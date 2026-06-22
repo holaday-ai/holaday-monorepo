@@ -67,6 +67,18 @@ interface FeatureFlags {
    * page.evaluate) never runs.
    */
   ACTION_CAPTURE: boolean;
+  /**
+   * Phase 1 Playbook B4 — screenshot anchor. When true (AND ACTION_CAPTURE on),
+   * the supercar loop attaches the post-action screenshot for SELECTED key
+   * steps (a page-advancing click) to the capture event; tasks.ts uploads it to
+   * R2 + writes an `evidence_artifacts` row (retention_policy='manual_hold' so
+   * the reaper never sweeps it) + backfills `task_action_captures.
+   * screenshot_anchor_id`. Capped per task. Independent of ACTION_CAPTURE so
+   * the R2-spending screenshot path can be canaried separately. Default OFF:
+   * the loop does not even attach the screenshot, and the upload chain never
+   * runs (dark ship). No migration — table/column/FK already exist.
+   */
+  B4_SCREENSHOT_ANCHOR: boolean;
 }
 
 function readFlagsFromEnv(): FeatureFlags {
@@ -78,6 +90,7 @@ function readFlagsFromEnv(): FeatureFlags {
     OTA_USER_BROWSER: process.env.OTA_USER_BROWSER_ENABLED === 'true',
     LEDGER_DB_WRITE: process.env.LEDGER_DB_WRITE_ENABLED === 'true',
     ACTION_CAPTURE: process.env.ACTION_CAPTURE_ENABLED === 'true',
+    B4_SCREENSHOT_ANCHOR: process.env.B4_SCREENSHOT_ANCHOR_ENABLED === 'true',
   };
 }
 

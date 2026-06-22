@@ -710,6 +710,12 @@ export interface SupercarActionCaptureEvent {
   entryUrl: string | null;
   inputValue: string | null;
   framePath: string | null;
+  /**
+   * B4 — post-action screenshot (base64 JPEG, no prefix) for SELECTED key
+   * steps only (a page-advancing click); the consumer uploads it as a
+   * screenshot anchor. Undefined when not selected / anchors disabled.
+   */
+  screenshotBase64?: string;
 }
 
 export interface SupercarAntiBotEvent {
@@ -790,6 +796,14 @@ export interface RunSupercarOptions {
    * so OFF = zero hot-path overhead. Best-effort (safeCall-guarded).
    */
   onAction?: (ev: SupercarActionCaptureEvent) => void | Promise<void>;
+  /**
+   * Phase 1 Playbook B4 — when true, the loop attaches the post-action
+   * screenshot (base64) to onAction events for SELECTED key steps (a
+   * page-advancing click). Set by tasks.ts from B4_SCREENSHOT_ANCHOR (AND
+   * ACTION_CAPTURE). When false/absent the screenshot is NEVER attached →
+   * zero overhead (the consumer then stores no anchor).
+   */
+  captureScreenshotAnchors?: boolean;
 
   // --- Phase 6-2: 5-lane router inputs ---
   /**
@@ -3264,6 +3278,16 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
             inputValue:
               captureKind === 'type' ? redactTypedValue(captureDescriptor, rawText) : null,
             framePath: captureDescriptor?.framePath ?? null,
+            // B4 — attach the post-action screenshot ONLY for a page-advancing
+            // click, and ONLY when anchors are enabled (else undefined → the
+            // consumer stores no anchor). `shot.base64` is already in hand
+            // (post-action frame, also fed to onScreencast above) — no re-shot.
+            screenshotBase64:
+              opts.captureScreenshotAnchors === true &&
+              captureKind === 'click' &&
+              turnChangedScreenshot
+                ? shot.base64
+                : undefined,
           });
         }
 

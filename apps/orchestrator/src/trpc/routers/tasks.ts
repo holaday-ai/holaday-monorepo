@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import Anthropic from '@anthropic-ai/sdk';
 import {
   BASIC_ROLE_PICK_LIMIT,
@@ -106,9 +107,12 @@ import type { PetI2vModel } from '../../agent/video/video-pet-i2v.js';
 import type { IpVideoConfig } from '../../agent/video/video-ip-lipsync.js';
 import type { VideoScript } from '../../agent/video/types.js';
 import type { VideoStyle } from '../../agent/video/video-script.js';
+import { EvidenceArtifactRepository } from '../../evidence/evidence-artifact-repository.js';
 import { routeTaskEvidenceOnDelete } from '../../evidence/evidence-deletion-service.js';
 import { writeLedgerToDb } from '../../evidence/ledger-write-service.js';
+import { getSharedStorageProvider } from '../../files/storage-provider.js';
 import { TaskActionCaptureRepository } from '../../playbook/task-action-capture-repository.js';
+import { taskActionCaptures } from '../../db/schema/task-action-captures.js';
 import { users } from '../../db/schema/users.js';
 import {
   broadcastToUser,
@@ -3375,8 +3379,24 @@ export const tasksRouter = router({
       const taskActionCaptureRepo = actionCaptureEnabled
         ? new TaskActionCaptureRepository(ctx.db)
         : null;
+      // Phase 1 Playbook B4 — screenshot anchor. Independent flag, AND
+      // ACTION_CAPTURE (rides the same onAction event). Instances built only
+      // when enabled; per-task counter caps R2 spend at MAX_SCREENSHOT_ANCHORS.
+      const screenshotAnchorEnabled =
+        actionCaptureEnabled && getExecutionFeatureFlags().B4_SCREENSHOT_ANCHOR;
+      const evidenceArtifactRepo = screenshotAnchorEnabled
+        ? new EvidenceArtifactRepository(ctx.db)
+        : null;
+      const sharedStorage = screenshotAnchorEnabled
+        ? getSharedStorageProvider({ logger: ctx.logger })
+        : null;
+      const MAX_SCREENSHOT_ANCHORS = 8;
+      let screenshotAnchorCount = 0;
       const supercarArgs: Parameters<typeof runSupercarTask>[0] = {
           taskId,
+          // Phase 1 Playbook B4 — gate screenshot-anchor attachment in the loop
+          // (OFF → loop never attaches the screenshot = zero overhead).
+          captureScreenshotAnchors: screenshotAnchorEnabled,
           // Phase 14 audit follow-up — feed the agent the parent-task
           // context block when this is a 追问. DB still stores
           // `input.intent` (what the user typed); only the model sees
@@ -3442,7 +3462,7 @@ export const tasksRouter = router({
                   // action is never awaited on it.
                   void (async () => {
                     try {
-                      await taskActionCaptureRepo.create({
+                      const capture = await taskActionCaptureRepo.create({
                         taskId: taskDbId,
                         siteDomain: ev.siteDomain,
                         actionIndex: ev.actionIndex,
@@ -3456,6 +3476,61 @@ export const tasksRouter = router({
                         entryUrl: ev.entryUrl,
                         inputValue: ev.inputValue,
                       });
+                      // Phase 1 Playbook B4 — screenshot anchor (gated + capped).
+                      // Own try so a failure keeps the capture row above + never
+                      // blocks/throws. Counter bumped BEFORE upload = caps R2
+                      // ATTEMPTS (a failed upload still consumes the budget).
+                      if (
+                        ev.screenshotBase64 &&
+                        evidenceArtifactRepo &&
+                        sharedStorage &&
+                        screenshotAnchorCount < MAX_SCREENSHOT_ANCHORS
+                      ) {
+                        screenshotAnchorCount += 1;
+                        try {
+                          const buffer = Buffer.from(ev.screenshotBase64, 'base64');
+                          const sha256 = createHash('sha256').update(buffer).digest('hex');
+                          const { storagePath } = await sharedStorage.put({
+                            userExternalId: taskId,
+                            kind: 'output',
+                            fileExternalId: newExternalId('file'),
+                            filename: 'anchor.jpg',
+                            buffer,
+                            mimetype: 'image/jpeg',
+                          });
+                          const artifact = await evidenceArtifactRepo.create({
+                            ownerUserId: userRow.id,
+                            taskId: taskDbId,
+                            artifactKind: 'screenshot',
+                            purpose: 'action_anchor',
+                            r2Bucket: process.env.R2_BUCKET ?? 'local',
+                            r2Key: storagePath,
+                            contentType: 'image/jpeg',
+                            sizeBytes: buffer.byteLength,
+                            sha256,
+                            capturedAt: new Date(),
+                            collectorLane: 'screenshot-anchor',
+                            retentionPolicy: 'manual_hold',
+                          });
+                          // Backfill the capture row's anchor FK BY PRIMARY KEY
+                          // (create() above returned the row + its id). PK is
+                          // unique + retry-safe: (task_id, action_index) is
+                          // NON-unique and the auto-retry wrapper re-runs the loop
+                          // with the same taskDbId + resets action_index, so it can
+                          // duplicate rows at the same action_index — keying on the
+                          // row's own id is the only target that hits exactly the
+                          // just-inserted capture row.
+                          await ctx.db
+                            .update(taskActionCaptures)
+                            .set({ screenshotAnchorId: artifact.id })
+                            .where(eq(taskActionCaptures.id, capture.id));
+                        } catch (e2) {
+                          ctx.logger.warn(
+                            { err: e2 instanceof Error ? e2.message : String(e2), taskId },
+                            'supercar: screenshot anchor failed (capture kept, anchor null)',
+                          );
+                        }
+                      }
                     } catch (err) {
                       ctx.logger.warn(
                         { err: err instanceof Error ? err.message : String(err), taskId },
