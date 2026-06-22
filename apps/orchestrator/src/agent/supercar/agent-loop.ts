@@ -3210,6 +3210,7 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
             await executor.getPage(),
             captureCoord?.x,
             captureCoord?.y,
+            { taskId: opts.taskId, actionIndex },
           );
         }
         const execResult = await executeComputerAction(executor, computerInput);

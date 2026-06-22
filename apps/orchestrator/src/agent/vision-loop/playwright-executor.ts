@@ -823,57 +823,108 @@ export class PlaywrightExecutor {
     page: Page,
     x?: number,
     y?: number,
+    diag?: { taskId?: string; actionIndex?: number },
   ): Promise<TargetDescriptor | null> {
     const coord: { x: number | null; y: number | null } =
       typeof x === 'number' && typeof y === 'number' ? { x, y } : { x: null, y: null };
+    // B2.1 instrument — metadata-only context for the diagnostic logs below.
+    // NEVER carries any captured field value / user input.
+    const ctx = { taskId: diag?.taskId, actionIndex: diag?.actionIndex };
     try {
       /* eslint-disable @typescript-eslint/no-explicit-any */
       const result = await withTimeout(
-        page.evaluate((c: { x: number | null; y: number | null }): TargetDescriptor | null => {
-          const w = globalThis as any;
-          const doc = w.document;
-          if (!doc) return null;
-          const el: any =
-            c.x !== null && c.y !== null ? doc.elementFromPoint(c.x, c.y) : doc.activeElement;
-          if (!el || el === doc.body || el === doc.documentElement) return null;
-          const text = ((el.innerText ?? el.textContent ?? '') as string).trim().slice(0, 200);
-          const attr = (n: string): string | null => el.getAttribute(n);
-          const esc = (v: string): string =>
-            w.CSS && typeof w.CSS.escape === 'function' ? w.CSS.escape(v) : v;
-          const tryUnique = (sel: string): string | null => {
-            try {
-              return doc.querySelectorAll(sel).length === 1 ? sel : null;
-            } catch {
-              return null;
+        page.evaluate(
+          (
+            c: { x: number | null; y: number | null },
+          ): TargetDescriptor | { __probe: 'no-doc' | 'no-element'; tagName: string | null } => {
+            const w = globalThis as any;
+            const doc = w.document;
+            // B2.1: report WHY no element resolved (mapped back to null by the
+            // caller — external behaviour identical to pre-instrument).
+            if (!doc) return { __probe: 'no-doc', tagName: null };
+            const el: any =
+              c.x !== null && c.y !== null ? doc.elementFromPoint(c.x, c.y) : doc.activeElement;
+            if (!el || el === doc.body || el === doc.documentElement) {
+              return {
+                __probe: 'no-element',
+                tagName: el ? ((el.tagName as string) || '').toLowerCase() : null,
+              };
             }
-          };
-          const tag = ((el.tagName as string) || '').toLowerCase();
-          let selector: string | null = null;
-          if (el.id) selector = tryUnique(`#${esc(el.id)}`);
-          if (!selector && attr('data-testid'))
-            selector = tryUnique(`[data-testid="${attr('data-testid')}"]`);
-          if (!selector && attr('data-id')) selector = tryUnique(`[data-id="${attr('data-id')}"]`);
-          if (!selector && attr('name')) selector = tryUnique(`${tag}[name="${attr('name')}"]`);
-          if (!selector && attr('aria-label'))
-            selector = tryUnique(`[aria-label="${attr('aria-label')}"]`);
-          return {
-            url: doc.location ? (doc.location.href as string) : null,
-            visibleText: text || null,
-            selector,
-            tagName: tag,
-            type: attr('type'),
-            autocomplete: attr('autocomplete'),
-            name: attr('name'),
-            id: el.id || null,
-            ariaLabel: attr('aria-label'),
-          };
-        }, coord),
+            const text = ((el.innerText ?? el.textContent ?? '') as string).trim().slice(0, 200);
+            const attr = (n: string): string | null => el.getAttribute(n);
+            const esc = (v: string): string =>
+              w.CSS && typeof w.CSS.escape === 'function' ? w.CSS.escape(v) : v;
+            const tryUnique = (sel: string): string | null => {
+              try {
+                return doc.querySelectorAll(sel).length === 1 ? sel : null;
+              } catch {
+                return null;
+              }
+            };
+            const tag = ((el.tagName as string) || '').toLowerCase();
+            let selector: string | null = null;
+            if (el.id) selector = tryUnique(`#${esc(el.id)}`);
+            if (!selector && attr('data-testid'))
+              selector = tryUnique(`[data-testid="${attr('data-testid')}"]`);
+            if (!selector && attr('data-id')) selector = tryUnique(`[data-id="${attr('data-id')}"]`);
+            if (!selector && attr('name')) selector = tryUnique(`${tag}[name="${attr('name')}"]`);
+            if (!selector && attr('aria-label'))
+              selector = tryUnique(`[aria-label="${attr('aria-label')}"]`);
+            return {
+              url: doc.location ? (doc.location.href as string) : null,
+              visibleText: text || null,
+              selector,
+              tagName: tag,
+              type: attr('type'),
+              autocomplete: attr('autocomplete'),
+              name: attr('name'),
+              id: el.id || null,
+              ariaLabel: attr('aria-label'),
+            };
+          },
+          coord,
+        ),
         CAPTURE_TIMEOUT_MS,
         'captureTargetDescriptor',
       );
       /* eslint-enable @typescript-eslint/no-explicit-any */
-      return (result as TargetDescriptor | null) ?? null;
-    } catch {
+      // B2.1: map the in-browser probe back to the SAME external contract
+      // (TargetDescriptor | null) and log WHY a null happens. Behaviour is
+      // byte-identical to pre-instrument (no-doc / no-element → null as before).
+      if (!result) {
+        logger.warn(ctx, 'capture: empty evaluate result (returning null)');
+        return null;
+      }
+      if ('__probe' in result) {
+        logger.warn(
+          { ...ctx, probe: result.__probe, tagName: result.tagName },
+          'capture: no target element (returning null)',
+        );
+        return null;
+      }
+      if (!result.visibleText) {
+        // Descriptor resolved but the primary text anchor is empty — log
+        // which OTHER signals did resolve (metadata only, no values).
+        logger.warn(
+          {
+            ...ctx,
+            tagName: result.tagName,
+            hasUrl: !!result.url,
+            hasSelector: !!result.selector,
+            hasName: !!result.name,
+            hasAriaLabel: !!result.ariaLabel,
+          },
+          'capture: descriptor without visible_text',
+        );
+      }
+      return result;
+    } catch (err) {
+      // B2.1: distinguish a hard timeout from an in-page evaluate failure
+      // (CSP / detached context / serialization). Metadata + error message
+      // only — never a captured value.
+      const msg = err instanceof Error ? err.message : String(err);
+      const kind = msg.includes('timed out') ? 'timeout' : 'threw';
+      logger.warn({ ...ctx, kind, error: msg }, 'capture: evaluate failed (returning null)');
       return null;
     }
   }
