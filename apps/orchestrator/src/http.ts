@@ -87,6 +87,32 @@ export function createHttpApp(deps: HttpAppDeps) {
     });
   });
 
+  // ─────────────────────────────────────────────────────────────────────
+  // B3 verification fixture — TEST-ONLY, flag-gated (B3_FIXTURE_ENABLED),
+  // default OFF = ZERO prod surface (the route is not even registered unless
+  // the flag is on). A minimal page embedding example.com in a CROSS-ORIGIN
+  // iframe (example.com is embeddable — no X-Frame-Options / CSP
+  // frame-ancestors, verified) so the supercar can DETERMINISTICALLY exercise
+  // B3 iframe-routing capture — external sites are unreliable iframe targets
+  // (anti-bot / X-Frame / no iframe). This page's origin (holaday.ai) ≠
+  // example.com → real cross-origin → triggers the B3 frame branch. The iframe
+  // is border:0 so the frame-local offset is exact. Reachable at
+  // https://holaday.ai/api/test/iframe-fixture (nginx strips /api/) and, on the
+  // box, http://localhost:4001/test/iframe-fixture. No auth (like /healthz),
+  // pure static HTML, no user input. REMOVE after B3 cross-origin verification.
+  if (process.env.B3_FIXTURE_ENABLED === 'true') {
+    app.get('/test/iframe-fixture', (_req, res) => {
+      res.type('html').send(`<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="robots" content="noindex"><title>B3 iframe fixture</title>
+<style>body{font:14px sans-serif;margin:24px}h1{font-size:18px}iframe{width:800px;height:600px;border:0;display:block;margin-top:16px}</style>
+</head><body>
+<h1>B3 cross-origin iframe capture fixture</h1>
+<p>Below is example.com in a cross-origin iframe — click the "More information" link inside it.</p>
+<iframe src="https://example.com/" title="example.com (cross-origin)"></iframe>
+</body></html>`);
+    });
+  }
+
   // ---------------------------------------------------------------------
   // Google OAuth2. Two endpoints:
   //   /api/auth/google           → kicks off consent flow
