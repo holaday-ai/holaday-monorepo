@@ -13,6 +13,7 @@ import {
 } from 'drizzle-orm/mysql-core';
 import { siteCapabilities } from './site-capabilities.js';
 import { sites } from './sites.js';
+import { tasks } from './tasks.js';
 
 /**
  * `operation_paths` — a versioned executable path for a capability
@@ -46,6 +47,13 @@ export const operationPaths = mysqlTable(
       (): AnyMySqlColumn => operationPaths.id,
       { onDelete: 'set null' },
     ),
+    // Phase 1 ① crystallization (0037) — source task this path was crystallized
+    // from: dedup key (idempotent re-runs skip an already-crystallized task) +
+    // provenance link. SET NULL so deleting the task doesn't drop the path.
+    sourceTaskId: bigint('source_task_id', { mode: 'number', unsigned: true }).references(
+      () => tasks.id,
+      { onDelete: 'set null' },
+    ),
     status: varchar('status', { length: 32 }).notNull().default('draft'),
     entryUrlTemplate: varchar('entry_url_template', { length: 1024 }),
     inputBindingJson: json('input_binding_json'),
@@ -65,6 +73,9 @@ export const operationPaths = mysqlTable(
     execCount30d: int('exec_count_30d', { unsigned: true }).notNull().default(0),
     failCount30d: int('fail_count_30d', { unsigned: true }).notNull().default(0),
     metricsUpdatedAt: datetime('metrics_updated_at', { mode: 'date', fsp: 3 }),
+    // Phase 1 ① crystallization (0037) — source task raw intent text + crystallize
+    // metadata (v2 clustering material). Mirrors sites / evidence_artifacts metadata_json.
+    metadataJson: json('metadata_json'),
     createdAt: datetime('created_at', { mode: 'date', fsp: 3 })
       .notNull()
       .default(sql`CURRENT_TIMESTAMP(3)`),
@@ -78,6 +89,7 @@ export const operationPaths = mysqlTable(
     uniqueIndex('uk_operation_path_capability_version').on(t.capabilityId, t.version),
     index('ix_operation_path_site_status').on(t.siteId, t.status),
     index('ix_operation_path_capability_status').on(t.capabilityId, t.status),
+    index('ix_operation_path_source_task').on(t.sourceTaskId),
   ],
 );
 

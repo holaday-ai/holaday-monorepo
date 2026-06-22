@@ -43,6 +43,9 @@ export const operationPathSteps = mysqlTable(
     targetSelectorJson: json('target_selector_json'),
     targetTextJson: json('target_text_json'),
     coordinateFallbackJson: json('coordinate_fallback_json'),
+    // Phase 1 ① crystallization (0037) — which frame this step targeted (B3
+    // capture's frame_path); null at top level.
+    framePath: varchar('frame_path', { length: 255 }),
     screenshotAnchorId: bigint('screenshot_anchor_id', {
       mode: 'number',
       unsigned: true,
