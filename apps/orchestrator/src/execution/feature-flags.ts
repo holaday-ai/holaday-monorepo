@@ -55,6 +55,18 @@ interface FeatureFlags {
    * tables are validated in production.
    */
   LEDGER_DB_WRITE: boolean;
+  /**
+   * Phase 1 Playbook B2 — per-action capture. When true, the supercar
+   * loop captures a multi-signal target descriptor (visible text / stable
+   * selector / coordinate) for each click / type / navigate and writes it
+   * to `task_action_captures` (distillation source for ① crystallization).
+   * When false (default) the whole capture → emit → write chain is skipped
+   * — zero hot-path overhead, no behaviour change (dark ship; canary on
+   * after validation). `tasks.ts` only wires the supercar `onAction`
+   * callback when this is on, so OFF means the in-loop capture (incl. the
+   * page.evaluate) never runs.
+   */
+  ACTION_CAPTURE: boolean;
 }
 
 function readFlagsFromEnv(): FeatureFlags {
@@ -65,6 +77,7 @@ function readFlagsFromEnv(): FeatureFlags {
     EXPERT_WORKFLOW: process.env.EXPERT_WORKFLOW_ENABLED === 'true',
     OTA_USER_BROWSER: process.env.OTA_USER_BROWSER_ENABLED === 'true',
     LEDGER_DB_WRITE: process.env.LEDGER_DB_WRITE_ENABLED === 'true',
+    ACTION_CAPTURE: process.env.ACTION_CAPTURE_ENABLED === 'true',
   };
 }
 

@@ -39,6 +39,10 @@ export const ID_PREFIXES = {
   evidenceArtifact: 'art',
   claim: 'clm',
   canaryResult: 'cnr',
+  // Phase 1 Playbook B2 — per-action capture row. NB: 'cap' is already
+  // taken by siteCapability, so this uses 'tac' (task-action-capture) to
+  // keep external-id prefixes collision-free for isExternalId().
+  taskActionCapture: 'tac',
   // Phase 1 #2 — A股自选股 (watchlist row).
   watchlist: 'wl',
 } as const;

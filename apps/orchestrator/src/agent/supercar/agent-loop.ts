@@ -37,7 +37,12 @@ import {
   describeSignal,
   detectAntiBot,
 } from '../vision-loop/anti-bot-detector.js';
-import type { PageLike, PlaywrightExecutor } from '../vision-loop/playwright-executor.js';
+import { redactTypedValue } from '../../playbook/action-capture-redaction.js';
+import type {
+  PageLike,
+  PlaywrightExecutor,
+  TargetDescriptor,
+} from '../vision-loop/playwright-executor.js';
 import { logger } from '../../config/logger.js';
 import {
   buildCreateFileToolDescription,
@@ -688,6 +693,25 @@ export interface SupercarScreencastEvent {
   viewportHeight: number;
 }
 
+/**
+ * Phase 1 Playbook B2 — one captured browse action (click / type /
+ * navigate). Multi-signal: `visibleText` is the PRIMARY anchor; selector +
+ * coordinate are fallbacks. `inputValue` is ALREADY redacted by the loop
+ * before this event is emitted — a sensitive field's raw value never
+ * appears here. `framePath` is reserved for B3 frame-routed capture.
+ */
+export interface SupercarActionCaptureEvent {
+  actionIndex: number;
+  stepType: 'navigate' | 'click' | 'type';
+  siteDomain: string | null;
+  visibleText: string | null;
+  targetSelector: string | null;
+  coordinate: { x: number; y: number } | null;
+  entryUrl: string | null;
+  inputValue: string | null;
+  framePath: string | null;
+}
+
 export interface SupercarAntiBotEvent {
   iteration: number;
   signal: AntiBotSignal;
@@ -759,6 +783,13 @@ export interface RunSupercarOptions {
   onAntiBotResolved?: (ev: SupercarAntiBotResolvedEvent) => void | Promise<void>;
   /** Fired for compact, verifier-safe facts observed inside the loop. */
   onEvidence?: (ev: SupercarEvidenceEvent) => void | Promise<void>;
+  /**
+   * Phase 1 Playbook B2 — fired once per captured browse action (click /
+   * type / navigate). Wired by tasks.ts ONLY when ACTION_CAPTURE is on;
+   * when absent the loop skips the whole capture (incl. the page.evaluate),
+   * so OFF = zero hot-path overhead. Best-effort (safeCall-guarded).
+   */
+  onAction?: (ev: SupercarActionCaptureEvent) => void | Promise<void>;
 
   // --- Phase 6-2: 5-lane router inputs ---
   /**
@@ -1397,6 +1428,9 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
 
   const toolsUsed = new Set<string>();
   let iteration = 0;
+  // Phase 1 Playbook B2 — monotonic per-action counter (task-internal
+  // action sequence). Bumped once per tool_use in the dispatch loop below.
+  let actionIndex = 0;
   let cancelled = false;
   // MD5 of the most recent screenshot we showed Claude. Compared after
   // each computer action's fresh shot — identical bytes means the page
@@ -2381,6 +2415,7 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
       // multiple parallel tool_uses that all observe the same frame.
       let turnChangedScreenshot = false;
       for (const toolUse of toolUseBlocks) {
+        actionIndex += 1;
         // -------- Custom `navigate` tool --------
         if (toolUse.name === 'navigate') {
           const navInput = (toolUse.input as { url?: string } | null) ?? {};
@@ -2439,6 +2474,22 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
               },
               'supercar: navigate goto errored (continuing to screenshot)',
             );
+          }
+          // Phase 1 Playbook B2 — navigate capture: entry_url = landed URL.
+          // Best-effort; gated by opts.onAction (ACTION_CAPTURE).
+          if (opts.onAction) {
+            const landedUrl = navPage.url();
+            await safeCall(opts.onAction, {
+              actionIndex,
+              stepType: 'navigate',
+              siteDomain: extractDomainStat(landedUrl),
+              visibleText: null,
+              targetSelector: null,
+              coordinate: null,
+              entryUrl: landedUrl,
+              inputValue: null,
+              framePath: null,
+            });
           }
           // Phase 3 R2 — site-config post-nav hook. Match the URL
           // landed on (NOT the requested URL — they can differ on
@@ -3142,7 +3193,26 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
         }
 
         // Execute the computer use action and return a fresh screenshot.
-        const execResult = await executeComputerAction(executor, toolUse.input as ComputerActionInput);
+        const computerInput = toolUse.input as ComputerActionInput;
+        // Phase 1 Playbook B2 — best-effort per-action capture, taken BEFORE
+        // the action so a click/type target reflects the page the model saw.
+        // Gated by opts.onAction (wired only when ACTION_CAPTURE is on), so
+        // OFF skips the page.evaluate entirely. null on any failure (bounded
+        // + try/catch in the executor) → the row degrades to coordinate-only.
+        const captureKind = opts.onAction ? computerCaptureKind(computerInput.action) : null;
+        const captureCoord =
+          captureKind === 'click' && Array.isArray(computerInput.coordinate)
+            ? { x: Number(computerInput.coordinate[0]), y: Number(computerInput.coordinate[1]) }
+            : null;
+        let captureDescriptor: TargetDescriptor | null = null;
+        if (captureKind) {
+          captureDescriptor = await executor.captureTargetDescriptor(
+            await executor.getPage(),
+            captureCoord?.x,
+            captureCoord?.y,
+          );
+        }
+        const execResult = await executeComputerAction(executor, computerInput);
         const freshPage = (await executor.getPage()) as unknown as PageLike;
         const shot = await executor.screenshot(freshPage);
         if (shot.error || !shot.base64) {
@@ -3173,6 +3243,28 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
           viewportWidth: shot.viewportWidth ?? displayWidth,
           viewportHeight: shot.viewportHeight ?? displayHeight,
         });
+
+        // Phase 1 Playbook B2 — emit the captured action. Redaction happens
+        // HERE, before the value crosses the callback boundary: a sensitive
+        // `type` target's raw value never enters the event.
+        if (captureKind) {
+          const rawText =
+            captureKind === 'type' && typeof computerInput.text === 'string'
+              ? computerInput.text
+              : null;
+          await safeCall(opts.onAction, {
+            actionIndex,
+            stepType: captureKind,
+            siteDomain: extractDomainStat(captureDescriptor?.url ?? null),
+            visibleText: captureDescriptor?.visibleText ?? null,
+            targetSelector: captureDescriptor?.selector ?? null,
+            coordinate: captureCoord,
+            entryUrl: null,
+            inputValue:
+              captureKind === 'type' ? redactTypedValue(captureDescriptor, rawText) : null,
+            framePath: null,
+          });
+        }
 
         // Anthropic requires that a tool_result marked is_error:true
         // contains ONLY text blocks — an image + is_error combo 400s
@@ -3560,6 +3652,26 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
 // ---------------------------------------------------------------------------
 // Computer use dispatch
 // ---------------------------------------------------------------------------
+
+/**
+ * Phase 1 Playbook B2 — which computer sub-actions warrant a capture row.
+ * Click variants → 'click' (elementFromPoint at the coordinate); 'type' →
+ * 'type' (activeElement). Everything else (scroll / key / wait / screenshot
+ * / mouse_move) returns null and is skipped.
+ */
+function computerCaptureKind(action: unknown): 'click' | 'type' | null {
+  if (
+    action === 'left_click' ||
+    action === 'right_click' ||
+    action === 'middle_click' ||
+    action === 'double_click' ||
+    action === 'triple_click'
+  ) {
+    return 'click';
+  }
+  if (action === 'type') return 'type';
+  return null;
+}
 
 interface ComputerActionInput {
   action: string;

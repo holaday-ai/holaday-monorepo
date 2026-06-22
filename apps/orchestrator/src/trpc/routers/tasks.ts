@@ -45,6 +45,7 @@ import {
   supercarAbort,
   supercarHandoffToGenerate,
   supercarReply,
+  type SupercarActionCaptureEvent,
   type SupercarOutcome,
 } from '../../agent/supercar/index.js';
 import {
@@ -107,6 +108,7 @@ import type { VideoScript } from '../../agent/video/types.js';
 import type { VideoStyle } from '../../agent/video/video-script.js';
 import { routeTaskEvidenceOnDelete } from '../../evidence/evidence-deletion-service.js';
 import { writeLedgerToDb } from '../../evidence/ledger-write-service.js';
+import { TaskActionCaptureRepository } from '../../playbook/task-action-capture-repository.js';
 import { users } from '../../db/schema/users.js';
 import {
   broadcastToUser,
@@ -3365,6 +3367,14 @@ export const tasksRouter = router({
         expiresAt: string;
         kind: 'pdf';
       }> = [];
+      // Phase 1 Playbook B2 — per-action capture. Wire onAction ONLY when
+      // ACTION_CAPTURE is on; the agent-loop skips the whole capture (incl.
+      // the page.evaluate) when opts.onAction is absent → OFF = zero
+      // overhead. Persist is fire-and-forget (mirrors the onTick consumer).
+      const actionCaptureEnabled = getExecutionFeatureFlags().ACTION_CAPTURE;
+      const taskActionCaptureRepo = actionCaptureEnabled
+        ? new TaskActionCaptureRepository(ctx.db)
+        : null;
       const supercarArgs: Parameters<typeof runSupercarTask>[0] = {
           taskId,
           // Phase 14 audit follow-up — feed the agent the parent-task
@@ -3423,6 +3433,39 @@ export const tasksRouter = router({
               );
             }
           },
+          ...(taskActionCaptureRepo
+            ? {
+                onAction: (ev: SupercarActionCaptureEvent) => {
+                  if (!taskDbId || !taskActionCaptureRepo) return;
+                  // Fire-and-forget (mirrors the onTick consumer): a DB
+                  // failure only drops this capture row + logs; the browse
+                  // action is never awaited on it.
+                  void (async () => {
+                    try {
+                      await taskActionCaptureRepo.create({
+                        taskId: taskDbId,
+                        siteDomain: ev.siteDomain,
+                        actionIndex: ev.actionIndex,
+                        stepType: ev.stepType,
+                        visibleText: ev.visibleText,
+                        targetSelectorJson: ev.targetSelector
+                          ? { selector: ev.targetSelector }
+                          : null,
+                        coordinateJson: ev.coordinate,
+                        framePath: ev.framePath,
+                        entryUrl: ev.entryUrl,
+                        inputValue: ev.inputValue,
+                      });
+                    } catch (err) {
+                      ctx.logger.warn(
+                        { err: err instanceof Error ? err.message : String(err), taskId },
+                        'supercar: persist action capture failed',
+                      );
+                    }
+                  })();
+                },
+              }
+            : {}),
           executor: primaryExecutor,
           domain: classification.domain,
           // Swap target: the NON-primary browser. When headed was

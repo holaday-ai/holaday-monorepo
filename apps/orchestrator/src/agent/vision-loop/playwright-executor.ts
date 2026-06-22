@@ -163,6 +163,27 @@ const INTERACTIVE_ROLES = new Set<string>([
   'spinbutton',
 ]);
 
+/**
+ * Phase 1 Playbook B2 — multi-signal descriptor of the element a browse
+ * action targeted, read at action time by `captureTargetDescriptor`. All
+ * fields are best-effort; the whole object is null when capture fails.
+ */
+export interface TargetDescriptor {
+  /** location.href of the page at capture time. */
+  url: string | null;
+  /** Primary text anchor — the target element's visible text (≤200 chars). */
+  visibleText: string | null;
+  /** A stable selector that UNIQUELY matches the target, else null. */
+  selector: string | null;
+  tagName: string;
+  /** Attributes used downstream to judge field sensitivity (redaction). */
+  type: string | null;
+  autocomplete: string | null;
+  name: string | null;
+  id: string | null;
+  ariaLabel: string | null;
+}
+
 export class PlaywrightExecutor {
   private browser: Browser | null = null;
   /**
@@ -785,6 +806,79 @@ export class PlaywrightExecutor {
   }
 
   /**
+   * Phase 1 Playbook B2 — best-effort multi-signal capture of the element
+   * a click/type targets, at action time. Runs `document.elementFromPoint`
+   * (or `document.activeElement` when no coordinate — e.g. a `type` action)
+   * and reads visible text (primary anchor), a UNIQUE stable selector
+   * candidate when one exists, the URL, and the attributes needed to judge
+   * field sensitivity. PURE READ — never mutates the page.
+   *
+   * HOT-PATH SAFE: bounded by CAPTURE_TIMEOUT_MS + try/catch; ANY failure
+   * (eval error, navigation mid-eval, timeout) returns null so the caller
+   * degrades to coordinate-only and the browse action is never affected.
+   * Takes a real `Page` (not `PageLike`) because `page.evaluate` runs a
+   * function in the browser context.
+   */
+  async captureTargetDescriptor(
+    page: Page,
+    x?: number,
+    y?: number,
+  ): Promise<TargetDescriptor | null> {
+    const coord: { x: number | null; y: number | null } =
+      typeof x === 'number' && typeof y === 'number' ? { x, y } : { x: null, y: null };
+    try {
+      /* eslint-disable @typescript-eslint/no-explicit-any */
+      const result = await withTimeout(
+        page.evaluate((c: { x: number | null; y: number | null }): TargetDescriptor | null => {
+          const w = globalThis as any;
+          const doc = w.document;
+          if (!doc) return null;
+          const el: any =
+            c.x !== null && c.y !== null ? doc.elementFromPoint(c.x, c.y) : doc.activeElement;
+          if (!el || el === doc.body || el === doc.documentElement) return null;
+          const text = ((el.innerText ?? el.textContent ?? '') as string).trim().slice(0, 200);
+          const attr = (n: string): string | null => el.getAttribute(n);
+          const esc = (v: string): string =>
+            w.CSS && typeof w.CSS.escape === 'function' ? w.CSS.escape(v) : v;
+          const tryUnique = (sel: string): string | null => {
+            try {
+              return doc.querySelectorAll(sel).length === 1 ? sel : null;
+            } catch {
+              return null;
+            }
+          };
+          const tag = ((el.tagName as string) || '').toLowerCase();
+          let selector: string | null = null;
+          if (el.id) selector = tryUnique(`#${esc(el.id)}`);
+          if (!selector && attr('data-testid'))
+            selector = tryUnique(`[data-testid="${attr('data-testid')}"]`);
+          if (!selector && attr('data-id')) selector = tryUnique(`[data-id="${attr('data-id')}"]`);
+          if (!selector && attr('name')) selector = tryUnique(`${tag}[name="${attr('name')}"]`);
+          if (!selector && attr('aria-label'))
+            selector = tryUnique(`[aria-label="${attr('aria-label')}"]`);
+          return {
+            url: doc.location ? (doc.location.href as string) : null,
+            visibleText: text || null,
+            selector,
+            tagName: tag,
+            type: attr('type'),
+            autocomplete: attr('autocomplete'),
+            name: attr('name'),
+            id: el.id || null,
+            ariaLabel: attr('aria-label'),
+          };
+        }, coord),
+        CAPTURE_TIMEOUT_MS,
+        'captureTargetDescriptor',
+      );
+      /* eslint-enable @typescript-eslint/no-explicit-any */
+      return (result as TargetDescriptor | null) ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Resolve + click an element by its ARIA role + accessible name —
    * the only addressing scheme accessibility mode has (refs are names
    * after all). Name is matched case-sensitively with `exact: false`
@@ -1025,6 +1119,9 @@ const ACTION_TIMEOUT_OVERRIDE = readEnvTimeoutOrNull('ACTION_TIMEOUT_MS');
 const CLICK_TIMEOUT_MS = ACTION_TIMEOUT_OVERRIDE ?? 10_000;
 const TYPE_TIMEOUT_MS = ACTION_TIMEOUT_OVERRIDE ?? 10_000;
 const KEY_TIMEOUT_MS = ACTION_TIMEOUT_OVERRIDE ?? 5_000;
+// Phase 1 Playbook B2 — best-effort target capture is bounded tight so it
+// never adds meaningful latency to a click/type; on timeout it yields null.
+const CAPTURE_TIMEOUT_MS = ACTION_TIMEOUT_OVERRIDE ?? 400;
 const SCROLL_TIMEOUT_MS = ACTION_TIMEOUT_OVERRIDE ?? 5_000;
 const NAVIGATE_TIMEOUT_MS = ACTION_TIMEOUT_OVERRIDE ?? 15_000;
 const SCREENSHOT_TIMEOUT_MS = ACTION_TIMEOUT_OVERRIDE ?? 10_000;

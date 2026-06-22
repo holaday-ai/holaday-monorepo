@@ -9,6 +9,7 @@ export {
   type SupercarStatus,
   type SupercarTickEvent,
   type SupercarScreencastEvent,
+  type SupercarActionCaptureEvent,
   type SupercarWebSearchEvent,
   type SupercarAwaitingUserEvent,
   type RunSupercarOptions,
