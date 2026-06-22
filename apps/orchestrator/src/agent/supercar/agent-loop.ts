@@ -3263,7 +3263,7 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
             entryUrl: null,
             inputValue:
               captureKind === 'type' ? redactTypedValue(captureDescriptor, rawText) : null,
-            framePath: null,
+            framePath: captureDescriptor?.framePath ?? null,
           });
         }
 

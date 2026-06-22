@@ -182,6 +182,8 @@ export interface TargetDescriptor {
   name: string | null;
   id: string | null;
   ariaLabel: string | null;
+  /** B3 — the iframe's URL (≤255) when captured from INSIDE a frame; null at top level. */
+  framePath?: string | null;
 }
 
 export class PlaywrightExecutor {
@@ -842,14 +844,24 @@ export class PlaywrightExecutor {
     // self-contained (no closures / outer helpers; its inner `function`s live
     // INSIDE the string, untouched by the build); the coordinate is interpolated
     // as a numeric / `null` literal. Pure DOM read — never mutates the page.
-    const probeExpr = `(function () {
+    // B3 — `buildProbe` runs in NODE to assemble the probe STRING. Its own
+    // esbuild `__name` wrapping is harmless (it is NEVER serialised into the
+    // page; only the returned STRING is, and a string literal is opaque to the
+    // build — B2.2 root fix preserved). `iframeMarker` lets the TOP probe signal
+    // an iframe hit ('iframe' → route into the frame) and the IN-FRAME probe
+    // signal a NESTED iframe ('nested' → B3 v1 does NOT recurse → coordinate
+    // fallback). Coordinates interpolated as numeric / `null` literals. Pure read.
+    const buildProbe = (px: number | null, py: number | null, iframeMarker: string): string => `(function () {
   var doc = document;
   if (!doc) return { __probe: 'no-doc', tagName: null };
-  var cx = ${cx};
-  var cy = ${cy};
+  var cx = ${px};
+  var cy = ${py};
   var el = (cx !== null && cy !== null) ? doc.elementFromPoint(cx, cy) : doc.activeElement;
   if (!el || el === doc.body || el === doc.documentElement) {
     return { __probe: 'no-element', tagName: el ? String(el.tagName || '').toLowerCase() : null };
+  }
+  if (String(el.tagName || '').toLowerCase() === 'iframe') {
+    return { __probe: '${iframeMarker}', tagName: 'iframe' };
   }
   var text = String(el.innerText || el.textContent || '').trim().slice(0, 200);
   function attr(n) { return el.getAttribute(n); }
@@ -874,20 +886,83 @@ export class PlaywrightExecutor {
     ariaLabel: attr('aria-label')
   };
 })()`;
+    type Probe =
+      | TargetDescriptor
+      | { __probe: 'no-doc' | 'no-element' | 'iframe' | 'nested'; tagName: string | null };
     try {
       const result = (await withTimeout(
-        page.evaluate(probeExpr),
+        page.evaluate(buildProbe(cx, cy, 'iframe')),
         CAPTURE_TIMEOUT_MS,
         'captureTargetDescriptor',
-      )) as TargetDescriptor | { __probe: 'no-doc' | 'no-element'; tagName: string | null } | null;
+      )) as Probe | null;
       // B2.1: map the in-browser probe back to the SAME external contract
-      // (TargetDescriptor | null) and log WHY a null happens. Behaviour is
-      // byte-identical to pre-instrument (no-doc / no-element → null as before).
+      // (TargetDescriptor | null) and log WHY a null happens.
       if (!result) {
         logger.warn(ctx, 'capture: empty evaluate result (returning null)');
         return null;
       }
       if ('__probe' in result) {
+        if (result.__probe === 'iframe') {
+          // ───────── B3 — route into the iframe (ONE level only) ─────────
+          // Fully bounded + guarded: ANY failure (no handle / no contentFrame /
+          // no boundingBox / sandboxed-or-detached frame / frame.evaluate throw /
+          // nested iframe / timeout) → return null → caller degrades to the
+          // existing coordinate-only capture. Never blocks/throws. Only runs on
+          // the ~1% iframe-hit path; the 99% path pays ZERO extra latency.
+          if (cx === null || cy === null) return null;
+          try {
+            return await withTimeout(
+              (async (): Promise<TargetDescriptor | null> => {
+                const handle = await page.evaluateHandle(`document.elementFromPoint(${cx}, ${cy})`);
+                const elH = handle.asElement();
+                if (!elH) {
+                  logger.warn(ctx, 'capture: iframe hit but no element handle (returning null)');
+                  return null;
+                }
+                const frame = await elH.contentFrame();
+                if (!frame) {
+                  logger.warn(ctx, 'capture: iframe element has no contentFrame (returning null)');
+                  return null;
+                }
+                const box = await elH.boundingBox();
+                if (!box) {
+                  logger.warn(ctx, 'capture: iframe has no boundingBox (returning null)');
+                  return null;
+                }
+                // frame-local coordinate = top coordinate − iframe top-left.
+                const framed = (await frame.evaluate(
+                  buildProbe(cx - box.x, cy - box.y, 'nested'),
+                )) as Probe | null;
+                if (!framed || '__probe' in framed) {
+                  logger.warn(
+                    { ...ctx, framed: framed && '__probe' in framed ? framed.__probe : 'empty' },
+                    'capture: in-frame probe found no target (returning null)',
+                  );
+                  return null; // nested iframe / no element in frame → coordinate fallback
+                }
+                if (!framed.visibleText) {
+                  logger.warn(
+                    { ...ctx, inFrame: true, tagName: framed.tagName, hasSelector: !!framed.selector },
+                    'capture: frame descriptor without visible_text',
+                  );
+                }
+                // Provenance: which frame the action targeted (≤255 = the
+                // frame_path column width). Top-level captures leave it null.
+                return { ...framed, framePath: (frame.url() || '').slice(0, 255) || null };
+              })(),
+              500, // frame-routing budget (ms) — tight; on timeout → coordinate fallback
+              'captureInsideFrame',
+            );
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            const kind = msg.includes('timed out') ? 'timeout' : 'threw';
+            logger.warn(
+              { ...ctx, stage: 'frame', kind, error: msg },
+              'capture: frame routing failed (returning null)',
+            );
+            return null;
+          }
+        }
         logger.warn(
           { ...ctx, probe: result.__probe, tagName: result.tagName },
           'capture: no target element (returning null)',
