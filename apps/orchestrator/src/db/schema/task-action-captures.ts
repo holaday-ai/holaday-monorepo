@@ -48,8 +48,15 @@ export const taskActionCaptures = mysqlTable(
       .references(() => tasks.id, { onDelete: 'cascade' }),
     /** Bare host the action targeted (no scheme/www). Indexed — distillation queries by site. */
     siteDomain: varchar('site_domain', { length: 255 }),
-    /** Task-internal action sequence. Non-unique by design: an append-only capture may emit
-     *  more than one row per logical action (retries / multi-signal). */
+    /**
+     * Task-internal action sequence. MONOTONIC but NON-CONTIGUOUS: the
+     * supercar loop bumps it once per tool_use, but ONLY click / type /
+     * navigate persist a row — so captured rows have GAPS (a skipped scroll
+     * / scrape / create_file still consumes an index, leaving no row).
+     * Downstream (① crystallization) MUST order by this but MUST NOT assume
+     * a dense 0..N sequence. Non-unique index (not a unique key) — ordering
+     * only, never a contiguous-count assumption.
+     */
     actionIndex: int('action_index', { unsigned: true }).notNull(),
     stepType: varchar('step_type', { length: 48 }).notNull(),
     /** PRIMARY anchor — the target element's visible text. */
