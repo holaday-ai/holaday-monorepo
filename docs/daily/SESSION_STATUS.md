@@ -10,6 +10,20 @@
 <!-- 固定维护：每次部署后由部署者更新这一行（硬规则 7）。改 ref 前必实读 live HEAD。 -->
 ## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05` — orch `0ba05d10`（**运行 orch 未变；origin tip=`354578a3`=① crystallize 离线 CLI，orch 运行时不 import、无 deploy-orch** · migration 0037 provenance · ACTION_CAPTURE+B4_SCREENSHOT_ANCHOR ON 灰度 · B3_FIXTURE OFF）/ SPA `8da47b4b`（bundle `index-DiYh_GAx.js`，未变）
 
+<!-- 2026-06-23 — Playbook ④ 主动探索：烧钱授权章节 v1（固化，explorer 码未写未跑）+ 单站成本估算 -->
+### 🔴 Playbook ④ 主动探索 — 烧钱授权章节 v1（BOSS 已逐条拍；explorer 代码跑前此章节须经 BOSS 确认生效）
+
+> **【④主动探索烧钱授权章节 v1】**
+> **A. 总闸**：④是首个自动烧钱能力，explorer 代码跑前此章节须经 BOSS 确认生效；设总预算上限（月度+单批）到顶自动停+报 BOSS；硬熔断（单日/单批超阈立即停+报）。预算数额待单站成本估出后 BOSS 定。
+> **B. 阶段一种子站**：BOSS 挑站列表；分批跑，每批跑前 BOSS 点确认（绝不一口气全量）；每批跑完报（几站/烧多少/几条 path）再下一批。
+> **C. 阶段二热度触发**：用户用到的未学站累积到 10 个不同用户 → 进探索队列、等 BOSS 批准才跑（初期不自动）；受总预算+熔断管。
+> **D. 动作边界（写死）**：explorer 只跑只读/浏览类（导航/点击/读取）；绝不自动下单/提交表单/填交数据/登录认证/支付/任何副作用敏感操作；遇反爬/失败记录跳过、不重试烧钱。
+> **E. 产物**：探索轨迹走现有捕获→结晶链落 draft path（不直接 verified；升 verified 走 ③canary）；全程 log、每笔花费可追溯。
+
+**预算依据 — 单站成本只读估算（2026-06-23，未跑探索，纯查 `llm_calls` 实录 + 计价模型）**：计价 Sonnet-4-6 `$3/$15` per M（cache-aware；Opus `$5/$25`、Haiku `$1/$5`）。实录浏览类单任务成本区间（`llm_calls` Q3）：简单 1-2 页（2-6 turn）`$0.04-0.10`、典型多步（6-12 turn）`$0.10-0.25`、深度（15-29 turn，如 Google 搜索流 29 calls/$0.59、Gmail 抓取 21 calls/$0.38）`$0.35-0.60`。**「深跑一个站学一遍」≈ 3-5 条代表性任务**：低 ~$0.25 / 中 ~$0.50-0.80 / 高 ~$1.50 单站。**+2× 安全裕度**（探索比定向任务多导航 + 见下记账缺口未实测 + 可能用 Opus）→ **建议单站预算 $1-2**。N 档总估（中心值 $0.5-0.8/站，含 2× 裕度的建议 cap）：**N=10 → $10-16**、**N=30 → $30-48**、**N=50 → $50-80**。预算数额 BOSS 定，填进章节 A。生成类（图 ¥0.025/张≈$0.0035、视频 lipsync $0.20/条）按 D 边界=只读浏览**不触发**，单独标记。
+
+**🔴 explorer spec 硬前置（本轮发现，记账缺口）**：`supercar/agent-loop.ts`（浏览执行器，自建 `new Anthropic()` line 1200）**不写 `llm_calls`**——7 个被捕获的浏览任务在 `llm_calls` 里 $0（记账经 vision-loop/commander + planner 两条旧路径，非当前浏览主路径）。→ 章节 A（预算上限/熔断）+ E（每笔花费可追溯）**不能靠现有 `llm_calls`**；explorer 落码必须自带成本记账（supercar loop 每 turn 有 `response.usage`，需接 `estimateCostUsd` 落库/按探索批累计）。这是 explorer spec 的前置项，非本轮做。
+
 <!-- 2026-06-23 — Playbook ① crystallize v1 首次真写 Pack A -->
 **✅ ① crystallize v1 首次真写 Pack A 成功（脚本 `354578a3`，离线 CLI，orch 运行时不 import → 无 deploy-orch；运行 orch 仍 `0ba05d10`）**。`scripts/crystallize-paths.ts`（默认 dry-run，`--commit` 真写）+ `src/playbook/crystallizer.ts`（pure planCrystallization + tx 写）。**Pack A 从 0 → 7 draft operation_path / 17 steps / 2 sites（example.com、holaday.ai，owner=NULL 全局）/ 2 site_capabilities（`general_browse` 占位）**。实证：version 递增（example.com v1-v5、holaday.ai v1-v2，uk_operation_path_capability_version 不撞）、**多域挂入口域** + crossDomain 标记、**B4 anchor=82 + B3 frame_path=example.com 落库**、step_index 密集 0..N-1、metadata_json 存 sourceTaskIntent 原文（v2 聚类料）、**FK 全通**（orphan steps=0、anchor82→evidence_artifacts 存在）。**幂等复验过**：2nd `--commit` 全 7 SKIP（already_crystallized）、written=0、行数不翻倍、duplicate source_task_id=0。**6 镜头对抗审**：5 holds + Camera 6 MAJOR（commit 非事务）已事务化修复（path+steps 一个 db.transaction）；repo 回退零改动。v1 = 单轨迹→draft，**聚类推 v2**（攒够真实多轨迹）。前态见下。
 
