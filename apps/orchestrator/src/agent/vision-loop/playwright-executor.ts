@@ -825,69 +825,61 @@ export class PlaywrightExecutor {
     y?: number,
     diag?: { taskId?: string; actionIndex?: number },
   ): Promise<TargetDescriptor | null> {
-    const coord: { x: number | null; y: number | null } =
-      typeof x === 'number' && typeof y === 'number' ? { x, y } : { x: null, y: null };
+    // Coordinate (or null → activeElement, e.g. a `type` action). Guarded to
+    // FINITE numbers so ONLY a numeric or `null` literal is interpolated below.
+    const cx = typeof x === 'number' && Number.isFinite(x) ? x : null;
+    const cy = typeof y === 'number' && Number.isFinite(y) ? y : null;
     // B2.1 instrument — metadata-only context for the diagnostic logs below.
     // NEVER carries any captured field value / user input.
     const ctx = { taskId: diag?.taskId, actionIndex: diag?.actionIndex };
+    // B2.2 ROOT FIX — author the in-page probe as a STRING IIFE, NOT a function
+    // value. tsx/esbuild `keepNames` wraps named/arrow functions with
+    // `__name(fn, ...)`; when Playwright serialised the function into the page,
+    // `__name` (a Node-side build helper) was undefined → page.evaluate threw
+    // `ReferenceError: __name is not defined` on EVERY click (proven by the
+    // B2.1 diagnostic). A string literal is opaque to the transpiler, so no
+    // `__name` is ever injected — root fix, not a workaround. The IIFE is fully
+    // self-contained (no closures / outer helpers; its inner `function`s live
+    // INSIDE the string, untouched by the build); the coordinate is interpolated
+    // as a numeric / `null` literal. Pure DOM read — never mutates the page.
+    const probeExpr = `(function () {
+  var doc = document;
+  if (!doc) return { __probe: 'no-doc', tagName: null };
+  var cx = ${cx};
+  var cy = ${cy};
+  var el = (cx !== null && cy !== null) ? doc.elementFromPoint(cx, cy) : doc.activeElement;
+  if (!el || el === doc.body || el === doc.documentElement) {
+    return { __probe: 'no-element', tagName: el ? String(el.tagName || '').toLowerCase() : null };
+  }
+  var text = String(el.innerText || el.textContent || '').trim().slice(0, 200);
+  function attr(n) { return el.getAttribute(n); }
+  function esc(v) { return (window.CSS && typeof window.CSS.escape === 'function') ? window.CSS.escape(v) : v; }
+  function tryUnique(sel) { try { return doc.querySelectorAll(sel).length === 1 ? sel : null; } catch (e) { return null; } }
+  var tag = String(el.tagName || '').toLowerCase();
+  var selector = null;
+  if (el.id) selector = tryUnique('#' + esc(el.id));
+  if (!selector && attr('data-testid')) selector = tryUnique('[data-testid="' + attr('data-testid') + '"]');
+  if (!selector && attr('data-id')) selector = tryUnique('[data-id="' + attr('data-id') + '"]');
+  if (!selector && attr('name')) selector = tryUnique(tag + '[name="' + attr('name') + '"]');
+  if (!selector && attr('aria-label')) selector = tryUnique('[aria-label="' + attr('aria-label') + '"]');
+  return {
+    url: doc.location ? doc.location.href : null,
+    visibleText: text || null,
+    selector: selector,
+    tagName: tag,
+    type: attr('type'),
+    autocomplete: attr('autocomplete'),
+    name: attr('name'),
+    id: el.id || null,
+    ariaLabel: attr('aria-label')
+  };
+})()`;
     try {
-      /* eslint-disable @typescript-eslint/no-explicit-any */
-      const result = await withTimeout(
-        page.evaluate(
-          (
-            c: { x: number | null; y: number | null },
-          ): TargetDescriptor | { __probe: 'no-doc' | 'no-element'; tagName: string | null } => {
-            const w = globalThis as any;
-            const doc = w.document;
-            // B2.1: report WHY no element resolved (mapped back to null by the
-            // caller — external behaviour identical to pre-instrument).
-            if (!doc) return { __probe: 'no-doc', tagName: null };
-            const el: any =
-              c.x !== null && c.y !== null ? doc.elementFromPoint(c.x, c.y) : doc.activeElement;
-            if (!el || el === doc.body || el === doc.documentElement) {
-              return {
-                __probe: 'no-element',
-                tagName: el ? ((el.tagName as string) || '').toLowerCase() : null,
-              };
-            }
-            const text = ((el.innerText ?? el.textContent ?? '') as string).trim().slice(0, 200);
-            const attr = (n: string): string | null => el.getAttribute(n);
-            const esc = (v: string): string =>
-              w.CSS && typeof w.CSS.escape === 'function' ? w.CSS.escape(v) : v;
-            const tryUnique = (sel: string): string | null => {
-              try {
-                return doc.querySelectorAll(sel).length === 1 ? sel : null;
-              } catch {
-                return null;
-              }
-            };
-            const tag = ((el.tagName as string) || '').toLowerCase();
-            let selector: string | null = null;
-            if (el.id) selector = tryUnique(`#${esc(el.id)}`);
-            if (!selector && attr('data-testid'))
-              selector = tryUnique(`[data-testid="${attr('data-testid')}"]`);
-            if (!selector && attr('data-id')) selector = tryUnique(`[data-id="${attr('data-id')}"]`);
-            if (!selector && attr('name')) selector = tryUnique(`${tag}[name="${attr('name')}"]`);
-            if (!selector && attr('aria-label'))
-              selector = tryUnique(`[aria-label="${attr('aria-label')}"]`);
-            return {
-              url: doc.location ? (doc.location.href as string) : null,
-              visibleText: text || null,
-              selector,
-              tagName: tag,
-              type: attr('type'),
-              autocomplete: attr('autocomplete'),
-              name: attr('name'),
-              id: el.id || null,
-              ariaLabel: attr('aria-label'),
-            };
-          },
-          coord,
-        ),
+      const result = (await withTimeout(
+        page.evaluate(probeExpr),
         CAPTURE_TIMEOUT_MS,
         'captureTargetDescriptor',
-      );
-      /* eslint-enable @typescript-eslint/no-explicit-any */
+      )) as TargetDescriptor | { __probe: 'no-doc' | 'no-element'; tagName: string | null } | null;
       // B2.1: map the in-browser probe back to the SAME external contract
       // (TargetDescriptor | null) and log WHY a null happens. Behaviour is
       // byte-identical to pre-instrument (no-doc / no-element → null as before).
