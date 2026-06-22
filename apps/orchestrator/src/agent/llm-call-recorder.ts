@@ -33,6 +33,11 @@ export interface LlmCallRecord {
    *   - commander.replan: full re-plan on irrecoverable failure (W3)
    *   - skill.body: lazy-load a SKILL.md body (v0.2 §5.5)
    *   - safety.filter: SafetyFilter screening (W3)
+   *   - supercar.turn: one messages.create turn of the supercar agent
+   *     loop (the computer-use browse path). It builds its OWN Anthropic
+   *     client, so unlike the vision-loop commander it was never wired to
+   *     the recorder — browse tasks recorded $0. Wired for Playbook ④
+   *     (budget caps / circuit breaker / per-task spend traceability).
    */
   purpose:
     | 'commander.plan'
@@ -41,7 +46,8 @@ export interface LlmCallRecord {
     | 'commander.accessibility'
     | 'commander.replan'
     | 'skill.body'
-    | 'safety.filter';
+    | 'safety.filter'
+    | 'supercar.turn';
   inputTokens: number;
   outputTokens: number;
   cacheReadInputTokens?: number;

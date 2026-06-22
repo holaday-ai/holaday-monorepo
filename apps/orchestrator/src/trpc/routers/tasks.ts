@@ -17,6 +17,7 @@ import { buildBaiduSmokePlan } from '../../agent/smoke-plans.js';
 import { friendlyTaskFailureReason } from '../../agent/task-failure-copy.js';
 import type { PlannedStep } from '../../agent/task-controller.js';
 import { TaskController } from '../../agent/task-controller.js';
+import { DrizzleLlmCallRecorder } from '../../agent/llm-call-recorder.js';
 import { TaskRepository } from '../../agent/task-repository.js';
 import { classifyExecutionMode } from '../../agent/intent-classifier.js';
 import { ashareQaHandlesMode } from '../../agent/a-share/ashare-qa-lane-gate.js';
@@ -3392,8 +3393,24 @@ export const tasksRouter = router({
         : null;
       const MAX_SCREENSHOT_ANCHORS = 8;
       let screenshotAnchorCount = 0;
+      // Phase 1 Playbook ④ prerequisite — wire the supercar loop to the
+      // shared LLM cost recorder so each browse turn lands in `llm_calls`
+      // (the loop builds its own Anthropic client and was never recorded →
+      // browse tasks showed $0). Recording is fire-and-forget inside the loop;
+      // a write failure only logs here.
+      const llmCallRecorder = new DrizzleLlmCallRecorder(ctx.db, {
+        onError: (err) =>
+          ctx.logger.warn(
+            { err: err instanceof Error ? err.message : String(err), taskId },
+            'supercar: llm_calls cost record failed (non-blocking)',
+          ),
+      });
       const supercarArgs: Parameters<typeof runSupercarTask>[0] = {
           taskId,
+          // Phase 1 Playbook ④ prerequisite — cost accounting for the browse
+          // loop (recorder + the external user id llm_calls.user_id needs).
+          recorder: llmCallRecorder,
+          userExternalId: ctx.userId,
           // Phase 1 Playbook B4 — gate screenshot-anchor attachment in the loop
           // (OFF → loop never attaches the screenshot = zero overhead).
           captureScreenshotAnchors: screenshotAnchorEnabled,

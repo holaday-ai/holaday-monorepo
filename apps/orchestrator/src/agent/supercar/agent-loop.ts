@@ -50,6 +50,7 @@ import {
   buildUnavailableFormatDirective,
 } from '../../files/writers.js';
 import type { DomainName } from '../vision-loop/domain/classifier.js';
+import type { LlmCallRecorder } from '../llm-call-recorder.js';
 import type { ApifyAdapter } from './adapters/apify.js';
 import type { ZapierAdapter } from './adapters/zapier.js';
 import { translateError } from '../error-translator.js';
@@ -804,6 +805,25 @@ export interface RunSupercarOptions {
    * zero overhead (the consumer then stores no anchor).
    */
   captureScreenshotAnchors?: boolean;
+  /**
+   * Phase 1 Playbook ④ prerequisite — LLM cost recorder. When provided
+   * (together with userExternalId), each SUCCESSFUL messages.create turn is
+   * recorded to `llm_calls` (provider / model / tokens / cost / task) so the
+   * exploration budget caps + circuit breaker + per-task spend have a source
+   * of truth. This loop builds its OWN Anthropic client, so — unlike the
+   * vision-loop commander — it was never wired to the recorder and browse
+   * tasks recorded $0. Pure accounting: it changes NO execution / token
+   * behaviour, and the write is fire-and-forget (never awaited, never throws
+   * into the loop — a billing-write failure must not break browsing). Default
+   * absent → no recording, identical to pre-④ behaviour (tests + callers that
+   * don't pass it are unchanged).
+   */
+  recorder?: LlmCallRecorder;
+  /**
+   * External user id (usr_…) for the recorder — `llm_calls.user_id` is NOT
+   * NULL, so recording is skipped when this is absent even if `recorder` is set.
+   */
+  userExternalId?: string;
 
   // --- Phase 6-2: 5-lane router inputs ---
   /**
@@ -1922,6 +1942,36 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
         },
         'supercar: api usage',
       );
+
+      // Phase 1 Playbook ④ prerequisite — record this turn's spend to
+      // `llm_calls`. This loop builds its own Anthropic client, so (unlike
+      // the vision-loop commander) it was never wired to the recorder →
+      // browse tasks showed $0. Reuses the shared recorder + estimateCostUsd
+      // pricing (no hard-coded prices). FIRE-AND-FORGET: not awaited, the
+      // `.catch` swallows everything — a billing-write failure must never
+      // block or break the browse loop (same discipline as the B-series
+      // captures). Recorded on the SUCCESS path only (the API-failure branch
+      // above returns before here), once per iteration, so no double-count.
+      if (opts.recorder && opts.userExternalId) {
+        const usage = response.usage;
+        void opts.recorder
+          .record({
+            userExternalId: opts.userExternalId,
+            taskExternalId: opts.taskId,
+            provider: 'anthropic',
+            model,
+            purpose: 'supercar.turn',
+            inputTokens: usage?.input_tokens ?? 0,
+            outputTokens: usage?.output_tokens ?? 0,
+            cacheReadInputTokens: usage?.cache_read_input_tokens ?? 0,
+            cacheCreationInputTokens: usage?.cache_creation_input_tokens ?? 0,
+            latencyMs: apiLatencyMs,
+            status: 'ok',
+          })
+          .catch(() => {
+            /* fire-and-forget: a billing-write failure never breaks browsing */
+          });
+      }
 
       // Append the full assistant content — NEVER just the text, and
       // NEVER a filtered subset. The Anthropic API validates thinking-
