@@ -19,6 +19,7 @@
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config as loadDotenv } from 'dotenv';
+import type { ExploreSiteOutcome } from '../src/playbook/explorer/explorer.js';
 
 const appRoot = resolve(fileURLToPath(new URL('.', import.meta.url)), '..');
 const repoRoot = resolve(appRoot, '../..');
@@ -43,6 +44,9 @@ const { PlaybookRepository } = await import('../src/playbook/playbook-repository
 const argv = process.argv.slice(2);
 const run = argv.includes('--run');
 const dryRun = !run; // DEFAULT dry-run; must pass --run AND open the other two locks
+// ④ browse-试用 lane (live veto + clean-context). OPT-IN: without --browse the lane is
+// byte-identical doc-first (Firecrawl scrape, no browser, no live actions, no veto path).
+const browse = argv.includes('--browse');
 const sitesArg = argv.find((a) => a.startsWith('--sites='));
 const seedSites = sitesArg
   ? sitesArg
@@ -78,7 +82,99 @@ if (fcKey) {
 
 const siteRepo = new SiteRepository(db);
 const playbookRepo = new PlaybookRepository(db);
-const exploreSite = makeDocFirstExploreSite({ scrapeDoc, siteRepo, capabilityRepo: playbookRepo });
+
+let exploreSite: (domain: string) => Promise<ExploreSiteOutcome>;
+if (browse) {
+  // ── ④ browse-试用 lane ──────────────────────────────────────────────────────────
+  // Heavy runtime imported LAZILY (only on --browse) so the default doc-first path never
+  // loads the browser/supercar stack — keeps doc-first byte-identical (audit point 1).
+  // EXPLORER_ENABLED still gates the whole run inside runExplorerBatch (audit point 6):
+  // OFF → no exploreSite call → no connect / no browse / no spend.
+  const { makeRunBrowseTask, withExplorationRun, requireBrowseEnv } = await import(
+    '../src/playbook/explorer/explorer-browse-runner.js'
+  );
+  // FAIL-CLOSED env gate (cost-source-A hinge): abort BEFORE any connect/spend if the
+  // recorder-gating user id (missing → breaker reads $0 = fail-OPEN) or the live CDP
+  // endpoint (9223; 9222 is dead) is absent. Tested: requireBrowseEnv in
+  // explorer-browse-runner.test.ts.
+  let explorerUser: string;
+  let cdpEndpoint: string;
+  try {
+    ({ userExternalId: explorerUser, cdpEndpoint } = requireBrowseEnv(process.env));
+  } catch (e) {
+    console.error(`[explorer] ${e instanceof Error ? e.message : String(e)} Aborting.`);
+    await pool.end().catch(() => {});
+    process.exit(1);
+  }
+  const { PlaywrightExecutor } = await import('../src/agent/vision-loop/playwright-executor.js');
+  const { runSupercarTask } = await import('../src/agent/supercar/agent-loop.js');
+  const { DrizzleLlmCallRecorder } = await import('../src/agent/llm-call-recorder.js');
+  const { makeBrowseExploreSite } = await import('../src/playbook/explorer/explorer-browse.js');
+  const { CostAccumulatingRecorder } = await import(
+    '../src/playbook/explorer/cost-accumulating-recorder.js'
+  );
+  const { newExternalId } = await import('@holaday/shared-types');
+
+  const runBrowseTask = makeRunBrowseTask({
+    cdpEndpoint,
+    // Fresh executor per browse → each site gets its own isolated clean context.
+    makeExecutor: () => new PlaywrightExecutor(),
+    runSupercar: async ({ taskId, intent, executor, onBeforeAction }) => {
+      // cost-source A: in-memory accumulator IS the breaker input (fail-closed); it wraps
+      // a best-effort llm_calls writer (finance détail only — its failure never moves the
+      // breaker). The supercar loop fires record() fire-and-forget; the accumulator sums
+      // synchronously so `total` is complete when runSupercarTask returns.
+      const recorder = new CostAccumulatingRecorder(
+        new DrizzleLlmCallRecorder(db, {
+          onError: (e) =>
+            logger.warn(
+              { err: e instanceof Error ? e.message : String(e) },
+              'llm_calls write failed (finance détail; breaker unaffected)',
+            ),
+        }),
+      );
+      const outcome = await runSupercarTask({
+        taskId,
+        intent,
+        // makeExecutor returns a real PlaywrightExecutor (satisfies the minimal view too).
+        executor: executor as unknown as PlaywrightExecutor,
+        ...(process.env.ANTHROPIC_API_KEY ? { apiKey: process.env.ANTHROPIC_API_KEY } : {}),
+        onBeforeAction, // ← live-veto (§9.6 + Sensitive Protocol) — half of the two-part guard
+        recorder,
+        userExternalId: explorerUser,
+        maxIterations: 25, // hard per-browse cap (~$0.5–0.6) — the real single-run spend bound
+        timeoutMs: 300_000, // 5-min wall clock
+        domain: null,
+      });
+      return { status: outcome.status, reason: outcome.reason, costUsd: recorder.total };
+    },
+    newTaskExternalId: () => newExternalId('task'),
+    logger,
+  });
+
+  // makeBrowseExploreSite connects { cleanContext: true } (§9.6 backstop) via the runner
+  // AND wires the veto hook — both halves of the guard. withExplorationRun persists one
+  // exploration_runs row per browse (site / status / accurate in-memory cost / halt).
+  const browseExplore = makeBrowseExploreSite({ runBrowseTask });
+  exploreSite = withExplorationRun(browseExplore, {
+    resolveSiteId: async (domain) => {
+      let s = await siteRepo.findGlobalByDomain(domain);
+      if (!s)
+        s = await siteRepo.create({
+          ownerUserId: null,
+          canonicalDomain: domain,
+          displayName: domain,
+          homepageUrl: `https://${domain}/`,
+        });
+      return s.id;
+    },
+    createExplorationRun: (input) => playbookRepo.createExplorationRun(input),
+    logger,
+  });
+} else {
+  // DEFAULT lane — doc-first (Firecrawl scrape; no browser, no live actions). Unchanged.
+  exploreSite = makeDocFirstExploreSite({ scrapeDoc, siteRepo, capabilityRepo: playbookRepo });
+}
 
 // Per-day / per-month breaker bases: prior cumulative explorer spend today / this
 // month. v1 returns 0 — TODO: sum exploration_runs.metadata_json.costUsd for the
@@ -92,7 +188,7 @@ const logger = {
 };
 
 console.log(
-  `[explorer] mode=${dryRun ? 'DRY-RUN (no dispatch/spend)' : '🔴 RUN'} batch=${batchId} sites=[${seedSites.join(', ') || '(none)'}]`,
+  `[explorer] mode=${dryRun ? 'DRY-RUN (no dispatch/spend)' : '🔴 RUN'} lane=${browse ? 'browse(live-veto+clean-context)' : 'doc-first'} batch=${batchId} sites=[${seedSites.join(', ') || '(none)'}]`,
 );
 
 try {

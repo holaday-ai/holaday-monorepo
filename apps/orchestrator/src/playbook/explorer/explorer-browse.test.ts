@@ -38,7 +38,7 @@ describe('browseIntent', () => {
 // A fake that mimics the agent-loop's veto contract: propose each action, call
 // onBeforeAction, EXECUTE (record) only if allowed; on a veto STOP and return failed
 // (the action is never executed) — exactly what runSupercarTask does with the hook.
-function fakeLoop(actions: BrowseAction[], executed: BrowseAction[], taskInternalId = 7) {
+function fakeLoop(actions: BrowseAction[], executed: BrowseAction[], costUsd = 0.42) {
   return async ({
     onBeforeAction,
   }: {
@@ -46,10 +46,10 @@ function fakeLoop(actions: BrowseAction[], executed: BrowseAction[], taskInterna
   }): Promise<BrowseRunResult> => {
     for (const a of actions) {
       const v = onBeforeAction(a);
-      if (!v.allowed) return { status: 'failed', taskInternalId, reason: v.reason };
+      if (!v.allowed) return { status: 'failed', costUsd, reason: v.reason }; // cost-source A
       executed.push(a); // only reached when allowed
     }
-    return { status: 'completed', taskInternalId };
+    return { status: 'completed', costUsd };
   };
 }
 
@@ -66,11 +66,10 @@ describe('makeBrowseExploreSite — live-veto really refuses + halts', () => {
         ],
         executed,
       ),
-      readTaskCostUsd: async () => 0.42,
     })('x.com');
 
     expect(out.status).toBe('halted_sensitive');
-    expect(out.costUsd).toBe(0.42);
+    expect(out.costUsd).toBe(0.42); // cost-source A: the run's in-memory cost, not a DB read
     expect(out.note).toMatch(/live-veto/);
     // the sensitive action + everything after it was NOT executed
     expect(executed.map((a) => a.label ?? a.url)).toEqual(['https://x.com/', 'Read docs']);
@@ -80,8 +79,7 @@ describe('makeBrowseExploreSite — live-veto really refuses + halts', () => {
   it('navigation to a sensitive url is vetoed (covers the page.goto path)', async () => {
     const executed: BrowseAction[] = [];
     const out = await makeBrowseExploreSite({
-      runBrowseTask: fakeLoop([{ kind: 'navigate', url: 'https://x.com/checkout' }], executed),
-      readTaskCostUsd: async () => 0,
+      runBrowseTask: fakeLoop([{ kind: 'navigate', url: 'https://x.com/checkout' }], executed, 0),
     })('x.com');
     expect(out.status).toBe('halted_sensitive');
     expect(executed).toEqual([]); // the navigation was refused before executing
@@ -97,8 +95,8 @@ describe('makeBrowseExploreSite — live-veto really refuses + halts', () => {
           { kind: 'type' },
         ],
         executed,
+        0.1,
       ),
-      readTaskCostUsd: async () => 0.1,
     })('x.com');
     expect(out.status).toBe('completed');
     expect(out.costUsd).toBe(0.1);
@@ -107,8 +105,7 @@ describe('makeBrowseExploreSite — live-veto really refuses + halts', () => {
 
   it('a non-veto task failure maps to failed (not halted_sensitive)', async () => {
     const out = await makeBrowseExploreSite({
-      runBrowseTask: async () => ({ status: 'failed', taskInternalId: 1, reason: 'timeout' }),
-      readTaskCostUsd: async () => 0.05,
+      runBrowseTask: async () => ({ status: 'failed', costUsd: 0.05, reason: 'timeout' }),
     })('x.com');
     expect(out.status).toBe('failed');
     expect(out.note).toMatch(/timeout/);
@@ -119,7 +116,6 @@ describe('makeBrowseExploreSite — live-veto really refuses + halts', () => {
       runBrowseTask: async () => {
         throw new Error('boom');
       },
-      readTaskCostUsd: async () => 0,
     })('x.com');
     expect(out.status).toBe('failed');
     expect(out.note).toMatch(/boom/);

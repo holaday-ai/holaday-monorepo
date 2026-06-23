@@ -26,16 +26,51 @@ export interface RunBrowseTaskDeps {
   cdpEndpoint: string;
   /** Fresh executor per browse so each site gets its own isolated clean context. */
   makeExecutor: () => CleanBrowseExecutor;
-  /** Dispatch the live browse through runSupercarTask with the clean executor + veto hook. */
+  /**
+   * Dispatch the live browse through runSupercarTask with the clean executor + veto hook.
+   * Returns the in-process accumulated cost (cost-source A) so the breaker reads a
+   * fail-closed number — NOT a DB read-back (a DB path fails OPEN = over-burn).
+   */
   runSupercar: (args: {
     taskId: string;
     intent: string;
     executor: CleanBrowseExecutor;
     onBeforeAction: (action: BrowseAction) => BrowseVerdict;
-  }) => Promise<{ status: string; reason?: string }>;
+  }) => Promise<{ status: string; reason?: string; costUsd: number }>;
   newTaskExternalId: () => string;
-  resolveTaskInternalId: (taskExternalId: string) => Promise<number | null>;
   logger?: { warn: (o: unknown, m: string) => void };
+}
+
+/**
+ * FAIL-CLOSED env gate for the browse lane — the cost-source-A safety hinge.
+ *
+ * The breaker reads an in-memory cost total, but the accumulator only receives turns when
+ * runSupercarTask fires `recorder.record()`, which it gates on `recorder && userExternalId`.
+ * So a MISSING `EXPLORER_USER_EXTERNAL_ID` silently yields $0 accumulated cost = fail-OPEN
+ * (the breaker can't see the burn → over-spend). And the browse MUST hit the live browser
+ * (`HEADED_CDP_ENDPOINT` = 9223); `CDP_ENDPOINT` (9222) is dead. THROW rather than browse
+ * blind — the CLI turns this into an abort BEFORE any connect / spend.
+ */
+export function requireBrowseEnv(env: {
+  EXPLORER_USER_EXTERNAL_ID?: string;
+  HEADED_CDP_ENDPOINT?: string;
+}): { userExternalId: string; cdpEndpoint: string } {
+  const userExternalId = (env.EXPLORER_USER_EXTERNAL_ID ?? '').trim();
+  const cdpEndpoint = (env.HEADED_CDP_ENDPOINT ?? '').trim();
+  if (!userExternalId) {
+    throw new Error(
+      '--browse requires EXPLORER_USER_EXTERNAL_ID — runSupercarTask fires the cost recorder ' +
+        'only when userExternalId is set; without it the in-memory breaker reads $0 (fail-OPEN). ' +
+        'Refusing to browse blind.',
+    );
+  }
+  if (!cdpEndpoint) {
+    throw new Error(
+      '--browse requires HEADED_CDP_ENDPOINT (the live browser; CDP_ENDPOINT 9222 is dead). ' +
+        'Refusing to browse.',
+    );
+  }
+  return { userExternalId, cdpEndpoint };
 }
 
 /**
@@ -54,19 +89,22 @@ export function makeRunBrowseTask(deps: RunBrowseTaskDeps): (args: {
     try {
       const c = await executor.connect(deps.cdpEndpoint, { cleanContext: true });
       if (!c.ok)
-        return { status: 'failed', reason: `clean-context connect failed: ${c.error ?? '?'}` };
+        return {
+          status: 'failed',
+          costUsd: 0,
+          reason: `clean-context connect failed: ${c.error ?? '?'}`,
+        };
       // 🔒 fail-closed zero-credential guarantee — throws if ANY cookie present.
       await executor.assertCleanContext();
       const outcome = await deps.runSupercar({ taskId, intent, executor, onBeforeAction });
-      const taskInternalId = await deps.resolveTaskInternalId(taskId).catch(() => null);
-      return { status: outcome.status, taskInternalId, reason: outcome.reason };
+      return { status: outcome.status, costUsd: outcome.costUsd, reason: outcome.reason };
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       deps.logger?.warn(
         { domain, reason },
         'browse runner: failed (clean-context assert or run error)',
       );
-      return { status: 'failed', reason };
+      return { status: 'failed', costUsd: 0, reason };
     } finally {
       await executor.disposeCleanContext().catch(() => {});
     }

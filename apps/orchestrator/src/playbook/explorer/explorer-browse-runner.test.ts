@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   type CleanBrowseExecutor,
   makeRunBrowseTask,
+  requireBrowseEnv,
   withExplorationRun,
 } from './explorer-browse-runner.js';
 import type { ExploreSiteOutcome } from './explorer.js';
@@ -32,13 +33,13 @@ describe('makeRunBrowseTask — clean-context contract', () => {
     const run = makeRunBrowseTask({
       cdpEndpoint: 'http://x',
       makeExecutor: () => ex,
-      runSupercar: async ({ executor }) => {
+      runSupercar: async ({ executor, onBeforeAction }) => {
         ranSupercar = true;
-        expect(executor).toBe(ex);
-        return { status: 'completed' };
+        expect(executor).toBe(ex); // the SAME clean executor the runner connected
+        expect(typeof onBeforeAction).toBe('function'); // veto hook threaded through
+        return { status: 'completed', costUsd: 0.42 };
       },
       newTaskExternalId: () => 'tsk_1',
-      resolveTaskInternalId: async () => 42,
     });
     const r = await run({
       domain: 'figma.com',
@@ -46,7 +47,7 @@ describe('makeRunBrowseTask — clean-context contract', () => {
       onBeforeAction: () => ({ allowed: true }),
     });
     expect(r.status).toBe('completed');
-    expect(r.taskInternalId).toBe(42);
+    expect(r.costUsd).toBe(0.42); // cost-source A: runSupercar's in-memory cost flows through
     expect(calls).toEqual({ connect: 1, assert: 1, dispose: 1 });
     expect(ranSupercar).toBe(true);
   });
@@ -59,10 +60,9 @@ describe('makeRunBrowseTask — clean-context contract', () => {
       makeExecutor: () => ex,
       runSupercar: async () => {
         ranSupercar = true;
-        return { status: 'completed' };
+        return { status: 'completed', costUsd: 0.1 };
       },
       newTaskExternalId: () => 'tsk_1',
-      resolveTaskInternalId: async () => 42,
     });
     const r = await run({
       domain: 'x.com',
@@ -80,9 +80,8 @@ describe('makeRunBrowseTask — clean-context contract', () => {
     const run = makeRunBrowseTask({
       cdpEndpoint: 'http://x',
       makeExecutor: () => ex,
-      runSupercar: async () => ({ status: 'completed' }),
+      runSupercar: async () => ({ status: 'completed', costUsd: 0.1 }),
       newTaskExternalId: () => 'tsk_1',
-      resolveTaskInternalId: async () => null,
     });
     const r = await run({
       domain: 'x.com',
@@ -91,8 +90,35 @@ describe('makeRunBrowseTask — clean-context contract', () => {
     });
     expect(r.status).toBe('failed');
     expect(r.reason).toMatch(/connect/i);
+    expect(r.costUsd).toBe(0); // connect-fail → never browsed → zero cost
     expect(calls.assert).toBe(0);
     expect(calls.dispose).toBe(1);
+  });
+});
+
+describe('requireBrowseEnv — FAIL-CLOSED env gate (the cost-source-A hinge)', () => {
+  it('🔴 throws when EXPLORER_USER_EXTERNAL_ID missing (recorder gate → breaker would read $0 = fail-OPEN)', () => {
+    expect(() => requireBrowseEnv({ HEADED_CDP_ENDPOINT: 'http://127.0.0.1:9223' })).toThrow(
+      /EXPLORER_USER_EXTERNAL_ID|fail-OPEN/i,
+    );
+  });
+  it('treats blank/whitespace user id as missing (still fail-closed)', () => {
+    expect(() =>
+      requireBrowseEnv({ EXPLORER_USER_EXTERNAL_ID: '   ', HEADED_CDP_ENDPOINT: 'http://x:9223' }),
+    ).toThrow(/EXPLORER_USER_EXTERNAL_ID/);
+  });
+  it('throws when HEADED_CDP_ENDPOINT missing (would hit the dead 9222)', () => {
+    expect(() => requireBrowseEnv({ EXPLORER_USER_EXTERNAL_ID: 'usr_1' })).toThrow(
+      /HEADED_CDP_ENDPOINT/,
+    );
+  });
+  it('returns both when present (the only path that lets browse proceed)', () => {
+    expect(
+      requireBrowseEnv({
+        EXPLORER_USER_EXTERNAL_ID: 'usr_1',
+        HEADED_CDP_ENDPOINT: 'http://127.0.0.1:9223',
+      }),
+    ).toEqual({ userExternalId: 'usr_1', cdpEndpoint: 'http://127.0.0.1:9223' });
   });
 });
 

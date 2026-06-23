@@ -62,8 +62,12 @@ export function browseIntent(domain: string): string {
 
 export interface BrowseRunResult {
   status: 'completed' | 'failed' | 'cancelled' | 'awaiting_user' | string;
-  /** internal task id of the dispatched supercar task, for the cost lookup. */
-  taskInternalId?: number | null;
+  /**
+   * Cost-source A: the in-process accumulated supercar.turn cost (USD) for THIS browse,
+   * summed in-memory from each turn's token usage (see CostAccumulatingRecorder). This
+   * is what the per-site $5 breaker reads — a fail-closed number, never a DB read-back.
+   */
+  costUsd: number;
   reason?: string;
 }
 
@@ -78,8 +82,6 @@ export interface BrowseDeps {
     intent: string;
     onBeforeAction: (action: BrowseAction) => BrowseVerdict;
   }) => Promise<BrowseRunResult>;
-  /** Real spend of the dispatched task — sum llm_calls (supercar.turn) for it. */
-  readTaskCostUsd: (taskInternalId: number) => Promise<number>;
 }
 
 /**
@@ -113,10 +115,9 @@ export function makeBrowseExploreSite(
       };
     }
 
-    const costUsd =
-      result.taskInternalId != null
-        ? await deps.readTaskCostUsd(result.taskInternalId).catch(() => 0)
-        : 0;
+    // Cost-source A: the in-process accumulated cost the runner returns (fail-closed;
+    // never a DB read-back). Feeds the per-site $5 breaker via ExploreSiteOutcome.costUsd.
+    const costUsd = Number.isFinite(result.costUsd) && result.costUsd > 0 ? result.costUsd : 0;
 
     if (state.vetoed) {
       return {
