@@ -73,6 +73,24 @@ export function requireBrowseEnv(env: {
   return { userExternalId, cdpEndpoint };
 }
 
+/** (c) Per-browse iteration cap — the real single-run spend bound (the per-site $5 breaker
+ *  is post-hoc; it can't kill a task mid-run). env-overridable so BOSS can tune batch-1
+ *  without a redeploy. The DEFAULT is the calibrated ~$0.5–0.6 budget. */
+export const DEFAULT_MAX_ITERATIONS = 25;
+/** Fat-finger guard: a mistyped EXPLORER_MAX_ITERATIONS=2500 must NOT let one browse run
+ *  away far past the $5 site breaker. A requested value above this is clamped down. */
+export const MAX_ITERATIONS_CEILING = 50;
+
+/**
+ * FAIL-SAFE parse of EXPLORER_MAX_ITERATIONS. Missing / non-integer / ≤0 → DEFAULT;
+ * a valid value is clamped to [1, MAX_ITERATIONS_CEILING]. Pure → unit-tested.
+ */
+export function resolveMaxIterations(raw: string | undefined): number {
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n <= 0) return DEFAULT_MAX_ITERATIONS;
+  return Math.min(n, MAX_ITERATIONS_CEILING);
+}
+
 /**
  * Build the `runBrowseTask`: connect a fresh clean context → ASSERT zero cookies
  * (fail-closed; a dirty context throws → caught → failed, browse refused) →

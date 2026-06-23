@@ -205,7 +205,37 @@ export async function runExplorerBatch(
       deps.logger?.warn({ domain, err: errMsg(err) }, 'explorer: site failed');
       continue;
     }
-    const siteCost = Number.isFinite(outcome.costUsd) && outcome.costUsd > 0 ? outcome.costUsd : 0;
+    // (a) FAIL-CLOSED on an INDETERMINATE cost. A non-finite / negative costUsd means we
+    // CANNOT confirm this site's spend — treating it as $0 and continuing would fail-OPEN
+    // (the breaker flies blind). Halt the whole batch (the spend meter is unreliable). A
+    // finite 0 is LEGITIMATE (a browse that made no billable call) → NOT a trip, normal flow.
+    if (
+      typeof outcome.costUsd !== 'number' ||
+      !Number.isFinite(outcome.costUsd) ||
+      outcome.costUsd < 0
+    ) {
+      deps.logger?.warn(
+        { domain, costUsd: outcome.costUsd },
+        'explorer: INDETERMINATE site cost — fail-closed halt (cannot confirm spend)',
+      );
+      perSite.push({
+        domain,
+        status: 'halted_budget',
+        note: `cost indeterminate (${String(outcome.costUsd)}) — fail-closed halt; spend unconfirmable`,
+        ...(outcome.capabilityExternalId
+          ? { capabilityExternalId: outcome.capabilityExternalId }
+          : {}),
+      });
+      return {
+        ...base,
+        halted: true,
+        haltReason: `indeterminate cost for ${domain} — fail-closed (spend meter unreliable)`,
+        sitesExplored: countExplored(perSite),
+        totalSpentUsd: totalSpent,
+        perSite,
+      };
+    }
+    const siteCost = outcome.costUsd; // finite, >= 0 — a finite 0 is legit, not a trip
     totalSpent += siteCost;
 
     // Per-SITE breaker: an abnormal single-site burn stops THIS site (flag it); the

@@ -315,6 +315,36 @@ describe('runExplorerBatch — three-layer breaker (does NOT 掐 normal completi
     expect(r.halted).toBe(false);
   });
 
+  it('(a) FAIL-CLOSED: a non-finite site cost HALTS the batch (NOT treated as $0)', async () => {
+    process.env.EXPLORER_ENABLED = 'true';
+    const calls: string[] = [];
+    const exploreSite = async (domain: string): Promise<ExploreSiteOutcome> => {
+      calls.push(domain);
+      return { domain, status: 'completed', costUsd: Number.NaN, note: 'fake' };
+    };
+    const r = await runExplorerBatch(
+      { exploreSite },
+      { seedSites: ['a.com', 'b.com'], dryRun: false },
+    );
+    expect(calls).toEqual(['a.com']); // halted after the indeterminate site — b.com never ran
+    expect(r.halted).toBe(true);
+    expect(r.haltReason).toMatch(/indeterminate cost/i);
+    expect(r.perSite.find((p) => p.domain === 'a.com')?.status).toBe('halted_budget');
+  });
+
+  it('(a) a FINITE $0 cost is legitimate (no billable call) — NOT a trip, batch completes', async () => {
+    process.env.EXPLORER_ENABLED = 'true';
+    const calls: string[] = [];
+    const r = await runExplorerBatch(
+      { exploreSite: spyExplore(calls, 0) },
+      { seedSites: ['a.com', 'b.com'], dryRun: false },
+    );
+    expect(calls).toEqual(['a.com', 'b.com']);
+    expect(r.halted).toBe(false);
+    expect(r.perSite.every((p) => p.status === 'completed')).toBe(true);
+    expect(r.totalSpentUsd).toBe(0);
+  });
+
   it('PER-BATCH breaker stops the WHOLE batch (backstop for multiple abnormal sites)', async () => {
     process.env.EXPLORER_ENABLED = 'true';
     // 2 sites × $5 × 1.2 = $12 batch breaker; two $7 sites → $14 ≥ $12 after site 2.

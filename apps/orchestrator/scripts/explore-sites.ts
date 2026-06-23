@@ -90,9 +90,8 @@ if (browse) {
   // loads the browser/supercar stack — keeps doc-first byte-identical (audit point 1).
   // EXPLORER_ENABLED still gates the whole run inside runExplorerBatch (audit point 6):
   // OFF → no exploreSite call → no connect / no browse / no spend.
-  const { makeRunBrowseTask, withExplorationRun, requireBrowseEnv } = await import(
-    '../src/playbook/explorer/explorer-browse-runner.js'
-  );
+  const { makeRunBrowseTask, withExplorationRun, requireBrowseEnv, resolveMaxIterations } =
+    await import('../src/playbook/explorer/explorer-browse-runner.js');
   // FAIL-CLOSED env gate (cost-source-A hinge): abort BEFORE any connect/spend if the
   // recorder-gating user id (missing → breaker reads $0 = fail-OPEN) or the live CDP
   // endpoint (9223; 9222 is dead) is absent. Tested: requireBrowseEnv in
@@ -114,6 +113,17 @@ if (browse) {
     '../src/playbook/explorer/cost-accumulating-recorder.js'
   );
   const { newExternalId } = await import('@holaday/shared-types');
+
+  // (c) per-browse iteration cap — env-overridable (tune batch-1 without a redeploy),
+  // fail-safe parsed + clamped to a fat-finger ceiling.
+  const maxIterations = resolveMaxIterations(process.env.EXPLORER_MAX_ITERATIONS);
+  const rawMaxIter = process.env.EXPLORER_MAX_ITERATIONS?.trim();
+  if (rawMaxIter && String(maxIterations) !== rawMaxIter) {
+    logger.warn(
+      { requested: rawMaxIter, effective: maxIterations },
+      'EXPLORER_MAX_ITERATIONS adjusted (fail-safe default or ceiling clamp)',
+    );
+  }
 
   const runBrowseTask = makeRunBrowseTask({
     cdpEndpoint,
@@ -142,7 +152,7 @@ if (browse) {
         onBeforeAction, // ← live-veto (§9.6 + Sensitive Protocol) — half of the two-part guard
         recorder,
         userExternalId: explorerUser,
-        maxIterations: 25, // hard per-browse cap (~$0.5–0.6) — the real single-run spend bound
+        maxIterations, // (c) env-configurable hard per-browse cap (default 25, ceiling 50)
         timeoutMs: 300_000, // 5-min wall clock
         domain: null,
       });

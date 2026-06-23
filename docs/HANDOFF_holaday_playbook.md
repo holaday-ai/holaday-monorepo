@@ -11,7 +11,7 @@
 
 | 项 | 值 |
 |---|---|
-| **运行 orch（PROD LIVE REF）** | `dcbb478`（④ browse-试用 live-veto + veto 多信号 OR 修复 dark ship；restart 689；护栏夹具验收 8/8 PASS）|
+| **运行 orch（PROD LIVE REF）** | `6f96bed`（④ browse lane wired 进 explore-sites `--browse` dark ship；restart 690；护栏夹具 8/8 PASS；flags 全 OFF）。⚠️ batch-1 prep 加固 (a) 非有限成本 fail-closed + (c) `EXPLORER_MAX_ITERATIONS` env 可配 **commit local 待审、未部署** |
 | **分支** | `claude/musing-keller-ae1d05`（prod 合并主干）|
 | **origin tip = 本地 HEAD** | `dcbb4783`（已 push，无未 push 增量；含 `51b43080`/`85f1d273` browse-试用 + `7b80320e` harness + `dcbb4783` veto 修复）|
 | **SPA** | `8da47b4b`（bundle `index-DiYh_GAx.js`，本工程期间未变）|
@@ -118,6 +118,7 @@
 - **veto 须多信号 OR（`visibleText ?? ariaLabel` 短路敏感 aria/title）**：④ veto label 解析原取首个非空 → emoji/glyph 的 visibleText（💳）**短路掉**敏感 aria-label/title → icon-only「立即支付」按钮漏拦（红队夹具真机实证，真 agent-loop 真漏 = money-gate BLOCKER）。**修=`classifyExplorerAction` 多信号 fail-safe OR**（visibleText/aria-label/title/placeholder/name 任一敏感即拦）+ **type=password 一律拦**（D 边界，关上轮 pwd-type 残留）；`captureTargetDescriptor` 加 `title`/`placeholder`（**内存 veto-path-only，B2 capture 不变、无 migration**）。(`dcbb4783`；veto-path-only，钩子缺失时用户任务字节级不变)
 - **expand-first**：schema migration apply + 只读验表 → 才部署用新列的码（见 §2 铁律 5）。
 - **deploy-preflight 拦 reset**：实读 live HEAD，非祖先拒（避免 reset 丢线上 commit）。
+- **熔断必 fail-closed（cost-source A）**：花钱控制器的成本输入只能 fail-CLOSED。DB 回读（写 llm_calls→读回）fail-OPEN——user 缺/行未写/写失败 → 读到 $0 → 续烧。故 ④ browse 熔断读**进程内累加**（`CostAccumulatingRecorder`，每 turn `+=` 在 await 前同步落账，连 loop 的 fire-and-forget `void record()` 也落）；llm_calls DB 写降 best-effort（finance 明细，失败不动熔断）。配套两闸：① `requireBrowseEnv` 缺 `EXPLORER_USER_EXTERNAL_ID`（recorder 触发门，缺则 record 不 fire→累加 $0→瞎）或 `HEADED_CDP_ENDPOINT` → **spend 前 abort**（4 例测）；② `runExplorerBatch` 非有限/负成本 → **fail-closed halt 整批**（判不准不当 $0 续；有限 0 合法不 trip）。(`explorer.ts`/`explorer-browse-runner.ts`/`cost-accumulating-recorder.ts`)
 
 ---
 
@@ -128,9 +129,10 @@
 - B3 验收夹具路由（`/test/iframe-fixture`）+ ④ veto 夹具路由（`/test/explorer-veto-fixture`）= 验完删（B/④ 阶段统一清）。
 - B4 选择性盲区：iframe 内点击 turnChanged=false（导航视觉滞后）→ 不锚；顶层点击锚。记 backlog。
 - 站点可达性折扣：高频域名（如 eastmoney）对执行器反爬、挡在加载阶段 → 复用/探索的"站点可达性"要打折。
-- 🟡 **CDP 端点**：`CDP_ENDPOINT=9222` 当前 **dead**（进程有 flag 但不 listen）；live 浏览器是 `HEADED_CDP_ENDPOINT=9223`（Brave，夹具验收用的就是它）→ explorer 真跑前确认 explorer 用哪个端点 + 9222 要不要修活。
+- 🟡 **CDP 端点（已解析）**：explorer `--browse` 用 `HEADED_CDP_ENDPOINT=9223`（Brave，live；`requireBrowseEnv` 缺它即 abort）。`CDP_ENDPOINT=9222` 仍 **dead**（进程有 flag 但不 listen）——非 explorer 用，是 index.ts Lane1 的；要不要修活是独立 ops 项。
 - **$5 单站熔断校准**：需 browse-试用 多 turn 真跑（doc-first $0.01 撞不到）。
-- `exploration_runs` browse 已补（`withExplorationRun`，本地 `85f1d273`）；doc-first 仍未写（v1.1）。
+- `exploration_runs` browse 已接（`--browse` 经 `withExplorationRun` 每 browse 写一行，含准的内存 cost）；doc-first 仍未写（v1.1）。
+- 🔵 **(b) backlog（hardening）**：让 accumulator 直接 tap 每-turn usage、绕开 `userExternalId` gate——则熔断永不依赖某 env var 设没设。当前 `requireBrowseEnv` 缺-id abort 已封洞（缺则不跑），不急；**仅在能纯 additive、不碰用户任务热路径时才做**。
 - ~~icon-only 无 aria 的敏感按钮 label 解析不到~~ **更正（已修 `dcbb4783`）**：原描述低估——不是「无 aria」，是「**有敏感 aria/title，但 visibleText(emoji glyph 💳) 短路**」→ 红队夹具抓到、多信号 OR 已修（向量 2 真机转 PASS，pwd-type 残留亦关）。`assertCleanContext` 只查 cookie 非 localStorage（fresh newContext 本就空，保留）。
 - harness `explorer-veto-acceptance.ts` finally cleanup 曾因 CDP socket 滞留挂起被 timeout-124 杀（断言已全跑完，结果有效）→ 已加 8s bounded race + `process.exit`（`dcbb4783`，重跑 exit 0 验证）。
 - veto 夹具真跑在 prod DB 留了测试行（`sites` veto-fixture.local ×1 + `exploration_runs` halted_sensitive ×2，两次跑各一）→ 可选清理（数据卫生，无害）。
@@ -146,12 +148,10 @@
 
 ## §7 下一步（断点精确）
 
-**近场 — browse-试用 v1 护栏夹具真机验收 ✅ 已通（2026-06-23）**：
-- 状态：live-veto 钩子 + clean-context + runBrowseTask + exploration_runs + 红队夹具全已 **push + dark deploy（orch `dcbb478`，EXPLORER_ENABLED 仍 OFF）**。三轮 6 镜头对抗审 + **真机红队夹具验收 8/8 PASS**（clean-context cookies=0 / 四向量真拦 / 安全链接放行 / executor.click spy 敏感=0安全=1 / exploration_runs 写入）。
-- **veto BLOCKER 已闭环**：夹具首跑抓到 icon-only emoji-短路-敏感-aria（真漏）→ 多信号 fail-safe OR 修复（`dcbb4783`）→ 重跑向量 2 转 PASS、pwd-type 转拦。见 §5。
-- **clean context = §9.6 硬前置**（已实现 + 真机实证：newContext-over-CDP 在 box live Brave 上 cookies=0）。
-- **下一步 = 真开 `EXPLORER_ENABLED` 跑标定站（首个真烧钱，逐项授权）**：护栏已验通 → 可单独谈真开 `EXPLORER_ENABLED` 跑 figma/ctrip browse（clean context、§4 三层熔断、校准单站 $5）。**这是新的授权点：要 BOSS 逐项 GO（真烧钱）+ 跑完立即归零 EXPLORER_ENABLED**。在此之前 explorer 仍绝不真做 live browse。
-- ⚠️ ops 前置（§6）：`CDP_ENDPOINT=9222` 当前 dead，live 浏览器是 `HEADED_CDP_ENDPOINT=9223`（Brave）→ explorer 真跑前需确认 explorer 用哪个端点（夹具验收用的 9223）。
+**近场 — browse lane wired + dark ✅，护栏夹具 8/8 PASS（2026-06-24）**：
+- 状态：live-veto 钩子 + clean-context + runBrowseTask + exploration_runs + 红队夹具 + veto 多信号 OR 修复 + **browse lane 接进 `explore-sites.ts --browse`** 全已 **push + dark deploy（orch `6f96bed`，两 explorer flag OFF）**。**真机红队夹具验收 8/8 PASS**（cookies=0 / 四向量真拦 / 安全链接放行 / executor.click spy 敏感=0安全=1 / exploration_runs 写）。veto BLOCKER 闭环（见 §5）。
+- **batch-1 prep 加固 commit local 待审（未部署）**：(a) 非有限成本 fail-closed halt + (c) `EXPLORER_MAX_ITERATIONS` env 可配（默认 25/上限 50，fail-safe+clamp）；(b) accumulator 解耦留 backlog（§6）。审过 dark 部署。
+- **下一步 = batch-1 figma 真跑（首个真烧钱，新授权点）**：browse lane + 熔断 + clean-context 全备。要齐：BOSS 逐项 GO + run-time 给 `EXPLORER_USER_EXTERNAL_ID`（recorder 门）+ 开 `EXPLORER_ENABLED` + `--run --browse --sites=figma.com --batch=…`（cdpEndpoint 自动取 HEADED 9223）+ **跑完立即归零 `EXPLORER_ENABLED`**。在此之前 explorer 绝不真做 live browse。
 
 **中场 — 专属账号 + Credential Vault 阶段**：护栏验通后才配钥匙进"登录后世界"（veto 要求更高）；可并行让人去注册专属账号（v1 绝不碰登录态/凭据）。
 

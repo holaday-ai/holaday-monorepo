@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   type CleanBrowseExecutor,
+  DEFAULT_MAX_ITERATIONS,
+  MAX_ITERATIONS_CEILING,
   makeRunBrowseTask,
   requireBrowseEnv,
+  resolveMaxIterations,
   withExplorationRun,
 } from './explorer-browse-runner.js';
 import type { ExploreSiteOutcome } from './explorer.js';
@@ -119,6 +122,26 @@ describe('requireBrowseEnv — FAIL-CLOSED env gate (the cost-source-A hinge)', 
         HEADED_CDP_ENDPOINT: 'http://127.0.0.1:9223',
       }),
     ).toEqual({ userExternalId: 'usr_1', cdpEndpoint: 'http://127.0.0.1:9223' });
+  });
+});
+
+describe('resolveMaxIterations — env-configurable per-browse cap (fail-safe + clamp)', () => {
+  it('missing / blank → DEFAULT', () => {
+    expect(resolveMaxIterations(undefined)).toBe(DEFAULT_MAX_ITERATIONS);
+    expect(resolveMaxIterations('')).toBe(DEFAULT_MAX_ITERATIONS);
+  });
+  it('non-positive / non-integer / garbage → DEFAULT (fail-safe)', () => {
+    expect(resolveMaxIterations('0')).toBe(DEFAULT_MAX_ITERATIONS);
+    expect(resolveMaxIterations('-5')).toBe(DEFAULT_MAX_ITERATIONS);
+    expect(resolveMaxIterations('15.5')).toBe(DEFAULT_MAX_ITERATIONS);
+    expect(resolveMaxIterations('abc')).toBe(DEFAULT_MAX_ITERATIONS);
+  });
+  it('a valid value is used (BOSS tunes batch-1 without a redeploy)', () => {
+    expect(resolveMaxIterations('15')).toBe(15);
+    expect(resolveMaxIterations(String(MAX_ITERATIONS_CEILING))).toBe(MAX_ITERATIONS_CEILING);
+  });
+  it('🛡️ fat-finger above the ceiling is CLAMPED (a mistyped 2500 cannot run away)', () => {
+    expect(resolveMaxIterations('2500')).toBe(MAX_ITERATIONS_CEILING);
   });
 });
 
