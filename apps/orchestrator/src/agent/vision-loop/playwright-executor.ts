@@ -182,6 +182,10 @@ export interface TargetDescriptor {
   name: string | null;
   id: string | null;
   ariaLabel: string | null;
+  /** `title` attr + (inputs) `placeholder` — extra accessible-name signals fed to the
+   *  ④ explorer veto (fail-safe OR; an icon-only control hides its intent here). */
+  title: string | null;
+  placeholder: string | null;
   /** B3 — the iframe's URL (≤255) when captured from INSIDE a frame; null at top level. */
   framePath?: string | null;
 }
@@ -960,7 +964,9 @@ export class PlaywrightExecutor {
     autocomplete: attr('autocomplete'),
     name: attr('name'),
     id: el.id || null,
-    ariaLabel: attr('aria-label')
+    ariaLabel: attr('aria-label'),
+    title: attr('title'),
+    placeholder: attr('placeholder')
   };
 })()`;
     type Probe =

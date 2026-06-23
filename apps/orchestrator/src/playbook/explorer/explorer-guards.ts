@@ -34,6 +34,19 @@ export interface ExplorerAction {
   kind: ExplorerActionKind;
   /** Visible control label / accessible name (click / type / submit). */
   label?: string;
+  /**
+   * Additional accessible-name signals — ALL are checked independently (fail-safe
+   * OR). An ICON-ONLY control hides its sensitive intent in aria-label / title while
+   * the visible text is a benign glyph (e.g. 💳); a `??` first-non-null label pick let
+   * that slip the veto, so every signal is matched on its own. (Veto-path only.)
+   */
+  ariaLabel?: string;
+  title?: string;
+  /** Input-field signals for `type` (also OR-checked). */
+  placeholder?: string;
+  name?: string;
+  /** For `type`: the focused element's input type. 'password' → ALWAYS vetoed. */
+  inputType?: string;
   /** Target URL (navigate). */
   url?: string;
 }
@@ -89,7 +102,6 @@ function normLabel(label: string): string {
  */
 export function classifyExplorerAction(action: ExplorerAction): ExplorerActionVerdict {
   const rawLabel = (action.label ?? '').trim();
-  const label = normLabel(rawLabel);
   const url = (action.url ?? '').trim().toLowerCase();
   switch (action.kind) {
     case 'read':
@@ -112,15 +124,39 @@ export function classifyExplorerAction(action: ExplorerAction): ExplorerActionVe
         reason: `submit blocked: form submission is never allowed (label="${rawLabel.slice(0, 40)}")`,
       };
     case 'click':
-    case 'type':
-      if (label && SENSITIVE_LABEL_RE.test(label)) {
+    case 'type': {
+      // D-boundary: typing into a credential field is NEVER allowed, independent of
+      // any label (the explorer enters no credentials). type=password is decisive.
+      if (action.kind === 'type' && normLabel((action.inputType ?? '').trim()) === 'password') {
         return {
           allowed: false,
           sensitive: true,
-          reason: `${action.kind} blocked: sensitive control ("${rawLabel.slice(0, 40)}")`,
+          reason: 'type blocked: password field (D-boundary, credentials never entered)',
         };
       }
+      // Fail-safe multi-signal OR. visible text / aria-label / title / placeholder /
+      // name are each matched INDEPENDENTLY — an icon-only sensitive control (benign
+      // glyph as visible text, sensitive aria-label/title) must not slip a first-non-
+      // null label pick. Blocked if ANY signal is sensitive.
+      const signals: Array<string | undefined> = [
+        action.label,
+        action.ariaLabel,
+        action.title,
+        action.placeholder,
+        action.name,
+      ];
+      for (const raw of signals) {
+        const s = normLabel((raw ?? '').trim());
+        if (s && SENSITIVE_LABEL_RE.test(s)) {
+          return {
+            allowed: false,
+            sensitive: true,
+            reason: `${action.kind} blocked: sensitive control ("${(raw ?? '').trim().slice(0, 40)}")`,
+          };
+        }
+      }
       return { allowed: true, sensitive: false, reason: `${action.kind}: benign control, allowed` };
+    }
     default:
       return { allowed: false, sensitive: true, reason: 'unknown action kind blocked' };
   }

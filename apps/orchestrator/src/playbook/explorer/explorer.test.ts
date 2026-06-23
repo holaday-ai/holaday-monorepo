@@ -155,6 +155,45 @@ describe('explorer-guards', () => {
     expect(classifyExplorerAction({ kind: 'type', label: 'Search' }).allowed).toBe(true);
     expect(classifyExplorerAction({ kind: 'click', label: 'Continue reading' }).allowed).toBe(true);
   });
+  // Regression — the icon-only BLOCKER the red-team fixture caught: an emoji/glyph
+  // visible text must NOT shadow a sensitive aria-label/title (fail-safe multi-signal
+  // OR, not first-non-null). Plus the type=password D-boundary + no over-block.
+  it('icon-only: benign-glyph visible text does NOT shadow a sensitive aria-label/title', () => {
+    // 💳 visible text + sensitive aria-label → blocked (the live BLOCKER).
+    expect(
+      classifyExplorerAction({ kind: 'click', label: '💳', ariaLabel: '立即支付' }).allowed,
+    ).toBe(false);
+    // sensitive intent only in title → blocked.
+    expect(classifyExplorerAction({ kind: 'click', label: '💳', title: '立即支付' }).allowed).toBe(
+      false,
+    );
+    // sensitive only in placeholder / name → blocked.
+    expect(classifyExplorerAction({ kind: 'type', placeholder: '短信验证码' }).allowed).toBe(false);
+    expect(classifyExplorerAction({ kind: 'click', name: 'addToCart' }).allowed).toBe(false);
+  });
+  it('type=password is ALWAYS vetoed (D-boundary), independent of label', () => {
+    expect(classifyExplorerAction({ kind: 'type', inputType: 'password' }).allowed).toBe(false);
+    expect(classifyExplorerAction({ kind: 'type', inputType: 'PASSWORD' }).allowed).toBe(false);
+    // even with a totally benign accessible name, password type wins.
+    expect(
+      classifyExplorerAction({ kind: 'type', inputType: 'password', placeholder: '请输入' }).allowed,
+    ).toBe(false);
+  });
+  it('does NOT over-block: benign signals + ordinary text/search input stay allowed', () => {
+    // a benign icon button (emoji + benign aria/title) is allowed.
+    expect(
+      classifyExplorerAction({ kind: 'click', label: '🔍', ariaLabel: '搜索', title: '查看文档' })
+        .allowed,
+    ).toBe(true);
+    // typing into a normal search/text field is allowed (explorer browses + searches).
+    expect(
+      classifyExplorerAction({ kind: 'type', inputType: 'search', placeholder: '搜索商品', name: 'q' })
+        .allowed,
+    ).toBe(true);
+    expect(
+      classifyExplorerAction({ kind: 'type', inputType: 'text', placeholder: '输入关键词' }).allowed,
+    ).toBe(true);
+  });
   it('blocks navigation to pay / login / auth urls (incl. review leaks); allows a doc url', () => {
     for (const url of [
       'https://x.com/checkout',

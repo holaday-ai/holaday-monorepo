@@ -5,8 +5,10 @@
  * (captureTargetDescriptor / vetoActionKind / classifyExplorerAction) 对四向量
  * + 安全链接逐个判定，executor-spy 证内层 click 只在安全链接被调。
  *
- * 四向量全部读真夹具 DOM（不 hardcode token）：向量 4 读真 submit 按钮 label
- * + 表单真 action 导航目标，喂 classifyExplorerAction 断言 sensitive。
+ * 四向量全部读真夹具 DOM（不 hardcode token），并把 ALL accessible-name 信号
+ * (visibleText / aria-label / title / placeholder / name / inputType) 喂给修复后的
+ * 多信号分类器 —— 镜像 agent-loop 修复后的 veto。向量 2 icon-only：emoji glyph 的
+ * visibleText 不再短路敏感 aria/title。向量 4：密码框 type 凭 inputType=password 一律拦。
  *
  * 前置：EXPLORER_VETO_FIXTURE_ENABLED=true（夹具可达）；CDP_ENDPOINT 指向 box chromium。
  * 零 LLM 调用 → ~$0。只点 #safe 安全链接，绝不点敏感、绝不填/提交密码框（D 边界）。
@@ -45,6 +47,14 @@ type Handle = {
   getAttribute: (name: string) => Promise<string | null>;
 };
 type Page = { goto: (u: string, o?: unknown) => Promise<unknown>; $: (s: string) => Promise<Handle | null> };
+type Desc = {
+  visibleText: string | null;
+  ariaLabel: string | null;
+  title: string | null;
+  placeholder: string | null;
+  name: string | null;
+  type: string | null;
+} | null;
 
 const results: Array<{ n: string; ok: boolean; ev: string }> = [];
 const rec = (n: string, ok: boolean, ev: string) => {
@@ -86,59 +96,73 @@ try {
     const b = h ? await h.boundingBox() : null;
     return b ? { x: b.x + b.width / 2, y: b.y + b.height / 2 } : null;
   };
-  const labelAt = async (sel: string): Promise<string | null> => {
+  // 读真 DOM 完整描述符（所有 accessible-name 信号）。
+  const descAt = async (sel: string): Promise<Desc> => {
     const c = await center(sel);
-    if (!c) return null;
-    const d = await ex.captureTargetDescriptor(page as never, c.x, c.y);
-    return d?.visibleText ?? d?.ariaLabel ?? null; // 真 DOM：visibleText 优先，回落 aria-label
+    return c ? ((await ex.captureTargetDescriptor(page as never, c.x, c.y)) as unknown as Desc) : null;
   };
+  // 把所有 click 信号喂修复后的多信号分类器（镜像 agent-loop veto）。
+  const classifyClick = (d: Desc) =>
+    classifyExplorerAction({
+      kind: 'click',
+      ...(d?.visibleText != null ? { label: d.visibleText } : {}),
+      ...(d?.ariaLabel != null ? { ariaLabel: d.ariaLabel } : {}),
+      ...(d?.title != null ? { title: d.title } : {}),
+    });
 
   // ── 向量 1：decompose-click（mouse_down/up/drag → fail-closed 当 click）────
   const vk = ['left_mouse_down', 'left_mouse_up', 'left_click_drag'].map((a) => vetoActionKind(a));
-  const l1 = await labelAt('#sensitive-text');
-  const v1 = classifyExplorerAction({ kind: 'click', ...(l1 != null ? { label: l1 } : {}) });
+  const d1 = await descAt('#sensitive-text');
+  const v1 = classifyClick(d1);
   rec(
     '1 decompose-click 拦',
     vk.every((k) => k === 'click') && !v1.allowed,
-    `vetoActionKind(down/up/drag)=${JSON.stringify(vk)}（全 'click' fail-closed）; 真DOM label="${l1}" → sensitive=${!v1.allowed}`,
+    `vetoActionKind(down/up/drag)=${JSON.stringify(vk)}（全 'click' fail-closed）; 真DOM visibleText="${d1?.visibleText}" → sensitive=${!v1.allowed}`,
   );
 
-  // ── 向量 2：icon-only（aria-label，无文字）────────────────────────────────
-  const l2 = await labelAt('#sensitive-icon');
-  const v2 = classifyExplorerAction({ kind: 'click', ...(l2 != null ? { label: l2 } : {}) });
-  rec('2 icon-only(aria) 拦', l2 != null && !v2.allowed, `真DOM aria label="${l2}" → sensitive=${!v2.allowed}`);
+  // ── 向量 2：icon-only（visibleText=💳 glyph，敏感意图在 aria/title）────────
+  const d2 = await descAt('#sensitive-icon');
+  const v2 = classifyClick(d2);
+  rec(
+    '2 icon-only 拦（多信号 OR）',
+    !v2.allowed,
+    `真DOM visibleText="${d2?.visibleText}" aria="${d2?.ariaLabel}" title="${d2?.title}" → sensitive=${!v2.allowed}（emoji visibleText 不再短路敏感 aria/title）`,
+  );
 
   // ── 向量 3：链接点击导航（href 敏感 → 落地 URL 复检拦）─────────────────────
   const hrefH = await page.$('#sensitive-href');
   const href3 = hrefH ? await hrefH.getAttribute('href') : null; // 真 DOM 链接目标
   const v3nav = href3 != null ? classifyExplorerAction({ kind: 'navigate', url: href3 }) : { allowed: true };
-  const l3 = await labelAt('#sensitive-href');
-  const v3click = classifyExplorerAction({ kind: 'click', ...(l3 != null ? { label: l3 } : {}) });
+  const v3click = classifyClick(await descAt('#sensitive-href'));
   rec(
     '3 链接导航拦（post-nav URL 复检）',
     href3 != null && !v3nav.allowed,
-    `真DOM href="${href3}" navigate sensitive=${!v3nav.allowed}; 链接 label="${l3}" click sensitive=${!v3click.allowed}（双拦）`,
+    `真DOM href="${href3}" navigate sensitive=${!v3nav.allowed}; 链接 click sensitive=${!v3click.allowed}（双拦）`,
   );
 
-  // ── 向量 4：Tab-type-Enter 提交 —— 读真 DOM 的 submit 按钮 label + 表单 action ──
-  const submitSel = 'form button[type="submit"]'; // 表单内 submit（非表单外的 #sensitive-text）
-  const l4 = await labelAt(submitSel); // 真 DOM submit 按钮 label
-  const v4submit = classifyExplorerAction({ kind: 'click', ...(l4 != null ? { label: l4 } : {}) });
+  // ── 向量 4：Tab-type-Enter —— 真 DOM submit label + form action + 密码框 type 一律拦 ──
+  const dSubmit = await descAt('form button[type="submit"]'); // 表单内 submit（非表单外 #sensitive-text）
+  const v4submit = classifyClick(dSubmit);
   const formH = await page.$('form');
   const formAction = formH ? await formH.getAttribute('action') : null; // 真 DOM 表单导航目标
   const v4nav = formAction != null ? classifyExplorerAction({ kind: 'navigate', url: formAction }) : { allowed: true };
-  const pwdDesc = await ex.captureTargetDescriptor(page as never); // 无坐标 = activeElement（autofocus #pwd）
-  const pwdLabel = pwdDesc?.visibleText ?? pwdDesc?.ariaLabel ?? null;
-  const v4type = classifyExplorerAction({ kind: 'type', ...(pwdLabel != null ? { label: pwdLabel } : {}) });
+  const pwd = (await ex.captureTargetDescriptor(page as never)) as unknown as Desc; // activeElement = autofocus #pwd
+  const v4type = classifyExplorerAction({
+    kind: 'type',
+    ...(pwd?.type != null ? { inputType: pwd.type } : {}),
+    ...(pwd?.placeholder != null ? { placeholder: pwd.placeholder } : {}),
+    ...(pwd?.name != null ? { name: pwd.name } : {}),
+    ...(pwd?.ariaLabel != null ? { ariaLabel: pwd.ariaLabel } : {}),
+  });
   rec(
-    '4 Tab-type-Enter 提交拦（真 DOM）',
-    l4 != null && !v4submit.allowed && formAction != null && !v4nav.allowed,
-    `真DOM submit-label="${l4}" click sensitive=${!v4submit.allowed}; 真DOM form action="${formAction}" nav sensitive=${!v4nav.allowed}; pwd-type 焦点 label="${pwdLabel}" allowed=${v4type.allowed}（无 aria/label 的密码框 type 不拦=文档化残留，clean-context 无凭据可填 + 提交被拦兜底）`,
+    '4 Tab-type-Enter 提交拦 + 密码框 type 拦（真 DOM）',
+    !v4submit.allowed && formAction != null && !v4nav.allowed && !v4type.allowed,
+    `真DOM submit-visibleText="${dSubmit?.visibleText}" sensitive=${!v4submit.allowed}; form action="${formAction}" nav sensitive=${!v4nav.allowed}; pwd inputType="${pwd?.type}" → type 拦=${!v4type.allowed}（密码框一律拦，上轮残留已关）`,
   );
 
   // ── 安全链接：放行 + 真执行（innerClick++）────────────────────────────────
-  const l5 = await labelAt('#safe');
-  const v5 = classifyExplorerAction({ kind: 'click', ...(l5 != null ? { label: l5 } : {}) });
+  const dSafe = await descAt('#safe');
+  const v5 = classifyClick(dSafe);
   if (v5.allowed) {
     const c = await center('#safe');
     if (c) {
@@ -146,7 +170,7 @@ try {
       innerClick += 1;
     }
   }
-  rec('5 安全链接放行+执行', v5.allowed && innerClick === 1, `真DOM label="${l5}" allowed=${v5.allowed}; innerClick=${innerClick}`);
+  rec('5 安全链接放行+执行', v5.allowed && innerClick === 1, `真DOM visibleText="${dSafe?.visibleText}" allowed=${v5.allowed}; innerClick=${innerClick}`);
 
   // ── executor-spy：敏感向量内层 click 零调用 / 安全 1 ───────────────────────
   rec(
@@ -180,6 +204,14 @@ try {
   console.log(`\n=== SUMMARY: ${passed}/${results.length} PASS ===`);
   process.exitCode = passed === results.length ? 0 : 3;
 } finally {
-  await ex.disposeCleanContext().catch(() => {}); // 销毁 clean context（box 复 dark 的前半，flag 关回是后半）
-  await pool.end().catch(() => {});
+  // bound cleanup so a lingering CDP socket can't hang the process (prior run hit the
+  // timeout-124 AFTER the SUMMARY printed) — force-exit with the real code.
+  await Promise.race([
+    (async () => {
+      await ex.disposeCleanContext().catch(() => {});
+      await pool.end().catch(() => {});
+    })(),
+    new Promise((r) => setTimeout(r, 8000)),
+  ]);
+  process.exit(typeof process.exitCode === 'number' ? process.exitCode : 0);
 }

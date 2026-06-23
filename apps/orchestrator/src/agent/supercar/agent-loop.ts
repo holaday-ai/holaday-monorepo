@@ -811,6 +811,11 @@ export interface RunSupercarOptions {
   onBeforeAction?: (action: {
     kind: 'click' | 'navigate' | 'type';
     label?: string | null;
+    ariaLabel?: string | null;
+    title?: string | null;
+    placeholder?: string | null;
+    name?: string | null;
+    inputType?: string | null;
     url?: string | null;
   }) => { allowed: boolean; reason?: string } | Promise<{ allowed: boolean; reason?: string }>;
   /**
@@ -1491,6 +1496,11 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
   const vetoOutcome = async (action: {
     kind: 'click' | 'navigate' | 'type';
     label?: string | null;
+    ariaLabel?: string | null;
+    title?: string | null;
+    placeholder?: string | null;
+    name?: string | null;
+    inputType?: string | null;
     url?: string | null;
   }): Promise<SupercarOutcome | null> => {
     if (!opts.onBeforeAction) return null;
@@ -3329,10 +3339,12 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
         // Phase 1 Playbook ④ — LIVE-VETO before the computer action executes.
         // Resolves the target descriptor (reuse the B2 one if already computed this
         // turn, else read it now: clicks → elementFromPoint at the coordinate; type/
-        // key → the focused activeElement). Classify on visible text OR the
-        // aria-label, so an ICON-ONLY control (no text, aria-label='立即支付') and a
-        // focused credential field are caught. A veto returns before
-        // executeComputerAction → the action never runs.
+        // key → the focused activeElement). Classify on ALL accessible-name signals —
+        // visible text / aria-label / title / placeholder / name, fail-safe OR — plus
+        // the input type (type=password ⇒ always vetoed). This catches an ICON-ONLY
+        // control whose benign-glyph visible text (💳) would otherwise shadow its
+        // sensitive aria-label/title, and a focused credential field. A veto returns
+        // before executeComputerAction → the action never runs.
         if (opts.onBeforeAction) {
           const vk = vetoActionKind(computerInput.action);
           if (vk) {
@@ -3351,8 +3363,15 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
                 desc = null; // best-effort; the veto still runs (label null → see clean-context note)
               }
             }
-            const vetoLabel = desc?.visibleText ?? desc?.ariaLabel ?? null;
-            const actVeto = await vetoOutcome({ kind: vk, label: vetoLabel });
+            const actVeto = await vetoOutcome({
+              kind: vk,
+              label: desc?.visibleText ?? null,
+              ariaLabel: desc?.ariaLabel ?? null,
+              title: desc?.title ?? null,
+              placeholder: desc?.placeholder ?? null,
+              name: desc?.name ?? null,
+              inputType: desc?.type ?? null,
+            });
             if (actVeto) return actVeto;
           }
         }

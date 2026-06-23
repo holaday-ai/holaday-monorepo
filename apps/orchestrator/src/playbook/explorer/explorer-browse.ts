@@ -19,6 +19,11 @@ import type { ExploreSiteOutcome } from './explorer.js';
 export interface BrowseAction {
   kind: 'click' | 'navigate' | 'type';
   label?: string | null;
+  ariaLabel?: string | null;
+  title?: string | null;
+  placeholder?: string | null;
+  name?: string | null;
+  inputType?: string | null;
   url?: string | null;
 }
 
@@ -35,6 +40,11 @@ export function explorerOnBeforeAction(action: BrowseAction): BrowseVerdict {
   const verdict = classifyExplorerAction({
     kind: action.kind,
     ...(action.label != null ? { label: action.label } : {}),
+    ...(action.ariaLabel != null ? { ariaLabel: action.ariaLabel } : {}),
+    ...(action.title != null ? { title: action.title } : {}),
+    ...(action.placeholder != null ? { placeholder: action.placeholder } : {}),
+    ...(action.name != null ? { name: action.name } : {}),
+    ...(action.inputType != null ? { inputType: action.inputType } : {}),
     ...(action.url != null ? { url: action.url } : {}),
   });
   return verdict.allowed ? { allowed: true } : { allowed: false, reason: verdict.reason };
