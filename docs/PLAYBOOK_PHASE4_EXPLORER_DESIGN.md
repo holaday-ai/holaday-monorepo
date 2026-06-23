@@ -97,5 +97,52 @@ scripts/explore-sites.ts  (BOSS-triggered CLI, default DISABLED)
 ## 8. 本轮交付 vs defer
 **交付（skeleton）**：design 本文 + `explorer-budget.ts`（真+测）+ `explorer-guards.ts`（真+测）+
 `explorer.ts`（编排骨架，inert）+ `scripts/explore-sites.ts`（CLI disabled）。
-**defer**：browse 试用实跑（executor 接线）/ live per-action veto（碰 loop）/ 月度聚合细化 /
-热度触发 C / **任何登录态/凭据存储 = Credential Vault 大工程，v1 只做免登录能学的**。
+**defer**：browse 试用实跑（executor 接线）/ 月度聚合细化 / 热度触发 C /
+**任何登录态/凭据存储 = Credential Vault 大工程，v1 只做免登录能学的**。
+
+## 9. Capability-2 BROWSE-试用 lane v1（live-veto）
+**目标**：把 Sensitive Protocol 从「静态认得」变成「explorer 每个 live 动作执行前真拦」。免登录 live 浏览。
+
+**9.1 LIVE-VETO 接入点（agent-loop，BOSS 批准的唯一改动）**
+- `RunSupercarOptions += onBeforeAction?(action:{kind:'click'|'navigate'|'type', label?, url?}) => {allowed, reason?}`。
+- **默认缺失 = 用户任务字节级不变**（同 B2 onAction：没传 → loop 从不调、零开销）。只有 explorer 传。
+- agent-loop 在每个 live **写**动作执行前调它（覆盖全）：
+  - **navigate**：在 `navPage.goto(url)` 前（CC 实证导航绕 executor、走 page.goto，这是唯一能拦导航的点）。
+  - **click**（left/right/middle/double/triple）：在 `executeComputerAction` 前，用 `captureTargetDescriptor(page,x,y)` 解析 label（复用 B2 已算的 descriptor，没有则现算）。
+  - **type / key / hold_key**：在 `executeComputerAction` 前（`vetoActionKind` 把键盘写也算 'type'；v1 无 label→classifier 放行，真护栏是 click/navigate/submit）。
+  - scroll/screenshot/mouse_move/wait = 读类，不调钩子。
+- veto（allowed=false）→ **该动作不执行**、`runSupercarTask` 立即 return `{status:'failed', reason}`（任务终止）。
+
+**9.2 explorer browse lane（`explorer-browse.ts`，explorer 自有 veto 接线）**
+- `makeBrowseExploreSite(deps)`：复用 `runBrowseTask`（注入，CLI 接 `runSupercarTask`+executor），
+  `onBeforeAction` 接 `classifyExplorerAction`（命中敏感/D 边界→allowed=false）。
+- veto 触发 → 记 `state.vetoed` → 站 `halted_sensitive`（note 含 reason）。costUsd = `readTaskCostUsd`(注入，读 supercar.turn)。
+- read-only `browseIntent`（软护栏）+ live-veto（硬护栏）双层；v1 免登录，碰登录墙/敏感即停。
+
+**9.3 🔴 护栏验证方案（真跑前必过验收）**
+- **单元（本轮已做）**：`explorer-browse.test.ts` 用 fake agent-loop（mimic veto 合约：allowed 才"执行"、veto 即停）证明
+  敏感 click「登录」/敏感 navigate `/checkout` → **veto 触发、动作从未进 executed、站 halted_sensitive**；benign 全过完成。
+- **真机（acceptance，GO 后做）**：flag-gated 夹具页（仿 B3 fixture）放「登录/提交」按钮 + 一个安全链接 → explorer 真 browse →
+  断言：点安全链接放行执行；走到「登录/提交」→ **veto 触发、`executor.click`/`page.goto` 内层从未被调、动作没执行、站 halted_sensitive**。
+  这是 browse-试用 真开主开关前的必过验收（像 B 系列真机验收）。
+
+**9.5 对抗审 6 镜头 — 发现的洞 + 修复（本轮）**
+6 镜头对抗审证明「动作边界的 label/URL 分类器」是 **best-effort、非密闭沙箱**。已修：
+- **🔴 BLOCKER（C2/C5）mouse 原子绕过**：`vetoActionKind` 原对 `left_mouse_down/up`、`left_click_drag` 返 null →
+  模型可把点击拆成 down+up 点敏感按钮、或拖「滑块确认支付」绕过。**修=fail-closed**：除明确读类（screenshot/
+  scroll/mouse_move/wait/cursor_position/zoom），**一切（含 mouse 原子 + 未知动作）→ 'click' 走 veto**。回归测试 `agent-loop.veto-kind.test.ts`。
+- **MAJOR（C2）icon-only 按钮**：veto 原只读 `visibleText`。**修**：label = `visibleText ?? ariaLabel`（aria-label="立即支付" 的图标按钮被拦）。
+- **MAJOR（C3）链接点击导航绕 URL 闸**：点 `<a href="/orders">查看订单</a>` 导航到敏感 URL，click veto 只看 label。
+  **修=post-action URL 复检**：每个 computer 动作后用 `freshPage.url()` 再过 navigate veto，落到敏感 URL（含 302 重定向）→ halt。
+- **MAJOR（C4）社交登录 label**：`Continue with Google/Apple`、`授权`、`Authorize`、`Connect with` 不在正则。**修=拓宽** `SENSITIVE_LABEL_RE`（+ OAuth-click→重定向 由 post-action URL 复检兜）。
+- **MAJOR（C6）凭据键入+回车提交**：Tab→聚焦密码框→type→Enter 全是 'type' 无 label→放行。**修**：type/key 现解析**聚焦元素**(activeElement) descriptor → label=visibleText??ariaLabel；有标识的密码/登录框被拦。
+- **nit（C1）**：navigate veto 加 call-site guard（hook 缺失零 alloc）。
+
+**9.6 🔴 密闭护栏 = 无凭据浏览上下文（hermetic guard，runBrowseTask 接线时硬性要求）**
+分类器 veto 是 **defense-in-depth、不是密闭沙箱**——动作边界的 label/URL 分类总有残角（无 label/aria 的匿名密码框 + 不导航的纯页内提交）。
+**v1 免登录的密闭保证 = explorer browse 必须跑在全新、无 cookie/session/凭据的浏览上下文（incognito/fresh context）**：
+没有用户凭据/会话 → 即使 veto 漏一个 login/OAuth/pay 点击，**登录/授权/支付也无法成功**（无密码可填、无会话可借）。
+→ `runBrowseTask` 落地时**必须**用 clean context（不复用用户 session、不接 Credential Vault）。这条是 browse-试用 真跑的**前置硬条件**，与三层熔断、live-veto 并列。
+
+**9.7 defer（下一阶段）**：CLI `runBrowseTask` 接线（**clean context** executor connect + `sumLlmCostForTasks` + 写 `exploration_runs`）/
+真机夹具验收（必红队 decompose-click / drag / 链接导航 / Tab-type-Enter 四向量）/ 登录态 = Credential Vault + 专属账号（v1 绝不碰）。

@@ -798,6 +798,22 @@ export interface RunSupercarOptions {
    */
   onAction?: (ev: SupercarActionCaptureEvent) => void | Promise<void>;
   /**
+   * Phase 1 Playbook ④ explorer — LIVE-VETO hook. Fires BEFORE each live WRITE
+   * action (click / navigate / type-or-key) executes; returning `{allowed:false}`
+   * REFUSES the action (it is NOT executed) and terminates the task. The explorer
+   * wires this to the Sensitive Site Protocol so a sensitive action (login / order /
+   * pay / submit) is hard-blocked at the moment of dispatch — INCLUDING navigation,
+   * which goes via `page.goto` (not `executor.navigate`), so this hook is the only
+   * place that covers it. DEFAULT ABSENT → the loop never calls it = zero overhead,
+   * byte-identical to a normal user task (same dark-ship discipline as `onAction`).
+   * Only the explorer passes it; user tasks never do.
+   */
+  onBeforeAction?: (action: {
+    kind: 'click' | 'navigate' | 'type';
+    label?: string | null;
+    url?: string | null;
+  }) => { allowed: boolean; reason?: string } | Promise<{ allowed: boolean; reason?: string }>;
+  /**
    * Phase 1 Playbook B4 — when true, the loop attaches the post-action
    * screenshot (base64) to onAction events for SELECTED key steps (a
    * page-advancing click). Set by tasks.ts from B4_SCREENSHOT_ANCHOR (AND
@@ -1466,6 +1482,31 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
   // action sequence). Bumped once per tool_use in the dispatch loop below.
   let actionIndex = 0;
   let cancelled = false;
+
+  // Phase 1 Playbook ④ explorer — LIVE-VETO. When opts.onBeforeAction is wired
+  // (explorer only), every live WRITE action calls this BEFORE executing. A veto
+  // means the action is NOT executed and the task terminates with a failed outcome
+  // (the explorer's hook records the sensitive reason on its side). Default absent →
+  // returns null immediately = zero overhead, zero behaviour change for user tasks.
+  const vetoOutcome = async (action: {
+    kind: 'click' | 'navigate' | 'type';
+    label?: string | null;
+    url?: string | null;
+  }): Promise<SupercarOutcome | null> => {
+    if (!opts.onBeforeAction) return null;
+    const verdict = await opts.onBeforeAction(action);
+    if (verdict.allowed) return null;
+    logger.warn(
+      { taskId: opts.taskId, iteration, actionKind: action.kind, reason: verdict.reason },
+      'supercar: live action VETOED by onBeforeAction — not executed, task halting',
+    );
+    return {
+      status: 'failed',
+      reason: verdict.reason ?? `${action.kind} blocked by safety policy`,
+      iterations: iteration,
+      toolsUsed: Array.from(toolsUsed),
+    };
+  };
   // MD5 of the most recent screenshot we showed Claude. Compared after
   // each computer action's fresh shot — identical bytes means the page
   // didn't react to the action (reset on every real change).
@@ -2509,6 +2550,14 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
             });
             continue;
           }
+          // Phase 1 Playbook ④ — LIVE-VETO before navigation. Navigation goes
+          // via page.goto (not executor.navigate), so this is the ONLY place that
+          // covers it. A veto returns before getPage/goto → the page never moves.
+          // Call-site guarded so a hook-absent user task pays zero alloc/microtask.
+          if (opts.onBeforeAction) {
+            const navVeto = await vetoOutcome({ kind: 'navigate', url: targetUrl });
+            if (navVeto) return navVeto;
+          }
           const navPage = (await executor.getPage()) as unknown as PageLike & {
             goto: (
               url: string,
@@ -3277,8 +3326,46 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
             { taskId: opts.taskId, actionIndex },
           );
         }
+        // Phase 1 Playbook ④ — LIVE-VETO before the computer action executes.
+        // Resolves the target descriptor (reuse the B2 one if already computed this
+        // turn, else read it now: clicks → elementFromPoint at the coordinate; type/
+        // key → the focused activeElement). Classify on visible text OR the
+        // aria-label, so an ICON-ONLY control (no text, aria-label='立即支付') and a
+        // focused credential field are caught. A veto returns before
+        // executeComputerAction → the action never runs.
+        if (opts.onBeforeAction) {
+          const vk = vetoActionKind(computerInput.action);
+          if (vk) {
+            let desc: TargetDescriptor | null = captureDescriptor;
+            if (!desc) {
+              try {
+                desc =
+                  vk === 'click' && Array.isArray(computerInput.coordinate)
+                    ? await executor.captureTargetDescriptor(
+                        await executor.getPage(),
+                        Number(computerInput.coordinate[0]),
+                        Number(computerInput.coordinate[1]),
+                      )
+                    : await executor.captureTargetDescriptor(await executor.getPage());
+              } catch {
+                desc = null; // best-effort; the veto still runs (label null → see clean-context note)
+              }
+            }
+            const vetoLabel = desc?.visibleText ?? desc?.ariaLabel ?? null;
+            const actVeto = await vetoOutcome({ kind: vk, label: vetoLabel });
+            if (actVeto) return actVeto;
+          }
+        }
         const execResult = await executeComputerAction(executor, computerInput);
         const freshPage = (await executor.getPage()) as unknown as PageLike;
+        // Phase 1 Playbook ④ — POST-ACTION URL re-check. A click on a link can
+        // navigate to a sensitive URL the click veto never saw (it only had the
+        // label, not the href) — and a navigate can 302-redirect. Re-classify the
+        // LANDED url; if sensitive, halt (the action ran, but we go no further).
+        if (opts.onBeforeAction) {
+          const landedVeto = await vetoOutcome({ kind: 'navigate', url: freshPage.url() });
+          if (landedVeto) return landedVeto;
+        }
         const shot = await executor.screenshot(freshPage);
         if (shot.error || !shot.base64) {
           toolResults.push({
@@ -3746,6 +3833,37 @@ function computerCaptureKind(action: unknown): 'click' | 'type' | null {
   }
   if (action === 'type') return 'type';
   return null;
+}
+
+/**
+ * Phase 1 Playbook ④ — map a computer action to the LIVE-VETO kind. Like
+ * computerCaptureKind but ALSO treats key / hold_key as a write ('type'), so the
+ * keyboard-write path is covered. Read-class actions (screenshot / scroll / mouse_move
+ * / wait / cursor_position / zoom) return null → not vetoed.
+ */
+export function vetoActionKind(action: unknown): 'click' | 'type' | null {
+  switch (action) {
+    // read-class — no page write → no veto.
+    case 'screenshot':
+    case 'cursor_position':
+    case 'mouse_move':
+    case 'scroll':
+    case 'wait':
+    case 'zoom':
+      return null;
+    // keyboard writes.
+    case 'type':
+    case 'key':
+    case 'hold_key':
+      return 'type';
+    // FAIL-CLOSED: all click variants, the mouse PRIMITIVES that compose into a click
+    // (left_mouse_down / left_mouse_up / left_click_drag), AND any unknown/future
+    // action → treated as a click-class WRITE and vetoed. A click decomposed into
+    // mouse_down+mouse_up, or a drag-to-confirm slider, must NOT slip past the veto
+    // (adversarial review CAMERA-2 blocker).
+    default:
+      return 'click';
+  }
 }
 
 interface ComputerActionInput {

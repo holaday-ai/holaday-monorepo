@@ -137,9 +137,23 @@ describe('explorer-guards', () => {
       expect(v.sensitive).toBe(true);
     }
   });
-  it('allows a benign click / type', () => {
+  it('blocks social-login / OAuth controls (review CAMERA-4: Continue with Google / 授权)', () => {
+    for (const label of [
+      'Continue with Google',
+      'Continue with Apple',
+      'Continue with Facebook',
+      'Connect with GitHub',
+      'Authorize',
+      '授权',
+      'Sign in with Google',
+    ]) {
+      expect(classifyExplorerAction({ kind: 'click', label }).allowed).toBe(false);
+    }
+  });
+  it('allows a benign click / type (no over-block of plain Continue/Read)', () => {
     expect(classifyExplorerAction({ kind: 'click', label: 'Read the docs' }).allowed).toBe(true);
     expect(classifyExplorerAction({ kind: 'type', label: 'Search' }).allowed).toBe(true);
+    expect(classifyExplorerAction({ kind: 'click', label: 'Continue reading' }).allowed).toBe(true);
   });
   it('blocks navigation to pay / login / auth urls (incl. review leaks); allows a doc url', () => {
     for (const url of [

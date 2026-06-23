@@ -53,7 +53,7 @@ export interface ExplorerActionVerdict {
 // 微信支付 / Buy Now / Add to cart / Order Now slipping through. EN patterns are
 // contiguous (whitespace already stripped); `\w*` bridges inserted words.
 const SENSITIVE_LABEL_RE =
-  /提交|下单|下订单|购买|结算|付款|支付|去支付|确认支付|确认付款|确认下单|确认订单|确认并支付|确认$|^确认|立即下单|立即购买|马上购买|去结算|去付款|去登录|加入购物车|加购|立即预订|确认预订|提交预订|绑定银行卡|添加银行卡|保存银行卡|保存支付|微信支付|支付宝|实名认证|身份证|银行卡号|手机验证码|短信验证码|验证码|登录|登陆|注册|设置密码|修改密码|重置密码|密码|发送|发布|发表|关注|订阅|私信|pay(?:now|ment)?|buynow|addtocart|cart|checkout|place\w*order|submitorder|order(?:now|confirm)?|confirm\w*pay|proceed\w*pay|continue\w*pay|signin|login|logon|signup|register|password|verification\w*code|subscribe|follow/i;
+  /提交|下单|下订单|购买|结算|付款|支付|去支付|确认支付|确认付款|确认下单|确认订单|确认并支付|确认$|^确认|立即下单|立即购买|马上购买|去结算|去付款|去登录|加入购物车|加购|立即预订|确认预订|提交预订|绑定银行卡|添加银行卡|保存银行卡|保存支付|微信支付|支付宝|实名认证|身份证|银行卡号|手机验证码|短信验证码|验证码|登录|登陆|注册|设置密码|修改密码|重置密码|密码|发送|发布|发表|关注|订阅|私信|pay(?:now|ment)?|buynow|addtocart|cart|checkout|place\w*order|submitorder|order(?:now|confirm)?|confirm\w*pay|proceed\w*pay|continue\w*pay|signin|login|logon|signup|register|授权|authorize|continuewith|connectwith|oauth|password|verification\w*code|subscribe|follow/i;
 
 // Forbidden navigation targets (tested against the lower-cased url). Pay/checkout/
 // order/cart/wallet/billing (commerce) + login/signin/signup/register/auth/oauth/sso/
