@@ -209,6 +209,16 @@ export class PlaywrightExecutor {
    * empty. We detect that in getPage() and redial using this value.
    */
   private cdpEndpoint: string | null = null;
+  /**
+   * Phase 1 Playbook ④ — gated CLEAN-CONTEXT mode (default OFF). When connect()
+   * is called with { cleanContext: true } (explorer only), the executor uses a
+   * FRESH isolated `browser.newContext()` (no storageState, its own empty cookie
+   * jar) for getPage() instead of the shared `contexts()[0]`. Off = byte-identical
+   * to before (getPage uses contexts()[0]; these stay null). The zero-credential
+   * GUARANTEE is the fail-closed `assertCleanContext()` below, NOT trust in newContext.
+   */
+  private cleanMode = false;
+  private cleanContext: BrowserContext | null = null;
   /** Dependency-injection seam for tests that want to bypass connect(). */
   private readonly chromium: {
     connectOverCDP: (endpoint: string) => Promise<Browser>;
@@ -245,11 +255,21 @@ export class PlaywrightExecutor {
    * Never throws — returns `{ok:false, error}` on any failure so the
    * orchestrator can gracefully fall back to the legacy WS/SW/CDP path.
    */
-  async connect(cdpEndpoint: string): Promise<ConnectResult> {
+  async connect(
+    cdpEndpoint: string,
+    opts: { cleanContext?: boolean } = {},
+  ): Promise<ConnectResult> {
     if (this.browser) return { ok: true };
     try {
       this.browser = await this.chromium.connectOverCDP(cdpEndpoint);
       this.cdpEndpoint = cdpEndpoint;
+      // Phase 1 Playbook ④ — gated CLEAN-CONTEXT mode (explorer only). Create a
+      // FRESH isolated context (no storageState → its own empty cookie jar) and
+      // route getPage() to it. Off by default → contexts()[0] as before.
+      if (opts.cleanContext) {
+        this.cleanMode = true;
+        this.cleanContext = await this.browser.newContext();
+      }
       if (isStealthEnabled()) {
         await this.applyStealthToContexts(this.browser);
       }
@@ -269,6 +289,54 @@ export class PlaywrightExecutor {
         error: `connectOverCDP(${cdpEndpoint}) failed: ${errMsg(err)}`,
       };
     }
+  }
+
+  /**
+   * Phase 1 Playbook ④ — fail-closed ZERO-CREDENTIAL assertion (clean-context mode
+   * only). Globally enumerates ALL cookies (no URL filter); if ANY exist, the fresh
+   * context is not actually clean → close it + throw, so the browse REFUSES to run
+   * rather than ride a credential/session. The hard guarantee — does NOT trust that
+   * `newContext()` is empty. Call before the first live action.
+   */
+  async assertCleanContext(): Promise<void> {
+    if (!this.cleanMode || !this.cleanContext) {
+      throw new Error('assertCleanContext: called outside clean-context mode');
+    }
+    const cookies = await this.cleanContext.cookies(); // global — all origins, no URL filter
+    if (cookies.length > 0) {
+      const domains = [...new Set(cookies.map((c) => c.domain))].slice(0, 5).join(',');
+      await this.disposeCleanContext();
+      throw new Error(
+        `clean context is NOT clean: ${cookies.length} cookie(s) present (${domains}) — refusing to browse`,
+      );
+    }
+  }
+
+  /** Close + drop the clean context (call when the browse finishes). No-op when off. */
+  async disposeCleanContext(): Promise<void> {
+    const ctx = this.cleanContext;
+    this.cleanContext = null;
+    this.activePage = null;
+    if (ctx) {
+      try {
+        await ctx.close();
+      } catch {
+        /* best-effort dispose */
+      }
+    }
+  }
+
+  /**
+   * Phase 1 Playbook ④ — the context every page-lifecycle method operates on. In
+   * clean-context mode this is the fresh isolated context and NEVER the shared
+   * contexts()[0] (which can carry credentials); off, it's the shared default
+   * context exactly as before. Routing reset/reopen/getPage through this is what
+   * stops clean mode from leaking into the shared context (adversarial review
+   * CAMERA-3/6 blocker: resetPageForTask/reopenActivePage used contexts()[0] directly).
+   */
+  private browseContext(browser: Browser): BrowserContext | undefined {
+    if (this.cleanMode) return this.cleanContext ?? undefined;
+    return browser.contexts()[0];
   }
 
   setViewportSize(size: { width: number; height: number } | null): void {
@@ -467,7 +535,9 @@ export class PlaywrightExecutor {
   async getPage(_tabId?: number): Promise<Page> {
     let browser = this.browser;
     if (!browser) throw new Error('PlaywrightExecutor not connected — call connect() first');
-    let ctx = browser.contexts()[0];
+    // Phase 1 Playbook ④ — clean-context mode uses the fresh isolated context, not
+    // the shared contexts()[0]. Off → contexts()[0] exactly as before.
+    let ctx = this.browseContext(browser);
     if (!ctx) {
       // Stale CDP. Try one redial — if the underlying Chromium is
       // actually up (common case: idle WebSocket, not crash) this
@@ -479,6 +549,13 @@ export class PlaywrightExecutor {
         );
       }
       browser = this.browser;
+      // Phase 1 Playbook ④ — in clean-context mode, NEVER fall back to the shared
+      // contexts()[0] (it can carry credentials). A lost clean context = hard fail.
+      if (this.cleanMode) {
+        throw new Error(
+          'PlaywrightExecutor: clean context lost on reconnect — refusing to use the shared context',
+        );
+      }
       ctx = browser.contexts()[0];
       if (!ctx) {
         throw new Error(
@@ -1152,7 +1229,8 @@ export class PlaywrightExecutor {
   private async reopenActivePage(stuck: PageLike | null): Promise<Page | null> {
     const browser = this.browser;
     if (!browser) return null;
-    const ctx = browser.contexts()[0];
+    // Phase 1 Playbook ④ — clean mode reopens in the fresh context, NOT contexts()[0].
+    const ctx = this.browseContext(browser);
     if (!ctx) return null;
     const fresh = await ctx.newPage();
     this.activePage = fresh;
@@ -1185,13 +1263,19 @@ export class PlaywrightExecutor {
       // active page (or Chromium's startup about:blank) has been seen
       // to leave navigation stuck in prod; newPage() gives a clean
       // target and navigate() can goto from there with full confidence.
-      let ctx = this.browser.contexts()[0];
+      // Phase 1 Playbook ④ — clean mode resets the FRESH context, never contexts()[0]
+      // (else the browse + the tab-close below would hit the shared user session).
+      let ctx = this.browseContext(this.browser);
       if (!ctx) {
+        // Clean mode: a missing context = the clean context was lost. Do NOT
+        // reconnect into the shared (credential-bearing) context — bail; the next
+        // getPage() throws a proper error.
+        if (this.cleanMode) return;
         // Stale CDP (same failure mode getPage recovers from). Try a
         // reconnect; if that fails we bail silently — the outer loop
         // will throw a proper error on the next getPage() anyway.
         if (!(await this.reconnectIfStale()) || !this.browser) return;
-        ctx = this.browser.contexts()[0];
+        ctx = this.browseContext(this.browser);
         if (!ctx) return;
       }
       const fresh = await ctx.newPage();
