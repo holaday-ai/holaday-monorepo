@@ -11,10 +11,9 @@
 
 | 项 | 值 |
 |---|---|
-| **运行 orch（PROD LIVE REF）** | `ec4e023e`（④ explorer v1 骨架 dark ship；restart 682）|
+| **运行 orch（PROD LIVE REF）** | `dcbb478`（④ browse-试用 live-veto + veto 多信号 OR 修复 dark ship；restart 689；护栏夹具验收 8/8 PASS）|
 | **分支** | `claude/musing-keller-ae1d05`（prod 合并主干）|
-| **origin tip** | `914793c1`（docs：④ 首次真跑记录）|
-| **本地 HEAD（未 push）** | `85f1d273`，**ahead origin 2 commits** = `51b43080` + `85f1d273`（browse-试用 v1，**仅 commit local，未 push/未 deploy**，详 §7）|
+| **origin tip = 本地 HEAD** | `dcbb4783`（已 push，无未 push 增量；含 `51b43080`/`85f1d273` browse-试用 + `7b80320e` harness + `dcbb4783` veto 修复）|
 | **SPA** | `8da47b4b`（bundle `index-DiYh_GAx.js`，本工程期间未变）|
 | **edge** | holaday.ai → Vultr 直连（无 CF 层）；orch+SPA 同机 207.148.70.106，PM2+Nginx（剥 `/api/`）|
 
@@ -26,7 +25,7 @@
 | `B4_SCREENSHOT_ANCHOR_ENABLED` | **true** | B4 关键步截图锚 → R2 + evidence_artifacts(manual_hold) + 回填 capture |
 | `B3_FIXTURE_ENABLED` | **false** | B3 跨域 iframe 验收夹具（验完关；路由码留待 B 阶段清）|
 | `EXPLORER_ENABLED` | **缺失 = OFF** | ④ explorer 主开关 = 自动烧钱总闸；**未设 = explorer 绝不跑** |
-| `EXPLORER_VETO_FIXTURE_ENABLED` | **缺失 = OFF** | browse-试用 护栏红队夹具（验收时临时翻；本地码 `85f1d273`）|
+| `EXPLORER_VETO_FIXTURE_ENABLED` | **=false（验收后关回，进程+.env 实证、路由 404）** | browse-试用 护栏红队夹具；2026-06-23 翻 true 验收 8/8 后内联 `=false` 关回 dark |
 | `EXPLORER_BREAKER_*` | **缺失 = 用默认** | 三层熔断阈值，默认即 §4 真值（$5/$3/$50/$200/×1.2）|
 | `RETENTION_REAPER_ENABLED` | **true** | evidence_artifacts 留存清理器（删 `expires_at<=now AND retention_policy!='manual_hold'`；留存 `LEDGER_RETENTION_DAYS` 默认 60d）|
 | `LEDGER_DB_WRITE_ENABLED` | **true** | 终态把 in-memory ledger 镜像进 evidence_artifacts/claims/links |
@@ -38,7 +37,7 @@
 **Migration：最新 `0037`**（`0037_phase1_crystallization_provenance` = operation_paths +source_task_id/metadata_json、operation_path_steps +frame_path；`0036`=task_action_captures；`0035`=video self-use consent）。
 机制：`pnpm db:migrate:numbered`（`scripts/apply-numbered-migrations.ts`）**无 `__drizzle_migrations` 追踪表 → 每次重跑全部 `00NN_*.sql`**；`SKIPPABLE_ERROR_CODES`(ER_DUP_FIELDNAME/ER_DUP_KEYNAME/ER_FK_DUP_NAME + `/already exists/`) 跳已建。所以 `applied=N` 里 N>本次新增语句数 = benign（老 migration 重跑计入幂等 DDL）；**真相以「只读验表」为准，不看 count**。`db:generate` 会重emit 全量 schema = 错工具，迁移一律手写编号 SQL。expand-first：schema 先 apply+验表，后部署用它的码。
 
-**Pack A 数据现状**（结晶产物）：`operation_paths=7` / `operation_path_steps=17` / `sites=4`（example.com、holaday.ai、figma.com、ctrip.com，owner=NULL 全局）/ `site_capabilities=4` / `exploration_runs=0`（v1 doc-first 未写该表，browse 的 `withExplorationRun` 在本地 `85f1d273` 未跑）/ `task_action_captures=22`。
+**Pack A 数据现状**（结晶产物）：`operation_paths=7` / `operation_path_steps=17` / `sites=5`（example.com、holaday.ai、figma.com、ctrip.com + **veto-fixture.local（夹具验收测试行，可清）**）/ `site_capabilities=4` / `exploration_runs=2`（**均为护栏夹具两次跑写的 halted_sensitive 测试行，可清**；doc-first/真 browse 尚无）/ `task_action_captures=22`。
 
 ---
 
@@ -115,7 +114,8 @@
 - **decompose-click BLOCKER**：`vetoActionKind` 原对 `left_mouse_down/up`、`left_click_drag` 返 null → 模型拆点击/拖滑块绕过 veto；**修=fail-closed**（除明确读类，一切含未知动作 → 'click' 走 veto）。(`agent-loop.ts`，对抗审发现)
 - **混合 CN/EN/URL 提交须 JS 注入**：表单/输入框直接 `type` 会被 IME/受控组件搞乱 → 用 native value setter + 派发 `input`/`change` event 注入提交（非逐字 type）。
 - **`manual_hold` 避 reaper**：B4 锚 evidence_artifacts `retention_policy='manual_hold'` → retention reaper 永不扫（reaper 只删 `!='manual_hold'` 的过期行）。
-- **pm2 `--update-env` 只合并不删 key**：翻 flag OFF 必须显式 `=false`（删 .env 行无效，pm2 留旧 true 值）。
+- **pm2 `--update-env` 只合并不删 key + OS-env 影子**：翻 flag OFF 必显式 `=false`（删 .env 行无效，pm2 留旧值）。**更深一层（2026-06-23 实测）**：orch 的 dotenv **不 override** 已存在的 OS env；pm2 进程 OS-env 一旦缓存过某 flag 旧值，`--update-env`（合并 shell env，shell 没 export 该 flag）+ 编辑 .env **都不生效**（route 仍按旧值）→ **可靠翻法 = 内联 export**：`FLAG=true pm2 restart --update-env`（同理关回 `FLAG=false ...`）。真值看 `/proc/PID/environ` + 行为（route 200/404），别只看 .env。
+- **veto 须多信号 OR（`visibleText ?? ariaLabel` 短路敏感 aria/title）**：④ veto label 解析原取首个非空 → emoji/glyph 的 visibleText（💳）**短路掉**敏感 aria-label/title → icon-only「立即支付」按钮漏拦（红队夹具真机实证，真 agent-loop 真漏 = money-gate BLOCKER）。**修=`classifyExplorerAction` 多信号 fail-safe OR**（visibleText/aria-label/title/placeholder/name 任一敏感即拦）+ **type=password 一律拦**（D 边界，关上轮 pwd-type 残留）；`captureTargetDescriptor` 加 `title`/`placeholder`（**内存 veto-path-only，B2 capture 不变、无 migration**）。(`dcbb4783`；veto-path-only，钩子缺失时用户任务字节级不变)
 - **expand-first**：schema migration apply + 只读验表 → 才部署用新列的码（见 §2 铁律 5）。
 - **deploy-preflight 拦 reset**：实读 live HEAD，非祖先拒（避免 reset 丢线上 commit）。
 
@@ -128,9 +128,12 @@
 - B3 验收夹具路由（`/test/iframe-fixture`）+ ④ veto 夹具路由（`/test/explorer-veto-fixture`）= 验完删（B/④ 阶段统一清）。
 - B4 选择性盲区：iframe 内点击 turnChanged=false（导航视觉滞后）→ 不锚；顶层点击锚。记 backlog。
 - 站点可达性折扣：高频域名（如 eastmoney）对执行器反爬、挡在加载阶段 → 复用/探索的"站点可达性"要打折。
+- 🟡 **CDP 端点**：`CDP_ENDPOINT=9222` 当前 **dead**（进程有 flag 但不 listen）；live 浏览器是 `HEADED_CDP_ENDPOINT=9223`（Brave，夹具验收用的就是它）→ explorer 真跑前确认 explorer 用哪个端点 + 9222 要不要修活。
 - **$5 单站熔断校准**：需 browse-试用 多 turn 真跑（doc-first $0.01 撞不到）。
 - `exploration_runs` browse 已补（`withExplorationRun`，本地 `85f1d273`）；doc-first 仍未写（v1.1）。
-- icon-only 无 aria 的敏感按钮 label 解析不到（navigate veto + clean context 兜，文档化残留）；`assertCleanContext` 只查 cookie 非 localStorage（fresh newContext 本就空）。
+- ~~icon-only 无 aria 的敏感按钮 label 解析不到~~ **更正（已修 `dcbb4783`）**：原描述低估——不是「无 aria」，是「**有敏感 aria/title，但 visibleText(emoji glyph 💳) 短路**」→ 红队夹具抓到、多信号 OR 已修（向量 2 真机转 PASS，pwd-type 残留亦关）。`assertCleanContext` 只查 cookie 非 localStorage（fresh newContext 本就空，保留）。
+- harness `explorer-veto-acceptance.ts` finally cleanup 曾因 CDP socket 滞留挂起被 timeout-124 杀（断言已全跑完，结果有效）→ 已加 8s bounded race + `process.exit`（`dcbb4783`，重跑 exit 0 验证）。
+- veto 夹具真跑在 prod DB 留了测试行（`sites` veto-fixture.local ×1 + `exploration_runs` halted_sensitive ×2，两次跑各一）→ 可选清理（数据卫生，无害）。
 
 **视频线 6 尾巴**：成片留存终态 / 过期提示 UX / bundle 版本检测 / A1 文案待白捡验 / 30d 实戳待白捡验 / fal 700s 上限观察。
 
@@ -143,10 +146,12 @@
 
 ## §7 下一步（断点精确）
 
-**近场 — browse-试用 v1 收尾段（在途，待审）**：
-- 状态：agent-loop `onBeforeAction` live-veto 钩子 + explorer-browse lane 骨架（`51b43080`）+ clean-context 模式 + `runBrowseTask` 接线 + `exploration_runs` 写 + 红队夹具（`85f1d273`）**全 commit local，未 push/未 deploy，EXPLORER_ENABLED OFF**。两轮 6 镜头对抗审：第一轮修 4 向量；第二轮发现并修 BLOCKER（resetPageForTask 抓共享上下文）+ 回归测。
-- **clean context = §9.6 硬前置**（已实现：newContext 无 storageState + browseContext 路由 + fail-closed 零-cookie 断言）。
-- **次序铁律（不可乱）**：审 commit → 技术 GO → push FF + deploy（**dark，EXPLORER_ENABLED 仍 OFF**）→ **先翻 `EXPLORER_VETO_FIXTURE_ENABLED` 跑护栏夹具红队验收**（clean-context 真 browse 夹具，断言：零-cookie + 四向量 decompose-click/icon-only/链接导航/Tab-type-Enter 真拦、`executor.click`/`page.goto` 内层从未被调、安全链接放行）→ **护栏验通才单独谈真开 `EXPLORER_ENABLED` 跑标定站**（figma/ctrip browse, clean context, 校准 $5）。**护栏没验通，explorer 绝不真做 live browse。**
+**近场 — browse-试用 v1 护栏夹具真机验收 ✅ 已通（2026-06-23）**：
+- 状态：live-veto 钩子 + clean-context + runBrowseTask + exploration_runs + 红队夹具全已 **push + dark deploy（orch `dcbb478`，EXPLORER_ENABLED 仍 OFF）**。三轮 6 镜头对抗审 + **真机红队夹具验收 8/8 PASS**（clean-context cookies=0 / 四向量真拦 / 安全链接放行 / executor.click spy 敏感=0安全=1 / exploration_runs 写入）。
+- **veto BLOCKER 已闭环**：夹具首跑抓到 icon-only emoji-短路-敏感-aria（真漏）→ 多信号 fail-safe OR 修复（`dcbb4783`）→ 重跑向量 2 转 PASS、pwd-type 转拦。见 §5。
+- **clean context = §9.6 硬前置**（已实现 + 真机实证：newContext-over-CDP 在 box live Brave 上 cookies=0）。
+- **下一步 = 真开 `EXPLORER_ENABLED` 跑标定站（首个真烧钱，逐项授权）**：护栏已验通 → 可单独谈真开 `EXPLORER_ENABLED` 跑 figma/ctrip browse（clean context、§4 三层熔断、校准单站 $5）。**这是新的授权点：要 BOSS 逐项 GO（真烧钱）+ 跑完立即归零 EXPLORER_ENABLED**。在此之前 explorer 仍绝不真做 live browse。
+- ⚠️ ops 前置（§6）：`CDP_ENDPOINT=9222` 当前 dead，live 浏览器是 `HEADED_CDP_ENDPOINT=9223`（Brave）→ explorer 真跑前需确认 explorer 用哪个端点（夹具验收用的 9223）。
 
 **中场 — 专属账号 + Credential Vault 阶段**：护栏验通后才配钥匙进"登录后世界"（veto 要求更高）；可并行让人去注册专属账号（v1 绝不碰登录态/凭据）。
 
