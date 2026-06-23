@@ -1,17 +1,20 @@
 /**
  * Playbook ④ active exploration — offline batch CLI (BOSS-triggered).
  *
- * ⚠️ DISABLED BY DEFAULT. Three locks must all be open to spend anything:
- *   1. EXPLORER_ENABLED=true                    (env master switch)
- *   2. EXPLORER_BUDGET_PER_{SITE,BATCH,MONTH}_USD > 0   (env caps; default 0 = inert)
- *   3. --run                                    (else DEFAULT --dry-run = plan only)
+ * ⚠️ DISABLED BY DEFAULT. The RUN gate is the master switch + --run; SPEND is bounded
+ * by the three-layer circuit breaker (charter §A — fences abnormal spend, not normal
+ * completion):
+ *   1. EXPLORER_ENABLED=true   (env master switch; default off = explorer never runs)
+ *   2. --run                   (else DEFAULT --dry-run = plan + breaker verdicts, no spend)
+ *   + breakers (env-overridable, DEFAULT to the §A values — NOT 0): per-site
+ *     EXPLORER_BREAKER_PER_SITE_SEED_USD=$5 / PER_SITE_STRANGER_USD=$3 / PER_DAY_USD=$50 /
+ *     PER_MONTH_USD=$200 / BATCH_FACTOR=1.2. A non-positive override fail-safe-trips.
  * No cron/timer anywhere — phase-1 is manual BOSS trigger, one batch at a time.
  *
- *   DRY-RUN (default — lists the plan + budget verdicts, dispatches nothing):
+ *   DRY-RUN (default — lists the plan + breaker verdicts, dispatches nothing, spends nothing):
  *     set -a && . .env && set +a && pnpm tsx scripts/explore-sites.ts --sites=anthropic.com,openai.com
- *   REAL RUN (only when all three locks are open):
- *     EXPLORER_ENABLED=true EXPLORER_BUDGET_PER_BATCH_USD=5 ... \
- *       pnpm tsx scripts/explore-sites.ts --sites=anthropic.com --run --batch=seed-2026-06-23
+ *   REAL RUN (master switch + --run; breakers default to the §A values):
+ *     EXPLORER_ENABLED=true pnpm tsx scripts/explore-sites.ts --sites=anthropic.com --run --batch=seed-2026-06-23
  */
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
