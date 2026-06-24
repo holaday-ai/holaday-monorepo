@@ -38,6 +38,8 @@ export interface RunBrowseTaskDeps {
     onBeforeAction: (action: BrowseAction) => BrowseVerdict;
   }) => Promise<{ status: string; reason?: string; costUsd: number; summary?: string }>;
   newTaskExternalId: () => string;
+  /** Per-site connect/assert hard timeout (ms). Default DEFAULT_CONNECT_MS. */
+  connectTimeoutMs?: number;
   logger?: { warn: (o: unknown, m: string) => void };
 }
 
@@ -102,6 +104,47 @@ export function resolveBrowseHardMs(raw: string | undefined): number {
   return n;
 }
 
+/** Per-site CONNECT/ASSERT hard timeout (env-overridable). The per-browse hard wall wraps
+ *  runSupercarTask but NOT the connectOverCDP + assertCleanContext phase before it — a hung
+ *  connect (busy/flaky browser) pinned the whole batch. Default 60s. */
+export const DEFAULT_CONNECT_MS = 60_000;
+export function resolveConnectMs(raw: string | undefined): number {
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n <= 0) return DEFAULT_CONNECT_MS;
+  return n;
+}
+
+/**
+ * Deterministic breakpoint summary — ALWAYS produced (done / maxIter / soft-timeout / hard-abort
+ * / veto-halt / connect-fail), built from the captured step sequence + the stop reason, NOT the
+ * model's final summary (a force-abort skips that, leaving it empty = the batch-2 "白烧"). This is
+ * the "免登录够不够" evidence: where the task got to + why it stopped. The caller persists it into
+ * exploration_runs.metadata.summary (a COMPLETED browse prefers the richer model summary).
+ */
+export function buildBreakpointSummary(args: {
+  status: string;
+  reason?: string;
+  steps: ReadonlyArray<{ stepType: string; visibleText?: string | null }>;
+}): string {
+  const { status, reason, steps } = args;
+  const r = reason ?? '';
+  let stop: string;
+  if (status === 'completed') stop = '完成（done）';
+  else if (/hard deadline/i.test(r)) stop = '硬超时 force-abort（未走完）';
+  else if (/maxIteration|exhausted/i.test(r)) stop = 'maxIter 耗尽（未收敛）';
+  else if (/veto|sensitive|refus|blocked|登录|支付|下单|提交/i.test(r))
+    stop = `veto 边界拦停（${r.slice(0, 80)}）`;
+  else if (/timeout|timed out/i.test(r)) stop = '软超时';
+  else if (/connect/i.test(r)) stop = `connect 失败（${r.slice(0, 80)}）`;
+  else stop = `失败（${r.slice(0, 80) || status}）`;
+  const stepLine = steps.length
+    ? steps
+        .map((s, i) => `${i + 1}.${s.stepType}${s.visibleText ? `(${s.visibleText.slice(0, 30)})` : ''}`)
+        .join(' → ')
+    : '(无捕获动作)';
+  return `停止原因：${stop}。已走 ${steps.length} 步：${stepLine}`;
+}
+
 /**
  * Race `work` against a HARD wall-clock deadline. On timeout: run `onTimeout` (best-effort —
  * e.g. force-dispose the clean context to reject any in-flight op and unblock a hung loop) and
@@ -144,18 +187,36 @@ export function makeRunBrowseTask(deps: RunBrowseTaskDeps): (args: {
   onBeforeAction: (a: BrowseAction) => BrowseVerdict;
 }) => Promise<BrowseRunResult> {
   return async ({ domain, intent, onBeforeAction }) => {
-    const executor = deps.makeExecutor();
     const taskId = deps.newTaskExternalId();
+    const connectMs = deps.connectTimeoutMs ?? DEFAULT_CONNECT_MS;
+    // ① + ② CONNECT/ASSERT phase: HARD-timeout (the per-browse wall wraps runSupercar but NOT
+    // this phase — a hung connectOverCDP pinned the whole batch) + ONE retry with a FRESH
+    // executor (a transient hung/failed connect on a busy browser recovers on retry). On final
+    // failure the SITE fails and the BATCH CONTINUES — it never pins the batch.
+    let executor: CleanBrowseExecutor | null = null;
+    for (let attempt = 1; attempt <= 2 && !executor; attempt++) {
+      const ex = deps.makeExecutor();
+      try {
+        const c = await withHardDeadline(ex.connect(deps.cdpEndpoint, { cleanContext: true }), connectMs, () => {
+          void ex.disposeCleanContext().catch(() => {}); // unblock a hung connect
+        });
+        if (!c.ok) throw new Error(`connect failed: ${c.error ?? '?'}`);
+        // 🔒 fail-closed zero-credential guarantee — throws if ANY cookie present.
+        await withHardDeadline(ex.assertCleanContext(), connectMs, () => {
+          void ex.disposeCleanContext().catch(() => {});
+        });
+        executor = ex; // connected + verified clean
+      } catch (e) {
+        await ex.disposeCleanContext().catch(() => {});
+        const reason = e instanceof Error ? e.message : String(e);
+        deps.logger?.warn({ domain, attempt, reason }, 'browse runner: connect/assert failed');
+        if (attempt === 2) {
+          return { status: 'failed', costUsd: 0, reason: `connect/assert failed (${attempt} attempts): ${reason}` };
+        }
+      }
+    }
+    if (!executor) return { status: 'failed', costUsd: 0, reason: 'connect: no executor (unexpected)' };
     try {
-      const c = await executor.connect(deps.cdpEndpoint, { cleanContext: true });
-      if (!c.ok)
-        return {
-          status: 'failed',
-          costUsd: 0,
-          reason: `clean-context connect failed: ${c.error ?? '?'}`,
-        };
-      // 🔒 fail-closed zero-credential guarantee — throws if ANY cookie present.
-      await executor.assertCleanContext();
       const outcome = await deps.runSupercar({ taskId, intent, executor, onBeforeAction });
       return {
         status: outcome.status,
@@ -165,10 +226,7 @@ export function makeRunBrowseTask(deps: RunBrowseTaskDeps): (args: {
       };
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
-      deps.logger?.warn(
-        { domain, reason },
-        'browse runner: failed (clean-context assert or run error)',
-      );
+      deps.logger?.warn({ domain, reason }, 'browse runner: run error');
       return { status: 'failed', costUsd: 0, reason };
     } finally {
       await executor.disposeCleanContext().catch(() => {});

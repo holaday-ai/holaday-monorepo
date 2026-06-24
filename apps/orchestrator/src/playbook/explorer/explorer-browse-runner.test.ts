@@ -2,11 +2,14 @@ import { describe, expect, it } from 'vitest';
 import {
   type CleanBrowseExecutor,
   DEFAULT_BROWSE_HARD_MS,
+  DEFAULT_CONNECT_MS,
   DEFAULT_MAX_ITERATIONS,
   MAX_ITERATIONS_CEILING,
+  buildBreakpointSummary,
   makeRunBrowseTask,
   requireBrowseEnv,
   resolveBrowseHardMs,
+  resolveConnectMs,
   resolveMaxIterations,
   withExplorationRun,
   withHardDeadline,
@@ -78,10 +81,11 @@ describe('makeRunBrowseTask — clean-context contract', () => {
     expect(r.status).toBe('failed');
     expect(r.reason).toMatch(/not clean/i);
     expect(ranSupercar).toBe(false); // never browsed a dirty context
-    expect(calls.dispose).toBe(1); // disposed in finally
+    expect(calls.connect).toBe(2); // ② retried once before giving up
+    expect(calls.dispose).toBeGreaterThanOrEqual(1); // disposed on each attempt
   });
 
-  it('connect failure → failed, dispose still called', async () => {
+  it('connect failure → failed (after 1 retry), dispose called, BATCH not pinned', async () => {
     const { ex, calls } = fakeExecutor({ connectOk: false });
     const run = makeRunBrowseTask({
       cdpEndpoint: 'http://x',
@@ -94,11 +98,39 @@ describe('makeRunBrowseTask — clean-context contract', () => {
       intent: 'i',
       onBeforeAction: () => ({ allowed: true }),
     });
+    expect(calls.connect).toBe(2); // ② one retry
     expect(r.status).toBe('failed');
     expect(r.reason).toMatch(/connect/i);
     expect(r.costUsd).toBe(0); // connect-fail → never browsed → zero cost
     expect(calls.assert).toBe(0);
-    expect(calls.dispose).toBe(1);
+    expect(calls.dispose).toBeGreaterThanOrEqual(1); // disposed on each attempt
+  });
+
+  it('① a HUNG connect is bounded by the timeout (→ failed, not a pinned batch)', async () => {
+    let connectCalls = 0;
+    const hungExec: CleanBrowseExecutor = {
+      connect: () => {
+        connectCalls += 1;
+        return new Promise(() => {}); // never resolves — a hung connectOverCDP
+      },
+      assertCleanContext: async () => {},
+      disposeCleanContext: async () => {},
+    };
+    let ranSupercar = false;
+    const run = makeRunBrowseTask({
+      cdpEndpoint: 'http://x',
+      makeExecutor: () => hungExec,
+      runSupercar: async () => {
+        ranSupercar = true;
+        return { status: 'completed', costUsd: 0 };
+      },
+      newTaskExternalId: () => 'tsk_1',
+      connectTimeoutMs: 20, // tiny timeout for the test
+    });
+    const r = await run({ domain: 'x.com', intent: 'i', onBeforeAction: () => ({ allowed: true }) });
+    expect(r.status).toBe('failed'); // bounded, not hung forever
+    expect(ranSupercar).toBe(false);
+    expect(connectCalls).toBe(2); // timed out then retried, both timed out
   });
 });
 
@@ -186,6 +218,40 @@ describe('withHardDeadline — fixes the soft-timeout gap (a hung op past the wa
         throw new Error('dispose blew up');
       }),
     ).rejects.toThrow(/hard deadline/i);
+  });
+});
+
+describe('resolveConnectMs — per-site connect timeout (env, fail-safe)', () => {
+  it('missing/invalid → DEFAULT; valid used', () => {
+    expect(resolveConnectMs(undefined)).toBe(DEFAULT_CONNECT_MS);
+    expect(resolveConnectMs('0')).toBe(DEFAULT_CONNECT_MS);
+    expect(resolveConnectMs('30000')).toBe(30000);
+  });
+});
+
+describe('buildBreakpointSummary — ALWAYS produces evidence (the force-abort 白烧 fix)', () => {
+  const steps = [
+    { stepType: 'navigate', visibleText: null },
+    { stepType: 'click', visibleText: '搜索' },
+  ];
+  it('hard-abort → 硬超时 + step trail (no model summary needed)', () => {
+    const s = buildBreakpointSummary({
+      status: 'failed',
+      reason: 'browse hard deadline 420000ms exceeded — force-aborted',
+      steps,
+    });
+    expect(s).toMatch(/硬超时/);
+    expect(s).toContain('搜索');
+    expect(s).toContain('已走 2 步');
+  });
+  it('veto-halt → 边界拦停 reason', () => {
+    expect(
+      buildBreakpointSummary({ status: 'failed', reason: 'click blocked: sensitive control ("登录")', steps }),
+    ).toMatch(/veto 边界拦停/);
+  });
+  it('completed → done; empty steps → 无捕获动作', () => {
+    expect(buildBreakpointSummary({ status: 'completed', steps: [] })).toMatch(/完成/);
+    expect(buildBreakpointSummary({ status: 'failed', reason: 'x', steps: [] })).toContain('无捕获动作');
   });
 });
 

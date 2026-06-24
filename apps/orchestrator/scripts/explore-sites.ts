@@ -111,7 +111,9 @@ if (browse) {
     requireBrowseEnv,
     resolveMaxIterations,
     resolveBrowseHardMs,
+    resolveConnectMs,
     withHardDeadline,
+    buildBreakpointSummary,
   } = await import('../src/playbook/explorer/explorer-browse-runner.js');
   // FAIL-CLOSED env gate (cost-source-A hinge): abort BEFORE any connect/spend if the
   // recorder-gating user id (missing → breaker reads $0 = fail-OPEN) or the live CDP
@@ -201,12 +203,17 @@ if (browse) {
           'explorer: capture tasks-row create failed (capture disabled this run; browse continues)',
         );
       }
+      // ③ in-memory step trail (always, regardless of capture-write success) → the deterministic
+      // breakpoint summary below. Every action lands here synchronously even if the DB capture
+      // write lags/fails.
+      const browseSteps: Array<{ stepType: string; visibleText: string | null }> = [];
       // onAction → task_action_captures (mirrors tasks.ts; fire-and-forget, best-effort).
       const tid = taskDbId;
       const repo = captureRepo;
       const onAction =
         tid !== null && repo
           ? (ev: SupercarActionCaptureEvent) => {
+              browseSteps.push({ stepType: ev.stepType, visibleText: ev.visibleText });
               void (async () => {
                 try {
                   await repo.create({
@@ -283,14 +290,23 @@ if (browse) {
           );
         }
       }
-      return {
-        status: outcome.status,
-        reason: outcome.reason,
-        costUsd: recorder.total,
-        ...(outcome.summary ? { summary: outcome.summary } : {}), // v2 断点报告 evidence
-      };
+      // ③ ALWAYS produce a breakpoint summary: a COMPLETED browse keeps the model's rich report
+      // (任务流程 + 能力清单 + 断点报告); any other termination (maxIter / soft / HARD force-abort /
+      // veto-halt / connect-fail) gets a DETERMINISTIC one (step trail + stop reason) so the
+      // exploration_run is never left without "免登录够不够" evidence (the batch-2 force-abort 白烧).
+      const summary =
+        outcome.summary && outcome.summary.trim()
+          ? outcome.summary
+          : buildBreakpointSummary({
+              status: outcome.status,
+              reason: outcome.reason,
+              steps: browseSteps,
+            });
+      return { status: outcome.status, reason: outcome.reason, costUsd: recorder.total, summary };
     },
     newTaskExternalId: () => newExternalId('task'),
+    // ① per-site connect/assert hard timeout — a hung connectOverCDP can't pin the batch.
+    connectTimeoutMs: resolveConnectMs(process.env.EXPLORER_CONNECT_TIMEOUT_MS),
     logger,
   });
 
