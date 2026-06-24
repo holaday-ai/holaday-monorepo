@@ -273,6 +273,15 @@ export class PlaywrightExecutor {
       if (opts.cleanContext) {
         this.cleanMode = true;
         this.cleanContext = await this.browser.newContext();
+        // ④ explorer per-op hard bound (CLEAN-CONTEXT ONLY → user tasks' shared context is
+        // untouched): every Playwright ACTION (goto/click/waitFor/…) in the clean context gets
+        // a default timeout so a single op can't block indefinitely on a hostile/anti-bot site.
+        // NOTE: page.evaluate has NO built-in timeout → the per-browse hard wall in the runner
+        // (withHardDeadline) is the catch-all.
+        const rawOpMs = Number.parseInt(process.env.EXPLORER_OP_TIMEOUT_MS ?? '45000', 10);
+        const opMs = Number.isInteger(rawOpMs) && rawOpMs > 0 ? rawOpMs : 45_000;
+        this.cleanContext.setDefaultTimeout(opMs);
+        this.cleanContext.setDefaultNavigationTimeout(opMs);
       }
       if (isStealthEnabled()) {
         await this.applyStealthToContexts(this.browser);

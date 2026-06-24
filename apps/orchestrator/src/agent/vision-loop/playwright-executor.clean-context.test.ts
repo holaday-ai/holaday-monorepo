@@ -8,7 +8,7 @@ import { PlaywrightExecutor } from './playwright-executor.js';
  * contexts() list, so these tests exercise the clean-context path in isolation.
  */
 function fakeChromium(cookies: Array<{ domain: string }>) {
-  const state = { newContextCalls: 0, closed: false, cookieCalls: 0 };
+  const state = { newContextCalls: 0, closed: false, cookieCalls: 0, defaultTimeoutMs: 0, navTimeoutMs: 0 };
   const fakeCtx = {
     cookies: async () => {
       state.cookieCalls += 1;
@@ -16,6 +16,13 @@ function fakeChromium(cookies: Array<{ domain: string }>) {
     },
     close: async () => {
       state.closed = true;
+    },
+    // ④ per-op hard bound (clean-context only)
+    setDefaultTimeout: (ms: number) => {
+      state.defaultTimeoutMs = ms;
+    },
+    setDefaultNavigationTimeout: (ms: number) => {
+      state.navTimeoutMs = ms;
     },
   };
   const browser = {
@@ -38,6 +45,8 @@ describe('PlaywrightExecutor — gated clean-context mode', () => {
     const r = await ex.connect('http://127.0.0.1:9222', { cleanContext: true });
     expect(r.ok).toBe(true);
     expect(state.newContextCalls).toBe(1); // fresh isolated context, not contexts()[0]
+    expect(state.defaultTimeoutMs).toBeGreaterThan(0); // ④ per-op hard bound set on the clean ctx
+    expect(state.navTimeoutMs).toBeGreaterThan(0);
     await expect(ex.assertCleanContext()).resolves.toBeUndefined();
     await ex.disposeCleanContext();
     expect(state.closed).toBe(true);
@@ -99,6 +108,8 @@ describe('PlaywrightExecutor — clean mode never touches the shared context', (
       },
       cookies: async () => [],
       close: async () => {},
+      setDefaultTimeout: () => {},
+      setDefaultNavigationTimeout: () => {},
     };
     const browser = { contexts: () => [sharedCtx], newContext: async () => cleanCtx };
     return { chromium: { connectOverCDP: async () => browser } as never, calls };

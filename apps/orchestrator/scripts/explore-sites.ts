@@ -105,8 +105,14 @@ if (browse) {
   // loads the browser/supercar stack — keeps doc-first byte-identical (audit point 1).
   // EXPLORER_ENABLED still gates the whole run inside runExplorerBatch (audit point 6):
   // OFF → no exploreSite call → no connect / no browse / no spend.
-  const { makeRunBrowseTask, withExplorationRun, requireBrowseEnv, resolveMaxIterations } =
-    await import('../src/playbook/explorer/explorer-browse-runner.js');
+  const {
+    makeRunBrowseTask,
+    withExplorationRun,
+    requireBrowseEnv,
+    resolveMaxIterations,
+    resolveBrowseHardMs,
+    withHardDeadline,
+  } = await import('../src/playbook/explorer/explorer-browse-runner.js');
   // FAIL-CLOSED env gate (cost-source-A hinge): abort BEFORE any connect/spend if the
   // recorder-gating user id (missing → breaker reads $0 = fail-OPEN) or the live CDP
   // endpoint (9223; 9222 is dead) is absent. Tested: requireBrowseEnv in
@@ -224,20 +230,40 @@ if (browse) {
               })();
             }
           : undefined;
-      const outcome = await runSupercarTask({
-        taskId,
-        intent,
-        // makeExecutor returns a real PlaywrightExecutor (satisfies the minimal view too).
-        executor: executor as unknown as PlaywrightExecutor,
-        ...(process.env.ANTHROPIC_API_KEY ? { apiKey: process.env.ANTHROPIC_API_KEY } : {}),
-        onBeforeAction, // ← live-veto (§9.6 + Sensitive Protocol) — half of the two-part guard
-        ...(onAction ? { onAction } : {}), // ← B2 capture (additive) → crystallize-able trajectory
-        recorder,
-        userExternalId: explorerUser,
-        maxIterations, // (c) env-configurable hard per-browse cap (default 25, ceiling 50)
-        timeoutMs: 300_000, // 5-min wall clock
-        domain: null,
-      });
+      // ④ per-browse HARD wall (robustness): runSupercarTask's `timeoutMs` is SOFT (checked
+      // between turns) → a single hung page/CDP op (hostile / anti-bot site, e.g. douyin) can
+      // block past it, pinning the browse + leaving a stuck 'running' row. Race a wall-clock
+      // deadline; on timeout FORCE-dispose the clean context (rejects the in-flight op → the
+      // hung loop unwinds) and resolve to a determinate `failed` outcome so the status-update
+      // below still runs. Hard wall > the 300s soft timeout (soft gets first, clean crack).
+      const hardMs = resolveBrowseHardMs(process.env.EXPLORER_BROWSE_HARD_MS);
+      let outcome: { status: string; reason?: string };
+      try {
+        outcome = await withHardDeadline(
+          runSupercarTask({
+            taskId,
+            intent,
+            // makeExecutor returns a real PlaywrightExecutor (satisfies the minimal view too).
+            executor: executor as unknown as PlaywrightExecutor,
+            ...(process.env.ANTHROPIC_API_KEY ? { apiKey: process.env.ANTHROPIC_API_KEY } : {}),
+            onBeforeAction, // ← live-veto (§9.6 + Sensitive Protocol) — half of the two-part guard
+            ...(onAction ? { onAction } : {}), // ← B2 capture (additive) → crystallize-able trajectory
+            recorder,
+            userExternalId: explorerUser,
+            maxIterations, // (c) env-configurable hard per-browse cap (default 25, ceiling 50)
+            timeoutMs: 300_000, // SOFT wall clock (between-turns)
+            domain: null,
+          }),
+          hardMs,
+          () => {
+            logger.warn({ hardMs }, 'explorer: per-browse HARD wall exceeded — force-aborting (dispose clean context)');
+            void executor.disposeCleanContext().catch(() => {}); // unblock any in-flight hung op
+          },
+        );
+      } catch (e) {
+        // hard-wall timeout OR runSupercarTask threw → still a determinate outcome (no stuck row).
+        outcome = { status: 'failed', reason: e instanceof Error ? e.message : String(e) };
+      }
       // Map outcome → tasks.status so crystallize (status IN completed/partial_success) only
       // distils a browse that actually COMPLETED — a halted / failed / maxIter-exhausted browse
       // stays non-success → never crystallized. Best-effort.

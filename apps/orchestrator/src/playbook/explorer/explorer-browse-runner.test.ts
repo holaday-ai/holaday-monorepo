@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
   type CleanBrowseExecutor,
+  DEFAULT_BROWSE_HARD_MS,
   DEFAULT_MAX_ITERATIONS,
   MAX_ITERATIONS_CEILING,
   makeRunBrowseTask,
   requireBrowseEnv,
+  resolveBrowseHardMs,
   resolveMaxIterations,
   withExplorationRun,
+  withHardDeadline,
 } from './explorer-browse-runner.js';
 import type { ExploreSiteOutcome } from './explorer.js';
 
@@ -142,6 +145,47 @@ describe('resolveMaxIterations — env-configurable per-browse cap (fail-safe + 
   });
   it('🛡️ fat-finger above the ceiling is CLAMPED (a mistyped 2500 cannot run away)', () => {
     expect(resolveMaxIterations('2500')).toBe(MAX_ITERATIONS_CEILING);
+  });
+});
+
+describe('resolveBrowseHardMs — per-browse hard wall (env, fail-safe)', () => {
+  it('missing / non-positive / garbage → DEFAULT', () => {
+    expect(resolveBrowseHardMs(undefined)).toBe(DEFAULT_BROWSE_HARD_MS);
+    expect(resolveBrowseHardMs('0')).toBe(DEFAULT_BROWSE_HARD_MS);
+    expect(resolveBrowseHardMs('-1')).toBe(DEFAULT_BROWSE_HARD_MS);
+    expect(resolveBrowseHardMs('abc')).toBe(DEFAULT_BROWSE_HARD_MS);
+  });
+  it('a valid value is used (BOSS tunes without redeploy)', () => {
+    expect(resolveBrowseHardMs('600000')).toBe(600000);
+  });
+});
+
+describe('withHardDeadline — fixes the soft-timeout gap (a hung op past the wall)', () => {
+  it('work resolves before the wall → returns value, onTimeout NOT called', async () => {
+    let fired = false;
+    const r = await withHardDeadline(Promise.resolve('ok'), 1000, () => {
+      fired = true;
+    });
+    expect(r).toBe('ok');
+    expect(fired).toBe(false);
+  });
+  it('🔴 a HUNG work past the wall → onTimeout fires (force-dispose) + rejects', async () => {
+    let fired = false;
+    const hung = new Promise<string>(() => {}); // never resolves — like a blocked page op
+    await expect(
+      withHardDeadline(hung, 20, () => {
+        fired = true; // in the real adapter: dispose the clean context → unblock the op
+      }),
+    ).rejects.toThrow(/hard deadline/i);
+    expect(fired).toBe(true);
+  });
+  it('onTimeout throwing does not mask the timeout rejection (best-effort)', async () => {
+    const hung = new Promise<string>(() => {});
+    await expect(
+      withHardDeadline(hung, 20, () => {
+        throw new Error('dispose blew up');
+      }),
+    ).rejects.toThrow(/hard deadline/i);
   });
 });
 

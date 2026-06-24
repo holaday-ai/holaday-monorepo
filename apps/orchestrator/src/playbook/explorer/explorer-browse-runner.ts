@@ -91,6 +91,48 @@ export function resolveMaxIterations(raw: string | undefined): number {
   return Math.min(n, MAX_ITERATIONS_CEILING);
 }
 
+/** Per-browse HARD wall (env-overridable). The supercar loop's `timeoutMs` is SOFT (checked
+ *  between turns) → a single hung page/CDP op (hostile / anti-bot site) can block past it.
+ *  This wall-clock deadline fires regardless. Default 420s > the 300s soft timeout, so the
+ *  soft one gets first (clean) crack and this is the catch-all backstop. */
+export const DEFAULT_BROWSE_HARD_MS = 420_000;
+export function resolveBrowseHardMs(raw: string | undefined): number {
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n <= 0) return DEFAULT_BROWSE_HARD_MS;
+  return n;
+}
+
+/**
+ * Race `work` against a HARD wall-clock deadline. On timeout: run `onTimeout` (best-effort —
+ * e.g. force-dispose the clean context to reject any in-flight op and unblock a hung loop) and
+ * REJECT, so the caller reaches its terminal handling (status update, no stuck 'running' row).
+ * The timer is always cleared. Pure-ish → unit-tested.
+ */
+export async function withHardDeadline<T>(
+  work: Promise<T>,
+  hardMs: number,
+  onTimeout: () => void,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          try {
+            onTimeout();
+          } catch {
+            /* best-effort — a cleanup failure must not mask the timeout */
+          }
+          reject(new Error(`browse hard deadline ${hardMs}ms exceeded — force-aborted`));
+        }, hardMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 /**
  * Build the `runBrowseTask`: connect a fresh clean context → ASSERT zero cookies
  * (fail-closed; a dirty context throws → caught → failed, browse refused) →
