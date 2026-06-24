@@ -19,6 +19,7 @@
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config as loadDotenv } from 'dotenv';
+import type { SupercarActionCaptureEvent } from '../src/agent/supercar/agent-loop.js';
 import type { ExploreSiteOutcome } from '../src/playbook/explorer/explorer.js';
 
 const appRoot = resolve(fileURLToPath(new URL('.', import.meta.url)), '..');
@@ -127,6 +128,15 @@ if (browse) {
     '../src/playbook/explorer/cost-accumulating-recorder.js'
   );
   const { newExternalId } = await import('@holaday/shared-types');
+  // ④ capture lane (additive): explorer trajectories must reach crystallize → create a
+  // tasks row (FK for task_action_captures) + write captures via onAction.
+  const { eq } = await import('drizzle-orm');
+  const { tasks } = await import('../src/db/schema/tasks.js');
+  const { users } = await import('../src/db/schema/users.js');
+  const { readInsertId } = await import('../src/db/mysql-result.js');
+  const { TaskActionCaptureRepository } = await import(
+    '../src/playbook/task-action-capture-repository.js'
+  );
 
   // (c) per-browse iteration cap — env-overridable (tune batch-1 without a redeploy),
   // fail-safe parsed + clamped to a fat-finger ceiling.
@@ -157,6 +167,63 @@ if (browse) {
             ),
         }),
       );
+      // ── ④ capture lane (additive, best-effort) ──────────────────────────────────────
+      // Create a tasks row (origin='explorer' → excluded from user history/quota/activeUsers,
+      // which filter origin='user') so the browse trajectory is captured (task_action_captures
+      // FK) and reaches crystallize. A failure here disables capture for THIS run but NEVER
+      // blocks the browse — veto / cost-source-A / clean-context are untouched.
+      let taskDbId: number | null = null;
+      let captureRepo: InstanceType<typeof TaskActionCaptureRepository> | null = null;
+      try {
+        const [u] = await db
+          .select({ id: users.id })
+          .from(users)
+          .where(eq(users.externalId, explorerUser))
+          .limit(1);
+        if (u) {
+          const ins = await db
+            .insert(tasks)
+            .values({ externalId: taskId, userId: u.id, intent, origin: 'explorer', status: 'running' });
+          taskDbId = readInsertId(ins);
+          captureRepo = new TaskActionCaptureRepository(db);
+        } else {
+          logger.warn({}, 'explorer: explorer user row not found → capture disabled this run (browse continues)');
+        }
+      } catch (e) {
+        logger.warn(
+          { err: e instanceof Error ? e.message : String(e) },
+          'explorer: capture tasks-row create failed (capture disabled this run; browse continues)',
+        );
+      }
+      // onAction → task_action_captures (mirrors tasks.ts; fire-and-forget, best-effort).
+      const tid = taskDbId;
+      const repo = captureRepo;
+      const onAction =
+        tid !== null && repo
+          ? (ev: SupercarActionCaptureEvent) => {
+              void (async () => {
+                try {
+                  await repo.create({
+                    taskId: tid,
+                    siteDomain: ev.siteDomain,
+                    actionIndex: ev.actionIndex,
+                    stepType: ev.stepType,
+                    visibleText: ev.visibleText,
+                    targetSelectorJson: ev.targetSelector ? { selector: ev.targetSelector } : null,
+                    coordinateJson: ev.coordinate,
+                    framePath: ev.framePath,
+                    entryUrl: ev.entryUrl,
+                    inputValue: ev.inputValue,
+                  });
+                } catch (e) {
+                  logger.warn(
+                    { err: e instanceof Error ? e.message : String(e) },
+                    'explorer: capture write failed (best-effort)',
+                  );
+                }
+              })();
+            }
+          : undefined;
       const outcome = await runSupercarTask({
         taskId,
         intent,
@@ -164,12 +231,32 @@ if (browse) {
         executor: executor as unknown as PlaywrightExecutor,
         ...(process.env.ANTHROPIC_API_KEY ? { apiKey: process.env.ANTHROPIC_API_KEY } : {}),
         onBeforeAction, // ← live-veto (§9.6 + Sensitive Protocol) — half of the two-part guard
+        ...(onAction ? { onAction } : {}), // ← B2 capture (additive) → crystallize-able trajectory
         recorder,
         userExternalId: explorerUser,
         maxIterations, // (c) env-configurable hard per-browse cap (default 25, ceiling 50)
         timeoutMs: 300_000, // 5-min wall clock
         domain: null,
       });
+      // Map outcome → tasks.status so crystallize (status IN completed/partial_success) only
+      // distils a browse that actually COMPLETED — a halted / failed / maxIter-exhausted browse
+      // stays non-success → never crystallized. Best-effort.
+      if (taskDbId !== null) {
+        try {
+          const mapped =
+            outcome.status === 'completed'
+              ? 'completed'
+              : outcome.status === 'awaiting_user'
+                ? 'awaiting_user'
+                : 'failed';
+          await db.update(tasks).set({ status: mapped }).where(eq(tasks.id, taskDbId));
+        } catch (e) {
+          logger.warn(
+            { err: e instanceof Error ? e.message : String(e) },
+            'explorer: task status update failed (best-effort)',
+          );
+        }
+      }
       return { status: outcome.status, reason: outcome.reason, costUsd: recorder.total };
     },
     newTaskExternalId: () => newExternalId('task'),

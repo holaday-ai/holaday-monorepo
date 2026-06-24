@@ -57,6 +57,11 @@ export function browseIntent(domain: string): string {
     '只做：导航、点击非敏感的浏览/查看类元素、阅读页面内容、必要的检索。',
     '绝不：登录、注册、提交表单、下单、支付、填写真实身份或任何写操作。',
     '遇到登录墙 / 提交 / 下单 / 支付这类按钮就停下，不要点（系统也会硬拦）。',
+    // Convergence (intent-tuning): without this the model kept wandering marketing pages
+    // and exhausted the iteration cap without ever declaring done. Give it a target +
+    // a wrap-up so it finishes deliberately.
+    '理解到位即收敛：用尽量少的步数（目标 ≤12 步）看懂这个网站的核心用途与主要功能/入口，不要为凑步数继续乱逛。',
+    '看够了就停下，输出一份简短「能力清单」（这个网站能做什么、主要功能/入口有哪些），并明确宣告完成（done）。',
   ].join('\n');
 }
 
