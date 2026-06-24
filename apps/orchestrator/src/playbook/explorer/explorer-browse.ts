@@ -51,17 +51,38 @@ export function explorerOnBeforeAction(action: BrowseAction): BrowseVerdict {
 }
 
 /** Read-only browse intent — the soft guard (the hard guard is the live-veto). */
+/**
+ * Per-domain SEED TASK hints (intent-deepening v2). 1-2 representative, concrete tasks per
+ * site so the browse has an evaluable goal ("摸清这个任务怎么走到边界") instead of a shallow
+ * marketing scroll. The model MAY pick one OR identify another common task for the site.
+ * Unknown domains → a generic "find the site's core task + try it". Static map (additive, no
+ * DB); a per-site DB-driven seed list is a later phase.
+ */
+const SEED_TASKS: Record<string, string[]> = {
+  'figma.com': ['新建一个设计文件', '打开模板库 / 找一个模板'],
+  'ctrip.com': ['查一段行程的机票（出发/到达/日期 → 看搜索结果）', '查某城市的酒店列表'],
+  'todoist.com': ['新建一个任务清单 / 添加一条任务', '找到怎么给任务设提醒'],
+  'douyin.com': ['搜索一个话题、看视频列表', '打开某个创作者主页'],
+};
+
+/**
+ * Read-only browse intent — the soft guard (the hard guard is the live-veto + clean-context).
+ * v2 = TASK/CAPABILITY-ORIENTED: drive ONE concrete task's flow to the ACTION BOUNDARY (stop
+ * before login/order/pay) and report the breakpoint — so a path carries real "how to do X" value
+ * instead of a shallow marketing crawl, AND we collect evidence on where "免登录" runs out.
+ */
 export function browseIntent(domain: string): string {
+  const seeds = SEED_TASKS[domain];
+  const seedLine = seeds?.length
+    ? `这个网站的代表任务（任选其一，或你识别出的另一个该站常见任务）：\n  - ${seeds.join('\n  - ')}`
+    : '先识别这个网站最核心的一个常见任务（用户最常来干的事），选一个具体任务深入。';
   return [
-    `打开 https://${domain}/ 并只读浏览，了解这个网站能做什么、怎么用。`,
-    '只做：导航、点击非敏感的浏览/查看类元素、阅读页面内容、必要的检索。',
-    '绝不：登录、注册、提交表单、下单、支付、填写真实身份或任何写操作。',
-    '遇到登录墙 / 提交 / 下单 / 支付这类按钮就停下，不要点（系统也会硬拦）。',
-    // Convergence (intent-tuning): without this the model kept wandering marketing pages
-    // and exhausted the iteration cap without ever declaring done. Give it a target +
-    // a wrap-up so it finishes deliberately.
-    '理解到位即收敛：用尽量少的步数（目标 ≤12 步）看懂这个网站的核心用途与主要功能/入口，不要为凑步数继续乱逛。',
-    '看够了就停下，输出一份简短「能力清单」（这个网站能做什么、主要功能/入口有哪些），并明确宣告完成（done）。',
+    `打开 https://${domain}/ ，目标是【摸清"做一件具体任务"在这个网站怎么走】，不是泛泛浏览。`,
+    seedLine,
+    '只读试做：导航、点击非敏感的浏览/查看/搜索/筛选类元素、阅读页面、必要检索——把这个任务的操作流程一步步走出来。',
+    '走到【动作边界】为止：一旦下一步需要 登录/注册/下单/支付/提交真实信息，就【停在那一步之前】、不要点（系统也会硬拦）。本轮全程免登录、绝不碰登录态。',
+    '【断点报告】最终总结里明确写出：这个任务走到第几步、停在哪个动作上、为什么停（需登录？需下单？需支付？还是已走完）——这是判断"免登录够不够"的关键证据。',
+    '收敛：用尽量少的步数（目标 ≤15 步）把这一个任务的流程摸到边界为止，看够了就停、输出【任务流程 + 能力清单 + 断点报告】并明确宣告完成（done），不要凑步数乱逛。',
   ].join('\n');
 }
 
@@ -74,6 +95,9 @@ export interface BrowseRunResult {
    */
   costUsd: number;
   reason?: string;
+  /** The model's final report (incl. the 任务流程 / 能力清单 / 断点报告). Persisted into
+   *  exploration_runs.metadata for the "免登录够不够" evidence review (intent-deepening v2). */
+  summary?: string;
 }
 
 export interface BrowseDeps {
@@ -133,7 +157,13 @@ export function makeBrowseExploreSite(
       };
     }
     if (result.status === 'completed') {
-      return { domain, status: 'completed', costUsd, note: 'browse: live exploration completed' };
+      return {
+        domain,
+        status: 'completed',
+        costUsd,
+        note: 'browse: live exploration completed',
+        ...(result.summary ? { summary: result.summary } : {}), // 任务流程 + 断点报告 evidence
+      };
     }
     return {
       domain,

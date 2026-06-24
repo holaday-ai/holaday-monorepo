@@ -40,6 +40,9 @@ export interface ExploreSiteOutcome {
   capabilityExternalId?: string;
   pathsCreated?: number;
   note: string;
+  /** browse-试用 v2 — the model's final report (任务流程 / 能力清单 / 断点报告). Persisted into
+   *  exploration_runs.metadata for the "免登录够不够" evidence review. */
+  summary?: string;
 }
 
 export type PerSiteStatus =

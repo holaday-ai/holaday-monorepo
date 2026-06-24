@@ -237,7 +237,7 @@ if (browse) {
       // hung loop unwinds) and resolve to a determinate `failed` outcome so the status-update
       // below still runs. Hard wall > the 300s soft timeout (soft gets first, clean crack).
       const hardMs = resolveBrowseHardMs(process.env.EXPLORER_BROWSE_HARD_MS);
-      let outcome: { status: string; reason?: string };
+      let outcome: { status: string; reason?: string; summary?: string };
       try {
         outcome = await withHardDeadline(
           runSupercarTask({
@@ -283,7 +283,12 @@ if (browse) {
           );
         }
       }
-      return { status: outcome.status, reason: outcome.reason, costUsd: recorder.total };
+      return {
+        status: outcome.status,
+        reason: outcome.reason,
+        costUsd: recorder.total,
+        ...(outcome.summary ? { summary: outcome.summary } : {}), // v2 断点报告 evidence
+      };
     },
     newTaskExternalId: () => newExternalId('task'),
     logger,

@@ -33,6 +33,18 @@ describe('browseIntent', () => {
     expect(i).toContain('绝不');
     expect(i).toMatch(/登录|支付|提交/);
   });
+  it('v2 task-oriented: seeds a known domain + drives to the boundary + asks for the breakpoint', () => {
+    const i = browseIntent('figma.com');
+    expect(i).toContain('新建一个设计文件'); // SEED_TASKS hint for the known domain
+    expect(i).toContain('边界'); // drive the task flow to the action boundary
+    expect(i).toContain('断点报告'); // report where/why it stopped (免登录 evidence)
+    expect(i).toMatch(/done|完成/);
+  });
+  it('v2 unknown domain → generic "find the core task" (no seed, still task-oriented)', () => {
+    const i = browseIntent('some-unknown-site.example');
+    expect(i).toContain('识别这个网站最核心的一个常见任务');
+    expect(i).toContain('断点报告');
+  });
 });
 
 // A fake that mimics the agent-loop's veto contract: propose each action, call

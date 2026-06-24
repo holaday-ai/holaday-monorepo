@@ -36,7 +36,7 @@ export interface RunBrowseTaskDeps {
     intent: string;
     executor: CleanBrowseExecutor;
     onBeforeAction: (action: BrowseAction) => BrowseVerdict;
-  }) => Promise<{ status: string; reason?: string; costUsd: number }>;
+  }) => Promise<{ status: string; reason?: string; costUsd: number; summary?: string }>;
   newTaskExternalId: () => string;
   logger?: { warn: (o: unknown, m: string) => void };
 }
@@ -157,7 +157,12 @@ export function makeRunBrowseTask(deps: RunBrowseTaskDeps): (args: {
       // 🔒 fail-closed zero-credential guarantee — throws if ANY cookie present.
       await executor.assertCleanContext();
       const outcome = await deps.runSupercar({ taskId, intent, executor, onBeforeAction });
-      return { status: outcome.status, costUsd: outcome.costUsd, reason: outcome.reason };
+      return {
+        status: outcome.status,
+        costUsd: outcome.costUsd,
+        reason: outcome.reason,
+        ...(outcome.summary ? { summary: outcome.summary } : {}),
+      };
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       deps.logger?.warn(
@@ -215,6 +220,9 @@ export function withExplorationRun(
           domain,
           costUsd: outcome.costUsd,
           note: outcome.note,
+          // v2 — the model's 任务流程 / 能力清单 / 断点报告 (truncated). The "免登录够不够"
+          // evidence lives here, queryable per exploration_run.
+          ...(outcome.summary ? { summary: outcome.summary.slice(0, 8000) } : {}),
           ...(outcome.capabilityExternalId
             ? { capabilityExternalId: outcome.capabilityExternalId }
             : {}),
