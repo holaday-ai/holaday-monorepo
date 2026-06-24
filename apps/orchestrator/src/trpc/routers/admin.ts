@@ -20,7 +20,7 @@
  */
 
 import { TRPCError } from '@trpc/server';
-import { and, desc, eq, gte, inArray, like, lte, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, like, lte, ne, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { llmCalls } from '../../db/schema/llm-calls.js';
 import { tasks } from '../../db/schema/tasks.js';
@@ -218,7 +218,11 @@ export const adminRouter = router({
 
     const [totalUsersRow] = await ctx.db
       .select({ totalUsers: sql<number>`COUNT(*)` })
-      .from(users);
+      .from(users)
+      // Exclude system identities (e.g. the `playbook-explorer` ④-explorer accounting
+      // bucket) from the human "total users" count. `role` is NOT NULL, so `ne` keeps
+      // every real user (no NULL-safety needed).
+      .where(ne(users.role, 'system'));
     const totalUsers = Number(totalUsersRow?.totalUsers ?? 0);
 
     // Recent 20 tasks. Model comes from a correlated subquery
