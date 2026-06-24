@@ -11,7 +11,7 @@
 
 | 项 | 值 |
 |---|---|
-| **运行 orch（PROD LIVE REF）** | `6f96bed`（④ browse lane wired 进 explore-sites `--browse` dark ship；restart 690；护栏夹具 8/8 PASS；flags 全 OFF）。⚠️ batch-1 prep 加固 (a) 非有限成本 fail-closed + (c) `EXPLORER_MAX_ITERATIONS` env 可配 **commit local 待审、未部署** |
+| **运行 orch（PROD LIVE REF）** | `572e422`（④ browse lane wired + batch-1 prep 加固 (a)非有限 fail-closed +(c)`EXPLORER_MAX_ITERATIONS` env + explore-sites TDZ 修复 dark ship；restart 693；flags 全 OFF）。**✅ batch-1 figma 真跑落地 `$0.4275`**（2026-06-24，orch 全程 dark、CLI 内联跑、归零自动；详 §7）|
 | **分支** | `claude/musing-keller-ae1d05`（prod 合并主干）|
 | **origin tip = 本地 HEAD** | `dcbb4783`（已 push，无未 push 增量；含 `51b43080`/`85f1d273` browse-试用 + `7b80320e` harness + `dcbb4783` veto 修复）|
 | **SPA** | `8da47b4b`（bundle `index-DiYh_GAx.js`，本工程期间未变）|
@@ -119,6 +119,10 @@
 - **expand-first**：schema migration apply + 只读验表 → 才部署用新列的码（见 §2 铁律 5）。
 - **deploy-preflight 拦 reset**：实读 live HEAD，非祖先拒（避免 reset 丢线上 commit）。
 - **熔断必 fail-closed（cost-source A）**：花钱控制器的成本输入只能 fail-CLOSED。DB 回读（写 llm_calls→读回）fail-OPEN——user 缺/行未写/写失败 → 读到 $0 → 续烧。故 ④ browse 熔断读**进程内累加**（`CostAccumulatingRecorder`，每 turn `+=` 在 await 前同步落账，连 loop 的 fire-and-forget `void record()` 也落）；llm_calls DB 写降 best-effort（finance 明细，失败不动熔断）。配套两闸：① `requireBrowseEnv` 缺 `EXPLORER_USER_EXTERNAL_ID`（recorder 触发门，缺则 record 不 fire→累加 $0→瞎）或 `HEADED_CDP_ENDPOINT` → **spend 前 abort**（4 例测）；② `runExplorerBatch` 非有限/负成本 → **fail-closed halt 整批**（判不准不当 $0 续；有限 0 合法不 trip）。(`explorer.ts`/`explorer-browse-runner.ts`/`cost-accumulating-recorder.ts`)
+- **CLI 入口构造段 TDZ**：`explore-sites.ts --browse` wiring 在 `const logger` 声明**之前**引用它 → 运行时 `Cannot access 'logger' before initialization`，batch-1 首跑崩在 setup（**零烧钱**，崩在 runExplorerBatch/connect/LLM 前）。tsc 被 deferred-closure 引用掩、CLI 脚本无单测 → 双双漏过；**防静默 cost-check（cost>0 + exploration_runs 行）抓住**。修=声明提到 lane branch 前。(`572e4227`)
+- **真跑前 zero-burn dry-run smoke = 常驻闸**：`--browse`（**无 `--run`、无 `EXPLORER_ENABLED`**）会执行 if(browse) wiring 构造但 runExplorerBatch 不真跑 → 零 connect/零 LLM/零烧钱，**专抓 tsc + 静态审漏的 init/TDZ bug**。每次改 explorer 入口、真烧钱前先跑它。
+- **explorer 是 CLI-only —— `EXPLORER_ENABLED` 不是 orch 常驻 flag**：`runExplorerBatch` LOCK1 在**跑 CLI 的进程**里读 `process.env.EXPLORER_ENABLED`；enable=**内联在 CLI 调用**（`EXPLORER_ENABLED=true pnpm tsx scripts/explore-sites.ts …`），**orch 全程真 dark、从不碰**；CLI 一次性退出 → 内联开关随之死 = **归零自动**（无须翻/验 orch flag）。⚠️ 早期文档写的"翻 orch EXPLORER_ENABLED 来 enable / 跑完归零 orch flag"**是错的**，按本条。
+- **运行拓扑 ground-truth**：CLI 跑在 **box（Vultr 新加坡）**——直连 Anthropic（实测 401/0.46s）+ figma，**无 GFW、无须代理**；Astrill 代理（`127.0.0.1:3213`）**只在 BOSS 的 Mac 上、给 git push 绕 GFW 用，box 上不存在**（`HTTPS_PROXY=127.0.0.1:3213` 放 box 会指向空、断掉 Anthropic）。**真跑命令里任何网络/proxy/env 假设，先在 box 上核拓扑（CC 实测）再定，别照搬 Mac 侧。**
 
 ---
 
@@ -151,7 +155,9 @@
 **近场 — browse lane wired + dark ✅，护栏夹具 8/8 PASS（2026-06-24）**：
 - 状态：live-veto 钩子 + clean-context + runBrowseTask + exploration_runs + 红队夹具 + veto 多信号 OR 修复 + **browse lane 接进 `explore-sites.ts --browse`** 全已 **push + dark deploy（orch `6f96bed`，两 explorer flag OFF）**。**真机红队夹具验收 8/8 PASS**（cookies=0 / 四向量真拦 / 安全链接放行 / executor.click spy 敏感=0安全=1 / exploration_runs 写）。veto BLOCKER 闭环（见 §5）。
 - **batch-1 prep 加固 commit local 待审（未部署）**：(a) 非有限成本 fail-closed halt + (c) `EXPLORER_MAX_ITERATIONS` env 可配（默认 25/上限 50，fail-safe+clamp）；(b) accumulator 解耦留 backlog（§6）。审过 dark 部署。
-- **下一步 = batch-1 figma 真跑（首个真烧钱，新授权点）**：browse lane + 熔断 + clean-context 全备。要齐：BOSS 逐项 GO + run-time 给 `EXPLORER_USER_EXTERNAL_ID`（recorder 门）+ 开 `EXPLORER_ENABLED` + `--run --browse --sites=figma.com --batch=…`（cdpEndpoint 自动取 HEADED 9223）+ **跑完立即归零 `EXPLORER_ENABLED`**。在此之前 explorer 绝不真做 live browse。
+- **✅ batch-1 figma 真跑落地（首个 ④ 自主探索真烧钱，2026-06-24）**：`$0.4275`（三方一致 accumulator=exploration_runs id=3=llm_calls 25turn 求和 → cost-source A 端到端验）；**零 veto 命中**（figma.com/pricing/design 全公开页、无敏感动作可拦，clean-context 零凭据）；**未 halt**（跑满 `maxIterations=25`、status=failed=未完成、$5 熔断未触）；**归零自动**（CLI 退出、orch 全程 dark 没碰、clean-context disposed）。跑法=CLI 内联 `EXPLORER_ENABLED=true EXPLORER_USER_EXTERNAL_ID=<id>`（box 直连、无代理）。
+- **校准**：`$0.017/turn` → `$5` 熔断 ≈ 290turn = 合理异常 backstop，**真正有效闸是 maxIterations**；figma 25turn 没自宣 done（模型逛营销页没收敛）→ **browse intent 调优** 进 backlog。
+- **下一步（逐项 GO）**：① **记账切系统身份**（`EXPLORER_USER_EXTERNAL_ID` 是自由串=breaker/exploration_runs 用；llm_calls 明细须有效 users.externalId FK，非则丢弃 → batch-2 用 `playbook-explorer` 自由串归 exploration_runs，或建一行系统 users 行拿 llm_calls 明细，BOSS 拍）② batch-2 加站（ctrip 等）③ maxIter/intent 校准 ④ 把 figma 轨迹走 ①crystallize 落 draft path。在此之前 explorer 绝不自动跑（orch 永 dark、每次真跑 BOSS 逐项 GO + 内联 CLI env + 跑完退出归零）。
 
 **中场 — 专属账号 + Credential Vault 阶段**：护栏验通后才配钥匙进"登录后世界"（veto 要求更高）；可并行让人去注册专属账号（v1 绝不碰登录态/凭据）。
 
