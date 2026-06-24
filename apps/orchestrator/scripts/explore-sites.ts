@@ -83,6 +83,20 @@ if (fcKey) {
 const siteRepo = new SiteRepository(db);
 const playbookRepo = new PlaybookRepository(db);
 
+// Declared BEFORE the lane branch below — the --browse wiring references `logger` + the
+// prior-spend bases at construction time; declaring them AFTER the block was a runtime TDZ
+// (`Cannot access 'logger' before initialization`) that tsc + the suite missed (the CLI
+// script is not unit-tested). The --browse dry-run smoke now exercises this wiring.
+const logger = {
+  info: (o: unknown, m: string) => console.log(`[explorer] ${m}`, o),
+  warn: (o: unknown, m: string) => console.warn(`[explorer] ⚠️ ${m}`, o),
+};
+// Per-day / per-month breaker bases: prior cumulative explorer spend today / this month.
+// v1 returns 0 — TODO: sum exploration_runs.metadata_json.costUsd for the day / month so
+// the breakers survive across batches (within-batch already enforced).
+const readPriorDaySpendUsd = async (): Promise<number> => 0;
+const readPriorMonthSpendUsd = async (): Promise<number> => 0;
+
 let exploreSite: (domain: string) => Promise<ExploreSiteOutcome>;
 if (browse) {
   // ── ④ browse-试用 lane ──────────────────────────────────────────────────────────
@@ -185,17 +199,6 @@ if (browse) {
   // DEFAULT lane — doc-first (Firecrawl scrape; no browser, no live actions). Unchanged.
   exploreSite = makeDocFirstExploreSite({ scrapeDoc, siteRepo, capabilityRepo: playbookRepo });
 }
-
-// Per-day / per-month breaker bases: prior cumulative explorer spend today / this
-// month. v1 returns 0 — TODO: sum exploration_runs.metadata_json.costUsd for the
-// day / month so the breakers survive across batches (within-batch already enforced).
-const readPriorDaySpendUsd = async (): Promise<number> => 0;
-const readPriorMonthSpendUsd = async (): Promise<number> => 0;
-
-const logger = {
-  info: (o: unknown, m: string) => console.log(`[explorer] ${m}`, o),
-  warn: (o: unknown, m: string) => console.warn(`[explorer] ⚠️ ${m}`, o),
-};
 
 console.log(
   `[explorer] mode=${dryRun ? 'DRY-RUN (no dispatch/spend)' : '🔴 RUN'} lane=${browse ? 'browse(live-veto+clean-context)' : 'doc-first'} batch=${batchId} sites=[${seedSites.join(', ') || '(none)'}]`,
