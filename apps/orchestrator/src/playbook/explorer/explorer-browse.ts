@@ -154,6 +154,7 @@ export function makeBrowseExploreSite(
         status: 'halted_sensitive',
         costUsd,
         note: `live-veto: ${state.vetoed.reason} — action refused (not executed), site stopped`,
+        ...(result.summary ? { summary: result.summary } : {}), // ③ breakpoint evidence (走到哪/被 veto 停) — MUST survive the veto path
       };
     }
     if (result.status === 'completed') {
@@ -170,6 +171,7 @@ export function makeBrowseExploreSite(
       status: 'failed',
       costUsd,
       note: `browse: task ${result.status}${result.reason ? ` — ${result.reason}` : ''}`,
+      ...(result.summary ? { summary: result.summary } : {}), // ③ breakpoint evidence (走到哪/为什么停) — MUST survive the failed path too
     };
   };
 }

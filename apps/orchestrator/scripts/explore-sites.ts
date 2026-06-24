@@ -157,6 +157,19 @@ if (browse) {
     );
   }
 
+  // 🛡️ Batch resilience (browse-only): a stray background-op rejection (e.g. a Playwright op
+  // rejecting after its page/context was torn down) must NOT kill the whole CLI mid-batch — that
+  // abandons the remaining sites + leaves a stuck 'running' row (figma, browse-task-20260625
+  // crashed the batch via an unhandled rejection at exit 1). Log it (so the actual error is
+  // captured next time) and keep the batch alive; the per-browse hard wall + per-site status-update
+  // still bound each site. Registered ONLY on the browse path (doc-first default stays untouched).
+  process.on('unhandledRejection', (reason) => {
+    logger.warn(
+      { reason: reason instanceof Error ? `${reason.message}\n${reason.stack ?? ''}` : String(reason) },
+      'explorer CLI: unhandledRejection swallowed — batch kept alive (does not abort remaining sites)',
+    );
+  });
+
   const runBrowseTask = makeRunBrowseTask({
     cdpEndpoint,
     // Fresh executor per browse → each site gets its own isolated clean context.

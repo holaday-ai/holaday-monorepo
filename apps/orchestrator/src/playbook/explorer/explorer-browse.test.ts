@@ -115,6 +115,35 @@ describe('makeBrowseExploreSite — live-veto really refuses + halts', () => {
     expect(executed).toHaveLength(3);
   });
 
+  it('③ forwards the breakpoint summary on the VETO-halt path (was dropped → null in prod)', async () => {
+    const out = await makeBrowseExploreSite({
+      runBrowseTask: async ({ onBeforeAction }) => {
+        onBeforeAction({ kind: 'click', label: '登录' }); // trips state.vetoed
+        return {
+          status: 'failed',
+          costUsd: 0.25,
+          reason: 'click blocked: sensitive',
+          summary: '停止原因：veto 边界拦停。已走 11 步：1.navigate → ...',
+        };
+      },
+    })('ctrip.com');
+    expect(out.status).toBe('halted_sensitive');
+    expect(out.summary).toContain('veto 边界拦停'); // breakpoint evidence survives the veto path
+  });
+
+  it('③ forwards the breakpoint summary on the FAILED path too', async () => {
+    const out = await makeBrowseExploreSite({
+      runBrowseTask: async () => ({
+        status: 'failed',
+        costUsd: 0.1,
+        reason: 'browse hard deadline exceeded',
+        summary: '停止原因：硬超时 force-abort。已走 5 步：...',
+      }),
+    })('x.com');
+    expect(out.status).toBe('failed');
+    expect(out.summary).toContain('硬超时'); // breakpoint evidence survives the failed path
+  });
+
   it('a non-veto task failure maps to failed (not halted_sensitive)', async () => {
     const out = await makeBrowseExploreSite({
       runBrowseTask: async () => ({ status: 'failed', costUsd: 0.05, reason: 'timeout' }),
