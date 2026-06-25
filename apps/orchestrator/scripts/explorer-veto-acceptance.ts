@@ -176,6 +176,9 @@ try {
   // 证明条件加厚：base RE 不动（免登录 allowed=不拦），login mode 并上 EXTRA_RE（vetoed）。这些
   // 控件（分享/转账/删除文件）只在登录后存在；登录态自学时必须被 veto。零真会话——纯分类器层证明
   // （storageState 连接路径由 explorer-browse-runner.test.ts 单测覆盖）。
+  // ⚠️ 向量 5 点了安全链接 → 页面已导航到 ?p=docs。先 RE-GOTO 回干净夹具，否则 page.$ 撞导航竞态
+  // （execution context destroyed）。re-goto 不点击 → innerClick 不变（spy 仍 1）。
+  await page.goto(FIXTURE, { waitUntil: 'domcontentloaded' });
   for (const [sel, name] of [
     ['#login-share', '分享'],
     ['#login-transfer', '转账'],
