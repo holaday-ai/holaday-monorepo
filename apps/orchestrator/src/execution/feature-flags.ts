@@ -88,6 +88,12 @@ interface FeatureFlags {
    * product lane (reuse/replay is a later phase), so this is ZERO live-user impact. Default OFF.
    */
   USER_TASK_CRYSTALLIZE: boolean;
+  /**
+   * Cosmic/Astrology module. When true, the orchestrator exposes
+   * astrology-backed readings through tRPC. Default OFF so production
+   * can merge the UI and API boundary before enabling a paid provider.
+   */
+  ASTROLOGY: boolean;
 }
 
 function readFlagsFromEnv(): FeatureFlags {
@@ -101,6 +107,7 @@ function readFlagsFromEnv(): FeatureFlags {
     ACTION_CAPTURE: process.env.ACTION_CAPTURE_ENABLED === 'true',
     B4_SCREENSHOT_ANCHOR: process.env.B4_SCREENSHOT_ANCHOR_ENABLED === 'true',
     USER_TASK_CRYSTALLIZE: process.env.USER_TASK_CRYSTALLIZE_ENABLED === 'true',
+    ASTROLOGY: process.env.ASTROLOGY_ENABLED === 'true',
   };
 }
 
