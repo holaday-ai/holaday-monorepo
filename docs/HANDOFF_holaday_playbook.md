@@ -11,9 +11,9 @@
 
 | 项 | 值 |
 |---|---|
-| **运行 orch（PROD LIVE REF）** | `572e422`（④ browse lane wired + batch-1 prep 加固 (a)非有限 fail-closed +(c)`EXPLORER_MAX_ITERATIONS` env + explore-sites TDZ 修复 dark ship；restart 693；flags 全 OFF）。**✅ batch-1 figma 真跑落地 `$0.4275`**（2026-06-24，orch 全程 dark、CLI 内联跑、归零自动；详 §7）|
+| **运行 orch（PROD LIVE REF）** | `ea2b6d1`（origin tip `69ab05e4`；④ **A 登录自学 4 接点 + B1 接结晶** + Bug A/B + connect-超时/重试 + 始终断点 summary + 硬超时(per-op 45s/per-browse 420s) + intent v2，全 dark ship；restart 706）。**B1 LIVE**（`USER_TASK_CRYSTALLIZE_ENABLED=true`，2026-06-25）；`EXPLORER_ENABLED`/`LOGIN_EXPLORER_ENABLED` 仍 OFF。详 §7 |
 | **分支** | `claude/musing-keller-ae1d05`（prod 合并主干）|
-| **origin tip = 本地 HEAD** | `dcbb4783`（已 push，无未 push 增量；含 `51b43080`/`85f1d273` browse-试用 + `7b80320e` harness + `dcbb4783` veto 修复）|
+| **origin tip = 本地 HEAD** | `69ab05e4`（已 push；A 登录自学+B1 `053f29b5` → harness 修 `ea2b6d1` → docs `69ab05e4`）|
 | **SPA** | `8da47b4b`（bundle `index-DiYh_GAx.js`，本工程期间未变）|
 | **edge** | holaday.ai → Vultr 直连（无 CF 层）；orch+SPA 同机 207.148.70.106，PM2+Nginx（剥 `/api/`）|
 
@@ -24,8 +24,10 @@
 | `ACTION_CAPTURE_ENABLED` | **true** | B2 每动作多信号捕获 → `task_action_captures`（结晶料源）|
 | `B4_SCREENSHOT_ANCHOR_ENABLED` | **true** | B4 关键步截图锚 → R2 + evidence_artifacts(manual_hold) + 回填 capture |
 | `B3_FIXTURE_ENABLED` | **false** | B3 跨域 iframe 验收夹具（验完关；路由码留待 B 阶段清）|
-| `EXPLORER_ENABLED` | **缺失 = OFF** | ④ explorer 主开关 = 自动烧钱总闸；**未设 = explorer 绝不跑** |
-| `EXPLORER_VETO_FIXTURE_ENABLED` | **=false（验收后关回，进程+.env 实证、路由 404）** | browse-试用 护栏红队夹具；2026-06-23 翻 true 验收 8/8 后内联 `=false` 关回 dark |
+| `EXPLORER_ENABLED` | **缺失 = OFF** | ④ explorer（免登录）主开关 = 自动烧钱总闸；**未设 = explorer 绝不跑** |
+| `LOGIN_EXPLORER_ENABLED` | **缺失 = OFF** | **A 登录自学主开关**（正交 EXPLORER_ENABLED、绝不随其自动开）；fail-closed 缺 `LOGIN_EXPLORER_STORAGE_STATE`（测试号 session 文件）即 abort。真跑需 BOSS 出 storageState |
+| `USER_TASK_CRYSTALLIZE_ENABLED` | **true（2026-06-25 翻，B1 LIVE）** | **B1 接结晶**：index.ts 6h gated cron → `crystallizeTasks(dryRun:false)` 结晶 completed 任务（user+explorer、无 origin 过滤）→ draft operation_paths。**write-only sink、没人读回（B2/B3 未建）→ 零 live 影响**；幂等 by source_task_id |
+| `EXPLORER_VETO_FIXTURE_ENABLED` | **=false（验收后关回，进程+.env 实证、路由 404）** | browse-试用 护栏红队夹具（含 A4 登录态向量 分享/转账/删除+伪登录横幅）；翻 true 跑 acceptance（**11/11 PASS** 2026-06-25）后关回 dark |
 | `EXPLORER_BREAKER_*` | **缺失 = 用默认** | 三层熔断阈值，默认即 §4 真值（$5/$3/$50/$200/×1.2）|
 | `RETENTION_REAPER_ENABLED` | **true** | evidence_artifacts 留存清理器（删 `expires_at<=now AND retention_policy!='manual_hold'`；留存 `LEDGER_RETENTION_DAYS` 默认 60d）|
 | `LEDGER_DB_WRITE_ENABLED` | **true** | 终态把 in-memory ledger 镜像进 evidence_artifacts/claims/links |
@@ -37,7 +39,7 @@
 **Migration：最新 `0037`**（`0037_phase1_crystallization_provenance` = operation_paths +source_task_id/metadata_json、operation_path_steps +frame_path；`0036`=task_action_captures；`0035`=video self-use consent）。
 机制：`pnpm db:migrate:numbered`（`scripts/apply-numbered-migrations.ts`）**无 `__drizzle_migrations` 追踪表 → 每次重跑全部 `00NN_*.sql`**；`SKIPPABLE_ERROR_CODES`(ER_DUP_FIELDNAME/ER_DUP_KEYNAME/ER_FK_DUP_NAME + `/already exists/`) 跳已建。所以 `applied=N` 里 N>本次新增语句数 = benign（老 migration 重跑计入幂等 DDL）；**真相以「只读验表」为准，不看 count**。`db:generate` 会重emit 全量 schema = 错工具，迁移一律手写编号 SQL。expand-first：schema 先 apply+验表，后部署用它的码。
 
-**Pack A 数据现状**（结晶产物）：`operation_paths=7` / `operation_path_steps=17` / `sites=5`（example.com、holaday.ai、figma.com、ctrip.com + **veto-fixture.local（夹具验收测试行，可清）**）/ `site_capabilities=4` / `exploration_runs=2`（**均为护栏夹具两次跑写的 halted_sensitive 测试行，可清**；doc-first/真 browse 尚无）/ `task_action_captures=22`。
+**Pack A 数据现状**（结晶产物，2026-06-25 B1 翻开后）：`operation_paths=11`（**by source origin：user=8 / explorer=3**；user 含 `tsk_2GMnW`→`opath_NY2…` draft v6 实证、example.com/iframe-fixt 测试夹具任务 caps2-4）/ `site_capabilities`+`operation_path_steps` 随之 / `sites`（example.com、holaday.ai、figma.com、ctrip.com + veto-fixture.local 夹具行）/ `exploration_runs`（含免登录四类真跑：ctrip/figma/todoist/douyin halted/completed/failed + 断点 summary）/ `task_action_captures`（user+explorer 轨迹）。**注**：当前 user 语料仍是测试/QA 夹具（非真实 post-login 路径）；B1 cron 6h 自动蒸新 completed（真价值待真实用户授权任务沉淀）。
 
 ---
 
@@ -152,6 +154,18 @@
 ---
 
 ## §7 下一步（断点精确）
+
+**🏁 会话末态（2026-06-25）— 免登录验透 + A 登录预热 dark + B1 LIVE**：
+- **免登录 explorer 四类验透**：ctrip/figma/todoist/douyin 全跑过、全终止路径（done/maxIter/软超时/硬 abort/veto-halt/connect-fail）出**非空断点证据**。**核心实证：免登录全停在登录墙、够不到 post-login 真实操作路径**（ctrip/douyin 都 veto 拦在登录控件、figma/todoist 跑公开页）。途中修了 connect-超时/重试（figma site-to-site 起来）+ Bug A(summary 转发)+Bug B(unhandledRejection 守卫)+始终断点 summary。
+- **A 登录预热 dark + 硬闸 11/11**：四接点（`LOGIN_EXPLORER_ENABLED` 独立锁 / login-ctx storageState 三隔离 / `SENSITIVE_LABEL_EXTRA_RE` veto 加厚 / fixture 登录态向量）上线 dark。真-DOM acceptance **11/11 PASS**（向量7：同控件免登录放行/登录态拦、spy=1）。**凭据模型**：agent 继承 BOSS 手建测试号 storageState、不登录不碰凭据。**待 BOSS 专属机就绪导出 storageState → figma 登录预热首跑**（翻 `LOGIN_EXPLORER_ENABLED=true` + `LOGIN_EXPLORER_STORAGE_STATE` 指文件）。
+- **B1 接结晶 LIVE**：`USER_TASK_CRYSTALLIZE_ENABLED=true`，6h cron 结晶 completed 任务→draft operation_paths（write-only、零 live、幂等）。实证 user 轨迹 `tsk_2GMnW`→`opath_NY2…` draft v6。当前 user 语料=测试夹具，真价值待真实用户授权任务沉淀。
+- **B2/B3 复用回灌**：设计就绪（影子模式先行/质量闸/灰度真喂），**未建**——是**全工程唯一真碰 live 用户路径**的一步，等 B1 攒真实语料后实现。
+- **战略（登录线）**：免登录够不到 post-login → 两条互补 = **A 登录预热**（赶在真实用户前预热站点 post-login、保首次时效+成功率）+ **B 产品 lane 闭环**（真实流量持续学）。
+- **安全线（钉死）**：登录自学**只用测试小号**（无真实数据/不绑支付）+ 专属机 + veto 加厚三层、**绝不碰真实用户凭据**。梯队 figma(首)→SaaS→交易/社交加厚。
+- **三个待 BOSS 关口**：① 专属机就绪→figma 登录预热首跑 ② B1 攒够真实语料→B2 影子转灰度真喂 ③ 登录梯队放行（SaaS→交易/社交）。
+- **设计文档（BOSS 手上）**：login_explorer_design_risk_v2 / A_login_explorer_impl_design_v1 / AB_design_v1 / B2B3_shadow_design_v1。
+
+---
 
 **近场 — browse lane wired + dark ✅，护栏夹具 8/8 PASS（2026-06-24）**：
 - 状态：live-veto 钩子 + clean-context + runBrowseTask + exploration_runs + 红队夹具 + veto 多信号 OR 修复 + **browse lane 接进 `explore-sites.ts --browse`** 全已 **push + dark deploy（orch `6f96bed`，两 explorer flag OFF）**。**真机红队夹具验收 8/8 PASS**（cookies=0 / 四向量真拦 / 安全链接放行 / executor.click spy 敏感=0安全=1 / exploration_runs 写）。veto BLOCKER 闭环（见 §5）。

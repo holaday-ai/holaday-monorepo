@@ -10,6 +10,25 @@
 <!-- 固定维护：每次部署后由部署者更新这一行（硬规则 7）。改 ref 前必实读 live HEAD。 -->
 ## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05` — orch `ea2b6d1`（**④ A 登录自学(4接点,硬闸11/11)+B1接结晶(cron,无origin障碍) / Bug A(summary转发)+B(unhandledRejection守卫) + fix-set(connect-超时60s+1重试 / 始终断点 summary) + intent 深化 v2(任务导向+种子+断点报告持久化) + 硬超时 fix（per-op 45s clean-mode + per-browse 420s 硬墙 force-dispose + 超时落 failed 无 stuck 行）dark ship · restart 695 · `EXPLORER_ENABLED`+`EXPLORER_VETO_FIXTURE_ENABLED` 都 OFF（进程实证、fixture 404）=绝不跑 · 硬超时只在 clean-mode/explorer adapter、共享 context=用户任务路径不变** · ④ 自学习闭环真站端到端验通(figma-rerun $0.1427) · 捕获环(→crystallize) + intent 收敛 + 记账 id=16 平台桶 · batch-1 figma $0.4275 · cost-source A fail-closed 熔断 +(a)非有限 +(c)EXPLORER_MAX_ITERATIONS env + requireBrowseEnv abort · 护栏夹具 8/8 · veto 多信号 OR · ① crystallize · totalUsers 排系统行 · migration 0037 · ACTION_CAPTURE+B4 ON · B3_FIXTURE OFF）/ SPA `8da47b4b`（未变）
 
+<!-- 2026-06-25 会话归档 — ④ 自学习: 免登录验透 + A 登录预热 dark + B1 LIVE + 战略/安全线 -->
+**📌 会话归档（2026-06-25）— ④ 自学习现状 + 登录线战略**
+
+**PROD 基线**：orch `ea2b6d1`（origin tip `69ab05e4`）。flags：`EXPLORER_ENABLED` **OFF** / `LOGIN_EXPLORER_ENABLED` **OFF** / `USER_TASK_CRYSTALLIZE_ENABLED` **ON（B1 live）**。
+
+**④ 自学习现状**：
+- **免登录 explorer**：四类（ctrip/figma/todoist/douyin）验透、全终止路径（done/maxIter/软超时/硬 abort/veto-halt/connect-fail）出**非空断点证据**、dark。**四类实证：免登录全停在登录墙、够不到 post-login 真实操作路径。**
+- **A 登录预热**：四接点（独立 flag `LOGIN_EXPLORER_ENABLED` / login-ctx `storageState` 三隔离 / `SENSITIVE_LABEL_EXTRA_RE` veto 加厚 / fixture 登录态向量）dark 上线、**真-DOM 硬闸 11/11 验过**（向量7：同控件免登录放行 / 登录态 EXTRA_RE 拦、spy innerClick=1）。凭据模型：agent 继承 BOSS 手建测试号 `storageState`、不登录不碰凭据。**等 BOSS 专属机就绪导出 storageState → figma 首跑。**
+- **B1 接结晶**：**LIVE**。`USER_TASK_CRYSTALLIZE_ENABLED=true` → index.ts 6h gated cron → `crystallizeTasks(dryRun:false)`（结晶器内部不改、幂等 by source_task_id）结晶 completed 任务（user+explorer、**无 origin 过滤**）→ draft `operation_paths`。**write-only sink、没人读回（B2/B3 未建）→ 零 live 影响**。user 轨迹已实证结晶（`tsk_2GMnW`→`opath_NY2LbMUzAxSTNJPnrNVZK` draft v6 origin=user；operation_paths 7→11、幂等重跑 0 新写）。
+- **B2/B3 复用回灌**：设计就绪（影子模式先行 / 质量闸 / 灰度真喂）。**未建**。是全工程**唯一真碰 live 用户路径**的一步。等 B1 攒出真实语料 → 实现。
+
+**战略决策（登录线）**：四类证据→免登录够不到 post-login 真实路径 → 两条互补：**A 登录预热**（赶在真实用户前预热操作站 post-login、保首次时效+成功率）+ **B 产品 lane 闭环**（真实流量持续学）。
+
+**安全线（钉死）**：登录自学**只用测试小号**（无真实数据 / 不绑支付）+ 专属机 + veto 加厚三层、**绝不碰真实用户凭据**。梯队：figma（首）→ SaaS → 交易/社交加厚。
+
+**三个待 BOSS 关口**：① 专属机就绪 → figma 登录预热首跑 ② B1 攒够真实语料 → B2 影子转灰度真喂 ③ 登录梯队放行（SaaS → 交易/社交）。
+
+**设计文档引用（BOSS 手上）**：login_explorer_design_risk_v2 / A_login_explorer_impl_design_v1 / AB_design_v1 / B2B3_shadow_design_v1。
+
 <!-- 2026-06-25 — Playbook ④ A 登录自学(4接点) + B1 接结晶 dark ship -->
 **✅ ④ A 登录自学 + B1 接结晶 dark ship（orch `ea2b6d1`，restart 706，全新 flag OFF）**。**A 登录自学（4 接点，CLI-only，第4把独立锁，正交 EXPLORER_ENABLED）**：①`LOGIN_EXPLORER_ENABLED`(默认OFF,fail-closed 缺 storageState 即 abort)②connect opts 加 storageState→独立 login-ctx(与空clean-ctx/contexts()[0]三隔离),login mode 跳过 assertCleanContext③veto 加厚 `SENSITIVE_LABEL_EXTRA_RE`(资金转账/提现/绑卡·不可逆解绑/注销/删除·发布公开/分享/邀请/授权),`classifyExplorerAction(a,{loginMode})` 条件 OR,base 正则+submit/password 不动④fixture 加 分享/转账/删除+伪登录横幅+harness 向量7。**真-DOM 硬闸 11/11 PASS**(向量7:同控件免登录放行/登录态EXTRA_RE拦,spy innerClick=1)。修过 harness 导航竞态(ea2b6d1,test-only)。**B1 接结晶**:`USER_TASK_CRYSTALLIZE_ENABLED`(默认OFF)→index.ts 6h gated cron→`crystallizeTasks` **内部不改**、幂等、请求路径外→write-only sink 零 live 影响。**B1 成色**:crystallizer **无 origin 过滤**(user 轨迹 tsk_2GMnW 真结晶得了),但当前 8 个 user 任务是测试/QA 夹具(example.com/iframe-fixt,caps2-4,7/8已结晶)→真语料待真实用户跑授权任务。**未建 B2/B3 复用回灌**(operation_paths 仍写汇没人读,以后单走)。+5+1 测、3043 绿。**真跑 A 需 BOSS 出测试号 storageState**(`LOGIN_EXPLORER_STORAGE_STATE`,不进对话)。以下为上一里程碑：
 
