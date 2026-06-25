@@ -184,10 +184,10 @@ const FALLBACK_PROFILE: AstroProfile = {
   zodiacSign: 'aries',
 };
 
-export function readAstroProfile(): AstroProfile | null {
+export function readAstroProfile(storageScope?: string | null): AstroProfile | null {
   if (typeof window === 'undefined') return null;
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = window.localStorage.getItem(profileStorageKey(storageScope));
     if (!raw) return null;
     return normalizeProfile(JSON.parse(raw) as Partial<AstroProfile>);
   } catch {
@@ -195,19 +195,22 @@ export function readAstroProfile(): AstroProfile | null {
   }
 }
 
-export function saveAstroProfile(profile: AstroProfile): void {
+export function saveAstroProfile(
+  profile: AstroProfile,
+  storageScope?: string | null,
+): void {
   if (typeof window === 'undefined') return;
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(profile));
+    window.localStorage.setItem(profileStorageKey(storageScope), JSON.stringify(profile));
   } catch {
     /* localStorage can be disabled or full. */
   }
 }
 
-export function clearAstroProfile(): void {
+export function clearAstroProfile(storageScope?: string | null): void {
   if (typeof window === 'undefined') return;
   try {
-    window.localStorage.removeItem(STORAGE_KEY);
+    window.localStorage.removeItem(profileStorageKey(storageScope));
   } catch {
     /* localStorage can be disabled. */
   }
@@ -355,6 +358,12 @@ function normalizeProfile(input: Partial<AstroProfile>): AstroProfile | null {
     birthPlace: input.birthPlace?.trim() ?? '',
     zodiacSign: input.zodiacSign,
   };
+}
+
+function profileStorageKey(storageScope?: string | null): string {
+  const scope = storageScope?.trim();
+  if (!scope) return STORAGE_KEY;
+  return `${STORAGE_KEY}.${encodeURIComponent(scope)}`;
 }
 
 function buildWeek(seed: number): AstroDay[] {

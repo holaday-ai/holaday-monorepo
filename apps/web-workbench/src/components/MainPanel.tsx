@@ -79,6 +79,7 @@ interface Props {
   sidePanelMode?: SidePanelMode;
   browserAttentionNeeded?: boolean;
   onToggleSidePanel?: () => void;
+  profileStorageScope?: string | null;
 }
 
 /**
@@ -106,6 +107,7 @@ export function MainPanel({
   sidePanelMode = 'closed',
   browserAttentionNeeded = false,
   onToggleSidePanel,
+  profileStorageScope = null,
 }: Props): JSX.Element {
   // Suggestion-chip clicks (empty-state EmptyState picks + the
   // "继续探索" chips inside TaskStream) prefill the composer instead
@@ -252,6 +254,7 @@ export function MainPanel({
                 <TaskStream
                   task={task}
                   onPickSuggestion={handlePickFromTaskSummary}
+                  profileStorageScope={profileStorageScope}
                 />
               </React.Suspense>
             </LazyLoadBoundary>

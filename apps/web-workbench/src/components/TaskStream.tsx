@@ -119,6 +119,7 @@ interface Props {
    * follow-up auto-detection inherits parent context.
    */
   onPickSuggestion?: (intent: string) => void;
+  profileStorageScope?: string | null;
 }
 
 // Stable empty-array reference so the zustand selector below returns
@@ -166,6 +167,7 @@ function hasPausedTerminalResult(task: UiTask): boolean {
 export function TaskStream({
   task,
   onPickSuggestion,
+  profileStorageScope = null,
 }: Props): JSX.Element {
   const steps = useTaskStore((s) => s.stepsByTask[task.taskId]) ?? EMPTY_STEPS;
   const userReplies =
@@ -243,6 +245,7 @@ export function TaskStream({
         awaitingUser={awaitingUser}
         webSearch={webSearch}
         serverSuggestions={serverSuggestions}
+        profileStorageScope={profileStorageScope}
       />
 
       <div ref={scrollAnchorRef} />
@@ -295,6 +298,7 @@ function AgentBlock({
   awaitingUser,
   webSearch,
   serverSuggestions,
+  profileStorageScope,
 }: {
   task: UiTask;
   steps: UiStep[];
@@ -309,6 +313,7 @@ function AgentBlock({
   awaitingUser: UiAwaitingUser | undefined;
   webSearch: UiWebSearchEvent | undefined;
   serverSuggestions?: string[];
+  profileStorageScope?: string | null;
 }): JSX.Element {
   const [detailOpen, setDetailOpen] = React.useState(false);
   // Phase 24 RC follow-up — generate / scrape streaming output. The
@@ -452,6 +457,7 @@ function AgentBlock({
             intent={task.intent}
             status={task.status}
             surface="waiting"
+            profileStorageScope={profileStorageScope}
           />
         )}
 
@@ -566,6 +572,7 @@ function AgentBlock({
             intent={task.intent}
             status={task.status}
             surface="complete"
+            profileStorageScope={profileStorageScope}
           />
         )}
         {/* Phase 11 QA #11 — terminal-but-empty fallback. Catches the

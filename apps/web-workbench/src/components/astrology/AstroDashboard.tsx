@@ -95,11 +95,15 @@ const EXPERIENCE_CARDS = [
 
 export function AstroDashboard({
   liveProvider = false,
+  profileStorageScope = null,
 }: {
   liveProvider?: boolean;
+  profileStorageScope?: string | null;
 }): JSX.Element {
+  const storageScope = profileStorageScope?.trim() || null;
+  const canUseProfileStorage = !liveProvider || Boolean(storageScope);
   const [profile, setProfile] = React.useState<AstroProfile | null>(() =>
-    readAstroProfile(),
+    canUseProfileStorage ? readAstroProfile(storageScope) : null,
   );
   const [cardIndex, setCardIndex] = React.useState(0);
   const [selectedMood, setSelectedMood] =
@@ -125,6 +129,10 @@ export function AstroDashboard({
   );
   const activeCard = reading.waitingCards[cardIndex % reading.waitingCards.length];
   const activeMood = MOODS.find((mood) => mood.id === selectedMood) ?? MOODS[0];
+
+  React.useEffect(() => {
+    setProfile(canUseProfileStorage ? readAstroProfile(storageScope) : null);
+  }, [canUseProfileStorage, storageScope]);
 
   const refreshProvider = React.useCallback(async () => {
     if (!liveProvider) {
@@ -174,12 +182,12 @@ export function AstroDashboard({
   }, [refreshProvider]);
 
   function handleSave(next: AstroProfile): void {
-    saveAstroProfile(next);
+    if (canUseProfileStorage) saveAstroProfile(next, storageScope);
     setProfile(next);
   }
 
   function handleReset(): void {
-    clearAstroProfile();
+    if (canUseProfileStorage) clearAstroProfile(storageScope);
     setProfile(null);
   }
 
