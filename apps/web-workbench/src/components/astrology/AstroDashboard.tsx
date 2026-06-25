@@ -8,6 +8,7 @@ import {
   Eraser,
   Gauge,
   Heart,
+  Loader2,
   MoonStar,
   Orbit,
   Palette,
@@ -32,6 +33,8 @@ import {
   type AstroProfile,
   type ZodiacSign,
 } from '@/lib/astrology';
+import { pageErrorMessage } from '@/lib/page-error-copy';
+import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 
 const MOODS = [
@@ -40,12 +43,23 @@ const MOODS = [
   { id: 'soft', label: '慢一点', hint: '适合整理和收尾' },
 ] as const;
 
+type LocalReading = ReturnType<typeof buildAstroReading>;
+type ProviderReading = Awaited<ReturnType<typeof trpc.astrology.daily.query>>;
+type TarotReading = Awaited<ReturnType<typeof trpc.astrology.tarot.query>>;
+
+interface ProviderState {
+  reading: ProviderReading | null;
+  tarot: TarotReading | null;
+  loading: boolean;
+  error: string | null;
+}
+
 const EXPERIENCE_CARDS = [
   {
     icon: Orbit,
     title: '完整星盘',
     body: '太阳、月亮、上升、宫位和行星解释，适合做长期个人档案。',
-    source: 'AstrologyAPI / Prokerala',
+    source: 'DivineAPI / Western',
   },
   {
     icon: Users,
@@ -79,19 +93,85 @@ const EXPERIENCE_CARDS = [
   },
 ] as const;
 
-export function AstroDashboard(): JSX.Element {
+export function AstroDashboard({
+  liveProvider = false,
+}: {
+  liveProvider?: boolean;
+}): JSX.Element {
   const [profile, setProfile] = React.useState<AstroProfile | null>(() =>
     readAstroProfile(),
   );
   const [cardIndex, setCardIndex] = React.useState(0);
   const [selectedMood, setSelectedMood] =
     React.useState<(typeof MOODS)[number]['id']>('clear');
-  const reading = React.useMemo(
-    () => buildAstroReading(profile ?? createProfileFromBirthday({ birthday: '1996-03-21' })),
+  const requestIdRef = React.useRef(0);
+  const [providerState, setProviderState] = React.useState<ProviderState>({
+    reading: null,
+    tarot: null,
+    loading: false,
+    error: null,
+  });
+  const effectiveProfile = React.useMemo(
+    () => profile ?? createProfileFromBirthday({ birthday: '1996-03-21' }),
     [profile],
+  );
+  const localReading = React.useMemo(
+    () => buildAstroReading(effectiveProfile),
+    [effectiveProfile],
+  );
+  const reading = React.useMemo(
+    () => mergeProviderReading(localReading, providerState.reading),
+    [localReading, providerState.reading],
   );
   const activeCard = reading.waitingCards[cardIndex % reading.waitingCards.length];
   const activeMood = MOODS.find((mood) => mood.id === selectedMood) ?? MOODS[0];
+
+  const refreshProvider = React.useCallback(async () => {
+    if (!liveProvider) {
+      setProviderState({ reading: null, tarot: null, loading: false, error: null });
+      return;
+    }
+    const requestId = ++requestIdRef.current;
+    setProviderState((current) => ({ ...current, loading: true, error: null }));
+    try {
+      const [remoteReading, remoteTarot] = await Promise.all([
+        trpc.astrology.daily.query({
+          name: effectiveProfile.name,
+          birthday: effectiveProfile.birthday,
+          birthTime: effectiveProfile.birthTime,
+          birthPlace: effectiveProfile.birthPlace,
+          zodiacSign: effectiveProfile.zodiacSign,
+          locale: 'zh-CN',
+        }),
+        trpc.astrology.tarot.query({
+          zodiacSign: effectiveProfile.zodiacSign,
+          locale: 'zh-CN',
+        }),
+      ]);
+      if (requestId !== requestIdRef.current) return;
+      setProviderState({
+        reading: remoteReading,
+        tarot: remoteTarot,
+        loading: false,
+        error: null,
+      });
+    } catch (err) {
+      if (requestId !== requestIdRef.current) return;
+      setProviderState({
+        reading: null,
+        tarot: null,
+        loading: false,
+        error: pageErrorMessage(err),
+      });
+    }
+  }, [effectiveProfile, liveProvider]);
+
+  React.useEffect(() => {
+    void refreshProvider();
+    return () => {
+      requestIdRef.current += 1;
+    };
+  }, [refreshProvider]);
 
   function handleSave(next: AstroProfile): void {
     saveAstroProfile(next);
@@ -110,15 +190,26 @@ export function AstroDashboard(): JSX.Element {
         <AstroProfilePanel profile={profile} onSave={handleSave} onReset={handleReset} />
       </div>
 
-      <HoroscopePanel reading={reading} />
+      <HoroscopePanel
+        liveProvider={liveProvider}
+        providerState={providerState}
+        reading={reading}
+        onRefresh={() => void refreshProvider()}
+      />
 
       <ExperienceGrid />
 
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
+      <div className="grid gap-5 xl:grid-cols-3">
         <WaitingCardPreview
           card={activeCard}
           cardIndex={cardIndex}
           onNext={() => setCardIndex((index) => index + 1)}
+        />
+        <TarotPanel
+          liveProvider={liveProvider}
+          loading={providerState.loading}
+          tarot={providerState.tarot}
+          zodiacLabel={reading.zodiacLabel}
         />
         <MoodCheckPanel
           selectedMood={selectedMood}
@@ -131,6 +222,53 @@ export function AstroDashboard(): JSX.Element {
       <WeeklyPlanner days={reading.weekly} />
     </div>
   );
+}
+
+function mergeProviderReading(
+  local: LocalReading,
+  provider: ProviderReading | null,
+): LocalReading {
+  if (!provider) return local;
+  const headline = provider.headline || local.headline;
+  const workNote = provider.workNote || local.workNote;
+  const luckyColor = provider.luckyColor || local.luckyColor;
+  const next: LocalReading = {
+    ...local,
+    headline,
+    workNote,
+    energyScore: provider.energyScore,
+    luckyColor,
+    luckyWindow: provider.luckyWindow || local.luckyWindow,
+    weekly: provider.weekly.length > 0 ? provider.weekly : local.weekly,
+  };
+  return {
+    ...next,
+    fortune: next.fortune.map((item) => {
+      if (item.key === 'overall') {
+        return {
+          ...item,
+          title: headline,
+          body:
+            provider.provider === 'divineapi'
+              ? workNote
+              : item.body,
+        };
+      }
+      if (item.key === 'career') {
+        return {
+          ...item,
+          body: workNote,
+        };
+      }
+      if (item.key === 'wealth') {
+        return {
+          ...item,
+          body: `适合检查订阅、预算、报价和待确认支出。幸运色 ${luckyColor} 可以当作今天的决策提醒。`,
+        };
+      }
+      return item;
+    }),
+  };
 }
 
 function ExperienceGrid(): JSX.Element {
@@ -172,10 +310,17 @@ function ExperienceGrid(): JSX.Element {
 }
 
 function HoroscopePanel({
+  liveProvider,
+  providerState,
   reading,
+  onRefresh,
 }: {
+  liveProvider: boolean;
+  providerState: ProviderState;
   reading: ReturnType<typeof buildAstroReading>;
+  onRefresh(): void;
 }): JSX.Element {
+  const providerLabel = providerStatusCopy(liveProvider, providerState);
   return (
     <section className="rounded-[8px] border border-[#DCDDDD] bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
@@ -186,18 +331,123 @@ function HoroscopePanel({
           </div>
           <h2 className="mt-2 text-xl font-semibold text-[#231F20]">总运、事业、财运、感情和身心状态</h2>
           <p className="mt-1 text-xs leading-5 text-[#8C8C8C]">
-            当前为预览版日运数据；接入 AstrologyAPI 后，这里会替换为真实 provider 返回。
+            {providerLabel.description}
           </p>
         </div>
-        <div className="inline-flex w-fit items-center gap-1.5 rounded-[8px] border border-[#7DD3FC]/45 bg-[#EFF6FF] px-2.5 py-1.5 text-xs font-medium text-[#0369A1]">
-          <MoonStar className="h-3.5 w-3.5" aria-hidden />
-          {reading.dateLabel}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className={cn('inline-flex w-fit items-center gap-1.5 rounded-[8px] border px-2.5 py-1.5 text-xs font-medium', providerLabel.className)}>
+            {providerState.loading ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+            ) : (
+              <MoonStar className="h-3.5 w-3.5" aria-hidden />
+            )}
+            {providerLabel.label}
+          </div>
+          {liveProvider && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={onRefresh}
+              disabled={providerState.loading}
+            >
+              <RefreshCcw className={cn('mr-1.5 h-3.5 w-3.5', providerState.loading && 'animate-spin')} aria-hidden />
+              刷新
+            </Button>
+          )}
         </div>
+      </div>
+      <div className="mb-4 inline-flex w-fit items-center gap-1.5 rounded-[8px] border border-[#7DD3FC]/45 bg-[#EFF6FF] px-2.5 py-1.5 text-xs font-medium text-[#0369A1]">
+        <MoonStar className="h-3.5 w-3.5" aria-hidden />
+        {reading.dateLabel}
       </div>
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
         {reading.fortune.map((item) => (
           <FortuneTile key={item.key} item={item} />
         ))}
+      </div>
+    </section>
+  );
+}
+
+function providerStatusCopy(
+  liveProvider: boolean,
+  state: ProviderState,
+): { label: string; description: string; className: string } {
+  if (!liveProvider) {
+    return {
+      label: '预览数据',
+      description: '当前为公开预览版日运数据；登录后的 /cosmic 会自动尝试读取 DivineAPI。',
+      className: 'border-[#DCDDDD] bg-[#FAFAFA] text-[#595757]',
+    };
+  }
+  if (state.loading) {
+    return {
+      label: '正在同步 DivineAPI',
+      description: '正在读取后端 provider；如果接口不可用，会自动保留本地预览结果。',
+      className: 'border-[#7DD3FC]/45 bg-[#EFF6FF] text-[#0369A1]',
+    };
+  }
+  if (state.error) {
+    return {
+      label: '已回退预览数据',
+      description: `DivineAPI 暂时不可用，当前展示本地预览结果。${state.error}`,
+      className: 'border-[#FDE68A]/70 bg-[#FFFBEB] text-[#B45309]',
+    };
+  }
+  if (state.reading?.provider === 'divineapi') {
+    return {
+      label: 'DivineAPI 已连接',
+      description: '今日运势来自后端 DivineAPI provider，并保留 Holaday 的轻量任务建议包装。',
+      className: 'border-[#BBF7D0]/70 bg-[#F0FDF4] text-[#15803D]',
+    };
+  }
+  return {
+    label: '使用预览数据',
+    description: '后端 provider 未配置或已回退，当前展示稳定的本地预览结果。',
+    className: 'border-[#DCDDDD] bg-[#FAFAFA] text-[#595757]',
+  };
+}
+
+function TarotPanel({
+  liveProvider,
+  loading,
+  tarot,
+  zodiacLabel,
+}: {
+  liveProvider: boolean;
+  loading: boolean;
+  tarot: TarotReading | null;
+  zodiacLabel: string;
+}): JSX.Element {
+  const title = tarot?.title ?? 'The Star';
+  const subtitle = tarot?.subtitle ?? '先把希望放回桌面';
+  const body =
+    tarot?.body ??
+    `${zodiacLabel} 今天适合抽一张轻提示卡。真实 DivineAPI tarot 接入后，这里会显示后端返回的每日牌面。`;
+  const provider = tarot?.provider === 'divineapi' ? 'DivineAPI Tarot' : '预览牌组';
+  return (
+    <section className="rounded-[8px] border border-[#DCDDDD] bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold text-[#231F20]">今日塔罗提示</h2>
+          <p className="mt-1 text-xs text-[#8C8C8C]">
+            {liveProvider ? '登录后由后端 provider 尝试同步。' : '公开预览页使用本地牌组。'}
+          </p>
+        </div>
+        <div className="inline-flex items-center gap-1 rounded-[8px] border border-[#DCDDDD] bg-[#FAFAFA] px-2 py-1 text-[10px] font-medium text-[#8C8C8C]">
+          {loading ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden /> : <Shuffle className="h-3 w-3" aria-hidden />}
+          {provider}
+        </div>
+      </div>
+      <div className="rounded-[8px] border border-[#57479C]/18 bg-[#F8F6FF] p-5">
+        <div className="flex items-center gap-2 text-xs font-medium text-[#57479C]">
+          <Sparkles className="h-4 w-4" aria-hidden />
+          Daily Tarot
+        </div>
+        <h3 className="mt-4 text-xl font-semibold text-[#231F20]">{title}</h3>
+        <p className="mt-1 text-sm font-medium text-[#57479C]">{subtitle}</p>
+        <p className="mt-3 text-sm leading-6 text-[#595757]">{body}</p>
       </div>
     </section>
   );
@@ -343,7 +593,7 @@ function AstroProfilePanel({
         <div>
           <h2 className="text-base font-semibold text-[#231F20]">个人星象档案</h2>
           <p className="mt-1 text-xs leading-5 text-[#8C8C8C]">
-            出生时间和地点可以先空着，后续接 AstrologyAPI 时再做完整星盘。
+            出生时间和地点可以先空着，后续接 DivineAPI 时再做完整星盘。
           </p>
         </div>
         {profile && (
