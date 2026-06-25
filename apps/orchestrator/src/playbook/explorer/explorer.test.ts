@@ -228,6 +228,30 @@ describe('explorer-guards', () => {
       expect(classifyExplorerAction({ kind: 'click', label: 'Read the docs' }, opts).allowed).toBe(true);
     }
   });
+  it('A3 EXTRA_RE precision: benign onboarding text NOT over-blocked, real combos still vetoed', () => {
+    // todoist login run FALSE POSITIVE: bare 清空/永久/公开 matched onboarding text ("清空您的大脑")
+    // → premature halt. Tightened to combos. These benign labels must NOT veto in login mode:
+    for (const label of ['清空您的大脑', '清空大脑', '永久免费', '公开课', '公开页面']) {
+      expect(classifyExplorerAction({ kind: 'click', label }, { loginMode: true }).allowed).toBe(true);
+    }
+    // the REAL destructive / share combos still vetoed in login mode (incl. 清空收件箱 = bulk-delete,
+    // the BOSS-flagged gap — a destructive 清空 combo, distinct from the benign onboarding "清空您的大脑"):
+    for (const label of [
+      '永久删除',
+      '清空收件箱',
+      '清空回收站',
+      '清空账户',
+      '清空所有',
+      '清空数据',
+      '设为公开',
+      '公开分享',
+      '删除任务',
+      '删除项目',
+      '转账',
+    ]) {
+      expect(classifyExplorerAction({ kind: 'click', label }, { loginMode: true }).allowed).toBe(false);
+    }
+  });
   it('blocks navigation to pay / login / auth urls (incl. review leaks); allows a doc url', () => {
     for (const url of [
       'https://x.com/checkout',

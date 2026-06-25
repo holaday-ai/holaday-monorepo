@@ -85,7 +85,7 @@ const SENSITIVE_URL_RE =
 // NOTE: matched against normLabel output (whitespace + zero-width stripped, lower-cased) — so an
 // EN share-link control "Copy link" arrives as "copylink"; patterns are space-free accordingly.
 const SENSITIVE_LABEL_EXTRA_RE =
-  /转账|汇款|提现|提款|充值|绑卡|绑定银行卡|授权扣款|自动扣费|解绑|注销|注销账号|删除账号|删除账户|删除文件|删除|清空|永久|公开|设为公开|分享|分享给|转发|邀请|授权登录|确认授权|授权访问|复制链接|分享链接|获取链接|生成链接|邀请链接|copylink|sharelink|getlink|invitelink|copylinktoshare|transfer|withdraw|topup|recharge|bind\w*card|unbind|deactivate|delete\w*account|delete|remove|permanent|make\w*public|share|invite|authorize\w*login|grant\w*access/i;
+  /转账|汇款|提现|提款|充值|绑卡|绑定银行卡|授权扣款|自动扣费|解绑|注销|注销账号|删除账号|删除账户|删除文件|删除任务|删除项目|删除|永久删除|清空收件箱|清空回收站|清空账户|清空账号|清空数据|清空所有|清空全部|清空列表|清空项目|设为公开|公开分享|公开发布|分享|分享给|转发|邀请|授权登录|确认授权|授权访问|复制链接|分享链接|获取链接|生成链接|邀请链接|copylink|sharelink|getlink|invitelink|copylinktoshare|transfer|withdraw|topup|recharge|bind\w*card|unbind|deactivate|delete\w*account|delete|remove|permanent\w*delete|make\w*public|share|invite|authorize\w*login|grant\w*access/i;
 
 /** Normalise a label for matching: strip whitespace + zero-width chars, lower-case. */
 function normLabel(label: string): string {
