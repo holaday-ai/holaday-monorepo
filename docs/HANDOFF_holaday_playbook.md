@@ -11,7 +11,7 @@
 
 | 项 | 值 |
 |---|---|
-| **运行 orch（PROD LIVE REF）** | `00bde7f`（🏁 **A 登录自学闭环端到端证通 + 第一条真 post-login path**（todoist add-task 5 步、id=18 completed、$0.177）；含 A 登录 4 接点 + login intent 指令式单任务 + 软600/硬720/iter40 + EXTRA_RE 误报修(清空/永久/公开收紧)+清空收件箱补漏 + Copy-link veto + B1 接结晶 + Bug A/B + connect-超时/重试，全 dark ship；restart 718）。**B1 LIVE**（`USER_TASK_CRYSTALLIZE_ENABLED=true`）；`EXPLORER_ENABLED`/`LOGIN_EXPLORER_ENABLED` 仍 OFF。两站 storageState 就位（figma+todoist、box 独立 600）。详 §7 |
+| **运行 orch（PROD LIVE REF）** | `f1b6fe6`（🏁🏁 **登录自学从机制到交易站真出货 + 四层 veto 防线**：两条真 post-login path（todoist add-task 5 步 + **trip.com 订票流 13 步**，停在付款红线前）；含 A 登录 4 接点 + 预订站 veto 加固(Layer A 词+Layer B 结构+交易页反转) + **Layer C 模型兜底**(haiku、触发收窄只扫真表单字段、fail-closed、≤15/run) + B1 接结晶，全 dark ship；restart 723）。**B1 LIVE**（`USER_TASK_CRYSTALLIZE_ENABLED=true`）；`EXPLORER_ENABLED`/`LOGIN_EXPLORER_ENABLED`/`LAYER_C_MODEL_VETO_ENABLED` 仍 OFF。**三站 storageState 就位**（figma+todoist+trip、box 独立 600）。详 §7 |
 | **分支** | `claude/musing-keller-ae1d05`（prod 合并主干）|
 | **origin tip = 本地 HEAD** | `69ab05e4`（已 push；A 登录自学+B1 `053f29b5` → harness 修 `ea2b6d1` → docs `69ab05e4`）|
 | **SPA** | `8da47b4b`（bundle `index-DiYh_GAx.js`，本工程期间未变）|
@@ -154,6 +154,15 @@
 ---
 
 ## §7 下一步（断点精确）
+
+**🏁🏁🏁 里程碑（2026-06-26）— 登录自学从机制到交易站真出货 + 四层 veto 防线全证通**：
+- **两条真 post-login path**：todoist add-task 5 步 + **trip.com 订票流 13 步**（Flights→Tokyo→Singapore→Search 63航班→Select 去/回程 Scoot $439→View Details→Continue→进订票主表单 Step 1/4 Fill in your info→认出付款红线→停、done）。交易站 trip 全程**零真交易**（未付款/未下单/未填证件，空壳号）。都会被 B1 cron 自动结晶。
+- **四层 veto 防线（真 SPA 交易站闭合）**：① 空壳测试号地基 ② Layer A 关键词(EXTRA_RE,login-mode) ③ Layer B 结构信号(提交型控件+交易文案) & 交易页反转(pageUrl 阶段 default-deny) ④ Layer C 模型兜底(haiku、A/B/反转都过+交易可疑区才触发、fail-closed/限额≤15/触发收窄只扫真表单字段)。**SPA URL 不变→反转弱 → 词层+Layer C 主力**。trip Layer C 实跑 3 调用 $0.00139。
+- **veto 四次在测试号调准（测试号兜底是命门）**：Copy link 漏拦→补 / 「清空您的大脑」误拦→收 / 字面审控出收紧过头漏「清空收件箱」→补 / Layer C pageTxSignal 过宽(扫页脚 prose)→收窄只扫真表单字段。**关键词/信号 veto 两方向都 fiddly、字面审+测试号实跑是命门**。
+- **变更链**：`89690206`(veto A+B+反转) → `f4404738`(Layer C) → `f1b6fe65`(pageTxSignal 收窄)。
+- **backlog**：① Continue 收严（trip "Continue" 进订票表单被 Layer C 判 ALLOW，agent 进了表单停付款前；更保守可调）② 扩更多交易站/任务验泛化 ③ B2 影子转灰度→等 B1 攒语料 ④ ⚠️ 监控纪律：detached 真跑必启 poll bg（本会话漏启→误判 1 小时 hang，实为 ~10min completed）。
+
+---
 
 **🏁🏁 里程碑（2026-06-25 晚）— A 登录自学闭环端到端证通 + 第一条真实 post-login path**：
 - **闭环链**：登录认证（login-ctx + storageState）→ 真执行（todoist add-task：点「添加任务」→ 输入「买牛奶」→ 回车提交、任务计数 1）→ **红线前自停**（看到「删除」、停在点击前、宣告 done）→ **completed** → 结晶**第一条 post-login path**（`tsk_5bFtqQ…` draft v1 app.todoist.com、5 步）。todoist id=18 `completed` / `$0.1770` / ~2min / 5 captures 全 benign / 未越红线 / 会话隔离 / 自动归零。B1 cron 会自动结晶它（或 `--commit`）。
