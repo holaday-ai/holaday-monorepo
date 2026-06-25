@@ -1,15 +1,23 @@
 import {
+  Activity,
+  Brain,
+  BriefcaseBusiness,
   CalendarDays,
   Clock,
   Compass,
   Eraser,
   Gauge,
+  Heart,
   MoonStar,
+  Orbit,
   Palette,
   RefreshCcw,
   Save,
+  Shuffle,
   Sparkles,
   TimerReset,
+  Users,
+  WalletCards,
 } from 'lucide-react';
 import * as React from 'react';
 import { Button } from '@/components/ui/button';
@@ -30,6 +38,45 @@ const MOODS = [
   { id: 'clear', label: '清醒', hint: '适合先做判断题' },
   { id: 'busy', label: '有点满', hint: '先把任务切小' },
   { id: 'soft', label: '慢一点', hint: '适合整理和收尾' },
+] as const;
+
+const EXPERIENCE_CARDS = [
+  {
+    icon: Orbit,
+    title: '完整星盘',
+    body: '太阳、月亮、上升、宫位和行星解释，适合做长期个人档案。',
+    source: 'AstrologyAPI / Prokerala',
+  },
+  {
+    icon: Users,
+    title: '合盘匹配',
+    body: '恋人、朋友、合作伙伴的吸引力、摩擦点和相处建议。',
+    source: 'Compatibility / Synastry',
+  },
+  {
+    icon: Brain,
+    title: '心理小测试',
+    body: '情绪、压力、决策风格和关系倾向，结合星盘给轻解释。',
+    source: 'Holaday AI layer',
+  },
+  {
+    icon: Shuffle,
+    title: '塔罗 / 抽卡',
+    body: '等待任务时抽一张卡，给一个轻量提示和下一步行动。',
+    source: 'Tarot API / mock deck',
+  },
+  {
+    icon: WalletCards,
+    title: '数字命理',
+    body: '生命灵数、个人年份、名字能量，适合做快捷娱乐入口。',
+    source: 'Numerology API',
+  },
+  {
+    icon: Activity,
+    title: '流年提醒',
+    body: '把重要 transit 做成今天、本周、本月的变化提醒。',
+    source: 'Transit endpoints',
+  },
 ] as const;
 
 export function AstroDashboard(): JSX.Element {
@@ -63,6 +110,10 @@ export function AstroDashboard(): JSX.Element {
         <AstroProfilePanel profile={profile} onSave={handleSave} onReset={handleReset} />
       </div>
 
+      <HoroscopePanel reading={reading} />
+
+      <ExperienceGrid />
+
       <div className="grid gap-5 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
         <WaitingCardPreview
           card={activeCard}
@@ -79,6 +130,110 @@ export function AstroDashboard(): JSX.Element {
 
       <WeeklyPlanner days={reading.weekly} />
     </div>
+  );
+}
+
+function ExperienceGrid(): JSX.Element {
+  return (
+    <section className="rounded-[8px] border border-[#DCDDDD] bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
+      <div className="mb-4">
+        <div className="flex items-center gap-2 text-xs font-medium text-[#EA1F59]">
+          <Compass className="h-4 w-4" aria-hidden />
+          <span>多元化命理入口</span>
+        </div>
+        <h2 className="mt-2 text-xl font-semibold text-[#231F20]">不只看今天，也能玩关系、心理和长期星盘</h2>
+        <p className="mt-1 text-xs leading-5 text-[#8C8C8C]">
+          这些入口先作为产品蓝图展示；后续按 API 能力逐个接入真实数据和 AI 解读。
+        </p>
+      </div>
+      <div className="grid gap-3 md:grid-cols-3">
+        {EXPERIENCE_CARDS.map(({ icon: Icon, title, body, source }) => (
+          <article
+            key={title}
+            className="rounded-[8px] border border-[#EFEFEF] bg-[#FAFAFA] p-4 transition hover:border-[#EA1F59]/25 hover:bg-[#EA1F59]/5"
+          >
+            <div className="flex items-start gap-3">
+              <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] bg-white text-[#57479C] shadow-[0_6px_18px_rgba(15,23,42,0.06)]">
+                <Icon className="h-4 w-4" aria-hidden />
+              </span>
+              <div className="min-w-0">
+                <h3 className="text-sm font-semibold text-[#231F20]">{title}</h3>
+                <p className="mt-1 text-xs leading-5 text-[#595757]">{body}</p>
+                <div className="mt-3 inline-flex rounded-[6px] border border-[#DCDDDD] bg-white px-2 py-1 text-[10px] font-medium text-[#8C8C8C]">
+                  {source}
+                </div>
+              </div>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function HoroscopePanel({
+  reading,
+}: {
+  reading: ReturnType<typeof buildAstroReading>;
+}): JSX.Element {
+  return (
+    <section className="rounded-[8px] border border-[#DCDDDD] bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <div className="flex items-center gap-2 text-xs font-medium text-[#EA1F59]">
+            <Sparkles className="h-4 w-4" aria-hidden />
+            <span>{reading.zodiacLabel} · 今日星座运势</span>
+          </div>
+          <h2 className="mt-2 text-xl font-semibold text-[#231F20]">总运、事业、财运、感情和身心状态</h2>
+          <p className="mt-1 text-xs leading-5 text-[#8C8C8C]">
+            当前为预览版日运数据；接入 AstrologyAPI 后，这里会替换为真实 provider 返回。
+          </p>
+        </div>
+        <div className="inline-flex w-fit items-center gap-1.5 rounded-[8px] border border-[#7DD3FC]/45 bg-[#EFF6FF] px-2.5 py-1.5 text-xs font-medium text-[#0369A1]">
+          <MoonStar className="h-3.5 w-3.5" aria-hidden />
+          {reading.dateLabel}
+        </div>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+        {reading.fortune.map((item) => (
+          <FortuneTile key={item.key} item={item} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function FortuneTile({
+  item,
+}: {
+  item: ReturnType<typeof buildAstroReading>['fortune'][number];
+}): JSX.Element {
+  const tone = FORTUNE_TONE[item.key];
+  const Icon = tone.icon;
+  return (
+    <article
+      className={cn(
+        'rounded-[8px] border p-4',
+        tone.shell,
+      )}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <span className={cn('inline-flex h-8 w-8 items-center justify-center rounded-[8px]', tone.iconShell)}>
+            <Icon className="h-4 w-4" aria-hidden />
+          </span>
+          <div>
+            <div className="text-xs font-medium text-[#595757]">{item.label}</div>
+            <div className="text-sm font-semibold text-[#231F20]">{item.score}%</div>
+          </div>
+        </div>
+      </div>
+      <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/80">
+        <div className={cn('h-full rounded-full', tone.bar)} style={{ width: `${item.score}%` }} />
+      </div>
+      <h3 className="mt-4 text-base font-semibold leading-snug text-[#231F20]">{item.title}</h3>
+      <p className="mt-2 text-sm leading-6 text-[#595757]">{item.body}</p>
+    </article>
   );
 }
 
@@ -425,6 +580,47 @@ const TONE_CLASS: Record<
   },
   recovery: {
     pill: 'bg-[#DCFCE7] text-[#15803D]',
+    bar: 'bg-[#22C55E]',
+  },
+};
+
+const FORTUNE_TONE: Record<
+  ReturnType<typeof buildAstroReading>['fortune'][number]['key'],
+  {
+    icon: typeof Sparkles;
+    shell: string;
+    iconShell: string;
+    bar: string;
+  }
+> = {
+  overall: {
+    icon: Sparkles,
+    shell: 'border-[#EA1F59]/20 bg-[#FFF6F8]',
+    iconShell: 'bg-[#EA1F59]/10 text-[#EA1F59]',
+    bar: 'bg-[#EA1F59]',
+  },
+  career: {
+    icon: BriefcaseBusiness,
+    shell: 'border-[#7DD3FC]/40 bg-[#F3FBFE]',
+    iconShell: 'bg-[#7DD3FC]/20 text-[#0369A1]',
+    bar: 'bg-[#42C0EF]',
+  },
+  wealth: {
+    icon: WalletCards,
+    shell: 'border-[#FDE68A]/70 bg-[#FFFBEB]',
+    iconShell: 'bg-[#FDE68A]/40 text-[#B45309]',
+    bar: 'bg-[#F59E0B]',
+  },
+  love: {
+    icon: Heart,
+    shell: 'border-[#FBCFE8]/70 bg-[#FDF2F8]',
+    iconShell: 'bg-[#FBCFE8]/45 text-[#BE185D]',
+    bar: 'bg-[#EC4899]',
+  },
+  health: {
+    icon: Activity,
+    shell: 'border-[#BBF7D0]/70 bg-[#F0FDF4]',
+    iconShell: 'bg-[#BBF7D0]/45 text-[#15803D]',
     bar: 'bg-[#22C55E]',
   },
 };
