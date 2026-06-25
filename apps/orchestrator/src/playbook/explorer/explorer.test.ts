@@ -195,7 +195,19 @@ describe('explorer-guards', () => {
     ).toBe(true);
   });
   it('A3 login-mode EXTRA_RE: blocks 转账/分享/删除/提现 ONLY when loginMode (免登录 unchanged)', () => {
-    for (const label of ['转账', '分享', '删除文件', '提现', '解绑', '设为公开', 'transfer', 'delete']) {
+    // 'Copy link' / '复制链接' = figma login run #2 gap (a share-link control slipped the veto).
+    for (const label of [
+      '转账',
+      '分享',
+      '删除文件',
+      '提现',
+      '解绑',
+      '设为公开',
+      'transfer',
+      'delete',
+      'Copy link',
+      '复制链接',
+    ]) {
       // 免登录 lane (default): EXTRA_RE controls are NOT in the base list → allowed.
       expect(classifyExplorerAction({ kind: 'click', label }).allowed).toBe(true);
       // login mode: EXTRA_RE thickens → blocked.

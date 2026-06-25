@@ -292,7 +292,11 @@ if (browse) {
             recorder,
             userExternalId: explorerUser,
             maxIterations, // (c) env-configurable hard per-browse cap (default 25, ceiling 50)
-            timeoutMs: 300_000, // SOFT wall clock (between-turns)
+            // ②b SOFT wall clock (between-turns). Login's deeper create-flow needs longer (this was
+            // the BINDING constraint that failed figma login run #2 at 19 steps / 300s — ② had only
+            // raised the HARD wall to 720s + maxIter to 40, leaving this 300s soft cap unchanged).
+            // Login 600s < the 720s hard wall (soft still gets first, cleaner crack); 免登录 stays 300s.
+            timeoutMs: loginMode ? 600_000 : 300_000,
             domain: null,
           }),
           hardMs,
