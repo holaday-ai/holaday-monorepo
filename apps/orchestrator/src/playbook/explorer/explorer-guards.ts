@@ -49,6 +49,11 @@ export interface ExplorerAction {
   inputType?: string;
   /** Target URL (navigate). */
   url?: string;
+  /** 预订站加固 (login-mode only) — structural signals from the target descriptor.
+   *  tagName/inputType → 提交型控件 detection (层 B); pageUrl (the page's location.href at
+   *  capture time) → 交易阶段 fail-closed reversal. All OPTIONAL → 免登录 lane unaffected. */
+  tagName?: string;
+  pageUrl?: string;
 }
 
 export interface ExplorerActionVerdict {
@@ -85,7 +90,28 @@ const SENSITIVE_URL_RE =
 // NOTE: matched against normLabel output (whitespace + zero-width stripped, lower-cased) — so an
 // EN share-link control "Copy link" arrives as "copylink"; patterns are space-free accordingly.
 const SENSITIVE_LABEL_EXTRA_RE =
-  /转账|汇款|提现|提款|充值|绑卡|绑定银行卡|授权扣款|自动扣费|解绑|注销|注销账号|删除账号|删除账户|删除文件|删除任务|删除项目|删除|永久删除|清空收件箱|清空回收站|清空账户|清空账号|清空数据|清空所有|清空全部|清空列表|清空项目|设为公开|公开分享|公开发布|分享|分享给|转发|邀请|授权登录|确认授权|授权访问|复制链接|分享链接|获取链接|生成链接|邀请链接|copylink|sharelink|getlink|invitelink|copylinktoshare|transfer|withdraw|topup|recharge|bind\w*card|unbind|deactivate|delete\w*account|delete|remove|permanent\w*delete|make\w*public|share|invite|authorize\w*login|grant\w*access/i;
+  /转账|汇款|提现|提款|充值|绑卡|绑定银行卡|授权扣款|自动扣费|解绑|注销|注销账号|删除账号|删除账户|删除文件|删除任务|删除项目|删除|永久删除|清空收件箱|清空回收站|清空账户|清空账号|清空数据|清空所有|清空全部|清空列表|清空项目|设为公开|公开分享|公开发布|分享|分享给|转发|邀请|授权登录|确认授权|授权访问|复制链接|分享链接|获取链接|生成链接|邀请链接|预订|预定|立即预订|确认预订|继续预订|提交订单|确认订单|下单|立即下单|去支付|去结算|继续支付|确认支付|立即支付|占座|选座|锁定座位|担保|预授权|添加出行人|添加乘客|新增联系人|填写证件|提交资料|保存出行人|copylink|sharelink|getlink|invitelink|copylinktoshare|booknow|bookflight|reserve|checkout|placeorder|confirmbooking|proceedtopay|paynow|continuetopayment|holdseat|addtraveler|addpassenger|addguest|transfer|withdraw|topup|recharge|bind\w*card|unbind|deactivate|delete\w*account|delete|remove|permanent\w*delete|make\w*public|share|invite|authorize\w*login|grant\w*access/i;
+
+// 预订/交易站 fail-closed 加固 (login-mode ONLY). 三段：
+// ① 层 B 结构信号 —— 提交型控件(button / input[submit|button|image]) + 这些交易/继续/提交文案任一 →
+//    视为交易动作拦(不靠精确词、靠"提交型 + 交易语境"上下文；"继续/下一步" 本身 benign，在提交钮上=进交易)。
+const TRANSACTION_TEXT_RE =
+  /确认|下单|支付|付款|预订|预定|继续|下一步|提交|结算|占座|选座|担保|预授权|book\w*now|reserve|checkout|pay\b|paynow|confirm|proceed|continue|next|submit|placeorder/i;
+// ② 交易阶段页面(pageUrl=location.href 命中这些段) —— 登录态在此页 = 最危险，default-deny。
+const TRANSACTION_PAGE_RE =
+  /checkout|payment|cashier|\/order|\/orders|booking|\/confirm|settlement|\/pay\b|\/pay\/|\/trade|\/buy\b|订单提交|booking\/confirm/i;
+// ③ 交易页唯一放行的安全白名单(返回/取消/查看/修改/搜索/筛选类) —— 其余 click 全拦。
+const SAFE_CONTROL_RE =
+  /返回|退回|后退|上一步|上一页|取消|放弃|修改|编辑|查看|详情|展开|收起|筛选|搜索|过滤|排序|关闭|帮助|back|cancel|edit|view|detail|filter|search|sort|close|previous|prev|help/i;
+
+/** 提交型控件 = button / input[submit|button|image]. (role 未捕获 → 是已知盲点、层 C 兜底。) */
+function isSubmitTypeControl(tagName?: string, inputType?: string): boolean {
+  const t = (tagName ?? '').trim().toLowerCase();
+  const it = (inputType ?? '').trim().toLowerCase();
+  if (t === 'button') return true;
+  if (t === 'input' && (it === 'submit' || it === 'button' || it === 'image')) return true;
+  return false;
+}
 
 /** Normalise a label for matching: strip whitespace + zero-width chars, lower-case. */
 function normLabel(label: string): string {
@@ -170,6 +196,38 @@ export function classifyExplorerAction(
             allowed: false,
             sensitive: true,
             reason: `${action.kind} blocked: sensitive control ("${(raw ?? '').trim().slice(0, 40)}")`,
+          };
+        }
+      }
+      // 预订/交易站 fail-closed 加固 — login-mode ONLY (免登录 lane / user tasks never set loginMode →
+      // this whole block is skipped; base + EXTRA word checks above already ran). Adds STRUCTURE/CONTEXT.
+      if (loginMode) {
+        const normSignals = signals.map((sig) => normLabel((sig ?? '').trim())).filter(Boolean);
+        const anySafe = normSignals.some((s) => SAFE_CONTROL_RE.test(s));
+        // ② 交易页反转 (最危险页·判不准往拦·极致): 登录态 + pageUrl 命中交易阶段 → default-deny ANY
+        //    click 除非命中安全白名单(返回/取消/查看/修改/搜索/筛选…). 提交型钮 + 中性钮 全覆盖。
+        if (
+          action.kind === 'click' &&
+          action.pageUrl &&
+          TRANSACTION_PAGE_RE.test(action.pageUrl.toLowerCase()) &&
+          !anySafe
+        ) {
+          return {
+            allowed: false,
+            sensitive: true,
+            reason: `交易页 fail-closed: 登录态交易阶段(${action.pageUrl.slice(0, 60)}) 非白名单点击默认拦`,
+          };
+        }
+        // ① 层 B 结构信号: 提交型控件(button/submit) + 交易/继续/提交 文案 → 交易动作拦 (catches a
+        //    NEUTRAL "继续/下一步/continue" sitting on a 提交钮 = proceed-to-transact, no keyword needed).
+        if (
+          isSubmitTypeControl(action.tagName, action.inputType) &&
+          normSignals.some((s) => TRANSACTION_TEXT_RE.test(s))
+        ) {
+          return {
+            allowed: false,
+            sensitive: true,
+            reason: `层B 提交型交易控件拦 (tag=${(action.tagName ?? '?').slice(0, 12)}, "${rawLabel.slice(0, 30)}")`,
           };
         }
       }

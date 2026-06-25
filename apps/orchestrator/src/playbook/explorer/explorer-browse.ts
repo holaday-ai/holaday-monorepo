@@ -25,6 +25,9 @@ export interface BrowseAction {
   name?: string | null;
   inputType?: string | null;
   url?: string | null;
+  /** 预订站加固 — structural signals (tagName/inputType = 提交型; pageUrl = 交易阶段). login-mode only. */
+  tagName?: string | null;
+  pageUrl?: string | null;
 }
 
 export interface BrowseVerdict {
@@ -50,6 +53,8 @@ export function explorerOnBeforeAction(
       ...(action.name != null ? { name: action.name } : {}),
       ...(action.inputType != null ? { inputType: action.inputType } : {}),
       ...(action.url != null ? { url: action.url } : {}),
+      ...(action.tagName != null ? { tagName: action.tagName } : {}), // 预订站加固: 提交型控件判定
+      ...(action.pageUrl != null ? { pageUrl: action.pageUrl } : {}), // 预订站加固: 交易阶段反转
     },
     opts, // A3: login-mode thickens the veto (EXTRA_RE) — default empty = 免登录 lane unchanged
   );

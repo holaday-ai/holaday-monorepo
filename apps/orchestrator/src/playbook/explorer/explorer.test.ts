@@ -252,6 +252,77 @@ describe('explorer-guards', () => {
       expect(classifyExplorerAction({ kind: 'click', label }, { loginMode: true }).allowed).toBe(false);
     }
   });
+
+  // ════ 预订/交易站 fail-closed 加固 (login-mode only) — 6 红队向量 ════
+  const LOGIN = { loginMode: true } as const;
+  it('🏨① 交易/出行人新词：login-mode 拦、免登录放行 (EXTRA-only，base 没这些)', () => {
+    // EXTRA-only (NOT in base; 立即预订/确认预订/下单/去支付… are already in base → blocked both modes,
+    // so they belong to ⑤ not here):
+    for (const label of [
+      '继续预订', '占座', '选座', '锁定座位', '担保',
+      'book now', 'reserve', 'hold seat', '添加出行人', '添加乘客', '新增联系人', '填写证件', '保存出行人',
+      'add traveler', 'add passenger',
+    ]) {
+      expect(classifyExplorerAction({ kind: 'click', label }, LOGIN).allowed).toBe(false); // login 拦
+      expect(classifyExplorerAction({ kind: 'click', label }).allowed).toBe(true); // 免登录放行
+    }
+    // base 交易词在两模式都拦 (确认这些没退化；预授权 经 base 授权 命中也属此列):
+    for (const label of ['立即预订', '确认预订', '下单', '去支付', '预授权']) {
+      expect(classifyExplorerAction({ kind: 'click', label }).allowed).toBe(false);
+      expect(classifyExplorerAction({ kind: 'click', label }, LOGIN).allowed).toBe(false);
+    }
+  });
+  it('🏨③ 层B 结构：提交型控件 + 中性"继续/下一步" → 拦；非提交型 → 不拦', () => {
+    expect(classifyExplorerAction({ kind: 'click', label: '继续', tagName: 'button' }, LOGIN).allowed).toBe(false);
+    expect(classifyExplorerAction({ kind: 'click', label: '下一步', tagName: 'button' }, LOGIN).allowed).toBe(false);
+    expect(
+      classifyExplorerAction({ kind: 'click', label: 'Continue', tagName: 'input', inputType: 'submit' }, LOGIN).allowed,
+    ).toBe(false);
+    // NON-submit control with the SAME neutral label → layer-B does NOT fire (no over-block of links/spans)
+    expect(classifyExplorerAction({ kind: 'click', label: '继续', tagName: 'span' }, LOGIN).allowed).toBe(true);
+    expect(classifyExplorerAction({ kind: 'click', label: '继续阅读', tagName: 'a' }, LOGIN).allowed).toBe(true);
+    // 免登录: layer B never fires (submit button + 继续 allowed)
+    expect(classifyExplorerAction({ kind: 'click', label: '继续', tagName: 'button' }).allowed).toBe(true);
+  });
+  it('🏨②⑥ 交易页反转：login + 交易阶段 pageUrl → 非白名单 click 默认拦；白名单放行；spy 内层 never 调（halt 前拦）', () => {
+    const tx = (label: string, extra: Record<string, unknown> = {}) =>
+      classifyExplorerAction(
+        { kind: 'click', label, pageUrl: 'https://www.trip.com/booking/confirm', ...extra },
+        LOGIN,
+      );
+    // 极致 fail-closed: ANY non-whitelisted click on a transaction-stage page → vetoed (sensitive=true →
+    // the agent-loop halts BEFORE executeComputerAction = executor inner click never called).
+    expect(tx('继续').allowed).toBe(false);
+    expect(tx('点这里').allowed).toBe(false); // 任意中性钮也拦
+    expect(tx('立即支付').allowed).toBe(false);
+    expect(tx('继续').sensitive).toBe(true); // halt 标记
+    // safe whitelist → allowed (agent can still navigate back / inspect)
+    expect(tx('返回').allowed).toBe(true);
+    expect(tx('查看价格明细').allowed).toBe(true);
+    expect(tx('修改').allowed).toBe(true);
+    expect(tx('取消').allowed).toBe(true);
+    // 反转只在交易页：同样中性 click 在非交易页 → 放行
+    expect(
+      classifyExplorerAction({ kind: 'click', label: '点这里', pageUrl: 'https://www.trip.com/flights/search' }, LOGIN)
+        .allowed,
+    ).toBe(true);
+    // 免登录: 反转不触发 (交易页 + 中性 click 放行)
+    expect(
+      classifyExplorerAction({ kind: 'click', label: '点这里', pageUrl: 'https://www.trip.com/booking/confirm' }).allowed,
+    ).toBe(true);
+  });
+  it('🏨④ benign 不误拦 (login-mode, 非交易页)：搜索/查看/筛选/改日期/返回 放行', () => {
+    for (const label of ['搜索航班', '查看详情', '筛选', '改日期', '返回', '排序', '展开更多']) {
+      expect(
+        classifyExplorerAction({ kind: 'click', label, pageUrl: 'https://www.trip.com/flights' }, LOGIN).allowed,
+      ).toBe(true);
+    }
+  });
+  it('🏨⑤ 既有红线不回归 (login-mode 仍拦)：转账/删除/分享/Copy link/清空收件箱/支付/登录', () => {
+    for (const label of ['转账', '删除任务', '分享', 'Copy link', '清空收件箱', '立即支付', '登录']) {
+      expect(classifyExplorerAction({ kind: 'click', label }, LOGIN).allowed).toBe(false);
+    }
+  });
   it('blocks navigation to pay / login / auth urls (incl. review leaks); allows a doc url', () => {
     for (const url of [
       'https://x.com/checkout',

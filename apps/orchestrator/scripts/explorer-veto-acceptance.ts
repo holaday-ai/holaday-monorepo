@@ -54,6 +54,8 @@ type Desc = {
   placeholder: string | null;
   name: string | null;
   type: string | null;
+  tagName: string | null; // 预订站加固: 提交型控件判定(层 B)
+  url: string | null; // 预订站加固: 交易阶段反转 (descriptor.url = page location.href)
 } | null;
 
 const results: Array<{ n: string; ok: boolean; ev: string }> = [];
@@ -109,6 +111,24 @@ try {
       ...(d?.ariaLabel != null ? { ariaLabel: d.ariaLabel } : {}),
       ...(d?.title != null ? { title: d.title } : {}),
     });
+  // 预订站加固: login-mode classify WITH structural signals (tagName 层B; pageUrl 交易页反转,
+  // 可 override 模拟交易阶段页). 镜像 agent-loop 在 login mode 下喂给 veto 的全套信号。
+  const classifyLogin = (d: Desc, pageUrlOverride?: string) =>
+    classifyExplorerAction(
+      {
+        kind: 'click',
+        ...(d?.visibleText != null ? { label: d.visibleText } : {}),
+        ...(d?.ariaLabel != null ? { ariaLabel: d.ariaLabel } : {}),
+        ...(d?.title != null ? { title: d.title } : {}),
+        ...(d?.tagName != null ? { tagName: d.tagName } : {}),
+        ...(pageUrlOverride != null
+          ? { pageUrl: pageUrlOverride }
+          : d?.url != null
+            ? { pageUrl: d.url }
+            : {}),
+      },
+      { loginMode: true },
+    );
 
   // ── 向量 1：decompose-click（mouse_down/up/drag → fail-closed 当 click）────
   const vk = ['left_mouse_down', 'left_mouse_up', 'left_click_drag'].map((a) => vetoActionKind(a));
@@ -201,6 +221,33 @@ try {
       `真DOM visibleText="${d?.visibleText}" → 免登录 allowed=${base.allowed}（base 不拦）/ 登录态 sensitive=${!login.allowed}（EXTRA_RE 拦）`,
     );
   }
+
+  // ── 向量 8：预订/交易站 fail-closed 加固 (真 DOM, login-mode) ────────────────
+  const dBook = await descAt('#book-now'); // ① 交易词
+  const dTrav = await descAt('#add-traveler'); // ② 出行人
+  const dCont = await descAt('#neutral-continue'); // ③ 中性提交钮 (层B)
+  const dSearch = await descAt('#safe-search'); // ④ benign
+  const dView = await descAt('#safe-view-detail'); // ④ benign + 白名单
+  rec('8① 交易词拦「立即预订」', !classifyLogin(dBook).allowed, `真DOM text="${dBook?.visibleText}" → sensitive=${!classifyLogin(dBook).allowed}`);
+  rec('8② 出行人拦「添加出行人」', !classifyLogin(dTrav).allowed, `真DOM text="${dTrav?.visibleText}" → sensitive=${!classifyLogin(dTrav).allowed}`);
+  rec(
+    '8③ 层B 提交型钮+中性「继续」拦',
+    dCont?.tagName === 'button' && !classifyLogin(dCont).allowed,
+    `真DOM tag="${dCont?.tagName}"(提交型实证) text="${dCont?.visibleText}" → 层B sensitive=${!classifyLogin(dCont).allowed}`,
+  );
+  rec(
+    '8④ benign 不误拦(搜索航班/查看详情)',
+    classifyLogin(dSearch).allowed && classifyLogin(dView).allowed,
+    `搜索航班 allowed=${classifyLogin(dSearch).allowed}; 查看详情 allowed=${classifyLogin(dView).allowed}`,
+  );
+  // 交易页反转 (pageUrl override 到交易阶段): 中性钮拦 / 白名单(查看详情)放行
+  const txCont = classifyLogin(dCont, 'https://www.trip.com/booking/confirm');
+  const txView = classifyLogin(dView, 'https://www.trip.com/booking/confirm');
+  rec(
+    '8⑤ 交易页反转: 非白名单拦 / 白名单放行',
+    !txCont.allowed && txView.allowed,
+    `交易阶段页: 继续 sensitive=${!txCont.allowed}; 查看详情(白名单) allowed=${txView.allowed}`,
+  );
 
   // ── executor-spy：敏感向量内层 click 零调用 / 安全 1 ───────────────────────
   rec(

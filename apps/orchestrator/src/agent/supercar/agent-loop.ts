@@ -1502,6 +1502,9 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
     name?: string | null;
     inputType?: string | null;
     url?: string | null;
+    // 预订站加固 — structural signals from the descriptor (login-mode veto consumes them).
+    tagName?: string | null;
+    pageUrl?: string | null;
   }): Promise<SupercarOutcome | null> => {
     if (!opts.onBeforeAction) return null;
     const verdict = await opts.onBeforeAction(action);
@@ -3371,6 +3374,8 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
               placeholder: desc?.placeholder ?? null,
               name: desc?.name ?? null,
               inputType: desc?.type ?? null,
+              tagName: desc?.tagName ?? null, // 预订站加固: 提交型控件判定(层 B)
+              pageUrl: desc?.url ?? null, // 预订站加固: 交易阶段反转(desc.url = page location.href)
             });
             if (actVeto) return actVeto;
           }
