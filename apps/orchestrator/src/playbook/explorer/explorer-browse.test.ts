@@ -70,6 +70,24 @@ describe('browseIntent', () => {
     expect(i).toContain('识别这个网站最核心的一个常见任务');
     expect(i).toContain('断点报告');
   });
+  it('① login mode → single hard-driven create-task, NO reverse-browse, drives to the boundary', () => {
+    const i = browseIntent('figma.com', { loginMode: true });
+    expect(i).toContain('唯一任务'); // single task, strongly driven
+    expect(i).toContain('New design file'); // figma create-task (not Community browse)
+    expect(i).toMatch(/禁止|不准逆向|绝不逆向/); // reverse-browse forbidden (the run #1 fix)
+    expect(i).toMatch(/分享|Share/); // steered at the share boundary (where EXTRA_RE halts)
+    // the免登录 "任选其一 / 或你识别出的另一个" extensibility (the reverse-browse root) is GONE
+    expect(i).not.toContain('任选其一');
+  });
+  it('① login mode unknown domain → generic CREATE task, still no reverse-browse', () => {
+    const i = browseIntent('some-saas.example', { loginMode: true });
+    expect(i).toContain('创建类');
+    expect(i).toMatch(/禁止|逆向/);
+  });
+  it('免登录 lane intent is unchanged by the loginMode option default (no opts)', () => {
+    expect(browseIntent('figma.com')).toContain('摸清"做一件具体任务"'); // 免登录 v2 intent intact
+    expect(browseIntent('figma.com')).not.toContain('唯一任务');
+  });
 });
 
 // A fake that mimics the agent-loop's veto contract: propose each action, call

@@ -86,17 +86,20 @@ export function requireBrowseEnv(env: {
  *  is post-hoc; it can't kill a task mid-run). env-overridable so BOSS can tune batch-1
  *  without a redeploy. The DEFAULT is the calibrated ~$0.5–0.6 budget. */
 export const DEFAULT_MAX_ITERATIONS = 25;
+/** ② login mode runs a deeper create-flow (新建→编辑→保存→分享 = more steps) → higher default. */
+export const LOGIN_MAX_ITERATIONS = 40;
 /** Fat-finger guard: a mistyped EXPLORER_MAX_ITERATIONS=2500 must NOT let one browse run
  *  away far past the $5 site breaker. A requested value above this is clamped down. */
 export const MAX_ITERATIONS_CEILING = 50;
 
 /**
- * FAIL-SAFE parse of EXPLORER_MAX_ITERATIONS. Missing / non-integer / ≤0 → DEFAULT;
- * a valid value is clamped to [1, MAX_ITERATIONS_CEILING]. Pure → unit-tested.
+ * FAIL-SAFE parse of EXPLORER_MAX_ITERATIONS. Missing / non-integer / ≤0 → DEFAULT (login mode:
+ * LOGIN_MAX_ITERATIONS); a valid value is clamped to [1, MAX_ITERATIONS_CEILING]. Pure → unit-tested.
  */
-export function resolveMaxIterations(raw: string | undefined): number {
+export function resolveMaxIterations(raw: string | undefined, loginMode = false): number {
+  const fallback = loginMode ? LOGIN_MAX_ITERATIONS : DEFAULT_MAX_ITERATIONS;
   const n = Number(raw);
-  if (!Number.isInteger(n) || n <= 0) return DEFAULT_MAX_ITERATIONS;
+  if (!Number.isInteger(n) || n <= 0) return fallback;
   return Math.min(n, MAX_ITERATIONS_CEILING);
 }
 
@@ -105,9 +108,11 @@ export function resolveMaxIterations(raw: string | undefined): number {
  *  This wall-clock deadline fires regardless. Default 420s > the 300s soft timeout, so the
  *  soft one gets first (clean) crack and this is the catch-all backstop. */
 export const DEFAULT_BROWSE_HARD_MS = 420_000;
-export function resolveBrowseHardMs(raw: string | undefined): number {
+/** ② login mode's deeper create-flow needs a longer per-browse wall (figma editor is heavy). */
+export const LOGIN_BROWSE_HARD_MS = 720_000;
+export function resolveBrowseHardMs(raw: string | undefined, loginMode = false): number {
   const n = Number(raw);
-  if (!Number.isInteger(n) || n <= 0) return DEFAULT_BROWSE_HARD_MS;
+  if (!Number.isInteger(n) || n <= 0) return loginMode ? LOGIN_BROWSE_HARD_MS : DEFAULT_BROWSE_HARD_MS;
   return n;
 }
 

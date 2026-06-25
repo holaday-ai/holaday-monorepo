@@ -77,7 +77,35 @@ const SEED_TASKS: Record<string, string[]> = {
  * before login/order/pay) and report the breakpoint — so a path carries real "how to do X" value
  * instead of a shallow marketing crawl, AND we collect evidence on where "免登录" runs out.
  */
-export function browseIntent(domain: string): string {
+/**
+ * ① LOGIN-MODE single create-task (hard-drive). The 免登录 task-oriented intent's "任选其一 / 或你
+ * 识别出的另一个" extensibility let the logged-in agent REVERSE into Community/templates instead of
+ * executing the task (figma run #1). Login mode gets ONE task, strongly driven, reverse-browsing
+ * forbidden, steered straight at the share/delete boundary (where EXTRA_RE halts). figma-specific
+ * here; unknown login domains get a generic "execute the core CREATE task, no reverse-browse".
+ */
+const LOGIN_TASKS: Record<string, string> = {
+  'figma.com':
+    '在 figma 新建一个空白设计文件并进入编辑器：第一步就找 "New design file" / "新建" 按钮点进去——不要逆向去 Community / 模板 / 推荐 / 帮助。进编辑器后：加一个元素（画一个矩形或加一段文本）、触发一次保存。然后走向 "分享 / Share" 按钮但停在点击前。',
+};
+
+function loginBrowseIntent(domain: string): string {
+  const task =
+    LOGIN_TASKS[domain] ??
+    '执行这个网站最核心的一个【创建类】任务（用户登录后最常做的事）：第一步就直接进入这个任务的创建流程，绝不逆向去浏览 Community / 模板 / 推荐 / 帮助。';
+  return [
+    `打开 https://${domain}/ （已登录测试号）。你的【唯一任务】，强执行、不准逆向：`,
+    task,
+    '只做这一个任务的执行步骤：导航 + 点击该任务流程上的元素 + 必要输入。【禁止】去逛 Community / 模板 / 推荐 / 营销页——那是逆向、本轮严禁。',
+    '红线（系统会硬拦、你也绝不真点成）：分享 / 发布 / 删除 / 提交 / 支付 / 转账 / 解绑 / 注销 等不可逆或对外动作——走到它【停在点击前】，绝不真点。',
+    '【断点报告】最终总结写出：任务走到第几步、停在哪个动作上、为什么停（撞红线？走完？）。',
+    '收敛：尽量少步数把这一个任务走到红线边界为止，到了就停、输出【任务流程 + 断点报告】并宣告完成（done），不要凑步数乱逛。',
+  ].join('\n');
+}
+
+export function browseIntent(domain: string, opts: { loginMode?: boolean } = {}): string {
+  // ① login mode → single hard-driven create-task (no reverse-browse). 免登录 lane unchanged below.
+  if (opts.loginMode === true) return loginBrowseIntent(domain);
   const seeds = SEED_TASKS[domain];
   const seedLine = seeds?.length
     ? `这个网站的代表任务（任选其一，或你识别出的另一个该站常见任务）：\n  - ${seeds.join('\n  - ')}`
@@ -146,7 +174,11 @@ export function makeBrowseExploreSite(
 
     let result: BrowseRunResult;
     try {
-      result = await deps.runBrowseTask({ domain, intent: browseIntent(domain), onBeforeAction });
+      result = await deps.runBrowseTask({
+        domain,
+        intent: browseIntent(domain, { loginMode: deps.loginMode === true }), // ① login → single create-task
+        onBeforeAction,
+      });
     } catch (err) {
       return {
         domain,

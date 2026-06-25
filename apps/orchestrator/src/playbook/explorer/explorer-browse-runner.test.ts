@@ -4,6 +4,8 @@ import {
   DEFAULT_BROWSE_HARD_MS,
   DEFAULT_CONNECT_MS,
   DEFAULT_MAX_ITERATIONS,
+  LOGIN_BROWSE_HARD_MS,
+  LOGIN_MAX_ITERATIONS,
   MAX_ITERATIONS_CEILING,
   buildBreakpointSummary,
   makeRunBrowseTask,
@@ -209,6 +211,22 @@ describe('resolveMaxIterations — env-configurable per-browse cap (fail-safe + 
   });
   it('🛡️ fat-finger above the ceiling is CLAMPED (a mistyped 2500 cannot run away)', () => {
     expect(resolveMaxIterations('2500')).toBe(MAX_ITERATIONS_CEILING);
+  });
+  it('② login mode default = LOGIN_MAX_ITERATIONS (40) > 免登录 25; env override still clamps', () => {
+    expect(resolveMaxIterations(undefined, true)).toBe(LOGIN_MAX_ITERATIONS);
+    expect(resolveMaxIterations(undefined, false)).toBe(DEFAULT_MAX_ITERATIONS);
+    expect(LOGIN_MAX_ITERATIONS).toBeGreaterThan(DEFAULT_MAX_ITERATIONS);
+    expect(resolveMaxIterations('2500', true)).toBe(MAX_ITERATIONS_CEILING); // ceiling still caps login
+  });
+});
+
+describe('resolveBrowseHardMs — per-browse hard wall (② login longer default)', () => {
+  it('missing/invalid → mode default (login 720s > 免登录 420s); valid used', () => {
+    expect(resolveBrowseHardMs(undefined)).toBe(DEFAULT_BROWSE_HARD_MS);
+    expect(resolveBrowseHardMs(undefined, false)).toBe(DEFAULT_BROWSE_HARD_MS);
+    expect(resolveBrowseHardMs(undefined, true)).toBe(LOGIN_BROWSE_HARD_MS);
+    expect(LOGIN_BROWSE_HARD_MS).toBeGreaterThan(DEFAULT_BROWSE_HARD_MS);
+    expect(resolveBrowseHardMs('600000', true)).toBe(600000); // explicit env wins in either mode
   });
 });
 

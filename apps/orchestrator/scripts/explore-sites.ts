@@ -169,7 +169,7 @@ if (browse) {
 
   // (c) per-browse iteration cap — env-overridable (tune batch-1 without a redeploy),
   // fail-safe parsed + clamped to a fat-finger ceiling.
-  const maxIterations = resolveMaxIterations(process.env.EXPLORER_MAX_ITERATIONS);
+  const maxIterations = resolveMaxIterations(process.env.EXPLORER_MAX_ITERATIONS, loginMode); // ② login → 40
   const rawMaxIter = process.env.EXPLORER_MAX_ITERATIONS?.trim();
   if (rawMaxIter && String(maxIterations) !== rawMaxIter) {
     logger.warn(
@@ -277,7 +277,7 @@ if (browse) {
       // deadline; on timeout FORCE-dispose the clean context (rejects the in-flight op → the
       // hung loop unwinds) and resolve to a determinate `failed` outcome so the status-update
       // below still runs. Hard wall > the 300s soft timeout (soft gets first, clean crack).
-      const hardMs = resolveBrowseHardMs(process.env.EXPLORER_BROWSE_HARD_MS);
+      const hardMs = resolveBrowseHardMs(process.env.EXPLORER_BROWSE_HARD_MS, loginMode); // ② login → 720s
       let outcome: { status: string; reason?: string; summary?: string };
       try {
         outcome = await withHardDeadline(
