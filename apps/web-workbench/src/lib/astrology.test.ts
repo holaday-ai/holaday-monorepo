@@ -1,11 +1,35 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   buildAstroReading,
+  clearAstroProfile,
   createProfileFromBirthday,
+  readAstroProfile,
+  saveAstroProfile,
   zodiacFromBirthday,
 } from '@/lib/astrology';
 
 describe('astrology helpers', () => {
+  const storage = new Map<string, string>();
+
+  beforeEach(() => {
+    storage.clear();
+    vi.stubGlobal('window', {
+      localStorage: {
+        getItem: (key: string) => storage.get(key) ?? null,
+        removeItem: (key: string) => {
+          storage.delete(key);
+        },
+        setItem: (key: string, value: string) => {
+          storage.set(key, value);
+        },
+      },
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it.each([
     ['1996-03-21', 'aries'],
     ['1996-04-20', 'taurus'],
@@ -45,5 +69,28 @@ describe('astrology helpers', () => {
     ]);
     expect(reading.waitingCards).toHaveLength(3);
     expect(reading.weekly).toHaveLength(7);
+  });
+
+  it('scopes persisted profiles by user id', () => {
+    const aries = createProfileFromBirthday({
+      name: 'User A',
+      birthday: '1996-03-21',
+    });
+    const taurus = createProfileFromBirthday({
+      name: 'User B',
+      birthday: '1996-04-20',
+    });
+
+    saveAstroProfile(aries, 'user-a');
+    saveAstroProfile(taurus, 'user-b');
+
+    expect(readAstroProfile('user-a')?.zodiacSign).toBe('aries');
+    expect(readAstroProfile('user-b')?.zodiacSign).toBe('taurus');
+    expect(readAstroProfile()).toBeNull();
+
+    clearAstroProfile('user-a');
+
+    expect(readAstroProfile('user-a')).toBeNull();
+    expect(readAstroProfile('user-b')?.zodiacSign).toBe('taurus');
   });
 });

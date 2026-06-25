@@ -37,6 +37,7 @@ interface Props {
   intent: string;
   status: UiTaskStatus;
   surface: 'waiting' | 'complete';
+  profileStorageScope?: string | null;
 }
 
 function storageKey(taskId: string, surface: Props['surface']): string {
@@ -66,11 +67,19 @@ export function AstroTaskCompanion({
   intent,
   status,
   surface,
+  profileStorageScope = null,
 }: Props): JSX.Element | null {
   const dismissKey = React.useMemo(() => storageKey(taskId, surface), [surface, taskId]);
   const [dismissed, setDismissed] = React.useState(() => readDismissed(dismissKey));
   const [spin, setSpin] = React.useState(0);
-  const profile = React.useMemo(() => readAstroProfile() ?? defaultAstroProfile(), []);
+  const storageScope = profileStorageScope?.trim() || null;
+  const profile = React.useMemo(
+    () =>
+      storageScope
+        ? (readAstroProfile(storageScope) ?? defaultAstroProfile())
+        : defaultAstroProfile(),
+    [storageScope],
+  );
   const insight = React.useMemo(
     () =>
       buildAstroTaskInsight({
