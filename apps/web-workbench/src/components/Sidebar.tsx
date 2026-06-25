@@ -7,6 +7,7 @@ import {
   FolderPlus,
   Layers,
   ListPlus,
+  MoonStar,
   Pencil,
   Pin,
   PinOff,
@@ -1006,6 +1007,7 @@ interface FeatureItem {
 
 const FEATURES: readonly FeatureItem[] = [
   { icon: Sparkles, label: '专家技能', href: '/skills' },
+  { icon: MoonStar, label: '今日能量', href: '/cosmic' },
   { icon: Clapperboard, label: '视频任务', href: '/video' },
   { icon: Clock, label: '定时任务', href: '/scheduled' },
   { icon: ListPlus, label: '批量任务', href: '/batch' },
