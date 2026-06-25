@@ -13,7 +13,7 @@
 <!-- 2026-06-25 会话归档 — ④ 自学习: 免登录验透 + A 登录预热 dark + B1 LIVE + 战略/安全线 -->
 **📌 会话归档（2026-06-25）— ④ 自学习现状 + 登录线战略**
 
-**PROD 基线**：orch `64da04b6`（A 登录态 intent 指令式+软600/硬720/iter40+Copy-link veto；run#1/#2 修）。flags：`EXPLORER_ENABLED` **OFF** / `LOGIN_EXPLORER_ENABLED` **OFF** / `USER_TASK_CRYSTALLIZE_ENABLED` **ON（B1 live）**。
+**PROD 基线**：orch `08dce4e8`(todoist 入 LOGIN_TASKS、表单站首选)（A 登录态 intent 指令式+软600/硬720/iter40+Copy-link veto；run#1/#2 修）。flags：`EXPLORER_ENABLED` **OFF** / `LOGIN_EXPLORER_ENABLED` **OFF** / `USER_TASK_CRYSTALLIZE_ENABLED` **ON（B1 live）**。
 
 **④ 自学习现状**：
 - **免登录 explorer**：四类（ctrip/figma/todoist/douyin）验透、全终止路径（done/maxIter/软超时/硬 abort/veto-halt/connect-fail）出**非空断点证据**、dark。**四类实证：免登录全停在登录墙、够不到 post-login 真实操作路径。**
