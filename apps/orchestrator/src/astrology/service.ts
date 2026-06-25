@@ -54,6 +54,7 @@ interface DivineApiConfig {
   apiKey: string;
   accessToken: string;
   baseUrl: string;
+  cacheTtlMs: number;
 }
 
 interface RequestOptions {
@@ -63,6 +64,8 @@ interface RequestOptions {
 }
 
 const DIVINE_DEFAULT_BASE_URL = 'https://astroapi-3.divineapi.com';
+const DIVINE_DEFAULT_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const divineApiCache = new Map<string, { expiresAt: number; value: unknown }>();
 
 const ZODIAC_META: Record<
   ZodiacSign,
@@ -179,6 +182,33 @@ export function hasDivineApiCredentials(env: NodeJS.ProcessEnv = process.env): b
 
 export function hasAstrologyApiCredentials(env: NodeJS.ProcessEnv = process.env): boolean {
   return hasDivineApiCredentials(env);
+}
+
+export function divineApiStatus(env: NodeJS.ProcessEnv = process.env): {
+  provider: 'divineapi' | 'mock';
+  apiConfigured: boolean;
+  cacheTtlMs: number;
+  cacheEntries: number;
+  endpoints: {
+    dailyHoroscope: string;
+    dailyTarot: string;
+  };
+} {
+  const config = divineApiConfig(env);
+  return {
+    provider: config ? 'divineapi' : 'mock',
+    apiConfigured: Boolean(config),
+    cacheTtlMs: config?.cacheTtlMs ?? readCacheTtlMs(env),
+    cacheEntries: divineApiCache.size,
+    endpoints: {
+      dailyHoroscope: '/api/v5/daily-horoscope',
+      dailyTarot: '/api/v2/daily-tarot',
+    },
+  };
+}
+
+export function clearDivineApiCacheForTest(): void {
+  divineApiCache.clear();
 }
 
 export function zodiacFromBirthday(birthday: string): ZodiacSign {
@@ -363,6 +393,7 @@ function divineApiConfig(env: NodeJS.ProcessEnv = process.env): DivineApiConfig 
     apiKey,
     accessToken,
     baseUrl: (env.DIVINE_API_BASE_URL ?? DIVINE_DEFAULT_BASE_URL).replace(/\/+$/, ''),
+    cacheTtlMs: readCacheTtlMs(env),
   };
 }
 
@@ -372,6 +403,13 @@ async function postDivineApiJson(
   config: DivineApiConfig,
   fetchImpl: typeof fetch = fetch,
 ): Promise<unknown> {
+  const bodyString = new URLSearchParams(body).toString();
+  const cacheKey = `${config.baseUrl}${path}?${bodyString}`;
+  if (config.cacheTtlMs > 0) {
+    const cached = divineApiCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) return cached.value;
+    if (cached) divineApiCache.delete(cacheKey);
+  }
   const res = await fetchImpl(`${config.baseUrl}${path}`, {
     method: 'POST',
     headers: {
@@ -379,12 +417,19 @@ async function postDivineApiJson(
       'Content-Type': 'application/x-www-form-urlencoded',
       Accept: 'application/json',
     },
-    body: new URLSearchParams(body).toString(),
+    body: bodyString,
   });
   if (!res.ok) {
     throw new Error(`DivineAPI request failed: ${res.status}`);
   }
-  return res.json();
+  const json = await res.json();
+  if (config.cacheTtlMs > 0) {
+    divineApiCache.set(cacheKey, {
+      expiresAt: Date.now() + config.cacheTtlMs,
+      value: json,
+    });
+  }
+  return json;
 }
 
 function mergeDivineDaily(mock: AstrologyReading, json: unknown): AstrologyReading {
@@ -478,6 +523,14 @@ function languageCode(locale?: string): string {
 
 function timezoneOffsetHours(date: Date): string {
   return String(-date.getTimezoneOffset() / 60);
+}
+
+function readCacheTtlMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.DIVINE_API_CACHE_TTL_MS;
+  if (!raw) return DIVINE_DEFAULT_CACHE_TTL_MS;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) return DIVINE_DEFAULT_CACHE_TTL_MS;
+  return parsed;
 }
 
 function seededNumber(value: string): number {

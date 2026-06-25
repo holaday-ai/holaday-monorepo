@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
   buildDailyAstrologyReading,
+  clearDivineApiCacheForTest,
+  divineApiStatus,
   getDailyAstrologyReading,
   getDailyTarotReading,
   hasAstrologyApiCredentials,
@@ -9,6 +11,10 @@ import {
 } from './service.js';
 
 describe('astrology service', () => {
+  afterEach(() => {
+    clearDivineApiCacheForTest();
+  });
+
   it('derives zodiac signs from birthday boundaries', () => {
     expect(zodiacFromBirthday('1996-03-21')).toBe('aries');
     expect(zodiacFromBirthday('1996-04-20')).toBe('taurus');
@@ -59,6 +65,23 @@ describe('astrology service', () => {
     expect(reading.provider).toBe('mock');
     expect(reading.apiConfigured).toBe(true);
     expect(reading.zodiacSign).toBe('aquarius');
+
+    expect(
+      divineApiStatus({
+        DIVINE_API_KEY: 'key',
+        DIVINE_ACCESS_TOKEN: 'token',
+        DIVINE_API_CACHE_TTL_MS: '60000',
+      }),
+    ).toEqual({
+      provider: 'divineapi',
+      apiConfigured: true,
+      cacheTtlMs: 60000,
+      cacheEntries: 0,
+      endpoints: {
+        dailyHoroscope: '/api/v5/daily-horoscope',
+        dailyTarot: '/api/v2/daily-tarot',
+      },
+    });
   });
 
   it('maps DivineAPI daily horoscope responses onto the reading shape', async () => {
@@ -135,5 +158,91 @@ describe('astrology service', () => {
     expect(reading.title).toBe('The Sun');
     expect(reading.subtitle).toBe('Major Arcana');
     expect(reading.body).toBe('Good momentum for a bright, simple action.');
+  });
+
+  it('caches identical DivineAPI calls to avoid repeated provider usage', async () => {
+    let callCount = 0;
+    const fetchImpl = (async () => {
+      callCount += 1;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: {
+            prediction: {
+              personal_life: `Cached daily summary ${callCount}.`,
+            },
+          },
+        }),
+      } as Response;
+    }) as typeof fetch;
+
+    const options = {
+      env: {
+        DIVINE_API_KEY: 'key',
+        DIVINE_ACCESS_TOKEN: 'token',
+        DIVINE_API_BASE_URL: 'https://example.test',
+        DIVINE_API_CACHE_TTL_MS: '60000',
+      },
+      fetchImpl,
+      now: new Date('2026-06-25T00:00:00.000Z'),
+    };
+
+    const first = await getDailyAstrologyReading(
+      { birthday: '1996-03-21', zodiacSign: 'aries', locale: 'zh-CN' },
+      options,
+    );
+    const second = await getDailyAstrologyReading(
+      { birthday: '1996-03-21', zodiacSign: 'aries', locale: 'zh-CN' },
+      options,
+    );
+
+    expect(callCount).toBe(1);
+    expect(first.headline).toBe('Cached daily summary 1.');
+    expect(second.headline).toBe('Cached daily summary 1.');
+    expect(divineApiStatus(options.env).cacheEntries).toBe(1);
+  });
+
+  it('can disable DivineAPI cache with a zero TTL', async () => {
+    let callCount = 0;
+    const fetchImpl = (async () => {
+      callCount += 1;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: {
+            prediction: {
+              personal_life: `Uncached daily summary ${callCount}.`,
+            },
+          },
+        }),
+      } as Response;
+    }) as typeof fetch;
+
+    const options = {
+      env: {
+        DIVINE_API_KEY: 'key',
+        DIVINE_ACCESS_TOKEN: 'token',
+        DIVINE_API_BASE_URL: 'https://example.test',
+        DIVINE_API_CACHE_TTL_MS: '0',
+      },
+      fetchImpl,
+      now: new Date('2026-06-25T00:00:00.000Z'),
+    };
+
+    const first = await getDailyAstrologyReading(
+      { birthday: '1996-03-21', zodiacSign: 'aries' },
+      options,
+    );
+    const second = await getDailyAstrologyReading(
+      { birthday: '1996-03-21', zodiacSign: 'aries' },
+      options,
+    );
+
+    expect(callCount).toBe(2);
+    expect(first.headline).toBe('Uncached daily summary 1.');
+    expect(second.headline).toBe('Uncached daily summary 2.');
+    expect(divineApiStatus(options.env).cacheEntries).toBe(0);
   });
 });

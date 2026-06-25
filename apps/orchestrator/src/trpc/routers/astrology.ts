@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import {
+  divineApiStatus,
   getDailyAstrologyReading,
   getDailyTarotReading,
-  hasDivineApiCredentials,
 } from '../../astrology/service.js';
 import { getFeatureFlags } from '../../execution/feature-flags.js';
 import { protectedProcedure, publicProcedure, router } from '../trpc.js';
@@ -34,11 +34,10 @@ const profileInputSchema = z.object({
 export const astrologyRouter = router({
   status: publicProcedure.query(() => {
     const flags = getFeatureFlags();
-    const apiConfigured = hasDivineApiCredentials();
+    const providerStatus = divineApiStatus();
     return {
       enabled: flags.ASTROLOGY,
-      provider: apiConfigured ? 'divineapi' : 'mock',
-      apiConfigured,
+      ...providerStatus,
     };
   }),
   daily: protectedProcedure.input(profileInputSchema).query(({ input }) =>
