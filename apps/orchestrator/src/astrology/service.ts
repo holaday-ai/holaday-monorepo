@@ -22,7 +22,7 @@ export interface AstrologyProfileInput {
 }
 
 export interface AstrologyReading {
-  provider: 'mock' | 'astrologyapi';
+  provider: 'mock' | 'divineapi';
   apiConfigured: boolean;
   zodiacSign: ZodiacSign;
   zodiacLabel: string;
@@ -41,6 +41,28 @@ export interface AstrologyReading {
     suggestion: string;
   }>;
 }
+
+export interface TarotReading {
+  provider: 'mock' | 'divineapi';
+  apiConfigured: boolean;
+  title: string;
+  subtitle: string;
+  body: string;
+}
+
+interface DivineApiConfig {
+  apiKey: string;
+  accessToken: string;
+  baseUrl: string;
+}
+
+interface RequestOptions {
+  env?: NodeJS.ProcessEnv;
+  now?: Date;
+  fetchImpl?: typeof fetch;
+}
+
+const DIVINE_DEFAULT_BASE_URL = 'https://astroapi-3.divineapi.com';
 
 const ZODIAC_META: Record<
   ZodiacSign,
@@ -151,8 +173,12 @@ const ZODIAC_META: Record<
   },
 };
 
+export function hasDivineApiCredentials(env: NodeJS.ProcessEnv = process.env): boolean {
+  return Boolean(env.DIVINE_API_KEY && env.DIVINE_ACCESS_TOKEN);
+}
+
 export function hasAstrologyApiCredentials(env: NodeJS.ProcessEnv = process.env): boolean {
-  return Boolean(env.ASTROLOGY_API_USER_ID && env.ASTROLOGY_API_KEY);
+  return hasDivineApiCredentials(env);
 }
 
 export function zodiacFromBirthday(birthday: string): ZodiacSign {
@@ -177,15 +203,15 @@ export function zodiacFromBirthday(birthday: string): ZodiacSign {
 
 export function buildDailyAstrologyReading(
   input: AstrologyProfileInput,
-  options: { env?: NodeJS.ProcessEnv; now?: Date } = {},
+  options: RequestOptions = {},
 ): AstrologyReading {
   const now = options.now ?? new Date();
   const zodiacSign = input.zodiacSign ?? zodiacFromBirthday(input.birthday);
   const meta = ZODIAC_META[zodiacSign];
   const seed = seededNumber(`${zodiacSign}-${input.birthday}-${dateKey(now)}`);
-  const apiConfigured = hasAstrologyApiCredentials(options.env);
+  const apiConfigured = hasDivineApiCredentials(options.env);
   return {
-    provider: apiConfigured ? 'astrologyapi' : 'mock',
+    provider: 'mock',
     apiConfigured,
     zodiacSign,
     zodiacLabel: meta.label,
@@ -203,6 +229,97 @@ export function buildDailyAstrologyReading(
     ]),
     weekly: buildWeek(seed),
   };
+}
+
+export async function getDailyAstrologyReading(
+  input: AstrologyProfileInput,
+  options: RequestOptions = {},
+): Promise<AstrologyReading> {
+  const mock = buildDailyAstrologyReading(input, options);
+  const config = divineApiConfig(options.env);
+  if (!config) return mock;
+
+  try {
+    const json = await postDivineApiJson(
+      '/api/v5/daily-horoscope',
+      {
+        api_key: config.apiKey,
+        sign: mock.zodiacSign,
+        h_day: 'today',
+        tzone: timezoneOffsetHours(options.now ?? new Date()),
+        lan: languageCode(input.locale),
+      },
+      config,
+      options.fetchImpl,
+    );
+    return mergeDivineDaily(mock, json);
+  } catch {
+    return mock;
+  }
+}
+
+export function buildMockTarotReading(
+  input: { zodiacSign?: ZodiacSign; locale?: string } = {},
+  options: RequestOptions = {},
+): TarotReading {
+  const now = options.now ?? new Date();
+  const sign = input.zodiacSign ?? 'aries';
+  const seed = seededNumber(`${sign}-tarot-${dateKey(now)}`);
+  const apiConfigured = hasDivineApiCredentials(options.env);
+  const cards: [
+    Pick<TarotReading, 'title' | 'subtitle' | 'body'>,
+    ...Array<Pick<TarotReading, 'title' | 'subtitle' | 'body'>>,
+  ] = [
+    {
+      title: 'The Star',
+      subtitle: '先把希望放回桌面',
+      body: '今天适合相信一个长期方向，但行动要轻一点。先完成一件能恢复信心的小事。',
+    },
+    {
+      title: 'Temperance',
+      subtitle: '把节奏调匀',
+      body: '今天不适合用力过猛。把任务拆开，给沟通和休息都留出位置。',
+    },
+    {
+      title: 'Page of Pentacles',
+      subtitle: '从一个可执行动作开始',
+      body: '今天适合学习、整理、试一个小工具。别急着定终局，先拿到反馈。',
+    },
+  ];
+  const card = cards[seed % cards.length] ?? cards[0];
+  return {
+    provider: 'mock',
+    apiConfigured,
+    title: card.title,
+    subtitle: card.subtitle,
+    body: card.body,
+  };
+}
+
+export async function getDailyTarotReading(
+  input: { zodiacSign?: ZodiacSign; locale?: string } = {},
+  options: RequestOptions = {},
+): Promise<TarotReading> {
+  const mock = buildMockTarotReading(input, options);
+  const config = divineApiConfig(options.env);
+  if (!config) return mock;
+
+  try {
+    const json = await postDivineApiJson(
+      '/api/v2/daily-tarot',
+      {
+        api_key: config.apiKey,
+        sign: input.zodiacSign ?? 'aries',
+        h_day: 'today',
+        lan: languageCode(input.locale),
+      },
+      config,
+      options.fetchImpl,
+    );
+    return mergeDivineTarot(mock, json);
+  } catch {
+    return mock;
+  }
 }
 
 function buildWeek(seed: number): AstrologyReading['weekly'] {
@@ -236,6 +353,131 @@ function buildWeek(seed: number): AstrologyReading['weekly'] {
       suggestion: suggestions[tone],
     };
   });
+}
+
+function divineApiConfig(env: NodeJS.ProcessEnv = process.env): DivineApiConfig | null {
+  const apiKey = env.DIVINE_API_KEY;
+  const accessToken = env.DIVINE_ACCESS_TOKEN;
+  if (!apiKey || !accessToken) return null;
+  return {
+    apiKey,
+    accessToken,
+    baseUrl: (env.DIVINE_API_BASE_URL ?? DIVINE_DEFAULT_BASE_URL).replace(/\/+$/, ''),
+  };
+}
+
+async function postDivineApiJson(
+  path: string,
+  body: Record<string, string>,
+  config: DivineApiConfig,
+  fetchImpl: typeof fetch = fetch,
+): Promise<unknown> {
+  const res = await fetchImpl(`${config.baseUrl}${path}`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${config.accessToken}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Accept: 'application/json',
+    },
+    body: new URLSearchParams(body).toString(),
+  });
+  if (!res.ok) {
+    throw new Error(`DivineAPI request failed: ${res.status}`);
+  }
+  return res.json();
+}
+
+function mergeDivineDaily(mock: AstrologyReading, json: unknown): AstrologyReading {
+  return {
+    ...mock,
+    provider: 'divineapi',
+    headline:
+      firstString(json, [
+        ['data', 'prediction', 'personal_life'],
+        ['data', 'prediction', 'emotions'],
+        ['data', 'prediction', 'profession'],
+        ['data', 'prediction'],
+        ['data', 'horoscope'],
+        ['data', 'summary'],
+        ['prediction'],
+      ]) ?? mock.headline,
+    workNote:
+      firstString(json, [
+        ['data', 'prediction', 'profession'],
+        ['data', 'prediction', 'luck'],
+        ['data', 'prediction', 'health'],
+        ['data', 'description'],
+        ['data', 'bot_response'],
+      ]) ?? mock.workNote,
+    luckyColor:
+      firstString(json, [
+        ['data', 'lucky_color'],
+        ['data', 'luckyColor'],
+        ['data', 'lucky', 'color'],
+      ]) ?? mock.luckyColor,
+  };
+}
+
+function mergeDivineTarot(mock: TarotReading, json: unknown): TarotReading {
+  const title =
+    firstString(json, [
+      ['data', 'card_name'],
+      ['data', 'card', 'name'],
+      ['data', 'name'],
+      ['card_name'],
+    ]) ?? mock.title;
+  return {
+    provider: 'divineapi',
+    apiConfigured: true,
+    title,
+    subtitle:
+      firstString(json, [
+        ['data', 'card_type'],
+        ['data', 'deck'],
+        ['data', 'subtitle'],
+      ]) ?? mock.subtitle,
+    body:
+      firstString(json, [
+        ['data', 'prediction'],
+        ['data', 'description'],
+        ['data', 'meaning'],
+        ['data', 'bot_response'],
+      ]) ?? mock.body,
+  };
+}
+
+function firstString(json: unknown, paths: Array<Array<string>>): string | null {
+  for (const path of paths) {
+    const value = getPath(json, path);
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+    if (value && typeof value === 'object') {
+      const flattened = Object.values(value)
+        .filter((entry): entry is string => typeof entry === 'string' && Boolean(entry.trim()))
+        .join(' ');
+      if (flattened) return flattened;
+    }
+  }
+  return null;
+}
+
+function getPath(value: unknown, path: Array<string>): unknown {
+  let current = value;
+  for (const key of path) {
+    if (!current || typeof current !== 'object' || !(key in current)) return null;
+    current = (current as Record<string, unknown>)[key];
+  }
+  return current;
+}
+
+function languageCode(locale?: string): string {
+  if (!locale) return 'en';
+  return locale.toLowerCase().startsWith('zh') ? 'zh' : 'en';
+}
+
+function timezoneOffsetHours(date: Date): string {
+  return String(-date.getTimezoneOffset() / 60);
 }
 
 function seededNumber(value: string): number {

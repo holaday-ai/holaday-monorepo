@@ -1,5 +1,9 @@
 import { z } from 'zod';
-import { buildDailyAstrologyReading, hasAstrologyApiCredentials } from '../../astrology/service.js';
+import {
+  getDailyAstrologyReading,
+  getDailyTarotReading,
+  hasDivineApiCredentials,
+} from '../../astrology/service.js';
 import { getFeatureFlags } from '../../execution/feature-flags.js';
 import { protectedProcedure, publicProcedure, router } from '../trpc.js';
 
@@ -30,14 +34,22 @@ const profileInputSchema = z.object({
 export const astrologyRouter = router({
   status: publicProcedure.query(() => {
     const flags = getFeatureFlags();
-    const apiConfigured = hasAstrologyApiCredentials();
+    const apiConfigured = hasDivineApiCredentials();
     return {
       enabled: flags.ASTROLOGY,
-      provider: apiConfigured ? 'astrologyapi' : 'mock',
+      provider: apiConfigured ? 'divineapi' : 'mock',
       apiConfigured,
     };
   }),
   daily: protectedProcedure.input(profileInputSchema).query(({ input }) =>
-    buildDailyAstrologyReading(input),
+    getDailyAstrologyReading(input),
   ),
+  tarot: protectedProcedure
+    .input(
+      z.object({
+        zodiacSign: zodiacSignSchema.optional(),
+        locale: z.string().trim().max(16).optional(),
+      }),
+    )
+    .query(({ input }) => getDailyTarotReading(input)),
 });
