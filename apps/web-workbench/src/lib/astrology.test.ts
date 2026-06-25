@@ -36,6 +36,13 @@ describe('astrology helpers', () => {
     expect(reading.zodiacLabel).toBe('白羊座');
     expect(reading.energyScore).toBeGreaterThanOrEqual(56);
     expect(reading.energyScore).toBeLessThanOrEqual(94);
+    expect(reading.fortune.map((item) => item.key)).toEqual([
+      'overall',
+      'career',
+      'wealth',
+      'love',
+      'health',
+    ]);
     expect(reading.waitingCards).toHaveLength(3);
     expect(reading.weekly).toHaveLength(7);
   });

@@ -29,6 +29,14 @@ export interface AstroDay {
   suggestion: string;
 }
 
+export interface AstroFortuneArea {
+  key: 'overall' | 'career' | 'wealth' | 'love' | 'health';
+  label: string;
+  score: number;
+  title: string;
+  body: string;
+}
+
 export interface AstroReading {
   zodiacLabel: string;
   dateLabel: string;
@@ -39,6 +47,7 @@ export interface AstroReading {
   focusMode: string;
   headline: string;
   workNote: string;
+  fortune: AstroFortuneArea[];
   waitingCards: Array<{
     title: string;
     body: string;
@@ -287,6 +296,7 @@ export function buildAstroReading(profile: AstroProfile, date = new Date()): Ast
     focusMode: meta.focusMode,
     headline: meta.headline,
     workNote: meta.workNote,
+    fortune: buildFortune(normalized.zodiacSign, seed),
     waitingCards,
     weekly: buildWeek(seed),
   };
@@ -373,6 +383,48 @@ function buildWeek(seed: number): AstroDay[] {
       suggestion: suggestions[tone],
     };
   });
+}
+
+function buildFortune(sign: ZodiacSign, seed: number): AstroFortuneArea[] {
+  const meta = ZODIAC_META[sign];
+  const score = (offset: number): number => 58 + ((seed + offset) % 35);
+  return [
+    {
+      key: 'overall',
+      label: '总运',
+      score: score(3),
+      title: meta.headline,
+      body: `${meta.label} 今天的整体节奏偏「${meta.mood}」。先顺着这个能量走，少一点硬拧，事情会更容易打开。`,
+    },
+    {
+      key: 'career',
+      label: '事业 / 学业',
+      score: score(11),
+      title: meta.focusMode,
+      body: `${meta.workNote} 今天更适合把一个关键动作做扎实，而不是同时开太多新线程。`,
+    },
+    {
+      key: 'wealth',
+      label: '财运',
+      score: score(19),
+      title: '适合做轻量复盘',
+      body: `适合检查订阅、预算、报价和待确认支出。幸运色 ${meta.luckyColor} 可以当作今天的决策提醒。`,
+    },
+    {
+      key: 'love',
+      label: '感情 / 人际',
+      score: score(27),
+      title: '表达放轻一点',
+      body: `今天不用急着证明自己。把话说具体一点、柔和一点，更容易获得回应和协作。`,
+    },
+    {
+      key: 'health',
+      label: '身心状态',
+      score: score(35),
+      title: '给身体留一点空隙',
+      body: `${pick(seed, ['散步', '拉伸', '热饮', '早点收工', '整理桌面'])}会让状态回得更快。高光时段前后别把日程塞太满。`,
+    },
+  ];
 }
 
 function seededNumber(value: string): number {
