@@ -47,6 +47,15 @@ export interface AstroReading {
   weekly: AstroDay[];
 }
 
+export interface AstroTaskInsight {
+  eyebrow: string;
+  title: string;
+  body: string;
+  action: string;
+  energyScore: number;
+  accent: 'rose' | 'sky' | 'sage' | 'violet';
+}
+
 const STORAGE_KEY = 'holaday.cosmic.profile.v1';
 
 const ZODIAC_META: Record<
@@ -195,6 +204,14 @@ export function clearAstroProfile(): void {
   }
 }
 
+export function defaultAstroProfile(): AstroProfile {
+  return { ...FALLBACK_PROFILE };
+}
+
+export function isCosmicEnabled(): boolean {
+  return import.meta.env.VITE_COSMIC_ENABLED !== 'false';
+}
+
 export function createProfileFromBirthday(input: {
   name?: string;
   birthday: string;
@@ -280,6 +297,41 @@ export function zodiacOptions(): Array<{ value: ZodiacSign; label: string }> {
     value,
     label: ZODIAC_META[value].label,
   }));
+}
+
+export function buildAstroTaskInsight({
+  profile,
+  intent,
+  surface,
+  date = new Date(),
+}: {
+  profile: AstroProfile;
+  intent: string;
+  surface: 'waiting' | 'complete';
+  date?: Date;
+}): AstroTaskInsight {
+  const reading = buildAstroReading(profile, date);
+  const seed = seededNumber(`${profile.zodiacSign}-${intent}-${surface}-${dateKey(date)}`);
+  const accents: AstroTaskInsight['accent'][] = ['rose', 'sky', 'sage', 'violet'];
+  if (surface === 'complete') {
+    return {
+      eyebrow: `${reading.zodiacLabel} · 完成后`,
+      title: '结果已经回来，先挑最顺手的一步',
+      body: `${reading.workNote} 如果这次输出有点长，先抓 1 个能立刻执行的动作就好。`,
+      action: '整理下一步',
+      energyScore: reading.energyScore,
+      accent: pick(seed, accents),
+    };
+  }
+  const card = reading.waitingCards[seed % reading.waitingCards.length];
+  return {
+    eyebrow: `${reading.zodiacLabel} · ${reading.mood}`,
+    title: card?.title ?? reading.headline,
+    body: card?.body ?? reading.workNote,
+    action: card?.cta ?? '换一张',
+    energyScore: reading.energyScore,
+    accent: pick(seed, accents),
+  };
 }
 
 function normalizeProfile(input: Partial<AstroProfile>): AstroProfile | null {

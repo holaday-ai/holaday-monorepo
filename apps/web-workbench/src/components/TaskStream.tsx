@@ -36,6 +36,7 @@ import remarkGfm from 'remark-gfm';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { useToast } from '@/components/ui/toast';
 import { FileDownloadCard, parseHoladayFilePayload } from '@/components/FileDownloadCard';
+import { AstroTaskCompanion } from '@/components/astrology/AstroTaskCompanion';
 import { awaitingUserCopy, awaitingUserStreamMessage } from '@/lib/awaiting-user-copy';
 import { isBrowserErrorUrl } from '@/components/browser-panel-state';
 import { copyTextToClipboard, hasCopyableText } from '@/lib/copy-text';
@@ -445,6 +446,15 @@ function AgentBlock({
           />
         )}
 
+        {showInlineProgress && !awaitingUser && (
+          <AstroTaskCompanion
+            taskId={task.taskId}
+            intent={task.intent}
+            status={task.status}
+            surface="waiting"
+          />
+        )}
+
         {showInlineProgress && screencastUrl && <CurrentUrlChip url={screencastUrl} />}
 
         {webSearch && !awaitingUser && <WebSearchLine event={webSearch} />}
@@ -548,6 +558,14 @@ function AgentBlock({
             // not render a second identical one (keeps one primary
             // re-run action; its 填入原描述 / copy stay as secondary).
             verificationBannerPresent={shouldShowVerificationBanner(task)}
+          />
+        )}
+        {terminal && (
+          <AstroTaskCompanion
+            taskId={task.taskId}
+            intent={task.intent}
+            status={task.status}
+            surface="complete"
           />
         )}
         {/* Phase 11 QA #11 — terminal-but-empty fallback. Catches the
