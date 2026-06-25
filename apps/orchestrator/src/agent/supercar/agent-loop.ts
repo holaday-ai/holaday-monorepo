@@ -817,6 +817,11 @@ export interface RunSupercarOptions {
     name?: string | null;
     inputType?: string | null;
     url?: string | null;
+    // 预订站加固 + Layer C structural/context signals (login-mode veto consumes them).
+    tagName?: string | null;
+    pageUrl?: string | null;
+    pageTitle?: string | null;
+    pageTxSignal?: string | null;
   }) => { allowed: boolean; reason?: string } | Promise<{ allowed: boolean; reason?: string }>;
   /**
    * Phase 1 Playbook B4 — when true, the loop attaches the post-action
@@ -826,6 +831,10 @@ export interface RunSupercarOptions {
    * zero overhead (the consumer then stores no anchor).
    */
   captureScreenshotAnchors?: boolean;
+  /** Layer C — when true, the click-veto captures page title + visible transaction-field NAMES
+   *  (a small page.title()+text scan, NO values) so the model fallback can judge SPA transaction
+   *  pages. Set by the CLI only when LAYER_C_MODEL_VETO_ENABLED. Off → never scanned (zero cost). */
+  captureLayerCSignals?: boolean;
   /**
    * Phase 1 Playbook ④ prerequisite — LLM cost recorder. When provided
    * (together with userExternalId), each SUCCESSFUL messages.create turn is
@@ -1505,6 +1514,9 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
     // 预订站加固 — structural signals from the descriptor (login-mode veto consumes them).
     tagName?: string | null;
     pageUrl?: string | null;
+    // Layer C trigger signals (captured only when opts.captureLayerCSignals — LAYER_C on).
+    pageTitle?: string | null;
+    pageTxSignal?: string | null;
   }): Promise<SupercarOutcome | null> => {
     if (!opts.onBeforeAction) return null;
     const verdict = await opts.onBeforeAction(action);
@@ -3366,6 +3378,27 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
                 desc = null; // best-effort; the veto still runs (label null → see clean-context note)
               }
             }
+            // Layer C — page-level signals (gated; LAYER_C off → never scanned). page.title() +
+            // a small page-text scan for transaction-field NAMES (NO values). Best-effort: a
+            // failure leaves them null and Layer C falls back to the proceed-word trigger.
+            let pageTitleSig: string | null = null;
+            let pageTxSig: string | null = null;
+            if (opts.captureLayerCSignals && vk === 'click') {
+              try {
+                pageTitleSig = (await (await executor.getPage()).title()) ?? null;
+              } catch {
+                pageTitleSig = null;
+              }
+              try {
+                const txt = (await readPageText(executor, 4000)) ?? '';
+                const TX_FIELD_RE =
+                  /passenger|乘客|出行人|联系人|证件|身份证|护照|payment|支付|价格明细|费用明细|order\s*summary|订单|结算/gi;
+                const hits = [...new Set((txt.match(TX_FIELD_RE) ?? []).map((m) => m.toLowerCase()))].slice(0, 8);
+                pageTxSig = hits.length ? hits.join(',') : null;
+              } catch {
+                pageTxSig = null;
+              }
+            }
             const actVeto = await vetoOutcome({
               kind: vk,
               label: desc?.visibleText ?? null,
@@ -3376,6 +3409,8 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
               inputType: desc?.type ?? null,
               tagName: desc?.tagName ?? null, // 预订站加固: 提交型控件判定(层 B)
               pageUrl: desc?.url ?? null, // 预订站加固: 交易阶段反转(desc.url = page location.href)
+              pageTitle: pageTitleSig, // Layer C: 页面标题(给模型)
+              pageTxSignal: pageTxSig, // Layer C: 页面可见交易字段名(给模型 + 触发判定)
             });
             if (actVeto) return actVeto;
           }

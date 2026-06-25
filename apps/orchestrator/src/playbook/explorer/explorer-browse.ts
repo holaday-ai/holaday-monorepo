@@ -28,11 +28,16 @@ export interface BrowseAction {
   /** 预订站加固 — structural signals (tagName/inputType = 提交型; pageUrl = 交易阶段). login-mode only. */
   tagName?: string | null;
   pageUrl?: string | null;
+  /** Layer C trigger signals (login-mode only) — page title + visible tx-field names (no values). */
+  pageTitle?: string | null;
+  pageTxSignal?: string | null;
 }
 
 export interface BrowseVerdict {
   allowed: boolean;
   reason?: string;
+  /** Layer C: classify wants the model consulted before allowing (交易可疑区). Async caller handles. */
+  consultLayerC?: boolean;
 }
 
 /**
@@ -55,10 +60,14 @@ export function explorerOnBeforeAction(
       ...(action.url != null ? { url: action.url } : {}),
       ...(action.tagName != null ? { tagName: action.tagName } : {}), // 预订站加固: 提交型控件判定
       ...(action.pageUrl != null ? { pageUrl: action.pageUrl } : {}), // 预订站加固: 交易阶段反转
+      ...(action.pageTitle != null ? { pageTitle: action.pageTitle } : {}), // Layer C trigger
+      ...(action.pageTxSignal != null ? { pageTxSignal: action.pageTxSignal } : {}), // Layer C trigger
     },
     opts, // A3: login-mode thickens the veto (EXTRA_RE) — default empty = 免登录 lane unchanged
   );
-  return verdict.allowed ? { allowed: true } : { allowed: false, reason: verdict.reason };
+  if (!verdict.allowed) return { allowed: false, reason: verdict.reason };
+  // consultLayerC flows up so the async onBeforeAction can call the model before truly allowing.
+  return verdict.consultLayerC ? { allowed: true, consultLayerC: true } : { allowed: true };
 }
 
 /** Read-only browse intent — the soft guard (the hard guard is the live-veto). */
@@ -151,7 +160,8 @@ export interface BrowseDeps {
   runBrowseTask: (args: {
     domain: string;
     intent: string;
-    onBeforeAction: (action: BrowseAction) => BrowseVerdict;
+    // ASYNC-capable: Layer C consults the model, so the hook may return a Promise.
+    onBeforeAction: (action: BrowseAction) => BrowseVerdict | Promise<BrowseVerdict>;
   }) => Promise<BrowseRunResult>;
   /**
    * A2/A3 login-self-learning: when true the live-veto thickens (EXTRA_RE — money / irreversible
@@ -159,6 +169,18 @@ export interface BrowseDeps {
    * sets it ONLY when LOGIN_EXPLORER_ENABLED is on (orthogonal to EXPLORER_ENABLED).
    */
   loginMode?: boolean;
+  /**
+   * Layer C model-fallback veto. Consulted ONLY when classify returns consultLayerC (login-mode +
+   * 交易可疑区, A/B/反转 all passed). undefined → Layer C OFF (the CLI wires it only when
+   * LAYER_C_MODEL_VETO_ENABLED). block=true → veto (halted_sensitive); fail-closed lives inside it.
+   */
+  layerCVeto?: (input: {
+    kind: string;
+    label: string | null;
+    tagName: string | null;
+    pageTitle: string | null;
+    pageTxFields: string | null;
+  }) => Promise<{ block: boolean; reason: string }>;
 }
 
 /**
@@ -174,10 +196,29 @@ export function makeBrowseExploreSite(
     // object wrapper so the closure mutation is visible after the await (a plain
     // `let` would be narrowed to null by the type-checker).
     const state: { vetoed: { reason: string } | null } = { vetoed: null };
-    const onBeforeAction = (action: BrowseAction): BrowseVerdict => {
+    // ASYNC veto hook (the agent-loop awaits it) so Layer C can call the model. The sync
+    // A/B/反转/base classify runs first (cheap, deterministic); the model is a LAST resort, only
+    // when classify says 交易可疑区 AND Layer C is wired.
+    const onBeforeAction = async (action: BrowseAction): Promise<BrowseVerdict> => {
       const v = explorerOnBeforeAction(action, { loginMode: deps.loginMode === true });
-      if (!v.allowed) state.vetoed = { reason: v.reason ?? 'sensitive action' };
-      return v;
+      if (!v.allowed) {
+        state.vetoed = { reason: v.reason ?? 'sensitive action' };
+        return v;
+      }
+      if (v.consultLayerC && deps.layerCVeto) {
+        const c = await deps.layerCVeto({
+          kind: action.kind,
+          label: action.label ?? null,
+          tagName: action.tagName ?? null,
+          pageTitle: action.pageTitle ?? null,
+          pageTxFields: action.pageTxSignal ?? null,
+        });
+        if (c.block) {
+          state.vetoed = { reason: c.reason };
+          return { allowed: false, reason: c.reason };
+        }
+      }
+      return { allowed: true };
     };
 
     let result: BrowseRunResult;

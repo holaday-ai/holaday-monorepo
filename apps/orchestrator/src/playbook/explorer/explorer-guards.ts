@@ -54,6 +54,10 @@ export interface ExplorerAction {
    *  capture time) → 交易阶段 fail-closed reversal. All OPTIONAL → 免登录 lane unaffected. */
   tagName?: string;
   pageUrl?: string;
+  /** Layer C (model fallback) trigger signals (login-mode only). pageTitle + pageTxSignal (visible
+   *  transaction-field names present on the page, NO values) — only ever fed to the model. */
+  pageTitle?: string;
+  pageTxSignal?: string;
 }
 
 export interface ExplorerActionVerdict {
@@ -62,6 +66,9 @@ export interface ExplorerActionVerdict {
   sensitive: boolean;
   /** machine + human readable, suitable for the audit log + exploration_run summary. */
   reason: string;
+  /** Layer C: A/B/reversal all PASSED but the click is in a 交易可疑区 (proceed-word OR page has tx
+   *  fields) → the ASYNC caller must consult the model before allowing (sync classify can't await). */
+  consultLayerC?: boolean;
 }
 
 // Forbidden control labels (tested against the whitespace-normalised, lower-cased
@@ -103,6 +110,12 @@ const TRANSACTION_PAGE_RE =
 // ③ 交易页唯一放行的安全白名单(返回/取消/查看/修改/搜索/筛选类) —— 其余 click 全拦。
 const SAFE_CONTROL_RE =
   /返回|退回|后退|上一步|上一页|取消|放弃|修改|编辑|查看|详情|展开|收起|筛选|搜索|过滤|排序|关闭|帮助|back|cancel|edit|view|detail|filter|search|sort|close|previous|prev|help/i;
+
+// Layer C trigger — "proceed 弱信号" words: benign-looking next-step labels that on a logged-in
+// transaction SPA may advance an order (trip.com "Continue" slipped A/B because the SPA URL never
+// hit a /checkout stage). When A/B/reversal all PASS but a click carries one of these (OR the page
+// shows transaction fields), the model fallback (Layer C) gets the final say.
+const PROCEED_WEAK_RE = /继续|下一步|下一页|确定|完成|提交|去填写|continue|next|proceed|confirm|submit|done/i;
 
 /** 提交型控件 = button / input[submit|button|image]. (role 未捕获 → 是已知盲点、层 C 兜底。) */
 function isSubmitTypeControl(tagName?: string, inputType?: string): boolean {
@@ -229,6 +242,21 @@ export function classifyExplorerAction(
             sensitive: true,
             reason: `层B 提交型交易控件拦 (tag=${(action.tagName ?? '?').slice(0, 12)}, "${rawLabel.slice(0, 30)}")`,
           };
+        }
+        // 层 C 触发判定 (不在此调模型——sync classify 不能 await): A/B/反转都 PASS 了，但这个 click 落在
+        // 【交易可疑区】= proceed 弱信号词(继续/下一步/continue…) 或 页面含交易字段(pageTxSignal 非空) →
+        // 标 consultLayerC, 让 ASYNC 调用方(makeBrowseExploreSite onBeforeAction)调模型终判。其余 → 放行。
+        if (action.kind === 'click') {
+          const proceedWeak = normSignals.some((s) => PROCEED_WEAK_RE.test(s));
+          const pageHasTxFields = (action.pageTxSignal ?? '').trim().length > 0;
+          if (proceedWeak || pageHasTxFields) {
+            return {
+              allowed: true,
+              sensitive: false,
+              reason: `${action.kind}: 交易可疑区 → 待 Layer C 模型终判`,
+              consultLayerC: true,
+            };
+          }
         }
       }
       return { allowed: true, sensitive: false, reason: `${action.kind}: benign control, allowed` };

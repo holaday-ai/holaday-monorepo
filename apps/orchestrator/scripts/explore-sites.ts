@@ -134,6 +134,9 @@ if (browse) {
   // FAIL-CLOSED: login mode REQUIRES a storageState file path (else a "login" browse would
   // silently run logged-out, defeating the point + the thicker veto's purpose).
   const loginMode = process.env.LOGIN_EXPLORER_ENABLED === 'true';
+  // Layer C model-fallback veto — ONLY when login-mode AND its own flag. OFF → never constructed,
+  // never scans the page, never calls the model (today's A/B/反转 behaviour, zero model spend).
+  const layerCEnabled = loginMode && process.env.LAYER_C_MODEL_VETO_ENABLED === 'true';
   const loginStorageState = (process.env.LOGIN_EXPLORER_STORAGE_STATE ?? '').trim();
   if (loginMode && !loginStorageState) {
     console.error(
@@ -297,6 +300,7 @@ if (browse) {
             // raised the HARD wall to 720s + maxIter to 40, leaving this 300s soft cap unchanged).
             // Login 600s < the 720s hard wall (soft still gets first, cleaner crack); 免登录 stays 300s.
             timeoutMs: loginMode ? 600_000 : 300_000,
+            captureLayerCSignals: layerCEnabled, // Layer C: gated page title+tx-field scan
             domain: null,
           }),
           hardMs,
@@ -354,8 +358,61 @@ if (browse) {
   // makeBrowseExploreSite connects { cleanContext: true } (§9.6 backstop) via the runner
   // AND wires the veto hook — both halves of the guard. withExplorationRun persists one
   // exploration_runs row per browse (site / status / accurate in-memory cost / halt).
+  // ── Layer C — model-fallback veto (login-mode + LAYER_C_MODEL_VETO_ENABLED). Cheap haiku, temp 0,
+  // tiny tokens; metered to llm_calls (purpose=safety.filter); per-process quota (≤15, =per-run for
+  // single-site login runs). FAIL-CLOSED lives inside makeLayerCVeto. OFF → layerCVeto undefined →
+  // makeBrowseExploreSite never consults the model.
+  let layerCVeto:
+    | ((input: {
+        kind: string;
+        label: string | null;
+        tagName: string | null;
+        pageTitle: string | null;
+        pageTxFields: string | null;
+      }) => Promise<{ block: boolean; reason: string }>)
+    | undefined;
+  if (layerCEnabled) {
+    const { makeLayerCVeto } = await import('../src/playbook/explorer/explorer-layer-c.js');
+    const { default: Anthropic } = await import('@anthropic-ai/sdk');
+    const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY ?? '' });
+    const layerCRecorder = new DrizzleLlmCallRecorder(db, { onError: () => {} });
+    const rawMax = Number.parseInt(process.env.LAYER_C_MAX_CALLS ?? '15', 10);
+    const maxCalls = Number.isInteger(rawMax) && rawMax > 0 ? Math.min(rawMax, 15) : 15; // hard ceiling 15
+    const LAYER_C_MODEL = 'claude-haiku-4-5-20251001';
+    const callModel = async (prompt: string): Promise<string> => {
+      const t0 = Date.now();
+      const resp = await anthropic.messages.create({
+        model: LAYER_C_MODEL,
+        max_tokens: 60,
+        temperature: 0,
+        messages: [{ role: 'user', content: prompt }],
+      });
+      void layerCRecorder
+        .record({
+          userExternalId: explorerUser,
+          provider: 'anthropic',
+          model: LAYER_C_MODEL,
+          purpose: 'safety.filter', // Layer C IS a safety filter (avoids touching the closed union)
+          inputTokens: resp.usage?.input_tokens ?? 0,
+          outputTokens: resp.usage?.output_tokens ?? 0,
+          latencyMs: Date.now() - t0,
+          status: 'ok',
+        })
+        .catch(() => {});
+      return resp.content
+        .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
+        .map((b) => b.text)
+        .join('');
+    };
+    layerCVeto = makeLayerCVeto({ callModel, maxCalls, logger }).veto;
+    logger.warn({ maxCalls, model: LAYER_C_MODEL }, 'explorer: LAYER C model-fallback veto ON (login-mode)');
+  }
   // A3 — login mode thickens the live-veto (EXTRA_RE). Off → 免登录 veto unchanged.
-  const browseExplore = makeBrowseExploreSite({ runBrowseTask, ...(loginMode ? { loginMode: true } : {}) });
+  const browseExplore = makeBrowseExploreSite({
+    runBrowseTask,
+    ...(loginMode ? { loginMode: true } : {}),
+    ...(layerCVeto ? { layerCVeto } : {}),
+  });
   exploreSite = withExplorationRun(browseExplore, {
     resolveSiteId: async (domain) => {
       let s = await siteRepo.findGlobalByDomain(domain);

@@ -323,6 +323,36 @@ describe('explorer-guards', () => {
       expect(classifyExplorerAction({ kind: 'click', label }, LOGIN).allowed).toBe(false);
     }
   });
+
+  // ════ Layer C trigger (consultLayerC — A/B/反转 PASSED, 交易可疑区 → 让 async 调模型) ════
+  it('🤖 Layer C 触发: login + click + proceed-word(非提交型) → consultLayerC (A/B 已过)', () => {
+    const v = classifyExplorerAction({ kind: 'click', label: '继续', tagName: 'a' }, LOGIN);
+    expect(v.allowed).toBe(true); // sync 不拦 (A/B 没命中, 非提交型)
+    expect(v.consultLayerC).toBe(true); // 但标记: 让模型终判
+  });
+  it('🤖 Layer C 触发: login + click + pageTxSignal(页面有交易字段) → consultLayerC', () => {
+    const v = classifyExplorerAction(
+      { kind: 'click', label: '某选项', tagName: 'a', pageTxSignal: '出行人,价格明细' },
+      LOGIN,
+    );
+    expect(v.allowed).toBe(true);
+    expect(v.consultLayerC).toBe(true);
+  });
+  it('🤖 Layer C 不触发: A/B 命中即拦 (submit钮+继续 → 层B veto, 不进 C)', () => {
+    const v = classifyExplorerAction({ kind: 'click', label: '继续', tagName: 'button' }, LOGIN);
+    expect(v.allowed).toBe(false); // Layer B 拦
+    expect(v.consultLayerC).toBeUndefined(); // 早拦 → 不浪费模型调用
+  });
+  it('🤖 Layer C 不触发: 免登录 (loginMode 块整个跳过)', () => {
+    const v = classifyExplorerAction({ kind: 'click', label: '继续', tagName: 'a' });
+    expect(v.allowed).toBe(true);
+    expect(v.consultLayerC).toBeUndefined();
+  });
+  it('🤖 Layer C 不触发: login + benign click (无 proceed-word / 无 tx-field)', () => {
+    const v = classifyExplorerAction({ kind: 'click', label: '看大图', tagName: 'a' }, LOGIN);
+    expect(v.allowed).toBe(true);
+    expect(v.consultLayerC).toBeUndefined();
+  });
   it('blocks navigation to pay / login / auth urls (incl. review leaks); allows a doc url', () => {
     for (const url of [
       'https://x.com/checkout',

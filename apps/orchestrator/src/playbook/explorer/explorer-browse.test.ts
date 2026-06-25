@@ -40,7 +40,7 @@ describe('makeBrowseExploreSite — A3 loginMode wiring', () => {
       makeBrowseExploreSite({
         loginMode,
         runBrowseTask: async ({ onBeforeAction }) => {
-          const v = onBeforeAction({ kind: 'click', label: '转账' });
+          const v = await onBeforeAction({ kind: 'click', label: '转账' });
           return v.allowed
             ? { status: 'completed', costUsd: 0 }
             : { status: 'failed', costUsd: 0, reason: v.reason };
@@ -105,10 +105,14 @@ function fakeLoop(actions: BrowseAction[], executed: BrowseAction[], costUsd = 0
   return async ({
     onBeforeAction,
   }: {
-    onBeforeAction: (a: BrowseAction) => { allowed: boolean; reason?: string };
+    onBeforeAction: (
+      a: BrowseAction,
+    ) =>
+      | { allowed: boolean; reason?: string }
+      | Promise<{ allowed: boolean; reason?: string }>;
   }): Promise<BrowseRunResult> => {
     for (const a of actions) {
-      const v = onBeforeAction(a);
+      const v = await onBeforeAction(a); // hook is async now (Layer C may call the model)
       if (!v.allowed) return { status: 'failed', costUsd, reason: v.reason }; // cost-source A
       executed.push(a); // only reached when allowed
     }
@@ -211,5 +215,71 @@ describe('makeBrowseExploreSite — live-veto really refuses + halts', () => {
     })('x.com');
     expect(out.status).toBe('failed');
     expect(out.note).toMatch(/boom/);
+  });
+});
+
+describe('makeBrowseExploreSite — Layer C wiring (login-mode 交易可疑区 → 调模型终判)', () => {
+  // a proceed-word click on a NON-submit control (a) → A/B 不命中 → classify sets consultLayerC →
+  // makeBrowseExploreSite consults deps.layerCVeto.
+  const run = (
+    loginMode: boolean,
+    layerCVeto?: (input: {
+      kind: string;
+      label: string | null;
+      tagName: string | null;
+      pageTitle: string | null;
+      pageTxFields: string | null;
+    }) => Promise<{ block: boolean; reason: string }>,
+  ) =>
+    makeBrowseExploreSite({
+      loginMode,
+      ...(layerCVeto ? { layerCVeto } : {}),
+      runBrowseTask: async ({ onBeforeAction }) => {
+        const v = await onBeforeAction({ kind: 'click', label: '继续', tagName: 'a' });
+        return v.allowed
+          ? { status: 'completed', costUsd: 0 }
+          : { status: 'failed', costUsd: 0, reason: v.reason };
+      },
+    })('trip.com');
+
+  it('consultLayerC + layerCVeto BLOCK → halted_sensitive', async () => {
+    const out = await run(true, async () => ({ block: true, reason: 'Layer C BLOCK: 推进交易' }));
+    expect(out.status).toBe('halted_sensitive');
+    expect(out.summary ?? out.note).toMatch(/Layer C/);
+  });
+  it('consultLayerC + layerCVeto ALLOW → completed', async () => {
+    const out = await run(true, async () => ({ block: false, reason: 'Layer C ALLOW' }));
+    expect(out.status).toBe('completed');
+  });
+  it('no layerCVeto wired → consultLayerC ignored → allowed (completed)', async () => {
+    const out = await run(true, undefined);
+    expect(out.status).toBe('completed');
+  });
+  it('免登录: classify never sets consultLayerC → layerCVeto NEVER called', async () => {
+    let called = 0;
+    const out = await run(false, async () => {
+      called += 1;
+      return { block: true, reason: 'should not be called' };
+    });
+    expect(called).toBe(0);
+    expect(out.status).toBe('completed');
+  });
+  it('A/B 命中(submit钮+继续 → 层B veto): layerCVeto NEVER called (早拦不浪费调用)', async () => {
+    let called = 0;
+    const out = await makeBrowseExploreSite({
+      loginMode: true,
+      layerCVeto: async () => {
+        called += 1;
+        return { block: false, reason: 'x' };
+      },
+      runBrowseTask: async ({ onBeforeAction }) => {
+        const v = await onBeforeAction({ kind: 'click', label: '继续', tagName: 'button' }); // submit → 层B
+        return v.allowed
+          ? { status: 'completed', costUsd: 0 }
+          : { status: 'failed', costUsd: 0, reason: v.reason };
+      },
+    })('trip.com');
+    expect(called).toBe(0); // Layer B halted it before Layer C
+    expect(out.status).toBe('halted_sensitive');
   });
 });
