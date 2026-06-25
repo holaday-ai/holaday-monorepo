@@ -8,7 +8,26 @@
 > **归属（BOSS 定）：本文件住共享 baseline `claude/musing-keller-ae1d05`**——三 worktree 分支最终都合回这里，协调文件理应在汇合点。各 session 更新时只对 musing-keller push 这**一个文件**（单文件无冲突风险）。
 
 <!-- 固定维护：每次部署后由部署者更新这一行（硬规则 7）。改 ref 前必实读 live HEAD。 -->
-## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05` — orch `ea2b6d1`（**④ A 登录自学(4接点,硬闸11/11)+B1接结晶(cron,无origin障碍) / Bug A(summary转发)+B(unhandledRejection守卫) + fix-set(connect-超时60s+1重试 / 始终断点 summary) + intent 深化 v2(任务导向+种子+断点报告持久化) + 硬超时 fix（per-op 45s clean-mode + per-browse 420s 硬墙 force-dispose + 超时落 failed 无 stuck 行）dark ship · restart 695 · `EXPLORER_ENABLED`+`EXPLORER_VETO_FIXTURE_ENABLED` 都 OFF（进程实证、fixture 404）=绝不跑 · 硬超时只在 clean-mode/explorer adapter、共享 context=用户任务路径不变** · ④ 自学习闭环真站端到端验通(figma-rerun $0.1427) · 捕获环(→crystallize) + intent 收敛 + 记账 id=16 平台桶 · batch-1 figma $0.4275 · cost-source A fail-closed 熔断 +(a)非有限 +(c)EXPLORER_MAX_ITERATIONS env + requireBrowseEnv abort · 护栏夹具 8/8 · veto 多信号 OR · ① crystallize · totalUsers 排系统行 · migration 0037 · ACTION_CAPTURE+B4 ON · B3_FIXTURE OFF）/ SPA `8da47b4b`（未变）
+## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05` — orch `00bde7f`（**🏁 A 登录自学闭环端到端证通 + 第一条真 post-login path（todoist add-task 5 步、id=18 completed、$0.177）；A 登录(4接点,硬闸11/11,login intent 指令式单任务+软600/硬720/iter40+EXTRA_RE 误报修+清空收件箱补漏)+B1接结晶(cron LIVE) / 早期：④ A 登录自学(4接点,硬闸11/11)+B1接结晶(cron,无origin障碍) / Bug A(summary转发)+B(unhandledRejection守卫) + fix-set(connect-超时60s+1重试 / 始终断点 summary) + intent 深化 v2(任务导向+种子+断点报告持久化) + 硬超时 fix（per-op 45s clean-mode + per-browse 420s 硬墙 force-dispose + 超时落 failed 无 stuck 行）dark ship · restart 695 · `EXPLORER_ENABLED`+`EXPLORER_VETO_FIXTURE_ENABLED` 都 OFF（进程实证、fixture 404）=绝不跑 · 硬超时只在 clean-mode/explorer adapter、共享 context=用户任务路径不变** · ④ 自学习闭环真站端到端验通(figma-rerun $0.1427) · 捕获环(→crystallize) + intent 收敛 + 记账 id=16 平台桶 · batch-1 figma $0.4275 · cost-source A fail-closed 熔断 +(a)非有限 +(c)EXPLORER_MAX_ITERATIONS env + requireBrowseEnv abort · 护栏夹具 8/8 · veto 多信号 OR · ① crystallize · totalUsers 排系统行 · migration 0037 · ACTION_CAPTURE+B4 ON · B3_FIXTURE OFF）/ SPA `8da47b4b`（未变）
+
+<!-- 2026-06-25 里程碑 — 🏁 A 登录自学闭环端到端证通 + 第一条真 post-login path -->
+**🏁 里程碑（2026-06-25）— A 登录自学闭环端到端证通 + 第一条真实 post-login path**
+
+**PROD 基线**：orch `00bde7f`。flags：`EXPLORER_ENABLED` **OFF** / `LOGIN_EXPLORER_ENABLED` **OFF** / `USER_TASK_CRYSTALLIZE_ENABLED` **ON（B1 live）**。两站 storageState 就位（box 独立路径、figma + todoist 并存、各 600）。
+
+**闭环链（端到端证通）**：登录认证（login-ctx 带 storageState）→ 真执行（todoist add-task：点「添加任务」→ 输入「买牛奶」→ 回车提交、任务出现计数 1）→ **红线前自停**（看到「删除」、停在点击前、宣告 done）→ **completed** → 结晶**第一条 post-login path**（5 步 add-task）。
+- **运行**：todoist `exploration_runs id=18 completed`、`$0.1770`、~2min、5 captures 全 benign、**未越任何红线**、会话隔离（brave 前 1/后 1）、归零自动、`LOGIN_EXPLORER` 自动回 OFF。
+- **path 落地**：crystallize dry-run `planned=1 (5 steps)`（`tsk_5bFtqQ…` → draft v1 app.todoist.com）。**B1 cron（无 origin 过滤）会自动结晶这条 completed 轨迹 → operation_paths**（或手动 `--commit`）。
+
+**关键学到**：
+- **站点选型决定成败**：figma×3 fail（重画布、vision-loop agent 操作不了、总在复杂 UI（Got it/Settings/Security）打转）vs **todoist×2 success（表单站「加一条任务」走得通）**。**表单型 SaaS = 登录梯队正确首站类型**。
+- **走通四要素合力**：指令式单任务 intent（去掉「任选其一」扩展子句）+ 禁逆向（明确禁 Community/Settings）+ 软超时 600s（②b：原 300s 软超时才是绑定约束、漏改过）+ 清空误报修。
+- **veto 双向偏差都在测试号逆出修好（测试号先行的价值）**：
+  - **false-neg（漏拦）**：figma「Copy link」分享动作未拦 → 补 复制链接/分享链接变体（copylink/sharelink…）。
+  - **false-pos（误拦）**：todoist「清空您的大脑」被裸词 `清空` 误拦 → 裸词收紧成组合词；**字面审又控出收紧过头漏掉「清空收件箱」**（真破坏）→ 补回（清空收件箱/回收站/账户/数据/所有/全部/列表/项目）。
+  - **启示**：关键词正则 veto 两个方向都会偏、很 fiddly → **测试号兜底是命门、预订/交易站前 veto 要大幅加固或换更稳判法**。
+
+**三关口现状**：① figma 首跑 → **已完（改 todoist 走通、闭环证通）** ② B2 影子转灰度 → 等 B1 攒真实语料 ③ 登录梯队：figma（画布、搁置）→ **todoist ✓** → 交易/社交（trip.com 按住、等 veto 为预订加固）。
 
 <!-- 2026-06-25 会话归档 — ④ 自学习: 免登录验透 + A 登录预热 dark + B1 LIVE + 战略/安全线 -->
 **📌 会话归档（2026-06-25）— ④ 自学习现状 + 登录线战略**

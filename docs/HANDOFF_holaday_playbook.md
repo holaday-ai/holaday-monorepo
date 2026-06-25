@@ -11,7 +11,7 @@
 
 | 项 | 值 |
 |---|---|
-| **运行 orch（PROD LIVE REF）** | `ea2b6d1`（origin tip `69ab05e4`；④ **A 登录自学 4 接点 + B1 接结晶** + Bug A/B + connect-超时/重试 + 始终断点 summary + 硬超时(per-op 45s/per-browse 420s) + intent v2，全 dark ship；restart 706）。**B1 LIVE**（`USER_TASK_CRYSTALLIZE_ENABLED=true`，2026-06-25）；`EXPLORER_ENABLED`/`LOGIN_EXPLORER_ENABLED` 仍 OFF。详 §7 |
+| **运行 orch（PROD LIVE REF）** | `00bde7f`（🏁 **A 登录自学闭环端到端证通 + 第一条真 post-login path**（todoist add-task 5 步、id=18 completed、$0.177）；含 A 登录 4 接点 + login intent 指令式单任务 + 软600/硬720/iter40 + EXTRA_RE 误报修(清空/永久/公开收紧)+清空收件箱补漏 + Copy-link veto + B1 接结晶 + Bug A/B + connect-超时/重试，全 dark ship；restart 718）。**B1 LIVE**（`USER_TASK_CRYSTALLIZE_ENABLED=true`）；`EXPLORER_ENABLED`/`LOGIN_EXPLORER_ENABLED` 仍 OFF。两站 storageState 就位（figma+todoist、box 独立 600）。详 §7 |
 | **分支** | `claude/musing-keller-ae1d05`（prod 合并主干）|
 | **origin tip = 本地 HEAD** | `69ab05e4`（已 push；A 登录自学+B1 `053f29b5` → harness 修 `ea2b6d1` → docs `69ab05e4`）|
 | **SPA** | `8da47b4b`（bundle `index-DiYh_GAx.js`，本工程期间未变）|
@@ -154,6 +154,16 @@
 ---
 
 ## §7 下一步（断点精确）
+
+**🏁🏁 里程碑（2026-06-25 晚）— A 登录自学闭环端到端证通 + 第一条真实 post-login path**：
+- **闭环链**：登录认证（login-ctx + storageState）→ 真执行（todoist add-task：点「添加任务」→ 输入「买牛奶」→ 回车提交、任务计数 1）→ **红线前自停**（看到「删除」、停在点击前、宣告 done）→ **completed** → 结晶**第一条 post-login path**（`tsk_5bFtqQ…` draft v1 app.todoist.com、5 步）。todoist id=18 `completed` / `$0.1770` / ~2min / 5 captures 全 benign / 未越红线 / 会话隔离 / 自动归零。B1 cron 会自动结晶它（或 `--commit`）。
+- **站点选型是命门**：figma×3 fail（重画布、agent 操作不了、在 Got it/Settings/Security 打转）vs todoist×2 success（表单站「加一条任务」走得通）→ **表单型 SaaS = 登录梯队正确首站类型**。
+- **走通四要素**：指令式单任务 intent（去「任选其一」扩展子句）+ 禁逆向 + 软超时 600s（②b：原 300s 软超时是绑定约束、漏改）+ 清空误报修。
+- **veto 双向偏差都在测试号逆出修好**（测试号先行的价值）：false-neg figma「Copy link」漏拦→补复制/分享链接变体；false-pos todoist「清空您的大脑」误拦→裸词收紧成组合，字面审又控出收紧过头漏「清空收件箱」→补回。**启示：关键词正则 veto 两向都偏、fiddly → 测试号兜底是命门，预订/交易站前 veto 要大幅加固或换更稳判法。**
+- **三关口**：① figma 首跑→**已完（todoist 走通、闭环证通）** ② B2 影子转灰度→等 B1 攒语料 ③ 登录梯队：figma（画布、搁置）→**todoist ✓**→交易/社交（trip.com 按住、等 veto 为预订加固）。
+- **下一步候选（BOSS 定）**：commit 这条 path / 扩 todoist 更多任务（新建项目、设提醒）/ 下一个表单站（notion?）/ 收尾归档。
+
+---
 
 **🏁 会话末态（2026-06-25）— 免登录验透 + A 登录预热 dark + B1 LIVE**：
 - **免登录 explorer 四类验透**：ctrip/figma/todoist/douyin 全跑过、全终止路径（done/maxIter/软超时/硬 abort/veto-halt/connect-fail）出**非空断点证据**。**核心实证：免登录全停在登录墙、够不到 post-login 真实操作路径**（ctrip/douyin 都 veto 拦在登录控件、figma/todoist 跑公开页）。途中修了 connect-超时/重试（figma site-to-site 起来）+ Bug A(summary 转发)+Bug B(unhandledRejection 守卫)+始终断点 summary。
