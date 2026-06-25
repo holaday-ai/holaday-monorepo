@@ -1595,6 +1595,8 @@ export const tasksRouter = router({
                       return block && block.type === 'text' ? block.text : '';
                     }
                   : undefined,
+                // Phase 2「看懂层」P1：腿A 逐指标注解开关（默认 OFF，零新增 LLM）。
+                seethrough: appEnv.ASHARE_SEETHROUGH_ENABLED,
                 logger: ctx.logger,
                 now: new Date(),
                 context: { userId: ctx.userId, taskId },

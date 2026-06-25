@@ -19,8 +19,10 @@ import {
   buildPanoramaContext,
   fetchFactData,
   fetchPanoramaData,
+  fetchStarData,
   renderFactCard,
   renderPanoramaBody,
+  renderStarSeethrough,
 } from './ashare-fact-card.js';
 import type { BriefingMode } from './ashare-format.js';
 import { judgeIntent } from './ashare-intent-judge.js';
@@ -41,6 +43,11 @@ export interface AshareQaRunnerDeps {
    * 由 tasks.ts 按 `ASHARE_INTENT_JUDGE_ENABLED` 决定是否注入。仅作用于全景⑦，不动轻量③。
    */
   judge?: (input: { system: string; user: string }) => Promise<string>;
+  /**
+   * Phase 2「看懂层」P1 开关（ASHARE_SEETHROUGH_ENABLED 注入）。true → ④⑤/解禁挂腿A确定性
+   * 逐指标注解（全景全量、轻量带 ★ 核心子集）；缺省/false → 完全回退现状（字节一致）。零新增 LLM。
+   */
+  seethrough?: boolean;
   /** 技能 markdown（人设/红线/版式）；空 → 跳过解读，纯事实卡。 */
   skillMarkdown?: string | null;
   logger: QaLogger;
@@ -140,7 +147,22 @@ export async function runAshareQa(
   const now = deps.now ?? new Date();
   const mode = deps.mode ?? 'prod';
   const data = await fetchFactData(deps.client, match);
-  const body = renderFactCard(data, match, now, mode);
+  let body = renderFactCard(data, match, now, mode);
+
+  // 看懂层 P1（flag 注入）：轻量速览追加 ★ 核心子集注解（腿A 确定性，零新增 LLM；
+  // 需 +2 取数/股取 ④⑤，走现有 TTL 缓存；取数失败仅跳过看懂层，不影响 ①②③）。
+  if (deps.seethrough) {
+    try {
+      const star = await fetchStarData(deps.client, match);
+      const starLines = renderStarSeethrough(data, star);
+      if (starLines.length) body = `${body}\n${starLines.join('\n')}`;
+    } catch (e) {
+      deps.logger.warn(
+        { ...deps.context, err: e instanceof Error ? e.message : String(e) },
+        'ashare-qa: ★看懂层取数失败，跳过看懂层（不影响①②③）',
+      );
+    }
+  }
 
   // 无技能上下文 → 纯事实卡（不解读）。
   if (!deps.skillMarkdown) {
@@ -287,7 +309,7 @@ export async function runAsharePanorama(
   const now = deps.now ?? new Date();
   const mode = deps.mode ?? 'prod';
   const data = await fetchPanoramaData(deps.client, match);
-  const body = renderPanoramaBody(data, match, now, mode);
+  const body = renderPanoramaBody(data, match, now, mode, deps.seethrough ?? false);
   const context = buildPanoramaContext(data, match);
 
   let interpretation = '';

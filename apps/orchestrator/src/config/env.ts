@@ -164,6 +164,15 @@ const schema = z.object({
     .enum(['true', 'false'])
     .default('false')
     .transform((v) => v === 'true'),
+  /**
+   * Phase 2「看懂层」P1 — 逐指标确定性注解（腿A 查表，零 LLM）。默认 OFF。
+   * on → ④⑤/解禁挂「衡量什么·客观位置·该警惕什么」注解（全景全量、轻量带 ★ 核心子集）；
+   * off → 完全回退现状输出（字节一致）。零新增数据源、零新增 LLM；仅 +2 取数/股（走 TTL 缓存）。
+   */
+  ASHARE_SEETHROUGH_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
 
   /**
    * Phase D Step 3 rollout switch.

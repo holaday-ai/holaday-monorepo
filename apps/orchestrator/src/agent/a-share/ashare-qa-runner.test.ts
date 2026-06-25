@@ -617,3 +617,80 @@ describe('ASHARE_QA_GUIDANCE（P0 兜底引导话术）', () => {
     expect(ASHARE_QA_GUIDANCE).not.toMatch(/建议买入|目标价|会涨|会跌|抄底|割肉/);
   });
 });
+
+describe('看懂层 P1 · seethrough flag（腿A 注解，勿删）', () => {
+  const LIGHT: AshareQaMatch = {
+    kind: 'info',
+    stocks: [{ symbol: '600519', displayName: '贵州茅台' }],
+    dateIso: '2026-06-12',
+    dateCompact: '20260612',
+    deep: false,
+  };
+  const DEEP: AshareQaMatch = { ...LIGHT, deep: true };
+
+  it('轻量 OFF（默认）→ 无 ★ 看懂块（字节回退现状）', async () => {
+    const { logger } = fakeLogger();
+    const r = await runAshareQa(
+      { client: fakeClient(), skillMarkdown: null, logger, now: NOW, interpret: async () => '' },
+      LIGHT,
+    );
+    expect(r.answer).not.toContain('★ 核心看懂');
+    expect(r.answer).not.toContain('〔看懂〕');
+  });
+
+  it('轻量 ON → 带 ★ 核心子集注解（净利率/营收同比/PE分位；零新增 LLM）', async () => {
+    const { logger } = fakeLogger();
+    const r = await runAshareQa(
+      {
+        client: fakeClient(),
+        skillMarkdown: null,
+        seethrough: true,
+        logger,
+        now: NOW,
+        interpret: async () => '',
+      },
+      LIGHT,
+    );
+    expect(r.answer).toContain('★ 核心看懂');
+    expect(r.answer).toContain('目前是亏损的'); // 净利率 -14.31%
+    expect(r.answer).toContain('营收比去年同期缩了'); // 营收同比 -33.43%
+    expect(r.answer).toContain('历史高位'); // PE 近5年分位 87.1%
+    // 注解仍只陈述+风险，绝不含买卖/涨跌/好差措辞（只截 ★ 块本体，不含尾部免责声明里的"不预测涨跌"）
+    const seeBlock = r.answer.slice(r.answer.indexOf('★ 核心看懂'), r.answer.indexOf('免责声明'));
+    expect(seeBlock).not.toMatch(/[买卖涨跌好差]|建议买入|目标价/);
+  });
+
+  it('全景 OFF（默认）→ ④⑤ 无〔看懂〕；与显式 false 字节一致', async () => {
+    const { logger } = fakeLogger();
+    const deps = {
+      client: fakeClient(),
+      interpret: async () => '客观状态画像。',
+      logger,
+      now: NOW,
+    };
+    const off = await runAsharePanorama(deps, DEEP);
+    const offExplicit = await runAsharePanorama({ ...deps, seethrough: false }, DEEP);
+    expect(off.answer).not.toContain('〔看懂〕');
+    expect(off.answer).toBe(offExplicit.answer); // OFF = 显式false = 字节回退
+  });
+
+  it('全景 ON → ④⑤ 逐指标挂〔看懂〕注解（即便 ⑦ 降级，①-⑤看懂仍在）', async () => {
+    const { logger } = fakeLogger();
+    const r = await runAsharePanorama(
+      {
+        client: fakeClient(),
+        seethrough: true,
+        interpret: async () => '建议逢低买入', // ⑦ 故意越线降级
+        logger,
+        now: NOW,
+      },
+      DEEP,
+    );
+    expect(r.degraded).toBe(true); // ⑦ 被闸门拦下
+    expect(r.answer).not.toContain('## ⑦ 分析师视角');
+    // 但 ④⑤ 看懂注解（确定性腿A）不受 ⑦ 降级影响，仍在
+    expect(r.answer).toContain('〔看懂〕');
+    expect(r.answer).toContain('用股东的钱赚钱的效率偏低'); // ROE -6.76% <5
+    expect(r.answer).toContain('历史高位'); // PE 分位 87.1%
+  });
+});

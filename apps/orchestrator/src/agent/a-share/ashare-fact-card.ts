@@ -13,6 +13,12 @@
 
 import type { AkshareClient } from './akshare-client.js';
 import {
+  type AnnotateInput,
+  type SeethroughKey,
+  annotate,
+  seethroughLine,
+} from './annotation-engine.js';
+import {
   BRIEFING_DISCLAIMER,
   type BriefingMode,
   dateHeader,
@@ -130,8 +136,8 @@ function fmtShares(n: number): string {
   return `${Math.round(n)}股`;
 }
 
-/** ② 限售解禁（临近）。展示前3 + **全部合计**（与 ⑦ 上下文口径一致，避免合计对不上）。 */
-function unlockLines(p: PerStock): string[] {
+/** ② 限售解禁（临近）。展示前3 + **全部合计**（与 ⑦ 上下文口径一致，避免合计对不上）。seethrough 开则挂看懂注解。 */
+function unlockLines(p: PerStock, seethrough = false): string[] {
   if (p.unlock.error || p.unlock.data.length === 0) return [];
   const out: string[] = ['- 限售解禁：'];
   for (const r of p.unlock.data.slice(0, 3)) {
@@ -149,6 +155,7 @@ function unlockLines(p: PerStock): string[] {
     out.push(`  - 合计 ${p.unlock.data.length} 笔，约 ${fmtShares(total)}`);
   }
   out.push(`  （${sourceTag(p.unlock)}）`);
+  if (total > 0) pushAnnotation(out, seethrough, 'unlock', { value: total });
   return out;
 }
 
@@ -393,10 +400,23 @@ function reportLabel(iso: string | null | undefined): string {
   return `${y}-${mo}财报`;
 }
 
-/** ④ 基本面段（确定性，纯数字 + 时效；缺指标诚实"—"，无源不臆造）。 */
+/** seethrough（看懂层）开 → 在数据行下追加「〔看懂〕」释义子行；关 → 完全不动（字节回退）。 */
+function pushAnnotation(
+  out: string[],
+  seethrough: boolean,
+  key: SeethroughKey,
+  input: AnnotateInput,
+): void {
+  if (!seethrough) return;
+  const a = annotate(key, input);
+  if (a) out.push(seethroughLine(a));
+}
+
+/** ④ 基本面段（确定性，纯数字 + 时效；缺指标诚实"—"，无源不臆造）。seethrough 开则逐指标挂看懂注解。 */
 export function fundamentalsLines(
   env: AkEnvelope<FundamentalsRow> | undefined,
   mode: BriefingMode,
+  seethrough = false,
 ): string[] {
   const f = env?.data[0];
   if (!env || env.error || !f) {
@@ -407,18 +427,34 @@ export function fundamentalsLines(
   out.push(
     `- 营业总收入 ${fmtMoneyAuto(f.revenue)}（同比 ${fmtPct(f.revenue_yoy)}${qoq(f.revenue_qoq)}）`,
   );
+  pushAnnotation(out, seethrough, 'revenue_yoy', { value: f.revenue_yoy });
   out.push(
     `- 归母净利润 ${fmtMoneyAuto(f.net_profit)}（同比 ${fmtPct(f.net_profit_yoy)}${qoq(f.net_profit_qoq)}）`,
   );
+  pushAnnotation(out, seethrough, 'net_profit_yoy', {
+    value: f.net_profit_yoy,
+    aux: f.revenue_yoy,
+  });
   if (f.deduct_net_profit != null) {
     out.push(
       `- 扣非净利润 ${fmtMoneyAuto(f.deduct_net_profit)}（同比 ${fmtPct(f.deduct_net_profit_yoy)}）`,
     );
+    pushAnnotation(out, seethrough, 'deduct_vs_net', {
+      value: f.deduct_net_profit,
+      aux: f.net_profit,
+    });
   }
   out.push(
     `- 销售毛利率 ${fmtPctPlain(f.gross_margin)} ｜ 净利率 ${fmtPctPlain(f.net_margin)} ｜ ROE ${fmtPctPlain(f.roe)} ｜ 资产负债率 ${fmtPctPlain(f.debt_ratio)}`,
   );
-  if (f.ocf_per_share != null) out.push(`- 每股经营现金流 ${fmtNum(f.ocf_per_share)} 元`);
+  // 毛利率注解（A3）因缺同比 + 行业毛利中位（数据缺口）P1 不挂，留 P2。
+  pushAnnotation(out, seethrough, 'net_margin', { value: f.net_margin });
+  pushAnnotation(out, seethrough, 'roe', { value: f.roe });
+  pushAnnotation(out, seethrough, 'debt_ratio', { value: f.debt_ratio });
+  if (f.ocf_per_share != null) {
+    out.push(`- 每股经营现金流 ${fmtNum(f.ocf_per_share)} 元`);
+    pushAnnotation(out, seethrough, 'ocf_per_share', { value: f.ocf_per_share });
+  }
   const t = (f.trend3y ?? []).filter((x) => x.report_period);
   if (t.length) {
     const parts = t.map((x) => {
@@ -431,10 +467,11 @@ export function fundamentalsLines(
   return out;
 }
 
-/** ⑤ 估值段（确定性，纯数字 + 时效；分位/行业对比只给数不下"贵/低"判断）。 */
+/** ⑤ 估值段（确定性，纯数字 + 时效；分位/行业对比只给数不下"贵/低"判断）。seethrough 开则挂看懂注解。 */
 export function valuationLines(
   env: AkEnvelope<ValuationRow> | undefined,
   mode: BriefingMode,
+  seethrough = false,
 ): string[] {
   const v = env?.data[0];
   if (!env || env.error || !v) {
@@ -447,6 +484,8 @@ export function valuationLines(
   if (v.pe_pctile_5y != null) pct.push(`PE 近5年分位 ${fmtPctile(v.pe_pctile_5y)}`);
   if (v.pb_pctile_5y != null) pct.push(`PB 近5年分位 ${fmtPctile(v.pb_pctile_5y)}`);
   if (pct.length) out.push(`- ${pct.join(' ｜ ')}`);
+  pushAnnotation(out, seethrough, 'pe_pctile', { pctile: v.pe_pctile_5y });
+  pushAnnotation(out, seethrough, 'pb_pctile', { pctile: v.pb_pctile_5y, aux: v.pb });
   if (v.industry && v.industry_pe_median != null) {
     // 相对行业落地：本股 PE-TTM vs 行业静态PE中位（客观高于/低于，"贵/便宜"判断留 ⑦）。
     const cmp =
@@ -460,6 +499,10 @@ export function valuationLines(
     out.push(
       `- 所属${v.industry}，行业静态PE中位 ${fmtNum(v.industry_pe_median)}${cmp ? `（本股 PE-TTM ${cmp}行业中位）` : ''}`,
     );
+    pushAnnotation(out, seethrough, 'industry_pe', {
+      value: v.pe_ttm,
+      industryMedian: v.industry_pe_median,
+    });
   }
   if (v.total_mv_yi != null) out.push(`- 总市值 ${fmtMvYi(v.total_mv_yi)}元`);
   out.push(`  （${sourceTag(env)}）`);
@@ -543,6 +586,7 @@ export function renderPanoramaBody(
   match: AshareQaMatch,
   now: Date,
   mode: BriefingMode,
+  seethrough = false,
 ): string {
   const lines: string[] = [
     `# 📈 HOLA DAY · A股全景速览（${dateHeader(match.dateIso)}）`,
@@ -562,11 +606,11 @@ export function renderPanoramaBody(
     lines.push('');
     lines.push('**③ 消息面**');
     lines.push(...announcementLines(p, mode));
-    const ul = unlockLines(p);
+    const ul = unlockLines(p, seethrough);
     lines.push(...(ul.length ? ul : ['- 限售解禁：近期无']));
     lines.push('');
-    lines.push(...fundamentalsLines(pano?.fundamentals, mode), '');
-    lines.push(...valuationLines(pano?.valuation, mode));
+    lines.push(...fundamentalsLines(pano?.fundamentals, mode, seethrough), '');
+    lines.push(...valuationLines(pano?.valuation, mode, seethrough));
     lines.push('');
   }
   return lines.join('\n').trimEnd();
@@ -582,4 +626,75 @@ export function buildPanoramaContext(data: PanoramaData, match: AshareQaMatch): 
     blocks.push(valuationContext(pano?.valuation));
   }
   return blocks.filter(Boolean).join('\n');
+}
+
+// ===== Phase 2「看懂层」P1 — ★ 核心子集（轻量速览带；腿A 零 LLM）====================
+// 全景版逐项注解走 renderPanoramaBody(seethrough=true)；轻量速览只带 ★ 核心几条
+// （A1净利率 / A2扣非vs归母 / B1营收同比 / D1 PE分位 / E1解禁），需额外取 ④基本面/⑤估值
+// （+2 取数/股，走现有 TTL 缓存），但**零新增 LLM**（纯查表注解）。
+
+export interface StarStockData {
+  fundamentals: AkEnvelope<FundamentalsRow>;
+  valuation: AkEnvelope<ValuationRow>;
+}
+
+/** 轻量 ★ 取数：每股 ④基本面 + ⑤估值（②解禁已在 fetchFactData 取过）。 */
+export async function fetchStarData(
+  client: AkshareClient,
+  match: AshareQaMatch,
+): Promise<Record<string, StarStockData>> {
+  const pairs = await Promise.all(
+    match.stocks.map(
+      async (s): Promise<readonly [string, StarStockData]> =>
+        [
+          s.symbol,
+          {
+            fundamentals: await client.getFundamentals(s.symbol),
+            valuation: await client.getValuation(s.symbol),
+          },
+        ] as const,
+    ),
+  );
+  return Object.fromEntries(pairs);
+}
+
+/** 一只个股的 ★ 核心看懂块（A1/A2/B1/D1/E1，对照 CORE_STAR_KEYS）。 */
+function starBlockForStock(
+  label: string,
+  fundEnv: AkEnvelope<FundamentalsRow> | undefined,
+  valEnv: AkEnvelope<ValuationRow> | undefined,
+  unlock: AkEnvelope<UnlockRow>,
+): string[] {
+  const f = fundEnv && !fundEnv.error ? fundEnv.data[0] : undefined;
+  const v = valEnv && !valEnv.error ? valEnv.data[0] : undefined;
+  const lines: string[] = [];
+  const add = (key: SeethroughKey, input: AnnotateInput): void => {
+    const a = annotate(key, input);
+    if (a) lines.push(seethroughLine(a));
+  };
+  if (f) {
+    add('net_margin', { value: f.net_margin });
+    add('deduct_vs_net', { value: f.deduct_net_profit, aux: f.net_profit });
+    add('revenue_yoy', { value: f.revenue_yoy });
+  }
+  if (v) add('pe_pctile', { pctile: v.pe_pctile_5y });
+  if (!unlock.error && unlock.data.length > 0) {
+    const total = unlock.data.reduce((s, r) => s + (toNum(pick(r, ['解禁数量'])) ?? 0), 0);
+    if (total > 0) add('unlock', { value: total });
+  }
+  return lines.length ? [`**★ 核心看懂 · ${label}**`, ...lines] : [];
+}
+
+/** 轻量速览 ★ 核心看懂段（多股各一块；无数据则空）。 */
+export function renderStarSeethrough(
+  data: FactData,
+  star: Record<string, StarStockData>,
+): string[] {
+  const out: string[] = [];
+  for (const p of data.perStock) {
+    const sd = star[p.stock.symbol];
+    const blk = starBlockForStock(stockLabel(p.stock), sd?.fundamentals, sd?.valuation, p.unlock);
+    if (blk.length) out.push('', ...blk);
+  }
+  return out;
 }
