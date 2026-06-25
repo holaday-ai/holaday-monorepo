@@ -111,6 +111,33 @@ const TRANSACTION_PAGE_RE =
 const SAFE_CONTROL_RE =
   /返回|退回|后退|上一步|上一页|取消|放弃|修改|编辑|查看|详情|展开|收起|筛选|搜索|过滤|排序|关闭|帮助|back|cancel|edit|view|detail|filter|search|sort|close|previous|prev|help/i;
 
+// Layer C pageTxSignal — TRANSACTION FORM-FIELD names. Matched against the names/ids/placeholders/
+// labels of real <input|textarea|select> fields ONLY (collected browser-side; NOT page prose). This
+// is the trip.com fix: the homepage footer "Payment methods" PROSE used to trip Layer C — but a
+// footer is not a form field, so it now contributes nothing. Only a real passenger/payment INPUT
+// field (出行人姓名 / cardNumber / cvv …) yields a signal. Keep this to ACTUAL field-name patterns,
+// not section headings, so a benign flight-search page (fromCity/date inputs) stays empty.
+const TX_FIELD_SIGNAL_RE =
+  /passenger|乘客|出行人|联系人|旅客|证件|身份证|护照|passport|card\s*number|cardnumber|cardno|card\s*holder|cardholder|持卡人|cvv|cvc|expir|billing|账单|邮编|zip\s*code|zipcode/gi;
+
+/**
+ * Pure matcher (unit-tested): given the concatenated form-FIELD signal text (names/ids/placeholders/
+ * labels of real input/textarea/select elements — collected browser-side, NEVER page prose, NEVER
+ * field VALUES), return ≤8 deduped matched transaction-field terms. Empty → no transaction stage →
+ * Layer C is NOT triggered by pageTxSignal. The browser-side scan + this matcher together replace the
+ * old whole-page readPageText scan that footer prose false-triggered.
+ */
+export function extractTxFieldSignal(fieldSignals: string): string {
+  const hits = [
+    ...new Set(
+      (String(fieldSignals ?? '').match(TX_FIELD_SIGNAL_RE) ?? []).map((m) =>
+        m.toLowerCase().replace(/\s+/g, ''),
+      ),
+    ),
+  ].slice(0, 8);
+  return hits.join(',');
+}
+
 // Layer C trigger — "proceed 弱信号" words: benign-looking next-step labels that on a logged-in
 // transaction SPA may advance an order (trip.com "Continue" slipped A/B because the SPA URL never
 // hit a /checkout stage). When A/B/reversal all PASS but a click carries one of these (OR the page

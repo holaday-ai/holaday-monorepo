@@ -68,6 +68,8 @@ import {
 import { detectBlankPage } from '../blank-page-detector.js';
 import { translateNavError } from '../nav-error-translator.js';
 import { classifyTaskType, filterTools } from '../tool-registry.js';
+// Layer C — pure matcher for the gated transaction-FORM-FIELD signal (explorer login-mode only).
+import { extractTxFieldSignal } from '../../playbook/explorer/explorer-guards.js';
 import {
   classifyRole,
   getTaskBudget,
@@ -3390,11 +3392,26 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
                 pageTitleSig = null;
               }
               try {
-                const txt = (await readPageText(executor, 4000)) ?? '';
-                const TX_FIELD_RE =
-                  /passenger|乘客|出行人|联系人|证件|身份证|护照|payment|支付|价格明细|费用明细|order\s*summary|订单|结算/gi;
-                const hits = [...new Set((txt.match(TX_FIELD_RE) ?? []).map((m) => m.toLowerCase()))].slice(0, 8);
-                pageTxSig = hits.length ? hits.join(',') : null;
+                // 收窄 (trip 首页页脚 prose 误触修): scan ONLY real <input|textarea|select> form
+                // fields' name/id/placeholder/aria-label/label (NOT page prose, NEVER field VALUES);
+                // the matcher (extractTxFieldSignal) keeps only ≤8 transaction-field terms. A page
+                // with no transaction INPUT field (e.g. trip homepage: only search inputs + footer
+                // "Payment methods" prose) → empty → Layer C NOT triggered by pageTxSignal.
+                const FIELD_SCAN = `(() => { try {
+                  const els = document.querySelectorAll('input, textarea, select');
+                  const out = []; let n = 0;
+                  for (const e of els) {
+                    if (n++ > 40) break;
+                    const parts = [e.name, e.id, e.getAttribute && e.getAttribute('placeholder'), e.getAttribute && e.getAttribute('aria-label')];
+                    if (e.id) { var l = document.querySelector('label[for="' + (e.id + '').replace(/"/g, '') + '"]'); if (l) parts.push((l.textContent || '').slice(0, 40)); }
+                    var pl = e.closest && e.closest('label'); if (pl) parts.push((pl.textContent || '').slice(0, 40));
+                    for (const p of parts) { if (p) out.push((p + '').slice(0, 40)); }
+                  }
+                  return out.join(' ').slice(0, 1200);
+                } catch (err) { return ''; } })()`;
+                const fieldSig = await (await executor.getPage()).evaluate(FIELD_SCAN);
+                const sig = extractTxFieldSignal(typeof fieldSig === 'string' ? fieldSig : '');
+                pageTxSig = sig.length ? sig : null;
               } catch {
                 pageTxSig = null;
               }

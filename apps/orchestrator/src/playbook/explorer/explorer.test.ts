@@ -8,6 +8,7 @@ import {
 } from './explorer-budget.js';
 import {
   classifyExplorerAction,
+  extractTxFieldSignal,
   isCapturedStepSafe,
   isWithinDBoundary,
 } from './explorer-guards.js';
@@ -352,6 +353,25 @@ describe('explorer-guards', () => {
     const v = classifyExplorerAction({ kind: 'click', label: '看大图', tagName: 'a' }, LOGIN);
     expect(v.allowed).toBe(true);
     expect(v.consultLayerC).toBeUndefined();
+  });
+
+  // ════ pageTxSignal 收窄 (extractTxFieldSignal — 只认真表单字段, 不认页脚 prose) ════
+  it('🔎① 页脚/正文 prose (Payment methods/支付方式, 无真字段) → 空 → 不触发 (trip 首页误触修)', () => {
+    expect(extractTxFieldSignal('Payment methods | Secure payment 24/7 | 支付方式 | 帮助中心')).toBe('');
+    expect(extractTxFieldSignal('')).toBe('');
+  });
+  it('🔎② 真 passenger/payment input 字段 → 出信号 (仍触发)', () => {
+    const s = extractTxFieldSignal('passengerName 出行人姓名 idCardNo 证件号码 cardNumber cvv expiryDate 持卡人');
+    expect(s.length).toBeGreaterThan(0);
+    expect(s).toMatch(/passenger|出行人/);
+    expect(s).toMatch(/cardnumber|cvv|持卡人/);
+  });
+  it('🔎④ benign 查机票字段 (fromCity/date/cabin) → 空 → 不触发', () => {
+    expect(extractTxFieldSignal('fromCity toCity departDate returnDate cabin adults children promoCode')).toBe('');
+  });
+  it('🔎 去重 + ≤8 + 去空格', () => {
+    expect(extractTxFieldSignal('passenger passenger 出行人 出行人').split(',').length).toBeLessThanOrEqual(8);
+    expect(extractTxFieldSignal('card number')).toBe('cardnumber'); // \\s 去掉
   });
   it('blocks navigation to pay / login / auth urls (incl. review leaks); allows a doc url', () => {
     for (const url of [
