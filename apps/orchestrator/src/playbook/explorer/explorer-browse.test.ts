@@ -84,6 +84,14 @@ describe('browseIntent', () => {
     expect(i).toContain('创建类');
     expect(i).toMatch(/禁止|逆向/);
   });
+  it('① login mode todoist → single "add a task" form task, no reverse to Settings, drives to boundary', () => {
+    const i = browseIntent('todoist.com', { loginMode: true });
+    expect(i).toContain('唯一任务');
+    expect(i).toMatch(/Add task|添加任务|新建一条任务/); // the form create-task (not figma's canvas)
+    expect(i).toMatch(/Settings|设置/); // explicitly forbids reverse-browse to Settings (figma run #3 failure mode)
+    expect(i).toMatch(/分享|Share|删除|Delete/); // steered at the share/delete boundary (EXTRA_RE halt)
+    expect(i).not.toContain('任选其一');
+  });
   it('免登录 lane intent is unchanged by the loginMode option default (no opts)', () => {
     expect(browseIntent('figma.com')).toContain('摸清"做一件具体任务"'); // 免登录 v2 intent intact
     expect(browseIntent('figma.com')).not.toContain('唯一任务');

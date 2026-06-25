@@ -87,6 +87,9 @@ const SEED_TASKS: Record<string, string[]> = {
 const LOGIN_TASKS: Record<string, string> = {
   'figma.com':
     '在 figma 新建一个空白设计文件并进入编辑器：第一步就找 "New design file" / "新建" 按钮点进去——不要逆向去 Community / 模板 / 推荐 / 帮助。进编辑器后：加一个元素（画一个矩形或加一段文本）、触发一次保存。然后走向 "分享 / Share" 按钮但停在点击前。',
+  // todoist = 表单站（"加一条任务" 是简单输入框，比 figma 画布好走通）→ 拿第一条真 post-login path。
+  'todoist.com':
+    '在 todoist 新建一条任务：第一步就找快速添加 / "Add task" / "添加任务" 输入框点进去 → 输入一条任务文本（如 "买牛奶"）→ 按回车 / 点保存提交这一条。然后走向 "分享项目 / Share project" 或 "删除任务 / Delete" 控件但停在点击前。绝不逆向去 Settings / 设置 / 集成 / 升级 / 别处。',
 };
 
 function loginBrowseIntent(domain: string): string {
