@@ -79,6 +79,15 @@ interface FeatureFlags {
    * runs (dark ship). No migration — table/column/FK already exist.
    */
   B4_SCREENSHOT_ANCHOR: boolean;
+  /**
+   * Phase 1 Playbook ④ B1 — user-task crystallize sweep. When true, a low-frequency cron runs
+   * the EXISTING `crystallizeTasks` (crystallizer internals UNCHANGED) over all completed/
+   * partial_success tasks that have captures — INCLUDING origin='user' (the crystallizer has no
+   * origin filter) — distilling their real trajectories into DRAFT `operation_paths`. Idempotent
+   * (dedup by source_task_id). WRITE-ONLY sink: nothing reads operation_paths back into the live
+   * product lane (reuse/replay is a later phase), so this is ZERO live-user impact. Default OFF.
+   */
+  USER_TASK_CRYSTALLIZE: boolean;
 }
 
 function readFlagsFromEnv(): FeatureFlags {
@@ -91,6 +100,7 @@ function readFlagsFromEnv(): FeatureFlags {
     LEDGER_DB_WRITE: process.env.LEDGER_DB_WRITE_ENABLED === 'true',
     ACTION_CAPTURE: process.env.ACTION_CAPTURE_ENABLED === 'true',
     B4_SCREENSHOT_ANCHOR: process.env.B4_SCREENSHOT_ANCHOR_ENABLED === 'true',
+    USER_TASK_CRYSTALLIZE: process.env.USER_TASK_CRYSTALLIZE_ENABLED === 'true',
   };
 }
 

@@ -194,6 +194,28 @@ describe('explorer-guards', () => {
       classifyExplorerAction({ kind: 'type', inputType: 'text', placeholder: '输入关键词' }).allowed,
     ).toBe(true);
   });
+  it('A3 login-mode EXTRA_RE: blocks 转账/分享/删除/提现 ONLY when loginMode (免登录 unchanged)', () => {
+    for (const label of ['转账', '分享', '删除文件', '提现', '解绑', '设为公开', 'transfer', 'delete']) {
+      // 免登录 lane (default): EXTRA_RE controls are NOT in the base list → allowed.
+      expect(classifyExplorerAction({ kind: 'click', label }).allowed).toBe(true);
+      // login mode: EXTRA_RE thickens → blocked.
+      expect(classifyExplorerAction({ kind: 'click', label }, { loginMode: true }).allowed).toBe(false);
+    }
+    // multi-signal: an icon-only 转账 (sensitive aria) is blocked in login mode.
+    expect(
+      classifyExplorerAction({ kind: 'click', label: '🔁', ariaLabel: '转账' }, { loginMode: true }).allowed,
+    ).toBe(false);
+  });
+  it('A3 login-mode does NOT loosen: base-sensitive + submit + password stay blocked in BOTH modes', () => {
+    // base sensitive label blocked regardless of mode.
+    for (const opts of [{}, { loginMode: true }]) {
+      expect(classifyExplorerAction({ kind: 'click', label: '立即支付' }, opts).allowed).toBe(false);
+      expect(classifyExplorerAction({ kind: 'submit', label: 'x' }, opts).allowed).toBe(false);
+      expect(classifyExplorerAction({ kind: 'type', inputType: 'password' }, opts).allowed).toBe(false);
+      // a benign control stays allowed even in login mode (no over-block).
+      expect(classifyExplorerAction({ kind: 'click', label: 'Read the docs' }, opts).allowed).toBe(true);
+    }
+  });
   it('blocks navigation to pay / login / auth urls (incl. review leaks); allows a doc url', () => {
     for (const url of [
       'https://x.com/checkout',

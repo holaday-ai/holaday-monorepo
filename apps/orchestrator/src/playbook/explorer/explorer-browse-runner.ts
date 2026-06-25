@@ -16,7 +16,7 @@ import type { ExploreSiteOutcome } from './explorer.js';
 export interface CleanBrowseExecutor {
   connect(
     cdpEndpoint: string,
-    opts: { cleanContext: true },
+    opts: { cleanContext: true; storageState?: string },
   ): Promise<{ ok: boolean; error?: string }>;
   assertCleanContext(): Promise<void>;
   disposeCleanContext(): Promise<void>;
@@ -40,6 +40,13 @@ export interface RunBrowseTaskDeps {
   newTaskExternalId: () => string;
   /** Per-site connect/assert hard timeout (ms). Default DEFAULT_CONNECT_MS. */
   connectTimeoutMs?: number;
+  /**
+   * A2 login-self-learning: a test-account Playwright storageState FILE PATH. When set, the
+   * connect seeds the isolated context with it (a LOGIN context) AND the clean-context assert is
+   * SKIPPED (cookies are EXPECTED — the免登录 zero-credential guarantee does not apply to a
+   * deliberately-authenticated test-account browse). Undefined → 免登录 lane unchanged (assert runs).
+   */
+  storageState?: string;
   logger?: { warn: (o: unknown, m: string) => void };
 }
 
@@ -197,15 +204,23 @@ export function makeRunBrowseTask(deps: RunBrowseTaskDeps): (args: {
     for (let attempt = 1; attempt <= 2 && !executor; attempt++) {
       const ex = deps.makeExecutor();
       try {
-        const c = await withHardDeadline(ex.connect(deps.cdpEndpoint, { cleanContext: true }), connectMs, () => {
+        const connectOpts = deps.storageState
+          ? ({ cleanContext: true, storageState: deps.storageState } as const)
+          : ({ cleanContext: true } as const);
+        const c = await withHardDeadline(ex.connect(deps.cdpEndpoint, connectOpts), connectMs, () => {
           void ex.disposeCleanContext().catch(() => {}); // unblock a hung connect
         });
         if (!c.ok) throw new Error(`connect failed: ${c.error ?? '?'}`);
-        // 🔒 fail-closed zero-credential guarantee — throws if ANY cookie present.
-        await withHardDeadline(ex.assertCleanContext(), connectMs, () => {
-          void ex.disposeCleanContext().catch(() => {});
-        });
-        executor = ex; // connected + verified clean
+        // 🔒 fail-closed zero-credential guarantee — throws if ANY cookie present. SKIPPED in
+        // login mode (deps.storageState set): a test-account browse is deliberately authenticated,
+        // so cookies are EXPECTED; safety there is the thicker veto (EXTRA_RE) + submit/password
+        // decisive rules + the test-account isolation, not the empty-jar assert.
+        if (!deps.storageState) {
+          await withHardDeadline(ex.assertCleanContext(), connectMs, () => {
+            void ex.disposeCleanContext().catch(() => {});
+          });
+        }
+        executor = ex; // connected + (免登录: verified clean / login: authenticated test-account)
       } catch (e) {
         await ex.disposeCleanContext().catch(() => {});
         const reason = e instanceof Error ? e.message : String(e);

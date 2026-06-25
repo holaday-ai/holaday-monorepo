@@ -36,17 +36,23 @@ export interface BrowseVerdict {
  * The live-veto decision: classify a proposed live action via the Sensitive Site
  * Protocol / D-boundary. This is what gets wired into the agent-loop `onBeforeAction`.
  */
-export function explorerOnBeforeAction(action: BrowseAction): BrowseVerdict {
-  const verdict = classifyExplorerAction({
-    kind: action.kind,
-    ...(action.label != null ? { label: action.label } : {}),
-    ...(action.ariaLabel != null ? { ariaLabel: action.ariaLabel } : {}),
-    ...(action.title != null ? { title: action.title } : {}),
-    ...(action.placeholder != null ? { placeholder: action.placeholder } : {}),
-    ...(action.name != null ? { name: action.name } : {}),
-    ...(action.inputType != null ? { inputType: action.inputType } : {}),
-    ...(action.url != null ? { url: action.url } : {}),
-  });
+export function explorerOnBeforeAction(
+  action: BrowseAction,
+  opts: { loginMode?: boolean } = {},
+): BrowseVerdict {
+  const verdict = classifyExplorerAction(
+    {
+      kind: action.kind,
+      ...(action.label != null ? { label: action.label } : {}),
+      ...(action.ariaLabel != null ? { ariaLabel: action.ariaLabel } : {}),
+      ...(action.title != null ? { title: action.title } : {}),
+      ...(action.placeholder != null ? { placeholder: action.placeholder } : {}),
+      ...(action.name != null ? { name: action.name } : {}),
+      ...(action.inputType != null ? { inputType: action.inputType } : {}),
+      ...(action.url != null ? { url: action.url } : {}),
+    },
+    opts, // A3: login-mode thickens the veto (EXTRA_RE) — default empty = 免登录 lane unchanged
+  );
   return verdict.allowed ? { allowed: true } : { allowed: false, reason: verdict.reason };
 }
 
@@ -111,6 +117,12 @@ export interface BrowseDeps {
     intent: string;
     onBeforeAction: (action: BrowseAction) => BrowseVerdict;
   }) => Promise<BrowseRunResult>;
+  /**
+   * A2/A3 login-self-learning: when true the live-veto thickens (EXTRA_RE — money / irreversible
+   * / publish). Default undefined/false → 免登录 public-skeleton lane is byte-identical. The CLI
+   * sets it ONLY when LOGIN_EXPLORER_ENABLED is on (orthogonal to EXPLORER_ENABLED).
+   */
+  loginMode?: boolean;
 }
 
 /**
@@ -127,7 +139,7 @@ export function makeBrowseExploreSite(
     // `let` would be narrowed to null by the type-checker).
     const state: { vetoed: { reason: string } | null } = { vetoed: null };
     const onBeforeAction = (action: BrowseAction): BrowseVerdict => {
-      const v = explorerOnBeforeAction(action);
+      const v = explorerOnBeforeAction(action, { loginMode: deps.loginMode === true });
       if (!v.allowed) state.vetoed = { reason: v.reason ?? 'sensitive action' };
       return v;
     };

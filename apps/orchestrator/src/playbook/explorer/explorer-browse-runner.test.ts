@@ -61,6 +61,38 @@ describe('makeRunBrowseTask — clean-context contract', () => {
     expect(ranSupercar).toBe(true);
   });
 
+  it('A2 login mode: storageState passed to connect + assertCleanContext SKIPPED (cookies expected)', async () => {
+    let seenStorageState: string | undefined;
+    let assertCalled = 0;
+    let ranSupercar = false;
+    const ex: CleanBrowseExecutor = {
+      connect: async (_e, opts) => {
+        expect(opts.cleanContext).toBe(true);
+        seenStorageState = opts.storageState; // login mode threads the test-account session path
+        return { ok: true };
+      },
+      assertCleanContext: async () => {
+        assertCalled += 1;
+      },
+      disposeCleanContext: async () => {},
+    };
+    const run = makeRunBrowseTask({
+      cdpEndpoint: 'http://x',
+      makeExecutor: () => ex,
+      runSupercar: async () => {
+        ranSupercar = true;
+        return { status: 'completed', costUsd: 0.1 };
+      },
+      newTaskExternalId: () => 'tsk_1',
+      storageState: '/tmp/test-account-session.json', // A2: login mode
+    });
+    const r = await run({ domain: 'x.com', intent: 'i', onBeforeAction: () => ({ allowed: true }) });
+    expect(r.status).toBe('completed');
+    expect(seenStorageState).toBe('/tmp/test-account-session.json'); // passed straight to connect
+    expect(assertCalled).toBe(0); // 🔓 clean assert SKIPPED in login mode (cookies are expected)
+    expect(ranSupercar).toBe(true);
+  });
+
   it('🔒 DIRTY context (assert throws) → failed, runSupercar NEVER called, context disposed', async () => {
     const { ex, calls } = fakeExecutor({ cleanThrows: true });
     let ranSupercar = false;

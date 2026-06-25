@@ -128,6 +128,27 @@ if (browse) {
     await pool.end().catch(() => {});
     process.exit(1);
   }
+  // A1 — 4th INDEPENDENT lock: login-self-learning mode. Orthogonal to EXPLORER_ENABLED (NEVER
+  // auto-enabled by it); default OFF. When on, the browse runs in an AUTHENTICATED test-account
+  // context (storageState) with a THICKER veto (EXTRA_RE — money / irreversible / publish).
+  // FAIL-CLOSED: login mode REQUIRES a storageState file path (else a "login" browse would
+  // silently run logged-out, defeating the point + the thicker veto's purpose).
+  const loginMode = process.env.LOGIN_EXPLORER_ENABLED === 'true';
+  const loginStorageState = (process.env.LOGIN_EXPLORER_STORAGE_STATE ?? '').trim();
+  if (loginMode && !loginStorageState) {
+    console.error(
+      '[explorer] LOGIN_EXPLORER_ENABLED=true requires LOGIN_EXPLORER_STORAGE_STATE (a test-account ' +
+        'session file path). Refusing a "login" browse without it. Aborting.',
+    );
+    await pool.end().catch(() => {});
+    process.exit(1);
+  }
+  if (loginMode) {
+    logger.warn(
+      { storageState: loginStorageState },
+      'explorer: LOGIN mode ON — authenticated test-account browse + thickened veto (EXTRA_RE)',
+    );
+  }
   const { PlaywrightExecutor } = await import('../src/agent/vision-loop/playwright-executor.js');
   const { runSupercarTask } = await import('../src/agent/supercar/agent-loop.js');
   const { DrizzleLlmCallRecorder } = await import('../src/agent/llm-call-recorder.js');
@@ -320,13 +341,17 @@ if (browse) {
     newTaskExternalId: () => newExternalId('task'),
     // ① per-site connect/assert hard timeout — a hung connectOverCDP can't pin the batch.
     connectTimeoutMs: resolveConnectMs(process.env.EXPLORER_CONNECT_TIMEOUT_MS),
+    // A2 — login mode seeds the isolated context with the test-account session + skips the
+    // clean-context assert. Undefined when off → 免登录 lane (empty jar + assert) unchanged.
+    ...(loginMode ? { storageState: loginStorageState } : {}),
     logger,
   });
 
   // makeBrowseExploreSite connects { cleanContext: true } (§9.6 backstop) via the runner
   // AND wires the veto hook — both halves of the guard. withExplorationRun persists one
   // exploration_runs row per browse (site / status / accurate in-memory cost / halt).
-  const browseExplore = makeBrowseExploreSite({ runBrowseTask });
+  // A3 — login mode thickens the live-veto (EXTRA_RE). Off → 免登录 veto unchanged.
+  const browseExplore = makeBrowseExploreSite({ runBrowseTask, ...(loginMode ? { loginMode: true } : {}) });
   exploreSite = withExplorationRun(browseExplore, {
     resolveSiteId: async (domain) => {
       let s = await siteRepo.findGlobalByDomain(domain);

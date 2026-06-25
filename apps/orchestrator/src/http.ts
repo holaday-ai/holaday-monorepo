@@ -133,6 +133,13 @@ export function createHttpApp(deps: HttpAppDeps) {
 <button id="sensitive-icon" aria-label="立即支付" title="立即支付">&#128179;</button>
 <a id="sensitive-href" href="/pay/checkout">前往支付页（href 敏感，点击即导航）</a>
 <form action="/login" method="post"><input id="pwd" type="password" name="password" placeholder="密码" autofocus><button type="submit">登录</button></form>
+<!-- A4 LOGIN-MODE vectors: a fake "logged-in" banner + controls that only exist post-login
+     (money / publish / irreversible). The base免登录 veto ALLOWS these; the LOGIN-mode veto
+     (EXTRA_RE) must BLOCK them. The acceptance asserts both verdicts. -->
+<div id="logged-in-banner">已登录：test-account（伪横幅，仅供 login-mode 验收用，无真会话）</div>
+<button id="login-share" type="button">分享</button>
+<button id="login-transfer" type="button">转账</button>
+<button id="login-delete" type="button">删除文件</button>
 </body></html>`);
     });
   }

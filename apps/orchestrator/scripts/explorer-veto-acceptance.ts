@@ -172,6 +172,33 @@ try {
   }
   rec('5 安全链接放行+执行', v5.allowed && innerClick === 1, `真DOM visibleText="${dSafe?.visibleText}" allowed=${v5.allowed}; innerClick=${innerClick}`);
 
+  // ── 向量 7：A3 LOGIN-MODE 加厚（EXTRA_RE）——同一真 DOM 控件，免登录放行 / 登录态拦 ──
+  // 证明条件加厚：base RE 不动（免登录 allowed=不拦），login mode 并上 EXTRA_RE（vetoed）。这些
+  // 控件（分享/转账/删除文件）只在登录后存在；登录态自学时必须被 veto。零真会话——纯分类器层证明
+  // （storageState 连接路径由 explorer-browse-runner.test.ts 单测覆盖）。
+  for (const [sel, name] of [
+    ['#login-share', '分享'],
+    ['#login-transfer', '转账'],
+    ['#login-delete', '删除文件'],
+  ] as const) {
+    const d = await descAt(sel);
+    const base = classifyClick(d); // loginMode 默认 false → 免登录 lane
+    const login = classifyExplorerAction(
+      {
+        kind: 'click',
+        ...(d?.visibleText != null ? { label: d.visibleText } : {}),
+        ...(d?.ariaLabel != null ? { ariaLabel: d.ariaLabel } : {}),
+        ...(d?.title != null ? { title: d.title } : {}),
+      },
+      { loginMode: true },
+    );
+    rec(
+      `7 login-mode 加厚拦「${name}」`,
+      base.allowed && !login.allowed,
+      `真DOM visibleText="${d?.visibleText}" → 免登录 allowed=${base.allowed}（base 不拦）/ 登录态 sensitive=${!login.allowed}（EXTRA_RE 拦）`,
+    );
+  }
+
   // ── executor-spy：敏感向量内层 click 零调用 / 安全 1 ───────────────────────
   rec(
     'spy executor.click：敏感=0 / 安全=1',

@@ -24,6 +24,31 @@ describe('explorerOnBeforeAction — live-veto decision', () => {
     // type carries no label → allowed (search box); the protective veto is click/nav/submit
     expect(explorerOnBeforeAction({ kind: 'type' }).allowed).toBe(true);
   });
+  it('A3 login-mode thickens: 转账/分享 blocked ONLY with { loginMode: true }', () => {
+    expect(explorerOnBeforeAction({ kind: 'click', label: '转账' }).allowed).toBe(true); // 免登录
+    expect(explorerOnBeforeAction({ kind: 'click', label: '转账' }, { loginMode: true }).allowed).toBe(false);
+    expect(explorerOnBeforeAction({ kind: 'click', label: '分享' }, { loginMode: true }).allowed).toBe(false);
+    // base-sensitive still blocked in both; benign still allowed in login mode.
+    expect(explorerOnBeforeAction({ kind: 'click', label: '登录' }, { loginMode: true }).allowed).toBe(false);
+    expect(explorerOnBeforeAction({ kind: 'click', label: 'Docs' }, { loginMode: true }).allowed).toBe(true);
+  });
+});
+
+describe('makeBrowseExploreSite — A3 loginMode wiring', () => {
+  it('with loginMode, a 转账 click halts the site (免登录 mode would NOT)', async () => {
+    const mk = (loginMode: boolean) =>
+      makeBrowseExploreSite({
+        loginMode,
+        runBrowseTask: async ({ onBeforeAction }) => {
+          const v = onBeforeAction({ kind: 'click', label: '转账' });
+          return v.allowed
+            ? { status: 'completed', costUsd: 0 }
+            : { status: 'failed', costUsd: 0, reason: v.reason };
+        },
+      })('x.com');
+    expect((await mk(true)).status).toBe('halted_sensitive'); // login mode → EXTRA_RE vetoes 转账
+    expect((await mk(false)).status).toBe('completed'); // 免登录 → 转账 not in base RE → allowed
+  });
 });
 
 describe('browseIntent', () => {

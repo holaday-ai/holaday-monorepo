@@ -75,6 +75,16 @@ const SENSITIVE_LABEL_RE =
 const SENSITIVE_URL_RE =
   /\b(?:pay|payment|cashier|checkout|order|orders|orderpay|buy|buynow|purchase|cart|trade|settlement|wallet|billing|recharge|topup|subscribe|login|log-in|signin|sign-in|sign_in|logon|signup|sign-up|register|auth|oauth|sso|connect\/authorize|account)\b|订单提交|booking\/confirm/i;
 
+// Phase 1 Playbook ④ A3 — LOGIN-MODE-ONLY extra blacklist. A logged-in test-account browse can
+// reach controls that DON'T exist for a logged-out visitor (money movement / irreversible account
+// ops / content publishing-and-sharing). These are vetoed ONLY when loginMode is passed (the
+// public-skeleton免登录 lane is byte-identical — the base RE above is untouched). Three groups:
+//   资金 transfer/withdraw/recharge/bind-card/authorized-deduction
+//   不可逆 unbind/deactivate/delete-account/delete/permanent
+//   发布扩展 publish-public/share/invite/authorize-login/confirm-authorize
+const SENSITIVE_LABEL_EXTRA_RE =
+  /转账|汇款|提现|提款|充值|绑卡|绑定银行卡|授权扣款|自动扣费|解绑|注销|注销账号|删除账号|删除账户|删除文件|删除|清空|永久|公开|设为公开|分享|分享给|转发|邀请|授权登录|确认授权|授权访问|transfer|withdraw|topup|recharge|bind\w*card|unbind|deactivate|delete\w*account|delete|remove|permanent|make\w*public|share|invite|authorize\w*login|grant\w*access/i;
+
 /** Normalise a label for matching: strip whitespace + zero-width chars, lower-case. */
 function normLabel(label: string): string {
   // strip whitespace + zero-width / BOM formatting chars, then lower-case, so
@@ -100,7 +110,13 @@ function normLabel(label: string): string {
  * allowed; navigate is allowed unless the URL is sensitive; submit is NEVER
  * allowed; click / type are allowed only when the (normalised) label is not sensitive.
  */
-export function classifyExplorerAction(action: ExplorerAction): ExplorerActionVerdict {
+export function classifyExplorerAction(
+  action: ExplorerAction,
+  opts: { loginMode?: boolean } = {},
+): ExplorerActionVerdict {
+  // A3: login-mode thickens the label blacklist with EXTRA_RE (money / irreversible / publish).
+  // Default false → byte-identical to the免登录 lane (the public-skeleton explorer never passes it).
+  const loginMode = opts.loginMode === true;
   const rawLabel = (action.label ?? '').trim();
   const url = (action.url ?? '').trim().toLowerCase();
   switch (action.kind) {
@@ -147,7 +163,7 @@ export function classifyExplorerAction(action: ExplorerAction): ExplorerActionVe
       ];
       for (const raw of signals) {
         const s = normLabel((raw ?? '').trim());
-        if (s && SENSITIVE_LABEL_RE.test(s)) {
+        if (s && (SENSITIVE_LABEL_RE.test(s) || (loginMode && SENSITIVE_LABEL_EXTRA_RE.test(s)))) {
           return {
             allowed: false,
             sensitive: true,

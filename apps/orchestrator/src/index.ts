@@ -791,6 +791,37 @@ async function main() {
     retentionReaperTimer.unref?.();
   }
 
+  // Phase 1 Playbook ④ B1 — user-task crystallize sweep. Low-frequency cron that distils
+  // completed/partial_success tasks WITH captures (incl. origin='user' real trajectories — the
+  // crystallizer has no origin filter) into DRAFT operation_paths. Reuses crystallizeTasks
+  // UNCHANGED (commit mode); idempotent (dedup by source_task_id). WRITE-ONLY sink → nothing
+  // reads operation_paths back into the live lane, so ZERO live-user impact. Off the request
+  // path entirely. Gated by USER_TASK_CRYSTALLIZE_ENABLED (default off). unref so it never holds
+  // the process up.
+  if (process.env.USER_TASK_CRYSTALLIZE_ENABLED === "true") {
+    const { crystallizeTasks } = await import("./playbook/crystallizer.js");
+    const USER_CRYSTALLIZE_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6h
+    const runSweep = () =>
+      void (async () => {
+        try {
+          const r = await crystallizeTasks({ db }, { dryRun: false });
+          if (r.planned.length > 0) {
+            logger.info(
+              { created: r.planned.length, scanned: r.scannedTasks, skipped: r.skipped.length },
+              "user-task crystallize sweep: distilled trajectories into draft operation_paths",
+            );
+          }
+        } catch (err) {
+          logger.warn(
+            { err: err instanceof Error ? err.message : String(err) },
+            "user-task crystallize sweep: failed (non-fatal)",
+          );
+        }
+      })();
+    const userCrystallizeTimer = setInterval(runSweep, USER_CRYSTALLIZE_INTERVAL_MS);
+    userCrystallizeTimer.unref?.();
+  }
+
   const recovery = await loadRehydratedTasks();
   logger.info(recovery, 'restart recovery: rehydrated in-flight tasks');
 

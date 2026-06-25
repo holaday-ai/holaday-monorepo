@@ -261,18 +261,24 @@ export class PlaywrightExecutor {
    */
   async connect(
     cdpEndpoint: string,
-    opts: { cleanContext?: boolean } = {},
+    opts: { cleanContext?: boolean; storageState?: string } = {},
   ): Promise<ConnectResult> {
     if (this.browser) return { ok: true };
     try {
       this.browser = await this.chromium.connectOverCDP(cdpEndpoint);
       this.cdpEndpoint = cdpEndpoint;
       // Phase 1 Playbook ④ — gated CLEAN-CONTEXT mode (explorer only). Create a
-      // FRESH isolated context (no storageState → its own empty cookie jar) and
-      // route getPage() to it. Off by default → contexts()[0] as before.
+      // FRESH isolated context and route getPage() to it. Off by default →
+      // contexts()[0] as before. A2 login-self-learning: when opts.storageState is
+      // given (a test-account session file path), seed the SAME isolated context with
+      // it → a LOGIN context that is STILL separate from contexts()[0] (user tasks)
+      // AND from a no-storageState clean context. No storageState → empty cookie jar
+      // (the 免登录 lane, unchanged).
       if (opts.cleanContext) {
         this.cleanMode = true;
-        this.cleanContext = await this.browser.newContext();
+        this.cleanContext = await this.browser.newContext(
+          opts.storageState ? { storageState: opts.storageState } : {},
+        );
         // ④ explorer per-op hard bound (CLEAN-CONTEXT ONLY → user tasks' shared context is
         // untouched): every Playwright ACTION (goto/click/waitFor/…) in the clean context gets
         // a default timeout so a single op can't block indefinitely on a hostile/anti-bot site.
