@@ -494,6 +494,7 @@ export function WorkbenchApp(): JSX.Element {
           followUpTarget={followUpTarget}
           userPlan={me?.plan}
           userSelectedRoles={me?.selectedRoles ?? null}
+          profileStorageScope={me?.userId ?? null}
           quotaExhausted={quotaExhausted}
           attachmentsAllowed={planForRetention !== 'free'}
           attachmentByteCap={

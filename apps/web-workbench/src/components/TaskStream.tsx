@@ -36,6 +36,7 @@ import remarkGfm from 'remark-gfm';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { useToast } from '@/components/ui/toast';
 import { FileDownloadCard, parseHoladayFilePayload } from '@/components/FileDownloadCard';
+import { AstroTaskCompanion } from '@/components/astrology/AstroTaskCompanion';
 import { awaitingUserCopy, awaitingUserStreamMessage } from '@/lib/awaiting-user-copy';
 import { isBrowserErrorUrl } from '@/components/browser-panel-state';
 import { copyTextToClipboard, hasCopyableText } from '@/lib/copy-text';
@@ -118,6 +119,7 @@ interface Props {
    * follow-up auto-detection inherits parent context.
    */
   onPickSuggestion?: (intent: string) => void;
+  profileStorageScope?: string | null;
 }
 
 // Stable empty-array reference so the zustand selector below returns
@@ -165,6 +167,7 @@ function hasPausedTerminalResult(task: UiTask): boolean {
 export function TaskStream({
   task,
   onPickSuggestion,
+  profileStorageScope = null,
 }: Props): JSX.Element {
   const steps = useTaskStore((s) => s.stepsByTask[task.taskId]) ?? EMPTY_STEPS;
   const userReplies =
@@ -242,6 +245,7 @@ export function TaskStream({
         awaitingUser={awaitingUser}
         webSearch={webSearch}
         serverSuggestions={serverSuggestions}
+        profileStorageScope={profileStorageScope}
       />
 
       <div ref={scrollAnchorRef} />
@@ -294,6 +298,7 @@ function AgentBlock({
   awaitingUser,
   webSearch,
   serverSuggestions,
+  profileStorageScope,
 }: {
   task: UiTask;
   steps: UiStep[];
@@ -308,6 +313,7 @@ function AgentBlock({
   awaitingUser: UiAwaitingUser | undefined;
   webSearch: UiWebSearchEvent | undefined;
   serverSuggestions?: string[];
+  profileStorageScope?: string | null;
 }): JSX.Element {
   const [detailOpen, setDetailOpen] = React.useState(false);
   // Phase 24 RC follow-up — generate / scrape streaming output. The
@@ -445,6 +451,16 @@ function AgentBlock({
           />
         )}
 
+        {showInlineProgress && !awaitingUser && (
+          <AstroTaskCompanion
+            taskId={task.taskId}
+            intent={task.intent}
+            status={task.status}
+            surface="waiting"
+            profileStorageScope={profileStorageScope}
+          />
+        )}
+
         {showInlineProgress && screencastUrl && <CurrentUrlChip url={screencastUrl} />}
 
         {webSearch && !awaitingUser && <WebSearchLine event={webSearch} />}
@@ -548,6 +564,15 @@ function AgentBlock({
             // not render a second identical one (keeps one primary
             // re-run action; its 填入原描述 / copy stay as secondary).
             verificationBannerPresent={shouldShowVerificationBanner(task)}
+          />
+        )}
+        {terminal && (
+          <AstroTaskCompanion
+            taskId={task.taskId}
+            intent={task.intent}
+            status={task.status}
+            surface="complete"
+            profileStorageScope={profileStorageScope}
           />
         )}
         {/* Phase 11 QA #11 — terminal-but-empty fallback. Catches the

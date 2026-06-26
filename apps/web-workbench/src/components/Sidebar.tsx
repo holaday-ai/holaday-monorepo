@@ -7,6 +7,7 @@ import {
   FolderPlus,
   Layers,
   ListPlus,
+  MoonStar,
   Pencil,
   Pin,
   PinOff,
@@ -51,6 +52,7 @@ import { TaskListItem } from '@/components/TaskListItem';
 import { useToast } from '@/components/ui/toast';
 import { NotificationBell } from '@/components/notifications/NotificationBell';
 import { UserMenu } from '@/components/UserMenu';
+import { isCosmicEnabled } from '@/lib/astrology';
 import { copyTextToClipboard } from '@/lib/copy-text';
 import {
   deletableTaskIdsForBatchSelection,
@@ -1006,6 +1008,7 @@ interface FeatureItem {
 
 const FEATURES: readonly FeatureItem[] = [
   { icon: Sparkles, label: '专家技能', href: '/skills' },
+  { icon: MoonStar, label: '今日能量', href: '/cosmic' },
   { icon: Clapperboard, label: '视频任务', href: '/video' },
   { icon: Clock, label: '定时任务', href: '/scheduled' },
   { icon: ListPlus, label: '批量任务', href: '/batch' },
@@ -1043,7 +1046,9 @@ function FeatureNav({
           {FEATURES.filter(
             // Phase 1 #4 — hide「视频任务」unless video is enabled for this
             // user (flag on + in allowlist). All other entries always show.
-            (feature) => feature.href !== '/video' || videoEnabled,
+            (feature) =>
+              (feature.href !== '/video' || videoEnabled) &&
+              (feature.href !== '/cosmic' || isCosmicEnabled()),
           ).map(({ icon: Icon, label, href }) => {
             if (href) {
               const isActive = pathname === href;

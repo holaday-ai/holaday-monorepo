@@ -21,6 +21,7 @@ const AdminLearningDomainPage = lazyRoute(
 const AdminLearningPage = lazyRoute(() => import('@/pages/admin/AdminLearningPage'), 'AdminLearningPage');
 const AdminUserDetailPage = lazyRoute(() => import('@/pages/admin/AdminUserDetailPage'), 'AdminUserDetailPage');
 const AdminUsersPage = lazyRoute(() => import('@/pages/admin/AdminUsersPage'), 'AdminUsersPage');
+const AstrologyPage = lazyRoute(() => import('@/pages/AstrologyPage'), 'AstrologyPage');
 const BatchPage = lazyRoute(() => import('@/pages/BatchPage'), 'BatchPage');
 const BillingPage = lazyRoute(() => import('@/pages/BillingPage'), 'BillingPage');
 const ConnectionsPage = lazyRoute(() => import('@/pages/ConnectionsPage'), 'ConnectionsPage');
@@ -82,6 +83,7 @@ export function App(): JSX.Element {
         <Route path="/privacy" element={lazyElement(<PrivacyPage />)} />
         <Route path="/terms" element={lazyElement(<TermsPage />)} />
         <Route path="/500" element={lazyElement(<ServerErrorPage />)} />
+        <Route path="/cosmic-preview" element={lazyElement(<AstrologyPage />)} />
         <Route path="/app" element={<AppAliasRedirect />} />
         <Route path="/roles" element={<LegacyRolesRedirect />} />
         <Route path="/tasks" element={<LegacyPathRedirect pathname="/history" />} />
@@ -130,6 +132,7 @@ export function App(): JSX.Element {
           <Route path="/plan" element={lazyElement(<PlanPage />)} />
           <Route path="/billing" element={lazyElement(<BillingPage />)} />
           <Route path="/usage" element={lazyElement(<UsagePage />)} />
+          <Route path="/cosmic" element={lazyElement(<AstrologyPage />)} />
           <Route path="/history" element={lazyElement(<HistoryPage />)} />
           <Route path="/skills" element={lazyElement(<SkillsPage />)} />
           <Route path="/projects" element={lazyElement(<ProjectsPage />)} />

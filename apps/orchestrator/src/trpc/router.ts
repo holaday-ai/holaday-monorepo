@@ -1,5 +1,6 @@
 import { adminRouter } from './routers/admin.js';
 import { apiKeysRouter } from './routers/api-keys.js';
+import { astrologyRouter } from './routers/astrology.js';
 import { authRouter } from './routers/auth.js';
 import { batchTasksRouter } from './routers/batch-tasks.js';
 import { connectionsRouter } from './routers/connections.js';
@@ -28,6 +29,7 @@ export const appRouter = router({
     status: 'ok' as const,
     time: new Date().toISOString(),
   })),
+  astrology: astrologyRouter,
   auth: authRouter,
   tasks: tasksRouter,
   llmCalls: llmCallsRouter,
