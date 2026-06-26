@@ -1597,6 +1597,8 @@ export const tasksRouter = router({
                   : undefined,
                 // Phase 2「看懂层」P1：腿A 逐指标注解开关（默认 OFF，零新增 LLM）。
                 seethrough: appEnv.ASHARE_SEETHROUGH_ENABLED,
+                // ④ 风险信号雷达 P1：腿A 确定性检测开关（默认 OFF，零新增 LLM）。
+                riskRadar: appEnv.ASHARE_RISK_RADAR_ENABLED,
                 logger: ctx.logger,
                 now: new Date(),
                 context: { userId: ctx.userId, taskId },

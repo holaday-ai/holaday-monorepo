@@ -50,6 +50,7 @@ import type {
   UnlockRow,
   ValuationRow,
 } from './briefing-types.js';
+import { RISK_DISCLAIMER, type RiskSignal, detectAllRisks, riskLine } from './risk-radar-engine.js';
 
 export interface FactCardDeps {
   client: AkshareClient;
@@ -695,6 +696,73 @@ export function renderStarSeethrough(
     const sd = star[p.stock.symbol];
     const blk = starBlockForStock(stockLabel(p.stock), sd?.fundamentals, sd?.valuation, p.unlock);
     if (blk.length) out.push('', ...blk);
+  }
+  return out;
+}
+
+// ===== ④ 风险信号雷达 P1 — 取数 + 检测 + 渲染（腿A 确定性，零 LLM）===================
+// 数据：质押/商誉/预告 按date取(内部解析周五/报告期)+按symbol过滤；董监高减持按symbol；
+// 问询函/大股东减持计划 = 公告标题 keyword（用更长窗口 90 天，单独取，不复用③的近7日）。
+
+export interface RiskData {
+  bySymbol: Record<string, RiskSignal[]>;
+}
+
+/** 取每股风险源 → detectAllRisks → RiskSignal[]。单源失败仅该项缺，不崩整组。 */
+export async function fetchRiskData(
+  client: AkshareClient,
+  match: AshareQaMatch,
+): Promise<RiskData> {
+  const dateCompact = match.dateCompact;
+  const annStart = shiftCompact(match.dateIso, -90); // 风险公告(问询/减持)看更长窗口
+  const bySymbol: Record<string, RiskSignal[]> = {};
+  await Promise.all(
+    match.stocks.map(async (s) => {
+      const [pledge, goodwill, forecast, insider, ann] = await Promise.all([
+        client.getRiskPledge(dateCompact, s.symbol),
+        client.getRiskGoodwill(dateCompact, s.symbol),
+        client.getRiskForecast(dateCompact, s.symbol),
+        client.getRiskInsider(s.symbol),
+        client.getStockAnnouncements(s.symbol, annStart, dateCompact),
+      ]);
+      bySymbol[s.symbol] = detectAllRisks({
+        pledge: pledge.error ? undefined : pledge.data[0],
+        goodwill: goodwill.error ? undefined : goodwill.data[0],
+        forecast: forecast.error ? undefined : forecast.data[0],
+        insider: insider.error ? [] : insider.data,
+        announcements: ann.error ? [] : ann.data,
+      });
+    }),
+  );
+  return { bySymbol };
+}
+
+/** 单股风险组（命中项才显；无 → 「未检测到上述风险信号」）。 */
+export function renderRiskGroup(signals: RiskSignal[]): string[] {
+  if (signals.length === 0) return ['- 未检测到上述风险信号'];
+  return [...signals.map(riskLine), `  （${RISK_DISCLAIMER}）`];
+}
+
+/** 全景版 ⑥ 风险信号段（多股各一块；单股省略股名后缀）。 */
+export function renderRiskSection(data: FactData, risk: RiskData): string[] {
+  const multi = data.perStock.length > 1;
+  const out: string[] = [];
+  for (const p of data.perStock) {
+    const sigs = risk.bySymbol[p.stock.symbol] ?? [];
+    out.push('');
+    out.push(multi ? `**⑥ 风险信号 · ${stockLabel(p.stock)}**` : '**⑥ 风险信号**');
+    out.push(...renderRiskGroup(sigs));
+  }
+  return out;
+}
+
+/** 轻量速览 ★ 风险提示（只带 star=true：R1高质押/R2高商誉/R3走弱/R5问询；无则空）。 */
+export function renderRiskStar(data: FactData, risk: RiskData): string[] {
+  const out: string[] = [];
+  for (const p of data.perStock) {
+    const star = (risk.bySymbol[p.stock.symbol] ?? []).filter((s) => s.star);
+    if (star.length)
+      out.push('', '**★ 风险提示**', ...star.map(riskLine), `  （${RISK_DISCLAIMER}）`);
   }
   return out;
 }

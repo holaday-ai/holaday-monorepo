@@ -85,6 +85,11 @@ function fakeClient(): AkshareClient {
           },
         ]),
       ),
+    getRiskPledge: () => Promise.resolve(env([{ 股票代码: '600519', 质押比例: 55 }])),
+    getRiskGoodwill: () => Promise.resolve(env([{ 股票代码: '600519', 商誉占净资产比例: 35 }])),
+    getRiskForecast: () =>
+      Promise.resolve(env([{ 股票代码: '600519', 预告类型: '预减', 业绩变动幅度: -40 }])),
+    getRiskInsider: () => Promise.resolve(env([{ 变动数: -500000 }])),
     // biome-ignore lint/suspicious/noExplicitAny: fake
   } as any;
 }
@@ -692,5 +697,84 @@ describe('看懂层 P1 · seethrough flag（腿A 注解，勿删）', () => {
     expect(r.answer).toContain('〔看懂〕');
     expect(r.answer).toContain('用股东的钱赚钱的效率偏低'); // ROE -6.76% <5
     expect(r.answer).toContain('历史高位'); // PE 分位 87.1%
+  });
+});
+
+describe('④ 风险雷达 P1 · riskRadar flag（腿A 检测，勿删）', () => {
+  const RLIGHT: AshareQaMatch = {
+    kind: 'info',
+    stocks: [{ symbol: '600519', displayName: '贵州茅台' }],
+    dateIso: '2026-06-12',
+    dateCompact: '20260612',
+    deep: false,
+  };
+  const RDEEP: AshareQaMatch = { ...RLIGHT, deep: true };
+
+  it('全景 OFF（默认）→ 无 ⑥ 风险信号；与显式 false 字节一致', async () => {
+    const { logger } = fakeLogger();
+    const deps = {
+      client: fakeClient(),
+      interpret: async () => '客观状态画像。',
+      logger,
+      now: NOW,
+    };
+    const off = await runAsharePanorama(deps, RDEEP);
+    const offExplicit = await runAsharePanorama({ ...deps, riskRadar: false }, RDEEP);
+    expect(off.answer).not.toContain('风险信号');
+    expect(off.answer).not.toContain('〔风险');
+    expect(off.answer).toBe(offExplicit.answer);
+  });
+
+  it('全景 ON → ⑥ 风险信号组（高质押/高商誉/预减走弱/减持）+ 免责；零买卖/行动指令泄漏', async () => {
+    const { logger } = fakeLogger();
+    const r = await runAsharePanorama(
+      {
+        client: fakeClient(),
+        seethrough: false,
+        riskRadar: true,
+        interpret: async () => '客观状态画像。',
+        logger,
+        now: NOW,
+      },
+      RDEEP,
+    );
+    expect(r.answer).toContain('**⑥ 风险信号**');
+    expect(r.answer).toContain('整体质押比例较高'); // R1 >50★
+    expect(r.answer).toContain('商誉占净资产比例较高'); // R2 >30★
+    expect(r.answer).toContain('同比走弱'); // R3 预减★
+    expect(r.answer).toContain('董监高减持'); // R4 减持
+    expect(r.answer).toContain('不构成投资建议'); // 风险组恒附免责
+    // ⑥ 风险组本体（不含尾部免责的「建议」）零买卖/涨跌/好差/行动指令
+    const sec = r.answer.slice(r.answer.indexOf('⑥ 风险信号'), r.answer.indexOf('## ⑦'));
+    expect(sec).not.toMatch(/[买卖涨跌好差]|目标价|赶紧|务必|规避|清仓|卖出/);
+  });
+
+  it('轻量 ON → ★ 风险提示（只 star：高质押/高商誉/预减；减持非★不入）', async () => {
+    const { logger } = fakeLogger();
+    const r = await runAshareQa(
+      {
+        client: fakeClient(),
+        skillMarkdown: null,
+        riskRadar: true,
+        interpret: async () => '',
+        logger,
+        now: NOW,
+      },
+      RLIGHT,
+    );
+    expect(r.answer).toContain('★ 风险提示');
+    expect(r.answer).toContain('整体质押比例较高');
+    expect(r.answer).toContain('同比走弱');
+    expect(r.answer).not.toContain('董监高减持'); // 减持 star=false，不进 ★
+  });
+
+  it('轻量 OFF（默认）→ 无 ★ 风险提示', async () => {
+    const { logger } = fakeLogger();
+    const r = await runAshareQa(
+      { client: fakeClient(), skillMarkdown: null, interpret: async () => '', logger, now: NOW },
+      RLIGHT,
+    );
+    expect(r.answer).not.toContain('★ 风险提示');
+    expect(r.answer).not.toContain('〔风险');
   });
 });

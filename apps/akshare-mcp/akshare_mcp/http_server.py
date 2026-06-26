@@ -140,6 +140,32 @@ def valuation(symbol: str) -> dict[str, Any]:
     return _safe(_val, symbol)
 
 
+# ④ 风险信号雷达：质押/商誉/预告 全市场按 date 共享缓存（内部 _risk_*_all @cached），
+# endpoint 直 _safe(adp.get_risk_*, date, symbol)（按 symbol 过滤后结果小，不再二次缓存）。
+@app.get("/risk-pledge/{date}")
+def risk_pledge(date: str, symbol: str = "") -> dict[str, Any]:
+    """R1 股权质押(质押比例)。date 'YYYYMMDD'(内部取≤date 最近周五)；symbol 过滤个股。"""
+    return _safe(adp.get_risk_pledge, date, symbol)
+
+
+@app.get("/risk-goodwill/{date}")
+def risk_goodwill(date: str, symbol: str = "") -> dict[str, Any]:
+    """R2 商誉(占净资产比例 + 上年商誉)。date 'YYYYMMDD'(内部取最近报告期)；symbol 过滤。"""
+    return _safe(adp.get_risk_goodwill, date, symbol)
+
+
+@app.get("/risk-forecast/{date}")
+def risk_forecast(date: str, symbol: str = "") -> dict[str, Any]:
+    """R3 业绩预告(预告类型/业绩变动幅度)。date 'YYYYMMDD'(内部取最近报告期)；symbol 过滤。"""
+    return _safe(adp.get_risk_forecast, date, symbol)
+
+
+@app.get("/risk-insider/{symbol}")
+def risk_insider(symbol: str) -> dict[str, Any]:
+    """R4 董监高持股变动(减持=变动数<0)。沪 sse / 深 szse 交易所直连。"""
+    return _safe(adp.get_risk_insider, symbol)
+
+
 @app.get("/symbol-search/{query}")
 def symbol_search(query: str) -> dict[str, Any]:
     """问句 → 个股 [{code,name}]（④ 短名解析）。表空时返空 + 异步刷新，不阻塞。"""

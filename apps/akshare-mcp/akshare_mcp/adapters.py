@@ -47,6 +47,8 @@ try:
 except Exception:  # pragma: no cover - akshare optional at import time
     ak = None  # type: ignore
 
+from .cache import cached as _cached  # ④ 风险源全市场 按date 共享缓存
+
 
 # --- per-interface TTLs (seconds), env-overridable -------------------
 def _ttl(name: str, default: int) -> int:
@@ -69,6 +71,7 @@ TTL_UNLOCK = _ttl("UNLOCK", 3600)
 TTL_TRADECAL = _ttl("TRADECAL", 86400)  # 交易日历日内基本不变，缓存 1 天
 TTL_FUND = _ttl("FUND", 86400)  # 财报季度才变，缓存 1 天
 TTL_VAL = _ttl("VAL", 3600)  # 估值日级，缓存 1 小时
+TTL_RISK = _ttl("RISK", 21600)  # ④ 风险源(质押/商誉/预告)粗粒度变更，缓存 6h
 
 # Row caps so a single tool call can't dump thousands of rows into the
 # model's context.
@@ -635,6 +638,102 @@ def get_valuation(symbol: str) -> tuple[list[dict[str, Any]], str]:
     except Exception:  # noqa: BLE001
         pass
     return [out], "akshare:zh_valuation_baidu(PE/PB+5y分位)+industry_pe_cninfo"
+
+
+# --- ④ 风险信号雷达（R1-R5；按date取全市场→date 共享缓存，再按 symbol 过滤）------
+# 数据源全为东财 datacenter(_em，Vultr 实测可达，≠ push2)；空结果 akshare 抛 KeyError →
+# 兜成空集(无数据≠不可达)；避开慢分页函数(hold_management_detail_em 340页 /
+# gpzy_pledge_ratio_detail_em 252页 不用)，只用按date单次调用。
+def _recent_friday(ref: str) -> str:
+    """ref 'YYYYMMDD' → ≤ref 的最近周五（质押按周五口径披露）。"""
+    d = datetime.date(int(ref[:4]), int(ref[4:6]), int(ref[6:8]))
+    return (d - datetime.timedelta(days=(d.weekday() - 4) % 7)).strftime("%Y%m%d")
+
+
+def _latest_report_period(ref: str) -> str:
+    """ref 'YYYYMMDD' → 最近已披露报告期(假设 ~45 天披露滞后)的季末 'YYYYMMDD'。"""
+    d = datetime.date(int(ref[:4]), int(ref[4:6]), int(ref[6:8]))
+    cutoff = d - datetime.timedelta(days=45)
+    cands = [
+        datetime.date(y, m, dd)
+        for y in (d.year, d.year - 1)
+        for (m, dd) in ((12, 31), (9, 30), (6, 30), (3, 31))
+        if datetime.date(y, m, dd) <= cutoff
+    ]
+    best = max(cands) if cands else datetime.date(d.year - 1, 12, 31)
+    return best.strftime("%Y%m%d")
+
+
+def _norm_code(symbol: str) -> str:
+    return symbol.strip().lstrip("shz").zfill(6)
+
+
+def _by_symbol(recs: list[dict[str, Any]], symbol: str) -> list[dict[str, Any]]:
+    if not symbol:
+        return recs
+    s = _norm_code(symbol)
+    return [r for r in recs if str(r.get("股票代码", "")).zfill(6) == s]
+
+
+@_cached(TTL_RISK)
+def _risk_pledge_all(query_date: str) -> list[dict[str, Any]]:
+    a = _require_ak()
+    try:
+        return _records(a.stock_gpzy_pledge_ratio_em(date=query_date), limit=6000)
+    except KeyError:  # akshare 空结果抛 KeyError → 空集
+        return []
+
+
+def get_risk_pledge(ref_date: str, symbol: str = "") -> tuple[list[dict[str, Any]], str]:
+    """R1 股权质押(质押比例)。ref_date 'YYYYMMDD'→最近周五口径；symbol→过滤个股。"""
+    recs = _risk_pledge_all(_recent_friday(ref_date))
+    return _by_symbol(recs, symbol), "akshare:stock_gpzy_pledge_ratio_em"
+
+
+@_cached(TTL_RISK)
+def _risk_goodwill_all(period: str) -> list[dict[str, Any]]:
+    a = _require_ak()
+    try:
+        return _records(a.stock_sy_em(date=period), limit=6000)
+    except KeyError:
+        return []
+
+
+def get_risk_goodwill(ref_date: str, symbol: str = "") -> tuple[list[dict[str, Any]], str]:
+    """R2 商誉(商誉占净资产比例 + 上年商誉)。ref_date→最近报告期；symbol→过滤。"""
+    recs = _risk_goodwill_all(_latest_report_period(ref_date))
+    return _by_symbol(recs, symbol), "akshare:stock_sy_em"
+
+
+@_cached(TTL_RISK)
+def _risk_forecast_all(period: str) -> list[dict[str, Any]]:
+    a = _require_ak()
+    try:
+        return _records(a.stock_yjyg_em(date=period), limit=9000)
+    except KeyError:
+        return []
+
+
+def get_risk_forecast(ref_date: str, symbol: str = "") -> tuple[list[dict[str, Any]], str]:
+    """R3 业绩预告(预告类型/业绩变动幅度)。ref_date→最近报告期；symbol→过滤。"""
+    recs = _risk_forecast_all(_latest_report_period(ref_date))
+    return _by_symbol(recs, symbol), "akshare:stock_yjyg_em"
+
+
+def get_risk_insider(symbol: str) -> tuple[list[dict[str, Any]], str]:
+    """R4 董监高持股变动(减持=变动数<0)。沪市 sse / 深市 szse(交易所直连，实测可达)。"""
+    a = _require_ak()
+    code = _norm_code(symbol)
+    try:
+        if code.startswith("6"):
+            df = a.stock_share_hold_change_sse(symbol=code)
+            src = "akshare:stock_share_hold_change_sse"
+        else:
+            df = a.stock_share_hold_change_szse(symbol=code)
+            src = "akshare:stock_share_hold_change_szse"
+        return _records(df, limit=200), src
+    except KeyError:
+        return [], "akshare:stock_share_hold_change(无数据)"
 
 
 # --- 交易日历（P1：非交易日不投递简报） -----------------------------

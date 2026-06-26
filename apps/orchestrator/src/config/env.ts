@@ -173,6 +173,15 @@ const schema = z.object({
     .enum(['true', 'false'])
     .default('false')
     .transform((v) => v === 'true'),
+  /**
+   * ④ 风险信号雷达 P1 — 腿A 确定性检测 + 风险注解（质押/商誉/预告/减持/问询函）。默认 OFF。
+   * on → 全景挂 ⑥ 风险信号组、轻量带 ★ 风险提示（命中才显）；off → 完全回退现状（字节一致）。
+   * 零新增 LLM；akshare 风险源走东财 datacenter（Vultr 可达）+ 公告 keyword（问询/减持）。
+   */
+  ASHARE_RISK_RADAR_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
 
   /**
    * Phase D Step 3 rollout switch.

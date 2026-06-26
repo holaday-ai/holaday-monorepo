@@ -12,11 +12,15 @@ import type {
   AkEnvelope,
   AnnouncementRow,
   DragonTigerRow,
+  ForecastRow,
   FundamentalsRow,
+  GoodwillRow,
   IndexRow,
+  InsiderChangeRow,
   KlineRow,
   MarketPulseRow,
   NorthboundRow,
+  PledgeRow,
   UnlockRow,
   ValuationRow,
   ZtReviewRow,
@@ -137,5 +141,23 @@ export class HttpAkshareClient implements AkshareClient {
   }
   getValuation(symbol: string) {
     return this.get<ValuationRow>(`/valuation/${encodeURIComponent(symbol)}`);
+  }
+  getRiskPledge(date: string, symbol: string) {
+    return this.get<PledgeRow>(
+      `/risk-pledge/${encodeURIComponent(date)}?symbol=${encodeURIComponent(symbol)}`,
+    );
+  }
+  getRiskGoodwill(date: string, symbol: string) {
+    return this.get<GoodwillRow>(
+      `/risk-goodwill/${encodeURIComponent(date)}?symbol=${encodeURIComponent(symbol)}`,
+    );
+  }
+  getRiskForecast(date: string, symbol: string) {
+    return this.get<ForecastRow>(
+      `/risk-forecast/${encodeURIComponent(date)}?symbol=${encodeURIComponent(symbol)}`,
+    );
+  }
+  getRiskInsider(symbol: string) {
+    return this.get<InsiderChangeRow>(`/risk-insider/${encodeURIComponent(symbol)}`);
   }
 }

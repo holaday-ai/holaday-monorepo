@@ -70,6 +70,10 @@ function fakeClient(dtSpy?: (d: string) => void): AkshareClient {
     getZtPoolSummary: () => Promise.resolve(PREMARKET_SAMPLE.ztReview ?? emptyEnv('zt_summary')),
     getFundamentals: () => Promise.resolve(emptyEnv('fundamentals')),
     getValuation: () => Promise.resolve(emptyEnv('valuation')),
+    getRiskPledge: () => Promise.resolve(emptyEnv('risk_pledge')),
+    getRiskGoodwill: () => Promise.resolve(emptyEnv('risk_goodwill')),
+    getRiskForecast: () => Promise.resolve(emptyEnv('risk_forecast')),
+    getRiskInsider: () => Promise.resolve(emptyEnv('risk_insider')),
   };
 }
 

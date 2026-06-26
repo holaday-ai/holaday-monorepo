@@ -17,11 +17,15 @@ import type {
   AkEnvelope,
   AnnouncementRow,
   DragonTigerRow,
+  ForecastRow,
   FundamentalsRow,
+  GoodwillRow,
   IndexRow,
+  InsiderChangeRow,
   KlineRow,
   MarketPulseRow,
   NorthboundRow,
+  PledgeRow,
   UnlockRow,
   ValuationRow,
   ZtReviewRow,
@@ -74,6 +78,14 @@ export interface AkshareClient {
   getFundamentals(symbol: string): Promise<AkEnvelope<FundamentalsRow>>;
   /** get_valuation(symbol) — Phase2 ⑤ 估值（PE/PB + 历史分位 + 行业PE中位）。 */
   getValuation(symbol: string): Promise<AkEnvelope<ValuationRow>>;
+  /** ④ R1 股权质押（date 'YYYYMMDD' 内部取最近周五；按 symbol 过滤个股）。 */
+  getRiskPledge(date: string, symbol: string): Promise<AkEnvelope<PledgeRow>>;
+  /** ④ R2 商誉（date 'YYYYMMDD' 内部取最近报告期；按 symbol 过滤）。 */
+  getRiskGoodwill(date: string, symbol: string): Promise<AkEnvelope<GoodwillRow>>;
+  /** ④ R3 业绩预告（date 'YYYYMMDD' 内部取最近报告期；按 symbol 过滤）。 */
+  getRiskForecast(date: string, symbol: string): Promise<AkEnvelope<ForecastRow>>;
+  /** ④ R4 董监高持股变动（按 symbol；变动数<0=减持；沪 sse / 深 szse）。 */
+  getRiskInsider(symbol: string): Promise<AkEnvelope<InsiderChangeRow>>;
 }
 
 const STUB_DISCLAIMER = '数据来源 AkShare 聚合，仅供信息参考，不构成任何投资建议，不预测股价。';
@@ -142,5 +154,25 @@ export class StubAkshareClient implements AkshareClient {
   }
   getValuation(symbol: string) {
     return Promise.resolve(this.err<ValuationRow>(`akshare:valuation(${symbol})`, this.now()));
+  }
+  getRiskPledge(date: string, symbol: string) {
+    return Promise.resolve(
+      this.err<PledgeRow>(`akshare:risk_pledge(${date},${symbol})`, this.now()),
+    );
+  }
+  getRiskGoodwill(date: string, symbol: string) {
+    return Promise.resolve(
+      this.err<GoodwillRow>(`akshare:risk_goodwill(${date},${symbol})`, this.now()),
+    );
+  }
+  getRiskForecast(date: string, symbol: string) {
+    return Promise.resolve(
+      this.err<ForecastRow>(`akshare:risk_forecast(${date},${symbol})`, this.now()),
+    );
+  }
+  getRiskInsider(symbol: string) {
+    return Promise.resolve(
+      this.err<InsiderChangeRow>(`akshare:risk_insider(${symbol})`, this.now()),
+    );
   }
 }
