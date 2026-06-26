@@ -58,6 +58,12 @@ export interface HttpAkshareClientOptions {
   fetchImpl?: FetchLike;
   /** 单次请求超时，默认 10000ms（BOSS 要求；超时/挂服→error envelope→对应段降级）。 */
   timeoutMs?: number;
+  /**
+   * ④ 风险源单独超时，默认 25000ms。风险按 date 取全市场表，冷缓存单张 >1min（预热为主，
+   * 见 akshare-mcp /risk-warm + 启动钩子）；此放宽是预热没命中的边缘日期/个股的冷取兜底，
+   * 宁可慢几秒真查出来、不假装「未检测到」。**仅作用于 4 个风险端点，不影响其他查询。**
+   */
+  riskTimeoutMs?: number;
   /** 注入后：原始异常 / 后端 error envelope 进 logger.warn，**不泄漏给用户文案**。 */
   logger?: MinimalLogger;
 }
@@ -66,18 +72,20 @@ export class HttpAkshareClient implements AkshareClient {
   private readonly baseUrl: string;
   private readonly fetchImpl: FetchLike;
   private readonly timeoutMs: number;
+  private readonly riskTimeoutMs: number;
   private readonly logger?: MinimalLogger;
 
   constructor(opts: HttpAkshareClientOptions) {
     this.baseUrl = opts.baseUrl.replace(/\/+$/, '');
     this.fetchImpl = opts.fetchImpl ?? (globalThis.fetch as unknown as FetchLike);
     this.timeoutMs = opts.timeoutMs ?? 10_000;
+    this.riskTimeoutMs = opts.riskTimeoutMs ?? 25_000;
     this.logger = opts.logger;
   }
 
-  private async get<T>(path: string): Promise<AkEnvelope<T>> {
+  private async get<T>(path: string, timeoutMs: number = this.timeoutMs): Promise<AkEnvelope<T>> {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const res = await this.fetchImpl(`${this.baseUrl}${path}`, { signal: controller.signal });
       if (!res.ok) {
@@ -146,19 +154,25 @@ export class HttpAkshareClient implements AkshareClient {
   getRiskPledge(date: string, symbol: string) {
     return this.get<PledgeRow>(
       `/risk-pledge/${encodeURIComponent(date)}?symbol=${encodeURIComponent(symbol)}`,
+      this.riskTimeoutMs,
     );
   }
   getRiskGoodwill(date: string, symbol: string) {
     return this.get<GoodwillRow>(
       `/risk-goodwill/${encodeURIComponent(date)}?symbol=${encodeURIComponent(symbol)}`,
+      this.riskTimeoutMs,
     );
   }
   getRiskForecast(date: string, symbol: string) {
     return this.get<ForecastRow>(
       `/risk-forecast/${encodeURIComponent(date)}?symbol=${encodeURIComponent(symbol)}`,
+      this.riskTimeoutMs,
     );
   }
   getRiskInsider(symbol: string) {
-    return this.get<InsiderChangeRow>(`/risk-insider/${encodeURIComponent(symbol)}`);
+    return this.get<InsiderChangeRow>(
+      `/risk-insider/${encodeURIComponent(symbol)}`,
+      this.riskTimeoutMs,
+    );
   }
 }

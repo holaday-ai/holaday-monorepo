@@ -3,21 +3,13 @@
 `pct_change` / `sina_prefix` 纯逻辑随处可跑；用到 `_records` 的经 pandas（随
 akshare 安装），本地无 pandas 时 `importorskip` 跳过，CI / Vultr 跑。
 
-直接按文件加载 adapters.py，避免 `import akshare_mcp` 触发可选依赖 akshare。
+adapters.py 现含 `from .cache import ...`（④ 风险源缓存）→ 按文件 importlib 加载会因相对
+导入失败；改包导入（akshare 在 adapters.py 内 try/except 守护，本地无 akshare 也能 import）。
 """
-
-import importlib.util
-from pathlib import Path
 
 import pytest
 
-_spec = importlib.util.spec_from_file_location(
-    "adp_under_test",
-    Path(__file__).resolve().parent.parent / "akshare_mcp" / "adapters.py",
-)
-adp = importlib.util.module_from_spec(_spec)
-assert _spec.loader is not None
-_spec.loader.exec_module(adp)
+from akshare_mcp import adapters as adp
 
 
 @pytest.mark.parametrize(

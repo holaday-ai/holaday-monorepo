@@ -186,6 +186,35 @@ def symbol_table_warm() -> dict[str, Any]:
         return {"error": f"接口调用失败: {exc}", "data": [], "count": 0, "disclaimer": DISCLAIMER}
 
 
+@app.post("/risk-warm")
+def risk_warm() -> dict[str, Any]:
+    """预热 3 张风险全市场表(质押/商誉/预告)入进程缓存。冷取慢(>1min/张) → 由启动钩子 + 周期后台
+    调；命中后客户端秒回。手动触发(部署后/补热)也走此端点。返回各表行数。"""
+    try:
+        counts = adp.warm_risk_tables()
+        return {"data": [counts], "count": 1, "source": "risk-warm", "disclaimer": DISCLAIMER}
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"接口调用失败: {exc}", "data": [], "count": 0, "disclaimer": DISCLAIMER}
+
+
+@app.on_event("startup")
+def _prewarm_risk_on_startup() -> None:
+    """启动后台预热风险表 + 周期重热(<TTL_RISK 保持热)。daemon 线程，**不阻塞 startup**
+    （服务立即起、慢 fetch 挪后台）；单轮失败仅跳过、服务照常。对齐 BOSS 方案 A。"""
+    import threading
+    import time
+
+    def _loop() -> None:
+        while True:
+            try:
+                adp.warm_risk_tables()
+            except Exception:  # noqa: BLE001 - 预热失败不影响服务
+                pass
+            time.sleep(5 * 3600)  # < TTL_RISK(6h)，周期重热
+
+    threading.Thread(target=_loop, daemon=True).start()
+
+
 def main() -> None:
     """Entry point — 仅监听本机回环，由同机 orchestrator 直取。"""
     import os

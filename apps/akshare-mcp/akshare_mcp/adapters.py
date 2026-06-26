@@ -701,6 +701,21 @@ def _latest_report_period(ref: str) -> str:
     return best.strftime("%Y%m%d")
 
 
+def _quarter_ends_desc(ref_period: str, n: int) -> list[str]:
+    """≤ ref_period('YYYYMMDD' 季末) 的季末日期，新→旧，取 ≤n 个（报告期往前探用，有界无死循环）。"""
+    base = datetime.date(int(ref_period[:4]), int(ref_period[4:6]), int(ref_period[6:8]))
+    cands = sorted(
+        (
+            datetime.date(yy, m, dd)
+            for yy in range(base.year, base.year - 3, -1)
+            for (m, dd) in ((12, 31), (9, 30), (6, 30), (3, 31))
+            if datetime.date(yy, m, dd) <= base
+        ),
+        reverse=True,
+    )
+    return [d.strftime("%Y%m%d") for d in cands[:n]]
+
+
 def _norm_code(symbol: str) -> str:
     return symbol.strip().lstrip("shz").zfill(6)
 
@@ -721,9 +736,21 @@ def _risk_pledge_all(query_date: str) -> list[dict[str, Any]]:
         return []
 
 
+@_cached(TTL_RISK)
+def _latest_pledge_date(ref_friday: str) -> str:
+    """从 ref_friday 当周五往前每周回退(≤4周,有界无死循环)找首个有质押数据的披露日；都空返当周五。
+    质押按周五口径披露但有滞后，当周常未出 → 探回到最近【已披露】周，R1 才真 fire。"""
+    base = datetime.date(int(ref_friday[:4]), int(ref_friday[4:6]), int(ref_friday[6:8]))
+    for k in range(5):  # 当周 + 回退 4 周
+        fri = (base - datetime.timedelta(days=7 * k)).strftime("%Y%m%d")
+        if _risk_pledge_all(fri):
+            return fri
+    return ref_friday
+
+
 def get_risk_pledge(ref_date: str, symbol: str = "") -> tuple[list[dict[str, Any]], str]:
-    """R1 股权质押(质押比例)。ref_date 'YYYYMMDD'→最近周五口径；symbol→过滤个股。"""
-    recs = _risk_pledge_all(_recent_friday(ref_date))
+    """R1 股权质押(质押比例)。ref_date 'YYYYMMDD'→最近【已披露】周五口径；symbol→过滤个股。"""
+    recs = _risk_pledge_all(_latest_pledge_date(_recent_friday(ref_date)))
     return _by_symbol(recs, symbol), "akshare:stock_gpzy_pledge_ratio_em"
 
 
@@ -736,9 +763,18 @@ def _risk_goodwill_all(period: str) -> list[dict[str, Any]]:
         return []
 
 
+@_cached(TTL_RISK)
+def _latest_goodwill_period(ref_period: str) -> str:
+    """从 ref_period 季末往前探(≤4季)找首个有商誉数据的报告期；都空返 ref_period。"""
+    for p in _quarter_ends_desc(ref_period, 4):
+        if _risk_goodwill_all(p):
+            return p
+    return ref_period
+
+
 def get_risk_goodwill(ref_date: str, symbol: str = "") -> tuple[list[dict[str, Any]], str]:
-    """R2 商誉(商誉占净资产比例 + 上年商誉)。ref_date→最近报告期；symbol→过滤。"""
-    recs = _risk_goodwill_all(_latest_report_period(ref_date))
+    """R2 商誉(商誉占净资产比例 + 上年商誉)。ref_date→最近【有数据】报告期；symbol→过滤。"""
+    recs = _risk_goodwill_all(_latest_goodwill_period(_latest_report_period(ref_date)))
     return _by_symbol(recs, symbol), "akshare:stock_sy_em"
 
 
@@ -751,9 +787,18 @@ def _risk_forecast_all(period: str) -> list[dict[str, Any]]:
         return []
 
 
+@_cached(TTL_RISK)
+def _latest_forecast_period(ref_period: str) -> str:
+    """从 ref_period 季末往前探(≤4季)找首个有业绩预告数据的报告期；都空返 ref_period。"""
+    for p in _quarter_ends_desc(ref_period, 4):
+        if _risk_forecast_all(p):
+            return p
+    return ref_period
+
+
 def get_risk_forecast(ref_date: str, symbol: str = "") -> tuple[list[dict[str, Any]], str]:
-    """R3 业绩预告(预告类型/业绩变动幅度)。ref_date→最近报告期；symbol→过滤。"""
-    recs = _risk_forecast_all(_latest_report_period(ref_date))
+    """R3 业绩预告(预告类型/业绩变动幅度)。ref_date→最近【有数据】报告期；symbol→过滤。"""
+    recs = _risk_forecast_all(_latest_forecast_period(_latest_report_period(ref_date)))
     return _by_symbol(recs, symbol), "akshare:stock_yjyg_em"
 
 
@@ -771,6 +816,17 @@ def get_risk_insider(symbol: str) -> tuple[list[dict[str, Any]], str]:
         return _records(df, limit=200), src
     except KeyError:
         return [], "akshare:stock_share_hold_change(无数据)"
+
+
+def warm_risk_tables(ref_date: str = "") -> dict[str, int]:
+    """预热 3 张风险全市场表(质押最近披露周 / 商誉·预告最近有数据报告期)入进程缓存。
+    冷取全市场表慢(>1min/张)→ 此函数只在 akshare-mcp 启动 + 周期(<TTL_RISK)后台调，
+    使查询命中热缓存、客户端 10/25s 内秒回。返回各表行数(0=该期暂无数据)。"""
+    ref = ref_date or datetime.date.today().strftime("%Y%m%d")
+    pl = _risk_pledge_all(_latest_pledge_date(_recent_friday(ref)))
+    gw = _risk_goodwill_all(_latest_goodwill_period(_latest_report_period(ref)))
+    fc = _risk_forecast_all(_latest_forecast_period(_latest_report_period(ref)))
+    return {"pledge": len(pl), "goodwill": len(gw), "forecast": len(fc)}
 
 
 # --- 交易日历（P1：非交易日不投递简报） -----------------------------
