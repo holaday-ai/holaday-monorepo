@@ -89,8 +89,10 @@ def share_unlock(symbol: str) -> dict[str, Any]:
 
 
 @app.get("/kline/{symbol}")
-def kline(symbol: str) -> dict[str, Any]:
-    return _safe(_kline, symbol)
+def kline(symbol: str, days: int = 0) -> dict[str, Any]:
+    """days>0 → 近 days 交易日 raw 序列(P3 F走势 本地算)；默认 0 = 末2行(①盘面，不变)。
+    cache 按 (symbol, days) 分键（序列与单行各自缓存）。"""
+    return _safe(_kline, symbol, days=days)
 
 
 @app.get("/quote/{symbol}")

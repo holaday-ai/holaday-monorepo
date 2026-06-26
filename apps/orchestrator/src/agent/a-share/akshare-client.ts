@@ -60,8 +60,11 @@ export interface AkshareClient {
   ): Promise<AkEnvelope<AnnouncementRow>>;
   /** get_share_unlock(symbol) — 个股限售解禁（G2）。 */
   getShareUnlock(symbol: string): Promise<AkEnvelope<UnlockRow>>;
-  /** get_stock_kline(symbol) — 历史 K 线（末行=当日表现）。 */
-  getStockKline(symbol: string): Promise<AkEnvelope<KlineRow>>;
+  /**
+   * get_stock_kline(symbol, days?) — 历史 K 线。默认（无 days）末行=当日表现（①盘面）；
+   * **days>0** → 近 days 交易日 raw 序列（P3 F走势 本地算，同源不新增数据）。
+   */
+  getStockKline(symbol: string, days?: number): Promise<AkEnvelope<KlineRow>>;
   /** get_dragon_tiger(startDate) — 龙虎榜明细（startDate 'YYYYMMDD'）。 */
   getDragonTiger(startDate: string): Promise<AkEnvelope<DragonTigerRow>>;
   /** get_northbound_flow() — 北向资金汇总。 */
@@ -124,7 +127,7 @@ export class StubAkshareClient implements AkshareClient {
   getShareUnlock(symbol: string) {
     return Promise.resolve(this.err<UnlockRow>(`akshare:share_unlock(${symbol})`, this.now()));
   }
-  getStockKline(symbol: string) {
+  getStockKline(symbol: string, _days?: number) {
     return Promise.resolve(this.err<KlineRow>(`akshare:kline(${symbol})`, this.now()));
   }
   getDragonTiger(startDate: string) {

@@ -188,15 +188,38 @@ def get_kline(
     start_date: str = "",
     end_date: str = "",
     adjust: str = "qfq",
+    days: int = 0,
 ) -> tuple[list[dict[str, Any]], str]:
-    """日 K 线（sina）。返末行 = 当日表现，含末2行算的涨跌幅。
+    """日 K 线（sina）。默认返末行 = 当日表现，含末2行算的涨跌幅（①盘面用，不变）。
 
     push2his stock_zh_a_hist 从 Vultr 不可达 → 改 stock_zh_a_daily（sina）。
     sina daily 列 date/open/high/low/close/volume/amount **无涨跌幅**，故末2行算。
     period 仅 daily（周/月线非简报所需，暂不支持）。
+    **P3 F走势**：days>0 → 返近 days 交易日 **raw 序列**（日期/开盘/最高/最低/收盘/成交量/成交额，
+    时间升序），F1-F4 本地纯算。同源 stock_zh_a_daily，零新数据源；停牌/新股不足返空（不崩）。
     """
     a = _require_ak()
     sina_sym = sina_prefix(symbol)
+    if days and days > 0:
+        sd2 = (datetime.date.today() - datetime.timedelta(days=int(days * 1.5) + 15)).strftime(
+            "%Y%m%d"
+        )
+        df = a.stock_zh_a_daily(symbol=sina_sym, start_date=sd2, adjust=adjust or "qfq")
+        if df is None or len(df) == 0:
+            return [], "akshare:stock_zh_a_daily(sina,series,空)"
+        series = [
+            {
+                "日期": r.get("date"),
+                "开盘": _to_float(r.get("open")),
+                "最高": _to_float(r.get("high")),
+                "最低": _to_float(r.get("low")),
+                "收盘": _to_float(r.get("close")),
+                "成交量": _to_float(r.get("volume")),
+                "成交额": _to_float(r.get("amount")),
+            }
+            for r in _records(df, limit=days + 30)
+        ]
+        return series, "akshare:stock_zh_a_daily(sina,series)"
     sd = start_date or (datetime.date.today() - datetime.timedelta(days=25)).strftime("%Y%m%d")
     kwargs: dict[str, Any] = {"symbol": sina_sym, "start_date": sd, "adjust": adjust or "qfq"}
     if end_date:

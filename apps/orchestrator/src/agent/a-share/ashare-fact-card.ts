@@ -50,6 +50,7 @@ import type {
   UnlockRow,
   ValuationRow,
 } from './briefing-types.js';
+import { type PerfSignal, detectAllPerf, perfLine } from './perf-trend-engine.js';
 import { RISK_DISCLAIMER, type RiskSignal, detectAllRisks, riskLine } from './risk-radar-engine.js';
 
 export interface FactCardDeps {
@@ -763,6 +764,61 @@ export function renderRiskStar(data: FactData, risk: RiskData): string[] {
     const star = (risk.bySymbol[p.stock.symbol] ?? []).filter((s) => s.star);
     if (star.length)
       out.push('', '**★ 风险提示**', ...star.map(riskLine), `  （${RISK_DISCLAIMER}）`);
+  }
+  return out;
+}
+
+// ===== P3 · F 走势组 — 取数(放宽 get_kline 近1年) + F1-F4 本地算 + 渲染（腿A 零LLM）===========
+// F1-F4 全用现成 daily 序列(get_kline?days=250)本地纯算，零新增取数接口；新股/停牌不足 → 不出。
+
+/** 走势组末免责（含「预测/建议」=免责非注解，渲染层一次性附；走势最易滑，钉客观）。 */
+export const PERF_DISCLAIMER = '以上为客观走势描述，不预测未来、不构成投资建议。';
+
+export interface PerfData {
+  bySymbol: Record<string, PerfSignal[]>;
+}
+
+/** 取每股近1年 daily 序列 → detectAllPerf → PerfSignal[]。取数失败/不足 → 空，不崩。 */
+export async function fetchPerfData(
+  client: AkshareClient,
+  match: AshareQaMatch,
+): Promise<PerfData> {
+  const bySymbol: Record<string, PerfSignal[]> = {};
+  await Promise.all(
+    match.stocks.map(async (s) => {
+      const kl = await client.getStockKline(s.symbol, 250); // 近1年(覆盖F3+F1/F2近3月切片)
+      const series = kl.error ? [] : kl.data;
+      bySymbol[s.symbol] = detectAllPerf({ series });
+    }),
+  );
+  return { bySymbol };
+}
+
+/** 单股走势组（能算才显；不足 → 「走势数据不足…暂不展示」）。 */
+export function renderPerfGroup(signals: PerfSignal[]): string[] {
+  if (signals.length === 0) return ['- 走势数据不足（如新股/停牌不足近1年），暂不展示'];
+  return [...signals.map(perfLine), `  （${PERF_DISCLAIMER}）`];
+}
+
+/** 全景版 F 走势段（多股各一块；单股省略股名后缀）。 */
+export function renderPerfSection(data: FactData, perf: PerfData): string[] {
+  const multi = data.perStock.length > 1;
+  const out: string[] = [];
+  for (const p of data.perStock) {
+    const sigs = perf.bySymbol[p.stock.symbol] ?? [];
+    out.push('');
+    out.push(multi ? `**F 走势 · ${stockLabel(p.stock)}**` : '**F 走势**');
+    out.push(...renderPerfGroup(sigs));
+  }
+  return out;
+}
+
+/** 轻量速览 ★ 走势（只带 star=true：F1区间变动 + F3区间位置；无则空）。 */
+export function renderPerfStar(data: FactData, perf: PerfData): string[] {
+  const out: string[] = [];
+  for (const p of data.perStock) {
+    const star = (perf.bySymbol[p.stock.symbol] ?? []).filter((s) => s.star);
+    if (star.length) out.push('', '**★ 走势**', ...star.map(perfLine), `  （${PERF_DISCLAIMER}）`);
   }
   return out;
 }

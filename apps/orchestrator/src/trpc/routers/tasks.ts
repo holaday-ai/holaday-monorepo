@@ -1599,6 +1599,8 @@ export const tasksRouter = router({
                 seethrough: appEnv.ASHARE_SEETHROUGH_ENABLED,
                 // ④ 风险信号雷达 P1：腿A 确定性检测开关（默认 OFF，零新增 LLM）。
                 riskRadar: appEnv.ASHARE_RISK_RADAR_ENABLED,
+                // P3 F 走势组 P1：腿A K线波动总结开关（默认 OFF，零新增 LLM）。
+                perfTrend: appEnv.ASHARE_PERF_TREND_ENABLED,
                 logger: ctx.logger,
                 now: new Date(),
                 context: { userId: ctx.userId, taskId },

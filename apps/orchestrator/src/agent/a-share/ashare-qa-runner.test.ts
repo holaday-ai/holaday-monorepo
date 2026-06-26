@@ -22,6 +22,13 @@ const MATCH: AshareQaMatch = {
 };
 const NOW = new Date('2026-06-12T07:00:00Z');
 
+// 250 行近1年序列：收盘单调上行 100→~124.9（F1 累计变动正、F2 回撤≈0=较小、F3 cur=max=高位），
+// 成交量恒定（F4 平稳）。仅 days>0 时由 fakeClient 返回。
+const PERF_SERIES_250 = Array.from({ length: 250 }, (_v, i) => ({
+  收盘: 100 + i * 0.1,
+  成交量: 1000,
+}));
+
 function env<T>(data: T[]) {
   return {
     data,
@@ -37,8 +44,11 @@ function fakeClient(): AkshareClient {
     getStockAnnouncements: () =>
       Promise.resolve(env([{ 公告标题: '2025年度股东会决议公告', 公告时间: '2026-06-12' }])),
     getShareUnlock: () => Promise.resolve(env([])),
-    getStockKline: () =>
-      Promise.resolve(env([{ 收盘: 1291.91, 涨跌幅: 1.01, 成交额: 6_478_000_000 }])),
+    // days>0 → 近1年序列(F走势本地算)：单调上行(回撤≈0=较小、cur=max=高位、量平稳)；无 days → ①单行。
+    getStockKline: (_s: string, days?: number) =>
+      days && days > 0
+        ? Promise.resolve(env(PERF_SERIES_250))
+        : Promise.resolve(env([{ 收盘: 1291.91, 涨跌幅: 1.01, 成交额: 6_478_000_000 }])),
     getDragonTiger: () => Promise.resolve(env([])),
     getNorthboundFlow: () =>
       Promise.resolve(env([{ 板块: '沪股通', 资金方向: '北向', 成交净买额: 0 }])),
@@ -776,5 +786,87 @@ describe('④ 风险雷达 P1 · riskRadar flag（腿A 检测，勿删）', () =
     );
     expect(r.answer).not.toContain('★ 风险提示');
     expect(r.answer).not.toContain('〔风险');
+  });
+});
+
+describe('P3 F走势 · perfTrend flag（腿A K线波动总结，勿删）', () => {
+  const PLIGHT: AshareQaMatch = {
+    kind: 'info',
+    stocks: [{ symbol: '600519', displayName: '贵州茅台' }],
+    dateIso: '2026-06-12',
+    dateCompact: '20260612',
+    deep: false,
+  };
+  const PDEEP: AshareQaMatch = { ...PLIGHT, deep: true };
+
+  it('全景 OFF（默认）→ 无 F 走势段；与显式 false 字节一致', async () => {
+    const { logger } = fakeLogger();
+    const deps = {
+      client: fakeClient(),
+      interpret: async () => '客观状态画像。',
+      logger,
+      now: NOW,
+    };
+    const off = await runAsharePanorama(deps, PDEEP);
+    const offExplicit = await runAsharePanorama({ ...deps, perfTrend: false }, PDEEP);
+    expect(off.answer).not.toContain('F 走势');
+    expect(off.answer).not.toContain('〔走势');
+    expect(off.answer).toBe(offExplicit.answer);
+  });
+
+  it('全景 ON → F 走势段（F1区间变动/F2回撤/F3区间位置/F4量能）+ 客观免责；零买卖/技术信号泄漏', async () => {
+    const { logger } = fakeLogger();
+    const r = await runAsharePanorama(
+      {
+        client: fakeClient(),
+        seethrough: false,
+        riskRadar: false,
+        perfTrend: true,
+        interpret: async () => '客观状态画像。',
+        logger,
+        now: NOW,
+      },
+      PDEEP,
+    );
+    expect(r.answer).toContain('**F 走势**');
+    expect(r.answer).toContain('累计变动'); // F1
+    expect(r.answer).toContain('最大回撤'); // F2
+    expect(r.answer).toContain('相对高位'); // F3：cur=max → 高位
+    expect(r.answer).toContain('不预测未来'); // 走势免责
+    // F 走势段本体（不含尾部免责的「建议」）零禁字 + 零 F 红线词
+    const sec = r.answer.slice(r.answer.indexOf('F 走势'), r.answer.indexOf('## ⑦'));
+    expect(sec).not.toMatch(
+      /[买卖涨跌好差]|目标价|金叉|死叉|支撑|压力位|突破|反弹|抄底|逃顶|看多|看空/,
+    );
+  });
+
+  it('轻量 ON → ★ 走势（只 F1区间变动 + F3区间位置；F2回撤/F4量能非★不入）', async () => {
+    const { logger } = fakeLogger();
+    const r = await runAshareQa(
+      {
+        client: fakeClient(),
+        skillMarkdown: null,
+        perfTrend: true,
+        interpret: async () => '',
+        logger,
+        now: NOW,
+      },
+      PLIGHT,
+    );
+    expect(r.answer).toContain('★ 走势');
+    expect(r.answer).toContain('累计变动'); // F1 ★
+    expect(r.answer).toContain('相对高位'); // F3 ★
+    expect(r.answer).not.toContain('最大回撤'); // F2 star=false，不进 ★
+    expect(r.answer).not.toContain('量能'); // F4 star=false，不进 ★
+  });
+
+  it('轻量 OFF（默认）→ 无 ★ 走势', async () => {
+    const { logger } = fakeLogger();
+    const r = await runAshareQa(
+      { client: fakeClient(), skillMarkdown: null, interpret: async () => '', logger, now: NOW },
+      PLIGHT,
+    );
+    expect(r.answer).not.toContain('★ 走势');
+    expect(r.answer).not.toContain('〔走势');
   });
 });

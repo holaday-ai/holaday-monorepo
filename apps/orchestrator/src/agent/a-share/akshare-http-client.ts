@@ -114,8 +114,9 @@ export class HttpAkshareClient implements AkshareClient {
   getShareUnlock(symbol: string) {
     return this.get<UnlockRow>(`/unlock/${encodeURIComponent(symbol)}`);
   }
-  getStockKline(symbol: string) {
-    return this.get<KlineRow>(`/kline/${encodeURIComponent(symbol)}`);
+  getStockKline(symbol: string, days?: number) {
+    const qs = days && days > 0 ? `?days=${days}` : '';
+    return this.get<KlineRow>(`/kline/${encodeURIComponent(symbol)}${qs}`);
   }
   getDragonTiger(startDate: string) {
     return this.get<DragonTigerRow>(`/dragon-tiger/${encodeURIComponent(startDate)}`);

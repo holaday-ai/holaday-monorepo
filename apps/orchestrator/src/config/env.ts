@@ -182,6 +182,15 @@ const schema = z.object({
     .enum(['true', 'false'])
     .default('false')
     .transform((v) => v === 'true'),
+  /**
+   * P3 F 走势组 P1 — 腿A K线波动「人话总结」（F1区间涨跌幅/F2最大回撤/F3区间位置/F4量能）。默认 OFF。
+   * on → 全景挂 F 走势段、轻量带 ★ 走势（F1+F3）；off → 完全回退现状（字节一致）。零新增 LLM，
+   * 仅放宽 get_kline 取近1年 daily 本地纯算（同源不新增数据源）。F5 阶段状态小结(腿B)不在本开关内。
+   */
+  ASHARE_PERF_TREND_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
 
   /**
    * Phase D Step 3 rollout switch.
