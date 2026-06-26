@@ -56,6 +56,18 @@ def test_latest_forecast_period_all_empty_fallback(monkeypatch):
     assert adp._latest_forecast_period("20260331") == "20260331"  # 都空 → 返当期(兜底)
 
 
+def test_risk_pledge_all_catches_akshare_none_error(monkeypatch):
+    """未披露日期 akshare 内部 'NoneType' subscript(TypeError) → broadened except → 空集(非崩)。
+    这是探回能继续往前找的前提（否则首个空当周就抛、kill 探回 + 预热）。"""
+
+    class FakeAk:
+        def stock_gpzy_pledge_ratio_em(self, date):  # noqa: D401, ARG002
+            raise TypeError("'NoneType' object is not subscriptable")
+
+    monkeypatch.setattr(adp, "_require_ak", lambda: FakeAk())
+    assert adp._risk_pledge_all("20260626") == []
+
+
 def test_warm_risk_tables_returns_counts(monkeypatch):
     monkeypatch.setattr(adp, "_risk_pledge_all", lambda d: [{"a": 1}, {"a": 2}])
     monkeypatch.setattr(adp, "_risk_goodwill_all", lambda p: [{"b": 1}])

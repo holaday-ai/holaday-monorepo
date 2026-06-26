@@ -732,7 +732,9 @@ def _risk_pledge_all(query_date: str) -> list[dict[str, Any]]:
     a = _require_ak()
     try:
         return _records(a.stock_gpzy_pledge_ratio_em(date=query_date), limit=6000)
-    except KeyError:  # akshare 空结果抛 KeyError → 空集
+    except (KeyError, TypeError, IndexError, AttributeError):
+        # 未披露日期 akshare 返 None/空 → _records 触 TypeError('NoneType' subscript)/KeyError 等 → 空集
+        # （非网络错；网络错放行给上层 _safe → error envelope）。探回逻辑据此继续往前找已披露日。
         return []
 
 
@@ -759,7 +761,7 @@ def _risk_goodwill_all(period: str) -> list[dict[str, Any]]:
     a = _require_ak()
     try:
         return _records(a.stock_sy_em(date=period), limit=6000)
-    except KeyError:
+    except (KeyError, TypeError, IndexError, AttributeError):  # 未披露期 None/空 → 空集（同质押）
         return []
 
 
@@ -783,7 +785,7 @@ def _risk_forecast_all(period: str) -> list[dict[str, Any]]:
     a = _require_ak()
     try:
         return _records(a.stock_yjyg_em(date=period), limit=9000)
-    except KeyError:
+    except (KeyError, TypeError, IndexError, AttributeError):  # 未披露期 None/空 → 空集（同质押）
         return []
 
 
