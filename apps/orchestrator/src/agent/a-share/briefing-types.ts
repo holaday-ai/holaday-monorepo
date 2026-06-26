@@ -173,8 +173,12 @@ export interface FundamentalsRow {
   net_margin?: number | null;
   roe?: number | null;
   debt_ratio?: number | null;
+  /** P2 A3：销售毛利率同比（pct 点；当期 − 上年同期，ths 多期算，零新字段）。 */
+  gross_margin_yoy?: number | null;
   /** 每股经营现金流（元）——判断利润含金量。 */
   ocf_per_share?: number | null;
+  /** P2 C1：基本每股收益（元）。现金含量 = ocf_per_share/eps_basic；近似总股本 = net_profit/eps_basic。 */
+  eps_basic?: number | null;
   /** 近3年趋势（年度，老→新），每条同上字段子集。 */
   trend3y?: Array<{
     report_period?: string | null;

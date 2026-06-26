@@ -76,6 +76,17 @@ describe('风险检测档位（腿A 确定性阈值）', () => {
     expect(detectReductionPlan([{ 公告标题: '2025年度股东会决议公告' }])).toBeNull();
   });
 
+  it('R4 占比（P2）：给近似总股本→「约占总股本 Y%」；缺/≤0→只给股数（兜底）', () => {
+    // 减持 100万股，近似总股本 1亿 → 1.00%
+    const withPct = detectInsider([{ 变动数: -1_000_000 }], 100_000_000)?.finding ?? '';
+    expect(withPct).toContain('约占总股本 1.00%');
+    expect(withPct).toContain('合计约');
+    // 兜底：无总股本 / EPS≤0 致 totalShares≤0 → 不给占比（回退 P1 现状）
+    expect(detectInsider([{ 变动数: -1_000_000 }])?.finding).not.toContain('约占总股本');
+    expect(detectInsider([{ 变动数: -1_000_000 }], 0)?.finding).not.toContain('约占总股本');
+    expect(detectInsider([{ 变动数: -1_000_000 }], -5)?.finding).not.toContain('约占总股本');
+  });
+
   it('R5 问询函：标题命中问询函/关注函/监管函 计数★ / 无→null', () => {
     const q = detectInquiry([
       { 公告标题: '关于收到上交所问询函的公告' },

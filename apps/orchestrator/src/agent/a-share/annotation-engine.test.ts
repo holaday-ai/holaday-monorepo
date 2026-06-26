@@ -57,10 +57,27 @@ describe('注解档位（腿A 确定性查表）', () => {
     expect(annotate('debt_ratio', { value: 80 })?.note).toContain('还债和利息压力');
   });
 
-  it('C3 每股经营现金流：仅释义、无档位判断（现金含量比留 P2）', () => {
+  it('C3 每股经营现金流：仅释义、无档位判断', () => {
     const a = annotate('ocf_per_share', { value: 0.5 });
     expect(a?.measure).toContain('每股经营现金流');
     expect(a?.note).toBe('');
+  });
+
+  it('A3 毛利率同比（P2）：提升/持平/下滑；缺同比或缺值 → null', () => {
+    expect(annotate('gross_margin', { value: 40, yoy: 5 })?.note).toContain('明显提升');
+    expect(annotate('gross_margin', { value: 40, yoy: 1 })?.note).toContain('基本持平');
+    expect(annotate('gross_margin', { value: 40, yoy: -5 })?.note).toContain('明显下滑');
+    expect(annotate('gross_margin', { value: 40 })).toBeNull(); // 无同比 = A3 不出
+    expect(annotate('gross_margin', { yoy: 5 })).toBeNull(); // 无当期值
+  });
+
+  it('C1 现金含量（★, P2）：≥1健康/0~1应收回款/<0净流出；EPS≤0 兜底 → null', () => {
+    expect(annotate('cash_content', { value: 2, aux: 1 })?.note).toContain('比较健康'); // ratio 2
+    expect(annotate('cash_content', { value: 0.5, aux: 1 })?.note).toContain('应收账款'); // 0.5
+    expect(annotate('cash_content', { value: -0.3, aux: 1 })?.note).toContain('净流出现金'); // <0
+    expect(annotate('cash_content', { value: 2, aux: 0 })).toBeNull(); // EPS=0 兜底
+    expect(annotate('cash_content', { value: 2, aux: -1 })).toBeNull(); // EPS<0（亏损）兜底
+    expect(annotate('cash_content', { value: 2 })).toBeNull(); // 缺 EPS
   });
 
   it('D1 PE 分位：低位/中间/高位', () => {
@@ -99,9 +116,19 @@ describe('合规哨兵 · 注解绝不含 买/卖/涨/跌/好/差/建议/目标�
       { value: 180, aux: 200 },
       { value: 100, aux: 200 },
     ],
+    gross_margin: [
+      { value: 40, yoy: 5 },
+      { value: 40, yoy: 1 },
+      { value: 40, yoy: -5 },
+    ],
     roe: [{ value: 3 }, { value: 10 }, { value: 20 }],
     revenue_yoy: [{ value: -5 }, { value: 8 }, { value: 30 }],
     net_profit_yoy: [{ value: -5, aux: 10 }, { value: 8 }, { value: 30, aux: -5 }],
+    cash_content: [
+      { value: 2, aux: 1 },
+      { value: 0.5, aux: 1 },
+      { value: -0.3, aux: 1 },
+    ],
     debt_ratio: [{ value: 30 }, { value: 50 }, { value: 80 }],
     ocf_per_share: [{ value: 0.5 }, { value: -0.3 }],
     pe_pctile: [{ pctile: 10 }, { pctile: 50 }, { pctile: 90 }],

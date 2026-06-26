@@ -449,13 +449,19 @@ export function fundamentalsLines(
   out.push(
     `- 销售毛利率 ${fmtPctPlain(f.gross_margin)} ｜ 净利率 ${fmtPctPlain(f.net_margin)} ｜ ROE ${fmtPctPlain(f.roe)} ｜ 资产负债率 ${fmtPctPlain(f.debt_ratio)}`,
   );
-  // 毛利率注解（A3）因缺同比 + 行业毛利中位（数据缺口）P1 不挂，留 P2。
+  // A3 毛利率同比（P2）：销售毛利率当期 − 上年同期（无同比数据 → 引擎返 null 不出）。
+  pushAnnotation(out, seethrough, 'gross_margin', {
+    value: f.gross_margin,
+    yoy: f.gross_margin_yoy,
+  });
   pushAnnotation(out, seethrough, 'net_margin', { value: f.net_margin });
   pushAnnotation(out, seethrough, 'roe', { value: f.roe });
   pushAnnotation(out, seethrough, 'debt_ratio', { value: f.debt_ratio });
   if (f.ocf_per_share != null) {
     out.push(`- 每股经营现金流 ${fmtNum(f.ocf_per_share)} 元`);
     pushAnnotation(out, seethrough, 'ocf_per_share', { value: f.ocf_per_share });
+    // C1 现金含量（★，P2）：= 每股经营现金流 ÷ 基本每股收益（EPS≤0 引擎兜底返 null）。
+    pushAnnotation(out, seethrough, 'cash_content', { value: f.ocf_per_share, aux: f.eps_basic });
   }
   const t = (f.trend3y ?? []).filter((x) => x.report_period);
   if (t.length) {
@@ -677,6 +683,7 @@ function starBlockForStock(
   if (f) {
     add('net_margin', { value: f.net_margin });
     add('deduct_vs_net', { value: f.deduct_net_profit, aux: f.net_profit });
+    add('cash_content', { value: f.ocf_per_share, aux: f.eps_basic }); // C1 ★（P2）
     add('revenue_yoy', { value: f.revenue_yoy });
   }
   if (v) add('pe_pctile', { pctile: v.pe_pctile_5y });
@@ -719,19 +726,30 @@ export async function fetchRiskData(
   const bySymbol: Record<string, RiskSignal[]> = {};
   await Promise.all(
     match.stocks.map(async (s) => {
-      const [pledge, goodwill, forecast, insider, ann] = await Promise.all([
+      const [pledge, goodwill, forecast, insider, ann, fund] = await Promise.all([
         client.getRiskPledge(dateCompact, s.symbol),
         client.getRiskGoodwill(dateCompact, s.symbol),
         client.getRiskForecast(dateCompact, s.symbol),
         client.getRiskInsider(s.symbol),
         client.getStockAnnouncements(s.symbol, annStart, dateCompact),
+        client.getFundamentals(s.symbol), // R4 占比：近似总股本(净利润/EPS)；TTL 缓存，全景已取=命中
       ]);
+      const fr = fund.error ? undefined : fund.data[0];
+      // P2 R4：近似总股本 = 净利润 ÷ 基本每股收益（EPS>0 才有意义；否则 null → 减持只给股数）。
+      const totalShares =
+        fr &&
+        typeof fr.net_profit === 'number' &&
+        typeof fr.eps_basic === 'number' &&
+        fr.eps_basic > 0
+          ? fr.net_profit / fr.eps_basic
+          : null;
       bySymbol[s.symbol] = detectAllRisks({
         pledge: pledge.error ? undefined : pledge.data[0],
         goodwill: goodwill.error ? undefined : goodwill.data[0],
         forecast: forecast.error ? undefined : forecast.data[0],
         insider: insider.error ? [] : insider.data,
         announcements: ann.error ? [] : ann.data,
+        totalShares,
       });
     }),
   );

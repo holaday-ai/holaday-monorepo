@@ -72,6 +72,9 @@ function fakeClient(): AkshareClient {
             roe: -6.76,
             debt_ratio: 64.65,
             ocf_per_share: 0.03,
+            // P2：亏损公司 EPS<0 → C1 现金含量 & R4 占比 引擎兜底（不算）；A3 毛利率同比有值 → 出 A3。
+            eps_basic: -0.16,
+            gross_margin_yoy: -2.21,
             trend3y: [
               { report_period: '2023-12-31', net_profit: -1.49e8 },
               { report_period: '2024-12-31', net_profit: -1.45e8 },
@@ -868,5 +871,35 @@ describe('P3 F走势 · perfTrend flag（腿A K线波动总结，勿删）', () 
     );
     expect(r.answer).not.toContain('★ 走势');
     expect(r.answer).not.toContain('〔走势');
+  });
+});
+
+describe('P2 数据补映射 · C1/A3/R4 接线（亏损 fake：A3出、C1兜底、R4占比兜底）', () => {
+  const PMATCH: AshareQaMatch = {
+    kind: 'info',
+    stocks: [{ symbol: '600519', displayName: '贵州茅台' }],
+    dateIso: '2026-06-12',
+    dateCompact: '20260612',
+    deep: true,
+  };
+
+  it('全景 seethrough ON → A3 毛利率同比注解挂上；C1 现金含量因 EPS<0 兜底不出', async () => {
+    const { logger } = fakeLogger();
+    const r = await runAsharePanorama(
+      { client: fakeClient(), seethrough: true, interpret: async () => '画像。', logger, now: NOW },
+      PMATCH,
+    );
+    expect(r.answer).toContain('扣掉直接生产成本'); // A3 毛利率 measure 挂上（yoy=-2.21）
+    expect(r.answer).not.toContain('经营现金流与净利之比'); // C1 EPS<0 → 兜底不出
+  });
+
+  it('全景 riskRadar ON → R4 减持因 EPS<0（总股本近似无意义）兜底：给股数、不给占比', async () => {
+    const { logger } = fakeLogger();
+    const r = await runAsharePanorama(
+      { client: fakeClient(), riskRadar: true, interpret: async () => '画像。', logger, now: NOW },
+      PMATCH,
+    );
+    expect(r.answer).toContain('董监高减持'); // R4 命中
+    expect(r.answer).not.toContain('约占总股本'); // EPS<0 → 占比兜底
   });
 });

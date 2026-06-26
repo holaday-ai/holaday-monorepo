@@ -540,6 +540,8 @@ def _fundamentals_row(r: dict[str, Any]) -> dict[str, Any]:
         "debt_ratio": _parse_ths_num(r.get("资产负债率")),
         # P1：每股经营现金流（判断利润含金量）。
         "ocf_per_share": _parse_ths_num(r.get("每股经营现金流")),
+        # P2：基本每股收益（C1 现金含量 = 每股经营现金流/基本每股收益；R4 近似总股本 = 净利润/基本每股收益）。
+        "eps_basic": _parse_ths_num(r.get("基本每股收益")),
     }
 
 
@@ -571,6 +573,18 @@ def get_fundamentals(symbol: str) -> tuple[list[dict[str, Any]], str]:
     if src is None:
         return [], "akshare:stock_financial_abstract_ths(无数据)"
     latest = _fundamentals_row(src.iloc[-1].to_dict())
+    # P2 A3 毛利率同比：当期销售毛利率 − 上年同期（src 多期里按 _rk 找 年-1 同月日）。零新字段、零新源。
+    try:
+        rp = str(src.iloc[-1].get("报告期"))
+        gm_cur = _parse_ths_num(src.iloc[-1].get("销售毛利率"))
+        prev_rk = f"{int(rp[:4]) - 1}{rp[4:]}" if len(rp) >= 4 and rp[:4].isdigit() else ""
+        prev_match = src[src["_rk"] == prev_rk] if prev_rk else src.iloc[0:0]
+        gm_prev = _parse_ths_num(prev_match.iloc[0].get("销售毛利率")) if len(prev_match) else None
+        latest["gross_margin_yoy"] = (
+            round(gm_cur - gm_prev, 2) if (gm_cur is not None and gm_prev is not None) else None
+        )
+    except Exception:  # noqa: BLE001
+        latest["gross_margin_yoy"] = None
     # P1 季度环比（按单季度，最新单季 vs 上一单季；看加速/减速）。
     try:
         sq = _ths_sorted(_retry(lambda: a.stock_financial_abstract_ths(symbol=symbol, indicator="按单季度")))

@@ -6,9 +6,11 @@
  * 实现 = 纯查表 bucketize：给指标当期值(+历史分位/行业中位/同比/辅助值) → 选档 → 返模板句。
  * **运行时绝不调 LLM、绝不产新数字、绝不下「买卖/涨跌/好坏/建议/目标价」结论。**
  *
- * P1 仅覆盖**数据已就绪**的指标（净利率/扣非vs归母/ROE/营收同比/净利同比/负债率/每股经营现金流/
- * PE历史分位/PB分位/行业PE中位/解禁）。**数据缺口项不做**：C1 现金含量(需总经营现金流)、
- * A3 毛利率同比 + 行业毛利中位 → 留 P2 复验补映射后再上。F 走势组留 P3。
+ * P1 覆盖数据已就绪指标（净利率/扣非vs归母/ROE/营收同比/净利同比/负债率/每股经营现金流/
+ * PE历史分位/PB分位/行业PE中位/解禁）。**P2 补映射**（复验确认零新字段、纯既有 ths 列算）：
+ * C1 现金含量 = 每股经营现金流÷基本每股收益（★，最防雷；总股本约掉，亏损股 EPS≤0 不算）；
+ * A3 毛利率同比 = 销售毛利率当期−上年同期（ths 多期）。**仍缺口不做**：A3 行业毛利中位（需同行清单，
+ * 成分股源 Vultr 不可达）→ 暂缓。F 走势组见 perf-trend-engine（P3）。
  *
  * ⚠️ 合规哨兵（annotation-engine.test.ts 全档位断言）：所有注解句**绝不含**
  *    买 / 卖 / 涨 / 跌 / 好 / 差 / 建议 / 目标价。
@@ -23,23 +25,25 @@
 export type SeethroughKey =
   | 'net_margin' // A1 净利率
   | 'deduct_vs_net' // A2 扣非 vs 归母
+  | 'gross_margin' // A3 毛利率同比（P2）
   | 'roe' // A4 ROE
   | 'revenue_yoy' // B1 营收同比
   | 'net_profit_yoy' // B2 净利同比
+  | 'cash_content' // C1 现金含量（★，P2；OCF/净利 ≈ 每股经营现金流/基本每股收益）
   | 'debt_ratio' // C2 资产负债率
-  | 'ocf_per_share' // C3 每股经营现金流（仅释义，现金含量比留 P2）
+  | 'ocf_per_share' // C3 每股经营现金流（仅释义）
   | 'pe_pctile' // D1 PE 历史分位
   | 'pb_pctile' // D2 PB 历史分位
   | 'industry_pe' // D3 行业 PE 对比
   | 'unlock'; // E1 限售解禁（释义+一般提示，%档留 P2）
 
 /**
- * ★ 核心子集（轻量速览带）。对照 template 的 ★ 标记：A1/A2/B1/D1/E1。
- * C1 现金含量虽为 ★（「最防雷」）但因 P1 数据缺口（缺总经营现金流）不做，留 P2。
+ * ★ 核心子集（轻量速览带）。对照 template 的 ★ 标记：A1/A2/B1/D1/E1 + **C1 现金含量（P2 补回，「最防雷」）**。
  */
 export const CORE_STAR_KEYS: readonly SeethroughKey[] = [
   'net_margin',
   'deduct_vs_net',
+  'cash_content',
   'revenue_yoy',
   'pe_pctile',
   'unlock',
@@ -105,6 +109,25 @@ function deductVsNet(i: AnnotateInput): Annotation | null {
   return { measure, note };
 }
 
+/**
+ * A3 毛利率同比（P2）：销售毛利率 当期 − 上年同期（yoy，pct 点）。趋势档 ↑≥3 / ±3 / ↓≤−3。
+ * 仅同比口径（行业毛利中位需同行清单、数据缺口，暂缓）；无同比数据 → null（A3 本就是「同比」）。
+ */
+function grossMargin(i: AnnotateInput): Annotation | null {
+  const v = num(i.value);
+  const yoy = num(i.yoy);
+  if (v === null || yoy === null) return null;
+  const measure =
+    '毛利率 = 每 100 元营收里，扣掉直接生产成本后还剩多少毛利，反映产品本身的赚钱能力。';
+  let note: string;
+  if (yoy >= 3)
+    note = '毛利率较去年同期明显提升，可留意是产品提价、成本下降还是产品结构变化带来的。';
+  else if (yoy <= -3)
+    note = '毛利率较去年同期明显下滑，要留意是成本上升、降价竞争还是产品结构变化。';
+  else note = '毛利率与去年同期基本持平。';
+  return { measure, note };
+}
+
 /** A4 ROE：档 <5 / 5~15 / >15 + 恒附（高 ROE 靠借债则结合负债率看）。 */
 function roe(i: AnnotateInput): Annotation | null {
   const v = num(i.value);
@@ -153,6 +176,26 @@ function netProfitYoy(i: AnnotateInput): Annotation | null {
 }
 
 // ── C. 财务健康 / 偿债 ─────────────────────────────────────────
+
+/**
+ * C1 现金含量（★「最防雷」，P2）：经营现金流/净利 ≈ 每股经营现金流(value) ÷ 基本每股收益(aux)。
+ * 总股本约掉。档 ≥1 / 0~1 / <0。**兜底：EPS≤0（亏损）现金含量除法无意义 → null（不算不显）。**
+ * 句式逐字照 BOSS 合同；「生意本身在变差」撞禁字「差」→ 保义改写「在转弱」（语义等价，登记待审）。
+ */
+function cashContent(i: AnnotateInput): Annotation | null {
+  const ocfps = num(i.value);
+  const eps = num(i.aux);
+  if (ocfps === null || eps === null || eps <= 0) return null; // 亏损/缺值 → 不算（兜底）
+  const ratio = ocfps / eps;
+  const measure = '经营现金流与净利之比，反映账面利润有没有真收到现金。';
+  let note: string;
+  if (ratio >= 1) note = '赚的利润大都收到了现金，比较健康。';
+  else if (ratio >= 0)
+    note = '账面利润不少，但有一部分还没真收回来（多挂在应收账款上），要留意客户回款情况。';
+  // 「生意本身在变差」→ 保义改写「在转弱」（避禁字「差」）。
+  else note = '经营上其实是净流出现金的，要留意是在扩张投入，还是生意本身在转弱、收不回钱。';
+  return { measure, note };
+}
 
 /** C2 资产负债率：档 <40 / 40~70 / >70（标注行业差异大）。 */
 function debtRatio(i: AnnotateInput): Annotation | null {
@@ -244,9 +287,11 @@ function unlock(i: AnnotateInput): Annotation | null {
 const REGISTRY: Record<SeethroughKey, (i: AnnotateInput) => Annotation | null> = {
   net_margin: netMargin,
   deduct_vs_net: deductVsNet,
+  gross_margin: grossMargin,
   roe,
   revenue_yoy: revenueYoy,
   net_profit_yoy: netProfitYoy,
+  cash_content: cashContent,
   debt_ratio: debtRatio,
   ocf_per_share: ocfPerShare,
   pe_pctile: pePctile,

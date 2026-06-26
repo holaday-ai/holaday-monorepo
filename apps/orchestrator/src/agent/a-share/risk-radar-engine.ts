@@ -140,7 +140,10 @@ export function detectForecast(row: ForecastRow | undefined): RiskSignal | null 
 
 // ── R4 董监高减持（变动数<0 求和）+ R4 大股东减持计划（公告 keyword 兜底）──────
 const INSIDER_MEASURE = '内部人/大股东减持是一种值得关注的信号';
-export function detectInsider(rows: InsiderChangeRow[] | undefined): RiskSignal | null {
+export function detectInsider(
+  rows: InsiderChangeRow[] | undefined,
+  totalShares?: number | null,
+): RiskSignal | null {
   if (!rows || rows.length === 0) return null;
   let total = 0;
   for (const r of rows) {
@@ -148,12 +151,15 @@ export function detectInsider(rows: InsiderChangeRow[] | undefined): RiskSignal 
     if (d !== null && d < 0) total += Math.abs(d);
   }
   if (total <= 0) return null;
-  // BOSS 句含「占比 Y%」，占比需总股本(数据缺口)→ P1 仅给「合计 X 股」，占比留补；登记待审。
+  // P2：占比 Y% = 减持股数 ÷ 近似总股本（净利润/基本每股收益，标「约」）。
+  // 兜底（BOSS 拍）：总股本不可得 / EPS≤0 致近似无意义 → 只给股数、不给占比（回退 P1 现状）。
+  const ts = num(totalShares);
+  const pctClause = ts !== null && ts > 0 ? `，约占总股本 ${((total / ts) * 100).toFixed(2)}%` : '';
   return {
     key: 'insider',
     label: '减持',
     measure: INSIDER_MEASURE,
-    finding: `近期有董监高减持（合计约 ${fmtSharesCn(total)}），要留意内部人减持释放的信号。`,
+    finding: `近期有董监高减持（合计约 ${fmtSharesCn(total)}${pctClause}），要留意内部人减持释放的信号。`,
     star: false,
   };
 }
@@ -192,6 +198,8 @@ export interface RiskInputs {
   forecast?: ForecastRow;
   insider?: InsiderChangeRow[];
   announcements?: AnnouncementRow[];
+  /** P2 R4 占比：近似总股本（净利润/基本每股收益）。缺/≤0 → 减持只给股数不给占比。 */
+  totalShares?: number | null;
 }
 
 /** 全检测：固定顺序 R1→R5，命中才入；无命中返空数组。纯函数零 LLM。 */
@@ -200,7 +208,7 @@ export function detectAllRisks(input: RiskInputs): RiskSignal[] {
     detectPledge(input.pledge),
     detectGoodwill(input.goodwill),
     detectForecast(input.forecast),
-    detectInsider(input.insider),
+    detectInsider(input.insider, input.totalShares),
     detectReductionPlan(input.announcements),
     detectInquiry(input.announcements),
   ].filter((s): s is RiskSignal => s !== null);
