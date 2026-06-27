@@ -1,4 +1,4 @@
-import { CheckCircle2, MoonStar, RefreshCcw, Sparkles, X } from 'lucide-react';
+import { Brain, CheckCircle2, MoonStar, RefreshCcw, Sparkles, X } from 'lucide-react';
 import * as React from 'react';
 import {
   buildAstroTaskInsight,
@@ -31,6 +31,30 @@ const ACCENT_CLASS = {
     bar: 'from-[#57479C] to-[#42C0EF]',
   },
 } as const;
+
+const WAITING_TEST_OPTIONS = [
+  {
+    id: 'speed',
+    label: '想快点',
+    resultTitle: '等待风格：先抓重点',
+    result:
+      '先写下你最想确认的一件事，结果回来就先看它。',
+  },
+  {
+    id: 'calm',
+    label: '想放松',
+    resultTitle: '等待风格：降噪恢复',
+    result:
+      '把肩膀放松，等任务跑完再做判断。',
+  },
+  {
+    id: 'organize',
+    label: '先整理',
+    resultTitle: '等待风格：整理控场',
+    result:
+      '把下一步拆成一个动作，完成后直接接上。',
+  },
+] as const;
 
 interface Props {
   taskId: string;
@@ -72,6 +96,8 @@ export function AstroTaskCompanion({
   const dismissKey = React.useMemo(() => storageKey(taskId, surface), [surface, taskId]);
   const [dismissed, setDismissed] = React.useState(() => readDismissed(dismissKey));
   const [spin, setSpin] = React.useState(0);
+  const [selectedTest, setSelectedTest] =
+    React.useState<(typeof WAITING_TEST_OPTIONS)[number] | null>(null);
   const storageScope = profileStorageScope?.trim() || null;
   const profile = React.useMemo(
     () =>
@@ -90,6 +116,9 @@ export function AstroTaskCompanion({
       }),
     [intent, profile, spin, surface],
   );
+  React.useEffect(() => {
+    setSelectedTest(null);
+  }, [surface, taskId]);
 
   if (!isCosmicEnabled() || dismissed) return null;
   if (surface === 'waiting' && status !== 'queued' && status !== 'executing') return null;
@@ -168,6 +197,51 @@ export function AstroTaskCompanion({
               </span>
             )}
           </div>
+          {surface === 'waiting' && (
+            <div className="mt-3 rounded-[8px] border border-white/70 bg-white/60 p-3 dark:border-white/10 dark:bg-white/5">
+              {selectedTest ? (
+                <div className="flex items-start gap-2">
+                  <span className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-[#57479C]/10 text-[#57479C] dark:bg-white/10 dark:text-[#B9AEFF]">
+                    <Brain className="h-3.5 w-3.5" aria-hidden />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs font-semibold text-[#2F2F33] dark:text-foreground">
+                      {selectedTest.resultTitle}
+                    </div>
+                    <p className="mt-1 text-xs leading-5 text-[#595757] dark:text-foreground/75">
+                      {selectedTest.result}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedTest(null)}
+                    className="inline-flex h-6 shrink-0 items-center rounded-md px-2 text-[11px] font-medium text-[#57479C] transition-colors hover:bg-white/75 dark:text-[#B9AEFF] dark:hover:bg-white/10"
+                  >
+                    重选
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div className="flex items-center gap-1.5 text-[11px] font-medium text-[#57479C] dark:text-[#B9AEFF]">
+                    <Brain className="h-3.5 w-3.5" aria-hidden />
+                    等结果时做个 3 秒小测试：你现在更想？
+                  </div>
+                  <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                    {WAITING_TEST_OPTIONS.map((option) => (
+                      <button
+                        key={option.id}
+                        type="button"
+                        onClick={() => setSelectedTest(option)}
+                        className="h-8 rounded-md border border-white/75 bg-white/70 px-2 text-xs font-medium text-[#2F2F33] transition-colors hover:border-[#EA1F59]/35 hover:bg-[#FFF6F8] dark:border-white/10 dark:bg-white/5 dark:text-foreground dark:hover:bg-white/10"
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </section>

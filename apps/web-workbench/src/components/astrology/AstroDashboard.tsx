@@ -59,37 +59,37 @@ const EXPERIENCE_CARDS = [
     icon: Orbit,
     title: '完整星盘',
     body: '太阳、月亮、上升、宫位和行星解释，适合做长期个人档案。',
-    source: 'DivineAPI / Western',
+    status: '规划中',
   },
   {
     icon: Users,
     title: '合盘匹配',
     body: '恋人、朋友、合作伙伴的吸引力、摩擦点和相处建议。',
-    source: 'Compatibility / Synastry',
+    status: '规划中',
   },
   {
     icon: Brain,
     title: '心理小测试',
     body: '情绪、压力、决策风格和关系倾向，结合星盘给轻解释。',
-    source: 'Holaday AI layer',
+    status: '等待时可体验',
   },
   {
     icon: Shuffle,
     title: '塔罗 / 抽卡',
     body: '等待任务时抽一张卡，给一个轻量提示和下一步行动。',
-    source: 'Tarot API / mock deck',
+    status: '今日已开放',
   },
   {
     icon: WalletCards,
     title: '数字命理',
     body: '生命灵数、个人年份、名字能量，适合做快捷娱乐入口。',
-    source: 'Numerology API',
+    status: '规划中',
   },
   {
     icon: Activity,
     title: '流年提醒',
     body: '把重要 transit 做成今天、本周、本月的变化提醒。',
-    source: 'Transit endpoints',
+    status: '规划中',
   },
 ] as const;
 
@@ -285,18 +285,18 @@ function ExperienceGrid(): JSX.Element {
       <div className="mb-4">
         <div className="flex items-center gap-2 text-xs font-medium text-[#EA1F59]">
           <Compass className="h-4 w-4" aria-hidden />
-          <span>多元化命理入口</span>
+          <span>更多玩法预告</span>
         </div>
-        <h2 className="mt-2 text-xl font-semibold text-[#231F20]">不只看今天，也能玩关系、心理和长期星盘</h2>
+        <h2 className="mt-2 text-xl font-semibold text-[#231F20]">先把今天做好，更多玩法逐步开放</h2>
         <p className="mt-1 text-xs leading-5 text-[#8C8C8C]">
-          这些入口先作为产品蓝图展示；后续按 API 能力逐个接入真实数据和 AI 解读。
+          先保留为轻量预告，等每个玩法有稳定数据和结果页后再开放。
         </p>
       </div>
       <div className="grid gap-3 md:grid-cols-3">
-        {EXPERIENCE_CARDS.map(({ icon: Icon, title, body, source }) => (
+        {EXPERIENCE_CARDS.map(({ icon: Icon, title, body, status }) => (
           <article
             key={title}
-            className="rounded-[8px] border border-[#EFEFEF] bg-[#FAFAFA] p-4 transition hover:border-[#EA1F59]/25 hover:bg-[#EA1F59]/5"
+            className="rounded-[8px] border border-[#EFEFEF] bg-[#FAFAFA] p-4"
           >
             <div className="flex items-start gap-3">
               <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] bg-white text-[#57479C] shadow-[0_6px_18px_rgba(15,23,42,0.06)]">
@@ -306,7 +306,7 @@ function ExperienceGrid(): JSX.Element {
                 <h3 className="text-sm font-semibold text-[#231F20]">{title}</h3>
                 <p className="mt-1 text-xs leading-5 text-[#595757]">{body}</p>
                 <div className="mt-3 inline-flex rounded-[6px] border border-[#DCDDDD] bg-white px-2 py-1 text-[10px] font-medium text-[#8C8C8C]">
-                  {source}
+                  {status}
                 </div>
               </div>
             </div>
@@ -384,35 +384,35 @@ function providerStatusCopy(
 ): { label: string; description: string; className: string } {
   if (!liveProvider) {
     return {
-      label: '预览数据',
-      description: '当前为公开预览版日运数据；登录后的 /cosmic 会自动尝试读取 DivineAPI。',
+      label: '预览模式',
+      description: '当前展示稳定的示例日运，适合快速感受页面节奏。',
       className: 'border-[#DCDDDD] bg-[#FAFAFA] text-[#595757]',
     };
   }
   if (state.loading) {
     return {
-      label: '正在同步 DivineAPI',
-      description: '正在读取后端 provider；如果接口不可用，会自动保留本地预览结果。',
+      label: '正在更新今日运势',
+      description: '正在更新今天的内容；如果网络暂时不稳，会先保留当前结果。',
       className: 'border-[#7DD3FC]/45 bg-[#EFF6FF] text-[#0369A1]',
     };
   }
   if (state.error) {
     return {
-      label: '已回退预览数据',
-      description: `DivineAPI 暂时不可用，当前展示本地预览结果。${state.error}`,
+      label: '暂用本地内容',
+      description: '今天的内容暂时没有更新成功，先展示稳定版本。',
       className: 'border-[#FDE68A]/70 bg-[#FFFBEB] text-[#B45309]',
     };
   }
   if (state.reading?.provider === 'divineapi') {
     return {
-      label: 'DivineAPI 已连接',
-      description: '今日运势来自后端 DivineAPI provider，并保留 Holaday 的轻量任务建议包装。',
+      label: '今日运势已更新',
+      description: '已同步今天的星座内容，并结合 Holaday 的任务节奏给出建议。',
       className: 'border-[#BBF7D0]/70 bg-[#F0FDF4] text-[#15803D]',
     };
   }
   return {
-    label: '使用预览数据',
-    description: '后端 provider 未配置或已回退，当前展示稳定的本地预览结果。',
+    label: '暂用本地内容',
+    description: '今天的内容暂时没有更新成功，先展示稳定版本。',
     className: 'border-[#DCDDDD] bg-[#FAFAFA] text-[#595757]',
   };
 }
@@ -432,15 +432,15 @@ function TarotPanel({
   const subtitle = tarot?.subtitle ?? '先把希望放回桌面';
   const body =
     tarot?.body ??
-    `${zodiacLabel} 今天适合抽一张轻提示卡。真实 DivineAPI tarot 接入后，这里会显示后端返回的每日牌面。`;
-  const provider = tarot?.provider === 'divineapi' ? 'DivineAPI Tarot' : '预览牌组';
+    `${zodiacLabel} 今天适合抽一张轻提示卡。先把问题放轻一点，选一个能马上行动的小方向。`;
+  const provider = tarot?.provider === 'divineapi' ? '今日牌面' : '预览牌组';
   return (
     <section className="rounded-[8px] border border-[#DCDDDD] bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
       <div className="mb-4 flex items-start justify-between gap-3">
         <div>
           <h2 className="text-base font-semibold text-[#231F20]">今日塔罗提示</h2>
           <p className="mt-1 text-xs text-[#8C8C8C]">
-            {liveProvider ? '登录后由后端 provider 尝试同步。' : '公开预览页使用本地牌组。'}
+            {liveProvider ? '每天给一个轻提示，适合等待任务时快速看一眼。' : '公开预览页使用示例牌组。'}
           </p>
         </div>
         <div className="inline-flex items-center gap-1 rounded-[8px] border border-[#DCDDDD] bg-[#FAFAFA] px-2 py-1 text-[10px] font-medium text-[#8C8C8C]">
@@ -451,7 +451,7 @@ function TarotPanel({
       <div className="rounded-[8px] border border-[#57479C]/18 bg-[#F8F6FF] p-5">
         <div className="flex items-center gap-2 text-xs font-medium text-[#57479C]">
           <Sparkles className="h-4 w-4" aria-hidden />
-          Daily Tarot
+          今日抽卡
         </div>
         <h3 className="mt-4 text-xl font-semibold text-[#231F20]">{title}</h3>
         <p className="mt-1 text-sm font-medium text-[#57479C]">{subtitle}</p>
@@ -601,7 +601,7 @@ function AstroProfilePanel({
         <div>
           <h2 className="text-base font-semibold text-[#231F20]">个人星象档案</h2>
           <p className="mt-1 text-xs leading-5 text-[#8C8C8C]">
-            出生时间和地点可以先空着，后续接 DivineAPI 时再做完整星盘。
+            出生时间和地点可以先空着，后续用于更完整的星盘和流年提醒。
           </p>
         </div>
         {profile && (
