@@ -114,12 +114,12 @@
     "category": "data_contradiction",
     "prompt": "复盘直播 GMV ¥200000 订单 500 客单价 ¥50",
     "expectations": {
-      "mustComplete": true,
+      "mustComplete": false,
       "executionMode": "generate",
       "mustContainAny": ["矛盾", "不一致", "对不上", "不匹配", "不是", "不符", "≠", "出入", "异常", "相差", "差", "偏差", "核查"],
       "maxDurationMs": 180000
     },
-    "notes": "200000 / 500 = ¥400 ≠ ¥50. Consistency-check prompt must surface the contradiction. Phrasing varies dramatically by sample — model's prose ranges over 矛盾/不一致 (formal), 不是 ¥50, 是 ¥400 (specific value), 数据异常预警 / 出入极大 / 相差 8 倍 (analytical), 建议核查 (advisory). All count as surfacing the conflict. The bar is 'model noticed the data is wrong', NOT 'used a specific phrase'."
+    "notes": "200000 / 500 = ¥400 ≠ ¥50. Consistency-check prompt must surface the contradiction. The task may now terminal as partial_success because deterministic verification classifies contradictory input as needs_clarification; that is acceptable as long as the generated summary clearly flags the conflict. Phrasing varies dramatically by sample — model's prose ranges over 矛盾/不一致 (formal), 不是 ¥50, 是 ¥400 (specific value), 数据异常预警 / 出入极大 / 相差 8 倍 (analytical), 建议核查 (advisory). All count as surfacing the conflict. The bar is 'model noticed the data is wrong', NOT 'used a specific phrase' or 'forced completed status'."
   },
   {
     "id": "P0_010",
