@@ -28,7 +28,7 @@
  * before it calls through.
  */
 
-import type { Browser, BrowserContext, Page } from 'playwright';
+import type { Browser, BrowserContext, ElementHandle, Page } from 'playwright';
 import sharp from 'sharp';
 import { logger } from '../../config/logger.js';
 import { humanClick, humanScroll, humanTypeText, isHumanizeEnabled } from './humanize.js';
@@ -1012,7 +1012,7 @@ export class PlaywrightExecutor {
             return await withTimeout(
               (async (): Promise<TargetDescriptor | null> => {
                 const handle = await page.evaluateHandle(`document.elementFromPoint(${cx}, ${cy})`);
-                const elH = handle.asElement();
+                const elH = handle.asElement() as ElementHandle<HTMLIFrameElement> | null;
                 if (!elH) {
                   logger.warn(ctx, 'capture: iframe hit but no element handle (returning null)');
                   return null;
