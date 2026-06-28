@@ -101,122 +101,95 @@ const STOCK_SNAPSHOTS: Record<string, StockSnapshot> = {
     symbol: 'NVDA',
     name: '英伟达',
     market: 'US',
-    price: '949.50',
-    changePct: 2.35,
-    signal: '强势',
-    report: '已生成',
-    spark: [42, 48, 44, 53, 58, 55, 63, 72],
-    newsCount: 8,
-    note: 'AI 链订单能见度继续提升',
+    price: '—',
+    changePct: 0,
+    signal: '待观察',
+    report: '待生成',
+    spark: [],
+    newsCount: 0,
+    note: '真实行情暂不可用',
   },
   TSLA: {
     symbol: 'TSLA',
     name: '特斯拉',
     market: 'US',
-    price: '178.22',
-    changePct: -1.12,
-    signal: '偏弱',
-    report: '已生成',
-    spark: [61, 58, 60, 54, 49, 52, 47, 45],
-    newsCount: 6,
-    note: '欧洲销量和毛利率仍是压力点',
+    price: '—',
+    changePct: 0,
+    signal: '待观察',
+    report: '待生成',
+    spark: [],
+    newsCount: 0,
+    note: '真实行情暂不可用',
   },
   AAPL: {
     symbol: 'AAPL',
     name: '苹果公司',
     market: 'US',
-    price: '192.45',
-    changePct: 0.58,
-    signal: '偏强',
-    report: '已生成',
-    spark: [47, 48, 46, 51, 50, 54, 53, 58],
-    newsCount: 5,
-    note: 'WWDC 临近，AI 功能预期升温',
+    price: '—',
+    changePct: 0,
+    signal: '待观察',
+    report: '待生成',
+    spark: [],
+    newsCount: 0,
+    note: '真实行情暂不可用',
   },
   MSFT: {
     symbol: 'MSFT',
     name: '微软',
     market: 'US',
-    price: '415.65',
-    changePct: 0.78,
-    signal: '强势',
-    report: '已生成',
-    spark: [55, 57, 56, 60, 63, 62, 65, 67],
-    newsCount: 4,
-    note: '云与 Copilot 需求保持稳健',
+    price: '—',
+    changePct: 0,
+    signal: '待观察',
+    report: '待生成',
+    spark: [],
+    newsCount: 0,
+    note: '真实行情暂不可用',
   },
   '600519': {
     symbol: '600519',
     name: '贵州茅台',
     market: 'A',
-    price: '1,535.00',
-    changePct: -0.36,
-    signal: '偏弱',
+    price: '—',
+    changePct: 0,
+    signal: '待观察',
     report: '待生成',
-    spark: [50, 48, 49, 45, 46, 44, 43, 42],
-    newsCount: 3,
-    note: '消费预期仍偏弱，等待量价验证',
+    spark: [],
+    newsCount: 0,
+    note: '真实行情暂不可用',
   },
   '300750': {
     symbol: '300750',
     name: '宁德时代',
     market: 'A',
-    price: '205.18',
-    changePct: 1.48,
-    signal: '强势',
-    report: '已生成',
-    spark: [38, 40, 44, 46, 50, 54, 55, 59],
-    newsCount: 5,
-    note: '储能订单与出海叙事同步增强',
+    price: '—',
+    changePct: 0,
+    signal: '待观察',
+    report: '待生成',
+    spark: [],
+    newsCount: 0,
+    note: '真实行情暂不可用',
   },
   '0700.HK': {
     symbol: '0700.HK',
     name: '腾讯控股',
     market: 'HK',
-    price: '388.40',
-    changePct: 0.92,
-    signal: '偏强',
-    report: '已生成',
-    spark: [46, 47, 49, 48, 52, 53, 56, 57],
-    newsCount: 4,
-    note: '游戏与广告恢复支撑估值',
+    price: '—',
+    changePct: 0,
+    signal: '待观察',
+    report: '待生成',
+    spark: [],
+    newsCount: 0,
+    note: '真实行情暂不可用',
   },
 };
 
-const DEFAULT_SYMBOLS = ['NVDA', 'TSLA', 'AAPL', 'MSFT', '600519'];
+const MARKET_INDICES: IndexRow[] = [];
 
-const MARKET_INDICES: IndexRow[] = [
-  { name: '上证指数', price: '3,348.37', changePct: 0.42, turnover: '4,521亿' },
-  { name: '深证成指', price: '10,189.20', changePct: 0.65, turnover: '6,231亿' },
-  { name: '创业板指', price: '2,051.32', changePct: 0.88, turnover: '3,102亿' },
-  { name: '恒生指数', price: '18,726.53', changePct: 1.22, turnover: '1,485亿' },
-  { name: '纳斯达克', price: '16,735.02', changePct: 1.41, turnover: '5,862亿' },
-  { name: '标普500', price: '5,309.91', changePct: 0.99, turnover: '4,321亿' },
-];
+const SECTORS: SectorRow[] = [];
 
-const SECTORS: SectorRow[] = [
-  { name: '半导体', changePct: 2.45, leader: '寒武纪-U', flow: '资金净流入', spark: [38, 45, 42, 51, 56, 60] },
-  { name: '光伏设备', changePct: 1.89, leader: '隆基绿能', flow: '放量回暖', spark: [44, 43, 48, 52, 53, 56] },
-  { name: '消费电子', changePct: 1.75, leader: '立讯精密', flow: '事件催化', spark: [40, 43, 45, 49, 50, 55] },
-  { name: '软件开发', changePct: 1.63, leader: '金山办公', flow: 'AI 主题', spark: [46, 45, 48, 51, 54, 53] },
-  { name: '白酒', changePct: -0.12, leader: '贵州茅台', flow: '缩量震荡', spark: [55, 52, 50, 48, 49, 46] },
-];
+const NEWS: NewsRow[] = [];
 
-const NEWS: NewsRow[] = [
-  { category: '盘面', time: '09:31', title: '中芯国际上调 Q2 营收指引，受益于成熟制程需求', symbols: ['半导体'], source: '示例动态' },
-  { category: '盘面', time: '08:45', title: '国家发改委：支持光伏行业高质量发展，鼓励技术创新', symbols: ['光伏'], source: '示例动态' },
-  { category: '关注', time: '07:58', title: '美联储会议纪要：多位官员认为短期内不宜降息', symbols: ['美股'], source: '示例动态' },
-  { category: '关注', time: '07:10', title: '苹果 WWDC 2025 邀请函发布，AI 功能预期升温', symbols: ['AAPL'], source: '示例动态' },
-  { category: '盘面', time: '06:55', title: '光伏玻璃价格本周上涨 5.2%', symbols: ['光伏'], source: '示例动态' },
-];
-
-const LEADERS: LeaderRow[] = [
-  { rank: 1, name: '寒武纪-U', price: '738.00', changePct: 6.88, reason: 'AI 芯片热度' },
-  { rank: 2, name: '中际旭创', price: '128.56', changePct: 5.21, reason: '光模块放量' },
-  { rank: 3, name: '新易盛', price: '108.22', changePct: 4.35, reason: '算力链共振' },
-  { rank: 4, name: '天孚通信', price: '82.31', changePct: 3.91, reason: '资金回流' },
-  { rank: 5, name: '剑桥科技', price: '66.78', changePct: 3.52, reason: '异动跟踪' },
-];
+const LEADERS: LeaderRow[] = [];
 
 function quickCommands(stocks: StockSnapshot[]): string[] {
   const first = stocks[0]?.symbol;
@@ -319,11 +292,7 @@ export function StockTasksPage(): JSX.Element {
     amount: dashboard?.leaders ?? LEADERS,
   };
   const leaders = pickActiveLeaders(activeLeaderboard, leaderboards);
-  const starStocks = dashboard?.starStocks ?? [
-    ...stocks,
-    STOCK_SNAPSHOTS['300750'],
-    STOCK_SNAPSHOTS['0700.HK'],
-  ].filter(Boolean).slice(0, 6);
+  const starStocks = dashboard?.starStocks ?? stocks.filter((stock) => stock.price !== '—').slice(0, 6);
   const temperature = dashboard?.temperature ?? null;
   const enabled = briefingStatus?.enabled === true;
   const sampleWatchlist = dashboard?.isFallbackWatchlist === true;
@@ -708,7 +677,13 @@ function WatchlistStrip({
               <span className="text-[17px] font-semibold tabular-nums text-[#121826]">{stock.price}</span>
               <ChangeText value={stock.changePct} compact className="self-end" />
             </div>
-            <Sparkline values={stock.spark} positive={stock.changePct >= 0} className="mt-3 h-9 w-full" />
+            {stock.spark.length >= 2 ? (
+              <Sparkline values={stock.spark} positive={stock.changePct >= 0} className="mt-3 h-9 w-full" />
+            ) : (
+              <div className="mt-3 flex h-9 items-center justify-center rounded-[7px] bg-[#F7F8FA] text-[11px] text-[#8B92A1]">
+                暂无真实走势
+              </div>
+            )}
             <div className="mt-3 flex items-center justify-between gap-2 border-t border-[#F0F1F4] pt-2 text-[12px]">
               <SignalPill signal={stock.signal} />
               <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-[11px] text-[#4F5868]">
@@ -1234,7 +1209,11 @@ function SectorTrends({
               <div className="truncate text-[11px] text-[#8B92A1]">{sector.leader} · {sector.flow}</div>
             </div>
             <ChangeText value={sector.changePct} compact />
-            <Sparkline values={sector.spark} positive={sector.changePct >= 0} className="h-6 w-14" />
+            {sector.spark.length >= 2 ? (
+              <Sparkline values={sector.spark} positive={sector.changePct >= 0} className="h-6 w-14" />
+            ) : (
+              <span className="w-14 text-right text-[10px] text-[#A0A7B3]">无走势</span>
+            )}
           </div>
         ))}
       </div>
@@ -1659,7 +1638,7 @@ function valuesToPoints(values: number[]): string {
 
 function buildStockRows(watchlist: WatchlistRow[] | null): StockSnapshot[] {
   if (!watchlist || watchlist.length === 0) {
-    return DEFAULT_SYMBOLS.map((symbol) => STOCK_SNAPSHOTS[symbol]);
+    return [];
   }
   return watchlist.map((row, index) => {
     const normalized = normalizeSymbol(row.symbol);
@@ -1669,26 +1648,29 @@ function buildStockRows(watchlist: WatchlistRow[] | null): StockSnapshot[] {
         ...known,
         name: row.displayName ?? known.name,
         market: row.market as Market,
+        price: '—',
+        changePct: 0,
+        signal: '待观察',
+        spark: [],
+        note: row.note ?? '真实行情暂不可用',
       };
     }
     return fallbackSnapshot(row, index);
   });
 }
 
-function fallbackSnapshot(row: WatchlistRow, index: number): StockSnapshot {
-  const change = ((index % 5) - 2) * 0.42 + 0.36;
-  const base = 46 + index * 3;
+function fallbackSnapshot(row: WatchlistRow, _index: number): StockSnapshot {
   return {
     symbol: row.symbol,
     name: row.displayName ?? row.symbol,
     market: row.market as Market,
-    price: row.market === 'US' ? (180 + index * 17.4).toFixed(2) : (18 + index * 23.6).toFixed(2),
-    changePct: Number(change.toFixed(2)),
-    signal: change > 1 ? '强势' : change < -0.4 ? '偏弱' : '中性',
+    price: '—',
+    changePct: 0,
+    signal: '待观察',
     report: '待生成',
-    spark: [base, base + 2, base + 1, base + 4, base + 3, base + 6, base + 5],
-    newsCount: 1 + (index % 4),
-    note: row.note ?? '等待 Holaday 建立更完整的分析画像',
+    spark: [],
+    newsCount: 0,
+    note: row.note ?? '真实行情暂不可用',
   };
 }
 

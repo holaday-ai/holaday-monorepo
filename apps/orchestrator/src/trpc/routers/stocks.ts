@@ -87,47 +87,16 @@ const FALLBACK_WATCHLIST: WatchlistEntry[] = [
 ];
 
 const FALLBACK_STOCKS: Record<string, StockSnapshot> = {
-  NVDA: stock('NVDA', '英伟达', 'US', '949.50', 2.35, [42, 48, 44, 53, 58, 55, 63, 72], 'AI 链订单能见度继续提升'),
-  TSLA: stock('TSLA', '特斯拉', 'US', '178.22', -1.12, [61, 58, 60, 54, 49, 52, 47, 45], '欧洲销量和毛利率仍是压力点'),
-  AAPL: stock('AAPL', '苹果公司', 'US', '192.45', 0.58, [47, 48, 46, 51, 50, 54, 53, 58], 'WWDC 临近，AI 功能预期升温'),
-  MSFT: stock('MSFT', '微软', 'US', '415.65', 0.78, [55, 57, 56, 60, 63, 62, 65, 67], '云与 Copilot 需求保持稳健'),
-  '600519': stock('600519', '贵州茅台', 'A', '1,535.00', -0.36, [50, 48, 49, 45, 46, 44, 43, 42], '消费预期仍偏弱，等待量价验证', '待生成'),
-  '300750': stock('300750', '宁德时代', 'A', '205.18', 1.48, [46, 49, 51, 50, 54, 56, 55, 60], '新能源链资金关注度回升', '待生成'),
-  '0700.HK': stock('0700.HK', '腾讯控股', 'HK', '386.40', 0.82, [52, 51, 54, 56, 55, 59, 61, 62], '游戏与广告业务预期改善', '待生成'),
+  NVDA: stock('NVDA', '英伟达', 'US', '—', 0, '真实行情暂不可用', '待生成'),
+  TSLA: stock('TSLA', '特斯拉', 'US', '—', 0, '真实行情暂不可用', '待生成'),
+  AAPL: stock('AAPL', '苹果公司', 'US', '—', 0, '真实行情暂不可用', '待生成'),
+  MSFT: stock('MSFT', '微软', 'US', '—', 0, '真实行情暂不可用', '待生成'),
+  '600519': stock('600519', '贵州茅台', 'A', '—', 0, '真实行情暂不可用', '待生成'),
+  '300750': stock('300750', '宁德时代', 'A', '—', 0, '真实行情暂不可用', '待生成'),
+  '0700.HK': stock('0700.HK', '腾讯控股', 'HK', '—', 0, '真实行情暂不可用', '待生成'),
 };
 
-const FALLBACK_INDICES: IndexSnapshot[] = [
-  { name: '上证指数', price: '3,348.37', changePct: 0.42, turnover: '4,521亿' },
-  { name: '深证成指', price: '10,189.20', changePct: 0.65, turnover: '6,231亿' },
-  { name: '创业板指', price: '2,051.32', changePct: 0.88, turnover: '3,102亿' },
-  { name: '恒生指数', price: '18,726.53', changePct: 1.22, turnover: '1,485亿' },
-  { name: '纳斯达克', price: '16,735.02', changePct: 1.41, turnover: '5,862亿' },
-  { name: '标普500', price: '5,309.91', changePct: 0.99, turnover: '4,321亿' },
-];
-
-const FALLBACK_SECTORS: SectorSnapshot[] = [
-  { name: '半导体', changePct: 2.45, leader: '寒武纪-U', flow: '资金净流入', spark: [38, 45, 42, 51, 56, 60] },
-  { name: '光伏设备', changePct: 1.89, leader: '隆基绿能', flow: '放量回暖', spark: [44, 43, 48, 52, 53, 56] },
-  { name: '消费电子', changePct: 1.75, leader: '立讯精密', flow: '事件催化', spark: [40, 43, 45, 49, 50, 55] },
-  { name: '软件开发', changePct: 1.63, leader: '金山办公', flow: 'AI 主题', spark: [46, 45, 48, 51, 54, 53] },
-  { name: '白酒', changePct: -0.12, leader: '贵州茅台', flow: '缩量震荡', spark: [55, 52, 50, 48, 49, 46] },
-];
-
-const FALLBACK_NEWS: NewsSnapshot[] = [
-  { category: '盘面', time: '09:31', title: '中芯国际上调 Q2 营收指引，受益于成熟制程需求', symbols: ['半导体'], source: '示例动态' },
-  { category: '盘面', time: '08:45', title: '国家发改委：支持光伏行业高质量发展，鼓励技术创新', symbols: ['光伏'], source: '示例动态' },
-  { category: '关注', time: '07:58', title: '美联储会议纪要：多位官员认为短期内不宜降息', symbols: ['美股'], source: '示例动态' },
-  { category: '关注', time: '07:10', title: '苹果 WWDC 邀请函发布，AI 功能预期升温', symbols: ['AAPL'], source: '示例动态' },
-  { category: '盘面', time: '06:55', title: '光伏玻璃价格本周上涨 5.2%', symbols: ['光伏'], source: '示例动态' },
-];
-
-const FALLBACK_LEADERS: LeaderSnapshot[] = [
-  { rank: 1, name: '寒武纪-U', price: '738.00', changePct: 6.88, reason: 'AI 芯片热度' },
-  { rank: 2, name: '中际旭创', price: '128.56', changePct: 5.21, reason: '光模块放量' },
-  { rank: 3, name: '新易盛', price: '108.22', changePct: 4.35, reason: '算力链共振' },
-  { rank: 4, name: '天孚通信', price: '82.31', changePct: 3.91, reason: '资金回流' },
-  { rank: 5, name: '剑桥科技', price: '66.78', changePct: 3.52, reason: '异动跟踪' },
-];
+const FALLBACK_INDICES: IndexSnapshot[] = [];
 
 const POPULAR_A_SYMBOLS = [
   { symbol: '600519', name: '贵州茅台' },
@@ -151,7 +120,6 @@ function stock(
   market: Market,
   price: string,
   changePct: number,
-  spark: number[],
   note: string,
   report: StockSnapshot['report'] = '已生成',
 ): StockSnapshot {
@@ -163,7 +131,7 @@ function stock(
     changePct,
     signal: signalFromChange(changePct),
     report,
-    spark,
+    spark: [],
     newsCount: 0,
     note,
   };
@@ -203,16 +171,30 @@ function signalFromChange(changePct: number): Signal {
   return '中性';
 }
 
-function sparkFromKline(rows: KlineRow[], fallback: number[]): number[] {
+function sparkFromKline(rows: KlineRow[]): number[] {
   const values = rows
     .slice(-8)
     .map((row) => toNum(pick(row, ['收盘', 'close', '最新价'])))
     .filter((value): value is number => value !== null);
-  return values.length >= 2 ? values : fallback;
+  return values.length >= 2 ? values : [];
 }
 
 function latestKline(rows: KlineRow[]): KlineRow | null {
   return rows.length > 0 ? rows[rows.length - 1] ?? null : null;
+}
+
+function unavailableStock(entry: WatchlistEntry, fallback: StockSnapshot): StockSnapshot {
+  return {
+    ...fallback,
+    symbol: entry.symbol,
+    name: entry.displayName ?? fallback.name,
+    market: entry.market as Market,
+    price: '—',
+    changePct: 0,
+    signal: '待观察',
+    spark: [],
+    note: '真实行情暂不可用，未展示走势线',
+  };
 }
 
 async function stockSnapshot(
@@ -222,14 +204,18 @@ async function stockSnapshot(
 ): Promise<StockSnapshot> {
   const normalized = entry.symbol.trim().toUpperCase();
   const fallback = FALLBACK_STOCKS[normalized] ?? fallbackStock(entry, index);
-  if (entry.market !== 'A') return fallback;
+  if (entry.market !== 'A') return unavailableStock(entry, fallback);
 
-  const env = await client.getStockKline(entry.symbol);
-  if (env.error || env.data.length === 0) return fallback;
-  const last = latestKline(env.data);
-  if (!last) return fallback;
+  const [dailyEnv, seriesEnv] = await Promise.all([
+    client.getStockKline(entry.symbol),
+    client.getStockKline(entry.symbol, 8),
+  ]);
+  if (dailyEnv.error || dailyEnv.data.length === 0) return unavailableStock(entry, fallback);
+  const last = latestKline(dailyEnv.data);
+  if (!last) return unavailableStock(entry, fallback);
   const close = pick(last, ['收盘', 'close', '最新价']);
   const changePct = toNum(pick(last, ['涨跌幅', 'changePct'])) ?? fallback.changePct;
+  const spark = seriesEnv.error ? [] : sparkFromKline(seriesEnv.data);
   return {
     ...fallback,
     symbol: entry.symbol,
@@ -238,22 +224,21 @@ async function stockSnapshot(
     price: fmtNum(close, 2),
     changePct: Number(changePct.toFixed(2)),
     signal: signalFromChange(changePct),
-    spark: sparkFromKline(env.data, fallback.spark),
-    note: env.error ? fallback.note : `来源 AkShare · ${entry.displayName ?? entry.symbol} 近期走势`,
+    spark,
+    note: spark.length >= 2
+      ? `来源 AkShare · ${entry.displayName ?? entry.symbol} 近 8 个交易日真实收盘价`
+      : `来源 AkShare · ${entry.displayName ?? entry.symbol} 最新行情，走势线暂缺`,
   };
 }
 
-function fallbackStock(entry: WatchlistEntry, index: number): StockSnapshot {
-  const changePct = Number((((index % 5) - 2) * 0.42 + 0.36).toFixed(2));
-  const base = 46 + index * 3;
+function fallbackStock(entry: WatchlistEntry, _index: number): StockSnapshot {
   return stock(
     entry.symbol,
     entry.displayName ?? entry.symbol,
     entry.market as Market,
-    entry.market === 'US' ? (180 + index * 17.4).toFixed(2) : (18 + index * 23.6).toFixed(2),
-    changePct,
-    [base, base + 2, base + 1, base + 4, base + 3, base + 6, base + 5],
-    '等待 Holaday 建立更完整的分析画像',
+    '—',
+    0,
+    '暂无真实行情数据',
     '待生成',
   );
 }
@@ -278,19 +263,18 @@ function mapIndices(env: AkEnvelope<IndexRow>): IndexSnapshot[] {
 function mapSectors(env: AkEnvelope<MarketPulseRow>): SectorSnapshot[] {
   const pulse = env.data[0];
   const sectors = pulse?.sectors_up;
-  if (env.error || !Array.isArray(sectors) || sectors.length === 0) return FALLBACK_SECTORS;
-  return sectors.slice(0, 5).map((sector, index) => sectorFromEntry(sector, index));
+  if (env.error || !Array.isArray(sectors) || sectors.length === 0) return [];
+  return sectors.slice(0, 5).map((sector) => sectorFromEntry(sector));
 }
 
-function sectorFromEntry(entry: SectorEntry, index: number): SectorSnapshot {
+function sectorFromEntry(entry: SectorEntry): SectorSnapshot {
   const changePct = entry.涨跌幅 ?? 0;
-  const base = 38 + index * 2;
   return {
     name: entry.板块,
     changePct: Number(changePct.toFixed(2)),
     leader: entry.领涨股 || '—',
     flow: entry.领涨股涨跌幅 != null ? `领涨股 ${entry.领涨股涨跌幅.toFixed(2)}%` : '板块异动',
-    spark: [base, base + 4, base + 3, base + 7, base + 8, base + 11],
+    spark: [],
   };
 }
 
@@ -325,26 +309,11 @@ function marketTemperature(env: AkEnvelope<MarketPulseRow>) {
   };
 }
 
-function buildLeaders(sectors: SectorSnapshot[]): LeaderSnapshot[] {
-  const leaders = sectors
-    .filter((sector) => sector.leader && sector.leader !== '—')
-    .slice(0, 5)
-    .map((sector, index) => ({
-      rank: index + 1,
-      name: sector.leader,
-      price: '—',
-      changePct: sector.changePct,
-      reason: sector.name,
-    }));
-  return leaders.length > 0 ? leaders : FALLBACK_LEADERS;
-}
-
 function mapRankingLeaders(
   env: AkEnvelope<StockRankingRow>,
   metric: 'gainers' | 'losers' | 'amount',
-  fallback: LeaderSnapshot[],
 ): LeaderSnapshot[] {
-  if (env.error || env.data.length === 0) return fallback;
+  if (env.error || env.data.length === 0) return [];
   const rows = env.data.slice(0, 8).map((row, index) => {
     const code = String(pick(row, ['代码', 'code']) ?? '').trim();
     const amount = pick(row, ['成交额', 'amount']);
@@ -356,16 +325,7 @@ function mapRankingLeaders(
       reason: metric === 'amount' ? `成交额 ${fmtYiYuan(amount)}` : code,
     };
   });
-  return rows.length > 0 ? rows : fallback;
-}
-
-function fallbackLeaderboards(sectors: SectorSnapshot[]): LeaderboardsSnapshot {
-  const gainers = buildLeaders(sectors);
-  const losers = [...gainers]
-    .map((row) => ({ ...row, changePct: row.changePct > 0 ? -row.changePct : row.changePct }))
-    .sort((a, b) => a.changePct - b.changePct)
-    .map((row, index) => ({ ...row, rank: index + 1 }));
-  return { gainers, losers, amount: gainers };
+  return rows.length > 0 ? rows : [];
 }
 
 function mapSymbolSearch(env: AkEnvelope<SymbolRow>, query: string) {
@@ -430,7 +390,8 @@ function buildNews(
       source: 'AkShare 市场脉冲',
     });
   }
-  for (const stockRow of stocks.slice(0, 4)) {
+  const realQuoteStocks = stocks.filter((stockRow) => stockRow.price !== '—' && stockRow.note.includes('来源 AkShare'));
+  for (const stockRow of realQuoteStocks.slice(0, 4)) {
     rows.push({
       category: '关注',
       time: '关注',
@@ -439,7 +400,7 @@ function buildNews(
       source: 'AkShare 行情',
     });
   }
-  return rows.length > 0 ? rows.slice(0, 5) : FALLBACK_NEWS;
+  return rows.slice(0, 5);
 }
 
 export const stocksRouter = router({
@@ -481,11 +442,10 @@ export const stocksRouter = router({
       rankingClient.getStockRankings('amount', 8),
     ]);
     const sectors = mapSectors(pulseEnv);
-    const fallbackBoards = fallbackLeaderboards(sectors);
     const leaderboards: LeaderboardsSnapshot = {
-      gainers: mapRankingLeaders(rankingGainers, 'gainers', fallbackBoards.gainers),
-      losers: mapRankingLeaders(rankingLosers, 'losers', fallbackBoards.losers),
-      amount: mapRankingLeaders(rankingAmount, 'amount', fallbackBoards.amount),
+      gainers: mapRankingLeaders(rankingGainers, 'gainers'),
+      losers: mapRankingLeaders(rankingLosers, 'losers'),
+      amount: mapRankingLeaders(rankingAmount, 'amount'),
     };
     return {
       updatedAt: now.toISOString(),
@@ -494,7 +454,7 @@ export const stocksRouter = router({
       watchlistStocks: stocks,
       marketIndices: mapIndices(indexCn),
       sectors,
-      starStocks: stocks.concat(FALLBACK_STOCKS['300750'] ?? []).filter(Boolean).slice(0, 6),
+      starStocks: stocks.filter((stockRow) => stockRow.price !== '—').slice(0, 6),
       temperature: marketTemperature(pulseEnv),
       news: buildNews(stocks, pulseEnv, announcements),
       leaders: leaderboards.gainers,
