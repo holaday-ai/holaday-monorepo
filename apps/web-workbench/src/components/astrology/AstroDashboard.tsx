@@ -91,6 +91,30 @@ const PSYCHOLOGY_RESULTS: Record<
   },
 };
 
+const WAITING_TEST_OPTIONS = [
+  {
+    id: 'fast',
+    label: '快一点',
+    body: '我想马上有个动作',
+    title: '先做 30 秒推进',
+    result: '把当前任务缩成一句话，然后只打开最相关的一个窗口。先动起来，别先整理全局。',
+  },
+  {
+    id: 'steady',
+    label: '稳一点',
+    body: '我想把节奏稳住',
+    title: '先做 1 个小排序',
+    result: '写下“等结果回来后第一件事”。有了落点，等待就不会一直占住脑子。',
+  },
+  {
+    id: 'soft',
+    label: '放轻一点',
+    body: '我想先松一口气',
+    title: '先做 15 秒放松',
+    result: '肩膀放低，喝一口水，把最吵的一件小事先放到旁边。任务还在跑，你不用跟着紧绷。',
+  },
+] as const;
+
 type LocalReading = ReturnType<typeof buildAstroReading>;
 type ProviderReading = Awaited<ReturnType<typeof trpc.astrology.daily.query>>;
 type TarotReading = Awaited<ReturnType<typeof trpc.astrology.tarot.query>>;
@@ -108,48 +132,49 @@ const EXPERIENCE_CARDS = [
     icon: Orbit,
     title: '完整星盘',
     body: '太阳、月亮、上升、元素倾向和任务风格，生成长期个人档案。',
-    status: '立即查看',
+    status: '看我的档案',
   },
   {
     id: 'compatibility',
     icon: Users,
     title: '合盘匹配',
     body: '输入对方生日，查看吸引力、摩擦点和相处建议。',
-    status: '立即测算',
+    status: '测一测',
   },
   {
     id: 'psychology',
     icon: Brain,
     title: '心理小测试',
     body: '用 3 个轻问题看今天的压力、决策和关系倾向。',
-    status: '立即测试',
+    status: '选一下',
   },
   {
     id: 'tarot',
     icon: Shuffle,
     title: '塔罗 / 抽卡',
     body: '等待任务时抽一张卡，给一个轻量提示和下一步行动。',
-    status: '立即抽卡',
+    status: '抽一张',
   },
   {
     id: 'numerology',
     icon: WalletCards,
     title: '数字命理',
     body: '根据生日计算生命灵数、个人年份和今天适合的节奏。',
-    status: '立即计算',
+    status: '算今日数',
   },
   {
     id: 'transit',
     icon: Activity,
     title: '流年提醒',
     body: '把本周重点变化转成今天、本周、本月的任务提醒。',
-    status: '立即查看',
+    status: '看提醒',
   },
 ] as const;
 
 type ExperienceId = (typeof EXPERIENCE_CARDS)[number]['id'];
 type PsychologyAnswer = (typeof PSYCHOLOGY_OPTIONS)[number]['id'];
 type WaitingMode = 'energy' | 'tarot' | 'test';
+type WaitingTestAnswer = (typeof WAITING_TEST_OPTIONS)[number]['id'];
 type NatalSnapshot = ReturnType<typeof buildNatalSnapshot>;
 type CompatibilityResult = ReturnType<typeof buildCompatibility>;
 type NumerologyItem = ReturnType<typeof buildNumerology>[number];
@@ -256,15 +281,13 @@ export function AstroDashboard({
     <div className="space-y-5">
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
         <DailyEnergyPanel reading={reading} profile={profile} />
-        <AstroProfilePanel profile={profile} onSave={handleSave} onReset={handleReset} />
+        <WaitingCardPreview
+          card={activeCard}
+          cardIndex={cardIndex}
+          onNext={() => setCardIndex((index) => index + 1)}
+          storageScope={storageScope}
+        />
       </div>
-
-      <HoroscopePanel
-        liveProvider={liveProvider}
-        providerState={providerState}
-        reading={reading}
-        onRefresh={() => void refreshProvider()}
-      />
 
       <ExperienceGrid
         profile={effectiveProfile}
@@ -274,13 +297,17 @@ export function AstroDashboard({
         storageScope={storageScope}
       />
 
-      <div className="grid gap-5 xl:grid-cols-3">
-        <WaitingCardPreview
-          card={activeCard}
-          cardIndex={cardIndex}
-          onNext={() => setCardIndex((index) => index + 1)}
-          storageScope={storageScope}
+      <div className="grid gap-5 xl:grid-cols-[minmax(320px,0.8fr)_minmax(0,1.2fr)]">
+        <AstroProfilePanel profile={profile} onSave={handleSave} onReset={handleReset} />
+        <HoroscopePanel
+          liveProvider={liveProvider}
+          providerState={providerState}
+          reading={reading}
+          onRefresh={() => void refreshProvider()}
         />
+      </div>
+
+      <div className="grid gap-5 xl:grid-cols-2">
         <TarotPanel
           liveProvider={liveProvider}
           loading={providerState.loading}
@@ -379,9 +406,9 @@ function ExperienceGrid({
           <Compass className="h-4 w-4" aria-hidden />
           <span>多元化命理</span>
         </div>
-        <h2 className="mt-2 text-xl font-semibold text-[#231F20]">星盘、合盘、测试和提醒都能直接玩</h2>
+        <h2 className="mt-2 text-xl font-semibold text-[#231F20]">等任务时，先玩一个 30 秒小占卜</h2>
         <p className="mt-1 text-xs leading-5 text-[#8C8C8C]">
-          先用你的今日档案生成轻量结果；保存生日和出生时间后，结果会更贴近你。
+          不用先填完整资料；生日和出生时间只会让结果更贴近你。
         </p>
       </div>
       <div className="grid gap-3 md:grid-cols-3">
@@ -1185,11 +1212,15 @@ function WaitingCardPreview({
   storageScope: string | null;
 }): JSX.Element {
   const [mode, setMode] = React.useState<WaitingMode>(() => readStoredWaitingMode(storageScope));
+  const [waitingAnswer, setWaitingAnswer] = React.useState<WaitingTestAnswer | null>(null);
+  const selectedWaitingResult =
+    WAITING_TEST_OPTIONS.find((option) => option.id === waitingAnswer) ?? null;
   React.useEffect(() => {
     setMode(readStoredWaitingMode(storageScope));
   }, [storageScope]);
   function selectMode(nextMode: WaitingMode): void {
     setMode(nextMode);
+    setWaitingAnswer(null);
     writeStoredValue(COSMIC_WAITING_KEY, storageScope, nextMode);
   }
   return (
@@ -1197,11 +1228,11 @@ function WaitingCardPreview({
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
           <h2 className="text-base font-semibold text-[#231F20]">任务等待模式</h2>
-          <p className="mt-1 text-xs text-[#8C8C8C]">执行任务时自动出现，帮用户把等待时间变轻一点。</p>
+          <p className="mt-1 text-xs text-[#8C8C8C]">任务还在跑，你可以先玩一个很轻的小动作。</p>
         </div>
         <Button type="button" variant="outline" size="sm" onClick={onNext}>
           <RefreshCcw className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-          换一张
+          换提示
         </Button>
       </div>
       <div className="mb-3 grid gap-2 sm:grid-cols-3">
@@ -1214,6 +1245,7 @@ function WaitingCardPreview({
             key={item.id}
             type="button"
             onClick={() => selectMode(item.id as WaitingMode)}
+            aria-pressed={mode === item.id}
             className={cn(
               'h-8 rounded-[8px] border px-2 text-xs font-medium transition',
               mode === item.id
@@ -1228,25 +1260,59 @@ function WaitingCardPreview({
       <div className="rounded-[8px] border border-[#EA1F59]/20 bg-[#EA1F59]/5 p-5">
         <div className="flex items-center gap-2 text-xs font-medium text-[#EA1F59]">
           <TimerReset className="h-4 w-4" aria-hidden />
-          {mode === 'energy' ? `正在为你跑任务 · 第 ${(cardIndex % 3) + 1} 张` : mode === 'tarot' ? '等待抽卡' : '等待小测试'}
+          {mode === 'energy' ? `正在为你跑任务 · 第 ${(cardIndex % 3) + 1} 张` : mode === 'tarot' ? '等待抽卡' : '3 秒小测试'}
         </div>
         <h3 className="mt-4 text-xl font-semibold text-[#231F20]">
-          {mode === 'energy' ? (card?.title ?? '任务正在跑') : mode === 'tarot' ? '先抽一张轻提示' : '你现在更想要哪种等待节奏？'}
+          {mode === 'energy'
+            ? (card?.title ?? '任务正在跑')
+            : mode === 'tarot'
+              ? (card?.title ?? '先抽一张轻提示')
+              : '你现在更想要哪种等待节奏？'}
         </h3>
         <p className="mt-3 text-sm leading-6 text-[#595757]">
           {mode === 'energy'
             ? (card?.body ?? '先喝口水，结果马上回来。')
             : mode === 'tarot'
-              ? '等任务跑完前，先给自己一个很小的下一步提示。'
+              ? (card?.body ?? '等任务跑完前，先给自己一个很小的下一步提示。')
               : '快一点、稳一点、放轻一点，选完会给一条即时建议。'}
         </p>
-        <button
-          type="button"
-          className="mt-5 inline-flex h-8 items-center rounded-[8px] border border-[#EA1F59]/25 bg-white px-3 text-xs font-medium text-[#EA1F59] transition hover:bg-[#EA1F59]/10"
-          onClick={onNext}
-        >
-          {mode === 'energy' ? (card?.cta ?? '继续') : mode === 'tarot' ? '抽一张' : '开始小测试'}
-        </button>
+        {mode === 'test' ? (
+          <div className="mt-4 space-y-3">
+            <div className="grid gap-2 sm:grid-cols-3">
+              {WAITING_TEST_OPTIONS.map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  onClick={() => setWaitingAnswer(option.id)}
+                  aria-pressed={waitingAnswer === option.id}
+                  className={cn(
+                    'rounded-[8px] border bg-white px-3 py-3 text-left transition',
+                    waitingAnswer === option.id
+                      ? 'border-[#EA1F59]/45 text-[#EA1F59] shadow-[0_8px_24px_rgba(234,31,89,0.08)]'
+                      : 'border-[#FBCFE8]/70 text-[#595757] hover:border-[#EA1F59]/30',
+                  )}
+                >
+                  <div className="text-sm font-semibold">{option.label}</div>
+                  <div className="mt-1 text-xs leading-4">{option.body}</div>
+                </button>
+              ))}
+            </div>
+            {selectedWaitingResult && (
+              <div className="rounded-[8px] border border-white/80 bg-white/80 p-3">
+                <div className="text-sm font-semibold text-[#231F20]">{selectedWaitingResult.title}</div>
+                <p className="mt-1 text-xs leading-5 text-[#595757]">{selectedWaitingResult.result}</p>
+              </div>
+            )}
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="mt-5 inline-flex h-8 items-center rounded-[8px] border border-[#EA1F59]/25 bg-white px-3 text-xs font-medium text-[#EA1F59] transition hover:bg-[#EA1F59]/10"
+            onClick={onNext}
+          >
+            {mode === 'energy' ? (card?.cta ?? '继续') : '再抽一张'}
+          </button>
+        )}
       </div>
     </section>
   );
