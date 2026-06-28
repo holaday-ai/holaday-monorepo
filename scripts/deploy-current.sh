@@ -47,7 +47,7 @@ deploy_orchestrator() {
 
 deploy_akshare() {
   echo "→ Deploying akshare-mcp"
-  "$ROOT_DIR/scripts/deploy-akshare-mcp.sh"
+  "$ROOT_DIR/scripts/deploy-akshare-mcp.sh" "$BRANCH"
 }
 
 verify_healthz() {

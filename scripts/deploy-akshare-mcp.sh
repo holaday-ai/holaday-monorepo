@@ -17,8 +17,9 @@ source "$SCRIPT_DIR/load-deploy-env.sh"
 source "$SCRIPT_DIR/ssh-password-auth.sh"
 
 VULTR_HOST="root@207.148.70.106"
-APP_DIR="/opt/holaday-monorepo/apps/akshare-mcp"
+BRANCH="${1:-${BRANCH:-}}"
 REPO_DIR="/opt/holaday-monorepo"
+APP_DIR="/opt/holaday-monorepo/apps/akshare-mcp"
 HEALTH_URL="http://127.0.0.1:8848/healthz"
 AKSHARE_HTTP_URL="${AKSHARE_HTTP_URL:-http://127.0.0.1:8848}"
 
@@ -29,6 +30,14 @@ fi
 build_ssh_password_prefix "$VULTR_PASSWORD"
 VULTR_AUTH_PREFIX=("${SSH_PASSWORD_PREFIX[@]}")
 SSH_OPTS=(-o StrictHostKeyChecking=no -o ConnectTimeout=20 -o ServerAliveInterval=10)
+
+if [[ -n "$BRANCH" ]]; then
+  echo "→ akshare-mcp: syncing remote repo to $BRANCH"
+  "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
+    cd '$REPO_DIR' && \
+    git fetch origin '+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH' && \
+    git reset --hard 'origin/$BRANCH'"
+fi
 
 echo "→ akshare-mcp: venv install + pm2 (re)start on Vultr"
 "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
