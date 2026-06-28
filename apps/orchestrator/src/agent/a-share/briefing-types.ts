@@ -69,6 +69,18 @@ export interface IndexRow {
   [k: string]: unknown;
 }
 
+/** A股全市场榜单行（stock_zh_a_spot/sina），用于股票任务页榜单。 */
+export interface StockRankingRow {
+  代码?: string;
+  名称?: string;
+  最新价?: number;
+  涨跌幅?: number;
+  涨跌额?: number;
+  成交量?: number;
+  成交额?: number;
+  [k: string]: unknown;
+}
+
 /** 个股限售解禁行（stock_restricted_release_queue_em，G2）。列名待 Vultr 核对。 */
 export interface UnlockRow {
   解禁时间?: string;

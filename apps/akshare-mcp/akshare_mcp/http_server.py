@@ -59,6 +59,7 @@ _ztsum = cached(adp.TTL_LHB)(adp.get_zt_pool_summary)
 # Phase 2 全景速览 step1：④ 基本面（季度级长缓存）+ ⑤ 估值（日级缓存）。
 _fund = cached(adp.TTL_FUND)(adp.get_fundamentals)
 _val = cached(adp.TTL_VAL)(adp.get_valuation)
+_rank = cached(adp.TTL_RANK)(adp.get_stock_rankings)
 
 app = FastAPI(title="akshare-cn-http", docs_url=None, redoc_url=None)
 
@@ -98,6 +99,12 @@ def kline(symbol: str, days: int = 0) -> dict[str, Any]:
 @app.get("/quote/{symbol}")
 def quote(symbol: str) -> dict[str, Any]:
     return _safe(_quote, symbol)
+
+
+@app.get("/stock-rankings/{metric}")
+def stock_rankings(metric: str, limit: int = 20) -> dict[str, Any]:
+    """metric: gainers | losers | amount。换手率源暂不可得，不提供假数据。"""
+    return _safe(_rank, metric, limit)
 
 
 @app.get("/dragon-tiger/{start_date}")
@@ -207,6 +214,7 @@ def _prewarm_risk_on_startup() -> None:
     def _loop() -> None:
         while True:
             try:
+                _safe(_rank, "gainers", 8)
                 adp.warm_risk_tables()
             except Exception:  # noqa: BLE001 - 预热失败不影响服务
                 pass

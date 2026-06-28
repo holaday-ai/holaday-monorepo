@@ -43,6 +43,7 @@ const ServerErrorPage = lazyRoute(() => import('@/pages/ServerErrorPage'), 'Serv
 const SettingsPage = lazyRoute(() => import('@/pages/SettingsPage'), 'SettingsPage');
 const SkillsPage = lazyRoute(() => import('@/pages/SkillsPage'), 'SkillsPage');
 const StarredPage = lazyRoute(() => import('@/pages/StarredPage'), 'StarredPage');
+const StockTasksPage = lazyRoute(() => import('@/pages/StockTasksPage'), 'StockTasksPage');
 const TermsPage = lazyRoute(() => import('@/pages/TermsPage'), 'TermsPage');
 const UsagePage = lazyRoute(() => import('@/pages/UsagePage'), 'UsagePage');
 const VideoPage = lazyRoute(() => import('@/pages/VideoPage'), 'VideoPage');
@@ -132,6 +133,7 @@ export function App(): JSX.Element {
           <Route path="/usage" element={lazyElement(<UsagePage />)} />
           <Route path="/history" element={lazyElement(<HistoryPage />)} />
           <Route path="/skills" element={lazyElement(<SkillsPage />)} />
+          <Route path="/stocks" element={lazyElement(<StockTasksPage />)} />
           <Route path="/projects" element={lazyElement(<ProjectsPage />)} />
           <Route path="/starred" element={lazyElement(<StarredPage />)} />
           <Route path="/files" element={lazyElement(<FilesPage />)} />

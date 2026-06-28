@@ -17,6 +17,7 @@ import { quotaRouter } from './routers/quota.js';
 import { rolesRouter } from './routers/roles.js';
 import { scheduledTasksRouter } from './routers/scheduled-tasks.js';
 import { skillsRouter } from './routers/skills.js';
+import { stocksRouter } from './routers/stocks.js';
 import { tasksRouter } from './routers/tasks.js';
 import { usageRouter } from './routers/usage.js';
 import { videoOnboardingRouter } from './routers/video-onboarding.js';
@@ -38,6 +39,7 @@ export const appRouter = router({
   quota: quotaRouter,
   roles: rolesRouter,
   skills: skillsRouter,
+  stocks: stocksRouter,
   files: filesRouter,
   scheduledTasks: scheduledTasksRouter,
   batchTasks: batchTasksRouter,
