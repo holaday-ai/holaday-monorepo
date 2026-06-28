@@ -54,7 +54,11 @@ VULTR_REMOTE_SMOKE_RESOLVE="holaday.ai:443:127.0.0.1"
 # Non-interactive password auth — pulled from env / local deploy env so
 # passwords don't end up in shell history. Uses sshpass when installed,
 # otherwise OpenSSH SSH_ASKPASS.
-build_ssh_password_prefix "${ALIYUN_PASSWORD:-}"
+if [[ -z "${ALIYUN_PASSWORD:-}" ]]; then
+  echo "❌ ALIYUN_PASSWORD unset — refusing SPA deploy" >&2
+  exit 1
+fi
+build_ssh_password_prefix "$ALIYUN_PASSWORD"
 ALIYUN_AUTH_PREFIX=("${SSH_PASSWORD_PREFIX[@]}")
 SSH_OPTS=(
   -o StrictHostKeyChecking=no

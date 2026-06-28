@@ -22,7 +22,11 @@ REPO_DIR="/opt/holaday-monorepo"
 HEALTH_URL="http://127.0.0.1:8848/healthz"
 AKSHARE_HTTP_URL="${AKSHARE_HTTP_URL:-http://127.0.0.1:8848}"
 
-build_ssh_password_prefix "${VULTR_PASSWORD:-}"
+if [[ -z "${VULTR_PASSWORD:-}" ]]; then
+  echo "❌ VULTR_PASSWORD unset — refusing akshare-mcp deploy" >&2
+  exit 1
+fi
+build_ssh_password_prefix "$VULTR_PASSWORD"
 VULTR_AUTH_PREFIX=("${SSH_PASSWORD_PREFIX[@]}")
 SSH_OPTS=(-o StrictHostKeyChecking=no -o ConnectTimeout=20 -o ServerAliveInterval=10)
 
