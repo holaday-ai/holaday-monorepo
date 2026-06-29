@@ -751,11 +751,11 @@ function WatchlistStrip({
         </div>
       ) : null}
       {hasRealQuotes ? (
-      <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-2">
+      <div className="mt-4 flex snap-x gap-4 overflow-x-auto pb-1 [scrollbar-width:thin]">
         {stocks.slice(0, 5).map((stock) => (
           <article
             key={stock.symbol}
-            className="group min-w-0 rounded-[8px] border border-[#E7E7EB] bg-[#FEFEFF] p-4 transition-[border-color,box-shadow,transform] hover:-translate-y-0.5 hover:border-[#EA1F59]/25 hover:shadow-[0_14px_28px_rgba(18,24,38,0.08)] motion-reduce:hover:translate-y-0"
+            className="group w-[min(520px,calc(100vw-3rem))] shrink-0 snap-start rounded-[8px] border border-[#E7E7EB] bg-[#FEFEFF] p-4 transition-[border-color,box-shadow,transform] hover:-translate-y-0.5 hover:border-[#EA1F59]/25 hover:shadow-[0_14px_28px_rgba(18,24,38,0.08)] motion-reduce:hover:translate-y-0"
           >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
