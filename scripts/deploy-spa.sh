@@ -192,8 +192,12 @@ fi
 NEW_HASH=$(grep -o 'index-[^"]*\.js' "$DIST_DIR/index.html" | head -1 || echo unknown)
 echo "📦 Local bundle: $NEW_HASH"
 
-ALIYUN_SSH=("${ALIYUN_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}")
-ALIYUN_SCP=("${ALIYUN_AUTH_PREFIX[@]}" scp "${SSH_OPTS[@]}")
+ALIYUN_SSH=(ssh "${SSH_OPTS[@]}")
+ALIYUN_SCP=(scp "${SSH_OPTS[@]}")
+if ((${#ALIYUN_AUTH_PREFIX[@]})); then
+  ALIYUN_SSH=("${ALIYUN_AUTH_PREFIX[@]}" "${ALIYUN_SSH[@]}")
+  ALIYUN_SCP=("${ALIYUN_AUTH_PREFIX[@]}" "${ALIYUN_SCP[@]}")
+fi
 
 echo "→ Backing up current dist on Aliyun"
 run_with_retry "Aliyun backup" "${ALIYUN_SSH[@]}" "$ALIYUN_HOST" \
@@ -246,8 +250,12 @@ VULTR_AUTH_PREFIX=()
 if ((${#SSH_PASSWORD_PREFIX[@]})); then
   VULTR_AUTH_PREFIX=("${SSH_PASSWORD_PREFIX[@]}")
 fi
-VULTR_SSH=("${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}")
-VULTR_SCP=("${VULTR_AUTH_PREFIX[@]}" scp "${SSH_OPTS[@]}")
+VULTR_SSH=(ssh "${SSH_OPTS[@]}")
+VULTR_SCP=(scp "${SSH_OPTS[@]}")
+if ((${#VULTR_AUTH_PREFIX[@]})); then
+  VULTR_SSH=("${VULTR_AUTH_PREFIX[@]}" "${VULTR_SSH[@]}")
+  VULTR_SCP=("${VULTR_AUTH_PREFIX[@]}" "${VULTR_SCP[@]}")
+fi
 
 echo "→ Uploading tarball to Vultr"
 run_with_retry "Vultr upload" "${VULTR_SCP[@]}" "$TARBALL" "$VULTR_HOST:/tmp/" >/dev/null

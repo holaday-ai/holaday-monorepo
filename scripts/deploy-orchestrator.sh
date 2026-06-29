@@ -55,6 +55,10 @@ SSH_OPTS=(
   -o ServerAliveCountMax=3
   -o TCPKeepAlive=yes
 )
+VULTR_SSH=(ssh "${SSH_OPTS[@]}")
+if ((${#VULTR_AUTH_PREFIX[@]})); then
+  VULTR_SSH=("${VULTR_AUTH_PREFIX[@]}" "${VULTR_SSH[@]}")
+fi
 REMOTE_RETRIES="${DEPLOY_REMOTE_RETRIES:-3}"
 REMOTE_RETRY_SLEEP="${DEPLOY_REMOTE_RETRY_SLEEP:-5}"
 
@@ -99,7 +103,7 @@ rollback() {
     return
   fi
   echo "→ Rolling back to $target" >&2
-  run_with_retry "Vultr rollback" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
+  run_with_retry "Vultr rollback" "${VULTR_SSH[@]}" "$VULTR_HOST" "set -e; \
     cd /opt/holaday-monorepo && \
     git reset --hard $target && \
     pnpm --filter @holaday/orchestrator build && \
@@ -108,7 +112,7 @@ rollback() {
 }
 
 echo "→ Capturing current HEAD for rollback"
-PREV_HEAD=$(run_with_retry "Vultr prev-head" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
+PREV_HEAD=$(run_with_retry "Vultr prev-head" "${VULTR_SSH[@]}" "$VULTR_HOST" \
   "cd /opt/holaday-monorepo && git rev-parse HEAD" | tail -1 | tr -d '[:space:]')
 echo "   prev HEAD (LIVE): ${PREV_HEAD:-unknown}"
 
@@ -122,11 +126,11 @@ echo "   prev HEAD (LIVE): ${PREV_HEAD:-unknown}"
 # deploy branch doesn't carry it yet). Override with ALLOW_DIVERGENT_DEPLOY=1.
 echo "→ Pre-reset gate (hard rule 7): deploy-preflight.sh on the live server"
 set +e
-run_with_retry "Vultr gate-fetch" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
+run_with_retry "Vultr gate-fetch" "${VULTR_SSH[@]}" "$VULTR_HOST" \
   "cd /opt/holaday-monorepo && git fetch origin '+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH' >/dev/null 2>&1"
 FETCH_RC=$?
 if (( FETCH_RC == 0 )); then
-  "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
+  "${VULTR_SSH[@]}" "$VULTR_HOST" "set -e; \
     cd /opt/holaday-monorepo && \
     if git cat-file -e 'origin/$BRANCH:scripts/deploy-preflight.sh' 2>/dev/null; then \
       git show 'origin/$BRANCH:scripts/deploy-preflight.sh' | bash -s -- '$BRANCH'; \
@@ -163,28 +167,28 @@ case "$GATE_RC" in
 esac
 
 echo "→ Fetching $BRANCH on Vultr"
-run_with_retry "Vultr fetch" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
+run_with_retry "Vultr fetch" "${VULTR_SSH[@]}" "$VULTR_HOST" "set -e; \
   cd /opt/holaday-monorepo && \
   git fetch origin '+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH' && \
   git reset --hard origin/$BRANCH && \
   git rev-parse HEAD" | tail -5
 
-NEW_HEAD=$(run_with_retry "Vultr new-head" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
+NEW_HEAD=$(run_with_retry "Vultr new-head" "${VULTR_SSH[@]}" "$VULTR_HOST" \
   "cd /opt/holaday-monorepo && git rev-parse --short HEAD" | tail -1 | tr -d '[:space:]')
 
 echo "→ Installing + building"
-run_with_retry "Vultr install/build" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
+run_with_retry "Vultr install/build" "${VULTR_SSH[@]}" "$VULTR_HOST" "set -e; \
   cd /opt/holaday-monorepo && \
   pnpm install && \
   pnpm --filter @holaday/orchestrator build" 2>&1 | tail -5
 
 echo "→ pm2 restart (--update-env so new .env keys load into the process)"
-run_with_retry "Vultr pm2 restart" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
+run_with_retry "Vultr pm2 restart" "${VULTR_SSH[@]}" "$VULTR_HOST" \
   "cd /opt/holaday-monorepo && set -a && . apps/orchestrator/.env && set +a && pm2 restart holaday-orchestrator --update-env"
 
 echo "→ Health check ($HEALTH_URL must return '$HEALTH_MARKER')"
 sleep 3
-HEALTH_OUT=$(run_with_retry "Vultr healthz" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
+HEALTH_OUT=$(run_with_retry "Vultr healthz" "${VULTR_SSH[@]}" "$VULTR_HOST" \
   "curl -sf --max-time 10 $HEALTH_URL || echo 'FAIL'")
 if echo "$HEALTH_OUT" | grep -q "$HEALTH_MARKER"; then
   echo "✅ Health check passed"
@@ -192,14 +196,14 @@ else
   echo "❌ Health check FAILED"
   echo "Response: $HEALTH_OUT" >&2
   echo "→ Last 10 error log lines:"
-  run_with_retry "Vultr pm2 error logs" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
+  run_with_retry "Vultr pm2 error logs" "${VULTR_SSH[@]}" "$VULTR_HOST" \
     "pm2 logs holaday-orchestrator --lines 10 --nostream --err 2>&1 | tail -15" >&2
   rollback "$PREV_HEAD"
   echo "❌ Deploy FAILED (health check) — rolled back to ${PREV_HEAD:-unknown}" >&2
   exit 1
 fi
 
-RESTART=$(run_with_retry "Vultr restart count" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
+RESTART=$(run_with_retry "Vultr restart count" "${VULTR_SSH[@]}" "$VULTR_HOST" \
   "node -e \"const list=JSON.parse(require('child_process').execFileSync('pm2',['jlist'],{encoding:'utf8'})); const app=list.find((p)=>p.name==='holaday-orchestrator'); process.stdout.write(String(app?.pm2_env?.restart_time ?? 'unknown'));\"")
 echo "✅ Orchestrator deployed — restart count: $RESTART"
 
@@ -211,7 +215,7 @@ echo "✅ Orchestrator deployed — restart count: $RESTART"
 # keyless (image intents would silently degrade to generate).
 REQUIRED_PROCESS_KEYS="${DEPLOY_REQUIRED_PROCESS_KEYS:-GEMINI_API_KEY ANTHROPIC_API_KEY}"
 echo "→ Verifying keys loaded in process: $REQUIRED_PROCESS_KEYS"
-PROC_KEYS=$(run_with_retry "Vultr key-check" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
+PROC_KEYS=$(run_with_retry "Vultr key-check" "${VULTR_SSH[@]}" "$VULTR_HOST" \
   "PID=\$(pm2 pid holaday-orchestrator | head -1); tr '\\0' '\\n' < /proc/\$PID/environ 2>/dev/null | grep -oE '^[A-Z_]+=.' | grep -oE '^[A-Z_]+'" | tr -d '\r')
 KEY_MISS=""
 for k in $REQUIRED_PROCESS_KEYS; do
@@ -235,7 +239,7 @@ if [[ "${SKIP_AUTO_SMOKE:-0}" == "1" ]]; then
   echo "→ Auto-smoke skipped (SKIP_AUTO_SMOKE=1)"
 else
   echo "→ Running P0 smoke (informational; failure does NOT block deploy)"
-  SMOKE_OUT=$(run_with_retry "Vultr auto-smoke" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
+  SMOKE_OUT=$(run_with_retry "Vultr auto-smoke" "${VULTR_SSH[@]}" "$VULTR_HOST" \
     "cd /opt/holaday-monorepo && \
      set -a && . apps/orchestrator/.env && set +a && \
      EVAL_BASE_URL=http://127.0.0.1:4001 \

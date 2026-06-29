@@ -26,9 +26,13 @@ if ((${#SSH_PASSWORD_PREFIX[@]})); then
   VULTR_AUTH_PREFIX=("${SSH_PASSWORD_PREFIX[@]}")
 fi
 SSH_OPTS=(-o StrictHostKeyChecking=no -o ConnectTimeout=20 -o ServerAliveInterval=10)
+VULTR_SSH=(ssh "${SSH_OPTS[@]}")
+if ((${#VULTR_AUTH_PREFIX[@]})); then
+  VULTR_SSH=("${VULTR_AUTH_PREFIX[@]}" "${VULTR_SSH[@]}")
+fi
 
 echo "→ akshare-mcp: venv install + pm2 (re)start on Vultr"
-"${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
+"${VULTR_SSH[@]}" "$VULTR_HOST" "set -e; \
   cd '$APP_DIR' && \
   ( [ -d .venv ] || python3 -m venv .venv ) && \
   .venv/bin/python -m pip install -q --upgrade pip && \
@@ -37,7 +41,7 @@ echo "→ akshare-mcp: venv install + pm2 (re)start on Vultr"
   pm2 save" 2>&1 | tail -8
 
 echo "→ Smoke check $HEALTH_URL (≤5s)"
-SMOKE=$("${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
+SMOKE=$("${VULTR_SSH[@]}" "$VULTR_HOST" \
   "curl -fsS --max-time 5 '$HEALTH_URL'" 2>/dev/null || true)
 if echo "$SMOKE" | grep -q '"status":"ok"'; then
   echo "✅ akshare-mcp /healthz OK"
