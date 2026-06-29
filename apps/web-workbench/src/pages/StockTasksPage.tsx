@@ -612,7 +612,7 @@ export function StockTasksPage(): JSX.Element {
             <main className="min-w-0 space-y-5">
               <WatchlistStrip
                 stocks={stocks}
-                loading={loadingDashboard && dashboard === null}
+                loading={(loadingDashboard && dashboard === null) || refreshingDashboard || dashboardFreshness?.status === 'partial'}
                 sample={sampleWatchlist}
                 onEdit={() => setWatchlistSheetOpen(true)}
               />
@@ -714,6 +714,7 @@ function WatchlistStrip({
   sample: boolean;
   onEdit: () => void;
 }): JSX.Element {
+  const hasRealQuotes = stocks.some((stock) => stock.price !== '—' || stock.spark.length >= 2);
   return (
     <section className="rounded-[8px] border border-[#E1E3E8] bg-white p-4 shadow-[0_8px_24px_rgba(18,24,38,0.035)]">
       <SectionHeader
@@ -722,6 +723,34 @@ function WatchlistStrip({
         action="编辑"
         onAction={onEdit}
       />
+      {!hasRealQuotes ? (
+        <div className="mt-4 rounded-[8px] border border-dashed border-[#D7DAE2] bg-[#FCFCFD] p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <div className="text-[14px] font-semibold text-[#121826]">真实行情同步中</div>
+              <p className="mt-1 max-w-[560px] text-[12px] leading-relaxed text-[#667085]">
+                Holaday 正在等待 AkShare 返回价格和走势；未拿到真实行情前，不放大空图表，也不使用模拟数据。
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onEdit}
+              className="inline-flex h-9 shrink-0 items-center justify-center rounded-[8px] border border-[#E1E3E8] bg-white px-3 text-[12px] font-medium text-[#4F5868] transition hover:border-[#EA1F59]/25 hover:text-[#EA1F59]"
+            >
+              管理关注
+            </button>
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {stocks.slice(0, 8).map((stock) => (
+              <span key={stock.symbol} className="inline-flex items-center gap-1.5 rounded-[7px] border border-[#E1E3E8] bg-white px-2.5 py-1.5 text-[12px] text-[#4F5868]">
+                <span className="font-semibold text-[#121826]">{stock.name}</span>
+                <span className="tabular-nums text-[#8B92A1]">{stock.symbol}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      ) : null}
+      {hasRealQuotes ? (
       <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-2">
         {stocks.slice(0, 5).map((stock) => (
           <article
@@ -780,6 +809,7 @@ function WatchlistStrip({
           </article>
         ))}
       </div>
+      ) : null}
     </section>
   );
 }
