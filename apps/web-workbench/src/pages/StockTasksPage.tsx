@@ -294,24 +294,19 @@ export function StockTasksPage(): JSX.Element {
 
   React.useEffect(() => {
     const status = dashboard?.freshness?.status;
-    if (!status || status === 'fresh') {
+    const hasDisplayableData = dashboardHasDisplayableData(dashboard);
+    if (!status || (status === 'fresh' && hasDisplayableData)) {
       dashboardCompletionRetries.current = 0;
       return;
     }
-    if (loadingDashboard || refreshingDashboard || dashboardCompletionRetries.current >= 4) return;
+    if (loadingDashboard || refreshingDashboard || dashboardCompletionRetries.current >= 12) return;
     dashboardCompletionRetries.current += 1;
-    const retryDelay = dashboardCompletionRetries.current === 1 ? 4_000 : 7_000;
+    const retryDelay = dashboardCompletionRetries.current <= 2 ? 4_000 : 8_000;
     const timer = window.setTimeout(() => {
       if (pageAlive.current) void loadPageData('refresh');
     }, retryDelay);
     return () => window.clearTimeout(timer);
-  }, [
-    dashboard?.freshness?.status,
-    dashboard?.updatedAt,
-    loadPageData,
-    loadingDashboard,
-    refreshingDashboard,
-  ]);
+  }, [dashboard, loadPageData, loadingDashboard, refreshingDashboard]);
 
   const initialDashboardLoading = loadingDashboard && dashboard === null && watchlist === null;
   const stocks = React.useMemo(
@@ -1925,6 +1920,18 @@ function valuesToPoints(values: number[]): string {
       return `${x.toFixed(1)},${y.toFixed(1)}`;
     })
     .join(' ');
+}
+
+function dashboardHasDisplayableData(snapshot: DashboardSnapshot | null): boolean {
+  if (!snapshot) return false;
+  return Boolean(
+    snapshot.watchlistStocks.some((stockRow) => stockRow.price !== '—' || stockRow.spark.length >= 2) ||
+      snapshot.marketIndices.length > 0 ||
+      snapshot.sectors.length > 0 ||
+      snapshot.news.length > 0 ||
+      snapshot.leaders.length > 0 ||
+      snapshot.temperature,
+  );
 }
 
 function buildStockRows(watchlist: WatchlistRow[] | null): StockSnapshot[] {
