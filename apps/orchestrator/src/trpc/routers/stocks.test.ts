@@ -215,4 +215,47 @@ describe('stocks dashboard snapshot', () => {
     expect(snapshot.freshness.message).toContain('指数、行业趋势、市场温度、榜单正在后台补齐');
     expect(snapshot.watchlistStocks[0]?.price).toBe('7.28');
   });
+
+  it('preserves market indices and leaderboards when a later refresh loses them', () => {
+    const previous = {
+      updatedAt: '2026-06-29T12:00:00.000Z',
+      source: 'akshare' as const,
+      isFallbackWatchlist: false,
+      watchlistStocks: [],
+      marketIndices: [{ name: '上证指数', price: '4073.90', changePct: 1.16, turnover: '16662.20亿元' }],
+      sectors: [],
+      starStocks: [],
+      temperature: null,
+      news: [],
+      leaders: [{ rank: 1, name: 'N科莱', price: '48.68', changePct: 211.65, reason: 'bj920072' }],
+      leaderboards: {
+        gainers: [{ rank: 1, name: 'N科莱', price: '48.68', changePct: 211.65, reason: 'bj920072' }],
+        losers: [{ rank: 1, name: '退市股', price: '1.00', changePct: -20, reason: 'sh000000' }],
+        amount: [{ rank: 1, name: '成交王', price: '10.00', changePct: 1, reason: '成交额 100亿元' }],
+      },
+      freshness: {
+        status: 'fresh' as const,
+        cachedAt: '2026-06-29T12:00:00.000Z',
+      },
+    };
+    const next = {
+      ...previous,
+      updatedAt: '2026-06-29T12:01:00.000Z',
+      marketIndices: [],
+      leaders: [],
+      leaderboards: { gainers: [], losers: [], amount: [] },
+      freshness: {
+        status: 'partial' as const,
+        cachedAt: '2026-06-29T12:01:00.000Z',
+      },
+    };
+
+    const merged = __stocksDashboardTest.withPreservedSlowSignals(next, previous);
+
+    expect(merged.marketIndices).toEqual(previous.marketIndices);
+    expect(merged.leaders).toEqual(previous.leaderboards.gainers);
+    expect(merged.leaderboards).toEqual(previous.leaderboards);
+    expect(merged.freshness.status).toBe('stale');
+    expect(merged.freshness.message).toContain('市场行情、榜单保留最近一次真实数据');
+  });
 });

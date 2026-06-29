@@ -636,22 +636,44 @@ function cacheDashboardSnapshot(cacheKey: string, snapshot: DashboardSnapshot, r
 
 function withPreservedSlowSignals(snapshot: DashboardSnapshot, previous?: DashboardSnapshot): DashboardSnapshot {
   if (!previous || (snapshot.freshness.status !== 'fresh' && snapshot.freshness.status !== 'partial')) return snapshot;
+  const shouldPreserveMarketIndices = snapshot.marketIndices.length === 0 && previous.marketIndices.length > 0;
   const shouldPreserveSectors = snapshot.sectors.length === 0 && previous.sectors.length > 0;
   const shouldPreserveTemperature = snapshot.temperature === null && previous.temperature !== null;
   const shouldPreserveNews = snapshot.news.length === 0 && previous.news.length > 0;
-  if (!shouldPreserveSectors && !shouldPreserveTemperature && !shouldPreserveNews) return snapshot;
+  const shouldPreserveLeaderboards =
+    snapshot.leaderboards.gainers.length === 0 &&
+    snapshot.leaderboards.losers.length === 0 &&
+    snapshot.leaderboards.amount.length === 0 &&
+    (
+      previous.leaderboards.gainers.length > 0 ||
+      previous.leaderboards.losers.length > 0 ||
+      previous.leaderboards.amount.length > 0
+    );
+  if (
+    !shouldPreserveMarketIndices &&
+    !shouldPreserveSectors &&
+    !shouldPreserveTemperature &&
+    !shouldPreserveNews &&
+    !shouldPreserveLeaderboards
+  ) return snapshot;
 
   const preservedLabels = [
+    shouldPreserveMarketIndices ? '市场行情' : null,
     shouldPreserveSectors ? '行业趋势' : null,
     shouldPreserveTemperature ? '市场温度' : null,
     shouldPreserveNews ? '股市新闻' : null,
+    shouldPreserveLeaderboards ? '榜单' : null,
   ].filter((label): label is string => label !== null);
+  const leaderboards = shouldPreserveLeaderboards ? previous.leaderboards : snapshot.leaderboards;
 
   return {
     ...snapshot,
+    marketIndices: shouldPreserveMarketIndices ? previous.marketIndices : snapshot.marketIndices,
     sectors: shouldPreserveSectors ? previous.sectors : snapshot.sectors,
     temperature: shouldPreserveTemperature ? previous.temperature : snapshot.temperature,
     news: shouldPreserveNews ? previous.news : snapshot.news,
+    leaders: shouldPreserveLeaderboards ? leaderboards.gainers : snapshot.leaders,
+    leaderboards,
     freshness: {
       ...snapshot.freshness,
       status: 'stale',
