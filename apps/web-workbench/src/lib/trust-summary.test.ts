@@ -25,9 +25,20 @@ describe('trust summary', () => {
     expect(summary.tone).toBe('neutral');
     expect(summary.verdict).toContain('仍需按来源复核关键事实');
     expect(summary.boundary).toContain('不把推断包装成事实');
-    expect(summary.rows.find((r) => r.label === '事实级证据')?.value).toBe('未展开');
+    expect(summary.boundary).toContain('ledger');
+    expect(summary.rows.find((r) => r.label === '事实级证据')?.value).toBe('见 ledger');
     expect(summary.rows.find((r) => r.label === '答案可见来源')?.detail).toContain(
       '不代表每条结论都已逐条验证',
+    );
+    expect(summary.ledger.map((item) => item.stage)).toEqual([
+      'observed',
+      'extracted',
+      'extracted',
+      'inferred',
+      'boundary',
+    ]);
+    expect(summary.ledger.find((item) => item.stage === 'boundary')?.detail).toContain(
+      '判断、建议和归因',
     );
   });
 
@@ -43,6 +54,7 @@ describe('trust summary', () => {
     expect(summary.verdict).toContain('自动审核发现不完整');
     expect(summary.checks).toEqual(['缺少可验证来源链接']);
     expect(summary.rows.find((r) => r.label === '答案可见来源')?.value).toBe('0 个链接');
+    expect(summary.ledger.find((item) => item.label === '自动审核')?.value).toBe('发现问题');
   });
 });
 
