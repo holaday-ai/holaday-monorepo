@@ -298,6 +298,14 @@ export function StockTasksPage(): JSX.Element {
   const sampleWatchlist = dashboard?.isFallbackWatchlist === true;
   const realWatchlist = watchlist ?? [];
   const commands = React.useMemo(() => quickCommands(stocks), [stocks]);
+  const hasMarketSignals = Boolean(
+    temperature ||
+      marketIndices.length > 0 ||
+      sectors.length > 0 ||
+      news.length > 0 ||
+      leaders.length > 0 ||
+      stocks.some((stock) => stock.price !== '—'),
+  );
 
   React.useEffect(() => {
     if (!watchlistSheetOpen) {
@@ -455,7 +463,7 @@ export function StockTasksPage(): JSX.Element {
             </h1>
             <span className="inline-flex items-center gap-1.5 rounded-full border border-[#D9F2E7] bg-[#F2FCF8] px-2.5 py-1 text-[12px] font-medium text-[#08764A]">
               <span className="h-1.5 w-1.5 rounded-full bg-[#10A66E]" />
-              {loadingDashboard ? '同步中' : '实时'}
+              {loadingDashboard ? '同步中' : dashboard ? 'AkShare' : '待连接'}
             </span>
             <span className="text-[12px] text-[#7D8493]">{formatUpdateTime(dashboard?.updatedAt)} 更新</span>
           </div>
@@ -473,6 +481,7 @@ export function StockTasksPage(): JSX.Element {
               type="button"
               onClick={() => void generateBriefing()}
               disabled={briefingGenerating || loadingDashboard || sampleWatchlist}
+              title={sampleWatchlist ? '添加真实关注股票后可生成日报' : undefined}
               className="inline-flex h-8 items-center gap-2 rounded-[8px] border border-[#DCDDDD] bg-white px-3 transition-colors hover:border-[#EA1F59]/30 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {briefingGenerating ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <FileText className="h-3.5 w-3.5" aria-hidden />}
@@ -537,6 +546,7 @@ export function StockTasksPage(): JSX.Element {
                 key={command}
                 type="button"
                 disabled={loadingDashboard || (command === '生成今日关注日报' && sampleWatchlist)}
+                title={command === '生成今日关注日报' && sampleWatchlist ? '添加真实关注股票后可生成日报' : undefined}
                 onClick={() => {
                   setPrompt(command);
                   if (command === '生成今日关注日报') void generateBriefing();
@@ -568,6 +578,7 @@ export function StockTasksPage(): JSX.Element {
                 generating={briefingGenerating}
                 onGenerate={generateBriefing}
                 sampleWatchlist={sampleWatchlist}
+                hasMarketSignals={hasMarketSignals}
               />
               <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
                 <MarketTable
@@ -802,6 +813,11 @@ function WatchlistManagerSheet({
                 </select>
               </label>
             </div>
+            {form.market !== 'A' ? (
+              <div className="mt-2 rounded-[7px] border border-[#E1E3E8] bg-[#FCFCFD] px-2.5 py-2 text-[11px] leading-relaxed text-[#667085]">
+                当前实时行情优先支持 A 股。美股/港股可以加入关注列表，行情和走势接入前会明确显示暂不可用。
+              </div>
+            ) : null}
             {searching || suggestions.length > 0 ? (
               <div className="mt-2 overflow-hidden rounded-[8px] border border-[#E1E3E8] bg-[#FCFCFD]">
                 {searching ? (
@@ -1058,6 +1074,7 @@ function DailyBriefing({
   generating,
   onGenerate,
   sampleWatchlist,
+  hasMarketSignals,
 }: {
   stocks: StockSnapshot[];
   updatedAt?: string;
@@ -1065,9 +1082,11 @@ function DailyBriefing({
   generating: boolean;
   onGenerate: () => void;
   sampleWatchlist: boolean;
+  hasMarketSignals: boolean;
 }): JSX.Element {
-  const riskStock = stocks.find((s) => s.signal === '偏弱' || s.signal === '风险升高') ?? stocks[1];
-  const leadStock = [...stocks].sort((a, b) => b.changePct - a.changePct)[0];
+  const quoteStocks = stocks.filter((stock) => stock.price !== '—');
+  const riskStock = quoteStocks.find((s) => s.signal === '偏弱' || s.signal === '风险升高');
+  const leadStock = [...quoteStocks].sort((a, b) => b.changePct - a.changePct)[0];
   const hasPositiveLeader = Boolean(leadStock && leadStock.changePct > 0);
   const previewLines = briefing ? briefingPreviewLines(briefing.markdown) : [];
   return (
@@ -1087,7 +1106,9 @@ function DailyBriefing({
         <div className="mt-1 text-[12px] leading-relaxed text-[#667085]">
           {briefing
             ? '已复用当前自选股和 AkShare 数据生成日报，可继续用上方输入框追问。'
-            : 'Holaday 已结合自选股、市场温度、重点动态和榜单异动生成盘中摘要。'}
+            : hasMarketSignals
+              ? 'Holaday 会优先使用已接入的真实行情、公告、市场动态和榜单数据生成摘要。'
+              : '当前真实市场数据不足。添加关注股票或稍后刷新后，可生成更完整的关注日报。'}
         </div>
       </div>
       {briefing ? (
@@ -1160,30 +1181,37 @@ function MarketTable({
 }): JSX.Element {
   return (
     <Panel className={className}>
-      <SectionHeader title="市场行情" meta="全球" action="查看全部行情" onAction={onInspect} />
+      <SectionHeader title="市场行情" meta="全球" action="查看详情" onAction={onInspect} />
+      {rows.length === 0 ? (
+        <EmptyState title="暂无真实行情数据" body="指数接口暂未返回可展示数据，刷新后会自动补齐。" />
+      ) : null}
       <div className="mt-3">
-        <div className="grid grid-cols-[minmax(0,1fr)_64px_46px] gap-1.5 border-b border-[#ECEEF3] pb-2 text-[12px] text-[#8B92A1]">
-          <span>指数</span>
-          <span className="text-right">最新价</span>
-          <span className="text-right">涨跌幅</span>
-        </div>
-        <div className="divide-y divide-[#F1F2F5]">
-          {rows.map((row) => (
-            <div
-              key={row.name}
-              className="grid grid-cols-[minmax(0,1fr)_64px_46px] items-center gap-1.5 py-2.5 text-[12px]"
-            >
-              <div className="min-w-0">
-                <div className="truncate font-medium text-[#121826]">{row.name}</div>
-                <div className="whitespace-nowrap text-[10px] tabular-nums text-[#8B92A1]">成交 {row.turnover}</div>
-              </div>
-              <div className="text-right tabular-nums text-[#344054]">{row.price}</div>
-              <div className="text-right">
-                <ChangeText value={row.changePct} compact />
-              </div>
+        {rows.length > 0 ? (
+          <>
+            <div className="grid grid-cols-[minmax(0,1fr)_64px_46px] gap-1.5 border-b border-[#ECEEF3] pb-2 text-[12px] text-[#8B92A1]">
+              <span>指数</span>
+              <span className="text-right">最新价</span>
+              <span className="text-right">涨跌幅</span>
             </div>
-          ))}
-        </div>
+            <div className="divide-y divide-[#F1F2F5]">
+              {rows.map((row) => (
+                <div
+                  key={row.name}
+                  className="grid grid-cols-[minmax(0,1fr)_64px_46px] items-center gap-1.5 py-2.5 text-[12px]"
+                >
+                  <div className="min-w-0">
+                    <div className="truncate font-medium text-[#121826]">{row.name}</div>
+                    <div className="whitespace-nowrap text-[10px] tabular-nums text-[#8B92A1]">成交 {row.turnover}</div>
+                  </div>
+                  <div className="text-right tabular-nums text-[#344054]">{row.price}</div>
+                  <div className="text-right">
+                    <ChangeText value={row.changePct} compact />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        ) : null}
       </div>
     </Panel>
   );
@@ -1200,7 +1228,10 @@ function SectorTrends({
 }): JSX.Element {
   return (
     <Panel className={className}>
-      <SectionHeader title="行业趋势" meta="涨幅榜" action="查看全部行业" onAction={onInspect} />
+      <SectionHeader title="行业趋势" meta="涨幅榜" action="查看详情" onAction={onInspect} />
+      {sectors.length === 0 ? (
+        <EmptyState title="暂无真实行业数据" body="市场脉冲接口暂未返回行业排行，刷新后会自动补齐。" />
+      ) : null}
       <div className="mt-3 space-y-1">
         {sectors.map((sector) => (
           <div key={sector.name} className="grid grid-cols-[1fr_auto_auto] items-center gap-3 border-b border-[#F1F2F5] py-2 last:border-b-0">
@@ -1233,39 +1264,44 @@ function StarStocks({
   const ranked = stocks.filter(Boolean).slice(0, 6);
   return (
     <Panel className={className}>
-      <SectionHeader title="明星股票" meta="今日关注" action="查看更多明星股" onAction={onInspect} />
+      <SectionHeader title="明星股票" meta="今日关注" action="查看详情" onAction={onInspect} />
+      {ranked.length === 0 ? (
+        <EmptyState title="暂无真实明星股票" body="只有拿到真实价格的股票才会进入这里，不使用模拟热度填充。" />
+      ) : null}
       <div className="mt-3">
-        <table className="w-full table-fixed text-[12px]">
-          <colgroup>
-            <col className="w-[39%]" />
-            <col className="w-[25%]" />
-            <col className="w-[22%]" />
-            <col className="w-[14%]" />
-          </colgroup>
-          <thead>
-            <tr className="border-b border-[#ECEEF3] text-left text-[#8B92A1]">
-              <th className="py-2 pr-2 font-medium">名称</th>
-              <th className="px-1 py-2 text-right font-medium">最新价</th>
-              <th className="px-1 py-2 text-right font-medium">涨跌幅</th>
-              <th className="py-2 pl-1 text-right font-medium">热度</th>
-            </tr>
-          </thead>
-          <tbody>
-            {ranked.map((stock, index) => (
-              <tr key={`${stock.symbol}-${index}`} className="border-b border-[#F1F2F5] last:border-0">
-                <td className="py-2 pr-2">
-                  <div className="truncate font-medium text-[#121826]">{stock.name}</div>
-                  <div className="truncate text-[11px] text-[#8B92A1]">{stock.symbol}</div>
-                </td>
-                <td className="px-1 py-2 text-right tabular-nums text-[#344054]">{stock.price}</td>
-                <td className="px-1 py-2 text-right">
-                  <ChangeText value={stock.changePct} compact />
-                </td>
-                <td className="py-2 pl-1 text-right tabular-nums text-[#344054]">{98 - index * 4}</td>
+        {ranked.length > 0 ? (
+          <table className="w-full table-fixed text-[12px]">
+            <colgroup>
+              <col className="w-[39%]" />
+              <col className="w-[25%]" />
+              <col className="w-[22%]" />
+              <col className="w-[14%]" />
+            </colgroup>
+            <thead>
+              <tr className="border-b border-[#ECEEF3] text-left text-[#8B92A1]">
+                <th className="py-2 pr-2 font-medium">名称</th>
+                <th className="px-1 py-2 text-right font-medium">最新价</th>
+                <th className="px-1 py-2 text-right font-medium">涨跌幅</th>
+                <th className="py-2 pl-1 text-right font-medium">状态</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {ranked.map((stock) => (
+                <tr key={stock.symbol} className="border-b border-[#F1F2F5] last:border-0">
+                  <td className="py-2 pr-2">
+                    <div className="truncate font-medium text-[#121826]">{stock.name}</div>
+                    <div className="truncate text-[11px] text-[#8B92A1]">{stock.symbol}</div>
+                  </td>
+                  <td className="px-1 py-2 text-right tabular-nums text-[#344054]">{stock.price}</td>
+                  <td className="px-1 py-2 text-right">
+                    <ChangeText value={stock.changePct} compact />
+                  </td>
+                  <td className="py-2 pl-1 text-right text-[11px] text-[#4F5868]">{stock.signal}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : null}
       </div>
     </Panel>
   );
@@ -1278,12 +1314,20 @@ function MarketTemperature({
   temperature: DashboardSnapshot['temperature'] | null;
   onInspect: () => void;
 }): JSX.Element {
-  const score = temperature?.score ?? 62;
-  const mood = temperature?.mood ?? '偏乐观';
-  const notes = temperature?.notes ?? ['市场情绪逐步回暖，成交活跃度提升。', 'AI 链和光伏设备贡献主要热度。'];
+  if (!temperature) {
+    return (
+      <Panel>
+        <SectionHeader title="市场温度" action="详情" onAction={onInspect} />
+        <EmptyState title="市场温度暂不可用" body="市场脉冲接口暂未返回涨跌家数、涨跌停或资金流数据。" />
+      </Panel>
+    );
+  }
+  const score = temperature.score;
+  const mood = temperature.mood;
+  const notes = temperature.notes;
   return (
     <Panel>
-      <SectionHeader title="市场温度" action="更多" onAction={onInspect} />
+      <SectionHeader title="市场温度" action="详情" onAction={onInspect} />
       <div className="mt-4 flex items-center gap-4">
         <div className="relative h-[118px] w-[118px] shrink-0">
           <div className="absolute inset-0 rounded-full border-[11px] border-[#E8EBF0]" />
@@ -1294,9 +1338,9 @@ function MarketTemperature({
           </div>
         </div>
         <div className="min-w-0 flex-1 space-y-3 text-[13px]">
-          <MetricLine label="较昨日" value={formatDelta(temperature?.dayDelta)} positive />
-          <MetricLine label="较上周" value={formatDelta(temperature?.weekDelta)} positive />
-          <MetricLine label="历史位置" value={temperature?.historicalPosition ?? '68%'} />
+          <MetricLine label="较昨日" value={formatDelta(temperature.dayDelta)} positive={deltaPositive(temperature.dayDelta)} />
+          <MetricLine label="较上周" value={formatDelta(temperature.weekDelta)} positive={deltaPositive(temperature.weekDelta)} />
+          <MetricLine label="历史位置" value={temperature.historicalPosition} />
         </div>
       </div>
       <div className="mt-4 space-y-2 border-t border-[#F1F2F5] pt-3 text-[12px] leading-relaxed text-[#4F5868]">
@@ -1312,7 +1356,10 @@ function NewsPanel({ news, onInspect }: { news: NewsRow[]; onInspect: () => void
   const items = news.slice(0, 6);
   return (
     <Panel>
-      <SectionHeader title="重点动态" action="更多" onAction={onInspect} />
+      <SectionHeader title="重点动态" action="查看详情" onAction={onInspect} />
+      {items.length === 0 ? (
+        <EmptyState title="暂无真实重点动态" body="公告、市场脉冲和自选股行情暂未返回可展示内容。" />
+      ) : null}
       <div className="mt-3 divide-y divide-[#F1F2F5]">
         {items.map((item) => (
           <div key={`${item.time}-${item.title}`} className="py-3">
@@ -1404,6 +1451,9 @@ function Leaderboard({
         当前展示 AkShare 全市场个股排行；换手率字段在可达源中暂缺，接入后会自动开放。
       </div>
       <div className="mt-3 divide-y divide-[#F1F2F5]">
+        {leaders.length === 0 ? (
+          <EmptyState title="暂无真实榜单数据" body="AkShare 排行接口暂未返回可展示个股，稍后刷新会自动更新。" />
+        ) : null}
         {leaders.map((leader) => (
           <div key={leader.rank} className="grid grid-cols-[24px_1fr_auto] items-center gap-2 py-2.5 text-[12px]">
             <span
@@ -1428,7 +1478,8 @@ function Leaderboard({
       <button
         type="button"
         onClick={onInspect}
-        className="mt-3 inline-flex w-full items-center justify-center gap-1 border-t border-[#F1F2F5] pt-3 text-[12px] font-medium text-[#4F5868] hover:text-[#EA1F59]"
+        disabled={leaders.length === 0}
+        className="mt-3 inline-flex w-full items-center justify-center gap-1 border-t border-[#F1F2F5] pt-3 text-[12px] font-medium text-[#4F5868] hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-50"
       >
         查看全部榜单
         <ChevronRight className="h-3.5 w-3.5" aria-hidden />
@@ -1490,6 +1541,21 @@ function Panel({
   );
 }
 
+function EmptyState({
+  title,
+  body,
+}: {
+  title: string;
+  body: string;
+}): JSX.Element {
+  return (
+    <div className="mt-3 rounded-[8px] border border-dashed border-[#DCDDDD] bg-[#FCFCFD] px-3 py-5 text-center">
+      <div className="text-[13px] font-medium text-[#4F5868]">{title}</div>
+      <div className="mt-1 text-[11px] leading-relaxed text-[#8B92A1]">{body}</div>
+    </div>
+  );
+}
+
 function BriefingLane({
   title,
   items,
@@ -1546,6 +1612,19 @@ function ChangeText({
   compact?: boolean;
   className?: string;
 }): JSX.Element {
+  if (value === 0) {
+    return (
+      <span
+        className={cn(
+          'inline-flex shrink-0 items-center justify-end whitespace-nowrap font-semibold tabular-nums text-[#667085]',
+          compact ? 'text-[11px]' : 'text-[13px]',
+          className,
+        )}
+      >
+        0.00%
+      </span>
+    );
+  }
   const positive = value >= 0;
   return (
     <span
@@ -1588,10 +1667,11 @@ function MetricLine({
   value: string;
   positive?: boolean;
 }): JSX.Element {
+  const valueClass = positive === true ? MARKET_UP_CLASS : positive === false ? MARKET_DOWN_CLASS : 'text-[#121826]';
   return (
     <div className="flex items-center justify-between gap-3">
       <span className="text-[#667085]">{label}</span>
-      <span className={cn('font-semibold tabular-nums', positive ? MARKET_UP_CLASS : 'text-[#121826]')}>
+      <span className={cn('font-semibold tabular-nums', valueClass)}>
         {value}
       </span>
     </div>
@@ -1702,9 +1782,11 @@ function pickActiveLeaders(
 
 function dailyBriefingHeadline(stocks: StockSnapshot[], riskStock?: StockSnapshot): string {
   if (stocks.length === 0) return '添加关注股票后，Holaday 会生成你的每日关注日报。';
-  const weakCount = stocks.filter((stock) => stock.changePct < 0).length;
-  const strong = [...stocks].sort((a, b) => b.changePct - a.changePct)[0];
-  if (weakCount >= Math.ceil(stocks.length / 2)) {
+  const quoteStocks = stocks.filter((stock) => stock.price !== '—');
+  if (quoteStocks.length === 0) return '真实行情暂不可用，Holaday 不会使用模拟数据生成盘面判断。';
+  const weakCount = quoteStocks.filter((stock) => stock.changePct < 0).length;
+  const strong = [...quoteStocks].sort((a, b) => b.changePct - a.changePct)[0];
+  if (weakCount >= Math.ceil(quoteStocks.length / 2)) {
     return `关注列表整体偏弱，${riskStock?.symbol ?? strong?.symbol ?? '重点标的'} 需要优先跟踪。`;
   }
   return `${strong?.symbol ?? '关注列表'} 相对活跃，继续跟踪公告、资金和行业主线。`;
@@ -1739,7 +1821,7 @@ function sectorInsight(sectors: SectorRow[]): InsightSheetState {
 function starStockInsight(stocks: StockSnapshot[]): InsightSheetState {
   return {
     title: '明星股票',
-    description: '结合关注列表和默认重点股票形成的观察池，排序用于快速扫描异动。',
+    description: '仅展示已拿到真实价格的关注股票，用于快速扫描当日异动。',
     rows: stocks.map((stock) => ({
       label: `${stock.name} ${stock.symbol}`,
       value: stock.price,
@@ -1752,23 +1834,25 @@ function starStockInsight(stocks: StockSnapshot[]): InsightSheetState {
 function temperatureInsight(temperature: DashboardSnapshot['temperature'] | null): InsightSheetState {
   return {
     title: '市场温度',
-    description: '由涨跌家数、涨跌停、资金流等盘面指标估算，仅用于判断市场拥挤度和情绪方向。',
-    rows: [
+    description: temperature
+      ? '由涨跌家数、涨跌停、资金流等盘面指标估算，仅用于判断市场拥挤度和情绪方向。'
+      : '市场脉冲接口暂未返回可展示数据，不展示模拟分数。',
+    rows: temperature ? [
       {
         label: '温度分',
-        value: String(temperature?.score ?? 62),
-        meta: temperature?.mood ?? '偏乐观',
+        value: String(temperature.score),
+        meta: temperature.mood,
       },
       {
         label: '历史位置',
-        value: temperature?.historicalPosition ?? '68%',
+        value: temperature.historicalPosition,
         meta: '分数越高代表市场情绪越热',
       },
-      ...(temperature?.notes ?? ['市场情绪逐步回暖，成交活跃度提升。']).map((note, index) => ({
+      ...temperature.notes.map((note, index) => ({
         label: `观察 ${index + 1}`,
         value: note,
       })),
-    ],
+    ] : [],
   };
 }
 
@@ -1787,7 +1871,7 @@ function newsInsight(news: NewsRow[]): InsightSheetState {
 function leaderboardInsight(active: string, leaders: LeaderRow[]): InsightSheetState {
   return {
     title: active,
-    description: '当前榜单来自市场脉冲领涨线索，后续可扩展到成交额、换手率和跌幅榜真实排行。',
+    description: '当前榜单来自 AkShare 全市场个股排行，接口无数据时不展示模拟榜单。',
     rows: leaders.map((leader) => ({
       label: `${leader.rank}. ${leader.name}`,
       value: leader.price,
@@ -1841,6 +1925,11 @@ function formatUpdateTime(value?: string): string {
 function formatDelta(value: number | null | undefined): string {
   if (value == null) return '—';
   return value > 0 ? `+${value}` : String(value);
+}
+
+function deltaPositive(value: number | null | undefined): boolean | undefined {
+  if (value == null || value === 0) return undefined;
+  return value > 0;
 }
 
 function toStockIntent(prompt: string, stocks: StockSnapshot[]): string {

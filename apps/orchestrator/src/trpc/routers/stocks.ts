@@ -281,14 +281,7 @@ function sectorFromEntry(entry: SectorEntry): SectorSnapshot {
 function marketTemperature(env: AkEnvelope<MarketPulseRow>) {
   const pulse = env.data[0];
   if (env.error || !pulse) {
-    return {
-      score: 62,
-      mood: '偏乐观',
-      dayDelta: 6,
-      weekDelta: 12,
-      historicalPosition: '68%',
-      notes: ['市场情绪逐步回暖，成交活跃度提升。', 'AI 链和光伏设备贡献主要热度。'],
-    };
+    return null;
   }
   const up = pulse.up_count ?? 0;
   const down = pulse.down_count ?? 0;
