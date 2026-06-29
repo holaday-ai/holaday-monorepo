@@ -76,7 +76,7 @@ import {
   RESULT_SOURCE_BADGES,
   type ResultSourceMarker,
 } from '@/lib/result-source-badges';
-import { shouldShowVerificationBanner, verificationBannerCopy } from '@/lib/verification-banner-copy';
+import { shouldShowVerificationBanner } from '@/lib/verification-banner-copy';
 import {
   buildRecoveryActions,
   buildTrustSummary,
@@ -542,20 +542,6 @@ function AgentBlock({
             </div>
           )}
 
-        {/* Verification verdict banner. It appears as soon as the
-            terminal status itself encodes a partial result, and also
-            after detail hydration when verificationPassed=false or
-            failed checks are present. This catches hard-fail verifier
-            cases without showing a generic banner for ordinary runtime
-            failures. */}
-        {terminal && shouldShowVerificationBanner(task) && (
-          <VerificationBanner
-            level={task.failureLevel ?? 'fixable'}
-            status={task.status}
-            failedChecks={task.failedChecks ?? null}
-            intent={task.intent}
-          />
-        )}
         {terminal && (task.resultText || hasTerminalArtifacts) && (
           <TerminalSummary
             status={task.status}
@@ -733,7 +719,7 @@ function TrustSummaryCard({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div className="min-w-0">
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <div className="text-[11px] font-medium text-muted-foreground">
                 {summary.title}
               </div>
               <div className="mt-0.5 font-medium text-foreground">{summary.verdict}</div>
@@ -747,31 +733,6 @@ function TrustSummaryCard({
           <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
             {summary.boundary}
           </p>
-          <div className="mt-3 rounded-[7px] border border-[#DCDDDD]/70 bg-white/60 px-3 py-2 dark:border-white/10 dark:bg-white/5">
-            <div className="mb-2 text-[11px] font-medium tracking-wide text-muted-foreground">
-              证据明细
-            </div>
-            <div className="grid gap-1.5">
-              {summary.ledger.map((item) => (
-                <div
-                  key={`${item.stage}-${item.label}`}
-                  className="grid gap-1 rounded-[6px] bg-[#FCFCFD]/80 px-2 py-1.5 sm:grid-cols-[96px_1fr] dark:bg-white/[0.03]"
-                >
-                  <div className="flex min-w-0 items-center gap-1.5">
-                    <TrustLedgerStagePill stage={item.stage} />
-                    <span className="truncate text-[11px] font-medium text-foreground">
-                      {item.label}
-                    </span>
-                  </div>
-                  <div className="min-w-0 text-[11px] leading-4 text-muted-foreground">
-                    <span className="font-medium text-foreground/85">{item.value}</span>
-                    <span className="mx-1 text-muted-foreground/55">·</span>
-                    <span>{item.detail}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
           <div className="mt-3 grid gap-2 sm:grid-cols-2">
             {summary.rows.map((row) => (
               <div
@@ -794,7 +755,7 @@ function TrustSummaryCard({
           </div>
           {summary.checks.length > 0 && (
             <div className="mt-3 rounded-[7px] border border-[#FFC910]/55 bg-[#FFC910]/10 px-3 py-2 text-xs dark:border-[#FFC910]/35">
-              <div className="font-medium text-foreground">自动审核检查项</div>
+              <div className="font-medium text-foreground">需要复核</div>
               <ul className="mt-1 list-inside list-disc space-y-0.5 leading-relaxed text-muted-foreground">
                 {summary.checks.map((check, i) => (
                   <li key={`${check}-${i}`}>{check}</li>
@@ -807,11 +768,34 @@ function TrustSummaryCard({
               )}
             </div>
           )}
+          <details className="mt-3 rounded-[7px] border border-[#DCDDDD]/70 bg-white/45 px-3 py-2 text-xs dark:border-white/10 dark:bg-white/5">
+            <summary className="cursor-pointer select-none text-[11px] font-medium text-muted-foreground">
+              查看证据边界
+            </summary>
+            <div className="mt-2 grid gap-1.5">
+              {summary.ledger.map((item) => (
+                <div
+                  key={`${item.stage}-${item.label}`}
+                  className="grid gap-1 rounded-[6px] bg-[#FCFCFD]/80 px-2 py-1.5 sm:grid-cols-[96px_1fr] dark:bg-white/[0.03]"
+                >
+                  <div className="flex min-w-0 items-center gap-1.5">
+                    <TrustLedgerStagePill stage={item.stage} />
+                    <span className="truncate text-[11px] font-medium text-foreground">
+                      {item.label}
+                    </span>
+                  </div>
+                  <div className="min-w-0 text-[11px] leading-4 text-muted-foreground">
+                    <span className="font-medium text-foreground/85">{item.value}</span>
+                    <span className="mx-1 text-muted-foreground/55">·</span>
+                    <span>{item.detail}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </details>
           {recoveryActions.length > 0 && (
             <div className="mt-3 border-t border-[#DCDDDD]/70 pt-3 dark:border-white/10">
-              <div className="mb-2 text-[11px] font-medium tracking-wide text-muted-foreground">
-                恢复动作
-              </div>
+              <div className="mb-2 text-[11px] font-medium text-muted-foreground">下一步</div>
               <div className="flex flex-wrap gap-2">
                 {recoveryActions.map((action) => (
                   <button
@@ -870,13 +854,13 @@ function trustLedgerStageLabel(stage: TrustEvidenceStage): {
 } {
   switch (stage) {
     case 'observed':
-      return { short: 'observed', title: 'observed：页面上直接观察到的证据' };
+      return { short: '已观察', title: '页面上直接观察到的证据' };
     case 'extracted':
-      return { short: 'extracted', title: 'extracted：从结果或页面提取到的信息' };
+      return { short: '已提取', title: '从结果或页面提取到的信息' };
     case 'inferred':
-      return { short: 'inferred', title: 'inferred：系统根据结构信号推断的状态' };
+      return { short: '系统判断', title: '系统根据结构信号判断的状态' };
     case 'boundary':
-      return { short: 'boundary', title: 'boundary：尚未被验证的使用边界' };
+      return { short: '未验证', title: '尚未被验证的使用边界' };
   }
 }
 
@@ -902,109 +886,6 @@ function failureLevelLabel(level: NonNullable<UiTask['failureLevel']>): string {
   if (level === 'hard_fail') return '硬失败';
   if (level === 'needs_clarification') return '需补充信息';
   return '可修正';
-}
-
-/**
- * Yellow-highlighted card shown when the agent parked on a clarifying
- * question. The composer below (InputArea) flips to "回复 HOLA DAY..."
- * mode so Enter sends a reply instead of spawning a new task.
- */
-function VerificationBanner({
-  level,
-  status,
-  failedChecks,
-  intent,
-}: {
-  level: 'fixable' | 'needs_clarification' | 'hard_fail' | null;
-  status: string;
-  failedChecks: Array<{ type: string; detail: string }> | null;
-  intent?: string;
-}): JSX.Element {
-  const copy = verificationBannerCopy({ level, status, failedChecks });
-  const isDanger = copy.tone === 'danger';
-  const toast = useToast();
-  const createTask = useTaskStore((s) => s.createTask);
-  const mountedRef = useMountedRef();
-  const [retrying, setRetrying] = React.useState(false);
-  const handleRetry = React.useCallback(async (): Promise<void> => {
-    if (!intent || retrying) return;
-    setRetrying(true);
-    try {
-      const res = await createTask(intent, []);
-      if (!mountedRef.current) return;
-      if ('error' in res) {
-        toast.show(taskActionError('重新执行失败', res.error), 'error');
-        return;
-      }
-      toast.show('已开始重新执行', 'info', 2000);
-    } finally {
-      if (mountedRef.current) {
-        setRetrying(false);
-      }
-    }
-  }, [createTask, intent, mountedRef, retrying, toast]);
-  return (
-    <div
-      className={cn(
-        'rounded-lg border px-4 py-3 text-sm shadow-[0_1px_3px_rgba(17,24,39,0.05)]',
-        isDanger
-          ? 'border-[#EA1F59]/35 bg-white text-[#595757] dark:border-[#EA1F59]/35 dark:bg-card/85 dark:text-foreground'
-          : 'border-[#FFC910]/60 bg-white text-[#595757] dark:border-[#FFC910]/35 dark:bg-card/85 dark:text-foreground',
-      )}
-    >
-      <div className="flex items-start gap-2.5">
-        {isDanger ? (
-          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-[#EA1F59]" />
-        ) : (
-          <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-[#FFC910]" />
-        )}
-        <div className="min-w-0 flex-1">
-          <div
-            className={cn(
-              'text-[11px] font-semibold uppercase tracking-wide',
-              isDanger
-                ? 'text-[#EA1F59]'
-                : 'text-[#57479C]',
-            )}
-          >
-            {copy.eyebrow}
-          </div>
-          <div className="mt-0.5 font-medium">{copy.title}</div>
-          <p className="mt-1 leading-relaxed">{copy.body}</p>
-          {copy.checks.length > 0 && (
-            <ul className="mt-2 list-inside list-disc space-y-0.5 leading-relaxed">
-              {copy.checks.map((label, i) => (
-                <li key={`${label}-${i}`}>{label}</li>
-              ))}
-            </ul>
-          )}
-          {copy.hiddenCount > 0 && (
-            <div className="mt-1 text-xs opacity-75">
-              另有 {copy.hiddenCount} 项检查未展开
-            </div>
-          )}
-          {intent && (
-            <button
-              type="button"
-              onClick={() => void handleRetry()}
-              disabled={retrying}
-              aria-label={retrying ? '正在重新执行任务' : '重新执行任务'}
-              title={retrying ? '正在重新执行' : '重新执行任务'}
-              className={cn(
-                'mt-2 inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-[11px] font-medium transition-colors disabled:cursor-wait disabled:opacity-60',
-                isDanger
-                  ? 'border-[#EA1F59]/25 bg-[#EA1F59]/5 text-[#EA1F59] hover:border-[#EA1F59]/45 hover:bg-[#EA1F59]/10'
-                  : 'border-[#FFC910]/60 bg-[#FFC910]/10 text-[#57479C] hover:border-[#FFC910]/80 hover:bg-[#FFC910]/15',
-              )}
-            >
-              <RotateCcw className={cn('h-3.5 w-3.5', retrying && 'animate-spin')} />
-              <span>{retrying ? '重新执行中…' : '重新执行'}</span>
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
-  );
 }
 
 /**
