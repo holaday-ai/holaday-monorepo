@@ -348,9 +348,9 @@ function StaticTaskDetailFallback({ task }: { task: UiTask }): JSX.Element {
 }
 
 /**
- * Suggestion chips below the composer. Small, single-line, click
- * fills the composer (does NOT submit). Eight chips covering the
- * common entry points; tap a chip to seed an intent then edit.
+ * Suggestion chips below the composer. They are grouped by the
+ * product jobs users understand first: web execution, expert work,
+ * and task management. Click fills the composer (does NOT submit).
  */
 function SuggestionChips({
   onPick,
@@ -358,28 +358,35 @@ function SuggestionChips({
   onPick(intent: string): void;
 }): JSX.Element {
   return (
-    <div className="mx-auto mt-4 flex max-w-[640px] flex-wrap items-center justify-center gap-1.5">
-      {SUGGESTIONS.map((s) => {
-        const Icon = s.icon;
-        return (
-          <button
-            key={s.label}
-            type="button"
-            onClick={() => onPick(s.intent)}
-            aria-label={`用示例填入：${s.label}`}
-            className="group inline-flex h-8 items-center gap-1.5 rounded-[7px] border border-[#DCDDDD]/75 bg-white/55 px-2.5 text-[12px] font-medium text-[#595757] shadow-[0_1px_1px_rgba(17,24,39,0.02)] transition-colors hover:border-[#EA1F59]/25 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20 dark:border-white/10 dark:bg-white/5 dark:text-foreground/75 dark:hover:border-[#EA1F59]/35 dark:hover:bg-[#EA1F59]/10"
-          >
-            <Icon className="h-3.5 w-3.5 text-[#ADADAD] transition-colors group-hover:text-[#EA1F59]" />
-            {s.label}
-          </button>
-        );
-      })}
+    <div className="mx-auto mt-4 flex max-w-[700px] flex-col gap-2.5">
+      {SUGGESTION_GROUPS.map((group) => (
+        <div key={group.title} className="flex min-w-0 flex-wrap items-center justify-center gap-1.5">
+          <span className="mr-1 hidden text-[11px] font-medium text-[#ADADAD] sm:inline">
+            {group.title}
+          </span>
+          {group.items.map((s) => {
+            const Icon = s.icon;
+            return (
+              <button
+                key={s.label}
+                type="button"
+                onClick={() => onPick(s.intent)}
+                aria-label={`用示例填入：${s.label}`}
+                className="group inline-flex h-8 items-center gap-1.5 rounded-[7px] border border-[#DCDDDD]/75 bg-white/55 px-2.5 text-[12px] font-medium text-[#595757] shadow-[0_1px_1px_rgba(17,24,39,0.02)] transition-colors hover:border-[#EA1F59]/25 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20 dark:border-white/10 dark:bg-white/5 dark:text-foreground/75 dark:hover:border-[#EA1F59]/35 dark:hover:bg-[#EA1F59]/10"
+              >
+                <Icon className="h-3.5 w-3.5 text-[#ADADAD] transition-colors group-hover:text-[#EA1F59]" />
+                {s.label}
+              </button>
+            );
+          })}
+        </div>
+      ))}
     </div>
   );
 }
 
 /**
- * Eight chip seeds covering the common entry points. Label is the
+ * Chip seeds covering the common entry points. Label is the
  * short tap target; intent is the prefill text that lands in the
  * composer (user can edit before submitting).
  */
@@ -444,29 +451,49 @@ function OnboardingHint(): JSX.Element | null {
   );
 }
 
-const SUGGESTIONS: ReadonlyArray<{
+type SuggestionItem = {
   label: string;
   intent: string;
   icon: LucideIcon;
+};
+
+const SUGGESTION_GROUPS: ReadonlyArray<{
+  title: string;
+  items: readonly SuggestionItem[];
 }> = [
   {
-    label: '直播复盘',
-    intent: '帮我复盘昨天的抖音直播数据，做总结和优化策略',
-    icon: Radio,
-  },
-  { label: '查资料', intent: '帮我查一下今天的科技新闻', icon: Search },
-  { label: '打开网页', intent: '打开 GitHub 看看 trending 项目', icon: Globe2 },
-  { label: '行情查询', intent: '去东方财富查一下茅台最新股价', icon: TrendingUp },
-  { label: '下载文件', intent: '把这页内容保存成 PDF：', icon: Download },
-  {
-    label: '定时任务',
-    intent: '每天早上 9 点跑一次昨天的电商日报',
-    icon: CalendarClock,
+    title: '网页执行',
+    items: [
+      { label: '查资料', intent: '帮我查一下今天的科技新闻', icon: Search },
+      { label: '打开网页', intent: '打开 GitHub 看看 trending 项目', icon: Globe2 },
+      { label: '下载文件', intent: '把这页内容保存成 PDF：', icon: Download },
+    ],
   },
   {
-    label: '批量执行',
-    intent: '帮我对这些链接逐个执行抓取：\n',
-    icon: ListChecks,
+    title: '专业任务',
+    items: [
+      {
+        label: '直播复盘',
+        intent: '帮我复盘昨天的抖音直播数据，做总结和优化策略',
+        icon: Radio,
+      },
+      { label: '行情查询', intent: '去东方财富查一下茅台最新股价', icon: TrendingUp },
+      { label: '翻译内容', intent: '帮我翻译这段内容：', icon: Languages },
+    ],
   },
-  { label: '翻译内容', intent: '帮我翻译这段内容：', icon: Languages },
+  {
+    title: '任务管理',
+    items: [
+      {
+        label: '定时任务',
+        intent: '每天早上 9 点跑一次昨天的电商日报',
+        icon: CalendarClock,
+      },
+      {
+        label: '批量执行',
+        intent: '帮我对这些链接逐个执行抓取：\n',
+        icon: ListChecks,
+      },
+    ],
+  },
 ];
