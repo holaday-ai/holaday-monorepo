@@ -235,6 +235,7 @@ export function StockTasksPage(): JSX.Element {
   const [searchingSymbols, setSearchingSymbols] = React.useState(false);
   const [activeLeaderboard, setActiveLeaderboard] = React.useState<'涨幅榜' | '跌幅榜' | '成交额榜' | '换手率榜'>('涨幅榜');
   const pageAlive = React.useRef(true);
+  const dashboardCompletionRetries = React.useRef(0);
 
   React.useEffect(() => {
     pageAlive.current = true;
@@ -287,6 +288,27 @@ export function StockTasksPage(): JSX.Element {
   React.useEffect(() => {
     void loadPageData('initial');
   }, [loadPageData]);
+
+  React.useEffect(() => {
+    const status = dashboard?.freshness?.status;
+    if (!status || status === 'fresh') {
+      dashboardCompletionRetries.current = 0;
+      return;
+    }
+    if (loadingDashboard || refreshingDashboard || dashboardCompletionRetries.current >= 4) return;
+    dashboardCompletionRetries.current += 1;
+    const retryDelay = dashboardCompletionRetries.current === 1 ? 4_000 : 7_000;
+    const timer = window.setTimeout(() => {
+      if (pageAlive.current) void loadPageData('refresh');
+    }, retryDelay);
+    return () => window.clearTimeout(timer);
+  }, [
+    dashboard?.freshness?.status,
+    dashboard?.updatedAt,
+    loadPageData,
+    loadingDashboard,
+    refreshingDashboard,
+  ]);
 
   const initialDashboardLoading = loadingDashboard && dashboard === null && watchlist === null;
   const stocks = React.useMemo(

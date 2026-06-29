@@ -146,10 +146,12 @@ const POPULAR_A_SYMBOLS = [
 ];
 
 const DASHBOARD_FRESH_TTL_MS = 60_000;
+const DASHBOARD_PARTIAL_FRESH_TTL_MS = 8_000;
 const DASHBOARD_STALE_TTL_MS = 10 * 60_000;
-const DASHBOARD_FIRST_PAINT_BUDGET_MS = 3_000;
-const DASHBOARD_AKSHARE_TIMEOUT_MS = 4_000;
-const DASHBOARD_RANKING_TIMEOUT_MS = 5_000;
+const DASHBOARD_FIRST_PAINT_BUDGET_MS = 5_500;
+const DASHBOARD_AKSHARE_TIMEOUT_MS = 8_000;
+const DASHBOARD_SLOW_SIGNAL_TIMEOUT_MS = 18_000;
+const DASHBOARD_RANKING_TIMEOUT_MS = 8_000;
 const dashboardCache = new Map<string, DashboardCacheEntry>();
 
 function stock(
@@ -216,6 +218,16 @@ function markStale(snapshot: DashboardSnapshot, message: string): DashboardSnaps
 
 function fallbackLeaderboards(): LeaderboardsSnapshot {
   return { gainers: [], losers: [], amount: [] };
+}
+
+function emptyEnvelope<T>(source: string): AkEnvelope<T> {
+  return {
+    data: [],
+    count: 0,
+    source,
+    fetched_at: new Date().toISOString(),
+    disclaimer: '数据来源 AkShare 聚合，仅供信息参考，不构成任何投资建议，不预测股价。',
+  };
 }
 
 function buildPartialDashboardSnapshot(
@@ -522,12 +534,18 @@ async function buildDashboardSnapshot(args: {
   watchlistRows: WatchlistEntry[];
   effectiveWatchlist: WatchlistEntry[];
   now: Date;
+  includeSlowSignals?: boolean;
 }): Promise<DashboardSnapshot> {
-  const { logger, watchlistRows, effectiveWatchlist, now } = args;
+  const { logger, watchlistRows, effectiveWatchlist, now, includeSlowSignals = true } = args;
   const baseUrl = process.env.AKSHARE_HTTP_URL ?? 'http://127.0.0.1:8848';
   const client = new HttpAkshareClient({
     baseUrl,
     timeoutMs: DASHBOARD_AKSHARE_TIMEOUT_MS,
+    logger,
+  });
+  const slowSignalClient = new HttpAkshareClient({
+    baseUrl,
+    timeoutMs: DASHBOARD_SLOW_SIGNAL_TIMEOUT_MS,
     logger,
   });
   const rankingClient = new HttpAkshareClient({
@@ -541,7 +559,9 @@ async function buildDashboardSnapshot(args: {
     .slice(0, 5);
   const [indexCn, pulseEnv, stocks, announcements, rankingGainers, rankingLosers, rankingAmount] = await Promise.all([
     client.getIndexQuote('cn'),
-    client.getMarketPulse(compact),
+    includeSlowSignals
+      ? slowSignalClient.getMarketPulse(compact)
+      : Promise.resolve(emptyEnvelope<MarketPulseRow>('akshare:market-pulse:deferred')),
     Promise.all(effectiveWatchlist.slice(0, 8).map((entry, index) => stockSnapshot(client, entry, index))),
     Promise.all(
       announcementWatchlist.map(async (entry) => ({
@@ -559,6 +579,16 @@ async function buildDashboardSnapshot(args: {
     losers: mapRankingLeaders(rankingLosers, 'losers'),
     amount: mapRankingLeaders(rankingAmount, 'amount'),
   };
+  const freshness: DashboardFreshness = includeSlowSignals
+    ? {
+        status: 'fresh',
+        cachedAt: now.toISOString(),
+      }
+    : {
+        status: 'partial',
+        cachedAt: now.toISOString(),
+        message: '真实行情已先展示，市场温度、板块与重点动态正在后台补齐。',
+      };
   return withFreshness(
     {
       updatedAt: now.toISOString(),
@@ -573,11 +603,54 @@ async function buildDashboardSnapshot(args: {
       leaders: leaderboards.gainers,
       leaderboards,
     },
-    {
-      status: 'fresh',
-      cachedAt: now.toISOString(),
-    },
+    freshness,
   );
+}
+
+function cacheDashboardSnapshot(cacheKey: string, snapshot: DashboardSnapshot, refreshPromise?: Promise<DashboardSnapshot>): void {
+  const freshTtl = snapshot.freshness.status === 'partial'
+    ? DASHBOARD_PARTIAL_FRESH_TTL_MS
+    : DASHBOARD_FRESH_TTL_MS;
+  dashboardCache.set(cacheKey, {
+    snapshot,
+    freshUntil: Date.now() + freshTtl,
+    staleUntil: Date.now() + DASHBOARD_STALE_TTL_MS,
+    refreshPromise,
+  });
+}
+
+function startFullDashboardRefresh(args: {
+  cacheKey: string;
+  logger: MinimalLogger;
+  watchlistRows: WatchlistEntry[];
+  effectiveWatchlist: WatchlistEntry[];
+}): Promise<DashboardSnapshot> {
+  const fullRefreshPromise = buildDashboardSnapshot({
+    logger: args.logger,
+    watchlistRows: args.watchlistRows,
+    effectiveWatchlist: args.effectiveWatchlist,
+    now: new Date(),
+    includeSlowSignals: true,
+  }).then((snapshot) => {
+    cacheDashboardSnapshot(args.cacheKey, snapshot);
+    return snapshot;
+  }).catch((error) => {
+    args.logger.warn(
+      { error: error instanceof Error ? error.message : String(error) },
+      'stocks-dashboard: full refresh failed',
+    );
+    throw error;
+  }).finally(() => {
+    const latest = dashboardCache.get(args.cacheKey);
+    if (latest?.refreshPromise === fullRefreshPromise) {
+      if (latest.snapshot) {
+        dashboardCache.set(args.cacheKey, { ...latest, refreshPromise: undefined });
+      } else {
+        dashboardCache.delete(args.cacheKey);
+      }
+    }
+  });
+  return fullRefreshPromise;
 }
 
 function startDashboardRefresh(args: {
@@ -588,18 +661,22 @@ function startDashboardRefresh(args: {
 }): Promise<DashboardSnapshot> {
   const existing = dashboardCache.get(args.cacheKey);
   if (existing?.refreshPromise) return existing.refreshPromise;
+  const quickFirst = !existing?.snapshot;
 
   const refreshPromise = buildDashboardSnapshot({
     logger: args.logger,
     watchlistRows: args.watchlistRows,
     effectiveWatchlist: args.effectiveWatchlist,
     now: new Date(),
+    includeSlowSignals: !quickFirst,
   }).then((snapshot) => {
-    dashboardCache.set(args.cacheKey, {
-      snapshot,
-      freshUntil: Date.now() + DASHBOARD_FRESH_TTL_MS,
-      staleUntil: Date.now() + DASHBOARD_STALE_TTL_MS,
-    });
+    if (quickFirst) {
+      const fullRefreshPromise = startFullDashboardRefresh(args);
+      cacheDashboardSnapshot(args.cacheKey, snapshot, fullRefreshPromise);
+      fullRefreshPromise.catch(() => undefined);
+    } else {
+      cacheDashboardSnapshot(args.cacheKey, snapshot);
+    }
     return snapshot;
   }).catch((error) => {
     args.logger.warn(
@@ -710,3 +787,8 @@ export const stocksRouter = router({
       };
     }),
 });
+
+export const __stocksDashboardTest = {
+  buildDashboardSnapshot,
+  dashboardCache,
+};
