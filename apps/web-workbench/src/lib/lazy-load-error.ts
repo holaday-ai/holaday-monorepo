@@ -1,4 +1,5 @@
 export interface LazyLoadErrorCopy {
+  readonly kind: 'stale_version' | 'load_failure';
   readonly title: string;
   readonly body: string;
   readonly actionLabel: string;
@@ -25,12 +26,14 @@ export function lazyLoadErrorCopy(
 ): LazyLoadErrorCopy {
   if (isLazyLoadError(error)) {
     return {
+      kind: 'stale_version',
       title: `${surfaceLabel}资源已更新`,
-      body: '当前打开的版本和服务器上的最新资源不一致。刷新后会加载最新版本，已输入的内容请先确认保存。',
+      body: '当前打开的版本和服务器上的最新资源不一致。下方仍可查看已加载的任务摘要；提交追问或继续操作前请先刷新页面。',
       actionLabel: '刷新页面',
     };
   }
   return {
+    kind: 'load_failure',
     title: `${surfaceLabel}暂时无法加载`,
     body: '这个页面刚才没有打开成功。刷新后仍然失败的话，请稍后再试或联系支持。',
     actionLabel: '刷新重试',

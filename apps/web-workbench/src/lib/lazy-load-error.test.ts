@@ -27,6 +27,7 @@ describe('lazy load error helpers', () => {
   it('keeps unrelated render errors generic', () => {
     expect(isLazyLoadError(new Error('Cannot read properties of null'))).toBe(false);
     expect(lazyLoadErrorCopy(new Error('Cannot read properties of null'), '任务详情')).toEqual({
+      kind: 'load_failure',
       title: '任务详情暂时无法加载',
       body: '这个页面刚才没有打开成功。刷新后仍然失败的话，请稍后再试或联系支持。',
       actionLabel: '刷新重试',
@@ -40,8 +41,9 @@ describe('lazy load error helpers', () => {
         '任务详情',
       ),
     ).toEqual({
+      kind: 'stale_version',
       title: '任务详情资源已更新',
-      body: '当前打开的版本和服务器上的最新资源不一致。刷新后会加载最新版本，已输入的内容请先确认保存。',
+      body: '当前打开的版本和服务器上的最新资源不一致。下方仍可查看已加载的任务摘要；提交追问或继续操作前请先刷新页面。',
       actionLabel: '刷新页面',
     });
   });
