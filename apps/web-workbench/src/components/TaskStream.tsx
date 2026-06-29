@@ -402,6 +402,10 @@ function AgentBlock({
   const hasTerminalArtifacts =
     Boolean(task.attachments?.length) ||
     Boolean(task.finalUrl && task.finalUrl !== 'about:blank');
+  const trustSummaryUrl = task.finalUrl ?? screencastUrl;
+  const showTrustSummary =
+    Boolean(awaitingUser) ||
+    (terminal && shouldShowTrustSummaryCard(task, trustSummaryUrl));
 
   // Product polish #5 — drop the "H" avatar circle. Assistant
   // output reads as a result card directly on the page (Codex /
@@ -493,10 +497,10 @@ function AgentBlock({
           />
         )}
 
-        {(terminal || awaitingUser) && (
+        {showTrustSummary && (
           <TrustSummaryCard
             task={task}
-            currentUrl={task.finalUrl ?? screencastUrl}
+            currentUrl={trustSummaryUrl}
             onSuggestionPick={onSuggestionPick}
           />
         )}
@@ -886,6 +890,22 @@ function failureLevelLabel(level: NonNullable<UiTask['failureLevel']>): string {
   if (level === 'hard_fail') return '硬失败';
   if (level === 'needs_clarification') return '需补充信息';
   return '可修正';
+}
+
+function shouldShowTrustSummaryCard(task: UiTask, currentUrl?: string | null): boolean {
+  if (task.status === 'failed' || task.status === 'cancelled') return true;
+  if (task.status === 'partial_success') return true;
+  if (task.verificationPassed === false) return true;
+  if ((task.failedChecks?.length ?? 0) > 0) return true;
+  if (task.failureLevel) return true;
+  if (task.finalScreenshot) return true;
+  if ((task.attachments?.length ?? 0) > 0) return true;
+  if (hasHttpUrl(task.resultText) || hasHttpUrl(currentUrl)) return true;
+  return false;
+}
+
+function hasHttpUrl(value?: string | null): boolean {
+  return typeof value === 'string' && /https?:\/\//i.test(value);
 }
 
 /**
