@@ -23,6 +23,8 @@ import {
   RotateCcw,
   Search,
   ShieldAlert,
+  ShieldCheck,
+  ShieldQuestion,
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -75,6 +77,12 @@ import {
   type ResultSourceMarker,
 } from '@/lib/result-source-badges';
 import { shouldShowVerificationBanner, verificationBannerCopy } from '@/lib/verification-banner-copy';
+import {
+  buildRecoveryActions,
+  buildTrustSummary,
+  type RecoveryAction,
+  type TrustTone,
+} from '@/lib/trust-summary';
 import { ScheduledTaskDialog } from '@/components/ScheduledTaskDialog';
 import { PlanCard } from '@/components/PlanCard';
 import { SearchResultCard } from '@/components/SearchResultCard';
@@ -477,6 +485,14 @@ function AgentBlock({
           />
         )}
 
+        {(terminal || awaitingUser) && (
+          <TrustSummaryCard
+            task={task}
+            currentUrl={task.finalUrl ?? screencastUrl}
+            onSuggestionPick={onSuggestionPick}
+          />
+        )}
+
         {/* Phase 24 RC follow-up — incremental streaming output for
          *  generate + scrape tasks. Render gate (Bug 1 fix):
          *
@@ -614,6 +630,207 @@ function AgentBlock({
       </div>
     </div>
   );
+}
+
+function TrustSummaryCard({
+  task,
+  currentUrl,
+  onSuggestionPick,
+}: {
+  task: UiTask;
+  currentUrl?: string | null;
+  onSuggestionPick?: (intent: string) => void;
+}): JSX.Element {
+  const toast = useToast();
+  const mountedRef = useMountedRef();
+  const createTask = useTaskStore((s) => s.createTask);
+  const [retrying, setRetrying] = React.useState(false);
+  const summary = React.useMemo(
+    () =>
+      buildTrustSummary({
+        status: task.status,
+        resultText: task.resultText,
+        currentUrl,
+        finalScreenshot: task.finalScreenshot ?? null,
+        attachments: task.attachments,
+        verificationPassed: task.verificationPassed,
+        failureLevel: task.failureLevel,
+        failedChecks: task.failedChecks ?? null,
+      }),
+    [
+      currentUrl,
+      task.attachments,
+      task.failedChecks,
+      task.failureLevel,
+      task.finalScreenshot,
+      task.resultText,
+      task.status,
+      task.verificationPassed,
+    ],
+  );
+  const recoveryActions = React.useMemo(
+    () =>
+      buildRecoveryActions({
+        status: task.status,
+        intent: task.intent,
+        resultText: task.resultText,
+        awaitingKind: task.awaitingKind ?? null,
+        failureLevel: task.failureLevel,
+        failedChecks: task.failedChecks ?? null,
+      }),
+    [
+      task.awaitingKind,
+      task.failedChecks,
+      task.failureLevel,
+      task.intent,
+      task.resultText,
+      task.status,
+    ],
+  );
+  const handleAction = React.useCallback(
+    async (action: RecoveryAction): Promise<void> => {
+      if (action.kind === 'prefill') {
+        if (!action.prompt || !onSuggestionPick) return;
+        onSuggestionPick(action.prompt);
+        toast.show('已填入恢复建议，可编辑后发送', 'info', 1800);
+        return;
+      }
+      if (!task.intent || retrying) return;
+      setRetrying(true);
+      try {
+        const res = await createTask(task.intent, []);
+        if (!mountedRef.current) return;
+        if ('error' in res) {
+          toast.show(taskActionError('重新执行失败', res.error), 'error');
+          return;
+        }
+        toast.show('已开始重新执行', 'info', 2000);
+      } finally {
+        if (mountedRef.current) setRetrying(false);
+      }
+    },
+    [createTask, mountedRef, onSuggestionPick, retrying, task.intent, toast],
+  );
+  const Icon = trustToneIcon(summary.tone);
+  return (
+    <div
+      className={cn(
+        TRUST_SURFACE,
+        'px-4 py-3 text-sm',
+        trustToneClass(summary.tone),
+      )}
+    >
+      <div className="flex items-start gap-2.5">
+        <Icon className={cn('mt-0.5 h-4 w-4 shrink-0', trustToneIconClass(summary.tone))} />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="min-w-0">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                {summary.title}
+              </div>
+              <div className="mt-0.5 font-medium text-foreground">{summary.verdict}</div>
+            </div>
+            {task.failureLevel && (
+              <span className="rounded-md border border-[#DCDDDD] bg-white/70 px-2 py-0.5 text-[11px] text-muted-foreground dark:border-white/10 dark:bg-white/5">
+                {failureLevelLabel(task.failureLevel)}
+              </span>
+            )}
+          </div>
+          <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+            {summary.boundary}
+          </p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            {summary.rows.map((row) => (
+              <div
+                key={row.label}
+                className="rounded-[7px] border border-[#DCDDDD]/70 bg-white/65 px-3 py-2 dark:border-white/10 dark:bg-white/5"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-medium text-muted-foreground">
+                    {row.label}
+                  </span>
+                  <span className="shrink-0 text-xs font-medium text-foreground">
+                    {row.value}
+                  </span>
+                </div>
+                <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                  {row.detail}
+                </p>
+              </div>
+            ))}
+          </div>
+          {summary.checks.length > 0 && (
+            <div className="mt-3 rounded-[7px] border border-[#FFC910]/55 bg-[#FFC910]/10 px-3 py-2 text-xs dark:border-[#FFC910]/35">
+              <div className="font-medium text-foreground">自动审核检查项</div>
+              <ul className="mt-1 list-inside list-disc space-y-0.5 leading-relaxed text-muted-foreground">
+                {summary.checks.map((check, i) => (
+                  <li key={`${check}-${i}`}>{check}</li>
+                ))}
+              </ul>
+              {summary.hiddenCheckCount > 0 && (
+                <div className="mt-1 text-[11px] text-muted-foreground">
+                  另有 {summary.hiddenCheckCount} 项检查未展开。
+                </div>
+              )}
+            </div>
+          )}
+          {recoveryActions.length > 0 && (
+            <div className="mt-3 border-t border-[#DCDDDD]/70 pt-3 dark:border-white/10">
+              <div className="mb-2 text-[11px] font-medium tracking-wide text-muted-foreground">
+                恢复动作
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {recoveryActions.map((action) => (
+                  <button
+                    key={`${action.kind}-${action.label}`}
+                    type="button"
+                    onClick={() => void handleAction(action)}
+                    disabled={
+                      (action.kind === 'retry' && retrying) ||
+                      (action.kind === 'prefill' && !onSuggestionPick)
+                    }
+                    title={action.detail}
+                    className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-[#DCDDDD] bg-white/75 px-3 text-[11px] font-medium text-[#595757] transition-colors hover:border-[#EA1F59]/30 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/10 dark:bg-white/5 dark:text-foreground/80 dark:hover:bg-white/10"
+                  >
+                    {action.kind === 'retry' ? (
+                      <RotateCcw className={cn('h-3.5 w-3.5', retrying && 'animate-spin')} />
+                    ) : (
+                      <ListChecks className="h-3.5 w-3.5" />
+                    )}
+                    <span>{action.kind === 'retry' && retrying ? '重新执行中…' : action.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function trustToneIcon(tone: TrustTone): React.ComponentType<{ className?: string }> {
+  if (tone === 'danger') return ShieldAlert;
+  if (tone === 'warning') return ShieldQuestion;
+  return ShieldCheck;
+}
+
+function trustToneClass(tone: TrustTone): string {
+  if (tone === 'danger') return 'border-[#EA1F59]/35';
+  if (tone === 'warning') return 'border-[#FFC910]/55';
+  return 'border-[#DCDDDD]';
+}
+
+function trustToneIconClass(tone: TrustTone): string {
+  if (tone === 'danger') return 'text-[#EA1F59]';
+  if (tone === 'warning') return 'text-[#57479C]';
+  return 'text-[#2F9E6D]';
+}
+
+function failureLevelLabel(level: NonNullable<UiTask['failureLevel']>): string {
+  if (level === 'hard_fail') return '硬失败';
+  if (level === 'needs_clarification') return '需补充信息';
+  return '可修正';
 }
 
 /**

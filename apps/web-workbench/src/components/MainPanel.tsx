@@ -21,6 +21,7 @@ import { TaskToolbar, isBrowserLikely } from '@/components/TaskToolbar';
 import { Button } from '@/components/ui/button';
 import type { ComposerSubmitResult } from '@/components/composer-submit';
 import { shouldResetComposerOnSelectionChange } from '@/components/composer-reset';
+import { taskStatusLabel } from '@/lib/task-status-copy';
 import { useTaskStore } from '@/stores/task-store';
 import type { AwaitingKind } from '@/lib/awaiting-user-copy';
 import type { SidePanelMode } from '@/types/side-panel';
@@ -249,7 +250,11 @@ export function MainPanel({
             </div>
           )}
           <div className="flex-1 overflow-y-auto scroll-pb-40 pb-40">
-            <LazyLoadBoundary surfaceLabel="任务详情" resetKey={task.taskId}>
+            <LazyLoadBoundary
+              surfaceLabel="任务详情"
+              resetKey={task.taskId}
+              staleVersionFallback={<StaticTaskDetailFallback task={task} />}
+            >
               <React.Suspense fallback={<TaskStreamFallback />}>
                 <TaskStream
                   task={task}
@@ -291,6 +296,53 @@ function TaskStreamFallback(): JSX.Element {
   return (
     <div className="mx-auto flex min-h-[220px] max-w-3xl items-center justify-center px-6 text-sm text-muted-foreground">
       加载任务详情…
+    </div>
+  );
+}
+
+function StaticTaskDetailFallback({ task }: { task: UiTask }): JSX.Element {
+  const statusLabel = taskStatusLabel(task.status, task.awaitingKind);
+  const hasResult = Boolean(task.resultText?.trim());
+  return (
+    <div className="rounded-[8px] border border-[#DCDDDD] bg-white px-5 py-4 text-sm shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-white/10 dark:bg-card/85">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            任务摘要
+          </div>
+          <h2 className="mt-1 break-words text-base font-semibold leading-snug text-foreground">
+            {task.title || task.intent}
+          </h2>
+        </div>
+        <span className="rounded-md border border-[#DCDDDD] bg-[#EFEFEF]/55 px-2 py-0.5 text-[11px] font-medium text-[#595757] dark:border-white/10 dark:bg-white/5 dark:text-foreground/80">
+          {statusLabel}
+        </span>
+      </div>
+      <div className="mt-4 rounded-[7px] border border-[#DCDDDD]/70 bg-[#F7FBFC]/80 px-3 py-2.5 dark:border-white/10 dark:bg-white/5">
+        <div className="text-[11px] font-medium text-muted-foreground">
+          已加载结果
+        </div>
+        {hasResult ? (
+          <p className="mt-1 max-h-[360px] overflow-y-auto whitespace-pre-wrap break-words text-sm leading-6 text-foreground">
+            {task.resultText}
+          </p>
+        ) : (
+          <p className="mt-1 text-sm leading-6 text-muted-foreground">
+            当前版本无法加载完整任务详情组件，但没有可展示的文本结果。刷新后会恢复完整步骤、附件和操作按钮。
+          </p>
+        )}
+      </div>
+      <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-3">
+        <div className="rounded-[7px] border border-[#DCDDDD]/70 bg-white/60 px-3 py-2 dark:border-white/10 dark:bg-white/5">
+          最终页面：{task.finalUrl ? '已记录' : '未记录'}
+        </div>
+        <div className="rounded-[7px] border border-[#DCDDDD]/70 bg-white/60 px-3 py-2 dark:border-white/10 dark:bg-white/5">
+          最终截图：{task.finalScreenshot ? '已保存' : '未保存'}
+        </div>
+        <div className="rounded-[7px] border border-[#DCDDDD]/70 bg-white/60 px-3 py-2 dark:border-white/10 dark:bg-white/5">
+          产物文件：{task.attachments?.length ?? 0} 个
+        </div>
+      </div>
     </div>
   );
 }
