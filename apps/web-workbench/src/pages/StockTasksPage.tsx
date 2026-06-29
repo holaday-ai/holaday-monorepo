@@ -2,7 +2,6 @@ import {
   ArrowRight,
   Bell,
   CalendarClock,
-  ChevronLeft,
   ChevronRight,
   ExternalLink,
   FileText,
@@ -723,16 +722,16 @@ function WatchlistStrip({
         action="编辑"
         onAction={onEdit}
       />
-      <div className="mt-4 flex snap-x gap-3 overflow-x-auto pb-1 [scrollbar-width:thin]">
+      <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-2">
         {stocks.slice(0, 5).map((stock) => (
           <article
             key={stock.symbol}
-            className="group min-w-[238px] max-w-[280px] flex-1 snap-start rounded-[8px] border border-[#E7E7EB] bg-[#FEFEFF] p-3 transition-[border-color,box-shadow,transform] hover:-translate-y-0.5 hover:border-[#EA1F59]/25 hover:shadow-[0_14px_28px_rgba(18,24,38,0.08)] motion-reduce:hover:translate-y-0"
+            className="group min-w-0 rounded-[8px] border border-[#E7E7EB] bg-[#FEFEFF] p-4 transition-[border-color,box-shadow,transform] hover:-translate-y-0.5 hover:border-[#EA1F59]/25 hover:shadow-[0_14px_28px_rgba(18,24,38,0.08)] motion-reduce:hover:translate-y-0"
           >
-            <div className="flex items-start justify-between gap-2">
+            <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <div className="truncate text-[13px] font-semibold text-[#121826]">{stock.name}</div>
-                <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-[#667085]">
+                <div className="truncate text-[16px] font-semibold text-[#121826]">{stock.name}</div>
+                <div className="mt-1 flex items-center gap-1.5 text-[12px] text-[#667085]">
                   <span className="tabular-nums">{stock.symbol}</span>
                   <span className="h-1 w-1 rounded-full bg-[#CBD0DA]" />
                   <span>{marketLabel(stock.market)}</span>
@@ -740,28 +739,43 @@ function WatchlistStrip({
               </div>
               <SignalPill signal={stock.signal} />
             </div>
-            <div className="mt-4 flex items-start justify-between gap-3">
-              <span className="text-[24px] font-semibold leading-none tabular-nums text-[#121826]">{stock.price}</span>
-              <ChangeBadge value={stock.changePct} />
-            </div>
-            {stock.spark.length >= 2 ? (
-              <MarketMiniChart values={stock.spark} positive={stock.changePct >= 0} className="mt-4 h-[86px] w-full" />
-            ) : (
-              <div className="mt-4 flex h-[86px] items-center justify-center rounded-[7px] border border-dashed border-[#D7DAE2] bg-[#F7F8FA] text-[11px] text-[#8B92A1]">
-                暂无真实走势
+
+            <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_140px]">
+              <div className="min-w-0">
+                <div className="flex items-end justify-between gap-3">
+                  <span className="text-[32px] font-semibold leading-none tabular-nums text-[#121826]">{stock.price}</span>
+                  <ChangeBadge value={stock.changePct} />
+                </div>
+                {stock.spark.length >= 2 ? (
+                  <MarketMiniChart values={stock.spark} positive={stock.changePct >= 0} className="mt-4 h-[132px] w-full" />
+                ) : (
+                  <div className="mt-4 flex h-[132px] items-center justify-center rounded-[7px] border border-dashed border-[#D7DAE2] bg-[#F7F8FA] text-[12px] text-[#8B92A1]">
+                    暂无真实走势
+                  </div>
+                )}
               </div>
-            )}
-            <div className="mt-3 flex items-center justify-between gap-2 border-t border-[#F0F1F4] pt-2 text-[12px]">
-              <span className="min-w-0 truncate text-[11px] text-[#8B92A1]">{stock.spark.length >= 2 ? '真实走势' : '等待行情'}</span>
-              <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-[11px] text-[#4F5868]">
-                日报：{stock.report}
-                <span
-                  className={cn(
-                    'h-1.5 w-1.5 rounded-full',
-                    stock.report === '已生成' ? 'bg-[#0E9F6E]' : 'bg-[#CBD0DA]',
-                  )}
-                />
-              </span>
+              <div className="grid min-w-0 grid-cols-2 gap-2 lg:grid-cols-1">
+                <StockMiniMetric label="8日区间" value={stockRangeText(stock)} />
+                <StockMiniMetric label="区间位置" value={stockPositionText(stock)} tone={stock.changePct >= 0 ? 'red' : 'green'} />
+                <StockMiniMetric label="今日观察" value={stockObservationText(stock)} />
+                <StockMiniMetric label="追踪重点" value={stockFollowupText(stock)} />
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-2 border-t border-[#F0F1F4] pt-3 text-[12px] text-[#4F5868] sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+              <div className="min-w-0 truncate">{stock.note}</div>
+              <div className="flex items-center justify-between gap-2 sm:justify-end">
+                <span className="min-w-0 truncate text-[11px] text-[#8B92A1]">{stock.spark.length >= 2 ? '真实走势' : '等待行情'}</span>
+                <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-[11px] text-[#4F5868]">
+                  日报：{stock.report}
+                  <span
+                    className={cn(
+                      'h-1.5 w-1.5 rounded-full',
+                      stock.report === '已生成' ? 'bg-[#0E9F6E]' : 'bg-[#CBD0DA]',
+                    )}
+                  />
+                </span>
+              </div>
             </div>
           </article>
         ))}
@@ -1423,12 +1437,6 @@ function NewsPanel({
   className?: string;
 }): JSX.Element {
   const items = news.slice(0, 6);
-  const scrollRef = React.useRef<HTMLDivElement | null>(null);
-  const scrollNews = React.useCallback((direction: -1 | 1) => {
-    const node = scrollRef.current;
-    if (!node) return;
-    node.scrollBy({ left: direction * Math.max(260, node.clientWidth * 0.82), behavior: 'smooth' });
-  }, []);
 
   return (
     <Panel className={cn('overflow-hidden', className)}>
@@ -1436,13 +1444,16 @@ function NewsPanel({
       {items.length === 0 ? (
         <EmptyState title="暂无真实股市新闻" body="公告、市场脉冲和自选股行情暂未返回可展示内容。" />
       ) : null}
-      <div ref={scrollRef} className="mt-4 flex snap-x gap-3 overflow-x-auto pb-1 [scrollbar-width:thin]">
-        {items.map((item) => (
+      <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+        {items.map((item, index) => (
           <article
             key={`${item.time}-${item.title}`}
-            className="min-w-[252px] max-w-[320px] flex-1 snap-start overflow-hidden rounded-[8px] border border-[#E7E7EB] bg-white shadow-[0_10px_24px_rgba(18,24,38,0.04)] transition hover:border-[#EA1F59]/20 hover:shadow-[0_16px_32px_rgba(18,24,38,0.08)]"
+            className={cn(
+              'min-w-0 overflow-hidden rounded-[8px] border border-[#E7E7EB] bg-white shadow-[0_10px_24px_rgba(18,24,38,0.04)] transition hover:border-[#EA1F59]/20 hover:shadow-[0_16px_32px_rgba(18,24,38,0.08)]',
+              index === 0 && items.length > 3 ? 'md:col-span-2 xl:col-span-1' : '',
+            )}
           >
-            <div className={cn('h-[92px] border-b border-[#F0F1F4] p-3', newsVisualClass(item.category))}>
+            <div className={cn('border-b border-[#F0F1F4] p-3', newsVisualClass(item.category))}>
               <div className="flex items-center justify-between gap-2">
                 <span className="rounded-full bg-white/85 px-2 py-1 text-[11px] font-medium text-[#344054] shadow-sm">
                   {item.category ?? '动态'}
@@ -1451,8 +1462,13 @@ function NewsPanel({
                   {item.time}
                 </span>
               </div>
-              <div className="mt-5 h-px w-full bg-white/70" />
-              <div className="mt-2 h-px w-2/3 bg-white/60" />
+              <div className="mt-4 flex items-end justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-[11px] font-medium text-[#667085]">来源</div>
+                  <div className="mt-1 truncate text-[13px] font-semibold text-[#121826]">{item.source ?? '公开来源'}</div>
+                </div>
+                <NewsSourceDots count={item.symbols.length || 1} />
+              </div>
             </div>
             <div className="p-3">
               {item.url ? (
@@ -1460,20 +1476,25 @@ function NewsPanel({
                   href={item.url}
                   target="_blank"
                   rel="noreferrer"
-                  className="group line-clamp-2 min-h-[42px] text-[14px] font-medium leading-relaxed text-[#344054] hover:text-[#EA1F59]"
+                  className="group line-clamp-3 min-h-[64px] text-[14px] font-semibold leading-relaxed text-[#344054] hover:text-[#EA1F59]"
                 >
                   {item.title}
                   <ExternalLink className="ml-1 inline h-3 w-3 opacity-60 transition group-hover:opacity-100" aria-hidden />
                 </a>
               ) : (
-                <p className="line-clamp-2 min-h-[42px] text-[14px] font-medium leading-relaxed text-[#344054]">{item.title}</p>
+                <p className="line-clamp-3 min-h-[64px] text-[14px] font-semibold leading-relaxed text-[#344054]">{item.title}</p>
               )}
-              <div className="mt-5 flex items-center justify-between gap-2">
-                <div className="flex min-w-0 items-center gap-2">
-                  <NewsSourceDots count={item.symbols.length || 1} />
-                  <span className="truncate text-[12px] text-[#667085]">
-                    {item.source ?? `${item.symbols.length || 1} 个来源`}
-                  </span>
+              <div className="mt-4 flex items-center justify-between gap-2 border-t border-[#F0F1F4] pt-3">
+                <div className="flex min-w-0 flex-wrap gap-1">
+                  {item.symbols.length > 0 ? item.symbols.slice(0, 3).map((symbol) => (
+                    <span key={symbol} className="rounded-[5px] border border-[#E1E3E8] bg-white px-1.5 py-0.5 text-[10px] text-[#667085]">
+                      {symbol}
+                    </span>
+                  )) : (
+                    <span className="rounded-[5px] border border-[#E1E3E8] bg-white px-1.5 py-0.5 text-[10px] text-[#667085]">
+                      市场
+                    </span>
+                  )}
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
                   <button
@@ -1498,36 +1519,6 @@ function NewsPanel({
           </article>
         ))}
       </div>
-      {items.length > 0 ? (
-        <div className="mt-4 flex items-center justify-between gap-3">
-          <button
-            type="button"
-            onClick={() => scrollNews(-1)}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#E1E3E8] text-[#667085] transition hover:border-[#EA1F59]/30 hover:text-[#EA1F59]"
-            aria-label="查看上一组动态"
-            title="查看上一组动态"
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </button>
-          <div className="flex items-center gap-1.5">
-            {items.map((item, index) => (
-              <span
-                key={`${item.time}-${item.title}-dot`}
-                className={cn('h-1.5 w-1.5 rounded-full', index === 0 ? 'bg-[#344054]' : 'bg-[#D7DAE2]')}
-              />
-            ))}
-          </div>
-          <button
-            type="button"
-            onClick={() => scrollNews(1)}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#E1E3E8] text-[#667085] transition hover:border-[#EA1F59]/30 hover:text-[#EA1F59]"
-            aria-label="查看下一组动态"
-            title="查看下一组动态"
-          >
-            <ChevronRight className="h-4 w-4" />
-          </button>
-        </div>
-      ) : null}
     </Panel>
   );
 }
@@ -1790,6 +1781,24 @@ function ChangeBadge({ value }: { value: number }): JSX.Element {
   );
 }
 
+function StockMiniMetric({
+  label,
+  value,
+  tone = 'neutral',
+}: {
+  label: string;
+  value: string;
+  tone?: 'neutral' | 'red' | 'green';
+}): JSX.Element {
+  const valueClass = tone === 'red' ? MARKET_UP_CLASS : tone === 'green' ? MARKET_DOWN_CLASS : 'text-[#121826]';
+  return (
+    <div className="min-w-0 rounded-[7px] border border-[#ECEEF3] bg-[#FCFCFD] px-2.5 py-2">
+      <div className="truncate text-[10px] font-medium text-[#8B92A1]">{label}</div>
+      <div className={cn('mt-1 truncate text-[12px] font-semibold leading-tight', valueClass)}>{value}</div>
+    </div>
+  );
+}
+
 function SignalPill({ signal }: { signal: Signal }): JSX.Element {
   const cls =
     signal === '强势' || signal === '偏强'
@@ -1920,6 +1929,42 @@ function valuesToPoints(values: number[]): string {
       return `${x.toFixed(1)},${y.toFixed(1)}`;
     })
     .join(' ');
+}
+
+function stockRangeText(stock: StockSnapshot): string {
+  if (stock.spark.length < 2) return '待补齐';
+  const min = Math.min(...stock.spark);
+  const max = Math.max(...stock.spark);
+  return `${min.toFixed(2)} - ${max.toFixed(2)}`;
+}
+
+function stockPositionText(stock: StockSnapshot): string {
+  if (stock.spark.length < 2) return '等待走势';
+  const min = Math.min(...stock.spark);
+  const max = Math.max(...stock.spark);
+  const latest = stock.spark[stock.spark.length - 1] ?? min;
+  const range = max - min;
+  if (range <= 0) return '区间持平';
+  const pct = ((latest - min) / range) * 100;
+  if (pct >= 78) return '接近高位';
+  if (pct <= 22) return '接近低位';
+  return '区间中部';
+}
+
+function stockObservationText(stock: StockSnapshot): string {
+  if (stock.price === '—') return '行情未回';
+  if (stock.changePct >= 5) return '强波动';
+  if (stock.changePct >= 1) return '偏强';
+  if (stock.changePct <= -5) return '风险放大';
+  if (stock.changePct <= -1) return '偏弱';
+  return '窄幅震荡';
+}
+
+function stockFollowupText(stock: StockSnapshot): string {
+  if (stock.price === '—') return '等行情源';
+  if (stock.signal === '强势' || stock.signal === '偏强') return '看公告/量能';
+  if (stock.signal === '偏弱' || stock.signal === '风险升高') return '看支撑/公告';
+  return '看行业联动';
 }
 
 function dashboardHasDisplayableData(snapshot: DashboardSnapshot | null): boolean {
