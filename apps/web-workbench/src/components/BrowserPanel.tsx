@@ -76,6 +76,7 @@ interface StaticEvidenceFit {
 }
 
 type StaticEvidenceViewMode = 'readable' | 'contain';
+type TerminalEvidenceScreenshotSource = 'saved-screenshot' | 'last-frame';
 
 /**
  * VNC bridge URL. Relative path lets the browser auto-resolve the
@@ -364,6 +365,12 @@ export function BrowserPanel({
     frame,
     taskTerminalForEvidence,
   ]);
+  const finalEvidenceSource: TerminalEvidenceScreenshotSource | null =
+    finalEvidenceFrame
+      ? activeTask?.finalScreenshot
+        ? 'saved-screenshot'
+        : 'last-frame'
+      : null;
   const latestFrame = React.useMemo<UiScreencast | null>(() => {
     const all = Object.values(screencastByTask);
     if (all.length === 0) return null;
@@ -1724,6 +1731,12 @@ export function BrowserPanel({
               // evidence viewer and offer a fresh re-run instead of a
               // misleading live takeover.
               <div className="relative flex h-full w-full flex-col">
+                <TerminalEvidenceLedger
+                  status={taskStatus}
+                  url={finalEvidenceFrame.url}
+                  screenshotSource={finalEvidenceSource ?? 'last-frame'}
+                  isSheet={isSheet}
+                />
                 <div
                   ref={finalEvidenceScrollRef}
                   className={cn(
@@ -2191,6 +2204,100 @@ function HibernationCard({
         </button>
       </div>
     </div>
+  );
+}
+
+function TerminalEvidenceLedger({
+  status,
+  url,
+  screenshotSource,
+  isSheet,
+}: {
+  status: UiTaskStatus | null | undefined;
+  url: string | null | undefined;
+  screenshotSource: TerminalEvidenceScreenshotSource;
+  isSheet: boolean;
+}): JSX.Element {
+  const safeFinalUrl = safeExternalHttpHref(url);
+  const title = terminalEvidenceFrameLabel({
+    status,
+    url: url ?? 'about:blank',
+  });
+  const screenshotLabel =
+    screenshotSource === 'saved-screenshot'
+      ? '已观察：最终截图'
+      : '已观察：最后画面';
+  return (
+    <div
+      className={cn(
+        'shrink-0 border-b bg-background/95 backdrop-blur',
+        BROWSER_DIVIDER,
+        isSheet ? 'px-2 py-2' : 'px-3 py-2',
+      )}
+    >
+      <div className="flex min-w-0 items-start gap-2">
+        <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-[7px] bg-[#42C0EF]/12 text-[#118AB2] dark:text-[#42C0EF]">
+          <ListChecks className="h-3.5 w-3.5" aria-hidden />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="truncate text-[12px] font-semibold text-foreground">
+              终态证据
+            </span>
+            <span className="min-w-0 truncate text-[11px] text-muted-foreground">
+              {title}
+            </span>
+          </div>
+          <div className="mt-1 flex min-w-0 flex-wrap gap-1.5">
+            <EvidenceLedgerPill tone="observed" label={screenshotLabel} />
+            <EvidenceLedgerPill
+              tone="extracted"
+              label={safeFinalUrl ? '已记录：最终 URL' : '未记录：最终 URL'}
+            />
+            <EvidenceLedgerPill
+              tone="boundary"
+              label="未验证：结果内每条推断"
+            />
+          </div>
+          <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
+            这里证明任务结束时的页面状态；结论是否成立仍以结果卡中的来源、检查项和上下文为准。
+          </p>
+        </div>
+        {safeFinalUrl && !isSheet && (
+          <SafeExternalLinkButton
+            href={safeFinalUrl}
+            className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-[#DCDDDD] bg-white px-2 text-[11px] font-medium text-[#595757] transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/60 dark:border-white/10 dark:bg-transparent dark:text-foreground/80 dark:hover:bg-white/10"
+          >
+            <ExternalLink className="h-3 w-3" aria-hidden />
+            <span>打开</span>
+          </SafeExternalLinkButton>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function EvidenceLedgerPill({
+  tone,
+  label,
+}: {
+  tone: 'observed' | 'extracted' | 'boundary';
+  label: string;
+}): JSX.Element {
+  return (
+    <span
+      className={cn(
+        'inline-flex max-w-full items-center rounded-full border px-2 py-0.5 text-[10px] font-medium',
+        tone === 'observed' &&
+          'border-[#42C0EF]/25 bg-[#42C0EF]/10 text-[#118AB2] dark:text-[#7DD3FC]',
+        tone === 'extracted' &&
+          'border-[#57479C]/25 bg-[#57479C]/10 text-[#57479C] dark:text-[#DCDDDD]',
+        tone === 'boundary' &&
+          'border-[#DCDDDD]/80 bg-white/45 text-[#595757] dark:border-white/10 dark:bg-white/5 dark:text-foreground/70',
+      )}
+    >
+      <span className="truncate">{label}</span>
+    </span>
   );
 }
 

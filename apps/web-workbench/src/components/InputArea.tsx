@@ -553,6 +553,13 @@ export function InputArea({
     !replyMode && !followUpTarget
       ? detectComposerExpertWorkflow(value, attachments.some((a) => a.status === 'ready'))
       : null;
+  const modePills = composerModePills({
+    taskMode,
+    expertMode,
+    replyMode: Boolean(replyMode),
+    followUp: Boolean(followUpTarget),
+    expertWorkflowMatched: Boolean(expertWorkflow),
+  });
 
   function appendGuidance(text: string): void {
     setValue((prev) => {
@@ -816,18 +823,21 @@ export function InputArea({
         </Button>
       </div>
       <div className="mt-2 flex min-h-[28px] items-center justify-between gap-3 px-1 text-[11px] text-muted-foreground/70">
-        <span
-          aria-live="polite"
-          className={cn(
-            'inline-flex min-w-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[#595757] shadow-[0_1px_2px_rgba(17,24,39,0.03)] transition-opacity dark:text-foreground/75',
-            submitting
-              ? 'border-[#EA1F59]/25 bg-[#EA1F59]/5 opacity-100'
-              : 'border-transparent bg-transparent opacity-0',
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+          {submitting ? (
+            <span
+              aria-live="polite"
+              className="inline-flex min-w-0 items-center gap-1.5 rounded-full border border-[#EA1F59]/25 bg-[#EA1F59]/5 px-2.5 py-1 text-[#595757] shadow-[0_1px_2px_rgba(17,24,39,0.03)] dark:text-foreground/75"
+            >
+              <Loader2 className="h-3 w-3 shrink-0 animate-spin text-[#EA1F59]" />
+              <span className="truncate">{submittingStatus}</span>
+            </span>
+          ) : (
+            modePills.map((pill) => (
+              <ComposerModePill key={pill.label} pill={pill} />
+            ))
           )}
-        >
-          {submitting && <Loader2 className="h-3 w-3 shrink-0 animate-spin text-[#EA1F59]" />}
-          <span className="truncate">{submitting ? submittingStatus : ' '}</span>
-        </span>
+        </div>
         <span className="hidden shrink-0 rounded-[6px] px-1.5 py-0.5 text-[#ADADAD] sm:inline">
           Enter 发送
         </span>
@@ -863,6 +873,95 @@ function pluginModeLabel(mode: 'normal' | 'expert' | 'auto'): string {
   if (mode === 'expert') return '开启';
   if (mode === 'normal') return '关闭';
   return '自动';
+}
+
+type ComposerModePillCopy = {
+  label: string;
+  detail: string;
+  tone?: 'accent' | 'neutral';
+};
+
+function composerModePills({
+  taskMode,
+  expertMode,
+  replyMode,
+  followUp,
+  expertWorkflowMatched,
+}: {
+  taskMode: 'auto' | 'plan';
+  expertMode: 'normal' | 'expert' | 'auto';
+  replyMode: boolean;
+  followUp: boolean;
+  expertWorkflowMatched: boolean;
+}): ComposerModePillCopy[] {
+  if (replyMode) {
+    return [
+      {
+        label: '补充信息',
+        detail: '发送后会继续当前暂停任务，不会新开一次执行。',
+        tone: 'accent',
+      },
+      {
+        label: '保留进度',
+        detail: '已完成步骤会作为上下文带回给执行器。',
+      },
+    ];
+  }
+  if (followUp) {
+    return [
+      {
+        label: '追问结果',
+        detail: '这条消息会接在当前任务结果后继续，不会丢失原记录。',
+        tone: 'accent',
+      },
+    ];
+  }
+  const execution =
+    taskMode === 'plan'
+      ? {
+          label: '先出方案',
+          detail: '先让 HOLA DAY 拆解步骤，确认后再进入执行。',
+          tone: 'accent' as const,
+        }
+      : {
+          label: '自动执行',
+          detail: '会直接进入网页执行；遇到登录、验证码或信息不足会暂停等你补充。',
+          tone: 'accent' as const,
+        };
+  const expert =
+    expertMode === 'expert'
+      ? {
+          label: expertWorkflowMatched ? '专家已命中' : '专家开启',
+          detail: '强制使用专家插件；缺少来源时应说明边界或先追问。',
+        }
+      : expertMode === 'normal'
+        ? {
+            label: '专家关闭',
+            detail: '跳过专家插件，优先更快的通用执行。',
+          }
+        : {
+            label: expertWorkflowMatched ? '专家已命中' : '专家自动',
+            detail: expertWorkflowMatched
+              ? '已识别到可用专家流程，发送后按专家结构输出。'
+              : '需要专业流程时自动启用；否则走通用执行。',
+          };
+  return [execution, expert];
+}
+
+function ComposerModePill({ pill }: { pill: ComposerModePillCopy }): JSX.Element {
+  return (
+    <span
+      title={pill.detail}
+      className={cn(
+        'inline-flex max-w-[180px] items-center rounded-full border px-2.5 py-1 font-medium shadow-[0_1px_2px_rgba(17,24,39,0.03)]',
+        pill.tone === 'accent'
+          ? 'border-[#EA1F59]/20 bg-[#EA1F59]/5 text-[#EA1F59] dark:border-[#EA1F59]/35 dark:bg-[#EA1F59]/10'
+          : 'border-[#DCDDDD]/70 bg-white/45 text-[#595757] dark:border-white/10 dark:bg-white/5 dark:text-foreground/75',
+      )}
+    >
+      <span className="truncate">{pill.label}</span>
+    </span>
+  );
 }
 
 function MiniSwitch({ checked }: { checked: boolean }): JSX.Element {
@@ -918,9 +1017,13 @@ function ExpertWorkflowHint({
               </span>
             ) : (
               <span className="text-muted-foreground">
-                信息已基本足够，发送后会按专家复盘结构执行
+                信息已基本足够，发送后会按专家结构执行
               </span>
             )}
+          </div>
+          <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] leading-4 text-muted-foreground">
+            <span>输出：诊断、证据边界、行动建议</span>
+            <span>缺数据会先追问，不把未验证内容写成确定结论</span>
           </div>
           {actions.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1.5">
