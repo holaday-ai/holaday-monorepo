@@ -742,7 +742,7 @@ function TrustSummaryCard({
           </p>
           <div className="mt-3 rounded-[7px] border border-[#DCDDDD]/70 bg-white/60 px-3 py-2 dark:border-white/10 dark:bg-white/5">
             <div className="mb-2 text-[11px] font-medium tracking-wide text-muted-foreground">
-              Evidence ledger
+              证据明细
             </div>
             <div className="grid gap-1.5">
               {summary.ledger.map((item) => (
@@ -836,10 +836,12 @@ function TrustSummaryCard({
 }
 
 function TrustLedgerStagePill({ stage }: { stage: TrustEvidenceStage }): JSX.Element {
+  const label = trustLedgerStageLabel(stage);
   return (
     <span
+      title={label.title}
       className={cn(
-        'inline-flex shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] font-semibold uppercase leading-none',
+        'inline-flex shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] font-semibold leading-none',
         stage === 'observed' &&
           'border-[#42C0EF]/25 bg-[#42C0EF]/10 text-[#118AB2] dark:text-[#7DD3FC]',
         stage === 'extracted' &&
@@ -850,9 +852,25 @@ function TrustLedgerStagePill({ stage }: { stage: TrustEvidenceStage }): JSX.Ele
           'border-[#DCDDDD]/80 bg-white/45 text-[#595757] dark:border-white/10 dark:bg-white/5 dark:text-foreground/70',
       )}
     >
-      {stage}
+      {label.short}
     </span>
   );
+}
+
+function trustLedgerStageLabel(stage: TrustEvidenceStage): {
+  short: string;
+  title: string;
+} {
+  switch (stage) {
+    case 'observed':
+      return { short: 'observed', title: 'observed：页面上直接观察到的证据' };
+    case 'extracted':
+      return { short: 'extracted', title: 'extracted：从结果或页面提取到的信息' };
+    case 'inferred':
+      return { short: 'inferred', title: 'inferred：系统根据结构信号推断的状态' };
+    case 'boundary':
+      return { short: 'boundary', title: 'boundary：尚未被验证的使用边界' };
+  }
 }
 
 function trustToneIcon(tone: TrustTone): React.ComponentType<{ className?: string }> {

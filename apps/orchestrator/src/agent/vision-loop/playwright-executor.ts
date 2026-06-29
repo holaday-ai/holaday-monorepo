@@ -28,7 +28,7 @@
  * before it calls through.
  */
 
-import type { Browser, BrowserContext, Page } from 'playwright';
+import type { Browser, BrowserContext, Frame, Page } from 'playwright';
 import sharp from 'sharp';
 import { logger } from '../../config/logger.js';
 import { humanClick, humanScroll, humanTypeText, isHumanizeEnabled } from './humanize.js';
@@ -188,6 +188,11 @@ export interface TargetDescriptor {
   placeholder: string | null;
   /** B3 — the iframe's URL (≤255) when captured from INSIDE a frame; null at top level. */
   framePath?: string | null;
+}
+
+interface IframeElementHandle {
+  contentFrame(): Promise<Frame | null>;
+  boundingBox(): Promise<{ x: number; y: number; width: number; height: number } | null>;
 }
 
 export class PlaywrightExecutor {
@@ -1012,7 +1017,7 @@ export class PlaywrightExecutor {
             return await withTimeout(
               (async (): Promise<TargetDescriptor | null> => {
                 const handle = await page.evaluateHandle(`document.elementFromPoint(${cx}, ${cy})`);
-                const elH = handle.asElement();
+                const elH = handle.asElement() as unknown as IframeElementHandle | null;
                 if (!elH) {
                   logger.warn(ctx, 'capture: iframe hit but no element handle (returning null)');
                   return null;
