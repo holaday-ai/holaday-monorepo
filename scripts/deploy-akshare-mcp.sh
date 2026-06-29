@@ -21,7 +21,10 @@ APP_DIR="/opt/holaday-monorepo/apps/akshare-mcp"
 HEALTH_URL="http://127.0.0.1:8848/healthz"
 
 build_ssh_password_prefix "${VULTR_PASSWORD:-}"
-VULTR_AUTH_PREFIX=("${SSH_PASSWORD_PREFIX[@]}")
+VULTR_AUTH_PREFIX=()
+if ((${#SSH_PASSWORD_PREFIX[@]})); then
+  VULTR_AUTH_PREFIX=("${SSH_PASSWORD_PREFIX[@]}")
+fi
 SSH_OPTS=(-o StrictHostKeyChecking=no -o ConnectTimeout=20 -o ServerAliveInterval=10)
 
 echo "→ akshare-mcp: venv install + pm2 (re)start on Vultr"

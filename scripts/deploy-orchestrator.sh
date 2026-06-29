@@ -44,7 +44,10 @@ HEALTH_URL="http://localhost:4001/healthz"
 HEALTH_MARKER='"status":"ok"'
 
 build_ssh_password_prefix "${VULTR_PASSWORD:-}"
-VULTR_AUTH_PREFIX=("${SSH_PASSWORD_PREFIX[@]}")
+VULTR_AUTH_PREFIX=()
+if ((${#SSH_PASSWORD_PREFIX[@]})); then
+  VULTR_AUTH_PREFIX=("${SSH_PASSWORD_PREFIX[@]}")
+fi
 SSH_OPTS=(
   -o StrictHostKeyChecking=no
   -o ConnectTimeout=20

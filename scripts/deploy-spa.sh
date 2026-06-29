@@ -55,7 +55,10 @@ VULTR_REMOTE_SMOKE_RESOLVE="holaday.ai:443:127.0.0.1"
 # passwords don't end up in shell history. Uses sshpass when installed,
 # otherwise OpenSSH SSH_ASKPASS.
 build_ssh_password_prefix "${ALIYUN_PASSWORD:-}"
-ALIYUN_AUTH_PREFIX=("${SSH_PASSWORD_PREFIX[@]}")
+ALIYUN_AUTH_PREFIX=()
+if ((${#SSH_PASSWORD_PREFIX[@]})); then
+  ALIYUN_AUTH_PREFIX=("${SSH_PASSWORD_PREFIX[@]}")
+fi
 SSH_OPTS=(
   -o StrictHostKeyChecking=no
   -o NumberOfPasswordPrompts=1
@@ -239,7 +242,10 @@ if [[ -z "${VULTR_PASSWORD:-}" ]]; then
 fi
 
 build_ssh_password_prefix "$VULTR_PASSWORD"
-VULTR_AUTH_PREFIX=("${SSH_PASSWORD_PREFIX[@]}")
+VULTR_AUTH_PREFIX=()
+if ((${#SSH_PASSWORD_PREFIX[@]})); then
+  VULTR_AUTH_PREFIX=("${SSH_PASSWORD_PREFIX[@]}")
+fi
 VULTR_SSH=("${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}")
 VULTR_SCP=("${VULTR_AUTH_PREFIX[@]}" scp "${SSH_OPTS[@]}")
 
