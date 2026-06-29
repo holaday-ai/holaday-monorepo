@@ -208,6 +208,11 @@ const MARKET_UP_CLASS = 'text-[#E11D48]';
 const MARKET_DOWN_CLASS = 'text-[#0E9F6E]';
 const MARKET_UP_STROKE = '#E11D48';
 const MARKET_DOWN_STROKE = '#0E9F6E';
+const DISCOVERY_IMAGES = [
+  'https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?auto=format&fit=crop&w=900&q=80',
+  'https://images.unsplash.com/photo-1520607162513-77705c0f0d4a?auto=format&fit=crop&w=900&q=80',
+  'https://images.unsplash.com/photo-1526628953301-3e589a6a8b74?auto=format&fit=crop&w=900&q=80',
+];
 
 export function StockTasksPage(): JSX.Element {
   const navigate = useNavigate();
@@ -610,7 +615,11 @@ export function StockTasksPage(): JSX.Element {
         ) : (
           <div className="grid min-w-0 grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
             <main className="min-w-0 space-y-5">
-              <WatchlistStrip
+              <DiscoveryPanel
+                news={news}
+                onInspect={() => setInsightSheet(newsInsight(news))}
+              />
+              <MarketHighlights
                 stocks={stocks}
                 loading={(loadingDashboard && dashboard === null) || refreshingDashboard || dashboardFreshness?.status === 'partial'}
                 sample={sampleWatchlist}
@@ -625,35 +634,26 @@ export function StockTasksPage(): JSX.Element {
                 sampleWatchlist={sampleWatchlist}
                 hasMarketSignals={hasMarketSignals}
               />
-              <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+              <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
                 <MarketTable
                   rows={marketIndices}
-                  className="lg:col-span-1"
                   onInspect={() => setInsightSheet(marketInsight(marketIndices))}
-                />
-                <SectorTrends
-                  sectors={sectors}
-                  className="lg:col-span-1"
-                  onInspect={() => setInsightSheet(sectorInsight(sectors))}
                 />
                 <StarStocks
                   stocks={starStocks}
-                  className="lg:col-span-1"
                   onInspect={() => setInsightSheet(starStockInsight(starStocks))}
                 />
               </div>
-              <NewsPanel
-                title="股市新闻"
-                meta="公告 / 盘面 / 关注"
-                news={news}
-                onInspect={() => setInsightSheet(newsInsight(news))}
-              />
             </main>
 
             <aside className="space-y-5">
               <MarketTemperature
                 temperature={temperature}
                 onInspect={() => setInsightSheet(temperatureInsight(temperature))}
+              />
+              <SectorTrends
+                sectors={sectors}
+                onInspect={() => setInsightSheet(sectorInsight(sectors))}
               />
               <Leaderboard
                 leaders={leaders}
@@ -703,7 +703,90 @@ export function StockTasksPage(): JSX.Element {
   );
 }
 
-function WatchlistStrip({
+function DiscoveryPanel({
+  news,
+  onInspect,
+}: {
+  news: NewsRow[];
+  onInspect: () => void;
+}): JSX.Element {
+  const items = news.slice(0, 3);
+  return (
+    <section className="rounded-[8px] border border-[#E1E3E8] bg-white p-4 shadow-[0_8px_24px_rgba(18,24,38,0.035)]">
+      <SectionHeader title="发现" meta={items.length > 0 ? `${items.length} 条来源动态` : '等待真实来源'} action="查看详情" onAction={onInspect} />
+      {items.length === 0 ? (
+        <EmptyState title="暂无真实股市新闻" body="公告、市场脉冲和自选股行情暂未返回可展示内容。" />
+      ) : null}
+      {items.length > 0 ? (
+        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+          {items.map((item, index) => (
+            <article
+              key={`${item.time}-${item.title}`}
+              className="min-w-0 overflow-hidden rounded-[8px] border border-[#E7E7EB] bg-white shadow-[0_10px_24px_rgba(18,24,38,0.04)] transition hover:-translate-y-0.5 hover:border-[#EA1F59]/25 hover:shadow-[0_16px_32px_rgba(18,24,38,0.08)] motion-reduce:hover:translate-y-0"
+            >
+              <div
+                className="relative h-[150px] bg-[#EEF1F6] bg-cover bg-center"
+                style={{ backgroundImage: `linear-gradient(180deg, rgba(18,24,38,0.04), rgba(18,24,38,0.22)), url(${DISCOVERY_IMAGES[index % DISCOVERY_IMAGES.length]})` }}
+              >
+                <div className="absolute left-3 top-3 flex items-center gap-2">
+                  <span className="rounded-full bg-white/90 px-2 py-1 text-[11px] font-medium text-[#344054] shadow-sm">
+                    {item.category ?? '动态'}
+                  </span>
+                  <span className="rounded-full bg-white/80 px-2 py-1 text-[11px] tabular-nums text-[#667085] shadow-sm">
+                    {item.time}
+                  </span>
+                </div>
+              </div>
+              <div className="p-3">
+                {item.url ? (
+                  <a
+                    href={item.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="group line-clamp-2 min-h-[48px] text-[15px] font-semibold leading-relaxed text-[#344054] hover:text-[#EA1F59]"
+                  >
+                    {item.title}
+                    <ExternalLink className="ml-1 inline h-3 w-3 opacity-60 transition group-hover:opacity-100" aria-hidden />
+                  </a>
+                ) : (
+                  <p className="line-clamp-2 min-h-[48px] text-[15px] font-semibold leading-relaxed text-[#344054]">{item.title}</p>
+                )}
+                <div className="mt-4 flex items-center justify-between gap-2">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <NewsSourceDots count={item.symbols.length || 1} />
+                    <span className="truncate text-[12px] text-[#667085]">
+                      {item.source ?? '公开来源'} · {Math.max(1, item.symbols.length)} 个关联
+                    </span>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <button
+                      type="button"
+                      className="rounded-full p-1.5 text-[#8B92A1] transition hover:bg-[#F7F8FA] hover:text-[#EA1F59]"
+                      aria-label="收藏动态"
+                      title="收藏动态"
+                    >
+                      <Heart className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-full p-1.5 text-[#8B92A1] transition hover:bg-[#F7F8FA] hover:text-[#344054]"
+                      aria-label="更多动态操作"
+                      title="更多动态操作"
+                    >
+                      <MoreHorizontal className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function MarketHighlights({
   stocks,
   loading,
   sample,
@@ -715,11 +798,12 @@ function WatchlistStrip({
   onEdit: () => void;
 }): JSX.Element {
   const hasRealQuotes = stocks.some((stock) => stock.price !== '—' || stock.spark.length >= 2);
+  const highlightStocks = stocks.filter((stock) => stock.price !== '—' || stock.spark.length >= 2).slice(0, 4);
   return (
     <section className="rounded-[8px] border border-[#E1E3E8] bg-white p-4 shadow-[0_8px_24px_rgba(18,24,38,0.035)]">
       <SectionHeader
-        title="我的关注"
-        meta={loading ? '同步自选股中…' : sample ? `示例关注 · ${stocks.length} 只` : `${stocks.length} 只股票`}
+        title="亮点"
+        meta={loading ? '同步自选股中…' : sample ? `示例关注 · ${stocks.length} 只` : `${stocks.length} 只关注股票`}
         action="编辑"
         onAction={onEdit}
       />
@@ -751,64 +835,56 @@ function WatchlistStrip({
         </div>
       ) : null}
       {hasRealQuotes ? (
-      <div className="mt-4 flex snap-x gap-4 overflow-x-auto pb-1 [scrollbar-width:thin]">
-        {stocks.slice(0, 5).map((stock) => (
-          <article
-            key={stock.symbol}
-            className="group w-[min(520px,calc(100vw-3rem))] shrink-0 snap-start rounded-[8px] border border-[#E7E7EB] bg-[#FEFEFF] p-4 transition-[border-color,box-shadow,transform] hover:-translate-y-0.5 hover:border-[#EA1F59]/25 hover:shadow-[0_14px_28px_rgba(18,24,38,0.08)] motion-reduce:hover:translate-y-0"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="truncate text-[16px] font-semibold text-[#121826]">{stock.name}</div>
-                <div className="mt-1 flex items-center gap-1.5 text-[12px] text-[#667085]">
-                  <span className="tabular-nums">{stock.symbol}</span>
-                  <span className="h-1 w-1 rounded-full bg-[#CBD0DA]" />
-                  <span>{marketLabel(stock.market)}</span>
-                </div>
-              </div>
-              <SignalPill signal={stock.signal} />
-            </div>
-
-            <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_140px]">
-              <div className="min-w-0">
-                <div className="flex items-end justify-between gap-3">
-                  <span className="text-[32px] font-semibold leading-none tabular-nums text-[#121826]">{stock.price}</span>
-                  <ChangeBadge value={stock.changePct} />
-                </div>
-                {stock.spark.length >= 2 ? (
-                  <MarketMiniChart values={stock.spark} positive={stock.changePct >= 0} className="mt-4 h-[132px] w-full" />
-                ) : (
-                  <div className="mt-4 flex h-[132px] items-center justify-center rounded-[7px] border border-dashed border-[#D7DAE2] bg-[#F7F8FA] text-[12px] text-[#8B92A1]">
-                    暂无真实走势
+        <div className="mt-4 space-y-3">
+          {highlightStocks.map((stock) => (
+            <article
+              key={stock.symbol}
+              className="group rounded-[8px] border border-[#E7E7EB] bg-[#FEFEFF] p-4 transition-[border-color,box-shadow,transform] hover:-translate-y-0.5 hover:border-[#EA1F59]/25 hover:shadow-[0_14px_28px_rgba(18,24,38,0.08)] motion-reduce:hover:translate-y-0"
+            >
+              <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_220px]">
+                <div className="min-w-0">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex min-w-0 items-start gap-3">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] bg-[#0B4AA2] text-[11px] font-semibold text-white">
+                        {stock.symbol.slice(0, 2)}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="truncate text-[16px] font-semibold text-[#121826]">{stock.name}</div>
+                        <div className="mt-1 flex items-center gap-1.5 text-[12px] text-[#667085]">
+                          <span className="tabular-nums">{stock.symbol}</span>
+                          <span className="h-1 w-1 rounded-full bg-[#CBD0DA]" />
+                          <span>{marketLabel(stock.market)}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-[24px] font-semibold leading-none tabular-nums text-[#121826]">{stock.price}</div>
+                      <ChangeText value={stock.changePct} className="mt-1 justify-end" />
+                    </div>
                   </div>
-                )}
+                  {stock.spark.length >= 2 ? (
+                    <MarketMiniChart values={stock.spark} positive={stock.changePct >= 0} className="mt-4 h-[220px] w-full" showTimeline />
+                  ) : (
+                    <div className="mt-4 flex h-[220px] items-center justify-center rounded-[7px] border border-dashed border-[#D7DAE2] bg-[#F7F8FA] text-[12px] text-[#8B92A1]">
+                      暂无真实走势
+                    </div>
+                  )}
+                  <p className="mt-3 text-[13px] leading-relaxed text-[#667085]">
+                    {stockNarrative(stock)}
+                  </p>
+                </div>
+                <div className="grid min-w-0 grid-cols-2 gap-2 self-start border-t border-[#F0F1F4] pt-3 lg:grid-cols-1 lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0">
+                  <StockMiniMetric label="状态" value={stock.signal} tone={stock.changePct >= 0 ? 'red' : 'green'} />
+                  <StockMiniMetric label="8日区间" value={stockRangeText(stock)} />
+                  <StockMiniMetric label="区间位置" value={stockPositionText(stock)} tone={stock.changePct >= 0 ? 'red' : 'green'} />
+                  <StockMiniMetric label="今日观察" value={stockObservationText(stock)} />
+                  <StockMiniMetric label="追踪重点" value={stockFollowupText(stock)} />
+                  <StockMiniMetric label="数据来源" value="AkShare" />
+                </div>
               </div>
-              <div className="grid min-w-0 grid-cols-2 gap-2 lg:grid-cols-1">
-                <StockMiniMetric label="8日区间" value={stockRangeText(stock)} />
-                <StockMiniMetric label="区间位置" value={stockPositionText(stock)} tone={stock.changePct >= 0 ? 'red' : 'green'} />
-                <StockMiniMetric label="今日观察" value={stockObservationText(stock)} />
-                <StockMiniMetric label="追踪重点" value={stockFollowupText(stock)} />
-              </div>
-            </div>
-
-            <div className="mt-4 grid gap-2 border-t border-[#F0F1F4] pt-3 text-[12px] text-[#4F5868] sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
-              <div className="min-w-0 truncate">{stock.note}</div>
-              <div className="flex items-center justify-between gap-2 sm:justify-end">
-                <span className="min-w-0 truncate text-[11px] text-[#8B92A1]">{stock.spark.length >= 2 ? '真实走势' : '等待行情'}</span>
-                <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-[11px] text-[#4F5868]">
-                  日报：{stock.report}
-                  <span
-                    className={cn(
-                      'h-1.5 w-1.5 rounded-full',
-                      stock.report === '已生成' ? 'bg-[#0E9F6E]' : 'bg-[#CBD0DA]',
-                    )}
-                  />
-                </span>
-              </div>
-            </div>
-          </article>
-        ))}
-      </div>
+            </article>
+          ))}
+        </div>
       ) : null}
     </section>
   );
@@ -1453,106 +1529,6 @@ function MarketTemperature({
   );
 }
 
-function NewsPanel({
-  news,
-  onInspect,
-  title = '重点动态',
-  meta,
-  className,
-}: {
-  news: NewsRow[];
-  onInspect: () => void;
-  title?: string;
-  meta?: string;
-  className?: string;
-}): JSX.Element {
-  const items = news.slice(0, 6);
-
-  return (
-    <Panel className={cn('overflow-hidden', className)}>
-      <SectionHeader title={title} meta={meta} action="查看详情" onAction={onInspect} />
-      {items.length === 0 ? (
-        <EmptyState title="暂无真实股市新闻" body="公告、市场脉冲和自选股行情暂未返回可展示内容。" />
-      ) : null}
-      <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-        {items.map((item, index) => (
-          <article
-            key={`${item.time}-${item.title}`}
-            className={cn(
-              'min-w-0 overflow-hidden rounded-[8px] border border-[#E7E7EB] bg-white shadow-[0_10px_24px_rgba(18,24,38,0.04)] transition hover:border-[#EA1F59]/20 hover:shadow-[0_16px_32px_rgba(18,24,38,0.08)]',
-              index === 0 && items.length > 3 ? 'md:col-span-2 xl:col-span-1' : '',
-            )}
-          >
-            <div className={cn('border-b border-[#F0F1F4] p-3', newsVisualClass(item.category))}>
-              <div className="flex items-center justify-between gap-2">
-                <span className="rounded-full bg-white/85 px-2 py-1 text-[11px] font-medium text-[#344054] shadow-sm">
-                  {item.category ?? '动态'}
-                </span>
-                <span className="rounded-full bg-white/75 px-2 py-1 text-[11px] tabular-nums text-[#667085]">
-                  {item.time}
-                </span>
-              </div>
-              <div className="mt-4 flex items-end justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="text-[11px] font-medium text-[#667085]">来源</div>
-                  <div className="mt-1 truncate text-[13px] font-semibold text-[#121826]">{item.source ?? '公开来源'}</div>
-                </div>
-                <NewsSourceDots count={item.symbols.length || 1} />
-              </div>
-            </div>
-            <div className="p-3">
-              {item.url ? (
-                <a
-                  href={item.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="group line-clamp-3 min-h-[64px] text-[14px] font-semibold leading-relaxed text-[#344054] hover:text-[#EA1F59]"
-                >
-                  {item.title}
-                  <ExternalLink className="ml-1 inline h-3 w-3 opacity-60 transition group-hover:opacity-100" aria-hidden />
-                </a>
-              ) : (
-                <p className="line-clamp-3 min-h-[64px] text-[14px] font-semibold leading-relaxed text-[#344054]">{item.title}</p>
-              )}
-              <div className="mt-4 flex items-center justify-between gap-2 border-t border-[#F0F1F4] pt-3">
-                <div className="flex min-w-0 flex-wrap gap-1">
-                  {item.symbols.length > 0 ? item.symbols.slice(0, 3).map((symbol) => (
-                    <span key={symbol} className="rounded-[5px] border border-[#E1E3E8] bg-white px-1.5 py-0.5 text-[10px] text-[#667085]">
-                      {symbol}
-                    </span>
-                  )) : (
-                    <span className="rounded-[5px] border border-[#E1E3E8] bg-white px-1.5 py-0.5 text-[10px] text-[#667085]">
-                      市场
-                    </span>
-                  )}
-                </div>
-                <div className="flex shrink-0 items-center gap-1">
-                  <button
-                    type="button"
-                    className="rounded-full p-1.5 text-[#8B92A1] transition hover:bg-[#F7F8FA] hover:text-[#EA1F59]"
-                    aria-label="收藏动态"
-                    title="收藏动态"
-                  >
-                    <Heart className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded-full p-1.5 text-[#8B92A1] transition hover:bg-[#F7F8FA] hover:text-[#344054]"
-                    aria-label="更多动态操作"
-                    title="更多动态操作"
-                  >
-                    <MoreHorizontal className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              </div>
-            </div>
-          </article>
-        ))}
-      </div>
-    </Panel>
-  );
-}
-
 function Leaderboard({
   leaders,
   active,
@@ -1788,29 +1764,6 @@ function ChangeText({
   );
 }
 
-function ChangeBadge({ value }: { value: number }): JSX.Element {
-  if (value === 0) {
-    return (
-      <span className="inline-flex h-7 shrink-0 items-center rounded-[7px] bg-[#F2F3F6] px-2 text-[12px] font-semibold tabular-nums text-[#667085]">
-        0.00%
-      </span>
-    );
-  }
-  const positive = value >= 0;
-  return (
-    <span
-      className={cn(
-        'inline-flex h-7 shrink-0 items-center gap-1 rounded-[7px] px-2 text-[12px] font-semibold tabular-nums',
-        positive ? 'bg-[#FFF5F7] text-[#BE123C]' : 'bg-[#F2FCF8] text-[#08764A]',
-      )}
-    >
-      {positive ? <TrendingUp className="h-3 w-3" aria-hidden /> : <TrendingDown className="h-3 w-3" aria-hidden />}
-      {positive ? '+' : ''}
-      {value.toFixed(2)}%
-    </span>
-  );
-}
-
 function StockMiniMetric({
   label,
   value,
@@ -1826,22 +1779,6 @@ function StockMiniMetric({
       <div className="truncate text-[10px] font-medium text-[#8B92A1]">{label}</div>
       <div className={cn('mt-1 truncate text-[12px] font-semibold leading-tight', valueClass)}>{value}</div>
     </div>
-  );
-}
-
-function SignalPill({ signal }: { signal: Signal }): JSX.Element {
-  const cls =
-    signal === '强势' || signal === '偏强'
-      ? 'border-[#FFE1E8] bg-[#FFF5F7] text-[#BE123C]'
-      : signal === '偏弱'
-        ? 'border-[#BFEBDD] bg-[#F2FCF8] text-[#08764A]'
-        : signal === '风险升高'
-          ? 'border-[#FFE5B8] bg-[#FFF9ED] text-[#A15C07]'
-        : 'border-[#FFE5B8] bg-[#FFF9ED] text-[#A15C07]';
-  return (
-    <span className={cn('whitespace-nowrap rounded-[6px] border px-1.5 py-0.5 text-[11px] font-medium', cls)}>
-      {signal}
-    </span>
   );
 }
 
@@ -1893,21 +1830,32 @@ function MarketMiniChart({
   values,
   positive,
   className,
+  showTimeline = false,
 }: {
   values: number[];
   positive: boolean;
   className?: string;
+  showTimeline?: boolean;
 }): JSX.Element {
   const points = valuesToPoints(values);
   const path = points ? `M ${points.split(' ').join(' L ')} L 98 38 L 2 38 Z` : '';
   const min = Math.min(...values);
   const max = Math.max(...values);
+  const latest = values[values.length - 1] ?? max;
+  const latestY = 36 - ((latest - min) / (max - min || 1)) * 30;
   const stroke = positive ? MARKET_UP_STROKE : MARKET_DOWN_STROKE;
   const fill = positive ? '#FFF1F4' : '#ECFDF5';
 
   return (
     <svg className={className} viewBox="0 0 100 44" role="img" aria-label="真实走势">
       <rect x="0" y="0" width="100" height="44" rx="4" fill="#FCFCFD" />
+      {showTimeline ? (
+        <>
+          <line x1="20" x2="20" y1="3" y2="38" stroke="#ECEEF3" strokeWidth="0.4" />
+          <line x1="50" x2="50" y1="3" y2="38" stroke="#ECEEF3" strokeWidth="0.4" />
+          <line x1="80" x2="80" y1="3" y2="38" stroke="#ECEEF3" strokeWidth="0.4" />
+        </>
+      ) : null}
       <line x1="2" x2="98" y1="8" y2="8" stroke="#ECEEF3" strokeDasharray="1.5 2.5" />
       <line x1="2" x2="98" y1="22" y2="22" stroke="#ECEEF3" strokeDasharray="1.5 2.5" />
       <line x1="2" x2="98" y1="36" y2="36" stroke="#ECEEF3" strokeDasharray="1.5 2.5" />
@@ -1920,20 +1868,29 @@ function MarketMiniChart({
         strokeLinecap="round"
         strokeLinejoin="round"
       />
+      {showTimeline ? (
+        <>
+          <circle cx="98" cy={latestY} r="1.5" fill={stroke} />
+          <rect x="73" y={Math.max(4, Math.min(28, latestY - 8))} width="23" height="8.5" rx="2.2" fill="white" stroke="#E1E3E8" />
+          <text x="75" y={Math.max(9.5, Math.min(33.5, latestY - 2.5))} fill="#344054" fontSize="3.8" fontFamily="ui-sans-serif, system-ui" className="tabular-nums">
+            {latest.toFixed(2)}
+          </text>
+        </>
+      ) : null}
       <text x="4" y="7" fill="#A0A7B4" fontSize="4.8" fontFamily="ui-sans-serif, system-ui" className="tabular-nums">
         {max.toFixed(2)}
       </text>
       <text x="4" y="41" fill="#A0A7B4" fontSize="4.8" fontFamily="ui-sans-serif, system-ui" className="tabular-nums">
         {min.toFixed(2)}
       </text>
+      {showTimeline ? (
+        <>
+          <text x="18" y="42" fill="#A0A7B4" fontSize="3.8" fontFamily="ui-sans-serif, system-ui">近8日</text>
+          <text x="82" y="42" fill="#A0A7B4" fontSize="3.8" fontFamily="ui-sans-serif, system-ui">最新</text>
+        </>
+      ) : null}
     </svg>
   );
-}
-
-function newsVisualClass(category?: NewsRow['category']): string {
-  if (category === '公告') return 'bg-[#FFF7FA]';
-  if (category === '盘面') return 'bg-[#F2FCF8]';
-  return 'bg-[#F5F8FF]';
 }
 
 function NewsSourceDots({ count }: { count: number }): JSX.Element {
@@ -1995,6 +1952,17 @@ function stockFollowupText(stock: StockSnapshot): string {
   if (stock.signal === '强势' || stock.signal === '偏强') return '看公告/量能';
   if (stock.signal === '偏弱' || stock.signal === '风险升高') return '看支撑/公告';
   return '看行业联动';
+}
+
+function stockNarrative(stock: StockSnapshot): string {
+  if (stock.price === '—') {
+    return `${stock.name} 已在关注列表中，但当前行情源尚未返回真实价格。Holaday 不会用模拟走势填充，建议稍后刷新或先查看公告来源。`;
+  }
+  const direction = stock.changePct >= 0 ? '上涨' : '下跌';
+  const range = stockRangeText(stock);
+  const position = stockPositionText(stock);
+  const followup = stockFollowupText(stock);
+  return `${stock.name} 最新价 ${stock.price}，今日${direction} ${Math.abs(stock.changePct).toFixed(2)}%。近 8 个交易日区间为 ${range}，当前${position}；下一步优先${followup}，再决定是否生成专属日报继续追问。`;
 }
 
 function dashboardHasDisplayableData(snapshot: DashboardSnapshot | null): boolean {
