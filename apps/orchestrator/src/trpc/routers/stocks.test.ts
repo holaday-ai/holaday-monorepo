@@ -131,4 +131,63 @@ describe('stocks dashboard snapshot', () => {
     expect(merged.freshness.status).toBe('stale');
     expect(merged.freshness.message).toContain('保留最近一次真实数据');
   });
+
+  it('preserves sectors when a refresh keeps temperature but loses industry rankings', () => {
+    const previous = {
+      updatedAt: '2026-06-29T12:00:00.000Z',
+      source: 'akshare' as const,
+      isFallbackWatchlist: false,
+      watchlistStocks: [],
+      marketIndices: [],
+      sectors: [
+        { name: '半导体', changePct: 3.2, leader: '兆易创新', flow: '领涨股 10.00%', spark: [] },
+      ],
+      starStocks: [],
+      temperature: {
+        score: 66,
+        mood: '偏乐观',
+        dayDelta: null,
+        weekDelta: null,
+        historicalPosition: '66%',
+        notes: ['上涨 3000 家，下跌 2000 家。'],
+      },
+      news: [],
+      leaders: [],
+      leaderboards: { gainers: [], losers: [], amount: [] },
+      freshness: {
+        status: 'fresh' as const,
+        cachedAt: '2026-06-29T12:00:00.000Z',
+      },
+    };
+    const next = {
+      ...previous,
+      updatedAt: '2026-06-29T12:01:00.000Z',
+      sectors: [],
+      temperature: {
+        score: 59,
+        mood: '偏乐观',
+        dayDelta: null,
+        weekDelta: null,
+        historicalPosition: '59%',
+        notes: ['上涨 2469 家，下跌 2933 家。'],
+      },
+      leaderboards: {
+        gainers: [{ rank: 1, name: 'N科莱', price: '48.68', changePct: 211.65, reason: 'bj920072' }],
+        losers: [],
+        amount: [],
+      },
+      freshness: {
+        status: 'fresh' as const,
+        cachedAt: '2026-06-29T12:01:00.000Z',
+      },
+    };
+
+    const merged = __stocksDashboardTest.withPreservedSlowSignals(next, previous);
+
+    expect(merged.sectors).toEqual(previous.sectors);
+    expect(merged.temperature).toEqual(next.temperature);
+    expect(merged.leaderboards.gainers).toEqual(next.leaderboards.gainers);
+    expect(merged.freshness.status).toBe('stale');
+    expect(merged.freshness.message).toContain('行业趋势保留最近一次真实数据');
+  });
 });

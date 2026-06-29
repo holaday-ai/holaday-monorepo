@@ -621,19 +621,26 @@ function cacheDashboardSnapshot(cacheKey: string, snapshot: DashboardSnapshot, r
 
 function withPreservedSlowSignals(snapshot: DashboardSnapshot, previous?: DashboardSnapshot): DashboardSnapshot {
   if (!previous || snapshot.freshness.status !== 'fresh') return snapshot;
-  const lostMarketPulse = snapshot.sectors.length === 0 && snapshot.temperature === null;
-  const hadMarketPulse = previous.sectors.length > 0 || previous.temperature !== null;
-  if (!lostMarketPulse || !hadMarketPulse) return snapshot;
+  const shouldPreserveSectors = snapshot.sectors.length === 0 && previous.sectors.length > 0;
+  const shouldPreserveTemperature = snapshot.temperature === null && previous.temperature !== null;
+  const shouldPreserveNews = snapshot.news.length === 0 && previous.news.length > 0;
+  if (!shouldPreserveSectors && !shouldPreserveTemperature && !shouldPreserveNews) return snapshot;
+
+  const preservedLabels = [
+    shouldPreserveSectors ? '行业趋势' : null,
+    shouldPreserveTemperature ? '市场温度' : null,
+    shouldPreserveNews ? '股市新闻' : null,
+  ].filter((label): label is string => label !== null);
 
   return {
     ...snapshot,
-    sectors: snapshot.sectors.length > 0 ? snapshot.sectors : previous.sectors,
-    temperature: snapshot.temperature ?? previous.temperature,
-    news: snapshot.news.length > 0 ? snapshot.news : previous.news,
+    sectors: shouldPreserveSectors ? previous.sectors : snapshot.sectors,
+    temperature: shouldPreserveTemperature ? previous.temperature : snapshot.temperature,
+    news: shouldPreserveNews ? previous.news : snapshot.news,
     freshness: {
       ...snapshot.freshness,
       status: 'stale',
-      message: '行情已更新，行业趋势与市场温度保留最近一次真实数据。',
+      message: `行情已更新，${preservedLabels.join('、')}保留最近一次真实数据。`,
     },
   };
 }
