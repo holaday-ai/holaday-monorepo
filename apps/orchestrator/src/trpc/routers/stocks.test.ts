@@ -67,4 +67,68 @@ describe('stocks dashboard snapshot', () => {
     expect(snapshot.leaderboards.gainers[0]?.name).toBe('兆易创新');
     expect(requestedPaths.some((path) => path.startsWith('/market-pulse'))).toBe(false);
   });
+
+  it('preserves the last real sector and temperature data when market pulse refresh is empty', () => {
+    const previous = {
+      updatedAt: '2026-06-29T12:00:00.000Z',
+      source: 'akshare' as const,
+      isFallbackWatchlist: false,
+      watchlistStocks: [],
+      marketIndices: [],
+      sectors: [
+        { name: '半导体', changePct: 3.2, leader: '兆易创新', flow: '领涨股 10.00%', spark: [] },
+      ],
+      starStocks: [],
+      temperature: {
+        score: 66,
+        mood: '偏乐观',
+        dayDelta: null,
+        weekDelta: null,
+        historicalPosition: '66%',
+        notes: ['上涨 3000 家，下跌 2000 家。'],
+      },
+      news: [
+        {
+          category: '盘面' as const,
+          time: '盘中',
+          title: '半导体 板块位居涨幅前列',
+          symbols: ['半导体'],
+          source: 'AkShare 市场脉冲',
+        },
+      ],
+      leaders: [],
+      leaderboards: { gainers: [], losers: [], amount: [] },
+      freshness: {
+        status: 'fresh' as const,
+        cachedAt: '2026-06-29T12:00:00.000Z',
+      },
+    };
+    const next = {
+      ...previous,
+      updatedAt: '2026-06-29T12:01:00.000Z',
+      marketIndices: [{ name: '上证指数', price: '4073.90', changePct: 1.16, turnover: '16662.20亿元' }],
+      sectors: [],
+      temperature: null,
+      news: [],
+      leaderboards: {
+        gainers: [{ rank: 1, name: 'N科莱', price: '48.68', changePct: 211.65, reason: 'bj920072' }],
+        losers: [],
+        amount: [],
+      },
+      freshness: {
+        status: 'fresh' as const,
+        cachedAt: '2026-06-29T12:01:00.000Z',
+      },
+    };
+
+    const merged = __stocksDashboardTest.withPreservedSlowSignals(next, previous);
+
+    expect(merged.sectors).toEqual(previous.sectors);
+    expect(merged.temperature).toEqual(previous.temperature);
+    expect(merged.news).toEqual(previous.news);
+    expect(merged.marketIndices).toEqual(next.marketIndices);
+    expect(merged.leaderboards.gainers).toEqual(next.leaderboards.gainers);
+    expect(merged.freshness.status).toBe('stale');
+    expect(merged.freshness.message).toContain('保留最近一次真实数据');
+  });
 });

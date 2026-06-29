@@ -645,6 +645,12 @@ export function StockTasksPage(): JSX.Element {
                   onInspect={() => setInsightSheet(starStockInsight(starStocks))}
                 />
               </div>
+              <NewsPanel
+                title="股市新闻"
+                meta="公告 / 盘面 / 关注"
+                news={news}
+                onInspect={() => setInsightSheet(newsInsight(news))}
+              />
             </main>
 
             <aside className="space-y-5">
@@ -652,7 +658,6 @@ export function StockTasksPage(): JSX.Element {
                 temperature={temperature}
                 onInspect={() => setInsightSheet(temperatureInsight(temperature))}
               />
-              <NewsPanel news={news} onInspect={() => setInsightSheet(newsInsight(news))} />
               <Leaderboard
                 leaders={leaders}
                 active={activeLeaderboard}
@@ -1401,17 +1406,29 @@ function MarketTemperature({
   );
 }
 
-function NewsPanel({ news, onInspect }: { news: NewsRow[]; onInspect: () => void }): JSX.Element {
+function NewsPanel({
+  news,
+  onInspect,
+  title = '重点动态',
+  meta,
+  className,
+}: {
+  news: NewsRow[];
+  onInspect: () => void;
+  title?: string;
+  meta?: string;
+  className?: string;
+}): JSX.Element {
   const items = news.slice(0, 6);
   return (
-    <Panel>
-      <SectionHeader title="重点动态" action="查看详情" onAction={onInspect} />
+    <Panel className={className}>
+      <SectionHeader title={title} meta={meta} action="查看详情" onAction={onInspect} />
       {items.length === 0 ? (
-        <EmptyState title="暂无真实重点动态" body="公告、市场脉冲和自选股行情暂未返回可展示内容。" />
+        <EmptyState title="暂无真实股市新闻" body="公告、市场脉冲和自选股行情暂未返回可展示内容。" />
       ) : null}
-      <div className="mt-3 divide-y divide-[#F1F2F5]">
+      <div className="mt-3 grid grid-cols-1 gap-x-5 lg:grid-cols-2">
         {items.map((item) => (
-          <div key={`${item.time}-${item.title}`} className="py-3">
+          <div key={`${item.time}-${item.title}`} className="border-b border-[#F1F2F5] py-3">
             <div className="flex items-start gap-3">
               <div className="w-10 shrink-0 space-y-1">
                 <div className="text-[12px] tabular-nums text-[#8B92A1]">{item.time}</div>

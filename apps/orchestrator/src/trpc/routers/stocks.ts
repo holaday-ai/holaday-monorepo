@@ -619,12 +619,32 @@ function cacheDashboardSnapshot(cacheKey: string, snapshot: DashboardSnapshot, r
   });
 }
 
+function withPreservedSlowSignals(snapshot: DashboardSnapshot, previous?: DashboardSnapshot): DashboardSnapshot {
+  if (!previous || snapshot.freshness.status !== 'fresh') return snapshot;
+  const lostMarketPulse = snapshot.sectors.length === 0 && snapshot.temperature === null;
+  const hadMarketPulse = previous.sectors.length > 0 || previous.temperature !== null;
+  if (!lostMarketPulse || !hadMarketPulse) return snapshot;
+
+  return {
+    ...snapshot,
+    sectors: snapshot.sectors.length > 0 ? snapshot.sectors : previous.sectors,
+    temperature: snapshot.temperature ?? previous.temperature,
+    news: snapshot.news.length > 0 ? snapshot.news : previous.news,
+    freshness: {
+      ...snapshot.freshness,
+      status: 'stale',
+      message: '行情已更新，行业趋势与市场温度保留最近一次真实数据。',
+    },
+  };
+}
+
 function startFullDashboardRefresh(args: {
   cacheKey: string;
   logger: MinimalLogger;
   watchlistRows: WatchlistEntry[];
   effectiveWatchlist: WatchlistEntry[];
 }): Promise<DashboardSnapshot> {
+  const existing = dashboardCache.get(args.cacheKey);
   const fullRefreshPromise = buildDashboardSnapshot({
     logger: args.logger,
     watchlistRows: args.watchlistRows,
@@ -632,8 +652,9 @@ function startFullDashboardRefresh(args: {
     now: new Date(),
     includeSlowSignals: true,
   }).then((snapshot) => {
-    cacheDashboardSnapshot(args.cacheKey, snapshot);
-    return snapshot;
+    const merged = withPreservedSlowSignals(snapshot, existing?.snapshot);
+    cacheDashboardSnapshot(args.cacheKey, merged);
+    return merged;
   }).catch((error) => {
     args.logger.warn(
       { error: error instanceof Error ? error.message : String(error) },
@@ -675,7 +696,9 @@ function startDashboardRefresh(args: {
       cacheDashboardSnapshot(args.cacheKey, snapshot, fullRefreshPromise);
       fullRefreshPromise.catch(() => undefined);
     } else {
-      cacheDashboardSnapshot(args.cacheKey, snapshot);
+      const merged = withPreservedSlowSignals(snapshot, existing?.snapshot);
+      cacheDashboardSnapshot(args.cacheKey, merged);
+      return merged;
     }
     return snapshot;
   }).catch((error) => {
@@ -791,4 +814,5 @@ export const stocksRouter = router({
 export const __stocksDashboardTest = {
   buildDashboardSnapshot,
   dashboardCache,
+  withPreservedSlowSignals,
 };
