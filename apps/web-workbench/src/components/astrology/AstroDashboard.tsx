@@ -3,8 +3,10 @@ import {
   Brain,
   BriefcaseBusiness,
   CalendarDays,
+  CheckCircle2,
   Clock,
   Compass,
+  Copy,
   Eraser,
   Gauge,
   Heart,
@@ -22,6 +24,7 @@ import {
 } from 'lucide-react';
 import * as React from 'react';
 import { Button } from '@/components/ui/button';
+import { useToast } from '@/components/ui/toast';
 import {
   buildAstroReading,
   clearAstroProfile,
@@ -33,6 +36,7 @@ import {
   type AstroProfile,
   type ZodiacSign,
 } from '@/lib/astrology';
+import { copyTextToClipboard } from '@/lib/copy-text';
 import { pageErrorMessage } from '@/lib/page-error-copy';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
@@ -41,6 +45,74 @@ const MOODS = [
   { id: 'clear', label: '清醒', hint: '适合先做判断题' },
   { id: 'busy', label: '有点满', hint: '先把任务切小' },
   { id: 'soft', label: '慢一点', hint: '适合整理和收尾' },
+] as const;
+
+const COSMIC_EXPERIENCE_KEY = 'holaday.cosmic.experience.v1';
+const COSMIC_PARTNER_KEY = 'holaday.cosmic.partner.v1';
+const COSMIC_PSYCHOLOGY_KEY = 'holaday.cosmic.psychology.v1';
+const COSMIC_WAITING_KEY = 'holaday.cosmic.waiting-mode.v1';
+
+const PSYCHOLOGY_OPTIONS = [
+  {
+    id: 'fast',
+    label: '先冲再调',
+    body: '脑子里已经有方向，最怕被流程拖住。',
+  },
+  {
+    id: 'steady',
+    label: '先稳住节奏',
+    body: '希望事情有条理，最好一步一步推进。',
+  },
+  {
+    id: 'soft',
+    label: '先照顾感受',
+    body: '今天更在意氛围、关系和心里的松紧。',
+  },
+] as const;
+
+const PSYCHOLOGY_RESULTS: Record<
+  (typeof PSYCHOLOGY_OPTIONS)[number]['id'],
+  { title: string; body: string; action: string }
+> = {
+  fast: {
+    title: '行动型压力',
+    body: '你现在适合用速度换清晰度。先做一个粗版本，别在开局就追求完美。',
+    action: '先开一个 10 分钟小冲刺，结束后再判断要不要加深。',
+  },
+  steady: {
+    title: '秩序型决策',
+    body: '你更需要可控感。把任务拆成三步，会比临场发挥更容易进入状态。',
+    action: '把最小下一步写出来，完成后再切到第二步。',
+  },
+  soft: {
+    title: '感受型恢复',
+    body: '你的注意力和情绪绑定得更紧。先降噪，再做决定，会更容易稳定输出。',
+    action: '先整理桌面或喝点水，再处理最需要沟通的一件事。',
+  },
+};
+
+const WAITING_TEST_OPTIONS = [
+  {
+    id: 'fast',
+    label: '快一点',
+    body: '我想马上有个动作',
+    title: '先做 30 秒推进',
+    result: '把当前任务缩成一句话，然后只打开最相关的一个窗口。先动起来，别先整理全局。',
+  },
+  {
+    id: 'steady',
+    label: '稳一点',
+    body: '我想把节奏稳住',
+    title: '先做 1 个小排序',
+    result: '写下“等结果回来后第一件事”。有了落点，等待就不会一直占住脑子。',
+  },
+  {
+    id: 'soft',
+    label: '放轻一点',
+    body: '我想先松一口气',
+    title: '先做 15 秒放松',
+    result: '肩膀放低，喝一口水，把最吵的一件小事先放到旁边。任务还在跑，你不用跟着紧绷。',
+  },
 ] as const;
 
 type LocalReading = ReturnType<typeof buildAstroReading>;
@@ -56,42 +128,56 @@ interface ProviderState {
 
 const EXPERIENCE_CARDS = [
   {
+    id: 'chart',
     icon: Orbit,
     title: '完整星盘',
-    body: '太阳、月亮、上升、宫位和行星解释，适合做长期个人档案。',
-    source: 'DivineAPI / Western',
+    body: '太阳、月亮、上升、元素倾向和任务风格，生成长期个人档案。',
+    status: '看我的档案',
   },
   {
+    id: 'compatibility',
     icon: Users,
     title: '合盘匹配',
-    body: '恋人、朋友、合作伙伴的吸引力、摩擦点和相处建议。',
-    source: 'Compatibility / Synastry',
+    body: '输入对方生日，查看吸引力、摩擦点和相处建议。',
+    status: '测一测',
   },
   {
+    id: 'psychology',
     icon: Brain,
     title: '心理小测试',
-    body: '情绪、压力、决策风格和关系倾向，结合星盘给轻解释。',
-    source: 'Holaday AI layer',
+    body: '用 3 个轻问题看今天的压力、决策和关系倾向。',
+    status: '选一下',
   },
   {
+    id: 'tarot',
     icon: Shuffle,
     title: '塔罗 / 抽卡',
     body: '等待任务时抽一张卡，给一个轻量提示和下一步行动。',
-    source: 'Tarot API / mock deck',
+    status: '抽一张',
   },
   {
+    id: 'numerology',
     icon: WalletCards,
     title: '数字命理',
-    body: '生命灵数、个人年份、名字能量，适合做快捷娱乐入口。',
-    source: 'Numerology API',
+    body: '根据生日计算生命灵数、个人年份和今天适合的节奏。',
+    status: '算今日数',
   },
   {
+    id: 'transit',
     icon: Activity,
     title: '流年提醒',
-    body: '把重要 transit 做成今天、本周、本月的变化提醒。',
-    source: 'Transit endpoints',
+    body: '把本周重点变化转成今天、本周、本月的任务提醒。',
+    status: '看提醒',
   },
 ] as const;
+
+type ExperienceId = (typeof EXPERIENCE_CARDS)[number]['id'];
+type PsychologyAnswer = (typeof PSYCHOLOGY_OPTIONS)[number]['id'];
+type WaitingMode = 'energy' | 'tarot' | 'test';
+type WaitingTestAnswer = (typeof WAITING_TEST_OPTIONS)[number]['id'];
+type NatalSnapshot = ReturnType<typeof buildNatalSnapshot>;
+type CompatibilityResult = ReturnType<typeof buildCompatibility>;
+type NumerologyItem = ReturnType<typeof buildNumerology>[number];
 
 export function AstroDashboard({
   liveProvider = false,
@@ -195,24 +281,33 @@ export function AstroDashboard({
     <div className="space-y-5">
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
         <DailyEnergyPanel reading={reading} profile={profile} />
-        <AstroProfilePanel profile={profile} onSave={handleSave} onReset={handleReset} />
-      </div>
-
-      <HoroscopePanel
-        liveProvider={liveProvider}
-        providerState={providerState}
-        reading={reading}
-        onRefresh={() => void refreshProvider()}
-      />
-
-      <ExperienceGrid />
-
-      <div className="grid gap-5 xl:grid-cols-3">
         <WaitingCardPreview
           card={activeCard}
           cardIndex={cardIndex}
           onNext={() => setCardIndex((index) => index + 1)}
+          storageScope={storageScope}
         />
+      </div>
+
+      <ExperienceGrid
+        profile={effectiveProfile}
+        reading={reading}
+        tarot={providerState.tarot}
+        tarotLoading={providerState.loading}
+        storageScope={storageScope}
+      />
+
+      <div className="grid gap-5 xl:grid-cols-[minmax(320px,0.8fr)_minmax(0,1.2fr)]">
+        <AstroProfilePanel profile={profile} onSave={handleSave} onReset={handleReset} />
+        <HoroscopePanel
+          liveProvider={liveProvider}
+          providerState={providerState}
+          reading={reading}
+          onRefresh={() => void refreshProvider()}
+        />
+      </div>
+
+      <div className="grid gap-5 xl:grid-cols-2">
         <TarotPanel
           liveProvider={liveProvider}
           loading={providerState.loading}
@@ -279,24 +374,55 @@ function mergeProviderReading(
   };
 }
 
-function ExperienceGrid(): JSX.Element {
+function ExperienceGrid({
+  profile,
+  reading,
+  tarot,
+  tarotLoading,
+  storageScope,
+}: {
+  profile: AstroProfile;
+  reading: ReturnType<typeof buildAstroReading>;
+  tarot: TarotReading | null;
+  tarotLoading: boolean;
+  storageScope: string | null;
+}): JSX.Element {
+  const [activeId, setActiveId] = React.useState<ExperienceId>(() =>
+    readStoredExperienceId(storageScope) ?? 'chart',
+  );
+  const activeCard = EXPERIENCE_CARDS.find((card) => card.id === activeId) ?? EXPERIENCE_CARDS[0];
+  const ActiveIcon = activeCard.icon;
+  React.useEffect(() => {
+    setActiveId(readStoredExperienceId(storageScope) ?? 'chart');
+  }, [storageScope]);
+  function selectExperience(id: ExperienceId): void {
+    setActiveId(id);
+    writeStoredValue(COSMIC_EXPERIENCE_KEY, storageScope, id);
+  }
   return (
     <section className="rounded-[8px] border border-[#DCDDDD] bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
       <div className="mb-4">
         <div className="flex items-center gap-2 text-xs font-medium text-[#EA1F59]">
           <Compass className="h-4 w-4" aria-hidden />
-          <span>多元化命理入口</span>
+          <span>多元化命理</span>
         </div>
-        <h2 className="mt-2 text-xl font-semibold text-[#231F20]">不只看今天，也能玩关系、心理和长期星盘</h2>
+        <h2 className="mt-2 text-xl font-semibold text-[#231F20]">等任务时，先玩一个 30 秒小占卜</h2>
         <p className="mt-1 text-xs leading-5 text-[#8C8C8C]">
-          这些入口先作为产品蓝图展示；后续按 API 能力逐个接入真实数据和 AI 解读。
+          不用先填完整资料；生日和出生时间只会让结果更贴近你。
         </p>
       </div>
       <div className="grid gap-3 md:grid-cols-3">
-        {EXPERIENCE_CARDS.map(({ icon: Icon, title, body, source }) => (
-          <article
-            key={title}
-            className="rounded-[8px] border border-[#EFEFEF] bg-[#FAFAFA] p-4 transition hover:border-[#EA1F59]/25 hover:bg-[#EA1F59]/5"
+        {EXPERIENCE_CARDS.map(({ id, icon: Icon, title, body, status }) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => selectExperience(id)}
+            className={cn(
+              'rounded-[8px] border p-4 text-left transition',
+              activeId === id
+                ? 'border-[#EA1F59]/40 bg-[#FFF6F8] shadow-[0_8px_24px_rgba(234,31,89,0.08)]'
+                : 'border-[#EFEFEF] bg-[#FAFAFA] hover:border-[#EA1F59]/25 hover:bg-[#EA1F59]/5',
+            )}
           >
             <div className="flex items-start gap-3">
               <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] bg-white text-[#57479C] shadow-[0_6px_18px_rgba(15,23,42,0.06)]">
@@ -306,14 +432,379 @@ function ExperienceGrid(): JSX.Element {
                 <h3 className="text-sm font-semibold text-[#231F20]">{title}</h3>
                 <p className="mt-1 text-xs leading-5 text-[#595757]">{body}</p>
                 <div className="mt-3 inline-flex rounded-[6px] border border-[#DCDDDD] bg-white px-2 py-1 text-[10px] font-medium text-[#8C8C8C]">
-                  {source}
+                  {status}
                 </div>
               </div>
             </div>
-          </article>
+          </button>
         ))}
       </div>
+      <div className="mt-4 rounded-[8px] border border-[#EFEFEF] bg-[#FAFAFA] p-4">
+        <div className="mb-3 flex items-center gap-2">
+          <span className="inline-flex h-8 w-8 items-center justify-center rounded-[8px] bg-white text-[#EA1F59] shadow-[0_6px_18px_rgba(15,23,42,0.05)]">
+            <ActiveIcon className="h-4 w-4" aria-hidden />
+          </span>
+          <div>
+            <h3 className="text-base font-semibold text-[#231F20]">{activeCard.title}</h3>
+            <p className="text-xs text-[#8C8C8C]">{activeCard.status}</p>
+          </div>
+        </div>
+        <ExperienceDetail
+          activeId={activeId}
+          profile={profile}
+          reading={reading}
+          tarot={tarot}
+          tarotLoading={tarotLoading}
+          storageScope={storageScope}
+        />
+      </div>
     </section>
+  );
+}
+
+function ExperienceDetail({
+  activeId,
+  profile,
+  reading,
+  tarot,
+  tarotLoading,
+  storageScope,
+}: {
+  activeId: ExperienceId;
+  profile: AstroProfile;
+  reading: ReturnType<typeof buildAstroReading>;
+  tarot: TarotReading | null;
+  tarotLoading: boolean;
+  storageScope: string | null;
+}): JSX.Element {
+  if (activeId === 'chart') return <NatalChartFeature profile={profile} reading={reading} />;
+  if (activeId === 'compatibility') return <CompatibilityFeature profile={profile} storageScope={storageScope} />;
+  if (activeId === 'psychology') return <PsychologyFeature reading={reading} storageScope={storageScope} />;
+  if (activeId === 'tarot') {
+    return (
+      <TarotCardBody
+        loading={tarotLoading}
+        tarot={tarot}
+        zodiacLabel={reading.zodiacLabel}
+      />
+    );
+  }
+  if (activeId === 'numerology') return <NumerologyFeature profile={profile} reading={reading} />;
+  return <TransitFeature reading={reading} />;
+}
+
+function NatalChartFeature({
+  profile,
+  reading,
+}: {
+  profile: AstroProfile;
+  reading: ReturnType<typeof buildAstroReading>;
+}): JSX.Element {
+  const snapshot = React.useMemo(() => buildNatalSnapshot(profile, reading), [profile, reading]);
+  return (
+    <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+      <div className="grid gap-3 sm:grid-cols-2">
+        {snapshot.items.map((item) => (
+          <div key={item.label} className="rounded-[8px] border border-[#DCDDDD] bg-white p-4">
+            <div className="text-xs font-medium text-[#8C8C8C]">{item.label}</div>
+            <div className="mt-1 text-lg font-semibold text-[#231F20]">{item.value}</div>
+            <p className="mt-2 text-xs leading-5 text-[#595757]">{item.body}</p>
+          </div>
+        ))}
+      </div>
+      <div className="rounded-[8px] border border-[#FDE68A]/70 bg-[#FFFBEB] p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-2 text-xs font-semibold text-[#B45309]">
+            <Orbit className="h-4 w-4" aria-hidden />
+            长期档案建议
+          </div>
+          <CopyReportButton
+            text={buildNatalReportText(snapshot)}
+            label="复制报告"
+          />
+        </div>
+        <h4 className="mt-3 text-base font-semibold text-[#231F20]">{snapshot.title}</h4>
+        <p className="mt-2 text-sm leading-6 text-[#595757]">{snapshot.body}</p>
+        <div className="mt-3 rounded-[8px] border border-white/80 bg-white/70 p-3 text-xs leading-5 text-[#595757]">
+          保存出生时间和出生地后，这里会优先使用你的上升与宫位信息；没填时用生日和当前任务节奏生成稳定档案。
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CompatibilityFeature({
+  profile,
+  storageScope,
+}: {
+  profile: AstroProfile;
+  storageScope: string | null;
+}): JSX.Element {
+  const storedPartner = React.useMemo(() => readStoredPartner(storageScope), [storageScope]);
+  const [partnerName, setPartnerName] = React.useState(storedPartner.name);
+  const [partnerBirthday, setPartnerBirthday] = React.useState(storedPartner.birthday);
+  const [partnerSign, setPartnerSign] = React.useState<ZodiacSign>(
+    storedPartner.zodiacSign,
+  );
+  React.useEffect(() => {
+    const next = readStoredPartner(storageScope);
+    setPartnerName(next.name);
+    setPartnerBirthday(next.birthday);
+    setPartnerSign(next.zodiacSign);
+  }, [storageScope]);
+  React.useEffect(() => {
+    writeStoredValue(COSMIC_PARTNER_KEY, storageScope, {
+      name: partnerName,
+      birthday: partnerBirthday,
+      zodiacSign: partnerSign,
+    });
+  }, [partnerBirthday, partnerName, partnerSign, storageScope]);
+  const result = React.useMemo(
+    () =>
+      buildCompatibility(profile, {
+        name: partnerName,
+        birthday: partnerBirthday,
+        birthTime: '',
+        birthPlace: '',
+        zodiacSign: partnerSign,
+      }),
+    [partnerBirthday, partnerName, partnerSign, profile],
+  );
+  return (
+    <div className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
+      <div className="rounded-[8px] border border-[#DCDDDD] bg-white p-4">
+        <div className="text-sm font-semibold text-[#231F20]">对方资料</div>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+          <Field label="昵称">
+            <input
+              value={partnerName}
+              onChange={(event) => setPartnerName(event.target.value)}
+              className="h-9 w-full rounded-[8px] border border-[#DCDDDD] bg-white px-3 text-sm outline-none transition focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
+            />
+          </Field>
+          <Field label="生日">
+            <input
+              type="date"
+              value={partnerBirthday}
+              onChange={(event) => {
+                setPartnerBirthday(event.target.value);
+                setPartnerSign(createProfileFromBirthday({ birthday: event.target.value }).zodiacSign);
+              }}
+              className="h-9 w-full rounded-[8px] border border-[#DCDDDD] bg-white px-3 text-sm outline-none transition focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
+            />
+          </Field>
+          <Field label="星座">
+            <select
+              value={partnerSign}
+              onChange={(event) => setPartnerSign(event.target.value as ZodiacSign)}
+              className="h-9 w-full rounded-[8px] border border-[#DCDDDD] bg-white px-3 text-sm outline-none transition focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
+            >
+              {zodiacOptions().map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+      </div>
+      <div className="rounded-[8px] border border-[#7DD3FC]/45 bg-[#EFF6FF] p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-xs font-semibold text-[#0369A1]">合盘结果</div>
+            <h4 className="mt-1 text-xl font-semibold text-[#231F20]">{result.title}</h4>
+          </div>
+          <div className="flex items-center gap-2">
+            <CopyReportButton
+              text={buildCompatibilityReportText(result)}
+              label="复制"
+            />
+            <div className="rounded-full bg-white px-3 py-1 text-sm font-semibold text-[#0369A1]">
+              {result.score}%
+            </div>
+          </div>
+        </div>
+        <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/80">
+          <div className="h-full rounded-full bg-[#42C0EF]" style={{ width: `${result.score}%` }} />
+        </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+          {result.facets.map((facet) => (
+            <div key={facet.label} className="rounded-[8px] bg-white/75 p-3">
+              <div className="text-xs font-semibold text-[#0369A1]">{facet.label}</div>
+              <p className="mt-1 text-xs leading-5 text-[#595757]">{facet.body}</p>
+            </div>
+          ))}
+        </div>
+        <p className="mt-3 text-sm leading-6 text-[#595757]">{result.advice}</p>
+      </div>
+    </div>
+  );
+}
+
+function PsychologyFeature({
+  reading,
+  storageScope,
+}: {
+  reading: ReturnType<typeof buildAstroReading>;
+  storageScope: string | null;
+}): JSX.Element {
+  const [answer, setAnswer] = React.useState<'fast' | 'steady' | 'soft'>(() =>
+    readStoredPsychologyAnswer(storageScope),
+  );
+  const result = PSYCHOLOGY_RESULTS[answer];
+  React.useEffect(() => {
+    setAnswer(readStoredPsychologyAnswer(storageScope));
+  }, [storageScope]);
+  function selectAnswer(value: 'fast' | 'steady' | 'soft'): void {
+    setAnswer(value);
+    writeStoredValue(COSMIC_PSYCHOLOGY_KEY, storageScope, value);
+  }
+  return (
+    <div className="grid gap-4 lg:grid-cols-[0.95fr_1.05fr]">
+      <div className="rounded-[8px] border border-[#DCDDDD] bg-white p-4">
+        <div className="text-sm font-semibold text-[#231F20]">现在遇到任务，你更像哪一种？</div>
+        <div className="mt-3 grid gap-2">
+          {PSYCHOLOGY_OPTIONS.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              onClick={() => selectAnswer(option.id)}
+              className={cn(
+                'rounded-[8px] border px-3 py-3 text-left transition',
+                answer === option.id
+                  ? 'border-[#EA1F59]/35 bg-[#FFF6F8] text-[#231F20]'
+                  : 'border-[#DCDDDD] bg-white text-[#595757] hover:border-[#EA1F59]/20 hover:bg-[#EA1F59]/5',
+              )}
+            >
+              <div className="text-sm font-semibold">{option.label}</div>
+              <div className="mt-1 text-xs leading-5">{option.body}</div>
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="rounded-[8px] border border-[#FBCFE8]/70 bg-[#FDF2F8] p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-2 text-xs font-semibold text-[#BE185D]">
+            <Brain className="h-4 w-4" aria-hidden />
+            今日心理画像
+          </div>
+          <CopyReportButton
+            text={buildPsychologyReportText(result, reading)}
+            label="复制"
+          />
+        </div>
+        <h4 className="mt-3 text-xl font-semibold text-[#231F20]">{result.title}</h4>
+        <p className="mt-2 text-sm leading-6 text-[#595757]">{result.body}</p>
+        <div className="mt-3 rounded-[8px] bg-white/75 p-3 text-xs leading-5 text-[#595757]">
+          结合今日关键词「{reading.mood}」：{result.action}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TarotCardBody({
+  loading,
+  tarot,
+  zodiacLabel,
+}: {
+  loading: boolean;
+  tarot: TarotReading | null;
+  zodiacLabel: string;
+}): JSX.Element {
+  const title = tarot?.title ?? 'The Star';
+  const subtitle = tarot?.subtitle ?? '先把希望放回桌面';
+  const body =
+    tarot?.body ??
+    `${zodiacLabel} 今天适合抽一张轻提示卡。先把问题放轻一点，选一个能马上行动的小方向。`;
+  return (
+    <div className="rounded-[8px] border border-[#57479C]/18 bg-[#F8F6FF] p-5">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-xs font-medium text-[#57479C]">
+          <Sparkles className="h-4 w-4" aria-hidden />
+          今日抽卡
+        </div>
+        <div className="flex items-center gap-2">
+          <CopyReportButton
+            text={buildTarotReportText({ title, subtitle, body })}
+            label="复制"
+          />
+          {loading && <Loader2 className="h-4 w-4 animate-spin text-[#57479C]" aria-hidden />}
+        </div>
+      </div>
+      <h3 className="mt-4 text-xl font-semibold text-[#231F20]">{title}</h3>
+      <p className="mt-1 text-sm font-medium text-[#57479C]">{subtitle}</p>
+      <p className="mt-3 text-sm leading-6 text-[#595757]">{body}</p>
+    </div>
+  );
+}
+
+function NumerologyFeature({
+  profile,
+  reading,
+}: {
+  profile: AstroProfile;
+  reading: ReturnType<typeof buildAstroReading>;
+}): JSX.Element {
+  const numbers = React.useMemo(() => buildNumerology(profile, reading), [profile, reading]);
+  return (
+    <div>
+      <div className="mb-3 flex justify-end">
+        <CopyReportButton text={buildNumerologyReportText(numbers)} label="复制数字报告" />
+      </div>
+      <div className="grid gap-3 md:grid-cols-3">
+        {numbers.map((item) => (
+          <div key={item.label} className="rounded-[8px] border border-[#FDE68A]/70 bg-[#FFFBEB] p-4">
+            <div className="text-xs font-semibold text-[#B45309]">{item.label}</div>
+            <div className="mt-2 text-3xl font-semibold text-[#231F20]">{item.value}</div>
+            <h4 className="mt-3 text-sm font-semibold text-[#231F20]">{item.title}</h4>
+            <p className="mt-1 text-xs leading-5 text-[#595757]">{item.body}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TransitFeature({
+  reading,
+}: {
+  reading: ReturnType<typeof buildAstroReading>;
+}): JSX.Element {
+  const strongest = [...reading.weekly].sort((a, b) => b.energy - a.energy).slice(0, 3);
+  return (
+    <div className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
+      <div className="rounded-[8px] border border-[#DCDDDD] bg-white p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-2 text-xs font-semibold text-[#57479C]">
+            <Activity className="h-4 w-4" aria-hidden />
+            今天 / 本周 / 本月
+          </div>
+          <CopyReportButton text={buildTransitReportText(reading, strongest)} label="复制" />
+        </div>
+        <h4 className="mt-3 text-lg font-semibold text-[#231F20]">把变化变成提醒</h4>
+        <p className="mt-2 text-sm leading-6 text-[#595757]">
+          今天先按「{reading.focusMode}」推进；本周优先抓能量最高的 3 天；本月把重复任务排到你的高光时段附近。
+        </p>
+      </div>
+      <div className="grid gap-2">
+        {strongest.map((day, index) => (
+          <div key={day.key} className="rounded-[8px] border border-[#BBF7D0]/70 bg-[#F0FDF4] p-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-sm font-semibold text-[#231F20]">
+                {index === 0 ? '重点提醒' : '辅助提醒'} · {day.label}
+              </div>
+              <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-[#15803D]">
+                {day.energy}%
+              </span>
+            </div>
+            <p className="mt-1 text-xs leading-5 text-[#595757]">
+              {day.title}：{day.suggestion}。适合安排在 {reading.luckyWindow} 前后。
+            </p>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -384,35 +875,35 @@ function providerStatusCopy(
 ): { label: string; description: string; className: string } {
   if (!liveProvider) {
     return {
-      label: '预览数据',
-      description: '当前为公开预览版日运数据；登录后的 /cosmic 会自动尝试读取 DivineAPI。',
+      label: '今日模式',
+      description: '当前展示今天的轻量日运，适合快速感受页面节奏。',
       className: 'border-[#DCDDDD] bg-[#FAFAFA] text-[#595757]',
     };
   }
   if (state.loading) {
     return {
-      label: '正在同步 DivineAPI',
-      description: '正在读取后端 provider；如果接口不可用，会自动保留本地预览结果。',
+      label: '正在更新今日运势',
+      description: '正在更新今天的内容；如果网络暂时不稳，会先保留当前结果。',
       className: 'border-[#7DD3FC]/45 bg-[#EFF6FF] text-[#0369A1]',
     };
   }
   if (state.error) {
     return {
-      label: '已回退预览数据',
-      description: `DivineAPI 暂时不可用，当前展示本地预览结果。${state.error}`,
+      label: '暂用本地内容',
+      description: '今天的内容暂时没有更新成功，先展示稳定版本。',
       className: 'border-[#FDE68A]/70 bg-[#FFFBEB] text-[#B45309]',
     };
   }
   if (state.reading?.provider === 'divineapi') {
     return {
-      label: 'DivineAPI 已连接',
-      description: '今日运势来自后端 DivineAPI provider，并保留 Holaday 的轻量任务建议包装。',
+      label: '今日运势已更新',
+      description: '已同步今天的星座内容，并结合 Holaday 的任务节奏给出建议。',
       className: 'border-[#BBF7D0]/70 bg-[#F0FDF4] text-[#15803D]',
     };
   }
   return {
-    label: '使用预览数据',
-    description: '后端 provider 未配置或已回退，当前展示稳定的本地预览结果。',
+    label: '暂用本地内容',
+    description: '今天的内容暂时没有更新成功，先展示稳定版本。',
     className: 'border-[#DCDDDD] bg-[#FAFAFA] text-[#595757]',
   };
 }
@@ -428,19 +919,14 @@ function TarotPanel({
   tarot: TarotReading | null;
   zodiacLabel: string;
 }): JSX.Element {
-  const title = tarot?.title ?? 'The Star';
-  const subtitle = tarot?.subtitle ?? '先把希望放回桌面';
-  const body =
-    tarot?.body ??
-    `${zodiacLabel} 今天适合抽一张轻提示卡。真实 DivineAPI tarot 接入后，这里会显示后端返回的每日牌面。`;
-  const provider = tarot?.provider === 'divineapi' ? 'DivineAPI Tarot' : '预览牌组';
+  const provider = tarot?.provider === 'divineapi' ? '今日牌面' : '今日牌组';
   return (
     <section className="rounded-[8px] border border-[#DCDDDD] bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
       <div className="mb-4 flex items-start justify-between gap-3">
         <div>
           <h2 className="text-base font-semibold text-[#231F20]">今日塔罗提示</h2>
           <p className="mt-1 text-xs text-[#8C8C8C]">
-            {liveProvider ? '登录后由后端 provider 尝试同步。' : '公开预览页使用本地牌组。'}
+            {liveProvider ? '每天给一个轻提示，适合等待任务时快速看一眼。' : '每天保留一张轻提示，适合等待任务时快速看一眼。'}
           </p>
         </div>
         <div className="inline-flex items-center gap-1 rounded-[8px] border border-[#DCDDDD] bg-[#FAFAFA] px-2 py-1 text-[10px] font-medium text-[#8C8C8C]">
@@ -448,15 +934,7 @@ function TarotPanel({
           {provider}
         </div>
       </div>
-      <div className="rounded-[8px] border border-[#57479C]/18 bg-[#F8F6FF] p-5">
-        <div className="flex items-center gap-2 text-xs font-medium text-[#57479C]">
-          <Sparkles className="h-4 w-4" aria-hidden />
-          Daily Tarot
-        </div>
-        <h3 className="mt-4 text-xl font-semibold text-[#231F20]">{title}</h3>
-        <p className="mt-1 text-sm font-medium text-[#57479C]">{subtitle}</p>
-        <p className="mt-3 text-sm leading-6 text-[#595757]">{body}</p>
-      </div>
+      <TarotCardBody loading={loading} tarot={tarot} zodiacLabel={zodiacLabel} />
     </section>
   );
 }
@@ -601,7 +1079,7 @@ function AstroProfilePanel({
         <div>
           <h2 className="text-base font-semibold text-[#231F20]">个人星象档案</h2>
           <p className="mt-1 text-xs leading-5 text-[#8C8C8C]">
-            出生时间和地点可以先空着，后续接 DivineAPI 时再做完整星盘。
+            出生时间和地点可以先空着，后续用于更完整的星盘和流年提醒。
           </p>
         </div>
         {profile && (
@@ -689,45 +1167,152 @@ function Field({
   );
 }
 
+function CopyReportButton({
+  text,
+  label,
+}: {
+  text: string;
+  label: string;
+}): JSX.Element {
+  const toast = useToast();
+  const [copied, setCopied] = React.useState(false);
+
+  async function handleCopy(): Promise<void> {
+    const ok = await copyTextToClipboard(text);
+    if (!ok) {
+      toast.show('复制失败，请稍后重试', 'error');
+      return;
+    }
+    setCopied(true);
+    toast.show('已复制今日报告', 'info', 1800);
+    globalThis.setTimeout(() => setCopied(false), 1600);
+  }
+
+  return (
+    <Button type="button" variant="outline" size="sm" onClick={() => void handleCopy()}>
+      {copied ? (
+        <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+      ) : (
+        <Copy className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+      )}
+      {copied ? '已复制' : label}
+    </Button>
+  );
+}
+
 function WaitingCardPreview({
   card,
   cardIndex,
   onNext,
+  storageScope,
 }: {
   card: ReturnType<typeof buildAstroReading>['waitingCards'][number] | undefined;
   cardIndex: number;
   onNext(): void;
+  storageScope: string | null;
 }): JSX.Element {
+  const [mode, setMode] = React.useState<WaitingMode>(() => readStoredWaitingMode(storageScope));
+  const [waitingAnswer, setWaitingAnswer] = React.useState<WaitingTestAnswer | null>(null);
+  const selectedWaitingResult =
+    WAITING_TEST_OPTIONS.find((option) => option.id === waitingAnswer) ?? null;
+  React.useEffect(() => {
+    setMode(readStoredWaitingMode(storageScope));
+  }, [storageScope]);
+  function selectMode(nextMode: WaitingMode): void {
+    setMode(nextMode);
+    setWaitingAnswer(null);
+    writeStoredValue(COSMIC_WAITING_KEY, storageScope, nextMode);
+  }
   return (
     <section className="rounded-[8px] border border-[#DCDDDD] bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
-          <h2 className="text-base font-semibold text-[#231F20]">等待时的小卡片</h2>
-          <p className="mt-1 text-xs text-[#8C8C8C]">后续可以嵌进任务执行中的等待区域。</p>
+          <h2 className="text-base font-semibold text-[#231F20]">任务等待模式</h2>
+          <p className="mt-1 text-xs text-[#8C8C8C]">任务还在跑，你可以先玩一个很轻的小动作。</p>
         </div>
         <Button type="button" variant="outline" size="sm" onClick={onNext}>
           <RefreshCcw className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-          换一张
+          换提示
         </Button>
+      </div>
+      <div className="mb-3 grid gap-2 sm:grid-cols-3">
+        {[
+          { id: 'energy', label: '今日能量' },
+          { id: 'tarot', label: '轻抽卡' },
+          { id: 'test', label: '3 秒测试' },
+        ].map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => selectMode(item.id as WaitingMode)}
+            aria-pressed={mode === item.id}
+            className={cn(
+              'h-8 rounded-[8px] border px-2 text-xs font-medium transition',
+              mode === item.id
+                ? 'border-[#EA1F59]/35 bg-[#FFF6F8] text-[#EA1F59]'
+                : 'border-[#DCDDDD] bg-white text-[#595757] hover:border-[#EA1F59]/25',
+            )}
+          >
+            {item.label}
+          </button>
+        ))}
       </div>
       <div className="rounded-[8px] border border-[#EA1F59]/20 bg-[#EA1F59]/5 p-5">
         <div className="flex items-center gap-2 text-xs font-medium text-[#EA1F59]">
           <TimerReset className="h-4 w-4" aria-hidden />
-          正在为你跑任务 · 第 {(cardIndex % 3) + 1} 张
+          {mode === 'energy' ? `正在为你跑任务 · 第 ${(cardIndex % 3) + 1} 张` : mode === 'tarot' ? '等待抽卡' : '3 秒小测试'}
         </div>
         <h3 className="mt-4 text-xl font-semibold text-[#231F20]">
-          {card?.title ?? '任务正在跑'}
+          {mode === 'energy'
+            ? (card?.title ?? '任务正在跑')
+            : mode === 'tarot'
+              ? (card?.title ?? '先抽一张轻提示')
+              : '你现在更想要哪种等待节奏？'}
         </h3>
         <p className="mt-3 text-sm leading-6 text-[#595757]">
-          {card?.body ?? '先喝口水，结果马上回来。'}
+          {mode === 'energy'
+            ? (card?.body ?? '先喝口水，结果马上回来。')
+            : mode === 'tarot'
+              ? (card?.body ?? '等任务跑完前，先给自己一个很小的下一步提示。')
+              : '快一点、稳一点、放轻一点，选完会给一条即时建议。'}
         </p>
-        <button
-          type="button"
-          className="mt-5 inline-flex h-8 items-center rounded-[8px] border border-[#EA1F59]/25 bg-white px-3 text-xs font-medium text-[#EA1F59] transition hover:bg-[#EA1F59]/10"
-          onClick={onNext}
-        >
-          {card?.cta ?? '继续'}
-        </button>
+        {mode === 'test' ? (
+          <div className="mt-4 space-y-3">
+            <div className="grid gap-2 sm:grid-cols-3">
+              {WAITING_TEST_OPTIONS.map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  onClick={() => setWaitingAnswer(option.id)}
+                  aria-pressed={waitingAnswer === option.id}
+                  className={cn(
+                    'rounded-[8px] border bg-white px-3 py-3 text-left transition',
+                    waitingAnswer === option.id
+                      ? 'border-[#EA1F59]/45 text-[#EA1F59] shadow-[0_8px_24px_rgba(234,31,89,0.08)]'
+                      : 'border-[#FBCFE8]/70 text-[#595757] hover:border-[#EA1F59]/30',
+                  )}
+                >
+                  <div className="text-sm font-semibold">{option.label}</div>
+                  <div className="mt-1 text-xs leading-4">{option.body}</div>
+                </button>
+              ))}
+            </div>
+            {selectedWaitingResult && (
+              <div className="rounded-[8px] border border-white/80 bg-white/80 p-3">
+                <div className="text-sm font-semibold text-[#231F20]">{selectedWaitingResult.title}</div>
+                <p className="mt-1 text-xs leading-5 text-[#595757]">{selectedWaitingResult.result}</p>
+              </div>
+            )}
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="mt-5 inline-flex h-8 items-center rounded-[8px] border border-[#EA1F59]/25 bg-white px-3 text-xs font-medium text-[#EA1F59] transition hover:bg-[#EA1F59]/10"
+            onClick={onNext}
+          >
+            {mode === 'energy' ? (card?.cta ?? '继续') : '再抽一张'}
+          </button>
+        )}
       </div>
     </section>
   );
@@ -818,6 +1403,295 @@ function DayTile({ day }: { day: AstroDay }): JSX.Element {
       <p className="mt-1 min-h-[34px] text-xs leading-4 text-[#595757]">{day.suggestion}</p>
     </div>
   );
+}
+
+function buildNatalSnapshot(
+  profile: AstroProfile,
+  reading: ReturnType<typeof buildAstroReading>,
+): {
+  title: string;
+  body: string;
+  items: Array<{ label: string; value: string; body: string }>;
+} {
+  const seed = localSeed(`${profile.birthday}-${profile.birthTime}-${profile.birthPlace}`);
+  const signs = zodiacOptions();
+  const moon = signs[(seed + 3) % signs.length] ?? signs[0];
+  const rising = profile.birthTime
+    ? (signs[(seed + Number(profile.birthTime.replace(':', ''))) % signs.length] ?? signs[0])
+    : null;
+  const element = pickLocal(seed, ['火象行动力', '土象稳定感', '风象连接力', '水象感受力']);
+  const mode = pickLocal(seed + 7, ['启动型', '固定型', '变动型']);
+  return {
+    title: `${reading.zodiacLabel} 的任务档案：${reading.focusMode}`,
+    body: `你的长期节奏适合先抓「${reading.mood}」这条主线。今天可以用 ${reading.luckyColor} 或 ${reading.luckyWindow} 作为进入状态的小锚点。`,
+    items: [
+      {
+        label: '太阳星座',
+        value: reading.zodiacLabel,
+        body: `外在行动主题是「${reading.mood}」，适合用明确目标推进任务。`,
+      },
+      {
+        label: '月亮倾向',
+        value: moon?.label ?? reading.zodiacLabel,
+        body: '代表情绪恢复方式；等待任务时更适合先照顾状态，再处理判断。',
+      },
+      {
+        label: '上升倾向',
+        value: rising?.label ?? '待补充出生时间',
+        body: rising ? '代表你进入新任务时给人的第一印象。' : '补充出生时间后，这项会更准确。',
+      },
+      {
+        label: '元素 / 模式',
+        value: `${element} · ${mode}`,
+        body: `适合把任务拆成「${reading.focusMode}」的小节奏，减少临场消耗。`,
+      },
+    ],
+  };
+}
+
+function buildCompatibility(
+  profile: AstroProfile,
+  partner: AstroProfile,
+): {
+  score: number;
+  title: string;
+  advice: string;
+  facets: Array<{ label: string; body: string }>;
+} {
+  const seed = localSeed(`${profile.zodiacSign}-${partner.zodiacSign}-${partner.birthday}`);
+  const score = 58 + (seed % 36);
+  const partnerLabel =
+    zodiacOptions().find((option) => option.value === partner.zodiacSign)?.label ?? '对方';
+  return {
+    score,
+    title: `${partner.name || partnerLabel}：${score >= 78 ? '很容易互相点亮' : score >= 68 ? '适合慢慢磨合' : '需要先对齐节奏'}`,
+    advice:
+      score >= 78
+        ? '适合一起推进有明确目标的事，但也要给彼此留一点自由空间。'
+        : score >= 68
+          ? '吸引力在，摩擦也会出现。先约定沟通频率，比猜对方想法更有效。'
+          : '先把边界和期待讲清楚，少用情绪推断，多用具体问题对齐。',
+    facets: [
+      {
+        label: '吸引力',
+        body: pickLocal(seed, ['容易被对方的表达吸引。', '对方会带来不同视角。', '互动有新鲜感，但节奏要慢一点。']),
+      },
+      {
+        label: '摩擦点',
+        body: pickLocal(seed + 5, ['容易抢节奏。', '容易一个想快、一个想稳。', '容易把沉默误会成冷淡。']),
+      },
+      {
+        label: '相处建议',
+        body: pickLocal(seed + 9, ['先说目标，再说情绪。', '把约定写下来更稳。', '给彼此一个缓冲时间。']),
+      },
+    ],
+  };
+}
+
+function buildNumerology(
+  profile: AstroProfile,
+  reading: ReturnType<typeof buildAstroReading>,
+): Array<{ label: string; value: number; title: string; body: string }> {
+  const lifePath = reduceNumber(profile.birthday.replace(/-/g, ''));
+  const year = new Date().getFullYear();
+  const [, month = '1', day = '1'] = profile.birthday.split('-');
+  const personalYear = reduceNumber(`${year}${month}${day}`);
+  const dailyNumber = reduceNumber(`${lifePath}${personalYear}${reading.energyScore}`);
+  return [
+    {
+      label: '生命灵数',
+      value: lifePath,
+      title: NUMEROLOGY_COPY[lifePath]?.title ?? '自我节奏',
+      body: NUMEROLOGY_COPY[lifePath]?.body ?? '适合按自己的稳定节奏推进。',
+    },
+    {
+      label: '个人年份',
+      value: personalYear,
+      title: `${year} 年主题`,
+      body: pickLocal(personalYear, ['适合开新局。', '适合打基础。', '适合表达和扩散。', '适合整理秩序。', '适合尝试新方向。']),
+    },
+    {
+      label: '今日行动数',
+      value: dailyNumber,
+      title: '今天怎么做',
+      body: `配合今日关键词「${reading.mood}」，先完成一个看得见的小动作。`,
+    },
+  ];
+}
+
+const NUMEROLOGY_COPY: Record<number, { title: string; body: string }> = {
+  1: { title: '启动者', body: '适合先开局、先定方向，不要等别人推你。' },
+  2: { title: '协调者', body: '适合沟通、配合、修复关系里的细节。' },
+  3: { title: '表达者', body: '适合输出、展示、写作和创意整理。' },
+  4: { title: '建设者', body: '适合打底、归档、做流程和长期维护。' },
+  5: { title: '探索者', body: '适合尝试新方法，但要给自己设一个边界。' },
+  6: { title: '照料者', body: '适合处理家庭、团队和责任相关的事。' },
+  7: { title: '研究者', body: '适合深度思考、复盘和独立判断。' },
+  8: { title: '推进者', body: '适合目标、资源、预算和结果导向的任务。' },
+  9: { title: '整合者', body: '适合收尾、放下旧负担，把经验整理出来。' },
+};
+
+function reduceNumber(value: string): number {
+  let total = value
+    .replace(/\D/g, '')
+    .split('')
+    .reduce((sum, digit) => sum + Number(digit), 0);
+  while (total > 9) {
+    total = String(total)
+      .split('')
+      .reduce((sum, digit) => sum + Number(digit), 0);
+  }
+  return total || 1;
+}
+
+function localSeed(value: string): number {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 33 + value.charCodeAt(index)) >>> 0;
+  }
+  return hash;
+}
+
+function pickLocal<T>(seed: number, values: T[]): T {
+  return values[seed % values.length] ?? values[0];
+}
+
+function scopedStorageKey(base: string, scope: string | null): string {
+  const normalized = scope?.trim();
+  return normalized ? `${base}.${encodeURIComponent(normalized)}` : base;
+}
+
+function readStoredString(base: string, scope: string | null): string | null {
+  try {
+    return globalThis.localStorage?.getItem(scopedStorageKey(base, scope)) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredValue(base: string, scope: string | null, value: unknown): void {
+  try {
+    const serialized = typeof value === 'string' ? value : JSON.stringify(value);
+    globalThis.localStorage?.setItem(scopedStorageKey(base, scope), serialized);
+  } catch {
+    // Storage can be blocked in private contexts; the UI should still work.
+  }
+}
+
+function readStoredExperienceId(scope: string | null): ExperienceId | null {
+  const raw = readStoredString(COSMIC_EXPERIENCE_KEY, scope);
+  return EXPERIENCE_CARDS.some((card) => card.id === raw) ? (raw as ExperienceId) : null;
+}
+
+function readStoredPartner(scope: string | null): {
+  name: string;
+  birthday: string;
+  zodiacSign: ZodiacSign;
+} {
+  const fallback = createProfileFromBirthday({
+    name: '对方',
+    birthday: '1996-08-08',
+  });
+  const raw = readStoredString(COSMIC_PARTNER_KEY, scope);
+  if (!raw) {
+    return {
+      name: fallback.name,
+      birthday: fallback.birthday,
+      zodiacSign: fallback.zodiacSign,
+    };
+  }
+  try {
+    const parsed = JSON.parse(raw) as Partial<AstroProfile>;
+    const birthday = isDateInputValue(parsed.birthday) ? parsed.birthday : fallback.birthday;
+    return {
+      name: typeof parsed.name === 'string' && parsed.name.trim() ? parsed.name : fallback.name,
+      birthday,
+      zodiacSign: isZodiacSign(parsed.zodiacSign)
+        ? parsed.zodiacSign
+        : createProfileFromBirthday({ birthday }).zodiacSign,
+    };
+  } catch {
+    return {
+      name: fallback.name,
+      birthday: fallback.birthday,
+      zodiacSign: fallback.zodiacSign,
+    };
+  }
+}
+
+function readStoredPsychologyAnswer(scope: string | null): PsychologyAnswer {
+  const raw = readStoredString(COSMIC_PSYCHOLOGY_KEY, scope);
+  return PSYCHOLOGY_OPTIONS.some((option) => option.id === raw)
+    ? (raw as PsychologyAnswer)
+    : 'steady';
+}
+
+function readStoredWaitingMode(scope: string | null): WaitingMode {
+  const raw = readStoredString(COSMIC_WAITING_KEY, scope);
+  return raw === 'tarot' || raw === 'test' || raw === 'energy' ? raw : 'energy';
+}
+
+function isZodiacSign(value: unknown): value is ZodiacSign {
+  return typeof value === 'string' && zodiacOptions().some((option) => option.value === value);
+}
+
+function isDateInputValue(value: unknown): value is string {
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function buildNatalReportText(snapshot: NatalSnapshot): string {
+  return [
+    '今日星盘档案',
+    snapshot.title,
+    snapshot.body,
+    '',
+    ...snapshot.items.map((item) => `${item.label}：${item.value}。${item.body}`),
+  ].join('\n');
+}
+
+function buildCompatibilityReportText(result: CompatibilityResult): string {
+  return [
+    '今日合盘结果',
+    `${result.title}（${result.score}%）`,
+    result.advice,
+    '',
+    ...result.facets.map((facet) => `${facet.label}：${facet.body}`),
+  ].join('\n');
+}
+
+function buildPsychologyReportText(
+  result: (typeof PSYCHOLOGY_RESULTS)[PsychologyAnswer],
+  reading: ReturnType<typeof buildAstroReading>,
+): string {
+  return [
+    '今日心理画像',
+    result.title,
+    result.body,
+    `结合今日关键词「${reading.mood}」：${result.action}`,
+  ].join('\n');
+}
+
+function buildTarotReportText(card: { title: string; subtitle: string; body: string }): string {
+  return ['今日抽卡', card.title, card.subtitle, card.body].join('\n');
+}
+
+function buildNumerologyReportText(items: NumerologyItem[]): string {
+  return [
+    '今日数字命理',
+    ...items.map((item) => `${item.label} ${item.value}：${item.title}。${item.body}`),
+  ].join('\n');
+}
+
+function buildTransitReportText(
+  reading: ReturnType<typeof buildAstroReading>,
+  strongest: AstroDay[],
+): string {
+  return [
+    '今日流年提醒',
+    `今天先按「${reading.focusMode}」推进，适合安排在 ${reading.luckyWindow} 前后。`,
+    '',
+    ...strongest.map((day) => `${day.label}：${day.title}，${day.suggestion}（${day.energy}%）`),
+  ].join('\n');
 }
 
 const TONE_CLASS: Record<
