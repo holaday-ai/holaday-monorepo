@@ -561,6 +561,7 @@ export function StockTasksPage(): JSX.Element {
               disabled={submitting || !prompt.trim()}
               className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-[8px] bg-[#EA1F59] text-white shadow-[0_10px_24px_rgba(234,31,89,0.22)] transition disabled:cursor-not-allowed disabled:opacity-55"
               aria-label="提交股市任务"
+              title="提交股市任务"
             >
               {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
             </button>
@@ -972,6 +973,7 @@ function WatchlistManagerSheet({
                         onClick={() => onRemove(row.symbol)}
                         className="inline-flex h-8 w-8 items-center justify-center rounded-[8px] border border-[#E1E3E8] text-[#667085] transition hover:border-[#EA1F59]/30 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-50"
                         aria-label={`移除 ${row.symbol}`}
+                        title={`移除 ${row.symbol}`}
                       >
                         <Trash2 className="h-3.5 w-3.5" aria-hidden />
                       </button>
