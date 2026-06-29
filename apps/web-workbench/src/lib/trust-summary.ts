@@ -3,8 +3,16 @@ import { verificationCheckLabel, type VerificationCheck } from '@/lib/verificati
 import type { UiTask } from '@/types/task';
 
 export type TrustTone = 'neutral' | 'warning' | 'danger';
+export type TrustEvidenceStage = 'observed' | 'extracted' | 'inferred' | 'boundary';
 
 export interface TrustEvidenceRow {
+  label: string;
+  value: string;
+  detail: string;
+}
+
+export interface TrustLedgerItem {
+  stage: TrustEvidenceStage;
   label: string;
   value: string;
   detail: string;
@@ -16,6 +24,7 @@ export interface TrustSummaryModel {
   verdict: string;
   boundary: string;
   rows: TrustEvidenceRow[];
+  ledger: TrustLedgerItem[];
   checks: string[];
   hiddenCheckCount: number;
 }
@@ -76,7 +85,7 @@ export function buildTrustSummary(input: TrustSummaryInput): TrustSummaryModel {
     title: '本次任务可信度',
     verdict,
     boundary:
-      '这里汇总前端已收到的证据，不把推断包装成事实；完整 evidence ledger 未在本视图展开。',
+      '这里汇总前端已收到的证据，不把推断包装成事实；下方 ledger 标明哪些被观察、提取或仅是边界说明。',
     rows: [
       {
         label: '答案可见来源',
@@ -110,9 +119,50 @@ export function buildTrustSummary(input: TrustSummaryInput): TrustSummaryModel {
       },
       {
         label: '事实级证据',
-        value: '未展开',
+        value: '见 ledger',
         detail:
-          '后端区分 observed / extracted / inferred；本卡不声称所有结论都已被 observed 证据支持。',
+          '下方区分 observed / extracted / inferred / boundary；本卡不声称所有结论都已被 observed 证据支持。',
+      },
+    ],
+    ledger: [
+      {
+        stage: 'observed',
+        label: '页面状态',
+        value: hasScreenshot ? '已观察' : '未观察',
+        detail: hasScreenshot
+          ? '保存了终态截图，可复核任务结束时页面长什么样。'
+          : '没有终态截图，无法从本卡观察任务结束时页面状态。',
+      },
+      {
+        stage: 'extracted',
+        label: '来源链接',
+        value: `${sourceCount} 个`,
+        detail:
+          sourceCount > 0
+            ? '从结果文本和最终页面 URL 中提取到链接，但未逐条证明每个事实都来自这些链接。'
+            : '没有提取到可点击来源，事实型任务需要补来源。',
+      },
+      {
+        stage: 'extracted',
+        label: '最终 URL',
+        value: hasFinalUrl ? '已记录' : '未记录',
+        detail: hasFinalUrl
+          ? '记录了任务结束时所在地址，可作为浏览路径线索。'
+          : '没有记录终态地址，不能据此确认到达了目标页面。',
+      },
+      {
+        stage: 'inferred',
+        label: '自动审核',
+        value: verificationLedgerValue(input.verificationPassed, failedChecks.length),
+        detail:
+          '这是结构性审核信号，不等同于人工或事实级验证通过。',
+      },
+      {
+        stage: 'boundary',
+        label: '未验证边界',
+        value: '结论推断',
+        detail:
+          '结果中的判断、建议和归因仍需结合来源、截图和业务上下文复核。',
       },
     ],
     checks,
@@ -254,6 +304,15 @@ function countVisibleSourceUrls(text?: string, currentUrl?: string | null): numb
 
 function hasHttpUrl(url?: string | null): boolean {
   return typeof url === 'string' && /^https?:\/\//i.test(url);
+}
+
+function verificationLedgerValue(
+  verificationPassed: boolean | null | undefined,
+  failedCheckCount: number,
+): string {
+  if (verificationPassed === true) return '未发现结构问题';
+  if (verificationPassed === false || failedCheckCount > 0) return '发现问题';
+  return '未返回';
 }
 
 function withIntent(intent: string | undefined, suffix: string): string {

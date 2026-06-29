@@ -81,6 +81,7 @@ import {
   buildRecoveryActions,
   buildTrustSummary,
   type RecoveryAction,
+  type TrustEvidenceStage,
   type TrustTone,
 } from '@/lib/trust-summary';
 import { ScheduledTaskDialog } from '@/components/ScheduledTaskDialog';
@@ -739,6 +740,31 @@ function TrustSummaryCard({
           <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
             {summary.boundary}
           </p>
+          <div className="mt-3 rounded-[7px] border border-[#DCDDDD]/70 bg-white/60 px-3 py-2 dark:border-white/10 dark:bg-white/5">
+            <div className="mb-2 text-[11px] font-medium tracking-wide text-muted-foreground">
+              Evidence ledger
+            </div>
+            <div className="grid gap-1.5">
+              {summary.ledger.map((item) => (
+                <div
+                  key={`${item.stage}-${item.label}`}
+                  className="grid gap-1 rounded-[6px] bg-[#FCFCFD]/80 px-2 py-1.5 sm:grid-cols-[96px_1fr] dark:bg-white/[0.03]"
+                >
+                  <div className="flex min-w-0 items-center gap-1.5">
+                    <TrustLedgerStagePill stage={item.stage} />
+                    <span className="truncate text-[11px] font-medium text-foreground">
+                      {item.label}
+                    </span>
+                  </div>
+                  <div className="min-w-0 text-[11px] leading-4 text-muted-foreground">
+                    <span className="font-medium text-foreground/85">{item.value}</span>
+                    <span className="mx-1 text-muted-foreground/55">·</span>
+                    <span>{item.detail}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
           <div className="mt-3 grid gap-2 sm:grid-cols-2">
             {summary.rows.map((row) => (
               <div
@@ -806,6 +832,26 @@ function TrustSummaryCard({
         </div>
       </div>
     </div>
+  );
+}
+
+function TrustLedgerStagePill({ stage }: { stage: TrustEvidenceStage }): JSX.Element {
+  return (
+    <span
+      className={cn(
+        'inline-flex shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] font-semibold uppercase leading-none',
+        stage === 'observed' &&
+          'border-[#42C0EF]/25 bg-[#42C0EF]/10 text-[#118AB2] dark:text-[#7DD3FC]',
+        stage === 'extracted' &&
+          'border-[#57479C]/25 bg-[#57479C]/10 text-[#57479C] dark:text-[#DCDDDD]',
+        stage === 'inferred' &&
+          'border-[#FFC910]/45 bg-[#FFC910]/10 text-[#8A6A00] dark:text-[#FACC15]',
+        stage === 'boundary' &&
+          'border-[#DCDDDD]/80 bg-white/45 text-[#595757] dark:border-white/10 dark:bg-white/5 dark:text-foreground/70',
+      )}
+    >
+      {stage}
+    </span>
   );
 }
 
