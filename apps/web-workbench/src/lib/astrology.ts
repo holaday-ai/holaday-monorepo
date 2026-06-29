@@ -331,7 +331,7 @@ export function buildAstroTaskInsight({
       eyebrow: `${reading.zodiacLabel} · 完成后`,
       title: '结果已经回来，先挑最顺手的一步',
       body: `${reading.workNote} 如果这次输出有点长，先抓 1 个能立刻执行的动作就好。`,
-      action: '整理下一步',
+      action: '小提示：先挑 1 步',
       energyScore: reading.energyScore,
       accent: pick(seed, accents),
     };

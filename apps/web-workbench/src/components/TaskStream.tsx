@@ -381,6 +381,13 @@ function AgentBlock({
     Boolean(awaitingUser) ||
     Boolean(webSearch) ||
     Boolean(task.resultText);
+  const hasExecutionActivity =
+    steps.length > 0 ||
+    Boolean(captchaWait) ||
+    Boolean(degrade) ||
+    Boolean(executorFallback) ||
+    Boolean(webSearch) ||
+    Boolean(screencastUrl);
 
   const showInlineProgress = !terminal;
   const hasTerminalArtifacts =
@@ -451,7 +458,7 @@ function AgentBlock({
           />
         )}
 
-        {showInlineProgress && !awaitingUser && (
+        {showInlineProgress && !awaitingUser && hasExecutionActivity && (
           <AstroTaskCompanion
             taskId={task.taskId}
             intent={task.intent}
