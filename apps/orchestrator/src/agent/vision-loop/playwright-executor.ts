@@ -1012,7 +1012,7 @@ export class PlaywrightExecutor {
             return await withTimeout(
               (async (): Promise<TargetDescriptor | null> => {
                 const handle = await page.evaluateHandle(`document.elementFromPoint(${cx}, ${cy})`);
-                const elH = handle.asElement() as ElementHandle<HTMLIFrameElement> | null;
+                const elH = handle.asElement() as ElementHandle | null;
                 if (!elH) {
                   logger.warn(ctx, 'capture: iframe hit but no element handle (returning null)');
                   return null;
