@@ -247,19 +247,33 @@ export function StockTasksPage(): JSX.Element {
     let dashboardError: string | null = null;
     if (mode === 'initial') setLoadingDashboard(true);
     else setRefreshingDashboard(true);
+    setLoadError(null);
     try {
-      const [watchlistRows, status, snapshot] = await Promise.all([
-        trpc.watchlists.list.query(),
-        trpc.watchlists.briefingStatus.query(),
-        trpc.stocks.dashboardSnapshot.query().catch((err) => {
+      const watchlistPromise = trpc.watchlists.list.query().then((rows) => {
+        if (pageAlive.current) setWatchlist(rows);
+        return rows;
+      });
+      const statusPromise = trpc.watchlists.briefingStatus.query().then((status) => {
+        if (pageAlive.current) setBriefingStatus(status);
+        return status;
+      });
+      const snapshotPromise = trpc.stocks.dashboardSnapshot.query().then((snapshot) => {
+        if (pageAlive.current) setDashboard(snapshot);
+        return snapshot;
+      }).catch((err) => {
+        if (pageAlive.current) {
           dashboardError = pageErrorMessage(err);
-          return null;
-        }),
+          setLoadError(dashboardError);
+        }
+        return null;
+      });
+      const [, , snapshot] = await Promise.all([
+        watchlistPromise,
+        statusPromise,
+        snapshotPromise,
       ]);
       if (!pageAlive.current) return;
-      setWatchlist(watchlistRows);
-      setBriefingStatus(status);
-      setDashboard(snapshot);
+      if (snapshot) setDashboard(snapshot);
       setLoadError(dashboardError);
     } catch (err) {
       if (pageAlive.current) setLoadError(pageErrorMessage(err));
@@ -296,6 +310,8 @@ export function StockTasksPage(): JSX.Element {
   const temperature = dashboard?.temperature ?? null;
   const enabled = briefingStatus?.enabled === true;
   const sampleWatchlist = dashboard?.isFallbackWatchlist === true;
+  const dashboardFreshness = dashboard?.freshness;
+  const freshnessMessage = dashboardFreshness?.message;
   const realWatchlist = watchlist ?? [];
   const commands = React.useMemo(() => quickCommands(stocks), [stocks]);
   const hasMarketSignals = Boolean(
@@ -463,7 +479,7 @@ export function StockTasksPage(): JSX.Element {
             </h1>
             <span className="inline-flex items-center gap-1.5 rounded-full border border-[#D9F2E7] bg-[#F2FCF8] px-2.5 py-1 text-[12px] font-medium text-[#08764A]">
               <span className="h-1.5 w-1.5 rounded-full bg-[#10A66E]" />
-              {loadingDashboard ? '同步中' : dashboard ? 'AkShare' : '待连接'}
+              {dashboardStatusLabel({ loading: loadingDashboard, dashboard })}
             </span>
             <span className="text-[12px] text-[#7D8493]">{formatUpdateTime(dashboard?.updatedAt)} 更新</span>
           </div>
@@ -509,6 +525,15 @@ export function StockTasksPage(): JSX.Element {
         {loadError ? (
           <div className="rounded-[8px] border border-[#EA1F59]/25 bg-white px-4 py-3 text-[13px] text-[#EA1F59]">
             部分股票数据暂时无法加载：{loadError}
+          </div>
+        ) : null}
+        {freshnessMessage ? (
+          <div className="rounded-[8px] border border-[#E1E3E8] bg-white px-4 py-3 text-[13px] text-[#4F5868]">
+            {refreshingDashboard ? '刷新中：' : null}{freshnessMessage}
+          </div>
+        ) : refreshingDashboard && dashboard ? (
+          <div className="rounded-[8px] border border-[#E1E3E8] bg-white px-4 py-3 text-[13px] text-[#4F5868]">
+            正在后台刷新行情，当前看板保持最近一次真实数据。
           </div>
         ) : null}
         {sampleWatchlist && !loadingDashboard ? (
@@ -1925,6 +1950,20 @@ function formatUpdateTime(value?: string): string {
 function formatDelta(value: number | null | undefined): string {
   if (value == null) return '—';
   return value > 0 ? `+${value}` : String(value);
+}
+
+function dashboardStatusLabel({
+  loading,
+  dashboard,
+}: {
+  loading: boolean;
+  dashboard: DashboardSnapshot | null;
+}): string {
+  if (loading && !dashboard) return '同步中';
+  if (!dashboard) return '待连接';
+  if (dashboard.freshness?.status === 'stale') return '缓存';
+  if (dashboard.freshness?.status === 'partial') return '部分数据';
+  return loading ? '刷新中' : 'AkShare';
 }
 
 function deltaPositive(value: number | null | undefined): boolean | undefined {

@@ -23,6 +23,9 @@ import { users } from '../../db/schema/users.js';
 import { protectedProcedure, router } from '../trpc.js';
 
 type Db = typeof import('../../db/client.js').db;
+interface MinimalLogger {
+  warn(obj: Record<string, unknown>, msg: string): void;
+}
 
 type Market = 'A' | 'HK' | 'US';
 type Signal = '强势' | '偏强' | '中性' | '偏弱' | '风险升高' | '待观察';
@@ -78,6 +81,34 @@ interface LeaderboardsSnapshot {
   amount: LeaderSnapshot[];
 }
 
+interface DashboardFreshness {
+  status: 'fresh' | 'stale' | 'partial';
+  cachedAt: string;
+  message?: string;
+}
+
+interface DashboardSnapshot {
+  updatedAt: string;
+  source: 'akshare';
+  isFallbackWatchlist: boolean;
+  watchlistStocks: StockSnapshot[];
+  marketIndices: IndexSnapshot[];
+  sectors: SectorSnapshot[];
+  starStocks: StockSnapshot[];
+  temperature: ReturnType<typeof marketTemperature>;
+  news: NewsSnapshot[];
+  leaders: LeaderSnapshot[];
+  leaderboards: LeaderboardsSnapshot;
+  freshness: DashboardFreshness;
+}
+
+interface DashboardCacheEntry {
+  snapshot?: DashboardSnapshot;
+  freshUntil: number;
+  staleUntil: number;
+  refreshPromise?: Promise<DashboardSnapshot>;
+}
+
 const FALLBACK_WATCHLIST: WatchlistEntry[] = [
   { symbol: 'NVDA', market: 'US', displayName: '英伟达' },
   { symbol: 'TSLA', market: 'US', displayName: '特斯拉' },
@@ -114,6 +145,13 @@ const POPULAR_A_SYMBOLS = [
   { symbol: '300308', name: '中际旭创' },
 ];
 
+const DASHBOARD_FRESH_TTL_MS = 60_000;
+const DASHBOARD_STALE_TTL_MS = 10 * 60_000;
+const DASHBOARD_FIRST_PAINT_BUDGET_MS = 3_000;
+const DASHBOARD_AKSHARE_TIMEOUT_MS = 4_000;
+const DASHBOARD_RANKING_TIMEOUT_MS = 5_000;
+const dashboardCache = new Map<string, DashboardCacheEntry>();
+
 function stock(
   symbol: string,
   name: string,
@@ -145,6 +183,89 @@ async function requireUserId(db: Db, externalUserId: string): Promise<number> {
     .limit(1);
   if (!row) throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
   return row.id;
+}
+
+function dashboardCacheKey(userInternalId: number, watchlist: WatchlistEntry[]): string {
+  const signature = watchlist
+    .map((entry) => [
+      entry.symbol.trim().toUpperCase(),
+      entry.market,
+      entry.displayName?.trim() ?? '',
+    ].join(':'))
+    .join('|');
+  return `${userInternalId}:${signature}`;
+}
+
+function withFreshness(
+  snapshot: Omit<DashboardSnapshot, 'freshness'>,
+  freshness: DashboardFreshness,
+): DashboardSnapshot {
+  return { ...snapshot, freshness };
+}
+
+function markStale(snapshot: DashboardSnapshot, message: string): DashboardSnapshot {
+  return {
+    ...snapshot,
+    freshness: {
+      ...snapshot.freshness,
+      status: 'stale',
+      message,
+    },
+  };
+}
+
+function fallbackLeaderboards(): LeaderboardsSnapshot {
+  return { gainers: [], losers: [], amount: [] };
+}
+
+function buildPartialDashboardSnapshot(
+  watchlistRows: WatchlistEntry[],
+  effectiveWatchlist: WatchlistEntry[],
+  now = new Date(),
+  message = '行情刷新仍在进行，先展示真实关注列表。',
+): DashboardSnapshot {
+  const watchlistStocks = effectiveWatchlist
+    .slice(0, 8)
+    .map((entry, index) => unavailableStock(entry, FALLBACK_STOCKS[entry.symbol.trim().toUpperCase()] ?? fallbackStock(entry, index)));
+  const leaderboards = fallbackLeaderboards();
+  return withFreshness(
+    {
+      updatedAt: now.toISOString(),
+      source: 'akshare',
+      isFallbackWatchlist: watchlistRows.length === 0,
+      watchlistStocks,
+      marketIndices: [],
+      sectors: [],
+      starStocks: [],
+      temperature: null,
+      news: [],
+      leaders: leaderboards.gainers,
+      leaderboards,
+    },
+    {
+      status: 'partial',
+      cachedAt: now.toISOString(),
+      message,
+    },
+  );
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`timeout after ${timeoutMs}ms`));
+    }, timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
 }
 
 function cnDateParts(now = new Date()): { iso: string; compact: string } {
@@ -396,51 +517,50 @@ function buildNews(
   return rows.slice(0, 5);
 }
 
-export const stocksRouter = router({
-  dashboardSnapshot: protectedProcedure.query(async ({ ctx }) => {
-    const userInternalId = await requireUserId(ctx.db, ctx.userId);
-    const watchlistRows = await listWatchlistForUser(ctx.db, userInternalId);
-    const effectiveWatchlist = watchlistRows.length > 0 ? watchlistRows : FALLBACK_WATCHLIST;
-    const client = new HttpAkshareClient({
-      baseUrl: process.env.AKSHARE_HTTP_URL ?? 'http://127.0.0.1:8848',
-      logger: ctx.logger,
-    });
-    const fastClient = new HttpAkshareClient({
-      baseUrl: process.env.AKSHARE_HTTP_URL ?? 'http://127.0.0.1:8848',
-      timeoutMs: 2_500,
-      logger: ctx.logger,
-    });
-    const rankingClient = new HttpAkshareClient({
-      baseUrl: process.env.AKSHARE_HTTP_URL ?? 'http://127.0.0.1:8848',
-      timeoutMs: 45_000,
-      logger: ctx.logger,
-    });
-    const now = new Date();
-    const { compact } = cnDateParts(now);
-    const announcementWatchlist = effectiveWatchlist
-      .filter((entry) => entry.market === 'A')
-      .slice(0, 5);
-    const [indexCn, pulseEnv, stocks, announcements, rankingGainers, rankingLosers, rankingAmount] = await Promise.all([
-      client.getIndexQuote('cn'),
-      fastClient.getMarketPulse(compact),
-      Promise.all(effectiveWatchlist.slice(0, 8).map((entry, index) => stockSnapshot(client, entry, index))),
-      Promise.all(
-        announcementWatchlist.map(async (entry) => ({
-          entry,
-          env: await fastClient.getStockAnnouncements(entry.symbol, cnCompactDaysAgo(now, 7), compact),
-        })),
-      ),
-      rankingClient.getStockRankings('gainers', 8),
-      rankingClient.getStockRankings('losers', 8),
-      rankingClient.getStockRankings('amount', 8),
-    ]);
-    const sectors = mapSectors(pulseEnv);
-    const leaderboards: LeaderboardsSnapshot = {
-      gainers: mapRankingLeaders(rankingGainers, 'gainers'),
-      losers: mapRankingLeaders(rankingLosers, 'losers'),
-      amount: mapRankingLeaders(rankingAmount, 'amount'),
-    };
-    return {
+async function buildDashboardSnapshot(args: {
+  logger: MinimalLogger;
+  watchlistRows: WatchlistEntry[];
+  effectiveWatchlist: WatchlistEntry[];
+  now: Date;
+}): Promise<DashboardSnapshot> {
+  const { logger, watchlistRows, effectiveWatchlist, now } = args;
+  const baseUrl = process.env.AKSHARE_HTTP_URL ?? 'http://127.0.0.1:8848';
+  const client = new HttpAkshareClient({
+    baseUrl,
+    timeoutMs: DASHBOARD_AKSHARE_TIMEOUT_MS,
+    logger,
+  });
+  const rankingClient = new HttpAkshareClient({
+    baseUrl,
+    timeoutMs: DASHBOARD_RANKING_TIMEOUT_MS,
+    logger,
+  });
+  const { compact } = cnDateParts(now);
+  const announcementWatchlist = effectiveWatchlist
+    .filter((entry) => entry.market === 'A')
+    .slice(0, 5);
+  const [indexCn, pulseEnv, stocks, announcements, rankingGainers, rankingLosers, rankingAmount] = await Promise.all([
+    client.getIndexQuote('cn'),
+    client.getMarketPulse(compact),
+    Promise.all(effectiveWatchlist.slice(0, 8).map((entry, index) => stockSnapshot(client, entry, index))),
+    Promise.all(
+      announcementWatchlist.map(async (entry) => ({
+        entry,
+        env: await client.getStockAnnouncements(entry.symbol, cnCompactDaysAgo(now, 7), compact),
+      })),
+    ),
+    rankingClient.getStockRankings('gainers', 8),
+    rankingClient.getStockRankings('losers', 8),
+    rankingClient.getStockRankings('amount', 8),
+  ]);
+  const sectors = mapSectors(pulseEnv);
+  const leaderboards: LeaderboardsSnapshot = {
+    gainers: mapRankingLeaders(rankingGainers, 'gainers'),
+    losers: mapRankingLeaders(rankingLosers, 'losers'),
+    amount: mapRankingLeaders(rankingAmount, 'amount'),
+  };
+  return withFreshness(
+    {
       updatedAt: now.toISOString(),
       source: 'akshare',
       isFallbackWatchlist: watchlistRows.length === 0,
@@ -452,7 +572,101 @@ export const stocksRouter = router({
       news: buildNews(stocks, pulseEnv, announcements),
       leaders: leaderboards.gainers,
       leaderboards,
-    };
+    },
+    {
+      status: 'fresh',
+      cachedAt: now.toISOString(),
+    },
+  );
+}
+
+function startDashboardRefresh(args: {
+  cacheKey: string;
+  logger: MinimalLogger;
+  watchlistRows: WatchlistEntry[];
+  effectiveWatchlist: WatchlistEntry[];
+}): Promise<DashboardSnapshot> {
+  const existing = dashboardCache.get(args.cacheKey);
+  if (existing?.refreshPromise) return existing.refreshPromise;
+
+  const refreshPromise = buildDashboardSnapshot({
+    logger: args.logger,
+    watchlistRows: args.watchlistRows,
+    effectiveWatchlist: args.effectiveWatchlist,
+    now: new Date(),
+  }).then((snapshot) => {
+    dashboardCache.set(args.cacheKey, {
+      snapshot,
+      freshUntil: Date.now() + DASHBOARD_FRESH_TTL_MS,
+      staleUntil: Date.now() + DASHBOARD_STALE_TTL_MS,
+    });
+    return snapshot;
+  }).catch((error) => {
+    args.logger.warn(
+      { error: error instanceof Error ? error.message : String(error) },
+      'stocks-dashboard: refresh failed',
+    );
+    throw error;
+  }).finally(() => {
+    const latest = dashboardCache.get(args.cacheKey);
+    if (latest?.refreshPromise === refreshPromise) {
+      if (latest.snapshot) {
+        dashboardCache.set(args.cacheKey, { ...latest, refreshPromise: undefined });
+      } else {
+        dashboardCache.delete(args.cacheKey);
+      }
+    }
+  });
+
+  dashboardCache.set(args.cacheKey, {
+    snapshot: existing?.snapshot,
+    freshUntil: existing?.freshUntil ?? 0,
+    staleUntil: existing?.staleUntil ?? 0,
+    refreshPromise,
+  });
+  return refreshPromise;
+}
+
+async function resolveDashboardSnapshot(args: {
+  logger: MinimalLogger;
+  userInternalId: number;
+  watchlistRows: WatchlistEntry[];
+  effectiveWatchlist: WatchlistEntry[];
+}): Promise<DashboardSnapshot> {
+  const cacheKey = dashboardCacheKey(args.userInternalId, args.effectiveWatchlist);
+  const cached = dashboardCache.get(cacheKey);
+  const nowMs = Date.now();
+  if (cached?.snapshot && cached.freshUntil > nowMs) return cached.snapshot;
+
+  const refreshPromise = startDashboardRefresh({
+    cacheKey,
+    logger: args.logger,
+    watchlistRows: args.watchlistRows,
+    effectiveWatchlist: args.effectiveWatchlist,
+  });
+
+  if (cached?.snapshot && cached.staleUntil > nowMs) {
+    return markStale(cached.snapshot, '正在后台刷新行情，当前展示最近一次真实数据。');
+  }
+
+  try {
+    return await withTimeout(refreshPromise, DASHBOARD_FIRST_PAINT_BUDGET_MS);
+  } catch {
+    return buildPartialDashboardSnapshot(args.watchlistRows, args.effectiveWatchlist);
+  }
+}
+
+export const stocksRouter = router({
+  dashboardSnapshot: protectedProcedure.query(async ({ ctx }) => {
+    const userInternalId = await requireUserId(ctx.db, ctx.userId);
+    const watchlistRows = await listWatchlistForUser(ctx.db, userInternalId);
+    const effectiveWatchlist = watchlistRows.length > 0 ? watchlistRows : FALLBACK_WATCHLIST;
+    return resolveDashboardSnapshot({
+      logger: ctx.logger,
+      userInternalId,
+      watchlistRows,
+      effectiveWatchlist,
+    });
   }),
 
   searchSymbols: protectedProcedure
