@@ -579,15 +579,30 @@ async function buildDashboardSnapshot(args: {
     losers: mapRankingLeaders(rankingLosers, 'losers'),
     amount: mapRankingLeaders(rankingAmount, 'amount'),
   };
-  const freshness: DashboardFreshness = includeSlowSignals
+  const marketIndices = mapIndices(indexCn);
+  const temperature = marketTemperature(pulseEnv);
+  const news = buildNews(stocks, pulseEnv, announcements);
+  const missingMarketPanels = [
+    marketIndices.length === 0 ? '指数' : null,
+    sectors.length === 0 ? '行业趋势' : null,
+    temperature === null ? '市场温度' : null,
+    leaderboards.gainers.length === 0 ? '榜单' : null,
+  ].filter((label): label is string => label !== null);
+  const freshness: DashboardFreshness = !includeSlowSignals
     ? {
-        status: 'fresh',
-        cachedAt: now.toISOString(),
-      }
-    : {
         status: 'partial',
         cachedAt: now.toISOString(),
         message: '真实行情已先展示，市场温度、板块与重点动态正在后台补齐。',
+      }
+    : missingMarketPanels.length === 0
+      ? {
+        status: 'fresh',
+        cachedAt: now.toISOString(),
+      }
+      : {
+        status: 'partial',
+        cachedAt: now.toISOString(),
+        message: `真实行情已先展示，${missingMarketPanels.join('、')}正在后台补齐。`,
       };
   return withFreshness(
     {
@@ -595,11 +610,11 @@ async function buildDashboardSnapshot(args: {
       source: 'akshare',
       isFallbackWatchlist: watchlistRows.length === 0,
       watchlistStocks: stocks,
-      marketIndices: mapIndices(indexCn),
+      marketIndices,
       sectors,
       starStocks: stocks.filter((stockRow) => stockRow.price !== '—').slice(0, 6),
-      temperature: marketTemperature(pulseEnv),
-      news: buildNews(stocks, pulseEnv, announcements),
+      temperature,
+      news,
       leaders: leaderboards.gainers,
       leaderboards,
     },
@@ -620,7 +635,7 @@ function cacheDashboardSnapshot(cacheKey: string, snapshot: DashboardSnapshot, r
 }
 
 function withPreservedSlowSignals(snapshot: DashboardSnapshot, previous?: DashboardSnapshot): DashboardSnapshot {
-  if (!previous || snapshot.freshness.status !== 'fresh') return snapshot;
+  if (!previous || (snapshot.freshness.status !== 'fresh' && snapshot.freshness.status !== 'partial')) return snapshot;
   const shouldPreserveSectors = snapshot.sectors.length === 0 && previous.sectors.length > 0;
   const shouldPreserveTemperature = snapshot.temperature === null && previous.temperature !== null;
   const shouldPreserveNews = snapshot.news.length === 0 && previous.news.length > 0;

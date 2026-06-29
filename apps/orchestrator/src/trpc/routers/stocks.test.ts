@@ -190,4 +190,29 @@ describe('stocks dashboard snapshot', () => {
     expect(merged.freshness.status).toBe('stale');
     expect(merged.freshness.message).toContain('行业趋势保留最近一次真实数据');
   });
+
+  it('marks a full refresh partial when market panels are still missing', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/kline/603528') {
+        return new Response(JSON.stringify(envelope([
+          { 日期: '2026-06-26', 收盘: 7.11, 涨跌幅: 0.42 },
+          { 日期: '2026-06-29', 收盘: 7.28, 涨跌幅: 2.39 },
+        ])));
+      }
+      return new Response(JSON.stringify(envelope([])));
+    });
+
+    const snapshot = await __stocksDashboardTest.buildDashboardSnapshot({
+      logger: { warn: vi.fn() },
+      watchlistRows: [{ symbol: '603528', market: 'A', displayName: '多伦科技' }],
+      effectiveWatchlist: [{ symbol: '603528', market: 'A', displayName: '多伦科技' }],
+      now: new Date('2026-06-29T12:00:00.000Z'),
+      includeSlowSignals: true,
+    });
+
+    expect(snapshot.freshness.status).toBe('partial');
+    expect(snapshot.freshness.message).toContain('指数、行业趋势、市场温度、榜单正在后台补齐');
+    expect(snapshot.watchlistStocks[0]?.price).toBe('7.28');
+  });
 });
