@@ -72,10 +72,16 @@ TTL_TRADECAL = _ttl("TRADECAL", 86400)  # 交易日历日内基本不变，缓�
 TTL_FUND = _ttl("FUND", 86400)  # 财报季度才变，缓存 1 天
 TTL_VAL = _ttl("VAL", 3600)  # 估值日级，缓存 1 小时
 TTL_RISK = _ttl("RISK", 21600)  # ④ 风险源(质押/商誉/预告)粗粒度变更，缓存 6h
+TTL_RANK = _ttl("RANK", 300)
+TTL_SPOT = _ttl("SPOT", TTL_RANK)
 
 # Row caps so a single tool call can't dump thousands of rows into the
 # model's context.
 MAX_ROWS = int(os.environ.get("AKSHARE_MCP_MAX_ROWS", "50"))
+
+_spot_lock = threading.Lock()
+_spot_records: list[dict[str, Any]] = []
+_spot_ts: float = 0.0
 
 
 class AkShareUnavailable(RuntimeError):
@@ -168,18 +174,70 @@ def sina_prefix(symbol: str) -> str:
 
 
 # --- 行情（quote: sina spot 过滤；push2 stock_bid_ask_em 从 Vultr 不可达） ----
+def _hydrate_symbol_table_from_spot(recs: list[dict[str, Any]]) -> None:
+    """Reuse the full-market spot payload to keep symbol search warm."""
+    global _symbol_table, _symbol_ts
+    table: dict[str, str] = {}
+    for rec in recs:
+        code = _strip_market_prefix(str(rec.get("代码", "")))
+        name = str(rec.get("名称", "")).strip()
+        if code and name and name != "nan":
+            table[code] = name
+    if not table:
+        return
+    with _symbol_lock:
+        _symbol_table = table
+        _symbol_ts = time.time()
+
+
+def _get_a_spot_records(ttl: int = TTL_SPOT) -> list[dict[str, Any]]:
+    """Fetch and cache full A-share spot rows once per process TTL window."""
+    global _spot_records, _spot_ts
+    now = time.time()
+    with _spot_lock:
+        if _spot_records and now - _spot_ts < ttl:
+            return list(_spot_records)
+
+    a = _require_ak()
+    df = a.stock_zh_a_spot()
+    recs = _records(df, limit=6000)
+    with _spot_lock:
+        _spot_records = recs
+        _spot_ts = time.time()
+    _hydrate_symbol_table_from_spot(recs)
+    return list(recs)
+
+
 def get_quote(symbol: str) -> tuple[list[dict[str, Any]], str]:
     """实时行情快照（最新价 / 涨跌幅 / 成交额）。symbol 形如 '600519'。
 
     走 sina 全市场 spot 再按代码过滤（push2 stock_bid_ask_em 从 Vultr 不可达）。
     注：全市场快照较重，④ 即时问答可后续换更轻的单只 sina 实时接口。
     """
-    a = _require_ak()
-    df = a.stock_zh_a_spot()
-    recs = _records(df, limit=6000)
+    recs = _get_a_spot_records()
     code = symbol.strip()
     hit = [r for r in recs if str(r.get("代码", "")).endswith(code)]
     return hit[:1], "akshare:stock_zh_a_spot(sina,filter)"
+
+
+def get_stock_rankings(metric: str = "gainers", limit: int = 20) -> tuple[list[dict[str, Any]], str]:
+    """A股全市场榜单。metric: gainers | losers | amount。"""
+    m = (metric or "gainers").strip().lower()
+    if m not in {"gainers", "losers", "amount"}:
+        raise AkShareUnavailable("不支持的榜单类型，仅支持 gainers/losers/amount")
+    cap = max(1, min(int(limit or 20), 50))
+    rows = [
+        r for r in _get_a_spot_records()
+        if _to_float(r.get("最新价")) is not None and _to_float(r.get("涨跌幅")) is not None
+    ]
+    if m == "amount":
+        rows = [r for r in rows if _to_float(r.get("成交额")) is not None]
+        rows.sort(key=lambda r: _to_float(r.get("成交额")) or 0, reverse=True)
+    elif m == "losers":
+        rows.sort(key=lambda r: _to_float(r.get("涨跌幅")) or 0)
+    else:
+        rows.sort(key=lambda r: _to_float(r.get("涨跌幅")) or 0, reverse=True)
+    return rows[:cap], f"akshare:stock_zh_a_spot(sina,{m})"
 
 
 def get_kline(
@@ -878,11 +936,9 @@ def _strip_market_prefix(code: str) -> str:
 def refresh_symbol_table() -> int:
     """同步拉全量代码名称表填缓存（~70s，prewarm 调）。返回条数。"""
     global _symbol_table, _symbol_ts, _symbol_refreshing
-    a = _require_ak()
     try:
-        df = a.stock_zh_a_spot()
         table: dict[str, str] = {}
-        for rec in df[["代码", "名称"]].to_dict("records"):
+        for rec in _get_a_spot_records():
             code = _strip_market_prefix(str(rec.get("代码", "")))
             name = str(rec.get("名称", "")).strip()
             if code and name and name != "nan":

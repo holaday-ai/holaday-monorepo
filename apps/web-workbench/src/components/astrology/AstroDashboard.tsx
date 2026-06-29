@@ -72,22 +72,37 @@ const PSYCHOLOGY_OPTIONS = [
 
 const PSYCHOLOGY_RESULTS: Record<
   (typeof PSYCHOLOGY_OPTIONS)[number]['id'],
-  { title: string; body: string; action: string }
+  { title: string; body: string; action: string; layers: Array<{ label: string; body: string }> }
 > = {
   fast: {
     title: '行动型压力',
     body: '你现在适合用速度换清晰度。先做一个粗版本，别在开局就追求完美。',
     action: '先开一个 10 分钟小冲刺，结束后再判断要不要加深。',
+    layers: [
+      { label: '压力来源', body: '想快点看到结果，所以容易对准备工作不耐烦。' },
+      { label: '优势', body: '启动快，适合把模糊任务先撞出一个轮廓。' },
+      { label: '提醒', body: '不要一边冲一边开太多分支，先把一个动作跑完。' },
+    ],
   },
   steady: {
     title: '秩序型决策',
     body: '你更需要可控感。把任务拆成三步，会比临场发挥更容易进入状态。',
     action: '把最小下一步写出来，完成后再切到第二步。',
+    layers: [
+      { label: '压力来源', body: '不确定下一步时，脑子会开始反复排练。' },
+      { label: '优势', body: '适合做判断、归类、复盘，把混乱变成顺序。' },
+      { label: '提醒', body: '别把计划写太满，留一个可以调整的空格。' },
+    ],
   },
   soft: {
     title: '感受型恢复',
     body: '你的注意力和情绪绑定得更紧。先降噪，再做决定，会更容易稳定输出。',
     action: '先整理桌面或喝点水，再处理最需要沟通的一件事。',
+    layers: [
+      { label: '压力来源', body: '外部声音太多时，情绪会比任务本身更耗电。' },
+      { label: '优势', body: '很会捕捉氛围，适合处理关系、表达和细节。' },
+      { label: '提醒', body: '先把感受安顿好，再回复消息或做决定。' },
+    ],
   },
 };
 
@@ -131,43 +146,55 @@ const EXPERIENCE_CARDS = [
     id: 'chart',
     icon: Orbit,
     title: '完整星盘',
-    body: '太阳、月亮、上升、元素倾向和任务风格，生成长期个人档案。',
+    body: '长期任务性格',
     status: '看我的档案',
+    badge: '深入',
+    priority: 'secondary',
   },
   {
     id: 'compatibility',
     icon: Users,
     title: '合盘匹配',
-    body: '输入对方生日，查看吸引力、摩擦点和相处建议。',
+    body: '测关系温度',
     status: '测一测',
+    badge: '热门',
+    priority: 'primary',
   },
   {
     id: 'psychology',
     icon: Brain,
     title: '心理小测试',
-    body: '用 3 个轻问题看今天的压力、决策和关系倾向。',
+    body: '看今天状态',
     status: '选一下',
+    badge: '30 秒',
+    priority: 'primary',
   },
   {
     id: 'tarot',
     icon: Shuffle,
     title: '塔罗 / 抽卡',
-    body: '等待任务时抽一张卡，给一个轻量提示和下一步行动。',
+    body: '抽今日提示',
     status: '抽一张',
+    badge: '推荐',
+    priority: 'primary',
   },
   {
     id: 'numerology',
     icon: WalletCards,
     title: '数字命理',
-    body: '根据生日计算生命灵数、个人年份和今天适合的节奏。',
+    body: '今日行动数',
     status: '算今日数',
+    badge: '轻量',
+    priority: 'secondary',
   },
   {
     id: 'transit',
     icon: Activity,
     title: '流年提醒',
-    body: '把本周重点变化转成今天、本周、本月的任务提醒。',
+    body: '本周节奏提醒',
     status: '看提醒',
+    badge: '规划',
+    priority: 'secondary',
   },
 ] as const;
 
@@ -307,13 +334,7 @@ export function AstroDashboard({
         />
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-2">
-        <TarotPanel
-          liveProvider={liveProvider}
-          loading={providerState.loading}
-          tarot={providerState.tarot}
-          zodiacLabel={reading.zodiacLabel}
-        />
+      <div className="grid gap-5">
         <MoodCheckPanel
           selectedMood={selectedMood}
           activeMood={activeMood}
@@ -388,12 +409,15 @@ function ExperienceGrid({
   storageScope: string | null;
 }): JSX.Element {
   const [activeId, setActiveId] = React.useState<ExperienceId>(() =>
-    readStoredExperienceId(storageScope) ?? 'chart',
+    readStoredExperienceId(storageScope) ?? 'tarot',
   );
   const activeCard = EXPERIENCE_CARDS.find((card) => card.id === activeId) ?? EXPERIENCE_CARDS[0];
   const ActiveIcon = activeCard.icon;
+  const activeTheme = experienceDetailTheme(activeId);
+  const primaryCards = EXPERIENCE_CARDS.filter((card) => card.priority === 'primary');
+  const secondaryCards = EXPERIENCE_CARDS.filter((card) => card.priority === 'secondary');
   React.useEffect(() => {
-    setActiveId(readStoredExperienceId(storageScope) ?? 'chart');
+    setActiveId(readStoredExperienceId(storageScope) ?? 'tarot');
   }, [storageScope]);
   function selectExperience(id: ExperienceId): void {
     setActiveId(id);
@@ -411,8 +435,9 @@ function ExperienceGrid({
           不用先填完整资料；生日和出生时间只会让结果更贴近你。
         </p>
       </div>
-      <div className="grid gap-3 md:grid-cols-3">
-        {EXPERIENCE_CARDS.map(({ id, icon: Icon, title, body, status }) => (
+      <div className="mb-2 text-xs font-semibold text-[#231F20]">推荐先玩</div>
+      <div className="grid gap-3 lg:grid-cols-3">
+        {primaryCards.map(({ id, icon: Icon, title, body, status, badge }) => (
           <button
             key={id}
             type="button"
@@ -428,25 +453,52 @@ function ExperienceGrid({
               <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] bg-white text-[#57479C] shadow-[0_6px_18px_rgba(15,23,42,0.06)]">
                 <Icon className="h-4 w-4" aria-hidden />
               </span>
-              <div className="min-w-0">
-                <h3 className="text-sm font-semibold text-[#231F20]">{title}</h3>
-                <p className="mt-1 text-xs leading-5 text-[#595757]">{body}</p>
-                <div className="mt-3 inline-flex rounded-[6px] border border-[#DCDDDD] bg-white px-2 py-1 text-[10px] font-medium text-[#8C8C8C]">
-                  {status}
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="text-sm font-semibold text-[#231F20]">{title}</h3>
+                  <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold text-[#EA1F59]">
+                    {badge}
+                  </span>
+                </div>
+                <p className="mt-2 text-sm font-medium text-[#595757]">{body}</p>
+                <div className="mt-4 inline-flex rounded-[6px] border border-[#DCDDDD] bg-white px-2 py-1 text-[10px] font-medium text-[#8C8C8C]">
+                  {activeId === id ? '正在看' : status}
                 </div>
               </div>
             </div>
           </button>
         ))}
       </div>
-      <div className="mt-4 rounded-[8px] border border-[#EFEFEF] bg-[#FAFAFA] p-4">
+      <div className="mt-4 text-xs font-semibold text-[#8C8C8C]">想看更深</div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-3">
+        {secondaryCards.map(({ id, icon: Icon, title, status }) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => selectExperience(id)}
+            className={cn(
+              'flex h-10 items-center justify-between rounded-[8px] border px-3 text-left text-xs transition',
+              activeId === id
+                ? 'border-[#EA1F59]/35 bg-[#FFF6F8] text-[#EA1F59]'
+                : 'border-[#EFEFEF] bg-white text-[#595757] hover:border-[#EA1F59]/20',
+            )}
+          >
+            <span className="flex min-w-0 items-center gap-2">
+              <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              <span className="truncate font-semibold">{title}</span>
+            </span>
+            <span className="shrink-0 text-[10px] opacity-75">{status}</span>
+          </button>
+        ))}
+      </div>
+      <div className={cn('mt-4 rounded-[8px] border p-4', activeTheme.panel)}>
         <div className="mb-3 flex items-center gap-2">
-          <span className="inline-flex h-8 w-8 items-center justify-center rounded-[8px] bg-white text-[#EA1F59] shadow-[0_6px_18px_rgba(15,23,42,0.05)]">
+          <span className={cn('inline-flex h-8 w-8 items-center justify-center rounded-[8px] bg-white shadow-[0_6px_18px_rgba(15,23,42,0.05)]', activeTheme.icon)}>
             <ActiveIcon className="h-4 w-4" aria-hidden />
           </span>
           <div>
             <h3 className="text-base font-semibold text-[#231F20]">{activeCard.title}</h3>
-            <p className="text-xs text-[#8C8C8C]">{activeCard.status}</p>
+            <p className={cn('text-xs font-medium', activeTheme.eyebrow)}>{activeCard.status}</p>
           </div>
         </div>
         <ExperienceDetail
@@ -460,6 +512,49 @@ function ExperienceGrid({
       </div>
     </section>
   );
+}
+
+function experienceDetailTheme(id: ExperienceId): { panel: string; icon: string; eyebrow: string } {
+  if (id === 'compatibility') {
+    return {
+      panel: 'border-[#7DD3FC]/45 bg-[#F0F9FF]',
+      icon: 'text-[#0369A1]',
+      eyebrow: 'text-[#0369A1]',
+    };
+  }
+  if (id === 'psychology') {
+    return {
+      panel: 'border-[#FBCFE8]/70 bg-[#FDF2F8]',
+      icon: 'text-[#BE185D]',
+      eyebrow: 'text-[#BE185D]',
+    };
+  }
+  if (id === 'numerology') {
+    return {
+      panel: 'border-[#FDE68A]/75 bg-[#FFFBEB]',
+      icon: 'text-[#B45309]',
+      eyebrow: 'text-[#B45309]',
+    };
+  }
+  if (id === 'transit') {
+    return {
+      panel: 'border-[#BBF7D0]/70 bg-[#F0FDF4]',
+      icon: 'text-[#15803D]',
+      eyebrow: 'text-[#15803D]',
+    };
+  }
+  if (id === 'chart') {
+    return {
+      panel: 'border-[#C4B5FD]/60 bg-[#F8F6FF]',
+      icon: 'text-[#57479C]',
+      eyebrow: 'text-[#57479C]',
+    };
+  }
+  return {
+    panel: 'border-[#FBCFE8]/70 bg-[#FFF6F8]',
+    icon: 'text-[#EA1F59]',
+    eyebrow: 'text-[#EA1F59]',
+  };
 }
 
 function ExperienceDetail({
@@ -525,6 +620,27 @@ function NatalChartFeature({
         </div>
         <h4 className="mt-3 text-base font-semibold text-[#231F20]">{snapshot.title}</h4>
         <p className="mt-2 text-sm leading-6 text-[#595757]">{snapshot.body}</p>
+        <div className="mt-3 grid gap-2">
+          {[
+            {
+              label: '你容易怎么开始',
+              body: `先抓一个能看见进展的小点，${reading.focusMode} 会比完整规划更适合今天。`,
+            },
+            {
+              label: '等待任务时怎么稳住',
+              body: `用 ${reading.luckyWindow} 做一个短窗口：只处理一件事，不反复切页面。`,
+            },
+            {
+              label: '今天少做什么',
+              body: `少把「${reading.mood}」用成硬撑；卡住时先换成整理、复述或轻沟通。`,
+            },
+          ].map((item) => (
+            <div key={item.label} className="rounded-[8px] bg-white/70 p-3">
+              <div className="text-xs font-semibold text-[#B45309]">{item.label}</div>
+              <p className="mt-1 text-xs leading-5 text-[#595757]">{item.body}</p>
+            </div>
+          ))}
+        </div>
         <div className="mt-3 rounded-[8px] border border-white/80 bg-white/70 p-3 text-xs leading-5 text-[#595757]">
           保存出生时间和出生地后，这里会优先使用你的上升与宫位信息；没填时用生日和当前任务节奏生成稳定档案。
         </div>
@@ -636,6 +752,27 @@ function CompatibilityFeature({
           ))}
         </div>
         <p className="mt-3 text-sm leading-6 text-[#595757]">{result.advice}</p>
+        <div className="mt-4 grid gap-2 sm:grid-cols-3">
+          {[
+            {
+              label: '今天适合聊',
+              body: result.score >= 78 ? '一起定一个小目标。' : result.score >= 68 ? '先同步期待，不急着定结论。' : '先讲事实，别先猜感受。',
+            },
+            {
+              label: '容易加分',
+              body: '把请求说具体，给对方一个好回应的台阶。',
+            },
+            {
+              label: '容易扣分',
+              body: '用沉默测试对方，或把一句话理解成全部态度。',
+            },
+          ].map((item) => (
+            <div key={item.label} className="rounded-[8px] border border-white/70 bg-white/65 p-3">
+              <div className="text-xs font-semibold text-[#0369A1]">{item.label}</div>
+              <p className="mt-1 text-xs leading-5 text-[#595757]">{item.body}</p>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -698,6 +835,14 @@ function PsychologyFeature({
         <div className="mt-3 rounded-[8px] bg-white/75 p-3 text-xs leading-5 text-[#595757]">
           结合今日关键词「{reading.mood}」：{result.action}
         </div>
+        <div className="mt-3 grid gap-2 sm:grid-cols-3">
+          {result.layers.map((layer) => (
+            <div key={layer.label} className="rounded-[8px] border border-white/70 bg-white/65 p-3">
+              <div className="text-xs font-semibold text-[#BE185D]">{layer.label}</div>
+              <p className="mt-1 text-xs leading-5 text-[#595757]">{layer.body}</p>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -717,6 +862,20 @@ function TarotCardBody({
   const body =
     tarot?.body ??
     `${zodiacLabel} 今天适合抽一张轻提示卡。先把问题放轻一点，选一个能马上行动的小方向。`;
+  const layers = [
+    {
+      label: '牌面在说',
+      body: '你不是没有方向，只是需要把希望落到一个具体动作上。',
+    },
+    {
+      label: '对应任务',
+      body: `${zodiacLabel} 今天适合先做能恢复信心的小步骤，而不是一口气解决全部问题。`,
+    },
+    {
+      label: '马上做',
+      body: '写下“我现在能推进的一厘米”，然后只做这一厘米。',
+    },
+  ];
   return (
     <div className="rounded-[8px] border border-[#57479C]/18 bg-[#F8F6FF] p-5">
       <div className="flex items-center justify-between gap-3">
@@ -735,6 +894,14 @@ function TarotCardBody({
       <h3 className="mt-4 text-xl font-semibold text-[#231F20]">{title}</h3>
       <p className="mt-1 text-sm font-medium text-[#57479C]">{subtitle}</p>
       <p className="mt-3 text-sm leading-6 text-[#595757]">{body}</p>
+      <div className="mt-4 grid gap-2 sm:grid-cols-3">
+        {layers.map((layer) => (
+          <div key={layer.label} className="rounded-[8px] border border-white/80 bg-white/70 p-3">
+            <div className="text-xs font-semibold text-[#57479C]">{layer.label}</div>
+            <p className="mt-1 text-xs leading-5 text-[#595757]">{layer.body}</p>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -762,6 +929,23 @@ function NumerologyFeature({
           </div>
         ))}
       </div>
+      <div className="mt-3 rounded-[8px] border border-[#FDE68A]/70 bg-white p-4">
+        <div className="text-sm font-semibold text-[#231F20]">今天的数字组合怎么读</div>
+        <div className="mt-3 grid gap-2 md:grid-cols-3">
+          <div className="rounded-[8px] bg-[#FFFBEB] p-3">
+            <div className="text-xs font-semibold text-[#B45309]">底色</div>
+            <p className="mt-1 text-xs leading-5 text-[#595757]">生命灵数看长期习惯，提醒你用自己顺手的方式开始。</p>
+          </div>
+          <div className="rounded-[8px] bg-[#FFFBEB] p-3">
+            <div className="text-xs font-semibold text-[#B45309]">年度主题</div>
+            <p className="mt-1 text-xs leading-5 text-[#595757]">个人年份像今年的背景音乐，不决定结果，但会影响你更容易投入什么。</p>
+          </div>
+          <div className="rounded-[8px] bg-[#FFFBEB] p-3">
+            <div className="text-xs font-semibold text-[#B45309]">今日用法</div>
+            <p className="mt-1 text-xs leading-5 text-[#595757]">今日行动数只看今天：选一个小动作完成，让能量有出口。</p>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -786,6 +970,9 @@ function TransitFeature({
         <p className="mt-2 text-sm leading-6 text-[#595757]">
           今天先按「{reading.focusMode}」推进；本周优先抓能量最高的 3 天；本月把重复任务排到你的高光时段附近。
         </p>
+        <div className="mt-3 rounded-[8px] bg-[#F8F6FF] p-3 text-xs leading-5 text-[#595757]">
+          解读方式：不是预测哪天一定会发生什么，而是把你更容易进入状态的时间段变成任务排布提示。
+        </div>
       </div>
       <div className="grid gap-2">
         {strongest.map((day, index) => (
@@ -906,37 +1093,6 @@ function providerStatusCopy(
     description: '今天的内容暂时没有更新成功，先展示稳定版本。',
     className: 'border-[#DCDDDD] bg-[#FAFAFA] text-[#595757]',
   };
-}
-
-function TarotPanel({
-  liveProvider,
-  loading,
-  tarot,
-  zodiacLabel,
-}: {
-  liveProvider: boolean;
-  loading: boolean;
-  tarot: TarotReading | null;
-  zodiacLabel: string;
-}): JSX.Element {
-  const provider = tarot?.provider === 'divineapi' ? '今日牌面' : '今日牌组';
-  return (
-    <section className="rounded-[8px] border border-[#DCDDDD] bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
-      <div className="mb-4 flex items-start justify-between gap-3">
-        <div>
-          <h2 className="text-base font-semibold text-[#231F20]">今日塔罗提示</h2>
-          <p className="mt-1 text-xs text-[#8C8C8C]">
-            {liveProvider ? '每天给一个轻提示，适合等待任务时快速看一眼。' : '每天保留一张轻提示，适合等待任务时快速看一眼。'}
-          </p>
-        </div>
-        <div className="inline-flex items-center gap-1 rounded-[8px] border border-[#DCDDDD] bg-[#FAFAFA] px-2 py-1 text-[10px] font-medium text-[#8C8C8C]">
-          {loading ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden /> : <Shuffle className="h-3 w-3" aria-hidden />}
-          {provider}
-        </div>
-      </div>
-      <TarotCardBody loading={loading} tarot={tarot} zodiacLabel={zodiacLabel} />
-    </section>
-  );
 }
 
 function FortuneTile({

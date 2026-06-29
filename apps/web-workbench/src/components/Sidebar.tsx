@@ -18,6 +18,7 @@ import {
   Shield,
   Sparkles,
   Trash2,
+  TrendingUp,
   X,
 } from 'lucide-react';
 import * as React from 'react';
@@ -1008,6 +1009,7 @@ interface FeatureItem {
 
 const FEATURES: readonly FeatureItem[] = [
   { icon: Sparkles, label: '专家技能', href: '/skills' },
+  { icon: TrendingUp, label: '股市任务', href: '/stocks' },
   { icon: MoonStar, label: '今日能量', href: '/cosmic' },
   { icon: Clapperboard, label: '视频任务', href: '/video' },
   { icon: Clock, label: '定时任务', href: '/scheduled' },

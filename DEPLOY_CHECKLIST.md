@@ -145,3 +145,41 @@ SSH is blocked for ~15-60 seconds. Plan for this:
 - A single retry after a fail2ban lockout almost always succeeds.
 
 Don't fight fail2ban — design around it.
+
+---
+
+## RULE 6 — Stock features require the local AkShare data service
+
+**The rule:** any deploy that touches the stock dashboard, A-share
+briefing, or AkShare adapters must deploy and smoke
+`akshare-mcp-http` before declaring orchestrator healthy. Use:
+
+```bash
+scripts/deploy-current.sh orchestrator
+# or
+scripts/deploy-current.sh both
+```
+
+Both paths now run `scripts/deploy-akshare-mcp.sh` first. For an
+AkShare-only hotfix, use `scripts/deploy-current.sh akshare`.
+
+**Why:** the stock UI and briefing code read real market data from
+`AKSHARE_HTTP_URL` (default `http://127.0.0.1:8848`). A plain
+orchestrator restart can look healthy while stock rankings degrade
+or time out if the local Python service is stale or down.
+
+**Smoke bar:** do not stop at `/healthz`. The AkShare smoke must
+also fetch real ranking envelopes:
+
+```bash
+AKSHARE_HTTP_URL=http://127.0.0.1:8848 scripts/smoke-akshare-mcp.sh
+```
+
+It checks `/stock-rankings/gainers?limit=1` and
+`/stock-rankings/amount?limit=1`. If either returns an error
+envelope, inspect `pm2 logs akshare-mcp-http --lines 40 --nostream`.
+
+**Security boundary:** `akshare-mcp-http` is intentionally
+unauthenticated and must stay loopback-only (`127.0.0.1:8848`).
+Never expose it through nginx, a public firewall rule, or a public
+DNS record.

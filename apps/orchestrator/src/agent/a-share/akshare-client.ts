@@ -26,6 +26,7 @@ import type {
   MarketPulseRow,
   NorthboundRow,
   PledgeRow,
+  StockRankingRow,
   UnlockRow,
   ValuationRow,
   ZtReviewRow,
@@ -73,6 +74,11 @@ export interface AkshareClient {
   getTradingDay(date: string): Promise<AkEnvelope<TradingDayRow>>;
   /** search_symbol(query) — 问句→个股（④ 短名解析；表 day-cache，冷启返空）。 */
   searchSymbol(query: string): Promise<AkEnvelope<SymbolRow>>;
+  /** get_stock_rankings(metric, limit) — A股全市场涨幅/跌幅/成交额榜。 */
+  getStockRankings(
+    metric: 'gainers' | 'losers' | 'amount',
+    limit?: number,
+  ): Promise<AkEnvelope<StockRankingRow>>;
   /** get_market_pulse(date, prevDate?) — v2 盘后温度计+板块主线+大盘净流入（prevDate→涨停昨对比）。 */
   getMarketPulse(date: string, prevDate?: string): Promise<AkEnvelope<MarketPulseRow>>;
   /** get_zt_pool_summary(date) — v2 盘前回顾某交易日涨停梯队（date 'YYYYMMDD'）。 */
@@ -143,6 +149,9 @@ export class StubAkshareClient implements AkshareClient {
   }
   searchSymbol(query: string) {
     return Promise.resolve(this.err<SymbolRow>(`akshare:symbol_search(${query})`, this.now()));
+  }
+  getStockRankings(metric: 'gainers' | 'losers' | 'amount', _limit?: number) {
+    return Promise.resolve(this.err<StockRankingRow>(`akshare:stock_rankings(${metric})`, this.now()));
   }
   getMarketPulse(date: string, _prevDate?: string) {
     return Promise.resolve(this.err<MarketPulseRow>(`akshare:market_pulse(${date})`, this.now()));

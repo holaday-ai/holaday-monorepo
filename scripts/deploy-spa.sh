@@ -54,11 +54,12 @@ VULTR_REMOTE_SMOKE_RESOLVE="holaday.ai:443:127.0.0.1"
 # Non-interactive password auth — pulled from env / local deploy env so
 # passwords don't end up in shell history. Uses sshpass when installed,
 # otherwise OpenSSH SSH_ASKPASS.
-build_ssh_password_prefix "${ALIYUN_PASSWORD:-}"
-ALIYUN_AUTH_PREFIX=()
-if ((${#SSH_PASSWORD_PREFIX[@]})); then
-  ALIYUN_AUTH_PREFIX=("${SSH_PASSWORD_PREFIX[@]}")
+if [[ -z "${ALIYUN_PASSWORD:-}" ]]; then
+  echo "❌ ALIYUN_PASSWORD unset — refusing SPA deploy" >&2
+  exit 1
 fi
+build_ssh_password_prefix "$ALIYUN_PASSWORD"
+ALIYUN_AUTH_PREFIX=("${SSH_PASSWORD_PREFIX[@]}")
 SSH_OPTS=(
   -o StrictHostKeyChecking=no
   -o NumberOfPasswordPrompts=1
@@ -192,12 +193,8 @@ fi
 NEW_HASH=$(grep -o 'index-[^"]*\.js' "$DIST_DIR/index.html" | head -1 || echo unknown)
 echo "📦 Local bundle: $NEW_HASH"
 
-ALIYUN_SSH=(ssh "${SSH_OPTS[@]}")
-ALIYUN_SCP=(scp "${SSH_OPTS[@]}")
-if ((${#ALIYUN_AUTH_PREFIX[@]})); then
-  ALIYUN_SSH=("${ALIYUN_AUTH_PREFIX[@]}" "${ALIYUN_SSH[@]}")
-  ALIYUN_SCP=("${ALIYUN_AUTH_PREFIX[@]}" "${ALIYUN_SCP[@]}")
-fi
+ALIYUN_SSH=("${ALIYUN_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}")
+ALIYUN_SCP=("${ALIYUN_AUTH_PREFIX[@]}" scp "${SSH_OPTS[@]}")
 
 echo "→ Backing up current dist on Aliyun"
 run_with_retry "Aliyun backup" "${ALIYUN_SSH[@]}" "$ALIYUN_HOST" \
@@ -246,16 +243,9 @@ if [[ -z "${VULTR_PASSWORD:-}" ]]; then
 fi
 
 build_ssh_password_prefix "$VULTR_PASSWORD"
-VULTR_AUTH_PREFIX=()
-if ((${#SSH_PASSWORD_PREFIX[@]})); then
-  VULTR_AUTH_PREFIX=("${SSH_PASSWORD_PREFIX[@]}")
-fi
-VULTR_SSH=(ssh "${SSH_OPTS[@]}")
-VULTR_SCP=(scp "${SSH_OPTS[@]}")
-if ((${#VULTR_AUTH_PREFIX[@]})); then
-  VULTR_SSH=("${VULTR_AUTH_PREFIX[@]}" "${VULTR_SSH[@]}")
-  VULTR_SCP=("${VULTR_AUTH_PREFIX[@]}" "${VULTR_SCP[@]}")
-fi
+VULTR_AUTH_PREFIX=("${SSH_PASSWORD_PREFIX[@]}")
+VULTR_SSH=("${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}")
+VULTR_SCP=("${VULTR_AUTH_PREFIX[@]}" scp "${SSH_OPTS[@]}")
 
 echo "→ Uploading tarball to Vultr"
 run_with_retry "Vultr upload" "${VULTR_SCP[@]}" "$TARBALL" "$VULTR_HOST:/tmp/" >/dev/null
