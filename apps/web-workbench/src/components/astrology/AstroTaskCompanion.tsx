@@ -92,8 +92,8 @@ export function AstroTaskCompanion({
   );
 
   if (!isCosmicEnabled() || dismissed) return null;
-  if (surface === 'waiting' && status !== 'queued' && status !== 'executing') return null;
-  if (surface === 'complete' && status !== 'completed' && status !== 'partial_success') return null;
+  if (surface === 'waiting' && status !== 'executing') return null;
+  if (surface === 'complete' && status !== 'completed') return null;
 
   const accent = ACCENT_CLASS[insight.accent];
   const Icon = surface === 'complete' ? CheckCircle2 : MoonStar;
@@ -162,7 +162,7 @@ export function AstroTaskCompanion({
               </button>
             )}
             {surface === 'complete' && (
-              <span className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-white/75 bg-white/70 px-2.5 py-1 text-[11px] font-medium text-[#57479C] dark:border-white/10 dark:bg-white/5 dark:text-[#B9AEFF]">
+              <span className="ml-auto inline-flex items-center gap-1.5 text-[11px] font-medium text-[#57479C] dark:text-[#B9AEFF]">
                 <Sparkles className="h-3 w-3" />
                 {insight.action}
               </span>
