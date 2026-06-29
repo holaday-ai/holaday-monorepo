@@ -2,10 +2,13 @@ import {
   ArrowRight,
   Bell,
   CalendarClock,
+  ChevronLeft,
   ChevronRight,
   ExternalLink,
   FileText,
+  Heart,
   Loader2,
+  MoreHorizontal,
   Plus,
   RefreshCw,
   Send,
@@ -725,31 +728,36 @@ function WatchlistStrip({
         action="编辑"
         onAction={onEdit}
       />
-      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5">
+      <div className="mt-4 flex snap-x gap-3 overflow-x-auto pb-1 [scrollbar-width:thin]">
         {stocks.slice(0, 5).map((stock) => (
           <article
             key={stock.symbol}
-            className="group min-w-0 rounded-[8px] border border-[#E7E7EB] bg-[#FEFEFF] p-3 transition-[border-color,box-shadow,transform] hover:-translate-y-0.5 hover:border-[#EA1F59]/25 hover:shadow-[0_14px_28px_rgba(18,24,38,0.08)] motion-reduce:hover:translate-y-0"
+            className="group min-w-[238px] max-w-[280px] flex-1 snap-start rounded-[8px] border border-[#E7E7EB] bg-[#FEFEFF] p-3 transition-[border-color,box-shadow,transform] hover:-translate-y-0.5 hover:border-[#EA1F59]/25 hover:shadow-[0_14px_28px_rgba(18,24,38,0.08)] motion-reduce:hover:translate-y-0"
           >
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
-                <div className="text-[14px] font-semibold text-[#121826]">{stock.symbol}</div>
-                <div className="whitespace-nowrap text-[12px] text-[#667085]">{stock.name}</div>
+                <div className="truncate text-[13px] font-semibold text-[#121826]">{stock.name}</div>
+                <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-[#667085]">
+                  <span className="tabular-nums">{stock.symbol}</span>
+                  <span className="h-1 w-1 rounded-full bg-[#CBD0DA]" />
+                  <span>{marketLabel(stock.market)}</span>
+                </div>
               </div>
+              <SignalPill signal={stock.signal} />
             </div>
-            <div className="mt-3 flex flex-col gap-0.5">
-              <span className="text-[17px] font-semibold tabular-nums text-[#121826]">{stock.price}</span>
-              <ChangeText value={stock.changePct} compact className="self-end" />
+            <div className="mt-4 flex items-start justify-between gap-3">
+              <span className="text-[24px] font-semibold leading-none tabular-nums text-[#121826]">{stock.price}</span>
+              <ChangeBadge value={stock.changePct} />
             </div>
             {stock.spark.length >= 2 ? (
-              <Sparkline values={stock.spark} positive={stock.changePct >= 0} className="mt-3 h-9 w-full" />
+              <MarketMiniChart values={stock.spark} positive={stock.changePct >= 0} className="mt-4 h-[86px] w-full" />
             ) : (
-              <div className="mt-3 flex h-9 items-center justify-center rounded-[7px] bg-[#F7F8FA] text-[11px] text-[#8B92A1]">
+              <div className="mt-4 flex h-[86px] items-center justify-center rounded-[7px] border border-dashed border-[#D7DAE2] bg-[#F7F8FA] text-[11px] text-[#8B92A1]">
                 暂无真实走势
               </div>
             )}
             <div className="mt-3 flex items-center justify-between gap-2 border-t border-[#F0F1F4] pt-2 text-[12px]">
-              <SignalPill signal={stock.signal} />
+              <span className="min-w-0 truncate text-[11px] text-[#8B92A1]">{stock.spark.length >= 2 ? '真实走势' : '等待行情'}</span>
               <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-[11px] text-[#4F5868]">
                 日报：{stock.report}
                 <span
@@ -1420,55 +1428,111 @@ function NewsPanel({
   className?: string;
 }): JSX.Element {
   const items = news.slice(0, 6);
+  const scrollRef = React.useRef<HTMLDivElement | null>(null);
+  const scrollNews = React.useCallback((direction: -1 | 1) => {
+    const node = scrollRef.current;
+    if (!node) return;
+    node.scrollBy({ left: direction * Math.max(260, node.clientWidth * 0.82), behavior: 'smooth' });
+  }, []);
+
   return (
-    <Panel className={className}>
+    <Panel className={cn('overflow-hidden', className)}>
       <SectionHeader title={title} meta={meta} action="查看详情" onAction={onInspect} />
       {items.length === 0 ? (
         <EmptyState title="暂无真实股市新闻" body="公告、市场脉冲和自选股行情暂未返回可展示内容。" />
       ) : null}
-      <div className="mt-3 grid grid-cols-1 gap-x-5 lg:grid-cols-2">
+      <div ref={scrollRef} className="mt-4 flex snap-x gap-3 overflow-x-auto pb-1 [scrollbar-width:thin]">
         {items.map((item) => (
-          <div key={`${item.time}-${item.title}`} className="border-b border-[#F1F2F5] py-3">
-            <div className="flex items-start gap-3">
-              <div className="w-10 shrink-0 space-y-1">
-                <div className="text-[12px] tabular-nums text-[#8B92A1]">{item.time}</div>
-                {item.category ? (
-                  <div className="inline-flex rounded-[5px] border border-[#E1E3E8] px-1 py-0.5 text-[10px] text-[#667085]">
-                    {item.category}
-                  </div>
-                ) : null}
+          <article
+            key={`${item.time}-${item.title}`}
+            className="min-w-[252px] max-w-[320px] flex-1 snap-start overflow-hidden rounded-[8px] border border-[#E7E7EB] bg-white shadow-[0_10px_24px_rgba(18,24,38,0.04)] transition hover:border-[#EA1F59]/20 hover:shadow-[0_16px_32px_rgba(18,24,38,0.08)]"
+          >
+            <div className={cn('h-[92px] border-b border-[#F0F1F4] p-3', newsVisualClass(item.category))}>
+              <div className="flex items-center justify-between gap-2">
+                <span className="rounded-full bg-white/85 px-2 py-1 text-[11px] font-medium text-[#344054] shadow-sm">
+                  {item.category ?? '动态'}
+                </span>
+                <span className="rounded-full bg-white/75 px-2 py-1 text-[11px] tabular-nums text-[#667085]">
+                  {item.time}
+                </span>
               </div>
-              <div className="min-w-0 flex-1">
-                {item.url ? (
-                  <a
-                    href={item.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="group inline-flex items-start gap-1 text-[12px] leading-relaxed text-[#344054] hover:text-[#EA1F59]"
+              <div className="mt-5 h-px w-full bg-white/70" />
+              <div className="mt-2 h-px w-2/3 bg-white/60" />
+            </div>
+            <div className="p-3">
+              {item.url ? (
+                <a
+                  href={item.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="group line-clamp-2 min-h-[42px] text-[14px] font-medium leading-relaxed text-[#344054] hover:text-[#EA1F59]"
+                >
+                  {item.title}
+                  <ExternalLink className="ml-1 inline h-3 w-3 opacity-60 transition group-hover:opacity-100" aria-hidden />
+                </a>
+              ) : (
+                <p className="line-clamp-2 min-h-[42px] text-[14px] font-medium leading-relaxed text-[#344054]">{item.title}</p>
+              )}
+              <div className="mt-5 flex items-center justify-between gap-2">
+                <div className="flex min-w-0 items-center gap-2">
+                  <NewsSourceDots count={item.symbols.length || 1} />
+                  <span className="truncate text-[12px] text-[#667085]">
+                    {item.source ?? `${item.symbols.length || 1} 个来源`}
+                  </span>
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  <button
+                    type="button"
+                    className="rounded-full p-1.5 text-[#8B92A1] transition hover:bg-[#F7F8FA] hover:text-[#EA1F59]"
+                    aria-label="收藏动态"
+                    title="收藏动态"
                   >
-                    <span>{item.title}</span>
-                    <ExternalLink className="mt-0.5 h-3 w-3 shrink-0 opacity-60 transition group-hover:opacity-100" aria-hidden />
-                  </a>
-                ) : (
-                  <p className="text-[12px] leading-relaxed text-[#344054]">{item.title}</p>
-                )}
-                <div className="mt-1 flex flex-wrap gap-1">
-                  {item.source ? (
-                    <span className="rounded-[5px] border border-[#F0D5DF] bg-[#FFF8FA] px-1.5 py-0.5 text-[10px] text-[#9F1239]">
-                      {item.source}
-                    </span>
-                  ) : null}
-                  {item.symbols.map((symbol) => (
-                    <span key={symbol} className="rounded-[5px] border border-[#E1E3E8] px-1.5 py-0.5 text-[10px] text-[#667085]">
-                      {symbol}
-                    </span>
-                  ))}
+                    <Heart className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-full p-1.5 text-[#8B92A1] transition hover:bg-[#F7F8FA] hover:text-[#344054]"
+                    aria-label="更多动态操作"
+                    title="更多动态操作"
+                  >
+                    <MoreHorizontal className="h-3.5 w-3.5" />
+                  </button>
                 </div>
               </div>
             </div>
-          </div>
+          </article>
         ))}
       </div>
+      {items.length > 0 ? (
+        <div className="mt-4 flex items-center justify-between gap-3">
+          <button
+            type="button"
+            onClick={() => scrollNews(-1)}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#E1E3E8] text-[#667085] transition hover:border-[#EA1F59]/30 hover:text-[#EA1F59]"
+            aria-label="查看上一组动态"
+            title="查看上一组动态"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+          <div className="flex items-center gap-1.5">
+            {items.map((item, index) => (
+              <span
+                key={`${item.time}-${item.title}-dot`}
+                className={cn('h-1.5 w-1.5 rounded-full', index === 0 ? 'bg-[#344054]' : 'bg-[#D7DAE2]')}
+              />
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={() => scrollNews(1)}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#E1E3E8] text-[#667085] transition hover:border-[#EA1F59]/30 hover:text-[#EA1F59]"
+            aria-label="查看下一组动态"
+            title="查看下一组动态"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
+      ) : null}
     </Panel>
   );
 }
@@ -1708,6 +1772,29 @@ function ChangeText({
   );
 }
 
+function ChangeBadge({ value }: { value: number }): JSX.Element {
+  if (value === 0) {
+    return (
+      <span className="inline-flex h-7 shrink-0 items-center rounded-[7px] bg-[#F2F3F6] px-2 text-[12px] font-semibold tabular-nums text-[#667085]">
+        0.00%
+      </span>
+    );
+  }
+  const positive = value >= 0;
+  return (
+    <span
+      className={cn(
+        'inline-flex h-7 shrink-0 items-center gap-1 rounded-[7px] px-2 text-[12px] font-semibold tabular-nums',
+        positive ? 'bg-[#FFF5F7] text-[#BE123C]' : 'bg-[#F2FCF8] text-[#08764A]',
+      )}
+    >
+      {positive ? <TrendingUp className="h-3 w-3" aria-hidden /> : <TrendingDown className="h-3 w-3" aria-hidden />}
+      {positive ? '+' : ''}
+      {value.toFixed(2)}%
+    </span>
+  );
+}
+
 function SignalPill({ signal }: { signal: Signal }): JSX.Element {
   const cls =
     signal === '强势' || signal === '偏强'
@@ -1765,6 +1852,64 @@ function Sparkline({
         strokeLinejoin="round"
       />
     </svg>
+  );
+}
+
+function MarketMiniChart({
+  values,
+  positive,
+  className,
+}: {
+  values: number[];
+  positive: boolean;
+  className?: string;
+}): JSX.Element {
+  const points = valuesToPoints(values);
+  const path = points ? `M ${points.split(' ').join(' L ')} L 98 38 L 2 38 Z` : '';
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const stroke = positive ? MARKET_UP_STROKE : MARKET_DOWN_STROKE;
+  const fill = positive ? '#FFF1F4' : '#ECFDF5';
+
+  return (
+    <svg className={className} viewBox="0 0 100 44" role="img" aria-label="真实走势">
+      <rect x="0" y="0" width="100" height="44" rx="4" fill="#FCFCFD" />
+      <line x1="2" x2="98" y1="8" y2="8" stroke="#ECEEF3" strokeDasharray="1.5 2.5" />
+      <line x1="2" x2="98" y1="22" y2="22" stroke="#ECEEF3" strokeDasharray="1.5 2.5" />
+      <line x1="2" x2="98" y1="36" y2="36" stroke="#ECEEF3" strokeDasharray="1.5 2.5" />
+      {path ? <path d={path} fill={fill} opacity="0.78" /> : null}
+      <polyline
+        points={points}
+        fill="none"
+        stroke={stroke}
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <text x="4" y="7" fill="#A0A7B4" fontSize="4.8" fontFamily="ui-sans-serif, system-ui" className="tabular-nums">
+        {max.toFixed(2)}
+      </text>
+      <text x="4" y="41" fill="#A0A7B4" fontSize="4.8" fontFamily="ui-sans-serif, system-ui" className="tabular-nums">
+        {min.toFixed(2)}
+      </text>
+    </svg>
+  );
+}
+
+function newsVisualClass(category?: NewsRow['category']): string {
+  if (category === '公告') return 'bg-[#FFF7FA]';
+  if (category === '盘面') return 'bg-[#F2FCF8]';
+  return 'bg-[#F5F8FF]';
+}
+
+function NewsSourceDots({ count }: { count: number }): JSX.Element {
+  const palette = ['bg-[#EA1F59]', 'bg-[#111827]', 'bg-[#F59E0B]'];
+  return (
+    <span className="flex -space-x-1" aria-hidden>
+      {Array.from({ length: Math.min(3, Math.max(1, count)) }).map((_, index) => (
+        <span key={index} className={cn('h-4 w-4 rounded-full border-2 border-white', palette[index % palette.length])} />
+      ))}
+    </span>
   );
 }
 
