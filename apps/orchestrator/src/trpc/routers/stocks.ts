@@ -399,16 +399,25 @@ async function stockSnapshot(
     client.getStockIntraday(entry.symbol),
     client.getStockQuote(entry.symbol),
   ]);
-  if (dailyEnv.error || dailyEnv.data.length === 0) return unavailableStock(entry, fallback);
   const last = latestKline(dailyEnv.data);
-  if (!last) return unavailableStock(entry, fallback);
   const quote = latestQuote(quoteEnv);
-  const close = quote ? pick(quote, ['最新价', 'price', '收盘', 'close']) : pick(last, ['收盘', 'close', '最新价']);
-  const changePct = toNum(quote ? pick(quote, ['涨跌幅', 'changePct']) : pick(last, ['涨跌幅', 'changePct'])) ?? fallback.changePct;
   const sparkSeries = seriesEnv.error ? { values: [], labels: [] } : sparkSeriesFromKline(seriesEnv.data);
   const intradaySeries = intradayEnv.error ? { values: [], labels: [] } : sparkSeriesFromIntraday(intradayEnv.data);
   const hasIntraday = intradaySeries.values.length >= 2;
+  const latestIntraday = hasIntraday ? intradaySeries.values[intradaySeries.values.length - 1] : null;
+  const close = quote
+    ? pick(quote, ['最新价', 'price', '收盘', 'close'])
+    : last
+      ? pick(last, ['收盘', 'close', '最新价'])
+      : latestIntraday;
+  if (close == null) return unavailableStock(entry, fallback);
   const sparkBaseline = hasIntraday ? previousCloseFromSeries(sparkSeries, intradaySeries.labels[0]) : null;
+  const changePct = toNum(quote ? pick(quote, ['涨跌幅', 'changePct']) : last ? pick(last, ['涨跌幅', 'changePct']) : null)
+    ?? (
+      typeof sparkBaseline === 'number' && sparkBaseline > 0
+        ? ((toNum(close) ?? sparkBaseline) - sparkBaseline) / sparkBaseline * 100
+        : fallback.changePct
+    );
   return {
     ...fallback,
     symbol: entry.symbol,

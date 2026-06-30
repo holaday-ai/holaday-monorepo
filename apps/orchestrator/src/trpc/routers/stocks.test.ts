@@ -84,6 +84,48 @@ describe('stocks dashboard snapshot', () => {
     expect(requestedPaths.some((path) => path.startsWith('/stock-rankings'))).toBe(false);
   });
 
+  it('keeps realtime stock cards visible when daily kline is unavailable', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/index/cn') {
+        return new Response(JSON.stringify(envelope([])));
+      }
+      if (url.pathname === '/kline/603528') {
+        return new Response(JSON.stringify({ error: 'kline timeout' }), { status: 503 });
+      }
+      if (url.pathname === '/intraday/603528') {
+        return new Response(JSON.stringify(envelope([
+          { 时间: '2026-06-29 14:45:00', 最新价: 7.22, 成交量: 1200 },
+          { 时间: '2026-06-29 14:46:00', 最新价: 7.25, 成交量: 1600 },
+          { 时间: '2026-06-29 14:47:00', 最新价: 7.28, 成交量: 1800 },
+        ])));
+      }
+      if (url.pathname === '/quote/603528') {
+        return new Response(JSON.stringify(envelope([
+          { 代码: 'sh603528', 名称: '多伦科技', 最新价: 7.31, 涨跌幅: 2.82 },
+        ])));
+      }
+      throw new Error(`unexpected path ${url.pathname}`);
+    });
+
+    const snapshot = await __stocksDashboardTest.buildDashboardSnapshot({
+      logger: { warn: vi.fn() },
+      watchlistRows: [{ symbol: '603528', market: 'A', displayName: '多伦科技' }],
+      effectiveWatchlist: [{ symbol: '603528', market: 'A', displayName: '多伦科技' }],
+      now: new Date('2026-06-29T12:00:00.000Z'),
+      includeSlowSignals: false,
+    });
+
+    expect(snapshot.watchlistStocks[0]).toMatchObject({
+      symbol: '603528',
+      price: '7.31',
+      changePct: 2.82,
+      spark: [7.22, 7.25, 7.28],
+      sparkLabels: ['2026-06-29 14:45:00', '2026-06-29 14:46:00', '2026-06-29 14:47:00'],
+      sparkKind: 'intraday',
+    });
+  });
+
   it('preserves the last real sector and temperature data when market pulse refresh is empty', () => {
     const previous = {
       updatedAt: '2026-06-29T12:00:00.000Z',
