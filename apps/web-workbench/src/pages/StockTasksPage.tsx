@@ -648,6 +648,8 @@ export function StockTasksPage(): JSX.Element {
                 loading={(loadingDashboard && dashboard === null) || refreshingDashboard || dashboardFreshness?.status === 'partial'}
                 sample={sampleWatchlist}
                 onEdit={() => setWatchlistSheetOpen(true)}
+                onGenerateBriefing={generateBriefing}
+                briefingGenerating={briefingGenerating}
               />
               <DailyBriefing
                 stocks={stocks}
@@ -816,12 +818,16 @@ function MarketHighlights({
   loading,
   sample,
   onEdit,
+  onGenerateBriefing,
+  briefingGenerating,
 }: {
   stocks: StockSnapshot[];
   marketIndices: IndexRow[];
   loading: boolean;
   sample: boolean;
   onEdit: () => void;
+  onGenerateBriefing: () => void;
+  briefingGenerating: boolean;
 }): JSX.Element {
   const hasRealQuotes = stocks.some((stock) => stock.price !== '—' || stock.spark.length >= 2);
   const highlightStocks = stocks.filter((stock) => stock.price !== '—' || stock.spark.length >= 2).slice(0, 4);
@@ -868,6 +874,9 @@ function MarketHighlights({
               key={stock.symbol}
               stock={stock}
               marketIndex={primaryIndex}
+              canGenerateBriefing={!sample}
+              briefingGenerating={briefingGenerating}
+              onGenerateBriefing={onGenerateBriefing}
             />
           ))}
         </div>
@@ -876,7 +885,19 @@ function MarketHighlights({
   );
 }
 
-function StockHighlightCard({ stock, marketIndex }: { stock: StockSnapshot; marketIndex: IndexRow | null }): JSX.Element {
+function StockHighlightCard({
+  stock,
+  marketIndex,
+  canGenerateBriefing,
+  briefingGenerating,
+  onGenerateBriefing,
+}: {
+  stock: StockSnapshot;
+  marketIndex: IndexRow | null;
+  canGenerateBriefing: boolean;
+  briefingGenerating: boolean;
+  onGenerateBriefing: () => void;
+}): JSX.Element {
   const [hoverRatio, setHoverRatio] = React.useState<number | null>(null);
   const chartKind = stock.sparkKind ?? 'daily_close';
   return (
@@ -898,7 +919,7 @@ function StockHighlightCard({ stock, marketIndex }: { stock: StockSnapshot; mark
               </div>
             </div>
             <div className="text-right">
-              <div className="text-[22px] font-medium leading-none tracking-normal tabular-nums text-[#121826]">{stock.price}</div>
+              <div className="whitespace-nowrap text-[22px] font-medium leading-none tracking-normal tabular-nums text-[#121826]">{formatStockPrice(stock)}</div>
               <StockChangeBadge value={stock.changePct} className="mt-1.5 justify-end" />
             </div>
           </div>
@@ -932,7 +953,19 @@ function StockHighlightCard({ stock, marketIndex }: { stock: StockSnapshot; mark
           <StockRailMetric label="成交额" value={stockTurnoverText(stock)} />
           <StockRailMetric label="成交活跃度" value={stockVolumeSignalText(stock)} meta={stockVolumeMeta(stock)} tone={stockVolumeTone(stock)} />
           <StockRailMetric label="市场" value={marketContextText(marketIndex)} meta={marketContextMeta(marketIndex)} tone={marketContextTone(marketIndex)} />
-          <StockRailMetric label="日报状态" value={stock.report} />
+          <div className="min-w-0 lg:mb-3.5">
+            <StockRailMetric label="日报状态" value={stock.report} />
+            {stock.report !== '已生成' ? (
+              <button
+                type="button"
+                disabled={!canGenerateBriefing || briefingGenerating}
+                onClick={onGenerateBriefing}
+                className="mt-2 inline-flex h-8 items-center justify-center rounded-[7px] border border-[#EA1F59]/20 bg-[#FFF7FA] px-2.5 text-[12px] font-medium text-[#EA1F59] transition hover:border-[#EA1F59]/40 hover:bg-[#FFEAF1] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {briefingGenerating ? '生成中…' : '生成日报'}
+              </button>
+            ) : null}
+          </div>
         </div>
       </div>
     </article>
@@ -1948,9 +1981,6 @@ function MarketMiniChart({
   const areaPath = linePath && firstPoint && lastPoint
     ? `${linePath} L ${lastPoint.x.toFixed(2)} 38 L ${firstPoint.x.toFixed(2)} 38 Z`
     : '';
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const mid = min + (max - min) / 2;
   const activeRatio = hoverRatio ?? 1;
   const activePoint = kind === 'intraday'
     ? interpolatedChartPoint(values, chart, activeRatio, latestChangePct, baseline)
@@ -1963,11 +1993,6 @@ function MarketMiniChart({
   const baselinePct = Math.max(0, Math.min(100, (baselineY / 48) * 100));
   const showHover = hoverRatio !== null;
   const axisTicks = chartAxisTicks(labels, kind);
-  const valueTicks = [
-    { value: max, y: chart.yForValue(max) + 1.3 },
-    { value: mid, y: chart.yForValue(mid) + 1.3 },
-    { value: min, y: chart.yForValue(min) + 1.3 },
-  ];
   const tooltipMeta = kind === 'intraday'
     ? `今日 ${formatStockDateLabel(labels[activePoint.index] ?? '')}`
     : `${formatStockDateLabel(labels[activePoint.index] ?? '')} 收盘`;
@@ -2071,15 +2096,6 @@ function MarketMiniChart({
           </>
         ) : null}
       </svg>
-      {valueTicks.map((label) => (
-        <span
-          key={label.value}
-          className="pointer-events-none absolute left-[2.5%] -translate-y-1/2 text-[12px] tabular-nums text-[#9CA4B2]"
-          style={{ top: `${(Math.max(7.2, Math.min(39, label.y)) / 48) * 100}%` }}
-        >
-          {label.value.toFixed(2)}
-        </span>
-      ))}
       {!showHover ? (
         <div
           className="pointer-events-none absolute rounded-[9px] border border-[#E1E4EA] bg-white px-2.5 py-1.5 text-[12px] font-medium tabular-nums text-[#767E8D] shadow-[0_1px_2px_rgba(18,24,38,0.04)]"
@@ -2089,7 +2105,7 @@ function MarketMiniChart({
             transform: 'translateY(-50%)',
           }}
         >
-          虚线={kind === 'intraday' ? '昨收' : '首日收盘'}: {baseline.toFixed(2)}
+          虚线={kind === 'intraday' ? '昨日收盘价' : '首日收盘价'}: {baseline.toFixed(2)}
         </div>
       ) : null}
       {showTimeline ? (
@@ -2474,6 +2490,14 @@ function formatMoneyAuto(value: number | null | undefined): string {
   if (abs >= 1e8) return `${(value / 1e8).toFixed(2)}亿元`;
   if (abs >= 1e4) return `${(value / 1e4).toFixed(2)}万元`;
   return `${value.toFixed(0)}元`;
+}
+
+function formatStockPrice(stock: StockSnapshot): string {
+  if (stock.price === '—') return '—';
+  if (stock.market === 'A') return `RMB¥ ${stock.price}`;
+  if (stock.market === 'HK') return `HK$ ${stock.price}`;
+  if (stock.market === 'US') return `US$ ${stock.price}`;
+  return stock.price;
 }
 
 function dashboardHasDisplayableData(snapshot: DashboardSnapshot | null): boolean {
