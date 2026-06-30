@@ -1856,9 +1856,11 @@ function MarketMiniChart({
   onHoverIndexChange?: (index: number | null) => void;
   showTimeline?: boolean;
 }): JSX.Element {
+  const gradientId = React.useId();
   const chart = chartGeometry(values);
   const points = chart.points.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(' ');
-  const path = points ? `M ${points.split(' ').join(' L ')} L 98 38 L 2 38 Z` : '';
+  const linePath = smoothPathFromPoints(chart.points);
+  const areaPath = linePath ? `${linePath} L 98 38 L 2 38 Z` : '';
   const min = Math.min(...values);
   const max = Math.max(...values);
   const activeIndex = hoverIndex ?? values.length - 1;
@@ -1869,10 +1871,11 @@ function MarketMiniChart({
       ? latestChangePct
       : pointChangePct(values, activeIndex);
   const positive = activeChangePct >= 0;
-  const stroke = latestChangePct >= 0 ? MARKET_UP_STROKE : MARKET_DOWN_STROKE;
-  const fill = latestChangePct >= 0 ? '#FFF1F4' : '#ECFDF5';
+  const strokeFallback = latestChangePct >= 0 ? MARKET_UP_STROKE : MARKET_DOWN_STROKE;
   const baseline = values[0] ?? activeValue;
   const baselineY = chart.yForValue(baseline);
+  const baselinePct = Math.max(0, Math.min(100, (baselineY / 48) * 100));
+  const showHover = hoverIndex !== null && activePoint;
   const handlePointerMove = (event: React.PointerEvent<SVGSVGElement>): void => {
     if (!onHoverIndexChange) return;
     const rect = event.currentTarget.getBoundingClientRect();
@@ -1891,49 +1894,83 @@ function MarketMiniChart({
         onPointerMove={handlePointerMove}
         onPointerLeave={handlePointerLeave}
       >
+        <defs>
+          <linearGradient id={gradientId} x1="0" x2="0" y1="4" y2="38" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stopColor={MARKET_UP_STROKE} />
+            <stop offset={`${Math.max(0, baselinePct - 1)}%`} stopColor={MARKET_UP_STROKE} />
+            <stop offset={`${Math.min(100, baselinePct + 1)}%`} stopColor={MARKET_DOWN_STROKE} />
+            <stop offset="100%" stopColor={MARKET_DOWN_STROKE} />
+          </linearGradient>
+          <linearGradient id={`${gradientId}-fill`} x1="0" x2="0" y1="4" y2="38" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stopColor={MARKET_UP_STROKE} stopOpacity="0.08" />
+            <stop offset={`${Math.max(0, baselinePct - 1)}%`} stopColor={MARKET_UP_STROKE} stopOpacity="0.055" />
+            <stop offset={`${Math.min(100, baselinePct + 1)}%`} stopColor={MARKET_DOWN_STROKE} stopOpacity="0.05" />
+            <stop offset="100%" stopColor={MARKET_DOWN_STROKE} stopOpacity="0.075" />
+          </linearGradient>
+        </defs>
         <rect x="0" y="0" width="100" height="48" rx="4" fill="#FCFCFD" />
         {showTimeline ? (
           <>
-            <line x1="20" x2="20" y1="4" y2="38" stroke="#E7EAF0" strokeWidth="0.35" />
-            <line x1="50" x2="50" y1="4" y2="38" stroke="#E7EAF0" strokeWidth="0.35" />
-            <line x1="80" x2="80" y1="4" y2="38" stroke="#E7EAF0" strokeWidth="0.35" />
+            <line x1="20" x2="20" y1="4" y2="38" stroke="#EDF0F4" strokeWidth="0.32" />
+            <line x1="50" x2="50" y1="4" y2="38" stroke="#EDF0F4" strokeWidth="0.32" />
+            <line x1="80" x2="80" y1="4" y2="38" stroke="#EDF0F4" strokeWidth="0.32" />
           </>
         ) : null}
         {[8, 18, 28, 38].map((y) => (
-          <line key={y} x1="2" x2="98" y1={y} y2={y} stroke="#EAEDF2" strokeDasharray="0.65 2.4" strokeWidth="0.5" />
+          <line key={y} x1="2" x2="98" y1={y} y2={y} stroke="#EDEFF4" strokeDasharray="0.45 2.15" strokeWidth="0.42" />
         ))}
         <line
           x1="2"
           x2="98"
           y1={baselineY}
           y2={baselineY}
-          stroke={stroke}
-          strokeDasharray="1.2 2.6"
-          strokeOpacity="0.22"
-          strokeWidth="0.55"
+          stroke="#A6ACB8"
+          strokeDasharray="1.25 2.35"
+          strokeOpacity="0.58"
+          strokeWidth="0.52"
         />
-        {path ? <path d={path} fill={fill} opacity="0.28" /> : null}
-        <polyline
-          points={points}
-          fill="none"
-          stroke={stroke}
-          strokeWidth={latestChangePct >= 0 ? '1.18' : '1.08'}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          vectorEffect="non-scaling-stroke"
-        />
-        {activePoint ? (
+        {areaPath ? <path d={areaPath} fill={`url(#${gradientId}-fill)`} /> : null}
+        {linePath ? (
+          <path
+            d={linePath}
+            fill="none"
+            stroke={`url(#${gradientId})`}
+            strokeWidth="1.05"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            vectorEffect="non-scaling-stroke"
+          />
+        ) : (
+          <polyline
+            points={points}
+            fill="none"
+            stroke={strokeFallback}
+            strokeWidth="1.05"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            vectorEffect="non-scaling-stroke"
+          />
+        )}
+        {showHover ? (
           <>
-            <line x1={activePoint.x} x2={activePoint.x} y1="4" y2="38" stroke="#A9B0BE" strokeWidth="0.55" />
-            <circle cx={activePoint.x} cy={activePoint.y} r="1.05" fill={stroke} stroke="white" strokeWidth="0.55" />
+            <line x1={activePoint.x} x2={activePoint.x} y1="4" y2="38" stroke="#9FA6B3" strokeWidth="0.48" />
+            <circle cx={activePoint.x} cy={activePoint.y} r="0.95" fill={positive ? MARKET_UP_STROKE : MARKET_DOWN_STROKE} stroke="white" strokeWidth="0.5" />
           </>
         ) : null}
-        <text x="4" y="7" fill="#98A1B2" fontSize="2.8" fontFamily="ui-sans-serif, system-ui" className="tabular-nums">
+        <text x="4" y="7" fill="#9CA4B2" fontSize="2.65" fontFamily="ui-sans-serif, system-ui" className="tabular-nums">
           {max.toFixed(2)}
         </text>
-        <text x="4" y="39.8" fill="#98A1B2" fontSize="2.8" fontFamily="ui-sans-serif, system-ui" className="tabular-nums">
+        <text x="4" y="39.8" fill="#9CA4B2" fontSize="2.65" fontFamily="ui-sans-serif, system-ui" className="tabular-nums">
           {min.toFixed(2)}
         </text>
+        {!showHover ? (
+          <>
+            <rect x="72" y={Math.max(5, Math.min(31, baselineY - 3.8))} width="23.5" height="7.6" rx="2.8" fill="white" stroke="#E4E7EC" />
+            <text x="74" y={Math.max(10, Math.min(36, baselineY + 1.1))} fill="#767E8D" fontSize="2.65" fontFamily="ui-sans-serif, system-ui">
+              前次收盘
+            </text>
+          </>
+        ) : null}
         {showTimeline ? (
           <>
             <text x="18" y="45" fill="#A5ADBA" fontSize="2.45" fontFamily="ui-sans-serif, system-ui">近8日</text>
@@ -1941,16 +1978,16 @@ function MarketMiniChart({
           </>
         ) : null}
       </svg>
-      {activePoint ? (
+      {showHover ? (
         <div
-          className="pointer-events-none absolute z-10 rounded-[8px] border border-[#DADDE5] bg-white px-2.5 py-1.5 text-left shadow-[0_8px_20px_rgba(18,24,38,0.12)]"
+          className="pointer-events-none absolute z-10 rounded-[7px] border border-[#DADDE5] bg-white px-2.5 py-1.5 text-left shadow-[0_8px_18px_rgba(18,24,38,0.11)]"
           style={{
             left: `${activePoint.x}%`,
             top: `${Math.max(9, Math.min(70, (activePoint.y / 48) * 100 - 12))}%`,
             transform: activePoint.x > 76 ? 'translate(-100%, -50%)' : 'translate(10px, -50%)',
           }}
         >
-          <div className="whitespace-nowrap text-[13px] font-semibold tabular-nums text-[#344054]">{activeValue.toFixed(2)}</div>
+          <div className="whitespace-nowrap text-[12px] font-semibold tabular-nums text-[#344054]">{activeValue.toFixed(2)}</div>
           <div className={cn('mt-0.5 whitespace-nowrap text-[11px] font-medium tabular-nums', positive ? MARKET_UP_CLASS : MARKET_DOWN_CLASS)}>
             {activeChangePct >= 0 ? '+' : ''}{activeChangePct.toFixed(2)}%
           </div>
@@ -2000,6 +2037,27 @@ function chartGeometry(values: number[]): {
     })),
     yForValue,
   };
+}
+
+function smoothPathFromPoints(points: Array<{ x: number; y: number }>): string {
+  if (points.length === 0) return '';
+  if (points.length === 1) return `M ${points[0].x.toFixed(2)} ${points[0].y.toFixed(2)}`;
+  const commands = [`M ${points[0].x.toFixed(2)} ${points[0].y.toFixed(2)}`];
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const current = points[index];
+    const next = points[index + 1];
+    const previous = points[index - 1] ?? current;
+    const afterNext = points[index + 2] ?? next;
+    const tension = 0.18;
+    const cp1x = current.x + (next.x - previous.x) * tension;
+    const cp1y = current.y + (next.y - previous.y) * tension;
+    const cp2x = next.x - (afterNext.x - current.x) * tension;
+    const cp2y = next.y - (afterNext.y - current.y) * tension;
+    commands.push(
+      `C ${cp1x.toFixed(2)} ${cp1y.toFixed(2)}, ${cp2x.toFixed(2)} ${cp2y.toFixed(2)}, ${next.x.toFixed(2)} ${next.y.toFixed(2)}`,
+    );
+  }
+  return commands.join(' ');
 }
 
 function pointChangePct(values: number[], index: number): number {
