@@ -1956,6 +1956,7 @@ function MarketMiniChart({
       <svg
         className="h-full w-full touch-none overflow-visible"
         viewBox="0 0 100 48"
+        preserveAspectRatio="none"
         role="img"
         aria-label="真实走势"
         onPointerMove={handlePointerMove}
