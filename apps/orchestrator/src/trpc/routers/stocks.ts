@@ -31,6 +31,7 @@ interface MinimalLogger {
 
 type Market = 'A' | 'HK' | 'US';
 type Signal = '强势' | '偏强' | '中性' | '偏弱' | '风险升高' | '待观察';
+type VolumeSignal = '放量' | '缩量' | '接近均量' | '待观察';
 
 interface StockSnapshot {
   symbol: string;
@@ -44,6 +45,10 @@ interface StockSnapshot {
   sparkLabels: string[];
   sparkKind: 'daily_close' | 'intraday';
   sparkBaseline: number | null;
+  turnoverAmount: number | null;
+  volume: number | null;
+  volumeRatio: number | null;
+  volumeSignal: VolumeSignal;
   newsCount: number;
   note: string;
 }
@@ -180,6 +185,10 @@ function stock(
     sparkLabels: [],
     sparkKind: 'daily_close',
     sparkBaseline: null,
+    turnoverAmount: null,
+    volume: null,
+    volumeRatio: null,
+    volumeSignal: '待观察',
     newsCount: 0,
     note,
   };
@@ -418,6 +427,13 @@ async function stockSnapshot(
         ? ((toNum(close) ?? sparkBaseline) - sparkBaseline) / sparkBaseline * 100
         : fallback.changePct
     );
+  const quoteVolume = toNum(quote ? pick(quote, ['成交量', 'volume']) : null);
+  const quoteAmount = toNum(quote ? pick(quote, ['成交额', 'amount', 'turnover']) : null);
+  const dailyVolume = toNum(last ? pick(last, ['成交量', 'volume']) : null);
+  const dailyAmount = toNum(last ? pick(last, ['成交额', 'amount', 'turnover']) : null);
+  const volume = quoteVolume ?? dailyVolume;
+  const turnoverAmount = quoteAmount ?? dailyAmount;
+  const volumeRatio = volumeRatioFromKline(volume, seriesEnv.error ? [] : seriesEnv.data);
   return {
     ...fallback,
     symbol: entry.symbol,
@@ -430,6 +446,10 @@ async function stockSnapshot(
     sparkLabels: hasIntraday ? intradaySeries.labels : sparkSeries.labels,
     sparkKind: hasIntraday ? 'intraday' : 'daily_close',
     sparkBaseline,
+    turnoverAmount,
+    volume,
+    volumeRatio,
+    volumeSignal: volumeSignalFromRatio(volumeRatio),
     note: hasIntraday
       ? `来源 AkShare · ${entry.displayName ?? entry.symbol} 今日真实分钟线`
       : sparkSeries.values.length >= 2
@@ -448,6 +468,25 @@ function fallbackStock(entry: WatchlistEntry, _index: number): StockSnapshot {
     '暂无真实行情数据',
     '待生成',
   );
+}
+
+function volumeRatioFromKline(volume: number | null, rows: KlineRow[]): number | null {
+  if (volume === null || volume <= 0) return null;
+  const recent = rows
+    .map((row) => toNum(pick(row, ['成交量', 'volume'])))
+    .filter((value): value is number => value !== null && value > 0);
+  const baseline = recent.length > 1 ? recent.slice(0, -1) : recent;
+  if (baseline.length === 0) return null;
+  const average = baseline.reduce((sum, value) => sum + value, 0) / baseline.length;
+  if (!Number.isFinite(average) || average <= 0) return null;
+  return Number((volume / average).toFixed(2));
+}
+
+function volumeSignalFromRatio(ratio: number | null): VolumeSignal {
+  if (ratio === null) return '待观察';
+  if (ratio >= 1.25) return '放量';
+  if (ratio <= 0.75) return '缩量';
+  return '接近均量';
 }
 
 function mapIndices(env: AkEnvelope<IndexRow>): IndexSnapshot[] {

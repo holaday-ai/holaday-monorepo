@@ -37,6 +37,7 @@ type DashboardSnapshot = Awaited<ReturnType<typeof trpc.stocks.dashboardSnapshot
 type SymbolSuggestion = Awaited<ReturnType<typeof trpc.stocks.searchSymbols.query>>[number];
 type Market = 'A' | 'HK' | 'US';
 type Signal = '强势' | '偏强' | '中性' | '偏弱' | '风险升高' | '待观察';
+type VolumeSignal = '放量' | '缩量' | '接近均量' | '待观察';
 
 interface StockSnapshot {
   symbol: string;
@@ -50,6 +51,10 @@ interface StockSnapshot {
   sparkLabels?: string[];
   sparkKind?: 'daily_close' | 'intraday';
   sparkBaseline?: number | null;
+  turnoverAmount?: number | null;
+  volume?: number | null;
+  volumeRatio?: number | null;
+  volumeSignal?: VolumeSignal;
   newsCount: number;
   note: string;
 }
@@ -633,6 +638,7 @@ export function StockTasksPage(): JSX.Element {
               />
               <MarketHighlights
                 stocks={stocks}
+                marketIndices={marketIndices}
                 loading={(loadingDashboard && dashboard === null) || refreshingDashboard || dashboardFreshness?.status === 'partial'}
                 sample={sampleWatchlist}
                 onEdit={() => setWatchlistSheetOpen(true)}
@@ -800,17 +806,20 @@ function DiscoveryPanel({
 
 function MarketHighlights({
   stocks,
+  marketIndices,
   loading,
   sample,
   onEdit,
 }: {
   stocks: StockSnapshot[];
+  marketIndices: IndexRow[];
   loading: boolean;
   sample: boolean;
   onEdit: () => void;
 }): JSX.Element {
   const hasRealQuotes = stocks.some((stock) => stock.price !== '—' || stock.spark.length >= 2);
   const highlightStocks = stocks.filter((stock) => stock.price !== '—' || stock.spark.length >= 2).slice(0, 4);
+  const primaryIndex = marketIndices.find((row) => row.name.includes('上证')) ?? marketIndices[0] ?? null;
   return (
     <section className="rounded-[8px] border border-[#E1E3E8] bg-white p-4 shadow-[0_8px_24px_rgba(18,24,38,0.035)]">
       <SectionHeader
@@ -852,6 +861,7 @@ function MarketHighlights({
             <StockHighlightCard
               key={stock.symbol}
               stock={stock}
+              marketIndex={primaryIndex}
             />
           ))}
         </div>
@@ -860,12 +870,12 @@ function MarketHighlights({
   );
 }
 
-function StockHighlightCard({ stock }: { stock: StockSnapshot }): JSX.Element {
+function StockHighlightCard({ stock, marketIndex }: { stock: StockSnapshot; marketIndex: IndexRow | null }): JSX.Element {
   const [hoverRatio, setHoverRatio] = React.useState<number | null>(null);
   const chartKind = stock.sparkKind ?? 'daily_close';
   return (
     <article className="group overflow-hidden rounded-[10px] border border-[#E7E7EB] bg-[#FEFEFF] px-4 pb-4 pt-4 transition-[border-color,box-shadow] hover:border-[#DADDE5] hover:shadow-[0_14px_28px_rgba(18,24,38,0.06)]">
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_156px]">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_180px]">
         <div className="min-w-0">
           <div className="flex items-start justify-between gap-3">
             <div className="flex min-w-0 items-start gap-3">
@@ -908,9 +918,11 @@ function StockHighlightCard({ stock }: { stock: StockSnapshot }): JSX.Element {
           </p>
         </div>
         <div className="grid min-w-0 grid-cols-2 gap-x-4 gap-y-3 self-start border-t border-[#F0F1F4] pt-3 lg:block lg:border-l lg:border-t-0 lg:pl-4 lg:pt-1">
-          <StockRailMetric label={chartKind === 'intraday' ? '今日区间' : '8日区间'} value={stockRangeText(stock)} />
-          <StockRailMetric label="区间位置" value={stockPositionText(stock)} tone={stock.changePct >= 0 ? 'red' : 'green'} />
-          <StockRailMetric label="关注源" value={`${stock.newsCount} 条`} />
+          <StockRailMetric label="支撑 / 压力" value={stockRangeText(stock)} />
+          <StockRailMetric label="日内位置" value={stockPositionText(stock)} tone={stockPositionTone(stock)} />
+          <StockRailMetric label="成交额" value={stockTurnoverText(stock)} />
+          <StockRailMetric label="量能" value={stockVolumeSignalText(stock)} meta={stockVolumeMeta(stock)} tone={stockVolumeTone(stock)} />
+          <StockRailMetric label="市场" value={marketContextText(marketIndex)} meta={marketContextMeta(marketIndex)} tone={marketContextTone(marketIndex)} />
           <StockRailMetric label="日报状态" value={stock.report} />
         </div>
       </div>
@@ -1825,17 +1837,28 @@ function StockChangeBadge({
 function StockRailMetric({
   label,
   value,
+  meta,
   tone = 'neutral',
 }: {
   label: string;
   value: string;
-  tone?: 'neutral' | 'red' | 'green';
+  meta?: string;
+  tone?: 'neutral' | 'red' | 'green' | 'muted';
 }): JSX.Element {
-  const valueClass = tone === 'red' ? MARKET_UP_CLASS : tone === 'green' ? MARKET_DOWN_CLASS : 'text-[#121826]';
+  const valueClass = tone === 'red'
+    ? MARKET_UP_CLASS
+    : tone === 'green'
+      ? MARKET_DOWN_CLASS
+      : tone === 'muted'
+        ? 'text-[#667085]'
+        : 'text-[#121826]';
   return (
-    <div className="min-w-0 lg:mb-4">
+    <div className="min-w-0 lg:mb-3.5">
       <div className="text-[12px] font-medium leading-none text-[#777F8D]">{label}</div>
-      <div className={cn('mt-2 truncate text-[12px] font-semibold leading-none tabular-nums', valueClass)}>{value}</div>
+      <div className={cn('mt-2 text-[12px] font-semibold leading-tight tabular-nums', valueClass)}>{value}</div>
+      {meta ? (
+        <div className="mt-1 truncate text-[11px] leading-none text-[#98A2B3]">{meta}</div>
+      ) : null}
     </div>
   );
 }
@@ -1930,6 +1953,11 @@ function MarketMiniChart({
   const baselinePct = Math.max(0, Math.min(100, (baselineY / 48) * 100));
   const showHover = hoverRatio !== null;
   const axisTicks = chartAxisTicks(labels, kind);
+  const valueTicks = [
+    { value: max, y: chart.yForValue(max) + 1.3 },
+    { value: mid, y: chart.yForValue(mid) + 1.3 },
+    { value: min, y: chart.yForValue(min) + 1.3 },
+  ];
   const tooltipMeta = kind === 'intraday'
     ? `今日 ${formatStockDateLabel(labels[activePoint.index] ?? '')}`
     : `${formatStockDateLabel(labels[activePoint.index] ?? '')} 收盘`;
@@ -2025,49 +2053,44 @@ function MarketMiniChart({
             <circle cx={activePoint.x} cy={activePoint.y} r="0.95" fill={positive ? MARKET_UP_STROKE : MARKET_DOWN_STROKE} stroke="white" strokeWidth="0.5" />
           </>
         ) : null}
-        {[
-          { value: max, y: chart.yForValue(max) + 1.3 },
-          { value: mid, y: chart.yForValue(mid) + 1.3 },
-          { value: min, y: chart.yForValue(min) + 1.3 },
-        ].map((label) => (
-          <text
-            key={label.value}
-            x="2.8"
-            y={Math.max(7.2, Math.min(39, label.y))}
-            fill="#9CA4B2"
-            fontSize="2.45"
-            fontFamily="ui-sans-serif, system-ui"
-            className="tabular-nums"
-          >
-            {label.value.toFixed(2)}
-          </text>
-        ))}
-        {!showHover ? (
-          <>
-            <rect x="69" y={Math.max(5, Math.min(31, baselineY - 3.7))} width="27.5" height="7.4" rx="3.2" fill="white" stroke="#E1E4EA" />
-            <text x="71" y={Math.max(10, Math.min(36, baselineY + 1.1))} fill="#767E8D" fontSize="2.35" fontFamily="ui-sans-serif, system-ui">
-              {kind === 'intraday' ? '前次收盘' : '首日收盘'}: {baseline.toFixed(2)}
-            </text>
-          </>
-        ) : null}
-        {showTimeline ? (
-          <>
-            {axisTicks.map((tick, index) => (
-              <text
-                key={tick.label}
-                x={tick.x}
-                y="45"
-                textAnchor={index === axisTicks.length - 1 ? 'end' : index === 0 ? 'start' : 'middle'}
-                fill="#A5ADBA"
-                fontSize="2.45"
-                fontFamily="ui-sans-serif, system-ui"
-              >
-                {tick.label}
-              </text>
-            ))}
-          </>
-        ) : null}
       </svg>
+      {valueTicks.map((label) => (
+        <span
+          key={label.value}
+          className="pointer-events-none absolute left-[2.5%] -translate-y-1/2 text-[12px] tabular-nums text-[#9CA4B2]"
+          style={{ top: `${(Math.max(7.2, Math.min(39, label.y)) / 48) * 100}%` }}
+        >
+          {label.value.toFixed(2)}
+        </span>
+      ))}
+      {!showHover ? (
+        <div
+          className="pointer-events-none absolute rounded-[9px] border border-[#E1E4EA] bg-white px-2.5 py-1.5 text-[12px] font-medium tabular-nums text-[#767E8D] shadow-[0_1px_2px_rgba(18,24,38,0.04)]"
+          style={{
+            left: '69%',
+            top: `${(Math.max(5, Math.min(31, baselineY - 0.2)) / 48) * 100}%`,
+            transform: 'translateY(-50%)',
+          }}
+        >
+          {kind === 'intraday' ? '前次收盘' : '首日收盘'}: {baseline.toFixed(2)}
+        </div>
+      ) : null}
+      {showTimeline ? (
+        <div className="pointer-events-none absolute inset-0">
+          {axisTicks.map((tick, index) => (
+            <span
+              key={tick.label}
+              className="absolute top-[93.75%] text-[12px] font-medium tabular-nums text-[#A5ADBA]"
+              style={{
+                left: `${tick.x}%`,
+                transform: index === axisTicks.length - 1 ? 'translateX(-100%)' : index === 0 ? undefined : 'translateX(-50%)',
+              }}
+            >
+              {tick.label}
+            </span>
+          ))}
+        </div>
+      ) : null}
       {showHover ? (
         <div
           className="pointer-events-none absolute z-10 rounded-[7px] border border-[#DADDE5] bg-white px-2.5 py-1.5 text-left shadow-[0_8px_18px_rgba(18,24,38,0.11)]"
@@ -2306,6 +2329,25 @@ function stockRangeText(stock: StockSnapshot): string {
   return `${min.toFixed(2)} - ${max.toFixed(2)}`;
 }
 
+function stockTurnoverText(stock: StockSnapshot): string {
+  return formatMoneyAuto(stock.turnoverAmount);
+}
+
+function stockVolumeSignalText(stock: StockSnapshot): string {
+  return stock.volumeSignal ?? '待观察';
+}
+
+function stockVolumeMeta(stock: StockSnapshot): string {
+  if (typeof stock.volumeRatio !== 'number' || !Number.isFinite(stock.volumeRatio)) return '等待均量';
+  return `约 ${stock.volumeRatio.toFixed(2)}x 近均量`;
+}
+
+function stockVolumeTone(stock: StockSnapshot): 'neutral' | 'red' | 'green' | 'muted' {
+  if (stock.volumeSignal === '放量') return stock.changePct >= 0 ? 'red' : 'green';
+  if (stock.volumeSignal === '缩量') return 'muted';
+  return 'neutral';
+}
+
 function stockPositionText(stock: StockSnapshot): string {
   if (stock.spark.length < 2) return '等待走势';
   const min = Math.min(...stock.spark);
@@ -2319,11 +2361,11 @@ function stockPositionText(stock: StockSnapshot): string {
   return '区间中部';
 }
 
-function stockFollowupText(stock: StockSnapshot): string {
-  if (stock.price === '—') return '等行情源';
-  if (stock.signal === '强势' || stock.signal === '偏强') return '看公告/量能';
-  if (stock.signal === '偏弱' || stock.signal === '风险升高') return '看支撑/公告';
-  return '看行业联动';
+function stockPositionTone(stock: StockSnapshot): 'neutral' | 'red' | 'green' {
+  const position = stockPositionText(stock);
+  if (position === '接近高位') return 'red';
+  if (position === '接近低位') return 'green';
+  return 'neutral';
 }
 
 function stockNarrative(stock: StockSnapshot): string {
@@ -2333,9 +2375,35 @@ function stockNarrative(stock: StockSnapshot): string {
   const direction = stock.changePct >= 0 ? '上涨' : '下跌';
   const range = stockRangeText(stock);
   const position = stockPositionText(stock);
-  const followup = stockFollowupText(stock);
-  const rangeScope = stock.sparkKind === 'intraday' ? '今日已返回分钟线区间' : '近 8 个交易日收盘区间';
-  return `${stock.name} 最新价 ${stock.price}，今日${direction} ${Math.abs(stock.changePct).toFixed(2)}%。${rangeScope}为 ${range}，当前${position}；下一步优先${followup}，再决定是否生成专属日报继续追问。`;
+  const turnover = stockTurnoverText(stock);
+  const volume = stockVolumeSignalText(stock);
+  const rangeScope = stock.sparkKind === 'intraday' ? '今日支撑/压力' : '近 8 日收盘区间';
+  return `${stock.name} 最新价 ${stock.price}，今日${direction} ${Math.abs(stock.changePct).toFixed(2)}%；成交额 ${turnover}，量能${volume}，${rangeScope} ${range}，当前${position}。详细拆解可生成日报。`;
+}
+
+function marketContextText(index: IndexRow | null): string {
+  if (!index) return '待补齐';
+  return `${index.name} ${formatSignedPct(index.changePct)}`;
+}
+
+function marketContextMeta(index: IndexRow | null): string {
+  if (!index || !index.turnover || index.turnover === '—') return '指数环境';
+  return index.turnover;
+}
+
+function marketContextTone(index: IndexRow | null): 'neutral' | 'red' | 'green' | 'muted' {
+  if (!index) return 'muted';
+  if (index.changePct > 0) return 'red';
+  if (index.changePct < 0) return 'green';
+  return 'neutral';
+}
+
+function formatMoneyAuto(value: number | null | undefined): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '待补齐';
+  const abs = Math.abs(value);
+  if (abs >= 1e8) return `${(value / 1e8).toFixed(2)}亿元`;
+  if (abs >= 1e4) return `${(value / 1e4).toFixed(2)}万元`;
+  return `${value.toFixed(0)}元`;
 }
 
 function dashboardHasDisplayableData(snapshot: DashboardSnapshot | null): boolean {

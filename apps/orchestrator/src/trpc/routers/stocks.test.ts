@@ -34,8 +34,8 @@ describe('stocks dashboard snapshot', () => {
       }
       if (url.pathname === '/kline/603528') {
         return new Response(JSON.stringify(envelope([
-          { 日期: '2026-06-26', 收盘: 7.11, 涨跌幅: 0.42 },
-          { 日期: '2026-06-29', 收盘: 7.28, 涨跌幅: 2.39 },
+          { 日期: '2026-06-26', 收盘: 7.11, 涨跌幅: 0.42, 成交量: 1000, 成交额: 7_100_000 },
+          { 日期: '2026-06-29', 收盘: 7.28, 涨跌幅: 2.39, 成交量: 2000, 成交额: 14_560_000 },
         ])));
       }
       if (url.pathname === '/intraday/603528') {
@@ -47,7 +47,7 @@ describe('stocks dashboard snapshot', () => {
       }
       if (url.pathname === '/quote/603528') {
         return new Response(JSON.stringify(envelope([
-          { 代码: 'sh603528', 名称: '多伦科技', 最新价: 7.31, 涨跌幅: 2.82 },
+          { 代码: 'sh603528', 名称: '多伦科技', 最新价: 7.31, 涨跌幅: 2.82, 成交量: 2400, 成交额: 17_544_000 },
         ])));
       }
       if (url.pathname.startsWith('/announcements/')) {
@@ -77,6 +77,10 @@ describe('stocks dashboard snapshot', () => {
       sparkLabels: ['2026-06-29 09:30:00', '2026-06-29 09:31:00', '2026-06-29 09:32:00'],
       sparkKind: 'intraday',
       sparkBaseline: 7.11,
+      turnoverAmount: 17_544_000,
+      volume: 2400,
+      volumeRatio: 2.4,
+      volumeSignal: '放量',
     });
     expect(snapshot.leaderboards.gainers).toEqual([]);
     expect(requestedPaths.some((path) => path.startsWith('/market-pulse'))).toBe(false);
