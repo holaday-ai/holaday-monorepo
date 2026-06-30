@@ -15,6 +15,7 @@ import type {
   KlineRow,
   MarketPulseRow,
   SectorEntry,
+  StockQuoteRow,
   StockRankingRow,
   WatchlistEntry,
 } from '../../agent/a-share/briefing-types.js';
@@ -149,8 +150,8 @@ const POPULAR_A_SYMBOLS = [
   { symbol: '300308', name: '中际旭创' },
 ];
 
-const DASHBOARD_FRESH_TTL_MS = 60_000;
-const DASHBOARD_PARTIAL_FRESH_TTL_MS = 8_000;
+const DASHBOARD_FRESH_TTL_MS = 15_000;
+const DASHBOARD_PARTIAL_FRESH_TTL_MS = 5_000;
 const DASHBOARD_STALE_TTL_MS = 10 * 60_000;
 const DASHBOARD_FIRST_PAINT_BUDGET_MS = 5_500;
 const DASHBOARD_AKSHARE_TIMEOUT_MS = 8_000;
@@ -364,6 +365,11 @@ function latestKline(rows: KlineRow[]): KlineRow | null {
   return rows.length > 0 ? rows[rows.length - 1] ?? null : null;
 }
 
+function latestQuote(env: AkEnvelope<StockQuoteRow>): StockQuoteRow | null {
+  if (env.error || env.data.length === 0) return null;
+  return env.data[0] ?? null;
+}
+
 function unavailableStock(entry: WatchlistEntry, fallback: StockSnapshot): StockSnapshot {
   return {
     ...fallback,
@@ -387,16 +393,18 @@ async function stockSnapshot(
   const fallback = FALLBACK_STOCKS[normalized] ?? fallbackStock(entry, index);
   if (entry.market !== 'A') return unavailableStock(entry, fallback);
 
-  const [dailyEnv, seriesEnv, intradayEnv] = await Promise.all([
+  const [dailyEnv, seriesEnv, intradayEnv, quoteEnv] = await Promise.all([
     client.getStockKline(entry.symbol),
     client.getStockKline(entry.symbol, 8),
     client.getStockIntraday(entry.symbol),
+    client.getStockQuote(entry.symbol),
   ]);
   if (dailyEnv.error || dailyEnv.data.length === 0) return unavailableStock(entry, fallback);
   const last = latestKline(dailyEnv.data);
   if (!last) return unavailableStock(entry, fallback);
-  const close = pick(last, ['收盘', 'close', '最新价']);
-  const changePct = toNum(pick(last, ['涨跌幅', 'changePct'])) ?? fallback.changePct;
+  const quote = latestQuote(quoteEnv);
+  const close = quote ? pick(quote, ['最新价', 'price', '收盘', 'close']) : pick(last, ['收盘', 'close', '最新价']);
+  const changePct = toNum(quote ? pick(quote, ['涨跌幅', 'changePct']) : pick(last, ['涨跌幅', 'changePct'])) ?? fallback.changePct;
   const sparkSeries = seriesEnv.error ? { values: [], labels: [] } : sparkSeriesFromKline(seriesEnv.data);
   const intradaySeries = intradayEnv.error ? { values: [], labels: [] } : sparkSeriesFromIntraday(intradayEnv.data);
   const hasIntraday = intradaySeries.values.length >= 2;

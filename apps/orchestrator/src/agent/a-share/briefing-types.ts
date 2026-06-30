@@ -48,6 +48,18 @@ export interface KlineRow {
   [k: string]: unknown;
 }
 
+/** A股实时行情快照（quote 接口；用于卡片右上角最新价/涨跌幅）。 */
+export interface StockQuoteRow {
+  代码?: string;
+  名称?: string;
+  最新价?: number;
+  涨跌幅?: number;
+  涨跌额?: number;
+  成交量?: number;
+  成交额?: number;
+  [k: string]: unknown;
+}
+
 /** A股真实分钟线行（AkShare 分钟接口；只含实际分钟点，不补齐）。 */
 export interface IntradayRow {
   时间?: string;

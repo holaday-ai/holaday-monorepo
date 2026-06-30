@@ -22,6 +22,7 @@ import type {
   MarketPulseRow,
   NorthboundRow,
   PledgeRow,
+  StockQuoteRow,
   StockRankingRow,
   UnlockRow,
   ValuationRow,
@@ -127,6 +128,9 @@ export class HttpAkshareClient implements AkshareClient {
   getStockKline(symbol: string, days?: number) {
     const qs = days && days > 0 ? `?days=${days}` : '';
     return this.get<KlineRow>(`/kline/${encodeURIComponent(symbol)}${qs}`);
+  }
+  getStockQuote(symbol: string) {
+    return this.get<StockQuoteRow>(`/quote/${encodeURIComponent(symbol)}`);
   }
   getStockIntraday(symbol: string) {
     return this.get<IntradayRow>(`/intraday/${encodeURIComponent(symbol)}`);

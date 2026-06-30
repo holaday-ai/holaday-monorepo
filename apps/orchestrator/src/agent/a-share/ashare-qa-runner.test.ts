@@ -49,6 +49,7 @@ function fakeClient(): AkshareClient {
       days && days > 0
         ? Promise.resolve(env(PERF_SERIES_250))
         : Promise.resolve(env([{ 收盘: 1291.91, 涨跌幅: 1.01, 成交额: 6_478_000_000 }])),
+    getStockQuote: () => Promise.resolve(env([])),
     getDragonTiger: () => Promise.resolve(env([])),
     getNorthboundFlow: () =>
       Promise.resolve(env([{ 板块: '沪股通', 资金方向: '北向', 成交净买额: 0 }])),

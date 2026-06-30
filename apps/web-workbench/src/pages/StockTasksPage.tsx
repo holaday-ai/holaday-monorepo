@@ -299,6 +299,14 @@ export function StockTasksPage(): JSX.Element {
   }, [loadPageData]);
 
   React.useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (document.hidden || loadingDashboard || refreshingDashboard) return;
+      void loadPageData('refresh');
+    }, 20_000);
+    return () => window.clearInterval(timer);
+  }, [loadPageData, loadingDashboard, refreshingDashboard]);
+
+  React.useEffect(() => {
     const status = dashboard?.freshness?.status;
     const hasDisplayableData = dashboardHasDisplayableData(dashboard);
     if (!status || (status === 'fresh' && hasDisplayableData)) {
@@ -852,7 +860,6 @@ function MarketHighlights({
 
 function StockHighlightCard({ stock }: { stock: StockSnapshot }): JSX.Element {
   const [hoverRatio, setHoverRatio] = React.useState<number | null>(null);
-  const display = stockDisplayPoint(stock, hoverRatio);
   const chartKind = stock.sparkKind ?? 'daily_close';
   return (
     <article className="group overflow-hidden rounded-[10px] border border-[#E7E7EB] bg-[#FEFEFF] px-4 pb-4 pt-4 transition-[border-color,box-shadow] hover:border-[#DADDE5] hover:shadow-[0_14px_28px_rgba(18,24,38,0.06)]">
@@ -873,8 +880,8 @@ function StockHighlightCard({ stock }: { stock: StockSnapshot }): JSX.Element {
               </div>
             </div>
             <div className="text-right">
-              <div className="text-[22px] font-medium leading-none tracking-normal tabular-nums text-[#121826]">{display.price}</div>
-              <StockChangeBadge value={display.changePct} className="mt-1.5 justify-end" />
+              <div className="text-[22px] font-medium leading-none tracking-normal tabular-nums text-[#121826]">{stock.price}</div>
+              <StockChangeBadge value={stock.changePct} className="mt-1.5 justify-end" />
             </div>
           </div>
           {stock.spark.length >= 2 ? (
@@ -1898,8 +1905,7 @@ function MarketMiniChart({
 }): JSX.Element {
   const gradientId = React.useId();
   const baseline = typeof baselineValue === 'number' && Number.isFinite(baselineValue) ? baselineValue : values[0] ?? Math.max(...values);
-  const xRatios = kind === 'intraday' ? intradayXRatios(labels, values.length) : undefined;
-  const chart = chartGeometry(values, [baseline], xRatios);
+  const chart = chartGeometry(values, [baseline]);
   const points = chart.points.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(' ');
   const linePath = smoothPathFromPoints(chart.points);
   const firstPoint = chart.points[0];
@@ -2235,9 +2241,22 @@ function chartAxisTicks(
   kind: 'daily_close' | 'intraday',
 ): Array<{ x: number; label: string }> {
   if (kind === 'intraday') {
-    return ['09:30', '10:30', '11:30', '14:00', '15:00'].map((label) => ({
-      x: 8 + (intradaySessionRatioFromLabel(label) ?? 0) * 90,
-      label: label.replace(/^0/, ''),
+    if (labels.length === 0) {
+      return [
+        { x: 8, label: '首笔' },
+        { x: 98, label: '最近' },
+      ];
+    }
+    const last = labels.length - 1;
+    const indexes = Array.from(new Set([
+      0,
+      Math.round(last / 3),
+      Math.round((last * 2) / 3),
+      last,
+    ])).sort((a, b) => a - b);
+    return indexes.map((index) => ({
+      x: 8 + (index / Math.max(1, last)) * 90,
+      label: formatStockDateLabel(labels[index] ?? ''),
     }));
   }
   if (labels.length === 0) {
@@ -2265,50 +2284,6 @@ function formatStockDateLabel(value: string): string {
   const match = /^(\d{4})[-/]?(\d{2})[-/]?(\d{2})$/.exec(trimmed);
   if (!match) return trimmed || '—';
   return `${match[2]}-${match[3]}`;
-}
-
-function intradayXRatios(labels: string[], valueCount: number): number[] | undefined {
-  if (valueCount <= 1) return undefined;
-  const ratios = labels.slice(0, valueCount).map(intradaySessionRatioFromLabel);
-  if (ratios.length !== valueCount || ratios.some((ratio) => ratio === null)) return undefined;
-  for (let index = 1; index < ratios.length; index += 1) {
-    const current = ratios[index];
-    const previous = ratios[index - 1];
-    if (current === null || previous === null || current < previous) return undefined;
-  }
-  return ratios as number[];
-}
-
-function intradaySessionRatioFromLabel(label: string): number | null {
-  const match = /(\d{1,2}):(\d{2})/.exec(label);
-  if (!match) return null;
-  const hour = Number(match[1]);
-  const minute = Number(match[2]);
-  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
-  const startMinutes = 9 * 60 + 30;
-  const endMinutes = 15 * 60;
-  const minutes = Math.max(startMinutes, Math.min(endMinutes, hour * 60 + minute));
-  return (minutes - startMinutes) / (endMinutes - startMinutes);
-}
-
-function stockDisplayPoint(stock: StockSnapshot, hoverRatio: number | null): { price: string; changePct: number } {
-  if (hoverRatio === null || stock.spark.length === 0) {
-    return { price: stock.price, changePct: stock.changePct };
-  }
-  const baseline = typeof stock.sparkBaseline === 'number' && Number.isFinite(stock.sparkBaseline)
-    ? stock.sparkBaseline
-    : stock.spark[0] ?? 0;
-  const xRatios = stock.sparkKind === 'intraday'
-    ? intradayXRatios(stock.sparkLabels ?? [], stock.spark.length)
-    : undefined;
-  const chart = chartGeometry(stock.spark, [baseline], xRatios);
-  const point = stock.sparkKind === 'intraday'
-    ? interpolatedChartPoint(stock.spark, chart, hoverRatio, stock.changePct, baseline)
-    : sampledChartPoint(stock.spark, chart, hoverRatio, stock.changePct, baseline);
-  return {
-    price: point.value.toFixed(2),
-    changePct: point.changePct,
-  };
 }
 
 function stockRangeText(stock: StockSnapshot): string {

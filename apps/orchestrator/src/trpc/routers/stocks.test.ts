@@ -45,6 +45,11 @@ describe('stocks dashboard snapshot', () => {
           { 时间: '2026-06-29 09:32:00', 最新价: 7.28, 成交量: 1800 },
         ])));
       }
+      if (url.pathname === '/quote/603528') {
+        return new Response(JSON.stringify(envelope([
+          { 代码: 'sh603528', 名称: '多伦科技', 最新价: 7.31, 涨跌幅: 2.82 },
+        ])));
+      }
       if (url.pathname.startsWith('/announcements/')) {
         return new Response(JSON.stringify(envelope([])));
       }
@@ -68,8 +73,8 @@ describe('stocks dashboard snapshot', () => {
     expect(snapshot.watchlistStocks[0]).toMatchObject({
       symbol: '603528',
       name: '多伦科技',
-      price: '7.28',
-      changePct: 2.39,
+      price: '7.31',
+      changePct: 2.82,
       spark: [7.22, 7.25, 7.28],
       sparkLabels: ['2026-06-29 09:30:00', '2026-06-29 09:31:00', '2026-06-29 09:32:00'],
       sparkKind: 'intraday',

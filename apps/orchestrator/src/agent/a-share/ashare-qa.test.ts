@@ -138,6 +138,7 @@ function fakeClient(over: FakeOver = {}): AkshareClient {
     getShareUnlock: () => Promise.resolve(over.unlock ?? env([])),
     getStockKline: () =>
       Promise.resolve(over.kline ?? env([{ 收盘: 1279, 涨跌幅: 0.24, 成交额: 3_230_000_000 }])),
+    getStockQuote: () => Promise.resolve(env([])),
     getDragonTiger: () =>
       Promise.resolve(
         over.dt ??
