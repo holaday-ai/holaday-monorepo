@@ -52,7 +52,9 @@ interface StockSnapshot {
   sparkKind?: 'daily_close' | 'intraday';
   sparkBaseline?: number | null;
   turnoverAmount?: number | null;
+  averageTurnoverAmount?: number | null;
   volume?: number | null;
+  averageVolume?: number | null;
   volumeRatio?: number | null;
   volumeSignal?: VolumeSignal;
   newsCount: number;
@@ -921,7 +923,7 @@ function StockHighlightCard({ stock, marketIndex }: { stock: StockSnapshot; mark
           <StockRailMetric label="支撑 / 压力" value={stockRangeText(stock)} />
           <StockRailMetric label="价格位置" value={stockPositionText(stock)} meta={stockPositionMeta(stock)} tone={stockPositionTone(stock)} />
           <StockRailMetric label="成交额" value={stockTurnoverText(stock)} />
-          <StockRailMetric label="量能" value={stockVolumeSignalText(stock)} meta={stockVolumeMeta(stock)} tone={stockVolumeTone(stock)} />
+          <StockRailMetric label="成交活跃度" value={stockVolumeSignalText(stock)} meta={stockVolumeMeta(stock)} tone={stockVolumeTone(stock)} />
           <StockRailMetric label="市场" value={marketContextText(marketIndex)} meta={marketContextMeta(marketIndex)} tone={marketContextTone(marketIndex)} />
           <StockRailMetric label="日报状态" value={stock.report} />
         </div>
@@ -1930,7 +1932,8 @@ function MarketMiniChart({
 }): JSX.Element {
   const gradientId = React.useId();
   const baseline = typeof baselineValue === 'number' && Number.isFinite(baselineValue) ? baselineValue : values[0] ?? Math.max(...values);
-  const chart = chartGeometry(values, [baseline]);
+  const xRatios = kind === 'intraday' ? intradayXRatios(labels, values.length) : undefined;
+  const chart = chartGeometry(values, [baseline], xRatios);
   const points = chart.points.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(' ');
   const linePath = smoothPathFromPoints(chart.points);
   const firstPoint = chart.points[0];
@@ -2284,23 +2287,13 @@ function chartAxisTicks(
   kind: 'daily_close' | 'intraday',
 ): Array<{ x: number; label: string }> {
   if (kind === 'intraday') {
-    if (labels.length === 0) {
-      return [
-        { x: MARKET_CHART_LEFT, label: '首笔' },
-        { x: MARKET_CHART_RIGHT, label: '最近' },
-      ];
-    }
-    const last = labels.length - 1;
-    const indexes = Array.from(new Set([
-      0,
-      Math.round(last / 3),
-      Math.round((last * 2) / 3),
-      last,
-    ])).sort((a, b) => a - b);
-    return indexes.map((index) => ({
-      x: MARKET_CHART_LEFT + (index / Math.max(1, last)) * (MARKET_CHART_RIGHT - MARKET_CHART_LEFT),
-      label: formatStockDateLabel(labels[index] ?? ''),
-    }));
+    return [
+      { x: MARKET_CHART_LEFT, label: '09:30' },
+      { x: MARKET_CHART_LEFT + 0.25 * (MARKET_CHART_RIGHT - MARKET_CHART_LEFT), label: '10:30' },
+      { x: MARKET_CHART_LEFT + 0.5 * (MARKET_CHART_RIGHT - MARKET_CHART_LEFT), label: '11:30' },
+      { x: MARKET_CHART_LEFT + 0.75 * (MARKET_CHART_RIGHT - MARKET_CHART_LEFT), label: '14:00' },
+      { x: MARKET_CHART_RIGHT, label: '15:00' },
+    ];
   }
   if (labels.length === 0) {
     return [
@@ -2318,6 +2311,33 @@ function chartAxisTicks(
     x: MARKET_CHART_LEFT + (index / Math.max(1, last)) * (MARKET_CHART_RIGHT - MARKET_CHART_LEFT),
     label: formatStockDateLabel(labels[index] ?? ''),
   }));
+}
+
+function intradayXRatios(labels: string[], count: number): number[] | undefined {
+  if (count <= 0) return undefined;
+  const ratios = labels
+    .slice(0, count)
+    .map((label) => intradayRatioFromLabel(label));
+  if (ratios.length !== count || ratios.some((ratio) => ratio === null)) return undefined;
+  return ratios.map((ratio) => ratio ?? 0);
+}
+
+function intradayRatioFromLabel(value: string): number | null {
+  const match = /(\d{1,2}):(\d{2})/.exec(value);
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+  const total = hour * 60 + minute;
+  const morningStart = 9 * 60 + 30;
+  const morningEnd = 11 * 60 + 30;
+  const afternoonStart = 13 * 60;
+  const afternoonEnd = 15 * 60;
+  if (total <= morningStart) return 0;
+  if (total <= morningEnd) return (total - morningStart) / 240;
+  if (total < afternoonStart) return 0.5;
+  if (total >= afternoonEnd) return 1;
+  return (120 + (total - afternoonStart)) / 240;
 }
 
 function formatStockDateLabel(value: string): string {
@@ -2341,12 +2361,18 @@ function stockTurnoverText(stock: StockSnapshot): string {
 }
 
 function stockVolumeSignalText(stock: StockSnapshot): string {
-  return stock.volumeSignal ?? '待观察';
+  const signal = stock.volumeSignal ?? '待观察';
+  if (typeof stock.averageTurnoverAmount === 'number' && Number.isFinite(stock.averageTurnoverAmount)) {
+    return `${signal}：${formatMoneyAuto(stock.averageTurnoverAmount)}`;
+  }
+  return signal;
 }
 
 function stockVolumeMeta(stock: StockSnapshot): string {
-  if (typeof stock.volumeRatio !== 'number' || !Number.isFinite(stock.volumeRatio)) return '近7日均量待补齐';
-  return `今日成交量 / 近7日均量 = ${stock.volumeRatio.toFixed(2)}x`;
+  if (typeof stock.turnoverAmount === 'number' && Number.isFinite(stock.turnoverAmount)) {
+    return `今日成交额 ${formatMoneyAuto(stock.turnoverAmount)}`;
+  }
+  return '今日成交额待补齐';
 }
 
 function stockVolumeTone(stock: StockSnapshot): 'neutral' | 'red' | 'green' | 'muted' {
@@ -2394,10 +2420,13 @@ function stockNarrative(stock: StockSnapshot, marketIndex: IndexRow | null): str
 }
 
 function stockVolumeSummary(stock: StockSnapshot): string {
-  if (stock.volumeSignal === '放量') return '成交活跃度高于近7日均量，说明今天参与度放大';
-  if (stock.volumeSignal === '缩量') return '成交活跃度低于近7日均量，说明今天参与度偏弱';
-  if (stock.volumeSignal === '接近均量') return '成交活跃度接近近7日均量，暂未出现明显放量';
-  return '量能基准仍在补齐，暂不判断成交活跃度';
+  const averageAmount = typeof stock.averageTurnoverAmount === 'number' && Number.isFinite(stock.averageTurnoverAmount)
+    ? `（近7日均额 ${formatMoneyAuto(stock.averageTurnoverAmount)}）`
+    : '';
+  if (stock.volumeSignal === '放量') return `成交活跃度高于近7日均额${averageAmount}，说明今天参与度放大`;
+  if (stock.volumeSignal === '缩量') return `成交活跃度低于近7日均额${averageAmount}，说明今天参与度偏弱`;
+  if (stock.volumeSignal === '接近均量') return `成交活跃度接近近7日均额${averageAmount}，暂未出现明显放量`;
+  return '近7日均额仍在补齐，暂不判断成交活跃度';
 }
 
 function marketSummary(index: IndexRow | null, stock: StockSnapshot): string {

@@ -46,7 +46,9 @@ interface StockSnapshot {
   sparkKind: 'daily_close' | 'intraday';
   sparkBaseline: number | null;
   turnoverAmount: number | null;
+  averageTurnoverAmount: number | null;
   volume: number | null;
+  averageVolume: number | null;
   volumeRatio: number | null;
   volumeSignal: VolumeSignal;
   newsCount: number;
@@ -186,7 +188,9 @@ function stock(
     sparkKind: 'daily_close',
     sparkBaseline: null,
     turnoverAmount: null,
+    averageTurnoverAmount: null,
     volume: null,
+    averageVolume: null,
     volumeRatio: null,
     volumeSignal: '待观察',
     newsCount: 0,
@@ -433,7 +437,16 @@ async function stockSnapshot(
   const dailyAmount = toNum(last ? pick(last, ['成交额', 'amount', 'turnover']) : null);
   const volume = quoteVolume ?? dailyVolume;
   const turnoverAmount = quoteAmount ?? dailyAmount;
-  const volumeRatio = volumeRatioFromKline(volume, seriesEnv.error ? [] : seriesEnv.data);
+  const klineRows = seriesEnv.error ? [] : seriesEnv.data;
+  const averageVolume = averageKlineValue(klineRows, ['成交量', 'volume']);
+  const averageTurnoverAmount = averageKlineValue(klineRows, ['成交额', 'amount', 'turnover']);
+  const turnoverRatio = turnoverAmount !== null && averageTurnoverAmount !== null && averageTurnoverAmount > 0
+    ? Number((turnoverAmount / averageTurnoverAmount).toFixed(2))
+    : null;
+  const volumeRatio = turnoverRatio
+    ?? (volume !== null && averageVolume !== null && averageVolume > 0
+      ? Number((volume / averageVolume).toFixed(2))
+      : null);
   return {
     ...fallback,
     symbol: entry.symbol,
@@ -447,7 +460,9 @@ async function stockSnapshot(
     sparkKind: hasIntraday ? 'intraday' : 'daily_close',
     sparkBaseline,
     turnoverAmount,
+    averageTurnoverAmount,
     volume,
+    averageVolume,
     volumeRatio,
     volumeSignal: volumeSignalFromRatio(volumeRatio),
     note: hasIntraday
@@ -470,16 +485,15 @@ function fallbackStock(entry: WatchlistEntry, _index: number): StockSnapshot {
   );
 }
 
-function volumeRatioFromKline(volume: number | null, rows: KlineRow[]): number | null {
-  if (volume === null || volume <= 0) return null;
+function averageKlineValue(rows: KlineRow[], keys: string[]): number | null {
   const recent = rows
-    .map((row) => toNum(pick(row, ['成交量', 'volume'])))
+    .map((row) => toNum(pick(row, keys)))
     .filter((value): value is number => value !== null && value > 0);
   const baseline = recent.length > 1 ? recent.slice(0, -1) : recent;
   if (baseline.length === 0) return null;
   const average = baseline.reduce((sum, value) => sum + value, 0) / baseline.length;
   if (!Number.isFinite(average) || average <= 0) return null;
-  return Number((volume / average).toFixed(2));
+  return Number(average.toFixed(2));
 }
 
 function volumeSignalFromRatio(ratio: number | null): VolumeSignal {

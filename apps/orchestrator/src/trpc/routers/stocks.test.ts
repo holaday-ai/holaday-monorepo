@@ -78,8 +78,10 @@ describe('stocks dashboard snapshot', () => {
       sparkKind: 'intraday',
       sparkBaseline: 7.11,
       turnoverAmount: 17_544_000,
+      averageTurnoverAmount: 7_100_000,
       volume: 2400,
-      volumeRatio: 2.4,
+      averageVolume: 1000,
+      volumeRatio: 2.47,
       volumeSignal: '放量',
     });
     expect(snapshot.leaderboards.gainers).toEqual([]);
