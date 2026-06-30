@@ -2,6 +2,7 @@ import {
   ArrowRight,
   Bell,
   CalendarClock,
+  ChevronLeft,
   ChevronRight,
   ExternalLink,
   FileText,
@@ -14,6 +15,7 @@ import {
   Trash2,
   TrendingDown,
   TrendingUp,
+  X,
 } from 'lucide-react';
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -224,6 +226,9 @@ const DISCOVERY_IMAGES = [
   'https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?auto=format&fit=crop&w=900&q=80',
   'https://images.unsplash.com/photo-1520607162513-77705c0f0d4a?auto=format&fit=crop&w=900&q=80',
   'https://images.unsplash.com/photo-1526628953301-3e589a6a8b74?auto=format&fit=crop&w=900&q=80',
+  'https://images.unsplash.com/photo-1590283603385-17ffb3a7f29f?auto=format&fit=crop&w=900&q=80',
+  'https://images.unsplash.com/photo-1535320903710-d993d3d77d29?auto=format&fit=crop&w=900&q=80',
+  'https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&w=900&q=80',
 ];
 export function StockTasksPage(): JSX.Element {
   const navigate = useNavigate();
@@ -242,6 +247,7 @@ export function StockTasksPage(): JSX.Element {
   const [briefingResult, setBriefingResult] = React.useState<GeneratedBriefing | null>(null);
   const [watchlistSheetOpen, setWatchlistSheetOpen] = React.useState(false);
   const [insightSheet, setInsightSheet] = React.useState<InsightSheetState | null>(null);
+  const [activeNewsIndex, setActiveNewsIndex] = React.useState<number | null>(null);
   const [watchlistSaving, setWatchlistSaving] = React.useState(false);
   const [stockForm, setStockForm] = React.useState({
     symbol: '',
@@ -640,7 +646,7 @@ export function StockTasksPage(): JSX.Element {
             <main className="min-w-0 space-y-5">
               <DiscoveryPanel
                 news={news}
-                onInspect={() => setInsightSheet(newsInsight(news))}
+                onOpenNews={(index) => setActiveNewsIndex(index)}
               />
               <MarketHighlights
                 stocks={stocks}
@@ -725,22 +731,48 @@ export function StockTasksPage(): JSX.Element {
           if (!open) setInsightSheet(null);
         }}
       />
+      <NewsDetailModal
+        news={news}
+        activeIndex={activeNewsIndex}
+        onClose={() => setActiveNewsIndex(null)}
+        onChangeIndex={setActiveNewsIndex}
+      />
     </div>
   );
 }
 
 function DiscoveryPanel({
   news,
-  onInspect,
+  onOpenNews,
 }: {
   news: NewsRow[];
-  onInspect: () => void;
+  onOpenNews: (index: number) => void;
 }): JSX.Element {
-  const items = news.slice(0, 3);
+  const pageSize = 3;
+  const [page, setPage] = React.useState(0);
+  const pageCount = Math.max(1, Math.ceil(news.length / pageSize));
+  const safePage = Math.min(page, pageCount - 1);
+  const start = safePage * pageSize;
+  const items = news.slice(start, start + pageSize);
+  const announcementCount = news.filter((item) => newsDisplayType(item) === '公告').length;
+  const marketNewsCount = news.length - announcementCount;
+
+  React.useEffect(() => {
+    if (safePage !== page) setPage(safePage);
+  }, [page, safePage]);
+
+  const goPrevious = (): void => setPage((current) => Math.max(0, current - 1));
+  const goNext = (): void => setPage((current) => Math.min(pageCount - 1, current + 1));
+
   return (
     <section className="rounded-[8px] border border-[#E1E3E8] bg-white p-4 shadow-[0_8px_24px_rgba(18,24,38,0.035)]">
-      <SectionHeader title="发现" meta={items.length > 0 ? `${items.length} 条来源动态` : '等待真实来源'} action="查看详情" onAction={onInspect} />
-      {items.length === 0 ? (
+      <SectionHeader
+        title="发现"
+        meta={news.length > 0 ? `${marketNewsCount} 条新闻 · ${announcementCount} 条公告` : '等待真实来源'}
+        action={news.length > 0 ? '查看详情' : undefined}
+        onAction={news.length > 0 ? () => onOpenNews(0) : undefined}
+      />
+      {news.length === 0 ? (
         <EmptyState title="暂无真实股市新闻" body="公告、市场脉冲和自选股行情暂未返回可展示内容。" />
       ) : null}
       {items.length > 0 ? (
@@ -748,15 +780,29 @@ function DiscoveryPanel({
           {items.map((item, index) => (
             <article
               key={`${item.time}-${item.title}`}
-              className="min-w-0 overflow-hidden rounded-[8px] border border-[#E7E7EB] bg-white shadow-[0_10px_24px_rgba(18,24,38,0.04)] transition hover:-translate-y-0.5 hover:border-[#EA1F59]/25 hover:shadow-[0_16px_32px_rgba(18,24,38,0.08)] motion-reduce:hover:translate-y-0"
+              role="button"
+              tabIndex={0}
+              onClick={() => onOpenNews(start + index)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  onOpenNews(start + index);
+                }
+              }}
+              className="group min-w-0 overflow-hidden rounded-[8px] border border-[#E7E7EB] bg-white text-left shadow-[0_10px_24px_rgba(18,24,38,0.04)] transition hover:-translate-y-0.5 hover:border-[#EA1F59]/25 hover:shadow-[0_16px_32px_rgba(18,24,38,0.08)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20 motion-reduce:hover:translate-y-0"
             >
               <div
                 className="relative h-[150px] bg-[#EEF1F6] bg-cover bg-center"
-                style={{ backgroundImage: `linear-gradient(180deg, rgba(18,24,38,0.04), rgba(18,24,38,0.22)), url(${DISCOVERY_IMAGES[index % DISCOVERY_IMAGES.length]})` }}
+                style={{ backgroundImage: `linear-gradient(180deg, rgba(18,24,38,0.04), rgba(18,24,38,0.22)), url(${newsImage(item, start + index)})` }}
               >
                 <div className="absolute left-3 top-3 flex items-center gap-2">
-                  <span className="rounded-full bg-white/90 px-2 py-1 text-[11px] font-medium text-[#344054] shadow-sm">
-                    {item.category ?? '动态'}
+                  <span className={cn(
+                    'rounded-full px-2 py-1 text-[11px] font-semibold shadow-sm',
+                    newsDisplayType(item) === '公告'
+                      ? 'bg-white/92 text-[#344054]'
+                      : 'bg-[#EA1F59] text-white',
+                  )}>
+                    {newsDisplayType(item)}
                   </span>
                   <span className="rounded-full bg-white/80 px-2 py-1 text-[11px] tabular-nums text-[#667085] shadow-sm">
                     {item.time}
@@ -764,19 +810,10 @@ function DiscoveryPanel({
                 </div>
               </div>
               <div className="p-3">
-                {item.url ? (
-                  <a
-                    href={item.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="group line-clamp-2 min-h-[48px] text-[15px] font-semibold leading-relaxed text-[#344054] hover:text-[#EA1F59]"
-                  >
-                    {item.title}
-                    <ExternalLink className="ml-1 inline h-3 w-3 opacity-60 transition group-hover:opacity-100" aria-hidden />
-                  </a>
-                ) : (
-                  <p className="line-clamp-2 min-h-[48px] text-[15px] font-semibold leading-relaxed text-[#344054]">{item.title}</p>
-                )}
+                <p className="line-clamp-2 min-h-[48px] text-[15px] font-semibold leading-relaxed text-[#344054] transition group-hover:text-[#EA1F59]">
+                  {item.title}
+                  {item.url ? <ExternalLink className="ml-1 inline h-3 w-3 opacity-60 transition group-hover:opacity-100" aria-hidden /> : null}
+                </p>
                 <div className="mt-4 flex items-center justify-between gap-2">
                   <div className="flex min-w-0 items-center gap-2">
                     <NewsSourceDots count={item.symbols.length || 1} />
@@ -787,6 +824,7 @@ function DiscoveryPanel({
                   <div className="flex shrink-0 items-center gap-1">
                     <button
                       type="button"
+                      onClick={(event) => event.stopPropagation()}
                       className="rounded-full p-1.5 text-[#8B92A1] transition hover:bg-[#F7F8FA] hover:text-[#EA1F59]"
                       aria-label="收藏动态"
                       title="收藏动态"
@@ -795,6 +833,7 @@ function DiscoveryPanel({
                     </button>
                     <button
                       type="button"
+                      onClick={(event) => event.stopPropagation()}
                       className="rounded-full p-1.5 text-[#8B92A1] transition hover:bg-[#F7F8FA] hover:text-[#344054]"
                       aria-label="更多动态操作"
                       title="更多动态操作"
@@ -808,7 +847,232 @@ function DiscoveryPanel({
           ))}
         </div>
       ) : null}
+      {news.length > pageSize ? (
+        <div className="mt-4 flex items-center justify-between gap-3">
+          <button
+            type="button"
+            onClick={goPrevious}
+            disabled={safePage === 0}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#E7E7EB] bg-white text-[#667085] transition hover:border-[#EA1F59]/25 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-40"
+            aria-label="上一页动态"
+            title="上一页"
+          >
+            <ChevronLeft className="h-4 w-4" aria-hidden />
+          </button>
+          <div className="flex min-w-0 flex-1 items-center justify-center gap-1.5">
+            {Array.from({ length: pageCount }).map((_, index) => (
+              <button
+                key={index}
+                type="button"
+                onClick={() => setPage(index)}
+                className={cn(
+                  'h-1.5 rounded-full transition-all',
+                  index === safePage ? 'w-4 bg-[#121826]' : 'w-1.5 bg-[#D2D6DE] hover:bg-[#AEB5C2]',
+                )}
+                aria-label={`查看第 ${index + 1} 页动态`}
+                title={`第 ${index + 1} 页`}
+              />
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={goNext}
+            disabled={safePage >= pageCount - 1}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#E7E7EB] bg-white text-[#667085] transition hover:border-[#EA1F59]/25 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-40"
+            aria-label="下一页动态"
+            title="下一页"
+          >
+            <ChevronRight className="h-4 w-4" aria-hidden />
+          </button>
+        </div>
+      ) : null}
     </section>
+  );
+}
+
+function NewsDetailModal({
+  news,
+  activeIndex,
+  onClose,
+  onChangeIndex,
+}: {
+  news: NewsRow[];
+  activeIndex: number | null;
+  onClose: () => void;
+  onChangeIndex: (index: number | null) => void;
+}): JSX.Element | null {
+  const closeRef = React.useRef<HTMLButtonElement>(null);
+  const item = activeIndex === null ? null : news[activeIndex] ?? null;
+  const hasPrevious = activeIndex !== null && activeIndex > 0;
+  const hasNext = activeIndex !== null && activeIndex < news.length - 1;
+
+  React.useEffect(() => {
+    if (!item) return;
+    closeRef.current?.focus();
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+      }
+      if (event.key === 'ArrowLeft' && hasPrevious && activeIndex !== null) {
+        event.preventDefault();
+        onChangeIndex(activeIndex - 1);
+      }
+      if (event.key === 'ArrowRight' && hasNext && activeIndex !== null) {
+        event.preventDefault();
+        onChangeIndex(activeIndex + 1);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [activeIndex, hasNext, hasPrevious, item, onChangeIndex, onClose]);
+
+  if (!item || activeIndex === null) return null;
+
+  const type = newsDisplayType(item);
+  const details = newsDetailParagraphs(item);
+
+  return (
+    <div
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/35 p-4 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="stock-news-dialog-title"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <article className="flex h-[min(92vh,860px)] w-[min(94vw,980px)] flex-col overflow-hidden rounded-[12px] border border-[#DCDDDD] bg-[#FBFAF8] shadow-[0_24px_80px_rgba(17,24,39,0.24)]">
+        <header className="flex shrink-0 items-center justify-between gap-3 border-b border-[#E4E1DC] bg-[#FBFAF8] px-5 py-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className={cn(
+              'rounded-full px-2.5 py-1 text-[12px] font-semibold',
+              type === '公告' ? 'bg-white text-[#344054] ring-1 ring-[#E1E3E8]' : 'bg-[#EA1F59] text-white',
+            )}>
+              {type}
+            </span>
+            <span className="truncate text-[12px] text-[#667085]">
+              {item.source ?? '公开来源'} · {item.time}
+            </span>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() => onChangeIndex(activeIndex - 1)}
+              disabled={!hasPrevious}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#E1E3E8] bg-white text-[#667085] transition hover:border-[#EA1F59]/25 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-40"
+              aria-label="上一条"
+              title="上一条"
+            >
+              <ChevronLeft className="h-4 w-4" aria-hidden />
+            </button>
+            <button
+              type="button"
+              onClick={() => onChangeIndex(activeIndex + 1)}
+              disabled={!hasNext}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#E1E3E8] bg-white text-[#667085] transition hover:border-[#EA1F59]/25 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-40"
+              aria-label="下一条"
+              title="下一条"
+            >
+              <ChevronRight className="h-4 w-4" aria-hidden />
+            </button>
+            <button
+              ref={closeRef}
+              type="button"
+              onClick={onClose}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[#667085] transition hover:bg-white hover:text-[#121826]"
+              aria-label="关闭"
+              title="关闭"
+            >
+              <X className="h-4 w-4" aria-hidden />
+            </button>
+          </div>
+        </header>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6 sm:px-8 lg:px-10">
+          <div className="mx-auto max-w-[760px]">
+            <div className="mb-4 flex flex-wrap items-center gap-2 text-[12px] text-[#667085]">
+              <span>{activeIndex + 1} / {news.length}</span>
+              {item.symbols.length > 0 ? (
+                <>
+                  <span className="h-1 w-1 rounded-full bg-[#CBD0DA]" />
+                  <span className="truncate">关联：{item.symbols.join('、')}</span>
+                </>
+              ) : null}
+            </div>
+            <h2 id="stock-news-dialog-title" className="text-[28px] font-semibold leading-tight tracking-normal text-[#242424] sm:text-[34px]">
+              {item.title}
+            </h2>
+            <p className="mt-4 text-[15px] leading-7 text-[#4F5868]">
+              {newsLead(item)}
+            </p>
+
+            <div className="mt-6 overflow-hidden rounded-[10px] border border-[#E4E1DC] bg-white shadow-[0_12px_30px_rgba(18,24,38,0.08)]">
+              <div
+                className="h-[240px] bg-[#EEF1F6] bg-cover bg-center sm:h-[320px]"
+                style={{ backgroundImage: `linear-gradient(180deg, rgba(18,24,38,0.02), rgba(18,24,38,0.16)), url(${newsImage(item, activeIndex)})` }}
+              />
+            </div>
+
+            <div className="mt-7 space-y-5">
+              <section>
+                <h3 className="text-[16px] font-semibold text-[#242424]">
+                  {type === '公告' ? '公告要点' : '新闻要点'}
+                </h3>
+                <div className="mt-3 space-y-3 text-[15px] leading-8 text-[#3F4652]">
+                  {details.map((paragraph) => (
+                    <p key={paragraph}>{paragraph}</p>
+                  ))}
+                </div>
+              </section>
+
+              <section className="rounded-[10px] border border-[#E4E1DC] bg-white px-4 py-3">
+                <div className="grid gap-3 text-[13px] text-[#4F5868] sm:grid-cols-3">
+                  <NewsDetailMetric label="类型" value={type} />
+                  <NewsDetailMetric label="来源" value={item.source ?? '公开来源'} />
+                  <NewsDetailMetric label="关联标的" value={item.symbols.length > 0 ? item.symbols.join('、') : '暂无'} />
+                </div>
+              </section>
+            </div>
+          </div>
+        </div>
+
+        <footer className="flex shrink-0 flex-col gap-3 border-t border-[#E4E1DC] bg-[#FBFAF8] px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="text-[12px] leading-relaxed text-[#667085]">
+            站内详情基于当前可用来源字段整理；原文内容以来源页面为准。
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            {item.url ? (
+              <a
+                href={item.url}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex h-9 items-center gap-2 rounded-[8px] border border-[#E1E3E8] bg-white px-3 text-[13px] font-medium text-[#344054] transition hover:border-[#EA1F59]/25 hover:text-[#EA1F59]"
+              >
+                打开原文
+                <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+              </a>
+            ) : null}
+            <button
+              type="button"
+              onClick={onClose}
+              className="inline-flex h-9 items-center justify-center rounded-[8px] bg-[#121826] px-3 text-[13px] font-medium text-white transition hover:bg-[#242B3A]"
+            >
+              关闭
+            </button>
+          </div>
+        </footer>
+      </article>
+    </div>
+  );
+}
+
+function NewsDetailMetric({ label, value }: { label: string; value: string }): JSX.Element {
+  return (
+    <div className="min-w-0">
+      <div className="text-[11px] text-[#8B92A1]">{label}</div>
+      <div className="mt-1 truncate font-medium text-[#121826]" title={value}>{value}</div>
+    </div>
   );
 }
 
@@ -2639,6 +2903,46 @@ function starStockInsight(stocks: StockSnapshot[]): InsightSheetState {
   };
 }
 
+function newsDisplayType(item: NewsRow): '新闻' | '公告' {
+  return item.category === '公告' ? '公告' : '新闻';
+}
+
+function newsImage(item: NewsRow, index: number): string {
+  const title = item.title.toLowerCase();
+  if (item.category === '公告') return DISCOVERY_IMAGES[(index + 1) % DISCOVERY_IMAGES.length];
+  if (/指数|市场|盘面|stock|market/.test(title)) return DISCOVERY_IMAGES[0] ?? DISCOVERY_IMAGES[index % DISCOVERY_IMAGES.length];
+  if (/科技|ai|芯片|半导体|软件/.test(title)) return DISCOVERY_IMAGES[2] ?? DISCOVERY_IMAGES[index % DISCOVERY_IMAGES.length];
+  return DISCOVERY_IMAGES[index % DISCOVERY_IMAGES.length] ?? DISCOVERY_IMAGES[0]!;
+}
+
+function newsLead(item: NewsRow): string {
+  const type = newsDisplayType(item);
+  const source = item.source ?? '公开来源';
+  const related = item.symbols.length > 0 ? `，关联 ${item.symbols.join('、')}` : '';
+  if (type === '公告') {
+    return `这是一条来自 ${source} 的公司公告${related}。Holaday 在这里保留来源、时间和关联标的，方便你先判断是否需要打开原文继续核对。`;
+  }
+  return `这是一条来自 ${source} 的市场新闻${related}。当前详情基于已返回的标题、来源和盘面字段整理，适合快速判断是否值得进一步追问或生成日报。`;
+}
+
+function newsDetailParagraphs(item: NewsRow): string[] {
+  const type = newsDisplayType(item);
+  const source = item.source ?? '公开来源';
+  const related = item.symbols.length > 0 ? item.symbols.join('、') : '暂无明确关联标的';
+  if (type === '公告') {
+    return [
+      `公告标题显示：${item.title}`,
+      `这类信息优先按事实来源处理，当前来源为 ${source}，发布时间标记为 ${item.time}，关联标的为 ${related}。如果涉及股东大会、持股计划、审计、解禁或重大合同，应打开原文核对公告全文和关键日期。`,
+      '公告本身不等于利好或利空。用于看盘时，建议结合股价位置、成交额变化和后续日报分析，再判断它对短线情绪或中期基本面的影响。',
+    ];
+  }
+  return [
+    `新闻标题显示：${item.title}`,
+    `当前来源为 ${source}，时间标记为 ${item.time}，关联标的为 ${related}。它可作为盘面线索，但不应单独作为交易判断。`,
+    '如果这条动态与自选股、行业板块或指数方向一致，可以继续生成日报或追问原因；如果只有标题信号，应先打开原文或补充更多来源再下结论。',
+  ];
+}
+
 function temperatureInsight(temperature: DashboardSnapshot['temperature'] | null): InsightSheetState {
   return {
     title: '市场温度',
@@ -2661,18 +2965,6 @@ function temperatureInsight(temperature: DashboardSnapshot['temperature'] | null
         value: note,
       })),
     ] : [],
-  };
-}
-
-function newsInsight(news: NewsRow[]): InsightSheetState {
-  return {
-    title: '重点动态',
-    description: '优先展示自选股公告、市场脉冲和关注股票异动。带外链的公告来自巨潮。',
-    rows: news.map((item) => ({
-      label: `${item.time} ${item.category ?? '动态'}`,
-      value: item.title,
-      meta: [item.source, item.symbols.join(' / ')].filter(Boolean).join(' · '),
-    })),
   };
 }
 
