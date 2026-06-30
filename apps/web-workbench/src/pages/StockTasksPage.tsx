@@ -837,56 +837,71 @@ function MarketHighlights({
       {hasRealQuotes ? (
         <div className="mt-4 space-y-3">
           {highlightStocks.map((stock) => (
-            <article
+            <StockHighlightCard
               key={stock.symbol}
-              className="group rounded-[8px] border border-[#E7E7EB] bg-[#FEFEFF] p-4 transition-[border-color,box-shadow,transform] hover:-translate-y-0.5 hover:border-[#EA1F59]/25 hover:shadow-[0_14px_28px_rgba(18,24,38,0.08)] motion-reduce:hover:translate-y-0"
-            >
-              <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_220px]">
-                <div className="min-w-0">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex min-w-0 items-start gap-3">
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] bg-[#0B4AA2] text-[11px] font-semibold text-white">
-                        {stock.symbol.slice(0, 2)}
-                      </div>
-                      <div className="min-w-0">
-                        <div className="truncate text-[16px] font-semibold text-[#121826]">{stock.name}</div>
-                        <div className="mt-1 flex items-center gap-1.5 text-[12px] text-[#667085]">
-                          <span className="tabular-nums">{stock.symbol}</span>
-                          <span className="h-1 w-1 rounded-full bg-[#CBD0DA]" />
-                          <span>{marketLabel(stock.market)}</span>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-[24px] font-semibold leading-none tabular-nums text-[#121826]">{stock.price}</div>
-                      <ChangeText value={stock.changePct} className="mt-1 justify-end" />
-                    </div>
-                  </div>
-                  {stock.spark.length >= 2 ? (
-                    <MarketMiniChart values={stock.spark} positive={stock.changePct >= 0} className="mt-4 h-[220px] w-full" showTimeline />
-                  ) : (
-                    <div className="mt-4 flex h-[220px] items-center justify-center rounded-[7px] border border-dashed border-[#D7DAE2] bg-[#F7F8FA] text-[12px] text-[#8B92A1]">
-                      暂无真实走势
-                    </div>
-                  )}
-                  <p className="mt-3 text-[13px] leading-relaxed text-[#667085]">
-                    {stockNarrative(stock)}
-                  </p>
-                </div>
-                <div className="grid min-w-0 grid-cols-2 gap-2 self-start border-t border-[#F0F1F4] pt-3 lg:grid-cols-1 lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0">
-                  <StockMiniMetric label="状态" value={stock.signal} tone={stock.changePct >= 0 ? 'red' : 'green'} />
-                  <StockMiniMetric label="8日区间" value={stockRangeText(stock)} />
-                  <StockMiniMetric label="区间位置" value={stockPositionText(stock)} tone={stock.changePct >= 0 ? 'red' : 'green'} />
-                  <StockMiniMetric label="今日观察" value={stockObservationText(stock)} />
-                  <StockMiniMetric label="追踪重点" value={stockFollowupText(stock)} />
-                  <StockMiniMetric label="数据来源" value="AkShare" />
-                </div>
-              </div>
-            </article>
+              stock={stock}
+            />
           ))}
         </div>
       ) : null}
     </section>
+  );
+}
+
+function StockHighlightCard({ stock }: { stock: StockSnapshot }): JSX.Element {
+  const [hoverIndex, setHoverIndex] = React.useState<number | null>(null);
+  const display = stockDisplayPoint(stock, hoverIndex);
+  return (
+    <article className="group rounded-[8px] border border-[#E7E7EB] bg-[#FEFEFF] p-4 transition-[border-color,box-shadow,transform] hover:-translate-y-0.5 hover:border-[#EA1F59]/25 hover:shadow-[0_14px_28px_rgba(18,24,38,0.08)] motion-reduce:hover:translate-y-0">
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_220px]">
+        <div className="min-w-0">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex min-w-0 items-start gap-3">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] bg-[#0B4AA2] text-[11px] font-semibold text-white">
+                {stock.symbol.slice(0, 2)}
+              </div>
+              <div className="min-w-0">
+                <div className="truncate text-[15px] font-semibold text-[#121826]">{stock.name}</div>
+                <div className="mt-1 flex items-center gap-1.5 text-[12px] text-[#667085]">
+                  <span className="tabular-nums">{stock.symbol}</span>
+                  <span className="h-1 w-1 rounded-full bg-[#CBD0DA]" />
+                  <span>{marketLabel(stock.market)}</span>
+                </div>
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="text-[22px] font-semibold leading-none tabular-nums text-[#121826]">{display.price}</div>
+              <ChangeText value={display.changePct} className="mt-1 justify-end" />
+            </div>
+          </div>
+          {stock.spark.length >= 2 ? (
+            <MarketMiniChart
+              values={stock.spark}
+              latestChangePct={stock.changePct}
+              className="mt-4 h-[220px] w-full"
+              hoverIndex={hoverIndex}
+              onHoverIndexChange={setHoverIndex}
+              showTimeline
+            />
+          ) : (
+            <div className="mt-4 flex h-[220px] items-center justify-center rounded-[7px] border border-dashed border-[#D7DAE2] bg-[#F7F8FA] text-[12px] text-[#8B92A1]">
+              暂无真实走势
+            </div>
+          )}
+          <p className="mt-3 text-[13px] leading-relaxed text-[#667085]">
+            {stockNarrative(stock)}
+          </p>
+        </div>
+        <div className="grid min-w-0 grid-cols-2 gap-2 self-start border-t border-[#F0F1F4] pt-3 lg:grid-cols-1 lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0">
+          <StockMiniMetric label="状态" value={stock.signal} tone={stock.changePct >= 0 ? 'red' : 'green'} />
+          <StockMiniMetric label="8日区间" value={stockRangeText(stock)} />
+          <StockMiniMetric label="区间位置" value={stockPositionText(stock)} tone={stock.changePct >= 0 ? 'red' : 'green'} />
+          <StockMiniMetric label="今日观察" value={stockObservationText(stock)} />
+          <StockMiniMetric label="追踪重点" value={stockFollowupText(stock)} />
+          <StockMiniMetric label="数据来源" value="AkShare" />
+        </div>
+      </div>
+    </article>
   );
 }
 
@@ -1828,68 +1843,120 @@ function Sparkline({
 
 function MarketMiniChart({
   values,
-  positive,
+  latestChangePct,
   className,
+  hoverIndex,
+  onHoverIndexChange,
   showTimeline = false,
 }: {
   values: number[];
-  positive: boolean;
+  latestChangePct: number;
   className?: string;
+  hoverIndex?: number | null;
+  onHoverIndexChange?: (index: number | null) => void;
   showTimeline?: boolean;
 }): JSX.Element {
-  const points = valuesToPoints(values);
+  const chart = chartGeometry(values);
+  const points = chart.points.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(' ');
   const path = points ? `M ${points.split(' ').join(' L ')} L 98 38 L 2 38 Z` : '';
   const min = Math.min(...values);
   const max = Math.max(...values);
-  const latest = values[values.length - 1] ?? max;
-  const latestY = 36 - ((latest - min) / (max - min || 1)) * 30;
-  const stroke = positive ? MARKET_UP_STROKE : MARKET_DOWN_STROKE;
-  const fill = positive ? '#FFF1F4' : '#ECFDF5';
-
+  const activeIndex = hoverIndex ?? values.length - 1;
+  const activePoint = chart.points[activeIndex] ?? chart.points[chart.points.length - 1];
+  const activeValue = values[activeIndex] ?? values[values.length - 1] ?? max;
+  const activeChangePct =
+    activeIndex === values.length - 1
+      ? latestChangePct
+      : pointChangePct(values, activeIndex);
+  const positive = activeChangePct >= 0;
+  const stroke = latestChangePct >= 0 ? MARKET_UP_STROKE : MARKET_DOWN_STROKE;
+  const fill = latestChangePct >= 0 ? '#FFF1F4' : '#ECFDF5';
+  const baseline = values[0] ?? activeValue;
+  const baselineY = chart.yForValue(baseline);
+  const handlePointerMove = (event: React.PointerEvent<SVGSVGElement>): void => {
+    if (!onHoverIndexChange) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const ratio = (event.clientX - rect.left) / Math.max(1, rect.width);
+    const index = Math.max(0, Math.min(values.length - 1, Math.round(ratio * (values.length - 1))));
+    onHoverIndexChange(index);
+  };
+  const handlePointerLeave = (): void => onHoverIndexChange?.(null);
   return (
-    <svg className={className} viewBox="0 0 100 44" role="img" aria-label="真实走势">
-      <rect x="0" y="0" width="100" height="44" rx="4" fill="#FCFCFD" />
-      {showTimeline ? (
-        <>
-          <line x1="20" x2="20" y1="3" y2="38" stroke="#ECEEF3" strokeWidth="0.4" />
-          <line x1="50" x2="50" y1="3" y2="38" stroke="#ECEEF3" strokeWidth="0.4" />
-          <line x1="80" x2="80" y1="3" y2="38" stroke="#ECEEF3" strokeWidth="0.4" />
-        </>
+    <div className={cn('relative select-none', className)}>
+      <svg
+        className="h-full w-full touch-none overflow-visible"
+        viewBox="0 0 100 48"
+        role="img"
+        aria-label="真实走势"
+        onPointerMove={handlePointerMove}
+        onPointerLeave={handlePointerLeave}
+      >
+        <rect x="0" y="0" width="100" height="48" rx="4" fill="#FCFCFD" />
+        {showTimeline ? (
+          <>
+            <line x1="20" x2="20" y1="4" y2="38" stroke="#E7EAF0" strokeWidth="0.35" />
+            <line x1="50" x2="50" y1="4" y2="38" stroke="#E7EAF0" strokeWidth="0.35" />
+            <line x1="80" x2="80" y1="4" y2="38" stroke="#E7EAF0" strokeWidth="0.35" />
+          </>
+        ) : null}
+        {[8, 18, 28, 38].map((y) => (
+          <line key={y} x1="2" x2="98" y1={y} y2={y} stroke="#EAEDF2" strokeDasharray="0.65 2.4" strokeWidth="0.5" />
+        ))}
+        <line
+          x1="2"
+          x2="98"
+          y1={baselineY}
+          y2={baselineY}
+          stroke={stroke}
+          strokeDasharray="1.2 2.6"
+          strokeOpacity="0.22"
+          strokeWidth="0.55"
+        />
+        {path ? <path d={path} fill={fill} opacity="0.28" /> : null}
+        <polyline
+          points={points}
+          fill="none"
+          stroke={stroke}
+          strokeWidth={latestChangePct >= 0 ? '1.18' : '1.08'}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          vectorEffect="non-scaling-stroke"
+        />
+        {activePoint ? (
+          <>
+            <line x1={activePoint.x} x2={activePoint.x} y1="4" y2="38" stroke="#A9B0BE" strokeWidth="0.55" />
+            <circle cx={activePoint.x} cy={activePoint.y} r="1.05" fill={stroke} stroke="white" strokeWidth="0.55" />
+          </>
+        ) : null}
+        <text x="4" y="7" fill="#98A1B2" fontSize="2.8" fontFamily="ui-sans-serif, system-ui" className="tabular-nums">
+          {max.toFixed(2)}
+        </text>
+        <text x="4" y="39.8" fill="#98A1B2" fontSize="2.8" fontFamily="ui-sans-serif, system-ui" className="tabular-nums">
+          {min.toFixed(2)}
+        </text>
+        {showTimeline ? (
+          <>
+            <text x="18" y="45" fill="#A5ADBA" fontSize="2.45" fontFamily="ui-sans-serif, system-ui">近8日</text>
+            <text x="83" y="45" fill="#A5ADBA" fontSize="2.45" fontFamily="ui-sans-serif, system-ui">最新</text>
+          </>
+        ) : null}
+      </svg>
+      {activePoint ? (
+        <div
+          className="pointer-events-none absolute z-10 rounded-[8px] border border-[#DADDE5] bg-white px-2.5 py-1.5 text-left shadow-[0_8px_20px_rgba(18,24,38,0.12)]"
+          style={{
+            left: `${activePoint.x}%`,
+            top: `${Math.max(9, Math.min(70, (activePoint.y / 48) * 100 - 12))}%`,
+            transform: activePoint.x > 76 ? 'translate(-100%, -50%)' : 'translate(10px, -50%)',
+          }}
+        >
+          <div className="whitespace-nowrap text-[13px] font-semibold tabular-nums text-[#344054]">{activeValue.toFixed(2)}</div>
+          <div className={cn('mt-0.5 whitespace-nowrap text-[11px] font-medium tabular-nums', positive ? MARKET_UP_CLASS : MARKET_DOWN_CLASS)}>
+            {activeChangePct >= 0 ? '+' : ''}{activeChangePct.toFixed(2)}%
+          </div>
+        </div>
       ) : null}
-      <line x1="2" x2="98" y1="8" y2="8" stroke="#ECEEF3" strokeDasharray="1.5 2.5" />
-      <line x1="2" x2="98" y1="22" y2="22" stroke="#ECEEF3" strokeDasharray="1.5 2.5" />
-      <line x1="2" x2="98" y1="36" y2="36" stroke="#ECEEF3" strokeDasharray="1.5 2.5" />
-      {path ? <path d={path} fill={fill} opacity="0.78" /> : null}
-      <polyline
-        points={points}
-        fill="none"
-        stroke={stroke}
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      {showTimeline ? (
-        <>
-          <circle cx="98" cy={latestY} r="1.5" fill={stroke} />
-          <rect x="73" y={Math.max(4, Math.min(28, latestY - 8))} width="23" height="8.5" rx="2.2" fill="white" stroke="#E1E3E8" />
-          <text x="75" y={Math.max(9.5, Math.min(33.5, latestY - 2.5))} fill="#344054" fontSize="3.8" fontFamily="ui-sans-serif, system-ui" className="tabular-nums">
-            {latest.toFixed(2)}
-          </text>
-        </>
-      ) : null}
-      <text x="4" y="7" fill="#A0A7B4" fontSize="4.8" fontFamily="ui-sans-serif, system-ui" className="tabular-nums">
-        {max.toFixed(2)}
-      </text>
-      <text x="4" y="41" fill="#A0A7B4" fontSize="4.8" fontFamily="ui-sans-serif, system-ui" className="tabular-nums">
-        {min.toFixed(2)}
-      </text>
-      {showTimeline ? (
-        <>
-          <text x="18" y="42" fill="#A0A7B4" fontSize="3.8" fontFamily="ui-sans-serif, system-ui">近8日</text>
-          <text x="82" y="42" fill="#A0A7B4" fontSize="3.8" fontFamily="ui-sans-serif, system-ui">最新</text>
-        </>
-      ) : null}
-    </svg>
+    </div>
   );
 }
 
@@ -1916,6 +1983,44 @@ function valuesToPoints(values: number[]): string {
       return `${x.toFixed(1)},${y.toFixed(1)}`;
     })
     .join(' ');
+}
+
+function chartGeometry(values: number[]): {
+  points: Array<{ x: number; y: number }>;
+  yForValue: (value: number) => number;
+} {
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+  const yForValue = (value: number): number => 38 - ((value - min) / range) * 30;
+  return {
+    points: values.map((value, index) => ({
+      x: (index / Math.max(1, values.length - 1)) * 96 + 2,
+      y: yForValue(value),
+    })),
+    yForValue,
+  };
+}
+
+function pointChangePct(values: number[], index: number): number {
+  const current = values[index];
+  if (typeof current !== 'number') return 0;
+  const previous = index > 0 ? values[index - 1] : values[0];
+  if (!previous) return 0;
+  return ((current - previous) / previous) * 100;
+}
+
+function stockDisplayPoint(stock: StockSnapshot, hoverIndex: number | null): { price: string; changePct: number } {
+  if (hoverIndex === null || stock.spark.length === 0) {
+    return { price: stock.price, changePct: stock.changePct };
+  }
+  const clamped = Math.max(0, Math.min(stock.spark.length - 1, hoverIndex));
+  const value = stock.spark[clamped];
+  if (typeof value !== 'number') return { price: stock.price, changePct: stock.changePct };
+  return {
+    price: value.toFixed(2),
+    changePct: clamped === stock.spark.length - 1 ? stock.changePct : pointChangePct(stock.spark, clamped),
+  };
 }
 
 function stockRangeText(stock: StockSnapshot): string {
