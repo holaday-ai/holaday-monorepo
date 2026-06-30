@@ -1961,22 +1961,27 @@ function MarketMiniChart({
   const tooltipMeta = kind === 'intraday'
     ? `今日 ${formatStockDateLabel(labels[activePoint.index] ?? '')}`
     : `${formatStockDateLabel(labels[activePoint.index] ?? '')} 收盘`;
-  const handlePointerMove = (event: React.PointerEvent<SVGSVGElement>): void => {
+  const updateHoverFromClientX = (svg: SVGSVGElement, clientX: number): void => {
     if (!onHoverRatioChange) return;
-    const svg = event.currentTarget;
     const matrix = svg.getScreenCTM();
     let svgX: number;
     if (matrix) {
       const point = svg.createSVGPoint();
-      point.x = event.clientX;
-      point.y = event.clientY;
+      point.x = clientX;
+      point.y = 0;
       svgX = point.matrixTransform(matrix.inverse()).x;
     } else {
       const rect = svg.getBoundingClientRect();
-      svgX = ((event.clientX - rect.left) / Math.max(1, rect.width)) * 100;
+      svgX = ((clientX - rect.left) / Math.max(1, rect.width)) * 100;
     }
     const ratio = (svgX - chart.left) / Math.max(1, chart.right - chart.left);
     onHoverRatioChange(Math.max(0, Math.min(1, ratio)));
+  };
+  const handlePointerMove = (event: React.PointerEvent<SVGSVGElement>): void => {
+    updateHoverFromClientX(event.currentTarget, event.clientX);
+  };
+  const handleMouseMove = (event: React.MouseEvent<SVGSVGElement>): void => {
+    updateHoverFromClientX(event.currentTarget, event.clientX);
   };
   const handlePointerLeave = (): void => onHoverRatioChange?.(null);
   return (
@@ -1989,6 +1994,8 @@ function MarketMiniChart({
         aria-label="真实走势"
         onPointerMove={handlePointerMove}
         onPointerLeave={handlePointerLeave}
+        onMouseMove={handleMouseMove}
+        onMouseLeave={handlePointerLeave}
       >
         <defs>
           <linearGradient id={gradientId} x1="0" x2="0" y1="4" y2="38" gradientUnits="userSpaceOnUse">
