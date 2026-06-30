@@ -166,6 +166,9 @@ const DASHBOARD_FIRST_PAINT_BUDGET_MS = 5_500;
 const DASHBOARD_AKSHARE_TIMEOUT_MS = 8_000;
 const DASHBOARD_SLOW_SIGNAL_TIMEOUT_MS = 90_000;
 const DASHBOARD_RANKING_TIMEOUT_MS = 75_000;
+const NEWS_LIMIT = 12;
+const NEWS_ANNOUNCEMENT_LIMIT = 7;
+const NEWS_PER_STOCK_ANNOUNCEMENTS = 3;
 const dashboardCache = new Map<string, DashboardCacheEntry>();
 
 function stock(
@@ -710,13 +713,14 @@ function buildNews(
 ): NewsSnapshot[] {
   const pulse = pulseEnv.data[0];
   const sector = pulse?.sectors_up?.[0];
-  const rows: NewsSnapshot[] = [];
+  const announcementRows: NewsSnapshot[] = [];
+  const marketRows: NewsSnapshot[] = [];
   for (const item of announcements) {
     if (item.env.error) continue;
-    for (const row of item.env.data.slice(0, 2)) {
+    for (const row of item.env.data.slice(0, NEWS_PER_STOCK_ANNOUNCEMENTS)) {
       const title = String(pick(row, ['公告标题']) ?? '').trim();
       if (!title) continue;
-      rows.push({
+      announcementRows.push({
         category: '公告',
         time: formatAnnouncementTime(pick(row, ['公告时间'])),
         title: `${item.entry.displayName ?? item.entry.symbol}：${title}`,
@@ -727,7 +731,7 @@ function buildNews(
     }
   }
   if (sector) {
-    rows.push({
+    marketRows.push({
       category: '盘面',
       time: '盘中',
       title: `${sector.板块} 板块位居涨幅前列，领涨股 ${sector.领涨股 || '暂缺'}`,
@@ -736,8 +740,8 @@ function buildNews(
     });
   }
   const realQuoteStocks = stocks.filter((stockRow) => stockRow.price !== '—' && stockRow.note.includes('来源 AkShare'));
-  for (const stockRow of realQuoteStocks.slice(0, 4)) {
-    rows.push({
+  for (const stockRow of realQuoteStocks.slice(0, NEWS_LIMIT)) {
+    marketRows.push({
       category: '关注',
       time: '关注',
       title: `${stockRow.name} 今日涨跌幅 ${stockRow.changePct > 0 ? '+' : ''}${stockRow.changePct.toFixed(2)}%`,
@@ -745,7 +749,11 @@ function buildNews(
       source: 'AkShare 行情',
     });
   }
-  return rows.slice(0, 5);
+  const rows = [
+    ...announcementRows.slice(0, NEWS_ANNOUNCEMENT_LIMIT),
+    ...marketRows,
+  ].slice(0, NEWS_LIMIT);
+  return rows;
 }
 
 async function buildDashboardSnapshot(args: {

@@ -749,11 +749,20 @@ function DiscoveryPanel({
   onOpenNews: (index: number) => void;
 }): JSX.Element {
   const pageSize = 3;
+  const [activeType, setActiveType] = React.useState<'全部' | '新闻' | '公告'>('全部');
   const [page, setPage] = React.useState(0);
-  const pageCount = Math.max(1, Math.ceil(news.length / pageSize));
+  const indexedNews = React.useMemo(
+    () => news.map((item, index) => ({ item, index })),
+    [news],
+  );
+  const filteredNews = React.useMemo(
+    () => indexedNews.filter(({ item }) => activeType === '全部' || newsDisplayType(item) === activeType),
+    [activeType, indexedNews],
+  );
+  const pageCount = Math.max(1, Math.ceil(filteredNews.length / pageSize));
   const safePage = Math.min(page, pageCount - 1);
   const start = safePage * pageSize;
-  const items = news.slice(start, start + pageSize);
+  const items = filteredNews.slice(start, start + pageSize);
   const announcementCount = news.filter((item) => newsDisplayType(item) === '公告').length;
   const marketNewsCount = news.length - announcementCount;
 
@@ -761,8 +770,17 @@ function DiscoveryPanel({
     if (safePage !== page) setPage(safePage);
   }, [page, safePage]);
 
+  React.useEffect(() => {
+    setPage(0);
+  }, [activeType]);
+
   const goPrevious = (): void => setPage((current) => Math.max(0, current - 1));
   const goNext = (): void => setPage((current) => Math.min(pageCount - 1, current + 1));
+  const tabItems = [
+    { label: '全部' as const, count: news.length },
+    { label: '新闻' as const, count: marketNewsCount },
+    { label: '公告' as const, count: announcementCount },
+  ];
 
   return (
     <section className="rounded-[8px] border border-[#E1E3E8] bg-white p-4 shadow-[0_8px_24px_rgba(18,24,38,0.035)]">
@@ -770,30 +788,59 @@ function DiscoveryPanel({
         title="发现"
         meta={news.length > 0 ? `${marketNewsCount} 条新闻 · ${announcementCount} 条公告` : '等待真实来源'}
         action={news.length > 0 ? '查看详情' : undefined}
-        onAction={news.length > 0 ? () => onOpenNews(0) : undefined}
+        onAction={filteredNews.length > 0 ? () => onOpenNews(filteredNews[0]!.index) : undefined}
       />
+      {news.length > 0 ? (
+        <div className="mt-3 flex flex-wrap items-center gap-2 border-b border-[#F1F2F5] pb-3">
+          {tabItems.map((tab) => (
+            <button
+              key={tab.label}
+              type="button"
+              disabled={tab.count === 0}
+              onClick={() => setActiveType(tab.label)}
+              className={cn(
+                'inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-[12px] font-medium transition',
+                activeType === tab.label
+                  ? 'border-[#EA1F59]/30 bg-[#FFF4F7] text-[#EA1F59]'
+                  : 'border-[#E1E3E8] bg-white text-[#667085] hover:border-[#C9CDD6] hover:text-[#121826]',
+                tab.count === 0 && 'cursor-not-allowed opacity-45',
+              )}
+            >
+              {tab.label}
+              <span className={cn(
+                'tabular-nums',
+                activeType === tab.label ? 'text-[#EA1F59]/80' : 'text-[#8B92A1]',
+              )}>
+                {tab.count}
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : null}
       {news.length === 0 ? (
         <EmptyState title="暂无真实股市新闻" body="公告、市场脉冲和自选股行情暂未返回可展示内容。" />
+      ) : filteredNews.length === 0 ? (
+        <EmptyState title={`暂无${activeType}`} body="当前分类没有可展示的真实内容，切换到全部可查看其他来源动态。" />
       ) : null}
       {items.length > 0 ? (
         <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
-          {items.map((item, index) => (
+          {items.map(({ item, index }, cardIndex) => (
             <article
-              key={`${item.time}-${item.title}`}
+              key={`${index}-${item.time}-${item.title}`}
               role="button"
               tabIndex={0}
-              onClick={() => onOpenNews(start + index)}
+              onClick={() => onOpenNews(index)}
               onKeyDown={(event) => {
                 if (event.key === 'Enter' || event.key === ' ') {
                   event.preventDefault();
-                  onOpenNews(start + index);
+                  onOpenNews(index);
                 }
               }}
               className="group min-w-0 overflow-hidden rounded-[8px] border border-[#E7E7EB] bg-white text-left shadow-[0_10px_24px_rgba(18,24,38,0.04)] transition hover:-translate-y-0.5 hover:border-[#EA1F59]/25 hover:shadow-[0_16px_32px_rgba(18,24,38,0.08)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20 motion-reduce:hover:translate-y-0"
             >
               <div
                 className="relative h-[150px] bg-[#EEF1F6] bg-cover bg-center"
-                style={{ backgroundImage: `linear-gradient(180deg, rgba(18,24,38,0.04), rgba(18,24,38,0.22)), url(${newsImage(item, start + index)})` }}
+                style={{ backgroundImage: `linear-gradient(180deg, rgba(18,24,38,0.04), rgba(18,24,38,0.22)), url(${newsImage(item, index + cardIndex)})` }}
               >
                 <div className="absolute left-3 top-3 flex items-center gap-2">
                   <span className={cn(
@@ -847,7 +894,7 @@ function DiscoveryPanel({
           ))}
         </div>
       ) : null}
-      {news.length > pageSize ? (
+      {filteredNews.length > pageSize ? (
         <div className="mt-4 flex items-center justify-between gap-3">
           <button
             type="button"
