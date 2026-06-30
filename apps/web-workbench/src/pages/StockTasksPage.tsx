@@ -914,12 +914,12 @@ function StockHighlightCard({ stock, marketIndex }: { stock: StockSnapshot; mark
             </div>
           )}
           <p className="mt-3 text-[13px] leading-relaxed text-[#667085]">
-            {stockNarrative(stock)}
+            {stockNarrative(stock, marketIndex)}
           </p>
         </div>
         <div className="grid min-w-0 grid-cols-2 gap-x-4 gap-y-3 self-start border-t border-[#F0F1F4] pt-3 lg:block lg:border-l lg:border-t-0 lg:pl-4 lg:pt-1">
           <StockRailMetric label="支撑 / 压力" value={stockRangeText(stock)} />
-          <StockRailMetric label="日内位置" value={stockPositionText(stock)} tone={stockPositionTone(stock)} />
+          <StockRailMetric label="价格位置" value={stockPositionText(stock)} meta={stockPositionMeta(stock)} tone={stockPositionTone(stock)} />
           <StockRailMetric label="成交额" value={stockTurnoverText(stock)} />
           <StockRailMetric label="量能" value={stockVolumeSignalText(stock)} meta={stockVolumeMeta(stock)} tone={stockVolumeTone(stock)} />
           <StockRailMetric label="市场" value={marketContextText(marketIndex)} meta={marketContextMeta(marketIndex)} tone={marketContextTone(marketIndex)} />
@@ -2079,7 +2079,7 @@ function MarketMiniChart({
             transform: 'translateY(-50%)',
           }}
         >
-          {kind === 'intraday' ? '前次收盘' : '首日收盘'}: {baseline.toFixed(2)}
+          虚线={kind === 'intraday' ? '昨收' : '首日收盘'}: {baseline.toFixed(2)}
         </div>
       ) : null}
       {showTimeline ? (
@@ -2345,8 +2345,8 @@ function stockVolumeSignalText(stock: StockSnapshot): string {
 }
 
 function stockVolumeMeta(stock: StockSnapshot): string {
-  if (typeof stock.volumeRatio !== 'number' || !Number.isFinite(stock.volumeRatio)) return '等待均量';
-  return `约 ${stock.volumeRatio.toFixed(2)}x 近均量`;
+  if (typeof stock.volumeRatio !== 'number' || !Number.isFinite(stock.volumeRatio)) return '近7日均量待补齐';
+  return `今日成交量 / 近7日均量 = ${stock.volumeRatio.toFixed(2)}x`;
 }
 
 function stockVolumeTone(stock: StockSnapshot): 'neutral' | 'red' | 'green' | 'muted' {
@@ -2363,29 +2363,52 @@ function stockPositionText(stock: StockSnapshot): string {
   const range = max - min;
   if (range <= 0) return '区间持平';
   const pct = ((latest - min) / range) * 100;
-  if (pct >= 78) return '接近高位';
-  if (pct <= 22) return '接近低位';
-  return '区间中部';
+  const scope = stock.sparkKind === 'intraday' ? '今日' : '近8日';
+  if (pct >= 78) return `靠近${scope}高点`;
+  if (pct <= 22) return `靠近${scope}低点`;
+  return `${scope}区间中段`;
+}
+
+function stockPositionMeta(stock: StockSnapshot): string {
+  return stock.sparkKind === 'intraday'
+    ? '按今日低点到高点计算'
+    : '按近8日收盘低高计算';
 }
 
 function stockPositionTone(stock: StockSnapshot): 'neutral' | 'red' | 'green' {
   const position = stockPositionText(stock);
-  if (position === '接近高位') return 'red';
-  if (position === '接近低位') return 'green';
+  if (position.includes('高点')) return 'red';
+  if (position.includes('低点')) return 'green';
   return 'neutral';
 }
 
-function stockNarrative(stock: StockSnapshot): string {
+function stockNarrative(stock: StockSnapshot, marketIndex: IndexRow | null): string {
   if (stock.price === '—') {
     return `${stock.name} 已在关注列表中，但当前行情源尚未返回真实价格。Holaday 不会用模拟走势填充，建议稍后刷新或先查看公告来源。`;
   }
-  const direction = stock.changePct >= 0 ? '上涨' : '下跌';
-  const range = stockRangeText(stock);
+  const direction = stock.changePct >= 0 ? '上涨' : '回落';
   const position = stockPositionText(stock);
-  const turnover = stockTurnoverText(stock);
-  const volume = stockVolumeSignalText(stock);
-  const rangeScope = stock.sparkKind === 'intraday' ? '今日支撑/压力' : '近 8 日收盘区间';
-  return `${stock.name} 最新价 ${stock.price}，今日${direction} ${Math.abs(stock.changePct).toFixed(2)}%；成交额 ${turnover}，量能${volume}，${rangeScope} ${range}，当前${position}。详细拆解可生成日报。`;
+  const volume = stockVolumeSummary(stock);
+  const market = marketSummary(marketIndex, stock);
+  return `${stock.name} 今日${direction} ${Math.abs(stock.changePct).toFixed(2)}%，价格仍在${position}；${volume}。${market}详细原因和公告影响可生成日报。`;
+}
+
+function stockVolumeSummary(stock: StockSnapshot): string {
+  if (stock.volumeSignal === '放量') return '成交活跃度高于近7日均量，说明今天参与度放大';
+  if (stock.volumeSignal === '缩量') return '成交活跃度低于近7日均量，说明今天参与度偏弱';
+  if (stock.volumeSignal === '接近均量') return '成交活跃度接近近7日均量，暂未出现明显放量';
+  return '量能基准仍在补齐，暂不判断成交活跃度';
+}
+
+function marketSummary(index: IndexRow | null, stock: StockSnapshot): string {
+  if (!index) return '大盘环境暂未补齐，先只看个股真实行情。';
+  const stockWeakWhileMarketUp = index.changePct > 0.3 && stock.changePct < 0;
+  const stockStrongWhileMarketDown = index.changePct < -0.3 && stock.changePct > 0;
+  if (stockWeakWhileMarketUp) return '大盘偏强但个股未同步走强，需要结合公告和行业原因继续拆解。';
+  if (stockStrongWhileMarketDown) return '大盘偏弱但个股相对抗跌，需要结合公告和资金热度继续拆解。';
+  if (index.changePct > 0.3) return '大盘环境偏强，个股表现需继续和行业板块一起看。';
+  if (index.changePct < -0.3) return '大盘环境偏弱，个股波动需要放在市场风险里看。';
+  return '大盘整体较平稳，个股自身消息和成交变化更值得继续看。';
 }
 
 function marketContextText(index: IndexRow | null): string {
@@ -2394,8 +2417,8 @@ function marketContextText(index: IndexRow | null): string {
 }
 
 function marketContextMeta(index: IndexRow | null): string {
-  if (!index || !index.turnover || index.turnover === '—') return '指数环境';
-  return index.turnover;
+  if (!index || !index.turnover || index.turnover === '—') return '指数成交额待补齐';
+  return `成交额 ${index.turnover}`;
 }
 
 function marketContextTone(index: IndexRow | null): 'neutral' | 'red' | 'green' | 'muted' {
