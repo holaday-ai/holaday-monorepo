@@ -462,6 +462,105 @@ describe('stocks dashboard snapshot', () => {
     expect(snapshot.freshness.message).toContain('最近一次真实数据');
   });
 
+  it('does not serve an empty stale cache when quick real intraday data is available', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/index/cn') {
+        return new Response(JSON.stringify(envelope([])));
+      }
+      if (url.pathname === '/kline/603528') {
+        return new Response(JSON.stringify(envelope([
+          { 日期: '2026-06-30', 收盘: 5.86, 开盘: 5.8, 最高: 6.01, 最低: 5.8, 成交额: 60_989_093, 涨跌幅: -0.17 },
+        ])));
+      }
+      if (url.pathname === '/intraday/603528') {
+        return new Response(JSON.stringify(envelope([
+          { 时间: '2026-06-30 09:31:00', 最新价: 5.9, 成交量: 158200, 成交额: 928671 },
+          { 时间: '2026-06-30 09:32:00', 最新价: 5.88, 成交量: 159000, 成交额: 936787 },
+          { 时间: '2026-06-30 15:00:00', 最新价: 5.86, 成交量: 26800, 成交额: 157048 },
+        ])));
+      }
+      if (url.pathname === '/quote/603528') {
+        return new Response(JSON.stringify(envelope([])));
+      }
+      throw new Error(`unexpected path ${url.pathname}`);
+    });
+    const emptySnapshot = {
+      updatedAt: '2026-06-30T09:40:00.000Z',
+      source: 'akshare' as const,
+      isFallbackWatchlist: false,
+      watchlistStocks: [
+        {
+          symbol: '603528',
+          name: '多伦科技',
+          market: 'A' as const,
+          price: '—',
+          changePct: 0,
+          signal: '待观察' as const,
+          report: '待生成' as const,
+          spark: [],
+          sparkLabels: [],
+          sparkKind: 'intraday' as const,
+          sparkBaseline: null,
+          turnoverAmount: null,
+          averageTurnoverAmount: null,
+          volume: null,
+          averageVolume: null,
+          volumeRatio: null,
+          volumeSignal: '待观察' as const,
+          newsCount: 0,
+          note: '真实行情暂不可用，未展示走势线',
+        },
+      ],
+      marketIndices: [],
+      sectors: [],
+      starStocks: [],
+      temperature: null,
+      news: [],
+      leaders: [],
+      leaderboards: { gainers: [], losers: [], amount: [] },
+      freshness: {
+        status: 'partial' as const,
+        cachedAt: '2026-06-30T09:40:00.000Z',
+      },
+    };
+    __stocksDashboardTest.dashboardCache.set('1:603528:A:多伦科技', {
+      snapshot: emptySnapshot,
+      freshUntil: Date.now() + 60_000,
+      staleUntil: Date.now() + 60_000,
+    });
+    const fakeDb = {
+      select: vi.fn(() => ({
+        from: () => ({
+          where: () => ({
+            limit: async () => [],
+          }),
+        }),
+      })),
+      insert: vi.fn(() => ({
+        values: () => ({
+          onDuplicateKeyUpdate: async () => undefined,
+        }),
+      })),
+    };
+
+    const snapshot = await __stocksDashboardTest.resolveDashboardSnapshot({
+      db: fakeDb as never,
+      logger: { warn: vi.fn() },
+      userInternalId: 1,
+      watchlistRows: [{ symbol: '603528', market: 'A', displayName: '多伦科技' }],
+      effectiveWatchlist: [{ symbol: '603528', market: 'A', displayName: '多伦科技' }],
+    });
+
+    expect(snapshot.watchlistStocks[0]).toMatchObject({
+      symbol: '603528',
+      price: '5.86',
+      changePct: -0.17,
+      spark: [5.9, 5.88, 5.86],
+      sparkKind: 'intraday',
+    });
+  });
+
   it('preserves sectors when a refresh keeps temperature but loses industry rankings', () => {
     const previous = {
       updatedAt: '2026-06-29T12:00:00.000Z',

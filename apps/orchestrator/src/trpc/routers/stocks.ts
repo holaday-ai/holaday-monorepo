@@ -993,7 +993,7 @@ function startDashboardRefresh(args: {
 }): Promise<DashboardSnapshot> {
   const existing = dashboardCache.get(args.cacheKey);
   if (existing?.refreshPromise) return existing.refreshPromise;
-  const quickFirst = !existing?.snapshot;
+  const quickFirst = !existing?.snapshot || !hasDisplayableRealDashboardData(existing.snapshot);
 
   const refreshPromise = buildDashboardSnapshot({
     logger: args.logger,
@@ -1078,7 +1078,8 @@ async function resolveDashboardSnapshot(args: {
     }
   }
   const nowMs = Date.now();
-  if (cached?.snapshot && cached.freshUntil > nowMs) return cached.snapshot;
+  const cachedHasDisplayableData = cached?.snapshot ? hasDisplayableRealDashboardData(cached.snapshot) : false;
+  if (cached?.snapshot && cachedHasDisplayableData && cached.freshUntil > nowMs) return cached.snapshot;
 
   const refreshPromise = startDashboardRefresh({
     db: args.db,
@@ -1089,7 +1090,7 @@ async function resolveDashboardSnapshot(args: {
     effectiveWatchlist: args.effectiveWatchlist,
   });
 
-  if (cached?.snapshot && cached.staleUntil > nowMs) {
+  if (cached?.snapshot && cachedHasDisplayableData && cached.staleUntil > nowMs) {
     refreshPromise.catch(() => undefined);
     return markStale(cached.snapshot, '正在后台刷新行情，当前展示最近一次真实数据。');
   }
@@ -1097,7 +1098,7 @@ async function resolveDashboardSnapshot(args: {
   try {
     return await withTimeout(refreshPromise, DASHBOARD_FIRST_PAINT_BUDGET_MS);
   } catch {
-    if (cached?.snapshot) {
+    if (cached?.snapshot && cachedHasDisplayableData) {
       return markStale(cached.snapshot, '行情接口暂未返回，当前展示最近一次真实数据。');
     }
     return buildPartialDashboardSnapshot(args.watchlistRows, args.effectiveWatchlist);
