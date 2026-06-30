@@ -67,6 +67,7 @@ def _safe(fn: Callable[..., tuple[list[dict[str, Any]], str]], *args: Any, **kwa
 
 # Cached fetches — one TTL per interface (the plan's "每个接口加缓存层").
 _quote = cached(adp.TTL_QUOTE)(adp.get_quote)
+_intraday = cached(adp.TTL_INTRADAY)(adp.get_intraday)
 _kline = cached(adp.TTL_KLINE)(adp.get_kline)
 _announce = cached(adp.TTL_ANNOUNCE)(adp.get_announcements)
 _lhb = cached(adp.TTL_LHB)(adp.get_dragon_tiger)
@@ -83,6 +84,12 @@ def get_stock_quote(symbol: str) -> dict[str, Any]:
     仅聚合公开行情，不构成投资建议。
     """
     return _safe(_quote, symbol)
+
+
+@mcp.tool()
+def get_stock_intraday(symbol: str) -> dict[str, Any]:
+    """A股个股真实分钟线。只返回数据源实际分钟点，不补齐、不外推。"""
+    return _safe(_intraday, symbol)
 
 
 @mcp.tool()

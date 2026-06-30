@@ -21,6 +21,7 @@ import type {
   FundamentalsRow,
   GoodwillRow,
   IndexRow,
+  IntradayRow,
   InsiderChangeRow,
   KlineRow,
   MarketPulseRow,
@@ -66,6 +67,8 @@ export interface AkshareClient {
    * **days>0** → 近 days 交易日 raw 序列（P3 F走势 本地算，同源不新增数据）。
    */
   getStockKline(symbol: string, days?: number): Promise<AkEnvelope<KlineRow>>;
+  /** get_stock_intraday(symbol) — 真实分钟线；只返回实际分钟点，不补齐、不外推。 */
+  getStockIntraday(symbol: string): Promise<AkEnvelope<IntradayRow>>;
   /** get_dragon_tiger(startDate) — 龙虎榜明细（startDate 'YYYYMMDD'）。 */
   getDragonTiger(startDate: string): Promise<AkEnvelope<DragonTigerRow>>;
   /** get_northbound_flow() — 北向资金汇总。 */
@@ -135,6 +138,9 @@ export class StubAkshareClient implements AkshareClient {
   }
   getStockKline(symbol: string, _days?: number) {
     return Promise.resolve(this.err<KlineRow>(`akshare:kline(${symbol})`, this.now()));
+  }
+  getStockIntraday(symbol: string) {
+    return Promise.resolve(this.err<IntradayRow>(`akshare:intraday(${symbol})`, this.now()));
   }
   getDragonTiger(startDate: string) {
     return Promise.resolve(

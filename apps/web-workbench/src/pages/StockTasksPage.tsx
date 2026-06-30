@@ -49,6 +49,7 @@ interface StockSnapshot {
   spark: number[];
   sparkLabels?: string[];
   sparkKind?: 'daily_close' | 'intraday';
+  sparkBaseline?: number | null;
   newsCount: number;
   note: string;
 }
@@ -881,6 +882,7 @@ function StockHighlightCard({ stock }: { stock: StockSnapshot }): JSX.Element {
               values={stock.spark}
               labels={stock.sparkLabels ?? []}
               kind={chartKind}
+              baselineValue={stock.sparkBaseline ?? null}
               latestChangePct={stock.changePct}
               className="mt-4 h-[218px] w-full"
               hoverRatio={hoverRatio}
@@ -897,7 +899,7 @@ function StockHighlightCard({ stock }: { stock: StockSnapshot }): JSX.Element {
           </p>
         </div>
         <div className="grid min-w-0 grid-cols-2 gap-x-4 gap-y-3 self-start border-t border-[#F0F1F4] pt-3 lg:block lg:border-l lg:border-t-0 lg:pl-4 lg:pt-1">
-          <StockRailMetric label="8日区间" value={stockRangeText(stock)} />
+          <StockRailMetric label={chartKind === 'intraday' ? '今日区间' : '8日区间'} value={stockRangeText(stock)} />
           <StockRailMetric label="区间位置" value={stockPositionText(stock)} tone={stock.changePct >= 0 ? 'red' : 'green'} />
           <StockRailMetric label="关注源" value={`${stock.newsCount} 条`} />
           <StockRailMetric label="日报状态" value={stock.report} />
@@ -1877,6 +1879,7 @@ function MarketMiniChart({
   values,
   labels,
   kind,
+  baselineValue,
   latestChangePct,
   className,
   hoverRatio,
@@ -1886,6 +1889,7 @@ function MarketMiniChart({
   values: number[];
   labels: string[];
   kind: 'daily_close' | 'intraday';
+  baselineValue?: number | null;
   latestChangePct: number;
   className?: string;
   hoverRatio?: number | null;
@@ -1893,28 +1897,33 @@ function MarketMiniChart({
   showTimeline?: boolean;
 }): JSX.Element {
   const gradientId = React.useId();
-  const chart = chartGeometry(values);
+  const baseline = typeof baselineValue === 'number' && Number.isFinite(baselineValue) ? baselineValue : values[0] ?? Math.max(...values);
+  const xRatios = kind === 'intraday' ? intradayXRatios(labels, values.length) : undefined;
+  const chart = chartGeometry(values, [baseline], xRatios);
   const points = chart.points.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(' ');
   const linePath = smoothPathFromPoints(chart.points);
-  const areaPath = linePath ? `${linePath} L ${chart.right} 38 L ${chart.left} 38 Z` : '';
+  const firstPoint = chart.points[0];
+  const lastPoint = chart.points[chart.points.length - 1];
+  const areaPath = linePath && firstPoint && lastPoint
+    ? `${linePath} L ${lastPoint.x.toFixed(2)} 38 L ${firstPoint.x.toFixed(2)} 38 Z`
+    : '';
   const min = Math.min(...values);
   const max = Math.max(...values);
   const mid = min + (max - min) / 2;
   const activeRatio = hoverRatio ?? 1;
   const activePoint = kind === 'intraday'
-    ? interpolatedChartPoint(values, chart, activeRatio, latestChangePct)
-    : sampledChartPoint(values, chart, activeRatio, latestChangePct);
+    ? interpolatedChartPoint(values, chart, activeRatio, latestChangePct, baseline)
+    : sampledChartPoint(values, chart, activeRatio, latestChangePct, baseline);
   const activeValue = activePoint.value;
   const activeChangePct = activePoint.changePct;
   const positive = activeChangePct >= 0;
   const strokeFallback = latestChangePct >= 0 ? MARKET_UP_STROKE : MARKET_DOWN_STROKE;
-  const baseline = values[0] ?? activeValue;
   const baselineY = chart.yForValue(baseline);
   const baselinePct = Math.max(0, Math.min(100, (baselineY / 48) * 100));
   const showHover = hoverRatio !== null;
   const axisTicks = chartAxisTicks(labels, kind);
   const tooltipMeta = kind === 'intraday'
-    ? `今日 ${intradayTimeLabel(activeRatio)}`
+    ? `今日 ${formatStockDateLabel(labels[activePoint.index] ?? '')}`
     : `${formatStockDateLabel(labels[activePoint.index] ?? '')} 收盘`;
   const handlePointerMove = (event: React.PointerEvent<SVGSVGElement>): void => {
     if (!onHoverRatioChange) return;
@@ -2084,7 +2093,7 @@ function valuesToPoints(values: number[]): string {
     .join(' ');
 }
 
-function chartGeometry(values: number[]): {
+function chartGeometry(values: number[], extraValues: number[] = [], xRatios?: number[]): {
   points: Array<{ x: number; y: number }>;
   yForValue: (value: number) => number;
   left: number;
@@ -2092,13 +2101,14 @@ function chartGeometry(values: number[]): {
 } {
   const left = 8;
   const right = 98;
-  const min = Math.min(...values);
-  const max = Math.max(...values);
+  const domainValues = [...values, ...extraValues.filter((value) => Number.isFinite(value))];
+  const min = Math.min(...domainValues);
+  const max = Math.max(...domainValues);
   const range = max - min || 1;
   const yForValue = (value: number): number => 38 - ((value - min) / range) * 30;
   return {
     points: values.map((value, index) => ({
-      x: (index / Math.max(1, values.length - 1)) * (right - left) + left,
+      x: ((xRatios?.[index] ?? (index / Math.max(1, values.length - 1))) * (right - left)) + left,
       y: yForValue(value),
     })),
     yForValue,
@@ -2133,10 +2143,14 @@ function interpolatedChartPoint(
   chart: ReturnType<typeof chartGeometry>,
   ratio: number,
   latestChangePct: number,
+  baseline: number,
 ): { x: number; y: number; value: number; changePct: number; index: number } {
   const clamped = Math.max(0, Math.min(1, ratio));
+  const targetX = chart.left + clamped * (chart.right - chart.left);
   const latest = values[values.length - 1] ?? 0;
-  if (values.length <= 1) {
+  const firstPoint = chart.points[0];
+  const lastPoint = chart.points[chart.points.length - 1];
+  if (values.length <= 1 || !firstPoint || !lastPoint) {
     return {
       x: chart.left,
       y: chart.yForValue(latest),
@@ -2145,24 +2159,51 @@ function interpolatedChartPoint(
       index: 0,
     };
   }
-  const scaled = clamped * (values.length - 1);
-  const leftIndex = Math.floor(scaled);
+  if (targetX <= firstPoint.x) {
+    const value = values[0] ?? latest;
+    return {
+      x: firstPoint.x,
+      y: firstPoint.y,
+      value,
+      changePct: baseline ? ((value - baseline) / baseline) * 100 : 0,
+      index: 0,
+    };
+  }
+  if (targetX >= lastPoint.x) {
+    return {
+      x: lastPoint.x,
+      y: lastPoint.y,
+      value: latest,
+      changePct: Number.isFinite(latestChangePct)
+        ? latestChangePct
+        : baseline
+          ? ((latest - baseline) / baseline) * 100
+          : 0,
+      index: values.length - 1,
+    };
+  }
+  let leftIndex = 0;
+  for (let index = 0; index < chart.points.length - 1; index += 1) {
+    const leftPoint = chart.points[index];
+    const rightPoint = chart.points[index + 1];
+    if (leftPoint && rightPoint && targetX >= leftPoint.x && targetX <= rightPoint.x) {
+      leftIndex = index;
+      break;
+    }
+  }
+  const leftPoint = chart.points[leftIndex] ?? firstPoint;
   const rightIndex = Math.min(values.length - 1, leftIndex + 1);
-  const localRatio = scaled - leftIndex;
+  const rightPoint = chart.points[rightIndex] ?? lastPoint;
+  const localRatio = rightPoint.x === leftPoint.x ? 0 : (targetX - leftPoint.x) / (rightPoint.x - leftPoint.x);
   const leftValue = values[leftIndex] ?? latest;
   const rightValue = values[rightIndex] ?? leftValue;
   const value = leftValue + (rightValue - leftValue) * localRatio;
-  const baseline = values[0] || value;
   return {
-    x: chart.left + clamped * (chart.right - chart.left),
+    x: targetX,
     y: chart.yForValue(value),
     value,
-    changePct: clamped >= 0.999 && Number.isFinite(latestChangePct)
-      ? latestChangePct
-      : baseline
-        ? ((value - baseline) / baseline) * 100
-        : 0,
-    index: Math.round(scaled),
+    changePct: baseline ? ((value - baseline) / baseline) * 100 : 0,
+    index: localRatio >= 0.5 ? rightIndex : leftIndex,
   };
 }
 
@@ -2171,11 +2212,11 @@ function sampledChartPoint(
   chart: ReturnType<typeof chartGeometry>,
   ratio: number,
   latestChangePct: number,
+  baseline: number,
 ): { x: number; y: number; value: number; changePct: number; index: number } {
   const latest = values[values.length - 1] ?? 0;
   const index = Math.max(0, Math.min(values.length - 1, Math.round(Math.max(0, Math.min(1, ratio)) * (values.length - 1))));
   const value = values[index] ?? latest;
-  const baseline = values[0] || value;
   return {
     x: chart.points[index]?.x ?? chart.right,
     y: chart.points[index]?.y ?? chart.yForValue(value),
@@ -2194,18 +2235,15 @@ function chartAxisTicks(
   kind: 'daily_close' | 'intraday',
 ): Array<{ x: number; label: string }> {
   if (kind === 'intraday') {
-    return [
-      { x: 8, label: '9:30' },
-      { x: 31, label: '10:30' },
-      { x: 54, label: '11:30' },
-      { x: 77, label: '14:00' },
-      { x: 98, label: '15:00' },
-    ];
+    return ['09:30', '10:30', '11:30', '14:00', '15:00'].map((label) => ({
+      x: 8 + (intradaySessionRatioFromLabel(label) ?? 0) * 90,
+      label: label.replace(/^0/, ''),
+    }));
   }
   if (labels.length === 0) {
     return [
       { x: 8, label: '首日' },
-      { x: 98, label: '最新' },
+      { x: 98, label: '末日' },
     ];
   }
   const last = labels.length - 1;
@@ -2222,29 +2260,51 @@ function chartAxisTicks(
 
 function formatStockDateLabel(value: string): string {
   const trimmed = value.trim();
+  const timeMatch = /(\d{1,2}):(\d{2})/.exec(trimmed);
+  if (timeMatch) return `${timeMatch[1]}:${timeMatch[2]}`;
   const match = /^(\d{4})[-/]?(\d{2})[-/]?(\d{2})$/.exec(trimmed);
   if (!match) return trimmed || '—';
   return `${match[2]}-${match[3]}`;
 }
 
-function intradayTimeLabel(ratio: number): string {
-  const clamped = Math.max(0, Math.min(1, ratio));
+function intradayXRatios(labels: string[], valueCount: number): number[] | undefined {
+  if (valueCount <= 1) return undefined;
+  const ratios = labels.slice(0, valueCount).map(intradaySessionRatioFromLabel);
+  if (ratios.length !== valueCount || ratios.some((ratio) => ratio === null)) return undefined;
+  for (let index = 1; index < ratios.length; index += 1) {
+    const current = ratios[index];
+    const previous = ratios[index - 1];
+    if (current === null || previous === null || current < previous) return undefined;
+  }
+  return ratios as number[];
+}
+
+function intradaySessionRatioFromLabel(label: string): number | null {
+  const match = /(\d{1,2}):(\d{2})/.exec(label);
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
   const startMinutes = 9 * 60 + 30;
   const endMinutes = 15 * 60;
-  const minutes = Math.round((startMinutes + (endMinutes - startMinutes) * clamped) / 5) * 5;
-  const hour = Math.floor(minutes / 60);
-  const minute = minutes % 60;
-  return `${hour}:${String(minute).padStart(2, '0')}`;
+  const minutes = Math.max(startMinutes, Math.min(endMinutes, hour * 60 + minute));
+  return (minutes - startMinutes) / (endMinutes - startMinutes);
 }
 
 function stockDisplayPoint(stock: StockSnapshot, hoverRatio: number | null): { price: string; changePct: number } {
   if (hoverRatio === null || stock.spark.length === 0) {
     return { price: stock.price, changePct: stock.changePct };
   }
-  const chart = chartGeometry(stock.spark);
+  const baseline = typeof stock.sparkBaseline === 'number' && Number.isFinite(stock.sparkBaseline)
+    ? stock.sparkBaseline
+    : stock.spark[0] ?? 0;
+  const xRatios = stock.sparkKind === 'intraday'
+    ? intradayXRatios(stock.sparkLabels ?? [], stock.spark.length)
+    : undefined;
+  const chart = chartGeometry(stock.spark, [baseline], xRatios);
   const point = stock.sparkKind === 'intraday'
-    ? interpolatedChartPoint(stock.spark, chart, hoverRatio, stock.changePct)
-    : sampledChartPoint(stock.spark, chart, hoverRatio, stock.changePct);
+    ? interpolatedChartPoint(stock.spark, chart, hoverRatio, stock.changePct, baseline)
+    : sampledChartPoint(stock.spark, chart, hoverRatio, stock.changePct, baseline);
   return {
     price: point.value.toFixed(2),
     changePct: point.changePct,
@@ -2286,7 +2346,8 @@ function stockNarrative(stock: StockSnapshot): string {
   const range = stockRangeText(stock);
   const position = stockPositionText(stock);
   const followup = stockFollowupText(stock);
-  return `${stock.name} 最新价 ${stock.price}，今日${direction} ${Math.abs(stock.changePct).toFixed(2)}%。近 8 个交易日区间为 ${range}，当前${position}；下一步优先${followup}，再决定是否生成专属日报继续追问。`;
+  const rangeScope = stock.sparkKind === 'intraday' ? '今日已返回分钟线区间' : '近 8 个交易日收盘区间';
+  return `${stock.name} 最新价 ${stock.price}，今日${direction} ${Math.abs(stock.changePct).toFixed(2)}%。${rangeScope}为 ${range}，当前${position}；下一步优先${followup}，再决定是否生成专属日报继续追问。`;
 }
 
 function dashboardHasDisplayableData(snapshot: DashboardSnapshot | null): boolean {

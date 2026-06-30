@@ -38,6 +38,13 @@ describe('stocks dashboard snapshot', () => {
           { 日期: '2026-06-29', 收盘: 7.28, 涨跌幅: 2.39 },
         ])));
       }
+      if (url.pathname === '/intraday/603528') {
+        return new Response(JSON.stringify(envelope([
+          { 时间: '2026-06-29 09:30:00', 最新价: 7.22, 成交量: 1200 },
+          { 时间: '2026-06-29 09:31:00', 最新价: 7.25, 成交量: 1600 },
+          { 时间: '2026-06-29 09:32:00', 最新价: 7.28, 成交量: 1800 },
+        ])));
+      }
       if (url.pathname.startsWith('/announcements/')) {
         return new Response(JSON.stringify(envelope([])));
       }
@@ -63,9 +70,10 @@ describe('stocks dashboard snapshot', () => {
       name: '多伦科技',
       price: '7.28',
       changePct: 2.39,
-      spark: [7.11, 7.28],
-      sparkLabels: ['2026-06-26', '2026-06-29'],
-      sparkKind: 'daily_close',
+      spark: [7.22, 7.25, 7.28],
+      sparkLabels: ['2026-06-29 09:30:00', '2026-06-29 09:31:00', '2026-06-29 09:32:00'],
+      sparkKind: 'intraday',
+      sparkBaseline: 7.11,
     });
     expect(snapshot.leaderboards.gainers[0]?.name).toBe('兆易创新');
     expect(requestedPaths.some((path) => path.startsWith('/market-pulse'))).toBe(false);

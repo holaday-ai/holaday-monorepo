@@ -16,6 +16,7 @@ import type {
   FundamentalsRow,
   GoodwillRow,
   IndexRow,
+  IntradayRow,
   InsiderChangeRow,
   KlineRow,
   MarketPulseRow,
@@ -126,6 +127,9 @@ export class HttpAkshareClient implements AkshareClient {
   getStockKline(symbol: string, days?: number) {
     const qs = days && days > 0 ? `?days=${days}` : '';
     return this.get<KlineRow>(`/kline/${encodeURIComponent(symbol)}${qs}`);
+  }
+  getStockIntraday(symbol: string) {
+    return this.get<IntradayRow>(`/intraday/${encodeURIComponent(symbol)}`);
   }
   getDragonTiger(startDate: string) {
     return this.get<DragonTigerRow>(`/dragon-tiger/${encodeURIComponent(startDate)}`);

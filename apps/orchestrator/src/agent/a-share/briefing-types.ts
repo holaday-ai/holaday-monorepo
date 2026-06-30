@@ -48,6 +48,15 @@ export interface KlineRow {
   [k: string]: unknown;
 }
 
+/** A股真实分钟线行（AkShare 分钟接口；只含实际分钟点，不补齐）。 */
+export interface IntradayRow {
+  时间?: string;
+  最新价?: number;
+  成交量?: number;
+  成交额?: number;
+  [k: string]: unknown;
+}
+
 /** 港/美股指数行。hk: stock_hk_index_spot_em（最新价/涨跌幅）；us: index_us_stock_sina 末行 OHLCV。 */
 export interface IndexRow {
   代码?: string;

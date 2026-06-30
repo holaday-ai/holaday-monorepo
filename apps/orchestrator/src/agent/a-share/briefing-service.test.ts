@@ -51,6 +51,7 @@ function fakeClient(dtSpy?: (d: string) => void): AkshareClient {
       Promise.resolve(PREMARKET_SAMPLE.announcements[s] ?? emptyEnv('ann')),
     getShareUnlock: (s) => Promise.resolve(PREMARKET_SAMPLE.shareUnlock[s] ?? emptyEnv('unlock')),
     getStockKline: (s) => Promise.resolve(POSTMARKET_SAMPLE.dailyKline[s] ?? emptyEnv('kline')),
+    getStockIntraday: () => Promise.resolve(emptyEnv('intraday')),
     getDragonTiger: (d) => {
       dtSpy?.(d);
       return Promise.resolve(PREMARKET_SAMPLE.dragonTiger);

@@ -11,6 +11,7 @@ import type {
   AkEnvelope,
   AnnouncementRow,
   IndexRow,
+  IntradayRow,
   KlineRow,
   MarketPulseRow,
   SectorEntry,
@@ -40,7 +41,8 @@ interface StockSnapshot {
   report: '已生成' | '待生成' | '生成中';
   spark: number[];
   sparkLabels: string[];
-  sparkKind: 'daily_close';
+  sparkKind: 'daily_close' | 'intraday';
+  sparkBaseline: number | null;
   newsCount: number;
   note: string;
 }
@@ -176,6 +178,7 @@ function stock(
     spark: [],
     sparkLabels: [],
     sparkKind: 'daily_close',
+    sparkBaseline: null,
     newsCount: 0,
     note,
   };
@@ -324,6 +327,39 @@ function sparkSeriesFromKline(rows: KlineRow[]): { values: number[]; labels: str
     : { values: [], labels: [] };
 }
 
+function sparkSeriesFromIntraday(rows: IntradayRow[]): { values: number[]; labels: string[] } {
+  const series = rows
+    .map((row) => ({
+      value: toNum(pick(row, ['最新价', '收盘', 'close', 'price'])),
+      label: String(pick(row, ['时间', 'time', 'datetime']) ?? '').trim(),
+    }))
+    .filter((point): point is { value: number; label: string } => point.value !== null && point.label.length > 0);
+  return series.length >= 2
+    ? {
+        values: series.map((point) => point.value),
+        labels: series.map((point) => point.label),
+      }
+    : { values: [], labels: [] };
+}
+
+function previousCloseFromSeries(series: { values: number[]; labels: string[] }, intradayLabel: string | undefined): number | null {
+  if (series.values.length === 0) return null;
+  const intradayDate = datePart(intradayLabel);
+  const lastIndex = series.values.length - 1;
+  const lastDailyDate = datePart(series.labels[lastIndex]);
+  if (intradayDate && lastDailyDate && lastDailyDate >= intradayDate && series.values.length >= 2) {
+    return series.values[lastIndex - 1] ?? null;
+  }
+  return series.values[lastIndex] ?? null;
+}
+
+function datePart(value: string | undefined): string | null {
+  const trimmed = String(value ?? '').trim();
+  const match = /^(\d{4})[-/]?(\d{2})[-/]?(\d{2})/.exec(trimmed);
+  if (!match) return null;
+  return `${match[1]}-${match[2]}-${match[3]}`;
+}
+
 function latestKline(rows: KlineRow[]): KlineRow | null {
   return rows.length > 0 ? rows[rows.length - 1] ?? null : null;
 }
@@ -351,9 +387,10 @@ async function stockSnapshot(
   const fallback = FALLBACK_STOCKS[normalized] ?? fallbackStock(entry, index);
   if (entry.market !== 'A') return unavailableStock(entry, fallback);
 
-  const [dailyEnv, seriesEnv] = await Promise.all([
+  const [dailyEnv, seriesEnv, intradayEnv] = await Promise.all([
     client.getStockKline(entry.symbol),
     client.getStockKline(entry.symbol, 8),
+    client.getStockIntraday(entry.symbol),
   ]);
   if (dailyEnv.error || dailyEnv.data.length === 0) return unavailableStock(entry, fallback);
   const last = latestKline(dailyEnv.data);
@@ -361,6 +398,9 @@ async function stockSnapshot(
   const close = pick(last, ['收盘', 'close', '最新价']);
   const changePct = toNum(pick(last, ['涨跌幅', 'changePct'])) ?? fallback.changePct;
   const sparkSeries = seriesEnv.error ? { values: [], labels: [] } : sparkSeriesFromKline(seriesEnv.data);
+  const intradaySeries = intradayEnv.error ? { values: [], labels: [] } : sparkSeriesFromIntraday(intradayEnv.data);
+  const hasIntraday = intradaySeries.values.length >= 2;
+  const sparkBaseline = hasIntraday ? previousCloseFromSeries(sparkSeries, intradaySeries.labels[0]) : null;
   return {
     ...fallback,
     symbol: entry.symbol,
@@ -369,10 +409,13 @@ async function stockSnapshot(
     price: fmtNum(close, 2),
     changePct: Number(changePct.toFixed(2)),
     signal: signalFromChange(changePct),
-    spark: sparkSeries.values,
-    sparkLabels: sparkSeries.labels,
-    sparkKind: 'daily_close',
-    note: sparkSeries.values.length >= 2
+    spark: hasIntraday ? intradaySeries.values : sparkSeries.values,
+    sparkLabels: hasIntraday ? intradaySeries.labels : sparkSeries.labels,
+    sparkKind: hasIntraday ? 'intraday' : 'daily_close',
+    sparkBaseline,
+    note: hasIntraday
+      ? `来源 AkShare · ${entry.displayName ?? entry.symbol} 今日真实分钟线`
+      : sparkSeries.values.length >= 2
       ? `来源 AkShare · ${entry.displayName ?? entry.symbol} 近 8 个交易日真实收盘价`
       : `来源 AkShare · ${entry.displayName ?? entry.symbol} 最新行情，走势线暂缺`,
   };

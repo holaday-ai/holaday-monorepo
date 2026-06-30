@@ -46,4 +46,8 @@ echo "→ akshare smoke: amount ranking"
 AMOUNT="$(curl_json '/stock-rankings/amount?limit=1' "$RANK_TIMEOUT")"
 require_payload "amount" "$AMOUNT"
 
+echo "→ akshare smoke: intraday minute series"
+INTRADAY="$(curl_json '/intraday/601958' 20)"
+require_payload "intraday" "$INTRADAY"
+
 echo "✅ akshare-mcp smoke OK"

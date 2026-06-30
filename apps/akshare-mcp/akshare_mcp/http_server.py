@@ -46,6 +46,7 @@ def _safe(fn: Callable[..., tuple[list[dict[str, Any]], str]], *args: Any, **kwa
 
 # Cached fetches — one TTL per interface (same as server.py).
 _quote = cached(adp.TTL_QUOTE)(adp.get_quote)
+_intraday = cached(adp.TTL_INTRADAY)(adp.get_intraday)
 _kline = cached(adp.TTL_KLINE)(adp.get_kline)
 _announce = cached(adp.TTL_ANNOUNCE)(adp.get_announcements)
 _lhb = cached(adp.TTL_LHB)(adp.get_dragon_tiger)
@@ -99,6 +100,12 @@ def kline(symbol: str, days: int = 0) -> dict[str, Any]:
 @app.get("/quote/{symbol}")
 def quote(symbol: str) -> dict[str, Any]:
     return _safe(_quote, symbol)
+
+
+@app.get("/intraday/{symbol}")
+def intraday(symbol: str) -> dict[str, Any]:
+    """真实分钟线；仅返回数据源实际分钟点，不补齐、不外推。"""
+    return _safe(_intraday, symbol)
 
 
 @app.get("/stock-rankings/{metric}")

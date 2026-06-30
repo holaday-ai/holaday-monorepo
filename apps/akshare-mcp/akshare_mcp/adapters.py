@@ -62,6 +62,7 @@ def _ttl(name: str, default: int) -> int:
 # 数据只真实拉取一次，其余命中缓存。故简报用到的接口 TTL 全 ≥ 600s(10min)，
 # 覆盖投递窗口（BOSS 要求）。QUOTE(15s) 仅 ④ 即时问答用，保持实时。
 TTL_QUOTE = _ttl("QUOTE", 15)
+TTL_INTRADAY = _ttl("INTRADAY", 15)
 TTL_KLINE = _ttl("KLINE", 600)
 TTL_ANNOUNCE = _ttl("ANNOUNCE", 1800)
 TTL_LHB = _ttl("LHB", 3600)
@@ -298,6 +299,110 @@ def get_kline(
         "涨跌幅": pct_change(prev_close, last.get("close")),
     }
     return [mapped], "akshare:stock_zh_a_daily(sina,末2行算涨跌幅)"
+
+
+def get_intraday(symbol: str) -> tuple[list[dict[str, Any]], str]:
+    """A股真实分钟线。只返回 AkShare 给出的实际分钟点，不补齐、不外推、不造收盘后价格。"""
+    a = _require_ak()
+    cn_today = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).date()
+    today = cn_today.strftime("%Y-%m-%d")
+    start = f"{today} 09:30:00"
+    end = f"{today} 15:00:00"
+    errors: list[str] = []
+
+    if hasattr(a, "stock_zh_a_hist_min_em"):
+        try:
+            df = a.stock_zh_a_hist_min_em(
+                symbol=symbol,
+                start_date=start,
+                end_date=end,
+                period="1",
+                adjust="",
+            )
+            rows = _intraday_rows(df, expected_date=today)
+            if rows:
+                return rows, "akshare:stock_zh_a_hist_min_em(1m)"
+        except Exception as exc:  # noqa: BLE001 - try next AkShare adapter
+            errors.append(f"stock_zh_a_hist_min_em: {exc}")
+
+    if hasattr(a, "stock_zh_a_minute"):
+        try:
+            df = a.stock_zh_a_minute(symbol=sina_prefix(symbol), period="1", adjust="")
+            rows = _intraday_rows(df, expected_date=today)
+            if rows:
+                return rows, "akshare:stock_zh_a_minute(sina,1m)"
+        except Exception as exc:  # noqa: BLE001 - report all attempted real sources
+            errors.append(f"stock_zh_a_minute: {exc}")
+
+    if hasattr(a, "stock_intraday_sina"):
+        try:
+            df = a.stock_intraday_sina(symbol=sina_prefix(symbol), date=cn_today.strftime("%Y%m%d"))
+            rows = _intraday_rows(df, expected_date=today, allow_time_only_date=True)
+            if rows:
+                return rows, "akshare:stock_intraday_sina(tick,last-per-minute)"
+        except Exception as exc:  # noqa: BLE001 - report all attempted real sources
+            errors.append(f"stock_intraday_sina: {exc}")
+
+    detail = "; ".join(errors) if errors else "AkShare 当前版本未提供可用分钟线接口"
+    raise AkShareUnavailable(f"分钟线暂不可用: {detail}")
+
+
+def _intraday_rows(
+    df: Any,
+    expected_date: str | None = None,
+    allow_time_only_date: bool = False,
+) -> list[dict[str, Any]]:
+    if df is None or len(df) == 0:
+        return []
+    rows: list[dict[str, Any]] = []
+    source = df.tail(MAX_ROWS * 20) if hasattr(df, "tail") else df
+    for raw in _records(source, limit=MAX_ROWS * 20):
+        time_value = (
+            raw.get("时间")
+            or raw.get("日期")
+            or raw.get("day")
+            or raw.get("time")
+            or raw.get("datetime")
+            or raw.get("ticktime")
+            or raw.get("成交时间")
+        )
+        price = _to_float(
+            raw.get("收盘")
+            or raw.get("最新价")
+            or raw.get("价格")
+            or raw.get("close")
+            or raw.get("price")
+            or raw.get("成交价格")
+        )
+        if price is None or time_value is None:
+            continue
+        time_text = str(time_value)
+        if expected_date:
+            date_match = re.search(r"(\d{4})[-/]?(\d{2})[-/]?(\d{2})", time_text)
+            if not date_match:
+                if not allow_time_only_date:
+                    continue
+                time_text = f"{expected_date} {time_text}"
+                date_match = re.search(r"(\d{4})[-/]?(\d{2})[-/]?(\d{2})", time_text)
+            if not date_match:
+                continue
+            row_date = f"{date_match.group(1)}-{date_match.group(2)}-{date_match.group(3)}"
+            if row_date != expected_date:
+                continue
+        row = {
+            "时间": time_text,
+            "最新价": price,
+            "成交量": _to_float(raw.get("成交量") or raw.get("volume")),
+            "成交额": _to_float(raw.get("成交额") or raw.get("amount")),
+        }
+        if allow_time_only_date:
+            minute_key = time_text[:16]
+            if rows and rows[-1].get("时间", "")[:16] == minute_key:
+                rows[-1] = row
+                continue
+        rows.append(row)
+    # A 股分钟线最多约 240 点；保留尾部实际交易点，避免大响应拖慢前端。
+    return rows[-260:]
 
 
 # --- 公告 ------------------------------------------------------------
