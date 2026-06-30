@@ -51,12 +51,10 @@ describe('stocks dashboard snapshot', () => {
         ])));
       }
       if (url.pathname.startsWith('/announcements/')) {
-        return new Response(JSON.stringify(envelope([])));
+        throw new Error('announcements should not block the quick snapshot');
       }
       if (url.pathname.startsWith('/stock-rankings/')) {
-        return new Response(JSON.stringify(envelope([
-          { 代码: 'sh603986', 名称: '兆易创新', 最新价: 840, 涨跌幅: 9.09, 成交额: 12_000_000_000 },
-        ])));
+        throw new Error('rankings should not block the quick snapshot');
       }
       throw new Error(`unexpected path ${url.pathname}`);
     });
@@ -80,8 +78,10 @@ describe('stocks dashboard snapshot', () => {
       sparkKind: 'intraday',
       sparkBaseline: 7.11,
     });
-    expect(snapshot.leaderboards.gainers[0]?.name).toBe('兆易创新');
+    expect(snapshot.leaderboards.gainers).toEqual([]);
     expect(requestedPaths.some((path) => path.startsWith('/market-pulse'))).toBe(false);
+    expect(requestedPaths.some((path) => path.startsWith('/announcements'))).toBe(false);
+    expect(requestedPaths.some((path) => path.startsWith('/stock-rankings'))).toBe(false);
   });
 
   it('preserves the last real sector and temperature data when market pulse refresh is empty', () => {

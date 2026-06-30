@@ -622,21 +622,31 @@ async function buildDashboardSnapshot(args: {
   const announcementWatchlist = effectiveWatchlist
     .filter((entry) => entry.market === 'A')
     .slice(0, 5);
+  const deferredPulse = Promise.resolve(emptyEnvelope<MarketPulseRow>('akshare:market-pulse:deferred'));
+  const deferredAnnouncements = Promise.resolve(
+    announcementWatchlist.map((entry) => ({
+      entry,
+      env: emptyEnvelope<AnnouncementRow>(`akshare:announcements:${entry.symbol}:deferred`),
+    })),
+  );
+  const deferredRankings = Promise.resolve(emptyEnvelope<StockRankingRow>('akshare:rankings:deferred'));
   const [indexCn, pulseEnv, stocks, announcements, rankingGainers, rankingLosers, rankingAmount] = await Promise.all([
     client.getIndexQuote('cn'),
     includeSlowSignals
       ? slowSignalClient.getMarketPulse(compact)
-      : Promise.resolve(emptyEnvelope<MarketPulseRow>('akshare:market-pulse:deferred')),
+      : deferredPulse,
     Promise.all(effectiveWatchlist.slice(0, 8).map((entry, index) => stockSnapshot(client, entry, index))),
-    Promise.all(
-      announcementWatchlist.map(async (entry) => ({
-        entry,
-        env: await client.getStockAnnouncements(entry.symbol, cnCompactDaysAgo(now, 7), compact),
-      })),
-    ),
-    rankingClient.getStockRankings('gainers', 8),
-    rankingClient.getStockRankings('losers', 8),
-    rankingClient.getStockRankings('amount', 8),
+    includeSlowSignals
+      ? Promise.all(
+        announcementWatchlist.map(async (entry) => ({
+          entry,
+          env: await client.getStockAnnouncements(entry.symbol, cnCompactDaysAgo(now, 7), compact),
+        })),
+      )
+      : deferredAnnouncements,
+    includeSlowSignals ? rankingClient.getStockRankings('gainers', 8) : deferredRankings,
+    includeSlowSignals ? rankingClient.getStockRankings('losers', 8) : deferredRankings,
+    includeSlowSignals ? rankingClient.getStockRankings('amount', 8) : deferredRankings,
   ]);
   const sectors = mapSectors(pulseEnv);
   const leaderboards: LeaderboardsSnapshot = {
