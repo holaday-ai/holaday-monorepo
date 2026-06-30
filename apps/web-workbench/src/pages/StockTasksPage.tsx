@@ -659,6 +659,10 @@ export function StockTasksPage(): JSX.Element {
               />
               <DailyBriefing
                 stocks={stocks}
+                marketIndices={marketIndices}
+                sectors={sectors}
+                news={news}
+                leaderboards={leaderboards}
                 updatedAt={dashboard?.updatedAt}
                 briefing={briefingResult}
                 generating={briefingGenerating}
@@ -1639,6 +1643,10 @@ function InsightSheet({
 
 function DailyBriefing({
   stocks,
+  marketIndices,
+  sectors,
+  news,
+  leaderboards,
   updatedAt,
   briefing,
   generating,
@@ -1647,6 +1655,10 @@ function DailyBriefing({
   hasMarketSignals,
 }: {
   stocks: StockSnapshot[];
+  marketIndices: IndexRow[];
+  sectors: SectorRow[];
+  news: NewsRow[];
+  leaderboards: NonNullable<DashboardSnapshot['leaderboards']>;
   updatedAt?: string;
   briefing: GeneratedBriefing | null;
   generating: boolean;
@@ -1656,9 +1668,10 @@ function DailyBriefing({
 }): JSX.Element {
   const quoteStocks = stocks.filter((stock) => stock.price !== '—');
   const riskStock = quoteStocks.find((s) => s.signal === '偏弱' || s.signal === '风险升高');
-  const leadStock = [...quoteStocks].sort((a, b) => b.changePct - a.changePct)[0];
-  const hasPositiveLeader = Boolean(leadStock && leadStock.changePct > 0);
   const previewLines = briefing ? briefingPreviewLines(briefing.markdown) : [];
+  const opportunityItems = dailyOpportunityItems(stocks, marketIndices, sectors, leaderboards.gainers);
+  const riskItems = dailyRiskItems(stocks, marketIndices, news, leaderboards.losers);
+  const trackingItems = dailyTrackingItems(stocks, news, leaderboards.amount);
   return (
     <section className="rounded-[8px] border border-[#E1E3E8] bg-white p-4 shadow-[0_8px_24px_rgba(18,24,38,0.035)]">
       <SectionHeader
@@ -1677,7 +1690,7 @@ function DailyBriefing({
           {briefing
             ? '已复用当前自选股和 AkShare 数据生成日报，可继续用上方输入框追问。'
             : hasMarketSignals
-              ? 'Holaday 会优先使用已接入的真实行情、公告、市场动态和榜单数据生成摘要。'
+              ? dailyBriefingSourceLine(quoteStocks, marketIndices, sectors, news, leaderboards)
               : '当前真实市场数据不足。添加关注股票或稍后刷新后，可生成更完整的关注日报。'}
         </div>
       </div>
@@ -1701,39 +1714,23 @@ function DailyBriefing({
         <BriefingLane
           tone="green"
           title="机会"
-          items={[
-            hasPositiveLeader
-              ? `${leadStock?.name ?? leadStock?.symbol} 相对活跃，今日涨跌幅 ${formatSignedPct(leadStock?.changePct ?? 0)}`
-              : '关注列表暂无明确强势个股，先等待价格企稳和成交确认',
-            '优先跟踪公告、资金流和行业主线是否形成同向信号',
-            '若指数企稳，可关注先于市场修复的自选标的',
-            '短线事件催化需要结合来源和时间戳复核',
-          ]}
-          tags={stockTags(stocks, ['机会'])}
+          items={opportunityItems}
+          tags={stockTags(opportunityItems.length > 0 ? stocks : [])}
+          empty="暂无真实机会信号"
         />
         <BriefingLane
           tone="red"
           title="风险"
-          items={[
-            riskStock
-              ? `${riskStock.name} 走势偏弱，今日涨跌幅 ${formatSignedPct(riskStock.changePct)}`
-              : '关注列表暂未出现明显风险升高信号',
-            '市场温度偏低时，弱势标的更容易放大波动',
-            '公告和盘面异动需要区分事实、观点与社区情绪',
-            '日报仅聚合公开信息，不提供买卖建议',
-          ]}
-          tags={stockTags([riskStock, ...stocks].filter(Boolean) as StockSnapshot[], ['风险'])}
+          items={riskItems}
+          tags={stockTags([riskStock, ...stocks].filter(Boolean) as StockSnapshot[])}
+          empty="暂无真实风险信号"
         />
         <BriefingLane
           tone="blue"
           title="需要追踪"
-          items={[
-            '自选股是否有新公告、解禁或龙虎榜信息',
-            '行业趋势是否连续两次刷新保持一致',
-            '指数成交额与市场温度是否同步改善',
-            '重点动态的来源链接和发布时间',
-          ]}
-          tags={['公告', '资金', '行业']}
+          items={trackingItems}
+          tags={trackingTags(news, leaderboards.amount)}
+          empty="暂无真实追踪项"
         />
       </div>
     </section>
@@ -2076,11 +2073,13 @@ function BriefingLane({
   items,
   tags,
   tone,
+  empty,
 }: {
   title: string;
   items: string[];
   tags: string[];
   tone: 'green' | 'red' | 'blue';
+  empty: string;
 }): JSX.Element {
   const toneClass = {
     green: 'text-[#08764A] bg-[#F2FCF8] border-[#D9F2E7]',
@@ -2099,21 +2098,29 @@ function BriefingLane({
           {title}
         </span>
       </div>
-      <ul className="space-y-2">
-        {items.map((item, index) => (
-          <li key={`${item}-${index}`} className="flex gap-2 text-[12px] leading-relaxed text-[#344054]">
-            <span className={cn('mt-2 h-1.5 w-1.5 shrink-0 rounded-full', bulletClass)} />
-            <span>{item}</span>
-          </li>
-        ))}
-      </ul>
-      <div className="mt-3 flex flex-wrap gap-1">
-        {tags.map((tag, index) => (
-          <span key={`${tag}-${index}`} className="rounded-[5px] border border-[#E1E3E8] bg-white px-1.5 py-0.5 text-[10px] text-[#667085]">
-            {tag}
-          </span>
-        ))}
-      </div>
+      {items.length > 0 ? (
+        <ul className="space-y-2">
+          {items.map((item, index) => (
+            <li key={`${item}-${index}`} className="flex gap-2 text-[12px] leading-relaxed text-[#344054]">
+              <span className={cn('mt-2 h-1.5 w-1.5 shrink-0 rounded-full', bulletClass)} />
+              <span>{item}</span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <div className="rounded-[8px] border border-dashed border-[#DCDDDD] bg-[#FCFCFD] px-3 py-5 text-center text-[12px] text-[#8B92A1]">
+          {empty}
+        </div>
+      )}
+      {tags.length > 0 ? (
+        <div className="mt-3 flex flex-wrap gap-1">
+          {tags.map((tag, index) => (
+            <span key={`${tag}-${index}`} className="rounded-[5px] border border-[#E1E3E8] bg-white px-1.5 py-0.5 text-[10px] text-[#667085]">
+              {tag}
+            </span>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -2899,16 +2906,147 @@ function pickActiveLeaders(
   return leaderboards.gainers;
 }
 
+function realQuoteStocks(stocks: StockSnapshot[]): StockSnapshot[] {
+  return stocks.filter((stock) => stock.price !== '—');
+}
+
+function dailyBriefingSourceLine(
+  quoteStocks: StockSnapshot[],
+  marketIndices: IndexRow[],
+  sectors: SectorRow[],
+  news: NewsRow[],
+  leaderboards: NonNullable<DashboardSnapshot['leaderboards']>,
+): string {
+  const announcementCount = news.filter((item) => item.category === '公告').length;
+  const marketNewsCount = news.length - announcementCount;
+  const parts = [
+    quoteStocks.length > 0 ? `${quoteStocks.length} 只真实关注行情` : null,
+    marketIndices.length > 0 ? `${marketIndices.length} 个市场指数` : null,
+    sectors.length > 0 ? `${sectors.length} 条行业趋势` : null,
+    news.length > 0 ? `${marketNewsCount} 条新闻 / ${announcementCount} 条公告` : null,
+    leaderboards.gainers.length + leaderboards.losers.length + leaderboards.amount.length > 0 ? '榜单数据' : null,
+  ].filter((part): part is string => part !== null);
+  return parts.length > 0
+    ? `当前摘要仅使用已返回的真实数据：${parts.join('、')}。`
+    : '当前没有可用于摘要的真实市场数据。';
+}
+
+function dailyOpportunityItems(
+  stocks: StockSnapshot[],
+  marketIndices: IndexRow[],
+  sectors: SectorRow[],
+  gainers: LeaderRow[],
+): string[] {
+  const items: string[] = [];
+  const strongestStock = realQuoteStocks(stocks)
+    .filter((stock) => stock.changePct > 0)
+    .sort((a, b) => b.changePct - a.changePct)[0];
+  if (strongestStock) {
+    items.push(`${strongestStock.name} ${strongestStock.price}，今日 ${formatSignedPct(strongestStock.changePct)}，为关注列表中涨幅最高。`);
+  }
+
+  const strongestIndex = marketIndices
+    .filter((index) => index.changePct > 0)
+    .sort((a, b) => b.changePct - a.changePct)[0];
+  if (strongestIndex) {
+    items.push(`${strongestIndex.name} ${strongestIndex.price}，今日 ${formatSignedPct(strongestIndex.changePct)}，成交 ${strongestIndex.turnover}。`);
+  }
+
+  const topSector = sectors[0];
+  if (topSector) {
+    items.push(`${topSector.name} 行业 ${formatSignedPct(topSector.changePct)}，领涨股 ${topSector.leader || '未返回'}。`);
+  }
+
+  const topGainer = gainers[0];
+  if (topGainer) {
+    items.push(`涨幅榜第 ${topGainer.rank}：${topGainer.name} ${topGainer.price}，${formatSignedPct(topGainer.changePct)}。`);
+  }
+  return items.slice(0, 4);
+}
+
+function dailyRiskItems(
+  stocks: StockSnapshot[],
+  marketIndices: IndexRow[],
+  news: NewsRow[],
+  losers: LeaderRow[],
+): string[] {
+  const items: string[] = [];
+  const weakestStock = realQuoteStocks(stocks)
+    .filter((stock) => stock.changePct < 0)
+    .sort((a, b) => a.changePct - b.changePct)[0];
+  if (weakestStock) {
+    items.push(`${weakestStock.name} ${weakestStock.price}，今日 ${formatSignedPct(weakestStock.changePct)}，为关注列表中跌幅最大。`);
+  }
+
+  const weakestIndex = marketIndices
+    .filter((index) => index.changePct < 0)
+    .sort((a, b) => a.changePct - b.changePct)[0];
+  if (weakestIndex) {
+    items.push(`${weakestIndex.name} ${weakestIndex.price}，今日 ${formatSignedPct(weakestIndex.changePct)}，成交 ${weakestIndex.turnover}。`);
+  }
+
+  const announcements = news.filter((item) => item.category === '公告');
+  if (announcements.length > 0) {
+    items.push(`近 7 日返回 ${announcements.length} 条公告，最新：${announcements[0]!.title}`);
+  }
+
+  const topLoser = losers[0];
+  if (topLoser) {
+    items.push(`跌幅榜第 ${topLoser.rank}：${topLoser.name} ${topLoser.price}，${formatSignedPct(topLoser.changePct)}。`);
+  }
+  return items.slice(0, 4);
+}
+
+function dailyTrackingItems(
+  stocks: StockSnapshot[],
+  news: NewsRow[],
+  amountLeaders: LeaderRow[],
+): string[] {
+  const items: string[] = [];
+  const latestMarketNews = news.find((item) => item.category !== '公告');
+  if (latestMarketNews) {
+    items.push(`最新动态：${latestMarketNews.title}（${latestMarketNews.source ?? '公开来源'}）`);
+  }
+
+  const latestAnnouncement = news.find((item) => item.category === '公告');
+  if (latestAnnouncement) {
+    items.push(`最新公告：${latestAnnouncement.title}`);
+  }
+
+  const mostLinkedStock = realQuoteStocks(stocks)
+    .filter((stock) => stock.newsCount > 0)
+    .sort((a, b) => b.newsCount - a.newsCount)[0];
+  if (mostLinkedStock) {
+    items.push(`${mostLinkedStock.name} 当前关联动态 ${mostLinkedStock.newsCount} 条。`);
+  }
+
+  const amountLeader = amountLeaders[0];
+  if (amountLeader) {
+    items.push(`成交额榜第 ${amountLeader.rank}：${amountLeader.name} ${amountLeader.price}，${formatSignedPct(amountLeader.changePct)}。`);
+  }
+  return items.slice(0, 4);
+}
+
+function trackingTags(news: NewsRow[], amountLeaders: LeaderRow[]): string[] {
+  const tags = [
+    news.some((item) => item.category === '公告') ? '公告' : null,
+    news.some((item) => item.category !== '公告') ? '新闻' : null,
+    amountLeaders.length > 0 ? '成交额榜' : null,
+  ].filter((tag): tag is string => tag !== null);
+  return tags.slice(0, 3);
+}
+
 function dailyBriefingHeadline(stocks: StockSnapshot[], riskStock?: StockSnapshot): string {
   if (stocks.length === 0) return '添加关注股票后，Holaday 会生成你的每日关注日报。';
-  const quoteStocks = stocks.filter((stock) => stock.price !== '—');
+  const quoteStocks = realQuoteStocks(stocks);
   if (quoteStocks.length === 0) return '真实行情暂不可用，Holaday 不会使用模拟数据生成盘面判断。';
   const weakCount = quoteStocks.filter((stock) => stock.changePct < 0).length;
   const strong = [...quoteStocks].sort((a, b) => b.changePct - a.changePct)[0];
   if (weakCount >= Math.ceil(quoteStocks.length / 2)) {
-    return `关注列表整体偏弱，${riskStock?.symbol ?? strong?.symbol ?? '重点标的'} 需要优先跟踪。`;
+    return `关注列表整体偏弱，${riskStock?.name ?? strong?.name ?? '重点标的'} 今日 ${formatSignedPct(riskStock?.changePct ?? strong?.changePct ?? 0)}。`;
   }
-  return `${strong?.symbol ?? '关注列表'} 相对活跃，继续跟踪公告、资金和行业主线。`;
+  if (strong && strong.changePct > 0) return `${strong.name} 今日 ${formatSignedPct(strong.changePct)}，为关注列表中相对活跃标的。`;
+  return `关注列表已返回 ${quoteStocks.length} 只真实行情，暂无上涨标的。`;
 }
 
 function marketInsight(rows: IndexRow[]): InsightSheetState {
@@ -3032,10 +3170,10 @@ function formatSignedPct(value: number): string {
   return `${value > 0 ? '+' : ''}${value.toFixed(2)}%`;
 }
 
-function stockTags(stocks: StockSnapshot[], fallback: string[]): string[] {
+function stockTags(stocks: StockSnapshot[]): string[] {
   const tags = stocks.map((stock) => stock.symbol).filter(Boolean);
   const uniqueTags = Array.from(new Set(tags)).slice(0, 3);
-  return uniqueTags.length > 0 ? uniqueTags : fallback;
+  return uniqueTags;
 }
 
 function briefingPreviewLines(markdown: string): string[] {
