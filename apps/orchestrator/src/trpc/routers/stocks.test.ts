@@ -240,6 +240,78 @@ describe('stocks dashboard snapshot', () => {
     expect(merged.freshness.message).toContain('保留最近一次真实数据');
   });
 
+  it('preserves the last real watchlist quotes when a refresh returns only unavailable stocks', () => {
+    const previous = {
+      updatedAt: '2026-06-30T09:40:00.000Z',
+      source: 'akshare' as const,
+      isFallbackWatchlist: false,
+      watchlistStocks: [
+        {
+          symbol: '603528',
+          name: '多伦科技',
+          market: 'A' as const,
+          price: '5.86',
+          changePct: -0.17,
+          signal: '偏弱' as const,
+          report: '待生成' as const,
+          spark: [5.87, 5.86],
+          sparkLabels: ['2026-06-30 14:59:00', '2026-06-30 15:00:00'],
+          sparkKind: 'intraday' as const,
+          sparkBaseline: 5.87,
+          turnoverAmount: 60_989_093,
+          averageTurnoverAmount: 90_455_000,
+          volume: null,
+          averageVolume: null,
+          volumeRatio: 0.67,
+          volumeSignal: '缩量' as const,
+          newsCount: 0,
+          note: '来源 AkShare · 多伦科技 今日真实分钟线',
+        },
+      ],
+      marketIndices: [],
+      sectors: [],
+      starStocks: [],
+      temperature: null,
+      news: [],
+      leaders: [],
+      leaderboards: { gainers: [], losers: [], amount: [] },
+      freshness: {
+        status: 'fresh' as const,
+        cachedAt: '2026-06-30T09:40:00.000Z',
+      },
+    };
+    const next = {
+      ...previous,
+      updatedAt: '2026-06-30T09:45:00.000Z',
+      watchlistStocks: [
+        {
+          ...previous.watchlistStocks[0]!,
+          price: '—',
+          changePct: 0,
+          spark: [],
+          sparkLabels: [],
+          sparkBaseline: null,
+          turnoverAmount: null,
+          averageTurnoverAmount: null,
+          volumeRatio: null,
+          volumeSignal: '待观察' as const,
+          note: '真实行情暂不可用，未展示走势线',
+        },
+      ],
+      freshness: {
+        status: 'partial' as const,
+        cachedAt: '2026-06-30T09:45:00.000Z',
+        message: '真实行情已先展示，市场温度正在后台补齐。',
+      },
+    };
+
+    const merged = __stocksDashboardTest.withPreservedSlowSignals(next, previous);
+
+    expect(merged.watchlistStocks).toEqual(previous.watchlistStocks);
+    expect(merged.freshness.status).toBe('stale');
+    expect(merged.freshness.message).toContain('关注股票');
+  });
+
   it('preserves sectors when a refresh keeps temperature but loses industry rankings', () => {
     const previous = {
       updatedAt: '2026-06-29T12:00:00.000Z',

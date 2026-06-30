@@ -277,7 +277,9 @@ export function StockTasksPage(): JSX.Element {
         return status;
       });
       const snapshotPromise = trpc.stocks.dashboardSnapshot.query().then((snapshot) => {
-        if (pageAlive.current) setDashboard(snapshot);
+        if (pageAlive.current) {
+          setDashboard((previous) => preserveDisplayableDashboard(snapshot, previous));
+        }
         return snapshot;
       }).catch((err) => {
         if (pageAlive.current) {
@@ -292,7 +294,9 @@ export function StockTasksPage(): JSX.Element {
         snapshotPromise,
       ]);
       if (!pageAlive.current) return;
-      if (snapshot) setDashboard(snapshot);
+      if (snapshot) {
+        setDashboard((previous) => preserveDisplayableDashboard(snapshot, previous));
+      }
       setLoadError(dashboardError);
     } catch (err) {
       if (pageAlive.current) setLoadError(pageErrorMessage(err));
@@ -2482,6 +2486,18 @@ function dashboardHasDisplayableData(snapshot: DashboardSnapshot | null): boolea
       snapshot.leaders.length > 0 ||
       snapshot.temperature,
   );
+}
+
+function preserveDisplayableDashboard(next: DashboardSnapshot, previous: DashboardSnapshot | null): DashboardSnapshot {
+  if (!previous || dashboardHasDisplayableData(next) || !dashboardHasDisplayableData(previous)) return next;
+  return {
+    ...previous,
+    freshness: {
+      ...next.freshness,
+      status: 'stale',
+      message: '行情源本次返回为空，当前继续展示上一次真实数据，后台会继续刷新。',
+    },
+  };
 }
 
 function buildStockRows(watchlist: WatchlistRow[] | null): StockSnapshot[] {

@@ -771,6 +771,9 @@ function cacheDashboardSnapshot(cacheKey: string, snapshot: DashboardSnapshot, r
 
 function withPreservedSlowSignals(snapshot: DashboardSnapshot, previous?: DashboardSnapshot): DashboardSnapshot {
   if (!previous || (snapshot.freshness.status !== 'fresh' && snapshot.freshness.status !== 'partial')) return snapshot;
+  const snapshotHasWatchlistQuotes = snapshot.watchlistStocks.some((stockRow) => stockRow.price !== '—' || stockRow.spark.length >= 2);
+  const previousHasWatchlistQuotes = previous.watchlistStocks.some((stockRow) => stockRow.price !== '—' || stockRow.spark.length >= 2);
+  const shouldPreserveWatchlistStocks = !snapshotHasWatchlistQuotes && previousHasWatchlistQuotes;
   const shouldPreserveMarketIndices = snapshot.marketIndices.length === 0 && previous.marketIndices.length > 0;
   const shouldPreserveSectors = snapshot.sectors.length === 0 && previous.sectors.length > 0;
   const shouldPreserveTemperature = snapshot.temperature === null && previous.temperature !== null;
@@ -785,6 +788,7 @@ function withPreservedSlowSignals(snapshot: DashboardSnapshot, previous?: Dashbo
       previous.leaderboards.amount.length > 0
     );
   if (
+    !shouldPreserveWatchlistStocks &&
     !shouldPreserveMarketIndices &&
     !shouldPreserveSectors &&
     !shouldPreserveTemperature &&
@@ -793,6 +797,7 @@ function withPreservedSlowSignals(snapshot: DashboardSnapshot, previous?: Dashbo
   ) return snapshot;
 
   const preservedLabels = [
+    shouldPreserveWatchlistStocks ? '关注股票' : null,
     shouldPreserveMarketIndices ? '市场行情' : null,
     shouldPreserveSectors ? '行业趋势' : null,
     shouldPreserveTemperature ? '市场温度' : null,
@@ -803,6 +808,8 @@ function withPreservedSlowSignals(snapshot: DashboardSnapshot, previous?: Dashbo
 
   return {
     ...snapshot,
+    watchlistStocks: shouldPreserveWatchlistStocks ? previous.watchlistStocks : snapshot.watchlistStocks,
+    starStocks: shouldPreserveWatchlistStocks ? previous.starStocks : snapshot.starStocks,
     marketIndices: shouldPreserveMarketIndices ? previous.marketIndices : snapshot.marketIndices,
     sectors: shouldPreserveSectors ? previous.sectors : snapshot.sectors,
     temperature: shouldPreserveTemperature ? previous.temperature : snapshot.temperature,
