@@ -63,6 +63,9 @@ describe('stocks dashboard snapshot', () => {
       name: '多伦科技',
       price: '7.28',
       changePct: 2.39,
+      spark: [7.11, 7.28],
+      sparkLabels: ['2026-06-26', '2026-06-29'],
+      sparkKind: 'daily_close',
     });
     expect(snapshot.leaderboards.gainers[0]?.name).toBe('兆易创新');
     expect(requestedPaths.some((path) => path.startsWith('/market-pulse'))).toBe(false);

@@ -39,6 +39,8 @@ interface StockSnapshot {
   signal: Signal;
   report: '已生成' | '待生成' | '生成中';
   spark: number[];
+  sparkLabels: string[];
+  sparkKind: 'daily_close';
   newsCount: number;
   note: string;
 }
@@ -172,6 +174,8 @@ function stock(
     signal: signalFromChange(changePct),
     report,
     spark: [],
+    sparkLabels: [],
+    sparkKind: 'daily_close',
     newsCount: 0,
     note,
   };
@@ -304,12 +308,20 @@ function signalFromChange(changePct: number): Signal {
   return '中性';
 }
 
-function sparkFromKline(rows: KlineRow[]): number[] {
-  const values = rows
+function sparkSeriesFromKline(rows: KlineRow[]): { values: number[]; labels: string[] } {
+  const series = rows
     .slice(-8)
-    .map((row) => toNum(pick(row, ['收盘', 'close', '最新价'])))
-    .filter((value): value is number => value !== null);
-  return values.length >= 2 ? values : [];
+    .map((row) => ({
+      value: toNum(pick(row, ['收盘', 'close', '最新价'])),
+      label: String(pick(row, ['日期', 'date']) ?? '').trim(),
+    }))
+    .filter((point): point is { value: number; label: string } => point.value !== null && point.label.length > 0);
+  return series.length >= 2
+    ? {
+        values: series.map((point) => point.value),
+        labels: series.map((point) => point.label),
+      }
+    : { values: [], labels: [] };
 }
 
 function latestKline(rows: KlineRow[]): KlineRow | null {
@@ -348,7 +360,7 @@ async function stockSnapshot(
   if (!last) return unavailableStock(entry, fallback);
   const close = pick(last, ['收盘', 'close', '最新价']);
   const changePct = toNum(pick(last, ['涨跌幅', 'changePct'])) ?? fallback.changePct;
-  const spark = seriesEnv.error ? [] : sparkFromKline(seriesEnv.data);
+  const sparkSeries = seriesEnv.error ? { values: [], labels: [] } : sparkSeriesFromKline(seriesEnv.data);
   return {
     ...fallback,
     symbol: entry.symbol,
@@ -357,8 +369,10 @@ async function stockSnapshot(
     price: fmtNum(close, 2),
     changePct: Number(changePct.toFixed(2)),
     signal: signalFromChange(changePct),
-    spark,
-    note: spark.length >= 2
+    spark: sparkSeries.values,
+    sparkLabels: sparkSeries.labels,
+    sparkKind: 'daily_close',
+    note: sparkSeries.values.length >= 2
       ? `来源 AkShare · ${entry.displayName ?? entry.symbol} 近 8 个交易日真实收盘价`
       : `来源 AkShare · ${entry.displayName ?? entry.symbol} 最新行情，走势线暂缺`,
   };

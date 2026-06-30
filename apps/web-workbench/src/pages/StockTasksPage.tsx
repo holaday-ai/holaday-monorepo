@@ -47,6 +47,8 @@ interface StockSnapshot {
   signal: Signal;
   report: '已生成' | '待生成' | '生成中';
   spark: number[];
+  sparkLabels?: string[];
+  sparkKind?: 'daily_close' | 'intraday';
   newsCount: number;
   note: string;
 }
@@ -213,14 +215,6 @@ const DISCOVERY_IMAGES = [
   'https://images.unsplash.com/photo-1520607162513-77705c0f0d4a?auto=format&fit=crop&w=900&q=80',
   'https://images.unsplash.com/photo-1526628953301-3e589a6a8b74?auto=format&fit=crop&w=900&q=80',
 ];
-const STOCK_CHART_TIME_TICKS = [
-  { x: 8, label: '5时' },
-  { x: 31, label: '8时' },
-  { x: 54, label: '11时' },
-  { x: 77, label: '14时' },
-  { x: 98, label: '17时' },
-];
-
 export function StockTasksPage(): JSX.Element {
   const navigate = useNavigate();
   const toast = useToast();
@@ -858,6 +852,7 @@ function MarketHighlights({
 function StockHighlightCard({ stock }: { stock: StockSnapshot }): JSX.Element {
   const [hoverRatio, setHoverRatio] = React.useState<number | null>(null);
   const display = stockDisplayPoint(stock, hoverRatio);
+  const chartKind = stock.sparkKind ?? 'daily_close';
   return (
     <article className="group overflow-hidden rounded-[10px] border border-[#E7E7EB] bg-[#FEFEFF] px-4 pb-4 pt-4 transition-[border-color,box-shadow] hover:border-[#DADDE5] hover:shadow-[0_14px_28px_rgba(18,24,38,0.06)]">
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_156px]">
@@ -884,6 +879,8 @@ function StockHighlightCard({ stock }: { stock: StockSnapshot }): JSX.Element {
           {stock.spark.length >= 2 ? (
             <MarketMiniChart
               values={stock.spark}
+              labels={stock.sparkLabels ?? []}
+              kind={chartKind}
               latestChangePct={stock.changePct}
               className="mt-4 h-[218px] w-full"
               hoverRatio={hoverRatio}
@@ -1878,6 +1875,8 @@ function Sparkline({
 
 function MarketMiniChart({
   values,
+  labels,
+  kind,
   latestChangePct,
   className,
   hoverRatio,
@@ -1885,6 +1884,8 @@ function MarketMiniChart({
   showTimeline = false,
 }: {
   values: number[];
+  labels: string[];
+  kind: 'daily_close' | 'intraday';
   latestChangePct: number;
   className?: string;
   hoverRatio?: number | null;
@@ -1900,7 +1901,9 @@ function MarketMiniChart({
   const max = Math.max(...values);
   const mid = min + (max - min) / 2;
   const activeRatio = hoverRatio ?? 1;
-  const activePoint = interpolatedChartPoint(values, chart, activeRatio, latestChangePct);
+  const activePoint = kind === 'intraday'
+    ? interpolatedChartPoint(values, chart, activeRatio, latestChangePct)
+    : sampledChartPoint(values, chart, activeRatio, latestChangePct);
   const activeValue = activePoint.value;
   const activeChangePct = activePoint.changePct;
   const positive = activeChangePct >= 0;
@@ -1909,7 +1912,10 @@ function MarketMiniChart({
   const baselineY = chart.yForValue(baseline);
   const baselinePct = Math.max(0, Math.min(100, (baselineY / 48) * 100));
   const showHover = hoverRatio !== null;
-  const tooltipTime = stockPointTimeLabel(activeRatio);
+  const axisTicks = chartAxisTicks(labels, kind);
+  const tooltipMeta = kind === 'intraday'
+    ? `今日 ${intradayTimeLabel(activeRatio)}`
+    : `${formatStockDateLabel(labels[activePoint.index] ?? '')} 收盘`;
   const handlePointerMove = (event: React.PointerEvent<SVGSVGElement>): void => {
     if (!onHoverRatioChange) return;
     const rect = event.currentTarget.getBoundingClientRect();
@@ -1945,7 +1951,7 @@ function MarketMiniChart({
         <rect x="0" y="0" width="100" height="48" rx="4" fill="#FEFEFF" />
         {showTimeline ? (
           <>
-            {STOCK_CHART_TIME_TICKS.map((tick) => (
+            {axisTicks.map((tick) => (
               <line key={tick.label} x1={tick.x} x2={tick.x} y1="5" y2="38" stroke="#ECEFF3" strokeWidth="0.34" />
             ))}
           </>
@@ -2012,18 +2018,18 @@ function MarketMiniChart({
           <>
             <rect x="69" y={Math.max(5, Math.min(31, baselineY - 3.7))} width="27.5" height="7.4" rx="3.2" fill="white" stroke="#E1E4EA" />
             <text x="71" y={Math.max(10, Math.min(36, baselineY + 1.1))} fill="#767E8D" fontSize="2.35" fontFamily="ui-sans-serif, system-ui">
-              前次收盘: {baseline.toFixed(2)}
+              {kind === 'intraday' ? '前次收盘' : '首日收盘'}: {baseline.toFixed(2)}
             </text>
           </>
         ) : null}
         {showTimeline ? (
           <>
-            {STOCK_CHART_TIME_TICKS.map((tick, index) => (
+            {axisTicks.map((tick, index) => (
               <text
                 key={tick.label}
                 x={tick.x}
                 y="45"
-                textAnchor={index === STOCK_CHART_TIME_TICKS.length - 1 ? 'end' : 'middle'}
+                textAnchor={index === axisTicks.length - 1 ? 'end' : index === 0 ? 'start' : 'middle'}
                 fill="#A5ADBA"
                 fontSize="2.45"
                 fontFamily="ui-sans-serif, system-ui"
@@ -2045,7 +2051,7 @@ function MarketMiniChart({
         >
           <div className="whitespace-nowrap text-[12px] font-semibold tabular-nums text-[#344054]">{activeValue.toFixed(2)}</div>
           <div className="mt-0.5 whitespace-nowrap text-[11px] font-medium tabular-nums text-[#8B92A1]">
-            今日 {tooltipTime}
+            {tooltipMeta}
           </div>
         </div>
       ) : null}
@@ -2127,7 +2133,7 @@ function interpolatedChartPoint(
   chart: ReturnType<typeof chartGeometry>,
   ratio: number,
   latestChangePct: number,
-): { x: number; y: number; value: number; changePct: number } {
+): { x: number; y: number; value: number; changePct: number; index: number } {
   const clamped = Math.max(0, Math.min(1, ratio));
   const latest = values[values.length - 1] ?? 0;
   if (values.length <= 1) {
@@ -2136,6 +2142,7 @@ function interpolatedChartPoint(
       y: chart.yForValue(latest),
       value: latest,
       changePct: latestChangePct,
+      index: 0,
     };
   }
   const scaled = clamped * (values.length - 1);
@@ -2155,13 +2162,75 @@ function interpolatedChartPoint(
       : baseline
         ? ((value - baseline) / baseline) * 100
         : 0,
+    index: Math.round(scaled),
   };
 }
 
-function stockPointTimeLabel(ratio: number): string {
+function sampledChartPoint(
+  values: number[],
+  chart: ReturnType<typeof chartGeometry>,
+  ratio: number,
+  latestChangePct: number,
+): { x: number; y: number; value: number; changePct: number; index: number } {
+  const latest = values[values.length - 1] ?? 0;
+  const index = Math.max(0, Math.min(values.length - 1, Math.round(Math.max(0, Math.min(1, ratio)) * (values.length - 1))));
+  const value = values[index] ?? latest;
+  const baseline = values[0] || value;
+  return {
+    x: chart.points[index]?.x ?? chart.right,
+    y: chart.points[index]?.y ?? chart.yForValue(value),
+    value,
+    changePct: index === values.length - 1 && Number.isFinite(latestChangePct)
+      ? latestChangePct
+      : baseline
+        ? ((value - baseline) / baseline) * 100
+        : 0,
+    index,
+  };
+}
+
+function chartAxisTicks(
+  labels: string[],
+  kind: 'daily_close' | 'intraday',
+): Array<{ x: number; label: string }> {
+  if (kind === 'intraday') {
+    return [
+      { x: 8, label: '9:30' },
+      { x: 31, label: '10:30' },
+      { x: 54, label: '11:30' },
+      { x: 77, label: '14:00' },
+      { x: 98, label: '15:00' },
+    ];
+  }
+  if (labels.length === 0) {
+    return [
+      { x: 8, label: '首日' },
+      { x: 98, label: '最新' },
+    ];
+  }
+  const last = labels.length - 1;
+  const indexes = Array.from(new Set([
+    0,
+    Math.round(last / 2),
+    last,
+  ])).sort((a, b) => a - b);
+  return indexes.map((index) => ({
+    x: 8 + (index / Math.max(1, last)) * 90,
+    label: formatStockDateLabel(labels[index] ?? ''),
+  }));
+}
+
+function formatStockDateLabel(value: string): string {
+  const trimmed = value.trim();
+  const match = /^(\d{4})[-/]?(\d{2})[-/]?(\d{2})$/.exec(trimmed);
+  if (!match) return trimmed || '—';
+  return `${match[2]}-${match[3]}`;
+}
+
+function intradayTimeLabel(ratio: number): string {
   const clamped = Math.max(0, Math.min(1, ratio));
-  const startMinutes = 5 * 60;
-  const endMinutes = 17 * 60;
+  const startMinutes = 9 * 60 + 30;
+  const endMinutes = 15 * 60;
   const minutes = Math.round((startMinutes + (endMinutes - startMinutes) * clamped) / 5) * 5;
   const hour = Math.floor(minutes / 60);
   const minute = minutes % 60;
@@ -2173,7 +2242,9 @@ function stockDisplayPoint(stock: StockSnapshot, hoverRatio: number | null): { p
     return { price: stock.price, changePct: stock.changePct };
   }
   const chart = chartGeometry(stock.spark);
-  const point = interpolatedChartPoint(stock.spark, chart, hoverRatio, stock.changePct);
+  const point = stock.sparkKind === 'intraday'
+    ? interpolatedChartPoint(stock.spark, chart, hoverRatio, stock.changePct)
+    : sampledChartPoint(stock.spark, chart, hoverRatio, stock.changePct);
   return {
     price: point.value.toFixed(2),
     changePct: point.changePct,
