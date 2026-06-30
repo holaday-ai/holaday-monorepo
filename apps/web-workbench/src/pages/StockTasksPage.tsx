@@ -213,6 +213,13 @@ const DISCOVERY_IMAGES = [
   'https://images.unsplash.com/photo-1520607162513-77705c0f0d4a?auto=format&fit=crop&w=900&q=80',
   'https://images.unsplash.com/photo-1526628953301-3e589a6a8b74?auto=format&fit=crop&w=900&q=80',
 ];
+const STOCK_CHART_TIME_TICKS = [
+  { x: 8, label: '5时' },
+  { x: 31, label: '8时' },
+  { x: 54, label: '11时' },
+  { x: 77, label: '14时' },
+  { x: 98, label: '17时' },
+];
 
 export function StockTasksPage(): JSX.Element {
   const navigate = useNavigate();
@@ -1911,9 +1918,9 @@ function MarketMiniChart({
         <rect x="0" y="0" width="100" height="48" rx="4" fill="#FCFCFD" />
         {showTimeline ? (
           <>
-            <line x1="20" x2="20" y1="4" y2="38" stroke="#EDF0F4" strokeWidth="0.32" />
-            <line x1="50" x2="50" y1="4" y2="38" stroke="#EDF0F4" strokeWidth="0.32" />
-            <line x1="80" x2="80" y1="4" y2="38" stroke="#EDF0F4" strokeWidth="0.32" />
+            {STOCK_CHART_TIME_TICKS.map((tick) => (
+              <line key={tick.label} x1={tick.x} x2={tick.x} y1="4" y2="38" stroke="#EDF0F4" strokeWidth="0.32" />
+            ))}
           </>
         ) : null}
         {[8, 18, 28, 38].map((y) => (
@@ -1965,16 +1972,27 @@ function MarketMiniChart({
         </text>
         {!showHover ? (
           <>
-            <rect x="72" y={Math.max(5, Math.min(31, baselineY - 3.8))} width="23.5" height="7.6" rx="2.8" fill="white" stroke="#E4E7EC" />
-            <text x="74" y={Math.max(10, Math.min(36, baselineY + 1.1))} fill="#767E8D" fontSize="2.65" fontFamily="ui-sans-serif, system-ui">
-              前次收盘
+            <rect x="69" y={Math.max(5, Math.min(31, baselineY - 3.8))} width="27.5" height="7.6" rx="2.8" fill="white" stroke="#E4E7EC" />
+            <text x="71" y={Math.max(10, Math.min(36, baselineY + 1.1))} fill="#767E8D" fontSize="2.45" fontFamily="ui-sans-serif, system-ui">
+              前次收盘: {baseline.toFixed(2)}
             </text>
           </>
         ) : null}
         {showTimeline ? (
           <>
-            <text x="18" y="45" fill="#A5ADBA" fontSize="2.45" fontFamily="ui-sans-serif, system-ui">近8日</text>
-            <text x="83" y="45" fill="#A5ADBA" fontSize="2.45" fontFamily="ui-sans-serif, system-ui">最新</text>
+            {STOCK_CHART_TIME_TICKS.map((tick, index) => (
+              <text
+                key={tick.label}
+                x={tick.x}
+                y="45"
+                textAnchor={index === STOCK_CHART_TIME_TICKS.length - 1 ? 'end' : 'middle'}
+                fill="#A5ADBA"
+                fontSize="2.45"
+                fontFamily="ui-sans-serif, system-ui"
+              >
+                {tick.label}
+              </text>
+            ))}
           </>
         ) : null}
       </svg>
