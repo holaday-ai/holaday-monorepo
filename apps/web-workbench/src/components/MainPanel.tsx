@@ -209,14 +209,14 @@ export function MainPanel({
             <p className="text-left text-[15px] font-medium text-[#8F96A3] sm:text-[17px]">
               欢迎回来！今天又是高效的一天呢！ 🚀
             </p>
-            <div className="relative mx-auto mt-14 h-[190px] max-w-[850px] overflow-visible">
+            <div className="relative mx-auto mt-11 h-[292px] max-w-[850px] overflow-visible">
               <img
                 src="/design-ref/home-hero.png"
                 alt=""
                 aria-hidden
-                className="pointer-events-none absolute left-1/2 top-0 h-[220px] w-[940px] max-w-none -translate-x-1/2 object-contain"
+                className="pointer-events-none absolute left-1/2 top-[58px] h-[178px] w-[860px] max-w-none -translate-x-1/2 object-contain"
               />
-              <div className="absolute left-1/2 top-[118px] z-10 w-[min(520px,calc(100vw-3rem))] -translate-x-1/2">
+              <div className="absolute left-1/2 top-0 z-10 w-[min(520px,calc(100vw-3rem))] -translate-x-1/2">
                 <OnboardingHint />
               </div>
             </div>

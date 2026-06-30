@@ -440,9 +440,9 @@ function videoSubStatusCopy(subStatus: string | undefined): string {
 // ---------------------------------------------------------------------------
 
 const MODEL_OPTIONS: ReadonlyArray<{ value: VideoModel; label: string; hint?: string }> = [
-  { value: 'veo_fast', label: 'Veo Fast', hint: '推荐 · 性价比' },
-  { value: 'happyhorse', label: '快马 HappyHorse', hint: '自带音效' },
-  { value: 'veo_standard', label: 'Veo 高质量', hint: '最贵' },
+  { value: 'veo_fast', label: 'Veo Fast', hint: '推荐' },
+  { value: 'happyhorse', label: '快马', hint: '音效' },
+  { value: 'veo_standard', label: 'Veo 高质量', hint: '高质' },
 ];
 const STYLE_OPTIONS: ReadonlyArray<{ value: VideoStyleOption; label: string }> = [
   { value: 'auto', label: '自动' },
@@ -451,17 +451,17 @@ const STYLE_OPTIONS: ReadonlyArray<{ value: VideoStyleOption; label: string }> =
   { value: 'science', label: '科普清晰' },
 ];
 const ASPECT_OPTIONS: ReadonlyArray<{ value: VideoAspect; label: string }> = [
-  { value: '9:16', label: '竖屏 9:16' },
-  { value: '16:9', label: '横屏 16:9' },
-  { value: '1:1', label: '方形 1:1' },
+  { value: '9:16', label: '9:16' },
+  { value: '16:9', label: '16:9' },
+  { value: '1:1', label: '1:1' },
 ];
 const RES_OPTIONS: ReadonlyArray<{ value: VideoResolution; label: string }> = [
   { value: '1080p', label: '1080P 高清' },
   { value: '720p', label: '720P 省钱' },
 ];
 const DURATION_OPTIONS: ReadonlyArray<{ value: VideoDuration; label: string }> = [
-  { value: 8, label: '8 秒/段' },
-  { value: 6, label: '6 秒/段' },
+  { value: 8, label: '8 秒' },
+  { value: 6, label: '6 秒' },
 ];
 
 /** 估算段数(真实段数由后端 optimize 决定,这里仅用于价格预览). */
@@ -512,12 +512,12 @@ function NormalVideoForm({ onTaskCreated }: { onTaskCreated: (taskId: string) =>
   return (
     <div className="mx-auto -mt-7 w-full max-w-[1080px] space-y-5 px-6">
       <Section className="relative z-10 rounded-[20px] border-transparent bg-white px-6 py-5 shadow-[0_16px_38px_rgba(89,87,87,0.08)]">
-        <div className="grid gap-5 lg:grid-cols-[180px_minmax(240px,1fr)_170px_180px_230px] lg:items-end">
-          <SegGroup label="模型" value={model} options={MODEL_OPTIONS} onChange={setModel} />
-          <SegGroup label="风格" value={style} options={STYLE_OPTIONS} onChange={setStyle} />
-          <SegGroup label="尺寸" value={aspectRatio} options={ASPECT_OPTIONS} onChange={setAspectRatio} />
-          <SegGroup label="画质" value={resolution} options={RES_OPTIONS} onChange={setResolution} />
+        <div className="grid gap-5 lg:grid-cols-[178px_288px_132px_198px_156px] lg:items-end">
+          <VideoSelect label="AI 模型" value={model} options={MODEL_OPTIONS} onChange={setModel} />
+          <SegGroup label="风格样式" value={style} options={STYLE_OPTIONS} onChange={setStyle} />
           <SegGroup label="时长" value={durationSeconds} options={DURATION_OPTIONS} onChange={setDurationSeconds} />
+          <SegGroup label="比例" value={aspectRatio} options={ASPECT_OPTIONS} onChange={setAspectRatio} />
+          <VideoSelect label="画质" value={resolution} options={RES_OPTIONS} onChange={setResolution} />
         </div>
       </Section>
 
@@ -779,6 +779,35 @@ function PetVideoForm({ onTaskCreated }: { onTaskCreated: (taskId: string) => vo
   );
 }
 
+function VideoSelect<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: T;
+  options: ReadonlyArray<{ value: T; label: string; hint?: string }>;
+  onChange: (v: T) => void;
+}): JSX.Element {
+  return (
+    <label className="block min-w-0">
+      <span className="mb-2 block text-[13px] font-semibold text-[#ADADAD]">{label}</span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value as T)}
+        className="h-11 w-full rounded-[10px] border border-[#DCDDDD] bg-white px-4 text-[14px] font-semibold text-foreground outline-none transition focus:border-[#57479C]/60 focus:ring-2 focus:ring-[#57479C]/10"
+      >
+        {options.map((option) => (
+          <option key={String(option.value)} value={option.value}>
+            {option.hint ? `${option.label} · ${option.hint}` : option.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 /** 通用分段单选控件(标签 + 一排按钮). */
 function SegGroup<T extends string | number>({
   label,
@@ -794,7 +823,7 @@ function SegGroup<T extends string | number>({
   return (
     <div className="min-w-0">
       <div className="mb-2 text-[13px] font-semibold text-[#ADADAD]">{label}</div>
-      <div className="flex flex-wrap gap-2">
+      <div className="flex min-h-11 rounded-[12px] bg-[#EFEFEF]/65 p-1">
         {options.map((o) => {
           const active = o.value === value;
           return (
@@ -804,17 +833,17 @@ function SegGroup<T extends string | number>({
               aria-pressed={active}
               onClick={() => onChange(o.value)}
               className={cn(
-                'inline-flex h-10 items-center gap-1.5 rounded-[10px] border px-4 text-[14px] font-semibold transition-colors',
+                'inline-flex min-w-0 flex-1 items-center justify-center gap-1 rounded-[9px] px-2 text-[13px] font-semibold transition-colors',
                 active
-                  ? 'border-[#57479C]/45 bg-[#57479C]/10 text-[#57479C]'
-                  : 'border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:text-[#57479C]',
+                  ? 'bg-white text-[#57479C] shadow-[0_1px_2px_rgba(17,24,39,0.05)] ring-1 ring-[#57479C]/25'
+                  : 'text-[#595757] hover:bg-white/70 hover:text-[#57479C]',
               )}
             >
-              {o.label}
+              <span className="truncate">{o.label}</span>
               {o.hint && (
                 <span
                   className={cn(
-                    'text-[11px]',
+                    'hidden text-[10px] xl:inline',
                     active ? 'text-[#57479C]/70' : 'text-muted-foreground',
                   )}
                 >
