@@ -10,6 +10,7 @@ import {
   Loader2,
   Lock,
   Mic,
+  Paperclip,
   PawPrint,
   ShieldCheck,
   Sparkles,
@@ -99,13 +100,12 @@ export function VideoPage(): JSX.Element {
   }, [currentTask, refreshTasks, taskId]);
 
   return (
-    <PageContainer width="wide" className="max-w-[1400px] px-4 py-0 sm:px-6 md:px-8">
+    <PageContainer width="wide" className="max-w-none px-0 py-0">
       <CreativeHero
         title="用AI创作视频"
-        description="把一段文案变成竖屏短视频：AI 配画面、配音和字幕。先报价，确认后才生成。"
         tone="video"
       />
-      <div className="mb-6 flex flex-wrap gap-2" role="tablist" aria-label="视频类型">
+      <div className="relative z-10 mx-auto -mt-[182px] mb-[142px] flex w-full max-w-[1080px] flex-wrap gap-2 px-6" role="tablist" aria-label="视频类型">
         {TABS.map((t) => {
           const active = tab === t.id;
           const Icon = t.icon;
@@ -185,52 +185,38 @@ function ImageTaskEntry(): JSX.Element {
 
 function CreativeHero({
   title,
-  description,
   tone,
 }: {
   title: string;
-  description: string;
   tone: 'video' | 'image';
 }): JSX.Element {
   const isVideo = tone === 'video';
   return (
     <header
       className={cn(
-        '-mx-4 mb-8 overflow-hidden rounded-b-[28px] px-8 pb-10 pt-14 sm:-mx-6 md:-mx-8 md:px-12',
+        'relative mb-0 h-[370px] overflow-hidden px-6',
         isVideo
           ? 'bg-[#57479C]/10'
           : 'bg-[#42C0EF]/10',
       )}
     >
-      <div className="flex items-start justify-between gap-8">
-        <div className="min-w-0">
-          <h1 className="text-[34px] font-semibold leading-tight tracking-tight text-foreground sm:text-[40px]">
-            {title}
-            <Sparkles
-              className={cn(
-                'ml-2 inline h-5 w-5 align-super',
-                isVideo ? 'text-[#57479C]' : 'text-[#42C0EF]',
-              )}
-              aria-hidden
-            />
-          </h1>
-          <p className="mt-3 max-w-2xl text-[14px] leading-relaxed text-[#595757]">
-            {description}
-          </p>
-        </div>
-        <div
+      <div className="mx-auto flex h-full w-full max-w-[1080px] items-start pt-[108px]">
+        <h1 className="relative z-10 text-[36px] font-semibold leading-tight tracking-tight text-foreground">
+          {title}
+          <Sparkles
+            className={cn(
+              'ml-2 inline h-5 w-5 align-super',
+              isVideo ? 'text-[#57479C]' : 'text-[#42C0EF]',
+            )}
+            aria-hidden
+          />
+        </h1>
+        <img
           aria-hidden
-          className={cn(
-            'hidden h-28 w-72 shrink-0 items-center justify-center rounded-[26px] bg-white/45 shadow-[0_18px_45px_rgba(89,87,87,0.08)] lg:flex',
-            isVideo ? 'text-[#57479C]' : 'text-[#42C0EF]',
-          )}
-        >
-          <div className="flex items-center gap-4">
-            <Film className="h-12 w-12 opacity-70" />
-            <VideoIcon className="h-16 w-16 opacity-80" />
-            <Sparkles className="h-8 w-8 opacity-70" />
-          </div>
-        </div>
+          src={isVideo ? '/design-ref/video-hero.png' : '/design-ref/image-hero.png'}
+          alt=""
+          className="pointer-events-none absolute right-0 top-0 h-full w-[58%] object-cover object-right-top"
+        />
       </div>
     </header>
   );
@@ -524,9 +510,9 @@ function NormalVideoForm({ onTaskCreated }: { onTaskCreated: (taskId: string) =>
   }
 
   return (
-    <div className="space-y-6">
-      <Section className="border-transparent bg-white px-5 py-4 shadow-[0_12px_32px_rgba(89,87,87,0.06)]">
-        <div className="space-y-5">
+    <div className="mx-auto -mt-7 w-full max-w-[1080px] space-y-5 px-6">
+      <Section className="relative z-10 rounded-[20px] border-transparent bg-white px-6 py-5 shadow-[0_16px_38px_rgba(89,87,87,0.08)]">
+        <div className="grid gap-5 lg:grid-cols-[180px_minmax(240px,1fr)_170px_180px_230px] lg:items-end">
           <SegGroup label="模型" value={model} options={MODEL_OPTIONS} onChange={setModel} />
           <SegGroup label="风格" value={style} options={STYLE_OPTIONS} onChange={setStyle} />
           <SegGroup label="尺寸" value={aspectRatio} options={ASPECT_OPTIONS} onChange={setAspectRatio} />
@@ -535,18 +521,34 @@ function NormalVideoForm({ onTaskCreated }: { onTaskCreated: (taskId: string) =>
         </div>
       </Section>
 
-      <Section className="border-transparent bg-white px-6 py-6 shadow-[0_12px_32px_rgba(89,87,87,0.06)]">
+      <section className="relative rounded-[20px] bg-white px-6 py-6 shadow-[0_16px_38px_rgba(89,87,87,0.08)]">
         <Textarea
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           placeholder="描述你想让 HOLA DAY 创作的视频内容 ..."
           rows={5}
-          className="min-h-[176px] resize-y border-0 bg-transparent px-0 text-[17px] font-medium shadow-none placeholder:text-[#DCDDDD] focus-visible:ring-0"
+          className="min-h-[252px] resize-none border-0 bg-transparent px-0 text-[18px] font-medium shadow-none placeholder:text-[#DCDDDD] focus-visible:ring-0"
         />
-        <p className="mt-2 text-[11px] text-muted-foreground">
-          仅编排你本人的内容，不模仿或冒充他人。最终成片带 HOLA DAY 水印。
-        </p>
-      </Section>
+        <div className="absolute bottom-9 left-8 flex items-center gap-3 text-[#9AA1AE]">
+          <ImagePlus className="h-5 w-5" aria-hidden />
+          <Paperclip className="h-5 w-5" aria-hidden />
+        </div>
+        <Button type="button" onClick={() => void handleSubmit()} disabled={submitting} className="absolute bottom-7 right-7 h-[46px] min-w-[132px] overflow-hidden rounded-full border border-[#57479C] bg-[#57479C]/12 px-0 pl-5 text-[16px] text-[#57479C] shadow-[0_10px_24px_rgba(87,71,156,0.16)] hover:bg-[#57479C]/18">
+          {submitting ? (
+            <>
+              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+              提交中…
+            </>
+          ) : (
+            <>
+              <span className="pr-3">生成视频</span>
+              <span className="flex h-[46px] w-[46px] items-center justify-center rounded-full bg-[#57479C] text-white shadow-[-6px_0_14px_rgba(89,87,87,0.08)]">
+                <Sparkles className="h-4 w-4" aria-hidden />
+              </span>
+            </>
+          )}
+        </Button>
+      </section>
 
       <Section title="价格预览" className="border-[#57479C]/20 bg-[#57479C]/[0.04]">
         <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2">
@@ -566,21 +568,8 @@ function NormalVideoForm({ onTaskCreated }: { onTaskCreated: (taskId: string) =>
         </p>
       </Section>
 
-      <div className="flex items-center justify-end gap-3">
-        <span className="text-[12px] text-muted-foreground">提交后先报价,不会立即扣费</span>
-        <Button type="button" onClick={() => void handleSubmit()} disabled={submitting} className="min-w-[132px] rounded-full bg-[#57479C] hover:bg-[#57479C]/90">
-          {submitting ? (
-            <>
-              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-              提交中…
-            </>
-          ) : (
-            <>
-              <Sparkles className="mr-1.5 h-4 w-4" />
-              生成视频
-            </>
-          )}
-        </Button>
+      <div className="flex items-center justify-end text-[12px] text-muted-foreground">
+        提交后先报价，不会立即扣费
       </div>
 
       <VideoHistory videoType="normal" />
@@ -803,8 +792,8 @@ function SegGroup<T extends string | number>({
   onChange: (v: T) => void;
 }): JSX.Element {
   return (
-    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
-      <div className="w-12 shrink-0 text-[13px] font-medium text-[#595757]">{label}</div>
+    <div className="min-w-0">
+      <div className="mb-2 text-[13px] font-semibold text-[#ADADAD]">{label}</div>
       <div className="flex flex-wrap gap-2">
         {options.map((o) => {
           const active = o.value === value;
@@ -815,7 +804,7 @@ function SegGroup<T extends string | number>({
               aria-pressed={active}
               onClick={() => onChange(o.value)}
               className={cn(
-                'inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[13px] transition-colors',
+                'inline-flex h-10 items-center gap-1.5 rounded-[10px] border px-4 text-[14px] font-semibold transition-colors',
                 active
                   ? 'border-[#57479C]/45 bg-[#57479C]/10 text-[#57479C]'
                   : 'border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:text-[#57479C]',

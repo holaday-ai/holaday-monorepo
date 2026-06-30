@@ -2,8 +2,6 @@ import {
   CalendarClock,
   Download,
   Globe2,
-  Languages,
-  ListChecks,
   Menu,
   Radio,
   Search,
@@ -201,17 +199,27 @@ export function MainPanel({
       </div>
       {showEmptyHome ? (
         <div className="flex-1 overflow-y-auto">
-          <div className="mx-auto w-full max-w-[920px] px-4 pb-12 pt-[12vh] sm:px-6 xl:pt-[14vh]">
-            <h1 className="mb-2 text-left text-[34px] font-semibold leading-tight tracking-tight text-foreground sm:text-[40px]">
+          <div className="mx-auto w-full max-w-[880px] px-4 pb-12 pt-[9vh] sm:px-6 xl:pt-[10vh]">
+            <h1 className="mb-2 text-left text-[30px] font-semibold leading-tight tracking-tight text-foreground sm:text-[38px]">
               Hello,{' '}
               <span className="text-[#EA1F59]">
                 {greetingName ? `${greetingName}～` : '今天想做点什么？'}
               </span>
             </h1>
-            <p className="mb-20 text-left text-[15px] font-medium text-[#ADADAD] sm:text-[17px]">
-              欢迎回来！今天又是高效的一天呢！
+            <p className="text-left text-[15px] font-medium text-[#8F96A3] sm:text-[17px]">
+              欢迎回来！今天又是高效的一天呢！ 🚀
             </p>
-            <OnboardingHint />
+            <div className="relative mx-auto mt-14 h-[190px] max-w-[850px] overflow-visible">
+              <img
+                src="/design-ref/home-hero.png"
+                alt=""
+                aria-hidden
+                className="pointer-events-none absolute left-1/2 top-0 h-[220px] w-[940px] max-w-none -translate-x-1/2 object-contain"
+              />
+              <div className="absolute left-1/2 top-[118px] z-10 w-[min(520px,calc(100vw-3rem))] -translate-x-1/2">
+                <OnboardingHint />
+              </div>
+            </div>
             <InputArea
               key={composerKey}
               onSubmit={onSubmit}
@@ -365,7 +373,7 @@ function SuggestionChips({
   onPick(intent: string): void;
 }): JSX.Element {
   return (
-    <div className="mx-auto mt-10 flex max-w-[820px] flex-wrap items-center justify-center gap-3">
+    <div className="mx-auto mt-10 flex max-w-[900px] flex-wrap items-center justify-center gap-4">
       {SUGGESTION_GROUPS.flatMap((group) => group.items).map((s) => {
         const Icon = s.icon;
         return (
@@ -375,7 +383,7 @@ function SuggestionChips({
             onClick={() => onPick(s.intent)}
             aria-label={`用示例填入：${s.label}`}
             className={cn(
-              'group inline-flex h-10 min-w-[132px] items-center justify-center gap-2 rounded-[10px] border px-4 text-[13px] font-semibold shadow-[0_8px_22px_rgba(89,87,87,0.035)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20',
+              'group inline-flex h-9 min-w-[126px] items-center justify-center gap-2 rounded-[8px] border px-4 text-[13px] font-semibold shadow-[0_8px_22px_rgba(89,87,87,0.035)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20',
               suggestionToneClass(s.tone),
             )}
           >
@@ -479,15 +487,7 @@ const SUGGESTION_GROUPS: ReadonlyArray<{
   items: readonly SuggestionItem[];
 }> = [
   {
-    title: '网页执行',
-    items: [
-      { label: '查资料', intent: '帮我查一下今天的科技新闻', icon: Search, tone: 'yellow' },
-      { label: '打开网页', intent: '打开 GitHub 看看 trending 项目', icon: Globe2, tone: 'blue' },
-      { label: '下载文件', intent: '把这页内容保存成 PDF：', icon: Download, tone: 'purple' },
-    ],
-  },
-  {
-    title: '专业任务',
+    title: '推荐',
     items: [
       {
         label: '直播复盘',
@@ -495,25 +495,11 @@ const SUGGESTION_GROUPS: ReadonlyArray<{
         icon: Radio,
         tone: 'magenta',
       },
+      { label: '查资料', intent: '帮我查一下今天的科技新闻', icon: Search, tone: 'yellow' },
+      { label: '打开网页', intent: '打开 GitHub 看看 trending 项目', icon: Globe2, tone: 'blue' },
       { label: '行情查询', intent: '去东方财富查一下茅台最新股价', icon: TrendingUp, tone: 'yellow' },
-      { label: '翻译内容', intent: '帮我翻译这段内容：', icon: Languages, tone: 'blue' },
-    ],
-  },
-  {
-    title: '任务管理',
-    items: [
-      {
-        label: '定时任务',
-        intent: '每天早上 9 点跑一次昨天的电商日报',
-        icon: CalendarClock,
-        tone: 'magenta',
-      },
-      {
-        label: '批量执行',
-        intent: '帮我对这些链接逐个执行抓取：\n',
-        icon: ListChecks,
-        tone: 'purple',
-      },
+      { label: '下载文件', intent: '把这页内容保存成 PDF：', icon: Download, tone: 'purple' },
+      { label: '定时任务', intent: '每天早上 9 点跑一次昨天的电商日报', icon: CalendarClock, tone: 'magenta' },
     ],
   },
 ];

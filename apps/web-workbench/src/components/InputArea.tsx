@@ -607,7 +607,7 @@ export function InputArea({
         className={cn(
           'relative overflow-hidden border transition-[border-color,box-shadow]',
           fullBleed
-            ? 'rounded-[24px] border-[#EA1F59]/10 bg-[#EA1F59]/[0.035] shadow-[0_18px_42px_rgba(234,31,89,0.10)] focus-within:border-[#EA1F59]/35 focus-within:ring-2 focus-within:ring-[#EA1F59]/10'
+            ? 'rounded-[24px] border-[#EA1F59]/10 bg-[#EA1F59]/10 shadow-[0_18px_42px_rgba(234,31,89,0.10)] focus-within:border-[#EA1F59]/30 focus-within:ring-2 focus-within:ring-[#EA1F59]/10'
             : cn('rounded-lg', COMPOSER_SURFACE, COMPOSER_FIELD_FOCUS),
           dragActive
             ? 'border-[#42C0EF]/60 ring-2 ring-[#42C0EF]/15'
@@ -656,7 +656,7 @@ export function InputArea({
           className={cn(
             'resize-none border-0 bg-transparent px-4 pr-14 leading-relaxed shadow-none placeholder:text-[#ADADAD] focus-visible:ring-0',
             fullBleed
-              ? 'min-h-[214px] px-6 pb-16 pt-6 text-[18px] font-medium sm:min-h-[236px]'
+              ? 'min-h-[218px] px-7 pb-16 pt-8 text-[18px] font-medium'
               : compact
                 ? 'min-h-[76px] pb-10 pt-3 text-[15px] sm:min-h-[92px] sm:pb-12 sm:pt-4'
                 : 'min-h-[92px] pb-12 pt-4 text-[15px]',
@@ -674,7 +674,7 @@ export function InputArea({
             hand-rolled outside-click popover. Picks up focus
             management, escape-to-close, arrow-key navigation,
             and proper portal layering for free. */}
-        <div className={cn('absolute', fullBleed ? 'bottom-8 left-7' : 'bottom-2.5 left-2.5')}>
+        <div className={cn('absolute', fullBleed ? 'bottom-8 left-8' : 'bottom-2.5 left-2.5')}>
           {attachmentsAllowed ? (
             <DropdownMenu open={plusMenuOpen} onOpenChange={setPlusMenuOpen}>
               <DropdownMenuTrigger asChild>
@@ -817,7 +817,7 @@ export function InputArea({
           className={cn(
             'absolute bg-[#EA1F59] text-white shadow-[0_4px_12px_rgba(234,31,89,0.18)] hover:bg-[#EA1F59]/90 focus-visible:ring-[#EA1F59]/25',
             fullBleed
-              ? 'bottom-7 right-7 h-12 gap-0 overflow-hidden rounded-full px-0 pl-5 text-[16px]'
+              ? 'bottom-7 right-7 h-[46px] gap-0 overflow-hidden rounded-full border border-[#EA1F59] bg-[#EA1F59]/12 px-0 pl-5 text-[16px] text-[#EA1F59] shadow-[0_10px_24px_rgba(234,31,89,0.16)] hover:bg-[#EA1F59]/18'
               : 'bottom-2.5 right-2.5 h-8 w-8 rounded-full',
           )}
           aria-label={submitting ? submittingStatus : '发送'}
@@ -828,7 +828,7 @@ export function InputArea({
           ) : fullBleed ? (
             <>
               <span className="pr-3">Enter</span>
-              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-[#EA1F59] shadow-[-6px_0_14px_rgba(89,87,87,0.08)]">
+              <span className="flex h-[46px] w-[46px] items-center justify-center rounded-full bg-[#EA1F59] text-white shadow-[-6px_0_14px_rgba(89,87,87,0.08)]">
                 <ArrowUp className="h-5 w-5" />
               </span>
             </>

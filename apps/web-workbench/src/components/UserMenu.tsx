@@ -114,19 +114,19 @@ export function UserMenu({
         <div
           role="menu"
           className={cn(
-            'absolute bottom-full z-50 rounded-[18px] border border-[#DCDDDD]/80 bg-white p-3 text-foreground shadow-[0_22px_54px_rgba(234,31,89,0.12)] animate-fade-in dark:border-white/10 dark:bg-card',
+            'absolute bottom-full z-50 min-h-[460px] rounded-[28px] border border-[#EFEFEF] bg-white p-5 text-foreground shadow-[0_26px_70px_rgba(234,31,89,0.14)] animate-fade-in dark:border-white/10 dark:bg-card',
             compact ? 'left-full mb-0 ml-2 w-[280px]' : 'left-0 mb-2 w-[280px]',
           )}
         >
-          <div className="flex items-center gap-3 border-b border-[#EFEFEF] px-1 pb-3 dark:border-white/10">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border-2 border-[#EA1F59]/20 bg-[#EA1F59]/10 text-base font-semibold text-[#EA1F59]">
+          <div className="flex items-center gap-4 border-b border-[#EFEFEF] pb-5 dark:border-white/10">
+            <div className="flex h-[72px] w-[72px] shrink-0 items-center justify-center rounded-full border-[3px] border-[#EA1F59]/20 bg-[#EA1F59]/10 text-xl font-semibold text-[#EA1F59]">
               {initial}
             </div>
             <div className="min-w-0 flex-1">
-              <div className="truncate text-[14px] font-semibold text-foreground">
+              <div className="truncate text-[18px] font-semibold text-foreground">
                 {displayName || email || '未命名'}
               </div>
-              <div className="mt-1 inline-flex items-center rounded-full border border-[#EA1F59]/15 bg-[#EA1F59]/10 px-2 py-0.5 text-[11px] font-semibold text-[#EA1F59]">
+              <div className="mt-2 inline-flex items-center rounded-full border border-[#EA1F59]/15 bg-[#EA1F59]/10 px-3 py-1 text-[14px] font-semibold text-[#EA1F59]">
                 {planLabel}
               </div>
             </div>
@@ -136,7 +136,7 @@ export function UserMenu({
               {email}
             </div>
           )}
-          <div className="border-b border-[#EFEFEF] py-2 dark:border-white/10">
+          <div className="border-b border-[#EFEFEF] py-5 dark:border-white/10">
             <MenuItem tone="magenta" icon={<UserIcon className="h-4 w-4" />} onClick={() => go('/profile')}>
               个人资料
             </MenuItem>
@@ -162,11 +162,11 @@ export function UserMenu({
               任务历史
             </MenuItem>
           </div>
-          <div className="px-1 pb-1 pt-2 text-[12px] font-semibold text-[#595757]">
+          <div className="pb-2 pt-5 text-[15px] font-semibold text-[#595757]">
             外观
           </div>
           <ThemeSwitcher mode={mode} onChange={setMode} />
-          <div className="mt-3 rounded-[12px] border border-[#EFEFEF] bg-white px-1 py-2 shadow-[0_8px_22px_rgba(89,87,87,0.035)] dark:border-white/10 dark:bg-white/[0.04]">
+          <div className="mt-5 rounded-[16px] border border-[#EFEFEF] bg-white px-2 py-3 shadow-[0_8px_22px_rgba(89,87,87,0.035)] dark:border-white/10 dark:bg-white/[0.04]">
             {onClearFailedTasks && failedTaskCount > 0 && (
               <MenuItem
                 tone="magenta"
@@ -216,7 +216,7 @@ function ThemeSwitcher({
   onChange(m: ThemeMode): void;
 }): JSX.Element {
   return (
-    <div className="grid grid-cols-3 gap-1 rounded-full bg-white p-1 shadow-[0_8px_22px_rgba(89,87,87,0.06)] dark:bg-white/10">
+    <div className="grid grid-cols-3 gap-1 rounded-full bg-white p-1.5 shadow-[0_8px_24px_rgba(89,87,87,0.08)] dark:bg-white/10">
       <ThemeOption active={mode === 'light'} onClick={() => onChange('light')} label="浅色">
         <Sun className="h-3.5 w-3.5" />
       </ThemeOption>
@@ -248,7 +248,7 @@ function ThemeOption({
       aria-pressed={active}
       title={label}
       className={cn(
-        'flex items-center justify-center gap-1 rounded-full px-2 py-2 text-[11px] font-semibold transition-colors',
+        'flex h-10 items-center justify-center gap-1 rounded-full px-2 text-[13px] font-semibold transition-colors',
         active
           ? 'border border-[#EA1F59]/25 bg-white text-[#EA1F59] shadow-[0_1px_2px_rgba(17,24,39,0.05)] dark:bg-card dark:text-foreground'
           : 'text-[#595757] hover:bg-white/65 hover:text-foreground dark:text-foreground/65 dark:hover:bg-white/10',
@@ -279,7 +279,7 @@ function MenuItem({
       role="menuitem"
       onClick={onClick}
       className={cn(
-        'flex w-full items-center gap-3 rounded-[10px] px-2 py-2.5 text-left text-[13px] font-semibold transition-colors',
+        'flex w-full items-center gap-4 rounded-[14px] px-2 py-3 text-left text-[16px] font-semibold transition-colors',
         destructive
           ? 'text-[#EA1F59] hover:bg-[#EA1F59]/10'
           : 'text-[#595757] hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] dark:text-foreground/75 dark:hover:bg-white/10 dark:hover:text-foreground',
@@ -287,7 +287,7 @@ function MenuItem({
     >
       <span
         className={cn(
-          'flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-white shadow-[0_8px_18px_rgba(89,87,87,0.06)]',
+          'flex h-12 w-12 shrink-0 items-center justify-center rounded-[14px] bg-white shadow-[0_10px_24px_rgba(89,87,87,0.08)]',
           destructive || tone === 'magenta'
             ? 'text-[#EA1F59]'
             : tone === 'blue'

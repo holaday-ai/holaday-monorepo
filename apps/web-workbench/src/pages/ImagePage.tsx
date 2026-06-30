@@ -2,9 +2,8 @@ import {
   Image as ImageIcon,
   ImagePlus,
   Loader2,
-  Palette,
+  Paperclip,
   Sparkles,
-  WandSparkles,
   X,
 } from 'lucide-react';
 import * as React from 'react';
@@ -37,13 +36,6 @@ type ImageModel = 'auto' | 'quality' | 'fast';
 type ImageStyle = 'dynamic' | 'realistic' | 'poster' | 'minimal';
 type ImageAspect = '2:3' | '1:1' | '16:9';
 type ImageCount = 1 | 2 | 3 | 4;
-
-const PROMPT_EXAMPLES = [
-  '做一张小红书风格护肤品种草封面，干净明亮，留白放标题',
-  '生成一张 SaaS 产品发布海报，科技感，深色背景，突出“AI Workflow”',
-  '画一张猫咪在咖啡馆窗边睡觉的插画，温暖手绘风',
-  '把参考图改成极简电商主图，白底，高级感，突出产品质感',
-];
 
 const IMAGE_MODEL_OPTIONS: ReadonlyArray<{ value: ImageModel; label: string }> = [
   { value: 'auto', label: 'Auto' },
@@ -157,12 +149,12 @@ export function ImagePage(): JSX.Element {
   }
 
   return (
-    <PageContainer width="wide" className="max-w-[1400px] px-4 py-0 sm:px-6 md:px-8">
+    <PageContainer width="wide" className="max-w-none px-0 py-0">
       <ImageHero />
 
-      <div className="space-y-6">
-        <Section className="border-transparent bg-white px-5 py-4 shadow-[0_12px_32px_rgba(89,87,87,0.06)]">
-          <div className="grid gap-5 lg:grid-cols-[1fr_1fr_auto_auto] lg:items-end">
+      <div className="mx-auto -mt-7 w-full max-w-[1080px] space-y-5 px-6">
+        <Section className="relative z-10 rounded-[20px] border-transparent bg-white px-6 py-5 shadow-[0_16px_38px_rgba(89,87,87,0.08)]">
+          <div className="grid gap-5 lg:grid-cols-[180px_180px_300px_260px] lg:items-end">
             <ImageOptionSelect<ImageModel> label="AI 模型" value={model} options={IMAGE_MODEL_OPTIONS} onChange={setModel} />
             <ImageOptionSelect<ImageStyle> label="风格样式" value={style} options={IMAGE_STYLE_OPTIONS} onChange={setStyle} />
             <ImageSegment<ImageAspect> label="比例" value={aspect} options={IMAGE_ASPECT_OPTIONS} onChange={setAspect} />
@@ -170,27 +162,34 @@ export function ImagePage(): JSX.Element {
           </div>
         </Section>
 
-        <Section className="border-transparent bg-white px-6 py-6 shadow-[0_12px_32px_rgba(89,87,87,0.06)]">
+        <section className="relative rounded-[20px] bg-white px-6 py-6 shadow-[0_16px_38px_rgba(89,87,87,0.08)]">
           <Textarea
             value={prompt}
             onChange={(event) => setPrompt(event.target.value)}
             placeholder="描述你想让 HOLA DAY 创作的图片内容 ..."
             rows={5}
-            className="min-h-[176px] resize-y border-0 bg-transparent px-0 text-[17px] font-medium shadow-none placeholder:text-[#DCDDDD] focus-visible:ring-0"
+            className="min-h-[252px] resize-none border-0 bg-transparent px-0 text-[18px] font-medium shadow-none placeholder:text-[#DCDDDD] focus-visible:ring-0"
           />
-          <div className="mt-3 flex flex-wrap gap-2">
-            {PROMPT_EXAMPLES.map((example) => (
-              <button
-                key={example}
-                type="button"
-                onClick={() => setPrompt(example)}
-                className="rounded-[8px] border border-[#E1E3E8] bg-white px-3 py-1.5 text-left text-[12px] text-[#595757] transition hover:border-[#42C0EF]/35 hover:bg-[#42C0EF]/10 hover:text-[#1688AA]"
-              >
-                {example}
-              </button>
-            ))}
+          <div className="absolute bottom-9 left-8 flex items-center gap-3 text-[#9AA1AE]">
+            <ImagePlus className="h-5 w-5" aria-hidden />
+            <Paperclip className="h-5 w-5" aria-hidden />
           </div>
-        </Section>
+          <Button type="button" onClick={() => void handleSubmit()} disabled={submitting || uploading} className="absolute bottom-7 right-7 h-[46px] min-w-[132px] overflow-hidden rounded-full border border-[#42C0EF] bg-[#42C0EF]/12 px-0 pl-5 text-[16px] text-[#1688AA] shadow-[0_10px_24px_rgba(66,192,239,0.16)] hover:bg-[#42C0EF]/18">
+            {submitting ? (
+              <>
+                <Loader2 className="mr-1.5 h-4 w-4 animate-spin" aria-hidden />
+                提交中…
+              </>
+            ) : (
+              <>
+                <span className="pr-3">生成图片</span>
+                <span className="flex h-[46px] w-[46px] items-center justify-center rounded-full bg-[#42C0EF] text-white shadow-[-6px_0_14px_rgba(89,87,87,0.08)]">
+                  <Sparkles className="h-4 w-4" aria-hidden />
+                </span>
+              </>
+            )}
+          </Button>
+        </section>
 
         <Section title="参考图" description="可选。上传后会作为图生图或编辑输入，不上传则走文生图。" className="border-transparent bg-white shadow-[0_12px_32px_rgba(89,87,87,0.06)]">
           <input
@@ -240,19 +239,6 @@ export function ImagePage(): JSX.Element {
 
         <div className="flex items-center justify-end gap-3">
           <span className="text-[12px] text-muted-foreground">生成结果会保存到任务产物和文件库</span>
-          <Button type="button" onClick={() => void handleSubmit()} disabled={submitting || uploading} className="min-w-[132px] rounded-full bg-[#42C0EF] hover:bg-[#42C0EF]/90">
-            {submitting ? (
-              <>
-                <Loader2 className="mr-1.5 h-4 w-4 animate-spin" aria-hidden />
-                提交中…
-              </>
-            ) : (
-              <>
-                <WandSparkles className="mr-1.5 h-4 w-4" aria-hidden />
-                生成图片
-              </>
-            )}
-          </Button>
         </div>
 
         <ImageHistory rows={imageRows} />
@@ -301,24 +287,18 @@ function ImageHistory({ rows }: { rows: ImageRow[] }): JSX.Element {
 
 function ImageHero(): JSX.Element {
   return (
-    <header className="-mx-4 mb-8 overflow-hidden rounded-b-[28px] bg-[#42C0EF]/10 px-8 pb-10 pt-14 sm:-mx-6 md:-mx-8 md:px-12">
-      <div className="flex items-start justify-between gap-8">
-        <div className="min-w-0">
-          <h1 className="text-[34px] font-semibold leading-tight tracking-tight text-foreground sm:text-[40px]">
-            用AI创作图片
-            <Sparkles className="ml-2 inline h-5 w-5 align-super text-[#42C0EF]" aria-hidden />
-          </h1>
-          <p className="mt-3 max-w-2xl text-[14px] leading-relaxed text-[#595757]">
-            生成海报、封面、主图、插画或头像；也可以上传参考图做图生图和局部风格修改。
-          </p>
-        </div>
-        <div aria-hidden className="hidden h-28 w-72 shrink-0 items-center justify-center rounded-[26px] bg-white/45 text-[#42C0EF] shadow-[0_18px_45px_rgba(89,87,87,0.08)] lg:flex">
-          <div className="flex items-center gap-4">
-            <Palette className="h-12 w-12 opacity-70" />
-            <ImagePlus className="h-16 w-16 opacity-80" />
-            <Sparkles className="h-8 w-8 opacity-70" />
-          </div>
-        </div>
+    <header className="relative mb-0 h-[370px] overflow-hidden bg-[#42C0EF]/10 px-6">
+      <div className="mx-auto flex h-full w-full max-w-[1080px] items-start pt-[108px]">
+        <h1 className="relative z-10 text-[36px] font-semibold leading-tight tracking-tight text-foreground">
+          用AI创作图片
+          <Sparkles className="ml-2 inline h-5 w-5 align-super text-[#42C0EF]" aria-hidden />
+        </h1>
+        <img
+          src="/design-ref/image-hero.png"
+          alt=""
+          aria-hidden
+          className="pointer-events-none absolute right-0 top-0 h-full w-[58%] object-cover object-right-top"
+        />
       </div>
     </header>
   );
@@ -341,7 +321,7 @@ function ImageOptionSelect<T extends string>({
       <select
         value={value}
         onChange={(event) => onChange(event.target.value as T)}
-        className="h-11 w-full rounded-[10px] border border-[#DCDDDD] bg-white px-4 text-[14px] font-semibold text-foreground outline-none transition focus:border-[#42C0EF]/60 focus:ring-2 focus:ring-[#42C0EF]/10"
+        className="h-10 w-full rounded-[10px] border border-[#DCDDDD] bg-white px-4 text-[14px] font-semibold text-foreground outline-none transition focus:border-[#42C0EF]/60 focus:ring-2 focus:ring-[#42C0EF]/10"
       >
         {options.map((option) => (
           <option key={option.value} value={option.value}>
@@ -377,7 +357,7 @@ function ImageSegment<T extends string | number>({
               aria-pressed={active}
               onClick={() => onChange(option.value)}
               className={cn(
-                'h-9 min-w-10 rounded-[8px] px-3 text-[13px] font-semibold transition-colors',
+                'h-10 min-w-12 rounded-[10px] px-4 text-[14px] font-semibold transition-colors',
                 active
                   ? 'border border-[#42C0EF]/45 bg-white text-[#42C0EF] shadow-[0_1px_2px_rgba(17,24,39,0.05)]'
                   : 'text-[#595757] hover:bg-white/70 hover:text-[#1688AA]',

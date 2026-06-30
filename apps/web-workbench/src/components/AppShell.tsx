@@ -682,8 +682,8 @@ export function AppShell(): JSX.Element {
       defaultOpen={true}
       style={
         {
-          '--sidebar-width': '260px',
-          '--sidebar-width-icon': '56px',
+          '--sidebar-width': '304px',
+          '--sidebar-width-icon': '64px',
         } as React.CSSProperties
       }
     >
