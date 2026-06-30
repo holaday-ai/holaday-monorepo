@@ -151,7 +151,34 @@ export function VideoPage(): JSX.Element {
         <IpOnboardingWizard onTaskCreated={handleTaskCreated} />
       )}
       {taskId && <CurrentVideoTaskPanel taskId={taskId} task={currentTask} />}
+      <ImageTaskEntry />
     </PageContainer>
+  );
+}
+
+function ImageTaskEntry(): JSX.Element {
+  return (
+    <Section title="图片任务" description="只需要静态图时，可以直接生成海报、封面、主图或上传参考图做图生图。">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-start gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px] bg-[#EA1F59]/10 text-[#EA1F59]">
+            <ImagePlus className="h-5 w-5" aria-hidden />
+          </div>
+          <div className="min-w-0">
+            <div className="text-[14px] font-semibold text-foreground">生成图片</div>
+            <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
+              文生图、图生图和图片编辑走独立图片任务，不进入视频报价流程。
+            </p>
+          </div>
+        </div>
+        <Link
+          to="/image"
+          className="inline-flex h-9 shrink-0 items-center justify-center rounded-[8px] border border-[#DCDDDD] bg-white px-3 text-[13px] font-medium text-[#595757] transition-colors hover:border-[#EA1F59]/30 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59]"
+        >
+          打开图片任务
+        </Link>
+      </div>
+    </Section>
   );
 }
 

@@ -27,6 +27,7 @@ const BillingPage = lazyRoute(() => import('@/pages/BillingPage'), 'BillingPage'
 const ConnectionsPage = lazyRoute(() => import('@/pages/ConnectionsPage'), 'ConnectionsPage');
 const FilesPage = lazyRoute(() => import('@/pages/FilesPage'), 'FilesPage');
 const HistoryPage = lazyRoute(() => import('@/pages/HistoryPage'), 'HistoryPage');
+const ImagePage = lazyRoute(() => import('@/pages/ImagePage'), 'ImagePage');
 const NotFoundPage = lazyRoute(() => import('@/pages/NotFoundPage'), 'NotFoundPage');
 const PlanPage = lazyRoute(() => import('@/pages/PlanPage'), 'PlanPage');
 const PrivacyPage = lazyRoute(() => import('@/pages/PrivacyPage'), 'PrivacyPage');
@@ -141,6 +142,7 @@ export function App(): JSX.Element {
           <Route path="/starred" element={lazyElement(<StarredPage />)} />
           <Route path="/files" element={lazyElement(<FilesPage />)} />
           <Route path="/video" element={<VideoGate />} />
+          <Route path="/image" element={lazyElement(<ImagePage />)} />
           <Route path="/scheduled" element={lazyElement(<ScheduledPage />)} />
           <Route path="/batch" element={lazyElement(<BatchPage />)} />
           <Route path="/batch/:batchId" element={lazyElement(<BatchPage />)} />

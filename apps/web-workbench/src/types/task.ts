@@ -99,7 +99,7 @@ export interface UiTask {
    * yet — the panel falls through to the streamingByTask signal in
    * that window.
    */
-  executionMode?: 'browser' | 'generate' | 'scrape';
+  executionMode?: 'browser' | 'generate' | 'scrape' | 'image';
   /**
    * Phase 2 video batch-2 — backend-stamped 成片 type (deriveVideoType),
    * hydrated from `result.metadata.videoType`. Drives per-tab history
