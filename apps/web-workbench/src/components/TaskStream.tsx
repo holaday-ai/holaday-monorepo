@@ -2821,7 +2821,7 @@ function makeMarkdownComponents(opts: {
                 }
               : undefined
           }
-          className="inline-flex min-h-7 items-center gap-1 rounded-[4px] px-0.5 align-middle text-[#EA1F59] underline decoration-[#EA1F59]/35 underline-offset-2 hover:text-[#D91B51] dark:text-[#EA1F59] dark:hover:text-[#F15A85]"
+          className="inline-flex min-h-7 items-center gap-1 rounded-[4px] px-0.5 align-middle text-[#EA1F59] underline decoration-[#EA1F59]/35 underline-offset-2 hover:text-[#EA1F59] dark:text-[#EA1F59] dark:hover:text-[#EA1F59]"
           {...rest}
         >
           {children}

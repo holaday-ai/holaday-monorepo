@@ -22,6 +22,7 @@ import { Button } from '@/components/ui/button';
 import type { ComposerSubmitResult } from '@/components/composer-submit';
 import { shouldResetComposerOnSelectionChange } from '@/components/composer-reset';
 import { taskStatusLabel } from '@/lib/task-status-copy';
+import { cn } from '@/lib/utils';
 import { useTaskStore } from '@/stores/task-store';
 import type { AwaitingKind } from '@/lib/awaiting-user-copy';
 import type { SidePanelMode } from '@/types/side-panel';
@@ -200,10 +201,16 @@ export function MainPanel({
       </div>
       {showEmptyHome ? (
         <div className="flex-1 overflow-y-auto">
-          <div className="mx-auto w-full max-w-[720px] px-4 pb-12 pt-[18vh] sm:px-6">
-            <h1 className="mb-6 text-center text-[28px] font-semibold leading-tight tracking-tight text-foreground">
-              你好，{greetingName || '今天想做点什么？'}
+          <div className="mx-auto w-full max-w-[920px] px-4 pb-12 pt-[12vh] sm:px-6 xl:pt-[14vh]">
+            <h1 className="mb-2 text-left text-[34px] font-semibold leading-tight tracking-tight text-foreground sm:text-[40px]">
+              Hello,{' '}
+              <span className="text-[#EA1F59]">
+                {greetingName ? `${greetingName}～` : '今天想做点什么？'}
+              </span>
             </h1>
+            <p className="mb-20 text-left text-[15px] font-medium text-[#ADADAD] sm:text-[17px]">
+              欢迎回来！今天又是高效的一天呢！
+            </p>
             <OnboardingHint />
             <InputArea
               key={composerKey}
@@ -358,29 +365,25 @@ function SuggestionChips({
   onPick(intent: string): void;
 }): JSX.Element {
   return (
-    <div className="mx-auto mt-4 flex max-w-[700px] flex-col gap-2.5">
-      {SUGGESTION_GROUPS.map((group) => (
-        <div key={group.title} className="flex min-w-0 flex-wrap items-center justify-center gap-1.5">
-          <span className="mr-1 hidden text-[11px] font-medium text-[#ADADAD] sm:inline">
-            {group.title}
-          </span>
-          {group.items.map((s) => {
-            const Icon = s.icon;
-            return (
-              <button
-                key={s.label}
-                type="button"
-                onClick={() => onPick(s.intent)}
-                aria-label={`用示例填入：${s.label}`}
-                className="group inline-flex h-8 items-center gap-1.5 rounded-[7px] border border-[#DCDDDD]/75 bg-white/55 px-2.5 text-[12px] font-medium text-[#595757] shadow-[0_1px_1px_rgba(17,24,39,0.02)] transition-colors hover:border-[#EA1F59]/25 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20 dark:border-white/10 dark:bg-white/5 dark:text-foreground/75 dark:hover:border-[#EA1F59]/35 dark:hover:bg-[#EA1F59]/10"
-              >
-                <Icon className="h-3.5 w-3.5 text-[#ADADAD] transition-colors group-hover:text-[#EA1F59]" />
-                {s.label}
-              </button>
-            );
-          })}
-        </div>
-      ))}
+    <div className="mx-auto mt-10 flex max-w-[820px] flex-wrap items-center justify-center gap-3">
+      {SUGGESTION_GROUPS.flatMap((group) => group.items).map((s) => {
+        const Icon = s.icon;
+        return (
+          <button
+            key={s.label}
+            type="button"
+            onClick={() => onPick(s.intent)}
+            aria-label={`用示例填入：${s.label}`}
+            className={cn(
+              'group inline-flex h-10 min-w-[132px] items-center justify-center gap-2 rounded-[10px] border px-4 text-[13px] font-semibold shadow-[0_8px_22px_rgba(89,87,87,0.035)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20',
+              suggestionToneClass(s.tone),
+            )}
+          >
+            <Icon className="h-4 w-4 transition-colors" />
+            {s.label}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -455,7 +458,21 @@ type SuggestionItem = {
   label: string;
   intent: string;
   icon: LucideIcon;
+  tone: 'magenta' | 'yellow' | 'blue' | 'purple';
 };
+
+function suggestionToneClass(tone: SuggestionItem['tone']): string {
+  switch (tone) {
+    case 'magenta':
+      return 'border-[#EA1F59]/10 bg-[#EA1F59]/10 text-[#EA1F59] hover:border-[#EA1F59]/25 hover:bg-[#EA1F59]/15';
+    case 'yellow':
+      return 'border-[#FFC910]/18 bg-[#FFC910]/10 text-[#8A6A00] hover:border-[#FFC910]/35 hover:bg-[#FFC910]/16';
+    case 'blue':
+      return 'border-[#42C0EF]/18 bg-[#42C0EF]/10 text-[#1688AA] hover:border-[#42C0EF]/35 hover:bg-[#42C0EF]/16';
+    case 'purple':
+      return 'border-[#57479C]/16 bg-[#57479C]/10 text-[#57479C] hover:border-[#57479C]/35 hover:bg-[#57479C]/15';
+  }
+}
 
 const SUGGESTION_GROUPS: ReadonlyArray<{
   title: string;
@@ -464,9 +481,9 @@ const SUGGESTION_GROUPS: ReadonlyArray<{
   {
     title: '网页执行',
     items: [
-      { label: '查资料', intent: '帮我查一下今天的科技新闻', icon: Search },
-      { label: '打开网页', intent: '打开 GitHub 看看 trending 项目', icon: Globe2 },
-      { label: '下载文件', intent: '把这页内容保存成 PDF：', icon: Download },
+      { label: '查资料', intent: '帮我查一下今天的科技新闻', icon: Search, tone: 'yellow' },
+      { label: '打开网页', intent: '打开 GitHub 看看 trending 项目', icon: Globe2, tone: 'blue' },
+      { label: '下载文件', intent: '把这页内容保存成 PDF：', icon: Download, tone: 'purple' },
     ],
   },
   {
@@ -476,9 +493,10 @@ const SUGGESTION_GROUPS: ReadonlyArray<{
         label: '直播复盘',
         intent: '帮我复盘昨天的抖音直播数据，做总结和优化策略',
         icon: Radio,
+        tone: 'magenta',
       },
-      { label: '行情查询', intent: '去东方财富查一下茅台最新股价', icon: TrendingUp },
-      { label: '翻译内容', intent: '帮我翻译这段内容：', icon: Languages },
+      { label: '行情查询', intent: '去东方财富查一下茅台最新股价', icon: TrendingUp, tone: 'yellow' },
+      { label: '翻译内容', intent: '帮我翻译这段内容：', icon: Languages, tone: 'blue' },
     ],
   },
   {
@@ -488,11 +506,13 @@ const SUGGESTION_GROUPS: ReadonlyArray<{
         label: '定时任务',
         intent: '每天早上 9 点跑一次昨天的电商日报',
         icon: CalendarClock,
+        tone: 'magenta',
       },
       {
         label: '批量执行',
         intent: '帮我对这些链接逐个执行抓取：\n',
         icon: ListChecks,
+        tone: 'purple',
       },
     ],
   },

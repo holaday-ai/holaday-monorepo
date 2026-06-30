@@ -11,7 +11,7 @@ import type { UiTaskStatus } from '@/types/task';
 
 const ACCENT_CLASS = {
   rose: {
-    shell: 'border-[#F5A3B7]/45 bg-[#FFF6F8]',
+    shell: 'border-[#EA1F59]/30 bg-[#EA1F59]/10',
     icon: 'bg-[#EA1F59]/10 text-[#EA1F59]',
     bar: 'from-[#EA1F59] to-[#FFC910]',
   },

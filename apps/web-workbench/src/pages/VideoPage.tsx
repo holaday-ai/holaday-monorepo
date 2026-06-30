@@ -32,7 +32,7 @@ import { selectStepsFor, shouldRefreshForTask } from '@/lib/video-task-selectors
 import { showImageOption, toVideoRow, type VideoRow, type VideoType } from '@/lib/video-history-row';
 import { ipRenderingHint } from '@/lib/video-ip-estimate';
 import { LazyPosterImg } from '@/components/LazyPosterImg';
-import { PageContainer, PageHeader, Section } from '@/pages/PageShell';
+import { PageContainer, Section } from '@/pages/PageShell';
 import { useTaskStore } from '@/stores/task-store';
 import type { UiTask } from '@/types/task';
 import {
@@ -99,10 +99,11 @@ export function VideoPage(): JSX.Element {
   }, [currentTask, refreshTasks, taskId]);
 
   return (
-    <PageContainer width="form">
-      <PageHeader
-        title="视频任务"
-        description="把一段文案变成竖屏短视频:AI 配画面 + 配音 + 字幕。先报价、确认后才生成。"
+    <PageContainer width="wide" className="max-w-[1400px] px-4 py-0 sm:px-6 md:px-8">
+      <CreativeHero
+        title="用AI创作视频"
+        description="把一段文案变成竖屏短视频：AI 配画面、配音和字幕。先报价，确认后才生成。"
+        tone="video"
       />
       <div className="mb-6 flex flex-wrap gap-2" role="tablist" aria-label="视频类型">
         {TABS.map((t) => {
@@ -125,8 +126,8 @@ export function VideoPage(): JSX.Element {
               className={cn(
                 'inline-flex items-center gap-2 rounded-full border px-4 py-2 text-[13px] font-medium transition-colors',
                 active
-                  ? 'border-[#EA1F59]/30 bg-[#EA1F59]/10 text-[#EA1F59]'
-                  : 'border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:text-[#EA1F59]',
+                  ? 'border-[#57479C]/35 bg-[#57479C]/10 text-[#57479C]'
+                  : 'border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:text-[#57479C]',
                 !t.enabled && 'cursor-not-allowed opacity-55 hover:border-[#DCDDDD] hover:text-[#595757]',
               )}
             >
@@ -158,10 +159,10 @@ export function VideoPage(): JSX.Element {
 
 function ImageTaskEntry(): JSX.Element {
   return (
-    <Section title="图片任务" description="只需要静态图时，可以直接生成海报、封面、主图或上传参考图做图生图。">
+    <Section title="创作图片" description="只需要静态图时，可以直接生成海报、封面、主图或上传参考图做图生图。">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-start gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px] bg-[#EA1F59]/10 text-[#EA1F59]">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px] bg-[#42C0EF]/10 text-[#42C0EF]">
             <ImagePlus className="h-5 w-5" aria-hidden />
           </div>
           <div className="min-w-0">
@@ -173,12 +174,65 @@ function ImageTaskEntry(): JSX.Element {
         </div>
         <Link
           to="/image"
-          className="inline-flex h-9 shrink-0 items-center justify-center rounded-[8px] border border-[#DCDDDD] bg-white px-3 text-[13px] font-medium text-[#595757] transition-colors hover:border-[#EA1F59]/30 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59]"
+          className="inline-flex h-9 shrink-0 items-center justify-center rounded-[8px] border border-[#DCDDDD] bg-white px-3 text-[13px] font-medium text-[#595757] transition-colors hover:border-[#42C0EF]/35 hover:bg-[#42C0EF]/10 hover:text-[#1688AA]"
         >
           打开图片任务
         </Link>
       </div>
     </Section>
+  );
+}
+
+function CreativeHero({
+  title,
+  description,
+  tone,
+}: {
+  title: string;
+  description: string;
+  tone: 'video' | 'image';
+}): JSX.Element {
+  const isVideo = tone === 'video';
+  return (
+    <header
+      className={cn(
+        '-mx-4 mb-8 overflow-hidden rounded-b-[28px] px-8 pb-10 pt-14 sm:-mx-6 md:-mx-8 md:px-12',
+        isVideo
+          ? 'bg-[#57479C]/10'
+          : 'bg-[#42C0EF]/10',
+      )}
+    >
+      <div className="flex items-start justify-between gap-8">
+        <div className="min-w-0">
+          <h1 className="text-[34px] font-semibold leading-tight tracking-tight text-foreground sm:text-[40px]">
+            {title}
+            <Sparkles
+              className={cn(
+                'ml-2 inline h-5 w-5 align-super',
+                isVideo ? 'text-[#57479C]' : 'text-[#42C0EF]',
+              )}
+              aria-hidden
+            />
+          </h1>
+          <p className="mt-3 max-w-2xl text-[14px] leading-relaxed text-[#595757]">
+            {description}
+          </p>
+        </div>
+        <div
+          aria-hidden
+          className={cn(
+            'hidden h-28 w-72 shrink-0 items-center justify-center rounded-[26px] bg-white/45 shadow-[0_18px_45px_rgba(89,87,87,0.08)] lg:flex',
+            isVideo ? 'text-[#57479C]' : 'text-[#42C0EF]',
+          )}
+        >
+          <div className="flex items-center gap-4">
+            <Film className="h-12 w-12 opacity-70" />
+            <VideoIcon className="h-16 w-16 opacity-80" />
+            <Sparkles className="h-8 w-8 opacity-70" />
+          </div>
+        </div>
+      </div>
+    </header>
   );
 }
 
@@ -471,20 +525,7 @@ function NormalVideoForm({ onTaskCreated }: { onTaskCreated: (taskId: string) =>
 
   return (
     <div className="space-y-6">
-      <Section title="文案" description="写你想讲的内容,AI 会忠于原意优化、配画面与配音。">
-        <Textarea
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          placeholder="例如:夏天紫外线很强,出门前 20 分钟涂够量,每两小时补涂一次……"
-          rows={5}
-          className="resize-y"
-        />
-        <p className="mt-2 text-[11px] text-muted-foreground">
-          仅编排你本人的内容,不模仿/冒充他人。最终成片带 HOLA DAY 水印。
-        </p>
-      </Section>
-
-      <Section title="参数">
+      <Section className="border-transparent bg-white px-5 py-4 shadow-[0_12px_32px_rgba(89,87,87,0.06)]">
         <div className="space-y-5">
           <SegGroup label="模型" value={model} options={MODEL_OPTIONS} onChange={setModel} />
           <SegGroup label="风格" value={style} options={STYLE_OPTIONS} onChange={setStyle} />
@@ -494,10 +535,23 @@ function NormalVideoForm({ onTaskCreated }: { onTaskCreated: (taskId: string) =>
         </div>
       </Section>
 
-      <Section title="价格预览" className="border-[#EA1F59]/20 bg-[#EA1F59]/[0.03]">
+      <Section className="border-transparent bg-white px-6 py-6 shadow-[0_12px_32px_rgba(89,87,87,0.06)]">
+        <Textarea
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          placeholder="描述你想让 HOLA DAY 创作的视频内容 ..."
+          rows={5}
+          className="min-h-[176px] resize-y border-0 bg-transparent px-0 text-[17px] font-medium shadow-none placeholder:text-[#DCDDDD] focus-visible:ring-0"
+        />
+        <p className="mt-2 text-[11px] text-muted-foreground">
+          仅编排你本人的内容，不模仿或冒充他人。最终成片带 HOLA DAY 水印。
+        </p>
+      </Section>
+
+      <Section title="价格预览" className="border-[#57479C]/20 bg-[#57479C]/[0.04]">
         <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2">
           <div>
-            <span className="text-2xl font-semibold text-[#EA1F59]">约 ¥{estVideoCny}</span>
+            <span className="text-2xl font-semibold text-[#57479C]">约 ¥{estVideoCny}</span>
             <span className="ml-2 text-[13px] text-muted-foreground">
               视频版 · 每段约 ¥{perSegCny} × {SEG_ESTIMATE} 段(估算)
             </span>
@@ -514,7 +568,7 @@ function NormalVideoForm({ onTaskCreated }: { onTaskCreated: (taskId: string) =>
 
       <div className="flex items-center justify-end gap-3">
         <span className="text-[12px] text-muted-foreground">提交后先报价,不会立即扣费</span>
-        <Button type="button" onClick={() => void handleSubmit()} disabled={submitting} className="min-w-[120px]">
+        <Button type="button" onClick={() => void handleSubmit()} disabled={submitting} className="min-w-[132px] rounded-full bg-[#57479C] hover:bg-[#57479C]/90">
           {submitting ? (
             <>
               <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
@@ -636,7 +690,7 @@ function PetVideoForm({ onTaskCreated }: { onTaskCreated: (taskId: string) => vo
 
   return (
     <div className="space-y-6">
-      <Section title="宠物照片" description="上传一张清晰的宠物正面照,AI 会让它在画面里自然活动。">
+      <Section title="宠物照片" description="上传一张清晰的宠物正面照,AI 会让它在画面里自然活动。" className="border-transparent bg-white shadow-[0_12px_32px_rgba(89,87,87,0.06)]">
         <input
           ref={fileRef}
           type="file"
@@ -673,7 +727,7 @@ function PetVideoForm({ onTaskCreated }: { onTaskCreated: (taskId: string) => vo
             type="button"
             onClick={() => fileRef.current?.click()}
             disabled={uploading}
-            className="flex w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-[#DCDDDD] py-10 text-muted-foreground transition-colors hover:border-[#EA1F59]/40 hover:text-[#EA1F59] disabled:opacity-60"
+            className="flex w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-[#DCDDDD] py-10 text-muted-foreground transition-colors hover:border-[#57479C]/40 hover:text-[#57479C] disabled:opacity-60"
           >
             {uploading ? <Loader2 className="h-6 w-6 animate-spin" /> : <ImagePlus className="h-6 w-6" />}
             <span className="text-[13px]">{uploading ? '上传中…' : '点击上传宠物照片'}</span>
@@ -682,7 +736,7 @@ function PetVideoForm({ onTaskCreated }: { onTaskCreated: (taskId: string) => vo
         )}
       </Section>
 
-      <Section title="动作描述" description="想让宠物做什么动作或表情。">
+      <Section title="动作描述" description="想让宠物做什么动作或表情。" className="border-transparent bg-white shadow-[0_12px_32px_rgba(89,87,87,0.06)]">
         <Textarea
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
@@ -692,7 +746,7 @@ function PetVideoForm({ onTaskCreated }: { onTaskCreated: (taskId: string) => vo
         />
       </Section>
 
-      <Section title="参数">
+      <Section title="参数" className="border-transparent bg-white shadow-[0_12px_32px_rgba(89,87,87,0.06)]">
         <div className="space-y-5">
           <SegGroup label="模型" value={petModel} options={PET_MODEL_OPTIONS} onChange={setPetModel} />
           <SegGroup label="尺寸" value={aspectRatio} options={ASPECT_OPTIONS} onChange={setAspectRatio} />
@@ -701,9 +755,9 @@ function PetVideoForm({ onTaskCreated }: { onTaskCreated: (taskId: string) => vo
         </div>
       </Section>
 
-      <Section title="价格预览" className="border-[#EA1F59]/20 bg-[#EA1F59]/[0.03]">
+      <Section title="价格预览" className="border-[#57479C]/20 bg-[#57479C]/[0.04]">
         <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2">
-          <span className="text-2xl font-semibold text-[#EA1F59]">约 ¥{estCny}</span>
+          <span className="text-2xl font-semibold text-[#57479C]">约 ¥{estCny}</span>
           <span className="text-[13px] text-muted-foreground">
             {petModel === 'wan_i2v' ? '万相 i2v' : '快马 i2v'} · {resolution} · {durationSeconds} 秒
           </span>
@@ -716,7 +770,7 @@ function PetVideoForm({ onTaskCreated }: { onTaskCreated: (taskId: string) => vo
 
       <div className="flex items-center justify-end gap-3">
         <span className="text-[12px] text-muted-foreground">提交后先报价,不会立即扣费</span>
-        <Button type="button" onClick={() => void handleSubmit()} disabled={submitting} className="min-w-[120px]">
+        <Button type="button" onClick={() => void handleSubmit()} disabled={submitting} className="min-w-[132px] rounded-full bg-[#57479C] hover:bg-[#57479C]/90">
           {submitting ? (
             <>
               <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
@@ -763,8 +817,8 @@ function SegGroup<T extends string | number>({
               className={cn(
                 'inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[13px] transition-colors',
                 active
-                  ? 'border-[#EA1F59]/40 bg-[#EA1F59]/10 text-[#EA1F59]'
-                  : 'border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:text-[#EA1F59]',
+                  ? 'border-[#57479C]/45 bg-[#57479C]/10 text-[#57479C]'
+                  : 'border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:text-[#57479C]',
               )}
             >
               {o.label}
@@ -772,7 +826,7 @@ function SegGroup<T extends string | number>({
                 <span
                   className={cn(
                     'text-[11px]',
-                    active ? 'text-[#EA1F59]/70' : 'text-muted-foreground',
+                    active ? 'text-[#57479C]/70' : 'text-muted-foreground',
                   )}
                 >
                   {o.hint}

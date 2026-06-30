@@ -142,7 +142,7 @@ export function ProjectsPage(): JSX.Element {
                   setCreating(true);
                   setCreateTouched(false);
                 }}
-                className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#EA1F59] px-3 text-sm font-medium text-white shadow-[0_1px_2px_rgba(15,23,42,0.08)] transition hover:bg-[#D91B51]"
+                className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#EA1F59] px-3 text-sm font-medium text-white shadow-[0_1px_2px_rgba(15,23,42,0.08)] transition hover:bg-[#EA1F59]/90"
               >
                 <Plus className="h-4 w-4" />
                 新建项目
@@ -202,7 +202,7 @@ export function ProjectsPage(): JSX.Element {
                 className={cn(
                   'rounded-md px-3 py-1.5 text-xs font-medium transition-colors sm:h-8',
                   createState.canSubmit && !creatingNow
-                    ? 'bg-[#EA1F59] text-white hover:bg-[#D91B51]'
+                    ? 'bg-[#EA1F59] text-white hover:bg-[#EA1F59]/90'
                     : 'cursor-not-allowed border border-[#DCDDDD] bg-[#EFEFEF]/60 text-muted-foreground',
                 )}
               >
@@ -266,7 +266,7 @@ export function ProjectsPage(): JSX.Element {
           <button
             type="button"
             onClick={() => void refresh()}
-            className="mt-1 inline-flex h-8 items-center rounded-md bg-[#EA1F59] px-3 text-xs font-medium text-white transition hover:bg-[#D91B51]"
+            className="mt-1 inline-flex h-8 items-center rounded-md bg-[#EA1F59] px-3 text-xs font-medium text-white transition hover:bg-[#EA1F59]/90"
           >
             重试
           </button>
@@ -284,7 +284,7 @@ export function ProjectsPage(): JSX.Element {
               setCreating(true);
               setCreateTouched(false);
             }}
-            className="mt-1 inline-flex h-8 items-center gap-1.5 rounded-md bg-[#EA1F59] px-3 text-xs font-medium text-white transition hover:bg-[#D91B51]"
+            className="mt-1 inline-flex h-8 items-center gap-1.5 rounded-md bg-[#EA1F59] px-3 text-xs font-medium text-white transition hover:bg-[#EA1F59]/90"
           >
             <Plus className="h-3.5 w-3.5" />
             新建项目

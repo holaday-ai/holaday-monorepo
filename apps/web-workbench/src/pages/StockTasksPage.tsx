@@ -631,7 +631,7 @@ export function StockTasksPage(): JSX.Element {
                   if (command === '生成今日关注日报') void generateBriefing();
                   else void submitPrompt(command);
                 }}
-                className="inline-flex h-9 items-center rounded-[8px] border border-[#E1E3E8] bg-white px-3 text-[13px] font-medium text-[#4F5868] transition hover:border-[#EA1F59]/25 hover:bg-[#FFF7FA] hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex h-9 items-center rounded-[8px] border border-[#E1E3E8] bg-white px-3 text-[13px] font-medium text-[#4F5868] transition hover:border-[#EA1F59]/25 hover:bg-[#EA1F59]/10 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {command}
               </button>
@@ -805,7 +805,7 @@ function DiscoveryPanel({
               className={cn(
                 'inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-[12px] font-medium transition',
                 activeType === tab.label
-                  ? 'border-[#EA1F59]/30 bg-[#FFF4F7] text-[#EA1F59]'
+                  ? 'border-[#EA1F59]/30 bg-[#EA1F59]/10 text-[#EA1F59]'
                   : 'border-[#E1E3E8] bg-white text-[#667085] hover:border-[#C9CDD6] hover:text-[#121826]',
                 tab.count === 0 && 'cursor-not-allowed opacity-45',
               )}
@@ -1275,7 +1275,7 @@ function StockHighlightCard({
                 type="button"
                 disabled={!canGenerateBriefing || briefingGenerating}
                 onClick={onGenerateBriefing}
-                className="mt-2 inline-flex h-8 items-center justify-center rounded-[7px] border border-[#EA1F59]/20 bg-[#FFF7FA] px-2.5 text-[12px] font-medium text-[#EA1F59] transition hover:border-[#EA1F59]/40 hover:bg-[#FFEAF1] disabled:cursor-not-allowed disabled:opacity-50"
+                className="mt-2 inline-flex h-8 items-center justify-center rounded-[7px] border border-[#EA1F59]/20 bg-[#EA1F59]/10 px-2.5 text-[12px] font-medium text-[#EA1F59] transition hover:border-[#EA1F59]/40 hover:bg-[#EA1F59]/15 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {briefingGenerating ? '生成中…' : '生成日报'}
               </button>

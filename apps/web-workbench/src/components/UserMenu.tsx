@@ -98,7 +98,7 @@ export function UserMenu({
           open && 'border-[#EA1F59]/25 bg-[#EA1F59]/5 shadow-[0_10px_26px_rgba(234,31,89,0.08)] dark:border-[#EA1F59]/35 dark:bg-[#EA1F59]/10',
         )}
       >
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] bg-[#EA1F59] text-sm font-semibold text-white shadow-[0_3px_10px_rgba(234,31,89,0.14)]">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-[#EA1F59]/20 bg-[#EA1F59]/10 text-sm font-semibold text-[#EA1F59] shadow-[0_3px_10px_rgba(234,31,89,0.10)]">
           {initial}
         </div>
         {!compact && (
@@ -114,46 +114,63 @@ export function UserMenu({
         <div
           role="menu"
           className={cn(
-            'absolute bottom-full z-50 rounded-[8px] border border-[#DCDDDD]/85 bg-white p-1 text-foreground shadow-[0_12px_32px_rgba(17,24,39,0.12)] animate-fade-in dark:border-white/10 dark:bg-card',
-            compact ? 'left-full mb-0 ml-2 min-w-[220px]' : 'left-0 right-0 mb-2',
+            'absolute bottom-full z-50 rounded-[18px] border border-[#DCDDDD]/80 bg-white p-3 text-foreground shadow-[0_22px_54px_rgba(234,31,89,0.12)] animate-fade-in dark:border-white/10 dark:bg-card',
+            compact ? 'left-full mb-0 ml-2 w-[280px]' : 'left-0 mb-2 w-[280px]',
           )}
         >
+          <div className="flex items-center gap-3 border-b border-[#EFEFEF] px-1 pb-3 dark:border-white/10">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border-2 border-[#EA1F59]/20 bg-[#EA1F59]/10 text-base font-semibold text-[#EA1F59]">
+              {initial}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-[14px] font-semibold text-foreground">
+                {displayName || email || '未命名'}
+              </div>
+              <div className="mt-1 inline-flex items-center rounded-full border border-[#EA1F59]/15 bg-[#EA1F59]/10 px-2 py-0.5 text-[11px] font-semibold text-[#EA1F59]">
+                {planLabel}
+              </div>
+            </div>
+          </div>
           {email && (
-            <div className="truncate border-b border-[#DCDDDD]/80 px-3 py-2 text-[11px] text-muted-foreground dark:border-white/10">
+            <div className="truncate px-1 pt-2 text-[11px] text-muted-foreground">
               {email}
             </div>
           )}
-          <div className="border-b border-[#DCDDDD]/80 py-1 dark:border-white/10">
-            <MenuItem icon={<UserIcon className="h-3.5 w-3.5" />} onClick={() => go('/profile')}>
+          <div className="border-b border-[#EFEFEF] py-2 dark:border-white/10">
+            <MenuItem tone="magenta" icon={<UserIcon className="h-4 w-4" />} onClick={() => go('/profile')}>
               个人资料
             </MenuItem>
             <MenuItem
-              icon={<SettingsIcon className="h-3.5 w-3.5" />}
+              tone="blue"
+              icon={<SettingsIcon className="h-4 w-4" />}
               onClick={() => go('/settings')}
             >
               设置
             </MenuItem>
             <MenuItem
-              icon={<CreditCard className="h-3.5 w-3.5" />}
+              tone="magenta"
+              icon={<CreditCard className="h-4 w-4" />}
               onClick={() => go('/plan')}
             >
               套餐与账单
             </MenuItem>
             <MenuItem
-              icon={<History className="h-3.5 w-3.5" />}
+              tone="blue"
+              icon={<History className="h-4 w-4" />}
               onClick={() => go('/history')}
             >
               任务历史
             </MenuItem>
           </div>
-          <div className="px-2 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+          <div className="px-1 pb-1 pt-2 text-[12px] font-semibold text-[#595757]">
             外观
           </div>
           <ThemeSwitcher mode={mode} onChange={setMode} />
-          <div className="mt-1 border-t border-[#DCDDDD]/80 pt-1 dark:border-white/10">
+          <div className="mt-3 rounded-[12px] border border-[#EFEFEF] bg-white px-1 py-2 shadow-[0_8px_22px_rgba(89,87,87,0.035)] dark:border-white/10 dark:bg-white/[0.04]">
             {onClearFailedTasks && failedTaskCount > 0 && (
               <MenuItem
-                icon={<Trash2 className="h-3.5 w-3.5" />}
+                tone="magenta"
+                icon={<Trash2 className="h-4 w-4" />}
                 onClick={() => {
                   setOpen(false);
                   onClearFailedTasks();
@@ -164,7 +181,8 @@ export function UserMenu({
             )}
             {onOpenFeedback && (
               <MenuItem
-                icon={<MessageSquare className="h-3.5 w-3.5" />}
+                tone="blue"
+                icon={<MessageSquare className="h-4 w-4" />}
                 onClick={() => {
                   setOpen(false);
                   onOpenFeedback();
@@ -174,7 +192,7 @@ export function UserMenu({
               </MenuItem>
             )}
             <MenuItem
-              icon={<LogOut className="h-3.5 w-3.5" />}
+              icon={<LogOut className="h-4 w-4" />}
               onClick={() => {
                 setOpen(false);
                 onLogout();
@@ -198,7 +216,7 @@ function ThemeSwitcher({
   onChange(m: ThemeMode): void;
 }): JSX.Element {
   return (
-    <div className="grid grid-cols-3 gap-1 rounded-[8px] bg-[#EFEFEF]/60 p-0.5 dark:bg-white/10">
+    <div className="grid grid-cols-3 gap-1 rounded-full bg-white p-1 shadow-[0_8px_22px_rgba(89,87,87,0.06)] dark:bg-white/10">
       <ThemeOption active={mode === 'light'} onClick={() => onChange('light')} label="浅色">
         <Sun className="h-3.5 w-3.5" />
       </ThemeOption>
@@ -230,9 +248,9 @@ function ThemeOption({
       aria-pressed={active}
       title={label}
       className={cn(
-        'flex flex-col items-center justify-center gap-0.5 rounded-[6px] px-1 py-1.5 text-[10px] transition-colors',
+        'flex items-center justify-center gap-1 rounded-full px-2 py-2 text-[11px] font-semibold transition-colors',
         active
-          ? 'bg-white text-[#EA1F59] shadow-[0_1px_2px_rgba(17,24,39,0.05)] dark:bg-card dark:text-foreground'
+          ? 'border border-[#EA1F59]/25 bg-white text-[#EA1F59] shadow-[0_1px_2px_rgba(17,24,39,0.05)] dark:bg-card dark:text-foreground'
           : 'text-[#595757] hover:bg-white/65 hover:text-foreground dark:text-foreground/65 dark:hover:bg-white/10',
       )}
     >
@@ -247,11 +265,13 @@ function MenuItem({
   children,
   onClick,
   destructive,
+  tone = 'neutral',
 }: {
   icon: React.ReactNode;
   children: React.ReactNode;
   onClick(): void;
   destructive?: boolean;
+  tone?: 'magenta' | 'blue' | 'neutral';
 }): JSX.Element {
   return (
     <button
@@ -259,13 +279,24 @@ function MenuItem({
       role="menuitem"
       onClick={onClick}
       className={cn(
-        'flex w-full items-center gap-2 rounded-[6px] px-2.5 py-1.5 text-left text-sm transition-colors',
+        'flex w-full items-center gap-3 rounded-[10px] px-2 py-2.5 text-left text-[13px] font-semibold transition-colors',
         destructive
           ? 'text-[#EA1F59] hover:bg-[#EA1F59]/10'
           : 'text-[#595757] hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] dark:text-foreground/75 dark:hover:bg-white/10 dark:hover:text-foreground',
       )}
     >
-      <span className="opacity-80">{icon}</span>
+      <span
+        className={cn(
+          'flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-white shadow-[0_8px_18px_rgba(89,87,87,0.06)]',
+          destructive || tone === 'magenta'
+            ? 'text-[#EA1F59]'
+            : tone === 'blue'
+              ? 'text-[#42C0EF]'
+              : 'text-[#595757]',
+        )}
+      >
+        {icon}
+      </span>
       <span>{children}</span>
     </button>
   );

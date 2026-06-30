@@ -603,7 +603,7 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
                   <button
                     type="button"
                     onClick={() => navigate(`/?task=${encodeURIComponent(item.taskId!)}`)}
-                    className="mt-1 inline-flex items-center text-[11px] text-[#EA1F59] underline decoration-[#EA1F59]/40 underline-offset-2 transition-colors hover:text-[#D91B51]"
+                    className="mt-1 inline-flex items-center text-[11px] text-[#EA1F59] underline decoration-[#EA1F59]/40 underline-offset-2 transition-colors hover:text-[#EA1F59]"
                   >
                     打开任务详情 →
                   </button>

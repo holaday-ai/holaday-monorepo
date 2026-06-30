@@ -342,7 +342,7 @@ export function ScheduledTaskDialog({
             type="button"
             onClick={() => void submit()}
             disabled={!canSubmit}
-            className="inline-flex items-center gap-1.5 rounded-[8px] bg-[#EA1F59] px-3 py-1.5 text-sm font-medium text-white shadow-[0_1px_2px_rgba(15,23,42,0.06)] transition hover:bg-[#D91B51] disabled:opacity-60"
+            className="inline-flex items-center gap-1.5 rounded-[8px] bg-[#EA1F59] px-3 py-1.5 text-sm font-medium text-white shadow-[0_1px_2px_rgba(15,23,42,0.06)] transition hover:bg-[#EA1F59]/90 disabled:opacity-60"
           >
             {submitting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
             {scheduledCreateButtonLabel(submitting)}

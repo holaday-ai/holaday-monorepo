@@ -445,7 +445,7 @@ function ExperienceGrid({
             className={cn(
               'rounded-[8px] border p-4 text-left transition',
               activeId === id
-                ? 'border-[#EA1F59]/40 bg-[#FFF6F8] shadow-[0_8px_24px_rgba(234,31,89,0.08)]'
+                ? 'border-[#EA1F59]/40 bg-[#EA1F59]/10 shadow-[0_8px_24px_rgba(234,31,89,0.08)]'
                 : 'border-[#EFEFEF] bg-[#FAFAFA] hover:border-[#EA1F59]/25 hover:bg-[#EA1F59]/5',
             )}
           >
@@ -479,7 +479,7 @@ function ExperienceGrid({
             className={cn(
               'flex h-10 items-center justify-between rounded-[8px] border px-3 text-left text-xs transition',
               activeId === id
-                ? 'border-[#EA1F59]/35 bg-[#FFF6F8] text-[#EA1F59]'
+                ? 'border-[#EA1F59]/35 bg-[#EA1F59]/10 text-[#EA1F59]'
                 : 'border-[#EFEFEF] bg-white text-[#595757] hover:border-[#EA1F59]/20',
             )}
           >
@@ -524,9 +524,9 @@ function experienceDetailTheme(id: ExperienceId): { panel: string; icon: string;
   }
   if (id === 'psychology') {
     return {
-      panel: 'border-[#FBCFE8]/70 bg-[#FDF2F8]',
-      icon: 'text-[#BE185D]',
-      eyebrow: 'text-[#BE185D]',
+      panel: 'border-[#EA1F59]/30 bg-[#EA1F59]/10',
+      icon: 'text-[#EA1F59]',
+      eyebrow: 'text-[#EA1F59]',
     };
   }
   if (id === 'numerology') {
@@ -551,7 +551,7 @@ function experienceDetailTheme(id: ExperienceId): { panel: string; icon: string;
     };
   }
   return {
-    panel: 'border-[#FBCFE8]/70 bg-[#FFF6F8]',
+    panel: 'border-[#EA1F59]/30 bg-[#EA1F59]/10',
     icon: 'text-[#EA1F59]',
     eyebrow: 'text-[#EA1F59]',
   };
@@ -809,7 +809,7 @@ function PsychologyFeature({
               className={cn(
                 'rounded-[8px] border px-3 py-3 text-left transition',
                 answer === option.id
-                  ? 'border-[#EA1F59]/35 bg-[#FFF6F8] text-[#231F20]'
+                  ? 'border-[#EA1F59]/35 bg-[#EA1F59]/10 text-[#231F20]'
                   : 'border-[#DCDDDD] bg-white text-[#595757] hover:border-[#EA1F59]/20 hover:bg-[#EA1F59]/5',
               )}
             >
@@ -819,9 +819,9 @@ function PsychologyFeature({
           ))}
         </div>
       </div>
-      <div className="rounded-[8px] border border-[#FBCFE8]/70 bg-[#FDF2F8] p-4">
+      <div className="rounded-[8px] border border-[#EA1F59]/30 bg-[#EA1F59]/10 p-4">
         <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-2 text-xs font-semibold text-[#BE185D]">
+          <div className="flex items-center gap-2 text-xs font-semibold text-[#EA1F59]">
             <Brain className="h-4 w-4" aria-hidden />
             今日心理画像
           </div>
@@ -838,7 +838,7 @@ function PsychologyFeature({
         <div className="mt-3 grid gap-2 sm:grid-cols-3">
           {result.layers.map((layer) => (
             <div key={layer.label} className="rounded-[8px] border border-white/70 bg-white/65 p-3">
-              <div className="text-xs font-semibold text-[#BE185D]">{layer.label}</div>
+              <div className="text-xs font-semibold text-[#EA1F59]">{layer.label}</div>
               <p className="mt-1 text-xs leading-5 text-[#595757]">{layer.body}</p>
             </div>
           ))}
@@ -1405,7 +1405,7 @@ function WaitingCardPreview({
             className={cn(
               'h-8 rounded-[8px] border px-2 text-xs font-medium transition',
               mode === item.id
-                ? 'border-[#EA1F59]/35 bg-[#FFF6F8] text-[#EA1F59]'
+                ? 'border-[#EA1F59]/35 bg-[#EA1F59]/10 text-[#EA1F59]'
                 : 'border-[#DCDDDD] bg-white text-[#595757] hover:border-[#EA1F59]/25',
             )}
           >
@@ -1445,7 +1445,7 @@ function WaitingCardPreview({
                     'rounded-[8px] border bg-white px-3 py-3 text-left transition',
                     waitingAnswer === option.id
                       ? 'border-[#EA1F59]/45 text-[#EA1F59] shadow-[0_8px_24px_rgba(234,31,89,0.08)]'
-                      : 'border-[#FBCFE8]/70 text-[#595757] hover:border-[#EA1F59]/30',
+                      : 'border-[#EA1F59]/20 text-[#595757] hover:border-[#EA1F59]/30',
                   )}
                 >
                   <div className="text-sm font-semibold">{option.label}</div>
@@ -1859,8 +1859,8 @@ const TONE_CLASS: Record<
     bar: 'bg-[#3B82F6]',
   },
   social: {
-    pill: 'bg-[#FCE7F3] text-[#BE185D]',
-    bar: 'bg-[#EC4899]',
+    pill: 'bg-[#EA1F59]/10 text-[#EA1F59]',
+    bar: 'bg-[#EA1F59]',
   },
   creative: {
     pill: 'bg-[#FEF3C7] text-[#B45309]',
@@ -1883,7 +1883,7 @@ const FORTUNE_TONE: Record<
 > = {
   overall: {
     icon: Sparkles,
-    shell: 'border-[#EA1F59]/20 bg-[#FFF6F8]',
+    shell: 'border-[#EA1F59]/20 bg-[#EA1F59]/10',
     iconShell: 'bg-[#EA1F59]/10 text-[#EA1F59]',
     bar: 'bg-[#EA1F59]',
   },
@@ -1901,9 +1901,9 @@ const FORTUNE_TONE: Record<
   },
   love: {
     icon: Heart,
-    shell: 'border-[#FBCFE8]/70 bg-[#FDF2F8]',
-    iconShell: 'bg-[#FBCFE8]/45 text-[#BE185D]',
-    bar: 'bg-[#EC4899]',
+    shell: 'border-[#EA1F59]/30 bg-[#EA1F59]/10',
+    iconShell: 'bg-[#EA1F59]/10 text-[#EA1F59]',
+    bar: 'bg-[#EA1F59]',
   },
   health: {
     icon: Activity,
