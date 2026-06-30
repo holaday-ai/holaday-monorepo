@@ -1,5 +1,6 @@
+import { createHash } from 'node:crypto';
 import { TRPCError } from '@trpc/server';
-import { eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { HttpAkshareClient } from '../../agent/a-share/akshare-http-client.js';
 import {
@@ -21,6 +22,7 @@ import type {
 } from '../../agent/a-share/briefing-types.js';
 import type { SymbolRow } from '../../agent/a-share/akshare-client.js';
 import { fmtNum, fmtYiYuan, pick, toNum } from '../../agent/a-share/ashare-format.js';
+import { stockDashboardSnapshots } from '../../db/schema/stock-dashboard-snapshots.js';
 import { users } from '../../db/schema/users.js';
 import { protectedProcedure, router } from '../trpc.js';
 
@@ -217,6 +219,98 @@ function dashboardCacheKey(userInternalId: number, watchlist: WatchlistEntry[]):
     ].join(':'))
     .join('|');
   return `${userInternalId}:${signature}`;
+}
+
+function dashboardPersistedCacheKey(cacheKey: string): string {
+  return createHash('sha256').update(cacheKey).digest('hex');
+}
+
+function isDashboardSnapshot(value: unknown): value is DashboardSnapshot {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Partial<DashboardSnapshot>;
+  return (
+    candidate.source === 'akshare' &&
+    Array.isArray(candidate.watchlistStocks) &&
+    Array.isArray(candidate.marketIndices) &&
+    Array.isArray(candidate.sectors) &&
+    Array.isArray(candidate.news) &&
+    Array.isArray(candidate.leaders) &&
+    typeof candidate.freshness === 'object' &&
+    candidate.freshness !== null
+  );
+}
+
+function hasDisplayableRealDashboardData(snapshot: DashboardSnapshot): boolean {
+  const hasWatchlistData = snapshot.watchlistStocks.some((stockRow) =>
+    stockRow.price !== '—' ||
+    stockRow.spark.length >= 2 ||
+    stockRow.turnoverAmount !== null ||
+    stockRow.volume !== null);
+  return (
+    hasWatchlistData ||
+    snapshot.marketIndices.length > 0 ||
+    snapshot.sectors.length > 0 ||
+    snapshot.news.length > 0 ||
+    snapshot.leaderboards.gainers.length > 0 ||
+    snapshot.leaderboards.losers.length > 0 ||
+    snapshot.leaderboards.amount.length > 0
+  );
+}
+
+async function loadPersistedDashboardSnapshot(args: {
+  db: Db;
+  logger: MinimalLogger;
+  userInternalId: number;
+  cacheKey: string;
+}): Promise<DashboardSnapshot | undefined> {
+  try {
+    const [row] = await args.db
+      .select({ snapshotJson: stockDashboardSnapshots.snapshotJson })
+      .from(stockDashboardSnapshots)
+      .where(and(
+        eq(stockDashboardSnapshots.userId, args.userInternalId),
+        eq(stockDashboardSnapshots.cacheKeyHash, dashboardPersistedCacheKey(args.cacheKey)),
+      ))
+      .limit(1);
+    if (!row || !isDashboardSnapshot(row.snapshotJson)) return undefined;
+    return markStale(row.snapshotJson, '行情接口正在刷新，当前展示最近一次真实数据。');
+  } catch (error) {
+    args.logger.warn(
+      { error: error instanceof Error ? error.message : String(error) },
+      'stocks-dashboard: persisted snapshot read failed',
+    );
+    return undefined;
+  }
+}
+
+async function persistDashboardSnapshot(args: {
+  db: Db;
+  logger: MinimalLogger;
+  userInternalId: number;
+  cacheKey: string;
+  snapshot: DashboardSnapshot;
+}): Promise<void> {
+  if (!hasDisplayableRealDashboardData(args.snapshot)) return;
+  try {
+    await args.db
+      .insert(stockDashboardSnapshots)
+      .values({
+        userId: args.userInternalId,
+        cacheKeyHash: dashboardPersistedCacheKey(args.cacheKey),
+        snapshotJson: args.snapshot,
+      })
+      .onDuplicateKeyUpdate({
+        set: {
+          snapshotJson: args.snapshot,
+          updatedAt: sql`CURRENT_TIMESTAMP(3)`,
+        },
+      });
+  } catch (error) {
+    args.logger.warn(
+      { error: error instanceof Error ? error.message : String(error) },
+      'stocks-dashboard: persisted snapshot write failed',
+    );
+  }
 }
 
 function withFreshness(
@@ -845,8 +939,10 @@ function withPreservedSlowSignals(snapshot: DashboardSnapshot, previous?: Dashbo
 }
 
 function startFullDashboardRefresh(args: {
+  db: Db;
   cacheKey: string;
   logger: MinimalLogger;
+  userInternalId: number;
   watchlistRows: WatchlistEntry[];
   effectiveWatchlist: WatchlistEntry[];
 }): Promise<DashboardSnapshot> {
@@ -857,9 +953,16 @@ function startFullDashboardRefresh(args: {
     effectiveWatchlist: args.effectiveWatchlist,
     now: new Date(),
     includeSlowSignals: true,
-  }).then((snapshot) => {
+  }).then(async (snapshot) => {
     const merged = withPreservedSlowSignals(snapshot, existing?.snapshot);
     cacheDashboardSnapshot(args.cacheKey, merged);
+    await persistDashboardSnapshot({
+      db: args.db,
+      logger: args.logger,
+      userInternalId: args.userInternalId,
+      cacheKey: args.cacheKey,
+      snapshot: merged,
+    });
     return merged;
   }).catch((error) => {
     args.logger.warn(
@@ -881,8 +984,10 @@ function startFullDashboardRefresh(args: {
 }
 
 function startDashboardRefresh(args: {
+  db: Db;
   cacheKey: string;
   logger: MinimalLogger;
+  userInternalId: number;
   watchlistRows: WatchlistEntry[];
   effectiveWatchlist: WatchlistEntry[];
 }): Promise<DashboardSnapshot> {
@@ -896,14 +1001,28 @@ function startDashboardRefresh(args: {
     effectiveWatchlist: args.effectiveWatchlist,
     now: new Date(),
     includeSlowSignals: !quickFirst,
-  }).then((snapshot) => {
+  }).then(async (snapshot) => {
     if (quickFirst) {
       const fullRefreshPromise = startFullDashboardRefresh(args);
       cacheDashboardSnapshot(args.cacheKey, snapshot, fullRefreshPromise);
+      persistDashboardSnapshot({
+        db: args.db,
+        logger: args.logger,
+        userInternalId: args.userInternalId,
+        cacheKey: args.cacheKey,
+        snapshot,
+      }).catch(() => undefined);
       fullRefreshPromise.catch(() => undefined);
     } else {
       const merged = withPreservedSlowSignals(snapshot, existing?.snapshot);
       cacheDashboardSnapshot(args.cacheKey, merged);
+      await persistDashboardSnapshot({
+        db: args.db,
+        logger: args.logger,
+        userInternalId: args.userInternalId,
+        cacheKey: args.cacheKey,
+        snapshot: merged,
+      });
       return merged;
     }
     return snapshot;
@@ -934,30 +1053,53 @@ function startDashboardRefresh(args: {
 }
 
 async function resolveDashboardSnapshot(args: {
+  db: Db;
   logger: MinimalLogger;
   userInternalId: number;
   watchlistRows: WatchlistEntry[];
   effectiveWatchlist: WatchlistEntry[];
 }): Promise<DashboardSnapshot> {
   const cacheKey = dashboardCacheKey(args.userInternalId, args.effectiveWatchlist);
-  const cached = dashboardCache.get(cacheKey);
+  let cached = dashboardCache.get(cacheKey);
+  if (!cached?.snapshot) {
+    const persisted = await loadPersistedDashboardSnapshot({
+      db: args.db,
+      logger: args.logger,
+      userInternalId: args.userInternalId,
+      cacheKey,
+    });
+    if (persisted) {
+      dashboardCache.set(cacheKey, {
+        snapshot: persisted,
+        freshUntil: 0,
+        staleUntil: Date.now() + DASHBOARD_STALE_TTL_MS,
+      });
+      cached = dashboardCache.get(cacheKey);
+    }
+  }
   const nowMs = Date.now();
   if (cached?.snapshot && cached.freshUntil > nowMs) return cached.snapshot;
 
   const refreshPromise = startDashboardRefresh({
+    db: args.db,
     cacheKey,
     logger: args.logger,
+    userInternalId: args.userInternalId,
     watchlistRows: args.watchlistRows,
     effectiveWatchlist: args.effectiveWatchlist,
   });
 
   if (cached?.snapshot && cached.staleUntil > nowMs) {
+    refreshPromise.catch(() => undefined);
     return markStale(cached.snapshot, '正在后台刷新行情，当前展示最近一次真实数据。');
   }
 
   try {
     return await withTimeout(refreshPromise, DASHBOARD_FIRST_PAINT_BUDGET_MS);
   } catch {
+    if (cached?.snapshot) {
+      return markStale(cached.snapshot, '行情接口暂未返回，当前展示最近一次真实数据。');
+    }
     return buildPartialDashboardSnapshot(args.watchlistRows, args.effectiveWatchlist);
   }
 }
@@ -968,6 +1110,7 @@ export const stocksRouter = router({
     const watchlistRows = await listWatchlistForUser(ctx.db, userInternalId);
     const effectiveWatchlist = watchlistRows.length > 0 ? watchlistRows : FALLBACK_WATCHLIST;
     return resolveDashboardSnapshot({
+      db: ctx.db,
       logger: ctx.logger,
       userInternalId,
       watchlistRows,
@@ -1020,5 +1163,7 @@ export const stocksRouter = router({
 export const __stocksDashboardTest = {
   buildDashboardSnapshot,
   dashboardCache,
+  hasDisplayableRealDashboardData,
+  resolveDashboardSnapshot,
   withPreservedSlowSignals,
 };

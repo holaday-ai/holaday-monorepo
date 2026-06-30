@@ -387,6 +387,81 @@ describe('stocks dashboard snapshot', () => {
     expect(merged.freshness.message).toContain('分时线');
   });
 
+  it('uses the persisted real snapshot after a process restart while AkShare is unavailable', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      new Response(JSON.stringify(envelope([]))));
+    const previousStock = {
+      symbol: '603528',
+      name: '多伦科技',
+      market: 'A' as const,
+      price: '5.86',
+      changePct: -0.17,
+      signal: '偏弱' as const,
+      report: '待生成' as const,
+      spark: [5.88, 5.91, 5.86],
+      sparkLabels: ['2026-06-30 09:31:00', '2026-06-30 10:50:00', '2026-06-30 15:00:00'],
+      sparkKind: 'intraday' as const,
+      sparkBaseline: 5.87,
+      turnoverAmount: 60_989_093,
+      averageTurnoverAmount: 90_455_000,
+      volume: null,
+      averageVolume: null,
+      volumeRatio: 0.67,
+      volumeSignal: '缩量' as const,
+      newsCount: 0,
+      note: '来源 AkShare · 多伦科技 今日真实分钟线',
+    };
+    const previous = {
+      updatedAt: '2026-06-30T09:40:00.000Z',
+      source: 'akshare' as const,
+      isFallbackWatchlist: false,
+      watchlistStocks: [previousStock],
+      marketIndices: [],
+      sectors: [],
+      starStocks: [previousStock],
+      temperature: null,
+      news: [],
+      leaders: [],
+      leaderboards: { gainers: [], losers: [], amount: [] },
+      freshness: {
+        status: 'fresh' as const,
+        cachedAt: '2026-06-30T09:40:00.000Z',
+      },
+    };
+    const fakeDb = {
+      select: vi.fn(() => ({
+        from: () => ({
+          where: () => ({
+            limit: async () => [{ snapshotJson: previous }],
+          }),
+        }),
+      })),
+      insert: vi.fn(() => ({
+        values: () => ({
+          onDuplicateKeyUpdate: async () => undefined,
+        }),
+      })),
+    };
+
+    const snapshot = await __stocksDashboardTest.resolveDashboardSnapshot({
+      db: fakeDb as never,
+      logger: { warn: vi.fn() },
+      userInternalId: 1,
+      watchlistRows: [{ symbol: '603528', market: 'A', displayName: '多伦科技' }],
+      effectiveWatchlist: [{ symbol: '603528', market: 'A', displayName: '多伦科技' }],
+    });
+
+    expect(snapshot.watchlistStocks[0]).toMatchObject({
+      symbol: '603528',
+      price: '5.86',
+      spark: previousStock.spark,
+      sparkLabels: previousStock.sparkLabels,
+      sparkKind: 'intraday',
+    });
+    expect(snapshot.freshness.status).toBe('stale');
+    expect(snapshot.freshness.message).toContain('最近一次真实数据');
+  });
+
   it('preserves sectors when a refresh keeps temperature but loses industry rankings', () => {
     const previous = {
       updatedAt: '2026-06-29T12:00:00.000Z',
