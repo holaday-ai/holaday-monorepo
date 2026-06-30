@@ -211,6 +211,8 @@ const MARKET_UP_CLASS = 'text-[#E11D48]';
 const MARKET_DOWN_CLASS = 'text-[#0E9F6E]';
 const MARKET_UP_STROKE = '#E11D48';
 const MARKET_DOWN_STROKE = '#0E9F6E';
+const MARKET_CHART_LEFT = 0;
+const MARKET_CHART_RIGHT = 100;
 const DISCOVERY_IMAGES = [
   'https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?auto=format&fit=crop&w=900&q=80',
   'https://images.unsplash.com/photo-1520607162513-77705c0f0d4a?auto=format&fit=crop&w=900&q=80',
@@ -1933,8 +1935,18 @@ function MarketMiniChart({
     : `${formatStockDateLabel(labels[activePoint.index] ?? '')} 收盘`;
   const handlePointerMove = (event: React.PointerEvent<SVGSVGElement>): void => {
     if (!onHoverRatioChange) return;
-    const rect = event.currentTarget.getBoundingClientRect();
-    const svgX = ((event.clientX - rect.left) / Math.max(1, rect.width)) * 100;
+    const svg = event.currentTarget;
+    const matrix = svg.getScreenCTM();
+    let svgX: number;
+    if (matrix) {
+      const point = svg.createSVGPoint();
+      point.x = event.clientX;
+      point.y = event.clientY;
+      svgX = point.matrixTransform(matrix.inverse()).x;
+    } else {
+      const rect = svg.getBoundingClientRect();
+      svgX = ((event.clientX - rect.left) / Math.max(1, rect.width)) * 100;
+    }
     const ratio = (svgX - chart.left) / Math.max(1, chart.right - chart.left);
     onHoverRatioChange(Math.max(0, Math.min(1, ratio)));
   };
@@ -2105,8 +2117,8 @@ function chartGeometry(values: number[], extraValues: number[] = [], xRatios?: n
   left: number;
   right: number;
 } {
-  const left = 8;
-  const right = 98;
+  const left = MARKET_CHART_LEFT;
+  const right = MARKET_CHART_RIGHT;
   const domainValues = [...values, ...extraValues.filter((value) => Number.isFinite(value))];
   const min = Math.min(...domainValues);
   const max = Math.max(...domainValues);
@@ -2243,8 +2255,8 @@ function chartAxisTicks(
   if (kind === 'intraday') {
     if (labels.length === 0) {
       return [
-        { x: 8, label: '首笔' },
-        { x: 98, label: '最近' },
+        { x: MARKET_CHART_LEFT, label: '首笔' },
+        { x: MARKET_CHART_RIGHT, label: '最近' },
       ];
     }
     const last = labels.length - 1;
@@ -2255,14 +2267,14 @@ function chartAxisTicks(
       last,
     ])).sort((a, b) => a - b);
     return indexes.map((index) => ({
-      x: 8 + (index / Math.max(1, last)) * 90,
+      x: MARKET_CHART_LEFT + (index / Math.max(1, last)) * (MARKET_CHART_RIGHT - MARKET_CHART_LEFT),
       label: formatStockDateLabel(labels[index] ?? ''),
     }));
   }
   if (labels.length === 0) {
     return [
-      { x: 8, label: '首日' },
-      { x: 98, label: '末日' },
+      { x: MARKET_CHART_LEFT, label: '首日' },
+      { x: MARKET_CHART_RIGHT, label: '末日' },
     ];
   }
   const last = labels.length - 1;
@@ -2272,7 +2284,7 @@ function chartAxisTicks(
     last,
   ])).sort((a, b) => a - b);
   return indexes.map((index) => ({
-    x: 8 + (index / Math.max(1, last)) * 90,
+    x: MARKET_CHART_LEFT + (index / Math.max(1, last)) * (MARKET_CHART_RIGHT - MARKET_CHART_LEFT),
     label: formatStockDateLabel(labels[index] ?? ''),
   }));
 }
