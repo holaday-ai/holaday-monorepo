@@ -856,8 +856,8 @@ function MarketHighlights({
 }
 
 function StockHighlightCard({ stock }: { stock: StockSnapshot }): JSX.Element {
-  const [hoverIndex, setHoverIndex] = React.useState<number | null>(null);
-  const display = stockDisplayPoint(stock, hoverIndex);
+  const [hoverRatio, setHoverRatio] = React.useState<number | null>(null);
+  const display = stockDisplayPoint(stock, hoverRatio);
   return (
     <article className="group overflow-hidden rounded-[10px] border border-[#E7E7EB] bg-[#FEFEFF] px-4 pb-4 pt-4 transition-[border-color,box-shadow] hover:border-[#DADDE5] hover:shadow-[0_14px_28px_rgba(18,24,38,0.06)]">
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_156px]">
@@ -886,8 +886,8 @@ function StockHighlightCard({ stock }: { stock: StockSnapshot }): JSX.Element {
               values={stock.spark}
               latestChangePct={stock.changePct}
               className="mt-4 h-[218px] w-full"
-              hoverIndex={hoverIndex}
-              onHoverIndexChange={setHoverIndex}
+              hoverRatio={hoverRatio}
+              onHoverRatioChange={setHoverRatio}
               showTimeline
             />
           ) : (
@@ -1880,15 +1880,15 @@ function MarketMiniChart({
   values,
   latestChangePct,
   className,
-  hoverIndex,
-  onHoverIndexChange,
+  hoverRatio,
+  onHoverRatioChange,
   showTimeline = false,
 }: {
   values: number[];
   latestChangePct: number;
   className?: string;
-  hoverIndex?: number | null;
-  onHoverIndexChange?: (index: number | null) => void;
+  hoverRatio?: number | null;
+  onHoverRatioChange?: (ratio: number | null) => void;
   showTimeline?: boolean;
 }): JSX.Element {
   const gradientId = React.useId();
@@ -1899,29 +1899,25 @@ function MarketMiniChart({
   const min = Math.min(...values);
   const max = Math.max(...values);
   const mid = min + (max - min) / 2;
-  const activeIndex = hoverIndex ?? values.length - 1;
-  const activePoint = chart.points[activeIndex] ?? chart.points[chart.points.length - 1];
-  const activeValue = values[activeIndex] ?? values[values.length - 1] ?? max;
-  const activeChangePct =
-    activeIndex === values.length - 1
-      ? latestChangePct
-      : pointChangePct(values, activeIndex);
+  const activeRatio = hoverRatio ?? 1;
+  const activePoint = interpolatedChartPoint(values, chart, activeRatio, latestChangePct);
+  const activeValue = activePoint.value;
+  const activeChangePct = activePoint.changePct;
   const positive = activeChangePct >= 0;
   const strokeFallback = latestChangePct >= 0 ? MARKET_UP_STROKE : MARKET_DOWN_STROKE;
   const baseline = values[0] ?? activeValue;
   const baselineY = chart.yForValue(baseline);
   const baselinePct = Math.max(0, Math.min(100, (baselineY / 48) * 100));
-  const showHover = hoverIndex !== null && activePoint;
-  const tooltipTime = stockPointTimeLabel(values.length, activeIndex);
+  const showHover = hoverRatio !== null;
+  const tooltipTime = stockPointTimeLabel(activeRatio);
   const handlePointerMove = (event: React.PointerEvent<SVGSVGElement>): void => {
-    if (!onHoverIndexChange) return;
+    if (!onHoverRatioChange) return;
     const rect = event.currentTarget.getBoundingClientRect();
     const svgX = ((event.clientX - rect.left) / Math.max(1, rect.width)) * 100;
     const ratio = (svgX - chart.left) / Math.max(1, chart.right - chart.left);
-    const index = Math.max(0, Math.min(values.length - 1, Math.round(ratio * (values.length - 1))));
-    onHoverIndexChange(index);
+    onHoverRatioChange(Math.max(0, Math.min(1, ratio)));
   };
-  const handlePointerLeave = (): void => onHoverIndexChange?.(null);
+  const handlePointerLeave = (): void => onHoverRatioChange?.(null);
   return (
     <div className={cn('relative select-none', className)}>
       <svg
@@ -2126,35 +2122,61 @@ function smoothPathFromPoints(points: Array<{ x: number; y: number }>): string {
   return commands.join(' ');
 }
 
-function pointChangePct(values: number[], index: number): number {
-  const current = values[index];
-  if (typeof current !== 'number') return 0;
-  const baseline = values[0];
-  if (!baseline) return 0;
-  return ((current - baseline) / baseline) * 100;
+function interpolatedChartPoint(
+  values: number[],
+  chart: ReturnType<typeof chartGeometry>,
+  ratio: number,
+  latestChangePct: number,
+): { x: number; y: number; value: number; changePct: number } {
+  const clamped = Math.max(0, Math.min(1, ratio));
+  const latest = values[values.length - 1] ?? 0;
+  if (values.length <= 1) {
+    return {
+      x: chart.left,
+      y: chart.yForValue(latest),
+      value: latest,
+      changePct: latestChangePct,
+    };
+  }
+  const scaled = clamped * (values.length - 1);
+  const leftIndex = Math.floor(scaled);
+  const rightIndex = Math.min(values.length - 1, leftIndex + 1);
+  const localRatio = scaled - leftIndex;
+  const leftValue = values[leftIndex] ?? latest;
+  const rightValue = values[rightIndex] ?? leftValue;
+  const value = leftValue + (rightValue - leftValue) * localRatio;
+  const baseline = values[0] || value;
+  return {
+    x: chart.left + clamped * (chart.right - chart.left),
+    y: chart.yForValue(value),
+    value,
+    changePct: clamped >= 0.999 && Number.isFinite(latestChangePct)
+      ? latestChangePct
+      : baseline
+        ? ((value - baseline) / baseline) * 100
+        : 0,
+  };
 }
 
-function stockPointTimeLabel(total: number, index: number): string {
-  const clamped = Math.max(0, Math.min(Math.max(0, total - 1), index));
-  const ratio = total <= 1 ? 0 : clamped / (total - 1);
+function stockPointTimeLabel(ratio: number): string {
+  const clamped = Math.max(0, Math.min(1, ratio));
   const startMinutes = 5 * 60;
   const endMinutes = 17 * 60;
-  const minutes = Math.round((startMinutes + (endMinutes - startMinutes) * ratio) / 5) * 5;
+  const minutes = Math.round((startMinutes + (endMinutes - startMinutes) * clamped) / 5) * 5;
   const hour = Math.floor(minutes / 60);
   const minute = minutes % 60;
   return `${hour}:${String(minute).padStart(2, '0')}`;
 }
 
-function stockDisplayPoint(stock: StockSnapshot, hoverIndex: number | null): { price: string; changePct: number } {
-  if (hoverIndex === null || stock.spark.length === 0) {
+function stockDisplayPoint(stock: StockSnapshot, hoverRatio: number | null): { price: string; changePct: number } {
+  if (hoverRatio === null || stock.spark.length === 0) {
     return { price: stock.price, changePct: stock.changePct };
   }
-  const clamped = Math.max(0, Math.min(stock.spark.length - 1, hoverIndex));
-  const value = stock.spark[clamped];
-  if (typeof value !== 'number') return { price: stock.price, changePct: stock.changePct };
+  const chart = chartGeometry(stock.spark);
+  const point = interpolatedChartPoint(stock.spark, chart, hoverRatio, stock.changePct);
   return {
-    price: value.toFixed(2),
-    changePct: clamped === stock.spark.length - 1 ? stock.changePct : pointChangePct(stock.spark, clamped),
+    price: point.value.toFixed(2),
+    changePct: point.changePct,
   };
 }
 
