@@ -312,6 +312,81 @@ describe('stocks dashboard snapshot', () => {
     expect(merged.freshness.message).toContain('关注股票');
   });
 
+  it('preserves per-stock intraday lines when quotes refresh but minute data is missing', () => {
+    const previousStock = {
+      symbol: '600497',
+      name: '驰宏锌锗',
+      market: 'A' as const,
+      price: '12.11',
+      changePct: -5.39,
+      signal: '风险升高' as const,
+      report: '待生成' as const,
+      spark: [12.8, 12.3, 12.11],
+      sparkLabels: ['2026-06-30 09:30:00', '2026-06-30 11:30:00', '2026-06-30 15:00:00'],
+      sparkKind: 'intraday' as const,
+      sparkBaseline: 12.8,
+      turnoverAmount: 4_171_506_704,
+      averageTurnoverAmount: 2_311_000_000,
+      volume: null,
+      averageVolume: null,
+      volumeRatio: 1.8,
+      volumeSignal: '放量' as const,
+      newsCount: 0,
+      note: '来源 AkShare · 驰宏锌锗 今日真实分钟线',
+    };
+    const previous = {
+      updatedAt: '2026-06-30T09:40:00.000Z',
+      source: 'akshare' as const,
+      isFallbackWatchlist: false,
+      watchlistStocks: [previousStock],
+      marketIndices: [],
+      sectors: [],
+      starStocks: [previousStock],
+      temperature: null,
+      news: [],
+      leaders: [],
+      leaderboards: { gainers: [], losers: [], amount: [] },
+      freshness: {
+        status: 'fresh' as const,
+        cachedAt: '2026-06-30T09:40:00.000Z',
+      },
+    };
+    const nextStock = {
+      ...previousStock,
+      price: '12.10',
+      changePct: -5.47,
+      spark: [],
+      sparkLabels: [],
+      sparkBaseline: 12.8,
+      note: '来源 AkShare · 驰宏锌锗 最新行情，分时走势暂缺',
+    };
+    const next = {
+      ...previous,
+      updatedAt: '2026-06-30T09:45:00.000Z',
+      watchlistStocks: [nextStock],
+      starStocks: [nextStock],
+      freshness: {
+        status: 'partial' as const,
+        cachedAt: '2026-06-30T09:45:00.000Z',
+        message: '真实行情已先展示，市场温度正在后台补齐。',
+      },
+    };
+
+    const merged = __stocksDashboardTest.withPreservedSlowSignals(next, previous);
+
+    expect(merged.watchlistStocks[0]).toMatchObject({
+      symbol: '600497',
+      price: '12.10',
+      changePct: -5.47,
+      spark: previousStock.spark,
+      sparkLabels: previousStock.sparkLabels,
+      sparkKind: 'intraday',
+      sparkBaseline: 12.8,
+    });
+    expect(merged.freshness.status).toBe('stale');
+    expect(merged.freshness.message).toContain('分时线');
+  });
+
   it('preserves sectors when a refresh keeps temperature but loses industry rankings', () => {
     const previous = {
       updatedAt: '2026-06-29T12:00:00.000Z',

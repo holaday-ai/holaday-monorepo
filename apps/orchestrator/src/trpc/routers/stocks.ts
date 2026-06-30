@@ -774,6 +774,22 @@ function withPreservedSlowSignals(snapshot: DashboardSnapshot, previous?: Dashbo
   const snapshotHasWatchlistQuotes = snapshot.watchlistStocks.some((stockRow) => stockRow.price !== '—' || stockRow.spark.length >= 2);
   const previousHasWatchlistQuotes = previous.watchlistStocks.some((stockRow) => stockRow.price !== '—' || stockRow.spark.length >= 2);
   const shouldPreserveWatchlistStocks = !snapshotHasWatchlistQuotes && previousHasWatchlistQuotes;
+  const previousStockBySymbol = new Map(previous.watchlistStocks.map((stockRow) => [stockRow.symbol, stockRow]));
+  const watchlistStocks = shouldPreserveWatchlistStocks
+    ? previous.watchlistStocks
+    : snapshot.watchlistStocks.map((stockRow) => {
+      const previousStock = previousStockBySymbol.get(stockRow.symbol);
+      if (stockRow.spark.length >= 2 || !previousStock || previousStock.spark.length < 2) return stockRow;
+      return {
+        ...stockRow,
+        spark: previousStock.spark,
+        sparkLabels: previousStock.sparkLabels,
+        sparkKind: previousStock.sparkKind,
+        sparkBaseline: previousStock.sparkBaseline,
+        note: `${stockRow.note}；分时线保留最近一次真实分钟线`,
+      };
+    });
+  const shouldPreserveWatchlistSparks = !shouldPreserveWatchlistStocks && watchlistStocks.some((stockRow, index) => stockRow !== snapshot.watchlistStocks[index]);
   const shouldPreserveMarketIndices = snapshot.marketIndices.length === 0 && previous.marketIndices.length > 0;
   const shouldPreserveSectors = snapshot.sectors.length === 0 && previous.sectors.length > 0;
   const shouldPreserveTemperature = snapshot.temperature === null && previous.temperature !== null;
@@ -789,6 +805,7 @@ function withPreservedSlowSignals(snapshot: DashboardSnapshot, previous?: Dashbo
     );
   if (
     !shouldPreserveWatchlistStocks &&
+    !shouldPreserveWatchlistSparks &&
     !shouldPreserveMarketIndices &&
     !shouldPreserveSectors &&
     !shouldPreserveTemperature &&
@@ -798,6 +815,7 @@ function withPreservedSlowSignals(snapshot: DashboardSnapshot, previous?: Dashbo
 
   const preservedLabels = [
     shouldPreserveWatchlistStocks ? '关注股票' : null,
+    shouldPreserveWatchlistSparks ? '分时线' : null,
     shouldPreserveMarketIndices ? '市场行情' : null,
     shouldPreserveSectors ? '行业趋势' : null,
     shouldPreserveTemperature ? '市场温度' : null,
@@ -808,8 +826,10 @@ function withPreservedSlowSignals(snapshot: DashboardSnapshot, previous?: Dashbo
 
   return {
     ...snapshot,
-    watchlistStocks: shouldPreserveWatchlistStocks ? previous.watchlistStocks : snapshot.watchlistStocks,
-    starStocks: shouldPreserveWatchlistStocks ? previous.starStocks : snapshot.starStocks,
+    watchlistStocks,
+    starStocks: shouldPreserveWatchlistStocks
+      ? previous.starStocks
+      : watchlistStocks.filter((stockRow) => stockRow.price !== '—').slice(0, 6),
     marketIndices: shouldPreserveMarketIndices ? previous.marketIndices : snapshot.marketIndices,
     sectors: shouldPreserveSectors ? previous.sectors : snapshot.sectors,
     temperature: shouldPreserveTemperature ? previous.temperature : snapshot.temperature,
