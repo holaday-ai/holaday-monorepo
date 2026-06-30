@@ -859,12 +859,12 @@ function StockHighlightCard({ stock }: { stock: StockSnapshot }): JSX.Element {
   const [hoverIndex, setHoverIndex] = React.useState<number | null>(null);
   const display = stockDisplayPoint(stock, hoverIndex);
   return (
-    <article className="group rounded-[8px] border border-[#E7E7EB] bg-[#FEFEFF] p-4 transition-[border-color,box-shadow,transform] hover:-translate-y-0.5 hover:border-[#EA1F59]/25 hover:shadow-[0_14px_28px_rgba(18,24,38,0.08)] motion-reduce:hover:translate-y-0">
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_220px]">
+    <article className="group overflow-hidden rounded-[10px] border border-[#E7E7EB] bg-[#FEFEFF] px-4 pb-4 pt-4 transition-[border-color,box-shadow] hover:border-[#DADDE5] hover:shadow-[0_14px_28px_rgba(18,24,38,0.06)]">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_156px]">
         <div className="min-w-0">
           <div className="flex items-start justify-between gap-3">
             <div className="flex min-w-0 items-start gap-3">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] bg-[#0B4AA2] text-[11px] font-semibold text-white">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[7px] bg-[#0B4AA2] text-[11px] font-semibold text-white shadow-[inset_0_-1px_0_rgba(255,255,255,0.18)]">
                 {stock.symbol.slice(0, 2)}
               </div>
               <div className="min-w-0">
@@ -877,15 +877,15 @@ function StockHighlightCard({ stock }: { stock: StockSnapshot }): JSX.Element {
               </div>
             </div>
             <div className="text-right">
-              <div className="text-[22px] font-semibold leading-none tabular-nums text-[#121826]">{display.price}</div>
-              <ChangeText value={display.changePct} className="mt-1 justify-end" />
+              <div className="text-[22px] font-medium leading-none tracking-normal tabular-nums text-[#121826]">{display.price}</div>
+              <StockChangeBadge value={display.changePct} className="mt-1.5 justify-end" />
             </div>
           </div>
           {stock.spark.length >= 2 ? (
             <MarketMiniChart
               values={stock.spark}
               latestChangePct={stock.changePct}
-              className="mt-4 h-[220px] w-full"
+              className="mt-4 h-[218px] w-full"
               hoverIndex={hoverIndex}
               onHoverIndexChange={setHoverIndex}
               showTimeline
@@ -899,13 +899,11 @@ function StockHighlightCard({ stock }: { stock: StockSnapshot }): JSX.Element {
             {stockNarrative(stock)}
           </p>
         </div>
-        <div className="grid min-w-0 grid-cols-2 gap-2 self-start border-t border-[#F0F1F4] pt-3 lg:grid-cols-1 lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0">
-          <StockMiniMetric label="状态" value={stock.signal} tone={stock.changePct >= 0 ? 'red' : 'green'} />
-          <StockMiniMetric label="8日区间" value={stockRangeText(stock)} />
-          <StockMiniMetric label="区间位置" value={stockPositionText(stock)} tone={stock.changePct >= 0 ? 'red' : 'green'} />
-          <StockMiniMetric label="今日观察" value={stockObservationText(stock)} />
-          <StockMiniMetric label="追踪重点" value={stockFollowupText(stock)} />
-          <StockMiniMetric label="数据来源" value="AkShare" />
+        <div className="grid min-w-0 grid-cols-2 gap-x-4 gap-y-3 self-start border-t border-[#F0F1F4] pt-3 lg:block lg:border-l lg:border-t-0 lg:pl-4 lg:pt-1">
+          <StockRailMetric label="8日区间" value={stockRangeText(stock)} />
+          <StockRailMetric label="区间位置" value={stockPositionText(stock)} tone={stock.changePct >= 0 ? 'red' : 'green'} />
+          <StockRailMetric label="关注源" value={`${stock.newsCount} 条`} />
+          <StockRailMetric label="日报状态" value={stock.report} />
         </div>
       </div>
     </article>
@@ -1786,7 +1784,37 @@ function ChangeText({
   );
 }
 
-function StockMiniMetric({
+function StockChangeBadge({
+  value,
+  className,
+}: {
+  value: number;
+  className?: string;
+}): JSX.Element {
+  if (!Number.isFinite(value) || value === 0) {
+    return (
+      <span className={cn('inline-flex items-center rounded-[4px] bg-[#F2F4F7] px-1.5 py-1 text-[12px] font-semibold tabular-nums text-[#667085]', className)}>
+        0.00%
+      </span>
+    );
+  }
+  const positive = value >= 0;
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center gap-1 rounded-[4px] px-1.5 py-1 text-[12px] font-semibold leading-none tabular-nums',
+        positive ? 'bg-[#FDECF2] text-[#E11D48]' : 'bg-[#EAF7F0] text-[#0E9F6E]',
+        className,
+      )}
+    >
+      {positive ? <TrendingUp className="h-3 w-3" aria-hidden /> : <TrendingDown className="h-3 w-3" aria-hidden />}
+      {positive ? '+' : ''}
+      {value.toFixed(2)}%
+    </span>
+  );
+}
+
+function StockRailMetric({
   label,
   value,
   tone = 'neutral',
@@ -1797,9 +1825,9 @@ function StockMiniMetric({
 }): JSX.Element {
   const valueClass = tone === 'red' ? MARKET_UP_CLASS : tone === 'green' ? MARKET_DOWN_CLASS : 'text-[#121826]';
   return (
-    <div className="min-w-0 rounded-[7px] border border-[#ECEEF3] bg-[#FCFCFD] px-2.5 py-2">
-      <div className="truncate text-[10px] font-medium text-[#8B92A1]">{label}</div>
-      <div className={cn('mt-1 truncate text-[12px] font-semibold leading-tight', valueClass)}>{value}</div>
+    <div className="min-w-0 lg:mb-4">
+      <div className="text-[12px] font-medium leading-none text-[#777F8D]">{label}</div>
+      <div className={cn('mt-2 truncate text-[12px] font-semibold leading-none tabular-nums', valueClass)}>{value}</div>
     </div>
   );
 }
@@ -1867,9 +1895,10 @@ function MarketMiniChart({
   const chart = chartGeometry(values);
   const points = chart.points.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(' ');
   const linePath = smoothPathFromPoints(chart.points);
-  const areaPath = linePath ? `${linePath} L 98 38 L 2 38 Z` : '';
+  const areaPath = linePath ? `${linePath} L ${chart.right} 38 L ${chart.left} 38 Z` : '';
   const min = Math.min(...values);
   const max = Math.max(...values);
+  const mid = min + (max - min) / 2;
   const activeIndex = hoverIndex ?? values.length - 1;
   const activePoint = chart.points[activeIndex] ?? chart.points[chart.points.length - 1];
   const activeValue = values[activeIndex] ?? values[values.length - 1] ?? max;
@@ -1883,10 +1912,12 @@ function MarketMiniChart({
   const baselineY = chart.yForValue(baseline);
   const baselinePct = Math.max(0, Math.min(100, (baselineY / 48) * 100));
   const showHover = hoverIndex !== null && activePoint;
+  const tooltipTime = stockPointTimeLabel(values.length, activeIndex);
   const handlePointerMove = (event: React.PointerEvent<SVGSVGElement>): void => {
     if (!onHoverIndexChange) return;
     const rect = event.currentTarget.getBoundingClientRect();
-    const ratio = (event.clientX - rect.left) / Math.max(1, rect.width);
+    const svgX = ((event.clientX - rect.left) / Math.max(1, rect.width)) * 100;
+    const ratio = (svgX - chart.left) / Math.max(1, chart.right - chart.left);
     const index = Math.max(0, Math.min(values.length - 1, Math.round(ratio * (values.length - 1))));
     onHoverIndexChange(index);
   };
@@ -1915,20 +1946,20 @@ function MarketMiniChart({
             <stop offset="100%" stopColor={MARKET_DOWN_STROKE} stopOpacity="0.075" />
           </linearGradient>
         </defs>
-        <rect x="0" y="0" width="100" height="48" rx="4" fill="#FCFCFD" />
+        <rect x="0" y="0" width="100" height="48" rx="4" fill="#FEFEFF" />
         {showTimeline ? (
           <>
             {STOCK_CHART_TIME_TICKS.map((tick) => (
-              <line key={tick.label} x1={tick.x} x2={tick.x} y1="4" y2="38" stroke="#EDF0F4" strokeWidth="0.32" />
+              <line key={tick.label} x1={tick.x} x2={tick.x} y1="5" y2="38" stroke="#ECEFF3" strokeWidth="0.34" />
             ))}
           </>
         ) : null}
         {[8, 18, 28, 38].map((y) => (
-          <line key={y} x1="2" x2="98" y1={y} y2={y} stroke="#EDEFF4" strokeDasharray="0.45 2.15" strokeWidth="0.42" />
+          <line key={y} x1={chart.left} x2={chart.right} y1={y} y2={y} stroke="#E8EBF0" strokeDasharray="0.35 1.45" strokeWidth="0.4" />
         ))}
         <line
-          x1="2"
-          x2="98"
+          x1={chart.left}
+          x2={chart.right}
           y1={baselineY}
           y2={baselineY}
           stroke="#A6ACB8"
@@ -1964,16 +1995,27 @@ function MarketMiniChart({
             <circle cx={activePoint.x} cy={activePoint.y} r="0.95" fill={positive ? MARKET_UP_STROKE : MARKET_DOWN_STROKE} stroke="white" strokeWidth="0.5" />
           </>
         ) : null}
-        <text x="4" y="7" fill="#9CA4B2" fontSize="2.65" fontFamily="ui-sans-serif, system-ui" className="tabular-nums">
-          {max.toFixed(2)}
-        </text>
-        <text x="4" y="39.8" fill="#9CA4B2" fontSize="2.65" fontFamily="ui-sans-serif, system-ui" className="tabular-nums">
-          {min.toFixed(2)}
-        </text>
+        {[
+          { value: max, y: chart.yForValue(max) + 1.3 },
+          { value: mid, y: chart.yForValue(mid) + 1.3 },
+          { value: min, y: chart.yForValue(min) + 1.3 },
+        ].map((label) => (
+          <text
+            key={label.value}
+            x="2.8"
+            y={Math.max(7.2, Math.min(39, label.y))}
+            fill="#9CA4B2"
+            fontSize="2.45"
+            fontFamily="ui-sans-serif, system-ui"
+            className="tabular-nums"
+          >
+            {label.value.toFixed(2)}
+          </text>
+        ))}
         {!showHover ? (
           <>
-            <rect x="69" y={Math.max(5, Math.min(31, baselineY - 3.8))} width="27.5" height="7.6" rx="2.8" fill="white" stroke="#E4E7EC" />
-            <text x="71" y={Math.max(10, Math.min(36, baselineY + 1.1))} fill="#767E8D" fontSize="2.45" fontFamily="ui-sans-serif, system-ui">
+            <rect x="69" y={Math.max(5, Math.min(31, baselineY - 3.7))} width="27.5" height="7.4" rx="3.2" fill="white" stroke="#E1E4EA" />
+            <text x="71" y={Math.max(10, Math.min(36, baselineY + 1.1))} fill="#767E8D" fontSize="2.35" fontFamily="ui-sans-serif, system-ui">
               前次收盘: {baseline.toFixed(2)}
             </text>
           </>
@@ -2006,8 +2048,8 @@ function MarketMiniChart({
           }}
         >
           <div className="whitespace-nowrap text-[12px] font-semibold tabular-nums text-[#344054]">{activeValue.toFixed(2)}</div>
-          <div className={cn('mt-0.5 whitespace-nowrap text-[11px] font-medium tabular-nums', positive ? MARKET_UP_CLASS : MARKET_DOWN_CLASS)}>
-            {activeChangePct >= 0 ? '+' : ''}{activeChangePct.toFixed(2)}%
+          <div className="mt-0.5 whitespace-nowrap text-[11px] font-medium tabular-nums text-[#8B92A1]">
+            今日 {tooltipTime}
           </div>
         </div>
       ) : null}
@@ -2043,17 +2085,23 @@ function valuesToPoints(values: number[]): string {
 function chartGeometry(values: number[]): {
   points: Array<{ x: number; y: number }>;
   yForValue: (value: number) => number;
+  left: number;
+  right: number;
 } {
+  const left = 8;
+  const right = 98;
   const min = Math.min(...values);
   const max = Math.max(...values);
   const range = max - min || 1;
   const yForValue = (value: number): number => 38 - ((value - min) / range) * 30;
   return {
     points: values.map((value, index) => ({
-      x: (index / Math.max(1, values.length - 1)) * 96 + 2,
+      x: (index / Math.max(1, values.length - 1)) * (right - left) + left,
       y: yForValue(value),
     })),
     yForValue,
+    left,
+    right,
   };
 }
 
@@ -2081,9 +2129,20 @@ function smoothPathFromPoints(points: Array<{ x: number; y: number }>): string {
 function pointChangePct(values: number[], index: number): number {
   const current = values[index];
   if (typeof current !== 'number') return 0;
-  const previous = index > 0 ? values[index - 1] : values[0];
-  if (!previous) return 0;
-  return ((current - previous) / previous) * 100;
+  const baseline = values[0];
+  if (!baseline) return 0;
+  return ((current - baseline) / baseline) * 100;
+}
+
+function stockPointTimeLabel(total: number, index: number): string {
+  const clamped = Math.max(0, Math.min(Math.max(0, total - 1), index));
+  const ratio = total <= 1 ? 0 : clamped / (total - 1);
+  const startMinutes = 5 * 60;
+  const endMinutes = 17 * 60;
+  const minutes = Math.round((startMinutes + (endMinutes - startMinutes) * ratio) / 5) * 5;
+  const hour = Math.floor(minutes / 60);
+  const minute = minutes % 60;
+  return `${hour}:${String(minute).padStart(2, '0')}`;
 }
 
 function stockDisplayPoint(stock: StockSnapshot, hoverIndex: number | null): { price: string; changePct: number } {
@@ -2117,15 +2176,6 @@ function stockPositionText(stock: StockSnapshot): string {
   if (pct >= 78) return '接近高位';
   if (pct <= 22) return '接近低位';
   return '区间中部';
-}
-
-function stockObservationText(stock: StockSnapshot): string {
-  if (stock.price === '—') return '行情未回';
-  if (stock.changePct >= 5) return '强波动';
-  if (stock.changePct >= 1) return '偏强';
-  if (stock.changePct <= -5) return '风险放大';
-  if (stock.changePct <= -1) return '偏弱';
-  return '窄幅震荡';
 }
 
 function stockFollowupText(stock: StockSnapshot): string {
