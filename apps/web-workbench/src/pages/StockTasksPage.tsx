@@ -911,8 +911,11 @@ function StockHighlightCard({ stock, marketIndex }: { stock: StockSnapshot; mark
               showTimeline
             />
           ) : (
-            <div className="mt-4 flex h-[220px] items-center justify-center rounded-[7px] border border-dashed border-[#D7DAE2] bg-[#F7F8FA] text-[12px] text-[#8B92A1]">
-              暂无真实走势
+            <div className="mt-4 flex h-[220px] flex-col items-center justify-center rounded-[7px] border border-dashed border-[#D7DAE2] bg-[#F7F8FA] px-4 text-center">
+              <div className="text-[13px] font-medium text-[#667085]">今日分时暂不可用</div>
+              <div className="mt-1 max-w-[320px] text-[12px] leading-relaxed text-[#98A2B3]">
+                已保留真实价格与成交数据，不自动切换成日线，稍后刷新可重试分钟线。
+              </div>
             </div>
           )}
           <p className="mt-3 text-[13px] leading-relaxed text-[#667085]">
@@ -2382,7 +2385,7 @@ function stockVolumeTone(stock: StockSnapshot): 'neutral' | 'red' | 'green' | 'm
 }
 
 function stockPositionText(stock: StockSnapshot): string {
-  if (stock.spark.length < 2) return '等待走势';
+  if (stock.spark.length < 2) return '分时待补齐';
   const min = Math.min(...stock.spark);
   const max = Math.max(...stock.spark);
   const latest = stock.spark[stock.spark.length - 1] ?? min;
@@ -2396,6 +2399,7 @@ function stockPositionText(stock: StockSnapshot): string {
 }
 
 function stockPositionMeta(stock: StockSnapshot): string {
+  if (stock.spark.length < 2) return '等待今日分钟线';
   return stock.sparkKind === 'intraday'
     ? '按今日低点到高点计算'
     : '按近8日收盘低高计算';
@@ -2413,9 +2417,12 @@ function stockNarrative(stock: StockSnapshot, marketIndex: IndexRow | null): str
     return `${stock.name} 已在关注列表中，但当前行情源尚未返回真实价格。Holaday 不会用模拟走势填充，建议稍后刷新或先查看公告来源。`;
   }
   const direction = stock.changePct >= 0 ? '上涨' : '回落';
-  const position = stockPositionText(stock);
   const volume = stockVolumeSummary(stock);
   const market = marketSummary(marketIndex, stock);
+  if (stock.spark.length < 2) {
+    return `${stock.name} 今日${direction} ${Math.abs(stock.changePct).toFixed(2)}%，真实价格与成交数据已返回，但 AkShare 今日分钟线暂缺，Holaday 不会自动改画日线以免误导。${volume}。${market}稍后刷新可重试分时，详细原因和公告影响可生成日报。`;
+  }
+  const position = stockPositionText(stock);
   return `${stock.name} 今日${direction} ${Math.abs(stock.changePct).toFixed(2)}%，价格仍在${position}；${volume}。${market}详细原因和公告影响可生成日报。`;
 }
 

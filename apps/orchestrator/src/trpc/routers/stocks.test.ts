@@ -132,6 +132,50 @@ describe('stocks dashboard snapshot', () => {
     });
   });
 
+  it('does not replace missing intraday charts with daily close charts', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/index/cn') {
+        return new Response(JSON.stringify(envelope([])));
+      }
+      if (url.pathname === '/kline/603528') {
+        return new Response(JSON.stringify(envelope([
+          { 日期: '2026-06-26', 收盘: 7.11, 涨跌幅: 0.42, 成交量: 1000, 成交额: 7_100_000 },
+          { 日期: '2026-06-29', 收盘: 7.28, 涨跌幅: 2.39, 成交量: 2000, 成交额: 14_560_000 },
+        ])));
+      }
+      if (url.pathname === '/intraday/603528') {
+        return new Response(JSON.stringify({ error: 'intraday timeout' }), { status: 503 });
+      }
+      if (url.pathname === '/quote/603528') {
+        return new Response(JSON.stringify(envelope([
+          { 代码: 'sh603528', 名称: '多伦科技', 最新价: 7.31, 涨跌幅: 2.82, 成交量: 2400, 成交额: 17_544_000 },
+        ])));
+      }
+      throw new Error(`unexpected path ${url.pathname}`);
+    });
+
+    const snapshot = await __stocksDashboardTest.buildDashboardSnapshot({
+      logger: { warn: vi.fn() },
+      watchlistRows: [{ symbol: '603528', market: 'A', displayName: '多伦科技' }],
+      effectiveWatchlist: [{ symbol: '603528', market: 'A', displayName: '多伦科技' }],
+      now: new Date('2026-06-29T12:00:00.000Z'),
+      includeSlowSignals: false,
+    });
+
+    expect(snapshot.watchlistStocks[0]).toMatchObject({
+      symbol: '603528',
+      price: '7.31',
+      changePct: 2.82,
+      spark: [],
+      sparkLabels: [],
+      sparkKind: 'intraday',
+      sparkBaseline: 7.28,
+      turnoverAmount: 17_544_000,
+      averageTurnoverAmount: 7_100_000,
+    });
+  });
+
   it('preserves the last real sector and temperature data when market pulse refresh is empty', () => {
     const previous = {
       updatedAt: '2026-06-29T12:00:00.000Z',

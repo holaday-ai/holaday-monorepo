@@ -424,7 +424,7 @@ async function stockSnapshot(
       ? pick(last, ['收盘', 'close', '最新价'])
       : latestIntraday;
   if (close == null) return unavailableStock(entry, fallback);
-  const sparkBaseline = hasIntraday ? previousCloseFromSeries(sparkSeries, intradaySeries.labels[0]) : null;
+  const sparkBaseline = previousCloseFromSeries(sparkSeries, intradaySeries.labels[0]);
   const changePct = toNum(quote ? pick(quote, ['涨跌幅', 'changePct']) : last ? pick(last, ['涨跌幅', 'changePct']) : null)
     ?? (
       typeof sparkBaseline === 'number' && sparkBaseline > 0
@@ -455,9 +455,9 @@ async function stockSnapshot(
     price: fmtNum(close, 2),
     changePct: Number(changePct.toFixed(2)),
     signal: signalFromChange(changePct),
-    spark: hasIntraday ? intradaySeries.values : sparkSeries.values,
-    sparkLabels: hasIntraday ? intradaySeries.labels : sparkSeries.labels,
-    sparkKind: hasIntraday ? 'intraday' : 'daily_close',
+    spark: hasIntraday ? intradaySeries.values : [],
+    sparkLabels: hasIntraday ? intradaySeries.labels : [],
+    sparkKind: 'intraday',
     sparkBaseline,
     turnoverAmount,
     averageTurnoverAmount,
@@ -467,9 +467,7 @@ async function stockSnapshot(
     volumeSignal: volumeSignalFromRatio(volumeRatio),
     note: hasIntraday
       ? `来源 AkShare · ${entry.displayName ?? entry.symbol} 今日真实分钟线`
-      : sparkSeries.values.length >= 2
-      ? `来源 AkShare · ${entry.displayName ?? entry.symbol} 近 8 个交易日真实收盘价`
-      : `来源 AkShare · ${entry.displayName ?? entry.symbol} 最新行情，走势线暂缺`,
+      : `来源 AkShare · ${entry.displayName ?? entry.symbol} 最新行情，分时走势暂缺`,
   };
 }
 
