@@ -607,10 +607,14 @@ export function InputArea({
         className={cn(
           'relative overflow-hidden border transition-[border-color,box-shadow]',
           fullBleed
-            ? 'rounded-[26px] border-[#EA1F59]/[0.18] bg-[#FFF4F8] shadow-[0_18px_42px_rgba(234,31,89,0.08)]'
+            ? compact
+              ? 'rounded-[22px] border-[#F8CAD7] bg-[#FFF9FC] shadow-[0_14px_32px_rgba(234,31,89,0.065)]'
+              : 'rounded-[26px] border-[#EA1F59]/[0.18] bg-[#FFF4F8] shadow-[0_18px_42px_rgba(234,31,89,0.08)]'
             : cn('rounded-lg', COMPOSER_SURFACE),
           fullBleed
-            ? 'focus-within:border-[#EA1F59]/30 focus-within:shadow-[0_20px_46px_rgba(234,31,89,0.11)] focus-within:ring-2 focus-within:ring-[#EA1F59]/[0.08]'
+            ? compact
+              ? 'focus-within:border-[#F4A9BE] focus-within:shadow-[0_12px_30px_rgba(234,31,89,0.075)] focus-within:ring-2 focus-within:ring-[#EA1F59]/[0.045]'
+              : 'focus-within:border-[#EA1F59]/30 focus-within:shadow-[0_20px_46px_rgba(234,31,89,0.11)] focus-within:ring-2 focus-within:ring-[#EA1F59]/[0.08]'
             : COMPOSER_FIELD_FOCUS,
           dragActive
             ? 'border-[#42C0EF]/60 ring-2 ring-[#42C0EF]/15'
@@ -659,7 +663,9 @@ export function InputArea({
           className={cn(
             'resize-none border-0 bg-transparent leading-relaxed shadow-none placeholder:text-muted-foreground/55 focus-visible:ring-0',
             fullBleed
-              ? 'min-h-[190px] px-7 pb-[68px] pr-[150px] pt-8 text-[18px] font-medium placeholder:text-[#9CA3AF]/80 sm:min-h-[198px]'
+              ? compact
+                ? 'min-h-[212px] px-7 pb-[68px] pr-[150px] pt-8 text-[18px] font-medium placeholder:text-[#A5ACBA]/80 sm:min-h-[218px]'
+                : 'min-h-[190px] px-7 pb-[68px] pr-[150px] pt-8 text-[18px] font-medium placeholder:text-[#9CA3AF]/80 sm:min-h-[198px]'
               : cn(
                   'px-4 pr-14 text-[15px]',
                   compact
@@ -680,7 +686,7 @@ export function InputArea({
             hand-rolled outside-click popover. Picks up focus
             management, escape-to-close, arrow-key navigation,
             and proper portal layering for free. */}
-        <div className={cn('absolute', fullBleed ? 'bottom-7 left-8' : 'bottom-2.5 left-2.5')}>
+        <div className={cn('absolute', fullBleed ? (compact ? 'bottom-7 left-7' : 'bottom-7 left-8') : 'bottom-2.5 left-2.5')}>
           {attachmentsAllowed ? (
             <DropdownMenu open={plusMenuOpen} onOpenChange={setPlusMenuOpen}>
               <DropdownMenuTrigger asChild>
@@ -827,7 +833,9 @@ export function InputArea({
           className={cn(
             'absolute rounded-full focus-visible:ring-[#EA1F59]/25',
             fullBleed
-              ? 'bottom-6 right-7 h-12 w-[116px] justify-between border border-[#EA1F59]/45 bg-white/55 px-5 pr-[52px] text-[#EA1F59] shadow-[0_10px_24px_rgba(234,31,89,0.12)] backdrop-blur hover:bg-white/75'
+              ? compact
+                ? 'bottom-5 right-5 h-11 w-[116px] justify-between border border-[#EA1F59]/45 bg-white/60 px-5 pr-[50px] text-[#EA1F59] shadow-[0_10px_22px_rgba(234,31,89,0.12)] backdrop-blur hover:bg-white/80'
+                : 'bottom-6 right-7 h-12 w-[116px] justify-between border border-[#EA1F59]/45 bg-white/55 px-5 pr-[52px] text-[#EA1F59] shadow-[0_10px_24px_rgba(234,31,89,0.12)] backdrop-blur hover:bg-white/75'
               : 'bottom-2.5 right-2.5 h-8 w-8 bg-[#EA1F59] text-white shadow-[0_4px_12px_rgba(234,31,89,0.18)] hover:bg-[#EA1F59]/90',
           )}
           aria-label={submitting ? submittingStatus : '发送'}
@@ -838,7 +846,12 @@ export function InputArea({
           ) : fullBleed ? (
             <>
               <span className="text-[15px] font-medium leading-none">Enter</span>
-              <span className="absolute right-0.5 top-0.5 flex h-[44px] w-[44px] items-center justify-center rounded-full bg-[#EA1F59] text-white shadow-[0_6px_16px_rgba(234,31,89,0.18)]">
+              <span
+                className={cn(
+                  'absolute right-0.5 top-0.5 flex items-center justify-center rounded-full bg-[#EA1F59] text-white shadow-[0_6px_16px_rgba(234,31,89,0.18)]',
+                  compact ? 'h-10 w-10' : 'h-[44px] w-[44px]',
+                )}
+              >
                 <ArrowUp className="h-5 w-5" />
               </span>
             </>
