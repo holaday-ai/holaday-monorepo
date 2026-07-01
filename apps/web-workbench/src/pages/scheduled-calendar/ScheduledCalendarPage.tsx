@@ -739,7 +739,7 @@ export function ScheduledCalendarPage(): JSX.Element {
               </div>
               <Button
                 onClick={() => setFullModalOpen(true)}
-                className="bg-[#EA1F59] text-white shadow-[0_1px_2px_rgba(15,23,42,0.06)] hover:bg-[#D91B51]"
+                className="bg-[#EA1F59] text-white shadow-[0_1px_2px_rgba(15,23,42,0.06)] hover:bg-[#EA1F59]/90"
               >
                 <Plus className="mr-1 h-4 w-4" />
                 新建定时任务

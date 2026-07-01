@@ -140,6 +140,12 @@ export function createHttpApp(deps: HttpAppDeps) {
 <button id="login-share" type="button">分享</button>
 <button id="login-transfer" type="button">转账</button>
 <button id="login-delete" type="button">删除文件</button>
+<!-- 预订/交易站加固 red-team controls (login-mode). ①交易词 ②出行人 ③中性提交钮(层B) ④benign. -->
+<button id="book-now" type="button">立即预订</button>
+<button id="add-traveler" type="button">添加出行人</button>
+<button id="neutral-continue" type="button">继续</button>
+<button id="safe-search" type="button">搜索航班</button>
+<a id="safe-view-detail" href="/test/explorer-veto-fixture?p=detail">查看详情</a>
 </body></html>`);
     });
   }

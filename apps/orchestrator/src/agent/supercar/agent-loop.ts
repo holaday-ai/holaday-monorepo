@@ -68,6 +68,8 @@ import {
 import { detectBlankPage } from '../blank-page-detector.js';
 import { translateNavError } from '../nav-error-translator.js';
 import { classifyTaskType, filterTools } from '../tool-registry.js';
+// Layer C — pure matcher for the gated transaction-FORM-FIELD signal (explorer login-mode only).
+import { extractTxFieldSignal } from '../../playbook/explorer/explorer-guards.js';
 import {
   classifyRole,
   getTaskBudget,
@@ -817,6 +819,11 @@ export interface RunSupercarOptions {
     name?: string | null;
     inputType?: string | null;
     url?: string | null;
+    // 预订站加固 + Layer C structural/context signals (login-mode veto consumes them).
+    tagName?: string | null;
+    pageUrl?: string | null;
+    pageTitle?: string | null;
+    pageTxSignal?: string | null;
   }) => { allowed: boolean; reason?: string } | Promise<{ allowed: boolean; reason?: string }>;
   /**
    * Phase 1 Playbook B4 — when true, the loop attaches the post-action
@@ -826,6 +833,10 @@ export interface RunSupercarOptions {
    * zero overhead (the consumer then stores no anchor).
    */
   captureScreenshotAnchors?: boolean;
+  /** Layer C — when true, the click-veto captures page title + visible transaction-field NAMES
+   *  (a small page.title()+text scan, NO values) so the model fallback can judge SPA transaction
+   *  pages. Set by the CLI only when LAYER_C_MODEL_VETO_ENABLED. Off → never scanned (zero cost). */
+  captureLayerCSignals?: boolean;
   /**
    * Phase 1 Playbook ④ prerequisite — LLM cost recorder. When provided
    * (together with userExternalId), each SUCCESSFUL messages.create turn is
@@ -1502,6 +1513,12 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
     name?: string | null;
     inputType?: string | null;
     url?: string | null;
+    // 预订站加固 — structural signals from the descriptor (login-mode veto consumes them).
+    tagName?: string | null;
+    pageUrl?: string | null;
+    // Layer C trigger signals (captured only when opts.captureLayerCSignals — LAYER_C on).
+    pageTitle?: string | null;
+    pageTxSignal?: string | null;
   }): Promise<SupercarOutcome | null> => {
     if (!opts.onBeforeAction) return null;
     const verdict = await opts.onBeforeAction(action);
@@ -3363,6 +3380,42 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
                 desc = null; // best-effort; the veto still runs (label null → see clean-context note)
               }
             }
+            // Layer C — page-level signals (gated; LAYER_C off → never scanned). page.title() +
+            // a small page-text scan for transaction-field NAMES (NO values). Best-effort: a
+            // failure leaves them null and Layer C falls back to the proceed-word trigger.
+            let pageTitleSig: string | null = null;
+            let pageTxSig: string | null = null;
+            if (opts.captureLayerCSignals && vk === 'click') {
+              try {
+                pageTitleSig = (await (await executor.getPage()).title()) ?? null;
+              } catch {
+                pageTitleSig = null;
+              }
+              try {
+                // 收窄 (trip 首页页脚 prose 误触修): scan ONLY real <input|textarea|select> form
+                // fields' name/id/placeholder/aria-label/label (NOT page prose, NEVER field VALUES);
+                // the matcher (extractTxFieldSignal) keeps only ≤8 transaction-field terms. A page
+                // with no transaction INPUT field (e.g. trip homepage: only search inputs + footer
+                // "Payment methods" prose) → empty → Layer C NOT triggered by pageTxSignal.
+                const FIELD_SCAN = `(() => { try {
+                  const els = document.querySelectorAll('input, textarea, select');
+                  const out = []; let n = 0;
+                  for (const e of els) {
+                    if (n++ > 40) break;
+                    const parts = [e.name, e.id, e.getAttribute && e.getAttribute('placeholder'), e.getAttribute && e.getAttribute('aria-label')];
+                    if (e.id) { var l = document.querySelector('label[for="' + (e.id + '').replace(/"/g, '') + '"]'); if (l) parts.push((l.textContent || '').slice(0, 40)); }
+                    var pl = e.closest && e.closest('label'); if (pl) parts.push((pl.textContent || '').slice(0, 40));
+                    for (const p of parts) { if (p) out.push((p + '').slice(0, 40)); }
+                  }
+                  return out.join(' ').slice(0, 1200);
+                } catch (err) { return ''; } })()`;
+                const fieldSig = await (await executor.getPage()).evaluate(FIELD_SCAN);
+                const sig = extractTxFieldSignal(typeof fieldSig === 'string' ? fieldSig : '');
+                pageTxSig = sig.length ? sig : null;
+              } catch {
+                pageTxSig = null;
+              }
+            }
             const actVeto = await vetoOutcome({
               kind: vk,
               label: desc?.visibleText ?? null,
@@ -3371,6 +3424,10 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
               placeholder: desc?.placeholder ?? null,
               name: desc?.name ?? null,
               inputType: desc?.type ?? null,
+              tagName: desc?.tagName ?? null, // 预订站加固: 提交型控件判定(层 B)
+              pageUrl: desc?.url ?? null, // 预订站加固: 交易阶段反转(desc.url = page location.href)
+              pageTitle: pageTitleSig, // Layer C: 页面标题(给模型)
+              pageTxSignal: pageTxSig, // Layer C: 页面可见交易字段名(给模型 + 触发判定)
             });
             if (actVeto) return actVeto;
           }

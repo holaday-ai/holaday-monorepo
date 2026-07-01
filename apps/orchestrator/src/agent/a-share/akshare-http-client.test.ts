@@ -2,7 +2,7 @@
  * §6c — HttpAkshareClient 单测（注入 mock fetch，不联网）.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { HttpAkshareClient } from './akshare-http-client.js';
 
 interface Route {
@@ -63,6 +63,7 @@ describe('HttpAkshareClient', () => {
     await c.getStockRankings('gainers', 10);
     await c.getDragonTiger('20260612');
     await c.getNorthboundFlow();
+    await c.getStockRankings('gainers', 10);
     expect(calls).toEqual([
       'http://127.0.0.1:8848/announcements/600519',
       'http://127.0.0.1:8848/unlock/600519',
@@ -70,6 +71,7 @@ describe('HttpAkshareClient', () => {
       'http://127.0.0.1:8848/stock-rankings/gainers?limit=10',
       'http://127.0.0.1:8848/dragon-tiger/20260612',
       'http://127.0.0.1:8848/northbound',
+      'http://127.0.0.1:8848/stock-rankings/gainers?limit=10',
     ]);
   });
 
@@ -88,5 +90,36 @@ describe('HttpAkshareClient', () => {
     const r = await c.getStockKline('600519');
     expect(r.error).toContain('network down');
     expect(r.data).toEqual([]);
+  });
+
+  it('④ 风险端点用 riskTimeoutMs(25s)、非风险用 timeoutMs(10s)：差异化超时', async () => {
+    vi.useFakeTimers();
+    const aborted = new Set<string>();
+    // 永不 resolve，只在 signal abort 时 reject（模拟冷缓存全市场慢取）。
+    const hangFetch = (url: string, init?: { signal?: AbortSignal }) =>
+      new Promise<never>((_res, rej) => {
+        init?.signal?.addEventListener('abort', () => {
+          aborted.add(url);
+          rej(new Error('aborted'));
+        });
+      });
+    const c = new HttpAkshareClient({
+      baseUrl: 'http://x',
+      fetchImpl: hangFetch as never,
+      timeoutMs: 10_000,
+      riskTimeoutMs: 25_000,
+    });
+    const pNB = c.getNorthboundFlow();
+    const pRisk = c.getRiskPledge('20260612', '600519');
+    await vi.advanceTimersByTimeAsync(10_000);
+    // 10s：非风险已超时 abort、风险还撑着（用更长超时）。
+    expect([...aborted].some((u) => u.includes('/northbound'))).toBe(true);
+    expect([...aborted].some((u) => u.includes('/risk-pledge'))).toBe(false);
+    await vi.advanceTimersByTimeAsync(15_000); // 累计 25s → 风险才 abort
+    expect([...aborted].some((u) => u.includes('/risk-pledge'))).toBe(true);
+    const [rNB, rRisk] = await Promise.all([pNB, pRisk]); // 收尾：catch→error envelope
+    expect(rNB.error).toContain('aborted');
+    expect(rRisk.error).toContain('aborted');
+    vi.useRealTimers();
   });
 });

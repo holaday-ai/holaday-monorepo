@@ -8,7 +8,29 @@
 > **归属（BOSS 定）：本文件住共享 baseline `claude/musing-keller-ae1d05`**——三 worktree 分支最终都合回这里，协调文件理应在汇合点。各 session 更新时只对 musing-keller push 这**一个文件**（单文件无冲突风险）。
 
 <!-- 固定维护：每次部署后由部署者更新这一行（硬规则 7）。改 ref 前必实读 live HEAD。 -->
-## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05` — orch `00bde7f`（**🏁 A 登录自学闭环端到端证通 + 第一条真 post-login path（todoist add-task 5 步、id=18 completed、$0.177）；A 登录(4接点,硬闸11/11,login intent 指令式单任务+软600/硬720/iter40+EXTRA_RE 误报修+清空收件箱补漏)+B1接结晶(cron LIVE) / 早期：④ A 登录自学(4接点,硬闸11/11)+B1接结晶(cron,无origin障碍) / Bug A(summary转发)+B(unhandledRejection守卫) + fix-set(connect-超时60s+1重试 / 始终断点 summary) + intent 深化 v2(任务导向+种子+断点报告持久化) + 硬超时 fix（per-op 45s clean-mode + per-browse 420s 硬墙 force-dispose + 超时落 failed 无 stuck 行）dark ship · restart 695 · `EXPLORER_ENABLED`+`EXPLORER_VETO_FIXTURE_ENABLED` 都 OFF（进程实证、fixture 404）=绝不跑 · 硬超时只在 clean-mode/explorer adapter、共享 context=用户任务路径不变** · ④ 自学习闭环真站端到端验通(figma-rerun $0.1427) · 捕获环(→crystallize) + intent 收敛 + 记账 id=16 平台桶 · batch-1 figma $0.4275 · cost-source A fail-closed 熔断 +(a)非有限 +(c)EXPLORER_MAX_ITERATIONS env + requireBrowseEnv abort · 护栏夹具 8/8 · veto 多信号 OR · ① crystallize · totalUsers 排系统行 · migration 0037 · ACTION_CAPTURE+B4 ON · B3_FIXTURE OFF）/ SPA `8da47b4b`（未变）
+## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05` — orch `3c82b433`（**📊 股票「看懂层」四块 + ④风险修复 已合主线 LIVE（2026-06-26）**：P1看懂(C1现金含量★/A3毛利率同比/逐指标确定性注解)+④风险雷达(R1质押/R2商誉/R3预告/R4减持占比/R5问询；/risk-warm预热+日期探回+风险源25s超时，真机 R1-R5 全 fire)+P3走势(F1-F4)+P2补映射(C1/A3/R4占比零新字段)，全真机验收+BOSS末验签字、各块合规线真数据守住。flags `ASHARE_SEETHROUGH`+`ASHARE_RISK_RADAR`+`ASHARE_PERF_TREND` 当前**全 ON**(验收态，灰度节奏待 BOSS 定)。akshare-mcp 同步(风险4端点+/risk-warm预热daemon+get_kline放宽)。｜ 以下为 Playbook④（仍 live dark，相关 flags OFF）：**🏁 登录自学从机制到交易站真出货：两条真 post-login path（todoist add-task 5 步 + trip.com 订票流 13 步）。四层 veto 防线全证通（空壳号地基 + Layer A 词 + Layer B 结构&交易页反转 + Layer C 模型兜底 触发收窄/fail-closed/≤15haiku）。flags：`EXPLORER_ENABLED`+`LOGIN_EXPLORER_ENABLED`+`LAYER_C_MODEL_VETO_ENABLED` 全 OFF · `USER_TASK_CRYSTALLIZE_ENABLED` ON(B1 live) · 三站 storageState 就位(figma+todoist+trip) · 链 `89690206`(veto A+B+反转)→`f4404738`(Layer C)→`f1b6fe65`(pageTxSignal 收窄)。早期里程碑：A 登录自学闭环端到端证通 + 第一条真 post-login path（todoist add-task 5 步、id=18 completed、$0.177）；A 登录(4接点,硬闸11/11,login intent 指令式单任务+软600/硬720/iter40+EXTRA_RE 误报修+清空收件箱补漏)+B1接结晶(cron LIVE) / 早期：④ A 登录自学(4接点,硬闸11/11)+B1接结晶(cron,无origin障碍) / Bug A(summary转发)+B(unhandledRejection守卫) + fix-set(connect-超时60s+1重试 / 始终断点 summary) + intent 深化 v2(任务导向+种子+断点报告持久化) + 硬超时 fix（per-op 45s clean-mode + per-browse 420s 硬墙 force-dispose + 超时落 failed 无 stuck 行）dark ship · restart 695 · `EXPLORER_ENABLED`+`EXPLORER_VETO_FIXTURE_ENABLED` 都 OFF（进程实证、fixture 404）=绝不跑 · 硬超时只在 clean-mode/explorer adapter、共享 context=用户任务路径不变** · ④ 自学习闭环真站端到端验通(figma-rerun $0.1427) · 捕获环(→crystallize) + intent 收敛 + 记账 id=16 平台桶 · batch-1 figma $0.4275 · cost-source A fail-closed 熔断 +(a)非有限 +(c)EXPLORER_MAX_ITERATIONS env + requireBrowseEnv abort · 护栏夹具 8/8 · veto 多信号 OR · ① crystallize · totalUsers 排系统行 · migration 0037 · ACTION_CAPTURE+B4 ON · B3_FIXTURE OFF）/ SPA `8da47b4b`（未变）
+
+<!-- 2026-06-26 里程碑 — 🏁🏁 登录自学从机制到交易站真出货 + 四层 veto 防线 -->
+**🏁🏁 里程碑（2026-06-26）— 登录自学从机制到交易站真出货 + 四层 veto 防线全证通**
+
+**PROD 基线**：orch `f1b6fe6`。flags：`EXPLORER_ENABLED` **OFF** / `LOGIN_EXPLORER_ENABLED` **OFF** / `LAYER_C_MODEL_VETO_ENABLED` **OFF** / `USER_TASK_CRYSTALLIZE_ENABLED` **ON（B1 live）**。三站 storageState 就位（figma + todoist + trip，box 独立路径各 600）。
+
+**两条真 post-login path**：
+- **todoist** add-task 5 步（点添加任务→输入买牛奶→回车提交→停在删除前→done）。
+- **trip.com** 订票流 **13 步**（Flights→Tokyo→Singapore→Search 63航班→Select 去/回程 Scoot $439→View Details→Continue→进订票主表单 Step 1/4 Fill in your info→认出付款红线→停、done）。
+- **闭环链**：登录认证（login-ctx + storageState）→ 真执行任务 → 红线前自停 → **completed** → 结晶 path。两条都会被 B1 cron 自动结晶。
+
+**交易站 trip 全程零真交易**：未付款 / 未下单 / 未填证件（空壳号本就无证件）；agent 自停在「Fill in your info」表单、付款红线前。Layer C 3 调用 $0.00139（≤15、无 hang）。
+
+**四层 veto 防线（真 SPA 交易站闭合）**：① 空壳测试号地基（无真数据/不绑支付）② Layer A 关键词（预订/去支付/添加出行人/copylink…，EXTRA_RE，login-mode）③ Layer B 结构信号（提交型控件+交易文案）& 交易页反转（pageUrl 阶段 default-deny）④ Layer C 模型兜底（haiku，A/B/反转都过+交易可疑区才触发；fail-closed/限额≤15/触发收窄只扫真表单字段）。**SPA URL 不变→反转弱 → 词层(A)+Layer C 是主力**。
+
+**关键学到**：
+- **站点选型**：figma×3 fail（重画布、vision agent 操作不了）/ **todoist+trip 成（表单型走得通）** = 表单/流程型站是登录梯队正确类型。
+- **veto 四次在测试号调准（均无害逆出，测试号兜底是命门）**：① Copy link 分享动作漏拦→补复制/分享链接变体 ② 「清空您的大脑」引导文案被裸 `清空` 误拦→收紧成组合 ③ 字面审控出收紧过头漏「清空收件箱」（真破坏）→补回 ④ Layer C `pageTxSignal` 过宽（扫整页 readPageText、trip 首页页脚 "Payment methods" prose 误触）→收窄成**只扫真 `input/textarea/select` 表单字段、不扫 prose**。**启示：关键词/信号 veto 两方向都 fiddly、字面审 + 测试号实跑是命门**。
+
+**变更链（本会话，都 dark / flag OFF）**：`89690206`(预订站 veto A+B+交易页反转) → `f4404738`(Layer C 模型兜底) → `f1b6fe65`(pageTxSignal 收窄)。
+
+**backlog**：① **Continue 收严**：trip "Continue"（进订票表单的导航）被 Layer C 判 ALLOW、agent 进了表单（停付款前）；要更保守可调（权衡：更安全 vs path 更短）。② 扩更多交易站/任务验泛化。③ B2 影子转灰度 — 等 B1 攒真实语料。④ ⚠️ 监控纪律：detached 真跑必启 poll bg（本轮漏启→误判 1 小时 hang，实为 ~10min completed）。
 
 <!-- 2026-06-25 里程碑 — 🏁 A 登录自学闭环端到端证通 + 第一条真 post-login path -->
 **🏁 里程碑（2026-06-25）— A 登录自学闭环端到端证通 + 第一条真实 post-login path**

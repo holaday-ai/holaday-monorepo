@@ -250,7 +250,7 @@ export function EventDetailPopover({
             if (busy !== null) return;
             onDeleteRequest(row.scheduledTaskId);
           }}
-          className="h-8 w-8 text-[#EA1F59] hover:bg-[#EA1F59]/10 hover:text-[#D91B51] disabled:cursor-wait disabled:opacity-55"
+          className="h-8 w-8 text-[#EA1F59] hover:bg-[#EA1F59]/10 hover:text-[#EA1F59] disabled:cursor-wait disabled:opacity-55"
         >
           <Trash2 className="h-3.5 w-3.5" aria-hidden />
         </Button>

@@ -438,7 +438,7 @@ function SkillCard({
           className={cn(
             'h-8 shrink-0 rounded-[7px] px-3 text-xs',
             skill.enabled &&
-              'bg-[#EA1F59] text-white hover:bg-[#CA174A] focus-visible:ring-[#EA1F59]/25',
+              'bg-[#EA1F59] text-white hover:bg-[#EA1F59]/90 focus-visible:ring-[#EA1F59]/25',
           )}
           disabled={!skill.enabled || pending || blocked || useBlockedByPlan}
           title={useAction.title}

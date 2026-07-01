@@ -164,6 +164,33 @@ const schema = z.object({
     .enum(['true', 'false'])
     .default('false')
     .transform((v) => v === 'true'),
+  /**
+   * Phase 2「看懂层」P1 — 逐指标确定性注解（腿A 查表，零 LLM）。默认 OFF。
+   * on → ④⑤/解禁挂「衡量什么·客观位置·该警惕什么」注解（全景全量、轻量带 ★ 核心子集）；
+   * off → 完全回退现状输出（字节一致）。零新增数据源、零新增 LLM；仅 +2 取数/股（走 TTL 缓存）。
+   */
+  ASHARE_SEETHROUGH_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+  /**
+   * ④ 风险信号雷达 P1 — 腿A 确定性检测 + 风险注解（质押/商誉/预告/减持/问询函）。默认 OFF。
+   * on → 全景挂 ⑥ 风险信号组、轻量带 ★ 风险提示（命中才显）；off → 完全回退现状（字节一致）。
+   * 零新增 LLM；akshare 风险源走东财 datacenter（Vultr 可达）+ 公告 keyword（问询/减持）。
+   */
+  ASHARE_RISK_RADAR_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+  /**
+   * P3 F 走势组 P1 — 腿A K线波动「人话总结」（F1区间涨跌幅/F2最大回撤/F3区间位置/F4量能）。默认 OFF。
+   * on → 全景挂 F 走势段、轻量带 ★ 走势（F1+F3）；off → 完全回退现状（字节一致）。零新增 LLM，
+   * 仅放宽 get_kline 取近1年 daily 本地纯算（同源不新增数据源）。F5 阶段状态小结(腿B)不在本开关内。
+   */
+  ASHARE_PERF_TREND_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
 
   /**
    * Phase D Step 3 rollout switch.

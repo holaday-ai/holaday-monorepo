@@ -31,6 +31,7 @@ const REQUIRED_TABLES = [
   'scheduled_tasks',
   'sessions',
   'skills',
+  'stock_dashboard_snapshots',
   'task_events',
   'task_files',
   'task_quotas',

@@ -22,6 +22,13 @@ const MATCH: AshareQaMatch = {
 };
 const NOW = new Date('2026-06-12T07:00:00Z');
 
+// 250 行近1年序列：收盘单调上行 100→~124.9（F1 累计变动正、F2 回撤≈0=较小、F3 cur=max=高位），
+// 成交量恒定（F4 平稳）。仅 days>0 时由 fakeClient 返回。
+const PERF_SERIES_250 = Array.from({ length: 250 }, (_v, i) => ({
+  收盘: 100 + i * 0.1,
+  成交量: 1000,
+}));
+
 function env<T>(data: T[]) {
   return {
     data,
@@ -37,8 +44,12 @@ function fakeClient(): AkshareClient {
     getStockAnnouncements: () =>
       Promise.resolve(env([{ 公告标题: '2025年度股东会决议公告', 公告时间: '2026-06-12' }])),
     getShareUnlock: () => Promise.resolve(env([])),
-    getStockKline: () =>
-      Promise.resolve(env([{ 收盘: 1291.91, 涨跌幅: 1.01, 成交额: 6_478_000_000 }])),
+    // days>0 → 近1年序列(F走势本地算)：单调上行(回撤≈0=较小、cur=max=高位、量平稳)；无 days → ①单行。
+    getStockKline: (_s: string, days?: number) =>
+      days && days > 0
+        ? Promise.resolve(env(PERF_SERIES_250))
+        : Promise.resolve(env([{ 收盘: 1291.91, 涨跌幅: 1.01, 成交额: 6_478_000_000 }])),
+    getStockQuote: () => Promise.resolve(env([])),
     getDragonTiger: () => Promise.resolve(env([])),
     getNorthboundFlow: () =>
       Promise.resolve(env([{ 板块: '沪股通', 资金方向: '北向', 成交净买额: 0 }])),
@@ -62,6 +73,9 @@ function fakeClient(): AkshareClient {
             roe: -6.76,
             debt_ratio: 64.65,
             ocf_per_share: 0.03,
+            // P2：亏损公司 EPS<0 → C1 现金含量 & R4 占比 引擎兜底（不算）；A3 毛利率同比有值 → 出 A3。
+            eps_basic: -0.16,
+            gross_margin_yoy: -2.21,
             trend3y: [
               { report_period: '2023-12-31', net_profit: -1.49e8 },
               { report_period: '2024-12-31', net_profit: -1.45e8 },
@@ -85,6 +99,11 @@ function fakeClient(): AkshareClient {
           },
         ]),
       ),
+    getRiskPledge: () => Promise.resolve(env([{ 股票代码: '600519', 质押比例: 55 }])),
+    getRiskGoodwill: () => Promise.resolve(env([{ 股票代码: '600519', 商誉占净资产比例: 35 }])),
+    getRiskForecast: () =>
+      Promise.resolve(env([{ 股票代码: '600519', 预告类型: '预减', 业绩变动幅度: -40 }])),
+    getRiskInsider: () => Promise.resolve(env([{ 变动数: -500000 }])),
     // biome-ignore lint/suspicious/noExplicitAny: fake
   } as any;
 }
@@ -615,5 +634,273 @@ describe('ASHARE_QA_GUIDANCE（P0 兜底引导话术）', () => {
     expect(ASHARE_QA_GUIDANCE).toContain('不提供买卖建议');
     // 静态引导本身不得含建议/预测措辞
     expect(ASHARE_QA_GUIDANCE).not.toMatch(/建议买入|目标价|会涨|会跌|抄底|割肉/);
+  });
+});
+
+describe('看懂层 P1 · seethrough flag（腿A 注解，勿删）', () => {
+  const LIGHT: AshareQaMatch = {
+    kind: 'info',
+    stocks: [{ symbol: '600519', displayName: '贵州茅台' }],
+    dateIso: '2026-06-12',
+    dateCompact: '20260612',
+    deep: false,
+  };
+  const DEEP: AshareQaMatch = { ...LIGHT, deep: true };
+
+  it('轻量 OFF（默认）→ 无 ★ 看懂块（字节回退现状）', async () => {
+    const { logger } = fakeLogger();
+    const r = await runAshareQa(
+      { client: fakeClient(), skillMarkdown: null, logger, now: NOW, interpret: async () => '' },
+      LIGHT,
+    );
+    expect(r.answer).not.toContain('★ 核心看懂');
+    expect(r.answer).not.toContain('〔看懂〕');
+  });
+
+  it('轻量 ON → 带 ★ 核心子集注解（净利率/营收同比/PE分位；零新增 LLM）', async () => {
+    const { logger } = fakeLogger();
+    const r = await runAshareQa(
+      {
+        client: fakeClient(),
+        skillMarkdown: null,
+        seethrough: true,
+        logger,
+        now: NOW,
+        interpret: async () => '',
+      },
+      LIGHT,
+    );
+    expect(r.answer).toContain('★ 核心看懂');
+    expect(r.answer).toContain('目前是亏损的'); // 净利率 -14.31%
+    expect(r.answer).toContain('营收比去年同期缩了'); // 营收同比 -33.43%
+    expect(r.answer).toContain('历史高位'); // PE 近5年分位 87.1%
+    // 注解仍只陈述+风险，绝不含买卖/涨跌/好差措辞（只截 ★ 块本体，不含尾部免责声明里的"不预测涨跌"）
+    const seeBlock = r.answer.slice(r.answer.indexOf('★ 核心看懂'), r.answer.indexOf('免责声明'));
+    expect(seeBlock).not.toMatch(/[买卖涨跌好差]|建议买入|目标价/);
+  });
+
+  it('全景 OFF（默认）→ ④⑤ 无〔看懂〕；与显式 false 字节一致', async () => {
+    const { logger } = fakeLogger();
+    const deps = {
+      client: fakeClient(),
+      interpret: async () => '客观状态画像。',
+      logger,
+      now: NOW,
+    };
+    const off = await runAsharePanorama(deps, DEEP);
+    const offExplicit = await runAsharePanorama({ ...deps, seethrough: false }, DEEP);
+    expect(off.answer).not.toContain('〔看懂〕');
+    expect(off.answer).toBe(offExplicit.answer); // OFF = 显式false = 字节回退
+  });
+
+  it('全景 ON → ④⑤ 逐指标挂〔看懂〕注解（即便 ⑦ 降级，①-⑤看懂仍在）', async () => {
+    const { logger } = fakeLogger();
+    const r = await runAsharePanorama(
+      {
+        client: fakeClient(),
+        seethrough: true,
+        interpret: async () => '建议逢低买入', // ⑦ 故意越线降级
+        logger,
+        now: NOW,
+      },
+      DEEP,
+    );
+    expect(r.degraded).toBe(true); // ⑦ 被闸门拦下
+    expect(r.answer).not.toContain('## ⑦ 分析师视角');
+    // 但 ④⑤ 看懂注解（确定性腿A）不受 ⑦ 降级影响，仍在
+    expect(r.answer).toContain('〔看懂〕');
+    expect(r.answer).toContain('用股东的钱赚钱的效率偏低'); // ROE -6.76% <5
+    expect(r.answer).toContain('历史高位'); // PE 分位 87.1%
+  });
+});
+
+describe('④ 风险雷达 P1 · riskRadar flag（腿A 检测，勿删）', () => {
+  const RLIGHT: AshareQaMatch = {
+    kind: 'info',
+    stocks: [{ symbol: '600519', displayName: '贵州茅台' }],
+    dateIso: '2026-06-12',
+    dateCompact: '20260612',
+    deep: false,
+  };
+  const RDEEP: AshareQaMatch = { ...RLIGHT, deep: true };
+
+  it('全景 OFF（默认）→ 无 ⑥ 风险信号；与显式 false 字节一致', async () => {
+    const { logger } = fakeLogger();
+    const deps = {
+      client: fakeClient(),
+      interpret: async () => '客观状态画像。',
+      logger,
+      now: NOW,
+    };
+    const off = await runAsharePanorama(deps, RDEEP);
+    const offExplicit = await runAsharePanorama({ ...deps, riskRadar: false }, RDEEP);
+    expect(off.answer).not.toContain('风险信号');
+    expect(off.answer).not.toContain('〔风险');
+    expect(off.answer).toBe(offExplicit.answer);
+  });
+
+  it('全景 ON → ⑥ 风险信号组（高质押/高商誉/预减走弱/减持）+ 免责；零买卖/行动指令泄漏', async () => {
+    const { logger } = fakeLogger();
+    const r = await runAsharePanorama(
+      {
+        client: fakeClient(),
+        seethrough: false,
+        riskRadar: true,
+        interpret: async () => '客观状态画像。',
+        logger,
+        now: NOW,
+      },
+      RDEEP,
+    );
+    expect(r.answer).toContain('**⑥ 风险信号**');
+    expect(r.answer).toContain('整体质押比例较高'); // R1 >50★
+    expect(r.answer).toContain('商誉占净资产比例较高'); // R2 >30★
+    expect(r.answer).toContain('同比走弱'); // R3 预减★
+    expect(r.answer).toContain('董监高减持'); // R4 减持
+    expect(r.answer).toContain('不构成投资建议'); // 风险组恒附免责
+    // ⑥ 风险组本体（不含尾部免责的「建议」）零买卖/涨跌/好差/行动指令
+    const sec = r.answer.slice(r.answer.indexOf('⑥ 风险信号'), r.answer.indexOf('## ⑦'));
+    expect(sec).not.toMatch(/[买卖涨跌好差]|目标价|赶紧|务必|规避|清仓|卖出/);
+  });
+
+  it('轻量 ON → ★ 风险提示（只 star：高质押/高商誉/预减；减持非★不入）', async () => {
+    const { logger } = fakeLogger();
+    const r = await runAshareQa(
+      {
+        client: fakeClient(),
+        skillMarkdown: null,
+        riskRadar: true,
+        interpret: async () => '',
+        logger,
+        now: NOW,
+      },
+      RLIGHT,
+    );
+    expect(r.answer).toContain('★ 风险提示');
+    expect(r.answer).toContain('整体质押比例较高');
+    expect(r.answer).toContain('同比走弱');
+    expect(r.answer).not.toContain('董监高减持'); // 减持 star=false，不进 ★
+  });
+
+  it('轻量 OFF（默认）→ 无 ★ 风险提示', async () => {
+    const { logger } = fakeLogger();
+    const r = await runAshareQa(
+      { client: fakeClient(), skillMarkdown: null, interpret: async () => '', logger, now: NOW },
+      RLIGHT,
+    );
+    expect(r.answer).not.toContain('★ 风险提示');
+    expect(r.answer).not.toContain('〔风险');
+  });
+});
+
+describe('P3 F走势 · perfTrend flag（腿A K线波动总结，勿删）', () => {
+  const PLIGHT: AshareQaMatch = {
+    kind: 'info',
+    stocks: [{ symbol: '600519', displayName: '贵州茅台' }],
+    dateIso: '2026-06-12',
+    dateCompact: '20260612',
+    deep: false,
+  };
+  const PDEEP: AshareQaMatch = { ...PLIGHT, deep: true };
+
+  it('全景 OFF（默认）→ 无 F 走势段；与显式 false 字节一致', async () => {
+    const { logger } = fakeLogger();
+    const deps = {
+      client: fakeClient(),
+      interpret: async () => '客观状态画像。',
+      logger,
+      now: NOW,
+    };
+    const off = await runAsharePanorama(deps, PDEEP);
+    const offExplicit = await runAsharePanorama({ ...deps, perfTrend: false }, PDEEP);
+    expect(off.answer).not.toContain('F 走势');
+    expect(off.answer).not.toContain('〔走势');
+    expect(off.answer).toBe(offExplicit.answer);
+  });
+
+  it('全景 ON → F 走势段（F1区间变动/F2回撤/F3区间位置/F4量能）+ 客观免责；零买卖/技术信号泄漏', async () => {
+    const { logger } = fakeLogger();
+    const r = await runAsharePanorama(
+      {
+        client: fakeClient(),
+        seethrough: false,
+        riskRadar: false,
+        perfTrend: true,
+        interpret: async () => '客观状态画像。',
+        logger,
+        now: NOW,
+      },
+      PDEEP,
+    );
+    expect(r.answer).toContain('**F 走势**');
+    expect(r.answer).toContain('累计变动'); // F1
+    expect(r.answer).toContain('最大回撤'); // F2
+    expect(r.answer).toContain('相对高位'); // F3：cur=max → 高位
+    expect(r.answer).toContain('不预测未来'); // 走势免责
+    // F 走势段本体（不含尾部免责的「建议」）零禁字 + 零 F 红线词
+    const sec = r.answer.slice(r.answer.indexOf('F 走势'), r.answer.indexOf('## ⑦'));
+    expect(sec).not.toMatch(
+      /[买卖涨跌好差]|目标价|金叉|死叉|支撑|压力位|突破|反弹|抄底|逃顶|看多|看空/,
+    );
+  });
+
+  it('轻量 ON → ★ 走势（只 F1区间变动 + F3区间位置；F2回撤/F4量能非★不入）', async () => {
+    const { logger } = fakeLogger();
+    const r = await runAshareQa(
+      {
+        client: fakeClient(),
+        skillMarkdown: null,
+        perfTrend: true,
+        interpret: async () => '',
+        logger,
+        now: NOW,
+      },
+      PLIGHT,
+    );
+    expect(r.answer).toContain('★ 走势');
+    expect(r.answer).toContain('累计变动'); // F1 ★
+    expect(r.answer).toContain('相对高位'); // F3 ★
+    expect(r.answer).not.toContain('最大回撤'); // F2 star=false，不进 ★
+    expect(r.answer).not.toContain('量能'); // F4 star=false，不进 ★
+  });
+
+  it('轻量 OFF（默认）→ 无 ★ 走势', async () => {
+    const { logger } = fakeLogger();
+    const r = await runAshareQa(
+      { client: fakeClient(), skillMarkdown: null, interpret: async () => '', logger, now: NOW },
+      PLIGHT,
+    );
+    expect(r.answer).not.toContain('★ 走势');
+    expect(r.answer).not.toContain('〔走势');
+  });
+});
+
+describe('P2 数据补映射 · C1/A3/R4 接线（亏损 fake：A3出、C1兜底、R4占比兜底）', () => {
+  const PMATCH: AshareQaMatch = {
+    kind: 'info',
+    stocks: [{ symbol: '600519', displayName: '贵州茅台' }],
+    dateIso: '2026-06-12',
+    dateCompact: '20260612',
+    deep: true,
+  };
+
+  it('全景 seethrough ON → A3 毛利率同比注解挂上；C1 现金含量因 EPS<0 兜底不出', async () => {
+    const { logger } = fakeLogger();
+    const r = await runAsharePanorama(
+      { client: fakeClient(), seethrough: true, interpret: async () => '画像。', logger, now: NOW },
+      PMATCH,
+    );
+    expect(r.answer).toContain('扣掉直接生产成本'); // A3 毛利率 measure 挂上（yoy=-2.21）
+    expect(r.answer).not.toContain('经营现金流与净利之比'); // C1 EPS<0 → 兜底不出
+  });
+
+  it('全景 riskRadar ON → R4 减持因 EPS<0（总股本近似无意义）兜底：给股数、不给占比', async () => {
+    const { logger } = fakeLogger();
+    const r = await runAsharePanorama(
+      { client: fakeClient(), riskRadar: true, interpret: async () => '画像。', logger, now: NOW },
+      PMATCH,
+    );
+    expect(r.answer).toContain('董监高减持'); // R4 命中
+    expect(r.answer).not.toContain('约占总股本'); // EPS<0 → 占比兜底
   });
 });

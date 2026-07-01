@@ -139,7 +139,7 @@ export function PlanCard({
                       e.preventDefault();
                       setPendingHref(safeHref);
                     }}
-                    className="text-[#EA1F59] underline decoration-[#EA1F59]/35 underline-offset-2 hover:text-[#D91B51] dark:text-[#EA1F59]"
+                    className="text-[#EA1F59] underline decoration-[#EA1F59]/35 underline-offset-2 hover:text-[#EA1F59] dark:text-[#EA1F59]"
                     {...rest}
                   >
                     {children}

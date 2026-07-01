@@ -48,12 +48,23 @@ export interface KlineRow {
   [k: string]: unknown;
 }
 
-/** A股全市场榜单行（stock_zh_a_spot sina）。 */
-export interface StockRankingRow {
+/** A股实时行情快照（quote 接口；用于卡片右上角最新价/涨跌幅）。 */
+export interface StockQuoteRow {
   代码?: string;
   名称?: string;
   最新价?: number;
   涨跌幅?: number;
+  涨跌额?: number;
+  成交量?: number;
+  成交额?: number;
+  [k: string]: unknown;
+}
+
+/** A股真实分钟线行（AkShare 分钟接口；只含实际分钟点，不补齐）。 */
+export interface IntradayRow {
+  时间?: string;
+  最新价?: number;
+  成交量?: number;
   成交额?: number;
   [k: string]: unknown;
 }
@@ -76,6 +87,18 @@ export interface IndexRow {
   low?: number;
   close?: number;
   volume?: number;
+  [k: string]: unknown;
+}
+
+/** A股全市场榜单行（stock_zh_a_spot/sina），用于股票任务页榜单。 */
+export interface StockRankingRow {
+  代码?: string;
+  名称?: string;
+  最新价?: number;
+  涨跌幅?: number;
+  涨跌额?: number;
+  成交量?: number;
+  成交额?: number;
   [k: string]: unknown;
 }
 
@@ -183,8 +206,12 @@ export interface FundamentalsRow {
   net_margin?: number | null;
   roe?: number | null;
   debt_ratio?: number | null;
+  /** P2 A3：销售毛利率同比（pct 点；当期 − 上年同期，ths 多期算，零新字段）。 */
+  gross_margin_yoy?: number | null;
   /** 每股经营现金流（元）——判断利润含金量。 */
   ocf_per_share?: number | null;
+  /** P2 C1：基本每股收益（元）。现金含量 = ocf_per_share/eps_basic；近似总股本 = net_profit/eps_basic。 */
+  eps_basic?: number | null;
   /** 近3年趋势（年度，老→新），每条同上字段子集。 */
   trend3y?: Array<{
     report_period?: string | null;
@@ -262,4 +289,53 @@ export interface PostmarketBriefingInput {
   announcements: Record<string, AkEnvelope<AnnouncementRow>>;
   /** v2: 市场温度计 + 板块主线 + 大盘净流入（get_market_pulse 单行聚合）。 */
   marketPulse?: AkEnvelope<MarketPulseRow>;
+}
+
+// ===== ④ 风险信号雷达（R1-R5；akshare 按date取全市场→orchestrator 过滤个股 / 按symbol）=====
+
+/** R1 股权质押行（stock_gpzy_pledge_ratio_em，按date全市场，过滤个股）。 */
+export interface PledgeRow {
+  股票代码?: string;
+  股票简称?: string;
+  交易日期?: string;
+  /** 质押比例（%）。 */
+  质押比例?: number;
+  质押股数?: number;
+  质押市值?: number;
+  [k: string]: unknown;
+}
+
+/** R2 商誉行（stock_sy_em，按date全市场，过滤个股）。 */
+export interface GoodwillRow {
+  股票代码?: string;
+  股票简称?: string;
+  商誉?: number;
+  /** 商誉占净资产比例（%）。 */
+  商誉占净资产比例?: number;
+  上年商誉?: number;
+  公告日期?: string;
+  [k: string]: unknown;
+}
+
+/** R3 业绩预告行（stock_yjyg_em，按date全市场，过滤个股）。 */
+export interface ForecastRow {
+  股票代码?: string;
+  股票简称?: string;
+  /** 预告类型：预增/预减/扭亏/首亏/续亏/略增/略减… */
+  预告类型?: string;
+  /** 业绩变动幅度（%，部分为区间字符串）。 */
+  业绩变动幅度?: number | string;
+  公告日期?: string;
+  [k: string]: unknown;
+}
+
+/** R4 董监高持股变动行（stock_share_hold_change_sse/_szse，按symbol）。变动数<0=减持。 */
+export interface InsiderChangeRow {
+  /** 变动数（股；负=减持）。 */
+  变动数?: number;
+  变动原因?: string;
+  变动日期?: string;
+  姓名?: string;
+  职务?: string;
+  [k: string]: unknown;
 }

@@ -47,7 +47,7 @@ deploy_orchestrator() {
 
 deploy_akshare() {
   echo "→ Deploying akshare-mcp"
-  "$ROOT_DIR/scripts/deploy-akshare-mcp.sh"
+  "$ROOT_DIR/scripts/deploy-akshare-mcp.sh" "$BRANCH"
 }
 
 verify_healthz() {
@@ -95,9 +95,12 @@ case "$TARGET" in
     ;;
   both)
     fetch_current
-    deploy_spa
     deploy_akshare
     deploy_orchestrator
+    # Orchestrator deploy resets the shared Vultr checkout. Keep SPA last
+    # so tracked/stale dist files in the checkout cannot overwrite the
+    # freshly uploaded web bundle.
+    deploy_spa
     verify_healthz
     ;;
   *)

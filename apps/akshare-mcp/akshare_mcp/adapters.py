@@ -47,6 +47,8 @@ try:
 except Exception:  # pragma: no cover - akshare optional at import time
     ak = None  # type: ignore
 
+from .cache import cached as _cached  # ④ 风险源全市场 按date 共享缓存
+
 
 # --- per-interface TTLs (seconds), env-overridable -------------------
 def _ttl(name: str, default: int) -> int:
@@ -60,6 +62,7 @@ def _ttl(name: str, default: int) -> int:
 # 数据只真实拉取一次，其余命中缓存。故简报用到的接口 TTL 全 ≥ 600s(10min)，
 # 覆盖投递窗口（BOSS 要求）。QUOTE(15s) 仅 ④ 即时问答用，保持实时。
 TTL_QUOTE = _ttl("QUOTE", 15)
+TTL_INTRADAY = _ttl("INTRADAY", 15)
 TTL_KLINE = _ttl("KLINE", 600)
 TTL_ANNOUNCE = _ttl("ANNOUNCE", 1800)
 TTL_LHB = _ttl("LHB", 3600)
@@ -69,8 +72,9 @@ TTL_UNLOCK = _ttl("UNLOCK", 3600)
 TTL_TRADECAL = _ttl("TRADECAL", 86400)  # 交易日历日内基本不变，缓存 1 天
 TTL_FUND = _ttl("FUND", 86400)  # 财报季度才变，缓存 1 天
 TTL_VAL = _ttl("VAL", 3600)  # 估值日级，缓存 1 小时
-TTL_RANK = _ttl("RANK", 300)  # 全市场排行较重，5 分钟缓存避免看板频繁冷拉。
-TTL_SPOT = _ttl("SPOT", TTL_RANK)  # A股全市场 sina spot 共享快照，报价/榜单共用。
+TTL_RISK = _ttl("RISK", 21600)  # ④ 风险源(质押/商誉/预告)粗粒度变更，缓存 6h
+TTL_RANK = _ttl("RANK", 300)
+TTL_SPOT = _ttl("SPOT", TTL_RANK)
 
 # Row caps so a single tool call can't dump thousands of rows into the
 # model's context.
@@ -156,43 +160,6 @@ def pct_change(prev_close: Any, last_close: Any) -> float | None:
     return round((last - prev) / prev * 100, 2)
 
 
-def _get_a_spot_records(ttl: int = TTL_SPOT) -> list[dict[str, Any]]:
-    """Return a shared A-share sina spot snapshot.
-
-    The dashboard needs quote + three ranking variants. Fetching the same
-    full-market AkShare frame once and deriving multiple views keeps cold-start
-    latency bounded and prevents parallel requests from stampeding AkShare.
-    """
-    global _spot_records, _spot_ts
-    now = time.time()
-    with _spot_lock:
-        if _spot_records and now - _spot_ts <= ttl:
-            return list(_spot_records)
-
-        a = _require_ak()
-        df = a.stock_zh_a_spot()
-        records = _records(df, limit=6000)
-        _spot_records = records
-        _spot_ts = time.time()
-        _hydrate_symbol_table_from_spot(records)
-        return list(records)
-
-
-def _hydrate_symbol_table_from_spot(records: list[dict[str, Any]]) -> None:
-    table: dict[str, str] = {}
-    for rec in records:
-        code = _strip_market_prefix(str(rec.get("代码", "")))
-        name = str(rec.get("名称", "")).strip()
-        if code and name and name != "nan":
-            table[code] = name
-    if not table:
-        return
-    with _symbol_lock:
-        global _symbol_table, _symbol_ts
-        _symbol_table = table
-        _symbol_ts = time.time()
-
-
 def sina_prefix(symbol: str) -> str:
     """6 位 A股代码 → sina 带交易所前缀（sh/sz/bj）。已带前缀则原样返回。"""
     s = symbol.strip().lower()
@@ -208,54 +175,70 @@ def sina_prefix(symbol: str) -> str:
 
 
 # --- 行情（quote: sina spot 过滤；push2 stock_bid_ask_em 从 Vultr 不可达） ----
+def _hydrate_symbol_table_from_spot(recs: list[dict[str, Any]]) -> None:
+    """Reuse the full-market spot payload to keep symbol search warm."""
+    global _symbol_table, _symbol_ts
+    table: dict[str, str] = {}
+    for rec in recs:
+        code = _strip_market_prefix(str(rec.get("代码", "")))
+        name = str(rec.get("名称", "")).strip()
+        if code and name and name != "nan":
+            table[code] = name
+    if not table:
+        return
+    with _symbol_lock:
+        _symbol_table = table
+        _symbol_ts = time.time()
+
+
+def _get_a_spot_records(ttl: int = TTL_SPOT) -> list[dict[str, Any]]:
+    """Fetch and cache full A-share spot rows once per process TTL window."""
+    global _spot_records, _spot_ts
+    now = time.time()
+    with _spot_lock:
+        if _spot_records and now - _spot_ts < ttl:
+            return list(_spot_records)
+
+    a = _require_ak()
+    df = a.stock_zh_a_spot()
+    recs = _records(df, limit=6000)
+    with _spot_lock:
+        _spot_records = recs
+        _spot_ts = time.time()
+    _hydrate_symbol_table_from_spot(recs)
+    return list(recs)
+
+
 def get_quote(symbol: str) -> tuple[list[dict[str, Any]], str]:
     """实时行情快照（最新价 / 涨跌幅 / 成交额）。symbol 形如 '600519'。
 
     走 sina 全市场 spot 再按代码过滤（push2 stock_bid_ask_em 从 Vultr 不可达）。
     注：全市场快照较重，④ 即时问答可后续换更轻的单只 sina 实时接口。
     """
-    recs = _get_a_spot_records(TTL_SPOT)
+    recs = _get_a_spot_records()
     code = symbol.strip()
     hit = [r for r in recs if str(r.get("代码", "")).endswith(code)]
     return hit[:1], "akshare:stock_zh_a_spot(sina,filter)"
 
 
 def get_stock_rankings(metric: str = "gainers", limit: int = 20) -> tuple[list[dict[str, Any]], str]:
-    """A股个股榜单：涨幅榜 / 跌幅榜 / 成交额榜。
-
-    走 sina 全市场 spot（Vultr 可达）。该源没有稳定换手率字段，因此换手率排行不在此
-    假造；调用方应保持禁用或另接可达数据源。
-    """
-    recs = _get_a_spot_records(TTL_SPOT)
-
-    rows: list[dict[str, Any]] = []
-    for r in recs:
-        code = _strip_market_prefix(str(r.get("代码") or ""))
-        name = str(r.get("名称") or "").strip()
-        price = _to_float(r.get("最新价"))
-        change_pct = _to_float(r.get("涨跌幅"))
-        amount = _to_float(r.get("成交额"))
-        if not code or not name or price is None or change_pct is None:
-            continue
-        rows.append(
-            {
-                "代码": code,
-                "名称": name,
-                "最新价": price,
-                "涨跌幅": change_pct,
-                "成交额": amount,
-            }
-        )
-
-    m = metric.strip().lower()
-    if m == "losers":
-        rows.sort(key=lambda r: _to_float(r.get("涨跌幅")) or 0.0)
-    elif m == "amount":
-        rows.sort(key=lambda r: _to_float(r.get("成交额")) or 0.0, reverse=True)
+    """A股全市场榜单。metric: gainers | losers | amount。"""
+    m = (metric or "gainers").strip().lower()
+    if m not in {"gainers", "losers", "amount"}:
+        raise AkShareUnavailable("不支持的榜单类型，仅支持 gainers/losers/amount")
+    cap = max(1, min(int(limit or 20), 50))
+    rows = [
+        r for r in _get_a_spot_records()
+        if _to_float(r.get("最新价")) is not None and _to_float(r.get("涨跌幅")) is not None
+    ]
+    if m == "amount":
+        rows = [r for r in rows if _to_float(r.get("成交额")) is not None]
+        rows.sort(key=lambda r: _to_float(r.get("成交额")) or 0, reverse=True)
+    elif m == "losers":
+        rows.sort(key=lambda r: _to_float(r.get("涨跌幅")) or 0)
     else:
-        rows.sort(key=lambda r: _to_float(r.get("涨跌幅")) or 0.0, reverse=True)
-        m = "gainers"
-    return rows[: max(1, min(limit, 50))], f"akshare:stock_zh_a_spot(sina,{m})"
+        rows.sort(key=lambda r: _to_float(r.get("涨跌幅")) or 0, reverse=True)
+    return rows[:cap], f"akshare:stock_zh_a_spot(sina,{m})"
 
 
 def get_kline(
@@ -264,15 +247,38 @@ def get_kline(
     start_date: str = "",
     end_date: str = "",
     adjust: str = "qfq",
+    days: int = 0,
 ) -> tuple[list[dict[str, Any]], str]:
-    """日 K 线（sina）。返末行 = 当日表现，含末2行算的涨跌幅。
+    """日 K 线（sina）。默认返末行 = 当日表现，含末2行算的涨跌幅（①盘面用，不变）。
 
     push2his stock_zh_a_hist 从 Vultr 不可达 → 改 stock_zh_a_daily（sina）。
     sina daily 列 date/open/high/low/close/volume/amount **无涨跌幅**，故末2行算。
     period 仅 daily（周/月线非简报所需，暂不支持）。
+    **P3 F走势**：days>0 → 返近 days 交易日 **raw 序列**（日期/开盘/最高/最低/收盘/成交量/成交额，
+    时间升序），F1-F4 本地纯算。同源 stock_zh_a_daily，零新数据源；停牌/新股不足返空（不崩）。
     """
     a = _require_ak()
     sina_sym = sina_prefix(symbol)
+    if days and days > 0:
+        sd2 = (datetime.date.today() - datetime.timedelta(days=int(days * 1.5) + 15)).strftime(
+            "%Y%m%d"
+        )
+        df = a.stock_zh_a_daily(symbol=sina_sym, start_date=sd2, adjust=adjust or "qfq")
+        if df is None or len(df) == 0:
+            return [], "akshare:stock_zh_a_daily(sina,series,空)"
+        series = [
+            {
+                "日期": r.get("date"),
+                "开盘": _to_float(r.get("open")),
+                "最高": _to_float(r.get("high")),
+                "最低": _to_float(r.get("low")),
+                "收盘": _to_float(r.get("close")),
+                "成交量": _to_float(r.get("volume")),
+                "成交额": _to_float(r.get("amount")),
+            }
+            for r in _records(df, limit=days + 30)
+        ]
+        return series, "akshare:stock_zh_a_daily(sina,series)"
     sd = start_date or (datetime.date.today() - datetime.timedelta(days=25)).strftime("%Y%m%d")
     kwargs: dict[str, Any] = {"symbol": sina_sym, "start_date": sd, "adjust": adjust or "qfq"}
     if end_date:
@@ -293,6 +299,110 @@ def get_kline(
         "涨跌幅": pct_change(prev_close, last.get("close")),
     }
     return [mapped], "akshare:stock_zh_a_daily(sina,末2行算涨跌幅)"
+
+
+def get_intraday(symbol: str) -> tuple[list[dict[str, Any]], str]:
+    """A股真实分钟线。只返回 AkShare 给出的实际分钟点，不补齐、不外推、不造收盘后价格。"""
+    a = _require_ak()
+    cn_today = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).date()
+    today = cn_today.strftime("%Y-%m-%d")
+    start = f"{today} 09:30:00"
+    end = f"{today} 15:00:00"
+    errors: list[str] = []
+
+    if hasattr(a, "stock_zh_a_hist_min_em"):
+        try:
+            df = a.stock_zh_a_hist_min_em(
+                symbol=symbol,
+                start_date=start,
+                end_date=end,
+                period="1",
+                adjust="",
+            )
+            rows = _intraday_rows(df, expected_date=today)
+            if rows:
+                return rows, "akshare:stock_zh_a_hist_min_em(1m)"
+        except Exception as exc:  # noqa: BLE001 - try next AkShare adapter
+            errors.append(f"stock_zh_a_hist_min_em: {exc}")
+
+    if hasattr(a, "stock_zh_a_minute"):
+        try:
+            df = a.stock_zh_a_minute(symbol=sina_prefix(symbol), period="1", adjust="")
+            rows = _intraday_rows(df, expected_date=today)
+            if rows:
+                return rows, "akshare:stock_zh_a_minute(sina,1m)"
+        except Exception as exc:  # noqa: BLE001 - report all attempted real sources
+            errors.append(f"stock_zh_a_minute: {exc}")
+
+    if hasattr(a, "stock_intraday_sina"):
+        try:
+            df = a.stock_intraday_sina(symbol=sina_prefix(symbol), date=cn_today.strftime("%Y%m%d"))
+            rows = _intraday_rows(df, expected_date=today, allow_time_only_date=True)
+            if rows:
+                return rows, "akshare:stock_intraday_sina(tick,last-per-minute)"
+        except Exception as exc:  # noqa: BLE001 - report all attempted real sources
+            errors.append(f"stock_intraday_sina: {exc}")
+
+    detail = "; ".join(errors) if errors else "AkShare 当前版本未提供可用分钟线接口"
+    raise AkShareUnavailable(f"分钟线暂不可用: {detail}")
+
+
+def _intraday_rows(
+    df: Any,
+    expected_date: str | None = None,
+    allow_time_only_date: bool = False,
+) -> list[dict[str, Any]]:
+    if df is None or len(df) == 0:
+        return []
+    rows: list[dict[str, Any]] = []
+    source = df.tail(MAX_ROWS * 20) if hasattr(df, "tail") else df
+    for raw in _records(source, limit=MAX_ROWS * 20):
+        time_value = (
+            raw.get("时间")
+            or raw.get("日期")
+            or raw.get("day")
+            or raw.get("time")
+            or raw.get("datetime")
+            or raw.get("ticktime")
+            or raw.get("成交时间")
+        )
+        price = _to_float(
+            raw.get("收盘")
+            or raw.get("最新价")
+            or raw.get("价格")
+            or raw.get("close")
+            or raw.get("price")
+            or raw.get("成交价格")
+        )
+        if price is None or time_value is None:
+            continue
+        time_text = str(time_value)
+        if expected_date:
+            date_match = re.search(r"(\d{4})[-/]?(\d{2})[-/]?(\d{2})", time_text)
+            if not date_match:
+                if not allow_time_only_date:
+                    continue
+                time_text = f"{expected_date} {time_text}"
+                date_match = re.search(r"(\d{4})[-/]?(\d{2})[-/]?(\d{2})", time_text)
+            if not date_match:
+                continue
+            row_date = f"{date_match.group(1)}-{date_match.group(2)}-{date_match.group(3)}"
+            if row_date != expected_date:
+                continue
+        row = {
+            "时间": time_text,
+            "最新价": price,
+            "成交量": _to_float(raw.get("成交量") or raw.get("volume")),
+            "成交额": _to_float(raw.get("成交额") or raw.get("amount")),
+        }
+        if allow_time_only_date:
+            minute_key = time_text[:16]
+            if rows and rows[-1].get("时间", "")[:16] == minute_key:
+                rows[-1] = row
+                continue
+        rows.append(row)
+    # A 股分钟线最多约 240 点；保留尾部实际交易点，避免大响应拖慢前端。
+    return rows[-260:]
 
 
 # --- 公告 ------------------------------------------------------------
@@ -593,6 +703,8 @@ def _fundamentals_row(r: dict[str, Any]) -> dict[str, Any]:
         "debt_ratio": _parse_ths_num(r.get("资产负债率")),
         # P1：每股经营现金流（判断利润含金量）。
         "ocf_per_share": _parse_ths_num(r.get("每股经营现金流")),
+        # P2：基本每股收益（C1 现金含量 = 每股经营现金流/基本每股收益；R4 近似总股本 = 净利润/基本每股收益）。
+        "eps_basic": _parse_ths_num(r.get("基本每股收益")),
     }
 
 
@@ -624,6 +736,18 @@ def get_fundamentals(symbol: str) -> tuple[list[dict[str, Any]], str]:
     if src is None:
         return [], "akshare:stock_financial_abstract_ths(无数据)"
     latest = _fundamentals_row(src.iloc[-1].to_dict())
+    # P2 A3 毛利率同比：当期销售毛利率 − 上年同期（src 多期里按 _rk 找 年-1 同月日）。零新字段、零新源。
+    try:
+        rp = str(src.iloc[-1].get("报告期"))
+        gm_cur = _parse_ths_num(src.iloc[-1].get("销售毛利率"))
+        prev_rk = f"{int(rp[:4]) - 1}{rp[4:]}" if len(rp) >= 4 and rp[:4].isdigit() else ""
+        prev_match = src[src["_rk"] == prev_rk] if prev_rk else src.iloc[0:0]
+        gm_prev = _parse_ths_num(prev_match.iloc[0].get("销售毛利率")) if len(prev_match) else None
+        latest["gross_margin_yoy"] = (
+            round(gm_cur - gm_prev, 2) if (gm_cur is not None and gm_prev is not None) else None
+        )
+    except Exception:  # noqa: BLE001
+        latest["gross_margin_yoy"] = None
     # P1 季度环比（按单季度，最新单季 vs 上一单季；看加速/减速）。
     try:
         sq = _ths_sorted(_retry(lambda: a.stock_financial_abstract_ths(symbol=symbol, indicator="按单季度")))
@@ -716,6 +840,160 @@ def get_valuation(symbol: str) -> tuple[list[dict[str, Any]], str]:
     return [out], "akshare:zh_valuation_baidu(PE/PB+5y分位)+industry_pe_cninfo"
 
 
+# --- ④ 风险信号雷达（R1-R5；按date取全市场→date 共享缓存，再按 symbol 过滤）------
+# 数据源全为东财 datacenter(_em，Vultr 实测可达，≠ push2)；空结果 akshare 抛 KeyError →
+# 兜成空集(无数据≠不可达)；避开慢分页函数(hold_management_detail_em 340页 /
+# gpzy_pledge_ratio_detail_em 252页 不用)，只用按date单次调用。
+def _recent_friday(ref: str) -> str:
+    """ref 'YYYYMMDD' → ≤ref 的最近周五（质押按周五口径披露）。"""
+    d = datetime.date(int(ref[:4]), int(ref[4:6]), int(ref[6:8]))
+    return (d - datetime.timedelta(days=(d.weekday() - 4) % 7)).strftime("%Y%m%d")
+
+
+def _latest_report_period(ref: str) -> str:
+    """ref 'YYYYMMDD' → 最近已披露报告期(假设 ~45 天披露滞后)的季末 'YYYYMMDD'。"""
+    d = datetime.date(int(ref[:4]), int(ref[4:6]), int(ref[6:8]))
+    cutoff = d - datetime.timedelta(days=45)
+    cands = [
+        datetime.date(y, m, dd)
+        for y in (d.year, d.year - 1)
+        for (m, dd) in ((12, 31), (9, 30), (6, 30), (3, 31))
+        if datetime.date(y, m, dd) <= cutoff
+    ]
+    best = max(cands) if cands else datetime.date(d.year - 1, 12, 31)
+    return best.strftime("%Y%m%d")
+
+
+def _quarter_ends_desc(ref_period: str, n: int) -> list[str]:
+    """≤ ref_period('YYYYMMDD' 季末) 的季末日期，新→旧，取 ≤n 个（报告期往前探用，有界无死循环）。"""
+    base = datetime.date(int(ref_period[:4]), int(ref_period[4:6]), int(ref_period[6:8]))
+    cands = sorted(
+        (
+            datetime.date(yy, m, dd)
+            for yy in range(base.year, base.year - 3, -1)
+            for (m, dd) in ((12, 31), (9, 30), (6, 30), (3, 31))
+            if datetime.date(yy, m, dd) <= base
+        ),
+        reverse=True,
+    )
+    return [d.strftime("%Y%m%d") for d in cands[:n]]
+
+
+def _norm_code(symbol: str) -> str:
+    return symbol.strip().lstrip("shz").zfill(6)
+
+
+def _by_symbol(recs: list[dict[str, Any]], symbol: str) -> list[dict[str, Any]]:
+    if not symbol:
+        return recs
+    s = _norm_code(symbol)
+    return [r for r in recs if str(r.get("股票代码", "")).zfill(6) == s]
+
+
+@_cached(TTL_RISK)
+def _risk_pledge_all(query_date: str) -> list[dict[str, Any]]:
+    a = _require_ak()
+    try:
+        return _records(a.stock_gpzy_pledge_ratio_em(date=query_date), limit=6000)
+    except (KeyError, TypeError, IndexError, AttributeError):
+        # 未披露日期 akshare 返 None/空 → _records 触 TypeError('NoneType' subscript)/KeyError 等 → 空集
+        # （非网络错；网络错放行给上层 _safe → error envelope）。探回逻辑据此继续往前找已披露日。
+        return []
+
+
+@_cached(TTL_RISK)
+def _latest_pledge_date(ref_friday: str) -> str:
+    """从 ref_friday 当周五往前每周回退(≤4周,有界无死循环)找首个有质押数据的披露日；都空返当周五。
+    质押按周五口径披露但有滞后，当周常未出 → 探回到最近【已披露】周，R1 才真 fire。"""
+    base = datetime.date(int(ref_friday[:4]), int(ref_friday[4:6]), int(ref_friday[6:8]))
+    for k in range(5):  # 当周 + 回退 4 周
+        fri = (base - datetime.timedelta(days=7 * k)).strftime("%Y%m%d")
+        if _risk_pledge_all(fri):
+            return fri
+    return ref_friday
+
+
+def get_risk_pledge(ref_date: str, symbol: str = "") -> tuple[list[dict[str, Any]], str]:
+    """R1 股权质押(质押比例)。ref_date 'YYYYMMDD'→最近【已披露】周五口径；symbol→过滤个股。"""
+    recs = _risk_pledge_all(_latest_pledge_date(_recent_friday(ref_date)))
+    return _by_symbol(recs, symbol), "akshare:stock_gpzy_pledge_ratio_em"
+
+
+@_cached(TTL_RISK)
+def _risk_goodwill_all(period: str) -> list[dict[str, Any]]:
+    a = _require_ak()
+    try:
+        return _records(a.stock_sy_em(date=period), limit=6000)
+    except (KeyError, TypeError, IndexError, AttributeError):  # 未披露期 None/空 → 空集（同质押）
+        return []
+
+
+@_cached(TTL_RISK)
+def _latest_goodwill_period(ref_period: str) -> str:
+    """从 ref_period 季末往前探(≤4季)找首个有商誉数据的报告期；都空返 ref_period。"""
+    for p in _quarter_ends_desc(ref_period, 4):
+        if _risk_goodwill_all(p):
+            return p
+    return ref_period
+
+
+def get_risk_goodwill(ref_date: str, symbol: str = "") -> tuple[list[dict[str, Any]], str]:
+    """R2 商誉(商誉占净资产比例 + 上年商誉)。ref_date→最近【有数据】报告期；symbol→过滤。"""
+    recs = _risk_goodwill_all(_latest_goodwill_period(_latest_report_period(ref_date)))
+    return _by_symbol(recs, symbol), "akshare:stock_sy_em"
+
+
+@_cached(TTL_RISK)
+def _risk_forecast_all(period: str) -> list[dict[str, Any]]:
+    a = _require_ak()
+    try:
+        return _records(a.stock_yjyg_em(date=period), limit=9000)
+    except (KeyError, TypeError, IndexError, AttributeError):  # 未披露期 None/空 → 空集（同质押）
+        return []
+
+
+@_cached(TTL_RISK)
+def _latest_forecast_period(ref_period: str) -> str:
+    """从 ref_period 季末往前探(≤4季)找首个有业绩预告数据的报告期；都空返 ref_period。"""
+    for p in _quarter_ends_desc(ref_period, 4):
+        if _risk_forecast_all(p):
+            return p
+    return ref_period
+
+
+def get_risk_forecast(ref_date: str, symbol: str = "") -> tuple[list[dict[str, Any]], str]:
+    """R3 业绩预告(预告类型/业绩变动幅度)。ref_date→最近【有数据】报告期；symbol→过滤。"""
+    recs = _risk_forecast_all(_latest_forecast_period(_latest_report_period(ref_date)))
+    return _by_symbol(recs, symbol), "akshare:stock_yjyg_em"
+
+
+def get_risk_insider(symbol: str) -> tuple[list[dict[str, Any]], str]:
+    """R4 董监高持股变动(减持=变动数<0)。沪市 sse / 深市 szse(交易所直连，实测可达)。"""
+    a = _require_ak()
+    code = _norm_code(symbol)
+    try:
+        if code.startswith("6"):
+            df = a.stock_share_hold_change_sse(symbol=code)
+            src = "akshare:stock_share_hold_change_sse"
+        else:
+            df = a.stock_share_hold_change_szse(symbol=code)
+            src = "akshare:stock_share_hold_change_szse"
+        return _records(df, limit=200), src
+    except KeyError:
+        return [], "akshare:stock_share_hold_change(无数据)"
+
+
+def warm_risk_tables(ref_date: str = "") -> dict[str, int]:
+    """预热 3 张风险全市场表(质押最近披露周 / 商誉·预告最近有数据报告期)入进程缓存。
+    冷取全市场表慢(>1min/张)→ 此函数只在 akshare-mcp 启动 + 周期(<TTL_RISK)后台调，
+    使查询命中热缓存、客户端 10/25s 内秒回。返回各表行数(0=该期暂无数据)。"""
+    ref = ref_date or datetime.date.today().strftime("%Y%m%d")
+    pl = _risk_pledge_all(_latest_pledge_date(_recent_friday(ref)))
+    gw = _risk_goodwill_all(_latest_goodwill_period(_latest_report_period(ref)))
+    fc = _risk_forecast_all(_latest_forecast_period(_latest_report_period(ref)))
+    return {"pledge": len(pl), "goodwill": len(gw), "forecast": len(fc)}
+
+
 # --- 交易日历（P1：非交易日不投递简报） -----------------------------
 def is_trading_day(date_str: str) -> tuple[list[dict[str, Any]], str]:
     """`date_str` 是否 A股交易日（周末/节假日 = False）。date 形如 'YYYY-MM-DD' 或 'YYYYMMDD'。
@@ -764,9 +1042,8 @@ def refresh_symbol_table() -> int:
     """同步拉全量代码名称表填缓存（~70s，prewarm 调）。返回条数。"""
     global _symbol_table, _symbol_ts, _symbol_refreshing
     try:
-        records = _get_a_spot_records(TTL_SPOT)
         table: dict[str, str] = {}
-        for rec in records:
+        for rec in _get_a_spot_records():
             code = _strip_market_prefix(str(rec.get("代码", "")))
             name = str(rec.get("名称", "")).strip()
             if code and name and name != "nan":

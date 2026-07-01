@@ -19,8 +19,16 @@ import {
   buildPanoramaContext,
   fetchFactData,
   fetchPanoramaData,
+  fetchPerfData,
+  fetchRiskData,
+  fetchStarData,
   renderFactCard,
   renderPanoramaBody,
+  renderPerfSection,
+  renderPerfStar,
+  renderRiskSection,
+  renderRiskStar,
+  renderStarSeethrough,
 } from './ashare-fact-card.js';
 import type { BriefingMode } from './ashare-format.js';
 import { judgeIntent } from './ashare-intent-judge.js';
@@ -41,6 +49,22 @@ export interface AshareQaRunnerDeps {
    * 由 tasks.ts 按 `ASHARE_INTENT_JUDGE_ENABLED` 决定是否注入。仅作用于全景⑦，不动轻量③。
    */
   judge?: (input: { system: string; user: string }) => Promise<string>;
+  /**
+   * Phase 2「看懂层」P1 开关（ASHARE_SEETHROUGH_ENABLED 注入）。true → ④⑤/解禁挂腿A确定性
+   * 逐指标注解（全景全量、轻量带 ★ 核心子集）；缺省/false → 完全回退现状（字节一致）。零新增 LLM。
+   */
+  seethrough?: boolean;
+  /**
+   * ④ 风险信号雷达 P1 开关（ASHARE_RISK_RADAR_ENABLED 注入）。true → 全景挂 ⑥ 风险信号组、
+   * 轻量带 ★ 风险提示（腿A 确定性检测，命中才显）；缺省/false → 完全回退现状（字节一致）。零新增 LLM。
+   */
+  riskRadar?: boolean;
+  /**
+   * P3「F 走势组」P1 开关（ASHARE_PERF_TREND_ENABLED 注入）。true → 全景挂 F 走势段、轻量带
+   * ★ 走势（F1区间变动 + F3区间位置；腿A K线波动确定性总结，零新增 LLM，仅放宽 get_kline 取近1年）；
+   * 缺省/false → 完全回退现状（字节一致）。F5 阶段状态小结(腿B)另行接入，不在本开关内。
+   */
+  perfTrend?: boolean;
   /** 技能 markdown（人设/红线/版式）；空 → 跳过解读，纯事实卡。 */
   skillMarkdown?: string | null;
   logger: QaLogger;
@@ -140,7 +164,52 @@ export async function runAshareQa(
   const now = deps.now ?? new Date();
   const mode = deps.mode ?? 'prod';
   const data = await fetchFactData(deps.client, match);
-  const body = renderFactCard(data, match, now, mode);
+  let body = renderFactCard(data, match, now, mode);
+
+  // 看懂层 P1（flag 注入）：轻量速览追加 ★ 核心子集注解（腿A 确定性，零新增 LLM；
+  // 需 +2 取数/股取 ④⑤，走现有 TTL 缓存；取数失败仅跳过看懂层，不影响 ①②③）。
+  if (deps.seethrough) {
+    try {
+      const star = await fetchStarData(deps.client, match);
+      const starLines = renderStarSeethrough(data, star);
+      if (starLines.length) body = `${body}\n${starLines.join('\n')}`;
+    } catch (e) {
+      deps.logger.warn(
+        { ...deps.context, err: e instanceof Error ? e.message : String(e) },
+        'ashare-qa: ★看懂层取数失败，跳过看懂层（不影响①②③）',
+      );
+    }
+  }
+
+  // ④ 风险雷达 P1（flag 注入）：轻量速览追加 ★ 风险提示（命中 star 项才显；腿A 零新增 LLM；
+  // 取数失败仅跳过风险层，不影响 ①②③）。
+  if (deps.riskRadar) {
+    try {
+      const risk = await fetchRiskData(deps.client, match);
+      const riskLines = renderRiskStar(data, risk);
+      if (riskLines.length) body = `${body}\n${riskLines.join('\n')}`;
+    } catch (e) {
+      deps.logger.warn(
+        { ...deps.context, err: e instanceof Error ? e.message : String(e) },
+        'ashare-qa: ④风险雷达取数失败，跳过风险层（不影响①②③）',
+      );
+    }
+  }
+
+  // P3 F走势 P1（flag 注入）：轻量速览追加 ★ 走势（F1区间变动 + F3区间位置；腿A 零新增 LLM；
+  // 仅放宽 get_kline 取近1年序列本地算；取数失败/不足仅跳过走势层，不影响 ①②③）。
+  if (deps.perfTrend) {
+    try {
+      const perf = await fetchPerfData(deps.client, match);
+      const perfLines = renderPerfStar(data, perf);
+      if (perfLines.length) body = `${body}\n${perfLines.join('\n')}`;
+    } catch (e) {
+      deps.logger.warn(
+        { ...deps.context, err: e instanceof Error ? e.message : String(e) },
+        'ashare-qa: P3走势取数失败，跳过走势层（不影响①②③）',
+      );
+    }
+  }
 
   // 无技能上下文 → 纯事实卡（不解读）。
   if (!deps.skillMarkdown) {
@@ -287,7 +356,35 @@ export async function runAsharePanorama(
   const now = deps.now ?? new Date();
   const mode = deps.mode ?? 'prod';
   const data = await fetchPanoramaData(deps.client, match);
-  const body = renderPanoramaBody(data, match, now, mode);
+  let body = renderPanoramaBody(data, match, now, mode, deps.seethrough ?? false);
+  // ④ 风险雷达 P1（flag 注入）：全景挂 ⑥ 风险信号组（命中才显，无→未检测到；插在 ⑤ 与 ⑦ 之间）。
+  // 腿A 确定性、零新增 LLM、不进 ⑦ 上下文（腿B 跨项串联留后续）；取数失败仅跳过该组。
+  if (deps.riskRadar) {
+    try {
+      const risk = await fetchRiskData(deps.client, match);
+      const riskLines = renderRiskSection(data, risk);
+      if (riskLines.length) body = `${body}\n${riskLines.join('\n')}`;
+    } catch (e) {
+      deps.logger.warn(
+        { ...deps.context, err: e instanceof Error ? e.message : String(e) },
+        'ashare-panorama: ④风险雷达取数失败，跳过风险组（不影响①-⑤⑦）',
+      );
+    }
+  }
+  // P3 F走势 P1（flag 注入）：全景挂 F 走势段（F1-F4 K线波动确定性人话；插在 ⑥风险 与 ⑦ 之间）。
+  // 腿A 确定性、零新增 LLM、**不进 ⑦ 上下文**（F5 跨项串联=腿B 留后续）；取数失败/不足仅跳过该段。
+  if (deps.perfTrend) {
+    try {
+      const perf = await fetchPerfData(deps.client, match);
+      const perfLines = renderPerfSection(data, perf);
+      if (perfLines.length) body = `${body}\n${perfLines.join('\n')}`;
+    } catch (e) {
+      deps.logger.warn(
+        { ...deps.context, err: e instanceof Error ? e.message : String(e) },
+        'ashare-panorama: P3走势取数失败，跳过走势段（不影响①-⑤⑦）',
+      );
+    }
+  }
   const context = buildPanoramaContext(data, match);
 
   let interpretation = '';

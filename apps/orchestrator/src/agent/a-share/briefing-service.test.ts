@@ -51,6 +51,8 @@ function fakeClient(dtSpy?: (d: string) => void): AkshareClient {
       Promise.resolve(PREMARKET_SAMPLE.announcements[s] ?? emptyEnv('ann')),
     getShareUnlock: (s) => Promise.resolve(PREMARKET_SAMPLE.shareUnlock[s] ?? emptyEnv('unlock')),
     getStockKline: (s) => Promise.resolve(POSTMARKET_SAMPLE.dailyKline[s] ?? emptyEnv('kline')),
+    getStockQuote: () => Promise.resolve(emptyEnv('quote')),
+    getStockIntraday: () => Promise.resolve(emptyEnv('intraday')),
     getDragonTiger: (d) => {
       dtSpy?.(d);
       return Promise.resolve(PREMARKET_SAMPLE.dragonTiger);
@@ -65,12 +67,16 @@ function fakeClient(dtSpy?: (d: string) => void): AkshareClient {
         disclaimer: 'x',
       }),
     searchSymbol: () => Promise.resolve(emptyEnv('symbol')),
-    getStockRankings: () => Promise.resolve(emptyEnv('rankings')),
+    getStockRankings: () => Promise.resolve(emptyEnv('stock_rankings')),
     getMarketPulse: () =>
       Promise.resolve(POSTMARKET_SAMPLE.marketPulse ?? emptyEnv('market_pulse')),
     getZtPoolSummary: () => Promise.resolve(PREMARKET_SAMPLE.ztReview ?? emptyEnv('zt_summary')),
     getFundamentals: () => Promise.resolve(emptyEnv('fundamentals')),
     getValuation: () => Promise.resolve(emptyEnv('valuation')),
+    getRiskPledge: () => Promise.resolve(emptyEnv('risk_pledge')),
+    getRiskGoodwill: () => Promise.resolve(emptyEnv('risk_goodwill')),
+    getRiskForecast: () => Promise.resolve(emptyEnv('risk_forecast')),
+    getRiskInsider: () => Promise.resolve(emptyEnv('risk_insider')),
   };
 }
 

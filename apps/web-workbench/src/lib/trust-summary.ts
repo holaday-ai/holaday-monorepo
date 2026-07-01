@@ -82,46 +82,40 @@ export function buildTrustSummary(input: TrustSummaryInput): TrustSummaryModel {
 
   return {
     tone,
-    title: '本次任务可信度',
+    title: '结果复核',
     verdict,
     boundary:
-      '这里汇总前端已收到的证据，不把推断包装成事实；下方 ledger 标明哪些被观察、提取或仅是边界说明。',
+      'HOLA DAY 只展示已经拿到的线索；没有截图、链接或终态页的部分，不会被当作已验证事实。',
     rows: [
       {
-        label: '答案可见来源',
+        label: '来源链接',
         value: `${sourceCount} 个链接`,
         detail:
           sourceCount > 0
-            ? '仅统计结果文本和最终页面里的 http(s) 链接，不代表每条结论都已逐条验证。'
-            : '未看到可点击来源；涉及事实、价格、排序时应补充来源后再使用。',
+            ? '结果里有可点击来源，关键事实仍建议点开核对。'
+            : '未看到可点击来源；涉及价格、排序、事实时不要直接采用。',
       },
       {
-        label: '最终页面',
+        label: '结束页面',
         value: hasFinalUrl ? '已记录' : '未记录',
         detail: hasFinalUrl
-          ? '记录了任务结束时所在 URL，可作为浏览路径线索。'
-          : '没有可展示的终态 URL，不能据此判断浏览是否到达目标页面。',
+          ? '保留了任务结束时的页面地址，可作为路径线索。'
+          : '没有结束页地址，无法确认是否到达目标页面。',
       },
       {
-        label: '最终截图',
+        label: '页面截图',
         value: hasScreenshot ? '已保存' : '未保存',
         detail: hasScreenshot
-          ? '保存了任务结束时的可视页面状态，可辅助复核。'
-          : '没有终态截图；页面状态需要通过其它来源复核。',
+          ? '保存了结束时页面画面，可辅助复核。'
+          : '没有结束截图，页面状态需要通过其它线索复核。',
       },
       {
         label: '产物文件',
         value: `${attachmentCount} 个`,
         detail:
           attachmentCount > 0
-            ? '有可下载产物或截图附件，仍需核对内容是否满足任务目标。'
-            : '没有文件产物；若任务要求下载、导出或生成文件，应重新执行或补充要求。',
-      },
-      {
-        label: '事实级证据',
-        value: '见 ledger',
-        detail:
-          '下方区分 observed / extracted / inferred / boundary；本卡不声称所有结论都已被 observed 证据支持。',
+            ? '有可下载产物或附件，仍需核对内容是否满足任务目标。'
+            : '没有文件产物；若任务要求下载或导出，应补充要求后重试。',
       },
     ],
     ledger: [
@@ -155,7 +149,7 @@ export function buildTrustSummary(input: TrustSummaryInput): TrustSummaryModel {
         label: '自动审核',
         value: verificationLedgerValue(input.verificationPassed, failedChecks.length),
         detail:
-          '这是结构性审核信号，不等同于人工或事实级验证通过。',
+          '这是系统检查信号，不等同于人工或事实级验证通过。',
       },
       {
         stage: 'boundary',

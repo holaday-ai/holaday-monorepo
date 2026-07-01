@@ -17,11 +17,17 @@ import type {
   AkEnvelope,
   AnnouncementRow,
   DragonTigerRow,
+  ForecastRow,
   FundamentalsRow,
+  GoodwillRow,
   IndexRow,
+  IntradayRow,
+  InsiderChangeRow,
   KlineRow,
   MarketPulseRow,
   NorthboundRow,
+  PledgeRow,
+  StockQuoteRow,
   StockRankingRow,
   UnlockRow,
   ValuationRow,
@@ -57,8 +63,15 @@ export interface AkshareClient {
   ): Promise<AkEnvelope<AnnouncementRow>>;
   /** get_share_unlock(symbol) — 个股限售解禁（G2）。 */
   getShareUnlock(symbol: string): Promise<AkEnvelope<UnlockRow>>;
-  /** get_stock_kline(symbol) — 历史 K 线（末行=当日表现）。 */
-  getStockKline(symbol: string): Promise<AkEnvelope<KlineRow>>;
+  /**
+   * get_stock_kline(symbol, days?) — 历史 K 线。默认（无 days）末行=当日表现（①盘面）；
+   * **days>0** → 近 days 交易日 raw 序列（P3 F走势 本地算，同源不新增数据）。
+  */
+  getStockKline(symbol: string, days?: number): Promise<AkEnvelope<KlineRow>>;
+  /** get_stock_quote(symbol) — 实时行情快照；用于当前价/涨跌幅。 */
+  getStockQuote(symbol: string): Promise<AkEnvelope<StockQuoteRow>>;
+  /** get_stock_intraday(symbol) — 真实分钟线；只返回实际分钟点，不补齐、不外推。 */
+  getStockIntraday(symbol: string): Promise<AkEnvelope<IntradayRow>>;
   /** get_dragon_tiger(startDate) — 龙虎榜明细（startDate 'YYYYMMDD'）。 */
   getDragonTiger(startDate: string): Promise<AkEnvelope<DragonTigerRow>>;
   /** get_northbound_flow() — 北向资金汇总。 */
@@ -67,8 +80,11 @@ export interface AkshareClient {
   getTradingDay(date: string): Promise<AkEnvelope<TradingDayRow>>;
   /** search_symbol(query) — 问句→个股（④ 短名解析；表 day-cache，冷启返空）。 */
   searchSymbol(query: string): Promise<AkEnvelope<SymbolRow>>;
-  /** get_stock_rankings(metric) — A股个股榜单：涨幅 / 跌幅 / 成交额。 */
-  getStockRankings(metric: 'gainers' | 'losers' | 'amount', limit?: number): Promise<AkEnvelope<StockRankingRow>>;
+  /** get_stock_rankings(metric, limit) — A股全市场涨幅/跌幅/成交额榜。 */
+  getStockRankings(
+    metric: 'gainers' | 'losers' | 'amount',
+    limit?: number,
+  ): Promise<AkEnvelope<StockRankingRow>>;
   /** get_market_pulse(date, prevDate?) — v2 盘后温度计+板块主线+大盘净流入（prevDate→涨停昨对比）。 */
   getMarketPulse(date: string, prevDate?: string): Promise<AkEnvelope<MarketPulseRow>>;
   /** get_zt_pool_summary(date) — v2 盘前回顾某交易日涨停梯队（date 'YYYYMMDD'）。 */
@@ -77,6 +93,14 @@ export interface AkshareClient {
   getFundamentals(symbol: string): Promise<AkEnvelope<FundamentalsRow>>;
   /** get_valuation(symbol) — Phase2 ⑤ 估值（PE/PB + 历史分位 + 行业PE中位）。 */
   getValuation(symbol: string): Promise<AkEnvelope<ValuationRow>>;
+  /** ④ R1 股权质押（date 'YYYYMMDD' 内部取最近周五；按 symbol 过滤个股）。 */
+  getRiskPledge(date: string, symbol: string): Promise<AkEnvelope<PledgeRow>>;
+  /** ④ R2 商誉（date 'YYYYMMDD' 内部取最近报告期；按 symbol 过滤）。 */
+  getRiskGoodwill(date: string, symbol: string): Promise<AkEnvelope<GoodwillRow>>;
+  /** ④ R3 业绩预告（date 'YYYYMMDD' 内部取最近报告期；按 symbol 过滤）。 */
+  getRiskForecast(date: string, symbol: string): Promise<AkEnvelope<ForecastRow>>;
+  /** ④ R4 董监高持股变动（按 symbol；变动数<0=减持；沪 sse / 深 szse）。 */
+  getRiskInsider(symbol: string): Promise<AkEnvelope<InsiderChangeRow>>;
 }
 
 const STUB_DISCLAIMER = '数据来源 AkShare 聚合，仅供信息参考，不构成任何投资建议，不预测股价。';
@@ -115,8 +139,14 @@ export class StubAkshareClient implements AkshareClient {
   getShareUnlock(symbol: string) {
     return Promise.resolve(this.err<UnlockRow>(`akshare:share_unlock(${symbol})`, this.now()));
   }
-  getStockKline(symbol: string) {
+  getStockKline(symbol: string, _days?: number) {
     return Promise.resolve(this.err<KlineRow>(`akshare:kline(${symbol})`, this.now()));
+  }
+  getStockQuote(symbol: string) {
+    return Promise.resolve(this.err<StockQuoteRow>(`akshare:quote(${symbol})`, this.now()));
+  }
+  getStockIntraday(symbol: string) {
+    return Promise.resolve(this.err<IntradayRow>(`akshare:intraday(${symbol})`, this.now()));
   }
   getDragonTiger(startDate: string) {
     return Promise.resolve(
@@ -132,7 +162,7 @@ export class StubAkshareClient implements AkshareClient {
   searchSymbol(query: string) {
     return Promise.resolve(this.err<SymbolRow>(`akshare:symbol_search(${query})`, this.now()));
   }
-  getStockRankings(metric: 'gainers' | 'losers' | 'amount') {
+  getStockRankings(metric: 'gainers' | 'losers' | 'amount', _limit?: number) {
     return Promise.resolve(this.err<StockRankingRow>(`akshare:stock_rankings(${metric})`, this.now()));
   }
   getMarketPulse(date: string, _prevDate?: string) {
@@ -148,5 +178,25 @@ export class StubAkshareClient implements AkshareClient {
   }
   getValuation(symbol: string) {
     return Promise.resolve(this.err<ValuationRow>(`akshare:valuation(${symbol})`, this.now()));
+  }
+  getRiskPledge(date: string, symbol: string) {
+    return Promise.resolve(
+      this.err<PledgeRow>(`akshare:risk_pledge(${date},${symbol})`, this.now()),
+    );
+  }
+  getRiskGoodwill(date: string, symbol: string) {
+    return Promise.resolve(
+      this.err<GoodwillRow>(`akshare:risk_goodwill(${date},${symbol})`, this.now()),
+    );
+  }
+  getRiskForecast(date: string, symbol: string) {
+    return Promise.resolve(
+      this.err<ForecastRow>(`akshare:risk_forecast(${date},${symbol})`, this.now()),
+    );
+  }
+  getRiskInsider(symbol: string) {
+    return Promise.resolve(
+      this.err<InsiderChangeRow>(`akshare:risk_insider(${symbol})`, this.now()),
+    );
   }
 }

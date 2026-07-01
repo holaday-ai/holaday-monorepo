@@ -33,3 +33,4 @@ export * from './canary-results.js';
 // Phase 1 Playbook B 捕获层 — raw per-action capture (distillation source).
 export * from './task-action-captures.js';
 export * from './watchlists.js';
+export * from './stock-dashboard-snapshots.js';

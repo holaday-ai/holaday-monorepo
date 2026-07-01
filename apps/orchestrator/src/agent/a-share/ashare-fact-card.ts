@@ -13,6 +13,12 @@
 
 import type { AkshareClient } from './akshare-client.js';
 import {
+  type AnnotateInput,
+  type SeethroughKey,
+  annotate,
+  seethroughLine,
+} from './annotation-engine.js';
+import {
   BRIEFING_DISCLAIMER,
   type BriefingMode,
   dateHeader,
@@ -44,6 +50,8 @@ import type {
   UnlockRow,
   ValuationRow,
 } from './briefing-types.js';
+import { type PerfSignal, detectAllPerf, perfLine } from './perf-trend-engine.js';
+import { RISK_DISCLAIMER, type RiskSignal, detectAllRisks, riskLine } from './risk-radar-engine.js';
 
 export interface FactCardDeps {
   client: AkshareClient;
@@ -130,8 +138,8 @@ function fmtShares(n: number): string {
   return `${Math.round(n)}股`;
 }
 
-/** ② 限售解禁（临近）。展示前3 + **全部合计**（与 ⑦ 上下文口径一致，避免合计对不上）。 */
-function unlockLines(p: PerStock): string[] {
+/** ② 限售解禁（临近）。展示前3 + **全部合计**（与 ⑦ 上下文口径一致，避免合计对不上）。seethrough 开则挂看懂注解。 */
+function unlockLines(p: PerStock, seethrough = false): string[] {
   if (p.unlock.error || p.unlock.data.length === 0) return [];
   const out: string[] = ['- 限售解禁：'];
   for (const r of p.unlock.data.slice(0, 3)) {
@@ -149,6 +157,7 @@ function unlockLines(p: PerStock): string[] {
     out.push(`  - 合计 ${p.unlock.data.length} 笔，约 ${fmtShares(total)}`);
   }
   out.push(`  （${sourceTag(p.unlock)}）`);
+  if (total > 0) pushAnnotation(out, seethrough, 'unlock', { value: total });
   return out;
 }
 
@@ -393,10 +402,23 @@ function reportLabel(iso: string | null | undefined): string {
   return `${y}-${mo}财报`;
 }
 
-/** ④ 基本面段（确定性，纯数字 + 时效；缺指标诚实"—"，无源不臆造）。 */
+/** seethrough（看懂层）开 → 在数据行下追加「〔看懂〕」释义子行；关 → 完全不动（字节回退）。 */
+function pushAnnotation(
+  out: string[],
+  seethrough: boolean,
+  key: SeethroughKey,
+  input: AnnotateInput,
+): void {
+  if (!seethrough) return;
+  const a = annotate(key, input);
+  if (a) out.push(seethroughLine(a));
+}
+
+/** ④ 基本面段（确定性，纯数字 + 时效；缺指标诚实"—"，无源不臆造）。seethrough 开则逐指标挂看懂注解。 */
 export function fundamentalsLines(
   env: AkEnvelope<FundamentalsRow> | undefined,
   mode: BriefingMode,
+  seethrough = false,
 ): string[] {
   const f = env?.data[0];
   if (!env || env.error || !f) {
@@ -407,18 +429,40 @@ export function fundamentalsLines(
   out.push(
     `- 营业总收入 ${fmtMoneyAuto(f.revenue)}（同比 ${fmtPct(f.revenue_yoy)}${qoq(f.revenue_qoq)}）`,
   );
+  pushAnnotation(out, seethrough, 'revenue_yoy', { value: f.revenue_yoy });
   out.push(
     `- 归母净利润 ${fmtMoneyAuto(f.net_profit)}（同比 ${fmtPct(f.net_profit_yoy)}${qoq(f.net_profit_qoq)}）`,
   );
+  pushAnnotation(out, seethrough, 'net_profit_yoy', {
+    value: f.net_profit_yoy,
+    aux: f.revenue_yoy,
+  });
   if (f.deduct_net_profit != null) {
     out.push(
       `- 扣非净利润 ${fmtMoneyAuto(f.deduct_net_profit)}（同比 ${fmtPct(f.deduct_net_profit_yoy)}）`,
     );
+    pushAnnotation(out, seethrough, 'deduct_vs_net', {
+      value: f.deduct_net_profit,
+      aux: f.net_profit,
+    });
   }
   out.push(
     `- 销售毛利率 ${fmtPctPlain(f.gross_margin)} ｜ 净利率 ${fmtPctPlain(f.net_margin)} ｜ ROE ${fmtPctPlain(f.roe)} ｜ 资产负债率 ${fmtPctPlain(f.debt_ratio)}`,
   );
-  if (f.ocf_per_share != null) out.push(`- 每股经营现金流 ${fmtNum(f.ocf_per_share)} 元`);
+  // A3 毛利率同比（P2）：销售毛利率当期 − 上年同期（无同比数据 → 引擎返 null 不出）。
+  pushAnnotation(out, seethrough, 'gross_margin', {
+    value: f.gross_margin,
+    yoy: f.gross_margin_yoy,
+  });
+  pushAnnotation(out, seethrough, 'net_margin', { value: f.net_margin });
+  pushAnnotation(out, seethrough, 'roe', { value: f.roe });
+  pushAnnotation(out, seethrough, 'debt_ratio', { value: f.debt_ratio });
+  if (f.ocf_per_share != null) {
+    out.push(`- 每股经营现金流 ${fmtNum(f.ocf_per_share)} 元`);
+    pushAnnotation(out, seethrough, 'ocf_per_share', { value: f.ocf_per_share });
+    // C1 现金含量（★，P2）：= 每股经营现金流 ÷ 基本每股收益（EPS≤0 引擎兜底返 null）。
+    pushAnnotation(out, seethrough, 'cash_content', { value: f.ocf_per_share, aux: f.eps_basic });
+  }
   const t = (f.trend3y ?? []).filter((x) => x.report_period);
   if (t.length) {
     const parts = t.map((x) => {
@@ -431,10 +475,11 @@ export function fundamentalsLines(
   return out;
 }
 
-/** ⑤ 估值段（确定性，纯数字 + 时效；分位/行业对比只给数不下"贵/低"判断）。 */
+/** ⑤ 估值段（确定性，纯数字 + 时效；分位/行业对比只给数不下"贵/低"判断）。seethrough 开则挂看懂注解。 */
 export function valuationLines(
   env: AkEnvelope<ValuationRow> | undefined,
   mode: BriefingMode,
+  seethrough = false,
 ): string[] {
   const v = env?.data[0];
   if (!env || env.error || !v) {
@@ -447,6 +492,8 @@ export function valuationLines(
   if (v.pe_pctile_5y != null) pct.push(`PE 近5年分位 ${fmtPctile(v.pe_pctile_5y)}`);
   if (v.pb_pctile_5y != null) pct.push(`PB 近5年分位 ${fmtPctile(v.pb_pctile_5y)}`);
   if (pct.length) out.push(`- ${pct.join(' ｜ ')}`);
+  pushAnnotation(out, seethrough, 'pe_pctile', { pctile: v.pe_pctile_5y });
+  pushAnnotation(out, seethrough, 'pb_pctile', { pctile: v.pb_pctile_5y, aux: v.pb });
   if (v.industry && v.industry_pe_median != null) {
     // 相对行业落地：本股 PE-TTM vs 行业静态PE中位（客观高于/低于，"贵/便宜"判断留 ⑦）。
     const cmp =
@@ -460,6 +507,10 @@ export function valuationLines(
     out.push(
       `- 所属${v.industry}，行业静态PE中位 ${fmtNum(v.industry_pe_median)}${cmp ? `（本股 PE-TTM ${cmp}行业中位）` : ''}`,
     );
+    pushAnnotation(out, seethrough, 'industry_pe', {
+      value: v.pe_ttm,
+      industryMedian: v.industry_pe_median,
+    });
   }
   if (v.total_mv_yi != null) out.push(`- 总市值 ${fmtMvYi(v.total_mv_yi)}元`);
   out.push(`  （${sourceTag(env)}）`);
@@ -543,6 +594,7 @@ export function renderPanoramaBody(
   match: AshareQaMatch,
   now: Date,
   mode: BriefingMode,
+  seethrough = false,
 ): string {
   const lines: string[] = [
     `# 📈 HOLA DAY · A股全景速览（${dateHeader(match.dateIso)}）`,
@@ -562,11 +614,11 @@ export function renderPanoramaBody(
     lines.push('');
     lines.push('**③ 消息面**');
     lines.push(...announcementLines(p, mode));
-    const ul = unlockLines(p);
+    const ul = unlockLines(p, seethrough);
     lines.push(...(ul.length ? ul : ['- 限售解禁：近期无']));
     lines.push('');
-    lines.push(...fundamentalsLines(pano?.fundamentals, mode), '');
-    lines.push(...valuationLines(pano?.valuation, mode));
+    lines.push(...fundamentalsLines(pano?.fundamentals, mode, seethrough), '');
+    lines.push(...valuationLines(pano?.valuation, mode, seethrough));
     lines.push('');
   }
   return lines.join('\n').trimEnd();
@@ -582,4 +634,209 @@ export function buildPanoramaContext(data: PanoramaData, match: AshareQaMatch): 
     blocks.push(valuationContext(pano?.valuation));
   }
   return blocks.filter(Boolean).join('\n');
+}
+
+// ===== Phase 2「看懂层」P1 — ★ 核心子集（轻量速览带；腿A 零 LLM）====================
+// 全景版逐项注解走 renderPanoramaBody(seethrough=true)；轻量速览只带 ★ 核心几条
+// （A1净利率 / A2扣非vs归母 / B1营收同比 / D1 PE分位 / E1解禁），需额外取 ④基本面/⑤估值
+// （+2 取数/股，走现有 TTL 缓存），但**零新增 LLM**（纯查表注解）。
+
+export interface StarStockData {
+  fundamentals: AkEnvelope<FundamentalsRow>;
+  valuation: AkEnvelope<ValuationRow>;
+}
+
+/** 轻量 ★ 取数：每股 ④基本面 + ⑤估值（②解禁已在 fetchFactData 取过）。 */
+export async function fetchStarData(
+  client: AkshareClient,
+  match: AshareQaMatch,
+): Promise<Record<string, StarStockData>> {
+  const pairs = await Promise.all(
+    match.stocks.map(
+      async (s): Promise<readonly [string, StarStockData]> =>
+        [
+          s.symbol,
+          {
+            fundamentals: await client.getFundamentals(s.symbol),
+            valuation: await client.getValuation(s.symbol),
+          },
+        ] as const,
+    ),
+  );
+  return Object.fromEntries(pairs);
+}
+
+/** 一只个股的 ★ 核心看懂块（A1/A2/B1/D1/E1，对照 CORE_STAR_KEYS）。 */
+function starBlockForStock(
+  label: string,
+  fundEnv: AkEnvelope<FundamentalsRow> | undefined,
+  valEnv: AkEnvelope<ValuationRow> | undefined,
+  unlock: AkEnvelope<UnlockRow>,
+): string[] {
+  const f = fundEnv && !fundEnv.error ? fundEnv.data[0] : undefined;
+  const v = valEnv && !valEnv.error ? valEnv.data[0] : undefined;
+  const lines: string[] = [];
+  const add = (key: SeethroughKey, input: AnnotateInput): void => {
+    const a = annotate(key, input);
+    if (a) lines.push(seethroughLine(a));
+  };
+  if (f) {
+    add('net_margin', { value: f.net_margin });
+    add('deduct_vs_net', { value: f.deduct_net_profit, aux: f.net_profit });
+    add('cash_content', { value: f.ocf_per_share, aux: f.eps_basic }); // C1 ★（P2）
+    add('revenue_yoy', { value: f.revenue_yoy });
+  }
+  if (v) add('pe_pctile', { pctile: v.pe_pctile_5y });
+  if (!unlock.error && unlock.data.length > 0) {
+    const total = unlock.data.reduce((s, r) => s + (toNum(pick(r, ['解禁数量'])) ?? 0), 0);
+    if (total > 0) add('unlock', { value: total });
+  }
+  return lines.length ? [`**★ 核心看懂 · ${label}**`, ...lines] : [];
+}
+
+/** 轻量速览 ★ 核心看懂段（多股各一块；无数据则空）。 */
+export function renderStarSeethrough(
+  data: FactData,
+  star: Record<string, StarStockData>,
+): string[] {
+  const out: string[] = [];
+  for (const p of data.perStock) {
+    const sd = star[p.stock.symbol];
+    const blk = starBlockForStock(stockLabel(p.stock), sd?.fundamentals, sd?.valuation, p.unlock);
+    if (blk.length) out.push('', ...blk);
+  }
+  return out;
+}
+
+// ===== ④ 风险信号雷达 P1 — 取数 + 检测 + 渲染（腿A 确定性，零 LLM）===================
+// 数据：质押/商誉/预告 按date取(内部解析周五/报告期)+按symbol过滤；董监高减持按symbol；
+// 问询函/大股东减持计划 = 公告标题 keyword（用更长窗口 90 天，单独取，不复用③的近7日）。
+
+export interface RiskData {
+  bySymbol: Record<string, RiskSignal[]>;
+}
+
+/** 取每股风险源 → detectAllRisks → RiskSignal[]。单源失败仅该项缺，不崩整组。 */
+export async function fetchRiskData(
+  client: AkshareClient,
+  match: AshareQaMatch,
+): Promise<RiskData> {
+  const dateCompact = match.dateCompact;
+  const annStart = shiftCompact(match.dateIso, -90); // 风险公告(问询/减持)看更长窗口
+  const bySymbol: Record<string, RiskSignal[]> = {};
+  await Promise.all(
+    match.stocks.map(async (s) => {
+      const [pledge, goodwill, forecast, insider, ann, fund] = await Promise.all([
+        client.getRiskPledge(dateCompact, s.symbol),
+        client.getRiskGoodwill(dateCompact, s.symbol),
+        client.getRiskForecast(dateCompact, s.symbol),
+        client.getRiskInsider(s.symbol),
+        client.getStockAnnouncements(s.symbol, annStart, dateCompact),
+        client.getFundamentals(s.symbol), // R4 占比：近似总股本(净利润/EPS)；TTL 缓存，全景已取=命中
+      ]);
+      const fr = fund.error ? undefined : fund.data[0];
+      // P2 R4：近似总股本 = 净利润 ÷ 基本每股收益（EPS>0 才有意义；否则 null → 减持只给股数）。
+      const totalShares =
+        fr &&
+        typeof fr.net_profit === 'number' &&
+        typeof fr.eps_basic === 'number' &&
+        fr.eps_basic > 0
+          ? fr.net_profit / fr.eps_basic
+          : null;
+      bySymbol[s.symbol] = detectAllRisks({
+        pledge: pledge.error ? undefined : pledge.data[0],
+        goodwill: goodwill.error ? undefined : goodwill.data[0],
+        forecast: forecast.error ? undefined : forecast.data[0],
+        insider: insider.error ? [] : insider.data,
+        announcements: ann.error ? [] : ann.data,
+        totalShares,
+      });
+    }),
+  );
+  return { bySymbol };
+}
+
+/** 单股风险组（命中项才显；无 → 「未检测到上述风险信号」）。 */
+export function renderRiskGroup(signals: RiskSignal[]): string[] {
+  if (signals.length === 0) return ['- 未检测到上述风险信号'];
+  return [...signals.map(riskLine), `  （${RISK_DISCLAIMER}）`];
+}
+
+/** 全景版 ⑥ 风险信号段（多股各一块；单股省略股名后缀）。 */
+export function renderRiskSection(data: FactData, risk: RiskData): string[] {
+  const multi = data.perStock.length > 1;
+  const out: string[] = [];
+  for (const p of data.perStock) {
+    const sigs = risk.bySymbol[p.stock.symbol] ?? [];
+    out.push('');
+    out.push(multi ? `**⑥ 风险信号 · ${stockLabel(p.stock)}**` : '**⑥ 风险信号**');
+    out.push(...renderRiskGroup(sigs));
+  }
+  return out;
+}
+
+/** 轻量速览 ★ 风险提示（只带 star=true：R1高质押/R2高商誉/R3走弱/R5问询；无则空）。 */
+export function renderRiskStar(data: FactData, risk: RiskData): string[] {
+  const out: string[] = [];
+  for (const p of data.perStock) {
+    const star = (risk.bySymbol[p.stock.symbol] ?? []).filter((s) => s.star);
+    if (star.length)
+      out.push('', '**★ 风险提示**', ...star.map(riskLine), `  （${RISK_DISCLAIMER}）`);
+  }
+  return out;
+}
+
+// ===== P3 · F 走势组 — 取数(放宽 get_kline 近1年) + F1-F4 本地算 + 渲染（腿A 零LLM）===========
+// F1-F4 全用现成 daily 序列(get_kline?days=250)本地纯算，零新增取数接口；新股/停牌不足 → 不出。
+
+/** 走势组末免责（含「预测/建议」=免责非注解，渲染层一次性附；走势最易滑，钉客观）。 */
+export const PERF_DISCLAIMER = '以上为客观走势描述，不预测未来、不构成投资建议。';
+
+export interface PerfData {
+  bySymbol: Record<string, PerfSignal[]>;
+}
+
+/** 取每股近1年 daily 序列 → detectAllPerf → PerfSignal[]。取数失败/不足 → 空，不崩。 */
+export async function fetchPerfData(
+  client: AkshareClient,
+  match: AshareQaMatch,
+): Promise<PerfData> {
+  const bySymbol: Record<string, PerfSignal[]> = {};
+  await Promise.all(
+    match.stocks.map(async (s) => {
+      const kl = await client.getStockKline(s.symbol, 250); // 近1年(覆盖F3+F1/F2近3月切片)
+      const series = kl.error ? [] : kl.data;
+      bySymbol[s.symbol] = detectAllPerf({ series });
+    }),
+  );
+  return { bySymbol };
+}
+
+/** 单股走势组（能算才显；不足 → 「走势数据不足…暂不展示」）。 */
+export function renderPerfGroup(signals: PerfSignal[]): string[] {
+  if (signals.length === 0) return ['- 走势数据不足（如新股/停牌不足近1年），暂不展示'];
+  return [...signals.map(perfLine), `  （${PERF_DISCLAIMER}）`];
+}
+
+/** 全景版 F 走势段（多股各一块；单股省略股名后缀）。 */
+export function renderPerfSection(data: FactData, perf: PerfData): string[] {
+  const multi = data.perStock.length > 1;
+  const out: string[] = [];
+  for (const p of data.perStock) {
+    const sigs = perf.bySymbol[p.stock.symbol] ?? [];
+    out.push('');
+    out.push(multi ? `**F 走势 · ${stockLabel(p.stock)}**` : '**F 走势**');
+    out.push(...renderPerfGroup(sigs));
+  }
+  return out;
+}
+
+/** 轻量速览 ★ 走势（只带 star=true：F1区间变动 + F3区间位置；无则空）。 */
+export function renderPerfStar(data: FactData, perf: PerfData): string[] {
+  const out: string[] = [];
+  for (const p of data.perStock) {
+    const star = (perf.bySymbol[p.stock.symbol] ?? []).filter((s) => s.star);
+    if (star.length) out.push('', '**★ 走势**', ...star.map(perfLine), `  （${PERF_DISCLAIMER}）`);
+  }
+  return out;
 }

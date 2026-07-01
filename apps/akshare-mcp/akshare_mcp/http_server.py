@@ -12,8 +12,6 @@ Run（Vultr，仅监听 127.0.0.1，由 orchestrator 同机直取，不对外暴
 
 from __future__ import annotations
 
-import threading
-from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any, Callable
 
@@ -48,6 +46,7 @@ def _safe(fn: Callable[..., tuple[list[dict[str, Any]], str]], *args: Any, **kwa
 
 # Cached fetches — one TTL per interface (same as server.py).
 _quote = cached(adp.TTL_QUOTE)(adp.get_quote)
+_intraday = cached(adp.TTL_INTRADAY)(adp.get_intraday)
 _kline = cached(adp.TTL_KLINE)(adp.get_kline)
 _announce = cached(adp.TTL_ANNOUNCE)(adp.get_announcements)
 _lhb = cached(adp.TTL_LHB)(adp.get_dragon_tiger)
@@ -63,23 +62,7 @@ _fund = cached(adp.TTL_FUND)(adp.get_fundamentals)
 _val = cached(adp.TTL_VAL)(adp.get_valuation)
 _rank = cached(adp.TTL_RANK)(adp.get_stock_rankings)
 
-
-def _prewarm_rankings() -> None:
-    """Warm the shared full-market spot cache without blocking health checks."""
-
-    def _run() -> None:
-        _safe(_rank, "gainers", 8)
-
-    threading.Thread(target=_run, daemon=True).start()
-
-
-@asynccontextmanager
-async def lifespan(_: FastAPI):
-    _prewarm_rankings()
-    yield
-
-
-app = FastAPI(title="akshare-cn-http", docs_url=None, redoc_url=None, lifespan=lifespan)
+app = FastAPI(title="akshare-cn-http", docs_url=None, redoc_url=None)
 
 
 @app.get("/health")
@@ -108,13 +91,21 @@ def share_unlock(symbol: str) -> dict[str, Any]:
 
 
 @app.get("/kline/{symbol}")
-def kline(symbol: str) -> dict[str, Any]:
-    return _safe(_kline, symbol)
+def kline(symbol: str, days: int = 0) -> dict[str, Any]:
+    """days>0 → 近 days 交易日 raw 序列(P3 F走势 本地算)；默认 0 = 末2行(①盘面，不变)。
+    cache 按 (symbol, days) 分键（序列与单行各自缓存）。"""
+    return _safe(_kline, symbol, days=days)
 
 
 @app.get("/quote/{symbol}")
 def quote(symbol: str) -> dict[str, Any]:
     return _safe(_quote, symbol)
+
+
+@app.get("/intraday/{symbol}")
+def intraday(symbol: str) -> dict[str, Any]:
+    """真实分钟线；仅返回数据源实际分钟点，不补齐、不外推。"""
+    return _safe(_intraday, symbol)
 
 
 @app.get("/stock-rankings/{metric}")
@@ -165,6 +156,32 @@ def valuation(symbol: str) -> dict[str, Any]:
     return _safe(_val, symbol)
 
 
+# ④ 风险信号雷达：质押/商誉/预告 全市场按 date 共享缓存（内部 _risk_*_all @cached），
+# endpoint 直 _safe(adp.get_risk_*, date, symbol)（按 symbol 过滤后结果小，不再二次缓存）。
+@app.get("/risk-pledge/{date}")
+def risk_pledge(date: str, symbol: str = "") -> dict[str, Any]:
+    """R1 股权质押(质押比例)。date 'YYYYMMDD'(内部取≤date 最近周五)；symbol 过滤个股。"""
+    return _safe(adp.get_risk_pledge, date, symbol)
+
+
+@app.get("/risk-goodwill/{date}")
+def risk_goodwill(date: str, symbol: str = "") -> dict[str, Any]:
+    """R2 商誉(占净资产比例 + 上年商誉)。date 'YYYYMMDD'(内部取最近报告期)；symbol 过滤。"""
+    return _safe(adp.get_risk_goodwill, date, symbol)
+
+
+@app.get("/risk-forecast/{date}")
+def risk_forecast(date: str, symbol: str = "") -> dict[str, Any]:
+    """R3 业绩预告(预告类型/业绩变动幅度)。date 'YYYYMMDD'(内部取最近报告期)；symbol 过滤。"""
+    return _safe(adp.get_risk_forecast, date, symbol)
+
+
+@app.get("/risk-insider/{symbol}")
+def risk_insider(symbol: str) -> dict[str, Any]:
+    """R4 董监高持股变动(减持=变动数<0)。沪 sse / 深 szse 交易所直连。"""
+    return _safe(adp.get_risk_insider, symbol)
+
+
 @app.get("/symbol-search/{query}")
 def symbol_search(query: str) -> dict[str, Any]:
     """问句 → 个股 [{code,name}]（④ 短名解析）。表空时返空 + 异步刷新，不阻塞。"""
@@ -181,6 +198,36 @@ def symbol_table_warm() -> dict[str, Any]:
         return {"error": str(exc), "data": [], "count": 0, "disclaimer": DISCLAIMER}
     except Exception as exc:  # noqa: BLE001
         return {"error": f"接口调用失败: {exc}", "data": [], "count": 0, "disclaimer": DISCLAIMER}
+
+
+@app.post("/risk-warm")
+def risk_warm() -> dict[str, Any]:
+    """预热 3 张风险全市场表(质押/商誉/预告)入进程缓存。冷取慢(>1min/张) → 由启动钩子 + 周期后台
+    调；命中后客户端秒回。手动触发(部署后/补热)也走此端点。返回各表行数。"""
+    try:
+        counts = adp.warm_risk_tables()
+        return {"data": [counts], "count": 1, "source": "risk-warm", "disclaimer": DISCLAIMER}
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"接口调用失败: {exc}", "data": [], "count": 0, "disclaimer": DISCLAIMER}
+
+
+@app.on_event("startup")
+def _prewarm_risk_on_startup() -> None:
+    """启动后台预热风险表 + 周期重热(<TTL_RISK 保持热)。daemon 线程，**不阻塞 startup**
+    （服务立即起、慢 fetch 挪后台）；单轮失败仅跳过、服务照常。对齐 BOSS 方案 A。"""
+    import threading
+    import time
+
+    def _loop() -> None:
+        while True:
+            try:
+                _safe(_rank, "gainers", 8)
+                adp.warm_risk_tables()
+            except Exception:  # noqa: BLE001 - 预热失败不影响服务
+                pass
+            time.sleep(5 * 3600)  # < TTL_RISK(6h)，周期重热
+
+    threading.Thread(target=_loop, daemon=True).start()
 
 
 def main() -> None:

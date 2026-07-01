@@ -1,5 +1,6 @@
+import { createHash } from 'node:crypto';
 import { TRPCError } from '@trpc/server';
-import { eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { HttpAkshareClient } from '../../agent/a-share/akshare-http-client.js';
 import {
@@ -11,21 +12,28 @@ import type {
   AkEnvelope,
   AnnouncementRow,
   IndexRow,
+  IntradayRow,
   KlineRow,
   MarketPulseRow,
   SectorEntry,
+  StockQuoteRow,
   StockRankingRow,
   WatchlistEntry,
 } from '../../agent/a-share/briefing-types.js';
 import type { SymbolRow } from '../../agent/a-share/akshare-client.js';
 import { fmtNum, fmtYiYuan, pick, toNum } from '../../agent/a-share/ashare-format.js';
+import { stockDashboardSnapshots } from '../../db/schema/stock-dashboard-snapshots.js';
 import { users } from '../../db/schema/users.js';
 import { protectedProcedure, router } from '../trpc.js';
 
 type Db = typeof import('../../db/client.js').db;
+interface MinimalLogger {
+  warn(obj: Record<string, unknown>, msg: string): void;
+}
 
 type Market = 'A' | 'HK' | 'US';
 type Signal = '强势' | '偏强' | '中性' | '偏弱' | '风险升高' | '待观察';
+type VolumeSignal = '放量' | '缩量' | '接近均量' | '待观察';
 
 interface StockSnapshot {
   symbol: string;
@@ -36,6 +44,15 @@ interface StockSnapshot {
   signal: Signal;
   report: '已生成' | '待生成' | '生成中';
   spark: number[];
+  sparkLabels: string[];
+  sparkKind: 'daily_close' | 'intraday';
+  sparkBaseline: number | null;
+  turnoverAmount: number | null;
+  averageTurnoverAmount: number | null;
+  volume: number | null;
+  averageVolume: number | null;
+  volumeRatio: number | null;
+  volumeSignal: VolumeSignal;
   newsCount: number;
   note: string;
 }
@@ -78,6 +95,34 @@ interface LeaderboardsSnapshot {
   amount: LeaderSnapshot[];
 }
 
+interface DashboardFreshness {
+  status: 'fresh' | 'stale' | 'partial';
+  cachedAt: string;
+  message?: string;
+}
+
+interface DashboardSnapshot {
+  updatedAt: string;
+  source: 'akshare';
+  isFallbackWatchlist: boolean;
+  watchlistStocks: StockSnapshot[];
+  marketIndices: IndexSnapshot[];
+  sectors: SectorSnapshot[];
+  starStocks: StockSnapshot[];
+  temperature: ReturnType<typeof marketTemperature>;
+  news: NewsSnapshot[];
+  leaders: LeaderSnapshot[];
+  leaderboards: LeaderboardsSnapshot;
+  freshness: DashboardFreshness;
+}
+
+interface DashboardCacheEntry {
+  snapshot?: DashboardSnapshot;
+  freshUntil: number;
+  staleUntil: number;
+  refreshPromise?: Promise<DashboardSnapshot>;
+}
+
 const POPULAR_A_SYMBOLS = [
   { symbol: '600519', name: '贵州茅台' },
   { symbol: '300750', name: '宁德时代' },
@@ -94,6 +139,42 @@ const POPULAR_A_SYMBOLS = [
   { symbol: '300308', name: '中际旭创' },
 ];
 
+const DASHBOARD_FRESH_TTL_MS = 15_000;
+const DASHBOARD_PARTIAL_FRESH_TTL_MS = 5_000;
+const DASHBOARD_STALE_TTL_MS = 10 * 60_000;
+const DASHBOARD_FIRST_PAINT_BUDGET_MS = 5_500;
+const DASHBOARD_AKSHARE_TIMEOUT_MS = 8_000;
+const DASHBOARD_SLOW_SIGNAL_TIMEOUT_MS = 90_000;
+const DASHBOARD_RANKING_TIMEOUT_MS = 75_000;
+const NEWS_LIMIT = 12;
+const NEWS_ANNOUNCEMENT_LIMIT = 7;
+const NEWS_PER_STOCK_ANNOUNCEMENTS = 3;
+const dashboardCache = new Map<string, DashboardCacheEntry>();
+
+function unavailableStock(entry: WatchlistEntry, note = '真实行情暂不可用，未展示走势线'): StockSnapshot {
+  return {
+    symbol: entry.symbol,
+    name: entry.displayName ?? entry.symbol,
+    market: entry.market as Market,
+    price: '—',
+    changePct: 0,
+    signal: '待观察',
+    report: '待生成',
+    spark: [],
+    sparkLabels: [],
+    sparkKind: 'daily_close',
+    sparkBaseline: null,
+    turnoverAmount: null,
+    averageTurnoverAmount: null,
+    volume: null,
+    averageVolume: null,
+    volumeRatio: null,
+    volumeSignal: '待观察',
+    newsCount: 0,
+    note,
+  };
+}
+
 async function requireUserId(db: Db, externalUserId: string): Promise<number> {
   const [row] = await db
     .select({ id: users.id })
@@ -102,6 +183,191 @@ async function requireUserId(db: Db, externalUserId: string): Promise<number> {
     .limit(1);
   if (!row) throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
   return row.id;
+}
+
+function dashboardCacheKey(userInternalId: number, watchlist: WatchlistEntry[]): string {
+  const signature = watchlist
+    .map((entry) => [
+      entry.symbol.trim().toUpperCase(),
+      entry.market,
+      entry.displayName?.trim() ?? '',
+    ].join(':'))
+    .join('|');
+  return `${userInternalId}:${signature}`;
+}
+
+function dashboardPersistedCacheKey(cacheKey: string): string {
+  return createHash('sha256').update(cacheKey).digest('hex');
+}
+
+function isDashboardSnapshot(value: unknown): value is DashboardSnapshot {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Partial<DashboardSnapshot>;
+  return (
+    candidate.source === 'akshare' &&
+    Array.isArray(candidate.watchlistStocks) &&
+    Array.isArray(candidate.marketIndices) &&
+    Array.isArray(candidate.sectors) &&
+    Array.isArray(candidate.news) &&
+    Array.isArray(candidate.leaders) &&
+    typeof candidate.freshness === 'object' &&
+    candidate.freshness !== null
+  );
+}
+
+function hasDisplayableRealDashboardData(snapshot: DashboardSnapshot): boolean {
+  const hasWatchlistData = snapshot.watchlistStocks.some((stockRow) =>
+    stockRow.price !== '—' ||
+    stockRow.spark.length >= 2 ||
+    stockRow.turnoverAmount !== null ||
+    stockRow.volume !== null);
+  return (
+    hasWatchlistData ||
+    snapshot.marketIndices.length > 0 ||
+    snapshot.sectors.length > 0 ||
+    snapshot.news.length > 0 ||
+    snapshot.leaderboards.gainers.length > 0 ||
+    snapshot.leaderboards.losers.length > 0 ||
+    snapshot.leaderboards.amount.length > 0
+  );
+}
+
+async function loadPersistedDashboardSnapshot(args: {
+  db: Db;
+  logger: MinimalLogger;
+  userInternalId: number;
+  cacheKey: string;
+}): Promise<DashboardSnapshot | undefined> {
+  try {
+    const [row] = await args.db
+      .select({ snapshotJson: stockDashboardSnapshots.snapshotJson })
+      .from(stockDashboardSnapshots)
+      .where(and(
+        eq(stockDashboardSnapshots.userId, args.userInternalId),
+        eq(stockDashboardSnapshots.cacheKeyHash, dashboardPersistedCacheKey(args.cacheKey)),
+      ))
+      .limit(1);
+    if (!row || !isDashboardSnapshot(row.snapshotJson)) return undefined;
+    return markStale(row.snapshotJson, '行情接口正在刷新，当前展示最近一次真实数据。');
+  } catch (error) {
+    args.logger.warn(
+      { error: error instanceof Error ? error.message : String(error) },
+      'stocks-dashboard: persisted snapshot read failed',
+    );
+    return undefined;
+  }
+}
+
+async function persistDashboardSnapshot(args: {
+  db: Db;
+  logger: MinimalLogger;
+  userInternalId: number;
+  cacheKey: string;
+  snapshot: DashboardSnapshot;
+}): Promise<void> {
+  if (!hasDisplayableRealDashboardData(args.snapshot)) return;
+  try {
+    await args.db
+      .insert(stockDashboardSnapshots)
+      .values({
+        userId: args.userInternalId,
+        cacheKeyHash: dashboardPersistedCacheKey(args.cacheKey),
+        snapshotJson: args.snapshot,
+      })
+      .onDuplicateKeyUpdate({
+        set: {
+          snapshotJson: args.snapshot,
+          updatedAt: sql`CURRENT_TIMESTAMP(3)`,
+        },
+      });
+  } catch (error) {
+    args.logger.warn(
+      { error: error instanceof Error ? error.message : String(error) },
+      'stocks-dashboard: persisted snapshot write failed',
+    );
+  }
+}
+
+function withFreshness(
+  snapshot: Omit<DashboardSnapshot, 'freshness'>,
+  freshness: DashboardFreshness,
+): DashboardSnapshot {
+  return { ...snapshot, freshness };
+}
+
+function markStale(snapshot: DashboardSnapshot, message: string): DashboardSnapshot {
+  return {
+    ...snapshot,
+    freshness: {
+      ...snapshot.freshness,
+      status: 'stale',
+      message,
+    },
+  };
+}
+
+function fallbackLeaderboards(): LeaderboardsSnapshot {
+  return { gainers: [], losers: [], amount: [] };
+}
+
+function emptyEnvelope<T>(source: string): AkEnvelope<T> {
+  return {
+    data: [],
+    count: 0,
+    source,
+    fetched_at: new Date().toISOString(),
+    disclaimer: '数据来源 AkShare 聚合，仅供信息参考，不构成任何投资建议，不预测股价。',
+  };
+}
+
+function buildPartialDashboardSnapshot(
+  _watchlistRows: WatchlistEntry[],
+  effectiveWatchlist: WatchlistEntry[],
+  now = new Date(),
+  message = '行情刷新仍在进行，先展示真实关注列表。',
+): DashboardSnapshot {
+  const watchlistStocks = effectiveWatchlist
+    .slice(0, 8)
+    .map((entry) => unavailableStock(entry));
+  const leaderboards = fallbackLeaderboards();
+  return withFreshness(
+    {
+      updatedAt: now.toISOString(),
+      source: 'akshare',
+      isFallbackWatchlist: false,
+      watchlistStocks,
+      marketIndices: [],
+      sectors: [],
+      starStocks: [],
+      temperature: null,
+      news: [],
+      leaders: leaderboards.gainers,
+      leaderboards,
+    },
+    {
+      status: 'partial',
+      cachedAt: now.toISOString(),
+      message,
+    },
+  );
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`timeout after ${timeoutMs}ms`));
+    }, timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
 }
 
 function cnDateParts(now = new Date()): { iso: string; compact: string } {
@@ -128,31 +394,62 @@ function signalFromChange(changePct: number): Signal {
   return '中性';
 }
 
-function unavailableStock(entry: WatchlistEntry, reason: string): StockSnapshot {
-  return {
-    symbol: entry.symbol,
-    name: entry.displayName ?? entry.symbol,
-    market: entry.market as Market,
-    price: '—',
-    changePct: 0,
-    signal: '待观察',
-    report: '待生成',
-    spark: [],
-    newsCount: 0,
-    note: reason,
-  };
+function sparkSeriesFromKline(rows: KlineRow[]): { values: number[]; labels: string[] } {
+  const series = rows
+    .slice(-8)
+    .map((row) => ({
+      value: toNum(pick(row, ['收盘', 'close', '最新价'])),
+      label: String(pick(row, ['日期', 'date']) ?? '').trim(),
+    }))
+    .filter((point): point is { value: number; label: string } => point.value !== null && point.label.length > 0);
+  return series.length >= 2
+    ? {
+        values: series.map((point) => point.value),
+        labels: series.map((point) => point.label),
+      }
+    : { values: [], labels: [] };
 }
 
-function sparkFromKline(rows: KlineRow[]): number[] {
-  const values = rows
-    .slice(-8)
-    .map((row) => toNum(pick(row, ['收盘', 'close', '最新价'])))
-    .filter((value): value is number => value !== null);
-  return values.length >= 2 ? values : [];
+function sparkSeriesFromIntraday(rows: IntradayRow[]): { values: number[]; labels: string[] } {
+  const series = rows
+    .map((row) => ({
+      value: toNum(pick(row, ['最新价', '收盘', 'close', 'price'])),
+      label: String(pick(row, ['时间', 'time', 'datetime']) ?? '').trim(),
+    }))
+    .filter((point): point is { value: number; label: string } => point.value !== null && point.label.length > 0);
+  return series.length >= 2
+    ? {
+        values: series.map((point) => point.value),
+        labels: series.map((point) => point.label),
+      }
+    : { values: [], labels: [] };
+}
+
+function previousCloseFromSeries(series: { values: number[]; labels: string[] }, intradayLabel: string | undefined): number | null {
+  if (series.values.length === 0) return null;
+  const intradayDate = datePart(intradayLabel);
+  const lastIndex = series.values.length - 1;
+  const lastDailyDate = datePart(series.labels[lastIndex]);
+  if (intradayDate && lastDailyDate && lastDailyDate >= intradayDate && series.values.length >= 2) {
+    return series.values[lastIndex - 1] ?? null;
+  }
+  return series.values[lastIndex] ?? null;
+}
+
+function datePart(value: string | undefined): string | null {
+  const trimmed = String(value ?? '').trim();
+  const match = /^(\d{4})[-/]?(\d{2})[-/]?(\d{2})/.exec(trimmed);
+  if (!match) return null;
+  return `${match[1]}-${match[2]}-${match[3]}`;
 }
 
 function latestKline(rows: KlineRow[]): KlineRow | null {
   return rows.length > 0 ? rows[rows.length - 1] ?? null : null;
+}
+
+function latestQuote(env: AkEnvelope<StockQuoteRow>): StockQuoteRow | null {
+  if (env.error || env.data.length === 0) return null;
+  return env.data[0] ?? null;
 }
 
 async function stockSnapshot(
@@ -163,12 +460,47 @@ async function stockSnapshot(
   void index;
   if (entry.market !== 'A') return unavailableStock(entry, '当前行情源仅接入 A 股真实数据');
 
-  const env = await client.getStockKline(entry.symbol);
-  if (env.error || env.data.length === 0) return unavailableStock(entry, 'AkShare 暂未返回该股票行情');
-  const last = latestKline(env.data);
-  if (!last) return unavailableStock(entry, 'AkShare 暂未返回该股票行情');
-  const close = pick(last, ['收盘', 'close', '最新价']);
-  const changePct = toNum(pick(last, ['涨跌幅', 'changePct'])) ?? 0;
+  const [dailyEnv, seriesEnv, intradayEnv, quoteEnv] = await Promise.all([
+    client.getStockKline(entry.symbol),
+    client.getStockKline(entry.symbol, 8),
+    client.getStockIntraday(entry.symbol),
+    client.getStockQuote(entry.symbol),
+  ]);
+  const last = latestKline(dailyEnv.data);
+  const quote = latestQuote(quoteEnv);
+  const sparkSeries = seriesEnv.error ? { values: [], labels: [] } : sparkSeriesFromKline(seriesEnv.data);
+  const intradaySeries = intradayEnv.error ? { values: [], labels: [] } : sparkSeriesFromIntraday(intradayEnv.data);
+  const hasIntraday = intradaySeries.values.length >= 2;
+  const latestIntraday = hasIntraday ? intradaySeries.values[intradaySeries.values.length - 1] : null;
+  const close = quote
+    ? pick(quote, ['最新价', 'price', '收盘', 'close'])
+    : last
+      ? pick(last, ['收盘', 'close', '最新价'])
+      : latestIntraday;
+  if (close == null) return unavailableStock(entry, 'AkShare 暂未返回该股票行情');
+  const sparkBaseline = previousCloseFromSeries(sparkSeries, intradaySeries.labels[0]);
+  const changePct = toNum(quote ? pick(quote, ['涨跌幅', 'changePct']) : last ? pick(last, ['涨跌幅', 'changePct']) : null)
+    ?? (
+      typeof sparkBaseline === 'number' && sparkBaseline > 0
+        ? ((toNum(close) ?? sparkBaseline) - sparkBaseline) / sparkBaseline * 100
+        : 0
+    );
+  const quoteVolume = toNum(quote ? pick(quote, ['成交量', 'volume']) : null);
+  const quoteAmount = toNum(quote ? pick(quote, ['成交额', 'amount', 'turnover']) : null);
+  const dailyVolume = toNum(last ? pick(last, ['成交量', 'volume']) : null);
+  const dailyAmount = toNum(last ? pick(last, ['成交额', 'amount', 'turnover']) : null);
+  const volume = quoteVolume ?? dailyVolume;
+  const turnoverAmount = quoteAmount ?? dailyAmount;
+  const klineRows = seriesEnv.error ? [] : seriesEnv.data;
+  const averageVolume = averageKlineValue(klineRows, ['成交量', 'volume']);
+  const averageTurnoverAmount = averageKlineValue(klineRows, ['成交额', 'amount', 'turnover']);
+  const turnoverRatio = turnoverAmount !== null && averageTurnoverAmount !== null && averageTurnoverAmount > 0
+    ? Number((turnoverAmount / averageTurnoverAmount).toFixed(2))
+    : null;
+  const volumeRatio = turnoverRatio
+    ?? (volume !== null && averageVolume !== null && averageVolume > 0
+      ? Number((volume / averageVolume).toFixed(2))
+      : null);
   return {
     symbol: entry.symbol,
     name: entry.displayName ?? entry.symbol,
@@ -177,10 +509,39 @@ async function stockSnapshot(
     changePct: Number(changePct.toFixed(2)),
     signal: signalFromChange(changePct),
     report: '待生成',
-    spark: sparkFromKline(env.data),
+    spark: hasIntraday ? intradaySeries.values : [],
+    sparkLabels: hasIntraday ? intradaySeries.labels : [],
+    sparkKind: 'intraday',
+    sparkBaseline,
+    turnoverAmount,
+    averageTurnoverAmount,
+    volume,
+    averageVolume,
+    volumeRatio,
+    volumeSignal: volumeSignalFromRatio(volumeRatio),
     newsCount: 0,
-    note: `来源 AkShare · ${entry.displayName ?? entry.symbol} 近期走势`,
+    note: hasIntraday
+      ? `来源 AkShare · ${entry.displayName ?? entry.symbol} 今日真实分钟线`
+      : `来源 AkShare · ${entry.displayName ?? entry.symbol} 最新行情，分时走势暂缺`,
   };
+}
+
+function averageKlineValue(rows: KlineRow[], keys: string[]): number | null {
+  const recent = rows
+    .map((row) => toNum(pick(row, keys)))
+    .filter((value): value is number => value !== null && value > 0);
+  const baseline = recent.length > 1 ? recent.slice(0, -1) : recent;
+  if (baseline.length === 0) return null;
+  const average = baseline.reduce((sum, value) => sum + value, 0) / baseline.length;
+  if (!Number.isFinite(average) || average <= 0) return null;
+  return Number(average.toFixed(2));
+}
+
+function volumeSignalFromRatio(ratio: number | null): VolumeSignal {
+  if (ratio === null) return '待观察';
+  if (ratio >= 1.25) return '放量';
+  if (ratio <= 0.75) return '缩量';
+  return '接近均量';
 }
 
 function mapIndices(env: AkEnvelope<IndexRow>): IndexSnapshot[] {
@@ -197,25 +558,24 @@ function mapIndices(env: AkEnvelope<IndexRow>): IndexSnapshot[] {
       turnover: fmtYiYuan(turnoverValue),
     };
   });
-  return rows;
+  return rows.length > 0 ? rows : [];
 }
 
 function mapSectors(env: AkEnvelope<MarketPulseRow>): SectorSnapshot[] {
   const pulse = env.data[0];
   const sectors = pulse?.sectors_up;
   if (env.error || !Array.isArray(sectors) || sectors.length === 0) return [];
-  return sectors.slice(0, 5).map((sector, index) => sectorFromEntry(sector, index));
+  return sectors.slice(0, 5).map((sector) => sectorFromEntry(sector));
 }
 
-function sectorFromEntry(entry: SectorEntry, index: number): SectorSnapshot {
+function sectorFromEntry(entry: SectorEntry): SectorSnapshot {
   const changePct = entry.涨跌幅 ?? 0;
-  const base = 38 + index * 2;
   return {
     name: entry.板块,
     changePct: Number(changePct.toFixed(2)),
     leader: entry.领涨股 || '—',
     flow: entry.领涨股涨跌幅 != null ? `领涨股 ${entry.领涨股涨跌幅.toFixed(2)}%` : '板块异动',
-    spark: [base, base + 4, base + 3, base + 7, base + 8, base + 11],
+    spark: [],
   };
 }
 
@@ -243,25 +603,12 @@ function marketTemperature(env: AkEnvelope<MarketPulseRow>) {
   };
 }
 
-function buildLeaders(sectors: SectorSnapshot[]): LeaderSnapshot[] {
-  return sectors
-    .filter((sector) => sector.leader && sector.leader !== '—')
-    .slice(0, 5)
-    .map((sector, index) => ({
-      rank: index + 1,
-      name: sector.leader,
-      price: '—',
-      changePct: sector.changePct,
-      reason: sector.name,
-    }));
-}
-
 function mapRankingLeaders(
   env: AkEnvelope<StockRankingRow>,
   metric: 'gainers' | 'losers' | 'amount',
 ): LeaderSnapshot[] {
   if (env.error || env.data.length === 0) return [];
-  return env.data.slice(0, 8).map((row, index) => {
+  const rows = env.data.slice(0, 8).map((row, index) => {
     const code = String(pick(row, ['代码', 'code']) ?? '').trim();
     const amount = pick(row, ['成交额', 'amount']);
     return {
@@ -272,6 +619,7 @@ function mapRankingLeaders(
       reason: metric === 'amount' ? `成交额 ${fmtYiYuan(amount)}` : code,
     };
   });
+  return rows.length > 0 ? rows : [];
 }
 
 function mapSymbolSearch(env: AkEnvelope<SymbolRow>, query: string) {
@@ -311,13 +659,14 @@ function buildNews(
 ): NewsSnapshot[] {
   const pulse = pulseEnv.data[0];
   const sector = pulse?.sectors_up?.[0];
-  const rows: NewsSnapshot[] = [];
+  const announcementRows: NewsSnapshot[] = [];
+  const marketRows: NewsSnapshot[] = [];
   for (const item of announcements) {
     if (item.env.error) continue;
-    for (const row of item.env.data.slice(0, 2)) {
+    for (const row of item.env.data.slice(0, NEWS_PER_STOCK_ANNOUNCEMENTS)) {
       const title = String(pick(row, ['公告标题']) ?? '').trim();
       if (!title) continue;
-      rows.push({
+      announcementRows.push({
         category: '公告',
         time: formatAnnouncementTime(pick(row, ['公告时间'])),
         title: `${item.entry.displayName ?? item.entry.symbol}：${title}`,
@@ -328,7 +677,7 @@ function buildNews(
     }
   }
   if (sector) {
-    rows.push({
+    marketRows.push({
       category: '盘面',
       time: '盘中',
       title: `${sector.板块} 板块位居涨幅前列，领涨股 ${sector.领涨股 || '暂缺'}`,
@@ -336,8 +685,9 @@ function buildNews(
       source: 'AkShare 市场脉冲',
     });
   }
-  for (const stockRow of stocks.slice(0, 4)) {
-    rows.push({
+  const realQuoteStocks = stocks.filter((stockRow) => stockRow.price !== '—' && stockRow.note.includes('来源 AkShare'));
+  for (const stockRow of realQuoteStocks.slice(0, NEWS_LIMIT)) {
+    marketRows.push({
       category: '关注',
       time: '关注',
       title: `${stockRow.name} 今日涨跌幅 ${stockRow.changePct > 0 ? '+' : ''}${stockRow.changePct.toFixed(2)}%`,
@@ -345,7 +695,368 @@ function buildNews(
       source: 'AkShare 行情',
     });
   }
-  return rows.slice(0, 5);
+  const rows = [
+    ...announcementRows.slice(0, NEWS_ANNOUNCEMENT_LIMIT),
+    ...marketRows,
+  ].slice(0, NEWS_LIMIT);
+  return rows;
+}
+
+async function buildDashboardSnapshot(args: {
+  logger: MinimalLogger;
+  watchlistRows: WatchlistEntry[];
+  effectiveWatchlist: WatchlistEntry[];
+  now: Date;
+  includeSlowSignals?: boolean;
+}): Promise<DashboardSnapshot> {
+  const { logger, effectiveWatchlist, now, includeSlowSignals = true } = args;
+  const baseUrl = process.env.AKSHARE_HTTP_URL ?? 'http://127.0.0.1:8848';
+  const client = new HttpAkshareClient({
+    baseUrl,
+    timeoutMs: DASHBOARD_AKSHARE_TIMEOUT_MS,
+    logger,
+  });
+  const slowSignalClient = new HttpAkshareClient({
+    baseUrl,
+    timeoutMs: DASHBOARD_SLOW_SIGNAL_TIMEOUT_MS,
+    logger,
+  });
+  const rankingClient = new HttpAkshareClient({
+    baseUrl,
+    timeoutMs: DASHBOARD_RANKING_TIMEOUT_MS,
+    logger,
+  });
+  const { compact } = cnDateParts(now);
+  const announcementWatchlist = effectiveWatchlist
+    .filter((entry) => entry.market === 'A')
+    .slice(0, 5);
+  const deferredPulse = Promise.resolve(emptyEnvelope<MarketPulseRow>('akshare:market-pulse:deferred'));
+  const deferredAnnouncements = Promise.resolve(
+    announcementWatchlist.map((entry) => ({
+      entry,
+      env: emptyEnvelope<AnnouncementRow>(`akshare:announcements:${entry.symbol}:deferred`),
+    })),
+  );
+  const deferredRankings = Promise.resolve(emptyEnvelope<StockRankingRow>('akshare:rankings:deferred'));
+  const [indexCn, pulseEnv, stocks, announcements, rankingGainers, rankingLosers, rankingAmount] = await Promise.all([
+    client.getIndexQuote('cn'),
+    includeSlowSignals
+      ? slowSignalClient.getMarketPulse(compact)
+      : deferredPulse,
+    Promise.all(effectiveWatchlist.slice(0, 8).map((entry, index) => stockSnapshot(client, entry, index))),
+    includeSlowSignals
+      ? Promise.all(
+        announcementWatchlist.map(async (entry) => ({
+          entry,
+          env: await client.getStockAnnouncements(entry.symbol, cnCompactDaysAgo(now, 7), compact),
+        })),
+      )
+      : deferredAnnouncements,
+    includeSlowSignals ? rankingClient.getStockRankings('gainers', 8) : deferredRankings,
+    includeSlowSignals ? rankingClient.getStockRankings('losers', 8) : deferredRankings,
+    includeSlowSignals ? rankingClient.getStockRankings('amount', 8) : deferredRankings,
+  ]);
+  const sectors = mapSectors(pulseEnv);
+  const leaderboards: LeaderboardsSnapshot = {
+    gainers: mapRankingLeaders(rankingGainers, 'gainers'),
+    losers: mapRankingLeaders(rankingLosers, 'losers'),
+    amount: mapRankingLeaders(rankingAmount, 'amount'),
+  };
+  const marketIndices = mapIndices(indexCn);
+  const temperature = marketTemperature(pulseEnv);
+  const news = buildNews(stocks, pulseEnv, announcements);
+  const missingMarketPanels = [
+    marketIndices.length === 0 ? '指数' : null,
+    sectors.length === 0 ? '行业趋势' : null,
+    temperature === null ? '市场温度' : null,
+    leaderboards.gainers.length === 0 ? '榜单' : null,
+  ].filter((label): label is string => label !== null);
+  const freshness: DashboardFreshness = !includeSlowSignals
+    ? {
+        status: 'partial',
+        cachedAt: now.toISOString(),
+        message: '真实行情已先展示，市场温度、板块与重点动态正在后台补齐。',
+      }
+    : missingMarketPanels.length === 0
+      ? {
+        status: 'fresh',
+        cachedAt: now.toISOString(),
+      }
+      : {
+        status: 'partial',
+        cachedAt: now.toISOString(),
+        message: `真实行情已先展示，${missingMarketPanels.join('、')}正在后台补齐。`,
+      };
+  return withFreshness(
+    {
+      updatedAt: now.toISOString(),
+      source: 'akshare',
+      isFallbackWatchlist: false,
+      watchlistStocks: stocks,
+      marketIndices,
+      sectors,
+      starStocks: stocks.filter((stockRow) => stockRow.price !== '—').slice(0, 6),
+      temperature,
+      news,
+      leaders: leaderboards.gainers,
+      leaderboards,
+    },
+    freshness,
+  );
+}
+
+function cacheDashboardSnapshot(cacheKey: string, snapshot: DashboardSnapshot, refreshPromise?: Promise<DashboardSnapshot>): void {
+  const freshTtl = snapshot.freshness.status === 'partial'
+    ? DASHBOARD_PARTIAL_FRESH_TTL_MS
+    : DASHBOARD_FRESH_TTL_MS;
+  dashboardCache.set(cacheKey, {
+    snapshot,
+    freshUntil: Date.now() + freshTtl,
+    staleUntil: Date.now() + DASHBOARD_STALE_TTL_MS,
+    refreshPromise,
+  });
+}
+
+function withPreservedSlowSignals(snapshot: DashboardSnapshot, previous?: DashboardSnapshot): DashboardSnapshot {
+  if (!previous || (snapshot.freshness.status !== 'fresh' && snapshot.freshness.status !== 'partial')) return snapshot;
+  const snapshotHasWatchlistQuotes = snapshot.watchlistStocks.some((stockRow) => stockRow.price !== '—' || stockRow.spark.length >= 2);
+  const previousHasWatchlistQuotes = previous.watchlistStocks.some((stockRow) => stockRow.price !== '—' || stockRow.spark.length >= 2);
+  const shouldPreserveWatchlistStocks = !snapshotHasWatchlistQuotes && previousHasWatchlistQuotes;
+  const previousStockBySymbol = new Map(previous.watchlistStocks.map((stockRow) => [stockRow.symbol, stockRow]));
+  const watchlistStocks = shouldPreserveWatchlistStocks
+    ? previous.watchlistStocks
+    : snapshot.watchlistStocks.map((stockRow) => {
+      const previousStock = previousStockBySymbol.get(stockRow.symbol);
+      if (stockRow.spark.length >= 2 || !previousStock || previousStock.spark.length < 2) return stockRow;
+      return {
+        ...stockRow,
+        spark: previousStock.spark,
+        sparkLabels: previousStock.sparkLabels,
+        sparkKind: previousStock.sparkKind,
+        sparkBaseline: previousStock.sparkBaseline,
+        note: `${stockRow.note}；分时线保留最近一次真实分钟线`,
+      };
+    });
+  const shouldPreserveWatchlistSparks = !shouldPreserveWatchlistStocks && watchlistStocks.some((stockRow, index) => stockRow !== snapshot.watchlistStocks[index]);
+  const shouldPreserveMarketIndices = snapshot.marketIndices.length === 0 && previous.marketIndices.length > 0;
+  const shouldPreserveSectors = snapshot.sectors.length === 0 && previous.sectors.length > 0;
+  const shouldPreserveTemperature = snapshot.temperature === null && previous.temperature !== null;
+  const shouldPreserveNews = snapshot.news.length === 0 && previous.news.length > 0;
+  const shouldPreserveLeaderboards =
+    snapshot.leaderboards.gainers.length === 0 &&
+    snapshot.leaderboards.losers.length === 0 &&
+    snapshot.leaderboards.amount.length === 0 &&
+    (
+      previous.leaderboards.gainers.length > 0 ||
+      previous.leaderboards.losers.length > 0 ||
+      previous.leaderboards.amount.length > 0
+    );
+  if (
+    !shouldPreserveWatchlistStocks &&
+    !shouldPreserveWatchlistSparks &&
+    !shouldPreserveMarketIndices &&
+    !shouldPreserveSectors &&
+    !shouldPreserveTemperature &&
+    !shouldPreserveNews &&
+    !shouldPreserveLeaderboards
+  ) return snapshot;
+
+  const preservedLabels = [
+    shouldPreserveWatchlistStocks ? '关注股票' : null,
+    shouldPreserveWatchlistSparks ? '分时线' : null,
+    shouldPreserveMarketIndices ? '市场行情' : null,
+    shouldPreserveSectors ? '行业趋势' : null,
+    shouldPreserveTemperature ? '市场温度' : null,
+    shouldPreserveNews ? '股市新闻' : null,
+    shouldPreserveLeaderboards ? '榜单' : null,
+  ].filter((label): label is string => label !== null);
+  const leaderboards = shouldPreserveLeaderboards ? previous.leaderboards : snapshot.leaderboards;
+
+  return {
+    ...snapshot,
+    watchlistStocks,
+    starStocks: shouldPreserveWatchlistStocks
+      ? previous.starStocks
+      : watchlistStocks.filter((stockRow) => stockRow.price !== '—').slice(0, 6),
+    marketIndices: shouldPreserveMarketIndices ? previous.marketIndices : snapshot.marketIndices,
+    sectors: shouldPreserveSectors ? previous.sectors : snapshot.sectors,
+    temperature: shouldPreserveTemperature ? previous.temperature : snapshot.temperature,
+    news: shouldPreserveNews ? previous.news : snapshot.news,
+    leaders: shouldPreserveLeaderboards ? leaderboards.gainers : snapshot.leaders,
+    leaderboards,
+    freshness: {
+      ...snapshot.freshness,
+      status: 'stale',
+      message: `行情已更新，${preservedLabels.join('、')}保留最近一次真实数据。`,
+    },
+  };
+}
+
+function startFullDashboardRefresh(args: {
+  db: Db;
+  cacheKey: string;
+  logger: MinimalLogger;
+  userInternalId: number;
+  watchlistRows: WatchlistEntry[];
+  effectiveWatchlist: WatchlistEntry[];
+}): Promise<DashboardSnapshot> {
+  const existing = dashboardCache.get(args.cacheKey);
+  const fullRefreshPromise = buildDashboardSnapshot({
+    logger: args.logger,
+    watchlistRows: args.watchlistRows,
+    effectiveWatchlist: args.effectiveWatchlist,
+    now: new Date(),
+    includeSlowSignals: true,
+  }).then(async (snapshot) => {
+    const merged = withPreservedSlowSignals(snapshot, existing?.snapshot);
+    cacheDashboardSnapshot(args.cacheKey, merged);
+    await persistDashboardSnapshot({
+      db: args.db,
+      logger: args.logger,
+      userInternalId: args.userInternalId,
+      cacheKey: args.cacheKey,
+      snapshot: merged,
+    });
+    return merged;
+  }).catch((error) => {
+    args.logger.warn(
+      { error: error instanceof Error ? error.message : String(error) },
+      'stocks-dashboard: full refresh failed',
+    );
+    throw error;
+  }).finally(() => {
+    const latest = dashboardCache.get(args.cacheKey);
+    if (latest?.refreshPromise === fullRefreshPromise) {
+      if (latest.snapshot) {
+        dashboardCache.set(args.cacheKey, { ...latest, refreshPromise: undefined });
+      } else {
+        dashboardCache.delete(args.cacheKey);
+      }
+    }
+  });
+  return fullRefreshPromise;
+}
+
+function startDashboardRefresh(args: {
+  db: Db;
+  cacheKey: string;
+  logger: MinimalLogger;
+  userInternalId: number;
+  watchlistRows: WatchlistEntry[];
+  effectiveWatchlist: WatchlistEntry[];
+}): Promise<DashboardSnapshot> {
+  const existing = dashboardCache.get(args.cacheKey);
+  if (existing?.refreshPromise) return existing.refreshPromise;
+  const quickFirst = !existing?.snapshot || !hasDisplayableRealDashboardData(existing.snapshot);
+
+  const refreshPromise = buildDashboardSnapshot({
+    logger: args.logger,
+    watchlistRows: args.watchlistRows,
+    effectiveWatchlist: args.effectiveWatchlist,
+    now: new Date(),
+    includeSlowSignals: !quickFirst,
+  }).then(async (snapshot) => {
+    if (quickFirst) {
+      const fullRefreshPromise = startFullDashboardRefresh(args);
+      cacheDashboardSnapshot(args.cacheKey, snapshot, fullRefreshPromise);
+      persistDashboardSnapshot({
+        db: args.db,
+        logger: args.logger,
+        userInternalId: args.userInternalId,
+        cacheKey: args.cacheKey,
+        snapshot,
+      }).catch(() => undefined);
+      fullRefreshPromise.catch(() => undefined);
+    } else {
+      const merged = withPreservedSlowSignals(snapshot, existing?.snapshot);
+      cacheDashboardSnapshot(args.cacheKey, merged);
+      await persistDashboardSnapshot({
+        db: args.db,
+        logger: args.logger,
+        userInternalId: args.userInternalId,
+        cacheKey: args.cacheKey,
+        snapshot: merged,
+      });
+      return merged;
+    }
+    return snapshot;
+  }).catch((error) => {
+    args.logger.warn(
+      { error: error instanceof Error ? error.message : String(error) },
+      'stocks-dashboard: refresh failed',
+    );
+    throw error;
+  }).finally(() => {
+    const latest = dashboardCache.get(args.cacheKey);
+    if (latest?.refreshPromise === refreshPromise) {
+      if (latest.snapshot) {
+        dashboardCache.set(args.cacheKey, { ...latest, refreshPromise: undefined });
+      } else {
+        dashboardCache.delete(args.cacheKey);
+      }
+    }
+  });
+
+  dashboardCache.set(args.cacheKey, {
+    snapshot: existing?.snapshot,
+    freshUntil: existing?.freshUntil ?? 0,
+    staleUntil: existing?.staleUntil ?? 0,
+    refreshPromise,
+  });
+  return refreshPromise;
+}
+
+async function resolveDashboardSnapshot(args: {
+  db: Db;
+  logger: MinimalLogger;
+  userInternalId: number;
+  watchlistRows: WatchlistEntry[];
+  effectiveWatchlist: WatchlistEntry[];
+}): Promise<DashboardSnapshot> {
+  const cacheKey = dashboardCacheKey(args.userInternalId, args.effectiveWatchlist);
+  let cached = dashboardCache.get(cacheKey);
+  if (!cached?.snapshot) {
+    const persisted = await loadPersistedDashboardSnapshot({
+      db: args.db,
+      logger: args.logger,
+      userInternalId: args.userInternalId,
+      cacheKey,
+    });
+    if (persisted) {
+      dashboardCache.set(cacheKey, {
+        snapshot: persisted,
+        freshUntil: 0,
+        staleUntil: Date.now() + DASHBOARD_STALE_TTL_MS,
+      });
+      cached = dashboardCache.get(cacheKey);
+    }
+  }
+  const nowMs = Date.now();
+  const cachedHasDisplayableData = cached?.snapshot ? hasDisplayableRealDashboardData(cached.snapshot) : false;
+  if (cached?.snapshot && cachedHasDisplayableData && cached.freshUntil > nowMs) return cached.snapshot;
+
+  const refreshPromise = startDashboardRefresh({
+    db: args.db,
+    cacheKey,
+    logger: args.logger,
+    userInternalId: args.userInternalId,
+    watchlistRows: args.watchlistRows,
+    effectiveWatchlist: args.effectiveWatchlist,
+  });
+
+  if (cached?.snapshot && cachedHasDisplayableData && cached.staleUntil > nowMs) {
+    refreshPromise.catch(() => undefined);
+    return markStale(cached.snapshot, '正在后台刷新行情，当前展示最近一次真实数据。');
+  }
+
+  try {
+    return await withTimeout(refreshPromise, DASHBOARD_FIRST_PAINT_BUDGET_MS);
+  } catch {
+    if (cached?.snapshot && cachedHasDisplayableData) {
+      return markStale(cached.snapshot, '行情接口暂未返回，当前展示最近一次真实数据。');
+    }
+    return buildPartialDashboardSnapshot(args.watchlistRows, args.effectiveWatchlist);
+  }
 }
 
 export const stocksRouter = router({
@@ -353,58 +1064,13 @@ export const stocksRouter = router({
     const userInternalId = await requireUserId(ctx.db, ctx.userId);
     const watchlistRows = await listWatchlistForUser(ctx.db, userInternalId);
     const effectiveWatchlist = watchlistRows;
-    const client = new HttpAkshareClient({
-      baseUrl: process.env.AKSHARE_HTTP_URL ?? 'http://127.0.0.1:8848',
+    return resolveDashboardSnapshot({
+      db: ctx.db,
       logger: ctx.logger,
+      userInternalId,
+      watchlistRows,
+      effectiveWatchlist,
     });
-    const fastClient = new HttpAkshareClient({
-      baseUrl: process.env.AKSHARE_HTTP_URL ?? 'http://127.0.0.1:8848',
-      timeoutMs: 2_500,
-      logger: ctx.logger,
-    });
-    const rankingClient = new HttpAkshareClient({
-      baseUrl: process.env.AKSHARE_HTTP_URL ?? 'http://127.0.0.1:8848',
-      timeoutMs: 45_000,
-      logger: ctx.logger,
-    });
-    const now = new Date();
-    const { compact } = cnDateParts(now);
-    const announcementWatchlist = effectiveWatchlist
-      .filter((entry) => entry.market === 'A')
-      .slice(0, 5);
-    const [indexCn, pulseEnv, stocks, announcements, rankingGainers, rankingLosers, rankingAmount] = await Promise.all([
-      client.getIndexQuote('cn'),
-      fastClient.getMarketPulse(compact),
-      Promise.all(effectiveWatchlist.slice(0, 8).map((entry, index) => stockSnapshot(client, entry, index))),
-      Promise.all(
-        announcementWatchlist.map(async (entry) => ({
-          entry,
-          env: await fastClient.getStockAnnouncements(entry.symbol, cnCompactDaysAgo(now, 7), compact),
-        })),
-      ),
-      rankingClient.getStockRankings('gainers', 8),
-      rankingClient.getStockRankings('losers', 8),
-      rankingClient.getStockRankings('amount', 8),
-    ]);
-    const sectors = mapSectors(pulseEnv);
-    const leaderboards: LeaderboardsSnapshot = {
-      gainers: mapRankingLeaders(rankingGainers, 'gainers'),
-      losers: mapRankingLeaders(rankingLosers, 'losers'),
-      amount: mapRankingLeaders(rankingAmount, 'amount'),
-    };
-    return {
-      updatedAt: now.toISOString(),
-      source: 'akshare',
-      isFallbackWatchlist: false,
-      watchlistStocks: stocks,
-      marketIndices: mapIndices(indexCn),
-      sectors,
-      starStocks: stocks.slice(0, 6),
-      temperature: marketTemperature(pulseEnv),
-      news: buildNews(stocks, pulseEnv, announcements),
-      leaders: leaderboards.gainers.length > 0 ? leaderboards.gainers : buildLeaders(sectors),
-      leaderboards,
-    };
   }),
 
   searchSymbols: protectedProcedure
@@ -448,3 +1114,11 @@ export const stocksRouter = router({
       };
     }),
 });
+
+export const __stocksDashboardTest = {
+  buildDashboardSnapshot,
+  dashboardCache,
+  hasDisplayableRealDashboardData,
+  resolveDashboardSnapshot,
+  withPreservedSlowSignals,
+};

@@ -113,7 +113,7 @@ function LazyLoadFallback({
               <button
                 type="button"
                 onClick={() => window.location.reload()}
-                className="mt-2 inline-flex h-8 items-center justify-center rounded-[8px] bg-[#EA1F59] px-3 text-xs font-medium text-white shadow-[0_8px_18px_rgba(234,31,89,0.16)] transition-colors hover:bg-[#d81b52]"
+                className="mt-2 inline-flex h-8 items-center justify-center rounded-[8px] bg-[#EA1F59] px-3 text-xs font-medium text-white shadow-[0_8px_18px_rgba(234,31,89,0.16)] transition-colors hover:bg-[#EA1F59]/90"
               >
                 {copy.actionLabel}
               </button>
@@ -135,7 +135,7 @@ function LazyLoadFallback({
         <button
           type="button"
           onClick={() => window.location.reload()}
-          className="mt-4 inline-flex h-9 items-center justify-center rounded-[8px] bg-[#EA1F59] px-3 text-sm font-medium text-white shadow-[0_8px_18px_rgba(234,31,89,0.16)] transition-colors hover:bg-[#d81b52]"
+          className="mt-4 inline-flex h-9 items-center justify-center rounded-[8px] bg-[#EA1F59] px-3 text-sm font-medium text-white shadow-[0_8px_18px_rgba(234,31,89,0.16)] transition-colors hover:bg-[#EA1F59]/90"
         >
           {copy.actionLabel}
         </button>

@@ -1831,6 +1831,9 @@ function inferExecutionModeFromIntent(
   intent: string,
 ): UiTask['executionMode'] {
   const t = intent.toLowerCase();
+  if (/生成一张图片|生成.*图片|图片生成|图生图|图片编辑/u.test(intent)) {
+    return 'image';
+  }
   if (/https?:\/\/\S+/i.test(t)) return 'browser';
   const hasAction = BROWSER_ACTION_RE.test(intent);
   const hasSite = BROWSER_SITE_RE.test(intent);
@@ -1845,13 +1848,13 @@ function extractExecutionMode(
   if (!result || typeof result !== 'object') return undefined;
   const r = result as Record<string, unknown>;
   const direct = r.executionMode;
-  if (direct === 'browser' || direct === 'generate' || direct === 'scrape') {
+  if (direct === 'browser' || direct === 'generate' || direct === 'scrape' || direct === 'image') {
     return direct;
   }
   const meta = r.metadata;
   if (meta && typeof meta === 'object') {
     const m = (meta as Record<string, unknown>).executionMode;
-    if (m === 'browser' || m === 'generate' || m === 'scrape') return m;
+    if (m === 'browser' || m === 'generate' || m === 'scrape' || m === 'image') return m;
   }
   return undefined;
 }

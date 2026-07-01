@@ -43,7 +43,11 @@ BRANCH="${1:-claude/musing-keller-ae1d05}"
 HEALTH_URL="http://localhost:4001/healthz"
 HEALTH_MARKER='"status":"ok"'
 
-build_ssh_password_prefix "${VULTR_PASSWORD:-}"
+if [[ -z "${VULTR_PASSWORD:-}" ]]; then
+  echo "❌ VULTR_PASSWORD unset — refusing orchestrator deploy" >&2
+  exit 1
+fi
+build_ssh_password_prefix "$VULTR_PASSWORD"
 VULTR_AUTH_PREFIX=("${SSH_PASSWORD_PREFIX[@]}")
 SSH_OPTS=(
   -o StrictHostKeyChecking=no
