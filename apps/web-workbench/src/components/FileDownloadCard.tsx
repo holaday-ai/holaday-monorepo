@@ -2,6 +2,7 @@ import { Download, File, FileSpreadsheet, FileText, Film, Image as ImageIcon, Lo
 import * as React from 'react';
 import { useToast } from '@/components/ui/toast';
 import {
+  blobToDataUrl,
   downloadFailureMessage,
   downloadFileAuthed,
   fetchFileBlobAuthed,
@@ -89,14 +90,24 @@ export function FileDownloadCard({ payload }: { payload: FileDownloadPayload }):
     // first and the thumbnail popped in seconds later.
     setPreviewState('loading');
     void (async () => {
-      const res = await fetchFileBlobAuthed({ url: payload.downloadUrl });
-      if (cancelled) return;
-      if (res.ok && res.blob) {
-        objectUrl = URL.createObjectURL(res.blob);
-        setPreviewUrl(objectUrl);
-        setPreviewState('ready');
-      } else {
-        setPreviewState('failed'); // fall back to the icon-only card
+      try {
+        const res = await fetchFileBlobAuthed({ url: payload.downloadUrl });
+        if (cancelled) return;
+        if (res.ok && res.blob) {
+          if (kind === 'image') {
+            const dataUrl = await blobToDataUrl(res.blob);
+            if (cancelled) return;
+            setPreviewUrl(dataUrl);
+          } else {
+            objectUrl = URL.createObjectURL(res.blob);
+            setPreviewUrl(objectUrl);
+          }
+          setPreviewState('ready');
+        } else {
+          setPreviewState('failed'); // fall back to the icon-only card
+        }
+      } catch {
+        if (!cancelled) setPreviewState('failed');
       }
     })();
     return () => {

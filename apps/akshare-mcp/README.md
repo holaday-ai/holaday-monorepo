@@ -18,8 +18,10 @@ Thin **MCP wrapper over [AkShare](https://akshare.akfamily.xyz/)** for A股
 | `get_dragon_tiger(start_date, end_date)` | 龙虎榜 | 3600s |
 | `get_northbound_flow()` | 北向资金流向 | 60s |
 | `get_index_quote(market)` | 港/美/A股指数（hk/us/cn） | 60s |
+| `get_stock_rankings(metric, limit)` | A股榜单（gainers/losers/amount） | 300s |
 | `get_share_unlock(symbol)` | 个股限售解禁（G2） | 3600s |
 
+榜单和个股 quote 共享 `stock_zh_a_spot(sina)` 全市场缓存，避免页面多个板块同时触发重复全量拉取。
 TTL 全部 env 可覆盖（`AKSHARE_MCP_TTL_*`，见 `.env.example`）。
 
 ## 结构
@@ -28,6 +30,7 @@ TTL 全部 env 可覆盖（`AKSHARE_MCP_TTL_*`，见 `.env.example`）。
 apps/akshare-mcp/
 ├── akshare_mcp/
 │   ├── server.py     # FastMCP 工具 + 来源/时间戳/免责封装 + 错误降级
+│   ├── http_server.py # 同机 HTTP transport，供 orchestrator 直取
 │   ├── adapters.py   # ← 唯一调用 ak.* 的地方（版本敏感，集中于此）
 │   └── cache.py      # 进程内 TTL 缓存（stdlib，无 Redis 依赖）
 ├── tests/test_cache.py
@@ -45,7 +48,22 @@ pip install -e .          # 或 pip install -r requirements.txt
 python -m akshare_mcp.server   # stdio MCP transport
 ```
 
+HTTP transport（生产使用，同机 orchestrator 直取；只监听 `127.0.0.1`，不可对公网暴露）：
+
+```bash
+cd apps/akshare-mcp
+python -m akshare_mcp.http_server
+curl -fsS http://127.0.0.1:8848/healthz
+curl -fsS 'http://127.0.0.1:8848/stock-rankings/gainers?limit=3'
+```
+
 测试（仅缓存层，无需联网）：`pip install -e '.[dev]' && pytest`。
+
+本地或生产 smoke：
+
+```bash
+AKSHARE_HTTP_URL=http://127.0.0.1:8848 scripts/smoke-akshare-mcp.sh
+```
 
 ## 合规红线（数据层内置 + 每条结果重申）
 
@@ -56,9 +74,20 @@ python -m akshare_mcp.server   # stdio MCP transport
 
 ## 接入 HOLA DAY orchestrator
 
-注册为 MCP server（stdio）。orchestrator 的 MCP provider 层 spawn
-`python -m akshare_mcp.server`，a-share-analyst skill 通过这些工具取数 →
-结合 skill 方法论出结构化解读（盘前/盘后简报、即时问答归因）。
+生产链路采用薄 HTTP：orchestrator 通过 `AKSHARE_HTTP_URL`
+（默认 `http://127.0.0.1:8848`）直取 akshare-mcp，a-share-analyst skill 和
+股票任务页复用同一批确定性数据。不要把该 HTTP 服务暴露到公网；它是无鉴权的同机数据服务。
+
+部署：
+
+```bash
+scripts/deploy-akshare-mcp.sh
+scripts/deploy-current.sh akshare
+scripts/deploy-current.sh orchestrator # 会先部署 akshare-mcp，再部署 orchestrator
+scripts/deploy-current.sh both         # SPA + akshare-mcp + orchestrator
+```
+
+PM2 进程名：`akshare-mcp-http`。日志默认写入 `/var/log/holaday/akshare-mcp-http.*.log`。
 
 ## ⚠️ 已知限制（2026-06-12 Vultr `207.148.70.106` 实测 akshare 1.18.64）
 
@@ -85,6 +114,9 @@ python -m akshare_mcp.server   # stdio MCP transport
 
 3. **龙虎榜含官方 `解读` 列**：`stock_lhb_detail_em` 自带一行中性解读（如「主力做T」），
    零成本接入盘后简报（非我们生成，合规）。
+
+4. **全市场榜单只提供可验证字段**：当前可稳定取得涨幅榜、跌幅榜、成交额榜；
+   换手率榜源暂未纳入，不用模拟字段补假数据。消费侧应禁用换手率 tab 或展示数据源说明。
 
 > 升级 AkShare 后用 `pip show akshare` 看版本，对照 <https://akshare.akfamily.xyz/>
 > 核对 `adapters.py` 里的 `ak.*`（集中于此，工具契约不变）。

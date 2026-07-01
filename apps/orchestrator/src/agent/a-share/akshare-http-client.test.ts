@@ -52,6 +52,7 @@ describe('HttpAkshareClient', () => {
       '/unlock/600519': { body },
       '/kline/600519': { body },
       '/quote/600519': { body },
+      '/stock-rankings/gainers?limit=10': { body },
       '/dragon-tiger/20260612': { body },
       '/northbound': { body },
     });
@@ -59,12 +60,14 @@ describe('HttpAkshareClient', () => {
     await c.getStockAnnouncements('600519');
     await c.getShareUnlock('600519');
     await c.getStockKline('600519');
+    await c.getStockRankings('gainers', 10);
     await c.getDragonTiger('20260612');
     await c.getNorthboundFlow();
     expect(calls).toEqual([
       'http://127.0.0.1:8848/announcements/600519',
       'http://127.0.0.1:8848/unlock/600519',
       'http://127.0.0.1:8848/kline/600519',
+      'http://127.0.0.1:8848/stock-rankings/gainers?limit=10',
       'http://127.0.0.1:8848/dragon-tiger/20260612',
       'http://127.0.0.1:8848/northbound',
     ]);

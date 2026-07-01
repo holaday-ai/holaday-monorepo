@@ -65,6 +65,7 @@ function fakeClient(dtSpy?: (d: string) => void): AkshareClient {
         disclaimer: 'x',
       }),
     searchSymbol: () => Promise.resolve(emptyEnv('symbol')),
+    getStockRankings: () => Promise.resolve(emptyEnv('rankings')),
     getMarketPulse: () =>
       Promise.resolve(POSTMARKET_SAMPLE.marketPulse ?? emptyEnv('market_pulse')),
     getZtPoolSummary: () => Promise.resolve(PREMARKET_SAMPLE.ztReview ?? emptyEnv('zt_summary')),

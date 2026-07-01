@@ -1,6 +1,6 @@
 import { Film } from 'lucide-react';
 import * as React from 'react';
-import { fetchFileBlobAuthed } from '@/lib/download-file';
+import { blobToDataUrl, fetchFileBlobAuthed } from '@/lib/download-file';
 import { cn } from '@/lib/utils';
 
 /**
@@ -54,21 +54,23 @@ export function LazyPosterImg({
   React.useEffect(() => {
     if (!visible) return;
     let cancelled = false;
-    let objectUrl: string | null = null;
     setState('loading');
     void fetchFileBlobAuthed({ url: posterUrl }).then((res) => {
       if (cancelled) return;
       if (res.ok && res.blob) {
-        objectUrl = URL.createObjectURL(res.blob);
-        setUrl(objectUrl);
-        setState('ready');
+        void blobToDataUrl(res.blob).then((dataUrl) => {
+          if (cancelled) return;
+          setUrl(dataUrl);
+          setState('ready');
+        }).catch(() => {
+          if (!cancelled) setState('failed');
+        });
       } else {
         setState('failed');
       }
     });
     return () => {
       cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [visible, posterUrl]);
 

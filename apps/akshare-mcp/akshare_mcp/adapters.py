@@ -69,10 +69,16 @@ TTL_UNLOCK = _ttl("UNLOCK", 3600)
 TTL_TRADECAL = _ttl("TRADECAL", 86400)  # 交易日历日内基本不变，缓存 1 天
 TTL_FUND = _ttl("FUND", 86400)  # 财报季度才变，缓存 1 天
 TTL_VAL = _ttl("VAL", 3600)  # 估值日级，缓存 1 小时
+TTL_RANK = _ttl("RANK", 300)  # 全市场排行较重，5 分钟缓存避免看板频繁冷拉。
+TTL_SPOT = _ttl("SPOT", TTL_RANK)  # A股全市场 sina spot 共享快照，报价/榜单共用。
 
 # Row caps so a single tool call can't dump thousands of rows into the
 # model's context.
 MAX_ROWS = int(os.environ.get("AKSHARE_MCP_MAX_ROWS", "50"))
+
+_spot_lock = threading.Lock()
+_spot_records: list[dict[str, Any]] = []
+_spot_ts: float = 0.0
 
 
 class AkShareUnavailable(RuntimeError):
@@ -150,6 +156,43 @@ def pct_change(prev_close: Any, last_close: Any) -> float | None:
     return round((last - prev) / prev * 100, 2)
 
 
+def _get_a_spot_records(ttl: int = TTL_SPOT) -> list[dict[str, Any]]:
+    """Return a shared A-share sina spot snapshot.
+
+    The dashboard needs quote + three ranking variants. Fetching the same
+    full-market AkShare frame once and deriving multiple views keeps cold-start
+    latency bounded and prevents parallel requests from stampeding AkShare.
+    """
+    global _spot_records, _spot_ts
+    now = time.time()
+    with _spot_lock:
+        if _spot_records and now - _spot_ts <= ttl:
+            return list(_spot_records)
+
+        a = _require_ak()
+        df = a.stock_zh_a_spot()
+        records = _records(df, limit=6000)
+        _spot_records = records
+        _spot_ts = time.time()
+        _hydrate_symbol_table_from_spot(records)
+        return list(records)
+
+
+def _hydrate_symbol_table_from_spot(records: list[dict[str, Any]]) -> None:
+    table: dict[str, str] = {}
+    for rec in records:
+        code = _strip_market_prefix(str(rec.get("代码", "")))
+        name = str(rec.get("名称", "")).strip()
+        if code and name and name != "nan":
+            table[code] = name
+    if not table:
+        return
+    with _symbol_lock:
+        global _symbol_table, _symbol_ts
+        _symbol_table = table
+        _symbol_ts = time.time()
+
+
 def sina_prefix(symbol: str) -> str:
     """6 位 A股代码 → sina 带交易所前缀（sh/sz/bj）。已带前缀则原样返回。"""
     s = symbol.strip().lower()
@@ -171,12 +214,48 @@ def get_quote(symbol: str) -> tuple[list[dict[str, Any]], str]:
     走 sina 全市场 spot 再按代码过滤（push2 stock_bid_ask_em 从 Vultr 不可达）。
     注：全市场快照较重，④ 即时问答可后续换更轻的单只 sina 实时接口。
     """
-    a = _require_ak()
-    df = a.stock_zh_a_spot()
-    recs = _records(df, limit=6000)
+    recs = _get_a_spot_records(TTL_SPOT)
     code = symbol.strip()
     hit = [r for r in recs if str(r.get("代码", "")).endswith(code)]
     return hit[:1], "akshare:stock_zh_a_spot(sina,filter)"
+
+
+def get_stock_rankings(metric: str = "gainers", limit: int = 20) -> tuple[list[dict[str, Any]], str]:
+    """A股个股榜单：涨幅榜 / 跌幅榜 / 成交额榜。
+
+    走 sina 全市场 spot（Vultr 可达）。该源没有稳定换手率字段，因此换手率排行不在此
+    假造；调用方应保持禁用或另接可达数据源。
+    """
+    recs = _get_a_spot_records(TTL_SPOT)
+
+    rows: list[dict[str, Any]] = []
+    for r in recs:
+        code = _strip_market_prefix(str(r.get("代码") or ""))
+        name = str(r.get("名称") or "").strip()
+        price = _to_float(r.get("最新价"))
+        change_pct = _to_float(r.get("涨跌幅"))
+        amount = _to_float(r.get("成交额"))
+        if not code or not name or price is None or change_pct is None:
+            continue
+        rows.append(
+            {
+                "代码": code,
+                "名称": name,
+                "最新价": price,
+                "涨跌幅": change_pct,
+                "成交额": amount,
+            }
+        )
+
+    m = metric.strip().lower()
+    if m == "losers":
+        rows.sort(key=lambda r: _to_float(r.get("涨跌幅")) or 0.0)
+    elif m == "amount":
+        rows.sort(key=lambda r: _to_float(r.get("成交额")) or 0.0, reverse=True)
+    else:
+        rows.sort(key=lambda r: _to_float(r.get("涨跌幅")) or 0.0, reverse=True)
+        m = "gainers"
+    return rows[: max(1, min(limit, 50))], f"akshare:stock_zh_a_spot(sina,{m})"
 
 
 def get_kline(
@@ -684,11 +763,10 @@ def _strip_market_prefix(code: str) -> str:
 def refresh_symbol_table() -> int:
     """同步拉全量代码名称表填缓存（~70s，prewarm 调）。返回条数。"""
     global _symbol_table, _symbol_ts, _symbol_refreshing
-    a = _require_ak()
     try:
-        df = a.stock_zh_a_spot()
+        records = _get_a_spot_records(TTL_SPOT)
         table: dict[str, str] = {}
-        for rec in df[["代码", "名称"]].to_dict("records"):
+        for rec in records:
             code = _strip_market_prefix(str(rec.get("代码", "")))
             name = str(rec.get("名称", "")).strip()
             if code and name and name != "nan":

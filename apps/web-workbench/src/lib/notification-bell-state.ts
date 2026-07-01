@@ -48,7 +48,7 @@ export function notificationErrorMessage(err: unknown, fallback = '请稍后重�
 
 export function notificationBadgeText(
   count: unknown,
-  placement: 'sidebar-footer' | 'mobile-header' = 'sidebar-footer',
+  placement: 'sidebar-footer' | 'mobile-header' | 'topbar' = 'sidebar-footer',
 ): string {
   const safeCount = safeNotificationCount(count);
   if (safeCount <= 0) return '';
@@ -59,7 +59,7 @@ export function notificationBadgeText(
 
 export function shouldRenderCompactNotificationDot(
   count: unknown,
-  placement: 'sidebar-footer' | 'mobile-header' = 'sidebar-footer',
+  placement: 'sidebar-footer' | 'mobile-header' | 'topbar' = 'sidebar-footer',
 ): boolean {
   return placement === 'mobile-header' && safeNotificationCount(count) > 9;
 }

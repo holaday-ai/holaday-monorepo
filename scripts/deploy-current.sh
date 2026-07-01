@@ -4,6 +4,7 @@
 # Usage:
 #   ./scripts/deploy-current.sh spa
 #   ./scripts/deploy-current.sh orchestrator
+#   ./scripts/deploy-current.sh akshare
 #   ./scripts/deploy-current.sh both
 #
 # Env:
@@ -44,6 +45,11 @@ deploy_orchestrator() {
   "$ROOT_DIR/scripts/deploy-orchestrator.sh" "$BRANCH"
 }
 
+deploy_akshare() {
+  echo "→ Deploying akshare-mcp"
+  "$ROOT_DIR/scripts/deploy-akshare-mcp.sh"
+}
+
 verify_healthz() {
   local urls=(
     "https://holaday.ai/api/healthz"
@@ -79,17 +85,23 @@ case "$TARGET" in
     ;;
   orchestrator)
     fetch_current
+    deploy_akshare
     deploy_orchestrator
     verify_healthz
+    ;;
+  akshare)
+    fetch_current
+    deploy_akshare
     ;;
   both)
     fetch_current
     deploy_spa
+    deploy_akshare
     deploy_orchestrator
     verify_healthz
     ;;
   *)
-    echo "Usage: $0 [spa|orchestrator|both]" >&2
+    echo "Usage: $0 [spa|orchestrator|akshare|both]" >&2
     exit 2
     ;;
 esac

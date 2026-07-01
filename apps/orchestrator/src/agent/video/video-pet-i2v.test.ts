@@ -93,6 +93,18 @@ describe('runPetVideoCreation — 宠物 i2v 单图', () => {
     expect(arg.durationSeconds).toBe(5);
   });
 
+  it('aspectRatio=3:4 → passes portrait 1080*1440 to i2v adapter', async () => {
+    const { svc, mocks } = makeServices();
+    await runPetVideoCreation(
+      { imageUrl: 'https://r2/cat.png', motionPrompt: '小猫眨眼' },
+      CFG,
+      { aspectRatio: '3:4' },
+      svc,
+    );
+    const arg = (mocks.generateBrollVideo.mock.calls[0] as unknown[])[0] as { size: string };
+    expect(arg.size).toBe('1080*1440');
+  });
+
   it('throws config error when no dashscope key / no image url', async () => {
     const { svc } = makeServices();
     await expect(

@@ -10,12 +10,15 @@ export type VideoType = 'normal' | 'pet' | 'ip_person';
 
 export interface VideoResultMeta {
   lane?: string;
+  executionMode?: string;
+  finalExecutionMode?: string;
   visualMode?: string;
   videoType?: string;
   attachments?: ReadonlyArray<{
     fileId?: string;
     downloadUrl?: string;
     filename?: string;
+    mimetype?: string;
     sizeBytes?: number;
     posterUrl?: string;
   }>;
@@ -36,6 +39,10 @@ export interface VideoRow {
 
 export function isVideoLane(lane: string | undefined): boolean {
   return typeof lane === 'string' && lane.startsWith('video_creation');
+}
+
+export function isImageLane(meta: VideoResultMeta | undefined): boolean {
+  return meta?.executionMode === 'image' || meta?.finalExecutionMode === 'image';
 }
 
 /** Narrow an unknown metadata.videoType to the enum, else undefined. */
@@ -82,8 +89,13 @@ export function toVideoRow(raw: unknown): VideoRow | null {
   if (!att?.fileId || !att.downloadUrl || !att.filename || typeof att.sizeBytes !== 'number') {
     return null;
   }
+  const downloadUrl = normaliseAttachmentDownloadUrl(att.downloadUrl);
+  if (!downloadUrl) return null;
   const videoType = asVideoType(meta?.videoType);
-  const posterUrl = typeof att.posterUrl === 'string' && att.posterUrl.length > 0 ? att.posterUrl : undefined;
+  const posterUrl =
+    typeof att.posterUrl === 'string' && att.posterUrl.length > 0
+      ? normaliseAttachmentDownloadUrl(att.posterUrl) ?? undefined
+      : undefined;
   return {
     taskId: r.taskId,
     intent: r.intent ?? '',
@@ -92,11 +104,57 @@ export function toVideoRow(raw: unknown): VideoRow | null {
     createdAt: r.createdAt ?? new Date(),
     download: {
       fileId: att.fileId,
-      downloadUrl: att.downloadUrl,
+      downloadUrl,
       filename: att.filename,
       size: att.sizeBytes,
     },
     ...(videoType ? { videoType } : {}),
     ...(posterUrl ? { posterUrl } : {}),
   };
+}
+
+export function toImageRow(raw: unknown): VideoRow | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as {
+    taskId?: string;
+    intent?: string;
+    title?: string | null;
+    status?: string;
+    createdAt?: string | number | Date;
+    result?: { metadata?: VideoResultMeta } | null;
+  };
+  const meta = r.result?.metadata;
+  if (!isImageLane(meta)) return null;
+  if (!r.taskId || !r.status || r.status !== 'completed') return null;
+  const att = meta?.attachments?.find((a) => {
+    if (!a.fileId || !a.downloadUrl || !a.filename || typeof a.sizeBytes !== 'number') return false;
+    if (typeof a.mimetype === 'string' && a.mimetype.startsWith('image/')) return true;
+    return /\.(png|jpe?g|webp|gif)$/i.test(a.filename);
+  });
+  if (!att?.fileId || !att.downloadUrl || !att.filename || typeof att.sizeBytes !== 'number') {
+    return null;
+  }
+  const downloadUrl = normaliseAttachmentDownloadUrl(att.downloadUrl);
+  if (!downloadUrl) return null;
+  return {
+    taskId: r.taskId,
+    intent: r.intent ?? '',
+    title: r.title ?? null,
+    status: r.status,
+    createdAt: r.createdAt ?? new Date(),
+    download: {
+      fileId: att.fileId,
+      downloadUrl,
+      filename: att.filename,
+      size: att.sizeBytes,
+    },
+    posterUrl: downloadUrl,
+  };
+}
+
+function normaliseAttachmentDownloadUrl(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (/^\/api\/files\/[^/]+\/download(?:[?#].*)?$/.test(trimmed)) return trimmed;
+  if (/^\/files\/[^/]+\/download(?:[?#].*)?$/.test(trimmed)) return `/api${trimmed}`;
+  return null;
 }

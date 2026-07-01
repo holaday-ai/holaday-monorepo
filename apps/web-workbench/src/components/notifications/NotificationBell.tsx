@@ -59,7 +59,7 @@ interface NotificationRow {
   scheduledTaskInternalId: number | null;
 }
 
-type NotificationBellPlacement = 'sidebar-footer' | 'mobile-header';
+type NotificationBellPlacement = 'sidebar-footer' | 'mobile-header' | 'topbar';
 
 interface NotificationBellProps {
   placement?: NotificationBellPlacement;
@@ -230,7 +230,10 @@ export function NotificationBell({
         title={hasUnread ? `通知，${safeUnreadCount} 条未读` : '通知'}
         aria-expanded={open}
         className={cn(
-          'relative flex h-9 w-9 items-center justify-center rounded-[8px] border border-[#DCDDDD]/60 bg-white/45 text-[#595757] shadow-[0_8px_22px_rgba(89,87,87,0.035)] transition-colors hover:border-[#EA1F59]/20 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] dark:border-white/10 dark:bg-white/[0.04] dark:text-foreground/70 dark:hover:border-[#EA1F59]/35 dark:hover:bg-[#EA1F59]/10',
+          'relative flex h-11 w-11 items-center justify-center text-[#595757] transition-colors hover:text-[#EA1F59] dark:text-foreground/70 dark:hover:text-[#EA1F59]',
+          placement === 'topbar'
+            ? 'rounded-full bg-transparent hover:bg-[#EFEFEF]/55 dark:hover:bg-white/10'
+            : 'rounded-[10px] border border-[#DCDDDD]/60 bg-white/55 shadow-[0_4px_12px_rgba(17,24,39,0.035)] hover:border-[#EA1F59]/20 hover:bg-[#EA1F59]/5 dark:border-white/10 dark:bg-white/[0.04] dark:hover:border-[#EA1F59]/35 dark:hover:bg-[#EA1F59]/10',
           open && 'border-[#EA1F59]/25 bg-[#EA1F59]/5 text-[#EA1F59] shadow-[0_10px_26px_rgba(234,31,89,0.08)] dark:border-[#EA1F59]/35 dark:bg-[#EA1F59]/10',
         )}
       >
@@ -257,7 +260,9 @@ export function NotificationBell({
             'hd-popover-enter absolute z-50 overflow-hidden rounded-[8px] border border-[#DCDDDD]/85 bg-white shadow-[0_12px_32px_rgba(17,24,39,0.12)] dark:border-white/10 dark:bg-card',
             placement === 'mobile-header'
               ? 'right-0 top-full mt-1 w-[min(calc(100vw-24px),360px)] origin-top-right'
-              : 'bottom-full left-full mb-1 ml-2 w-[360px] origin-bottom-left',
+              : placement === 'topbar'
+                ? 'right-0 top-full mt-3 w-[320px] origin-top-right rounded-[16px]'
+              : 'bottom-full right-0 mb-2 w-[244px] origin-bottom-right',
           )}
         >
           <div className="flex items-center justify-between gap-3 border-b border-[#DCDDDD]/80 px-3 py-2.5 dark:border-white/10">
@@ -289,7 +294,7 @@ export function NotificationBell({
                 {actionError}
               </div>
             )}
-            {statusCopy && (
+            {statusCopy && !(listError && items.length === 0) && (
               <NotificationStatusNotice
                 copy={statusCopy}
                 loading={loading}
@@ -421,13 +426,18 @@ function NotificationHardError({
   onRetry(): void;
 }): JSX.Element {
   return (
-    <div className="px-3 py-8 text-center">
-      <AlertCircle className="mx-auto h-7 w-7 text-[#EA1F59]" aria-hidden />
-      <div className="mt-2 text-sm font-medium text-foreground/85">通知暂时无法加载</div>
-      <div className="mx-auto mt-1 max-w-[260px] text-xs leading-5 text-muted-foreground">
+    <div className="px-3 py-5 text-center">
+      <AlertCircle className="mx-auto h-6 w-6 text-[#EA1F59]" aria-hidden />
+      <div className="mt-2 text-[13px] font-medium text-foreground/85">通知暂时无法加载</div>
+      <div className="mx-auto mt-1 max-w-[210px] text-[11px] leading-5 text-muted-foreground">
         {message}
       </div>
-      <Button type="button" size="sm" className="mt-3" onClick={onRetry}>
+      <Button
+        type="button"
+        size="sm"
+        className="mt-3 h-8 rounded-[7px] bg-[#EA1F59] px-3 text-xs text-white hover:bg-[#EA1F59]/90"
+        onClick={onRetry}
+      >
         重试
       </Button>
     </div>

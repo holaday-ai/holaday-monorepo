@@ -124,6 +124,18 @@ export async function fetchFileBlobAuthed(
   }
 }
 
+export function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') resolve(reader.result);
+      else reject(new Error('无法读取图片预览'));
+    };
+    reader.onerror = () => reject(reader.error ?? new Error('无法读取图片预览'));
+    reader.readAsDataURL(blob);
+  });
+}
+
 /**
  * Map a DownloadResult / FetchBlobResult status to user-facing copy.
  * Centralised so 401 / 404 / 410 all say the same thing across

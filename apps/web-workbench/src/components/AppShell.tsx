@@ -14,6 +14,7 @@ import { NotificationBell } from '@/components/notifications/NotificationBell';
 import { SearchOverlay } from '@/components/SearchOverlay';
 import { Sidebar } from '@/components/Sidebar';
 import { UpdateBanner } from '@/components/UpdateBanner';
+import { UserMenu } from '@/components/UserMenu';
 import { AppSkeleton } from '@/components/Skeleton';
 import {
   SidebarInset,
@@ -756,16 +757,10 @@ export function AppShell(): JSX.Element {
           void refreshProjects();
         }}
         onCreateProject={() => navigate('/projects?create=1')}
-        userEmail={me?.email ?? null}
-        userDisplayName={displayName}
-        userPlan={me?.plan ?? 'free'}
         userRole={me?.role ?? 'user'}
+        userPlan={me?.plan ?? 'free'}
         videoEnabled={me?.videoEnabled ?? false}
-        onLogout={handleLogout}
-        onOpenFeedback={() => setFeedbackOpen(true)}
         onOpenSearch={() => setSearchOpen(true)}
-        failedTaskCount={serverFailedCount}
-        onClearFailedTasks={() => setConfirmClearFailed(true)}
         mobileOpen={sidebarOpen}
         onMobileClose={() => setSidebarOpen(false)}
       />
@@ -785,6 +780,15 @@ export function AppShell(): JSX.Element {
       <SidebarInset className="h-svh overflow-y-auto bg-background">
         <Outlet context={ctx} />
       </SidebarInset>
+      <DesktopAccountDock
+        displayName={displayName}
+        email={me?.email ?? null}
+        plan={me?.plan ?? 'free'}
+        failedTaskCount={serverFailedCount}
+        onLogout={handleLogout}
+        onOpenFeedback={() => setFeedbackOpen(true)}
+        onClearFailedTasks={() => setConfirmClearFailed(true)}
+      />
       <MobileNotificationBellSlot />
       <UpdateBanner />
 
@@ -970,6 +974,40 @@ function MobileNotificationBellSlot(): JSX.Element | null {
   return (
     <div className="fixed right-3 top-1.5 z-40 md:hidden">
       <NotificationBell placement="mobile-header" />
+    </div>
+  );
+}
+
+function DesktopAccountDock({
+  displayName,
+  email,
+  plan,
+  failedTaskCount,
+  onLogout,
+  onOpenFeedback,
+  onClearFailedTasks,
+}: {
+  displayName: string;
+  email: string | null;
+  plan: string;
+  failedTaskCount: number;
+  onLogout(): void;
+  onOpenFeedback(): void;
+  onClearFailedTasks(): void;
+}): JSX.Element {
+  return (
+    <div className="fixed right-7 top-5 z-40 hidden items-center gap-3 md:flex">
+      <NotificationBell placement="topbar" />
+      <UserMenu
+        placement="topbar"
+        displayName={displayName}
+        email={email}
+        plan={plan}
+        onLogout={onLogout}
+        onOpenFeedback={onOpenFeedback}
+        failedTaskCount={failedTaskCount}
+        onClearFailedTasks={onClearFailedTasks}
+      />
     </div>
   );
 }

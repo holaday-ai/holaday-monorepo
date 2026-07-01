@@ -182,6 +182,26 @@ describe('runSimpleVideoCreation — aspectRatio (Phase 2 多画幅)', () => {
     expect(clipArg.width).toBe(1080);
     expect(clipArg.height).toBe(1080);
   });
+
+  it('4:3 → veo aspectRatio uses 16:9 source, render/compose 1440×1080', async () => {
+    const { svc, mocks } = makeServices();
+    await runSimpleVideoCreation({ userText: 'x' }, CFG, { visualMode: 'video', videoSource: 'veo_fast', aspectRatio: '4:3' }, svc);
+    const veoArg = (mocks.generateVeoVideo.mock.calls[0] as unknown[])[0] as { aspectRatio: string };
+    expect(veoArg.aspectRatio).toBe('16:9');
+    const clipArg = (mocks.renderVideoClip.mock.calls[0] as unknown[])[0] as { width: number; height: number };
+    expect(clipArg.width).toBe(1440);
+    expect(clipArg.height).toBe(1080);
+  });
+
+  it('3:4 → veo aspectRatio uses 9:16 source, render/compose 1080×1440', async () => {
+    const { svc, mocks } = makeServices();
+    await runSimpleVideoCreation({ userText: 'x' }, CFG, { visualMode: 'video', videoSource: 'veo_fast', aspectRatio: '3:4' }, svc);
+    const veoArg = (mocks.generateVeoVideo.mock.calls[0] as unknown[])[0] as { aspectRatio: string };
+    expect(veoArg.aspectRatio).toBe('9:16');
+    const clipArg = (mocks.renderVideoClip.mock.calls[0] as unknown[])[0] as { width: number; height: number };
+    expect(clipArg.width).toBe(1080);
+    expect(clipArg.height).toBe(1440);
+  });
 });
 
 describe('runSimpleVideoCreation — config gates', () => {

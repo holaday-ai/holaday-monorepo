@@ -5,6 +5,7 @@ import {
   Clock,
   FolderOpen,
   FolderPlus,
+  ImagePlus,
   Layers,
   ListPlus,
   MoonStar,
@@ -18,6 +19,7 @@ import {
   Shield,
   Sparkles,
   Trash2,
+  TrendingUp,
   X,
 } from 'lucide-react';
 import * as React from 'react';
@@ -50,8 +52,6 @@ import {
 } from '@/components/ui/sidebar';
 import { TaskListItem } from '@/components/TaskListItem';
 import { useToast } from '@/components/ui/toast';
-import { NotificationBell } from '@/components/notifications/NotificationBell';
-import { UserMenu } from '@/components/UserMenu';
 import { isCosmicEnabled } from '@/lib/astrology';
 import { copyTextToClipboard } from '@/lib/copy-text';
 import {
@@ -112,27 +112,13 @@ interface Props {
   // now reveals itself only when a browser-mode task is selected
   // or a login / captcha park fires. No explicit user-driven entry.
   onOpenSearch?(): void;
-  userEmail: string | null;
-  userDisplayName: string;
-  userPlan: string;
   /**
    * Phase 27 — when 'admin', the FeatureNav renders an extra
    * "管理后台" entry that routes to /admin. Default 'user'.
    */
+  userPlan: string;
   userRole?: 'user' | 'admin';
-  /**
-   * Phase 1 #4 — video-creation reachable for this user (flag on + in
-   * allowlist, from auth.me). When false the「视频任务」FeatureNav entry
-   * is hidden (the /video route is also guarded in App.tsx).
-   */
   videoEnabled?: boolean;
-  onLogout(): void;
-  onOpenFeedback?(): void;
-  /** O12 — open the in-app settings modal instead of navigating. */
-  /** Count of tasks in status='failed' — feeds UserMenu badge. */
-  failedTaskCount?: number;
-  /** "清除所有失败任务" handler; hidden when count=0 or handler absent. */
-  onClearFailedTasks?(): void;
   /** Mobile drawer state — ignored at md+ breakpoints. */
   mobileOpen?: boolean;
   onMobileClose?: () => void;
@@ -195,15 +181,8 @@ export function Sidebar({
   // omitted we just don't render it (Cmd+K shortcut still works via
   // AppShell's keyboard handler regardless).
   onOpenSearch,
-  userEmail,
-  userDisplayName,
   userPlan,
   userRole = 'user',
-  videoEnabled = false,
-  onLogout,
-  onOpenFeedback,
-  failedTaskCount = 0,
-  onClearFailedTasks,
   mobileOpen,
   onMobileClose,
   hiddenTaskCount = 0,
@@ -319,7 +298,7 @@ export function Sidebar({
   // We just bind mobile open via setOpenMobile so the legacy
   // `mobileOpen` prop continues to drive the Sheet from
   // WorkbenchApp's hamburger button.
-  const { isMobile, setOpenMobile } = useSidebar();
+  const { setOpenMobile } = useSidebar();
   React.useEffect(() => {
     setOpenMobile(!!mobileOpen);
   }, [mobileOpen, setOpenMobile]);
@@ -405,7 +384,7 @@ export function Sidebar({
             list when space is tight; tall windows behave identically
             because the content fits and there's no scroll. */}
         <SidebarContent className="px-0 bg-white/45 dark:bg-transparent">
-            <FeatureNav userRole={userRole} videoEnabled={videoEnabled} />
+            <FeatureNav userRole={userRole} />
             {projectFilter && (
               <div
                 className={cn(
@@ -631,23 +610,6 @@ export function Sidebar({
               />
               <div className="px-2 pb-1 pt-1">
                 <ShareInviteRow />
-              </div>
-              {/* Phase 26B follow-up — bell sits inline next to
-                  the UserMenu. Flex row gives the menu the available
-                  width; bell stays at a fixed 36px square on the right. */}
-              <div className="flex items-center gap-2 px-2">
-                <div className="min-w-0 flex-1">
-                  <UserMenu
-                    displayName={userDisplayName}
-                    email={userEmail}
-                    plan={userPlan}
-                    onLogout={onLogout}
-                    failedTaskCount={failedTaskCount}
-                    {...(onClearFailedTasks ? { onClearFailedTasks } : {})}
-                    {...(onOpenFeedback ? { onOpenFeedback } : {})}
-                  />
-                </div>
-                {!isMobile && <NotificationBell />}
               </div>
             </SidebarFooter>
         {/* SidebarRail — invisible hairline on the right edge that
@@ -1008,8 +970,10 @@ interface FeatureItem {
 
 const FEATURES: readonly FeatureItem[] = [
   { icon: Sparkles, label: '专家技能', href: '/skills' },
+  { icon: TrendingUp, label: '股市任务', href: '/stocks' },
   { icon: MoonStar, label: '今日能量', href: '/cosmic' },
-  { icon: Clapperboard, label: '视频任务', href: '/video' },
+  { icon: Clapperboard, label: '创建视频', href: '/video' },
+  { icon: ImagePlus, label: '创作图片', href: '/image' },
   { icon: Clock, label: '定时任务', href: '/scheduled' },
   { icon: ListPlus, label: '批量任务', href: '/batch' },
   { icon: FolderOpen, label: '文件库', href: '/files' },
@@ -1025,13 +989,7 @@ const FEATURES: readonly FeatureItem[] = [
  * routes render as clickable nav links; disabled rows keep a neutral
  * unavailable label. Compact density (32px row).
  */
-function FeatureNav({
-  userRole,
-  videoEnabled,
-}: {
-  userRole: 'user' | 'admin';
-  videoEnabled: boolean;
-}): JSX.Element {
+function FeatureNav({ userRole }: { userRole: 'user' | 'admin' }): JSX.Element {
   const navigate = useNavigate();
   // Read pathname directly so the active highlight updates on route
   // switch without forcing a re-render through props. The shrink-0
@@ -1044,11 +1002,7 @@ function FeatureNav({
       <SidebarGroupContent>
         <SidebarMenu>
           {FEATURES.filter(
-            // Phase 1 #4 — hide「视频任务」unless video is enabled for this
-            // user (flag on + in allowlist). All other entries always show.
-            (feature) =>
-              (feature.href !== '/video' || videoEnabled) &&
-              (feature.href !== '/cosmic' || isCosmicEnabled()),
+            (feature) => feature.href !== '/cosmic' || isCosmicEnabled(),
           ).map(({ icon: Icon, label, href }) => {
             if (href) {
               const isActive = pathname === href;

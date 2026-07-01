@@ -77,8 +77,8 @@ const DEFAULT_HAPPYHORSE_MODEL = 'happyhorse-1.0-t2v';
 const isVeoSource = (s: VideoSource): boolean =>
   s === 'veo_fast' || s === 'veo_lite' || s === 'veo_standard';
 
-/** 三档画幅 (Phase 2 第一期). Veo 仅支持 9:16/16:9 → 1:1 用 9:16 出, compose pad 到方形. */
-export type AspectRatio = '9:16' | '16:9' | '1:1';
+/** 多画幅. Veo 仅支持 9:16/16:9 → 方形/4:3/3:4 用最接近源比例生成, compose pad 到目标画幅. */
+export type AspectRatio = '9:16' | '16:9' | '1:1' | '4:3' | '3:4';
 export function resolveAspect(ar: AspectRatio): {
   width: number;
   height: number;
@@ -88,10 +88,29 @@ export function resolveAspect(ar: AspectRatio): {
   switch (ar) {
     case '16:9':
       return { width: 1920, height: 1080, veoAspect: '16:9', hhSize: '1920*1080' };
+    case '4:3':
+      return { width: 1440, height: 1080, veoAspect: '16:9', hhSize: '1440*1080' };
     case '1:1':
       return { width: 1080, height: 1080, veoAspect: '9:16', hhSize: '1080*1080' };
+    case '3:4':
+      return { width: 1080, height: 1440, veoAspect: '9:16', hhSize: '1080*1440' };
     default: // 9:16 竖屏
       return { width: 1080, height: 1920, veoAspect: '9:16', hhSize: '1080*1920' };
+  }
+}
+
+function aspectCopy(ar: AspectRatio | undefined): string {
+  switch (ar) {
+    case '16:9':
+      return '横屏 16:9';
+    case '4:3':
+      return '横屏 4:3';
+    case '1:1':
+      return '方形 1:1';
+    case '3:4':
+      return '竖屏 3:4';
+    default:
+      return '竖屏 9:16';
   }
 }
 
@@ -215,7 +234,7 @@ export function createSimplePipelineDeps(
   const visualMode = opts.visualMode ?? 'video';
   const videoSource = opts.videoSource ?? 'veo_fast';
   const aspect = resolveAspect(opts.aspectRatio ?? '9:16');
-  const aspectLabel = opts.aspectRatio === '16:9' ? '横屏 16:9' : opts.aspectRatio === '1:1' ? '方形 1:1' : '竖屏 9:16';
+  const aspectLabel = aspectCopy(opts.aspectRatio);
 
   return {
     logger: svc.logger,

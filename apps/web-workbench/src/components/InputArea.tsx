@@ -605,9 +605,13 @@ export function InputArea({
     >
       <div
         className={cn(
-          'relative overflow-hidden rounded-lg border transition-[border-color,box-shadow]',
-          COMPOSER_SURFACE,
-          COMPOSER_FIELD_FOCUS,
+          'relative overflow-hidden border transition-[border-color,box-shadow]',
+          fullBleed
+            ? 'rounded-[26px] border-[#EA1F59]/[0.18] bg-[#FFF4F8] shadow-[0_18px_42px_rgba(234,31,89,0.08)]'
+            : cn('rounded-lg', COMPOSER_SURFACE),
+          fullBleed
+            ? 'focus-within:border-[#EA1F59]/30 focus-within:shadow-[0_20px_46px_rgba(234,31,89,0.11)] focus-within:ring-2 focus-within:ring-[#EA1F59]/[0.08]'
+            : COMPOSER_FIELD_FOCUS,
           dragActive
             ? 'border-[#42C0EF]/60 ring-2 ring-[#42C0EF]/15'
             : '',
@@ -653,12 +657,17 @@ export function InputArea({
           }
           rows={compact ? 1 : 2}
           className={cn(
-            'resize-none border-0 bg-transparent px-4 pr-14 text-[15px] leading-relaxed shadow-none placeholder:text-muted-foreground/55 focus-visible:ring-0',
-            compact
-              ? 'min-h-[76px] pb-10 pt-3 sm:min-h-[92px] sm:pb-12 sm:pt-4'
-              : 'min-h-[92px] pb-12 pt-4',
+            'resize-none border-0 bg-transparent leading-relaxed shadow-none placeholder:text-muted-foreground/55 focus-visible:ring-0',
+            fullBleed
+              ? 'min-h-[190px] px-7 pb-[68px] pr-[150px] pt-8 text-[18px] font-medium placeholder:text-[#9CA3AF]/80 sm:min-h-[198px]'
+              : cn(
+                  'px-4 pr-14 text-[15px]',
+                  compact
+                    ? 'min-h-[76px] pb-10 pt-3 sm:min-h-[92px] sm:pb-12 sm:pt-4'
+                    : 'min-h-[92px] pb-12 pt-4',
+                ),
           )}
-          style={{ maxHeight: '10rem' }}
+          style={{ maxHeight: fullBleed ? 'none' : '10rem' }}
           disabled={disabled}
         />
         {/* F2 — attachment + plus menu now available in replyMode too.
@@ -671,7 +680,7 @@ export function InputArea({
             hand-rolled outside-click popover. Picks up focus
             management, escape-to-close, arrow-key navigation,
             and proper portal layering for free. */}
-        <div className="absolute bottom-2.5 left-2.5">
+        <div className={cn('absolute', fullBleed ? 'bottom-7 left-8' : 'bottom-2.5 left-2.5')}>
           {attachmentsAllowed ? (
             <DropdownMenu open={plusMenuOpen} onOpenChange={setPlusMenuOpen}>
               <DropdownMenuTrigger asChild>
@@ -681,6 +690,7 @@ export function InputArea({
                   title="添加附件"
                   className={cn(
                     ATTACHMENT_TRIGGER_CLASS,
+                    fullBleed && 'h-9 w-9 rounded-[10px] text-[#57479C] hover:bg-white/65',
                     plusMenuOpen && ATTACHMENT_TRIGGER_ACTIVE,
                   )}
                 >
@@ -790,7 +800,10 @@ export function InputArea({
               }}
               aria-label="升级基础版可添加附件"
               title="升级基础版可添加附件"
-              className="inline-flex h-8 w-8 cursor-not-allowed items-center justify-center rounded-[8px] border border-transparent bg-transparent text-[#ADADAD] dark:text-foreground/40"
+              className={cn(
+                'inline-flex cursor-not-allowed items-center justify-center border border-transparent bg-transparent text-[#ADADAD] dark:text-foreground/40',
+                fullBleed ? 'h-9 w-9 rounded-[10px]' : 'h-8 w-8 rounded-[8px]',
+              )}
             >
               <Plus className="h-4 w-4" />
             </button>
@@ -808,21 +821,34 @@ export function InputArea({
           }}
         />
         <Button
-          size="icon"
+          size={fullBleed ? undefined : 'icon'}
           onClick={() => void handleSubmit()}
           disabled={disabled || value.trim().length === 0}
-          className="absolute bottom-2.5 right-2.5 h-8 w-8 rounded-full bg-[#EA1F59] text-white shadow-[0_4px_12px_rgba(234,31,89,0.18)] hover:bg-[#EA1F59]/90 focus-visible:ring-[#EA1F59]/25"
+          className={cn(
+            'absolute rounded-full focus-visible:ring-[#EA1F59]/25',
+            fullBleed
+              ? 'bottom-6 right-7 h-12 w-[116px] justify-between border border-[#EA1F59]/45 bg-white/55 px-5 pr-[52px] text-[#EA1F59] shadow-[0_10px_24px_rgba(234,31,89,0.12)] backdrop-blur hover:bg-white/75'
+              : 'bottom-2.5 right-2.5 h-8 w-8 bg-[#EA1F59] text-white shadow-[0_4px_12px_rgba(234,31,89,0.18)] hover:bg-[#EA1F59]/90',
+          )}
           aria-label={submitting ? submittingStatus : '发送'}
           title={submitting ? submittingStatus : '发送'}
         >
           {submitting ? (
             <Loader2 className="h-4 w-4 animate-spin" />
+          ) : fullBleed ? (
+            <>
+              <span className="text-[15px] font-medium leading-none">Enter</span>
+              <span className="absolute right-0.5 top-0.5 flex h-[44px] w-[44px] items-center justify-center rounded-full bg-[#EA1F59] text-white shadow-[0_6px_16px_rgba(234,31,89,0.18)]">
+                <ArrowUp className="h-5 w-5" />
+              </span>
+            </>
           ) : (
             <ArrowUp className="h-4 w-4" />
           )}
         </Button>
       </div>
-      <div className="mt-2 flex min-h-[28px] items-center justify-between gap-3 px-1 text-[11px] text-muted-foreground/70">
+      {!fullBleed && (
+        <div className="mt-2 flex min-h-[28px] items-center justify-between gap-3 px-1 text-[11px] text-muted-foreground/70">
         <div className="flex min-w-0 flex-wrap items-center gap-1.5">
           {submitting ? (
             <span
@@ -842,6 +868,7 @@ export function InputArea({
           Enter 发送
         </span>
       </div>
+      )}
       {/* Phase 5b — multi-line detect. When the composer holds 2+
           non-empty lines AND we're not in a reply / follow-up flow,
           surface a one-click "make this a batch" hint. Routes to

@@ -2123,9 +2123,11 @@ function parseUiAttachments(arr: unknown): UiTask['attachments'] | undefined {
       ) {
         return null;
       }
+      const downloadUrl = normaliseAttachmentDownloadUrl(e.downloadUrl);
+      if (!downloadUrl) return null;
       return {
         fileId: e.fileId,
-        downloadUrl: e.downloadUrl,
+        downloadUrl,
         filename: e.filename,
         mimetype: e.mimetype,
         sizeBytes: e.sizeBytes,
@@ -2135,6 +2137,13 @@ function parseUiAttachments(arr: unknown): UiTask['attachments'] | undefined {
     })
     .filter((v): v is NonNullable<typeof v> => v !== null);
   return cleaned.length > 0 ? cleaned : undefined;
+}
+
+function normaliseAttachmentDownloadUrl(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (/^\/api\/files\/[^/]+\/download(?:[?#].*)?$/.test(trimmed)) return trimmed;
+  if (/^\/files\/[^/]+\/download(?:[?#].*)?$/.test(trimmed)) return `/api${trimmed}`;
+  return null;
 }
 
 function safeNullableTaskListDate(value: unknown): Date | null {

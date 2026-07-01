@@ -341,7 +341,7 @@ const createInput = z.object({
       /** 宠物照片的已上传 fileId(tab='pet' 必填). confirmVideo 据此 mint presigned GET 当 img_url. */
       petImageFileId: z.string().min(1).max(64).optional(),
       style: z.enum(['auto', 'realistic', 'atmospheric', 'science']).optional(),
-      aspectRatio: z.enum(['9:16', '16:9', '1:1']).optional(),
+      aspectRatio: z.enum(['9:16', '16:9', '1:1', '4:3', '3:4']).optional(),
       resolution: z.enum(['720p', '1080p']).optional(),
       durationSeconds: z.number().int().min(3).max(15).optional(),
     })

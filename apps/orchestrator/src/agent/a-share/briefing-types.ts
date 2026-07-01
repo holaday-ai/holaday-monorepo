@@ -48,6 +48,16 @@ export interface KlineRow {
   [k: string]: unknown;
 }
 
+/** A股全市场榜单行（stock_zh_a_spot sina）。 */
+export interface StockRankingRow {
+  代码?: string;
+  名称?: string;
+  最新价?: number;
+  涨跌幅?: number;
+  成交额?: number;
+  [k: string]: unknown;
+}
+
 /** 港/美股指数行。hk: stock_hk_index_spot_em（最新价/涨跌幅）；us: index_us_stock_sina 末行 OHLCV。 */
 export interface IndexRow {
   代码?: string;

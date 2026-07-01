@@ -12,6 +12,8 @@ Run（Vultr，仅监听 127.0.0.1，由 orchestrator 同机直取，不对外暴
 
 from __future__ import annotations
 
+import threading
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any, Callable
 
@@ -59,8 +61,25 @@ _ztsum = cached(adp.TTL_LHB)(adp.get_zt_pool_summary)
 # Phase 2 全景速览 step1：④ 基本面（季度级长缓存）+ ⑤ 估值（日级缓存）。
 _fund = cached(adp.TTL_FUND)(adp.get_fundamentals)
 _val = cached(adp.TTL_VAL)(adp.get_valuation)
+_rank = cached(adp.TTL_RANK)(adp.get_stock_rankings)
 
-app = FastAPI(title="akshare-cn-http", docs_url=None, redoc_url=None)
+
+def _prewarm_rankings() -> None:
+    """Warm the shared full-market spot cache without blocking health checks."""
+
+    def _run() -> None:
+        _safe(_rank, "gainers", 8)
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    _prewarm_rankings()
+    yield
+
+
+app = FastAPI(title="akshare-cn-http", docs_url=None, redoc_url=None, lifespan=lifespan)
 
 
 @app.get("/health")
@@ -96,6 +115,12 @@ def kline(symbol: str) -> dict[str, Any]:
 @app.get("/quote/{symbol}")
 def quote(symbol: str) -> dict[str, Any]:
     return _safe(_quote, symbol)
+
+
+@app.get("/stock-rankings/{metric}")
+def stock_rankings(metric: str, limit: int = 20) -> dict[str, Any]:
+    """metric: gainers | losers | amount。换手率源暂不可得，不提供假数据。"""
+    return _safe(_rank, metric, limit)
 
 
 @app.get("/dragon-tiger/{start_date}")

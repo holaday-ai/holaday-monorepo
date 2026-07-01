@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { asVideoType, isVideoLane, showImageOption, toVideoRow } from './video-history-row';
+import { asVideoType, isImageLane, isVideoLane, showImageOption, toImageRow, toVideoRow } from './video-history-row';
 
 describe('showImageOption — 图片版 gate (B2)', () => {
   it('hides 图片版 for ip_person only', () => {
@@ -76,6 +76,15 @@ describe('isVideoLane', () => {
   });
 });
 
+describe('isImageLane', () => {
+  it('matches image execution metadata', () => {
+    expect(isImageLane({ executionMode: 'image' })).toBe(true);
+    expect(isImageLane({ finalExecutionMode: 'image' })).toBe(true);
+    expect(isImageLane({ lane: 'video_creation' })).toBe(false);
+    expect(isImageLane(undefined)).toBe(false);
+  });
+});
+
 describe('toVideoRow — 生成历史 only lists completed 成片 with an attachment', () => {
   it('completed + valid attachment → row carrying the download', () => {
     const out = toVideoRow(row());
@@ -87,6 +96,27 @@ describe('toVideoRow — 生成历史 only lists completed 成片 with an attach
       filename: 'holaday-video.mp4',
       size: 6_000_000,
     });
+  });
+
+  it('normalizes backend /files download URLs to the frontend /api/files path', () => {
+    const out = toVideoRow(
+      row({
+        result: {
+          metadata: {
+            lane: 'video_creation',
+            attachments: [
+              {
+                ...ATT,
+                downloadUrl: '/files/file_x/download',
+                posterUrl: '/files/poster_x/download',
+              },
+            ],
+          },
+        },
+      }),
+    );
+    expect(out?.download?.downloadUrl).toBe('/api/files/file_x/download');
+    expect(out?.posterUrl).toBe('/api/files/poster_x/download');
   });
 
   it('DROPS failed (the face-detection failure no longer pollutes history)', () => {
@@ -129,5 +159,85 @@ describe('toVideoRow — 生成历史 only lists completed 成片 with an attach
     expect(toVideoRow(null)).toBeNull();
     expect(toVideoRow('nope')).toBeNull();
     expect(toVideoRow({})).toBeNull();
+  });
+});
+
+describe('toImageRow — 图片历史 only lists completed image outputs', () => {
+  const imageAtt = {
+    fileId: 'file_img',
+    downloadUrl: '/api/files/file_img/download',
+    filename: 'holaday-image-1.png',
+    mimetype: 'image/png',
+    sizeBytes: 900_000,
+  };
+
+  function imageRow(over: Record<string, unknown> = {}): unknown {
+    return {
+      taskId: 'tsk_img',
+      intent: '生成图片：极简工作台插画',
+      title: null,
+      status: 'completed',
+      createdAt: '2026-07-01T00:00:00.000Z',
+      result: { metadata: { executionMode: 'image', attachments: [imageAtt] } },
+      ...over,
+    };
+  }
+
+  it('completed image task + valid image attachment → row with thumbnail payload', () => {
+    const out = toImageRow(imageRow());
+    expect(out?.taskId).toBe('tsk_img');
+    expect(out?.posterUrl).toBe('/api/files/file_img/download');
+    expect(out?.download).toEqual({
+      fileId: 'file_img',
+      downloadUrl: '/api/files/file_img/download',
+      filename: 'holaday-image-1.png',
+      size: 900_000,
+    });
+  });
+
+  it('normalizes image backend /files URLs before rendering previews', () => {
+    const out = toImageRow(
+      imageRow({
+        result: {
+          metadata: {
+            executionMode: 'image',
+            attachments: [{ ...imageAtt, downloadUrl: '/files/file_img/download' }],
+          },
+        },
+      }),
+    );
+    expect(out?.download?.downloadUrl).toBe('/api/files/file_img/download');
+    expect(out?.posterUrl).toBe('/api/files/file_img/download');
+  });
+
+  it('accepts image extension when mimetype is absent', () => {
+    const out = toImageRow(
+      imageRow({
+        result: {
+          metadata: {
+            finalExecutionMode: 'image',
+            attachments: [{ ...imageAtt, mimetype: undefined, filename: 'generated.webp' }],
+          },
+        },
+      }),
+    );
+    expect(out?.download?.filename).toBe('generated.webp');
+  });
+
+  it('DROPS failed or non-image outputs', () => {
+    expect(toImageRow(imageRow({ status: 'failed' }))).toBeNull();
+    expect(toImageRow(imageRow({ result: { metadata: { executionMode: 'image', attachments: [] } } }))).toBeNull();
+    expect(
+      toImageRow(
+        imageRow({
+          result: {
+            metadata: {
+              executionMode: 'image',
+              attachments: [{ ...imageAtt, filename: 'notes.txt', mimetype: 'text/plain' }],
+            },
+          },
+        }),
+      ),
+    ).toBeNull();
   });
 });

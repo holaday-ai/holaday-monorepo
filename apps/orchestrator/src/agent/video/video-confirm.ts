@@ -89,7 +89,7 @@ export interface VideoQuoteOpts {
   /** 每段生成时长(6/8),影响计费秒数。默认 8。 */
   readonly durationSeconds?: number;
   /** 画幅,只改报价文案的「竖/横/方屏」措辞,不影响价格。默认竖屏。 */
-  readonly aspectRatio?: '9:16' | '16:9' | '1:1';
+  readonly aspectRatio?: '9:16' | '16:9' | '1:1' | '4:3' | '3:4';
 }
 
 export interface VideoQuote {
@@ -181,7 +181,11 @@ export function quoteVideo(segments: number, tier: VideoSource, opts: VideoQuote
   const videoCny = Math.ceil(segments * billSec * perSec * USD_TO_CNY);
   const imageCny = Math.ceil(segments * NB_USD_PER_IMG * USD_TO_CNY);
   const shape =
-    opts.aspectRatio === '16:9' ? '横屏' : opts.aspectRatio === '1:1' ? '方形' : '竖屏';
+    opts.aspectRatio === '16:9' || opts.aspectRatio === '4:3'
+      ? '横屏'
+      : opts.aspectRatio === '1:1'
+        ? '方形'
+        : '竖屏';
   const message =
     `将用 ${segments} 段动态画面合成一条${shape}视频，预计费用约 ¥${videoCny}` +
     `（${TIER_LABEL[tier]} · ${resolution} · 每段 ${billSec} 秒计费）。\n` +

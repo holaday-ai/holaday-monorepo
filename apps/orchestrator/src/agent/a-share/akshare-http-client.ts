@@ -17,6 +17,7 @@ import type {
   KlineRow,
   MarketPulseRow,
   NorthboundRow,
+  StockRankingRow,
   UnlockRow,
   ValuationRow,
   ZtReviewRow,
@@ -124,6 +125,11 @@ export class HttpAkshareClient implements AkshareClient {
   }
   searchSymbol(query: string) {
     return this.get<SymbolRow>(`/symbol-search/${encodeURIComponent(query)}`);
+  }
+  getStockRankings(metric: 'gainers' | 'losers' | 'amount', limit = 20) {
+    const qs = new URLSearchParams();
+    qs.set('limit', String(limit));
+    return this.get<StockRankingRow>(`/stock-rankings/${encodeURIComponent(metric)}?${qs.toString()}`);
   }
   getMarketPulse(date: string, prevDate?: string) {
     const qs = prevDate ? `?prev_date=${encodeURIComponent(prevDate)}` : '';

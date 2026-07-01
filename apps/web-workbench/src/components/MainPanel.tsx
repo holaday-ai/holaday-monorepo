@@ -21,6 +21,7 @@ import { TaskToolbar, isBrowserLikely } from '@/components/TaskToolbar';
 import { Button } from '@/components/ui/button';
 import type { ComposerSubmitResult } from '@/components/composer-submit';
 import { shouldResetComposerOnSelectionChange } from '@/components/composer-reset';
+import { cn } from '@/lib/utils';
 import { taskStatusLabel } from '@/lib/task-status-copy';
 import { useTaskStore } from '@/stores/task-store';
 import type { AwaitingKind } from '@/lib/awaiting-user-copy';
@@ -200,36 +201,54 @@ export function MainPanel({
       </div>
       {showEmptyHome ? (
         <div className="flex-1 overflow-y-auto">
-          <div className="mx-auto w-full max-w-[720px] px-4 pb-12 pt-[18vh] sm:px-6">
-            <h1 className="mb-6 text-center text-[28px] font-semibold leading-tight tracking-tight text-foreground">
-              你好，{greetingName || '今天想做点什么？'}
-            </h1>
-            <OnboardingHint />
-            <InputArea
-              key={composerKey}
-              onSubmit={onSubmit}
-              busy={busy}
-              inputRef={inputRef}
-              replyMode={replyMode}
-              replyKind={replyKind}
-              followUpTarget={followUpTarget}
-              quotaExhausted={quotaExhausted}
-              quotaPlan={userPlan}
-              attachmentsAllowed={attachmentsAllowed}
-              attachmentByteCap={attachmentByteCap}
-              prefillIntent={prefillIntent}
-              onPrefillConsumed={() => setPrefillIntent(null)}
-              fullBleed
-            />
-            <SuggestionChips onPick={handlePickFromEmptyState} />
-            {userPlan ? (
-              <div className="mt-10">
-                <RoleNudgeBanner
-                  plan={userPlan}
-                  selectedRoles={userSelectedRoles ?? null}
+          <div className="mx-auto w-full max-w-[1180px] px-6 pb-14 pt-[6vh] sm:px-10 lg:pt-[7vh]">
+            <div className="mx-auto w-full max-w-[1040px]">
+              <h1 className="text-left text-[28px] font-semibold leading-tight tracking-tight text-foreground sm:text-[34px]">
+                Hello, <span className="text-[#EA1F59]">{greetingName || '今天想做点什么'}</span>~
+              </h1>
+              <p className="mt-2 text-left text-[14px] font-medium text-[#8B93A6] sm:text-[16px]">
+                欢迎回来！ 今天又是高效的一天呢！ 🚀
+              </p>
+              <div className="relative mx-auto mt-4 h-[186px] max-w-[900px] overflow-visible sm:h-[196px]">
+                <img
+                  src="/design-ref/home-hero.png?v=20260701"
+                  alt=""
+                  aria-hidden="true"
+                  loading="eager"
+                  className="pointer-events-none absolute left-1/2 top-0 h-auto w-[min(1260px,calc(100vw-2rem))] max-w-none -translate-x-1/2 select-none"
+                />
+                <div className="absolute left-1/2 top-[84px] z-20 w-[min(500px,calc(100vw-3rem))] -translate-x-1/2 sm:top-[92px]">
+                  <OnboardingHint />
+                </div>
+              </div>
+              <div className="relative z-30 mx-auto mt-0 max-w-[900px]">
+                <InputArea
+                  key={composerKey}
+                  onSubmit={onSubmit}
+                  busy={busy}
+                  inputRef={inputRef}
+                  replyMode={replyMode}
+                  replyKind={replyKind}
+                  followUpTarget={followUpTarget}
+                  quotaExhausted={quotaExhausted}
+                  quotaPlan={userPlan}
+                  attachmentsAllowed={attachmentsAllowed}
+                  attachmentByteCap={attachmentByteCap}
+                  prefillIntent={prefillIntent}
+                  onPrefillConsumed={() => setPrefillIntent(null)}
+                  fullBleed
                 />
               </div>
-            ) : null}
+              <SuggestionChips onPick={handlePickFromEmptyState} />
+              {userPlan ? (
+                <div className="mx-auto mt-8 max-w-[900px]">
+                  <RoleNudgeBanner
+                    plan={userPlan}
+                    selectedRoles={userSelectedRoles ?? null}
+                  />
+                </div>
+              ) : null}
+            </div>
           </div>
         </div>
       ) : (
@@ -357,30 +376,34 @@ function SuggestionChips({
 }: {
   onPick(intent: string): void;
 }): JSX.Element {
+  const allItems = SUGGESTION_GROUPS.flatMap((group) => group.items);
+  const primaryItems = HOME_SUGGESTION_LABELS.map((label) =>
+    allItems.find((item) => item.label === label),
+  ).filter((item): item is SuggestionItem => Boolean(item));
+
   return (
-    <div className="mx-auto mt-4 flex max-w-[700px] flex-col gap-2.5">
-      {SUGGESTION_GROUPS.map((group) => (
-        <div key={group.title} className="flex min-w-0 flex-wrap items-center justify-center gap-1.5">
-          <span className="mr-1 hidden text-[11px] font-medium text-[#ADADAD] sm:inline">
-            {group.title}
-          </span>
-          {group.items.map((s) => {
-            const Icon = s.icon;
-            return (
-              <button
-                key={s.label}
-                type="button"
-                onClick={() => onPick(s.intent)}
-                aria-label={`用示例填入：${s.label}`}
-                className="group inline-flex h-8 items-center gap-1.5 rounded-[7px] border border-[#DCDDDD]/75 bg-white/55 px-2.5 text-[12px] font-medium text-[#595757] shadow-[0_1px_1px_rgba(17,24,39,0.02)] transition-colors hover:border-[#EA1F59]/25 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20 dark:border-white/10 dark:bg-white/5 dark:text-foreground/75 dark:hover:border-[#EA1F59]/35 dark:hover:bg-[#EA1F59]/10"
-              >
-                <Icon className="h-3.5 w-3.5 text-[#ADADAD] transition-colors group-hover:text-[#EA1F59]" />
-                {s.label}
-              </button>
-            );
-          })}
-        </div>
-      ))}
+    <div className="mx-auto mt-6 max-w-[900px]">
+      <div className="flex flex-wrap items-center justify-center gap-3">
+        {primaryItems.map((s) => {
+          const Icon = s.icon;
+          const tone = suggestionTone(s.label);
+          return (
+            <button
+              key={s.label}
+              type="button"
+              onClick={() => onPick(s.intent)}
+              aria-label={`用示例填入：${s.label}`}
+              className={cn(
+                'group inline-flex h-9 min-w-[118px] items-center justify-center gap-2 rounded-[7px] border px-4 text-[13px] font-semibold shadow-[0_7px_16px_rgba(17,24,39,0.035)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20',
+                tone.button,
+              )}
+            >
+              <Icon className={cn('h-3.5 w-3.5 transition-colors', tone.icon)} />
+              {s.label}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -424,11 +447,11 @@ function OnboardingHint(): JSX.Element | null {
   if (dismissed) return null;
 
   return (
-    <div className="mb-4 flex items-start gap-2.5 rounded-[8px] border border-[#DCDDDD]/70 bg-white/55 px-3 py-2 text-[13px] text-[#595757] shadow-[0_1px_1px_rgba(17,24,39,0.02)] dark:border-white/10 dark:bg-white/5 dark:text-foreground/75">
-      <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-[6px] bg-[#EA1F59]/7 text-[#EA1F59]">
-        <Sparkles className="h-3.5 w-3.5" />
+    <div className="flex items-center gap-3 rounded-[14px] border border-[#EA1F59]/25 bg-[#FFF7FA] px-4 py-2.5 text-[13px] text-[#595757] shadow-[0_8px_22px_rgba(234,31,89,0.14)] dark:border-[#EA1F59]/35 dark:bg-card dark:text-foreground/75">
+      <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[8px] text-[#EA1F59]">
+        <Sparkles className="h-4 w-4" />
       </span>
-      <div className="min-w-0 flex-1 leading-relaxed">
+      <div className="min-w-0 flex-1 leading-5 sm:truncate">
         第一次来？点击下方的任务示例，或直接输入你想做的事情。
       </div>
       <button
@@ -441,7 +464,7 @@ function OnboardingHint(): JSX.Element | null {
           }
           setDismissed(true);
         }}
-        className="-mr-1 -mt-1 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[6px] text-[#ADADAD] transition-colors hover:bg-[#EFEFEF]/70 hover:text-[#595757] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20 dark:hover:bg-white/10 dark:hover:text-foreground"
+        className="-mr-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px] text-[#595757]/70 transition-colors hover:bg-white/70 hover:text-[#595757] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20 dark:hover:bg-white/10 dark:hover:text-foreground"
         aria-label="关闭引导"
         title="关闭"
       >
@@ -456,6 +479,47 @@ type SuggestionItem = {
   intent: string;
   icon: LucideIcon;
 };
+
+const HOME_SUGGESTION_LABELS = [
+  '直播复盘',
+  '查资料',
+  '打开网页',
+  '行情查询',
+  '下载文件',
+  '定时任务',
+] as const;
+
+function suggestionTone(label: string): { button: string; icon: string } {
+  switch (label) {
+    case '直播复盘':
+    case '定时任务':
+      return {
+        button: 'border-[#EA1F59]/[0.16] bg-[#EA1F59]/[0.09] text-[#EA1F59] hover:border-[#EA1F59]/[0.28] hover:bg-[#EA1F59]/[0.13]',
+        icon: 'text-[#EA1F59]',
+      };
+    case '查资料':
+    case '行情查询':
+      return {
+        button: 'border-[#FFC910]/[0.22] bg-[#FFC910]/[0.12] text-[#7A5A00] hover:border-[#FFC910]/35 hover:bg-[#FFC910]/[0.18]',
+        icon: 'text-[#D29A00]',
+      };
+    case '打开网页':
+      return {
+        button: 'border-[#42C0EF]/20 bg-[#42C0EF]/[0.12] text-[#0F6F8D] hover:border-[#42C0EF]/35 hover:bg-[#42C0EF]/[0.18]',
+        icon: 'text-[#0F96BE]',
+      };
+    case '下载文件':
+      return {
+        button: 'border-[#57479C]/[0.18] bg-[#57479C]/10 text-[#57479C] hover:border-[#57479C]/30 hover:bg-[#57479C]/[0.14]',
+        icon: 'text-[#57479C]',
+      };
+    default:
+      return {
+        button: 'border-[#DCDDDD]/75 bg-white/70 text-[#595757] hover:border-[#EA1F59]/25 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59]',
+        icon: 'text-[#ADADAD] group-hover:text-[#EA1F59]',
+      };
+  }
+}
 
 const SUGGESTION_GROUPS: ReadonlyArray<{
   title: string;
