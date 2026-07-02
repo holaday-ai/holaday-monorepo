@@ -75,7 +75,12 @@ export function allowsConciseFactResult(intent?: string): boolean {
 
 export function taskCancelStateChangedMessage(state: string | null | undefined): string {
   const status = typeof state === 'string' ? state.trim() : '';
-  if (status === 'completed' || status === 'failed' || status === 'cancelled') {
+  if (
+    status === 'completed' ||
+    status === 'partial_success' ||
+    status === 'failed' ||
+    status === 'cancelled'
+  ) {
     return '任务已经结束，当前详情已保留。';
   }
   if (status === 'running' || status === 'awaiting_user') {

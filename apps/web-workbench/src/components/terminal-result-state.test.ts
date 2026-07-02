@@ -64,6 +64,9 @@ describe('terminalResultContentInsufficient', () => {
 
   it('hides raw task states in cancel failure copy', () => {
     expect(taskCancelStateChangedMessage('completed')).toBe('任务已经结束，当前详情已保留。');
+    expect(taskCancelStateChangedMessage('partial_success')).toBe(
+      '任务已经结束，当前详情已保留。',
+    );
     expect(taskCancelStateChangedMessage('awaiting_user')).toBe(
       '任务状态刚刚变化，请刷新后再确认是否需要取消。',
     );
