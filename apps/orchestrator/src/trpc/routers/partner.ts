@@ -1,4 +1,8 @@
-import { HOLA_CREDIT_CNY_CENTS, PARTNER_RECHARGE_MAX_MONTHLY_CNY_CENTS } from '@holaday/shared-types';
+import {
+  HOLA_CREDIT_CNY_CENTS,
+  PARTNER_MEMBERSHIP_PRICE_CNY_CENTS,
+  PARTNER_RECHARGE_MAX_MONTHLY_CNY_CENTS,
+} from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
 import { desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
@@ -8,9 +12,40 @@ import { CreditLedgerService } from '../../partner/credit-ledger-service.js';
 import { KycService, canRechargeWithKycStatus } from '../../partner/kyc-service.js';
 import { PartnerMembershipService } from '../../partner/membership-service.js';
 import { calculateApiUnits, selectRechargeTier } from '../../partner/partner-rules.js';
-import { validateRechargeAmount } from '../../partner/recharge-service.js';
+import {
+  RechargeGateError,
+  RechargeOrderIdempotencyConflictError,
+  RechargeService,
+  validateRechargeAmount,
+} from '../../partner/recharge-service.js';
+import { evaluatePartnerRisk } from '../../partner/risk-service.js';
+import {
+  WithdrawalGateError,
+  WithdrawalRequestIdempotencyConflictError,
+  WithdrawalService,
+  WithdrawalValidationError,
+} from '../../partner/withdrawal-service.js';
 import { protectedProcedure, publicProcedure, router } from '../trpc.js';
 import type { Context } from '../context.js';
+
+const paymentProviderInput = z.enum(['wechat', 'alipay', 'manual']);
+
+const createMembershipOrderInput = z.object({
+  provider: paymentProviderInput.optional(),
+  idempotencyKey: z.string().min(1).max(128),
+});
+
+const createRechargeOrderInput = z.object({
+  amountCnyCents: z.number(),
+  provider: paymentProviderInput.optional(),
+  idempotencyKey: z.string().min(1).max(128),
+});
+
+const requestWithdrawalInput = z.object({
+  amountCreditCents: z.number(),
+  bankAccountFingerprint: z.string().min(1).max(128),
+  idempotencyKey: z.string().min(1).max(128),
+});
 
 const rechargePreviewInput = z.object({
   amountCnyCents: z.number(),
@@ -19,6 +54,15 @@ const rechargePreviewInput = z.object({
 
 function partnerLedgerEnabled(): boolean {
   return process.env.PARTNER_LEDGER_ENABLED === 'true';
+}
+
+function requirePartnerLedgerEnabled(): void {
+  if (!partnerLedgerEnabled()) {
+    throw new TRPCError({
+      code: 'PRECONDITION_FAILED',
+      message: 'partner ledger is disabled',
+    });
+  }
 }
 
 async function requireInternalUserId(ctx: Context & { userId: string }): Promise<number> {
@@ -36,6 +80,103 @@ async function requireInternalUserId(ctx: Context & { userId: string }): Promise
 
 function badRequest(message: string): never {
   throw new TRPCError({ code: 'BAD_REQUEST', message });
+}
+
+function summarizePartnerOrder(order: {
+  externalId: string;
+  provider: string;
+  orderKind: string;
+  amountCnyCents: number;
+  status: string;
+}) {
+  return {
+    orderExternalId: order.externalId,
+    provider: order.provider,
+    orderKind: order.orderKind,
+    amountCnyCents: order.amountCnyCents,
+    status: order.status,
+  };
+}
+
+function summarizePartnerWithdrawal(withdrawal: {
+  externalId: string;
+  amountCreditCents: number;
+  status: string;
+  reviewDueAt: Date;
+  riskScore: number;
+}) {
+  return {
+    withdrawalExternalId: withdrawal.externalId,
+    amountCreditCents: withdrawal.amountCreditCents,
+    status: withdrawal.status,
+    reviewDueAt: withdrawal.reviewDueAt,
+    riskScore: withdrawal.riskScore,
+  };
+}
+
+function mapRechargeOrderError(error: unknown): never {
+  if (error instanceof TRPCError) {
+    throw error;
+  }
+
+  if (error instanceof RechargeGateError) {
+    throw new TRPCError({
+      code: 'PRECONDITION_FAILED',
+      message:
+        error.reason === 'membership_required'
+          ? 'partner membership required'
+          : 'partner KYC must be passed before recharge',
+    });
+  }
+
+  if (error instanceof RechargeOrderIdempotencyConflictError) {
+    throw new TRPCError({
+      code: 'CONFLICT',
+      message: 'partner recharge order idempotency conflict',
+    });
+  }
+
+  if (error instanceof RangeError) {
+    badRequest(error.message);
+  }
+
+  throw new TRPCError({
+    code: 'INTERNAL_SERVER_ERROR',
+    message: 'failed to create partner recharge order',
+  });
+}
+
+function mapWithdrawalError(error: unknown): never {
+  if (error instanceof TRPCError) {
+    throw error;
+  }
+
+  if (error instanceof WithdrawalGateError) {
+    throw new TRPCError({
+      code: 'PRECONDITION_FAILED',
+      message: 'partner KYC must be passed before withdrawal',
+    });
+  }
+
+  if (error instanceof WithdrawalValidationError) {
+    badRequest(error.reason);
+  }
+
+  if (error instanceof WithdrawalRequestIdempotencyConflictError) {
+    throw new TRPCError({
+      code: 'CONFLICT',
+      message: 'partner withdrawal request idempotency conflict',
+    });
+  }
+
+  if (error instanceof RangeError) {
+    badRequest(error.message);
+  }
+
+  throw new TRPCError({
+    code: 'INTERNAL_SERVER_ERROR',
+    message: 'failed to request partner withdrawal',
+  });
 }
 
 function normalizeRollingThirtyDayAmount(
@@ -125,13 +266,71 @@ export const partnerRouter = router({
     };
   }),
 
-  rechargePreview: protectedProcedure.input(rechargePreviewInput).query(async ({ ctx, input }) => {
-    if (!partnerLedgerEnabled()) {
-      throw new TRPCError({
-        code: 'PRECONDITION_FAILED',
-        message: 'partner ledger is disabled',
+  createMembershipOrder: protectedProcedure.input(createMembershipOrderInput).mutation(async ({ ctx, input }) => {
+    requirePartnerLedgerEnabled();
+
+    const userId = await requireInternalUserId(ctx);
+    try {
+      const order = await new RechargeService(ctx.db).createPendingOrder({
+        userId,
+        provider: input.provider ?? 'manual',
+        orderKind: 'membership',
+        amountCnyCents: PARTNER_MEMBERSHIP_PRICE_CNY_CENTS,
+        idempotencyKey: input.idempotencyKey,
       });
+      return summarizePartnerOrder(order);
+    } catch (error) {
+      mapRechargeOrderError(error);
     }
+  }),
+
+  createRechargeOrder: protectedProcedure.input(createRechargeOrderInput).mutation(async ({ ctx, input }) => {
+    requirePartnerLedgerEnabled();
+
+    const userId = await requireInternalUserId(ctx);
+    try {
+      const order = await new RechargeService(ctx.db).createPendingOrder({
+        userId,
+        provider: input.provider ?? 'manual',
+        orderKind: 'recharge',
+        amountCnyCents: input.amountCnyCents,
+        idempotencyKey: input.idempotencyKey,
+      });
+      return summarizePartnerOrder(order);
+    } catch (error) {
+      mapRechargeOrderError(error);
+    }
+  }),
+
+  requestWithdrawal: protectedProcedure.input(requestWithdrawalInput).mutation(async ({ ctx, input }) => {
+    requirePartnerLedgerEnabled();
+
+    const userId = await requireInternalUserId(ctx);
+    try {
+      const kycStatus = await new KycService(ctx.db).getStatus(userId);
+      const risk = evaluatePartnerRisk({
+        kycPassed: kycStatus === 'passed',
+        sameNameBank: false,
+        amountCreditCents: input.amountCreditCents,
+        referralConcentration: false,
+        accountFrozen: false,
+      });
+      const withdrawal = await new WithdrawalService(ctx.db).requestWithdrawal({
+        userId,
+        amountCreditCents: input.amountCreditCents,
+        bankAccountFingerprint: input.bankAccountFingerprint,
+        highRisk: risk.status !== 'normal',
+        riskScore: risk.score,
+        idempotencyKey: input.idempotencyKey,
+      });
+      return summarizePartnerWithdrawal(withdrawal);
+    } catch (error) {
+      mapWithdrawalError(error);
+    }
+  }),
+
+  rechargePreview: protectedProcedure.input(rechargePreviewInput).query(async ({ ctx, input }) => {
+    requirePartnerLedgerEnabled();
 
     const validation = validateRechargeAmount(input.amountCnyCents);
     if (!validation.ok) {
