@@ -41,6 +41,11 @@ import {
   uploadByteLimit,
 } from './files/file-service.js';
 import { nextExpiryFor, type PayPalAdapter, type PlanId } from './payment/index.js';
+import {
+  PartnerPaymentConfirmConflictError,
+  PartnerPaymentConfirmService,
+  PartnerPaymentProviderCaptureConflictError,
+} from './partner/payment-confirm-service.js';
 import { QuotaService } from './quota/quota-service.js';
 import {
   ADDON_PACK_CATALOGUE,
@@ -1005,6 +1010,63 @@ export function createHttpApp(deps: HttpAppDeps) {
   // — the trailing slash on the upstream URL is what strips it).
   // External callers still hit https://holaday.ai/api/internal/...,
   // and the gateway's `VULTR_INTERNAL_URL` keeps that public form.
+  app.post('/internal/partner-payment/confirm', async (req, res) => {
+    const expectedSecret = process.env.INTERNAL_SHARED_SECRET;
+    if (!expectedSecret) {
+      logger.error('partner-internal-confirm: INTERNAL_SHARED_SECRET unset — refusing all calls');
+      res.status(503).json({ error: 'internal_secret_not_configured' });
+      return;
+    }
+    const provided = req.headers['x-internal-secret'];
+    if (provided !== expectedSecret) {
+      logger.warn(
+        { presentedLength: typeof provided === 'string' ? provided.length : -1 },
+        'partner-internal-confirm: shared-secret mismatch',
+      );
+      res.status(401).json({ error: 'unauthorized' });
+      return;
+    }
+
+    const body = (req.body ?? {}) as {
+      orderExternalId?: unknown;
+      provider?: unknown;
+      providerCaptureId?: unknown;
+      amountCnyCents?: unknown;
+    };
+
+    try {
+      const result = await new PartnerPaymentConfirmService(db).confirmCapturedOrder({
+        orderExternalId: body.orderExternalId as string,
+        provider: body.provider as string,
+        providerCaptureId: body.providerCaptureId as string,
+        amountCnyCents: Number(body.amountCnyCents),
+      });
+      const { ok: _ok, ...payload } = result;
+      res.status(200).json({ ok: true, ...payload });
+    } catch (err) {
+      if (err instanceof RangeError) {
+        res.status(400).json({ error: 'invalid_partner_payment_confirm' });
+        return;
+      }
+      if (
+        err instanceof PartnerPaymentConfirmConflictError ||
+        err instanceof PartnerPaymentProviderCaptureConflictError
+      ) {
+        logger.warn(
+          { err: err.message },
+          'partner-internal-confirm: confirmation rejected',
+        );
+        res.status(409).json({ error: 'partner_payment_confirm_conflict' });
+        return;
+      }
+      logger.error(
+        { err: err instanceof Error ? err.message : String(err) },
+        'partner-internal-confirm: handler crashed',
+      );
+      res.status(500).json({ error: 'internal_error' });
+    }
+  });
+
   app.post('/internal/payment/confirm', async (req, res) => {
     const expectedSecret = process.env.INTERNAL_SHARED_SECRET;
     if (!expectedSecret) {
