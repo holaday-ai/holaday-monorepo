@@ -222,8 +222,42 @@ async function applyRehydrationForUser(state: ClientState): Promise<void> {
       if (!step) {
         logger.warn(
           { userId: state.userId, taskId: entry.state.taskId, cursor: entry.state.cursor },
-          'executing task rehydrated with cursor past plan end; skipping re-dispatch',
+          'executing task rehydrated with cursor past plan end; failing visibly',
         );
+        const reason = '服务重启导致任务中断，重新发送一次即可。';
+        let failedPersisted = false;
+        try {
+          const result = await failRehydratedTaskIfStatus(
+            entry.state.taskId,
+            entry.state.status,
+            reason,
+          );
+          failedPersisted = result.persisted;
+        } catch (err) {
+          logger.warn(
+            {
+              err: err instanceof Error ? err.message : String(err),
+              userId: state.userId,
+              taskId: entry.state.taskId,
+              status: entry.state.status,
+            },
+            'restart recovery: failed to persist unrecoverable executing task failure',
+          );
+        }
+        if (failedPersisted) {
+          state.tasks.set(entry.state.taskId, {
+            ...entry.state,
+            status: 'failed',
+            error: { code: 'ORCHESTRATOR_RESTART', message: reason },
+          });
+          send(state.socket, {
+            type: 'server.task.terminal',
+            taskId: entry.state.taskId,
+            status: 'failed',
+            reason,
+          });
+          reemittedTerminal += 1;
+        }
         continue;
       }
       send(state.socket, {
@@ -242,8 +276,10 @@ async function applyRehydrationForUser(state: ClientState): Promise<void> {
 
     if (isRestartLostTransientStatus(entry.state.status)) {
       const reason = '服务重启导致任务中断，重新发送一次即可。';
+      let failedPersisted = false;
       try {
-        await failRehydratedTransientTask(entry.state.taskId, entry.state.status, reason);
+        const result = await failRehydratedTaskIfStatus(entry.state.taskId, entry.state.status, reason);
+        failedPersisted = result.persisted;
       } catch (err) {
         logger.warn(
           {
@@ -254,6 +290,13 @@ async function applyRehydrationForUser(state: ClientState): Promise<void> {
           },
           'restart recovery: failed to persist transient task failure',
         );
+      }
+      if (!failedPersisted) {
+        logger.info(
+          { userId: state.userId, taskId: entry.state.taskId, status: entry.state.status },
+          'restart recovery: transient task failure guard refused; not broadcasting terminal',
+        );
+        continue;
       }
       state.tasks.set(entry.state.taskId, {
         ...entry.state,
@@ -297,12 +340,12 @@ function isRestartLostTransientStatus(status: TaskState['status']): boolean {
   return status === 'pending' || status === 'planning' || status === 'queued';
 }
 
-async function failRehydratedTransientTask(
+async function failRehydratedTaskIfStatus(
   taskId: string,
   fromStatus: TaskState['status'],
   reason: string,
-): Promise<void> {
-  await failTaskWithEventIfStatus(db, {
+): Promise<{ persisted: boolean }> {
+  return await failTaskWithEventIfStatus(db, {
     source: 'restart_rehydration',
     taskExternalId: taskId,
     fromStatus,
