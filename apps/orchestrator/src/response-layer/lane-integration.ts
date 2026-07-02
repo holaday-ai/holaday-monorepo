@@ -4,10 +4,10 @@
  * Wraps the response-layer formatter so the three "vision-loop"
  * lanes (generate / scrape / handoff-generate) can opt in with one
  * call each instead of duplicating the supercar lane's inline
- * pattern. Supercar still has its own bespoke wiring because its
- * `outcome` shape differs (carries verifier evidence + finalState);
- * unifying that would risk the production-stable path for a code
- * win.
+ * pattern. Supercar still keeps its bespoke formatter wiring because
+ * its `outcome` shape differs (carries verifier evidence +
+ * finalState), but it also reuses the post-persist stamp helper so
+ * all lanes share the same stale-write guard.
  *
  * The contract is split into TWO helpers because the formatter
  * runs BEFORE persist (so the row stores the polished summary in

@@ -4335,6 +4335,7 @@ export const tasksRouter = router({
                   summary: handoffRl.summary,
                 };
               }
+              let handoffTerminalPersisted = false;
               try {
                 if (generateOutcome.status === 'completed') {
                   const persisted = await repo.persistVisionOutcome(taskId, {
@@ -4343,6 +4344,7 @@ export const tasksRouter = router({
                     tickCount: outcome.iterations,
                     metadata,
                   });
+                  handoffTerminalPersisted = persisted.persisted;
                   // P1 — generate has no plan-step marker discipline
                   // (no [STEP N done] emission), so any pending /
                   // running steps left over from the supercar's
@@ -4370,6 +4372,7 @@ export const tasksRouter = router({
                     tickCount: outcome.iterations,
                     metadata,
                   });
+                  handoffTerminalPersisted = persisted.persisted;
                   if (persisted.persisted) {
                     broadcastToUser(userId, {
                       type: 'server.task.terminal',
@@ -4388,20 +4391,23 @@ export const tasksRouter = router({
                 );
               }
               // Stamp metadata columns after persist. Safe to call
-              // even on the failed branch (the helper no-ops when
-              // metadata is undefined; metadata is only defined
-              // when format() actually ran, which requires
-              // status='completed' + summary).
-              await stampResponseLayerColumns(
-                ctx.db,
-                taskId,
-                handoffRl.responseLayerOriginal,
-                generateOutcome.status === 'completed'
-                  ? generateOutcome.summary
-                  : '',
-                handoffRl.responseLayerMetadata,
-                ctx.logger,
-              );
+              // only when the terminal row actually landed. The
+              // helper itself guards terminal source statuses; this
+              // extra gate prevents a late handoff result from
+              // stamping formatter metadata onto a task that was
+              // already cancelled or otherwise superseded.
+              if (handoffTerminalPersisted) {
+                await stampResponseLayerColumns(
+                  ctx.db,
+                  taskId,
+                  handoffRl.responseLayerOriginal,
+                  generateOutcome.status === 'completed'
+                    ? generateOutcome.summary
+                    : '',
+                  handoffRl.responseLayerMetadata,
+                  ctx.logger,
+                );
+              }
               return;
             }
             // R7 — grab the final-state evidence BEFORE persistSupercar
@@ -4822,18 +4828,20 @@ export const tasksRouter = router({
             // ran, even if it fell back).
             if (terminalPersisted && responseLayerMetadata) {
               try {
-                await ctx.db
-                  .update(tasksTable)
-                  .set({
-                    originalSummary:
-                      responseLayerOriginal ?? outcome.summary ?? null,
-                    formattedSummary: outcome.summary ?? null,
-                    responseLayerMetadata: responseLayerMetadata as Record<
-                      string,
-                      unknown
-                    >,
-                  })
-                  .where(eq(tasksTable.externalId, taskId));
+                const stamped = await stampResponseLayerColumns(
+                  ctx.db,
+                  taskId,
+                  responseLayerOriginal,
+                  outcome.summary ?? '',
+                  responseLayerMetadata,
+                  ctx.logger,
+                );
+                if (!stamped) {
+                  ctx.logger.warn(
+                    { taskId },
+                    'openai-response-layer: supercar stamp skipped because task was no longer terminal',
+                  );
+                }
               } catch (err) {
                 ctx.logger.warn(
                   { err: err instanceof Error ? err.message : String(err), taskId },
@@ -5937,13 +5945,53 @@ export const tasksRouter = router({
       const claimed = await repo.consumeVideoConfirm(input.taskId);
       const action = decideVideoGate(choice, claimed);
       if (action === 'already_consumed') {
-        broadcastToUser(ctx.userId, {
-          type: 'server.task.terminal',
-          taskId: input.taskId,
-          status: 'completed',
-          summary: '该报价已开始制作或已取消，未重复扣费。',
+        const [current] = await ctx.db
+          .select({
+            status: tasksTable.status,
+            result: tasksTable.result,
+          })
+          .from(tasksTable)
+          .where(
+            and(
+              eq(tasksTable.externalId, input.taskId),
+              eq(tasksTable.userId, userRow.id),
+              eq(tasksTable.origin, 'user'),
+            ),
+          )
+          .limit(1);
+        const currentStatus = current?.status;
+        if (currentStatus === 'completed') {
+          const summary =
+            readResultSummary(current?.result) ??
+            '该报价已开始制作视频，未重复扣费。';
+          broadcastToUser(ctx.userId, {
+            type: 'server.task.terminal',
+            taskId: input.taskId,
+            status: 'completed',
+            summary,
+          });
+          return { taskId: input.taskId, status: 'completed' as const };
+        }
+        if (currentStatus === 'cancelled') {
+          const summary =
+            readResultSummary(current?.result) ??
+            '已取消，未产生任何费用。';
+          broadcastToUser(ctx.userId, {
+            type: 'server.task.terminal',
+            taskId: input.taskId,
+            status: 'cancelled',
+            summary,
+          });
+          return { taskId: input.taskId, status: 'cancelled' as const };
+        }
+        ctx.logger.warn(
+          { taskId: input.taskId, currentStatus },
+          'video confirm consume raced but task is not terminal; refusing synthetic terminal broadcast',
+        );
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: '报价状态已变化，请刷新后重试。',
         });
-        return { taskId: input.taskId, status: 'completed' as const };
       }
 
       // generate_video | generate_image — Veo 在此之后(已过原子抢占=确认后)。
@@ -6631,13 +6679,20 @@ export const tasksRouter = router({
         try {
           const [row] = await ctx.db
             .select({
+              status: tasksTable.status,
               awaitingQuestion: tasksTable.awaitingQuestion,
               awaitingKind: tasksTable.awaitingKind,
             })
             .from(tasksTable)
-            .where(eq(tasksTable.externalId, input.taskId))
+            .where(
+              and(
+                eq(tasksTable.externalId, input.taskId),
+                eq(tasksTable.userId, userRow.id),
+                eq(tasksTable.origin, 'user'),
+              ),
+            )
             .limit(1);
-          if (row?.awaitingQuestion) {
+          if (row?.status === 'awaiting_user' && row.awaitingQuestion) {
             const k = row.awaitingKind;
             const validKinds = ['clarification', 'login', 'captcha', 'permission', 'browser_action'] as const;
             const kind =
@@ -7822,6 +7877,14 @@ function stripFinalScreenshot(result: unknown): unknown {
   const { finalScreenshot: _omitted, ...rest } = r;
   void _omitted;
   return rest;
+}
+
+function readResultSummary(result: unknown): string | null {
+  if (!result || typeof result !== 'object' || Array.isArray(result)) {
+    return null;
+  }
+  const summary = (result as Record<string, unknown>).summary;
+  return typeof summary === 'string' && summary.trim() ? summary : null;
 }
 
 /**
