@@ -3,6 +3,7 @@ import {
   PARTNER_RECHARGE_MAX_SINGLE_CNY_CENTS,
   PARTNER_RECHARGE_MIN_CNY_CENTS,
 } from '@holaday/shared-types';
+import { pageErrorMessage } from './page-error-copy';
 
 type PartnerMembershipStatus = 'active' | 'expired' | 'cancelled';
 type NormalizedMembershipStatus = PartnerMembershipStatus | 'none';
@@ -60,6 +61,11 @@ export interface PartnerLotState {
 
 export type PartnerPageState = PartnerDisabledState | PartnerEnabledState;
 
+export interface PartnerIdempotencyDraft {
+  readonly key: string;
+  readonly fingerprint: string;
+}
+
 const disabledState: PartnerDisabledState = {
   enabled: false,
   title: '合伙人账本暂未开放',
@@ -107,6 +113,16 @@ const LOT_STATUSES = new Set<PartnerLotStatus>([
   'closed',
 ]);
 const RISK_STATUSES = new Set<PartnerRiskStatus>(['normal', 'review', 'review_required', 'frozen']);
+
+const PARTNER_ACTION_ERROR_RULES: ReadonlyArray<readonly [RegExp, string]> = [
+  [/\bbelow_minimum\b/i, '金额低于最低限制'],
+  [/\babove_single_maximum\b/i, '金额超过单笔上限'],
+  [/\bnot_whole_cny\b/i, '金额必须为整元'],
+  [/partner membership required/i, '请先创建并完成年费会员订单'],
+  [/partner KYC must be passed before recharge/i, '实名通过后才能充值'],
+  [/partner KYC must be passed before withdrawal/i, '实名通过后才能提现'],
+  [/\binsufficient_available_credit\b/i, '可用 HOLA Credit 不足'],
+];
 
 export function normalizePartnerDashboard(value: unknown): PartnerPageState {
   if (!isRecord(value) || value.enabled !== true) return disabledState;
@@ -162,6 +178,48 @@ export function membershipStatusLabel(value: unknown): string {
 
 export function kycStatusLabel(value: unknown): string {
   return KYC_LABELS[normalizeKycStatus(value)];
+}
+
+export function partnerActionErrorMessage(error: unknown, fallback: string): string {
+  const raw = rawErrorText(error);
+  if (!raw) return pageErrorMessage(error, fallback);
+  for (const [match, copy] of PARTNER_ACTION_ERROR_RULES) {
+    if (match.test(raw)) return copy;
+  }
+  return pageErrorMessage(null, fallback);
+}
+
+export function partnerDraftKeyFor({
+  current,
+  prefix,
+  fingerprint,
+  makeKey,
+}: {
+  readonly current: PartnerIdempotencyDraft | null;
+  readonly prefix: string;
+  readonly fingerprint: string;
+  readonly makeKey: (prefix: string) => string;
+}): PartnerIdempotencyDraft {
+  if (current?.fingerprint === fingerprint) return current;
+  return {
+    key: makeKey(prefix),
+    fingerprint,
+  };
+}
+
+export function partnerDraftKeyAfterSuccess({
+  prefix,
+  fingerprint,
+  makeKey,
+}: {
+  readonly prefix: string;
+  readonly fingerprint: string;
+  readonly makeKey: (prefix: string) => string;
+}): PartnerIdempotencyDraft {
+  return {
+    key: makeKey(prefix),
+    fingerprint,
+  };
 }
 
 function normalizeMembership(value: unknown): NormalizedPartnerMembership {
@@ -268,6 +326,12 @@ function safeCents(value: unknown): number {
 
 function safeTrimmedString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function rawErrorText(error: unknown): string {
+  if (error instanceof Error) return error.message.trim();
+  if (typeof error === 'string') return error.trim();
+  return '';
 }
 
 function dateOnly(value: unknown): string | null {

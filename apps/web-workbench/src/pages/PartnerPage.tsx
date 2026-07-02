@@ -17,6 +17,10 @@ import {
   formatHolaCreditCents,
   formatPartnerCnyCents,
   normalizePartnerDashboard,
+  partnerActionErrorMessage,
+  partnerDraftKeyAfterSuccess,
+  partnerDraftKeyFor,
+  type PartnerIdempotencyDraft,
   type PartnerEnabledState,
   type PartnerPageState,
 } from '@/lib/partner-page-state';
@@ -56,6 +60,7 @@ export function PartnerPage(): JSX.Element {
   const toast = useToast();
   const mountedRef = React.useRef(false);
   const requestIdRef = React.useRef(0);
+  const mutationInFlightRef = React.useRef(false);
   const [state, setState] = React.useState<PartnerPageState | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [loadError, setLoadError] = React.useState<string | null>(null);
@@ -68,6 +73,25 @@ export function PartnerPage(): JSX.Element {
   const [rechargeAmountInput, setRechargeAmountInput] = React.useState('10000');
   const [withdrawalAmountInput, setWithdrawalAmountInput] = React.useState('');
   const [bankFingerprint, setBankFingerprint] = React.useState('');
+  const [membershipIdempotencyKey, setMembershipIdempotencyKey] = React.useState(() =>
+    idempotencyKey('partner-membership'),
+  );
+  const [rechargeDraft, setRechargeDraft] = React.useState<PartnerIdempotencyDraft>(() =>
+    partnerDraftKeyFor({
+      current: null,
+      prefix: 'partner-recharge',
+      fingerprint: rechargeFingerprint(10_000_00),
+      makeKey: idempotencyKey,
+    }),
+  );
+  const [withdrawalDraft, setWithdrawalDraft] = React.useState<PartnerIdempotencyDraft>(() =>
+    partnerDraftKeyFor({
+      current: null,
+      prefix: 'partner-withdrawal',
+      fingerprint: withdrawalFingerprint(0, ''),
+      makeKey: idempotencyKey,
+    }),
+  );
 
   const refresh = React.useCallback(async () => {
     const requestId = ++requestIdRef.current;
@@ -79,7 +103,7 @@ export function PartnerPage(): JSX.Element {
       setState(dashboard);
     } catch (err) {
       if (!mountedRef.current || requestId !== requestIdRef.current) return;
-      setLoadError(rawErrorMessage(err, '合伙人账本暂时无法加载'));
+      setLoadError(partnerActionErrorMessage(err, '合伙人账本暂时无法加载'));
     } finally {
       if (mountedRef.current && requestId === requestIdRef.current) setLoading(false);
     }
@@ -98,6 +122,37 @@ export function PartnerPage(): JSX.Element {
     () => clampRechargeAmountCnyCents(rechargeAmountInput),
     [rechargeAmountInput],
   );
+  const rechargeDraftFingerprint = React.useMemo(
+    () => rechargeFingerprint(rechargeAmountCnyCents),
+    [rechargeAmountCnyCents],
+  );
+  const withdrawalDraftFingerprint = React.useMemo(
+    () => withdrawalFingerprint(amountInputToCreditCents(withdrawalAmountInput), bankFingerprint),
+    [bankFingerprint, withdrawalAmountInput],
+  );
+  const isMutating = pendingAction !== null;
+
+  React.useEffect(() => {
+    setRechargeDraft((current) =>
+      partnerDraftKeyFor({
+        current,
+        prefix: 'partner-recharge',
+        fingerprint: rechargeDraftFingerprint,
+        makeKey: idempotencyKey,
+      }),
+    );
+  }, [rechargeDraftFingerprint]);
+
+  React.useEffect(() => {
+    setWithdrawalDraft((current) =>
+      partnerDraftKeyFor({
+        current,
+        prefix: 'partner-withdrawal',
+        fingerprint: withdrawalDraftFingerprint,
+        makeKey: idempotencyKey,
+      }),
+    );
+  }, [withdrawalDraftFingerprint]);
 
   const refreshAction = (
     <Button
@@ -106,7 +161,7 @@ export function PartnerPage(): JSX.Element {
       size="sm"
       className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
       onClick={() => void refresh()}
-      disabled={loading}
+      disabled={loading || isMutating}
     >
       {loading ? (
         <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
@@ -118,26 +173,25 @@ export function PartnerPage(): JSX.Element {
   );
 
   async function createMembershipOrder(): Promise<void> {
-    setPendingAction('membership');
-    setActionError(null);
+    if (!beginMutation('membership')) return;
     try {
       const order = await trpc.partner.createMembershipOrder.mutate({
         provider: 'manual',
-        idempotencyKey: idempotencyKey('partner-membership'),
+        idempotencyKey: membershipIdempotencyKey,
       });
       setMembershipOrder(order);
+      setMembershipIdempotencyKey(idempotencyKey('partner-membership'));
       toast.show('会员订单已创建，请等待人工确认', 'info', 2500);
     } catch (err) {
       handleActionError(err, '会员订单创建失败');
     } finally {
-      setPendingAction(null);
+      endMutation();
     }
   }
 
   async function previewRecharge(): Promise<void> {
+    if (!beginMutation('preview')) return;
     const amountCnyCents = normalizeRechargeInput();
-    setPendingAction('preview');
-    setActionError(null);
     try {
       const preview = await trpc.partner.rechargePreview.query({
         amountCnyCents,
@@ -148,26 +202,40 @@ export function PartnerPage(): JSX.Element {
     } catch (err) {
       handleActionError(err, '充值预览失败');
     } finally {
-      setPendingAction(null);
+      endMutation();
     }
   }
 
   async function createRechargeOrder(): Promise<void> {
+    if (!beginMutation('recharge')) return;
     const amountCnyCents = normalizeRechargeInput();
-    setPendingAction('recharge');
-    setActionError(null);
+    const fingerprint = rechargeFingerprint(amountCnyCents);
+    const draft = partnerDraftKeyFor({
+      current: rechargeDraft,
+      prefix: 'partner-recharge',
+      fingerprint,
+      makeKey: idempotencyKey,
+    });
+    setRechargeDraft(draft);
     try {
       const order = await trpc.partner.createRechargeOrder.mutate({
         amountCnyCents,
         provider: 'manual',
-        idempotencyKey: idempotencyKey('partner-recharge'),
+        idempotencyKey: draft.key,
       });
       setRechargeOrder(order);
+      setRechargeDraft(
+        partnerDraftKeyAfterSuccess({
+          prefix: 'partner-recharge',
+          fingerprint,
+          makeKey: idempotencyKey,
+        }),
+      );
       toast.show('充值订单已创建，请等待人工确认', 'info', 2500);
     } catch (err) {
       handleActionError(err, '充值订单创建失败');
     } finally {
-      setPendingAction(null);
+      endMutation();
     }
   }
 
@@ -183,20 +251,35 @@ export function PartnerPage(): JSX.Element {
       return;
     }
 
-    setPendingAction('withdrawal');
-    setActionError(null);
+    if (!beginMutation('withdrawal')) return;
+    const fingerprintKey = withdrawalFingerprint(amountCreditCents, fingerprint);
+    const draft = partnerDraftKeyFor({
+      current: withdrawalDraft,
+      prefix: 'partner-withdrawal',
+      fingerprint: fingerprintKey,
+      makeKey: idempotencyKey,
+    });
+    setWithdrawalDraft(draft);
     try {
       const result = await trpc.partner.requestWithdrawal.mutate({
         amountCreditCents,
         bankAccountFingerprint: fingerprint,
-        idempotencyKey: idempotencyKey('partner-withdrawal'),
+        idempotencyKey: draft.key,
       });
       setWithdrawal(result);
+      setWithdrawalDraft(
+        partnerDraftKeyAfterSuccess({
+          prefix: 'partner-withdrawal',
+          fingerprint: fingerprintKey,
+          makeKey: idempotencyKey,
+        }),
+      );
       toast.show('提现申请已提交，需完成审核后出款', 'info', 2800);
+      await refresh();
     } catch (err) {
       handleActionError(err, '提现申请失败');
     } finally {
-      setPendingAction(null);
+      endMutation();
     }
   }
 
@@ -207,9 +290,25 @@ export function PartnerPage(): JSX.Element {
   }
 
   function handleActionError(err: unknown, fallback: string): void {
-    const message = rawErrorMessage(err, fallback);
+    const message = partnerActionErrorMessage(err, fallback);
     setActionError(message);
     toast.show(message, 'error');
+  }
+
+  function beginMutation(action: PartnerAction): boolean {
+    if (mutationInFlightRef.current) {
+      toast.show('已有操作处理中，请稍候', 'info', 1800);
+      return false;
+    }
+    mutationInFlightRef.current = true;
+    setPendingAction(action);
+    setActionError(null);
+    return true;
+  }
+
+  function endMutation(): void {
+    mutationInFlightRef.current = false;
+    setPendingAction(null);
   }
 
   return (
@@ -282,6 +381,7 @@ export function PartnerPage(): JSX.Element {
           onBankFingerprintChange={setBankFingerprint}
           withdrawal={withdrawal}
           pendingAction={pendingAction}
+          isMutating={isMutating}
         />
       )}
     </PageContainer>
@@ -307,6 +407,7 @@ function PartnerWorkbench({
   onBankFingerprintChange,
   withdrawal,
   pendingAction,
+  isMutating,
 }: {
   state: PartnerEnabledState;
   rechargeAmountInput: string;
@@ -326,6 +427,7 @@ function PartnerWorkbench({
   onBankFingerprintChange: (value: string) => void;
   withdrawal: PartnerWithdrawalSummary | null;
   pendingAction: PartnerAction | null;
+  isMutating: boolean;
 }): JSX.Element {
   return (
     <div className="space-y-6">
@@ -377,13 +479,13 @@ function PartnerWorkbench({
             <table className="min-w-[760px] w-full text-left text-xs">
               <thead className="border-b border-[#EFEFEF] text-[11px] text-muted-foreground">
                 <tr>
-                  <th className="pb-2 pr-4 font-medium">批次</th>
-                  <th className="pb-2 pr-4 font-medium">状态</th>
-                  <th className="pb-2 pr-4 font-medium">本金</th>
-                  <th className="pb-2 pr-4 font-medium">锁定增量</th>
-                  <th className="pb-2 pr-4 font-medium">已释放</th>
-                  <th className="pb-2 pr-4 font-medium">释放窗口</th>
-                  <th className="pb-2 font-medium">风险</th>
+                  <th scope="col" className="pb-2 pr-4 font-medium">批次</th>
+                  <th scope="col" className="pb-2 pr-4 font-medium">状态</th>
+                  <th scope="col" className="pb-2 pr-4 font-medium">本金</th>
+                  <th scope="col" className="pb-2 pr-4 font-medium">锁定增量</th>
+                  <th scope="col" className="pb-2 pr-4 font-medium">已释放</th>
+                  <th scope="col" className="pb-2 pr-4 font-medium">释放窗口</th>
+                  <th scope="col" className="pb-2 font-medium">风险</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#EFEFEF]">
@@ -422,7 +524,7 @@ function PartnerWorkbench({
               type="button"
               size="sm"
               onClick={onMembershipOrder}
-              disabled={pendingAction === 'membership'}
+              disabled={isMutating}
             >
               {pendingAction === 'membership' ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
@@ -449,6 +551,7 @@ function PartnerWorkbench({
                 inputMode="decimal"
                 placeholder="例如 5000"
                 value={withdrawalAmountInput}
+                disabled={isMutating}
                 onChange={(event) => onWithdrawalAmountInputChange(event.target.value)}
               />
             </label>
@@ -458,6 +561,7 @@ function PartnerWorkbench({
                 className="mt-1"
                 placeholder="bank_fp_..."
                 value={bankFingerprint}
+                disabled={isMutating}
                 onChange={(event) => onBankFingerprintChange(event.target.value)}
               />
             </label>
@@ -468,7 +572,7 @@ function PartnerWorkbench({
               type="button"
               size="sm"
               onClick={onRequestWithdrawal}
-              disabled={pendingAction === 'withdrawal'}
+              disabled={isMutating}
             >
               {pendingAction === 'withdrawal' ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
@@ -500,6 +604,7 @@ function PartnerWorkbench({
                   max={200000}
                   step={1}
                   value={rechargeAmountInput}
+                  disabled={isMutating}
                   onChange={(event) => onRechargeAmountInputChange(event.target.value)}
                   onBlur={() => onRechargeAmountInputChange(String(rechargeAmountCnyCents / 100))}
                 />
@@ -515,6 +620,7 @@ function PartnerWorkbench({
               max={200000_00}
               step={100}
               value={rechargeAmountCnyCents}
+              disabled={isMutating}
               onChange={(event) => onRechargeSliderChange(Number(event.target.value))}
               aria-label="充值金额"
             />
@@ -530,7 +636,7 @@ function PartnerWorkbench({
               size="sm"
               className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
               onClick={onPreviewRecharge}
-              disabled={pendingAction === 'preview'}
+              disabled={isMutating}
             >
               {pendingAction === 'preview' && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />}
               预览
@@ -539,7 +645,7 @@ function PartnerWorkbench({
               type="button"
               size="sm"
               onClick={onCreateRechargeOrder}
-              disabled={pendingAction === 'recharge'}
+              disabled={isMutating}
             >
               {pendingAction === 'recharge' ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
@@ -660,10 +766,12 @@ function amountInputToCreditCents(value: string): number {
   return Math.floor(parsed * 100);
 }
 
-function rawErrorMessage(err: unknown, fallback: string): string {
-  if (err instanceof Error && err.message.trim()) return err.message;
-  if (typeof err === 'string' && err.trim()) return err.trim();
-  return fallback;
+function rechargeFingerprint(amountCnyCents: number): string {
+  return `amountCnyCents=${amountCnyCents}`;
+}
+
+function withdrawalFingerprint(amountCreditCents: number, bankAccountFingerprint: string): string {
+  return `amountCreditCents=${amountCreditCents};bank=${bankAccountFingerprint.trim()}`;
 }
 
 function providerLabel(provider: string): string {
@@ -694,5 +802,8 @@ function withdrawalStatusLabel(status: string): string {
 function formatDateTime(value: Date | string): string {
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) return '—';
-  return date.toISOString().slice(0, 16).replace('T', ' ');
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(date);
 }

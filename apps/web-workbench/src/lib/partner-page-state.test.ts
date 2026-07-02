@@ -6,6 +6,9 @@ import {
   kycStatusLabel,
   membershipStatusLabel,
   normalizePartnerDashboard,
+  partnerActionErrorMessage,
+  partnerDraftKeyAfterSuccess,
+  partnerDraftKeyFor,
 } from './partner-page-state';
 
 describe('partner page state helpers', () => {
@@ -138,5 +141,85 @@ describe('partner page state helpers', () => {
     expect(state.lots[0]?.riskStatus).toBe('review_required');
     expect(state.lots[0]?.riskLabel).toBe('需复核');
     expect(state.lots[0]?.riskLabel).not.toBe('正常');
+  });
+
+  it('maps partner action backend errors to safe localized copy', () => {
+    expect(partnerActionErrorMessage(new Error('below_minimum'), '充值失败')).toBe(
+      '金额低于最低限制',
+    );
+    expect(partnerActionErrorMessage(new Error('above_single_maximum'), '充值失败')).toBe(
+      '金额超过单笔上限',
+    );
+    expect(partnerActionErrorMessage(new Error('not_whole_cny'), '充值失败')).toBe(
+      '金额必须为整元',
+    );
+    expect(
+      partnerActionErrorMessage(new Error('partner membership required'), '充值失败'),
+    ).toBe('请先创建并完成年费会员订单');
+    expect(
+      partnerActionErrorMessage(
+        new Error('partner KYC must be passed before recharge'),
+        '充值失败',
+      ),
+    ).toBe('实名通过后才能充值');
+    expect(
+      partnerActionErrorMessage(
+        new Error('partner KYC must be passed before withdrawal'),
+        '提现失败',
+      ),
+    ).toBe('实名通过后才能提现');
+    expect(
+      partnerActionErrorMessage(new Error('insufficient_available_credit'), '提现失败'),
+    ).toBe('可用 HOLA Credit 不足');
+    expect(
+      partnerActionErrorMessage(
+        new Error('SQLSTATE 23000: internal stack trace should not render'),
+        '操作失败',
+      ),
+    ).toBe('操作失败');
+  });
+
+  it('keeps idempotency draft keys stable until draft changes or succeeds', () => {
+    const issued: string[] = [];
+    const makeKey = (prefix: string) => {
+      const key = `${prefix}:${issued.length + 1}`;
+      issued.push(key);
+      return key;
+    };
+
+    const first = partnerDraftKeyFor({
+      current: null,
+      prefix: 'partner-recharge',
+      fingerprint: 'amount=10000',
+      makeKey,
+    });
+    const retry = partnerDraftKeyFor({
+      current: first,
+      prefix: 'partner-recharge',
+      fingerprint: 'amount=10000',
+      makeKey,
+    });
+    const changedDraft = partnerDraftKeyFor({
+      current: retry,
+      prefix: 'partner-recharge',
+      fingerprint: 'amount=20000',
+      makeKey,
+    });
+    const afterSuccess = partnerDraftKeyAfterSuccess({
+      prefix: 'partner-recharge',
+      fingerprint: 'amount=20000',
+      makeKey,
+    });
+
+    expect(retry).toBe(first);
+    expect(changedDraft.key).not.toBe(first.key);
+    expect(changedDraft.fingerprint).toBe('amount=20000');
+    expect(afterSuccess.key).not.toBe(changedDraft.key);
+    expect(afterSuccess.fingerprint).toBe('amount=20000');
+    expect(issued).toEqual([
+      'partner-recharge:1',
+      'partner-recharge:2',
+      'partner-recharge:3',
+    ]);
   });
 });
