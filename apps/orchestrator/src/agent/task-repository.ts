@@ -873,16 +873,55 @@ export class TaskRepository {
    * consumed,故匹配行 affectedRows=1;二次 WHERE 不再匹配 → 0)。真 MySQL 上实测。
    */
   async consumeVideoConfirm(taskExternalId: string): Promise<boolean> {
-    const result = await this.db.execute(sql`
-      UPDATE tasks
-      SET result = JSON_SET(result, '$.metadata.lane', 'video_creation_consumed')
-      WHERE external_id = ${taskExternalId}
-        AND status = 'awaiting_user'
-        AND awaiting_kind = 'video_quote'
-        AND JSON_UNQUOTE(JSON_EXTRACT(result, '$.metadata.lane')) = 'video_creation_confirm'
-    `);
-    const header = (Array.isArray(result) ? result[0] : result) as { affectedRows?: number } | undefined;
-    return (header?.affectedRows ?? 0) === 1;
+    const [taskRow] = await this.db
+      .select({ id: tasks.id })
+      .from(tasks)
+      .where(eq(tasks.externalId, taskExternalId))
+      .limit(1);
+    if (!taskRow) throw new Error(`task ${taskExternalId} not found in DB`);
+
+    let persisted = true;
+    await this.db.transaction(async (tx) => {
+      const result = await tx.execute(sql`
+        UPDATE tasks
+        SET
+          status = 'completed',
+          awaiting_kind = NULL,
+          awaiting_question = NULL,
+          result = JSON_SET(
+            COALESCE(result, JSON_OBJECT()),
+            '$.summary',
+            '已确认，正在生成视频。',
+            '$.metadata.lane',
+            'video_creation_consumed'
+          ),
+          updated_at = ${new Date()},
+          completed_at = ${new Date()}
+        WHERE external_id = ${taskExternalId}
+          AND status = 'awaiting_user'
+          AND awaiting_kind = 'video_quote'
+          AND JSON_UNQUOTE(JSON_EXTRACT(result, '$.metadata.lane')) = 'video_creation_confirm'
+      `);
+      const header = (Array.isArray(result) ? result[0] : result) as { affectedRows?: number } | undefined;
+      if ((header?.affectedRows ?? 0) !== 1) {
+        persisted = false;
+        return;
+      }
+
+      await tx.insert(taskEvents).values({
+        externalId: newExternalId('taskEvent'),
+        taskId: taskRow.id,
+        type: 'task.completed',
+        actor: 'user',
+        payload: {
+          source: 'video_quote',
+          from: 'awaiting_user',
+          to: 'completed',
+          reason: 'user_confirmed',
+        },
+      });
+    });
+    return persisted;
   }
 
   async cancelVideoConfirm(taskExternalId: string): Promise<{ persisted: boolean }> {

@@ -972,6 +972,42 @@ describe('TaskRepository task terminal state persistence', () => {
     expect(captured.eventPayloads).toHaveLength(0);
   });
 
+  it('consumeVideoConfirm atomically completes the quote task before generation starts', async () => {
+    const { db, captured } = fakeDbForExecute(1);
+    const repo = new TaskRepository(db);
+
+    const result = await repo.consumeVideoConfirm('tsk_state_machine');
+
+    expect(result).toBe(true);
+    const sqlText = collectSqlText(captured.statements[0]);
+    expect(sqlText).toContain('status = \'completed\'');
+    expect(sqlText).toContain('awaiting_kind = NULL');
+    expect(sqlText).toContain('awaiting_question = NULL');
+    expect(sqlText).toContain('video_creation_confirm');
+    expect(sqlText).toContain('video_creation_consumed');
+    expect(captured.transactionRan).toBe(true);
+    expect(captured.eventPayloads[0]).toMatchObject({
+      type: 'task.completed',
+      actor: 'user',
+      payload: {
+        source: 'video_quote',
+        from: 'awaiting_user',
+        to: 'completed',
+        reason: 'user_confirmed',
+      },
+    });
+  });
+
+  it('consumeVideoConfirm reports stale rows without completing the quote task', async () => {
+    const { db, captured } = fakeDbForExecute(0);
+    const repo = new TaskRepository(db);
+
+    const result = await repo.consumeVideoConfirm('tsk_state_machine');
+
+    expect(result).toBe(false);
+    expect(captured.eventPayloads).toHaveLength(0);
+  });
+
   it('cancelVideoConfirm atomically cancels only active video quote rows', async () => {
     const { db, captured } = fakeDbForExecute(1);
     const repo = new TaskRepository(db);

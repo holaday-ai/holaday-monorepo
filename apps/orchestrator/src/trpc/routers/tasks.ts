@@ -5898,20 +5898,9 @@ export const tasksRouter = router({
         return { taskId: input.taskId, status: 'awaiting_user' as const };
       }
 
-      // video|image — 原子抢占(防双击双扣)。只有抢到才生成。
-      const claimed = await repo.consumeVideoConfirm(input.taskId);
-      const action = decideVideoGate(choice, claimed);
-      if (action === 'already_consumed') {
-        broadcastToUser(ctx.userId, {
-          type: 'server.task.terminal',
-          taskId: input.taskId,
-          status: 'completed',
-          summary: '该报价已开始制作或已取消，未重复扣费。',
-        });
-        return { taskId: input.taskId, status: 'completed' as const };
-      }
-
-      // generate_video | generate_image — Veo 在此之后(已过原子抢占=确认后)。
+      // Validate the quote payload before the atomic consume. A malformed
+      // quote should not be marked completed before we know generation can
+      // at least start.
       const meta =
         ((
           row.result as {
@@ -5942,6 +5931,21 @@ export const tasksRouter = router({
       const vOpts = meta.videoOptions ?? {};
       // 宠物 i2v / IP 换口型无脚本;普通文生必须有脚本(报价时存的).
       if (!isPet && !isIp && !script) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '报价脚本丢失' });
+
+      // video|image — 原子抢占(防双击双扣)。只有抢到才生成。
+      const claimed = await repo.consumeVideoConfirm(input.taskId);
+      const action = decideVideoGate(choice, claimed);
+      if (action === 'already_consumed') {
+        broadcastToUser(ctx.userId, {
+          type: 'server.task.terminal',
+          taskId: input.taskId,
+          status: 'completed',
+          summary: '该报价已开始制作或已取消，未重复扣费。',
+        });
+        return { taskId: input.taskId, status: 'completed' as const };
+      }
+
+      // generate_video | generate_image — Veo 在此之后(已过原子抢占=确认后)。
       const visualMode = action === 'generate_image' ? ('image' as const) : ('video' as const);
 
       const newTaskId = newExternalId('task');
