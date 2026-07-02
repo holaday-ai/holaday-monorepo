@@ -753,6 +753,81 @@ describe('TaskRepository task terminal state persistence', () => {
     expect(captured.eventPayloads).toHaveLength(0);
   });
 
+  it('persistAwaitingUserResult only patches result while the same awaiting kind is still parked', async () => {
+    const { db, captured } = fakeDbForStateTransitions(1);
+    const repo = new TaskRepository(db);
+
+    const result = await repo.persistAwaitingUserResult({
+      taskExternalId: 'tsk_state_machine',
+      awaitingKind: 'login_required',
+      result: {
+        executionMode: 'browser',
+        finalUrl: 'https://example.com/login',
+      },
+    });
+
+    expect(result.persisted).toBe(true);
+    expect(captured.updatePayloads[0]).toMatchObject({
+      result: {
+        executionMode: 'browser',
+        finalUrl: 'https://example.com/login',
+      },
+    });
+    const params = collectDrizzleParamValues(captured.whereClauses.at(0));
+    expect(params).toEqual(
+      expect.arrayContaining(['tsk_state_machine', 'awaiting_user', 'login_required']),
+    );
+  });
+
+  it('persistAwaitingUserResult reports stale rows without pretending to patch result', async () => {
+    const { db } = fakeDbForStateTransitions(0);
+    const repo = new TaskRepository(db);
+
+    const result = await repo.persistAwaitingUserResult({
+      taskExternalId: 'tsk_state_machine',
+      awaitingKind: 'login_required',
+      result: { executionMode: 'browser' },
+    });
+
+    expect(result.persisted).toBe(false);
+  });
+
+  it('persistActivePlanStatus only updates active runner rows', async () => {
+    const { db, captured } = fakeDbForStateTransitions(1);
+    const repo = new TaskRepository(db);
+    const planStatus = [{ idx: 0, status: 'running', note: '正在打开页面' }];
+
+    const result = await repo.persistActivePlanStatus('tsk_state_machine', planStatus);
+
+    expect(result.persisted).toBe(true);
+    expect(captured.updatePayloads[0]).toMatchObject({
+      planStatus,
+    });
+    const params = collectDrizzleParamValues(captured.whereClauses.at(0));
+    expect(params).toEqual(
+      expect.arrayContaining([
+        'tsk_state_machine',
+        'pending',
+        'planning',
+        'queued',
+        'executing',
+      ]),
+    );
+    expect(params).not.toContain('awaiting_user');
+    expect(params).not.toContain('completed');
+  });
+
+  it('persistActivePlanStatus reports stale rows without pretending to update plan status', async () => {
+    const { db } = fakeDbForStateTransitions(0);
+    const repo = new TaskRepository(db);
+
+    const result = await repo.persistActivePlanStatus('tsk_state_machine', [
+      { idx: 0, status: 'running' },
+    ]);
+
+    expect(result.persisted).toBe(false);
+  });
+
   it('markQueuedTaskExecuting only starts rows still queued', async () => {
     const { db, captured } = fakeDbForStateTransitions(1);
     const repo = new TaskRepository(db);

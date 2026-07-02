@@ -353,6 +353,40 @@ export class TaskRepository {
     return { persisted };
   }
 
+  async persistAwaitingUserResult(params: {
+    taskExternalId: string;
+    awaitingKind: string;
+    result: Record<string, unknown>;
+  }): Promise<{ persisted: boolean }> {
+    const result = await this.db
+      .update(tasks)
+      .set({ result: params.result })
+      .where(
+        and(
+          eq(tasks.externalId, params.taskExternalId),
+          eq(tasks.status, 'awaiting_user'),
+          eq(tasks.awaitingKind, params.awaitingKind),
+        ),
+      );
+    return { persisted: extractMysqlAffectedRows(result) > 0 };
+  }
+
+  async persistActivePlanStatus(
+    taskExternalId: string,
+    planStatus: unknown,
+  ): Promise<{ persisted: boolean }> {
+    const result = await this.db
+      .update(tasks)
+      .set({ planStatus })
+      .where(
+        and(
+          eq(tasks.externalId, taskExternalId),
+          inArray(tasks.status, [...TASK_RUNNER_OUTCOME_SOURCE_STATUSES]),
+        ),
+      );
+    return { persisted: extractMysqlAffectedRows(result) > 0 };
+  }
+
   async markQueuedTaskExecuting(taskExternalId: string): Promise<{ persisted: boolean }> {
     const result = await this.db
       .update(tasks)

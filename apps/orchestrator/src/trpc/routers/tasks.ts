@@ -3501,25 +3501,27 @@ export const tasksRouter = router({
           // effort: a DB blip or broadcast failure logs and continues
           // (the loop already has the up-to-date state in memory).
           onPlanStepUpdate: (steps) => {
-            void ctx.db
-              .update(tasksTable)
-              .set({ planStatus: steps as unknown })
-              .where(eq(tasksTable.externalId, taskId))
-              .catch((err) =>
-                ctx.logger.warn({ err, taskId }, 'plan-step persist failed'),
-              );
-            try {
-              broadcastToUser(ctx.userId, {
-                type: 'server.task.plan_step',
-                taskId,
-                planStatus: steps,
-              });
-            } catch (err) {
-              ctx.logger.warn(
-                { err, taskId },
-                'plan-step broadcast failed',
-              );
-            }
+            void (async () => {
+              const persisted = await repo.persistActivePlanStatus(taskId, steps);
+              if (!persisted.persisted) {
+                ctx.logger.info({ taskId }, 'plan-step skipped stale update');
+                return;
+              }
+              try {
+                broadcastToUser(ctx.userId, {
+                  type: 'server.task.plan_step',
+                  taskId,
+                  planStatus: steps,
+                });
+              } catch (err) {
+                ctx.logger.warn(
+                  { err, taskId },
+                  'plan-step broadcast failed',
+                );
+              }
+            })().catch((err) =>
+              ctx.logger.warn({ err, taskId }, 'plan-step persist failed'),
+            );
           },
           onStatsRecord: ({ laneUsed, targetSite, success, latencyMs, errorType }) => {
             void statsService.record({
@@ -3941,10 +3943,17 @@ export const tasksRouter = router({
                 if (captured.finalViewport) {
                   next.finalViewport = captured.finalViewport;
                 }
-                await ctx.db
-                  .update(tasksTable)
-                  .set({ result: next })
-                  .where(eq(tasksTable.externalId, taskId));
+                const persisted = await repo.persistAwaitingUserResult({
+                  taskExternalId: taskId,
+                  awaitingKind: ev.awaitingKind,
+                  result: next,
+                });
+                if (!persisted.persisted) {
+                  ctx.logger.info(
+                    { taskId, awaitingKind: ev.awaitingKind },
+                    'supercar: skipped stale park metadata write',
+                  );
+                }
               } catch (err) {
                 ctx.logger.warn(
                   { err, taskId },
