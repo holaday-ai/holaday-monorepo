@@ -12,38 +12,48 @@ import {
 } from 'drizzle-orm/mysql-core';
 import { users } from './users.js';
 
-const id = bigint('id', { mode: 'number', unsigned: true }).primaryKey().autoincrement();
-const externalId = varchar('external_id', { length: 32 }).notNull();
-const userId = bigint('user_id', { mode: 'number', unsigned: true })
-  .notNull()
-  .references(() => users.id, { onDelete: 'cascade' });
+function idColumn() {
+  return bigint('id', { mode: 'number', unsigned: true }).primaryKey().autoincrement();
+}
 
-const timestamps = {
-  createdAt: datetime('created_at', { mode: 'date', fsp: 3 })
-    .notNull()
-    .default(sql`CURRENT_TIMESTAMP(3)`),
-  updatedAt: datetime('updated_at', { mode: 'date', fsp: 3 })
-    .notNull()
-    .default(sql`CURRENT_TIMESTAMP(3)`)
-    .$onUpdate(() => new Date()),
-};
+function externalIdColumn() {
+  return varchar('external_id', { length: 32 }).notNull();
+}
 
-const createdAt = datetime('created_at', { mode: 'date', fsp: 3 })
-  .notNull()
-  .default(sql`CURRENT_TIMESTAMP(3)`);
+function userIdColumn() {
+  return bigint('user_id', { mode: 'number', unsigned: true })
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' });
+}
+
+function createdAtColumn() {
+  return datetime('created_at', { mode: 'date', fsp: 3 })
+    .notNull()
+    .default(sql`CURRENT_TIMESTAMP(3)`);
+}
+
+function timestamps() {
+  return {
+    createdAt: createdAtColumn(),
+    updatedAt: datetime('updated_at', { mode: 'date', fsp: 3 })
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP(3)`)
+      .$onUpdate(() => new Date()),
+  };
+}
 
 export const partnerMemberships = mysqlTable(
   'partner_memberships',
   {
-    id,
-    externalId,
-    userId,
+    id: idColumn(),
+    externalId: externalIdColumn(),
+    userId: userIdColumn(),
     status: varchar('status', { length: 24 }).notNull().default('active'),
     startsAt: datetime('starts_at', { mode: 'date', fsp: 3 }).notNull(),
     expiresAt: datetime('expires_at', { mode: 'date', fsp: 3 }).notNull(),
     sourcePaymentExternalId: varchar('source_payment_external_id', { length: 32 }),
     metadata: json('metadata'),
-    ...timestamps,
+    ...timestamps(),
   },
   (t) => [
     uniqueIndex('uk_partner_memberships_external_id').on(t.externalId),
@@ -55,9 +65,9 @@ export const partnerMemberships = mysqlTable(
 export const partnerKycProfiles = mysqlTable(
   'partner_kyc_profiles',
   {
-    id,
-    externalId,
-    userId,
+    id: idColumn(),
+    externalId: externalIdColumn(),
+    userId: userIdColumn(),
     status: varchar('status', { length: 24 }).notNull().default('not_started'),
     country: varchar('country', { length: 8 }).notNull().default('CN'),
     realNameHash: varchar('real_name_hash', { length: 128 }),
@@ -68,7 +78,7 @@ export const partnerKycProfiles = mysqlTable(
     providerRef: varchar('provider_ref', { length: 128 }),
     reviewedAt: datetime('reviewed_at', { mode: 'date', fsp: 3 }),
     metadata: json('metadata'),
-    ...timestamps,
+    ...timestamps(),
   },
   (t) => [
     uniqueIndex('uk_partner_kyc_profiles_external_id').on(t.externalId),
@@ -80,9 +90,9 @@ export const partnerKycProfiles = mysqlTable(
 export const partnerRechargeOrders = mysqlTable(
   'partner_recharge_orders',
   {
-    id,
-    externalId,
-    userId,
+    id: idColumn(),
+    externalId: externalIdColumn(),
+    userId: userIdColumn(),
     provider: varchar('provider', { length: 24 }).notNull(),
     providerOrderId: varchar('provider_order_id', { length: 128 }),
     providerCaptureId: varchar('provider_capture_id', { length: 128 }),
@@ -91,7 +101,7 @@ export const partnerRechargeOrders = mysqlTable(
     orderKind: varchar('order_kind', { length: 32 }).notNull(),
     idempotencyKey: varchar('idempotency_key', { length: 128 }).notNull(),
     metadata: json('metadata'),
-    ...timestamps,
+    ...timestamps(),
   },
   (t) => [
     uniqueIndex('uk_partner_recharge_orders_external_id').on(t.externalId),
@@ -104,9 +114,9 @@ export const partnerRechargeOrders = mysqlTable(
 export const partnerLots = mysqlTable(
   'partner_lots',
   {
-    id,
-    externalId,
-    userId,
+    id: idColumn(),
+    externalId: externalIdColumn(),
+    userId: userIdColumn(),
     rechargeOrderId: bigint('recharge_order_id', { mode: 'number', unsigned: true }).references(
       () => partnerRechargeOrders.id,
       { onDelete: 'restrict' },
@@ -126,7 +136,7 @@ export const partnerLots = mysqlTable(
     releaseStartsAt: datetime('release_starts_at', { mode: 'date', fsp: 3 }).notNull(),
     releaseEndsAt: datetime('release_ends_at', { mode: 'date', fsp: 3 }).notNull(),
     metadata: json('metadata'),
-    ...timestamps,
+    ...timestamps(),
   },
   (t) => [
     uniqueIndex('uk_partner_lots_external_id').on(t.externalId),
@@ -138,9 +148,9 @@ export const partnerLots = mysqlTable(
 export const holaCreditLedgerEntries = mysqlTable(
   'hola_credit_ledger_entries',
   {
-    id,
-    externalId,
-    userId,
+    id: idColumn(),
+    externalId: externalIdColumn(),
+    userId: userIdColumn(),
     lotId: bigint('lot_id', { mode: 'number', unsigned: true }).references(() => partnerLots.id, {
       onDelete: 'set null',
     }),
@@ -152,7 +162,7 @@ export const holaCreditLedgerEntries = mysqlTable(
     status: varchar('status', { length: 16 }).notNull().default('posted'),
     idempotencyKey: varchar('idempotency_key', { length: 160 }).notNull(),
     metadata: json('metadata'),
-    createdAt,
+    createdAt: createdAtColumn(),
   },
   (t) => [
     uniqueIndex('uk_hola_credit_ledger_entries_external_id').on(t.externalId),
@@ -165,8 +175,8 @@ export const holaCreditLedgerEntries = mysqlTable(
 export const apiCostPoolEvents = mysqlTable(
   'api_cost_pool_events',
   {
-    id,
-    externalId,
+    id: idColumn(),
+    externalId: externalIdColumn(),
     eventDate: varchar('event_date', { length: 10 }).notNull(),
     source: varchar('source', { length: 32 }).notNull(),
     costUsdMicros: bigint('cost_usd_micros', { mode: 'number', unsigned: true }).notNull().default(0),
@@ -174,7 +184,7 @@ export const apiCostPoolEvents = mysqlTable(
     apiUnits: bigint('api_units', { mode: 'number', unsigned: true }).notNull(),
     idempotencyKey: varchar('idempotency_key', { length: 160 }).notNull(),
     metadata: json('metadata'),
-    createdAt,
+    createdAt: createdAtColumn(),
   },
   (t) => [
     uniqueIndex('uk_api_cost_pool_events_external_id').on(t.externalId),
@@ -186,9 +196,9 @@ export const apiCostPoolEvents = mysqlTable(
 export const partnerWithdrawalRequests = mysqlTable(
   'partner_withdrawal_requests',
   {
-    id,
-    externalId,
-    userId,
+    id: idColumn(),
+    externalId: externalIdColumn(),
+    userId: userIdColumn(),
     amountCreditCents: int('amount_credit_cents', { unsigned: true }).notNull(),
     status: varchar('status', { length: 24 }).notNull().default('requested'),
     reviewDueAt: datetime('review_due_at', { mode: 'date', fsp: 3 }).notNull(),
@@ -196,7 +206,7 @@ export const partnerWithdrawalRequests = mysqlTable(
     riskScore: int('risk_score', { unsigned: true }).notNull().default(0),
     rejectionReason: text('rejection_reason'),
     metadata: json('metadata'),
-    ...timestamps,
+    ...timestamps(),
   },
   (t) => [
     uniqueIndex('uk_partner_withdrawal_requests_external_id').on(t.externalId),
@@ -208,9 +218,9 @@ export const partnerWithdrawalRequests = mysqlTable(
 export const partnerRiskEvents = mysqlTable(
   'partner_risk_events',
   {
-    id,
-    externalId,
-    userId,
+    id: idColumn(),
+    externalId: externalIdColumn(),
+    userId: userIdColumn(),
     lotId: bigint('lot_id', { mode: 'number', unsigned: true }).references(() => partnerLots.id, {
       onDelete: 'set null',
     }),
@@ -218,7 +228,7 @@ export const partnerRiskEvents = mysqlTable(
     severity: varchar('severity', { length: 16 }).notNull(),
     status: varchar('status', { length: 24 }).notNull().default('open'),
     metadata: json('metadata'),
-    ...timestamps,
+    ...timestamps(),
   },
   (t) => [
     uniqueIndex('uk_partner_risk_events_external_id').on(t.externalId),
@@ -230,8 +240,8 @@ export const partnerRiskEvents = mysqlTable(
 export const partnerReferrals = mysqlTable(
   'partner_referrals',
   {
-    id,
-    externalId,
+    id: idColumn(),
+    externalId: externalIdColumn(),
     inviterUserId: bigint('inviter_user_id', { mode: 'number', unsigned: true })
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
@@ -247,10 +257,11 @@ export const partnerReferrals = mysqlTable(
     rewardRateBps: int('reward_rate_bps', { unsigned: true }).notNull().default(0),
     assisted: int('assisted', { unsigned: true }).notNull().default(0),
     metadata: json('metadata'),
-    ...timestamps,
+    ...timestamps(),
   },
   (t) => [
     uniqueIndex('uk_partner_referrals_external_id').on(t.externalId),
+    // MVP first-attribution policy: one invitee maps to one partner referral.
     uniqueIndex('uk_partner_referrals_invitee_user').on(t.inviteeUserId),
     index('ix_partner_referrals_inviter_status').on(t.inviterUserId, t.status),
   ],
@@ -259,8 +270,8 @@ export const partnerReferrals = mysqlTable(
 export const partnerDailyAllocations = mysqlTable(
   'partner_daily_allocations',
   {
-    id,
-    externalId,
+    id: idColumn(),
+    externalId: externalIdColumn(),
     lotId: bigint('lot_id', { mode: 'number', unsigned: true })
       .notNull()
       .references(() => partnerLots.id, { onDelete: 'cascade' }),
@@ -269,11 +280,12 @@ export const partnerDailyAllocations = mysqlTable(
     apiUnitsWeight: bigint('api_units_weight', { mode: 'number', unsigned: true }).notNull(),
     idempotencyKey: varchar('idempotency_key', { length: 160 }).notNull(),
     metadata: json('metadata'),
-    createdAt,
+    createdAt: createdAtColumn(),
   },
   (t) => [
     uniqueIndex('uk_partner_daily_allocations_external_id').on(t.externalId),
     uniqueIndex('uk_partner_daily_allocations_idempotency_key').on(t.idempotencyKey),
+    uniqueIndex('uk_partner_daily_allocations_lot_date').on(t.lotId, t.allocationDate),
     index('ix_partner_daily_allocations_lot').on(t.lotId),
     index('ix_partner_daily_allocations_date').on(t.allocationDate),
   ],
@@ -282,8 +294,8 @@ export const partnerDailyAllocations = mysqlTable(
 export const partnerMonthlyReleases = mysqlTable(
   'partner_monthly_releases',
   {
-    id,
-    externalId,
+    id: idColumn(),
+    externalId: externalIdColumn(),
     lotId: bigint('lot_id', { mode: 'number', unsigned: true })
       .notNull()
       .references(() => partnerLots.id, { onDelete: 'cascade' }),
@@ -294,11 +306,12 @@ export const partnerMonthlyReleases = mysqlTable(
     status: varchar('status', { length: 24 }).notNull().default('posted'),
     idempotencyKey: varchar('idempotency_key', { length: 160 }).notNull(),
     metadata: json('metadata'),
-    createdAt,
+    createdAt: createdAtColumn(),
   },
   (t) => [
     uniqueIndex('uk_partner_monthly_releases_external_id').on(t.externalId),
     uniqueIndex('uk_partner_monthly_releases_idempotency_key').on(t.idempotencyKey),
+    uniqueIndex('uk_partner_monthly_releases_lot_month').on(t.lotId, t.releaseMonth),
     index('ix_partner_monthly_releases_lot').on(t.lotId),
     index('ix_partner_monthly_releases_month').on(t.releaseMonth),
   ],

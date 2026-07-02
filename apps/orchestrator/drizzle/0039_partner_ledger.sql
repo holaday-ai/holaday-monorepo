@@ -177,6 +177,7 @@ CREATE TABLE `partner_risk_events` (
   CONSTRAINT `fk_partner_risk_events_lot` FOREIGN KEY (`lot_id`) REFERENCES `partner_lots` (`id`) ON DELETE SET NULL
 );
 
+-- MVP first-attribution policy: one invitee can map to one partner referral.
 CREATE TABLE `partner_referrals` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   `external_id` VARCHAR(32) NOT NULL,
@@ -212,6 +213,7 @@ CREATE TABLE `partner_daily_allocations` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_partner_daily_allocations_external_id` (`external_id`),
   UNIQUE KEY `uk_partner_daily_allocations_idempotency_key` (`idempotency_key`),
+  UNIQUE KEY `uk_partner_daily_allocations_lot_date` (`lot_id`, `allocation_date`),
   KEY `ix_partner_daily_allocations_lot` (`lot_id`),
   KEY `ix_partner_daily_allocations_date` (`allocation_date`),
   CONSTRAINT `fk_partner_daily_allocations_lot` FOREIGN KEY (`lot_id`) REFERENCES `partner_lots` (`id`) ON DELETE CASCADE
@@ -232,6 +234,7 @@ CREATE TABLE `partner_monthly_releases` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_partner_monthly_releases_external_id` (`external_id`),
   UNIQUE KEY `uk_partner_monthly_releases_idempotency_key` (`idempotency_key`),
+  UNIQUE KEY `uk_partner_monthly_releases_lot_month` (`lot_id`, `release_month`),
   KEY `ix_partner_monthly_releases_lot` (`lot_id`),
   KEY `ix_partner_monthly_releases_month` (`release_month`),
   CONSTRAINT `fk_partner_monthly_releases_lot` FOREIGN KEY (`lot_id`) REFERENCES `partner_lots` (`id`) ON DELETE CASCADE
