@@ -452,7 +452,7 @@ describe('persistExecution writes the 5 columns', () => {
     expect(v.verification!.passed).toBe(true);
 
     const setFn = vi.fn((_arg: Record<string, unknown>) => ({
-      where: vi.fn(() => Promise.resolve()),
+      where: vi.fn(() => Promise.resolve([{ affectedRows: 1 }])),
     }));
     const fakeDb = { update: vi.fn(() => ({ set: setFn })) } as unknown as Parameters<
       typeof persistExecution
@@ -498,7 +498,7 @@ describe('persistExecution writes the 5 columns', () => {
       finalUrl: 'https://example.com/',
     });
     const setFn = vi.fn((_arg: Record<string, unknown>) => ({
-      where: vi.fn(() => Promise.resolve()),
+      where: vi.fn(() => Promise.resolve([{ affectedRows: 1 }])),
     }));
     const fakeDb = { update: vi.fn(() => ({ set: setFn })) } as unknown as Parameters<
       typeof persistExecution
@@ -511,6 +511,36 @@ describe('persistExecution writes the 5 columns', () => {
     const setArg = setFn.mock.calls[0]![0] as Record<string, unknown>;
     expect(setArg.verificationPassed).toBe(false);
     expect(setArg.failureLevel).toBe('hard_fail');
+  });
+
+  it('returns false when the terminal-status guard refuses the update', async () => {
+    initExecution({
+      taskId: 'tsk_p3',
+      intent: 'translate',
+      executionMode: 'generate',
+    });
+    recordEvidence('tsk_p3', {
+      fact: 'response_length=80',
+      sourceType: 'tool_result',
+      sourceDetail: 'llm_generate_response',
+      confidence: 'observed',
+    });
+
+    const setFn = vi.fn((_arg: Record<string, unknown>) => ({
+      where: vi.fn(() => Promise.resolve([{ affectedRows: 0 }])),
+    }));
+    const fakeDb = { update: vi.fn(() => ({ set: setFn })) } as unknown as Parameters<
+      typeof persistExecution
+    >[0]['db'];
+
+    const ok = await persistExecution({
+      taskId: 'tsk_p3',
+      verification: null,
+      db: fakeDb,
+    });
+
+    expect(ok).toBe(false);
+    expect(fakeDb.update).toHaveBeenCalledTimes(1);
   });
 });
 

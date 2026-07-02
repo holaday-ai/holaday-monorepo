@@ -36,9 +36,10 @@
  */
 import type Anthropic from '@anthropic-ai/sdk';
 import type { Logger } from 'pino';
-import { eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { tasks as tasksTable } from '../db/schema/tasks.js';
 import type { DB } from '../db/client.js';
+import { readAffectedRows } from '../db/mysql-result.js';
 
 import type { CheckResult, ParsedItem, VerificationResult } from './answer-verifier.js';
 import { extractStructuredItems, verifyDeterministic } from './answer-verifier.js';
@@ -63,6 +64,13 @@ import {
   type AnthropicLikeClient,
 } from './llm-verifier.js';
 import { getExpertWorkflowById } from './expert-workflow-registry.js';
+
+const EXECUTION_PERSIST_SOURCE_STATUSES = [
+  'completed',
+  'partial_success',
+  'failed',
+  'cancelled',
+] as const;
 
 // ---------------------------------------------------------------------------
 // Contract registry (module-scope)
@@ -589,7 +597,7 @@ export async function persistExecution(
     return false;
   }
   try {
-    await inputs.db
+    const result = await inputs.db
       .update(tasksTable)
       .set({
         contractJson: contract ? (contract as unknown as Record<string, unknown>) : null,
@@ -602,8 +610,13 @@ export async function persistExecution(
         verificationPassed: inputs.verification?.passed ?? null,
         failureLevel: inputs.verification?.failureLevel ?? null,
       })
-      .where(eq(tasksTable.externalId, inputs.taskId));
-    return true;
+      .where(
+        and(
+          eq(tasksTable.externalId, inputs.taskId),
+          inArray(tasksTable.status, [...EXECUTION_PERSIST_SOURCE_STATUSES]),
+        ),
+      );
+    return readAffectedRows(result) > 0;
   } catch (err) {
     inputs.logger?.warn(
       { err: err instanceof Error ? err.message : String(err), taskId: inputs.taskId },

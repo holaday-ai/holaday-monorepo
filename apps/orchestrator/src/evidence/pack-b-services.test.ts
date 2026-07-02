@@ -193,6 +193,21 @@ describe('ledger-write-service', () => {
     expect(inserts).toHaveLength(0);
   });
 
+  it('writeLedgerToDbUnchecked — returns null when the task is not terminal', async () => {
+    const ledger = seededLedger('tsk_active');
+    // The service filters to completed / partial_success / failed / cancelled.
+    // In the fake DB, an active row filtered out by SQL is represented as no row.
+    const { db, inserts } = makeFakeDb({ selectResults: [[]] });
+    const { storage, puts } = makeFakeStorage();
+    const res = await writeLedgerToDbUnchecked(
+      { taskExternalId: 'tsk_active', verification: null, db: db as never, storage },
+      ledger,
+    );
+    expect(res).toBeNull();
+    expect(inserts).toHaveLength(0);
+    expect(puts).toHaveLength(0);
+  });
+
   it('writeLedgerToDb — flag OFF is a no-op (no DB touch)', async () => {
     setFeatureFlagsForTest({ LEDGER_DB_WRITE: false });
     getOrCreateLedger('tsk_2').add({

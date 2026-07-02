@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { newExternalId } from '@holaday/shared-types';
-import { eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import type { Logger } from 'pino';
 import type { DB } from '../db/client.js';
 import { tasks as tasksTable } from '../db/schema/tasks.js';
@@ -9,6 +9,13 @@ import { getFeatureFlags } from '../execution/feature-flags.js';
 import { type StorageProvider, getSharedStorageProvider } from '../files/storage-provider.js';
 import { ClaimRepository } from './claim-repository.js';
 import { EvidenceArtifactRepository } from './evidence-artifact-repository.js';
+
+const LEDGER_WRITE_SOURCE_STATUSES = [
+  'completed',
+  'partial_success',
+  'failed',
+  'cancelled',
+] as const;
 
 /**
  * Phase 1 #3 Pack B — Evidence Ledger DB write path (design §4.6).
@@ -126,7 +133,12 @@ export async function writeLedgerToDbUnchecked(
   const [row] = await db
     .select({ id: tasksTable.id, userId: tasksTable.userId, intent: tasksTable.intent })
     .from(tasksTable)
-    .where(eq(tasksTable.externalId, input.taskExternalId))
+    .where(
+      and(
+        eq(tasksTable.externalId, input.taskExternalId),
+        inArray(tasksTable.status, [...LEDGER_WRITE_SOURCE_STATUSES]),
+      ),
+    )
     .limit(1);
   if (!row) return null;
 

@@ -2505,8 +2505,10 @@ export const tasksRouter = router({
           db: ctx.db,
           logger: ctx.logger,
         })
-          .then(() =>
-            writeLedgerToDb({ taskExternalId: taskId, verification: executionVerification, db: ctx.db, logger: ctx.logger }),
+          .then((persisted) =>
+            persisted
+              ? writeLedgerToDb({ taskExternalId: taskId, verification: executionVerification, db: ctx.db, logger: ctx.logger })
+              : null,
           )
           .finally(() => disposeExecution(taskId));
       })();
@@ -3021,8 +3023,10 @@ export const tasksRouter = router({
           db: ctx.db,
           logger: ctx.logger,
         })
-          .then(() =>
-            writeLedgerToDb({ taskExternalId: taskId, verification: executionVerification, db: ctx.db, logger: ctx.logger }),
+          .then((persisted) =>
+            persisted
+              ? writeLedgerToDb({ taskExternalId: taskId, verification: executionVerification, db: ctx.db, logger: ctx.logger })
+              : null,
           )
           .finally(() => disposeExecution(taskId));
       })();
@@ -5049,8 +5053,10 @@ export const tasksRouter = router({
               db: ctx.db,
               logger: ctx.logger,
             })
-          .then(() =>
-            writeLedgerToDb({ taskExternalId: taskId, verification: executionVerification, db: ctx.db, logger: ctx.logger }),
+          .then((persisted) =>
+            persisted
+              ? writeLedgerToDb({ taskExternalId: taskId, verification: executionVerification, db: ctx.db, logger: ctx.logger })
+              : null,
           )
           .finally(() => disposeExecution(taskId));
           });
