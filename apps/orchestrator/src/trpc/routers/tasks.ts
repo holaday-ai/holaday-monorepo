@@ -5833,7 +5833,7 @@ export const tasksRouter = router({
           ),
         )
         .limit(1);
-      if (!row || row.awaitingKind !== 'video_quote') {
+      if (!row || row.status !== 'awaiting_user' || row.awaitingKind !== 'video_quote') {
         throw new TRPCError({ code: 'NOT_FOUND', message: '找不到待确认的视频报价' });
       }
 
@@ -5844,17 +5844,10 @@ export const tasksRouter = router({
 
       // cancel — 标记消费(杜绝再确认)+ 取消,绝不进生成。
       if (choice === 'cancel') {
-        await repo.consumeVideoConfirm(input.taskId);
-        await ctx.db
-          .update(tasksTable)
-          .set({
-            status: 'cancelled',
-            awaitingKind: null,
-            awaitingQuestion: null,
-            result: { summary: '已取消，未产生任何费用。', metadata: { lane: 'video_creation_cancelled' } },
-            completedAt: new Date(),
-          })
-          .where(eq(tasksTable.externalId, input.taskId));
+        const cancelled = await repo.cancelVideoConfirm(input.taskId);
+        if (!cancelled.persisted) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: '找不到待确认的视频报价' });
+        }
         broadcastToUser(ctx.userId, {
           type: 'server.task.terminal',
           taskId: input.taskId,
@@ -5866,14 +5859,10 @@ export const tasksRouter = router({
       // unclear — 没听懂 → 重出报价卡,仍 awaiting,不消费、不烧钱。
       if (choice === 'unclear') {
         const question = '请点按钮选择：确认制作 / 图片版 / 取消。';
-        await ctx.db
-          .update(tasksTable)
-          .set({
-            status: 'awaiting_user',
-            awaitingQuestion: question,
-            awaitingKind: 'video_quote',
-          })
-          .where(eq(tasksTable.externalId, input.taskId));
+        const reprompted = await repo.repromptVideoConfirm(input.taskId, question);
+        if (!reprompted.persisted) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: '找不到待确认的视频报价' });
+        }
         broadcastToUser(ctx.userId, {
           type: 'server.supercar.awaiting_user',
           taskId: input.taskId,

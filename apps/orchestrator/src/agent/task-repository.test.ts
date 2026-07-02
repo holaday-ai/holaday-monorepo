@@ -138,6 +138,34 @@ function fakeDbForStateTransitions(affectedRows = 1) {
   return { db, captured };
 }
 
+function fakeDbForExecute(affectedRows = 1) {
+  const captured = {
+    statements: [] as unknown[],
+  };
+  const execute = async (statement: unknown) => {
+    captured.statements.push(statement);
+    return [{ affectedRows }];
+  };
+  const db = { execute } as unknown as DB;
+  return { db, captured };
+}
+
+function collectSqlText(input: unknown): string {
+  if (Array.isArray(input)) {
+    return input.map((item) => collectSqlText(item)).join('');
+  }
+  if (typeof input === 'string') return input;
+  if (!input || typeof input !== 'object') return '';
+  const record = input as { queryChunks?: unknown[]; value?: unknown };
+  const ownValue = Array.isArray(record.value)
+    ? record.value.filter((item): item is string => typeof item === 'string').join('')
+    : '';
+  const childValue = Array.isArray(record.queryChunks)
+    ? record.queryChunks.map((item) => collectSqlText(item)).join('')
+    : '';
+  return `${ownValue}${childValue}`;
+}
+
 describe('TaskRepository.persistVisionOutcome — awaiting_user state guard (Phase 3 R1, atomic)', () => {
   it('UPDATE no-op (affectedRows=0) → row was awaiting_user → no event log, console.warn fires, persisted=false', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
@@ -666,6 +694,53 @@ describe('TaskRepository task terminal state persistence', () => {
     const result = await repo.markAwaitingReplyCompleted('tsk_state_machine', {
       summary: 'handoff created',
     });
+
+    expect(result.persisted).toBe(false);
+  });
+
+  it('cancelVideoConfirm atomically cancels only active video quote rows', async () => {
+    const { db, captured } = fakeDbForExecute(1);
+    const repo = new TaskRepository(db);
+
+    const result = await repo.cancelVideoConfirm('tsk_state_machine');
+
+    expect(result.persisted).toBe(true);
+    const sqlText = collectSqlText(captured.statements[0]);
+    expect(sqlText).toContain('status = \'awaiting_user\'');
+    expect(sqlText).toContain('awaiting_kind = \'video_quote\'');
+    expect(sqlText).toContain('video_creation_confirm');
+    expect(sqlText).toContain('video_creation_cancelled');
+  });
+
+  it('cancelVideoConfirm reports stale rows without pretending to cancel', async () => {
+    const { db } = fakeDbForExecute(0);
+    const repo = new TaskRepository(db);
+
+    const result = await repo.cancelVideoConfirm('tsk_state_machine');
+
+    expect(result.persisted).toBe(false);
+  });
+
+  it('repromptVideoConfirm atomically updates only active video quote rows', async () => {
+    const { db, captured } = fakeDbForExecute(1);
+    const repo = new TaskRepository(db);
+
+    const result = await repo.repromptVideoConfirm('tsk_state_machine', '请选择一个操作');
+
+    expect(result.persisted).toBe(true);
+    const sqlText = collectSqlText(captured.statements[0]);
+    expect(sqlText).toContain('status = \'awaiting_user\'');
+    expect(sqlText).toContain('awaiting_kind = \'video_quote\'');
+    expect(sqlText).toContain('video_creation_confirm');
+    expect(sqlText).toContain('请选择一个操作');
+    expect(sqlText).toContain('tsk_state_machine');
+  });
+
+  it('repromptVideoConfirm reports stale rows without pretending to reprompt', async () => {
+    const { db } = fakeDbForExecute(0);
+    const repo = new TaskRepository(db);
+
+    const result = await repo.repromptVideoConfirm('tsk_state_machine', '请选择一个操作');
 
     expect(result.persisted).toBe(false);
   });

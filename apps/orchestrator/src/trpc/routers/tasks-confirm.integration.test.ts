@@ -99,7 +99,7 @@ describe('tasks.confirm tRPC mutation (awaiting_user → executing | cancelled)'
     return { userExternalId, taskId };
   }
 
-  async function makeUserWithVideoQuoteTask() {
+  async function makeUserWithVideoQuoteTask(status = 'awaiting_user') {
     const { newExternalId } = await import('@holaday/shared-types');
     const { db } = await import('../../db/client.js');
     const { eq } = await import('drizzle-orm');
@@ -119,12 +119,15 @@ describe('tasks.confirm tRPC mutation (awaiting_user → executing | cancelled)'
       externalId: taskId,
       userId: user.id,
       intent: '生成一个产品介绍视频',
-      status: 'awaiting_user',
+      status,
       awaitingKind: 'video_quote',
       awaitingQuestion: '报价：确认制作 / 图片版 / 取消。',
       plan: null,
       origin: 'user',
       result: { summary: '报价：确认制作 / 图片版 / 取消。', metadata: { lane: 'video_creation_confirm' } },
+      ...(status === 'completed' || status === 'cancelled' || status === 'failed'
+        ? { completedAt: new Date() }
+        : {}),
     });
     return { userExternalId, taskId };
   }
@@ -247,5 +250,23 @@ describe('tasks.confirm tRPC mutation (awaiting_user → executing | cancelled)'
     expect(taskRow.awaitingKind).toBe('video_quote');
     expect(taskRow.awaitingQuestion).toBe('请点按钮选择：确认制作 / 图片版 / 取消。');
     expect(taskRow.completedAt).toBeNull();
+  });
+
+  it('confirmVideo cancel refuses stale non-awaiting video quote rows without mutating them', async () => {
+    const { userExternalId, taskId } = await makeUserWithVideoQuoteTask('completed');
+    const { status } = await callTrpc('confirmVideo', { taskId, choice: 'cancel' }, userExternalId);
+    expect(status).toBe(404);
+
+    const { db } = await import('../../db/client.js');
+    const { eq } = await import('drizzle-orm');
+    const { tasks } = await import('../../db/schema/tasks.js');
+    const taskRow = must(
+      (await db.select().from(tasks).where(eq(tasks.externalId, taskId)))[0],
+      'taskRow',
+    );
+    expect(taskRow.status).toBe('completed');
+    expect(taskRow.result).toMatchObject({
+      metadata: { lane: 'video_creation_confirm' },
+    });
   });
 });

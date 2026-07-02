@@ -629,10 +629,55 @@ export class TaskRepository {
       UPDATE tasks
       SET result = JSON_SET(result, '$.metadata.lane', 'video_creation_consumed')
       WHERE external_id = ${taskExternalId}
+        AND status = 'awaiting_user'
+        AND awaiting_kind = 'video_quote'
         AND JSON_UNQUOTE(JSON_EXTRACT(result, '$.metadata.lane')) = 'video_creation_confirm'
     `);
     const header = (Array.isArray(result) ? result[0] : result) as { affectedRows?: number } | undefined;
     return (header?.affectedRows ?? 0) === 1;
+  }
+
+  async cancelVideoConfirm(taskExternalId: string): Promise<{ persisted: boolean }> {
+    const result = await this.db.execute(sql`
+      UPDATE tasks
+      SET
+        status = 'cancelled',
+        awaiting_kind = NULL,
+        awaiting_question = NULL,
+        result = JSON_SET(
+          COALESCE(result, JSON_OBJECT()),
+          '$.summary',
+          '已取消，未产生任何费用。',
+          '$.metadata.lane',
+          'video_creation_cancelled'
+        ),
+        completed_at = ${new Date()}
+      WHERE external_id = ${taskExternalId}
+        AND status = 'awaiting_user'
+        AND awaiting_kind = 'video_quote'
+        AND JSON_UNQUOTE(JSON_EXTRACT(result, '$.metadata.lane')) = 'video_creation_confirm'
+    `);
+    const header = (Array.isArray(result) ? result[0] : result) as { affectedRows?: number } | undefined;
+    return { persisted: (header?.affectedRows ?? 0) === 1 };
+  }
+
+  async repromptVideoConfirm(
+    taskExternalId: string,
+    question: string,
+  ): Promise<{ persisted: boolean }> {
+    const result = await this.db.execute(sql`
+      UPDATE tasks
+      SET
+        status = 'awaiting_user',
+        awaiting_question = ${question},
+        awaiting_kind = 'video_quote'
+      WHERE external_id = ${taskExternalId}
+        AND status = 'awaiting_user'
+        AND awaiting_kind = 'video_quote'
+        AND JSON_UNQUOTE(JSON_EXTRACT(result, '$.metadata.lane')) = 'video_creation_confirm'
+    `);
+    const header = (Array.isArray(result) ? result[0] : result) as { affectedRows?: number } | undefined;
+    return { persisted: (header?.affectedRows ?? 0) === 1 };
   }
 
   async rehydrateInFlight(): Promise<RehydratedTask[]> {
