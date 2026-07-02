@@ -7,7 +7,7 @@ import {
   PARTNER_RELEASE_MONTHS,
   newExternalId,
 } from '@holaday/shared-types';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, gte, sql } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
 import {
   partnerLots,
@@ -17,9 +17,11 @@ import {
 } from '../db/schema/partner.js';
 import { KycService, canRechargeWithKycStatus } from './kyc-service.js';
 import { PartnerMembershipService } from './membership-service.js';
+import { partnerConfig } from './partner-config.js';
 import { calculateApiUnits, calculateLotCaps, selectRechargeTier } from './partner-rules.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const THIRTY_DAYS_MS = 30 * DAY_MS;
 
 export type RechargeAmountValidationResult =
   | { ok: true }
@@ -81,6 +83,66 @@ export class RechargeLotConflictError extends Error {
   }
 }
 
+export function rechargeRollingThirtyDayWindowStart(now: Date): Date {
+  return new Date(normalizeDate(now, 'now').getTime() - THIRTY_DAYS_MS);
+}
+
+export function rechargeAnnualWindowStart(now: Date): Date {
+  const normalized = normalizeDate(now, 'now');
+  const start = new Date(normalized.getTime());
+  start.setUTCFullYear(start.getUTCFullYear() - 1);
+  return start;
+}
+
+export function assertAnnualRechargeCap(input: {
+  annualRechargeTotalCnyCents: number;
+  annualRechargeCapCnyCents?: number;
+}): void {
+  const annualRechargeTotalCnyCents = normalizeNonNegativeWholeCnyAmount(
+    input.annualRechargeTotalCnyCents,
+    'annualRechargeTotalCnyCents',
+  );
+  const annualRechargeCapCnyCents = normalizeNonNegativeWholeCnyAmount(
+    input.annualRechargeCapCnyCents ?? partnerConfig().annualRechargeCapCnyCents,
+    'annualRechargeCapCnyCents',
+  );
+
+  if (annualRechargeTotalCnyCents > annualRechargeCapCnyCents) {
+    throw new RangeError('annual recharge cap exceeded');
+  }
+}
+
+export async function computeCompletedRechargeTotalCnyCents(
+  db: DB,
+  input: { userId: number; windowStart: Date; now: Date },
+): Promise<number> {
+  const userId = normalizePositiveSafeInteger(input.userId, 'userId');
+  const windowStart = normalizeDate(input.windowStart, 'windowStart');
+  const now = normalizeDate(input.now, 'now');
+
+  const rows = await db
+    .select()
+    .from(partnerRechargeOrders)
+    .where(
+      and(
+        eq(partnerRechargeOrders.userId, userId),
+        eq(partnerRechargeOrders.status, 'completed'),
+        eq(partnerRechargeOrders.orderKind, 'recharge'),
+        gte(partnerRechargeOrders.updatedAt, windowStart),
+      ),
+    );
+
+  return rows
+    .filter((row) => {
+      if (row.userId !== userId || row.status !== 'completed' || row.orderKind !== 'recharge') {
+        return false;
+      }
+      const effectiveAt = row.updatedAt ?? row.createdAt;
+      return effectiveAt.getTime() >= windowStart.getTime() && effectiveAt.getTime() <= now.getTime();
+    })
+    .reduce((sum, row) => sum + row.amountCnyCents, 0);
+}
+
 export function validateRechargeAmount(amountCnyCents: number): RechargeAmountValidationResult {
   if (!Number.isSafeInteger(amountCnyCents) || amountCnyCents <= 0) {
     return { ok: false, reason: 'invalid_amount' };
@@ -132,6 +194,16 @@ function normalizeOrderKind(value: string): RechargeOrderKind {
 function normalizePositiveWholeCnyAmount(amountCnyCents: number, fieldName: string): number {
   if (!Number.isSafeInteger(amountCnyCents) || amountCnyCents <= 0) {
     throw new RangeError(`${fieldName} must be a positive safe integer`);
+  }
+  if (amountCnyCents % HOLA_CREDIT_CNY_CENTS !== 0) {
+    throw new RangeError(`${fieldName} must be a whole CNY amount`);
+  }
+  return amountCnyCents;
+}
+
+function normalizeNonNegativeWholeCnyAmount(amountCnyCents: number, fieldName: string): number {
+  if (!Number.isSafeInteger(amountCnyCents) || amountCnyCents < 0) {
+    throw new RangeError(`${fieldName} must be a non-negative safe integer`);
   }
   if (amountCnyCents % HOLA_CREDIT_CNY_CENTS !== 0) {
     throw new RangeError(`${fieldName} must be a whole CNY amount`);
@@ -292,6 +364,27 @@ export class RechargeService {
       if (!canRechargeWithKycStatus(kycStatus)) {
         throw new RechargeGateError('kyc_required');
       }
+    }
+
+    const [existing] = await this.db
+      .select()
+      .from(partnerRechargeOrders)
+      .where(eq(partnerRechargeOrders.idempotencyKey, order.idempotencyKey))
+      .limit(1);
+    if (existing) {
+      assertIdempotentOrderPayloadMatches(existing, order);
+      return existing;
+    }
+
+    if (order.orderKind === 'recharge') {
+      const annualRechargeTotalCnyCents =
+        order.amountCnyCents +
+        (await computeCompletedRechargeTotalCnyCents(this.db, {
+          userId: order.userId,
+          windowStart: rechargeAnnualWindowStart(order.now),
+          now: order.now,
+        }));
+      assertAnnualRechargeCap({ annualRechargeTotalCnyCents });
     }
 
     await this.db

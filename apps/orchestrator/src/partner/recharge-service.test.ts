@@ -1,6 +1,6 @@
 import { inspect } from 'node:util';
 import type { PartnerKycStatus } from '@holaday/shared-types';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import type { DB } from '../db/client.js';
 import {
   partnerLots,
@@ -150,6 +150,14 @@ class FakeRechargeDb {
 
   private selectRows(table: unknown, predicateText: string): Array<PartnerRechargeOrder | PartnerLot> {
     if (table === partnerRechargeOrders) {
+      if (predicateText.includes('user_id') && predicateText.includes('completed')) {
+        return this.orders.filter(
+          (row) =>
+            predicateText.includes(String(row.userId)) &&
+            row.status === 'completed' &&
+            row.orderKind === 'recharge',
+        );
+      }
       const byKey = this.orders.find((row) => predicateText.includes(row.idempotencyKey));
       if (byKey) return [byKey];
       const byExternalId = this.orders.find((row) => predicateText.includes(row.externalId));
@@ -268,6 +276,16 @@ function serviceWithGates(
   });
 }
 
+const originalAnnualCap = process.env.PARTNER_RECHARGE_MAX_ANNUAL_CNY_CENTS;
+
+afterEach(() => {
+  if (originalAnnualCap === undefined) {
+    delete process.env.PARTNER_RECHARGE_MAX_ANNUAL_CNY_CENTS;
+  } else {
+    process.env.PARTNER_RECHARGE_MAX_ANNUAL_CNY_CENTS = originalAnnualCap;
+  }
+});
+
 describe('validateRechargeAmount', () => {
   it.each([
     [9_999_00, { ok: false, reason: 'below_minimum' }],
@@ -318,6 +336,55 @@ describe('RechargeService createPendingOrder', () => {
     expect(row.externalId).toMatch(/^pay_/);
     expect(fakeDb.orderRowsCreated).toBe(1);
     expect(fakeDb.wherePredicateTexts.some((predicateText) => predicateText.includes('idempotency_key'))).toBe(true);
+  });
+
+  it('rejects recharge orders that would exceed the configured annual cap', async () => {
+    process.env.PARTNER_RECHARGE_MAX_ANNUAL_CNY_CENTS = String(25_000_00);
+    const fakeDb = new FakeRechargeDb({
+      orders: [
+        fakeOrder({
+          id: 2,
+          externalId: 'pay_prior_inside_annual_window',
+          status: 'completed',
+          amountCnyCents: 16_000_00,
+          providerCaptureId: 'cap_prior_inside',
+          createdAt: new Date('2026-02-01T00:00:00.000Z'),
+          updatedAt: new Date('2026-02-01T00:00:00.000Z'),
+          idempotencyKey: 'prior-inside',
+        }),
+        fakeOrder({
+          id: 3,
+          externalId: 'pay_prior_outside_annual_window',
+          status: 'completed',
+          amountCnyCents: 200_000_00,
+          providerCaptureId: 'cap_prior_outside',
+          createdAt: new Date('2025-06-01T00:00:00.000Z'),
+          updatedAt: new Date('2025-06-01T00:00:00.000Z'),
+          idempotencyKey: 'prior-outside',
+        }),
+        fakeOrder({
+          id: 4,
+          externalId: 'pay_prior_membership',
+          status: 'completed',
+          orderKind: 'membership',
+          amountCnyCents: 999_00,
+          providerCaptureId: 'cap_membership',
+          createdAt: new Date('2026-06-01T00:00:00.000Z'),
+          updatedAt: new Date('2026-06-01T00:00:00.000Z'),
+          idempotencyKey: 'prior-membership',
+        }),
+      ],
+    });
+    const service = serviceWithGates(fakeDb);
+
+    await expect(
+      service.createPendingOrder({
+        ...validRechargeOrderInput,
+        amountCnyCents: 10_000_00,
+        now: new Date('2026-07-02T00:00:00.000Z'),
+      }),
+    ).rejects.toThrow(/annual recharge cap/);
+    expect(fakeDb.orderRowsCreated).toBe(0);
   });
 
   it('returns an existing order for the same idempotency key and same payload', async () => {

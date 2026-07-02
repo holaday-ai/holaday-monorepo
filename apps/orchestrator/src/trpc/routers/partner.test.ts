@@ -8,10 +8,12 @@ import {
   partnerKycProfiles,
   partnerLots,
   partnerMemberships,
+  partnerRechargeOrders,
   type HolaCreditLedgerEntry,
   type PartnerKycProfile,
   type PartnerLot,
   type PartnerMembership,
+  type PartnerRechargeOrder,
 } from '../../db/schema/partner.js';
 
 class FakePartnerDb {
@@ -20,6 +22,7 @@ class FakePartnerDb {
   readonly kycProfiles: PartnerKycProfile[];
   readonly ledgerEntries: HolaCreditLedgerEntry[];
   readonly lots: PartnerLot[];
+  readonly orders: PartnerRechargeOrder[];
   readonly selectTables: string[] = [];
 
   constructor(input: {
@@ -28,12 +31,14 @@ class FakePartnerDb {
     kycProfiles?: PartnerKycProfile[];
     ledgerEntries?: HolaCreditLedgerEntry[];
     lots?: PartnerLot[];
+    orders?: PartnerRechargeOrder[];
   } = {}) {
     this.users = [...(input.users ?? [fakeUser()])];
     this.memberships = [...(input.memberships ?? [])];
     this.kycProfiles = [...(input.kycProfiles ?? [])];
     this.ledgerEntries = [...(input.ledgerEntries ?? [])];
     this.lots = [...(input.lots ?? [])];
+    this.orders = [...(input.orders ?? [])];
   }
 
   asContext(userId = 'usr_partner') {
@@ -92,6 +97,14 @@ class FakePartnerDb {
     }
     if (table === partnerLots) {
       return this.lots.filter((lot) => predicateText.includes(String(lot.userId)));
+    }
+    if (table === partnerRechargeOrders) {
+      return this.orders.filter(
+        (order) =>
+          predicateText.includes(String(order.userId)) &&
+          order.status === 'completed' &&
+          order.orderKind === 'recharge',
+      );
     }
     return [];
   }
@@ -213,6 +226,25 @@ function fakeLot(overrides: Partial<PartnerLot> = {}): PartnerLot {
   };
 }
 
+function fakeOrder(overrides: Partial<PartnerRechargeOrder> = {}): PartnerRechargeOrder {
+  return {
+    id: 50,
+    externalId: 'pay_order',
+    userId: 123,
+    provider: 'wechat',
+    providerOrderId: null,
+    providerCaptureId: 'cap_order',
+    amountCnyCents: 40_001_00,
+    status: 'completed',
+    orderKind: 'recharge',
+    idempotencyKey: 'order-idem-1',
+    metadata: null,
+    createdAt: new Date('2026-06-20T00:00:00.000Z'),
+    updatedAt: new Date('2026-06-20T00:00:00.000Z'),
+    ...overrides,
+  };
+}
+
 describe('partnerRouter', () => {
   const originalFlag = process.env.PARTNER_LEDGER_ENABLED;
 
@@ -279,7 +311,7 @@ describe('partnerRouter', () => {
       ledger: {
         availableCreditCents: 10_000_00,
         lockedCreditCents: 500_00,
-        withdrawableCreditCents: 0,
+        withdrawableCreditCents: 10_000_00,
         pendingWithdrawalCreditCents: 0,
         frozenCreditCents: 0,
       },
@@ -343,12 +375,18 @@ describe('partnerRouter', () => {
     });
   });
 
-  it('rechargePreview validates amount and rolling total', async () => {
+  it('rechargePreview validates amount and computed rolling total', async () => {
     process.env.PARTNER_LEDGER_ENABLED = 'true';
     const caller = partnerRouter.createCaller(
       new FakePartnerDb({
         memberships: [fakeMembership()],
         kycProfiles: [fakeKyc()],
+        orders: [
+          fakeOrder({
+            amountCnyCents: 490_001_00,
+            updatedAt: new Date('2026-06-20T00:00:00.000Z'),
+          }),
+        ],
       }).asContext(),
     );
 
@@ -359,20 +397,11 @@ describe('partnerRouter', () => {
     await expect(
       caller.rechargePreview({
         amountCnyCents: 10_000_00,
-        rollingThirtyDayCnyCents: 9_999_00,
+        rollingThirtyDayCnyCents: 10_000_00,
       }),
     ).rejects.toMatchObject({
       code: 'BAD_REQUEST',
-      message: 'rollingThirtyDayCnyCents must include the current recharge amount',
-    });
-    await expect(
-      caller.rechargePreview({
-        amountCnyCents: 10_000_00,
-        rollingThirtyDayCnyCents: 10_000_01,
-      }),
-    ).rejects.toMatchObject({
-      code: 'BAD_REQUEST',
-      message: 'rollingThirtyDayCnyCents must be a whole CNY amount',
+      message: 'rollingThirtyDayCnyCents must not exceed the monthly maximum',
     });
   });
 
@@ -382,13 +411,27 @@ describe('partnerRouter', () => {
       new FakePartnerDb({
         memberships: [fakeMembership()],
         kycProfiles: [fakeKyc()],
+        orders: [
+          fakeOrder({
+            amountCnyCents: 40_001_00,
+            updatedAt: new Date('2026-06-20T00:00:00.000Z'),
+          }),
+          fakeOrder({
+            id: 51,
+            externalId: 'pay_order_outside_window',
+            amountCnyCents: 200_000_00,
+            providerCaptureId: 'cap_order_outside',
+            idempotencyKey: 'order-idem-outside',
+            updatedAt: new Date('2026-05-01T00:00:00.000Z'),
+          }),
+        ],
       }).asContext(),
     );
 
     await expect(
       caller.rechargePreview({
         amountCnyCents: 10_000_00,
-        rollingThirtyDayCnyCents: 50_001_00,
+        rollingThirtyDayCnyCents: 10_000_00,
       }),
     ).resolves.toEqual({
       amountCnyCents: 10_000_00,

@@ -25,3 +25,9 @@ export function partnerConfig() {
     withdrawalMinCreditCents: intEnv('PARTNER_WITHDRAWAL_MIN_CREDIT_CENTS', 500_00),
   };
 }
+
+export function assertPartnerLedgerWriteEnabled(): void {
+  if (!partnerConfig().enabled) {
+    throw new Error('partner ledger is disabled');
+  }
+}

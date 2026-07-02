@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ApiCostPoolEvent } from '../db/schema/partner.js';
 import type { DailyLockedBonusSummary } from './allocation-service.js';
 import type { MonthlyReleaseSummary } from './release-service.js';
@@ -12,12 +12,22 @@ import {
 } from './schedulers.js';
 
 const originalPartnerFxBps = process.env.PARTNER_FX_BPS;
+const originalPartnerLedgerEnabled = process.env.PARTNER_LEDGER_ENABLED;
+
+beforeEach(() => {
+  process.env.PARTNER_LEDGER_ENABLED = 'true';
+});
 
 afterEach(() => {
   if (originalPartnerFxBps === undefined) {
     delete process.env.PARTNER_FX_BPS;
   } else {
     process.env.PARTNER_FX_BPS = originalPartnerFxBps;
+  }
+  if (originalPartnerLedgerEnabled === undefined) {
+    delete process.env.PARTNER_LEDGER_ENABLED;
+  } else {
+    process.env.PARTNER_LEDGER_ENABLED = originalPartnerLedgerEnabled;
   }
 });
 
@@ -76,6 +86,20 @@ class FakeReleaseService implements PartnerReleaseService {
 }
 
 describe('runPartnerDailyJobs', () => {
+  it('refuses write jobs when the partner ledger flag is disabled', async () => {
+    delete process.env.PARTNER_LEDGER_ENABLED;
+    const allocationService = new FakeAllocationService(12_345);
+
+    await expect(
+      runPartnerDailyJobs({
+        allocationService,
+        day: '2026-07-02',
+        fxBps: 72_000,
+      }),
+    ).rejects.toThrow(/partner ledger is disabled/);
+    expect(allocationService.calls).toEqual([]);
+  });
+
   it('defaults to the previous UTC day, uses configured fx bps, derives allocation budget, and preserves call order', async () => {
     process.env.PARTNER_FX_BPS = '73000';
     const allocationService = new FakeAllocationService(12_345);
@@ -152,6 +176,20 @@ describe('runPartnerDailyJobs', () => {
 });
 
 describe('runPartnerMonthlyRelease', () => {
+  it('refuses release writes when the partner ledger flag is disabled', async () => {
+    delete process.env.PARTNER_LEDGER_ENABLED;
+    const releaseService = new FakeReleaseService();
+
+    await expect(
+      runPartnerMonthlyRelease({
+        releaseService,
+        releaseMonth: '2026-07',
+        budgetCreditCents: 8_000,
+      }),
+    ).rejects.toThrow(/partner ledger is disabled/);
+    expect(releaseService.calls).toEqual([]);
+  });
+
   it('defaults to the previous UTC month and runs the release with the explicit budget', async () => {
     const releaseService = new FakeReleaseService();
 

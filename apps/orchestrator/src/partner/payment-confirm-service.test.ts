@@ -1,5 +1,5 @@
 import { inspect } from 'node:util';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import type { DB } from '../db/client.js';
 import {
   partnerRechargeOrders,
@@ -263,6 +263,16 @@ const confirmInput = {
   now: new Date('2026-07-02T00:00:00.000Z'),
 };
 
+const originalAnnualCap = process.env.PARTNER_RECHARGE_MAX_ANNUAL_CNY_CENTS;
+
+afterEach(() => {
+  if (originalAnnualCap === undefined) {
+    delete process.env.PARTNER_RECHARGE_MAX_ANNUAL_CNY_CENTS;
+  } else {
+    process.env.PARTNER_RECHARGE_MAX_ANNUAL_CNY_CENTS = originalAnnualCap;
+  }
+});
+
 describe('partnerPaymentIdempotencyKey', () => {
   it('builds a partner payment key from provider and capture id', () => {
     expect(partnerPaymentIdempotencyKey({ provider: 'wechat', providerCaptureId: 'cap_1' })).toBe(
@@ -505,6 +515,57 @@ describe('PartnerPaymentConfirmService.confirmCapturedOrder', () => {
       reviewReason: 'lot_creation_failed',
       errorName: 'RangeError',
       errorMessage: 'rollingThirtyDayCnyCents must not exceed the monthly maximum',
+    });
+    expect(lotCreations).toHaveLength(0);
+  });
+
+  it('moves a captured recharge to review_required when serialized annual total exceeds the configured cap', async () => {
+    process.env.PARTNER_RECHARGE_MAX_ANNUAL_CNY_CENTS = String(25_000_00);
+    const current = fakeOrder({
+      id: 1,
+      externalId: 'pay_order_1',
+      userId: 123,
+      amountCnyCents: 10_000_00,
+      createdAt: new Date('2026-07-01T00:00:00.000Z'),
+      updatedAt: new Date('2026-07-01T00:00:00.000Z'),
+    });
+    const priorInsideWindow = fakeOrder({
+      id: 2,
+      externalId: 'pay_order_2',
+      userId: 123,
+      providerCaptureId: 'cap_prior_inside',
+      status: 'completed',
+      amountCnyCents: 16_000_00,
+      createdAt: new Date('2026-02-01T00:00:00.000Z'),
+      updatedAt: new Date('2026-02-01T00:00:00.000Z'),
+      idempotencyKey: 'prior-inside',
+    });
+    const priorOutsideWindow = fakeOrder({
+      id: 3,
+      externalId: 'pay_order_3',
+      userId: 123,
+      providerCaptureId: 'cap_prior_outside',
+      status: 'completed',
+      amountCnyCents: 200_000_00,
+      createdAt: new Date('2025-06-01T00:00:00.000Z'),
+      updatedAt: new Date('2025-06-01T00:00:00.000Z'),
+      idempotencyKey: 'prior-outside',
+    });
+    const fakeDb = new FakePartnerPaymentDb({
+      orders: [current, priorInsideWindow, priorOutsideWindow],
+    });
+    const { service, lotCreations } = serviceWithFakes(fakeDb);
+
+    await expect(service.confirmCapturedOrder(confirmInput)).rejects.toBeInstanceOf(
+      PartnerPaymentConfirmReviewRequiredError,
+    );
+
+    expect(current.status).toBe('review_required');
+    expect(current.providerCaptureId).toBe('cap_1');
+    expect(current.metadata).toMatchObject({
+      reviewReason: 'annual_recharge_cap_exceeded',
+      annualRechargeCapCnyCents: 25_000_00,
+      annualRechargeTotalCnyCents: 26_000_00,
     });
     expect(lotCreations).toHaveLength(0);
   });

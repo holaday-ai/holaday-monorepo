@@ -22,10 +22,12 @@ class FakeReleaseDb {
   readonly ledgerInsertAttempts: FakeLedgerInsert[] = [];
   readonly lotReconciliations: Array<{
     lotId: number;
+    status?: string;
     releasedPrincipalCreditCents: number;
     releasedBonusCreditCents: number;
     carryForwardCreditCents: number;
   }> = [];
+  readonly lotStatusTransitions: Array<{ lotId: number; status: string }> = [];
   private nextReleaseId: number;
   private nextLedgerId: number;
   private lastLedgerIdempotencyKey: string | null = null;
@@ -100,25 +102,56 @@ class FakeReleaseDb {
 
     return {
       set: (
-        values: Pick<
-          PartnerLot,
-          'releasedPrincipalCreditCents' | 'releasedBonusCreditCents' | 'carryForwardCreditCents'
+        values: Partial<
+          Pick<
+            PartnerLot,
+            'status' | 'releasedPrincipalCreditCents' | 'releasedBonusCreditCents' | 'carryForwardCreditCents'
+          >
         >,
       ) => ({
         where: (predicate: unknown) => {
+          if (
+            values.status === 'release_pending' &&
+            values.releasedPrincipalCreditCents === undefined &&
+            values.releasedBonusCreditCents === undefined &&
+            values.carryForwardCreditCents === undefined
+          ) {
+            const now = extractPredicateDates(predicate)[0] ?? new Date('2100-01-01T00:00:00.000Z');
+            for (const lot of this.lotRows) {
+              if (
+                lot.status === 'accumulating' &&
+                lot.riskStatus === 'normal' &&
+                lot.accumulationEndsAt.getTime() <= now.getTime()
+              ) {
+                lot.status = values.status;
+                lot.updatedAt = new Date('2026-11-01T00:00:00.000Z');
+                this.lotStatusTransitions.push({ lotId: lot.id, status: values.status });
+              }
+            }
+            return Promise.resolve([{ affectedRows: this.lotStatusTransitions.length }, null]);
+          }
+
           const lotId = extractPredicateNumbers(predicate)[0] ?? null;
           const lot = lotId === null ? undefined : this.lotRows.find((row) => row.id === lotId);
           if (!lot) return Promise.resolve();
 
-          lot.releasedPrincipalCreditCents = values.releasedPrincipalCreditCents;
-          lot.releasedBonusCreditCents = values.releasedBonusCreditCents;
-          lot.carryForwardCreditCents = values.carryForwardCreditCents;
+          if (values.status !== undefined) lot.status = values.status;
+          if (values.releasedPrincipalCreditCents !== undefined) {
+            lot.releasedPrincipalCreditCents = values.releasedPrincipalCreditCents;
+          }
+          if (values.releasedBonusCreditCents !== undefined) {
+            lot.releasedBonusCreditCents = values.releasedBonusCreditCents;
+          }
+          if (values.carryForwardCreditCents !== undefined) {
+            lot.carryForwardCreditCents = values.carryForwardCreditCents;
+          }
           lot.updatedAt = new Date('2026-11-01T00:00:00.000Z');
           this.lotReconciliations.push({
             lotId: lot.id,
-            releasedPrincipalCreditCents: values.releasedPrincipalCreditCents,
-            releasedBonusCreditCents: values.releasedBonusCreditCents,
-            carryForwardCreditCents: values.carryForwardCreditCents,
+            ...(values.status === undefined ? {} : { status: values.status }),
+            releasedPrincipalCreditCents: lot.releasedPrincipalCreditCents,
+            releasedBonusCreditCents: lot.releasedBonusCreditCents,
+            carryForwardCreditCents: lot.carryForwardCreditCents,
           });
           return Promise.resolve();
         },
@@ -191,6 +224,33 @@ class FakeReleaseDb {
 
     return [];
   }
+}
+
+function extractPredicateDates(value: unknown): Date[] {
+  const dates: Date[] = [];
+  const seen = new WeakSet<object>();
+
+  function visit(candidate: unknown): void {
+    if (candidate instanceof Date) {
+      dates.push(candidate);
+      return;
+    }
+    if (!candidate || typeof candidate !== 'object' || seen.has(candidate)) return;
+    seen.add(candidate);
+
+    if ('value' in candidate && (candidate as { value?: unknown }).value instanceof Date) {
+      dates.push((candidate as { value: Date }).value);
+    }
+    if ('queryChunks' in candidate) {
+      for (const chunk of (candidate as { queryChunks?: unknown[] }).queryChunks ?? []) visit(chunk);
+    }
+    if ('params' in candidate) {
+      for (const param of (candidate as { params?: unknown[] }).params ?? []) visit(param);
+    }
+  }
+
+  visit(value);
+  return dates;
 }
 
 function extractPredicateNumbers(value: unknown): number[] {
@@ -380,10 +440,56 @@ describe('ReleaseService releaseEligibleLots', () => {
       ['monthly_release_bonus', 'available', 2_000],
     ]);
     expect(fakeDb.lotRows[0]).toMatchObject({
+      status: 'releasing',
       releasedPrincipalCreditCents: 10_000,
       releasedBonusCreditCents: 2_000,
       carryForwardCreditCents: 0,
     });
+  });
+
+  it('transitions matured accumulating lots before monthly release and is idempotent', async () => {
+    const fakeDb = new FakeReleaseDb({
+      lots: [
+        fakeLot({
+          status: 'accumulating',
+          accumulationEndsAt: new Date('2026-10-29T00:00:00.000Z'),
+          releaseStartsAt: new Date('2026-11-01T00:00:00.000Z'),
+        }),
+        fakeLot({
+          id: 2,
+          externalId: 'payment_lot_not_matured',
+          status: 'accumulating',
+          accumulationEndsAt: new Date('2026-12-15T00:00:00.000Z'),
+          releaseStartsAt: new Date('2026-12-16T00:00:00.000Z'),
+        }),
+        fakeLot({
+          id: 3,
+          externalId: 'payment_lot_frozen',
+          status: 'accumulating',
+          riskStatus: 'frozen',
+          accumulationEndsAt: new Date('2026-10-29T00:00:00.000Z'),
+          releaseStartsAt: new Date('2026-11-01T00:00:00.000Z'),
+        }),
+      ],
+    });
+    const service = new ReleaseService(fakeDb.asDB());
+
+    const first = await service.releaseEligibleLots({ releaseMonth: '2026-11', budgetCreditCents: 50_000 });
+    const second = await service.releaseEligibleLots({ releaseMonth: '2026-11', budgetCreditCents: 50_000 });
+
+    expect(first).toMatchObject({
+      eligibleLotCount: 1,
+      releaseCount: 1,
+      totalReleasedCreditCents: 12_000,
+    });
+    expect(second).toEqual(first);
+    expect(fakeDb.lotStatusTransitions).toEqual([{ lotId: 1, status: 'release_pending' }]);
+    expect(fakeDb.lotRows.map((lot) => [lot.id, lot.status])).toEqual([
+      [1, 'releasing'],
+      [2, 'accumulating'],
+      [3, 'accumulating'],
+    ]);
+    expect(fakeDb.releaseRows).toHaveLength(1);
   });
 
   it('carries forward a short-budget release and consumes the remaining budget', async () => {
@@ -572,6 +678,7 @@ describe('ReleaseService releaseEligibleLots', () => {
       carryForwardCreditCents: 0,
     });
     expect(fakeDb.lotRows[0]).toMatchObject({
+      status: 'completed',
       releasedPrincipalCreditCents: 80_000,
       releasedBonusCreditCents: 16_000,
       carryForwardCreditCents: 0,
@@ -708,7 +815,13 @@ describe('ReleaseService releaseEligibleLots', () => {
           releaseEndsAt: new Date('2026-10-31T00:00:00.000Z'),
         }),
         fakeLot({ id: 3, externalId: 'payment_lot_3', riskStatus: 'frozen' }),
-        fakeLot({ id: 4, externalId: 'payment_lot_4', status: 'accumulating' }),
+        fakeLot({
+          id: 4,
+          externalId: 'payment_lot_4',
+          status: 'accumulating',
+          accumulationEndsAt: new Date('2026-12-15T00:00:00.000Z'),
+          releaseStartsAt: new Date('2026-12-16T00:00:00.000Z'),
+        }),
       ],
     });
     const service = new ReleaseService(fakeDb.asDB());

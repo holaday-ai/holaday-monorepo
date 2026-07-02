@@ -2,7 +2,7 @@ import { API_UNITS_PER_HOLA_CREDIT, HOLA_CREDIT_CNY_CENTS } from '@holaday/share
 import type { DB } from '../db/client.js';
 import type { ApiCostPoolEvent } from '../db/schema/partner.js';
 import { AllocationService, type DailyLockedBonusSummary } from './allocation-service.js';
-import { partnerConfig } from './partner-config.js';
+import { assertPartnerLedgerWriteEnabled, partnerConfig } from './partner-config.js';
 import { ReleaseService, type MonthlyReleaseSummary } from './release-service.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -282,6 +282,7 @@ export function parsePartnerMonthlyCliArgs(
 }
 
 export async function runPartnerDailyJobs(input: RunPartnerDailyJobsInput = {}): Promise<PartnerDailyJobSummary> {
+  assertPartnerLedgerWriteEnabled();
   const day = normalizePartnerDailyDay(input.day ?? defaultPreviousUtcDay(input.now ?? new Date()));
   const fxBps = assertPositiveSafeInteger(input.fxBps ?? partnerConfig().fxBps, 'fxBps');
   const explicitAllocationBudgetCreditCents =
@@ -312,6 +313,7 @@ export async function runPartnerDailyJobs(input: RunPartnerDailyJobsInput = {}):
 export async function runPartnerMonthlyRelease(
   input: RunPartnerMonthlyReleaseInput = {},
 ): Promise<PartnerMonthlyReleaseJobSummary> {
+  assertPartnerLedgerWriteEnabled();
   const releaseMonth = normalizePartnerReleaseMonth(
     input.releaseMonth ?? defaultPreviousUtcMonth(input.now ?? new Date()),
   );

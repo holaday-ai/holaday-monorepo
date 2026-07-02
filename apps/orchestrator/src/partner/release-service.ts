@@ -1,6 +1,7 @@
 import { PARTNER_RELEASE_MONTHS, newExternalId } from '@holaday/shared-types';
 import { and, eq, gte, inArray, lte, sql } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
+import { readAffectedRows } from '../db/mysql-result.js';
 import {
   partnerLots,
   partnerMonthlyReleases,
@@ -30,6 +31,13 @@ function normalizeReleaseMonth(value: string): string {
   }
 
   return value;
+}
+
+function normalizeDate(value: Date, fieldName: string): Date {
+  if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
+    throw new RangeError(`${fieldName} must be a valid Date`);
+  }
+  return new Date(value.getTime());
 }
 
 function monthBoundsUtc(releaseMonth: string): { start: Date; end: Date } {
@@ -64,6 +72,10 @@ function latestReleaseRow(rows: readonly PartnerMonthlyRelease[]): PartnerMonthl
     if (byMonth !== 0) return byMonth;
     return a.id - b.id;
   }).at(-1);
+}
+
+function canProgressLotStatus(status: string): boolean {
+  return status === 'accumulating' || status === 'release_pending' || status === 'releasing';
 }
 
 export interface MonthlyReleaseSummary {
@@ -189,18 +201,43 @@ export class ReleaseService {
 
   private async reconcileLotSummaries(lotId: number): Promise<void> {
     const rows = await this.readReleasesForLot(lotId);
+    const lot = await this.readLot(lotId);
+    if (!lot) return;
     const latest = latestReleaseRow(rows);
     const releasedPrincipalCreditCents = rows.reduce((sum, row) => sum + row.principalCreditCents, 0);
     const releasedBonusCreditCents = rows.reduce((sum, row) => sum + row.bonusCreditCents, 0);
+    const status =
+      canProgressLotStatus(lot.status) && rows.length > 0
+        ? releasedPrincipalCreditCents >= lot.principalCreditCents &&
+          releasedBonusCreditCents >= lot.lockedBonusCreditCents
+          ? 'completed'
+          : 'releasing'
+        : lot.status;
 
     await this.db
       .update(partnerLots)
       .set({
+        ...(status === lot.status ? {} : { status }),
         releasedPrincipalCreditCents,
         releasedBonusCreditCents,
         carryForwardCreditCents: latest?.carryForwardCreditCents ?? 0,
       })
       .where(eq(partnerLots.id, lotId));
+  }
+
+  async transitionAccumulatedLotsToReleasePending(input: { now?: Date } = {}): Promise<number> {
+    const now = normalizeDate(input.now ?? new Date(), 'now');
+    const result = await this.db
+      .update(partnerLots)
+      .set({ status: 'release_pending' })
+      .where(
+        and(
+          eq(partnerLots.status, 'accumulating'),
+          eq(partnerLots.riskStatus, 'normal'),
+          lte(partnerLots.accumulationEndsAt, now),
+        ),
+      );
+    return readAffectedRows(result);
   }
 
   async releaseEligibleLots(input: {
@@ -209,6 +246,7 @@ export class ReleaseService {
   }): Promise<MonthlyReleaseSummary> {
     const releaseMonth = normalizeReleaseMonth(input.releaseMonth);
     const budgetCreditCents = assertNonNegativeSafeInteger(input.budgetCreditCents, 'budgetCreditCents');
+    await this.transitionAccumulatedLotsToReleasePending({ now: monthBoundsUtc(releaseMonth).end });
     const existingReleasesForMonth = await this.readReleasesForMonth(releaseMonth);
     const existingReleaseByLotId = new Map(existingReleasesForMonth.map((row) => [row.lotId, row]));
     const lotIdsToReconcile = new Set(existingReleasesForMonth.map((row) => row.lotId));

@@ -47,6 +47,7 @@ import {
   PartnerPaymentConfirmService,
   PartnerPaymentProviderCaptureConflictError,
 } from './partner/payment-confirm-service.js';
+import { partnerConfig } from './partner/partner-config.js';
 import { QuotaService } from './quota/quota-service.js';
 import {
   ADDON_PACK_CATALOGUE,
@@ -1025,6 +1026,11 @@ export function createHttpApp(deps: HttpAppDeps) {
         'partner-internal-confirm: shared-secret mismatch',
       );
       res.status(401).json({ error: 'unauthorized' });
+      return;
+    }
+    if (!partnerConfig().enabled) {
+      logger.warn('partner-internal-confirm: partner ledger disabled');
+      res.status(503).json({ error: 'partner_ledger_disabled' });
       return;
     }
 

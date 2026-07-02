@@ -16,6 +16,8 @@ import {
   RechargeGateError,
   RechargeOrderIdempotencyConflictError,
   RechargeService,
+  computeCompletedRechargeTotalCnyCents,
+  rechargeRollingThirtyDayWindowStart,
   validateRechargeAmount,
 } from '../../partner/recharge-service.js';
 import { evaluatePartnerRisk } from '../../partner/risk-service.js';
@@ -181,26 +183,16 @@ function mapWithdrawalError(error: unknown): never {
   });
 }
 
-function normalizeRollingThirtyDayAmount(
-  amountCnyCents: number,
-  rollingThirtyDayCnyCents?: number,
-): number {
-  const rolling = rollingThirtyDayCnyCents ?? amountCnyCents;
-
+function assertRollingThirtyDayAmount(rolling: number): void {
   if (!Number.isSafeInteger(rolling) || rolling < 0) {
     badRequest('rollingThirtyDayCnyCents must be a non-negative safe integer');
   }
   if (rolling % HOLA_CREDIT_CNY_CENTS !== 0) {
     badRequest('rollingThirtyDayCnyCents must be a whole CNY amount');
   }
-  if (rolling < amountCnyCents) {
-    badRequest('rollingThirtyDayCnyCents must include the current recharge amount');
-  }
   if (rolling > PARTNER_RECHARGE_MAX_MONTHLY_CNY_CENTS) {
     badRequest('rollingThirtyDayCnyCents must not exceed the monthly maximum');
   }
-
-  return rolling;
 }
 
 export const partnerRouter = router({
@@ -242,6 +234,11 @@ export const partnerRouter = router({
         .limit(20),
     ]);
 
+    const dashboardLedger = {
+      ...ledger,
+      withdrawableCreditCents: ledger.availableCreditCents,
+    };
+
     return {
       enabled: true as const,
       membership: membership
@@ -251,7 +248,7 @@ export const partnerRouter = router({
           }
         : null,
       kycStatus,
-      ledger,
+      ledger: dashboardLedger,
       lots: lots.map((lot) => ({
         id: lot.id,
         externalId: lot.externalId,
@@ -339,10 +336,6 @@ export const partnerRouter = router({
       badRequest(validation.reason);
     }
     const amountCnyCents = input.amountCnyCents;
-    const rollingThirtyDayCnyCents = normalizeRollingThirtyDayAmount(
-      amountCnyCents,
-      input.rollingThirtyDayCnyCents,
-    );
 
     const userId = await requireInternalUserId(ctx);
     const membership = await new PartnerMembershipService(ctx.db).getActiveMembership(userId);
@@ -361,6 +354,15 @@ export const partnerRouter = router({
       });
     }
 
+    const previewNow = new Date();
+    const rollingThirtyDayCnyCents =
+      amountCnyCents +
+      (await computeCompletedRechargeTotalCnyCents(ctx.db, {
+        userId,
+        windowStart: rechargeRollingThirtyDayWindowStart(previewNow),
+        now: previewNow,
+      }));
+    assertRollingThirtyDayAmount(rollingThirtyDayCnyCents);
     const tier = selectRechargeTier(rollingThirtyDayCnyCents);
 
     return {

@@ -1,5 +1,5 @@
 import { HOLA_CREDIT_CNY_CENTS } from '@holaday/shared-types';
-import { and, eq, gte } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
 import { readAffectedRows } from '../db/mysql-result.js';
 import {
@@ -8,12 +8,19 @@ import {
 } from '../db/schema/partner.js';
 import { users } from '../db/schema/users.js';
 import { PartnerMembershipService } from './membership-service.js';
-import { RechargeLotConflictError, RechargeService } from './recharge-service.js';
+import { partnerConfig } from './partner-config.js';
+import {
+  RechargeLotConflictError,
+  RechargeService,
+  assertAnnualRechargeCap,
+  computeCompletedRechargeTotalCnyCents,
+  rechargeAnnualWindowStart,
+  rechargeRollingThirtyDayWindowStart,
+} from './recharge-service.js';
 
 const ORDER_EXTERNAL_ID_MAX_LENGTH = 32;
 const PROVIDER_MAX_LENGTH = 24;
 const PROVIDER_CAPTURE_ID_MAX_LENGTH = 128;
-const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 
 type PartnerPaymentOrderKind = 'membership' | 'recharge';
 
@@ -213,6 +220,23 @@ function reviewMetadata(existing: unknown, error: unknown): Record<string, unkno
   };
 }
 
+function annualCapReviewMetadata(input: {
+  existing: unknown;
+  annualRechargeCapCnyCents: number;
+  annualRechargeTotalCnyCents: number;
+}): Record<string, unknown> {
+  const base =
+    input.existing !== null && typeof input.existing === 'object' && !Array.isArray(input.existing)
+      ? (input.existing as Record<string, unknown>)
+      : {};
+  return {
+    ...base,
+    reviewReason: 'annual_recharge_cap_exceeded',
+    annualRechargeCapCnyCents: input.annualRechargeCapCnyCents,
+    annualRechargeTotalCnyCents: input.annualRechargeTotalCnyCents,
+  };
+}
+
 export function partnerPaymentIdempotencyKey(input: {
   provider: string;
   providerCaptureId: string;
@@ -362,8 +386,41 @@ export class PartnerPaymentConfirmService {
         now: confirm.now,
       });
     } else {
-      const rollingThirtyDayCnyCents = await this.computeRollingThirtyDayCnyCents(tx, {
+      const annualRechargeTotalCnyCents = await computeCompletedRechargeTotalCnyCents(tx, {
         userId: order.userId,
+        windowStart: rechargeAnnualWindowStart(confirm.now),
+        now: confirm.now,
+      });
+      const annualRechargeCapCnyCents = partnerConfig().annualRechargeCapCnyCents;
+      try {
+        assertAnnualRechargeCap({
+          annualRechargeTotalCnyCents,
+          annualRechargeCapCnyCents,
+        });
+      } catch (error) {
+        if (!(error instanceof RangeError)) {
+          throw error;
+        }
+        await this.markOrderReviewRequired(
+          tx,
+          completedOrder,
+          confirm,
+          annualCapReviewMetadata({
+            existing: completedOrder.metadata,
+            annualRechargeCapCnyCents,
+            annualRechargeTotalCnyCents,
+          }),
+        );
+        return new PartnerPaymentConfirmReviewRequiredError(
+          order.externalId,
+          orderKind,
+          confirm.providerCaptureId,
+        );
+      }
+
+      const rollingThirtyDayCnyCents = await computeCompletedRechargeTotalCnyCents(tx, {
+        userId: order.userId,
+        windowStart: rechargeRollingThirtyDayWindowStart(confirm.now),
         now: confirm.now,
       });
       try {
@@ -378,7 +435,7 @@ export class PartnerPaymentConfirmService {
         if (!isRechargeLotCreationBusinessError(error)) {
           throw error;
         }
-        await this.markOrderReviewRequired(tx, completedOrder, confirm, error);
+        await this.markOrderReviewRequired(tx, completedOrder, confirm, reviewMetadata(completedOrder.metadata, error));
         return new PartnerPaymentConfirmReviewRequiredError(
           order.externalId,
           orderKind,
@@ -433,14 +490,14 @@ export class PartnerPaymentConfirmService {
     db: DB,
     order: PartnerRechargeOrder,
     confirm: NormalizedPartnerPaymentConfirmInput,
-    error: unknown,
+    metadata: Record<string, unknown>,
   ): Promise<void> {
     const result = await db
       .update(partnerRechargeOrders)
       .set({
         status: 'review_required',
         providerCaptureId: confirm.providerCaptureId,
-        metadata: reviewMetadata(order.metadata, error),
+        metadata,
         updatedAt: confirm.now,
       })
       .where(eq(partnerRechargeOrders.externalId, order.externalId));
@@ -451,31 +508,4 @@ export class PartnerPaymentConfirmService {
     }
   }
 
-  private async computeRollingThirtyDayCnyCents(
-    db: DB,
-    input: { userId: number; now: Date },
-  ): Promise<number> {
-    const windowStart = new Date(input.now.getTime() - THIRTY_DAYS_MS);
-    const rows = await db
-      .select()
-      .from(partnerRechargeOrders)
-      .where(
-        and(
-          eq(partnerRechargeOrders.userId, input.userId),
-          eq(partnerRechargeOrders.status, 'completed'),
-          eq(partnerRechargeOrders.orderKind, 'recharge'),
-          gte(partnerRechargeOrders.updatedAt, windowStart),
-        ),
-      );
-
-    return rows
-      .filter((row) => {
-        if (row.userId !== input.userId || row.status !== 'completed' || row.orderKind !== 'recharge') {
-          return false;
-        }
-        const effectiveAt = row.updatedAt ?? row.createdAt;
-        return effectiveAt.getTime() >= windowStart.getTime() && effectiveAt.getTime() <= input.now.getTime();
-      })
-      .reduce((sum, row) => sum + row.amountCnyCents, 0);
-  }
 }
