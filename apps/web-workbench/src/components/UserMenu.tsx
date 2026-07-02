@@ -26,7 +26,7 @@ interface Props {
   onOpenFeedback?(): void;
   /** Count of failed tasks — shows/hides the 批量清除 menu item. */
   failedTaskCount?: number;
-  /** Invoked when the user picks "清除所有失败任务". Caller confirms + deletes. */
+  /** Invoked when the user picks "清除失败/需复核任务". Caller confirms + deletes. */
   onClearFailedTasks?(): void;
   /**
    * Codex-rail layout — renders just the avatar (no name / plan text)
@@ -205,7 +205,7 @@ export function UserMenu({
                   onClearFailedTasks();
                 }}
               >
-                清除失败任务（{failedTaskCount}）
+                清除失败/需复核任务（{failedTaskCount}）
               </MenuItem>
             )}
             {onOpenFeedback && (

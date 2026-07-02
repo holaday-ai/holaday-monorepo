@@ -16,7 +16,7 @@
  * tests guard the calculation + the row-state machine.
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   computeNextRun,
@@ -25,6 +25,10 @@ import {
   startScheduledRunner,
   stopScheduledRunner,
 } from './scheduled-runner.js';
+
+afterEach(() => {
+  stopScheduledRunner();
+});
 
 describe('computeNextRun', () => {
   it('once → null (one-shot trigger marks row completed instead)', () => {
@@ -321,6 +325,35 @@ describe('startScheduledRunner — tick integration', () => {
     expect(updates.length).toBe(2);
     const advance = updates[1]!;
     expect((advance as { lastError: string }).lastError).toHaveLength(2_000);
+    stopScheduledRunner();
+  });
+
+  it('dispatch skipped → records skipped and notifies with skipped semantics, not started copy', async () => {
+    const { db, updates } = makeFakeDb([
+      { id: 14, userId: 42, intent: 'market briefing', repeatType: 'daily' },
+    ]);
+    const dispatch = vi.fn(async () => ({
+      skipped: true as const,
+      note: '非交易日，未生成简报',
+    }));
+    const notify = vi.fn(async () => undefined);
+    startScheduledRunner({ db, dispatch, notify, pollIntervalMs: 60_000 });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(updates.length).toBe(2);
+    expect(updates[1]).toMatchObject({
+      status: 'active',
+      lastRunStatus: 'skipped',
+      lastError: '非交易日，未生成简报',
+    });
+    expect(notify).toHaveBeenCalledWith({
+      userInternalId: 42,
+      scheduledTaskInternalId: 14,
+      intent: 'market briefing',
+      ok: false,
+      error: '非交易日，未生成简报',
+      skipped: true,
+    });
     stopScheduledRunner();
   });
 

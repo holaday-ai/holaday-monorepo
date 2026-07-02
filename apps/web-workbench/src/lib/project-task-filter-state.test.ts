@@ -230,12 +230,13 @@ describe('project task filter state', () => {
     expect(projectTaskFilterAfterTaskDelete(current, ['tsk_missing'])).toBe(current);
   });
 
-  it('removes failed tasks after the clear-failed action succeeds', () => {
+  it('removes failed-review tasks after the clear action succeeds', () => {
     const current = state({
       projectId: 'proj_a',
       tasks: [
         task('tsk_done'),
         task('tsk_failed', { status: 'failed' }),
+        task('tsk_partial', { status: 'partial_success' }),
         task('tsk_cancelled', { status: 'cancelled' }),
       ],
     });

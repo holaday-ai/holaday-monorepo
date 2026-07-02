@@ -133,6 +133,12 @@ describe('tRPC tasks.delete', () => {
     });
   }
 
+  async function callFailedCount(port: number, token: string) {
+    return fetch(`http://127.0.0.1:${port}/trpc/tasks.failedCount`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+  }
+
   it('deletes the caller\'s own terminal task', async () => {
     const user = await seedUser();
     const taskId = await seedTask(user.internalId, 'completed');
@@ -193,7 +199,7 @@ describe('tRPC tasks.delete', () => {
     }
   });
 
-  it("clears all failed tasks for the caller without deleting other statuses or users' rows", async () => {
+  it("clears failed-review tasks for the caller without deleting completed or other users' rows", async () => {
     const user = await seedUser();
     const other = await seedUser();
     const failedA = await seedTask(user.internalId, 'failed');
@@ -206,6 +212,8 @@ describe('tRPC tasks.delete', () => {
       const token = await signAccessToken({ sub: user.external, plan: 'free' });
       const res = await callClearFailed(port, token);
       expect(res.status).toBe(200);
+      const json = (await res.json()) as { result?: { data?: { deleted?: number } } };
+      expect(json.result?.data?.deleted).toBe(3);
 
       const { db } = await import('../../db/client.js');
       const { inArray } = await import('drizzle-orm');
@@ -225,9 +233,26 @@ describe('tRPC tasks.delete', () => {
       const byId = new Map(rows.map((row) => [row.externalId, row.status]));
       expect(byId.has(failedA)).toBe(false);
       expect(byId.has(failedB)).toBe(false);
+      expect(byId.has(partial)).toBe(false);
       expect(byId.get(completed)).toBe('completed');
-      expect(byId.get(partial)).toBe('partial_success');
       expect(byId.get(otherFailed)).toBe('failed');
+    } finally {
+      await close();
+    }
+  });
+
+  it('failedCount includes partial_success because it is part of the failure-review set', async () => {
+    const user = await seedUser();
+    await seedTask(user.internalId, 'failed');
+    await seedTask(user.internalId, 'partial_success');
+    await seedTask(user.internalId, 'completed');
+    const { port, signAccessToken, close } = await bootTrpcServer();
+    try {
+      const token = await signAccessToken({ sub: user.external, plan: 'free' });
+      const res = await callFailedCount(port, token);
+      expect(res.status).toBe(200);
+      const json = (await res.json()) as { result?: { data?: { count?: number } } };
+      expect(json.result?.data?.count).toBe(2);
     } finally {
       await close();
     }

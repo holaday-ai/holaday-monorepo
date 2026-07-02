@@ -238,7 +238,7 @@ export function AppShell(): JSX.Element {
 
   const failedTaskSignature = React.useMemo(() => {
     const failedIds = tasks
-      .filter((task) => task.status === 'failed')
+      .filter((task) => task.status === 'failed' || task.status === 'partial_success')
       .map((task) => task.taskId)
       .sort();
     return failedIds.join('|');
@@ -919,8 +919,8 @@ export function AppShell(): JSX.Element {
 
       <ConfirmDialog
         open={confirmClearFailed}
-        title="清除所有失败任务？"
-        description={`将清除 ${serverFailedCount} 个失败任务，此操作不可恢复。\n进行中的任务不受影响。`}
+        title="清除失败/需复核任务？"
+        description={`将清除 ${serverFailedCount} 个失败或需复核任务，此操作不可恢复。\n进行中的任务不受影响。`}
         confirmLabel={`清除 ${serverFailedCount} 个`}
         destructive
         onClose={() => setConfirmClearFailed(false)}
@@ -934,12 +934,12 @@ export function AppShell(): JSX.Element {
             );
             if (deleted > 0) {
               setProjectTaskFilter(projectTaskFilterAfterFailedTasksCleared);
-              toast.show(`已清除 ${deleted} 个失败任务`);
+              toast.show(`已清除 ${deleted} 个失败/需复核任务`);
             } else {
-              toast.show('没有可清除的失败任务');
+              toast.show('没有可清除的失败/需复核任务');
             }
             const active = tasks.find((t) => t.taskId === selectedTaskId);
-            if (active?.status === 'failed') {
+            if (active?.status === 'failed' || active?.status === 'partial_success') {
               enterNewTaskMode();
             }
             void refreshTaskList();

@@ -174,6 +174,7 @@ import {
 } from '../../task-status.js';
 
 const taskController = new TaskController();
+const FAILURE_REVIEW_STATUSES = ['failed', 'partial_success'] as const;
 
 /**
  * Phase 24 — controlled quota bypass for the test account.
@@ -7364,7 +7365,13 @@ export const tasksRouter = router({
     const failedRows = await ctx.db
       .select({ id: tasksTable.id })
       .from(tasksTable)
-      .where(and(eq(tasksTable.userId, userRow.id), eq(tasksTable.status, 'failed'), eq(tasksTable.origin, 'user')));
+      .where(
+        and(
+          eq(tasksTable.userId, userRow.id),
+          inArray(tasksTable.status, [...FAILURE_REVIEW_STATUSES]),
+          eq(tasksTable.origin, 'user'),
+        ),
+      );
     const failedIds = failedRows.map((row) => row.id);
     if (failedIds.length === 0) {
       return { ok: true as const, deleted: 0 };
@@ -7684,7 +7691,11 @@ export const tasksRouter = router({
       .select({ count: sql<number>`COUNT(*)` })
       .from(tasksTable)
       .where(
-        and(eq(tasksTable.userId, userRow.id), eq(tasksTable.status, 'failed'), eq(tasksTable.origin, 'user')),
+        and(
+          eq(tasksTable.userId, userRow.id),
+          inArray(tasksTable.status, [...FAILURE_REVIEW_STATUSES]),
+          eq(tasksTable.origin, 'user'),
+        ),
       );
     return { count: Number(row?.count ?? 0) };
   }),

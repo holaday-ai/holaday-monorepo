@@ -496,11 +496,11 @@ async function main() {
       // dispatch attempts land in the user's inbox + fire any
       // configured webhooks. The notify hook is best-effort; the
       // runner ignores its return value and never blocks on it.
-      notify: async ({ userInternalId, scheduledTaskInternalId, intent, ok, error }) => {
+      notify: async ({ userInternalId, scheduledTaskInternalId, intent, ok, error, skipped }) => {
         // 简报 intent 的通知由 dispatch 分支自管（成功投递简报 + 3 连败错误）→ 跳过通用。
         if (isBriefingIntent(intent)) return;
         const { notify } = await import('./notifications/notification-service.js');
-        const payload = buildScheduledDispatchNotification({ intent, ok, error });
+        const payload = buildScheduledDispatchNotification({ intent, ok, error, skipped });
         await notify(
           { db, logger },
           {

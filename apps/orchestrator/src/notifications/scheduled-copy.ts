@@ -11,8 +11,17 @@ export function buildScheduledDispatchNotification(input: {
   intent: string;
   ok: boolean;
   error: string | null;
+  skipped?: boolean;
 }): ScheduledDispatchNotification {
   const taskName = truncateIntent(input.intent);
+  if (input.skipped) {
+    return {
+      type: 'task_skipped',
+      title: '定时任务已跳过',
+      message: `「${taskName}」本次未启动：${input.error ?? '本次条件不满足'}`,
+      taskName,
+    };
+  }
   if (input.ok) {
     return {
       // Dispatch success means a real task was created; the task's

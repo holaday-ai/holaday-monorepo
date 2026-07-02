@@ -35,6 +35,7 @@ export type NotificationType =
   | 'task_started'
   | 'task_complete'
   | 'task_failed'
+  | 'task_skipped'
   | 'task_reminder';
 
 /**
@@ -47,8 +48,8 @@ export interface WebhookContext {
   title: string;
   /** Notification message body — sentence or two. */
   message: string;
-  /** 'started' | 'success' | 'failed' | 'reminder' — easy switch in custom JSON. */
-  status: 'started' | 'success' | 'failed' | 'reminder';
+  /** Easy switch in custom JSON: started / success / failed / skipped / reminder. */
+  status: 'started' | 'success' | 'failed' | 'skipped' | 'reminder';
   /** Short label of the underlying scheduled task. May be empty. */
   taskName: string;
 }
@@ -95,6 +96,7 @@ export function formatPresetMessage(ctx: WebhookContext): string {
   // so webhook bubbles don't imply the underlying task already ended.
   if (ctx.status === 'started') lines.push('(状态：已启动)');
   else if (ctx.status === 'failed') lines.push('(状态：失败)');
+  else if (ctx.status === 'skipped') lines.push('(状态：已跳过)');
   else if (ctx.status === 'reminder') lines.push('(状态：提醒)');
   return lines.join('\n');
 }

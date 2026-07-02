@@ -223,7 +223,9 @@ export function projectTaskFilterAfterFailedTasksCleared(
   state: ProjectTaskFilterState | null,
 ): ProjectTaskFilterState | null {
   if (!state) return null;
-  const tasks = state.tasks.filter((task) => task.status !== 'failed');
+  const tasks = state.tasks.filter(
+    (task) => task.status !== 'failed' && task.status !== 'partial_success',
+  );
   if (tasks.length === state.tasks.length) return state;
   return { ...state, tasks };
 }

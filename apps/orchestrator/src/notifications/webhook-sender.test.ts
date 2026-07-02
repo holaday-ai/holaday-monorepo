@@ -47,6 +47,11 @@ describe('formatPresetMessage', () => {
     expect(out).toContain('(状态：提醒)');
   });
 
+  it('appends "(状态：已跳过)" for skipped status', () => {
+    const out = formatPresetMessage({ ...CTX, status: 'skipped' });
+    expect(out).toContain('(状态：已跳过)');
+  });
+
   it('skips empty fields cleanly (no "undefined" in output)', () => {
     const out = formatPresetMessage({ ...CTX, title: '', taskName: '' });
     expect(out).not.toContain('undefined');

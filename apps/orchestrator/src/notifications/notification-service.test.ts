@@ -252,4 +252,27 @@ describe('notify', () => {
     const ctxArg = sendMock.mock.calls[0]![1];
     expect(ctxArg.status).toBe('reminder');
   });
+
+  it('maps task_skipped to a skipped webhook status, not success', async () => {
+    const { db } = makeDbStub({
+      channels: [
+        { externalId: 'nch_1', platform: 'wecom', webhookUrl: 'u1', customTemplate: null },
+      ],
+    });
+    const sendMock = vi
+      .fn<SendFn>()
+      .mockResolvedValue({ ok: true, status: 200, attempt: 1 });
+    await notify(
+      { db, logger: NOOP_LOGGER, send: sendMock },
+      {
+        userInternalId: 42,
+        type: 'task_skipped',
+        title: '定时任务已跳过',
+        message: '非交易日，未生成简报。',
+        taskName: '每日简报',
+      },
+    );
+    const ctxArg = sendMock.mock.calls[0]![1];
+    expect(ctxArg.status).toBe('skipped');
+  });
 });

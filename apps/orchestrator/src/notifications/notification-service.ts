@@ -71,6 +71,7 @@ export interface NotifyDeps {
 function typeToStatus(type: NotificationType): WebhookContext['status'] {
   if (type === 'task_started') return 'started';
   if (type === 'task_failed') return 'failed';
+  if (type === 'task_skipped') return 'skipped';
   if (type === 'task_reminder') return 'reminder';
   return 'success';
 }

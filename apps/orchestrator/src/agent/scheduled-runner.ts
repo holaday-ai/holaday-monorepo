@@ -65,6 +65,7 @@ export interface ScheduledRunnerDeps {
     intent: string;
     ok: boolean;
     error: string | null;
+    skipped?: boolean;
   }) => Promise<void>;
   /**
    * Phase 26B follow-up — reminder hook. Fires when a row's
@@ -520,8 +521,9 @@ async function tick(deps: ScheduledRunnerDeps): Promise<void> {
           userInternalId: row.userId,
           scheduledTaskInternalId: row.id,
           intent: row.intent,
-          ok: dispatchOk,
-          error: truncatedError,
+          ok: dispatchOk && !skipped,
+          error: skipped ? skipNote : truncatedError,
+          ...(skipped ? { skipped: true } : {}),
         });
       } catch (err) {
         logger.warn(

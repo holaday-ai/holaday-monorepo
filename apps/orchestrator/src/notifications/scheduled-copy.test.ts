@@ -33,6 +33,22 @@ describe('buildScheduledDispatchNotification', () => {
     });
   });
 
+  it('uses skipped copy when the runner intentionally does not dispatch', () => {
+    const out = buildScheduledDispatchNotification({
+      intent: '生成 A股日报',
+      ok: false,
+      error: '非交易日，未生成简报',
+      skipped: true,
+    });
+
+    expect(out).toMatchObject({
+      type: 'task_skipped',
+      title: '定时任务已跳过',
+      message: '「生成 A股日报」本次未启动：非交易日，未生成简报',
+      taskName: '生成 A股日报',
+    });
+  });
+
   it('truncates long intents consistently for title body and taskName', () => {
     const intent = 'x'.repeat(70);
     const out = buildScheduledDispatchNotification({

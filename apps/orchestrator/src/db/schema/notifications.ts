@@ -22,7 +22,7 @@ import { users } from './users.js';
  *
  * `type` lives as a varchar (not enum) so new types can be added
  * without an ALTER. Today: 'task_started' | 'task_complete' |
- * 'task_failed' | 'task_reminder'.
+ * 'task_failed' | 'task_skipped' | 'task_reminder'.
  *
  * `scheduled_task_id` is nullable so a future non-scheduled-task
  * notification path (manual / system) can reuse this table without
