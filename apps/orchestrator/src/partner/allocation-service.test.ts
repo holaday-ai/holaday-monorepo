@@ -405,6 +405,34 @@ describe('AllocationService allocateDailyLockedBonus', () => {
     expect(fakeDb.allocationInsertAttempts).toHaveLength(1);
   });
 
+  it('counts existing same-day allocations against the budget before allocating missing lots', async () => {
+    const fakeDb = new FakeAllocationDb({
+      lots: [
+        fakeLot({ id: 1, apiUnits: 10_500_000, lockedBonusCreditCents: 1_500 }),
+        fakeLot({ id: 2, externalId: 'payment_lot_2', apiUnits: 10_500_000 }),
+      ],
+      allocations: [fakeAllocation({ lotId: 1, lockedBonusCreditCents: 1_500 })],
+    });
+    const service = new AllocationService(fakeDb.asDB());
+
+    const summary = await service.allocateDailyLockedBonus({ day: '2026-07-02', budgetCreditCents: 2_000 });
+
+    expect(summary).toEqual({
+      day: '2026-07-02',
+      eligibleLotCount: 2,
+      allocationCount: 2,
+      totalLockedBonusCreditCents: 2_000,
+      remainingBudgetCreditCents: 0,
+    });
+    expect(fakeDb.allocationRows).toHaveLength(2);
+    expect(fakeDb.allocationRows.map((row) => [row.lotId, row.lockedBonusCreditCents])).toEqual([
+      [1, 1_500],
+      [2, 500],
+    ]);
+    expect(fakeDb.lotUpdates).toEqual([{ lotId: 2, incrementBy: 500 }]);
+    expect(fakeDb.lotRows.map((row) => row.lockedBonusCreditCents)).toEqual([1_500, 500]);
+  });
+
   it('skips risk/frozen and non-accumulating lots', async () => {
     const fakeDb = new FakeAllocationDb({
       lots: [

@@ -209,6 +209,13 @@ export interface DailyLockedBonusSummary {
   remainingBudgetCreditCents: number;
 }
 
+interface LotAllocationState {
+  lot: PartnerLot;
+  weight: number;
+  idempotencyKey: string;
+  existingAllocation: PartnerDailyAllocation | undefined;
+}
+
 export class AllocationService {
   constructor(private readonly db: DB) {}
 
@@ -267,10 +274,8 @@ export class AllocationService {
       .from(partnerLots)
       .where(and(eq(partnerLots.status, 'accumulating'), eq(partnerLots.riskStatus, 'normal')));
     const weightedLots = lots.map((lot) => ({ lot, weight: weightLot(lot) }));
-    const totalWeight = weightedLots.reduce((sum, item) => sum + BigInt(item.weight), 0n);
-
-    let totalLockedBonusCreditCents = 0;
-    let allocationCount = 0;
+    const lotAllocationStates: LotAllocationState[] = [];
+    let existingLockedBonusCreditCents = 0;
 
     for (const { lot, weight } of weightedLots) {
       const idempotencyKey = `daily:${day}:${lot.id}`;
@@ -280,19 +285,39 @@ export class AllocationService {
         .where(eq(partnerDailyAllocations.idempotencyKey, idempotencyKey))
         .limit(1);
 
-      const targetCreditCents = calculateProportionalShare({
-        budgetCreditCents,
-        lotWeight: weight,
-        totalWeight,
-      });
-      const cappedByRemaining = capDailyBonus({
-        targetCreditCents,
-        remainingBonusCreditCents: remainingBonusCreditCents(lot),
-      });
-      const lockedBonusCreditCents = capDailyBonus({
-        targetCreditCents: cappedByRemaining,
-        remainingBonusCreditCents: calculateLotDailyTarget(lot),
-      });
+      if (existingAllocation) {
+        existingLockedBonusCreditCents += existingAllocation.lockedBonusCreditCents;
+      }
+
+      lotAllocationStates.push({ lot, weight, idempotencyKey, existingAllocation });
+    }
+
+    const remainingBudgetForNewAllocations = Math.max(0, budgetCreditCents - existingLockedBonusCreditCents);
+    const missingAllocationWeight = lotAllocationStates
+      .filter((item) => !item.existingAllocation)
+      .reduce((sum, item) => sum + BigInt(item.weight), 0n);
+
+    let totalLockedBonusCreditCents = 0;
+    let allocationCount = 0;
+
+    for (const { lot, weight, idempotencyKey, existingAllocation } of lotAllocationStates) {
+      let lockedBonusCreditCents = existingAllocation?.lockedBonusCreditCents ?? 0;
+
+      if (!existingAllocation) {
+        const targetCreditCents = calculateProportionalShare({
+          budgetCreditCents: remainingBudgetForNewAllocations,
+          lotWeight: weight,
+          totalWeight: missingAllocationWeight,
+        });
+        const cappedByRemaining = capDailyBonus({
+          targetCreditCents,
+          remainingBonusCreditCents: remainingBonusCreditCents(lot),
+        });
+        lockedBonusCreditCents = capDailyBonus({
+          targetCreditCents: cappedByRemaining,
+          remainingBonusCreditCents: calculateLotDailyTarget(lot),
+        });
+      }
 
       await this.db
         .insert(partnerDailyAllocations)
@@ -335,7 +360,7 @@ export class AllocationService {
       eligibleLotCount: lots.length,
       allocationCount,
       totalLockedBonusCreditCents,
-      remainingBudgetCreditCents: budgetCreditCents - totalLockedBonusCreditCents,
+      remainingBudgetCreditCents: Math.max(0, budgetCreditCents - totalLockedBonusCreditCents),
     };
   }
 }
