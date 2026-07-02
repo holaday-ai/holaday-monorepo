@@ -17,6 +17,7 @@ out/
 
 # Turbo
 .turbo/
+.worktrees/
 
 # Coverage
 coverage/
