@@ -28,11 +28,19 @@
  * module + its `openai` SDK dep on every terminal task.
  */
 
-import { eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import type { Logger } from 'pino';
 import { tasks as tasksTable } from '../db/schema/tasks.js';
 import type { DB } from '../db/client.js';
+import { readAffectedRows } from '../db/mysql-result.js';
 import { isTaskTerminalStatus, type TaskTerminalStatus } from '../task-status.js';
+
+const RESPONSE_LAYER_STAMP_SOURCE_STATUSES = [
+  'completed',
+  'partial_success',
+  'failed',
+  'cancelled',
+] as const;
 
 export interface RunResponseLayerForLaneInput {
   taskId: string;
@@ -159,10 +167,10 @@ export async function stampResponseLayerColumns(
   finalSummary: string,
   responseLayerMetadata: unknown,
   logger: Logger,
-): Promise<void> {
-  if (!responseLayerMetadata) return;
+): Promise<boolean> {
+  if (!responseLayerMetadata) return false;
   try {
-    await db
+    const result = await db
       .update(tasksTable)
       .set({
         // When formatter rewrote text: original = pre-format text;
@@ -173,7 +181,13 @@ export async function stampResponseLayerColumns(
         formattedSummary: finalSummary,
         responseLayerMetadata: responseLayerMetadata as Record<string, unknown>,
       })
-      .where(eq(tasksTable.externalId, taskId));
+      .where(
+        and(
+          eq(tasksTable.externalId, taskId),
+          inArray(tasksTable.status, [...RESPONSE_LAYER_STAMP_SOURCE_STATUSES]),
+        ),
+      );
+    return readAffectedRows(result) > 0;
   } catch (err) {
     logger.warn(
       {
@@ -182,5 +196,6 @@ export async function stampResponseLayerColumns(
       },
       'openai-response-layer (lane): stamp metadata failed (non-fatal)',
     );
+    return false;
   }
 }

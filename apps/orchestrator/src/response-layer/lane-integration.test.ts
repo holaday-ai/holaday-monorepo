@@ -115,7 +115,7 @@ describe('runResponseLayerForLane', () => {
 });
 
 describe('stampResponseLayerColumns', () => {
-  function makeFakeDb() {
+  function makeFakeDb(affectedRows = 1) {
     const updates: Array<{ setValues: unknown; predicate: unknown }> = [];
     let throwOnUpdate: Error | null = null;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -131,7 +131,7 @@ describe('stampResponseLayerColumns', () => {
                   throw e;
                 }
                 updates.push({ setValues, predicate });
-                return { affectedRows: 1 };
+                return [{ affectedRows }];
               },
             };
           },
@@ -149,7 +149,7 @@ describe('stampResponseLayerColumns', () => {
 
   it('metadata undefined → NO UPDATE issued (flag-off contract)', async () => {
     const { db, updates } = makeFakeDb();
-    await stampResponseLayerColumns(
+    const persisted = await stampResponseLayerColumns(
       db,
       'tsk_x',
       undefined,
@@ -157,13 +157,14 @@ describe('stampResponseLayerColumns', () => {
       undefined,
       fakeLogger,
     );
+    expect(persisted).toBe(false);
     expect(updates).toHaveLength(0);
   });
 
   it('formatter rewrote → original = pre-format, formatted = final, metadata stored', async () => {
     const { db, updates } = makeFakeDb();
     const metadata = { model: 'gpt-4o-mini', latencyMs: 1500, changes: ['length_delta'] };
-    await stampResponseLayerColumns(
+    const persisted = await stampResponseLayerColumns(
       db,
       'tsk_x',
       'raw agent body',
@@ -171,6 +172,7 @@ describe('stampResponseLayerColumns', () => {
       metadata,
       fakeLogger,
     );
+    expect(persisted).toBe(true);
     expect(updates).toHaveLength(1);
     const u = updates[0]!.setValues as Record<string, unknown>;
     expect(u.originalSummary).toBe('raw agent body');
@@ -190,7 +192,7 @@ describe('stampResponseLayerColumns', () => {
       changes: [],
       fallbackReason: 'short_response',
     };
-    await stampResponseLayerColumns(
+    const persisted = await stampResponseLayerColumns(
       db,
       'tsk_x',
       undefined,
@@ -198,11 +200,26 @@ describe('stampResponseLayerColumns', () => {
       metadata,
       fakeLogger,
     );
+    expect(persisted).toBe(true);
     expect(updates).toHaveLength(1);
     const u = updates[0]!.setValues as Record<string, unknown>;
     expect(u.originalSummary).toBe('short body');
     expect(u.formattedSummary).toBe('short body');
     expect(u.responseLayerMetadata).toEqual(metadata);
+  });
+
+  it('stale / non-terminal row → returns false without pretending to stamp', async () => {
+    const { db, updates } = makeFakeDb(0);
+    const persisted = await stampResponseLayerColumns(
+      db,
+      'tsk_x',
+      undefined,
+      'body',
+      { model: 'gpt-4o-mini', latencyMs: 0, changes: [] },
+      fakeLogger,
+    );
+    expect(persisted).toBe(false);
+    expect(updates).toHaveLength(1);
   });
 
   it('DB error → swallowed (best-effort; logs warn)', async () => {
@@ -218,7 +235,7 @@ describe('stampResponseLayerColumns', () => {
         { model: 'gpt-4o-mini', latencyMs: 0, changes: [] },
         fakeLogger,
       ),
-    ).resolves.toBeUndefined();
+    ).resolves.toBe(false);
     expect(fakeLogger.warn).toHaveBeenCalled();
   });
 });
