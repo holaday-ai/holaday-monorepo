@@ -82,6 +82,8 @@ import {
   followUpParentReasonLabel,
   followUpTerminalGuardMessage,
 } from './task-followup-copy.js';
+import { markQueuedTaskExecutingOrThrow } from './task-queue-start.js';
+import { persistAndBroadcastVisionLoopThrow } from './task-terminal-recovery.js';
 import {
   formatForPrompt as formatPlaybooksForPrompt,
   matchPlaybooks,
@@ -5075,27 +5077,13 @@ export const tasksRouter = router({
           userId: ctx.userId,
           runFn: dispatchToBrave,
           onStart: async (): Promise<void> => {
-            try {
-              const started = await repo.markQueuedTaskExecuting(taskId);
-              if (!started.persisted) {
-                ctx.logger.warn(
-                  { taskId },
-                  'task-queue: onStart refused because task was no longer queued',
-                );
-                throw new Error('task was no longer queued');
-              }
-              // No queued→executing WS frame — supercar's own
-              // `server.task.plan` / step events fire next from the
-              // dispatched runFn, and the SPA's task store reads the
-              // fresh row on its existing tRPC poll. Avoid adding a
-              // new message type for a transition that's already
-              // observable via the next event.
-            } catch (err) {
-              ctx.logger.warn(
-                { err: err instanceof Error ? err.message : String(err), taskId },
-                'task-queue: onStart DB update failed',
-              );
-            }
+            await markQueuedTaskExecutingOrThrow({ repo, taskId, logger: ctx.logger });
+            // No queued→executing WS frame — supercar's own
+            // `server.task.plan` / step events fire next from the
+            // dispatched runFn, and the SPA's task store reads the
+            // fresh row on its existing tRPC poll. Avoid adding a
+            // new message type for a transition that's already
+            // observable via the next event.
           },
           onTimeout: async (): Promise<void> => {
             ctx.logger.warn(
@@ -5512,25 +5500,21 @@ export const tasksRouter = router({
           .catch(async (err) => {
             // Phase 22a — same fix as the supercar branch: persist a
             // failed terminal state when the runner throws so the task
-            // doesn't sit at 'executing' forever. Independent try so a
-            // DB blip during recovery doesn't propagate.
+            // doesn't sit at 'executing' forever. Broadcast only after
+            // the guarded recovery persist actually changes the row.
             const reason = err instanceof Error ? err.message : String(err);
             ctx.logger.error(
               { err, taskId },
               'vision loop threw — persisting failed',
             );
-            try {
-              await repo.persistVisionOutcome(taskId, {
-                status: 'failed',
-                reason: `vision loop threw: ${reason}`.slice(0, 500),
-                tickCount: 0,
-              });
-            } catch (persistErr) {
-              ctx.logger.error(
-                { err: persistErr, taskId },
-                'vision loop: catch-block persist also failed',
-              );
-            }
+            await persistAndBroadcastVisionLoopThrow({
+              repo,
+              taskId,
+              userId: ctx.userId,
+              reason,
+              logger: ctx.logger,
+              broadcastToUser,
+            });
           });
 
       // Phase 24 — fire directly (no per-user FIFO queue). Per-task
