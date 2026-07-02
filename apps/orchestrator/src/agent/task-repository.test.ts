@@ -960,11 +960,13 @@ describe('TaskRepository task terminal state persistence', () => {
     const result = await repo.markQueuedTaskFailed(
       'tsk_state_machine',
       'queue timeout: 排队等待时间过长，请稍后重试',
+      { errorCode: 'QUEUE_TIMEOUT', source: 'task_queue' },
     );
 
     expect(result.persisted).toBe(true);
     expect(captured.updatePayloads[0]).toMatchObject({
       status: 'failed',
+      errorCode: 'QUEUE_TIMEOUT',
       errorMessage: 'queue timeout: 排队等待时间过长，请稍后重试',
     });
     expect(captured.updatePayloads[0]?.completedAt).toBeInstanceOf(Date);
@@ -973,7 +975,13 @@ describe('TaskRepository task terminal state persistence', () => {
     expect(captured.eventPayloads[0]).toMatchObject({
       type: 'task.failed',
       actor: 'system',
-      payload: { reason: 'queue timeout: 排队等待时间过长，请稍后重试' },
+      payload: {
+        source: 'task_queue',
+        from: 'queued',
+        to: 'failed',
+        errorCode: 'QUEUE_TIMEOUT',
+        reason: 'queue timeout: 排队等待时间过长，请稍后重试',
+      },
     });
   });
 

@@ -533,7 +533,10 @@ export class TaskRepository {
   async markQueuedTaskFailed(
     taskExternalId: string,
     errorMessage: string,
+    opts: { errorCode?: string; source?: string } = {},
   ): Promise<{ persisted: boolean }> {
+    const errorCode = opts.errorCode ?? 'QUEUE_FAILED';
+    const source = opts.source ?? 'task_queue';
     const [taskRow] = await this.db
       .select({ id: tasks.id })
       .from(tasks)
@@ -547,6 +550,7 @@ export class TaskRepository {
         .update(tasks)
         .set({
           status: 'failed',
+          errorCode,
           errorMessage,
           completedAt: new Date(),
         })
@@ -560,7 +564,13 @@ export class TaskRepository {
         taskId: taskRow.id,
         type: 'task.failed',
         actor: 'system',
-        payload: { reason: errorMessage },
+        payload: {
+          source,
+          from: 'queued',
+          to: 'failed',
+          errorCode,
+          reason: errorMessage,
+        },
       });
     });
     return { persisted };

@@ -5094,6 +5094,7 @@ export const tasksRouter = router({
               const failed = await repo.markQueuedTaskFailed(
                 taskId,
                 'queue timeout: 排队等待时间过长，请稍后重试',
+                { errorCode: 'QUEUE_TIMEOUT', source: 'task_queue_timeout' },
               );
               if (failed.persisted) {
                 broadcastToUser(ctx.userId, {
@@ -5117,7 +5118,10 @@ export const tasksRouter = router({
             'task-queue: enqueue rejected (queue at depth cap)',
           );
           try {
-            await repo.markQueuedTaskFailed(taskId, enqueueResult.reason);
+            await repo.markQueuedTaskFailed(taskId, enqueueResult.reason, {
+              errorCode: 'QUEUE_REJECTED',
+              source: 'task_queue_rejected',
+            });
           } catch (err) {
             ctx.logger.warn(
               { err: err instanceof Error ? err.message : String(err), taskId },
