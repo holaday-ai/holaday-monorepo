@@ -479,6 +479,19 @@ const ECOMMERCE_LIST_HINTS: readonly string[] = [
 ];
 
 const SKILL_HINTS: ReadonlyMap<string, ExecutionMode> = new Map([
+  ['douyin-live-ops', 'browser'],
+  ['xiaohongshu-seeding-ops', 'browser'],
+  ['wechat-article-ops', 'generate'],
+  ['social-media-strategy', 'generate'],
+  ['image-prompt-reverse', 'image'],
+  ['a-share-market-briefing', 'generate'],
+  ['contract-risk-review', 'generate'],
+  ['market-competitor-insight', 'scrape'],
+  ['data-report-insight', 'generate'],
+  ['product-plan-drafting', 'generate'],
+  ['project-delivery-management', 'generate'],
+  ['resume-search-screening', 'browser'],
+  ['performance-review-design', 'generate'],
   ['content-creator', 'generate'],
   ['brand-guardian', 'generate'],
   ['visual-storyteller', 'generate'],

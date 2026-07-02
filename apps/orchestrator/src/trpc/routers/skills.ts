@@ -1,5 +1,5 @@
 /**
- * Phase 16 — user-skills router. The "专家技能" settings page reads
+ * Phase 16 — user-skills router. The Skills page reads
  * SKILL_META and the caller's users.selected_skills JSON, then lets
  * the user toggle each on/off.
  *
@@ -30,9 +30,9 @@ function skillCapForPlan(plan: string | null | undefined): number {
 }
 
 function skillLimitErrorMessage(plan: string | null | undefined, cap: number): string {
-  if (cap <= 0) return '当前套餐暂不支持启用专家技能';
+  if (cap <= 0) return '当前套餐暂不支持启用技能';
   const label = plan === 'pro' ? '专业版' : plan === 'basic' ? '基础版' : '当前套餐';
-  return `${label}最多可启用 ${cap} 个专家技能，请先停用一个技能后再启用新的技能`;
+  return `${label}最多可启用 ${cap} 个技能，请先停用一个技能后再启用新的技能`;
 }
 
 function normalizeSelectedSkillIds(value: unknown): string[] {
@@ -40,6 +40,21 @@ function normalizeSelectedSkillIds(value: unknown): string[] {
   return Array.from(
     new Set(value.filter((skillId): skillId is string => SKILL_ID_SET.has(skillId))),
   );
+}
+
+function buildSkillListRows(enabledIds: Iterable<string>) {
+  const enabled = new Set(enabledIds);
+  return SKILL_META.map((skill) => ({
+    id: skill.id,
+    name: skill.name,
+    logoId: skill.logoId,
+    category: skill.category,
+    description: skill.description,
+    aliases: [...skill.aliases],
+    maturity: skill.maturity,
+    connectors: [...skill.connectors],
+    enabled: enabled.has(skill.id),
+  }));
 }
 
 /**
@@ -67,15 +82,7 @@ export const skillsRouter = router({
    * renders this as the SkillsPage card grid grouped by category.
    */
   list: protectedProcedure.query(async ({ ctx }) => {
-    const enabled = new Set(await loadEnabledIds(ctx));
-    return SKILL_META.map((s) => ({
-      id: s.id,
-      name: s.name,
-      icon: s.icon,
-      category: s.category,
-      description: s.description,
-      enabled: enabled.has(s.id),
-    }));
+    return buildSkillListRows(await loadEnabledIds(ctx));
   }),
 
   /**
@@ -121,6 +128,7 @@ export const skillsRouter = router({
 });
 
 export const __skillsInternals = {
+  buildSkillListRows,
   normalizeSelectedSkillIds,
   skillCapForPlan,
   skillLimitErrorMessage,

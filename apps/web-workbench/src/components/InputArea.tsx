@@ -7,10 +7,12 @@ import {
   Puzzle,
   Sparkles,
   Target,
+  X,
 } from 'lucide-react';
 import * as React from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { AttachmentChip, type DraftAttachment } from '@/components/AttachmentChip';
+import { SkillLogo } from '@/components/SkillLogo';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -34,8 +36,16 @@ import {
 } from '@/components/composer-submit';
 import { awaitingUserCopy, type AwaitingKind } from '@/lib/awaiting-user-copy';
 import { quotaExhaustedCopy } from '@/lib/quota-exhausted-copy';
+import { normalizeSkillRows } from '@/lib/skills-page-state';
+import {
+  detectSkillMentionTrigger,
+  filterMentionSkills,
+  stripSkillMention,
+} from '@/lib/skill-mention';
+import { trpc } from '@/lib/trpc';
 import { uploadFailureMessage, uploadFile } from '@/lib/upload-file';
 import { cn } from '@/lib/utils';
+import type { UiSkill, UiSkillSelection } from '@/types/task';
 
 interface Props {
   onSubmit: (
@@ -43,6 +53,7 @@ interface Props {
     fileIds: string[],
     mode?: 'auto' | 'plan',
     expertMode?: 'normal' | 'expert' | 'auto',
+    skillSelection?: UiSkillSelection,
   ) => Promise<ComposerSubmitResult> | ComposerSubmitResult;
   busy?: boolean;
   /** Forwarded ref for keyboard-shortcut focus (Cmd+N / slash). */
@@ -209,6 +220,26 @@ export function InputArea({
     };
   }, []);
 
+  const [mentionSkills, setMentionSkills] = React.useState<UiSkill[]>([]);
+  const [selectedSkill, setSelectedSkill] = React.useState<UiSkillSelection | null>(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    void trpc.skills.list
+      .query()
+      .then((rows) => {
+        if (cancelled || !mountedRef.current) return;
+        setMentionSkills(normalizeSkillRows(rows).filter((skill) => skill.enabled));
+      })
+      .catch(() => {
+        if (!cancelled && mountedRef.current) {
+          setMentionSkills([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Suggestion chip → composer prefill. The chip click sets
   // prefillIntent in MainPanel; this effect copies it into the local
   // value, focuses the textarea, and signals back so the prop can
@@ -216,6 +247,7 @@ export function InputArea({
   React.useEffect(() => {
     if (prefillIntent == null) return;
     setValue(prefillIntent);
+    setSelectedSkill(null);
     // requestAnimationFrame ensures the value commit has flushed
     // before we move the caret — focusing into a stale textarea
     // sometimes drops the cursor at index 0 on mobile.
@@ -293,15 +325,18 @@ export function InputArea({
   // on tasks.create as `expertMode`; the backend honours it when
   // not null.
   const [expertMode, setExpertMode] = React.useState<'normal' | 'expert' | 'auto'>('auto');
-  // SkillsPage → 用此专家. This is an editable draft, not an
-  // auto-submit: it lands in the composer, flips plugin mode to
-  // "开启", then lets the user complete the task request.
+  // Skill handoff. This is an editable draft, not an
+  // auto-submit: it lands in the composer, selects the skill, then
+  // lets the user complete the task request.
   React.useEffect(() => {
     const state = location.state as
       | {
           attachFile?: unknown;
           skillTaskDraft?: {
             prompt?: unknown;
+            skillId?: unknown;
+            skillName?: unknown;
+            skillSource?: unknown;
             expertMode?: unknown;
           };
         }
@@ -310,12 +345,25 @@ export function InputArea({
     const prompt = typeof draft?.prompt === 'string' ? draft.prompt.trimEnd() : '';
     if (!prompt) return;
     setValue(prompt);
+    const skillId = typeof draft?.skillId === 'string' ? draft.skillId.trim() : '';
+    const skillName = typeof draft?.skillName === 'string' ? draft.skillName.trim() : '';
+    if (skillId && skillName) {
+      setSelectedSkill({
+        skillId,
+        skillName,
+        skillSource: 'manual',
+      });
+    } else {
+      setSelectedSkill(null);
+    }
     if (
       draft?.expertMode === 'expert' ||
       draft?.expertMode === 'normal' ||
       draft?.expertMode === 'auto'
     ) {
       setExpertMode(draft.expertMode);
+    } else if (skillId) {
+      setExpertMode('auto');
     } else {
       setExpertMode('expert');
     }
@@ -380,6 +428,18 @@ export function InputArea({
     vv.addEventListener('resize', onResize);
     return () => vv.removeEventListener('resize', onResize);
   }, []);
+
+  const mentionTrigger = React.useMemo(
+    () => (replyMode ? null : detectSkillMentionTrigger(value)),
+    [replyMode, value],
+  );
+  const mentionMatches = React.useMemo(
+    () =>
+      mentionTrigger
+        ? filterMentionSkills(mentionSkills, mentionTrigger.query).slice(0, 6)
+        : [],
+    [mentionSkills, mentionTrigger],
+  );
 
   // F1 — quota gate exception for reply / follow-up paths. Replying
   // to a parked supercar task or following up on a recently-completed
@@ -477,9 +537,42 @@ export function InputArea({
     setAttachments((prev) => prev.filter((_, i) => i !== index));
   }
 
+  function applySkillMention(skill: UiSkill): void {
+    const trigger = mentionTrigger ?? detectSkillMentionTrigger(value);
+    const start = trigger?.start ?? value.length;
+    const end = trigger?.end ?? value.length;
+    const nextValue = `${value.slice(0, start)}@${skill.name} ${value
+      .slice(end)
+      .replace(/^\s+/u, '')}`;
+    const caret = start + skill.name.length + 2;
+    setValue(nextValue);
+    setSelectedSkill({
+      skillId: skill.id,
+      skillName: skill.name,
+      skillSource: 'manual',
+    });
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      try {
+        el.setSelectionRange(caret, caret);
+      } catch {
+        /* setSelectionRange not supported on every input type */
+      }
+    });
+  }
+
   async function handleSubmit(): Promise<void> {
     const trimmed = value.trim();
     if (!trimmed || submitting || busy) return;
+    const intentForSubmit = selectedSkill
+      ? stripSkillMention(trimmed, selectedSkill.skillName)
+      : trimmed;
+    if (!intentForSubmit) {
+      toast.show('请输入要让技能完成的任务');
+      return;
+    }
     // Block submit while any attachment is still uploading; let
     // failed ones submit (they'll just be ignored server-side).
     if (attachments.some((a) => a.status === 'uploading')) {
@@ -502,7 +595,7 @@ export function InputArea({
     let submitOk = false;
     try {
       const result = (await Promise.resolve(
-        onSubmit(trimmed, fileIds, taskMode, expertMode),
+        onSubmit(intentForSubmit, fileIds, taskMode, expertMode, selectedSkill ?? undefined),
       )) as unknown;
       // onSubmit may return void OR { ok: boolean } / { error: string }.
       // Treat undefined as success (legacy callers never threw and didn't
@@ -534,6 +627,7 @@ export function InputArea({
       // taskMode semantics). Reset to `auto` so the user has to
       // re-opt-in for every expert / normal forced task.
       setExpertMode('auto');
+      setSelectedSkill(null);
     }
   }
 
@@ -645,6 +739,59 @@ export function InputArea({
             }}
           />
         )}
+        {(selectedSkill || mentionMatches.length > 0) && (
+          <div className="px-3 pt-2">
+            {selectedSkill ? (
+              <span className="inline-flex h-7 max-w-full items-center gap-1.5 rounded-full bg-white/70 px-2 text-[12px] font-medium text-[#595757] shadow-[inset_0_0_0_1px_rgba(234,31,89,0.11)]">
+                <SkillLogo
+                  logoId={selectedSkill.skillId}
+                  label={selectedSkill.skillName}
+                  size="sm"
+                  className="h-4 w-4 shrink-0 rounded-[5px] shadow-none"
+                />
+                <span className="shrink-0 text-[#EA1F59]/85">@</span>
+                <span className="min-w-0 truncate">{selectedSkill.skillName}</span>
+                <button
+                  type="button"
+                  className="ml-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[#ADADAD] hover:bg-[#EFEFEF]/80 hover:text-[#595757]"
+                  aria-label={`移除${selectedSkill.skillName}`}
+                  title={`移除${selectedSkill.skillName}`}
+                  onClick={() => setSelectedSkill(null)}
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            ) : null}
+            {mentionMatches.length > 0 ? (
+              <div className={cn(selectedSkill ? 'mt-1.5' : '', 'max-w-[460px] py-0.5')}>
+                {mentionMatches.map((skill) => (
+                  <button
+                    key={skill.id}
+                    type="button"
+                    className="flex min-h-8 w-full items-center gap-2 rounded-[7px] px-2 py-1.5 text-left transition-colors hover:bg-white/70 focus-visible:bg-white/70 focus-visible:outline-none dark:hover:bg-white/10 dark:focus-visible:bg-white/10"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => applySkillMention(skill)}
+                  >
+                    <SkillLogo
+                      logoId={skill.logoId}
+                      label={skill.name}
+                      size="sm"
+                      className="h-5 w-5 shrink-0 rounded-[6px] shadow-none"
+                    />
+                    <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
+                      <span className="text-[12px] font-medium text-foreground">
+                        {skill.name}
+                      </span>
+                      <span className="ml-1.5">
+                        {skill.description}
+                      </span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        )}
         <Textarea
           ref={setTextareaRef}
           value={value}
@@ -664,8 +811,8 @@ export function InputArea({
             'resize-none border-0 bg-transparent leading-relaxed shadow-none placeholder:text-muted-foreground/55 focus-visible:ring-0',
             fullBleed
               ? compact
-                ? 'min-h-[212px] px-7 pb-[68px] pr-[150px] pt-8 text-[18px] font-medium placeholder:text-[#A5ACBA]/80 sm:min-h-[218px]'
-                : 'min-h-[190px] px-7 pb-[68px] pr-[150px] pt-8 text-[18px] font-medium placeholder:text-[#9CA3AF]/80 sm:min-h-[198px]'
+                ? 'min-h-[212px] px-7 pb-[68px] pr-[150px] pt-8 text-[15px] font-normal placeholder:text-[#A5ACBA]/80 sm:min-h-[218px]'
+                : 'min-h-[190px] px-7 pb-[68px] pr-[150px] pt-8 text-[15px] font-normal placeholder:text-[#9CA3AF]/80 sm:min-h-[198px]'
               : cn(
                   'px-4 pr-14 text-[15px]',
                   compact
@@ -751,7 +898,7 @@ export function InputArea({
                   <DropdownMenuSubTrigger className="gap-2.5 rounded-[6px] px-2 py-2 text-[13px] focus:bg-[#EFEFEF]/70 data-[state=open]:bg-[#EFEFEF]/70 dark:focus:bg-white/10 dark:data-[state=open]:bg-white/10">
                     <Puzzle className="h-4 w-4 text-[#595757]" />
                     <span className="min-w-0 flex-1 font-medium text-foreground">
-                      插件
+                      技能
                     </span>
                     <span className="mr-1 text-[11px] text-muted-foreground">
                       {pluginModeLabel(expertMode)}
@@ -773,7 +920,7 @@ export function InputArea({
                         <span className="flex min-w-0 flex-1 flex-col">
                           <span className="text-[12px] font-medium text-foreground">自动</span>
                           <span className="text-[11px] text-muted-foreground">
-                            需要时自动启用专家插件
+                            需要时自动启用技能
                           </span>
                         </span>
                       </DropdownMenuRadioItem>
@@ -781,7 +928,7 @@ export function InputArea({
                         <span className="flex min-w-0 flex-1 flex-col">
                           <span className="text-[12px] font-medium text-foreground">开启</span>
                           <span className="text-[11px] text-muted-foreground">
-                            强制使用专家插件
+                            强制使用技能
                           </span>
                         </span>
                       </DropdownMenuRadioItem>
@@ -789,7 +936,7 @@ export function InputArea({
                         <span className="flex min-w-0 flex-1 flex-col">
                           <span className="text-[12px] font-medium text-foreground">关闭</span>
                           <span className="text-[11px] text-muted-foreground">
-                            跳过插件，优先速度
+                            跳过技能，优先速度
                           </span>
                         </span>
                       </DropdownMenuRadioItem>
@@ -971,16 +1118,16 @@ function composerModePills({
   const expert =
     expertMode === 'expert'
       ? {
-          label: expertWorkflowMatched ? '专家已命中' : '专家开启',
-          detail: '强制使用专家插件；缺少来源时应说明边界或先追问。',
+          label: expertWorkflowMatched ? '技能已命中' : '技能开启',
+          detail: '强制使用技能；缺少来源时应说明边界或先追问。',
         }
       : expertMode === 'normal'
         ? {
-            label: '专家关闭',
-            detail: '跳过专家插件，优先更快的通用执行。',
+            label: '技能关闭',
+            detail: '跳过技能，优先更快的通用执行。',
           }
         : {
-            label: expertWorkflowMatched ? '专家已命中' : '专家自动',
+            label: expertWorkflowMatched ? '技能已命中' : '技能自动',
             detail: expertWorkflowMatched
               ? '已识别到可用专家流程，发送后按专家结构输出。'
               : '需要专业流程时自动启用；否则走通用执行。',

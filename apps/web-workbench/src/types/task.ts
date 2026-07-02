@@ -196,27 +196,26 @@ export interface UiProject {
 }
 
 /**
- * Phase 16 — one entry on the SkillsPage. `enabled` reflects the
- * server's view of users.selected_roles; `toggle()` mutates it.
+ * One entry on the Skills page. `enabled` reflects the server's view
+ * of users.selected_skills; `toggle()` mutates it.
  */
 export interface UiSkill {
   id: string;
   name: string;
-  /** lucide-react export name. Resolved client-side via a static lookup. */
-  icon: string;
-  category:
-    | '运营'
-    | '内容'
-    | '商业分析'
-    | '产品'
-    | '法律'
-    | '人力'
-    | '行政'
-    | '财务'
-    | '翻译'
-    | '其他';
+  /** App-logo id resolved by SkillLogo. */
+  logoId: string;
+  category: '内容运营' | '分析决策' | '管理协作';
   description: string;
+  aliases: readonly string[];
+  maturity: 'template' | 'workflow' | 'connected';
+  connectors: readonly string[];
   enabled: boolean;
+}
+
+export interface UiSkillSelection {
+  skillId: string;
+  skillName: string;
+  skillSource: 'manual';
 }
 
 /**

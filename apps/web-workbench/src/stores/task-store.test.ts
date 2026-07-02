@@ -730,6 +730,37 @@ describe('selectTask detail hydration', () => {
     });
   });
 
+  it('passes an explicit composer skill selection to task creation', async () => {
+    createMutate.mockResolvedValueOnce({
+      taskId: 'tsk_skill',
+      status: 'executing',
+      executionMode: 'generate',
+    } as never);
+    listQuery.mockResolvedValueOnce({ tasks: [], nextCursor: null } as never);
+
+    await useTaskStore.getState().createTask(
+      '帮我做直播复盘',
+      [],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        skillId: 'douyin-live-ops',
+        skillName: '抖音直播与运营',
+        skillSource: 'manual',
+      },
+    );
+
+    expect(createMutate).toHaveBeenCalledWith({
+      intent: '帮我做直播复盘',
+      skillId: 'douyin-live-ops',
+      skillSource: 'manual',
+      viewportProfile: 'desktop',
+    });
+  });
+
   it('survives malformed detail rows and synthesizes a safe selected task', async () => {
     detailQuery.mockResolvedValueOnce({
       intent: { unsafe: true },

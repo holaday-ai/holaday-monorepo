@@ -15,7 +15,7 @@ export function expertResultUsageCopy({
 }): string | null {
   if (expertWorkflowId) {
     const label = EXPERT_RESULT_LABELS[expertWorkflowId];
-    return `本次使用了 1 个专家技能${label ? `（${label}）` : ''}`;
+    return `本次使用了 1 个技能${label ? `（${label}）` : ''}`;
   }
   if (expertMode === 'expert') {
     return '本次按专家模式处理';

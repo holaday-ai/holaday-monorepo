@@ -59,7 +59,7 @@ describe('classifyExecutionMode — image lane', () => {
   it('image intent overrides an installed skill hint', async () => {
     // xiaohongshu skill normally forces 'browser'; an explicit image
     // ask is a STRONG signal and wins.
-    expect(await classify('帮我画一张小红书封面图', 'xiaohongshu')).toBe('image');
+    expect(await classify('帮我画一张小红书封面图', 'xiaohongshu-seeding-ops')).toBe('image');
   });
 
   it.each([

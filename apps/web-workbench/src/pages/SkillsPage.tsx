@@ -1,43 +1,7 @@
-import {
-  AlertCircle,
-  BarChart3,
-  BookOpen,
-  Calculator,
-  ClipboardList,
-  Compass,
-  DollarSign,
-  FileCheck,
-  FileText,
-  Globe,
-  Headphones,
-  Heart,
-  Image,
-  Kanban,
-  Languages,
-  Layers,
-  type LucideIcon,
-  Mail,
-  MessageCircle,
-  MessageSquare,
-  Palette,
-  PenTool,
-  PlayCircle,
-  Presentation,
-  Scale,
-  Share2,
-  Shield,
-  ShoppingBag,
-  Sparkles,
-  Target,
-  Truck,
-  TrendingUp,
-  UserCheck,
-  UserPlus,
-  Users,
-  Video,
-} from 'lucide-react';
+import { AlertCircle, Check, Loader2, LockKeyhole, Plus, Search, Sparkles } from 'lucide-react';
 import * as React from 'react';
 import { useNavigate, useOutletContext } from 'react-router-dom';
+import { SkillLogo } from '@/components/SkillLogo';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import {
@@ -45,13 +9,10 @@ import {
   normalizeSkillRows,
   normalizeSkillToggleResponse,
   skillCardBadge,
-  skillCardUsageHint,
-  skillUseActionCopy,
   skillLimitBannerCopy,
   skillLimitMessage,
   skillLoadErrorCopy,
   skillPageSummary,
-  skillTaskDraft,
 } from '@/lib/skills-page-state';
 import { pageActionError, pageErrorMessage } from '@/lib/page-error-copy';
 import { supportMailtoHref } from '@/lib/support-links';
@@ -68,53 +29,10 @@ const SKILL_CAPS: Record<string, number> = {
 };
 
 /**
- * Static lookup of the lucide icons referenced by the backend's
- * skill-meta. Keeping this client-side avoids dynamic imports and
- * keeps the card render synchronous. New skill icons must be added
- * to BOTH this map and `agent/skills/skill-meta.ts`.
- */
-const ICONS: Record<string, LucideIcon> = {
-  Heart,
-  Video,
-  MessageSquare,
-  ShoppingBag,
-  Scale,
-  TrendingUp,
-  BarChart3,
-  Layers,
-  Mail,
-  BookOpen,
-  // Phase 20b — icons for the 25 new specialist roles
-  Users,
-  Globe,
-  Share2,
-  PenTool,
-  Shield,
-  Palette,
-  Image,
-  Compass,
-  MessageCircle,
-  DollarSign,
-  Truck,
-  Kanban,
-  FileCheck,
-  UserPlus,
-  UserCheck,
-  Target,
-  ClipboardList,
-  FileText,
-  Presentation,
-  Headphones,
-  Calculator,
-  Languages,
-};
-
-/**
- * Phase 16 — 专家技能 selection page. Lists every skill in the
+ * Skills selection page. Lists every skill in the
  * orchestrator's catalogue grouped by category, with each card
  * acting as a one-tap toggle. Persists via skills.toggle which
- * writes to users.selected_roles (the same storage Pro-tier role
- * gating already uses).
+ * writes to users.selected_skills.
  */
 export function SkillsPage(): JSX.Element {
   const toast = useToast();
@@ -130,6 +48,7 @@ export function SkillsPage(): JSX.Element {
   const planId = (outletCtx?.me?.plan ?? 'free') as keyof typeof SKILL_CAPS;
   const cap = SKILL_CAPS[planId] ?? 0;
   const [skills, setSkills] = React.useState<UiSkill[]>([]);
+  const [query, setQuery] = React.useState('');
   const [loading, setLoading] = React.useState(true);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [pendingId, setPendingId] = React.useState<string | null>(null);
@@ -173,7 +92,20 @@ export function SkillsPage(): JSX.Element {
     };
   }, [refresh]);
 
-  const grouped = React.useMemo(() => groupSkillsByCategory(skills), [skills]);
+  const enabledSkills = React.useMemo(
+    () => skills.filter((skill) => skill.enabled),
+    [skills],
+  );
+  const filteredSkills = React.useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return skills;
+    return skills.filter((skill) =>
+      [skill.name, skill.id, skill.description, ...skill.aliases].some((value) =>
+        value.toLowerCase().includes(q),
+      ),
+    );
+  }, [query, skills]);
+  const grouped = React.useMemo(() => groupSkillsByCategory(filteredSkills), [filteredSkills]);
   const summary = skillPageSummary({
     loading,
     error: loadError,
@@ -229,45 +161,53 @@ export function SkillsPage(): JSX.Element {
   return (
     <PageContainer width="wide">
       <PageHeader
-        title="专家技能"
-        description="选择你常用的技能，HOLA DAY 会自动识别并调用专业工作流"
-        action={
-          <div
-            className={cn(
-              'inline-flex items-center gap-1.5 rounded-full border bg-white px-3 py-1 text-[12px] font-medium text-[#595757] shadow-[0_1px_2px_rgba(15,23,42,0.03)]',
-              atLimit && !loadError && !loading
-                ? 'border-[#FFC910]/65'
-                : 'border-[#DCDDDD]',
-            )}
-          >
-            {summary}
-          </div>
-        }
+        title="技能"
+        description="启用常用技能，并在任务中用 @ 调用"
       />
-      {!loading && !loadError && grouped.length > 0 && (
-        <div className="mb-5 flex flex-col gap-3 rounded-[8px] border border-[#DCDDDD] bg-white px-4 py-3 text-[13px] text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.03)] sm:flex-row sm:items-center sm:justify-between">
-          <div className="min-w-0">
-            <div className="font-medium">如何使用专家技能</div>
-            <div className="mt-0.5 text-[12px] leading-5 text-muted-foreground">
-              启用后，新任务会自动匹配相关专家；也可以在技能卡上点“用此专家”直接开始。
-            </div>
+      <div className="mb-5">
+        <label className="relative block">
+          <Search
+            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#ADADAD]"
+            aria-hidden
+          />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="搜索技能"
+            className="h-10 w-full rounded-full border border-[#DCDDDD] bg-white px-10 text-sm text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.03)] outline-none transition-colors placeholder:text-[#ADADAD] focus:border-[#EA1F59]/45 focus:ring-2 focus:ring-[#EA1F59]/10"
+          />
+        </label>
+        <div
+          className={cn(
+            'mt-3 inline-flex items-center gap-1.5 rounded-full border bg-white px-3 py-1 text-[12px] font-medium text-[#595757] shadow-[0_1px_2px_rgba(15,23,42,0.03)]',
+            atLimit && !loadError && !loading
+              ? 'border-[#FFC910]/65'
+              : 'border-[#DCDDDD]',
+          )}
+        >
+          {summary}
+        </div>
+      </div>
+      {!loading && !loadError && enabledSkills.length > 0 && (
+        <div className="mb-5 flex items-center gap-3 pb-2">
+          <div className="shrink-0 text-[13px] font-medium text-foreground">已启用</div>
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            {enabledSkills.map((skill) => (
+              <SkillLogo
+                key={skill.id}
+                logoId={skill.logoId}
+                label={skill.name}
+                size="sm"
+              />
+            ))}
           </div>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="shrink-0"
-            onClick={() => navigate('/app')}
-          >
-            开始新任务
-          </Button>
         </div>
       )}
       {/* Upgrade nudge when Basic user hits the cap. Inline banner
           so the action sits adjacent to the skill grid the user is
           interacting with. */}
       {limitBanner && planId !== 'pro' && (
-        <div className="mb-5 flex flex-col gap-3 rounded-[8px] border border-[#DCDDDD] border-l-[#FFC910] bg-white px-4 py-3 text-[13px] text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px] sm:flex-row sm:items-center sm:justify-between">
+        <div className="mb-5 flex flex-col gap-3 border-y border-[#EFEFEF] py-3 text-[13px] text-foreground sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
             <div className="font-medium">{limitBanner.title}</div>
             <div className="mt-0.5 text-[12px] text-muted-foreground">
@@ -286,7 +226,7 @@ export function SkillsPage(): JSX.Element {
         </div>
       )}
       {loading ? (
-        <PageLoadingPanel label="技能加载中" description="正在同步专家技能目录" />
+        <PageLoadingPanel label="技能加载中" description="正在同步技能目录" />
       ) : loadError ? (
         <div className="flex flex-col items-center gap-3 rounded-[8px] border border-[#DCDDDD] bg-white px-6 py-12 text-center">
           <AlertCircle className="h-8 w-8 text-primary" aria-hidden />
@@ -301,8 +241,8 @@ export function SkillsPage(): JSX.Element {
             <Button asChild variant="outline" size="sm">
               <a
                 href={supportMailtoHref({
-                  subject: '专家技能列表加载失败',
-                  body: '专家技能列表加载失败，请协助排查。\n\n注册邮箱：\n出现时间：',
+                  subject: '技能列表加载失败',
+                  body: '技能列表加载失败，请协助排查。\n\n注册邮箱：\n出现时间：',
                 })}
               >
                 联系支持
@@ -320,8 +260,8 @@ export function SkillsPage(): JSX.Element {
           <Button asChild variant="outline" size="sm" className="mt-1">
             <a
               href={supportMailtoHref({
-                subject: '专家技能目录为空',
-                body: '专家技能目录为空，请协助确认。\n\n注册邮箱：',
+                subject: '技能目录为空',
+                body: '技能目录为空，请协助确认。\n\n注册邮箱：',
               })}
             >
               联系支持
@@ -332,17 +272,15 @@ export function SkillsPage(): JSX.Element {
         <div className="space-y-8">
           {grouped.map(({ category, items }) => (
             <section key={category}>
-              <div className="mb-3 flex items-center justify-between gap-3 border-b border-[#EFEFEF] pb-2">
-                <h2 className="text-[11px] font-semibold uppercase tracking-wide text-[#595757]">
+              <div className="mb-1 flex items-center justify-between gap-3">
+                <h2 className="text-[13px] font-medium text-foreground">
                   {category}
                 </h2>
-                <div className="rounded-full border border-[#DCDDDD] bg-white px-2 py-0.5 text-[11px] text-[#595757]">
-                  {items.length} 个
-                </div>
+                <div className="text-[12px] text-muted-foreground">{items.length} 个</div>
               </div>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              <div className="grid grid-cols-1 gap-x-16 gap-y-1 lg:grid-cols-2">
                 {items.map((s) => (
-                  <SkillCard
+                  <SkillListRow
                     key={s.id}
                     skill={s}
                     pending={pendingId === s.id}
@@ -350,14 +288,6 @@ export function SkillsPage(): JSX.Element {
                     limitBlocked={atLimit && !s.enabled}
                     cap={cap}
                     onToggle={() => void onToggle(s)}
-                    onUse={() => {
-                      navigate('/', {
-                        state: {
-                          newTask: true,
-                          skillTaskDraft: skillTaskDraft(s),
-                        },
-                      });
-                    }}
                   />
                 ))}
               </div>
@@ -369,14 +299,13 @@ export function SkillsPage(): JSX.Element {
   );
 }
 
-function SkillCard({
+function SkillListRow({
   skill,
   pending,
   blocked,
   limitBlocked,
   cap,
   onToggle,
-  onUse,
 }: {
   skill: UiSkill;
   pending: boolean;
@@ -384,92 +313,64 @@ function SkillCard({
   limitBlocked: boolean;
   cap: number;
   onToggle: () => void;
-  onUse: () => void;
 }): JSX.Element {
-  const Icon = ICONS[skill.icon] ?? Sparkles;
   const toggleDisabled = pending || blocked || limitBlocked;
-  const useBlockedByPlan = skill.enabled && cap <= 0;
   const toggleTitle = limitBlocked
     ? cap <= 0
-      ? '当前套餐暂不支持启用专家技能'
+      ? '当前套餐暂不支持启用技能'
       : '已达到技能上限，先停用一个已启用技能'
     : `${skill.enabled ? '停用' : '启用'}${skill.name}`;
-  const useAction = skillUseActionCopy({
-    skillName: skill.name,
-    enabled: skill.enabled,
-    pending,
-    blocked,
-    planBlocked: useBlockedByPlan,
-  });
   return (
-    <article
+    <div
       className={cn(
-        'group relative flex min-h-[124px] flex-col items-start gap-2 rounded-[8px] border bg-white p-4 text-left shadow-[0_1px_2px_rgba(15,23,42,0.03)] transition-[border-color,box-shadow] duration-150',
-        skill.enabled
-          ? 'border-[#DCDDDD]'
-          : 'border-[#DCDDDD] hover:border-[#ADADAD] hover:shadow-[0_4px_14px_rgba(15,23,42,0.05)]',
+        'group flex min-h-[74px] items-center gap-3 rounded-[8px] px-2 py-2.5 text-left transition-[background-color,opacity]',
         (pending || blocked) && 'opacity-60',
+        !(pending || blocked) && 'hover:bg-[#F8F7F9]',
       )}
     >
-      <div
-        className={cn(
-          'flex h-9 w-9 items-center justify-center rounded-md border bg-white transition-colors',
-          skill.enabled
-            ? 'border-[#EA1F59]/30 text-[#EA1F59]'
-            : 'border-[#DCDDDD] text-[#595757] group-hover:border-[#ADADAD]',
-        )}
-      >
-        <Icon className="h-4 w-4" aria-hidden />
-      </div>
-      <div className="min-w-0 pr-20 text-sm font-medium leading-5 text-foreground">
-        {skill.name}
-      </div>
-      <div className="line-clamp-2 text-xs leading-5 text-muted-foreground">
-        {skill.description}
-      </div>
-      <div className="mt-auto flex w-full items-center justify-between gap-2 border-t border-[#EFEFEF] pt-2">
-        <div className="min-w-0 text-[11px] leading-4 text-muted-foreground">
-          {skillCardUsageHint({ enabled: skill.enabled, pending, limitBlocked, cap })}
+      <SkillLogo logoId={skill.logoId} label={skill.name} className="shrink-0" />
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-medium leading-5 text-foreground">
+          {skill.name}
         </div>
-        <Button
-          type="button"
-          size="sm"
-          variant={skill.enabled ? 'default' : 'outline'}
-          className={cn(
-            'h-8 shrink-0 rounded-[7px] px-3 text-xs',
-            skill.enabled &&
-              'bg-[#EA1F59] text-white hover:bg-[#EA1F59]/90 focus-visible:ring-[#EA1F59]/25',
-          )}
-          disabled={!skill.enabled || pending || blocked || useBlockedByPlan}
-          title={useAction.title}
-          aria-label={useAction.ariaLabel}
-          onClick={onUse}
-        >
-          {skill.enabled && <PlayCircle className="mr-1.5 h-3.5 w-3.5" aria-hidden />}
-          {useAction.label}
-        </Button>
+        <div className="mt-0.5 truncate text-[12px] leading-5 text-muted-foreground">
+          {skill.description}
+        </div>
       </div>
-      <button
-        type="button"
-        onClick={onToggle}
-        disabled={toggleDisabled}
-        aria-pressed={skill.enabled}
-        aria-busy={pending}
-        aria-label={toggleTitle}
-        title={toggleTitle}
-        className={cn(
-          'absolute right-3 top-3 flex h-8 items-center rounded-full px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20',
-          pending
-            ? 'border border-[#42C0EF]/45 bg-white text-[#217EA0]'
-            : skill.enabled
-              ? 'border border-[#EA1F59]/35 bg-white text-[#EA1F59]'
-              : limitBlocked
-                ? 'border border-[#FFC910]/60 bg-[#FFC910]/10 text-[#6E5B00]'
-                : 'border border-[#DCDDDD] bg-white text-[#595757]',
-        )}
-      >
-        {skillCardBadge({ enabled: skill.enabled, pending, limitBlocked, cap })}
-      </button>
-    </article>
+      <div className="ml-auto flex shrink-0 items-center gap-2">
+        <button
+          type="button"
+          onClick={onToggle}
+          disabled={toggleDisabled}
+          aria-pressed={skill.enabled}
+          aria-busy={pending}
+          aria-label={toggleTitle}
+          title={toggleTitle}
+          className={cn(
+            'flex h-7 w-7 items-center justify-center rounded-full border border-transparent bg-transparent transition-[background-color,color,opacity] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20',
+            pending
+              ? 'text-[#42C0EF]'
+              : skill.enabled
+                ? 'text-[#EA1F59]/70 hover:bg-[#FFF5F8] hover:text-[#EA1F59]'
+                : limitBlocked
+                  ? 'text-[#C99A1A] hover:bg-[#FFF9E8]'
+                  : 'text-[#ADADAD] opacity-70 hover:bg-[#FFF5F8] hover:text-[#EA1F59] hover:opacity-100 group-hover:opacity-100',
+          )}
+        >
+          {pending ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+          ) : limitBlocked ? (
+            <LockKeyhole className="h-3.5 w-3.5" aria-hidden />
+          ) : skill.enabled ? (
+            <Check className="h-4 w-4" aria-hidden />
+          ) : (
+            <Plus className="h-4 w-4" aria-hidden />
+          )}
+          <span className="sr-only">
+            {skillCardBadge({ enabled: skill.enabled, pending, limitBlocked, cap })}
+          </span>
+        </button>
+      </div>
+    </div>
   );
 }
