@@ -474,6 +474,8 @@ export class TaskController {
    *   - 'user'             : explicit user pause (Pause button in popup)
    *   - 'quota_exceeded'   : billing / rate-limit guard (Phase 0 wires in W2)
    * `retries_exhausted` is reached inside onStepResult, not via this method.
+   * `awaiting_user` is already a parked user-input state, so pause is a no-op
+   * there; otherwise pendingConfirm could leak into a resumed executing state.
    */
   pause(
     state: TaskState,
@@ -483,6 +485,7 @@ export class TaskController {
       state.status === 'completed' ||
       state.status === 'failed' ||
       state.status === 'cancelled' ||
+      state.status === 'awaiting_user' ||
       state.status === 'paused'
     ) {
       return { state, effects: [{ kind: 'noop' }] };

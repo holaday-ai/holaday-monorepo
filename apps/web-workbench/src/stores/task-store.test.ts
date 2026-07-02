@@ -1284,9 +1284,150 @@ describe('applyServerMessage task.control', () => {
     expect(state.progressByTask.tsk_cancel).toBe('正在执行');
     expect(state.subStatusByTask.tsk_cancel).toBeUndefined();
   });
+
+  it('does not let late control frames overwrite completed terminal tasks', () => {
+    useTaskStore.setState({
+      tasks: [
+        task({
+          taskId: 'tsk_done_control',
+          status: 'completed',
+          resultText: '已完成',
+        }),
+      ],
+      terminalTaskIds: new Set(['tsk_done_control']),
+    });
+
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.task.control',
+      taskId: 'tsk_done_control',
+      command: 'resume',
+    });
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.task.control',
+      taskId: 'tsk_done_control',
+      command: 'cancel',
+    });
+
+    const state = useTaskStore.getState();
+    expect(state.tasks[0]).toMatchObject({
+      status: 'completed',
+      resultText: '已完成',
+    });
+    expect(state.terminalTaskIds.has('tsk_done_control')).toBe(true);
+  });
+
+  it('does not apply late control frames after terminal marker arrives first', () => {
+    useTaskStore.setState({
+      tasks: [task({ taskId: 'tsk_terminal_marker_first', status: 'executing' })],
+      terminalTaskIds: new Set(['tsk_terminal_marker_first']),
+    });
+
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.task.control',
+      taskId: 'tsk_terminal_marker_first',
+      command: 'cancel',
+    });
+
+    const state = useTaskStore.getState();
+    expect(state.tasks[0]).toMatchObject({ status: 'executing' });
+    expect(state.terminalTaskIds.has('tsk_terminal_marker_first')).toBe(true);
+  });
+});
+
+describe('applyServerMessage stale live frames after terminal', () => {
+  it('does not revive cancelled tasks from queued, tick, or awaiting-user frames', () => {
+    useTaskStore.setState({
+      tasks: [task({ taskId: 'tsk_final_cancel', status: 'cancelled' })],
+      terminalTaskIds: new Set(['tsk_final_cancel']),
+    });
+
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.task.queued',
+      taskId: 'tsk_final_cancel',
+      position: 2,
+    });
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.vision.tick.start',
+      taskId: 'tsk_final_cancel',
+      tickIndex: 0,
+      mode: 'screenshot',
+    });
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.supercar.awaiting_user',
+      taskId: 'tsk_final_cancel',
+      question: '请补充信息',
+      awaitingKind: 'clarification',
+    });
+
+    const state = useTaskStore.getState();
+    expect(state.tasks[0]).toMatchObject({ status: 'cancelled' });
+    expect(state.tasks[0]?.queuePosition).toBeUndefined();
+    expect(state.stepsByTask.tsk_final_cancel).toBeUndefined();
+    expect(state.awaitingUserByTask.tsk_final_cancel).toBeUndefined();
+  });
+
+  it('keeps partial_success terminal when late stream and progress arrive', () => {
+    useTaskStore.setState({
+      tasks: [
+        task({
+          taskId: 'tsk_partial_final',
+          status: 'partial_success',
+          resultText: '部分完成',
+        }),
+      ],
+      terminalTaskIds: new Set(['tsk_partial_final']),
+    });
+
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.task.stream',
+      taskId: 'tsk_partial_final',
+      delta: ' stale stream',
+    });
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.task.progress',
+      taskId: 'tsk_partial_final',
+      message: 'stale progress',
+      subStatus: 'generating',
+    });
+
+    const state = useTaskStore.getState();
+    expect(state.tasks[0]).toMatchObject({
+      status: 'partial_success',
+      resultText: '部分完成',
+    });
+    expect(state.streamingByTask.tsk_partial_final).toBeUndefined();
+    expect(state.progressByTask.tsk_partial_final).toBeUndefined();
+    expect(state.subStatusByTask.tsk_partial_final).toBeUndefined();
+  });
 });
 
 describe('applyServerMessage paused terminal frame', () => {
+  it('does not let a late different terminal frame overwrite an existing final task', () => {
+    useTaskStore.setState({
+      tasks: [
+        task({
+          taskId: 'tsk_done_terminal',
+          status: 'completed',
+          resultText: '最终答案',
+        }),
+      ],
+      terminalTaskIds: new Set(['tsk_done_terminal']),
+    });
+
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.task.terminal',
+      taskId: 'tsk_done_terminal',
+      status: 'failed',
+      reason: 'late failure',
+    });
+
+    const state = useTaskStore.getState();
+    expect(state.tasks[0]).toMatchObject({
+      status: 'completed',
+      resultText: '最终答案',
+    });
+  });
+
   it('keeps paused recoverable and clears stale live blockers without terminal reveal animation', () => {
     useTaskStore.setState({
       tasks: [task({ taskId: 'tsk_paused_terminal', status: 'executing' })],

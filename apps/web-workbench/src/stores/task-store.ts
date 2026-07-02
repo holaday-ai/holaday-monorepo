@@ -1174,6 +1174,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
   applyServerMessage(msg) {
     if (msg.type === 'server.task.control') {
       set((prev) => {
+        if (isTaskRuntimeTerminal(prev, msg.taskId)) return prev;
         const nextSubStatus = { ...prev.subStatusByTask };
         delete nextSubStatus[msg.taskId];
         const nextAwaiting = { ...prev.awaitingUserByTask };
@@ -1208,6 +1209,14 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     }
     if (msg.type === 'server.task.terminal') {
       set((prev) => {
+        const existingTask = prev.tasks.find((task) => task.taskId === msg.taskId);
+        if (
+          existingTask &&
+          isTerminalStatus(existingTask.status) &&
+          existingTask.status !== msg.status
+        ) {
+          return prev;
+        }
         // Phase 24 RC follow-up (Bug 1 fix): DO NOT clear streaming
         // + progress buffers here. There's a ~200ms window between
         // terminal arrival and tasks.detail merging the canonical
@@ -1432,7 +1441,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     if (msg.type === 'server.task.queued') {
       set((prev) => ({
         tasks: prev.tasks.map((t) =>
-          t.taskId === msg.taskId
+          t.taskId === msg.taskId && !isTaskRuntimeTerminal(prev, msg.taskId)
             ? { ...t, status: 'queued' as const, queuePosition: msg.position }
             : t,
         ),
@@ -1466,6 +1475,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     }
     if (msg.type === 'server.vision.tick.start') {
       set((prev) => {
+        if (isTaskRuntimeTerminal(prev, msg.taskId)) return prev;
         const existing = prev.stepsByTask[msg.taskId] ?? [];
         // Idempotent: a reconnected WS may replay a recent tick. If
         // we already have the step, leave it alone.
@@ -1613,6 +1623,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     if (msg.type === 'server.supercar.awaiting_user') {
       const awaitingKind = msg.awaitingKind;
       set((prev) => {
+        if (isTaskRuntimeTerminal(prev, msg.taskId)) return prev;
         const nextSubStatus = { ...prev.subStatusByTask };
         delete nextSubStatus[msg.taskId];
         return {
@@ -2269,6 +2280,21 @@ function markTaskRunningFromLiveSignal(task: UiTask): UiTask {
     ...rest,
     ...(shouldFlip ? { status: 'executing' as const } : {}),
   };
+}
+
+function hasFinalTaskRow(
+  state: Pick<TaskStore, 'tasks'>,
+  taskId: string,
+): boolean {
+  const task = state.tasks.find((candidate) => candidate.taskId === taskId);
+  return Boolean(task && isTerminalStatus(task.status));
+}
+
+function isTaskRuntimeTerminal(
+  state: Pick<TaskStore, 'tasks' | 'terminalTaskIds'>,
+  taskId: string,
+): boolean {
+  return state.terminalTaskIds.has(taskId) || hasFinalTaskRow(state, taskId);
 }
 
 export function normaliseDetailStepStatus(raw: string): UiStep['status'] {

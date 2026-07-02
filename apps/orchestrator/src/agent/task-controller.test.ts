@@ -175,6 +175,29 @@ describe('TaskController state machine', () => {
     expect(effects).toEqual([{ kind: 'noop' }]);
   });
 
+  it('pause is a no-op while awaiting user input', async () => {
+    const c = await setup();
+    const { state: s0 } = c.start({
+      state: null,
+      plan: [
+        { id: 'stp_1', kind: 'click', risk: 'high' },
+        { id: 'stp_2', kind: 'wait', risk: 'low' },
+      ],
+    });
+    const { state: awaiting } = c.onStepResult(s0, {
+      taskId: s0.taskId,
+      stepId: 'stp_1',
+      status: 'ok',
+    });
+
+    const { state: stillAwaiting, effects } = c.pause(awaiting, 'user');
+
+    expect(stillAwaiting).toBe(awaiting);
+    expect(stillAwaiting.status).toBe('awaiting_user');
+    expect(stillAwaiting.pendingConfirm?.stepId).toBe('stp_1');
+    expect(effects).toEqual([{ kind: 'noop' }]);
+  });
+
   it('resume re-dispatches the current step and clears pauseReason', async () => {
     const c = await setup();
     const { state: s0 } = c.start({
