@@ -1,5 +1,6 @@
 import { newExternalId } from '@holaday/shared-types';
 import type { ServerMessage } from '@holaday/shared-types';
+import { isTaskTerminalStatus } from '../task-status.js';
 
 /**
  * In-memory state machine for the Agent Loop control plane.
@@ -16,7 +17,7 @@ import type { ServerMessage } from '@holaday/shared-types';
  *                                  ↕             ↓
  *                                paused      cancelled
  *                                  ↓
- *                            completed / failed
+ *                      completed / partial_success / failed
  */
 
 export type TaskStatus =
@@ -32,6 +33,7 @@ export type TaskStatus =
   | 'awaiting_user'
   | 'paused'
   | 'completed'
+  | 'partial_success'
   | 'failed'
   | 'cancelled';
 
@@ -448,7 +450,7 @@ export class TaskController {
 
   /** External cancel (user closed task). Works from any non-terminal state. */
   cancel(state: TaskState): { state: TaskState; effects: ControlEffect[] } {
-    if (state.status === 'completed' || state.status === 'failed' || state.status === 'cancelled') {
+    if (isTaskTerminalStatus(state.status)) {
       return { state, effects: [{ kind: 'noop' }] };
     }
     const cancelled: TaskState = {
@@ -482,9 +484,7 @@ export class TaskController {
     reason: Exclude<PauseReason, 'retries_exhausted'>,
   ): { state: TaskState; effects: ControlEffect[] } {
     if (
-      state.status === 'completed' ||
-      state.status === 'failed' ||
-      state.status === 'cancelled' ||
+      isTaskTerminalStatus(state.status) ||
       state.status === 'awaiting_user' ||
       state.status === 'paused'
     ) {

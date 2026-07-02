@@ -163,12 +163,23 @@ describe('TaskController state machine', () => {
     }
   });
 
-  it('pause is a no-op on terminal status and on already-paused', async () => {
+  it('pause is a no-op on terminal statuses and on already-paused', async () => {
     const c = await setup();
     const { state: s0 } = c.start({
       state: null,
       plan: [{ id: 'stp_1', kind: 'goto', risk: 'low' }],
     });
+    const { state: completed } = c.onStepResult(s0, {
+      taskId: s0.taskId,
+      stepId: 'stp_1',
+      status: 'ok',
+    });
+    for (const status of ['completed', 'partial_success', 'failed', 'cancelled'] as const) {
+      const terminal = { ...completed, status };
+      const { state: stillTerminal, effects } = c.pause(terminal, 'user');
+      expect(stillTerminal).toBe(terminal);
+      expect(effects).toEqual([{ kind: 'noop' }]);
+    }
     const { state: paused } = c.pause(s0, 'user');
     const { state: pausedAgain, effects } = c.pause(paused, 'user');
     expect(pausedAgain).toBe(paused);
@@ -327,14 +338,18 @@ describe('TaskController state machine', () => {
       state: null,
       plan: [{ id: 'stp_1', kind: 'goto', risk: 'low' }],
     });
-    const { state: s1 } = c.onStepResult(s0, {
+    const { state: completed } = c.onStepResult(s0, {
       taskId: s0.taskId,
       stepId: 'stp_1',
       status: 'ok',
     });
-    expect(s1.status).toBe('completed');
-    const { effects } = c.cancel(s1);
-    expect(effects).toEqual([{ kind: 'noop' }]);
+    expect(completed.status).toBe('completed');
+    for (const status of ['completed', 'partial_success', 'failed', 'cancelled'] as const) {
+      const terminal = { ...completed, status };
+      const { state: stillTerminal, effects } = c.cancel(terminal);
+      expect(stillTerminal).toBe(terminal);
+      expect(effects).toEqual([{ kind: 'noop' }]);
+    }
   });
 
   it('out-of-order step result is ignored', async () => {
