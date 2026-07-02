@@ -29,27 +29,29 @@ import { protectedProcedure, publicProcedure, router } from '../trpc.js';
 import type { Context } from '../context.js';
 
 const paymentProviderInput = z.enum(['wechat', 'alipay', 'manual']);
+const moneyCentsInput = z.number().int().safe();
+const idempotencyKeyInput = z.string().trim().min(1).max(128);
 
 const createMembershipOrderInput = z.object({
   provider: paymentProviderInput.optional(),
-  idempotencyKey: z.string().min(1).max(128),
+  idempotencyKey: idempotencyKeyInput,
 });
 
 const createRechargeOrderInput = z.object({
-  amountCnyCents: z.number(),
+  amountCnyCents: moneyCentsInput,
   provider: paymentProviderInput.optional(),
-  idempotencyKey: z.string().min(1).max(128),
+  idempotencyKey: idempotencyKeyInput,
 });
 
 const requestWithdrawalInput = z.object({
-  amountCreditCents: z.number(),
-  bankAccountFingerprint: z.string().min(1).max(128),
-  idempotencyKey: z.string().min(1).max(128),
+  amountCreditCents: moneyCentsInput,
+  bankAccountFingerprint: z.string().trim().min(1).max(128),
+  idempotencyKey: idempotencyKeyInput,
 });
 
 const rechargePreviewInput = z.object({
-  amountCnyCents: z.number(),
-  rollingThirtyDayCnyCents: z.number().optional(),
+  amountCnyCents: moneyCentsInput,
+  rollingThirtyDayCnyCents: moneyCentsInput.optional(),
 });
 
 function partnerLedgerEnabled(): boolean {

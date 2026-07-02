@@ -171,6 +171,26 @@ describe('partnerRouter mutations', () => {
     });
   });
 
+  it('trims idempotency keys before creating membership orders', async () => {
+    createPendingOrderMock.mockResolvedValueOnce({
+      externalId: 'payment_membership_1',
+      provider: 'manual',
+      orderKind: 'membership',
+      amountCnyCents: PARTNER_MEMBERSHIP_PRICE_CNY_CENTS,
+      status: 'pending',
+    });
+
+    await partnerRouter.createCaller(makeContext()).createMembershipOrder({
+      idempotencyKey: '  membership-idem-trimmed  ',
+    });
+
+    expect(createPendingOrderMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        idempotencyKey: 'membership-idem-trimmed',
+      }),
+    );
+  });
+
   it('maps recharge membership and KYC gate failures to precondition errors', async () => {
     const caller = partnerRouter.createCaller(makeContext());
     createPendingOrderMock.mockRejectedValueOnce(new RechargeGateError('membership_required'));
@@ -227,6 +247,16 @@ describe('partnerRouter mutations', () => {
     });
   });
 
+  it('rejects non-integer recharge amounts before calling the service', async () => {
+    await expect(
+      partnerRouter.createCaller(makeContext()).createRechargeOrder({
+        amountCnyCents: 10_000_00.5,
+        idempotencyKey: 'recharge-fractional',
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(createPendingOrderMock).not.toHaveBeenCalled();
+  });
+
   it('maps recharge validation and idempotency errors', async () => {
     const caller = partnerRouter.createCaller(makeContext());
     createPendingOrderMock.mockRejectedValueOnce(new RangeError('below_minimum'));
@@ -244,6 +274,20 @@ describe('partnerRouter mutations', () => {
         idempotencyKey: 'recharge-conflict',
       }),
     ).rejects.toMatchObject({ code: 'CONFLICT' });
+  });
+
+  it('sanitizes unknown recharge service errors', async () => {
+    createPendingOrderMock.mockRejectedValueOnce(new Error('database stack details'));
+
+    await expect(
+      partnerRouter.createCaller(makeContext()).createRechargeOrder({
+        amountCnyCents: 10_000_00,
+        idempotencyKey: 'recharge-unknown-error',
+      }),
+    ).rejects.toMatchObject({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: 'failed to create partner recharge order',
+    });
   });
 
   it('derives high-risk review withdrawal requests because same-name bank checks are unavailable', async () => {
@@ -279,6 +323,39 @@ describe('partnerRouter mutations', () => {
       riskScore: 25,
       idempotencyKey: 'withdrawal-idem-1',
     });
+  });
+
+  it('trims withdrawal string inputs and rejects non-integer amounts before the service', async () => {
+    const reviewDueAt = new Date('2026-04-15T00:00:00.000Z');
+    getKycStatusMock.mockResolvedValueOnce('passed');
+    requestWithdrawalMock.mockResolvedValueOnce({
+      externalId: 'payment_withdrawal_1',
+      amountCreditCents: 1_000_00,
+      status: 'reviewing',
+      reviewDueAt,
+      riskScore: 25,
+    });
+
+    await partnerRouter.createCaller(makeContext()).requestWithdrawal({
+      amountCreditCents: 1_000_00,
+      bankAccountFingerprint: '  bank-fp-trimmed  ',
+      idempotencyKey: '  withdrawal-idem-trimmed  ',
+    });
+    expect(requestWithdrawalMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bankAccountFingerprint: 'bank-fp-trimmed',
+        idempotencyKey: 'withdrawal-idem-trimmed',
+      }),
+    );
+
+    await expect(
+      partnerRouter.createCaller(makeContext()).requestWithdrawal({
+        amountCreditCents: 500_00.5,
+        bankAccountFingerprint: 'bank-fp-fractional',
+        idempotencyKey: 'withdrawal-fractional',
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(requestWithdrawalMock).toHaveBeenCalledTimes(1);
   });
 
   it('maps withdrawal gate, validation, and idempotency errors', async () => {
@@ -325,5 +402,21 @@ describe('partnerRouter mutations', () => {
         idempotencyKey: 'withdrawal-conflict',
       }),
     ).rejects.toMatchObject({ code: 'CONFLICT' });
+  });
+
+  it('sanitizes unknown withdrawal service errors', async () => {
+    getKycStatusMock.mockResolvedValueOnce('passed');
+    requestWithdrawalMock.mockRejectedValueOnce(new Error('withdrawal stack details'));
+
+    await expect(
+      partnerRouter.createCaller(makeContext()).requestWithdrawal({
+        amountCreditCents: 500_00,
+        bankAccountFingerprint: 'bank-fp-unknown-error',
+        idempotencyKey: 'withdrawal-unknown-error',
+      }),
+    ).rejects.toMatchObject({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: 'failed to request partner withdrawal',
+    });
   });
 });

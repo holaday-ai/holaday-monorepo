@@ -509,8 +509,6 @@ describe('WithdrawalService requestWithdrawal', () => {
     ['different amount', { amountCreditCents: 700_00 }],
     ['different user', { userId: 456 }],
     ['different fingerprint', { bankAccountFingerprint: 'different_bank_fingerprint' }],
-    ['different highRisk status', { highRisk: true }],
-    ['different riskScore', { riskScore: 77 }],
   ])('throws an idempotency conflict for same key with %s', async (_name, patch) => {
     const existing = fakeWithdrawalRequest();
     const { db, ledger, service } = serviceWithDeps({
@@ -527,6 +525,34 @@ describe('WithdrawalService requestWithdrawal', () => {
     expect(db.rows).toEqual([existing]);
     expect(db.rowsCreated).toBe(0);
     expect(ledger.entries).toHaveLength(0);
+  });
+
+  it('preserves stored risk and status on replay when derived risk inputs changed', async () => {
+    const existing = fakeWithdrawalRequest({
+      status: 'requested',
+      riskScore: 12,
+      reviewDueAt: new Date('2026-07-09T10:20:30.000Z'),
+    });
+    const { db, ledger, service } = serviceWithDeps({
+      db: new FakeWithdrawalDb([existing]),
+      ledger: new FakeLedgerService(0),
+    });
+
+    const row = await service.requestWithdrawal({
+      ...validWithdrawalInput,
+      highRisk: true,
+      riskScore: 88,
+    });
+
+    expect(row).toBe(existing);
+    expect(row).toMatchObject({
+      status: 'requested',
+      riskScore: 12,
+      reviewDueAt: new Date('2026-07-09T10:20:30.000Z'),
+    });
+    expect(db.rowsCreated).toBe(0);
+    expect(db.insertAttempts).toHaveLength(0);
+    expect(ledger.entries).toHaveLength(2);
   });
 
   it('does not re-check available balance for an exact-balance retry', async () => {

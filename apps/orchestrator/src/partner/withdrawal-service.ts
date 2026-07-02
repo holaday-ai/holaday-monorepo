@@ -157,12 +157,12 @@ function assertIdempotentRequestPayloadMatches(
   row: PartnerWithdrawalRequest,
   expected: NormalizedWithdrawalRequest,
 ): void {
+  // Status, riskScore, and reviewDueAt are server-derived at creation time.
+  // Replays preserve the stored review decision even if current KYC/risk context changed.
   if (
     row.userId !== expected.userId ||
     row.amountCreditCents !== expected.amountCreditCents ||
     row.bankAccountFingerprint !== expected.bankAccountFingerprint ||
-    row.status !== expected.status ||
-    row.riskScore !== expected.riskScore ||
     row.idempotencyKey !== expected.idempotencyKey
   ) {
     throw new WithdrawalRequestIdempotencyConflictError();
