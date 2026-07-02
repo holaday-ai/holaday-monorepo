@@ -698,6 +698,113 @@ describe('TaskRepository task terminal state persistence', () => {
     expect(result.persisted).toBe(false);
   });
 
+  it('persistAwaitingUser only parks active runner rows', async () => {
+    const { db, captured } = fakeDbForStateTransitions(1);
+    const repo = new TaskRepository(db);
+
+    const result = await repo.persistAwaitingUser({
+      taskExternalId: 'tsk_state_machine',
+      question: '请补充目标城市',
+      awaitingKind: 'clarification',
+      result: { executionMode: 'generate' },
+    });
+
+    expect(result.persisted).toBe(true);
+    expect(captured.updatePayloads[0]).toMatchObject({
+      status: 'awaiting_user',
+      awaitingQuestion: '请补充目标城市',
+      awaitingKind: 'clarification',
+      result: { executionMode: 'generate' },
+    });
+    const params = collectDrizzleParamValues(captured.whereClauses.at(0));
+    expect(params).toEqual(
+      expect.arrayContaining([
+        'tsk_state_machine',
+        'pending',
+        'planning',
+        'queued',
+        'executing',
+      ]),
+    );
+    expect(params).not.toContain('awaiting_user');
+    expect(params).not.toContain('completed');
+    expect(captured.eventPayloads[0]).toMatchObject({
+      type: 'task.awaiting_user',
+      actor: 'system',
+      payload: {
+        awaitingKind: 'clarification',
+        question: '请补充目标城市',
+      },
+    });
+  });
+
+  it('persistAwaitingUser reports stale rows without inserting an event', async () => {
+    const { db, captured } = fakeDbForStateTransitions(0);
+    const repo = new TaskRepository(db);
+
+    const result = await repo.persistAwaitingUser({
+      taskExternalId: 'tsk_state_machine',
+      question: '请补充目标城市',
+      awaitingKind: 'clarification',
+      result: { executionMode: 'generate' },
+    });
+
+    expect(result.persisted).toBe(false);
+    expect(captured.eventPayloads).toHaveLength(0);
+  });
+
+  it('markQueuedTaskExecuting only starts rows still queued', async () => {
+    const { db, captured } = fakeDbForStateTransitions(1);
+    const repo = new TaskRepository(db);
+
+    const result = await repo.markQueuedTaskExecuting('tsk_state_machine');
+
+    expect(result.persisted).toBe(true);
+    expect(captured.updatePayloads[0]).toMatchObject({
+      status: 'executing',
+    });
+    expect(captured.updatePayloads[0]?.startedAt).toBeInstanceOf(Date);
+    const params = collectDrizzleParamValues(captured.whereClauses.at(0));
+    expect(params).toEqual(expect.arrayContaining(['tsk_state_machine', 'queued']));
+  });
+
+  it('markQueuedTaskExecuting reports stale rows without pretending to start', async () => {
+    const { db } = fakeDbForStateTransitions(0);
+    const repo = new TaskRepository(db);
+
+    const result = await repo.markQueuedTaskExecuting('tsk_state_machine');
+
+    expect(result.persisted).toBe(false);
+  });
+
+  it('markQueuedTaskFailed only fails rows still queued', async () => {
+    const { db, captured } = fakeDbForStateTransitions(1);
+    const repo = new TaskRepository(db);
+
+    const result = await repo.markQueuedTaskFailed(
+      'tsk_state_machine',
+      'queue timeout: 排队等待时间过长，请稍后重试',
+    );
+
+    expect(result.persisted).toBe(true);
+    expect(captured.updatePayloads[0]).toMatchObject({
+      status: 'failed',
+      errorMessage: 'queue timeout: 排队等待时间过长，请稍后重试',
+    });
+    expect(captured.updatePayloads[0]?.completedAt).toBeInstanceOf(Date);
+    const params = collectDrizzleParamValues(captured.whereClauses.at(0));
+    expect(params).toEqual(expect.arrayContaining(['tsk_state_machine', 'queued']));
+  });
+
+  it('markQueuedTaskFailed reports stale rows without pretending to fail', async () => {
+    const { db } = fakeDbForStateTransitions(0);
+    const repo = new TaskRepository(db);
+
+    const result = await repo.markQueuedTaskFailed('tsk_state_machine', 'queue timeout');
+
+    expect(result.persisted).toBe(false);
+  });
+
   it('cancelVideoConfirm atomically cancels only active video quote rows', async () => {
     const { db, captured } = fakeDbForExecute(1);
     const repo = new TaskRepository(db);

@@ -1979,61 +1979,67 @@ export const tasksRouter = router({
           'task:completed',
         );
 
+        let templatePersisted = false;
+        let templateAwaitingPersisted = false;
         try {
           if (result.status === 'completed') {
-            await repo.persistVisionOutcome(taskId, {
+            const persisted = await repo.persistVisionOutcome(taskId, {
               status: 'completed',
               summary: result.summary,
               tickCount: 1,
               metadata,
             });
+            templatePersisted = persisted.persisted;
           } else if (result.status === 'partial_success') {
-            await repo.persistVisionOutcome(taskId, {
+            const persisted = await repo.persistVisionOutcome(taskId, {
               status: 'partial_success',
               summary: result.summary,
               tickCount: 1,
               metadata,
             });
+            templatePersisted = persisted.persisted;
           } else if (result.status === 'awaiting_user') {
             // Chat-only clarification (please upload a template) — same
             // shape as the generate-lane intake park.
-            await ctx.db
-              .update(tasksTable)
-              .set({
-                status: 'awaiting_user',
-                awaitingQuestion: result.awaitingQuestion ?? '请补充信息后继续。',
-                awaitingKind: 'clarification',
-                result: { ...metadata, executionMode: 'template_fill' as const },
-              })
-              .where(eq(tasksTable.externalId, taskId));
+            const persisted = await repo.persistAwaitingUser({
+              taskExternalId: taskId,
+              question: result.awaitingQuestion ?? '请补充信息后继续。',
+              awaitingKind: 'clarification',
+              result: { ...metadata, executionMode: 'template_fill' as const },
+            });
+            templateAwaitingPersisted = persisted.persisted;
           } else {
-            await repo.persistVisionOutcome(taskId, {
+            const persisted = await repo.persistVisionOutcome(taskId, {
               status: 'failed',
               reason: result.reason ?? '模板填充失败，请稍后重试。',
               tickCount: 1,
               metadata,
             });
+            templatePersisted = persisted.persisted;
           }
         } catch (err) {
           ctx.logger.error({ err, taskId }, 'template-fill: persist failed');
         }
 
         try {
-          if (result.status === 'completed' || result.status === 'partial_success') {
+          if (
+            templatePersisted &&
+            (result.status === 'completed' || result.status === 'partial_success')
+          ) {
             broadcastToUser(ctx.userId, {
               type: 'server.task.terminal',
               taskId,
               status: result.status,
               ...(result.summary ? { summary: result.summary } : {}),
             });
-          } else if (result.status === 'awaiting_user') {
+          } else if (result.status === 'awaiting_user' && templateAwaitingPersisted) {
             broadcastToUser(ctx.userId, {
               type: 'server.supercar.awaiting_user',
               taskId,
               question: result.awaitingQuestion ?? '请补充信息后继续。',
               awaitingKind: 'clarification',
             });
-          } else {
+          } else if (templatePersisted) {
             broadcastToUser(ctx.userId, {
               type: 'server.task.terminal',
               taskId,
@@ -2339,26 +2345,30 @@ export const tasksRouter = router({
             : []),
           ...generateExtraFailedChecks,
         ];
+        let generateTerminalPersisted = false;
+        let generateAwaitingPersisted = false;
 
         try {
           if (generateTerminalStatus === 'completed' && outcome.status === 'completed') {
-            await repo.persistVisionOutcome(taskId, {
+            const persisted = await repo.persistVisionOutcome(taskId, {
               status: 'completed',
               summary: outcome.summary,
               tickCount: 1,
               metadata,
             });
+            generateTerminalPersisted = persisted.persisted;
           } else if (generateTerminalStatus === 'partial_success' && outcome.status === 'completed') {
             // Codex Pack A3 — verifier flagged soft failure; row keeps
             // summary, status='partial_success' so the SPA renders a
             // yellow "结果可能不完整" banner above the answer.
-            await repo.persistVisionOutcome(taskId, {
+            const persisted = await repo.persistVisionOutcome(taskId, {
               status: 'partial_success',
               summary: outcome.summary,
               tickCount: 1,
               metadata,
               failedChecks: generateFailedChecks,
             });
+            generateTerminalPersisted = persisted.persisted;
           } else if (generateTerminalStatus === 'failed') {
             // Either the runner failed OR the verifier verdict
             // escalated a completed task to failed (hard_fail). Prefer
@@ -2368,13 +2378,14 @@ export const tasksRouter = router({
               outcome.status === 'failed'
                 ? (outcome.reason ?? 'generate: api failed')
                 : (failureSummary ?? '质量校验未通过');
-            await repo.persistVisionOutcome(taskId, {
+            const persisted = await repo.persistVisionOutcome(taskId, {
               status: 'failed',
               reason,
               tickCount: 1,
               metadata,
               failedChecks: generateFailedChecks,
             });
+            generateTerminalPersisted = persisted.persisted;
           } else if (outcome.status === 'awaiting_user') {
             // Expert-workflow intake park out of the generate runner.
             // Persist status='awaiting_user' + the visible question
@@ -2385,15 +2396,19 @@ export const tasksRouter = router({
             // `result.executionMode='generate'` (rather than going
             // through persistVisionOutcome) so the reply path can
             // tell this task is parked from generate, not supercar.
-            await ctx.db
-              .update(tasksTable)
-              .set({
-                status: 'awaiting_user',
-                awaitingQuestion: outcome.summary,
-                awaitingKind: 'clarification',
-                result: { ...metadata, executionMode: 'generate' as const },
-              })
-              .where(eq(tasksTable.externalId, taskId));
+            const awaitingPersist = await repo.persistAwaitingUser({
+              taskExternalId: taskId,
+              question: outcome.summary,
+              awaitingKind: 'clarification',
+              result: { ...metadata, executionMode: 'generate' as const },
+            });
+            generateAwaitingPersisted = awaitingPersist.persisted;
+            if (!awaitingPersist.persisted) {
+              ctx.logger.warn(
+                { taskId },
+                'generate: awaiting_user persist refused by state guard',
+              );
+            }
           }
         } catch (err) {
           ctx.logger.error({ err, taskId }, 'generate: persist failed');
@@ -2405,24 +2420,34 @@ export const tasksRouter = router({
         // actually ran (flag on); the awaiting_user branch never
         // produces a formatter run (non-terminal status filter
         // inside `runResponseLayerForLane`).
-        await stampResponseLayerColumns(
-          ctx.db,
-          taskId,
-          generateRl.responseLayerOriginal,
-          outcome.status === 'completed' ? outcome.summary : '',
-          generateRl.responseLayerMetadata,
-          ctx.logger,
-        );
+        if (generateTerminalPersisted) {
+          await stampResponseLayerColumns(
+            ctx.db,
+            taskId,
+            generateRl.responseLayerOriginal,
+            outcome.status === 'completed' ? outcome.summary : '',
+            generateRl.responseLayerMetadata,
+            ctx.logger,
+          );
+        }
 
         try {
-          if (generateTerminalStatus === 'completed' && outcome.status === 'completed') {
+          if (
+            generateTerminalPersisted &&
+            generateTerminalStatus === 'completed' &&
+            outcome.status === 'completed'
+          ) {
             broadcastToUser(ctx.userId, {
               type: 'server.task.terminal',
               taskId,
               status: 'completed',
               ...(outcome.summary ? { summary: outcome.summary } : {}),
             });
-          } else if (generateTerminalStatus === 'partial_success' && outcome.status === 'completed') {
+          } else if (
+            generateTerminalPersisted &&
+            generateTerminalStatus === 'partial_success' &&
+            outcome.status === 'completed'
+          ) {
             broadcastToUser(ctx.userId, {
               type: 'server.task.terminal',
               taskId,
@@ -2430,7 +2455,7 @@ export const tasksRouter = router({
               ...(outcome.summary ? { summary: outcome.summary } : {}),
               ...(generateFailedChecks.length > 0 ? { failedChecks: generateFailedChecks } : {}),
             });
-          } else if (generateTerminalStatus === 'failed') {
+          } else if (generateTerminalPersisted && generateTerminalStatus === 'failed') {
             const reason =
               outcome.status === 'failed'
                 ? outcome.reason
@@ -2442,7 +2467,7 @@ export const tasksRouter = router({
               ...(reason ? { reason } : {}),
               ...(generateFailedChecks.length > 0 ? { failedChecks: generateFailedChecks } : {}),
             });
-          } else if (outcome.status === 'awaiting_user') {
+          } else if (outcome.status === 'awaiting_user' && generateAwaitingPersisted) {
             broadcastToUser(ctx.userId, {
               type: 'server.supercar.awaiting_user',
               taskId,
@@ -2518,22 +2543,26 @@ export const tasksRouter = router({
       // loudly with the exact reason. SPA / translateError surfaces
       // a clear "Firecrawl 未配置" instead of "服务繁忙".
       if (!ctx.firecrawl) {
+        let missingFirecrawlPersisted = false;
         try {
-          await repo.persistVisionOutcome(taskId, {
+          const persisted = await repo.persistVisionOutcome(taskId, {
             status: 'failed',
             reason: 'scrape: Firecrawl 未配置（FIRECRAWL_API_KEY 缺失），任务无法执行',
             tickCount: 0,
           });
+          missingFirecrawlPersisted = persisted.persisted;
         } catch (err) {
           ctx.logger.warn({ err, taskId }, 'scrape: persist failed-row write threw');
         }
         try {
-          broadcastToUser(ctx.userId, {
-            type: 'server.task.terminal',
-            taskId,
-            status: 'failed',
-            reason: 'Firecrawl 未配置',
-          });
+          if (missingFirecrawlPersisted) {
+            broadcastToUser(ctx.userId, {
+              type: 'server.task.terminal',
+              taskId,
+              status: 'failed',
+              reason: 'Firecrawl 未配置',
+            });
+          }
         } catch {
           /* swallow — best-effort */
         }
@@ -2878,58 +2907,72 @@ export const tasksRouter = router({
             : []),
           ...scrapeExtraFailedChecks,
         ];
+        let scrapeTerminalPersisted = false;
 
         try {
           if (scrapeTerminalStatus === 'completed' && outcome.status === 'completed') {
-            await repo.persistVisionOutcome(taskId, {
+            const persisted = await repo.persistVisionOutcome(taskId, {
               status: 'completed',
               summary: outcome.summary,
               tickCount: 1,
               metadata,
             });
+            scrapeTerminalPersisted = persisted.persisted;
           } else if (scrapeTerminalStatus === 'partial_success' && outcome.status === 'completed') {
-            await repo.persistVisionOutcome(taskId, {
+            const persisted = await repo.persistVisionOutcome(taskId, {
               status: 'partial_success',
               summary: outcome.summary,
               tickCount: 1,
               metadata,
               failedChecks: scrapeFailedChecks,
             });
+            scrapeTerminalPersisted = persisted.persisted;
           } else {
             const reason =
               outcome.status === 'failed'
                 ? outcome.reason
                 : (failureSummary ?? '质量校验未通过');
-            await repo.persistVisionOutcome(taskId, {
+            const persisted = await repo.persistVisionOutcome(taskId, {
               status: 'failed',
               reason,
               tickCount: 1,
               metadata,
               failedChecks: scrapeFailedChecks,
             });
+            scrapeTerminalPersisted = persisted.persisted;
           }
         } catch (err) {
           ctx.logger.error({ err, taskId }, 'scrape: persist failed');
         }
 
-        await stampResponseLayerColumns(
-          ctx.db,
-          taskId,
-          scrapeRl.responseLayerOriginal,
-          outcome.status === 'completed' ? outcome.summary : '',
-          scrapeRl.responseLayerMetadata,
-          ctx.logger,
-        );
+        if (scrapeTerminalPersisted) {
+          await stampResponseLayerColumns(
+            ctx.db,
+            taskId,
+            scrapeRl.responseLayerOriginal,
+            outcome.status === 'completed' ? outcome.summary : '',
+            scrapeRl.responseLayerMetadata,
+            ctx.logger,
+          );
+        }
 
         try {
-          if (scrapeTerminalStatus === 'completed' && outcome.status === 'completed') {
+          if (
+            scrapeTerminalPersisted &&
+            scrapeTerminalStatus === 'completed' &&
+            outcome.status === 'completed'
+          ) {
             broadcastToUser(ctx.userId, {
               type: 'server.task.terminal',
               taskId,
               status: 'completed',
               ...(outcome.summary ? { summary: outcome.summary } : {}),
             });
-          } else if (scrapeTerminalStatus === 'partial_success' && outcome.status === 'completed') {
+          } else if (
+            scrapeTerminalPersisted &&
+            scrapeTerminalStatus === 'partial_success' &&
+            outcome.status === 'completed'
+          ) {
             broadcastToUser(ctx.userId, {
               type: 'server.task.terminal',
               taskId,
@@ -2937,7 +2980,7 @@ export const tasksRouter = router({
               ...(outcome.summary ? { summary: outcome.summary } : {}),
               ...(scrapeFailedChecks.length > 0 ? { failedChecks: scrapeFailedChecks } : {}),
             });
-          } else {
+          } else if (scrapeTerminalPersisted) {
             const reason =
               outcome.status === 'failed'
                 ? outcome.reason
@@ -3815,6 +3858,18 @@ export const tasksRouter = router({
             }
           },
           async onAwaitingUser(ev) {
+            let awaitingPersisted = false;
+            try {
+              const persisted = await repo.persistAwaitingUser({
+                taskExternalId: taskId,
+                question: ev.question,
+                awaitingKind: ev.awaitingKind,
+              });
+              awaitingPersisted = persisted.persisted;
+            } catch (err) {
+              ctx.logger.warn({ err, taskId }, 'supercar: persist awaiting_user state failed');
+            }
+            if (!awaitingPersisted) return;
             try {
               broadcastToUser(userId, {
                 type: 'server.supercar.awaiting_user',
@@ -3827,26 +3882,6 @@ export const tasksRouter = router({
               });
             } catch (err) {
               ctx.logger.warn({ err, taskId }, 'supercar: broadcast awaiting_user failed');
-            }
-            // Codex P3 follow-up — AWAIT the status flip before the
-            // agent loop suspends. Previously this was fire-and-forget
-            // (`.catch()` only), so a fast tasks.reply landing within
-            // the same event-loop tick could read the row before the
-            // status / awaitingQuestion / awaitingKind columns were
-            // committed, and fall through the "no parked supercar"
-            // branch. Awaiting here closes that race; safeCall on the
-            // agent side already awaits this callback's promise.
-            try {
-              await ctx.db
-                .update(tasksTable)
-                .set({
-                  status: 'awaiting_user',
-                  awaitingQuestion: ev.question,
-                  awaitingKind: ev.awaitingKind,
-                })
-                .where(eq(tasksTable.externalId, taskId));
-            } catch (err) {
-              ctx.logger.warn({ err, taskId }, 'supercar: persist awaiting_user state failed');
             }
             // Phase 1 follow-up — stamp `executionMode='browser'`,
             // `finalUrl`, AND `finalScreenshot` into result on park.
@@ -4013,56 +4048,22 @@ export const tasksRouter = router({
         void (async (): Promise<void> => {
           const reason = '任务执行超时，已自动停止。建议：简化任务描述后重试。';
           try {
-            const [row] = await ctx.db
-              .select({
-                status: tasksTable.status,
-                result: tasksTable.result,
-              })
-              .from(tasksTable)
-              .where(eq(tasksTable.externalId, taskId))
-              .limit(1);
-            if (!row) return;
-            if (
-              row.status === 'completed' ||
-              row.status === 'partial_success' ||
-              row.status === 'failed' ||
-              row.status === 'cancelled' ||
-              row.status === 'awaiting_user'
-            ) {
-              return;
-            }
-            const normalizedResult = normalizeOutput(row.result);
-            const prevResult =
-              normalizedResult && typeof normalizedResult === 'object'
-                ? (normalizedResult as Record<string, unknown>)
-                : {};
-            watchdogFinalized = true;
-            await ctx.db
-              .update(tasksTable)
-              .set({
-                status: 'failed',
-                errorCode: 'SUPERCAR_WATCHDOG_TIMEOUT',
-                errorMessage: reason,
-                result: {
-                  ...prevResult,
-                  reason,
-                  metadata: {
-                    ...((prevResult.metadata &&
-                    typeof prevResult.metadata === 'object'
-                      ? prevResult.metadata
-                      : {}) as Record<string, unknown>),
-                    watchdog: true,
-                  },
-                },
-                completedAt: new Date(),
-              })
-              .where(eq(tasksTable.externalId, taskId));
-            broadcastToUser(userId, {
-              type: 'server.task.terminal',
-              taskId,
+            const persisted = await repo.persistVisionOutcome(taskId, {
               status: 'failed',
               reason,
+              tickCount: 0,
+              errorCode: 'SUPERCAR_WATCHDOG_TIMEOUT',
+              metadata: { executionMode: 'browser', watchdog: true },
             });
+            watchdogFinalized = persisted.persisted;
+            if (persisted.persisted) {
+              broadcastToUser(userId, {
+                type: 'server.task.terminal',
+                taskId,
+                status: 'failed',
+                reason,
+              });
+            }
           } catch (err) {
             watchdogFinalized = false;
             ctx.logger.warn(
@@ -4742,29 +4743,25 @@ export const tasksRouter = router({
             if (supercarStateTransition.kind === 'waiting_user') {
               try {
                 const finalFields = finalStatePersistFields(finalState);
-                await ctx.db
-                  .update(tasksTable)
-                  .set({
-                    status: 'awaiting_user',
-                    awaitingQuestion: supercarStateTransition.question,
-                    awaitingKind: supercarStateTransition.awaitingKind,
-                    pauseReason: null,
-                    errorCode: null,
-                    errorMessage: null,
-                    result: {
-                      ...(metadata ?? {}),
-                      executionMode:
-                        typeof metadata?.executionMode === 'string'
-                          ? metadata.executionMode
-                          : 'browser',
-                      ...finalFields,
-                    },
-                  })
-                  .where(eq(tasksTable.externalId, taskId));
-                broadcastToUser(userId, buildSupercarWaitingUserMessage({
-                  taskId,
-                  transition: supercarStateTransition,
-                }));
+                const waitingPersisted = await repo.persistAwaitingUser({
+                  taskExternalId: taskId,
+                  question: supercarStateTransition.question,
+                  awaitingKind: supercarStateTransition.awaitingKind,
+                  result: {
+                    ...(metadata ?? {}),
+                    executionMode:
+                      typeof metadata?.executionMode === 'string'
+                        ? metadata.executionMode
+                        : 'browser',
+                    ...finalFields,
+                  },
+                });
+                if (waitingPersisted.persisted) {
+                  broadcastToUser(userId, buildSupercarWaitingUserMessage({
+                    taskId,
+                    transition: supercarStateTransition,
+                  }));
+                }
               } catch (err) {
                 ctx.logger.warn(
                   { err, taskId },
@@ -5052,10 +5049,14 @@ export const tasksRouter = router({
           runFn: dispatchToBrave,
           onStart: async (): Promise<void> => {
             try {
-              await ctx.db
-                .update(tasksTable)
-                .set({ status: 'executing', startedAt: new Date() })
-                .where(eq(tasksTable.externalId, taskId));
+              const started = await repo.markQueuedTaskExecuting(taskId);
+              if (!started.persisted) {
+                ctx.logger.warn(
+                  { taskId },
+                  'task-queue: onStart refused because task was no longer queued',
+                );
+                throw new Error('task was no longer queued');
+              }
               // No queued→executing WS frame — supercar's own
               // `server.task.plan` / step events fire next from the
               // dispatched runFn, and the SPA's task store reads the
@@ -5075,20 +5076,18 @@ export const tasksRouter = router({
               'task-queue: queue timeout — marking failed',
             );
             try {
-              await ctx.db
-                .update(tasksTable)
-                .set({
-                  status: 'failed',
-                  errorMessage: 'queue timeout: 排队等待时间过长，请稍后重试',
-                  completedAt: new Date(),
-                })
-                .where(eq(tasksTable.externalId, taskId));
-              broadcastToUser(ctx.userId, {
-                type: 'server.task.terminal',
+              const failed = await repo.markQueuedTaskFailed(
                 taskId,
-                status: 'failed',
-                reason: 'queue timeout',
-              });
+                'queue timeout: 排队等待时间过长，请稍后重试',
+              );
+              if (failed.persisted) {
+                broadcastToUser(ctx.userId, {
+                  type: 'server.task.terminal',
+                  taskId,
+                  status: 'failed',
+                  reason: 'queue timeout',
+                });
+              }
             } catch (err) {
               ctx.logger.warn(
                 { err: err instanceof Error ? err.message : String(err), taskId },
@@ -5103,14 +5102,7 @@ export const tasksRouter = router({
             'task-queue: enqueue rejected (queue at depth cap)',
           );
           try {
-            await ctx.db
-              .update(tasksTable)
-              .set({
-                status: 'failed',
-                errorMessage: enqueueResult.reason,
-                completedAt: new Date(),
-              })
-              .where(eq(tasksTable.externalId, taskId));
+            await repo.markQueuedTaskFailed(taskId, enqueueResult.reason);
           } catch (err) {
             ctx.logger.warn(
               { err: err instanceof Error ? err.message : String(err), taskId },
@@ -6996,48 +6988,51 @@ export const tasksRouter = router({
         };
         try {
           if (outcome.status === 'completed') {
-            await repo.persistVisionOutcome(input.taskId, {
+            const persisted = await repo.persistVisionOutcome(input.taskId, {
               status: 'completed',
               summary: outcome.summary,
               tickCount: 1,
               metadata,
             });
-            broadcastToUser(ctx.userId, {
-              type: 'server.task.terminal',
-              taskId: input.taskId,
-              status: 'completed',
-              ...(outcome.summary ? { summary: outcome.summary } : {}),
-            });
+            if (persisted.persisted) {
+              broadcastToUser(ctx.userId, {
+                type: 'server.task.terminal',
+                taskId: input.taskId,
+                status: 'completed',
+                ...(outcome.summary ? { summary: outcome.summary } : {}),
+              });
+            }
           } else if (outcome.status === 'awaiting_user') {
             // Park again — model still wants more info.
-            await ctx.db
-              .update(tasksTable)
-              .set({
-                status: 'awaiting_user',
-                awaitingQuestion: outcome.summary,
-                awaitingKind: 'clarification',
-                result: { ...metadata, executionMode: 'generate' as const },
-              })
-              .where(eq(tasksTable.externalId, input.taskId));
-            broadcastToUser(ctx.userId, {
-              type: 'server.supercar.awaiting_user',
-              taskId: input.taskId,
+            const persisted = await repo.persistAwaitingUser({
+              taskExternalId: input.taskId,
               question: outcome.summary,
               awaitingKind: 'clarification',
+              result: { ...metadata, executionMode: 'generate' as const },
             });
+            if (persisted.persisted) {
+              broadcastToUser(ctx.userId, {
+                type: 'server.supercar.awaiting_user',
+                taskId: input.taskId,
+                question: outcome.summary,
+                awaitingKind: 'clarification',
+              });
+            }
           } else {
-            await repo.persistVisionOutcome(input.taskId, {
+            const persisted = await repo.persistVisionOutcome(input.taskId, {
               status: 'failed',
               reason: outcome.reason ?? 'generate-resume: api failed',
               tickCount: 1,
               metadata,
             });
-            broadcastToUser(ctx.userId, {
-              type: 'server.task.terminal',
-              taskId: input.taskId,
-              status: 'failed',
-              ...(outcome.reason ? { reason: outcome.reason } : {}),
-            });
+            if (persisted.persisted) {
+              broadcastToUser(ctx.userId, {
+                type: 'server.task.terminal',
+                taskId: input.taskId,
+                status: 'failed',
+                ...(outcome.reason ? { reason: outcome.reason } : {}),
+              });
+            }
           }
         } catch (err) {
           ctx.logger.error(
