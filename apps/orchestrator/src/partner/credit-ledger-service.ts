@@ -14,6 +14,7 @@ const CREDIT_BUCKET_VALUES: readonly CreditBucket[] = [
   'frozen',
 ];
 const LEDGER_DIRECTION_VALUES: readonly LedgerDirection[] = ['credit', 'debit'];
+const MYSQL_UNSIGNED_INT_MAX = 4_294_967_295;
 
 export interface LedgerSummaryInput {
   bucket: string;
@@ -59,7 +60,9 @@ export function summarizeLedgerEntries(entries: readonly LedgerSummaryInput[]): 
     if (entry.status !== 'posted') continue;
 
     const key = SUMMARY_KEY_BY_BUCKET.get(entry.bucket);
-    if (!key) continue;
+    if (!key) {
+      throw new RangeError('ledger bucket must be a known credit bucket');
+    }
 
     if (entry.direction === 'credit') {
       summary[key] += entry.amountCreditCents;
@@ -73,9 +76,9 @@ export function summarizeLedgerEntries(entries: readonly LedgerSummaryInput[]): 
   return summary;
 }
 
-function normalizeAmount(value: number | undefined, fieldName: string): number {
+function normalizeAmount(value: number | undefined, fieldName: string, maxValue = Number.MAX_SAFE_INTEGER): number {
   const amount = value ?? 0;
-  if (!Number.isSafeInteger(amount) || amount < 0) {
+  if (!Number.isSafeInteger(amount) || amount < 0 || amount > maxValue) {
     throw new RangeError(`${fieldName} must be a non-negative safe integer`);
   }
   return amount;
@@ -97,7 +100,7 @@ function normalizeOptionalPositiveSafeInteger(
 }
 
 function normalizeBoundedString(value: string, fieldName: string, maxLength: number): string {
-  if (typeof value !== 'string' || value.length === 0 || value.length > maxLength) {
+  if (typeof value !== 'string' || value.trim().length === 0 || value.length > maxLength) {
     throw new RangeError(`${fieldName} must be a non-empty string with length <= ${maxLength}`);
   }
   return value;
@@ -147,7 +150,7 @@ function normalizePostEntryInput(input: {
     entryType: normalizeBoundedString(input.entryType, 'entryType', 48),
     direction: normalizeDirection(input.direction),
     bucket: normalizeBucket(input.bucket),
-    amountCreditCents: normalizeAmount(input.amountCreditCents, 'amountCreditCents'),
+    amountCreditCents: normalizeAmount(input.amountCreditCents, 'amountCreditCents', MYSQL_UNSIGNED_INT_MAX),
     amountApiUnits: normalizeAmount(input.amountApiUnits, 'amountApiUnits'),
     status: 'posted',
     idempotencyKey: normalizeBoundedString(input.idempotencyKey, 'idempotencyKey', 160),
@@ -220,6 +223,7 @@ export class CreditLedgerService {
   }
 
   async summarizeUser(userId: number): Promise<LedgerSummary> {
+    const normalizedUserId = normalizePositiveSafeInteger(userId, 'userId');
     const rows = await this.db
       .select({
         bucket: holaCreditLedgerEntries.bucket,
@@ -228,7 +232,7 @@ export class CreditLedgerService {
         status: holaCreditLedgerEntries.status,
       })
       .from(holaCreditLedgerEntries)
-      .where(eq(holaCreditLedgerEntries.userId, userId));
+      .where(eq(holaCreditLedgerEntries.userId, normalizedUserId));
 
     return summarizeLedgerEntries(rows);
   }

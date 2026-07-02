@@ -1,3 +1,4 @@
+import { inspect } from 'node:util';
 import { describe, expect, it } from 'vitest';
 import type { DB } from '../db/client.js';
 import {
@@ -27,6 +28,7 @@ type FakeLedgerInsert = Omit<FakeLedgerRow, 'id' | 'createdAt'>;
 class FakeCreditLedgerDb {
   readonly rows: FakeLedgerRow[];
   readonly insertedValues: FakeLedgerInsert[] = [];
+  lastWherePredicateText: string | null = null;
   private nextId: number;
   private lastIdempotencyKey: string | null = null;
 
@@ -63,11 +65,19 @@ class FakeCreditLedgerDb {
   select(_selection?: unknown) {
     return {
       from: (_table: unknown) => ({
-        where: (_predicate: unknown) => ({
+        where: (predicate: unknown) => ({
           limit: async (count: number) => {
-            if (!this.lastIdempotencyKey) return [];
+            const predicateText = inspect(predicate, { depth: 6, getters: true });
+            this.lastWherePredicateText = predicateText;
+            const readbackKey =
+              this.lastIdempotencyKey &&
+              predicateText.includes('idempotency_key') &&
+              predicateText.includes(this.lastIdempotencyKey)
+                ? this.lastIdempotencyKey
+                : null;
+            if (!readbackKey) return [];
             return this.rows
-              .filter((row) => row.idempotencyKey === this.lastIdempotencyKey)
+              .filter((row) => row.idempotencyKey === readbackKey)
               .slice(0, count);
           },
         }),
@@ -124,11 +134,20 @@ describe('CreditLedgerService pure summary', () => {
     });
   });
 
-  it('ignores unknown buckets', () => {
-    const summary = summarizeLedgerEntries([
-      { bucket: 'toString', direction: 'credit', amountCreditCents: 42_00, status: 'posted' },
-    ]);
-    expect(summary).toEqual({
+  it('throws for unknown buckets on posted rows', () => {
+    expect(() =>
+      summarizeLedgerEntries([
+        { bucket: 'toString', direction: 'credit', amountCreditCents: 42_00, status: 'posted' },
+      ]),
+    ).toThrow(RangeError);
+  });
+
+  it('ignores non-posted rows without validating bucket or direction', () => {
+    expect(
+      summarizeLedgerEntries([
+        { bucket: 'toString', direction: 'hold', amountCreditCents: 42_00, status: 'voided' },
+      ]),
+    ).toEqual({
       availableCreditCents: 0,
       lockedCreditCents: 0,
       withdrawableCreditCents: 0,
@@ -172,6 +191,8 @@ describe('CreditLedgerService postEntry', () => {
       status: 'posted',
       idempotencyKey: 'ledger-idem-1',
     });
+    expect(fakeDb.lastWherePredicateText).toContain('idempotency_key');
+    expect(fakeDb.lastWherePredicateText).toContain('ledger-idem-1');
   });
 
   it('returns an existing row for the same idempotency key and same payload', async () => {
@@ -215,8 +236,11 @@ describe('CreditLedgerService postEntry', () => {
   it.each([
     ['negative amount', { amountCreditCents: -1 }],
     ['fraction amount', { amountApiUnits: 1.5 }],
+    ['credit cents beyond MySQL unsigned int', { amountCreditCents: 4_294_967_296 }],
     ['bad userId', { userId: 0 }],
     ['empty idempotencyKey', { idempotencyKey: '' }],
+    ['whitespace-only idempotencyKey', { idempotencyKey: '   ' }],
+    ['whitespace-only entryType', { entryType: '   ' }],
     ['bad bucket', { bucket: 'mystery' }],
     ['bad direction', { direction: 'hold' }],
   ])('throws RangeError for %s', async (_name, patch) => {
@@ -225,5 +249,11 @@ describe('CreditLedgerService postEntry', () => {
     const input = { ...validPostInput, ...patch } as Parameters<CreditLedgerService['postEntry']>[0];
 
     await expect(service.postEntry(input)).rejects.toBeInstanceOf(RangeError);
+  });
+
+  it('throws RangeError for an invalid summarizeUser userId', async () => {
+    const service = new CreditLedgerService(new FakeCreditLedgerDb().asDB());
+
+    await expect(service.summarizeUser(0)).rejects.toBeInstanceOf(RangeError);
   });
 });
