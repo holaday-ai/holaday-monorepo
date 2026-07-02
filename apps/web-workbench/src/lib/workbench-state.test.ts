@@ -50,10 +50,13 @@ describe('workbench state helpers', () => {
     ).toBe(true);
   });
 
-  it('allows follow-up chips for all terminal statuses including partial success', () => {
+  it('allows follow-up only for terminal results with usable context', () => {
     expect(
       followUpTargetForTask({
-        selectedTask: task({ status: 'partial_success' }),
+        selectedTask: task({
+          status: 'completed',
+          resultText: '已完成网页检索并整理结果。',
+        }),
         selectedTaskId: 'tsk_test',
         selectedNeedsUser: false,
       }),
@@ -61,6 +64,36 @@ describe('workbench state helpers', () => {
       taskId: 'tsk_test',
       title: '打开 https://example.com 并总结结果',
     });
+    expect(
+      followUpTargetForTask({
+        selectedTask: task({
+          status: 'partial_success',
+          finalUrl: 'https://example.com/result',
+        }),
+        selectedTaskId: 'tsk_test',
+        selectedNeedsUser: false,
+      }),
+    ).toEqual({
+      taskId: 'tsk_test',
+      title: '打开 https://example.com 并总结结果',
+    });
+  });
+
+  it('suppresses follow-up for failed, cancelled, or empty terminal tasks', () => {
+    for (const selectedTask of [
+      task({ status: 'failed', resultText: 'Browser timeout' }),
+      task({ status: 'cancelled', resultText: '已取消，未产生任何费用。' }),
+      task({ status: 'completed' }),
+      task({ status: 'partial_success' }),
+    ]) {
+      expect(
+        followUpTargetForTask({
+          selectedTask,
+          selectedTaskId: 'tsk_test',
+          selectedNeedsUser: false,
+        }),
+      ).toBeNull();
+    }
   });
 
   it('suppresses follow-up chips for paused tasks even when they have a result', () => {

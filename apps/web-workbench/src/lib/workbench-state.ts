@@ -63,6 +63,18 @@ export function isWorkbenchTerminalTask(task: UiTask): boolean {
   }).lifecycle === 'terminal';
 }
 
+export function terminalTaskHasFollowUpContext(task: UiTask): boolean {
+  if (task.status !== 'completed' && task.status !== 'partial_success') {
+    return false;
+  }
+  return Boolean(
+    task.resultText?.trim() ||
+      task.finalUrl?.trim() ||
+      task.finalScreenshot ||
+      (task.attachments?.length ?? 0) > 0,
+  );
+}
+
 export function followUpTargetForTask(input: {
   selectedTask: UiTask | null;
   selectedTaskId: string | null;
@@ -72,6 +84,7 @@ export function followUpTargetForTask(input: {
   if (!selectedTask || !selectedTaskId) return null;
   if (input.selectedNeedsUser) return null;
   if (!isWorkbenchTerminalTask(selectedTask)) return null;
+  if (!terminalTaskHasFollowUpContext(selectedTask)) return null;
 
   return {
     taskId: selectedTaskId,
