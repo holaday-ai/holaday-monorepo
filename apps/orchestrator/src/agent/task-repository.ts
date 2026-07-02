@@ -106,7 +106,7 @@ export class TaskRepository {
     next: TaskState,
     resultPayload?: unknown,
     rawInputStatus?: 'ok' | 'error' | 'awaiting_user' | 'skipped',
-  ): Promise<void> {
+  ): Promise<{ persisted: boolean }> {
     if (prev.taskId !== next.taskId) {
       throw new Error('applyStepResult requires matching taskIds');
     }
@@ -132,6 +132,7 @@ export class TaskRepository {
     // Detect pause due to retries_exhausted (step failed terminally, task paused).
     const isRetriesExhausted = next.status === 'paused' && next.pauseReason === 'retries_exhausted';
 
+    let persisted = true;
     await this.db.transaction(async (tx) => {
       const taskUpdate: Partial<typeof tasks.$inferInsert> = { status: next.status };
       if (isTaskTerminalStatus(next.status)) {
@@ -148,6 +149,7 @@ export class TaskRepository {
         .where(and(eq(tasks.id, taskRowId), eq(tasks.status, prev.status)));
       const taskUpdateAffected = extractMysqlAffectedRows(taskUpdateResult);
       if (taskUpdateAffected === 0) {
+        persisted = false;
         return;
       }
 
@@ -214,13 +216,17 @@ export class TaskRepository {
         payload: resultPayload ?? null,
       });
     });
+    return { persisted };
   }
 
   /**
    * User pause / resume and quota-exceeded pause are transitions that do NOT
    * correspond to a step result frame. This applies them with one SQL batch.
    */
-  async applyControlTransition(prev: TaskState, next: TaskState): Promise<void> {
+  async applyControlTransition(
+    prev: TaskState,
+    next: TaskState,
+  ): Promise<{ persisted: boolean }> {
     if (prev.taskId !== next.taskId) {
       throw new Error('applyControlTransition requires matching taskIds');
     }
@@ -231,6 +237,7 @@ export class TaskRepository {
       .limit(1);
     if (!taskRow) throw new Error(`task ${next.taskId} not found in DB`);
 
+    let persisted = true;
     await this.db.transaction(async (tx) => {
       const update: Partial<typeof tasks.$inferInsert> = {
         status: next.status,
@@ -245,6 +252,7 @@ export class TaskRepository {
         .where(and(eq(tasks.id, taskRow.id), eq(tasks.status, prev.status)));
       const affected = extractMysqlAffectedRows(updateResult);
       if (affected === 0) {
+        persisted = false;
         return;
       }
 
@@ -256,6 +264,36 @@ export class TaskRepository {
         payload: next.pauseReason ? { reason: next.pauseReason } : null,
       });
     });
+    return { persisted };
+  }
+
+  async markAwaitingReplyResumed(taskExternalId: string): Promise<{ persisted: boolean }> {
+    const result = await this.db
+      .update(tasks)
+      .set({
+        status: 'executing',
+        awaitingQuestion: null,
+        awaitingKind: null,
+      })
+      .where(and(eq(tasks.externalId, taskExternalId), eq(tasks.status, 'awaiting_user')));
+    return { persisted: extractMysqlAffectedRows(result) > 0 };
+  }
+
+  async markAwaitingReplyCompleted(
+    taskExternalId: string,
+    resultPayload: Record<string, unknown>,
+  ): Promise<{ persisted: boolean }> {
+    const result = await this.db
+      .update(tasks)
+      .set({
+        status: 'completed',
+        awaitingQuestion: null,
+        awaitingKind: null,
+        result: resultPayload,
+        completedAt: new Date(),
+      })
+      .where(and(eq(tasks.externalId, taskExternalId), eq(tasks.status, 'awaiting_user')));
+    return { persisted: extractMysqlAffectedRows(result) > 0 };
   }
 
   /**
@@ -467,7 +505,7 @@ export class TaskRepository {
    * No step row status change (the step is still "in flight"; client will
    * emit more step.results as it processes the batch).
    */
-  async applyBatchApprove(prev: TaskState, next: TaskState): Promise<void> {
+  async applyBatchApprove(prev: TaskState, next: TaskState): Promise<{ persisted: boolean }> {
     if (prev.taskId !== next.taskId) {
       throw new Error('applyBatchApprove requires matching taskIds');
     }
@@ -480,11 +518,17 @@ export class TaskRepository {
 
     const current = next.plan[next.cursor];
 
+    let persisted = true;
     await this.db.transaction(async (tx) => {
-      await tx
+      const taskUpdateResult = await tx
         .update(tasks)
         .set({ status: next.status, pauseReason: null })
-        .where(eq(tasks.id, taskRow.id));
+        .where(and(eq(tasks.id, taskRow.id), eq(tasks.status, prev.status)));
+      const affected = extractMysqlAffectedRows(taskUpdateResult);
+      if (affected === 0) {
+        persisted = false;
+        return;
+      }
 
       if (current) {
         await tx
@@ -507,6 +551,7 @@ export class TaskRepository {
             : null,
       });
     });
+    return { persisted };
   }
 
   /**

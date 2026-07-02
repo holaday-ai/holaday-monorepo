@@ -15,7 +15,7 @@ import { injectResolvedUrl, resolveIntentUrl } from '../../agent/url-resolver.js
 import { env as appEnv } from '../../config/env.js';
 import { buildBaiduSmokePlan } from '../../agent/smoke-plans.js';
 import { friendlyTaskFailureReason } from '../../agent/task-failure-copy.js';
-import type { PlannedStep } from '../../agent/task-controller.js';
+import type { PlannedStep, TaskState } from '../../agent/task-controller.js';
 import { TaskController } from '../../agent/task-controller.js';
 import { DrizzleLlmCallRecorder } from '../../agent/llm-call-recorder.js';
 import { TaskRepository } from '../../agent/task-repository.js';
@@ -5679,7 +5679,13 @@ export const tasksRouter = router({
       });
     }
 
-    await repo.applyControlTransition(prev, next);
+    const persisted = await repo.applyControlTransition(prev, next);
+    if (!persisted.persisted) {
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message: 'task state changed; refresh and retry',
+      });
+    }
     updateTaskStateForUser(ctx.userId, next);
     for (const eff of effects) {
       if (eff.kind === 'send') broadcastToUser(ctx.userId, eff.message);
@@ -5699,7 +5705,13 @@ export const tasksRouter = router({
       });
     }
 
-    await repo.applyControlTransition(prev, next);
+    const persisted = await repo.applyControlTransition(prev, next);
+    if (!persisted.persisted) {
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message: 'task state changed; refresh and retry',
+      });
+    }
     updateTaskStateForUser(ctx.userId, next);
     for (const eff of effects) {
       if (eff.kind === 'send') broadcastToUser(ctx.userId, eff.message);
@@ -5747,11 +5759,29 @@ export const tasksRouter = router({
       //                           marked completed)
       const batchApprove = prev.pendingConfirm?.kind === 'batch' && decision === 'approve';
       if (next.status === 'cancelled') {
-        await repo.applyControlTransition(prev, next);
+        const persisted = await repo.applyControlTransition(prev, next);
+        if (!persisted.persisted) {
+          throw new TRPCError({
+            code: 'PRECONDITION_FAILED',
+            message: 'task state changed; refresh and retry',
+          });
+        }
       } else if (batchApprove) {
-        await repo.applyBatchApprove(prev, next);
+        const persisted = await repo.applyBatchApprove(prev, next);
+        if (!persisted.persisted) {
+          throw new TRPCError({
+            code: 'PRECONDITION_FAILED',
+            message: 'task state changed; refresh and retry',
+          });
+        }
       } else {
-        await repo.applyStepResult(prev, next, { confirmed: true, decision });
+        const persisted = await repo.applyStepResult(prev, next, { confirmed: true, decision });
+        if (!persisted.persisted) {
+          throw new TRPCError({
+            code: 'PRECONDITION_FAILED',
+            message: 'task state changed; refresh and retry',
+          });
+        }
       }
       updateTaskStateForUser(ctx.userId, next);
       for (const eff of effects) {
@@ -6626,14 +6656,15 @@ export const tasksRouter = router({
       const supercarHasHandle = hasParkedSupercarHandle(input.taskId);
       if (supercarHasHandle) {
         try {
-          await ctx.db
-            .update(tasksTable)
-            .set({
-              status: 'executing',
-              awaitingQuestion: null,
-              awaitingKind: null,
-            })
-            .where(eq(tasksTable.externalId, input.taskId));
+          const repo = new TaskRepository(ctx.db);
+          const persisted = await repo.markAwaitingReplyResumed(input.taskId);
+          if (!persisted.persisted) {
+            ctx.logger.warn(
+              { taskId: input.taskId },
+              'reply: awaiting_user → executing guard refused; not delivering reply',
+            );
+            return { ok: false, state: 'persistFailed' as const };
+          }
         } catch (err) {
           ctx.logger.error(
             { err, taskId: input.taskId },
@@ -6793,27 +6824,28 @@ export const tasksRouter = router({
         // worse UX than ideal but never blocks the user, and matches
         // the prior behaviour for partial failure.
         try {
-          await ctx.db
-            .update(tasksTable)
-            .set({
-              status: 'completed',
-              awaitingQuestion: null,
-              awaitingKind: null,
-              result: {
-                ...(prevResult ?? {}),
-                executionMode: 'generate',
-                handoffSuggestion: 'browser',
-                combinedIntent,
-                summary: handoffNotice,
-              },
-              completedAt: new Date(),
-            })
-            .where(eq(tasksTable.externalId, input.taskId));
+          const parentResult = {
+            ...(prevResult ?? {}),
+            executionMode: 'generate',
+            handoffSuggestion: 'browser',
+            combinedIntent,
+            summary: handoffNotice,
+          };
+          const repo = new TaskRepository(ctx.db);
+          const persisted = await repo.markAwaitingReplyCompleted(input.taskId, parentResult);
+          if (!persisted.persisted) {
+            ctx.logger.warn(
+              { taskId: input.taskId },
+              'reply: handoff parent-flip guard refused; not creating handoff task',
+            );
+            return { ok: false, state: 'persistFailed' as const };
+          }
         } catch (err) {
           ctx.logger.error(
             { err, taskId: input.taskId },
             'reply: handoff parent-flip persist failed',
           );
+          return { ok: false, state: 'persistFailed' as const };
         }
 
         if (!handoffTaskId) {
@@ -6908,14 +6940,14 @@ export const tasksRouter = router({
       const newWorkflowPreamble = newWorkflow?.promptPreamble ?? '';
       const effectiveCombined =
         (newWorkflowPreamble ? `${newWorkflowPreamble}\n` : '') + combinedIntent;
-      await ctx.db
-        .update(tasksTable)
-        .set({
-          status: 'executing',
-          awaitingQuestion: null,
-          awaitingKind: null,
-        })
-        .where(eq(tasksTable.externalId, input.taskId));
+      const resumePersisted = await repo.markAwaitingReplyResumed(input.taskId);
+      if (!resumePersisted.persisted) {
+        ctx.logger.warn(
+          { taskId: input.taskId },
+          'reply: generate resume guard refused; not dispatching runner',
+        );
+        return { ok: false, state: 'persistFailed' as const };
+      }
       const resumeStartedAt = Date.now();
       void (async () => {
         let outcome;
@@ -7063,26 +7095,26 @@ export const tasksRouter = router({
       }
 
       // Auth/captcha/permission waits are durable: the supercar loop parks the
-      // DB row in awaiting_user and releases its in-memory abort handle. Do the
-      // control transition directly against the owned task row instead of
-      // relying on rehydrated in-memory state, which can lag behind the DB.
-      await ctx.db.transaction(async (tx) => {
-        await tx
-          .update(tasksTable)
-          .set({
-            status: 'cancelled',
-            pauseReason: null,
-            completedAt: new Date(),
-          })
-          .where(and(eq(tasksTable.id, taskRow.id), inArray(tasksTable.status, cancellableStatuses)));
-        await tx.insert(taskEvents).values({
-          externalId: newExternalId('taskEvent'),
-          taskId: taskRow.id,
-          type: 'task.cancelled',
-          actor: 'user',
-          payload: null,
-        });
-      });
+      // DB row in awaiting_user and releases its in-memory abort handle. Run the
+      // same guarded control transition as pause/resume so a stale read cannot
+      // produce a fake task.cancelled event or terminal broadcast.
+      const repo = new TaskRepository(ctx.db);
+      const prev: TaskState = {
+        taskId: input.taskId,
+        status: taskRow.status as TaskState['status'],
+        plan: [],
+        cursor: 0,
+        pendingConfirm: null,
+      };
+      const next: TaskState = {
+        ...prev,
+        status: 'cancelled',
+        pauseReason: null,
+      };
+      const persisted = await repo.applyControlTransition(prev, next);
+      if (!persisted.persisted) {
+        return { ok: false, state: 'stale' as const };
+      }
       broadcastToUser(ctx.userId, {
         type: 'server.task.terminal',
         taskId: input.taskId,

@@ -392,6 +392,34 @@ describe('TaskRepository task terminal state persistence', () => {
     expect(captured.eventPayloads).toHaveLength(0);
   });
 
+  it('applyStepResult reports when the guarded task update is refused', async () => {
+    const { db } = fakeDbForStateTransitions(0);
+    const repo = new TaskRepository(db);
+    const next: TaskState = {
+      ...baseState,
+      status: 'completed',
+      cursor: 1,
+    };
+
+    const result = await repo.applyStepResult(baseState, next, { summary: 'stale done' });
+
+    expect(result.persisted).toBe(false);
+  });
+
+  it('applyStepResult reports when the guarded task update is persisted', async () => {
+    const { db } = fakeDbForStateTransitions(1);
+    const repo = new TaskRepository(db);
+    const next: TaskState = {
+      ...baseState,
+      status: 'completed',
+      cursor: 1,
+    };
+
+    const result = await repo.applyStepResult(baseState, next, { summary: 'done' });
+
+    expect(result.persisted).toBe(true);
+  });
+
   it('applyControlTransition treats partial_success as terminal for completedAt and event ledger', async () => {
     const { db, captured } = fakeDbForStateTransitions();
     const repo = new TaskRepository(db);
@@ -442,5 +470,203 @@ describe('TaskRepository task terminal state persistence', () => {
 
     expect(captured.updatePayloads).toHaveLength(1);
     expect(captured.eventPayloads).toHaveLength(0);
+  });
+
+  it('applyControlTransition reports when the guarded task update is refused', async () => {
+    const { db } = fakeDbForStateTransitions(0);
+    const repo = new TaskRepository(db);
+    const next: TaskState = {
+      ...baseState,
+      status: 'paused',
+      pauseReason: 'user',
+    };
+
+    const result = await repo.applyControlTransition(baseState, next);
+
+    expect(result.persisted).toBe(false);
+  });
+
+  it('applyControlTransition reports when the guarded task update is persisted', async () => {
+    const { db } = fakeDbForStateTransitions(1);
+    const repo = new TaskRepository(db);
+    const next: TaskState = {
+      ...baseState,
+      status: 'paused',
+      pauseReason: 'user',
+    };
+
+    const result = await repo.applyControlTransition(baseState, next);
+
+    expect(result.persisted).toBe(true);
+  });
+
+  it('applyBatchApprove guards updates with the previous DB status', async () => {
+    const { db, captured } = fakeDbForStateTransitions();
+    const repo = new TaskRepository(db);
+    const prev: TaskState = {
+      taskId: 'tsk_state_machine',
+      status: 'awaiting_user',
+      plan: [{ id: 'stp_batch', kind: 'click', risk: 'high' }],
+      cursor: 0,
+      pendingConfirm: {
+        kind: 'batch',
+        stepId: 'stp_batch',
+        batchIndex: 0,
+        batchTotal: 2,
+        items: [{ label: 'First draft', preview: 'Send first draft' }],
+        risk: 'high',
+      },
+    };
+    const next: TaskState = {
+      ...prev,
+      status: 'executing',
+      pendingConfirm: null,
+    };
+
+    await repo.applyBatchApprove(prev, next);
+
+    const params = collectDrizzleParamValues(captured.whereClauses.at(0));
+    expect(params).toEqual(expect.arrayContaining([1, 'awaiting_user']));
+  });
+
+  it('applyBatchApprove skips step and event writes when the previous status guard refuses the task update', async () => {
+    const { db, captured } = fakeDbForStateTransitions(0);
+    const repo = new TaskRepository(db);
+    const prev: TaskState = {
+      taskId: 'tsk_state_machine',
+      status: 'awaiting_user',
+      plan: [{ id: 'stp_batch', kind: 'click', risk: 'high' }],
+      cursor: 0,
+      pendingConfirm: {
+        kind: 'batch',
+        stepId: 'stp_batch',
+        batchIndex: 0,
+        batchTotal: 2,
+        items: [{ label: 'First draft', preview: 'Send first draft' }],
+        risk: 'high',
+      },
+    };
+    const next: TaskState = {
+      ...prev,
+      status: 'executing',
+      pendingConfirm: null,
+    };
+
+    await repo.applyBatchApprove(prev, next);
+
+    expect(captured.updatePayloads).toHaveLength(1);
+    expect(captured.eventPayloads).toHaveLength(0);
+  });
+
+  it('applyBatchApprove reports when the guarded task update is refused', async () => {
+    const { db } = fakeDbForStateTransitions(0);
+    const repo = new TaskRepository(db);
+    const prev: TaskState = {
+      taskId: 'tsk_state_machine',
+      status: 'awaiting_user',
+      plan: [{ id: 'stp_batch', kind: 'click', risk: 'high' }],
+      cursor: 0,
+      pendingConfirm: {
+        kind: 'batch',
+        stepId: 'stp_batch',
+        batchIndex: 0,
+        batchTotal: 2,
+        items: [{ label: 'First draft', preview: 'Send first draft' }],
+        risk: 'high',
+      },
+    };
+    const next: TaskState = {
+      ...prev,
+      status: 'executing',
+      pendingConfirm: null,
+    };
+
+    const result = await repo.applyBatchApprove(prev, next);
+
+    expect(result.persisted).toBe(false);
+  });
+
+  it('applyBatchApprove reports when the guarded task update is persisted', async () => {
+    const { db } = fakeDbForStateTransitions(1);
+    const repo = new TaskRepository(db);
+    const prev: TaskState = {
+      taskId: 'tsk_state_machine',
+      status: 'awaiting_user',
+      plan: [{ id: 'stp_batch', kind: 'click', risk: 'high' }],
+      cursor: 0,
+      pendingConfirm: {
+        kind: 'batch',
+        stepId: 'stp_batch',
+        batchIndex: 0,
+        batchTotal: 2,
+        items: [{ label: 'First draft', preview: 'Send first draft' }],
+        risk: 'high',
+      },
+    };
+    const next: TaskState = {
+      ...prev,
+      status: 'executing',
+      pendingConfirm: null,
+    };
+
+    const result = await repo.applyBatchApprove(prev, next);
+
+    expect(result.persisted).toBe(true);
+  });
+
+  it('markAwaitingReplyResumed only resumes rows that are still awaiting_user', async () => {
+    const { db, captured } = fakeDbForStateTransitions(1);
+    const repo = new TaskRepository(db);
+
+    const result = await repo.markAwaitingReplyResumed('tsk_state_machine');
+
+    expect(result.persisted).toBe(true);
+    expect(captured.updatePayloads[0]).toMatchObject({
+      status: 'executing',
+      awaitingQuestion: null,
+      awaitingKind: null,
+    });
+    const params = collectDrizzleParamValues(captured.whereClauses.at(0));
+    expect(params).toEqual(expect.arrayContaining(['tsk_state_machine', 'awaiting_user']));
+  });
+
+  it('markAwaitingReplyResumed reports stale rows without pretending to resume', async () => {
+    const { db } = fakeDbForStateTransitions(0);
+    const repo = new TaskRepository(db);
+
+    const result = await repo.markAwaitingReplyResumed('tsk_state_machine');
+
+    expect(result.persisted).toBe(false);
+  });
+
+  it('markAwaitingReplyCompleted only completes rows that are still awaiting_user', async () => {
+    const { db, captured } = fakeDbForStateTransitions(1);
+    const repo = new TaskRepository(db);
+
+    const result = await repo.markAwaitingReplyCompleted('tsk_state_machine', {
+      summary: 'handoff created',
+    });
+
+    expect(result.persisted).toBe(true);
+    expect(captured.updatePayloads[0]).toMatchObject({
+      status: 'completed',
+      awaitingQuestion: null,
+      awaitingKind: null,
+      result: { summary: 'handoff created' },
+    });
+    expect(captured.updatePayloads[0]?.completedAt).toBeInstanceOf(Date);
+    const params = collectDrizzleParamValues(captured.whereClauses.at(0));
+    expect(params).toEqual(expect.arrayContaining(['tsk_state_machine', 'awaiting_user']));
+  });
+
+  it('markAwaitingReplyCompleted reports stale rows without completing them', async () => {
+    const { db } = fakeDbForStateTransitions(0);
+    const repo = new TaskRepository(db);
+
+    const result = await repo.markAwaitingReplyCompleted('tsk_state_machine', {
+      summary: 'handoff created',
+    });
+
+    expect(result.persisted).toBe(false);
   });
 });

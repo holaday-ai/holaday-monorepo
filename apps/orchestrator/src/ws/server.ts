@@ -1159,18 +1159,34 @@ async function runStepResult(
     error: msg.error,
   });
 
+  for (const eff of effects) {
+    if (eff.kind === 'persist') {
+      try {
+        const persisted = await taskRepository.applyStepResult(
+          taskState,
+          nextState,
+          msg.data,
+          msg.status,
+        );
+        if (!persisted.persisted) {
+          logger.warn(
+            { taskId: msg.taskId, stepId: msg.stepId, prevStatus: taskState.status },
+            'persist applyStepResult refused by state guard; suppressing in-memory transition',
+          );
+          return;
+        }
+      } catch (err) {
+        logger.error({ err, taskId: msg.taskId }, 'persist applyStepResult failed');
+        return;
+      }
+    }
+  }
+
   state.tasks.set(msg.taskId, nextState);
 
   for (const eff of effects) {
     if (eff.kind === 'send') {
       send(state.socket, eff.message);
-    }
-    if (eff.kind === 'persist') {
-      try {
-        await taskRepository.applyStepResult(taskState, nextState, msg.data, msg.status);
-      } catch (err) {
-        logger.error({ err, taskId: msg.taskId }, 'persist applyStepResult failed');
-      }
     }
   }
 }
