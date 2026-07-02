@@ -1200,28 +1200,31 @@ export const tasksRouter = router({
           'task:completed',
         );
 
+        let imagePersisted = false;
         try {
           if (result.status === 'completed') {
-            await repo.persistVisionOutcome(taskId, {
+            const persisted = await repo.persistVisionOutcome(taskId, {
               status: 'completed',
               summary: result.summary,
               tickCount: 1,
               metadata,
             });
+            imagePersisted = persisted.persisted;
           } else {
-            await repo.persistVisionOutcome(taskId, {
+            const persisted = await repo.persistVisionOutcome(taskId, {
               status: 'failed',
               reason: result.reason ?? '图片生成失败，请稍后重试。',
               tickCount: 1,
               metadata,
             });
+            imagePersisted = persisted.persisted;
           }
         } catch (err) {
           ctx.logger.error({ err, taskId }, 'image: persist failed');
         }
 
         try {
-          if (result.status === 'completed') {
+          if (imagePersisted && result.status === 'completed') {
             broadcastToUser(ctx.userId, {
               type: 'server.task.terminal',
               taskId,
@@ -1235,7 +1238,7 @@ export const tasksRouter = router({
                 ? { attachments: result.attachments }
                 : {}),
             });
-          } else {
+          } else if (imagePersisted) {
             broadcastToUser(ctx.userId, {
               type: 'server.task.terminal',
               taskId,
@@ -1629,32 +1632,35 @@ export const tasksRouter = router({
             terminalStatus = 'failed';
           }
           try {
+            let asharePersisted = false;
             const taskInternalId = await taskInternalIdFor(ctx.db, taskId);
             if (taskInternalId != null) {
               if (terminalStatus === 'completed') {
-                await repo.persistVisionOutcome(taskId, {
+                const persisted = await repo.persistVisionOutcome(taskId, {
                   status: 'completed',
                   summary: answer,
                   tickCount: 1,
                   metadata: { executionMode: 'generate', lane: 'ashare_qa' },
                 });
+                asharePersisted = persisted.persisted;
               } else {
-                await repo.persistVisionOutcome(taskId, {
+                const persisted = await repo.persistVisionOutcome(taskId, {
                   status: 'failed',
                   reason: answer,
                   tickCount: 1,
                   metadata: { executionMode: 'generate', lane: 'ashare_qa' },
                 });
+                asharePersisted = persisted.persisted;
               }
             }
-            if (terminalStatus === 'completed') {
+            if (asharePersisted && terminalStatus === 'completed') {
               broadcastToUser(ctx.userId, {
                 type: 'server.task.terminal',
                 taskId,
                 status: 'completed',
                 summary: answer,
               });
-            } else {
+            } else if (asharePersisted) {
               broadcastToUser(ctx.userId, {
                 type: 'server.task.terminal',
                 taskId,
@@ -1705,32 +1711,35 @@ export const tasksRouter = router({
             terminalStatus = 'failed';
           }
           try {
+            let indexPersisted = false;
             const taskInternalId = await taskInternalIdFor(ctx.db, taskId);
             if (taskInternalId != null) {
               if (terminalStatus === 'completed') {
-                await repo.persistVisionOutcome(taskId, {
+                const persisted = await repo.persistVisionOutcome(taskId, {
                   status: 'completed',
                   summary: answer,
                   tickCount: 1,
                   metadata: { executionMode: 'generate', lane: 'ashare_index' },
                 });
+                indexPersisted = persisted.persisted;
               } else {
-                await repo.persistVisionOutcome(taskId, {
+                const persisted = await repo.persistVisionOutcome(taskId, {
                   status: 'failed',
                   reason: answer,
                   tickCount: 1,
                   metadata: { executionMode: 'generate', lane: 'ashare_index' },
                 });
+                indexPersisted = persisted.persisted;
               }
             }
-            if (terminalStatus === 'completed') {
+            if (indexPersisted && terminalStatus === 'completed') {
               broadcastToUser(ctx.userId, {
                 type: 'server.task.terminal',
                 taskId,
                 status: 'completed',
                 summary: answer,
               });
-            } else {
+            } else if (indexPersisted) {
               broadcastToUser(ctx.userId, {
                 type: 'server.task.terminal',
                 taskId,
@@ -1771,21 +1780,25 @@ export const tasksRouter = router({
         );
         void (async () => {
           try {
+            let guidancePersisted = false;
             const taskInternalId = await taskInternalIdFor(ctx.db, taskId);
             if (taskInternalId != null) {
-              await repo.persistVisionOutcome(taskId, {
+              const persisted = await repo.persistVisionOutcome(taskId, {
                 status: 'completed',
                 summary: ASHARE_QA_GUIDANCE,
                 tickCount: 1,
                 metadata: { executionMode: 'generate', lane: 'ashare_qa_guidance' },
               });
+              guidancePersisted = persisted.persisted;
             }
-            broadcastToUser(ctx.userId, {
-              type: 'server.task.terminal',
-              taskId,
-              status: 'completed',
-              summary: ASHARE_QA_GUIDANCE,
-            });
+            if (guidancePersisted) {
+              broadcastToUser(ctx.userId, {
+                type: 'server.task.terminal',
+                taskId,
+                status: 'completed',
+                summary: ASHARE_QA_GUIDANCE,
+              });
+            }
           } catch (err) {
             ctx.logger.error({ err, taskId }, 'ashare-qa-guidance: persist/broadcast failed');
           }
@@ -4307,7 +4320,7 @@ export const tasksRouter = router({
               }
               try {
                 if (generateOutcome.status === 'completed') {
-                  await repo.persistVisionOutcome(taskId, {
+                  const persisted = await repo.persistVisionOutcome(taskId, {
                     status: 'completed',
                     summary: generateOutcome.summary,
                     tickCount: outcome.iterations,
@@ -4321,31 +4334,35 @@ export const tasksRouter = router({
                   // Roll them all to done now and broadcast so the
                   // PlanCard catches up. Best-effort: a DB blip
                   // can't block terminal broadcast.
-                  void convergePlanStatusOnSuccess(ctx, taskId, userId);
-                  broadcastToUser(userId, {
-                    type: 'server.task.terminal',
-                    taskId,
-                    status: 'completed',
-                    ...(generateOutcome.summary
-                      ? { summary: generateOutcome.summary }
-                      : {}),
-                  });
+                  if (persisted.persisted) {
+                    void convergePlanStatusOnSuccess(ctx, taskId, userId);
+                    broadcastToUser(userId, {
+                      type: 'server.task.terminal',
+                      taskId,
+                      status: 'completed',
+                      ...(generateOutcome.summary
+                        ? { summary: generateOutcome.summary }
+                        : {}),
+                    });
+                  }
                 } else {
-                  await repo.persistVisionOutcome(taskId, {
+                  const persisted = await repo.persistVisionOutcome(taskId, {
                     status: 'failed',
                     reason:
                       generateOutcome.reason ?? 'handoff-generate: api failed',
                     tickCount: outcome.iterations,
                     metadata,
                   });
-                  broadcastToUser(userId, {
-                    type: 'server.task.terminal',
-                    taskId,
-                    status: 'failed',
-                    ...(generateOutcome.reason
-                      ? { reason: generateOutcome.reason }
-                      : {}),
-                  });
+                  if (persisted.persisted) {
+                    broadcastToUser(userId, {
+                      type: 'server.task.terminal',
+                      taskId,
+                      status: 'failed',
+                      ...(generateOutcome.reason
+                        ? { reason: generateOutcome.reason }
+                        : {}),
+                    });
+                  }
                 }
               } catch (err) {
                 ctx.logger.error(
@@ -5428,30 +5445,35 @@ export const tasksRouter = router({
               },
               'vision loop terminated',
             );
+            let visionPersisted = false;
             try {
               if (outcome.status === 'completed') {
-                await repo.persistVisionOutcome(taskId, {
+                const persisted = await repo.persistVisionOutcome(taskId, {
                   status: 'completed',
                   summary: outcome.summary,
                   tickCount: outcome.history.length,
                 });
+                visionPersisted = persisted.persisted;
               } else if (outcome.status === 'failed') {
-                await repo.persistVisionOutcome(taskId, {
+                const persisted = await repo.persistVisionOutcome(taskId, {
                   status: 'failed',
                   reason: outcome.reason,
                   tickCount: outcome.history.length,
                 });
+                visionPersisted = persisted.persisted;
               } else if (outcome.status === 'paused') {
-                await repo.persistVisionOutcome(taskId, {
+                const persisted = await repo.persistVisionOutcome(taskId, {
                   status: 'paused',
                   reason: outcome.reason,
                   tickCount: outcome.history.length,
                 });
+                visionPersisted = persisted.persisted;
               } else {
-                await repo.persistVisionOutcome(taskId, {
+                const persisted = await repo.persistVisionOutcome(taskId, {
                   status: 'cancelled',
                   tickCount: outcome.history.length,
                 });
+                visionPersisted = persisted.persisted;
               }
             } catch (err) {
               ctx.logger.error({ err, taskId }, 'persistVisionOutcome failed');
@@ -5462,15 +5484,17 @@ export const tasksRouter = router({
             // is connected (task ended while popup/SW was offline;
             // the popup will pick up the DB row on its next mount).
             try {
-              broadcastToUser(ctx.userId, {
-                type: 'server.task.terminal',
-                taskId,
-                status: outcome.status,
-                ...(outcome.status === 'completed' ? { summary: outcome.summary } : {}),
-                ...(outcome.status === 'failed' || outcome.status === 'paused'
-                  ? { reason: outcome.reason }
-                  : {}),
-              });
+              if (visionPersisted) {
+                broadcastToUser(ctx.userId, {
+                  type: 'server.task.terminal',
+                  taskId,
+                  status: outcome.status,
+                  ...(outcome.status === 'completed' ? { summary: outcome.summary } : {}),
+                  ...(outcome.status === 'failed' || outcome.status === 'paused'
+                    ? { reason: outcome.reason }
+                    : {}),
+                });
+              }
             } catch (err) {
               ctx.logger.warn({ err, taskId }, 'broadcast task.terminal failed');
             }
@@ -6081,7 +6105,7 @@ export const tasksRouter = router({
             );
             summary = `视频已生成（${result.segments} 段 / ${Math.round(result.totalDurationMs / 1000)} 秒）。`;
           }
-          await repo.persistVisionOutcome(newTaskId, {
+          const persisted = await repo.persistVisionOutcome(newTaskId, {
             status: 'completed',
             summary,
             tickCount: 1,
@@ -6093,32 +6117,36 @@ export const tasksRouter = router({
               ...(finalAtt ? { attachments: [finalAtt] } : {}),
             },
           });
-          broadcastToUser(userExternalId, {
-            type: 'server.task.terminal',
-            taskId: newTaskId,
-            status: 'completed',
-            summary,
-            ...(finalAtt ? { attachments: [finalAtt] } : {}),
-          });
+          if (persisted.persisted) {
+            broadcastToUser(userExternalId, {
+              type: 'server.task.terminal',
+              taskId: newTaskId,
+              status: 'completed',
+              summary,
+              ...(finalAtt ? { attachments: [finalAtt] } : {}),
+            });
+          }
         } catch (err) {
           // Full error to the server log (internal); a SAFE whitelisted reason
           // to the user — never leak stack / detail / urls / file ids.
           logger.error({ err, taskId: newTaskId }, 'video_creation: lane failed');
           const friendlyReason = mapVideoFailureReason(err);
-          await repo
+          const persisted = await repo
             .persistVisionOutcome(newTaskId, {
               status: 'failed',
               reason: friendlyReason,
               tickCount: 1,
               metadata: { executionMode: 'generate', lane: 'video_creation' },
             })
-            .catch(() => {});
-          broadcastToUser(userExternalId, {
-            type: 'server.task.terminal',
-            taskId: newTaskId,
-            status: 'failed',
-            reason: friendlyReason,
-          });
+            .catch(() => ({ persisted: false }));
+          if (persisted.persisted) {
+            broadcastToUser(userExternalId, {
+              type: 'server.task.terminal',
+              taskId: newTaskId,
+              status: 'failed',
+              reason: friendlyReason,
+            });
+          }
         } finally {
           await fsp.rm(workdir, { recursive: true, force: true }).catch(() => {});
         }
