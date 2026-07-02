@@ -9,7 +9,7 @@ import {
 describe('taskStatusLabel', () => {
   it('covers terminal and active task statuses', () => {
     expect(taskStatusLabel('completed')).toBe('已完成');
-    expect(taskStatusLabel('partial_success')).toBe('部分完成');
+    expect(taskStatusLabel('partial_success')).toBe('需复核');
     expect(taskStatusLabel('awaiting_user')).toBe('需要你回复');
     expect(taskStatusLabel('awaiting_user', 'login')).toBe('需要登录');
     expect(taskStatusLabel('awaiting_user', 'browser_action')).toBe('需要确认');

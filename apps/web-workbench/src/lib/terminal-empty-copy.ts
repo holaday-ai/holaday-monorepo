@@ -20,8 +20,8 @@ export function terminalEmptyCopy(status: UiTask['status']): {
 
   if (status === 'partial_success') {
     return {
-      title: '部分完成',
-      body: '任务只完成了一部分，但没有生成可用的最终回复。已完成的执行记录会保留；重新执行会新建一次尝试继续验证。',
+      title: '需复核',
+      body: '任务已产出部分结果，但没有生成可直接采用的最终回复。已完成的执行记录会保留；重新执行会新建一次尝试继续验证。',
     };
   }
 

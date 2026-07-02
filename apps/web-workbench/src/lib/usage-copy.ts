@@ -11,7 +11,7 @@ export function usageOutcomeSubcopy({
 }): string {
   const parts: string[] = [];
   if (typeof partialSuccess === 'number' && partialSuccess > 0) {
-    parts.push(`部分完成 ${Math.max(0, partialSuccess)}`);
+    parts.push(`需复核 ${Math.max(0, partialSuccess)}`);
   }
   if (typeof cancelled === 'number') {
     parts.push(`失败 ${Math.max(0, failed)}`);

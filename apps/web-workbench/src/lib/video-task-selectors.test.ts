@@ -88,5 +88,6 @@ describe('video task product status helpers', () => {
     }
     expect(isVideoTaskRunning('awaiting_user')).toBe(false);
     expect(videoTaskStatusLabel('awaiting_user')).toBe('待确认报价');
+    expect(videoTaskStatusLabel('partial_success')).toBe('需复核');
   });
 });

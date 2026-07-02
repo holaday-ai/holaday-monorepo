@@ -29,7 +29,7 @@ const STATUS_MAP: Record<string, StatusToken> = {
     bgClass: 'bg-[#42C0EF]/10',
   },
   partial_success: {
-    label: '部分完成',
+    label: '需复核',
     textClass: 'text-[#8A6A00]',
     bgClass: 'bg-[#FFC910]/20',
   },

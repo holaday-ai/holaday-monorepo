@@ -30,7 +30,7 @@ export function taskStatusLabel(
       return '已暂停';
     case 'terminal':
       if (productState.outcome === 'completed') return '已完成';
-      if (productState.outcome === 'partial_success') return '部分完成';
+      if (productState.outcome === 'partial_success') return '需复核';
       if (productState.outcome === 'failed') return '失败';
       if (productState.outcome === 'cancelled') return '已取消';
       return '未知状态';

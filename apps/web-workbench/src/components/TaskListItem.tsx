@@ -350,8 +350,8 @@ export function taskListItemSubtitle(
           return task.tickCount === 0 ? '已完成' : `已完成 · ${task.tickCount} 步`;
         case 'partial_success':
           return task.tickCount === 0
-            ? '结果可能不完整'
-            : `结果可能不完整 · ${task.tickCount} 步`;
+            ? '需复核'
+            : `需复核 · ${task.tickCount} 步`;
         case 'failed':
           return task.tickCount === 0 ? '失败' : `失败 · ${task.tickCount} 步`;
         case 'cancelled':

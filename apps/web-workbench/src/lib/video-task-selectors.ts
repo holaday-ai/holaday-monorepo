@@ -72,7 +72,7 @@ export function videoTaskStatusLabel(status: string): string {
     case 'completed':
       return '已完成';
     case 'partial_success':
-      return '部分完成';
+      return '需复核';
     case 'failed':
       return '失败';
     case 'cancelled':

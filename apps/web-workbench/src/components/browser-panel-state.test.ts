@@ -50,7 +50,7 @@ describe('BrowserPanel state helpers', () => {
 
   it('labels terminal browser evidence by the actual task status', () => {
     expect(terminalEvidenceStatusLabel('completed')).toBe('任务已完成');
-    expect(terminalEvidenceStatusLabel('partial_success')).toBe('部分完成');
+    expect(terminalEvidenceStatusLabel('partial_success')).toBe('任务需复核');
     expect(terminalEvidenceStatusLabel('failed')).toBe('任务未完成');
     expect(terminalEvidenceStatusLabel('cancelled')).toBe('任务已取消');
     expect(terminalEvidenceStatusLabel('executing')).toBe('任务已结束');

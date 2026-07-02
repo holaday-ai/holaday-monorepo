@@ -16,7 +16,7 @@ describe('admin statusToken', () => {
   it('renders partial success as a user-facing warning label', () => {
     const token = statusToken('partial_success');
 
-    expect(token.label).toBe('部分完成');
+    expect(token.label).toBe('需复核');
     expect(token.textClass).toContain('#8A6A00');
     expect(token.bgClass).toContain('#FFC910');
   });

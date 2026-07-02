@@ -149,7 +149,7 @@ export function verificationBannerCopy({
   return {
     tone: 'warning',
     eyebrow: '自动审核发现可修正问题',
-    title: '结果可能不完整',
+    title: '结果需复核',
     body:
       timeoutOnly
         ? '答案已经生成，但自动审核等待过久。HOLA DAY 没有因此阻塞任务，请按关键数据和来源自行核对。'

@@ -10,7 +10,7 @@ describe('usageOutcomeSubcopy', () => {
         cancelled: 0,
         executing: 3,
       }),
-    ).toBe('部分完成 2 · 失败 1 · 取消 0 · 进行中 3');
+    ).toBe('需复核 2 · 失败 1 · 取消 0 · 进行中 3');
   });
 
   it('keeps failed and cancelled month counts separate', () => {

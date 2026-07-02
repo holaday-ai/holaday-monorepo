@@ -113,6 +113,7 @@ describe('verificationBannerCopy', () => {
 
     expect(copy.tone).toBe('warning');
     expect(copy.eyebrow).toBe('自动审核发现可修正问题');
+    expect(copy.title).toBe('结果需复核');
     expect(copy.checks).toEqual(['缺少来源链接']);
   });
 

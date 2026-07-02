@@ -38,7 +38,7 @@ export function terminalEvidenceStatusLabel(
     case 'completed':
       return '任务已完成';
     case 'partial_success':
-      return '部分完成';
+      return '任务需复核';
     case 'failed':
       return '任务未完成';
     case 'cancelled':

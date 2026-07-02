@@ -99,4 +99,13 @@ describe('taskListItemSubtitle', () => {
       '未知状态',
     );
   });
+
+  it('surfaces partial-success rows as review-needed instead of completed work', () => {
+    expect(taskListItemSubtitle({ status: 'partial_success', tickCount: 0 })).toBe(
+      '需复核',
+    );
+    expect(taskListItemSubtitle({ status: 'partial_success', tickCount: 4 })).toBe(
+      '需复核 · 4 步',
+    );
+  });
 });
