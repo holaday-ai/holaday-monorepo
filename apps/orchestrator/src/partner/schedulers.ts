@@ -31,6 +31,8 @@ export interface RunPartnerMonthlyReleaseInput {
   releaseService?: PartnerReleaseService;
 }
 
+export type PartnerSchedulerCliEnv = Partial<Record<string, string>>;
+
 export interface PartnerCostPoolSummary {
   id: number;
   externalId: string;
@@ -144,6 +146,18 @@ function assertPositiveSafeInteger(value: number | undefined, fieldName: string)
   return value;
 }
 
+function parseIntegerCliValue(value: string | undefined, fieldName: string): number | undefined {
+  if (value === undefined || value === '') return undefined;
+  if (!/^-?\d+$/.test(value)) {
+    throw new RangeError(`${fieldName} must be an integer`);
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) {
+    throw new RangeError(`${fieldName} must be an integer`);
+  }
+  return parsed;
+}
+
 function toSafeInteger(value: bigint, fieldName: string): number {
   if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
     throw new RangeError(`${fieldName} exceeds Number.MAX_SAFE_INTEGER`);
@@ -182,6 +196,89 @@ function releaseServiceFor(input: RunPartnerMonthlyReleaseInput): PartnerRelease
   if (input.releaseService) return input.releaseService;
   if (!input.db) throw new RangeError('db is required when releaseService is omitted');
   return new ReleaseService(input.db);
+}
+
+function envValue(env: PartnerSchedulerCliEnv, name: string): string | undefined {
+  const value = env[name];
+  return value === '' ? undefined : value;
+}
+
+function parseCliFlags(args: readonly string[], allowedFlags: readonly string[]): Map<string, string> {
+  const allowed = new Set(allowedFlags);
+  const values = new Map<string, string>();
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index]!;
+    if (!arg.startsWith('--')) {
+      throw new RangeError(`Unexpected positional argument: ${arg}`);
+    }
+
+    const flagBody = arg.slice(2);
+    if (flagBody === '') {
+      throw new RangeError('Unexpected empty flag');
+    }
+
+    const equalsIndex = flagBody.indexOf('=');
+    const flagName = equalsIndex === -1 ? flagBody : flagBody.slice(0, equalsIndex);
+    if (!allowed.has(flagName)) {
+      throw new RangeError(`Unknown flag: --${flagName}`);
+    }
+    if (values.has(flagName)) {
+      throw new RangeError(`Duplicate flag: --${flagName}`);
+    }
+
+    if (equalsIndex !== -1) {
+      values.set(flagName, flagBody.slice(equalsIndex + 1));
+      continue;
+    }
+
+    const next = args[index + 1];
+    if (next === undefined || next.startsWith('--')) {
+      throw new RangeError(`Missing value for --${flagName}`);
+    }
+
+    values.set(flagName, next);
+    index += 1;
+  }
+
+  return values;
+}
+
+export function parsePartnerDailyCliArgs(
+  args: readonly string[],
+  env: PartnerSchedulerCliEnv = process.env,
+): Pick<RunPartnerDailyJobsInput, 'day' | 'fxBps' | 'allocationBudgetCreditCents'> {
+  const flags = parseCliFlags(args, ['day', 'fx-bps', 'allocation-budget-credit-cents']);
+  const day = flags.get('day') ?? envValue(env, 'PARTNER_DAILY_DAY');
+  const fxBps = parseIntegerCliValue(flags.get('fx-bps') ?? envValue(env, 'PARTNER_FX_BPS'), 'fxBps');
+  const allocationBudgetCreditCents = parseIntegerCliValue(
+    flags.get('allocation-budget-credit-cents') ??
+      envValue(env, 'PARTNER_DAILY_ALLOCATION_BUDGET_CREDIT_CENTS'),
+    'allocationBudgetCreditCents',
+  );
+
+  return {
+    ...(day === undefined ? {} : { day }),
+    ...(fxBps === undefined ? {} : { fxBps }),
+    ...(allocationBudgetCreditCents === undefined ? {} : { allocationBudgetCreditCents }),
+  };
+}
+
+export function parsePartnerMonthlyCliArgs(
+  args: readonly string[],
+  env: PartnerSchedulerCliEnv = process.env,
+): Pick<RunPartnerMonthlyReleaseInput, 'releaseMonth' | 'budgetCreditCents'> {
+  const flags = parseCliFlags(args, ['release-month', 'budget-credit-cents']);
+  const releaseMonth = flags.get('release-month') ?? envValue(env, 'PARTNER_RELEASE_MONTH');
+  const budgetCreditCents = parseIntegerCliValue(
+    flags.get('budget-credit-cents') ?? envValue(env, 'PARTNER_MONTHLY_RELEASE_BUDGET_CREDIT_CENTS'),
+    'budgetCreditCents',
+  );
+
+  return {
+    ...(releaseMonth === undefined ? {} : { releaseMonth }),
+    ...(budgetCreditCents === undefined ? {} : { budgetCreditCents }),
+  };
 }
 
 export async function runPartnerDailyJobs(input: RunPartnerDailyJobsInput = {}): Promise<PartnerDailyJobSummary> {

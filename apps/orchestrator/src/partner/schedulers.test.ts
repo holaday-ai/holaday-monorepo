@@ -3,6 +3,8 @@ import type { ApiCostPoolEvent } from '../db/schema/partner.js';
 import type { DailyLockedBonusSummary } from './allocation-service.js';
 import type { MonthlyReleaseSummary } from './release-service.js';
 import {
+  parsePartnerDailyCliArgs,
+  parsePartnerMonthlyCliArgs,
   runPartnerDailyJobs,
   runPartnerMonthlyRelease,
   type PartnerAllocationService,
@@ -198,5 +200,92 @@ describe('runPartnerMonthlyRelease', () => {
       runPartnerMonthlyRelease({ releaseService, releaseMonth: '2026-07', budgetCreditCents: 1.5 }),
     ).rejects.toThrow(RangeError);
     expect(releaseService.calls).toEqual([]);
+  });
+});
+
+describe('partner scheduler CLI parsers', () => {
+  it('parses daily inline and split flags with integer values', () => {
+    expect(
+      parsePartnerDailyCliArgs([
+        '--day=2026-07-02',
+        '--fx-bps=73000',
+        '--allocation-budget-credit-cents=1234',
+      ]),
+    ).toEqual({
+      day: '2026-07-02',
+      fxBps: 73_000,
+      allocationBudgetCreditCents: 1_234,
+    });
+
+    expect(
+      parsePartnerDailyCliArgs([
+        '--day',
+        '2026-07-03',
+        '--fx-bps',
+        '74000',
+        '--allocation-budget-credit-cents',
+        '500',
+      ]),
+    ).toEqual({
+      day: '2026-07-03',
+      fxBps: 74_000,
+      allocationBudgetCreditCents: 500,
+    });
+  });
+
+  it('uses daily env fallbacks, including PARTNER_FX_BPS, while omitting unset optional values', () => {
+    expect(
+      parsePartnerDailyCliArgs([], {
+        PARTNER_DAILY_DAY: '2026-07-04',
+        PARTNER_FX_BPS: '75000',
+        PARTNER_DAILY_ALLOCATION_BUDGET_CREDIT_CENTS: '777',
+      }),
+    ).toEqual({
+      day: '2026-07-04',
+      fxBps: 75_000,
+      allocationBudgetCreditCents: 777,
+    });
+
+    expect(parsePartnerDailyCliArgs([], {})).toEqual({});
+  });
+
+  it('fails daily parsing for unknown flags, positional args, and malformed integers', () => {
+    expect(() => parsePartnerDailyCliArgs(['--unknown=1'])).toThrow(/Unknown flag/);
+    expect(() => parsePartnerDailyCliArgs(['2026-07-02'])).toThrow(/Unexpected positional/);
+    expect(() => parsePartnerDailyCliArgs(['--fx-bps=72_000'])).toThrow(/fxBps must be an integer/);
+  });
+
+  it('parses monthly inline and split flags with env fallbacks', () => {
+    expect(
+      parsePartnerMonthlyCliArgs(['--release-month=2026-07', '--budget-credit-cents=9000']),
+    ).toEqual({
+      releaseMonth: '2026-07',
+      budgetCreditCents: 9_000,
+    });
+
+    expect(
+      parsePartnerMonthlyCliArgs(['--release-month', '2026-08', '--budget-credit-cents', '10000']),
+    ).toEqual({
+      releaseMonth: '2026-08',
+      budgetCreditCents: 10_000,
+    });
+
+    expect(
+      parsePartnerMonthlyCliArgs([], {
+        PARTNER_RELEASE_MONTH: '2026-09',
+        PARTNER_MONTHLY_RELEASE_BUDGET_CREDIT_CENTS: '11000',
+      }),
+    ).toEqual({
+      releaseMonth: '2026-09',
+      budgetCreditCents: 11_000,
+    });
+  });
+
+  it('fails monthly parsing for unknown flags, positional args, and malformed integers', () => {
+    expect(() => parsePartnerMonthlyCliArgs(['--unknown=1'])).toThrow(/Unknown flag/);
+    expect(() => parsePartnerMonthlyCliArgs(['2026-07'])).toThrow(/Unexpected positional/);
+    expect(() => parsePartnerMonthlyCliArgs(['--budget-credit-cents=1e3'])).toThrow(
+      /budgetCreditCents must be an integer/,
+    );
   });
 });

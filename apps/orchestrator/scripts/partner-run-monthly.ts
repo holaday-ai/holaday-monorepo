@@ -1,41 +1,50 @@
 import { db, pool } from '../src/db/client.js';
-import { runPartnerMonthlyRelease } from '../src/partner/schedulers.js';
+import { parsePartnerMonthlyCliArgs, runPartnerMonthlyRelease } from '../src/partner/schedulers.js';
 
-function flagValue(name: string): string | undefined {
-  const prefix = `--${name}=`;
-  return process.argv.slice(2).find((arg) => arg.startsWith(prefix))?.slice(prefix.length);
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
-function optionalInteger(value: string | undefined, fieldName: string): number | undefined {
-  if (value === undefined || value === '') return undefined;
-  if (!/^-?\d+$/.test(value)) {
-    throw new RangeError(`${fieldName} must be an integer`);
+async function closePool(): Promise<unknown | undefined> {
+  try {
+    await pool.end();
+    return undefined;
+  } catch (err) {
+    return err;
   }
-  const parsed = Number(value);
-  if (!Number.isSafeInteger(parsed)) {
-    throw new RangeError(`${fieldName} must be an integer`);
-  }
-  return parsed;
 }
 
 async function main(): Promise<void> {
+  let primaryError: unknown;
+
   try {
     const summary = await runPartnerMonthlyRelease({
       db,
-      releaseMonth: flagValue('release-month') ?? process.env.PARTNER_RELEASE_MONTH,
-      budgetCreditCents: optionalInteger(
-        flagValue('budget-credit-cents') ?? process.env.PARTNER_MONTHLY_RELEASE_BUDGET_CREDIT_CENTS,
-        'budgetCreditCents',
-      ),
+      ...parsePartnerMonthlyCliArgs(process.argv.slice(2), process.env),
     });
 
     process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
-  } finally {
-    await pool.end();
+  } catch (err) {
+    primaryError = err;
+  }
+
+  const closeError = await closePool();
+  if (primaryError !== undefined) {
+    console.error(`[partner:monthly] ${errorMessage(primaryError)}`);
+    if (closeError !== undefined) {
+      console.error(`[partner:monthly] secondary pool close failed: ${errorMessage(closeError)}`);
+    }
+    process.exitCode = 1;
+    return;
+  }
+
+  if (closeError !== undefined) {
+    console.error(`[partner:monthly] pool close failed: ${errorMessage(closeError)}`);
+    process.exitCode = 1;
   }
 }
 
 main().catch((err) => {
-  console.error(`[partner:monthly] ${err instanceof Error ? err.message : String(err)}`);
+  console.error(`[partner:monthly] ${errorMessage(err)}`);
   process.exitCode = 1;
 });
