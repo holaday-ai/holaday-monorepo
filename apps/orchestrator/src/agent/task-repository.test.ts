@@ -22,6 +22,7 @@ interface Captured {
   txUpdates: number;
   taskUpdate: Record<string, unknown> | null;
   eventPayload: Record<string, unknown> | null;
+  whereClauses: unknown[];
   transactionRan: boolean;
 }
 
@@ -35,6 +36,7 @@ function fakeDbWithAffectedRows(affectedRows: number) {
     txUpdates: 0,
     taskUpdate: null,
     eventPayload: null,
+    whereClauses: [],
     transactionRan: false,
   };
 
@@ -48,7 +50,8 @@ function fakeDbWithAffectedRows(affectedRows: number) {
 
   const update = () => ({
     set: (payload: Record<string, unknown>) => ({
-      where: async () => {
+      where: async (condition: unknown) => {
+        captured.whereClauses.push(condition);
         captured.txUpdates += 1;
         captured.taskUpdate = payload;
         return [{ affectedRows }];
@@ -73,10 +76,31 @@ function fakeDbWithAffectedRows(affectedRows: number) {
   return { db, captured };
 }
 
-function fakeDbForStateTransitions() {
+function collectDrizzleParamValues(input: unknown, out: unknown[] = []): unknown[] {
+  if (Array.isArray(input)) {
+    for (const item of input) collectDrizzleParamValues(item, out);
+    return out;
+  }
+  if (!input || typeof input !== 'object') return out;
+  const record = input as {
+    constructor?: { name?: string };
+    queryChunks?: unknown[];
+    value?: unknown;
+  };
+  if (record.constructor?.name === 'Param') {
+    out.push(record.value);
+  }
+  if (Array.isArray(record.queryChunks)) {
+    collectDrizzleParamValues(record.queryChunks, out);
+  }
+  return out;
+}
+
+function fakeDbForStateTransitions(affectedRows = 1) {
   const captured = {
     updatePayloads: [] as Record<string, unknown>[],
     eventPayloads: [] as Record<string, unknown>[],
+    whereClauses: [] as unknown[],
     transactionRan: false,
   };
 
@@ -90,9 +114,10 @@ function fakeDbForStateTransitions() {
 
   const update = () => ({
     set: (payload: Record<string, unknown>) => ({
-      where: async () => {
+      where: async (condition: unknown) => {
+        captured.whereClauses.push(condition);
         captured.updatePayloads.push(payload);
-        return [{ affectedRows: 1 }];
+        return [{ affectedRows }];
       },
     }),
   });
@@ -133,7 +158,7 @@ describe('TaskRepository.persistVisionOutcome — awaiting_user state guard (Pha
     // Codex P3 follow-up — surfaces refusal to callers via persisted flag.
     expect(result.persisted).toBe(false);
     expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('refusing to overwrite awaiting_user'),
+      expect.stringContaining('refusing illegal runner outcome'),
     );
     warnSpy.mockRestore();
   });
@@ -180,6 +205,61 @@ describe('TaskRepository.persistVisionOutcome — awaiting_user state guard (Pha
     expect(captured.transactionRan).toBe(true);
     expect(captured.eventInserts).toBe(1);
     expect(result.persisted).toBe(true);
+  });
+
+  it('guards completed writes to active running rows at SQL level', async () => {
+    const { db, captured } = fakeDbWithAffectedRows(1);
+    const repo = new TaskRepository(db);
+
+    await repo.persistVisionOutcome('tsk_guard_scope', {
+      status: 'completed',
+      summary: 'final answer',
+      tickCount: 3,
+    });
+
+    const params = collectDrizzleParamValues(captured.whereClauses.at(-1));
+    expect(params).toEqual(
+      expect.arrayContaining([
+        1,
+        'pending',
+        'planning',
+        'queued',
+        'executing',
+      ]),
+    );
+    expect(params).not.toContain('paused');
+    expect(params).not.toContain('awaiting_user');
+    expect(params).not.toContain('completed');
+    expect(params).not.toContain('partial_success');
+    expect(params).not.toContain('failed');
+    expect(params).not.toContain('cancelled');
+  });
+
+  it('allows cancelled writes from paused rows but not terminal rows', async () => {
+    const { db, captured } = fakeDbWithAffectedRows(1);
+    const repo = new TaskRepository(db);
+
+    await repo.persistVisionOutcome('tsk_cancel_guard_scope', {
+      status: 'cancelled',
+      tickCount: 3,
+    });
+
+    const params = collectDrizzleParamValues(captured.whereClauses.at(-1));
+    expect(params).toEqual(
+      expect.arrayContaining([
+        1,
+        'pending',
+        'planning',
+        'queued',
+        'executing',
+        'paused',
+      ]),
+    );
+    expect(params).not.toContain('awaiting_user');
+    expect(params).not.toContain('completed');
+    expect(params).not.toContain('partial_success');
+    expect(params).not.toContain('failed');
+    expect(params).not.toContain('cancelled');
   });
 
   it('UPDATE applied → event row written (executing → failed)', async () => {
@@ -282,6 +362,36 @@ describe('TaskRepository task terminal state persistence', () => {
     });
   });
 
+  it('applyStepResult guards task updates with the previous DB status', async () => {
+    const { db, captured } = fakeDbForStateTransitions();
+    const repo = new TaskRepository(db);
+    const next: TaskState = {
+      ...baseState,
+      status: 'completed',
+      cursor: 1,
+    };
+
+    await repo.applyStepResult(baseState, next, { summary: 'done' });
+
+    const params = collectDrizzleParamValues(captured.whereClauses.at(0));
+    expect(params).toEqual(expect.arrayContaining([1, 'executing']));
+  });
+
+  it('applyStepResult skips step and event writes when the previous status guard refuses the task update', async () => {
+    const { db, captured } = fakeDbForStateTransitions(0);
+    const repo = new TaskRepository(db);
+    const next: TaskState = {
+      ...baseState,
+      status: 'completed',
+      cursor: 1,
+    };
+
+    await repo.applyStepResult(baseState, next, { summary: 'stale done' });
+
+    expect(captured.updatePayloads).toHaveLength(1);
+    expect(captured.eventPayloads).toHaveLength(0);
+  });
+
   it('applyControlTransition treats partial_success as terminal for completedAt and event ledger', async () => {
     const { db, captured } = fakeDbForStateTransitions();
     const repo = new TaskRepository(db);
@@ -302,5 +412,35 @@ describe('TaskRepository task terminal state persistence', () => {
       type: 'task.partial_success',
       actor: 'user',
     });
+  });
+
+  it('applyControlTransition guards updates with the previous DB status', async () => {
+    const { db, captured } = fakeDbForStateTransitions();
+    const repo = new TaskRepository(db);
+    const next: TaskState = {
+      ...baseState,
+      status: 'paused',
+      pauseReason: 'user',
+    };
+
+    await repo.applyControlTransition(baseState, next);
+
+    const params = collectDrizzleParamValues(captured.whereClauses.at(0));
+    expect(params).toEqual(expect.arrayContaining([1, 'executing']));
+  });
+
+  it('applyControlTransition skips event logging when the previous status guard refuses the update', async () => {
+    const { db, captured } = fakeDbForStateTransitions(0);
+    const repo = new TaskRepository(db);
+    const next: TaskState = {
+      ...baseState,
+      status: 'paused',
+      pauseReason: 'user',
+    };
+
+    await repo.applyControlTransition(baseState, next);
+
+    expect(captured.updatePayloads).toHaveLength(1);
+    expect(captured.eventPayloads).toHaveLength(0);
   });
 });

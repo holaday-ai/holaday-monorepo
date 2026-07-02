@@ -1,5 +1,5 @@
 import { newExternalId } from '@holaday/shared-types';
-import { and, eq, inArray, ne, sql } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
 
 /**
@@ -20,7 +20,11 @@ import { taskEvents } from '../db/schema/task-events.js';
 import { taskSteps } from '../db/schema/task-steps.js';
 import { tasks } from '../db/schema/tasks.js';
 import { users } from '../db/schema/users.js';
-import { isTaskTerminalStatus, TASK_ACTIVE_STATUSES } from '../task-status.js';
+import {
+  isTaskTerminalStatus,
+  TASK_ACTIVE_STATUSES,
+  taskRunnerOutcomeSourceStatuses,
+} from '../task-status.js';
 import type { PendingConfirm, PlannedStep, TaskState } from './task-controller.js';
 
 /**
@@ -138,7 +142,14 @@ export class TaskRepository {
         taskUpdate.errorMessage = next.error.message;
       }
       taskUpdate.pauseReason = next.status === 'paused' ? (next.pauseReason ?? null) : null;
-      await tx.update(tasks).set(taskUpdate).where(eq(tasks.id, taskRowId));
+      const taskUpdateResult = await tx
+        .update(tasks)
+        .set(taskUpdate)
+        .where(and(eq(tasks.id, taskRowId), eq(tasks.status, prev.status)));
+      const taskUpdateAffected = extractMysqlAffectedRows(taskUpdateResult);
+      if (taskUpdateAffected === 0) {
+        return;
+      }
 
       if (isRetry && completedStep) {
         // Same step, another attempt. Keep status executing; clear last error blob.
@@ -228,7 +239,14 @@ export class TaskRepository {
       if (isTaskTerminalStatus(next.status)) {
         update.completedAt = new Date();
       }
-      await tx.update(tasks).set(update).where(eq(tasks.id, taskRow.id));
+      const updateResult = await tx
+        .update(tasks)
+        .set(update)
+        .where(and(eq(tasks.id, taskRow.id), eq(tasks.status, prev.status)));
+      const affected = extractMysqlAffectedRows(updateResult);
+      if (affected === 0) {
+        return;
+      }
 
       await tx.insert(taskEvents).values({
         externalId: newExternalId('taskEvent'),
@@ -393,17 +411,13 @@ export class TaskRepository {
 
     // Phase 3 R1 (Codex follow-up) — atomic state-machine guard.
     // Earlier the guard was SELECT-status THEN UPDATE — a race window
-    // existed where another writer could flip status to
-    // 'awaiting_user' between the read and the write. Now the UPDATE
-    // itself includes `WHERE status != 'awaiting_user'`, so the row
-    // is either updated atomically (when not parked) or no-op (when
-    // parked); inspecting affectedRows tells us which happened.
-    //
-    // The legitimate state-machine invariant is unchanged: once a row
-    // is in awaiting_user, ONLY tasks.reply can transition it back to
-    // executing. Persist writes from a late agent-loop completion or
-    // takeover-timeout get refused here so the row keeps reflecting
-    // the real user-facing state (parked, awaiting input).
+    // existed where another writer could flip status before the write.
+    // The UPDATE now carries the legal source-state table directly:
+    // runner terminal writes may only settle active running rows
+    // (pending/planning/queued/executing), while cancellation may also
+    // settle paused rows. Awaiting-user and all terminal statuses are
+    // refused atomically so late runner completions cannot overwrite
+    // what the user already sees.
     //
     // Codex P3 follow-up — return `{persisted}` so callers can skip
     // terminal-only side effects (server.task.terminal broadcast,
@@ -417,15 +431,21 @@ export class TaskRepository {
       const updateResult = await tx
         .update(tasks)
         .set(update)
-        .where(and(eq(tasks.id, taskRowId), ne(tasks.status, 'awaiting_user')));
+        .where(
+          and(
+            eq(tasks.id, taskRowId),
+            inArray(tasks.status, [...taskRunnerOutcomeSourceStatuses(outcome.status)]),
+          ),
+        );
       const affected = extractMysqlAffectedRows(updateResult);
       if (affected === 0) {
-        // Row is in awaiting_user; UPDATE was a no-op. Skip the event
-        // insert too — recording a `vision.completed` event when the
-        // row is still parked would be wrong / misleading.
+        // Row is parked or terminal; UPDATE was a no-op. Skip the
+        // event insert too — recording a `vision.completed` event
+        // when the row is still waiting, paused, or already terminal
+        // would be wrong / misleading.
         // eslint-disable-next-line no-console
         console.warn(
-          `[task-repository] refusing to overwrite awaiting_user → ${outcome.status} for ${taskExternalId} (Phase 3 R1 atomic state guard)`,
+          `[task-repository] refusing illegal runner outcome → ${outcome.status} for ${taskExternalId} (state guard)`,
         );
         persisted = false;
         return;
