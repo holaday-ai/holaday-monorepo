@@ -140,6 +140,7 @@ export const partnerLots = mysqlTable(
   },
   (t) => [
     uniqueIndex('uk_partner_lots_external_id').on(t.externalId),
+    uniqueIndex('uk_partner_lots_recharge_order').on(t.rechargeOrderId),
     index('ix_partner_lots_user_status').on(t.userId, t.status),
     index('ix_partner_lots_release_status').on(t.releaseStartsAt, t.status),
   ],

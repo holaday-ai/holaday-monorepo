@@ -1,6 +1,7 @@
 import {
   HOLA_CREDIT_CNY_CENTS,
   PARTNER_ACCUMULATION_DAYS,
+  PARTNER_RECHARGE_MAX_MONTHLY_CNY_CENTS,
   PARTNER_RECHARGE_MAX_SINGLE_CNY_CENTS,
   PARTNER_RECHARGE_MIN_CNY_CENTS,
   PARTNER_RELEASE_MONTHS,
@@ -146,12 +147,18 @@ function normalizeRechargeAmountOrThrow(amountCnyCents: number): number {
   return amountCnyCents;
 }
 
-function normalizeRollingThirtyDayAmount(rollingThirtyDayCnyCents: number): number {
+function normalizeRollingThirtyDayAmount(rollingThirtyDayCnyCents: number, amountCnyCents: number): number {
   if (!Number.isSafeInteger(rollingThirtyDayCnyCents) || rollingThirtyDayCnyCents < 0) {
     throw new RangeError('rollingThirtyDayCnyCents must be a non-negative safe integer');
   }
   if (rollingThirtyDayCnyCents % HOLA_CREDIT_CNY_CENTS !== 0) {
     throw new RangeError('rollingThirtyDayCnyCents must be a whole CNY amount');
+  }
+  if (rollingThirtyDayCnyCents < amountCnyCents) {
+    throw new RangeError('rollingThirtyDayCnyCents must include the current recharge amount');
+  }
+  if (rollingThirtyDayCnyCents > PARTNER_RECHARGE_MAX_MONTHLY_CNY_CENTS) {
+    throw new RangeError('rollingThirtyDayCnyCents must not exceed the monthly maximum');
   }
   return rollingThirtyDayCnyCents;
 }
@@ -218,6 +225,7 @@ function buildExpectedLotPayload(input: {
   const amountCnyCents = normalizeRechargeAmountOrThrow(input.amountCnyCents);
   const rollingThirtyDayCnyCents = normalizeRollingThirtyDayAmount(
     input.rollingThirtyDayCnyCents,
+    amountCnyCents,
   );
   const accumulationStartsAt = normalizeDate(input.now, 'now');
   const accumulationEndsAt = addUtcDays(accumulationStartsAt, PARTNER_ACCUMULATION_DAYS);
@@ -328,49 +336,41 @@ export class RechargeService {
       now: input.now ?? new Date(),
     });
 
-    const [existing] = await this.db
+    await this.db
+      .insert(partnerLots)
+      .values({
+        externalId: newExternalId('payment'),
+        userId: expected.userId,
+        rechargeOrderId: expected.rechargeOrderId,
+        status: expected.status,
+        riskStatus: 'normal',
+        principalCreditCents: expected.principalCreditCents,
+        tierMultiplierBps: expected.tierMultiplierBps,
+        apiUnits: expected.apiUnits,
+        bonusCapCreditCents: expected.bonusCapCreditCents,
+        lockedBonusCreditCents: 0,
+        releasedPrincipalCreditCents: 0,
+        releasedBonusCreditCents: 0,
+        carryForwardCreditCents: 0,
+        accumulationStartsAt: expected.accumulationStartsAt,
+        accumulationEndsAt: expected.accumulationEndsAt,
+        releaseStartsAt: expected.releaseStartsAt,
+        releaseEndsAt: expected.releaseEndsAt,
+        metadata: null,
+      })
+      .onDuplicateKeyUpdate({ set: { rechargeOrderId: sql`recharge_order_id` } });
+
+    const [row] = await this.db
       .select()
       .from(partnerLots)
       .where(eq(partnerLots.rechargeOrderId, expected.rechargeOrderId))
       .limit(1);
 
-    if (existing) {
-      assertExistingLotPayloadMatches(existing, expected);
-      return existing;
-    }
-
-    const externalId = newExternalId('payment');
-    await this.db.insert(partnerLots).values({
-      externalId,
-      userId: expected.userId,
-      rechargeOrderId: expected.rechargeOrderId,
-      status: expected.status,
-      riskStatus: 'normal',
-      principalCreditCents: expected.principalCreditCents,
-      tierMultiplierBps: expected.tierMultiplierBps,
-      apiUnits: expected.apiUnits,
-      bonusCapCreditCents: expected.bonusCapCreditCents,
-      lockedBonusCreditCents: 0,
-      releasedPrincipalCreditCents: 0,
-      releasedBonusCreditCents: 0,
-      carryForwardCreditCents: 0,
-      accumulationStartsAt: expected.accumulationStartsAt,
-      accumulationEndsAt: expected.accumulationEndsAt,
-      releaseStartsAt: expected.releaseStartsAt,
-      releaseEndsAt: expected.releaseEndsAt,
-      metadata: null,
-    });
-
-    const [row] = await this.db
-      .select()
-      .from(partnerLots)
-      .where(eq(partnerLots.externalId, externalId))
-      .limit(1);
-
     if (!row) {
-      throw new Error('partner recharge lot vanished after insert');
+      throw new Error('partner recharge lot vanished after idempotent insert');
     }
 
+    assertExistingLotPayloadMatches(row, expected);
     return row;
   }
 }

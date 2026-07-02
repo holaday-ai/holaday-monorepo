@@ -92,6 +92,7 @@ CREATE TABLE `partner_lots` (
   `updated_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_partner_lots_external_id` (`external_id`),
+  UNIQUE KEY `uk_partner_lots_recharge_order` (`recharge_order_id`),
   KEY `ix_partner_lots_user_status` (`user_id`, `status`),
   KEY `ix_partner_lots_release_status` (`release_starts_at`, `status`),
   CONSTRAINT `fk_partner_lots_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,

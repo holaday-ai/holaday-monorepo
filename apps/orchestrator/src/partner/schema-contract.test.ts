@@ -44,6 +44,7 @@ describe('partner schema contract', () => {
 
   it('pins partner uniqueness indexes', () => {
     expect(indexConfig(partnerDailyAllocations, 'uk_partner_daily_allocations_lot_date')?.unique).toBe(true);
+    expect(indexConfig(partnerLots, 'uk_partner_lots_recharge_order')?.unique).toBe(true);
     expect(indexConfig(partnerMonthlyReleases, 'uk_partner_monthly_releases_lot_month')?.unique).toBe(true);
     expect(indexConfig(partnerRechargeOrders, 'uk_partner_recharge_orders_provider_capture')?.unique).toBe(true);
   });
@@ -53,6 +54,7 @@ describe('partner schema contract', () => {
 
     expect(migration.match(/\bCREATE TABLE\b/g)).toHaveLength(11);
     expect(migration).toContain('uk_partner_daily_allocations_lot_date');
+    expect(migration).toContain('uk_partner_lots_recharge_order');
     expect(migration).toContain('uk_partner_monthly_releases_lot_month');
     expect(migration).not.toMatch(/\bALTER\s+TABLE\b/i);
     expect(migration).not.toMatch(/\bDROP\s+TABLE\b/i);

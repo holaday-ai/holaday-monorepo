@@ -61,6 +61,8 @@ class FakeRechargeDb {
   readonly wherePredicateTexts: string[] = [];
   orderRowsCreated = 0;
   lotRowsCreated = 0;
+  orderDuplicateKeyUpdateCalls = 0;
+  lotDuplicateKeyUpdateCalls = 0;
   private nextOrderId: number;
   private nextLotId: number;
 
@@ -83,6 +85,7 @@ class FakeRechargeDb {
           this.orderInsertAttempts.push(orderValues);
           return {
             onDuplicateKeyUpdate: async (_config: unknown) => {
+              this.orderDuplicateKeyUpdateCalls += 1;
               const existing = this.orders.find((row) => row.idempotencyKey === orderValues.idempotencyKey);
               if (existing) return;
               this.orders.push({
@@ -103,17 +106,22 @@ class FakeRechargeDb {
         if (table === partnerLots) {
           const lotValues = values as FakeLotInsert;
           this.lotInsertAttempts.push(lotValues);
-          return Promise.resolve().then(() => {
-            this.lots.push({
-              id: this.nextLotId,
-              metadata: null,
-              createdAt: new Date('2026-01-01T00:00:00.000Z'),
-              updatedAt: new Date('2026-01-01T00:00:00.000Z'),
-              ...lotValues,
-            });
-            this.nextLotId += 1;
-            this.lotRowsCreated += 1;
-          });
+          return {
+            onDuplicateKeyUpdate: async (_config: unknown) => {
+              this.lotDuplicateKeyUpdateCalls += 1;
+              const existing = this.lots.find((row) => row.rechargeOrderId === lotValues.rechargeOrderId);
+              if (existing) return;
+              this.lots.push({
+                id: this.nextLotId,
+                metadata: null,
+                createdAt: new Date('2026-01-01T00:00:00.000Z'),
+                updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+                ...lotValues,
+              });
+              this.nextLotId += 1;
+              this.lotRowsCreated += 1;
+            },
+          };
         }
 
         throw new Error('unexpected insert table');
@@ -414,9 +422,45 @@ describe('RechargeService createLotForCapturedRecharge', () => {
     expect(row.releaseStartsAt.toISOString()).toBe('2026-10-30T03:04:05.006Z');
     expect(row.releaseEndsAt.toISOString()).toBe('2027-06-30T03:04:05.006Z');
     expect(fakeDb.lotRowsCreated).toBe(1);
+    expect(fakeDb.lotDuplicateKeyUpdateCalls).toBe(1);
+    expect(fakeDb.wherePredicateTexts.some((predicateText) => predicateText.includes('recharge_order_id'))).toBe(
+      true,
+    );
   });
 
-  it('returns an existing lot for the same recharge order and same payload', async () => {
+  it('rejects rollingThirtyDayCnyCents below the current amount', async () => {
+    const fakeDb = new FakeRechargeDb();
+    const service = new RechargeService(fakeDb.asDB());
+
+    await expect(
+      service.createLotForCapturedRecharge({
+        userId: 123,
+        rechargeOrderId: 77,
+        amountCnyCents: 10_000_00,
+        rollingThirtyDayCnyCents: 9_999_00,
+        now: new Date('2026-07-01T03:04:05.006Z'),
+      }),
+    ).rejects.toThrow(/include the current recharge amount/);
+    expect(fakeDb.lotInsertAttempts).toHaveLength(0);
+  });
+
+  it('rejects rollingThirtyDayCnyCents above the 30-day cap', async () => {
+    const fakeDb = new FakeRechargeDb();
+    const service = new RechargeService(fakeDb.asDB());
+
+    await expect(
+      service.createLotForCapturedRecharge({
+        userId: 123,
+        rechargeOrderId: 77,
+        amountCnyCents: 200_000_00,
+        rollingThirtyDayCnyCents: 500_001_00,
+        now: new Date('2026-07-01T03:04:05.006Z'),
+      }),
+    ).rejects.toThrow(/monthly maximum/);
+    expect(fakeDb.lotInsertAttempts).toHaveLength(0);
+  });
+
+  it('uses duplicate-key idempotency and returns an existing lot for the same recharge order and same payload', async () => {
     const existing = fakeLot();
     const fakeDb = new FakeRechargeDb({ lots: [existing] });
     const service = new RechargeService(fakeDb.asDB());
@@ -432,10 +476,12 @@ describe('RechargeService createLotForCapturedRecharge', () => {
     expect(row).toBe(existing);
     expect(fakeDb.lots).toHaveLength(1);
     expect(fakeDb.lotRowsCreated).toBe(0);
+    expect(fakeDb.lotInsertAttempts).toHaveLength(1);
+    expect(fakeDb.lotDuplicateKeyUpdateCalls).toBe(1);
   });
 
   it.each([
-    ['different amount', { amountCnyCents: 11_000_00 }],
+    ['different amount', { amountCnyCents: 11_000_00, rollingThirtyDayCnyCents: 11_000_00 }],
     ['different user', { userId: 456 }],
   ])('throws a conflict error for an existing recharge-order lot with a %s', async (_name, patch) => {
     const fakeDb = new FakeRechargeDb({ lots: [fakeLot()] });
