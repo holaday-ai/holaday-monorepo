@@ -5,6 +5,16 @@ import { deriveTaskProductState } from './task-product-state';
 export type HistoryStatusFilter = 'all' | 'completed' | 'failed' | 'running';
 export type HistoryRangeFilter = '7d' | '30d' | 'all';
 
+export const historyStatusFilterOptions: ReadonlyArray<{
+  readonly id: HistoryStatusFilter;
+  readonly label: string;
+}> = [
+  { id: 'all', label: '全部' },
+  { id: 'completed', label: '已完成' },
+  { id: 'failed', label: '失败/需复核' },
+  { id: 'running', label: '进行中' },
+];
+
 export interface NormalizedTaskHubRow {
   readonly taskId: string;
   readonly intent: string;
@@ -160,6 +170,13 @@ export type TaskHubStatusTone =
   | 'running'
   | 'unknown';
 
+export type TaskHubStatusIconKind =
+  | 'success'
+  | 'attention'
+  | 'failed'
+  | 'inactive'
+  | 'running';
+
 export function taskHubStatusTone(input: TaskHubProductStateInput): TaskHubStatusTone {
   const state = toTaskHubProductState(input);
   if (state.lifecycle === 'waiting_user') return 'awaiting';
@@ -170,6 +187,15 @@ export function taskHubStatusTone(input: TaskHubProductStateInput): TaskHubStatu
   if (state.outcome === 'partial_success') return 'partial_success';
   if (state.outcome === 'failed') return 'failed';
   if (state.outcome === 'cancelled') return 'cancelled';
+  return 'running';
+}
+
+export function taskHubStatusIconKind(input: TaskHubProductStateInput): TaskHubStatusIconKind {
+  const tone = taskHubStatusTone(input);
+  if (tone === 'completed') return 'success';
+  if (tone === 'partial_success' || tone === 'awaiting') return 'attention';
+  if (tone === 'failed') return 'failed';
+  if (tone === 'cancelled' || tone === 'paused' || tone === 'unknown') return 'inactive';
   return 'running';
 }
 

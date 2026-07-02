@@ -81,3 +81,26 @@ export function videoTaskStatusLabel(status: string): string {
       return status;
   }
 }
+
+export type VideoTaskStatusIconKind =
+  | 'success'
+  | 'attention'
+  | 'failed'
+  | 'inactive'
+  | 'running';
+
+export function videoTaskStatusIconKind(status: string): VideoTaskStatusIconKind {
+  switch (status) {
+    case 'completed':
+      return 'success';
+    case 'partial_success':
+    case 'awaiting_user':
+      return 'attention';
+    case 'failed':
+      return 'failed';
+    case 'cancelled':
+      return 'inactive';
+    default:
+      return 'running';
+  }
+}

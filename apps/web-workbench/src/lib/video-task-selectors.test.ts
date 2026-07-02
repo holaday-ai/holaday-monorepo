@@ -5,6 +5,7 @@ import {
   isVideoTaskRunning,
   selectStepsFor,
   shouldRefreshForTask,
+  videoTaskStatusIconKind,
   videoTaskStatusLabel,
 } from './video-task-selectors';
 
@@ -89,5 +90,14 @@ describe('video task product status helpers', () => {
     expect(isVideoTaskRunning('awaiting_user')).toBe(false);
     expect(videoTaskStatusLabel('awaiting_user')).toBe('待确认报价');
     expect(videoTaskStatusLabel('partial_success')).toBe('需复核');
+  });
+
+  it('does not use a success icon for review-needed video tasks', () => {
+    expect(videoTaskStatusIconKind('completed')).toBe('success');
+    expect(videoTaskStatusIconKind('partial_success')).toBe('attention');
+    expect(videoTaskStatusIconKind('awaiting_user')).toBe('attention');
+    expect(videoTaskStatusIconKind('failed')).toBe('failed');
+    expect(videoTaskStatusIconKind('cancelled')).toBe('inactive');
+    expect(videoTaskStatusIconKind('executing')).toBe('running');
   });
 });

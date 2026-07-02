@@ -16,7 +16,7 @@ import {
   taskHubLoadMoreErrorCopy,
   taskHubNeedsAttention,
   taskHubRowTone,
-  taskHubStatusTone,
+  taskHubStatusIconKind,
   type NormalizedTaskHubRow,
 } from '@/lib/task-hub-state';
 import { taskStatusLabel } from '@/lib/task-status-copy';
@@ -306,29 +306,22 @@ function PinnedStatusIcon({ task }: { task: Pick<PinnedRow, 'awaitingKind' | 'st
   // every non-awaiting pin showed an identical Pin icon, so a failed or
   // cancelled pin looked exactly like a completed one. Only healthy
   // pins (completed / running) keep the Pin affordance.
-  const tone = taskHubStatusTone(task);
-  if (tone === 'awaiting') {
+  const iconKind = taskHubStatusIconKind(task);
+  if (iconKind === 'attention') {
     return (
       <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[#FFC910]/55 bg-[#FFC910]/15 text-[#8A6A00]">
         <AlertCircle className="h-3.5 w-3.5" />
       </span>
     );
   }
-  if (tone === 'failed') {
+  if (iconKind === 'failed') {
     return (
       <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[#EA1F59]/45 bg-[#EA1F59]/10 text-[#EA1F59]">
         <XCircle className="h-3.5 w-3.5" />
       </span>
     );
   }
-  if (tone === 'partial_success') {
-    return (
-      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[#FFC910]/55 bg-[#FFC910]/15 text-[#8A6A00]">
-        <CheckCircle2 className="h-3.5 w-3.5" />
-      </span>
-    );
-  }
-  if (tone === 'cancelled') {
+  if (iconKind === 'inactive') {
     // Neutral cancelled treatment — matches the grey CircleSlash the
     // history page uses, instead of the brand-red Pin that read as a
     // healthy / completed pin.
@@ -338,10 +331,10 @@ function PinnedStatusIcon({ task }: { task: Pick<PinnedRow, 'awaitingKind' | 'st
       </span>
     );
   }
-  if (tone === 'paused' || tone === 'unknown') {
+  if (iconKind === 'success') {
     return (
-      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[#DCDDDD] bg-[#EFEFEF]/45 text-muted-foreground dark:border-white/10 dark:bg-white/5">
-        <CircleSlash className="h-3.5 w-3.5" />
+      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[#42C0EF]/35 bg-[#42C0EF]/10 text-[#1688AA]">
+        <CheckCircle2 className="h-3.5 w-3.5" />
       </span>
     );
   }

@@ -36,6 +36,7 @@ import {
   isVideoTaskRunning,
   selectStepsFor,
   shouldRefreshForTask,
+  videoTaskStatusIconKind,
   videoTaskStatusLabel,
 } from '@/lib/video-task-selectors';
 import { showImageOption, toImageRow, toVideoRow, type VideoRow, type VideoType } from '@/lib/video-history-row';
@@ -1482,28 +1483,29 @@ function videoTypeLabel(videoType: VideoType | undefined): string {
 
 function VideoStatusIcon({ status }: { status: string }): JSX.Element {
   const base = 'flex h-7 w-7 shrink-0 items-center justify-center rounded-md border';
-  if (status === 'awaiting_user') {
+  const iconKind = videoTaskStatusIconKind(status);
+  if (iconKind === 'attention') {
     return (
       <span className={cn(base, 'border-[#FFC910]/55 bg-[#FFC910]/15 text-[#8A6A00]')}>
         <AlertCircle className="h-3.5 w-3.5" />
       </span>
     );
   }
-  if (status === 'failed') {
+  if (iconKind === 'failed') {
     return (
       <span className={cn(base, 'border-[#EA1F59]/45 bg-[#EA1F59]/10 text-[#EA1F59]')}>
         <XCircle className="h-3.5 w-3.5" />
       </span>
     );
   }
-  if (status === 'cancelled') {
+  if (iconKind === 'inactive') {
     return (
       <span className={cn(base, 'border-[#DCDDDD] bg-[#EFEFEF]/45 text-muted-foreground')}>
         <CircleSlash className="h-3.5 w-3.5" />
       </span>
     );
   }
-  if (status === 'completed' || status === 'partial_success') {
+  if (iconKind === 'success') {
     return (
       <span className={cn(base, 'border-[#DCDDDD] bg-white text-[#EA1F59]')}>
         <CheckCircle2 className="h-3.5 w-3.5" />

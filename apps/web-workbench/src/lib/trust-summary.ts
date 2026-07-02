@@ -301,9 +301,10 @@ export function buildRecoveryActions(input: RecoveryInput): RecoveryAction[] {
 
   if (intent && input.status === 'partial_success') {
     actions.push({
-      kind: 'retry',
-      label: '重新执行',
-      detail: '新开一次任务，保留旧记录用于对照。',
+      kind: 'prefill',
+      label: '带已完成信息重试',
+      detail: '把上次已经产出的内容带入输入框，确认后再补齐缺失项。',
+      prompt: partialRetryPrompt(intent, input.resultText),
     });
   }
 
@@ -402,6 +403,19 @@ function verificationLedgerValue(
 
 function withIntent(intent: string | undefined, suffix: string): string {
   return intent ? `${intent}\n${suffix}` : suffix;
+}
+
+function partialRetryPrompt(intent: string, resultText?: string): string {
+  const summary = compactText(resultText);
+  const instruction = '请基于上次任务已完成的信息重试，只补齐缺失来源、字段或数量；未验证的内容请明确标注。';
+  if (!summary) return `${intent}\n${instruction}`;
+  return `${intent}\n${instruction}\n\n上次已完成信息：\n${summary}`;
+}
+
+function compactText(text?: string): string {
+  const normalized = text?.replace(/\s+/g, ' ').trim() ?? '';
+  if (!normalized) return '';
+  return normalized.length > 500 ? `${normalized.slice(0, 500)}…` : normalized;
 }
 
 function dedupe(values: string[]): string[] {

@@ -4,6 +4,7 @@ import {
   hasHistoryFilters,
   historyFilterRequestKey,
   historyPageSummary,
+  historyStatusFilterOptions,
   mergeTaskHubRowsById,
   normalizeTaskHubCursor,
   normalizeTaskHubRows,
@@ -13,6 +14,7 @@ import {
   taskHubLoadErrorCopy,
   taskHubLoadMoreErrorCopy,
   taskHubNeedsAttention,
+  taskHubStatusIconKind,
   taskHubRowTone,
   taskHubStatusTone,
 } from './task-hub-state';
@@ -34,6 +36,12 @@ describe('task hub state helpers', () => {
     expect(hasHistoryFilters({ query: ' invoice ', status: 'all', range: '30d' })).toBe(true);
     expect(hasHistoryFilters({ query: '', status: 'failed', range: '30d' })).toBe(true);
     expect(hasHistoryFilters({ query: '', status: 'all', range: 'all' })).toBe(true);
+  });
+
+  it('labels the failed history filter as including review-needed tasks', () => {
+    expect(historyStatusFilterOptions.find((option) => option.id === 'failed')?.label).toBe(
+      '失败/需复核',
+    );
   });
 
   it('summarizes history page states', () => {
@@ -134,6 +142,15 @@ describe('task hub state helpers', () => {
     expect(taskHubStatusTone('executing')).toBe('running');
     expect(taskHubStatusTone('mystery')).toBe('unknown');
     expect(taskHubStatusTone('unknown')).toBe('unknown');
+  });
+
+  it('uses attention icons for review-needed rows instead of success checkmarks', () => {
+    expect(taskHubStatusIconKind('completed')).toBe('success');
+    expect(taskHubStatusIconKind('partial_success')).toBe('attention');
+    expect(taskHubStatusIconKind('awaiting_user')).toBe('attention');
+    expect(taskHubStatusIconKind('failed')).toBe('failed');
+    expect(taskHubStatusIconKind('cancelled')).toBe('inactive');
+    expect(taskHubStatusIconKind('executing')).toBe('running');
   });
 
   it('keys history requests to the active filter set', () => {

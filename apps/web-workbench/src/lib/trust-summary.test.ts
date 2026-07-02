@@ -151,11 +151,16 @@ describe('recovery actions', () => {
     const actions = buildRecoveryActions({
       status: 'partial_success',
       intent: '查今天特斯拉股价并给来源',
+      resultText: '已查到 TSLA 最新价，但答案缺少可点击来源链接。',
       failureLevel: 'fixable',
       failedChecks: [{ type: 'url_count', detail: 'only 0 URL' }],
     });
 
-    expect(actions.some((a) => a.kind === 'retry' && a.label === '重新执行')).toBe(true);
+    const retryWithContext = actions.find((a) => a.label === '带已完成信息重试');
+    expect(retryWithContext).toMatchObject({ kind: 'prefill' });
+    expect(retryWithContext?.prompt).toContain('查今天特斯拉股价并给来源');
+    expect(retryWithContext?.prompt).toContain('已查到 TSLA 最新价');
+    expect(actions.some((a) => a.kind === 'retry' && a.label === '重新执行')).toBe(false);
     const sourceAction = actions.find((a) => a.label === '指定可信来源');
     expect(sourceAction?.prompt).toContain('请只使用以下可信来源');
     expect(sourceAction?.prompt).toContain('查今天特斯拉股价');

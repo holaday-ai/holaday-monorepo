@@ -8,6 +8,7 @@ import {
   hasHistoryFilters,
   historyFilterRequestKey,
   historyPageSummary,
+  historyStatusFilterOptions,
   mergeTaskHubRowsById,
   normalizeTaskHubCursor,
   normalizeTaskHubRows,
@@ -16,7 +17,7 @@ import {
   taskHubLoadErrorCopy,
   taskHubLoadMoreErrorCopy,
   taskHubNeedsAttention,
-  taskHubStatusTone,
+  taskHubStatusIconKind,
   type HistoryRangeFilter,
   type HistoryStatusFilter,
   type NormalizedTaskHubRow,
@@ -300,12 +301,7 @@ export function HistoryPage(): JSX.Element {
               <FilterGroup<StatusFilter>
                 value={status}
                 onChange={setStatus}
-                options={[
-                  { id: 'all', label: '全部' },
-                  { id: 'completed', label: '已完成' },
-                  { id: 'failed', label: '失败' },
-                  { id: 'running', label: '进行中' },
-                ]}
+                options={historyStatusFilterOptions}
               />
               <FilterGroup<RangeFilter>
                 value={range}
@@ -491,7 +487,7 @@ function FilterGroup<T extends string>({
 }: {
   value: T;
   onChange(v: T): void;
-  options: Array<{ id: T; label: string }>;
+  options: ReadonlyArray<{ readonly id: T; readonly label: string }>;
 }): JSX.Element {
   return (
     <div className="inline-flex gap-0.5 rounded-[8px] border border-[#DCDDDD] bg-[#EFEFEF]/55 p-0.5 text-xs">
@@ -515,20 +511,17 @@ function FilterGroup<T extends string>({
 }
 
 function StatusIcon({ task }: { task: Pick<HistoryTask, 'awaitingKind' | 'status'> }): JSX.Element {
-  const tone = taskHubStatusTone(task);
-  if (tone === 'completed') {
+  const iconKind = taskHubStatusIconKind(task);
+  if (iconKind === 'success') {
     return <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-[#42C0EF]" />;
   }
-  if (tone === 'partial_success') {
-    return <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-[#FFC910]" />;
-  }
-  if (tone === 'failed') {
-    return <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-[#EA1F59]" />;
-  }
-  if (tone === 'awaiting') {
+  if (iconKind === 'attention') {
     return <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-[#8A6A00]" />;
   }
-  if (tone === 'cancelled' || tone === 'paused' || tone === 'unknown') {
+  if (iconKind === 'failed') {
+    return <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-[#EA1F59]" />;
+  }
+  if (iconKind === 'inactive') {
     return (
       <CircleSlash className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
     );
