@@ -71,6 +71,13 @@ export function buildTrustSummary(input: TrustSummaryInput): TrustSummaryModel {
     input.status === 'partial_success' ||
     input.verificationPassed === false ||
     failedChecks.length > 0;
+  const hasAnyEvidence =
+    sourceCount > 0 ||
+    hasFinalUrl ||
+    hasScreenshot ||
+    attachmentCount > 0;
+  const compactMissingEvidence =
+    !hasAnyEvidence && (input.status === 'cancelled' || input.status === 'failed');
 
   const tone: TrustTone = hardFailure ? 'danger' : flagged ? 'warning' : 'neutral';
   const verdict = trustVerdict({
@@ -82,83 +89,102 @@ export function buildTrustSummary(input: TrustSummaryInput): TrustSummaryModel {
 
   return {
     tone,
-    title: '结果复核',
+    title: compactMissingEvidence ? '任务状态' : '结果复核',
     verdict,
-    boundary:
-      'HOLA DAY 只展示已经拿到的线索；没有截图、链接或终态页的部分，不会被当作已验证事实。',
-    rows: [
-      {
-        label: '来源链接',
-        value: `${sourceCount} 个链接`,
-        detail:
-          sourceCount > 0
-            ? '结果里有可点击来源，关键事实仍建议点开核对。'
-            : '未看到可点击来源；涉及价格、排序、事实时不要直接采用。',
-      },
-      {
-        label: '结束页面',
-        value: hasFinalUrl ? '已记录' : '未记录',
-        detail: hasFinalUrl
-          ? '保留了任务结束时的页面地址，可作为路径线索。'
-          : '没有结束页地址，无法确认是否到达目标页面。',
-      },
-      {
-        label: '页面截图',
-        value: hasScreenshot ? '已保存' : '未保存',
-        detail: hasScreenshot
-          ? '保存了结束时页面画面，可辅助复核。'
-          : '没有结束截图，页面状态需要通过其它线索复核。',
-      },
-      {
-        label: '产物文件',
-        value: `${attachmentCount} 个`,
-        detail:
-          attachmentCount > 0
-            ? '有可下载产物或附件，仍需核对内容是否满足任务目标。'
-            : '没有文件产物；若任务要求下载或导出，应补充要求后重试。',
-      },
-    ],
-    ledger: [
-      {
-        stage: 'observed',
-        label: '页面状态',
-        value: hasScreenshot ? '已观察' : '未观察',
-        detail: hasScreenshot
-          ? '保存了终态截图，可复核任务结束时页面长什么样。'
-          : '没有终态截图，无法从本卡观察任务结束时页面状态。',
-      },
-      {
-        stage: 'extracted',
-        label: '来源链接',
-        value: `${sourceCount} 个`,
-        detail:
-          sourceCount > 0
-            ? '从结果文本和最终页面 URL 中提取到链接，但未逐条证明每个事实都来自这些链接。'
-            : '没有提取到可点击来源，事实型任务需要补来源。',
-      },
-      {
-        stage: 'extracted',
-        label: '最终 URL',
-        value: hasFinalUrl ? '已记录' : '未记录',
-        detail: hasFinalUrl
-          ? '记录了任务结束时所在地址，可作为浏览路径线索。'
-          : '没有记录终态地址，不能据此确认到达了目标页面。',
-      },
-      {
-        stage: 'inferred',
-        label: '自动审核',
-        value: verificationLedgerValue(input.verificationPassed, failedChecks.length),
-        detail:
-          '这是系统检查信号，不等同于人工或事实级验证通过。',
-      },
-      {
-        stage: 'boundary',
-        label: '未验证边界',
-        value: '结论推断',
-        detail:
-          '结果中的判断、建议和归因仍需结合来源、截图和业务上下文复核。',
-      },
-    ],
+    boundary: compactMissingEvidence
+      ? '本次没有形成可复核的最终结果；HOLA DAY 只保留已拿到的步骤线索，不会把空指标包装成证据。'
+      : 'HOLA DAY 只展示已经拿到的线索；没有截图、链接或终态页的部分，不会被当作已验证事实。',
+    rows: compactMissingEvidence
+      ? []
+      : [
+          {
+            label: '来源链接',
+            value: `${sourceCount} 个链接`,
+            detail:
+              sourceCount > 0
+                ? '结果里有可点击来源，关键事实仍建议点开核对。'
+                : '未看到可点击来源；涉及价格、排序、事实时不要直接采用。',
+          },
+          {
+            label: '结束页面',
+            value: hasFinalUrl ? '已记录' : '未记录',
+            detail: hasFinalUrl
+              ? '保留了任务结束时的页面地址，可作为路径线索。'
+              : '没有结束页地址，无法确认是否到达目标页面。',
+          },
+          {
+            label: '页面截图',
+            value: hasScreenshot ? '已保存' : '未保存',
+            detail: hasScreenshot
+              ? '保存了结束时页面画面，可辅助复核。'
+              : '没有结束截图，页面状态需要通过其它线索复核。',
+          },
+          {
+            label: '产物文件',
+            value: `${attachmentCount} 个`,
+            detail:
+              attachmentCount > 0
+                ? '有可下载产物或附件，仍需核对内容是否满足任务目标。'
+                : '没有文件产物；若任务要求下载或导出，应补充要求后重试。',
+          },
+        ],
+    ledger: compactMissingEvidence
+      ? [
+          {
+            stage: 'observed',
+            label: '页面状态',
+            value: '未形成终态证据',
+            detail: '任务结束前没有保存截图或终态页，无法从本卡复核页面事实。',
+          },
+          {
+            stage: 'boundary',
+            label: '使用边界',
+            value: '只能参考过程',
+            detail:
+              '请只把已完成步骤当作线索；涉及事实、价格、排序或链接的结论需要重新执行或补充来源。',
+          },
+        ]
+      : [
+          {
+            stage: 'observed',
+            label: '页面状态',
+            value: hasScreenshot ? '已观察' : '未观察',
+            detail: hasScreenshot
+              ? '保存了终态截图，可复核任务结束时页面长什么样。'
+              : '没有终态截图，无法从本卡观察任务结束时页面状态。',
+          },
+          {
+            stage: 'extracted',
+            label: '来源链接',
+            value: `${sourceCount} 个`,
+            detail:
+              sourceCount > 0
+                ? '从结果文本和最终页面 URL 中提取到链接，但未逐条证明每个事实都来自这些链接。'
+                : '没有提取到可点击来源，事实型任务需要补来源。',
+          },
+          {
+            stage: 'extracted',
+            label: '最终 URL',
+            value: hasFinalUrl ? '已记录' : '未记录',
+            detail: hasFinalUrl
+              ? '记录了任务结束时所在地址，可作为浏览路径线索。'
+              : '没有记录终态地址，不能据此确认到达了目标页面。',
+          },
+          {
+            stage: 'inferred',
+            label: '自动审核',
+            value: verificationLedgerValue(input.verificationPassed, failedChecks.length),
+            detail:
+              '这是系统检查信号，不等同于人工或事实级验证通过。',
+          },
+          {
+            stage: 'boundary',
+            label: '未验证边界',
+            value: '结论推断',
+            detail:
+              '结果中的判断、建议和归因仍需结合来源、截图和业务上下文复核。',
+          },
+        ],
     checks,
     hiddenCheckCount,
   };

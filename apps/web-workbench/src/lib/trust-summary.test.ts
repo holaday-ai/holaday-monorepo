@@ -55,6 +55,23 @@ describe('trust summary', () => {
     expect(summary.rows.find((r) => r.label === '来源链接')?.value).toBe('0 个链接');
     expect(summary.ledger.find((item) => item.label === '自动审核')?.value).toBe('发现问题');
   });
+
+  it('does not present empty evidence counters as a review card for cancelled tasks', () => {
+    const summary = buildTrustSummary({
+      status: 'cancelled',
+      resultText: '',
+      currentUrl: null,
+      finalScreenshot: null,
+      attachments: [],
+    });
+
+    expect(summary.title).toBe('任务状态');
+    expect(summary.boundary).toContain('没有形成可复核的最终结果');
+    expect(summary.rows).toEqual([]);
+    expect(summary.ledger.find((item) => item.label === '页面状态')?.value).toBe(
+      '未形成终态证据',
+    );
+  });
 });
 
 describe('recovery actions', () => {

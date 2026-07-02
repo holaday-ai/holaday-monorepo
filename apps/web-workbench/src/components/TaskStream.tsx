@@ -745,26 +745,28 @@ function TrustSummaryCard({
           <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
             {summary.boundary}
           </p>
-          <div className="mt-3 grid gap-2 sm:grid-cols-2">
-            {summary.rows.map((row) => (
-              <div
-                key={row.label}
-                className="rounded-[7px] border border-[#DCDDDD]/70 bg-white/65 px-3 py-2 dark:border-white/10 dark:bg-white/5"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[11px] font-medium text-muted-foreground">
-                    {row.label}
-                  </span>
-                  <span className="shrink-0 text-xs font-medium text-foreground">
-                    {row.value}
-                  </span>
+          {summary.rows.length > 0 && (
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              {summary.rows.map((row) => (
+                <div
+                  key={row.label}
+                  className="rounded-[7px] border border-[#DCDDDD]/70 bg-white/65 px-3 py-2 dark:border-white/10 dark:bg-white/5"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-medium text-muted-foreground">
+                      {row.label}
+                    </span>
+                    <span className="shrink-0 text-xs font-medium text-foreground">
+                      {row.value}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                    {row.detail}
+                  </p>
                 </div>
-                <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-                  {row.detail}
-                </p>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
           {summary.checks.length > 0 && (
             <div className="mt-3 rounded-[7px] border border-[#FFC910]/55 bg-[#FFC910]/10 px-3 py-2 text-xs dark:border-[#FFC910]/35">
               <div className="font-medium text-foreground">需要复核</div>
