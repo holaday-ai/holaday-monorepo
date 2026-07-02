@@ -8,7 +8,7 @@ type PartnerMembershipStatus = 'active' | 'expired' | 'cancelled';
 type NormalizedMembershipStatus = PartnerMembershipStatus | 'none';
 type PartnerKycStatus = 'not_started' | 'pending' | 'passed' | 'review_required' | 'rejected';
 type PartnerLotStatus = 'accumulating' | 'release_pending' | 'releasing' | 'completed' | 'frozen' | 'closed';
-type PartnerRiskStatus = 'normal' | 'review' | 'frozen';
+type PartnerRiskStatus = 'normal' | 'review' | 'review_required' | 'frozen';
 
 export interface PartnerDisabledState {
   readonly enabled: false;
@@ -86,6 +86,7 @@ const LOT_STATUS_LABELS: Record<PartnerLotStatus, string> = {
 const RISK_LABELS: Record<PartnerRiskStatus, string> = {
   normal: '正常',
   review: '复核中',
+  review_required: '需复核',
   frozen: '已冻结',
 };
 
@@ -105,7 +106,7 @@ const LOT_STATUSES = new Set<PartnerLotStatus>([
   'frozen',
   'closed',
 ]);
-const RISK_STATUSES = new Set<PartnerRiskStatus>(['normal', 'review', 'frozen']);
+const RISK_STATUSES = new Set<PartnerRiskStatus>(['normal', 'review', 'review_required', 'frozen']);
 
 export function normalizePartnerDashboard(value: unknown): PartnerPageState {
   if (!isRecord(value) || value.enabled !== true) return disabledState;

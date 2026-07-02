@@ -121,4 +121,22 @@ describe('partner page state helpers', () => {
       ],
     });
   });
+
+  it('preserves review-required lot risk status as non-normal copy', () => {
+    const state = normalizePartnerDashboard({
+      enabled: true,
+      lots: [
+        {
+          externalId: 'lot_review',
+          riskStatus: 'review_required',
+        },
+      ],
+    });
+
+    expect(state.enabled).toBe(true);
+    if (!state.enabled) throw new Error('expected enabled partner dashboard');
+    expect(state.lots[0]?.riskStatus).toBe('review_required');
+    expect(state.lots[0]?.riskLabel).toBe('需复核');
+    expect(state.lots[0]?.riskLabel).not.toBe('正常');
+  });
 });
