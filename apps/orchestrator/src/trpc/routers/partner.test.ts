@@ -1,5 +1,5 @@
 import { inspect } from 'node:util';
-import { describe, expect, it, beforeEach, afterEach } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { appRouter } from '../router.js';
 import { partnerRouter } from './partner.js';
 import { users, type User } from '../../db/schema/users.js';
@@ -249,10 +249,12 @@ describe('partnerRouter', () => {
   const originalFlag = process.env.PARTNER_LEDGER_ENABLED;
 
   beforeEach(() => {
+    vi.setSystemTime(new Date('2026-07-02T00:00:00.000Z'));
     delete process.env.PARTNER_LEDGER_ENABLED;
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     if (originalFlag === undefined) {
       delete process.env.PARTNER_LEDGER_ENABLED;
     } else {
