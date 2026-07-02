@@ -35,9 +35,9 @@ const CHECK_TYPE_LABELS: Record<string, string> = {
  * Whether the auto-review (verification) banner should render for a
  * terminal task. The banner is the authoritative recovery surface for
  * flagged results: it explains the failed checks and offers the
- * "重新执行" action. Callers also use this to suppress the *duplicate*
+ * recovery action. Callers also use this to suppress the *duplicate*
  * re-run button on the empty / insufficient fallback cards — when the
- * banner already provides one, a second identical button just muddies
+ * banner already owns recovery, a second generic button just muddies
  * which action is primary.
  */
 export function shouldShowVerificationBanner(task: {
@@ -154,7 +154,7 @@ export function verificationBannerCopy({
       timeoutOnly
         ? '答案已经生成，但自动审核等待过久。HOLA DAY 没有因此阻塞任务，请按关键数据和来源自行核对。'
         : labels.includes('缺少可验证来源链接')
-        ? '答案可先参考，但原始来源链接不足或已被移除，避免把未验证链接当作事实来源。建议重新执行或指定可信来源。'
+        ? '答案可先参考，但原始来源链接不足或已被移除，避免把未验证链接当作事实来源。建议带已完成信息重试，或指定可信来源。'
         : labels.length > 0
         ? '答案可先参考，但下面的结构性要求没有完全满足。建议核对来源后再行动。'
         : '答案可先参考，但旧任务没有保存具体检查项。建议核对来源、数量和排序后再行动。',

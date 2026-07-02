@@ -23,7 +23,7 @@ describe('terminalEmptyCopy', () => {
   it('uses partial-success copy when verification produced no final text', () => {
     expect(terminalEmptyCopy('partial_success')).toEqual({
       title: '需复核',
-      body: '任务已产出部分结果，但没有生成可直接采用的最终回复。已完成的执行记录会保留；重新执行会新建一次尝试继续验证。',
+      body: '任务已进入需复核状态，但没有生成可直接采用的最终回复。已完成的执行记录会保留；带已完成信息重试会新建一次尝试继续验证。',
     });
   });
 

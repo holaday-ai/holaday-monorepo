@@ -79,6 +79,10 @@ import {
   extractDomain,
 } from '../../agent/supercar/stats-service.js';
 import {
+  followUpParentReasonLabel,
+  followUpTerminalGuardMessage,
+} from './task-followup-copy.js';
+import {
   formatForPrompt as formatPlaybooksForPrompt,
   matchPlaybooks,
 } from '../../agent/supercar/playbook-service.js';
@@ -654,7 +658,7 @@ export const tasksRouter = router({
       if (!isTaskTerminalStatus(parent.status)) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
-          message: '只能追问已完成/部分完成/失败/取消的任务，正在执行的任务请用回复',
+          message: followUpTerminalGuardMessage(),
         });
       }
       const parentResult = (parent.result ?? null) as
@@ -678,12 +682,7 @@ export const tasksRouter = router({
       const summary = parentResult?.summary?.trim() ?? '';
       const reason =
         parentResult?.reason?.trim() ?? (parent.errorMessage ?? '').trim();
-      const reasonLabel =
-        parent.status === 'failed'
-          ? '失败原因'
-          : parent.status === 'partial_success'
-            ? '部分完成原因'
-            : '终止原因';
+      const reasonLabel = followUpParentReasonLabel(parent.status);
       const outcomeLine =
         (parent.status === 'completed' || parent.status === 'partial_success') && summary
           ? `结果：${summary}`

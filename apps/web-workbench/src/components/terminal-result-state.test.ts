@@ -70,6 +70,18 @@ describe('terminalResultContentInsufficient', () => {
     expect(taskCancelStateChangedMessage('awaiting_user')).toBe(
       '任务状态刚刚变化，请刷新后再确认是否需要取消。',
     );
+    expect(taskCancelStateChangedMessage('planning')).toBe(
+      '任务状态刚刚变化，请刷新后再确认是否需要取消。',
+    );
+    expect(taskCancelStateChangedMessage('queued')).toBe(
+      '任务状态刚刚变化，请刷新后再确认是否需要取消。',
+    );
+    expect(taskCancelStateChangedMessage('executing')).toBe(
+      '任务状态刚刚变化，请刷新后再确认是否需要取消。',
+    );
+    expect(taskCancelStateChangedMessage('paused')).toBe(
+      '任务状态刚刚变化，请刷新后再确认是否需要取消。',
+    );
     expect(taskCancelStateChangedMessage('unknown')).toBe('任务状态已变化，请刷新后查看最新进度。');
   });
 });

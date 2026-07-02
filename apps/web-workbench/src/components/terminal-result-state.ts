@@ -83,7 +83,15 @@ export function taskCancelStateChangedMessage(state: string | null | undefined):
   ) {
     return '任务已经结束，当前详情已保留。';
   }
-  if (status === 'running' || status === 'awaiting_user') {
+  if (
+    status === 'running' ||
+    status === 'pending' ||
+    status === 'planning' ||
+    status === 'queued' ||
+    status === 'executing' ||
+    status === 'awaiting_user' ||
+    status === 'paused'
+  ) {
     return '任务状态刚刚变化，请刷新后再确认是否需要取消。';
   }
   return '任务状态已变化，请刷新后查看最新进度。';
