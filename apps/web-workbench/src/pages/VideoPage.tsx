@@ -32,7 +32,12 @@ import { useToast } from '@/components/ui/toast';
 import { trpc } from '@/lib/trpc';
 import { uploadFailureMessage, uploadFile, uploadMediaFile } from '@/lib/upload-file';
 import { cn } from '@/lib/utils';
-import { selectStepsFor, shouldRefreshForTask } from '@/lib/video-task-selectors';
+import {
+  isVideoTaskRunning,
+  selectStepsFor,
+  shouldRefreshForTask,
+  videoTaskStatusLabel,
+} from '@/lib/video-task-selectors';
 import { showImageOption, toImageRow, toVideoRow, type VideoRow, type VideoType } from '@/lib/video-history-row';
 import { ipRenderingHint } from '@/lib/video-ip-estimate';
 import { LazyPosterImg } from '@/components/LazyPosterImg';
@@ -922,7 +927,7 @@ function CurrentVideoTaskPanel({
                   {task.title?.trim() || task.intent || '视频任务'}
                 </span>
                 <span className="rounded-full border border-[#DCDDDD] bg-white px-2 py-0.5 text-[11px] text-muted-foreground">
-                  {videoStatusLabel(task.status)}
+                  {videoTaskStatusLabel(task.status)}
                 </span>
               </div>
               {liveText && (
@@ -931,13 +936,12 @@ function CurrentVideoTaskPanel({
                 </p>
               )}
               {/* A1 — IP 换口型慢，给等待预期（仅 ip_person 生成中）。 */}
-              {task.videoType === 'ip_person' &&
-                (task.status === 'executing' || task.status === 'queued') && (
-                  <p className="mt-2 flex items-start gap-1.5 text-[12px] leading-relaxed text-[#8A6A00]">
-                    <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                    {ipRenderingHint(task.intent)}
-                  </p>
-                )}
+              {task.videoType === 'ip_person' && isVideoTaskRunning(task.status) && (
+                <p className="mt-2 flex items-start gap-1.5 text-[12px] leading-relaxed text-[#8A6A00]">
+                  <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  {ipRenderingHint(task.intent)}
+                </p>
+              )}
             </div>
           </div>
 
@@ -980,7 +984,7 @@ function CurrentVideoTaskPanel({
             </div>
           )}
 
-          {(task.status === 'queued' || task.status === 'executing' || task.status === 'awaiting_user') &&
+          {(isVideoTaskRunning(task.status) || task.status === 'awaiting_user') &&
             task.awaitingKind !== 'video_quote' && (
               <div className="flex justify-end">
                 <Button
@@ -1473,26 +1477,6 @@ function videoTypeLabel(videoType: VideoType | undefined): string {
       return '文本视频';
     default:
       return '视频';
-  }
-}
-
-function videoStatusLabel(status: string): string {
-  switch (status) {
-    case 'awaiting_user':
-      return '待确认报价';
-    case 'executing':
-    case 'queued':
-      return '生成中';
-    case 'completed':
-      return '已完成';
-    case 'partial_success':
-      return '部分完成';
-    case 'failed':
-      return '失败';
-    case 'cancelled':
-      return '已取消';
-    default:
-      return status;
   }
 }
 

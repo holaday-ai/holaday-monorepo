@@ -6,6 +6,7 @@ import {
   searchOverlayNeedsAttention,
   searchOverlayRowCopy,
   searchOverlayRowTone,
+  searchOverlayStatusTone,
   searchOverlayErrorMessage,
   searchOverlayStatusCopy,
 } from './search-overlay-state';
@@ -24,6 +25,16 @@ describe('searchOverlayRowTone — P2-B resting tone', () => {
     expect(searchOverlayRowTone('completed')).toBe('');
     expect(searchOverlayRowTone('awaiting_user')).toBe('');
     expect(searchOverlayRowTone('executing')).toBe('');
+    expect(searchOverlayRowTone({ status: 'executing', awaitingKind: 'login' })).toBe('');
+  });
+
+  it('uses awaiting badge tone when awaitingKind arrives before status flips', () => {
+    expect(searchOverlayStatusTone({ status: 'executing', awaitingKind: 'login' })).toContain(
+      '#FFC910',
+    );
+    expect(searchOverlayStatusTone('executing')).toContain('#57479C');
+    expect(searchOverlayStatusTone('paused')).toContain('#EFEFEF');
+    expect(searchOverlayStatusTone('unknown')).toContain('#EFEFEF');
   });
 });
 
@@ -83,7 +94,7 @@ describe('search overlay state helpers', () => {
           intent: '  Weekly report  ',
           title: '  Report title  ',
           status: 'completed',
-          awaitingKind: 'login',
+          awaitingKind: 'video_quote',
         },
         {
           taskId: 'tsk_2',
@@ -99,13 +110,13 @@ describe('search overlay state helpers', () => {
         intent: 'Weekly report',
         title: 'Report title',
         status: 'completed',
-        awaitingKind: 'login',
+        awaitingKind: 'video_quote',
       },
       {
         taskId: 'tsk_2',
         intent: '未命名任务',
         title: null,
-        status: 'queued',
+        status: 'mystery',
         awaitingKind: null,
       },
     ]);
@@ -119,6 +130,9 @@ describe('search overlay state helpers', () => {
   it('keeps action-needed status visible in mobile search rows', () => {
     expect(searchOverlayNeedsAttention('awaiting_user')).toBe(true);
     expect(searchOverlayNeedsAttention('executing')).toBe(false);
+    expect(searchOverlayNeedsAttention({ status: 'executing', awaitingKind: 'login' })).toBe(
+      true,
+    );
 
     expect(
       searchOverlayRowCopy({
@@ -169,5 +183,18 @@ describe('search overlay state helpers', () => {
       title: '整理好的标题',
       secondary: '原始任务描述',
     });
+  });
+
+  it('preserves unknown string statuses so search results do not fake queued state', () => {
+    expect(
+      normalizeSearchOverlayRows([
+        {
+          taskId: 'tsk_new_status',
+          intent: 'new lifecycle',
+          status: 'archived',
+          awaitingKind: null,
+        },
+      ])[0]?.status,
+    ).toBe('archived');
   });
 });

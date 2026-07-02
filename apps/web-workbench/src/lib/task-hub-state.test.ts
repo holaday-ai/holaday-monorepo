@@ -113,6 +113,7 @@ describe('task hub state helpers', () => {
     expect(taskHubNeedsAttention('awaiting_user')).toBe(true);
     expect(taskHubNeedsAttention('executing')).toBe(false);
     expect(taskHubNeedsAttention('completed')).toBe(false);
+    expect(taskHubNeedsAttention({ status: 'executing', awaitingKind: 'login' })).toBe(true);
   });
 
   it('classifies task status into hub display tones', () => {
@@ -122,13 +123,17 @@ describe('task hub state helpers', () => {
     expect(taskHubStatusTone('failed')).toBe('failed');
     expect(taskHubStatusTone('awaiting_user')).toBe('awaiting');
     expect(taskHubStatusTone('cancelled')).toBe('cancelled');
+    expect(taskHubStatusTone('paused')).toBe('paused');
+    expect(taskHubStatusTone({ status: 'executing', awaitingKind: 'video_quote' })).toBe(
+      'awaiting',
+    );
     // …while every non-terminal status collapses to 'running'.
     expect(taskHubStatusTone('pending')).toBe('running');
     expect(taskHubStatusTone('planning')).toBe('running');
     expect(taskHubStatusTone('queued')).toBe('running');
     expect(taskHubStatusTone('executing')).toBe('running');
-    expect(taskHubStatusTone('paused')).toBe('running');
-    expect(taskHubStatusTone('mystery')).toBe('running');
+    expect(taskHubStatusTone('mystery')).toBe('unknown');
+    expect(taskHubStatusTone('unknown')).toBe('unknown');
   });
 
   it('keys history requests to the active filter set', () => {
@@ -206,7 +211,7 @@ describe('task hub state helpers', () => {
           intent: ' Check weekly metrics ',
           title: '  Metrics summary ',
           status: 'completed',
-          awaitingKind: 'captcha',
+          awaitingKind: 'video_quote',
           createdAt: ' 2026-05-25T00:00:00.000Z ',
           completedAt: ' 2026-05-25T00:05:00.000Z ',
           starredAt: 1780000000000,
@@ -218,12 +223,25 @@ describe('task hub state helpers', () => {
         intent: 'Check weekly metrics',
         title: 'Metrics summary',
         status: 'completed',
-        awaitingKind: 'captcha',
+        awaitingKind: 'video_quote',
         createdAt: '2026-05-25T00:00:00.000Z',
         completedAt: '2026-05-25T00:05:00.000Z',
         starredAt: 1780000000000,
       },
     ]);
+  });
+
+  it('preserves unknown string statuses so new backend states are not shown as queued', () => {
+    expect(
+      normalizeTaskHubRows([
+        {
+          taskId: 'tsk_new_status',
+          intent: 'new lifecycle',
+          status: 'archived',
+          createdAt: '2026-05-25T00:00:00.000Z',
+        },
+      ])[0]?.status,
+    ).toBe('archived');
   });
 
   it('falls back from malformed task hub fields safely', () => {
@@ -233,7 +251,7 @@ describe('task hub state helpers', () => {
           taskId: 'tsk_2',
           intent: { unsafe: true },
           title: { unsafe: true },
-          status: 'mystery',
+          status: { unsafe: true },
           awaitingKind: 'bad',
           createdAt: { unsafe: true },
           completedAt: Number.POSITIVE_INFINITY,
@@ -245,7 +263,7 @@ describe('task hub state helpers', () => {
         taskId: 'tsk_2',
         intent: '未命名任务',
         title: null,
-        status: 'queued',
+        status: 'unknown',
         awaitingKind: null,
         createdAt: '',
         completedAt: null,

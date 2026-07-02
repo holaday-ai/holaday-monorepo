@@ -132,6 +132,48 @@ describe('normaliseDetailStepStatus', () => {
 });
 
 describe('toUiTask', () => {
+  it('preserves persisted pre-execution statuses for the product state machine', () => {
+    for (const status of ['pending', 'planning', 'queued'] as const) {
+      const task = toUiTask({
+        taskId: `tsk_${status}`,
+        intent: '准备执行任务',
+        title: null,
+        status,
+        result: null,
+        errorMessage: null,
+        createdAt: new Date('2026-06-04T00:00:00Z'),
+        opusUsed: false,
+        starred: false,
+        starredAt: null,
+        projectId: null,
+        verificationPassed: null,
+        failureLevel: null,
+      } as never);
+
+      expect(task.status).toBe(status);
+    }
+  });
+
+  it('normalizes unrecognized persisted task statuses to unknown', () => {
+    const task = toUiTask({
+      taskId: 'tsk_mystery',
+      intent: '未知状态任务',
+      title: null,
+      status: 'archived',
+      result: null,
+      errorMessage: null,
+      createdAt: new Date('2026-06-04T00:00:00Z'),
+      opusUsed: false,
+      starred: false,
+      starredAt: null,
+      projectId: null,
+      verificationPassed: null,
+      failureLevel: null,
+    } as never);
+
+    expect(task.status).toBe('unknown');
+  });
+
   it('hydrates persisted verifier failedChecks from tasks.list result JSON', () => {
     const task = toUiTask({
       taskId: 'tsk_partial',
@@ -340,7 +382,7 @@ describe('toUiTask', () => {
         taskId: 'tsk_fallback',
         intent: '未命名任务',
         title: null,
-        status: 'queued',
+        status: 'unknown',
         starredAt: null,
         projectId: null,
       },
@@ -516,7 +558,7 @@ describe('refreshTaskList', () => {
       taskId: 'tsk_boot',
       intent: '未命名任务',
       title: null,
-      status: 'queued',
+      status: 'unknown',
     });
   });
 });
@@ -722,7 +764,7 @@ describe('selectTask detail hydration', () => {
       taskId: 'tsk_detail',
       intent: '未命名任务',
       title: null,
-      status: 'queued',
+      status: 'unknown',
       resultText: 'Done summary',
       createdAt: new Date(0),
       starredAt: null,
@@ -904,7 +946,7 @@ describe('loadMoreTasks', () => {
     ]);
     expect(state.tasks[1]).toMatchObject({
       intent: '未命名任务',
-      status: 'queued',
+      status: 'unknown',
     });
   });
 });
@@ -1148,6 +1190,202 @@ describe('replyToTask', () => {
     expect(state.awaitingUserByTask.tsk_wait?.awaitingKind).toBe('browser_action');
     expect(state.tasks[0]?.status).toBe('awaiting_user');
     expect(state.tasks[0]?.awaitingKind).toBe('browser_action');
+  });
+});
+
+describe('applyServerMessage awaiting_user', () => {
+  it('mirrors awaiting_user onto the task row immediately', () => {
+    useTaskStore.setState({
+      tasks: [task({ taskId: 'tsk_wait', status: 'executing', executionMode: 'browser' })],
+      subStatusByTask: {
+        tsk_wait: { subStatus: 'browsing', since: 1 },
+      },
+    });
+
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.supercar.awaiting_user',
+      taskId: 'tsk_wait',
+      question: '请先完成登录',
+      awaitingKind: 'login',
+    });
+
+    const state = useTaskStore.getState();
+    expect(state.awaitingUserByTask.tsk_wait).toMatchObject({
+      question: '请先完成登录',
+      awaitingKind: 'login',
+    });
+    expect(state.tasks[0]).toMatchObject({
+      status: 'awaiting_user',
+      awaitingKind: 'login',
+    });
+    expect(state.subStatusByTask.tsk_wait).toBeUndefined();
+  });
+});
+
+describe('applyServerMessage task.control', () => {
+  it('pauses and resumes a task from control frames', () => {
+    useTaskStore.setState({
+      tasks: [task({ taskId: 'tsk_control', status: 'executing' })],
+      subStatusByTask: {
+        tsk_control: { subStatus: 'browsing', since: 1 },
+      },
+    });
+
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.task.control',
+      taskId: 'tsk_control',
+      command: 'pause',
+      reason: 'retries_exhausted',
+    });
+
+    expect(useTaskStore.getState().tasks[0]?.status).toBe('paused');
+    expect(useTaskStore.getState().subStatusByTask.tsk_control).toBeUndefined();
+
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.task.control',
+      taskId: 'tsk_control',
+      command: 'resume',
+    });
+
+    expect(useTaskStore.getState().tasks[0]?.status).toBe('executing');
+  });
+
+  it('cancels a task immediately and gates stale stream/progress frames', () => {
+    useTaskStore.setState({
+      tasks: [task({ taskId: 'tsk_cancel', status: 'executing' })],
+      streamingByTask: { tsk_cancel: 'partial answer' },
+      progressByTask: { tsk_cancel: '正在执行' },
+      subStatusByTask: {
+        tsk_cancel: { subStatus: 'generating', since: 1 },
+      },
+    });
+
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.task.control',
+      taskId: 'tsk_cancel',
+      command: 'cancel',
+    });
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.task.stream',
+      taskId: 'tsk_cancel',
+      delta: ' stale',
+    });
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.task.progress',
+      taskId: 'tsk_cancel',
+      message: 'stale progress',
+      subStatus: 'generating',
+    });
+
+    const state = useTaskStore.getState();
+    expect(state.tasks[0]?.status).toBe('cancelled');
+    expect(state.terminalTaskIds.has('tsk_cancel')).toBe(true);
+    expect(state.streamingByTask.tsk_cancel).toBe('partial answer');
+    expect(state.progressByTask.tsk_cancel).toBe('正在执行');
+    expect(state.subStatusByTask.tsk_cancel).toBeUndefined();
+  });
+});
+
+describe('applyServerMessage paused terminal frame', () => {
+  it('keeps paused recoverable and clears stale live blockers without terminal reveal animation', () => {
+    useTaskStore.setState({
+      tasks: [task({ taskId: 'tsk_paused_terminal', status: 'executing' })],
+      awaitingUserByTask: {
+        tsk_paused_terminal: {
+          question: '需要继续吗？',
+          at: 1,
+          awaitingKind: 'clarification',
+        },
+      },
+      subStatusByTask: {
+        tsk_paused_terminal: { subStatus: 'browsing', since: 1 },
+      },
+    });
+
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.task.terminal',
+      taskId: 'tsk_paused_terminal',
+      status: 'paused',
+      reason: '达到最大步骤数，请确认下一步。',
+    });
+
+    const state = useTaskStore.getState();
+    expect(state.tasks[0]).toMatchObject({
+      status: 'paused',
+      resultText: '达到最大步骤数，请确认下一步。',
+    });
+    expect(state.awaitingUserByTask.tsk_paused_terminal).toBeUndefined();
+    expect(state.subStatusByTask.tsk_paused_terminal).toBeUndefined();
+    expect(state.terminalTaskIds.has('tsk_paused_terminal')).toBe(true);
+    expect(state.animatedTaskIds.has('tsk_paused_terminal')).toBe(false);
+  });
+});
+
+describe('applyServerMessage queued lifecycle', () => {
+  it('marks queued tasks explicitly and flips them to executing on first tick', () => {
+    useTaskStore.setState({
+      tasks: [task({ taskId: 'tsk_queue', status: 'executing' })],
+    });
+
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.task.queued',
+      taskId: 'tsk_queue',
+      position: 3,
+    });
+
+    expect(useTaskStore.getState().tasks[0]).toMatchObject({
+      status: 'queued',
+      queuePosition: 3,
+    });
+
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.vision.tick.start',
+      taskId: 'tsk_queue',
+      tickIndex: 0,
+      mode: 'screenshot',
+    });
+
+    expect(useTaskStore.getState().tasks[0]).toMatchObject({
+      status: 'executing',
+      tickCount: 1,
+    });
+    expect(useTaskStore.getState().tasks[0]?.queuePosition).toBeUndefined();
+  });
+
+  it('flips queued tasks to executing on first progress frame', () => {
+    useTaskStore.setState({
+      tasks: [task({ taskId: 'tsk_progress_queue', status: 'queued', queuePosition: 2 })],
+    });
+
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.task.progress',
+      taskId: 'tsk_progress_queue',
+      message: '正在准备执行',
+      subStatus: 'planning',
+    });
+
+    expect(useTaskStore.getState().tasks[0]).toMatchObject({
+      status: 'executing',
+    });
+    expect(useTaskStore.getState().tasks[0]?.queuePosition).toBeUndefined();
+  });
+
+  it('flips queued tasks to executing on first stream frame', () => {
+    useTaskStore.setState({
+      tasks: [task({ taskId: 'tsk_stream_queue', status: 'queued', queuePosition: 1 })],
+    });
+
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.task.stream',
+      taskId: 'tsk_stream_queue',
+      delta: '开始生成',
+    });
+
+    expect(useTaskStore.getState().tasks[0]).toMatchObject({
+      status: 'executing',
+      executionMode: 'generate',
+    });
+    expect(useTaskStore.getState().tasks[0]?.queuePosition).toBeUndefined();
   });
 });
 

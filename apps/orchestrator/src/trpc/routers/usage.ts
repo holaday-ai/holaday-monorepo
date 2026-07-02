@@ -15,6 +15,7 @@ import type { PlanId } from '@holaday/shared-types';
 import { tasks } from '../../db/schema/tasks.js';
 import { users } from '../../db/schema/users.js';
 import { QuotaService, getConcurrencyLimit } from '../../quota/quota-service.js';
+import { TASK_ACTIVE_STATUSES } from '../../task-status.js';
 import { protectedProcedure, router } from '../trpc.js';
 
 /**
@@ -37,15 +38,6 @@ function buildSevenDayWindow(now: Date = new Date()): string[] {
   }
   return out;
 }
-
-const RUNNING_STATUSES = [
-  'pending',
-  'planning',
-  'queued',
-  'executing',
-  'awaiting_user',
-  'paused',
-] as const;
 
 type UsageStatusRow = { status: string; count: number };
 
@@ -70,7 +62,7 @@ function summarizeMonthlyStatusRows(statusRows: UsageStatusRow[]): {
     else if (row.status === 'partial_success') monthPartialSuccess += c;
     else if (row.status === 'failed') monthFailed += c;
     else if (row.status === 'cancelled') monthCancelled += c;
-    else if ((RUNNING_STATUSES as readonly string[]).includes(row.status)) {
+    else if ((TASK_ACTIVE_STATUSES as readonly string[]).includes(row.status)) {
       monthExecuting += c;
     }
   }

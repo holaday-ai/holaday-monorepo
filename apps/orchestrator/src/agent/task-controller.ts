@@ -12,11 +12,11 @@ import type { ServerMessage } from '@holaday/shared-types';
  *
  * Status machine (mirrors docs/HOLADAY_ORCHESTRATOR_DESIGN.md):
  *
- *   pending → planning → executing ↔ awaiting_user
- *                          ↕             ↓
- *                        paused      cancelled
- *                          ↓
- *                      completed / failed
+ *   pending → planning → queued → executing ↔ awaiting_user
+ *                                  ↕             ↓
+ *                                paused      cancelled
+ *                                  ↓
+ *                            completed / failed
  */
 
 export type TaskStatus =

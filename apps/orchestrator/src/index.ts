@@ -612,11 +612,11 @@ async function main() {
     );
   }
 
-  // Boot-time stale-task sweep. Any task still in a non-terminal
-  // status after an orchestrator restart can't make progress — the
-  // in-memory queue + agent-loop handle are gone. Mark them failed
-  // with a clear error code so the UI shows them as terminal and the
-  // queue starts clean. 2-minute cutoff because the orchestrator boot
+  // Boot-time stale-task sweep. Transient server-side states that
+  // still exist after an orchestrator restart have lost their
+  // process-local queue/planner handle. Mark stale rows failed with
+  // a clear error code so the UI shows them as terminal and the queue
+  // starts clean. 2-minute cutoff because the orchestrator boot
   // itself takes ~5-10s; anything older than that is definitely stale.
   try {
     const { sql } = await import('drizzle-orm');
@@ -630,7 +630,7 @@ async function main() {
              error_message = '服务重启导致任务中断，重新发送一次即可。',
              updated_at = NOW(3),
              completed_at = NOW(3)
-       WHERE status IN ('pending','executing','planning')
+       WHERE status IN ('pending','planning','queued','executing')
          AND created_at < NOW() - INTERVAL 2 MINUTE
     `);
     // Phase 3 R1 — also reap stale awaiting_user tasks. With the new

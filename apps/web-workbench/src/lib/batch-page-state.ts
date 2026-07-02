@@ -218,23 +218,13 @@ function normalizeBatchItem(value: unknown, fallbackSeq: number): NormalizedBatc
 }
 
 function normalizeBatchStatus(value: unknown): string {
-  return value === 'pending' ||
-    value === 'running' ||
-    value === 'completed' ||
-    value === 'partial' ||
-    value === 'cancelled'
-    ? value
-    : 'pending';
+  const status = safeBatchText(value);
+  return status || 'unknown';
 }
 
 function normalizeBatchItemStatus(value: unknown): string {
-  return value === 'pending' ||
-    value === 'running' ||
-    value === 'completed' ||
-    value === 'failed' ||
-    value === 'cancelled'
-    ? value
-    : 'pending';
+  const status = safeBatchText(value);
+  return status || 'unknown';
 }
 
 function positiveBatchCount(value: unknown): number {

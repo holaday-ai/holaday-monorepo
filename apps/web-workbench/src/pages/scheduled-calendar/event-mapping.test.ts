@@ -112,6 +112,16 @@ describe('pickStatusColor', () => {
     expect(c.backgroundHover).toBeTruthy();
     expect(c.backgroundHover).not.toBe(c.background);
   });
+
+  it('unknown status uses neutral styling instead of pretending to be active', () => {
+    const c = pickStatusColor(
+      { status: 'unknown', lastRunStatus: null },
+      new Date('2026-05-16T13:00:00Z'),
+      now,
+    );
+    expect(c.accent).toBe('#ADADAD');
+    expect(c.opacity).toBe(0.75);
+  });
 });
 
 describe('rowToEventInput', () => {
@@ -266,7 +276,7 @@ describe('normalizeScheduledTaskRows', () => {
           timezone: { unsafe: true },
           nextRunAt: '2026-05-25T10:00:00.000Z',
           lastRunAt: { unsafe: true },
-          status: 'unknown',
+          status: { unsafe: true },
           lastRunStatus: 'almost',
           lastError: { unsafe: true },
           createdAt: { unsafe: true },
@@ -285,11 +295,27 @@ describe('normalizeScheduledTaskRows', () => {
         timezone: 'Asia/Shanghai',
         nextRunAt: '2026-05-25T10:00:00.000Z',
         lastRunAt: null,
-        status: 'active',
+        status: 'unknown',
         lastRunStatus: null,
         lastError: null,
         createdAt: '',
       },
     ]);
+  });
+
+  it('preserves unknown string scheduled statuses so new backend states are visible', () => {
+    expect(
+      normalizeScheduledTaskRows([
+        {
+          scheduledTaskId: 'sch_new',
+          intent: 'new scheduled state',
+          repeatType: 'once',
+          durationMinutes: 30,
+          nextRunAt: '2026-05-25T10:00:00.000Z',
+          status: 'archived',
+          createdAt: '2026-05-20T00:00:00.000Z',
+        },
+      ])[0]?.status,
+    ).toBe('archived');
   });
 });

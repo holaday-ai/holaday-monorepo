@@ -170,13 +170,45 @@ describe('batch page state helpers', () => {
     ]);
   });
 
+  it('preserves unknown string batch statuses so new backend states are visible', () => {
+    expect(
+      normalizeBatchRows([
+        {
+          batchId: 'batch_new',
+          status: 'archived',
+          concurrency: 1,
+          itemsTotal: 1,
+          createdAt: '2026-05-25T00:00:00.000Z',
+        },
+      ])[0]?.status,
+    ).toBe('archived');
+
+    expect(
+      normalizeBatchDetail({
+        batchId: 'batch_detail_new',
+        status: 'archived',
+        concurrency: 1,
+        itemsTotal: 1,
+        createdAt: '2026-05-25T00:00:00.000Z',
+        items: [
+          {
+            batchItemId: 'item_new',
+            prompt: 'new state',
+            status: 'needs_review',
+            createdAt: '2026-05-25T00:00:00.000Z',
+          },
+        ],
+      })?.items[0]?.status,
+    ).toBe('needs_review');
+  });
+
   it('falls back from malformed batch row fields safely', () => {
     expect(
       normalizeBatchRows([
         {
           batchId: 'batch_2',
           name: { unsafe: true },
-          status: 'unknown',
+          status: { unsafe: true },
           concurrency: -1,
           itemsTotal: Number.NaN,
           itemsDone: Number.POSITIVE_INFINITY,
@@ -190,7 +222,7 @@ describe('batch page state helpers', () => {
       {
         batchId: 'batch_2',
         name: null,
-        status: 'pending',
+        status: 'unknown',
         concurrency: 1,
         itemsTotal: 0,
         itemsDone: 0,
@@ -244,7 +276,7 @@ describe('batch page state helpers', () => {
         batchItemId: 'item_1',
         seq: 1,
         prompt: '未命名任务',
-        status: 'pending',
+        status: 'unknown',
         errorMessage: null,
         taskId: null,
         createdAt: '',

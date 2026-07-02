@@ -20,6 +20,7 @@ import { taskEvents } from '../db/schema/task-events.js';
 import { taskSteps } from '../db/schema/task-steps.js';
 import { tasks } from '../db/schema/tasks.js';
 import { users } from '../db/schema/users.js';
+import { TASK_ACTIVE_STATUSES } from '../task-status.js';
 import type { PendingConfirm, PlannedStep, TaskState } from './task-controller.js';
 
 /**
@@ -491,8 +492,8 @@ export class TaskRepository {
   /**
    * Rehydrate in-flight TaskStates after orchestrator restart.
    *
-   * Reads every `tasks` row whose status is non-terminal (executing /
-   * awaiting_user / paused / planning / pending) together with the
+   * Reads every `tasks` row whose status is non-terminal (pending /
+   * planning / queued / executing / awaiting_user / paused) together with the
    * user's external_id (for routing back to the owning WS client) and
    * the ordered task_steps list. Rebuilds a TaskState per task so the
    * WS server can re-seed its per-client in-memory map and, if the step
@@ -581,7 +582,7 @@ export class TaskRepository {
       })
       .from(tasks)
       .innerJoin(users, eq(users.id, tasks.userId))
-      .where(inArray(tasks.status, [...IN_FLIGHT_STATUSES]));
+      .where(inArray(tasks.status, [...TASK_ACTIVE_STATUSES]));
 
     const out: RehydratedTask[] = [];
     for (const row of rows) {
@@ -693,8 +694,6 @@ function normalizePendingConfirm(raw: unknown): PendingConfirm | null {
   }
   return null;
 }
-
-const IN_FLIGHT_STATUSES = ['pending', 'planning', 'executing', 'awaiting_user', 'paused'] as const;
 
 // ---------- helpers ----------
 

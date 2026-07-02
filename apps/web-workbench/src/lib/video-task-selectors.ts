@@ -50,3 +50,34 @@ export function shouldRefreshForTask(input: {
   if (input.already) return false;
   return true;
 }
+
+export function isVideoTaskRunning(status: string): boolean {
+  return (
+    status === 'pending' ||
+    status === 'planning' ||
+    status === 'queued' ||
+    status === 'executing'
+  );
+}
+
+export function videoTaskStatusLabel(status: string): string {
+  switch (status) {
+    case 'awaiting_user':
+      return '待确认报价';
+    case 'pending':
+    case 'planning':
+    case 'executing':
+    case 'queued':
+      return '生成中';
+    case 'completed':
+      return '已完成';
+    case 'partial_success':
+      return '部分完成';
+    case 'failed':
+      return '失败';
+    case 'cancelled':
+      return '已取消';
+    default:
+      return status;
+  }
+}

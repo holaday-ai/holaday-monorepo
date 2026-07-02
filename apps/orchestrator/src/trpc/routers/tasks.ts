@@ -51,6 +51,12 @@ import {
   type SupercarOutcome,
 } from '../../agent/supercar/index.js';
 import {
+  buildSupercarWaitingUserMessage,
+  classifySupercarTaskStateTransition,
+  shouldPersistSupercarTerminalOutcome,
+  shouldRunSupercarTerminalSideEffects,
+} from '../../agent/supercar/task-state-machine.js';
+import {
   parseOtaAllowlist,
   resolveOtaCanaryLane,
 } from '../../agent/supercar/ota-user-browser-policy.js';
@@ -160,7 +166,11 @@ import {
 // would otherwise label it "已完成" because the runner respected the
 // agent's terminal decision.
 import { detectNavFailure } from '../../agent/nav-failure-detector.js';
-import { isTaskTerminalStatus } from '../../task-status.js';
+import {
+  TASK_ACTIVE_STATUSES,
+  TASK_QUEUE_DEPTH_STATUSES,
+  isTaskTerminalStatus,
+} from '../../task-status.js';
 
 const taskController = new TaskController();
 
@@ -889,13 +899,13 @@ export const tasksRouter = router({
     // Phase 21a P0 — global queue-depth guard. Applies to ALL users,
     // bypass or not, so a runaway client (or a bug elsewhere) can't
     // pile tasks faster than the executor pool drains. Counts across
-    // pending/executing/planning, the same set the boot sweep cleans
-    // up on restart. The query hits an index on `status`, so this is
+    // pending/planning/queued/executing. Parked user-wait states do
+    // not consume executor capacity. The query hits an index on `status`, so this is
     // sub-ms even at high concurrency.
     const [activeRow] = await ctx.db
       .select({ count: sql<number>`COUNT(*)` })
       .from(tasksTable)
-      .where(inArray(tasksTable.status, ['pending', 'executing', 'planning']));
+      .where(inArray(tasksTable.status, [...TASK_QUEUE_DEPTH_STATUSES]));
     const queueDepth = Number(activeRow?.count ?? 0);
     if (queueDepth >= GLOBAL_QUEUE_DEPTH_LIMIT) {
       ctx.logger.warn(
@@ -4658,6 +4668,11 @@ export const tasksRouter = router({
               executionVerification && !executionVerification.passed
                 ? extractFailedChecks(executionVerification)
                 : undefined;
+            const supercarStateTransition = classifySupercarTaskStateTransition({
+              status: outcome.status,
+              question: outcome.question,
+              summary: outcome.summary,
+            });
             // Optimization #2 — OpenAI response formatter / style
             // layer. Runs AFTER the verifier (so we polish facts that
             // have already been grounded) and BEFORE persistence. The
@@ -4723,16 +4738,52 @@ export const tasksRouter = router({
                 );
               }
             }
-            const { persisted: terminalPersisted } = await persistSupercarOutcome(
-              repo,
-              taskId,
-              outcome,
-              finalState,
-              metadata,
-              supercarTerminalStatus,
-              supercarFailureSummary,
-              supercarFailedChecks,
-            );
+            let terminalPersisted = false;
+            if (supercarStateTransition.kind === 'waiting_user') {
+              try {
+                const finalFields = finalStatePersistFields(finalState);
+                await ctx.db
+                  .update(tasksTable)
+                  .set({
+                    status: 'awaiting_user',
+                    awaitingQuestion: supercarStateTransition.question,
+                    awaitingKind: supercarStateTransition.awaitingKind,
+                    pauseReason: null,
+                    errorCode: null,
+                    errorMessage: null,
+                    result: {
+                      ...(metadata ?? {}),
+                      executionMode:
+                        typeof metadata?.executionMode === 'string'
+                          ? metadata.executionMode
+                          : 'browser',
+                      ...finalFields,
+                    },
+                  })
+                  .where(eq(tasksTable.externalId, taskId));
+                broadcastToUser(userId, buildSupercarWaitingUserMessage({
+                  taskId,
+                  transition: supercarStateTransition,
+                }));
+              } catch (err) {
+                ctx.logger.warn(
+                  { err, taskId },
+                  'supercar: persist/broadcast awaiting_user fallback failed',
+                );
+              }
+            } else {
+              const terminalResult = await persistSupercarOutcome(
+                repo,
+                taskId,
+                outcome,
+                finalState,
+                metadata,
+                supercarTerminalStatus,
+                supercarFailureSummary,
+                supercarFailedChecks,
+              );
+              terminalPersisted = terminalResult.persisted;
+            }
             // Optimization #2 — stamp the formatter columns. Best-
             // effort UPDATE after the row landed; failure here logs
             // but doesn't tear down the terminal flow. Only writes
@@ -4813,13 +4864,17 @@ export const tasksRouter = router({
             // extraction would store a half-finished summary, and a
             // stale suggestion bubble would surface alongside the
             // running task. Skip all three when the row didn't move.
-            if (!terminalPersisted) {
+            const runTerminalSideEffects = shouldRunSupercarTerminalSideEffects({
+              transition: supercarStateTransition,
+              persisted: terminalPersisted,
+            });
+            if (!runTerminalSideEffects) {
               ctx.logger.info(
-                { taskId },
-                'supercar: terminal persist refused by state guard — skipping broadcast / memory / suggestions',
+                { taskId, transition: supercarStateTransition.kind },
+                'supercar: skipping terminal broadcast / memory / suggestions',
               );
             }
-            if (terminalPersisted) {
+            if (runTerminalSideEffects) {
               try {
                 // Codex Round 2 P1-6 — surface verifier failed checks
                 // to the SPA banner. Only populated when verifier
@@ -5077,6 +5132,13 @@ export const tasksRouter = router({
           },
           'task-queue: task enqueued',
         );
+        if (enqueueResult.kind === 'queued') {
+          broadcastToUser(ctx.userId, {
+            type: 'server.task.queued',
+            taskId,
+            position: enqueueResult.position,
+          });
+        }
         const statusOut = enqueueResult.kind === 'dispatched' ? 'executing' : 'queued';
         return {
           taskId,
@@ -5773,10 +5835,19 @@ export const tasksRouter = router({
       }
       // unclear — 没听懂 → 重出报价卡,仍 awaiting,不消费、不烧钱。
       if (choice === 'unclear') {
+        const question = '请点按钮选择：确认制作 / 图片版 / 取消。';
+        await ctx.db
+          .update(tasksTable)
+          .set({
+            status: 'awaiting_user',
+            awaitingQuestion: question,
+            awaitingKind: 'video_quote',
+          })
+          .where(eq(tasksTable.externalId, input.taskId));
         broadcastToUser(ctx.userId, {
           type: 'server.supercar.awaiting_user',
           taskId: input.taskId,
-          question: '请点按钮选择：确认制作 / 图片版 / 取消。',
+          question,
           awaitingKind: 'video_quote',
         });
         return { taskId: input.taskId, status: 'awaiting_user' as const };
@@ -6986,8 +7057,8 @@ export const tasksRouter = router({
         return { ok: true, state: 'aborting' as const };
       }
 
-      const cancellableStatuses = ['pending', 'planning', 'executing', 'awaiting_user', 'paused'];
-      if (!cancellableStatuses.includes(taskRow.status)) {
+      const cancellableStatuses = [...TASK_ACTIVE_STATUSES];
+      if (!(cancellableStatuses as readonly string[]).includes(taskRow.status)) {
         return { ok: false, state: taskRow.status };
       }
 
@@ -7812,6 +7883,15 @@ async function persistSupercarOutcome(
   // suggestions when the state-machine guard refused the write (row
   // still in awaiting_user). See task-repository.ts atomic guard for
   // the rationale.
+  if (!shouldPersistSupercarTerminalOutcome(outcome.status)) {
+    // Awaiting-user is a parked non-terminal state. Persist it through
+    // the explicit waiting-user path, never through terminal helpers
+    // that would collapse it into paused/failed/cancelled semantics.
+    console.warn(
+      `[supercar] refusing terminal persist for awaiting_user outcome ${taskId}`,
+    );
+    return { persisted: false };
+  }
   try {
     const finalFields = finalStatePersistFields(finalState);
     // Codex Pack A3 — verifier verdict overrides on a completed run.
@@ -7839,19 +7919,6 @@ async function persistSupercarOutcome(
       return await repo.persistVisionOutcome(taskId, {
         status: 'completed',
         summary: outcome.summary ?? '',
-        tickCount: outcome.iterations,
-        ...finalFields,
-        ...(metadata ? { metadata } : {}),
-      });
-    } else if (outcome.status === 'awaiting_user') {
-      // Shouldn't land here in the happy path — the loop returns a
-      // terminal status after the reply, not awaiting_user. Persist
-      // as paused so the UI still renders sensibly if it did.
-      // Phase 1 follow-up — include finalUrl + finalScreenshot so
-      // the BrowserPanel has a frame to render instead of blank.
-      return await repo.persistVisionOutcome(taskId, {
-        status: 'paused',
-        reason: outcome.question ?? 'awaiting user reply',
         tickCount: outcome.iterations,
         ...finalFields,
         ...(metadata ? { metadata } : {}),
@@ -8027,9 +8094,10 @@ async function captureFinalState(
 }
 
 /**
- * Translate a supercar outcome to the `server.task.terminal` frame the
- * web workbench + extension already understand. `timeout` collapses to
- * `failed` over the wire so the schema doesn't need to widen.
+ * Translate a supercar outcome to the status frame the web workbench
+ * understands. Terminal outcomes emit `server.task.terminal`; parked
+ * clarification emits `server.supercar.awaiting_user`. `timeout`
+ * collapses to `failed` over the wire so the schema doesn't need to widen.
  */
 function buildTaskTerminalMessage(
   taskId: string,
@@ -8083,12 +8151,14 @@ function buildTaskTerminalMessage(
     return { type: 'server.task.terminal', taskId, status: 'cancelled' };
   }
   if (outcome.status === 'awaiting_user') {
-    return {
-      type: 'server.task.terminal',
+    return buildSupercarWaitingUserMessage({
       taskId,
-      status: 'paused',
-      ...(outcome.question ? { reason: outcome.question } : {}),
-    };
+      transition: {
+        kind: 'waiting_user',
+        awaitingKind: 'clarification',
+        question: outcome.question ?? '请补充必要信息后继续。',
+      },
+    });
   }
   // failed / timeout — translate the internal reason into a
   // user-facing Chinese explanation + one actionable suggestion.

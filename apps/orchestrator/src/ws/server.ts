@@ -8,6 +8,7 @@ import {
   WS_SUBPROTOCOL,
   parseClientMessage,
 } from '@holaday/shared-types';
+import { eq } from 'drizzle-orm';
 import { WebSocket, WebSocketServer } from 'ws';
 import type { Planner } from '../agent/planner.js';
 import { TaskController, type TaskState } from '../agent/task-controller.js';
@@ -17,6 +18,7 @@ import { type RehydratedTask, TaskRepository } from '../agent/task-repository.js
 import { verifyAccessToken } from '../auth/jwt.js';
 import { logger } from '../config/logger.js';
 import { db } from '../db/client.js';
+import { tasks as tasksTable } from '../db/schema/tasks.js';
 import {
   extensionNoClientMessage,
   extensionSocketClosedMessage,
@@ -142,10 +144,13 @@ export function createWsServer(port: number, opts: WsServerOpts = {}) {
  *   executing     → re-emit server.task.dispatch for the cursor step,
  *                    so the extension resumes the in-flight action
  *                    (W1 rehearsal b1: completeness of crash recovery)
+ *   queued/pending/planning → fail visibly; these states depended on
+ *                    process-local queue/planner closures that no
+ *                    longer exist after restart
  *
- * `planning` and `pending` are transient server-side states that shouldn't
- * normally persist past a restart; if they do, we log and move on — a
- * re-plan would need to call the commander again which is out of scope.
+ * Re-planning queued/pending/planning would need to reconstruct the
+ * original tasks.create execution closure and risks double-consuming
+ * quota/external side effects, so we prefer an honest restart failure.
  */
 function isExtensionHello(msg: ClientMessage): boolean {
   if (msg.type !== 'client.hello') return false;
@@ -156,7 +161,7 @@ function isExtensionHello(msg: ClientMessage): boolean {
   );
 }
 
-function applyRehydrationForUser(state: ClientState): void {
+async function applyRehydrationForUser(state: ClientState): Promise<void> {
   if (!state.userId) return;
   if (state.isExtension) {
     logger.debug(
@@ -171,6 +176,7 @@ function applyRehydrationForUser(state: ClientState): void {
   let reemittedDispatch = 0;
   let reemittedConfirm = 0;
   let reemittedPause = 0;
+  let reemittedTerminal = 0;
 
   for (const entry of bucket) {
     state.tasks.set(entry.state.taskId, entry.state);
@@ -235,9 +241,39 @@ function applyRehydrationForUser(state: ClientState): void {
       continue;
     }
 
+    if (isRestartLostTransientStatus(entry.state.status)) {
+      const reason = '服务重启导致任务中断，重新发送一次即可。';
+      try {
+        await failRehydratedTransientTask(entry.state.taskId, reason);
+      } catch (err) {
+        logger.warn(
+          {
+            err: err instanceof Error ? err.message : String(err),
+            userId: state.userId,
+            taskId: entry.state.taskId,
+            status: entry.state.status,
+          },
+          'restart recovery: failed to persist transient task failure',
+        );
+      }
+      state.tasks.set(entry.state.taskId, {
+        ...entry.state,
+        status: 'failed',
+        error: { code: 'ORCHESTRATOR_RESTART', message: reason },
+      });
+      send(state.socket, {
+        type: 'server.task.terminal',
+        taskId: entry.state.taskId,
+        status: 'failed',
+        reason,
+      });
+      reemittedTerminal += 1;
+      continue;
+    }
+
     logger.info(
       { userId: state.userId, taskId: entry.state.taskId, status: entry.state.status },
-      'rehydrated task in transient state; not re-emitting (needs re-plan in W2+)',
+      'rehydrated task in unsupported state; not re-emitting',
     );
   }
 
@@ -249,12 +285,30 @@ function applyRehydrationForUser(state: ClientState): void {
         dispatch: reemittedDispatch,
         confirm: reemittedConfirm,
         pause: reemittedPause,
+        terminal: reemittedTerminal,
       },
     },
     'rehydrated tasks delivered to client',
   );
   // Drain so reconnecting sibling tabs don't double-prompt.
   rehydratedByUser.delete(state.userId);
+}
+
+function isRestartLostTransientStatus(status: TaskState['status']): boolean {
+  return status === 'pending' || status === 'planning' || status === 'queued';
+}
+
+async function failRehydratedTransientTask(taskId: string, reason: string): Promise<void> {
+  await db
+    .update(tasksTable)
+    .set({
+      status: 'failed',
+      errorCode: 'ORCHESTRATOR_RESTART',
+      errorMessage: reason,
+      updatedAt: new Date(),
+      completedAt: new Date(),
+    })
+    .where(eq(tasksTable.externalId, taskId));
 }
 
 // ---------- Connected-clients registry (so tRPC can push) ----------
@@ -671,7 +725,7 @@ async function handleClientMessage(
       clientId: state.id,
       heartbeatMs: HEARTBEAT_INTERVAL_MS,
     });
-    applyRehydrationForUser(state);
+    await applyRehydrationForUser(state);
     return;
   }
 

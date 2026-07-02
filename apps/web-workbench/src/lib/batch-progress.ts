@@ -118,23 +118,13 @@ function normalizeProgressItem(value: unknown): BatchProgressFrame['item'] | und
 }
 
 function normalizeBatchProgressStatus(value: unknown): string {
-  return value === 'pending' ||
-    value === 'running' ||
-    value === 'completed' ||
-    value === 'partial' ||
-    value === 'cancelled'
-    ? value
-    : 'pending';
+  const status = safeProgressText(value);
+  return status || 'unknown';
 }
 
 function normalizeBatchItemProgressStatus(value: unknown): string {
-  return value === 'pending' ||
-    value === 'running' ||
-    value === 'completed' ||
-    value === 'failed' ||
-    value === 'cancelled'
-    ? value
-    : 'pending';
+  const status = safeProgressText(value);
+  return status || 'unknown';
 }
 
 function safeProgressCount(value: unknown): number {

@@ -199,4 +199,41 @@ describe('paused state persistence + rehydration', () => {
     expect(hit?.state.pauseReason).toBe('quota_exceeded');
     expect(hit?.pauseReason).toBe('quota_exceeded');
   });
+
+  it('rehydrateInFlight returns queued tasks so restart recovery can resolve them visibly', async () => {
+    const { newExternalId } = await import('@holaday/shared-types');
+    const { db } = await import('../db/client.js');
+    const { eq } = await import('drizzle-orm');
+    const { users } = await import('../db/schema/users.js');
+    const { TaskRepository } = await import('./task-repository.js');
+
+    const email = `rehydrate-queued+${Date.now()}@example.com`;
+    await db.insert(users).values({
+      externalId: newExternalId('user'),
+      email,
+      passwordHash: 'placeholder',
+    });
+    const user = must((await db.select().from(users).where(eq(users.email, email)))[0], 'user');
+
+    const repo = new TaskRepository(db);
+    const stepId = newExternalId('taskStep');
+    const taskId = newExternalId('task');
+    await repo.insertTask(
+      {
+        taskId,
+        status: 'queued',
+        plan: [{ id: stepId, kind: 'goto' as const, risk: 'low' as const }],
+        cursor: 0,
+        pendingConfirm: null,
+      },
+      { userId: user.id, intent: 'rehydrate queued' },
+    );
+
+    const all = await repo.rehydrateInFlight();
+    const hit = all.find((r) => r.state.taskId === taskId);
+    expect(hit).toBeDefined();
+    expect(hit?.state.status).toBe('queued');
+    expect(hit?.state.cursor).toBe(0);
+    expect(hit?.state.plan).toHaveLength(1);
+  });
 });

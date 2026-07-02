@@ -1,33 +1,78 @@
 import type { UiTaskStatus } from '@/types/task';
 import { awaitingUserCopy, type AwaitingKind } from './awaiting-user-copy';
+import { deriveTaskProductState } from './task-product-state';
 
 export function taskStatusLabel(
   status: UiTaskStatus | string,
   awaitingKind?: AwaitingKind | null,
 ): string {
-  switch (status) {
+  if (!status) return '未知状态';
+  if (!awaitingKind && !isKnownTaskStatus(status)) return status;
+
+  const productState = deriveTaskProductState({
+    status,
+    awaitingKind: awaitingKind ?? null,
+  });
+  switch (productState.lifecycle) {
     case 'queued':
-    case 'pending':
       return '排队中';
-    case 'planning':
-      return '规划中';
-    case 'executing':
+    case 'running':
+      if (productState.phase === 'planning') return '规划中';
       return '执行中';
-    case 'awaiting_user':
-      return awaitingUserCopy(awaitingKind ?? undefined).toolbarLabel;
+    case 'waiting_user':
+      return awaitingUserCopy(
+        productState.blocker === 'max_steps' ||
+          productState.blocker === 'retries_exhausted'
+          ? undefined
+          : productState.blocker,
+      ).toolbarLabel;
     case 'paused':
       return '已暂停';
-    case 'completed':
-      return '已完成';
-    case 'partial_success':
-      return '部分完成';
-    case 'failed':
-      return '失败';
-    case 'cancelled':
-      return '已取消';
+    case 'terminal':
+      if (productState.outcome === 'completed') return '已完成';
+      if (productState.outcome === 'partial_success') return '部分完成';
+      if (productState.outcome === 'failed') return '失败';
+      if (productState.outcome === 'cancelled') return '已取消';
+      return '未知状态';
+    case 'unknown':
+      return '未知状态';
     default:
       return status || '未知状态';
   }
+}
+
+function isKnownTaskStatus(status: string): boolean {
+  return status === 'pending' ||
+    status === 'planning' ||
+    status === 'queued' ||
+    status === 'executing' ||
+    status === 'awaiting_user' ||
+    status === 'paused' ||
+    status === 'completed' ||
+    status === 'partial_success' ||
+    status === 'failed' ||
+    status === 'cancelled' ||
+    status === 'unknown';
+}
+
+export function pausedTaskNoticeCopy(reason?: string | null): {
+  title: string;
+  body: string;
+  hint: string;
+} {
+  const trimmed = typeof reason === 'string' ? reason.trim() : '';
+  if (trimmed) {
+    return {
+      title: '任务已暂停',
+      body: trimmed,
+      hint: '当前进度已保留，可以补充说明或稍后继续处理。',
+    };
+  }
+  return {
+    title: '任务已暂停',
+    body: '执行已暂停，当前进度已保留。',
+    hint: '可以补充说明或稍后继续处理。',
+  };
 }
 
 export function historyEmptyCopy({

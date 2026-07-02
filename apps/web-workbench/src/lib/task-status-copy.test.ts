@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   historyEmptyCopy,
+  pausedTaskNoticeCopy,
   taskSearchEmptyCopy,
   taskStatusLabel,
 } from './task-status-copy';
@@ -12,12 +13,33 @@ describe('taskStatusLabel', () => {
     expect(taskStatusLabel('awaiting_user')).toBe('需要你回复');
     expect(taskStatusLabel('awaiting_user', 'login')).toBe('需要登录');
     expect(taskStatusLabel('awaiting_user', 'browser_action')).toBe('需要确认');
+    expect(taskStatusLabel('executing', 'login')).toBe('需要登录');
+    expect(taskStatusLabel('completed', 'login')).toBe('已完成');
     expect(taskStatusLabel('planning')).toBe('规划中');
+    expect(taskStatusLabel('unknown')).toBe('未知状态');
   });
 
   it('surfaces unknown statuses instead of dropping them', () => {
     expect(taskStatusLabel('archived')).toBe('archived');
     expect(taskStatusLabel('')).toBe('未知状态');
+  });
+});
+
+describe('pausedTaskNoticeCopy', () => {
+  it('keeps paused copy recoverable and preserves the backend reason', () => {
+    expect(pausedTaskNoticeCopy('达到最大步骤数，请确认下一步。')).toEqual({
+      title: '任务已暂停',
+      body: '达到最大步骤数，请确认下一步。',
+      hint: '当前进度已保留，可以补充说明或稍后继续处理。',
+    });
+  });
+
+  it('uses neutral fallback copy when no reason is available', () => {
+    expect(pausedTaskNoticeCopy()).toEqual({
+      title: '任务已暂停',
+      body: '执行已暂停，当前进度已保留。',
+      hint: '可以补充说明或稍后继续处理。',
+    });
   });
 });
 

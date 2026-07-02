@@ -39,7 +39,7 @@ describe('workbench state helpers', () => {
     );
   });
 
-  it('only treats paused browser tasks as terminal once a result is available', () => {
+  it('keeps paused browser tasks live even when a pause frame carries a result', () => {
     expect(isLiveBrowserTaskForWorkbench(task({ status: 'paused' }))).toBe(
       true,
     );
@@ -47,7 +47,7 @@ describe('workbench state helpers', () => {
       isLiveBrowserTaskForWorkbench(
         task({ status: 'paused', resultText: '已完成到可跟进的阶段。' }),
       ),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it('allows follow-up chips for all terminal statuses including partial success', () => {
@@ -63,7 +63,7 @@ describe('workbench state helpers', () => {
     });
   });
 
-  it('allows follow-up chips for paused tasks once they have a result', () => {
+  it('suppresses follow-up chips for paused tasks even when they have a result', () => {
     expect(
       followUpTargetForTask({
         selectedTask: task({
@@ -73,10 +73,7 @@ describe('workbench state helpers', () => {
         selectedTaskId: 'tsk_test',
         selectedNeedsUser: false,
       }),
-    ).toEqual({
-      taskId: 'tsk_test',
-      title: '打开 https://example.com 并总结结果',
-    });
+    ).toBeNull();
   });
 
   it('suppresses follow-up chips while the task is still active or awaiting user input', () => {

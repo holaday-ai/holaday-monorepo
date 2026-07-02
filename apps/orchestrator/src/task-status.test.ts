@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { isTaskTerminalStatus } from './task-status.js';
+import {
+  TASK_ACTIVE_STATUSES,
+  TASK_QUEUE_DEPTH_STATUSES,
+  isTaskTerminalStatus,
+} from './task-status.js';
 
 describe('isTaskTerminalStatus', () => {
   it('treats partial_success as a first-class terminal task status', () => {
@@ -17,3 +21,24 @@ describe('isTaskTerminalStatus', () => {
   });
 });
 
+describe('task status sets', () => {
+  it('keeps queued in the active task set for quota and recovery visibility', () => {
+    expect(TASK_ACTIVE_STATUSES).toEqual([
+      'pending',
+      'planning',
+      'queued',
+      'executing',
+      'awaiting_user',
+      'paused',
+    ]);
+  });
+
+  it('counts queued in global queue depth without counting parked user waits', () => {
+    expect(TASK_QUEUE_DEPTH_STATUSES).toEqual([
+      'pending',
+      'planning',
+      'queued',
+      'executing',
+    ]);
+  });
+});

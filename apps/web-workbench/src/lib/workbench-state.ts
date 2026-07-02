@@ -1,7 +1,7 @@
 import type { UiTask } from '@/types/task';
-import { isTerminalStatus } from '@/types/task';
 import type { ConnStatus } from '@/lib/ws';
 import type { SidePanelMode, SidePanelOverride } from '@/types/side-panel';
+import { deriveTaskProductState } from '@/lib/task-product-state';
 
 export interface WorkbenchToastCopy {
   message: string;
@@ -55,10 +55,12 @@ export function isLiveBrowserTaskForWorkbench(task: UiTask | null): boolean {
 }
 
 export function isWorkbenchTerminalTask(task: UiTask): boolean {
-  return (
-    isTerminalStatus(task.status) ||
-    (task.status === 'paused' && Boolean(task.resultText))
-  );
+  return deriveTaskProductState({
+    status: task.status,
+    queuePosition: task.queuePosition,
+    tickCount: task.tickCount,
+    awaitingKind: task.awaitingKind ?? null,
+  }).lifecycle === 'terminal';
 }
 
 export function followUpTargetForTask(input: {

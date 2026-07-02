@@ -459,7 +459,11 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         : {};
       const steps = normalizeTaskDetailSteps(detail.steps);
       set((prev) => {
-        const detailStatus = normaliseStatus(safeTaskListText(detail.status) || 'queued');
+        const existingTask = prev.tasks.find((t) => t.taskId === taskId);
+        const rawDetailStatus = safeTaskListText(detail.status);
+        const detailStatus = rawDetailStatus
+          ? normaliseStatus(rawDetailStatus)
+          : existingTask?.status ?? 'unknown';
         const rawResultText = extractSummary(detail.result);
         const rawErrorText = safeTaskListText(detail.errorMessage);
         const resultText =
@@ -572,7 +576,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
               return next;
             })();
         const nextTasks: UiTask[] = (() => {
-          const exists = prev.tasks.some((t) => t.taskId === taskId);
+          const exists = Boolean(existingTask);
           if (exists) {
             return prev.tasks.map((t) =>
               t.taskId === taskId
@@ -1168,6 +1172,40 @@ export const useTaskStore = create<TaskStore>((set, get) => {
   },
 
   applyServerMessage(msg) {
+    if (msg.type === 'server.task.control') {
+      set((prev) => {
+        const nextSubStatus = { ...prev.subStatusByTask };
+        delete nextSubStatus[msg.taskId];
+        const nextAwaiting = { ...prev.awaitingUserByTask };
+        delete nextAwaiting[msg.taskId];
+        const nextTerminalIds = new Set(prev.terminalTaskIds);
+        if (msg.command === 'cancel') nextTerminalIds.add(msg.taskId);
+        else nextTerminalIds.delete(msg.taskId);
+        const status =
+          msg.command === 'pause'
+            ? 'paused'
+            : msg.command === 'cancel'
+              ? 'cancelled'
+              : 'executing';
+        return {
+          tasks: prev.tasks.map((t) =>
+            t.taskId === msg.taskId
+              ? {
+                  ...t,
+                  status,
+                  ...(msg.command === 'resume'
+                    ? { awaitingKind: undefined, resultText: undefined }
+                    : {}),
+                }
+              : t,
+          ),
+          awaitingUserByTask: nextAwaiting,
+          subStatusByTask: nextSubStatus,
+          terminalTaskIds: nextTerminalIds,
+        };
+      });
+      return;
+    }
     if (msg.type === 'server.task.terminal') {
       set((prev) => {
         // Phase 24 RC follow-up (Bug 1 fix): DO NOT clear streaming
@@ -1199,7 +1237,11 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         // navigating to a historical task renders the summary in full
         // immediately — no replay on every sidebar click.
         const nextAnimatedIds = new Set(prev.animatedTaskIds);
-        nextAnimatedIds.add(msg.taskId);
+        if (isTerminalStatus(msg.status)) {
+          nextAnimatedIds.add(msg.taskId);
+        } else {
+          nextAnimatedIds.delete(msg.taskId);
+        }
         // Codex Pack B1 — clear sub-status on terminal so the chip
         // disappears the moment a task finishes. Unlike
         // streamingByTask / progressByTask (which we keep around to
@@ -1208,6 +1250,8 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         // 操作浏览器…" hanging next to a completed result.
         const nextSubStatus = { ...prev.subStatusByTask };
         delete nextSubStatus[msg.taskId];
+        const nextAwaiting = { ...prev.awaitingUserByTask };
+        delete nextAwaiting[msg.taskId];
         // Codex Round 2 P1-6 — terminal frame may carry the verifier
         // verdict's failed-check list so the SPA banner can render
         // specific bullets. Stamp onto the task; null clears prior
@@ -1240,6 +1284,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           ),
           terminalTaskIds: nextTerminalIds,
           animatedTaskIds: nextAnimatedIds,
+          awaitingUserByTask: nextAwaiting,
           subStatusByTask: nextSubStatus,
           // streamingByTask + progressByTask unchanged; buffers
           // persist until resultText is rendered in their place.
@@ -1303,8 +1348,11 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           // currently undefined / 'browser', so a real browser→generate
           // fallback that already persisted 'generate' isn't overridden.
           tasks: prev.tasks.map((t) =>
-            t.taskId === msg.taskId && t.executionMode !== 'generate'
-              ? { ...t, executionMode: 'generate' as const }
+            t.taskId === msg.taskId
+              ? {
+                  ...markTaskRunningFromLiveSignal(t),
+                  executionMode: 'generate' as const,
+                }
               : t,
           ),
         };
@@ -1369,13 +1417,14 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           // adds supercar/browser progress events; skip the flip when
           // the new subStatus is `browsing` (real browser session) so
           // the panel stays mounted.
-          tasks: prev.tasks.map((t) =>
-            t.taskId === msg.taskId &&
-            t.executionMode !== 'generate' &&
-            typedSubStatus !== 'browsing'
-              ? { ...t, executionMode: 'generate' as const }
-              : t,
-          ),
+          tasks: prev.tasks.map((t) => {
+            if (t.taskId !== msg.taskId) return t;
+            const liveTask = markTaskRunningFromLiveSignal(t);
+            if (liveTask.executionMode !== 'generate' && typedSubStatus !== 'browsing') {
+              return { ...liveTask, executionMode: 'generate' as const };
+            }
+            return liveTask;
+          }),
         };
       });
       return;
@@ -1383,7 +1432,9 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     if (msg.type === 'server.task.queued') {
       set((prev) => ({
         tasks: prev.tasks.map((t) =>
-          t.taskId === msg.taskId ? { ...t, queuePosition: msg.position } : t,
+          t.taskId === msg.taskId
+            ? { ...t, status: 'queued' as const, queuePosition: msg.position }
+            : t,
         ),
       }));
       return;
@@ -1430,7 +1481,11 @@ export const useTaskStore = create<TaskStore>((set, get) => {
             if (t.taskId !== msg.taskId) return t;
             const { queuePosition: _queuePosition, ...rest } = t;
             void _queuePosition;
-            return { ...rest, tickCount: Math.max(t.tickCount, msg.tickIndex + 1) };
+            return {
+              ...rest,
+              status: 'executing' as const,
+              tickCount: Math.max(t.tickCount, msg.tickIndex + 1),
+            };
           }),
         };
       });
@@ -1557,25 +1612,37 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     }
     if (msg.type === 'server.supercar.awaiting_user') {
       const awaitingKind = msg.awaitingKind;
-      set((prev) => ({
-        awaitingUserByTask: {
-          ...prev.awaitingUserByTask,
-          [msg.taskId]: {
-            question: msg.question,
-            at: Date.now(),
-            ...(awaitingKind ? { awaitingKind } : {}),
+      set((prev) => {
+        const nextSubStatus = { ...prev.subStatusByTask };
+        delete nextSubStatus[msg.taskId];
+        return {
+          awaitingUserByTask: {
+            ...prev.awaitingUserByTask,
+            [msg.taskId]: {
+              question: msg.question,
+              at: Date.now(),
+              ...(awaitingKind ? { awaitingKind } : {}),
+            },
           },
-        },
-        // P2-A — also mirror onto the task row so a refresh that
-        // re-loads via tasks.detail still has the right kind even if
-        // the WS event arrived first and tasks.detail's hydrate has
-        // not yet fired.
-        tasks: prev.tasks.map((t) =>
-          t.taskId === msg.taskId && awaitingKind
-            ? { ...t, awaitingKind }
-            : t,
-        ),
-      }));
+          subStatusByTask: nextSubStatus,
+          // P2-A — also mirror onto the task row so a refresh that
+          // re-loads via tasks.detail still has the right kind even if
+          // the WS event arrived first and tasks.detail's hydrate has
+          // not yet fired. Also flip the row status immediately: the
+          // awaiting card is now the authoritative lifecycle surface and
+          // must suppress stale "executing / browsing" UI until the next
+          // list refresh catches up.
+          tasks: prev.tasks.map((t) =>
+            t.taskId === msg.taskId
+              ? {
+                  ...t,
+                  status: 'awaiting_user' as const,
+                  ...(awaitingKind ? { awaitingKind } : {}),
+                }
+              : t,
+          ),
+        };
+      });
       return;
     }
     if (msg.type === 'server.supercar.web_search') {
@@ -1943,7 +2010,7 @@ function normalizeTaskListRow(value: unknown): Record<string, unknown> | null {
     taskId,
     intent: safeTaskListText(value.intent) || '未命名任务',
     title: safeNullableTaskListText(value.title),
-    status: safeTaskListText(value.status) || 'queued',
+    status: safeTaskListText(value.status) || 'unknown',
     createdAt: safeTaskListDate(value.createdAt) ?? 0,
     starredAt: safeNullableTaskListDate(value.starredAt),
     projectId: safeNullableTaskListText(value.projectId),
@@ -1987,7 +2054,7 @@ function normalizeStepAntiBot(value: unknown): UiStep['antiBot'] | undefined {
 export function toUiTask(row: ListRow): UiTask {
   const opusUsed = (row as { opusUsed?: unknown }).opusUsed === true;
   const r = row as { starred?: unknown; starredAt?: unknown; projectId?: unknown };
-  const status = normaliseStatus(safeTaskListText((row as { status?: unknown }).status) || 'queued');
+  const status = normaliseStatus(safeTaskListText((row as { status?: unknown }).status) || 'unknown');
   // Root-cause fix for the "result text disappears on refresh" / brief
   // post-terminal flash: tasks.list already ships `result` for every
   // row, but toUiTask used to drop it and only map errorMessage. The
@@ -2177,6 +2244,8 @@ function normaliseStatus(raw: string): UiTaskStatus {
     case 'failed':
     case 'cancelled':
     case 'paused':
+    case 'pending':
+    case 'planning':
     case 'executing':
     case 'awaiting_user':
     // Codex Pack A4 — verifier verdict downgraded a completed run.
@@ -2186,8 +2255,20 @@ function normaliseStatus(raw: string): UiTaskStatus {
     case 'queued':
       return raw;
     default:
-      return 'executing';
+      return 'unknown';
   }
+}
+
+function markTaskRunningFromLiveSignal(task: UiTask): UiTask {
+  const shouldFlip =
+    task.status === 'pending' || task.status === 'planning' || task.status === 'queued';
+  if (!shouldFlip && task.queuePosition === undefined) return task;
+  const { queuePosition: _queuePosition, ...rest } = task;
+  void _queuePosition;
+  return {
+    ...rest,
+    ...(shouldFlip ? { status: 'executing' as const } : {}),
+  };
 }
 
 export function normaliseDetailStepStatus(raw: string): UiStep['status'] {

@@ -18,8 +18,10 @@ import { users } from './users.js';
 
 /**
  * `tasks` — main Agent Loop tasks.
- * Status machine: pending → planning → executing ↔ awaiting_user ↔ paused
- *                                   → completed / failed / cancelled
+ * Status machine:
+ *   pending/planning/queued → executing ↔ awaiting_user
+ *                          ↔ paused
+ *                          → completed / failed / cancelled
  */
 export const tasks = mysqlTable(
   'tasks',

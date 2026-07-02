@@ -10,6 +10,8 @@
 // is at its 10-slot capacity; the row flips to 'executing' the moment
 // a slot frees and the queue dispatches.
 export type UiTaskStatus =
+  | 'pending'
+  | 'planning'
   | 'queued'
   | 'executing'
   | 'awaiting_user'
@@ -17,7 +19,8 @@ export type UiTaskStatus =
   | 'completed'
   | 'partial_success'
   | 'failed'
-  | 'cancelled';
+  | 'cancelled'
+  | 'unknown';
 
 export interface UiTask {
   taskId: string;
@@ -31,9 +34,9 @@ export interface UiTask {
   resultText?: string;
   createdAt: Date;
   /**
-   * G6: position in the per-user FIFO queue as reported at enqueue
-   * time. 1 = running now; 2+ = queued that many slots back. Cleared
-   * once the first tick.start lands (task is actually executing).
+   * Position in the executor-capacity queue as reported at enqueue
+   * time. 1 = first waiting for a slot; 2+ = queued behind earlier
+   * work. Cleared once a live execution signal lands.
    */
   queuePosition?: number;
   /**
@@ -347,6 +350,8 @@ export function isActive(status: UiTaskStatus): boolean {
   // the row with a non-terminal style; the row's hover preview also
   // uses it for live-task affordances.
   return (
+    status === 'pending' ||
+    status === 'planning' ||
     status === 'queued' ||
     status === 'executing' ||
     status === 'awaiting_user' ||

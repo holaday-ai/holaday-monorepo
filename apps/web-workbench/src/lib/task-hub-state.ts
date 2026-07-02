@@ -1,5 +1,6 @@
 import { pageErrorMessage } from './page-error-copy';
 import type { AwaitingKind } from './awaiting-user-copy';
+import { deriveTaskProductState } from './task-product-state';
 
 export type HistoryStatusFilter = 'all' | 'completed' | 'failed' | 'running';
 export type HistoryRangeFilter = '7d' | '30d' | 'all';
@@ -96,8 +97,28 @@ export function starredPageSummary({
   return `已置顶 ${count}${hasMore ? '+' : ''} 个`;
 }
 
-export function taskHubNeedsAttention(status: string): boolean {
-  return status === 'awaiting_user';
+type TaskHubProductStateInput =
+  | string
+  | {
+      readonly status: string;
+      readonly awaitingKind?: AwaitingKind | null;
+      readonly queuePosition?: number | null;
+      readonly tickCount?: number | null;
+    };
+
+function toTaskHubProductState(input: TaskHubProductStateInput) {
+  return typeof input === 'string'
+    ? deriveTaskProductState({ status: input })
+    : deriveTaskProductState({
+        status: input.status,
+        awaitingKind: input.awaitingKind ?? null,
+        queuePosition: input.queuePosition ?? null,
+        tickCount: input.tickCount ?? null,
+      });
+}
+
+export function taskHubNeedsAttention(input: TaskHubProductStateInput): boolean {
+  return toTaskHubProductState(input).lifecycle === 'waiting_user';
 }
 
 /**
@@ -106,14 +127,16 @@ export function taskHubNeedsAttention(status: string): boolean {
  * without the strong awaiting highlight. Empty for awaiting (keeps its
  * own highlight) and completed / running (neutral). P2-B.
  */
-export function taskHubRowTone(status: string): string {
-  if (status === 'failed') {
+export function taskHubRowTone(input: TaskHubProductStateInput): string {
+  const state = toTaskHubProductState(input);
+  if (state.lifecycle !== 'terminal') return '';
+  if (state.outcome === 'failed') {
     return 'bg-[#EA1F59]/[0.035] shadow-[inset_3px_0_0_rgba(234,31,89,0.4)]';
   }
-  if (status === 'partial_success') {
+  if (state.outcome === 'partial_success') {
     return 'bg-[#FFC910]/[0.05] shadow-[inset_3px_0_0_rgba(255,201,16,0.5)]';
   }
-  if (status === 'cancelled') {
+  if (state.outcome === 'cancelled') {
     return 'shadow-[inset_3px_0_0_rgba(89,87,87,0.28)]';
   }
   return '';
@@ -132,15 +155,21 @@ export type TaskHubStatusTone =
   | 'partial_success'
   | 'failed'
   | 'awaiting'
+  | 'paused'
   | 'cancelled'
-  | 'running';
+  | 'running'
+  | 'unknown';
 
-export function taskHubStatusTone(status: string): TaskHubStatusTone {
-  if (status === 'completed') return 'completed';
-  if (status === 'partial_success') return 'partial_success';
-  if (status === 'failed') return 'failed';
-  if (status === 'awaiting_user') return 'awaiting';
-  if (status === 'cancelled') return 'cancelled';
+export function taskHubStatusTone(input: TaskHubProductStateInput): TaskHubStatusTone {
+  const state = toTaskHubProductState(input);
+  if (state.lifecycle === 'waiting_user') return 'awaiting';
+  if (state.lifecycle === 'paused') return 'paused';
+  if (state.lifecycle === 'unknown') return 'unknown';
+  if (state.lifecycle !== 'terminal') return 'running';
+  if (state.outcome === 'completed') return 'completed';
+  if (state.outcome === 'partial_success') return 'partial_success';
+  if (state.outcome === 'failed') return 'failed';
+  if (state.outcome === 'cancelled') return 'cancelled';
   return 'running';
 }
 
@@ -250,18 +279,8 @@ function normalizeTaskHubRow(value: unknown): NormalizedTaskHubRow | null {
 }
 
 function normalizeTaskHubStatus(value: unknown): string {
-  return value === 'pending' ||
-    value === 'planning' ||
-    value === 'queued' ||
-    value === 'executing' ||
-    value === 'awaiting_user' ||
-    value === 'paused' ||
-    value === 'completed' ||
-    value === 'partial_success' ||
-    value === 'failed' ||
-    value === 'cancelled'
-    ? value
-    : 'queued';
+  const status = safeTaskHubText(value);
+  return status || 'unknown';
 }
 
 function safeNullableTaskHubText(value: unknown): string | null {
@@ -274,7 +293,8 @@ function normalizeAwaitingKind(value: unknown): AwaitingKind | null {
     value === 'login' ||
     value === 'captcha' ||
     value === 'permission' ||
-    value === 'browser_action'
+    value === 'browser_action' ||
+    value === 'video_quote'
     ? value
     : null;
 }

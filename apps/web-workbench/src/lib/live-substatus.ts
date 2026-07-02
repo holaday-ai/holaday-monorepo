@@ -1,3 +1,8 @@
+import {
+  deriveTaskProductState,
+  type TaskProductStateInput,
+} from './task-product-state';
+
 /**
  * Whether the live sub-status chip ("正在操作浏览器 / 仍在执行网页操作 /
  * 你可以继续等待" + elapsed timer) should render for a task.
@@ -13,10 +18,12 @@
  * Terminal tasks never show it either (the result card is the surface).
  */
 export function shouldRenderLiveSubStatus(
-  status: string,
-  terminal: boolean,
+  statusOrInput: string | TaskProductStateInput,
+  terminal = false,
 ): boolean {
-  if (terminal) return false;
-  if (status === 'awaiting_user') return false;
-  return true;
+  const state =
+    typeof statusOrInput === 'string'
+      ? deriveTaskProductState({ status: statusOrInput, terminal })
+      : deriveTaskProductState(statusOrInput);
+  return state.lifecycle === 'running';
 }

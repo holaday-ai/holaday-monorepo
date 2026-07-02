@@ -4,7 +4,6 @@ import { shouldRenderLiveSubStatus } from './live-substatus';
 describe('shouldRenderLiveSubStatus', () => {
   it('shows the live sub-status while a task is actively executing', () => {
     expect(shouldRenderLiveSubStatus('executing', false)).toBe(true);
-    expect(shouldRenderLiveSubStatus('queued', false)).toBe(true);
     expect(shouldRenderLiveSubStatus('planning', false)).toBe(true);
   });
 
@@ -12,6 +11,25 @@ describe('shouldRenderLiveSubStatus', () => {
     // The 需要登录 banner is the authoritative state; a stale "正在操作
     // 浏览器 / 你可以继续等待" chip would contradict it.
     expect(shouldRenderLiveSubStatus('awaiting_user', false)).toBe(false);
+    expect(
+      shouldRenderLiveSubStatus({
+        status: 'executing',
+        terminal: false,
+        hasAwaitingUser: true,
+      }),
+    ).toBe(false);
+  });
+
+  it('does not show a live phase while the task is still queued or paused', () => {
+    expect(
+      shouldRenderLiveSubStatus({
+        status: 'queued',
+        terminal: false,
+        queuePosition: 2,
+        tickCount: 0,
+      }),
+    ).toBe(false);
+    expect(shouldRenderLiveSubStatus('paused', false)).toBe(false);
   });
 
   it('never shows it for terminal tasks', () => {

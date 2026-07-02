@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { UiStep } from '@/types/task';
-import { EMPTY_STEPS, selectStepsFor, shouldRefreshForTask } from './video-task-selectors';
+import {
+  EMPTY_STEPS,
+  isVideoTaskRunning,
+  selectStepsFor,
+  shouldRefreshForTask,
+  videoTaskStatusLabel,
+} from './video-task-selectors';
 
 type StepsState = { stepsByTask: Record<string, UiStep[]> };
 
@@ -71,5 +77,16 @@ describe('shouldRefreshForTask — one-time deep-link refresh guard', () => {
   });
   it('false when there is no ?task= id', () => {
     expect(shouldRefreshForTask({ taskId: null, hasTask: false, already: false })).toBe(false);
+  });
+});
+
+describe('video task product status helpers', () => {
+  it('treats pre-execution and executing statuses as generating', () => {
+    for (const status of ['pending', 'planning', 'queued', 'executing'] as const) {
+      expect(isVideoTaskRunning(status)).toBe(true);
+      expect(videoTaskStatusLabel(status)).toBe('生成中');
+    }
+    expect(isVideoTaskRunning('awaiting_user')).toBe(false);
+    expect(videoTaskStatusLabel('awaiting_user')).toBe('待确认报价');
   });
 });

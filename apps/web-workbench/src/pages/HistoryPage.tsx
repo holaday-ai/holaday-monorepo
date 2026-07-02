@@ -16,6 +16,7 @@ import {
   taskHubLoadErrorCopy,
   taskHubLoadMoreErrorCopy,
   taskHubNeedsAttention,
+  taskHubStatusTone,
   type HistoryRangeFilter,
   type HistoryStatusFilter,
   type NormalizedTaskHubRow,
@@ -402,7 +403,7 @@ export function HistoryPage(): JSX.Element {
           ) : (
             <ul className="divide-y divide-[#EFEFEF]">
               {tasks.map((t) => {
-                const needsAttention = taskHubNeedsAttention(t.status);
+                const needsAttention = taskHubNeedsAttention(t);
                 const statusLabel = taskStatusLabel(t.status, t.awaitingKind);
                 return (
                   <li
@@ -420,7 +421,7 @@ export function HistoryPage(): JSX.Element {
                         needsAttention && 'hover:bg-[#FFC910]/[0.10]',
                       )}
                     >
-                      <StatusIcon status={t.status} />
+                      <StatusIcon task={t} />
                       <div className="min-w-0 flex-1 px-1">
                         <div className="truncate text-sm font-medium group-hover:text-[#EA1F59]">
                           {t.intent || '未命名任务'}
@@ -513,20 +514,21 @@ function FilterGroup<T extends string>({
   );
 }
 
-function StatusIcon({ status }: { status: string }): JSX.Element {
-  if (status === 'completed') {
+function StatusIcon({ task }: { task: Pick<HistoryTask, 'awaitingKind' | 'status'> }): JSX.Element {
+  const tone = taskHubStatusTone(task);
+  if (tone === 'completed') {
     return <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-[#42C0EF]" />;
   }
-  if (status === 'partial_success') {
+  if (tone === 'partial_success') {
     return <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-[#FFC910]" />;
   }
-  if (status === 'failed') {
+  if (tone === 'failed') {
     return <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-[#EA1F59]" />;
   }
-  if (status === 'awaiting_user') {
+  if (tone === 'awaiting') {
     return <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-[#8A6A00]" />;
   }
-  if (status === 'cancelled') {
+  if (tone === 'cancelled' || tone === 'paused' || tone === 'unknown') {
     return (
       <CircleSlash className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
     );

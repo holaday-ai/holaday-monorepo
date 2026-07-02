@@ -83,7 +83,7 @@ export function EventDetailPopover({
 
   const position = computePosition(anchor, mobile);
   const statusLabel = STATUS_LABEL[row.status] ?? row.status;
-  const statusIcon = STATUS_ICON[row.status];
+  const statusIcon = STATUS_ICON[row.status] ?? STATUS_ICON.unknown;
   const canToggle = scheduledEventCanToggle(row.status);
   const canRunNow = scheduledEventCanRunNow(row.status);
   const toggleLabel = scheduledEventToggleLabel(row.status);
@@ -278,20 +278,22 @@ function computePosition(
   return { left, top, width: POPOVER_WIDTH };
 }
 
-const STATUS_LABEL: Record<ScheduledTaskRow['status'], string> = {
+const STATUS_LABEL: Partial<Record<ScheduledTaskRow['status'], string>> = {
   active: '已启用',
   paused: '已暂停',
   running: '执行中',
   completed: '已完成',
   failed: '已失败',
+  unknown: '状态未知',
 };
 
-const STATUS_ICON: Record<ScheduledTaskRow['status'], React.ReactNode> = {
+const STATUS_ICON: Partial<Record<ScheduledTaskRow['status'], React.ReactNode>> = {
   active: <Clock className="h-3 w-3" style={{ color: '#EA1F59' }} />,
   paused: <Pause className="h-3 w-3 text-[#ADADAD]" />,
   running: <Loader2 className="h-3 w-3 animate-spin text-[#FFC910]" />,
   completed: <CheckCircle2 className="h-3 w-3 text-[#42C0EF]" />,
   failed: <XCircle className="h-3 w-3 text-[#EA1F59]" />,
+  unknown: <Clock className="h-3 w-3 text-[#ADADAD]" />,
 };
 
 function formatDateTime(d: Date | string | null): string {

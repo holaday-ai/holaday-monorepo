@@ -1,5 +1,6 @@
 import { pageErrorMessage } from './page-error-copy';
 import type { AwaitingKind } from './awaiting-user-copy';
+import { deriveTaskProductState } from './task-product-state';
 
 export interface SearchOverlayRow {
   readonly taskId: string;
@@ -85,8 +86,26 @@ export function searchOverlayRowCopy(
   };
 }
 
-export function searchOverlayNeedsAttention(status: string): boolean {
-  return status === 'awaiting_user';
+type SearchOverlayProductStateInput =
+  | string
+  | {
+      readonly status: string;
+      readonly awaitingKind?: AwaitingKind | null;
+    };
+
+function toSearchOverlayProductState(input: SearchOverlayProductStateInput) {
+  return typeof input === 'string'
+    ? deriveTaskProductState({ status: input })
+    : deriveTaskProductState({
+        status: input.status,
+        awaitingKind: input.awaitingKind ?? null,
+      });
+}
+
+export function searchOverlayNeedsAttention(
+  input: SearchOverlayProductStateInput,
+): boolean {
+  return toSearchOverlayProductState(input).lifecycle === 'waiting_user';
 }
 
 /**
@@ -96,17 +115,32 @@ export function searchOverlayNeedsAttention(status: string): boolean {
  * awaiting_user — those two keep their existing stronger styles. Empty
  * string for completed / running so they stay neutral. P2-B.
  */
-export function searchOverlayRowTone(status: string): string {
-  if (status === 'failed') {
+export function searchOverlayRowTone(input: SearchOverlayProductStateInput): string {
+  const state = toSearchOverlayProductState(input);
+  if (state.lifecycle !== 'terminal') return '';
+  if (state.outcome === 'failed') {
     return 'bg-[#EA1F59]/[0.035] shadow-[inset_3px_0_0_rgba(234,31,89,0.4)]';
   }
-  if (status === 'partial_success') {
+  if (state.outcome === 'partial_success') {
     return 'bg-[#FFC910]/[0.05] shadow-[inset_3px_0_0_rgba(255,201,16,0.5)]';
   }
-  if (status === 'cancelled') {
+  if (state.outcome === 'cancelled') {
     return 'shadow-[inset_3px_0_0_rgba(89,87,87,0.28)]';
   }
   return '';
+}
+
+export function searchOverlayStatusTone(input: SearchOverlayProductStateInput): string {
+  const state = toSearchOverlayProductState(input);
+  if (state.lifecycle === 'waiting_user') return 'bg-[#FFC910]/20 text-[#8A6A00]';
+  if (state.lifecycle === 'paused') return 'bg-[#EFEFEF] text-[#595757]';
+  if (state.lifecycle === 'unknown') return 'bg-[#EFEFEF] text-[#595757]';
+  if (state.lifecycle !== 'terminal') return 'bg-[#57479C]/10 text-[#57479C]';
+  if (state.outcome === 'completed') return 'bg-[#42C0EF]/10 text-[#1688AA]';
+  if (state.outcome === 'failed') return 'bg-[#EA1F59]/10 text-[#EA1F59]';
+  if (state.outcome === 'partial_success') return 'bg-[#FFC910]/20 text-[#8A6A00]';
+  if (state.outcome === 'cancelled') return 'bg-[#EFEFEF] text-[#595757]';
+  return 'bg-[#EFEFEF] text-[#595757]';
 }
 
 /**
@@ -137,16 +171,8 @@ function normalizeSearchOverlayRow(value: unknown): SearchOverlayRow | null {
 }
 
 function normalizeSearchStatus(value: unknown): string {
-  return value === 'queued' ||
-    value === 'executing' ||
-    value === 'awaiting_user' ||
-    value === 'paused' ||
-    value === 'completed' ||
-    value === 'partial_success' ||
-    value === 'failed' ||
-    value === 'cancelled'
-    ? value
-    : 'queued';
+  const status = safeSearchText(value);
+  return status || 'unknown';
 }
 
 function safeNullableSearchText(value: unknown): string | null {
@@ -159,7 +185,8 @@ function normalizeAwaitingKind(value: unknown): AwaitingKind | null {
     value === 'login' ||
     value === 'captcha' ||
     value === 'permission' ||
-    value === 'browser_action'
+    value === 'browser_action' ||
+    value === 'video_quote'
     ? value
     : null;
 }

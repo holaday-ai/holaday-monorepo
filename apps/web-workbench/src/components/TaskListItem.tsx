@@ -1,6 +1,7 @@
 import { Check, MoreHorizontal } from 'lucide-react';
 import * as React from 'react';
 import { awaitingUserCopy } from '@/lib/awaiting-user-copy';
+import { deriveTaskProductState } from '@/lib/task-product-state';
 import { cn } from '@/lib/utils';
 import { type UiTask, isActive } from '@/types/task';
 import { summariseIntent } from '@/utils/summarise-intent';
@@ -309,13 +310,19 @@ export function taskListItemSubtitle(
   liveSubStatus?: TaskLiveSubStatusEntry | null,
   now = Date.now(),
 ): string {
-  if (task.queuePosition && task.queuePosition > 1 && task.tickCount === 0) {
-    return `排队中 · 第 ${task.queuePosition} 位`;
-  }
-  switch (task.status) {
+  const productState = deriveTaskProductState({
+    status: task.status,
+    queuePosition: task.queuePosition ?? null,
+    tickCount: task.tickCount,
+    awaitingKind: task.awaitingKind ?? null,
+    subStatus: liveSubStatus ? liveSubStatusValue(liveSubStatus) : null,
+  });
+  switch (productState.lifecycle) {
     case 'queued':
-      return '排队中 · 等待空闲槽位';
-    case 'executing':
+      return productState.queuePosition && productState.queuePosition > 1
+        ? `排队中 · 第 ${productState.queuePosition} 位`
+        : '排队中 · 等待空闲槽位';
+    case 'running':
       if (liveSubStatus) {
         const subStatus = liveSubStatusValue(liveSubStatus);
         const elapsed = taskListElapsedLabel(liveSubStatus, now);
@@ -324,25 +331,36 @@ export function taskListItemSubtitle(
           : LIVE_SUB_STATUS_LABELS[subStatus];
       }
       return task.tickCount === 0 ? '正在启动…' : `执行中 · 第 ${task.tickCount} 步`;
-    case 'awaiting_user':
+    case 'waiting_user':
       // F3 — explicit awaiting-user copy. Previously this fell through
       // to the default branch and rendered `undefined` in the row's
       // tooltip / aria-label, both visually wrong and a screen-reader
       // hole.
-      return awaitingUserCopy(task.awaitingKind).toolbarLabel;
+      return awaitingUserCopy(
+        productState.blocker === 'max_steps' ||
+          productState.blocker === 'retries_exhausted'
+          ? undefined
+          : productState.blocker,
+      ).toolbarLabel;
     case 'paused':
       return task.tickCount === 0 ? '已暂停' : `已暂停 · ${task.tickCount} 步`;
-    case 'completed':
-      return task.tickCount === 0 ? '已完成' : `已完成 · ${task.tickCount} 步`;
-    case 'partial_success':
-      // Codex Pack A4 — soft-failure subtitle. Sidebar row reads as
-      // terminal-but-warning; the result panel renders the yellow
-      // banner above the answer.
-      return task.tickCount === 0 ? '结果可能不完整' : `结果可能不完整 · ${task.tickCount} 步`;
-    case 'failed':
-      return task.tickCount === 0 ? '失败' : `失败 · ${task.tickCount} 步`;
-    case 'cancelled':
-      return task.tickCount === 0 ? '已取消' : `已取消 · ${task.tickCount} 步`;
+    case 'terminal':
+      switch (productState.outcome) {
+        case 'completed':
+          return task.tickCount === 0 ? '已完成' : `已完成 · ${task.tickCount} 步`;
+        case 'partial_success':
+          return task.tickCount === 0
+            ? '结果可能不完整'
+            : `结果可能不完整 · ${task.tickCount} 步`;
+        case 'failed':
+          return task.tickCount === 0 ? '失败' : `失败 · ${task.tickCount} 步`;
+        case 'cancelled':
+          return task.tickCount === 0 ? '已取消' : `已取消 · ${task.tickCount} 步`;
+        default:
+          return '';
+      }
+    case 'unknown':
+      return '未知状态';
     default:
       // Defence-in-depth: never let `undefined` reach the DOM if a
       // future status sneaks past TS narrowing.

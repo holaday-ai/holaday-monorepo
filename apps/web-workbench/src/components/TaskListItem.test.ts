@@ -70,4 +70,33 @@ describe('taskListItemSubtitle', () => {
       }),
     ).toBe('需要你回复');
   });
+
+  it('lets queued and waiting-user lifecycle override stale live phases', () => {
+    expect(
+      taskListItemSubtitle(
+        {
+          status: 'executing',
+          tickCount: 0,
+          queuePosition: 2,
+        },
+        'browsing',
+      ),
+    ).toBe('排队中 · 第 2 位');
+    expect(
+      taskListItemSubtitle(
+        {
+          status: 'executing',
+          tickCount: 4,
+          awaitingKind: 'login',
+        },
+        'browsing',
+      ),
+    ).toBe('需要登录');
+  });
+
+  it('does not present unknown statuses as executing', () => {
+    expect(taskListItemSubtitle({ status: 'unknown', tickCount: 0 })).toBe(
+      '未知状态',
+    );
+  });
 });

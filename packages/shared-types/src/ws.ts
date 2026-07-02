@@ -571,17 +571,16 @@ export const serverVisionDegradeSchema = z.object({
 
 /**
  * Task queued behind earlier work (Phase F F3 per-user FIFO). Fires
- * once on enqueue when the task lands at position > 1 — position 1
- * means it started immediately and the UI never needs a "queued"
- * badge for it. Position is *stable at enqueue time*: as earlier
- * tasks drain, we don't re-broadcast updates, we just rely on the
- * first `server.vision.tick.start` to signal the task is now
- * actually running.
+ * once on enqueue when the task is waiting for executor capacity.
+ * Position is *stable at enqueue time*: 1 means first waiting for the
+ * next slot, 2 means one queued task ahead, and so on. As earlier
+ * tasks drain, we don't re-broadcast updates; the first live progress
+ * frame signals that the task is actually running.
  */
 export const serverTaskQueuedSchema = z.object({
   type: z.literal('server.task.queued'),
   taskId: z.string(),
-  /** 1 = currently running; 2+ = queued N-1 tasks ahead. */
+  /** 1 = first waiting for capacity; 2+ = queued behind earlier work. */
   position: z.number().int().positive(),
 });
 

@@ -9,6 +9,7 @@ import {
   searchOverlayNeedsAttention,
   searchOverlayRowCopy,
   searchOverlayRowTone,
+  searchOverlayStatusTone,
   searchOverlayStatusCopy,
   type SearchOverlayRow,
 } from '@/lib/search-overlay-state';
@@ -279,9 +280,9 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
           )}
           {filtered.map((t, i) => {
             const copy = searchOverlayRowCopy(t);
-            const needsAttention = searchOverlayNeedsAttention(t.status);
+            const needsAttention = searchOverlayNeedsAttention(t);
             const restingTone =
-              !needsAttention && i !== active ? searchOverlayRowTone(t.status) : '';
+              !needsAttention && i !== active ? searchOverlayRowTone(t) : '';
             return (
               <li key={t.taskId}>
                 <button
@@ -355,24 +356,12 @@ function SearchStatusBadge({
     <span
       className={cn(
         'mt-0.5 inline-flex min-h-6 shrink-0 items-center rounded-full px-2 py-0.5 text-[11px] font-medium',
-        searchStatusTone(status),
+        searchOverlayStatusTone({ status, awaitingKind }),
       )}
     >
       {taskStatusLabel(status, awaitingKind)}
     </span>
   );
-}
-
-function searchStatusTone(status: string): string {
-  if (status === 'completed') return 'bg-[#42C0EF]/10 text-[#1688AA]';
-  if (status === 'failed') return 'bg-[#EA1F59]/10 text-[#EA1F59]';
-  if (status === 'partial_success') return 'bg-[#FFC910]/20 text-[#8A6A00]';
-  if (status === 'awaiting_user') return 'bg-[#FFC910]/20 text-[#8A6A00]';
-  if (status === 'cancelled') return 'bg-[#EFEFEF] text-[#595757]';
-  if (status === 'executing' || status === 'queued') {
-    return 'bg-[#57479C]/10 text-[#57479C]';
-  }
-  return 'bg-[#EFEFEF] text-[#595757]';
 }
 
 function KeyHint({ children }: { children: React.ReactNode }): JSX.Element {

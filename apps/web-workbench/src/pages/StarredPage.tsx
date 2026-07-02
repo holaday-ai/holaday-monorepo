@@ -212,8 +212,8 @@ export function StarredPage(): JSX.Element {
         <>
           <div className="divide-y divide-[#EFEFEF] rounded-[8px] border border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
             {items.map((t) => {
-              const needsAttention = taskHubNeedsAttention(t.status);
-              const restingTone = needsAttention ? '' : taskHubRowTone(t.status);
+              const needsAttention = taskHubNeedsAttention(t);
+              const restingTone = needsAttention ? '' : taskHubRowTone(t);
               const statusLabel = taskStatusLabel(t.status, t.awaitingKind);
               return (
                 <div
@@ -225,7 +225,7 @@ export function StarredPage(): JSX.Element {
                       'bg-[#FFC910]/[0.06] [box-shadow:inset_3px_0_0_rgba(255,201,16,0.75)] hover:bg-[#FFC910]/[0.10]',
                   )}
                 >
-                  <PinnedStatusIcon status={t.status} />
+                  <PinnedStatusIcon task={t} />
                   <button
                     type="button"
                     onClick={() => open(t.taskId)}
@@ -299,14 +299,14 @@ export function StarredPage(): JSX.Element {
   );
 }
 
-function PinnedStatusIcon({ status }: { status: string }): JSX.Element {
+function PinnedStatusIcon({ task }: { task: Pick<PinnedRow, 'awaitingKind' | 'status'> }): JSX.Element {
   // Surface the exceptional terminal states (awaiting / failed /
   // partial / cancelled) with the same icon vocabulary as the history
   // page so a pinned task's state is spottable at a glance — previously
   // every non-awaiting pin showed an identical Pin icon, so a failed or
   // cancelled pin looked exactly like a completed one. Only healthy
   // pins (completed / running) keep the Pin affordance.
-  const tone = taskHubStatusTone(status);
+  const tone = taskHubStatusTone(task);
   if (tone === 'awaiting') {
     return (
       <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[#FFC910]/55 bg-[#FFC910]/15 text-[#8A6A00]">
@@ -332,6 +332,13 @@ function PinnedStatusIcon({ status }: { status: string }): JSX.Element {
     // Neutral cancelled treatment — matches the grey CircleSlash the
     // history page uses, instead of the brand-red Pin that read as a
     // healthy / completed pin.
+    return (
+      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[#DCDDDD] bg-[#EFEFEF]/45 text-muted-foreground dark:border-white/10 dark:bg-white/5">
+        <CircleSlash className="h-3.5 w-3.5" />
+      </span>
+    );
+  }
+  if (tone === 'paused' || tone === 'unknown') {
     return (
       <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[#DCDDDD] bg-[#EFEFEF]/45 text-muted-foreground dark:border-white/10 dark:bg-white/5">
         <CircleSlash className="h-3.5 w-3.5" />

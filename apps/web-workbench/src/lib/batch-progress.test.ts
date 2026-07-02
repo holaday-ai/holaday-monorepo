@@ -137,14 +137,43 @@ describe('batch progress helpers', () => {
     ).toEqual({
       type: 'server.batch.progress',
       batchId: 'batch_1',
-      status: 'pending',
+      status: 'unknown',
       itemsTotal: 0,
       itemsDone: 2,
       itemsFailed: 0,
       itemsCancelled: 0,
       item: {
         batchItemId: 'item_1',
-        status: 'pending',
+        status: 'unknown',
+      },
+    });
+  });
+
+  it('preserves unknown string statuses in live progress frames', () => {
+    expect(
+      normalizeBatchProgressFrame({
+        type: 'server.batch.progress',
+        batchId: ' batch_new ',
+        status: 'archived',
+        itemsTotal: 1,
+        itemsDone: 0,
+        itemsFailed: 0,
+        item: {
+          batchItemId: ' item_new ',
+          status: 'needs_review',
+        },
+      }),
+    ).toEqual({
+      type: 'server.batch.progress',
+      batchId: 'batch_new',
+      status: 'archived',
+      itemsTotal: 1,
+      itemsDone: 0,
+      itemsFailed: 0,
+      itemsCancelled: 0,
+      item: {
+        batchItemId: 'item_new',
+        status: 'needs_review',
       },
     });
   });

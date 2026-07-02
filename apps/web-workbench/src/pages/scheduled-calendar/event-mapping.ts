@@ -13,6 +13,7 @@
  *   failed                 → magenta accent (full opacity even in past)
  *   paused                 → neutral accent at 80% opacity
  *   active + lastFailed    → magenta tint to warn of recurring-failure
+ *   unknown/unrecognized   → neutral, no active affordance
  *
  * Pure helpers — React-free + FullCalendar-free, fully unit-testable.
  */
@@ -37,7 +38,14 @@ export interface ScheduledTaskRow {
   timezone: string;
   nextRunAt: string | Date;
   lastRunAt: string | Date | null;
-  status: 'active' | 'paused' | 'running' | 'completed' | 'failed';
+  status:
+    | 'active'
+    | 'paused'
+    | 'running'
+    | 'completed'
+    | 'failed'
+    | 'unknown'
+    | (string & {});
   lastRunStatus: 'success' | 'failed' | null;
   lastError: string | null;
   createdAt: string | Date;
@@ -123,6 +131,14 @@ export function pickStatusColor(
       background: COLORS.magentaBg,
       backgroundHover: COLORS.magentaBgHover,
       opacity: 1,
+    };
+  }
+  if (row.status !== 'active') {
+    return {
+      accent: COLORS.neutral,
+      background: COLORS.neutralBg,
+      backgroundHover: COLORS.neutralBgHover,
+      opacity: 0.75,
     };
   }
   // status === 'active'. If the last fire failed, keep a magenta
@@ -266,13 +282,8 @@ function normalizeRepeatType(value: unknown): ScheduledTaskRow['repeatType'] {
 }
 
 function normalizeStatus(value: unknown): ScheduledTaskRow['status'] {
-  return value === 'paused' ||
-    value === 'running' ||
-    value === 'completed' ||
-    value === 'failed' ||
-    value === 'active'
-    ? value
-    : 'active';
+  const status = safeText(value);
+  return status || 'unknown';
 }
 
 function normalizeLastRunStatus(value: unknown): ScheduledTaskRow['lastRunStatus'] {

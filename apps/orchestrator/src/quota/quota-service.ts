@@ -42,6 +42,7 @@ import type { DB } from '../db/client.js';
 import { readAffectedRows } from '../db/mysql-result.js';
 import { taskQuotas, type TaskQuota } from '../db/schema/task-quotas.js';
 import { tasks } from '../db/schema/tasks.js';
+import { TASK_ACTIVE_STATUSES } from '../task-status.js';
 
 export type QuotaPeriod = 'day' | 'month';
 
@@ -307,19 +308,11 @@ export class QuotaService {
    * cancelled) are out by design.
    */
   async getActiveTaskCount(userIdInternal: number): Promise<number> {
-    const ACTIVE_STATUSES = [
-      'pending',
-      'planning',
-      'queued',
-      'executing',
-      'awaiting_user',
-      'paused',
-    ];
     const [row] = await this.db
       .select({ c: sql<number>`COUNT(*)` })
       .from(tasks)
       .where(
-        and(eq(tasks.userId, userIdInternal), inArray(tasks.status, ACTIVE_STATUSES)),
+        and(eq(tasks.userId, userIdInternal), inArray(tasks.status, [...TASK_ACTIVE_STATUSES])),
       );
     return Number(row?.c ?? 0);
   }

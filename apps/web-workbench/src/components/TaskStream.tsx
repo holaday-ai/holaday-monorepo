@@ -94,6 +94,7 @@ import {
 } from '@/components/terminal-result-state';
 import { hdDebug } from '@/lib/hd-debug';
 import { markdownCodeBlockMeta } from '@/lib/markdown-code-block-state';
+import { pausedTaskNoticeCopy } from '@/lib/task-status-copy';
 import { trpc } from '@/lib/trpc';
 import { useTaskStore } from '@/stores/task-store';
 import { showImageOption } from '@/lib/video-history-row';
@@ -153,10 +154,6 @@ function useMountedRef(): React.MutableRefObject<boolean> {
   return mountedRef;
 }
 
-function hasPausedTerminalResult(task: UiTask): boolean {
-  return task.status === 'paused' && Boolean(task.resultText);
-}
-
 /**
  * Conversational stream for one task. Emulates Claude's chat layout:
  *
@@ -197,7 +194,7 @@ export function TaskStream({
   //   - the user is already pinned near the bottom (< 200 px from
   //     scrollHeight). Switching to a historical task or scrolling
   //     up to read past content shouldn't yank the view back down.
-  const isTerminal = isTerminalStatus(task.status) || hasPausedTerminalResult(task);
+  const isTerminal = isTerminalStatus(task.status);
   React.useEffect(() => {
     if (isTerminal) return;
     const anchor = scrollAnchorRef.current;
@@ -225,7 +222,7 @@ export function TaskStream({
     webSearch,
   ]);
 
-  const terminal = isTerminalStatus(task.status) || hasPausedTerminalResult(task);
+  const terminal = isTerminalStatus(task.status);
 
   const humanLines = React.useMemo(() => buildHumanLines(steps), [steps]);
   // Prefer the live thinking event from the supercar loop; fall back to
@@ -444,12 +441,17 @@ function AgentBlock({
             Takes precedence over BoardingLine since the chip is the
             more specific surface ("正在操作浏览器… 45s" beats "正在
             分析您的请求"). */}
-        {subStatusEntry && shouldRenderLiveSubStatus(task.status, terminal) && (
-          <LiveSubStatusChip
-            subStatus={subStatusEntry.subStatus}
-            since={subStatusEntry.since}
-          />
-        )}
+        {subStatusEntry &&
+          shouldRenderLiveSubStatus({
+            status: task.status,
+            terminal,
+            hasAwaitingUser: Boolean(awaitingUser),
+          }) && (
+            <LiveSubStatusChip
+              subStatus={subStatusEntry.subStatus}
+              since={subStatusEntry.since}
+            />
+          )}
         {!hasAnyActivity && !terminal && !subStatusEntry && <BoardingLine />}
 
         {showInlineProgress && humanLines.length > 0 && (
@@ -496,6 +498,8 @@ function AgentBlock({
             taskTickCount={task.tickCount}
           />
         )}
+
+        {task.status === 'paused' && <PausedTaskNotice reason={task.resultText} />}
 
         {showTrustSummary && (
           <TrustSummaryCard
@@ -1070,6 +1074,26 @@ const AWAITING_KIND_ICON: Record<
   browser_action: MousePointerClick,
   video_quote: Clapperboard,
 };
+
+function PausedTaskNotice({ reason }: { reason?: string }): JSX.Element {
+  const copy = pausedTaskNoticeCopy(reason);
+  return (
+    <div className="rounded-lg border border-[#DCDDDD] bg-white px-4 py-3 shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-white/10 dark:bg-card/85">
+      <div className="flex items-start gap-2.5">
+        <CircleSlash className="mt-0.5 h-4 w-4 shrink-0 text-[#595757]" />
+        <div className="min-w-0 flex-1">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-[#595757]">
+            {copy.title}
+          </div>
+          <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-foreground">
+            {copy.body}
+          </p>
+          <p className="mt-2 text-[11px] text-muted-foreground">{copy.hint}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /**
  * Compact "agent is on SITE" chip shown in the stream while a task is

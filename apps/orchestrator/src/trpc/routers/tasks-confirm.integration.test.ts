@@ -72,8 +72,65 @@ describe('tasks.confirm tRPC mutation (awaiting_user → executing | cancelled)'
     return { userExternalId, taskId: s0.taskId };
   }
 
+  async function makeUserWithTaskStatus(status: string) {
+    const { newExternalId } = await import('@holaday/shared-types');
+    const { db } = await import('../../db/client.js');
+    const { eq } = await import('drizzle-orm');
+    const { users } = await import('../../db/schema/users.js');
+    const { tasks } = await import('../../db/schema/tasks.js');
+
+    const email = `confirm-${status}+${Date.now()}+${Math.random()}@example.com`;
+    const userExternalId = newExternalId('user');
+    await db.insert(users).values({
+      externalId: userExternalId,
+      email,
+      passwordHash: 'placeholder',
+    });
+    const user = must((await db.select().from(users).where(eq(users.email, email)))[0], 'user');
+    const taskId = newExternalId('task');
+    await db.insert(tasks).values({
+      externalId: taskId,
+      userId: user.id,
+      intent: `seeded ${status}`,
+      status,
+      plan: null,
+      origin: 'user',
+    });
+    return { userExternalId, taskId };
+  }
+
+  async function makeUserWithVideoQuoteTask() {
+    const { newExternalId } = await import('@holaday/shared-types');
+    const { db } = await import('../../db/client.js');
+    const { eq } = await import('drizzle-orm');
+    const { users } = await import('../../db/schema/users.js');
+    const { tasks } = await import('../../db/schema/tasks.js');
+
+    const email = `video-quote+${Date.now()}+${Math.random()}@example.com`;
+    const userExternalId = newExternalId('user');
+    await db.insert(users).values({
+      externalId: userExternalId,
+      email,
+      passwordHash: 'placeholder',
+    });
+    const user = must((await db.select().from(users).where(eq(users.email, email)))[0], 'user');
+    const taskId = newExternalId('task');
+    await db.insert(tasks).values({
+      externalId: taskId,
+      userId: user.id,
+      intent: '生成一个产品介绍视频',
+      status: 'awaiting_user',
+      awaitingKind: 'video_quote',
+      awaitingQuestion: '报价：确认制作 / 图片版 / 取消。',
+      plan: null,
+      origin: 'user',
+      result: { summary: '报价：确认制作 / 图片版 / 取消。', metadata: { lane: 'video_creation_confirm' } },
+    });
+    return { userExternalId, taskId };
+  }
+
   async function callTrpc(
-    route: 'abort' | 'confirm' | 'pause' | 'resume',
+    route: 'abort' | 'confirm' | 'confirmVideo' | 'pause' | 'resume',
     body: unknown,
     userExternalId: string,
   ) {
@@ -152,5 +209,43 @@ describe('tasks.confirm tRPC mutation (awaiting_user → executing | cancelled)'
     );
     expect(taskRow.status).toBe('cancelled');
     expect(taskRow.completedAt).not.toBeNull();
+  });
+
+  it('abort cancels a queued task before it starts executing', async () => {
+    const { userExternalId, taskId } = await makeUserWithTaskStatus('queued');
+    const { status, json } = await callTrpc('abort', { taskId }, userExternalId);
+    expect(status).toBe(200);
+    expect((json as { result: { data: { state: string } } }).result.data.state).toBe('cancelled');
+
+    const { db } = await import('../../db/client.js');
+    const { eq } = await import('drizzle-orm');
+    const { tasks } = await import('../../db/schema/tasks.js');
+    const taskRow = must(
+      (await db.select().from(tasks).where(eq(tasks.externalId, taskId)))[0],
+      'taskRow',
+    );
+    expect(taskRow.status).toBe('cancelled');
+    expect(taskRow.completedAt).not.toBeNull();
+  });
+
+  it('confirmVideo unclear keeps video quotes parked and persists the next prompt', async () => {
+    const { userExternalId, taskId } = await makeUserWithVideoQuoteTask();
+    const { status, json } = await callTrpc('confirmVideo', { taskId, text: '好' }, userExternalId);
+    expect(status).toBe(200);
+    expect((json as { result: { data: { status: string } } }).result.data.status).toBe(
+      'awaiting_user',
+    );
+
+    const { db } = await import('../../db/client.js');
+    const { eq } = await import('drizzle-orm');
+    const { tasks } = await import('../../db/schema/tasks.js');
+    const taskRow = must(
+      (await db.select().from(tasks).where(eq(tasks.externalId, taskId)))[0],
+      'taskRow',
+    );
+    expect(taskRow.status).toBe('awaiting_user');
+    expect(taskRow.awaitingKind).toBe('video_quote');
+    expect(taskRow.awaitingQuestion).toBe('请点按钮选择：确认制作 / 图片版 / 取消。');
+    expect(taskRow.completedAt).toBeNull();
   });
 });

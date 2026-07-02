@@ -167,27 +167,9 @@ export function ScheduledPage(): JSX.Element {
                       {REPEAT_LABEL[r.repeatType] ?? r.repeatType}
                     </span>
                     <span
-                      className={
-                        r.status === 'running'
-                          ? 'text-primary'
-                          : r.status === 'active'
-                            ? 'text-foreground/80'
-                            : r.status === 'paused'
-                              ? 'text-amber-700 dark:text-amber-300'
-                              : r.status === 'failed'
-                                ? 'text-rose-700 dark:text-rose-300'
-                                : 'text-muted-foreground'
-                      }
+                      className={scheduledStatusClassName(r.status)}
                     >
-                      {r.status === 'running'
-                        ? '执行中'
-                        : r.status === 'active'
-                          ? '已启用'
-                          : r.status === 'paused'
-                            ? '已暂停'
-                            : r.status === 'failed'
-                              ? '已失败'
-                              : '已完成'}
+                      {scheduledStatusLabel(r.status)}
                     </span>
                     {/* Codex P1 — for recurring rows that just had a
                         failed fire (status='active', last_run_status='failed'),
@@ -328,6 +310,40 @@ function ScheduledToggleButton({
 function truncate(s: string, n: number): string {
   if (s.length <= n) return s;
   return `${s.slice(0, n)}…`;
+}
+
+function scheduledStatusLabel(status: string): string {
+  switch (status) {
+    case 'running':
+      return '执行中';
+    case 'active':
+      return '已启用';
+    case 'paused':
+      return '已暂停';
+    case 'failed':
+      return '已失败';
+    case 'completed':
+      return '已完成';
+    case 'unknown':
+      return '状态未知';
+    default:
+      return status;
+  }
+}
+
+function scheduledStatusClassName(status: string): string {
+  switch (status) {
+    case 'running':
+      return 'text-primary';
+    case 'active':
+      return 'text-foreground/80';
+    case 'paused':
+      return 'text-amber-700 dark:text-amber-300';
+    case 'failed':
+      return 'text-rose-700 dark:text-rose-300';
+    default:
+      return 'text-muted-foreground';
+  }
 }
 
 function errorMessage(err: unknown): string {
