@@ -55,6 +55,7 @@ import {
   classifySupercarTaskStateTransition,
   shouldPersistSupercarTerminalOutcome,
   shouldRunSupercarTerminalSideEffects,
+  supercarResponseLayerTerminalStatus,
 } from '../../agent/supercar/task-state-machine.js';
 import {
   parseOtaAllowlist,
@@ -4690,10 +4691,6 @@ export const tasksRouter = router({
             // for every terminal task even when no user had opted in.
             let responseLayerOriginal: string | undefined;
             let responseLayerMetadata: unknown = undefined;
-            const isTerminal =
-              outcome.status === 'completed' ||
-              outcome.status === 'failed' ||
-              outcome.status === 'cancelled';
             // Inline flag gate — kept in sync with
             // openai-response-layer.ts `isResponseLayerEnabled`. Inline
             // (vs. import + call) so the common flag-off path avoids
@@ -4705,7 +4702,13 @@ export const tasksRouter = router({
             const responseLayerActive =
               (responseLayerFlag === 'true' || responseLayerFlag === '1') &&
               !!process.env.OPENAI_API_KEY;
-            if (isTerminal && outcome.summary && responseLayerActive) {
+            const responseLayerTerminalStatus =
+              supercarResponseLayerTerminalStatus(supercarTerminalStatus);
+            if (
+              responseLayerTerminalStatus &&
+              outcome.summary &&
+              responseLayerActive
+            ) {
               try {
                 const { format: formatResponse } = await import(
                   '../../response-layer/openai-response-layer.js'
@@ -4713,10 +4716,7 @@ export const tasksRouter = router({
                 const fmt = await formatResponse(
                   {
                     original: outcome.summary,
-                    terminalStatus: outcome.status as
-                      | 'completed'
-                      | 'failed'
-                      | 'cancelled',
+                    terminalStatus: responseLayerTerminalStatus,
                     expertWorkflowId:
                       typeof metadata?.expertWorkflowId === 'string'
                         ? metadata.expertWorkflowId

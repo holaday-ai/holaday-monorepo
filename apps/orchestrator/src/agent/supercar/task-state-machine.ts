@@ -1,4 +1,5 @@
 import type { ServerMessage } from '@holaday/shared-types';
+import { isTaskTerminalStatus, type TaskTerminalStatus } from '../../task-status.js';
 
 export type SupercarTaskOutcomeStatus =
   | 'completed'
@@ -43,6 +44,12 @@ export function shouldPersistSupercarTerminalOutcome(
   status: SupercarTaskOutcomeStatus,
 ): boolean {
   return status !== 'awaiting_user';
+}
+
+export function supercarResponseLayerTerminalStatus(
+  status: string | null | undefined,
+): TaskTerminalStatus | null {
+  return isTaskTerminalStatus(status) ? status : null;
 }
 
 export function buildSupercarWaitingUserMessage(input: {

@@ -4,6 +4,7 @@ import {
   classifySupercarTaskStateTransition,
   shouldPersistSupercarTerminalOutcome,
   shouldRunSupercarTerminalSideEffects,
+  supercarResponseLayerTerminalStatus,
 } from './task-state-machine.js';
 
 describe('classifySupercarTaskStateTransition', () => {
@@ -85,6 +86,20 @@ describe('shouldPersistSupercarTerminalOutcome', () => {
     ] as const) {
       expect(shouldPersistSupercarTerminalOutcome(status)).toBe(true);
     }
+  });
+});
+
+describe('supercarResponseLayerTerminalStatus', () => {
+  it('allows every user-visible terminal status, including partial_success', () => {
+    for (const status of ['completed', 'partial_success', 'failed', 'cancelled'] as const) {
+      expect(supercarResponseLayerTerminalStatus(status)).toBe(status);
+    }
+  });
+
+  it('refuses parked or recoverable non-terminal states', () => {
+    expect(supercarResponseLayerTerminalStatus('awaiting_user')).toBeNull();
+    expect(supercarResponseLayerTerminalStatus('paused')).toBeNull();
+    expect(supercarResponseLayerTerminalStatus(null)).toBeNull();
   });
 });
 
