@@ -34,11 +34,11 @@ describe('terminalEmptyCopy', () => {
     });
   });
 
-  it('offers rerun only when empty-terminal copy points at rerunning', () => {
+  it('offers rerun for terminal empty states that can safely start a fresh attempt', () => {
     expect(terminalEmptyAllowsRerun('completed')).toBe(true);
     expect(terminalEmptyAllowsRerun('partial_success')).toBe(true);
     expect(terminalEmptyAllowsRerun('failed')).toBe(true);
-    expect(terminalEmptyAllowsRerun('cancelled')).toBe(false);
+    expect(terminalEmptyAllowsRerun('cancelled')).toBe(true);
   });
 
   it('keeps insufficient-result copy consistent with empty terminal states', () => {

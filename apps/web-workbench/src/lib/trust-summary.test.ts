@@ -168,7 +168,7 @@ describe('recovery actions', () => {
       failureLevel: 'hard_fail',
     });
 
-    expect(actions.some((a) => a.kind === 'retry')).toBe(true);
+    expect(actions.some((a) => a.kind === 'retry')).toBe(false);
     expect(actions.find((a) => a.label === '拆成小步骤')?.prompt).toContain('请先只完成第一步');
   });
 });

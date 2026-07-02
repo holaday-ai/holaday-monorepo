@@ -299,7 +299,7 @@ export function buildRecoveryActions(input: RecoveryInput): RecoveryAction[] {
     }
   }
 
-  if (intent && (input.status === 'failed' || input.status === 'partial_success')) {
+  if (intent && input.status === 'partial_success') {
     actions.push({
       kind: 'retry',
       label: '重新执行',

@@ -35,7 +35,8 @@ export function terminalEmptyAllowsRerun(status: UiTask['status']): boolean {
   return (
     status === 'completed' ||
     status === 'partial_success' ||
-    status === 'failed'
+    status === 'failed' ||
+    status === 'cancelled'
   );
 }
 

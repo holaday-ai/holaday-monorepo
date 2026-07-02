@@ -2564,23 +2564,6 @@ function TerminalSummary({
           >
             <Copy className="h-3.5 w-3.5" />
           </button>
-          {/* BOSS feedback — retry button on failed tasks. Re-fires
-              the original intent as a brand-new task via the store
-              (NOT a reply, so quota + supercar prompt are fresh).
-              Cancelled tasks don't get retry — they were stopped
-              on purpose. */}
-          {status === 'failed' && intent && (
-            <button
-              type="button"
-              onClick={() => void handleRetry(intent)}
-              disabled={retryingIntent != null}
-              aria-label={retryingIntent ? '正在重新执行任务' : '重新执行任务'}
-              title={retryingIntent ? '正在重新执行' : '重新执行任务'}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-[6px] border border-[#EA1F59]/25 bg-[#EA1F59]/5 font-medium text-[#EA1F59] transition-colors hover:border-[#EA1F59]/45 hover:bg-[#EA1F59]/10 hover:text-[#c80a5d] disabled:cursor-wait disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20"
-            >
-              <RotateCcw className={cn('h-3.5 w-3.5', retryingIntent && 'animate-spin')} aria-hidden />
-            </button>
-          )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
@@ -3136,10 +3119,9 @@ function FailureHeaderCard({
       <div className="font-medium">{friendly.title}</div>
       <div className="mt-0.5 text-xs opacity-80">{friendly.subtitle}</div>
       <div className="mt-2 flex flex-wrap items-center gap-2">
-        <div className="inline-flex min-h-7 items-center gap-1.5 rounded-[6px] border border-[#DCDDDD]/75 bg-white/70 px-2 py-1 text-[11px] text-[#595757] dark:border-white/10 dark:bg-white/10 dark:text-foreground/80">
-          <RotateCcw className="h-3 w-3 text-[#EA1F59]" aria-hidden />
-          <span>{friendly.nextStep}</span>
-        </div>
+        <p className="min-w-[180px] flex-1 text-[11px] leading-5 text-[#595757]/75 dark:text-foreground/70">
+          {friendly.nextStep}
+        </p>
         {onRetry && (
           <button
             type="button"
