@@ -36,6 +36,12 @@ export function calculateLotCaps(principalCreditCents: number) {
   };
 }
 
+function assertNonNegativeInteger(value: number, name: string): void {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new RangeError(`${name} must be a non-negative integer`);
+  }
+}
+
 export function calculateReleaseSlice(input: {
   principalCreditCents: number;
   lockedBonusCreditCents: number;
@@ -43,13 +49,30 @@ export function calculateReleaseSlice(input: {
   releasedBonusCreditCents?: number;
   remainingReleaseMonths?: number;
 }) {
+  const releasedPrincipalCreditCents = input.releasedPrincipalCreditCents ?? 0;
+  const releasedBonusCreditCents = input.releasedBonusCreditCents ?? 0;
   const remainingReleaseMonths = input.remainingReleaseMonths ?? PARTNER_RELEASE_MONTHS;
-  if (!Number.isInteger(remainingReleaseMonths) || remainingReleaseMonths <= 0) {
-    throw new RangeError('remainingReleaseMonths must be a positive integer');
+  assertNonNegativeInteger(input.principalCreditCents, 'principalCreditCents');
+  assertNonNegativeInteger(input.lockedBonusCreditCents, 'lockedBonusCreditCents');
+  assertNonNegativeInteger(releasedPrincipalCreditCents, 'releasedPrincipalCreditCents');
+  assertNonNegativeInteger(releasedBonusCreditCents, 'releasedBonusCreditCents');
+
+  if (
+    !Number.isInteger(remainingReleaseMonths) ||
+    remainingReleaseMonths < 1 ||
+    remainingReleaseMonths > PARTNER_RELEASE_MONTHS
+  ) {
+    throw new RangeError(`remainingReleaseMonths must be an integer from 1 to ${PARTNER_RELEASE_MONTHS}`);
+  }
+  if (releasedPrincipalCreditCents > input.principalCreditCents) {
+    throw new RangeError('releasedPrincipalCreditCents cannot exceed principalCreditCents');
+  }
+  if (releasedBonusCreditCents > input.lockedBonusCreditCents) {
+    throw new RangeError('releasedBonusCreditCents cannot exceed lockedBonusCreditCents');
   }
 
-  const remainingPrincipalCreditCents = input.principalCreditCents - (input.releasedPrincipalCreditCents ?? 0);
-  const remainingBonusCreditCents = input.lockedBonusCreditCents - (input.releasedBonusCreditCents ?? 0);
+  const remainingPrincipalCreditCents = input.principalCreditCents - releasedPrincipalCreditCents;
+  const remainingBonusCreditCents = input.lockedBonusCreditCents - releasedBonusCreditCents;
   const principalCreditCents = Math.ceil(remainingPrincipalCreditCents / remainingReleaseMonths);
   const bonusCreditCents = Math.ceil(remainingBonusCreditCents / remainingReleaseMonths);
   return {

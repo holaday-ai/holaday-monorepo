@@ -70,4 +70,35 @@ describe('partner rules', () => {
     expect(releasedBonusCreditCents).toBe(bonusTotal);
     expect(releasedTotalCreditCents).toBe(principalTotal + bonusTotal);
   });
+
+  it('rejects invalid release state', () => {
+    const validInput = {
+      principalCreditCents: 10_000_03,
+      lockedBonusCreditCents: 2_000_05,
+      releasedPrincipalCreditCents: 1_250_01,
+      releasedBonusCreditCents: 250_01,
+      remainingReleaseMonths: 7,
+    };
+
+    const invalidInputs = [
+      { ...validInput, releasedPrincipalCreditCents: validInput.principalCreditCents + 1 },
+      { ...validInput, releasedBonusCreditCents: validInput.lockedBonusCreditCents + 1 },
+      { ...validInput, principalCreditCents: -1 },
+      { ...validInput, lockedBonusCreditCents: -1 },
+      { ...validInput, releasedPrincipalCreditCents: -1 },
+      { ...validInput, releasedBonusCreditCents: -1 },
+      { ...validInput, principalCreditCents: 10_000.5 },
+      { ...validInput, lockedBonusCreditCents: 2_000.5 },
+      { ...validInput, releasedPrincipalCreditCents: 1_250.5 },
+      { ...validInput, releasedBonusCreditCents: 250.5 },
+      { ...validInput, remainingReleaseMonths: 0 },
+      { ...validInput, remainingReleaseMonths: -1 },
+      { ...validInput, remainingReleaseMonths: 1.5 },
+      { ...validInput, remainingReleaseMonths: 9 },
+    ];
+
+    for (const invalidInput of invalidInputs) {
+      expect(() => calculateReleaseSlice(invalidInput)).toThrow(RangeError);
+    }
+  });
 });
