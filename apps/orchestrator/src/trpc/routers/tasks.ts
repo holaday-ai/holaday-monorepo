@@ -275,11 +275,11 @@ const createInput = z.object({
   fileIds: z.array(z.string()).max(5).optional(),
   /**
    * Phase 14 audit follow-up — multi-turn追问. When the user is
-   * looking at a completed/failed task and types a follow-up
+   * looking at a terminal task and types a follow-up
    * (e.g. "为什么失败"), the SPA passes the parent task's
    * external id here. Server then:
    *   1. Validates the parent belongs to the same user and is in
-   *      a terminal state (completed / failed / cancelled).
+   *      a terminal state (completed / partial_success / failed / cancelled).
    *   2. Skips quota consumption — follow-ups are free; they
    *      reuse the cost the user already paid.
    *   3. Prepends a "前一个任务"<intent>"，结果：<summary>" block
@@ -7886,7 +7886,7 @@ async function persistSupercarOutcome(
   if (!shouldPersistSupercarTerminalOutcome(outcome.status)) {
     // Awaiting-user is a parked non-terminal state. Persist it through
     // the explicit waiting-user path, never through terminal helpers
-    // that would collapse it into paused/failed/cancelled semantics.
+    // that would collapse it into paused/failed/cancelled-style semantics.
     console.warn(
       `[supercar] refusing terminal persist for awaiting_user outcome ${taskId}`,
     );

@@ -28,7 +28,7 @@
 
 /**
  * One queued task's closure. Resolves when the vision loop terminates
- * (completed / failed / paused / cancelled). Never throws: loop
+ * (completed / partial_success / failed / paused / cancelled). Never throws: loop
  * errors are caught by tasks.create wrapping it.
  */
 export type QueuedTaskFn = () => Promise<unknown>;

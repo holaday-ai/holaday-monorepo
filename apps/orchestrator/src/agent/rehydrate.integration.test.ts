@@ -154,4 +154,61 @@ describe('pending_confirm_payload + rehydration', () => {
     const stepRows = await db.select().from(taskSteps).where(eq(taskSteps.externalId, firstStepId));
     expect(stepRows[0]?.pendingConfirmPayload).toBeNull();
   });
+
+  it('rehydrateInFlight keeps cursor after a skipped step instead of replaying it', async () => {
+    const { newExternalId } = await import('@holaday/shared-types');
+    const { db } = await import('../db/client.js');
+    const { eq } = await import('drizzle-orm');
+    const { users } = await import('../db/schema/users.js');
+    const { taskSteps } = await import('../db/schema/task-steps.js');
+    const { TaskRepository } = await import('./task-repository.js');
+    const { TaskController } = await import('./task-controller.js');
+
+    const email = `rehydrate-skipped+${Date.now()}@example.com`;
+    await db.insert(users).values({
+      externalId: newExternalId('user'),
+      email,
+      passwordHash: 'placeholder',
+    });
+    const user = must((await db.select().from(users).where(eq(users.email, email)))[0], 'user');
+
+    const repo = new TaskRepository(db);
+    const controller = new TaskController();
+
+    const skippedStepId = newExternalId('taskStep');
+    const nextStepId = newExternalId('taskStep');
+    const { state: s0 } = controller.start({
+      state: {
+        taskId: newExternalId('task'),
+        status: 'planning',
+        plan: [
+          { id: skippedStepId, kind: 'screenshot' as const, risk: 'low' as const },
+          { id: nextStepId, kind: 'extract' as const, risk: 'low' as const },
+        ],
+        cursor: 0,
+        pendingConfirm: null,
+      },
+    });
+    await repo.insertTask(s0, { userId: user.id, intent: 'skip then recover' });
+
+    const { state: s1 } = controller.onStepResult(s0, {
+      taskId: s0.taskId,
+      stepId: skippedStepId,
+      status: 'skipped',
+    });
+    expect(s1.status).toBe('executing');
+    expect(s1.cursor).toBe(1);
+    await repo.applyStepResult(s0, s1, { reason: 'optional screenshot unavailable' }, 'skipped');
+
+    const stepRows = await db.select().from(taskSteps).where(eq(taskSteps.externalId, skippedStepId));
+    expect(stepRows[0]?.status).toBe('skipped');
+
+    const fresh = new TaskRepository(db);
+    const rehydrated = await fresh.rehydrateInFlight();
+    const hit = rehydrated.find((r) => r.state.taskId === s0.taskId);
+    expect(hit).toBeDefined();
+    expect(hit?.state.status).toBe('executing');
+    expect(hit?.state.cursor).toBe(1);
+    expect(hit?.state.plan[hit.state.cursor]?.id).toBe(nextStepId);
+  });
 });

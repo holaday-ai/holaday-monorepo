@@ -12,6 +12,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import type { DB } from '../db/client.js';
+import type { TaskState } from './task-controller.js';
 import { TaskRepository } from './task-repository.js';
 
 interface Captured {
@@ -59,6 +60,46 @@ function fakeDbWithAffectedRows(affectedRows: number) {
     values: async (payload: Record<string, unknown>) => {
       captured.eventInserts += 1;
       captured.eventPayload = payload;
+      return undefined;
+    },
+  });
+
+  const transaction = async (cb: (tx: unknown) => Promise<void>) => {
+    captured.transactionRan = true;
+    await cb({ update, insert });
+  };
+
+  const db = { select, update, insert, transaction } as unknown as DB;
+  return { db, captured };
+}
+
+function fakeDbForStateTransitions() {
+  const captured = {
+    updatePayloads: [] as Record<string, unknown>[],
+    eventPayloads: [] as Record<string, unknown>[],
+    transactionRan: false,
+  };
+
+  const select = () => ({
+    from: () => ({
+      where: () => ({
+        limit: async () => [{ id: 1 }],
+      }),
+    }),
+  });
+
+  const update = () => ({
+    set: (payload: Record<string, unknown>) => ({
+      where: async () => {
+        captured.updatePayloads.push(payload);
+        return [{ affectedRows: 1 }];
+      },
+    }),
+  });
+
+  const insert = () => ({
+    values: async (payload: Record<string, unknown>) => {
+      captured.eventPayloads.push(payload);
       return undefined;
     },
   });
@@ -200,5 +241,66 @@ describe('TaskRepository.persistVisionOutcome — awaiting_user state guard (Pha
     });
 
     expect(captured.eventInserts).toBe(1);
+  });
+});
+
+describe('TaskRepository task terminal state persistence', () => {
+  const baseState: TaskState = {
+    taskId: 'tsk_state_machine',
+    status: 'executing',
+    plan: [{ id: 'stp_terminal', kind: 'extract', risk: 'low' }],
+    cursor: 0,
+    pendingConfirm: null,
+  };
+
+  it('applyStepResult treats partial_success as terminal for completedAt and event ledger', async () => {
+    const { db, captured } = fakeDbForStateTransitions();
+    const repo = new TaskRepository(db);
+    const next: TaskState = {
+      ...baseState,
+      status: 'partial_success',
+      cursor: 1,
+    };
+
+    await repo.applyStepResult(baseState, next, { summary: 'result needs review' });
+
+    expect(captured.transactionRan).toBe(true);
+    expect(captured.updatePayloads[0]).toMatchObject({
+      status: 'partial_success',
+      pauseReason: null,
+    });
+    expect(captured.updatePayloads[0]?.completedAt).toBeInstanceOf(Date);
+    expect(captured.updatePayloads[1]).toMatchObject({
+      status: 'completed',
+      output: { summary: 'result needs review' },
+      pendingConfirmPayload: null,
+    });
+    expect(captured.eventPayloads[0]).toMatchObject({
+      type: 'task.partial_success',
+      actor: 'system',
+      payload: { summary: 'result needs review' },
+    });
+  });
+
+  it('applyControlTransition treats partial_success as terminal for completedAt and event ledger', async () => {
+    const { db, captured } = fakeDbForStateTransitions();
+    const repo = new TaskRepository(db);
+    const next: TaskState = {
+      ...baseState,
+      status: 'partial_success',
+    };
+
+    await repo.applyControlTransition(baseState, next);
+
+    expect(captured.transactionRan).toBe(true);
+    expect(captured.updatePayloads[0]).toMatchObject({
+      status: 'partial_success',
+      pauseReason: null,
+    });
+    expect(captured.updatePayloads[0]?.completedAt).toBeInstanceOf(Date);
+    expect(captured.eventPayloads[0]).toMatchObject({
+      type: 'task.partial_success',
+      actor: 'user',
+    });
   });
 });

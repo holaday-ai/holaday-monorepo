@@ -15,7 +15,7 @@ import { tasks } from './tasks.js';
 /**
  * `task_steps` — the Agent Loop's step ledger.
  * Persisted after every step so Orchestrator can recover from restart.
- * `index` is the 0-based ordinal within the parent task.
+ * `seq` is the 0-based ordinal within the parent task.
  */
 export const taskSteps = mysqlTable(
   'task_steps',

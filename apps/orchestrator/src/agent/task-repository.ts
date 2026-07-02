@@ -20,7 +20,7 @@ import { taskEvents } from '../db/schema/task-events.js';
 import { taskSteps } from '../db/schema/task-steps.js';
 import { tasks } from '../db/schema/tasks.js';
 import { users } from '../db/schema/users.js';
-import { TASK_ACTIVE_STATUSES } from '../task-status.js';
+import { isTaskTerminalStatus, TASK_ACTIVE_STATUSES } from '../task-status.js';
 import type { PendingConfirm, PlannedStep, TaskState } from './task-controller.js';
 
 /**
@@ -130,7 +130,7 @@ export class TaskRepository {
 
     await this.db.transaction(async (tx) => {
       const taskUpdate: Partial<typeof tasks.$inferInsert> = { status: next.status };
-      if (next.status === 'completed' || next.status === 'failed' || next.status === 'cancelled') {
+      if (isTaskTerminalStatus(next.status)) {
         taskUpdate.completedAt = new Date();
       }
       if (next.error) {
@@ -225,7 +225,7 @@ export class TaskRepository {
         status: next.status,
         pauseReason: next.status === 'paused' ? (next.pauseReason ?? null) : null,
       };
-      if (next.status === 'completed' || next.status === 'failed' || next.status === 'cancelled') {
+      if (isTaskTerminalStatus(next.status)) {
         update.completedAt = new Date();
       }
       await tx.update(tasks).set(update).where(eq(tasks.id, taskRow.id));
@@ -617,10 +617,8 @@ export class TaskRepository {
         };
       });
 
-      // Cursor = first step that is not completed/failed/cancelled.
-      let cursor = steps.findIndex(
-        (s) => s.status !== 'completed' && s.status !== 'failed' && s.status !== 'cancelled',
-      );
+      // Cursor = first step that has not reached a settled ledger status.
+      let cursor = steps.findIndex((s) => !isSettledStepStatus(s.status));
       if (cursor < 0) cursor = steps.length;
 
       const current = steps[cursor];
@@ -702,6 +700,7 @@ function eventTypeFor(prev: TaskState, next: TaskState): string {
   if (next.status === 'awaiting_user') return 'step.awaiting_user';
   if (next.status === 'cancelled') return 'task.cancelled';
   if (next.status === 'completed') return 'task.completed';
+  if (next.status === 'partial_success') return 'task.partial_success';
   if (next.status === 'paused') return 'task.paused';
   if (next.cursor > prev.cursor) return 'step.completed';
   return 'task.transition';
@@ -711,7 +710,20 @@ function controlEventType(prev: TaskState, next: TaskState): string {
   if (next.status === 'paused') return 'task.paused';
   if (prev.status === 'paused' && next.status === 'executing') return 'task.resumed';
   if (next.status === 'cancelled') return 'task.cancelled';
+  if (next.status === 'completed') return 'task.completed';
+  if (next.status === 'partial_success') return 'task.partial_success';
+  if (next.status === 'failed') return 'task.failed';
   return 'task.transition';
+}
+
+function isSettledStepStatus(status: string | null | undefined): boolean {
+  return (
+    status === 'completed' ||
+    status === 'failed' ||
+    status === 'cancelled' ||
+    status === 'skipped' ||
+    status === 'partial_success'
+  );
 }
 
 function stepStatusFor(

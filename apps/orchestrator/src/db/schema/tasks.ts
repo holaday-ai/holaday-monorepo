@@ -21,7 +21,7 @@ import { users } from './users.js';
  * Status machine:
  *   pending/planning/queued → executing ↔ awaiting_user
  *                          ↔ paused
- *                          → completed / failed / cancelled
+ *                          → completed / partial_success / failed / cancelled
  */
 export const tasks = mysqlTable(
   'tasks',
