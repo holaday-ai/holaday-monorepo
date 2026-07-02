@@ -228,22 +228,34 @@ export class ReleaseService {
     for (const lot of eligibleLots) {
       if (existingReleaseByLotId.has(lot.id)) continue;
 
-      const priorReleases = (await this.readReleasesForLot(lot.id)).filter((row) => row.releaseMonth < releaseMonth);
-      if (priorReleases.length > 0) {
+      const allReleases = await this.readReleasesForLot(lot.id);
+      const priorReleases = allReleases.filter((row) => row.releaseMonth < releaseMonth);
+      if (allReleases.length > 0) {
         lotIdsToReconcile.add(lot.id);
       }
 
-      const releasedPrincipalCreditCents = priorReleases.reduce((sum, row) => sum + row.principalCreditCents, 0);
-      const releasedBonusCreditCents = priorReleases.reduce((sum, row) => sum + row.bonusCreditCents, 0);
+      const priorReleasedPrincipalCreditCents = priorReleases.reduce(
+        (sum, row) => sum + row.principalCreditCents,
+        0,
+      );
+      const priorReleasedBonusCreditCents = priorReleases.reduce((sum, row) => sum + row.bonusCreditCents, 0);
+      const totalReleasedPrincipalCreditCents = allReleases.reduce(
+        (sum, row) => sum + row.principalCreditCents,
+        0,
+      );
+      const totalReleasedBonusCreditCents = allReleases.reduce((sum, row) => sum + row.bonusCreditCents, 0);
       const latestCarryForwardCreditCents = latestReleaseRow(priorReleases)?.carryForwardCreditCents ?? 0;
-      const remainingPrincipalCreditCents = Math.max(0, lot.principalCreditCents - releasedPrincipalCreditCents);
-      const remainingBonusCreditCents = Math.max(0, lot.lockedBonusCreditCents - releasedBonusCreditCents);
+      const remainingPrincipalCreditCents = Math.max(
+        0,
+        lot.principalCreditCents - totalReleasedPrincipalCreditCents,
+      );
+      const remainingBonusCreditCents = Math.max(0, lot.lockedBonusCreditCents - totalReleasedBonusCreditCents);
       const remainingReleaseMonths = Math.max(1, PARTNER_RELEASE_MONTHS - priorReleases.length);
       const slice = calculateReleaseSlice({
         principalCreditCents: lot.principalCreditCents,
         lockedBonusCreditCents: lot.lockedBonusCreditCents,
-        releasedPrincipalCreditCents,
-        releasedBonusCreditCents,
+        releasedPrincipalCreditCents: priorReleasedPrincipalCreditCents,
+        releasedBonusCreditCents: priorReleasedBonusCreditCents,
         remainingReleaseMonths,
       });
       const requestedTargetCreditCents = slice.totalCreditCents + latestCarryForwardCreditCents;

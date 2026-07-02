@@ -578,6 +578,84 @@ describe('ReleaseService releaseEligibleLots', () => {
     });
   });
 
+  it('does not backfill an earlier month when later releases already consumed the lot capacity', async () => {
+    const fakeDb = new FakeReleaseDb({
+      lots: [
+        fakeLot({
+          releasedPrincipalCreditCents: 0,
+          releasedBonusCreditCents: 0,
+          carryForwardCreditCents: 99,
+        }),
+      ],
+      releases: [
+        fakeRelease({
+          releaseMonth: '2026-12',
+          principalCreditCents: 80_000,
+          bonusCreditCents: 16_000,
+          idempotencyKey: 'monthly_release:2026-12:1',
+        }),
+      ],
+    });
+    const service = new ReleaseService(fakeDb.asDB());
+
+    const summary = await service.releaseEligibleLots({ releaseMonth: '2026-11', budgetCreditCents: 50_000 });
+
+    expect(summary).toEqual({
+      releaseMonth: '2026-11',
+      eligibleLotCount: 1,
+      releaseCount: 0,
+      totalReleasedCreditCents: 0,
+      remainingBudgetCreditCents: 50_000,
+    });
+    expect(fakeDb.releaseRows).toHaveLength(1);
+    expect(fakeDb.ledgerRows).toEqual([]);
+    expect(fakeDb.lotRows[0]).toMatchObject({
+      releasedPrincipalCreditCents: 80_000,
+      releasedBonusCreditCents: 16_000,
+      carryForwardCreditCents: 0,
+    });
+  });
+
+  it('caps an earlier backfill release to capacity left after later releases', async () => {
+    const fakeDb = new FakeReleaseDb({
+      lots: [fakeLot()],
+      releases: [
+        fakeRelease({
+          releaseMonth: '2026-12',
+          principalCreditCents: 75_000,
+          bonusCreditCents: 15_000,
+          idempotencyKey: 'monthly_release:2026-12:1',
+        }),
+      ],
+    });
+    const service = new ReleaseService(fakeDb.asDB());
+
+    const summary = await service.releaseEligibleLots({ releaseMonth: '2026-11', budgetCreditCents: 50_000 });
+
+    expect(summary).toEqual({
+      releaseMonth: '2026-11',
+      eligibleLotCount: 1,
+      releaseCount: 1,
+      totalReleasedCreditCents: 6_000,
+      remainingBudgetCreditCents: 44_000,
+    });
+    expect(fakeDb.releaseRows.at(-1)).toMatchObject({
+      releaseMonth: '2026-11',
+      principalCreditCents: 5_000,
+      bonusCreditCents: 1_000,
+      carryForwardCreditCents: 0,
+    });
+    expect(fakeDb.ledgerRows.map((row) => [row.entryType, row.amountCreditCents])).toEqual([
+      ['monthly_release_principal', 5_000],
+      ['monthly_release_bonus', 1_000],
+    ]);
+    expect(fakeDb.lotRows[0]).toMatchObject({
+      releasedPrincipalCreditCents: 80_000,
+      releasedBonusCreditCents: 16_000,
+      carryForwardCreditCents: 0,
+    });
+  });
+
   it('does not create a release row when budget is zero', async () => {
     const fakeDb = new FakeReleaseDb({ lots: [fakeLot()] });
     const service = new ReleaseService(fakeDb.asDB());
