@@ -96,6 +96,25 @@ describe('trust summary', () => {
       '0 个',
     );
   });
+
+  it('does not frame awaiting-user states as result review', () => {
+    const summary = buildTrustSummary({
+      status: 'awaiting_user',
+      resultText: '',
+      currentUrl: null,
+      finalScreenshot: null,
+      attachments: [],
+    });
+
+    expect(summary.tone).toBe('warning');
+    expect(summary.title).toBe('等待你处理');
+    expect(summary.verdict).toContain('任务正在等待你的操作');
+    expect(summary.boundary).toContain('还没有进入结果复核');
+    expect(summary.rows).toEqual([]);
+    expect(summary.ledger.find((item) => item.label === '当前状态')?.value).toBe(
+      '等待用户',
+    );
+  });
 });
 
 describe('shouldShowTrustSummary', () => {

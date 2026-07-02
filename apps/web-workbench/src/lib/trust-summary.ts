@@ -74,7 +74,9 @@ export function buildTrustSummary(input: TrustSummaryInput): TrustSummaryModel {
   const hasScreenshot = Boolean(input.finalScreenshot);
   const attachmentCount = input.attachments?.length ?? 0;
   const hardFailure = input.status === 'failed' || input.failureLevel === 'hard_fail';
+  const awaitingUser = input.status === 'awaiting_user';
   const flagged =
+    awaitingUser ||
     input.status === 'partial_success' ||
     input.verificationPassed === false ||
     failedChecks.length > 0;
@@ -97,16 +99,20 @@ export function buildTrustSummary(input: TrustSummaryInput): TrustSummaryModel {
 
   return {
     tone,
-    title: compactMissingEvidence
+    title: awaitingUser
+      ? '等待你处理'
+      : compactMissingEvidence
       ? input.status === 'cancelled' || input.status === 'failed'
         ? '任务状态'
         : '复核提示'
       : '结果复核',
     verdict,
-    boundary: compactMissingEvidence
+    boundary: awaitingUser
+      ? '任务还没有进入结果复核；先完成下方操作或补充信息，HOLA DAY 会沿用当前进度继续。'
+      : compactMissingEvidence
       ? '本次没有拿到可复核的链接、截图或产物；HOLA DAY 只保留已生成内容和步骤线索，不会把空指标包装成证据。'
       : 'HOLA DAY 只展示已经拿到的线索；没有截图、链接或终态页的部分，不会被当作已验证事实。',
-    rows: compactMissingEvidence
+    rows: awaitingUser || compactMissingEvidence
       ? []
       : buildEvidenceRows({
           sourceCount,
@@ -114,7 +120,22 @@ export function buildTrustSummary(input: TrustSummaryInput): TrustSummaryModel {
           hasScreenshot,
           attachmentCount,
         }),
-    ledger: compactMissingEvidence
+    ledger: awaitingUser
+      ? [
+          {
+            stage: 'observed',
+            label: '当前状态',
+            value: '等待用户',
+            detail: '任务已暂停在需要你配合的步骤，尚未生成最终结果。',
+          },
+          {
+            stage: 'boundary',
+            label: '使用边界',
+            value: '不是结果复核',
+            detail: '当前卡片只提供继续动作；事实、价格、排序或链接需要任务完成后再复核。',
+          },
+        ]
+      : compactMissingEvidence
       ? [
           {
             stage: 'observed',
@@ -368,6 +389,7 @@ function trustVerdict(input: {
   failureLevel?: UiTask['failureLevel'];
   failedCheckCount: number;
 }): string {
+  if (input.status === 'awaiting_user') return '任务正在等待你的操作，当前进度已保留。';
   if (input.status === 'failed') return '任务未完成，结果不能当作完成产物使用。';
   if (input.status === 'cancelled') return '任务已取消，只能参考已保留的中间信息。';
   if (input.status === 'partial_success') return '任务产出了结果，但自动审核发现不完整或需复核。';
