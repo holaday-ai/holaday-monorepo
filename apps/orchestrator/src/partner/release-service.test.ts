@@ -414,6 +414,77 @@ describe('ReleaseService releaseEligibleLots', () => {
     });
   });
 
+  it('uses next-month budget to catch up carried-forward principal before paying bonus ahead', async () => {
+    const fakeDb = new FakeReleaseDb({ lots: [fakeLot()] });
+    const service = new ReleaseService(fakeDb.asDB());
+
+    await service.releaseEligibleLots({ releaseMonth: '2026-11', budgetCreditCents: 5_000 });
+    const summary = await service.releaseEligibleLots({ releaseMonth: '2026-12', budgetCreditCents: 50_000 });
+
+    expect(summary).toEqual({
+      releaseMonth: '2026-12',
+      eligibleLotCount: 1,
+      releaseCount: 1,
+      totalReleasedCreditCents: 20_001,
+      remainingBudgetCreditCents: 29_999,
+    });
+    expect(
+      fakeDb.releaseRows.map((row) => [
+        row.releaseMonth,
+        row.principalCreditCents,
+        row.bonusCreditCents,
+        row.carryForwardCreditCents,
+      ]),
+    ).toEqual([
+      ['2026-11', 5_000, 0, 7_000],
+      ['2026-12', 17_715, 2_286, 0],
+    ]);
+    expect(fakeDb.lotRows[0]).toMatchObject({
+      releasedPrincipalCreditCents: 22_715,
+      releasedBonusCreditCents: 2_286,
+      carryForwardCreditCents: 0,
+    });
+  });
+
+  it('releases carried-forward principal when bonus is already exhausted', async () => {
+    const fakeDb = new FakeReleaseDb({
+      lots: [
+        fakeLot({
+          lockedBonusCreditCents: 2_000,
+        }),
+      ],
+      releases: [
+        fakeRelease({
+          principalCreditCents: 5_000,
+          bonusCreditCents: 2_000,
+          carryForwardCreditCents: 7_000,
+        }),
+      ],
+    });
+    const service = new ReleaseService(fakeDb.asDB());
+
+    const summary = await service.releaseEligibleLots({ releaseMonth: '2026-12', budgetCreditCents: 50_000 });
+
+    expect(summary).toEqual({
+      releaseMonth: '2026-12',
+      eligibleLotCount: 1,
+      releaseCount: 1,
+      totalReleasedCreditCents: 17_715,
+      remainingBudgetCreditCents: 32_285,
+    });
+    expect(fakeDb.releaseRows.at(-1)).toMatchObject({
+      releaseMonth: '2026-12',
+      principalCreditCents: 17_715,
+      bonusCreditCents: 0,
+      carryForwardCreditCents: 0,
+    });
+    expect(fakeDb.lotRows[0]).toMatchObject({
+      releasedPrincipalCreditCents: 22_715,
+      releasedBonusCreditCents: 2_000,
+      carryForwardCreditCents: 0,
+    });
+  });
+
   it('reruns an existing release row to repair missing ledger entries and stale lot summaries', async () => {
     const existingRelease = fakeRelease();
     const fakeDb = new FakeReleaseDb({

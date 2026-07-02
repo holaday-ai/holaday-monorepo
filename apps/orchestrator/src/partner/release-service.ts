@@ -255,13 +255,17 @@ export class ReleaseService {
         targetCreditCents,
         budgetCreditCents: remainingBudgetCreditCents,
       });
+      const principalCapacityCreditCents = Math.min(
+        remainingPrincipalCreditCents,
+        slice.principalCreditCents + latestCarryForwardCreditCents,
+      );
       const principalCreditCents = Math.min(
         releasedCreditCents,
-        Math.min(slice.principalCreditCents, remainingPrincipalCreditCents),
+        principalCapacityCreditCents,
       );
       const bonusCreditCents = Math.min(
         releasedCreditCents - principalCreditCents,
-        Math.min(slice.bonusCreditCents + latestCarryForwardCreditCents, remainingBonusCreditCents),
+        Math.min(slice.bonusCreditCents, remainingBonusCreditCents),
       );
       const actualReleasedCreditCents = principalCreditCents + bonusCreditCents;
       const carryForwardCreditCents = Math.max(0, targetCreditCents - actualReleasedCreditCents);
