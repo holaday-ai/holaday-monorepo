@@ -38,6 +38,18 @@ describe('error-copy', () => {
     );
   });
 
+  it('maps internal terminal status strings from batch items to user-facing copy', () => {
+    expect(humaniseTaskError('task ended with status=partial_success')).toBe(
+      '子任务已产出结果，但需要复核。请打开任务详情查看缺失项。',
+    );
+    expect(humaniseTaskError('task ended with status=failed')).toBe(
+      '子任务未完成，请打开任务详情查看失败原因。',
+    );
+    expect(humaniseTaskError('task ended with status=cancelled')).toBe(
+      '子任务已取消。',
+    );
+  });
+
   it('hides model secret names in missing configuration errors', () => {
     expect(humaniseTaskError('missing ANTHROPIC_API_KEY')).toBe(
       'AI 服务暂未配置，请联系 support@holaday.ai。',

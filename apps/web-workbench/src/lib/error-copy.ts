@@ -22,6 +22,18 @@ interface Rule {
 
 const SYSTEM_TASK_RULES: Rule[] = [
   {
+    match: /task ended with status=partial_success/i,
+    to: '子任务已产出结果，但需要复核。请打开任务详情查看缺失项。',
+  },
+  {
+    match: /task ended with status=failed/i,
+    to: '子任务未完成，请打开任务详情查看失败原因。',
+  },
+  {
+    match: /task ended with status=cancelled/i,
+    to: '子任务已取消。',
+  },
+  {
     match: /ORCHESTRATOR_RESTART|orchestrator restarted while task was in-flight|服务重启导致任务中断/i,
     to: '服务刚重启过，这个任务没能继续。重新执行会保留旧记录并新开一次。',
   },
