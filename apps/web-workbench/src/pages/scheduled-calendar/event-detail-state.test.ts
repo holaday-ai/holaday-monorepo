@@ -78,6 +78,12 @@ describe('event detail state helpers', () => {
       tone: 'attention',
     });
 
+    expect(scheduledEventActionHint({ status: 'active', lastRunStatus: 'skipped' })).toEqual({
+      title: '上次执行已跳过',
+      body: '计划仍在运行；这通常表示本次条件不满足，例如非交易日、缺少可用窗口或外部来源暂不可用。',
+      tone: 'neutral',
+    });
+
     expect(scheduledEventActionHint({ status: 'running', lastRunStatus: null })).toEqual({
       title: '正在执行',
       body: '这次运行结束前暂不能修改计划。完成后可以在任务详情查看结果。',

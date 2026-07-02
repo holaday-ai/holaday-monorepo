@@ -171,6 +171,20 @@ describe('rowToEventInput', () => {
     expect(ext.scheduledTaskInternalId).toBe(101);
   });
 
+  it('preserves skipped as a first-class last-run status', () => {
+    const events = rowToEventInput(
+      makeRow({
+        lastRunAt: '2026-05-16T08:00:00.000Z',
+        lastRunStatus: 'skipped',
+        lastError: '非交易日，已跳过本次执行。',
+      }),
+      { now },
+    );
+    const ext = events[0]?.extendedProps as Record<string, unknown>;
+    expect(ext.lastRunStatus).toBe('skipped');
+    expect(ext.lastError).toBe('非交易日，已跳过本次执行。');
+  });
+
   it('reminderMinutes is null when not set on the row', () => {
     const events = rowToEventInput(makeRow({}), { now });
     const ext = events[0]?.extendedProps as Record<string, unknown>;
@@ -249,6 +263,28 @@ describe('normalizeScheduledTaskRows', () => {
         createdAt: '2026-05-20T00:00:00.000Z',
       },
     ]);
+  });
+
+  it('normalizes skipped last-run status instead of dropping it', () => {
+    expect(
+      normalizeScheduledTaskRows([
+        {
+          scheduledTaskId: 'sch_skip',
+          intent: 'A 股收盘后生成关注日报',
+          repeatType: 'daily',
+          nextRunAt: '2026-05-25T10:00:00.000Z',
+          lastRunAt: '2026-05-24T10:00:00.000Z',
+          status: 'active',
+          lastRunStatus: 'skipped',
+          lastError: '非交易日，已跳过本次执行。',
+          createdAt: '2026-05-20T00:00:00.000Z',
+        },
+      ])[0],
+    ).toMatchObject({
+      scheduledTaskId: 'sch_skip',
+      lastRunStatus: 'skipped',
+      lastError: '非交易日，已跳过本次执行。',
+    });
   });
 
   it('drops rows without stable identity or schedule time', () => {

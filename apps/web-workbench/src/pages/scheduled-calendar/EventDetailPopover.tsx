@@ -11,7 +11,7 @@
  * round once the popover is in real use.
  */
 
-import { Bell, BellOff, Calendar, CheckCircle2, Clock, Loader2, Pause, Play, Trash2, XCircle } from 'lucide-react';
+import { Bell, BellOff, Calendar, CheckCircle2, CircleSlash, Clock, Loader2, Pause, Play, Trash2, XCircle } from 'lucide-react';
 import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -115,6 +115,11 @@ export function EventDetailPopover({
                 上次失败
               </span>
             )}
+            {row.lastRunStatus === 'skipped' && row.status === 'active' && (
+              <span className="ml-1 rounded bg-[#EFEFEF] px-1.5 py-0.5 text-[10px] font-semibold text-[#595757]">
+                上次跳过
+              </span>
+            )}
           </div>
           <p className="mt-2 break-words text-sm text-foreground">
             {row.intent}
@@ -169,6 +174,11 @@ export function EventDetailPopover({
                   <XCircle className="h-3 w-3" aria-hidden />
                   <span>失败</span>
                 </span>
+              ) : row.lastRunStatus === 'skipped' ? (
+                <span className="inline-flex items-center gap-1 text-[#595757]">
+                  <CircleSlash className="h-3 w-3" aria-hidden />
+                  <span>已跳过</span>
+                </span>
               ) : null}
               <span className="text-muted-foreground">
                 · {formatDateTime(row.lastRunAt)}
@@ -184,6 +194,13 @@ export function EventDetailPopover({
           <div className="break-words text-[11px]">
             {scheduledEventFailureDetail(row.lastError)}
           </div>
+        </div>
+      )}
+
+      {row.lastError && row.lastRunStatus === 'skipped' && (
+        <div className="mt-3 rounded-[8px] border border-[#DCDDDD] bg-[#FAFAFA] px-3 py-2 text-xs text-[#595757]">
+          <div className="mb-0.5 font-semibold text-foreground/85">跳过说明</div>
+          <div className="break-words text-[11px]">{row.lastError}</div>
         </div>
       )}
 

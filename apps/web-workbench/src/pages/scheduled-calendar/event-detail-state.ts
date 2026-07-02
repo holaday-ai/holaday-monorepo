@@ -63,6 +63,13 @@ export function scheduledEventActionHint(
       tone: 'attention',
     };
   }
+  if (row.status === 'active' && row.lastRunStatus === 'skipped') {
+    return {
+      title: '上次执行已跳过',
+      body: '计划仍在运行；这通常表示本次条件不满足，例如非交易日、缺少可用窗口或外部来源暂不可用。',
+      tone: 'neutral',
+    };
+  }
   if (row.status === 'running') {
     return {
       title: '正在执行',

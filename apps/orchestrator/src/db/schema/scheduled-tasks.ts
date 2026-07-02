@@ -36,9 +36,9 @@ import { users } from './users.js';
  * for the latest fire — lets the SPA show "上次运行：tsk_…" with a
  * deep link. Null until the first fire.
  *
- * `last_run_status` is 'success' | 'failed' | NULL (never run yet).
- * `last_error` is a short error message when `last_run_status='failed'`,
- * NULL otherwise.
+ * `last_run_status` is 'success' | 'failed' | 'skipped' | NULL (never run yet).
+ * `last_error` is a short error/skip note when `last_run_status='failed'`
+ * or 'skipped', NULL otherwise.
  */
 export const scheduledTasks = mysqlTable(
   'scheduled_tasks',
@@ -56,9 +56,9 @@ export const scheduledTasks = mysqlTable(
     lastTaskId: bigint('last_task_id', { mode: 'number', unsigned: true }),
     status: varchar('status', { length: 16 }).notNull().default('active'),
     /** Codex P1 — outcome of the most recent dispatch attempt.
-     *  'success' | 'failed' | null (never run yet). */
+     *  'success' | 'failed' | 'skipped' | null (never run yet). */
     lastRunStatus: varchar('last_run_status', { length: 16 }),
-    /** Codex P1 — short error message when last_run_status='failed';
+    /** Codex P1 — short error/skip note when last_run_status='failed' or 'skipped';
      *  null on success / not-yet-run. */
     lastError: text('last_error'),
     /**

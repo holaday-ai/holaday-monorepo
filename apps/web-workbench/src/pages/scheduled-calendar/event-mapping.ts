@@ -46,7 +46,7 @@ export interface ScheduledTaskRow {
     | 'failed'
     | 'unknown'
     | (string & {});
-  lastRunStatus: 'success' | 'failed' | null;
+  lastRunStatus: 'success' | 'failed' | 'skipped' | null;
   lastError: string | null;
   createdAt: string | Date;
 }
@@ -287,7 +287,7 @@ function normalizeStatus(value: unknown): ScheduledTaskRow['status'] {
 }
 
 function normalizeLastRunStatus(value: unknown): ScheduledTaskRow['lastRunStatus'] {
-  return value === 'success' || value === 'failed' ? value : null;
+  return value === 'success' || value === 'failed' || value === 'skipped' ? value : null;
 }
 
 function safeNullableText(value: unknown): string | null {
