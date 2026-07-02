@@ -172,13 +172,29 @@ describe('tasks.confirm tRPC mutation (awaiting_user → executing | cancelled)'
 
     // DB reflects it.
     const { db } = await import('../../db/client.js');
-    const { eq } = await import('drizzle-orm');
+    const { and, eq } = await import('drizzle-orm');
+    const { taskEvents } = await import('../../db/schema/task-events.js');
     const { tasks } = await import('../../db/schema/tasks.js');
     const taskRow = must(
       (await db.select().from(tasks).where(eq(tasks.externalId, taskId)))[0],
       'taskRow',
     );
     expect(taskRow.status).toBe('executing');
+
+    const [event] = await db
+      .select({
+        type: taskEvents.type,
+        actor: taskEvents.actor,
+        payload: taskEvents.payload,
+      })
+      .from(taskEvents)
+      .where(and(eq(taskEvents.taskId, taskRow.id), eq(taskEvents.type, 'step.completed')))
+      .limit(1);
+    expect(event).toEqual({
+      type: 'step.completed',
+      actor: 'user',
+      payload: { confirmed: true, decision: 'approve' },
+    });
   });
 
   it('reject transitions to cancelled', async () => {

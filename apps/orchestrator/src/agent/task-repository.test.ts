@@ -547,6 +547,21 @@ describe('TaskRepository task terminal state persistence', () => {
     expect(result.persisted).toBe(true);
   });
 
+  it('recordCancelRequested writes a user event without changing task status', async () => {
+    const { db, captured } = fakeDbForStateTransitions(1);
+    const repo = new TaskRepository(db);
+
+    const result = await repo.recordCancelRequested('tsk_state_machine', 'executing');
+
+    expect(result.persisted).toBe(true);
+    expect(captured.updatePayloads).toHaveLength(0);
+    expect(captured.eventPayloads[0]).toMatchObject({
+      type: 'task.cancel_requested',
+      actor: 'user',
+      payload: { from: 'executing', reason: 'user_abort' },
+    });
+  });
+
   it('applyBatchApprove guards updates with the previous DB status', async () => {
     const { db, captured } = fakeDbForStateTransitions();
     const repo = new TaskRepository(db);

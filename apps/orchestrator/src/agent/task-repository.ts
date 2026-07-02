@@ -107,6 +107,7 @@ export class TaskRepository {
     next: TaskState,
     resultPayload?: unknown,
     rawInputStatus?: 'ok' | 'error' | 'awaiting_user' | 'skipped',
+    eventActor: 'system' | 'user' = 'system',
   ): Promise<{ persisted: boolean }> {
     if (prev.taskId !== next.taskId) {
       throw new Error('applyStepResult requires matching taskIds');
@@ -213,7 +214,7 @@ export class TaskRepository {
         taskId: taskRowId,
         ...(completedStep ? { stepId: null } : {}),
         type: isRetry ? 'step.retry' : eventTypeFor(prev, next),
-        actor: 'system',
+        actor: eventActor,
         payload: resultPayload ?? null,
       });
     });
@@ -266,6 +267,27 @@ export class TaskRepository {
       });
     });
     return { persisted };
+  }
+
+  async recordCancelRequested(
+    taskExternalId: string,
+    expectedStatus: TaskState['status'],
+  ): Promise<{ persisted: boolean }> {
+    const [taskRow] = await this.db
+      .select({ id: tasks.id })
+      .from(tasks)
+      .where(and(eq(tasks.externalId, taskExternalId), eq(tasks.status, expectedStatus)))
+      .limit(1);
+    if (!taskRow) return { persisted: false };
+
+    await this.db.insert(taskEvents).values({
+      externalId: newExternalId('taskEvent'),
+      taskId: taskRow.id,
+      type: 'task.cancel_requested',
+      actor: 'user',
+      payload: { from: expectedStatus, reason: 'user_abort' },
+    });
+    return { persisted: true };
   }
 
   async markAwaitingReplyResumed(taskExternalId: string): Promise<{ persisted: boolean }> {

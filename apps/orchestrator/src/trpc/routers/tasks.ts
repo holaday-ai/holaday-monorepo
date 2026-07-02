@@ -5801,7 +5801,13 @@ export const tasksRouter = router({
           });
         }
       } else {
-        const persisted = await repo.applyStepResult(prev, next, { confirmed: true, decision });
+        const persisted = await repo.applyStepResult(
+          prev,
+          next,
+          { confirmed: true, decision },
+          undefined,
+          'user',
+        );
         if (!persisted.persisted) {
           throw new TRPCError({
             code: 'PRECONDITION_FAILED',
@@ -7110,8 +7116,17 @@ export const tasksRouter = router({
       if (!taskRow) {
         throw new TRPCError({ code: 'NOT_FOUND', message: `task ${input.taskId} not found` });
       }
+      const repo = new TaskRepository(ctx.db);
       const aborted = supercarAbort(input.taskId);
       if (aborted) {
+        try {
+          await repo.recordCancelRequested(input.taskId, taskRow.status as TaskState['status']);
+        } catch (err) {
+          ctx.logger.warn(
+            { err, taskId: input.taskId, status: taskRow.status },
+            'abort: cancel-request event persist failed',
+          );
+        }
         return { ok: true, state: 'aborting' as const };
       }
 
@@ -7124,7 +7139,6 @@ export const tasksRouter = router({
       // DB row in awaiting_user and releases its in-memory abort handle. Run the
       // same guarded control transition as pause/resume so a stale read cannot
       // produce a fake task.cancelled event or terminal broadcast.
-      const repo = new TaskRepository(ctx.db);
       const prev: TaskState = {
         taskId: input.taskId,
         status: taskRow.status as TaskState['status'],
