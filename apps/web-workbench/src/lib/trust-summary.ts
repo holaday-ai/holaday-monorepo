@@ -38,7 +38,7 @@ export interface RecoveryAction {
   prompt?: string;
 }
 
-interface TrustSummaryInput {
+export interface TrustSummaryInput {
   status: UiTask['status'];
   resultText?: string;
   currentUrl?: string | null;
@@ -47,6 +47,13 @@ interface TrustSummaryInput {
   verificationPassed?: boolean | null;
   failureLevel?: UiTask['failureLevel'];
   failedChecks?: Array<VerificationCheck> | null;
+}
+
+export interface TrustEvidenceInput {
+  resultText?: string;
+  currentUrl?: string | null;
+  finalScreenshot?: string | null;
+  attachments?: UiTask['attachments'];
 }
 
 interface RecoveryInput {
@@ -71,13 +78,14 @@ export function buildTrustSummary(input: TrustSummaryInput): TrustSummaryModel {
     input.status === 'partial_success' ||
     input.verificationPassed === false ||
     failedChecks.length > 0;
-  const hasAnyEvidence =
-    sourceCount > 0 ||
-    hasFinalUrl ||
-    hasScreenshot ||
-    attachmentCount > 0;
+  const hasAnyEvidence = hasTrustEvidence(input);
   const compactMissingEvidence =
-    !hasAnyEvidence && (input.status === 'cancelled' || input.status === 'failed');
+    !hasAnyEvidence &&
+    (input.status === 'cancelled' ||
+      input.status === 'failed' ||
+      input.status === 'partial_success' ||
+      input.verificationPassed === false ||
+      failedChecks.length > 0);
 
   const tone: TrustTone = hardFailure ? 'danger' : flagged ? 'warning' : 'neutral';
   const verdict = trustVerdict({
@@ -89,45 +97,23 @@ export function buildTrustSummary(input: TrustSummaryInput): TrustSummaryModel {
 
   return {
     tone,
-    title: compactMissingEvidence ? '任务状态' : '结果复核',
+    title: compactMissingEvidence
+      ? input.status === 'cancelled' || input.status === 'failed'
+        ? '任务状态'
+        : '复核提示'
+      : '结果复核',
     verdict,
     boundary: compactMissingEvidence
-      ? '本次没有形成可复核的最终结果；HOLA DAY 只保留已拿到的步骤线索，不会把空指标包装成证据。'
+      ? '本次没有拿到可复核的链接、截图或产物；HOLA DAY 只保留已生成内容和步骤线索，不会把空指标包装成证据。'
       : 'HOLA DAY 只展示已经拿到的线索；没有截图、链接或终态页的部分，不会被当作已验证事实。',
     rows: compactMissingEvidence
       ? []
-      : [
-          {
-            label: '来源链接',
-            value: `${sourceCount} 个链接`,
-            detail:
-              sourceCount > 0
-                ? '结果里有可点击来源，关键事实仍建议点开核对。'
-                : '未看到可点击来源；涉及价格、排序、事实时不要直接采用。',
-          },
-          {
-            label: '结束页面',
-            value: hasFinalUrl ? '已记录' : '未记录',
-            detail: hasFinalUrl
-              ? '保留了任务结束时的页面地址，可作为路径线索。'
-              : '没有结束页地址，无法确认是否到达目标页面。',
-          },
-          {
-            label: '页面截图',
-            value: hasScreenshot ? '已保存' : '未保存',
-            detail: hasScreenshot
-              ? '保存了结束时页面画面，可辅助复核。'
-              : '没有结束截图，页面状态需要通过其它线索复核。',
-          },
-          {
-            label: '产物文件',
-            value: `${attachmentCount} 个`,
-            detail:
-              attachmentCount > 0
-                ? '有可下载产物或附件，仍需核对内容是否满足任务目标。'
-                : '没有文件产物；若任务要求下载或导出，应补充要求后重试。',
-          },
-        ],
+      : buildEvidenceRows({
+          sourceCount,
+          hasFinalUrl,
+          hasScreenshot,
+          attachmentCount,
+        }),
     ledger: compactMissingEvidence
       ? [
           {
@@ -136,6 +122,16 @@ export function buildTrustSummary(input: TrustSummaryInput): TrustSummaryModel {
             value: '未形成终态证据',
             detail: '任务结束前没有保存截图或终态页，无法从本卡复核页面事实。',
           },
+          ...(input.verificationPassed === false || failedChecks.length > 0
+            ? [
+                {
+                  stage: 'inferred' as const,
+                  label: '自动审核',
+                  value: verificationLedgerValue(input.verificationPassed, failedChecks.length),
+                  detail: '这是系统检查信号，不等同于人工或事实级验证通过。',
+                },
+              ]
+            : []),
           {
             stage: 'boundary',
             label: '使用边界',
@@ -188,6 +184,75 @@ export function buildTrustSummary(input: TrustSummaryInput): TrustSummaryModel {
     checks,
     hiddenCheckCount,
   };
+}
+
+export function shouldShowTrustSummary(input: TrustSummaryInput): boolean {
+  const failedCheckCount = input.failedChecks?.length ?? 0;
+  const hasEvidence = hasTrustEvidence(input);
+
+  if (input.status === 'cancelled') {
+    return hasEvidence || failedCheckCount > 0 || Boolean(input.failureLevel);
+  }
+  if (input.status === 'failed') {
+    return (
+      hasEvidence ||
+      failedCheckCount > 0 ||
+      Boolean(input.failureLevel) ||
+      input.verificationPassed === false
+    );
+  }
+  if (input.status === 'partial_success') return true;
+  if (input.verificationPassed === false) return true;
+  if (failedCheckCount > 0) return true;
+  if (input.failureLevel) return true;
+  return hasEvidence;
+}
+
+export function hasTrustEvidence(input: TrustEvidenceInput): boolean {
+  return (
+    countVisibleSourceUrls(input.resultText, input.currentUrl) > 0 ||
+    hasHttpUrl(input.currentUrl) ||
+    Boolean(input.finalScreenshot) ||
+    (input.attachments?.length ?? 0) > 0
+  );
+}
+
+function buildEvidenceRows(input: {
+  sourceCount: number;
+  hasFinalUrl: boolean;
+  hasScreenshot: boolean;
+  attachmentCount: number;
+}): TrustEvidenceRow[] {
+  const rows: TrustEvidenceRow[] = [];
+  if (input.sourceCount > 0) {
+    rows.push({
+      label: '来源链接',
+      value: `${input.sourceCount} 个链接`,
+      detail: '结果里有可点击来源，关键事实仍建议点开核对。',
+    });
+  }
+  if (input.hasFinalUrl) {
+    rows.push({
+      label: '结束页面',
+      value: '已记录',
+      detail: '保留了任务结束时的页面地址，可作为路径线索。',
+    });
+  }
+  if (input.hasScreenshot) {
+    rows.push({
+      label: '页面截图',
+      value: '已保存',
+      detail: '保存了结束时页面画面，可辅助复核。',
+    });
+  }
+  if (input.attachmentCount > 0) {
+    rows.push({
+      label: '产物文件',
+      value: `${input.attachmentCount} 个`,
+      detail: '有可下载产物或附件，仍需核对内容是否满足任务目标。',
+    });
+  }
+  return rows;
 }
 
 export function buildRecoveryActions(input: RecoveryInput): RecoveryAction[] {

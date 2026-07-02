@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { buildRecoveryActions, buildTrustSummary } from './trust-summary';
+import {
+  buildRecoveryActions,
+  buildTrustSummary,
+  shouldShowTrustSummary,
+} from './trust-summary';
 
 describe('trust summary', () => {
   it('states evidence boundaries without implying fact-level certainty', () => {
@@ -52,7 +56,8 @@ describe('trust summary', () => {
     expect(summary.tone).toBe('warning');
     expect(summary.verdict).toContain('自动审核发现不完整');
     expect(summary.checks).toEqual(['缺少可验证来源链接']);
-    expect(summary.rows.find((r) => r.label === '来源链接')?.value).toBe('0 个链接');
+    expect(summary.title).toBe('复核提示');
+    expect(summary.rows).toEqual([]);
     expect(summary.ledger.find((item) => item.label === '自动审核')?.value).toBe('发现问题');
   });
 
@@ -66,11 +71,64 @@ describe('trust summary', () => {
     });
 
     expect(summary.title).toBe('任务状态');
-    expect(summary.boundary).toContain('没有形成可复核的最终结果');
+    expect(summary.boundary).toContain('不会把空指标包装成证据');
     expect(summary.rows).toEqual([]);
     expect(summary.ledger.find((item) => item.label === '页面状态')?.value).toBe(
       '未形成终态证据',
     );
+  });
+
+  it('only puts collected evidence in the top evidence rows', () => {
+    const summary = buildTrustSummary({
+      status: 'failed',
+      resultText: '已生成中间说明，但没有链接',
+      currentUrl: null,
+      finalScreenshot: 'base64',
+      attachments: [],
+      failedChecks: [{ type: 'source_count', detail: '缺少来源链接' }],
+    });
+
+    expect(summary.title).toBe('结果复核');
+    expect(summary.rows.map((row) => row.label)).toEqual(['页面截图']);
+    expect(summary.rows.map((row) => row.value)).not.toContain('0 个链接');
+    expect(summary.rows.map((row) => row.value)).not.toContain('未记录');
+    expect(summary.ledger.find((item) => item.label === '来源链接')?.value).toBe(
+      '0 个',
+    );
+  });
+});
+
+describe('shouldShowTrustSummary', () => {
+  it('hides cancelled empty evidence states to avoid fake review counters', () => {
+    expect(
+      shouldShowTrustSummary({
+        status: 'cancelled',
+        resultText: '',
+        currentUrl: null,
+        finalScreenshot: null,
+        attachments: [],
+      }),
+    ).toBe(false);
+  });
+
+  it('keeps warning summaries visible when verification flags a result without evidence', () => {
+    expect(
+      shouldShowTrustSummary({
+        status: 'partial_success',
+        resultText: '没有来源',
+        verificationPassed: false,
+        failedChecks: [{ type: 'url_count', detail: 'only 0 URL' }],
+      }),
+    ).toBe(true);
+  });
+
+  it('shows cancelled tasks when they left real evidence behind', () => {
+    expect(
+      shouldShowTrustSummary({
+        status: 'cancelled',
+        finalScreenshot: 'base64',
+      }),
+    ).toBe(true);
   });
 });
 

@@ -81,6 +81,7 @@ import { shouldShowVerificationBanner } from '@/lib/verification-banner-copy';
 import {
   buildRecoveryActions,
   buildTrustSummary,
+  shouldShowTrustSummary,
   type RecoveryAction,
   type TrustEvidenceStage,
   type TrustTone,
@@ -903,19 +904,16 @@ function failureLevelLabel(level: NonNullable<UiTask['failureLevel']>): string {
 }
 
 function shouldShowTrustSummaryCard(task: UiTask, currentUrl?: string | null): boolean {
-  if (task.status === 'failed' || task.status === 'cancelled') return true;
-  if (task.status === 'partial_success') return true;
-  if (task.verificationPassed === false) return true;
-  if ((task.failedChecks?.length ?? 0) > 0) return true;
-  if (task.failureLevel) return true;
-  if (task.finalScreenshot) return true;
-  if ((task.attachments?.length ?? 0) > 0) return true;
-  if (hasHttpUrl(task.resultText) || hasHttpUrl(currentUrl)) return true;
-  return false;
-}
-
-function hasHttpUrl(value?: string | null): boolean {
-  return typeof value === 'string' && /https?:\/\//i.test(value);
+  return shouldShowTrustSummary({
+    status: task.status,
+    resultText: task.resultText,
+    currentUrl,
+    finalScreenshot: task.finalScreenshot ?? null,
+    attachments: task.attachments,
+    verificationPassed: task.verificationPassed,
+    failureLevel: task.failureLevel,
+    failedChecks: task.failedChecks ?? null,
+  });
 }
 
 /**
