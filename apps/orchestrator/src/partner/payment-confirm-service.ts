@@ -6,8 +6,9 @@ import {
   partnerRechargeOrders,
   type PartnerRechargeOrder,
 } from '../db/schema/partner.js';
+import { users } from '../db/schema/users.js';
 import { PartnerMembershipService } from './membership-service.js';
-import { RechargeService } from './recharge-service.js';
+import { RechargeLotConflictError, RechargeService } from './recharge-service.js';
 
 const ORDER_EXTERNAL_ID_MAX_LENGTH = 32;
 const PROVIDER_MAX_LENGTH = 24;
@@ -68,6 +69,18 @@ export class PartnerPaymentProviderCaptureConflictError extends Error {
     super(message);
     this.name = 'PartnerPaymentProviderCaptureConflictError';
     Object.setPrototypeOf(this, PartnerPaymentProviderCaptureConflictError.prototype);
+  }
+}
+
+export class PartnerPaymentConfirmReviewRequiredError extends Error {
+  constructor(
+    readonly orderExternalId: string,
+    readonly orderKind: PartnerPaymentOrderKind,
+    readonly providerCaptureId: string,
+  ) {
+    super(`partner payment confirmation requires manual review: ${orderExternalId}`);
+    this.name = 'PartnerPaymentConfirmReviewRequiredError';
+    Object.setPrototypeOf(this, PartnerPaymentConfirmReviewRequiredError.prototype);
   }
 }
 
@@ -171,6 +184,35 @@ function isDuplicateKeyError(error: unknown): boolean {
   return /duplicate/i.test(message);
 }
 
+function isRechargeLotCreationBusinessError(error: unknown): boolean {
+  return error instanceof RangeError || error instanceof RechargeLotConflictError;
+}
+
+function safeErrorName(error: unknown): string {
+  if (error instanceof Error && error.name.trim().length > 0) {
+    return error.name.slice(0, 128);
+  }
+  return 'Error';
+}
+
+function safeErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.slice(0, 512);
+}
+
+function reviewMetadata(existing: unknown, error: unknown): Record<string, unknown> {
+  const base =
+    existing !== null && typeof existing === 'object' && !Array.isArray(existing)
+      ? (existing as Record<string, unknown>)
+      : {};
+  return {
+    ...base,
+    reviewReason: 'lot_creation_failed',
+    errorName: safeErrorName(error),
+    errorMessage: safeErrorMessage(error),
+  };
+}
+
 export function partnerPaymentIdempotencyKey(input: {
   provider: string;
   providerCaptureId: string;
@@ -218,6 +260,19 @@ export class PartnerPaymentConfirmService {
       );
     }
 
+    if (order.status === 'review_required') {
+      if (isSameCapturedOrder(order, confirm)) {
+        throw new PartnerPaymentConfirmReviewRequiredError(
+          order.externalId,
+          orderKind,
+          confirm.providerCaptureId,
+        );
+      }
+      throw new PartnerPaymentConfirmConflictError(
+        `partner order ${order.externalId} is already in review with a different capture payload`,
+      );
+    }
+
     if (order.status !== 'pending') {
       throw new PartnerPaymentConfirmConflictError(
         `partner order ${order.externalId} cannot be confirmed from status ${order.status}`,
@@ -235,9 +290,13 @@ export class PartnerPaymentConfirmService {
       );
     }
 
-    return this.db.transaction((tx) =>
+    const result = await this.db.transaction((tx) =>
       this.confirmPendingOrderInTransaction(tx as unknown as DB, order, orderKind, confirm),
     );
+    if (result instanceof PartnerPaymentConfirmReviewRequiredError) {
+      throw result;
+    }
+    return result;
   }
 
   private async confirmPendingOrderInTransaction(
@@ -245,7 +304,9 @@ export class PartnerPaymentConfirmService {
     order: PartnerRechargeOrder,
     orderKind: PartnerPaymentOrderKind,
     confirm: NormalizedPartnerPaymentConfirmInput,
-  ): Promise<PartnerPaymentConfirmResult> {
+  ): Promise<PartnerPaymentConfirmResult | PartnerPaymentConfirmReviewRequiredError> {
+    await this.lockUserForConfirmation(tx, order.userId);
+
     let updateResult: unknown;
     try {
       updateResult = await tx
@@ -275,6 +336,13 @@ export class PartnerPaymentConfirmService {
       if (readback?.status === 'completed' && isSameCapturedOrder(readback, confirm)) {
         return partnerOrderCompletedResult(readback, true);
       }
+      if (readback?.status === 'review_required' && isSameCapturedOrder(readback, confirm)) {
+        return new PartnerPaymentConfirmReviewRequiredError(
+          readback.externalId,
+          normalizeOrderKind(readback.orderKind),
+          confirm.providerCaptureId,
+        );
+      }
       throw new PartnerPaymentConfirmConflictError(
         `partner order ${order.externalId} was not completed by this confirmation attempt`,
       );
@@ -298,16 +366,40 @@ export class PartnerPaymentConfirmService {
         userId: order.userId,
         now: confirm.now,
       });
-      await this.rechargeService(tx).createLotForCapturedRecharge({
-        userId: order.userId,
-        rechargeOrderId: order.id,
-        amountCnyCents: order.amountCnyCents,
-        rollingThirtyDayCnyCents,
-        now: confirm.now,
-      });
+      try {
+        await this.rechargeService(tx).createLotForCapturedRecharge({
+          userId: order.userId,
+          rechargeOrderId: order.id,
+          amountCnyCents: order.amountCnyCents,
+          rollingThirtyDayCnyCents,
+          now: confirm.now,
+        });
+      } catch (error) {
+        if (!isRechargeLotCreationBusinessError(error)) {
+          throw error;
+        }
+        await this.markOrderReviewRequired(tx, completedOrder, confirm, error);
+        return new PartnerPaymentConfirmReviewRequiredError(
+          order.externalId,
+          orderKind,
+          confirm.providerCaptureId,
+        );
+      }
     }
 
     return partnerOrderCompletedResult(completedOrder, false);
+  }
+
+  private async lockUserForConfirmation(db: DB, userId: number): Promise<void> {
+    const [row] = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.id, userId))
+      .for('update')
+      .limit(1);
+    if (!row) {
+      throw new PartnerPaymentConfirmConflictError(`partner payment user ${userId} was not found`);
+    }
   }
 
   private async readOrderByExternalId(db: DB, externalId: string): Promise<PartnerRechargeOrder | null> {
@@ -335,6 +427,28 @@ export class PartnerPaymentConfirmService {
       )
       .limit(1);
     return row ?? null;
+  }
+
+  private async markOrderReviewRequired(
+    db: DB,
+    order: PartnerRechargeOrder,
+    confirm: NormalizedPartnerPaymentConfirmInput,
+    error: unknown,
+  ): Promise<void> {
+    const result = await db
+      .update(partnerRechargeOrders)
+      .set({
+        status: 'review_required',
+        providerCaptureId: confirm.providerCaptureId,
+        metadata: reviewMetadata(order.metadata, error),
+        updatedAt: confirm.now,
+      })
+      .where(eq(partnerRechargeOrders.externalId, order.externalId));
+    if (readAffectedRows(result) !== 1) {
+      throw new PartnerPaymentConfirmConflictError(
+        `partner order ${order.externalId} could not be moved to review_required`,
+      );
+    }
   }
 
   private async computeRollingThirtyDayCnyCents(

@@ -43,6 +43,7 @@ import {
 import { nextExpiryFor, type PayPalAdapter, type PlanId } from './payment/index.js';
 import {
   PartnerPaymentConfirmConflictError,
+  PartnerPaymentConfirmReviewRequiredError,
   PartnerPaymentConfirmService,
   PartnerPaymentProviderCaptureConflictError,
 } from './partner/payment-confirm-service.js';
@@ -1034,18 +1035,36 @@ export function createHttpApp(deps: HttpAppDeps) {
       amountCnyCents?: unknown;
     };
 
+    if (
+      typeof body.orderExternalId !== 'string' ||
+      typeof body.provider !== 'string' ||
+      typeof body.providerCaptureId !== 'string' ||
+      typeof body.amountCnyCents !== 'number'
+    ) {
+      res.status(400).json({ error: 'invalid_partner_payment_confirm' });
+      return;
+    }
+
     try {
       const result = await new PartnerPaymentConfirmService(db).confirmCapturedOrder({
-        orderExternalId: body.orderExternalId as string,
-        provider: body.provider as string,
-        providerCaptureId: body.providerCaptureId as string,
-        amountCnyCents: Number(body.amountCnyCents),
+        orderExternalId: body.orderExternalId,
+        provider: body.provider,
+        providerCaptureId: body.providerCaptureId,
+        amountCnyCents: body.amountCnyCents,
       });
       const { ok: _ok, ...payload } = result;
       res.status(200).json({ ok: true, ...payload });
     } catch (err) {
       if (err instanceof RangeError) {
         res.status(400).json({ error: 'invalid_partner_payment_confirm' });
+        return;
+      }
+      if (err instanceof PartnerPaymentConfirmReviewRequiredError) {
+        logger.warn(
+          { err: err.message, orderExternalId: err.orderExternalId },
+          'partner-internal-confirm: review required',
+        );
+        res.status(409).json({ error: 'partner_payment_review_required' });
         return;
       }
       if (

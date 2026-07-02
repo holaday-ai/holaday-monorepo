@@ -7,8 +7,10 @@ import {
   type PartnerMembership,
   type PartnerRechargeOrder,
 } from '../db/schema/partner.js';
+import { users } from '../db/schema/users.js';
 import {
   PartnerPaymentConfirmService,
+  PartnerPaymentConfirmReviewRequiredError,
   partnerPaymentIdempotencyKey,
 } from './payment-confirm-service.js';
 
@@ -17,6 +19,8 @@ class FakePartnerPaymentDb {
   readonly wherePredicateTexts: string[] = [];
   readonly updatePredicateTexts: string[] = [];
   readonly updateValues: Array<Partial<PartnerRechargeOrder>> = [];
+  readonly lockedUserIds: number[] = [];
+  readonly operations: string[] = [];
   transactionCalls = 0;
   updateRowsAffected: number[] = [];
 
@@ -40,9 +44,19 @@ class FakePartnerPaymentDb {
           const predicateText = inspect(predicate, { depth: 6, getters: true });
           this.wherePredicateTexts.push(predicateText);
           const chain = {
+            for: (lockMode: string) => {
+              if (table === users && lockMode === 'update') {
+                const lockedUserId = this.findUserIdInPredicate(predicateText);
+                if (lockedUserId !== null) {
+                  this.lockedUserIds.push(lockedUserId);
+                  this.operations.push(`lock-user:${lockedUserId}`);
+                }
+              }
+              return chain;
+            },
             limit: async (count: number) => this.selectRows(table, predicateText).slice(0, count),
             then: (
-              onFulfilled?: ((value: PartnerRechargeOrder[]) => unknown) | null,
+              onFulfilled?: ((value: Array<PartnerRechargeOrder | { id: number }>) => unknown) | null,
               onRejected?: ((reason: unknown) => unknown) | null,
             ) => Promise.resolve(this.selectRows(table, predicateText)).then(onFulfilled, onRejected),
           };
@@ -63,15 +77,18 @@ class FakePartnerPaymentDb {
           this.updatePredicateTexts.push(predicateText);
           this.updateValues.push(values);
 
-          const row = this.orders.find(
-            (order) => predicateText.includes(order.externalId) && order.status === 'pending',
-          );
+          const row = this.orders.find((order) => {
+            if (!predicateText.includes(order.externalId)) return false;
+            if (values.status === 'completed') return order.status === 'pending';
+            return true;
+          });
           if (!row) {
             this.updateRowsAffected.push(0);
             return [{ affectedRows: 0 }, null];
           }
 
           Object.assign(row, values);
+          this.operations.push(`update:${row.externalId}:${String(values.status ?? 'unknown')}`);
           this.updateRowsAffected.push(1);
           return [{ affectedRows: 1 }, null];
         },
@@ -79,7 +96,12 @@ class FakePartnerPaymentDb {
     };
   }
 
-  private selectRows(table: unknown, predicateText: string): PartnerRechargeOrder[] {
+  private selectRows(table: unknown, predicateText: string): Array<PartnerRechargeOrder | { id: number }> {
+    if (table === users) {
+      const userId = this.findUserIdInPredicate(predicateText);
+      return userId === null ? [] : [{ id: userId }];
+    }
+
     if (table !== partnerRechargeOrders) return [];
 
     const externalId = this.orders
@@ -109,6 +131,11 @@ class FakePartnerPaymentDb {
     }
 
     return [];
+  }
+
+  private findUserIdInPredicate(predicateText: string): number | null {
+    const userIds = [...new Set(this.orders.map((order) => order.userId))];
+    return userIds.find((userId) => predicateText.includes(String(userId))) ?? null;
   }
 }
 
@@ -174,7 +201,18 @@ function fakeLot(overrides: Partial<PartnerLot> = {}): PartnerLot {
   };
 }
 
-function serviceWithFakes(fakeDb: FakePartnerPaymentDb) {
+function serviceWithFakes(
+  fakeDb: FakePartnerPaymentDb,
+  overrides: {
+    createLotForCapturedRecharge?: (input: {
+      userId: number;
+      rechargeOrderId: number;
+      amountCnyCents: number;
+      rollingThirtyDayCnyCents: number;
+      now?: Date;
+    }) => Promise<PartnerLot>;
+  } = {},
+) {
   const membershipActivations: Array<{
     userId: number;
     sourcePaymentExternalId?: string;
@@ -201,6 +239,9 @@ function serviceWithFakes(fakeDb: FakePartnerPaymentDb) {
     }),
     rechargeService: () => ({
       createLotForCapturedRecharge: async (input) => {
+        if (overrides.createLotForCapturedRecharge) {
+          return overrides.createLotForCapturedRecharge(input);
+        }
         lotCreations.push(input);
         return fakeLot({
           userId: input.userId,
@@ -343,6 +384,19 @@ describe('PartnerPaymentConfirmService.confirmCapturedOrder', () => {
     expect(membershipActivations).toHaveLength(0);
   });
 
+  it('locks the user row before confirming a recharge order', async () => {
+    const order = fakeOrder({ orderKind: 'recharge' });
+    const fakeDb = new FakePartnerPaymentDb({ orders: [order] });
+    const { service } = serviceWithFakes(fakeDb);
+
+    await service.confirmCapturedOrder(confirmInput);
+
+    expect(fakeDb.lockedUserIds).toEqual([123]);
+    expect(fakeDb.operations.indexOf('lock-user:123')).toBeLessThan(
+      fakeDb.operations.indexOf('update:pay_order_1:completed'),
+    );
+  });
+
   it('does not process a capture id already attached to another partner order', async () => {
     const current = fakeOrder({ id: 1, externalId: 'pay_order_1', status: 'pending' });
     const other = fakeOrder({
@@ -414,6 +468,77 @@ describe('PartnerPaymentConfirmService.confirmCapturedOrder', () => {
     expect(lotCreations[0]?.rollingThirtyDayCnyCents).toBe(50_001_00);
   });
 
+  it('moves a captured recharge to review_required when serialized rolling total exceeds the lot cap', async () => {
+    const current = fakeOrder({
+      id: 1,
+      externalId: 'pay_order_1',
+      userId: 123,
+      amountCnyCents: 10_000_00,
+    });
+    const priorNearCap = fakeOrder({
+      id: 2,
+      externalId: 'pay_order_2',
+      userId: 123,
+      providerCaptureId: 'cap_prior',
+      status: 'completed',
+      amountCnyCents: 490_001_00,
+      createdAt: new Date('2026-06-20T00:00:00.000Z'),
+      updatedAt: new Date('2026-06-20T00:00:00.000Z'),
+    });
+    const fakeDb = new FakePartnerPaymentDb({ orders: [current, priorNearCap] });
+    const { service, lotCreations } = serviceWithFakes(fakeDb, {
+      createLotForCapturedRecharge: async (input) => {
+        if (input.rollingThirtyDayCnyCents > 500_000_00) {
+          throw new RangeError('rollingThirtyDayCnyCents must not exceed the monthly maximum');
+        }
+        return fakeLot();
+      },
+    });
+
+    await expect(service.confirmCapturedOrder(confirmInput)).rejects.toBeInstanceOf(
+      PartnerPaymentConfirmReviewRequiredError,
+    );
+
+    expect(current.status).toBe('review_required');
+    expect(current.providerCaptureId).toBe('cap_1');
+    expect(current.metadata).toMatchObject({
+      reviewReason: 'lot_creation_failed',
+      errorName: 'RangeError',
+      errorMessage: 'rollingThirtyDayCnyCents must not exceed the monthly maximum',
+    });
+    expect(lotCreations).toHaveLength(0);
+  });
+
+  it('preserves captured recharge facts after lot creation RangeError and retry is safe', async () => {
+    const order = fakeOrder({ orderKind: 'recharge' });
+    const fakeDb = new FakePartnerPaymentDb({ orders: [order] });
+    const { service, lotCreations } = serviceWithFakes(fakeDb, {
+      createLotForCapturedRecharge: async () => {
+        throw new RangeError('lot business validation failed');
+      },
+    });
+
+    await expect(service.confirmCapturedOrder(confirmInput)).rejects.toBeInstanceOf(
+      PartnerPaymentConfirmReviewRequiredError,
+    );
+    await expect(service.confirmCapturedOrder(confirmInput)).rejects.toBeInstanceOf(
+      PartnerPaymentConfirmReviewRequiredError,
+    );
+
+    expect(order).toMatchObject({
+      status: 'review_required',
+      providerCaptureId: 'cap_1',
+      updatedAt: new Date('2026-07-02T00:00:00.000Z'),
+    });
+    expect(order.metadata).toMatchObject({
+      reviewReason: 'lot_creation_failed',
+      errorName: 'RangeError',
+      errorMessage: 'lot business validation failed',
+    });
+    expect(fakeDb.updateRowsAffected).toEqual([1, 1]);
+    expect(lotCreations).toHaveLength(0);
+  });
+
   it('throws for an unknown order kind before applying side effects', async () => {
     const order = fakeOrder({ orderKind: 'bonus' });
     const fakeDb = new FakePartnerPaymentDb({ orders: [order] });
@@ -424,5 +549,20 @@ describe('PartnerPaymentConfirmService.confirmCapturedOrder', () => {
     expect(fakeDb.updateRowsAffected).toEqual([]);
     expect(membershipActivations).toHaveLength(0);
     expect(lotCreations).toHaveLength(0);
+  });
+
+  it('rejects malformed amount values before reading or writing order state', async () => {
+    const fakeDb = new FakePartnerPaymentDb({ orders: [fakeOrder()] });
+    const { service } = serviceWithFakes(fakeDb);
+
+    await expect(
+      service.confirmCapturedOrder({
+        ...confirmInput,
+        amountCnyCents: '1000000' as unknown as number,
+      }),
+    ).rejects.toBeInstanceOf(RangeError);
+
+    expect(fakeDb.wherePredicateTexts).toHaveLength(0);
+    expect(fakeDb.updateRowsAffected).toEqual([]);
   });
 });
