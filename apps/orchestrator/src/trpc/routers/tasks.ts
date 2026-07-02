@@ -114,6 +114,7 @@ import { skills } from '../../db/schema/skills.js';
 import { taskEvents } from '../../db/schema/task-events.js';
 import { taskSteps } from '../../db/schema/task-steps.js';
 import { tasks as tasksTable } from '../../db/schema/tasks.js';
+import { readAffectedRows } from '../../db/mysql-result.js';
 import { decideVideoGate, parseVideoConfirm, quoteIpVideo, quotePetI2v, quoteVideo } from '../../agent/video/video-confirm.js';
 import { deriveVideoType, mapVideoFailureReason } from '../../agent/video/video-confirm-meta.js';
 import type { AspectRatio, SimpleVideoConfig, VideoSource } from '../../agent/video/video-lane-simple.js';
@@ -8086,10 +8087,22 @@ async function convergePlanStatusOnSuccess(
       return { ...s };
     });
     if (!mutated) return;
-    await ctx.db
+    const result = await ctx.db
       .update(tasksTable)
       .set({ planStatus: converged as unknown })
-      .where(eq(tasksTable.externalId, taskExternalId));
+      .where(
+        and(
+          eq(tasksTable.externalId, taskExternalId),
+          eq(tasksTable.status, 'completed'),
+        ),
+      );
+    if (readAffectedRows(result) === 0) {
+      ctx.logger.warn(
+        { taskId: taskExternalId },
+        'plan-step convergence skipped because task was no longer completed',
+      );
+      return;
+    }
     try {
       broadcastToUser(userExternalId, {
         type: 'server.task.plan_step',
