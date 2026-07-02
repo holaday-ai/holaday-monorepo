@@ -8,7 +8,7 @@ import {
 } from '@holaday/shared-types';
 
 export function isWholeCnyAmount(amountCnyCents: number): boolean {
-  return Number.isInteger(amountCnyCents) && amountCnyCents % HOLA_CREDIT_CNY_CENTS === 0;
+  return Number.isInteger(amountCnyCents) && amountCnyCents >= 0 && amountCnyCents % HOLA_CREDIT_CNY_CENTS === 0;
 }
 
 export function selectRechargeTier(rollingThirtyDayCnyCents: number) {
@@ -23,12 +23,14 @@ export function selectRechargeTier(rollingThirtyDayCnyCents: number) {
 }
 
 export function calculateApiUnits(principalCreditCents: number, multiplierBps: number): number {
+  assertNonNegativeInteger(principalCreditCents, 'principalCreditCents');
   return Math.floor(
     (principalCreditCents * API_UNITS_PER_HOLA_CREDIT * multiplierBps) / (HOLA_CREDIT_CNY_CENTS * 10_000),
   );
 }
 
 export function calculateLotCaps(principalCreditCents: number) {
+  assertNonNegativeInteger(principalCreditCents, 'principalCreditCents');
   return {
     principalCreditCents,
     bonusCapCreditCents: Math.floor((principalCreditCents * PARTNER_BONUS_BPS) / 10_000),
@@ -69,6 +71,9 @@ export function calculateReleaseSlice(input: {
   }
   if (releasedBonusCreditCents > input.lockedBonusCreditCents) {
     throw new RangeError('releasedBonusCreditCents cannot exceed lockedBonusCreditCents');
+  }
+  if (input.lockedBonusCreditCents > calculateLotCaps(input.principalCreditCents).bonusCapCreditCents) {
+    throw new RangeError('lockedBonusCreditCents cannot exceed bonus cap');
   }
 
   const remainingPrincipalCreditCents = input.principalCreditCents - releasedPrincipalCreditCents;

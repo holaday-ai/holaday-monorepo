@@ -21,7 +21,9 @@ describe('partner rules', () => {
   it('rejects cent-level recharge amounts for tier selection', () => {
     expect(isWholeCnyAmount(50_000_00)).toBe(true);
     expect(isWholeCnyAmount(50_000_01)).toBe(false);
+    expect(isWholeCnyAmount(-100_00)).toBe(false);
     expect(() => selectRechargeTier(50_000_01)).toThrow(RangeError);
+    expect(() => selectRechargeTier(-100_00)).toThrow(RangeError);
   });
 
   it('calculates API Units from principal credit cents and tier basis points', () => {
@@ -37,6 +39,13 @@ describe('partner rules', () => {
     });
   });
 
+  it('rejects invalid principal amounts for API unit and lot cap calculations', () => {
+    expect(() => calculateApiUnits(-1, 10_500)).toThrow(RangeError);
+    expect(() => calculateApiUnits(10_000.5, 10_500)).toThrow(RangeError);
+    expect(() => calculateLotCaps(-1)).toThrow(RangeError);
+    expect(() => calculateLotCaps(10_000.5)).toThrow(RangeError);
+  });
+
   it('splits full 120 percent claim into eight equal monthly releases', () => {
     expect(calculateReleaseSlice({ principalCreditCents: 10_000_00, lockedBonusCreditCents: 2_000_00 })).toEqual({
       principalCreditCents: 1_250_00,
@@ -46,7 +55,7 @@ describe('partner rules', () => {
   });
 
   it('preserves cents across eight monthly releases for uneven amounts', () => {
-    const principalTotal = 10_000_03;
+    const principalTotal = 10_000_35;
     const bonusTotal = 2_000_05;
     let releasedPrincipalCreditCents = 0;
     let releasedBonusCreditCents = 0;
@@ -73,7 +82,7 @@ describe('partner rules', () => {
 
   it('rejects invalid release state', () => {
     const validInput = {
-      principalCreditCents: 10_000_03,
+      principalCreditCents: 10_000_35,
       lockedBonusCreditCents: 2_000_05,
       releasedPrincipalCreditCents: 1_250_01,
       releasedBonusCreditCents: 250_01,
@@ -83,6 +92,7 @@ describe('partner rules', () => {
     const invalidInputs = [
       { ...validInput, releasedPrincipalCreditCents: validInput.principalCreditCents + 1 },
       { ...validInput, releasedBonusCreditCents: validInput.lockedBonusCreditCents + 1 },
+      { ...validInput, principalCreditCents: 10_000_00, lockedBonusCreditCents: 2_000_01 },
       { ...validInput, principalCreditCents: -1 },
       { ...validInput, lockedBonusCreditCents: -1 },
       { ...validInput, releasedPrincipalCreditCents: -1 },
