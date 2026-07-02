@@ -1294,24 +1294,24 @@ export const tasksRouter = router({
             { taskId, status: 'awaiting_user', plan: [], cursor: 0, pendingConfirm: null },
             { userId: userRow.id, intent: input.intent, roleId: 'video-creator', opusUsed: false },
           );
-          await ctx.db
-            .update(tasksTable)
-            .set({
-              status: 'awaiting_user',
-              awaitingQuestion: petQuote.message,
-              awaitingKind: 'video_quote',
-              result: {
-                summary: petQuote.message,
-                metadata: {
-                  lane: 'video_creation_confirm',
-                  petImageFileId: vOpts.petImageFileId,
-                  petModel,
-                  i2vPrompt: input.intent,
-                  videoOptions: vOpts,
-                },
+          const initialized = await repo.persistInitialAwaitingUser({
+            taskExternalId: taskId,
+            question: petQuote.message,
+            awaitingKind: 'video_quote',
+            result: {
+              summary: petQuote.message,
+              metadata: {
+                lane: 'video_creation_confirm',
+                petImageFileId: vOpts.petImageFileId,
+                petModel,
+                i2vPrompt: input.intent,
+                videoOptions: vOpts,
               },
-            })
-            .where(eq(tasksTable.externalId, taskId));
+            },
+          });
+          if (!initialized.persisted) {
+            throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '视频报价任务初始化失败，请重试。' });
+          }
           ctx.logger.info(
             { taskId, userId: ctx.userId, executorLane: 'video_creation_confirm', petModel, videoCny: petQuote.videoCny },
             'task: executor lane selected (pet i2v)',
@@ -1345,18 +1345,18 @@ export const tasksRouter = router({
             { taskId, status: 'awaiting_user', plan: [], cursor: 0, pendingConfirm: null },
             { userId: userRow.id, intent: input.intent, roleId: 'video-creator', opusUsed: false },
           );
-          await ctx.db
-            .update(tasksTable)
-            .set({
-              status: 'awaiting_user',
-              awaitingQuestion: ipQuote.message,
-              awaitingKind: 'video_quote',
-              result: {
-                summary: ipQuote.message,
-                metadata: { lane: 'video_creation_confirm', ipCopyText: input.intent, videoOptions: vOpts },
-              },
-            })
-            .where(eq(tasksTable.externalId, taskId));
+          const initialized = await repo.persistInitialAwaitingUser({
+            taskExternalId: taskId,
+            question: ipQuote.message,
+            awaitingKind: 'video_quote',
+            result: {
+              summary: ipQuote.message,
+              metadata: { lane: 'video_creation_confirm', ipCopyText: input.intent, videoOptions: vOpts },
+            },
+          });
+          if (!initialized.persisted) {
+            throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '视频报价任务初始化失败，请重试。' });
+          }
           ctx.logger.info(
             { taskId, userId: ctx.userId, executorLane: 'video_creation_confirm', ipChars: ipQuote.chars, videoCny: ipQuote.videoCny },
             'task: executor lane selected (ip lip-sync)',
@@ -1409,26 +1409,27 @@ export const tasksRouter = router({
             { taskId, status: 'awaiting_user', plan: [], cursor: 0, pendingConfirm: null },
             { userId: userRow.id, intent: input.intent, roleId: 'video-creator', opusUsed: false },
           );
-          // persistVisionOutcome 不支持 awaiting_user → 直接补 awaitingKind/result.
+          // Initial awaiting_user quote: stamp awaitingKind/result and
+          // write the matching task.awaiting_user event in one repository call.
           // result.metadata 存 videoScript(确认后复用,保证段数=报价段数)+ lane(给
           // consumeVideoConfirm 原子抢占识别)。
-          await ctx.db
-            .update(tasksTable)
-            .set({
-              status: 'awaiting_user',
-              awaitingQuestion: quote.message,
-              awaitingKind: 'video_quote',
-              result: {
-                summary: quote.message,
-                metadata: {
-                  lane: 'video_creation_confirm',
-                  videoScript: script,
-                  videoTier: tier,
-                  videoOptions: vOpts,
-                },
+          const initialized = await repo.persistInitialAwaitingUser({
+            taskExternalId: taskId,
+            question: quote.message,
+            awaitingKind: 'video_quote',
+            result: {
+              summary: quote.message,
+              metadata: {
+                lane: 'video_creation_confirm',
+                videoScript: script,
+                videoTier: tier,
+                videoOptions: vOpts,
               },
-            })
-            .where(eq(tasksTable.externalId, taskId));
+            },
+          });
+          if (!initialized.persisted) {
+            throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '视频报价任务初始化失败，请重试。' });
+          }
           ctx.logger.info(
             {
               taskId,

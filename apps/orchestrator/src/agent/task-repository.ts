@@ -269,32 +269,74 @@ export class TaskRepository {
   }
 
   async markAwaitingReplyResumed(taskExternalId: string): Promise<{ persisted: boolean }> {
-    const result = await this.db
-      .update(tasks)
-      .set({
-        status: 'executing',
-        awaitingQuestion: null,
-        awaitingKind: null,
-      })
-      .where(and(eq(tasks.externalId, taskExternalId), eq(tasks.status, 'awaiting_user')));
-    return { persisted: extractMysqlAffectedRows(result) > 0 };
+    const [taskRow] = await this.db
+      .select({ id: tasks.id })
+      .from(tasks)
+      .where(eq(tasks.externalId, taskExternalId))
+      .limit(1);
+    if (!taskRow) throw new Error(`task ${taskExternalId} not found in DB`);
+
+    let persisted = true;
+    await this.db.transaction(async (tx) => {
+      const result = await tx
+        .update(tasks)
+        .set({
+          status: 'executing',
+          awaitingQuestion: null,
+          awaitingKind: null,
+        })
+        .where(and(eq(tasks.externalId, taskExternalId), eq(tasks.status, 'awaiting_user')));
+      if (extractMysqlAffectedRows(result) === 0) {
+        persisted = false;
+        return;
+      }
+      await tx.insert(taskEvents).values({
+        externalId: newExternalId('taskEvent'),
+        taskId: taskRow.id,
+        type: 'task.resumed',
+        actor: 'user',
+        payload: null,
+      });
+    });
+    return { persisted };
   }
 
   async markAwaitingReplyCompleted(
     taskExternalId: string,
     resultPayload: Record<string, unknown>,
   ): Promise<{ persisted: boolean }> {
-    const result = await this.db
-      .update(tasks)
-      .set({
-        status: 'completed',
-        awaitingQuestion: null,
-        awaitingKind: null,
-        result: resultPayload,
-        completedAt: new Date(),
-      })
-      .where(and(eq(tasks.externalId, taskExternalId), eq(tasks.status, 'awaiting_user')));
-    return { persisted: extractMysqlAffectedRows(result) > 0 };
+    const [taskRow] = await this.db
+      .select({ id: tasks.id })
+      .from(tasks)
+      .where(eq(tasks.externalId, taskExternalId))
+      .limit(1);
+    if (!taskRow) throw new Error(`task ${taskExternalId} not found in DB`);
+
+    let persisted = true;
+    await this.db.transaction(async (tx) => {
+      const result = await tx
+        .update(tasks)
+        .set({
+          status: 'completed',
+          awaitingQuestion: null,
+          awaitingKind: null,
+          result: resultPayload,
+          completedAt: new Date(),
+        })
+        .where(and(eq(tasks.externalId, taskExternalId), eq(tasks.status, 'awaiting_user')));
+      if (extractMysqlAffectedRows(result) === 0) {
+        persisted = false;
+        return;
+      }
+      await tx.insert(taskEvents).values({
+        externalId: newExternalId('taskEvent'),
+        taskId: taskRow.id,
+        type: 'task.completed',
+        actor: 'system',
+        payload: resultPayload,
+      });
+    });
+    return { persisted };
   }
 
   async persistAwaitingUser(params: {
@@ -353,6 +395,53 @@ export class TaskRepository {
     return { persisted };
   }
 
+  async persistInitialAwaitingUser(params: {
+    taskExternalId: string;
+    question: string;
+    awaitingKind: string;
+    result: Record<string, unknown>;
+  }): Promise<{ persisted: boolean }> {
+    const [taskRow] = await this.db
+      .select({ id: tasks.id })
+      .from(tasks)
+      .where(eq(tasks.externalId, params.taskExternalId))
+      .limit(1);
+    if (!taskRow) throw new Error(`task ${params.taskExternalId} not found in DB`);
+
+    let persisted = true;
+    await this.db.transaction(async (tx) => {
+      const updateResult = await tx
+        .update(tasks)
+        .set({
+          awaitingQuestion: params.question,
+          awaitingKind: params.awaitingKind,
+          result: params.result,
+        })
+        .where(
+          and(
+            eq(tasks.externalId, params.taskExternalId),
+            eq(tasks.status, 'awaiting_user'),
+          ),
+        );
+      if (extractMysqlAffectedRows(updateResult) === 0) {
+        persisted = false;
+        return;
+      }
+
+      await tx.insert(taskEvents).values({
+        externalId: newExternalId('taskEvent'),
+        taskId: taskRow.id,
+        type: 'task.awaiting_user',
+        actor: 'system',
+        payload: {
+          awaitingKind: params.awaitingKind,
+          question: params.question,
+        },
+      });
+    });
+    return { persisted };
+  }
+
   async persistAwaitingUserResult(params: {
     taskExternalId: string;
     awaitingKind: string;
@@ -388,29 +477,71 @@ export class TaskRepository {
   }
 
   async markQueuedTaskExecuting(taskExternalId: string): Promise<{ persisted: boolean }> {
-    const result = await this.db
-      .update(tasks)
-      .set({
-        status: 'executing',
-        startedAt: new Date(),
-      })
-      .where(and(eq(tasks.externalId, taskExternalId), eq(tasks.status, 'queued')));
-    return { persisted: extractMysqlAffectedRows(result) > 0 };
+    const [taskRow] = await this.db
+      .select({ id: tasks.id })
+      .from(tasks)
+      .where(eq(tasks.externalId, taskExternalId))
+      .limit(1);
+    if (!taskRow) throw new Error(`task ${taskExternalId} not found in DB`);
+
+    let persisted = true;
+    await this.db.transaction(async (tx) => {
+      const result = await tx
+        .update(tasks)
+        .set({
+          status: 'executing',
+          startedAt: new Date(),
+        })
+        .where(and(eq(tasks.externalId, taskExternalId), eq(tasks.status, 'queued')));
+      if (extractMysqlAffectedRows(result) === 0) {
+        persisted = false;
+        return;
+      }
+      await tx.insert(taskEvents).values({
+        externalId: newExternalId('taskEvent'),
+        taskId: taskRow.id,
+        type: 'task.transition',
+        actor: 'system',
+        payload: { from: 'queued', to: 'executing' },
+      });
+    });
+    return { persisted };
   }
 
   async markQueuedTaskFailed(
     taskExternalId: string,
     errorMessage: string,
   ): Promise<{ persisted: boolean }> {
-    const result = await this.db
-      .update(tasks)
-      .set({
-        status: 'failed',
-        errorMessage,
-        completedAt: new Date(),
-      })
-      .where(and(eq(tasks.externalId, taskExternalId), eq(tasks.status, 'queued')));
-    return { persisted: extractMysqlAffectedRows(result) > 0 };
+    const [taskRow] = await this.db
+      .select({ id: tasks.id })
+      .from(tasks)
+      .where(eq(tasks.externalId, taskExternalId))
+      .limit(1);
+    if (!taskRow) throw new Error(`task ${taskExternalId} not found in DB`);
+
+    let persisted = true;
+    await this.db.transaction(async (tx) => {
+      const result = await tx
+        .update(tasks)
+        .set({
+          status: 'failed',
+          errorMessage,
+          completedAt: new Date(),
+        })
+        .where(and(eq(tasks.externalId, taskExternalId), eq(tasks.status, 'queued')));
+      if (extractMysqlAffectedRows(result) === 0) {
+        persisted = false;
+        return;
+      }
+      await tx.insert(taskEvents).values({
+        externalId: newExternalId('taskEvent'),
+        taskId: taskRow.id,
+        type: 'task.failed',
+        actor: 'system',
+        payload: { reason: errorMessage },
+      });
+    });
+    return { persisted };
   }
 
   /**

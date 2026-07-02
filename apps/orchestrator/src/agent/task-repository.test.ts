@@ -656,15 +656,20 @@ describe('TaskRepository task terminal state persistence', () => {
     });
     const params = collectDrizzleParamValues(captured.whereClauses.at(0));
     expect(params).toEqual(expect.arrayContaining(['tsk_state_machine', 'awaiting_user']));
+    expect(captured.eventPayloads[0]).toMatchObject({
+      type: 'task.resumed',
+      actor: 'user',
+    });
   });
 
   it('markAwaitingReplyResumed reports stale rows without pretending to resume', async () => {
-    const { db } = fakeDbForStateTransitions(0);
+    const { db, captured } = fakeDbForStateTransitions(0);
     const repo = new TaskRepository(db);
 
     const result = await repo.markAwaitingReplyResumed('tsk_state_machine');
 
     expect(result.persisted).toBe(false);
+    expect(captured.eventPayloads).toHaveLength(0);
   });
 
   it('markAwaitingReplyCompleted only completes rows that are still awaiting_user', async () => {
@@ -685,10 +690,15 @@ describe('TaskRepository task terminal state persistence', () => {
     expect(captured.updatePayloads[0]?.completedAt).toBeInstanceOf(Date);
     const params = collectDrizzleParamValues(captured.whereClauses.at(0));
     expect(params).toEqual(expect.arrayContaining(['tsk_state_machine', 'awaiting_user']));
+    expect(captured.eventPayloads[0]).toMatchObject({
+      type: 'task.completed',
+      actor: 'system',
+      payload: { summary: 'handoff created' },
+    });
   });
 
   it('markAwaitingReplyCompleted reports stale rows without completing them', async () => {
-    const { db } = fakeDbForStateTransitions(0);
+    const { db, captured } = fakeDbForStateTransitions(0);
     const repo = new TaskRepository(db);
 
     const result = await repo.markAwaitingReplyCompleted('tsk_state_machine', {
@@ -696,6 +706,7 @@ describe('TaskRepository task terminal state persistence', () => {
     });
 
     expect(result.persisted).toBe(false);
+    expect(captured.eventPayloads).toHaveLength(0);
   });
 
   it('persistAwaitingUser only parks active runner rows', async () => {
@@ -747,6 +758,56 @@ describe('TaskRepository task terminal state persistence', () => {
       question: '请补充目标城市',
       awaitingKind: 'clarification',
       result: { executionMode: 'generate' },
+    });
+
+    expect(result.persisted).toBe(false);
+    expect(captured.eventPayloads).toHaveLength(0);
+  });
+
+  it('persistInitialAwaitingUser initializes an already-parked task with an awaiting event', async () => {
+    const { db, captured } = fakeDbForStateTransitions(1);
+    const repo = new TaskRepository(db);
+
+    const result = await repo.persistInitialAwaitingUser({
+      taskExternalId: 'tsk_state_machine',
+      question: '确认后开始生成视频',
+      awaitingKind: 'video_quote',
+      result: {
+        summary: '确认后开始生成视频',
+        metadata: { lane: 'video_creation_confirm' },
+      },
+    });
+
+    expect(result.persisted).toBe(true);
+    expect(captured.updatePayloads[0]).toMatchObject({
+      awaitingQuestion: '确认后开始生成视频',
+      awaitingKind: 'video_quote',
+      result: {
+        summary: '确认后开始生成视频',
+        metadata: { lane: 'video_creation_confirm' },
+      },
+    });
+    const params = collectDrizzleParamValues(captured.whereClauses.at(0));
+    expect(params).toEqual(expect.arrayContaining(['tsk_state_machine', 'awaiting_user']));
+    expect(captured.eventPayloads[0]).toMatchObject({
+      type: 'task.awaiting_user',
+      actor: 'system',
+      payload: {
+        awaitingKind: 'video_quote',
+        question: '确认后开始生成视频',
+      },
+    });
+  });
+
+  it('persistInitialAwaitingUser reports stale rows without inserting an event', async () => {
+    const { db, captured } = fakeDbForStateTransitions(0);
+    const repo = new TaskRepository(db);
+
+    const result = await repo.persistInitialAwaitingUser({
+      taskExternalId: 'tsk_state_machine',
+      question: '确认后开始生成视频',
+      awaitingKind: 'video_quote',
+      result: { summary: '确认后开始生成视频' },
     });
 
     expect(result.persisted).toBe(false);
@@ -841,15 +902,21 @@ describe('TaskRepository task terminal state persistence', () => {
     expect(captured.updatePayloads[0]?.startedAt).toBeInstanceOf(Date);
     const params = collectDrizzleParamValues(captured.whereClauses.at(0));
     expect(params).toEqual(expect.arrayContaining(['tsk_state_machine', 'queued']));
+    expect(captured.eventPayloads[0]).toMatchObject({
+      type: 'task.transition',
+      actor: 'system',
+      payload: { from: 'queued', to: 'executing' },
+    });
   });
 
   it('markQueuedTaskExecuting reports stale rows without pretending to start', async () => {
-    const { db } = fakeDbForStateTransitions(0);
+    const { db, captured } = fakeDbForStateTransitions(0);
     const repo = new TaskRepository(db);
 
     const result = await repo.markQueuedTaskExecuting('tsk_state_machine');
 
     expect(result.persisted).toBe(false);
+    expect(captured.eventPayloads).toHaveLength(0);
   });
 
   it('markQueuedTaskFailed only fails rows still queued', async () => {
@@ -869,15 +936,21 @@ describe('TaskRepository task terminal state persistence', () => {
     expect(captured.updatePayloads[0]?.completedAt).toBeInstanceOf(Date);
     const params = collectDrizzleParamValues(captured.whereClauses.at(0));
     expect(params).toEqual(expect.arrayContaining(['tsk_state_machine', 'queued']));
+    expect(captured.eventPayloads[0]).toMatchObject({
+      type: 'task.failed',
+      actor: 'system',
+      payload: { reason: 'queue timeout: 排队等待时间过长，请稍后重试' },
+    });
   });
 
   it('markQueuedTaskFailed reports stale rows without pretending to fail', async () => {
-    const { db } = fakeDbForStateTransitions(0);
+    const { db, captured } = fakeDbForStateTransitions(0);
     const repo = new TaskRepository(db);
 
     const result = await repo.markQueuedTaskFailed('tsk_state_machine', 'queue timeout');
 
     expect(result.persisted).toBe(false);
+    expect(captured.eventPayloads).toHaveLength(0);
   });
 
   it('cancelVideoConfirm atomically cancels only active video quote rows', async () => {
