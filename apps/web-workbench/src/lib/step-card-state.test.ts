@@ -3,6 +3,7 @@ import {
   shouldShowStepCard,
   stepDurationLabel,
   stepDisplaySummary,
+  stepDisplayStepsForTask,
   stepDisplayTitle,
   stepDetailSummary,
   stepFailureMessage,
@@ -25,7 +26,7 @@ describe('step-card-state', () => {
       failed: 1,
       running: 1,
       cancelled: 1,
-      label: '1/4 步完成 · 1 执行中 · 1 失败 · 1 取消',
+      label: '1/4 步完成 · 1 执行中 · 1 失败 · 1 已取消',
       tone: 'failed',
     });
   });
@@ -37,7 +38,24 @@ describe('step-card-state', () => {
         { status: 'cancelled' },
       ]),
     ).toMatchObject({
-      label: '1/2 步完成 · 1 取消',
+      label: '1/2 步完成 · 1 已取消',
+      tone: 'cancelled',
+    });
+  });
+
+  it('renders stale running detail steps as cancelled once the parent task is cancelled', () => {
+    const steps = stepDisplayStepsForTask(
+      [
+        { tickIndex: 0, status: 'running' as const },
+        { tickIndex: 1, status: 'done' as const },
+        { tickIndex: 2, status: 'running' as const },
+      ],
+      'cancelled',
+    );
+
+    expect(steps.map((step) => step.status)).toEqual(['cancelled', 'done', 'cancelled']);
+    expect(stepDetailSummary(steps)).toMatchObject({
+      label: '1/3 步完成 · 2 已取消',
       tone: 'cancelled',
     });
   });

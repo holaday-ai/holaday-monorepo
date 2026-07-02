@@ -68,6 +68,7 @@ import {
 import {
   shouldShowStepCard,
   stepDetailSummary,
+  stepDisplayStepsForTask,
   stepStatusText,
   type StepDetailSummary,
 } from '@/lib/step-card-state';
@@ -373,7 +374,10 @@ function AgentBlock({
     return undefined;
   }, [steps]);
   const latestRunningStatus = steps[steps.length - 1]?.status ?? 'done';
-  const detailSteps = React.useMemo(() => steps.filter(shouldShowStepCard), [steps]);
+  const detailSteps = React.useMemo(
+    () => stepDisplayStepsForTask(steps.filter(shouldShowStepCard), task.status),
+    [steps, task.status],
+  );
   const detailSummary = React.useMemo(
     () => stepDetailSummary(detailSteps),
     [detailSteps],

@@ -27,6 +27,18 @@ export function stepStatusText(status: StepExecutionStatus): string {
   return '执行中';
 }
 
+export function stepDisplayStepsForTask<T extends Pick<UiStep, 'status'>>(
+  steps: readonly T[],
+  taskStatus: string | null | undefined,
+): readonly T[] {
+  if (taskStatus !== 'cancelled') return steps;
+  return steps.map((step) =>
+    step.status === 'running'
+      ? { ...step, status: 'cancelled' as const }
+      : step,
+  );
+}
+
 export function stepDurationLabel(durationMs: number | null | undefined): string | null {
   if (durationMs == null || durationMs <= 0) return null;
   if (durationMs < 1000) return '<1s';
@@ -186,7 +198,7 @@ export function stepDetailSummary(
       : ['暂无详细步骤'];
   if (running > 0) parts.push(`${running} 执行中`);
   if (failed > 0) parts.push(`${failed} 失败`);
-  if (cancelled > 0) parts.push(`${cancelled} 取消`);
+  if (cancelled > 0) parts.push(`${cancelled} 已取消`);
   const tone =
     failed > 0
       ? 'failed'
