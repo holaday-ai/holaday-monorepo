@@ -252,6 +252,50 @@ describe('tasks.confirm tRPC mutation (awaiting_user → executing | cancelled)'
     expect(taskRow.completedAt).toBeNull();
   });
 
+  it('confirmVideo cancel records a user cancellation event', async () => {
+    const { userExternalId, taskId } = await makeUserWithVideoQuoteTask();
+    const { status, json } = await callTrpc(
+      'confirmVideo',
+      { taskId, choice: 'cancel' },
+      userExternalId,
+    );
+    expect(status).toBe(200);
+    expect((json as { result: { data: { status: string } } }).result.data.status).toBe(
+      'cancelled',
+    );
+
+    const { db } = await import('../../db/client.js');
+    const { and, eq } = await import('drizzle-orm');
+    const { taskEvents } = await import('../../db/schema/task-events.js');
+    const { tasks } = await import('../../db/schema/tasks.js');
+    const taskRow = must(
+      (await db.select().from(tasks).where(eq(tasks.externalId, taskId)))[0],
+      'taskRow',
+    );
+    expect(taskRow.status).toBe('cancelled');
+    expect(taskRow.completedAt).not.toBeNull();
+
+    const [event] = await db
+      .select({
+        type: taskEvents.type,
+        actor: taskEvents.actor,
+        payload: taskEvents.payload,
+      })
+      .from(taskEvents)
+      .where(and(eq(taskEvents.taskId, taskRow.id), eq(taskEvents.type, 'task.cancelled')))
+      .limit(1);
+    expect(event).toEqual({
+      type: 'task.cancelled',
+      actor: 'user',
+      payload: {
+        source: 'video_quote',
+        from: 'awaiting_user',
+        to: 'cancelled',
+        reason: 'user_cancelled',
+      },
+    });
+  });
+
   it('confirmVideo cancel refuses stale non-awaiting video quote rows without mutating them', async () => {
     const { userExternalId, taskId } = await makeUserWithVideoQuoteTask('completed');
     const { status } = await callTrpc('confirmVideo', { taskId, choice: 'cancel' }, userExternalId);

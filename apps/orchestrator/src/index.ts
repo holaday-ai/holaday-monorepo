@@ -12,6 +12,7 @@ import {
   recoverStuckRunningScheduledTasks,
   startScheduledRunner,
 } from './agent/scheduled-runner.js';
+import { failStaleTasksWithEvents } from './agent/task-maintenance.js';
 import {
   type ExecutionRouter,
   createApifyAdapter,
@@ -36,22 +37,6 @@ import { createPayPalAdapter } from './payment/index.js';
 import { type TaskQueue, createTaskQueue } from './queue/task-queue.js';
 import { createScreencastProxy } from './streaming/screencast-proxy.js';
 import { createWsServer, loadRehydratedTasks } from './ws/server.js';
-
-/**
- * Phase 22a — extract `affectedRows` from a drizzle `db.execute(UPDATE)`
- * result. mysql2 returns `[ResultSetHeader, ...]` so the count is on
- * `[0].affectedRows`; some shape variants surface it directly on the
- * top-level object. Probe both so the boot sweep + zombie reaper logs
- * the real count instead of a silent zero.
- */
-function extractAffectedRows(result: unknown): number {
-  if (Array.isArray(result)) {
-    const head = result[0] as { affectedRows?: number } | undefined;
-    if (typeof head?.affectedRows === 'number') return head.affectedRows;
-  }
-  const direct = (result as { affectedRows?: number }).affectedRows;
-  return typeof direct === 'number' ? direct : 0;
-}
 
 async function main() {
   const recorder = new DrizzleLlmCallRecorder(db, {
@@ -619,20 +604,18 @@ async function main() {
   // starts clean. 2-minute cutoff because the orchestrator boot
   // itself takes ~5-10s; anything older than that is definitely stale.
   try {
-    const { sql } = await import('drizzle-orm');
-    const rows = await db.execute(sql`
-      UPDATE tasks
-         SET status = 'failed',
-             error_code = 'ORCHESTRATOR_RESTART',
-             -- User-facing error_message; the stable diagnostic is in
-             -- error_code above. Keep this short + actionable since the
-             -- SPA renders it verbatim inside the failed-task card.
-             error_message = '服务重启导致任务中断，重新发送一次即可。',
-             updated_at = NOW(3),
-             completed_at = NOW(3)
-       WHERE status IN ('pending','planning','queued','executing')
-         AND created_at < NOW() - INTERVAL 2 MINUTE
-    `);
+    const restartMessage = '服务重启导致任务中断，重新发送一次即可。';
+    const changed = await failStaleTasksWithEvents(db, {
+      source: 'boot_sweep',
+      sourceStatuses: ['pending', 'planning', 'queued', 'executing'],
+      staleBy: 'createdAt',
+      cutoff: new Date(Date.now() - 2 * 60_000),
+      errorCode: 'ORCHESTRATOR_RESTART',
+      // User-facing error_message; the stable diagnostic is in
+      // error_code above. Keep this short + actionable since the
+      // SPA renders it verbatim inside the failed-task card.
+      errorMessage: restartMessage,
+    });
     // Phase 3 R1 — also reap stale awaiting_user tasks. With the new
     // state-machine guard, agent-loop's takeover-timeout no longer
     // overwrites awaiting_user with completed, so parked tasks that
@@ -649,32 +632,20 @@ async function main() {
     // reaper hadn't existed yet). Set BOOT_SWEEP_AWAITING_USER_MIN=5
     // for one deploy to flush, then restore.
     const bootAwaitingMin = Number.parseInt(process.env.BOOT_SWEEP_AWAITING_USER_MIN ?? '35', 10);
-    const parkRows = await db.execute(sql`
-      UPDATE tasks
-         SET status = 'failed',
-             error_code = 'AWAITING_USER_TIMEOUT',
-             error_message = ${`等待用户响应超时（>${bootAwaitingMin}分钟），任务已自动释放。`},
-             awaiting_question = NULL,
-             awaiting_kind = NULL,
-             updated_at = NOW(3),
-             completed_at = NOW(3)
-       WHERE status = 'awaiting_user'
-         AND updated_at < NOW() - INTERVAL ${sql.raw(String(bootAwaitingMin))} MINUTE
-    `);
-    // Phase 22a (#25 audit fix) — `db.execute(UPDATE)` returns
-    // `[ResultSetHeader, ...]` under mysql2 (the driver drizzle uses
-    // for MySQL); affectedRows is on `[0]`, not on `rows.affectedRows`.
-    // The pre-22a cast read `.affectedRows` off the array itself, which
-    // is undefined → log always reported 0 even when N rows were
-    // updated. Check both shapes for forward-compat with future
-    // drizzle/driver shape tweaks.
-    const changed = extractAffectedRows(rows);
+    const parkChanged = await failStaleTasksWithEvents(db, {
+      source: 'boot_sweep',
+      sourceStatuses: ['awaiting_user'],
+      staleBy: 'updatedAt',
+      cutoff: new Date(Date.now() - bootAwaitingMin * 60_000),
+      errorCode: 'AWAITING_USER_TIMEOUT',
+      errorMessage: `等待用户响应超时（>${bootAwaitingMin}分钟），任务已自动释放。`,
+      clearAwaiting: true,
+    });
     if (changed > 0) {
       logger.warn({ count: changed }, 'boot sweep: marked stale in-flight tasks as failed');
     } else {
       logger.info('boot sweep: no stale in-flight tasks to mark');
     }
-    const parkChanged = extractAffectedRows(parkRows);
     if (parkChanged > 0) {
       logger.warn(
         { count: parkChanged, thresholdMin: bootAwaitingMin },
@@ -707,7 +678,6 @@ async function main() {
   // via persist hooks within that window keeps itself out of the reap.
   const ZOMBIE_REAP_INTERVAL_MS = 60_000;
   const ZOMBIE_REAP_THRESHOLD_MIN = 20;
-  const { sql: sqlForReaper } = await import('drizzle-orm');
   // Phase 3 R1 — runtime sweep also covers stale awaiting_user. Same
   // 35-min threshold as the boot-sweep counterpart; marks parked tasks
   // the user never came back to as failed so they stop counting against
@@ -718,36 +688,29 @@ async function main() {
   const zombieReaperTimer = setInterval(() => {
     void (async () => {
       try {
-        const result = await db.execute(sqlForReaper`
-          UPDATE tasks
-             SET status = 'failed',
-                 error_code = 'EXECUTION_TIMEOUT',
-                 error_message = ${`任务执行超过 ${ZOMBIE_REAP_THRESHOLD_MIN} 分钟未更新，已自动标记失败。`},
-                 updated_at = NOW(3),
-                 completed_at = NOW(3)
-           WHERE status = 'executing'
-             AND updated_at < NOW() - INTERVAL ${ZOMBIE_REAP_THRESHOLD_MIN} MINUTE
-        `);
-        const changed = extractAffectedRows(result);
+        const changed = await failStaleTasksWithEvents(db, {
+          source: 'runtime_zombie_reaper',
+          sourceStatuses: ['executing'],
+          staleBy: 'updatedAt',
+          cutoff: new Date(Date.now() - ZOMBIE_REAP_THRESHOLD_MIN * 60_000),
+          errorCode: 'EXECUTION_TIMEOUT',
+          errorMessage: `任务执行超过 ${ZOMBIE_REAP_THRESHOLD_MIN} 分钟未更新，已自动标记失败。`,
+        });
         if (changed > 0) {
           logger.warn(
             { count: changed, thresholdMin: ZOMBIE_REAP_THRESHOLD_MIN },
             'zombie reaper: marked stale executing tasks as failed',
           );
         }
-        const parkResult = await db.execute(sqlForReaper`
-          UPDATE tasks
-             SET status = 'failed',
-                 error_code = 'AWAITING_USER_TIMEOUT',
-                 error_message = ${`等待用户响应超时（>${AWAITING_USER_REAP_THRESHOLD_MIN}分钟），任务已自动释放。`},
-                 awaiting_question = NULL,
-                 awaiting_kind = NULL,
-                 updated_at = NOW(3),
-                 completed_at = NOW(3)
-           WHERE status = 'awaiting_user'
-             AND updated_at < NOW() - INTERVAL ${AWAITING_USER_REAP_THRESHOLD_MIN} MINUTE
-        `);
-        const parkChanged = extractAffectedRows(parkResult);
+        const parkChanged = await failStaleTasksWithEvents(db, {
+          source: 'runtime_zombie_reaper',
+          sourceStatuses: ['awaiting_user'],
+          staleBy: 'updatedAt',
+          cutoff: new Date(Date.now() - AWAITING_USER_REAP_THRESHOLD_MIN * 60_000),
+          errorCode: 'AWAITING_USER_TIMEOUT',
+          errorMessage: `等待用户响应超时（>${AWAITING_USER_REAP_THRESHOLD_MIN}分钟），任务已自动释放。`,
+          clearAwaiting: true,
+        });
         if (parkChanged > 0) {
           logger.warn(
             { count: parkChanged, thresholdMin: AWAITING_USER_REAP_THRESHOLD_MIN },

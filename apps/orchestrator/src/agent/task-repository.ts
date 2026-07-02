@@ -886,27 +886,54 @@ export class TaskRepository {
   }
 
   async cancelVideoConfirm(taskExternalId: string): Promise<{ persisted: boolean }> {
-    const result = await this.db.execute(sql`
-      UPDATE tasks
-      SET
-        status = 'cancelled',
-        awaiting_kind = NULL,
-        awaiting_question = NULL,
-        result = JSON_SET(
-          COALESCE(result, JSON_OBJECT()),
-          '$.summary',
-          '已取消，未产生任何费用。',
-          '$.metadata.lane',
-          'video_creation_cancelled'
-        ),
-        completed_at = ${new Date()}
-      WHERE external_id = ${taskExternalId}
-        AND status = 'awaiting_user'
-        AND awaiting_kind = 'video_quote'
-        AND JSON_UNQUOTE(JSON_EXTRACT(result, '$.metadata.lane')) = 'video_creation_confirm'
-    `);
-    const header = (Array.isArray(result) ? result[0] : result) as { affectedRows?: number } | undefined;
-    return { persisted: (header?.affectedRows ?? 0) === 1 };
+    const [taskRow] = await this.db
+      .select({ id: tasks.id })
+      .from(tasks)
+      .where(eq(tasks.externalId, taskExternalId))
+      .limit(1);
+    if (!taskRow) throw new Error(`task ${taskExternalId} not found in DB`);
+
+    let persisted = true;
+    await this.db.transaction(async (tx) => {
+      const result = await tx.execute(sql`
+        UPDATE tasks
+        SET
+          status = 'cancelled',
+          awaiting_kind = NULL,
+          awaiting_question = NULL,
+          result = JSON_SET(
+            COALESCE(result, JSON_OBJECT()),
+            '$.summary',
+            '已取消，未产生任何费用。',
+            '$.metadata.lane',
+            'video_creation_cancelled'
+          ),
+          completed_at = ${new Date()}
+        WHERE external_id = ${taskExternalId}
+          AND status = 'awaiting_user'
+          AND awaiting_kind = 'video_quote'
+          AND JSON_UNQUOTE(JSON_EXTRACT(result, '$.metadata.lane')) = 'video_creation_confirm'
+      `);
+      const header = (Array.isArray(result) ? result[0] : result) as { affectedRows?: number } | undefined;
+      if ((header?.affectedRows ?? 0) !== 1) {
+        persisted = false;
+        return;
+      }
+
+      await tx.insert(taskEvents).values({
+        externalId: newExternalId('taskEvent'),
+        taskId: taskRow.id,
+        type: 'task.cancelled',
+        actor: 'user',
+        payload: {
+          source: 'video_quote',
+          from: 'awaiting_user',
+          to: 'cancelled',
+          reason: 'user_cancelled',
+        },
+      });
+    });
+    return { persisted };
   }
 
   async repromptVideoConfirm(

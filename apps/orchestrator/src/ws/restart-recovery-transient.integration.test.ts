@@ -30,7 +30,8 @@ describe('restart recovery: transient queued tasks fail visibly', () => {
       '@holaday/shared-types'
     );
     const { db } = await import('../db/client.js');
-    const { eq } = await import('drizzle-orm');
+    const { and, eq } = await import('drizzle-orm');
+    const { taskEvents } = await import('../db/schema/task-events.js');
     const { users } = await import('../db/schema/users.js');
     const { tasks } = await import('../db/schema/tasks.js');
     const { TaskRepository } = await import('../agent/task-repository.js');
@@ -115,6 +116,7 @@ describe('restart recovery: transient queued tasks fail visibly', () => {
 
       const [row] = await db
         .select({
+          id: tasks.id,
           status: tasks.status,
           errorCode: tasks.errorCode,
           errorMessage: tasks.errorMessage,
@@ -122,10 +124,33 @@ describe('restart recovery: transient queued tasks fail visibly', () => {
         .from(tasks)
         .where(eq(tasks.externalId, taskId))
         .limit(1);
+      if (!row) throw new Error('task row missing after restart recovery');
       expect(row).toEqual({
+        id: expect.any(Number),
         status: 'failed',
         errorCode: 'ORCHESTRATOR_RESTART',
         errorMessage: '服务重启导致任务中断，重新发送一次即可。',
+      });
+
+      const [event] = await db
+        .select({
+          type: taskEvents.type,
+          actor: taskEvents.actor,
+          payload: taskEvents.payload,
+        })
+        .from(taskEvents)
+        .where(and(eq(taskEvents.taskId, row.id), eq(taskEvents.type, 'task.failed')))
+        .limit(1);
+      expect(event).toEqual({
+        type: 'task.failed',
+        actor: 'system',
+        payload: {
+          source: 'restart_rehydration',
+          from: 'queued',
+          to: 'failed',
+          errorCode: 'ORCHESTRATOR_RESTART',
+          reason: '服务重启导致任务中断，重新发送一次即可。',
+        },
       });
     } finally {
       client.close();

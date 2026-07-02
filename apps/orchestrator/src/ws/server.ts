@@ -8,17 +8,16 @@ import {
   WS_SUBPROTOCOL,
   parseClientMessage,
 } from '@holaday/shared-types';
-import { eq } from 'drizzle-orm';
 import { WebSocket, WebSocketServer } from 'ws';
 import type { Planner } from '../agent/planner.js';
 import { TaskController, type TaskState } from '../agent/task-controller.js';
 import type { PlaywrightExecutor } from '../agent/vision-loop/playwright-executor.js';
 import type { BrowserPool } from '../browser-pool/browser-pool.js';
 import { type RehydratedTask, TaskRepository } from '../agent/task-repository.js';
+import { failTaskWithEventIfStatus } from '../agent/task-maintenance.js';
 import { verifyAccessToken } from '../auth/jwt.js';
 import { logger } from '../config/logger.js';
 import { db } from '../db/client.js';
-import { tasks as tasksTable } from '../db/schema/tasks.js';
 import {
   extensionNoClientMessage,
   extensionSocketClosedMessage,
@@ -244,7 +243,7 @@ async function applyRehydrationForUser(state: ClientState): Promise<void> {
     if (isRestartLostTransientStatus(entry.state.status)) {
       const reason = '服务重启导致任务中断，重新发送一次即可。';
       try {
-        await failRehydratedTransientTask(entry.state.taskId, reason);
+        await failRehydratedTransientTask(entry.state.taskId, entry.state.status, reason);
       } catch (err) {
         logger.warn(
           {
@@ -298,17 +297,18 @@ function isRestartLostTransientStatus(status: TaskState['status']): boolean {
   return status === 'pending' || status === 'planning' || status === 'queued';
 }
 
-async function failRehydratedTransientTask(taskId: string, reason: string): Promise<void> {
-  await db
-    .update(tasksTable)
-    .set({
-      status: 'failed',
-      errorCode: 'ORCHESTRATOR_RESTART',
-      errorMessage: reason,
-      updatedAt: new Date(),
-      completedAt: new Date(),
-    })
-    .where(eq(tasksTable.externalId, taskId));
+async function failRehydratedTransientTask(
+  taskId: string,
+  fromStatus: TaskState['status'],
+  reason: string,
+): Promise<void> {
+  await failTaskWithEventIfStatus(db, {
+    source: 'restart_rehydration',
+    taskExternalId: taskId,
+    fromStatus,
+    errorCode: 'ORCHESTRATOR_RESTART',
+    errorMessage: reason,
+  });
 }
 
 // ---------- Connected-clients registry (so tRPC can push) ----------

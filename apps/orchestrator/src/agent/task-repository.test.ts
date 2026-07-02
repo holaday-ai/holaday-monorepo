@@ -141,12 +141,31 @@ function fakeDbForStateTransitions(affectedRows = 1) {
 function fakeDbForExecute(affectedRows = 1) {
   const captured = {
     statements: [] as unknown[],
+    eventPayloads: [] as Record<string, unknown>[],
+    transactionRan: false,
   };
+  const select = () => ({
+    from: () => ({
+      where: () => ({
+        limit: async () => [{ id: 1 }],
+      }),
+    }),
+  });
   const execute = async (statement: unknown) => {
     captured.statements.push(statement);
     return [{ affectedRows }];
   };
-  const db = { execute } as unknown as DB;
+  const insert = () => ({
+    values: async (payload: Record<string, unknown>) => {
+      captured.eventPayloads.push(payload);
+      return undefined;
+    },
+  });
+  const transaction = async (cb: (tx: unknown) => Promise<void>) => {
+    captured.transactionRan = true;
+    await cb({ execute, insert });
+  };
+  const db = { execute, select, transaction } as unknown as DB;
   return { db, captured };
 }
 
@@ -965,15 +984,27 @@ describe('TaskRepository task terminal state persistence', () => {
     expect(sqlText).toContain('awaiting_kind = \'video_quote\'');
     expect(sqlText).toContain('video_creation_confirm');
     expect(sqlText).toContain('video_creation_cancelled');
+    expect(captured.transactionRan).toBe(true);
+    expect(captured.eventPayloads[0]).toMatchObject({
+      type: 'task.cancelled',
+      actor: 'user',
+      payload: {
+        source: 'video_quote',
+        from: 'awaiting_user',
+        to: 'cancelled',
+        reason: 'user_cancelled',
+      },
+    });
   });
 
   it('cancelVideoConfirm reports stale rows without pretending to cancel', async () => {
-    const { db } = fakeDbForExecute(0);
+    const { db, captured } = fakeDbForExecute(0);
     const repo = new TaskRepository(db);
 
     const result = await repo.cancelVideoConfirm('tsk_state_machine');
 
     expect(result.persisted).toBe(false);
+    expect(captured.eventPayloads).toHaveLength(0);
   });
 
   it('repromptVideoConfirm atomically updates only active video quote rows', async () => {
