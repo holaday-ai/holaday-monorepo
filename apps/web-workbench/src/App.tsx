@@ -28,6 +28,7 @@ const ConnectionsPage = lazyRoute(() => import('@/pages/ConnectionsPage'), 'Conn
 const FilesPage = lazyRoute(() => import('@/pages/FilesPage'), 'FilesPage');
 const HistoryPage = lazyRoute(() => import('@/pages/HistoryPage'), 'HistoryPage');
 const NotFoundPage = lazyRoute(() => import('@/pages/NotFoundPage'), 'NotFoundPage');
+const PartnerPage = lazyRoute(() => import('@/pages/PartnerPage'), 'PartnerPage');
 const PlanPage = lazyRoute(() => import('@/pages/PlanPage'), 'PlanPage');
 const PrivacyPage = lazyRoute(() => import('@/pages/PrivacyPage'), 'PrivacyPage');
 const ProfilePage = lazyRoute(() => import('@/pages/ProfilePage'), 'ProfilePage');
@@ -132,6 +133,7 @@ export function App(): JSX.Element {
           <Route path="/profile" element={lazyElement(<ProfilePage />)} />
           <Route path="/settings" element={lazyElement(<SettingsPage />)} />
           <Route path="/settings/roles" element={lazyElement(<RolesPage />)} />
+          <Route path="/partner" element={lazyElement(<PartnerPage />)} />
           <Route path="/plan" element={lazyElement(<PlanPage />)} />
           <Route path="/billing" element={lazyElement(<BillingPage />)} />
           <Route path="/usage" element={lazyElement(<UsagePage />)} />

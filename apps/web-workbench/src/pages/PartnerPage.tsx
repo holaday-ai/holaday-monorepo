@@ -1,0 +1,698 @@
+import {
+  AlertCircle,
+  ArrowUpRight,
+  CreditCard,
+  Loader2,
+  RefreshCw,
+  Shield,
+  Wallet,
+} from 'lucide-react';
+import * as React from 'react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { useToast } from '@/components/ui/toast';
+import {
+  clampRechargeAmountCnyCents,
+  formatApiUnits,
+  formatHolaCreditCents,
+  formatPartnerCnyCents,
+  normalizePartnerDashboard,
+  type PartnerEnabledState,
+  type PartnerPageState,
+} from '@/lib/partner-page-state';
+import { trpc } from '@/lib/trpc';
+import { PageContainer, PageHeader, PageLoadingPanel, Row, Section } from '@/pages/PageShell';
+
+interface PartnerOrderSummary {
+  readonly orderExternalId: string;
+  readonly provider: string;
+  readonly orderKind: string;
+  readonly amountCnyCents: number;
+  readonly status: string;
+}
+
+interface PartnerRechargePreview {
+  readonly amountCnyCents: number;
+  readonly rollingThirtyDayCnyCents: number;
+  readonly tier: {
+    readonly minCnyCents: number;
+    readonly maxCnyCents: number;
+    readonly multiplierBps: number;
+  };
+  readonly apiUnits: number;
+}
+
+interface PartnerWithdrawalSummary {
+  readonly withdrawalExternalId: string;
+  readonly amountCreditCents: number;
+  readonly status: string;
+  readonly reviewDueAt: Date | string;
+  readonly riskScore: number;
+}
+
+type PartnerAction = 'membership' | 'preview' | 'recharge' | 'withdrawal';
+
+export function PartnerPage(): JSX.Element {
+  const toast = useToast();
+  const mountedRef = React.useRef(false);
+  const requestIdRef = React.useRef(0);
+  const [state, setState] = React.useState<PartnerPageState | null>(null);
+  const [loading, setLoading] = React.useState(true);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
+  const [actionError, setActionError] = React.useState<string | null>(null);
+  const [pendingAction, setPendingAction] = React.useState<PartnerAction | null>(null);
+  const [membershipOrder, setMembershipOrder] = React.useState<PartnerOrderSummary | null>(null);
+  const [rechargePreview, setRechargePreview] = React.useState<PartnerRechargePreview | null>(null);
+  const [rechargeOrder, setRechargeOrder] = React.useState<PartnerOrderSummary | null>(null);
+  const [withdrawal, setWithdrawal] = React.useState<PartnerWithdrawalSummary | null>(null);
+  const [rechargeAmountInput, setRechargeAmountInput] = React.useState('10000');
+  const [withdrawalAmountInput, setWithdrawalAmountInput] = React.useState('');
+  const [bankFingerprint, setBankFingerprint] = React.useState('');
+
+  const refresh = React.useCallback(async () => {
+    const requestId = ++requestIdRef.current;
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const dashboard = normalizePartnerDashboard(await trpc.partner.dashboard.query());
+      if (!mountedRef.current || requestId !== requestIdRef.current) return;
+      setState(dashboard);
+    } catch (err) {
+      if (!mountedRef.current || requestId !== requestIdRef.current) return;
+      setLoadError(rawErrorMessage(err, '合伙人账本暂时无法加载'));
+    } finally {
+      if (mountedRef.current && requestId === requestIdRef.current) setLoading(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    mountedRef.current = true;
+    void refresh();
+    return () => {
+      mountedRef.current = false;
+      requestIdRef.current += 1;
+    };
+  }, [refresh]);
+
+  const rechargeAmountCnyCents = React.useMemo(
+    () => clampRechargeAmountCnyCents(rechargeAmountInput),
+    [rechargeAmountInput],
+  );
+
+  const refreshAction = (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+      onClick={() => void refresh()}
+      disabled={loading}
+    >
+      {loading ? (
+        <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+      ) : (
+        <RefreshCw className="h-3.5 w-3.5" aria-hidden />
+      )}
+      刷新
+    </Button>
+  );
+
+  async function createMembershipOrder(): Promise<void> {
+    setPendingAction('membership');
+    setActionError(null);
+    try {
+      const order = await trpc.partner.createMembershipOrder.mutate({
+        provider: 'manual',
+        idempotencyKey: idempotencyKey('partner-membership'),
+      });
+      setMembershipOrder(order);
+      toast.show('会员订单已创建，请等待人工确认', 'info', 2500);
+    } catch (err) {
+      handleActionError(err, '会员订单创建失败');
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  async function previewRecharge(): Promise<void> {
+    const amountCnyCents = normalizeRechargeInput();
+    setPendingAction('preview');
+    setActionError(null);
+    try {
+      const preview = await trpc.partner.rechargePreview.query({
+        amountCnyCents,
+        rollingThirtyDayCnyCents: amountCnyCents,
+      });
+      setRechargePreview(preview);
+      toast.show('充值预览已更新', 'info', 1800);
+    } catch (err) {
+      handleActionError(err, '充值预览失败');
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  async function createRechargeOrder(): Promise<void> {
+    const amountCnyCents = normalizeRechargeInput();
+    setPendingAction('recharge');
+    setActionError(null);
+    try {
+      const order = await trpc.partner.createRechargeOrder.mutate({
+        amountCnyCents,
+        provider: 'manual',
+        idempotencyKey: idempotencyKey('partner-recharge'),
+      });
+      setRechargeOrder(order);
+      toast.show('充值订单已创建，请等待人工确认', 'info', 2500);
+    } catch (err) {
+      handleActionError(err, '充值订单创建失败');
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  async function requestWithdrawal(): Promise<void> {
+    const amountCreditCents = amountInputToCreditCents(withdrawalAmountInput);
+    const fingerprint = bankFingerprint.trim();
+    if (amountCreditCents <= 0) {
+      toast.show('请填写大于 0 的 HOLA Credit 提现金额', 'error');
+      return;
+    }
+    if (!fingerprint) {
+      toast.show('请填写银行账户指纹', 'error');
+      return;
+    }
+
+    setPendingAction('withdrawal');
+    setActionError(null);
+    try {
+      const result = await trpc.partner.requestWithdrawal.mutate({
+        amountCreditCents,
+        bankAccountFingerprint: fingerprint,
+        idempotencyKey: idempotencyKey('partner-withdrawal'),
+      });
+      setWithdrawal(result);
+      toast.show('提现申请已提交，需完成审核后出款', 'info', 2800);
+    } catch (err) {
+      handleActionError(err, '提现申请失败');
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  function normalizeRechargeInput(): number {
+    const amountCnyCents = clampRechargeAmountCnyCents(rechargeAmountInput);
+    setRechargeAmountInput(String(amountCnyCents / 100));
+    return amountCnyCents;
+  }
+
+  function handleActionError(err: unknown, fallback: string): void {
+    const message = rawErrorMessage(err, fallback);
+    setActionError(message);
+    toast.show(message, 'error');
+  }
+
+  return (
+    <PageContainer width="wide">
+      <PageHeader
+        title="合伙人计划"
+        description="查看 HOLADAY 合伙人账本、充值预览、订单和提现审核进度。"
+        action={refreshAction}
+      />
+
+      {loadError && (
+        <StatusPanel
+          tone="error"
+          title={state ? '刷新失败，正在显示上次账本' : '合伙人账本暂时无法加载'}
+          body={loadError}
+          action={
+            <Button type="button" size="sm" onClick={() => void refresh()} disabled={loading}>
+              重试
+            </Button>
+          }
+        />
+      )}
+
+      {actionError && (
+        <StatusPanel tone="error" title="操作未完成" body={actionError} className="mb-5" />
+      )}
+
+      {loading && state == null ? (
+        <PageLoadingPanel label="合伙人账本加载中" description="正在读取会员、KYC 和账本余额" />
+      ) : state == null ? (
+        <StatusPanel
+          tone="error"
+          title="合伙人账本暂时无法加载"
+          body={loadError ?? '请稍后重试。'}
+          action={
+            <Button type="button" size="sm" onClick={() => void refresh()} disabled={loading}>
+              重试
+            </Button>
+          }
+        />
+      ) : !state.enabled ? (
+        <Section className="rounded-[8px] border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
+          <div className="flex items-start gap-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-[#595757]">
+              <Shield className="h-4 w-4" aria-hidden />
+            </div>
+            <div className="min-w-0">
+              <div className="text-sm font-medium text-foreground/85">{state.title}</div>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">{state.description}</p>
+            </div>
+          </div>
+        </Section>
+      ) : (
+        <PartnerWorkbench
+          state={state}
+          rechargeAmountInput={rechargeAmountInput}
+          rechargeAmountCnyCents={rechargeAmountCnyCents}
+          onRechargeAmountInputChange={setRechargeAmountInput}
+          onRechargeSliderChange={(value) => setRechargeAmountInput(String(value / 100))}
+          onMembershipOrder={() => void createMembershipOrder()}
+          onPreviewRecharge={() => void previewRecharge()}
+          onCreateRechargeOrder={() => void createRechargeOrder()}
+          onRequestWithdrawal={() => void requestWithdrawal()}
+          membershipOrder={membershipOrder}
+          rechargePreview={rechargePreview}
+          rechargeOrder={rechargeOrder}
+          withdrawalAmountInput={withdrawalAmountInput}
+          onWithdrawalAmountInputChange={setWithdrawalAmountInput}
+          bankFingerprint={bankFingerprint}
+          onBankFingerprintChange={setBankFingerprint}
+          withdrawal={withdrawal}
+          pendingAction={pendingAction}
+        />
+      )}
+    </PageContainer>
+  );
+}
+
+function PartnerWorkbench({
+  state,
+  rechargeAmountInput,
+  rechargeAmountCnyCents,
+  onRechargeAmountInputChange,
+  onRechargeSliderChange,
+  onMembershipOrder,
+  onPreviewRecharge,
+  onCreateRechargeOrder,
+  onRequestWithdrawal,
+  membershipOrder,
+  rechargePreview,
+  rechargeOrder,
+  withdrawalAmountInput,
+  onWithdrawalAmountInputChange,
+  bankFingerprint,
+  onBankFingerprintChange,
+  withdrawal,
+  pendingAction,
+}: {
+  state: PartnerEnabledState;
+  rechargeAmountInput: string;
+  rechargeAmountCnyCents: number;
+  onRechargeAmountInputChange: (value: string) => void;
+  onRechargeSliderChange: (value: number) => void;
+  onMembershipOrder: () => void;
+  onPreviewRecharge: () => void;
+  onCreateRechargeOrder: () => void;
+  onRequestWithdrawal: () => void;
+  membershipOrder: PartnerOrderSummary | null;
+  rechargePreview: PartnerRechargePreview | null;
+  rechargeOrder: PartnerOrderSummary | null;
+  withdrawalAmountInput: string;
+  onWithdrawalAmountInputChange: (value: string) => void;
+  bankFingerprint: string;
+  onBankFingerprintChange: (value: string) => void;
+  withdrawal: PartnerWithdrawalSummary | null;
+  pendingAction: PartnerAction | null;
+}): JSX.Element {
+  return (
+    <div className="space-y-6">
+      <Section
+        title="状态与余额"
+        description="HOLA Credit 和 API Units 仅用于合伙人账本展示。"
+        className="rounded-[8px] border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]"
+      >
+        <div className="grid gap-x-8 lg:grid-cols-2">
+          <Row label="会员状态" description="年费会员是充值和提现的前置条件">
+            <StatusValue icon={<CreditCard className="h-3.5 w-3.5" />} value={state.membership.label} />
+          </Row>
+          <Row label="会员到期" description="到期后需要重新开通年费会员">
+            <span className="text-sm tabular-nums text-foreground/80">{state.membership.expiresAtLabel}</span>
+          </Row>
+          <Row label="KYC 状态" description="通过后才能创建充值订单和提现申请">
+            <StatusValue icon={<Shield className="h-3.5 w-3.5" />} value={state.kycLabel} />
+          </Row>
+          <Row label="可用 HOLA Credit" description="可用于后续合伙人账本操作">
+            <span className="text-sm font-medium tabular-nums">{formatHolaCreditCents(state.ledger.availableCreditCents)}</span>
+          </Row>
+          <Row label="锁定 HOLA Credit" description="仍处于累计或释放周期内">
+            <span className="text-sm tabular-nums">{formatHolaCreditCents(state.ledger.lockedCreditCents)}</span>
+          </Row>
+          <Row label="可提现 HOLA Credit" description="可提交提现申请的余额">
+            <span className="text-sm font-medium tabular-nums">{formatHolaCreditCents(state.ledger.withdrawableCreditCents)}</span>
+          </Row>
+          <Row label="待出款 HOLA Credit" description="已提交但尚未完成审批或出款">
+            <span className="text-sm tabular-nums">{formatHolaCreditCents(state.ledger.pendingWithdrawalCreditCents)}</span>
+          </Row>
+          <Row label="冻结 HOLA Credit" description="风险复核或异常状态下冻结">
+            <span className="text-sm tabular-nums">{formatHolaCreditCents(state.ledger.frozenCreditCents)}</span>
+          </Row>
+        </div>
+      </Section>
+
+      <Section
+        title="最近批次"
+        description="展示最近创建的合伙人账本批次和释放窗口。"
+        className="rounded-[8px] border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]"
+      >
+        {state.lots.length === 0 ? (
+          <div className="border-y border-dashed border-[#DCDDDD] py-8 text-center">
+            <div className="text-sm font-medium text-foreground/80">暂无批次</div>
+            <div className="mt-1 text-xs text-muted-foreground">完成充值确认后，批次会显示在这里。</div>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-[760px] w-full text-left text-xs">
+              <thead className="border-b border-[#EFEFEF] text-[11px] text-muted-foreground">
+                <tr>
+                  <th className="pb-2 pr-4 font-medium">批次</th>
+                  <th className="pb-2 pr-4 font-medium">状态</th>
+                  <th className="pb-2 pr-4 font-medium">本金</th>
+                  <th className="pb-2 pr-4 font-medium">锁定增量</th>
+                  <th className="pb-2 pr-4 font-medium">已释放</th>
+                  <th className="pb-2 pr-4 font-medium">释放窗口</th>
+                  <th className="pb-2 font-medium">风险</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#EFEFEF]">
+                {state.lots.map((lot) => (
+                  <tr key={lot.key}>
+                    <td className="py-3 pr-4 font-medium text-foreground/80">{lot.externalId}</td>
+                    <td className="py-3 pr-4">{lot.statusLabel}</td>
+                    <td className="py-3 pr-4 tabular-nums">{formatHolaCreditCents(lot.principalCreditCents)}</td>
+                    <td className="py-3 pr-4 tabular-nums">{formatHolaCreditCents(lot.lockedBonusCreditCents)}</td>
+                    <td className="py-3 pr-4 tabular-nums">
+                      {formatHolaCreditCents(lot.releasedPrincipalCreditCents + lot.releasedBonusCreditCents)}
+                    </td>
+                    <td className="py-3 pr-4 tabular-nums">
+                      {lot.releaseStartsAtLabel} 至 {lot.releaseEndsAtLabel}
+                    </td>
+                    <td className="py-3">{lot.riskLabel}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Section>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Section
+          title="年费会员订单"
+          description="默认使用人工确认；订单创建后不会立即开通。"
+          className="rounded-[8px] border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]"
+        >
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0 text-xs leading-5 text-muted-foreground">
+              创建待处理会员订单，确认后才会更新会员状态。
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              onClick={onMembershipOrder}
+              disabled={pendingAction === 'membership'}
+            >
+              {pendingAction === 'membership' ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+              ) : (
+                <CreditCard className="h-3.5 w-3.5" aria-hidden />
+              )}
+              创建会员订单
+            </Button>
+          </div>
+          {membershipOrder && <OrderSummary order={membershipOrder} />}
+        </Section>
+
+        <Section
+          title="提现申请"
+          description="提交后进入审核，审批和出款都不是立即完成。"
+          className="rounded-[8px] border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]"
+        >
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="min-w-0 text-xs font-medium text-[#595757]">
+              提现金额
+              <Input
+                className="mt-1"
+                type="number"
+                inputMode="decimal"
+                placeholder="例如 5000"
+                value={withdrawalAmountInput}
+                onChange={(event) => onWithdrawalAmountInputChange(event.target.value)}
+              />
+            </label>
+            <label className="min-w-0 text-xs font-medium text-[#595757]">
+              银行账户指纹
+              <Input
+                className="mt-1"
+                placeholder="bank_fp_..."
+                value={bankFingerprint}
+                onChange={(event) => onBankFingerprintChange(event.target.value)}
+              />
+            </label>
+          </div>
+          <div className="mt-3 flex items-center justify-between gap-3 text-xs text-muted-foreground">
+            <span>金额单位为 HOLA Credit。</span>
+            <Button
+              type="button"
+              size="sm"
+              onClick={onRequestWithdrawal}
+              disabled={pendingAction === 'withdrawal'}
+            >
+              {pendingAction === 'withdrawal' ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+              ) : (
+                <ArrowUpRight className="h-3.5 w-3.5" aria-hidden />
+              )}
+              提交申请
+            </Button>
+          </div>
+          {withdrawal && <WithdrawalSummary withdrawal={withdrawal} />}
+        </Section>
+      </div>
+
+      <Section
+        title="充值预览与订单"
+        description="单笔 ¥10,000 至 ¥200,000，预览按当前金额作为 30 天滚动金额。"
+        className="rounded-[8px] border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]"
+      >
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+          <div className="min-w-0">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+              <label className="min-w-0 flex-1 text-xs font-medium text-[#595757]">
+                充值金额
+                <Input
+                  className="mt-1"
+                  type="number"
+                  inputMode="numeric"
+                  min={10000}
+                  max={200000}
+                  step={1}
+                  value={rechargeAmountInput}
+                  onChange={(event) => onRechargeAmountInputChange(event.target.value)}
+                  onBlur={() => onRechargeAmountInputChange(String(rechargeAmountCnyCents / 100))}
+                />
+              </label>
+              <div className="text-sm font-semibold tabular-nums text-foreground">
+                {formatPartnerCnyCents(rechargeAmountCnyCents)}
+              </div>
+            </div>
+            <input
+              className="mt-4 h-2 w-full accent-[#EA1F59]"
+              type="range"
+              min={10000_00}
+              max={200000_00}
+              step={100}
+              value={rechargeAmountCnyCents}
+              onChange={(event) => onRechargeSliderChange(Number(event.target.value))}
+              aria-label="充值金额"
+            />
+            <div className="mt-1 flex justify-between text-[11px] text-muted-foreground">
+              <span>¥10,000</span>
+              <span>¥200,000</span>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2 lg:justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+              onClick={onPreviewRecharge}
+              disabled={pendingAction === 'preview'}
+            >
+              {pendingAction === 'preview' && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />}
+              预览
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              onClick={onCreateRechargeOrder}
+              disabled={pendingAction === 'recharge'}
+            >
+              {pendingAction === 'recharge' ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+              ) : (
+                <Wallet className="h-3.5 w-3.5" aria-hidden />
+              )}
+              创建充值订单
+            </Button>
+          </div>
+        </div>
+        {rechargePreview && <RechargePreviewSummary preview={rechargePreview} />}
+        {rechargeOrder && <OrderSummary order={rechargeOrder} />}
+      </Section>
+    </div>
+  );
+}
+
+function StatusValue({ icon, value }: { icon: React.ReactNode; value: string }): JSX.Element {
+  return (
+    <span className="inline-flex max-w-full items-center gap-1.5 text-sm font-medium text-foreground/85">
+      <span className="text-[#EA1F59]">{icon}</span>
+      <span className="min-w-0 truncate">{value}</span>
+    </span>
+  );
+}
+
+function StatusPanel({
+  tone,
+  title,
+  body,
+  action,
+  className,
+}: {
+  tone: 'error' | 'info';
+  title: string;
+  body: string;
+  action?: React.ReactNode;
+  className?: string;
+}): JSX.Element {
+  return (
+    <div
+      role={tone === 'error' ? 'alert' : 'status'}
+      className={`mb-6 rounded-[8px] border border-[#DCDDDD] bg-white px-4 py-3 shadow-[0_1px_2px_rgba(15,23,42,0.03)] ${className ?? ''}`}
+    >
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-start gap-2">
+          <AlertCircle
+            className={`mt-0.5 h-4 w-4 shrink-0 ${tone === 'error' ? 'text-[#EA1F59]' : 'text-[#595757]'}`}
+            aria-hidden
+          />
+          <div className="min-w-0">
+            <div className="text-sm font-medium text-foreground/85">{title}</div>
+            <div className="mt-0.5 text-xs leading-5 text-muted-foreground">{body}</div>
+          </div>
+        </div>
+        {action && <div className="shrink-0">{action}</div>}
+      </div>
+    </div>
+  );
+}
+
+function OrderSummary({ order }: { order: PartnerOrderSummary }): JSX.Element {
+  return (
+    <dl className="mt-4 grid gap-3 border-t border-[#EFEFEF] pt-4 text-xs sm:grid-cols-2">
+      <SummaryItem label="订单编号" value={order.orderExternalId} />
+      <SummaryItem label="类型" value={order.orderKind === 'membership' ? '年费会员' : '充值'} />
+      <SummaryItem label="渠道" value={providerLabel(order.provider)} />
+      <SummaryItem label="状态" value={orderStatusLabel(order.status)} />
+      <SummaryItem label="金额" value={formatPartnerCnyCents(order.amountCnyCents)} />
+    </dl>
+  );
+}
+
+function RechargePreviewSummary({ preview }: { preview: PartnerRechargePreview }): JSX.Element {
+  const multiplier = `${(preview.tier.multiplierBps / 10_000).toFixed(2)}x`;
+  return (
+    <dl className="mt-4 grid gap-3 border-t border-[#EFEFEF] pt-4 text-xs sm:grid-cols-2 lg:grid-cols-4">
+      <SummaryItem label="当前金额" value={formatPartnerCnyCents(preview.amountCnyCents)} />
+      <SummaryItem label="30 天滚动金额" value={formatPartnerCnyCents(preview.rollingThirtyDayCnyCents)} />
+      <SummaryItem label="阶梯倍率" value={multiplier} />
+      <SummaryItem label="API Units" value={formatApiUnits(preview.apiUnits)} />
+    </dl>
+  );
+}
+
+function WithdrawalSummary({ withdrawal }: { withdrawal: PartnerWithdrawalSummary }): JSX.Element {
+  return (
+    <dl className="mt-4 grid gap-3 border-t border-[#EFEFEF] pt-4 text-xs sm:grid-cols-2">
+      <SummaryItem label="申请编号" value={withdrawal.withdrawalExternalId} />
+      <SummaryItem label="金额" value={formatHolaCreditCents(withdrawal.amountCreditCents)} />
+      <SummaryItem label="状态" value={withdrawalStatusLabel(withdrawal.status)} />
+      <SummaryItem label="预计复核时间" value={formatDateTime(withdrawal.reviewDueAt)} />
+      <SummaryItem label="风险分" value={String(withdrawal.riskScore)} />
+    </dl>
+  );
+}
+
+function SummaryItem({ label, value }: { label: string; value: string }): JSX.Element {
+  return (
+    <div className="min-w-0">
+      <dt className="text-[11px] text-muted-foreground">{label}</dt>
+      <dd className="mt-0.5 break-words font-medium text-foreground/85">{value}</dd>
+    </div>
+  );
+}
+
+function idempotencyKey(prefix: string): string {
+  const suffix =
+    typeof globalThis.crypto?.randomUUID === 'function'
+      ? globalThis.crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return `${prefix}:${suffix}`;
+}
+
+function amountInputToCreditCents(value: string): number {
+  const parsed = Number(value.trim());
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+  return Math.floor(parsed * 100);
+}
+
+function rawErrorMessage(err: unknown, fallback: string): string {
+  if (err instanceof Error && err.message.trim()) return err.message;
+  if (typeof err === 'string' && err.trim()) return err.trim();
+  return fallback;
+}
+
+function providerLabel(provider: string): string {
+  if (provider === 'manual') return '人工确认';
+  if (provider === 'wechat') return '微信支付';
+  if (provider === 'alipay') return '支付宝';
+  return provider;
+}
+
+function orderStatusLabel(status: string): string {
+  if (status === 'pending') return '待确认';
+  if (status === 'completed') return '已完成';
+  if (status === 'review_required') return '待复核';
+  if (status === 'cancelled') return '已取消';
+  return status;
+}
+
+function withdrawalStatusLabel(status: string): string {
+  if (status === 'requested') return '已提交';
+  if (status === 'reviewing') return '审核中';
+  if (status === 'approved') return '已批准';
+  if (status === 'paid') return '已出款';
+  if (status === 'rejected') return '未通过';
+  if (status === 'returned') return '已退回';
+  return status;
+}
+
+function formatDateTime(value: Date | string): string {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toISOString().slice(0, 16).replace('T', ' ');
+}
