@@ -6,3 +6,5 @@ export * from './kyc-service.js';
 export * from './recharge-service.js';
 export * from './allocation-service.js';
 export * from './release-service.js';
+export * from './risk-service.js';
+export * from './withdrawal-service.js';
