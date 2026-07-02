@@ -1,3 +1,4 @@
+import { inspect } from 'node:util';
 import type { PartnerKycStatus } from '@holaday/shared-types';
 import { describe, expect, it } from 'vitest';
 import type { DB } from '../db/client.js';
@@ -17,6 +18,8 @@ type FakeKycRow = {
 };
 
 class FakeKycDb {
+  readonly wherePredicateTexts: string[] = [];
+
   constructor(private readonly rows: FakeKycRow[] = []) {}
 
   asDB(): DB {
@@ -26,7 +29,11 @@ class FakeKycDb {
   select(_selection?: unknown) {
     return {
       from: (_table: unknown) => ({
-        where: async (_predicate: unknown) => this.rows,
+        where: async (predicate: unknown) => {
+          const predicateText = inspect(predicate, { depth: 6, getters: true });
+          this.wherePredicateTexts.push(predicateText);
+          return this.rows.filter((row) => predicateText.includes(String(row.userId)));
+        },
       }),
     };
   }
@@ -66,14 +73,14 @@ describe('KycService', () => {
   });
 
   it('returns the normalized status for the user profile', async () => {
-    const service = new KycService(
-      new FakeKycDb([
-        { userId: 999, status: 'passed' },
-        { userId: 123, status: 'pending' },
-      ]).asDB(),
-    );
+    const fakeDb = new FakeKycDb([
+      { userId: 999, status: 'passed' },
+      { userId: 123, status: 'pending' },
+    ]);
+    const service = new KycService(fakeDb.asDB());
 
     await expect(service.getStatus(123)).resolves.toBe('pending');
+    expect(fakeDb.wherePredicateTexts[0]).toContain('user_id');
   });
 
   it('fails closed for unknown database statuses', async () => {

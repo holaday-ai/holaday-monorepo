@@ -1,5 +1,5 @@
 import { newExternalId } from '@holaday/shared-types';
-import { eq } from 'drizzle-orm';
+import { and, desc, eq, gt, lte } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
 import { partnerMemberships, type PartnerMembership } from '../db/schema/partner.js';
 
@@ -32,6 +32,13 @@ export function computeMembershipExpiry(startsAt: Date): Date {
   return new Date(normalizedStartsAt.getTime() + MEMBERSHIP_DURATION_MS);
 }
 
+export class PartnerMembershipSourceConflictError extends Error {
+  constructor(sourcePaymentExternalId: string) {
+    super(`partner membership source payment is already linked to another user: ${sourcePaymentExternalId}`);
+    this.name = 'PartnerMembershipSourceConflictError';
+  }
+}
+
 export class PartnerMembershipService {
   constructor(private readonly db: DB) {}
 
@@ -42,7 +49,16 @@ export class PartnerMembershipService {
     const rows = await this.db
       .select()
       .from(partnerMemberships)
-      .where(eq(partnerMemberships.userId, normalizedUserId));
+      .where(
+        and(
+          eq(partnerMemberships.userId, normalizedUserId),
+          eq(partnerMemberships.status, 'active'),
+          lte(partnerMemberships.startsAt, normalizedNow),
+          gt(partnerMemberships.expiresAt, normalizedNow),
+        ),
+      )
+      .orderBy(desc(partnerMemberships.expiresAt))
+      .limit(1);
 
     return (
       rows
@@ -50,6 +66,7 @@ export class PartnerMembershipService {
           (row) =>
             row.userId === normalizedUserId &&
             row.status === 'active' &&
+            row.startsAt.getTime() <= normalizedNow.getTime() &&
             row.expiresAt.getTime() > normalizedNow.getTime(),
         )
         .sort((left, right) => right.expiresAt.getTime() - left.expiresAt.getTime())[0] ?? null
@@ -64,11 +81,30 @@ export class PartnerMembershipService {
     const userId = normalizePositiveSafeInteger(input.userId, 'userId');
     const startsAt = normalizeDate(input.now ?? new Date(), 'now');
     const expiresAt = computeMembershipExpiry(startsAt);
-    const externalId = newExternalId('payment');
     const sourcePaymentExternalId = normalizeOptionalExternalId(
       input.sourcePaymentExternalId,
       'sourcePaymentExternalId',
     );
+
+    if (sourcePaymentExternalId !== null) {
+      const existingRows = await this.db
+        .select()
+        .from(partnerMemberships)
+        .where(eq(partnerMemberships.sourcePaymentExternalId, sourcePaymentExternalId))
+        .limit(1);
+      const existing = existingRows.find(
+        (membership) => membership.sourcePaymentExternalId === sourcePaymentExternalId,
+      );
+
+      if (existing) {
+        if (existing.userId !== userId) {
+          throw new PartnerMembershipSourceConflictError(sourcePaymentExternalId);
+        }
+        return existing;
+      }
+    }
+
+    const externalId = newExternalId('payment');
 
     await this.db.insert(partnerMemberships).values({
       externalId,
@@ -83,7 +119,8 @@ export class PartnerMembershipService {
     const rows = await this.db
       .select()
       .from(partnerMemberships)
-      .where(eq(partnerMemberships.externalId, externalId));
+      .where(eq(partnerMemberships.externalId, externalId))
+      .limit(1);
     const row = rows.find((membership) => membership.externalId === externalId);
 
     if (!row) {
