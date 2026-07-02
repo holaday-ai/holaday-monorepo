@@ -361,6 +361,17 @@ export class TaskRepository {
     return { persisted };
   }
 
+  async patchCompletedTaskResult(
+    taskExternalId: string,
+    resultPayload: Record<string, unknown>,
+  ): Promise<{ persisted: boolean }> {
+    const result = await this.db
+      .update(tasks)
+      .set({ result: resultPayload })
+      .where(and(eq(tasks.externalId, taskExternalId), eq(tasks.status, 'completed')));
+    return { persisted: extractMysqlAffectedRows(result) > 0 };
+  }
+
   async persistAwaitingUser(params: {
     taskExternalId: string;
     question: string;

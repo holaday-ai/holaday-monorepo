@@ -6840,6 +6840,7 @@ export const tasksRouter = router({
         // stays completed (with combinedIntent in result) — slightly
         // worse UX than ideal but never blocks the user, and matches
         // the prior behaviour for partial failure.
+        const repo = new TaskRepository(ctx.db);
         try {
           const parentResult = {
             ...(prevResult ?? {}),
@@ -6848,7 +6849,6 @@ export const tasksRouter = router({
             combinedIntent,
             summary: handoffNotice,
           };
-          const repo = new TaskRepository(ctx.db);
           const persisted = await repo.markAwaitingReplyCompleted(input.taskId, parentResult);
           if (!persisted.persisted) {
             ctx.logger.warn(
@@ -6906,19 +6906,26 @@ export const tasksRouter = router({
         // below already carries the field for live SPA listeners.
         try {
           if (handoffTaskId) {
-            await ctx.db
-              .update(tasksTable)
-              .set({
-                result: {
-                  ...(prevResult ?? {}),
-                  executionMode: 'generate',
-                  handoffSuggestion: 'browser',
-                  combinedIntent,
-                  summary: handoffNotice,
-                  handoffTaskId,
-                },
-              })
-              .where(eq(tasksTable.externalId, input.taskId));
+            const patched = await repo.patchCompletedTaskResult(input.taskId, {
+              ...(prevResult ?? {}),
+              executionMode: 'generate',
+              handoffSuggestion: 'browser',
+              combinedIntent,
+              summary: handoffNotice,
+              handoffTaskId,
+            });
+            if (!patched.persisted) {
+              ctx.logger.warn(
+                { taskId: input.taskId, handoffTaskId },
+                'reply: handoff result patch guard refused; skipping stale terminal broadcast',
+              );
+              return {
+                ok: false,
+                state: 'persistFailed' as const,
+                handoff: 'browser' as const,
+                handoffTaskId,
+              };
+            }
           }
           broadcastToUser(ctx.userId, {
             type: 'server.task.terminal',

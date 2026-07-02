@@ -743,6 +743,37 @@ describe('TaskRepository task terminal state persistence', () => {
     expect(captured.eventPayloads).toHaveLength(0);
   });
 
+  it('patchCompletedTaskResult only patches rows that are still completed', async () => {
+    const { db, captured } = fakeDbForStateTransitions(1);
+    const repo = new TaskRepository(db);
+
+    const result = await repo.patchCompletedTaskResult('tsk_state_machine', {
+      summary: 'handoff ready',
+      handoffTaskId: 'tsk_handoff',
+    });
+
+    expect(result.persisted).toBe(true);
+    expect(captured.updatePayloads[0]).toEqual({
+      result: {
+        summary: 'handoff ready',
+        handoffTaskId: 'tsk_handoff',
+      },
+    });
+    const params = collectDrizzleParamValues(captured.whereClauses.at(0));
+    expect(params).toEqual(expect.arrayContaining(['tsk_state_machine', 'completed']));
+  });
+
+  it('patchCompletedTaskResult reports stale rows without pretending to patch', async () => {
+    const { db } = fakeDbForStateTransitions(0);
+    const repo = new TaskRepository(db);
+
+    const result = await repo.patchCompletedTaskResult('tsk_state_machine', {
+      summary: 'late handoff',
+    });
+
+    expect(result.persisted).toBe(false);
+  });
+
   it('persistAwaitingUser only parks active runner rows', async () => {
     const { db, captured } = fakeDbForStateTransitions(1);
     const repo = new TaskRepository(db);
