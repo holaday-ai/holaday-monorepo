@@ -27,6 +27,8 @@
     "db:migrate:numbered": "tsx scripts/apply-numbered-migrations.ts",
     "db:push": "drizzle-kit push",
     "db:verify": "tsx scripts/verify-db-schema.ts",
+    "partner:daily": "tsx scripts/partner-run-daily.ts",
+    "partner:monthly": "tsx scripts/partner-run-monthly.ts",
     "db:studio": "drizzle-kit studio",
     "clean": "rimraf dist .turbo"
   },
