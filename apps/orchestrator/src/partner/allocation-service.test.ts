@@ -200,13 +200,14 @@ class FakeAllocationDb {
       const predicateNumbers = extractPredicateNumbers(predicate);
       const hasLotId =
         predicateNumbers.length > 0 && (predicateText.includes('lot_id') || predicateText.includes('lotId'));
-      const matchingDayRows = this.allocationRows.filter(
-        (row) => predicateText.includes(row.allocationDate) || predicateStrings.includes(row.allocationDate),
-      );
+      const hasAllocationDate = predicateStrings.some((value) => /^\d{4}-\d{2}-\d{2}$/.test(value));
+      const matchingDateRows = hasAllocationDate
+        ? this.allocationRows.filter((row) => predicateStrings.includes(row.allocationDate))
+        : this.allocationRows;
       if (hasLotId) {
-        return matchingDayRows.filter((row) => predicateNumbers.includes(row.lotId));
+        return matchingDateRows.filter((row) => predicateNumbers.includes(row.lotId));
       }
-      return matchingDayRows;
+      return matchingDateRows;
     }
 
     return [];
@@ -432,10 +433,13 @@ describe('AllocationService allocateDailyLockedBonus', () => {
     expect(todayAllocations).toHaveLength(2);
     expect(todayAllocations.map((row) => row.lockedBonusCreditCents)).toEqual([1_666, 10]);
     expect(fakeDb.lotRows.map((row) => row.lockedBonusCreditCents)).toEqual([1_666, 200_000]);
-    expect(fakeDb.lotReconciliations).toEqual([
-      { lotId: 1, lockedBonusCreditCents: 1_666 },
-      { lotId: 2, lockedBonusCreditCents: 200_000 },
-    ]);
+    expect(fakeDb.lotReconciliations).toHaveLength(2);
+    expect(fakeDb.lotReconciliations).toEqual(
+      expect.arrayContaining([
+        { lotId: 1, lockedBonusCreditCents: 1_666 },
+        { lotId: 2, lockedBonusCreditCents: 200_000 },
+      ]),
+    );
   });
 
   it('does not double-increment a lot when rerun for the same lot and day', async () => {
@@ -502,6 +506,63 @@ describe('AllocationService allocateDailyLockedBonus', () => {
     expect(fakeDb.allocationRows).toHaveLength(1);
     expect(fakeDb.lotRows[0]!.lockedBonusCreditCents).toBe(1_000);
     expect(fakeDb.lotReconciliations).toEqual([{ lotId: 1, lockedBonusCreditCents: 1_000 }]);
+  });
+
+  it('caps a new-day allocation using prior allocation rows when the lot row is stale low', async () => {
+    const fakeDb = new FakeAllocationDb({
+      lots: [fakeLot({ id: 1, lockedBonusCreditCents: 0, bonusCapCreditCents: 200_000 })],
+      allocations: [
+        fakeAllocation({
+          lotId: 1,
+          allocationDate: '2026-07-01',
+          lockedBonusCreditCents: 199_990,
+          idempotencyKey: 'daily:2026-07-01:1',
+        }),
+      ],
+    });
+    const service = new AllocationService(fakeDb.asDB());
+
+    const summary = await service.allocateDailyLockedBonus({ day: '2026-07-02', budgetCreditCents: 20_000 });
+    const todayAllocations = fakeDb.allocationRows.filter((row) => row.allocationDate === '2026-07-02');
+
+    expect(summary).toEqual({
+      day: '2026-07-02',
+      eligibleLotCount: 1,
+      allocationCount: 1,
+      totalLockedBonusCreditCents: 10,
+      remainingBudgetCreditCents: 19_990,
+    });
+    expect(todayAllocations.map((row) => [row.lotId, row.lockedBonusCreditCents])).toEqual([[1, 10]]);
+    expect(fakeDb.lotRows[0]!.lockedBonusCreditCents).toBe(200_000);
+    expect(fakeDb.lotReconciliations).toEqual([{ lotId: 1, lockedBonusCreditCents: 200_000 }]);
+  });
+
+  it('skips a new-day allocation when prior allocation rows already reached the bonus cap', async () => {
+    const fakeDb = new FakeAllocationDb({
+      lots: [fakeLot({ id: 1, lockedBonusCreditCents: 0, bonusCapCreditCents: 200_000 })],
+      allocations: [
+        fakeAllocation({
+          lotId: 1,
+          allocationDate: '2026-07-01',
+          lockedBonusCreditCents: 200_000,
+          idempotencyKey: 'daily:2026-07-01:1',
+        }),
+      ],
+    });
+    const service = new AllocationService(fakeDb.asDB());
+
+    const summary = await service.allocateDailyLockedBonus({ day: '2026-07-02', budgetCreditCents: 20_000 });
+
+    expect(summary).toEqual({
+      day: '2026-07-02',
+      eligibleLotCount: 1,
+      allocationCount: 0,
+      totalLockedBonusCreditCents: 0,
+      remainingBudgetCreditCents: 20_000,
+    });
+    expect(fakeDb.allocationRows).toHaveLength(1);
+    expect(fakeDb.lotRows[0]!.lockedBonusCreditCents).toBe(200_000);
+    expect(fakeDb.lotReconciliations).toEqual([{ lotId: 1, lockedBonusCreditCents: 200_000 }]);
   });
 
   it('counts existing same-day allocations against the budget before allocating missing lots', async () => {

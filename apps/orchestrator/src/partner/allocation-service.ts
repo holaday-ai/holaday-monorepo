@@ -168,9 +168,10 @@ function assertCostPoolPayloadMatches(
   }
 }
 
-function remainingBonusCreditCents(lot: PartnerLot): number {
-  if (lot.lockedBonusCreditCents >= lot.bonusCapCreditCents) return 0;
-  return lot.bonusCapCreditCents - lot.lockedBonusCreditCents;
+function remainingBonusCreditCents(lot: PartnerLot, allocatedBonusCreditCents: number): number {
+  assertNonNegativeSafeInteger(allocatedBonusCreditCents, 'allocatedBonusCreditCents');
+  if (allocatedBonusCreditCents >= lot.bonusCapCreditCents) return 0;
+  return lot.bonusCapCreditCents - allocatedBonusCreditCents;
 }
 
 function weightLot(lot: PartnerLot): number {
@@ -218,6 +219,7 @@ interface LotAllocationState {
   weight: number;
   idempotencyKey: string;
   existingAllocation: PartnerDailyAllocation | undefined;
+  allocatedBonusCreditCents: number;
 }
 
 export class AllocationService {
@@ -317,9 +319,20 @@ export class AllocationService {
 
     for (const { lot, weight } of weightedLots) {
       const idempotencyKey = `daily:${day}:${lot.id}`;
-      const existingAllocation = existingAllocationByLotId.get(lot.id);
+      const allocationRowsForLot = await this.db
+        .select()
+        .from(partnerDailyAllocations)
+        .where(eq(partnerDailyAllocations.lotId, lot.id));
+      const allocatedBonusCreditCents = sumLockedBonusCreditCents(allocationRowsForLot);
+      const existingAllocation =
+        allocationRowsForLot.find((allocation) => allocation.allocationDate === day) ??
+        existingAllocationByLotId.get(lot.id);
 
-      lotAllocationStates.push({ lot, weight, idempotencyKey, existingAllocation });
+      if (allocatedBonusCreditCents > 0) {
+        lotIdsToReconcile.add(lot.id);
+      }
+
+      lotAllocationStates.push({ lot, weight, idempotencyKey, existingAllocation, allocatedBonusCreditCents });
     }
 
     const existingLockedBonusCreditCents = sumLockedBonusCreditCents(existingAllocationsForDay);
@@ -331,7 +344,7 @@ export class AllocationService {
     let totalLockedBonusCreditCents = existingLockedBonusCreditCents;
     let allocationCount = existingAllocationsForDay.length;
 
-    for (const { lot, weight, idempotencyKey, existingAllocation } of lotAllocationStates) {
+    for (const { lot, weight, idempotencyKey, existingAllocation, allocatedBonusCreditCents } of lotAllocationStates) {
       let lockedBonusCreditCents = existingAllocation?.lockedBonusCreditCents ?? 0;
 
       if (!existingAllocation) {
@@ -342,7 +355,7 @@ export class AllocationService {
         });
         const cappedByRemaining = capDailyBonus({
           targetCreditCents,
-          remainingBonusCreditCents: remainingBonusCreditCents(lot),
+          remainingBonusCreditCents: remainingBonusCreditCents(lot, allocatedBonusCreditCents),
         });
         lockedBonusCreditCents = capDailyBonus({
           targetCreditCents: cappedByRemaining,
