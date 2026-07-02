@@ -1,7 +1,8 @@
 import { newExternalId } from '@holaday/shared-types';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
 import { partnerWithdrawalRequests, type PartnerWithdrawalRequest } from '../db/schema/partner.js';
+import { users } from '../db/schema/users.js';
 import { CreditLedgerService } from './credit-ledger-service.js';
 import { KycService, canWithdrawWithKycStatus } from './kyc-service.js';
 
@@ -24,6 +25,14 @@ export class WithdrawalGateError extends Error {
     super('Withdrawal requires passed KYC status');
     this.name = 'WithdrawalGateError';
     Object.setPrototypeOf(this, WithdrawalGateError.prototype);
+  }
+}
+
+export class WithdrawalRequestIdempotencyConflictError extends Error {
+  constructor() {
+    super('Partner withdrawal request idempotency key was reused with a different payload');
+    this.name = 'WithdrawalRequestIdempotencyConflictError';
+    Object.setPrototypeOf(this, WithdrawalRequestIdempotencyConflictError.prototype);
   }
 }
 
@@ -118,10 +127,16 @@ type WithdrawalRequestInput = {
   now?: Date;
 };
 
+type WithdrawalStatus = 'requested' | 'reviewing';
 type WithdrawalLedger = Pick<CreditLedgerService, 'postEntry' | 'summarizeUser'>;
 type WithdrawalKyc = Pick<KycService, 'getStatus'>;
 
-function normalizeRequestInput(input: WithdrawalRequestInput): Required<WithdrawalRequestInput> {
+type NormalizedWithdrawalRequest = Required<WithdrawalRequestInput> & {
+  status: WithdrawalStatus;
+};
+
+function normalizeRequestInput(input: WithdrawalRequestInput): NormalizedWithdrawalRequest {
+  const highRisk = assertBoolean(input.highRisk, 'highRisk');
   return {
     userId: assertPositiveSafeInteger(input.userId, 'userId'),
     amountCreditCents: assertNonNegativeSafeInteger(input.amountCreditCents, 'amountCreditCents'),
@@ -130,33 +145,124 @@ function normalizeRequestInput(input: WithdrawalRequestInput): Required<Withdraw
       'bankAccountFingerprint',
       128,
     ),
-    highRisk: assertBoolean(input.highRisk, 'highRisk'),
+    highRisk,
     riskScore: assertRiskScore(input.riskScore),
-    idempotencyKey: assertBoundedNonEmptyString(input.idempotencyKey, 'idempotencyKey', 160),
+    idempotencyKey: assertBoundedNonEmptyString(input.idempotencyKey, 'idempotencyKey', 128),
     now: assertValidDate(input.now ?? new Date(), 'now'),
+    status: highRisk ? 'reviewing' : 'requested',
   };
 }
 
+function assertIdempotentRequestPayloadMatches(
+  row: PartnerWithdrawalRequest,
+  expected: NormalizedWithdrawalRequest,
+): void {
+  if (
+    row.userId !== expected.userId ||
+    row.amountCreditCents !== expected.amountCreditCents ||
+    row.bankAccountFingerprint !== expected.bankAccountFingerprint ||
+    row.status !== expected.status ||
+    row.riskScore !== expected.riskScore ||
+    row.idempotencyKey !== expected.idempotencyKey
+  ) {
+    throw new WithdrawalRequestIdempotencyConflictError();
+  }
+}
+
 export class WithdrawalService {
-  private readonly ledger: WithdrawalLedger;
-  private readonly kyc: WithdrawalKyc;
+  private readonly ledger?: WithdrawalLedger;
+  private readonly kyc?: WithdrawalKyc;
 
   constructor(
     private readonly db: DB,
     deps: { ledger?: WithdrawalLedger; kyc?: WithdrawalKyc } = {},
   ) {
-    this.ledger = deps.ledger ?? new CreditLedgerService(db);
-    this.kyc = deps.kyc ?? new KycService(db);
+    this.ledger = deps.ledger;
+    this.kyc = deps.kyc;
   }
 
-  async requestWithdrawal(input: WithdrawalRequestInput): Promise<PartnerWithdrawalRequest> {
-    const request = normalizeRequestInput(input);
-    const kycStatus = await this.kyc.getStatus(request.userId);
+  private ledgerFor(db: DB): WithdrawalLedger {
+    return this.ledger ?? new CreditLedgerService(db);
+  }
+
+  private kycFor(db: DB): WithdrawalKyc {
+    return this.kyc ?? new KycService(db);
+  }
+
+  private async lockUserForWithdrawal(db: DB, userId: number): Promise<void> {
+    const [row] = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.id, userId))
+      .for('update')
+      .limit(1);
+    if (!row) {
+      throw new Error('user row not found for withdrawal lock');
+    }
+  }
+
+  private async readByIdempotencyKey(
+    db: DB,
+    idempotencyKey: string,
+  ): Promise<PartnerWithdrawalRequest | undefined> {
+    const [row] = await db
+      .select()
+      .from(partnerWithdrawalRequests)
+      .where(eq(partnerWithdrawalRequests.idempotencyKey, idempotencyKey))
+      .limit(1);
+    return row;
+  }
+
+  private async postHoldEntries(
+    ledger: WithdrawalLedger,
+    row: PartnerWithdrawalRequest,
+  ): Promise<void> {
+    await ledger.postEntry({
+      userId: row.userId,
+      entryType: 'withdrawal_request_hold',
+      direction: 'debit',
+      bucket: 'available',
+      amountCreditCents: row.amountCreditCents,
+      idempotencyKey: `withdrawal:hold:${row.idempotencyKey}`,
+      metadata: {
+        withdrawalRequestId: row.id,
+        withdrawalRequestExternalId: row.externalId,
+      },
+    });
+    await ledger.postEntry({
+      userId: row.userId,
+      entryType: 'withdrawal_request_hold',
+      direction: 'credit',
+      bucket: 'pending_withdrawal',
+      amountCreditCents: row.amountCreditCents,
+      idempotencyKey: `withdrawal:pending:${row.idempotencyKey}`,
+      metadata: {
+        withdrawalRequestId: row.id,
+        withdrawalRequestExternalId: row.externalId,
+      },
+    });
+  }
+
+  private async requestWithdrawalInTransaction(
+    db: DB,
+    request: NormalizedWithdrawalRequest,
+  ): Promise<PartnerWithdrawalRequest> {
+    await this.lockUserForWithdrawal(db, request.userId);
+
+    const ledger = this.ledgerFor(db);
+    const existing = await this.readByIdempotencyKey(db, request.idempotencyKey);
+    if (existing) {
+      assertIdempotentRequestPayloadMatches(existing, request);
+      await this.postHoldEntries(ledger, existing);
+      return existing;
+    }
+
+    const kycStatus = await this.kycFor(db).getStatus(request.userId);
     if (!canWithdrawWithKycStatus(kycStatus)) {
       throw new WithdrawalGateError('kyc_required');
     }
 
-    const summary = await this.ledger.summarizeUser(request.userId);
+    const summary = await ledger.summarizeUser(request.userId);
     const validation = validateWithdrawalRequest({
       amountCreditCents: request.amountCreditCents,
       availableCreditCents: summary.availableCreditCents,
@@ -166,51 +272,33 @@ export class WithdrawalService {
     }
 
     const externalId = newExternalId('payment');
-    await this.db.insert(partnerWithdrawalRequests).values({
-      externalId,
-      userId: request.userId,
-      amountCreditCents: request.amountCreditCents,
-      status: request.highRisk ? 'reviewing' : 'requested',
-      reviewDueAt: computeWithdrawalReviewDueAt({ now: request.now, highRisk: request.highRisk }),
-      bankAccountFingerprint: request.bankAccountFingerprint,
-      riskScore: request.riskScore,
-      metadata: null,
-    });
+    await db
+      .insert(partnerWithdrawalRequests)
+      .values({
+        externalId,
+        userId: request.userId,
+        amountCreditCents: request.amountCreditCents,
+        status: request.status,
+        reviewDueAt: computeWithdrawalReviewDueAt({ now: request.now, highRisk: request.highRisk }),
+        bankAccountFingerprint: request.bankAccountFingerprint,
+        riskScore: request.riskScore,
+        idempotencyKey: request.idempotencyKey,
+        metadata: null,
+      })
+      .onDuplicateKeyUpdate({ set: { idempotencyKey: sql`idempotency_key` } });
 
-    const [row] = await this.db
-      .select()
-      .from(partnerWithdrawalRequests)
-      .where(eq(partnerWithdrawalRequests.externalId, externalId))
-      .limit(1);
+    const row = await this.readByIdempotencyKey(db, request.idempotencyKey);
     if (!row) {
       throw new Error('partner withdrawal request vanished after insert');
     }
-
-    await this.ledger.postEntry({
-      userId: request.userId,
-      entryType: 'withdrawal_request_hold',
-      direction: 'debit',
-      bucket: 'available',
-      amountCreditCents: request.amountCreditCents,
-      idempotencyKey: `withdrawal:hold:${request.idempotencyKey}`,
-      metadata: {
-        withdrawalRequestId: row.id,
-        withdrawalRequestExternalId: row.externalId,
-      },
-    });
-    await this.ledger.postEntry({
-      userId: request.userId,
-      entryType: 'withdrawal_request_hold',
-      direction: 'credit',
-      bucket: 'pending_withdrawal',
-      amountCreditCents: request.amountCreditCents,
-      idempotencyKey: `withdrawal:pending:${request.idempotencyKey}`,
-      metadata: {
-        withdrawalRequestId: row.id,
-        withdrawalRequestExternalId: row.externalId,
-      },
-    });
+    assertIdempotentRequestPayloadMatches(row, request);
+    await this.postHoldEntries(ledger, row);
 
     return row;
+  }
+
+  async requestWithdrawal(input: WithdrawalRequestInput): Promise<PartnerWithdrawalRequest> {
+    const request = normalizeRequestInput(input);
+    return this.db.transaction((tx) => this.requestWithdrawalInTransaction(tx as unknown as DB, request));
   }
 }

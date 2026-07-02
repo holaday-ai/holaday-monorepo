@@ -13,6 +13,13 @@ function assertNonNegativeSafeInteger(value: number, fieldName: string): number 
   return value;
 }
 
+function assertBoolean(value: boolean, fieldName: string): boolean {
+  if (typeof value !== 'boolean') {
+    throw new RangeError(`${fieldName} must be a boolean`);
+  }
+  return value;
+}
+
 export function evaluatePartnerRisk(input: {
   kycPassed: boolean;
   sameNameBank: boolean;
@@ -20,17 +27,21 @@ export function evaluatePartnerRisk(input: {
   referralConcentration: boolean;
   accountFrozen: boolean;
 }): RiskDecision {
+  const kycPassed = assertBoolean(input.kycPassed, 'kycPassed');
+  const sameNameBank = assertBoolean(input.sameNameBank, 'sameNameBank');
   const amountCreditCents = assertNonNegativeSafeInteger(input.amountCreditCents, 'amountCreditCents');
+  const referralConcentration = assertBoolean(input.referralConcentration, 'referralConcentration');
+  const accountFrozen = assertBoolean(input.accountFrozen, 'accountFrozen');
 
-  if (input.accountFrozen) {
+  if (accountFrozen) {
     return { status: 'frozen', score: 100, reasons: ['account_frozen'] };
   }
 
   const reasons: string[] = [];
-  if (!input.kycPassed) reasons.push('missing_kyc');
-  if (!input.sameNameBank) reasons.push('bank_name_mismatch');
+  if (!kycPassed) reasons.push('missing_kyc');
+  if (!sameNameBank) reasons.push('bank_name_mismatch');
   if (amountCreditCents >= LARGE_WITHDRAWAL_CREDIT_CENTS) reasons.push('large_amount');
-  if (input.referralConcentration) reasons.push('referral_concentration');
+  if (referralConcentration) reasons.push('referral_concentration');
 
   if (reasons.length === 0) {
     return { status: 'normal', score: 0, reasons };

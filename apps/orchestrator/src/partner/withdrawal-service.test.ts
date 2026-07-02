@@ -2,6 +2,7 @@ import { inspect } from 'node:util';
 import type { PartnerKycStatus } from '@holaday/shared-types';
 import { describe, expect, it } from 'vitest';
 import type { DB } from '../db/client.js';
+import { users } from '../db/schema/users.js';
 import { partnerWithdrawalRequests, type PartnerWithdrawalRequest } from '../db/schema/partner.js';
 import { LedgerIdempotencyConflictError, type CreditLedgerService } from './credit-ledger-service.js';
 import type { KycService } from './kyc-service.js';
@@ -9,6 +10,7 @@ import { evaluatePartnerRisk } from './risk-service.js';
 import {
   WITHDRAWAL_MIN_CREDIT_CENTS,
   WithdrawalGateError,
+  WithdrawalRequestIdempotencyConflictError,
   WithdrawalService,
   WithdrawalValidationError,
   computeWithdrawalReviewDueAt,
@@ -23,6 +25,7 @@ type FakeWithdrawalInsert = {
   reviewDueAt: Date;
   bankAccountFingerprint: string;
   riskScore: number;
+  idempotencyKey: string;
   metadata?: unknown;
 };
 
@@ -38,6 +41,8 @@ class FakeWithdrawalDb {
   readonly rows: PartnerWithdrawalRequest[];
   readonly insertAttempts: FakeWithdrawalInsert[] = [];
   readonly wherePredicateTexts: string[] = [];
+  readonly lockedUserIds: number[] = [];
+  transactionCalls = 0;
   rowsCreated = 0;
   private nextId: number;
 
@@ -50,24 +55,47 @@ class FakeWithdrawalDb {
     return this as unknown as DB;
   }
 
+  async transaction<T>(callback: (tx: this) => Promise<T>): Promise<T> {
+    this.transactionCalls += 1;
+    const rowSnapshot = [...this.rows];
+    const insertSnapshot = [...this.insertAttempts];
+    const rowsCreatedSnapshot = this.rowsCreated;
+    const nextIdSnapshot = this.nextId;
+    try {
+      return await callback(this);
+    } catch (error) {
+      this.rows.splice(0, this.rows.length, ...rowSnapshot);
+      this.insertAttempts.splice(0, this.insertAttempts.length, ...insertSnapshot);
+      this.rowsCreated = rowsCreatedSnapshot;
+      this.nextId = nextIdSnapshot;
+      throw error;
+    }
+  }
+
   insert(table: unknown) {
     return {
-      values: async (values: FakeWithdrawalInsert) => {
+      values: (values: FakeWithdrawalInsert) => {
         if (table !== partnerWithdrawalRequests) {
           throw new Error('unexpected insert table');
         }
 
-        this.insertAttempts.push(values);
-        this.rows.push({
-          id: this.nextId,
-          rejectionReason: null,
-          metadata: null,
-          createdAt: new Date('2026-01-01T00:00:00.000Z'),
-          updatedAt: new Date('2026-01-01T00:00:00.000Z'),
-          ...values,
-        });
-        this.nextId += 1;
-        this.rowsCreated += 1;
+        return {
+          onDuplicateKeyUpdate: async (_config: unknown) => {
+            this.insertAttempts.push(values);
+            const existing = this.rows.find((row) => row.idempotencyKey === values.idempotencyKey);
+            if (existing) return;
+            this.rows.push({
+              id: this.nextId,
+              rejectionReason: null,
+              metadata: null,
+              createdAt: new Date('2026-01-01T00:00:00.000Z'),
+              updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+              ...values,
+            });
+            this.nextId += 1;
+            this.rowsCreated += 1;
+          },
+        };
       },
     };
   }
@@ -78,16 +106,32 @@ class FakeWithdrawalDb {
         where: (predicate: unknown) => {
           const predicateText = inspect(predicate, { depth: 6, getters: true });
           this.wherePredicateTexts.push(predicateText);
-          return {
+          const chain = {
+            for: (lock: string) => {
+              if (table === users && lock === 'update') {
+                const userId = Number(predicateText.match(/value:\s*(\d+)/)?.[1] ?? 0);
+                this.lockedUserIds.push(userId);
+              }
+              return chain;
+            },
             limit: async (count: number) => this.selectRows(table, predicateText).slice(0, count),
+          };
+          return {
+            ...chain,
           };
         },
       }),
     };
   }
 
-  private selectRows(table: unknown, predicateText: string): PartnerWithdrawalRequest[] {
+  private selectRows(table: unknown, predicateText: string): PartnerWithdrawalRequest[] | Array<{ id: number }> {
+    if (table === users) {
+      const userId = Number(predicateText.match(/value:\s*(\d+)/)?.[1] ?? 0);
+      return userId > 0 ? [{ id: userId }] : [];
+    }
     if (table !== partnerWithdrawalRequests) return [];
+    const byKey = this.rows.find((row) => predicateText.includes(row.idempotencyKey));
+    if (byKey) return [byKey];
     const byExternalId = this.rows.find((row) => predicateText.includes(row.externalId));
     return byExternalId ? [byExternalId] : [];
   }
@@ -96,12 +140,25 @@ class FakeWithdrawalDb {
 class FakeLedgerService implements Pick<CreditLedgerService, 'postEntry' | 'summarizeUser'> {
   readonly entries: FakeLedgerEntry[] = [];
   readonly attempts: FakeLedgerPostInput[] = [];
+  readonly conflictKeys: Set<string>;
 
-  constructor(private readonly availableCreditCents: number) {}
+  constructor(
+    private readonly baseAvailableCreditCents: number,
+    input: { entries?: FakeLedgerEntry[]; conflictKeys?: string[] } = {},
+  ) {
+    this.entries = [...(input.entries ?? [])];
+    this.conflictKeys = new Set(input.conflictKeys ?? []);
+  }
 
-  async summarizeUser(_userId: number) {
+  async summarizeUser(userId: number) {
+    const postedAvailableDelta = this.entries
+      .filter((entry) => entry.userId === userId && entry.bucket === 'available')
+      .reduce(
+        (sum, entry) => sum + (entry.direction === 'credit' ? entry.amountCreditCents : -entry.amountCreditCents),
+        0,
+      );
     return {
-      availableCreditCents: this.availableCreditCents,
+      availableCreditCents: this.baseAvailableCreditCents + postedAvailableDelta,
       lockedCreditCents: 0,
       withdrawableCreditCents: 0,
       pendingWithdrawalCreditCents: 0,
@@ -111,6 +168,9 @@ class FakeLedgerService implements Pick<CreditLedgerService, 'postEntry' | 'summ
 
   async postEntry(input: FakeLedgerPostInput) {
     this.attempts.push(input);
+    if (this.conflictKeys.has(input.idempotencyKey)) {
+      throw new LedgerIdempotencyConflictError();
+    }
     const existing = this.entries.find((entry) => entry.idempotencyKey === input.idempotencyKey);
     if (existing) {
       if (
@@ -152,6 +212,43 @@ class FakeLedgerService implements Pick<CreditLedgerService, 'postEntry' | 'summ
 function fakeKycService(status: PartnerKycStatus): Pick<KycService, 'getStatus'> {
   return {
     getStatus: async () => status,
+  };
+}
+
+function fakeWithdrawalRequest(overrides: Partial<PartnerWithdrawalRequest> = {}): PartnerWithdrawalRequest {
+  return {
+    id: 1,
+    externalId: 'pay_existing_withdrawal',
+    userId: 123,
+    amountCreditCents: 600_00,
+    status: 'requested',
+    reviewDueAt: new Date('2026-07-09T10:20:30.000Z'),
+    bankAccountFingerprint: 'bank_fingerprint_123',
+    riskScore: 12,
+    idempotencyKey: 'withdrawal-idem-1',
+    rejectionReason: null,
+    metadata: null,
+    createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    ...overrides,
+  };
+}
+
+function fakeHoldEntry(overrides: Partial<FakeLedgerEntry> = {}): FakeLedgerEntry {
+  return {
+    userId: 123,
+    lotId: null,
+    entryType: 'withdrawal_request_hold',
+    direction: 'debit',
+    bucket: 'available',
+    amountCreditCents: 600_00,
+    amountApiUnits: 0,
+    idempotencyKey: 'withdrawal:hold:withdrawal-idem-1',
+    metadata: {
+      withdrawalRequestId: 1,
+      withdrawalRequestExternalId: 'pay_existing_withdrawal',
+    },
+    ...overrides,
   };
 }
 
@@ -230,6 +327,18 @@ describe('evaluatePartnerRisk', () => {
         kycPassed: true,
         sameNameBank: true,
         amountCreditCents: -1,
+        referralConcentration: false,
+        accountFrozen: false,
+      }),
+    ).toThrow(RangeError);
+  });
+
+  it('rejects invalid risk booleans', () => {
+    expect(() =>
+      evaluatePartnerRisk({
+        kycPassed: 'yes' as unknown as boolean,
+        sameNameBank: true,
+        amountCreditCents: 1_000_00,
         referralConcentration: false,
         accountFrozen: false,
       }),
@@ -340,8 +449,11 @@ describe('WithdrawalService requestWithdrawal', () => {
       reviewDueAt: new Date('2026-07-09T10:20:30.000Z'),
       bankAccountFingerprint: 'bank_fingerprint_123',
       riskScore: 12,
+      idempotencyKey: 'withdrawal-idem-1',
     });
-    expect(db.wherePredicateTexts.some((predicateText) => predicateText.includes('external_id'))).toBe(true);
+    expect(db.transactionCalls).toBe(1);
+    expect(db.lockedUserIds).toEqual([123]);
+    expect(db.wherePredicateTexts.some((predicateText) => predicateText.includes('idempotency_key'))).toBe(true);
     expect(ledger.entries).toHaveLength(2);
     expect(ledger.entries).toEqual([
       expect.objectContaining({
@@ -381,14 +493,114 @@ describe('WithdrawalService requestWithdrawal', () => {
     expect(ledger.entries).toHaveLength(2);
   });
 
-  it('does not duplicate ledger entries when a request is retried with the same ledger idempotency keys', async () => {
+  it('returns the same request row without duplicating request or ledger entries on exact retry', async () => {
     const { db, ledger, service } = serviceWithDeps();
 
-    await service.requestWithdrawal(validWithdrawalInput);
-    await service.requestWithdrawal(validWithdrawalInput);
+    const first = await service.requestWithdrawal(validWithdrawalInput);
+    const second = await service.requestWithdrawal(validWithdrawalInput);
 
-    expect(db.rowsCreated).toBe(2);
+    expect(second).toBe(first);
+    expect(db.rowsCreated).toBe(1);
     expect(ledger.attempts).toHaveLength(4);
+    expect(ledger.entries).toHaveLength(2);
+  });
+
+  it.each([
+    ['different amount', { amountCreditCents: 700_00 }],
+    ['different user', { userId: 456 }],
+    ['different fingerprint', { bankAccountFingerprint: 'different_bank_fingerprint' }],
+    ['different highRisk status', { highRisk: true }],
+    ['different riskScore', { riskScore: 77 }],
+  ])('throws an idempotency conflict for same key with %s', async (_name, patch) => {
+    const existing = fakeWithdrawalRequest();
+    const { db, ledger, service } = serviceWithDeps({
+      db: new FakeWithdrawalDb([existing]),
+      ledger: new FakeLedgerService(2_000_00),
+    });
+
+    await expect(
+      service.requestWithdrawal({
+        ...validWithdrawalInput,
+        ...patch,
+      }),
+    ).rejects.toBeInstanceOf(WithdrawalRequestIdempotencyConflictError);
+    expect(db.rows).toEqual([existing]);
+    expect(db.rowsCreated).toBe(0);
+    expect(ledger.entries).toHaveLength(0);
+  });
+
+  it('does not re-check available balance for an exact-balance retry', async () => {
+    const { db, ledger, service } = serviceWithDeps({ ledger: new FakeLedgerService(600_00) });
+
+    const first = await service.requestWithdrawal(validWithdrawalInput);
+    const second = await service.requestWithdrawal(validWithdrawalInput);
+
+    expect(second).toBe(first);
+    expect(db.rowsCreated).toBe(1);
+    expect(ledger.entries).toHaveLength(2);
+  });
+
+  it('repairs both ledger holds for an existing request without holds', async () => {
+    const existing = fakeWithdrawalRequest();
+    const { db, ledger, service } = serviceWithDeps({
+      db: new FakeWithdrawalDb([existing]),
+      ledger: new FakeLedgerService(0),
+    });
+
+    const row = await service.requestWithdrawal(validWithdrawalInput);
+
+    expect(row).toBe(existing);
+    expect(db.rowsCreated).toBe(0);
+    expect(ledger.entries).toHaveLength(2);
+    expect(ledger.entries.map((entry) => entry.idempotencyKey)).toEqual([
+      'withdrawal:hold:withdrawal-idem-1',
+      'withdrawal:pending:withdrawal-idem-1',
+    ]);
+  });
+
+  it('repairs a missing pending hold without duplicating an existing debit hold', async () => {
+    const existing = fakeWithdrawalRequest();
+    const debit = fakeHoldEntry();
+    const { ledger, service } = serviceWithDeps({
+      db: new FakeWithdrawalDb([existing]),
+      ledger: new FakeLedgerService(0, { entries: [debit] }),
+    });
+
+    const row = await service.requestWithdrawal(validWithdrawalInput);
+
+    expect(row).toBe(existing);
+    expect(ledger.entries.filter((entry) => entry.idempotencyKey === 'withdrawal:hold:withdrawal-idem-1')).toHaveLength(1);
+    expect(ledger.entries.filter((entry) => entry.idempotencyKey === 'withdrawal:pending:withdrawal-idem-1')).toHaveLength(1);
+  });
+
+  it('rolls back a newly inserted request when a ledger hold conflicts', async () => {
+    const { db, ledger, service } = serviceWithDeps({
+      ledger: new FakeLedgerService(2_000_00, {
+        conflictKeys: ['withdrawal:hold:withdrawal-idem-1'],
+      }),
+    });
+
+    await expect(service.requestWithdrawal(validWithdrawalInput)).rejects.toBeInstanceOf(
+      LedgerIdempotencyConflictError,
+    );
+    expect(db.rowsCreated).toBe(0);
+    expect(db.rows).toHaveLength(0);
+    expect(ledger.entries).toHaveLength(0);
+  });
+
+  it('serializes distinct-key exact-balance withdrawals so the second sees the first hold', async () => {
+    const { db, ledger, service } = serviceWithDeps({ ledger: new FakeLedgerService(600_00) });
+
+    await service.requestWithdrawal(validWithdrawalInput);
+    await expect(
+      service.requestWithdrawal({
+        ...validWithdrawalInput,
+        idempotencyKey: 'withdrawal-idem-2',
+      }),
+    ).rejects.toMatchObject({ reason: 'insufficient_available_credit' });
+
+    expect(db.rowsCreated).toBe(1);
+    expect(db.lockedUserIds).toEqual([123, 123]);
     expect(ledger.entries).toHaveLength(2);
   });
 
@@ -400,7 +612,7 @@ describe('WithdrawalService requestWithdrawal', () => {
     ['negative riskScore', { riskScore: -1 }],
     ['riskScore over 100', { riskScore: 101 }],
     ['empty idempotency key', { idempotencyKey: '' }],
-    ['long idempotency key', { idempotencyKey: 'x'.repeat(161) }],
+    ['long idempotency key', { idempotencyKey: 'x'.repeat(129) }],
     ['invalid now', { now: new Date(Number.NaN) }],
   ])('rejects %s', async (_name, patch) => {
     const { service } = serviceWithDeps();

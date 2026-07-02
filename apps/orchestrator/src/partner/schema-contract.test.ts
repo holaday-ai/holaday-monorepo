@@ -47,6 +47,9 @@ describe('partner schema contract', () => {
     expect(indexConfig(partnerLots, 'uk_partner_lots_recharge_order')?.unique).toBe(true);
     expect(indexConfig(partnerMonthlyReleases, 'uk_partner_monthly_releases_lot_month')?.unique).toBe(true);
     expect(indexConfig(partnerRechargeOrders, 'uk_partner_recharge_orders_provider_capture')?.unique).toBe(true);
+    expect(indexConfig(partnerWithdrawalRequests, 'uk_partner_withdrawal_requests_idempotency_key')?.unique).toBe(
+      true,
+    );
   });
 
   it('keeps the partner ledger migration additive', async () => {
@@ -56,6 +59,8 @@ describe('partner schema contract', () => {
     expect(migration).toContain('uk_partner_daily_allocations_lot_date');
     expect(migration).toContain('uk_partner_lots_recharge_order');
     expect(migration).toContain('uk_partner_monthly_releases_lot_month');
+    expect(migration).toContain('`idempotency_key` VARCHAR(128) NOT NULL');
+    expect(migration).toContain('uk_partner_withdrawal_requests_idempotency_key');
     expect(migration).not.toMatch(/\bALTER\s+TABLE\b/i);
     expect(migration).not.toMatch(/\bDROP\s+TABLE\b/i);
     expect(migration).not.toMatch(/^\s*UPDATE\b/im);
