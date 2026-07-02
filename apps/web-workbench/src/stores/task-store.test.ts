@@ -1250,6 +1250,74 @@ describe('applyServerMessage task.control', () => {
     expect(useTaskStore.getState().tasks[0]?.status).toBe('executing');
   });
 
+  it('does not let stale live frames revive a control-paused task', () => {
+    useTaskStore.setState({
+      tasks: [task({ taskId: 'tsk_control_pause_stale', status: 'executing' })],
+      progressByTask: { tsk_control_pause_stale: '等待用户确认' },
+    });
+
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.task.control',
+      taskId: 'tsk_control_pause_stale',
+      command: 'pause',
+      reason: 'user',
+    });
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.task.progress',
+      taskId: 'tsk_control_pause_stale',
+      message: '迟到的执行进度',
+      subStatus: 'browsing',
+    });
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.task.stream',
+      taskId: 'tsk_control_pause_stale',
+      delta: ' stale answer',
+    });
+
+    const state = useTaskStore.getState();
+    expect(state.tasks[0]).toMatchObject({ status: 'paused' });
+    expect(state.terminalTaskIds.has('tsk_control_pause_stale')).toBe(true);
+    expect(state.progressByTask.tsk_control_pause_stale).toBe('等待用户确认');
+    expect(state.subStatusByTask.tsk_control_pause_stale).toBeUndefined();
+    expect(state.streamingByTask.tsk_control_pause_stale).toBeUndefined();
+  });
+
+  it('resumes a paused terminal task instead of treating pause as final', () => {
+    useTaskStore.setState({
+      tasks: [
+        task({
+          taskId: 'tsk_paused_then_resume',
+          status: 'paused',
+          resultText: '达到最大步骤数，请确认下一步。',
+        }),
+      ],
+      terminalTaskIds: new Set(['tsk_paused_then_resume']),
+    });
+
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.task.control',
+      taskId: 'tsk_paused_then_resume',
+      command: 'resume',
+    });
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.task.progress',
+      taskId: 'tsk_paused_then_resume',
+      message: '继续执行中',
+      subStatus: 'browsing',
+    });
+
+    const state = useTaskStore.getState();
+    expect(state.tasks[0]).toMatchObject({
+      status: 'executing',
+      resultText: undefined,
+    });
+    expect(state.terminalTaskIds.has('tsk_paused_then_resume')).toBe(false);
+    expect(state.progressByTask.tsk_paused_then_resume).toBe('继续执行中');
+    expect(state.subStatusByTask.tsk_paused_then_resume).toMatchObject({
+      subStatus: 'browsing',
+    });
+  });
+
   it('cancels a task immediately and gates stale stream/progress frames', () => {
     useTaskStore.setState({
       tasks: [task({ taskId: 'tsk_cancel', status: 'executing' })],
@@ -1353,6 +1421,16 @@ describe('applyServerMessage stale live frames after terminal', () => {
       mode: 'screenshot',
     });
     useTaskStore.getState().applyServerMessage({
+      type: 'server.vision.tick.end',
+      taskId: 'tsk_final_cancel',
+      tickIndex: 0,
+      mode: 'screenshot',
+      ok: true,
+      durationMs: 1200,
+      actionKind: 'browse',
+      actionSummary: '迟到步骤',
+    });
+    useTaskStore.getState().applyServerMessage({
       type: 'server.supercar.awaiting_user',
       taskId: 'tsk_final_cancel',
       question: '请补充信息',
@@ -1361,6 +1439,7 @@ describe('applyServerMessage stale live frames after terminal', () => {
 
     const state = useTaskStore.getState();
     expect(state.tasks[0]).toMatchObject({ status: 'cancelled' });
+    expect(state.tasks[0]?.tickCount).toBe(0);
     expect(state.tasks[0]?.queuePosition).toBeUndefined();
     expect(state.stepsByTask.tsk_final_cancel).toBeUndefined();
     expect(state.awaitingUserByTask.tsk_final_cancel).toBeUndefined();
@@ -1426,6 +1505,48 @@ describe('applyServerMessage paused terminal frame', () => {
       status: 'completed',
       resultText: '最终答案',
     });
+  });
+
+  it('clears live-only blockers when a terminal frame arrives', () => {
+    useTaskStore.setState({
+      tasks: [task({ taskId: 'tsk_terminal_cleanup', status: 'executing' })],
+      captchaWaitByTask: {
+        tsk_terminal_cleanup: {
+          antiBotType: 'captcha',
+          message: '验证中',
+          startedAt: 1,
+          deadlineMs: 2,
+        },
+      },
+      executorFallbackByTask: {
+        tsk_terminal_cleanup: { available: false, at: 1 },
+      },
+      degradeByTask: {
+        tsk_terminal_cleanup: {
+          level: 2,
+          strategy: 'extension',
+          ok: false,
+          message: '降级中',
+          at: 1,
+        },
+      },
+    });
+
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.task.terminal',
+      taskId: 'tsk_terminal_cleanup',
+      status: 'completed',
+      summary: '完成',
+    });
+
+    const state = useTaskStore.getState();
+    expect(state.tasks[0]).toMatchObject({
+      status: 'completed',
+      resultText: '完成',
+    });
+    expect(state.captchaWaitByTask.tsk_terminal_cleanup).toBeUndefined();
+    expect(state.executorFallbackByTask.tsk_terminal_cleanup).toBeUndefined();
+    expect(state.degradeByTask.tsk_terminal_cleanup).toBeUndefined();
   });
 
   it('keeps paused recoverable and clears stale live blockers without terminal reveal animation', () => {

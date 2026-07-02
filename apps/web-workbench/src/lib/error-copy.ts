@@ -23,7 +23,7 @@ interface Rule {
 const SYSTEM_TASK_RULES: Rule[] = [
   {
     match: /task ended with status=partial_success/i,
-    to: '子任务已产出结果，但需要复核。请打开任务详情查看缺失项。',
+    to: '子任务进入需复核状态，请打开任务详情查看缺失项。',
   },
   {
     match: /task ended with status=failed/i,

@@ -110,15 +110,12 @@ export interface TaskStore {
     }
   >;
   /**
-   * Phase 24 RC follow-up — set of taskIds that have reached a
-   * terminal state (server.task.terminal received). The
-   * stale-delta guard for stream / progress handlers checks THIS
-   * set instead of `prev.tasks.find(...).status` because the
-   * tasks array is populated asynchronously (initial list query)
-   * and a delta arriving before the task row is in the array
-   * would otherwise see status='unknown' and skip the guard.
-   * Set membership is the authoritative "this task is done"
-   * signal for the SPA's runtime.
+   * Phase 24 RC follow-up — set of taskIds whose stale live frames
+   * must be blocked. Completed/failed/cancelled terminal frames stay
+   * here permanently; paused tasks are added while paused and removed
+   * on resume. Stream/progress/tick guards check THIS set instead of
+   * `prev.tasks.find(...).status` because the tasks array is populated
+   * asynchronously and a late frame can otherwise revive old UI.
    */
   terminalTaskIds: ReadonlySet<string>;
   /**
@@ -1174,13 +1171,15 @@ export const useTaskStore = create<TaskStore>((set, get) => {
   applyServerMessage(msg) {
     if (msg.type === 'server.task.control') {
       set((prev) => {
-        if (isTaskRuntimeTerminal(prev, msg.taskId)) return prev;
+        const existingTask = prev.tasks.find((task) => task.taskId === msg.taskId);
+        const isPausedResume = msg.command === 'resume' && existingTask?.status === 'paused';
+        if (isTaskRuntimeTerminal(prev, msg.taskId) && !isPausedResume) return prev;
         const nextSubStatus = { ...prev.subStatusByTask };
         delete nextSubStatus[msg.taskId];
         const nextAwaiting = { ...prev.awaitingUserByTask };
         delete nextAwaiting[msg.taskId];
         const nextTerminalIds = new Set(prev.terminalTaskIds);
-        if (msg.command === 'cancel') nextTerminalIds.add(msg.taskId);
+        if (msg.command === 'cancel' || msg.command === 'pause') nextTerminalIds.add(msg.taskId);
         else nextTerminalIds.delete(msg.taskId);
         const status =
           msg.command === 'pause'
@@ -1261,6 +1260,12 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         delete nextSubStatus[msg.taskId];
         const nextAwaiting = { ...prev.awaitingUserByTask };
         delete nextAwaiting[msg.taskId];
+        const nextCaptchaWait = omitRuntimeKey(prev.captchaWaitByTask, msg.taskId);
+        const nextExecutorFallback = omitRuntimeKey(
+          prev.executorFallbackByTask,
+          msg.taskId,
+        );
+        const nextDegrade = omitRuntimeKey(prev.degradeByTask, msg.taskId);
         // Codex Round 2 P1-6 — terminal frame may carry the verifier
         // verdict's failed-check list so the SPA banner can render
         // specific bullets. Stamp onto the task; null clears prior
@@ -1295,6 +1300,9 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           animatedTaskIds: nextAnimatedIds,
           awaitingUserByTask: nextAwaiting,
           subStatusByTask: nextSubStatus,
+          captchaWaitByTask: nextCaptchaWait,
+          executorFallbackByTask: nextExecutorFallback,
+          degradeByTask: nextDegrade,
           // streamingByTask + progressByTask unchanged; buffers
           // persist until resultText is rendered in their place.
         };
@@ -1514,6 +1522,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           }
         : undefined;
       set((prev) => {
+        if (isTaskRuntimeTerminal(prev, msg.taskId)) return prev;
         const existing = prev.stepsByTask[msg.taskId] ?? [];
         let matched = false;
         const updated = existing.map((s) => {

@@ -40,7 +40,7 @@ describe('error-copy', () => {
 
   it('maps internal terminal status strings from batch items to user-facing copy', () => {
     expect(humaniseTaskError('task ended with status=partial_success')).toBe(
-      '子任务已产出结果，但需要复核。请打开任务详情查看缺失项。',
+      '子任务进入需复核状态，请打开任务详情查看缺失项。',
     );
     expect(humaniseTaskError('task ended with status=failed')).toBe(
       '子任务未完成，请打开任务详情查看失败原因。',
