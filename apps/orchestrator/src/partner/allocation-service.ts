@@ -201,6 +201,10 @@ function assertAllocationBudget(value: number): number {
   return assertMysqlUnsignedInt(value, 'budgetCreditCents');
 }
 
+function sumLockedBonusCreditCents(rows: ReadonlyArray<{ lockedBonusCreditCents: number }>): number {
+  return rows.reduce((sum, row) => sum + row.lockedBonusCreditCents, 0);
+}
+
 export interface DailyLockedBonusSummary {
   day: string;
   eligibleLotCount: number;
@@ -218,6 +222,28 @@ interface LotAllocationState {
 
 export class AllocationService {
   constructor(private readonly db: DB) {}
+
+  private async readDailyAllocation(lotId: number, day: string): Promise<PartnerDailyAllocation | undefined> {
+    const [allocation] = await this.db
+      .select()
+      .from(partnerDailyAllocations)
+      .where(and(eq(partnerDailyAllocations.lotId, lotId), eq(partnerDailyAllocations.allocationDate, day)))
+      .limit(1);
+    return allocation;
+  }
+
+  private async reconcileLotLockedBonus(lotId: number): Promise<void> {
+    await this.db
+      .update(partnerLots)
+      .set({
+        lockedBonusCreditCents: sql<number>`(
+          SELECT COALESCE(SUM(${partnerDailyAllocations.lockedBonusCreditCents}), 0)
+          FROM ${partnerDailyAllocations}
+          WHERE ${partnerDailyAllocations.lotId} = ${lotId}
+        )`,
+      })
+      .where(eq(partnerLots.id, lotId));
+  }
 
   async buildDailyCostPool(input: { day: string; fxBps: number }): Promise<ApiCostPoolEvent> {
     const day = normalizeDay(input.day);
@@ -268,6 +294,19 @@ export class AllocationService {
   }): Promise<DailyLockedBonusSummary> {
     const day = normalizeDay(input.day);
     const budgetCreditCents = assertAllocationBudget(input.budgetCreditCents);
+    const existingAllocationsForDay = await this.db
+      .select()
+      .from(partnerDailyAllocations)
+      .where(eq(partnerDailyAllocations.allocationDate, day));
+    const existingAllocationByLotId = new Map<number, PartnerDailyAllocation>();
+    const lotIdsToReconcile = new Set<number>();
+
+    for (const allocation of existingAllocationsForDay) {
+      if (!existingAllocationByLotId.has(allocation.lotId)) {
+        existingAllocationByLotId.set(allocation.lotId, allocation);
+      }
+      lotIdsToReconcile.add(allocation.lotId);
+    }
 
     const lots = await this.db
       .select()
@@ -275,30 +314,22 @@ export class AllocationService {
       .where(and(eq(partnerLots.status, 'accumulating'), eq(partnerLots.riskStatus, 'normal')));
     const weightedLots = lots.map((lot) => ({ lot, weight: weightLot(lot) }));
     const lotAllocationStates: LotAllocationState[] = [];
-    let existingLockedBonusCreditCents = 0;
 
     for (const { lot, weight } of weightedLots) {
       const idempotencyKey = `daily:${day}:${lot.id}`;
-      const [existingAllocation] = await this.db
-        .select()
-        .from(partnerDailyAllocations)
-        .where(eq(partnerDailyAllocations.idempotencyKey, idempotencyKey))
-        .limit(1);
-
-      if (existingAllocation) {
-        existingLockedBonusCreditCents += existingAllocation.lockedBonusCreditCents;
-      }
+      const existingAllocation = existingAllocationByLotId.get(lot.id);
 
       lotAllocationStates.push({ lot, weight, idempotencyKey, existingAllocation });
     }
 
+    const existingLockedBonusCreditCents = sumLockedBonusCreditCents(existingAllocationsForDay);
     const remainingBudgetForNewAllocations = Math.max(0, budgetCreditCents - existingLockedBonusCreditCents);
     const missingAllocationWeight = lotAllocationStates
       .filter((item) => !item.existingAllocation)
       .reduce((sum, item) => sum + BigInt(item.weight), 0n);
 
-    let totalLockedBonusCreditCents = 0;
-    let allocationCount = 0;
+    let totalLockedBonusCreditCents = existingLockedBonusCreditCents;
+    let allocationCount = existingAllocationsForDay.length;
 
     for (const { lot, weight, idempotencyKey, existingAllocation } of lotAllocationStates) {
       let lockedBonusCreditCents = existingAllocation?.lockedBonusCreditCents ?? 0;
@@ -319,6 +350,10 @@ export class AllocationService {
         });
       }
 
+      if (!existingAllocation && lockedBonusCreditCents === 0) {
+        continue;
+      }
+
       await this.db
         .insert(partnerDailyAllocations)
         .values({
@@ -332,27 +367,21 @@ export class AllocationService {
         })
         .onDuplicateKeyUpdate({ set: { idempotencyKey: sql`idempotency_key` } });
 
-      const [allocation] = await this.db
-        .select()
-        .from(partnerDailyAllocations)
-        .where(eq(partnerDailyAllocations.idempotencyKey, idempotencyKey))
-        .limit(1);
+      const allocation = await this.readDailyAllocation(lot.id, day);
 
       if (!allocation) {
         throw new Error('partner daily allocation vanished after idempotent insert');
       }
 
-      allocationCount += 1;
-      totalLockedBonusCreditCents += allocation.lockedBonusCreditCents;
+      if (!existingAllocation) {
+        allocationCount += 1;
+        totalLockedBonusCreditCents += allocation.lockedBonusCreditCents;
+      }
+      lotIdsToReconcile.add(allocation.lotId);
+    }
 
-      if (existingAllocation || allocation.lockedBonusCreditCents === 0) continue;
-
-      await this.db
-        .update(partnerLots)
-        .set({
-          lockedBonusCreditCents: sql`${partnerLots.lockedBonusCreditCents} + ${allocation.lockedBonusCreditCents}`,
-        })
-        .where(eq(partnerLots.id, lot.id));
+    for (const lotId of lotIdsToReconcile) {
+      await this.reconcileLotLockedBonus(lotId);
     }
 
     return {

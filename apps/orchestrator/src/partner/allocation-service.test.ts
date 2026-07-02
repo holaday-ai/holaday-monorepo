@@ -33,7 +33,7 @@ class FakeAllocationDb {
   readonly allocationRows: PartnerDailyAllocation[];
   readonly costPoolInsertAttempts: FakeCostPoolInsert[] = [];
   readonly allocationInsertAttempts: FakeDailyAllocationInsert[] = [];
-  readonly lotUpdates: Array<{ lotId: number; incrementBy: number }> = [];
+  readonly lotReconciliations: Array<{ lotId: number; lockedBonusCreditCents: number }> = [];
   private nextCostPoolId: number;
   private nextAllocationId: number;
 
@@ -107,10 +107,10 @@ class FakeAllocationDb {
     }
 
     return {
-      set: (values: { lockedBonusCreditCents?: unknown }) => ({
+      set: (_values: { lockedBonusCreditCents?: unknown }) => ({
         where: (predicate: unknown) => {
           const predicateText = inspect(predicate, { depth: 8, getters: true });
-          const predicateLotId = extractPredicateNumber(predicate);
+          const predicateLotId = extractPredicateNumbers(predicate)[0] ?? null;
           const lot =
             predicateLotId === null
               ? this.lotRows.find(
@@ -119,14 +119,12 @@ class FakeAllocationDb {
               : this.lotRows.find((candidate) => candidate.id === predicateLotId);
           if (!lot) return Promise.resolve();
 
-          const incrementBy = extractSqlIncrement(values.lockedBonusCreditCents);
-          if (!Number.isSafeInteger(incrementBy) || incrementBy < 0) {
-            throw new Error('fake db expected a non-negative locked bonus increment');
-          }
-
-          lot.lockedBonusCreditCents += incrementBy;
+          const lockedBonusCreditCents = this.allocationRows
+            .filter((row) => row.lotId === lot.id)
+            .reduce((sum, row) => sum + row.lockedBonusCreditCents, 0);
+          lot.lockedBonusCreditCents = lockedBonusCreditCents;
           lot.updatedAt = new Date('2026-07-02T00:00:00.000Z');
-          this.lotUpdates.push({ lotId: lot.id, incrementBy });
+          this.lotReconciliations.push({ lotId: lot.id, lockedBonusCreditCents });
           return Promise.resolve();
         },
       }),
@@ -137,7 +135,7 @@ class FakeAllocationDb {
     return {
       from: (table: unknown) => {
         const chain = {
-          where: (predicate: unknown) => this.selectRows(table, inspect(predicate, { depth: 8, getters: true })),
+          where: (predicate: unknown) => this.selectRows(table, predicate),
           then: (
             onFulfilled?: ((value: unknown[]) => unknown) | null,
             onRejected?: ((reason: unknown) => unknown) | null,
@@ -148,8 +146,8 @@ class FakeAllocationDb {
     };
   }
 
-  private selectRows(table: unknown, predicateText: string | null) {
-    const rows = this.rowsForTable(table, predicateText);
+  private selectRows(table: unknown, predicate: unknown | null) {
+    const rows = this.rowsForTable(table, predicate, predicate ? inspect(predicate, { depth: 8, getters: true }) : null);
     return {
       limit: async (count: number) => rows.slice(0, count),
       then: (
@@ -159,7 +157,7 @@ class FakeAllocationDb {
     };
   }
 
-  private rowsForTable(table: unknown, predicateText: string | null): unknown[] {
+  private rowsForTable(table: unknown, predicate: unknown | null, predicateText: string | null): unknown[] {
     if (table === llmCalls) {
       if (!predicateText) return [...this.llmCallRows];
       const bounds = Array.from(predicateText.matchAll(/(\d{4}-\d{2}-\d{2}T00:00:00\.000Z)/g), (match) =>
@@ -175,7 +173,10 @@ class FakeAllocationDb {
 
     if (table === apiCostPoolEvents) {
       if (!predicateText) return [...this.costPoolRows];
-      const byKey = this.costPoolRows.find((row) => predicateText.includes(row.idempotencyKey));
+      const predicateStrings = extractPredicateStrings(predicate);
+      const byKey = this.costPoolRows.find(
+        (row) => predicateText.includes(row.idempotencyKey) || predicateStrings.includes(row.idempotencyKey),
+      );
       return byKey ? [byKey] : [];
     }
 
@@ -190,34 +191,78 @@ class FakeAllocationDb {
 
     if (table === partnerDailyAllocations) {
       if (!predicateText) return [...this.allocationRows];
-      const byKey = this.allocationRows.find((row) => predicateText.includes(row.idempotencyKey));
-      return byKey ? [byKey] : [];
+      const predicateStrings = extractPredicateStrings(predicate);
+      const byKey = this.allocationRows.find(
+        (row) => predicateText.includes(row.idempotencyKey) || predicateStrings.includes(row.idempotencyKey),
+      );
+      if (byKey) return [byKey];
+
+      const predicateNumbers = extractPredicateNumbers(predicate);
+      const hasLotId =
+        predicateNumbers.length > 0 && (predicateText.includes('lot_id') || predicateText.includes('lotId'));
+      const matchingDayRows = this.allocationRows.filter(
+        (row) => predicateText.includes(row.allocationDate) || predicateStrings.includes(row.allocationDate),
+      );
+      if (hasLotId) {
+        return matchingDayRows.filter((row) => predicateNumbers.includes(row.lotId));
+      }
+      return matchingDayRows;
     }
 
     return [];
   }
 }
 
-function extractSqlIncrement(value: unknown): number {
-  if (typeof value === 'number') return value;
-  if (value && typeof value === 'object' && 'queryChunks' in value) {
-    const chunks = (value as { queryChunks?: unknown[] }).queryChunks ?? [];
-    const numericChunk = chunks.find((chunk): chunk is number => typeof chunk === 'number');
-    return numericChunk ?? Number.NaN;
-  }
-  return Number.NaN;
-}
+function extractPredicateNumbers(value: unknown): number[] {
+  const numbers: number[] = [];
 
-function extractPredicateNumber(value: unknown): number | null {
-  if (!value || typeof value !== 'object' || !('queryChunks' in value)) return null;
-  for (const chunk of (value as { queryChunks?: unknown[] }).queryChunks ?? []) {
-    if (typeof chunk === 'number') return chunk;
-    if (chunk && typeof chunk === 'object' && 'value' in chunk) {
-      const nestedValue = (chunk as { value?: unknown }).value;
-      if (typeof nestedValue === 'number') return nestedValue;
+  function visit(candidate: unknown): void {
+    if (typeof candidate === 'number') {
+      numbers.push(candidate);
+      return;
+    }
+    if (!candidate || typeof candidate !== 'object') return;
+    if ('value' in candidate) {
+      const nestedValue = (candidate as { value?: unknown }).value;
+      if (typeof nestedValue === 'number') {
+        numbers.push(nestedValue);
+      }
+    }
+    if ('queryChunks' in candidate) {
+      for (const chunk of (candidate as { queryChunks?: unknown[] }).queryChunks ?? []) {
+        visit(chunk);
+      }
     }
   }
-  return null;
+
+  visit(value);
+  return numbers;
+}
+
+function extractPredicateStrings(value: unknown): string[] {
+  const strings: string[] = [];
+
+  function visit(candidate: unknown): void {
+    if (typeof candidate === 'string') {
+      strings.push(candidate);
+      return;
+    }
+    if (!candidate || typeof candidate !== 'object') return;
+    if ('value' in candidate) {
+      const nestedValue = (candidate as { value?: unknown }).value;
+      if (typeof nestedValue === 'string') {
+        strings.push(nestedValue);
+      }
+    }
+    if ('queryChunks' in candidate) {
+      for (const chunk of (candidate as { queryChunks?: unknown[] }).queryChunks ?? []) {
+        visit(chunk);
+      }
+    }
+  }
+
+  visit(value);
+  return strings;
 }
 
 function fakeLot(overrides: Partial<PartnerLot> = {}): PartnerLot {
@@ -361,10 +406,21 @@ describe('AllocationService allocateDailyLockedBonus', () => {
     });
     const fakeDb = new FakeAllocationDb({
       lots: [fakeLot({ id: 1, apiUnits: 10_500_000 }), almostCappedLot],
+      allocations: [
+        fakeAllocation({
+          id: 10,
+          externalId: 'payment_prior_allocation',
+          lotId: 2,
+          allocationDate: '2026-07-01',
+          lockedBonusCreditCents: 199_990,
+          idempotencyKey: 'daily:2026-07-01:2',
+        }),
+      ],
     });
     const service = new AllocationService(fakeDb.asDB());
 
     const summary = await service.allocateDailyLockedBonus({ day: '2026-07-02', budgetCreditCents: 20_000 });
+    const todayAllocations = fakeDb.allocationRows.filter((row) => row.allocationDate === '2026-07-02');
 
     expect(summary).toEqual({
       day: '2026-07-02',
@@ -373,12 +429,12 @@ describe('AllocationService allocateDailyLockedBonus', () => {
       totalLockedBonusCreditCents: 1_676,
       remainingBudgetCreditCents: 18_324,
     });
-    expect(fakeDb.allocationRows).toHaveLength(2);
-    expect(fakeDb.allocationRows.map((row) => row.lockedBonusCreditCents)).toEqual([1_666, 10]);
+    expect(todayAllocations).toHaveLength(2);
+    expect(todayAllocations.map((row) => row.lockedBonusCreditCents)).toEqual([1_666, 10]);
     expect(fakeDb.lotRows.map((row) => row.lockedBonusCreditCents)).toEqual([1_666, 200_000]);
-    expect(fakeDb.lotUpdates).toEqual([
-      { lotId: 1, incrementBy: 1_666 },
-      { lotId: 2, incrementBy: 10 },
+    expect(fakeDb.lotReconciliations).toEqual([
+      { lotId: 1, lockedBonusCreditCents: 1_666 },
+      { lotId: 2, lockedBonusCreditCents: 200_000 },
     ]);
   });
 
@@ -400,9 +456,52 @@ describe('AllocationService allocateDailyLockedBonus', () => {
       remainingBudgetCreditCents: 9_000,
     });
     expect(fakeDb.lotRows[0]!.lockedBonusCreditCents).toBe(1_000);
-    expect(fakeDb.lotUpdates).toEqual([]);
+    expect(fakeDb.lotReconciliations).toEqual([{ lotId: 1, lockedBonusCreditCents: 1_000 }]);
     expect(fakeDb.allocationRows).toHaveLength(1);
     expect(fakeDb.allocationInsertAttempts).toHaveLength(1);
+  });
+
+  it('repairs a stale lot locked bonus from an existing allocation row on rerun', async () => {
+    const fakeDb = new FakeAllocationDb({
+      lots: [fakeLot({ id: 1, lockedBonusCreditCents: 0 })],
+      allocations: [fakeAllocation({ lotId: 1, lockedBonusCreditCents: 1_000 })],
+    });
+    const service = new AllocationService(fakeDb.asDB());
+
+    const summary = await service.allocateDailyLockedBonus({ day: '2026-07-02', budgetCreditCents: 10_000 });
+
+    expect(summary).toMatchObject({
+      allocationCount: 1,
+      totalLockedBonusCreditCents: 1_000,
+      remainingBudgetCreditCents: 9_000,
+    });
+    expect(fakeDb.lotRows[0]!.lockedBonusCreditCents).toBe(1_000);
+    expect(fakeDb.lotReconciliations).toEqual([{ lotId: 1, lockedBonusCreditCents: 1_000 }]);
+  });
+
+  it('handles an existing lot/day allocation with a different idempotency key without double-crediting', async () => {
+    const fakeDb = new FakeAllocationDb({
+      lots: [fakeLot({ id: 1, lockedBonusCreditCents: 0 })],
+      allocations: [
+        fakeAllocation({
+          lotId: 1,
+          lockedBonusCreditCents: 1_000,
+          idempotencyKey: 'daily:2026-07-02:other-worker',
+        }),
+      ],
+    });
+    const service = new AllocationService(fakeDb.asDB());
+
+    const summary = await service.allocateDailyLockedBonus({ day: '2026-07-02', budgetCreditCents: 10_000 });
+
+    expect(summary).toMatchObject({
+      allocationCount: 1,
+      totalLockedBonusCreditCents: 1_000,
+      remainingBudgetCreditCents: 9_000,
+    });
+    expect(fakeDb.allocationRows).toHaveLength(1);
+    expect(fakeDb.lotRows[0]!.lockedBonusCreditCents).toBe(1_000);
+    expect(fakeDb.lotReconciliations).toEqual([{ lotId: 1, lockedBonusCreditCents: 1_000 }]);
   });
 
   it('counts existing same-day allocations against the budget before allocating missing lots', async () => {
@@ -429,8 +528,62 @@ describe('AllocationService allocateDailyLockedBonus', () => {
       [1, 1_500],
       [2, 500],
     ]);
-    expect(fakeDb.lotUpdates).toEqual([{ lotId: 2, incrementBy: 500 }]);
+    expect(fakeDb.lotReconciliations).toEqual([
+      { lotId: 1, lockedBonusCreditCents: 1_500 },
+      { lotId: 2, lockedBonusCreditCents: 500 },
+    ]);
     expect(fakeDb.lotRows.map((row) => row.lockedBonusCreditCents)).toEqual([1_500, 500]);
+  });
+
+  it('counts existing allocations for now-ineligible lots against the daily budget', async () => {
+    const fakeDb = new FakeAllocationDb({
+      lots: [
+        fakeLot({ id: 1, status: 'frozen', riskStatus: 'normal', lockedBonusCreditCents: 1_500 }),
+        fakeLot({ id: 2, externalId: 'payment_lot_2', status: 'accumulating', riskStatus: 'normal' }),
+      ],
+      allocations: [fakeAllocation({ lotId: 1, lockedBonusCreditCents: 1_500 })],
+    });
+    const service = new AllocationService(fakeDb.asDB());
+
+    const summary = await service.allocateDailyLockedBonus({ day: '2026-07-02', budgetCreditCents: 2_000 });
+
+    expect(summary).toEqual({
+      day: '2026-07-02',
+      eligibleLotCount: 1,
+      allocationCount: 2,
+      totalLockedBonusCreditCents: 2_000,
+      remainingBudgetCreditCents: 0,
+    });
+    expect(fakeDb.allocationRows.map((row) => [row.lotId, row.lockedBonusCreditCents])).toEqual([
+      [1, 1_500],
+      [2, 500],
+    ]);
+    expect(fakeDb.lotReconciliations).toEqual([
+      { lotId: 1, lockedBonusCreditCents: 1_500 },
+      { lotId: 2, lockedBonusCreditCents: 500 },
+    ]);
+  });
+
+  it('does not create zero-value allocations for rounded-zero shares', async () => {
+    const fakeDb = new FakeAllocationDb({
+      lots: [
+        fakeLot({ id: 1, apiUnits: 10_500_000 }),
+        fakeLot({ id: 2, externalId: 'payment_lot_2', apiUnits: 10_500_000 }),
+      ],
+    });
+    const service = new AllocationService(fakeDb.asDB());
+
+    const summary = await service.allocateDailyLockedBonus({ day: '2026-07-02', budgetCreditCents: 1 });
+
+    expect(summary).toEqual({
+      day: '2026-07-02',
+      eligibleLotCount: 2,
+      allocationCount: 0,
+      totalLockedBonusCreditCents: 0,
+      remainingBudgetCreditCents: 1,
+    });
+    expect(fakeDb.allocationRows).toEqual([]);
+    expect(fakeDb.lotReconciliations).toEqual([]);
   });
 
   it('skips risk/frozen and non-accumulating lots', async () => {
@@ -451,6 +604,6 @@ describe('AllocationService allocateDailyLockedBonus', () => {
       totalLockedBonusCreditCents: 1_666,
     });
     expect(fakeDb.allocationRows.map((row) => row.lotId)).toEqual([1]);
-    expect(fakeDb.lotUpdates).toEqual([{ lotId: 1, incrementBy: 1_666 }]);
+    expect(fakeDb.lotReconciliations).toEqual([{ lotId: 1, lockedBonusCreditCents: 1_666 }]);
   });
 });
