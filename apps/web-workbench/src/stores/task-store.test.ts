@@ -518,6 +518,25 @@ describe('task page merging', () => {
     ]);
   });
 
+  it('keeps local terminal rows when pagination returns stale active duplicates', () => {
+    const terminal = task({
+      taskId: 'tsk_dup',
+      status: 'completed',
+      resultText: 'live result',
+    });
+    const stale = task({
+      taskId: 'tsk_dup',
+      status: 'executing',
+      resultText: 'stale result',
+    });
+    const appended = task({ taskId: 'tsk_new', status: 'completed' });
+
+    expect(mergeTaskPagesReplacingDuplicates([terminal], [stale, appended])).toEqual([
+      terminal,
+      appended,
+    ]);
+  });
+
   it('keeps a preserved deep-link selection ahead of the first page once', () => {
     const selected = task({ taskId: 'tsk_selected', status: 'completed' });
     const first = task({ taskId: 'tsk_first', status: 'executing' });
@@ -534,6 +553,39 @@ describe('task page merging', () => {
 });
 
 describe('refreshTaskList', () => {
+  it('does not let stale active first-page rows overwrite live terminal tasks', async () => {
+    listQuery.mockResolvedValueOnce({
+      tasks: [
+        taskRow({
+          taskId: 'tsk_list_race',
+          status: 'executing',
+          result: { summary: '旧列表内容' },
+        }),
+      ],
+      nextCursor: null,
+    } as never);
+    useTaskStore.setState({
+      tasks: [
+        task({
+          taskId: 'tsk_list_race',
+          status: 'completed',
+          resultText: '实时终态',
+        }),
+      ],
+      terminalTaskIds: new Set(['tsk_list_race']),
+    });
+
+    await useTaskStore.getState().refreshTaskList();
+
+    const state = useTaskStore.getState();
+    expect(state.tasks[0]).toMatchObject({
+      taskId: 'tsk_list_race',
+      status: 'completed',
+      resultText: '实时终态',
+    });
+    expect(state.terminalTaskIds.has('tsk_list_race')).toBe(true);
+  });
+
   it('survives malformed first-page rows and cursor values', async () => {
     listQuery.mockResolvedValueOnce({
       tasks: [

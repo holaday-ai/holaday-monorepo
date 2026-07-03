@@ -396,10 +396,29 @@ export function mergeTaskPagesReplacingDuplicates(
       merged.push(task);
       continue;
     }
+    const existing = merged[existingIndex];
+    if (existing && shouldPreserveFinalTaskRow(existing, task)) {
+      continue;
+    }
     merged[existingIndex] = task;
   }
 
   return merged;
+}
+
+function preserveFinalTaskRows(
+  current: readonly UiTask[],
+  incoming: readonly UiTask[],
+): UiTask[] {
+  const currentByTaskId = new Map(current.map((task) => [task.taskId, task]));
+  return incoming.map((task) => {
+    const existing = currentByTaskId.get(task.taskId);
+    return existing && shouldPreserveFinalTaskRow(existing, task) ? existing : task;
+  });
+}
+
+function shouldPreserveFinalTaskRow(current: UiTask, incoming: UiTask): boolean {
+  return isTerminalStatus(current.status) && !isTerminalStatus(incoming.status);
 }
 
 export function mergeFirstPageWithPreservedSelection(
@@ -772,7 +791,10 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     set({ loading: true, error: null });
     try {
       const res = await trpc.tasks.list.query({ limit: 50 });
-      const freshList = normalizeTaskListRows(res?.tasks);
+      const freshList = preserveFinalTaskRows(
+        get().tasks,
+        normalizeTaskListRows(res?.tasks),
+      );
       // P1-C: preserve the active selection's UiTask object across
       // a list refresh. Deep-linked oldies (not in the first 50) get
       // upserted by the hydrate path, and that synth must survive a
