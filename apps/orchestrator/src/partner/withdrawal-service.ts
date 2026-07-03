@@ -1,6 +1,7 @@
 import { newExternalId } from '@holaday/shared-types';
 import { eq, sql } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
+import { readAffectedRows } from '../db/mysql-result.js';
 import { partnerWithdrawalRequests, type PartnerWithdrawalRequest } from '../db/schema/partner.js';
 import { users } from '../db/schema/users.js';
 import { CreditLedgerService } from './credit-ledger-service.js';
@@ -36,6 +37,23 @@ export class WithdrawalRequestIdempotencyConflictError extends Error {
   }
 }
 
+export class WithdrawalTransitionError extends Error {
+  constructor(
+    readonly reason:
+      | 'not_found'
+      | 'not_reviewable'
+      | 'not_approved'
+      | 'already_paid'
+      | 'already_rejected'
+      | 'already_returned'
+      | 'update_conflict',
+  ) {
+    super(`Withdrawal transition rejected: ${reason}`);
+    this.name = 'WithdrawalTransitionError';
+    Object.setPrototypeOf(this, WithdrawalTransitionError.prototype);
+  }
+}
+
 function assertNonNegativeSafeInteger(value: number, fieldName: string): number {
   if (!Number.isSafeInteger(value) || value < 0) {
     throw new RangeError(`${fieldName} must be a non-negative safe integer`);
@@ -68,14 +86,14 @@ function assertBoundedNonEmptyString(value: string, fieldName: string, maxLength
   if (typeof value !== 'string' || value.trim().length === 0 || value.length > maxLength) {
     throw new RangeError(`${fieldName} must be a non-empty string with length <= ${maxLength}`);
   }
-  return value;
+  return value.trim();
 }
 
 function assertValidDate(value: Date, fieldName: string): Date {
   if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
     throw new RangeError(`${fieldName} must be a valid Date`);
   }
-  return value;
+  return new Date(value.getTime());
 }
 
 function addUtcDays(value: Date, days: number): Date {
@@ -135,6 +153,24 @@ type NormalizedWithdrawalRequest = Required<WithdrawalRequestInput> & {
   status: WithdrawalStatus;
 };
 
+type WithdrawalAdminInputBase = {
+  withdrawalExternalId: string;
+  reviewerUserId: number;
+  now?: Date;
+};
+
+type NormalizedApproveWithdrawalInput = Required<WithdrawalAdminInputBase> & {
+  note: string | null;
+};
+
+type NormalizedRejectWithdrawalInput = Required<WithdrawalAdminInputBase> & {
+  reason: string;
+};
+
+type NormalizedMarkPaidWithdrawalInput = Required<WithdrawalAdminInputBase> & {
+  providerPayoutId: string;
+};
+
 function normalizeRequestInput(input: WithdrawalRequestInput): NormalizedWithdrawalRequest {
   const highRisk = assertBoolean(input.highRisk, 'highRisk');
   return {
@@ -151,6 +187,63 @@ function normalizeRequestInput(input: WithdrawalRequestInput): NormalizedWithdra
     now: assertValidDate(input.now ?? new Date(), 'now'),
     status: highRisk ? 'reviewing' : 'requested',
   };
+}
+
+function normalizeApproveInput(input: WithdrawalAdminInputBase & { note?: string }): NormalizedApproveWithdrawalInput {
+  return {
+    withdrawalExternalId: assertBoundedNonEmptyString(
+      input.withdrawalExternalId,
+      'withdrawalExternalId',
+      32,
+    ),
+    reviewerUserId: assertPositiveSafeInteger(input.reviewerUserId, 'reviewerUserId'),
+    note: input.note == null ? null : assertBoundedNonEmptyString(input.note, 'note', 1000),
+    now: assertValidDate(input.now ?? new Date(), 'now'),
+  };
+}
+
+function normalizeRejectInput(input: WithdrawalAdminInputBase & { reason: string }): NormalizedRejectWithdrawalInput {
+  return {
+    withdrawalExternalId: assertBoundedNonEmptyString(
+      input.withdrawalExternalId,
+      'withdrawalExternalId',
+      32,
+    ),
+    reviewerUserId: assertPositiveSafeInteger(input.reviewerUserId, 'reviewerUserId'),
+    reason: assertBoundedNonEmptyString(input.reason, 'reason', 1000),
+    now: assertValidDate(input.now ?? new Date(), 'now'),
+  };
+}
+
+function normalizeMarkPaidInput(
+  input: WithdrawalAdminInputBase & { providerPayoutId: string },
+): NormalizedMarkPaidWithdrawalInput {
+  return {
+    withdrawalExternalId: assertBoundedNonEmptyString(
+      input.withdrawalExternalId,
+      'withdrawalExternalId',
+      32,
+    ),
+    reviewerUserId: assertPositiveSafeInteger(input.reviewerUserId, 'reviewerUserId'),
+    providerPayoutId: assertBoundedNonEmptyString(input.providerPayoutId, 'providerPayoutId', 128),
+    now: assertValidDate(input.now ?? new Date(), 'now'),
+  };
+}
+
+function metadataRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? { ...(value as Record<string, unknown>) }
+    : {};
+}
+
+function transitionErrorForTerminalStatus(
+  status: string,
+  fallback: WithdrawalTransitionError['reason'],
+): WithdrawalTransitionError {
+  if (status === 'paid') return new WithdrawalTransitionError('already_paid');
+  if (status === 'rejected') return new WithdrawalTransitionError('already_rejected');
+  if (status === 'returned') return new WithdrawalTransitionError('already_returned');
+  return new WithdrawalTransitionError(fallback);
 }
 
 function assertIdempotentRequestPayloadMatches(
@@ -213,6 +306,15 @@ export class WithdrawalService {
     return row;
   }
 
+  private async readByExternalId(db: DB, externalId: string): Promise<PartnerWithdrawalRequest | undefined> {
+    const [row] = await db
+      .select()
+      .from(partnerWithdrawalRequests)
+      .where(eq(partnerWithdrawalRequests.externalId, externalId))
+      .limit(1);
+    return row;
+  }
+
   private async postHoldEntries(
     ledger: WithdrawalLedger,
     row: PartnerWithdrawalRequest,
@@ -236,6 +338,54 @@ export class WithdrawalService {
       bucket: 'pending_withdrawal',
       amountCreditCents: row.amountCreditCents,
       idempotencyKey: `withdrawal:pending:${row.idempotencyKey}`,
+      metadata: {
+        withdrawalRequestId: row.id,
+        withdrawalRequestExternalId: row.externalId,
+      },
+    });
+  }
+
+  private async postRejectReleaseEntries(
+    ledger: WithdrawalLedger,
+    row: PartnerWithdrawalRequest,
+  ): Promise<void> {
+    await ledger.postEntry({
+      userId: row.userId,
+      entryType: 'withdrawal_rejected_release',
+      direction: 'credit',
+      bucket: 'available',
+      amountCreditCents: row.amountCreditCents,
+      idempotencyKey: `withdrawal:reject:available:${row.idempotencyKey}`,
+      metadata: {
+        withdrawalRequestId: row.id,
+        withdrawalRequestExternalId: row.externalId,
+      },
+    });
+    await ledger.postEntry({
+      userId: row.userId,
+      entryType: 'withdrawal_rejected_release',
+      direction: 'debit',
+      bucket: 'pending_withdrawal',
+      amountCreditCents: row.amountCreditCents,
+      idempotencyKey: `withdrawal:reject:pending:${row.idempotencyKey}`,
+      metadata: {
+        withdrawalRequestId: row.id,
+        withdrawalRequestExternalId: row.externalId,
+      },
+    });
+  }
+
+  private async postPaidSettlementEntry(
+    ledger: WithdrawalLedger,
+    row: PartnerWithdrawalRequest,
+  ): Promise<void> {
+    await ledger.postEntry({
+      userId: row.userId,
+      entryType: 'withdrawal_paid_settlement',
+      direction: 'debit',
+      bucket: 'pending_withdrawal',
+      amountCreditCents: row.amountCreditCents,
+      idempotencyKey: `withdrawal:paid:${row.idempotencyKey}`,
       metadata: {
         withdrawalRequestId: row.id,
         withdrawalRequestExternalId: row.externalId,
@@ -300,5 +450,128 @@ export class WithdrawalService {
   async requestWithdrawal(input: WithdrawalRequestInput): Promise<PartnerWithdrawalRequest> {
     const request = normalizeRequestInput(input);
     return this.db.transaction((tx) => this.requestWithdrawalInTransaction(tx as unknown as DB, request));
+  }
+
+  async approveWithdrawal(input: WithdrawalAdminInputBase & { note?: string }): Promise<PartnerWithdrawalRequest> {
+    const request = normalizeApproveInput(input);
+    return this.db.transaction(async (tx) => {
+      const db = tx as unknown as DB;
+      const row = await this.readByExternalId(db, request.withdrawalExternalId);
+      if (!row) throw new WithdrawalTransitionError('not_found');
+      await this.lockUserForWithdrawal(db, row.userId);
+
+      if (row.status === 'approved') return row;
+      if (row.status !== 'requested' && row.status !== 'reviewing') {
+        throw transitionErrorForTerminalStatus(row.status, 'not_reviewable');
+      }
+
+      const metadata = {
+        ...metadataRecord(row.metadata),
+        approvedByUserId: request.reviewerUserId,
+        approvedAt: request.now.toISOString(),
+        ...(request.note ? { approvalNote: request.note } : {}),
+      };
+      const result = await db
+        .update(partnerWithdrawalRequests)
+        .set({
+          status: 'approved',
+          metadata,
+          updatedAt: request.now,
+        })
+        .where(eq(partnerWithdrawalRequests.externalId, row.externalId));
+      if (readAffectedRows(result) !== 1) {
+        throw new WithdrawalTransitionError('update_conflict');
+      }
+
+      const updated = await this.readByExternalId(db, row.externalId);
+      if (!updated) throw new WithdrawalTransitionError('not_found');
+      return updated;
+    });
+  }
+
+  async rejectWithdrawal(input: WithdrawalAdminInputBase & { reason: string }): Promise<PartnerWithdrawalRequest> {
+    const request = normalizeRejectInput(input);
+    return this.db.transaction(async (tx) => {
+      const db = tx as unknown as DB;
+      const row = await this.readByExternalId(db, request.withdrawalExternalId);
+      if (!row) throw new WithdrawalTransitionError('not_found');
+      await this.lockUserForWithdrawal(db, row.userId);
+      const ledger = this.ledgerFor(db);
+
+      if (row.status === 'rejected') {
+        await this.postRejectReleaseEntries(ledger, row);
+        return row;
+      }
+      if (row.status !== 'requested' && row.status !== 'reviewing' && row.status !== 'approved') {
+        throw transitionErrorForTerminalStatus(row.status, 'not_reviewable');
+      }
+
+      const metadata = {
+        ...metadataRecord(row.metadata),
+        rejectedByUserId: request.reviewerUserId,
+        rejectedAt: request.now.toISOString(),
+      };
+      const result = await db
+        .update(partnerWithdrawalRequests)
+        .set({
+          status: 'rejected',
+          rejectionReason: request.reason,
+          metadata,
+          updatedAt: request.now,
+        })
+        .where(eq(partnerWithdrawalRequests.externalId, row.externalId));
+      if (readAffectedRows(result) !== 1) {
+        throw new WithdrawalTransitionError('update_conflict');
+      }
+
+      const updated = await this.readByExternalId(db, row.externalId);
+      if (!updated) throw new WithdrawalTransitionError('not_found');
+      await this.postRejectReleaseEntries(ledger, updated);
+      return updated;
+    });
+  }
+
+  async markWithdrawalPaid(
+    input: WithdrawalAdminInputBase & { providerPayoutId: string },
+  ): Promise<PartnerWithdrawalRequest> {
+    const request = normalizeMarkPaidInput(input);
+    return this.db.transaction(async (tx) => {
+      const db = tx as unknown as DB;
+      const row = await this.readByExternalId(db, request.withdrawalExternalId);
+      if (!row) throw new WithdrawalTransitionError('not_found');
+      await this.lockUserForWithdrawal(db, row.userId);
+      const ledger = this.ledgerFor(db);
+
+      if (row.status === 'paid') {
+        await this.postPaidSettlementEntry(ledger, row);
+        return row;
+      }
+      if (row.status !== 'approved') {
+        throw transitionErrorForTerminalStatus(row.status, 'not_approved');
+      }
+
+      const metadata = {
+        ...metadataRecord(row.metadata),
+        paidByUserId: request.reviewerUserId,
+        providerPayoutId: request.providerPayoutId,
+        paidAt: request.now.toISOString(),
+      };
+      const result = await db
+        .update(partnerWithdrawalRequests)
+        .set({
+          status: 'paid',
+          metadata,
+          updatedAt: request.now,
+        })
+        .where(eq(partnerWithdrawalRequests.externalId, row.externalId));
+      if (readAffectedRows(result) !== 1) {
+        throw new WithdrawalTransitionError('update_conflict');
+      }
+
+      const updated = await this.readByExternalId(db, row.externalId);
+      if (!updated) throw new WithdrawalTransitionError('not_found');
+      await this.postPaidSettlementEntry(ledger, updated);
+      return updated;
+    });
   }
 }

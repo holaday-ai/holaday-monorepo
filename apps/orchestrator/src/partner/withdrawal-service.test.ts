@@ -41,6 +41,8 @@ class FakeWithdrawalDb {
   readonly rows: PartnerWithdrawalRequest[];
   readonly insertAttempts: FakeWithdrawalInsert[] = [];
   readonly wherePredicateTexts: string[] = [];
+  readonly updatePredicateTexts: string[] = [];
+  readonly updateValues: Array<Partial<PartnerWithdrawalRequest>> = [];
   readonly lockedUserIds: number[] = [];
   transactionCalls = 0;
   rowsCreated = 0;
@@ -97,6 +99,25 @@ class FakeWithdrawalDb {
           },
         };
       },
+    };
+  }
+
+  update(table: unknown) {
+    return {
+      set: (values: Partial<PartnerWithdrawalRequest>) => ({
+        where: async (predicate: unknown) => {
+          if (table !== partnerWithdrawalRequests) {
+            throw new Error('unexpected update table');
+          }
+          const predicateText = inspect(predicate, { depth: 6, getters: true });
+          this.updatePredicateTexts.push(predicateText);
+          this.updateValues.push(values);
+          const row = this.rows.find((candidate) => predicateText.includes(candidate.externalId));
+          if (!row) return [{ affectedRows: 0 }, null];
+          Object.assign(row, values);
+          return [{ affectedRows: 1 }, null];
+        },
+      }),
     };
   }
 
@@ -660,5 +681,153 @@ describe('WithdrawalService requestWithdrawal', () => {
         amountCreditCents: WITHDRAWAL_MIN_CREDIT_CENTS - 1,
       }),
     ).rejects.toBeInstanceOf(WithdrawalValidationError);
+  });
+});
+
+describe('WithdrawalService admin transitions', () => {
+  it('approves a requested withdrawal without moving held funds', async () => {
+    const existing = fakeWithdrawalRequest({ status: 'requested' });
+    const { db, ledger, service } = serviceWithDeps({
+      db: new FakeWithdrawalDb([existing]),
+      ledger: new FakeLedgerService(0),
+    });
+
+    const row = await service.approveWithdrawal({
+      withdrawalExternalId: 'pay_existing_withdrawal',
+      reviewerUserId: 999,
+      note: 'bank account checked',
+      now: new Date('2026-07-03T04:00:00.000Z'),
+    });
+
+    expect(row).toBe(existing);
+    expect(row).toMatchObject({
+      status: 'approved',
+      metadata: {
+        approvedByUserId: 999,
+        approvalNote: 'bank account checked',
+        approvedAt: '2026-07-03T04:00:00.000Z',
+      },
+    });
+    expect(db.transactionCalls).toBe(1);
+    expect(db.lockedUserIds).toEqual([123]);
+    expect(db.updateValues).toHaveLength(1);
+    expect(ledger.entries).toHaveLength(0);
+  });
+
+  it('rejects a held withdrawal and releases available credit idempotently', async () => {
+    const existing = fakeWithdrawalRequest({ status: 'reviewing' });
+    const heldDebit = fakeHoldEntry();
+    const heldPending = fakeHoldEntry({
+      direction: 'credit',
+      bucket: 'pending_withdrawal',
+      idempotencyKey: 'withdrawal:pending:withdrawal-idem-1',
+    });
+    const { ledger, service } = serviceWithDeps({
+      db: new FakeWithdrawalDb([existing]),
+      ledger: new FakeLedgerService(0, { entries: [heldDebit, heldPending] }),
+    });
+
+    const row = await service.rejectWithdrawal({
+      withdrawalExternalId: 'pay_existing_withdrawal',
+      reviewerUserId: 999,
+      reason: 'bank card mismatch',
+      now: new Date('2026-07-03T04:30:00.000Z'),
+    });
+    const retry = await service.rejectWithdrawal({
+      withdrawalExternalId: 'pay_existing_withdrawal',
+      reviewerUserId: 999,
+      reason: 'bank card mismatch',
+      now: new Date('2026-07-03T04:31:00.000Z'),
+    });
+
+    expect(retry).toBe(row);
+    expect(row).toMatchObject({
+      status: 'rejected',
+      rejectionReason: 'bank card mismatch',
+      metadata: {
+        rejectedByUserId: 999,
+        rejectedAt: '2026-07-03T04:30:00.000Z',
+      },
+    });
+    expect(ledger.entries).toEqual([
+      heldDebit,
+      heldPending,
+      expect.objectContaining({
+        entryType: 'withdrawal_rejected_release',
+        direction: 'credit',
+        bucket: 'available',
+        amountCreditCents: 600_00,
+        idempotencyKey: 'withdrawal:reject:available:withdrawal-idem-1',
+      }),
+      expect.objectContaining({
+        entryType: 'withdrawal_rejected_release',
+        direction: 'debit',
+        bucket: 'pending_withdrawal',
+        amountCreditCents: 600_00,
+        idempotencyKey: 'withdrawal:reject:pending:withdrawal-idem-1',
+      }),
+    ]);
+  });
+
+  it('marks an approved withdrawal paid and settles pending withdrawal credit once', async () => {
+    const existing = fakeWithdrawalRequest({ status: 'approved' });
+    const heldPending = fakeHoldEntry({
+      direction: 'credit',
+      bucket: 'pending_withdrawal',
+      idempotencyKey: 'withdrawal:pending:withdrawal-idem-1',
+    });
+    const { ledger, service } = serviceWithDeps({
+      db: new FakeWithdrawalDb([existing]),
+      ledger: new FakeLedgerService(0, { entries: [heldPending] }),
+    });
+
+    const row = await service.markWithdrawalPaid({
+      withdrawalExternalId: 'pay_existing_withdrawal',
+      reviewerUserId: 999,
+      providerPayoutId: 'bank-payout-1',
+      now: new Date('2026-07-03T05:00:00.000Z'),
+    });
+    const retry = await service.markWithdrawalPaid({
+      withdrawalExternalId: 'pay_existing_withdrawal',
+      reviewerUserId: 999,
+      providerPayoutId: 'bank-payout-1',
+      now: new Date('2026-07-03T05:01:00.000Z'),
+    });
+
+    expect(retry).toBe(row);
+    expect(row).toMatchObject({
+      status: 'paid',
+      metadata: {
+        paidByUserId: 999,
+        providerPayoutId: 'bank-payout-1',
+        paidAt: '2026-07-03T05:00:00.000Z',
+      },
+    });
+    expect(ledger.entries).toEqual([
+      heldPending,
+      expect.objectContaining({
+        entryType: 'withdrawal_paid_settlement',
+        direction: 'debit',
+        bucket: 'pending_withdrawal',
+        amountCreditCents: 600_00,
+        idempotencyKey: 'withdrawal:paid:withdrawal-idem-1',
+      }),
+    ]);
+  });
+
+  it('rejects invalid terminal transitions without posting ledger entries', async () => {
+    const { ledger, service } = serviceWithDeps({
+      db: new FakeWithdrawalDb([fakeWithdrawalRequest({ status: 'paid' })]),
+      ledger: new FakeLedgerService(0),
+    });
+
+    await expect(
+      service.rejectWithdrawal({
+        withdrawalExternalId: 'pay_existing_withdrawal',
+        reviewerUserId: 999,
+        reason: 'too late',
+      }),
+    ).rejects.toMatchObject({ reason: 'already_paid' });
+    expect(ledger.entries).toHaveLength(0);
   });
 });

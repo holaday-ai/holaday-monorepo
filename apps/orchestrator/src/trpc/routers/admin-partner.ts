@@ -1,0 +1,381 @@
+import { TRPCError } from '@trpc/server';
+import { desc, eq, inArray, or } from 'drizzle-orm';
+import { z } from 'zod';
+import type { DB } from '../../db/client.js';
+import {
+  partnerKycProfiles,
+  partnerLots,
+  partnerRechargeOrders,
+  partnerWithdrawalRequests,
+  type PartnerRechargeOrder,
+  type PartnerWithdrawalRequest,
+} from '../../db/schema/partner.js';
+import { users } from '../../db/schema/users.js';
+import { KycService } from '../../partner/kyc-service.js';
+import {
+  PartnerPaymentConfirmConflictError,
+  PartnerPaymentConfirmReviewRequiredError,
+  PartnerPaymentProviderCaptureConflictError,
+  PartnerPaymentConfirmService,
+} from '../../partner/payment-confirm-service.js';
+import { WithdrawalService, WithdrawalTransitionError } from '../../partner/withdrawal-service.js';
+import { adminProcedure, router } from '../trpc.js';
+
+const OVERVIEW_LIMIT_CAP = 100;
+
+function partnerLedgerEnabled(): boolean {
+  return process.env.PARTNER_LEDGER_ENABLED === 'true';
+}
+
+function requirePartnerLedgerEnabled(): void {
+  if (!partnerLedgerEnabled()) {
+    throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'partner ledger is disabled' });
+  }
+}
+
+async function resolveUserByExternalId(db: DB, userExternalId: string) {
+  const [row] = await db
+    .select({
+      id: users.id,
+      externalId: users.externalId,
+      email: users.email,
+      displayName: users.displayName,
+      role: users.role,
+    })
+    .from(users)
+    .where(eq(users.externalId, userExternalId))
+    .limit(1);
+  if (!row) {
+    throw new TRPCError({ code: 'NOT_FOUND', message: 'user not found' });
+  }
+  return row;
+}
+
+async function readOrderByExternalId(db: DB, orderExternalId: string): Promise<PartnerRechargeOrder> {
+  const [row] = await db
+    .select()
+    .from(partnerRechargeOrders)
+    .where(eq(partnerRechargeOrders.externalId, orderExternalId))
+    .limit(1);
+  if (!row) {
+    throw new TRPCError({ code: 'NOT_FOUND', message: 'partner order not found' });
+  }
+  return row;
+}
+
+function summarizeOrder(order: PartnerRechargeOrder) {
+  return {
+    orderExternalId: order.externalId,
+    provider: order.provider,
+    providerCaptureId: order.providerCaptureId,
+    amountCnyCents: order.amountCnyCents,
+    status: order.status,
+    orderKind: order.orderKind,
+    createdAt: order.createdAt,
+    updatedAt: order.updatedAt,
+  };
+}
+
+function summarizeWithdrawal(withdrawal: PartnerWithdrawalRequest) {
+  return {
+    withdrawalExternalId: withdrawal.externalId,
+    amountCreditCents: withdrawal.amountCreditCents,
+    status: withdrawal.status,
+    reviewDueAt: withdrawal.reviewDueAt,
+    riskScore: withdrawal.riskScore,
+    rejectionReason: withdrawal.rejectionReason,
+    createdAt: withdrawal.createdAt,
+    updatedAt: withdrawal.updatedAt,
+  };
+}
+
+function mapPaymentError(error: unknown): never {
+  if (
+    error instanceof PartnerPaymentConfirmConflictError ||
+    error instanceof PartnerPaymentProviderCaptureConflictError
+  ) {
+    throw new TRPCError({ code: 'CONFLICT', message: error.message });
+  }
+  if (error instanceof RangeError) {
+    throw new TRPCError({ code: 'BAD_REQUEST', message: error.message });
+  }
+  throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'partner order confirmation failed' });
+}
+
+function mapWithdrawalError(error: unknown): never {
+  if (error instanceof WithdrawalTransitionError) {
+    if (error.reason === 'not_found') {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'withdrawal request not found' });
+    }
+    if (error.reason === 'update_conflict') {
+      throw new TRPCError({ code: 'CONFLICT', message: 'withdrawal request changed while reviewing' });
+    }
+    throw new TRPCError({ code: 'PRECONDITION_FAILED', message: error.message });
+  }
+  if (error instanceof RangeError) {
+    throw new TRPCError({ code: 'BAD_REQUEST', message: error.message });
+  }
+  throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'withdrawal review failed' });
+}
+
+export const adminPartnerRouter = router({
+  overview: adminProcedure
+    .input(
+      z
+        .object({
+          limit: z.number().int().min(1).max(OVERVIEW_LIMIT_CAP).default(50),
+        })
+        .optional(),
+    )
+    .query(async ({ ctx, input }) => {
+      if (!partnerLedgerEnabled()) {
+        return { enabled: false as const };
+      }
+
+      const limit = input?.limit ?? 50;
+      const now = new Date();
+      const [orderRows, kycRows, withdrawalRows, riskLotRows] = await Promise.all([
+        ctx.db
+          .select({
+            orderExternalId: partnerRechargeOrders.externalId,
+            userExternalId: users.externalId,
+            email: users.email,
+            displayName: users.displayName,
+            provider: partnerRechargeOrders.provider,
+            providerCaptureId: partnerRechargeOrders.providerCaptureId,
+            amountCnyCents: partnerRechargeOrders.amountCnyCents,
+            status: partnerRechargeOrders.status,
+            orderKind: partnerRechargeOrders.orderKind,
+            createdAt: partnerRechargeOrders.createdAt,
+            updatedAt: partnerRechargeOrders.updatedAt,
+          })
+          .from(partnerRechargeOrders)
+          .innerJoin(users, eq(users.id, partnerRechargeOrders.userId))
+          .where(inArray(partnerRechargeOrders.status, ['pending', 'review_required']))
+          .orderBy(desc(partnerRechargeOrders.createdAt))
+          .limit(limit),
+        ctx.db
+          .select({
+            kycExternalId: partnerKycProfiles.externalId,
+            userExternalId: users.externalId,
+            email: users.email,
+            displayName: users.displayName,
+            status: partnerKycProfiles.status,
+            country: partnerKycProfiles.country,
+            provider: partnerKycProfiles.provider,
+            providerRef: partnerKycProfiles.providerRef,
+            reviewedAt: partnerKycProfiles.reviewedAt,
+            updatedAt: partnerKycProfiles.updatedAt,
+          })
+          .from(partnerKycProfiles)
+          .innerJoin(users, eq(users.id, partnerKycProfiles.userId))
+          .where(inArray(partnerKycProfiles.status, ['pending', 'review_required']))
+          .orderBy(desc(partnerKycProfiles.updatedAt))
+          .limit(limit),
+        ctx.db
+          .select({
+            withdrawalExternalId: partnerWithdrawalRequests.externalId,
+            userExternalId: users.externalId,
+            email: users.email,
+            displayName: users.displayName,
+            amountCreditCents: partnerWithdrawalRequests.amountCreditCents,
+            status: partnerWithdrawalRequests.status,
+            reviewDueAt: partnerWithdrawalRequests.reviewDueAt,
+            riskScore: partnerWithdrawalRequests.riskScore,
+            rejectionReason: partnerWithdrawalRequests.rejectionReason,
+            createdAt: partnerWithdrawalRequests.createdAt,
+            updatedAt: partnerWithdrawalRequests.updatedAt,
+          })
+          .from(partnerWithdrawalRequests)
+          .innerJoin(users, eq(users.id, partnerWithdrawalRequests.userId))
+          .where(inArray(partnerWithdrawalRequests.status, ['requested', 'reviewing', 'approved']))
+          .orderBy(desc(partnerWithdrawalRequests.reviewDueAt))
+          .limit(limit),
+        ctx.db
+          .select({
+            lotExternalId: partnerLots.externalId,
+            userExternalId: users.externalId,
+            email: users.email,
+            displayName: users.displayName,
+            status: partnerLots.status,
+            riskStatus: partnerLots.riskStatus,
+            principalCreditCents: partnerLots.principalCreditCents,
+            apiUnits: partnerLots.apiUnits,
+            accumulationEndsAt: partnerLots.accumulationEndsAt,
+            releaseStartsAt: partnerLots.releaseStartsAt,
+            updatedAt: partnerLots.updatedAt,
+          })
+          .from(partnerLots)
+          .innerJoin(users, eq(users.id, partnerLots.userId))
+          .where(or(inArray(partnerLots.riskStatus, ['review', 'review_required', 'frozen']), eq(partnerLots.status, 'frozen')))
+          .orderBy(desc(partnerLots.updatedAt))
+          .limit(limit),
+      ]);
+
+      const activeWithdrawalRows = withdrawalRows.filter(
+        (row) => row.status === 'requested' || row.status === 'reviewing',
+      );
+
+      return {
+        enabled: true as const,
+        metrics: {
+          pendingKycCount: kycRows.length,
+          pendingOrderCount: orderRows.filter((row) => row.status === 'pending').length,
+          reviewRequiredOrderCount: orderRows.filter((row) => row.status === 'review_required').length,
+          pendingWithdrawalCount: activeWithdrawalRows.length,
+          approvedWithdrawalCount: withdrawalRows.filter((row) => row.status === 'approved').length,
+          overdueWithdrawalCount: activeWithdrawalRows.filter((row) => row.reviewDueAt.getTime() <= now.getTime()).length,
+          riskLotCount: riskLotRows.length,
+        },
+        orders: orderRows,
+        kycProfiles: kycRows,
+        withdrawals: withdrawalRows,
+        riskLots: riskLotRows,
+      };
+    }),
+
+  setKycStatus: adminProcedure
+    .input(
+      z.object({
+        userExternalId: z.string().trim().min(1).max(32),
+        status: z.enum(['pending', 'passed', 'review_required', 'rejected']),
+        provider: z.string().trim().min(1).max(32).default('manual'),
+        providerRef: z.string().trim().min(1).max(128).optional(),
+        note: z.string().trim().min(1).max(1000).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      requirePartnerLedgerEnabled();
+      const [adminUser, targetUser] = await Promise.all([
+        resolveUserByExternalId(ctx.db, ctx.userId),
+        resolveUserByExternalId(ctx.db, input.userExternalId),
+      ]);
+      try {
+        const row = await new KycService(ctx.db).upsertStatus({
+          userId: targetUser.id,
+          status: input.status,
+          provider: input.provider,
+          providerRef: input.providerRef,
+          reviewerUserId: adminUser.id,
+          note: input.note,
+        });
+        return {
+          kycExternalId: row.externalId,
+          userExternalId: targetUser.externalId,
+          status: row.status,
+          country: row.country,
+          provider: row.provider,
+          providerRef: row.providerRef,
+          reviewedAt: row.reviewedAt,
+        };
+      } catch (error) {
+        if (error instanceof RangeError) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: error.message });
+        }
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'KYC status update failed' });
+      }
+    }),
+
+  confirmOrder: adminProcedure
+    .input(
+      z.object({
+        orderExternalId: z.string().trim().min(1).max(32),
+        providerCaptureId: z.string().trim().min(1).max(128).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      requirePartnerLedgerEnabled();
+      const order = await readOrderByExternalId(ctx.db, input.orderExternalId);
+      try {
+        const result = await new PartnerPaymentConfirmService(ctx.db).confirmCapturedOrder({
+          orderExternalId: order.externalId,
+          provider: order.provider,
+          providerCaptureId: input.providerCaptureId ?? `manual:${order.externalId}`,
+          amountCnyCents: order.amountCnyCents,
+        });
+        return result;
+      } catch (error) {
+        if (error instanceof PartnerPaymentConfirmReviewRequiredError) {
+          return {
+            ok: false as const,
+            status: 'review_required' as const,
+            orderExternalId: error.orderExternalId,
+            orderKind: error.orderKind,
+            providerCaptureId: error.providerCaptureId,
+          };
+        }
+        return mapPaymentError(error);
+      }
+    }),
+
+  approveWithdrawal: adminProcedure
+    .input(
+      z.object({
+        withdrawalExternalId: z.string().trim().min(1).max(32),
+        note: z.string().trim().min(1).max(1000).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      requirePartnerLedgerEnabled();
+      const adminUser = await resolveUserByExternalId(ctx.db, ctx.userId);
+      try {
+        const row = await new WithdrawalService(ctx.db).approveWithdrawal({
+          withdrawalExternalId: input.withdrawalExternalId,
+          reviewerUserId: adminUser.id,
+          note: input.note,
+        });
+        return summarizeWithdrawal(row);
+      } catch (error) {
+        return mapWithdrawalError(error);
+      }
+    }),
+
+  rejectWithdrawal: adminProcedure
+    .input(
+      z.object({
+        withdrawalExternalId: z.string().trim().min(1).max(32),
+        reason: z.string().trim().min(1).max(1000),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      requirePartnerLedgerEnabled();
+      const adminUser = await resolveUserByExternalId(ctx.db, ctx.userId);
+      try {
+        const row = await new WithdrawalService(ctx.db).rejectWithdrawal({
+          withdrawalExternalId: input.withdrawalExternalId,
+          reviewerUserId: adminUser.id,
+          reason: input.reason,
+        });
+        return summarizeWithdrawal(row);
+      } catch (error) {
+        return mapWithdrawalError(error);
+      }
+    }),
+
+  markWithdrawalPaid: adminProcedure
+    .input(
+      z.object({
+        withdrawalExternalId: z.string().trim().min(1).max(32),
+        providerPayoutId: z.string().trim().min(1).max(128),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      requirePartnerLedgerEnabled();
+      const adminUser = await resolveUserByExternalId(ctx.db, ctx.userId);
+      try {
+        const row = await new WithdrawalService(ctx.db).markWithdrawalPaid({
+          withdrawalExternalId: input.withdrawalExternalId,
+          reviewerUserId: adminUser.id,
+          providerPayoutId: input.providerPayoutId,
+        });
+        return summarizeWithdrawal(row);
+      } catch (error) {
+        return mapWithdrawalError(error);
+      }
+    }),
+});
+
+export const __adminPartnerInternals = {
+  summarizeOrder,
+  summarizeWithdrawal,
+};
