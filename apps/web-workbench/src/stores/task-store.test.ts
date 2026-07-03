@@ -1609,6 +1609,50 @@ describe('applyServerMessage stale live frames after terminal', () => {
       planStatus: [{ idx: 1, note: '完成前计划', status: 'done' }],
     });
   });
+
+  it('does not attach late vision auxiliary frames to terminal tasks', () => {
+    useTaskStore.setState({
+      tasks: [task({ taskId: 'tsk_done_aux', status: 'completed' })],
+      terminalTaskIds: new Set(['tsk_done_aux']),
+    });
+
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.vision.captcha_detected',
+      taskId: 'tsk_done_aux',
+      antiBotType: 'captcha',
+      message: '迟到验证码',
+      waitTimeoutMs: 30_000,
+    });
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.vision.degrade',
+      taskId: 'tsk_done_aux',
+      level: 1,
+      strategy: 'profile_rotation',
+      ok: false,
+      message: '迟到降级',
+    });
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.vision.executor_fallback',
+      taskId: 'tsk_done_aux',
+      reason: 'anti-bot',
+      available: false,
+    });
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.vision.screencast',
+      taskId: 'tsk_done_aux',
+      tickIndex: 9,
+      imageBase64: 'late',
+      url: 'https://example.com/late',
+      viewport: { width: 1280, height: 720 },
+      timestamp: '2026-07-03T00:00:00.000Z',
+    });
+
+    const state = useTaskStore.getState();
+    expect(state.captchaWaitByTask.tsk_done_aux).toBeUndefined();
+    expect(state.degradeByTask.tsk_done_aux).toBeUndefined();
+    expect(state.executorFallbackByTask.tsk_done_aux).toBeUndefined();
+    expect(state.screencastByTask.tsk_done_aux).toBeUndefined();
+  });
 });
 
 describe('applyServerMessage paused terminal frame', () => {

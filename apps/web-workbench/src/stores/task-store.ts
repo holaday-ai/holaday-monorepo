@@ -1587,17 +1587,20 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     }
     if (msg.type === 'server.vision.captcha_detected') {
       const startedAt = Date.now();
-      set((prev) => ({
-        captchaWaitByTask: {
-          ...prev.captchaWaitByTask,
-          [msg.taskId]: {
-            antiBotType: msg.antiBotType,
-            message: msg.message,
-            startedAt,
-            deadlineMs: startedAt + msg.waitTimeoutMs,
+      set((prev) => {
+        if (isTaskRuntimeTerminal(prev, msg.taskId)) return prev;
+        return {
+          captchaWaitByTask: {
+            ...prev.captchaWaitByTask,
+            [msg.taskId]: {
+              antiBotType: msg.antiBotType,
+              message: msg.message,
+              startedAt,
+              deadlineMs: startedAt + msg.waitTimeoutMs,
+            },
           },
-        },
-      }));
+        };
+      });
       return;
     }
     if (msg.type === 'server.vision.captcha_resolved') {
@@ -1609,44 +1612,53 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       return;
     }
     if (msg.type === 'server.vision.degrade') {
-      set((prev) => ({
-        degradeByTask: {
-          ...prev.degradeByTask,
-          [msg.taskId]: {
-            level: msg.level,
-            strategy: msg.strategy,
-            ok: msg.ok,
-            message: msg.message,
-            ...(msg.handoffToExtension ? { handoffToExtension: true } : {}),
-            ...(msg.nextUrl ? { nextUrl: msg.nextUrl } : {}),
-            at: Date.now(),
+      set((prev) => {
+        if (isTaskRuntimeTerminal(prev, msg.taskId)) return prev;
+        return {
+          degradeByTask: {
+            ...prev.degradeByTask,
+            [msg.taskId]: {
+              level: msg.level,
+              strategy: msg.strategy,
+              ok: msg.ok,
+              message: msg.message,
+              ...(msg.handoffToExtension ? { handoffToExtension: true } : {}),
+              ...(msg.nextUrl ? { nextUrl: msg.nextUrl } : {}),
+              at: Date.now(),
+            },
           },
-        },
-      }));
+        };
+      });
       return;
     }
     if (msg.type === 'server.vision.executor_fallback') {
-      set((prev) => ({
-        executorFallbackByTask: {
-          ...prev.executorFallbackByTask,
-          [msg.taskId]: { available: msg.available, at: Date.now() },
-        },
-      }));
+      set((prev) => {
+        if (isTaskRuntimeTerminal(prev, msg.taskId)) return prev;
+        return {
+          executorFallbackByTask: {
+            ...prev.executorFallbackByTask,
+            [msg.taskId]: { available: msg.available, at: Date.now() },
+          },
+        };
+      });
       return;
     }
     if (msg.type === 'server.vision.screencast') {
-      set((prev) => ({
-        screencastByTask: {
-          ...prev.screencastByTask,
-          [msg.taskId]: {
-            tickIndex: msg.tickIndex,
-            imageBase64: msg.imageBase64,
-            url: msg.url,
-            viewport: msg.viewport,
-            timestamp: msg.timestamp,
+      set((prev) => {
+        if (isTaskRuntimeTerminal(prev, msg.taskId)) return prev;
+        return {
+          screencastByTask: {
+            ...prev.screencastByTask,
+            [msg.taskId]: {
+              tickIndex: msg.tickIndex,
+              imageBase64: msg.imageBase64,
+              url: msg.url,
+              viewport: msg.viewport,
+              timestamp: msg.timestamp,
+            },
           },
-        },
-      }));
+        };
+      });
       return;
     }
     if (msg.type === 'server.supercar.awaiting_user') {
