@@ -532,6 +532,8 @@ export class TaskRepository {
         .set({
           status: 'executing',
           startedAt: new Date(),
+          awaitingQuestion: null,
+          awaitingKind: null,
         })
         .where(and(eq(tasks.externalId, taskExternalId), eq(tasks.status, 'queued')));
       if (extractMysqlAffectedRows(result) === 0) {
@@ -572,6 +574,8 @@ export class TaskRepository {
           errorCode,
           errorMessage,
           completedAt: new Date(),
+          awaitingQuestion: null,
+          awaitingKind: null,
         })
         .where(and(eq(tasks.externalId, taskExternalId), eq(tasks.status, 'queued')));
       if (extractMysqlAffectedRows(result) === 0) {
@@ -693,6 +697,8 @@ export class TaskRepository {
     const taskRowId = taskRow.id;
 
     const update: Partial<typeof tasks.$inferInsert> = { status: outcome.status };
+    update.awaitingQuestion = null;
+    update.awaitingKind = null;
     const result: Record<string, unknown> = { tickCount: outcome.tickCount };
     let eventPayload: Record<string, unknown> = { tickCount: outcome.tickCount };
     if (outcome.status === 'completed' || outcome.status === 'partial_success') {
@@ -821,7 +827,12 @@ export class TaskRepository {
     await this.db.transaction(async (tx) => {
       const taskUpdateResult = await tx
         .update(tasks)
-        .set({ status: next.status, pauseReason: null })
+        .set({
+          status: next.status,
+          pauseReason: null,
+          awaitingQuestion: null,
+          awaitingKind: null,
+        })
         .where(and(eq(tasks.id, taskRow.id), eq(tasks.status, prev.status)));
       const affected = extractMysqlAffectedRows(taskUpdateResult);
       if (affected === 0) {

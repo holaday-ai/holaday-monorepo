@@ -254,6 +254,23 @@ describe('TaskRepository.persistVisionOutcome — awaiting_user state guard (Pha
     expect(result.persisted).toBe(true);
   });
 
+  it('clears stale awaiting fields on terminal runner outcomes', async () => {
+    const { db, captured } = fakeDbWithAffectedRows(1);
+    const repo = new TaskRepository(db);
+
+    await repo.persistVisionOutcome('tsk_exec_done', {
+      status: 'completed',
+      summary: 'final answer',
+      tickCount: 3,
+    });
+
+    expect(captured.taskUpdate).toMatchObject({
+      status: 'completed',
+      awaitingQuestion: null,
+      awaitingKind: null,
+    });
+  });
+
   it('guards completed writes to active running rows at SQL level', async () => {
     const { db, captured } = fakeDbWithAffectedRows(1);
     const repo = new TaskRepository(db);
@@ -736,6 +753,39 @@ describe('TaskRepository task terminal state persistence', () => {
     expect(result.persisted).toBe(true);
   });
 
+  it('applyBatchApprove clears stale awaiting fields when resuming execution', async () => {
+    const { db, captured } = fakeDbForStateTransitions(1);
+    const repo = new TaskRepository(db);
+    const prev: TaskState = {
+      taskId: 'tsk_state_machine',
+      status: 'awaiting_user',
+      plan: [{ id: 'stp_batch', kind: 'click', risk: 'high' }],
+      cursor: 0,
+      pendingConfirm: {
+        kind: 'batch',
+        stepId: 'stp_batch',
+        batchIndex: 0,
+        batchTotal: 2,
+        items: [{ label: 'First draft', preview: 'Send first draft' }],
+        risk: 'high',
+      },
+    };
+    const next: TaskState = {
+      ...prev,
+      status: 'executing',
+      pendingConfirm: null,
+    };
+
+    await repo.applyBatchApprove(prev, next);
+
+    expect(captured.updatePayloads[0]).toMatchObject({
+      status: 'executing',
+      pauseReason: null,
+      awaitingQuestion: null,
+      awaitingKind: null,
+    });
+  });
+
   it('markAwaitingReplyResumed only resumes rows that are still awaiting_user', async () => {
     const { db, captured } = fakeDbForStateTransitions(1);
     const repo = new TaskRepository(db);
@@ -1034,6 +1084,19 @@ describe('TaskRepository task terminal state persistence', () => {
     });
   });
 
+  it('markQueuedTaskExecuting clears stale awaiting fields', async () => {
+    const { db, captured } = fakeDbForStateTransitions(1);
+    const repo = new TaskRepository(db);
+
+    await repo.markQueuedTaskExecuting('tsk_state_machine');
+
+    expect(captured.updatePayloads[0]).toMatchObject({
+      status: 'executing',
+      awaitingQuestion: null,
+      awaitingKind: null,
+    });
+  });
+
   it('markQueuedTaskExecuting reports stale rows without pretending to start', async () => {
     const { db, captured } = fakeDbForStateTransitions(0);
     const repo = new TaskRepository(db);
@@ -1073,6 +1136,19 @@ describe('TaskRepository task terminal state persistence', () => {
         errorCode: 'QUEUE_TIMEOUT',
         reason: 'queue timeout: 排队等待时间过长，请稍后重试',
       },
+    });
+  });
+
+  it('markQueuedTaskFailed clears stale awaiting fields', async () => {
+    const { db, captured } = fakeDbForStateTransitions(1);
+    const repo = new TaskRepository(db);
+
+    await repo.markQueuedTaskFailed('tsk_state_machine', 'queue timeout');
+
+    expect(captured.updatePayloads[0]).toMatchObject({
+      status: 'failed',
+      awaitingQuestion: null,
+      awaitingKind: null,
     });
   });
 
