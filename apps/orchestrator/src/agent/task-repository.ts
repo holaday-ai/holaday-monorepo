@@ -1110,6 +1110,8 @@ export class TaskRepository {
         taskExternalId: tasks.externalId,
         status: tasks.status,
         pauseReason: tasks.pauseReason,
+        awaitingQuestion: tasks.awaitingQuestion,
+        awaitingKind: tasks.awaitingKind,
         userExternalId: users.externalId,
         errorCode: tasks.errorCode,
         errorMessage: tasks.errorMessage,
@@ -1186,6 +1188,8 @@ export class TaskRepository {
         userExternalId: row.userExternalId,
         pendingConfirm: pending,
         pauseReason: state.pauseReason ?? null,
+        awaitingQuestion: row.awaitingQuestion ?? null,
+        awaitingKind: row.awaitingKind ?? null,
       });
     }
     return out;
@@ -1197,6 +1201,8 @@ export interface RehydratedTask {
   userExternalId: string;
   pendingConfirm: PendingConfirm | null;
   pauseReason: 'user' | 'retries_exhausted' | 'quota_exceeded' | null;
+  awaitingQuestion: string | null;
+  awaitingKind: string | null;
 }
 
 /**

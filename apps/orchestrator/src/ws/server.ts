@@ -138,8 +138,11 @@ export function createWsServer(port: number, opts: WsServerOpts = {}) {
  * Drain per-user rehydrated tasks into the client's in-memory map and
  * re-emit the right continuation frame so the extension can resume:
  *
- *   awaiting_user → re-emit server.user.confirm (persisted pending payload)
+ *   awaiting_user → re-emit server.user.confirm when a legacy
+ *                    pending_confirm_payload exists
  *   paused        → re-emit server.task.control pause (with reason)
+ *   awaiting_user → re-emit server.supercar.awaiting_user when the
+ *                    durable task row has awaiting_question/kind
  *   executing     → re-emit server.task.dispatch for the cursor step,
  *                    so the extension resumes the in-flight action
  *                    (W1 rehearsal b1: completeness of crash recovery)
@@ -174,6 +177,7 @@ async function applyRehydrationForUser(state: ClientState): Promise<void> {
 
   let reemittedDispatch = 0;
   let reemittedConfirm = 0;
+  let reemittedAwaiting = 0;
   let reemittedPause = 0;
   let reemittedTerminal = 0;
 
@@ -203,6 +207,17 @@ async function applyRehydrationForUser(state: ClientState): Promise<void> {
         });
       }
       reemittedConfirm += 1;
+      continue;
+    }
+
+    if (entry.state.status === 'awaiting_user' && entry.awaitingQuestion) {
+      send(state.socket, {
+        type: 'server.supercar.awaiting_user',
+        taskId: entry.state.taskId,
+        question: entry.awaitingQuestion,
+        awaitingKind: normalizeRehydratedAwaitingKind(entry.awaitingKind),
+      });
+      reemittedAwaiting += 1;
       continue;
     }
 
@@ -326,6 +341,7 @@ async function applyRehydrationForUser(state: ClientState): Promise<void> {
       reemitted: {
         dispatch: reemittedDispatch,
         confirm: reemittedConfirm,
+        awaiting: reemittedAwaiting,
         pause: reemittedPause,
         terminal: reemittedTerminal,
       },
@@ -338,6 +354,22 @@ async function applyRehydrationForUser(state: ClientState): Promise<void> {
 
 function isRestartLostTransientStatus(status: TaskState['status']): boolean {
   return status === 'pending' || status === 'planning' || status === 'queued';
+}
+
+function normalizeRehydratedAwaitingKind(
+  raw: string | null,
+): 'clarification' | 'login' | 'captcha' | 'permission' | 'browser_action' | 'video_quote' {
+  const valid = [
+    'clarification',
+    'login',
+    'captcha',
+    'permission',
+    'browser_action',
+    'video_quote',
+  ] as const;
+  return valid.includes(raw as (typeof valid)[number])
+    ? (raw as (typeof valid)[number])
+    : 'clarification';
 }
 
 async function failRehydratedTaskIfStatus(
