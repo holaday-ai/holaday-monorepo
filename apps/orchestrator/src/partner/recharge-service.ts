@@ -22,6 +22,7 @@ import { calculateApiUnits, calculateLotCaps, selectRechargeTier } from './partn
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const THIRTY_DAYS_MS = 30 * DAY_MS;
+const REVIEW_OVERRIDE_NOTE_MAX_LENGTH = 1000;
 
 export type RechargeAmountValidationResult =
   | { ok: true }
@@ -33,6 +34,18 @@ export type RechargeGateReason = 'membership_required' | 'kyc_required';
 export interface RechargeServiceDeps {
   membership?: Pick<PartnerMembershipService, 'getActiveMembership'>;
   kyc?: Pick<KycService, 'getStatus'>;
+}
+
+export interface RechargeLotReviewOverride {
+  reviewerUserId: number;
+  approvedAt: Date;
+  note?: string;
+}
+
+interface NormalizedRechargeLotReviewOverride {
+  reviewerUserId: number;
+  approvedAt: Date;
+  note?: string;
 }
 
 interface NormalizedPendingOrder {
@@ -49,6 +62,7 @@ interface ExpectedLotPayload {
   userId: number;
   rechargeOrderId: number;
   status: 'accumulating';
+  riskStatus: 'normal' | 'review';
   principalCreditCents: number;
   tierMultiplierBps: number;
   apiUnits: number;
@@ -57,6 +71,7 @@ interface ExpectedLotPayload {
   accumulationEndsAt: Date;
   releaseStartsAt: Date;
   releaseEndsAt: Date;
+  metadata: Record<string, unknown> | null;
 }
 
 export class RechargeGateError extends Error {
@@ -219,7 +234,31 @@ function normalizeRechargeAmountOrThrow(amountCnyCents: number): number {
   return amountCnyCents;
 }
 
-function normalizeRollingThirtyDayAmount(rollingThirtyDayCnyCents: number, amountCnyCents: number): number {
+function normalizeOptionalBoundedString(
+  value: string | undefined,
+  fieldName: string,
+  maxLength: number,
+): string | undefined {
+  if (value === undefined) return undefined;
+  return normalizeBoundedString(value, fieldName, maxLength).trim();
+}
+
+function normalizeReviewOverride(
+  value: RechargeLotReviewOverride | undefined,
+): NormalizedRechargeLotReviewOverride | undefined {
+  if (value === undefined) return undefined;
+  return {
+    reviewerUserId: normalizePositiveSafeInteger(value.reviewerUserId, 'reviewOverride.reviewerUserId'),
+    approvedAt: normalizeDate(value.approvedAt, 'reviewOverride.approvedAt'),
+    note: normalizeOptionalBoundedString(value.note, 'reviewOverride.note', REVIEW_OVERRIDE_NOTE_MAX_LENGTH),
+  };
+}
+
+function normalizeRollingThirtyDayAmount(
+  rollingThirtyDayCnyCents: number,
+  amountCnyCents: number,
+  options: { allowAboveMonthlyMaximum?: boolean } = {},
+): number {
   if (!Number.isSafeInteger(rollingThirtyDayCnyCents) || rollingThirtyDayCnyCents < 0) {
     throw new RangeError('rollingThirtyDayCnyCents must be a non-negative safe integer');
   }
@@ -229,7 +268,10 @@ function normalizeRollingThirtyDayAmount(rollingThirtyDayCnyCents: number, amoun
   if (rollingThirtyDayCnyCents < amountCnyCents) {
     throw new RangeError('rollingThirtyDayCnyCents must include the current recharge amount');
   }
-  if (rollingThirtyDayCnyCents > PARTNER_RECHARGE_MAX_MONTHLY_CNY_CENTS) {
+  if (
+    rollingThirtyDayCnyCents > PARTNER_RECHARGE_MAX_MONTHLY_CNY_CENTS &&
+    options.allowAboveMonthlyMaximum !== true
+  ) {
     throw new RangeError('rollingThirtyDayCnyCents must not exceed the monthly maximum');
   }
   return rollingThirtyDayCnyCents;
@@ -291,13 +333,16 @@ function buildExpectedLotPayload(input: {
   amountCnyCents: number;
   rollingThirtyDayCnyCents: number;
   now: Date;
+  reviewOverride?: RechargeLotReviewOverride;
 }): ExpectedLotPayload {
   const userId = normalizePositiveSafeInteger(input.userId, 'userId');
   const rechargeOrderId = normalizePositiveSafeInteger(input.rechargeOrderId, 'rechargeOrderId');
   const amountCnyCents = normalizeRechargeAmountOrThrow(input.amountCnyCents);
+  const reviewOverride = normalizeReviewOverride(input.reviewOverride);
   const rollingThirtyDayCnyCents = normalizeRollingThirtyDayAmount(
     input.rollingThirtyDayCnyCents,
     amountCnyCents,
+    { allowAboveMonthlyMaximum: reviewOverride !== undefined },
   );
   const accumulationStartsAt = normalizeDate(input.now, 'now');
   const accumulationEndsAt = addUtcDays(accumulationStartsAt, PARTNER_ACCUMULATION_DAYS);
@@ -310,6 +355,7 @@ function buildExpectedLotPayload(input: {
     userId,
     rechargeOrderId,
     status: 'accumulating',
+    riskStatus: reviewOverride ? 'review' : 'normal',
     principalCreditCents: caps.principalCreditCents,
     tierMultiplierBps: tier.multiplierBps,
     apiUnits: calculateApiUnits(amountCnyCents, tier.multiplierBps),
@@ -318,6 +364,17 @@ function buildExpectedLotPayload(input: {
     accumulationEndsAt,
     releaseStartsAt,
     releaseEndsAt,
+    metadata: reviewOverride
+      ? {
+          reviewOverride: {
+            reviewerUserId: reviewOverride.reviewerUserId,
+            approvedAt: reviewOverride.approvedAt.toISOString(),
+            ...(reviewOverride.note ? { note: reviewOverride.note } : {}),
+          },
+          rollingThirtyDayCnyCents,
+          monthlyCapCnyCents: PARTNER_RECHARGE_MAX_MONTHLY_CNY_CENTS,
+        }
+      : null,
   };
 }
 
@@ -329,6 +386,7 @@ function assertExistingLotPayloadMatches(row: PartnerLot, expected: ExpectedLotP
     row.tierMultiplierBps !== expected.tierMultiplierBps ||
     row.apiUnits !== expected.apiUnits ||
     row.bonusCapCreditCents !== expected.bonusCapCreditCents ||
+    row.riskStatus !== expected.riskStatus ||
     row.status !== expected.status
   ) {
     throw new RechargeLotConflictError();
@@ -422,6 +480,7 @@ export class RechargeService {
     rechargeOrderId: number;
     amountCnyCents: number;
     rollingThirtyDayCnyCents: number;
+    reviewOverride?: RechargeLotReviewOverride;
     now?: Date;
   }): Promise<PartnerLot> {
     const expected = buildExpectedLotPayload({
@@ -436,7 +495,7 @@ export class RechargeService {
         userId: expected.userId,
         rechargeOrderId: expected.rechargeOrderId,
         status: expected.status,
-        riskStatus: 'normal',
+        riskStatus: expected.riskStatus,
         principalCreditCents: expected.principalCreditCents,
         tierMultiplierBps: expected.tierMultiplierBps,
         apiUnits: expected.apiUnits,
@@ -449,7 +508,7 @@ export class RechargeService {
         accumulationEndsAt: expected.accumulationEndsAt,
         releaseStartsAt: expected.releaseStartsAt,
         releaseEndsAt: expected.releaseEndsAt,
-        metadata: null,
+        metadata: expected.metadata,
       })
       .onDuplicateKeyUpdate({ set: { rechargeOrderId: sql`recharge_order_id` } });
 

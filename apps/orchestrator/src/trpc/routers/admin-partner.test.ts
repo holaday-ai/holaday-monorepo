@@ -5,12 +5,14 @@ import { users } from '../../db/schema/users.js';
 
 const {
   confirmCapturedOrderMock,
+  approveReviewRequiredOrderMock,
   upsertKycStatusMock,
   approveWithdrawalMock,
   rejectWithdrawalMock,
   markWithdrawalPaidMock,
 } = vi.hoisted(() => ({
   confirmCapturedOrderMock: vi.fn(),
+  approveReviewRequiredOrderMock: vi.fn(),
   upsertKycStatusMock: vi.fn(),
   approveWithdrawalMock: vi.fn(),
   rejectWithdrawalMock: vi.fn(),
@@ -23,6 +25,7 @@ vi.mock('../../partner/payment-confirm-service.js', async (importOriginal) => {
     ...actual,
     PartnerPaymentConfirmService: vi.fn(() => ({
       confirmCapturedOrder: confirmCapturedOrderMock,
+      approveReviewRequiredOrder: approveReviewRequiredOrderMock,
     })),
   };
 });
@@ -180,6 +183,7 @@ describe('admin.partner router', () => {
   beforeEach(() => {
     process.env.PARTNER_LEDGER_ENABLED = 'true';
     confirmCapturedOrderMock.mockReset();
+    approveReviewRequiredOrderMock.mockReset();
     upsertKycStatusMock.mockReset();
     approveWithdrawalMock.mockReset();
     rejectWithdrawalMock.mockReset();
@@ -270,6 +274,32 @@ describe('admin.partner router', () => {
       provider: 'manual',
       providerCaptureId: 'manual:pay_order_1',
       amountCnyCents: 10_000_00,
+    });
+  });
+
+  it('approves a review-required order with the admin reviewer id', async () => {
+    approveReviewRequiredOrderMock.mockResolvedValueOnce({
+      ok: true,
+      status: 'completed',
+      orderExternalId: 'pay_order_1',
+      orderKind: 'recharge',
+      deduped: false,
+    });
+
+    const result = await adminRouter.createCaller(makeContext()).partner.approveReviewRequiredOrder({
+      orderExternalId: 'pay_order_1',
+      note: '人工复核放行',
+    });
+
+    expect(result).toMatchObject({
+      status: 'completed',
+      orderExternalId: 'pay_order_1',
+      orderKind: 'recharge',
+    });
+    expect(approveReviewRequiredOrderMock).toHaveBeenCalledWith({
+      orderExternalId: 'pay_order_1',
+      reviewerUserId: 1,
+      note: '人工复核放行',
     });
   });
 

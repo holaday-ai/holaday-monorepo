@@ -79,7 +79,9 @@ class FakePartnerPaymentDb {
 
           const row = this.orders.find((order) => {
             if (!predicateText.includes(order.externalId)) return false;
-            if (values.status === 'completed') return order.status === 'pending';
+            if (values.status === 'completed') {
+              return order.status === 'pending' || order.status === 'review_required';
+            }
             return true;
           });
           if (!row) {
@@ -209,6 +211,11 @@ function serviceWithFakes(
       rechargeOrderId: number;
       amountCnyCents: number;
       rollingThirtyDayCnyCents: number;
+      reviewOverride?: {
+        reviewerUserId: number;
+        approvedAt: Date;
+        note?: string;
+      };
       now?: Date;
     }) => Promise<PartnerLot>;
   } = {},
@@ -223,6 +230,11 @@ function serviceWithFakes(
     rechargeOrderId: number;
     amountCnyCents: number;
     rollingThirtyDayCnyCents: number;
+    reviewOverride?: {
+      reviewerUserId: number;
+      approvedAt: Date;
+      note?: string;
+    };
     now?: Date;
   }> = [];
 
@@ -625,5 +637,164 @@ describe('PartnerPaymentConfirmService.confirmCapturedOrder', () => {
 
     expect(fakeDb.wherePredicateTexts).toHaveLength(0);
     expect(fakeDb.updateRowsAffected).toEqual([]);
+  });
+});
+
+describe('PartnerPaymentConfirmService.approveReviewRequiredOrder', () => {
+  it('completes a review-required recharge order, records reviewer metadata, and creates one lot', async () => {
+    const order = fakeOrder({
+      status: 'review_required',
+      providerCaptureId: 'cap_1',
+      metadata: {
+        reviewReason: 'lot_creation_failed',
+        errorName: 'RangeError',
+      },
+    });
+    const fakeDb = new FakePartnerPaymentDb({ orders: [order] });
+    const { service, lotCreations } = serviceWithFakes(fakeDb);
+
+    await expect(
+      service.approveReviewRequiredOrder({
+        orderExternalId: 'pay_order_1',
+        reviewerUserId: 77,
+        note: '复核通过，允许继续建批次',
+        now: new Date('2026-07-03T03:00:00.000Z'),
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      status: 'completed',
+      orderExternalId: 'pay_order_1',
+      orderKind: 'recharge',
+      deduped: false,
+    });
+
+    expect(order.status).toBe('completed');
+    expect(order.metadata).toMatchObject({
+      reviewReason: 'lot_creation_failed',
+      errorName: 'RangeError',
+      reviewApprovedByUserId: 77,
+      reviewApprovedAt: '2026-07-03T03:00:00.000Z',
+      reviewApprovalNote: '复核通过，允许继续建批次',
+    });
+    expect(lotCreations).toEqual([
+      {
+        userId: 123,
+        rechargeOrderId: 1,
+        amountCnyCents: 10_000_00,
+        rollingThirtyDayCnyCents: 10_000_00,
+        reviewOverride: {
+          reviewerUserId: 77,
+          approvedAt: new Date('2026-07-03T03:00:00.000Z'),
+          note: '复核通过，允许继续建批次',
+        },
+        now: new Date('2026-07-03T03:00:00.000Z'),
+      },
+    ]);
+  });
+
+  it('treats a repeated review approval as completed without creating another lot', async () => {
+    const order = fakeOrder({
+      status: 'review_required',
+      providerCaptureId: 'cap_1',
+      metadata: {
+        reviewReason: 'annual_recharge_cap_exceeded',
+      },
+    });
+    const fakeDb = new FakePartnerPaymentDb({ orders: [order] });
+    const { service, lotCreations } = serviceWithFakes(fakeDb);
+
+    await service.approveReviewRequiredOrder({
+      orderExternalId: 'pay_order_1',
+      reviewerUserId: 77,
+      now: new Date('2026-07-03T03:00:00.000Z'),
+    });
+    await expect(
+      service.approveReviewRequiredOrder({
+        orderExternalId: 'pay_order_1',
+        reviewerUserId: 77,
+        now: new Date('2026-07-03T03:01:00.000Z'),
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      status: 'completed',
+      orderExternalId: 'pay_order_1',
+      orderKind: 'recharge',
+      deduped: true,
+    });
+
+    expect(lotCreations).toHaveLength(1);
+  });
+
+  it('passes review override details when approving a lot above the monthly cap', async () => {
+    const current = fakeOrder({
+      id: 1,
+      status: 'review_required',
+      providerCaptureId: 'cap_1',
+      amountCnyCents: 10_000_00,
+      metadata: {
+        reviewReason: 'lot_creation_failed',
+        errorName: 'RangeError',
+        errorMessage: 'rollingThirtyDayCnyCents must not exceed the monthly maximum',
+      },
+    });
+    const priorNearCap = fakeOrder({
+      id: 2,
+      externalId: 'pay_order_2',
+      userId: 123,
+      providerCaptureId: 'cap_prior',
+      status: 'completed',
+      amountCnyCents: 490_001_00,
+      createdAt: new Date('2026-06-20T00:00:00.000Z'),
+      updatedAt: new Date('2026-06-20T00:00:00.000Z'),
+    });
+    const lotInputs: Array<{
+      rollingThirtyDayCnyCents: number;
+      reviewOverride?: {
+        reviewerUserId: number;
+        approvedAt: Date;
+        note?: string;
+      };
+    }> = [];
+    const fakeDb = new FakePartnerPaymentDb({ orders: [current, priorNearCap] });
+    const { service } = serviceWithFakes(fakeDb, {
+      createLotForCapturedRecharge: async (input) => {
+        lotInputs.push({
+          rollingThirtyDayCnyCents: input.rollingThirtyDayCnyCents,
+          reviewOverride: input.reviewOverride,
+        });
+        if (input.rollingThirtyDayCnyCents > 500_000_00 && !input.reviewOverride) {
+          throw new RangeError('rollingThirtyDayCnyCents must not exceed the monthly maximum');
+        }
+        return fakeLot({
+          userId: input.userId,
+          rechargeOrderId: input.rechargeOrderId,
+          principalCreditCents: input.amountCnyCents,
+        });
+      },
+    });
+
+    await expect(
+      service.approveReviewRequiredOrder({
+        orderExternalId: 'pay_order_1',
+        reviewerUserId: 77,
+        note: '人工确认允许超过月上限',
+        now: new Date('2026-07-03T03:00:00.000Z'),
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      status: 'completed',
+      deduped: false,
+    });
+
+    expect(lotInputs).toEqual([
+      {
+        rollingThirtyDayCnyCents: 500_001_00,
+        reviewOverride: {
+          reviewerUserId: 77,
+          approvedAt: new Date('2026-07-03T03:00:00.000Z'),
+          note: '人工确认允许超过月上限',
+        },
+      },
+    ]);
   });
 });

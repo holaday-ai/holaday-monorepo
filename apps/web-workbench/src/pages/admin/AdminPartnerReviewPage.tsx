@@ -23,6 +23,7 @@ import {
   formatPartnerCreditCents,
   formatPartnerMoneyCents,
   normalizeAdminPartnerOverview,
+  partnerOrderActionLabel,
   partnerReviewStatusToken,
   type AdminPartnerStatusKind,
 } from './admin-partner-state';
@@ -43,6 +44,7 @@ export function AdminPartnerReviewPage(): JSX.Element {
   const [kycStatus, setKycStatus] = React.useState<KycStatusInput>('passed');
   const [kycProvider, setKycProvider] = React.useState('manual');
   const [kycNote, setKycNote] = React.useState('');
+  const [orderReviewNotes, setOrderReviewNotes] = React.useState<Record<string, string>>({});
   const [withdrawalReasons, setWithdrawalReasons] = React.useState<Record<string, string>>({});
   const [payoutIds, setPayoutIds] = React.useState<Record<string, string>>({});
 
@@ -158,12 +160,14 @@ export function AdminPartnerReviewPage(): JSX.Element {
           kycStatus={kycStatus}
           kycProvider={kycProvider}
           kycNote={kycNote}
+          orderReviewNotes={orderReviewNotes}
           withdrawalReasons={withdrawalReasons}
           payoutIds={payoutIds}
           setKycUserExternalId={setKycUserExternalId}
           setKycStatus={setKycStatus}
           setKycProvider={setKycProvider}
           setKycNote={setKycNote}
+          setOrderReviewNotes={setOrderReviewNotes}
           setWithdrawalReasons={setWithdrawalReasons}
           setPayoutIds={setPayoutIds}
           submitManualKyc={submitManualKyc}
@@ -181,12 +185,14 @@ function EnabledAdminPartnerReview({
   kycStatus,
   kycProvider,
   kycNote,
+  orderReviewNotes,
   withdrawalReasons,
   payoutIds,
   setKycUserExternalId,
   setKycStatus,
   setKycProvider,
   setKycNote,
+  setOrderReviewNotes,
   setWithdrawalReasons,
   setPayoutIds,
   submitManualKyc,
@@ -198,12 +204,14 @@ function EnabledAdminPartnerReview({
   kycStatus: KycStatusInput;
   kycProvider: string;
   kycNote: string;
+  orderReviewNotes: Record<string, string>;
   withdrawalReasons: Record<string, string>;
   payoutIds: Record<string, string>;
   setKycUserExternalId: (value: string) => void;
   setKycStatus: (value: KycStatusInput) => void;
   setKycProvider: (value: string) => void;
   setKycNote: (value: string) => void;
+  setOrderReviewNotes: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   setWithdrawalReasons: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   setPayoutIds: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   submitManualKyc: () => Promise<void>;
@@ -233,7 +241,13 @@ function EnabledAdminPartnerReview({
       />
 
       <KycQueue rows={data.kycProfiles} pendingAction={pendingAction} runAction={runAction} />
-      <OrderQueue rows={data.orders} pendingAction={pendingAction} runAction={runAction} />
+      <OrderQueue
+        rows={data.orders}
+        pendingAction={pendingAction}
+        orderReviewNotes={orderReviewNotes}
+        setOrderReviewNotes={setOrderReviewNotes}
+        runAction={runAction}
+      />
       <WithdrawalQueue
         rows={data.withdrawals}
         pendingAction={pendingAction}
@@ -395,10 +409,14 @@ function KycQueue({
 function OrderQueue({
   rows,
   pendingAction,
+  orderReviewNotes,
+  setOrderReviewNotes,
   runAction,
 }: {
   rows: EnabledOverviewState['orders'];
   pendingAction: string | null;
+  orderReviewNotes: Record<string, string>;
+  setOrderReviewNotes: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   runAction: (actionKey: string, action: () => Promise<void>, success: string) => Promise<void>;
 }): JSX.Element {
   return (
@@ -408,38 +426,65 @@ function OrderQueue({
         empty={rows.length === 0}
         colSpan={7}
       >
-        {rows.map((row) => (
-          <tr key={row.orderExternalId} className="border-b border-[#EFEFEF] last:border-b-0 hover:bg-[#EFEFEF]/35">
-            <UserCell userExternalId={row.userExternalId} email={row.email} displayName={row.displayName} />
-            <td className="px-3 py-3 text-muted-foreground">{row.orderKind === 'membership' ? '年费会员' : '充值'}</td>
-            <td className="px-3 py-3 tabular-nums">{formatPartnerMoneyCents(row.amountCnyCents)}</td>
-            <td className="px-3 py-3"><StatusBadge kind="order" status={row.status} /></td>
-            <td className="px-3 py-3 text-muted-foreground">{row.provider}</td>
-            <td className="px-3 py-3 text-muted-foreground">{formatDateTime(row.createdAt as string | Date | null)}</td>
-            <td className="px-5 py-3">
-              <ActionButton
-                icon={CheckCircle2}
-                label="确认"
-                compact
-                pending={pendingAction === `order:${row.orderExternalId}`}
-                onClick={() =>
-                  void runAction(
-                    `order:${row.orderExternalId}`,
-                    async () => {
-                      const result = await trpc.admin.partner.confirmOrder.mutate({
-                        orderExternalId: row.orderExternalId,
-                      });
-                      if (result.status === 'review_required') {
-                        throw new Error('订单仍需人工复核');
+        {rows.map((row) => {
+          const reviewRequired = row.status === 'review_required';
+          const actionKey = `${reviewRequired ? 'order-approve' : 'order'}:${row.orderExternalId}`;
+          const reviewNote = orderReviewNotes[row.orderExternalId] ?? '';
+          return (
+            <tr key={row.orderExternalId} className="border-b border-[#EFEFEF] last:border-b-0 hover:bg-[#EFEFEF]/35">
+              <UserCell userExternalId={row.userExternalId} email={row.email} displayName={row.displayName} />
+              <td className="px-3 py-3 text-muted-foreground">{row.orderKind === 'membership' ? '年费会员' : '充值'}</td>
+              <td className="px-3 py-3 tabular-nums">{formatPartnerMoneyCents(row.amountCnyCents)}</td>
+              <td className="px-3 py-3"><StatusBadge kind="order" status={row.status} /></td>
+              <td className="px-3 py-3 text-muted-foreground">{row.provider}</td>
+              <td className="px-3 py-3 text-muted-foreground">{formatDateTime(row.createdAt as string | Date | null)}</td>
+              <td className="px-5 py-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  {reviewRequired && (
+                    <input
+                      value={reviewNote}
+                      onChange={(event) =>
+                        setOrderReviewNotes((current) => ({
+                          ...current,
+                          [row.orderExternalId]: event.target.value,
+                        }))
                       }
-                    },
-                    '订单已确认',
-                  )
-                }
-              />
-            </td>
-          </tr>
-        ))}
+                      placeholder="放行备注"
+                      className="h-8 w-40 rounded-[8px] border border-[#DCDDDD] px-2 text-[12px] outline-none focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
+                    />
+                  )}
+                  <ActionButton
+                    icon={CheckCircle2}
+                    label={partnerOrderActionLabel(row.status)}
+                    compact
+                    pending={pendingAction === actionKey}
+                    onClick={() =>
+                      void runAction(
+                        actionKey,
+                        async () => {
+                          if (reviewRequired) {
+                            await trpc.admin.partner.approveReviewRequiredOrder.mutate({
+                              orderExternalId: row.orderExternalId,
+                              note: reviewNote.trim() || '后台复核放行',
+                            });
+                            return;
+                          }
+                          const result = await trpc.admin.partner.confirmOrder.mutate({
+                            orderExternalId: row.orderExternalId,
+                          });
+                          if (result.status === 'review_required') {
+                            throw new Error('订单仍需人工复核');
+                          }
+                        },
+                        reviewRequired ? '订单已放行' : '订单已确认',
+                      )
+                    }
+                  />
+                </div>
+              </td>
+            </tr>
+          );
+        })}
       </DataTable>
     </QueueSection>
   );

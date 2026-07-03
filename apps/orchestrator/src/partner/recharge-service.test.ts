@@ -527,6 +527,35 @@ describe('RechargeService createLotForCapturedRecharge', () => {
     expect(fakeDb.lotInsertAttempts).toHaveLength(0);
   });
 
+  it('allows a review-approved lot above the 30-day cap and marks it for risk review', async () => {
+    const fakeDb = new FakeRechargeDb();
+    const service = new RechargeService(fakeDb.asDB());
+
+    const row = await service.createLotForCapturedRecharge({
+      userId: 123,
+      rechargeOrderId: 77,
+      amountCnyCents: 200_000_00,
+      rollingThirtyDayCnyCents: 500_001_00,
+      now: new Date('2026-07-01T03:04:05.006Z'),
+      reviewOverride: {
+        reviewerUserId: 88,
+        approvedAt: new Date('2026-07-01T03:04:05.006Z'),
+        note: '后台复核允许超过月累计上限',
+      },
+    });
+
+    expect(row.riskStatus).toBe('review');
+    expect(row.metadata).toMatchObject({
+      reviewOverride: {
+        reviewerUserId: 88,
+        approvedAt: '2026-07-01T03:04:05.006Z',
+        note: '后台复核允许超过月累计上限',
+      },
+      rollingThirtyDayCnyCents: 500_001_00,
+    });
+    expect(fakeDb.lotRowsCreated).toBe(1);
+  });
+
   it('uses duplicate-key idempotency and returns an existing lot for the same recharge order and same payload', async () => {
     const existing = fakeLot();
     const fakeDb = new FakeRechargeDb({ lots: [existing] });

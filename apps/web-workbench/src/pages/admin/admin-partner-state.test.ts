@@ -4,6 +4,7 @@ import {
   formatPartnerMoneyCents,
   normalizeAdminPartnerOverview,
   normalizeRiskScore,
+  partnerOrderActionLabel,
   partnerReviewStatusToken,
 } from './admin-partner-state';
 
@@ -17,6 +18,13 @@ describe('partnerReviewStatusToken', () => {
 
   it('falls back without exposing unknown backend statuses', () => {
     expect(partnerReviewStatusToken('withdrawal', 'provider_surprise').label).toBe('未知状态');
+  });
+});
+
+describe('partnerOrderActionLabel', () => {
+  it('distinguishes ordinary confirmation from review approval', () => {
+    expect(partnerOrderActionLabel('pending')).toBe('确认');
+    expect(partnerOrderActionLabel('review_required')).toBe('放行');
   });
 });
 

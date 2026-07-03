@@ -119,6 +119,10 @@ export function partnerReviewStatusToken(
   return STATUS_TOKENS[kind][normalized] ?? FALLBACK_STATUS;
 }
 
+export function partnerOrderActionLabel(status: unknown): '确认' | '放行' {
+  return status === 'review_required' ? '放行' : '确认';
+}
+
 export function formatPartnerMoneyCents(value: unknown): string {
   const cents = Math.round(nonNegativeNumber(value));
   const yuan = cents / 100;

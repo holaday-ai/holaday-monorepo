@@ -308,6 +308,27 @@ export const adminPartnerRouter = router({
       }
     }),
 
+  approveReviewRequiredOrder: adminProcedure
+    .input(
+      z.object({
+        orderExternalId: z.string().trim().min(1).max(32),
+        note: z.string().trim().min(1).max(1000).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      requirePartnerLedgerEnabled();
+      const adminUser = await resolveUserByExternalId(ctx.db, ctx.userId);
+      try {
+        return await new PartnerPaymentConfirmService(ctx.db).approveReviewRequiredOrder({
+          orderExternalId: input.orderExternalId,
+          reviewerUserId: adminUser.id,
+          note: input.note,
+        });
+      } catch (error) {
+        return mapPaymentError(error);
+      }
+    }),
+
   approveWithdrawal: adminProcedure
     .input(
       z.object({

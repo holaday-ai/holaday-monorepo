@@ -21,6 +21,7 @@ import {
 const ORDER_EXTERNAL_ID_MAX_LENGTH = 32;
 const PROVIDER_MAX_LENGTH = 24;
 const PROVIDER_CAPTURE_ID_MAX_LENGTH = 128;
+const REVIEW_APPROVAL_NOTE_MAX_LENGTH = 1000;
 
 type PartnerPaymentOrderKind = 'membership' | 'recharge';
 
@@ -45,6 +46,20 @@ interface NormalizedPartnerPaymentConfirmInput {
   provider: string;
   providerCaptureId: string;
   amountCnyCents: number;
+  now: Date;
+}
+
+export interface PartnerPaymentReviewApprovalInput {
+  orderExternalId: string;
+  reviewerUserId: number;
+  note?: string;
+  now?: Date;
+}
+
+interface NormalizedPartnerPaymentReviewApprovalInput {
+  orderExternalId: string;
+  reviewerUserId: number;
+  note?: string;
   now: Date;
 }
 
@@ -119,6 +134,13 @@ function normalizeDate(value: Date, fieldName: string): Date {
   return new Date(value.getTime());
 }
 
+function normalizePositiveSafeInteger(value: unknown, fieldName: string): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
+    throw new RangeError(`${fieldName} must be a positive safe integer`);
+  }
+  return value;
+}
+
 function normalizeConfirmInput(input: PartnerPaymentConfirmInput): NormalizedPartnerPaymentConfirmInput {
   return {
     orderExternalId: normalizeBoundedString(
@@ -133,6 +155,26 @@ function normalizeConfirmInput(input: PartnerPaymentConfirmInput): NormalizedPar
       PROVIDER_CAPTURE_ID_MAX_LENGTH,
     ),
     amountCnyCents: normalizeWholeCnyAmount(input.amountCnyCents),
+    now: normalizeDate(input.now ?? new Date(), 'now'),
+  };
+}
+
+function normalizeReviewApprovalInput(
+  input: PartnerPaymentReviewApprovalInput,
+): NormalizedPartnerPaymentReviewApprovalInput {
+  const note =
+    input.note === undefined
+      ? undefined
+      : normalizeBoundedString(input.note, 'note', REVIEW_APPROVAL_NOTE_MAX_LENGTH);
+
+  return {
+    orderExternalId: normalizeBoundedString(
+      input.orderExternalId,
+      'orderExternalId',
+      ORDER_EXTERNAL_ID_MAX_LENGTH,
+    ),
+    reviewerUserId: normalizePositiveSafeInteger(input.reviewerUserId, 'reviewerUserId'),
+    note,
     now: normalizeDate(input.now ?? new Date(), 'now'),
   };
 }
@@ -237,6 +279,31 @@ function annualCapReviewMetadata(input: {
   };
 }
 
+function approvalMetadata(
+  existing: unknown,
+  approval: NormalizedPartnerPaymentReviewApprovalInput,
+): Record<string, unknown> {
+  const base =
+    existing !== null && typeof existing === 'object' && !Array.isArray(existing)
+      ? (existing as Record<string, unknown>)
+      : {};
+  return {
+    ...base,
+    reviewApprovedByUserId: approval.reviewerUserId,
+    reviewApprovedAt: approval.now.toISOString(),
+    ...(approval.note ? { reviewApprovalNote: approval.note } : {}),
+  };
+}
+
+function hasReviewApprovalMetadata(order: PartnerRechargeOrder): boolean {
+  return (
+    order.metadata !== null &&
+    typeof order.metadata === 'object' &&
+    !Array.isArray(order.metadata) &&
+    typeof (order.metadata as Record<string, unknown>).reviewApprovedByUserId === 'number'
+  );
+}
+
 export function partnerPaymentIdempotencyKey(input: {
   provider: string;
   providerCaptureId: string;
@@ -321,6 +388,51 @@ export class PartnerPaymentConfirmService {
       throw result;
     }
     return result;
+  }
+
+  async approveReviewRequiredOrder(
+    input: PartnerPaymentReviewApprovalInput,
+  ): Promise<PartnerPaymentConfirmResult> {
+    const approval = normalizeReviewApprovalInput(input);
+    const order = await this.readOrderByExternalId(this.db, approval.orderExternalId);
+
+    if (!order) {
+      throw new PartnerPaymentConfirmConflictError(
+        `partner order ${approval.orderExternalId} was not found for review approval`,
+      );
+    }
+
+    const orderKind = normalizeOrderKind(order.orderKind);
+    if (orderKind !== 'recharge') {
+      throw new PartnerPaymentConfirmConflictError(
+        `partner order ${order.externalId} cannot be review-approved because it is not a recharge order`,
+      );
+    }
+
+    if (order.status === 'completed') {
+      if (hasReviewApprovalMetadata(order)) {
+        return partnerOrderCompletedResult(order, true);
+      }
+      throw new PartnerPaymentConfirmConflictError(
+        `partner order ${order.externalId} is already completed outside review approval`,
+      );
+    }
+
+    if (order.status !== 'review_required') {
+      throw new PartnerPaymentConfirmConflictError(
+        `partner order ${order.externalId} cannot be review-approved from status ${order.status}`,
+      );
+    }
+
+    if (order.providerCaptureId === null || order.providerCaptureId.trim().length === 0) {
+      throw new PartnerPaymentConfirmConflictError(
+        `partner order ${order.externalId} has no captured provider id to review-approve`,
+      );
+    }
+
+    return this.db.transaction((tx) =>
+      this.approveReviewRequiredOrderInTransaction(tx as unknown as DB, order, approval),
+    );
   }
 
   private async confirmPendingOrderInTransaction(
@@ -443,6 +555,66 @@ export class PartnerPaymentConfirmService {
         );
       }
     }
+
+    return partnerOrderCompletedResult(completedOrder, false);
+  }
+
+  private async approveReviewRequiredOrderInTransaction(
+    tx: DB,
+    order: PartnerRechargeOrder,
+    approval: NormalizedPartnerPaymentReviewApprovalInput,
+  ): Promise<PartnerPaymentConfirmResult> {
+    await this.lockUserForConfirmation(tx, order.userId);
+
+    const metadata = approvalMetadata(order.metadata, approval);
+    const updateResult = await tx
+      .update(partnerRechargeOrders)
+      .set({
+        status: 'completed',
+        metadata,
+        updatedAt: approval.now,
+      })
+      .where(
+        and(
+          eq(partnerRechargeOrders.externalId, order.externalId),
+          eq(partnerRechargeOrders.status, 'review_required'),
+        ),
+      );
+
+    if (readAffectedRows(updateResult) !== 1) {
+      const readback = await this.readOrderByExternalId(tx, order.externalId);
+      if (readback?.status === 'completed' && hasReviewApprovalMetadata(readback)) {
+        return partnerOrderCompletedResult(readback, true);
+      }
+      throw new PartnerPaymentConfirmConflictError(
+        `partner order ${order.externalId} was not completed by this review approval`,
+      );
+    }
+
+    const completedOrder = {
+      ...order,
+      status: 'completed',
+      metadata,
+      updatedAt: approval.now,
+    };
+
+    const rollingThirtyDayCnyCents = await computeCompletedRechargeTotalCnyCents(tx, {
+      userId: order.userId,
+      windowStart: rechargeRollingThirtyDayWindowStart(approval.now),
+      now: approval.now,
+    });
+    await this.rechargeService(tx).createLotForCapturedRecharge({
+      userId: order.userId,
+      rechargeOrderId: order.id,
+      amountCnyCents: order.amountCnyCents,
+      rollingThirtyDayCnyCents,
+      reviewOverride: {
+        reviewerUserId: approval.reviewerUserId,
+        approvedAt: approval.now,
+        ...(approval.note ? { note: approval.note } : {}),
+      },
+      now: approval.now,
+    });
 
     return partnerOrderCompletedResult(completedOrder, false);
   }
