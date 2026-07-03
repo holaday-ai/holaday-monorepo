@@ -1018,6 +1018,8 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         set((prev) => {
           const nextAwaiting = { ...prev.awaitingUserByTask };
           delete nextAwaiting[taskId];
+          const nextTerminalIds = new Set(prev.terminalTaskIds);
+          nextTerminalIds.delete(taskId);
           const nextCaptcha = prev.captchaWaitByTask[taskId]
             ? { ...prev.captchaWaitByTask }
             : prev.captchaWaitByTask;
@@ -1025,9 +1027,10 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           return {
             awaitingUserByTask: nextAwaiting,
             captchaWaitByTask: nextCaptcha,
+            terminalTaskIds: nextTerminalIds,
             tasks: prev.tasks.map((t) => {
               if (t.taskId !== taskId) return t;
-              const { awaitingKind: _awaitingKind, ...rest } = t;
+              const { awaitingKind: _awaitingKind, resultText: _resultText, ...rest } = t;
               return {
                 ...rest,
                 status: t.status === 'awaiting_user' ? 'executing' : t.status,
@@ -1632,9 +1635,13 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     if (msg.type === 'server.supercar.awaiting_user') {
       const awaitingKind = msg.awaitingKind;
       set((prev) => {
-        if (isTaskRuntimeTerminal(prev, msg.taskId)) return prev;
+        const existingTask = prev.tasks.find((task) => task.taskId === msg.taskId);
+        const canRecoverPausedTask = existingTask?.status === 'paused';
+        if (isTaskRuntimeTerminal(prev, msg.taskId) && !canRecoverPausedTask) return prev;
         const nextSubStatus = { ...prev.subStatusByTask };
         delete nextSubStatus[msg.taskId];
+        const nextTerminalIds = new Set(prev.terminalTaskIds);
+        nextTerminalIds.delete(msg.taskId);
         return {
           awaitingUserByTask: {
             ...prev.awaitingUserByTask,
@@ -1645,6 +1652,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
             },
           },
           subStatusByTask: nextSubStatus,
+          terminalTaskIds: nextTerminalIds,
           // P2-A — also mirror onto the task row so a refresh that
           // re-loads via tasks.detail still has the right kind even if
           // the WS event arrived first and tasks.detail's hydrate has
@@ -1654,11 +1662,14 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           // list refresh catches up.
           tasks: prev.tasks.map((t) =>
             t.taskId === msg.taskId
-              ? {
-                  ...t,
-                  status: 'awaiting_user' as const,
-                  ...(awaitingKind ? { awaitingKind } : {}),
-                }
+              ? (() => {
+                  const { resultText: _resultText, ...rest } = t;
+                  return {
+                    ...rest,
+                    status: 'awaiting_user' as const,
+                    ...(awaitingKind ? { awaitingKind } : {}),
+                  };
+                })()
               : t,
           ),
         };

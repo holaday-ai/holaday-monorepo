@@ -1220,6 +1220,54 @@ describe('applyServerMessage awaiting_user', () => {
     });
     expect(state.subStatusByTask.tsk_wait).toBeUndefined();
   });
+
+  it('allows a paused runtime marker to become a recoverable awaiting-user state', async () => {
+    replyMutate.mockResolvedValueOnce({ ok: true, state: 'resumed' });
+    useTaskStore.setState({
+      tasks: [
+        task({
+          taskId: 'tsk_paused_wait',
+          status: 'paused',
+          resultText: '达到最大步骤数，请确认下一步。',
+        }),
+      ],
+      terminalTaskIds: new Set(['tsk_paused_wait']),
+    });
+
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.supercar.awaiting_user',
+      taskId: 'tsk_paused_wait',
+      question: '还需要补充哪个平台？',
+      awaitingKind: 'clarification',
+    });
+
+    let state = useTaskStore.getState();
+    expect(state.tasks[0]).toMatchObject({
+      status: 'awaiting_user',
+      awaitingKind: 'clarification',
+    });
+    expect(state.tasks[0]?.resultText).toBeUndefined();
+    expect(state.awaitingUserByTask.tsk_paused_wait).toMatchObject({
+      question: '还需要补充哪个平台？',
+      awaitingKind: 'clarification',
+    });
+    expect(state.terminalTaskIds.has('tsk_paused_wait')).toBe(false);
+
+    await useTaskStore.getState().replyToTask('tsk_paused_wait', '继续比较京东', []);
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.task.progress',
+      taskId: 'tsk_paused_wait',
+      message: '继续执行中',
+      subStatus: 'browsing',
+    });
+
+    state = useTaskStore.getState();
+    expect(state.tasks[0]).toMatchObject({
+      status: 'executing',
+    });
+    expect(state.tasks[0]?.resultText).toBeUndefined();
+    expect(state.progressByTask.tsk_paused_wait).toBe('继续执行中');
+  });
 });
 
 describe('applyServerMessage task.control', () => {
