@@ -467,6 +467,24 @@ describe('TaskRepository task terminal state persistence', () => {
     expect(result.persisted).toBe(true);
   });
 
+  it('applyStepResult clears stale awaiting fields on non-awaiting transitions', async () => {
+    const { db, captured } = fakeDbForStateTransitions(1);
+    const repo = new TaskRepository(db);
+    const next: TaskState = {
+      ...baseState,
+      status: 'completed',
+      cursor: 1,
+    };
+
+    await repo.applyStepResult(baseState, next, { summary: 'done' });
+
+    expect(captured.updatePayloads[0]).toMatchObject({
+      status: 'completed',
+      awaitingQuestion: null,
+      awaitingKind: null,
+    });
+  });
+
   it('applyControlTransition treats partial_success as terminal for completedAt and event ledger', async () => {
     const { db, captured } = fakeDbForStateTransitions();
     const repo = new TaskRepository(db);
@@ -545,6 +563,48 @@ describe('TaskRepository task terminal state persistence', () => {
     const result = await repo.applyControlTransition(baseState, next);
 
     expect(result.persisted).toBe(true);
+  });
+
+  it('applyControlTransition clears awaiting fields when cancelling a parked task', async () => {
+    const { db, captured } = fakeDbForStateTransitions(1);
+    const repo = new TaskRepository(db);
+    const prev: TaskState = {
+      ...baseState,
+      status: 'awaiting_user',
+      pendingConfirm: null,
+    };
+    const next: TaskState = {
+      ...prev,
+      status: 'cancelled',
+    };
+
+    await repo.applyControlTransition(prev, next);
+
+    expect(captured.updatePayloads[0]).toMatchObject({
+      status: 'cancelled',
+      pauseReason: null,
+      awaitingQuestion: null,
+      awaitingKind: null,
+    });
+  });
+
+  it('applyControlTransition clears stale awaiting fields on every non-awaiting transition', async () => {
+    const { db, captured } = fakeDbForStateTransitions(1);
+    const repo = new TaskRepository(db);
+    const next: TaskState = {
+      ...baseState,
+      status: 'paused',
+      pauseReason: 'user',
+    };
+
+    await repo.applyControlTransition(baseState, next);
+
+    expect(captured.updatePayloads[0]).toMatchObject({
+      status: 'paused',
+      pauseReason: 'user',
+      awaitingQuestion: null,
+      awaitingKind: null,
+    });
   });
 
   it('recordCancelRequested writes a user event without changing task status', async () => {

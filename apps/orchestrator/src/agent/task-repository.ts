@@ -140,6 +140,10 @@ export class TaskRepository {
       if (isTaskTerminalStatus(next.status)) {
         taskUpdate.completedAt = new Date();
       }
+      if (next.status !== 'awaiting_user') {
+        taskUpdate.awaitingQuestion = null;
+        taskUpdate.awaitingKind = null;
+      }
       if (next.error) {
         taskUpdate.errorCode = next.error.code;
         taskUpdate.errorMessage = next.error.message;
@@ -245,6 +249,10 @@ export class TaskRepository {
         status: next.status,
         pauseReason: next.status === 'paused' ? (next.pauseReason ?? null) : null,
       };
+      if (next.status !== 'awaiting_user') {
+        update.awaitingQuestion = null;
+        update.awaitingKind = null;
+      }
       if (isTaskTerminalStatus(next.status)) {
         update.completedAt = new Date();
       }
