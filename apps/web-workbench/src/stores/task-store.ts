@@ -1706,26 +1706,32 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       return;
     }
     if (msg.type === 'server.supercar.web_search') {
-      set((prev) => ({
-        webSearchByTask: {
-          ...prev.webSearchByTask,
-          [msg.taskId]: {
-            iteration: msg.iteration,
-            query: msg.query,
-            at: Date.now(),
-            ...(msg.sources && msg.sources.length > 0 ? { sources: msg.sources } : {}),
+      set((prev) => {
+        if (isTaskRuntimeTerminal(prev, msg.taskId)) return prev;
+        return {
+          webSearchByTask: {
+            ...prev.webSearchByTask,
+            [msg.taskId]: {
+              iteration: msg.iteration,
+              query: msg.query,
+              at: Date.now(),
+              ...(msg.sources && msg.sources.length > 0 ? { sources: msg.sources } : {}),
+            },
           },
-        },
-      }));
+        };
+      });
       return;
     }
     if (msg.type === 'server.supercar.thinking') {
-      set((prev) => ({
-        thinkingByTask: {
-          ...prev.thinkingByTask,
-          [msg.taskId]: { summary: msg.summary, at: Date.now() },
-        },
-      }));
+      set((prev) => {
+        if (isTaskRuntimeTerminal(prev, msg.taskId)) return prev;
+        return {
+          thinkingByTask: {
+            ...prev.thinkingByTask,
+            [msg.taskId]: { summary: msg.summary, at: Date.now() },
+          },
+        };
+      });
       return;
     }
     if (msg.type === 'server.supercar.suggestions') {

@@ -1653,6 +1653,44 @@ describe('applyServerMessage stale live frames after terminal', () => {
     expect(state.executorFallbackByTask.tsk_done_aux).toBeUndefined();
     expect(state.screencastByTask.tsk_done_aux).toBeUndefined();
   });
+
+  it('does not attach late supercar live auxiliary frames to terminal tasks', () => {
+    useTaskStore.setState({
+      tasks: [task({ taskId: 'tsk_done_supercar_aux', status: 'completed' })],
+      terminalTaskIds: new Set(['tsk_done_supercar_aux']),
+    });
+
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.supercar.web_search',
+      taskId: 'tsk_done_supercar_aux',
+      iteration: 4,
+      query: '迟到搜索',
+      sources: [
+        {
+          title: '迟到来源',
+          url: 'https://example.com/late',
+          snippet: '不应挂到已结束任务上',
+        },
+      ],
+    });
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.supercar.thinking',
+      taskId: 'tsk_done_supercar_aux',
+      summary: '迟到思考',
+    });
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.supercar.suggestions',
+      taskId: 'tsk_done_supercar_aux',
+      suggestions: ['完成后建议仍应允许到达'],
+    });
+
+    const state = useTaskStore.getState();
+    expect(state.webSearchByTask.tsk_done_supercar_aux).toBeUndefined();
+    expect(state.thinkingByTask.tsk_done_supercar_aux).toBeUndefined();
+    expect(state.suggestionsByTask.tsk_done_supercar_aux).toEqual([
+      '完成后建议仍应允许到达',
+    ]);
+  });
 });
 
 describe('applyServerMessage paused terminal frame', () => {
