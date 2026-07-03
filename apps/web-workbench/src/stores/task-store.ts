@@ -268,6 +268,7 @@ type RuntimeStateKey =
   | 'executorFallbackByTask'
   | 'degradeByTask'
   | 'awaitingUserByTask'
+  | 'thinkingByTask'
   | 'streamingByTask'
   | 'progressByTask'
   | 'subStatusByTask';
@@ -325,6 +326,11 @@ export function pruneRuntimeStateForTerminalTasks(
   );
   if (nextAwaitingUserByTask !== prev.awaitingUserByTask) {
     patch.awaitingUserByTask = nextAwaitingUserByTask;
+  }
+
+  const nextThinkingByTask = omitRuntimeKeys(prev.thinkingByTask, terminalIds);
+  if (nextThinkingByTask !== prev.thinkingByTask) {
+    patch.thinkingByTask = nextThinkingByTask;
   }
 
   const nextSubStatusByTask = omitRuntimeKeys(prev.subStatusByTask, terminalIds);
@@ -1299,6 +1305,8 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         delete nextSubStatus[msg.taskId];
         const nextAwaiting = { ...prev.awaitingUserByTask };
         delete nextAwaiting[msg.taskId];
+        const nextThinking = { ...prev.thinkingByTask };
+        delete nextThinking[msg.taskId];
         const nextCaptchaWait = omitRuntimeKey(prev.captchaWaitByTask, msg.taskId);
         const nextExecutorFallback = omitRuntimeKey(
           prev.executorFallbackByTask,
@@ -1338,6 +1346,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           terminalTaskIds: nextTerminalIds,
           animatedTaskIds: nextAnimatedIds,
           awaitingUserByTask: nextAwaiting,
+          thinkingByTask: nextThinking,
           subStatusByTask: nextSubStatus,
           captchaWaitByTask: nextCaptchaWait,
           executorFallbackByTask: nextExecutorFallback,

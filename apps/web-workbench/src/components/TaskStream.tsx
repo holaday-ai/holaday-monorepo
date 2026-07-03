@@ -490,7 +490,9 @@ function AgentBlock({
 
         {showInlineProgress && screencastUrl && <CurrentUrlChip url={screencastUrl} />}
 
-        {webSearch && !awaitingUser && <WebSearchLine event={webSearch} />}
+        {webSearch && !awaitingUser && (
+          <WebSearchLine event={webSearch} terminal={terminal} />
+        )}
 
         {captchaWait && <CaptchaWaitBanner wait={captchaWait} />}
         {degrade && !executorFallback && <DegradeBanner event={degrade} />}
@@ -1140,13 +1142,24 @@ function CurrentUrlChip({ url }: { url: string }): JSX.Element | null {
  * block), the cards render below the query line so the user can see
  * exactly which pages Claude pulled from.
  */
-function WebSearchLine({ event }: { event: UiWebSearchEvent }): JSX.Element {
+export function webSearchLinePrefix(terminal: boolean): string {
+  return terminal ? '已联网搜索' : '正在联网搜索';
+}
+
+function WebSearchLine({
+  event,
+  terminal,
+}: {
+  event: UiWebSearchEvent;
+  terminal: boolean;
+}): JSX.Element {
   return (
     <div className="flex flex-col gap-1">
       <div className="flex items-start gap-2 text-sm leading-relaxed text-muted-foreground">
         <Search className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#42C0EF]" />
         <span className="min-w-0 flex-1">
-          正在联网搜索 <span className="text-foreground">"{event.query}"</span>
+          {webSearchLinePrefix(terminal)}{' '}
+          <span className="text-foreground">"{event.query}"</span>
         </span>
       </div>
       {event.sources && event.sources.length > 0 && (

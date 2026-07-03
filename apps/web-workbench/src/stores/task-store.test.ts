@@ -429,6 +429,10 @@ describe('pruneRuntimeStateForTerminalTasks', () => {
         awaitingUserByTask: {
           tsk_done: { question: 'still there?', at: 1 },
         },
+        thinkingByTask: {
+          tsk_done: { summary: 'still thinking', at: 1 },
+          tsk_live: { summary: 'keep thinking', at: 1 },
+        },
         streamingByTask: { tsk_done: 'old stream', tsk_live: 'keep stream' },
         progressByTask: { tsk_done: '正在验证结果…', tsk_live: 'keep progress' },
         subStatusByTask: {
@@ -464,6 +468,9 @@ describe('pruneRuntimeStateForTerminalTasks', () => {
     expect(patch.streamingByTask).toEqual({ tsk_live: 'keep stream' });
     expect(patch.progressByTask).toEqual({ tsk_live: 'keep progress' });
     expect(patch.awaitingUserByTask).toEqual({});
+    expect(patch.thinkingByTask).toEqual({
+      tsk_live: { summary: 'keep thinking', at: 1 },
+    });
     expect(patch.captchaWaitByTask).toEqual({});
     expect(patch.executorFallbackByTask).toEqual({});
     expect(patch.degradeByTask).toEqual({});
@@ -477,6 +484,7 @@ describe('pruneRuntimeStateForTerminalTasks', () => {
         executorFallbackByTask: {},
         degradeByTask: {},
         awaitingUserByTask: {},
+        thinkingByTask: {},
         streamingByTask: { tsk_done: 'bridge stream' },
         progressByTask: { tsk_done: 'bridge progress' },
         subStatusByTask: { tsk_done: { subStatus: 'verifying', since: 1 } },
@@ -1834,6 +1842,12 @@ describe('applyServerMessage paused terminal frame', () => {
           at: 1,
         },
       },
+      thinkingByTask: {
+        tsk_terminal_cleanup: { summary: '仍在思考', at: 1 },
+      },
+      webSearchByTask: {
+        tsk_terminal_cleanup: { iteration: 1, query: 'holaday', at: 1 },
+      },
     });
 
     useTaskStore.getState().applyServerMessage({
@@ -1851,6 +1865,10 @@ describe('applyServerMessage paused terminal frame', () => {
     expect(state.captchaWaitByTask.tsk_terminal_cleanup).toBeUndefined();
     expect(state.executorFallbackByTask.tsk_terminal_cleanup).toBeUndefined();
     expect(state.degradeByTask.tsk_terminal_cleanup).toBeUndefined();
+    expect(state.thinkingByTask.tsk_terminal_cleanup).toBeUndefined();
+    expect(state.webSearchByTask.tsk_terminal_cleanup).toMatchObject({
+      query: 'holaday',
+    });
   });
 
   it('keeps paused recoverable and clears stale live blockers without terminal reveal animation', () => {

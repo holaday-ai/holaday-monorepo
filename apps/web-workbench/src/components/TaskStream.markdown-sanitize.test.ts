@@ -4,6 +4,7 @@ import {
   liveSubStatusLongRunningHint,
   sanitizeMarkdownBrokenBoldUrls,
   sanitizeMarkdownTrailingPunctuation,
+  webSearchLinePrefix,
 } from './TaskStream';
 
 describe('TaskStream markdown sanitizer', () => {
@@ -42,5 +43,10 @@ describe('TaskStream live phase copy', () => {
     expect(liveSubStatusLongRunningHint('verifying', 180)).toBe(
       '仍在整理和核对结果，不是卡死。',
     );
+  });
+
+  it('uses completed wording for terminal web search evidence', () => {
+    expect(webSearchLinePrefix(false)).toBe('正在联网搜索');
+    expect(webSearchLinePrefix(true)).toBe('已联网搜索');
   });
 });
