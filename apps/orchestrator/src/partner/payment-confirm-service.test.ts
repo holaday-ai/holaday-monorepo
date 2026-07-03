@@ -237,10 +237,20 @@ function serviceWithFakes(
     };
     now?: Date;
   }> = [];
+  const referralSettlements: Array<{
+    inviteeUserId: number;
+    rechargeOrderId: number;
+    amountCnyCents: number;
+    now?: Date;
+  }> = [];
 
-  const service = new PartnerPaymentConfirmService(fakeDb.asDB(), {
+  const deps = {
     membershipService: () => ({
-      activate: async (input) => {
+      activate: async (input: {
+        userId: number;
+        sourcePaymentExternalId?: string;
+        now?: Date;
+      }) => {
         membershipActivations.push(input);
         return fakeMembership({
           userId: input.userId,
@@ -250,7 +260,18 @@ function serviceWithFakes(
       },
     }),
     rechargeService: () => ({
-      createLotForCapturedRecharge: async (input) => {
+      createLotForCapturedRecharge: async (input: {
+        userId: number;
+        rechargeOrderId: number;
+        amountCnyCents: number;
+        rollingThirtyDayCnyCents: number;
+        reviewOverride?: {
+          reviewerUserId: number;
+          approvedAt: Date;
+          note?: string;
+        };
+        now?: Date;
+      }) => {
         if (overrides.createLotForCapturedRecharge) {
           return overrides.createLotForCapturedRecharge(input);
         }
@@ -262,9 +283,22 @@ function serviceWithFakes(
         });
       },
     }),
-  });
+    referralService: () => ({
+      settleRechargeReward: async (input: {
+        inviteeUserId: number;
+        rechargeOrderId: number;
+        amountCnyCents: number;
+        now?: Date;
+      }) => {
+        referralSettlements.push(input);
+        return null;
+      },
+    }),
+  };
 
-  return { service, membershipActivations, lotCreations };
+  const service = new PartnerPaymentConfirmService(fakeDb.asDB(), deps);
+
+  return { service, membershipActivations, lotCreations, referralSettlements };
 }
 
 const confirmInput = {
@@ -307,7 +341,7 @@ describe('partnerPaymentIdempotencyKey', () => {
 describe('PartnerPaymentConfirmService.confirmCapturedOrder', () => {
   it('treats a missing order as an idempotent no-op', async () => {
     const fakeDb = new FakePartnerPaymentDb();
-    const { service, membershipActivations, lotCreations } = serviceWithFakes(fakeDb);
+    const { service, membershipActivations, lotCreations, referralSettlements } = serviceWithFakes(fakeDb);
 
     await expect(service.confirmCapturedOrder(confirmInput)).resolves.toEqual({
       ok: true,
@@ -318,6 +352,7 @@ describe('PartnerPaymentConfirmService.confirmCapturedOrder', () => {
     expect(fakeDb.updateRowsAffected).toEqual([]);
     expect(membershipActivations).toHaveLength(0);
     expect(lotCreations).toHaveLength(0);
+    expect(referralSettlements).toHaveLength(0);
   });
 
   it.each([
@@ -326,7 +361,7 @@ describe('PartnerPaymentConfirmService.confirmCapturedOrder', () => {
   ])('throws on %s without side effects', async (_name, patch, expectedMessage) => {
     const order = fakeOrder({ orderKind: 'membership' });
     const fakeDb = new FakePartnerPaymentDb({ orders: [order] });
-    const { service, membershipActivations, lotCreations } = serviceWithFakes(fakeDb);
+    const { service, membershipActivations, lotCreations, referralSettlements } = serviceWithFakes(fakeDb);
 
     await expect(service.confirmCapturedOrder({ ...confirmInput, ...patch })).rejects.toThrow(expectedMessage);
     expect(order.status).toBe('pending');
@@ -334,12 +369,13 @@ describe('PartnerPaymentConfirmService.confirmCapturedOrder', () => {
     expect(fakeDb.updateRowsAffected).toEqual([]);
     expect(membershipActivations).toHaveLength(0);
     expect(lotCreations).toHaveLength(0);
+    expect(referralSettlements).toHaveLength(0);
   });
 
   it('completes a pending membership order and activates membership exactly once', async () => {
     const order = fakeOrder({ orderKind: 'membership', amountCnyCents: 999_00 });
     const fakeDb = new FakePartnerPaymentDb({ orders: [order] });
-    const { service, membershipActivations, lotCreations } = serviceWithFakes(fakeDb);
+    const { service, membershipActivations, lotCreations, referralSettlements } = serviceWithFakes(fakeDb);
     const input = { ...confirmInput, amountCnyCents: 999_00 };
 
     await expect(service.confirmCapturedOrder(input)).resolves.toEqual({
@@ -370,12 +406,13 @@ describe('PartnerPaymentConfirmService.confirmCapturedOrder', () => {
       },
     ]);
     expect(lotCreations).toHaveLength(0);
+    expect(referralSettlements).toHaveLength(0);
   });
 
-  it('completes a pending recharge order and creates one lot across retry', async () => {
+  it('completes a pending recharge order and creates one lot plus referral settlement across retry', async () => {
     const order = fakeOrder({ orderKind: 'recharge' });
     const fakeDb = new FakePartnerPaymentDb({ orders: [order] });
-    const { service, membershipActivations, lotCreations } = serviceWithFakes(fakeDb);
+    const { service, membershipActivations, lotCreations, referralSettlements } = serviceWithFakes(fakeDb);
 
     await expect(service.confirmCapturedOrder(confirmInput)).resolves.toMatchObject({
       ok: true,
@@ -404,6 +441,14 @@ describe('PartnerPaymentConfirmService.confirmCapturedOrder', () => {
       },
     ]);
     expect(membershipActivations).toHaveLength(0);
+    expect(referralSettlements).toEqual([
+      {
+        inviteeUserId: 123,
+        rechargeOrderId: 1,
+        amountCnyCents: 10_000_00,
+        now: new Date('2026-07-02T00:00:00.000Z'),
+      },
+    ]);
   });
 
   it('locks the user row before confirming a recharge order', async () => {
@@ -651,7 +696,7 @@ describe('PartnerPaymentConfirmService.approveReviewRequiredOrder', () => {
       },
     });
     const fakeDb = new FakePartnerPaymentDb({ orders: [order] });
-    const { service, lotCreations } = serviceWithFakes(fakeDb);
+    const { service, lotCreations, referralSettlements } = serviceWithFakes(fakeDb);
 
     await expect(
       service.approveReviewRequiredOrder({
@@ -690,6 +735,14 @@ describe('PartnerPaymentConfirmService.approveReviewRequiredOrder', () => {
         now: new Date('2026-07-03T03:00:00.000Z'),
       },
     ]);
+    expect(referralSettlements).toEqual([
+      {
+        inviteeUserId: 123,
+        rechargeOrderId: 1,
+        amountCnyCents: 10_000_00,
+        now: new Date('2026-07-03T03:00:00.000Z'),
+      },
+    ]);
   });
 
   it('treats a repeated review approval as completed without creating another lot', async () => {
@@ -701,7 +754,7 @@ describe('PartnerPaymentConfirmService.approveReviewRequiredOrder', () => {
       },
     });
     const fakeDb = new FakePartnerPaymentDb({ orders: [order] });
-    const { service, lotCreations } = serviceWithFakes(fakeDb);
+    const { service, lotCreations, referralSettlements } = serviceWithFakes(fakeDb);
 
     await service.approveReviewRequiredOrder({
       orderExternalId: 'pay_order_1',
@@ -723,6 +776,7 @@ describe('PartnerPaymentConfirmService.approveReviewRequiredOrder', () => {
     });
 
     expect(lotCreations).toHaveLength(1);
+    expect(referralSettlements).toHaveLength(1);
   });
 
   it('passes review override details when approving a lot above the monthly cap', async () => {

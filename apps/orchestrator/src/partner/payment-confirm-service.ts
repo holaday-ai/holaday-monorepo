@@ -17,6 +17,7 @@ import {
   rechargeAnnualWindowStart,
   rechargeRollingThirtyDayWindowStart,
 } from './recharge-service.js';
+import { ReferralService } from './referral-service.js';
 
 const ORDER_EXTERNAL_ID_MAX_LENGTH = 32;
 const PROVIDER_MAX_LENGTH = 24;
@@ -27,10 +28,12 @@ type PartnerPaymentOrderKind = 'membership' | 'recharge';
 
 type MembershipActivator = Pick<PartnerMembershipService, 'activate'>;
 type RechargeLotCreator = Pick<RechargeService, 'createLotForCapturedRecharge'>;
+type ReferralRewardSettler = Pick<ReferralService, 'settleRechargeReward'>;
 
 export interface PartnerPaymentConfirmServiceDeps {
   membershipService?: (db: DB) => MembershipActivator;
   rechargeService?: (db: DB) => RechargeLotCreator;
+  referralService?: (db: DB) => ReferralRewardSettler;
 }
 
 export interface PartnerPaymentConfirmInput {
@@ -320,10 +323,12 @@ export function partnerPaymentIdempotencyKey(input: {
 export class PartnerPaymentConfirmService {
   private readonly membershipService: (db: DB) => MembershipActivator;
   private readonly rechargeService: (db: DB) => RechargeLotCreator;
+  private readonly referralService: (db: DB) => ReferralRewardSettler;
 
   constructor(private readonly db: DB, deps: PartnerPaymentConfirmServiceDeps = {}) {
     this.membershipService = deps.membershipService ?? ((db) => new PartnerMembershipService(db));
     this.rechargeService = deps.rechargeService ?? ((db) => new RechargeService(db));
+    this.referralService = deps.referralService ?? ((db) => new ReferralService(db));
   }
 
   async confirmCapturedOrder(input: PartnerPaymentConfirmInput): Promise<PartnerPaymentConfirmResult> {
@@ -554,6 +559,12 @@ export class PartnerPaymentConfirmService {
           confirm.providerCaptureId,
         );
       }
+      await this.referralService(tx).settleRechargeReward({
+        inviteeUserId: order.userId,
+        rechargeOrderId: order.id,
+        amountCnyCents: order.amountCnyCents,
+        now: confirm.now,
+      });
     }
 
     return partnerOrderCompletedResult(completedOrder, false);
@@ -613,6 +624,12 @@ export class PartnerPaymentConfirmService {
         approvedAt: approval.now,
         ...(approval.note ? { note: approval.note } : {}),
       },
+      now: approval.now,
+    });
+    await this.referralService(tx).settleRechargeReward({
+      inviteeUserId: order.userId,
+      rechargeOrderId: order.id,
+      amountCnyCents: order.amountCnyCents,
       now: approval.now,
     });
 
