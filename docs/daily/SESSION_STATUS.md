@@ -8,7 +8,7 @@
 > **归属（BOSS 定）：本文件住共享 baseline `claude/musing-keller-ae1d05`**——三 worktree 分支最终都合回这里，协调文件理应在汇合点。各 session 更新时只对 musing-keller push 这**一个文件**（单文件无冲突风险）。
 
 <!-- 固定维护：每次部署后由部署者更新这一行（硬规则 7）。改 ref 前必实读 live HEAD。 -->
-## 🔴 PROD LIVE REF = `codex/trust-loop-round1` — orch `7cd8b85`（**状态机清理 LIVE（2026-07-03）**：离开 `awaiting_user` 的 repository 持久化路径会清空 `awaitingQuestion`/`awaitingKind`，覆盖 step/control、runner terminal、batch approve、queued start/fail；前序 `92000d7` terminal side-effect race guard 已在同分支 LIVE；SPA 未变。）
+## 🔴 PROD LIVE REF = `codex/trust-loop-round1` — orch `31f4c45`（**状态机清理 LIVE（2026-07-03）**：离开 `awaiting_user` 的 repository 持久化路径会清空 `awaitingQuestion`/`awaitingKind`，覆盖 step/control、runner terminal、batch approve、queued start/fail；非错误恢复/成功/取消出口会清空旧 `errorCode/errorMessage`，避免 completed/executing 带旧失败原因；前序 `92000d7` terminal side-effect race guard 已在同分支 LIVE；SPA 未变。）
 
 <!-- 2026-06-26 里程碑 — 🏁🏁 登录自学从机制到交易站真出货 + 四层 veto 防线 -->
 **🏁🏁 里程碑（2026-06-26）— 登录自学从机制到交易站真出货 + 四层 veto 防线全证通**
