@@ -8,7 +8,7 @@
 > **归属（BOSS 定）：本文件住共享 baseline `claude/musing-keller-ae1d05`**——三 worktree 分支最终都合回这里，协调文件理应在汇合点。各 session 更新时只对 musing-keller push 这**一个文件**（单文件无冲突风险）。
 
 <!-- 固定维护：每次部署后由部署者更新这一行（硬规则 7）。改 ref 前必实读 live HEAD。 -->
-## 🔴 PROD LIVE REF = `codex/trust-loop-round1` — orch `918d406`（**状态机清理 LIVE（2026-07-03）**：WS schema/TaskState 承认 `max_steps_reached` 暂停原因，避免 vision max-steps 暂停在重启恢复时发出前端不可解析的 control 帧；前序 `d627115` 已让重启/重连恢复重播 durable `server.supercar.awaiting_user` 等待态；前序 `aafaae2` 已让 result patch helper 清 completed/awaiting_user 的旧 `pauseReason`/error/awaiting 字段；前序 `c3fe3fa` 已让 video confirm/cancel/reprompt raw SQL 统一清旧 `pauseReason`/error；前序 `3c1429f` 已让 maintenance/repository 状态出口清旧 `pauseReason`；前序 `b1d37c6` 已清 awaiting/error 残留与 controller stale error；前序 `92000d7` terminal side-effect race guard 已在同分支 LIVE；SPA 未变。）
+## 🔴 PROD LIVE REF = `codex/trust-loop-round1` — SPA `674fb32` / bundle `index-BCGV5Mjp.js` + orch `918d406`（**状态机清理 LIVE（2026-07-03）**：SPA 修 paused runtime marker 可恢复为 `server.supercar.awaiting_user`，避免最大步数/暂停后追问被前端 terminal guard 吞掉；WS schema/TaskState 承认 `max_steps_reached` 暂停原因，避免 vision max-steps 暂停在重启恢复时发出前端不可解析的 control 帧；前序 `d627115` 已让重启/重连恢复重播 durable `server.supercar.awaiting_user` 等待态；前序 `aafaae2` 已让 result patch helper 清 completed/awaiting_user 的旧 `pauseReason`/error/awaiting 字段；前序 `c3fe3fa` 已让 video confirm/cancel/reprompt raw SQL 统一清旧 `pauseReason`/error；前序 `3c1429f` 已让 maintenance/repository 状态出口清旧 `pauseReason`；前序 `b1d37c6` 已清 awaiting/error 残留与 controller stale error；前序 `92000d7` terminal side-effect race guard 已在同分支 LIVE。）
 
 <!-- 2026-06-26 里程碑 — 🏁🏁 登录自学从机制到交易站真出货 + 四层 veto 防线 -->
 **🏁🏁 里程碑（2026-06-26）— 登录自学从机制到交易站真出货 + 四层 veto 防线全证通**
