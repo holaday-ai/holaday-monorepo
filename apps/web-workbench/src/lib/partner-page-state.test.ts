@@ -74,6 +74,7 @@ describe('partner page state helpers', () => {
           withdrawableCreditCents: 999,
           pendingWithdrawalCreditCents: Number.POSITIVE_INFINITY,
         },
+        inviteCode: ' usr_partner ',
         lots: [
           {
             externalId: ' lot_1 ',
@@ -96,6 +97,7 @@ describe('partner page state helpers', () => {
       },
       kycStatus: 'not_started',
       kycLabel: '未开始',
+      inviteCode: 'usr_partner',
       ledger: {
         availableCreditCents: 0,
         lockedCreditCents: 1200,
@@ -128,6 +130,7 @@ describe('partner page state helpers', () => {
   it('preserves review-required lot risk status as non-normal copy', () => {
     const state = normalizePartnerDashboard({
       enabled: true,
+      inviteCode: '',
       lots: [
         {
           externalId: 'lot_review',
@@ -138,6 +141,7 @@ describe('partner page state helpers', () => {
 
     expect(state.enabled).toBe(true);
     if (!state.enabled) throw new Error('expected enabled partner dashboard');
+    expect(state.inviteCode).toBe('');
     expect(state.lots[0]?.riskStatus).toBe('review_required');
     expect(state.lots[0]?.riskLabel).toBe('需复核');
     expect(state.lots[0]?.riskLabel).not.toBe('正常');
@@ -171,6 +175,9 @@ describe('partner page state helpers', () => {
     expect(
       partnerActionErrorMessage(new Error('insufficient_available_credit'), '提现失败'),
     ).toBe('可用 HOLA Credit 不足');
+    expect(
+      partnerActionErrorMessage(new Error('partner referral attribution conflict'), '邀请登记失败'),
+    ).toBe('该账号已有邀请归因');
     expect(
       partnerActionErrorMessage(
         new Error('Failed to connect to 127.0.0.1 port 3001'),

@@ -1,7 +1,9 @@
 import {
   AlertCircle,
   ArrowUpRight,
+  Copy,
   CreditCard,
+  Gift,
   Loader2,
   RefreshCw,
   Shield,
@@ -54,7 +56,15 @@ interface PartnerWithdrawalSummary {
   readonly riskScore: number;
 }
 
-type PartnerAction = 'membership' | 'preview' | 'recharge' | 'withdrawal';
+interface PartnerReferralSummary {
+  readonly referralExternalId: string;
+  readonly inviterExternalId: string;
+  readonly inviteeExternalId: string;
+  readonly status: string;
+  readonly assisted: boolean;
+}
+
+type PartnerAction = 'membership' | 'preview' | 'recharge' | 'withdrawal' | 'invite';
 
 export function PartnerPage(): JSX.Element {
   const toast = useToast();
@@ -70,9 +80,12 @@ export function PartnerPage(): JSX.Element {
   const [rechargePreview, setRechargePreview] = React.useState<PartnerRechargePreview | null>(null);
   const [rechargeOrder, setRechargeOrder] = React.useState<PartnerOrderSummary | null>(null);
   const [withdrawal, setWithdrawal] = React.useState<PartnerWithdrawalSummary | null>(null);
+  const [referral, setReferral] = React.useState<PartnerReferralSummary | null>(null);
   const [rechargeAmountInput, setRechargeAmountInput] = React.useState('10000');
   const [withdrawalAmountInput, setWithdrawalAmountInput] = React.useState('');
   const [bankFingerprint, setBankFingerprint] = React.useState('');
+  const [inviteCodeInput, setInviteCodeInput] = React.useState('');
+  const [assistedInvite, setAssistedInvite] = React.useState(false);
   const [membershipIdempotencyKey, setMembershipIdempotencyKey] = React.useState(() =>
     idempotencyKey('partner-membership'),
   );
@@ -282,6 +295,39 @@ export function PartnerPage(): JSX.Element {
     }
   }
 
+  async function recordInvite(): Promise<void> {
+    const inviterExternalId = inviteCodeInput.trim();
+    if (!inviterExternalId) {
+      toast.show('请填写好友的邀请码', 'error');
+      return;
+    }
+
+    if (!beginMutation('invite')) return;
+    try {
+      const result = await trpc.partner.recordInvite.mutate({
+        inviterExternalId,
+        assisted: assistedInvite,
+      });
+      setReferral(result);
+      setInviteCodeInput('');
+      toast.show('邀请归因已登记', 'info', 2200);
+    } catch (err) {
+      handleActionError(err, '邀请登记失败');
+    } finally {
+      endMutation();
+    }
+  }
+
+  async function copyInviteCode(): Promise<void> {
+    if (!state?.enabled || !state.inviteCode) return;
+    try {
+      await navigator.clipboard.writeText(state.inviteCode);
+      toast.show('邀请码已复制', 'info', 1600);
+    } catch {
+      toast.show('复制失败，请手动选择邀请码', 'error');
+    }
+  }
+
   function normalizeRechargeInput(): number {
     const amountCnyCents = clampRechargeAmountCnyCents(rechargeAmountInput);
     setRechargeAmountInput(String(amountCnyCents / 100));
@@ -371,6 +417,8 @@ export function PartnerPage(): JSX.Element {
           onPreviewRecharge={() => void previewRecharge()}
           onCreateRechargeOrder={() => void createRechargeOrder()}
           onRequestWithdrawal={() => void requestWithdrawal()}
+          onRecordInvite={() => void recordInvite()}
+          onCopyInviteCode={() => void copyInviteCode()}
           membershipOrder={membershipOrder}
           rechargePreview={rechargePreview}
           rechargeOrder={rechargeOrder}
@@ -379,6 +427,11 @@ export function PartnerPage(): JSX.Element {
           bankFingerprint={bankFingerprint}
           onBankFingerprintChange={setBankFingerprint}
           withdrawal={withdrawal}
+          inviteCodeInput={inviteCodeInput}
+          onInviteCodeInputChange={setInviteCodeInput}
+          assistedInvite={assistedInvite}
+          onAssistedInviteChange={setAssistedInvite}
+          referral={referral}
           pendingAction={pendingAction}
           isMutating={isMutating}
         />
@@ -397,6 +450,8 @@ function PartnerWorkbench({
   onPreviewRecharge,
   onCreateRechargeOrder,
   onRequestWithdrawal,
+  onRecordInvite,
+  onCopyInviteCode,
   membershipOrder,
   rechargePreview,
   rechargeOrder,
@@ -405,6 +460,11 @@ function PartnerWorkbench({
   bankFingerprint,
   onBankFingerprintChange,
   withdrawal,
+  inviteCodeInput,
+  onInviteCodeInputChange,
+  assistedInvite,
+  onAssistedInviteChange,
+  referral,
   pendingAction,
   isMutating,
 }: {
@@ -417,6 +477,8 @@ function PartnerWorkbench({
   onPreviewRecharge: () => void;
   onCreateRechargeOrder: () => void;
   onRequestWithdrawal: () => void;
+  onRecordInvite: () => void;
+  onCopyInviteCode: () => void;
   membershipOrder: PartnerOrderSummary | null;
   rechargePreview: PartnerRechargePreview | null;
   rechargeOrder: PartnerOrderSummary | null;
@@ -425,6 +487,11 @@ function PartnerWorkbench({
   bankFingerprint: string;
   onBankFingerprintChange: (value: string) => void;
   withdrawal: PartnerWithdrawalSummary | null;
+  inviteCodeInput: string;
+  onInviteCodeInputChange: (value: string) => void;
+  assistedInvite: boolean;
+  onAssistedInviteChange: (value: boolean) => void;
+  referral: PartnerReferralSummary | null;
   pendingAction: PartnerAction | null;
   isMutating: boolean;
 }): JSX.Element {
@@ -461,6 +528,69 @@ function PartnerWorkbench({
             <span className="text-sm tabular-nums">{formatHolaCreditCents(state.ledger.frozenCreditCents)}</span>
           </Row>
         </div>
+      </Section>
+
+      <Section
+        title="邀请好友赚 HOLA Credit"
+        description="普通邀请按好友充值额 20% 入账，代充值或协助充值按 10% 入账。"
+        className="rounded-[8px] border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]"
+      >
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+          <label className="min-w-0 text-xs font-medium text-[#595757]">
+            我的邀请码
+            <div className="mt-1 flex gap-2">
+              <Input value={state.inviteCode || '—'} readOnly className="font-mono text-xs" />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="shrink-0 border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+                onClick={onCopyInviteCode}
+                disabled={!state.inviteCode}
+                aria-label="复制我的邀请码"
+              >
+                <Copy className="h-3.5 w-3.5" aria-hidden />
+                复制
+              </Button>
+            </div>
+          </label>
+          <label className="min-w-0 text-xs font-medium text-[#595757]">
+            好友邀请码
+            <Input
+              className="mt-1 font-mono text-xs"
+              placeholder="usr_..."
+              value={inviteCodeInput}
+              disabled={isMutating}
+              onChange={(event) => onInviteCodeInputChange(event.target.value)}
+            />
+          </label>
+        </div>
+        <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <label className="inline-flex items-center gap-2 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded border-[#DCDDDD] accent-[#EA1F59]"
+              checked={assistedInvite}
+              disabled={isMutating}
+              onChange={(event) => onAssistedInviteChange(event.target.checked)}
+            />
+            代充值或协助充值
+          </label>
+          <Button
+            type="button"
+            size="sm"
+            onClick={onRecordInvite}
+            disabled={isMutating || inviteCodeInput.trim().length === 0}
+          >
+            {pendingAction === 'invite' ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+            ) : (
+              <Gift className="h-3.5 w-3.5" aria-hidden />
+            )}
+            登记邀请
+          </Button>
+        </div>
+        {referral && <ReferralSummary referral={referral} />}
       </Section>
 
       <Section
@@ -738,6 +868,17 @@ function WithdrawalSummary({ withdrawal }: { withdrawal: PartnerWithdrawalSummar
       <SummaryItem label="状态" value={withdrawalStatusLabel(withdrawal.status)} />
       <SummaryItem label="预计复核时间" value={formatDateTime(withdrawal.reviewDueAt)} />
       <SummaryItem label="风险分" value={String(withdrawal.riskScore)} />
+    </dl>
+  );
+}
+
+function ReferralSummary({ referral }: { referral: PartnerReferralSummary }): JSX.Element {
+  return (
+    <dl className="mt-4 grid gap-3 border-t border-[#EFEFEF] pt-4 text-xs sm:grid-cols-2 lg:grid-cols-4">
+      <SummaryItem label="邀请编号" value={referral.referralExternalId} />
+      <SummaryItem label="邀请人" value={referral.inviterExternalId} />
+      <SummaryItem label="当前账号" value={referral.inviteeExternalId} />
+      <SummaryItem label="奖励类型" value={referral.assisted ? '代充值 10%' : '普通邀请 20%'} />
     </dl>
   );
 }

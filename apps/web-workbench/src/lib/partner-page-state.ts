@@ -22,6 +22,7 @@ export interface PartnerEnabledState {
   readonly membership: NormalizedPartnerMembership;
   readonly kycStatus: PartnerKycStatus;
   readonly kycLabel: string;
+  readonly inviteCode: string;
   readonly ledger: PartnerLedgerState;
   readonly lots: readonly PartnerLotState[];
 }
@@ -123,6 +124,7 @@ const PARTNER_ACTION_ERROR_RULES: ReadonlyArray<readonly [RegExp, string]> = [
   [/partner KYC must be passed before recharge/i, '实名通过后才能充值'],
   [/partner KYC must be passed before withdrawal/i, '实名通过后才能提现'],
   [/\binsufficient_available_credit\b/i, '可用 HOLA Credit 不足'],
+  [/partner referral attribution conflict/i, '该账号已有邀请归因'],
   [
     /Failed to fetch|fetch failed|NetworkError|Load failed|ECONNREFUSED|ECONNRESET|Failed to connect|Bad Gateway|Service Unavailable/i,
     '合伙人服务暂时未连接，请确认 orchestrator 已启动后重试',
@@ -138,6 +140,7 @@ export function normalizePartnerDashboard(value: unknown): PartnerPageState {
     membership: normalizeMembership(value.membership),
     kycStatus,
     kycLabel: kycStatusLabel(kycStatus),
+    inviteCode: normalizeInviteCode(value.inviteCode),
     ledger: normalizeLedger(value.ledger),
     lots: normalizeLots(value.lots),
   };
@@ -258,6 +261,10 @@ function normalizeKycStatus(value: unknown): PartnerKycStatus {
   return typeof value === 'string' && KYC_STATUSES.has(value as PartnerKycStatus)
     ? (value as PartnerKycStatus)
     : 'not_started';
+}
+
+function normalizeInviteCode(value: unknown): string {
+  return typeof value === 'string' ? value.trim().slice(0, 64) : '';
 }
 
 function normalizeLedger(value: unknown): PartnerLedgerState {

@@ -310,6 +310,7 @@ describe('partnerRouter', () => {
         expiresAt: new Date('2027-01-01T00:00:00.000Z'),
       },
       kycStatus: 'passed',
+      inviteCode: 'usr_partner',
       ledger: {
         availableCreditCents: 10_000_00,
         lockedCreditCents: 500_00,

@@ -20,6 +20,7 @@ import {
   rechargeRollingThirtyDayWindowStart,
   validateRechargeAmount,
 } from '../../partner/recharge-service.js';
+import { PartnerReferralConflictError, ReferralService } from '../../partner/referral-service.js';
 import { evaluatePartnerRisk } from '../../partner/risk-service.js';
 import {
   WithdrawalGateError,
@@ -43,6 +44,11 @@ const createRechargeOrderInput = z.object({
   amountCnyCents: moneyCentsInput,
   provider: paymentProviderInput.optional(),
   idempotencyKey: idempotencyKeyInput,
+});
+
+const recordInviteInput = z.object({
+  inviterExternalId: z.string().trim().min(1).max(64),
+  assisted: z.boolean().optional(),
 });
 
 const requestWithdrawalInput = z.object({
@@ -70,16 +76,24 @@ function requirePartnerLedgerEnabled(): void {
 }
 
 async function requireInternalUserId(ctx: Context & { userId: string }): Promise<number> {
-  const [row] = await ctx.db
-    .select({ id: users.id })
-    .from(users)
-    .where(eq(users.externalId, ctx.userId))
-    .limit(1);
-
+  const row = await readUserByExternalId(ctx, ctx.userId);
   if (!row) {
     throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
   }
   return row.id;
+}
+
+async function readUserByExternalId(
+  ctx: Context,
+  externalId: string,
+): Promise<{ id: number } | null> {
+  const [row] = await ctx.db
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.externalId, externalId))
+    .limit(1);
+
+  return row ?? null;
 }
 
 function badRequest(message: string): never {
@@ -115,6 +129,26 @@ function summarizePartnerWithdrawal(withdrawal: {
     status: withdrawal.status,
     reviewDueAt: withdrawal.reviewDueAt,
     riskScore: withdrawal.riskScore,
+  };
+}
+
+function summarizePartnerReferral(
+  referral: {
+    externalId: string;
+    status: string;
+    assisted: number;
+  },
+  input: {
+    inviterExternalId: string;
+    inviteeExternalId: string;
+  },
+) {
+  return {
+    referralExternalId: referral.externalId,
+    inviterExternalId: input.inviterExternalId,
+    inviteeExternalId: input.inviteeExternalId,
+    status: referral.status,
+    assisted: referral.assisted === 1,
   };
 }
 
@@ -183,6 +217,28 @@ function mapWithdrawalError(error: unknown): never {
   });
 }
 
+function mapReferralError(error: unknown): never {
+  if (error instanceof TRPCError) {
+    throw error;
+  }
+
+  if (error instanceof PartnerReferralConflictError) {
+    throw new TRPCError({
+      code: 'CONFLICT',
+      message: 'partner referral attribution conflict',
+    });
+  }
+
+  if (error instanceof RangeError) {
+    badRequest(error.message);
+  }
+
+  throw new TRPCError({
+    code: 'INTERNAL_SERVER_ERROR',
+    message: 'failed to record partner invite',
+  });
+}
+
 function assertRollingThirtyDayAmount(rolling: number): void {
   if (!Number.isSafeInteger(rolling) || rolling < 0) {
     badRequest('rollingThirtyDayCnyCents must be a non-negative safe integer');
@@ -248,6 +304,7 @@ export const partnerRouter = router({
           }
         : null,
       kycStatus,
+      inviteCode: ctx.userId,
       ledger: dashboardLedger,
       lots: lots.map((lot) => ({
         id: lot.id,
@@ -298,6 +355,30 @@ export const partnerRouter = router({
       return summarizePartnerOrder(order);
     } catch (error) {
       mapRechargeOrderError(error);
+    }
+  }),
+
+  recordInvite: protectedProcedure.input(recordInviteInput).mutation(async ({ ctx, input }) => {
+    requirePartnerLedgerEnabled();
+
+    const inviteeUserId = await requireInternalUserId(ctx);
+    const inviter = await readUserByExternalId(ctx, input.inviterExternalId);
+    if (!inviter) {
+      badRequest('inviter user was not found');
+    }
+
+    try {
+      const referral = await new ReferralService(ctx.db).recordInvite({
+        inviterUserId: inviter.id,
+        inviteeUserId,
+        assisted: input.assisted,
+      });
+      return summarizePartnerReferral(referral, {
+        inviterExternalId: input.inviterExternalId,
+        inviteeExternalId: ctx.userId,
+      });
+    } catch (error) {
+      mapReferralError(error);
     }
   }),
 

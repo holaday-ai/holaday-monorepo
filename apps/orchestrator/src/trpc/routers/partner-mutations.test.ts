@@ -5,10 +5,12 @@ import { users } from '../../db/schema/users.js';
 const {
   createPendingOrderMock,
   getKycStatusMock,
+  recordInviteMock,
   requestWithdrawalMock,
 } = vi.hoisted(() => ({
   createPendingOrderMock: vi.fn(),
   getKycStatusMock: vi.fn(),
+  recordInviteMock: vi.fn(),
   requestWithdrawalMock: vi.fn(),
 }));
 
@@ -42,10 +44,21 @@ vi.mock('../../partner/withdrawal-service.js', async (importOriginal) => {
   };
 });
 
+vi.mock('../../partner/referral-service.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../partner/referral-service.js')>();
+  return {
+    ...actual,
+    ReferralService: vi.fn(() => ({
+      recordInvite: recordInviteMock,
+    })),
+  };
+});
+
 import {
   RechargeGateError,
   RechargeOrderIdempotencyConflictError,
 } from '../../partner/recharge-service.js';
+import { PartnerReferralConflictError } from '../../partner/referral-service.js';
 import {
   WithdrawalGateError,
   WithdrawalRequestIdempotencyConflictError,
@@ -54,15 +67,29 @@ import {
 import { partnerRouter } from './partner.js';
 
 class FakeUserLookupDb {
+  readonly users: Array<{ id: number; externalId: string }>;
   readonly selectTables: string[] = [];
+
+  constructor(usersInput: Array<{ id: number; externalId: string }> = [
+    { id: 123, externalId: 'usr_partner' },
+    { id: 456, externalId: 'usr_inviter' },
+  ]) {
+    this.users = usersInput;
+  }
 
   select(_selection?: unknown) {
     return {
       from: (table: unknown) => {
         this.selectTables.push(tableName(table));
         return {
-          where: () => ({
-            limit: async () => (table === users ? [{ id: 123 }] : []),
+          where: (predicate: unknown) => ({
+            limit: async () => {
+              if (table !== users) return [];
+              const predicateStrings = extractPredicateStrings(predicate);
+              return this.users
+                .filter((user) => predicateStrings.includes(user.externalId))
+                .slice(0, 1);
+            },
           }),
         };
       },
@@ -72,6 +99,34 @@ class FakeUserLookupDb {
 
 function tableName(table: unknown): string {
   return (table as Record<symbol, string> | null)?.[Symbol.for('drizzle:Name')] ?? 'unknown';
+}
+
+function extractPredicateStrings(value: unknown): string[] {
+  const strings: string[] = [];
+  const seen = new WeakSet<object>();
+
+  function visit(current: unknown, depth: number): void {
+    if (depth > 8 || current == null) return;
+    if (typeof current === 'string') {
+      strings.push(current);
+      return;
+    }
+    if (typeof current !== 'object') return;
+    if (seen.has(current)) return;
+    seen.add(current);
+
+    if (Array.isArray(current)) {
+      for (const item of current) visit(item, depth + 1);
+      return;
+    }
+
+    for (const item of Object.values(current as Record<string, unknown>)) {
+      visit(item, depth + 1);
+    }
+  }
+
+  visit(value, 0);
+  return strings;
 }
 
 function makeContext(db = new FakeUserLookupDb()) {
@@ -95,6 +150,7 @@ describe('partnerRouter mutations', () => {
     process.env.PARTNER_LEDGER_ENABLED = 'true';
     createPendingOrderMock.mockReset();
     getKycStatusMock.mockReset();
+    recordInviteMock.mockReset();
     requestWithdrawalMock.mockReset();
   });
 
@@ -136,9 +192,18 @@ describe('partnerRouter mutations', () => {
       code: 'PRECONDITION_FAILED',
       message: 'partner ledger is disabled',
     });
+    await expect(
+      caller.recordInvite({
+        inviterExternalId: 'usr_inviter',
+      }),
+    ).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+      message: 'partner ledger is disabled',
+    });
     expect(fakeDb.selectTables).toEqual([]);
     expect(createPendingOrderMock).not.toHaveBeenCalled();
     expect(getKycStatusMock).not.toHaveBeenCalled();
+    expect(recordInviteMock).not.toHaveBeenCalled();
     expect(requestWithdrawalMock).not.toHaveBeenCalled();
   });
 
@@ -287,6 +352,56 @@ describe('partnerRouter mutations', () => {
     ).rejects.toMatchObject({
       code: 'INTERNAL_SERVER_ERROR',
       message: 'failed to create partner recharge order',
+    });
+  });
+
+  it('records an invite for the current user from an inviter external id', async () => {
+    recordInviteMock.mockResolvedValueOnce({
+      externalId: 'payment_referral_1',
+      inviterUserId: 456,
+      inviteeUserId: 123,
+      status: 'pending',
+      assisted: 1,
+    });
+
+    await expect(
+      partnerRouter.createCaller(makeContext()).recordInvite({
+        inviterExternalId: '  usr_inviter  ',
+        assisted: true,
+      }),
+    ).resolves.toEqual({
+      referralExternalId: 'payment_referral_1',
+      inviterExternalId: 'usr_inviter',
+      inviteeExternalId: 'usr_partner',
+      status: 'pending',
+      assisted: true,
+    });
+    expect(recordInviteMock).toHaveBeenCalledWith({
+      inviterUserId: 456,
+      inviteeUserId: 123,
+      assisted: true,
+    });
+  });
+
+  it('maps missing inviter and referral conflicts for invite recording', async () => {
+    await expect(
+      partnerRouter.createCaller(makeContext(new FakeUserLookupDb([{ id: 123, externalId: 'usr_partner' }]))).recordInvite({
+        inviterExternalId: 'usr_missing',
+      }),
+    ).rejects.toMatchObject({
+      code: 'BAD_REQUEST',
+      message: 'inviter user was not found',
+    });
+    expect(recordInviteMock).not.toHaveBeenCalled();
+
+    recordInviteMock.mockRejectedValueOnce(new PartnerReferralConflictError());
+    await expect(
+      partnerRouter.createCaller(makeContext()).recordInvite({
+        inviterExternalId: 'usr_inviter',
+      }),
+    ).rejects.toMatchObject({
+      code: 'CONFLICT',
+      message: 'partner referral attribution conflict',
     });
   });
 
