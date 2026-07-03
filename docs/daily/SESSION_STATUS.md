@@ -8,7 +8,7 @@
 > **归属（BOSS 定）：本文件住共享 baseline `claude/musing-keller-ae1d05`**——三 worktree 分支最终都合回这里，协调文件理应在汇合点。各 session 更新时只对 musing-keller push 这**一个文件**（单文件无冲突风险）。
 
 <!-- 固定维护：每次部署后由部署者更新这一行（硬规则 7）。改 ref 前必实读 live HEAD。 -->
-## 🔴 PROD LIVE REF = `codex/trust-loop-round1` — orch `c3fe3fa`（**状态机清理 LIVE（2026-07-03）**：video confirm/cancel/reprompt raw SQL 也统一清旧 `pauseReason`/error；前序 `3c1429f` 已让 maintenance/repository 进入 failed/completed/executing/awaiting_user 时清旧 `pauseReason`，保留 paused 才有 pause reason；前序 `b1d37c6` 已清 awaiting/error 残留与 controller stale error；前序 `92000d7` terminal side-effect race guard 已在同分支 LIVE；SPA 未变。）
+## 🔴 PROD LIVE REF = `codex/trust-loop-round1` — orch `aafaae2`（**状态机清理 LIVE（2026-07-03）**：result patch helper 也会顺手清 completed/awaiting_user 的旧 `pauseReason`/error/awaiting 字段；前序 `c3fe3fa` 已让 video confirm/cancel/reprompt raw SQL 统一清旧 `pauseReason`/error；前序 `3c1429f` 已让 maintenance/repository 状态出口清旧 `pauseReason`；前序 `b1d37c6` 已清 awaiting/error 残留与 controller stale error；前序 `92000d7` terminal side-effect race guard 已在同分支 LIVE；SPA 未变。）
 
 <!-- 2026-06-26 里程碑 — 🏁🏁 登录自学从机制到交易站真出货 + 四层 veto 防线 -->
 **🏁🏁 里程碑（2026-06-26）— 登录自学从机制到交易站真出货 + 四层 veto 防线全证通**
