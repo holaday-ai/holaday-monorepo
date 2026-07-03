@@ -960,6 +960,11 @@ describe('TaskRepository task terminal state persistence', () => {
 
     expect(result.persisted).toBe(true);
     expect(captured.updatePayloads[0]).toEqual({
+      pauseReason: null,
+      awaitingQuestion: null,
+      awaitingKind: null,
+      errorCode: null,
+      errorMessage: null,
       result: {
         summary: 'handoff ready',
         handoffTaskId: 'tsk_handoff',
@@ -1102,6 +1107,9 @@ describe('TaskRepository task terminal state persistence', () => {
 
     expect(result.persisted).toBe(true);
     expect(captured.updatePayloads[0]).toMatchObject({
+      pauseReason: null,
+      errorCode: null,
+      errorMessage: null,
       result: {
         executionMode: 'browser',
         finalUrl: 'https://example.com/login',

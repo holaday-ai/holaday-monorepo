@@ -391,7 +391,14 @@ export class TaskRepository {
   ): Promise<{ persisted: boolean }> {
     const result = await this.db
       .update(tasks)
-      .set({ result: resultPayload })
+      .set({
+        pauseReason: null,
+        awaitingQuestion: null,
+        awaitingKind: null,
+        errorCode: null,
+        errorMessage: null,
+        result: resultPayload,
+      })
       .where(and(eq(tasks.externalId, taskExternalId), eq(tasks.status, 'completed')));
     return { persisted: extractMysqlAffectedRows(result) > 0 };
   }
@@ -509,7 +516,12 @@ export class TaskRepository {
   }): Promise<{ persisted: boolean }> {
     const result = await this.db
       .update(tasks)
-      .set({ result: params.result })
+      .set({
+        pauseReason: null,
+        errorCode: null,
+        errorMessage: null,
+        result: params.result,
+      })
       .where(
         and(
           eq(tasks.externalId, params.taskExternalId),
