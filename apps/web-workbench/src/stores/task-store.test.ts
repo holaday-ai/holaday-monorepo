@@ -22,6 +22,7 @@ vi.mock('@/lib/trpc', () => ({
       detail: { query: vi.fn() },
       create: { mutate: vi.fn() },
       reply: { mutate: vi.fn() },
+      abort: { mutate: vi.fn() },
       delete: { mutate: vi.fn() },
       moveToProject: { mutate: vi.fn() },
       star: { mutate: vi.fn() },
@@ -33,6 +34,7 @@ const listQuery = vi.mocked(trpc.tasks.list.query);
 const detailQuery = vi.mocked(trpc.tasks.detail.query);
 const createMutate = vi.mocked(trpc.tasks.create.mutate);
 const replyMutate = vi.mocked(trpc.tasks.reply.mutate);
+const abortMutate = vi.mocked(trpc.tasks.abort.mutate);
 const deleteMutate = vi.mocked(trpc.tasks.delete.mutate);
 const moveToProjectMutate = vi.mocked(trpc.tasks.moveToProject.mutate);
 const starMutate = vi.mocked(trpc.tasks.star.mutate);
@@ -42,6 +44,7 @@ beforeEach(() => {
   detailQuery.mockReset();
   createMutate.mockReset();
   replyMutate.mockReset();
+  abortMutate.mockReset();
   deleteMutate.mockReset();
   moveToProjectMutate.mockReset();
   starMutate.mockReset();
@@ -1190,6 +1193,51 @@ describe('replyToTask', () => {
     expect(state.awaitingUserByTask.tsk_wait?.awaitingKind).toBe('browser_action');
     expect(state.tasks[0]?.status).toBe('awaiting_user');
     expect(state.tasks[0]?.awaitingKind).toBe('browser_action');
+  });
+});
+
+describe('abortTask', () => {
+  it('marks optimistic cancellation as runtime-terminal so stale live frames cannot revive it', async () => {
+    abortMutate.mockResolvedValueOnce({ ok: true } as never);
+    useTaskStore.setState({
+      tasks: [task({ taskId: 'tsk_abort', status: 'executing' })],
+      awaitingUserByTask: {
+        tsk_abort: {
+          question: '请确认',
+          at: 1,
+          awaitingKind: 'clarification',
+        },
+      },
+      progressByTask: { tsk_abort: '正在执行' },
+      streamingByTask: { tsk_abort: 'partial answer' },
+      subStatusByTask: {
+        tsk_abort: { subStatus: 'browsing', since: 1 },
+      },
+    });
+
+    await expect(useTaskStore.getState().abortTask('tsk_abort')).resolves.toEqual({
+      ok: true,
+    });
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.task.progress',
+      taskId: 'tsk_abort',
+      message: '迟到进度',
+      subStatus: 'browsing',
+    });
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.task.stream',
+      taskId: 'tsk_abort',
+      delta: ' stale text',
+    });
+
+    const state = useTaskStore.getState();
+    expect(abortMutate).toHaveBeenCalledWith({ taskId: 'tsk_abort' });
+    expect(state.tasks[0]?.status).toBe('cancelled');
+    expect(state.terminalTaskIds.has('tsk_abort')).toBe(true);
+    expect(state.awaitingUserByTask.tsk_abort).toBeUndefined();
+    expect(state.subStatusByTask.tsk_abort).toBeUndefined();
+    expect(state.progressByTask.tsk_abort).toBe('正在执行');
+    expect(state.streamingByTask.tsk_abort).toBe('partial answer');
   });
 });
 

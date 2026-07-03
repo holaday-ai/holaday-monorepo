@@ -1055,11 +1055,22 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       // server's own terminal broadcast (status='cancelled') will
       // overwrite this in applyServerMessage on the same tick.
       if (res.ok) {
-        set((prev) => ({
-          tasks: prev.tasks.map((t) =>
-            t.taskId === taskId ? { ...t, status: 'cancelled' as const } : t,
-          ),
-        }));
+        set((prev) => {
+          const nextTerminalIds = new Set(prev.terminalTaskIds);
+          nextTerminalIds.add(taskId);
+          const nextAwaiting = { ...prev.awaitingUserByTask };
+          delete nextAwaiting[taskId];
+          const nextSubStatus = { ...prev.subStatusByTask };
+          delete nextSubStatus[taskId];
+          return {
+            tasks: prev.tasks.map((t) =>
+              t.taskId === taskId ? { ...t, status: 'cancelled' as const } : t,
+            ),
+            terminalTaskIds: nextTerminalIds,
+            awaitingUserByTask: nextAwaiting,
+            subStatusByTask: nextSubStatus,
+          };
+        });
       }
       return { ok: res.ok };
     } catch (err) {
