@@ -103,7 +103,7 @@ export function PartnerPage(): JSX.Element {
       setState(dashboard);
     } catch (err) {
       if (!mountedRef.current || requestId !== requestIdRef.current) return;
-      setLoadError(partnerActionErrorMessage(err, '合伙人账本暂时无法加载'));
+      setLoadError(partnerActionErrorMessage(err, '请稍后重试。'));
     } finally {
       if (mountedRef.current && requestId === requestIdRef.current) setLoading(false);
     }
@@ -195,7 +195,6 @@ export function PartnerPage(): JSX.Element {
     try {
       const preview = await trpc.partner.rechargePreview.query({
         amountCnyCents,
-        rollingThirtyDayCnyCents: amountCnyCents,
       });
       setRechargePreview(preview);
       toast.show('充值预览已更新', 'info', 1800);
@@ -319,13 +318,13 @@ export function PartnerPage(): JSX.Element {
         action={refreshAction}
       />
 
-      {loadError && (
+      {loadError && state != null && (
         <StatusPanel
           tone="error"
-          title={state ? '刷新失败，正在显示上次账本' : '合伙人账本暂时无法加载'}
+          title="刷新失败，正在显示上次账本"
           body={loadError}
           action={
-            <Button type="button" size="sm" onClick={() => void refresh()} disabled={loading}>
+            <Button type="button" size="sm" onClick={() => void refresh()} disabled={loading || isMutating}>
               重试
             </Button>
           }
@@ -344,7 +343,7 @@ export function PartnerPage(): JSX.Element {
           title="合伙人账本暂时无法加载"
           body={loadError ?? '请稍后重试。'}
           action={
-            <Button type="button" size="sm" onClick={() => void refresh()} disabled={loading}>
+            <Button type="button" size="sm" onClick={() => void refresh()} disabled={loading || isMutating}>
               重试
             </Button>
           }

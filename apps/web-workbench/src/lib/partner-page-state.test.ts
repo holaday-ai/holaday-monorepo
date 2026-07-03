@@ -173,6 +173,15 @@ describe('partner page state helpers', () => {
     ).toBe('可用 HOLA Credit 不足');
     expect(
       partnerActionErrorMessage(
+        new Error('Failed to connect to 127.0.0.1 port 3001'),
+        '合伙人账本暂时无法加载',
+      ),
+    ).toBe('合伙人服务暂时未连接，请确认 orchestrator 已启动后重试');
+    expect(
+      partnerActionErrorMessage(new Error('partner ledger is disabled'), '操作失败'),
+    ).toBe('合伙人账本暂未开放');
+    expect(
+      partnerActionErrorMessage(
         new Error('SQLSTATE 23000: internal stack trace should not render'),
         '操作失败',
       ),

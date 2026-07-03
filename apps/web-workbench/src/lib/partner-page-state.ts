@@ -115,6 +115,7 @@ const LOT_STATUSES = new Set<PartnerLotStatus>([
 const RISK_STATUSES = new Set<PartnerRiskStatus>(['normal', 'review', 'review_required', 'frozen']);
 
 const PARTNER_ACTION_ERROR_RULES: ReadonlyArray<readonly [RegExp, string]> = [
+  [/partner ledger is disabled/i, '合伙人账本暂未开放'],
   [/\bbelow_minimum\b/i, '金额低于最低限制'],
   [/\babove_single_maximum\b/i, '金额超过单笔上限'],
   [/\bnot_whole_cny\b/i, '金额必须为整元'],
@@ -122,6 +123,10 @@ const PARTNER_ACTION_ERROR_RULES: ReadonlyArray<readonly [RegExp, string]> = [
   [/partner KYC must be passed before recharge/i, '实名通过后才能充值'],
   [/partner KYC must be passed before withdrawal/i, '实名通过后才能提现'],
   [/\binsufficient_available_credit\b/i, '可用 HOLA Credit 不足'],
+  [
+    /Failed to fetch|fetch failed|NetworkError|Load failed|ECONNREFUSED|ECONNRESET|Failed to connect|Bad Gateway|Service Unavailable/i,
+    '合伙人服务暂时未连接，请确认 orchestrator 已启动后重试',
+  ],
 ];
 
 export function normalizePartnerDashboard(value: unknown): PartnerPageState {
