@@ -1574,6 +1574,41 @@ describe('applyServerMessage stale live frames after terminal', () => {
     expect(state.progressByTask.tsk_partial_final).toBeUndefined();
     expect(state.subStatusByTask.tsk_partial_final).toBeUndefined();
   });
+
+  it('does not attach late plan frames to terminal tasks', () => {
+    useTaskStore.setState({
+      tasks: [
+        task({
+          taskId: 'tsk_done_plan',
+          status: 'completed',
+          resultText: '已完成',
+          planText: '原计划',
+          planStatus: [{ idx: 1, note: '完成前计划', status: 'done' }],
+        }),
+      ],
+      terminalTaskIds: new Set(['tsk_done_plan']),
+    });
+
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.task.plan',
+      taskId: 'tsk_done_plan',
+      planText: '迟到计划',
+      planStatus: [{ idx: 2, note: '迟到计划', status: 'pending' }],
+    });
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.task.plan_step',
+      taskId: 'tsk_done_plan',
+      planStatus: [{ idx: 3, note: '迟到步骤', status: 'running' }],
+    });
+
+    const state = useTaskStore.getState();
+    expect(state.tasks[0]).toMatchObject({
+      status: 'completed',
+      resultText: '已完成',
+      planText: '原计划',
+      planStatus: [{ idx: 1, note: '完成前计划', status: 'done' }],
+    });
+  });
 });
 
 describe('applyServerMessage paused terminal frame', () => {

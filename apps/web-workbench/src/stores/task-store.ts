@@ -1475,24 +1475,30 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       // matching task; the TaskStream renders <PlanCard> when this
       // is set. Idempotent: a reconnected WS replay just overwrites
       // with the same body.
-      set((prev) => ({
-        tasks: prev.tasks.map((t) =>
-          t.taskId === msg.taskId
-            ? { ...t, planText: msg.planText, planStatus: msg.planStatus }
-            : t,
-        ),
-      }));
+      set((prev) => {
+        if (isTaskRuntimeTerminal(prev, msg.taskId)) return prev;
+        return {
+          tasks: prev.tasks.map((t) =>
+            t.taskId === msg.taskId
+              ? { ...t, planText: msg.planText, planStatus: msg.planStatus }
+              : t,
+          ),
+        };
+      });
       return;
     }
     if (msg.type === 'server.task.plan_step') {
       // Phase 13 Dim 1 follow-up — incremental status update.
       // Replace the planStatus array wholesale; the orchestrator
       // sends the whole snapshot so the SPA doesn't merge diffs.
-      set((prev) => ({
-        tasks: prev.tasks.map((t) =>
-          t.taskId === msg.taskId ? { ...t, planStatus: msg.planStatus } : t,
-        ),
-      }));
+      set((prev) => {
+        if (isTaskRuntimeTerminal(prev, msg.taskId)) return prev;
+        return {
+          tasks: prev.tasks.map((t) =>
+            t.taskId === msg.taskId ? { ...t, planStatus: msg.planStatus } : t,
+          ),
+        };
+      });
       return;
     }
     if (msg.type === 'server.vision.tick.start') {
