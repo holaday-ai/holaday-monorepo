@@ -271,6 +271,23 @@ describe('TaskRepository.persistVisionOutcome — awaiting_user state guard (Pha
     });
   });
 
+  it('clears stale task errors on successful terminal runner outcomes', async () => {
+    const { db, captured } = fakeDbWithAffectedRows(1);
+    const repo = new TaskRepository(db);
+
+    await repo.persistVisionOutcome('tsk_exec_done', {
+      status: 'completed',
+      summary: 'final answer',
+      tickCount: 3,
+    });
+
+    expect(captured.taskUpdate).toMatchObject({
+      status: 'completed',
+      errorCode: null,
+      errorMessage: null,
+    });
+  });
+
   it('guards completed writes to active running rows at SQL level', async () => {
     const { db, captured } = fakeDbWithAffectedRows(1);
     const repo = new TaskRepository(db);
@@ -502,6 +519,24 @@ describe('TaskRepository task terminal state persistence', () => {
     });
   });
 
+  it('applyStepResult clears stale task errors after a successful step', async () => {
+    const { db, captured } = fakeDbForStateTransitions(1);
+    const repo = new TaskRepository(db);
+    const next: TaskState = {
+      ...baseState,
+      status: 'completed',
+      cursor: 1,
+    };
+
+    await repo.applyStepResult(baseState, next, { summary: 'done' });
+
+    expect(captured.updatePayloads[0]).toMatchObject({
+      status: 'completed',
+      errorCode: null,
+      errorMessage: null,
+    });
+  });
+
   it('applyControlTransition treats partial_success as terminal for completedAt and event ledger', async () => {
     const { db, captured } = fakeDbForStateTransitions();
     const repo = new TaskRepository(db);
@@ -621,6 +656,31 @@ describe('TaskRepository task terminal state persistence', () => {
       pauseReason: 'user',
       awaitingQuestion: null,
       awaitingKind: null,
+    });
+  });
+
+  it('applyControlTransition clears stale task errors when resuming', async () => {
+    const { db, captured } = fakeDbForStateTransitions(1);
+    const repo = new TaskRepository(db);
+    const prev: TaskState = {
+      ...baseState,
+      status: 'paused',
+      pauseReason: 'retries_exhausted',
+      error: { code: 'NAV_TIMEOUT', message: 'page never loaded' },
+    };
+    const next: TaskState = {
+      ...prev,
+      status: 'executing',
+      pauseReason: null,
+      error: undefined,
+    };
+
+    await repo.applyControlTransition(prev, next);
+
+    expect(captured.updatePayloads[0]).toMatchObject({
+      status: 'executing',
+      errorCode: null,
+      errorMessage: null,
     });
   });
 
@@ -783,6 +843,40 @@ describe('TaskRepository task terminal state persistence', () => {
       pauseReason: null,
       awaitingQuestion: null,
       awaitingKind: null,
+    });
+  });
+
+  it('applyBatchApprove clears stale task errors when resuming execution', async () => {
+    const { db, captured } = fakeDbForStateTransitions(1);
+    const repo = new TaskRepository(db);
+    const prev: TaskState = {
+      taskId: 'tsk_state_machine',
+      status: 'awaiting_user',
+      plan: [{ id: 'stp_batch', kind: 'click', risk: 'high' }],
+      cursor: 0,
+      pendingConfirm: {
+        kind: 'batch',
+        stepId: 'stp_batch',
+        batchIndex: 0,
+        batchTotal: 2,
+        items: [{ label: 'First draft', preview: 'Send first draft' }],
+        risk: 'high',
+      },
+      error: { code: 'PREV_ERROR', message: 'previous attempt failed' },
+    };
+    const next: TaskState = {
+      ...prev,
+      status: 'executing',
+      pendingConfirm: null,
+      error: undefined,
+    };
+
+    await repo.applyBatchApprove(prev, next);
+
+    expect(captured.updatePayloads[0]).toMatchObject({
+      status: 'executing',
+      errorCode: null,
+      errorMessage: null,
     });
   });
 
@@ -1097,6 +1191,19 @@ describe('TaskRepository task terminal state persistence', () => {
     });
   });
 
+  it('markQueuedTaskExecuting clears stale task errors', async () => {
+    const { db, captured } = fakeDbForStateTransitions(1);
+    const repo = new TaskRepository(db);
+
+    await repo.markQueuedTaskExecuting('tsk_state_machine');
+
+    expect(captured.updatePayloads[0]).toMatchObject({
+      status: 'executing',
+      errorCode: null,
+      errorMessage: null,
+    });
+  });
+
   it('markQueuedTaskExecuting reports stale rows without pretending to start', async () => {
     const { db, captured } = fakeDbForStateTransitions(0);
     const repo = new TaskRepository(db);
@@ -1173,6 +1280,8 @@ describe('TaskRepository task terminal state persistence', () => {
     expect(sqlText).toContain('status = \'completed\'');
     expect(sqlText).toContain('awaiting_kind = NULL');
     expect(sqlText).toContain('awaiting_question = NULL');
+    expect(sqlText).toContain('error_code = NULL');
+    expect(sqlText).toContain('error_message = NULL');
     expect(sqlText).toContain('video_creation_confirm');
     expect(sqlText).toContain('video_creation_consumed');
     expect(captured.transactionRan).toBe(true);
@@ -1208,6 +1317,8 @@ describe('TaskRepository task terminal state persistence', () => {
     const sqlText = collectSqlText(captured.statements[0]);
     expect(sqlText).toContain('status = \'awaiting_user\'');
     expect(sqlText).toContain('awaiting_kind = \'video_quote\'');
+    expect(sqlText).toContain('error_code = NULL');
+    expect(sqlText).toContain('error_message = NULL');
     expect(sqlText).toContain('video_creation_confirm');
     expect(sqlText).toContain('video_creation_cancelled');
     expect(captured.transactionRan).toBe(true);
