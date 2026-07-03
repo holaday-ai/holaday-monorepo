@@ -863,6 +863,45 @@ describe('selectTask detail hydration', () => {
       resultText: '浏览器连接中断，请重新执行任务。',
     });
   });
+
+  it('does not let stale active detail overwrite a live terminal frame', async () => {
+    let resolveDetail!: (value: unknown) => void;
+    const detailPromise = new Promise((resolve) => {
+      resolveDetail = resolve;
+    });
+    detailQuery.mockReturnValueOnce(detailPromise as never);
+    useTaskStore.setState({
+      tasks: [task({ taskId: 'tsk_detail_race', status: 'executing' })],
+    });
+
+    useTaskStore.getState().selectTask('tsk_detail_race', 'ui');
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.task.terminal',
+      taskId: 'tsk_detail_race',
+      status: 'completed',
+      summary: '实时终态',
+    });
+
+    resolveDetail({
+      intent: '打开网页',
+      title: null,
+      status: 'executing',
+      createdAt: '2026-05-22T00:00:00.000Z',
+      steps: [],
+      result: { summary: '旧详情内容' },
+      verificationPassed: null,
+      failureLevel: null,
+    });
+    await flushPromises();
+
+    const state = useTaskStore.getState();
+    expect(state.tasks[0]).toMatchObject({
+      taskId: 'tsk_detail_race',
+      status: 'completed',
+      resultText: '实时终态',
+    });
+    expect(state.terminalTaskIds.has('tsk_detail_race')).toBe(true);
+  });
 });
 
 describe('loadMoreTasks', () => {

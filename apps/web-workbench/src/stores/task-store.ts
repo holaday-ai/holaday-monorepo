@@ -461,6 +461,9 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         const detailStatus = rawDetailStatus
           ? normaliseStatus(rawDetailStatus)
           : existingTask?.status ?? 'unknown';
+        if (hasFinalTaskRow(prev, taskId) && !isTerminalStatus(detailStatus)) {
+          return prev;
+        }
         const rawResultText = extractSummary(detail.result);
         const rawErrorText = safeTaskListText(detail.errorMessage);
         const resultText =
