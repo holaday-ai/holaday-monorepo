@@ -297,6 +297,8 @@ export class TaskController {
         ...state,
         status: 'awaiting_user',
         pendingConfirm: pending,
+        pauseReason: null,
+        error: undefined,
       };
 
       const confirmMessage: ServerMessage =
@@ -329,7 +331,13 @@ export class TaskController {
     }
 
     // OK path: advance.
-    const advanced: TaskState = { ...state, cursor: state.cursor + 1, pendingConfirm: null };
+    const advanced: TaskState = {
+      ...state,
+      cursor: state.cursor + 1,
+      pendingConfirm: null,
+      pauseReason: null,
+      error: undefined,
+    };
     const nextStep = advanced.plan[advanced.cursor];
     if (!nextStep) {
       const completed: TaskState = { ...advanced, status: 'completed' };
@@ -387,6 +395,8 @@ export class TaskController {
         ...state,
         status: 'cancelled',
         pendingConfirm: null,
+        pauseReason: null,
+        error: undefined,
       };
       return {
         state: cancelled,
@@ -407,13 +417,21 @@ export class TaskController {
     if (pending.kind === 'batch' && decision === 'approve') {
       const current = state.plan[state.cursor];
       if (!current) {
-        const completed: TaskState = { ...state, status: 'completed', pendingConfirm: null };
+        const completed: TaskState = {
+          ...state,
+          status: 'completed',
+          pendingConfirm: null,
+          pauseReason: null,
+          error: undefined,
+        };
         return { state: completed, effects: [{ kind: 'persist', state: completed }] };
       }
       const resumed: TaskState = {
         ...state,
         status: 'executing',
         pendingConfirm: null,
+        pauseReason: null,
+        error: undefined,
       };
       return {
         state: resumed,
@@ -429,6 +447,8 @@ export class TaskController {
       ...state,
       cursor: state.cursor + 1,
       pendingConfirm: null,
+      pauseReason: null,
+      error: undefined,
     };
     const nextStep = advanced.plan[advanced.cursor];
     if (!nextStep) {
@@ -458,6 +478,7 @@ export class TaskController {
       status: 'cancelled',
       pendingConfirm: null,
       pauseReason: null,
+      error: undefined,
     };
     return {
       state: cancelled,
@@ -490,7 +511,13 @@ export class TaskController {
     ) {
       return { state, effects: [{ kind: 'noop' }] };
     }
-    const paused: TaskState = { ...state, status: 'paused', pauseReason: reason };
+    const paused: TaskState = {
+      ...state,
+      status: 'paused',
+      pendingConfirm: null,
+      pauseReason: reason,
+      error: undefined,
+    };
     return {
       state: paused,
       effects: [
@@ -523,6 +550,7 @@ export class TaskController {
         ...state,
         status: 'completed',
         pauseReason: null,
+        error: undefined,
       };
       return { state: completed, effects: [{ kind: 'persist', state: completed }] };
     }

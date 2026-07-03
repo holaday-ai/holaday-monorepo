@@ -76,6 +76,29 @@ describe('TaskController state machine', () => {
     expect(s1.status).toBe('completed');
   });
 
+  it('clears stale retry error when a later step succeeds', async () => {
+    const c = await setup();
+    const { state: s0 } = c.start({
+      state: null,
+      plan: [{ id: 'stp_1', kind: 'goto', risk: 'low' }],
+    });
+    const { state: retried } = c.onStepResult(s0, {
+      taskId: s0.taskId,
+      stepId: 'stp_1',
+      status: 'error',
+      error: { code: 'NAV_TIMEOUT', message: 'first fail' },
+    });
+
+    const { state: completed } = c.onStepResult(retried, {
+      taskId: retried.taskId,
+      stepId: 'stp_1',
+      status: 'ok',
+    });
+
+    expect(completed.status).toBe('completed');
+    expect(completed.error).toBeUndefined();
+  });
+
   it('first step error retries the same step (does not advance, does not fail)', async () => {
     const c = await setup();
     const { state: s0 } = c.start({
@@ -290,6 +313,29 @@ describe('TaskController state machine', () => {
     }
   });
 
+  it('clears stale retry error when a later step parks for confirmation', async () => {
+    const c = await setup();
+    const { state: s0 } = c.start({
+      state: null,
+      plan: [{ id: 'stp_1', kind: 'click', risk: 'high' }],
+    });
+    const { state: retried } = c.onStepResult(s0, {
+      taskId: s0.taskId,
+      stepId: 'stp_1',
+      status: 'error',
+      error: { code: 'CLICK_FAILED', message: 'first fail' },
+    });
+
+    const { state: awaiting } = c.onStepResult(retried, {
+      taskId: retried.taskId,
+      stepId: 'stp_1',
+      status: 'ok',
+    });
+
+    expect(awaiting.status).toBe('awaiting_user');
+    expect(awaiting.error).toBeUndefined();
+  });
+
   it('userConfirm(approve) resumes execution', async () => {
     const c = await setup();
     const { state: s0 } = c.start({
@@ -311,6 +357,31 @@ describe('TaskController state machine', () => {
     if (sendEffect?.kind === 'send' && sendEffect.message.type === 'server.task.dispatch') {
       expect(sendEffect.message.stepId).toBe('stp_2');
     }
+  });
+
+  it('userConfirm clears stale error while leaving awaiting_user', async () => {
+    const c = await setup();
+    const { state: s0 } = c.start({
+      state: null,
+      plan: [
+        { id: 'stp_1', kind: 'click', risk: 'high' },
+        { id: 'stp_2', kind: 'wait', risk: 'low' },
+      ],
+    });
+    const { state: awaiting } = c.onStepResult(s0, {
+      taskId: s0.taskId,
+      stepId: 'stp_1',
+      status: 'ok',
+    });
+    const staleAwaiting = {
+      ...awaiting,
+      error: { code: 'OLD_ERROR', message: 'old error' },
+    };
+
+    const { state: resumed } = c.userConfirm(staleAwaiting, 'approve');
+
+    expect(resumed.status).toBe('executing');
+    expect(resumed.error).toBeUndefined();
   });
 
   it('userConfirm(reject) cancels the task', async () => {
