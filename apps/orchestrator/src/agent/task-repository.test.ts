@@ -1286,6 +1286,7 @@ describe('TaskRepository task terminal state persistence', () => {
     expect(sqlText).toContain('status = \'completed\'');
     expect(sqlText).toContain('awaiting_kind = NULL');
     expect(sqlText).toContain('awaiting_question = NULL');
+    expect(sqlText).toContain('pause_reason = NULL');
     expect(sqlText).toContain('error_code = NULL');
     expect(sqlText).toContain('error_message = NULL');
     expect(sqlText).toContain('video_creation_confirm');
@@ -1323,6 +1324,7 @@ describe('TaskRepository task terminal state persistence', () => {
     const sqlText = collectSqlText(captured.statements[0]);
     expect(sqlText).toContain('status = \'awaiting_user\'');
     expect(sqlText).toContain('awaiting_kind = \'video_quote\'');
+    expect(sqlText).toContain('pause_reason = NULL');
     expect(sqlText).toContain('error_code = NULL');
     expect(sqlText).toContain('error_message = NULL');
     expect(sqlText).toContain('video_creation_confirm');
@@ -1360,6 +1362,9 @@ describe('TaskRepository task terminal state persistence', () => {
     const sqlText = collectSqlText(captured.statements[0]);
     expect(sqlText).toContain('status = \'awaiting_user\'');
     expect(sqlText).toContain('awaiting_kind = \'video_quote\'');
+    expect(sqlText).toContain('pause_reason = NULL');
+    expect(sqlText).toContain('error_code = NULL');
+    expect(sqlText).toContain('error_message = NULL');
     expect(sqlText).toContain('video_creation_confirm');
     expect(sqlText).toContain('请选择一个操作');
     expect(sqlText).toContain('tsk_state_machine');

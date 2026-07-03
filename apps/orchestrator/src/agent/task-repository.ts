@@ -977,6 +977,7 @@ export class TaskRepository {
           status = 'completed',
           awaiting_kind = NULL,
           awaiting_question = NULL,
+          pause_reason = NULL,
           error_code = NULL,
           error_message = NULL,
           result = JSON_SET(
@@ -1031,6 +1032,7 @@ export class TaskRepository {
           status = 'cancelled',
           awaiting_kind = NULL,
           awaiting_question = NULL,
+          pause_reason = NULL,
           error_code = NULL,
           error_message = NULL,
           result = JSON_SET(
@@ -1077,7 +1079,10 @@ export class TaskRepository {
       SET
         status = 'awaiting_user',
         awaiting_question = ${question},
-        awaiting_kind = 'video_quote'
+        awaiting_kind = 'video_quote',
+        pause_reason = NULL,
+        error_code = NULL,
+        error_message = NULL
       WHERE external_id = ${taskExternalId}
         AND status = 'awaiting_user'
         AND awaiting_kind = 'video_quote'
