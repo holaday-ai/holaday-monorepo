@@ -4,13 +4,17 @@ import { users } from '../../db/schema/users.js';
 
 const {
   createPendingOrderMock,
+  getActiveMembershipMock,
   getKycStatusMock,
   recordInviteMock,
+  upsertKycStatusMock,
   requestWithdrawalMock,
 } = vi.hoisted(() => ({
   createPendingOrderMock: vi.fn(),
+  getActiveMembershipMock: vi.fn(),
   getKycStatusMock: vi.fn(),
   recordInviteMock: vi.fn(),
+  upsertKycStatusMock: vi.fn(),
   requestWithdrawalMock: vi.fn(),
 }));
 
@@ -30,6 +34,17 @@ vi.mock('../../partner/kyc-service.js', async (importOriginal) => {
     ...actual,
     KycService: vi.fn(() => ({
       getStatus: getKycStatusMock,
+      upsertStatus: upsertKycStatusMock,
+    })),
+  };
+});
+
+vi.mock('../../partner/membership-service.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../partner/membership-service.js')>();
+  return {
+    ...actual,
+    PartnerMembershipService: vi.fn(() => ({
+      getActiveMembership: getActiveMembershipMock,
     })),
   };
 });
@@ -149,8 +164,10 @@ describe('partnerRouter mutations', () => {
   beforeEach(() => {
     process.env.PARTNER_LEDGER_ENABLED = 'true';
     createPendingOrderMock.mockReset();
+    getActiveMembershipMock.mockReset();
     getKycStatusMock.mockReset();
     recordInviteMock.mockReset();
+    upsertKycStatusMock.mockReset();
     requestWithdrawalMock.mockReset();
   });
 
@@ -200,10 +217,16 @@ describe('partnerRouter mutations', () => {
       code: 'PRECONDITION_FAILED',
       message: 'partner ledger is disabled',
     });
+    await expect(caller.submitKyc({ providerRef: 'provider-disabled' })).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+      message: 'partner ledger is disabled',
+    });
     expect(fakeDb.selectTables).toEqual([]);
     expect(createPendingOrderMock).not.toHaveBeenCalled();
+    expect(getActiveMembershipMock).not.toHaveBeenCalled();
     expect(getKycStatusMock).not.toHaveBeenCalled();
     expect(recordInviteMock).not.toHaveBeenCalled();
+    expect(upsertKycStatusMock).not.toHaveBeenCalled();
     expect(requestWithdrawalMock).not.toHaveBeenCalled();
   });
 
@@ -381,6 +404,74 @@ describe('partnerRouter mutations', () => {
       inviteeUserId: 123,
       assisted: true,
     });
+  });
+
+  it('submits the current user for KYC review after membership is active', async () => {
+    const reviewedAt = null;
+    getActiveMembershipMock.mockResolvedValueOnce({
+      id: 55,
+      userId: 123,
+      status: 'active',
+      expiresAt: new Date('2027-07-03T00:00:00.000Z'),
+    });
+    getKycStatusMock.mockResolvedValueOnce('not_started');
+    upsertKycStatusMock.mockResolvedValueOnce({
+      externalId: 'payment_kyc_1',
+      userId: 123,
+      status: 'pending',
+      country: 'CN',
+      provider: 'manual',
+      providerRef: 'bankcard-flow-1',
+      reviewedAt,
+    });
+
+    await expect(
+      partnerRouter.createCaller(makeContext()).submitKyc({
+        providerRef: '  bankcard-flow-1  ',
+      }),
+    ).resolves.toEqual({
+      kycExternalId: 'payment_kyc_1',
+      status: 'pending',
+      country: 'CN',
+      provider: 'manual',
+      providerRef: 'bankcard-flow-1',
+      reviewedAt,
+    });
+    expect(getActiveMembershipMock).toHaveBeenCalledWith(123);
+    expect(getKycStatusMock).toHaveBeenCalledWith(123);
+    expect(upsertKycStatusMock).toHaveBeenCalledWith({
+      userId: 123,
+      status: 'pending',
+      provider: 'manual',
+      providerRef: 'bankcard-flow-1',
+      note: 'partner user submitted KYC review',
+    });
+  });
+
+  it('blocks KYC submission before membership and does not regress passed KYC', async () => {
+    getActiveMembershipMock.mockResolvedValueOnce(null);
+    await expect(
+      partnerRouter.createCaller(makeContext()).submitKyc({}),
+    ).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+      message: 'partner membership required',
+    });
+    expect(upsertKycStatusMock).not.toHaveBeenCalled();
+
+    getActiveMembershipMock.mockResolvedValueOnce({
+      id: 55,
+      userId: 123,
+      status: 'active',
+      expiresAt: new Date('2027-07-03T00:00:00.000Z'),
+    });
+    getKycStatusMock.mockResolvedValueOnce('passed');
+    await expect(
+      partnerRouter.createCaller(makeContext()).submitKyc({}),
+    ).rejects.toMatchObject({
+      code: 'CONFLICT',
+      message: 'partner KYC already passed',
+    });
+    expect(upsertKycStatusMock).not.toHaveBeenCalled();
   });
 
   it('maps missing inviter and referral conflicts for invite recording', async () => {

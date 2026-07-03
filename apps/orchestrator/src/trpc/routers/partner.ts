@@ -51,6 +51,10 @@ const recordInviteInput = z.object({
   assisted: z.boolean().optional(),
 });
 
+const submitKycInput = z.object({
+  providerRef: z.string().trim().min(1).max(128).optional(),
+});
+
 const requestWithdrawalInput = z.object({
   amountCreditCents: moneyCentsInput,
   bankAccountFingerprint: z.string().trim().min(1).max(128),
@@ -152,6 +156,24 @@ function summarizePartnerReferral(
   };
 }
 
+function summarizePartnerKyc(profile: {
+  externalId: string;
+  status: string;
+  country: string;
+  provider: string | null;
+  providerRef: string | null;
+  reviewedAt: Date | null;
+}) {
+  return {
+    kycExternalId: profile.externalId,
+    status: profile.status,
+    country: profile.country,
+    provider: profile.provider ?? 'manual',
+    providerRef: profile.providerRef,
+    reviewedAt: profile.reviewedAt,
+  };
+}
+
 function mapRechargeOrderError(error: unknown): never {
   if (error instanceof TRPCError) {
     throw error;
@@ -214,6 +236,21 @@ function mapWithdrawalError(error: unknown): never {
   throw new TRPCError({
     code: 'INTERNAL_SERVER_ERROR',
     message: 'failed to request partner withdrawal',
+  });
+}
+
+function mapKycSubmissionError(error: unknown): never {
+  if (error instanceof TRPCError) {
+    throw error;
+  }
+
+  if (error instanceof RangeError) {
+    badRequest(error.message);
+  }
+
+  throw new TRPCError({
+    code: 'INTERNAL_SERVER_ERROR',
+    message: 'failed to submit partner KYC',
   });
 }
 
@@ -379,6 +416,41 @@ export const partnerRouter = router({
       });
     } catch (error) {
       mapReferralError(error);
+    }
+  }),
+
+  submitKyc: protectedProcedure.input(submitKycInput).mutation(async ({ ctx, input }) => {
+    requirePartnerLedgerEnabled();
+
+    const userId = await requireInternalUserId(ctx);
+    const membership = await new PartnerMembershipService(ctx.db).getActiveMembership(userId);
+    if (!membership) {
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message: 'partner membership required',
+      });
+    }
+
+    const kycService = new KycService(ctx.db);
+    const currentStatus = await kycService.getStatus(userId);
+    if (currentStatus === 'passed') {
+      throw new TRPCError({
+        code: 'CONFLICT',
+        message: 'partner KYC already passed',
+      });
+    }
+
+    try {
+      const profile = await kycService.upsertStatus({
+        userId,
+        status: 'pending',
+        provider: 'manual',
+        providerRef: input.providerRef,
+        note: 'partner user submitted KYC review',
+      });
+      return summarizePartnerKyc(profile);
+    } catch (error) {
+      mapKycSubmissionError(error);
     }
   }),
 

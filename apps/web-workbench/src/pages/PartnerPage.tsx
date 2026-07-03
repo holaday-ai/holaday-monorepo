@@ -18,6 +18,7 @@ import {
   formatApiUnits,
   formatHolaCreditCents,
   formatPartnerCnyCents,
+  kycStatusLabel,
   normalizePartnerDashboard,
   partnerActionErrorMessage,
   partnerDraftKeyAfterSuccess,
@@ -64,7 +65,16 @@ interface PartnerReferralSummary {
   readonly assisted: boolean;
 }
 
-type PartnerAction = 'membership' | 'preview' | 'recharge' | 'withdrawal' | 'invite';
+interface PartnerKycSubmissionSummary {
+  readonly kycExternalId: string;
+  readonly status: string;
+  readonly country: string;
+  readonly provider: string;
+  readonly providerRef: string | null;
+  readonly reviewedAt: Date | string | null;
+}
+
+type PartnerAction = 'membership' | 'preview' | 'recharge' | 'withdrawal' | 'invite' | 'kyc';
 
 export function PartnerPage(): JSX.Element {
   const toast = useToast();
@@ -81,11 +91,13 @@ export function PartnerPage(): JSX.Element {
   const [rechargeOrder, setRechargeOrder] = React.useState<PartnerOrderSummary | null>(null);
   const [withdrawal, setWithdrawal] = React.useState<PartnerWithdrawalSummary | null>(null);
   const [referral, setReferral] = React.useState<PartnerReferralSummary | null>(null);
+  const [kycSubmission, setKycSubmission] = React.useState<PartnerKycSubmissionSummary | null>(null);
   const [rechargeAmountInput, setRechargeAmountInput] = React.useState('10000');
   const [withdrawalAmountInput, setWithdrawalAmountInput] = React.useState('');
   const [bankFingerprint, setBankFingerprint] = React.useState('');
   const [inviteCodeInput, setInviteCodeInput] = React.useState('');
   const [assistedInvite, setAssistedInvite] = React.useState(false);
+  const [kycProviderRef, setKycProviderRef] = React.useState('');
   const [membershipIdempotencyKey, setMembershipIdempotencyKey] = React.useState(() =>
     idempotencyKey('partner-membership'),
   );
@@ -318,6 +330,24 @@ export function PartnerPage(): JSX.Element {
     }
   }
 
+  async function submitKyc(): Promise<void> {
+    if (!beginMutation('kyc')) return;
+    try {
+      const providerRef = kycProviderRef.trim() || undefined;
+      const result = await trpc.partner.submitKyc.mutate({
+        providerRef,
+      });
+      setKycSubmission(result);
+      setKycProviderRef('');
+      toast.show('实名复核已提交', 'info', 2200);
+      await refresh();
+    } catch (err) {
+      handleActionError(err, '实名提交失败');
+    } finally {
+      endMutation();
+    }
+  }
+
   async function copyInviteCode(): Promise<void> {
     if (!state?.enabled || !state.inviteCode) return;
     try {
@@ -419,6 +449,7 @@ export function PartnerPage(): JSX.Element {
           onRequestWithdrawal={() => void requestWithdrawal()}
           onRecordInvite={() => void recordInvite()}
           onCopyInviteCode={() => void copyInviteCode()}
+          onSubmitKyc={() => void submitKyc()}
           membershipOrder={membershipOrder}
           rechargePreview={rechargePreview}
           rechargeOrder={rechargeOrder}
@@ -432,6 +463,9 @@ export function PartnerPage(): JSX.Element {
           assistedInvite={assistedInvite}
           onAssistedInviteChange={setAssistedInvite}
           referral={referral}
+          kycProviderRef={kycProviderRef}
+          onKycProviderRefChange={setKycProviderRef}
+          kycSubmission={kycSubmission}
           pendingAction={pendingAction}
           isMutating={isMutating}
         />
@@ -452,6 +486,7 @@ function PartnerWorkbench({
   onRequestWithdrawal,
   onRecordInvite,
   onCopyInviteCode,
+  onSubmitKyc,
   membershipOrder,
   rechargePreview,
   rechargeOrder,
@@ -465,6 +500,9 @@ function PartnerWorkbench({
   assistedInvite,
   onAssistedInviteChange,
   referral,
+  kycProviderRef,
+  onKycProviderRefChange,
+  kycSubmission,
   pendingAction,
   isMutating,
 }: {
@@ -479,6 +517,7 @@ function PartnerWorkbench({
   onRequestWithdrawal: () => void;
   onRecordInvite: () => void;
   onCopyInviteCode: () => void;
+  onSubmitKyc: () => void;
   membershipOrder: PartnerOrderSummary | null;
   rechargePreview: PartnerRechargePreview | null;
   rechargeOrder: PartnerOrderSummary | null;
@@ -492,9 +531,27 @@ function PartnerWorkbench({
   assistedInvite: boolean;
   onAssistedInviteChange: (value: boolean) => void;
   referral: PartnerReferralSummary | null;
+  kycProviderRef: string;
+  onKycProviderRefChange: (value: string) => void;
+  kycSubmission: PartnerKycSubmissionSummary | null;
   pendingAction: PartnerAction | null;
   isMutating: boolean;
 }): JSX.Element {
+  const membershipActive = state.membership.status === 'active';
+  const kycSubmitBlocked = !membershipActive || state.kycStatus === 'passed' || state.kycStatus === 'pending';
+  const kycHint =
+    !membershipActive
+      ? '完成年度会员后可提交实名复核。'
+      : state.kycStatus === 'passed'
+        ? '实名已通过。'
+        : state.kycStatus === 'pending'
+          ? '实名复核已提交，等待审核。'
+          : state.kycStatus === 'review_required'
+            ? '需补充材料后重新提交。'
+            : state.kycStatus === 'rejected'
+              ? '实名未通过，可重新提交。'
+              : '可提交实名复核。';
+
   return (
     <div className="space-y-6">
       <Section
@@ -528,6 +585,42 @@ function PartnerWorkbench({
             <span className="text-sm tabular-nums">{formatHolaCreditCents(state.ledger.frozenCreditCents)}</span>
           </Row>
         </div>
+      </Section>
+
+      <Section
+        title="实名认证"
+        description="年度会员开通后提交实名复核，审核通过后才能充值和提现。"
+        className="rounded-[8px] border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]"
+      >
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] lg:items-end">
+          <Row label="当前状态" description={kycHint}>
+            <StatusValue icon={<Shield className="h-3.5 w-3.5" />} value={state.kycLabel} />
+          </Row>
+          <label className="min-w-0 text-xs font-medium text-[#595757]">
+            认证流水号（选填）
+            <Input
+              className="mt-1 font-mono text-xs"
+              placeholder="bankcard-flow-..."
+              value={kycProviderRef}
+              disabled={isMutating || kycSubmitBlocked}
+              onChange={(event) => onKycProviderRefChange(event.target.value)}
+            />
+          </label>
+          <Button
+            type="button"
+            size="sm"
+            onClick={onSubmitKyc}
+            disabled={isMutating || kycSubmitBlocked}
+          >
+            {pendingAction === 'kyc' ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+            ) : (
+              <Shield className="h-3.5 w-3.5" aria-hidden />
+            )}
+            提交实名
+          </Button>
+        </div>
+        {kycSubmission && <KycSubmissionSummary submission={kycSubmission} />}
       </Section>
 
       <Section
@@ -879,6 +972,17 @@ function ReferralSummary({ referral }: { referral: PartnerReferralSummary }): JS
       <SummaryItem label="邀请人" value={referral.inviterExternalId} />
       <SummaryItem label="当前账号" value={referral.inviteeExternalId} />
       <SummaryItem label="奖励类型" value={referral.assisted ? '代充值 10%' : '普通邀请 20%'} />
+    </dl>
+  );
+}
+
+function KycSubmissionSummary({ submission }: { submission: PartnerKycSubmissionSummary }): JSX.Element {
+  return (
+    <dl className="mt-4 grid gap-3 border-t border-[#EFEFEF] pt-4 text-xs sm:grid-cols-2 lg:grid-cols-4">
+      <SummaryItem label="实名编号" value={submission.kycExternalId} />
+      <SummaryItem label="状态" value={kycStatusLabel(submission.status)} />
+      <SummaryItem label="认证方式" value={submission.provider} />
+      <SummaryItem label="流水号" value={submission.providerRef ?? '—'} />
     </dl>
   );
 }

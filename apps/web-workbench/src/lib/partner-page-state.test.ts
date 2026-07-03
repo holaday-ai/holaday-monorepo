@@ -179,6 +179,9 @@ describe('partner page state helpers', () => {
       partnerActionErrorMessage(new Error('partner referral attribution conflict'), '邀请登记失败'),
     ).toBe('该账号已有邀请归因');
     expect(
+      partnerActionErrorMessage(new Error('partner KYC already passed'), '实名提交失败'),
+    ).toBe('实名已通过，无需重复提交');
+    expect(
       partnerActionErrorMessage(
         new Error('Failed to connect to 127.0.0.1 port 3001'),
         '合伙人账本暂时无法加载',
