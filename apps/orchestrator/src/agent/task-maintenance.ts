@@ -73,6 +73,7 @@ export async function failStaleTasksWithEvents(
       const now = new Date();
       const update: Partial<typeof tasks.$inferInsert> = {
         status: 'failed',
+        pauseReason: null,
         errorCode: params.errorCode,
         errorMessage: params.errorMessage,
         updatedAt: now,
@@ -130,6 +131,7 @@ export async function failTaskWithEventIfStatus(
     const now = new Date();
     const update: Partial<typeof tasks.$inferInsert> = {
       status: 'failed',
+      pauseReason: null,
       errorCode: params.errorCode,
       errorMessage: params.errorMessage,
       updatedAt: now,

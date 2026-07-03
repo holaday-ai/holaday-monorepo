@@ -322,6 +322,7 @@ export class TaskRepository {
         .update(tasks)
         .set({
           status: 'executing',
+          pauseReason: null,
           awaitingQuestion: null,
           awaitingKind: null,
           errorCode: null,
@@ -360,6 +361,7 @@ export class TaskRepository {
         .update(tasks)
         .set({
           status: 'completed',
+          pauseReason: null,
           awaitingQuestion: null,
           awaitingKind: null,
           errorCode: null,
@@ -470,6 +472,7 @@ export class TaskRepository {
         .set({
           awaitingQuestion: params.question,
           awaitingKind: params.awaitingKind,
+          pauseReason: null,
           errorCode: null,
           errorMessage: null,
           result: params.result,
@@ -547,6 +550,7 @@ export class TaskRepository {
         .update(tasks)
         .set({
           status: 'executing',
+          pauseReason: null,
           startedAt: new Date(),
           awaitingQuestion: null,
           awaitingKind: null,
@@ -589,6 +593,7 @@ export class TaskRepository {
         .update(tasks)
         .set({
           status: 'failed',
+          pauseReason: null,
           errorCode,
           errorMessage,
           completedAt: new Date(),

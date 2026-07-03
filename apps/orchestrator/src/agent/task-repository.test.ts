@@ -889,6 +889,7 @@ describe('TaskRepository task terminal state persistence', () => {
     expect(result.persisted).toBe(true);
     expect(captured.updatePayloads[0]).toMatchObject({
       status: 'executing',
+      pauseReason: null,
       awaitingQuestion: null,
       awaitingKind: null,
     });
@@ -921,6 +922,7 @@ describe('TaskRepository task terminal state persistence', () => {
     expect(result.persisted).toBe(true);
     expect(captured.updatePayloads[0]).toMatchObject({
       status: 'completed',
+      pauseReason: null,
       awaitingQuestion: null,
       awaitingKind: null,
       result: { summary: 'handoff created' },
@@ -991,6 +993,7 @@ describe('TaskRepository task terminal state persistence', () => {
 
     expect(result.persisted).toBe(true);
     expect(captured.updatePayloads[0]).toMatchObject({
+      pauseReason: null,
       status: 'awaiting_user',
       awaitingQuestion: '请补充目标城市',
       awaitingKind: 'clarification',
@@ -1049,6 +1052,7 @@ describe('TaskRepository task terminal state persistence', () => {
 
     expect(result.persisted).toBe(true);
     expect(captured.updatePayloads[0]).toMatchObject({
+      pauseReason: null,
       awaitingQuestion: '确认后开始生成视频',
       awaitingKind: 'video_quote',
       result: {
@@ -1186,6 +1190,7 @@ describe('TaskRepository task terminal state persistence', () => {
 
     expect(captured.updatePayloads[0]).toMatchObject({
       status: 'executing',
+      pauseReason: null,
       awaitingQuestion: null,
       awaitingKind: null,
     });
@@ -1254,6 +1259,7 @@ describe('TaskRepository task terminal state persistence', () => {
 
     expect(captured.updatePayloads[0]).toMatchObject({
       status: 'failed',
+      pauseReason: null,
       awaitingQuestion: null,
       awaitingKind: null,
     });
