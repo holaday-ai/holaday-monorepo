@@ -39,7 +39,7 @@ export type TaskStatus =
 
 export type StepStatus = 'ok' | 'error' | 'awaiting_user' | 'skipped';
 export type Risk = 'low' | 'medium' | 'high';
-export type PauseReason = 'user' | 'retries_exhausted' | 'quota_exceeded';
+export type PauseReason = 'user' | 'retries_exhausted' | 'quota_exceeded' | 'max_steps_reached';
 
 /** Phase 0: retry each failing step once before escalating to paused. */
 export const MAX_STEP_RETRIES = 1;
@@ -502,7 +502,7 @@ export class TaskController {
    */
   pause(
     state: TaskState,
-    reason: Exclude<PauseReason, 'retries_exhausted'>,
+    reason: Exclude<PauseReason, 'retries_exhausted' | 'max_steps_reached'>,
   ): { state: TaskState; effects: ControlEffect[] } {
     if (
       isTaskTerminalStatus(state.status) ||

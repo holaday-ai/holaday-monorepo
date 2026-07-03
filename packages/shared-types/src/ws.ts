@@ -294,7 +294,7 @@ export const serverTaskControlSchema = z.object({
   taskId: z.string(),
   command: z.enum(['pause', 'resume', 'cancel']),
   /** Why the task paused — populated on pause commands. */
-  reason: z.enum(['user', 'retries_exhausted', 'quota_exceeded']).optional(),
+  reason: z.enum(['user', 'retries_exhausted', 'quota_exceeded', 'max_steps_reached']).optional(),
   /** Free-form detail the UI can render (e.g. last error on retries_exhausted). */
   detail: z.record(z.string(), z.unknown()).optional(),
 });

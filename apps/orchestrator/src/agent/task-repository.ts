@@ -1200,7 +1200,7 @@ export interface RehydratedTask {
   state: TaskState;
   userExternalId: string;
   pendingConfirm: PendingConfirm | null;
-  pauseReason: 'user' | 'retries_exhausted' | 'quota_exceeded' | null;
+  pauseReason: 'user' | 'retries_exhausted' | 'quota_exceeded' | 'max_steps_reached' | null;
   awaitingQuestion: string | null;
   awaitingKind: string | null;
 }

@@ -200,6 +200,48 @@ describe('paused state persistence + rehydration', () => {
     expect(hit?.pauseReason).toBe('quota_exceeded');
   });
 
+  it('rehydrateInFlight preserves max_steps_reached pause reasons from vision outcomes', async () => {
+    const { newExternalId } = await import('@holaday/shared-types');
+    const { db } = await import('../db/client.js');
+    const { eq } = await import('drizzle-orm');
+    const { users } = await import('../db/schema/users.js');
+    const { TaskRepository } = await import('./task-repository.js');
+
+    const email = `rehydrate-max-steps+${Date.now()}@example.com`;
+    await db.insert(users).values({
+      externalId: newExternalId('user'),
+      email,
+      passwordHash: 'placeholder',
+    });
+    const user = must((await db.select().from(users).where(eq(users.email, email)))[0], 'user');
+
+    const repo = new TaskRepository(db);
+    const taskId = newExternalId('task');
+    await repo.insertTask(
+      {
+        taskId,
+        status: 'executing',
+        plan: [],
+        cursor: 0,
+        pendingConfirm: null,
+      },
+      { userId: user.id, intent: 'max steps demo' },
+    );
+    const paused = await repo.persistVisionOutcome(taskId, {
+      status: 'paused',
+      reason: 'max_steps_reached (25)',
+      tickCount: 25,
+    });
+    expect(paused.persisted).toBe(true);
+
+    const all = await repo.rehydrateInFlight();
+    const hit = all.find((r) => r.state.taskId === taskId);
+    expect(hit).toBeDefined();
+    expect(hit?.state.status).toBe('paused');
+    expect(hit?.state.pauseReason).toBe('max_steps_reached');
+    expect(hit?.pauseReason).toBe('max_steps_reached');
+  });
+
   it('rehydrateInFlight returns queued tasks so restart recovery can resolve them visibly', async () => {
     const { newExternalId } = await import('@holaday/shared-types');
     const { db } = await import('../db/client.js');
