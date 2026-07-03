@@ -45,6 +45,10 @@ const SYSTEM_TASK_RULES: Rule[] = [
     match: /EXECUTION_TIMEOUT|SUPERCAR_WATCHDOG_TIMEOUT|任务执行超过\s*\d+\s*分钟未更新/i,
     to: '任务长时间没有进展，已自动停止。可以重新执行，或把步骤拆小一点。',
   },
+  {
+    match: /QUEUE_TIMEOUT|queue timeout|排队等待时间过长/i,
+    to: '排队等待时间过长，任务已自动停止。请稍后重新执行。',
+  },
 ];
 
 const RULES: Rule[] = [

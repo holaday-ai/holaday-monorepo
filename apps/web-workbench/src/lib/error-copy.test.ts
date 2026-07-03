@@ -36,6 +36,9 @@ describe('error-copy', () => {
     expect(humaniseTaskError('任务执行超过 20 分钟未更新，已自动标记失败。')).toBe(
       '任务长时间没有进展，已自动停止。可以重新执行，或把步骤拆小一点。',
     );
+    expect(humaniseTaskError('queue timeout')).toBe(
+      '排队等待时间过长，任务已自动停止。请稍后重新执行。',
+    );
   });
 
   it('maps internal terminal status strings from batch items to user-facing copy', () => {

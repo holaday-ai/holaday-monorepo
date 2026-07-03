@@ -5105,10 +5105,12 @@ export const tasksRouter = router({
               { taskId, userId: ctx.userId },
               'task-queue: queue timeout — marking failed',
             );
+            const queueTimeoutReason =
+              '排队等待时间过长，任务已自动停止。请稍后重新执行。';
             try {
               const failed = await repo.markQueuedTaskFailed(
                 taskId,
-                'queue timeout: 排队等待时间过长，请稍后重试',
+                `queue timeout: ${queueTimeoutReason}`,
                 { errorCode: 'QUEUE_TIMEOUT', source: 'task_queue_timeout' },
               );
               if (failed.persisted) {
@@ -5116,7 +5118,7 @@ export const tasksRouter = router({
                   type: 'server.task.terminal',
                   taskId,
                   status: 'failed',
-                  reason: 'queue timeout',
+                  reason: queueTimeoutReason,
                 });
               }
             } catch (err) {
