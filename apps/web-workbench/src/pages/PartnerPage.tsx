@@ -23,6 +23,7 @@ import {
   partnerActionErrorMessage,
   partnerDraftKeyAfterSuccess,
   partnerDraftKeyFor,
+  partnerRechargeGate,
   type PartnerIdempotencyDraft,
   type PartnerEnabledState,
   type PartnerPageState,
@@ -539,6 +540,7 @@ function PartnerWorkbench({
 }): JSX.Element {
   const membershipActive = state.membership.status === 'active';
   const kycSubmitBlocked = !membershipActive || state.kycStatus === 'passed' || state.kycStatus === 'pending';
+  const rechargeGate = partnerRechargeGate(state);
   const kycHint =
     !membershipActive
       ? '完成年度会员后可提交实名复核。'
@@ -851,31 +853,36 @@ function PartnerWorkbench({
               <span>¥200,000</span>
             </div>
           </div>
-          <div className="flex flex-wrap gap-2 lg:justify-end">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
-              onClick={onPreviewRecharge}
-              disabled={isMutating}
-            >
-              {pendingAction === 'preview' && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />}
-              预览
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              onClick={onCreateRechargeOrder}
-              disabled={isMutating}
-            >
-              {pendingAction === 'recharge' ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-              ) : (
-                <Wallet className="h-3.5 w-3.5" aria-hidden />
-              )}
-              创建充值订单
-            </Button>
+          <div className="flex flex-col gap-2 lg:items-end">
+            <div className="max-w-[260px] text-xs leading-5 text-muted-foreground lg:text-right">
+              {rechargeGate.reason}
+            </div>
+            <div className="flex flex-wrap gap-2 lg:justify-end">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+                onClick={onPreviewRecharge}
+                disabled={isMutating || rechargeGate.blocked}
+              >
+                {pendingAction === 'preview' && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />}
+                预览
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={onCreateRechargeOrder}
+                disabled={isMutating || rechargeGate.blocked}
+              >
+                {pendingAction === 'recharge' ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                ) : (
+                  <Wallet className="h-3.5 w-3.5" aria-hidden />
+                )}
+                创建充值订单
+              </Button>
+            </div>
           </div>
         </div>
         {rechargePreview && <RechargePreviewSummary preview={rechargePreview} />}

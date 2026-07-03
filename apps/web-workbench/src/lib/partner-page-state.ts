@@ -67,6 +67,11 @@ export interface PartnerIdempotencyDraft {
   readonly fingerprint: string;
 }
 
+export interface PartnerRechargeGate {
+  readonly blocked: boolean;
+  readonly reason: string;
+}
+
 const disabledState: PartnerDisabledState = {
   enabled: false,
   title: '合伙人账本暂未开放',
@@ -187,6 +192,32 @@ export function membershipStatusLabel(value: unknown): string {
 
 export function kycStatusLabel(value: unknown): string {
   return KYC_LABELS[normalizeKycStatus(value)];
+}
+
+export function partnerRechargeGate(state: PartnerEnabledState): PartnerRechargeGate {
+  if (state.membership.status !== 'active') {
+    return {
+      blocked: true,
+      reason: '完成年度会员后才能充值。',
+    };
+  }
+
+  if (state.kycStatus !== 'passed') {
+    return {
+      blocked: true,
+      reason:
+        state.kycStatus === 'review_required'
+          ? '补充实名材料并通过后才能充值。'
+          : state.kycStatus === 'rejected'
+            ? '重新提交实名并通过后才能充值。'
+            : '实名审核通过后才能充值。',
+    };
+  }
+
+  return {
+    blocked: false,
+    reason: '可以创建充值预览和订单。',
+  };
 }
 
 export function partnerActionErrorMessage(error: unknown, fallback: string): string {

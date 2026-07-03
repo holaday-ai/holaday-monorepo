@@ -9,6 +9,7 @@ import {
   partnerActionErrorMessage,
   partnerDraftKeyAfterSuccess,
   partnerDraftKeyFor,
+  partnerRechargeGate,
 } from './partner-page-state';
 
 describe('partner page state helpers', () => {
@@ -196,6 +197,44 @@ describe('partner page state helpers', () => {
         '操作失败',
       ),
     ).toBe('操作失败');
+  });
+
+  it('summarizes the recharge gate from membership and KYC state', () => {
+    const disabled = normalizePartnerDashboard({
+      enabled: true,
+      membership: null,
+      kycStatus: 'not_started',
+    });
+    expect(disabled.enabled).toBe(true);
+    if (!disabled.enabled) throw new Error('expected enabled partner dashboard');
+    expect(partnerRechargeGate(disabled)).toEqual({
+      blocked: true,
+      reason: '完成年度会员后才能充值。',
+    });
+
+    const pendingKyc = normalizePartnerDashboard({
+      enabled: true,
+      membership: { status: 'active', expiresAt: '2027-07-03T00:00:00.000Z' },
+      kycStatus: 'pending',
+    });
+    expect(pendingKyc.enabled).toBe(true);
+    if (!pendingKyc.enabled) throw new Error('expected enabled partner dashboard');
+    expect(partnerRechargeGate(pendingKyc)).toEqual({
+      blocked: true,
+      reason: '实名审核通过后才能充值。',
+    });
+
+    const ready = normalizePartnerDashboard({
+      enabled: true,
+      membership: { status: 'active', expiresAt: '2027-07-03T00:00:00.000Z' },
+      kycStatus: 'passed',
+    });
+    expect(ready.enabled).toBe(true);
+    if (!ready.enabled) throw new Error('expected enabled partner dashboard');
+    expect(partnerRechargeGate(ready)).toEqual({
+      blocked: false,
+      reason: '可以创建充值预览和订单。',
+    });
   });
 
   it('keeps idempotency draft keys stable until draft changes or succeeds', () => {
