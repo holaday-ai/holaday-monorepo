@@ -1051,13 +1051,19 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           delete nextAwaiting[taskId];
           const nextTerminalIds = new Set(prev.terminalTaskIds);
           nextTerminalIds.delete(taskId);
-          const nextCaptcha = prev.captchaWaitByTask[taskId]
-            ? { ...prev.captchaWaitByTask }
-            : prev.captchaWaitByTask;
-          if (nextCaptcha !== prev.captchaWaitByTask) delete nextCaptcha[taskId];
+          const nextThinking = omitRuntimeKey(prev.thinkingByTask, taskId);
+          const nextCaptcha = omitRuntimeKey(prev.captchaWaitByTask, taskId);
+          const nextExecutorFallback = omitRuntimeKey(
+            prev.executorFallbackByTask,
+            taskId,
+          );
+          const nextDegrade = omitRuntimeKey(prev.degradeByTask, taskId);
           return {
             awaitingUserByTask: nextAwaiting,
+            thinkingByTask: nextThinking,
             captchaWaitByTask: nextCaptcha,
+            executorFallbackByTask: nextExecutorFallback,
+            degradeByTask: nextDegrade,
             terminalTaskIds: nextTerminalIds,
             tasks: prev.tasks.map((t) => {
               if (t.taskId !== taskId) return t;
@@ -1093,13 +1099,24 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           delete nextAwaiting[taskId];
           const nextSubStatus = { ...prev.subStatusByTask };
           delete nextSubStatus[taskId];
+          const nextThinking = omitRuntimeKey(prev.thinkingByTask, taskId);
+          const nextCaptchaWait = omitRuntimeKey(prev.captchaWaitByTask, taskId);
+          const nextExecutorFallback = omitRuntimeKey(
+            prev.executorFallbackByTask,
+            taskId,
+          );
+          const nextDegrade = omitRuntimeKey(prev.degradeByTask, taskId);
           return {
             tasks: prev.tasks.map((t) =>
               t.taskId === taskId ? { ...t, status: 'cancelled' as const } : t,
             ),
             terminalTaskIds: nextTerminalIds,
             awaitingUserByTask: nextAwaiting,
+            thinkingByTask: nextThinking,
             subStatusByTask: nextSubStatus,
+            captchaWaitByTask: nextCaptchaWait,
+            executorFallbackByTask: nextExecutorFallback,
+            degradeByTask: nextDegrade,
           };
         });
       }
@@ -1223,6 +1240,13 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         delete nextSubStatus[msg.taskId];
         const nextAwaiting = { ...prev.awaitingUserByTask };
         delete nextAwaiting[msg.taskId];
+        const nextThinking = omitRuntimeKey(prev.thinkingByTask, msg.taskId);
+        const nextCaptchaWait = omitRuntimeKey(prev.captchaWaitByTask, msg.taskId);
+        const nextExecutorFallback = omitRuntimeKey(
+          prev.executorFallbackByTask,
+          msg.taskId,
+        );
+        const nextDegrade = omitRuntimeKey(prev.degradeByTask, msg.taskId);
         const nextTerminalIds = new Set(prev.terminalTaskIds);
         if (msg.command === 'cancel' || msg.command === 'pause') nextTerminalIds.add(msg.taskId);
         else nextTerminalIds.delete(msg.taskId);
@@ -1245,7 +1269,11 @@ export const useTaskStore = create<TaskStore>((set, get) => {
               : t,
           ),
           awaitingUserByTask: nextAwaiting,
+          thinkingByTask: nextThinking,
           subStatusByTask: nextSubStatus,
+          captchaWaitByTask: nextCaptchaWait,
+          executorFallbackByTask: nextExecutorFallback,
+          degradeByTask: nextDegrade,
           terminalTaskIds: nextTerminalIds,
         };
       });
@@ -1703,6 +1731,13 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         if (isTaskRuntimeTerminal(prev, msg.taskId) && !canRecoverPausedTask) return prev;
         const nextSubStatus = { ...prev.subStatusByTask };
         delete nextSubStatus[msg.taskId];
+        const nextThinking = omitRuntimeKey(prev.thinkingByTask, msg.taskId);
+        const nextCaptchaWait = omitRuntimeKey(prev.captchaWaitByTask, msg.taskId);
+        const nextExecutorFallback = omitRuntimeKey(
+          prev.executorFallbackByTask,
+          msg.taskId,
+        );
+        const nextDegrade = omitRuntimeKey(prev.degradeByTask, msg.taskId);
         const nextTerminalIds = new Set(prev.terminalTaskIds);
         nextTerminalIds.delete(msg.taskId);
         return {
@@ -1715,6 +1750,10 @@ export const useTaskStore = create<TaskStore>((set, get) => {
             },
           },
           subStatusByTask: nextSubStatus,
+          thinkingByTask: nextThinking,
+          captchaWaitByTask: nextCaptchaWait,
+          executorFallbackByTask: nextExecutorFallback,
+          degradeByTask: nextDegrade,
           terminalTaskIds: nextTerminalIds,
           // P2-A — also mirror onto the task row so a refresh that
           // re-loads via tasks.detail still has the right kind even if

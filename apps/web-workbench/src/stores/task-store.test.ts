@@ -1250,6 +1250,19 @@ describe('replyToTask', () => {
           deadlineMs: 2,
         },
       },
+      executorFallbackByTask: { tsk_wait: { available: false, at: 1 } },
+      degradeByTask: {
+        tsk_wait: {
+          level: 1,
+          strategy: 'extension',
+          ok: false,
+          message: '旧降级提示',
+          at: 1,
+        },
+      },
+      thinkingByTask: {
+        tsk_wait: { summary: '旧思考提示', at: 1 },
+      },
     });
 
     await expect(
@@ -1259,6 +1272,9 @@ describe('replyToTask', () => {
     const state = useTaskStore.getState();
     expect(state.awaitingUserByTask.tsk_wait).toBeUndefined();
     expect(state.captchaWaitByTask.tsk_wait).toBeUndefined();
+    expect(state.executorFallbackByTask.tsk_wait).toBeUndefined();
+    expect(state.degradeByTask.tsk_wait).toBeUndefined();
+    expect(state.thinkingByTask.tsk_wait).toBeUndefined();
     expect(state.tasks[0]?.status).toBe('executing');
     expect(state.tasks[0]?.awaitingKind).toBeUndefined();
     expect(state.userRepliesByTask.tsk_wait?.[0]?.text).toBe('登录好了');
@@ -1312,6 +1328,27 @@ describe('abortTask', () => {
       subStatusByTask: {
         tsk_abort: { subStatus: 'browsing', since: 1 },
       },
+      captchaWaitByTask: {
+        tsk_abort: {
+          antiBotType: 'captcha',
+          message: '需要验证',
+          startedAt: 1,
+          deadlineMs: 1000,
+        },
+      },
+      executorFallbackByTask: { tsk_abort: { available: false, at: 1 } },
+      degradeByTask: {
+        tsk_abort: {
+          level: 1,
+          strategy: 'extension',
+          ok: false,
+          message: '切换执行器',
+          at: 1,
+        },
+      },
+      thinkingByTask: {
+        tsk_abort: { summary: '仍在分析', at: 1 },
+      },
     });
 
     await expect(useTaskStore.getState().abortTask('tsk_abort')).resolves.toEqual({
@@ -1335,6 +1372,10 @@ describe('abortTask', () => {
     expect(state.terminalTaskIds.has('tsk_abort')).toBe(true);
     expect(state.awaitingUserByTask.tsk_abort).toBeUndefined();
     expect(state.subStatusByTask.tsk_abort).toBeUndefined();
+    expect(state.captchaWaitByTask.tsk_abort).toBeUndefined();
+    expect(state.executorFallbackByTask.tsk_abort).toBeUndefined();
+    expect(state.degradeByTask.tsk_abort).toBeUndefined();
+    expect(state.thinkingByTask.tsk_abort).toBeUndefined();
     expect(state.progressByTask.tsk_abort).toBe('正在执行');
     expect(state.streamingByTask.tsk_abort).toBe('partial answer');
   });
@@ -1346,6 +1387,27 @@ describe('applyServerMessage awaiting_user', () => {
       tasks: [task({ taskId: 'tsk_wait', status: 'executing', executionMode: 'browser' })],
       subStatusByTask: {
         tsk_wait: { subStatus: 'browsing', since: 1 },
+      },
+      captchaWaitByTask: {
+        tsk_wait: {
+          antiBotType: 'captcha',
+          message: '验证中',
+          startedAt: 1,
+          deadlineMs: 1000,
+        },
+      },
+      executorFallbackByTask: { tsk_wait: { available: false, at: 1 } },
+      degradeByTask: {
+        tsk_wait: {
+          level: 1,
+          strategy: 'extension',
+          ok: false,
+          message: '执行器降级',
+          at: 1,
+        },
+      },
+      thinkingByTask: {
+        tsk_wait: { summary: '正在推理', at: 1 },
       },
     });
 
@@ -1366,6 +1428,10 @@ describe('applyServerMessage awaiting_user', () => {
       awaitingKind: 'login',
     });
     expect(state.subStatusByTask.tsk_wait).toBeUndefined();
+    expect(state.captchaWaitByTask.tsk_wait).toBeUndefined();
+    expect(state.executorFallbackByTask.tsk_wait).toBeUndefined();
+    expect(state.degradeByTask.tsk_wait).toBeUndefined();
+    expect(state.thinkingByTask.tsk_wait).toBeUndefined();
   });
 
   it('allows a paused runtime marker to become a recoverable awaiting-user state', async () => {
@@ -1521,6 +1587,27 @@ describe('applyServerMessage task.control', () => {
       subStatusByTask: {
         tsk_cancel: { subStatus: 'generating', since: 1 },
       },
+      captchaWaitByTask: {
+        tsk_cancel: {
+          antiBotType: 'verify',
+          message: '验证中',
+          startedAt: 1,
+          deadlineMs: 1000,
+        },
+      },
+      executorFallbackByTask: { tsk_cancel: { available: false, at: 1 } },
+      degradeByTask: {
+        tsk_cancel: {
+          level: 1,
+          strategy: 'extension',
+          ok: false,
+          message: '正在降级',
+          at: 1,
+        },
+      },
+      thinkingByTask: {
+        tsk_cancel: { summary: '正在思考', at: 1 },
+      },
     });
 
     useTaskStore.getState().applyServerMessage({
@@ -1546,6 +1633,10 @@ describe('applyServerMessage task.control', () => {
     expect(state.streamingByTask.tsk_cancel).toBe('partial answer');
     expect(state.progressByTask.tsk_cancel).toBe('正在执行');
     expect(state.subStatusByTask.tsk_cancel).toBeUndefined();
+    expect(state.captchaWaitByTask.tsk_cancel).toBeUndefined();
+    expect(state.executorFallbackByTask.tsk_cancel).toBeUndefined();
+    expect(state.degradeByTask.tsk_cancel).toBeUndefined();
+    expect(state.thinkingByTask.tsk_cancel).toBeUndefined();
   });
 
   it('does not let late control frames overwrite completed terminal tasks', () => {
