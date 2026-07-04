@@ -368,9 +368,9 @@ function KycQueue({
   return (
     <QueueSection title="实名队列" empty="暂无实名复核">
       <DataTable
-        headers={['用户', '状态', '国家', 'provider', '更新时间', '操作']}
+        headers={['用户', '状态', '国家', 'provider', '认证流水', '更新时间', '操作']}
         empty={rows.length === 0}
-        colSpan={6}
+        colSpan={7}
       >
         {rows.map((row) => (
           <tr key={row.kycExternalId} className="border-b border-[#EFEFEF] last:border-b-0 hover:bg-[#EFEFEF]/35">
@@ -378,6 +378,7 @@ function KycQueue({
             <td className="px-3 py-3"><StatusBadge kind="kyc" status={row.status} /></td>
             <td className="px-3 py-3 text-muted-foreground">{row.country}</td>
             <td className="px-3 py-3 text-muted-foreground">{truncate(row.provider, 24)}</td>
+            <td className="px-3 py-3 text-muted-foreground">{truncate(row.providerRef, 28) || '—'}</td>
             <td className="px-3 py-3 text-muted-foreground">{formatDateTime(row.updatedAt as string | Date | null)}</td>
             <td className="px-5 py-3">
               <div className="flex flex-wrap gap-2">

@@ -116,6 +116,7 @@ describe('normalizeAdminPartnerOverview', () => {
           userExternalId: 'usr_bob',
           email: 'bob@holaday.local',
           displayName: 'Bob Partner',
+          providerRef: 'bankcard-flow-bob',
         },
       ],
       withdrawals: [
@@ -156,6 +157,12 @@ describe('normalizeAdminPartnerOverview', () => {
     expect(byRiskLot.enabled).toBe(true);
     if (!byRiskLot.enabled) throw new Error('expected enabled state');
     expect(byRiskLot.riskLots).toHaveLength(1);
+
+    const byProviderRef = filterAdminPartnerOverview(state, 'bankcard-flow');
+    expect(byProviderRef.enabled).toBe(true);
+    if (!byProviderRef.enabled) throw new Error('expected enabled state');
+    expect(byProviderRef.kycProfiles).toHaveLength(1);
+    expect(byProviderRef.kycProfiles[0]?.providerRef).toBe('bankcard-flow-bob');
 
     expect(filterAdminPartnerOverview({ enabled: false }, 'alice')).toEqual({ enabled: false });
   });

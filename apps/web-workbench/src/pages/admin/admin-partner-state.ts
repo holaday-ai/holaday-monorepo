@@ -185,6 +185,7 @@ export function normalizeAdminPartnerOverview(value: unknown) {
         status: safeText(row.status),
         country: safeText(row.country, 'CN'),
         provider: safeText(row.provider),
+        providerRef: safeText(row.providerRef),
         updatedAt: row.updatedAt,
       };
     }),
@@ -235,7 +236,15 @@ export function filterAdminPartnerOverview(
       rowMatches(needle, row, ['orderExternalId', 'userExternalId', 'email', 'displayName', 'orderKind', 'status']),
     ),
     kycProfiles: state.kycProfiles.filter((row) =>
-      rowMatches(needle, row, ['kycExternalId', 'userExternalId', 'email', 'displayName', 'status', 'provider']),
+      rowMatches(needle, row, [
+        'kycExternalId',
+        'userExternalId',
+        'email',
+        'displayName',
+        'status',
+        'provider',
+        'providerRef',
+      ]),
     ),
     withdrawals: state.withdrawals.filter((row) =>
       rowMatches(needle, row, ['withdrawalExternalId', 'userExternalId', 'email', 'displayName', 'status']),
