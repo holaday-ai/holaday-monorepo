@@ -45,6 +45,7 @@ export function AdminPartnerReviewPage(): JSX.Element {
   const [kycUserExternalId, setKycUserExternalId] = React.useState('');
   const [kycStatus, setKycStatus] = React.useState<KycStatusInput>('passed');
   const [kycProvider, setKycProvider] = React.useState('manual');
+  const [kycProviderRef, setKycProviderRef] = React.useState('');
   const [kycNote, setKycNote] = React.useState('');
   const [orderReviewNotes, setOrderReviewNotes] = React.useState<Record<string, string>>({});
   const [withdrawalReasons, setWithdrawalReasons] = React.useState<Record<string, string>>({});
@@ -105,8 +106,10 @@ export function AdminPartnerReviewPage(): JSX.Element {
           userExternalId,
           status: kycStatus,
           provider,
+          providerRef: kycProviderRef.trim() || undefined,
           note: kycNote.trim() || undefined,
         });
+        setKycProviderRef('');
         setKycNote('');
       },
       '实名状态已更新',
@@ -167,6 +170,7 @@ export function AdminPartnerReviewPage(): JSX.Element {
           kycUserExternalId={kycUserExternalId}
           kycStatus={kycStatus}
           kycProvider={kycProvider}
+          kycProviderRef={kycProviderRef}
           kycNote={kycNote}
           orderReviewNotes={orderReviewNotes}
           withdrawalReasons={withdrawalReasons}
@@ -174,6 +178,7 @@ export function AdminPartnerReviewPage(): JSX.Element {
           setKycUserExternalId={setKycUserExternalId}
           setKycStatus={setKycStatus}
           setKycProvider={setKycProvider}
+          setKycProviderRef={setKycProviderRef}
           setKycNote={setKycNote}
           setOrderReviewNotes={setOrderReviewNotes}
           setWithdrawalReasons={setWithdrawalReasons}
@@ -194,6 +199,7 @@ function EnabledAdminPartnerReview({
   kycUserExternalId,
   kycStatus,
   kycProvider,
+  kycProviderRef,
   kycNote,
   orderReviewNotes,
   withdrawalReasons,
@@ -201,6 +207,7 @@ function EnabledAdminPartnerReview({
   setKycUserExternalId,
   setKycStatus,
   setKycProvider,
+  setKycProviderRef,
   setKycNote,
   setOrderReviewNotes,
   setWithdrawalReasons,
@@ -215,6 +222,7 @@ function EnabledAdminPartnerReview({
   kycUserExternalId: string;
   kycStatus: KycStatusInput;
   kycProvider: string;
+  kycProviderRef: string;
   kycNote: string;
   orderReviewNotes: Record<string, string>;
   withdrawalReasons: Record<string, string>;
@@ -222,6 +230,7 @@ function EnabledAdminPartnerReview({
   setKycUserExternalId: (value: string) => void;
   setKycStatus: (value: KycStatusInput) => void;
   setKycProvider: (value: string) => void;
+  setKycProviderRef: (value: string) => void;
   setKycNote: (value: string) => void;
   setOrderReviewNotes: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   setWithdrawalReasons: React.Dispatch<React.SetStateAction<Record<string, string>>>;
@@ -244,11 +253,13 @@ function EnabledAdminPartnerReview({
         userExternalId={kycUserExternalId}
         status={kycStatus}
         provider={kycProvider}
+        providerRef={kycProviderRef}
         note={kycNote}
         pending={pendingAction?.startsWith('kyc-manual') ?? false}
         setUserExternalId={setKycUserExternalId}
         setStatus={setKycStatus}
         setProvider={setKycProvider}
+        setProviderRef={setKycProviderRef}
         setNote={setKycNote}
         onSubmit={submitManualKyc}
       />
@@ -291,22 +302,26 @@ function ManualKycPanel({
   userExternalId,
   status,
   provider,
+  providerRef,
   note,
   pending,
   setUserExternalId,
   setStatus,
   setProvider,
+  setProviderRef,
   setNote,
   onSubmit,
 }: {
   userExternalId: string;
   status: KycStatusInput;
   provider: string;
+  providerRef: string;
   note: string;
   pending: boolean;
   setUserExternalId: (value: string) => void;
   setStatus: (value: KycStatusInput) => void;
   setProvider: (value: string) => void;
+  setProviderRef: (value: string) => void;
   setNote: (value: string) => void;
   onSubmit: () => Promise<void>;
 }): JSX.Element {
@@ -316,7 +331,7 @@ function ManualKycPanel({
         <ShieldCheck className="h-4 w-4 text-[#EA1F59]" aria-hidden />
         <h2 className="text-[15px] font-semibold">实名状态</h2>
       </div>
-      <div className="grid gap-3 md:grid-cols-[1.2fr_0.8fr_0.9fr_1.4fr_auto]">
+      <div className="grid gap-3 md:grid-cols-[1.2fr_0.8fr_0.9fr_1fr_1.2fr_auto]">
         <input
           value={userExternalId}
           onChange={(e) => setUserExternalId(e.target.value)}
@@ -337,6 +352,12 @@ function ManualKycPanel({
           value={provider}
           onChange={(e) => setProvider(e.target.value)}
           placeholder="provider"
+          className="h-9 rounded-[8px] border border-[#DCDDDD] px-3 text-[13px] outline-none focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
+        />
+        <input
+          value={providerRef}
+          onChange={(e) => setProviderRef(e.target.value)}
+          placeholder="认证流水"
           className="h-9 rounded-[8px] border border-[#DCDDDD] px-3 text-[13px] outline-none focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
         />
         <input
