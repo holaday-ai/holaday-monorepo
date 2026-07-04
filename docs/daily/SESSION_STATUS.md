@@ -12,7 +12,7 @@
 <!-- 2026-07-04 Codex 补充：进入 awaiting_user、用户回复恢复执行、control resume、tasks.list/detail 刷新到等待态时，都会清旧 progress/stream/thinking/subStatus 等 live-only 残留。 -->
 <!-- 2026-07-04 Codex 补充：历史页把 failed 与 partial_success 拆成“失败/需复核”独立筛选；视频/图片生成历史保留带真实附件的 partial_success 产物并标“需复核”。 -->
 <!-- 2026-07-04 Codex 补充：前端补齐 server.user.confirm / server.batch_confirm_required，重连恢复后的单步/批量确认会显示结构化按钮并保留 stale-frame guard。 -->
-## 🔴 PROD LIVE REF = `codex/trust-loop-round1` — SPA `874ac1f` / bundle `index-BQmx6jDi.js` + orch `21b4e3b`（**任务列表产物元数据补齐 LIVE（2026-07-04）**：tasks.list 刷新/历史列表现在会从终态 result metadata 还原附件产物与专家模式信息，避免图片/视频/专家结果在列表态看起来丢失；股票最近真实交易日分时 LIVE 继续生效：A股分时拒绝无日期分钟点，盘中同日裁掉未来分钟，非交易日/收盘后可展示 AkShare 返回的最近带日期真实交易日分钟线，价格/成交额已有但分时全空的旧缓存不再阻塞快速刷新真实分时；前端空态明确不使用模拟线或日线替代。状态机清理与通知遮挡修复继续生效。）
+## 🔴 PROD LIVE REF = `codex/trust-loop-round1` — SPA `691b4b2` / bundle `index-BQmx6jDi.js` + orch `21b4e3b`（**图片历史需复核产物保留 LIVE（2026-07-04）**：图片页生成历史现在和视频/任务历史一致，展示 `completed` 或 `partial_success` 且带真实图片附件的产物，并给 `partial_success` 标“需复核”，避免已生成文件在图片页消失；tasks.list 刷新/历史列表继续从终态 result metadata 还原附件产物与专家模式信息；股票最近真实交易日分时 LIVE 继续生效，前端空态明确不使用模拟线或日线替代。状态机清理与通知遮挡修复继续生效。）
 
 <!-- 2026-06-26 里程碑 — 🏁🏁 登录自学从机制到交易站真出货 + 四层 veto 防线 -->
 **🏁🏁 里程碑（2026-06-26）— 登录自学从机制到交易站真出货 + 四层 veto 防线全证通**
