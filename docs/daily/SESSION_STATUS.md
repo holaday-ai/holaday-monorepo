@@ -13,7 +13,8 @@
 <!-- 2026-07-04 Codex 补充：历史页把 failed 与 partial_success 拆成“失败/需复核”独立筛选；视频/图片生成历史保留带真实附件的 partial_success 产物并标“需复核”。 -->
 <!-- 2026-07-04 Codex 补充：前端补齐 server.user.confirm / server.batch_confirm_required，重连恢复后的单步/批量确认会显示结构化按钮并保留 stale-frame guard。 -->
 <!-- 2026-07-04 Codex 补充：批量子任务保留底层 terminal 语义；partial_success 显示“需复核”，cancelled 显示“已取消”，父级批量仍汇总为 partial/未成功数量。 -->
-## 🔴 PROD LIVE REF = `codex/trust-loop-round1` — SPA `b1f3dfb` / bundle `index-BoGXk4ZV.js` + orch `b1f3dfb`（**批量子任务需复核状态保真 LIVE（2026-07-04）**：批量任务现在不会把底层 `partial_success` 压成纯失败，列表/详情/WS 进度会显示“需复核”；底层 `cancelled` 也保留为“已取消”。父级批量仍把需复核项计入未成功数量并进入 `partial`，避免用户误以为整批全完成；图片历史需复核产物保留、tasks.list metadata hydration、股票最近真实交易日分时、状态机清理与通知遮挡修复继续生效。）
+<!-- 2026-07-04 Codex 补充：批量任务和 Admin Learning 里的 failed+partial_success 聚合文案改为“未成功/需复核或失败”，partial 批量进度改黄色，避免把需复核误读成纯失败。 -->
+## 🔴 PROD LIVE REF = `codex/trust-loop-round1` — SPA `76b1283` / bundle `index-BWAkdUPR.js` + orch `b1f3dfb`（**状态语义文案收口 LIVE（2026-07-04）**：批量任务列表/详情不再把 `itemsFailed` 聚合直接写成“失败”，改为“需复核/失败”或老 API 下的“未成功”；批量 `partial` 进度条改为黄色；Admin Learning 的高风险、未成功筛选、失败/需复核分析统一按 failed+partial_success 的真实含义表达。批量子任务状态保真、图片历史需复核产物保留、tasks.list metadata hydration、股票最近真实交易日分时、状态机清理与通知遮挡修复继续生效。）
 
 <!-- 2026-06-26 里程碑 — 🏁🏁 登录自学从机制到交易站真出货 + 四层 veto 防线 -->
 **🏁🏁 里程碑（2026-06-26）— 登录自学从机制到交易站真出货 + 四层 veto 防线全证通**
