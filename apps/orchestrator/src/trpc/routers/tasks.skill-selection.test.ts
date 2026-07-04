@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { TRPCError } from '@trpc/server';
 import { __tasksInternals } from './tasks.js';
 
-const { assertManualSkillSelectionEnabled } = __tasksInternals;
+const {
+  assertManualSkillSelectionEnabled,
+  resolveTaskDispatchSkillId,
+  resolveTaskSkillContext,
+} = __tasksInternals;
 
 describe('tasks router manual skill selection', () => {
   it('accepts enabled catalogue skills selected from the composer', () => {
@@ -64,5 +68,39 @@ describe('tasks router manual skill selection', () => {
         [],
       ),
     ).toBeNull();
+  });
+
+  it('normalizes the skill id used by task creation after manual validation', () => {
+    expect(
+      resolveTaskSkillContext(
+        { skillId: 'douyin', skillSource: 'manual' },
+        ['douyin'],
+      ),
+    ).toBe('douyin-live-ops');
+    expect(
+      resolveTaskSkillContext(
+        { roleId: 'xiaohongshu', skillSource: 'manual' },
+        ['xiaohongshu'],
+      ),
+    ).toBe('xiaohongshu-seeding-ops');
+  });
+
+  it('canonicalizes known legacy skill ids without breaking old role ids', () => {
+    expect(resolveTaskSkillContext({ roleId: 'a-share-analyst' }, [])).toBe(
+      'a-share-market-briefing',
+    );
+    expect(resolveTaskSkillContext({ roleId: 'legacy-role-id' }, [])).toBe(
+      'legacy-role-id',
+    );
+  });
+
+  it('lets explicit skill context win over automatic role classification', () => {
+    expect(resolveTaskDispatchSkillId('a-share-market-briefing', 'tech-translator')).toBe(
+      'a-share-market-briefing',
+    );
+    expect(resolveTaskDispatchSkillId(undefined, 'xiaohongshu-expert')).toBe(
+      'xiaohongshu-expert',
+    );
+    expect(resolveTaskDispatchSkillId(undefined, 'none')).toBeUndefined();
   });
 });

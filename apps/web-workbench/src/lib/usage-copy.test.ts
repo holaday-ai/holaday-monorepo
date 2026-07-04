@@ -23,9 +23,9 @@ describe('usageOutcomeSubcopy', () => {
     );
   });
 
-  it('uses honest fallback copy when old API lacks cancelled count', () => {
+  it('keeps the visible outcome labels separate even when a caller omits cancelled', () => {
     expect(usageOutcomeSubcopy({ failed: 3, executing: 1 })).toBe(
-      '失败/取消 3 · 进行中 1',
+      '失败 3 · 取消 0 · 进行中 1',
     );
   });
 

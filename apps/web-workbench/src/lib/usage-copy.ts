@@ -13,12 +13,8 @@ export function usageOutcomeSubcopy({
   if (typeof partialSuccess === 'number' && partialSuccess > 0) {
     parts.push(`需复核 ${Math.max(0, partialSuccess)}`);
   }
-  if (typeof cancelled === 'number') {
-    parts.push(`失败 ${Math.max(0, failed)}`);
-    parts.push(`取消 ${Math.max(0, cancelled)}`);
-  } else {
-    parts.push(`失败/取消 ${Math.max(0, failed)}`);
-  }
+  parts.push(`失败 ${Math.max(0, failed)}`);
+  parts.push(`取消 ${Math.max(0, cancelled ?? 0)}`);
   parts.push(`进行中 ${Math.max(0, executing)}`);
   return parts.join(' · ');
 }

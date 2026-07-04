@@ -399,6 +399,36 @@ function assertManualSkillSelectionEnabled(
   return skill.id;
 }
 
+function normalizeTaskSkillInputId(input: {
+  skillId?: string | null;
+  roleId?: string | null;
+}): string | undefined {
+  const raw = (input.skillId ?? input.roleId ?? '').trim();
+  if (!raw) return undefined;
+  return skillById(raw)?.id ?? raw;
+}
+
+function resolveTaskSkillContext(
+  input: {
+    skillId?: string | null;
+    roleId?: string | null;
+    skillSource?: 'manual' | undefined;
+  },
+  selectedSkillIds: unknown,
+): string | undefined {
+  return (
+    assertManualSkillSelectionEnabled(input, selectedSkillIds) ??
+    normalizeTaskSkillInputId(input)
+  );
+}
+
+function resolveTaskDispatchSkillId(
+  taskSkillId: string | undefined,
+  gatedRole: string,
+): string | undefined {
+  return taskSkillId ?? (gatedRole === 'none' ? undefined : gatedRole);
+}
+
 /**
  * O15 — friendly refusal for coding / app-building intents. HOLA DAY
  * is a browser-task agent, not a code IDE; trying to satisfy a "帮我
@@ -623,8 +653,9 @@ export const tasksRouter = router({
     // "用 Cursor" insults them. The guard is meant to catch raw
     // free-form attempts to build apps in HOLA DAY, not legitimate
     // expert-mode scripting.
+    const inputSkillId = normalizeTaskSkillInputId(input);
     const intentImpliesRole = classifyRole(input.intent) !== 'none';
-    const inSpecialistContext = Boolean(input.skillId) || intentImpliesRole;
+    const inSpecialistContext = Boolean(inputSkillId) || intentImpliesRole;
     if (!inSpecialistContext && looksLikeCodeIntent(input.intent)) {
       throw new TRPCError({
         code: 'BAD_REQUEST',
@@ -649,7 +680,7 @@ export const tasksRouter = router({
     if (!userRow) {
       throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
     }
-    assertManualSkillSelectionEnabled(input, userRow.selectedSkills);
+    const taskSkillId = resolveTaskSkillContext(input, userRow.selectedSkills);
 
     // Phase 14 audit follow-up — multi-turn 追问. When `replyToTaskId`
     // is set, the new task piggybacks on a previously completed/failed
@@ -829,7 +860,9 @@ export const tasksRouter = router({
     if (planId === 'pro' && gatedRole === 'xiaohongshu-operator') {
       gatedRole = 'xiaohongshu-expert';
     }
-    const routed = selectModelAndEffort(input.intent, gatedRole);
+    const dispatchSkillId = resolveTaskDispatchSkillId(taskSkillId, gatedRole);
+    const dispatchRoleId = dispatchSkillId ?? null;
+    const routed = selectModelAndEffort(input.intent, dispatchSkillId ?? 'none');
     const isOpus = routed.model === 'claude-opus-4-7';
 
     // Free + Basic don't have an Opus quota; selectModelAndEffort
@@ -849,7 +882,7 @@ export const tasksRouter = router({
     // circuit most cases for free.
     const classifiedExecutionMode = await classifyExecutionMode({
       intent: input.intent,
-      skillId: input.skillId,
+      skillId: taskSkillId,
       // §5 fileIds-aware soft template-fill: an attachment + a fill clue
       // ("填入…模板…留空") relaxes the strict-pattern adjacency requirement.
       hasFileAttachment: Boolean(input.fileIds && input.fileIds.length > 0),
@@ -874,7 +907,7 @@ export const tasksRouter = router({
         : getExecutionFeatureFlags().EXPERT_WORKFLOW
           ? matchTypedExpertWorkflow({
               intent: input.intent,
-              roleId: input.skillId ?? null,
+              roleId: taskSkillId ?? null,
             })
           : null;
     // Phase 3 R1 (Codex follow-up #2) — on follow-up tasks the chip
@@ -1114,7 +1147,7 @@ export const tasksRouter = router({
         {
           userId: userRow.id,
           intent: input.intent,
-          roleId: gatedRole === 'none' ? null : gatedRole,
+          roleId: dispatchRoleId,
           opusUsed: false,
         },
       );
@@ -1502,8 +1535,7 @@ export const tasksRouter = router({
     );
     const ashareContext =
       ashareSkillEnabled ||
-      (input.skillId ? ASHARE_SKILL_IDS.has(input.skillId) : false) ||
-      (input.roleId ? ASHARE_SKILL_IDS.has(input.roleId) : false) ||
+      (taskSkillId ? ASHARE_SKILL_IDS.has(taskSkillId) : false) ||
       ASHARE_SKILL_IDS.has(gatedRole);
     // Cross-session guard (#1 session, 2026-06-13, see SESSION_STATUS): only
     // enter the a-share QA lane for GENERIC info intents — a dedicated lane the
@@ -1556,7 +1588,7 @@ export const tasksRouter = router({
         ashareQaMatch = await resolveAshareQa(
           {
             intent: input.intent,
-            roleId: input.skillId ?? input.roleId ?? null,
+            roleId: taskSkillId ?? null,
             watchlist,
             now: new Date(),
           },
@@ -1571,7 +1603,7 @@ export const tasksRouter = router({
           {
             userId: userRow.id,
             intent: input.intent,
-            roleId: gatedRole === 'none' ? null : gatedRole,
+            roleId: dispatchRoleId,
             opusUsed: false,
           },
         );
@@ -1728,7 +1760,7 @@ export const tasksRouter = router({
           {
             userId: userRow.id,
             intent: input.intent,
-            roleId: gatedRole === 'none' ? null : gatedRole,
+            roleId: dispatchRoleId,
             opusUsed: false,
           },
         );
@@ -1807,7 +1839,7 @@ export const tasksRouter = router({
           {
             userId: userRow.id,
             intent: input.intent,
-            roleId: gatedRole === 'none' ? null : gatedRole,
+            roleId: dispatchRoleId,
             opusUsed: false,
           },
         );
@@ -1881,7 +1913,7 @@ export const tasksRouter = router({
         {
           userId: userRow.id,
           intent: input.intent,
-          roleId: gatedRole === 'none' ? null : gatedRole,
+          roleId: dispatchRoleId,
           opusUsed: false,
         },
       );
@@ -2139,7 +2171,7 @@ export const tasksRouter = router({
         {
           userId: userRow.id,
           intent: input.intent,
-          roleId: gatedRole === 'none' ? null : gatedRole,
+          roleId: dispatchRoleId,
           opusUsed: opusActuallyConsumed,
         },
       );
@@ -2213,10 +2245,7 @@ export const tasksRouter = router({
             // when the parent ecom-daily report's summary text
             // happened to contain douyin-review keywords like 诊断).
             workflowOverride: typedWorkflow,
-            skillId:
-              gatedRole !== 'none'
-                ? gatedRole
-                : input.skillId ?? undefined,
+            skillId: dispatchSkillId,
             client: anthropicClient,
             logger: ctx.logger,
             ...(attachmentBlocks.length > 0 ? { attachments: attachmentBlocks } : {}),
@@ -2312,7 +2341,7 @@ export const tasksRouter = router({
           // tasks.detail.result.metadata.expertMode to decide whether
           // to render the "本次使用了技能" footer chip.
           expertMode: expertModeOverride,
-          selectedRole: gatedRole === 'none' ? null : gatedRole,
+          selectedRole: dispatchRoleId,
           model: 'claude-sonnet-4-6',
           fallbackChain,
           elapsedMs,
@@ -2581,7 +2610,7 @@ export const tasksRouter = router({
         {
           userId: userRow.id,
           intent: input.intent,
-          roleId: gatedRole === 'none' ? null : gatedRole,
+          roleId: dispatchRoleId,
           opusUsed: opusActuallyConsumed,
         },
       );
@@ -2676,10 +2705,7 @@ export const tasksRouter = router({
               expertWorkflow || typedWorkflow || isFollowUp
                 ? effectiveIntent
                 : input.intent,
-            skillId:
-              gatedRole !== 'none'
-                ? gatedRole
-                : input.skillId ?? undefined,
+            skillId: dispatchSkillId,
             client: anthropicClient,
             firecrawl,
             logger: ctx.logger,
@@ -2777,10 +2803,7 @@ export const tasksRouter = router({
                 ? effectiveIntent
                 : input.intent,
               workflowOverride: typedWorkflow,
-              skillId:
-                gatedRole !== 'none'
-                  ? gatedRole
-                  : input.skillId ?? undefined,
+              skillId: dispatchSkillId,
               client: anthropicClient,
               logger: ctx.logger,
               ...(attachmentBlocks.length > 0 ? { attachments: attachmentBlocks } : {}),
@@ -2886,7 +2909,7 @@ export const tasksRouter = router({
           finalExecutionMode,
           expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
           expertMode: expertModeOverride,
-          selectedRole: gatedRole === 'none' ? null : gatedRole,
+          selectedRole: dispatchRoleId,
           model: 'claude-sonnet-4-6',
           fallbackChain,
           elapsedMs,
@@ -3166,7 +3189,7 @@ export const tasksRouter = router({
         {
           userId: userRow.id,
           intent: input.intent,
-          roleId: gatedRole === 'none' ? null : gatedRole,
+          roleId: dispatchRoleId,
           opusUsed: opusActuallyConsumed,
         },
       );
@@ -3696,10 +3719,10 @@ export const tasksRouter = router({
           isSimpleSearch: isSimpleSearchIntent,
           isCrossPlatformAutomation: classifyAsCrossPlatformAutomation(input.intent),
           zapierWebhookPath: process.env.ZAPIER_WEBHOOK_PATH ?? null,
-          // Pass the post-gate role so prompt-layers cannot accidentally
-          // resurrect the raw classifier match. Gated value is 'none' for
-          // free users, 'none' or open-pool for basic, anything for pro.
-          roleIdOverride: gatedRole,
+          // Pass the resolved dispatch context so prompt-layers cannot
+          // resurrect the raw classifier match. Manual skills win over
+          // automatic role classification; otherwise this is the gated role.
+          roleIdOverride: dispatchSkillId ?? 'none',
           // Phase 10 Tier 3 — attachments parsed above, prepended to
           // the agent's first user message before the screenshot.
           ...(attachmentBlocks.length > 0 ? { attachments: attachmentBlocks } : {}),
@@ -4273,10 +4296,7 @@ export const tasksRouter = router({
                   userId: ctx.userId,
                   intent: combinedIntent,
                   workflowOverride: typedWorkflow,
-                  skillId:
-                    gatedRole !== 'none'
-                      ? gatedRole
-                      : input.skillId ?? undefined,
+                  skillId: dispatchSkillId,
                   client: anthropicForResolver!,
                   logger: ctx.logger,
                   ...(attachmentBlocks.length > 0
@@ -4320,7 +4340,7 @@ export const tasksRouter = router({
                 finalExecutionMode: 'generate' as const,
                 expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
                 expertMode: expertModeOverride,
-                selectedRole: gatedRole === 'none' ? null : gatedRole,
+                selectedRole: dispatchRoleId,
                 model: 'claude-sonnet-4-6',
                 fallbackChain: ['browser', 'generate'],
                 elapsedMs,
@@ -4464,7 +4484,7 @@ export const tasksRouter = router({
               finalExecutionMode: executionMode === 'browser' ? 'browser' : executionMode,
               expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
               expertMode: expertModeOverride,
-              selectedRole: gatedRole === 'none' ? null : gatedRole,
+              selectedRole: dispatchRoleId,
               model: opusActuallyConsumed ? 'claude-opus-4-7' : 'claude-sonnet-4-6',
               fallbackChain: ['browser'],
               elapsedMs,
@@ -5244,7 +5264,7 @@ export const tasksRouter = router({
         {
           userId: userRow.id,
           intent: input.intent,
-          roleId: gatedRole === 'none' ? null : gatedRole,
+          roleId: dispatchRoleId,
           opusUsed: opusActuallyConsumed,
         },
       );
@@ -5654,7 +5674,7 @@ export const tasksRouter = router({
     await repo.insertTask(state, {
       userId: userRow.id,
       intent: input.intent,
-      roleId: gatedRole === 'none' ? null : gatedRole,
+      roleId: dispatchRoleId,
       opusUsed: opusActuallyConsumed,
     });
 
@@ -8640,4 +8660,6 @@ function unionAllowedOrigins(catalogue: SkillCatalogueEntry[]): readonly string[
 
 export const __tasksInternals = {
   assertManualSkillSelectionEnabled,
+  resolveTaskDispatchSkillId,
+  resolveTaskSkillContext,
 };
