@@ -8,29 +8,21 @@ import {
 } from 'lucide-react';
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FileDownloadCard, type FileDownloadPayload } from '@/components/FileDownloadCard';
+import { FileDownloadCard } from '@/components/FileDownloadCard';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/toast';
+import { toImageHistoryRow, type ImageHistoryRow } from '@/lib/image-history-row';
 import { uploadFailureMessage, uploadFile } from '@/lib/upload-file';
 import { cn } from '@/lib/utils';
 import { PageContainer, Section } from '@/pages/PageShell';
 import { useTaskStore } from '@/stores/task-store';
-import type { UiTask, UiTerminalAttachment } from '@/types/task';
 
 type ReferenceImage = {
   fileId: string;
   name: string;
   previewUrl: string;
 };
-
-interface ImageRow {
-  taskId: string;
-  title: string;
-  intent: string;
-  createdAt: Date;
-  download: FileDownloadPayload;
-}
 
 type ImageModel = 'auto' | 'quality' | 'fast';
 type ImageStyle = 'dynamic' | 'realistic' | 'poster' | 'minimal';
@@ -87,7 +79,13 @@ export function ImagePage(): JSX.Element {
     };
   }, [reference?.previewUrl]);
 
-  const imageRows = React.useMemo(() => tasks.map(toImageRow).filter((row): row is ImageRow => row !== null), [tasks]);
+  const imageRows = React.useMemo(
+    () =>
+      tasks
+        .map(toImageHistoryRow)
+        .filter((row): row is ImageHistoryRow => row !== null),
+    [tasks],
+  );
 
   async function handlePick(event: React.ChangeEvent<HTMLInputElement>): Promise<void> {
     const file = event.target.files?.[0];
@@ -247,10 +245,10 @@ export function ImagePage(): JSX.Element {
   );
 }
 
-function ImageHistory({ rows }: { rows: ImageRow[] }): JSX.Element {
+function ImageHistory({ rows }: { rows: ImageHistoryRow[] }): JSX.Element {
   const navigate = useNavigate();
   return (
-    <Section title="生成历史" description="这里只展示已完成且带图片产物的任务。">
+    <Section title="生成历史" description="这里只展示已完成或需复核且带图片产物的任务。">
       {rows.length === 0 ? (
         <div className="rounded-[8px] border border-dashed border-[#DCDDDD] px-4 py-8 text-center">
           <ImageIcon className="mx-auto h-8 w-8 text-muted-foreground/50" aria-hidden />
@@ -270,7 +268,14 @@ function ImageHistory({ rows }: { rows: ImageRow[] }): JSX.Element {
                   <div className="truncate text-[13px] font-semibold text-foreground hover:text-[#1688AA]">
                     {row.title || row.intent || '图片任务'}
                   </div>
-                  <div className="mt-0.5 text-[11px] text-muted-foreground">{formatTime(row.createdAt)}</div>
+                  <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                    <span>{formatTime(row.createdAt)}</span>
+                    {row.status === 'partial_success' ? (
+                      <span className="rounded-full bg-[#FFC910]/15 px-2 py-0.5 text-[#8A6A00]">
+                        需复核
+                      </span>
+                    ) : null}
+                  </div>
                 </button>
                 <Button variant="outline" size="sm" onClick={() => navigate(`/?task=${encodeURIComponent(row.taskId)}`)}>
                   打开任务
@@ -383,34 +388,6 @@ function imageStyleLabel(style: ImageStyle): string {
   if (style === 'poster') return 'Poster';
   if (style === 'minimal') return 'Minimal';
   return 'Dynamic';
-}
-
-function toImageRow(task: UiTask): ImageRow | null {
-  if (task.status !== 'completed') return null;
-  const imageAttachment = task.attachments?.find(isImageAttachment);
-  if (!imageAttachment) return null;
-  const looksLikeImageLane =
-    task.executionMode === 'image' ||
-    task.intent.includes('生成一张图片') ||
-    task.intent.includes('图生图') ||
-    task.intent.includes('图片编辑');
-  if (!looksLikeImageLane) return null;
-  return {
-    taskId: task.taskId,
-    title: task.title ?? '',
-    intent: task.intent,
-    createdAt: task.createdAt,
-    download: {
-      fileId: imageAttachment.fileId,
-      downloadUrl: imageAttachment.downloadUrl,
-      filename: imageAttachment.filename,
-      size: imageAttachment.sizeBytes,
-    },
-  };
-}
-
-function isImageAttachment(attachment: UiTerminalAttachment): boolean {
-  return attachment.mimetype.startsWith('image/') || /\.(png|jpe?g|webp|gif)$/i.test(attachment.filename);
 }
 
 function formatTime(value: Date): string {
