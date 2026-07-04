@@ -11,7 +11,8 @@
 <!-- 2026-07-04 Codex 补充：live thinking/progress/streaming/result 变化现在会更新自动滚动依赖，避免执行中内容继续增长但视口不跟随。 -->
 <!-- 2026-07-04 Codex 补充：进入 awaiting_user、用户回复恢复执行、control resume、tasks.list/detail 刷新到等待态时，都会清旧 progress/stream/thinking/subStatus 等 live-only 残留。 -->
 <!-- 2026-07-04 Codex 补充：历史页把 failed 与 partial_success 拆成“失败/需复核”独立筛选；视频/图片生成历史保留带真实附件的 partial_success 产物并标“需复核”。 -->
-## 🔴 PROD LIVE REF = `codex/trust-loop-round1` — SPA `69fa297` / bundle `index-12dDKjfU.js` + orch `69fa297`（**状态机清理 LIVE（2026-07-04）**：paused 不再作为 terminal WS outcome；vision max-steps pause 现在广播 `server.task.control(pause)`，重启恢复会带回 pause detail；前端允许 paused 后续 pause/resume/cancel 控制帧穿过 stale-frame guard；completed/failed/partial_success/cancelled 仍走 `server.task.terminal`。）
+<!-- 2026-07-04 Codex 补充：前端补齐 server.user.confirm / server.batch_confirm_required，重连恢复后的单步/批量确认会显示结构化按钮并保留 stale-frame guard。 -->
+## 🔴 PROD LIVE REF = `codex/trust-loop-round1` — SPA `fd60bf6a` / bundle `index-Ec2--Uy9.js` + orch `69fa297`（**状态机清理 LIVE（2026-07-04）**：paused 不再作为 terminal WS outcome；vision max-steps pause 现在广播 `server.task.control(pause)`，重启恢复会带回 pause detail；前端允许 paused 后续 pause/resume/cancel 控制帧穿过 stale-frame guard；前端已补齐单步/批量确认帧；completed/failed/partial_success/cancelled 仍走 `server.task.terminal`。）
 
 <!-- 2026-06-26 里程碑 — 🏁🏁 登录自学从机制到交易站真出货 + 四层 veto 防线 -->
 **🏁🏁 里程碑（2026-06-26）— 登录自学从机制到交易站真出货 + 四层 veto 防线全证通**
