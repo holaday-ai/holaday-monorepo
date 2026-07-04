@@ -3,7 +3,7 @@ import * as React from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { trpc } from '@/lib/trpc';
-import { usageOutcomeSubcopy } from '@/lib/usage-copy';
+import { usageOutcomeSubcopy, usageQuotaPolicyCopy } from '@/lib/usage-copy';
 import {
   hasRecentUsage,
   normalizeUsageSnapshot,
@@ -229,7 +229,7 @@ export function UsagePage(): JSX.Element {
 
             <Section title="额度使用进度" className="rounded-[8px] border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
               <p className="mb-3 text-[11px] text-muted-foreground">
-                额度仅计入成功消耗的任务，失败和系统任务不扣额度。
+                {usageQuotaPolicyCopy()}
               </p>
               <div className="flex items-center gap-3">
                 <div className="h-2 flex-1 overflow-hidden rounded-full bg-[#EFEFEF]">

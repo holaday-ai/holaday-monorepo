@@ -22,3 +22,7 @@ export function usageOutcomeSubcopy({
   parts.push(`进行中 ${Math.max(0, executing)}`);
   return parts.join(' · ');
 }
+
+export function usageQuotaPolicyCopy(): string {
+  return '额度按任务提交计入；系统任务不计入。任务后续进入需复核、失败或取消，也会保留本次提交占用。';
+}
