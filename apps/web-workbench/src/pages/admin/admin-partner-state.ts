@@ -171,6 +171,11 @@ export function normalizeAdminPartnerOverview(value: unknown) {
         orderKind: safeText(row.orderKind),
         status: safeText(row.status),
         provider: safeText(row.provider),
+        providerCaptureId: safeText(row.providerCaptureId),
+        reviewReason: safeText(row.reviewReason),
+        reviewErrorName: safeText(row.reviewErrorName),
+        reviewErrorMessage: safeText(row.reviewErrorMessage),
+        reviewApprovalNote: safeText(row.reviewApprovalNote),
         amountCnyCents: Math.round(nonNegativeNumber(row.amountCnyCents)),
         createdAt: row.createdAt,
       };
@@ -199,6 +204,10 @@ export function normalizeAdminPartnerOverview(value: unknown) {
         amountCreditCents: Math.round(nonNegativeNumber(row.amountCreditCents)),
         status: safeText(row.status),
         reviewDueAt: row.reviewDueAt,
+        bankAccountFingerprint: safeText(row.bankAccountFingerprint),
+        rejectionReason: safeText(row.rejectionReason),
+        approvalNote: safeText(row.approvalNote),
+        providerPayoutId: safeText(row.providerPayoutId),
         riskScore: normalizeRiskScore(row.riskScore),
       };
     }),
@@ -233,7 +242,20 @@ export function filterAdminPartnerOverview(
   return {
     ...state,
     orders: state.orders.filter((row) =>
-      rowMatches(needle, row, ['orderExternalId', 'userExternalId', 'email', 'displayName', 'orderKind', 'status']),
+      rowMatches(needle, row, [
+        'orderExternalId',
+        'userExternalId',
+        'email',
+        'displayName',
+        'orderKind',
+        'status',
+        'provider',
+        'providerCaptureId',
+        'reviewReason',
+        'reviewErrorName',
+        'reviewErrorMessage',
+        'reviewApprovalNote',
+      ]),
     ),
     kycProfiles: state.kycProfiles.filter((row) =>
       rowMatches(needle, row, [
@@ -247,7 +269,17 @@ export function filterAdminPartnerOverview(
       ]),
     ),
     withdrawals: state.withdrawals.filter((row) =>
-      rowMatches(needle, row, ['withdrawalExternalId', 'userExternalId', 'email', 'displayName', 'status']),
+      rowMatches(needle, row, [
+        'withdrawalExternalId',
+        'userExternalId',
+        'email',
+        'displayName',
+        'status',
+        'bankAccountFingerprint',
+        'rejectionReason',
+        'approvalNote',
+        'providerPayoutId',
+      ]),
     ),
     riskLots: state.riskLots.filter((row) =>
       rowMatches(needle, row, ['lotExternalId', 'userExternalId', 'email', 'displayName', 'status', 'riskStatus']),

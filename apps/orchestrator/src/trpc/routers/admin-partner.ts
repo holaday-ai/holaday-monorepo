@@ -63,6 +63,36 @@ async function readOrderByExternalId(db: DB, orderExternalId: string): Promise<P
   return row;
 }
 
+function metadataRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function metadataText(metadata: Record<string, unknown>, key: string): string | undefined {
+  const value = metadata[key];
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function metadataNumber(metadata: Record<string, unknown>, key: string): number | undefined {
+  const value = metadata[key];
+  return typeof value === 'number' && Number.isSafeInteger(value) ? value : undefined;
+}
+
+function summarizeOrderAudit(metadataValue: unknown) {
+  const metadata = metadataRecord(metadataValue);
+  return {
+    reviewReason: metadataText(metadata, 'reviewReason'),
+    reviewErrorName: metadataText(metadata, 'errorName'),
+    reviewErrorMessage: metadataText(metadata, 'errorMessage'),
+    reviewApprovedByUserId: metadataNumber(metadata, 'reviewApprovedByUserId'),
+    reviewApprovedAt: metadataText(metadata, 'reviewApprovedAt'),
+    reviewApprovalNote: metadataText(metadata, 'reviewApprovalNote'),
+  };
+}
+
 function summarizeOrder(order: PartnerRechargeOrder) {
   return {
     orderExternalId: order.externalId,
@@ -73,6 +103,21 @@ function summarizeOrder(order: PartnerRechargeOrder) {
     orderKind: order.orderKind,
     createdAt: order.createdAt,
     updatedAt: order.updatedAt,
+    ...summarizeOrderAudit(order.metadata),
+  };
+}
+
+function summarizeWithdrawalAudit(metadataValue: unknown) {
+  const metadata = metadataRecord(metadataValue);
+  return {
+    approvedByUserId: metadataNumber(metadata, 'approvedByUserId'),
+    approvedAt: metadataText(metadata, 'approvedAt'),
+    approvalNote: metadataText(metadata, 'approvalNote'),
+    rejectedByUserId: metadataNumber(metadata, 'rejectedByUserId'),
+    rejectedAt: metadataText(metadata, 'rejectedAt'),
+    paidByUserId: metadataNumber(metadata, 'paidByUserId'),
+    providerPayoutId: metadataText(metadata, 'providerPayoutId'),
+    paidAt: metadataText(metadata, 'paidAt'),
   };
 }
 
@@ -82,10 +127,12 @@ function summarizeWithdrawal(withdrawal: PartnerWithdrawalRequest) {
     amountCreditCents: withdrawal.amountCreditCents,
     status: withdrawal.status,
     reviewDueAt: withdrawal.reviewDueAt,
+    bankAccountFingerprint: withdrawal.bankAccountFingerprint,
     riskScore: withdrawal.riskScore,
     rejectionReason: withdrawal.rejectionReason,
     createdAt: withdrawal.createdAt,
     updatedAt: withdrawal.updatedAt,
+    ...summarizeWithdrawalAudit(withdrawal.metadata),
   };
 }
 
@@ -146,6 +193,7 @@ export const adminPartnerRouter = router({
             amountCnyCents: partnerRechargeOrders.amountCnyCents,
             status: partnerRechargeOrders.status,
             orderKind: partnerRechargeOrders.orderKind,
+            metadata: partnerRechargeOrders.metadata,
             createdAt: partnerRechargeOrders.createdAt,
             updatedAt: partnerRechargeOrders.updatedAt,
           })
@@ -181,8 +229,10 @@ export const adminPartnerRouter = router({
             amountCreditCents: partnerWithdrawalRequests.amountCreditCents,
             status: partnerWithdrawalRequests.status,
             reviewDueAt: partnerWithdrawalRequests.reviewDueAt,
+            bankAccountFingerprint: partnerWithdrawalRequests.bankAccountFingerprint,
             riskScore: partnerWithdrawalRequests.riskScore,
             rejectionReason: partnerWithdrawalRequests.rejectionReason,
+            metadata: partnerWithdrawalRequests.metadata,
             createdAt: partnerWithdrawalRequests.createdAt,
             updatedAt: partnerWithdrawalRequests.updatedAt,
           })
@@ -227,9 +277,15 @@ export const adminPartnerRouter = router({
           overdueWithdrawalCount: activeWithdrawalRows.filter((row) => row.reviewDueAt.getTime() <= now.getTime()).length,
           riskLotCount: riskLotRows.length,
         },
-        orders: orderRows,
+        orders: orderRows.map(({ metadata, ...row }) => ({
+          ...row,
+          ...summarizeOrderAudit(metadata),
+        })),
         kycProfiles: kycRows,
-        withdrawals: withdrawalRows,
+        withdrawals: withdrawalRows.map(({ metadata, ...row }) => ({
+          ...row,
+          ...summarizeWithdrawalAudit(metadata),
+        })),
         riskLots: riskLotRows,
       };
     }),

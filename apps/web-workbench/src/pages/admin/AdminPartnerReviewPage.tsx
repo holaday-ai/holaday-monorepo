@@ -448,20 +448,24 @@ function OrderQueue({
   return (
     <QueueSection title="订单确认" empty="暂无待确认订单">
       <DataTable
-        headers={['用户', '类型', '金额', '状态', 'provider', '创建时间', '操作']}
+        headers={['用户', '类型', '金额', '状态', '复核依据', 'provider', '创建时间', '操作']}
         empty={rows.length === 0}
-        colSpan={7}
+        colSpan={8}
       >
         {rows.map((row) => {
           const reviewRequired = row.status === 'review_required';
           const actionKey = `${reviewRequired ? 'order-approve' : 'order'}:${row.orderExternalId}`;
           const reviewNote = orderReviewNotes[row.orderExternalId] ?? '';
+          const reviewSummary =
+            [row.reviewReason, row.reviewErrorName, row.reviewErrorMessage].filter(Boolean).join(' / ') ||
+            row.reviewApprovalNote;
           return (
             <tr key={row.orderExternalId} className="border-b border-[#EFEFEF] last:border-b-0 hover:bg-[#EFEFEF]/35">
               <UserCell userExternalId={row.userExternalId} email={row.email} displayName={row.displayName} />
               <td className="px-3 py-3 text-muted-foreground">{row.orderKind === 'membership' ? '年费会员' : '充值'}</td>
               <td className="px-3 py-3 tabular-nums">{formatPartnerMoneyCents(row.amountCnyCents)}</td>
               <td className="px-3 py-3"><StatusBadge kind="order" status={row.status} /></td>
+              <td className="px-3 py-3 text-muted-foreground">{truncate(reviewSummary, 36) || '—'}</td>
               <td className="px-3 py-3 text-muted-foreground">{row.provider}</td>
               <td className="px-3 py-3 text-muted-foreground">{formatDateTime(row.createdAt as string | Date | null)}</td>
               <td className="px-5 py-3">
@@ -536,9 +540,9 @@ function WithdrawalQueue({
   return (
     <QueueSection title="提现复核" empty="暂无提现申请">
       <DataTable
-        headers={['用户', '金额', '状态', '风险分', '审核截止', '操作']}
+        headers={['用户', '金额', '状态', '风险分', '银行指纹', '审核截止', '操作']}
         empty={rows.length === 0}
-        colSpan={6}
+        colSpan={7}
       >
         {rows.map((row) => {
           const reason = withdrawalReasons[row.withdrawalExternalId] ?? '';
@@ -549,6 +553,7 @@ function WithdrawalQueue({
               <td className="px-3 py-3 tabular-nums">{formatPartnerCreditCents(row.amountCreditCents)}</td>
               <td className="px-3 py-3"><StatusBadge kind="withdrawal" status={row.status} /></td>
               <td className="px-3 py-3 tabular-nums text-muted-foreground">{row.riskScore}</td>
+              <td className="px-3 py-3 text-muted-foreground">{truncate(row.bankAccountFingerprint, 24) || '—'}</td>
               <td className="px-3 py-3 text-muted-foreground">{formatDateTime(row.reviewDueAt as string | Date | null)}</td>
               <td className="px-5 py-3">
                 <div className="flex flex-wrap items-center gap-2">

@@ -108,6 +108,8 @@ describe('normalizeAdminPartnerOverview', () => {
           userExternalId: 'usr_alice',
           email: 'alice@holaday.local',
           displayName: 'Alice Partner',
+          reviewReason: 'annual_recharge_cap_exceeded',
+          reviewErrorMessage: 'monthly cap exceeded',
         },
       ],
       kycProfiles: [
@@ -125,6 +127,7 @@ describe('normalizeAdminPartnerOverview', () => {
           userExternalId: 'usr_cash',
           email: 'cash@holaday.local',
           displayName: 'Cash Partner',
+          bankAccountFingerprint: 'bank-card-fp-cash',
         },
       ],
       riskLots: [
@@ -146,12 +149,24 @@ describe('normalizeAdminPartnerOverview', () => {
     expect(byUser.kycProfiles).toHaveLength(0);
     expect(byUser.withdrawals).toHaveLength(0);
     expect(byUser.riskLots).toHaveLength(0);
+    expect(byUser.orders[0]?.reviewReason).toBe('annual_recharge_cap_exceeded');
+
+    const byReviewReason = filterAdminPartnerOverview(state, 'annual_recharge');
+    expect(byReviewReason.enabled).toBe(true);
+    if (!byReviewReason.enabled) throw new Error('expected enabled state');
+    expect(byReviewReason.orders).toHaveLength(1);
 
     const byWithdrawal = filterAdminPartnerOverview(state, 'cashout');
     expect(byWithdrawal.enabled).toBe(true);
     if (!byWithdrawal.enabled) throw new Error('expected enabled state');
     expect(byWithdrawal.orders).toHaveLength(0);
     expect(byWithdrawal.withdrawals).toHaveLength(1);
+    expect(byWithdrawal.withdrawals[0]?.bankAccountFingerprint).toBe('bank-card-fp-cash');
+
+    const byBankFingerprint = filterAdminPartnerOverview(state, 'bank-card-fp');
+    expect(byBankFingerprint.enabled).toBe(true);
+    if (!byBankFingerprint.enabled) throw new Error('expected enabled state');
+    expect(byBankFingerprint.withdrawals).toHaveLength(1);
 
     const byRiskLot = filterAdminPartnerOverview(state, 'LOT_RISK');
     expect(byRiskLot.enabled).toBe(true);

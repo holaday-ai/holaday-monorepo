@@ -53,6 +53,7 @@ vi.mock('../../partner/withdrawal-service.js', async (importOriginal) => {
 });
 
 import { adminRouter } from './admin.js';
+import { __adminPartnerInternals } from './admin-partner.js';
 
 type FakeUserRow = {
   id: number;
@@ -342,6 +343,51 @@ describe('admin.partner router', () => {
       withdrawalExternalId: 'pay_withdrawal_1',
       reviewerUserId: 1,
       providerPayoutId: 'bank-payout-1',
+    });
+  });
+
+  it('summarizes partner order and withdrawal audit metadata for review queues', () => {
+    const order = __adminPartnerInternals.summarizeOrder(
+      fakeOrder({
+        status: 'review_required',
+        metadata: {
+          reviewReason: 'lot_creation_failed',
+          errorName: 'RechargeLotConflictError',
+          errorMessage: 'monthly cap exceeded',
+          reviewApprovedByUserId: 77,
+          reviewApprovedAt: '2026-07-03T04:00:00.000Z',
+          reviewApprovalNote: '人工复核放行',
+        },
+      }),
+    );
+    expect(order).toMatchObject({
+      reviewReason: 'lot_creation_failed',
+      reviewErrorName: 'RechargeLotConflictError',
+      reviewErrorMessage: 'monthly cap exceeded',
+      reviewApprovedByUserId: 77,
+      reviewApprovedAt: '2026-07-03T04:00:00.000Z',
+      reviewApprovalNote: '人工复核放行',
+    });
+
+    const withdrawal = __adminPartnerInternals.summarizeWithdrawal(
+      fakeWithdrawal({
+        bankAccountFingerprint: 'bank_fp_123',
+        metadata: {
+          approvedByUserId: 88,
+          approvedAt: '2026-07-03T05:00:00.000Z',
+          approvalNote: 'bank checked',
+          providerPayoutId: 'bank-payout-1',
+          paidAt: '2026-07-03T06:00:00.000Z',
+        },
+      }),
+    );
+    expect(withdrawal).toMatchObject({
+      bankAccountFingerprint: 'bank_fp_123',
+      approvedByUserId: 88,
+      approvedAt: '2026-07-03T05:00:00.000Z',
+      approvalNote: 'bank checked',
+      providerPayoutId: 'bank-payout-1',
+      paidAt: '2026-07-03T06:00:00.000Z',
     });
   });
 });
