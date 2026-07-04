@@ -40,6 +40,7 @@ import { sanitizeForRender } from '@/utils/render-sanitizer';
 import { Button } from '@/components/ui/button';
 import {
   notificationBadgeText,
+  notificationButtonTitle,
   notificationErrorMessage,
   notificationListStatusCopy,
   notificationListSummary,
@@ -208,6 +209,7 @@ export function NotificationBell({
 
   const safeUnreadCount = safeNotificationCount(unreadCount);
   const badge = notificationBadgeText(safeUnreadCount, placement);
+  const buttonTitle = notificationButtonTitle(safeUnreadCount, placement);
   const hasUnread = safeUnreadCount > 0;
   const compactBadge = shouldRenderCompactNotificationDot(safeUnreadCount, placement);
   const summary = notificationListSummary({
@@ -227,7 +229,7 @@ export function NotificationBell({
         type="button"
         onClick={handleToggle}
         aria-label={hasUnread ? `通知，${safeUnreadCount} 条未读` : '通知'}
-        title={hasUnread ? `通知，${safeUnreadCount} 条未读` : '通知'}
+        title={buttonTitle}
         aria-expanded={open}
         className={cn(
           'relative flex h-11 w-11 items-center justify-center text-[#595757] transition-colors hover:text-[#EA1F59] dark:text-foreground/70 dark:hover:text-[#EA1F59]',

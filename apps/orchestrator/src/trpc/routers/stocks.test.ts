@@ -16,6 +16,7 @@ function envelope(data: unknown[]) {
 describe('stocks dashboard snapshot', () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.useRealTimers();
     __stocksDashboardTest.dashboardCache.clear();
   });
 
@@ -76,6 +77,7 @@ describe('stocks dashboard snapshot', () => {
       spark: [7.22, 7.25, 7.28],
       sparkLabels: ['2026-06-29 09:30:00', '2026-06-29 09:31:00', '2026-06-29 09:32:00'],
       sparkKind: 'intraday',
+      sparkTradeDate: '2026-06-29',
       sparkBaseline: 7.11,
       turnoverAmount: 17_544_000,
       averageTurnoverAmount: 7_100_000,
@@ -129,6 +131,91 @@ describe('stocks dashboard snapshot', () => {
       spark: [7.22, 7.25, 7.28],
       sparkLabels: ['2026-06-29 14:45:00', '2026-06-29 14:46:00', '2026-06-29 14:47:00'],
       sparkKind: 'intraday',
+    });
+  });
+
+  it('filters same-day intraday points that are ahead of the current Shanghai minute', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/index/cn') {
+        return new Response(JSON.stringify(envelope([])));
+      }
+      if (url.pathname === '/kline/603528') {
+        return new Response(JSON.stringify(envelope([
+          { 日期: '2026-06-29', 收盘: 5.87, 涨跌幅: 0.1, 成交量: 1000, 成交额: 5_870_000 },
+          { 日期: '2026-06-30', 收盘: 5.92, 涨跌幅: 0.85, 成交量: 2000, 成交额: 11_840_000 },
+        ])));
+      }
+      if (url.pathname === '/intraday/603528') {
+        return new Response(JSON.stringify(envelope([
+          { 时间: '2026-06-30 14:08:00', 最新价: 5.93 },
+          { 时间: '2026-06-30 14:09:00', 最新价: 5.92 },
+          { 时间: '2026-06-30 15:00:00', 最新价: 5.99 },
+        ])));
+      }
+      if (url.pathname === '/quote/603528') {
+        return new Response(JSON.stringify(envelope([
+          { 代码: 'sh603528', 名称: '多伦科技', 最新价: 5.92, 涨跌幅: -1.82, 成交额: 70_081_500 },
+        ])));
+      }
+      throw new Error(`unexpected path ${url.pathname}`);
+    });
+
+    const snapshot = await __stocksDashboardTest.buildDashboardSnapshot({
+      logger: { warn: vi.fn() },
+      watchlistRows: [{ symbol: '603528', market: 'A', displayName: '多伦科技' }],
+      effectiveWatchlist: [{ symbol: '603528', market: 'A', displayName: '多伦科技' }],
+      now: new Date('2026-06-30T06:10:00.000Z'),
+      includeSlowSignals: false,
+    });
+
+    expect(snapshot.watchlistStocks[0]).toMatchObject({
+      spark: [5.93, 5.92],
+      sparkLabels: ['2026-06-30 14:08:00', '2026-06-30 14:09:00'],
+      sparkKind: 'intraday',
+      sparkTradeDate: '2026-06-30',
+    });
+  });
+
+  it('does not trust intraday points without a trade date', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/index/cn') {
+        return new Response(JSON.stringify(envelope([])));
+      }
+      if (url.pathname === '/kline/603528') {
+        return new Response(JSON.stringify(envelope([
+          { 日期: '2026-06-30', 收盘: 5.92, 涨跌幅: -1.82, 成交量: 2000, 成交额: 11_840_000 },
+        ])));
+      }
+      if (url.pathname === '/intraday/603528') {
+        return new Response(JSON.stringify(envelope([
+          { 时间: '14:08:00', 最新价: 5.93 },
+          { 时间: '14:09:00', 最新价: 5.92 },
+        ])));
+      }
+      if (url.pathname === '/quote/603528') {
+        return new Response(JSON.stringify(envelope([
+          { 代码: 'sh603528', 名称: '多伦科技', 最新价: 5.92, 涨跌幅: -1.82, 成交额: 70_081_500 },
+        ])));
+      }
+      throw new Error(`unexpected path ${url.pathname}`);
+    });
+
+    const snapshot = await __stocksDashboardTest.buildDashboardSnapshot({
+      logger: { warn: vi.fn() },
+      watchlistRows: [{ symbol: '603528', market: 'A', displayName: '多伦科技' }],
+      effectiveWatchlist: [{ symbol: '603528', market: 'A', displayName: '多伦科技' }],
+      now: new Date('2026-06-30T06:10:00.000Z'),
+      includeSlowSignals: false,
+    });
+
+    expect(snapshot.watchlistStocks[0]).toMatchObject({
+      price: '5.92',
+      spark: [],
+      sparkLabels: [],
+      sparkTradeDate: null,
+      note: '来源 AkShare · 多伦科技 最新行情，分时走势暂缺',
     });
   });
 
@@ -387,7 +474,147 @@ describe('stocks dashboard snapshot', () => {
     expect(merged.freshness.message).toContain('分时线');
   });
 
+  it('does not preserve prior-day intraday lines as current charts', () => {
+    const previousStock = {
+      symbol: '603528',
+      name: '多伦科技',
+      market: 'A' as const,
+      price: '5.86',
+      changePct: -0.17,
+      signal: '偏弱' as const,
+      report: '待生成' as const,
+      spark: [5.88, 5.86],
+      sparkLabels: ['2026-06-29 14:59:00', '2026-06-29 15:00:00'],
+      sparkKind: 'intraday' as const,
+      sparkBaseline: 5.87,
+      turnoverAmount: 60_989_093,
+      averageTurnoverAmount: 90_455_000,
+      volume: null,
+      averageVolume: null,
+      volumeRatio: 0.67,
+      volumeSignal: '缩量' as const,
+      newsCount: 0,
+      note: '来源 AkShare · 多伦科技 今日真实分钟线',
+    };
+    const nextStock = {
+      ...previousStock,
+      price: '5.92',
+      changePct: -1.82,
+      spark: [],
+      sparkLabels: [],
+      sparkBaseline: 5.87,
+      turnoverAmount: 70_081_500,
+      note: '来源 AkShare · 多伦科技 最新行情，分时走势暂缺',
+    };
+    const previous = {
+      updatedAt: '2026-06-29T07:05:00.000Z',
+      source: 'akshare' as const,
+      isFallbackWatchlist: false,
+      watchlistStocks: [previousStock],
+      marketIndices: [],
+      sectors: [],
+      starStocks: [previousStock],
+      temperature: null,
+      news: [],
+      leaders: [],
+      leaderboards: { gainers: [], losers: [], amount: [] },
+      freshness: {
+        status: 'fresh' as const,
+        cachedAt: '2026-06-29T07:05:00.000Z',
+      },
+    };
+    const next = {
+      ...previous,
+      updatedAt: '2026-06-30T06:10:00.000Z',
+      watchlistStocks: [nextStock],
+      starStocks: [nextStock],
+      freshness: {
+        status: 'partial' as const,
+        cachedAt: '2026-06-30T06:10:00.000Z',
+        message: '真实行情已先展示，市场温度正在后台补齐。',
+      },
+    };
+
+    const merged = __stocksDashboardTest.withPreservedSlowSignals(next, previous);
+
+    expect(merged.watchlistStocks[0]).toMatchObject({
+      price: '5.92',
+      spark: [],
+      sparkLabels: [],
+      note: '来源 AkShare · 多伦科技 最新行情，分时走势暂缺',
+    });
+    expect(merged.freshness.message).not.toContain('分时线');
+  });
+
+  it('trims future points before preserving a same-day intraday line', () => {
+    const previousStock = {
+      symbol: '603528',
+      name: '多伦科技',
+      market: 'A' as const,
+      price: '5.92',
+      changePct: -1.82,
+      signal: '偏弱' as const,
+      report: '待生成' as const,
+      spark: [5.93, 5.92, 5.99],
+      sparkLabels: ['2026-06-30 14:08:00', '2026-06-30 14:09:00', '2026-06-30 15:00:00'],
+      sparkKind: 'intraday' as const,
+      sparkBaseline: 6.03,
+      turnoverAmount: 70_081_500,
+      averageTurnoverAmount: 91_331_400,
+      volume: null,
+      averageVolume: null,
+      volumeRatio: 0.77,
+      volumeSignal: '接近均量' as const,
+      newsCount: 0,
+      note: '来源 AkShare · 多伦科技 今日真实分钟线',
+    };
+    const nextStock = {
+      ...previousStock,
+      spark: [],
+      sparkLabels: [],
+      note: '来源 AkShare · 多伦科技 最新行情，分时走势暂缺',
+    };
+    const previous = {
+      updatedAt: '2026-06-30T06:08:00.000Z',
+      source: 'akshare' as const,
+      isFallbackWatchlist: false,
+      watchlistStocks: [previousStock],
+      marketIndices: [],
+      sectors: [],
+      starStocks: [previousStock],
+      temperature: null,
+      news: [],
+      leaders: [],
+      leaderboards: { gainers: [], losers: [], amount: [] },
+      freshness: {
+        status: 'fresh' as const,
+        cachedAt: '2026-06-30T06:08:00.000Z',
+      },
+    };
+    const next = {
+      ...previous,
+      updatedAt: '2026-06-30T06:10:00.000Z',
+      watchlistStocks: [nextStock],
+      starStocks: [nextStock],
+      freshness: {
+        status: 'partial' as const,
+        cachedAt: '2026-06-30T06:10:00.000Z',
+      },
+    };
+
+    const merged = __stocksDashboardTest.withPreservedSlowSignals(next, previous);
+
+    expect(merged.watchlistStocks[0]).toMatchObject({
+      spark: [5.93, 5.92],
+      sparkLabels: ['2026-06-30 14:08:00', '2026-06-30 14:09:00'],
+      sparkKind: 'intraday',
+      sparkTradeDate: '2026-06-30',
+    });
+  });
+
   it('uses the persisted real snapshot after a process restart while AkShare is unavailable', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-06-30T08:00:00.000Z'));
     vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
       new Response(JSON.stringify(envelope([]))));
     const previousStock = {
@@ -463,6 +690,8 @@ describe('stocks dashboard snapshot', () => {
   });
 
   it('does not serve an empty stale cache when quick real intraday data is available', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-06-30T08:00:00.000Z'));
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       const url = new URL(String(input));
       if (url.pathname === '/index/cn') {

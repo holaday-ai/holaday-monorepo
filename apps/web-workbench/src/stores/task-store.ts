@@ -1309,6 +1309,45 @@ export const useTaskStore = create<TaskStore>((set, get) => {
   },
 
   applyServerMessage(msg) {
+    if (msg.type === 'server.error') {
+      set({
+        error: msg.message.trim() || `服务器连接错误：${msg.code}`,
+      });
+      return;
+    }
+    if (msg.type === 'server.welcome') {
+      set({ error: null });
+      return;
+    }
+    if (msg.type === 'server.task.dispatch') {
+      set((prev) => {
+        const existingTask = prev.tasks.find((task) => task.taskId === msg.taskId);
+        const canRecoverPausedTask = existingTask?.status === 'paused';
+        if (isTaskRuntimeTerminal(prev, msg.taskId) && !canRecoverPausedTask) return prev;
+        const nextAwaiting = { ...prev.awaitingUserByTask };
+        delete nextAwaiting[msg.taskId];
+        const nextTerminalIds = new Set(prev.terminalTaskIds);
+        nextTerminalIds.delete(msg.taskId);
+        return {
+          awaitingUserByTask: nextAwaiting,
+          terminalTaskIds: nextTerminalIds,
+          tasks: prev.tasks.map((t) => {
+            if (t.taskId !== msg.taskId) return t;
+            if (t.status === 'paused') {
+              const { queuePosition: _queuePosition, resultText: _resultText, ...rest } = t;
+              void _queuePosition;
+              void _resultText;
+              return {
+                ...rest,
+                status: 'executing' as const,
+              };
+            }
+            return markTaskRunningFromLiveSignal(t);
+          }),
+        };
+      });
+      return;
+    }
     if (msg.type === 'server.task.control') {
       set((prev) => {
         const existingTask = prev.tasks.find((task) => task.taskId === msg.taskId);

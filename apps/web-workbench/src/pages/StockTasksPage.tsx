@@ -29,6 +29,14 @@ import {
 } from '@/components/ui/sheet';
 import { useToast } from '@/components/ui/toast';
 import { pageErrorMessage } from '@/lib/page-error-copy';
+import {
+  formatStockDateTimeLabel,
+  formatStockDateLabel,
+  formatStockTradeDateLabel,
+  intradayRatioFromLabel,
+  stockLabelDatePart,
+  stockChartAxisTicks,
+} from '@/lib/stock-chart-state';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import { useTaskStore } from '@/stores/task-store';
@@ -53,6 +61,7 @@ interface StockSnapshot {
   sparkLabels?: string[];
   sparkKind?: 'daily_close' | 'intraday';
   sparkBaseline?: number | null;
+  sparkTradeDate?: string | null;
   turnoverAmount?: number | null;
   averageTurnoverAmount?: number | null;
   volume?: number | null;
@@ -1159,7 +1168,7 @@ function StockHighlightCard({
             />
           ) : (
             <div className="mt-4 flex h-[220px] flex-col items-center justify-center rounded-[7px] border border-dashed border-[#D7DAE2] bg-[#F7F8FA] px-4 text-center">
-              <div className="text-[13px] font-medium text-[#667085]">今日分时暂不可用</div>
+              <div className="text-[13px] font-medium text-[#667085]">真实分时暂不可用</div>
               <div className="mt-1 max-w-[320px] text-[12px] leading-relaxed text-[#98A2B3]">
                 已保留真实价格与成交数据，不自动切换成日线，稍后刷新可重试分钟线。
               </div>
@@ -2217,9 +2226,9 @@ function MarketMiniChart({
   const baselineY = chart.yForValue(baseline);
   const baselinePct = Math.max(0, Math.min(100, (baselineY / 48) * 100));
   const showHover = hoverRatio !== null;
-  const axisTicks = chartAxisTicks(labels, kind);
+  const axisTicks = stockChartAxisTicks(labels, kind, MARKET_CHART_LEFT, MARKET_CHART_RIGHT);
   const tooltipMeta = kind === 'intraday'
-    ? `今日 ${formatStockDateLabel(labels[activePoint.index] ?? '')}`
+    ? formatStockDateTimeLabel(labels[activePoint.index] ?? '')
     : `${formatStockDateLabel(labels[activePoint.index] ?? '')} 收盘`;
   const updateHoverFromClientX = (svg: SVGSVGElement, clientX: number): void => {
     if (!onHoverRatioChange) return;
@@ -2530,37 +2539,6 @@ function sampledChartPoint(
   };
 }
 
-function chartAxisTicks(
-  labels: string[],
-  kind: 'daily_close' | 'intraday',
-): Array<{ x: number; label: string }> {
-  if (kind === 'intraday') {
-    return [
-      { x: MARKET_CHART_LEFT, label: '09:30' },
-      { x: MARKET_CHART_LEFT + 0.25 * (MARKET_CHART_RIGHT - MARKET_CHART_LEFT), label: '10:30' },
-      { x: MARKET_CHART_LEFT + 0.5 * (MARKET_CHART_RIGHT - MARKET_CHART_LEFT), label: '11:30' },
-      { x: MARKET_CHART_LEFT + 0.75 * (MARKET_CHART_RIGHT - MARKET_CHART_LEFT), label: '14:00' },
-      { x: MARKET_CHART_RIGHT, label: '15:00' },
-    ];
-  }
-  if (labels.length === 0) {
-    return [
-      { x: MARKET_CHART_LEFT, label: '首日' },
-      { x: MARKET_CHART_RIGHT, label: '末日' },
-    ];
-  }
-  const last = labels.length - 1;
-  const indexes = Array.from(new Set([
-    0,
-    Math.round(last / 2),
-    last,
-  ])).sort((a, b) => a - b);
-  return indexes.map((index) => ({
-    x: MARKET_CHART_LEFT + (index / Math.max(1, last)) * (MARKET_CHART_RIGHT - MARKET_CHART_LEFT),
-    label: formatStockDateLabel(labels[index] ?? ''),
-  }));
-}
-
 function intradayXRatios(labels: string[], count: number): number[] | undefined {
   if (count <= 0) return undefined;
   const ratios = labels
@@ -2570,31 +2548,21 @@ function intradayXRatios(labels: string[], count: number): number[] | undefined 
   return ratios.map((ratio) => ratio ?? 0);
 }
 
-function intradayRatioFromLabel(value: string): number | null {
-  const match = /(\d{1,2}):(\d{2})/.exec(value);
-  if (!match) return null;
-  const hour = Number(match[1]);
-  const minute = Number(match[2]);
-  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
-  const total = hour * 60 + minute;
-  const morningStart = 9 * 60 + 30;
-  const morningEnd = 11 * 60 + 30;
-  const afternoonStart = 13 * 60;
-  const afternoonEnd = 15 * 60;
-  if (total <= morningStart) return 0;
-  if (total <= morningEnd) return (total - morningStart) / 240;
-  if (total < afternoonStart) return 0.5;
-  if (total >= afternoonEnd) return 1;
-  return (120 + (total - afternoonStart)) / 240;
+function stockTradeDate(stock: StockSnapshot): string | null {
+  return stock.sparkTradeDate ?? stockLabelDatePart(stock.sparkLabels?.[stock.sparkLabels.length - 1]);
 }
 
-function formatStockDateLabel(value: string): string {
-  const trimmed = value.trim();
-  const timeMatch = /(\d{1,2}):(\d{2})/.exec(trimmed);
-  if (timeMatch) return `${timeMatch[1]}:${timeMatch[2]}`;
-  const match = /^(\d{4})[-/]?(\d{2})[-/]?(\d{2})$/.exec(trimmed);
-  if (!match) return trimmed || '—';
-  return `${match[2]}-${match[3]}`;
+function stockIntradayScope(stock: StockSnapshot): string {
+  const label = formatStockTradeDateLabel(stockTradeDate(stock));
+  return label === '-' ? '分时' : `${label} 分时`;
+}
+
+function stockMoveScope(stock: StockSnapshot): string {
+  if (stock.sparkKind === 'intraday') {
+    const label = formatStockTradeDateLabel(stockTradeDate(stock));
+    return label === '-' ? '本交易日' : `${label} 交易日`;
+  }
+  return '最近交易日';
 }
 
 function stockRangeText(stock: StockSnapshot): string {
@@ -2618,9 +2586,9 @@ function stockVolumeSignalText(stock: StockSnapshot): string {
 
 function stockVolumeMeta(stock: StockSnapshot): string {
   if (typeof stock.turnoverAmount === 'number' && Number.isFinite(stock.turnoverAmount)) {
-    return `今日成交额 ${formatMoneyAuto(stock.turnoverAmount)}`;
+    return `本交易日成交额 ${formatMoneyAuto(stock.turnoverAmount)}`;
   }
-  return '今日成交额待补齐';
+  return '本交易日成交额待补齐';
 }
 
 function stockVolumeTone(stock: StockSnapshot): 'neutral' | 'red' | 'green' | 'muted' {
@@ -2637,16 +2605,16 @@ function stockPositionText(stock: StockSnapshot): string {
   const range = max - min;
   if (range <= 0) return '区间持平';
   const pct = ((latest - min) / range) * 100;
-  const scope = stock.sparkKind === 'intraday' ? '今日' : '近8日';
+  const scope = stock.sparkKind === 'intraday' ? stockIntradayScope(stock) : '近8日';
   if (pct >= 78) return `靠近${scope}高点`;
   if (pct <= 22) return `靠近${scope}低点`;
   return `${scope}区间中段`;
 }
 
 function stockPositionMeta(stock: StockSnapshot): string {
-  if (stock.spark.length < 2) return '等待今日分钟线';
+  if (stock.spark.length < 2) return '等待真实分钟线';
   return stock.sparkKind === 'intraday'
-    ? '按今日低点到高点计算'
+    ? `按${stockIntradayScope(stock)}低点到高点计算`
     : '按近8日收盘低高计算';
 }
 
@@ -2662,21 +2630,22 @@ function stockNarrative(stock: StockSnapshot, marketIndex: IndexRow | null): str
     return `${stock.name} 已在关注列表中，但当前行情源尚未返回真实价格。Holaday 不会用模拟走势填充，建议稍后刷新或先查看公告来源。`;
   }
   const direction = stock.changePct >= 0 ? '上涨' : '回落';
+  const moveScope = stockMoveScope(stock);
   const volume = stockVolumeSummary(stock);
   const market = marketSummary(marketIndex, stock);
   if (stock.spark.length < 2) {
-    return `${stock.name} 今日${direction} ${Math.abs(stock.changePct).toFixed(2)}%，真实价格与成交数据已返回，但 AkShare 今日分钟线暂缺，Holaday 不会自动改画日线以免误导。${volume}。${market}稍后刷新可重试分时，详细原因和公告影响可生成日报。`;
+    return `${stock.name} ${moveScope}${direction} ${Math.abs(stock.changePct).toFixed(2)}%，真实价格与成交数据已返回，但 AkShare 分钟线暂缺，Holaday 不会自动改画日线以免误导。${volume}。${market}稍后刷新可重试分时，详细原因和公告影响可生成日报。`;
   }
   const position = stockPositionText(stock);
-  return `${stock.name} 今日${direction} ${Math.abs(stock.changePct).toFixed(2)}%，价格仍在${position}；${volume}。${market}详细原因和公告影响可生成日报。`;
+  return `${stock.name} ${moveScope}${direction} ${Math.abs(stock.changePct).toFixed(2)}%，价格仍在${position}；${volume}。${market}详细原因和公告影响可生成日报。`;
 }
 
 function stockVolumeSummary(stock: StockSnapshot): string {
   const averageAmount = typeof stock.averageTurnoverAmount === 'number' && Number.isFinite(stock.averageTurnoverAmount)
     ? `（近7日均额 ${formatMoneyAuto(stock.averageTurnoverAmount)}）`
     : '';
-  if (stock.volumeSignal === '放量') return `成交活跃度高于近7日均额${averageAmount}，说明今天参与度放大`;
-  if (stock.volumeSignal === '缩量') return `成交活跃度低于近7日均额${averageAmount}，说明今天参与度偏弱`;
+  if (stock.volumeSignal === '放量') return `成交活跃度高于近7日均额${averageAmount}，说明本交易日参与度放大`;
+  if (stock.volumeSignal === '缩量') return `成交活跃度低于近7日均额${averageAmount}，说明本交易日参与度偏弱`;
   if (stock.volumeSignal === '接近均量') return `成交活跃度接近近7日均额${averageAmount}，暂未出现明显放量`;
   return '近7日均额仍在补齐，暂不判断成交活跃度';
 }
@@ -2833,14 +2802,14 @@ function dailyOpportunityItems(
     .filter((stock) => stock.changePct > 0)
     .sort((a, b) => b.changePct - a.changePct)[0];
   if (strongestStock) {
-    items.push(`${strongestStock.name} ${strongestStock.price}，今日 ${formatSignedPct(strongestStock.changePct)}，为关注列表中涨幅最高。`);
+    items.push(`${strongestStock.name} ${strongestStock.price}，本交易日 ${formatSignedPct(strongestStock.changePct)}，为关注列表中涨幅最高。`);
   }
 
   const strongestIndex = marketIndices
     .filter((index) => index.changePct > 0)
     .sort((a, b) => b.changePct - a.changePct)[0];
   if (strongestIndex) {
-    items.push(`${strongestIndex.name} ${strongestIndex.price}，今日 ${formatSignedPct(strongestIndex.changePct)}，成交 ${strongestIndex.turnover}。`);
+    items.push(`${strongestIndex.name} ${strongestIndex.price}，本交易日 ${formatSignedPct(strongestIndex.changePct)}，成交 ${strongestIndex.turnover}。`);
   }
 
   const topSector = sectors[0];
@@ -2866,14 +2835,14 @@ function dailyRiskItems(
     .filter((stock) => stock.changePct < 0)
     .sort((a, b) => a.changePct - b.changePct)[0];
   if (weakestStock) {
-    items.push(`${weakestStock.name} ${weakestStock.price}，今日 ${formatSignedPct(weakestStock.changePct)}，为关注列表中跌幅最大。`);
+    items.push(`${weakestStock.name} ${weakestStock.price}，本交易日 ${formatSignedPct(weakestStock.changePct)}，为关注列表中跌幅最大。`);
   }
 
   const weakestIndex = marketIndices
     .filter((index) => index.changePct < 0)
     .sort((a, b) => a.changePct - b.changePct)[0];
   if (weakestIndex) {
-    items.push(`${weakestIndex.name} ${weakestIndex.price}，今日 ${formatSignedPct(weakestIndex.changePct)}，成交 ${weakestIndex.turnover}。`);
+    items.push(`${weakestIndex.name} ${weakestIndex.price}，本交易日 ${formatSignedPct(weakestIndex.changePct)}，成交 ${weakestIndex.turnover}。`);
   }
 
   const announcements = news.filter((item) => item.category === '公告');
@@ -2934,16 +2903,16 @@ function dailyBriefingHeadline(stocks: StockSnapshot[], riskStock?: StockSnapsho
   const weakCount = quoteStocks.filter((stock) => stock.changePct < 0).length;
   const strong = [...quoteStocks].sort((a, b) => b.changePct - a.changePct)[0];
   if (weakCount >= Math.ceil(quoteStocks.length / 2)) {
-    return `关注列表整体偏弱，${riskStock?.name ?? strong?.name ?? '重点标的'} 今日 ${formatSignedPct(riskStock?.changePct ?? strong?.changePct ?? 0)}。`;
+    return `关注列表整体偏弱，${riskStock?.name ?? strong?.name ?? '重点标的'} 本交易日 ${formatSignedPct(riskStock?.changePct ?? strong?.changePct ?? 0)}。`;
   }
-  if (strong && strong.changePct > 0) return `${strong.name} 今日 ${formatSignedPct(strong.changePct)}，为关注列表中相对活跃标的。`;
+  if (strong && strong.changePct > 0) return `${strong.name} 本交易日 ${formatSignedPct(strong.changePct)}，为关注列表中相对活跃标的。`;
   return `关注列表已返回 ${quoteStocks.length} 只真实行情，暂无上涨标的。`;
 }
 
 function marketInsight(rows: IndexRow[]): InsightSheetState {
   return {
     title: '市场行情',
-    description: '主要指数的最新点位、涨跌幅和成交额，用于判断今天的整体风险偏好。',
+    description: '主要指数的最新点位、涨跌幅和成交额，用于判断当前交易日的整体风险偏好。',
     rows: rows.map((row) => ({
       label: row.name,
       value: row.price,

@@ -2062,6 +2062,12 @@ describe('applyServerMessage stale live frames after terminal', () => {
       position: 2,
     });
     useTaskStore.getState().applyServerMessage({
+      type: 'server.task.dispatch',
+      taskId: 'tsk_final_cancel',
+      stepId: 'stp_late',
+      action: { kind: 'wait' },
+    });
+    useTaskStore.getState().applyServerMessage({
       type: 'server.vision.tick.start',
       taskId: 'tsk_final_cancel',
       tickIndex: 0,
@@ -2359,6 +2365,24 @@ describe('applyServerMessage terminal and pause cleanup', () => {
 });
 
 describe('applyServerMessage queued lifecycle', () => {
+  it('flips queued tasks to executing on dispatch recovery frames', () => {
+    useTaskStore.setState({
+      tasks: [task({ taskId: 'tsk_dispatch_queue', status: 'queued', queuePosition: 4 })],
+    });
+
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.task.dispatch',
+      taskId: 'tsk_dispatch_queue',
+      stepId: 'stp_resume',
+      action: { kind: 'wait' },
+    });
+
+    expect(useTaskStore.getState().tasks[0]).toMatchObject({
+      status: 'executing',
+    });
+    expect(useTaskStore.getState().tasks[0]?.queuePosition).toBeUndefined();
+  });
+
   it('marks queued tasks explicitly and flips them to executing on first tick', () => {
     useTaskStore.setState({
       tasks: [task({ taskId: 'tsk_queue', status: 'executing' })],
@@ -2423,6 +2447,26 @@ describe('applyServerMessage queued lifecycle', () => {
       executionMode: 'generate',
     });
     expect(useTaskStore.getState().tasks[0]?.queuePosition).toBeUndefined();
+  });
+});
+
+describe('applyServerMessage connection frames', () => {
+  it('surfaces server errors and clears them after a welcome frame', () => {
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.error',
+      code: 'bad_hello',
+      message: 'WS auth fallback failed',
+    });
+
+    expect(useTaskStore.getState().error).toBe('WS auth fallback failed');
+
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.welcome',
+      clientId: 'client_1',
+      heartbeatMs: 30_000,
+    });
+
+    expect(useTaskStore.getState().error).toBeNull();
   });
 });
 

@@ -57,6 +57,15 @@ export function notificationBadgeText(
   return String(safeCount);
 }
 
+export function notificationButtonTitle(
+  count: unknown,
+  placement: 'sidebar-footer' | 'mobile-header' | 'topbar' = 'sidebar-footer',
+): string | undefined {
+  if (placement === 'topbar') return undefined;
+  const safeCount = safeNotificationCount(count);
+  return safeCount > 0 ? `通知，${safeCount} 条未读` : '通知';
+}
+
 export function shouldRenderCompactNotificationDot(
   count: unknown,
   placement: 'sidebar-footer' | 'mobile-header' | 'topbar' = 'sidebar-footer',

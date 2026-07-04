@@ -47,6 +47,7 @@ interface StockSnapshot {
   sparkLabels: string[];
   sparkKind: 'daily_close' | 'intraday';
   sparkBaseline: number | null;
+  sparkTradeDate?: string | null;
   turnoverAmount: number | null;
   averageTurnoverAmount: number | null;
   volume: number | null;
@@ -164,6 +165,7 @@ function unavailableStock(entry: WatchlistEntry, note = '真实行情暂不可�
     sparkLabels: [],
     sparkKind: 'daily_close',
     sparkBaseline: null,
+    sparkTradeDate: null,
     turnoverAmount: null,
     averageTurnoverAmount: null,
     volume: null,
@@ -248,7 +250,10 @@ async function loadPersistedDashboardSnapshot(args: {
       ))
       .limit(1);
     if (!row || !isDashboardSnapshot(row.snapshotJson)) return undefined;
-    return markStale(row.snapshotJson, '行情接口正在刷新，当前展示最近一次真实数据。');
+    return markStale(
+      dashboardWithObservedIntraday(row.snapshotJson, new Date()),
+      '行情接口正在刷新，当前展示最近一次真实数据。',
+    );
   } catch (error) {
     args.logger.warn(
       { error: error instanceof Error ? error.message : String(error) },
@@ -410,13 +415,16 @@ function sparkSeriesFromKline(rows: KlineRow[]): { values: number[]; labels: str
     : { values: [], labels: [] };
 }
 
-function sparkSeriesFromIntraday(rows: IntradayRow[]): { values: number[]; labels: string[] } {
+function sparkSeriesFromIntraday(rows: IntradayRow[], now = new Date()): { values: number[]; labels: string[] } {
   const series = rows
     .map((row) => ({
       value: toNum(pick(row, ['最新价', '收盘', 'close', 'price'])),
       label: String(pick(row, ['时间', 'time', 'datetime']) ?? '').trim(),
     }))
-    .filter((point): point is { value: number; label: string } => point.value !== null && point.label.length > 0);
+    .filter((point): point is { value: number; label: string } =>
+      point.value !== null &&
+      point.label.length > 0 &&
+      intradayLabelIsObservedNow(point.label, now));
   return series.length >= 2
     ? {
         values: series.map((point) => point.value),
@@ -443,6 +451,80 @@ function datePart(value: string | undefined): string | null {
   return `${match[1]}-${match[2]}-${match[3]}`;
 }
 
+function intradayMinuteOfDay(value: string | undefined): number | null {
+  const match = /(\d{1,2}):(\d{2})/.exec(String(value ?? ''));
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+  return hour * 60 + minute;
+}
+
+function shanghaiDateMinute(now: Date): { date: string; minuteOfDay: number } {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(now);
+  const value = (type: Intl.DateTimeFormatPartTypes): string =>
+    parts.find((part) => part.type === type)?.value ?? '00';
+  return {
+    date: `${value('year')}-${value('month')}-${value('day')}`,
+    minuteOfDay: Number(value('hour')) * 60 + Number(value('minute')),
+  };
+}
+
+function intradayLabelIsObservedNow(label: string, now: Date): boolean {
+  const labelDate = datePart(label);
+  const labelMinute = intradayMinuteOfDay(label);
+  if (!labelDate || labelMinute === null) return false;
+  const current = shanghaiDateMinute(now);
+  if (labelDate !== current.date) return false;
+  return labelMinute <= current.minuteOfDay;
+}
+
+function observedIntradayStockForNow(stockRow: StockSnapshot, now: Date): StockSnapshot {
+  if (stockRow.sparkKind !== 'intraday' || stockRow.spark.length < 2) return stockRow;
+  const points = stockRow.sparkLabels
+    .slice(0, stockRow.spark.length)
+    .map((label, index) => ({
+      label,
+      value: stockRow.spark[index],
+    }))
+    .filter((point): point is { label: string; value: number } =>
+      typeof point.value === 'number' &&
+      Number.isFinite(point.value) &&
+      intradayLabelIsObservedNow(point.label, now));
+  if (points.length === stockRow.spark.length) return stockRow;
+  return {
+    ...stockRow,
+    spark: points.length >= 2 ? points.map((point) => point.value) : [],
+    sparkLabels: points.length >= 2 ? points.map((point) => point.label) : [],
+    sparkTradeDate: points.length >= 2 ? datePart(points[points.length - 1]?.label) : null,
+  };
+}
+
+function dashboardWithObservedIntraday(snapshot: DashboardSnapshot, now: Date): DashboardSnapshot {
+  const watchlistStocks = snapshot.watchlistStocks.map((stockRow) => observedIntradayStockForNow(stockRow, now));
+  const bySymbol = new Map(watchlistStocks.map((stockRow) => [stockRow.symbol, stockRow]));
+  const starStocks = snapshot.starStocks.map((stockRow) =>
+    bySymbol.get(stockRow.symbol) ?? observedIntradayStockForNow(stockRow, now));
+  return {
+    ...snapshot,
+    watchlistStocks,
+    starStocks,
+  };
+}
+
+function dashboardReferenceDate(snapshot: DashboardSnapshot): Date {
+  const parsed = new Date(snapshot.updatedAt || snapshot.freshness.cachedAt);
+  return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+}
+
 function latestKline(rows: KlineRow[]): KlineRow | null {
   return rows.length > 0 ? rows[rows.length - 1] ?? null : null;
 }
@@ -456,6 +538,7 @@ async function stockSnapshot(
   client: HttpAkshareClient,
   entry: WatchlistEntry,
   index: number,
+  now: Date,
 ): Promise<StockSnapshot> {
   void index;
   if (entry.market !== 'A') return unavailableStock(entry, '当前行情源仅接入 A 股真实数据');
@@ -469,8 +552,9 @@ async function stockSnapshot(
   const last = latestKline(dailyEnv.data);
   const quote = latestQuote(quoteEnv);
   const sparkSeries = seriesEnv.error ? { values: [], labels: [] } : sparkSeriesFromKline(seriesEnv.data);
-  const intradaySeries = intradayEnv.error ? { values: [], labels: [] } : sparkSeriesFromIntraday(intradayEnv.data);
+  const intradaySeries = intradayEnv.error ? { values: [], labels: [] } : sparkSeriesFromIntraday(intradayEnv.data, now);
   const hasIntraday = intradaySeries.values.length >= 2;
+  const sparkTradeDate = hasIntraday ? datePart(intradaySeries.labels[intradaySeries.labels.length - 1]) : null;
   const latestIntraday = hasIntraday ? intradaySeries.values[intradaySeries.values.length - 1] : null;
   const close = quote
     ? pick(quote, ['最新价', 'price', '收盘', 'close'])
@@ -513,6 +597,7 @@ async function stockSnapshot(
     sparkLabels: hasIntraday ? intradaySeries.labels : [],
     sparkKind: 'intraday',
     sparkBaseline,
+    sparkTradeDate,
     turnoverAmount,
     averageTurnoverAmount,
     volume,
@@ -521,7 +606,7 @@ async function stockSnapshot(
     volumeSignal: volumeSignalFromRatio(volumeRatio),
     newsCount: 0,
     note: hasIntraday
-      ? `来源 AkShare · ${entry.displayName ?? entry.symbol} 今日真实分钟线`
+      ? `来源 AkShare · ${entry.displayName ?? entry.symbol} ${sparkTradeDate ?? '当前交易日'}真实分钟线`
       : `来源 AkShare · ${entry.displayName ?? entry.symbol} 最新行情，分时走势暂缺`,
   };
 }
@@ -690,7 +775,7 @@ function buildNews(
     marketRows.push({
       category: '关注',
       time: '关注',
-      title: `${stockRow.name} 今日涨跌幅 ${stockRow.changePct > 0 ? '+' : ''}${stockRow.changePct.toFixed(2)}%`,
+      title: `${stockRow.name} 本交易日涨跌幅 ${stockRow.changePct > 0 ? '+' : ''}${stockRow.changePct.toFixed(2)}%`,
       symbols: [stockRow.symbol],
       source: 'AkShare 行情',
     });
@@ -743,7 +828,7 @@ async function buildDashboardSnapshot(args: {
     includeSlowSignals
       ? slowSignalClient.getMarketPulse(compact)
       : deferredPulse,
-    Promise.all(effectiveWatchlist.slice(0, 8).map((entry, index) => stockSnapshot(client, entry, index))),
+    Promise.all(effectiveWatchlist.slice(0, 8).map((entry, index) => stockSnapshot(client, entry, index, now))),
     includeSlowSignals
       ? Promise.all(
         announcementWatchlist.map(async (entry) => ({
@@ -806,11 +891,12 @@ async function buildDashboardSnapshot(args: {
 }
 
 function cacheDashboardSnapshot(cacheKey: string, snapshot: DashboardSnapshot, refreshPromise?: Promise<DashboardSnapshot>): void {
+  const safeSnapshot = dashboardWithObservedIntraday(snapshot, dashboardReferenceDate(snapshot));
   const freshTtl = snapshot.freshness.status === 'partial'
     ? DASHBOARD_PARTIAL_FRESH_TTL_MS
     : DASHBOARD_FRESH_TTL_MS;
   dashboardCache.set(cacheKey, {
-    snapshot,
+    snapshot: safeSnapshot,
     freshUntil: Date.now() + freshTtl,
     staleUntil: Date.now() + DASHBOARD_STALE_TTL_MS,
     refreshPromise,
@@ -819,12 +905,14 @@ function cacheDashboardSnapshot(cacheKey: string, snapshot: DashboardSnapshot, r
 
 function withPreservedSlowSignals(snapshot: DashboardSnapshot, previous?: DashboardSnapshot): DashboardSnapshot {
   if (!previous || (snapshot.freshness.status !== 'fresh' && snapshot.freshness.status !== 'partial')) return snapshot;
+  const now = dashboardReferenceDate(snapshot);
   const snapshotHasWatchlistQuotes = snapshot.watchlistStocks.some((stockRow) => stockRow.price !== '—' || stockRow.spark.length >= 2);
-  const previousHasWatchlistQuotes = previous.watchlistStocks.some((stockRow) => stockRow.price !== '—' || stockRow.spark.length >= 2);
+  const previousWatchlistStocks = previous.watchlistStocks.map((stockRow) => observedIntradayStockForNow(stockRow, now));
+  const previousHasWatchlistQuotes = previousWatchlistStocks.some((stockRow) => stockRow.price !== '—' || stockRow.spark.length >= 2);
   const shouldPreserveWatchlistStocks = !snapshotHasWatchlistQuotes && previousHasWatchlistQuotes;
-  const previousStockBySymbol = new Map(previous.watchlistStocks.map((stockRow) => [stockRow.symbol, stockRow]));
+  const previousStockBySymbol = new Map(previousWatchlistStocks.map((stockRow) => [stockRow.symbol, stockRow]));
   const watchlistStocks = shouldPreserveWatchlistStocks
-    ? previous.watchlistStocks
+    ? previousWatchlistStocks
     : snapshot.watchlistStocks.map((stockRow) => {
       const previousStock = previousStockBySymbol.get(stockRow.symbol);
       if (stockRow.spark.length >= 2 || !previousStock || previousStock.spark.length < 2) return stockRow;
@@ -834,6 +922,7 @@ function withPreservedSlowSignals(snapshot: DashboardSnapshot, previous?: Dashbo
         sparkLabels: previousStock.sparkLabels,
         sparkKind: previousStock.sparkKind,
         sparkBaseline: previousStock.sparkBaseline,
+        sparkTradeDate: previousStock.sparkTradeDate,
         note: `${stockRow.note}；分时线保留最近一次真实分钟线`,
       };
     });
@@ -1032,8 +1121,11 @@ async function resolveDashboardSnapshot(args: {
     }
   }
   const nowMs = Date.now();
-  const cachedHasDisplayableData = cached?.snapshot ? hasDisplayableRealDashboardData(cached.snapshot) : false;
-  if (cached?.snapshot && cachedHasDisplayableData && cached.freshUntil > nowMs) return cached.snapshot;
+  const observedCached = cached?.snapshot
+    ? dashboardWithObservedIntraday(cached.snapshot, new Date())
+    : undefined;
+  const cachedHasDisplayableData = observedCached ? hasDisplayableRealDashboardData(observedCached) : false;
+  if (observedCached && cachedHasDisplayableData && cached && cached.freshUntil > nowMs) return observedCached;
 
   const refreshPromise = startDashboardRefresh({
     db: args.db,
@@ -1044,16 +1136,16 @@ async function resolveDashboardSnapshot(args: {
     effectiveWatchlist: args.effectiveWatchlist,
   });
 
-  if (cached?.snapshot && cachedHasDisplayableData && cached.staleUntil > nowMs) {
+  if (observedCached && cached && cachedHasDisplayableData && cached.staleUntil > nowMs) {
     refreshPromise.catch(() => undefined);
-    return markStale(cached.snapshot, '正在后台刷新行情，当前展示最近一次真实数据。');
+    return markStale(observedCached, '正在后台刷新行情，当前展示最近一次真实数据。');
   }
 
   try {
     return await withTimeout(refreshPromise, DASHBOARD_FIRST_PAINT_BUDGET_MS);
   } catch {
-    if (cached?.snapshot && cachedHasDisplayableData) {
-      return markStale(cached.snapshot, '行情接口暂未返回，当前展示最近一次真实数据。');
+    if (observedCached && cachedHasDisplayableData) {
+      return markStale(observedCached, '行情接口暂未返回，当前展示最近一次真实数据。');
     }
     return buildPartialDashboardSnapshot(args.watchlistRows, args.effectiveWatchlist);
   }

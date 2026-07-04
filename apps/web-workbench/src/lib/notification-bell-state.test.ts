@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   notificationBadgeText,
+  notificationButtonTitle,
   notificationErrorMessage,
   notificationListStatusCopy,
   notificationListSummary,
@@ -65,5 +66,12 @@ describe('notification bell state helpers', () => {
     expect(notificationBadgeText(22, 'sidebar-footer')).toBe('22');
     expect(notificationBadgeText(120, 'sidebar-footer')).toBe('99+');
     expect(shouldRenderCompactNotificationDot(120, 'sidebar-footer')).toBe(false);
+  });
+
+  it('does not use native browser titles for fixed topbar controls', () => {
+    expect(notificationButtonTitle(56, 'topbar')).toBeUndefined();
+    expect(notificationButtonTitle(0, 'topbar')).toBeUndefined();
+    expect(notificationButtonTitle(56, 'sidebar-footer')).toBe('通知，56 条未读');
+    expect(notificationButtonTitle(0, 'sidebar-footer')).toBe('通知');
   });
 });
