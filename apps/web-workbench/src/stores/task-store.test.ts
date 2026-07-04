@@ -1905,6 +1905,150 @@ describe('applyServerMessage task.control', () => {
   });
 });
 
+describe('applyServerMessage confirmation gates', () => {
+  it('does not revive terminal tasks from late confirmation frames', () => {
+    useTaskStore.setState({
+      tasks: [
+        task({
+          taskId: 'tsk_late_confirm',
+          status: 'completed',
+          resultText: '最终结果',
+        }),
+      ],
+      terminalTaskIds: new Set(['tsk_late_confirm']),
+    });
+
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.user.confirm',
+      taskId: 'tsk_late_confirm',
+      stepId: 'stp_submit',
+      prompt: '请确认是否继续：点击提交按钮。',
+      risk: 'high',
+    });
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.batch_confirm_required',
+      taskId: 'tsk_late_confirm',
+      stepId: 'stp_batch',
+      batchIndex: 1,
+      batchTotal: 2,
+      risk: 'medium',
+      items: [{ label: '评论 #1', preview: '您好，感谢反馈。' }],
+    });
+
+    const state = useTaskStore.getState();
+    expect(state.tasks[0]).toMatchObject({
+      status: 'completed',
+      resultText: '最终结果',
+    });
+    expect(state.awaitingUserByTask.tsk_late_confirm).toBeUndefined();
+    expect(state.terminalTaskIds.has('tsk_late_confirm')).toBe(true);
+  });
+
+  it('maps single-step confirmations into structured awaiting-user state', () => {
+    useTaskStore.setState({
+      tasks: [
+        task({
+          taskId: 'tsk_single_confirm',
+          status: 'paused',
+          resultText: '暂停前原因',
+        }),
+      ],
+      terminalTaskIds: new Set(['tsk_single_confirm']),
+      progressByTask: { tsk_single_confirm: '暂停前进度' },
+      streamingByTask: { tsk_single_confirm: '暂停前输出' },
+      subStatusByTask: {
+        tsk_single_confirm: { subStatus: 'browsing', since: 1 },
+      },
+    });
+
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.user.confirm',
+      taskId: 'tsk_single_confirm',
+      stepId: 'stp_submit',
+      prompt: '请确认是否继续：点击提交按钮。',
+      risk: 'high',
+    });
+
+    const state = useTaskStore.getState();
+    expect(state.tasks[0]).toMatchObject({
+      status: 'awaiting_user',
+      awaitingKind: 'browser_action',
+    });
+    expect(state.tasks[0]?.resultText).toBeUndefined();
+    expect(state.awaitingUserByTask.tsk_single_confirm).toMatchObject({
+      awaitingKind: 'browser_action',
+      question: '请确认是否继续：点击提交按钮。',
+      singleConfirm: {
+        stepId: 'stp_submit',
+        prompt: '请确认是否继续：点击提交按钮。',
+        risk: 'high',
+      },
+    });
+    expect(state.terminalTaskIds.has('tsk_single_confirm')).toBe(false);
+    expect(state.progressByTask.tsk_single_confirm).toBeUndefined();
+    expect(state.streamingByTask.tsk_single_confirm).toBeUndefined();
+    expect(state.subStatusByTask.tsk_single_confirm).toBeUndefined();
+  });
+
+  it('maps batch confirmations into the awaiting-user state and clears paused guards', () => {
+    useTaskStore.setState({
+      tasks: [
+        task({
+          taskId: 'tsk_batch_confirm',
+          status: 'paused',
+          resultText: '暂停前原因',
+        }),
+      ],
+      terminalTaskIds: new Set(['tsk_batch_confirm']),
+      progressByTask: { tsk_batch_confirm: '暂停前进度' },
+      streamingByTask: { tsk_batch_confirm: '暂停前输出' },
+      subStatusByTask: {
+        tsk_batch_confirm: { subStatus: 'browsing', since: 1 },
+      },
+    });
+
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.batch_confirm_required',
+      taskId: 'tsk_batch_confirm',
+      stepId: 'stp_batch',
+      batchIndex: 2,
+      batchTotal: 3,
+      risk: 'high',
+      summary: '回复 5 条差评',
+      items: [
+        { label: '评论 #1', preview: '您好，感谢反馈。' },
+        { label: '评论 #2', preview: '抱歉体验不佳。' },
+      ],
+    });
+
+    const state = useTaskStore.getState();
+    expect(state.tasks[0]).toMatchObject({
+      status: 'awaiting_user',
+      awaitingKind: 'browser_action',
+    });
+    expect(state.tasks[0]?.resultText).toBeUndefined();
+    expect(state.awaitingUserByTask.tsk_batch_confirm).toMatchObject({
+      awaitingKind: 'browser_action',
+      question: '确认第 2/3 批：回复 5 条差评',
+      batchConfirm: {
+        stepId: 'stp_batch',
+        batchIndex: 2,
+        batchTotal: 3,
+        risk: 'high',
+        summary: '回复 5 条差评',
+        items: [
+          { label: '评论 #1', preview: '您好，感谢反馈。' },
+          { label: '评论 #2', preview: '抱歉体验不佳。' },
+        ],
+      },
+    });
+    expect(state.terminalTaskIds.has('tsk_batch_confirm')).toBe(false);
+    expect(state.progressByTask.tsk_batch_confirm).toBeUndefined();
+    expect(state.streamingByTask.tsk_batch_confirm).toBeUndefined();
+    expect(state.subStatusByTask.tsk_batch_confirm).toBeUndefined();
+  });
+});
+
 describe('applyServerMessage stale live frames after terminal', () => {
   it('does not revive cancelled tasks from queued, tick, or awaiting-user frames', () => {
     useTaskStore.setState({

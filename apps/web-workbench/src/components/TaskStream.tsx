@@ -40,6 +40,14 @@ import { useToast } from '@/components/ui/toast';
 import { FileDownloadCard, parseHoladayFilePayload } from '@/components/FileDownloadCard';
 import { AstroTaskCompanion } from '@/components/astrology/AstroTaskCompanion';
 import { awaitingUserCopy, awaitingUserStreamMessage } from '@/lib/awaiting-user-copy';
+import {
+  batchConfirmActionLabel,
+  batchConfirmSummary,
+  type BatchConfirmDecision,
+  singleConfirmActionLabel,
+  singleConfirmSummary,
+  type SingleConfirmDecision,
+} from '@/lib/batch-confirm-copy';
 import { isBrowserErrorUrl } from '@/components/browser-panel-state';
 import { copyTextToClipboard, hasCopyableText } from '@/lib/copy-text';
 import { shouldRenderLiveSubStatus } from '@/lib/live-substatus';
@@ -1000,11 +1008,23 @@ function AwaitingUserBanner({
   const toast = useToast();
   const mountedRef = useMountedRef();
   const [cancelling, setCancelling] = React.useState(false);
-  const [confirming, setConfirming] = React.useState<string | null>(null);
+  const [confirming, setConfirming] = React.useState<
+    | 'video:confirm_video'
+    | 'video:confirm_image'
+    | 'video:cancel'
+    | 'batch:approve'
+    | 'batch:skip'
+    | 'batch:reject'
+    | 'single:approve'
+    | 'single:reject'
+    | null
+  >(null);
   const kind = wait.awaitingKind ?? 'clarification';
   const copy = awaitingUserCopy(kind);
   const message = awaitingUserStreamMessage(kind, wait.question);
   const Icon = AWAITING_KIND_ICON[kind] ?? AWAITING_KIND_ICON.clarification;
+  const batchConfirm = wait.batchConfirm;
+  const singleConfirm = wait.singleConfirm;
   // B2 — hide 图片版 for ip_person. UiAwaitingUser doesn't carry the type, but
   // we have the taskId; read videoType off the task (toUiTask falls back to
   // metadata.videoOptions.tab so the quote task has it). Primitive selector →
@@ -1035,11 +1055,53 @@ function AwaitingUserBanner({
   const handleConfirmVideo = React.useCallback(
     async (choice: 'confirm_video' | 'confirm_image' | 'cancel') => {
       if (confirming) return;
-      setConfirming(choice);
+      setConfirming(`video:${choice}`);
       try {
         await trpc.tasks.confirmVideo.mutate({ taskId, choice });
         if (!mountedRef.current) return;
         toast.show(choice === 'cancel' ? '已取消，未产生费用' : '开始制作视频…', 'info', 2000);
+      } catch (err) {
+        if (!mountedRef.current) return;
+        toast.show(pageActionError('操作失败', err), 'error');
+      } finally {
+        if (mountedRef.current) setConfirming(null);
+      }
+    },
+    [confirming, mountedRef, taskId, toast],
+  );
+  const handleBatchConfirm = React.useCallback(
+    async (decision: BatchConfirmDecision) => {
+      if (confirming) return;
+      setConfirming(`batch:${decision}`);
+      try {
+        await trpc.tasks.confirm.mutate({ taskId, decision });
+        if (!mountedRef.current) return;
+        if (decision === 'reject') {
+          toast.show('已取消任务', 'info', 2000);
+        } else if (decision === 'skip') {
+          toast.show('已跳过本批', 'info', 2000);
+        } else {
+          toast.show('已确认执行本批', 'info', 2000);
+        }
+        void useTaskStore.getState().refreshTasks();
+      } catch (err) {
+        if (!mountedRef.current) return;
+        toast.show(pageActionError('操作失败', err), 'error');
+      } finally {
+        if (mountedRef.current) setConfirming(null);
+      }
+    },
+    [confirming, mountedRef, taskId, toast],
+  );
+  const handleSingleConfirm = React.useCallback(
+    async (decision: SingleConfirmDecision) => {
+      if (confirming) return;
+      setConfirming(`single:${decision}`);
+      try {
+        await trpc.tasks.confirm.mutate({ taskId, decision });
+        if (!mountedRef.current) return;
+        toast.show(decision === 'reject' ? '已取消任务' : '已确认继续', 'info', 2000);
+        void useTaskStore.getState().refreshTasks();
       } catch (err) {
         if (!mountedRef.current) return;
         toast.show(pageActionError('操作失败', err), 'error');
@@ -1065,7 +1127,87 @@ function AwaitingUserBanner({
               {message.followUp}
             </p>
           )}
-          {kind === 'video_quote' ? (
+          {batchConfirm ? (
+            <div className="mt-3 space-y-3">
+              <div className="rounded-md border border-[#DCDDDD] bg-white/70 p-2.5 dark:border-white/10 dark:bg-white/5">
+                <div className="text-[11px] font-medium text-muted-foreground">
+                  {batchConfirmSummary(batchConfirm)}
+                </div>
+                <div className="mt-2 space-y-1.5">
+                  {batchConfirm.items.map((item, index) => (
+                    <div
+                      key={`${item.label}-${index}`}
+                      className="rounded-md bg-[#F7F8FA] px-2.5 py-2 text-xs leading-relaxed dark:bg-white/5"
+                    >
+                      <div className="font-medium text-foreground">{item.label}</div>
+                      <div className="mt-0.5 line-clamp-2 text-muted-foreground">
+                        {item.preview}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                <button
+                  type="button"
+                  onClick={() => void handleBatchConfirm('approve')}
+                  disabled={confirming !== null}
+                  className="inline-flex h-7 items-center gap-1 rounded-md border border-[#57479C] bg-[#57479C] px-3 font-medium text-white transition-colors hover:bg-[#473a82] disabled:opacity-60"
+                >
+                  {confirming === 'batch:approve' ? '提交中…' : batchConfirmActionLabel('approve')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleBatchConfirm('skip')}
+                  disabled={confirming !== null}
+                  className="inline-flex h-7 items-center gap-1 rounded-md border border-[#DCDDDD] bg-transparent px-3 text-[#595757] transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/60 disabled:opacity-60 dark:border-white/10 dark:text-foreground dark:hover:bg-white/10"
+                >
+                  {confirming === 'batch:skip' ? '提交中…' : batchConfirmActionLabel('skip')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleBatchConfirm('reject')}
+                  disabled={confirming !== null}
+                  className="ml-auto inline-flex h-7 items-center gap-1 rounded-md border border-[#DCDDDD] bg-transparent px-3 text-[#595757] transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/60 disabled:opacity-60 dark:border-white/10 dark:text-foreground dark:hover:bg-white/10"
+                >
+                  {confirming === 'batch:reject' ? '取消中…' : batchConfirmActionLabel('reject')}
+                </button>
+              </div>
+            </div>
+          ) : singleConfirm ? (
+            <div className="mt-3 space-y-3">
+              <div className="rounded-md border border-[#DCDDDD] bg-white/70 p-2.5 dark:border-white/10 dark:bg-white/5">
+                <div className="text-[11px] font-medium text-muted-foreground">
+                  {singleConfirmSummary(singleConfirm)}
+                </div>
+                <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+                  确认后任务会继续；最终提交、支付、发送、分享、改权限、删除或退订仍需要你在页面上手动完成。
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                <button
+                  type="button"
+                  onClick={() => void handleSingleConfirm('approve')}
+                  disabled={confirming !== null}
+                  className="inline-flex h-7 items-center gap-1 rounded-md border border-[#57479C] bg-[#57479C] px-3 font-medium text-white transition-colors hover:bg-[#473a82] disabled:opacity-60"
+                >
+                  {confirming === 'single:approve'
+                    ? '提交中…'
+                    : singleConfirmActionLabel('approve')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleSingleConfirm('reject')}
+                  disabled={confirming !== null}
+                  className="ml-auto inline-flex h-7 items-center gap-1 rounded-md border border-[#DCDDDD] bg-transparent px-3 text-[#595757] transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/60 disabled:opacity-60 dark:border-white/10 dark:text-foreground dark:hover:bg-white/10"
+                >
+                  {confirming === 'single:reject'
+                    ? '取消中…'
+                    : singleConfirmActionLabel('reject')}
+                </button>
+              </div>
+            </div>
+          ) : kind === 'video_quote' ? (
             // 三个结构化按钮(确认制作 / 图片版 / 取消)→ tasks.confirmVideo。
             // 价格显示在上方 body(后端报价文案),按钮只透传选择。
             <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px]">
@@ -1075,7 +1217,7 @@ function AwaitingUserBanner({
                 disabled={confirming !== null}
                 className="inline-flex h-7 items-center gap-1 rounded-md border border-[#57479C] bg-[#57479C] px-3 font-medium text-white transition-colors hover:bg-[#473a82] disabled:opacity-60"
               >
-                {confirming === 'confirm_video' ? '提交中…' : '确认制作'}
+                {confirming === 'video:confirm_video' ? '提交中…' : '确认制作'}
               </button>
               {showImageOption(videoType) && (
                 <button
@@ -1084,7 +1226,7 @@ function AwaitingUserBanner({
                   disabled={confirming !== null}
                   className="inline-flex h-7 items-center gap-1 rounded-md border border-[#DCDDDD] bg-transparent px-3 text-[#595757] transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/60 disabled:opacity-60 dark:border-white/10 dark:text-foreground dark:hover:bg-white/10"
                 >
-                  {confirming === 'confirm_image' ? '提交中…' : '图片版'}
+                  {confirming === 'video:confirm_image' ? '提交中…' : '图片版'}
                 </button>
               )}
               <button
@@ -1093,7 +1235,7 @@ function AwaitingUserBanner({
                 disabled={confirming !== null}
                 className="inline-flex h-7 items-center gap-1 rounded-md border border-[#DCDDDD] bg-transparent px-3 text-[#595757] transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/60 disabled:opacity-60 dark:border-white/10 dark:text-foreground dark:hover:bg-white/10"
               >
-                {confirming === 'cancel' ? '取消中…' : '取消'}
+                {confirming === 'video:cancel' ? '取消中…' : '取消'}
               </button>
             </div>
           ) : (

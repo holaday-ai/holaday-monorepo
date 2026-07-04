@@ -313,6 +313,32 @@ export interface UiAwaitingUser {
    * preserves the BrowserPanel's expand/banner decision.
    */
   awaitingKind?: 'clarification' | 'login' | 'captcha' | 'permission' | 'browser_action' | 'video_quote';
+  /**
+   * Legacy task-controller batch confirmation. Kept structured so the
+   * stream can render every pending item and call tasks.confirm with an
+   * explicit approve / skip / reject decision after reconnect recovery.
+   */
+  batchConfirm?: {
+    stepId: string;
+    batchIndex: number;
+    batchTotal: number;
+    risk: 'low' | 'medium' | 'high';
+    summary?: string;
+    items: ReadonlyArray<{
+      label: string;
+      preview: string;
+      meta?: Record<string, unknown>;
+    }>;
+  };
+  /**
+   * Legacy task-controller single-step confirmation. This is distinct from
+   * clarification: the user is approving or rejecting a risky next step.
+   */
+  singleConfirm?: {
+    stepId: string;
+    prompt: string;
+    risk: 'low' | 'medium' | 'high';
+  };
 }
 
 /**

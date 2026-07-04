@@ -1,5 +1,6 @@
 import type { BrowserViewportProfile, ServerMessage } from '@holaday/shared-types';
 import { create } from 'zustand';
+import { batchConfirmQuestion, singleConfirmQuestion } from '@/lib/batch-confirm-copy';
 import { pickDefaultBrowserViewportProfile } from '@/lib/browser-viewport-profile';
 import { humaniseTaskError } from '@/lib/error-copy';
 import { pageErrorMessage } from '@/lib/page-error-copy';
@@ -1373,6 +1374,123 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       });
       return;
     }
+    if (msg.type === 'server.user.confirm') {
+      set((prev) => {
+        const existingTask = prev.tasks.find((task) => task.taskId === msg.taskId);
+        const canRecoverPausedTask = existingTask?.status === 'paused';
+        if (isTaskRuntimeTerminal(prev, msg.taskId) && !canRecoverPausedTask) return prev;
+        const singleConfirm: NonNullable<UiAwaitingUser['singleConfirm']> = {
+          stepId: msg.stepId,
+          prompt: msg.prompt,
+          risk: msg.risk,
+        };
+        const nextSubStatus = { ...prev.subStatusByTask };
+        delete nextSubStatus[msg.taskId];
+        const nextThinking = omitRuntimeKey(prev.thinkingByTask, msg.taskId);
+        const nextProgress = omitRuntimeKey(prev.progressByTask, msg.taskId);
+        const nextStreaming = omitRuntimeKey(prev.streamingByTask, msg.taskId);
+        const nextCaptchaWait = omitRuntimeKey(prev.captchaWaitByTask, msg.taskId);
+        const nextExecutorFallback = omitRuntimeKey(
+          prev.executorFallbackByTask,
+          msg.taskId,
+        );
+        const nextDegrade = omitRuntimeKey(prev.degradeByTask, msg.taskId);
+        const nextTerminalIds = new Set(prev.terminalTaskIds);
+        nextTerminalIds.delete(msg.taskId);
+        return {
+          awaitingUserByTask: {
+            ...prev.awaitingUserByTask,
+            [msg.taskId]: {
+              question: singleConfirmQuestion(singleConfirm),
+              at: Date.now(),
+              awaitingKind: 'browser_action',
+              singleConfirm,
+            },
+          },
+          subStatusByTask: nextSubStatus,
+          thinkingByTask: nextThinking,
+          progressByTask: nextProgress,
+          streamingByTask: nextStreaming,
+          captchaWaitByTask: nextCaptchaWait,
+          executorFallbackByTask: nextExecutorFallback,
+          degradeByTask: nextDegrade,
+          terminalTaskIds: nextTerminalIds,
+          tasks: prev.tasks.map((t) =>
+            t.taskId === msg.taskId
+              ? (() => {
+                  const { resultText: _resultText, ...rest } = t;
+                  return {
+                    ...rest,
+                    status: 'awaiting_user' as const,
+                    awaitingKind: 'browser_action' as const,
+                  };
+                })()
+              : t,
+          ),
+        };
+      });
+      return;
+    }
+    if (msg.type === 'server.batch_confirm_required') {
+      set((prev) => {
+        const existingTask = prev.tasks.find((task) => task.taskId === msg.taskId);
+        const canRecoverPausedTask = existingTask?.status === 'paused';
+        if (isTaskRuntimeTerminal(prev, msg.taskId) && !canRecoverPausedTask) return prev;
+        const batchConfirm: NonNullable<UiAwaitingUser['batchConfirm']> = {
+          stepId: msg.stepId,
+          batchIndex: msg.batchIndex,
+          batchTotal: msg.batchTotal,
+          risk: msg.risk,
+          ...(msg.summary ? { summary: msg.summary } : {}),
+          items: msg.items,
+        };
+        const nextSubStatus = { ...prev.subStatusByTask };
+        delete nextSubStatus[msg.taskId];
+        const nextThinking = omitRuntimeKey(prev.thinkingByTask, msg.taskId);
+        const nextProgress = omitRuntimeKey(prev.progressByTask, msg.taskId);
+        const nextStreaming = omitRuntimeKey(prev.streamingByTask, msg.taskId);
+        const nextCaptchaWait = omitRuntimeKey(prev.captchaWaitByTask, msg.taskId);
+        const nextExecutorFallback = omitRuntimeKey(
+          prev.executorFallbackByTask,
+          msg.taskId,
+        );
+        const nextDegrade = omitRuntimeKey(prev.degradeByTask, msg.taskId);
+        const nextTerminalIds = new Set(prev.terminalTaskIds);
+        nextTerminalIds.delete(msg.taskId);
+        return {
+          awaitingUserByTask: {
+            ...prev.awaitingUserByTask,
+            [msg.taskId]: {
+              question: batchConfirmQuestion(batchConfirm),
+              at: Date.now(),
+              awaitingKind: 'browser_action',
+              batchConfirm,
+            },
+          },
+          subStatusByTask: nextSubStatus,
+          thinkingByTask: nextThinking,
+          progressByTask: nextProgress,
+          streamingByTask: nextStreaming,
+          captchaWaitByTask: nextCaptchaWait,
+          executorFallbackByTask: nextExecutorFallback,
+          degradeByTask: nextDegrade,
+          terminalTaskIds: nextTerminalIds,
+          tasks: prev.tasks.map((t) =>
+            t.taskId === msg.taskId
+              ? (() => {
+                  const { resultText: _resultText, ...rest } = t;
+                  return {
+                    ...rest,
+                    status: 'awaiting_user' as const,
+                    awaitingKind: 'browser_action' as const,
+                  };
+                })()
+              : t,
+          ),
+        };
+      });
+      return;
+    }
     if (msg.type === 'server.task.terminal') {
       set((prev) => {
         const existingTask = prev.tasks.find((task) => task.taskId === msg.taskId);
@@ -1914,7 +2032,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       }));
       return;
     }
-    // Other frames (vision.observe / vision.act / user.confirm / ...)
+    // Other frames (vision.observe / vision.act / ...)
     // aren't UI-relevant yet; silently ignore.
   },
 
