@@ -117,6 +117,56 @@ describe('batch progress helpers', () => {
     });
   });
 
+  it('patches review-needed item status from live progress', () => {
+    const detail = {
+      batchId: 'batch_1',
+      status: 'running',
+      itemsTotal: 1,
+      itemsDone: 0,
+      itemsFailed: 0,
+      items: [
+        {
+          batchItemId: 'item_review',
+          status: 'running',
+          taskId: null,
+          errorMessage: null,
+        },
+      ],
+    };
+
+    expect(
+      applyBatchProgressToDetail(detail, {
+        type: 'server.batch.progress',
+        batchId: 'batch_1',
+        status: 'partial',
+        itemsTotal: 1,
+        itemsDone: 0,
+        itemsFailed: 1,
+        item: {
+          batchItemId: 'item_review',
+          status: 'partial_success',
+          taskId: 'tsk_review',
+          errorMessage: 'task ended with status=partial_success',
+        },
+      }),
+    ).toEqual({
+      batchId: 'batch_1',
+      status: 'partial',
+      itemsTotal: 1,
+      itemsDone: 0,
+      itemsFailed: 1,
+      itemsCancelled: 0,
+      items: [
+        {
+          batchItemId: 'item_review',
+          status: 'partial_success',
+          taskId: 'tsk_review',
+          errorMessage: 'task ended with status=partial_success',
+        },
+      ],
+    });
+  });
+
   it('normalizes malformed live progress frames before applying them', () => {
     expect(
       normalizeBatchProgressFrame({

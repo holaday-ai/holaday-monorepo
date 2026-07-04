@@ -18,7 +18,7 @@ import { users } from './users.js';
  *   pending   → just created, executor hasn't started yet
  *   running   → at least one item dispatched
  *   completed → every item finished status='completed'
- *   partial   → all items settled, some failed
+ *   partial   → all items settled, some failed, cancelled, or need review
  *   cancelled → user pressed cancel; remaining items skipped, already-
  *               dispatched ones continue to their natural terminal
  *
@@ -64,6 +64,7 @@ export const batchTasks = mysqlTable(
  *   pending   → waiting in queue, executor hasn't dispatched yet
  *   running   → tasks.create returned, task is in flight
  *   completed → underlying task terminal=completed
+ *   partial_success → underlying task produced output but needs review
  *   failed    → tasks.create threw OR underlying task terminal=failed/timeout
  *   cancelled → batch was cancelled before this item was dispatched
  *

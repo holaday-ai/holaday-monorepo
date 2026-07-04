@@ -64,6 +64,7 @@ const ITEM_STATUS_LABEL: Record<string, string> = {
   pending: '等待中',
   running: '运行中',
   completed: '完成',
+  partial_success: '需复核',
   failed: '失败',
   cancelled: '已取消',
 };
@@ -748,6 +749,9 @@ function HardErrorState({
 function ItemStatusIcon({ status }: { status: string }): JSX.Element {
   if (status === 'completed') {
     return <CheckCircle2 className="h-4 w-4 text-[#42C0EF]" />;
+  }
+  if (status === 'partial_success') {
+    return <AlertCircle className="h-4 w-4 text-[#FFC910]" />;
   }
   if (status === 'failed') {
     return <XCircle className="h-4 w-4 text-[#EA1F59]" />;

@@ -28,4 +28,26 @@ describe('server message schema', () => {
 
     expect(parsed.success).toBe(false);
   });
+
+  it('accepts partial_success as a batch item progress status', () => {
+    const parsed = parseServerMessage(
+      JSON.stringify({
+        type: 'server.batch.progress',
+        batchId: 'btc_review',
+        status: 'partial',
+        itemsTotal: 1,
+        itemsDone: 0,
+        itemsFailed: 1,
+        item: {
+          batchItemId: 'bti_review',
+          seq: 0,
+          status: 'partial_success',
+          taskId: 'tsk_review',
+          errorMessage: 'task ended with status=partial_success',
+        },
+      }),
+    );
+
+    expect(parsed.success).toBe(true);
+  });
 });

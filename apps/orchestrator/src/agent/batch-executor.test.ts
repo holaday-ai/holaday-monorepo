@@ -51,6 +51,22 @@ describe('summarizeBatchItemStatuses — split terminal counters', () => {
       terminal: 2,
     });
   });
+
+  it('counts partial_success as review-needed failure volume', () => {
+    expect(
+      summarizeBatchItemStatuses([
+        { status: 'completed' },
+        { status: 'partial_success' },
+        { status: 'failed' },
+      ]),
+    ).toEqual({
+      total: 3,
+      done: 1,
+      failed: 2,
+      cancelled: 0,
+      terminal: 3,
+    });
+  });
 });
 
 describe('runWithConcurrency — concurrent dispatch', () => {

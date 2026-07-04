@@ -19,7 +19,10 @@
  *   - tasks.create throws (quota / concurrency cap / DB blip) →
  *     item status='failed' with the error message captured. Other
  *     items continue.
- *   - Underlying task terminal=failed / timeout → item status='failed'.
+ *   - Underlying task terminal=failed / partial_success / timeout →
+ *     item status mirrors that outcome for the detail UI; partial_success
+ *     still counts toward the parent "partial" batch result.
+ *   - Underlying task terminal=cancelled → item status='cancelled'.
  *   - User cancels mid-flight → remaining un-dispatched items move
  *     to status='cancelled'. Already-dispatched tasks finish naturally.
  *   - Batch status at end: 'completed' if every item completed,
@@ -299,24 +302,26 @@ async function runItem(
       .where(eq(tasks.id, taskInternalId))
       .limit(1);
     if (tRow && isTaskTerminalStatus(tRow.status)) {
-      const ok = tRow.status === 'completed';
+      const itemStatus = taskTerminalStatusToBatchItemStatus(tRow.status);
+      const ok = itemStatus === 'completed';
+      const errorMessage = ok ? null : `task ended with status=${tRow.status}`;
       await db
         .update(batchTaskItems)
         .set({
-          status: ok ? 'completed' : 'failed',
+          status: itemStatus,
           completedAt: new Date(),
-          ...(ok ? {} : { errorMessage: `task ended with status=${tRow.status}` }),
+          ...(errorMessage ? { errorMessage } : {}),
         })
         .where(eq(batchTaskItems.id, item.id));
       await broadcastItemUpdate(
         batch,
         item.id,
-        ok ? 'completed' : 'failed',
+        itemStatus,
         deps,
         owner.externalId,
         {
           ...(taskExternalId ? { taskExternalId } : {}),
-          ...(ok ? {} : { errorMessage: `task ended with status=${tRow.status}` }),
+          ...(errorMessage ? { errorMessage } : {}),
         },
       );
       return;
@@ -388,7 +393,13 @@ async function finalizeBatch(batchInternalId: number, deps: BatchExecutorDeps): 
 async function broadcastItemUpdate(
   batch: BatchTask,
   itemInternalId: number,
-  itemStatus: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled',
+  itemStatus:
+    | 'pending'
+    | 'running'
+    | 'completed'
+    | 'partial_success'
+    | 'failed'
+    | 'cancelled',
   deps: BatchExecutorDeps,
   userExternalId: string,
   extras?: { taskExternalId?: string; errorMessage?: string },
@@ -438,7 +449,7 @@ export function summarizeBatchItemStatuses(
   let cancelled = 0;
   for (const item of items) {
     if (item.status === 'completed') done += 1;
-    else if (item.status === 'failed') failed += 1;
+    else if (item.status === 'failed' || item.status === 'partial_success') failed += 1;
     else if (item.status === 'cancelled') cancelled += 1;
   }
   return {
@@ -448,6 +459,17 @@ export function summarizeBatchItemStatuses(
     cancelled,
     terminal: done + failed + cancelled,
   };
+}
+
+function taskTerminalStatusToBatchItemStatus(status: string):
+  | 'completed'
+  | 'partial_success'
+  | 'failed'
+  | 'cancelled' {
+  if (status === 'completed') return 'completed';
+  if (status === 'partial_success') return 'partial_success';
+  if (status === 'cancelled') return 'cancelled';
+  return 'failed';
 }
 
 /**

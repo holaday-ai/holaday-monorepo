@@ -807,7 +807,14 @@ export const serverBatchProgressSchema = z.object({
     .object({
       batchItemId: z.string(),
       seq: z.number().int().nonnegative(),
-      status: z.enum(['pending', 'running', 'completed', 'failed', 'cancelled']),
+      status: z.enum([
+        'pending',
+        'running',
+        'completed',
+        'partial_success',
+        'failed',
+        'cancelled',
+      ]),
       taskId: z.string().optional(),
       errorMessage: z.string().optional(),
     })
