@@ -306,6 +306,89 @@ describe('toUiTask', () => {
     });
   });
 
+  it('hydrates terminal attachments from tasks.list result metadata', () => {
+    const task = toUiTask({
+      taskId: 'tsk_image_list',
+      intent: '生成图片',
+      title: null,
+      status: 'completed',
+      result: {
+        summary: '已生成图片',
+        metadata: {
+          attachments: [
+            {
+              fileId: 'file_img',
+              downloadUrl: '/files/file_img/download',
+              filename: 'holaday-image-1.jpg',
+              mimetype: 'image/jpeg',
+              sizeBytes: 418_513,
+              expiresAt: '2026-07-02T00:00:00.000Z',
+              kind: 'output',
+            },
+            {
+              fileId: 'bad_file',
+              downloadUrl: 'https://evil.example/file',
+              filename: 'bad.jpg',
+              mimetype: 'image/jpeg',
+              sizeBytes: 1,
+              expiresAt: '2026-07-02T00:00:00.000Z',
+              kind: 'output',
+            },
+          ],
+        },
+      },
+      errorMessage: null,
+      createdAt: new Date('2026-07-01T00:00:00Z'),
+      opusUsed: false,
+      starred: false,
+      starredAt: null,
+      projectId: null,
+      verificationPassed: true,
+      failureLevel: null,
+    } as never);
+
+    expect(task.attachments).toEqual([
+      {
+        fileId: 'file_img',
+        downloadUrl: '/api/files/file_img/download',
+        filename: 'holaday-image-1.jpg',
+        mimetype: 'image/jpeg',
+        sizeBytes: 418_513,
+        expiresAt: '2026-07-02T00:00:00.000Z',
+        kind: 'output',
+      },
+    ]);
+  });
+
+  it('hydrates expert metadata from tasks.list rows', () => {
+    const task = toUiTask({
+      taskId: 'tsk_expert_list',
+      intent: '给 landing page 优化建议',
+      title: null,
+      status: 'completed',
+      result: {
+        summary: '建议已生成',
+        metadata: {
+          expertWorkflowId: 'workflow_saas_growth',
+          expertMode: 'expert',
+        },
+      },
+      errorMessage: null,
+      createdAt: new Date('2026-07-01T00:00:00Z'),
+      opusUsed: false,
+      starred: false,
+      starredAt: null,
+      projectId: null,
+      verificationPassed: true,
+      failureLevel: null,
+    } as never);
+
+    expect(task).toMatchObject({
+      expertWorkflowId: 'workflow_saas_growth',
+      expertMode: 'expert',
+    });
+  });
+
   // B2 regression guard — the REAL chain, not the showImageOption pure unit.
   // A quote task (awaiting video_quote) carries metadata.videoOptions.tab and
   // NO top-level metadata.videoType (videoType is only stamped on the

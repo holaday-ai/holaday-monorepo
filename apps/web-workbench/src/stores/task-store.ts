@@ -2473,6 +2473,19 @@ export function toUiTask(row: ListRow): UiTask {
     videoTypeRaw === 'normal' || videoTypeRaw === 'pet' || videoTypeRaw === 'ip_person'
       ? videoTypeRaw
       : undefined;
+  const attachments: UiTask['attachments'] | undefined = parseUiAttachments(
+    metadata.attachments,
+  );
+  const expertWorkflowId =
+    safeTaskListText(metadata.expertWorkflowId).length > 0
+      ? safeTaskListText(metadata.expertWorkflowId)
+      : undefined;
+  const expertMode =
+    metadata.expertMode === 'normal' ||
+    metadata.expertMode === 'expert' ||
+    metadata.expertMode === 'auto'
+      ? metadata.expertMode
+      : undefined;
   const finalScreenshot =
     safeTaskListText(resultObj.finalScreenshot).length > 0
       ? safeTaskListText(resultObj.finalScreenshot)
@@ -2514,6 +2527,9 @@ export function toUiTask(row: ListRow): UiTask {
     ...(resultText ? { resultText } : {}),
     ...(executionMode ? { executionMode } : {}),
     ...(videoType ? { videoType } : {}),
+    ...(attachments ? { attachments } : {}),
+    ...(expertWorkflowId ? { expertWorkflowId } : {}),
+    ...(expertMode ? { expertMode } : {}),
     ...(finalScreenshot ? { finalScreenshot } : {}),
     ...(finalUrl ? { finalUrl } : {}),
     ...(finalViewport ? { finalViewport } : {}),
