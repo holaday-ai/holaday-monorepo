@@ -416,15 +416,15 @@ function sparkSeriesFromKline(rows: KlineRow[]): { values: number[]; labels: str
 }
 
 function sparkSeriesFromIntraday(rows: IntradayRow[], now = new Date()): { values: number[]; labels: string[] } {
-  const series = rows
+  const rawPoints = rows
     .map((row) => ({
       value: toNum(pick(row, ['最新价', '收盘', 'close', 'price'])),
       label: String(pick(row, ['时间', 'time', 'datetime']) ?? '').trim(),
     }))
     .filter((point): point is { value: number; label: string } =>
       point.value !== null &&
-      point.label.length > 0 &&
-      intradayLabelIsObservedNow(point.label, now));
+      point.label.length > 0);
+  const series = observedIntradayPointsForNow(rawPoints, now);
   return series.length >= 2
     ? {
         values: series.map((point) => point.value),
@@ -478,18 +478,43 @@ function shanghaiDateMinute(now: Date): { date: string; minuteOfDay: number } {
   };
 }
 
-function intradayLabelIsObservedNow(label: string, now: Date): boolean {
+function observedIntradayPointsForNow(
+  points: Array<{ label: string; value: number }>,
+  now: Date,
+): Array<{ label: string; value: number }> {
+  const current = shanghaiDateMinute(now);
+  const datedPoints = points.filter((point) => {
+    const labelDate = datePart(point.label);
+    const labelMinute = intradayMinuteOfDay(point.label);
+    return (
+      labelDate !== null &&
+      labelDate <= current.date &&
+      labelMinute !== null &&
+      Number.isFinite(point.value)
+    );
+  });
+  const tradeDate = datedPoints
+    .map((point) => datePart(point.label))
+    .filter((date): date is string => date !== null)
+    .sort()
+    .at(-1);
+  if (!tradeDate) return [];
+  return datedPoints.filter((point) => intradayLabelBelongsToObservedSession(point.label, now, tradeDate));
+}
+
+function intradayLabelBelongsToObservedSession(label: string, now: Date, tradeDate: string): boolean {
   const labelDate = datePart(label);
   const labelMinute = intradayMinuteOfDay(label);
-  if (!labelDate || labelMinute === null) return false;
+  if (!labelDate || labelMinute === null || labelDate !== tradeDate) return false;
   const current = shanghaiDateMinute(now);
-  if (labelDate !== current.date) return false;
+  if (labelDate > current.date) return false;
+  if (labelDate < current.date) return true;
   return labelMinute <= current.minuteOfDay;
 }
 
 function observedIntradayStockForNow(stockRow: StockSnapshot, now: Date): StockSnapshot {
   if (stockRow.sparkKind !== 'intraday' || stockRow.spark.length < 2) return stockRow;
-  const points = stockRow.sparkLabels
+  const rawPoints = stockRow.sparkLabels
     .slice(0, stockRow.spark.length)
     .map((label, index) => ({
       label,
@@ -497,14 +522,17 @@ function observedIntradayStockForNow(stockRow: StockSnapshot, now: Date): StockS
     }))
     .filter((point): point is { label: string; value: number } =>
       typeof point.value === 'number' &&
-      Number.isFinite(point.value) &&
-      intradayLabelIsObservedNow(point.label, now));
-  if (points.length === stockRow.spark.length) return stockRow;
+      Number.isFinite(point.value));
+  const points = observedIntradayPointsForNow(rawPoints, now);
+  const sparkTradeDate = points.length >= 2 ? datePart(points[points.length - 1]?.label) : null;
+  if (points.length === stockRow.spark.length) {
+    return stockRow.sparkTradeDate === sparkTradeDate ? stockRow : { ...stockRow, sparkTradeDate };
+  }
   return {
     ...stockRow,
     spark: points.length >= 2 ? points.map((point) => point.value) : [],
     sparkLabels: points.length >= 2 ? points.map((point) => point.label) : [],
-    sparkTradeDate: points.length >= 2 ? datePart(points[points.length - 1]?.label) : null,
+    sparkTradeDate,
   };
 }
 

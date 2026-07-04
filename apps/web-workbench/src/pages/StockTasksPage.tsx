@@ -1168,9 +1168,9 @@ function StockHighlightCard({
             />
           ) : (
             <div className="mt-4 flex h-[220px] flex-col items-center justify-center rounded-[7px] border border-dashed border-[#D7DAE2] bg-[#F7F8FA] px-4 text-center">
-              <div className="text-[13px] font-medium text-[#667085]">真实分时暂不可用</div>
+              <div className="text-[13px] font-medium text-[#667085]">最近交易日分时暂不可用</div>
               <div className="mt-1 max-w-[320px] text-[12px] leading-relaxed text-[#98A2B3]">
-                已保留真实价格与成交数据，不自动切换成日线，稍后刷新可重试分钟线。
+                已保留真实价格与成交数据；不使用模拟线，也不自动切换成日线。
               </div>
             </div>
           )}
@@ -2634,7 +2634,7 @@ function stockNarrative(stock: StockSnapshot, marketIndex: IndexRow | null): str
   const volume = stockVolumeSummary(stock);
   const market = marketSummary(marketIndex, stock);
   if (stock.spark.length < 2) {
-    return `${stock.name} ${moveScope}${direction} ${Math.abs(stock.changePct).toFixed(2)}%，真实价格与成交数据已返回，但 AkShare 分钟线暂缺，Holaday 不会自动改画日线以免误导。${volume}。${market}稍后刷新可重试分时，详细原因和公告影响可生成日报。`;
+    return `${stock.name} ${moveScope}${direction} ${Math.abs(stock.changePct).toFixed(2)}%，真实价格与成交数据已返回，但最近交易日分钟线暂缺，Holaday 不会用模拟线或日线替代。${volume}。${market}稍后刷新可重试分时，详细原因和公告影响可生成日报。`;
   }
   const position = stockPositionText(stock);
   return `${stock.name} ${moveScope}${direction} ${Math.abs(stock.changePct).toFixed(2)}%，价格仍在${position}；${volume}。${market}详细原因和公告影响可生成日报。`;

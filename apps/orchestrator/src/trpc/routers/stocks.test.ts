@@ -177,6 +177,51 @@ describe('stocks dashboard snapshot', () => {
     });
   });
 
+  it('shows the latest dated trading-session intraday line on non-trading days', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/index/cn') {
+        return new Response(JSON.stringify(envelope([])));
+      }
+      if (url.pathname === '/kline/603528') {
+        return new Response(JSON.stringify(envelope([
+          { 日期: '2026-07-02', 收盘: 5.87, 涨跌幅: 0.1, 成交量: 1000, 成交额: 5_870_000 },
+          { 日期: '2026-07-03', 收盘: 6.07, 涨跌幅: 2.53, 成交量: 2000, 成交额: 80_291_100 },
+        ])));
+      }
+      if (url.pathname === '/intraday/603528') {
+        return new Response(JSON.stringify(envelope([
+          { 时间: '2026-07-03 09:30:00', 最新价: 5.95 },
+          { 时间: '2026-07-03 11:30:00', 最新价: 6.02 },
+          { 时间: '2026-07-03 15:00:00', 最新价: 6.07 },
+        ])));
+      }
+      if (url.pathname === '/quote/603528') {
+        return new Response(JSON.stringify(envelope([
+          { 代码: 'sh603528', 名称: '多伦科技', 最新价: 6.07, 涨跌幅: 2.53, 成交额: 80_291_100 },
+        ])));
+      }
+      throw new Error(`unexpected path ${url.pathname}`);
+    });
+
+    const snapshot = await __stocksDashboardTest.buildDashboardSnapshot({
+      logger: { warn: vi.fn() },
+      watchlistRows: [{ symbol: '603528', market: 'A', displayName: '多伦科技' }],
+      effectiveWatchlist: [{ symbol: '603528', market: 'A', displayName: '多伦科技' }],
+      now: new Date('2026-07-04T07:00:00.000Z'),
+      includeSlowSignals: false,
+    });
+
+    expect(snapshot.watchlistStocks[0]).toMatchObject({
+      price: '6.07',
+      changePct: 2.53,
+      spark: [5.95, 6.02, 6.07],
+      sparkLabels: ['2026-07-03 09:30:00', '2026-07-03 11:30:00', '2026-07-03 15:00:00'],
+      sparkKind: 'intraday',
+      sparkTradeDate: '2026-07-03',
+    });
+  });
+
   it('does not trust intraday points without a trade date', async () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       const url = new URL(String(input));
@@ -394,7 +439,10 @@ describe('stocks dashboard snapshot', () => {
 
     const merged = __stocksDashboardTest.withPreservedSlowSignals(next, previous);
 
-    expect(merged.watchlistStocks).toEqual(previous.watchlistStocks);
+    expect(merged.watchlistStocks[0]).toMatchObject({
+      ...previous.watchlistStocks[0]!,
+      sparkTradeDate: '2026-06-30',
+    });
     expect(merged.freshness.status).toBe('stale');
     expect(merged.freshness.message).toContain('关注股票');
   });
@@ -474,7 +522,7 @@ describe('stocks dashboard snapshot', () => {
     expect(merged.freshness.message).toContain('分时线');
   });
 
-  it('does not preserve prior-day intraday lines as current charts', () => {
+  it('preserves prior-day intraday lines as clearly dated recent charts', () => {
     const previousStock = {
       symbol: '603528',
       name: '多伦科技',
@@ -539,11 +587,11 @@ describe('stocks dashboard snapshot', () => {
 
     expect(merged.watchlistStocks[0]).toMatchObject({
       price: '5.92',
-      spark: [],
-      sparkLabels: [],
-      note: '来源 AkShare · 多伦科技 最新行情，分时走势暂缺',
+      spark: [5.88, 5.86],
+      sparkLabels: ['2026-06-29 14:59:00', '2026-06-29 15:00:00'],
+      sparkTradeDate: '2026-06-29',
     });
-    expect(merged.freshness.message).not.toContain('分时线');
+    expect(merged.freshness.message).toContain('分时线');
   });
 
   it('trims future points before preserving a same-day intraday line', () => {
