@@ -234,6 +234,15 @@ function hasDisplayableRealDashboardData(snapshot: DashboardSnapshot): boolean {
   );
 }
 
+function dashboardNeedsWatchlistIntradayRefresh(snapshot: DashboardSnapshot): boolean {
+  const realWatchlistQuotes = snapshot.watchlistStocks.filter((stockRow) =>
+    stockRow.market === 'A' && stockRow.price !== '—');
+  return (
+    realWatchlistQuotes.length > 0 &&
+    realWatchlistQuotes.every((stockRow) => stockRow.sparkKind === 'intraday' && stockRow.spark.length < 2)
+  );
+}
+
 async function loadPersistedDashboardSnapshot(args: {
   db: Db;
   logger: MinimalLogger;
@@ -1064,7 +1073,10 @@ function startDashboardRefresh(args: {
 }): Promise<DashboardSnapshot> {
   const existing = dashboardCache.get(args.cacheKey);
   if (existing?.refreshPromise) return existing.refreshPromise;
-  const quickFirst = !existing?.snapshot || !hasDisplayableRealDashboardData(existing.snapshot);
+  const quickFirst =
+    !existing?.snapshot ||
+    !hasDisplayableRealDashboardData(existing.snapshot) ||
+    dashboardNeedsWatchlistIntradayRefresh(existing.snapshot);
 
   const refreshPromise = buildDashboardSnapshot({
     logger: args.logger,
@@ -1153,7 +1165,15 @@ async function resolveDashboardSnapshot(args: {
     ? dashboardWithObservedIntraday(cached.snapshot, new Date())
     : undefined;
   const cachedHasDisplayableData = observedCached ? hasDisplayableRealDashboardData(observedCached) : false;
-  if (observedCached && cachedHasDisplayableData && cached && cached.freshUntil > nowMs) return observedCached;
+  const shouldRefreshMissingIntraday =
+    observedCached ? dashboardNeedsWatchlistIntradayRefresh(observedCached) : false;
+  if (
+    observedCached &&
+    cachedHasDisplayableData &&
+    cached &&
+    cached.freshUntil > nowMs &&
+    !shouldRefreshMissingIntraday
+  ) return observedCached;
 
   const refreshPromise = startDashboardRefresh({
     db: args.db,
@@ -1164,7 +1184,13 @@ async function resolveDashboardSnapshot(args: {
     effectiveWatchlist: args.effectiveWatchlist,
   });
 
-  if (observedCached && cached && cachedHasDisplayableData && cached.staleUntil > nowMs) {
+  if (
+    observedCached &&
+    cached &&
+    cachedHasDisplayableData &&
+    cached.staleUntil > nowMs &&
+    !shouldRefreshMissingIntraday
+  ) {
     refreshPromise.catch(() => undefined);
     return markStale(observedCached, '正在后台刷新行情，当前展示最近一次真实数据。');
   }
