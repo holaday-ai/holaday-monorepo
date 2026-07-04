@@ -560,7 +560,7 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
         )}
         <div className="mb-4 grid gap-2 sm:grid-cols-4">
           <BatchMetric label="成功" value={detailDone} tone="success" />
-          <BatchMetric label="失败" value={detailFailed} tone="danger" />
+          <BatchMetric label="需复核/失败" value={detailFailed} tone="danger" />
           <BatchMetric label="取消" value={detailCancelled} tone="neutral" />
           <BatchMetric label="剩余" value={detailRemaining} tone="pending" />
         </div>
@@ -800,6 +800,7 @@ function batchStatusTone(status: string): string {
 
 function batchProgressFillTone(status: string): string {
   if (status === 'completed') return 'bg-[#42C0EF]';
+  if (status === 'partial') return 'bg-[#FFC910]';
   if (status === 'cancelled' || status === 'pending') return 'bg-[#ADADAD]';
   return 'bg-[#EA1F59]';
 }

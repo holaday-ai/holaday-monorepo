@@ -167,17 +167,17 @@ export function AdminLearningDomainPage(): JSX.Element {
 
       {/* Failure breakdown */}
       <Section
-        title="失败模式分析"
+        title="失败/需复核模式分析"
         hint={
           view.stats.failed === 0
-            ? '本期无失败'
-            : `${formatInteger(view.stats.failed)} 次失败 · 按类型分组`
+            ? '本期无失败/需复核'
+            : `${formatInteger(view.stats.failed)} 次失败/需复核 · 按类型分组`
         }
         className="mt-6"
       >
         {view.failureBreakdown.length === 0 ? (
           <div className="flex h-24 items-center justify-center text-[12px] text-muted-foreground">
-            本期无失败任务
+            本期无失败/需复核任务
           </div>
         ) : (
           <div className="space-y-2.5">

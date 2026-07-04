@@ -4,8 +4,8 @@
  * Layout:
  *   1. 3 metric cards (analyzed domains / high-risk / AI memories)
  *   2. Filter bar (search + filter tabs)
- *   3. Ranking table — domain, total, success/fail counts, success
- *      bar (cyan/yellow/red gradient), last-failed-at, top failure reason,
+ *   3. Ranking table — domain, total, success/unsuccessful counts, success
+ *      bar (cyan/yellow/red gradient), last issue time, top issue reason,
  *      action column linking to /admin/learning/:domain.
  *
  * No charts on the overview — the ranking is the story. The detail
@@ -109,7 +109,7 @@ export function AdminLearningPage(): JSX.Element {
         <MetricCard
           label="高风险域名"
           value={data ? normalized.metrics.highRiskCount : null}
-          hint="失败 / (成功 + 失败) > 50%"
+          hint="未成功 / (成功 + 未成功) > 50%"
           highlight
         />
         <MetricCard
@@ -146,7 +146,7 @@ export function AdminLearningPage(): JSX.Element {
           active={filter === 'recentFail'}
           onClick={() => setFilter('recentFail')}
         >
-          本周有失败
+          本周有未成功
         </FilterPill>
       </div>
 
@@ -163,10 +163,10 @@ export function AdminLearningPage(): JSX.Element {
               <tr className="border-b border-[#EFEFEF] text-left text-[11px] uppercase text-muted-foreground">
                 <th className="px-5 py-3 font-medium">域名</th>
                 <th className="px-3 py-3 font-medium text-right">总任务</th>
-                <th className="px-3 py-3 font-medium text-right">成功 / 失败 / 取消</th>
+                <th className="px-3 py-3 font-medium text-right">成功 / 未成功 / 取消</th>
                 <th className="px-3 py-3 font-medium">成功率</th>
-                <th className="px-3 py-3 font-medium">最近失败</th>
-                <th className="px-3 py-3 font-medium">主要失败原因</th>
+                <th className="px-3 py-3 font-medium">最近未成功</th>
+                <th className="px-3 py-3 font-medium">主要原因</th>
                 <th className="px-5 py-3 font-medium">操作</th>
               </tr>
             </thead>
