@@ -187,8 +187,16 @@ export function TaskStream({
   const awaitingUser = useTaskStore((s) => s.awaitingUserByTask[task.taskId]);
   const webSearch = useTaskStore((s) => s.webSearchByTask[task.taskId]);
   const thinkingEvent = useTaskStore((s) => s.thinkingByTask[task.taskId]);
+  const streamingText = useTaskStore((s) => s.streamingByTask[task.taskId]);
+  const progressMessage = useTaskStore((s) => s.progressByTask[task.taskId]);
   const serverSuggestions = useTaskStore((s) => s.suggestionsByTask[task.taskId]);
   const scrollAnchorRef = React.useRef<HTMLDivElement>(null);
+  const activityKey = taskStreamLiveActivityKey({
+    thinking: thinkingEvent?.summary ?? null,
+    progressMessage,
+    streamingText,
+    resultText: task.resultText,
+  });
 
   // Auto-scroll only follows the live tail when:
   //   - the task hasn't reached a terminal state (still streaming
@@ -222,6 +230,7 @@ export function TaskStream({
     degrade,
     awaitingUser,
     webSearch,
+    activityKey,
   ]);
 
   const terminal = isTerminalStatus(task.status);
@@ -669,6 +678,20 @@ export function taskStreamHasAnyActivity(input: {
     Boolean(input.streamingText) ||
     Boolean(input.resultText)
   );
+}
+
+export function taskStreamLiveActivityKey(input: {
+  thinking?: string | null;
+  progressMessage?: string | null;
+  streamingText?: string | null;
+  resultText?: string | null;
+}): string {
+  return [
+    input.thinking ?? '',
+    input.progressMessage ?? '',
+    input.streamingText?.length ?? 0,
+    input.resultText?.length ?? 0,
+  ].join('|');
 }
 
 function TrustSummaryCard({

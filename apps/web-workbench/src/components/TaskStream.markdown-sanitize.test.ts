@@ -5,6 +5,7 @@ import {
   sanitizeMarkdownBrokenBoldUrls,
   sanitizeMarkdownTrailingPunctuation,
   taskStreamHasAnyActivity,
+  taskStreamLiveActivityKey,
   webSearchLinePrefix,
 } from './TaskStream';
 
@@ -55,5 +56,17 @@ describe('TaskStream live phase copy', () => {
     expect(taskStreamHasAnyActivity({ thinking: '正在分析' })).toBe(true);
     expect(taskStreamHasAnyActivity({ progressMessage: '正在读取页面' })).toBe(true);
     expect(taskStreamHasAnyActivity({ streamingText: '已经找到一条结果' })).toBe(true);
+  });
+
+  it('changes live activity key when streaming, progress, or thinking changes', () => {
+    expect(
+      taskStreamLiveActivityKey({ streamingText: 'abc' }),
+    ).not.toBe(taskStreamLiveActivityKey({ streamingText: 'abcd' }));
+    expect(
+      taskStreamLiveActivityKey({ progressMessage: '正在读取页面' }),
+    ).not.toBe(taskStreamLiveActivityKey({ progressMessage: '正在整理结果' }));
+    expect(
+      taskStreamLiveActivityKey({ thinking: '先搜索' }),
+    ).not.toBe(taskStreamLiveActivityKey({ thinking: '再验证' }));
   });
 });
