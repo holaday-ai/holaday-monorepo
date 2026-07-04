@@ -56,6 +56,7 @@ interface PartnerWithdrawalSummary {
   readonly amountCreditCents: number;
   readonly status: string;
   readonly reviewDueAt: Date | string;
+  readonly bankAccountFingerprint: string;
   readonly riskScore: number;
 }
 
@@ -594,6 +595,24 @@ function PartnerWorkbench({
         </div>
       </Section>
 
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Section
+          title="最近订单"
+          description="会员和充值订单的确认状态。"
+          className="rounded-[8px] border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]"
+        >
+          <RecentOrdersTable rows={state.orders} />
+        </Section>
+
+        <Section
+          title="提现进度"
+          description="提现申请的复核和出款状态。"
+          className="rounded-[8px] border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]"
+        >
+          <RecentWithdrawalsTable rows={state.withdrawals} />
+        </Section>
+      </div>
+
       <Section
         title="实名认证"
         description="年度会员开通后提交实名复核，审核通过后才能充值和提现。"
@@ -972,8 +991,88 @@ function WithdrawalSummary({ withdrawal }: { withdrawal: PartnerWithdrawalSummar
       <SummaryItem label="金额" value={formatHolaCreditCents(withdrawal.amountCreditCents)} />
       <SummaryItem label="状态" value={withdrawalStatusLabel(withdrawal.status)} />
       <SummaryItem label="预计复核时间" value={formatDateTime(withdrawal.reviewDueAt)} />
+      <SummaryItem label="银行指纹" value={withdrawal.bankAccountFingerprint || '—'} />
       <SummaryItem label="风险分" value={String(withdrawal.riskScore)} />
     </dl>
+  );
+}
+
+function RecentOrdersTable({ rows }: { rows: PartnerEnabledState['orders'] }): JSX.Element {
+  if (rows.length === 0) {
+    return <EmptyInlineState title="暂无订单" body="会员或充值订单创建后会显示在这里。" />;
+  }
+  return (
+    <div className="overflow-x-auto">
+      <table className="min-w-[520px] w-full text-left text-xs">
+        <thead className="border-b border-[#EFEFEF] text-[11px] text-muted-foreground">
+          <tr>
+            <th scope="col" className="pb-2 pr-4 font-medium">订单</th>
+            <th scope="col" className="pb-2 pr-4 font-medium">类型</th>
+            <th scope="col" className="pb-2 pr-4 font-medium">金额</th>
+            <th scope="col" className="pb-2 pr-4 font-medium">状态</th>
+            <th scope="col" className="pb-2 font-medium">创建</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-[#EFEFEF]">
+          {rows.map((row) => (
+            <tr key={row.key}>
+              <td className="py-3 pr-4 font-mono text-[11px] text-foreground/75">{row.orderExternalId}</td>
+              <td className="py-3 pr-4 text-muted-foreground">{row.orderKind === 'membership' ? '年费会员' : '充值'}</td>
+              <td className="py-3 pr-4 tabular-nums">{formatPartnerCnyCents(row.amountCnyCents)}</td>
+              <td className="py-3 pr-4">{orderStatusLabel(row.status)}</td>
+              <td className="py-3 text-muted-foreground">{row.createdAtLabel}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function RecentWithdrawalsTable({ rows }: { rows: PartnerEnabledState['withdrawals'] }): JSX.Element {
+  if (rows.length === 0) {
+    return <EmptyInlineState title="暂无提现" body="提现申请提交后会显示在这里。" />;
+  }
+  return (
+    <div className="overflow-x-auto">
+      <table className="min-w-[560px] w-full text-left text-xs">
+        <thead className="border-b border-[#EFEFEF] text-[11px] text-muted-foreground">
+          <tr>
+            <th scope="col" className="pb-2 pr-4 font-medium">申请</th>
+            <th scope="col" className="pb-2 pr-4 font-medium">金额</th>
+            <th scope="col" className="pb-2 pr-4 font-medium">状态</th>
+            <th scope="col" className="pb-2 pr-4 font-medium">银行指纹</th>
+            <th scope="col" className="pb-2 pr-4 font-medium">复核</th>
+            <th scope="col" className="pb-2 font-medium">风险</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-[#EFEFEF]">
+          {rows.map((row) => (
+            <tr key={row.key}>
+              <td className="py-3 pr-4 font-mono text-[11px] text-foreground/75">{row.withdrawalExternalId}</td>
+              <td className="py-3 pr-4 tabular-nums">{formatHolaCreditCents(row.amountCreditCents)}</td>
+              <td className="py-3 pr-4">{withdrawalStatusLabel(row.status)}</td>
+              <td className="py-3 pr-4 text-muted-foreground">
+                <span className="block max-w-[160px] truncate" title={row.bankAccountFingerprint}>
+                  {row.bankAccountFingerprint || '—'}
+                </span>
+              </td>
+              <td className="py-3 pr-4 text-muted-foreground">{row.reviewDueAtLabel}</td>
+              <td className="py-3 tabular-nums text-muted-foreground">{row.riskScore}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function EmptyInlineState({ title, body }: { title: string; body: string }): JSX.Element {
+  return (
+    <div className="border-y border-dashed border-[#DCDDDD] py-8 text-center">
+      <div className="text-sm font-medium text-foreground/80">{title}</div>
+      <div className="mt-1 text-xs text-muted-foreground">{body}</div>
+    </div>
   );
 }
 

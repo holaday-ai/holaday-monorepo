@@ -25,6 +25,8 @@ export interface PartnerEnabledState {
   readonly inviteCode: string;
   readonly ledger: PartnerLedgerState;
   readonly lots: readonly PartnerLotState[];
+  readonly orders: readonly PartnerOrderState[];
+  readonly withdrawals: readonly PartnerWithdrawalActivityState[];
 }
 
 export interface NormalizedPartnerMembership {
@@ -58,6 +60,28 @@ export interface PartnerLotState {
   readonly releaseStartsAtLabel: string;
   readonly releaseEndsAt: string | null;
   readonly releaseEndsAtLabel: string;
+}
+
+export interface PartnerOrderState {
+  readonly key: string;
+  readonly orderExternalId: string;
+  readonly provider: string;
+  readonly orderKind: string;
+  readonly amountCnyCents: number;
+  readonly status: string;
+  readonly createdAt: string | null;
+  readonly createdAtLabel: string;
+}
+
+export interface PartnerWithdrawalActivityState {
+  readonly key: string;
+  readonly withdrawalExternalId: string;
+  readonly amountCreditCents: number;
+  readonly status: string;
+  readonly reviewDueAt: string | null;
+  readonly reviewDueAtLabel: string;
+  readonly bankAccountFingerprint: string;
+  readonly riskScore: number;
 }
 
 export type PartnerPageState = PartnerDisabledState | PartnerEnabledState;
@@ -156,6 +180,8 @@ export function normalizePartnerDashboard(value: unknown): PartnerPageState {
     inviteCode: normalizeInviteCode(value.inviteCode),
     ledger: normalizeLedger(value.ledger),
     lots: normalizeLots(value.lots),
+    orders: normalizeOrders(value.orders),
+    withdrawals: normalizeWithdrawals(value.withdrawals),
   };
 }
 
@@ -422,6 +448,48 @@ function normalizeLots(value: unknown): readonly PartnerLotState[] {
   });
 }
 
+function normalizeOrders(value: unknown): readonly PartnerOrderState[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry, index) => {
+    if (!isRecord(entry)) return [];
+    const orderExternalId = safeTrimmedString(entry.orderExternalId) || `order-${index + 1}`;
+    const createdAt = dateOnly(entry.createdAt);
+    return [
+      {
+        key: orderExternalId,
+        orderExternalId,
+        provider: safeTrimmedString(entry.provider) || 'manual',
+        orderKind: safeTrimmedString(entry.orderKind) || 'recharge',
+        amountCnyCents: safeCents(entry.amountCnyCents),
+        status: safeTrimmedString(entry.status) || 'pending',
+        createdAt,
+        createdAtLabel: createdAt ?? '—',
+      },
+    ];
+  });
+}
+
+function normalizeWithdrawals(value: unknown): readonly PartnerWithdrawalActivityState[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry, index) => {
+    if (!isRecord(entry)) return [];
+    const withdrawalExternalId = safeTrimmedString(entry.withdrawalExternalId) || `withdrawal-${index + 1}`;
+    const reviewDueAt = dateOnly(entry.reviewDueAt);
+    return [
+      {
+        key: withdrawalExternalId,
+        withdrawalExternalId,
+        amountCreditCents: safeCents(entry.amountCreditCents),
+        status: safeTrimmedString(entry.status) || 'requested',
+        reviewDueAt,
+        reviewDueAtLabel: reviewDueAt ?? '—',
+        bankAccountFingerprint: safeTrimmedString(entry.bankAccountFingerprint),
+        riskScore: safeRiskScore(entry.riskScore),
+      },
+    ];
+  });
+}
+
 function normalizeLotStatus(value: unknown): PartnerLotStatus {
   return typeof value === 'string' && LOT_STATUSES.has(value as PartnerLotStatus)
     ? (value as PartnerLotStatus)
@@ -447,6 +515,17 @@ function safeCents(value: unknown): number {
         : Number.NaN;
   if (!Number.isFinite(parsed) || parsed < 0) return 0;
   return Math.floor(parsed);
+}
+
+function safeRiskScore(value: unknown): number {
+  const parsed =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string' && value.trim()
+        ? Number(value)
+        : Number.NaN;
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.min(100, Math.max(0, Math.round(parsed)));
 }
 
 function safeTrimmedString(value: unknown): string {

@@ -7,7 +7,7 @@ import { TRPCError } from '@trpc/server';
 import { desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { users } from '../../db/schema/users.js';
-import { partnerLots } from '../../db/schema/partner.js';
+import { partnerLots, partnerRechargeOrders, partnerWithdrawalRequests } from '../../db/schema/partner.js';
 import { CreditLedgerService } from '../../partner/credit-ledger-service.js';
 import { KycService, canRechargeWithKycStatus } from '../../partner/kyc-service.js';
 import { PartnerMembershipService } from '../../partner/membership-service.js';
@@ -66,6 +66,8 @@ const rechargePreviewInput = z.object({
   rollingThirtyDayCnyCents: moneyCentsInput.optional(),
 });
 
+const DASHBOARD_ACTIVITY_LIMIT = 10;
+
 function partnerLedgerEnabled(): boolean {
   return process.env.PARTNER_LEDGER_ENABLED === 'true';
 }
@@ -110,6 +112,7 @@ function summarizePartnerOrder(order: {
   orderKind: string;
   amountCnyCents: number;
   status: string;
+  createdAt: Date;
 }) {
   return {
     orderExternalId: order.externalId,
@@ -117,6 +120,7 @@ function summarizePartnerOrder(order: {
     orderKind: order.orderKind,
     amountCnyCents: order.amountCnyCents,
     status: order.status,
+    createdAt: order.createdAt,
   };
 }
 
@@ -125,6 +129,7 @@ function summarizePartnerWithdrawal(withdrawal: {
   amountCreditCents: number;
   status: string;
   reviewDueAt: Date;
+  bankAccountFingerprint: string;
   riskScore: number;
 }) {
   return {
@@ -132,6 +137,7 @@ function summarizePartnerWithdrawal(withdrawal: {
     amountCreditCents: withdrawal.amountCreditCents,
     status: withdrawal.status,
     reviewDueAt: withdrawal.reviewDueAt,
+    bankAccountFingerprint: withdrawal.bankAccountFingerprint,
     riskScore: withdrawal.riskScore,
   };
 }
@@ -303,7 +309,7 @@ export const partnerRouter = router({
     const kycService = new KycService(ctx.db);
     const ledgerService = new CreditLedgerService(ctx.db);
 
-    const [membership, kycStatus, ledger, lots] = await Promise.all([
+    const [membership, kycStatus, ledger, lots, orders, withdrawals] = await Promise.all([
       membershipService.getActiveMembership(userId),
       kycService.getStatus(userId),
       ledgerService.summarizeUser(userId),
@@ -325,6 +331,32 @@ export const partnerRouter = router({
         .where(eq(partnerLots.userId, userId))
         .orderBy(desc(partnerLots.createdAt))
         .limit(20),
+      ctx.db
+        .select({
+          externalId: partnerRechargeOrders.externalId,
+          provider: partnerRechargeOrders.provider,
+          orderKind: partnerRechargeOrders.orderKind,
+          amountCnyCents: partnerRechargeOrders.amountCnyCents,
+          status: partnerRechargeOrders.status,
+          createdAt: partnerRechargeOrders.createdAt,
+        })
+        .from(partnerRechargeOrders)
+        .where(eq(partnerRechargeOrders.userId, userId))
+        .orderBy(desc(partnerRechargeOrders.createdAt))
+        .limit(DASHBOARD_ACTIVITY_LIMIT),
+      ctx.db
+        .select({
+          externalId: partnerWithdrawalRequests.externalId,
+          amountCreditCents: partnerWithdrawalRequests.amountCreditCents,
+          status: partnerWithdrawalRequests.status,
+          reviewDueAt: partnerWithdrawalRequests.reviewDueAt,
+          bankAccountFingerprint: partnerWithdrawalRequests.bankAccountFingerprint,
+          riskScore: partnerWithdrawalRequests.riskScore,
+        })
+        .from(partnerWithdrawalRequests)
+        .where(eq(partnerWithdrawalRequests.userId, userId))
+        .orderBy(desc(partnerWithdrawalRequests.createdAt))
+        .limit(DASHBOARD_ACTIVITY_LIMIT),
     ]);
 
     const dashboardLedger = {
@@ -356,6 +388,8 @@ export const partnerRouter = router({
         releaseStartsAt: lot.releaseStartsAt,
         releaseEndsAt: lot.releaseEndsAt,
       })),
+      orders: orders.map(summarizePartnerOrder),
+      withdrawals: withdrawals.map(summarizePartnerWithdrawal),
     };
   }),
 

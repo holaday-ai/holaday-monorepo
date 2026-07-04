@@ -88,6 +88,28 @@ describe('partner page state helpers', () => {
           },
           null,
         ],
+        orders: [
+          {
+            orderExternalId: ' pay_order_1 ',
+            provider: 'wechat',
+            orderKind: 'membership',
+            amountCnyCents: '99900',
+            status: 'pending',
+            createdAt: '2026-07-02T10:00:00.000Z',
+          },
+          null,
+        ],
+        withdrawals: [
+          {
+            withdrawalExternalId: ' pay_withdrawal_1 ',
+            amountCreditCents: '60000',
+            status: 'reviewing',
+            reviewDueAt: 'not-a-date',
+            bankAccountFingerprint: ' bank_fp_123 ',
+            riskScore: '88.8',
+          },
+          null,
+        ],
       }),
     ).toEqual({
       enabled: true,
@@ -124,6 +146,30 @@ describe('partner page state helpers', () => {
           releaseStartsAtLabel: '—',
           releaseEndsAt: null,
           releaseEndsAtLabel: '—',
+        },
+      ],
+      orders: [
+        {
+          key: 'pay_order_1',
+          orderExternalId: 'pay_order_1',
+          provider: 'wechat',
+          orderKind: 'membership',
+          amountCnyCents: 99900,
+          status: 'pending',
+          createdAt: '2026-07-02',
+          createdAtLabel: '2026-07-02',
+        },
+      ],
+      withdrawals: [
+        {
+          key: 'pay_withdrawal_1',
+          withdrawalExternalId: 'pay_withdrawal_1',
+          amountCreditCents: 60000,
+          status: 'reviewing',
+          reviewDueAt: null,
+          reviewDueAtLabel: '—',
+          bankAccountFingerprint: 'bank_fp_123',
+          riskScore: 89,
         },
       ],
     });

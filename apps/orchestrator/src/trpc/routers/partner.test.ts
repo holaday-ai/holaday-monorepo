@@ -9,11 +9,13 @@ import {
   partnerLots,
   partnerMemberships,
   partnerRechargeOrders,
+  partnerWithdrawalRequests,
   type HolaCreditLedgerEntry,
   type PartnerKycProfile,
   type PartnerLot,
   type PartnerMembership,
   type PartnerRechargeOrder,
+  type PartnerWithdrawalRequest,
 } from '../../db/schema/partner.js';
 
 class FakePartnerDb {
@@ -23,6 +25,7 @@ class FakePartnerDb {
   readonly ledgerEntries: HolaCreditLedgerEntry[];
   readonly lots: PartnerLot[];
   readonly orders: PartnerRechargeOrder[];
+  readonly withdrawals: PartnerWithdrawalRequest[];
   readonly selectTables: string[] = [];
 
   constructor(input: {
@@ -32,6 +35,7 @@ class FakePartnerDb {
     ledgerEntries?: HolaCreditLedgerEntry[];
     lots?: PartnerLot[];
     orders?: PartnerRechargeOrder[];
+    withdrawals?: PartnerWithdrawalRequest[];
   } = {}) {
     this.users = [...(input.users ?? [fakeUser()])];
     this.memberships = [...(input.memberships ?? [])];
@@ -39,6 +43,7 @@ class FakePartnerDb {
     this.ledgerEntries = [...(input.ledgerEntries ?? [])];
     this.lots = [...(input.lots ?? [])];
     this.orders = [...(input.orders ?? [])];
+    this.withdrawals = [...(input.withdrawals ?? [])];
   }
 
   asContext(userId = 'usr_partner') {
@@ -99,12 +104,14 @@ class FakePartnerDb {
       return this.lots.filter((lot) => predicateText.includes(String(lot.userId)));
     }
     if (table === partnerRechargeOrders) {
-      return this.orders.filter(
-        (order) =>
-          predicateText.includes(String(order.userId)) &&
-          order.status === 'completed' &&
-          order.orderKind === 'recharge',
-      );
+      const rows = this.orders.filter((order) => predicateText.includes(String(order.userId)));
+      if (predicateText.includes('completed')) {
+        return rows.filter((order) => order.status === 'completed' && order.orderKind === 'recharge');
+      }
+      return rows;
+    }
+    if (table === partnerWithdrawalRequests) {
+      return this.withdrawals.filter((withdrawal) => predicateText.includes(String(withdrawal.userId)));
     }
     return [];
   }
@@ -245,6 +252,25 @@ function fakeOrder(overrides: Partial<PartnerRechargeOrder> = {}): PartnerRechar
   };
 }
 
+function fakeWithdrawal(overrides: Partial<PartnerWithdrawalRequest> = {}): PartnerWithdrawalRequest {
+  return {
+    id: 60,
+    externalId: 'pay_withdrawal',
+    userId: 123,
+    amountCreditCents: 600_00,
+    status: 'reviewing',
+    reviewDueAt: new Date('2026-07-09T00:00:00.000Z'),
+    bankAccountFingerprint: 'bank_fp_123',
+    riskScore: 72,
+    idempotencyKey: 'withdrawal-idem-1',
+    rejectionReason: null,
+    metadata: null,
+    createdAt: new Date('2026-07-02T00:00:00.000Z'),
+    updatedAt: new Date('2026-07-02T00:00:00.000Z'),
+    ...overrides,
+  };
+}
+
 describe('partnerRouter', () => {
   const originalFlag = process.env.PARTNER_LEDGER_ENABLED;
 
@@ -299,6 +325,18 @@ describe('partnerRouter', () => {
         }),
       ],
       lots: [fakeLot()],
+      orders: [
+        fakeOrder({
+          externalId: 'pay_membership_pending',
+          provider: 'manual',
+          providerCaptureId: null,
+          orderKind: 'membership',
+          amountCnyCents: 999_00,
+          status: 'pending',
+          idempotencyKey: 'membership-idem-1',
+        }),
+      ],
+      withdrawals: [fakeWithdrawal()],
     });
 
     const result = await partnerRouter.createCaller(fakeDb.asContext()).dashboard();
@@ -331,6 +369,26 @@ describe('partnerRouter', () => {
           carryForwardCreditCents: 25_00,
           releaseStartsAt: new Date('2026-06-30T00:00:00.000Z'),
           releaseEndsAt: new Date('2027-02-28T00:00:00.000Z'),
+        },
+      ],
+      orders: [
+        {
+          orderExternalId: 'pay_membership_pending',
+          provider: 'manual',
+          orderKind: 'membership',
+          amountCnyCents: 999_00,
+          status: 'pending',
+          createdAt: new Date('2026-06-20T00:00:00.000Z'),
+        },
+      ],
+      withdrawals: [
+        {
+          withdrawalExternalId: 'pay_withdrawal',
+          amountCreditCents: 600_00,
+          status: 'reviewing',
+          reviewDueAt: new Date('2026-07-09T00:00:00.000Z'),
+          bankAccountFingerprint: 'bank_fp_123',
+          riskScore: 72,
         },
       ],
     });
