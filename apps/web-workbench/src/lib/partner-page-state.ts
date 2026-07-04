@@ -22,6 +22,7 @@ export interface PartnerEnabledState {
   readonly membership: NormalizedPartnerMembership;
   readonly kycStatus: PartnerKycStatus;
   readonly kycLabel: string;
+  readonly kycProfile: PartnerKycProfileState | null;
   readonly inviteCode: string;
   readonly ledger: PartnerLedgerState;
   readonly lots: readonly PartnerLotState[];
@@ -60,6 +61,17 @@ export interface PartnerLotState {
   readonly releaseStartsAtLabel: string;
   readonly releaseEndsAt: string | null;
   readonly releaseEndsAtLabel: string;
+}
+
+export interface PartnerKycProfileState {
+  readonly kycExternalId: string;
+  readonly status: PartnerKycStatus;
+  readonly statusLabel: string;
+  readonly country: string;
+  readonly provider: string;
+  readonly providerRef: string | null;
+  readonly reviewedAt: string | null;
+  readonly reviewedAtLabel: string;
 }
 
 export interface PartnerOrderState {
@@ -177,6 +189,7 @@ export function normalizePartnerDashboard(value: unknown): PartnerPageState {
     membership: normalizeMembership(value.membership),
     kycStatus,
     kycLabel: kycStatusLabel(kycStatus),
+    kycProfile: normalizeKycProfile(value.kycProfile),
     inviteCode: normalizeInviteCode(value.inviteCode),
     ledger: normalizeLedger(value.ledger),
     lots: normalizeLots(value.lots),
@@ -414,6 +427,25 @@ function normalizeLedger(value: unknown): PartnerLedgerState {
     withdrawableCreditCents: safeCents(ledger.withdrawableCreditCents),
     pendingWithdrawalCreditCents: safeCents(ledger.pendingWithdrawalCreditCents),
     frozenCreditCents: safeCents(ledger.frozenCreditCents),
+  };
+}
+
+function normalizeKycProfile(value: unknown): PartnerKycProfileState | null {
+  if (!isRecord(value)) return null;
+  const kycExternalId = safeTrimmedString(value.kycExternalId);
+  if (!kycExternalId) return null;
+  const status = normalizeKycStatus(value.status);
+  const providerRef = safeTrimmedString(value.providerRef);
+  const reviewedAt = dateOnly(value.reviewedAt);
+  return {
+    kycExternalId,
+    status,
+    statusLabel: KYC_LABELS[status],
+    country: safeTrimmedString(value.country) || 'CN',
+    provider: safeTrimmedString(value.provider) || 'manual',
+    providerRef: providerRef || null,
+    reviewedAt,
+    reviewedAtLabel: reviewedAt ?? '—',
   };
 }
 

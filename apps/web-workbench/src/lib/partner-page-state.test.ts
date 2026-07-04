@@ -70,6 +70,14 @@ describe('partner page state helpers', () => {
         enabled: true,
         membership: { status: 'surprise', expiresAt: 'not-a-date' },
         kycStatus: 'mystery',
+        kycProfile: {
+          kycExternalId: ' pay_kyc_1 ',
+          status: 'pending',
+          country: 'CN',
+          provider: 'cn-bankcard',
+          providerRef: ' bankcard-flow-123 ',
+          reviewedAt: '2026-07-02T10:00:00.000Z',
+        },
         ledger: {
           availableCreditCents: -100,
           lockedCreditCents: '1200.9',
@@ -121,6 +129,16 @@ describe('partner page state helpers', () => {
       },
       kycStatus: 'not_started',
       kycLabel: '未开始',
+      kycProfile: {
+        kycExternalId: 'pay_kyc_1',
+        status: 'pending',
+        statusLabel: '审核中',
+        country: 'CN',
+        provider: 'cn-bankcard',
+        providerRef: 'bankcard-flow-123',
+        reviewedAt: '2026-07-02',
+        reviewedAtLabel: '2026-07-02',
+      },
       inviteCode: 'usr_partner',
       ledger: {
         availableCreditCents: 0,

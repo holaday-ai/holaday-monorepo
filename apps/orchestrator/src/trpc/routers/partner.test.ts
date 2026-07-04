@@ -312,7 +312,7 @@ describe('partnerRouter', () => {
     process.env.PARTNER_LEDGER_ENABLED = 'true';
     const fakeDb = new FakePartnerDb({
       memberships: [fakeMembership()],
-      kycProfiles: [fakeKyc({ status: 'passed' })],
+      kycProfiles: [fakeKyc({ status: 'pending', provider: 'cn-bankcard', providerRef: 'bankcard-flow-123' })],
       ledgerEntries: [
         fakeLedgerEntry({ bucket: 'available', direction: 'credit', amountCreditCents: 10_000_00 }),
         fakeLedgerEntry({
@@ -347,7 +347,15 @@ describe('partnerRouter', () => {
         status: 'active',
         expiresAt: new Date('2027-01-01T00:00:00.000Z'),
       },
-      kycStatus: 'passed',
+      kycStatus: 'pending',
+      kycProfile: {
+        kycExternalId: 'kyc_profile',
+        status: 'pending',
+        country: 'CN',
+        provider: 'cn-bankcard',
+        providerRef: 'bankcard-flow-123',
+        reviewedAt: new Date('2026-02-01T00:00:00.000Z'),
+      },
       inviteCode: 'usr_partner',
       ledger: {
         availableCreditCents: 10_000_00,

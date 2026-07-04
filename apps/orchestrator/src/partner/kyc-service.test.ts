@@ -142,6 +142,21 @@ describe('KycService', () => {
     expect(fakeDb.wherePredicateTexts[0]).toContain('user_id');
   });
 
+  it('returns the stored profile for dashboard display', async () => {
+    const fakeDb = new FakeKycDb([
+      { userId: 999, status: 'passed', providerRef: 'other-ref' },
+      { userId: 123, status: 'pending', provider: 'cn-bankcard', providerRef: 'bankcard-flow-123' },
+    ]);
+    const service = new KycService(fakeDb.asDB());
+
+    await expect(service.getProfile(123)).resolves.toMatchObject({
+      userId: 123,
+      status: 'pending',
+      provider: 'cn-bankcard',
+      providerRef: 'bankcard-flow-123',
+    });
+  });
+
   it('fails closed for unknown database statuses', async () => {
     const service = new KycService(new FakeKycDb([{ userId: 123, status: 'provider_surprise' }]).asDB());
 

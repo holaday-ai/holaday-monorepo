@@ -646,7 +646,11 @@ function PartnerWorkbench({
             提交实名
           </Button>
         </div>
-        {kycSubmission && <KycSubmissionSummary submission={kycSubmission} />}
+        {kycSubmission ? (
+          <KycSubmissionSummary submission={kycSubmission} />
+        ) : (
+          state.kycProfile && <KycProfileSummary profile={state.kycProfile} />
+        )}
       </Section>
 
       <Section
@@ -1094,6 +1098,18 @@ function KycSubmissionSummary({ submission }: { submission: PartnerKycSubmission
       <SummaryItem label="状态" value={kycStatusLabel(submission.status)} />
       <SummaryItem label="认证方式" value={submission.provider} />
       <SummaryItem label="流水号" value={submission.providerRef ?? '—'} />
+    </dl>
+  );
+}
+
+function KycProfileSummary({ profile }: { profile: NonNullable<PartnerEnabledState['kycProfile']> }): JSX.Element {
+  return (
+    <dl className="mt-4 grid gap-3 border-t border-[#EFEFEF] pt-4 text-xs sm:grid-cols-2 lg:grid-cols-4">
+      <SummaryItem label="实名编号" value={profile.kycExternalId} />
+      <SummaryItem label="状态" value={profile.statusLabel} />
+      <SummaryItem label="认证方式" value={profile.provider} />
+      <SummaryItem label="流水号" value={profile.providerRef ?? '—'} />
+      <SummaryItem label="复核日期" value={profile.reviewedAtLabel} />
     </dl>
   );
 }

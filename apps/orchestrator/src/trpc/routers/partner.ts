@@ -9,7 +9,7 @@ import { z } from 'zod';
 import { users } from '../../db/schema/users.js';
 import { partnerLots, partnerRechargeOrders, partnerWithdrawalRequests } from '../../db/schema/partner.js';
 import { CreditLedgerService } from '../../partner/credit-ledger-service.js';
-import { KycService, canRechargeWithKycStatus } from '../../partner/kyc-service.js';
+import { KycService, canRechargeWithKycStatus, normalizeKycStatus } from '../../partner/kyc-service.js';
 import { PartnerMembershipService } from '../../partner/membership-service.js';
 import { calculateApiUnits, selectRechargeTier } from '../../partner/partner-rules.js';
 import {
@@ -309,9 +309,9 @@ export const partnerRouter = router({
     const kycService = new KycService(ctx.db);
     const ledgerService = new CreditLedgerService(ctx.db);
 
-    const [membership, kycStatus, ledger, lots, orders, withdrawals] = await Promise.all([
+    const [membership, kycProfile, ledger, lots, orders, withdrawals] = await Promise.all([
       membershipService.getActiveMembership(userId),
-      kycService.getStatus(userId),
+      kycService.getProfile(userId),
       ledgerService.summarizeUser(userId),
       ctx.db
         .select({
@@ -363,6 +363,7 @@ export const partnerRouter = router({
       ...ledger,
       withdrawableCreditCents: ledger.availableCreditCents,
     };
+    const kycStatus = kycProfile ? normalizeKycStatus(kycProfile.status) : 'not_started';
 
     return {
       enabled: true as const,
@@ -373,6 +374,7 @@ export const partnerRouter = router({
           }
         : null,
       kycStatus,
+      kycProfile: kycProfile ? summarizePartnerKyc(kycProfile) : null,
       inviteCode: ctx.userId,
       ledger: dashboardLedger,
       lots: lots.map((lot) => ({

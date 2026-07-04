@@ -86,18 +86,20 @@ export function canWithdrawWithKycStatus(status: PartnerKycStatus): boolean {
 export class KycService {
   constructor(private readonly db: DB) {}
 
-  async getStatus(userId: number): Promise<PartnerKycStatus> {
+  async getProfile(userId: number): Promise<PartnerKycProfile | null> {
     const normalizedUserId = normalizePositiveSafeInteger(userId, 'userId');
 
     const rows = await this.db
-      .select({
-        userId: partnerKycProfiles.userId,
-        status: partnerKycProfiles.status,
-      })
+      .select()
       .from(partnerKycProfiles)
       .where(eq(partnerKycProfiles.userId, normalizedUserId));
     const row = rows.find((profile) => profile.userId === normalizedUserId);
 
+    return row ?? null;
+  }
+
+  async getStatus(userId: number): Promise<PartnerKycStatus> {
+    const row = await this.getProfile(userId);
     if (!row) return 'not_started';
     return normalizeKycStatus(row.status);
   }
