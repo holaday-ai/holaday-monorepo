@@ -324,9 +324,38 @@ function TaskStreamFallback(): JSX.Element {
   );
 }
 
+export interface StaticTaskEvidenceRow {
+  label: string;
+  value: string;
+}
+
+export function staticTaskEvidenceRows(input: {
+  finalUrl?: string | null;
+  finalScreenshot?: string | null;
+  attachments?: readonly unknown[] | null;
+}): StaticTaskEvidenceRow[] {
+  const rows: StaticTaskEvidenceRow[] = [];
+  if (input.finalUrl?.trim()) {
+    rows.push({ label: '最终页面', value: '已记录' });
+  }
+  if (input.finalScreenshot) {
+    rows.push({ label: '最终截图', value: '已保存' });
+  }
+  const attachmentCount = input.attachments?.length ?? 0;
+  if (attachmentCount > 0) {
+    rows.push({ label: '产物文件', value: `${attachmentCount} 个` });
+  }
+  return rows;
+}
+
 function StaticTaskDetailFallback({ task }: { task: UiTask }): JSX.Element {
   const statusLabel = taskStatusLabel(task.status, task.awaitingKind);
   const hasResult = Boolean(task.resultText?.trim());
+  const evidenceRows = staticTaskEvidenceRows({
+    finalUrl: task.finalUrl,
+    finalScreenshot: task.finalScreenshot,
+    attachments: task.attachments,
+  });
   return (
     <div className="rounded-[8px] border border-[#DCDDDD] bg-white px-5 py-4 text-sm shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-white/10 dark:bg-card/85">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -356,17 +385,22 @@ function StaticTaskDetailFallback({ task }: { task: UiTask }): JSX.Element {
           </p>
         )}
       </div>
-      <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-3">
-        <div className="rounded-[7px] border border-[#DCDDDD]/70 bg-white/60 px-3 py-2 dark:border-white/10 dark:bg-white/5">
-          最终页面：{task.finalUrl ? '已记录' : '未记录'}
+      {evidenceRows.length > 0 ? (
+        <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-3">
+          {evidenceRows.map((row) => (
+            <div
+              key={row.label}
+              className="rounded-[7px] border border-[#DCDDDD]/70 bg-white/60 px-3 py-2 dark:border-white/10 dark:bg-white/5"
+            >
+              {row.label}：{row.value}
+            </div>
+          ))}
         </div>
-        <div className="rounded-[7px] border border-[#DCDDDD]/70 bg-white/60 px-3 py-2 dark:border-white/10 dark:bg-white/5">
-          最终截图：{task.finalScreenshot ? '已保存' : '未保存'}
-        </div>
-        <div className="rounded-[7px] border border-[#DCDDDD]/70 bg-white/60 px-3 py-2 dark:border-white/10 dark:bg-white/5">
-          产物文件：{task.attachments?.length ?? 0} 个
-        </div>
-      </div>
+      ) : (
+        <p className="mt-3 rounded-[7px] border border-[#DCDDDD]/70 bg-white/60 px-3 py-2 text-xs leading-5 text-muted-foreground dark:border-white/10 dark:bg-white/5">
+          暂无可复核的链接、截图或产物；已加载文本只能作为过程线索。
+        </p>
+      )}
     </div>
   );
 }
