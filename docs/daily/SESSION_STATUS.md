@@ -15,7 +15,8 @@
 <!-- 2026-07-04 Codex 补充：批量子任务保留底层 terminal 语义；partial_success 显示“需复核”，cancelled 显示“已取消”，父级批量仍汇总为 partial/未成功数量。 -->
 <!-- 2026-07-04 Codex 补充：批量任务和 Admin Learning 里的 failed+partial_success 聚合文案改为“未成功/需复核或失败”，partial 批量进度改黄色，避免把需复核误读成纯失败。 -->
 <!-- 2026-07-04 Codex 补充：任务详情 lazy-load fallback 不再展示“未记录/未保存/0 个”的空证据指标；只有真实拿到页面、截图或附件才显示证据行，否则标明只能作为过程线索。 -->
-## 🔴 PROD LIVE REF = `codex/trust-loop-round1` — SPA `edcef62` / bundle `index-CDwGYOP2.js` + orch `b1f3dfb`（**结果证据 fallback 收口 LIVE（2026-07-04）**：任务详情 lazy-load fallback 只展示真实存在的页面/截图/附件证据；无证据时改为“暂无可复核的链接、截图或产物；已加载文本只能作为过程线索”，避免把空指标包装成证据。批量任务和 Admin Learning 的“需复核/失败”语义、批量子任务状态保真、图片历史需复核产物保留、tasks.list metadata hydration、股票最近真实交易日分时、状态机清理与通知遮挡修复继续生效。）
+<!-- 2026-07-04 Codex 补充：批量父状态 partial 的页面标签从“部分失败”改为“部分未成功”，覆盖需复核/失败/取消混合场景。 -->
+## 🔴 PROD LIVE REF = `codex/trust-loop-round1` — SPA `299d608` / bundle `index-b5oG9zOi.js` + orch `b1f3dfb`（**批量父状态文案收口 LIVE（2026-07-04）**：批量父状态 `partial` 不再显示“部分失败”，改为“部分未成功”，避免把包含需复核/取消的批量误读为纯失败。任务详情 lazy-load fallback 只展示真实存在的页面/截图/附件证据；批量任务和 Admin Learning 的“需复核/失败”语义、批量子任务状态保真、图片历史需复核产物保留、tasks.list metadata hydration、股票最近真实交易日分时、状态机清理与通知遮挡修复继续生效。）
 
 <!-- 2026-06-26 里程碑 — 🏁🏁 登录自学从机制到交易站真出货 + 四层 veto 防线 -->
 **🏁🏁 里程碑（2026-06-26）— 登录自学从机制到交易站真出货 + 四层 veto 防线全证通**
