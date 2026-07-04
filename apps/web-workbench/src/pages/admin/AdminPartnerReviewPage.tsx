@@ -3,6 +3,7 @@ import {
   CheckCircle2,
   Loader2,
   RefreshCw,
+  Search,
   ShieldCheck,
   XCircle,
   type LucideIcon,
@@ -22,6 +23,7 @@ import {
 import {
   formatPartnerCreditCents,
   formatPartnerMoneyCents,
+  filterAdminPartnerOverview,
   normalizeAdminPartnerOverview,
   partnerOrderActionLabel,
   partnerReviewStatusToken,
@@ -47,6 +49,7 @@ export function AdminPartnerReviewPage(): JSX.Element {
   const [orderReviewNotes, setOrderReviewNotes] = React.useState<Record<string, string>>({});
   const [withdrawalReasons, setWithdrawalReasons] = React.useState<Record<string, string>>({});
   const [payoutIds, setPayoutIds] = React.useState<Record<string, string>>({});
+  const [queueSearch, setQueueSearch] = React.useState('');
 
   const refresh = React.useCallback(async () => {
     const requestId = ++requestIdRef.current;
@@ -111,6 +114,10 @@ export function AdminPartnerReviewPage(): JSX.Element {
   }
 
   const enabled = data?.enabled ? data : null;
+  const visibleData = React.useMemo(
+    () => (enabled ? filterAdminPartnerOverview(enabled, queueSearch) : null),
+    [enabled, queueSearch],
+  );
 
   return (
     <div className="mx-auto max-w-7xl px-6 py-8">
@@ -152,9 +159,10 @@ export function AdminPartnerReviewPage(): JSX.Element {
         <div className="rounded-[8px] border border-[#DCDDDD] bg-white px-5 py-8 text-sm text-muted-foreground">
           合伙人账本未启用
         </div>
-      ) : enabled ? (
+      ) : enabled && visibleData?.enabled ? (
         <EnabledAdminPartnerReview
-          data={enabled}
+          data={visibleData}
+          queueSearch={queueSearch}
           pendingAction={pendingAction}
           kycUserExternalId={kycUserExternalId}
           kycStatus={kycStatus}
@@ -170,6 +178,7 @@ export function AdminPartnerReviewPage(): JSX.Element {
           setOrderReviewNotes={setOrderReviewNotes}
           setWithdrawalReasons={setWithdrawalReasons}
           setPayoutIds={setPayoutIds}
+          setQueueSearch={setQueueSearch}
           submitManualKyc={submitManualKyc}
           runAction={runAction}
         />
@@ -180,6 +189,7 @@ export function AdminPartnerReviewPage(): JSX.Element {
 
 function EnabledAdminPartnerReview({
   data,
+  queueSearch,
   pendingAction,
   kycUserExternalId,
   kycStatus,
@@ -195,10 +205,12 @@ function EnabledAdminPartnerReview({
   setOrderReviewNotes,
   setWithdrawalReasons,
   setPayoutIds,
+  setQueueSearch,
   submitManualKyc,
   runAction,
 }: {
   data: EnabledOverviewState;
+  queueSearch: string;
   pendingAction: string | null;
   kycUserExternalId: string;
   kycStatus: KycStatusInput;
@@ -214,6 +226,7 @@ function EnabledAdminPartnerReview({
   setOrderReviewNotes: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   setWithdrawalReasons: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   setPayoutIds: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  setQueueSearch: (value: string) => void;
   submitManualKyc: () => Promise<void>;
   runAction: (actionKey: string, action: () => Promise<void>, success: string) => Promise<void>;
 }): JSX.Element {
@@ -239,6 +252,18 @@ function EnabledAdminPartnerReview({
         setNote={setKycNote}
         onSubmit={submitManualKyc}
       />
+
+      <section className="rounded-[8px] border border-[#DCDDDD] bg-white p-4">
+        <label className="flex min-w-0 items-center gap-2 rounded-[8px] border border-[#DCDDDD] px-3 focus-within:border-[#EA1F59] focus-within:ring-2 focus-within:ring-[#EA1F59]/15">
+          <Search className="h-4 w-4 shrink-0 text-[#595757]" aria-hidden />
+          <input
+            value={queueSearch}
+            onChange={(event) => setQueueSearch(event.target.value)}
+            placeholder="搜索用户、订单、提现或批次"
+            className="h-9 min-w-0 flex-1 bg-transparent text-[13px] outline-none"
+          />
+        </label>
+      </section>
 
       <KycQueue rows={data.kycProfiles} pendingAction={pendingAction} runAction={runAction} />
       <OrderQueue

@@ -217,3 +217,39 @@ export function normalizeAdminPartnerOverview(value: unknown) {
     }),
   };
 }
+
+type AdminPartnerOverviewState = ReturnType<typeof normalizeAdminPartnerOverview>;
+type EnabledAdminPartnerOverviewState = Extract<AdminPartnerOverviewState, { enabled: true }>;
+
+export function filterAdminPartnerOverview(
+  state: AdminPartnerOverviewState,
+  query: string,
+): AdminPartnerOverviewState {
+  if (!state.enabled) return state;
+  const needle = query.trim().toLowerCase();
+  if (!needle) return state;
+
+  return {
+    ...state,
+    orders: state.orders.filter((row) =>
+      rowMatches(needle, row, ['orderExternalId', 'userExternalId', 'email', 'displayName', 'orderKind', 'status']),
+    ),
+    kycProfiles: state.kycProfiles.filter((row) =>
+      rowMatches(needle, row, ['kycExternalId', 'userExternalId', 'email', 'displayName', 'status', 'provider']),
+    ),
+    withdrawals: state.withdrawals.filter((row) =>
+      rowMatches(needle, row, ['withdrawalExternalId', 'userExternalId', 'email', 'displayName', 'status']),
+    ),
+    riskLots: state.riskLots.filter((row) =>
+      rowMatches(needle, row, ['lotExternalId', 'userExternalId', 'email', 'displayName', 'status', 'riskStatus']),
+    ),
+  } satisfies EnabledAdminPartnerOverviewState;
+}
+
+function rowMatches<T extends Record<string, unknown>>(
+  needle: string,
+  row: T,
+  keys: ReadonlyArray<keyof T>,
+): boolean {
+  return keys.some((key) => String(row[key] ?? '').toLowerCase().includes(needle));
+}

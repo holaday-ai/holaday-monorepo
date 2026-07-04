@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   formatPartnerCreditCents,
   formatPartnerMoneyCents,
+  filterAdminPartnerOverview,
   normalizeAdminPartnerOverview,
   normalizeRiskScore,
   partnerOrderActionLabel,
@@ -87,5 +88,75 @@ describe('normalizeAdminPartnerOverview', () => {
     });
     expect(state.withdrawals[0].riskScore).toBe(100);
     expect(state.kycProfiles).toEqual([]);
+  });
+
+  it('filters enabled overview queues by user and queue identifiers', () => {
+    const state = normalizeAdminPartnerOverview({
+      enabled: true,
+      metrics: {
+        pendingKycCount: 1,
+        pendingOrderCount: 1,
+        reviewRequiredOrderCount: 1,
+        pendingWithdrawalCount: 1,
+        approvedWithdrawalCount: 1,
+        overdueWithdrawalCount: 0,
+        riskLotCount: 1,
+      },
+      orders: [
+        {
+          orderExternalId: 'pay_order_alice',
+          userExternalId: 'usr_alice',
+          email: 'alice@holaday.local',
+          displayName: 'Alice Partner',
+        },
+      ],
+      kycProfiles: [
+        {
+          kycExternalId: 'pay_kyc_bob',
+          userExternalId: 'usr_bob',
+          email: 'bob@holaday.local',
+          displayName: 'Bob Partner',
+        },
+      ],
+      withdrawals: [
+        {
+          withdrawalExternalId: 'pay_withdrawal_cashout',
+          userExternalId: 'usr_cash',
+          email: 'cash@holaday.local',
+          displayName: 'Cash Partner',
+        },
+      ],
+      riskLots: [
+        {
+          lotExternalId: 'lot_risk_1',
+          userExternalId: 'usr_risk',
+          email: 'risk@holaday.local',
+          displayName: 'Risk Partner',
+        },
+      ],
+    });
+    expect(state.enabled).toBe(true);
+    if (!state.enabled) throw new Error('expected enabled state');
+
+    const byUser = filterAdminPartnerOverview(state, 'alice');
+    expect(byUser.enabled).toBe(true);
+    if (!byUser.enabled) throw new Error('expected enabled state');
+    expect(byUser.orders).toHaveLength(1);
+    expect(byUser.kycProfiles).toHaveLength(0);
+    expect(byUser.withdrawals).toHaveLength(0);
+    expect(byUser.riskLots).toHaveLength(0);
+
+    const byWithdrawal = filterAdminPartnerOverview(state, 'cashout');
+    expect(byWithdrawal.enabled).toBe(true);
+    if (!byWithdrawal.enabled) throw new Error('expected enabled state');
+    expect(byWithdrawal.orders).toHaveLength(0);
+    expect(byWithdrawal.withdrawals).toHaveLength(1);
+
+    const byRiskLot = filterAdminPartnerOverview(state, 'LOT_RISK');
+    expect(byRiskLot.enabled).toBe(true);
+    if (!byRiskLot.enabled) throw new Error('expected enabled state');
+    expect(byRiskLot.riskLots).toHaveLength(1);
+
+    expect(filterAdminPartnerOverview({ enabled: false }, 'alice')).toEqual({ enabled: false });
   });
 });
