@@ -4,6 +4,7 @@ import {
   liveSubStatusLongRunningHint,
   sanitizeMarkdownBrokenBoldUrls,
   sanitizeMarkdownTrailingPunctuation,
+  taskStreamHasAnyActivity,
   webSearchLinePrefix,
 } from './TaskStream';
 
@@ -48,5 +49,11 @@ describe('TaskStream live phase copy', () => {
   it('uses completed wording for terminal web search evidence', () => {
     expect(webSearchLinePrefix(false)).toBe('正在联网搜索');
     expect(webSearchLinePrefix(true)).toBe('已联网搜索');
+  });
+
+  it('treats live thinking, progress, and streaming output as activity', () => {
+    expect(taskStreamHasAnyActivity({ thinking: '正在分析' })).toBe(true);
+    expect(taskStreamHasAnyActivity({ progressMessage: '正在读取页面' })).toBe(true);
+    expect(taskStreamHasAnyActivity({ streamingText: '已经找到一条结果' })).toBe(true);
   });
 });

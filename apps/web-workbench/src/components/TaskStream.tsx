@@ -384,14 +384,18 @@ function AgentBlock({
     [detailSteps],
   );
 
-  const hasAnyActivity =
-    humanLines.length > 0 ||
-    Boolean(captchaWait) ||
-    Boolean(degrade) ||
-    Boolean(executorFallback) ||
-    Boolean(awaitingUser) ||
-    Boolean(webSearch) ||
-    Boolean(task.resultText);
+  const hasAnyActivity = taskStreamHasAnyActivity({
+    humanLineCount: humanLines.length,
+    captchaWait,
+    degrade,
+    executorFallback,
+    awaitingUser,
+    webSearch,
+    thinking,
+    progressMessage,
+    streamingText,
+    resultText: task.resultText,
+  });
   const hasExecutionActivity =
     steps.length > 0 ||
     Boolean(captchaWait) ||
@@ -638,6 +642,32 @@ function AgentBlock({
         )}
       </div>
     </div>
+  );
+}
+
+export function taskStreamHasAnyActivity(input: {
+  humanLineCount?: number;
+  captchaWait?: unknown;
+  degrade?: unknown;
+  executorFallback?: unknown;
+  awaitingUser?: unknown;
+  webSearch?: unknown;
+  thinking?: string | null;
+  progressMessage?: string | null;
+  streamingText?: string | null;
+  resultText?: string | null;
+}): boolean {
+  return (
+    (input.humanLineCount ?? 0) > 0 ||
+    Boolean(input.captchaWait) ||
+    Boolean(input.degrade) ||
+    Boolean(input.executorFallback) ||
+    Boolean(input.awaitingUser) ||
+    Boolean(input.webSearch) ||
+    Boolean(input.thinking) ||
+    Boolean(input.progressMessage) ||
+    Boolean(input.streamingText) ||
+    Boolean(input.resultText)
   );
 }
 
