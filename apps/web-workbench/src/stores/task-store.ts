@@ -274,6 +274,16 @@ type RuntimeStateKey =
   | 'subStatusByTask';
 
 type RuntimeStatePatch = Pick<TaskStore, RuntimeStateKey | 'terminalTaskIds'>;
+type AwaitingRuntimeStatePatch = Pick<
+  TaskStore,
+  | 'captchaWaitByTask'
+  | 'executorFallbackByTask'
+  | 'degradeByTask'
+  | 'thinkingByTask'
+  | 'streamingByTask'
+  | 'progressByTask'
+  | 'subStatusByTask'
+>;
 
 export function pruneRuntimeStateForTerminalTasks(
   prev: Pick<TaskStore, RuntimeStateKey | 'terminalTaskIds'>,
@@ -353,6 +363,62 @@ export function pruneRuntimeStateForTerminalTasks(
     prev.progressByTask,
     terminalIdsWithResult,
   );
+  if (nextProgressByTask !== prev.progressByTask) {
+    patch.progressByTask = nextProgressByTask;
+  }
+
+  return patch;
+}
+
+function pruneRuntimeStateForAwaitingUserTasks(
+  prev: Pick<TaskStore, keyof AwaitingRuntimeStatePatch>,
+  tasks: readonly UiTask[],
+): Partial<AwaitingRuntimeStatePatch> {
+  const awaitingIds = new Set(
+    tasks
+      .filter((task) => task.status === 'awaiting_user')
+      .map((task) => task.taskId),
+  );
+  if (awaitingIds.size === 0) return {};
+
+  const patch: Partial<AwaitingRuntimeStatePatch> = {};
+  const nextCaptchaWaitByTask = omitRuntimeKeys(
+    prev.captchaWaitByTask,
+    awaitingIds,
+  );
+  if (nextCaptchaWaitByTask !== prev.captchaWaitByTask) {
+    patch.captchaWaitByTask = nextCaptchaWaitByTask;
+  }
+
+  const nextExecutorFallbackByTask = omitRuntimeKeys(
+    prev.executorFallbackByTask,
+    awaitingIds,
+  );
+  if (nextExecutorFallbackByTask !== prev.executorFallbackByTask) {
+    patch.executorFallbackByTask = nextExecutorFallbackByTask;
+  }
+
+  const nextDegradeByTask = omitRuntimeKeys(prev.degradeByTask, awaitingIds);
+  if (nextDegradeByTask !== prev.degradeByTask) {
+    patch.degradeByTask = nextDegradeByTask;
+  }
+
+  const nextThinkingByTask = omitRuntimeKeys(prev.thinkingByTask, awaitingIds);
+  if (nextThinkingByTask !== prev.thinkingByTask) {
+    patch.thinkingByTask = nextThinkingByTask;
+  }
+
+  const nextSubStatusByTask = omitRuntimeKeys(prev.subStatusByTask, awaitingIds);
+  if (nextSubStatusByTask !== prev.subStatusByTask) {
+    patch.subStatusByTask = nextSubStatusByTask;
+  }
+
+  const nextStreamingByTask = omitRuntimeKeys(prev.streamingByTask, awaitingIds);
+  if (nextStreamingByTask !== prev.streamingByTask) {
+    patch.streamingByTask = nextStreamingByTask;
+  }
+
+  const nextProgressByTask = omitRuntimeKeys(prev.progressByTask, awaitingIds);
   if (nextProgressByTask !== prev.progressByTask) {
     patch.progressByTask = nextProgressByTask;
   }
@@ -671,6 +737,9 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           awaitingUserByTask: nextAwaitingUserByTask,
           tasks: nextTasks,
           ...(hydratedTask
+            ? pruneRuntimeStateForAwaitingUserTasks(prev, [hydratedTask])
+            : {}),
+          ...(hydratedTask
             ? pruneRuntimeStateForTerminalTasks(
                 { ...prev, awaitingUserByTask: nextAwaitingUserByTask },
                 [hydratedTask],
@@ -827,6 +896,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         loading: false,
         tasksCursor: normalizeTaskListCursor(res?.nextCursor),
         tasksHasMore: normalizeTaskListCursor(res?.nextCursor) != null,
+        ...pruneRuntimeStateForAwaitingUserTasks(prev, tasks),
         ...pruneRuntimeStateForTerminalTasks(prev, tasks),
       }));
       if (prevSelected) {
@@ -866,6 +936,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           loadingMore: false,
           tasksCursor: normalizeTaskListCursor(res?.nextCursor),
           tasksHasMore: normalizeTaskListCursor(res?.nextCursor) != null,
+          ...pruneRuntimeStateForAwaitingUserTasks(prev, moreTasks),
           ...pruneRuntimeStateForTerminalTasks(prev, moreTasks),
         };
       });
@@ -1052,6 +1123,9 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           const nextTerminalIds = new Set(prev.terminalTaskIds);
           nextTerminalIds.delete(taskId);
           const nextThinking = omitRuntimeKey(prev.thinkingByTask, taskId);
+          const nextProgress = omitRuntimeKey(prev.progressByTask, taskId);
+          const nextStreaming = omitRuntimeKey(prev.streamingByTask, taskId);
+          const nextSubStatus = omitRuntimeKey(prev.subStatusByTask, taskId);
           const nextCaptcha = omitRuntimeKey(prev.captchaWaitByTask, taskId);
           const nextExecutorFallback = omitRuntimeKey(
             prev.executorFallbackByTask,
@@ -1061,6 +1135,9 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           return {
             awaitingUserByTask: nextAwaiting,
             thinkingByTask: nextThinking,
+            progressByTask: nextProgress,
+            streamingByTask: nextStreaming,
+            subStatusByTask: nextSubStatus,
             captchaWaitByTask: nextCaptcha,
             executorFallbackByTask: nextExecutorFallback,
             degradeByTask: nextDegrade,
@@ -1247,6 +1324,14 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           msg.taskId,
         );
         const nextDegrade = omitRuntimeKey(prev.degradeByTask, msg.taskId);
+        const nextProgress =
+          msg.command === 'resume'
+            ? omitRuntimeKey(prev.progressByTask, msg.taskId)
+            : prev.progressByTask;
+        const nextStreaming =
+          msg.command === 'resume'
+            ? omitRuntimeKey(prev.streamingByTask, msg.taskId)
+            : prev.streamingByTask;
         const nextTerminalIds = new Set(prev.terminalTaskIds);
         if (msg.command === 'cancel' || msg.command === 'pause') nextTerminalIds.add(msg.taskId);
         else nextTerminalIds.delete(msg.taskId);
@@ -1271,6 +1356,8 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           awaitingUserByTask: nextAwaiting,
           thinkingByTask: nextThinking,
           subStatusByTask: nextSubStatus,
+          progressByTask: nextProgress,
+          streamingByTask: nextStreaming,
           captchaWaitByTask: nextCaptchaWait,
           executorFallbackByTask: nextExecutorFallback,
           degradeByTask: nextDegrade,
@@ -1732,6 +1819,8 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         const nextSubStatus = { ...prev.subStatusByTask };
         delete nextSubStatus[msg.taskId];
         const nextThinking = omitRuntimeKey(prev.thinkingByTask, msg.taskId);
+        const nextProgress = omitRuntimeKey(prev.progressByTask, msg.taskId);
+        const nextStreaming = omitRuntimeKey(prev.streamingByTask, msg.taskId);
         const nextCaptchaWait = omitRuntimeKey(prev.captchaWaitByTask, msg.taskId);
         const nextExecutorFallback = omitRuntimeKey(
           prev.executorFallbackByTask,
@@ -1751,6 +1840,8 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           },
           subStatusByTask: nextSubStatus,
           thinkingByTask: nextThinking,
+          progressByTask: nextProgress,
+          streamingByTask: nextStreaming,
           captchaWaitByTask: nextCaptchaWait,
           executorFallbackByTask: nextExecutorFallback,
           degradeByTask: nextDegrade,

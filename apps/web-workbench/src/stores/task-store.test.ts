@@ -594,6 +594,54 @@ describe('refreshTaskList', () => {
     expect(state.terminalTaskIds.has('tsk_list_race')).toBe(true);
   });
 
+  it('clears stale live buffers when a refreshed list row is awaiting_user', async () => {
+    listQuery.mockResolvedValueOnce({
+      tasks: [
+        taskRow({
+          taskId: 'tsk_wait_refresh',
+          status: 'awaiting_user',
+          result: { summary: '等待用户操作' },
+        }),
+      ],
+      nextCursor: null,
+    } as never);
+    detailQuery.mockReturnValueOnce(new Promise(() => {}) as never);
+    useTaskStore.setState({
+      selectedTaskId: 'tsk_wait_refresh',
+      composerMode: 'task',
+      tasks: [task({ taskId: 'tsk_wait_refresh', status: 'executing' })],
+      progressByTask: { tsk_wait_refresh: '旧进度' },
+      streamingByTask: { tsk_wait_refresh: '旧流式内容' },
+      subStatusByTask: {
+        tsk_wait_refresh: { subStatus: 'browsing', since: 1 },
+      },
+      thinkingByTask: {
+        tsk_wait_refresh: { summary: '旧思考', at: 1 },
+      },
+      captchaWaitByTask: {
+        tsk_wait_refresh: {
+          antiBotType: 'captcha',
+          message: '旧验证码',
+          startedAt: 1,
+          deadlineMs: 2,
+        },
+      },
+    });
+
+    await useTaskStore.getState().refreshTaskList();
+
+    const state = useTaskStore.getState();
+    expect(state.tasks[0]).toMatchObject({
+      taskId: 'tsk_wait_refresh',
+      status: 'awaiting_user',
+    });
+    expect(state.progressByTask.tsk_wait_refresh).toBeUndefined();
+    expect(state.streamingByTask.tsk_wait_refresh).toBeUndefined();
+    expect(state.subStatusByTask.tsk_wait_refresh).toBeUndefined();
+    expect(state.thinkingByTask.tsk_wait_refresh).toBeUndefined();
+    expect(state.captchaWaitByTask.tsk_wait_refresh).toBeUndefined();
+  });
+
   it('survives malformed first-page rows and cursor values', async () => {
     listQuery.mockResolvedValueOnce({
       tasks: [
@@ -838,6 +886,50 @@ describe('selectTask detail hydration', () => {
     expect(state.tasks[0]?.attachments).toBeUndefined();
     expect(state.tasks[0]?.planStatus).toBeUndefined();
     expect(state.awaitingUserByTask.tsk_detail).toBeUndefined();
+  });
+
+  it('clears stale live buffers when hydrated detail parks in awaiting_user', async () => {
+    detailQuery.mockResolvedValueOnce({
+      intent: '打开网页',
+      title: null,
+      status: 'awaiting_user',
+      awaitingQuestion: '请先登录后继续',
+      awaitingKind: 'login',
+      createdAt: '2026-05-22T00:00:00.000Z',
+      steps: [],
+      result: { summary: '旧等待说明' },
+      verificationPassed: null,
+      failureLevel: null,
+    } as never);
+    useTaskStore.setState({
+      tasks: [task({ taskId: 'tsk_detail_wait', status: 'executing' })],
+      progressByTask: { tsk_detail_wait: '旧进度' },
+      streamingByTask: { tsk_detail_wait: '旧流式内容' },
+      subStatusByTask: {
+        tsk_detail_wait: { subStatus: 'browsing', since: 1 },
+      },
+      thinkingByTask: {
+        tsk_detail_wait: { summary: '旧思考', at: 1 },
+      },
+    });
+
+    useTaskStore.getState().selectTask('tsk_detail_wait', 'ui');
+    await flushPromises();
+
+    const state = useTaskStore.getState();
+    expect(state.tasks[0]).toMatchObject({
+      taskId: 'tsk_detail_wait',
+      status: 'awaiting_user',
+      awaitingKind: 'login',
+    });
+    expect(state.awaitingUserByTask.tsk_detail_wait).toMatchObject({
+      question: '请先登录后继续',
+      awaitingKind: 'login',
+    });
+    expect(state.progressByTask.tsk_detail_wait).toBeUndefined();
+    expect(state.streamingByTask.tsk_detail_wait).toBeUndefined();
+    expect(state.subStatusByTask.tsk_detail_wait).toBeUndefined();
+    expect(state.thinkingByTask.tsk_detail_wait).toBeUndefined();
   });
 
   it('normalizes terminal attachment download URLs from detail rows', async () => {
@@ -1263,6 +1355,11 @@ describe('replyToTask', () => {
       thinkingByTask: {
         tsk_wait: { summary: '旧思考提示', at: 1 },
       },
+      progressByTask: { tsk_wait: '旧进度提示' },
+      streamingByTask: { tsk_wait: '旧流式内容' },
+      subStatusByTask: {
+        tsk_wait: { subStatus: 'verifying', since: 1 },
+      },
     });
 
     await expect(
@@ -1275,6 +1372,9 @@ describe('replyToTask', () => {
     expect(state.executorFallbackByTask.tsk_wait).toBeUndefined();
     expect(state.degradeByTask.tsk_wait).toBeUndefined();
     expect(state.thinkingByTask.tsk_wait).toBeUndefined();
+    expect(state.progressByTask.tsk_wait).toBeUndefined();
+    expect(state.streamingByTask.tsk_wait).toBeUndefined();
+    expect(state.subStatusByTask.tsk_wait).toBeUndefined();
     expect(state.tasks[0]?.status).toBe('executing');
     expect(state.tasks[0]?.awaitingKind).toBeUndefined();
     expect(state.userRepliesByTask.tsk_wait?.[0]?.text).toBe('登录好了');
@@ -1409,6 +1509,8 @@ describe('applyServerMessage awaiting_user', () => {
       thinkingByTask: {
         tsk_wait: { summary: '正在推理', at: 1 },
       },
+      progressByTask: { tsk_wait: '旧执行进度' },
+      streamingByTask: { tsk_wait: '旧流式内容' },
     });
 
     useTaskStore.getState().applyServerMessage({
@@ -1432,6 +1534,8 @@ describe('applyServerMessage awaiting_user', () => {
     expect(state.executorFallbackByTask.tsk_wait).toBeUndefined();
     expect(state.degradeByTask.tsk_wait).toBeUndefined();
     expect(state.thinkingByTask.tsk_wait).toBeUndefined();
+    expect(state.progressByTask.tsk_wait).toBeUndefined();
+    expect(state.streamingByTask.tsk_wait).toBeUndefined();
   });
 
   it('allows a paused runtime marker to become a recoverable awaiting-user state', async () => {
@@ -1577,6 +1681,36 @@ describe('applyServerMessage task.control', () => {
     expect(state.subStatusByTask.tsk_paused_then_resume).toMatchObject({
       subStatus: 'browsing',
     });
+  });
+
+  it('clears stale live buffers when resuming a paused task', () => {
+    useTaskStore.setState({
+      tasks: [
+        task({
+          taskId: 'tsk_resume_cleanup',
+          status: 'paused',
+          resultText: '达到最大步骤数，请确认下一步。',
+        }),
+      ],
+      terminalTaskIds: new Set(['tsk_resume_cleanup']),
+      progressByTask: { tsk_resume_cleanup: '暂停前进度' },
+      streamingByTask: { tsk_resume_cleanup: '暂停前输出' },
+    });
+
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.task.control',
+      taskId: 'tsk_resume_cleanup',
+      command: 'resume',
+    });
+
+    const state = useTaskStore.getState();
+    expect(state.tasks[0]).toMatchObject({
+      status: 'executing',
+      resultText: undefined,
+    });
+    expect(state.terminalTaskIds.has('tsk_resume_cleanup')).toBe(false);
+    expect(state.progressByTask.tsk_resume_cleanup).toBeUndefined();
+    expect(state.streamingByTask.tsk_resume_cleanup).toBeUndefined();
   });
 
   it('cancels a task immediately and gates stale stream/progress frames', () => {
