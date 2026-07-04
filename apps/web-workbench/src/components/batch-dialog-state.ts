@@ -2,6 +2,10 @@ export function batchCreateButtonLabel(submitting: boolean): string {
   return submitting ? '创建中…' : '创建并开始';
 }
 
+export function batchIndependenceCopy(): string {
+  return '每一项都是一个独立的任务，部分未成功不会影响其他任务。';
+}
+
 export function batchCreateDisabled({
   submitting,
   promptCount,

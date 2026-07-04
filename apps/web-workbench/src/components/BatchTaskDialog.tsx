@@ -4,6 +4,7 @@ import {
   batchActiveIndexAfterRemove,
   batchCreateButtonLabel,
   batchCreateDisabled,
+  batchIndependenceCopy,
   batchPromptCountCopy,
   normalizeBatchCreateResult,
 } from '@/components/batch-dialog-state';
@@ -455,7 +456,7 @@ export function BatchTaskDialog({
           </div>
           <p className="text-[11px] text-muted-foreground">
             批量任务会按你的套餐并发执行：免费 1 个、基础 3 个、专业 5 个。
-            每一项都是一个独立的任务，部分失败不会影响其他任务。
+            {batchIndependenceCopy()}
           </p>
           </div>
           <footer className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-[#DCDDDD]/80 bg-white px-5 py-3 dark:border-white/10 dark:bg-card">

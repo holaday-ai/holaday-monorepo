@@ -7485,7 +7485,7 @@ export const tasksRouter = router({
   /**
    * Clear every failed task owned by the caller, not just the first
    * page currently loaded by the SPA. This powers the sidebar/user-menu
-   * "清除失败任务" action whose badge is already server-side via
+   * "清除失败/需复核任务" action whose badge is already server-side via
    * `failedCount`.
    */
   clearFailed: protectedProcedure.mutation(async ({ ctx }) => {
@@ -7809,8 +7809,8 @@ export const tasksRouter = router({
     }),
 
   /**
-   * BOSS bug fix — total failed-task count for the caller (across
-   * all time, not just the loaded slice). The "清除失败任务 (N)"
+   * BOSS bug fix — total failed/review-needed task count for the caller (across
+   * all time, not just the loaded slice). The "清除失败/需复核任务 (N)"
    * badge was driven by tasks.filter(failed).length which only
    * counts what the SPA store has loaded. After a server-side
    * cleanup (admin SQL, batch delete) the badge would lag the

@@ -3,6 +3,7 @@ import {
   batchActiveIndexAfterRemove,
   batchCreateButtonLabel,
   batchCreateDisabled,
+  batchIndependenceCopy,
   batchPromptCountCopy,
   normalizeBatchCreateResult,
 } from './batch-dialog-state';
@@ -37,6 +38,12 @@ describe('batch dialog state helpers', () => {
   it('names the busy submit state', () => {
     expect(batchCreateButtonLabel(false)).toBe('创建并开始');
     expect(batchCreateButtonLabel(true)).toBe('创建中…');
+  });
+
+  it('describes independent items with unsuccessful wording, not pure failure wording', () => {
+    expect(batchIndependenceCopy()).toBe(
+      '每一项都是一个独立的任务，部分未成功不会影响其他任务。',
+    );
   });
 
   it('keeps the guided task card focused after removing cards', () => {

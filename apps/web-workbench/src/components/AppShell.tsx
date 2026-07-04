@@ -143,7 +143,7 @@ export function AppShell(): JSX.Element {
   const projectFilterRequestRef = React.useRef(0);
   const projectLoadMoreRequestRef = React.useRef(0);
   /**
-   * BOSS bug fix — server-side failed-task count for the user
+   * BOSS bug fix — server-side failed/review-needed task count for the user
    * menu badge + clear-confirm dialog. The previous
    * `tasks.filter(failed).length` only counted what the SPA had
    * loaded (paginated), so the badge lagged reality after

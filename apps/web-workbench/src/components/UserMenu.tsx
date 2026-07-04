@@ -24,7 +24,7 @@ interface Props {
   plan: string;
   onLogout(): void;
   onOpenFeedback?(): void;
-  /** Count of failed tasks — shows/hides the 批量清除 menu item. */
+  /** Count of failed or review-needed tasks — shows/hides the 批量清除 menu item. */
   failedTaskCount?: number;
   /** Invoked when the user picks "清除失败/需复核任务". Caller confirms + deletes. */
   onClearFailedTasks?(): void;
