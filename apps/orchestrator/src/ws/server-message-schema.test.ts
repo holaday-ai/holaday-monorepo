@@ -9,9 +9,23 @@ describe('server message schema', () => {
         taskId: 'tsk_max_steps',
         command: 'pause',
         reason: 'max_steps_reached',
+        detail: { message: 'max_steps_reached (25)' },
       }),
     );
 
     expect(parsed.success).toBe(true);
+  });
+
+  it('does not classify paused as a terminal websocket outcome', () => {
+    const parsed = parseServerMessage(
+      JSON.stringify({
+        type: 'server.task.terminal',
+        taskId: 'tsk_paused',
+        status: 'paused',
+        reason: 'max_steps_reached (25)',
+      }),
+    );
+
+    expect(parsed.success).toBe(false);
   });
 });

@@ -5497,25 +5497,31 @@ export const tasksRouter = router({
             } catch (err) {
               ctx.logger.error({ err, taskId }, 'persistVisionOutcome failed');
             }
-            // Push the terminal state to any connected SW for the user
-            // so the popup can update its card without polling. Fire-
-            // and-forget — broadcastToUser skips cleanly if no client
-            // is connected (task ended while popup/SW was offline;
-            // the popup will pick up the DB row on its next mount).
+            // Push the settled state to any connected client so the
+            // UI can update without polling. Paused is recoverable, so
+            // it uses task.control(pause) rather than task.terminal.
             try {
               if (visionPersisted) {
-                broadcastToUser(ctx.userId, {
-                  type: 'server.task.terminal',
-                  taskId,
-                  status: outcome.status,
-                  ...(outcome.status === 'completed' ? { summary: outcome.summary } : {}),
-                  ...(outcome.status === 'failed' || outcome.status === 'paused'
-                    ? { reason: outcome.reason }
-                    : {}),
-                });
+                if (outcome.status === 'paused') {
+                  broadcastToUser(ctx.userId, {
+                    type: 'server.task.control',
+                    taskId,
+                    command: 'pause',
+                    reason: 'max_steps_reached',
+                    detail: { message: outcome.reason },
+                  });
+                } else {
+                  broadcastToUser(ctx.userId, {
+                    type: 'server.task.terminal',
+                    taskId,
+                    status: outcome.status,
+                    ...(outcome.status === 'completed' ? { summary: outcome.summary } : {}),
+                    ...(outcome.status === 'failed' ? { reason: outcome.reason } : {}),
+                  });
+                }
               }
             } catch (err) {
-              ctx.logger.warn({ err, taskId }, 'broadcast task.terminal failed');
+              ctx.logger.warn({ err, taskId }, 'broadcast task settle failed');
             }
           })
           .catch(async (err) => {

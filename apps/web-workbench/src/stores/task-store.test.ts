@@ -1615,6 +1615,32 @@ describe('applyServerMessage task.control', () => {
     expect(useTaskStore.getState().tasks[0]?.status).toBe('executing');
   });
 
+  it('keeps max-steps pause recoverable while preserving the visible reason', () => {
+    useTaskStore.setState({
+      tasks: [task({ taskId: 'tsk_control_max_steps', status: 'executing' })],
+      subStatusByTask: {
+        tsk_control_max_steps: { subStatus: 'browsing', since: 1 },
+      },
+    });
+
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.task.control',
+      taskId: 'tsk_control_max_steps',
+      command: 'pause',
+      reason: 'max_steps_reached',
+      detail: { message: 'max_steps_reached (25)' },
+    });
+
+    const state = useTaskStore.getState();
+    expect(state.tasks[0]).toMatchObject({
+      status: 'paused',
+      resultText: 'max_steps_reached (25)',
+    });
+    expect(state.subStatusByTask.tsk_control_max_steps).toBeUndefined();
+    expect(state.terminalTaskIds.has('tsk_control_max_steps')).toBe(true);
+    expect(state.animatedTaskIds.has('tsk_control_max_steps')).toBe(false);
+  });
+
   it('does not let stale live frames revive a control-paused task', () => {
     useTaskStore.setState({
       tasks: [task({ taskId: 'tsk_control_pause_stale', status: 'executing' })],
@@ -2017,7 +2043,7 @@ describe('applyServerMessage stale live frames after terminal', () => {
   });
 });
 
-describe('applyServerMessage paused terminal frame', () => {
+describe('applyServerMessage terminal and pause cleanup', () => {
   it('does not let a late different terminal frame overwrite an existing final task', () => {
     useTaskStore.setState({
       tasks: [
@@ -2112,10 +2138,11 @@ describe('applyServerMessage paused terminal frame', () => {
     });
 
     useTaskStore.getState().applyServerMessage({
-      type: 'server.task.terminal',
+      type: 'server.task.control',
       taskId: 'tsk_paused_terminal',
-      status: 'paused',
-      reason: '达到最大步骤数，请确认下一步。',
+      command: 'pause',
+      reason: 'max_steps_reached',
+      detail: { message: '达到最大步骤数，请确认下一步。' },
     });
 
     const state = useTaskStore.getState();

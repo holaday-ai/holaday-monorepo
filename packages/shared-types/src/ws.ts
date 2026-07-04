@@ -369,7 +369,7 @@ export const serverVisionActSchema = z.object({
 });
 
 /**
- * Orchestrator → SW: task has reached a terminal state. Fired for
+ * Orchestrator → clients: task has reached a terminal state. Fired for
  * vision-loop tasks after `persistVisionOutcome` lands, so the SW
  * can update its in-memory view and the popup shows the final result
  * even when a task ended while the popup was closed.
@@ -377,11 +377,11 @@ export const serverVisionActSchema = z.object({
  *   completed → `summary` populated (task_done's summary text)
  *   failed    → `reason` populated (task_give_up reason or
  *                orchestrator-synthesised message)
- *   paused    → `reason` populated (e.g. max_steps_reached)
  *   cancelled → both optional
  *
- * Legacy plan-once tasks use server.task.control(pause) /
- * persistence, not this frame.
+ * Pauses are intentionally not terminal outcomes. Use
+ * server.task.control(command='pause') so clients preserve recovery
+ * affordances and only use their stale-frame guards.
  */
 export const serverTaskTerminalSchema = z.object({
   type: z.literal('server.task.terminal'),
@@ -392,7 +392,7 @@ export const serverTaskTerminalSchema = z.object({
   // visible answer but failed at least one structural check
   // (url_count / result_count / price_sort). SPA renders a yellow
   // banner above the summary; `summary` is still populated.
-  status: z.enum(['completed', 'failed', 'paused', 'cancelled', 'partial_success']),
+  status: z.enum(['completed', 'failed', 'cancelled', 'partial_success']),
   summary: z.string().optional(),
   reason: z.string().optional(),
   // Codex Round 2 P1-6 — list of failed structural checks so the
