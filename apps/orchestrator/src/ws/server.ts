@@ -227,6 +227,7 @@ async function applyRehydrationForUser(state: ClientState): Promise<void> {
         taskId: entry.state.taskId,
         command: 'pause',
         reason: entry.pauseReason,
+        ...(entry.pauseMessage ? { detail: { message: entry.pauseMessage } } : {}),
       });
       reemittedPause += 1;
       continue;

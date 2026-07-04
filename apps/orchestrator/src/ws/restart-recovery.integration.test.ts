@@ -214,4 +214,95 @@ describe('restart recovery: awaiting_user re-emits server.user.confirm', () => {
       client.close();
     }
   });
+
+  it('reconnecting web client receives persisted pause detail after hello', async () => {
+    const { newExternalId, WS_SUBPROTOCOL, parseServerMessage } = await import(
+      '@holaday/shared-types'
+    );
+    const { db } = await import('../db/client.js');
+    const { eq } = await import('drizzle-orm');
+    const { users } = await import('../db/schema/users.js');
+    const { TaskRepository } = await import('../agent/task-repository.js');
+    const { signAccessToken } = await import('../auth/jwt.js');
+    const { createWsServer, loadRehydratedTasks } = await import('./server.js');
+    const { default: WebSocket } = await import('ws');
+
+    const email = `recovery-paused-detail+${Date.now()}@example.com`;
+    const userExternalId = newExternalId('user');
+    await db.insert(users).values({
+      externalId: userExternalId,
+      email,
+      passwordHash: 'placeholder',
+    });
+    const user = must((await db.select().from(users).where(eq(users.email, email)))[0], 'user');
+
+    const repo = new TaskRepository(db);
+    const taskId = newExternalId('task');
+    await repo.insertTask(
+      {
+        taskId,
+        status: 'executing',
+        plan: [],
+        cursor: 0,
+        pendingConfirm: null,
+      },
+      { userId: user.id, intent: 'pause detail recovery' },
+    );
+    const paused = await repo.persistVisionOutcome(taskId, {
+      status: 'paused',
+      reason: 'max_steps_reached (25)',
+      tickCount: 25,
+    });
+    expect(paused.persisted).toBe(true);
+
+    const summary = await loadRehydratedTasks();
+    expect(summary.taskCount).toBeGreaterThanOrEqual(1);
+
+    const port = Number(process.env.WS_PORT);
+    const ws = createWsServer(port);
+    close = async () => {
+      await ws.close();
+    };
+
+    const token = await signAccessToken({ sub: userExternalId, plan: 'free' });
+    const client = new WebSocket(`ws://127.0.0.1:${port}`, [WS_SUBPROTOCOL, `jwt.${token}`]);
+
+    const pausePromise = new Promise<{
+      taskId: string;
+      command: string;
+      reason?: string;
+      detail?: Record<string, unknown>;
+    }>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('no pause control received')), 5_000);
+      client.on('message', (raw) => {
+        const parsed = parseServerMessage(raw.toString());
+        if (parsed.success && parsed.data.type === 'server.task.control') {
+          clearTimeout(timer);
+          resolve(parsed.data);
+        }
+      });
+      client.on('error', (err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+    });
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        client.once('open', () => resolve());
+        client.once('error', reject);
+      });
+      client.send(JSON.stringify({ type: 'client.hello', token, extensionVersion: 'web-workbench' }));
+
+      const pause = await pausePromise;
+      expect(pause).toMatchObject({
+        taskId,
+        command: 'pause',
+        reason: 'max_steps_reached',
+        detail: { message: 'max_steps_reached (25)' },
+      });
+    } finally {
+      client.close();
+    }
+  });
 });

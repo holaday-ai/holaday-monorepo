@@ -1709,6 +1709,63 @@ describe('applyServerMessage task.control', () => {
     });
   });
 
+  it('allows a paused runtime marker to be cancelled by a later control frame', () => {
+    useTaskStore.setState({
+      tasks: [
+        task({
+          taskId: 'tsk_paused_then_cancel',
+          status: 'paused',
+          resultText: '达到最大步骤数，请确认下一步。',
+        }),
+      ],
+      terminalTaskIds: new Set(['tsk_paused_then_cancel']),
+      progressByTask: { tsk_paused_then_cancel: '等待用户确认' },
+      streamingByTask: { tsk_paused_then_cancel: 'partial answer' },
+    });
+
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.task.control',
+      taskId: 'tsk_paused_then_cancel',
+      command: 'cancel',
+    });
+
+    const state = useTaskStore.getState();
+    expect(state.tasks[0]).toMatchObject({
+      status: 'cancelled',
+      resultText: '达到最大步骤数，请确认下一步。',
+    });
+    expect(state.terminalTaskIds.has('tsk_paused_then_cancel')).toBe(true);
+    expect(state.progressByTask.tsk_paused_then_cancel).toBe('等待用户确认');
+    expect(state.streamingByTask.tsk_paused_then_cancel).toBe('partial answer');
+  });
+
+  it('allows a paused runtime marker to receive refreshed pause detail', () => {
+    useTaskStore.setState({
+      tasks: [
+        task({
+          taskId: 'tsk_paused_detail_refresh',
+          status: 'paused',
+        }),
+      ],
+      terminalTaskIds: new Set(['tsk_paused_detail_refresh']),
+    });
+
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.task.control',
+      taskId: 'tsk_paused_detail_refresh',
+      command: 'pause',
+      reason: 'max_steps_reached',
+      detail: { message: 'max_steps_reached (25)' },
+    });
+
+    const state = useTaskStore.getState();
+    expect(state.tasks[0]).toMatchObject({
+      status: 'paused',
+      resultText: 'max_steps_reached (25)',
+    });
+    expect(state.terminalTaskIds.has('tsk_paused_detail_refresh')).toBe(true);
+  });
+
   it('clears stale live buffers when resuming a paused task', () => {
     useTaskStore.setState({
       tasks: [

@@ -240,6 +240,7 @@ describe('paused state persistence + rehydration', () => {
     expect(hit?.state.status).toBe('paused');
     expect(hit?.state.pauseReason).toBe('max_steps_reached');
     expect(hit?.pauseReason).toBe('max_steps_reached');
+    expect((hit as { pauseMessage?: string } | undefined)?.pauseMessage).toBe('max_steps_reached (25)');
   });
 
   it('rehydrateInFlight returns queued tasks so restart recovery can resolve them visibly', async () => {

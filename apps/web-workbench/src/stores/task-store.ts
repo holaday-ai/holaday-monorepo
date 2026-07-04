@@ -1311,8 +1311,10 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     if (msg.type === 'server.task.control') {
       set((prev) => {
         const existingTask = prev.tasks.find((task) => task.taskId === msg.taskId);
-        const isPausedResume = msg.command === 'resume' && existingTask?.status === 'paused';
-        if (isTaskRuntimeTerminal(prev, msg.taskId) && !isPausedResume) return prev;
+        const isPausedRecoverableControl =
+          existingTask?.status === 'paused' &&
+          (msg.command === 'pause' || msg.command === 'resume' || msg.command === 'cancel');
+        if (isTaskRuntimeTerminal(prev, msg.taskId) && !isPausedRecoverableControl) return prev;
         const pauseMessage =
           msg.command === 'pause' && typeof msg.detail?.message === 'string'
             ? msg.detail.message

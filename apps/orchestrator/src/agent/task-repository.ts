@@ -1115,6 +1115,7 @@ export class TaskRepository {
         userExternalId: users.externalId,
         errorCode: tasks.errorCode,
         errorMessage: tasks.errorMessage,
+        result: tasks.result,
       })
       .from(tasks)
       .innerJoin(users, eq(users.id, tasks.userId))
@@ -1162,6 +1163,7 @@ export class TaskRepository {
       // Tolerate pre-batch rows that stored the old flat shape
       // {stepId, prompt, risk}. Upgrade them to {kind:'single', ...}.
       const pending: PendingConfirm | null = normalizePendingConfirm(pendingRaw);
+      const resultReason = extractResultReason(row.result);
 
       const retryCount: Record<string, number> = {};
       for (const s of steps) {
@@ -1188,6 +1190,7 @@ export class TaskRepository {
         userExternalId: row.userExternalId,
         pendingConfirm: pending,
         pauseReason: state.pauseReason ?? null,
+        pauseMessage: state.status === 'paused' ? resultReason : null,
         awaitingQuestion: row.awaitingQuestion ?? null,
         awaitingKind: row.awaitingKind ?? null,
       });
@@ -1201,6 +1204,7 @@ export interface RehydratedTask {
   userExternalId: string;
   pendingConfirm: PendingConfirm | null;
   pauseReason: 'user' | 'retries_exhausted' | 'quota_exceeded' | 'max_steps_reached' | null;
+  pauseMessage: string | null;
   awaitingQuestion: string | null;
   awaitingKind: string | null;
 }
@@ -1231,6 +1235,13 @@ function normalizePendingConfirm(raw: unknown): PendingConfirm | null {
     };
   }
   return null;
+}
+
+function extractResultReason(value: unknown): string | null {
+  const result = normalizeJson(value);
+  if (!result || typeof result !== 'object') return null;
+  const reason = (result as Record<string, unknown>).reason;
+  return typeof reason === 'string' && reason.trim().length > 0 ? reason : null;
 }
 
 // ---------- helpers ----------
