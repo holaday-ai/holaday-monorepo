@@ -72,6 +72,13 @@ export interface PartnerRechargeGate {
   readonly reason: string;
 }
 
+export interface PartnerWithdrawalGate {
+  readonly blocked: boolean;
+  readonly reason: string;
+}
+
+const PARTNER_WITHDRAWAL_MIN_CREDIT_CENTS = 500_00;
+
 const disabledState: PartnerDisabledState = {
   enabled: false,
   title: '合伙人账本暂未开放',
@@ -217,6 +224,80 @@ export function partnerRechargeGate(state: PartnerEnabledState): PartnerRecharge
   return {
     blocked: false,
     reason: '可以创建充值预览和订单。',
+  };
+}
+
+export function partnerWithdrawalGate(
+  state: PartnerEnabledState,
+  input: {
+    readonly amountCreditCents: number;
+    readonly bankAccountFingerprint: string;
+  },
+): PartnerWithdrawalGate {
+  if (state.membership.status !== 'active') {
+    return {
+      blocked: true,
+      reason: '完成年度会员后才能提现。',
+    };
+  }
+
+  if (state.kycStatus !== 'passed') {
+    return {
+      blocked: true,
+      reason:
+        state.kycStatus === 'review_required'
+          ? '补充实名材料并通过后才能提现。'
+          : state.kycStatus === 'rejected'
+            ? '重新提交实名并通过后才能提现。'
+            : '实名审核通过后才能提现。',
+    };
+  }
+
+  if (state.ledger.frozenCreditCents > 0) {
+    return {
+      blocked: true,
+      reason: '账户存在冻结 HOLA Credit，需完成复核后再提现。',
+    };
+  }
+
+  if (state.ledger.withdrawableCreditCents < PARTNER_WITHDRAWAL_MIN_CREDIT_CENTS) {
+    return {
+      blocked: true,
+      reason: '可提现 HOLA Credit 低于 500 HOLA Credit。',
+    };
+  }
+
+  if (input.amountCreditCents <= 0) {
+    return {
+      blocked: true,
+      reason: '请填写提现金额。',
+    };
+  }
+
+  if (input.amountCreditCents < PARTNER_WITHDRAWAL_MIN_CREDIT_CENTS) {
+    return {
+      blocked: true,
+      reason: '单次提现最低 500 HOLA Credit。',
+    };
+  }
+
+  if (input.amountCreditCents > state.ledger.withdrawableCreditCents) {
+    return {
+      blocked: true,
+      reason: '提现金额超过可提现 HOLA Credit。',
+    };
+  }
+
+  if (input.bankAccountFingerprint.trim().length === 0) {
+    return {
+      blocked: true,
+      reason: '请填写银行账户指纹。',
+    };
+  }
+
+  return {
+    blocked: false,
+    reason: '可以提交提现申请。',
   };
 }
 

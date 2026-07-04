@@ -24,6 +24,7 @@ import {
   partnerDraftKeyAfterSuccess,
   partnerDraftKeyFor,
   partnerRechargeGate,
+  partnerWithdrawalGate,
   type PartnerIdempotencyDraft,
   type PartnerEnabledState,
   type PartnerPageState,
@@ -541,6 +542,10 @@ function PartnerWorkbench({
   const membershipActive = state.membership.status === 'active';
   const kycSubmitBlocked = !membershipActive || state.kycStatus === 'passed' || state.kycStatus === 'pending';
   const rechargeGate = partnerRechargeGate(state);
+  const withdrawalGate = partnerWithdrawalGate(state, {
+    amountCreditCents: amountInputToCreditCents(withdrawalAmountInput),
+    bankAccountFingerprint: bankFingerprint,
+  });
   const kycHint =
     !membershipActive
       ? '完成年度会员后可提交实名复核。'
@@ -791,12 +796,12 @@ function PartnerWorkbench({
             </label>
           </div>
           <div className="mt-3 flex items-center justify-between gap-3 text-xs text-muted-foreground">
-            <span>金额单位为 HOLA Credit。</span>
+            <span>{withdrawalGate.reason}</span>
             <Button
               type="button"
               size="sm"
               onClick={onRequestWithdrawal}
-              disabled={isMutating}
+              disabled={isMutating || withdrawalGate.blocked}
             >
               {pendingAction === 'withdrawal' ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />

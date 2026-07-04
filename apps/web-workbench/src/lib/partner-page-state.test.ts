@@ -10,6 +10,7 @@ import {
   partnerDraftKeyAfterSuccess,
   partnerDraftKeyFor,
   partnerRechargeGate,
+  partnerWithdrawalGate,
 } from './partner-page-state';
 
 describe('partner page state helpers', () => {
@@ -234,6 +235,107 @@ describe('partner page state helpers', () => {
     expect(partnerRechargeGate(ready)).toEqual({
       blocked: false,
       reason: '可以创建充值预览和订单。',
+    });
+  });
+
+  it('summarizes the withdrawal gate from balance, KYC, and bank state', () => {
+    const missingMembership = normalizePartnerDashboard({
+      enabled: true,
+      membership: null,
+      kycStatus: 'passed',
+      ledger: { withdrawableCreditCents: 10_000_00 },
+    });
+    expect(missingMembership.enabled).toBe(true);
+    if (!missingMembership.enabled) throw new Error('expected enabled partner dashboard');
+    expect(
+      partnerWithdrawalGate(missingMembership, {
+        amountCreditCents: 600_00,
+        bankAccountFingerprint: 'bank_fp_1',
+      }),
+    ).toEqual({
+      blocked: true,
+      reason: '完成年度会员后才能提现。',
+    });
+
+    const pendingKyc = normalizePartnerDashboard({
+      enabled: true,
+      membership: { status: 'active', expiresAt: '2027-07-03T00:00:00.000Z' },
+      kycStatus: 'pending',
+      ledger: { withdrawableCreditCents: 10_000_00 },
+    });
+    expect(pendingKyc.enabled).toBe(true);
+    if (!pendingKyc.enabled) throw new Error('expected enabled partner dashboard');
+    expect(
+      partnerWithdrawalGate(pendingKyc, {
+        amountCreditCents: 600_00,
+        bankAccountFingerprint: 'bank_fp_1',
+      }),
+    ).toEqual({
+      blocked: true,
+      reason: '实名审核通过后才能提现。',
+    });
+
+    const frozen = normalizePartnerDashboard({
+      enabled: true,
+      membership: { status: 'active', expiresAt: '2027-07-03T00:00:00.000Z' },
+      kycStatus: 'passed',
+      ledger: { withdrawableCreditCents: 10_000_00, frozenCreditCents: 1_00 },
+    });
+    expect(frozen.enabled).toBe(true);
+    if (!frozen.enabled) throw new Error('expected enabled partner dashboard');
+    expect(
+      partnerWithdrawalGate(frozen, {
+        amountCreditCents: 600_00,
+        bankAccountFingerprint: 'bank_fp_1',
+      }),
+    ).toEqual({
+      blocked: true,
+      reason: '账户存在冻结 HOLA Credit，需完成复核后再提现。',
+    });
+
+    const ready = normalizePartnerDashboard({
+      enabled: true,
+      membership: { status: 'active', expiresAt: '2027-07-03T00:00:00.000Z' },
+      kycStatus: 'passed',
+      ledger: { withdrawableCreditCents: 10_000_00 },
+    });
+    expect(ready.enabled).toBe(true);
+    if (!ready.enabled) throw new Error('expected enabled partner dashboard');
+    expect(
+      partnerWithdrawalGate(ready, {
+        amountCreditCents: 499_00,
+        bankAccountFingerprint: 'bank_fp_1',
+      }),
+    ).toEqual({
+      blocked: true,
+      reason: '单次提现最低 500 HOLA Credit。',
+    });
+    expect(
+      partnerWithdrawalGate(ready, {
+        amountCreditCents: 11_000_00,
+        bankAccountFingerprint: 'bank_fp_1',
+      }),
+    ).toEqual({
+      blocked: true,
+      reason: '提现金额超过可提现 HOLA Credit。',
+    });
+    expect(
+      partnerWithdrawalGate(ready, {
+        amountCreditCents: 600_00,
+        bankAccountFingerprint: '',
+      }),
+    ).toEqual({
+      blocked: true,
+      reason: '请填写银行账户指纹。',
+    });
+    expect(
+      partnerWithdrawalGate(ready, {
+        amountCreditCents: 600_00,
+        bankAccountFingerprint: 'bank_fp_1',
+      }),
+    ).toEqual({
+      blocked: false,
+      reason: '可以提交提现申请。',
     });
   });
 
