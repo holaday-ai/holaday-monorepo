@@ -26,3 +26,7 @@ export function usageOutcomeSubcopy({
 export function usageQuotaPolicyCopy(): string {
   return '额度按任务提交计入；系统任务不计入。任务后续进入需复核、失败或取消，也会保留本次提交占用。';
 }
+
+export function usageOutcomeLoadingSubcopy(): string {
+  return '需复核 — · 失败 — · 取消 — · 进行中 —';
+}

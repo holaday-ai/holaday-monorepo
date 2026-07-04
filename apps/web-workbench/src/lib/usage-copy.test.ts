@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { usageOutcomeSubcopy, usageQuotaPolicyCopy } from './usage-copy';
+import {
+  usageOutcomeLoadingSubcopy,
+  usageOutcomeSubcopy,
+  usageQuotaPolicyCopy,
+} from './usage-copy';
 
 describe('usageOutcomeSubcopy', () => {
   it('surfaces partial-success counts separately from hard failures', () => {
@@ -29,5 +33,9 @@ describe('usageOutcomeSubcopy', () => {
     expect(usageQuotaPolicyCopy()).toBe(
       '额度按任务提交计入；系统任务不计入。任务后续进入需复核、失败或取消，也会保留本次提交占用。',
     );
+  });
+
+  it('keeps the loading placeholder aligned with visible outcome categories', () => {
+    expect(usageOutcomeLoadingSubcopy()).toBe('需复核 — · 失败 — · 取消 — · 进行中 —');
   });
 });

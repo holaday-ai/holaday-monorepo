@@ -3,7 +3,11 @@ import * as React from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { trpc } from '@/lib/trpc';
-import { usageOutcomeSubcopy, usageQuotaPolicyCopy } from '@/lib/usage-copy';
+import {
+  usageOutcomeLoadingSubcopy,
+  usageOutcomeSubcopy,
+  usageQuotaPolicyCopy,
+} from '@/lib/usage-copy';
 import {
   hasRecentUsage,
   normalizeUsageSnapshot,
@@ -210,7 +214,7 @@ export function UsagePage(): JSX.Element {
                 value={snap == null ? '—' : String(snap.monthCompleted)}
                 sub={
                   snap == null
-                    ? '失败 — · 进行中 —'
+                    ? usageOutcomeLoadingSubcopy()
                     : usageOutcomeSubcopy({
                         partialSuccess: snap.monthPartialSuccess,
                         failed: snap.monthFailed,
