@@ -4,13 +4,13 @@ import { expertResultUsageCopy } from './expert-result-usage';
 describe('expertResultUsageCopy', () => {
   it('names typed expert workflows when metadata has a workflow id', () => {
     expect(expertResultUsageCopy({ expertWorkflowId: 'content-topic' })).toBe(
-      '本次使用了 1 个专家技能（选题分析）',
+      '本次使用了 1 个技能（选题分析）',
     );
   });
 
   it('keeps unknown workflow ids visible without inventing a label', () => {
     expect(expertResultUsageCopy({ expertWorkflowId: 'custom-workflow' })).toBe(
-      '本次使用了 1 个专家技能',
+      '本次使用了 1 个技能',
     );
   });
 

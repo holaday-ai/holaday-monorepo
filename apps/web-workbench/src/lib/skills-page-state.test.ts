@@ -5,7 +5,6 @@ import {
   normalizeSkillToggleResponse,
   skillCardBadge,
   skillCardUsageHint,
-  skillUseActionCopy,
   skillTaskDraft,
   skillLimitBannerCopy,
   skillLimitMessage,
@@ -21,17 +20,17 @@ interface SkillFixture {
 }
 
 const skills: readonly SkillFixture[] = [
-  { id: 'finance', category: '财务' },
-  { id: 'content', category: '内容' },
-  { id: 'ops', category: '运营' },
+  { id: 'analytics', category: '分析决策' },
+  { id: 'content', category: '内容运营' },
+  { id: 'management', category: '管理协作' },
 ];
 
 describe('skills page state helpers', () => {
   it('groups skills in product category order', () => {
     const groups = groupSkillsByCategory(skills);
 
-    expect(groups.map((group) => group.category)).toEqual(['运营', '内容', '财务']);
-    expect(groups[0]?.items.map((item) => item.id)).toEqual(['ops']);
+    expect(groups.map((group) => group.category)).toEqual(['内容运营', '分析决策', '管理协作']);
+    expect(groups[0]?.items.map((item) => item.id)).toEqual(['content']);
   });
 
   it('labels known and unknown plans', () => {
@@ -101,23 +100,23 @@ describe('skills page state helpers', () => {
         cap: 0,
         planId: 'free',
       }),
-    ).toBe('体验版暂不支持启用专家技能');
+    ).toBe('体验版暂不支持启用技能');
   });
 
   it('builds plan-aware limit messages', () => {
     expect(skillLimitMessage({ cap: 0, planId: 'free' })).toBe(
-      '体验版暂不支持启用专家技能',
+      '体验版暂不支持启用技能',
     );
     expect(skillLimitMessage({ cap: 33, planId: 'pro' })).toBe('已达到 33 个技能上限');
     expect(skillLimitMessage({ cap: 5, planId: 'basic' })).toBe(
-      '已达到当前套餐的技能上限（5 个）· 升级到专业版可使用全部 33 个技能',
+      '已达到当前套餐的技能上限（5 个）· 升级到专业版可使用全部 13 个技能',
     );
   });
 
   it('explains over-limit skill states without implying a broken counter', () => {
     expect(skillLimitBannerCopy({ cap: 0, enabledCount: 0, planId: 'free' })).toEqual({
-      title: '体验版暂不支持启用专家技能',
-      body: '升级到基础版可自选专家技能；升级到专业版可使用全部 33 个技能。',
+      title: '体验版暂不支持启用技能',
+      body: '升级到基础版可自选技能；升级到专业版可使用全部 13 个技能。',
     });
     expect(skillLimitBannerCopy({ cap: 5, enabledCount: 11, planId: 'basic' })).toEqual({
       title: '当前已启用 11 个技能',
@@ -125,7 +124,7 @@ describe('skills page state helpers', () => {
     });
     expect(skillLimitBannerCopy({ cap: 5, enabledCount: 5, planId: 'basic' })).toEqual({
       title: '已达到 5 个技能上限',
-      body: '升级到专业版可使用全部 33 个技能。',
+      body: '升级到专业版可使用全部 13 个技能。',
     });
   });
 
@@ -136,7 +135,7 @@ describe('skills page state helpers', () => {
     });
     expect(skillLoadErrorCopy('')).toEqual({
       title: '技能暂时无法加载',
-      body: '请稍后重试，或刷新页面后再打开专家技能。',
+      body: '请稍后重试，或刷新页面后再打开技能。',
     });
   });
 
@@ -154,7 +153,7 @@ describe('skills page state helpers', () => {
 
   it('explains how enabled skill cards affect new tasks', () => {
     expect(skillCardUsageHint({ enabled: true, pending: false })).toBe(
-      '会自动匹配；也可立即开始',
+      '会自动匹配；可在输入框 @ 调用',
     );
     expect(skillCardUsageHint({ enabled: false, pending: false })).toBe(
       '启用后可参与自动匹配',
@@ -173,72 +172,27 @@ describe('skills page state helpers', () => {
     );
   });
 
-  it('builds direct expert action copy for skill cards', () => {
-    expect(
-      skillUseActionCopy({
-        skillName: '增长黑客',
-        enabled: true,
-        pending: false,
-        blocked: false,
-      }),
-    ).toEqual({
-      label: '用此专家',
-      title: '用增长黑客创建任务',
-      ariaLabel: '用增长黑客创建任务',
-    });
-    expect(
-      skillUseActionCopy({
-        skillName: '增长黑客',
-        enabled: false,
-        pending: false,
-        blocked: false,
-      }).label,
-    ).toBe('先启用');
-    expect(
-      skillUseActionCopy({
-        skillName: '增长黑客',
-        enabled: true,
-        pending: true,
-        blocked: false,
-      }).title,
-    ).toBe('正在保存技能选择');
-    expect(
-      skillUseActionCopy({
-        skillName: '增长黑客',
-        enabled: true,
-        pending: false,
-        blocked: true,
-      }).title,
-    ).toBe('另一个技能正在保存，稍后可用此专家创建任务');
-    expect(
-      skillUseActionCopy({
-        skillName: '增长黑客',
-        enabled: true,
-        pending: false,
-        blocked: false,
-        planBlocked: true,
-      }),
-    ).toEqual({
-      label: '不可使用',
-      title: '当前套餐暂不支持用此专家创建任务',
-      ariaLabel: '当前套餐暂不支持用增长黑客创建任务',
-    });
-  });
-
-  it('builds an editable expert task draft from a skill card', () => {
+  it('builds an editable skill task draft from a skill card', () => {
     expect(
       skillTaskDraft({
-        name: ' 增长黑客 ',
-        description: ' 设计增长实验 ',
+        id: ' douyin-live-ops ',
+        name: ' 抖音直播与运营 ',
+        description: ' 直播复盘 ',
       }),
     ).toEqual({
-      skillName: '增长黑客',
-      expertMode: 'expert',
-      prompt: '使用「增长黑客」专家技能：设计增长实验\n\n请帮我：',
+      skillId: 'douyin-live-ops',
+      skillName: '抖音直播与运营',
+      skillSource: 'manual',
+      prompt: '@抖音直播与运营 ',
     });
-    expect(skillTaskDraft({ name: '', description: '' }).prompt).toBe(
-      '使用「专家」专家技能：\n\n请帮我：',
-    );
+    expect(
+      skillTaskDraft({ id: '', name: '', description: '' }),
+    ).toEqual({
+      skillId: '',
+      skillName: '技能',
+      skillSource: 'manual',
+      prompt: '@技能 ',
+    });
   });
 
   it('normalizes skill list payloads before rendering', () => {
@@ -247,20 +201,25 @@ describe('skills page state helpers', () => {
         {
           id: ' content ',
           name: ' 内容助手 ',
-          icon: ' PenTool ',
-          category: '内容',
+          logoId: ' social-media-strategy ',
+          category: '内容运营',
           description: ' 写作 ',
+          aliases: [' 社媒 ', ''],
+          maturity: 'workflow',
+          connectors: [' browser ', ''],
           enabled: true,
         },
         {
           id: 'loose',
           name: '',
-          icon: '',
           category: 'bad',
           description: null,
+          aliases: 'bad',
+          maturity: 'bad',
+          connectors: null,
           enabled: 'yes',
         },
-        { id: 'content', name: 'duplicate', category: '运营' },
+        { id: 'content', name: 'duplicate', category: '内容运营' },
         { id: '', name: 'empty' },
         null,
       ]),
@@ -268,17 +227,23 @@ describe('skills page state helpers', () => {
       {
         id: 'content',
         name: '内容助手',
-        icon: 'PenTool',
-        category: '内容',
+        logoId: 'social-media-strategy',
+        category: '内容运营',
         description: '写作',
+        aliases: ['社媒'],
+        maturity: 'workflow',
+        connectors: ['browser'],
         enabled: true,
       },
       {
         id: 'loose',
         name: 'loose',
-        icon: 'Sparkles',
-        category: '其他',
+        logoId: 'loose',
+        category: '内容运营',
         description: '暂无技能说明',
+        aliases: [],
+        maturity: 'template',
+        connectors: [],
         enabled: false,
       },
     ]);

@@ -4,7 +4,9 @@ import {
   BASIC_ROLE_PICK_LIMIT,
   gateRoleForUser,
   newExternalId,
+  normalizeSkillIds,
   OPEN_POOL_ROLE_IDS,
+  skillById,
   type PlanId,
 } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
@@ -324,6 +326,7 @@ const createInput = z.object({
    * the wire lets us short-circuit the guard cleanly.
    */
   skillId: z.string().min(1).max(64).optional(),
+  skillSource: z.enum(['manual']).optional(),
   /**
    * Phase 1 #2 ④ — alias for skillId. 历史上 skill/role 字段在本仓库混用，
    * API 调用方（含对抗实测）常传 `roleId`。接受为 skillId 的别名，避免选了
@@ -366,6 +369,35 @@ const createInput = z.object({
     })
     .optional(),
 });
+
+const ASHARE_SKILL_IDS = new Set(['a-share-market-briefing', 'a-share-analyst']);
+
+function assertManualSkillSelectionEnabled(
+  input: {
+    skillId?: string | null;
+    roleId?: string | null;
+    skillSource?: 'manual' | undefined;
+  },
+  selectedSkillIds: unknown,
+): string | null {
+  if (input.skillSource !== 'manual') return null;
+  const skillId = (input.skillId ?? input.roleId ?? '').trim();
+  const skill = skillById(skillId);
+  if (!skill) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: '该技能不存在或已更新，请刷新技能页后重试',
+    });
+  }
+  const enabled = new Set(normalizeSkillIds(selectedSkillIds));
+  if (!enabled.has(skill.id)) {
+    throw new TRPCError({
+      code: 'PRECONDITION_FAILED',
+      message: '请先启用该技能，再在输入框中 @ 调用',
+    });
+  }
+  return skill.id;
+}
 
 /**
  * O15 — friendly refusal for coding / app-building intents. HOLA DAY
@@ -617,6 +649,7 @@ export const tasksRouter = router({
     if (!userRow) {
       throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
     }
+    assertManualSkillSelectionEnabled(input, userRow.selectedSkills);
 
     // Phase 14 audit follow-up — multi-turn 追问. When `replyToTaskId`
     // is set, the new task piggybacks on a previously completed/failed
@@ -1464,14 +1497,14 @@ export const tasksRouter = router({
     // 或显式选技能（skillId/roleId/gatedRole）= 上下文内。上下文内**命中任一 A股信号**（个股
     // 解析成功 / A股术语 / 持仓语境词 / 自选股整体问）→ 进合规框架（lane 或引导兜底）；**完全无
     // A股信号**（如「帮我写周报」）→ 放行通用路径，不误拦。per-task 选择器(发 skillId)记 backlog。
-    const ashareSkillEnabled =
-      Array.isArray(userRow.selectedSkills) &&
-      (userRow.selectedSkills as string[]).includes('a-share-analyst');
+    const ashareSkillEnabled = normalizeSkillIds(userRow.selectedSkills).some((id) =>
+      ASHARE_SKILL_IDS.has(id),
+    );
     const ashareContext =
       ashareSkillEnabled ||
-      input.skillId === 'a-share-analyst' ||
-      input.roleId === 'a-share-analyst' ||
-      gatedRole === 'a-share-analyst';
+      (input.skillId ? ASHARE_SKILL_IDS.has(input.skillId) : false) ||
+      (input.roleId ? ASHARE_SKILL_IDS.has(input.roleId) : false) ||
+      ASHARE_SKILL_IDS.has(gatedRole);
     // Cross-session guard (#1 session, 2026-06-13, see SESSION_STATUS): only
     // enter the a-share QA lane for GENERIC info intents — a dedicated lane the
     // classifier already chose (template_fill / image / browser) must win, or
@@ -1568,7 +1601,7 @@ export const tasksRouter = router({
             const [row] = await ctx.db
               .select({ manifest: skills.manifest })
               .from(skills)
-              .where(eq(skills.slug, 'a-share-analyst'))
+              .where(inArray(skills.slug, Array.from(ASHARE_SKILL_IDS)))
               .limit(1);
             const body = (row?.manifest as { body?: unknown } | null)?.body;
             if (typeof body === 'string' && body.trim()) skillMarkdown = body;
@@ -2277,7 +2310,7 @@ export const tasksRouter = router({
           expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
           // Codex Pack C1 — user's composer pick. SPA reads this from
           // tasks.detail.result.metadata.expertMode to decide whether
-          // to render the "本次使用了专家技能" footer chip.
+          // to render the "本次使用了技能" footer chip.
           expertMode: expertModeOverride,
           selectedRole: gatedRole === 'none' ? null : gatedRole,
           model: 'claude-sonnet-4-6',
@@ -8604,3 +8637,7 @@ function unionAllowedOrigins(catalogue: SkillCatalogueEntry[]): readonly string[
   }
   return out;
 }
+
+export const __tasksInternals = {
+  assertManualSkillSelectionEnabled,
+};

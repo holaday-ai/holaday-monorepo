@@ -26,7 +26,7 @@ import { taskStatusLabel } from '@/lib/task-status-copy';
 import { useTaskStore } from '@/stores/task-store';
 import type { AwaitingKind } from '@/lib/awaiting-user-copy';
 import type { SidePanelMode } from '@/types/side-panel';
-import type { UiTask } from '@/types/task';
+import type { UiSkillSelection, UiTask } from '@/types/task';
 
 const TaskStream = React.lazy(() =>
   import('@/components/TaskStream').then((module) => ({
@@ -41,6 +41,7 @@ interface Props {
     fileIds: string[],
     mode?: 'auto' | 'plan',
     expertMode?: 'normal' | 'expert' | 'auto',
+    skillSelection?: UiSkillSelection,
   ) => Promise<ComposerSubmitResult> | ComposerSubmitResult;
   busy?: boolean;
   onOpenSidebar?: () => void;

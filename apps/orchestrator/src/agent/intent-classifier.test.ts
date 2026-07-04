@@ -122,19 +122,19 @@ describe('classifyExecutionMode — pre-Firecrawl regression suite (site/URL wit
 });
 
 describe('classifyExecutionMode — explicit skill hint short-circuit', () => {
-  it('content-creator skill stays generate even with site name in intent', async () => {
+  it('公众号推文运营 skill stays generate even with site name in intent', async () => {
     const out = await classifyExecutionMode({
       intent: '为知乎账号写一篇 AI Agent 普及文',
-      skillId: 'content-creator',
+      skillId: 'wechat-article-ops',
       logger: fakeLogger(),
     });
     expect(out).toBe('generate');
   });
 
-  it('xiaohongshu skill is browser even on a generate-leaning intent', async () => {
+  it('小红书种草运营 skill is browser even on a generate-leaning intent', async () => {
     const out = await classifyExecutionMode({
       intent: '帮我写一段笔记',
-      skillId: 'xiaohongshu',
+      skillId: 'xiaohongshu-seeding-ops',
       logger: fakeLogger(),
     });
     expect(out).toBe('browser');
@@ -164,7 +164,7 @@ describe('classifyExecutionMode — strong keyword overrides skill hint (Phase 1
   it('search-verb signal beats xiaohongshu skill hint → scrape', async () => {
     const out = await classifyExecutionMode({
       intent: '搜索小红书上 P1F-A 露营装备笔记',
-      skillId: 'xiaohongshu',
+      skillId: 'xiaohongshu-seeding-ops',
       logger: fakeLogger(),
     });
     expect(out).toBe('scrape');
@@ -173,7 +173,7 @@ describe('classifyExecutionMode — strong keyword overrides skill hint (Phase 1
   it('search-verb signal beats douyin skill hint → scrape', async () => {
     const out = await classifyExecutionMode({
       intent: '查找 P1F-B 抖音热门商品趋势',
-      skillId: 'douyin',
+      skillId: 'douyin-live-ops',
       logger: fakeLogger(),
     });
     expect(out).toBe('scrape');
@@ -181,8 +181,8 @@ describe('classifyExecutionMode — strong keyword overrides skill hint (Phase 1
 
   it('English search-pattern signal beats browser skill hints → scrape', async () => {
     for (const [intent, skillId] of [
-      ['search P1F-G Xiaohongshu camping notes', 'xiaohongshu'],
-      ['look up P1F-H recent posts on Douyin', 'douyin'],
+      ['search P1F-G Xiaohongshu camping notes', 'xiaohongshu-seeding-ops'],
+      ['look up P1F-H recent posts on Douyin', 'douyin-live-ops'],
     ] as const) {
       const out = await classifyExecutionMode({
         intent,
@@ -196,7 +196,7 @@ describe('classifyExecutionMode — strong keyword overrides skill hint (Phase 1
   it('URL signal beats douyin skill hint → scrape', async () => {
     const out = await classifyExecutionMode({
       intent: '看一下 https://example.com/p1f-c-page',
-      skillId: 'douyin',
+      skillId: 'douyin-live-ops',
       logger: fakeLogger(),
     });
     expect(out).toBe('scrape');
@@ -205,7 +205,7 @@ describe('classifyExecutionMode — strong keyword overrides skill hint (Phase 1
   it('interaction verb still routes to browser even without skill hint', async () => {
     const out = await classifyExecutionMode({
       intent: '在小红书上点赞 P1F-D 这篇笔记',
-      skillId: 'xiaohongshu',
+      skillId: 'xiaohongshu-seeding-ops',
       logger: fakeLogger(),
     });
     expect(out).toBe('browser');
@@ -216,7 +216,7 @@ describe('classifyExecutionMode — strong keyword overrides skill hint (Phase 1
     // signal that defers to the user's explicit skill choice.
     const out = await classifyExecutionMode({
       intent: '看看小红书 P1F-E 的产品页',
-      skillId: 'xiaohongshu',
+      skillId: 'xiaohongshu-seeding-ops',
       logger: fakeLogger(),
     });
     expect(out).toBe('browser');

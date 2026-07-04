@@ -969,7 +969,7 @@ interface FeatureItem {
 }
 
 const FEATURES: readonly FeatureItem[] = [
-  { icon: Sparkles, label: '专家技能', href: '/skills' },
+  { icon: Sparkles, label: '技能', href: '/skills' },
   { icon: TrendingUp, label: '股市任务', href: '/stocks' },
   { icon: MoonStar, label: '今日能量', href: '/cosmic' },
   { icon: Clapperboard, label: '创建视频', href: '/video' },

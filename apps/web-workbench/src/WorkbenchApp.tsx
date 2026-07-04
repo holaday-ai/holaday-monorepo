@@ -40,7 +40,7 @@ import {
   type SidePanelMode,
   type SidePanelOverride,
 } from '@/types/side-panel';
-import type { UiTask } from '@/types/task';
+import type { UiSkillSelection, UiTask } from '@/types/task';
 
 type UiTaskAwaitingKind = NonNullable<UiTask['awaitingKind']> | undefined;
 
@@ -285,12 +285,30 @@ export function WorkbenchApp(): JSX.Element {
     setDefaultViewportProfile(pickCurrentViewportProfile());
   }, [pickCurrentViewportProfile, setDefaultViewportProfile]);
   const createTask: typeof createTaskRaw = React.useCallback(
-    (intent, fileIds, replyToTaskId, mode, expertMode, viewportProfile) => {
+    (
+      intent,
+      fileIds,
+      replyToTaskId,
+      mode,
+      expertMode,
+      viewportProfile,
+      videoOptions,
+      skillSelection,
+    ) => {
       // Pack C1 added `expertMode` at position 5; viewportProfile
       // moved to position 6. The wrapper still auto-picks viewport
       // from the current panel layout when callers don't pass one.
       const picked = viewportProfile ?? pickCurrentViewportProfile();
-      return createTaskRaw(intent, fileIds, replyToTaskId, mode, expertMode, picked);
+      return createTaskRaw(
+        intent,
+        fileIds,
+        replyToTaskId,
+        mode,
+        expertMode,
+        picked,
+        videoOptions,
+        skillSelection,
+      );
     },
     [createTaskRaw, pickCurrentViewportProfile],
   );
@@ -504,13 +522,20 @@ export function WorkbenchApp(): JSX.Element {
                 ? 5 * 1024 * 1024
                 : 0
           }
-          onSubmit={async (intent, fileIds, mode, expertMode) => {
+          onSubmit={async (
+            intent,
+            fileIds,
+            mode,
+            expertMode,
+            skillSelection?: UiSkillSelection,
+          ) => {
             hdDebug('onSubmit', {
               isReplyMode,
               followUpTaskId: followUpTarget?.taskId ?? null,
               selectedTaskId,
               mode,
               expertMode,
+              skillId: skillSelection?.skillId ?? null,
             });
             if (isReplyMode && selectedTaskId) {
               const res = await replyToTask(selectedTaskId, intent, fileIds);
@@ -528,7 +553,16 @@ export function WorkbenchApp(): JSX.Element {
               return clearComposerOnSubmitSuccess;
             }
             if (followUpTarget) {
-              const res = await createTask(intent, fileIds, followUpTarget.taskId);
+              const res = await createTask(
+                intent,
+                fileIds,
+                followUpTarget.taskId,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                skillSelection,
+              );
               if ('error' in res) {
                 toast.show(taskActionError('追问失败', res.error), 'error');
                 return keepComposerOnSubmitFailure;
@@ -536,7 +570,16 @@ export function WorkbenchApp(): JSX.Element {
               toast.show('已基于上一个任务追问');
               return clearComposerOnSubmitSuccess;
             }
-            const res = await createTask(intent, fileIds, undefined, mode, expertMode);
+            const res = await createTask(
+              intent,
+              fileIds,
+              undefined,
+              mode,
+              expertMode,
+              undefined,
+              undefined,
+              skillSelection,
+            );
             if ('error' in res) {
               const codeRejected =
                 res.error.includes('HOLA DAY 专注浏览器任务') ||

@@ -1,5 +1,5 @@
 /**
- * Phase 16 — user-skills router. The "专家技能" settings page reads
+ * Phase 16 — user-skills router. The Skills page reads
  * SKILL_META and the caller's users.selected_skills JSON, then lets
  * the user toggle each on/off.
  *
@@ -11,7 +11,7 @@
  * one-shot `scripts/split-skills.ts` partitions existing rows.
  */
 
-import { PLAN_CATALOGUE, type PlanId } from '@holaday/shared-types';
+import { PLAN_CATALOGUE, normalizeSkillIds, type PlanId } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
@@ -20,8 +20,6 @@ import { users } from '../../db/schema/users.js';
 import { protectedProcedure, router } from '../trpc.js';
 
 const PLAN_IDS = new Set<string>(Object.keys(PLAN_CATALOGUE));
-const SKILL_ID_SET: ReadonlySet<string> = new Set(SKILL_META.map((skill) => skill.id));
-
 function skillCapForPlan(plan: string | null | undefined): number {
   if (plan && PLAN_IDS.has(plan)) {
     return PLAN_CATALOGUE[plan as PlanId].rolesAllowed;
@@ -30,16 +28,28 @@ function skillCapForPlan(plan: string | null | undefined): number {
 }
 
 function skillLimitErrorMessage(plan: string | null | undefined, cap: number): string {
-  if (cap <= 0) return '当前套餐暂不支持启用专家技能';
+  if (cap <= 0) return '当前套餐暂不支持启用技能';
   const label = plan === 'pro' ? '专业版' : plan === 'basic' ? '基础版' : '当前套餐';
-  return `${label}最多可启用 ${cap} 个专家技能，请先停用一个技能后再启用新的技能`;
+  return `${label}最多可启用 ${cap} 个技能，请先停用一个技能后再启用新的技能`;
 }
 
 function normalizeSelectedSkillIds(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return Array.from(
-    new Set(value.filter((skillId): skillId is string => SKILL_ID_SET.has(skillId))),
-  );
+  return normalizeSkillIds(value);
+}
+
+function buildSkillListRows(enabledIds: Iterable<string>) {
+  const enabled = new Set(normalizeSelectedSkillIds(Array.from(enabledIds)));
+  return SKILL_META.map((skill) => ({
+    id: skill.id,
+    name: skill.name,
+    logoId: skill.logoId,
+    category: skill.category,
+    description: skill.description,
+    aliases: [...skill.aliases],
+    maturity: skill.maturity,
+    connectors: [...skill.connectors],
+    enabled: enabled.has(skill.id),
+  }));
 }
 
 /**
@@ -67,15 +77,7 @@ export const skillsRouter = router({
    * renders this as the SkillsPage card grid grouped by category.
    */
   list: protectedProcedure.query(async ({ ctx }) => {
-    const enabled = new Set(await loadEnabledIds(ctx));
-    return SKILL_META.map((s) => ({
-      id: s.id,
-      name: s.name,
-      icon: s.icon,
-      category: s.category,
-      description: s.description,
-      enabled: enabled.has(s.id),
-    }));
+    return buildSkillListRows(await loadEnabledIds(ctx));
   }),
 
   /**
@@ -86,7 +88,8 @@ export const skillsRouter = router({
   toggle: protectedProcedure
     .input(z.object({ skillId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
-      if (!skillMetaById(input.skillId)) {
+      const skill = skillMetaById(input.skillId);
+      if (!skill) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
           message: `unknown skill: ${input.skillId}`,
@@ -101,7 +104,7 @@ export const skillsRouter = router({
         throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
       }
       const current = new Set(normalizeSelectedSkillIds(row.selectedSkills));
-      const wasEnabled = current.has(input.skillId);
+      const wasEnabled = current.has(skill.id);
       const cap = skillCapForPlan(row.plan);
       if (!wasEnabled && current.size >= cap) {
         throw new TRPCError({
@@ -109,18 +112,19 @@ export const skillsRouter = router({
           message: skillLimitErrorMessage(row.plan, cap),
         });
       }
-      if (wasEnabled) current.delete(input.skillId);
-      else current.add(input.skillId);
+      if (wasEnabled) current.delete(skill.id);
+      else current.add(skill.id);
       const next = Array.from(current);
       await ctx.db
         .update(users)
         .set({ selectedSkills: next.length === 0 ? null : next })
         .where(eq(users.id, row.id));
-      return { skillId: input.skillId, enabled: !wasEnabled };
+      return { skillId: skill.id, enabled: !wasEnabled };
     }),
 });
 
 export const __skillsInternals = {
+  buildSkillListRows,
   normalizeSelectedSkillIds,
   skillCapForPlan,
   skillLimitErrorMessage,

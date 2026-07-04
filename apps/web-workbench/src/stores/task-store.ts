@@ -12,6 +12,7 @@ import type {
   UiDegradeEvent,
   UiExecutorFallback,
   UiScreencast,
+  UiSkillSelection,
   UiStep,
   UiTask,
   UiTaskStatus,
@@ -245,6 +246,7 @@ export interface TaskStore {
      * 其余任务忽略。透传给 `tasks.create` 的 `videoOptions`。
      */
     videoOptions?: VideoCreationOptions,
+    skillSelection?: UiSkillSelection,
   ): Promise<{ taskId: string } | { error: string }>;
   deleteTask(taskId: string): Promise<{ ok: true } | { error: string }>;
   renameTask(taskId: string, title: string): Promise<{ ok: true } | { error: string }>;
@@ -1206,7 +1208,16 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     }
   },
 
-  async createTask(intent, fileIds, replyToTaskId, mode, expertMode, viewportProfile, videoOptions) {
+  async createTask(
+    intent,
+    fileIds,
+    replyToTaskId,
+    mode,
+    expertMode,
+    viewportProfile,
+    videoOptions,
+    skillSelection,
+  ) {
     // Reject intents that are obviously control commands typed into
     // the wrong box (e.g. user typing "停止" into the composer
     // because they didn't see the Stop button). Fails client-side
@@ -1245,6 +1256,12 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         ...(replyToTaskId ? { replyToTaskId } : {}),
         ...(mode === 'plan' ? { mode } : {}),
         ...(expertMode && expertMode !== 'auto' ? { expertMode } : {}),
+        ...(skillSelection?.skillId
+          ? {
+              skillId: skillSelection.skillId,
+              skillSource: skillSelection.skillSource,
+            }
+          : {}),
         ...(videoOptions ? { videoOptions } : {}),
         viewportProfile: pickedViewportProfile,
       });

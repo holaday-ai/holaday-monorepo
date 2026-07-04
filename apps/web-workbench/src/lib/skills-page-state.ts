@@ -8,16 +8,9 @@ export interface SkillGroup<TSkill extends Pick<UiSkill, 'category'>> {
 }
 
 export const SKILL_CATEGORY_ORDER: readonly SkillCategory[] = [
-  '运营',
-  '内容',
-  '商业分析',
-  '产品',
-  '法律',
-  '人力',
-  '行政',
-  '财务',
-  '翻译',
-  '其他',
+  '内容运营',
+  '分析决策',
+  '管理协作',
 ];
 
 export interface SkillToggleSnapshot {
@@ -35,8 +28,9 @@ export interface SkillLimitBannerCopy {
 }
 
 export interface SkillTaskDraft {
+  readonly skillId: string;
   readonly skillName: string;
-  readonly expertMode: 'expert';
+  readonly skillSource: 'manual';
   readonly prompt: string;
 }
 
@@ -78,7 +72,7 @@ export function skillPageSummary(options: {
   if (options.error) return '技能暂时无法加载';
   if (options.totalCount === 0) return '暂无可用技能';
   if (options.cap <= 0) {
-    return `${skillPlanLabel(options.planId)}暂不支持启用专家技能`;
+    return `${skillPlanLabel(options.planId)}暂不支持启用技能`;
   }
   if (options.cap > 0) {
     if (options.enabledCount > options.cap) {
@@ -93,7 +87,7 @@ export function skillLoadErrorCopy(message: string | null | undefined): SkillLoa
   const body =
     typeof message === 'string' && message.trim()
       ? message.trim()
-      : '请稍后重试，或刷新页面后再打开专家技能。';
+      : '请稍后重试，或刷新页面后再打开技能。';
   return {
     title: '技能暂时无法加载',
     body,
@@ -104,9 +98,9 @@ export function skillLimitMessage(options: {
   readonly cap: number;
   readonly planId: string;
 }): string {
-  if (options.cap <= 0) return `${skillPlanLabel(options.planId)}暂不支持启用专家技能`;
+  if (options.cap <= 0) return `${skillPlanLabel(options.planId)}暂不支持启用技能`;
   if (options.planId === 'pro') return `已达到 ${options.cap} 个技能上限`;
-  return `已达到当前套餐的技能上限（${options.cap} 个）· 升级到专业版可使用全部 33 个技能`;
+  return `已达到当前套餐的技能上限（${options.cap} 个）· 升级到专业版可使用全部 13 个技能`;
 }
 
 export function skillLimitBannerCopy(options: {
@@ -116,8 +110,8 @@ export function skillLimitBannerCopy(options: {
 }): SkillLimitBannerCopy {
   if (options.cap <= 0) {
     return {
-      title: `${skillPlanLabel(options.planId)}暂不支持启用专家技能`,
-      body: '升级到基础版可自选专家技能；升级到专业版可使用全部 33 个技能。',
+      title: `${skillPlanLabel(options.planId)}暂不支持启用技能`,
+      body: '升级到基础版可自选技能；升级到专业版可使用全部 13 个技能。',
     };
   }
   if (options.enabledCount > options.cap) {
@@ -128,10 +122,10 @@ export function skillLimitBannerCopy(options: {
   }
   return {
     title: `已达到 ${options.cap} 个技能上限`,
-    body:
-      options.planId === 'pro'
-        ? '你已启用当前套餐支持的全部技能。'
-        : '升级到专业版可使用全部 33 个技能。',
+      body:
+        options.planId === 'pro'
+          ? '你已启用当前套餐支持的全部技能。'
+        : '升级到专业版可使用全部 13 个技能。',
   };
 }
 
@@ -161,67 +155,19 @@ export function skillCardUsageHint(options: {
     return '当前套餐不可启用';
   }
   if (!options.enabled && options.limitBlocked) return '先停用一个技能后可启用';
-  return options.enabled ? '会自动匹配；也可立即开始' : '启用后可参与自动匹配';
-}
-
-export function skillUseActionCopy(options: {
-  readonly skillName: string;
-  readonly enabled: boolean;
-  readonly pending: boolean;
-  readonly blocked: boolean;
-  readonly planBlocked?: boolean;
-}): {
-  readonly label: string;
-  readonly title: string;
-  readonly ariaLabel: string;
-} {
-  const skillName = safeSkillText(options.skillName) || '专家';
-  if (options.pending) {
-    return {
-      label: '保存中',
-      title: '正在保存技能选择',
-      ariaLabel: '正在保存技能选择',
-    };
-  }
-  if (options.blocked) {
-    return {
-      label: '稍后使用',
-      title: '另一个技能正在保存，稍后可用此专家创建任务',
-      ariaLabel: `稍后用${skillName}创建任务`,
-    };
-  }
-  if (options.planBlocked) {
-    return {
-      label: '不可使用',
-      title: '当前套餐暂不支持用此专家创建任务',
-      ariaLabel: `当前套餐暂不支持用${skillName}创建任务`,
-    };
-  }
-  if (!options.enabled) {
-    return {
-      label: '先启用',
-      title: '启用后可用此专家创建任务',
-      ariaLabel: `启用${skillName}后创建任务`,
-    };
-  }
-  return {
-    label: '用此专家',
-    title: `用${skillName}创建任务`,
-    ariaLabel: `用${skillName}创建任务`,
-  };
+  return options.enabled ? '会自动匹配；可在输入框 @ 调用' : '启用后可参与自动匹配';
 }
 
 export function skillTaskDraft(
-  skill: Pick<UiSkill, 'name' | 'description'>,
+  skill: Pick<UiSkill, 'id' | 'name' | 'description'>,
 ): SkillTaskDraft {
-  const name = safeSkillText(skill.name) || '专家';
-  const description = safeSkillText(skill.description);
+  const id = safeSkillText(skill.id);
+  const name = safeSkillText(skill.name) || '技能';
   return {
+    skillId: id,
     skillName: name,
-    expertMode: 'expert',
-    prompt: description
-      ? `使用「${name}」专家技能：${description}\n\n请帮我：`
-      : `使用「${name}」专家技能：\n\n请帮我：`,
+    skillSource: 'manual',
+    prompt: `@${name} `,
   };
 }
 
@@ -255,26 +201,36 @@ function normalizeSkillRow(value: unknown): UiSkill | null {
   return {
     id,
     name,
-    icon: safeSkillText(value.icon) || 'Sparkles',
+    logoId: safeSkillText(value.logoId) || id,
     category: normalizeSkillCategory(value.category),
     description: safeSkillText(value.description) || '暂无技能说明',
+    aliases: normalizeTextArray(value.aliases),
+    maturity: normalizeSkillMaturity(value.maturity),
+    connectors: normalizeTextArray(value.connectors),
     enabled: value.enabled === true,
   };
 }
 
 function normalizeSkillCategory(value: unknown): SkillCategory {
-  return value === '运营' ||
-    value === '内容' ||
-    value === '商业分析' ||
-    value === '产品' ||
-    value === '法律' ||
-    value === '人力' ||
-    value === '行政' ||
-    value === '财务' ||
-    value === '翻译' ||
-    value === '其他'
+  return value === '内容运营' ||
+    value === '分析决策' ||
+    value === '管理协作'
     ? value
-    : '其他';
+    : '内容运营';
+}
+
+function normalizeSkillMaturity(value: unknown): UiSkill['maturity'] {
+  return value === 'workflow' || value === 'connected' || value === 'template'
+    ? value
+    : 'template';
+}
+
+function normalizeTextArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    const text = safeSkillText(item);
+    return text ? [text] : [];
+  });
 }
 
 function safeSkillText(value: unknown): string {
