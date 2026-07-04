@@ -155,6 +155,23 @@ export function batchShouldPoll(status: string | null | undefined): boolean {
   return status === 'pending' || status === 'running';
 }
 
+export function batchStatusLabel(status: string): string {
+  switch (status) {
+    case 'pending':
+      return '等待中';
+    case 'running':
+      return '运行中';
+    case 'completed':
+      return '全部完成';
+    case 'partial':
+      return '部分未成功';
+    case 'cancelled':
+      return '已取消';
+    default:
+      return status;
+  }
+}
+
 export function safeBatchCount(value: unknown): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
   return Math.max(0, Math.floor(value));

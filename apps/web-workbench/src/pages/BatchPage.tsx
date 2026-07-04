@@ -30,6 +30,7 @@ import {
   batchRemainingCount,
   batchShouldPoll,
   batchStatusCopy,
+  batchStatusLabel,
   safeBatchCount,
 } from '@/lib/batch-page-state';
 import {
@@ -51,14 +52,6 @@ import { onServerMessage } from '@/lib/ws';
  * Live updates come from `server.batch.progress` frames, with a 5s
  * poll as a safety net if the WS connection drops.
  */
-
-const STATUS_LABEL: Record<string, string> = {
-  pending: '等待中',
-  running: '运行中',
-  completed: '全部完成',
-  partial: '部分失败',
-  cancelled: '已取消',
-};
 
 const ITEM_STATUS_LABEL: Record<string, string> = {
   pending: '等待中',
@@ -297,7 +290,7 @@ function BatchListRow({
               </div>
               <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
                 <span className={statusTone}>
-                  {STATUS_LABEL[row.status] ?? row.status}
+                  {batchStatusLabel(row.status)}
                 </span>
                 <span>并发 {safeBatchCount(row.concurrency)}</span>
                 <span>{fmtDate(row.createdAt)}</span>
@@ -512,7 +505,7 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
     <PageContainer width="list">
       <PageHeader
         title={detail.name ?? `批量任务 · ${detailTotal ?? 0} 项`}
-        description={`并发 ${safeBatchCount(detail.concurrency)} · ${STATUS_LABEL[detail.status] ?? detail.status}`}
+        description={`并发 ${safeBatchCount(detail.concurrency)} · ${batchStatusLabel(detail.status)}`}
         action={
           <div className="flex flex-wrap items-center justify-end gap-2">
             <div className="hidden items-center rounded-full border border-[#DCDDDD] bg-white px-3 py-1 text-[12px] font-medium text-[#595757] shadow-[0_1px_2px_rgba(15,23,42,0.03)] sm:inline-flex">

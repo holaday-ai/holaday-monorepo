@@ -7,6 +7,7 @@ import {
   batchProgressPercent,
   batchRemainingCount,
   batchShouldPoll,
+  batchStatusLabel,
   batchStatusCopy,
   normalizeBatchDetail,
   normalizeBatchRows,
@@ -115,6 +116,15 @@ describe('batch page state helpers', () => {
     expect(batchShouldPoll('partial')).toBe(false);
     expect(batchShouldPoll('cancelled')).toBe(false);
     expect(batchShouldPoll(null)).toBe(false);
+  });
+
+  it('labels partial parent batches as not fully successful, not pure failures', () => {
+    expect(batchStatusLabel('pending')).toBe('等待中');
+    expect(batchStatusLabel('running')).toBe('运行中');
+    expect(batchStatusLabel('completed')).toBe('全部完成');
+    expect(batchStatusLabel('partial')).toBe('部分未成功');
+    expect(batchStatusLabel('cancelled')).toBe('已取消');
+    expect(batchStatusLabel('archived')).toBe('archived');
   });
 
   it('normalizes malformed batch counters before rendering', () => {
