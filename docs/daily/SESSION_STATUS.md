@@ -12,7 +12,7 @@
 <!-- 2026-07-04 Codex 补充：进入 awaiting_user、用户回复恢复执行、control resume、tasks.list/detail 刷新到等待态时，都会清旧 progress/stream/thinking/subStatus 等 live-only 残留。 -->
 <!-- 2026-07-04 Codex 补充：历史页把 failed 与 partial_success 拆成“失败/需复核”独立筛选；视频/图片生成历史保留带真实附件的 partial_success 产物并标“需复核”。 -->
 <!-- 2026-07-04 Codex 补充：前端补齐 server.user.confirm / server.batch_confirm_required，重连恢复后的单步/批量确认会显示结构化按钮并保留 stale-frame guard。 -->
-## 🔴 PROD LIVE REF = `codex/trust-loop-round1` — SPA `fd60bf6a` / bundle `index-Ec2--Uy9.js` + orch `69fa297`（**状态机清理 LIVE（2026-07-04）**：paused 不再作为 terminal WS outcome；vision max-steps pause 现在广播 `server.task.control(pause)`，重启恢复会带回 pause detail；前端允许 paused 后续 pause/resume/cancel 控制帧穿过 stale-frame guard；前端已补齐单步/批量确认帧；completed/failed/partial_success/cancelled 仍走 `server.task.terminal`。）
+## 🔴 PROD LIVE REF = `codex/trust-loop-round1` — SPA `b57ff9c` / bundle `index-DWIuDe3I.js` + orch `b57ff9c`（**股票真实数据边界 + 状态机清理 LIVE（2026-07-04）**：A股分时只展示带交易日期且不超过上海当前分钟的真实分钟点；缓存/持久化缓存/上次快照复用都会裁掉未来或无日期分时，前端 tooltip 显示交易日时间且不再硬展示未来 15:00；topbar 通知去掉 native title 遮挡；paused/confirmation/dispatch/server.error 状态机清理继续生效。）
 
 <!-- 2026-06-26 里程碑 — 🏁🏁 登录自学从机制到交易站真出货 + 四层 veto 防线 -->
 **🏁🏁 里程碑（2026-06-26）— 登录自学从机制到交易站真出货 + 四层 veto 防线全证通**
