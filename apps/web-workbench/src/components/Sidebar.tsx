@@ -226,7 +226,7 @@ export function Sidebar({
   const buckets = React.useMemo(() => bucketByTime(unpinnedTasks), [unpinnedTasks]);
   // Number of tasks in any terminal state — feeds the QuotaIndicator
   // refresh key so the bar re-fetches the moment any in-flight task
-  // hits completed / failed / cancelled, not just when a new task
+  // hits completed / partial-success / failed / cancelled, not just when a new task
   // gets created. Without this the displayed used count stayed at
   // task.length while server-side actual usage was incrementing.
   const quotaTerminalCount = React.useMemo(

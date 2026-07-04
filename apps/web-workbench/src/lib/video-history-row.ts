@@ -2,7 +2,7 @@ import type { FileDownloadPayload } from '@/components/FileDownloadCard';
 
 /**
  * Pure helpers for the /video 生成历史 list. Extracted from VideoPage so
- * the "only successful 成片 show up" filter is unit-testable without a DOM.
+ * the "only downloadable 成片 show up" filter is unit-testable without a DOM.
  */
 
 /** Backend-stamped 成片 type (deriveVideoType in video-confirm-meta.ts). */
@@ -63,10 +63,11 @@ export function showImageOption(videoType: VideoType | undefined): boolean {
 /**
  * Map a tasks.list row to a 生成历史 entry, or null to drop it.
  *
- * 生成历史只显示**成功出片**的成片任务：`status==='completed'` 且带一条可
- * 下载的附件。其余一律 drop：失败 / 取消 / `awaiting_user`（报价卡 stub，
- * lane `video_creation_consumed`）/ `executing`（生成中）。这样失败任务
- * （如人脸检测失败的那条）和报价 stub 不再混进历史列表。
+ * 生成历史显示已经产出真实文件的成片任务：`completed` / `partial_success`
+ * 且带一条可下载附件。其余一律 drop：失败 / 取消 / `awaiting_user`（报价卡
+ * stub，lane `video_creation_consumed`）/ `executing`（生成中）。这样失败任务
+ * （如人脸检测失败的那条）和报价 stub 不再混进历史列表，同时不把“需复核但
+ * 已有产物”的任务藏起来。
  */
 export function toVideoRow(raw: unknown): VideoRow | null {
   if (!raw || typeof raw !== 'object') return null;
@@ -81,8 +82,7 @@ export function toVideoRow(raw: unknown): VideoRow | null {
   const meta = r.result?.metadata;
   if (!isVideoLane(meta?.lane)) return null;
   if (!r.taskId || !r.status) return null;
-  // 只收成功出片的成片。
-  if (r.status !== 'completed') return null;
+  if (!isDownloadableTerminalOutput(r.status)) return null;
   const att = meta?.attachments?.find(
     (a) => a.fileId && a.downloadUrl && a.filename && typeof a.sizeBytes === 'number',
   );
@@ -125,7 +125,7 @@ export function toImageRow(raw: unknown): VideoRow | null {
   };
   const meta = r.result?.metadata;
   if (!isImageLane(meta)) return null;
-  if (!r.taskId || !r.status || r.status !== 'completed') return null;
+  if (!r.taskId || !r.status || !isDownloadableTerminalOutput(r.status)) return null;
   const att = meta?.attachments?.find((a) => {
     if (!a.fileId || !a.downloadUrl || !a.filename || typeof a.sizeBytes !== 'number') return false;
     if (typeof a.mimetype === 'string' && a.mimetype.startsWith('image/')) return true;
@@ -150,6 +150,10 @@ export function toImageRow(raw: unknown): VideoRow | null {
     },
     posterUrl: downloadUrl,
   };
+}
+
+function isDownloadableTerminalOutput(status: string): boolean {
+  return status === 'completed' || status === 'partial_success';
 }
 
 function normaliseAttachmentDownloadUrl(raw: string): string | null {

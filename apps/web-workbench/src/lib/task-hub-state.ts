@@ -2,8 +2,33 @@ import { pageErrorMessage } from './page-error-copy';
 import type { AwaitingKind } from './awaiting-user-copy';
 import { deriveTaskProductState } from './task-product-state';
 
-export type HistoryStatusFilter = 'all' | 'completed' | 'failed' | 'running';
+export type HistoryStatusFilter = 'all' | 'completed' | 'review' | 'failed' | 'running';
 export type HistoryRangeFilter = '7d' | '30d' | 'all';
+export type HistoryServerTaskStatus =
+  | 'pending'
+  | 'planning'
+  | 'queued'
+  | 'executing'
+  | 'awaiting_user'
+  | 'paused'
+  | 'completed'
+  | 'partial_success'
+  | 'failed'
+  | 'cancelled';
+
+export type HistoryStatusServerFilter =
+  | HistoryServerTaskStatus
+  | HistoryServerTaskStatus[]
+  | null;
+
+export const historyRunningStatuses = [
+  'pending',
+  'planning',
+  'queued',
+  'executing',
+  'awaiting_user',
+  'paused',
+] as const satisfies readonly HistoryServerTaskStatus[];
 
 export const historyStatusFilterOptions: ReadonlyArray<{
   readonly id: HistoryStatusFilter;
@@ -11,9 +36,20 @@ export const historyStatusFilterOptions: ReadonlyArray<{
 }> = [
   { id: 'all', label: '全部' },
   { id: 'completed', label: '已完成' },
-  { id: 'failed', label: '失败/需复核' },
+  { id: 'review', label: '需复核' },
+  { id: 'failed', label: '失败' },
   { id: 'running', label: '进行中' },
 ];
+
+export function historyStatusFilterToServerStatuses(
+  status: HistoryStatusFilter,
+): HistoryStatusServerFilter {
+  if (status === 'all') return null;
+  if (status === 'completed') return 'completed';
+  if (status === 'review') return 'partial_success';
+  if (status === 'failed') return 'failed';
+  return [...historyRunningStatuses];
+}
 
 export interface NormalizedTaskHubRow {
   readonly taskId: string;

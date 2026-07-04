@@ -123,6 +123,12 @@ describe('toVideoRow — 生成历史 only lists completed 成片 with an attach
     expect(toVideoRow(row({ status: 'failed', result: { metadata: { lane: 'video_creation' } } }))).toBeNull();
   });
 
+  it('keeps review-needed video outputs when a downloadable attachment exists', () => {
+    const out = toVideoRow(row({ status: 'partial_success' }));
+    expect(out?.status).toBe('partial_success');
+    expect(out?.download?.downloadUrl).toBe('/api/files/file_x/download');
+  });
+
   it('DROPS cancelled', () => {
     expect(toVideoRow(row({ status: 'cancelled' }))).toBeNull();
   });
@@ -239,5 +245,11 @@ describe('toImageRow — 图片历史 only lists completed image outputs', () =>
         }),
       ),
     ).toBeNull();
+  });
+
+  it('keeps review-needed image outputs when a downloadable image exists', () => {
+    const out = toImageRow(imageRow({ status: 'partial_success' }));
+    expect(out?.status).toBe('partial_success');
+    expect(out?.posterUrl).toBe('/api/files/file_img/download');
   });
 });

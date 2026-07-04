@@ -809,6 +809,11 @@ function CreativeHistory({
                     {row.title?.trim() || row.intent || (mode === 'image' ? '图片作品' : '视频作品')}
                   </h2>
                   <div className="mt-5 flex flex-wrap gap-2">
+                    {row.status === 'partial_success' ? (
+                      <span className="rounded-full bg-[#FFC910]/20 px-3 py-1 text-[11px] font-medium text-[#8A6A00]">
+                        {videoTaskStatusLabel(row.status)}
+                      </span>
+                    ) : null}
                     {mode === 'video' && row.videoType ? (
                       <span className="rounded-full bg-[#EA1F59]/10 px-3 py-1 text-[11px] font-medium text-[#595757]">
                         {videoTypeLabel(row.videoType)}
@@ -1453,8 +1458,8 @@ function SegGroup<T extends string | number>({
 
 // VideoResultMeta / VideoRow / isVideoLane / toVideoRow moved to
 // '@/lib/video-history-row' so the "only successful 成片" filter is
-// unit-testable. toVideoRow now drops failed / cancelled / awaiting
-// (报价 stub) / executing rows — 生成历史 only lists completed 成片.
+// unit-testable. toVideoRow drops failed / cancelled / awaiting
+// (报价 stub) / executing rows, but keeps downloadable partial-success output.
 
 function VideoHistory({ videoType }: { videoType: VideoType }): JSX.Element {
   return (

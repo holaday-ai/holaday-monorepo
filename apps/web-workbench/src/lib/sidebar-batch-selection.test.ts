@@ -12,11 +12,12 @@ describe('sidebar batch selection', () => {
         task('tsk_done', 'completed'),
         task('tsk_running', 'executing'),
         task('tsk_failed', 'failed'),
+        task('tsk_partial', 'partial_success'),
         task('tsk_done', 'completed'),
         task('tsk_cancelled', 'cancelled'),
         task('tsk_waiting', 'awaiting_user'),
       ]),
-    ).toEqual(['tsk_done', 'tsk_failed', 'tsk_cancelled']);
+    ).toEqual(['tsk_done', 'tsk_failed', 'tsk_partial', 'tsk_cancelled']);
   });
 
   it('drops stale selected ids when rows disappear or become active', () => {

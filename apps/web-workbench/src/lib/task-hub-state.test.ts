@@ -4,6 +4,7 @@ import {
   hasHistoryFilters,
   historyFilterRequestKey,
   historyPageSummary,
+  historyStatusFilterToServerStatuses,
   historyStatusFilterOptions,
   mergeTaskHubRowsById,
   normalizeTaskHubCursor,
@@ -38,9 +39,43 @@ describe('task hub state helpers', () => {
     expect(hasHistoryFilters({ query: '', status: 'all', range: 'all' })).toBe(true);
   });
 
-  it('labels the failed history filter as including review-needed tasks', () => {
+  it('keeps failed and review-needed history filters separate', () => {
     expect(historyStatusFilterOptions.find((option) => option.id === 'failed')?.label).toBe(
-      '失败/需复核',
+      '失败',
+    );
+    expect(historyStatusFilterOptions.find((option) => option.id === 'review')?.label).toBe(
+      '需复核',
+    );
+    expect(historyStatusFilterToServerStatuses('failed')).toBe('failed');
+    expect(historyStatusFilterToServerStatuses('review')).toBe('partial_success');
+    expect(historyStatusFilterToServerStatuses('running')).toEqual([
+      'pending',
+      'planning',
+      'queued',
+      'executing',
+      'awaiting_user',
+      'paused',
+    ]);
+    expect(historyStatusFilterToServerStatuses('all')).toBeNull();
+    expect(historyStatusFilterToServerStatuses('completed')).toBe('completed');
+  });
+
+  it('keys review-needed history requests separately from failed requests', () => {
+    expect(
+      historyFilterRequestKey({
+        query: '',
+        status: 'failed',
+        range: '30d',
+      }),
+    ).toBe('failed\n30d\n');
+    expect(
+      historyFilterRequestKey({
+        query: '',
+        status: 'review',
+        range: '30d',
+      }),
+    ).toBe(
+      'review\n30d\n',
     );
   });
 

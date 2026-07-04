@@ -8,6 +8,7 @@ import {
   hasHistoryFilters,
   historyFilterRequestKey,
   historyPageSummary,
+  historyStatusFilterToServerStatuses,
   historyStatusFilterOptions,
   mergeTaskHubRowsById,
   normalizeTaskHubCursor,
@@ -17,8 +18,10 @@ import {
   taskHubLoadErrorCopy,
   taskHubLoadMoreErrorCopy,
   taskHubNeedsAttention,
+  taskHubRowTone,
   taskHubStatusIconKind,
   type HistoryRangeFilter,
+  type HistoryServerTaskStatus,
   type HistoryStatusFilter,
   type NormalizedTaskHubRow,
 } from '@/lib/task-hub-state';
@@ -41,32 +44,6 @@ type StatusFilter = HistoryStatusFilter;
 type RangeFilter = HistoryRangeFilter;
 
 type HistoryTask = NormalizedTaskHubRow;
-
-// "进行中" maps to all non-terminal DB statuses — the chip is a UX
-// shortcut, the server still receives the explicit list so the WHERE
-// clause is `status IN (…)` instead of five round-trips.
-const RUNNING_STATUSES = [
-  'pending',
-  'planning',
-  'queued',
-  'executing',
-  'awaiting_user',
-  'paused',
-] as const;
-
-const FAILED_STATUSES = ['failed', 'partial_success'] as const;
-
-type ServerTaskStatus =
-  | 'pending'
-  | 'planning'
-  | 'queued'
-  | 'executing'
-  | 'awaiting_user'
-  | 'paused'
-  | 'completed'
-  | 'partial_success'
-  | 'failed'
-  | 'cancelled';
 
 /**
  * Full historical task list. Filters (status / date range / query)
@@ -115,13 +92,12 @@ export function HistoryPage(): JSX.Element {
     const out: {
       limit: number;
       query?: string;
-      status?: ServerTaskStatus | ServerTaskStatus[];
+      status?: HistoryServerTaskStatus | HistoryServerTaskStatus[];
       dateFrom?: Date;
     } = { limit: 50 };
     if (debouncedQuery.length > 0) out.query = debouncedQuery;
-    if (status === 'completed') out.status = 'completed';
-    else if (status === 'failed') out.status = [...FAILED_STATUSES];
-    else if (status === 'running') out.status = [...RUNNING_STATUSES];
+    const serverStatus = historyStatusFilterToServerStatuses(status);
+    if (serverStatus) out.status = serverStatus;
     if (range === '7d') out.dateFrom = new Date(Date.now() - 7 * 86400000);
     else if (range === '30d') out.dateFrom = new Date(Date.now() - 30 * 86400000);
     return out;
@@ -400,11 +376,13 @@ export function HistoryPage(): JSX.Element {
             <ul className="divide-y divide-[#EFEFEF]">
               {tasks.map((t) => {
                 const needsAttention = taskHubNeedsAttention(t);
+                const restingTone = needsAttention ? '' : taskHubRowTone(t);
                 const statusLabel = taskStatusLabel(t.status, t.awaitingKind);
                 return (
                   <li
                     key={t.taskId}
                     className={cn(
+                      restingTone,
                       needsAttention &&
                         'bg-[#FFC910]/[0.06] [box-shadow:inset_3px_0_0_rgba(255,201,16,0.75)]',
                     )}
