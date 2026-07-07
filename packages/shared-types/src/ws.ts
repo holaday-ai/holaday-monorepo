@@ -801,6 +801,7 @@ export const serverBatchProgressSchema = z.object({
   status: z.enum(['pending', 'running', 'completed', 'partial', 'cancelled']),
   itemsTotal: z.number().int().nonnegative(),
   itemsDone: z.number().int().nonnegative(),
+  itemsReview: z.number().int().nonnegative().optional(),
   itemsFailed: z.number().int().nonnegative(),
   itemsCancelled: z.number().int().nonnegative().optional(),
   item: z

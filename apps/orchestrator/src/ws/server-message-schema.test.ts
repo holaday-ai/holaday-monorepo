@@ -37,7 +37,8 @@ describe('server message schema', () => {
         status: 'partial',
         itemsTotal: 1,
         itemsDone: 0,
-        itemsFailed: 1,
+        itemsReview: 1,
+        itemsFailed: 0,
         item: {
           batchItemId: 'bti_review',
           seq: 0,

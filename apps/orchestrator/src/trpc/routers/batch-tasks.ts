@@ -72,6 +72,7 @@ export const batchTasksRouter = router({
         concurrency: batchTasks.concurrency,
         itemsTotal: batchTasks.itemsTotal,
         itemsDone: batchTasks.itemsDone,
+        itemsReview: batchTasks.itemsReview,
         itemsFailed: batchTasks.itemsFailed,
         createdAt: batchTasks.createdAt,
         completedAt: batchTasks.completedAt,
@@ -107,6 +108,7 @@ export const batchTasksRouter = router({
       const counts = countsByBatch.get(r.id) ?? {
         total: r.itemsTotal,
         done: r.itemsDone,
+        review: r.itemsReview,
         failed: r.itemsFailed,
         cancelled: 0,
       };
@@ -117,6 +119,7 @@ export const batchTasksRouter = router({
         concurrency: r.concurrency,
         itemsTotal: counts.total,
         itemsDone: counts.done,
+        itemsReview: counts.review,
         itemsFailed: counts.failed,
         itemsCancelled: counts.cancelled,
         createdAt: r.createdAt,
@@ -181,6 +184,7 @@ export const batchTasksRouter = router({
         concurrency: batch.concurrency,
         itemsTotal: counts.total,
         itemsDone: counts.done,
+        itemsReview: counts.review,
         itemsFailed: counts.failed,
         itemsCancelled: counts.cancelled,
         createdAt: batch.createdAt,

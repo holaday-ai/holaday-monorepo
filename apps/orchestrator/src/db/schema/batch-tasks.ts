@@ -44,6 +44,7 @@ export const batchTasks = mysqlTable(
     status: varchar('status', { length: 16 }).notNull().default('pending'),
     itemsTotal: int('items_total').notNull().default(0),
     itemsDone: int('items_done').notNull().default(0),
+    itemsReview: int('items_review').notNull().default(0),
     itemsFailed: int('items_failed').notNull().default(0),
     createdAt: datetime('created_at', { mode: 'date', fsp: 3 })
       .notNull()

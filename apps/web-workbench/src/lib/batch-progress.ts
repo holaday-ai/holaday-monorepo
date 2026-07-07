@@ -3,6 +3,7 @@ export interface BatchProgressRow {
   status: string;
   itemsTotal: number;
   itemsDone: number;
+  itemsReview?: number | null;
   itemsFailed: number;
   itemsCancelled?: number | null;
 }
@@ -24,6 +25,7 @@ export interface BatchProgressFrame {
   status: string;
   itemsTotal: number;
   itemsDone: number;
+  itemsReview?: number;
   itemsFailed: number;
   itemsCancelled?: number;
   item?: {
@@ -39,12 +41,16 @@ export function normalizeBatchProgressFrame(value: unknown): BatchProgressFrame 
   const batchId = safeProgressText(value.batchId);
   if (!batchId) return null;
   const item = normalizeProgressItem(value.item);
+  const itemsReview = hasOwn(value, 'itemsReview')
+    ? safeProgressCount(value.itemsReview)
+    : undefined;
   return {
     type: 'server.batch.progress',
     batchId,
     status: normalizeBatchProgressStatus(value.status),
     itemsTotal: safeProgressCount(value.itemsTotal),
     itemsDone: safeProgressCount(value.itemsDone),
+    ...(itemsReview !== undefined ? { itemsReview } : {}),
     itemsFailed: safeProgressCount(value.itemsFailed),
     itemsCancelled: safeProgressCount(value.itemsCancelled),
     ...(item ? { item } : {}),
@@ -98,6 +104,7 @@ function applyBatchCounters<T extends BatchProgressRow>(
     status: frame.status,
     itemsTotal: frame.itemsTotal,
     itemsDone: frame.itemsDone,
+    itemsReview: frame.itemsReview ?? row.itemsReview ?? 0,
     itemsFailed: frame.itemsFailed,
     itemsCancelled: frame.itemsCancelled ?? row.itemsCancelled ?? 0,
   };
@@ -138,4 +145,8 @@ function safeProgressText(value: unknown): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
+}
+
+function hasOwn(value: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key);
 }

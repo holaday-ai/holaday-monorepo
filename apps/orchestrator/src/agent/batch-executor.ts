@@ -353,13 +353,17 @@ async function finalizeBatch(batchInternalId: number, deps: BatchExecutorDeps): 
   // partial when status is still 'running'.
   let nextStatus = batch.status;
   if (batch.status === 'running') {
-    nextStatus = counts.failed === 0 && counts.cancelled === 0 ? 'completed' : 'partial';
+    nextStatus =
+      counts.review === 0 && counts.failed === 0 && counts.cancelled === 0
+        ? 'completed'
+        : 'partial';
   }
   await db
     .update(batchTasks)
     .set({
       itemsTotal: counts.total,
       itemsDone: counts.done,
+      itemsReview: counts.review,
       itemsFailed: counts.failed,
       status: nextStatus,
       ...(nextStatus !== 'running' ? { completedAt: new Date() } : {}),
@@ -378,6 +382,7 @@ async function finalizeBatch(batchInternalId: number, deps: BatchExecutorDeps): 
       status: nextStatus as 'pending' | 'running' | 'completed' | 'partial' | 'cancelled',
       itemsTotal: counts.total,
       itemsDone: counts.done,
+      itemsReview: counts.review,
       itemsFailed: counts.failed,
       itemsCancelled: counts.cancelled,
     });
@@ -423,6 +428,7 @@ async function broadcastItemUpdate(
     status: 'running',
     itemsTotal: counts.total,
     itemsDone: counts.done,
+    itemsReview: counts.review,
     itemsFailed: counts.failed,
     itemsCancelled: counts.cancelled,
     item: {
@@ -440,24 +446,28 @@ export function summarizeBatchItemStatuses(
 ): {
   total: number;
   done: number;
+  review: number;
   failed: number;
   cancelled: number;
   terminal: number;
 } {
   let done = 0;
+  let review = 0;
   let failed = 0;
   let cancelled = 0;
   for (const item of items) {
     if (item.status === 'completed') done += 1;
-    else if (item.status === 'failed' || item.status === 'partial_success') failed += 1;
+    else if (item.status === 'partial_success') review += 1;
+    else if (item.status === 'failed') failed += 1;
     else if (item.status === 'cancelled') cancelled += 1;
   }
   return {
     total: items.length,
     done,
+    review,
     failed,
     cancelled,
-    terminal: done + failed + cancelled,
+    terminal: done + review + failed + cancelled,
   };
 }
 

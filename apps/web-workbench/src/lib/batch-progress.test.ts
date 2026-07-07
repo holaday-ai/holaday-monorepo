@@ -13,6 +13,7 @@ describe('batch progress helpers', () => {
     status: 'partial',
     itemsTotal: 4,
     itemsDone: 2,
+    itemsReview: 1,
     itemsFailed: 1,
     itemsCancelled: 1,
   };
@@ -41,6 +42,7 @@ describe('batch progress helpers', () => {
         status: 'partial',
         itemsTotal: 4,
         itemsDone: 2,
+        itemsReview: 1,
         itemsFailed: 1,
         itemsCancelled: 1,
       },
@@ -60,6 +62,37 @@ describe('batch progress helpers', () => {
     ];
 
     expect(applyBatchProgressToRows(rows, frame)).toBe(rows);
+  });
+
+  it('preserves existing review count when an older progress frame omits it', () => {
+    const rows = [
+      {
+        batchId: 'batch_1',
+        status: 'partial',
+        itemsTotal: 4,
+        itemsDone: 1,
+        itemsReview: 2,
+        itemsFailed: 0,
+        itemsCancelled: 0,
+      },
+    ];
+
+    expect(
+      applyBatchProgressToRows(rows, {
+        type: 'server.batch.progress',
+        batchId: 'batch_1',
+        status: 'partial',
+        itemsTotal: 4,
+        itemsDone: 1,
+        itemsFailed: 0,
+        itemsCancelled: 0,
+      }),
+    ).toEqual([
+      {
+        ...rows[0],
+        itemsReview: 2,
+      },
+    ]);
   });
 
   it('patches the matching detail item from live progress', () => {
@@ -90,6 +123,7 @@ describe('batch progress helpers', () => {
         ...frame,
         itemsTotal: 2,
         itemsDone: 1,
+        itemsReview: 0,
         itemsFailed: 0,
         itemsCancelled: 0,
         item: {
@@ -103,6 +137,7 @@ describe('batch progress helpers', () => {
       status: 'partial',
       itemsTotal: 2,
       itemsDone: 1,
+      itemsReview: 0,
       itemsFailed: 0,
       itemsCancelled: 0,
       items: [
@@ -141,7 +176,8 @@ describe('batch progress helpers', () => {
         status: 'partial',
         itemsTotal: 1,
         itemsDone: 0,
-        itemsFailed: 1,
+        itemsReview: 1,
+        itemsFailed: 0,
         item: {
           batchItemId: 'item_review',
           status: 'partial_success',
@@ -154,7 +190,8 @@ describe('batch progress helpers', () => {
       status: 'partial',
       itemsTotal: 1,
       itemsDone: 0,
-      itemsFailed: 1,
+      itemsReview: 1,
+      itemsFailed: 0,
       itemsCancelled: 0,
       items: [
         {
@@ -175,6 +212,7 @@ describe('batch progress helpers', () => {
         status: 'unknown',
         itemsTotal: Number.NaN,
         itemsDone: 2.8,
+        itemsReview: 1.9,
         itemsFailed: -1,
         itemsCancelled: { unsafe: true },
         item: {
@@ -190,6 +228,7 @@ describe('batch progress helpers', () => {
       status: 'unknown',
       itemsTotal: 0,
       itemsDone: 2,
+      itemsReview: 1,
       itemsFailed: 0,
       itemsCancelled: 0,
       item: {
@@ -207,6 +246,7 @@ describe('batch progress helpers', () => {
         status: 'archived',
         itemsTotal: 1,
         itemsDone: 0,
+        itemsReview: 0,
         itemsFailed: 0,
         item: {
           batchItemId: ' item_new ',
@@ -219,6 +259,7 @@ describe('batch progress helpers', () => {
       status: 'archived',
       itemsTotal: 1,
       itemsDone: 0,
+      itemsReview: 0,
       itemsFailed: 0,
       itemsCancelled: 0,
       item: {
@@ -236,6 +277,7 @@ describe('batch progress helpers', () => {
         status: 'running',
         itemsTotal: 1,
         itemsDone: 0,
+        itemsReview: 0,
         itemsFailed: 0,
       },
     ];

@@ -33,6 +33,7 @@ describe('summarizeBatchItemStatuses — split terminal counters', () => {
     ).toEqual({
       total: 4,
       done: 1,
+      review: 0,
       failed: 1,
       cancelled: 1,
       terminal: 3,
@@ -46,13 +47,14 @@ describe('summarizeBatchItemStatuses — split terminal counters', () => {
         { status: 'cancelled' },
       ]),
     ).toMatchObject({
+      review: 0,
       failed: 0,
       cancelled: 2,
       terminal: 2,
     });
   });
 
-  it('counts partial_success as review-needed failure volume', () => {
+  it('keeps partial_success as review-needed volume separate from failed', () => {
     expect(
       summarizeBatchItemStatuses([
         { status: 'completed' },
@@ -62,7 +64,8 @@ describe('summarizeBatchItemStatuses — split terminal counters', () => {
     ).toEqual({
       total: 3,
       done: 1,
-      failed: 2,
+      review: 1,
+      failed: 1,
       cancelled: 0,
       terminal: 3,
     });

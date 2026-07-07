@@ -133,6 +133,15 @@ const REQUIRED_COLUMNS: Record<string, readonly string[]> = {
     'last_reminder_run',
   ],
   task_files: ['external_id', 'user_id', 'task_id', 'kind', 'status', 'expires_at'],
+  batch_tasks: [
+    'external_id',
+    'user_id',
+    'status',
+    'items_total',
+    'items_done',
+    'items_review',
+    'items_failed',
+  ],
   payments: ['provider', 'provider_order_id', 'provider_capture_id', 'kind', 'status'],
   pending_cookies: [
     'user_id',

@@ -60,14 +60,15 @@ describe('batch page state helpers', () => {
   });
 
   it('calculates progress percent defensively', () => {
-    expect(batchProgressPercent({ total: 10, done: 4, failed: 1, cancelled: 1 })).toBe(60);
+    expect(batchProgressPercent({ total: 10, done: 4, review: 2, failed: 1, cancelled: 1 })).toBe(80);
     expect(batchProgressPercent({ total: 10, done: 99, failed: 0, cancelled: 0 })).toBe(100);
-    expect(batchProgressPercent({ total: 0, done: 1, failed: 1, cancelled: 1 })).toBe(0);
-    expect(batchProgressPercent({ total: 10, done: -1, failed: -1, cancelled: -1 })).toBe(0);
+    expect(batchProgressPercent({ total: 0, done: 1, review: 1, failed: 1, cancelled: 1 })).toBe(0);
+    expect(batchProgressPercent({ total: 10, done: -1, review: -1, failed: -1, cancelled: -1 })).toBe(0);
     expect(
       batchProgressPercent({
         total: Number.NaN,
         done: Number.POSITIVE_INFINITY,
+        review: 1,
         failed: 1,
         cancelled: 1,
       }),
@@ -75,26 +76,28 @@ describe('batch page state helpers', () => {
   });
 
   it('calculates finished batch work defensively', () => {
-    expect(batchFinishedCount({ done: 4, failed: 1, cancelled: 1 })).toBe(6);
-    expect(batchFinishedCount({ done: -1, failed: -1, cancelled: -1 })).toBe(0);
+    expect(batchFinishedCount({ done: 4, review: 2, failed: 1, cancelled: 1 })).toBe(8);
+    expect(batchFinishedCount({ done: -1, review: -1, failed: -1, cancelled: -1 })).toBe(0);
     expect(
       batchFinishedCount({
         done: Number.POSITIVE_INFINITY,
+        review: 1.2,
         failed: Number.NaN,
         cancelled: 2.8,
       }),
-    ).toBe(2);
+    ).toBe(3);
   });
 
   it('calculates remaining batch work defensively', () => {
-    expect(batchRemainingCount({ total: 10, done: 4, failed: 1, cancelled: 1 })).toBe(4);
+    expect(batchRemainingCount({ total: 10, done: 4, review: 2, failed: 1, cancelled: 1 })).toBe(2);
     expect(batchRemainingCount({ total: 10, done: 99, failed: 0, cancelled: 0 })).toBe(0);
-    expect(batchRemainingCount({ total: 0, done: 1, failed: 1, cancelled: 1 })).toBe(0);
-    expect(batchRemainingCount({ total: 10, done: -1, failed: -1, cancelled: -1 })).toBe(10);
+    expect(batchRemainingCount({ total: 0, done: 1, review: 1, failed: 1, cancelled: 1 })).toBe(0);
+    expect(batchRemainingCount({ total: 10, done: -1, review: -1, failed: -1, cancelled: -1 })).toBe(10);
     expect(
       batchRemainingCount({
         total: Number.NaN,
         done: Number.POSITIVE_INFINITY,
+        review: 1,
         failed: 1,
         cancelled: 1,
       }),
@@ -158,6 +161,7 @@ describe('batch page state helpers', () => {
           concurrency: 3,
           itemsTotal: 10.9,
           itemsDone: 4,
+          itemsReview: 3,
           itemsFailed: 2,
           itemsCancelled: 1,
           createdAt: ' 2026-05-25T00:00:00.000Z ',
@@ -172,6 +176,7 @@ describe('batch page state helpers', () => {
         concurrency: 3,
         itemsTotal: 10,
         itemsDone: 4,
+        itemsReview: 3,
         itemsFailed: 2,
         itemsCancelled: 1,
         createdAt: '2026-05-25T00:00:00.000Z',
@@ -222,6 +227,7 @@ describe('batch page state helpers', () => {
           concurrency: -1,
           itemsTotal: Number.NaN,
           itemsDone: Number.POSITIVE_INFINITY,
+          itemsReview: -2,
           itemsFailed: -2,
           itemsCancelled: { unsafe: true },
           createdAt: { unsafe: true },
@@ -236,6 +242,7 @@ describe('batch page state helpers', () => {
         concurrency: 1,
         itemsTotal: 0,
         itemsDone: 0,
+        itemsReview: 0,
         itemsFailed: 0,
         itemsCancelled: 0,
         createdAt: '',
@@ -252,6 +259,7 @@ describe('batch page state helpers', () => {
       concurrency: 2,
       itemsTotal: 2,
       itemsDone: 1,
+      itemsReview: 0,
       itemsFailed: 0,
       itemsCancelled: 0,
       createdAt: '2026-05-25T00:00:00.000Z',

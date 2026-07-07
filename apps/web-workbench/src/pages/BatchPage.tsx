@@ -265,11 +265,12 @@ function BatchListRow({
 }): JSX.Element {
   const total = safeBatchCount(row.itemsTotal);
   const done = safeBatchCount(row.itemsDone);
+  const review = safeBatchCount(row.itemsReview);
   const failed = safeBatchCount(row.itemsFailed);
   const cancelled = safeBatchCount(row.itemsCancelled ?? 0);
-  const finished = batchFinishedCount({ done, failed, cancelled });
-  const remaining = batchRemainingCount({ total, done, failed, cancelled });
-  const pct = batchProgressPercent({ total, done, failed, cancelled });
+  const finished = batchFinishedCount({ done, review, failed, cancelled });
+  const remaining = batchRemainingCount({ total, done, review, failed, cancelled });
+  const pct = batchProgressPercent({ total, done, review, failed, cancelled });
   const statusTone = batchStatusTone(row.status);
 
   return (
@@ -310,7 +311,7 @@ function BatchListRow({
           <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
             <span>
               {finished}/{total} 已处理
-              {batchUnsuccessfulCopy(failed, cancelled)}
+              {batchUnsuccessfulCopy(failed, cancelled, review)}
             </span>
             {remaining > 0 && <span>剩余 {remaining}</span>}
           </div>
@@ -403,11 +404,13 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
   };
 
   const detailDone = safeBatchCount(detail?.itemsDone);
+  const detailReview = safeBatchCount(detail?.itemsReview);
   const detailFailed = safeBatchCount(detail?.itemsFailed);
   const detailCancelled = safeBatchCount(detail?.itemsCancelled ?? 0);
   const detailTotal = detail ? safeBatchCount(detail.itemsTotal) : null;
   const finishedCount = batchFinishedCount({
     done: detailDone,
+    review: detailReview,
     failed: detailFailed,
     cancelled: detailCancelled,
   });
@@ -489,6 +492,7 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
   const pct = batchProgressPercent({
     total: detailTotal ?? 0,
     done: detailDone,
+    review: detailReview,
     failed: detailFailed,
     cancelled: detailCancelled,
   });
@@ -551,16 +555,17 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
             supportBody="批量任务详情加载失败，请协助排查。"
           />
         )}
-        <div className="mb-4 grid gap-2 sm:grid-cols-4">
+        <div className="mb-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
           <BatchMetric label="成功" value={detailDone} tone="success" />
-          <BatchMetric label="需复核/失败" value={detailFailed} tone="danger" />
+          <BatchMetric label="需复核" value={detailReview} tone="warning" />
+          <BatchMetric label="失败" value={detailFailed} tone="danger" />
           <BatchMetric label="取消" value={detailCancelled} tone="neutral" />
           <BatchMetric label="剩余" value={detailRemaining} tone="pending" />
         </div>
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
           <span>
             {finishedCount} / {detailTotal ?? 0} 已处理
-            {batchUnsuccessfulCopy(detailFailed, detailCancelled)}
+            {batchUnsuccessfulCopy(detailFailed, detailCancelled, detailReview)}
           </span>
           <span className="font-mono text-[#595757]">{pct}%</span>
         </div>
@@ -765,10 +770,11 @@ function BatchMetric({
 }: {
   readonly label: string;
   readonly value: number;
-  readonly tone: 'success' | 'danger' | 'neutral' | 'pending';
+  readonly tone: 'success' | 'warning' | 'danger' | 'neutral' | 'pending';
 }): JSX.Element {
   const toneClass = {
     success: 'border-[#42C0EF]/35 bg-[rgba(66,192,239,0.10)] text-[#1688AA]',
+    warning: 'border-[#FFC910]/45 bg-[rgba(255,201,16,0.12)] text-[#8A6A00]',
     danger: 'border-[#EA1F59]/30 bg-[rgba(234,31,89,0.08)] text-[#EA1F59]',
     neutral: 'border-[#DCDDDD] bg-[#EFEFEF]/50 text-[#595757]',
     pending: 'border-[#FFC910]/45 bg-[rgba(255,201,16,0.12)] text-[#8A6A00]',

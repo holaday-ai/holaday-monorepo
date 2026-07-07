@@ -7,6 +7,7 @@ export interface NormalizedBatchRow {
   readonly concurrency: number;
   readonly itemsTotal: number;
   readonly itemsDone: number;
+  readonly itemsReview: number;
   readonly itemsFailed: number;
   readonly itemsCancelled: number;
   readonly createdAt: string | Date;
@@ -103,15 +104,17 @@ export function batchProgressPercent({
   done,
   failed,
   cancelled,
+  review,
 }: {
   readonly total: number;
   readonly done: number;
+  readonly review?: number | null;
   readonly failed: number;
   readonly cancelled?: number | null;
 }): number {
   const safeTotal = safeBatchCount(total);
   if (safeTotal <= 0) return 0;
-  const finished = batchFinishedCount({ done, failed, cancelled });
+  const finished = batchFinishedCount({ done, review, failed, cancelled });
   return Math.min(100, Math.max(0, Math.round((finished / safeTotal) * 100)));
 }
 
@@ -119,13 +122,16 @@ export function batchFinishedCount({
   done,
   failed,
   cancelled,
+  review,
 }: {
   readonly done: number;
+  readonly review?: number | null;
   readonly failed: number;
   readonly cancelled?: number | null;
 }): number {
   return (
     safeBatchCount(done) +
+    safeBatchCount(review ?? 0) +
     safeBatchCount(failed) +
     safeBatchCount(cancelled ?? 0)
   );
@@ -136,14 +142,16 @@ export function batchRemainingCount({
   done,
   failed,
   cancelled,
+  review,
 }: {
   readonly total: number;
   readonly done: number;
+  readonly review?: number | null;
   readonly failed: number;
   readonly cancelled?: number | null;
 }): number {
   const safeTotal = safeBatchCount(total);
-  const finished = batchFinishedCount({ done, failed, cancelled });
+  const finished = batchFinishedCount({ done, review, failed, cancelled });
   return Math.max(0, safeTotal - finished);
 }
 
@@ -208,6 +216,7 @@ function normalizeBatchRow(value: unknown): NormalizedBatchRow | null {
     concurrency: positiveBatchCount(value.concurrency),
     itemsTotal: safeBatchCount(value.itemsTotal),
     itemsDone: safeBatchCount(value.itemsDone),
+    itemsReview: safeBatchCount(value.itemsReview),
     itemsFailed: safeBatchCount(value.itemsFailed),
     itemsCancelled: safeBatchCount(value.itemsCancelled),
     createdAt: safeBatchDate(value.createdAt) ?? '',
