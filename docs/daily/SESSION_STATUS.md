@@ -21,7 +21,8 @@
 <!-- 2026-07-04 Codex 补充：批量任务创建弹窗说明从“部分失败不会影响其他任务”改为“部分未成功不会影响其他任务”，覆盖需复核/失败/取消混合语义。 -->
 <!-- 2026-07-04 Codex 补充：技能线合并上线：shared 13 技能目录、输入框 @ 技能选择、技能页新列表与 logo；旧 selected_skills ID canonical 映射保留，避免老用户已启用技能静默掉线。 -->
 <!-- 2026-07-04 Codex 补充：任务创建统一 canonical skill dispatch；手动 @ 技能优先于自动角色分类，roleId/metadata/runner/model 路由记录一致；用量结果文案不再把失败和取消合并。 -->
-## 🔴 PROD LIVE REF = `codex/trust-loop-round1` — SPA `7705e49` / bundle `index-DIC6_ls6.js` + orch `7705e49`（**技能 dispatch 与用量口径修正 LIVE（2026-07-04）**：任务创建统一 canonical skill dispatch，手动 @ 技能优先于自动角色分类，roleId/metadata/runner/model 路由记录一致；用量页结果文案固定拆分“失败/取消”，不再出现“失败/取消”混合标签。此前技能目录与 @ 技能入口、批量任务未成功口径、用量加载态、任务详情 evidence fallback、批量子任务状态保真、股票最近真实交易日分时、状态机清理与通知遮挡修复继续生效。）
+<!-- 2026-07-07 Codex 补充：批量任务父级计数新增 items_review；partial_success 不再塞进 items_failed，列表/详情/WS/进度百分比拆成“需复核/失败/取消”，兼容旧 WS 帧不清空既有复核计数。0039 已先 apply+db:verify，再重启 orch。 -->
+## 🔴 PROD LIVE REF = `codex/trust-loop-round1` — SPA `ec6cb967` / bundle `index-CWZrrlXJ.js` + orch `ec6cb967`（**批量任务需复核计数拆分 LIVE（2026-07-07）**：生产库已 apply `0039_batch_items_review_count.sql` 并 `db:verify`；batch parent/WS/API/frontend 现在把 `partial_success` 计入 `itemsReview`，真实失败才计入 `itemsFailed`，批量详情显示“需复核 / 失败 / 取消”独立指标。此前技能 dispatch、技能目录与 @ 技能入口、批量任务未成功口径、用量加载态、任务详情 evidence fallback、批量子任务状态保真、股票最近真实交易日分时、状态机清理与通知遮挡修复继续生效。）
 
 <!-- 2026-06-26 里程碑 — 🏁🏁 登录自学从机制到交易站真出货 + 四层 veto 防线 -->
 **🏁🏁 里程碑（2026-06-26）— 登录自学从机制到交易站真出货 + 四层 veto 防线全证通**
