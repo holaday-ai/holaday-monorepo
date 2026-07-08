@@ -1,4 +1,4 @@
-import type { UiTask } from '@/types/task';
+import { isActive, isTerminalStatus, type UiTask, type UiTaskStatus } from '@/types/task';
 
 export interface TerminalResultInsufficientInput {
   status: UiTask['status'];
@@ -75,24 +75,31 @@ export function allowsConciseFactResult(intent?: string): boolean {
 
 export function taskCancelStateChangedMessage(state: string | null | undefined): string {
   const status = typeof state === 'string' ? state.trim() : '';
-  if (
-    status === 'completed' ||
-    status === 'partial_success' ||
-    status === 'failed' ||
-    status === 'cancelled'
-  ) {
+  const knownStatus = toKnownUiTaskStatus(status);
+  if (knownStatus && isTerminalStatus(knownStatus)) {
     return '任务已经结束，当前详情已保留。';
   }
-  if (
-    status === 'running' ||
-    status === 'pending' ||
-    status === 'planning' ||
-    status === 'queued' ||
-    status === 'executing' ||
-    status === 'awaiting_user' ||
-    status === 'paused'
-  ) {
+  if (status === 'running' || (knownStatus && isActive(knownStatus))) {
     return '任务状态刚刚变化，请刷新后再确认是否需要取消。';
   }
   return '任务状态已变化，请刷新后查看最新进度。';
+}
+
+function toKnownUiTaskStatus(status: string): UiTaskStatus | null {
+  switch (status) {
+    case 'pending':
+    case 'planning':
+    case 'queued':
+    case 'executing':
+    case 'awaiting_user':
+    case 'paused':
+    case 'completed':
+    case 'partial_success':
+    case 'failed':
+    case 'cancelled':
+    case 'unknown':
+      return status;
+    default:
+      return null;
+  }
 }
