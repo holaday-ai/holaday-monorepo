@@ -4,7 +4,7 @@ import {
   emptyProjectTaskFilterState,
   projectFilterChipState,
   projectTaskFilterAppendPage,
-  projectTaskFilterAfterFailedTasksCleared,
+  projectTaskFilterAfterUnsuccessfulTasksCleared,
   projectTaskFilterAfterTaskDelete,
   projectTaskFilterAfterTaskMove,
   projectTaskFilterFirstPage,
@@ -230,7 +230,7 @@ describe('project task filter state', () => {
     expect(projectTaskFilterAfterTaskDelete(current, ['tsk_missing'])).toBe(current);
   });
 
-  it('removes failed-review tasks after the clear action succeeds', () => {
+  it('removes unsuccessful tasks after the clear action succeeds', () => {
     const current = state({
       projectId: 'proj_a',
       tasks: [
@@ -241,7 +241,7 @@ describe('project task filter state', () => {
       ],
     });
 
-    expect(projectTaskFilterAfterFailedTasksCleared(current)).toEqual({
+    expect(projectTaskFilterAfterUnsuccessfulTasksCleared(current)).toEqual({
       ...current,
       tasks: [task('tsk_done'), task('tsk_cancelled', { status: 'cancelled' })],
     });

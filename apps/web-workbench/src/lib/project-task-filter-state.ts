@@ -219,7 +219,7 @@ export function projectTaskFilterAfterTaskDelete(
   return { ...state, tasks };
 }
 
-export function projectTaskFilterAfterFailedTasksCleared(
+export function projectTaskFilterAfterUnsuccessfulTasksCleared(
   state: ProjectTaskFilterState | null,
 ): ProjectTaskFilterState | null {
   if (!state) return null;

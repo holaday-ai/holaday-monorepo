@@ -185,6 +185,76 @@ import {
 const taskController = new TaskController();
 const FAILURE_REVIEW_STATUSES = ['failed', 'partial_success'] as const;
 
+const unsuccessfulCountProcedure = protectedProcedure.query(async ({ ctx }) => {
+  const [userRow] = await ctx.db
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.externalId, ctx.userId))
+    .limit(1);
+  if (!userRow) return { count: 0 };
+  const [row] = await ctx.db
+    .select({ count: sql<number>`COUNT(*)` })
+    .from(tasksTable)
+    .where(
+      and(
+        eq(tasksTable.userId, userRow.id),
+        inArray(tasksTable.status, [...FAILURE_REVIEW_STATUSES]),
+        eq(tasksTable.origin, 'user'),
+      ),
+    );
+  return { count: Number(row?.count ?? 0) };
+});
+
+const clearUnsuccessfulProcedure = protectedProcedure.mutation(async ({ ctx }) => {
+  const [userRow] = await ctx.db
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.externalId, ctx.userId))
+    .limit(1);
+  if (!userRow) {
+    throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
+  }
+
+  const unsuccessfulRows = await ctx.db
+    .select({ id: tasksTable.id })
+    .from(tasksTable)
+    .where(
+      and(
+        eq(tasksTable.userId, userRow.id),
+        inArray(tasksTable.status, [...FAILURE_REVIEW_STATUSES]),
+        eq(tasksTable.origin, 'user'),
+      ),
+    );
+  const unsuccessfulIds = unsuccessfulRows.map((row) => row.id);
+  if (unsuccessfulIds.length === 0) {
+    return { ok: true as const, deleted: 0 };
+  }
+
+  // Same evidence semantics as single-task delete: route artifacts
+  // before deleting rows while task_id is still populated. Without
+  // this, the evidence_artifacts.task_id FK would SET NULL and leave
+  // task_evidence / audit rows orphaned without applying the
+  // user-delete vs audit-retention split from design §4.9.
+  for (const taskId of unsuccessfulIds) {
+    try {
+      await routeTaskEvidenceOnDelete(ctx.db, taskId, { logger: ctx.logger });
+    } catch (err) {
+      ctx.logger.warn(
+        { err, taskInternalId: taskId },
+        "tasks.clearUnsuccessful: evidence routing failed (non-blocking)",
+      );
+    }
+  }
+
+  // task_steps cascades via FK; task_events has no FK and must be
+  // deleted explicitly to avoid orphan audit rows.
+  await ctx.db.transaction(async (tx) => {
+    await tx.delete(taskEvents).where(inArray(taskEvents.taskId, unsuccessfulIds));
+    await tx.delete(tasksTable).where(inArray(tasksTable.id, unsuccessfulIds));
+  });
+  return { ok: true as const, deleted: unsuccessfulIds.length };
+});
+
 /**
  * Phase 24 — controlled quota bypass for the test account.
  *
@@ -7536,60 +7606,14 @@ export const tasksRouter = router({
     }),
 
   /**
-   * Clear every failed task owned by the caller, not just the first
-   * page currently loaded by the SPA. This powers the sidebar/user-menu
-   * "清除失败/需复核任务" action whose badge is already server-side via
-   * `failedCount`.
+   * Clear every failed or review-needed task owned by the caller, not
+   * just the first page currently loaded by the SPA. This powers the
+   * sidebar/user-menu "清除未成功任务" action whose badge is already
+   * server-side via `unsuccessfulCount`.
    */
-  clearFailed: protectedProcedure.mutation(async ({ ctx }) => {
-    const [userRow] = await ctx.db
-      .select({ id: users.id })
-      .from(users)
-      .where(eq(users.externalId, ctx.userId))
-      .limit(1);
-    if (!userRow) {
-      throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
-    }
-
-    const failedRows = await ctx.db
-      .select({ id: tasksTable.id })
-      .from(tasksTable)
-      .where(
-        and(
-          eq(tasksTable.userId, userRow.id),
-          inArray(tasksTable.status, [...FAILURE_REVIEW_STATUSES]),
-          eq(tasksTable.origin, 'user'),
-        ),
-      );
-    const failedIds = failedRows.map((row) => row.id);
-    if (failedIds.length === 0) {
-      return { ok: true as const, deleted: 0 };
-    }
-
-    // Same evidence semantics as single-task delete: route artifacts
-    // before deleting rows while task_id is still populated. Without
-    // this, the evidence_artifacts.task_id FK would SET NULL and leave
-    // task_evidence / audit rows orphaned without applying the
-    // user-delete vs audit-retention split from design §4.9.
-    for (const taskId of failedIds) {
-      try {
-        await routeTaskEvidenceOnDelete(ctx.db, taskId, { logger: ctx.logger });
-      } catch (err) {
-        ctx.logger.warn(
-          { err, taskInternalId: taskId },
-          "tasks.clearFailed: evidence routing failed (non-blocking)",
-        );
-      }
-    }
-
-    // task_steps cascades via FK; task_events has no FK and must be
-    // deleted explicitly to avoid orphan audit rows.
-    await ctx.db.transaction(async (tx) => {
-      await tx.delete(taskEvents).where(inArray(taskEvents.taskId, failedIds));
-      await tx.delete(tasksTable).where(inArray(tasksTable.id, failedIds));
-    });
-    return { ok: true as const, deleted: failedIds.length };
-  }),
+  clearUnsuccessful: clearUnsuccessfulProcedure,
+  /** Compatibility alias for older SPA bundles / clients. */
+  clearFailed: clearUnsuccessfulProcedure,
 
   /**
    * Rename a task (sets the display `title` column). Pass an empty
@@ -7862,32 +7886,16 @@ export const tasksRouter = router({
     }),
 
   /**
-   * BOSS bug fix — total failed/review-needed task count for the caller (across
-   * all time, not just the loaded slice). The "清除失败/需复核任务 (N)"
-   * badge was driven by tasks.filter(failed).length which only
-   * counts what the SPA store has loaded. After a server-side
-   * cleanup (admin SQL, batch delete) the badge would lag the
-   * truth. SPA bootstrap + post-clear both refetch this.
+   * BOSS bug fix — total unsuccessful-task count for the caller (across
+   * all time, not just the loaded slice). The "清除未成功任务 (N)" badge
+   * was driven by tasks.filter(failed).length which only counts what
+   * the SPA store has loaded. After a server-side cleanup (admin SQL,
+   * batch delete) the badge would lag the truth. SPA bootstrap +
+   * post-clear both refetch this.
    */
-  failedCount: protectedProcedure.query(async ({ ctx }) => {
-    const [userRow] = await ctx.db
-      .select({ id: users.id })
-      .from(users)
-      .where(eq(users.externalId, ctx.userId))
-      .limit(1);
-    if (!userRow) return { count: 0 };
-    const [row] = await ctx.db
-      .select({ count: sql<number>`COUNT(*)` })
-      .from(tasksTable)
-      .where(
-        and(
-          eq(tasksTable.userId, userRow.id),
-          inArray(tasksTable.status, [...FAILURE_REVIEW_STATUSES]),
-          eq(tasksTable.origin, 'user'),
-        ),
-      );
-    return { count: Number(row?.count ?? 0) };
-  }),
+  unsuccessfulCount: unsuccessfulCountProcedure,
+  /** Compatibility alias for older SPA bundles / clients. */
+  failedCount: unsuccessfulCountProcedure,
 });
 
 import { sql as sqlFilter } from 'drizzle-orm';

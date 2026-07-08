@@ -13,7 +13,7 @@ describe('learningEmptyCopy', () => {
       '无高风险域名',
     );
     expect(learningEmptyCopy({ search: '', filter: 'recentFail' })).toBe(
-      '本周无失败/需复核任务',
+      '本周无未成功任务（失败或需复核）',
     );
   });
 

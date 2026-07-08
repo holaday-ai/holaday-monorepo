@@ -38,7 +38,7 @@ import { pageActionError, pageErrorMessage } from '@/lib/page-error-copy';
 import {
   projectFilterChipState,
   projectTaskFilterAppendPage,
-  projectTaskFilterAfterFailedTasksCleared,
+  projectTaskFilterAfterUnsuccessfulTasksCleared,
   projectTaskFilterAfterTaskDelete,
   projectTaskFilterAfterTaskMove,
   projectTaskFilterFirstPage,
@@ -135,40 +135,40 @@ export function AppShell(): JSX.Element {
   const [confirmBulkDelete, setConfirmBulkDelete] = React.useState<
     string[] | null
   >(null);
-  const [confirmClearFailed, setConfirmClearFailed] = React.useState(false);
+  const [confirmClearUnsuccessful, setConfirmClearUnsuccessful] = React.useState(false);
   const mountedRef = React.useRef(false);
   const authInvalidatedRef = React.useRef(false);
-  const failedCountRequestRef = React.useRef(0);
+  const unsuccessfulCountRequestRef = React.useRef(0);
   const projectRefreshRequestRef = React.useRef(0);
   const projectFilterRequestRef = React.useRef(0);
   const projectLoadMoreRequestRef = React.useRef(0);
   /**
-   * BOSS bug fix — server-side failed/review-needed task count for the user
+   * BOSS bug fix — server-side unsuccessful-task count for the user
    * menu badge + clear-confirm dialog. The previous
    * `tasks.filter(failed).length` only counted what the SPA had
    * loaded (paginated), so the badge lagged reality after
    * out-of-band cleanups (admin SQL, deployments). Refetched on
    * bootstrap + after the clear-all action settles.
    */
-  const [serverFailedCount, setServerFailedCount] = React.useState(0);
+  const [serverUnsuccessfulCount, setServerUnsuccessfulCount] = React.useState(0);
   React.useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
-      failedCountRequestRef.current += 1;
+      unsuccessfulCountRequestRef.current += 1;
       projectRefreshRequestRef.current += 1;
       projectFilterRequestRef.current += 1;
       projectLoadMoreRequestRef.current += 1;
     };
   }, []);
 
-  const refreshFailedCount = React.useCallback(async () => {
-    const requestId = failedCountRequestRef.current + 1;
-    failedCountRequestRef.current = requestId;
+  const refreshUnsuccessfulCount = React.useCallback(async () => {
+    const requestId = unsuccessfulCountRequestRef.current + 1;
+    unsuccessfulCountRequestRef.current = requestId;
     try {
-      const res = await trpc.tasks.failedCount.query();
-      if (!mountedRef.current || failedCountRequestRef.current !== requestId) return;
-      setServerFailedCount(
+      const res = await trpc.tasks.unsuccessfulCount.query();
+      if (!mountedRef.current || unsuccessfulCountRequestRef.current !== requestId) return;
+      setServerUnsuccessfulCount(
         normalizeTaskActionCount((res as { count?: unknown } | null)?.count),
       );
     } catch {
@@ -213,9 +213,9 @@ export function AppShell(): JSX.Element {
   }, []);
 
   const refreshDeletionDependentMeta = React.useCallback(() => {
-    void refreshFailedCount();
+    void refreshUnsuccessfulCount();
     void refreshProjects();
-  }, [refreshFailedCount, refreshProjects]);
+  }, [refreshProjects, refreshUnsuccessfulCount]);
 
   const invalidateAuthSession = React.useCallback(() => {
     if (authInvalidatedRef.current) return;
@@ -246,8 +246,8 @@ export function AppShell(): JSX.Element {
 
   React.useEffect(() => {
     if (!authed) return;
-    void refreshFailedCount();
-  }, [authed, failedTaskSignature, refreshFailedCount]);
+    void refreshUnsuccessfulCount();
+  }, [authed, failedTaskSignature, refreshUnsuccessfulCount]);
 
   // Bootstrap. Runs once when `authed` flips true. Identical to the
   // pre-refactor flow inside WorkbenchApp but lifted up — every authed
@@ -288,7 +288,7 @@ export function AppShell(): JSX.Element {
         }
       },
     );
-    void refreshFailedCount();
+    void refreshUnsuccessfulCount();
     Promise.allSettled([listFuture, meFuture]).then(finish);
     const timer = setTimeout(finish, 1500);
     void refreshProjects();
@@ -784,10 +784,10 @@ export function AppShell(): JSX.Element {
         displayName={displayName}
         email={me?.email ?? null}
         plan={me?.plan ?? 'free'}
-        failedTaskCount={serverFailedCount}
+        unsuccessfulTaskCount={serverUnsuccessfulCount}
         onLogout={handleLogout}
         onOpenFeedback={() => setFeedbackOpen(true)}
-        onClearFailedTasks={() => setConfirmClearFailed(true)}
+        onClearUnsuccessfulTasks={() => setConfirmClearUnsuccessful(true)}
       />
       <MobileNotificationBellSlot />
       <UpdateBanner />
@@ -918,25 +918,25 @@ export function AppShell(): JSX.Element {
       />
 
       <ConfirmDialog
-        open={confirmClearFailed}
-        title="清除失败/需复核任务？"
-        description={`将清除 ${serverFailedCount} 个失败或需复核任务，此操作不可恢复。\n进行中的任务不受影响。`}
-        confirmLabel={`清除 ${serverFailedCount} 个`}
+        open={confirmClearUnsuccessful}
+        title="清除未成功任务？"
+        description={`将清除 ${serverUnsuccessfulCount} 个失败或需复核任务，此操作不可恢复。\n进行中的任务不受影响。`}
+        confirmLabel={`清除 ${serverUnsuccessfulCount} 个`}
         destructive
-        onClose={() => setConfirmClearFailed(false)}
+        onClose={() => setConfirmClearUnsuccessful(false)}
         onConfirm={async () => {
-          setConfirmClearFailed(false);
+          setConfirmClearUnsuccessful(false);
           try {
-            const res = await trpc.tasks.clearFailed.mutate();
+            const res = await trpc.tasks.clearUnsuccessful.mutate();
             if (!mountedRef.current) return;
             const deleted = normalizeTaskActionCount(
               (res as { deleted?: unknown } | null)?.deleted,
             );
             if (deleted > 0) {
-              setProjectTaskFilter(projectTaskFilterAfterFailedTasksCleared);
-              toast.show(`已清除 ${deleted} 个失败/需复核任务`);
+              setProjectTaskFilter(projectTaskFilterAfterUnsuccessfulTasksCleared);
+              toast.show(`已清除 ${deleted} 个未成功任务`);
             } else {
-              toast.show('没有可清除的失败/需复核任务');
+              toast.show('没有可清除的未成功任务');
             }
             const active = tasks.find((t) => t.taskId === selectedTaskId);
             if (active?.status === 'failed' || active?.status === 'partial_success') {
@@ -982,18 +982,18 @@ function DesktopAccountDock({
   displayName,
   email,
   plan,
-  failedTaskCount,
+  unsuccessfulTaskCount,
   onLogout,
   onOpenFeedback,
-  onClearFailedTasks,
+  onClearUnsuccessfulTasks,
 }: {
   displayName: string;
   email: string | null;
   plan: string;
-  failedTaskCount: number;
+  unsuccessfulTaskCount: number;
   onLogout(): void;
   onOpenFeedback(): void;
-  onClearFailedTasks(): void;
+  onClearUnsuccessfulTasks(): void;
 }): JSX.Element {
   return (
     <div className="fixed right-7 top-5 z-40 hidden items-center gap-3 md:flex">
@@ -1005,8 +1005,8 @@ function DesktopAccountDock({
         plan={plan}
         onLogout={onLogout}
         onOpenFeedback={onOpenFeedback}
-        failedTaskCount={failedTaskCount}
-        onClearFailedTasks={onClearFailedTasks}
+        unsuccessfulTaskCount={unsuccessfulTaskCount}
+        onClearUnsuccessfulTasks={onClearUnsuccessfulTasks}
       />
     </div>
   );

@@ -133,8 +133,25 @@ describe('tRPC tasks.delete', () => {
     });
   }
 
+  async function callClearUnsuccessful(port: number, token: string) {
+    return fetch(`http://127.0.0.1:${port}/trpc/tasks.clearUnsuccessful`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({}),
+    });
+  }
+
   async function callFailedCount(port: number, token: string) {
     return fetch(`http://127.0.0.1:${port}/trpc/tasks.failedCount`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+  }
+
+  async function callUnsuccessfulCount(port: number, token: string) {
+    return fetch(`http://127.0.0.1:${port}/trpc/tasks.unsuccessfulCount`, {
       headers: { authorization: `Bearer ${token}` },
     });
   }
@@ -199,7 +216,7 @@ describe('tRPC tasks.delete', () => {
     }
   });
 
-  it("clears failed-review tasks for the caller without deleting completed or other users' rows", async () => {
+  it("clearUnsuccessful clears failed and review-needed tasks without deleting completed or other users' rows", async () => {
     const user = await seedUser();
     const other = await seedUser();
     const failedA = await seedTask(user.internalId, 'failed');
@@ -210,7 +227,7 @@ describe('tRPC tasks.delete', () => {
     const { port, signAccessToken, close } = await bootTrpcServer();
     try {
       const token = await signAccessToken({ sub: user.external, plan: 'free' });
-      const res = await callClearFailed(port, token);
+      const res = await callClearUnsuccessful(port, token);
       expect(res.status).toBe(200);
       const json = (await res.json()) as { result?: { data?: { deleted?: number } } };
       expect(json.result?.data?.deleted).toBe(3);
@@ -241,7 +258,7 @@ describe('tRPC tasks.delete', () => {
     }
   });
 
-  it('failedCount includes partial_success because it is part of the failure-review set', async () => {
+  it('unsuccessfulCount includes failed and partial_success while keeping failedCount as a compatibility alias', async () => {
     const user = await seedUser();
     await seedTask(user.internalId, 'failed');
     await seedTask(user.internalId, 'partial_success');
@@ -249,6 +266,13 @@ describe('tRPC tasks.delete', () => {
     const { port, signAccessToken, close } = await bootTrpcServer();
     try {
       const token = await signAccessToken({ sub: user.external, plan: 'free' });
+      const unsuccessful = await callUnsuccessfulCount(port, token);
+      expect(unsuccessful.status).toBe(200);
+      const unsuccessfulJson = (await unsuccessful.json()) as {
+        result?: { data?: { count?: number } };
+      };
+      expect(unsuccessfulJson.result?.data?.count).toBe(2);
+
       const res = await callFailedCount(port, token);
       expect(res.status).toBe(200);
       const json = (await res.json()) as { result?: { data?: { count?: number } } };

@@ -24,10 +24,10 @@ interface Props {
   plan: string;
   onLogout(): void;
   onOpenFeedback?(): void;
-  /** Count of failed or review-needed tasks — shows/hides the 批量清除 menu item. */
-  failedTaskCount?: number;
-  /** Invoked when the user picks "清除失败/需复核任务". Caller confirms + deletes. */
-  onClearFailedTasks?(): void;
+  /** Count of unsuccessful tasks: failed or review-needed. Shows/hides the cleanup menu item. */
+  unsuccessfulTaskCount?: number;
+  /** Invoked when the user picks "清除未成功任务". Caller confirms + deletes. */
+  onClearUnsuccessfulTasks?(): void;
   /**
    * Codex-rail layout — renders just the avatar (no name / plan text)
    * and anchors the popover to the avatar rather than the whole row.
@@ -49,8 +49,8 @@ export function UserMenu({
   plan,
   onLogout,
   onOpenFeedback,
-  failedTaskCount = 0,
-  onClearFailedTasks,
+  unsuccessfulTaskCount = 0,
+  onClearUnsuccessfulTasks,
   compact = false,
   placement = 'sidebar',
 }: Props): JSX.Element {
@@ -196,16 +196,16 @@ export function UserMenu({
           </div>
           <ThemeSwitcher mode={mode} onChange={setMode} topbar={topbar} />
           <div className={cn('mt-1 border-t border-[#DCDDDD]/80 pt-1 dark:border-white/10', topbar && 'mt-3 rounded-[14px] border bg-white p-1.5 shadow-[0_1px_3px_rgba(15,23,42,0.03)] dark:bg-transparent')}>
-            {onClearFailedTasks && failedTaskCount > 0 && (
+            {onClearUnsuccessfulTasks && unsuccessfulTaskCount > 0 && (
               <MenuItem
                 topbar={topbar}
                 icon={<Trash2 className="h-3.5 w-3.5" />}
                 onClick={() => {
                   setOpen(false);
-                  onClearFailedTasks();
+                  onClearUnsuccessfulTasks();
                 }}
               >
-                清除失败/需复核任务（{failedTaskCount}）
+                清除未成功任务（{unsuccessfulTaskCount}）
               </MenuItem>
             )}
             {onOpenFeedback && (
