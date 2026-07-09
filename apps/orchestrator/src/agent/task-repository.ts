@@ -242,7 +242,7 @@ export class TaskRepository {
     if (prev.taskId !== next.taskId) {
       throw new Error('applyControlTransition requires matching taskIds');
     }
-    if (isTaskTerminalStatus(prev.status)) {
+    if (!canApplyControlTransition(prev, next)) {
       return { persisted: false };
     }
     const [taskRow] = await this.db
@@ -1278,6 +1278,13 @@ function controlEventType(prev: TaskState, next: TaskState): string {
   if (next.status === 'partial_success') return 'task.partial_success';
   if (next.status === 'failed') return 'task.failed';
   return 'task.transition';
+}
+
+function canApplyControlTransition(prev: TaskState, next: TaskState): boolean {
+  if (isTaskTerminalStatus(prev.status)) return false;
+  if (next.status === 'paused') return prev.status === 'executing';
+  if (next.status === 'executing') return prev.status === 'paused';
+  return true;
 }
 
 function canApplyStepResultFrom(status: TaskState['status']): boolean {

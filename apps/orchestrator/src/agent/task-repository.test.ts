@@ -659,6 +659,56 @@ describe('TaskRepository task terminal state persistence', () => {
     expect(captured.eventPayloads).toHaveLength(0);
   });
 
+  it('applyControlTransition refuses pause from non-executing source states', async () => {
+    const { db, captured } = fakeDbForStateTransitions(1);
+    const repo = new TaskRepository(db);
+
+    for (const status of ['pending', 'planning', 'queued', 'awaiting_user', 'paused'] as const) {
+      const prev: TaskState = {
+        ...baseState,
+        status,
+      };
+      const next: TaskState = {
+        ...prev,
+        status: 'paused',
+        pauseReason: 'user',
+      };
+
+      const result = await repo.applyControlTransition(prev, next);
+
+      expect(result.persisted).toBe(false);
+    }
+
+    expect(captured.transactionRan).toBe(false);
+    expect(captured.updatePayloads).toHaveLength(0);
+    expect(captured.eventPayloads).toHaveLength(0);
+  });
+
+  it('applyControlTransition refuses resume from non-paused source states', async () => {
+    const { db, captured } = fakeDbForStateTransitions(1);
+    const repo = new TaskRepository(db);
+
+    for (const status of ['pending', 'planning', 'queued', 'executing', 'awaiting_user'] as const) {
+      const prev: TaskState = {
+        ...baseState,
+        status,
+      };
+      const next: TaskState = {
+        ...prev,
+        status: 'executing',
+        pauseReason: null,
+      };
+
+      const result = await repo.applyControlTransition(prev, next);
+
+      expect(result.persisted).toBe(false);
+    }
+
+    expect(captured.transactionRan).toBe(false);
+    expect(captured.updatePayloads).toHaveLength(0);
+    expect(captured.eventPayloads).toHaveLength(0);
+  });
+
   it('applyControlTransition clears awaiting fields when cancelling a parked task', async () => {
     const { db, captured } = fakeDbForStateTransitions(1);
     const repo = new TaskRepository(db);

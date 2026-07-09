@@ -171,6 +171,8 @@ export class TaskController {
     if (
       input.state &&
       (isTaskTerminalStatus(state.status) ||
+        state.status === 'pending' ||
+        state.status === 'queued' ||
         state.status === 'awaiting_user' ||
         state.status === 'paused')
     ) {
@@ -516,11 +518,7 @@ export class TaskController {
     state: TaskState,
     reason: Exclude<PauseReason, 'retries_exhausted' | 'max_steps_reached'>,
   ): { state: TaskState; effects: ControlEffect[] } {
-    if (
-      isTaskTerminalStatus(state.status) ||
-      state.status === 'awaiting_user' ||
-      state.status === 'paused'
-    ) {
+    if (state.status !== 'executing') {
       return { state, effects: [{ kind: 'noop' }] };
     }
     const paused: TaskState = {

@@ -39,7 +39,7 @@ describe('TaskController state machine', () => {
     }
   });
 
-  it('start() does not re-dispatch parked or terminal existing states', async () => {
+  it('start() does not re-dispatch parked, queued/pending, or terminal existing states', async () => {
     const c = await setup();
     const base = {
       taskId: 'tsk_existing',
@@ -49,6 +49,8 @@ describe('TaskController state machine', () => {
     };
 
     for (const status of [
+      'pending',
+      'queued',
       'awaiting_user',
       'paused',
       'completed',
@@ -238,6 +240,23 @@ describe('TaskController state machine', () => {
     const sendEffect = effects.find((e) => e.kind === 'send');
     if (sendEffect?.kind === 'send' && sendEffect.message.type === 'server.task.control') {
       expect(sendEffect.message.reason).toBe('quota_exceeded');
+    }
+  });
+
+  it('pause is a no-op before execution starts', async () => {
+    const c = await setup();
+    const base = {
+      taskId: 'tsk_pre_execution',
+      plan: [{ id: 'stp_1', kind: 'goto' as const, risk: 'low' as const }],
+      cursor: 0,
+      pendingConfirm: null,
+    };
+
+    for (const status of ['pending', 'planning', 'queued'] as const) {
+      const existing = { ...base, status };
+      const { state, effects } = c.pause(existing, 'user');
+      expect(state).toBe(existing);
+      expect(effects).toEqual([{ kind: 'noop' }]);
     }
   });
 
