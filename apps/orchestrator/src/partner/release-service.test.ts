@@ -326,7 +326,7 @@ function fakeLot(overrides: Partial<PartnerLot> = {}): PartnerLot {
     accumulationStartsAt: new Date('2026-07-01T00:00:00.000Z'),
     accumulationEndsAt: new Date('2026-10-29T00:00:00.000Z'),
     releaseStartsAt: new Date('2026-11-01T00:00:00.000Z'),
-    releaseEndsAt: new Date('2027-06-30T00:00:00.000Z'),
+    releaseEndsAt: new Date('2027-10-31T00:00:00.000Z'),
     metadata: null,
     createdAt: new Date('2026-07-01T00:00:00.000Z'),
     updatedAt: new Date('2026-07-01T00:00:00.000Z'),
@@ -340,8 +340,8 @@ function fakeRelease(overrides: Partial<PartnerMonthlyRelease> = {}): PartnerMon
     externalId: 'payment_existing_release',
     lotId: 1,
     releaseMonth: '2026-11',
-    principalCreditCents: 10_000,
-    bonusCreditCents: 2_000,
+    principalCreditCents: 6_667,
+    bonusCreditCents: 1_334,
     carryForwardCreditCents: 0,
     status: 'posted',
     idempotencyKey: 'monthly_release:2026-11:1',
@@ -352,15 +352,28 @@ function fakeRelease(overrides: Partial<PartnerMonthlyRelease> = {}): PartnerMon
 }
 
 function priorMonthlyReleases(count: number, lotId = 1): PartnerMonthlyRelease[] {
-  const months = ['2026-11', '2026-12', '2027-01', '2027-02', '2027-03', '2027-04', '2027-05', '2027-06'];
+  const months = [
+    '2026-11',
+    '2026-12',
+    '2027-01',
+    '2027-02',
+    '2027-03',
+    '2027-04',
+    '2027-05',
+    '2027-06',
+    '2027-07',
+    '2027-08',
+    '2027-09',
+    '2027-10',
+  ];
   return months.slice(0, count).map((releaseMonth, index) =>
     fakeRelease({
       id: index + 1,
       externalId: `payment_prior_release_${index + 1}`,
       lotId,
       releaseMonth,
-      principalCreditCents: 10_000,
-      bonusCreditCents: 2_000,
+      principalCreditCents: 6_667,
+      bonusCreditCents: 1_334,
       idempotencyKey: `monthly_release:${releaseMonth}:${lotId}`,
       createdAt: new Date(`${releaseMonth}-01T00:00:00.000Z`),
     }),
@@ -413,7 +426,7 @@ describe('ReleaseService releaseEligibleLots', () => {
     );
   });
 
-  it('creates a full-budget monthly release, credits available ledger, and reconciles lot totals', async () => {
+  it('creates a full-budget monthly release, credits withdrawable ledger, and reconciles lot totals', async () => {
     const fakeDb = new FakeReleaseDb({ lots: [fakeLot()] });
     const service = new ReleaseService(fakeDb.asDB());
 
@@ -423,26 +436,26 @@ describe('ReleaseService releaseEligibleLots', () => {
       releaseMonth: '2026-11',
       eligibleLotCount: 1,
       releaseCount: 1,
-      totalReleasedCreditCents: 12_000,
-      remainingBudgetCreditCents: 38_000,
+      totalReleasedCreditCents: 8_001,
+      remainingBudgetCreditCents: 41_999,
     });
     expect(fakeDb.releaseRows).toHaveLength(1);
     expect(fakeDb.releaseRows[0]).toMatchObject({
       lotId: 1,
       releaseMonth: '2026-11',
-      principalCreditCents: 10_000,
-      bonusCreditCents: 2_000,
+      principalCreditCents: 6_667,
+      bonusCreditCents: 1_334,
       carryForwardCreditCents: 0,
       idempotencyKey: 'monthly_release:2026-11:1',
     });
     expect(fakeDb.ledgerRows.map((row) => [row.entryType, row.bucket, row.amountCreditCents])).toEqual([
-      ['monthly_release_principal', 'available', 10_000],
-      ['monthly_release_bonus', 'available', 2_000],
+      ['monthly_release_principal', 'withdrawable', 6_667],
+      ['monthly_release_bonus', 'withdrawable', 1_334],
     ]);
     expect(fakeDb.lotRows[0]).toMatchObject({
       status: 'releasing',
-      releasedPrincipalCreditCents: 10_000,
-      releasedBonusCreditCents: 2_000,
+      releasedPrincipalCreditCents: 6_667,
+      releasedBonusCreditCents: 1_334,
       carryForwardCreditCents: 0,
     });
   });
@@ -480,7 +493,7 @@ describe('ReleaseService releaseEligibleLots', () => {
     expect(first).toMatchObject({
       eligibleLotCount: 1,
       releaseCount: 1,
-      totalReleasedCreditCents: 12_000,
+      totalReleasedCreditCents: 8_001,
     });
     expect(second).toEqual(first);
     expect(fakeDb.lotStatusTransitions).toEqual([{ lotId: 1, status: 'release_pending' }]);
@@ -508,7 +521,7 @@ describe('ReleaseService releaseEligibleLots', () => {
     expect(fakeDb.releaseRows[0]).toMatchObject({
       principalCreditCents: 5_000,
       bonusCreditCents: 0,
-      carryForwardCreditCents: 7_000,
+      carryForwardCreditCents: 3_001,
     });
     expect(fakeDb.ledgerRows.map((row) => [row.entryType, row.amountCreditCents])).toEqual([
       ['monthly_release_principal', 5_000],
@@ -516,7 +529,7 @@ describe('ReleaseService releaseEligibleLots', () => {
     expect(fakeDb.lotRows[0]).toMatchObject({
       releasedPrincipalCreditCents: 5_000,
       releasedBonusCreditCents: 0,
-      carryForwardCreditCents: 7_000,
+      carryForwardCreditCents: 3_001,
     });
   });
 
@@ -531,8 +544,8 @@ describe('ReleaseService releaseEligibleLots', () => {
       releaseMonth: '2026-12',
       eligibleLotCount: 1,
       releaseCount: 1,
-      totalReleasedCreditCents: 20_001,
-      remainingBudgetCreditCents: 29_999,
+      totalReleasedCreditCents: 11_275,
+      remainingBudgetCreditCents: 38_725,
     });
     expect(
       fakeDb.releaseRows.map((row) => [
@@ -542,12 +555,12 @@ describe('ReleaseService releaseEligibleLots', () => {
         row.carryForwardCreditCents,
       ]),
     ).toEqual([
-      ['2026-11', 5_000, 0, 7_000],
-      ['2026-12', 17_715, 2_286, 0],
+      ['2026-11', 5_000, 0, 3_001],
+      ['2026-12', 9_820, 1_455, 0],
     ]);
     expect(fakeDb.lotRows[0]).toMatchObject({
-      releasedPrincipalCreditCents: 22_715,
-      releasedBonusCreditCents: 2_286,
+      releasedPrincipalCreditCents: 14_820,
+      releasedBonusCreditCents: 1_455,
       carryForwardCreditCents: 0,
     });
   });
@@ -575,17 +588,17 @@ describe('ReleaseService releaseEligibleLots', () => {
       releaseMonth: '2026-12',
       eligibleLotCount: 1,
       releaseCount: 1,
-      totalReleasedCreditCents: 17_715,
-      remainingBudgetCreditCents: 32_285,
+      totalReleasedCreditCents: 13_819,
+      remainingBudgetCreditCents: 36_181,
     });
     expect(fakeDb.releaseRows.at(-1)).toMatchObject({
       releaseMonth: '2026-12',
-      principalCreditCents: 17_715,
+      principalCreditCents: 13_819,
       bonusCreditCents: 0,
       carryForwardCreditCents: 0,
     });
     expect(fakeDb.lotRows[0]).toMatchObject({
-      releasedPrincipalCreditCents: 22_715,
+      releasedPrincipalCreditCents: 18_819,
       releasedBonusCreditCents: 2_000,
       carryForwardCreditCents: 0,
     });
@@ -614,8 +627,8 @@ describe('ReleaseService releaseEligibleLots', () => {
     expect(fakeDb.ledgerRows).toHaveLength(2);
     expect(fakeDb.ledgerInsertAttempts).toHaveLength(4);
     expect(fakeDb.lotRows[0]).toMatchObject({
-      releasedPrincipalCreditCents: 10_000,
-      releasedBonusCreditCents: 2_000,
+      releasedPrincipalCreditCents: 6_667,
+      releasedBonusCreditCents: 1_334,
       carryForwardCreditCents: 0,
     });
   });
@@ -640,13 +653,14 @@ describe('ReleaseService releaseEligibleLots', () => {
       remainingBudgetCreditCents: 0,
     });
     expect(fakeDb.releaseRows.map((row) => [row.lotId, row.principalCreditCents, row.bonusCreditCents, row.carryForwardCreditCents])).toEqual([
-      [1, 10_000, 2_000, 0],
-      [2, 3_000, 0, 9_000],
+      [1, 6_667, 1_334, 0],
+      [2, 6_667, 332, 1_002],
     ]);
     expect(fakeDb.ledgerRows.map((row) => [row.lotId, row.entryType, row.amountCreditCents])).toEqual([
-      [1, 'monthly_release_principal', 10_000],
-      [1, 'monthly_release_bonus', 2_000],
-      [2, 'monthly_release_principal', 3_000],
+      [1, 'monthly_release_principal', 6_667],
+      [1, 'monthly_release_bonus', 1_334],
+      [2, 'monthly_release_principal', 6_667],
+      [2, 'monthly_release_bonus', 332],
     ]);
   });
 
@@ -658,23 +672,23 @@ describe('ReleaseService releaseEligibleLots', () => {
           releasedBonusCreditCents: 0,
         }),
       ],
-      releases: priorMonthlyReleases(7),
+      releases: priorMonthlyReleases(11),
     });
     const service = new ReleaseService(fakeDb.asDB());
 
-    const summary = await service.releaseEligibleLots({ releaseMonth: '2027-06', budgetCreditCents: 50_000 });
+    const summary = await service.releaseEligibleLots({ releaseMonth: '2027-10', budgetCreditCents: 50_000 });
 
     expect(summary).toEqual({
-      releaseMonth: '2027-06',
+      releaseMonth: '2027-10',
       eligibleLotCount: 1,
       releaseCount: 1,
-      totalReleasedCreditCents: 12_000,
-      remainingBudgetCreditCents: 38_000,
+      totalReleasedCreditCents: 7_989,
+      remainingBudgetCreditCents: 42_011,
     });
     expect(fakeDb.releaseRows.at(-1)).toMatchObject({
-      releaseMonth: '2027-06',
-      principalCreditCents: 10_000,
-      bonusCreditCents: 2_000,
+      releaseMonth: '2027-10',
+      principalCreditCents: 6_663,
+      bonusCreditCents: 1_326,
       carryForwardCreditCents: 0,
     });
     expect(fakeDb.lotRows[0]).toMatchObject({

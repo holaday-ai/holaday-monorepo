@@ -1,9 +1,6 @@
 import {
   HOLA_CREDIT_CNY_CENTS,
   PARTNER_ACCUMULATION_DAYS,
-  PARTNER_RECHARGE_MAX_MONTHLY_CNY_CENTS,
-  PARTNER_RECHARGE_MAX_SINGLE_CNY_CENTS,
-  PARTNER_RECHARGE_MIN_CNY_CENTS,
   PARTNER_RELEASE_MONTHS,
   newExternalId,
 } from '@holaday/shared-types';
@@ -27,6 +24,12 @@ const REVIEW_OVERRIDE_NOTE_MAX_LENGTH = 1000;
 export type RechargeAmountValidationResult =
   | { ok: true }
   | { ok: false; reason: 'invalid_amount' | 'not_whole_cny' | 'below_minimum' | 'above_single_maximum' };
+
+export interface RechargeAmountLimits {
+  singleRechargeMinCnyCents: number;
+  singleRechargeMaxCnyCents: number;
+  monthlyRechargeCapCnyCents: number;
+}
 
 export type RechargeOrderKind = 'membership' | 'recharge';
 export type RechargeGateReason = 'membership_required' | 'kyc_required';
@@ -158,7 +161,43 @@ export async function computeCompletedRechargeTotalCnyCents(
     .reduce((sum, row) => sum + row.amountCnyCents, 0);
 }
 
-export function validateRechargeAmount(amountCnyCents: number): RechargeAmountValidationResult {
+function currentRechargeLimits(): RechargeAmountLimits {
+  const config = partnerConfig();
+  return {
+    singleRechargeMinCnyCents: config.singleRechargeMinCnyCents,
+    singleRechargeMaxCnyCents: config.singleRechargeMaxCnyCents,
+    monthlyRechargeCapCnyCents: config.monthlyRechargeCapCnyCents,
+  };
+}
+
+function normalizeRechargeLimits(input?: Partial<RechargeAmountLimits>): RechargeAmountLimits {
+  const raw = input ?? currentRechargeLimits();
+  const singleRechargeMinCnyCents = normalizeNonNegativeWholeCnyAmount(
+    raw.singleRechargeMinCnyCents ?? currentRechargeLimits().singleRechargeMinCnyCents,
+    'singleRechargeMinCnyCents',
+  );
+  const singleRechargeMaxCnyCents = normalizeNonNegativeWholeCnyAmount(
+    raw.singleRechargeMaxCnyCents ?? currentRechargeLimits().singleRechargeMaxCnyCents,
+    'singleRechargeMaxCnyCents',
+  );
+  const monthlyRechargeCapCnyCents = normalizeNonNegativeWholeCnyAmount(
+    raw.monthlyRechargeCapCnyCents ?? currentRechargeLimits().monthlyRechargeCapCnyCents,
+    'monthlyRechargeCapCnyCents',
+  );
+  if (singleRechargeMinCnyCents > singleRechargeMaxCnyCents) {
+    throw new RangeError('singleRechargeMinCnyCents must not exceed singleRechargeMaxCnyCents');
+  }
+  return {
+    singleRechargeMinCnyCents,
+    singleRechargeMaxCnyCents,
+    monthlyRechargeCapCnyCents,
+  };
+}
+
+export function validateRechargeAmount(
+  amountCnyCents: number,
+  limits?: Partial<RechargeAmountLimits>,
+): RechargeAmountValidationResult {
   if (!Number.isSafeInteger(amountCnyCents) || amountCnyCents <= 0) {
     return { ok: false, reason: 'invalid_amount' };
   }
@@ -167,11 +206,12 @@ export function validateRechargeAmount(amountCnyCents: number): RechargeAmountVa
     return { ok: false, reason: 'not_whole_cny' };
   }
 
-  if (amountCnyCents < PARTNER_RECHARGE_MIN_CNY_CENTS) {
+  const normalizedLimits = normalizeRechargeLimits(limits);
+  if (amountCnyCents < normalizedLimits.singleRechargeMinCnyCents) {
     return { ok: false, reason: 'below_minimum' };
   }
 
-  if (amountCnyCents > PARTNER_RECHARGE_MAX_SINGLE_CNY_CENTS) {
+  if (amountCnyCents > normalizedLimits.singleRechargeMaxCnyCents) {
     return { ok: false, reason: 'above_single_maximum' };
   }
 
@@ -226,8 +266,11 @@ function normalizeNonNegativeWholeCnyAmount(amountCnyCents: number, fieldName: s
   return amountCnyCents;
 }
 
-function normalizeRechargeAmountOrThrow(amountCnyCents: number): number {
-  const validation = validateRechargeAmount(amountCnyCents);
+function normalizeRechargeAmountOrThrow(
+  amountCnyCents: number,
+  limits?: Partial<RechargeAmountLimits>,
+): number {
+  const validation = validateRechargeAmount(amountCnyCents, limits);
   if (!validation.ok) {
     throw new RangeError(validation.reason);
   }
@@ -257,8 +300,12 @@ function normalizeReviewOverride(
 function normalizeRollingThirtyDayAmount(
   rollingThirtyDayCnyCents: number,
   amountCnyCents: number,
-  options: { allowAboveMonthlyMaximum?: boolean } = {},
+  options: { allowAboveMonthlyMaximum?: boolean; monthlyRechargeCapCnyCents?: number } = {},
 ): number {
+  const monthlyRechargeCapCnyCents = normalizeNonNegativeWholeCnyAmount(
+    options.monthlyRechargeCapCnyCents ?? currentRechargeLimits().monthlyRechargeCapCnyCents,
+    'monthlyRechargeCapCnyCents',
+  );
   if (!Number.isSafeInteger(rollingThirtyDayCnyCents) || rollingThirtyDayCnyCents < 0) {
     throw new RangeError('rollingThirtyDayCnyCents must be a non-negative safe integer');
   }
@@ -269,7 +316,7 @@ function normalizeRollingThirtyDayAmount(
     throw new RangeError('rollingThirtyDayCnyCents must include the current recharge amount');
   }
   if (
-    rollingThirtyDayCnyCents > PARTNER_RECHARGE_MAX_MONTHLY_CNY_CENTS &&
+    rollingThirtyDayCnyCents > monthlyRechargeCapCnyCents &&
     options.allowAboveMonthlyMaximum !== true
   ) {
     throw new RangeError('rollingThirtyDayCnyCents must not exceed the monthly maximum');
@@ -286,9 +333,10 @@ function normalizePendingOrderInput(input: {
   now?: Date;
 }): NormalizedPendingOrder {
   const orderKind = normalizeOrderKind(input.orderKind);
+  const limits = currentRechargeLimits();
   const amountCnyCents =
     orderKind === 'recharge'
-      ? normalizeRechargeAmountOrThrow(input.amountCnyCents)
+      ? normalizeRechargeAmountOrThrow(input.amountCnyCents, limits)
       : normalizePositiveWholeCnyAmount(input.amountCnyCents, 'amountCnyCents');
 
   return {
@@ -311,7 +359,7 @@ function assertIdempotentOrderPayloadMatches(
     row.provider !== expected.provider ||
     row.amountCnyCents !== expected.amountCnyCents ||
     row.orderKind !== expected.orderKind ||
-    row.status !== expected.status
+    row.idempotencyKey !== expected.idempotencyKey
   ) {
     throw new RechargeOrderIdempotencyConflictError();
   }
@@ -335,14 +383,18 @@ function buildExpectedLotPayload(input: {
   now: Date;
   reviewOverride?: RechargeLotReviewOverride;
 }): ExpectedLotPayload {
+  const limits = currentRechargeLimits();
   const userId = normalizePositiveSafeInteger(input.userId, 'userId');
   const rechargeOrderId = normalizePositiveSafeInteger(input.rechargeOrderId, 'rechargeOrderId');
-  const amountCnyCents = normalizeRechargeAmountOrThrow(input.amountCnyCents);
+  const amountCnyCents = normalizeRechargeAmountOrThrow(input.amountCnyCents, limits);
   const reviewOverride = normalizeReviewOverride(input.reviewOverride);
   const rollingThirtyDayCnyCents = normalizeRollingThirtyDayAmount(
     input.rollingThirtyDayCnyCents,
     amountCnyCents,
-    { allowAboveMonthlyMaximum: reviewOverride !== undefined },
+    {
+      allowAboveMonthlyMaximum: reviewOverride !== undefined,
+      monthlyRechargeCapCnyCents: limits.monthlyRechargeCapCnyCents,
+    },
   );
   const accumulationStartsAt = normalizeDate(input.now, 'now');
   const accumulationEndsAt = addUtcDays(accumulationStartsAt, PARTNER_ACCUMULATION_DAYS);
@@ -372,7 +424,7 @@ function buildExpectedLotPayload(input: {
             ...(reviewOverride.note ? { note: reviewOverride.note } : {}),
           },
           rollingThirtyDayCnyCents,
-          monthlyCapCnyCents: PARTNER_RECHARGE_MAX_MONTHLY_CNY_CENTS,
+          monthlyCapCnyCents: limits.monthlyRechargeCapCnyCents,
         }
       : null,
   };
@@ -412,6 +464,16 @@ export class RechargeService {
   }): Promise<PartnerRechargeOrder> {
     const order = normalizePendingOrderInput(input);
 
+    const [existing] = await this.db
+      .select()
+      .from(partnerRechargeOrders)
+      .where(eq(partnerRechargeOrders.idempotencyKey, order.idempotencyKey))
+      .limit(1);
+    if (existing) {
+      assertIdempotentOrderPayloadMatches(existing, order);
+      return existing;
+    }
+
     if (order.orderKind === 'recharge') {
       const membership = await this.membership.getActiveMembership(order.userId, order.now);
       if (!membership) {
@@ -422,16 +484,6 @@ export class RechargeService {
       if (!canRechargeWithKycStatus(kycStatus)) {
         throw new RechargeGateError('kyc_required');
       }
-    }
-
-    const [existing] = await this.db
-      .select()
-      .from(partnerRechargeOrders)
-      .where(eq(partnerRechargeOrders.idempotencyKey, order.idempotencyKey))
-      .limit(1);
-    if (existing) {
-      assertIdempotentOrderPayloadMatches(existing, order);
-      return existing;
     }
 
     if (order.orderKind === 'recharge') {

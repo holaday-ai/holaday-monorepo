@@ -86,6 +86,11 @@ const STATUS_TOKENS: Record<AdminPartnerStatusKind, Record<string, AdminPartnerS
       textClass: 'text-[#EA1F59]',
       bgClass: 'bg-[#EA1F59]/10',
     },
+    returned: {
+      label: '已退回',
+      textClass: 'text-[#595757]',
+      bgClass: 'bg-[#EFEFEF]',
+    },
   },
   risk: {
     normal: {
@@ -208,6 +213,7 @@ export function normalizeAdminPartnerOverview(value: unknown) {
       approvedWithdrawalCount: Math.round(nonNegativeNumber(metrics.approvedWithdrawalCount)),
       paidWithdrawalCount: Math.round(nonNegativeNumber(metrics.paidWithdrawalCount)),
       rejectedWithdrawalCount: Math.round(nonNegativeNumber(metrics.rejectedWithdrawalCount)),
+      returnedWithdrawalCount: Math.round(nonNegativeNumber(metrics.returnedWithdrawalCount)),
       overdueWithdrawalCount: Math.round(nonNegativeNumber(metrics.overdueWithdrawalCount)),
       riskLotCount: Math.round(nonNegativeNumber(metrics.riskLotCount)),
     },

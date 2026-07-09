@@ -15,6 +15,7 @@ describe('partnerReviewStatusToken', () => {
     expect(partnerReviewStatusToken('kyc', 'review_required').label).toBe('需复核');
     expect(partnerReviewStatusToken('order', 'pending').label).toBe('待确认');
     expect(partnerReviewStatusToken('withdrawal', 'approved').label).toBe('待出款');
+    expect(partnerReviewStatusToken('withdrawal', 'returned').label).toBe('已退回');
     expect(partnerReviewStatusToken('risk', 'frozen').label).toBe('已冻结');
   });
 
@@ -101,6 +102,7 @@ describe('normalizeAdminPartnerOverview', () => {
         approvedWithdrawalCount: 1,
         paidWithdrawalCount: 2,
         rejectedWithdrawalCount: 3,
+        returnedWithdrawalCount: 1,
         overdueWithdrawalCount: 0,
         riskLotCount: 3,
       },
@@ -128,6 +130,7 @@ describe('normalizeAdminPartnerOverview', () => {
     expect(state.metrics.pendingWithdrawalCount).toBe(0);
     expect(state.metrics.paidWithdrawalCount).toBe(2);
     expect(state.metrics.rejectedWithdrawalCount).toBe(3);
+    expect(state.metrics.returnedWithdrawalCount).toBe(1);
     expect(state.orders[0]).toMatchObject({
       orderExternalId: 'pay_order_1',
       amountCnyCents: 1_000_000,
@@ -178,6 +181,7 @@ describe('normalizeAdminPartnerOverview', () => {
         overdueWithdrawalCount: 0,
         paidWithdrawalCount: 1,
         rejectedWithdrawalCount: 1,
+        returnedWithdrawalCount: 1,
         riskLotCount: 1,
       },
       orders: [
@@ -229,6 +233,14 @@ describe('normalizeAdminPartnerOverview', () => {
           rejectionReason: 'bank mismatch',
           amountCreditCents: 700_00,
         },
+        {
+          withdrawalExternalId: 'pay_withdrawal_returned',
+          userExternalId: 'usr_returned',
+          email: 'returned@holaday.local',
+          displayName: 'Returned Partner',
+          status: 'returned',
+          amountCreditCents: 800_00,
+        },
       ],
       riskLots: [
         {
@@ -236,6 +248,8 @@ describe('normalizeAdminPartnerOverview', () => {
           userExternalId: 'usr_risk',
           email: 'risk@holaday.local',
           displayName: 'Risk Partner',
+          status: 'frozen',
+          riskStatus: 'normal',
         },
       ],
     });
@@ -282,10 +296,20 @@ describe('normalizeAdminPartnerOverview', () => {
     expect(byRejectedReason.withdrawalHistory).toHaveLength(1);
     expect(byRejectedReason.withdrawalHistory[0]?.status).toBe('rejected');
 
+    const byReturned = filterAdminPartnerOverview(state, 'returned');
+    expect(byReturned.enabled).toBe(true);
+    if (!byReturned.enabled) throw new Error('expected enabled state');
+    expect(byReturned.withdrawalHistory).toHaveLength(1);
+    expect(byReturned.withdrawalHistory[0]?.status).toBe('returned');
+
     const byRiskLot = filterAdminPartnerOverview(state, 'LOT_RISK');
     expect(byRiskLot.enabled).toBe(true);
     if (!byRiskLot.enabled) throw new Error('expected enabled state');
     expect(byRiskLot.riskLots).toHaveLength(1);
+    expect(byRiskLot.riskLots[0]).toMatchObject({
+      status: 'frozen',
+      riskStatus: 'normal',
+    });
 
     const byProviderRef = filterAdminPartnerOverview(state, 'bankcard-flow');
     expect(byProviderRef.enabled).toBe(true);

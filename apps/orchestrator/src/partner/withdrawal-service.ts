@@ -6,16 +6,17 @@ import { partnerWithdrawalRequests, type PartnerWithdrawalRequest } from '../db/
 import { users } from '../db/schema/users.js';
 import { CreditLedgerService } from './credit-ledger-service.js';
 import { KycService, canWithdrawWithKycStatus } from './kyc-service.js';
+import { PartnerMembershipService } from './membership-service.js';
 import { partnerConfig } from './partner-config.js';
 
 export const WITHDRAWAL_MIN_CREDIT_CENTS = 500_00;
 
 export type WithdrawalValidationResult =
   | { ok: true }
-  | { ok: false; reason: 'below_minimum' | 'insufficient_available_credit' };
+  | { ok: false; reason: 'below_minimum' | 'insufficient_withdrawable_credit' };
 
 export class WithdrawalValidationError extends Error {
-  constructor(readonly reason: 'below_minimum' | 'insufficient_available_credit') {
+  constructor(readonly reason: 'below_minimum' | 'insufficient_withdrawable_credit') {
     super(`Withdrawal request rejected: ${reason}`);
     this.name = 'WithdrawalValidationError';
     Object.setPrototypeOf(this, WithdrawalValidationError.prototype);
@@ -23,8 +24,12 @@ export class WithdrawalValidationError extends Error {
 }
 
 export class WithdrawalGateError extends Error {
-  constructor(readonly reason: 'kyc_required') {
-    super('Withdrawal requires passed KYC status');
+  constructor(readonly reason: 'membership_required' | 'kyc_required') {
+    super(
+      reason === 'membership_required'
+        ? 'Withdrawal requires an active partner membership'
+        : 'Withdrawal requires passed KYC status',
+    );
     this.name = 'WithdrawalGateError';
     Object.setPrototypeOf(this, WithdrawalGateError.prototype);
   }
@@ -47,6 +52,7 @@ export class WithdrawalTransitionError extends Error {
       | 'already_paid'
       | 'already_rejected'
       | 'already_returned'
+      | 'payout_conflict'
       | 'update_conflict',
   ) {
     super(`Withdrawal transition rejected: ${reason}`);
@@ -113,13 +119,13 @@ function addUtcDays(value: Date, days: number): Date {
 
 export function validateWithdrawalRequest(input: {
   amountCreditCents: number;
-  availableCreditCents: number;
+  withdrawableCreditCents: number;
   minCreditCents?: number;
 }): WithdrawalValidationResult {
   const amountCreditCents = assertNonNegativeSafeInteger(input.amountCreditCents, 'amountCreditCents');
-  const availableCreditCents = assertNonNegativeSafeInteger(
-    input.availableCreditCents,
-    'availableCreditCents',
+  const withdrawableCreditCents = assertNonNegativeSafeInteger(
+    input.withdrawableCreditCents,
+    'withdrawableCreditCents',
   );
   const minCreditCents = assertNonNegativeSafeInteger(
     input.minCreditCents ?? WITHDRAWAL_MIN_CREDIT_CENTS,
@@ -129,8 +135,8 @@ export function validateWithdrawalRequest(input: {
   if (amountCreditCents < minCreditCents) {
     return { ok: false, reason: 'below_minimum' };
   }
-  if (amountCreditCents > availableCreditCents) {
-    return { ok: false, reason: 'insufficient_available_credit' };
+  if (amountCreditCents > withdrawableCreditCents) {
+    return { ok: false, reason: 'insufficient_withdrawable_credit' };
   }
   return { ok: true };
 }
@@ -154,6 +160,7 @@ type WithdrawalRequestInput = {
 type WithdrawalStatus = 'requested' | 'reviewing';
 type WithdrawalLedger = Pick<CreditLedgerService, 'postEntry' | 'summarizeUser'>;
 type WithdrawalKyc = Pick<KycService, 'getStatus'>;
+type WithdrawalMembership = Pick<PartnerMembershipService, 'getActiveMembership'>;
 
 type NormalizedWithdrawalRequest = Required<WithdrawalRequestInput> & {
   status: WithdrawalStatus;
@@ -242,6 +249,11 @@ function metadataRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
+function metadataText(value: unknown, key: string): string | undefined {
+  const raw = metadataRecord(value)[key];
+  return typeof raw === 'string' && raw.trim().length > 0 ? raw.trim() : undefined;
+}
+
 function transitionErrorForTerminalStatus(
   status: string,
   fallback: WithdrawalTransitionError['reason'],
@@ -271,13 +283,15 @@ function assertIdempotentRequestPayloadMatches(
 export class WithdrawalService {
   private readonly ledger?: WithdrawalLedger;
   private readonly kyc?: WithdrawalKyc;
+  private readonly membership?: WithdrawalMembership;
 
   constructor(
     private readonly db: DB,
-    deps: { ledger?: WithdrawalLedger; kyc?: WithdrawalKyc } = {},
+    deps: { ledger?: WithdrawalLedger; kyc?: WithdrawalKyc; membership?: WithdrawalMembership } = {},
   ) {
     this.ledger = deps.ledger;
     this.kyc = deps.kyc;
+    this.membership = deps.membership;
   }
 
   private ledgerFor(db: DB): WithdrawalLedger {
@@ -286,6 +300,10 @@ export class WithdrawalService {
 
   private kycFor(db: DB): WithdrawalKyc {
     return this.kyc ?? new KycService(db);
+  }
+
+  private membershipFor(db: DB): WithdrawalMembership {
+    return this.membership ?? new PartnerMembershipService(db);
   }
 
   private async lockUserForWithdrawal(db: DB, userId: number): Promise<void> {
@@ -329,7 +347,7 @@ export class WithdrawalService {
       userId: row.userId,
       entryType: 'withdrawal_request_hold',
       direction: 'debit',
-      bucket: 'available',
+      bucket: 'withdrawable',
       amountCreditCents: row.amountCreditCents,
       idempotencyKey: `withdrawal:hold:${row.idempotencyKey}`,
       metadata: {
@@ -359,9 +377,9 @@ export class WithdrawalService {
       userId: row.userId,
       entryType: 'withdrawal_rejected_release',
       direction: 'credit',
-      bucket: 'available',
+      bucket: 'withdrawable',
       amountCreditCents: row.amountCreditCents,
-      idempotencyKey: `withdrawal:reject:available:${row.idempotencyKey}`,
+      idempotencyKey: `withdrawal:reject:withdrawable:${row.idempotencyKey}`,
       metadata: {
         withdrawalRequestId: row.id,
         withdrawalRequestExternalId: row.externalId,
@@ -413,6 +431,11 @@ export class WithdrawalService {
       return existing;
     }
 
+    const membership = await this.membershipFor(db).getActiveMembership(request.userId, request.now);
+    if (!membership) {
+      throw new WithdrawalGateError('membership_required');
+    }
+
     const kycStatus = await this.kycFor(db).getStatus(request.userId);
     if (!canWithdrawWithKycStatus(kycStatus)) {
       throw new WithdrawalGateError('kyc_required');
@@ -421,7 +444,7 @@ export class WithdrawalService {
     const summary = await ledger.summarizeUser(request.userId);
     const validation = validateWithdrawalRequest({
       amountCreditCents: request.amountCreditCents,
-      availableCreditCents: summary.availableCreditCents,
+      withdrawableCreditCents: summary.withdrawableCreditCents,
       minCreditCents: partnerConfig().withdrawalMinCreditCents,
     });
     if (!validation.ok) {
@@ -550,6 +573,10 @@ export class WithdrawalService {
       const ledger = this.ledgerFor(db);
 
       if (row.status === 'paid') {
+        const existingProviderPayoutId = metadataText(row.metadata, 'providerPayoutId');
+        if (existingProviderPayoutId && existingProviderPayoutId !== request.providerPayoutId) {
+          throw new WithdrawalTransitionError('payout_conflict');
+        }
         await this.postPaidSettlementEntry(ledger, row);
         return row;
       }

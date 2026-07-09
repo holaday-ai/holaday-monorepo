@@ -3,9 +3,10 @@ import type { PartnerKycStatus } from '@holaday/shared-types';
 import { describe, expect, it } from 'vitest';
 import type { DB } from '../db/client.js';
 import { users } from '../db/schema/users.js';
-import { partnerWithdrawalRequests, type PartnerWithdrawalRequest } from '../db/schema/partner.js';
+import { partnerWithdrawalRequests, type PartnerMembership, type PartnerWithdrawalRequest } from '../db/schema/partner.js';
 import { LedgerIdempotencyConflictError, type CreditLedgerService } from './credit-ledger-service.js';
 import type { KycService } from './kyc-service.js';
+import type { PartnerMembershipService } from './membership-service.js';
 import { evaluatePartnerRisk } from './risk-service.js';
 import {
   WITHDRAWAL_MIN_CREDIT_CENTS,
@@ -164,7 +165,7 @@ class FakeLedgerService implements Pick<CreditLedgerService, 'postEntry' | 'summ
   readonly conflictKeys: Set<string>;
 
   constructor(
-    private readonly baseAvailableCreditCents: number,
+    private readonly baseWithdrawableCreditCents: number,
     input: { entries?: FakeLedgerEntry[]; conflictKeys?: string[] } = {},
   ) {
     this.entries = [...(input.entries ?? [])];
@@ -172,17 +173,17 @@ class FakeLedgerService implements Pick<CreditLedgerService, 'postEntry' | 'summ
   }
 
   async summarizeUser(userId: number) {
-    const postedAvailableDelta = this.entries
-      .filter((entry) => entry.userId === userId && entry.bucket === 'available')
+    const postedBucketDelta = (bucket: FakeLedgerEntry['bucket']) => this.entries
+      .filter((entry) => entry.userId === userId && entry.bucket === bucket)
       .reduce(
         (sum, entry) => sum + (entry.direction === 'credit' ? entry.amountCreditCents : -entry.amountCreditCents),
         0,
       );
     return {
-      availableCreditCents: this.baseAvailableCreditCents + postedAvailableDelta,
+      availableCreditCents: postedBucketDelta('available'),
       lockedCreditCents: 0,
-      withdrawableCreditCents: 0,
-      pendingWithdrawalCreditCents: 0,
+      withdrawableCreditCents: this.baseWithdrawableCreditCents + postedBucketDelta('withdrawable'),
+      pendingWithdrawalCreditCents: postedBucketDelta('pending_withdrawal'),
       frozenCreditCents: 0,
     };
   }
@@ -236,6 +237,28 @@ function fakeKycService(status: PartnerKycStatus): Pick<KycService, 'getStatus'>
   };
 }
 
+function fakeMembership(overrides: Partial<PartnerMembership> = {}): PartnerMembership {
+  return {
+    id: 10,
+    externalId: 'pay_membership',
+    userId: 123,
+    status: 'active',
+    startsAt: new Date('2026-01-01T00:00:00.000Z'),
+    expiresAt: new Date('2027-01-01T00:00:00.000Z'),
+    sourcePaymentExternalId: null,
+    metadata: null,
+    createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    ...overrides,
+  };
+}
+
+function fakeMembershipService(membership: PartnerMembership | null): Pick<PartnerMembershipService, 'getActiveMembership'> {
+  return {
+    getActiveMembership: async () => membership,
+  };
+}
+
 function fakeWithdrawalRequest(overrides: Partial<PartnerWithdrawalRequest> = {}): PartnerWithdrawalRequest {
   return {
     id: 1,
@@ -261,7 +284,7 @@ function fakeHoldEntry(overrides: Partial<FakeLedgerEntry> = {}): FakeLedgerEntr
     lotId: null,
     entryType: 'withdrawal_request_hold',
     direction: 'debit',
-    bucket: 'available',
+    bucket: 'withdrawable',
     amountCreditCents: 600_00,
     amountApiUnits: 0,
     idempotencyKey: 'withdrawal:hold:withdrawal-idem-1',
@@ -277,12 +300,14 @@ function serviceWithDeps(input: {
   db?: FakeWithdrawalDb;
   ledger?: FakeLedgerService;
   kycStatus?: PartnerKycStatus;
+  membership?: PartnerMembership | null;
 } = {}): { db: FakeWithdrawalDb; ledger: FakeLedgerService; service: WithdrawalService } {
   const db = input.db ?? new FakeWithdrawalDb();
   const ledger = input.ledger ?? new FakeLedgerService(2_000_00);
   const service = new WithdrawalService(db.asDB(), {
     ledger,
     kyc: fakeKycService(input.kycStatus ?? 'passed') as KycService,
+    membership: fakeMembershipService(Object.hasOwn(input, 'membership') ? (input.membership ?? null) : fakeMembership()) as PartnerMembershipService,
   });
   return { db, ledger, service };
 }
@@ -372,13 +397,13 @@ describe('withdrawal pure helpers', () => {
     expect(
       validateWithdrawalRequest({
         amountCreditCents: WITHDRAWAL_MIN_CREDIT_CENTS - 1,
-        availableCreditCents: WITHDRAWAL_MIN_CREDIT_CENTS,
+        withdrawableCreditCents: WITHDRAWAL_MIN_CREDIT_CENTS,
       }),
     ).toEqual({ ok: false, reason: 'below_minimum' });
     expect(
       validateWithdrawalRequest({
         amountCreditCents: WITHDRAWAL_MIN_CREDIT_CENTS,
-        availableCreditCents: WITHDRAWAL_MIN_CREDIT_CENTS,
+        withdrawableCreditCents: WITHDRAWAL_MIN_CREDIT_CENTS,
       }),
     ).toEqual({ ok: true });
   });
@@ -387,26 +412,26 @@ describe('withdrawal pure helpers', () => {
     expect(
       validateWithdrawalRequest({
         amountCreditCents: 999_00,
-        availableCreditCents: 1_000_00,
+        withdrawableCreditCents: 1_000_00,
         minCreditCents: 1_000_00,
       }),
     ).toEqual({ ok: false, reason: 'below_minimum' });
     expect(
       validateWithdrawalRequest({
         amountCreditCents: 1_000_00,
-        availableCreditCents: 1_000_00,
+        withdrawableCreditCents: 1_000_00,
         minCreditCents: 1_000_00,
       }),
     ).toEqual({ ok: true });
   });
 
-  it('blocks requests above available credit', () => {
+  it('blocks requests above withdrawable credit', () => {
     expect(
       validateWithdrawalRequest({
         amountCreditCents: 600_00,
-        availableCreditCents: 599_99,
+        withdrawableCreditCents: 599_99,
       }),
-    ).toEqual({ ok: false, reason: 'insufficient_available_credit' });
+    ).toEqual({ ok: false, reason: 'insufficient_withdrawable_credit' });
   });
 
   it('computes T+7 and T+15 review due dates with UTC day math without mutating now', () => {
@@ -423,10 +448,10 @@ describe('withdrawal pure helpers', () => {
   });
 
   it.each([
-    ['negative amount', () => validateWithdrawalRequest({ amountCreditCents: -1, availableCreditCents: 1_000_00 })],
+    ['negative amount', () => validateWithdrawalRequest({ amountCreditCents: -1, withdrawableCreditCents: 1_000_00 })],
     [
-      'fractional available credit',
-      () => validateWithdrawalRequest({ amountCreditCents: 500_00, availableCreditCents: 1_000_00.5 }),
+      'fractional withdrawable credit',
+      () => validateWithdrawalRequest({ amountCreditCents: 500_00, withdrawableCreditCents: 1_000_00.5 }),
     ],
     ['invalid date', () => computeWithdrawalReviewDueAt({ now: new Date(Number.NaN), highRisk: false })],
   ])('rejects helper validation for %s', (_name, action) => {
@@ -468,14 +493,40 @@ describe('WithdrawalService requestWithdrawal', () => {
     }
   });
 
-  it('blocks requests above available credit', async () => {
+  it('blocks requests above withdrawable credit', async () => {
     const { db, ledger, service } = serviceWithDeps({ ledger: new FakeLedgerService(599_99) });
 
     await expect(service.requestWithdrawal(validWithdrawalInput)).rejects.toMatchObject({
-      reason: 'insufficient_available_credit',
+      reason: 'insufficient_withdrawable_credit',
     });
     expect(db.rowsCreated).toBe(0);
     expect(ledger.entries).toHaveLength(0);
+  });
+
+  it('blocks requests when credit is available but not withdrawable', async () => {
+    const { db, ledger, service } = serviceWithDeps({
+      ledger: new FakeLedgerService(0, {
+        entries: [
+          {
+            userId: 123,
+            lotId: null,
+            entryType: 'referral_recharge_reward',
+            direction: 'credit',
+            bucket: 'available',
+            amountCreditCents: 2_000_00,
+            amountApiUnits: 0,
+            idempotencyKey: 'available-only-credit',
+            metadata: null,
+          },
+        ],
+      }),
+    });
+
+    await expect(service.requestWithdrawal(validWithdrawalInput)).rejects.toMatchObject({
+      reason: 'insufficient_withdrawable_credit',
+    });
+    expect(db.rowsCreated).toBe(0);
+    expect(ledger.entries).toHaveLength(1);
   });
 
   it('requires passed KYC before withdrawal', async () => {
@@ -483,6 +534,17 @@ describe('WithdrawalService requestWithdrawal', () => {
 
     await expect(service.requestWithdrawal(validWithdrawalInput)).rejects.toBeInstanceOf(WithdrawalGateError);
     await expect(service.requestWithdrawal(validWithdrawalInput)).rejects.toMatchObject({ reason: 'kyc_required' });
+    expect(db.rowsCreated).toBe(0);
+    expect(ledger.entries).toHaveLength(0);
+  });
+
+  it('requires active partner membership before withdrawal', async () => {
+    const { db, ledger, service } = serviceWithDeps({ membership: null });
+
+    await expect(service.requestWithdrawal(validWithdrawalInput)).rejects.toBeInstanceOf(WithdrawalGateError);
+    await expect(service.requestWithdrawal(validWithdrawalInput)).rejects.toMatchObject({
+      reason: 'membership_required',
+    });
     expect(db.rowsCreated).toBe(0);
     expect(ledger.entries).toHaveLength(0);
   });
@@ -518,7 +580,7 @@ describe('WithdrawalService requestWithdrawal', () => {
         userId: 123,
         entryType: 'withdrawal_request_hold',
         direction: 'debit',
-        bucket: 'available',
+        bucket: 'withdrawable',
         amountCreditCents: 600_00,
         idempotencyKey: 'withdrawal:hold:withdrawal-idem-1',
       }),
@@ -681,7 +743,7 @@ describe('WithdrawalService requestWithdrawal', () => {
         ...validWithdrawalInput,
         idempotencyKey: 'withdrawal-idem-2',
       }),
-    ).rejects.toMatchObject({ reason: 'insufficient_available_credit' });
+    ).rejects.toMatchObject({ reason: 'insufficient_withdrawable_credit' });
 
     expect(db.rowsCreated).toBe(1);
     expect(db.lockedUserIds).toEqual([123, 123]);
@@ -751,7 +813,7 @@ describe('WithdrawalService admin transitions', () => {
     expect(ledger.entries).toHaveLength(0);
   });
 
-  it('rejects a held withdrawal and releases available credit idempotently', async () => {
+  it('rejects a held withdrawal and releases withdrawable credit idempotently', async () => {
     const existing = fakeWithdrawalRequest({ status: 'reviewing' });
     const heldDebit = fakeHoldEntry();
     const heldPending = fakeHoldEntry({
@@ -792,9 +854,9 @@ describe('WithdrawalService admin transitions', () => {
       expect.objectContaining({
         entryType: 'withdrawal_rejected_release',
         direction: 'credit',
-        bucket: 'available',
+        bucket: 'withdrawable',
         amountCreditCents: 600_00,
-        idempotencyKey: 'withdrawal:reject:available:withdrawal-idem-1',
+        idempotencyKey: 'withdrawal:reject:withdrawable:withdrawal-idem-1',
       }),
       expect.objectContaining({
         entryType: 'withdrawal_rejected_release',
@@ -850,6 +912,30 @@ describe('WithdrawalService admin transitions', () => {
         idempotencyKey: 'withdrawal:paid:withdrawal-idem-1',
       }),
     ]);
+  });
+
+  it('rejects a paid withdrawal replay with a different provider payout id', async () => {
+    const { ledger, service } = serviceWithDeps({
+      db: new FakeWithdrawalDb([
+        fakeWithdrawalRequest({
+          status: 'paid',
+          metadata: {
+            providerPayoutId: 'bank-payout-1',
+            paidAt: '2026-07-03T05:00:00.000Z',
+          },
+        }),
+      ]),
+      ledger: new FakeLedgerService(0),
+    });
+
+    await expect(
+      service.markWithdrawalPaid({
+        withdrawalExternalId: 'pay_existing_withdrawal',
+        reviewerUserId: 999,
+        providerPayoutId: 'bank-payout-2',
+      }),
+    ).rejects.toMatchObject({ reason: 'payout_conflict' });
+    expect(ledger.entries).toHaveLength(0);
   });
 
   it('rejects invalid terminal transitions without posting ledger entries', async () => {

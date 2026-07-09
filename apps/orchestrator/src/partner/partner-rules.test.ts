@@ -46,22 +46,22 @@ describe('partner rules', () => {
     expect(() => calculateLotCaps(10_000.5)).toThrow(RangeError);
   });
 
-  it('splits full 120 percent claim into eight equal monthly releases', () => {
-    expect(calculateReleaseSlice({ principalCreditCents: 10_000_00, lockedBonusCreditCents: 2_000_00 })).toEqual({
-      principalCreditCents: 1_250_00,
-      bonusCreditCents: 250_00,
-      totalCreditCents: 1_500_00,
+  it('splits full 120 percent claim into twelve monthly releases', () => {
+    expect(calculateReleaseSlice({ principalCreditCents: 12_000_00, lockedBonusCreditCents: 2_400_00 })).toEqual({
+      principalCreditCents: 1_000_00,
+      bonusCreditCents: 200_00,
+      totalCreditCents: 1_200_00,
     });
   });
 
-  it('preserves cents across eight monthly releases for uneven amounts', () => {
+  it('preserves cents across twelve monthly releases for uneven amounts', () => {
     const principalTotal = 10_000_35;
     const bonusTotal = 2_000_05;
     let releasedPrincipalCreditCents = 0;
     let releasedBonusCreditCents = 0;
     let releasedTotalCreditCents = 0;
 
-    for (let remainingReleaseMonths = 8; remainingReleaseMonths > 0; remainingReleaseMonths -= 1) {
+    for (let remainingReleaseMonths = 12; remainingReleaseMonths > 0; remainingReleaseMonths -= 1) {
       const slice = calculateReleaseSlice({
         principalCreditCents: principalTotal,
         lockedBonusCreditCents: bonusTotal,
@@ -86,7 +86,7 @@ describe('partner rules', () => {
       lockedBonusCreditCents: 2_000_05,
       releasedPrincipalCreditCents: 1_250_01,
       releasedBonusCreditCents: 250_01,
-      remainingReleaseMonths: 7,
+      remainingReleaseMonths: 11,
     };
 
     const invalidInputs = [
@@ -104,7 +104,7 @@ describe('partner rules', () => {
       { ...validInput, remainingReleaseMonths: 0 },
       { ...validInput, remainingReleaseMonths: -1 },
       { ...validInput, remainingReleaseMonths: 1.5 },
-      { ...validInput, remainingReleaseMonths: 9 },
+      { ...validInput, remainingReleaseMonths: 13 },
     ];
 
     for (const invalidInput of invalidInputs) {

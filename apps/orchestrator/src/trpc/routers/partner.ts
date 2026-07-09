@@ -1,7 +1,6 @@
 import {
   HOLA_CREDIT_CNY_CENTS,
   PARTNER_MEMBERSHIP_PRICE_CNY_CENTS,
-  PARTNER_RECHARGE_MAX_MONTHLY_CNY_CENTS,
 } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
 import { desc, eq } from 'drizzle-orm';
@@ -220,11 +219,7 @@ function summarizeDashboardLedger(ledger: {
   pendingWithdrawalCreditCents: number;
   frozenCreditCents: number;
 }) {
-  return {
-    ...ledger,
-    withdrawableCreditCents:
-      ledger.withdrawableCreditCents > 0 ? ledger.withdrawableCreditCents : ledger.availableCreditCents,
-  };
+  return ledger;
 }
 
 function mapRechargeOrderError(error: unknown): never {
@@ -267,7 +262,10 @@ function mapWithdrawalError(error: unknown): never {
   if (error instanceof WithdrawalGateError) {
     throw new TRPCError({
       code: 'PRECONDITION_FAILED',
-      message: 'partner KYC must be passed before withdrawal',
+      message:
+        error.reason === 'membership_required'
+          ? 'partner membership required'
+          : 'partner KYC must be passed before withdrawal',
     });
   }
 
@@ -329,14 +327,14 @@ function mapReferralError(error: unknown): never {
   });
 }
 
-function assertRollingThirtyDayAmount(rolling: number): void {
+function assertRollingThirtyDayAmount(rolling: number, monthlyRechargeCapCnyCents: number): void {
   if (!Number.isSafeInteger(rolling) || rolling < 0) {
     badRequest('rollingThirtyDayCnyCents must be a non-negative safe integer');
   }
   if (rolling % HOLA_CREDIT_CNY_CENTS !== 0) {
     badRequest('rollingThirtyDayCnyCents must be a whole CNY amount');
   }
-  if (rolling > PARTNER_RECHARGE_MAX_MONTHLY_CNY_CENTS) {
+  if (rolling > monthlyRechargeCapCnyCents) {
     badRequest('rollingThirtyDayCnyCents must not exceed the monthly maximum');
   }
 }
@@ -571,7 +569,8 @@ export const partnerRouter = router({
   rechargePreview: protectedProcedure.input(rechargePreviewInput).query(async ({ ctx, input }) => {
     requirePartnerLedgerEnabled();
 
-    const validation = validateRechargeAmount(input.amountCnyCents);
+    const config = partnerConfig();
+    const validation = validateRechargeAmount(input.amountCnyCents, config);
     if (!validation.ok) {
       badRequest(validation.reason);
     }
@@ -602,7 +601,7 @@ export const partnerRouter = router({
         windowStart: rechargeRollingThirtyDayWindowStart(previewNow),
         now: previewNow,
       }));
-    assertRollingThirtyDayAmount(rollingThirtyDayCnyCents);
+    assertRollingThirtyDayAmount(rollingThirtyDayCnyCents, config.monthlyRechargeCapCnyCents);
     const tier = selectRechargeTier(rollingThirtyDayCnyCents);
 
     return {

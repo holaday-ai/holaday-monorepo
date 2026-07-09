@@ -1,5 +1,5 @@
 import { TRPCError } from '@trpc/server';
-import { desc, eq, inArray, or } from 'drizzle-orm';
+import { and, desc, eq, inArray, like, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { DB } from '../../db/client.js';
 import {
@@ -107,6 +107,67 @@ function summarizeOrder(order: PartnerRechargeOrder) {
   };
 }
 
+function normalizeOverviewSearchQuery(query: string | undefined): string | undefined {
+  const normalized = query?.trim();
+  return normalized ? normalized : undefined;
+}
+
+function metadataLike(column: unknown, pattern: string) {
+  return sql`CAST(${column} AS CHAR) LIKE ${pattern}`;
+}
+
+function userSearchCondition(pattern: string) {
+  return or(
+    like(users.externalId, pattern),
+    like(users.email, pattern),
+    like(users.displayName, pattern),
+  );
+}
+
+function orderSearchCondition(pattern: string) {
+  return or(
+    userSearchCondition(pattern),
+    like(partnerRechargeOrders.externalId, pattern),
+    like(partnerRechargeOrders.status, pattern),
+    like(partnerRechargeOrders.orderKind, pattern),
+    like(partnerRechargeOrders.provider, pattern),
+    like(partnerRechargeOrders.providerCaptureId, pattern),
+    metadataLike(partnerRechargeOrders.metadata, pattern),
+  );
+}
+
+function kycSearchCondition(pattern: string) {
+  return or(
+    userSearchCondition(pattern),
+    like(partnerKycProfiles.externalId, pattern),
+    like(partnerKycProfiles.status, pattern),
+    like(partnerKycProfiles.country, pattern),
+    like(partnerKycProfiles.provider, pattern),
+    like(partnerKycProfiles.providerRef, pattern),
+    metadataLike(partnerKycProfiles.metadata, pattern),
+  );
+}
+
+function withdrawalSearchCondition(pattern: string) {
+  return or(
+    userSearchCondition(pattern),
+    like(partnerWithdrawalRequests.externalId, pattern),
+    like(partnerWithdrawalRequests.status, pattern),
+    like(partnerWithdrawalRequests.bankAccountFingerprint, pattern),
+    like(partnerWithdrawalRequests.rejectionReason, pattern),
+    metadataLike(partnerWithdrawalRequests.metadata, pattern),
+  );
+}
+
+function riskLotSearchCondition(pattern: string) {
+  return or(
+    userSearchCondition(pattern),
+    like(partnerLots.externalId, pattern),
+    like(partnerLots.status, pattern),
+    like(partnerLots.riskStatus, pattern),
+  );
+}
+
 function summarizeKycAudit(metadataValue: unknown) {
   const metadata = metadataRecord(metadataValue);
   return {
@@ -163,6 +224,7 @@ function summarizeWithdrawalMetrics(
     approvedWithdrawalCount: rows.filter((row) => row.status === 'approved').length,
     paidWithdrawalCount: rows.filter((row) => row.status === 'paid').length,
     rejectedWithdrawalCount: rows.filter((row) => row.status === 'rejected').length,
+    returnedWithdrawalCount: rows.filter((row) => row.status === 'returned').length,
     overdueWithdrawalCount: activeRows.filter((row) => row.reviewDueAt.getTime() <= now.getTime()).length,
   };
 }
@@ -202,6 +264,7 @@ export const adminPartnerRouter = router({
       z
         .object({
           limit: z.number().int().min(1).max(OVERVIEW_LIMIT_CAP).default(50),
+          query: z.string().trim().max(100).optional(),
         })
         .optional(),
     )
@@ -211,6 +274,8 @@ export const adminPartnerRouter = router({
       }
 
       const limit = input?.limit ?? 50;
+      const query = normalizeOverviewSearchQuery(input?.query);
+      const searchPattern = query ? `%${query}%` : undefined;
       const now = new Date();
       const [orderRows, kycRows, withdrawalRows, withdrawalHistoryRows, riskLotRows] = await Promise.all([
         ctx.db
@@ -230,7 +295,12 @@ export const adminPartnerRouter = router({
           })
           .from(partnerRechargeOrders)
           .innerJoin(users, eq(users.id, partnerRechargeOrders.userId))
-          .where(inArray(partnerRechargeOrders.status, ['pending', 'review_required']))
+          .where(
+            and(
+              inArray(partnerRechargeOrders.status, ['pending', 'review_required']),
+              searchPattern ? orderSearchCondition(searchPattern) : undefined,
+            ),
+          )
           .orderBy(desc(partnerRechargeOrders.createdAt))
           .limit(limit),
         ctx.db
@@ -249,7 +319,12 @@ export const adminPartnerRouter = router({
           })
           .from(partnerKycProfiles)
           .innerJoin(users, eq(users.id, partnerKycProfiles.userId))
-          .where(inArray(partnerKycProfiles.status, ['pending', 'review_required']))
+          .where(
+            and(
+              inArray(partnerKycProfiles.status, ['pending', 'review_required']),
+              searchPattern ? kycSearchCondition(searchPattern) : undefined,
+            ),
+          )
           .orderBy(desc(partnerKycProfiles.updatedAt))
           .limit(limit),
         ctx.db
@@ -270,7 +345,12 @@ export const adminPartnerRouter = router({
           })
           .from(partnerWithdrawalRequests)
           .innerJoin(users, eq(users.id, partnerWithdrawalRequests.userId))
-          .where(inArray(partnerWithdrawalRequests.status, ['requested', 'reviewing', 'approved']))
+          .where(
+            and(
+              inArray(partnerWithdrawalRequests.status, ['requested', 'reviewing', 'approved']),
+              searchPattern ? withdrawalSearchCondition(searchPattern) : undefined,
+            ),
+          )
           .orderBy(desc(partnerWithdrawalRequests.reviewDueAt))
           .limit(limit),
         ctx.db
@@ -291,7 +371,12 @@ export const adminPartnerRouter = router({
           })
           .from(partnerWithdrawalRequests)
           .innerJoin(users, eq(users.id, partnerWithdrawalRequests.userId))
-          .where(inArray(partnerWithdrawalRequests.status, ['paid', 'rejected']))
+          .where(
+            and(
+              inArray(partnerWithdrawalRequests.status, ['paid', 'rejected', 'returned']),
+              searchPattern ? withdrawalSearchCondition(searchPattern) : undefined,
+            ),
+          )
           .orderBy(desc(partnerWithdrawalRequests.updatedAt))
           .limit(limit),
         ctx.db
@@ -310,7 +395,12 @@ export const adminPartnerRouter = router({
           })
           .from(partnerLots)
           .innerJoin(users, eq(users.id, partnerLots.userId))
-          .where(or(inArray(partnerLots.riskStatus, ['review', 'review_required', 'frozen']), eq(partnerLots.status, 'frozen')))
+          .where(
+            and(
+              or(inArray(partnerLots.riskStatus, ['review', 'review_required', 'frozen']), eq(partnerLots.status, 'frozen')),
+              searchPattern ? riskLotSearchCondition(searchPattern) : undefined,
+            ),
+          )
           .orderBy(desc(partnerLots.updatedAt))
           .limit(limit),
       ]);

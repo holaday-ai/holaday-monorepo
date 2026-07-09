@@ -215,7 +215,7 @@ function fakeLot(overrides: Partial<PartnerLot> = {}): PartnerLot {
     accumulationStartsAt: new Date('2026-07-01T03:04:05.006Z'),
     accumulationEndsAt: new Date('2026-10-29T03:04:05.006Z'),
     releaseStartsAt: new Date('2026-10-30T03:04:05.006Z'),
-    releaseEndsAt: new Date('2027-06-30T03:04:05.006Z'),
+    releaseEndsAt: new Date('2027-10-30T03:04:05.006Z'),
     metadata: null,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
@@ -276,14 +276,25 @@ function serviceWithGates(
   });
 }
 
-const originalAnnualCap = process.env.PARTNER_RECHARGE_MAX_ANNUAL_CNY_CENTS;
+const originalPartnerEnv = {
+  annualCap: process.env.PARTNER_RECHARGE_MAX_ANNUAL_CNY_CENTS,
+  monthlyCap: process.env.PARTNER_RECHARGE_MAX_MONTHLY_CNY_CENTS,
+  singleMin: process.env.PARTNER_RECHARGE_MIN_CNY_CENTS,
+  singleMax: process.env.PARTNER_RECHARGE_MAX_SINGLE_CNY_CENTS,
+};
 
 afterEach(() => {
-  if (originalAnnualCap === undefined) {
-    delete process.env.PARTNER_RECHARGE_MAX_ANNUAL_CNY_CENTS;
-  } else {
-    process.env.PARTNER_RECHARGE_MAX_ANNUAL_CNY_CENTS = originalAnnualCap;
-  }
+  const restore = (name: string, value: string | undefined) => {
+    if (value === undefined) {
+      delete process.env[name];
+    } else {
+      process.env[name] = value;
+    }
+  };
+  restore('PARTNER_RECHARGE_MAX_ANNUAL_CNY_CENTS', originalPartnerEnv.annualCap);
+  restore('PARTNER_RECHARGE_MAX_MONTHLY_CNY_CENTS', originalPartnerEnv.monthlyCap);
+  restore('PARTNER_RECHARGE_MIN_CNY_CENTS', originalPartnerEnv.singleMin);
+  restore('PARTNER_RECHARGE_MAX_SINGLE_CNY_CENTS', originalPartnerEnv.singleMax);
 });
 
 describe('validateRechargeAmount', () => {
@@ -298,6 +309,27 @@ describe('validateRechargeAmount', () => {
     [10_000_00.5, { ok: false, reason: 'invalid_amount' }],
   ])('validates %s as %o', (amount, expected) => {
     expect(validateRechargeAmount(amount)).toEqual(expected);
+  });
+
+  it('honors configured single recharge limits', () => {
+    expect(
+      validateRechargeAmount(7_499_00, {
+        singleRechargeMinCnyCents: 7_500_00,
+        singleRechargeMaxCnyCents: 150_000_00,
+      }),
+    ).toEqual({ ok: false, reason: 'below_minimum' });
+    expect(
+      validateRechargeAmount(7_500_00, {
+        singleRechargeMinCnyCents: 7_500_00,
+        singleRechargeMaxCnyCents: 150_000_00,
+      }),
+    ).toEqual({ ok: true });
+    expect(
+      validateRechargeAmount(150_001_00, {
+        singleRechargeMinCnyCents: 7_500_00,
+        singleRechargeMaxCnyCents: 150_000_00,
+      }),
+    ).toEqual({ ok: false, reason: 'above_single_maximum' });
   });
 });
 
@@ -336,6 +368,27 @@ describe('RechargeService createPendingOrder', () => {
     expect(row.externalId).toMatch(/^pay_/);
     expect(fakeDb.orderRowsCreated).toBe(1);
     expect(fakeDb.wherePredicateTexts.some((predicateText) => predicateText.includes('idempotency_key'))).toBe(true);
+  });
+
+  it('uses configured single recharge limits when creating pending orders', async () => {
+    process.env.PARTNER_RECHARGE_MIN_CNY_CENTS = String(7_500_00);
+    process.env.PARTNER_RECHARGE_MAX_SINGLE_CNY_CENTS = String(150_000_00);
+    const fakeDb = new FakeRechargeDb();
+    const service = serviceWithGates(fakeDb);
+
+    await expect(
+      service.createPendingOrder({
+        ...validRechargeOrderInput,
+        amountCnyCents: 7_500_00,
+      }),
+    ).resolves.toMatchObject({ amountCnyCents: 7_500_00 });
+    await expect(
+      service.createPendingOrder({
+        ...validRechargeOrderInput,
+        amountCnyCents: 150_001_00,
+        idempotencyKey: 'order-idem-above-configured-max',
+      }),
+    ).rejects.toThrow(/above_single_maximum/);
   });
 
   it('rejects recharge orders that would exceed the configured annual cap', async () => {
@@ -391,6 +444,21 @@ describe('RechargeService createPendingOrder', () => {
     const existing = fakeOrder();
     const fakeDb = new FakeRechargeDb({ orders: [existing] });
     const service = serviceWithGates(fakeDb);
+
+    const row = await service.createPendingOrder(validRechargeOrderInput);
+
+    expect(row).toBe(existing);
+    expect(fakeDb.orders).toHaveLength(1);
+    expect(fakeDb.orderRowsCreated).toBe(0);
+  });
+
+  it('returns an existing progressed order for an idempotent create retry without rechecking gates', async () => {
+    const existing = fakeOrder({
+      status: 'completed',
+      providerCaptureId: 'cap_existing',
+    });
+    const fakeDb = new FakeRechargeDb({ orders: [existing] });
+    const service = serviceWithGates(fakeDb, { membership: null, kycStatus: 'rejected' });
 
     const row = await service.createPendingOrder(validRechargeOrderInput);
 
@@ -487,7 +555,7 @@ describe('RechargeService createLotForCapturedRecharge', () => {
     expect(row.accumulationStartsAt.toISOString()).toBe('2026-07-01T03:04:05.006Z');
     expect(row.accumulationEndsAt.toISOString()).toBe('2026-10-29T03:04:05.006Z');
     expect(row.releaseStartsAt.toISOString()).toBe('2026-10-30T03:04:05.006Z');
-    expect(row.releaseEndsAt.toISOString()).toBe('2027-06-30T03:04:05.006Z');
+    expect(row.releaseEndsAt.toISOString()).toBe('2027-10-30T03:04:05.006Z');
     expect(fakeDb.lotRowsCreated).toBe(1);
     expect(fakeDb.lotDuplicateKeyUpdateCalls).toBe(1);
     expect(fakeDb.wherePredicateTexts.some((predicateText) => predicateText.includes('recharge_order_id'))).toBe(
@@ -521,6 +589,23 @@ describe('RechargeService createLotForCapturedRecharge', () => {
         rechargeOrderId: 77,
         amountCnyCents: 200_000_00,
         rollingThirtyDayCnyCents: 500_001_00,
+        now: new Date('2026-07-01T03:04:05.006Z'),
+      }),
+    ).rejects.toThrow(/monthly maximum/);
+    expect(fakeDb.lotInsertAttempts).toHaveLength(0);
+  });
+
+  it('uses the configured 30-day recharge cap for captured lots', async () => {
+    process.env.PARTNER_RECHARGE_MAX_MONTHLY_CNY_CENTS = String(250_000_00);
+    const fakeDb = new FakeRechargeDb();
+    const service = new RechargeService(fakeDb.asDB());
+
+    await expect(
+      service.createLotForCapturedRecharge({
+        userId: 123,
+        rechargeOrderId: 77,
+        amountCnyCents: 200_000_00,
+        rollingThirtyDayCnyCents: 250_001_00,
         now: new Date('2026-07-01T03:04:05.006Z'),
       }),
     ).rejects.toThrow(/monthly maximum/);

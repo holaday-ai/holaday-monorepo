@@ -52,13 +52,17 @@ export function AdminPartnerReviewPage(): JSX.Element {
   const [withdrawalReasons, setWithdrawalReasons] = React.useState<Record<string, string>>({});
   const [payoutIds, setPayoutIds] = React.useState<Record<string, string>>({});
   const [queueSearch, setQueueSearch] = React.useState('');
+  const [serverQueueSearch, setServerQueueSearch] = React.useState('');
 
   const refresh = React.useCallback(async () => {
     const requestId = ++requestIdRef.current;
     setLoading(true);
     setError(null);
     try {
-      const res = normalizeAdminPartnerOverview(await trpc.admin.partner.overview.query());
+      const query = serverQueueSearch.trim();
+      const res = normalizeAdminPartnerOverview(
+        await trpc.admin.partner.overview.query(query ? { query } : undefined),
+      );
       if (mountedRef.current && requestIdRef.current === requestId) setData(res);
     } catch (err) {
       if (mountedRef.current && requestIdRef.current === requestId) {
@@ -67,7 +71,14 @@ export function AdminPartnerReviewPage(): JSX.Element {
     } finally {
       if (mountedRef.current && requestIdRef.current === requestId) setLoading(false);
     }
-  }, [mountedRef]);
+  }, [mountedRef, serverQueueSearch]);
+
+  React.useEffect(() => {
+    const handle = window.setTimeout(() => {
+      if (mountedRef.current) setServerQueueSearch(queueSearch.trim().slice(0, 100));
+    }, 300);
+    return () => window.clearTimeout(handle);
+  }, [mountedRef, queueSearch]);
 
   React.useEffect(() => {
     void refresh();
@@ -242,7 +253,7 @@ function EnabledAdminPartnerReview({
 }): JSX.Element {
   return (
     <div className="space-y-5">
-      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-8">
+      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-9">
         <MetricCard label="待实名" value={data.metrics.pendingKycCount} />
         <MetricCard label="待确认订单" value={data.metrics.pendingOrderCount} />
         <MetricCard label="需复核订单" value={data.metrics.reviewRequiredOrderCount} />
@@ -250,6 +261,7 @@ function EnabledAdminPartnerReview({
         <MetricCard label="待出款" value={data.metrics.approvedWithdrawalCount} />
         <MetricCard label="已出款" value={data.metrics.paidWithdrawalCount} />
         <MetricCard label="已拒绝" value={data.metrics.rejectedWithdrawalCount} />
+        <MetricCard label="已退回" value={data.metrics.returnedWithdrawalCount} />
         <MetricCard label="风险批次" value={data.metrics.riskLotCount} tone={data.metrics.riskLotCount > 0 ? 'danger' : 'normal'} />
       </section>
 
@@ -687,7 +699,11 @@ function WithdrawalHistory({ rows }: { rows: EnabledOverviewState['withdrawalHis
           const detail =
             row.status === 'paid'
               ? [row.providerPayoutId, row.paidAt ? `出款 ${formatDateTime(row.paidAt)}` : ''].filter(Boolean).join(' / ')
-              : [row.rejectionReason, row.rejectedAt ? `拒绝 ${formatDateTime(row.rejectedAt)}` : '']
+              : row.status === 'returned'
+                ? ['资金退回', formatDateTime(row.updatedAt as string | Date | null)]
+                    .filter(Boolean)
+                    .join(' / ')
+                : [row.rejectionReason, row.rejectedAt ? `拒绝 ${formatDateTime(row.rejectedAt)}` : '']
                   .filter(Boolean)
                   .join(' / ');
           return (
@@ -710,9 +726,9 @@ function RiskLotQueue({ rows }: { rows: EnabledOverviewState['riskLots'] }): JSX
   return (
     <QueueSection title="风险批次" empty="暂无风险批次">
       <DataTable
-        headers={['用户', '批次', '本金', 'API Units', '风险状态', '更新时间']}
+        headers={['用户', '批次', '本金', 'API Units', '批次状态', '风险状态', '更新时间']}
         empty={rows.length === 0}
-        colSpan={6}
+        colSpan={7}
       >
         {rows.map((row) => (
           <tr key={row.lotExternalId} className="border-b border-[#EFEFEF] last:border-b-0 hover:bg-[#EFEFEF]/35">
@@ -720,6 +736,7 @@ function RiskLotQueue({ rows }: { rows: EnabledOverviewState['riskLots'] }): JSX
             <td className="px-3 py-3 text-muted-foreground">{truncate(row.lotExternalId, 18)}</td>
             <td className="px-3 py-3 tabular-nums">{formatPartnerCreditCents(row.principalCreditCents)}</td>
             <td className="px-3 py-3 tabular-nums text-muted-foreground">{formatInteger(row.apiUnits)}</td>
+            <td className="px-3 py-3 text-muted-foreground">{row.status === 'frozen' ? '已冻结' : row.status || '—'}</td>
             <td className="px-3 py-3"><StatusBadge kind="risk" status={row.riskStatus} /></td>
             <td className="px-3 py-3 text-muted-foreground">{formatDateTime(row.updatedAt as string | Date | null)}</td>
           </tr>

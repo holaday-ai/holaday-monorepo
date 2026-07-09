@@ -4,7 +4,7 @@ import {
   PARTNER_ACCUMULATION_DAYS,
   newExternalId,
 } from '@holaday/shared-types';
-import { and, eq, gte, lt, sql } from 'drizzle-orm';
+import { and, eq, gt, gte, lt, sql } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
 import { llmCalls } from '../db/schema/llm-calls.js';
 import {
@@ -313,7 +313,14 @@ export class AllocationService {
     const lots = await this.db
       .select()
       .from(partnerLots)
-      .where(and(eq(partnerLots.status, 'accumulating'), eq(partnerLots.riskStatus, 'normal')));
+      .where(
+        and(
+          eq(partnerLots.status, 'accumulating'),
+          eq(partnerLots.riskStatus, 'normal'),
+          lt(partnerLots.accumulationStartsAt, dayBoundsUtc(day).end),
+          gt(partnerLots.accumulationEndsAt, dayBoundsUtc(day).start),
+        ),
+      );
     const weightedLots = lots.map((lot) => ({ lot, weight: weightLot(lot) }));
     const lotAllocationStates: LotAllocationState[] = [];
 

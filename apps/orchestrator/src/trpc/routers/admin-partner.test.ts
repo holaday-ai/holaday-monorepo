@@ -369,6 +369,7 @@ describe('admin.partner router', () => {
           fakeWithdrawal({ externalId: 'pay_withdrawal_approved', status: 'approved' }),
           fakeWithdrawal({ externalId: 'pay_withdrawal_paid', status: 'paid' }),
           fakeWithdrawal({ externalId: 'pay_withdrawal_rejected', status: 'rejected' }),
+          fakeWithdrawal({ externalId: 'pay_withdrawal_returned', status: 'returned' }),
         ],
         now,
       ),
@@ -377,6 +378,7 @@ describe('admin.partner router', () => {
       approvedWithdrawalCount: 1,
       paidWithdrawalCount: 1,
       rejectedWithdrawalCount: 1,
+      returnedWithdrawalCount: 1,
       overdueWithdrawalCount: 1,
     });
   });

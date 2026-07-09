@@ -1,6 +1,7 @@
 import { HOLA_CREDIT_CNY_CENTS, newExternalId } from '@holaday/shared-types';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
+import { readAffectedRows } from '../db/mysql-result.js';
 import { partnerReferrals, type PartnerReferral } from '../db/schema/partner.js';
 import { CreditLedgerService } from './credit-ledger-service.js';
 
@@ -61,6 +62,12 @@ function calculateRewardCreditCents(amountCnyCents: number, rewardRateBps: numbe
   return Math.floor((amountCnyCents * rewardRateBps) / 10_000);
 }
 
+function metadataRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? { ...(value as Record<string, unknown>) }
+    : {};
+}
+
 function assertInvitePayloadMatches(
   row: PartnerReferral,
   input: { inviterUserId: number; inviteeUserId: number; assisted: 0 | 1 },
@@ -75,10 +82,14 @@ function assertInvitePayloadMatches(
 }
 
 export class ReferralService {
-  private readonly ledger: ReferralLedgerPoster;
+  private readonly ledger?: ReferralLedgerPoster;
 
   constructor(private readonly db: DB, deps: ReferralServiceDeps = {}) {
-    this.ledger = deps.ledger ?? new CreditLedgerService(db);
+    this.ledger = deps.ledger;
+  }
+
+  private ledgerFor(db: DB): ReferralLedgerPoster {
+    return this.ledger ?? new CreditLedgerService(db);
   }
 
   async recordInvite(input: {
@@ -130,37 +141,100 @@ export class ReferralService {
     const amountCnyCents = normalizeWholeCnyAmount(input.amountCnyCents, 'amountCnyCents');
     const now = normalizeDate(input.now ?? new Date(), 'now');
 
-    // Referral attribution must exist before payment confirmation; late attribution is not backfilled.
-    const referral = await this.readByInviteeUserId(this.db, inviteeUserId);
-    if (!referral) return null;
+    return this.db.transaction(async (tx) => {
+      const db = tx as unknown as DB;
+      const ledger = this.ledgerFor(db);
+      // Referral attribution must exist before payment confirmation; late attribution is not backfilled.
+      const referral = await this.readByInviteeUserId(db, inviteeUserId);
+      if (!referral) return null;
 
-    const rewardRateBps = rewardRateBpsForAssisted(referral.assisted);
-    const rewardCreditCents = calculateRewardCreditCents(amountCnyCents, rewardRateBps);
+      const rewardRateBps = rewardRateBpsForAssisted(referral.assisted);
+      const rewardCreditCents = calculateRewardCreditCents(amountCnyCents, rewardRateBps);
 
-    if (referral.status !== 'pending' && referral.status !== 'rewarded') {
-      throw new PartnerReferralConflictError(`Partner referral cannot be rewarded from status ${referral.status}`);
-    }
+      if (referral.status === 'rewarded') {
+        if (
+          referral.rechargeOrderId === rechargeOrderId &&
+          referral.rewardCreditCents === rewardCreditCents &&
+          referral.rewardRateBps === rewardRateBps
+        ) {
+          await this.postRechargeReward(ledger, referral, {
+            rechargeOrderId,
+            amountCnyCents,
+            rewardCreditCents,
+            rewardRateBps,
+            now,
+          });
+        }
+        return referral;
+      }
 
-    await this.ledger.postEntry({
+      if (referral.status !== 'pending') {
+        throw new PartnerReferralConflictError(`Partner referral cannot be rewarded from status ${referral.status}`);
+      }
+
+      const metadata = {
+        ...metadataRecord(referral.metadata),
+        rewardedAt: now.toISOString(),
+      };
+      const result = await db
+        .update(partnerReferrals)
+        .set({
+          rechargeOrderId,
+          status: 'rewarded',
+          rewardCreditCents,
+          rewardRateBps,
+          metadata,
+          updatedAt: now,
+        })
+        .where(and(eq(partnerReferrals.id, referral.id), eq(partnerReferrals.status, 'pending')));
+      if (readAffectedRows(result) !== 1) {
+        throw new PartnerReferralConflictError('Partner referral changed while rewarding');
+      }
+
+      const updated = await this.readByInviteeUserId(db, inviteeUserId);
+      if (!updated) {
+        throw new Error('partner referral vanished after reward update');
+      }
+      await this.postRechargeReward(ledger, updated, {
+        rechargeOrderId,
+        amountCnyCents,
+        rewardCreditCents,
+        rewardRateBps,
+        now,
+      });
+      return updated;
+    });
+  }
+
+  private async postRechargeReward(
+    ledger: ReferralLedgerPoster,
+    referral: PartnerReferral,
+    input: {
+      rechargeOrderId: number;
+      amountCnyCents: number;
+      rewardCreditCents: number;
+      rewardRateBps: number;
+      now: Date;
+    },
+  ): Promise<void> {
+    await ledger.postEntry({
       userId: referral.inviterUserId,
       lotId: null,
       entryType: 'referral_recharge_reward',
       direction: 'credit',
       bucket: 'available',
-      amountCreditCents: rewardCreditCents,
-      idempotencyKey: `referral:recharge_reward:${referral.id}:${rechargeOrderId}`,
+      amountCreditCents: input.rewardCreditCents,
+      idempotencyKey: `referral:recharge_reward:${referral.id}:${input.rechargeOrderId}`,
       metadata: {
         referralId: referral.id,
         referralExternalId: referral.externalId,
         inviteeUserId: referral.inviteeUserId,
-        rechargeOrderId,
-        rechargeAmountCnyCents: amountCnyCents,
-        rewardRateBps,
-        settledAt: now.toISOString(),
+        rechargeOrderId: input.rechargeOrderId,
+        rechargeAmountCnyCents: input.amountCnyCents,
+        rewardRateBps: input.rewardRateBps,
+        settledAt: input.now.toISOString(),
       },
     });
-
-    return referral;
   }
 
   private async readByInviteeUserId(db: DB, inviteeUserId: number): Promise<PartnerReferral | null> {

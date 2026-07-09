@@ -840,7 +840,7 @@ function PartnerWorkbench({
 
       <Section
         title="充值预览与订单"
-        description="单笔 ¥10,000 至 ¥200,000，预览按当前金额作为 30 天滚动金额。"
+        description="单笔 ¥10,000 至 ¥200,000，预览会计入过去 30 天已完成充值和当前金额。"
         className="rounded-[8px] border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]"
       >
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">

@@ -44,6 +44,7 @@ function extractColumnValues(predicate: unknown, columnName: string): unknown[] 
 class FakeReferralDb {
   readonly referrals: PartnerReferral[];
   readonly insertedValues: FakeReferralInsert[] = [];
+  readonly updateValues: Array<Partial<PartnerReferral>> = [];
   transactionCalls = 0;
   private nextId: number;
 
@@ -58,7 +59,13 @@ class FakeReferralDb {
 
   async transaction<T>(cb: (tx: DB) => Promise<T>): Promise<T> {
     this.transactionCalls += 1;
-    return cb(this.asDB());
+    const referralSnapshot = this.referrals.map((row) => ({ ...row }));
+    try {
+      return await cb(this.asDB());
+    } catch (error) {
+      this.referrals.splice(0, this.referrals.length, ...referralSnapshot);
+      throw error;
+    }
   }
 
   insert(table: unknown) {
@@ -95,6 +102,23 @@ class FakeReferralDb {
             return row ? [row].slice(0, count) : [];
           },
         }),
+      }),
+    };
+  }
+
+  update(table: unknown) {
+    if (table !== partnerReferrals) {
+      throw new Error('unexpected update table');
+    }
+    return {
+      set: (values: Partial<PartnerReferral>) => ({
+        where: async (predicate: unknown) => {
+          this.updateValues.push(values);
+          const row = this.findReferral(predicate);
+          if (!row) return [{ affectedRows: 0 }, null];
+          Object.assign(row, values);
+          return [{ affectedRows: 1 }, null];
+        },
       }),
     };
   }
@@ -272,17 +296,20 @@ describe('ReferralService.settleRechargeReward', () => {
     });
 
     expect(first).toMatchObject({
-      status: 'pending',
-      rechargeOrderId: null,
-      rewardCreditCents: 0,
-      rewardRateBps: 0,
+      status: 'rewarded',
+      rechargeOrderId: 77,
+      rewardCreditCents: 2_000_00,
+      rewardRateBps: 2_000,
     });
     expect(second).toMatchObject({
       id: first?.id,
       inviteeUserId: 456,
       inviterUserId: 123,
+      status: 'rewarded',
+      rechargeOrderId: 77,
     });
-    expect(db.transactionCalls).toBe(0);
+    expect(db.transactionCalls).toBe(2);
+    expect(db.updateValues).toHaveLength(1);
     expect(ledger.entries).toHaveLength(1);
     expect(ledger.entries[0]).toMatchObject({
       userId: 123,
@@ -306,6 +333,10 @@ describe('ReferralService.settleRechargeReward', () => {
     expect(row).toMatchObject({
       inviteeUserId: 456,
       inviterUserId: 123,
+      status: 'rewarded',
+      rechargeOrderId: 77,
+      rewardCreditCents: 1_000_00,
+      rewardRateBps: 1_000,
     });
     expect(ledger.entries[0]?.amountCreditCents).toBe(1_000_00);
   });
@@ -323,7 +354,7 @@ describe('ReferralService.settleRechargeReward', () => {
     expect(ledger.entries).toEqual([]);
   });
 
-  it('credits each distinct recharge for the same attributed invitee', async () => {
+  it('does not credit a second distinct recharge for the same attributed invitee', async () => {
     const { ledger, service } = serviceWithFakes({
       referrals: [
         fakeReferral({
@@ -344,14 +375,11 @@ describe('ReferralService.settleRechargeReward', () => {
     ).resolves.toMatchObject({
       inviteeUserId: 456,
       inviterUserId: 123,
+      status: 'rewarded',
+      rechargeOrderId: 77,
     });
 
-    expect(ledger.entries).toHaveLength(1);
-    expect(ledger.entries[0]).toMatchObject({
-      userId: 123,
-      amountCreditCents: 4_000_00,
-      idempotencyKey: 'referral:recharge_reward:1:78',
-    });
+    expect(ledger.entries).toHaveLength(0);
   });
 
   it('returns null without side effects when no referral existed before recharge settlement', async () => {
@@ -367,7 +395,7 @@ describe('ReferralService.settleRechargeReward', () => {
     expect(ledger.entries).toEqual([]);
   });
 
-  it('does not overwrite the attribution row while settling a recharge reward', async () => {
+  it('updates the attribution row while settling the first recharge reward', async () => {
     const referral = fakeReferral();
     const { db, ledger, service } = serviceWithFakes({ referrals: [referral] });
 
@@ -377,13 +405,19 @@ describe('ReferralService.settleRechargeReward', () => {
         rechargeOrderId: 77,
         amountCnyCents: 10_000_00,
       }),
-    ).resolves.toBe(referral);
+    ).resolves.toMatchObject({
+      id: referral.id,
+      status: 'rewarded',
+      rechargeOrderId: 77,
+      rewardCreditCents: 2_000_00,
+      rewardRateBps: 2_000,
+    });
 
-    expect(referral).toMatchObject({
-      status: 'pending',
-      rechargeOrderId: null,
-      rewardCreditCents: 0,
-      rewardRateBps: 0,
+    expect(db.referrals[0]).toMatchObject({
+      status: 'rewarded',
+      rechargeOrderId: 77,
+      rewardCreditCents: 2_000_00,
+      rewardRateBps: 2_000,
     });
     expect(ledger.entries).toHaveLength(1);
   });

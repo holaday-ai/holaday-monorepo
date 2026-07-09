@@ -413,6 +413,27 @@ describe('partnerRouter', () => {
     });
   });
 
+  it('dashboard preserves zero withdrawable credit instead of falling back to available credit', async () => {
+    process.env.PARTNER_LEDGER_ENABLED = 'true';
+    const fakeDb = new FakePartnerDb({
+      memberships: [fakeMembership()],
+      kycProfiles: [fakeKyc()],
+      ledgerEntries: [
+        fakeLedgerEntry({ bucket: 'available', direction: 'credit', amountCreditCents: 10_000_00 }),
+      ],
+    });
+
+    const result = await partnerRouter.createCaller(fakeDb.asContext()).dashboard();
+
+    expect(result).toMatchObject({
+      enabled: true,
+      ledger: {
+        availableCreditCents: 10_000_00,
+        withdrawableCreditCents: 0,
+      },
+    });
+  });
+
   it('dashboard exposes user-facing order and withdrawal progress context', async () => {
     process.env.PARTNER_LEDGER_ENABLED = 'true';
     const fakeDb = new FakePartnerDb({
@@ -570,6 +591,44 @@ describe('partnerRouter', () => {
       code: 'BAD_REQUEST',
       message: 'rollingThirtyDayCnyCents must not exceed the monthly maximum',
     });
+  });
+
+  it('rechargePreview honors configured recharge limits', async () => {
+    process.env.PARTNER_LEDGER_ENABLED = 'true';
+    const originalMin = process.env.PARTNER_RECHARGE_MIN_CNY_CENTS;
+    const originalMonthly = process.env.PARTNER_RECHARGE_MAX_MONTHLY_CNY_CENTS;
+    process.env.PARTNER_RECHARGE_MIN_CNY_CENTS = String(7_500_00);
+    process.env.PARTNER_RECHARGE_MAX_MONTHLY_CNY_CENTS = String(250_000_00);
+    try {
+      const caller = partnerRouter.createCaller(
+        new FakePartnerDb({
+          memberships: [fakeMembership()],
+          kycProfiles: [fakeKyc()],
+          orders: [
+            fakeOrder({
+              amountCnyCents: 242_501_00,
+              updatedAt: new Date('2026-06-20T00:00:00.000Z'),
+            }),
+          ],
+        }).asContext(),
+      );
+
+      await expect(caller.rechargePreview({ amountCnyCents: 7_500_00 })).rejects.toMatchObject({
+        code: 'BAD_REQUEST',
+        message: 'rollingThirtyDayCnyCents must not exceed the monthly maximum',
+      });
+    } finally {
+      if (originalMin === undefined) {
+        delete process.env.PARTNER_RECHARGE_MIN_CNY_CENTS;
+      } else {
+        process.env.PARTNER_RECHARGE_MIN_CNY_CENTS = originalMin;
+      }
+      if (originalMonthly === undefined) {
+        delete process.env.PARTNER_RECHARGE_MAX_MONTHLY_CNY_CENTS;
+      } else {
+        process.env.PARTNER_RECHARGE_MAX_MONTHLY_CNY_CENTS = originalMonthly;
+      }
+    }
   });
 
   it('rechargePreview returns tier and API Units for a valid active partner', async () => {

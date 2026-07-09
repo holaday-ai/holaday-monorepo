@@ -172,7 +172,7 @@ export class ReleaseService {
         lotId: lot.id,
         entryType: 'monthly_release_principal',
         direction: 'credit',
-        bucket: 'available',
+        bucket: 'withdrawable',
         amountCreditCents: release.principalCreditCents,
         idempotencyKey: `monthly_release_principal:${release.releaseMonth}:${release.lotId}`,
         metadata: {
@@ -188,7 +188,7 @@ export class ReleaseService {
         lotId: lot.id,
         entryType: 'monthly_release_bonus',
         direction: 'credit',
-        bucket: 'available',
+        bucket: 'withdrawable',
         amountCreditCents: release.bonusCreditCents,
         idempotencyKey: `monthly_release_bonus:${release.releaseMonth}:${release.lotId}`,
         metadata: {

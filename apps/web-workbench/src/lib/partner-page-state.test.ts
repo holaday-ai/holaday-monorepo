@@ -298,6 +298,9 @@ describe('partner page state helpers', () => {
       partnerActionErrorMessage(new Error('insufficient_available_credit'), '提现失败'),
     ).toBe('可用 HOLA Credit 不足');
     expect(
+      partnerActionErrorMessage(new Error('insufficient_withdrawable_credit'), '提现失败'),
+    ).toBe('可提现 HOLA Credit 不足');
+    expect(
       partnerActionErrorMessage(new Error('partner referral attribution conflict'), '邀请登记失败'),
     ).toBe('该账号已有邀请归因');
     expect(

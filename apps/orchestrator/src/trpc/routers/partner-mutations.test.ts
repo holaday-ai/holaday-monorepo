@@ -567,13 +567,24 @@ describe('partnerRouter mutations', () => {
   it('maps withdrawal gate, validation, and idempotency errors', async () => {
     const caller = partnerRouter.createCaller(makeContext());
     getKycStatusMock.mockResolvedValue('passed');
+    requestWithdrawalMock.mockRejectedValueOnce(new WithdrawalGateError('membership_required'));
     requestWithdrawalMock.mockRejectedValueOnce(new WithdrawalGateError('kyc_required'));
     requestWithdrawalMock.mockRejectedValueOnce(new WithdrawalValidationError('below_minimum'));
     requestWithdrawalMock.mockRejectedValueOnce(
-      new WithdrawalValidationError('insufficient_available_credit'),
+      new WithdrawalValidationError('insufficient_withdrawable_credit'),
     );
     requestWithdrawalMock.mockRejectedValueOnce(new WithdrawalRequestIdempotencyConflictError());
 
+    await expect(
+      caller.requestWithdrawal({
+        amountCreditCents: 500_00,
+        bankAccountFingerprint: 'bank-fp-membership',
+        idempotencyKey: 'withdrawal-membership-gate',
+      }),
+    ).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+      message: 'partner membership required',
+    });
     await expect(
       caller.requestWithdrawal({
         amountCreditCents: 500_00,
@@ -599,7 +610,7 @@ describe('partnerRouter mutations', () => {
       }),
     ).rejects.toMatchObject({
       code: 'BAD_REQUEST',
-      message: 'insufficient_available_credit',
+      message: 'insufficient_withdrawable_credit',
     });
     await expect(
       caller.requestWithdrawal({

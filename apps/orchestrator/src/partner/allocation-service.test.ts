@@ -182,9 +182,16 @@ class FakeAllocationDb {
 
     if (table === partnerLots) {
       if (!predicateText) return [...this.lotRows];
+      const bounds = Array.from(predicateText.matchAll(/(\d{4}-\d{2}-\d{2}T00:00:00\.000Z)/g), (match) =>
+        Date.parse(match[1]!),
+      );
+      const dayStart = bounds.length >= 2 ? Math.min(...bounds) : null;
+      const dayEnd = bounds.length >= 2 ? Math.max(...bounds) : null;
       return this.lotRows.filter((row) => {
         if (predicateText.includes('accumulating') && row.status !== 'accumulating') return false;
         if (predicateText.includes('normal') && row.riskStatus !== 'normal') return false;
+        if (dayStart !== null && row.accumulationEndsAt.getTime() <= dayStart) return false;
+        if (dayEnd !== null && row.accumulationStartsAt.getTime() >= dayEnd) return false;
         return true;
       });
     }
@@ -663,6 +670,40 @@ describe('AllocationService allocateDailyLockedBonus', () => {
       eligibleLotCount: 1,
       allocationCount: 1,
       totalLockedBonusCreditCents: 1_666,
+    });
+    expect(fakeDb.allocationRows.map((row) => row.lotId)).toEqual([1]);
+    expect(fakeDb.lotReconciliations).toEqual([{ lotId: 1, lockedBonusCreditCents: 1_666 }]);
+  });
+
+  it('skips lots outside the allocation day accumulation window', async () => {
+    const fakeDb = new FakeAllocationDb({
+      lots: [
+        fakeLot({
+          id: 1,
+          accumulationStartsAt: new Date('2026-07-02T00:00:00.000Z'),
+          accumulationEndsAt: new Date('2026-07-03T00:00:00.000Z'),
+        }),
+        fakeLot({
+          id: 2,
+          externalId: 'payment_lot_future',
+          accumulationStartsAt: new Date('2026-07-03T00:00:00.000Z'),
+          accumulationEndsAt: new Date('2026-07-04T00:00:00.000Z'),
+        }),
+        fakeLot({
+          id: 3,
+          externalId: 'payment_lot_expired',
+          accumulationStartsAt: new Date('2026-07-01T00:00:00.000Z'),
+          accumulationEndsAt: new Date('2026-07-02T00:00:00.000Z'),
+        }),
+      ],
+    });
+    const service = new AllocationService(fakeDb.asDB());
+
+    const summary = await service.allocateDailyLockedBonus({ day: '2026-07-02', budgetCreditCents: 10_000 });
+
+    expect(summary).toMatchObject({
+      eligibleLotCount: 1,
+      allocationCount: 1,
     });
     expect(fakeDb.allocationRows.map((row) => row.lotId)).toEqual([1]);
     expect(fakeDb.lotReconciliations).toEqual([{ lotId: 1, lockedBonusCreditCents: 1_666 }]);
