@@ -117,7 +117,11 @@ export class KycService {
     const userId = normalizePositiveSafeInteger(input.userId, 'userId');
     const status = normalizeUpsertKycStatus(input.status);
     const provider = normalizeBoundedString(input.provider, 'provider', 32);
-    const providerRef = normalizeOptionalBoundedString(input.providerRef, 'providerRef', 128);
+    const existing = await this.getProfile(userId);
+    const providerRef =
+      input.providerRef === undefined
+        ? (existing?.providerRef ?? null)
+        : normalizeOptionalBoundedString(input.providerRef, 'providerRef', 128);
     const country = normalizeBoundedString(input.country ?? 'CN', 'country', 8);
     const now = normalizeDate(input.now ?? new Date(), 'now');
     const reviewedAt = status === 'pending' ? null : now;

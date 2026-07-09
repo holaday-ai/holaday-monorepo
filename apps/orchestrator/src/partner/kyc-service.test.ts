@@ -210,7 +210,7 @@ describe('KycService', () => {
         status: 'pending',
         country: 'CN',
         provider: 'manual',
-        providerRef: null,
+        providerRef: 'bankcard-flow-existing',
         reviewedAt: null,
         metadata: null,
         createdAt: new Date('2026-01-01T00:00:00.000Z'),
@@ -232,6 +232,7 @@ describe('KycService', () => {
       externalId: 'pay_existing_kyc',
       status: 'rejected',
       provider: 'manual',
+      providerRef: 'bankcard-flow-existing',
       metadata: { note: 'document mismatch' },
     });
     expect(fakeDb.rowsCreated).toBe(0);
