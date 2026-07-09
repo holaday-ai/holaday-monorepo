@@ -323,6 +323,14 @@ describe('partnerRouter', () => {
           amountCreditCents: 500_00,
           idempotencyKey: 'ledger-idem-2',
         }),
+        fakeLedgerEntry({
+          id: 32,
+          externalId: 'ledger_withdrawable',
+          bucket: 'withdrawable',
+          direction: 'credit',
+          amountCreditCents: 7_000_00,
+          idempotencyKey: 'ledger-idem-3',
+        }),
       ],
       lots: [fakeLot()],
       orders: [
@@ -360,7 +368,7 @@ describe('partnerRouter', () => {
       ledger: {
         availableCreditCents: 10_000_00,
         lockedCreditCents: 500_00,
-        withdrawableCreditCents: 10_000_00,
+        withdrawableCreditCents: 7_000_00,
         pendingWithdrawalCreditCents: 0,
         frozenCreditCents: 0,
       },

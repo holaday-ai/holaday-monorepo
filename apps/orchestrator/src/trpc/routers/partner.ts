@@ -180,6 +180,20 @@ function summarizePartnerKyc(profile: {
   };
 }
 
+function summarizeDashboardLedger(ledger: {
+  availableCreditCents: number;
+  lockedCreditCents: number;
+  withdrawableCreditCents: number;
+  pendingWithdrawalCreditCents: number;
+  frozenCreditCents: number;
+}) {
+  return {
+    ...ledger,
+    withdrawableCreditCents:
+      ledger.withdrawableCreditCents > 0 ? ledger.withdrawableCreditCents : ledger.availableCreditCents,
+  };
+}
+
 function mapRechargeOrderError(error: unknown): never {
   if (error instanceof TRPCError) {
     throw error;
@@ -359,10 +373,7 @@ export const partnerRouter = router({
         .limit(DASHBOARD_ACTIVITY_LIMIT),
     ]);
 
-    const dashboardLedger = {
-      ...ledger,
-      withdrawableCreditCents: ledger.availableCreditCents,
-    };
+    const dashboardLedger = summarizeDashboardLedger(ledger);
     const kycStatus = kycProfile ? normalizeKycStatus(kycProfile.status) : 'not_started';
 
     return {
