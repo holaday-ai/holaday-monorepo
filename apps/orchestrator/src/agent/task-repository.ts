@@ -857,6 +857,13 @@ export class TaskRepository {
     if (prev.taskId !== next.taskId) {
       throw new Error('applyBatchApprove requires matching taskIds');
     }
+    if (
+      prev.status !== 'awaiting_user' ||
+      prev.pendingConfirm?.kind !== 'batch' ||
+      next.status !== 'executing'
+    ) {
+      return { persisted: false };
+    }
     const [taskRow] = await this.db
       .select({ id: tasks.id })
       .from(tasks)

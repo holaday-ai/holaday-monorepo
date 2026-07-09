@@ -855,6 +855,45 @@ describe('TaskRepository task terminal state persistence', () => {
     expect(result.persisted).toBe(true);
   });
 
+  it('applyBatchApprove refuses non-batch or non-awaiting source states', async () => {
+    const cases: TaskState[] = [
+      {
+        taskId: 'tsk_state_machine',
+        status: 'executing',
+        plan: [{ id: 'stp_batch', kind: 'click', risk: 'high' }],
+        cursor: 0,
+        pendingConfirm: null,
+      },
+      {
+        taskId: 'tsk_state_machine',
+        status: 'awaiting_user',
+        plan: [{ id: 'stp_batch', kind: 'click', risk: 'high' }],
+        cursor: 0,
+        pendingConfirm: {
+          kind: 'single',
+          stepId: 'stp_batch',
+          prompt: '确认继续？',
+          risk: 'high',
+        },
+      },
+    ];
+
+    for (const prev of cases) {
+      const { db, captured } = fakeDbForStateTransitions(1);
+      const repo = new TaskRepository(db);
+      const result = await repo.applyBatchApprove(prev, {
+        ...prev,
+        status: 'executing',
+        pendingConfirm: null,
+      });
+
+      expect(result.persisted).toBe(false);
+      expect(captured.transactionRan).toBe(false);
+      expect(captured.updatePayloads).toHaveLength(0);
+      expect(captured.eventPayloads).toHaveLength(0);
+    }
+  });
+
   it('applyBatchApprove clears stale awaiting fields when resuming execution', async () => {
     const { db, captured } = fakeDbForStateTransitions(1);
     const repo = new TaskRepository(db);
