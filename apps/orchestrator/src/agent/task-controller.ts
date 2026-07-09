@@ -118,6 +118,8 @@ export type ConfirmDecision = 'approve' | 'skip' | 'reject';
 export interface ControllerInput {
   /** Existing in-memory state for this task (or `null` to seed from `plan`). */
   state: TaskState | null;
+  /** Optional external task id when seeding a brand-new task from `plan`. */
+  taskId?: string;
   /** New plan to seed if state is null. */
   plan?: PlannedStep[];
   /** Optional intent / metadata, kept for logs only. */
@@ -158,7 +160,7 @@ export class TaskController {
     const state: TaskState =
       input.state ??
       ({
-        taskId: newExternalId('task'),
+        taskId: input.taskId ?? newExternalId('task'),
         status: 'planning',
         plan: input.plan ?? [],
         cursor: 0,
@@ -172,6 +174,7 @@ export class TaskController {
       input.state &&
       (isTaskTerminalStatus(state.status) ||
         state.status === 'pending' ||
+        state.status === 'planning' ||
         state.status === 'queued' ||
         state.status === 'awaiting_user' ||
         state.status === 'paused')

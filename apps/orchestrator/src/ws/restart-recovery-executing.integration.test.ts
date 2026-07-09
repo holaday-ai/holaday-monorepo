@@ -62,31 +62,27 @@ describe('restart recovery: executing re-emits server.task.dispatch', () => {
     const step1Id = newExternalId('taskStep');
     const step2Id = newExternalId('taskStep');
     const { state: s0 } = controller.start({
-      state: {
-        taskId: newExternalId('task'),
-        status: 'planning',
-        plan: [
-          {
-            id: step1Id,
-            kind: 'goto',
-            risk: 'low',
-            payload: { url: 'https://example.com/a' },
+      state: null,
+      taskId: newExternalId('task'),
+      plan: [
+        {
+          id: step1Id,
+          kind: 'goto',
+          risk: 'low',
+          payload: { url: 'https://example.com/a' },
+        },
+        {
+          id: step2Id,
+          kind: 'click',
+          risk: 'low',
+          selector: {
+            description: 'continue button',
+            strategies: [{ kind: 'text', value: 'Continue' }],
+            scope: { timeoutMs: 5000 },
+            selfHeal: true,
           },
-          {
-            id: step2Id,
-            kind: 'click',
-            risk: 'low',
-            selector: {
-              description: 'continue button',
-              strategies: [{ kind: 'text', value: 'Continue' }],
-              scope: { timeoutMs: 5000 },
-              selfHeal: true,
-            },
-          },
-        ],
-        cursor: 0,
-        pendingConfirm: null,
-      },
+        },
+      ],
     });
     await repo.insertTask(s0, { userId: user.id, intent: 'executing-restart demo' });
 
@@ -177,31 +173,27 @@ describe('restart recovery: executing re-emits server.task.dispatch', () => {
     const step1Id = newExternalId('taskStep');
     const step2Id = newExternalId('taskStep');
     const { state: s0 } = controller.start({
-      state: {
-        taskId: newExternalId('task'),
-        status: 'planning',
-        plan: [
-          {
-            id: step1Id,
-            kind: 'goto',
-            risk: 'low',
-            payload: { url: 'https://example.com/a' },
+      state: null,
+      taskId: newExternalId('task'),
+      plan: [
+        {
+          id: step1Id,
+          kind: 'goto',
+          risk: 'low',
+          payload: { url: 'https://example.com/a' },
+        },
+        {
+          id: step2Id,
+          kind: 'click',
+          risk: 'low',
+          selector: {
+            description: 'continue button',
+            strategies: [{ kind: 'text', value: 'Continue' }],
+            scope: { timeoutMs: 5000 },
+            selfHeal: true,
           },
-          {
-            id: step2Id,
-            kind: 'click',
-            risk: 'low',
-            selector: {
-              description: 'continue button',
-              strategies: [{ kind: 'text', value: 'Continue' }],
-              scope: { timeoutMs: 5000 },
-              selfHeal: true,
-            },
-          },
-        ],
-        cursor: 0,
-        pendingConfirm: null,
-      },
+        },
+      ],
     });
     await repo.insertTask(s0, { userId: user.id, intent: 'extension should not resume task' });
 

@@ -49,21 +49,17 @@ describe('TaskRepository against real MySQL', () => {
     const repo = new TaskRepository(db);
     const controller = new TaskController();
     const { state } = controller.start({
-      state: {
-        taskId: newExternalId('task'),
-        status: 'planning',
-        plan: [
-          {
-            id: newExternalId('taskStep'),
-            kind: 'goto',
-            risk: 'low',
-            payload: { url: 'https://example.com' },
-          },
-          { id: newExternalId('taskStep'), kind: 'click', risk: 'high' },
-        ],
-        cursor: 0,
-        pendingConfirm: null,
-      },
+      state: null,
+      taskId: newExternalId('task'),
+      plan: [
+        {
+          id: newExternalId('taskStep'),
+          kind: 'goto',
+          risk: 'low',
+          payload: { url: 'https://example.com' },
+        },
+        { id: newExternalId('taskStep'), kind: 'click', risk: 'high' },
+      ],
     });
 
     await repo.insertTask(state, { userId: user.id, intent: 'scrape example.com' });
@@ -117,13 +113,9 @@ describe('TaskRepository against real MySQL', () => {
     const secondStepId = must(plan[1], 'plan[1]').id;
 
     const { state: s0 } = controller.start({
-      state: {
-        taskId: newExternalId('task'),
-        status: 'planning',
-        plan,
-        cursor: 0,
-        pendingConfirm: null,
-      },
+      state: null,
+      taskId: newExternalId('task'),
+      plan,
     });
     await repo.insertTask(s0, { userId: user.id, intent: 'multi-step' });
 

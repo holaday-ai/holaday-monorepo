@@ -39,7 +39,19 @@ describe('TaskController state machine', () => {
     }
   });
 
-  it('start() does not re-dispatch parked, queued/pending, or terminal existing states', async () => {
+  it('start() can seed a brand-new task with an explicit task id', async () => {
+    const c = await setup();
+    const { state } = c.start({
+      state: null,
+      taskId: 'tsk_explicit',
+      plan: [{ id: 'stp_1', kind: 'goto', risk: 'low' }],
+    });
+
+    expect(state.taskId).toBe('tsk_explicit');
+    expect(state.status).toBe('executing');
+  });
+
+  it('start() does not re-dispatch parked, transient, or terminal existing states', async () => {
     const c = await setup();
     const base = {
       taskId: 'tsk_existing',
@@ -50,6 +62,7 @@ describe('TaskController state machine', () => {
 
     for (const status of [
       'pending',
+      'planning',
       'queued',
       'awaiting_user',
       'paused',

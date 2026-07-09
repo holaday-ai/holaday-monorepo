@@ -5730,14 +5730,10 @@ export const tasksRouter = router({
 
     const taskId = newExternalId('task');
     const { state, effects } = taskController.start({
-      state: {
-        taskId,
-        status: 'planning',
-        plan,
-        cursor: 0,
-        pendingConfirm: null,
-        ...(allowedOrigins.length > 0 ? { allowedOrigins } : {}),
-      },
+      state: null,
+      taskId,
+      plan,
+      ...(allowedOrigins.length > 0 ? { allowedOrigins } : {}),
     });
 
     const repo = new TaskRepository(ctx.db);
@@ -5794,14 +5790,10 @@ export const tasksRouter = router({
     // driver) actually enforces the list.
     const smokeAllowedOrigins = ['*.baidu.com'] as const;
     const { state, effects } = taskController.start({
-      state: {
-        taskId,
-        status: 'planning',
-        plan,
-        cursor: 0,
-        pendingConfirm: null,
-        allowedOrigins: smokeAllowedOrigins,
-      },
+      state: null,
+      taskId,
+      plan,
+      allowedOrigins: smokeAllowedOrigins,
     });
 
     const repo = new TaskRepository(ctx.db);

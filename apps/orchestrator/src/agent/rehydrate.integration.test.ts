@@ -54,13 +54,9 @@ describe('pending_confirm_payload + rehydration', () => {
       { id: secondStepId, kind: 'screenshot' as const, risk: 'low' as const },
     ];
     const { state: s0 } = controller.start({
-      state: {
-        taskId: newExternalId('task'),
-        status: 'planning',
-        plan,
-        cursor: 0,
-        pendingConfirm: null,
-      },
+      state: null,
+      taskId: newExternalId('task'),
+      plan,
     });
     await repo.insertTask(s0, { userId: user.id, intent: 'high-risk demo' });
 
@@ -125,16 +121,12 @@ describe('pending_confirm_payload + rehydration', () => {
 
     const firstStepId = newExternalId('taskStep');
     const { state: s0 } = controller.start({
-      state: {
-        taskId: newExternalId('task'),
-        status: 'planning',
-        plan: [
-          { id: firstStepId, kind: 'click' as const, risk: 'high' as const },
-          { id: newExternalId('taskStep'), kind: 'wait' as const, risk: 'low' as const },
-        ],
-        cursor: 0,
-        pendingConfirm: null,
-      },
+      state: null,
+      taskId: newExternalId('task'),
+      plan: [
+        { id: firstStepId, kind: 'click' as const, risk: 'high' as const },
+        { id: newExternalId('taskStep'), kind: 'wait' as const, risk: 'low' as const },
+      ],
     });
     await repo.insertTask(s0, { userId: user.id, intent: 'confirm clear' });
 
@@ -178,16 +170,12 @@ describe('pending_confirm_payload + rehydration', () => {
     const skippedStepId = newExternalId('taskStep');
     const nextStepId = newExternalId('taskStep');
     const { state: s0 } = controller.start({
-      state: {
-        taskId: newExternalId('task'),
-        status: 'planning',
-        plan: [
-          { id: skippedStepId, kind: 'screenshot' as const, risk: 'low' as const },
-          { id: nextStepId, kind: 'extract' as const, risk: 'low' as const },
-        ],
-        cursor: 0,
-        pendingConfirm: null,
-      },
+      state: null,
+      taskId: newExternalId('task'),
+      plan: [
+        { id: skippedStepId, kind: 'screenshot' as const, risk: 'low' as const },
+        { id: nextStepId, kind: 'extract' as const, risk: 'low' as const },
+      ],
     });
     await repo.insertTask(s0, { userId: user.id, intent: 'skip then recover' });
 

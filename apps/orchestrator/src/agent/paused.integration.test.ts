@@ -50,13 +50,9 @@ describe('paused state persistence + rehydration', () => {
 
     const stepId = newExternalId('taskStep');
     const { state: s0 } = controller.start({
-      state: {
-        taskId: newExternalId('task'),
-        status: 'planning',
-        plan: [{ id: stepId, kind: 'goto' as const, risk: 'low' as const }],
-        cursor: 0,
-        pendingConfirm: null,
-      },
+      state: null,
+      taskId: newExternalId('task'),
+      plan: [{ id: stepId, kind: 'goto' as const, risk: 'low' as const }],
     });
     await repo.insertTask(s0, { userId: user.id, intent: 'pause demo' });
 
@@ -109,16 +105,12 @@ describe('paused state persistence + rehydration', () => {
     const repo = new TaskRepository(db);
     const stepId = newExternalId('taskStep');
     const { state: s0 } = controller.start({
-      state: {
-        taskId: newExternalId('task'),
-        status: 'planning',
-        plan: [
-          { id: stepId, kind: 'click' as const, risk: 'low' as const },
-          { id: newExternalId('taskStep'), kind: 'wait' as const, risk: 'low' as const },
-        ],
-        cursor: 0,
-        pendingConfirm: null,
-      },
+      state: null,
+      taskId: newExternalId('task'),
+      plan: [
+        { id: stepId, kind: 'click' as const, risk: 'low' as const },
+        { id: newExternalId('taskStep'), kind: 'wait' as const, risk: 'low' as const },
+      ],
     });
     await repo.insertTask(s0, { userId: user.id, intent: 'retry escalation' });
 
@@ -180,13 +172,9 @@ describe('paused state persistence + rehydration', () => {
     const repo = new TaskRepository(db);
     const stepId = newExternalId('taskStep');
     const { state: s0 } = controller.start({
-      state: {
-        taskId: newExternalId('task'),
-        status: 'planning',
-        plan: [{ id: stepId, kind: 'goto' as const, risk: 'low' as const }],
-        cursor: 0,
-        pendingConfirm: null,
-      },
+      state: null,
+      taskId: newExternalId('task'),
+      plan: [{ id: stepId, kind: 'goto' as const, risk: 'low' as const }],
     });
     await repo.insertTask(s0, { userId: user.id, intent: 'rehydrate paused' });
     const { state: paused } = controller.pause(s0, 'quota_exceeded');

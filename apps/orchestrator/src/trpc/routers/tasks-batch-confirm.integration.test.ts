@@ -55,16 +55,12 @@ describe('tasks.confirm batch flow (approve / skip / reject)', () => {
     const stepBatchId = newExternalId('taskStep');
     const stepNextId = newExternalId('taskStep');
     const { state: s0 } = controller.start({
-      state: {
-        taskId: newExternalId('task'),
-        status: 'planning',
-        plan: [
-          { id: stepBatchId, kind: 'click', risk: 'low' },
-          { id: stepNextId, kind: 'wait', risk: 'low' },
-        ],
-        cursor: 0,
-        pendingConfirm: null,
-      },
+      state: null,
+      taskId: newExternalId('task'),
+      plan: [
+        { id: stepBatchId, kind: 'click', risk: 'low' },
+        { id: stepNextId, kind: 'wait', risk: 'low' },
+      ],
     });
     await repo.insertTask(s0, { userId: user.id, intent: 'batch confirm e2e' });
 

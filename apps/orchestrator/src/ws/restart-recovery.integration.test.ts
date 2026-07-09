@@ -52,16 +52,12 @@ describe('restart recovery: awaiting_user re-emits server.user.confirm', () => {
     const controller = new TaskController();
     const stepIdHigh = newExternalId('taskStep');
     const { state: s0 } = controller.start({
-      state: {
-        taskId: newExternalId('task'),
-        status: 'planning',
-        plan: [
-          { id: stepIdHigh, kind: 'click' as const, risk: 'high' as const },
-          { id: newExternalId('taskStep'), kind: 'wait' as const, risk: 'low' as const },
-        ],
-        cursor: 0,
-        pendingConfirm: null,
-      },
+      state: null,
+      taskId: newExternalId('task'),
+      plan: [
+        { id: stepIdHigh, kind: 'click' as const, risk: 'high' as const },
+        { id: newExternalId('taskStep'), kind: 'wait' as const, risk: 'low' as const },
+      ],
     });
     await repo.insertTask(s0, { userId: user.id, intent: 'recovery demo' });
     const { state: s1 } = controller.onStepResult(s0, {

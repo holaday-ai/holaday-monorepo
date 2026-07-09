@@ -49,16 +49,12 @@ describe('tasks.confirm tRPC mutation (awaiting_user → executing | cancelled)'
     const stepHigh = newExternalId('taskStep');
     const stepNext = newExternalId('taskStep');
     const { state: s0 } = controller.start({
-      state: {
-        taskId: newExternalId('task'),
-        status: 'planning',
-        plan: [
-          { id: stepHigh, kind: 'click' as const, risk: 'high' as const },
-          { id: stepNext, kind: 'wait' as const, risk: 'low' as const },
-        ],
-        cursor: 0,
-        pendingConfirm: null,
-      },
+      state: null,
+      taskId: newExternalId('task'),
+      plan: [
+        { id: stepHigh, kind: 'click' as const, risk: 'high' as const },
+        { id: stepNext, kind: 'wait' as const, risk: 'low' as const },
+      ],
     });
     await repo.insertTask(s0, { userId: user.id, intent: 'confirm-flow' });
     const { state: s1 } = controller.onStepResult(s0, {
