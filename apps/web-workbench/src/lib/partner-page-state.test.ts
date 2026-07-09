@@ -174,6 +174,8 @@ describe('partner page state helpers', () => {
           orderKind: 'membership',
           amountCnyCents: 99900,
           status: 'pending',
+          statusLabel: '待确认',
+          statusHelp: '等待支付渠道或后台确认。',
           createdAt: '2026-07-02',
           createdAtLabel: '2026-07-02',
         },
@@ -184,9 +186,15 @@ describe('partner page state helpers', () => {
           withdrawalExternalId: 'pay_withdrawal_1',
           amountCreditCents: 60000,
           status: 'reviewing',
+          statusLabel: '审核中',
+          statusHelp: '提现申请正在复核，请等待处理。',
           reviewDueAt: null,
           reviewDueAtLabel: '—',
           bankAccountFingerprint: 'bank_fp_123',
+          rejectionReason: '',
+          providerPayoutId: '',
+          paidAt: null,
+          paidAtLabel: '—',
           riskScore: 89,
         },
       ],
@@ -211,6 +219,51 @@ describe('partner page state helpers', () => {
     expect(state.lots[0]?.riskStatus).toBe('review_required');
     expect(state.lots[0]?.riskLabel).toBe('需复核');
     expect(state.lots[0]?.riskLabel).not.toBe('正常');
+  });
+
+  it('adds user-facing explanations for order and withdrawal workflow states', () => {
+    const state = normalizePartnerDashboard({
+      enabled: true,
+      orders: [
+        {
+          orderExternalId: 'pay_order_review',
+          orderKind: 'recharge',
+          amountCnyCents: 10_000_00,
+          status: 'review_required',
+          reviewErrorMessage: 'monthly cap exceeded',
+        },
+      ],
+      withdrawals: [
+        {
+          withdrawalExternalId: 'pay_withdrawal_paid',
+          amountCreditCents: 600_00,
+          status: 'paid',
+          providerPayoutId: 'bank-payout-1',
+          paidAt: '2026-07-03T06:00:00.000Z',
+        },
+        {
+          withdrawalExternalId: 'pay_withdrawal_rejected',
+          amountCreditCents: 700_00,
+          status: 'rejected',
+          rejectionReason: 'bank mismatch',
+        },
+      ],
+    });
+
+    expect(state.enabled).toBe(true);
+    if (!state.enabled) throw new Error('expected enabled partner dashboard');
+    expect(state.orders[0]).toMatchObject({
+      statusLabel: '待复核',
+      statusHelp: '订单进入人工复核：monthly cap exceeded',
+    });
+    expect(state.withdrawals[0]).toMatchObject({
+      statusLabel: '已出款',
+      statusHelp: '已完成出款，流水号 bank-payout-1。',
+    });
+    expect(state.withdrawals[1]).toMatchObject({
+      statusLabel: '未通过',
+      statusHelp: '提现未通过：bank mismatch',
+    });
   });
 
   it('maps partner action backend errors to safe localized copy', () => {

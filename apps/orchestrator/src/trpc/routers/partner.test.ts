@@ -410,6 +410,71 @@ describe('partnerRouter', () => {
     });
   });
 
+  it('dashboard exposes user-facing order and withdrawal progress context', async () => {
+    process.env.PARTNER_LEDGER_ENABLED = 'true';
+    const fakeDb = new FakePartnerDb({
+      memberships: [fakeMembership()],
+      kycProfiles: [fakeKyc()],
+      orders: [
+        fakeOrder({
+          externalId: 'pay_order_review',
+          status: 'review_required',
+          metadata: {
+            reviewReason: 'lot_creation_failed',
+            errorMessage: 'monthly cap exceeded',
+          },
+        }),
+      ],
+      withdrawals: [
+        fakeWithdrawal({
+          externalId: 'pay_withdrawal_rejected',
+          status: 'rejected',
+          rejectionReason: 'bank mismatch',
+          metadata: {
+            rejectedAt: '2026-07-03T05:00:00.000Z',
+          },
+        }),
+        fakeWithdrawal({
+          id: 61,
+          externalId: 'pay_withdrawal_paid',
+          status: 'paid',
+          metadata: {
+            providerPayoutId: 'bank-payout-1',
+            paidAt: '2026-07-03T06:00:00.000Z',
+          },
+        }),
+      ],
+    });
+
+    const result = await partnerRouter.createCaller(fakeDb.asContext()).dashboard();
+
+    expect(result).toMatchObject({
+      enabled: true,
+      orders: [
+        {
+          orderExternalId: 'pay_order_review',
+          status: 'review_required',
+          reviewReason: 'lot_creation_failed',
+          reviewErrorMessage: 'monthly cap exceeded',
+        },
+      ],
+      withdrawals: [
+        {
+          withdrawalExternalId: 'pay_withdrawal_rejected',
+          status: 'rejected',
+          rejectionReason: 'bank mismatch',
+          rejectedAt: '2026-07-03T05:00:00.000Z',
+        },
+        {
+          withdrawalExternalId: 'pay_withdrawal_paid',
+          status: 'paid',
+          providerPayoutId: 'bank-payout-1',
+          paidAt: '2026-07-03T06:00:00.000Z',
+        },
+      ],
+    });
+  });
+
   it('rechargePreview is blocked when the feature flag is disabled', async () => {
     await expect(
       partnerRouter.createCaller(new FakePartnerDb().asContext()).rechargePreview({

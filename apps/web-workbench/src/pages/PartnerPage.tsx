@@ -1007,13 +1007,14 @@ function RecentOrdersTable({ rows }: { rows: PartnerEnabledState['orders'] }): J
   }
   return (
     <div className="overflow-x-auto">
-      <table className="min-w-[520px] w-full text-left text-xs">
+      <table className="min-w-[680px] w-full text-left text-xs">
         <thead className="border-b border-[#EFEFEF] text-[11px] text-muted-foreground">
           <tr>
             <th scope="col" className="pb-2 pr-4 font-medium">订单</th>
             <th scope="col" className="pb-2 pr-4 font-medium">类型</th>
             <th scope="col" className="pb-2 pr-4 font-medium">金额</th>
             <th scope="col" className="pb-2 pr-4 font-medium">状态</th>
+            <th scope="col" className="pb-2 pr-4 font-medium">说明</th>
             <th scope="col" className="pb-2 font-medium">创建</th>
           </tr>
         </thead>
@@ -1023,7 +1024,8 @@ function RecentOrdersTable({ rows }: { rows: PartnerEnabledState['orders'] }): J
               <td className="py-3 pr-4 font-mono text-[11px] text-foreground/75">{row.orderExternalId}</td>
               <td className="py-3 pr-4 text-muted-foreground">{row.orderKind === 'membership' ? '年费会员' : '充值'}</td>
               <td className="py-3 pr-4 tabular-nums">{formatPartnerCnyCents(row.amountCnyCents)}</td>
-              <td className="py-3 pr-4">{orderStatusLabel(row.status)}</td>
+              <td className="py-3 pr-4">{row.statusLabel}</td>
+              <td className="max-w-[240px] py-3 pr-4 text-muted-foreground">{row.statusHelp}</td>
               <td className="py-3 text-muted-foreground">{row.createdAtLabel}</td>
             </tr>
           ))}
@@ -1039,12 +1041,13 @@ function RecentWithdrawalsTable({ rows }: { rows: PartnerEnabledState['withdrawa
   }
   return (
     <div className="overflow-x-auto">
-      <table className="min-w-[560px] w-full text-left text-xs">
+      <table className="min-w-[760px] w-full text-left text-xs">
         <thead className="border-b border-[#EFEFEF] text-[11px] text-muted-foreground">
           <tr>
             <th scope="col" className="pb-2 pr-4 font-medium">申请</th>
             <th scope="col" className="pb-2 pr-4 font-medium">金额</th>
             <th scope="col" className="pb-2 pr-4 font-medium">状态</th>
+            <th scope="col" className="pb-2 pr-4 font-medium">说明</th>
             <th scope="col" className="pb-2 pr-4 font-medium">银行指纹</th>
             <th scope="col" className="pb-2 pr-4 font-medium">复核</th>
             <th scope="col" className="pb-2 font-medium">风险</th>
@@ -1055,7 +1058,8 @@ function RecentWithdrawalsTable({ rows }: { rows: PartnerEnabledState['withdrawa
             <tr key={row.key}>
               <td className="py-3 pr-4 font-mono text-[11px] text-foreground/75">{row.withdrawalExternalId}</td>
               <td className="py-3 pr-4 tabular-nums">{formatHolaCreditCents(row.amountCreditCents)}</td>
-              <td className="py-3 pr-4">{withdrawalStatusLabel(row.status)}</td>
+              <td className="py-3 pr-4">{row.statusLabel}</td>
+              <td className="max-w-[240px] py-3 pr-4 text-muted-foreground">{row.statusHelp}</td>
               <td className="py-3 pr-4 text-muted-foreground">
                 <span className="block max-w-[160px] truncate" title={row.bankAccountFingerprint}>
                   {row.bankAccountFingerprint || '—'}

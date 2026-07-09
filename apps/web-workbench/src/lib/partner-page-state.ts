@@ -81,6 +81,8 @@ export interface PartnerOrderState {
   readonly orderKind: string;
   readonly amountCnyCents: number;
   readonly status: string;
+  readonly statusLabel: string;
+  readonly statusHelp: string;
   readonly createdAt: string | null;
   readonly createdAtLabel: string;
 }
@@ -90,9 +92,15 @@ export interface PartnerWithdrawalActivityState {
   readonly withdrawalExternalId: string;
   readonly amountCreditCents: number;
   readonly status: string;
+  readonly statusLabel: string;
+  readonly statusHelp: string;
   readonly reviewDueAt: string | null;
   readonly reviewDueAtLabel: string;
   readonly bankAccountFingerprint: string;
+  readonly rejectionReason: string;
+  readonly providerPayoutId: string;
+  readonly paidAt: string | null;
+  readonly paidAtLabel: string;
   readonly riskScore: number;
 }
 
@@ -143,6 +151,22 @@ const RISK_LABELS: Record<PartnerRiskStatus, string> = {
   review: '复核中',
   review_required: '需复核',
   frozen: '已冻结',
+};
+
+const ORDER_STATUS_LABELS: Record<string, string> = {
+  pending: '待确认',
+  completed: '已完成',
+  review_required: '待复核',
+  cancelled: '已取消',
+};
+
+const WITHDRAWAL_STATUS_LABELS: Record<string, string> = {
+  requested: '已提交',
+  reviewing: '审核中',
+  approved: '待出款',
+  paid: '已出款',
+  rejected: '未通过',
+  returned: '已退回',
 };
 
 const MEMBERSHIP_STATUSES = new Set<PartnerMembershipStatus>(['active', 'expired', 'cancelled']);
@@ -485,6 +509,8 @@ function normalizeOrders(value: unknown): readonly PartnerOrderState[] {
   return value.flatMap((entry, index) => {
     if (!isRecord(entry)) return [];
     const orderExternalId = safeTrimmedString(entry.orderExternalId) || `order-${index + 1}`;
+    const status = safeTrimmedString(entry.status) || 'pending';
+    const reviewDetail = safeTrimmedString(entry.reviewErrorMessage) || safeTrimmedString(entry.reviewReason);
     const createdAt = dateOnly(entry.createdAt);
     return [
       {
@@ -493,7 +519,9 @@ function normalizeOrders(value: unknown): readonly PartnerOrderState[] {
         provider: safeTrimmedString(entry.provider) || 'manual',
         orderKind: safeTrimmedString(entry.orderKind) || 'recharge',
         amountCnyCents: safeCents(entry.amountCnyCents),
-        status: safeTrimmedString(entry.status) || 'pending',
+        status,
+        statusLabel: orderStatusLabel(status),
+        statusHelp: orderStatusHelp(status, reviewDetail),
         createdAt,
         createdAtLabel: createdAt ?? '—',
       },
@@ -506,16 +534,29 @@ function normalizeWithdrawals(value: unknown): readonly PartnerWithdrawalActivit
   return value.flatMap((entry, index) => {
     if (!isRecord(entry)) return [];
     const withdrawalExternalId = safeTrimmedString(entry.withdrawalExternalId) || `withdrawal-${index + 1}`;
+    const status = safeTrimmedString(entry.status) || 'requested';
     const reviewDueAt = dateOnly(entry.reviewDueAt);
+    const paidAt = dateOnly(entry.paidAt);
+    const rejectionReason = safeTrimmedString(entry.rejectionReason);
+    const providerPayoutId = safeTrimmedString(entry.providerPayoutId);
     return [
       {
         key: withdrawalExternalId,
         withdrawalExternalId,
         amountCreditCents: safeCents(entry.amountCreditCents),
-        status: safeTrimmedString(entry.status) || 'requested',
+        status,
+        statusLabel: withdrawalStatusLabel(status),
+        statusHelp: withdrawalStatusHelp(status, {
+          rejectionReason,
+          providerPayoutId,
+        }),
         reviewDueAt,
         reviewDueAtLabel: reviewDueAt ?? '—',
         bankAccountFingerprint: safeTrimmedString(entry.bankAccountFingerprint),
+        rejectionReason,
+        providerPayoutId,
+        paidAt,
+        paidAtLabel: paidAt ?? '—',
         riskScore: safeRiskScore(entry.riskScore),
       },
     ];
@@ -532,6 +573,46 @@ function normalizeRiskStatus(value: unknown): PartnerRiskStatus {
   return typeof value === 'string' && RISK_STATUSES.has(value as PartnerRiskStatus)
     ? (value as PartnerRiskStatus)
     : 'normal';
+}
+
+function orderStatusLabel(status: string): string {
+  return ORDER_STATUS_LABELS[status] ?? status;
+}
+
+function orderStatusHelp(status: string, reviewDetail: string): string {
+  if (status === 'pending') return '等待支付渠道或后台确认。';
+  if (status === 'completed') return '订单已完成，权益或 HOLA Credit 已入账。';
+  if (status === 'review_required') {
+    return reviewDetail ? `订单进入人工复核：${reviewDetail}` : '订单进入人工复核，请等待后台确认。';
+  }
+  if (status === 'cancelled') return '订单已取消，不会继续处理。';
+  return '订单状态已更新，请刷新查看最新进度。';
+}
+
+function withdrawalStatusLabel(status: string): string {
+  return WITHDRAWAL_STATUS_LABELS[status] ?? status;
+}
+
+function withdrawalStatusHelp(
+  status: string,
+  detail: {
+    readonly rejectionReason: string;
+    readonly providerPayoutId: string;
+  },
+): string {
+  if (status === 'requested') return '提现申请已提交，等待后台复核。';
+  if (status === 'reviewing') return '提现申请正在复核，请等待处理。';
+  if (status === 'approved') return '提现已通过复核，等待出款。';
+  if (status === 'paid') {
+    return detail.providerPayoutId
+      ? `已完成出款，流水号 ${detail.providerPayoutId}。`
+      : '已完成出款，请留意到账。';
+  }
+  if (status === 'rejected') {
+    return detail.rejectionReason ? `提现未通过：${detail.rejectionReason}` : '提现未通过，资金已回到可用余额。';
+  }
+  if (status === 'returned') return '提现已退回，资金会回到可用余额。';
+  return '提现状态已更新，请刷新查看最新进度。';
 }
 
 function isMembershipStatus(value: unknown): value is PartnerMembershipStatus {

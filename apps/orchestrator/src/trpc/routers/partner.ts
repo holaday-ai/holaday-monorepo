@@ -106,6 +106,19 @@ function badRequest(message: string): never {
   throw new TRPCError({ code: 'BAD_REQUEST', message });
 }
 
+function metadataRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function metadataText(metadata: Record<string, unknown>, key: string): string | undefined {
+  const value = metadata[key];
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : undefined;
+}
+
 function summarizePartnerOrder(order: {
   externalId: string;
   provider: string;
@@ -113,13 +126,19 @@ function summarizePartnerOrder(order: {
   amountCnyCents: number;
   status: string;
   createdAt: Date;
+  metadata?: unknown;
 }) {
+  const metadata = metadataRecord(order.metadata);
+  const reviewReason = metadataText(metadata, 'reviewReason');
+  const reviewErrorMessage = metadataText(metadata, 'errorMessage');
   return {
     orderExternalId: order.externalId,
     provider: order.provider,
     orderKind: order.orderKind,
     amountCnyCents: order.amountCnyCents,
     status: order.status,
+    ...(reviewReason ? { reviewReason } : {}),
+    ...(reviewErrorMessage ? { reviewErrorMessage } : {}),
     createdAt: order.createdAt,
   };
 }
@@ -131,7 +150,16 @@ function summarizePartnerWithdrawal(withdrawal: {
   reviewDueAt: Date;
   bankAccountFingerprint: string;
   riskScore: number;
+  rejectionReason?: string | null;
+  metadata?: unknown;
 }) {
+  const metadata = metadataRecord(withdrawal.metadata);
+  const rejectionReason = typeof withdrawal.rejectionReason === 'string' && withdrawal.rejectionReason.trim()
+    ? withdrawal.rejectionReason.trim()
+    : undefined;
+  const providerPayoutId = metadataText(metadata, 'providerPayoutId');
+  const paidAt = metadataText(metadata, 'paidAt');
+  const rejectedAt = metadataText(metadata, 'rejectedAt');
   return {
     withdrawalExternalId: withdrawal.externalId,
     amountCreditCents: withdrawal.amountCreditCents,
@@ -139,6 +167,10 @@ function summarizePartnerWithdrawal(withdrawal: {
     reviewDueAt: withdrawal.reviewDueAt,
     bankAccountFingerprint: withdrawal.bankAccountFingerprint,
     riskScore: withdrawal.riskScore,
+    ...(rejectionReason ? { rejectionReason } : {}),
+    ...(providerPayoutId ? { providerPayoutId } : {}),
+    ...(paidAt ? { paidAt } : {}),
+    ...(rejectedAt ? { rejectedAt } : {}),
   };
 }
 
@@ -352,6 +384,7 @@ export const partnerRouter = router({
           orderKind: partnerRechargeOrders.orderKind,
           amountCnyCents: partnerRechargeOrders.amountCnyCents,
           status: partnerRechargeOrders.status,
+          metadata: partnerRechargeOrders.metadata,
           createdAt: partnerRechargeOrders.createdAt,
         })
         .from(partnerRechargeOrders)
@@ -366,6 +399,8 @@ export const partnerRouter = router({
           reviewDueAt: partnerWithdrawalRequests.reviewDueAt,
           bankAccountFingerprint: partnerWithdrawalRequests.bankAccountFingerprint,
           riskScore: partnerWithdrawalRequests.riskScore,
+          rejectionReason: partnerWithdrawalRequests.rejectionReason,
+          metadata: partnerWithdrawalRequests.metadata,
         })
         .from(partnerWithdrawalRequests)
         .where(eq(partnerWithdrawalRequests.userId, userId))
