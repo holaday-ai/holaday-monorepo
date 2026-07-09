@@ -168,6 +168,15 @@ export class TaskController {
           : {}),
       } satisfies TaskState);
 
+    if (
+      input.state &&
+      (isTaskTerminalStatus(state.status) ||
+        state.status === 'awaiting_user' ||
+        state.status === 'paused')
+    ) {
+      return { state, effects: [{ kind: 'noop' }] };
+    }
+
     if (state.plan.length === 0) {
       const completed: TaskState = { ...state, status: 'completed' };
       return {

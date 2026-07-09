@@ -39,6 +39,30 @@ describe('TaskController state machine', () => {
     }
   });
 
+  it('start() does not re-dispatch parked or terminal existing states', async () => {
+    const c = await setup();
+    const base = {
+      taskId: 'tsk_existing',
+      plan: [{ id: 'stp_1', kind: 'goto' as const, risk: 'low' as const }],
+      cursor: 0,
+      pendingConfirm: null,
+    };
+
+    for (const status of [
+      'awaiting_user',
+      'paused',
+      'completed',
+      'partial_success',
+      'failed',
+      'cancelled',
+    ] as const) {
+      const existing = { ...base, status };
+      const { state, effects } = c.start({ state: existing });
+      expect(state).toBe(existing);
+      expect(effects).toEqual([{ kind: 'noop' }]);
+    }
+  });
+
   it('ok step result advances to next step', async () => {
     const c = await setup();
     const { state: s0 } = c.start({
