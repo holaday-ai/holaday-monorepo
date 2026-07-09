@@ -6824,17 +6824,11 @@ export const tasksRouter = router({
             )
             .limit(1);
           if (row?.status === 'awaiting_user' && row.awaitingQuestion) {
-            const k = row.awaitingKind;
-            const validKinds = ['clarification', 'login', 'captcha', 'permission', 'browser_action'] as const;
-            const kind =
-              typeof k === 'string' && (validKinds as readonly string[]).includes(k)
-                ? (k as (typeof validKinds)[number])
-                : 'clarification';
             broadcastToUser(ctx.userId, {
               type: 'server.supercar.awaiting_user',
               taskId: input.taskId,
               question: row.awaitingQuestion,
-              awaitingKind: kind,
+              awaitingKind: normalizeReplyAwaitingKindForBroadcast(row.awaitingKind),
             });
           }
         } catch (err) {
@@ -7979,6 +7973,30 @@ function readResultSummary(result: unknown): string | null {
  */
 function shouldUseBrowserPool(_userId: string): boolean {
   return true;
+}
+
+type ReplyBroadcastAwaitingKind =
+  | 'clarification'
+  | 'login'
+  | 'captcha'
+  | 'permission'
+  | 'browser_action'
+  | 'video_quote';
+
+export function normalizeReplyAwaitingKindForBroadcast(
+  raw: string | null | undefined,
+): ReplyBroadcastAwaitingKind {
+  const validKinds = [
+    'clarification',
+    'login',
+    'captcha',
+    'permission',
+    'browser_action',
+    'video_quote',
+  ] as const satisfies readonly ReplyBroadcastAwaitingKind[];
+  return validKinds.includes(raw as ReplyBroadcastAwaitingKind)
+    ? (raw as ReplyBroadcastAwaitingKind)
+    : 'clarification';
 }
 
 /**

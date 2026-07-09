@@ -7,7 +7,11 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { classifyReplyIntent, normalizeModeBPingOutcome } from './tasks.js';
+import {
+  classifyReplyIntent,
+  normalizeModeBPingOutcome,
+  normalizeReplyAwaitingKindForBroadcast,
+} from './tasks.js';
 
 describe('classifyReplyIntent', () => {
   describe('manual_data', () => {
@@ -224,5 +228,16 @@ describe('normalizeModeBPingOutcome', () => {
       expect(normalized.title).toHaveLength(300);
       expect(normalized.bodyText).toHaveLength(12_000);
     }
+  });
+});
+
+describe('normalizeReplyAwaitingKindForBroadcast', () => {
+  it('preserves video quote awaiting kind when rebroadcasting a parked task', () => {
+    expect(normalizeReplyAwaitingKindForBroadcast('video_quote')).toBe('video_quote');
+  });
+
+  it('falls back to clarification for legacy or unknown awaiting kinds', () => {
+    expect(normalizeReplyAwaitingKindForBroadcast(null)).toBe('clarification');
+    expect(normalizeReplyAwaitingKindForBroadcast('login_required')).toBe('clarification');
   });
 });
