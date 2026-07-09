@@ -217,6 +217,9 @@ export function normalizeAdminPartnerOverview(value: unknown) {
         country: safeText(row.country, 'CN'),
         provider: safeText(row.provider),
         providerRef: safeText(row.providerRef),
+        reviewerUserId: Math.round(nonNegativeNumber(row.reviewerUserId)),
+        reviewNote: safeText(row.reviewNote),
+        reviewSource: safeText(row.reviewSource),
         updatedAt: row.updatedAt,
       };
     }),
@@ -292,6 +295,9 @@ export function filterAdminPartnerOverview(
         'status',
         'provider',
         'providerRef',
+        'reviewNote',
+        'reviewSource',
+        'reviewerUserId',
       ]),
     ),
     withdrawals: state.withdrawals.filter((row) =>

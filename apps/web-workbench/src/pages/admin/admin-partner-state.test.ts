@@ -132,6 +132,36 @@ describe('normalizeAdminPartnerOverview', () => {
     expect(state.kycProfiles).toEqual([]);
   });
 
+  it('preserves KYC review audit fields for the admin queue', () => {
+    const state = normalizeAdminPartnerOverview({
+      enabled: true,
+      metrics: {},
+      kycProfiles: [
+        {
+          kycExternalId: 'pay_kyc_bob',
+          userExternalId: 'usr_bob',
+          status: 'review_required',
+          provider: 'cn-bankcard',
+          providerRef: 'bankcard-flow-bob',
+          reviewerUserId: 77,
+          reviewNote: '银行卡四要素通过，证件照待复核',
+          reviewSource: 'cn-bankcard',
+        },
+      ],
+      orders: [],
+      withdrawals: [],
+      riskLots: [],
+    });
+
+    expect(state.enabled).toBe(true);
+    if (!state.enabled) throw new Error('expected enabled state');
+    expect(state.kycProfiles[0]).toMatchObject({
+      reviewerUserId: 77,
+      reviewNote: '银行卡四要素通过，证件照待复核',
+      reviewSource: 'cn-bankcard',
+    });
+  });
+
   it('filters enabled overview queues by user and queue identifiers', () => {
     const state = normalizeAdminPartnerOverview({
       enabled: true,
@@ -161,6 +191,8 @@ describe('normalizeAdminPartnerOverview', () => {
           email: 'bob@holaday.local',
           displayName: 'Bob Partner',
           providerRef: 'bankcard-flow-bob',
+          reviewNote: '银行卡四要素通过，证件照待复核',
+          reviewSource: 'cn-bankcard',
         },
       ],
       withdrawals: [
@@ -220,6 +252,11 @@ describe('normalizeAdminPartnerOverview', () => {
     if (!byProviderRef.enabled) throw new Error('expected enabled state');
     expect(byProviderRef.kycProfiles).toHaveLength(1);
     expect(byProviderRef.kycProfiles[0]?.providerRef).toBe('bankcard-flow-bob');
+
+    const byKycAudit = filterAdminPartnerOverview(state, '四要素');
+    expect(byKycAudit.enabled).toBe(true);
+    if (!byKycAudit.enabled) throw new Error('expected enabled state');
+    expect(byKycAudit.kycProfiles).toHaveLength(1);
 
     expect(filterAdminPartnerOverview({ enabled: false }, 'alice')).toEqual({ enabled: false });
   });

@@ -107,6 +107,23 @@ function summarizeOrder(order: PartnerRechargeOrder) {
   };
 }
 
+function summarizeKycAudit(metadataValue: unknown) {
+  const metadata = metadataRecord(metadataValue);
+  return {
+    reviewerUserId: metadataNumber(metadata, 'reviewerUserId'),
+    reviewNote: metadataText(metadata, 'note'),
+    reviewSource: metadataText(metadata, 'source'),
+  };
+}
+
+function summarizeKycProfile<T extends { metadata?: unknown }>(profile: T) {
+  const { metadata, ...row } = profile;
+  return {
+    ...row,
+    ...summarizeKycAudit(metadata),
+  };
+}
+
 function summarizeWithdrawalAudit(metadataValue: unknown) {
   const metadata = metadataRecord(metadataValue);
   return {
@@ -213,6 +230,7 @@ export const adminPartnerRouter = router({
             provider: partnerKycProfiles.provider,
             providerRef: partnerKycProfiles.providerRef,
             reviewedAt: partnerKycProfiles.reviewedAt,
+            metadata: partnerKycProfiles.metadata,
             updatedAt: partnerKycProfiles.updatedAt,
           })
           .from(partnerKycProfiles)
@@ -281,7 +299,7 @@ export const adminPartnerRouter = router({
           ...row,
           ...summarizeOrderAudit(metadata),
         })),
-        kycProfiles: kycRows,
+        kycProfiles: kycRows.map(summarizeKycProfile),
         withdrawals: withdrawalRows.map(({ metadata, ...row }) => ({
           ...row,
           ...summarizeWithdrawalAudit(metadata),
@@ -453,6 +471,7 @@ export const adminPartnerRouter = router({
 });
 
 export const __adminPartnerInternals = {
+  summarizeKycProfile,
   summarizeOrder,
   summarizeWithdrawal,
 };

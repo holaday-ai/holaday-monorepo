@@ -41,6 +41,12 @@ function normalizeDate(value: Date, fieldName: string): Date {
   return new Date(value.getTime());
 }
 
+function metadataRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? { ...(value as Record<string, unknown>) }
+    : {};
+}
+
 function normalizeUpsertKycStatus(status: PartnerKycStatus): Exclude<PartnerKycStatus, 'not_started'> {
   const normalized = normalizeKycStatus(status);
   if (normalized === 'not_started') {
@@ -54,8 +60,10 @@ function reviewMetadata(input: {
   note?: string;
   provider: string;
   providerRef: string | null;
+  existingMetadata?: unknown;
 }): Record<string, unknown> {
   const metadata: Record<string, unknown> = {
+    ...metadataRecord(input.existingMetadata),
     source: input.provider,
   };
   if (input.providerRef) metadata.providerRef = input.providerRef;
@@ -130,6 +138,7 @@ export class KycService {
       note: input.note,
       provider,
       providerRef,
+      existingMetadata: existing?.metadata,
     });
 
     await this.db

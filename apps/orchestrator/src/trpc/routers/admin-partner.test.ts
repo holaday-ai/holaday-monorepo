@@ -346,7 +346,7 @@ describe('admin.partner router', () => {
     });
   });
 
-  it('summarizes partner order and withdrawal audit metadata for review queues', () => {
+  it('summarizes partner order, KYC, and withdrawal audit metadata for review queues', () => {
     const order = __adminPartnerInternals.summarizeOrder(
       fakeOrder({
         status: 'review_required',
@@ -368,6 +368,35 @@ describe('admin.partner router', () => {
       reviewApprovedAt: '2026-07-03T04:00:00.000Z',
       reviewApprovalNote: '人工复核放行',
     });
+
+    const kyc = (
+      __adminPartnerInternals as typeof __adminPartnerInternals & {
+        summarizeKycProfile: (row: Record<string, unknown>) => Record<string, unknown>;
+      }
+    ).summarizeKycProfile({
+      kycExternalId: 'pay_kyc_1',
+      userExternalId: 'usr_partner',
+      email: 'partner@holaday.local',
+      displayName: 'Partner User',
+      status: 'review_required',
+      country: 'CN',
+      provider: 'cn-bankcard',
+      providerRef: 'bankcard-flow-1',
+      reviewedAt: new Date('2026-07-03T04:00:00.000Z'),
+      updatedAt: new Date('2026-07-03T04:10:00.000Z'),
+      metadata: {
+        source: 'cn-bankcard',
+        reviewerUserId: 77,
+        note: '银行卡四要素通过，证件照待复核',
+      },
+    });
+    expect(kyc).toMatchObject({
+      kycExternalId: 'pay_kyc_1',
+      reviewerUserId: 77,
+      reviewNote: '银行卡四要素通过，证件照待复核',
+      reviewSource: 'cn-bankcard',
+    });
+    expect(kyc).not.toHaveProperty('metadata');
 
     const withdrawal = __adminPartnerInternals.summarizeWithdrawal(
       fakeWithdrawal({

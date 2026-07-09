@@ -239,6 +239,48 @@ describe('KycService', () => {
     expect(fakeDb.insertAttempts).toHaveLength(1);
   });
 
+  it('preserves existing provider audit metadata when reviewing an existing profile', async () => {
+    const fakeDb = new FakeKycDb([
+      {
+        id: 10,
+        externalId: 'pay_existing_kyc',
+        userId: 123,
+        status: 'review_required',
+        country: 'CN',
+        provider: 'cn-bankcard',
+        providerRef: 'bankcard-flow-existing',
+        reviewedAt: null,
+        metadata: {
+          source: 'cn-bankcard',
+          providerRef: 'bankcard-flow-existing',
+          providerRequestId: 'aliyun-job-1',
+          bankCardLast4: '1234',
+        },
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+      },
+    ]);
+    const service = new KycService(fakeDb.asDB());
+
+    const row = await service.upsertStatus({
+      userId: 123,
+      status: 'passed',
+      provider: 'cn-bankcard',
+      reviewerUserId: 999,
+      note: 'same-name bank card verified',
+      now: new Date('2026-07-03T03:30:00.000Z'),
+    });
+
+    expect(row.metadata).toMatchObject({
+      source: 'cn-bankcard',
+      providerRef: 'bankcard-flow-existing',
+      providerRequestId: 'aliyun-job-1',
+      bankCardLast4: '1234',
+      reviewerUserId: 999,
+      note: 'same-name bank card verified',
+    });
+  });
+
   it('rejects not_started as an explicit upsert target', async () => {
     const service = new KycService(new FakeKycDb().asDB());
 

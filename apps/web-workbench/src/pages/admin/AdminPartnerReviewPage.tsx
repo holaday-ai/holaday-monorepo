@@ -390,59 +390,64 @@ function KycQueue({
   return (
     <QueueSection title="实名队列" empty="暂无实名复核">
       <DataTable
-        headers={['用户', '状态', '国家', 'provider', '认证流水', '更新时间', '操作']}
+        headers={['用户', '状态', '国家', 'provider', '认证流水', '审核信息', '更新时间', '操作']}
         empty={rows.length === 0}
-        colSpan={7}
+        colSpan={8}
       >
-        {rows.map((row) => (
-          <tr key={row.kycExternalId} className="border-b border-[#EFEFEF] last:border-b-0 hover:bg-[#EFEFEF]/35">
-            <UserCell userExternalId={row.userExternalId} email={row.email} displayName={row.displayName} />
-            <td className="px-3 py-3"><StatusBadge kind="kyc" status={row.status} /></td>
-            <td className="px-3 py-3 text-muted-foreground">{row.country}</td>
-            <td className="px-3 py-3 text-muted-foreground">{truncate(row.provider, 24)}</td>
-            <td className="px-3 py-3 text-muted-foreground">{truncate(row.providerRef, 28) || '—'}</td>
-            <td className="px-3 py-3 text-muted-foreground">{formatDateTime(row.updatedAt as string | Date | null)}</td>
-            <td className="px-5 py-3">
-              <div className="flex flex-wrap gap-2">
-                <ActionButton
-                  icon={CheckCircle2}
-                  label="通过"
-                  compact
-                  pending={pendingAction === `kyc-pass:${row.userExternalId}`}
-                  onClick={() =>
-                    void runAction(
-                      `kyc-pass:${row.userExternalId}`,
-                      async () => {
-                        await trpc.admin.partner.setKycStatus.mutate(
-                          partnerKycQueueReviewPayload(row, 'passed', '后台审核通过'),
-                        );
-                      },
-                      '实名已通过',
-                    )
-                  }
-                />
-                <ActionButton
-                  icon={XCircle}
-                  label="拒绝"
-                  compact
-                  tone="danger"
-                  pending={pendingAction === `kyc-reject:${row.userExternalId}`}
-                  onClick={() =>
-                    void runAction(
-                      `kyc-reject:${row.userExternalId}`,
-                      async () => {
-                        await trpc.admin.partner.setKycStatus.mutate(
-                          partnerKycQueueReviewPayload(row, 'rejected', '后台审核拒绝'),
-                        );
-                      },
-                      '实名已拒绝',
-                    )
-                  }
-                />
-              </div>
-            </td>
-          </tr>
-        ))}
+        {rows.map((row) => {
+          const reviewer = row.reviewerUserId > 0 ? `审核人 #${row.reviewerUserId}` : '';
+          const reviewSummary = [row.reviewNote, reviewer, row.reviewSource].filter(Boolean).join(' / ');
+          return (
+            <tr key={row.kycExternalId} className="border-b border-[#EFEFEF] last:border-b-0 hover:bg-[#EFEFEF]/35">
+              <UserCell userExternalId={row.userExternalId} email={row.email} displayName={row.displayName} />
+              <td className="px-3 py-3"><StatusBadge kind="kyc" status={row.status} /></td>
+              <td className="px-3 py-3 text-muted-foreground">{row.country}</td>
+              <td className="px-3 py-3 text-muted-foreground">{truncate(row.provider, 24)}</td>
+              <td className="px-3 py-3 text-muted-foreground">{truncate(row.providerRef, 28) || '—'}</td>
+              <td className="px-3 py-3 text-muted-foreground">{truncate(reviewSummary, 40) || '—'}</td>
+              <td className="px-3 py-3 text-muted-foreground">{formatDateTime(row.updatedAt as string | Date | null)}</td>
+              <td className="px-5 py-3">
+                <div className="flex flex-wrap gap-2">
+                  <ActionButton
+                    icon={CheckCircle2}
+                    label="通过"
+                    compact
+                    pending={pendingAction === `kyc-pass:${row.userExternalId}`}
+                    onClick={() =>
+                      void runAction(
+                        `kyc-pass:${row.userExternalId}`,
+                        async () => {
+                          await trpc.admin.partner.setKycStatus.mutate(
+                            partnerKycQueueReviewPayload(row, 'passed', '后台审核通过'),
+                          );
+                        },
+                        '实名已通过',
+                      )
+                    }
+                  />
+                  <ActionButton
+                    icon={XCircle}
+                    label="拒绝"
+                    compact
+                    tone="danger"
+                    pending={pendingAction === `kyc-reject:${row.userExternalId}`}
+                    onClick={() =>
+                      void runAction(
+                        `kyc-reject:${row.userExternalId}`,
+                        async () => {
+                          await trpc.admin.partner.setKycStatus.mutate(
+                            partnerKycQueueReviewPayload(row, 'rejected', '后台审核拒绝'),
+                          );
+                        },
+                        '实名已拒绝',
+                      )
+                    }
+                  />
+                </div>
+              </td>
+            </tr>
+          );
+        })}
       </DataTable>
     </QueueSection>
   );
