@@ -221,6 +221,9 @@ export class TaskController {
     if (state.taskId !== input.taskId) {
       return { state, effects: [{ kind: 'noop' }] };
     }
+    if (state.status !== 'executing') {
+      return { state, effects: [{ kind: 'noop' }] };
+    }
     const current = state.plan[state.cursor];
     if (!current || current.id !== input.stepId) {
       // Out-of-order or stale step result: ignore for Phase 0.

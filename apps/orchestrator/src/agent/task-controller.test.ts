@@ -100,6 +100,37 @@ describe('TaskController state machine', () => {
     expect(s1.status).toBe('completed');
   });
 
+  it('ignores step results once the task is no longer executing', async () => {
+    const c = await setup();
+    const base = {
+      taskId: 'tsk_late_step',
+      plan: [{ id: 'stp_1', kind: 'goto' as const, risk: 'low' as const }],
+      cursor: 0,
+      pendingConfirm: null,
+    };
+
+    for (const status of [
+      'pending',
+      'planning',
+      'queued',
+      'awaiting_user',
+      'paused',
+      'completed',
+      'partial_success',
+      'failed',
+      'cancelled',
+    ] as const) {
+      const existing = { ...base, status };
+      const { state, effects } = c.onStepResult(existing, {
+        taskId: existing.taskId,
+        stepId: 'stp_1',
+        status: 'ok',
+      });
+      expect(state).toBe(existing);
+      expect(effects).toEqual([{ kind: 'noop' }]);
+    }
+  });
+
   it('clears stale retry error when a later step succeeds', async () => {
     const c = await setup();
     const { state: s0 } = c.start({
