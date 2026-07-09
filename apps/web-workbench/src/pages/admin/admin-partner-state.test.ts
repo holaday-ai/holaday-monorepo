@@ -5,6 +5,7 @@ import {
   filterAdminPartnerOverview,
   normalizeAdminPartnerOverview,
   normalizeRiskScore,
+  partnerKycQueueReviewPayload,
   partnerOrderActionLabel,
   partnerReviewStatusToken,
 } from './admin-partner-state';
@@ -26,6 +27,47 @@ describe('partnerOrderActionLabel', () => {
   it('distinguishes ordinary confirmation from review approval', () => {
     expect(partnerOrderActionLabel('pending')).toBe('确认');
     expect(partnerOrderActionLabel('review_required')).toBe('放行');
+  });
+});
+
+describe('partnerKycQueueReviewPayload', () => {
+  it('preserves provider context when queue actions pass or reject KYC rows', () => {
+    expect(
+      partnerKycQueueReviewPayload(
+        {
+          userExternalId: 'usr_partner',
+          provider: 'cn-bankcard',
+          providerRef: 'bankcard-flow-123',
+        },
+        'passed',
+        '后台审核通过',
+      ),
+    ).toEqual({
+      userExternalId: 'usr_partner',
+      status: 'passed',
+      provider: 'cn-bankcard',
+      providerRef: 'bankcard-flow-123',
+      note: '后台审核通过',
+    });
+  });
+
+  it('falls back to manual provider without sending blank providerRef', () => {
+    expect(
+      partnerKycQueueReviewPayload(
+        {
+          userExternalId: 'usr_partner',
+          provider: '',
+          providerRef: '',
+        },
+        'rejected',
+        '后台审核拒绝',
+      ),
+    ).toEqual({
+      userExternalId: 'usr_partner',
+      status: 'rejected',
+      provider: 'manual',
+      note: '后台审核拒绝',
+    });
   });
 });
 

@@ -123,6 +123,32 @@ export function partnerOrderActionLabel(status: unknown): '确认' | '放行' {
   return status === 'review_required' ? '放行' : '确认';
 }
 
+export function partnerKycQueueReviewPayload(
+  row: {
+    readonly userExternalId: string;
+    readonly provider: string;
+    readonly providerRef: string;
+  },
+  status: 'passed' | 'rejected',
+  note: string,
+): {
+  userExternalId: string;
+  status: 'passed' | 'rejected';
+  provider: string;
+  providerRef?: string;
+  note: string;
+} {
+  const provider = row.provider.trim() || 'manual';
+  const providerRef = row.providerRef.trim();
+  return {
+    userExternalId: row.userExternalId,
+    status,
+    provider,
+    ...(providerRef ? { providerRef } : {}),
+    note,
+  };
+}
+
 export function formatPartnerMoneyCents(value: unknown): string {
   const cents = Math.round(nonNegativeNumber(value));
   const yuan = cents / 100;

@@ -25,6 +25,7 @@ import {
   formatPartnerMoneyCents,
   filterAdminPartnerOverview,
   normalizeAdminPartnerOverview,
+  partnerKycQueueReviewPayload,
   partnerOrderActionLabel,
   partnerReviewStatusToken,
   type AdminPartnerStatusKind,
@@ -412,12 +413,9 @@ function KycQueue({
                     void runAction(
                       `kyc-pass:${row.userExternalId}`,
                       async () => {
-                        await trpc.admin.partner.setKycStatus.mutate({
-                          userExternalId: row.userExternalId,
-                          status: 'passed',
-                          provider: 'manual',
-                          note: '后台审核通过',
-                        });
+                        await trpc.admin.partner.setKycStatus.mutate(
+                          partnerKycQueueReviewPayload(row, 'passed', '后台审核通过'),
+                        );
                       },
                       '实名已通过',
                     )
@@ -433,12 +431,9 @@ function KycQueue({
                     void runAction(
                       `kyc-reject:${row.userExternalId}`,
                       async () => {
-                        await trpc.admin.partner.setKycStatus.mutate({
-                          userExternalId: row.userExternalId,
-                          status: 'rejected',
-                          provider: 'manual',
-                          note: '后台审核拒绝',
-                        });
+                        await trpc.admin.partner.setKycStatus.mutate(
+                          partnerKycQueueReviewPayload(row, 'rejected', '后台审核拒绝'),
+                        );
                       },
                       '实名已拒绝',
                     )
