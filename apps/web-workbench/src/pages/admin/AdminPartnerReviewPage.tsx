@@ -242,11 +242,14 @@ function EnabledAdminPartnerReview({
 }): JSX.Element {
   return (
     <div className="space-y-5">
-      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-8">
         <MetricCard label="待实名" value={data.metrics.pendingKycCount} />
         <MetricCard label="待确认订单" value={data.metrics.pendingOrderCount} />
         <MetricCard label="需复核订单" value={data.metrics.reviewRequiredOrderCount} />
-        <MetricCard label="待提现处理" value={data.metrics.pendingWithdrawalCount + data.metrics.approvedWithdrawalCount} />
+        <MetricCard label="待提现复核" value={data.metrics.pendingWithdrawalCount} />
+        <MetricCard label="待出款" value={data.metrics.approvedWithdrawalCount} />
+        <MetricCard label="已出款" value={data.metrics.paidWithdrawalCount} />
+        <MetricCard label="已拒绝" value={data.metrics.rejectedWithdrawalCount} />
         <MetricCard label="风险批次" value={data.metrics.riskLotCount} tone={data.metrics.riskLotCount > 0 ? 'danger' : 'normal'} />
       </section>
 
@@ -294,6 +297,7 @@ function EnabledAdminPartnerReview({
         setPayoutIds={setPayoutIds}
         runAction={runAction}
       />
+      <WithdrawalHistory rows={data.withdrawalHistory} />
       <RiskLotQueue rows={data.riskLots} />
     </div>
   );
@@ -663,6 +667,37 @@ function WithdrawalQueue({
                   )}
                 </div>
               </td>
+            </tr>
+          );
+        })}
+      </DataTable>
+    </QueueSection>
+  );
+}
+
+function WithdrawalHistory({ rows }: { rows: EnabledOverviewState['withdrawalHistory'] }): JSX.Element {
+  return (
+    <QueueSection title="提现历史" empty="暂无提现历史">
+      <DataTable
+        headers={['用户', '金额', '状态', '银行指纹', '处理信息', '更新时间']}
+        empty={rows.length === 0}
+        colSpan={6}
+      >
+        {rows.map((row) => {
+          const detail =
+            row.status === 'paid'
+              ? [row.providerPayoutId, row.paidAt ? `出款 ${formatDateTime(row.paidAt)}` : ''].filter(Boolean).join(' / ')
+              : [row.rejectionReason, row.rejectedAt ? `拒绝 ${formatDateTime(row.rejectedAt)}` : '']
+                  .filter(Boolean)
+                  .join(' / ');
+          return (
+            <tr key={row.withdrawalExternalId} className="border-b border-[#EFEFEF] last:border-b-0 hover:bg-[#EFEFEF]/35">
+              <UserCell userExternalId={row.userExternalId} email={row.email} displayName={row.displayName} />
+              <td className="px-3 py-3 tabular-nums">{formatPartnerCreditCents(row.amountCreditCents)}</td>
+              <td className="px-3 py-3"><StatusBadge kind="withdrawal" status={row.status} /></td>
+              <td className="px-3 py-3 text-muted-foreground">{truncate(row.bankAccountFingerprint, 24) || '—'}</td>
+              <td className="px-3 py-3 text-muted-foreground">{truncate(detail, 42) || '—'}</td>
+              <td className="px-3 py-3 text-muted-foreground">{formatDateTime(row.updatedAt as string | Date | null)}</td>
             </tr>
           );
         })}

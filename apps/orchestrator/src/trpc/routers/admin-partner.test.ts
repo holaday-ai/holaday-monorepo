@@ -346,6 +346,41 @@ describe('admin.partner router', () => {
     });
   });
 
+  it('summarizes withdrawal queue metrics by workflow stage', () => {
+    const summarizeWithdrawalMetrics = (
+      __adminPartnerInternals as typeof __adminPartnerInternals & {
+        summarizeWithdrawalMetrics: (
+          rows: PartnerWithdrawalRequest[],
+          now: Date,
+        ) => Record<string, number>;
+      }
+    ).summarizeWithdrawalMetrics;
+    const now = new Date('2026-07-03T04:00:00.000Z');
+
+    expect(
+      summarizeWithdrawalMetrics(
+        [
+          fakeWithdrawal({
+            externalId: 'pay_withdrawal_requested',
+            status: 'requested',
+            reviewDueAt: new Date('2026-07-03T03:00:00.000Z'),
+          }),
+          fakeWithdrawal({ externalId: 'pay_withdrawal_reviewing', status: 'reviewing' }),
+          fakeWithdrawal({ externalId: 'pay_withdrawal_approved', status: 'approved' }),
+          fakeWithdrawal({ externalId: 'pay_withdrawal_paid', status: 'paid' }),
+          fakeWithdrawal({ externalId: 'pay_withdrawal_rejected', status: 'rejected' }),
+        ],
+        now,
+      ),
+    ).toEqual({
+      pendingWithdrawalCount: 2,
+      approvedWithdrawalCount: 1,
+      paidWithdrawalCount: 1,
+      rejectedWithdrawalCount: 1,
+      overdueWithdrawalCount: 1,
+    });
+  });
+
   it('summarizes partner order, KYC, and withdrawal audit metadata for review queues', () => {
     const order = __adminPartnerInternals.summarizeOrder(
       fakeOrder({

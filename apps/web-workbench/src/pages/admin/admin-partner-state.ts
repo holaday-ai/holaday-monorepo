@@ -170,6 +170,28 @@ export function normalizeRiskScore(value: unknown): number {
   return Math.min(100, Math.max(0, Math.round(finiteNumber(value, 0))));
 }
 
+function normalizeWithdrawalOverviewRow(raw: unknown) {
+  const row = asRecord(raw);
+  return {
+    withdrawalExternalId: safeText(row.withdrawalExternalId),
+    userExternalId: safeText(row.userExternalId),
+    email: safeText(row.email),
+    displayName: safeText(row.displayName),
+    amountCreditCents: Math.round(nonNegativeNumber(row.amountCreditCents)),
+    status: safeText(row.status),
+    reviewDueAt: row.reviewDueAt,
+    bankAccountFingerprint: safeText(row.bankAccountFingerprint),
+    rejectionReason: safeText(row.rejectionReason),
+    approvalNote: safeText(row.approvalNote),
+    providerPayoutId: safeText(row.providerPayoutId),
+    approvedAt: safeText(row.approvedAt),
+    rejectedAt: safeText(row.rejectedAt),
+    paidAt: safeText(row.paidAt),
+    updatedAt: row.updatedAt,
+    riskScore: normalizeRiskScore(row.riskScore),
+  };
+}
+
 export function normalizeAdminPartnerOverview(value: unknown) {
   const root = asRecord(value);
   if (root.enabled === false) {
@@ -184,6 +206,8 @@ export function normalizeAdminPartnerOverview(value: unknown) {
       reviewRequiredOrderCount: Math.round(nonNegativeNumber(metrics.reviewRequiredOrderCount)),
       pendingWithdrawalCount: Math.round(nonNegativeNumber(metrics.pendingWithdrawalCount)),
       approvedWithdrawalCount: Math.round(nonNegativeNumber(metrics.approvedWithdrawalCount)),
+      paidWithdrawalCount: Math.round(nonNegativeNumber(metrics.paidWithdrawalCount)),
+      rejectedWithdrawalCount: Math.round(nonNegativeNumber(metrics.rejectedWithdrawalCount)),
       overdueWithdrawalCount: Math.round(nonNegativeNumber(metrics.overdueWithdrawalCount)),
       riskLotCount: Math.round(nonNegativeNumber(metrics.riskLotCount)),
     },
@@ -223,23 +247,8 @@ export function normalizeAdminPartnerOverview(value: unknown) {
         updatedAt: row.updatedAt,
       };
     }),
-    withdrawals: safeArray(root.withdrawals).map((raw) => {
-      const row = asRecord(raw);
-      return {
-        withdrawalExternalId: safeText(row.withdrawalExternalId),
-        userExternalId: safeText(row.userExternalId),
-        email: safeText(row.email),
-        displayName: safeText(row.displayName),
-        amountCreditCents: Math.round(nonNegativeNumber(row.amountCreditCents)),
-        status: safeText(row.status),
-        reviewDueAt: row.reviewDueAt,
-        bankAccountFingerprint: safeText(row.bankAccountFingerprint),
-        rejectionReason: safeText(row.rejectionReason),
-        approvalNote: safeText(row.approvalNote),
-        providerPayoutId: safeText(row.providerPayoutId),
-        riskScore: normalizeRiskScore(row.riskScore),
-      };
-    }),
+    withdrawals: safeArray(root.withdrawals).map(normalizeWithdrawalOverviewRow),
+    withdrawalHistory: safeArray(root.withdrawalHistory).map(normalizeWithdrawalOverviewRow),
     riskLots: safeArray(root.riskLots).map((raw) => {
       const row = asRecord(raw);
       return {
@@ -311,6 +320,22 @@ export function filterAdminPartnerOverview(
         'rejectionReason',
         'approvalNote',
         'providerPayoutId',
+      ]),
+    ),
+    withdrawalHistory: state.withdrawalHistory.filter((row) =>
+      rowMatches(needle, row, [
+        'withdrawalExternalId',
+        'userExternalId',
+        'email',
+        'displayName',
+        'status',
+        'bankAccountFingerprint',
+        'rejectionReason',
+        'approvalNote',
+        'providerPayoutId',
+        'approvedAt',
+        'rejectedAt',
+        'paidAt',
       ]),
     ),
     riskLots: state.riskLots.filter((row) =>

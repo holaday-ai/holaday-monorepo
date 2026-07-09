@@ -153,6 +153,20 @@ function summarizeWithdrawal(withdrawal: PartnerWithdrawalRequest) {
   };
 }
 
+function summarizeWithdrawalMetrics(
+  rows: Array<{ status: string; reviewDueAt: Date }>,
+  now: Date,
+) {
+  const activeRows = rows.filter((row) => row.status === 'requested' || row.status === 'reviewing');
+  return {
+    pendingWithdrawalCount: activeRows.length,
+    approvedWithdrawalCount: rows.filter((row) => row.status === 'approved').length,
+    paidWithdrawalCount: rows.filter((row) => row.status === 'paid').length,
+    rejectedWithdrawalCount: rows.filter((row) => row.status === 'rejected').length,
+    overdueWithdrawalCount: activeRows.filter((row) => row.reviewDueAt.getTime() <= now.getTime()).length,
+  };
+}
+
 function mapPaymentError(error: unknown): never {
   if (
     error instanceof PartnerPaymentConfirmConflictError ||
@@ -198,7 +212,7 @@ export const adminPartnerRouter = router({
 
       const limit = input?.limit ?? 50;
       const now = new Date();
-      const [orderRows, kycRows, withdrawalRows, riskLotRows] = await Promise.all([
+      const [orderRows, kycRows, withdrawalRows, withdrawalHistoryRows, riskLotRows] = await Promise.all([
         ctx.db
           .select({
             orderExternalId: partnerRechargeOrders.externalId,
@@ -261,6 +275,27 @@ export const adminPartnerRouter = router({
           .limit(limit),
         ctx.db
           .select({
+            withdrawalExternalId: partnerWithdrawalRequests.externalId,
+            userExternalId: users.externalId,
+            email: users.email,
+            displayName: users.displayName,
+            amountCreditCents: partnerWithdrawalRequests.amountCreditCents,
+            status: partnerWithdrawalRequests.status,
+            reviewDueAt: partnerWithdrawalRequests.reviewDueAt,
+            bankAccountFingerprint: partnerWithdrawalRequests.bankAccountFingerprint,
+            riskScore: partnerWithdrawalRequests.riskScore,
+            rejectionReason: partnerWithdrawalRequests.rejectionReason,
+            metadata: partnerWithdrawalRequests.metadata,
+            createdAt: partnerWithdrawalRequests.createdAt,
+            updatedAt: partnerWithdrawalRequests.updatedAt,
+          })
+          .from(partnerWithdrawalRequests)
+          .innerJoin(users, eq(users.id, partnerWithdrawalRequests.userId))
+          .where(inArray(partnerWithdrawalRequests.status, ['paid', 'rejected']))
+          .orderBy(desc(partnerWithdrawalRequests.updatedAt))
+          .limit(limit),
+        ctx.db
+          .select({
             lotExternalId: partnerLots.externalId,
             userExternalId: users.externalId,
             email: users.email,
@@ -280,8 +315,9 @@ export const adminPartnerRouter = router({
           .limit(limit),
       ]);
 
-      const activeWithdrawalRows = withdrawalRows.filter(
-        (row) => row.status === 'requested' || row.status === 'reviewing',
+      const withdrawalMetrics = summarizeWithdrawalMetrics(
+        [...withdrawalRows, ...withdrawalHistoryRows],
+        now,
       );
 
       return {
@@ -290,9 +326,7 @@ export const adminPartnerRouter = router({
           pendingKycCount: kycRows.length,
           pendingOrderCount: orderRows.filter((row) => row.status === 'pending').length,
           reviewRequiredOrderCount: orderRows.filter((row) => row.status === 'review_required').length,
-          pendingWithdrawalCount: activeWithdrawalRows.length,
-          approvedWithdrawalCount: withdrawalRows.filter((row) => row.status === 'approved').length,
-          overdueWithdrawalCount: activeWithdrawalRows.filter((row) => row.reviewDueAt.getTime() <= now.getTime()).length,
+          ...withdrawalMetrics,
           riskLotCount: riskLotRows.length,
         },
         orders: orderRows.map(({ metadata, ...row }) => ({
@@ -301,6 +335,10 @@ export const adminPartnerRouter = router({
         })),
         kycProfiles: kycRows.map(summarizeKycProfile),
         withdrawals: withdrawalRows.map(({ metadata, ...row }) => ({
+          ...row,
+          ...summarizeWithdrawalAudit(metadata),
+        })),
+        withdrawalHistory: withdrawalHistoryRows.map(({ metadata, ...row }) => ({
           ...row,
           ...summarizeWithdrawalAudit(metadata),
         })),
@@ -474,4 +512,5 @@ export const __adminPartnerInternals = {
   summarizeKycProfile,
   summarizeOrder,
   summarizeWithdrawal,
+  summarizeWithdrawalMetrics,
 };

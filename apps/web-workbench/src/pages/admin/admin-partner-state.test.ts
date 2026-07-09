@@ -99,6 +99,8 @@ describe('normalizeAdminPartnerOverview', () => {
         pendingOrderCount: 1,
         pendingWithdrawalCount: -5,
         approvedWithdrawalCount: 1,
+        paidWithdrawalCount: 2,
+        rejectedWithdrawalCount: 3,
         overdueWithdrawalCount: 0,
         riskLotCount: 3,
       },
@@ -124,6 +126,8 @@ describe('normalizeAdminPartnerOverview', () => {
     if (!state.enabled) throw new Error('expected enabled state');
     expect(state.metrics.pendingKycCount).toBe(2);
     expect(state.metrics.pendingWithdrawalCount).toBe(0);
+    expect(state.metrics.paidWithdrawalCount).toBe(2);
+    expect(state.metrics.rejectedWithdrawalCount).toBe(3);
     expect(state.orders[0]).toMatchObject({
       orderExternalId: 'pay_order_1',
       amountCnyCents: 1_000_000,
@@ -172,6 +176,8 @@ describe('normalizeAdminPartnerOverview', () => {
         pendingWithdrawalCount: 1,
         approvedWithdrawalCount: 1,
         overdueWithdrawalCount: 0,
+        paidWithdrawalCount: 1,
+        rejectedWithdrawalCount: 1,
         riskLotCount: 1,
       },
       orders: [
@@ -202,6 +208,26 @@ describe('normalizeAdminPartnerOverview', () => {
           email: 'cash@holaday.local',
           displayName: 'Cash Partner',
           bankAccountFingerprint: 'bank-card-fp-cash',
+        },
+      ],
+      withdrawalHistory: [
+        {
+          withdrawalExternalId: 'pay_withdrawal_paid',
+          userExternalId: 'usr_paid',
+          email: 'paid@holaday.local',
+          displayName: 'Paid Partner',
+          status: 'paid',
+          providerPayoutId: 'bank-payout-paid-1',
+          amountCreditCents: 600_00,
+        },
+        {
+          withdrawalExternalId: 'pay_withdrawal_rejected',
+          userExternalId: 'usr_rejected',
+          email: 'rejected@holaday.local',
+          displayName: 'Rejected Partner',
+          status: 'rejected',
+          rejectionReason: 'bank mismatch',
+          amountCreditCents: 700_00,
         },
       ],
       riskLots: [
@@ -235,12 +261,26 @@ describe('normalizeAdminPartnerOverview', () => {
     if (!byWithdrawal.enabled) throw new Error('expected enabled state');
     expect(byWithdrawal.orders).toHaveLength(0);
     expect(byWithdrawal.withdrawals).toHaveLength(1);
+    expect(byWithdrawal.withdrawalHistory).toHaveLength(0);
     expect(byWithdrawal.withdrawals[0]?.bankAccountFingerprint).toBe('bank-card-fp-cash');
 
     const byBankFingerprint = filterAdminPartnerOverview(state, 'bank-card-fp');
     expect(byBankFingerprint.enabled).toBe(true);
     if (!byBankFingerprint.enabled) throw new Error('expected enabled state');
     expect(byBankFingerprint.withdrawals).toHaveLength(1);
+
+    const byPayout = filterAdminPartnerOverview(state, 'bank-payout-paid');
+    expect(byPayout.enabled).toBe(true);
+    if (!byPayout.enabled) throw new Error('expected enabled state');
+    expect(byPayout.withdrawals).toHaveLength(0);
+    expect(byPayout.withdrawalHistory).toHaveLength(1);
+    expect(byPayout.withdrawalHistory[0]?.status).toBe('paid');
+
+    const byRejectedReason = filterAdminPartnerOverview(state, 'bank mismatch');
+    expect(byRejectedReason.enabled).toBe(true);
+    if (!byRejectedReason.enabled) throw new Error('expected enabled state');
+    expect(byRejectedReason.withdrawalHistory).toHaveLength(1);
+    expect(byRejectedReason.withdrawalHistory[0]?.status).toBe('rejected');
 
     const byRiskLot = filterAdminPartnerOverview(state, 'LOT_RISK');
     expect(byRiskLot.enabled).toBe(true);
