@@ -24,7 +24,8 @@
 <!-- 2026-07-07 Codex 补充：批量任务父级计数新增 items_review；partial_success 不再塞进 items_failed，列表/详情/WS/进度百分比拆成“需复核/失败/取消”，兼容旧 WS 帧不清空既有复核计数。0039 已先 apply+db:verify，再重启 orch。 -->
 <!-- 2026-07-08 Codex 补充：任务清理口径从 failed 兼容别名升级为 unsuccessful；清除入口覆盖 failed + partial_success，用户菜单/Admin Learning 文案改成“未成功任务（失败或需复核）”；取消态提示复用共享 task status guard。 -->
 <!-- 2026-07-09 Codex 补充：状态机双层 guard：TaskController.start 不重启 awaiting/paused/terminal 既有态；onStepResult 只接受 executing；TaskRepository.applyStepResult 只允许 executing/awaiting_user source，防 late step result 复活已停任务。 -->
-## 🔴 PROD LIVE REF = `codex/trust-loop-round1` — SPA `2dd384de` / bundle `index-DBBSuxe1.js` + orch `005306bb`（**状态机防复活 guard LIVE（2026-07-09）**：controller 层禁止 `start(existing)` 重启 awaiting/paused/terminal，late step result 只在 executing 接受；repository 层 `applyStepResult` 只允许 executing/awaiting_user source，避免绕过 controller 后把已取消/失败/暂停任务重新写回执行结果。此前未成功任务清理口径、批量任务需复核计数拆分、技能 dispatch、技能目录与 @ 技能入口、批量任务未成功口径、用量加载态、任务详情 evidence fallback、批量子任务状态保真、股票最近真实交易日分时、状态机清理与通知遮挡修复继续生效。）
+<!-- 2026-07-09 Codex 补充：状态机控制边补强：control transition 拒绝 terminal source；batch approve 仅允许 awaiting_user + pendingConfirm=batch → executing；tasks.reply still_awaiting 重播保留 video_quote awaitingKind。 -->
+## 🔴 PROD LIVE REF = `codex/trust-loop-round1` — SPA `2dd384de` / bundle `index-DBBSuxe1.js` + orch `eebabe28`（**状态机防复活/防误恢复 guard LIVE（2026-07-09）**：controller 层禁止 `start(existing)` 重启 awaiting/paused/terminal，late step result 只在 executing 接受；repository 层 `applyStepResult` 只允许 executing/awaiting_user source，control transition 拒绝 terminal source，batch approve 只允许等待批量确认的任务恢复到 executing；`tasks.reply` 对仍等待中的视频报价任务重播保留 `video_quote` 等待类型，避免前端卡片降级。此前未成功任务清理口径、批量任务需复核计数拆分、技能 dispatch、技能目录与 @ 技能入口、批量任务未成功口径、用量加载态、任务详情 evidence fallback、批量子任务状态保真、股票最近真实交易日分时、状态机清理与通知遮挡修复继续生效。）
 
 <!-- 2026-06-26 里程碑 — 🏁🏁 登录自学从机制到交易站真出货 + 四层 veto 防线 -->
 **🏁🏁 里程碑（2026-06-26）— 登录自学从机制到交易站真出货 + 四层 veto 防线全证通**
