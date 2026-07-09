@@ -6,6 +6,7 @@ import { partnerWithdrawalRequests, type PartnerWithdrawalRequest } from '../db/
 import { users } from '../db/schema/users.js';
 import { CreditLedgerService } from './credit-ledger-service.js';
 import { KycService, canWithdrawWithKycStatus } from './kyc-service.js';
+import { partnerConfig } from './partner-config.js';
 
 export const WITHDRAWAL_MIN_CREDIT_CENTS = 500_00;
 
@@ -113,14 +114,19 @@ function addUtcDays(value: Date, days: number): Date {
 export function validateWithdrawalRequest(input: {
   amountCreditCents: number;
   availableCreditCents: number;
+  minCreditCents?: number;
 }): WithdrawalValidationResult {
   const amountCreditCents = assertNonNegativeSafeInteger(input.amountCreditCents, 'amountCreditCents');
   const availableCreditCents = assertNonNegativeSafeInteger(
     input.availableCreditCents,
     'availableCreditCents',
   );
+  const minCreditCents = assertNonNegativeSafeInteger(
+    input.minCreditCents ?? WITHDRAWAL_MIN_CREDIT_CENTS,
+    'minCreditCents',
+  );
 
-  if (amountCreditCents < WITHDRAWAL_MIN_CREDIT_CENTS) {
+  if (amountCreditCents < minCreditCents) {
     return { ok: false, reason: 'below_minimum' };
   }
   if (amountCreditCents > availableCreditCents) {
@@ -416,6 +422,7 @@ export class WithdrawalService {
     const validation = validateWithdrawalRequest({
       amountCreditCents: request.amountCreditCents,
       availableCreditCents: summary.availableCreditCents,
+      minCreditCents: partnerConfig().withdrawalMinCreditCents,
     });
     if (!validation.ok) {
       throw new WithdrawalValidationError(validation.reason);

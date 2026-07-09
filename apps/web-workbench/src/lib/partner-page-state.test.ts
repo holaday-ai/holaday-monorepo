@@ -147,6 +147,9 @@ describe('partner page state helpers', () => {
         pendingWithdrawalCreditCents: 0,
         frozenCreditCents: 0,
       },
+      limits: {
+        withdrawalMinCreditCents: 500_00,
+      },
       lots: [
         {
           key: 'lot_1',
@@ -448,6 +451,37 @@ describe('partner page state helpers', () => {
     expect(
       partnerWithdrawalGate(ready, {
         amountCreditCents: 600_00,
+        bankAccountFingerprint: 'bank_fp_1',
+      }),
+    ).toEqual({
+      blocked: false,
+      reason: '可以提交提现申请。',
+    });
+  });
+
+  it('uses configured dashboard withdrawal minimum in the withdrawal gate', () => {
+    const state = normalizePartnerDashboard({
+      enabled: true,
+      membership: { status: 'active', expiresAt: '2027-07-03T00:00:00.000Z' },
+      kycStatus: 'passed',
+      ledger: { withdrawableCreditCents: 1_000_00 },
+      limits: { withdrawalMinCreditCents: 750_00 },
+    });
+
+    expect(state.enabled).toBe(true);
+    if (!state.enabled) throw new Error('expected enabled partner dashboard');
+    expect(
+      partnerWithdrawalGate(state, {
+        amountCreditCents: 600_00,
+        bankAccountFingerprint: 'bank_fp_1',
+      }),
+    ).toEqual({
+      blocked: true,
+      reason: '单次提现最低 750 HOLA Credit。',
+    });
+    expect(
+      partnerWithdrawalGate(state, {
+        amountCreditCents: 750_00,
         bankAccountFingerprint: 'bank_fp_1',
       }),
     ).toEqual({

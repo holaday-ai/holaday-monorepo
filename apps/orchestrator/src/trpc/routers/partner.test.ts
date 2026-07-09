@@ -351,6 +351,9 @@ describe('partnerRouter', () => {
 
     expect(result).toEqual({
       enabled: true,
+      limits: {
+        withdrawalMinCreditCents: 500_00,
+      },
       membership: {
         status: 'active',
         expiresAt: new Date('2027-01-01T00:00:00.000Z'),
@@ -473,6 +476,28 @@ describe('partnerRouter', () => {
         },
       ],
     });
+  });
+
+  it('dashboard exposes configured partner action limits', async () => {
+    process.env.PARTNER_LEDGER_ENABLED = 'true';
+    const original = process.env.PARTNER_WITHDRAWAL_MIN_CREDIT_CENTS;
+    process.env.PARTNER_WITHDRAWAL_MIN_CREDIT_CENTS = String(750_00);
+    try {
+      const result = await partnerRouter.createCaller(new FakePartnerDb().asContext()).dashboard();
+
+      expect(result).toMatchObject({
+        enabled: true,
+        limits: {
+          withdrawalMinCreditCents: 750_00,
+        },
+      });
+    } finally {
+      if (original === undefined) {
+        delete process.env.PARTNER_WITHDRAWAL_MIN_CREDIT_CENTS;
+      } else {
+        process.env.PARTNER_WITHDRAWAL_MIN_CREDIT_CENTS = original;
+      }
+    }
   });
 
   it('rechargePreview is blocked when the feature flag is disabled', async () => {

@@ -11,6 +11,7 @@ import { partnerLots, partnerRechargeOrders, partnerWithdrawalRequests } from '.
 import { CreditLedgerService } from '../../partner/credit-ledger-service.js';
 import { KycService, canRechargeWithKycStatus, normalizeKycStatus } from '../../partner/kyc-service.js';
 import { PartnerMembershipService } from '../../partner/membership-service.js';
+import { partnerConfig } from '../../partner/partner-config.js';
 import { calculateApiUnits, selectRechargeTier } from '../../partner/partner-rules.js';
 import {
   RechargeGateError,
@@ -410,9 +411,13 @@ export const partnerRouter = router({
 
     const dashboardLedger = summarizeDashboardLedger(ledger);
     const kycStatus = kycProfile ? normalizeKycStatus(kycProfile.status) : 'not_started';
+    const config = partnerConfig();
 
     return {
       enabled: true as const,
+      limits: {
+        withdrawalMinCreditCents: config.withdrawalMinCreditCents,
+      },
       membership: membership
         ? {
             status: membership.status,

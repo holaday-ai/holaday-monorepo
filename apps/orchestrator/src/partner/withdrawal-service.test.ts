@@ -383,6 +383,23 @@ describe('withdrawal pure helpers', () => {
     ).toEqual({ ok: true });
   });
 
+  it('honors a configured minimum withdrawal amount', () => {
+    expect(
+      validateWithdrawalRequest({
+        amountCreditCents: 999_00,
+        availableCreditCents: 1_000_00,
+        minCreditCents: 1_000_00,
+      }),
+    ).toEqual({ ok: false, reason: 'below_minimum' });
+    expect(
+      validateWithdrawalRequest({
+        amountCreditCents: 1_000_00,
+        availableCreditCents: 1_000_00,
+        minCreditCents: 1_000_00,
+      }),
+    ).toEqual({ ok: true });
+  });
+
   it('blocks requests above available credit', () => {
     expect(
       validateWithdrawalRequest({
@@ -429,6 +446,26 @@ describe('WithdrawalService requestWithdrawal', () => {
     ).rejects.toMatchObject({ reason: 'below_minimum' });
     expect(db.rowsCreated).toBe(0);
     expect(ledger.entries).toHaveLength(0);
+  });
+
+  it('uses the configured withdrawal minimum for service requests', async () => {
+    const original = process.env.PARTNER_WITHDRAWAL_MIN_CREDIT_CENTS;
+    process.env.PARTNER_WITHDRAWAL_MIN_CREDIT_CENTS = String(750_00);
+    try {
+      const { db, ledger, service } = serviceWithDeps();
+
+      await expect(service.requestWithdrawal(validWithdrawalInput)).rejects.toMatchObject({
+        reason: 'below_minimum',
+      });
+      expect(db.rowsCreated).toBe(0);
+      expect(ledger.entries).toHaveLength(0);
+    } finally {
+      if (original === undefined) {
+        delete process.env.PARTNER_WITHDRAWAL_MIN_CREDIT_CENTS;
+      } else {
+        process.env.PARTNER_WITHDRAWAL_MIN_CREDIT_CENTS = original;
+      }
+    }
   });
 
   it('blocks requests above available credit', async () => {

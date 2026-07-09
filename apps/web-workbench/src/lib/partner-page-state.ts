@@ -23,6 +23,7 @@ export interface PartnerEnabledState {
   readonly kycStatus: PartnerKycStatus;
   readonly kycLabel: string;
   readonly kycProfile: PartnerKycProfileState | null;
+  readonly limits: PartnerLimitsState;
   readonly inviteCode: string;
   readonly ledger: PartnerLedgerState;
   readonly lots: readonly PartnerLotState[];
@@ -43,6 +44,10 @@ export interface PartnerLedgerState {
   readonly withdrawableCreditCents: number;
   readonly pendingWithdrawalCreditCents: number;
   readonly frozenCreditCents: number;
+}
+
+export interface PartnerLimitsState {
+  readonly withdrawalMinCreditCents: number;
 }
 
 export interface PartnerLotState {
@@ -214,6 +219,7 @@ export function normalizePartnerDashboard(value: unknown): PartnerPageState {
     kycStatus,
     kycLabel: kycStatusLabel(kycStatus),
     kycProfile: normalizeKycProfile(value.kycProfile),
+    limits: normalizeLimits(value.limits),
     inviteCode: normalizeInviteCode(value.inviteCode),
     ledger: normalizeLedger(value.ledger),
     lots: normalizeLots(value.lots),
@@ -323,10 +329,12 @@ export function partnerWithdrawalGate(
     };
   }
 
-  if (state.ledger.withdrawableCreditCents < PARTNER_WITHDRAWAL_MIN_CREDIT_CENTS) {
+  const withdrawalMinCreditCents = state.limits.withdrawalMinCreditCents;
+
+  if (state.ledger.withdrawableCreditCents < withdrawalMinCreditCents) {
     return {
       blocked: true,
-      reason: '可提现 HOLA Credit 低于 500 HOLA Credit。',
+      reason: `可提现 HOLA Credit 低于 ${formatHolaCreditCents(withdrawalMinCreditCents)}。`,
     };
   }
 
@@ -337,10 +345,10 @@ export function partnerWithdrawalGate(
     };
   }
 
-  if (input.amountCreditCents < PARTNER_WITHDRAWAL_MIN_CREDIT_CENTS) {
+  if (input.amountCreditCents < withdrawalMinCreditCents) {
     return {
       blocked: true,
-      reason: '单次提现最低 500 HOLA Credit。',
+      reason: `单次提现最低 ${formatHolaCreditCents(withdrawalMinCreditCents)}。`,
     };
   }
 
@@ -451,6 +459,13 @@ function normalizeLedger(value: unknown): PartnerLedgerState {
     withdrawableCreditCents: safeCents(ledger.withdrawableCreditCents),
     pendingWithdrawalCreditCents: safeCents(ledger.pendingWithdrawalCreditCents),
     frozenCreditCents: safeCents(ledger.frozenCreditCents),
+  };
+}
+
+function normalizeLimits(value: unknown): PartnerLimitsState {
+  const limits = isRecord(value) ? value : {};
+  return {
+    withdrawalMinCreditCents: safeCents(limits.withdrawalMinCreditCents) || PARTNER_WITHDRAWAL_MIN_CREDIT_CENTS,
   };
 }
 
