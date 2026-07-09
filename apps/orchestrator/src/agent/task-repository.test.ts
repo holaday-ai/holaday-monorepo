@@ -638,6 +638,27 @@ describe('TaskRepository task terminal state persistence', () => {
     expect(result.persisted).toBe(true);
   });
 
+  it('applyControlTransition refuses terminal source states', async () => {
+    const { db, captured } = fakeDbForStateTransitions(1);
+    const repo = new TaskRepository(db);
+    const prev: TaskState = {
+      ...baseState,
+      status: 'completed',
+    };
+    const next: TaskState = {
+      ...prev,
+      status: 'paused',
+      pauseReason: 'user',
+    };
+
+    const result = await repo.applyControlTransition(prev, next);
+
+    expect(result.persisted).toBe(false);
+    expect(captured.transactionRan).toBe(false);
+    expect(captured.updatePayloads).toHaveLength(0);
+    expect(captured.eventPayloads).toHaveLength(0);
+  });
+
   it('applyControlTransition clears awaiting fields when cancelling a parked task', async () => {
     const { db, captured } = fakeDbForStateTransitions(1);
     const repo = new TaskRepository(db);

@@ -242,6 +242,9 @@ export class TaskRepository {
     if (prev.taskId !== next.taskId) {
       throw new Error('applyControlTransition requires matching taskIds');
     }
+    if (isTaskTerminalStatus(prev.status)) {
+      return { persisted: false };
+    }
     const [taskRow] = await this.db
       .select({ id: tasks.id })
       .from(tasks)
