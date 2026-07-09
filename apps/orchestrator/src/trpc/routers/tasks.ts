@@ -3,6 +3,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import {
   BASIC_ROLE_PICK_LIMIT,
   gateRoleForUser,
+  HOLADAY_SKILLS,
   newExternalId,
   normalizeSkillIds,
   OPEN_POOL_ROLE_IDS,
@@ -497,6 +498,57 @@ function resolveTaskDispatchSkillId(
   gatedRole: string,
 ): string | undefined {
   return taskSkillId ?? (gatedRole === 'none' ? undefined : gatedRole);
+}
+
+type SkillCatalogueRow = {
+  slug: string;
+  description: string | null;
+  occupationTag: string | null;
+  manifest: unknown;
+};
+
+function buildPlannerSkillCatalogue(rows: SkillCatalogueRow[]): SkillCatalogueEntry[] {
+  const out: SkillCatalogueEntry[] = [];
+  const seen = new Set<string>();
+
+  for (const row of rows) {
+    if (!row.description) continue;
+    const canonical = skillById(row.slug)?.id ?? row.slug;
+    out.push({
+      slug: canonical,
+      description: row.description,
+      occupationTag: row.occupationTag,
+      allowedOrigins: extractAllowedOrigins(row.manifest),
+    });
+    seen.add(row.slug);
+    seen.add(canonical);
+  }
+
+  for (const skill of HOLADAY_SKILLS) {
+    if (seen.has(skill.id)) continue;
+    out.push({
+      slug: skill.id,
+      description: skill.description,
+      occupationTag: null,
+      allowedOrigins: [],
+    });
+    seen.add(skill.id);
+  }
+
+  return out;
+}
+
+function buildPlannerIntent(intent: string, taskSkillId: string | undefined): string {
+  if (!taskSkillId) return intent;
+  const skill = skillById(taskSkillId);
+  if (!skill) return intent;
+  return [
+    `【用户选择的技能】${skill.name}（${skill.id}）`,
+    `技能说明：${skill.description}`,
+    '请优先按该技能的目标、语气和限制规划任务；如果用户需求与该技能不相关，以用户原始需求为准。',
+    '',
+    intent,
+  ].join('\n');
 }
 
 /**
@@ -5683,7 +5735,7 @@ export const tasksRouter = router({
     let plan: Awaited<ReturnType<typeof ctx.planner.plan>>;
     try {
       plan = await ctx.planner.plan({
-        intent: input.intent,
+        intent: buildPlannerIntent(input.intent, taskSkillId),
         userId: ctx.userId,
         occupation: input.occupation ?? null,
         skills: catalogue,
@@ -8533,10 +8585,10 @@ async function loadTaskState(repo: TaskRepository, taskExternalId: string, userE
  * never in catalogue, so a "帮我看抖音后台" intent fell through to
  * xueqiu's allowedOrigins and the real douyin URL got ORIGIN_BLOCKED).
  *
- * Cost: catalogue is ~5-10 rows, few hundred tokens, Opus handles it.
- * Boundary is preserved because `unionAllowedOrigins` unions ALL
- * Skills' allowedOrigins — anything outside that union is still
- * blocked by the driver.
+ * Cost: catalogue is still small (DB SKILL.md rows + the shared
+ * user-visible skill list), a few hundred tokens, Opus handles it.
+ * DB-backed SKILL.md rows keep their allowedOrigins; shared fallback
+ * rows are descriptive only until a real SKILL.md exists for them.
  *
  * `occupation` is kept on the signature for now as a Phase 1 knob
  * (we may want to *prefer* a Skill matching the user's occupation
@@ -8557,14 +8609,7 @@ async function loadSkillCatalogue(
     .from(skills)
     .where(eq(skills.status, 'active'));
 
-  return rows
-    .filter((r): r is typeof r & { description: string } => Boolean(r.description))
-    .map((r) => ({
-      slug: r.slug,
-      description: r.description,
-      occupationTag: r.occupationTag,
-      allowedOrigins: extractAllowedOrigins(r.manifest),
-    }));
+  return buildPlannerSkillCatalogue(rows);
 }
 
 /**
@@ -8678,6 +8723,8 @@ function unionAllowedOrigins(catalogue: SkillCatalogueEntry[]): readonly string[
 
 export const __tasksInternals = {
   assertManualSkillSelectionEnabled,
+  buildPlannerIntent,
+  buildPlannerSkillCatalogue,
   resolveTaskDispatchSkillId,
   resolveTaskSkillContext,
 };

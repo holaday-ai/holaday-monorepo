@@ -4,9 +4,19 @@ import { __tasksInternals } from './tasks.js';
 
 const {
   assertManualSkillSelectionEnabled,
+  buildPlannerIntent,
+  buildPlannerSkillCatalogue,
   resolveTaskDispatchSkillId,
   resolveTaskSkillContext,
-} = __tasksInternals;
+} = __tasksInternals as typeof __tasksInternals & {
+  buildPlannerIntent?: (intent: string, taskSkillId: string | undefined) => string;
+  buildPlannerSkillCatalogue?: (rows: Array<{
+    slug: string;
+    description: string | null;
+    occupationTag: string | null;
+    manifest: unknown;
+  }>) => Array<{ slug: string; description: string; allowedOrigins?: readonly string[] }>;
+};
 
 describe('tasks router manual skill selection', () => {
   it('accepts enabled catalogue skills selected from the composer', () => {
@@ -102,5 +112,44 @@ describe('tasks router manual skill selection', () => {
       'xiaohongshu-expert',
     );
     expect(resolveTaskDispatchSkillId(undefined, 'none')).toBeUndefined();
+  });
+
+  it('keeps the planner catalogue aligned with every user-visible shared skill', () => {
+    expect(typeof buildPlannerSkillCatalogue).toBe('function');
+    const catalogue = buildPlannerSkillCatalogue!([
+      {
+        slug: 'douyin-comment-manager',
+        description: 'Manage Douyin comments from the legacy DB skill table',
+        occupationTag: 'content-ops',
+        manifest: { allowedOrigins: ['*.douyin.com'] },
+      },
+    ]);
+
+    expect(catalogue.map((skill) => skill.slug)).toEqual(
+      expect.arrayContaining([
+        'douyin-comment-manager',
+        'douyin-live-ops',
+        'xiaohongshu-seeding-ops',
+        'a-share-market-briefing',
+        'resume-search-screening',
+      ]),
+    );
+    expect(catalogue.find((skill) => skill.slug === 'douyin-comment-manager')?.allowedOrigins).toEqual([
+      '*.douyin.com',
+    ]);
+    expect(catalogue.find((skill) => skill.slug === 'douyin-live-ops')?.description).toBe(
+      '直播复盘、短视频选题、脚本与账号运营',
+    );
+  });
+
+  it('passes an explicit user-selected skill hint into the planner intent', () => {
+    expect(typeof buildPlannerIntent).toBe('function');
+    const intent = buildPlannerIntent!('帮我做直播复盘', 'douyin-live-ops');
+
+    expect(intent).toContain('【用户选择的技能】抖音直播与运营（douyin-live-ops）');
+    expect(intent).toContain('直播复盘、短视频选题、脚本与账号运营');
+    expect(intent.endsWith('帮我做直播复盘')).toBe(true);
+    expect(buildPlannerIntent!('帮我做直播复盘', undefined)).toBe('帮我做直播复盘');
+    expect(buildPlannerIntent!('帮我做直播复盘', 'legacy-role-id')).toBe('帮我做直播复盘');
   });
 });
