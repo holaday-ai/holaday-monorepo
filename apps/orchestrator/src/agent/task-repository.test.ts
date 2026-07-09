@@ -501,6 +501,27 @@ describe('TaskRepository task terminal state persistence', () => {
     expect(result.persisted).toBe(true);
   });
 
+  it('applyStepResult refuses source states that cannot receive step results', async () => {
+    const { db, captured } = fakeDbForStateTransitions(1);
+    const repo = new TaskRepository(db);
+    const prev: TaskState = {
+      ...baseState,
+      status: 'cancelled',
+    };
+    const next: TaskState = {
+      ...prev,
+      status: 'completed',
+      cursor: 1,
+    };
+
+    const result = await repo.applyStepResult(prev, next, { summary: 'late result' });
+
+    expect(result.persisted).toBe(false);
+    expect(captured.transactionRan).toBe(false);
+    expect(captured.updatePayloads).toHaveLength(0);
+    expect(captured.eventPayloads).toHaveLength(0);
+  });
+
   it('applyStepResult clears stale awaiting fields on non-awaiting transitions', async () => {
     const { db, captured } = fakeDbForStateTransitions(1);
     const repo = new TaskRepository(db);

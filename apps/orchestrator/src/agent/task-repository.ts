@@ -112,6 +112,9 @@ export class TaskRepository {
     if (prev.taskId !== next.taskId) {
       throw new Error('applyStepResult requires matching taskIds');
     }
+    if (!canApplyStepResultFrom(prev.status)) {
+      return { persisted: false };
+    }
     const [taskRow] = await this.db
       .select({ id: tasks.id })
       .from(tasks)
@@ -1265,6 +1268,10 @@ function controlEventType(prev: TaskState, next: TaskState): string {
   if (next.status === 'partial_success') return 'task.partial_success';
   if (next.status === 'failed') return 'task.failed';
   return 'task.transition';
+}
+
+function canApplyStepResultFrom(status: TaskState['status']): boolean {
+  return status === 'executing' || status === 'awaiting_user';
 }
 
 function isSettledStepStatus(status: string | null | undefined): boolean {
