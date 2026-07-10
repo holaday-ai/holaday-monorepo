@@ -26,6 +26,7 @@ export function partnerConfig() {
     withdrawalDailyPlatformCapCreditCents: intEnv('PARTNER_WITHDRAWAL_DAILY_PLATFORM_CAP_CREDIT_CENTS', 200_000_00),
     withdrawalMonthlyUserCapCreditCents: intEnv('PARTNER_WITHDRAWAL_MONTHLY_USER_CAP_CREDIT_CENTS', 100_000_00),
     withdrawalBankCardCooldownDays: intEnv('PARTNER_WITHDRAWAL_BANK_CARD_COOLDOWN_DAYS', 7),
+    kycMockAutoPass: process.env.NODE_ENV !== 'production' && process.env.PARTNER_KYC_MOCK_AUTO_PASS !== 'false',
   };
 }
 

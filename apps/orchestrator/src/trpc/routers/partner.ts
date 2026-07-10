@@ -587,6 +587,7 @@ export const partnerRouter = router({
       const verification = resolveCnBankCardKycSubmission({
         bankCardHash: bankAccountFingerprint,
         providerRef: input.providerRef,
+        allowMockAutoPass: partnerConfig().kycMockAutoPass,
       });
       const profile = await kycService.upsertStatus({
         userId,

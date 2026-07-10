@@ -136,6 +136,7 @@ describe('resolveCnBankCardKycSubmission', () => {
       resolveCnBankCardKycSubmission({
         bankCardHash: 'bank_hash_123',
         providerRef: 'bankcard-flow-1',
+        allowMockAutoPass: true,
       }),
     ).toEqual({
       status: 'passed',
@@ -143,6 +144,22 @@ describe('resolveCnBankCardKycSubmission', () => {
       providerRef: 'bankcard-flow-1',
       bankCardHash: 'bank_hash_123',
       note: 'same-name bank card verified by provider',
+    });
+  });
+
+  it('does not trust a provider reference when mock auto-pass is disabled', () => {
+    expect(
+      resolveCnBankCardKycSubmission({
+        bankCardHash: 'bank_hash_123',
+        providerRef: 'bankcard-flow-1',
+        allowMockAutoPass: false,
+      }),
+    ).toEqual({
+      status: 'review_required',
+      provider: 'cn-bankcard',
+      providerRef: 'bankcard-flow-1',
+      bankCardHash: 'bank_hash_123',
+      note: 'cn bank card provider reference requires server verification; manual review required',
     });
   });
 

@@ -178,9 +178,11 @@ function makeContext(db = new FakeUserLookupDb()) {
 
 describe('partnerRouter mutations', () => {
   const originalFlag = process.env.PARTNER_LEDGER_ENABLED;
+  const originalNodeEnv = process.env.NODE_ENV;
 
   beforeEach(() => {
     process.env.PARTNER_LEDGER_ENABLED = 'true';
+    process.env.NODE_ENV = 'test';
     createPendingOrderMock.mockReset();
     getActiveMembershipMock.mockReset();
     getKycProfileMock.mockReset();
@@ -197,6 +199,11 @@ describe('partnerRouter mutations', () => {
       delete process.env.PARTNER_LEDGER_ENABLED;
     } else {
       process.env.PARTNER_LEDGER_ENABLED = originalFlag;
+    }
+    if (originalNodeEnv === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = originalNodeEnv;
     }
   });
 
@@ -565,6 +572,51 @@ describe('partnerRouter mutations', () => {
       providerRef: null,
       bankCardHash: 'bank_hash_123',
       note: 'cn bank card provider reference missing; manual review required',
+    });
+  });
+
+  it('does not auto-pass client supplied provider references in production', async () => {
+    process.env.NODE_ENV = 'production';
+    const reviewedAt = new Date('2026-07-03T03:30:00.000Z');
+    getActiveMembershipMock.mockResolvedValueOnce({
+      id: 55,
+      userId: 123,
+      status: 'active',
+      expiresAt: new Date('2027-07-03T00:00:00.000Z'),
+    });
+    getKycStatusMock.mockResolvedValueOnce('not_started');
+    upsertKycStatusMock.mockResolvedValueOnce({
+      externalId: 'payment_kyc_prod_review',
+      userId: 123,
+      status: 'review_required',
+      country: 'CN',
+      provider: 'cn-bankcard',
+      providerRef: 'bankcard-flow-prod',
+      bankCardHash: 'bank_hash_prod',
+      reviewedAt,
+    });
+
+    await expect(
+      partnerRouter.createCaller(makeContext()).submitKyc({
+        providerRef: 'bankcard-flow-prod',
+        bankAccountFingerprint: 'bank_hash_prod',
+      }),
+    ).resolves.toEqual({
+      kycExternalId: 'payment_kyc_prod_review',
+      status: 'review_required',
+      country: 'CN',
+      provider: 'cn-bankcard',
+      providerRef: 'bankcard-flow-prod',
+      bankCardVerified: true,
+      reviewedAt,
+    });
+    expect(upsertKycStatusMock).toHaveBeenCalledWith({
+      userId: 123,
+      status: 'review_required',
+      provider: 'cn-bankcard',
+      providerRef: 'bankcard-flow-prod',
+      bankCardHash: 'bank_hash_prod',
+      note: 'cn bank card provider reference requires server verification; manual review required',
     });
   });
 

@@ -104,17 +104,28 @@ export interface CnBankCardKycSubmissionResult {
 export function resolveCnBankCardKycSubmission(input: {
   bankCardHash: string;
   providerRef?: string | null;
+  allowMockAutoPass?: boolean;
 }): CnBankCardKycSubmissionResult {
   const bankCardHash = normalizeBoundedString(input.bankCardHash, 'bankCardHash', 128);
   const providerRef = normalizeOptionalBoundedString(input.providerRef, 'providerRef', 128);
 
-  if (providerRef) {
+  if (providerRef && input.allowMockAutoPass === true) {
     return {
       status: 'passed',
       provider: 'cn-bankcard',
       providerRef,
       bankCardHash,
       note: 'same-name bank card verified by provider',
+    };
+  }
+
+  if (providerRef) {
+    return {
+      status: 'review_required',
+      provider: 'cn-bankcard',
+      providerRef,
+      bankCardHash,
+      note: 'cn bank card provider reference requires server verification; manual review required',
     };
   }
 
