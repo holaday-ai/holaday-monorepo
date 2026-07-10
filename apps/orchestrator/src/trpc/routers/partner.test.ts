@@ -556,6 +556,58 @@ describe('partnerRouter', () => {
     });
   });
 
+  it('orderStatus returns a current-user pending order with a payment intent', async () => {
+    process.env.PARTNER_LEDGER_ENABLED = 'true';
+    const fakeDb = new FakePartnerDb({
+      orders: [
+        fakeOrder({
+          externalId: 'pay_order_pending',
+          provider: 'alipay',
+          providerCaptureId: null,
+          status: 'pending',
+          createdAt: new Date('2026-07-10T10:00:00.000Z'),
+        }),
+      ],
+    });
+
+    await expect(
+      partnerRouter.createCaller(fakeDb.asContext()).orderStatus({
+        orderExternalId: 'pay_order_pending',
+      }),
+    ).resolves.toMatchObject({
+      orderExternalId: 'pay_order_pending',
+      provider: 'alipay',
+      status: 'pending',
+      paymentIntent: {
+        provider: 'alipay',
+        mode: 'redirect',
+        payUrl: expect.stringContaining('pay_order_pending'),
+        expiresAt: new Date('2026-07-10T10:30:00.000Z'),
+      },
+    });
+  });
+
+  it('orderStatus does not expose another user order', async () => {
+    process.env.PARTNER_LEDGER_ENABLED = 'true';
+    const fakeDb = new FakePartnerDb({
+      orders: [
+        fakeOrder({
+          externalId: 'pay_other_user_order',
+          userId: 456,
+        }),
+      ],
+    });
+
+    await expect(
+      partnerRouter.createCaller(fakeDb.asContext()).orderStatus({
+        orderExternalId: 'pay_other_user_order',
+      }),
+    ).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+      message: 'partner order not found',
+    });
+  });
+
   it('dashboard exposes configured partner action limits', async () => {
     process.env.PARTNER_LEDGER_ENABLED = 'true';
     const original = process.env.PARTNER_WITHDRAWAL_MIN_CREDIT_CENTS;

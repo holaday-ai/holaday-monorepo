@@ -3,7 +3,7 @@ import {
   PARTNER_MEMBERSHIP_PRICE_CNY_CENTS,
 } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
-import { desc, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { users } from '../../db/schema/users.js';
 import { partnerLots, partnerRechargeOrders, partnerWithdrawalRequests } from '../../db/schema/partner.js';
@@ -72,6 +72,10 @@ const requestWithdrawalInput = z.object({
 const rechargePreviewInput = z.object({
   amountCnyCents: moneyCentsInput,
   rollingThirtyDayCnyCents: moneyCentsInput.optional(),
+});
+
+const orderStatusInput = z.object({
+  orderExternalId: z.string().trim().min(1).max(32),
 });
 
 const DASHBOARD_ACTIVITY_LIMIT = 10;
@@ -545,6 +549,31 @@ export const partnerRouter = router({
     } catch (error) {
       mapRechargeOrderError(error);
     }
+  }),
+
+  orderStatus: protectedProcedure.input(orderStatusInput).query(async ({ ctx, input }) => {
+    requirePartnerLedgerEnabled();
+
+    const userId = await requireInternalUserId(ctx);
+    const [order] = await ctx.db
+      .select()
+      .from(partnerRechargeOrders)
+      .where(
+        and(
+          eq(partnerRechargeOrders.userId, userId),
+          eq(partnerRechargeOrders.externalId, input.orderExternalId),
+        ),
+      )
+      .limit(1);
+
+    if (!order) {
+      throw new TRPCError({
+        code: 'NOT_FOUND',
+        message: 'partner order not found',
+      });
+    }
+
+    return summarizePartnerOrder(order, { includePaymentIntent: order.status === 'pending' });
   }),
 
   recordInvite: protectedProcedure.input(recordInviteInput).mutation(async ({ ctx, input }) => {
