@@ -404,6 +404,41 @@ describe('AllocationService buildDailyCostPool', () => {
 });
 
 describe('AllocationService allocateDailyLockedBonus', () => {
+  it('uses activity factors as allocation weight without creating direct credit', async () => {
+    const fakeDb = new FakeAllocationDb({
+      lots: [
+        fakeLot({ id: 1, userId: 123, apiUnits: 10_500_000 }),
+        fakeLot({ id: 2, userId: 456, externalId: 'payment_lot_2', apiUnits: 10_500_000 }),
+      ],
+    });
+    const calls: Array<{ userId: number; at: string }> = [];
+    const service = new AllocationService(fakeDb.asDB(), {
+      activity: {
+        async getActivityFactorBps(userId: number, at: Date): Promise<number> {
+          calls.push({ userId, at: at.toISOString() });
+          return userId === 456 ? 11_000 : 10_000;
+        },
+      },
+    });
+
+    const summary = await service.allocateDailyLockedBonus({ day: '2026-07-02', budgetCreditCents: 1_200 });
+    const todayAllocations = fakeDb.allocationRows.filter((row) => row.allocationDate === '2026-07-02');
+
+    expect(calls).toEqual([
+      { userId: 123, at: '2026-07-02T00:00:00.000Z' },
+      { userId: 456, at: '2026-07-02T00:00:00.000Z' },
+    ]);
+    expect(todayAllocations.map((row) => [row.lotId, row.lockedBonusCreditCents, row.apiUnitsWeight])).toEqual([
+      [1, 571, 10_500_000],
+      [2, 628, 11_550_000],
+    ]);
+    expect(summary).toMatchObject({
+      allocationCount: 2,
+      totalLockedBonusCreditCents: 1_199,
+      remainingBudgetCreditCents: 1,
+    });
+  });
+
   it('creates daily allocations, caps by remaining bonus, and increments each lot once', async () => {
     const almostCappedLot = fakeLot({
       id: 2,

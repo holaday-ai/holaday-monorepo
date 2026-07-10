@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build an isolated partner ledger system for HOLA Credit, API Units, partner lots, 120-day accumulation, 8-month release, KYC/risk gates, withdrawal requests, and referral rewards without changing the existing plan/add-on payment behavior.
+**Goal:** Build an isolated partner ledger system for HOLA Credit, API Units, partner lots, 120-day accumulation, a 12-month total cycle with 8 monthly release windows, KYC/risk gates, withdrawal requests, and referral rewards without changing the existing plan/add-on payment behavior.
 
 **Architecture:** Add a new partner domain beside the current payment/quota code. Keep money-like changes append-only through a credit ledger, keep recharges as immutable lots, gate all release/withdrawal behavior behind budget and risk services, and expose a new `partner.*` tRPC router plus separate partner pages. Use dark-ship defaults so the backend can land before the UI is publicly linked.
 
@@ -2060,7 +2060,7 @@ export function calculateActivityFactorBps(input: {
   completedTasks: number;
   validInvites: number;
 }): number {
-  const loginBoost = Math.min(300, Math.max(0, input.loginDays) * 50);
+  const loginBoost = Math.min(300, Math.max(0, input.loginDays) * 100);
   const taskBoost = Math.min(400, Math.max(0, input.completedTasks) * 100);
   const inviteBoost = Math.min(300, Math.max(0, input.validInvites) * 300);
   return Math.min(11_000, 10_000 + loginBoost + taskBoost + inviteBoost);
@@ -2175,7 +2175,7 @@ git commit -m "fix: harden partner ledger dark launch"
 - API Units valuation: Task 1 implements `1 HOLA Credit = 1,000 API Units`; Task 6 converts `llm_calls.cost_usd` to API Units.
 - Immutable lots: Task 2 adds `partner_lots`; Task 5 creates lots from captured recharge orders.
 - 120-day accumulation: Task 6 calculates daily locked bonus.
-- 8-month release: Task 7 releases principal plus locked bonus with carry-forward.
+- 12-month total cycle: Task 7 releases principal plus locked bonus with carry-forward after the 120-day accumulation period, across 8 monthly release windows.
 - Budget constraints: Task 6 and Task 7 accept budget inputs and cap allocations/releases.
 - Append-only ledger: Task 3 writes ledger entries with idempotency keys.
 - KYC/risk/withdrawal: Task 4 and Task 8 implement gates, T+7/T+15, and withdrawal request lifecycle.

@@ -7,6 +7,7 @@ export * from './recharge-service.js';
 export * from './referral-service.js';
 export * from './payment-confirm-service.js';
 export * from './allocation-service.js';
+export * from './activity-service.js';
 export * from './release-service.js';
 export * from './schedulers.js';
 export * from './risk-service.js';

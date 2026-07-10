@@ -161,7 +161,7 @@ normal
 Use the updated stable model:
 
 - First 4 months: accumulation period. Calculate and lock bonus allocation, but do not allow withdrawal.
-- Next 8 months: monthly release period. Release principal plus accumulated bonus to available HOLA Credit.
+- Next 8 months: monthly release period. Release principal plus accumulated bonus to withdrawable HOLA Credit, subject to KYC, membership, and risk controls.
 - Full target cycle: 12 months.
 
 ### 5.1 First 120 Days: Accumulation, No Withdrawal
@@ -328,7 +328,7 @@ Recommended account buckets:
 - `pendingWithdrawalCredit`: withdrawal requested, not paid.
 - `frozenCredit`: held by risk control.
 
-Monthly releases should move credit from locked state to `availableCredit`. A withdrawal request then moves eligible credit from `availableCredit` or `withdrawableCredit` into `pendingWithdrawalCredit` after KYC, same-name bank, amount, cooldown, and risk checks pass. This keeps "released for use inside Holaday" separate from "approved for cash withdrawal".
+Monthly releases should move credit from locked state to `withdrawableCredit` in the MVP. A withdrawal request then moves eligible credit from `withdrawableCredit` into `pendingWithdrawalCredit` after active membership, KYC, same-name bank, amount, cooldown, and risk checks pass. Future inside-Holaday spending can use `availableCredit` without making it cash-withdrawable by default.
 
 Ledger entry types:
 
@@ -581,7 +581,7 @@ When implementation starts, test these areas:
 - Tier adjustment entries without rewriting historical rows.
 - Lot cap calculations.
 - 120-day accumulation without available/withdrawable balance changes.
-- 8-month release schedule.
+- 12-month total cycle with an 8-month release schedule after the 120-day accumulation period.
 - Budget insufficiency and carry-forward.
 - FIFO plus weighted allocation ordering.
 - Risk freeze and resume.

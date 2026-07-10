@@ -15,11 +15,11 @@ import {
   type PartnerDailyAllocation,
   type PartnerLot,
 } from '../db/schema/partner.js';
+import { PartnerActivityService } from './activity-service.js';
 
 const BPS_DENOMINATOR = 10_000n;
 const USD_MICROS_PER_USD = 1_000_000n;
 const DAY_MS = 24 * 60 * 60 * 1000;
-const ACTIVITY_FACTOR_BPS = 10_000;
 const AGE_FACTOR_BPS = 10_000;
 const RISK_FACTOR_BPS = 10_000;
 const MYSQL_UNSIGNED_INT_MAX = 4_294_967_295;
@@ -174,11 +174,13 @@ function remainingBonusCreditCents(lot: PartnerLot, allocatedBonusCreditCents: n
   return lot.bonusCapCreditCents - allocatedBonusCreditCents;
 }
 
-function weightLot(lot: PartnerLot): number {
+type AllocationActivity = Pick<PartnerActivityService, 'getActivityFactorBps'>;
+
+function weightLot(lot: PartnerLot, activityFactorBps: number): number {
   return calculateLotWeight({
     apiUnits: lot.apiUnits,
     ageFactorBps: AGE_FACTOR_BPS,
-    activityFactorBps: ACTIVITY_FACTOR_BPS,
+    activityFactorBps,
     riskFactorBps: RISK_FACTOR_BPS,
   });
 }
@@ -223,7 +225,14 @@ interface LotAllocationState {
 }
 
 export class AllocationService {
-  constructor(private readonly db: DB) {}
+  private readonly activity: AllocationActivity;
+
+  constructor(
+    private readonly db: DB,
+    deps: { activity?: AllocationActivity } = {},
+  ) {
+    this.activity = deps.activity ?? new PartnerActivityService();
+  }
 
   private async readDailyAllocation(lotId: number, day: string): Promise<PartnerDailyAllocation | undefined> {
     const [allocation] = await this.db
@@ -295,6 +304,7 @@ export class AllocationService {
     budgetCreditCents: number;
   }): Promise<DailyLockedBonusSummary> {
     const day = normalizeDay(input.day);
+    const allocationDate = dayBoundsUtc(day).start;
     const budgetCreditCents = assertAllocationBudget(input.budgetCreditCents);
     const existingAllocationsForDay = await this.db
       .select()
@@ -321,7 +331,12 @@ export class AllocationService {
           gt(partnerLots.accumulationEndsAt, dayBoundsUtc(day).start),
         ),
       );
-    const weightedLots = lots.map((lot) => ({ lot, weight: weightLot(lot) }));
+    const weightedLots = await Promise.all(
+      lots.map(async (lot) => ({
+        lot,
+        weight: weightLot(lot, await this.activity.getActivityFactorBps(lot.userId, allocationDate)),
+      })),
+    );
     const lotAllocationStates: LotAllocationState[] = [];
 
     for (const { lot, weight } of weightedLots) {
