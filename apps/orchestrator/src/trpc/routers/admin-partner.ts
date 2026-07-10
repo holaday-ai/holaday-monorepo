@@ -18,7 +18,7 @@ import {
   PartnerPaymentProviderCaptureConflictError,
   PartnerPaymentConfirmService,
 } from '../../partner/payment-confirm-service.js';
-import { WithdrawalService, WithdrawalTransitionError } from '../../partner/withdrawal-service.js';
+import { WithdrawalGateError, WithdrawalService, WithdrawalTransitionError } from '../../partner/withdrawal-service.js';
 import { adminProcedure, router } from '../trpc.js';
 
 const OVERVIEW_LIMIT_CAP = 100;
@@ -243,6 +243,16 @@ function mapPaymentError(error: unknown): never {
 }
 
 function mapWithdrawalError(error: unknown): never {
+  if (error instanceof WithdrawalGateError) {
+    const message = {
+      membership_required: 'partner membership required',
+      kyc_required: 'partner KYC must be passed before withdrawal',
+      risk_frozen: 'partner withdrawal is frozen by risk control',
+    }[error.reason];
+
+    throw new TRPCError({ code: 'PRECONDITION_FAILED', message });
+  }
+
   if (error instanceof WithdrawalTransitionError) {
     if (error.reason === 'not_found') {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'withdrawal request not found' });

@@ -54,6 +54,7 @@ vi.mock('../../partner/withdrawal-service.js', async (importOriginal) => {
 
 import { adminRouter } from './admin.js';
 import { __adminPartnerInternals } from './admin-partner.js';
+import { WithdrawalGateError } from '../../partner/withdrawal-service.js';
 
 type FakeUserRow = {
   id: number;
@@ -343,6 +344,20 @@ describe('admin.partner router', () => {
       withdrawalExternalId: 'pay_withdrawal_1',
       reviewerUserId: 1,
       providerPayoutId: 'bank-payout-1',
+    });
+  });
+
+  it('maps frozen withdrawal review gates to precondition failures', async () => {
+    approveWithdrawalMock.mockRejectedValueOnce(new WithdrawalGateError('risk_frozen'));
+
+    await expect(
+      adminRouter.createCaller(makeContext()).partner.approveWithdrawal({
+        withdrawalExternalId: 'pay_withdrawal_1',
+        note: 'bank checked',
+      }),
+    ).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+      message: 'partner withdrawal is frozen by risk control',
     });
   });
 

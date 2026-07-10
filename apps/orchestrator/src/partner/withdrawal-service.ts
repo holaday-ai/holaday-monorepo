@@ -441,6 +441,13 @@ export class WithdrawalService {
     return aggregateCreditCents(row?.totalCreditCents);
   }
 
+  private async assertAccountNotFrozen(ledger: WithdrawalLedger, userId: number): Promise<void> {
+    const summary = await ledger.summarizeUser(userId);
+    if (summary.frozenCreditCents > 0) {
+      throw new WithdrawalGateError('risk_frozen');
+    }
+  }
+
   private async postHoldEntries(
     ledger: WithdrawalLedger,
     row: PartnerWithdrawalRequest,
@@ -613,11 +620,13 @@ export class WithdrawalService {
       const row = await this.readByExternalId(db, request.withdrawalExternalId);
       if (!row) throw new WithdrawalTransitionError('not_found');
       await this.lockUserForWithdrawal(db, row.userId);
+      const ledger = this.ledgerFor(db);
 
       if (row.status === 'approved') return row;
       if (row.status !== 'requested' && row.status !== 'reviewing') {
         throw transitionErrorForTerminalStatus(row.status, 'not_reviewable');
       }
+      await this.assertAccountNotFrozen(ledger, row.userId);
 
       const metadata = {
         ...metadataRecord(row.metadata),
@@ -707,6 +716,7 @@ export class WithdrawalService {
       if (row.status !== 'approved') {
         throw transitionErrorForTerminalStatus(row.status, 'not_approved');
       }
+      await this.assertAccountNotFrozen(ledger, row.userId);
 
       const metadata = {
         ...metadataRecord(row.metadata),

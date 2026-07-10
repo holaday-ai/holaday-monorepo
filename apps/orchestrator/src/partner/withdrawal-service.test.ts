@@ -316,6 +316,21 @@ function fakeHoldEntry(overrides: Partial<FakeLedgerEntry> = {}): FakeLedgerEntr
   };
 }
 
+function fakeFrozenEntry(overrides: Partial<FakeLedgerEntry> = {}): FakeLedgerEntry {
+  return {
+    userId: 123,
+    lotId: null,
+    entryType: 'risk_freeze',
+    direction: 'credit',
+    bucket: 'frozen',
+    amountCreditCents: 1_00,
+    amountApiUnits: 0,
+    idempotencyKey: 'risk:frozen:123',
+    metadata: null,
+    ...overrides,
+  };
+}
+
 function serviceWithDeps(input: {
   db?: FakeWithdrawalDb;
   ledger?: FakeLedgerService;
@@ -572,19 +587,7 @@ describe('WithdrawalService requestWithdrawal', () => {
   it('blocks withdrawals while the account has frozen credit', async () => {
     const { db, ledger, service } = serviceWithDeps({
       ledger: new FakeLedgerService(2_000_00, {
-        entries: [
-          {
-            userId: 123,
-            lotId: null,
-            entryType: 'risk_freeze',
-            direction: 'credit',
-            bucket: 'frozen',
-            amountCreditCents: 1_00,
-            amountApiUnits: 0,
-            idempotencyKey: 'risk:frozen:123',
-            metadata: null,
-          },
-        ],
+        entries: [fakeFrozenEntry()],
       }),
     });
 
@@ -934,6 +937,26 @@ describe('WithdrawalService admin transitions', () => {
     expect(ledger.entries).toHaveLength(0);
   });
 
+  it('blocks approval when the account becomes frozen after request', async () => {
+    const existing = fakeWithdrawalRequest({ status: 'requested' });
+    const { db, ledger, service } = serviceWithDeps({
+      db: new FakeWithdrawalDb([existing]),
+      ledger: new FakeLedgerService(0, { entries: [fakeFrozenEntry()] }),
+    });
+
+    await expect(
+      service.approveWithdrawal({
+        withdrawalExternalId: 'pay_existing_withdrawal',
+        reviewerUserId: 999,
+        note: 'bank account checked',
+        now: new Date('2026-07-03T04:00:00.000Z'),
+      }),
+    ).rejects.toMatchObject({ reason: 'risk_frozen' });
+    expect(existing.status).toBe('requested');
+    expect(db.updateValues).toHaveLength(0);
+    expect(ledger.entries).toHaveLength(1);
+  });
+
   it('rejects a held withdrawal and releases withdrawable credit idempotently', async () => {
     const existing = fakeWithdrawalRequest({ status: 'reviewing' });
     const heldDebit = fakeHoldEntry();
@@ -1033,6 +1056,26 @@ describe('WithdrawalService admin transitions', () => {
         idempotencyKey: 'withdrawal:paid:withdrawal-idem-1',
       }),
     ]);
+  });
+
+  it('blocks payout when the account becomes frozen after approval', async () => {
+    const existing = fakeWithdrawalRequest({ status: 'approved' });
+    const { db, ledger, service } = serviceWithDeps({
+      db: new FakeWithdrawalDb([existing]),
+      ledger: new FakeLedgerService(0, { entries: [fakeFrozenEntry()] }),
+    });
+
+    await expect(
+      service.markWithdrawalPaid({
+        withdrawalExternalId: 'pay_existing_withdrawal',
+        reviewerUserId: 999,
+        providerPayoutId: 'payout_1',
+        now: new Date('2026-07-03T05:00:00.000Z'),
+      }),
+    ).rejects.toMatchObject({ reason: 'risk_frozen' });
+    expect(existing.status).toBe('approved');
+    expect(db.updateValues).toHaveLength(0);
+    expect(ledger.entries).toHaveLength(1);
   });
 
   it('rejects a paid withdrawal replay with a different provider payout id', async () => {
