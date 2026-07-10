@@ -53,6 +53,7 @@ const recordInviteInput = z.object({
 
 const submitKycInput = z.object({
   providerRef: z.string().trim().min(1).max(128).optional(),
+  bankAccountFingerprint: z.string().trim().min(1).max(128).optional(),
 });
 
 const requestWithdrawalInput = z.object({
@@ -263,6 +264,9 @@ function mapWithdrawalError(error: unknown): never {
     const message = {
       membership_required: 'partner membership required',
       kyc_required: 'partner KYC must be passed before withdrawal',
+      bank_account_required: 'partner withdrawal requires a verified bank account',
+      bank_account_mismatch: 'partner withdrawal bank account must match KYC bank card',
+      bank_card_cooling_down: 'partner withdrawal bank account is cooling down',
       risk_frozen: 'partner withdrawal is frozen by risk control',
     }[error.reason];
 
@@ -534,6 +538,7 @@ export const partnerRouter = router({
         status: 'pending',
         provider: 'manual',
         providerRef: input.providerRef,
+        bankCardHash: input.bankAccountFingerprint,
         note: 'partner user submitted KYC review',
       });
       return summarizePartnerKyc(profile);
@@ -547,10 +552,14 @@ export const partnerRouter = router({
 
     const userId = await requireInternalUserId(ctx);
     try {
-      const kycStatus = await new KycService(ctx.db).getStatus(userId);
+      const kycProfile = await new KycService(ctx.db).getProfile(userId);
+      const kycStatus = kycProfile ? normalizeKycStatus(kycProfile.status) : 'not_started';
+      const sameNameBank =
+        typeof kycProfile?.bankCardHash === 'string' &&
+        kycProfile.bankCardHash.trim() === input.bankAccountFingerprint;
       const risk = evaluatePartnerRisk({
         kycPassed: kycStatus === 'passed',
-        sameNameBank: false,
+        sameNameBank,
         amountCreditCents: input.amountCreditCents,
         referralConcentration: false,
         accountFrozen: false,

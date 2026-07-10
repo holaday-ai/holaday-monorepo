@@ -5,6 +5,7 @@ import { users } from '../../db/schema/users.js';
 const {
   createPendingOrderMock,
   getActiveMembershipMock,
+  getKycProfileMock,
   getKycStatusMock,
   recordInviteMock,
   upsertKycStatusMock,
@@ -12,6 +13,7 @@ const {
 } = vi.hoisted(() => ({
   createPendingOrderMock: vi.fn(),
   getActiveMembershipMock: vi.fn(),
+  getKycProfileMock: vi.fn(),
   getKycStatusMock: vi.fn(),
   recordInviteMock: vi.fn(),
   upsertKycStatusMock: vi.fn(),
@@ -33,6 +35,7 @@ vi.mock('../../partner/kyc-service.js', async (importOriginal) => {
   return {
     ...actual,
     KycService: vi.fn(() => ({
+      getProfile: getKycProfileMock,
       getStatus: getKycStatusMock,
       upsertStatus: upsertKycStatusMock,
     })),
@@ -165,6 +168,7 @@ describe('partnerRouter mutations', () => {
     process.env.PARTNER_LEDGER_ENABLED = 'true';
     createPendingOrderMock.mockReset();
     getActiveMembershipMock.mockReset();
+    getKycProfileMock.mockReset();
     getKycStatusMock.mockReset();
     recordInviteMock.mockReset();
     upsertKycStatusMock.mockReset();
@@ -428,6 +432,7 @@ describe('partnerRouter mutations', () => {
     await expect(
       partnerRouter.createCaller(makeContext()).submitKyc({
         providerRef: '  bankcard-flow-1  ',
+        bankAccountFingerprint: '  bank_hash_123  ',
       }),
     ).resolves.toEqual({
       kycExternalId: 'payment_kyc_1',
@@ -444,6 +449,7 @@ describe('partnerRouter mutations', () => {
       status: 'pending',
       provider: 'manual',
       providerRef: 'bankcard-flow-1',
+      bankCardHash: 'bank_hash_123',
       note: 'partner user submitted KYC review',
     });
   });
@@ -496,15 +502,18 @@ describe('partnerRouter mutations', () => {
     });
   });
 
-  it('derives high-risk review withdrawal requests because same-name bank checks are unavailable', async () => {
+  it('derives normal-risk withdrawal requests when the bank fingerprint matches KYC', async () => {
     const reviewDueAt = new Date('2026-04-15T00:00:00.000Z');
-    getKycStatusMock.mockResolvedValueOnce('passed');
+    getKycProfileMock.mockResolvedValueOnce({
+      status: 'passed',
+      bankCardHash: 'bank-fp-1',
+    });
     requestWithdrawalMock.mockResolvedValueOnce({
       externalId: 'payment_withdrawal_1',
       amountCreditCents: 1_000_00,
-      status: 'reviewing',
+      status: 'requested',
       reviewDueAt,
-      riskScore: 25,
+      riskScore: 0,
     });
 
     await expect(
@@ -516,30 +525,33 @@ describe('partnerRouter mutations', () => {
     ).resolves.toEqual({
       withdrawalExternalId: 'payment_withdrawal_1',
       amountCreditCents: 1_000_00,
-      status: 'reviewing',
+      status: 'requested',
       reviewDueAt,
-      riskScore: 25,
+      riskScore: 0,
     });
-    expect(getKycStatusMock).toHaveBeenCalledWith(123);
+    expect(getKycProfileMock).toHaveBeenCalledWith(123);
     expect(requestWithdrawalMock).toHaveBeenCalledWith({
       userId: 123,
       amountCreditCents: 1_000_00,
       bankAccountFingerprint: 'bank-fp-1',
-      highRisk: true,
-      riskScore: 25,
+      highRisk: false,
+      riskScore: 0,
       idempotencyKey: 'withdrawal-idem-1',
     });
   });
 
   it('trims withdrawal string inputs and rejects non-integer amounts before the service', async () => {
     const reviewDueAt = new Date('2026-04-15T00:00:00.000Z');
-    getKycStatusMock.mockResolvedValueOnce('passed');
+    getKycProfileMock.mockResolvedValueOnce({
+      status: 'passed',
+      bankCardHash: 'bank-fp-trimmed',
+    });
     requestWithdrawalMock.mockResolvedValueOnce({
       externalId: 'payment_withdrawal_1',
       amountCreditCents: 1_000_00,
-      status: 'reviewing',
+      status: 'requested',
       reviewDueAt,
-      riskScore: 25,
+      riskScore: 0,
     });
 
     await partnerRouter.createCaller(makeContext()).requestWithdrawal({
@@ -566,9 +578,15 @@ describe('partnerRouter mutations', () => {
 
   it('maps withdrawal gate, validation, and idempotency errors', async () => {
     const caller = partnerRouter.createCaller(makeContext());
-    getKycStatusMock.mockResolvedValue('passed');
+    getKycProfileMock.mockResolvedValue({
+      status: 'passed',
+      bankCardHash: 'bank-fp-membership',
+    });
     requestWithdrawalMock.mockRejectedValueOnce(new WithdrawalGateError('membership_required'));
     requestWithdrawalMock.mockRejectedValueOnce(new WithdrawalGateError('kyc_required'));
+    requestWithdrawalMock.mockRejectedValueOnce(new WithdrawalGateError('bank_account_required'));
+    requestWithdrawalMock.mockRejectedValueOnce(new WithdrawalGateError('bank_account_mismatch'));
+    requestWithdrawalMock.mockRejectedValueOnce(new WithdrawalGateError('bank_card_cooling_down'));
     requestWithdrawalMock.mockRejectedValueOnce(new WithdrawalGateError('risk_frozen'));
     requestWithdrawalMock.mockRejectedValueOnce(new WithdrawalValidationError('below_minimum'));
     requestWithdrawalMock.mockRejectedValueOnce(
@@ -595,6 +613,36 @@ describe('partnerRouter mutations', () => {
     ).rejects.toMatchObject({
       code: 'PRECONDITION_FAILED',
       message: 'partner KYC must be passed before withdrawal',
+    });
+    await expect(
+      caller.requestWithdrawal({
+        amountCreditCents: 500_00,
+        bankAccountFingerprint: 'bank-fp-required',
+        idempotencyKey: 'withdrawal-bank-required',
+      }),
+    ).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+      message: 'partner withdrawal requires a verified bank account',
+    });
+    await expect(
+      caller.requestWithdrawal({
+        amountCreditCents: 500_00,
+        bankAccountFingerprint: 'bank-fp-mismatch',
+        idempotencyKey: 'withdrawal-bank-mismatch',
+      }),
+    ).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+      message: 'partner withdrawal bank account must match KYC bank card',
+    });
+    await expect(
+      caller.requestWithdrawal({
+        amountCreditCents: 500_00,
+        bankAccountFingerprint: 'bank-fp-cooldown',
+        idempotencyKey: 'withdrawal-bank-cooldown',
+      }),
+    ).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+      message: 'partner withdrawal bank account is cooling down',
     });
     await expect(
       caller.requestWithdrawal({
@@ -633,7 +681,10 @@ describe('partnerRouter mutations', () => {
   });
 
   it('sanitizes unknown withdrawal service errors', async () => {
-    getKycStatusMock.mockResolvedValueOnce('passed');
+    getKycProfileMock.mockResolvedValueOnce({
+      status: 'passed',
+      bankCardHash: 'bank-fp-unknown-error',
+    });
     requestWithdrawalMock.mockRejectedValueOnce(new Error('withdrawal stack details'));
 
     await expect(

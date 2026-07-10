@@ -2,10 +2,10 @@ import { newExternalId } from '@holaday/shared-types';
 import { and, eq, gte, inArray, lt, sql } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
 import { readAffectedRows } from '../db/mysql-result.js';
-import { partnerWithdrawalRequests, type PartnerWithdrawalRequest } from '../db/schema/partner.js';
+import { partnerWithdrawalRequests, type PartnerKycProfile, type PartnerWithdrawalRequest } from '../db/schema/partner.js';
 import { users } from '../db/schema/users.js';
 import { CreditLedgerService } from './credit-ledger-service.js';
-import { KycService, canWithdrawWithKycStatus } from './kyc-service.js';
+import { KycService, canWithdrawWithKycStatus, normalizeKycStatus } from './kyc-service.js';
 import { PartnerMembershipService } from './membership-service.js';
 import { partnerConfig } from './partner-config.js';
 
@@ -29,14 +29,28 @@ export class WithdrawalValidationError extends Error {
   }
 }
 
+type WithdrawalGateReason =
+  | 'membership_required'
+  | 'kyc_required'
+  | 'bank_account_required'
+  | 'bank_account_mismatch'
+  | 'bank_card_cooling_down'
+  | 'risk_frozen';
+
 export class WithdrawalGateError extends Error {
-  constructor(readonly reason: 'membership_required' | 'kyc_required' | 'risk_frozen') {
+  constructor(readonly reason: WithdrawalGateReason) {
     super(
       reason === 'membership_required'
         ? 'Withdrawal requires an active partner membership'
         : reason === 'kyc_required'
           ? 'Withdrawal requires passed KYC status'
-          : 'Withdrawal is frozen by risk control',
+          : reason === 'bank_account_required'
+            ? 'Withdrawal requires a verified bank account'
+            : reason === 'bank_account_mismatch'
+              ? 'Withdrawal bank account must match the verified KYC bank card'
+              : reason === 'bank_card_cooling_down'
+                ? 'Withdrawal bank card change is cooling down'
+                : 'Withdrawal is frozen by risk control',
     );
     this.name = 'WithdrawalGateError';
     Object.setPrototypeOf(this, WithdrawalGateError.prototype);
@@ -222,7 +236,7 @@ type WithdrawalRequestInput = {
 
 type WithdrawalStatus = 'requested' | 'reviewing';
 type WithdrawalLedger = Pick<CreditLedgerService, 'postEntry' | 'summarizeUser'>;
-type WithdrawalKyc = Pick<KycService, 'getStatus'>;
+type WithdrawalKyc = Pick<KycService, 'getProfile'>;
 type WithdrawalMembership = Pick<PartnerMembershipService, 'getActiveMembership'>;
 
 const WITHDRAWAL_CAP_STATUSES = ['requested', 'reviewing', 'approved', 'paid'] as const;
@@ -317,6 +331,23 @@ function metadataRecord(value: unknown): Record<string, unknown> {
 function metadataText(value: unknown, key: string): string | undefined {
   const raw = metadataRecord(value)[key];
   return typeof raw === 'string' && raw.trim().length > 0 ? raw.trim() : undefined;
+}
+
+function verifiedBankCardHash(profile: PartnerKycProfile): string | null {
+  const bankCardHash = profile.bankCardHash;
+  return typeof bankCardHash === 'string' && bankCardHash.trim().length > 0 ? bankCardHash.trim() : null;
+}
+
+function metadataDate(value: unknown, key: string): Date | null {
+  const raw = metadataText(value, key);
+  if (!raw) return null;
+  const date = new Date(raw);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function isWithinBankCardCooldown(changedAt: Date, now: Date, cooldownDays: number): boolean {
+  if (cooldownDays <= 0) return false;
+  return now.getTime() - changedAt.getTime() < cooldownDays * 24 * 60 * 60 * 1000;
 }
 
 function transitionErrorForTerminalStatus(
@@ -545,12 +576,27 @@ export class WithdrawalService {
       throw new WithdrawalGateError('membership_required');
     }
 
-    const kycStatus = await this.kycFor(db).getStatus(request.userId);
-    if (!canWithdrawWithKycStatus(kycStatus)) {
+    const kycProfile = await this.kycFor(db).getProfile(request.userId);
+    if (!kycProfile || !canWithdrawWithKycStatus(normalizeKycStatus(kycProfile.status))) {
       throw new WithdrawalGateError('kyc_required');
     }
 
     const config = partnerConfig();
+    const bankCardHash = verifiedBankCardHash(kycProfile);
+    if (!bankCardHash) {
+      throw new WithdrawalGateError('bank_account_required');
+    }
+    if (bankCardHash !== request.bankAccountFingerprint) {
+      throw new WithdrawalGateError('bank_account_mismatch');
+    }
+    const bankCardHashUpdatedAt = metadataDate(kycProfile.metadata, 'bankCardHashUpdatedAt');
+    if (
+      bankCardHashUpdatedAt &&
+      isWithinBankCardCooldown(bankCardHashUpdatedAt, request.now, config.withdrawalBankCardCooldownDays)
+    ) {
+      throw new WithdrawalGateError('bank_card_cooling_down');
+    }
+
     const summary = await ledger.summarizeUser(request.userId);
     if (summary.frozenCreditCents > 0) {
       throw new WithdrawalGateError('risk_frozen');

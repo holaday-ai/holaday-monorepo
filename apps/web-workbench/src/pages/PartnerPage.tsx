@@ -101,6 +101,7 @@ export function PartnerPage(): JSX.Element {
   const [inviteCodeInput, setInviteCodeInput] = React.useState('');
   const [assistedInvite, setAssistedInvite] = React.useState(false);
   const [kycProviderRef, setKycProviderRef] = React.useState('');
+  const [kycBankFingerprint, setKycBankFingerprint] = React.useState('');
   const [membershipIdempotencyKey, setMembershipIdempotencyKey] = React.useState(() =>
     idempotencyKey('partner-membership'),
   );
@@ -334,14 +335,22 @@ export function PartnerPage(): JSX.Element {
   }
 
   async function submitKyc(): Promise<void> {
+    const bankAccountFingerprint = kycBankFingerprint.trim();
+    if (!bankAccountFingerprint) {
+      toast.show('请填写实名银行卡指纹', 'error');
+      return;
+    }
+
     if (!beginMutation('kyc')) return;
     try {
       const providerRef = kycProviderRef.trim() || undefined;
       const result = await trpc.partner.submitKyc.mutate({
         providerRef,
+        bankAccountFingerprint,
       });
       setKycSubmission(result);
       setKycProviderRef('');
+      setKycBankFingerprint('');
       toast.show('实名复核已提交', 'info', 2200);
       await refresh();
     } catch (err) {
@@ -468,6 +477,8 @@ export function PartnerPage(): JSX.Element {
           referral={referral}
           kycProviderRef={kycProviderRef}
           onKycProviderRefChange={setKycProviderRef}
+          kycBankFingerprint={kycBankFingerprint}
+          onKycBankFingerprintChange={setKycBankFingerprint}
           kycSubmission={kycSubmission}
           pendingAction={pendingAction}
           isMutating={isMutating}
@@ -505,6 +516,8 @@ function PartnerWorkbench({
   referral,
   kycProviderRef,
   onKycProviderRefChange,
+  kycBankFingerprint,
+  onKycBankFingerprintChange,
   kycSubmission,
   pendingAction,
   isMutating,
@@ -536,6 +549,8 @@ function PartnerWorkbench({
   referral: PartnerReferralSummary | null;
   kycProviderRef: string;
   onKycProviderRefChange: (value: string) => void;
+  kycBankFingerprint: string;
+  onKycBankFingerprintChange: (value: string) => void;
   kycSubmission: PartnerKycSubmissionSummary | null;
   pendingAction: PartnerAction | null;
   isMutating: boolean;
@@ -618,10 +633,20 @@ function PartnerWorkbench({
         description="年度会员开通后提交实名复核，审核通过后才能充值和提现。"
         className="rounded-[8px] border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]"
       >
-        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] lg:items-end">
+        <div className="grid gap-3 lg:grid-cols-3">
           <Row label="当前状态" description={kycHint}>
             <StatusValue icon={<Shield className="h-3.5 w-3.5" />} value={state.kycLabel} />
           </Row>
+          <label className="min-w-0 text-xs font-medium text-[#595757]">
+            实名银行卡指纹
+            <Input
+              className="mt-1 font-mono text-xs"
+              placeholder="bank_fp_..."
+              value={kycBankFingerprint}
+              disabled={isMutating || kycSubmitBlocked}
+              onChange={(event) => onKycBankFingerprintChange(event.target.value)}
+            />
+          </label>
           <label className="min-w-0 text-xs font-medium text-[#595757]">
             认证流水号（选填）
             <Input
@@ -632,6 +657,8 @@ function PartnerWorkbench({
               onChange={(event) => onKycProviderRefChange(event.target.value)}
             />
           </label>
+        </div>
+        <div className="mt-3 flex justify-end">
           <Button
             type="button"
             size="sm"

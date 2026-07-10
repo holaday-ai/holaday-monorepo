@@ -3,7 +3,12 @@ import type { PartnerKycStatus } from '@holaday/shared-types';
 import { describe, expect, it } from 'vitest';
 import type { DB } from '../db/client.js';
 import { users } from '../db/schema/users.js';
-import { partnerWithdrawalRequests, type PartnerMembership, type PartnerWithdrawalRequest } from '../db/schema/partner.js';
+import {
+  partnerWithdrawalRequests,
+  type PartnerKycProfile,
+  type PartnerMembership,
+  type PartnerWithdrawalRequest,
+} from '../db/schema/partner.js';
 import { LedgerIdempotencyConflictError, type CreditLedgerService } from './credit-ledger-service.js';
 import type { KycService } from './kyc-service.js';
 import type { PartnerMembershipService } from './membership-service.js';
@@ -251,9 +256,31 @@ class FakeLedgerService implements Pick<CreditLedgerService, 'postEntry' | 'summ
   }
 }
 
-function fakeKycService(status: PartnerKycStatus): Pick<KycService, 'getStatus'> {
+function fakeKycProfile(overrides: Partial<PartnerKycProfile> = {}): PartnerKycProfile {
   return {
-    getStatus: async () => status,
+    id: 20,
+    externalId: 'pay_fake_kyc',
+    userId: 123,
+    status: 'passed',
+    country: 'CN',
+    realNameHash: null,
+    idNumberHash: null,
+    bankCardHash: 'bank_fingerprint_123',
+    phoneHash: null,
+    provider: 'cn-bankcard',
+    providerRef: 'kyc_ref_123',
+    reviewedAt: new Date('2026-07-01T00:00:00.000Z'),
+    metadata: null,
+    createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    ...overrides,
+  };
+}
+
+function fakeKycService(profile: PartnerKycProfile | null): Pick<KycService, 'getProfile' | 'getStatus'> {
+  return {
+    getProfile: async (userId: number) => (profile?.userId === userId ? profile : null),
+    getStatus: async (userId: number) => (profile?.userId === userId ? (profile.status as PartnerKycStatus) : 'not_started'),
   };
 }
 
@@ -335,13 +362,17 @@ function serviceWithDeps(input: {
   db?: FakeWithdrawalDb;
   ledger?: FakeLedgerService;
   kycStatus?: PartnerKycStatus;
+  kycProfile?: PartnerKycProfile | null;
   membership?: PartnerMembership | null;
 } = {}): { db: FakeWithdrawalDb; ledger: FakeLedgerService; service: WithdrawalService } {
   const db = input.db ?? new FakeWithdrawalDb();
   const ledger = input.ledger ?? new FakeLedgerService(2_000_00);
+  const kycProfile = Object.hasOwn(input, 'kycProfile')
+    ? (input.kycProfile ?? null)
+    : fakeKycProfile({ status: input.kycStatus ?? 'passed' });
   const service = new WithdrawalService(db.asDB(), {
     ledger,
-    kyc: fakeKycService(input.kycStatus ?? 'passed') as KycService,
+    kyc: fakeKycService(kycProfile) as KycService,
     membership: fakeMembershipService(Object.hasOwn(input, 'membership') ? (input.membership ?? null) : fakeMembership()) as PartnerMembershipService,
   });
   return { db, ledger, service };
@@ -571,6 +602,69 @@ describe('WithdrawalService requestWithdrawal', () => {
     await expect(service.requestWithdrawal(validWithdrawalInput)).rejects.toMatchObject({ reason: 'kyc_required' });
     expect(db.rowsCreated).toBe(0);
     expect(ledger.entries).toHaveLength(0);
+  });
+
+  it('requires a verified KYC bank account before withdrawal', async () => {
+    const { db, ledger, service } = serviceWithDeps({
+      kycProfile: fakeKycProfile({ bankCardHash: null }),
+    });
+
+    await expect(service.requestWithdrawal(validWithdrawalInput)).rejects.toBeInstanceOf(WithdrawalGateError);
+    await expect(service.requestWithdrawal(validWithdrawalInput)).rejects.toMatchObject({
+      reason: 'bank_account_required',
+    });
+    expect(db.rowsCreated).toBe(0);
+    expect(ledger.entries).toHaveLength(0);
+  });
+
+  it('requires withdrawal bank fingerprint to match the verified KYC bank card', async () => {
+    const { db, ledger, service } = serviceWithDeps({
+      kycProfile: fakeKycProfile({ bankCardHash: 'bank_fingerprint_other' }),
+    });
+
+    await expect(service.requestWithdrawal(validWithdrawalInput)).rejects.toBeInstanceOf(WithdrawalGateError);
+    await expect(service.requestWithdrawal(validWithdrawalInput)).rejects.toMatchObject({
+      reason: 'bank_account_mismatch',
+    });
+    expect(db.rowsCreated).toBe(0);
+    expect(ledger.entries).toHaveLength(0);
+  });
+
+  it('blocks withdrawals during bank card change cooldown', async () => {
+    const originalCooldown = process.env.PARTNER_WITHDRAWAL_BANK_CARD_COOLDOWN_DAYS;
+    process.env.PARTNER_WITHDRAWAL_BANK_CARD_COOLDOWN_DAYS = '7';
+    try {
+      const { db, ledger, service } = serviceWithDeps({
+        kycProfile: fakeKycProfile({
+          metadata: {
+            bankCardHashUpdatedAt: '2026-07-01T00:00:00.000Z',
+          },
+        }),
+      });
+
+      await expect(
+        service.requestWithdrawal({
+          ...validWithdrawalInput,
+          now: new Date('2026-07-03T00:00:00.000Z'),
+        }),
+      ).rejects.toBeInstanceOf(WithdrawalGateError);
+      await expect(
+        service.requestWithdrawal({
+          ...validWithdrawalInput,
+          now: new Date('2026-07-03T00:00:00.000Z'),
+        }),
+      ).rejects.toMatchObject({
+        reason: 'bank_card_cooling_down',
+      });
+      expect(db.rowsCreated).toBe(0);
+      expect(ledger.entries).toHaveLength(0);
+    } finally {
+      if (originalCooldown === undefined) {
+        delete process.env.PARTNER_WITHDRAWAL_BANK_CARD_COOLDOWN_DAYS;
+      } else {
+        process.env.PARTNER_WITHDRAWAL_BANK_CARD_COOLDOWN_DAYS = originalCooldown;
+      }
+    }
   });
 
   it('requires active partner membership before withdrawal', async () => {

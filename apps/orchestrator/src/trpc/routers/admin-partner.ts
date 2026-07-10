@@ -247,6 +247,9 @@ function mapWithdrawalError(error: unknown): never {
     const message = {
       membership_required: 'partner membership required',
       kyc_required: 'partner KYC must be passed before withdrawal',
+      bank_account_required: 'partner withdrawal requires a verified bank account',
+      bank_account_mismatch: 'partner withdrawal bank account must match KYC bank card',
+      bank_card_cooling_down: 'partner withdrawal bank account is cooling down',
       risk_frozen: 'partner withdrawal is frozen by risk control',
     }[error.reason];
 
@@ -453,6 +456,7 @@ export const adminPartnerRouter = router({
         status: z.enum(['pending', 'passed', 'review_required', 'rejected']),
         provider: z.string().trim().min(1).max(32).default('manual'),
         providerRef: z.string().trim().min(1).max(128).optional(),
+        bankCardHash: z.string().trim().min(1).max(128).optional(),
         note: z.string().trim().min(1).max(1000).optional(),
       }),
     )
@@ -468,6 +472,7 @@ export const adminPartnerRouter = router({
           status: input.status,
           provider: input.provider,
           providerRef: input.providerRef,
+          bankCardHash: input.bankCardHash,
           reviewerUserId: adminUser.id,
           note: input.note,
         });

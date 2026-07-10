@@ -47,6 +47,7 @@ export function AdminPartnerReviewPage(): JSX.Element {
   const [kycStatus, setKycStatus] = React.useState<KycStatusInput>('passed');
   const [kycProvider, setKycProvider] = React.useState('manual');
   const [kycProviderRef, setKycProviderRef] = React.useState('');
+  const [kycBankCardHash, setKycBankCardHash] = React.useState('');
   const [kycNote, setKycNote] = React.useState('');
   const [orderReviewNotes, setOrderReviewNotes] = React.useState<Record<string, string>>({});
   const [withdrawalReasons, setWithdrawalReasons] = React.useState<Record<string, string>>({});
@@ -119,9 +120,11 @@ export function AdminPartnerReviewPage(): JSX.Element {
           status: kycStatus,
           provider,
           providerRef: kycProviderRef.trim() || undefined,
+          bankCardHash: kycBankCardHash.trim() || undefined,
           note: kycNote.trim() || undefined,
         });
         setKycProviderRef('');
+        setKycBankCardHash('');
         setKycNote('');
       },
       '实名状态已更新',
@@ -183,6 +186,7 @@ export function AdminPartnerReviewPage(): JSX.Element {
           kycStatus={kycStatus}
           kycProvider={kycProvider}
           kycProviderRef={kycProviderRef}
+          kycBankCardHash={kycBankCardHash}
           kycNote={kycNote}
           orderReviewNotes={orderReviewNotes}
           withdrawalReasons={withdrawalReasons}
@@ -191,6 +195,7 @@ export function AdminPartnerReviewPage(): JSX.Element {
           setKycStatus={setKycStatus}
           setKycProvider={setKycProvider}
           setKycProviderRef={setKycProviderRef}
+          setKycBankCardHash={setKycBankCardHash}
           setKycNote={setKycNote}
           setOrderReviewNotes={setOrderReviewNotes}
           setWithdrawalReasons={setWithdrawalReasons}
@@ -212,6 +217,7 @@ function EnabledAdminPartnerReview({
   kycStatus,
   kycProvider,
   kycProviderRef,
+  kycBankCardHash,
   kycNote,
   orderReviewNotes,
   withdrawalReasons,
@@ -220,6 +226,7 @@ function EnabledAdminPartnerReview({
   setKycStatus,
   setKycProvider,
   setKycProviderRef,
+  setKycBankCardHash,
   setKycNote,
   setOrderReviewNotes,
   setWithdrawalReasons,
@@ -235,6 +242,7 @@ function EnabledAdminPartnerReview({
   kycStatus: KycStatusInput;
   kycProvider: string;
   kycProviderRef: string;
+  kycBankCardHash: string;
   kycNote: string;
   orderReviewNotes: Record<string, string>;
   withdrawalReasons: Record<string, string>;
@@ -243,6 +251,7 @@ function EnabledAdminPartnerReview({
   setKycStatus: (value: KycStatusInput) => void;
   setKycProvider: (value: string) => void;
   setKycProviderRef: (value: string) => void;
+  setKycBankCardHash: (value: string) => void;
   setKycNote: (value: string) => void;
   setOrderReviewNotes: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   setWithdrawalReasons: React.Dispatch<React.SetStateAction<Record<string, string>>>;
@@ -270,12 +279,14 @@ function EnabledAdminPartnerReview({
         status={kycStatus}
         provider={kycProvider}
         providerRef={kycProviderRef}
+        bankCardHash={kycBankCardHash}
         note={kycNote}
         pending={pendingAction?.startsWith('kyc-manual') ?? false}
         setUserExternalId={setKycUserExternalId}
         setStatus={setKycStatus}
         setProvider={setKycProvider}
         setProviderRef={setKycProviderRef}
+        setBankCardHash={setKycBankCardHash}
         setNote={setKycNote}
         onSubmit={submitManualKyc}
       />
@@ -320,12 +331,14 @@ function ManualKycPanel({
   status,
   provider,
   providerRef,
+  bankCardHash,
   note,
   pending,
   setUserExternalId,
   setStatus,
   setProvider,
   setProviderRef,
+  setBankCardHash,
   setNote,
   onSubmit,
 }: {
@@ -333,12 +346,14 @@ function ManualKycPanel({
   status: KycStatusInput;
   provider: string;
   providerRef: string;
+  bankCardHash: string;
   note: string;
   pending: boolean;
   setUserExternalId: (value: string) => void;
   setStatus: (value: KycStatusInput) => void;
   setProvider: (value: string) => void;
   setProviderRef: (value: string) => void;
+  setBankCardHash: (value: string) => void;
   setNote: (value: string) => void;
   onSubmit: () => Promise<void>;
 }): JSX.Element {
@@ -348,7 +363,7 @@ function ManualKycPanel({
         <ShieldCheck className="h-4 w-4 text-[#EA1F59]" aria-hidden />
         <h2 className="text-[15px] font-semibold">实名状态</h2>
       </div>
-      <div className="grid gap-3 md:grid-cols-[1.2fr_0.8fr_0.9fr_1fr_1.2fr_auto]">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[1.2fr_0.8fr_0.9fr_1fr_1fr_1.2fr_auto]">
         <input
           value={userExternalId}
           onChange={(e) => setUserExternalId(e.target.value)}
@@ -375,6 +390,12 @@ function ManualKycPanel({
           value={providerRef}
           onChange={(e) => setProviderRef(e.target.value)}
           placeholder="认证流水"
+          className="h-9 rounded-[8px] border border-[#DCDDDD] px-3 text-[13px] outline-none focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
+        />
+        <input
+          value={bankCardHash}
+          onChange={(e) => setBankCardHash(e.target.value)}
+          placeholder="银行卡哈希"
           className="h-9 rounded-[8px] border border-[#DCDDDD] px-3 text-[13px] outline-none focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
         />
         <input

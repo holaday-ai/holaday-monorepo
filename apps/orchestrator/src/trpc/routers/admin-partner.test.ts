@@ -234,6 +234,7 @@ describe('admin.partner router', () => {
       status: 'passed',
       provider: 'cn-bankcard',
       providerRef: 'bankcard-verify-1',
+      bankCardHash: 'bank_hash_123',
       note: 'same-name bank card verified',
     });
 
@@ -248,6 +249,7 @@ describe('admin.partner router', () => {
       status: 'passed',
       provider: 'cn-bankcard',
       providerRef: 'bankcard-verify-1',
+      bankCardHash: 'bank_hash_123',
       reviewerUserId: 1,
       note: 'same-name bank card verified',
     });
@@ -358,6 +360,20 @@ describe('admin.partner router', () => {
     ).rejects.toMatchObject({
       code: 'PRECONDITION_FAILED',
       message: 'partner withdrawal is frozen by risk control',
+    });
+  });
+
+  it('maps bank-card withdrawal gates to precondition failures', async () => {
+    approveWithdrawalMock.mockRejectedValueOnce(new WithdrawalGateError('bank_account_mismatch'));
+
+    await expect(
+      adminRouter.createCaller(makeContext()).partner.approveWithdrawal({
+        withdrawalExternalId: 'pay_withdrawal_1',
+        note: 'bank checked',
+      }),
+    ).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+      message: 'partner withdrawal bank account must match KYC bank card',
     });
   });
 

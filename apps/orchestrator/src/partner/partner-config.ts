@@ -25,6 +25,7 @@ export function partnerConfig() {
     withdrawalMinCreditCents: intEnv('PARTNER_WITHDRAWAL_MIN_CREDIT_CENTS', 500_00),
     withdrawalDailyPlatformCapCreditCents: intEnv('PARTNER_WITHDRAWAL_DAILY_PLATFORM_CAP_CREDIT_CENTS', 200_000_00),
     withdrawalMonthlyUserCapCreditCents: intEnv('PARTNER_WITHDRAWAL_MONTHLY_USER_CAP_CREDIT_CENTS', 100_000_00),
+    withdrawalBankCardCooldownDays: intEnv('PARTNER_WITHDRAWAL_BANK_CARD_COOLDOWN_DAYS', 7),
   };
 }
 

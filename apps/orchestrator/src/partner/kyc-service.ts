@@ -60,6 +60,7 @@ function reviewMetadata(input: {
   note?: string;
   provider: string;
   providerRef: string | null;
+  bankCardHashUpdatedAt?: Date | null;
   existingMetadata?: unknown;
 }): Record<string, unknown> {
   const metadata: Record<string, unknown> = {
@@ -67,6 +68,7 @@ function reviewMetadata(input: {
     source: input.provider,
   };
   if (input.providerRef) metadata.providerRef = input.providerRef;
+  if (input.bankCardHashUpdatedAt) metadata.bankCardHashUpdatedAt = input.bankCardHashUpdatedAt.toISOString();
   if (input.reviewerUserId != null) {
     metadata.reviewerUserId = normalizePositiveSafeInteger(input.reviewerUserId, 'reviewerUserId');
   }
@@ -120,6 +122,7 @@ export class KycService {
     reviewerUserId?: number;
     note?: string;
     country?: string;
+    bankCardHash?: string | null;
     now?: Date;
   }): Promise<PartnerKycProfile> {
     const userId = normalizePositiveSafeInteger(input.userId, 'userId');
@@ -130,14 +133,21 @@ export class KycService {
       input.providerRef === undefined
         ? (existing?.providerRef ?? null)
         : normalizeOptionalBoundedString(input.providerRef, 'providerRef', 128);
+    const bankCardHash =
+      input.bankCardHash === undefined
+        ? (existing?.bankCardHash ?? null)
+        : normalizeOptionalBoundedString(input.bankCardHash, 'bankCardHash', 128);
     const country = normalizeBoundedString(input.country ?? 'CN', 'country', 8);
     const now = normalizeDate(input.now ?? new Date(), 'now');
     const reviewedAt = status === 'pending' ? null : now;
+    const bankCardHashUpdatedAt =
+      existing?.bankCardHash && bankCardHash && existing.bankCardHash !== bankCardHash ? now : null;
     const metadata = reviewMetadata({
       reviewerUserId: input.reviewerUserId,
       note: input.note,
       provider,
       providerRef,
+      bankCardHashUpdatedAt,
       existingMetadata: existing?.metadata,
     });
 
@@ -150,6 +160,7 @@ export class KycService {
         country,
         provider,
         providerRef,
+        bankCardHash,
         reviewedAt,
         metadata,
         updatedAt: now,
@@ -160,6 +171,7 @@ export class KycService {
           country,
           provider,
           providerRef,
+          bankCardHash,
           reviewedAt,
           metadata,
           updatedAt: now,

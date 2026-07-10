@@ -301,6 +301,24 @@ describe('partner page state helpers', () => {
       ),
     ).toBe('账户存在冻结 HOLA Credit，需完成复核后再提现');
     expect(
+      partnerActionErrorMessage(
+        new Error('partner withdrawal requires a verified bank account'),
+        '提现失败',
+      ),
+    ).toBe('请先完成银行卡实名验证');
+    expect(
+      partnerActionErrorMessage(
+        new Error('partner withdrawal bank account must match KYC bank card'),
+        '提现失败',
+      ),
+    ).toBe('提现银行卡需与实名验证银行卡一致');
+    expect(
+      partnerActionErrorMessage(
+        new Error('partner withdrawal bank account is cooling down'),
+        '提现失败',
+      ),
+    ).toBe('银行卡变更冷却期内暂不能提现');
+    expect(
       partnerActionErrorMessage(new Error('insufficient_available_credit'), '提现失败'),
     ).toBe('可用 HOLA Credit 不足');
     expect(

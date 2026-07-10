@@ -179,6 +179,7 @@ describe('KycService', () => {
       status: 'passed',
       provider: 'cn-bankcard',
       providerRef: 'aliyun-kyc-123',
+      bankCardHash: 'bank_hash_123',
       reviewerUserId: 999,
       note: 'same-name bank card verified',
       now: reviewedAt,
@@ -190,6 +191,7 @@ describe('KycService', () => {
       country: 'CN',
       provider: 'cn-bankcard',
       providerRef: 'aliyun-kyc-123',
+      bankCardHash: 'bank_hash_123',
       reviewedAt,
       metadata: {
         reviewerUserId: 999,
@@ -199,6 +201,46 @@ describe('KycService', () => {
     expect(row.externalId).toMatch(/^pay_/);
     expect(fakeDb.rowsCreated).toBe(1);
     expect(fakeDb.upsertSetAttempts).toHaveLength(1);
+  });
+
+  it('records bank card change time when a verified card changes', async () => {
+    const fakeDb = new FakeKycDb([
+      {
+        id: 10,
+        externalId: 'pay_existing_kyc',
+        userId: 123,
+        status: 'passed',
+        country: 'CN',
+        provider: 'cn-bankcard',
+        providerRef: 'bankcard-flow-existing',
+        bankCardHash: 'bank_hash_old',
+        reviewedAt: new Date('2026-07-01T00:00:00.000Z'),
+        metadata: {
+          source: 'cn-bankcard',
+          bankCardHashUpdatedAt: '2026-07-01T00:00:00.000Z',
+        },
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-07-01T00:00:00.000Z'),
+      },
+    ]);
+    const service = new KycService(fakeDb.asDB());
+    const changedAt = new Date('2026-07-03T03:00:00.000Z');
+
+    const row = await service.upsertStatus({
+      userId: 123,
+      status: 'passed',
+      provider: 'cn-bankcard',
+      bankCardHash: 'bank_hash_new',
+      now: changedAt,
+    });
+
+    expect(row).toMatchObject({
+      bankCardHash: 'bank_hash_new',
+      metadata: {
+        source: 'cn-bankcard',
+        bankCardHashUpdatedAt: '2026-07-03T03:00:00.000Z',
+      },
+    });
   });
 
   it('updates the existing user profile without creating a duplicate row', async () => {
