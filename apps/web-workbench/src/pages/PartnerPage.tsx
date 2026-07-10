@@ -86,7 +86,15 @@ interface PartnerKycSubmissionSummary {
   readonly reviewedAt: Date | string | null;
 }
 
-type PartnerAction = 'membership' | 'preview' | 'recharge' | 'withdrawal' | 'invite' | 'kyc' | 'activity';
+type PartnerAction =
+  | 'membership'
+  | 'preview'
+  | 'recharge'
+  | 'orderStatus'
+  | 'withdrawal'
+  | 'invite'
+  | 'kyc'
+  | 'activity';
 
 export function PartnerPage(): JSX.Element {
   const toast = useToast();
@@ -278,6 +286,27 @@ export function PartnerPage(): JSX.Element {
       toast.show(`充值订单已创建，${partnerPaymentProviderHint(rechargeProvider)}`, 'info', 2500);
     } catch (err) {
       handleActionError(err, '充值订单创建失败');
+    } finally {
+      endMutation();
+    }
+  }
+
+  async function refreshOrderStatus(
+    order: PartnerOrderSummary,
+    setOrder: (value: PartnerOrderSummary) => void,
+  ): Promise<void> {
+    if (!beginMutation('orderStatus')) return;
+    try {
+      const latest = await trpc.partner.orderStatus.query({
+        orderExternalId: order.orderExternalId,
+      });
+      setOrder(latest);
+      toast.show(latest.status === order.status ? '订单状态已刷新' : '订单状态已更新', 'info', 1800);
+      if (latest.status !== 'pending') {
+        await refresh();
+      }
+    } catch (err) {
+      handleActionError(err, '订单状态刷新失败');
     } finally {
       endMutation();
     }
@@ -510,6 +539,8 @@ export function PartnerPage(): JSX.Element {
           onMembershipOrder={() => void createMembershipOrder()}
           onPreviewRecharge={() => void previewRecharge()}
           onCreateRechargeOrder={() => void createRechargeOrder()}
+          onRefreshMembershipOrder={(order) => void refreshOrderStatus(order, setMembershipOrder)}
+          onRefreshRechargeOrder={(order) => void refreshOrderStatus(order, setRechargeOrder)}
           onRequestWithdrawal={() => void requestWithdrawal()}
           onRecordInvite={() => void recordInvite()}
           onClaimDailyActivity={() => void claimDailyActivity()}
@@ -554,6 +585,8 @@ function PartnerWorkbench({
   onMembershipOrder,
   onPreviewRecharge,
   onCreateRechargeOrder,
+  onRefreshMembershipOrder,
+  onRefreshRechargeOrder,
   onRequestWithdrawal,
   onRecordInvite,
   onClaimDailyActivity,
@@ -592,6 +625,8 @@ function PartnerWorkbench({
   onMembershipOrder: () => void;
   onPreviewRecharge: () => void;
   onCreateRechargeOrder: () => void;
+  onRefreshMembershipOrder: (order: PartnerOrderSummary) => void;
+  onRefreshRechargeOrder: (order: PartnerOrderSummary) => void;
   onRequestWithdrawal: () => void;
   onRecordInvite: () => void;
   onClaimDailyActivity: () => void;
@@ -923,7 +958,13 @@ function PartnerWorkbench({
               创建会员订单
             </Button>
           </div>
-          {membershipOrder && <OrderSummary order={membershipOrder} />}
+          {membershipOrder && (
+            <OrderSummary
+              order={membershipOrder}
+              onRefresh={() => onRefreshMembershipOrder(membershipOrder)}
+              refreshing={pendingAction === 'orderStatus'}
+            />
+          )}
         </Section>
 
         <Section
@@ -1060,7 +1101,13 @@ function PartnerWorkbench({
           </div>
         </div>
         {rechargePreview && <RechargePreviewSummary preview={rechargePreview} />}
-        {rechargeOrder && <OrderSummary order={rechargeOrder} />}
+        {rechargeOrder && (
+          <OrderSummary
+            order={rechargeOrder}
+            onRefresh={() => onRefreshRechargeOrder(rechargeOrder)}
+            refreshing={pendingAction === 'orderStatus'}
+          />
+        )}
       </Section>
     </div>
   );
@@ -1138,17 +1185,47 @@ function StatusPanel({
   );
 }
 
-function OrderSummary({ order }: { order: PartnerOrderSummary }): JSX.Element {
+function OrderSummary({
+  order,
+  onRefresh,
+  refreshing,
+}: {
+  order: PartnerOrderSummary;
+  onRefresh?: () => void;
+  refreshing?: boolean;
+}): JSX.Element {
   const paymentIntent = partnerPaymentIntentDisplay(order.paymentIntent);
   return (
-    <dl className="mt-4 grid gap-3 border-t border-[#EFEFEF] pt-4 text-xs sm:grid-cols-2">
-      <SummaryItem label="订单编号" value={order.orderExternalId} />
-      <SummaryItem label="类型" value={order.orderKind === 'membership' ? '年费会员' : '充值'} />
-      <SummaryItem label="渠道" value={partnerPaymentProviderLabel(order.provider)} />
-      <SummaryItem label="状态" value={orderStatusLabel(order.status)} />
-      <SummaryItem label="金额" value={formatPartnerCnyCents(order.amountCnyCents)} />
-      {paymentIntent && <SummaryItem label="支付意图" value={`${paymentIntent.label} · ${paymentIntent.detail}`} />}
-    </dl>
+    <div className="mt-4 border-t border-[#EFEFEF] pt-4">
+      <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="text-xs font-medium text-foreground/80">订单摘要</div>
+        {onRefresh && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="w-fit border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+            onClick={onRefresh}
+            disabled={refreshing}
+          >
+            {refreshing ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+            ) : (
+              <RefreshCw className="h-3.5 w-3.5" aria-hidden />
+            )}
+            刷新状态
+          </Button>
+        )}
+      </div>
+      <dl className="grid gap-3 text-xs sm:grid-cols-2">
+        <SummaryItem label="订单编号" value={order.orderExternalId} />
+        <SummaryItem label="类型" value={order.orderKind === 'membership' ? '年费会员' : '充值'} />
+        <SummaryItem label="渠道" value={partnerPaymentProviderLabel(order.provider)} />
+        <SummaryItem label="状态" value={orderStatusLabel(order.status)} />
+        <SummaryItem label="金额" value={formatPartnerCnyCents(order.amountCnyCents)} />
+        {paymentIntent && <SummaryItem label="支付意图" value={`${paymentIntent.label} · ${paymentIntent.detail}`} />}
+      </dl>
+    </div>
   );
 }
 
