@@ -7,6 +7,7 @@ import {
   type PartnerRechargeOrder,
 } from '../db/schema/partner.js';
 import { users } from '../db/schema/users.js';
+import { KycService, canRechargeWithKycStatus } from './kyc-service.js';
 import { PartnerMembershipService } from './membership-service.js';
 import { partnerConfig } from './partner-config.js';
 import {
@@ -29,11 +30,13 @@ type PartnerPaymentOrderKind = 'membership' | 'recharge';
 type MembershipActivator = Pick<PartnerMembershipService, 'activate'>;
 type RechargeLotCreator = Pick<RechargeService, 'createLotForCapturedRecharge'>;
 type ReferralRewardSettler = Pick<ReferralService, 'settleRechargeReward'>;
+type KycStatusReader = Pick<KycService, 'getStatus'>;
 
 export interface PartnerPaymentConfirmServiceDeps {
   membershipService?: (db: DB) => MembershipActivator;
   rechargeService?: (db: DB) => RechargeLotCreator;
   referralService?: (db: DB) => ReferralRewardSettler;
+  kycService?: (db: DB) => KycStatusReader;
 }
 
 export interface PartnerPaymentConfirmInput {
@@ -282,6 +285,18 @@ function annualCapReviewMetadata(input: {
   };
 }
 
+function kycReviewMetadata(input: { existing: unknown; kycStatus: string }): Record<string, unknown> {
+  const base =
+    input.existing !== null && typeof input.existing === 'object' && !Array.isArray(input.existing)
+      ? (input.existing as Record<string, unknown>)
+      : {};
+  return {
+    ...base,
+    reviewReason: 'kyc_not_passed',
+    kycStatus: input.kycStatus,
+  };
+}
+
 function approvalMetadata(
   existing: unknown,
   approval: NormalizedPartnerPaymentReviewApprovalInput,
@@ -324,11 +339,13 @@ export class PartnerPaymentConfirmService {
   private readonly membershipService: (db: DB) => MembershipActivator;
   private readonly rechargeService: (db: DB) => RechargeLotCreator;
   private readonly referralService: (db: DB) => ReferralRewardSettler;
+  private readonly kycService: (db: DB) => KycStatusReader;
 
   constructor(private readonly db: DB, deps: PartnerPaymentConfirmServiceDeps = {}) {
     this.membershipService = deps.membershipService ?? ((db) => new PartnerMembershipService(db));
     this.rechargeService = deps.rechargeService ?? ((db) => new RechargeService(db));
     this.referralService = deps.referralService ?? ((db) => new ReferralService(db));
+    this.kycService = deps.kycService ?? ((db) => new KycService(db));
   }
 
   async confirmCapturedOrder(input: PartnerPaymentConfirmInput): Promise<PartnerPaymentConfirmResult> {
@@ -503,6 +520,21 @@ export class PartnerPaymentConfirmService {
         now: confirm.now,
       });
     } else {
+      const kycStatus = await this.kycService(tx).getStatus(order.userId);
+      if (!canRechargeWithKycStatus(kycStatus)) {
+        await this.markOrderReviewRequired(
+          tx,
+          completedOrder,
+          confirm,
+          kycReviewMetadata({ existing: completedOrder.metadata, kycStatus }),
+        );
+        return new PartnerPaymentConfirmReviewRequiredError(
+          order.externalId,
+          orderKind,
+          confirm.providerCaptureId,
+        );
+      }
+
       const annualRechargeTotalCnyCents = await computeCompletedRechargeTotalCnyCents(tx, {
         userId: order.userId,
         windowStart: rechargeAnnualWindowStart(confirm.now),

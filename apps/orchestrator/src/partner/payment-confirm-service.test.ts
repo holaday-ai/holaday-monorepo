@@ -1,4 +1,5 @@
 import { inspect } from 'node:util';
+import type { PartnerKycStatus } from '@holaday/shared-types';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { DB } from '../db/client.js';
 import {
@@ -206,6 +207,7 @@ function fakeLot(overrides: Partial<PartnerLot> = {}): PartnerLot {
 function serviceWithFakes(
   fakeDb: FakePartnerPaymentDb,
   overrides: {
+    kycStatus?: PartnerKycStatus;
     createLotForCapturedRecharge?: (input: {
       userId: number;
       rechargeOrderId: number;
@@ -282,6 +284,9 @@ function serviceWithFakes(
           principalCreditCents: input.amountCnyCents,
         });
       },
+    }),
+    kycService: () => ({
+      getStatus: async () => overrides.kycStatus ?? 'passed',
     }),
     referralService: () => ({
       settleRechargeReward: async (input: {
@@ -625,6 +630,27 @@ describe('PartnerPaymentConfirmService.confirmCapturedOrder', () => {
       annualRechargeTotalCnyCents: 26_000_00,
     });
     expect(lotCreations).toHaveLength(0);
+  });
+
+  it('moves a captured recharge to review_required when KYC no longer allows recharge', async () => {
+    const current = fakeOrder();
+    const fakeDb = new FakePartnerPaymentDb({ orders: [current] });
+    const { service, lotCreations, referralSettlements } = serviceWithFakes(fakeDb, {
+      kycStatus: 'rejected',
+    });
+
+    await expect(service.confirmCapturedOrder(confirmInput)).rejects.toBeInstanceOf(
+      PartnerPaymentConfirmReviewRequiredError,
+    );
+
+    expect(current.status).toBe('review_required');
+    expect(current.providerCaptureId).toBe('cap_1');
+    expect(current.metadata).toMatchObject({
+      reviewReason: 'kyc_not_passed',
+      kycStatus: 'rejected',
+    });
+    expect(lotCreations).toHaveLength(0);
+    expect(referralSettlements).toHaveLength(0);
   });
 
   it('preserves captured recharge facts after lot creation RangeError and retry is safe', async () => {
