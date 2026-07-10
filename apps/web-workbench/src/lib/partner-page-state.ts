@@ -32,6 +32,37 @@ export function partnerPaymentProviderHint(value: unknown): string {
   return provider === 'manual' ? '人工兜底通道，后台确认后生效。' : '支付成功后等待渠道回调确认。';
 }
 
+export interface PartnerPaymentIntentDisplay {
+  readonly label: string;
+  readonly detail: string;
+}
+
+export function partnerPaymentIntentDisplay(value: unknown): PartnerPaymentIntentDisplay | null {
+  if (!isRecord(value)) return null;
+  const provider = normalizePartnerPaymentProvider(value.provider);
+  const mode = safeTrimmedString(value.mode);
+  const instructions = safeTrimmedString(value.instructions);
+  if (provider === 'wechat' && mode === 'qr') {
+    return {
+      label: '微信二维码',
+      detail: instructions || '支付成功后等待渠道回调确认。',
+    };
+  }
+  if (provider === 'alipay' && mode === 'redirect') {
+    return {
+      label: '支付宝跳转',
+      detail: instructions || '支付成功后等待渠道回调确认。',
+    };
+  }
+  if (provider === 'manual' && mode === 'manual') {
+    return {
+      label: '人工确认',
+      detail: instructions || '人工确认通道，后台确认后生效。',
+    };
+  }
+  return null;
+}
+
 export interface PartnerDisabledState {
   readonly enabled: false;
   readonly title: string;

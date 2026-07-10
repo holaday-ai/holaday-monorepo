@@ -264,28 +264,37 @@ describe('partnerRouter mutations', () => {
   });
 
   it('creates a membership order with the fixed price and returns a pending summary', async () => {
+    const createdAt = new Date('2026-07-10T10:00:00.000Z');
     createPendingOrderMock.mockResolvedValueOnce({
       externalId: 'payment_membership_1',
-      provider: 'manual',
+      provider: 'wechat',
       orderKind: 'membership',
       amountCnyCents: PARTNER_MEMBERSHIP_PRICE_CNY_CENTS,
       status: 'pending',
+      createdAt,
     });
 
     await expect(
       partnerRouter.createCaller(makeContext()).createMembershipOrder({
+        provider: 'wechat',
         idempotencyKey: 'membership-idem-1',
       }),
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       orderExternalId: 'payment_membership_1',
-      provider: 'manual',
+      provider: 'wechat',
       orderKind: 'membership',
       amountCnyCents: PARTNER_MEMBERSHIP_PRICE_CNY_CENTS,
       status: 'pending',
+      paymentIntent: {
+        provider: 'wechat',
+        mode: 'qr',
+        codeUrl: expect.stringContaining('payment_membership_1'),
+        expiresAt: new Date('2026-07-10T10:30:00.000Z'),
+      },
     });
     expect(createPendingOrderMock).toHaveBeenCalledWith({
       userId: 123,
-      provider: 'manual',
+      provider: 'wechat',
       orderKind: 'membership',
       amountCnyCents: PARTNER_MEMBERSHIP_PRICE_CNY_CENTS,
       idempotencyKey: 'membership-idem-1',
@@ -338,12 +347,14 @@ describe('partnerRouter mutations', () => {
   });
 
   it('returns a recharge pending summary when the service succeeds', async () => {
+    const createdAt = new Date('2026-07-10T11:00:00.000Z');
     createPendingOrderMock.mockResolvedValueOnce({
       externalId: 'payment_recharge_1',
       provider: 'alipay',
       orderKind: 'recharge',
       amountCnyCents: 10_000_00,
       status: 'pending',
+      createdAt,
     });
 
     await expect(
@@ -352,12 +363,18 @@ describe('partnerRouter mutations', () => {
         provider: 'alipay',
         idempotencyKey: 'recharge-idem-1',
       }),
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       orderExternalId: 'payment_recharge_1',
       provider: 'alipay',
       orderKind: 'recharge',
       amountCnyCents: 10_000_00,
       status: 'pending',
+      paymentIntent: {
+        provider: 'alipay',
+        mode: 'redirect',
+        payUrl: expect.stringContaining('payment_recharge_1'),
+        expiresAt: new Date('2026-07-10T11:30:00.000Z'),
+      },
     });
     expect(createPendingOrderMock).toHaveBeenCalledWith({
       userId: 123,

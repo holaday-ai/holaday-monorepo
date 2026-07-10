@@ -16,6 +16,7 @@ import {
   resolveCnBankCardKycSubmission,
 } from '../../partner/kyc-service.js';
 import { PartnerMembershipService } from '../../partner/membership-service.js';
+import { buildPartnerPaymentIntent } from '../../partner/payment-intent-service.js';
 import { partnerConfig } from '../../partner/partner-config.js';
 import { calculateApiUnits, selectRechargeTier } from '../../partner/partner-rules.js';
 import {
@@ -132,18 +133,30 @@ function summarizePartnerOrder(order: {
   orderKind: string;
   amountCnyCents: number;
   status: string;
-  createdAt: Date;
+  createdAt?: Date;
   metadata?: unknown;
-}) {
+}, options: { includePaymentIntent?: boolean } = {}) {
   const metadata = metadataRecord(order.metadata);
   const reviewReason = metadataText(metadata, 'reviewReason');
   const reviewErrorMessage = metadataText(metadata, 'errorMessage');
+  const createdAt = order.createdAt instanceof Date ? order.createdAt : new Date();
   return {
     orderExternalId: order.externalId,
     provider: order.provider,
     orderKind: order.orderKind,
     amountCnyCents: order.amountCnyCents,
     status: order.status,
+    ...(options.includePaymentIntent
+      ? {
+          paymentIntent: buildPartnerPaymentIntent({
+            orderExternalId: order.externalId,
+            provider: order.provider,
+            orderKind: order.orderKind,
+            amountCnyCents: order.amountCnyCents,
+            createdAt,
+          }),
+        }
+      : {}),
     ...(reviewReason ? { reviewReason } : {}),
     ...(reviewErrorMessage ? { reviewErrorMessage } : {}),
     createdAt: order.createdAt,
@@ -472,7 +485,7 @@ export const partnerRouter = router({
         releaseStartsAt: lot.releaseStartsAt,
         releaseEndsAt: lot.releaseEndsAt,
       })),
-      orders: orders.map(summarizePartnerOrder),
+      orders: orders.map((order) => summarizePartnerOrder(order)),
       withdrawals: withdrawals.map(summarizePartnerWithdrawal),
     };
   }),
@@ -510,7 +523,7 @@ export const partnerRouter = router({
         amountCnyCents: PARTNER_MEMBERSHIP_PRICE_CNY_CENTS,
         idempotencyKey: input.idempotencyKey,
       });
-      return summarizePartnerOrder(order);
+      return summarizePartnerOrder(order, { includePaymentIntent: true });
     } catch (error) {
       mapRechargeOrderError(error);
     }
@@ -528,7 +541,7 @@ export const partnerRouter = router({
         amountCnyCents: input.amountCnyCents,
         idempotencyKey: input.idempotencyKey,
       });
-      return summarizePartnerOrder(order);
+      return summarizePartnerOrder(order, { includePaymentIntent: true });
     } catch (error) {
       mapRechargeOrderError(error);
     }

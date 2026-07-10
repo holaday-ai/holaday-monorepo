@@ -12,6 +12,7 @@ import {
   partnerDraftKeyFor,
   partnerPaymentProviderHint,
   partnerPaymentProviderLabel,
+  partnerPaymentIntentDisplay,
   partnerRechargeGate,
   partnerWithdrawalGate,
 } from './partner-page-state';
@@ -40,6 +41,34 @@ describe('partner page state helpers', () => {
     expect(partnerPaymentProviderLabel('manual')).toBe('人工确认');
     expect(partnerPaymentProviderHint('wechat')).toBe('支付成功后等待渠道回调确认。');
     expect(partnerPaymentProviderHint('manual')).toBe('人工兜底通道，后台确认后生效。');
+  });
+
+  it('formats partner payment intent display copy', () => {
+    expect(
+      partnerPaymentIntentDisplay({
+        provider: 'wechat',
+        mode: 'qr',
+        instructions: '支付成功后等待渠道回调确认。',
+      }),
+    ).toEqual({
+      label: '微信二维码',
+      detail: '支付成功后等待渠道回调确认。',
+    });
+    expect(
+      partnerPaymentIntentDisplay({
+        provider: 'alipay',
+        mode: 'redirect',
+        instructions: '支付成功后等待渠道回调确认。',
+      }),
+    ).toEqual({
+      label: '支付宝跳转',
+      detail: '支付成功后等待渠道回调确认。',
+    });
+    expect(partnerPaymentIntentDisplay({ provider: 'manual', mode: 'manual' })).toEqual({
+      label: '人工确认',
+      detail: '人工确认通道，后台确认后生效。',
+    });
+    expect(partnerPaymentIntentDisplay(null)).toBeNull();
   });
 
   it('normalizes a disabled dashboard into a disabled page state', () => {

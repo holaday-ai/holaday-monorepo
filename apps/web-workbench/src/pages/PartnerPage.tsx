@@ -33,6 +33,7 @@ import {
   normalizePartnerPaymentProvider,
   partnerPaymentProviderHint,
   partnerPaymentProviderLabel,
+  partnerPaymentIntentDisplay,
   type PartnerPaymentProvider,
 } from '@/lib/partner-page-state';
 import { trpc } from '@/lib/trpc';
@@ -44,6 +45,7 @@ interface PartnerOrderSummary {
   readonly orderKind: string;
   readonly amountCnyCents: number;
   readonly status: string;
+  readonly paymentIntent?: unknown;
 }
 
 interface PartnerRechargePreview {
@@ -1137,6 +1139,7 @@ function StatusPanel({
 }
 
 function OrderSummary({ order }: { order: PartnerOrderSummary }): JSX.Element {
+  const paymentIntent = partnerPaymentIntentDisplay(order.paymentIntent);
   return (
     <dl className="mt-4 grid gap-3 border-t border-[#EFEFEF] pt-4 text-xs sm:grid-cols-2">
       <SummaryItem label="订单编号" value={order.orderExternalId} />
@@ -1144,6 +1147,7 @@ function OrderSummary({ order }: { order: PartnerOrderSummary }): JSX.Element {
       <SummaryItem label="渠道" value={partnerPaymentProviderLabel(order.provider)} />
       <SummaryItem label="状态" value={orderStatusLabel(order.status)} />
       <SummaryItem label="金额" value={formatPartnerCnyCents(order.amountCnyCents)} />
+      {paymentIntent && <SummaryItem label="支付意图" value={`${paymentIntent.label} · ${paymentIntent.detail}`} />}
     </dl>
   );
 }
