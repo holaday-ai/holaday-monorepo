@@ -231,7 +231,7 @@ export class AllocationService {
     private readonly db: DB,
     deps: { activity?: AllocationActivity } = {},
   ) {
-    this.activity = deps.activity ?? new PartnerActivityService();
+    this.activity = deps.activity ?? new PartnerActivityService(db);
   }
 
   private async readDailyAllocation(lotId: number, day: string): Promise<PartnerDailyAllocation | undefined> {

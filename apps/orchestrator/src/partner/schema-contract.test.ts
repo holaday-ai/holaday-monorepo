@@ -5,6 +5,7 @@ import {
   apiCostPoolEvents,
   holaCreditLedgerEntries,
   partnerDailyAllocations,
+  partnerActivityEvents,
   partnerKycProfiles,
   partnerLots,
   partnerMemberships,
@@ -34,6 +35,7 @@ describe('partner schema contract', () => {
   it('exports companion partner tables', () => {
     expect(partnerRiskEvents).toBeDefined();
     expect(partnerReferrals).toBeDefined();
+    expect(partnerActivityEvents).toBeDefined();
     expect(partnerDailyAllocations).toBeDefined();
     expect(partnerMonthlyReleases).toBeDefined();
   });
@@ -43,6 +45,7 @@ describe('partner schema contract', () => {
   });
 
   it('pins partner uniqueness indexes', () => {
+    expect(indexConfig(partnerActivityEvents, 'uk_partner_activity_events_user_day_type')?.unique).toBe(true);
     expect(indexConfig(partnerDailyAllocations, 'uk_partner_daily_allocations_lot_date')?.unique).toBe(true);
     expect(indexConfig(partnerLots, 'uk_partner_lots_recharge_order')?.unique).toBe(true);
     expect(indexConfig(partnerMonthlyReleases, 'uk_partner_monthly_releases_lot_month')?.unique).toBe(true);
@@ -61,6 +64,18 @@ describe('partner schema contract', () => {
     expect(migration).toContain('uk_partner_monthly_releases_lot_month');
     expect(migration).toContain('`idempotency_key` VARCHAR(128) NOT NULL');
     expect(migration).toContain('uk_partner_withdrawal_requests_idempotency_key');
+    expect(migration).not.toMatch(/\bALTER\s+TABLE\b/i);
+    expect(migration).not.toMatch(/\bDROP\s+TABLE\b/i);
+    expect(migration).not.toMatch(/^\s*UPDATE\b/im);
+    expect(migration).not.toMatch(/^\s*DELETE\b/im);
+  });
+
+  it('keeps the partner activity migration additive', async () => {
+    const migration = await readFile(new URL('../../drizzle/0040_partner_activity_events.sql', import.meta.url), 'utf8');
+
+    expect(migration.match(/\bCREATE TABLE\b/g)).toHaveLength(1);
+    expect(migration).toContain('partner_activity_events');
+    expect(migration).toContain('uk_partner_activity_events_user_day_type');
     expect(migration).not.toMatch(/\bALTER\s+TABLE\b/i);
     expect(migration).not.toMatch(/\bDROP\s+TABLE\b/i);
     expect(migration).not.toMatch(/^\s*UPDATE\b/im);

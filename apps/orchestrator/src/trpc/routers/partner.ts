@@ -7,6 +7,7 @@ import { desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { users } from '../../db/schema/users.js';
 import { partnerLots, partnerRechargeOrders, partnerWithdrawalRequests } from '../../db/schema/partner.js';
+import { PartnerActivityService } from '../../partner/activity-service.js';
 import { CreditLedgerService } from '../../partner/credit-ledger-service.js';
 import { KycService, canRechargeWithKycStatus, normalizeKycStatus } from '../../partner/kyc-service.js';
 import { PartnerMembershipService } from '../../partner/membership-service.js';
@@ -336,6 +337,21 @@ function mapReferralError(error: unknown): never {
   });
 }
 
+function mapActivityError(error: unknown): never {
+  if (error instanceof TRPCError) {
+    throw error;
+  }
+
+  if (error instanceof RangeError) {
+    badRequest(error.message);
+  }
+
+  throw new TRPCError({
+    code: 'INTERNAL_SERVER_ERROR',
+    message: 'failed to claim partner daily activity',
+  });
+}
+
 function assertRollingThirtyDayAmount(rolling: number, monthlyRechargeCapCnyCents: number): void {
   if (!Number.isSafeInteger(rolling) || rolling < 0) {
     badRequest('rollingThirtyDayCnyCents must be a non-negative safe integer');
@@ -362,11 +378,13 @@ export const partnerRouter = router({
     const membershipService = new PartnerMembershipService(ctx.db);
     const kycService = new KycService(ctx.db);
     const ledgerService = new CreditLedgerService(ctx.db);
+    const activityService = new PartnerActivityService(ctx.db);
 
-    const [membership, kycProfile, ledger, lots, orders, withdrawals] = await Promise.all([
+    const [membership, kycProfile, ledger, activity, lots, orders, withdrawals] = await Promise.all([
       membershipService.getActiveMembership(userId),
       kycService.getProfile(userId),
       ledgerService.summarizeUser(userId),
+      activityService.getActivitySummary(userId),
       ctx.db
         .select({
           id: partnerLots.id,
@@ -434,6 +452,7 @@ export const partnerRouter = router({
       kycStatus,
       kycProfile: kycProfile ? summarizePartnerKyc(kycProfile) : null,
       inviteCode: ctx.userId,
+      activity,
       ledger: dashboardLedger,
       lots: lots.map((lot) => ({
         id: lot.id,
@@ -451,6 +470,27 @@ export const partnerRouter = router({
       orders: orders.map(summarizePartnerOrder),
       withdrawals: withdrawals.map(summarizePartnerWithdrawal),
     };
+  }),
+
+  claimDailyActivity: protectedProcedure.mutation(async ({ ctx }) => {
+    requirePartnerLedgerEnabled();
+
+    const userId = await requireInternalUserId(ctx);
+    const membership = await new PartnerMembershipService(ctx.db).getActiveMembership(userId);
+    if (!membership) {
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message: 'partner membership required',
+      });
+    }
+
+    try {
+      const activityService = new PartnerActivityService(ctx.db);
+      await activityService.recordDailyCheckIn({ userId });
+      return activityService.getActivitySummary(userId);
+    } catch (error) {
+      mapActivityError(error);
+    }
   }),
 
   createMembershipOrder: protectedProcedure.input(createMembershipOrderInput).mutation(async ({ ctx, input }) => {

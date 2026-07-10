@@ -270,6 +270,28 @@ export const partnerReferrals = mysqlTable(
   ],
 );
 
+export const partnerActivityEvents = mysqlTable(
+  'partner_activity_events',
+  {
+    id: idColumn(),
+    externalId: externalIdColumn(),
+    userId: userIdColumn(),
+    activityDate: varchar('activity_date', { length: 10 }).notNull(),
+    eventType: varchar('event_type', { length: 32 }).notNull(),
+    points: int('points', { unsigned: true }).notNull().default(0),
+    idempotencyKey: varchar('idempotency_key', { length: 160 }).notNull(),
+    metadata: json('metadata'),
+    createdAt: createdAtColumn(),
+  },
+  (t) => [
+    uniqueIndex('uk_partner_activity_events_external_id').on(t.externalId),
+    uniqueIndex('uk_partner_activity_events_idempotency_key').on(t.idempotencyKey),
+    uniqueIndex('uk_partner_activity_events_user_day_type').on(t.userId, t.activityDate, t.eventType),
+    index('ix_partner_activity_events_user_date').on(t.userId, t.activityDate),
+    index('ix_partner_activity_events_date_type').on(t.activityDate, t.eventType),
+  ],
+);
+
 export const partnerDailyAllocations = mysqlTable(
   'partner_daily_allocations',
   {
@@ -338,6 +360,8 @@ export type PartnerRiskEvent = typeof partnerRiskEvents.$inferSelect;
 export type NewPartnerRiskEvent = typeof partnerRiskEvents.$inferInsert;
 export type PartnerReferral = typeof partnerReferrals.$inferSelect;
 export type NewPartnerReferral = typeof partnerReferrals.$inferInsert;
+export type PartnerActivityEvent = typeof partnerActivityEvents.$inferSelect;
+export type NewPartnerActivityEvent = typeof partnerActivityEvents.$inferInsert;
 export type PartnerDailyAllocation = typeof partnerDailyAllocations.$inferSelect;
 export type NewPartnerDailyAllocation = typeof partnerDailyAllocations.$inferInsert;
 export type PartnerMonthlyRelease = typeof partnerMonthlyReleases.$inferSelect;

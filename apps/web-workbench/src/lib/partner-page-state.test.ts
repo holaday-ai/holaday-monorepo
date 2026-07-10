@@ -155,6 +155,16 @@ describe('partner page state helpers', () => {
         reviewedAtLabel: '2026-07-02',
       },
       inviteCode: 'usr_partner',
+      activity: {
+        activityDate: '',
+        checkedInToday: false,
+        checkedInLabel: '今日未签到',
+        loginDays: 0,
+        completedTasks: 0,
+        validInvites: 0,
+        activityFactorBps: 10_000,
+        activityMultiplierLabel: '1.00x',
+      },
       ledger: {
         availableCreditCents: 0,
         lockedCreditCents: 1200,
@@ -216,6 +226,33 @@ describe('partner page state helpers', () => {
           riskScore: 89,
         },
       ],
+    });
+  });
+
+  it('normalizes daily activity summary for check-in display', () => {
+    const state = normalizePartnerDashboard({
+      enabled: true,
+      activity: {
+        activityDate: '2026-07-03',
+        checkedInToday: true,
+        loginDays: 3,
+        completedTasks: 1,
+        validInvites: 1,
+        activityFactorBps: 10_700,
+      },
+    });
+
+    expect(state.enabled).toBe(true);
+    if (!state.enabled) throw new Error('expected enabled partner dashboard');
+    expect(state.activity).toEqual({
+      activityDate: '2026-07-03',
+      checkedInToday: true,
+      checkedInLabel: '今日已签到',
+      loginDays: 3,
+      completedTasks: 1,
+      validInvites: 1,
+      activityFactorBps: 10_700,
+      activityMultiplierLabel: '1.07x',
     });
   });
 

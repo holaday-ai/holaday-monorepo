@@ -25,6 +25,7 @@ export interface PartnerEnabledState {
   readonly kycProfile: PartnerKycProfileState | null;
   readonly limits: PartnerLimitsState;
   readonly inviteCode: string;
+  readonly activity: PartnerActivityState;
   readonly ledger: PartnerLedgerState;
   readonly lots: readonly PartnerLotState[];
   readonly orders: readonly PartnerOrderState[];
@@ -48,6 +49,17 @@ export interface PartnerLedgerState {
 
 export interface PartnerLimitsState {
   readonly withdrawalMinCreditCents: number;
+}
+
+export interface PartnerActivityState {
+  readonly activityDate: string;
+  readonly checkedInToday: boolean;
+  readonly checkedInLabel: string;
+  readonly loginDays: number;
+  readonly completedTasks: number;
+  readonly validInvites: number;
+  readonly activityFactorBps: number;
+  readonly activityMultiplierLabel: string;
 }
 
 export interface PartnerLotState {
@@ -229,6 +241,7 @@ export function normalizePartnerDashboard(value: unknown): PartnerPageState {
     kycProfile: normalizeKycProfile(value.kycProfile),
     limits: normalizeLimits(value.limits),
     inviteCode: normalizeInviteCode(value.inviteCode),
+    activity: normalizeActivity(value.activity),
     ledger: normalizeLedger(value.ledger),
     lots: normalizeLots(value.lots),
     orders: normalizeOrders(value.orders),
@@ -484,6 +497,22 @@ function normalizeLimits(value: unknown): PartnerLimitsState {
   };
 }
 
+function normalizeActivity(value: unknown): PartnerActivityState {
+  const activity = isRecord(value) ? value : {};
+  const activityFactorBps = safeActivityFactorBps(activity.activityFactorBps);
+  const checkedInToday = activity.checkedInToday === true;
+  return {
+    activityDate: dateOnly(activity.activityDate) ?? '',
+    checkedInToday,
+    checkedInLabel: checkedInToday ? '今日已签到' : '今日未签到',
+    loginDays: safeCount(activity.loginDays),
+    completedTasks: safeCount(activity.completedTasks),
+    validInvites: safeCount(activity.validInvites),
+    activityFactorBps,
+    activityMultiplierLabel: `${(activityFactorBps / 10_000).toFixed(2)}x`,
+  };
+}
+
 function normalizeKycProfile(value: unknown): PartnerKycProfileState | null {
   if (!isRecord(value)) return null;
   const kycExternalId = safeTrimmedString(value.kycExternalId);
@@ -659,6 +688,28 @@ function safeCents(value: unknown): number {
         : Number.NaN;
   if (!Number.isFinite(parsed) || parsed < 0) return 0;
   return Math.floor(parsed);
+}
+
+function safeCount(value: unknown): number {
+  const parsed =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string' && value.trim()
+        ? Number(value)
+        : Number.NaN;
+  if (!Number.isFinite(parsed) || parsed < 0) return 0;
+  return Math.floor(parsed);
+}
+
+function safeActivityFactorBps(value: unknown): number {
+  const parsed =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string' && value.trim()
+        ? Number(value)
+        : Number.NaN;
+  if (!Number.isFinite(parsed)) return 10_000;
+  return Math.min(11_000, Math.max(10_000, Math.floor(parsed)));
 }
 
 function safeRiskScore(value: unknown): number {

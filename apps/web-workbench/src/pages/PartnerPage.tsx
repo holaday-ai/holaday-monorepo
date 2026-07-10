@@ -1,6 +1,7 @@
 import {
   AlertCircle,
   ArrowUpRight,
+  CalendarCheck,
   Copy,
   CreditCard,
   Gift,
@@ -78,7 +79,7 @@ interface PartnerKycSubmissionSummary {
   readonly reviewedAt: Date | string | null;
 }
 
-type PartnerAction = 'membership' | 'preview' | 'recharge' | 'withdrawal' | 'invite' | 'kyc';
+type PartnerAction = 'membership' | 'preview' | 'recharge' | 'withdrawal' | 'invite' | 'kyc' | 'activity';
 
 export function PartnerPage(): JSX.Element {
   const toast = useToast();
@@ -361,6 +362,38 @@ export function PartnerPage(): JSX.Element {
     }
   }
 
+  async function claimDailyActivity(): Promise<void> {
+    if (!state?.enabled) return;
+    if (state.activity.checkedInToday) {
+      toast.show('今日活跃已记录', 'info', 1600);
+      return;
+    }
+
+    if (!beginMutation('activity')) return;
+    try {
+      const result = await trpc.partner.claimDailyActivity.mutate();
+      const normalized = normalizePartnerDashboard({
+        enabled: true,
+        activity: result,
+      });
+      if (normalized.enabled) {
+        setState((current) =>
+          current?.enabled
+            ? {
+                ...current,
+                activity: normalized.activity,
+              }
+            : current,
+        );
+      }
+      toast.show('今日活跃已记录', 'info', 1800);
+    } catch (err) {
+      handleActionError(err, '今日活跃记录失败');
+    } finally {
+      endMutation();
+    }
+  }
+
   async function copyInviteCode(): Promise<void> {
     if (!state?.enabled || !state.inviteCode) return;
     try {
@@ -461,6 +494,7 @@ export function PartnerPage(): JSX.Element {
           onCreateRechargeOrder={() => void createRechargeOrder()}
           onRequestWithdrawal={() => void requestWithdrawal()}
           onRecordInvite={() => void recordInvite()}
+          onClaimDailyActivity={() => void claimDailyActivity()}
           onCopyInviteCode={() => void copyInviteCode()}
           onSubmitKyc={() => void submitKyc()}
           membershipOrder={membershipOrder}
@@ -500,6 +534,7 @@ function PartnerWorkbench({
   onCreateRechargeOrder,
   onRequestWithdrawal,
   onRecordInvite,
+  onClaimDailyActivity,
   onCopyInviteCode,
   onSubmitKyc,
   membershipOrder,
@@ -533,6 +568,7 @@ function PartnerWorkbench({
   onCreateRechargeOrder: () => void;
   onRequestWithdrawal: () => void;
   onRecordInvite: () => void;
+  onClaimDailyActivity: () => void;
   onCopyInviteCode: () => void;
   onSubmitKyc: () => void;
   membershipOrder: PartnerOrderSummary | null;
@@ -608,6 +644,43 @@ function PartnerWorkbench({
           <Row label="冻结 HOLA Credit" description="风险复核或异常状态下冻结">
             <span className="text-sm tabular-nums">{formatHolaCreditCents(state.ledger.frozenCreditCents)}</span>
           </Row>
+        </div>
+      </Section>
+
+      <Section
+        title="每日活跃"
+        description="签到只影响后续 API Units 分配权重，不会直接发放 HOLA Credit。"
+        className="rounded-[8px] border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]"
+      >
+        <div className="grid gap-x-8 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+          <div className="grid gap-x-8 lg:grid-cols-3">
+            <Row label="今日状态" description={state.activity.activityDate || '—'}>
+              <StatusValue icon={<CalendarCheck className="h-3.5 w-3.5" />} value={state.activity.checkedInLabel} />
+            </Row>
+            <Row label="近 7 日签到" description="用于计算每日活跃系数">
+              <span className="text-sm font-medium tabular-nums text-foreground/85">{state.activity.loginDays} 天</span>
+            </Row>
+            <Row label="活跃系数" description="参与每日锁定增量分配权重">
+              <span className="text-sm font-medium tabular-nums text-foreground/85">
+                {state.activity.activityMultiplierLabel}
+              </span>
+            </Row>
+          </div>
+          <div className="mt-3 flex justify-end lg:mt-0">
+            <Button
+              type="button"
+              size="sm"
+              onClick={onClaimDailyActivity}
+              disabled={isMutating || !membershipActive || state.activity.checkedInToday}
+            >
+              {pendingAction === 'activity' ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+              ) : (
+                <CalendarCheck className="h-3.5 w-3.5" aria-hidden />
+              )}
+              {state.activity.checkedInToday ? '今日已签到' : '记录活跃'}
+            </Button>
+          </div>
         </div>
       </Section>
 

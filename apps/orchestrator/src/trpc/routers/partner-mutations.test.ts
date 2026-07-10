@@ -7,7 +7,9 @@ const {
   getActiveMembershipMock,
   getKycProfileMock,
   getKycStatusMock,
+  getActivitySummaryMock,
   recordInviteMock,
+  recordDailyCheckInMock,
   upsertKycStatusMock,
   requestWithdrawalMock,
 } = vi.hoisted(() => ({
@@ -15,7 +17,9 @@ const {
   getActiveMembershipMock: vi.fn(),
   getKycProfileMock: vi.fn(),
   getKycStatusMock: vi.fn(),
+  getActivitySummaryMock: vi.fn(),
   recordInviteMock: vi.fn(),
+  recordDailyCheckInMock: vi.fn(),
   upsertKycStatusMock: vi.fn(),
   requestWithdrawalMock: vi.fn(),
 }));
@@ -68,6 +72,17 @@ vi.mock('../../partner/referral-service.js', async (importOriginal) => {
     ...actual,
     ReferralService: vi.fn(() => ({
       recordInvite: recordInviteMock,
+    })),
+  };
+});
+
+vi.mock('../../partner/activity-service.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../partner/activity-service.js')>();
+  return {
+    ...actual,
+    PartnerActivityService: vi.fn(() => ({
+      recordDailyCheckIn: recordDailyCheckInMock,
+      getActivitySummary: getActivitySummaryMock,
     })),
   };
 });
@@ -170,7 +185,9 @@ describe('partnerRouter mutations', () => {
     getActiveMembershipMock.mockReset();
     getKycProfileMock.mockReset();
     getKycStatusMock.mockReset();
+    getActivitySummaryMock.mockReset();
     recordInviteMock.mockReset();
+    recordDailyCheckInMock.mockReset();
     upsertKycStatusMock.mockReset();
     requestWithdrawalMock.mockReset();
   });
@@ -225,11 +242,16 @@ describe('partnerRouter mutations', () => {
       code: 'PRECONDITION_FAILED',
       message: 'partner ledger is disabled',
     });
+    await expect(caller.claimDailyActivity()).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+      message: 'partner ledger is disabled',
+    });
     expect(fakeDb.selectTables).toEqual([]);
     expect(createPendingOrderMock).not.toHaveBeenCalled();
     expect(getActiveMembershipMock).not.toHaveBeenCalled();
     expect(getKycStatusMock).not.toHaveBeenCalled();
     expect(recordInviteMock).not.toHaveBeenCalled();
+    expect(recordDailyCheckInMock).not.toHaveBeenCalled();
     expect(upsertKycStatusMock).not.toHaveBeenCalled();
     expect(requestWithdrawalMock).not.toHaveBeenCalled();
   });
@@ -408,6 +430,53 @@ describe('partnerRouter mutations', () => {
       inviteeUserId: 123,
       assisted: true,
     });
+  });
+
+  it('claims daily activity after membership is active and returns the updated summary', async () => {
+    getActiveMembershipMock.mockResolvedValueOnce({
+      id: 55,
+      userId: 123,
+      status: 'active',
+      expiresAt: new Date('2027-07-03T00:00:00.000Z'),
+    });
+    recordDailyCheckInMock.mockResolvedValueOnce({
+      externalId: 'payment_activity_1',
+      userId: 123,
+      activityDate: '2026-07-03',
+      eventType: 'daily_checkin',
+      points: 1,
+    });
+    getActivitySummaryMock.mockResolvedValueOnce({
+      activityDate: '2026-07-03',
+      checkedInToday: true,
+      loginDays: 3,
+      completedTasks: 0,
+      validInvites: 0,
+      activityFactorBps: 10_300,
+    });
+
+    await expect(partnerRouter.createCaller(makeContext()).claimDailyActivity()).resolves.toEqual({
+      activityDate: '2026-07-03',
+      checkedInToday: true,
+      loginDays: 3,
+      completedTasks: 0,
+      validInvites: 0,
+      activityFactorBps: 10_300,
+    });
+    expect(getActiveMembershipMock).toHaveBeenCalledWith(123);
+    expect(recordDailyCheckInMock).toHaveBeenCalledWith({ userId: 123 });
+    expect(getActivitySummaryMock).toHaveBeenCalledWith(123);
+  });
+
+  it('blocks daily activity before membership is active', async () => {
+    getActiveMembershipMock.mockResolvedValueOnce(null);
+
+    await expect(partnerRouter.createCaller(makeContext()).claimDailyActivity()).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+      message: 'partner membership required',
+    });
+    expect(recordDailyCheckInMock).not.toHaveBeenCalled();
+    expect(getActivitySummaryMock).not.toHaveBeenCalled();
   });
 
   it('submits the current user for KYC review after membership is active', async () => {

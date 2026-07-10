@@ -5,9 +5,11 @@ import { llmCalls } from '../db/schema/llm-calls.js';
 import {
   apiCostPoolEvents,
   partnerDailyAllocations,
+  partnerActivityEvents,
   partnerLots,
   type ApiCostPoolEvent,
   type PartnerDailyAllocation,
+  type PartnerActivityEvent,
   type PartnerLot,
 } from '../db/schema/partner.js';
 import {
@@ -31,6 +33,7 @@ class FakeAllocationDb {
   readonly costPoolRows: ApiCostPoolEvent[];
   readonly lotRows: PartnerLot[];
   readonly allocationRows: PartnerDailyAllocation[];
+  readonly activityEventRows: PartnerActivityEvent[];
   readonly costPoolInsertAttempts: FakeCostPoolInsert[] = [];
   readonly allocationInsertAttempts: FakeDailyAllocationInsert[] = [];
   readonly lotReconciliations: Array<{ lotId: number; lockedBonusCreditCents: number }> = [];
@@ -42,11 +45,13 @@ class FakeAllocationDb {
     costPoolEvents?: ApiCostPoolEvent[];
     lots?: PartnerLot[];
     allocations?: PartnerDailyAllocation[];
+    activityEvents?: PartnerActivityEvent[];
   } = {}) {
     this.llmCallRows = [...(input.llmCalls ?? [])];
     this.costPoolRows = [...(input.costPoolEvents ?? [])];
     this.lotRows = [...(input.lots ?? [])];
     this.allocationRows = [...(input.allocations ?? [])];
+    this.activityEventRows = [...(input.activityEvents ?? [])];
     this.nextCostPoolId = Math.max(0, ...this.costPoolRows.map((row) => row.id)) + 1;
     this.nextAllocationId = Math.max(0, ...this.allocationRows.map((row) => row.id)) + 1;
   }
@@ -217,6 +222,24 @@ class FakeAllocationDb {
       return matchingDateRows;
     }
 
+    if (table === partnerActivityEvents) {
+      if (!predicateText) return [...this.activityEventRows];
+      const predicateNumbers = extractPredicateNumbers(predicate);
+      const predicateStrings = extractPredicateStrings(predicate);
+      const hasUserId =
+        predicateNumbers.length > 0 && (predicateText.includes('user_id') || predicateText.includes('userId'));
+      const days = predicateStrings.filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(value));
+      const startDay = days[0] ?? null;
+      const endDay = days[days.length - 1] ?? startDay;
+      return this.activityEventRows.filter((row) => {
+        if (hasUserId && !predicateNumbers.includes(row.userId)) return false;
+        if (predicateText.includes('daily_checkin') && row.eventType !== 'daily_checkin') return false;
+        if (startDay !== null && row.activityDate < startDay) return false;
+        if (endDay !== null && row.activityDate > endDay) return false;
+        return true;
+      });
+    }
+
     return [];
   }
 }
@@ -315,6 +338,21 @@ function fakeAllocation(overrides: Partial<PartnerDailyAllocation> = {}): Partne
   };
 }
 
+function fakeActivity(overrides: Partial<PartnerActivityEvent> = {}): PartnerActivityEvent {
+  return {
+    id: 1,
+    externalId: 'payment_activity_1',
+    userId: 123,
+    activityDate: '2026-07-01',
+    eventType: 'daily_checkin',
+    points: 1,
+    idempotencyKey: 'activity:daily_checkin:123:2026-07-01',
+    metadata: null,
+    createdAt: new Date('2026-07-01T00:00:00.000Z'),
+    ...overrides,
+  };
+}
+
 describe('partner allocation pure rules', () => {
   it('converts USD micros through CNY FX bps into API Units', () => {
     expect(calculateApiUnitsFromUsdCost({ costUsdMicros: 1_000_000, fxBps: 72_000 })).toBe(7_200);
@@ -404,6 +442,29 @@ describe('AllocationService buildDailyCostPool', () => {
 });
 
 describe('AllocationService allocateDailyLockedBonus', () => {
+  it('uses stored daily check-ins through the default activity service', async () => {
+    const fakeDb = new FakeAllocationDb({
+      lots: [
+        fakeLot({ id: 1, userId: 123, apiUnits: 10_500_000 }),
+        fakeLot({ id: 2, userId: 456, externalId: 'payment_lot_2', apiUnits: 10_500_000 }),
+      ],
+      activityEvents: [
+        fakeActivity({ id: 1, userId: 456, activityDate: '2026-06-30', idempotencyKey: 'old' }),
+        fakeActivity({ id: 2, userId: 456, activityDate: '2026-07-01', idempotencyKey: 'd1' }),
+        fakeActivity({ id: 3, userId: 456, activityDate: '2026-07-02', idempotencyKey: 'd2' }),
+      ],
+    });
+    const service = new AllocationService(fakeDb.asDB());
+
+    await service.allocateDailyLockedBonus({ day: '2026-07-02', budgetCreditCents: 1_200 });
+    const todayAllocations = fakeDb.allocationRows.filter((row) => row.allocationDate === '2026-07-02');
+
+    expect(todayAllocations.map((row) => [row.lotId, row.lockedBonusCreditCents, row.apiUnitsWeight])).toEqual([
+      [1, 591, 10_500_000],
+      [2, 608, 10_815_000],
+    ]);
+  });
+
   it('uses activity factors as allocation weight without creating direct credit', async () => {
     const fakeDb = new FakeAllocationDb({
       lots: [

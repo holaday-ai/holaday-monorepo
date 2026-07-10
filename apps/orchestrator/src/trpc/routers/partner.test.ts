@@ -5,12 +5,14 @@ import { partnerRouter } from './partner.js';
 import { users, type User } from '../../db/schema/users.js';
 import {
   holaCreditLedgerEntries,
+  partnerActivityEvents,
   partnerKycProfiles,
   partnerLots,
   partnerMemberships,
   partnerRechargeOrders,
   partnerWithdrawalRequests,
   type HolaCreditLedgerEntry,
+  type PartnerActivityEvent,
   type PartnerKycProfile,
   type PartnerLot,
   type PartnerMembership,
@@ -23,6 +25,7 @@ class FakePartnerDb {
   readonly memberships: PartnerMembership[];
   readonly kycProfiles: PartnerKycProfile[];
   readonly ledgerEntries: HolaCreditLedgerEntry[];
+  readonly activityEvents: PartnerActivityEvent[];
   readonly lots: PartnerLot[];
   readonly orders: PartnerRechargeOrder[];
   readonly withdrawals: PartnerWithdrawalRequest[];
@@ -33,6 +36,7 @@ class FakePartnerDb {
     memberships?: PartnerMembership[];
     kycProfiles?: PartnerKycProfile[];
     ledgerEntries?: HolaCreditLedgerEntry[];
+    activityEvents?: PartnerActivityEvent[];
     lots?: PartnerLot[];
     orders?: PartnerRechargeOrder[];
     withdrawals?: PartnerWithdrawalRequest[];
@@ -41,6 +45,7 @@ class FakePartnerDb {
     this.memberships = [...(input.memberships ?? [])];
     this.kycProfiles = [...(input.kycProfiles ?? [])];
     this.ledgerEntries = [...(input.ledgerEntries ?? [])];
+    this.activityEvents = [...(input.activityEvents ?? [])];
     this.lots = [...(input.lots ?? [])];
     this.orders = [...(input.orders ?? [])];
     this.withdrawals = [...(input.withdrawals ?? [])];
@@ -100,6 +105,19 @@ class FakePartnerDb {
     if (table === holaCreditLedgerEntries) {
       return this.ledgerEntries.filter((entry) => predicateText.includes(String(entry.userId)));
     }
+    if (table === partnerActivityEvents) {
+      const predicateStrings = extractPredicateStrings(predicateText);
+      const days = predicateStrings.filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(value));
+      const startDay = days[0] ?? null;
+      const endDay = days[days.length - 1] ?? startDay;
+      return this.activityEvents.filter((event) => {
+        if (!predicateText.includes(String(event.userId))) return false;
+        if (predicateText.includes('daily_checkin') && event.eventType !== 'daily_checkin') return false;
+        if (startDay && event.activityDate < startDay) return false;
+        if (endDay && event.activityDate > endDay) return false;
+        return true;
+      });
+    }
     if (table === partnerLots) {
       return this.lots.filter((lot) => predicateText.includes(String(lot.userId)));
     }
@@ -119,6 +137,10 @@ class FakePartnerDb {
 
 function tableName(table: unknown): string {
   return (table as Record<symbol, string> | null)?.[Symbol.for('drizzle:Name')] ?? 'unknown';
+}
+
+function extractPredicateStrings(value: string): string[] {
+  return Array.from(value.matchAll(/'([^']+)'|"([^"]+)"/g), (match) => match[1] ?? match[2] ?? '');
 }
 
 function fakeUser(overrides: Partial<User> = {}): User {
@@ -202,6 +224,21 @@ function fakeLedgerEntry(overrides: Partial<HolaCreditLedgerEntry> = {}): HolaCr
     idempotencyKey: 'ledger-idem-1',
     metadata: null,
     createdAt: new Date('2026-03-01T00:00:00.000Z'),
+    ...overrides,
+  };
+}
+
+function fakeActivity(overrides: Partial<PartnerActivityEvent> = {}): PartnerActivityEvent {
+  return {
+    id: 35,
+    externalId: 'payment_activity',
+    userId: 123,
+    activityDate: '2026-07-02',
+    eventType: 'daily_checkin',
+    points: 1,
+    idempotencyKey: 'activity:daily_checkin:123:2026-07-02',
+    metadata: null,
+    createdAt: new Date('2026-07-02T00:00:00.000Z'),
     ...overrides,
   };
 }
@@ -339,6 +376,10 @@ describe('partnerRouter', () => {
           idempotencyKey: 'ledger-idem-3',
         }),
       ],
+      activityEvents: [
+        fakeActivity({ id: 35, activityDate: '2026-07-01', idempotencyKey: 'activity:d1' }),
+        fakeActivity({ id: 36, activityDate: '2026-07-02', idempotencyKey: 'activity:d2' }),
+      ],
       lots: [fakeLot()],
       orders: [
         fakeOrder({
@@ -376,6 +417,14 @@ describe('partnerRouter', () => {
         reviewedAt: new Date('2026-02-01T00:00:00.000Z'),
       },
       inviteCode: 'usr_partner',
+      activity: {
+        activityDate: '2026-07-02',
+        checkedInToday: true,
+        loginDays: 2,
+        completedTasks: 0,
+        validInvites: 0,
+        activityFactorBps: 10_200,
+      },
       ledger: {
         availableCreditCents: 10_000_00,
         lockedCreditCents: 500_00,
