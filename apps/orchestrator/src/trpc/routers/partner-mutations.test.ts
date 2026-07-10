@@ -569,6 +569,7 @@ describe('partnerRouter mutations', () => {
     getKycStatusMock.mockResolvedValue('passed');
     requestWithdrawalMock.mockRejectedValueOnce(new WithdrawalGateError('membership_required'));
     requestWithdrawalMock.mockRejectedValueOnce(new WithdrawalGateError('kyc_required'));
+    requestWithdrawalMock.mockRejectedValueOnce(new WithdrawalGateError('risk_frozen'));
     requestWithdrawalMock.mockRejectedValueOnce(new WithdrawalValidationError('below_minimum'));
     requestWithdrawalMock.mockRejectedValueOnce(
       new WithdrawalValidationError('insufficient_withdrawable_credit'),
@@ -594,6 +595,16 @@ describe('partnerRouter mutations', () => {
     ).rejects.toMatchObject({
       code: 'PRECONDITION_FAILED',
       message: 'partner KYC must be passed before withdrawal',
+    });
+    await expect(
+      caller.requestWithdrawal({
+        amountCreditCents: 500_00,
+        bankAccountFingerprint: 'bank-fp-risk-frozen',
+        idempotencyKey: 'withdrawal-risk-frozen',
+      }),
+    ).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+      message: 'partner withdrawal is frozen by risk control',
     });
     await expect(
       caller.requestWithdrawal({

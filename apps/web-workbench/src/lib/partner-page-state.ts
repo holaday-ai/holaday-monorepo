@@ -201,6 +201,7 @@ const PARTNER_ACTION_ERROR_RULES: ReadonlyArray<readonly [RegExp, string]> = [
   [/partner KYC must be passed before recharge/i, '实名通过后才能充值'],
   [/partner KYC must be passed before withdrawal/i, '实名通过后才能提现'],
   [/partner KYC already passed/i, '实名已通过，无需重复提交'],
+  [/partner withdrawal is frozen by risk control/i, '账户存在冻结 HOLA Credit，需完成复核后再提现'],
   [/\binsufficient_withdrawable_credit\b/i, '可提现 HOLA Credit 不足'],
   [/\binsufficient_available_credit\b/i, '可用 HOLA Credit 不足'],
   [/partner referral attribution conflict/i, '该账号已有邀请归因'],

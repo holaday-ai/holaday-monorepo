@@ -24,11 +24,13 @@ export class WithdrawalValidationError extends Error {
 }
 
 export class WithdrawalGateError extends Error {
-  constructor(readonly reason: 'membership_required' | 'kyc_required') {
+  constructor(readonly reason: 'membership_required' | 'kyc_required' | 'risk_frozen') {
     super(
       reason === 'membership_required'
         ? 'Withdrawal requires an active partner membership'
-        : 'Withdrawal requires passed KYC status',
+        : reason === 'kyc_required'
+          ? 'Withdrawal requires passed KYC status'
+          : 'Withdrawal is frozen by risk control',
     );
     this.name = 'WithdrawalGateError';
     Object.setPrototypeOf(this, WithdrawalGateError.prototype);
@@ -442,6 +444,10 @@ export class WithdrawalService {
     }
 
     const summary = await ledger.summarizeUser(request.userId);
+    if (summary.frozenCreditCents > 0) {
+      throw new WithdrawalGateError('risk_frozen');
+    }
+
     const validation = validateWithdrawalRequest({
       amountCreditCents: request.amountCreditCents,
       withdrawableCreditCents: summary.withdrawableCreditCents,

@@ -260,12 +260,15 @@ function mapWithdrawalError(error: unknown): never {
   }
 
   if (error instanceof WithdrawalGateError) {
+    const message = {
+      membership_required: 'partner membership required',
+      kyc_required: 'partner KYC must be passed before withdrawal',
+      risk_frozen: 'partner withdrawal is frozen by risk control',
+    }[error.reason];
+
     throw new TRPCError({
       code: 'PRECONDITION_FAILED',
-      message:
-        error.reason === 'membership_required'
-          ? 'partner membership required'
-          : 'partner KYC must be passed before withdrawal',
+      message,
     });
   }
 

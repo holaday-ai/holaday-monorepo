@@ -184,7 +184,7 @@ class FakeLedgerService implements Pick<CreditLedgerService, 'postEntry' | 'summ
       lockedCreditCents: 0,
       withdrawableCreditCents: this.baseWithdrawableCreditCents + postedBucketDelta('withdrawable'),
       pendingWithdrawalCreditCents: postedBucketDelta('pending_withdrawal'),
-      frozenCreditCents: 0,
+      frozenCreditCents: postedBucketDelta('frozen'),
     };
   }
 
@@ -547,6 +547,33 @@ describe('WithdrawalService requestWithdrawal', () => {
     });
     expect(db.rowsCreated).toBe(0);
     expect(ledger.entries).toHaveLength(0);
+  });
+
+  it('blocks withdrawals while the account has frozen credit', async () => {
+    const { db, ledger, service } = serviceWithDeps({
+      ledger: new FakeLedgerService(2_000_00, {
+        entries: [
+          {
+            userId: 123,
+            lotId: null,
+            entryType: 'risk_freeze',
+            direction: 'credit',
+            bucket: 'frozen',
+            amountCreditCents: 1_00,
+            amountApiUnits: 0,
+            idempotencyKey: 'risk:frozen:123',
+            metadata: null,
+          },
+        ],
+      }),
+    });
+
+    await expect(service.requestWithdrawal(validWithdrawalInput)).rejects.toBeInstanceOf(WithdrawalGateError);
+    await expect(service.requestWithdrawal(validWithdrawalInput)).rejects.toMatchObject({
+      reason: 'risk_frozen',
+    });
+    expect(db.rowsCreated).toBe(0);
+    expect(ledger.entries).toHaveLength(1);
   });
 
   it('inserts a requested withdrawal and posts exactly two hold ledger entries', async () => {

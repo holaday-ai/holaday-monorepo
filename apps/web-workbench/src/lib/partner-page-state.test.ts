@@ -295,6 +295,12 @@ describe('partner page state helpers', () => {
       ),
     ).toBe('实名通过后才能提现');
     expect(
+      partnerActionErrorMessage(
+        new Error('partner withdrawal is frozen by risk control'),
+        '提现失败',
+      ),
+    ).toBe('账户存在冻结 HOLA Credit，需完成复核后再提现');
+    expect(
       partnerActionErrorMessage(new Error('insufficient_available_credit'), '提现失败'),
     ).toBe('可用 HOLA Credit 不足');
     expect(
