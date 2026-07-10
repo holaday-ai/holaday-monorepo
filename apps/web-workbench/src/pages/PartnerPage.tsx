@@ -833,6 +833,7 @@ function PartnerWorkbench({
                 onClick={onCopyInviteCode}
                 disabled={!state.inviteCode}
                 aria-label="复制我的邀请码"
+                title="复制我的邀请码"
               >
                 <Copy className="h-3.5 w-3.5" aria-hidden />
                 复制
