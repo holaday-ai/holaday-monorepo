@@ -6,9 +6,12 @@ import {
   kycStatusLabel,
   membershipStatusLabel,
   normalizePartnerDashboard,
+  normalizePartnerPaymentProvider,
   partnerActionErrorMessage,
   partnerDraftKeyAfterSuccess,
   partnerDraftKeyFor,
+  partnerPaymentProviderHint,
+  partnerPaymentProviderLabel,
   partnerRechargeGate,
   partnerWithdrawalGate,
 } from './partner-page-state';
@@ -27,6 +30,18 @@ function passedKycProfile(overrides: Record<string, unknown> = {}) {
 }
 
 describe('partner page state helpers', () => {
+  it('normalizes and labels partner payment providers', () => {
+    expect(normalizePartnerPaymentProvider('wechat')).toBe('wechat');
+    expect(normalizePartnerPaymentProvider('alipay')).toBe('alipay');
+    expect(normalizePartnerPaymentProvider('manual')).toBe('manual');
+    expect(normalizePartnerPaymentProvider('surprise')).toBe('manual');
+    expect(partnerPaymentProviderLabel('wechat')).toBe('微信支付');
+    expect(partnerPaymentProviderLabel('alipay')).toBe('支付宝');
+    expect(partnerPaymentProviderLabel('manual')).toBe('人工确认');
+    expect(partnerPaymentProviderHint('wechat')).toBe('支付成功后等待渠道回调确认。');
+    expect(partnerPaymentProviderHint('manual')).toBe('人工兜底通道，后台确认后生效。');
+  });
+
   it('normalizes a disabled dashboard into a disabled page state', () => {
     expect(normalizePartnerDashboard({ enabled: false })).toEqual({
       enabled: false,

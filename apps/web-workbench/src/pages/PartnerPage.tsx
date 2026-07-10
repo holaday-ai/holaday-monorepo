@@ -29,6 +29,11 @@ import {
   type PartnerIdempotencyDraft,
   type PartnerEnabledState,
   type PartnerPageState,
+  PARTNER_PAYMENT_PROVIDERS,
+  normalizePartnerPaymentProvider,
+  partnerPaymentProviderHint,
+  partnerPaymentProviderLabel,
+  type PartnerPaymentProvider,
 } from '@/lib/partner-page-state';
 import { trpc } from '@/lib/trpc';
 import { PageContainer, PageHeader, PageLoadingPanel, Row, Section } from '@/pages/PageShell';
@@ -104,14 +109,16 @@ export function PartnerPage(): JSX.Element {
   const [assistedInvite, setAssistedInvite] = React.useState(false);
   const [kycProviderRef, setKycProviderRef] = React.useState('');
   const [kycBankFingerprint, setKycBankFingerprint] = React.useState('');
+  const [membershipProvider, setMembershipProvider] = React.useState<PartnerPaymentProvider>('wechat');
+  const [rechargeProvider, setRechargeProvider] = React.useState<PartnerPaymentProvider>('wechat');
   const [membershipIdempotencyKey, setMembershipIdempotencyKey] = React.useState(() =>
-    idempotencyKey('partner-membership'),
+    idempotencyKey('partner-membership-wechat'),
   );
   const [rechargeDraft, setRechargeDraft] = React.useState<PartnerIdempotencyDraft>(() =>
     partnerDraftKeyFor({
       current: null,
       prefix: 'partner-recharge',
-      fingerprint: rechargeFingerprint(10_000_00),
+      fingerprint: rechargeFingerprint(10_000_00, 'wechat'),
       makeKey: idempotencyKey,
     }),
   );
@@ -154,8 +161,8 @@ export function PartnerPage(): JSX.Element {
     [rechargeAmountInput],
   );
   const rechargeDraftFingerprint = React.useMemo(
-    () => rechargeFingerprint(rechargeAmountCnyCents),
-    [rechargeAmountCnyCents],
+    () => rechargeFingerprint(rechargeAmountCnyCents, rechargeProvider),
+    [rechargeAmountCnyCents, rechargeProvider],
   );
   const withdrawalDraftFingerprint = React.useMemo(
     () => withdrawalFingerprint(amountInputToCreditCents(withdrawalAmountInput), bankFingerprint),
@@ -185,6 +192,11 @@ export function PartnerPage(): JSX.Element {
     );
   }, [withdrawalDraftFingerprint]);
 
+  const updateMembershipProvider = React.useCallback((provider: PartnerPaymentProvider) => {
+    setMembershipProvider(provider);
+    setMembershipIdempotencyKey(idempotencyKey(`partner-membership-${provider}`));
+  }, []);
+
   const refreshAction = (
     <Button
       type="button"
@@ -207,12 +219,12 @@ export function PartnerPage(): JSX.Element {
     if (!beginMutation('membership')) return;
     try {
       const order = await trpc.partner.createMembershipOrder.mutate({
-        provider: 'manual',
+        provider: membershipProvider,
         idempotencyKey: membershipIdempotencyKey,
       });
       setMembershipOrder(order);
-      setMembershipIdempotencyKey(idempotencyKey('partner-membership'));
-      toast.show('会员订单已创建，请等待人工确认', 'info', 2500);
+      setMembershipIdempotencyKey(idempotencyKey(`partner-membership-${membershipProvider}`));
+      toast.show(`会员订单已创建，${partnerPaymentProviderHint(membershipProvider)}`, 'info', 2500);
     } catch (err) {
       handleActionError(err, '会员订单创建失败');
     } finally {
@@ -239,7 +251,7 @@ export function PartnerPage(): JSX.Element {
   async function createRechargeOrder(): Promise<void> {
     if (!beginMutation('recharge')) return;
     const amountCnyCents = normalizeRechargeInput();
-    const fingerprint = rechargeFingerprint(amountCnyCents);
+    const fingerprint = rechargeFingerprint(amountCnyCents, rechargeProvider);
     const draft = partnerDraftKeyFor({
       current: rechargeDraft,
       prefix: 'partner-recharge',
@@ -250,7 +262,7 @@ export function PartnerPage(): JSX.Element {
     try {
       const order = await trpc.partner.createRechargeOrder.mutate({
         amountCnyCents,
-        provider: 'manual',
+        provider: rechargeProvider,
         idempotencyKey: draft.key,
       });
       setRechargeOrder(order);
@@ -261,7 +273,7 @@ export function PartnerPage(): JSX.Element {
           makeKey: idempotencyKey,
         }),
       );
-      toast.show('充值订单已创建，请等待人工确认', 'info', 2500);
+      toast.show(`充值订单已创建，${partnerPaymentProviderHint(rechargeProvider)}`, 'info', 2500);
     } catch (err) {
       handleActionError(err, '充值订单创建失败');
     } finally {
@@ -489,6 +501,10 @@ export function PartnerPage(): JSX.Element {
           rechargeAmountCnyCents={rechargeAmountCnyCents}
           onRechargeAmountInputChange={setRechargeAmountInput}
           onRechargeSliderChange={(value) => setRechargeAmountInput(String(value / 100))}
+          membershipProvider={membershipProvider}
+          onMembershipProviderChange={updateMembershipProvider}
+          rechargeProvider={rechargeProvider}
+          onRechargeProviderChange={setRechargeProvider}
           onMembershipOrder={() => void createMembershipOrder()}
           onPreviewRecharge={() => void previewRecharge()}
           onCreateRechargeOrder={() => void createRechargeOrder()}
@@ -529,6 +545,10 @@ function PartnerWorkbench({
   rechargeAmountCnyCents,
   onRechargeAmountInputChange,
   onRechargeSliderChange,
+  membershipProvider,
+  onMembershipProviderChange,
+  rechargeProvider,
+  onRechargeProviderChange,
   onMembershipOrder,
   onPreviewRecharge,
   onCreateRechargeOrder,
@@ -563,6 +583,10 @@ function PartnerWorkbench({
   rechargeAmountCnyCents: number;
   onRechargeAmountInputChange: (value: string) => void;
   onRechargeSliderChange: (value: number) => void;
+  membershipProvider: PartnerPaymentProvider;
+  onMembershipProviderChange: (value: PartnerPaymentProvider) => void;
+  rechargeProvider: PartnerPaymentProvider;
+  onRechargeProviderChange: (value: PartnerPaymentProvider) => void;
   onMembershipOrder: () => void;
   onPreviewRecharge: () => void;
   onCreateRechargeOrder: () => void;
@@ -866,16 +890,26 @@ function PartnerWorkbench({
       <div className="grid gap-6 lg:grid-cols-2">
         <Section
           title="年费会员订单"
-          description="默认使用人工确认；订单创建后不会立即开通。"
+          description="选择支付渠道创建年费订单；渠道回调或后台确认后生效。"
           className="rounded-[8px] border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]"
         >
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(150px,180px)_auto] sm:items-end">
             <div className="min-w-0 text-xs leading-5 text-muted-foreground">
-              创建待处理会员订单，确认后才会更新会员状态。
+              {partnerPaymentProviderHint(membershipProvider)}
             </div>
+            <label className="min-w-0 text-xs font-medium text-[#595757]">
+              支付渠道
+              <PartnerPaymentProviderSelect
+                value={membershipProvider}
+                onChange={onMembershipProviderChange}
+                disabled={isMutating}
+                ariaLabel="年费会员支付渠道"
+              />
+            </label>
             <Button
               type="button"
               size="sm"
+              className="sm:self-end"
               onClick={onMembershipOrder}
               disabled={isMutating}
             >
@@ -946,8 +980,8 @@ function PartnerWorkbench({
       >
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
           <div className="min-w-0">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-              <label className="min-w-0 flex-1 text-xs font-medium text-[#595757]">
+            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(150px,180px)_auto] sm:items-end">
+              <label className="min-w-0 text-xs font-medium text-[#595757]">
                 充值金额
                 <Input
                   className="mt-1"
@@ -962,7 +996,16 @@ function PartnerWorkbench({
                   onBlur={() => onRechargeAmountInputChange(String(rechargeAmountCnyCents / 100))}
                 />
               </label>
-              <div className="text-sm font-semibold tabular-nums text-foreground">
+              <label className="min-w-0 text-xs font-medium text-[#595757]">
+                支付渠道
+                <PartnerPaymentProviderSelect
+                  value={rechargeProvider}
+                  onChange={onRechargeProviderChange}
+                  disabled={isMutating}
+                  ariaLabel="充值支付渠道"
+                />
+              </label>
+              <div className="text-sm font-semibold tabular-nums text-foreground sm:pb-2">
                 {formatPartnerCnyCents(rechargeAmountCnyCents)}
               </div>
             </div>
@@ -984,7 +1027,7 @@ function PartnerWorkbench({
           </div>
           <div className="flex flex-col gap-2 lg:items-end">
             <div className="max-w-[260px] text-xs leading-5 text-muted-foreground lg:text-right">
-              {rechargeGate.reason}
+              {rechargeGate.blocked ? rechargeGate.reason : partnerPaymentProviderHint(rechargeProvider)}
             </div>
             <div className="flex flex-wrap gap-2 lg:justify-end">
               <Button
@@ -1018,6 +1061,34 @@ function PartnerWorkbench({
         {rechargeOrder && <OrderSummary order={rechargeOrder} />}
       </Section>
     </div>
+  );
+}
+
+function PartnerPaymentProviderSelect({
+  value,
+  onChange,
+  disabled,
+  ariaLabel,
+}: {
+  value: PartnerPaymentProvider;
+  onChange: (value: PartnerPaymentProvider) => void;
+  disabled: boolean;
+  ariaLabel: string;
+}): JSX.Element {
+  return (
+    <select
+      className="mt-1 h-9 w-full rounded-[8px] border border-[#DCDDDD] bg-white px-3 text-sm text-foreground outline-none transition focus:border-[#EA1F59] disabled:cursor-not-allowed disabled:bg-[#F7F7F7] disabled:text-muted-foreground"
+      value={value}
+      disabled={disabled}
+      aria-label={ariaLabel}
+      onChange={(event) => onChange(normalizePartnerPaymentProvider(event.target.value))}
+    >
+      {PARTNER_PAYMENT_PROVIDERS.map((provider) => (
+        <option key={provider} value={provider}>
+          {partnerPaymentProviderLabel(provider)}
+        </option>
+      ))}
+    </select>
   );
 }
 
@@ -1070,7 +1141,7 @@ function OrderSummary({ order }: { order: PartnerOrderSummary }): JSX.Element {
     <dl className="mt-4 grid gap-3 border-t border-[#EFEFEF] pt-4 text-xs sm:grid-cols-2">
       <SummaryItem label="订单编号" value={order.orderExternalId} />
       <SummaryItem label="类型" value={order.orderKind === 'membership' ? '年费会员' : '充值'} />
-      <SummaryItem label="渠道" value={providerLabel(order.provider)} />
+      <SummaryItem label="渠道" value={partnerPaymentProviderLabel(order.provider)} />
       <SummaryItem label="状态" value={orderStatusLabel(order.status)} />
       <SummaryItem label="金额" value={formatPartnerCnyCents(order.amountCnyCents)} />
     </dl>
@@ -1244,19 +1315,12 @@ function amountInputToCreditCents(value: string): number {
   return Math.floor(parsed * 100);
 }
 
-function rechargeFingerprint(amountCnyCents: number): string {
-  return `amountCnyCents=${amountCnyCents}`;
+function rechargeFingerprint(amountCnyCents: number, provider: PartnerPaymentProvider): string {
+  return `amountCnyCents=${amountCnyCents};provider=${provider}`;
 }
 
 function withdrawalFingerprint(amountCreditCents: number, bankAccountFingerprint: string): string {
   return `amountCreditCents=${amountCreditCents};bank=${bankAccountFingerprint.trim()}`;
-}
-
-function providerLabel(provider: string): string {
-  if (provider === 'manual') return '人工确认';
-  if (provider === 'wechat') return '微信支付';
-  if (provider === 'alipay') return '支付宝';
-  return provider;
 }
 
 function orderStatusLabel(status: string): string {

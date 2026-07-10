@@ -10,6 +10,27 @@ type NormalizedMembershipStatus = PartnerMembershipStatus | 'none';
 type PartnerKycStatus = 'not_started' | 'pending' | 'passed' | 'review_required' | 'rejected';
 type PartnerLotStatus = 'accumulating' | 'release_pending' | 'releasing' | 'completed' | 'frozen' | 'closed';
 type PartnerRiskStatus = 'normal' | 'review' | 'review_required' | 'frozen';
+export type PartnerPaymentProvider = 'wechat' | 'alipay' | 'manual';
+
+export const PARTNER_PAYMENT_PROVIDERS: readonly PartnerPaymentProvider[] = ['wechat', 'alipay', 'manual'];
+
+export function normalizePartnerPaymentProvider(value: unknown): PartnerPaymentProvider {
+  return typeof value === 'string' && PARTNER_PAYMENT_PROVIDERS.includes(value as PartnerPaymentProvider)
+    ? (value as PartnerPaymentProvider)
+    : 'manual';
+}
+
+export function partnerPaymentProviderLabel(value: unknown): string {
+  const provider = normalizePartnerPaymentProvider(value);
+  if (provider === 'wechat') return '微信支付';
+  if (provider === 'alipay') return '支付宝';
+  return '人工确认';
+}
+
+export function partnerPaymentProviderHint(value: unknown): string {
+  const provider = normalizePartnerPaymentProvider(value);
+  return provider === 'manual' ? '人工兜底通道，后台确认后生效。' : '支付成功后等待渠道回调确认。';
+}
 
 export interface PartnerDisabledState {
   readonly enabled: false;
