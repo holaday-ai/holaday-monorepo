@@ -23,6 +23,8 @@ export function partnerConfig() {
     singleRechargeMinCnyCents: intEnv('PARTNER_RECHARGE_MIN_CNY_CENTS', PARTNER_RECHARGE_MIN_CNY_CENTS),
     singleRechargeMaxCnyCents: intEnv('PARTNER_RECHARGE_MAX_SINGLE_CNY_CENTS', PARTNER_RECHARGE_MAX_SINGLE_CNY_CENTS),
     withdrawalMinCreditCents: intEnv('PARTNER_WITHDRAWAL_MIN_CREDIT_CENTS', 500_00),
+    withdrawalDailyPlatformCapCreditCents: intEnv('PARTNER_WITHDRAWAL_DAILY_PLATFORM_CAP_CREDIT_CENTS', 200_000_00),
+    withdrawalMonthlyUserCapCreditCents: intEnv('PARTNER_WITHDRAWAL_MONTHLY_USER_CAP_CREDIT_CENTS', 100_000_00),
   };
 }
 

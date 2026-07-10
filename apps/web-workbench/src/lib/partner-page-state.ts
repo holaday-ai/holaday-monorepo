@@ -204,6 +204,8 @@ const PARTNER_ACTION_ERROR_RULES: ReadonlyArray<readonly [RegExp, string]> = [
   [/partner withdrawal is frozen by risk control/i, '账户存在冻结 HOLA Credit，需完成复核后再提现'],
   [/\binsufficient_withdrawable_credit\b/i, '可提现 HOLA Credit 不足'],
   [/\binsufficient_available_credit\b/i, '可用 HOLA Credit 不足'],
+  [/\bdaily_platform_cap_exceeded\b/i, '今日平台提现额度已用完，请明天再试'],
+  [/\bmonthly_user_cap_exceeded\b/i, '本月提现额度已达上限，请下月再试'],
   [/partner referral attribution conflict/i, '该账号已有邀请归因'],
   [
     /Failed to fetch|fetch failed|NetworkError|Load failed|ECONNREFUSED|ECONNRESET|Failed to connect|Bad Gateway|Service Unavailable/i,

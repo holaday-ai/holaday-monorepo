@@ -307,6 +307,12 @@ describe('partner page state helpers', () => {
       partnerActionErrorMessage(new Error('insufficient_withdrawable_credit'), '提现失败'),
     ).toBe('可提现 HOLA Credit 不足');
     expect(
+      partnerActionErrorMessage(new Error('daily_platform_cap_exceeded'), '提现失败'),
+    ).toBe('今日平台提现额度已用完，请明天再试');
+    expect(
+      partnerActionErrorMessage(new Error('monthly_user_cap_exceeded'), '提现失败'),
+    ).toBe('本月提现额度已达上限，请下月再试');
+    expect(
       partnerActionErrorMessage(new Error('partner referral attribution conflict'), '邀请登记失败'),
     ).toBe('该账号已有邀请归因');
     expect(

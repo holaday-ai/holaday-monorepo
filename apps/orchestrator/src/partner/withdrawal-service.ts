@@ -1,5 +1,5 @@
 import { newExternalId } from '@holaday/shared-types';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, gte, inArray, lt, sql } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
 import { readAffectedRows } from '../db/mysql-result.js';
 import { partnerWithdrawalRequests, type PartnerWithdrawalRequest } from '../db/schema/partner.js';
@@ -11,12 +11,18 @@ import { partnerConfig } from './partner-config.js';
 
 export const WITHDRAWAL_MIN_CREDIT_CENTS = 500_00;
 
+type WithdrawalValidationReason =
+  | 'below_minimum'
+  | 'insufficient_withdrawable_credit'
+  | 'daily_platform_cap_exceeded'
+  | 'monthly_user_cap_exceeded';
+
 export type WithdrawalValidationResult =
   | { ok: true }
-  | { ok: false; reason: 'below_minimum' | 'insufficient_withdrawable_credit' };
+  | { ok: false; reason: WithdrawalValidationReason };
 
 export class WithdrawalValidationError extends Error {
-  constructor(readonly reason: 'below_minimum' | 'insufficient_withdrawable_credit') {
+  constructor(readonly reason: WithdrawalValidationReason) {
     super(`Withdrawal request rejected: ${reason}`);
     this.name = 'WithdrawalValidationError';
     Object.setPrototypeOf(this, WithdrawalValidationError.prototype);
@@ -143,10 +149,65 @@ export function validateWithdrawalRequest(input: {
   return { ok: true };
 }
 
+export function validateWithdrawalLimits(input: {
+  amountCreditCents: number;
+  dailyPlatformWithdrawalCreditCents: number;
+  dailyPlatformCapCreditCents: number;
+  monthlyUserWithdrawalCreditCents: number;
+  monthlyUserCapCreditCents: number;
+}): WithdrawalValidationResult {
+  const amountCreditCents = assertNonNegativeSafeInteger(input.amountCreditCents, 'amountCreditCents');
+  const dailyPlatformWithdrawalCreditCents = assertNonNegativeSafeInteger(
+    input.dailyPlatformWithdrawalCreditCents,
+    'dailyPlatformWithdrawalCreditCents',
+  );
+  const dailyPlatformCapCreditCents = assertNonNegativeSafeInteger(
+    input.dailyPlatformCapCreditCents,
+    'dailyPlatformCapCreditCents',
+  );
+  const monthlyUserWithdrawalCreditCents = assertNonNegativeSafeInteger(
+    input.monthlyUserWithdrawalCreditCents,
+    'monthlyUserWithdrawalCreditCents',
+  );
+  const monthlyUserCapCreditCents = assertNonNegativeSafeInteger(
+    input.monthlyUserCapCreditCents,
+    'monthlyUserCapCreditCents',
+  );
+
+  if (
+    dailyPlatformCapCreditCents > 0 &&
+    dailyPlatformWithdrawalCreditCents + amountCreditCents > dailyPlatformCapCreditCents
+  ) {
+    return { ok: false, reason: 'daily_platform_cap_exceeded' };
+  }
+  if (
+    monthlyUserCapCreditCents > 0 &&
+    monthlyUserWithdrawalCreditCents + amountCreditCents > monthlyUserCapCreditCents
+  ) {
+    return { ok: false, reason: 'monthly_user_cap_exceeded' };
+  }
+  return { ok: true };
+}
+
 export function computeWithdrawalReviewDueAt(input: { now: Date; highRisk: boolean }): Date {
   const now = assertValidDate(input.now, 'now');
   const highRisk = assertBoolean(input.highRisk, 'highRisk');
   return addUtcDays(now, highRisk ? 15 : 7);
+}
+
+function utcDayBounds(value: Date): { start: Date; end: Date } {
+  const start = new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()));
+  return { start, end: addUtcDays(start, 1) };
+}
+
+function utcMonthBounds(value: Date): { start: Date; end: Date } {
+  const start = new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), 1));
+  const end = new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth() + 1, 1));
+  return { start, end };
+}
+
+function aggregateCreditCents(value: unknown): number {
+  return assertNonNegativeSafeInteger(Number(value ?? 0), 'totalCreditCents');
 }
 
 type WithdrawalRequestInput = {
@@ -163,6 +224,8 @@ type WithdrawalStatus = 'requested' | 'reviewing';
 type WithdrawalLedger = Pick<CreditLedgerService, 'postEntry' | 'summarizeUser'>;
 type WithdrawalKyc = Pick<KycService, 'getStatus'>;
 type WithdrawalMembership = Pick<PartnerMembershipService, 'getActiveMembership'>;
+
+const WITHDRAWAL_CAP_STATUSES = ['requested', 'reviewing', 'approved', 'paid'] as const;
 
 type NormalizedWithdrawalRequest = Required<WithdrawalRequestInput> & {
   status: WithdrawalStatus;
@@ -341,6 +404,43 @@ export class WithdrawalService {
     return row;
   }
 
+  private async readDailyPlatformWithdrawalCreditCents(db: DB, now: Date): Promise<number> {
+    const { start, end } = utcDayBounds(now);
+    const [row] = await db
+      .select({
+        totalCreditCents: sql<number>`COALESCE(SUM(${partnerWithdrawalRequests.amountCreditCents}), 0)`,
+      })
+      .from(partnerWithdrawalRequests)
+      .where(
+        and(
+          inArray(partnerWithdrawalRequests.status, [...WITHDRAWAL_CAP_STATUSES]),
+          gte(partnerWithdrawalRequests.createdAt, start),
+          lt(partnerWithdrawalRequests.createdAt, end),
+        ),
+      )
+      .limit(1);
+    return aggregateCreditCents(row?.totalCreditCents);
+  }
+
+  private async readMonthlyUserWithdrawalCreditCents(db: DB, userId: number, now: Date): Promise<number> {
+    const { start, end } = utcMonthBounds(now);
+    const [row] = await db
+      .select({
+        totalCreditCents: sql<number>`COALESCE(SUM(${partnerWithdrawalRequests.amountCreditCents}), 0)`,
+      })
+      .from(partnerWithdrawalRequests)
+      .where(
+        and(
+          eq(partnerWithdrawalRequests.userId, userId),
+          inArray(partnerWithdrawalRequests.status, [...WITHDRAWAL_CAP_STATUSES]),
+          gte(partnerWithdrawalRequests.createdAt, start),
+          lt(partnerWithdrawalRequests.createdAt, end),
+        ),
+      )
+      .limit(1);
+    return aggregateCreditCents(row?.totalCreditCents);
+  }
+
   private async postHoldEntries(
     ledger: WithdrawalLedger,
     row: PartnerWithdrawalRequest,
@@ -443,6 +543,7 @@ export class WithdrawalService {
       throw new WithdrawalGateError('kyc_required');
     }
 
+    const config = partnerConfig();
     const summary = await ledger.summarizeUser(request.userId);
     if (summary.frozenCreditCents > 0) {
       throw new WithdrawalGateError('risk_frozen');
@@ -451,10 +552,27 @@ export class WithdrawalService {
     const validation = validateWithdrawalRequest({
       amountCreditCents: request.amountCreditCents,
       withdrawableCreditCents: summary.withdrawableCreditCents,
-      minCreditCents: partnerConfig().withdrawalMinCreditCents,
+      minCreditCents: config.withdrawalMinCreditCents,
     });
     if (!validation.ok) {
       throw new WithdrawalValidationError(validation.reason);
+    }
+
+    const limitValidation = validateWithdrawalLimits({
+      amountCreditCents: request.amountCreditCents,
+      dailyPlatformWithdrawalCreditCents:
+        config.withdrawalDailyPlatformCapCreditCents > 0
+          ? await this.readDailyPlatformWithdrawalCreditCents(db, request.now)
+          : 0,
+      dailyPlatformCapCreditCents: config.withdrawalDailyPlatformCapCreditCents,
+      monthlyUserWithdrawalCreditCents:
+        config.withdrawalMonthlyUserCapCreditCents > 0
+          ? await this.readMonthlyUserWithdrawalCreditCents(db, request.userId, request.now)
+          : 0,
+      monthlyUserCapCreditCents: config.withdrawalMonthlyUserCapCreditCents,
+    });
+    if (!limitValidation.ok) {
+      throw new WithdrawalValidationError(limitValidation.reason);
     }
 
     const externalId = newExternalId('payment');

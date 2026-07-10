@@ -38,6 +38,8 @@ type FakeLedgerEntry = Omit<FakeLedgerPostInput, 'lotId' | 'amountCreditCents' |
   metadata: Record<string, unknown> | null;
 };
 
+const ACTIVE_WITHDRAWAL_CAP_STATUSES = new Set(['requested', 'reviewing', 'approved', 'paid']);
+
 class FakeWithdrawalDb {
   readonly rows: PartnerWithdrawalRequest[];
   readonly insertAttempts: FakeWithdrawalInsert[] = [];
@@ -122,7 +124,7 @@ class FakeWithdrawalDb {
     };
   }
 
-  select(_selection?: unknown) {
+  select(selection?: unknown) {
     return {
       from: (table: unknown) => ({
         where: (predicate: unknown) => {
@@ -136,7 +138,7 @@ class FakeWithdrawalDb {
               }
               return chain;
             },
-            limit: async (count: number) => this.selectRows(table, predicateText).slice(0, count),
+            limit: async (count: number) => this.selectRows(table, predicateText, selection).slice(0, count),
           };
           return {
             ...chain,
@@ -146,12 +148,30 @@ class FakeWithdrawalDb {
     };
   }
 
-  private selectRows(table: unknown, predicateText: string): PartnerWithdrawalRequest[] | Array<{ id: number }> {
+  private selectRows(
+    table: unknown,
+    predicateText: string,
+    selection?: unknown,
+  ): PartnerWithdrawalRequest[] | Array<{ id: number }> | Array<{ totalCreditCents: number }> {
     if (table === users) {
       const userId = Number(predicateText.match(/value:\s*(\d+)/)?.[1] ?? 0);
       return userId > 0 ? [{ id: userId }] : [];
     }
     if (table !== partnerWithdrawalRequests) return [];
+    if (
+      selection &&
+      typeof selection === 'object' &&
+      !Array.isArray(selection) &&
+      Object.hasOwn(selection, 'totalCreditCents')
+    ) {
+      return [
+        {
+          totalCreditCents: this.rows
+            .filter((row) => ACTIVE_WITHDRAWAL_CAP_STATUSES.has(row.status))
+            .reduce((sum, row) => sum + row.amountCreditCents, 0),
+        },
+      ];
+    }
     const byKey = this.rows.find((row) => predicateText.includes(row.idempotencyKey));
     if (byKey) return [byKey];
     const byExternalId = this.rows.find((row) => predicateText.includes(row.externalId));
@@ -574,6 +594,80 @@ describe('WithdrawalService requestWithdrawal', () => {
     });
     expect(db.rowsCreated).toBe(0);
     expect(ledger.entries).toHaveLength(1);
+  });
+
+  it('blocks requests above the daily platform withdrawal cap', async () => {
+    const originalDailyCap = process.env.PARTNER_WITHDRAWAL_DAILY_PLATFORM_CAP_CREDIT_CENTS;
+    const originalMonthlyCap = process.env.PARTNER_WITHDRAWAL_MONTHLY_USER_CAP_CREDIT_CENTS;
+    process.env.PARTNER_WITHDRAWAL_DAILY_PLATFORM_CAP_CREDIT_CENTS = String(1_000_00);
+    process.env.PARTNER_WITHDRAWAL_MONTHLY_USER_CAP_CREDIT_CENTS = String(10_000_00);
+    try {
+      const { db, ledger, service } = serviceWithDeps({
+        db: new FakeWithdrawalDb([
+          fakeWithdrawalRequest({
+            id: 2,
+            externalId: 'pay_existing_today_withdrawal',
+            amountCreditCents: 500_00,
+            idempotencyKey: 'withdrawal-idem-existing-today',
+            createdAt: new Date('2026-07-02T01:00:00.000Z'),
+          }),
+        ]),
+      });
+
+      await expect(service.requestWithdrawal(validWithdrawalInput)).rejects.toMatchObject({
+        reason: 'daily_platform_cap_exceeded',
+      });
+      expect(db.rowsCreated).toBe(0);
+      expect(ledger.entries).toHaveLength(0);
+    } finally {
+      if (originalDailyCap === undefined) {
+        delete process.env.PARTNER_WITHDRAWAL_DAILY_PLATFORM_CAP_CREDIT_CENTS;
+      } else {
+        process.env.PARTNER_WITHDRAWAL_DAILY_PLATFORM_CAP_CREDIT_CENTS = originalDailyCap;
+      }
+      if (originalMonthlyCap === undefined) {
+        delete process.env.PARTNER_WITHDRAWAL_MONTHLY_USER_CAP_CREDIT_CENTS;
+      } else {
+        process.env.PARTNER_WITHDRAWAL_MONTHLY_USER_CAP_CREDIT_CENTS = originalMonthlyCap;
+      }
+    }
+  });
+
+  it('blocks requests above the monthly user withdrawal cap', async () => {
+    const originalDailyCap = process.env.PARTNER_WITHDRAWAL_DAILY_PLATFORM_CAP_CREDIT_CENTS;
+    const originalMonthlyCap = process.env.PARTNER_WITHDRAWAL_MONTHLY_USER_CAP_CREDIT_CENTS;
+    process.env.PARTNER_WITHDRAWAL_DAILY_PLATFORM_CAP_CREDIT_CENTS = String(10_000_00);
+    process.env.PARTNER_WITHDRAWAL_MONTHLY_USER_CAP_CREDIT_CENTS = String(1_000_00);
+    try {
+      const { db, ledger, service } = serviceWithDeps({
+        db: new FakeWithdrawalDb([
+          fakeWithdrawalRequest({
+            id: 3,
+            externalId: 'pay_existing_monthly_withdrawal',
+            amountCreditCents: 500_00,
+            idempotencyKey: 'withdrawal-idem-existing-monthly',
+            createdAt: new Date('2026-07-01T01:00:00.000Z'),
+          }),
+        ]),
+      });
+
+      await expect(service.requestWithdrawal(validWithdrawalInput)).rejects.toMatchObject({
+        reason: 'monthly_user_cap_exceeded',
+      });
+      expect(db.rowsCreated).toBe(0);
+      expect(ledger.entries).toHaveLength(0);
+    } finally {
+      if (originalDailyCap === undefined) {
+        delete process.env.PARTNER_WITHDRAWAL_DAILY_PLATFORM_CAP_CREDIT_CENTS;
+      } else {
+        process.env.PARTNER_WITHDRAWAL_DAILY_PLATFORM_CAP_CREDIT_CENTS = originalDailyCap;
+      }
+      if (originalMonthlyCap === undefined) {
+        delete process.env.PARTNER_WITHDRAWAL_MONTHLY_USER_CAP_CREDIT_CENTS;
+      } else {
+        process.env.PARTNER_WITHDRAWAL_MONTHLY_USER_CAP_CREDIT_CENTS = originalMonthlyCap;
+      }
+    }
   });
 
   it('inserts a requested withdrawal and posts exactly two hold ledger entries', async () => {
