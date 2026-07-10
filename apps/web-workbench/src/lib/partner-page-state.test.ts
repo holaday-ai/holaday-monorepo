@@ -13,6 +13,19 @@ import {
   partnerWithdrawalGate,
 } from './partner-page-state';
 
+function passedKycProfile(overrides: Record<string, unknown> = {}) {
+  return {
+    kycExternalId: 'pay_kyc_1',
+    status: 'passed',
+    country: 'CN',
+    provider: 'cn-bankcard',
+    providerRef: 'bankcard-flow-123',
+    bankCardVerified: true,
+    reviewedAt: '2026-07-02T10:00:00.000Z',
+    ...overrides,
+  };
+}
+
 describe('partner page state helpers', () => {
   it('normalizes a disabled dashboard into a disabled page state', () => {
     expect(normalizePartnerDashboard({ enabled: false })).toEqual({
@@ -76,6 +89,7 @@ describe('partner page state helpers', () => {
           country: 'CN',
           provider: 'cn-bankcard',
           providerRef: ' bankcard-flow-123 ',
+          bankCardVerified: true,
           reviewedAt: '2026-07-02T10:00:00.000Z',
         },
         ledger: {
@@ -136,6 +150,7 @@ describe('partner page state helpers', () => {
         country: 'CN',
         provider: 'cn-bankcard',
         providerRef: 'bankcard-flow-123',
+        bankCardVerified: true,
         reviewedAt: '2026-07-02',
         reviewedAtLabel: '2026-07-02',
       },
@@ -432,6 +447,7 @@ describe('partner page state helpers', () => {
       enabled: true,
       membership: { status: 'active', expiresAt: '2027-07-03T00:00:00.000Z' },
       kycStatus: 'passed',
+      kycProfile: passedKycProfile(),
       ledger: { withdrawableCreditCents: 10_000_00, frozenCreditCents: 1_00 },
     });
     expect(frozen.enabled).toBe(true);
@@ -446,10 +462,30 @@ describe('partner page state helpers', () => {
       reason: '账户存在冻结 HOLA Credit，需完成复核后再提现。',
     });
 
+    const missingBankCard = normalizePartnerDashboard({
+      enabled: true,
+      membership: { status: 'active', expiresAt: '2027-07-03T00:00:00.000Z' },
+      kycStatus: 'passed',
+      kycProfile: passedKycProfile({ bankCardVerified: false }),
+      ledger: { withdrawableCreditCents: 10_000_00 },
+    });
+    expect(missingBankCard.enabled).toBe(true);
+    if (!missingBankCard.enabled) throw new Error('expected enabled partner dashboard');
+    expect(
+      partnerWithdrawalGate(missingBankCard, {
+        amountCreditCents: 600_00,
+        bankAccountFingerprint: 'bank_fp_1',
+      }),
+    ).toEqual({
+      blocked: true,
+      reason: '请先完成银行卡实名验证。',
+    });
+
     const ready = normalizePartnerDashboard({
       enabled: true,
       membership: { status: 'active', expiresAt: '2027-07-03T00:00:00.000Z' },
       kycStatus: 'passed',
+      kycProfile: passedKycProfile(),
       ledger: { withdrawableCreditCents: 10_000_00 },
     });
     expect(ready.enabled).toBe(true);
@@ -497,6 +533,7 @@ describe('partner page state helpers', () => {
       enabled: true,
       membership: { status: 'active', expiresAt: '2027-07-03T00:00:00.000Z' },
       kycStatus: 'passed',
+      kycProfile: passedKycProfile(),
       ledger: { withdrawableCreditCents: 1_000_00 },
       limits: { withdrawalMinCreditCents: 750_00 },
     });

@@ -75,6 +75,7 @@ export interface PartnerKycProfileState {
   readonly country: string;
   readonly provider: string;
   readonly providerRef: string | null;
+  readonly bankCardVerified: boolean;
   readonly reviewedAt: string | null;
   readonly reviewedAtLabel: string;
 }
@@ -329,6 +330,13 @@ export function partnerWithdrawalGate(
     };
   }
 
+  if (state.kycProfile?.bankCardVerified !== true) {
+    return {
+      blocked: true,
+      reason: '请先完成银行卡实名验证。',
+    };
+  }
+
   if (state.ledger.frozenCreditCents > 0) {
     return {
       blocked: true,
@@ -490,6 +498,7 @@ function normalizeKycProfile(value: unknown): PartnerKycProfileState | null {
     country: safeTrimmedString(value.country) || 'CN',
     provider: safeTrimmedString(value.provider) || 'manual',
     providerRef: providerRef || null,
+    bankCardVerified: value.bankCardVerified === true,
     reviewedAt,
     reviewedAtLabel: reviewedAt ?? '—',
   };

@@ -426,6 +426,7 @@ describe('partnerRouter mutations', () => {
       country: 'CN',
       provider: 'manual',
       providerRef: 'bankcard-flow-1',
+      bankCardHash: 'bank_hash_123',
       reviewedAt,
     });
 
@@ -440,6 +441,7 @@ describe('partnerRouter mutations', () => {
       country: 'CN',
       provider: 'manual',
       providerRef: 'bankcard-flow-1',
+      bankCardVerified: true,
       reviewedAt,
     });
     expect(getActiveMembershipMock).toHaveBeenCalledWith(123);

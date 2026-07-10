@@ -74,6 +74,7 @@ interface PartnerKycSubmissionSummary {
   readonly country: string;
   readonly provider: string;
   readonly providerRef: string | null;
+  readonly bankCardVerified: boolean;
   readonly reviewedAt: Date | string | null;
 }
 
@@ -1124,22 +1125,24 @@ function ReferralSummary({ referral }: { referral: PartnerReferralSummary }): JS
 
 function KycSubmissionSummary({ submission }: { submission: PartnerKycSubmissionSummary }): JSX.Element {
   return (
-    <dl className="mt-4 grid gap-3 border-t border-[#EFEFEF] pt-4 text-xs sm:grid-cols-2 lg:grid-cols-4">
+    <dl className="mt-4 grid gap-3 border-t border-[#EFEFEF] pt-4 text-xs sm:grid-cols-2 lg:grid-cols-5">
       <SummaryItem label="实名编号" value={submission.kycExternalId} />
       <SummaryItem label="状态" value={kycStatusLabel(submission.status)} />
       <SummaryItem label="认证方式" value={submission.provider} />
       <SummaryItem label="流水号" value={submission.providerRef ?? '—'} />
+      <SummaryItem label="银行卡实名" value={submission.bankCardVerified ? '已绑定' : '未绑定'} />
     </dl>
   );
 }
 
 function KycProfileSummary({ profile }: { profile: NonNullable<PartnerEnabledState['kycProfile']> }): JSX.Element {
   return (
-    <dl className="mt-4 grid gap-3 border-t border-[#EFEFEF] pt-4 text-xs sm:grid-cols-2 lg:grid-cols-4">
+    <dl className="mt-4 grid gap-3 border-t border-[#EFEFEF] pt-4 text-xs sm:grid-cols-2 lg:grid-cols-5">
       <SummaryItem label="实名编号" value={profile.kycExternalId} />
       <SummaryItem label="状态" value={profile.statusLabel} />
       <SummaryItem label="认证方式" value={profile.provider} />
       <SummaryItem label="流水号" value={profile.providerRef ?? '—'} />
+      <SummaryItem label="银行卡实名" value={profile.bankCardVerified ? '已绑定' : '未绑定'} />
       <SummaryItem label="复核日期" value={profile.reviewedAtLabel} />
     </dl>
   );

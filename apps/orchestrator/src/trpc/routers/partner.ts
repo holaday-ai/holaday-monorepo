@@ -199,6 +199,7 @@ function summarizePartnerKyc(profile: {
   externalId: string;
   status: string;
   country: string;
+  bankCardHash: string | null;
   provider: string | null;
   providerRef: string | null;
   reviewedAt: Date | null;
@@ -209,6 +210,7 @@ function summarizePartnerKyc(profile: {
     country: profile.country,
     provider: profile.provider ?? 'manual',
     providerRef: profile.providerRef,
+    bankCardVerified: typeof profile.bankCardHash === 'string' && profile.bankCardHash.trim().length > 0,
     reviewedAt: profile.reviewedAt,
   };
 }
