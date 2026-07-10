@@ -3,7 +3,13 @@ import type { PartnerKycStatus } from '@holaday/shared-types';
 import { describe, expect, it } from 'vitest';
 import type { DB } from '../db/client.js';
 import { partnerKycProfiles, type PartnerKycProfile } from '../db/schema/partner.js';
-import { KycService, canRechargeWithKycStatus, canWithdrawWithKycStatus, normalizeKycStatus } from './kyc-service.js';
+import {
+  KycService,
+  canRechargeWithKycStatus,
+  canWithdrawWithKycStatus,
+  normalizeKycStatus,
+  resolveCnBankCardKycSubmission,
+} from './kyc-service.js';
 
 const KNOWN_STATUSES: readonly PartnerKycStatus[] = [
   'not_started',
@@ -121,6 +127,37 @@ describe('KYC status gates', () => {
 
   it('normalizes unknown database statuses conservatively', () => {
     expect(normalizeKycStatus('provider_surprise')).toBe('review_required');
+  });
+});
+
+describe('resolveCnBankCardKycSubmission', () => {
+  it('passes provider-backed bank card submissions without manual review', () => {
+    expect(
+      resolveCnBankCardKycSubmission({
+        bankCardHash: 'bank_hash_123',
+        providerRef: 'bankcard-flow-1',
+      }),
+    ).toEqual({
+      status: 'passed',
+      provider: 'cn-bankcard',
+      providerRef: 'bankcard-flow-1',
+      bankCardHash: 'bank_hash_123',
+      note: 'same-name bank card verified by provider',
+    });
+  });
+
+  it('falls back to review_required when the provider reference is missing', () => {
+    expect(
+      resolveCnBankCardKycSubmission({
+        bankCardHash: 'bank_hash_123',
+      }),
+    ).toEqual({
+      status: 'review_required',
+      provider: 'cn-bankcard',
+      providerRef: null,
+      bankCardHash: 'bank_hash_123',
+      note: 'cn bank card provider reference missing; manual review required',
+    });
   });
 });
 

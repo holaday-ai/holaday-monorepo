@@ -353,7 +353,7 @@ export function PartnerPage(): JSX.Element {
       setKycSubmission(result);
       setKycProviderRef('');
       setKycBankFingerprint('');
-      toast.show('实名复核已提交', 'info', 2200);
+      toast.show(result.status === 'passed' ? '实名认证已通过' : '实名材料已提交复核', 'info', 2200);
       await refresh();
     } catch (err) {
       handleActionError(err, '实名提交失败');
@@ -601,16 +601,16 @@ function PartnerWorkbench({
   });
   const kycHint =
     !membershipActive
-      ? '完成年度会员后可提交实名复核。'
+      ? '完成年度会员后可进行实名银行卡认证。'
       : state.kycStatus === 'passed'
-        ? '实名已通过。'
+        ? '银行卡实名认证已通过。'
         : state.kycStatus === 'pending'
-          ? '实名复核已提交，等待审核。'
+          ? '银行卡认证已提交，等待认证结果。'
           : state.kycStatus === 'review_required'
-            ? '需补充材料后重新提交。'
+            ? '认证证据不足，需补充流水或等待人工复核。'
             : state.kycStatus === 'rejected'
               ? '实名未通过，可重新提交。'
-              : '可提交实名复核。';
+              : '可提交实名银行卡认证。';
 
   return (
     <div className="space-y-6">
@@ -704,7 +704,7 @@ function PartnerWorkbench({
 
       <Section
         title="实名认证"
-        description="年度会员开通后提交实名复核，审核通过后才能充值和提现。"
+        description="年度会员开通后完成实名银行卡认证，通过后才能充值和提现。"
         className="rounded-[8px] border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]"
       >
         <div className="grid gap-3 lg:grid-cols-3">
@@ -712,7 +712,7 @@ function PartnerWorkbench({
             <StatusValue icon={<Shield className="h-3.5 w-3.5" />} value={state.kycLabel} />
           </Row>
           <label className="min-w-0 text-xs font-medium text-[#595757]">
-            实名银行卡指纹
+            银行卡认证指纹
             <Input
               className="mt-1 font-mono text-xs"
               placeholder="bank_fp_..."
@@ -722,7 +722,7 @@ function PartnerWorkbench({
             />
           </label>
           <label className="min-w-0 text-xs font-medium text-[#595757]">
-            认证流水号（选填）
+            银行卡认证流水号
             <Input
               className="mt-1 font-mono text-xs"
               placeholder="bankcard-flow-..."
@@ -744,7 +744,7 @@ function PartnerWorkbench({
             ) : (
               <Shield className="h-3.5 w-3.5" aria-hidden />
             )}
-            提交实名
+            提交认证
           </Button>
         </div>
         {kycSubmission ? (

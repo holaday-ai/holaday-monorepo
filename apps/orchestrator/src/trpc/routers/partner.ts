@@ -9,7 +9,12 @@ import { users } from '../../db/schema/users.js';
 import { partnerLots, partnerRechargeOrders, partnerWithdrawalRequests } from '../../db/schema/partner.js';
 import { PartnerActivityService } from '../../partner/activity-service.js';
 import { CreditLedgerService } from '../../partner/credit-ledger-service.js';
-import { KycService, canRechargeWithKycStatus, normalizeKycStatus } from '../../partner/kyc-service.js';
+import {
+  KycService,
+  canRechargeWithKycStatus,
+  normalizeKycStatus,
+  resolveCnBankCardKycSubmission,
+} from '../../partner/kyc-service.js';
 import { PartnerMembershipService } from '../../partner/membership-service.js';
 import { partnerConfig } from '../../partner/partner-config.js';
 import { calculateApiUnits, selectRechargeTier } from '../../partner/partner-rules.js';
@@ -575,13 +580,21 @@ export const partnerRouter = router({
     }
 
     try {
+      const bankAccountFingerprint = input.bankAccountFingerprint?.trim();
+      if (!bankAccountFingerprint) {
+        badRequest('partner KYC bank account fingerprint required');
+      }
+      const verification = resolveCnBankCardKycSubmission({
+        bankCardHash: bankAccountFingerprint,
+        providerRef: input.providerRef,
+      });
       const profile = await kycService.upsertStatus({
         userId,
-        status: 'pending',
-        provider: 'manual',
-        providerRef: input.providerRef,
-        bankCardHash: input.bankAccountFingerprint,
-        note: 'partner user submitted KYC review',
+        status: verification.status,
+        provider: verification.provider,
+        providerRef: verification.providerRef,
+        bankCardHash: verification.bankCardHash,
+        note: verification.note,
       });
       return summarizePartnerKyc(profile);
     } catch (error) {

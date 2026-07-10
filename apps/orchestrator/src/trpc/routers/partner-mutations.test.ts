@@ -479,8 +479,8 @@ describe('partnerRouter mutations', () => {
     expect(getActivitySummaryMock).not.toHaveBeenCalled();
   });
 
-  it('submits the current user for KYC review after membership is active', async () => {
-    const reviewedAt = null;
+  it('submits provider-backed bank card KYC as passed after membership is active', async () => {
+    const reviewedAt = new Date('2026-07-03T02:30:00.000Z');
     getActiveMembershipMock.mockResolvedValueOnce({
       id: 55,
       userId: 123,
@@ -491,9 +491,9 @@ describe('partnerRouter mutations', () => {
     upsertKycStatusMock.mockResolvedValueOnce({
       externalId: 'payment_kyc_1',
       userId: 123,
-      status: 'pending',
+      status: 'passed',
       country: 'CN',
-      provider: 'manual',
+      provider: 'cn-bankcard',
       providerRef: 'bankcard-flow-1',
       bankCardHash: 'bank_hash_123',
       reviewedAt,
@@ -506,9 +506,9 @@ describe('partnerRouter mutations', () => {
       }),
     ).resolves.toEqual({
       kycExternalId: 'payment_kyc_1',
-      status: 'pending',
+      status: 'passed',
       country: 'CN',
-      provider: 'manual',
+      provider: 'cn-bankcard',
       providerRef: 'bankcard-flow-1',
       bankCardVerified: true,
       reviewedAt,
@@ -517,11 +517,54 @@ describe('partnerRouter mutations', () => {
     expect(getKycStatusMock).toHaveBeenCalledWith(123);
     expect(upsertKycStatusMock).toHaveBeenCalledWith({
       userId: 123,
-      status: 'pending',
-      provider: 'manual',
+      status: 'passed',
+      provider: 'cn-bankcard',
       providerRef: 'bankcard-flow-1',
       bankCardHash: 'bank_hash_123',
-      note: 'partner user submitted KYC review',
+      note: 'same-name bank card verified by provider',
+    });
+  });
+
+  it('falls back to KYC review_required when provider evidence is incomplete', async () => {
+    const reviewedAt = new Date('2026-07-03T03:00:00.000Z');
+    getActiveMembershipMock.mockResolvedValueOnce({
+      id: 55,
+      userId: 123,
+      status: 'active',
+      expiresAt: new Date('2027-07-03T00:00:00.000Z'),
+    });
+    getKycStatusMock.mockResolvedValueOnce('not_started');
+    upsertKycStatusMock.mockResolvedValueOnce({
+      externalId: 'payment_kyc_review',
+      userId: 123,
+      status: 'review_required',
+      country: 'CN',
+      provider: 'cn-bankcard',
+      providerRef: null,
+      bankCardHash: 'bank_hash_123',
+      reviewedAt,
+    });
+
+    await expect(
+      partnerRouter.createCaller(makeContext()).submitKyc({
+        bankAccountFingerprint: 'bank_hash_123',
+      }),
+    ).resolves.toEqual({
+      kycExternalId: 'payment_kyc_review',
+      status: 'review_required',
+      country: 'CN',
+      provider: 'cn-bankcard',
+      providerRef: null,
+      bankCardVerified: true,
+      reviewedAt,
+    });
+    expect(upsertKycStatusMock).toHaveBeenCalledWith({
+      userId: 123,
+      status: 'review_required',
+      provider: 'cn-bankcard',
+      providerRef: null,
+      bankCardHash: 'bank_hash_123',
+      note: 'cn bank card provider reference missing; manual review required',
     });
   });
 

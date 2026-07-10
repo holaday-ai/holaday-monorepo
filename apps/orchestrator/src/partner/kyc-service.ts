@@ -93,6 +93,40 @@ export function canWithdrawWithKycStatus(status: PartnerKycStatus): boolean {
   return status === 'passed';
 }
 
+export interface CnBankCardKycSubmissionResult {
+  readonly status: 'passed' | 'review_required';
+  readonly provider: 'cn-bankcard';
+  readonly providerRef: string | null;
+  readonly bankCardHash: string;
+  readonly note: string;
+}
+
+export function resolveCnBankCardKycSubmission(input: {
+  bankCardHash: string;
+  providerRef?: string | null;
+}): CnBankCardKycSubmissionResult {
+  const bankCardHash = normalizeBoundedString(input.bankCardHash, 'bankCardHash', 128);
+  const providerRef = normalizeOptionalBoundedString(input.providerRef, 'providerRef', 128);
+
+  if (providerRef) {
+    return {
+      status: 'passed',
+      provider: 'cn-bankcard',
+      providerRef,
+      bankCardHash,
+      note: 'same-name bank card verified by provider',
+    };
+  }
+
+  return {
+    status: 'review_required',
+    provider: 'cn-bankcard',
+    providerRef: null,
+    bankCardHash,
+    note: 'cn bank card provider reference missing; manual review required',
+  };
+}
+
 export class KycService {
   constructor(private readonly db: DB) {}
 

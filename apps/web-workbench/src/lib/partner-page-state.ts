@@ -149,7 +149,7 @@ const disabledState: PartnerDisabledState = {
 
 const KYC_LABELS: Record<PartnerKycStatus, string> = {
   not_started: '未开始',
-  pending: '审核中',
+  pending: '认证中',
   passed: '已通过',
   review_required: '需补充材料',
   rejected: '未通过',
@@ -214,6 +214,7 @@ const PARTNER_ACTION_ERROR_RULES: ReadonlyArray<readonly [RegExp, string]> = [
   [/partner KYC must be passed before recharge/i, '实名通过后才能充值'],
   [/partner KYC must be passed before withdrawal/i, '实名通过后才能提现'],
   [/partner KYC already passed/i, '实名已通过，无需重复提交'],
+  [/partner KYC bank account fingerprint required/i, '请填写银行卡认证指纹'],
   [/partner withdrawal is frozen by risk control/i, '账户存在冻结 HOLA Credit，需完成复核后再提现'],
   [/partner withdrawal requires a verified bank account/i, '请先完成银行卡实名验证'],
   [/partner withdrawal bank account must match KYC bank card/i, '提现银行卡需与实名验证银行卡一致'],
@@ -307,7 +308,7 @@ export function partnerRechargeGate(state: PartnerEnabledState): PartnerRecharge
           ? '补充实名材料并通过后才能充值。'
           : state.kycStatus === 'rejected'
             ? '重新提交实名并通过后才能充值。'
-            : '实名审核通过后才能充值。',
+            : '实名通过后才能充值。',
     };
   }
 
@@ -339,7 +340,7 @@ export function partnerWithdrawalGate(
           ? '补充实名材料并通过后才能提现。'
           : state.kycStatus === 'rejected'
             ? '重新提交实名并通过后才能提现。'
-            : '实名审核通过后才能提现。',
+            : '实名通过后才能提现。',
     };
   }
 

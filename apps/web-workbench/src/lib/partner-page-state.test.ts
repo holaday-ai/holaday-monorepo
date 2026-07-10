@@ -70,7 +70,7 @@ describe('partner page state helpers', () => {
     expect(membershipStatusLabel({ status: 'surprise', expiresAt: null })).toBe('未开通');
 
     expect(kycStatusLabel('not_started')).toBe('未开始');
-    expect(kycStatusLabel('pending')).toBe('审核中');
+    expect(kycStatusLabel('pending')).toBe('认证中');
     expect(kycStatusLabel('passed')).toBe('已通过');
     expect(kycStatusLabel('review_required')).toBe('需补充材料');
     expect(kycStatusLabel('rejected')).toBe('未通过');
@@ -146,7 +146,7 @@ describe('partner page state helpers', () => {
       kycProfile: {
         kycExternalId: 'pay_kyc_1',
         status: 'pending',
-        statusLabel: '审核中',
+        statusLabel: '认证中',
         country: 'CN',
         provider: 'cn-bankcard',
         providerRef: 'bankcard-flow-123',
@@ -389,6 +389,9 @@ describe('partner page state helpers', () => {
       partnerActionErrorMessage(new Error('partner KYC already passed'), '实名提交失败'),
     ).toBe('实名已通过，无需重复提交');
     expect(
+      partnerActionErrorMessage(new Error('partner KYC bank account fingerprint required'), '实名提交失败'),
+    ).toBe('请填写银行卡认证指纹');
+    expect(
       partnerActionErrorMessage(
         new Error('Failed to connect to 127.0.0.1 port 3001'),
         '合伙人账本暂时无法加载',
@@ -427,7 +430,7 @@ describe('partner page state helpers', () => {
     if (!pendingKyc.enabled) throw new Error('expected enabled partner dashboard');
     expect(partnerRechargeGate(pendingKyc)).toEqual({
       blocked: true,
-      reason: '实名审核通过后才能充值。',
+      reason: '实名通过后才能充值。',
     });
 
     const ready = normalizePartnerDashboard({
@@ -477,7 +480,7 @@ describe('partner page state helpers', () => {
       }),
     ).toEqual({
       blocked: true,
-      reason: '实名审核通过后才能提现。',
+      reason: '实名通过后才能提现。',
     });
 
     const frozen = normalizePartnerDashboard({
