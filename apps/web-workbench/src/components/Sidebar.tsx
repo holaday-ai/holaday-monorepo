@@ -59,6 +59,10 @@ import {
   deletableTaskIdsForBatchSelection,
   pruneBatchSelection,
 } from '@/lib/sidebar-batch-selection';
+import {
+  filterSidebarFeatureNavItems,
+  isPartnerNavEnabled,
+} from '@/lib/sidebar-feature-nav';
 import type { ProjectFilterChipState } from '@/lib/project-task-filter-state';
 import { cn } from '@/lib/utils';
 import { useTaskStore } from '@/stores/task-store';
@@ -1003,9 +1007,10 @@ function FeatureNav({ userRole }: { userRole: 'user' | 'admin' }): JSX.Element {
     <SidebarGroup className="shrink-0 border-b border-[#DCDDDD]/70 dark:border-white/10">
       <SidebarGroupContent>
         <SidebarMenu>
-          {FEATURES.filter(
-            (feature) => feature.href !== '/cosmic' || isCosmicEnabled(),
-          ).map(({ icon: Icon, label, href }) => {
+          {filterSidebarFeatureNavItems(FEATURES, {
+            cosmicEnabled: isCosmicEnabled(),
+            partnerEnabled: isPartnerNavEnabled(),
+          }).map(({ icon: Icon, label, href }) => {
             if (href) {
               const isActive = pathname === href;
               return (
