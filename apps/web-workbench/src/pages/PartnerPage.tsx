@@ -693,7 +693,10 @@ function PartnerWorkbench({
           <Row label="可用 HOLA Credit" description="可用于后续合伙人账本操作">
             <span className="text-sm font-medium tabular-nums">{formatHolaCreditCents(state.ledger.availableCreditCents)}</span>
           </Row>
-          <Row label="锁定 HOLA Credit" description="仍处于累计或释放周期内">
+          <Row label="批次待释放 HOLA Credit" description="本金与锁定增量中尚未释放的部分">
+            <span className="text-sm tabular-nums">{formatHolaCreditCents(state.ledger.scheduledCreditCents)}</span>
+          </Row>
+          <Row label="其他锁定 HOLA Credit" description="邀请奖励等非批次锁定额度">
             <span className="text-sm tabular-nums">{formatHolaCreditCents(state.ledger.lockedCreditCents)}</span>
           </Row>
           <Row label="可提现 HOLA Credit" description="可提交提现申请的余额">

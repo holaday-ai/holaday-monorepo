@@ -211,6 +211,7 @@ describe('partner page state helpers', () => {
       },
       ledger: {
         availableCreditCents: 0,
+        scheduledCreditCents: 9999,
         lockedCreditCents: 1200,
         withdrawableCreditCents: 999,
         pendingWithdrawalCreditCents: 0,
@@ -318,6 +319,36 @@ describe('partner page state helpers', () => {
     expect(state.lots[0]?.riskStatus).toBe('review_required');
     expect(state.lots[0]?.riskLabel).toBe('需复核');
     expect(state.lots[0]?.riskLabel).not.toBe('正常');
+  });
+
+  it('derives scheduled credit from unreleased lot principal and locked bonus', () => {
+    const state = normalizePartnerDashboard({
+      enabled: true,
+      ledger: {
+        lockedCreditCents: 100_00,
+      },
+      lots: [
+        {
+          externalId: 'lot_release',
+          principalCreditCents: 10_000_00,
+          lockedBonusCreditCents: 2_000_00,
+          releasedPrincipalCreditCents: 3_000_00,
+          releasedBonusCreditCents: 500_00,
+        },
+        {
+          externalId: 'lot_over_released',
+          principalCreditCents: 100_00,
+          lockedBonusCreditCents: 0,
+          releasedPrincipalCreditCents: 200_00,
+          releasedBonusCreditCents: 0,
+        },
+      ],
+    });
+
+    expect(state.enabled).toBe(true);
+    if (!state.enabled) throw new Error('expected enabled partner dashboard');
+    expect(state.ledger.scheduledCreditCents).toBe(8_500_00);
+    expect(state.ledger.lockedCreditCents).toBe(100_00);
   });
 
   it('adds user-facing explanations for order and withdrawal workflow states', () => {

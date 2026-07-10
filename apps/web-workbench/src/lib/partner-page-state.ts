@@ -93,6 +93,7 @@ export interface NormalizedPartnerMembership {
 
 export interface PartnerLedgerState {
   readonly availableCreditCents: number;
+  readonly scheduledCreditCents: number;
   readonly lockedCreditCents: number;
   readonly withdrawableCreditCents: number;
   readonly pendingWithdrawalCreditCents: number;
@@ -286,6 +287,7 @@ export function normalizePartnerDashboard(value: unknown): PartnerPageState {
   if (!isRecord(value) || value.enabled !== true) return disabledState;
 
   const kycStatus = normalizeKycStatus(value.kycStatus);
+  const lots = normalizeLots(value.lots);
   return {
     enabled: true,
     membership: normalizeMembership(value.membership),
@@ -295,8 +297,8 @@ export function normalizePartnerDashboard(value: unknown): PartnerPageState {
     limits: normalizeLimits(value.limits),
     inviteCode: normalizeInviteCode(value.inviteCode),
     activity: normalizeActivity(value.activity),
-    ledger: normalizeLedger(value.ledger),
-    lots: normalizeLots(value.lots),
+    ledger: normalizeLedger(value.ledger, lots),
+    lots,
     orders: normalizeOrders(value.orders),
     withdrawals: normalizeWithdrawals(value.withdrawals),
   };
@@ -532,15 +534,24 @@ function normalizeInviteCode(value: unknown): string {
   return typeof value === 'string' ? value.trim().slice(0, 64) : '';
 }
 
-function normalizeLedger(value: unknown): PartnerLedgerState {
+function normalizeLedger(value: unknown, lots: readonly PartnerLotState[]): PartnerLedgerState {
   const ledger = isRecord(value) ? value : {};
   return {
     availableCreditCents: safeCents(ledger.availableCreditCents),
+    scheduledCreditCents: sumScheduledCreditCents(lots),
     lockedCreditCents: safeCents(ledger.lockedCreditCents),
     withdrawableCreditCents: safeCents(ledger.withdrawableCreditCents),
     pendingWithdrawalCreditCents: safeCents(ledger.pendingWithdrawalCreditCents),
     frozenCreditCents: safeCents(ledger.frozenCreditCents),
   };
+}
+
+function sumScheduledCreditCents(lots: readonly PartnerLotState[]): number {
+  return lots.reduce((sum, lot) => {
+    const total = lot.principalCreditCents + lot.lockedBonusCreditCents;
+    const released = lot.releasedPrincipalCreditCents + lot.releasedBonusCreditCents;
+    return sum + Math.max(0, total - released);
+  }, 0);
 }
 
 function normalizeLimits(value: unknown): PartnerLimitsState {
