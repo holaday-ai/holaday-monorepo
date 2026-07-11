@@ -1,5 +1,5 @@
 import { TRPCError } from '@trpc/server';
-import { and, desc, eq, inArray, like, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, like, lt, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { DB } from '../../db/client.js';
 import {
@@ -22,6 +22,8 @@ import { WithdrawalGateError, WithdrawalService, WithdrawalTransitionError } fro
 import { adminProcedure, router } from '../trpc.js';
 
 const OVERVIEW_LIMIT_CAP = 100;
+const RECONCILIATION_LIMIT_CAP = 1000;
+const ISO_DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 function partnerLedgerEnabled(): boolean {
   return process.env.PARTNER_LEDGER_ENABLED === 'true';
@@ -79,6 +81,14 @@ function metadataText(metadata: Record<string, unknown>, key: string): string | 
 function metadataNumber(metadata: Record<string, unknown>, key: string): number | undefined {
   const value = metadata[key];
   return typeof value === 'number' && Number.isSafeInteger(value) ? value : undefined;
+}
+
+function rowText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function rowNonNegativeInteger(value: unknown): number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : 0;
 }
 
 function summarizeOrderAudit(metadataValue: unknown) {
@@ -226,6 +236,130 @@ function summarizeWithdrawalMetrics(
     rejectedWithdrawalCount: rows.filter((row) => row.status === 'rejected').length,
     returnedWithdrawalCount: rows.filter((row) => row.status === 'returned').length,
     overdueWithdrawalCount: activeRows.filter((row) => row.reviewDueAt.getTime() <= now.getTime()).length,
+  };
+}
+
+function summarizePartnerReconciliation(input: {
+  orders: Array<Record<string, unknown>>;
+  withdrawals: Array<Record<string, unknown>>;
+}) {
+  const orders = input.orders.map((row) => ({
+    ...row,
+    orderExternalId: rowText(row.orderExternalId),
+    userExternalId: rowText(row.userExternalId),
+    provider: rowText(row.provider) || 'unknown',
+    providerCaptureId: rowText(row.providerCaptureId),
+    orderKind: rowText(row.orderKind),
+    status: rowText(row.status),
+    amountCnyCents: rowNonNegativeInteger(row.amountCnyCents),
+  }));
+  const withdrawals = input.withdrawals.map((row) => ({
+    ...row,
+    withdrawalExternalId: rowText(row.withdrawalExternalId),
+    userExternalId: rowText(row.userExternalId),
+    status: rowText(row.status),
+    amountCreditCents: rowNonNegativeInteger(row.amountCreditCents),
+  }));
+  const providerBreakdown = Array.from(
+    orders.reduce(
+      (byProvider, row) => {
+        const current = byProvider.get(row.provider) ?? {
+          provider: row.provider,
+          orderCount: 0,
+          completedOrderCount: 0,
+          completedAmountCnyCents: 0,
+          reviewRequiredOrderCount: 0,
+        };
+        current.orderCount += 1;
+        if (row.status === 'completed') {
+          current.completedOrderCount += 1;
+          current.completedAmountCnyCents += row.amountCnyCents;
+        }
+        if (row.status === 'review_required') {
+          current.reviewRequiredOrderCount += 1;
+        }
+        byProvider.set(row.provider, current);
+        return byProvider;
+      },
+      new Map<
+        string,
+        {
+          provider: string;
+          orderCount: number;
+          completedOrderCount: number;
+          completedAmountCnyCents: number;
+          reviewRequiredOrderCount: number;
+        }
+      >(),
+    ).values(),
+  ).sort((a, b) => a.provider.localeCompare(b.provider));
+  const completedOrders = orders.filter((row) => row.status === 'completed');
+
+  return {
+    metrics: {
+      orderCount: orders.length,
+      completedOrderCount: completedOrders.length,
+      pendingOrderCount: orders.filter((row) => row.status === 'pending').length,
+      reviewRequiredOrderCount: orders.filter((row) => row.status === 'review_required').length,
+      completedOrderAmountCnyCents: completedOrders.reduce((sum, row) => sum + row.amountCnyCents, 0),
+      membershipRevenueCnyCents: completedOrders
+        .filter((row) => row.orderKind === 'membership')
+        .reduce((sum, row) => sum + row.amountCnyCents, 0),
+      rechargePrincipalCnyCents: completedOrders
+        .filter((row) => row.orderKind === 'recharge')
+        .reduce((sum, row) => sum + row.amountCnyCents, 0),
+      withdrawalCount: withdrawals.length,
+      requestedWithdrawalCount: withdrawals.filter((row) => row.status === 'requested').length,
+      approvedWithdrawalCount: withdrawals.filter((row) => row.status === 'approved').length,
+      paidWithdrawalCount: withdrawals.filter((row) => row.status === 'paid').length,
+      rejectedWithdrawalCount: withdrawals.filter((row) => row.status === 'rejected').length,
+      returnedWithdrawalCount: withdrawals.filter((row) => row.status === 'returned').length,
+      approvedWithdrawalCreditCents: withdrawals
+        .filter((row) => row.status === 'approved')
+        .reduce((sum, row) => sum + row.amountCreditCents, 0),
+      paidWithdrawalCreditCents: withdrawals
+        .filter((row) => row.status === 'paid')
+        .reduce((sum, row) => sum + row.amountCreditCents, 0),
+    },
+    providerBreakdown,
+    orders,
+    withdrawals,
+  };
+}
+
+function isoDay(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+function parseIsoDay(value: string, fieldName: string): Date {
+  if (!ISO_DAY_PATTERN.test(value)) {
+    throw new RangeError(`${fieldName} must be YYYY-MM-DD`);
+  }
+  const date = new Date(`${value}T00:00:00.000Z`);
+  if (Number.isNaN(date.getTime()) || isoDay(date) !== value) {
+    throw new RangeError(`${fieldName} must be a valid calendar day`);
+  }
+  return date;
+}
+
+function addUtcDays(date: Date, days: number): Date {
+  return new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
+}
+
+function normalizeReconciliationWindow(input: { from?: string; to?: string } | undefined) {
+  const defaultToDay = isoDay(new Date());
+  const toDay = input?.to ?? defaultToDay;
+  const toDate = parseIsoDay(toDay, 'to');
+  const fromDay = input?.from ?? isoDay(addUtcDays(toDate, -6));
+  const fromDate = parseIsoDay(fromDay, 'from');
+  if (fromDate.getTime() > toDate.getTime()) {
+    throw new RangeError('from must be on or before to');
+  }
+  return {
+    fromDay,
+    toDay,
+    fromDate,
+    toExclusiveDate: addUtcDays(toDate, 1),
   };
 }
 
@@ -449,6 +583,95 @@ export const adminPartnerRouter = router({
       };
     }),
 
+  reconciliation: adminProcedure
+    .input(
+      z
+        .object({
+          from: z.string().trim().regex(ISO_DAY_PATTERN).optional(),
+          to: z.string().trim().regex(ISO_DAY_PATTERN).optional(),
+          limit: z.number().int().min(1).max(RECONCILIATION_LIMIT_CAP).default(500),
+        })
+        .optional(),
+    )
+    .query(async ({ ctx, input }) => {
+      if (!partnerLedgerEnabled()) {
+        return { enabled: false as const };
+      }
+
+      let window: ReturnType<typeof normalizeReconciliationWindow>;
+      try {
+        window = normalizeReconciliationWindow(input);
+      } catch (error) {
+        if (error instanceof RangeError) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: error.message });
+        }
+        throw error;
+      }
+
+      const limit = input?.limit ?? 500;
+      const [orders, withdrawals] = await Promise.all([
+        ctx.db
+          .select({
+            orderExternalId: partnerRechargeOrders.externalId,
+            userExternalId: users.externalId,
+            email: users.email,
+            displayName: users.displayName,
+            provider: partnerRechargeOrders.provider,
+            providerCaptureId: partnerRechargeOrders.providerCaptureId,
+            amountCnyCents: partnerRechargeOrders.amountCnyCents,
+            status: partnerRechargeOrders.status,
+            orderKind: partnerRechargeOrders.orderKind,
+            createdAt: partnerRechargeOrders.createdAt,
+            updatedAt: partnerRechargeOrders.updatedAt,
+          })
+          .from(partnerRechargeOrders)
+          .innerJoin(users, eq(users.id, partnerRechargeOrders.userId))
+          .where(
+            and(
+              gte(partnerRechargeOrders.updatedAt, window.fromDate),
+              lt(partnerRechargeOrders.updatedAt, window.toExclusiveDate),
+            ),
+          )
+          .orderBy(desc(partnerRechargeOrders.updatedAt))
+          .limit(limit),
+        ctx.db
+          .select({
+            withdrawalExternalId: partnerWithdrawalRequests.externalId,
+            userExternalId: users.externalId,
+            email: users.email,
+            displayName: users.displayName,
+            amountCreditCents: partnerWithdrawalRequests.amountCreditCents,
+            status: partnerWithdrawalRequests.status,
+            reviewDueAt: partnerWithdrawalRequests.reviewDueAt,
+            bankAccountFingerprint: partnerWithdrawalRequests.bankAccountFingerprint,
+            riskScore: partnerWithdrawalRequests.riskScore,
+            rejectionReason: partnerWithdrawalRequests.rejectionReason,
+            createdAt: partnerWithdrawalRequests.createdAt,
+            updatedAt: partnerWithdrawalRequests.updatedAt,
+          })
+          .from(partnerWithdrawalRequests)
+          .innerJoin(users, eq(users.id, partnerWithdrawalRequests.userId))
+          .where(
+            and(
+              gte(partnerWithdrawalRequests.updatedAt, window.fromDate),
+              lt(partnerWithdrawalRequests.updatedAt, window.toExclusiveDate),
+            ),
+          )
+          .orderBy(desc(partnerWithdrawalRequests.updatedAt))
+          .limit(limit),
+      ]);
+
+      return {
+        enabled: true as const,
+        range: {
+          from: window.fromDay,
+          to: window.toDay,
+          basis: 'updated_at' as const,
+        },
+        ...summarizePartnerReconciliation({ orders, withdrawals }),
+      };
+    }),
+
   setKycStatus: adminProcedure
     .input(
       z.object({
@@ -616,6 +839,7 @@ export const adminPartnerRouter = router({
 export const __adminPartnerInternals = {
   summarizeKycProfile,
   summarizeOrder,
+  summarizePartnerReconciliation,
   summarizeWithdrawal,
   summarizeWithdrawalMetrics,
 };

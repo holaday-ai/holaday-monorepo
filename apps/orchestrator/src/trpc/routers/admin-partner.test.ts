@@ -414,6 +414,88 @@ describe('admin.partner router', () => {
     });
   });
 
+  it('summarizes partner reconciliation rows for operator export', () => {
+    const summarizePartnerReconciliation = (
+      __adminPartnerInternals as typeof __adminPartnerInternals & {
+        summarizePartnerReconciliation: (input: {
+          orders: Array<Record<string, unknown>>;
+          withdrawals: Array<Record<string, unknown>>;
+        }) => Record<string, unknown>;
+      }
+    ).summarizePartnerReconciliation;
+
+    expect(
+      summarizePartnerReconciliation({
+        orders: [
+          {
+            orderExternalId: 'pay_membership_completed',
+            userExternalId: 'usr_partner',
+            orderKind: 'membership',
+            provider: 'wechat',
+            amountCnyCents: 999_00,
+            status: 'completed',
+            providerCaptureId: 'wx-cap-1',
+          },
+          {
+            orderExternalId: 'pay_recharge_completed',
+            userExternalId: 'usr_partner',
+            orderKind: 'recharge',
+            provider: 'alipay',
+            amountCnyCents: 10_000_00,
+            status: 'completed',
+            providerCaptureId: 'ali-cap-1',
+          },
+          {
+            orderExternalId: 'pay_recharge_review',
+            userExternalId: 'usr_partner',
+            orderKind: 'recharge',
+            provider: 'wechat',
+            amountCnyCents: 20_000_00,
+            status: 'review_required',
+            providerCaptureId: 'wx-cap-review',
+          },
+        ],
+        withdrawals: [
+          {
+            withdrawalExternalId: 'pay_withdrawal_paid',
+            userExternalId: 'usr_partner',
+            amountCreditCents: 600_00,
+            status: 'paid',
+          },
+          {
+            withdrawalExternalId: 'pay_withdrawal_approved',
+            userExternalId: 'usr_partner',
+            amountCreditCents: 700_00,
+            status: 'approved',
+          },
+        ],
+      }),
+    ).toMatchObject({
+      metrics: {
+        orderCount: 3,
+        completedOrderCount: 2,
+        pendingOrderCount: 0,
+        reviewRequiredOrderCount: 1,
+        membershipRevenueCnyCents: 999_00,
+        rechargePrincipalCnyCents: 10_000_00,
+        paidWithdrawalCreditCents: 600_00,
+        approvedWithdrawalCreditCents: 700_00,
+      },
+      providerBreakdown: [
+        {
+          provider: 'alipay',
+          completedOrderCount: 1,
+          completedAmountCnyCents: 10_000_00,
+        },
+        {
+          provider: 'wechat',
+          completedOrderCount: 1,
+          completedAmountCnyCents: 999_00,
+        },
+      ],
+    });
+  });
+
   it('summarizes partner order, KYC, and withdrawal audit metadata for review queues', () => {
     const order = __adminPartnerInternals.summarizeOrder(
       fakeOrder({
