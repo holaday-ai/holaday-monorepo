@@ -7,6 +7,7 @@ import {
   partnerLots,
   partnerRechargeOrders,
   partnerWithdrawalRequests,
+  type PartnerLot,
   type PartnerRechargeOrder,
   type PartnerWithdrawalRequest,
 } from '../../db/schema/partner.js';
@@ -18,6 +19,7 @@ import {
   PartnerPaymentProviderCaptureConflictError,
   PartnerPaymentConfirmService,
 } from '../../partner/payment-confirm-service.js';
+import { PartnerRiskLotService, PartnerRiskLotTransitionError } from '../../partner/risk-lot-service.js';
 import { WithdrawalGateError, WithdrawalService, WithdrawalTransitionError } from '../../partner/withdrawal-service.js';
 import { adminProcedure, router } from '../trpc.js';
 
@@ -224,6 +226,17 @@ function summarizeWithdrawal(withdrawal: PartnerWithdrawalRequest) {
   };
 }
 
+function summarizeRiskLot(lot: PartnerLot) {
+  return {
+    lotExternalId: lot.externalId,
+    status: lot.status,
+    riskStatus: lot.riskStatus,
+    principalCreditCents: lot.principalCreditCents,
+    apiUnits: lot.apiUnits,
+    updatedAt: lot.updatedAt,
+  };
+}
+
 function summarizeWithdrawalMetrics(
   rows: Array<{ status: string; reviewDueAt: Date }>,
   now: Date,
@@ -403,6 +416,22 @@ function mapWithdrawalError(error: unknown): never {
     throw new TRPCError({ code: 'BAD_REQUEST', message: error.message });
   }
   throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'withdrawal review failed' });
+}
+
+function mapRiskLotError(error: unknown): never {
+  if (error instanceof PartnerRiskLotTransitionError) {
+    if (error.reason === 'not_found') {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'partner risk lot not found' });
+    }
+    if (error.reason === 'not_frozen') {
+      throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'partner risk lot is not frozen' });
+    }
+    throw new TRPCError({ code: 'PRECONDITION_FAILED', message: error.message });
+  }
+  if (error instanceof RangeError) {
+    throw new TRPCError({ code: 'BAD_REQUEST', message: error.message });
+  }
+  throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'partner risk lot review failed' });
 }
 
 export const adminPartnerRouter = router({
@@ -832,6 +861,50 @@ export const adminPartnerRouter = router({
         return summarizeWithdrawal(row);
       } catch (error) {
         return mapWithdrawalError(error);
+      }
+    }),
+
+  freezeRiskLot: adminProcedure
+    .input(
+      z.object({
+        lotExternalId: z.string().trim().min(1).max(32),
+        reason: z.string().trim().min(1).max(1000),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      requirePartnerLedgerEnabled();
+      const adminUser = await resolveUserByExternalId(ctx.db, ctx.userId);
+      try {
+        const row = await new PartnerRiskLotService(ctx.db).freezeLot({
+          lotExternalId: input.lotExternalId,
+          reviewerUserId: adminUser.id,
+          reason: input.reason,
+        });
+        return summarizeRiskLot(row);
+      } catch (error) {
+        return mapRiskLotError(error);
+      }
+    }),
+
+  resumeRiskLot: adminProcedure
+    .input(
+      z.object({
+        lotExternalId: z.string().trim().min(1).max(32),
+        note: z.string().trim().min(1).max(1000).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      requirePartnerLedgerEnabled();
+      const adminUser = await resolveUserByExternalId(ctx.db, ctx.userId);
+      try {
+        const row = await new PartnerRiskLotService(ctx.db).resumeLot({
+          lotExternalId: input.lotExternalId,
+          reviewerUserId: adminUser.id,
+          note: input.note,
+        });
+        return summarizeRiskLot(row);
+      } catch (error) {
+        return mapRiskLotError(error);
       }
     }),
 });

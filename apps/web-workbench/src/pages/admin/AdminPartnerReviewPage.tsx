@@ -30,6 +30,7 @@ import {
   partnerReconciliationCsv,
   partnerKycQueueReviewPayload,
   partnerOrderActionLabel,
+  partnerRiskLotQueueAction,
   partnerReviewStatusToken,
   type AdminPartnerStatusKind,
   type PartnerReconciliationState,
@@ -409,7 +410,7 @@ function EnabledAdminPartnerReview({
         runAction={runAction}
       />
       <WithdrawalHistory rows={data.withdrawalHistory} />
-      <RiskLotQueue rows={data.riskLots} />
+      <RiskLotQueue rows={data.riskLots} pendingAction={pendingAction} runAction={runAction} />
     </div>
   );
 }
@@ -968,25 +969,66 @@ function WithdrawalHistory({ rows }: { rows: EnabledOverviewState['withdrawalHis
   );
 }
 
-function RiskLotQueue({ rows }: { rows: EnabledOverviewState['riskLots'] }): JSX.Element {
+function RiskLotQueue({
+  rows,
+  pendingAction,
+  runAction,
+}: {
+  rows: EnabledOverviewState['riskLots'];
+  pendingAction: string | null;
+  runAction: (actionKey: string, action: () => Promise<void>, success: string) => Promise<void>;
+}): JSX.Element {
   return (
     <QueueSection title="风险批次" empty="暂无风险批次">
       <DataTable
-        headers={['用户', '批次', '本金', 'API Units', '批次状态', '风险状态', '更新时间']}
+        headers={['用户', '批次', '本金', 'API Units', '批次状态', '风险状态', '更新时间', '操作']}
         empty={rows.length === 0}
-        colSpan={7}
+        colSpan={8}
       >
-        {rows.map((row) => (
-          <tr key={row.lotExternalId} className="border-b border-[#EFEFEF] last:border-b-0 hover:bg-[#EFEFEF]/35">
-            <UserCell userExternalId={row.userExternalId} email={row.email} displayName={row.displayName} />
-            <td className="px-3 py-3 text-muted-foreground">{truncate(row.lotExternalId, 18)}</td>
-            <td className="px-3 py-3 tabular-nums">{formatPartnerCreditCents(row.principalCreditCents)}</td>
-            <td className="px-3 py-3 tabular-nums text-muted-foreground">{formatInteger(row.apiUnits)}</td>
-            <td className="px-3 py-3 text-muted-foreground">{row.status === 'frozen' ? '已冻结' : row.status || '—'}</td>
-            <td className="px-3 py-3"><StatusBadge kind="risk" status={row.riskStatus} /></td>
-            <td className="px-3 py-3 text-muted-foreground">{formatDateTime(row.updatedAt as string | Date | null)}</td>
-          </tr>
-        ))}
+        {rows.map((row) => {
+          const action = partnerRiskLotQueueAction(row);
+          const actionKey = `risk-${action.action}:${row.lotExternalId}`;
+          const pending = pendingAction === actionKey;
+          return (
+            <tr key={row.lotExternalId} className="border-b border-[#EFEFEF] last:border-b-0 hover:bg-[#EFEFEF]/35">
+              <UserCell userExternalId={row.userExternalId} email={row.email} displayName={row.displayName} />
+              <td className="px-3 py-3 text-muted-foreground">{truncate(row.lotExternalId, 18)}</td>
+              <td className="px-3 py-3 tabular-nums">{formatPartnerCreditCents(row.principalCreditCents)}</td>
+              <td className="px-3 py-3 tabular-nums text-muted-foreground">{formatInteger(row.apiUnits)}</td>
+              <td className="px-3 py-3 text-muted-foreground">{row.status === 'frozen' ? '已冻结' : row.status || '—'}</td>
+              <td className="px-3 py-3"><StatusBadge kind="risk" status={row.riskStatus} /></td>
+              <td className="px-3 py-3 text-muted-foreground">{formatDateTime(row.updatedAt as string | Date | null)}</td>
+              <td className="px-5 py-3">
+                <ActionButton
+                  icon={action.action === 'freeze' ? ShieldCheck : RefreshCw}
+                  label={pending ? action.pendingLabel : action.label}
+                  compact
+                  tone={action.action === 'freeze' ? 'danger' : 'primary'}
+                  pending={pending}
+                  onClick={() =>
+                    void runAction(
+                      actionKey,
+                      async () => {
+                        if (action.action === 'freeze') {
+                          await trpc.admin.partner.freezeRiskLot.mutate({
+                            lotExternalId: row.lotExternalId,
+                            reason: '后台风险冻结',
+                          });
+                          return;
+                        }
+                        await trpc.admin.partner.resumeRiskLot.mutate({
+                          lotExternalId: row.lotExternalId,
+                          note: '后台风险恢复',
+                        });
+                      },
+                      action.action === 'freeze' ? '批次已冻结' : '批次已恢复',
+                    )
+                  }
+                />
+              </td>
+            </tr>
+          );
+        })}
       </DataTable>
     </QueueSection>
   );

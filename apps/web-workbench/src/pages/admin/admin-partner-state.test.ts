@@ -9,6 +9,7 @@ import {
   normalizeRiskScore,
   partnerKycQueueReviewPayload,
   partnerOrderActionLabel,
+  partnerRiskLotQueueAction,
   partnerReviewStatusToken,
 } from './admin-partner-state';
 
@@ -30,6 +31,21 @@ describe('partnerOrderActionLabel', () => {
   it('distinguishes ordinary confirmation from review approval', () => {
     expect(partnerOrderActionLabel('pending')).toBe('确认');
     expect(partnerOrderActionLabel('review_required')).toBe('放行');
+  });
+});
+
+describe('partnerRiskLotQueueAction', () => {
+  it('uses freeze for active risk lots and resume for frozen lots', () => {
+    expect(partnerRiskLotQueueAction({ status: 'accumulating', riskStatus: 'review' })).toEqual({
+      action: 'freeze',
+      label: '冻结',
+      pendingLabel: '冻结中',
+    });
+    expect(partnerRiskLotQueueAction({ status: 'frozen', riskStatus: 'frozen' })).toEqual({
+      action: 'resume',
+      label: '恢复',
+      pendingLabel: '恢复中',
+    });
   });
 });
 

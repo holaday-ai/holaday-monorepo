@@ -1,6 +1,11 @@
 import { inspect } from 'node:util';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
-import { partnerRechargeOrders, type PartnerRechargeOrder, type PartnerWithdrawalRequest } from '../../db/schema/partner.js';
+import {
+  partnerRechargeOrders,
+  type PartnerLot,
+  type PartnerRechargeOrder,
+  type PartnerWithdrawalRequest,
+} from '../../db/schema/partner.js';
 import { users } from '../../db/schema/users.js';
 
 const {
@@ -10,6 +15,8 @@ const {
   approveWithdrawalMock,
   rejectWithdrawalMock,
   markWithdrawalPaidMock,
+  freezeRiskLotMock,
+  resumeRiskLotMock,
 } = vi.hoisted(() => ({
   confirmCapturedOrderMock: vi.fn(),
   approveReviewRequiredOrderMock: vi.fn(),
@@ -17,6 +24,8 @@ const {
   approveWithdrawalMock: vi.fn(),
   rejectWithdrawalMock: vi.fn(),
   markWithdrawalPaidMock: vi.fn(),
+  freezeRiskLotMock: vi.fn(),
+  resumeRiskLotMock: vi.fn(),
 }));
 
 vi.mock('../../partner/payment-confirm-service.js', async (importOriginal) => {
@@ -52,9 +61,21 @@ vi.mock('../../partner/withdrawal-service.js', async (importOriginal) => {
   };
 });
 
+vi.mock('../../partner/risk-lot-service.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../partner/risk-lot-service.js')>();
+  return {
+    ...actual,
+    PartnerRiskLotService: vi.fn(() => ({
+      freezeLot: freezeRiskLotMock,
+      resumeLot: resumeRiskLotMock,
+    })),
+  };
+});
+
 import { adminRouter } from './admin.js';
 import { __adminPartnerInternals } from './admin-partner.js';
 import { WithdrawalGateError } from '../../partner/withdrawal-service.js';
+import { PartnerRiskLotTransitionError } from '../../partner/risk-lot-service.js';
 
 type FakeUserRow = {
   id: number;
@@ -165,6 +186,33 @@ function fakeWithdrawal(overrides: Partial<PartnerWithdrawalRequest> = {}): Part
   };
 }
 
+function fakeLot(overrides: Partial<PartnerLot> = {}): PartnerLot {
+  return {
+    id: 30,
+    externalId: 'pay_risk_lot_1',
+    userId: 123,
+    rechargeOrderId: 10,
+    status: 'accumulating',
+    riskStatus: 'review',
+    principalCreditCents: 10_000_00,
+    tierMultiplierBps: 10_500,
+    apiUnits: 10_500_000,
+    bonusCapCreditCents: 2_000_00,
+    lockedBonusCreditCents: 0,
+    releasedPrincipalCreditCents: 0,
+    releasedBonusCreditCents: 0,
+    carryForwardCreditCents: 0,
+    accumulationStartsAt: new Date('2026-07-03T01:00:00.000Z'),
+    accumulationEndsAt: new Date('2026-10-31T01:00:00.000Z'),
+    releaseStartsAt: new Date('2026-11-01T01:00:00.000Z'),
+    releaseEndsAt: new Date('2027-11-01T01:00:00.000Z'),
+    metadata: null,
+    createdAt: new Date('2026-07-03T01:00:00.000Z'),
+    updatedAt: new Date('2026-07-03T01:00:00.000Z'),
+    ...overrides,
+  };
+}
+
 function makeContext(db = new FakeAdminPartnerDb()) {
   return {
     db,
@@ -190,6 +238,8 @@ describe('admin.partner router', () => {
     approveWithdrawalMock.mockReset();
     rejectWithdrawalMock.mockReset();
     markWithdrawalPaidMock.mockReset();
+    freezeRiskLotMock.mockReset();
+    resumeRiskLotMock.mockReset();
   });
 
   afterEach(() => {
@@ -374,6 +424,50 @@ describe('admin.partner router', () => {
     ).rejects.toMatchObject({
       code: 'PRECONDITION_FAILED',
       message: 'partner withdrawal bank account must match KYC bank card',
+    });
+  });
+
+  it('passes risk lot freeze and resume actions through the risk lot service', async () => {
+    freezeRiskLotMock.mockResolvedValueOnce(fakeLot({ status: 'frozen', riskStatus: 'frozen' }));
+    resumeRiskLotMock.mockResolvedValueOnce(fakeLot({ status: 'releasing', riskStatus: 'review' }));
+    const caller = adminRouter.createCaller(makeContext()).partner;
+
+    await expect(
+      caller.freezeRiskLot({
+        lotExternalId: 'pay_risk_lot_1',
+        reason: 'bank dispute signal',
+      }),
+    ).resolves.toMatchObject({ lotExternalId: 'pay_risk_lot_1', status: 'frozen', riskStatus: 'frozen' });
+    await expect(
+      caller.resumeRiskLot({
+        lotExternalId: 'pay_risk_lot_1',
+        note: 'manual review cleared',
+      }),
+    ).resolves.toMatchObject({ lotExternalId: 'pay_risk_lot_1', status: 'releasing', riskStatus: 'review' });
+
+    expect(freezeRiskLotMock).toHaveBeenCalledWith({
+      lotExternalId: 'pay_risk_lot_1',
+      reviewerUserId: 1,
+      reason: 'bank dispute signal',
+    });
+    expect(resumeRiskLotMock).toHaveBeenCalledWith({
+      lotExternalId: 'pay_risk_lot_1',
+      reviewerUserId: 1,
+      note: 'manual review cleared',
+    });
+  });
+
+  it('maps missing risk lots to not-found responses', async () => {
+    freezeRiskLotMock.mockRejectedValueOnce(new PartnerRiskLotTransitionError('not_found'));
+
+    await expect(
+      adminRouter.createCaller(makeContext()).partner.freezeRiskLot({
+        lotExternalId: 'pay_missing_lot',
+        reason: 'bank dispute signal',
+      }),
+    ).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+      message: 'partner risk lot not found',
     });
   });
 

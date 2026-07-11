@@ -11,4 +11,5 @@ export * from './activity-service.js';
 export * from './release-service.js';
 export * from './schedulers.js';
 export * from './risk-service.js';
+export * from './risk-lot-service.js';
 export * from './withdrawal-service.js';

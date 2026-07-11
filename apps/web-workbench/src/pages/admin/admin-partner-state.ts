@@ -128,6 +128,16 @@ export function partnerOrderActionLabel(status: unknown): '确认' | '放行' {
   return status === 'review_required' ? '放行' : '确认';
 }
 
+export function partnerRiskLotQueueAction(row: {
+  readonly status: string;
+  readonly riskStatus: string;
+}): { action: 'freeze' | 'resume'; label: string; pendingLabel: string } {
+  if (row.status === 'frozen' || row.riskStatus === 'frozen') {
+    return { action: 'resume', label: '恢复', pendingLabel: '恢复中' };
+  }
+  return { action: 'freeze', label: '冻结', pendingLabel: '冻结中' };
+}
+
 export function partnerKycQueueReviewPayload(
   row: {
     readonly userExternalId: string;

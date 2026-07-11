@@ -151,6 +151,25 @@ Use `/admin/partners` for:
 Reconciliation is based on `updated_at`, not `created_at`. Use it for
 settlement activity in a window, not raw order origination.
 
+## Risk Lot Review
+
+Risk lots appear when `partner_lots.risk_status` is `review`,
+`review_required`, `frozen`, or the lot status is `frozen`.
+
+Use Freeze when a lot needs manual containment. The service:
+
+- Saves the pre-freeze lot status and risk status into metadata.
+- Sets both `status` and `risk_status` to `frozen`.
+- Writes a `partner_risk_events` row with reviewer id and reason.
+
+Use Resume only after review evidence is cleared. The service restores
+the pre-freeze status from metadata, writes a `lot_resumed` risk event,
+and leaves the original freeze audit trail intact.
+
+If the incident requires refund, fraud handling, or account-wide
+containment, keep the lot frozen and handle the finance action manually
+before resuming or closing the customer path.
+
 ## KYC Rules
 
 Current KYC provider behavior is conservative:
