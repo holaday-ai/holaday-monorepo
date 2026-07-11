@@ -179,10 +179,14 @@ function makeContext(db = new FakeUserLookupDb()) {
 describe('partnerRouter mutations', () => {
   const originalFlag = process.env.PARTNER_LEDGER_ENABLED;
   const originalNodeEnv = process.env.NODE_ENV;
+  const originalCnPaymentUrl = process.env.CN_PAYMENT_URL;
+  const originalInternalSharedSecret = process.env.INTERNAL_SHARED_SECRET;
 
   beforeEach(() => {
     process.env.PARTNER_LEDGER_ENABLED = 'true';
     process.env.NODE_ENV = 'test';
+    delete process.env.CN_PAYMENT_URL;
+    delete process.env.INTERNAL_SHARED_SECRET;
     createPendingOrderMock.mockReset();
     getActiveMembershipMock.mockReset();
     getKycProfileMock.mockReset();
@@ -205,6 +209,17 @@ describe('partnerRouter mutations', () => {
     } else {
       process.env.NODE_ENV = originalNodeEnv;
     }
+    if (originalCnPaymentUrl === undefined) {
+      delete process.env.CN_PAYMENT_URL;
+    } else {
+      process.env.CN_PAYMENT_URL = originalCnPaymentUrl;
+    }
+    if (originalInternalSharedSecret === undefined) {
+      delete process.env.INTERNAL_SHARED_SECRET;
+    } else {
+      process.env.INTERNAL_SHARED_SECRET = originalInternalSharedSecret;
+    }
+    vi.unstubAllGlobals();
   });
 
   it('blocks new mutations when the partner ledger flag is disabled', async () => {
@@ -298,6 +313,63 @@ describe('partnerRouter mutations', () => {
       orderKind: 'membership',
       amountCnyCents: PARTNER_MEMBERSHIP_PRICE_CNY_CENTS,
       idempotencyKey: 'membership-idem-1',
+    });
+  });
+
+  it('creates an online membership payment through the cn-payment gateway when configured', async () => {
+    process.env.CN_PAYMENT_URL = 'https://pay.example.test/';
+    process.env.INTERNAL_SHARED_SECRET = 'internal-secret';
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        provider: 'wechat',
+        outTradeNo: 'payment_membership_1',
+        codeUrl: 'weixin://wxpay/bizpayurl?pr=partner',
+        amountCents: PARTNER_MEMBERSHIP_PRICE_CNY_CENTS,
+        description: 'HOLA DAY 合伙人年费',
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    createPendingOrderMock.mockResolvedValueOnce({
+      externalId: 'payment_membership_1',
+      provider: 'wechat',
+      orderKind: 'membership',
+      amountCnyCents: PARTNER_MEMBERSHIP_PRICE_CNY_CENTS,
+      status: 'pending',
+      createdAt: new Date('2026-07-10T10:00:00.000Z'),
+    });
+
+    await expect(
+      partnerRouter.createCaller(makeContext()).createMembershipOrder({
+        provider: 'wechat',
+        idempotencyKey: 'membership-online',
+      }),
+    ).resolves.toMatchObject({
+      orderExternalId: 'payment_membership_1',
+      paymentIntent: {
+        provider: 'wechat',
+        mode: 'qr',
+        codeUrl: 'weixin://wxpay/bizpayurl?pr=partner',
+        expiresAt: new Date('2026-07-10T10:30:00.000Z'),
+      },
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith('https://pay.example.test/payment/create', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-internal-secret': 'internal-secret',
+      },
+      body: JSON.stringify({
+        provider: 'wechat',
+        userId: 'usr_partner',
+        purchase: {
+          kind: 'partner_membership',
+          partnerOrderExternalId: 'payment_membership_1',
+          amountCnyCents: PARTNER_MEMBERSHIP_PRICE_CNY_CENTS,
+        },
+      }),
     });
   });
 

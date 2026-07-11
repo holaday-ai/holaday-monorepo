@@ -16,7 +16,12 @@ import {
   resolveCnBankCardKycSubmission,
 } from '../../partner/kyc-service.js';
 import { PartnerMembershipService } from '../../partner/membership-service.js';
-import { buildPartnerPaymentIntent } from '../../partner/payment-intent-service.js';
+import {
+  buildPartnerPaymentGatewayCreatePayload,
+  buildPartnerPaymentIntent,
+  buildPartnerPaymentIntentFromGatewayResponse,
+  type PartnerPaymentIntent,
+} from '../../partner/payment-intent-service.js';
 import { partnerConfig } from '../../partner/partner-config.js';
 import { calculateApiUnits, selectRechargeTier } from '../../partner/partner-rules.js';
 import {
@@ -139,7 +144,7 @@ function summarizePartnerOrder(order: {
   status: string;
   createdAt?: Date;
   metadata?: unknown;
-}, options: { includePaymentIntent?: boolean } = {}) {
+}, options: { includePaymentIntent?: boolean; paymentIntent?: PartnerPaymentIntent } = {}) {
   const metadata = metadataRecord(order.metadata);
   const reviewReason = metadataText(metadata, 'reviewReason');
   const reviewErrorMessage = metadataText(metadata, 'errorMessage');
@@ -152,19 +157,120 @@ function summarizePartnerOrder(order: {
     status: order.status,
     ...(options.includePaymentIntent
       ? {
-          paymentIntent: buildPartnerPaymentIntent({
-            orderExternalId: order.externalId,
-            provider: order.provider,
-            orderKind: order.orderKind,
-            amountCnyCents: order.amountCnyCents,
-            createdAt,
-          }),
+          paymentIntent:
+            options.paymentIntent ??
+            buildPartnerPaymentIntent({
+              orderExternalId: order.externalId,
+              provider: order.provider,
+              orderKind: order.orderKind,
+              amountCnyCents: order.amountCnyCents,
+              createdAt,
+            }),
         }
       : {}),
     ...(reviewReason ? { reviewReason } : {}),
     ...(reviewErrorMessage ? { reviewErrorMessage } : {}),
     createdAt: order.createdAt,
   };
+}
+
+function isOnlinePartnerPaymentProvider(provider: string): provider is 'wechat' | 'alipay' {
+  return provider === 'wechat' || provider === 'alipay';
+}
+
+async function resolvePartnerPaymentIntent(
+  ctx: Context & { userId: string },
+  order: {
+    externalId: string;
+    provider: string;
+    orderKind: string;
+    amountCnyCents: number;
+    createdAt?: Date;
+  },
+): Promise<PartnerPaymentIntent> {
+  const createdAt = order.createdAt instanceof Date ? order.createdAt : new Date();
+  if (!isOnlinePartnerPaymentProvider(order.provider)) {
+    return buildPartnerPaymentIntent({
+      orderExternalId: order.externalId,
+      provider: order.provider,
+      orderKind: order.orderKind,
+      amountCnyCents: order.amountCnyCents,
+      createdAt,
+    });
+  }
+
+  const cnPaymentUrl = process.env.CN_PAYMENT_URL?.trim();
+  const secret = process.env.INTERNAL_SHARED_SECRET?.trim();
+  if (!cnPaymentUrl || !secret) {
+    return buildPartnerPaymentIntent({
+      orderExternalId: order.externalId,
+      provider: order.provider,
+      orderKind: order.orderKind,
+      amountCnyCents: order.amountCnyCents,
+      createdAt,
+    });
+  }
+
+  const payload = buildPartnerPaymentGatewayCreatePayload({
+    provider: order.provider,
+    userExternalId: ctx.userId,
+    orderExternalId: order.externalId,
+    orderKind: order.orderKind,
+    amountCnyCents: order.amountCnyCents,
+  });
+
+  const endpoint = `${cnPaymentUrl.replace(/\/$/, '')}/payment/create`;
+  let responsePayload: unknown;
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-internal-secret': secret },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const body = await res.text();
+      ctx.logger.warn(
+        { status: res.status, body: body.slice(0, 400), orderExternalId: order.externalId },
+        'partner cn-payment: create call failed',
+      );
+      throw new TRPCError({
+        code: 'INTERNAL_SERVER_ERROR',
+        message: `cn-payment ${res.status}: ${body.slice(0, 200)}`,
+      });
+    }
+    responsePayload = await res.json();
+  } catch (error) {
+    if (error instanceof TRPCError) throw error;
+    const message = error instanceof Error ? error.message : String(error);
+    ctx.logger.warn(
+      { err: message, orderExternalId: order.externalId },
+      'partner cn-payment: create call threw',
+    );
+    throw new TRPCError({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: 'failed to create partner payment with cn-payment',
+    });
+  }
+
+  try {
+    return buildPartnerPaymentIntentFromGatewayResponse({
+      provider: order.provider,
+      orderExternalId: order.externalId,
+      amountCnyCents: order.amountCnyCents,
+      createdAt,
+      response: responsePayload,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    ctx.logger.warn(
+      { err: message, orderExternalId: order.externalId },
+      'partner cn-payment: create response mismatch',
+    );
+    throw new TRPCError({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: 'cn-payment returned an invalid partner payment response',
+    });
+  }
 }
 
 function summarizePartnerWithdrawal(withdrawal: {
@@ -527,7 +633,8 @@ export const partnerRouter = router({
         amountCnyCents: PARTNER_MEMBERSHIP_PRICE_CNY_CENTS,
         idempotencyKey: input.idempotencyKey,
       });
-      return summarizePartnerOrder(order, { includePaymentIntent: true });
+      const paymentIntent = await resolvePartnerPaymentIntent(ctx, order);
+      return summarizePartnerOrder(order, { includePaymentIntent: true, paymentIntent });
     } catch (error) {
       mapRechargeOrderError(error);
     }
@@ -545,7 +652,8 @@ export const partnerRouter = router({
         amountCnyCents: input.amountCnyCents,
         idempotencyKey: input.idempotencyKey,
       });
-      return summarizePartnerOrder(order, { includePaymentIntent: true });
+      const paymentIntent = await resolvePartnerPaymentIntent(ctx, order);
+      return summarizePartnerOrder(order, { includePaymentIntent: true, paymentIntent });
     } catch (error) {
       mapRechargeOrderError(error);
     }

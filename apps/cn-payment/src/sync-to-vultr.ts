@@ -1,8 +1,9 @@
 /**
  * Bridge from the Aliyun gateway → Vultr orchestrator. After a
  * verified WX/Alipay notification, we POST the canonical fields to
- * Vultr's /api/internal/payment/confirm with the shared HMAC-style
- * secret in the X-Internal-Secret header.
+ * either Vultr's legacy /api/internal/payment/confirm endpoint or
+ * the partner ledger /api/internal/partner-payment/confirm endpoint
+ * with the shared HMAC-style secret in the X-Internal-Secret header.
  *
  * Idempotency: the receiver keys on (provider, transactionId) and
  * skips duplicates. Safe to retry on network blips.
@@ -29,6 +30,13 @@ export interface VultrConfirmPayload {
   kind: 'subscription' | 'addon';
   /** present when kind='addon'; one of the AddonPackId values. */
   addonPackId?: string;
+}
+
+export interface VultrPartnerConfirmPayload {
+  provider: 'wechat' | 'alipay';
+  orderExternalId: string;
+  providerCaptureId: string;
+  amountCnyCents: number;
 }
 
 /**
@@ -75,6 +83,37 @@ export class VultrSync {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.error({ err: message, payload }, 'sync: Vultr POST threw');
+      return { ok: false, reason: message };
+    }
+  }
+
+  async confirmPartner(
+    payload: VultrPartnerConfirmPayload,
+  ): Promise<{ ok: true } | { ok: false; reason: string }> {
+    const base = deriveBase(this.env.VULTR_INTERNAL_URL);
+    const url = `${base}/api/internal/partner-payment/confirm`;
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-internal-secret': this.env.INTERNAL_SHARED_SECRET,
+        },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const body = await res.text();
+        this.logger.error(
+          { status: res.status, body: body.slice(0, 400), payload },
+          'sync: Vultr rejected partner confirm',
+        );
+        return { ok: false, reason: `vultr ${res.status}: ${body.slice(0, 200)}` };
+      }
+      this.logger.info({ payload }, 'sync: Vultr confirmed partner payment');
+      return { ok: true };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.error({ err: message, payload }, 'sync: Vultr partner POST threw');
       return { ok: false, reason: message };
     }
   }

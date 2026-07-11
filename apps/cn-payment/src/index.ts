@@ -21,6 +21,7 @@ import {
   getPlanPriceCents,
   ADDON_PACK_CATALOGUE,
   getAddonPackPriceCents,
+  HOLA_CREDIT_CNY_CENTS,
   type PlanId,
   type BillingCycle,
 } from '@holaday/shared-types';
@@ -31,6 +32,49 @@ import { WechatPayAdapter } from './wechat-pay.js';
 import { AlipayAdapter } from './alipay.js';
 import { SmsAdapter } from './sms.js';
 import { VultrSync } from './sync-to-vultr.js';
+
+const WholeCnyCents = z
+  .number()
+  .int()
+  .positive()
+  .refine((value) => value % HOLA_CREDIT_CNY_CENTS === 0, 'amount must be whole CNY cents');
+
+const PartnerPurchaseInput = z.object({
+  kind: z.enum(['partner_membership', 'partner_recharge']),
+  partnerOrderExternalId: z.string().trim().min(1).max(32),
+  amountCnyCents: WholeCnyCents,
+});
+
+const CreateInput = z.object({
+  provider: z.enum(['wechat', 'alipay']),
+  userId: z.string().min(1),
+  purchase: z.discriminatedUnion('kind', [
+    z.object({
+      kind: z.literal('subscription'),
+      planId: z.enum(['basic', 'pro']),
+      cycle: z.enum(['monthly', 'yearly']),
+      isFirstMonth: z.boolean().optional(),
+    }),
+    z.object({
+      kind: z.literal('addon'),
+      packId: z.string().min(1),
+    }),
+    PartnerPurchaseInput.extend({
+      kind: z.literal('partner_membership'),
+    }),
+    PartnerPurchaseInput.extend({
+      kind: z.literal('partner_recharge'),
+    }),
+  ]),
+});
+
+type CreatePurchase = z.infer<typeof CreateInput>['purchase'];
+
+function isPartnerPurchase(
+  purchase: CreatePurchase,
+): purchase is Extract<CreatePurchase, { kind: 'partner_membership' | 'partner_recharge' }> {
+  return purchase.kind === 'partner_membership' || purchase.kind === 'partner_recharge';
+}
 
 async function main(): Promise<void> {
   const env = loadEnv();
@@ -75,23 +119,6 @@ async function main(): Promise<void> {
   // (which proxies user clicks). Single endpoint, branches on
   // provider; reduces the proxy permutation matrix on Vultr.
   // ------------------------------------------------------------------
-  const CreateInput = z.object({
-    provider: z.enum(['wechat', 'alipay']),
-    userId: z.string().min(1),
-    purchase: z.discriminatedUnion('kind', [
-      z.object({
-        kind: z.literal('subscription'),
-        planId: z.enum(['basic', 'pro']),
-        cycle: z.enum(['monthly', 'yearly']),
-        isFirstMonth: z.boolean().optional(),
-      }),
-      z.object({
-        kind: z.literal('addon'),
-        packId: z.string().min(1),
-      }),
-    ]),
-  });
-
   app.post('/payment/create', async (req, res) => {
     // Authentication: same shared secret as the confirm side. The
     // Vultr orchestrator forwards user clicks here and tags them
@@ -126,7 +153,7 @@ async function main(): Promise<void> {
         planId: purchase.planId,
         cycle: purchase.cycle,
       });
-    } else {
+    } else if (purchase.kind === 'addon') {
       const pack = ADDON_PACK_CATALOGUE[purchase.packId as keyof typeof ADDON_PACK_CATALOGUE];
       if (!pack) {
         res.status(400).json({ error: 'unknown_pack' });
@@ -139,6 +166,17 @@ async function main(): Promise<void> {
         userId,
         packId: purchase.packId,
       });
+    } else {
+      amountCents = purchase.amountCnyCents;
+      description =
+        purchase.kind === 'partner_membership'
+          ? 'HOLA DAY 合伙人年费'
+          : 'HOLA DAY 合伙人充值';
+      attach = JSON.stringify({
+        kind: purchase.kind,
+        userId,
+        partnerOrderExternalId: purchase.partnerOrderExternalId,
+      });
     }
     if (amountCents <= 0) {
       res.status(400).json({ error: 'amount_must_be_positive' });
@@ -148,7 +186,9 @@ async function main(): Promise<void> {
     // Per-call out_trade_no. WX max 32 chars, Alipay max 64. Our
     // newExternalId('payment') is 25 chars (4-char prefix + 21-char
     // nanoid), well within both caps.
-    const outTradeNo = newExternalId('payment');
+    const outTradeNo = isPartnerPurchase(purchase)
+      ? purchase.partnerOrderExternalId
+      : newExternalId('payment');
 
     try {
       if (provider === 'wechat') {
@@ -185,7 +225,9 @@ async function main(): Promise<void> {
         notifyUrl: `${env.PUBLIC_ORIGIN}/payment/alipay/notify`,
         // The user lands here after Alipay closes; we just need a
         // page that exists. The SPA polls for status separately.
-        returnUrl: `https://holaday.ai/billing/return?payment=${outTradeNo}`,
+        returnUrl: isPartnerPurchase(purchase)
+          ? `https://holaday.ai/partner?payment=${outTradeNo}`
+          : `https://holaday.ai/billing/return?payment=${outTradeNo}`,
       });
       res.json({
         provider: 'alipay',
@@ -358,13 +400,30 @@ async function handleSuccessfulPayment(
   amountCents: number,
   attachJson: string,
 ): Promise<void> {
-  let attach: { kind: 'subscription'; userId: string; planId: PlanId; cycle: BillingCycle } | { kind: 'addon'; userId: string; packId: string } | null = null;
+  let attach:
+    | { kind: 'subscription'; userId: string; planId: PlanId; cycle: BillingCycle }
+    | { kind: 'addon'; userId: string; packId: string }
+    | { kind: 'partner_membership'; userId: string; partnerOrderExternalId: string }
+    | { kind: 'partner_recharge'; userId: string; partnerOrderExternalId: string }
+    | null = null;
   try {
     attach = JSON.parse(attachJson);
   } catch {
     throw new Error(`malformed attach: ${attachJson.slice(0, 80)}`);
   }
   if (!attach) throw new Error('empty attach');
+  if (attach.kind === 'partner_membership' || attach.kind === 'partner_recharge') {
+    const result = await sync.confirmPartner({
+      provider,
+      orderExternalId: attach.partnerOrderExternalId,
+      providerCaptureId: transactionId,
+      amountCnyCents: amountCents,
+    });
+    if (!result.ok) {
+      throw new Error(`partner confirm failed: ${result.reason}`);
+    }
+    return;
+  }
   if (attach.kind === 'subscription') {
     if (attach.planId !== 'basic' && attach.planId !== 'pro') {
       throw new Error(`bad planId: ${attach.planId}`);
