@@ -157,6 +157,24 @@ export function partnerRiskLotActionPayload(
   return { reason: normalized || '后台风险冻结' };
 }
 
+export function partnerRiskEventTypeLabel(value: unknown): string {
+  const type = typeof value === 'string' ? value : '';
+  return {
+    lot_frozen: '批次冻结',
+    lot_resumed: '批次恢复',
+    lot_closed: '批次关闭',
+  }[type] ?? '风险事件';
+}
+
+export function partnerRiskEventSeverityLabel(value: unknown): string {
+  const severity = typeof value === 'string' ? value : '';
+  return {
+    high: '高',
+    medium: '中',
+    low: '低',
+  }[severity] ?? '未知';
+}
+
 export function partnerKycQueueReviewPayload(
   row: {
     readonly userExternalId: string;

@@ -9,6 +9,8 @@ import {
   normalizeRiskScore,
   partnerKycQueueReviewPayload,
   partnerOrderActionLabel,
+  partnerRiskEventSeverityLabel,
+  partnerRiskEventTypeLabel,
   partnerRiskLotActionPayload,
   partnerRiskLotQueueAction,
   partnerReviewStatusToken,
@@ -55,6 +57,18 @@ describe('partnerRiskLotQueueAction', () => {
       pendingLabel: '已关闭',
       canClose: false,
     });
+  });
+});
+
+describe('partner risk event labels', () => {
+  it('maps risk event enums into operator-facing labels', () => {
+    expect(partnerRiskEventTypeLabel('lot_frozen')).toBe('批次冻结');
+    expect(partnerRiskEventTypeLabel('lot_resumed')).toBe('批次恢复');
+    expect(partnerRiskEventTypeLabel('lot_closed')).toBe('批次关闭');
+    expect(partnerRiskEventTypeLabel('provider_surprise')).toBe('风险事件');
+    expect(partnerRiskEventSeverityLabel('high')).toBe('高');
+    expect(partnerRiskEventSeverityLabel('medium')).toBe('中');
+    expect(partnerRiskEventSeverityLabel('provider_surprise')).toBe('未知');
   });
 });
 

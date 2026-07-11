@@ -30,6 +30,8 @@ import {
   partnerReconciliationCsv,
   partnerKycQueueReviewPayload,
   partnerOrderActionLabel,
+  partnerRiskEventSeverityLabel,
+  partnerRiskEventTypeLabel,
   partnerRiskLotActionPayload,
   partnerRiskLotQueueAction,
   partnerReviewStatusToken,
@@ -1131,8 +1133,8 @@ function RiskEventHistory({ rows }: { rows: EnabledOverviewState['riskEvents'] }
             <tr key={row.riskEventExternalId} className="border-b border-[#EFEFEF] last:border-b-0 hover:bg-[#EFEFEF]/35">
               <UserCell userExternalId={row.userExternalId} email={row.email} displayName={row.displayName} />
               <td className="px-3 py-3 text-muted-foreground">{truncate(row.lotExternalId, 18) || '—'}</td>
-              <td className="px-3 py-3 text-muted-foreground">{row.eventType || '—'}</td>
-              <td className="px-3 py-3 text-muted-foreground">{row.severity || '—'}</td>
+              <td className="px-3 py-3 text-muted-foreground">{partnerRiskEventTypeLabel(row.eventType)}</td>
+              <td className="px-3 py-3 text-muted-foreground">{partnerRiskEventSeverityLabel(row.severity)}</td>
               <td className="px-3 py-3 text-muted-foreground">{row.status || '—'}</td>
               <td className="px-3 py-3 text-muted-foreground">{truncate(detail, 56) || '—'}</td>
               <td className="px-3 py-3 text-muted-foreground">{formatDateTime(row.createdAt as string | Date | null)}</td>
