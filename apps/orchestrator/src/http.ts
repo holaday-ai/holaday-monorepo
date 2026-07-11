@@ -46,6 +46,7 @@ import {
   PartnerPaymentConfirmReviewRequiredError,
   PartnerPaymentConfirmService,
   PartnerPaymentProviderCaptureConflictError,
+  validatePartnerPaymentConfirmHttpRequest,
 } from './partner/payment-confirm-service.js';
 import { partnerConfig } from './partner/partner-config.js';
 import { QuotaService } from './quota/quota-service.js';
@@ -1013,50 +1014,35 @@ export function createHttpApp(deps: HttpAppDeps) {
   // External callers still hit https://holaday.ai/api/internal/...,
   // and the gateway's `VULTR_INTERNAL_URL` keeps that public form.
   app.post('/internal/partner-payment/confirm', async (req, res) => {
-    const expectedSecret = process.env.INTERNAL_SHARED_SECRET;
-    if (!expectedSecret) {
-      logger.error('partner-internal-confirm: INTERNAL_SHARED_SECRET unset — refusing all calls');
-      res.status(503).json({ error: 'internal_secret_not_configured' });
-      return;
-    }
-    const provided = req.headers['x-internal-secret'];
-    if (provided !== expectedSecret) {
-      logger.warn(
-        { presentedLength: typeof provided === 'string' ? provided.length : -1 },
-        'partner-internal-confirm: shared-secret mismatch',
-      );
-      res.status(401).json({ error: 'unauthorized' });
-      return;
-    }
-    if (!partnerConfig().enabled) {
-      logger.warn('partner-internal-confirm: partner ledger disabled');
-      res.status(503).json({ error: 'partner_ledger_disabled' });
-      return;
-    }
+    const validation = validatePartnerPaymentConfirmHttpRequest({
+      expectedSecret: process.env.INTERNAL_SHARED_SECRET,
+      providedSecret: req.headers['x-internal-secret'],
+      partnerLedgerEnabled: partnerConfig().enabled,
+      body: req.body,
+    });
 
-    const body = (req.body ?? {}) as {
-      orderExternalId?: unknown;
-      provider?: unknown;
-      providerCaptureId?: unknown;
-      amountCnyCents?: unknown;
-    };
-
-    if (
-      typeof body.orderExternalId !== 'string' ||
-      typeof body.provider !== 'string' ||
-      typeof body.providerCaptureId !== 'string' ||
-      typeof body.amountCnyCents !== 'number'
-    ) {
-      res.status(400).json({ error: 'invalid_partner_payment_confirm' });
+    if (!validation.ok) {
+      if (validation.error === 'internal_secret_not_configured') {
+        logger.error('partner-internal-confirm: INTERNAL_SHARED_SECRET unset — refusing all calls');
+      } else if (validation.error === 'unauthorized') {
+        const provided = req.headers['x-internal-secret'];
+        logger.warn(
+          { presentedLength: typeof provided === 'string' ? provided.length : -1 },
+          'partner-internal-confirm: shared-secret mismatch',
+        );
+      } else if (validation.error === 'partner_ledger_disabled') {
+        logger.warn('partner-internal-confirm: partner ledger disabled');
+      }
+      res.status(validation.statusCode).json({ error: validation.error });
       return;
     }
 
     try {
       const result = await new PartnerPaymentConfirmService(db).confirmCapturedOrder({
-        orderExternalId: body.orderExternalId,
-        provider: body.provider,
-        providerCaptureId: body.providerCaptureId,
-        amountCnyCents: body.amountCnyCents,
+        orderExternalId: validation.input.orderExternalId,
+        provider: validation.input.provider,
+        providerCaptureId: validation.input.providerCaptureId,
+        amountCnyCents: validation.input.amountCnyCents,
       });
       const { ok: _ok, ...payload } = result;
       res.status(200).json({ ok: true, ...payload });

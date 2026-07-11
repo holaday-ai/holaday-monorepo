@@ -47,6 +47,28 @@ export interface PartnerPaymentConfirmInput {
   now?: Date;
 }
 
+export interface PartnerPaymentConfirmHttpRequestInput {
+  expectedSecret: string | undefined;
+  providedSecret: string | string[] | undefined;
+  partnerLedgerEnabled: boolean;
+  body: unknown;
+}
+
+export type PartnerPaymentConfirmHttpValidationResult =
+  | {
+      ok: true;
+      input: PartnerPaymentConfirmInput;
+    }
+  | {
+      ok: false;
+      statusCode: 400 | 401 | 503;
+      error:
+        | 'internal_secret_not_configured'
+        | 'unauthorized'
+        | 'partner_ledger_disabled'
+        | 'invalid_partner_payment_confirm';
+    };
+
 interface NormalizedPartnerPaymentConfirmInput {
   orderExternalId: string;
   provider: string;
@@ -163,6 +185,49 @@ function normalizeConfirmInput(input: PartnerPaymentConfirmInput): NormalizedPar
     amountCnyCents: normalizeWholeCnyAmount(input.amountCnyCents),
     now: normalizeDate(input.now ?? new Date(), 'now'),
   };
+}
+
+export function validatePartnerPaymentConfirmHttpRequest(
+  input: PartnerPaymentConfirmHttpRequestInput,
+): PartnerPaymentConfirmHttpValidationResult {
+  if (!input.expectedSecret) {
+    return { ok: false, statusCode: 503, error: 'internal_secret_not_configured' };
+  }
+  if (typeof input.providedSecret !== 'string' || input.providedSecret !== input.expectedSecret) {
+    return { ok: false, statusCode: 401, error: 'unauthorized' };
+  }
+  if (!input.partnerLedgerEnabled) {
+    return { ok: false, statusCode: 503, error: 'partner_ledger_disabled' };
+  }
+  if (input.body === null || typeof input.body !== 'object' || Array.isArray(input.body)) {
+    return { ok: false, statusCode: 400, error: 'invalid_partner_payment_confirm' };
+  }
+
+  const body = input.body as Record<string, unknown>;
+  try {
+    return {
+      ok: true,
+      input: {
+        orderExternalId: normalizeBoundedString(
+          body.orderExternalId,
+          'orderExternalId',
+          ORDER_EXTERNAL_ID_MAX_LENGTH,
+        ),
+        provider: normalizeBoundedString(body.provider, 'provider', PROVIDER_MAX_LENGTH),
+        providerCaptureId: normalizeBoundedString(
+          body.providerCaptureId,
+          'providerCaptureId',
+          PROVIDER_CAPTURE_ID_MAX_LENGTH,
+        ),
+        amountCnyCents: normalizeWholeCnyAmount(body.amountCnyCents),
+      },
+    };
+  } catch (error) {
+    if (error instanceof RangeError) {
+      return { ok: false, statusCode: 400, error: 'invalid_partner_payment_confirm' };
+    }
+    throw error;
+  }
 }
 
 function normalizeReviewApprovalInput(

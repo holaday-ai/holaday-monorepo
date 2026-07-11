@@ -13,6 +13,7 @@ import {
   PartnerPaymentConfirmService,
   PartnerPaymentConfirmReviewRequiredError,
   partnerPaymentIdempotencyKey,
+  validatePartnerPaymentConfirmHttpRequest,
 } from './payment-confirm-service.js';
 
 class FakePartnerPaymentDb {
@@ -340,6 +341,75 @@ describe('partnerPaymentIdempotencyKey', () => {
     [{ provider: 'wechat', providerCaptureId: 'x'.repeat(129) }],
   ])('rejects invalid idempotency key input %o', (input) => {
     expect(() => partnerPaymentIdempotencyKey(input)).toThrow(RangeError);
+  });
+});
+
+describe('validatePartnerPaymentConfirmHttpRequest', () => {
+  it('authorizes and normalizes a valid internal callback payload', () => {
+    expect(
+      validatePartnerPaymentConfirmHttpRequest({
+        expectedSecret: 'secret',
+        providedSecret: 'secret',
+        partnerLedgerEnabled: true,
+        body: {
+          orderExternalId: ' pay_order_1 ',
+          provider: ' wechat ',
+          providerCaptureId: ' cap_1 ',
+          amountCnyCents: 10_000_00,
+        },
+      }),
+    ).toEqual({
+      ok: true,
+      input: {
+        orderExternalId: 'pay_order_1',
+        provider: 'wechat',
+        providerCaptureId: 'cap_1',
+        amountCnyCents: 10_000_00,
+      },
+    });
+  });
+
+  it.each([
+    [
+      'missing shared secret',
+      { expectedSecret: undefined, providedSecret: 'secret', partnerLedgerEnabled: true, body: {} },
+      { statusCode: 503, error: 'internal_secret_not_configured' },
+    ],
+    [
+      'mismatched shared secret',
+      { expectedSecret: 'secret', providedSecret: 'wrong', partnerLedgerEnabled: true, body: {} },
+      { statusCode: 401, error: 'unauthorized' },
+    ],
+    [
+      'array shared secret header',
+      { expectedSecret: 'secret', providedSecret: ['secret'], partnerLedgerEnabled: true, body: {} },
+      { statusCode: 401, error: 'unauthorized' },
+    ],
+    [
+      'disabled partner ledger',
+      { expectedSecret: 'secret', providedSecret: 'secret', partnerLedgerEnabled: false, body: {} },
+      { statusCode: 503, error: 'partner_ledger_disabled' },
+    ],
+    [
+      'malformed payload',
+      {
+        expectedSecret: 'secret',
+        providedSecret: 'secret',
+        partnerLedgerEnabled: true,
+        body: {
+          orderExternalId: 'pay_order_1',
+          provider: 'wechat',
+          providerCaptureId: 'cap_1',
+          amountCnyCents: 10_000_50,
+        },
+      },
+      { statusCode: 400, error: 'invalid_partner_payment_confirm' },
+    ],
+  ])('rejects %s before payment confirmation', (_label, input, expected) => {
+    expect(validatePartnerPaymentConfirmHttpRequest(input)).toEqual({
+      ok: false,
+      ...expected,
+    });
   });
 });
 
