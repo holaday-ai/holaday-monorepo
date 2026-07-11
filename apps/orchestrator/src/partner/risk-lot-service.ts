@@ -184,6 +184,9 @@ export class PartnerRiskLotService {
       if (lot.status === 'closed') {
         return lot;
       }
+      if (lot.status !== 'frozen' && lot.riskStatus !== 'frozen') {
+        throw new PartnerRiskLotTransitionError('not_frozen');
+      }
 
       const metadata = {
         ...metadataRecord(lot.metadata),

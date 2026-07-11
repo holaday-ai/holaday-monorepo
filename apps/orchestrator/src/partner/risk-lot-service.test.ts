@@ -293,6 +293,22 @@ describe('PartnerRiskLotService', () => {
     });
   });
 
+  it('rejects close for a lot that is not currently frozen', async () => {
+    const fakeDb = new FakeRiskLotDb({
+      lots: [fakeLot({ status: 'accumulating', riskStatus: 'review' })],
+    });
+    const service = new PartnerRiskLotService(fakeDb.asDB());
+
+    await expect(
+      service.closeLot({
+        lotExternalId: 'pay_risk_lot_1',
+        reviewerUserId: 11,
+        reason: 'provider refund completed',
+      }),
+    ).rejects.toEqual(new PartnerRiskLotTransitionError('not_frozen'));
+    expect(fakeDb.riskEventRows).toHaveLength(0);
+  });
+
   it('rejects resume for a terminally closed lot', async () => {
     const fakeDb = new FakeRiskLotDb({
       lots: [

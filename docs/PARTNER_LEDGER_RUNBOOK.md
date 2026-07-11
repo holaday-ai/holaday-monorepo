@@ -171,7 +171,8 @@ and leaves the original freeze audit trail intact.
 Use Close only after refund, fraud handling, or another terminal finance
 decision is complete. The service sets `status='closed'`, keeps
 `risk_status='frozen'`, writes a `lot_closed` risk event, and blocks
-future resume attempts for that lot.
+future resume attempts for that lot. Close requires the lot to already
+be frozen.
 
 If the incident requires refund, fraud handling, or account-wide
 containment, keep the lot frozen and handle the finance action manually
