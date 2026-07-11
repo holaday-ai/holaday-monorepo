@@ -141,6 +141,22 @@ export function partnerRiskLotQueueAction(row: {
   return { action: 'freeze', label: '冻结', pendingLabel: '冻结中', canClose: false };
 }
 
+export function partnerRiskLotActionPayload(action: 'freeze' | 'close', operatorNote: string): { reason: string };
+export function partnerRiskLotActionPayload(action: 'resume', operatorNote: string): { note: string };
+export function partnerRiskLotActionPayload(
+  action: 'freeze' | 'resume' | 'close',
+  operatorNote: string,
+): { reason: string } | { note: string } {
+  const normalized = operatorNote.trim();
+  if (action === 'resume') {
+    return { note: normalized || '后台风险恢复' };
+  }
+  if (action === 'close') {
+    return { reason: normalized || '后台关闭风险批次' };
+  }
+  return { reason: normalized || '后台风险冻结' };
+}
+
 export function partnerKycQueueReviewPayload(
   row: {
     readonly userExternalId: string;

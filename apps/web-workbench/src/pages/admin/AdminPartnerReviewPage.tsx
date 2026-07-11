@@ -30,6 +30,7 @@ import {
   partnerReconciliationCsv,
   partnerKycQueueReviewPayload,
   partnerOrderActionLabel,
+  partnerRiskLotActionPayload,
   partnerRiskLotQueueAction,
   partnerReviewStatusToken,
   type AdminPartnerStatusKind,
@@ -63,6 +64,7 @@ export function AdminPartnerReviewPage(): JSX.Element {
   const [orderReviewNotes, setOrderReviewNotes] = React.useState<Record<string, string>>({});
   const [withdrawalReasons, setWithdrawalReasons] = React.useState<Record<string, string>>({});
   const [payoutIds, setPayoutIds] = React.useState<Record<string, string>>({});
+  const [riskLotNotes, setRiskLotNotes] = React.useState<Record<string, string>>({});
   const [queueSearch, setQueueSearch] = React.useState('');
   const [serverQueueSearch, setServerQueueSearch] = React.useState('');
 
@@ -246,6 +248,7 @@ export function AdminPartnerReviewPage(): JSX.Element {
           orderReviewNotes={orderReviewNotes}
           withdrawalReasons={withdrawalReasons}
           payoutIds={payoutIds}
+          riskLotNotes={riskLotNotes}
           setKycUserExternalId={setKycUserExternalId}
           setKycStatus={setKycStatus}
           setKycProvider={setKycProvider}
@@ -255,6 +258,7 @@ export function AdminPartnerReviewPage(): JSX.Element {
           setOrderReviewNotes={setOrderReviewNotes}
           setWithdrawalReasons={setWithdrawalReasons}
           setPayoutIds={setPayoutIds}
+          setRiskLotNotes={setRiskLotNotes}
           setReconciliationFrom={setReconciliationFrom}
           setReconciliationTo={setReconciliationTo}
           setQueueSearch={setQueueSearch}
@@ -286,6 +290,7 @@ function EnabledAdminPartnerReview({
   orderReviewNotes,
   withdrawalReasons,
   payoutIds,
+  riskLotNotes,
   setKycUserExternalId,
   setKycStatus,
   setKycProvider,
@@ -295,6 +300,7 @@ function EnabledAdminPartnerReview({
   setOrderReviewNotes,
   setWithdrawalReasons,
   setPayoutIds,
+  setRiskLotNotes,
   setReconciliationFrom,
   setReconciliationTo,
   setQueueSearch,
@@ -320,6 +326,7 @@ function EnabledAdminPartnerReview({
   orderReviewNotes: Record<string, string>;
   withdrawalReasons: Record<string, string>;
   payoutIds: Record<string, string>;
+  riskLotNotes: Record<string, string>;
   setKycUserExternalId: (value: string) => void;
   setKycStatus: (value: KycStatusInput) => void;
   setKycProvider: (value: string) => void;
@@ -329,6 +336,7 @@ function EnabledAdminPartnerReview({
   setOrderReviewNotes: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   setWithdrawalReasons: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   setPayoutIds: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  setRiskLotNotes: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   setReconciliationFrom: (value: string) => void;
   setReconciliationTo: (value: string) => void;
   setQueueSearch: (value: string) => void;
@@ -410,7 +418,13 @@ function EnabledAdminPartnerReview({
         runAction={runAction}
       />
       <WithdrawalHistory rows={data.withdrawalHistory} />
-      <RiskLotQueue rows={data.riskLots} pendingAction={pendingAction} runAction={runAction} />
+      <RiskLotQueue
+        rows={data.riskLots}
+        pendingAction={pendingAction}
+        riskLotNotes={riskLotNotes}
+        setRiskLotNotes={setRiskLotNotes}
+        runAction={runAction}
+      />
       <RiskEventHistory rows={data.riskEvents} />
     </div>
   );
@@ -973,10 +987,14 @@ function WithdrawalHistory({ rows }: { rows: EnabledOverviewState['withdrawalHis
 function RiskLotQueue({
   rows,
   pendingAction,
+  riskLotNotes,
+  setRiskLotNotes,
   runAction,
 }: {
   rows: EnabledOverviewState['riskLots'];
   pendingAction: string | null;
+  riskLotNotes: Record<string, string>;
+  setRiskLotNotes: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   runAction: (actionKey: string, action: () => Promise<void>, success: string) => Promise<void>;
 }): JSX.Element {
   return (
@@ -992,6 +1010,7 @@ function RiskLotQueue({
           const closeActionKey = `risk-close:${row.lotExternalId}`;
           const pending = pendingAction === actionKey;
           const closePending = pendingAction === closeActionKey;
+          const operatorNote = riskLotNotes[row.lotExternalId] ?? '';
           const riskDetail = [
             row.riskFreezeReason,
             row.riskFrozenByUserId > 0 ? `冻结人 #${row.riskFrozenByUserId}` : '',
@@ -1016,36 +1035,49 @@ function RiskLotQueue({
               <td className="px-3 py-3 text-muted-foreground">{truncate(riskDetail, 52) || '—'}</td>
               <td className="px-3 py-3 text-muted-foreground">{formatDateTime(row.updatedAt as string | Date | null)}</td>
               <td className="px-5 py-3">
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   {action.action === 'closed' ? (
                     <span className="text-[12px] text-muted-foreground">已关闭</span>
                   ) : (
-                    <ActionButton
-                      icon={action.action === 'freeze' ? ShieldCheck : RefreshCw}
-                      label={pending ? action.pendingLabel : action.label}
-                      compact
-                      tone={action.action === 'freeze' ? 'danger' : 'primary'}
-                      pending={pending}
-                      onClick={() =>
-                        void runAction(
-                          actionKey,
-                          async () => {
-                            if (action.action === 'freeze') {
-                              await trpc.admin.partner.freezeRiskLot.mutate({
+                    <>
+                      <input
+                        value={operatorNote}
+                        onChange={(event) =>
+                          setRiskLotNotes((current) => ({
+                            ...current,
+                            [row.lotExternalId]: event.target.value,
+                          }))
+                        }
+                        placeholder="风险备注"
+                        className="h-8 w-40 rounded-[8px] border border-[#DCDDDD] px-2 text-[12px] outline-none focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
+                      />
+                      <ActionButton
+                        icon={action.action === 'freeze' ? ShieldCheck : RefreshCw}
+                        label={pending ? action.pendingLabel : action.label}
+                        compact
+                        tone={action.action === 'freeze' ? 'danger' : 'primary'}
+                        pending={pending}
+                        onClick={() =>
+                          void runAction(
+                            actionKey,
+                            async () => {
+                              if (action.action === 'freeze') {
+                                await trpc.admin.partner.freezeRiskLot.mutate({
+                                  lotExternalId: row.lotExternalId,
+                                  ...partnerRiskLotActionPayload('freeze', operatorNote),
+                                });
+                                return;
+                              }
+                              await trpc.admin.partner.resumeRiskLot.mutate({
                                 lotExternalId: row.lotExternalId,
-                                reason: '后台风险冻结',
+                                ...partnerRiskLotActionPayload('resume', operatorNote),
                               });
-                              return;
-                            }
-                            await trpc.admin.partner.resumeRiskLot.mutate({
-                              lotExternalId: row.lotExternalId,
-                              note: '后台风险恢复',
-                            });
-                          },
-                          action.action === 'freeze' ? '批次已冻结' : '批次已恢复',
-                        )
-                      }
-                    />
+                            },
+                            action.action === 'freeze' ? '批次已冻结' : '批次已恢复',
+                          )
+                        }
+                      />
+                    </>
                   )}
                   {action.canClose && (
                     <ActionButton
@@ -1060,7 +1092,7 @@ function RiskLotQueue({
                           async () => {
                             await trpc.admin.partner.closeRiskLot.mutate({
                               lotExternalId: row.lotExternalId,
-                              reason: '后台关闭风险批次',
+                              ...partnerRiskLotActionPayload('close', operatorNote),
                             });
                           },
                           '批次已关闭',

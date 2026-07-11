@@ -9,6 +9,7 @@ import {
   normalizeRiskScore,
   partnerKycQueueReviewPayload,
   partnerOrderActionLabel,
+  partnerRiskLotActionPayload,
   partnerRiskLotQueueAction,
   partnerReviewStatusToken,
 } from './admin-partner-state';
@@ -54,6 +55,26 @@ describe('partnerRiskLotQueueAction', () => {
       pendingLabel: '已关闭',
       canClose: false,
     });
+  });
+});
+
+describe('partnerRiskLotActionPayload', () => {
+  it('trims operator notes and maps them to the backend field for each risk action', () => {
+    expect(partnerRiskLotActionPayload('freeze', '  银行争议待核查  ')).toEqual({
+      reason: '银行争议待核查',
+    });
+    expect(partnerRiskLotActionPayload('resume', '  证据已清除  ')).toEqual({
+      note: '证据已清除',
+    });
+    expect(partnerRiskLotActionPayload('close', '  已完成退款  ')).toEqual({
+      reason: '已完成退款',
+    });
+  });
+
+  it('uses audited fallback copy when the operator note is blank', () => {
+    expect(partnerRiskLotActionPayload('freeze', '   ')).toEqual({ reason: '后台风险冻结' });
+    expect(partnerRiskLotActionPayload('resume', '')).toEqual({ note: '后台风险恢复' });
+    expect(partnerRiskLotActionPayload('close', '')).toEqual({ reason: '后台关闭风险批次' });
   });
 });
 
