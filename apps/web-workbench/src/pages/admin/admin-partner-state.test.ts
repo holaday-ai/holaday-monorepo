@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   formatPartnerCreditCents,
   formatPartnerMoneyCents,
+  partnerReconciliationCsv,
   filterAdminPartnerOverview,
   normalizeAdminPartnerOverview,
+  normalizePartnerReconciliation,
   normalizeRiskScore,
   partnerKycQueueReviewPayload,
   partnerOrderActionLabel,
@@ -323,5 +325,75 @@ describe('normalizeAdminPartnerOverview', () => {
     expect(byKycAudit.kycProfiles).toHaveLength(1);
 
     expect(filterAdminPartnerOverview({ enabled: false }, 'alice')).toEqual({ enabled: false });
+  });
+});
+
+describe('normalizePartnerReconciliation', () => {
+  it('normalizes operator reconciliation summaries and CSV rows', () => {
+    const state = normalizePartnerReconciliation({
+      enabled: true,
+      range: { from: '2026-07-01', to: '2026-07-07', basis: 'updated_at' },
+      metrics: {
+        orderCount: 3,
+        completedOrderCount: 2,
+        reviewRequiredOrderCount: 1,
+        membershipRevenueCnyCents: 999_00,
+        rechargePrincipalCnyCents: 10_000_00,
+        paidWithdrawalCreditCents: 600_00,
+      },
+      providerBreakdown: [
+        { provider: 'wechat', orderCount: 2, completedOrderCount: 1, completedAmountCnyCents: 999_00 },
+      ],
+      orders: [
+        {
+          orderExternalId: 'pay_membership_completed',
+          userExternalId: 'usr_partner',
+          orderKind: 'membership',
+          provider: 'wechat',
+          amountCnyCents: 999_00,
+          status: 'completed',
+          providerCaptureId: 'wx-cap-1',
+          updatedAt: '2026-07-02T01:00:00.000Z',
+        },
+      ],
+      withdrawals: [
+        {
+          withdrawalExternalId: 'pay_withdrawal_paid',
+          userExternalId: 'usr_partner',
+          amountCreditCents: 600_00,
+          status: 'paid',
+          updatedAt: '2026-07-03T01:00:00.000Z',
+        },
+      ],
+    });
+
+    expect(state).toMatchObject({
+      enabled: true,
+      range: { from: '2026-07-01', to: '2026-07-07', basis: 'updated_at' },
+      metrics: {
+        orderCount: 3,
+        completedOrderCount: 2,
+        membershipRevenueCnyCents: 999_00,
+        rechargePrincipalCnyCents: 10_000_00,
+        paidWithdrawalCreditCents: 600_00,
+      },
+      providerBreakdown: [
+        {
+          provider: 'wechat',
+          orderCount: 2,
+          completedOrderCount: 1,
+          completedAmountCnyCents: 999_00,
+        },
+      ],
+    });
+    expect(state.enabled && state.orders[0]?.amountCnyCents).toBe(999_00);
+    expect(state.enabled && state.withdrawals[0]?.amountCreditCents).toBe(600_00);
+    expect(partnerReconciliationCsv(state)).toContain('order,pay_membership_completed,usr_partner');
+    expect(partnerReconciliationCsv(state)).toContain('withdrawal,pay_withdrawal_paid,usr_partner');
+  });
+
+  it('keeps disabled reconciliation state inert', () => {
+    expect(normalizePartnerReconciliation({ enabled: false })).toEqual({ enabled: false });
+    expect(partnerReconciliationCsv({ enabled: false })).toBe('');
   });
 });

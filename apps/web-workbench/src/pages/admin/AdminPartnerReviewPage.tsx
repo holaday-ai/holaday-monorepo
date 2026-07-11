@@ -1,6 +1,7 @@
 import {
   Banknote,
   CheckCircle2,
+  Clipboard,
   Loader2,
   RefreshCw,
   Search,
@@ -25,10 +26,13 @@ import {
   formatPartnerMoneyCents,
   filterAdminPartnerOverview,
   normalizeAdminPartnerOverview,
+  normalizePartnerReconciliation,
+  partnerReconciliationCsv,
   partnerKycQueueReviewPayload,
   partnerOrderActionLabel,
   partnerReviewStatusToken,
   type AdminPartnerStatusKind,
+  type PartnerReconciliationState,
 } from './admin-partner-state';
 
 type OverviewState = ReturnType<typeof normalizeAdminPartnerOverview>;
@@ -39,10 +43,16 @@ export function AdminPartnerReviewPage(): JSX.Element {
   const mountedRef = useMountedRef();
   const toast = useToast();
   const requestIdRef = React.useRef(0);
+  const reconciliationRequestIdRef = React.useRef(0);
   const [data, setData] = React.useState<OverviewState | null>(null);
+  const [reconciliation, setReconciliation] = React.useState<PartnerReconciliationState | null>(null);
   const [loading, setLoading] = React.useState(true);
+  const [reconciliationLoading, setReconciliationLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
+  const [reconciliationError, setReconciliationError] = React.useState<string | null>(null);
   const [pendingAction, setPendingAction] = React.useState<string | null>(null);
+  const [reconciliationTo, setReconciliationTo] = React.useState(() => isoDay(new Date()));
+  const [reconciliationFrom, setReconciliationFrom] = React.useState(() => isoDay(addDays(new Date(), -6)));
   const [kycUserExternalId, setKycUserExternalId] = React.useState('');
   const [kycStatus, setKycStatus] = React.useState<KycStatusInput>('passed');
   const [kycProvider, setKycProvider] = React.useState('manual');
@@ -74,6 +84,27 @@ export function AdminPartnerReviewPage(): JSX.Element {
     }
   }, [mountedRef, serverQueueSearch]);
 
+  const refreshReconciliation = React.useCallback(async () => {
+    const requestId = ++reconciliationRequestIdRef.current;
+    setReconciliationLoading(true);
+    setReconciliationError(null);
+    try {
+      const res = normalizePartnerReconciliation(
+        await trpc.admin.partner.reconciliation.query({
+          from: reconciliationFrom || undefined,
+          to: reconciliationTo || undefined,
+        }),
+      );
+      if (mountedRef.current && reconciliationRequestIdRef.current === requestId) setReconciliation(res);
+    } catch (err) {
+      if (mountedRef.current && reconciliationRequestIdRef.current === requestId) {
+        setReconciliationError(pageErrorMessage(err));
+      }
+    } finally {
+      if (mountedRef.current && reconciliationRequestIdRef.current === requestId) setReconciliationLoading(false);
+    }
+  }, [mountedRef, reconciliationFrom, reconciliationTo]);
+
   React.useEffect(() => {
     const handle = window.setTimeout(() => {
       if (mountedRef.current) setServerQueueSearch(queueSearch.trim().slice(0, 100));
@@ -88,6 +119,13 @@ export function AdminPartnerReviewPage(): JSX.Element {
     };
   }, [refresh]);
 
+  React.useEffect(() => {
+    void refreshReconciliation();
+    return () => {
+      reconciliationRequestIdRef.current += 1;
+    };
+  }, [refreshReconciliation]);
+
   async function runAction(actionKey: string, action: () => Promise<void>, success: string): Promise<void> {
     if (pendingAction) {
       toast.show('已有审核动作处理中', 'info', 1600);
@@ -98,6 +136,7 @@ export function AdminPartnerReviewPage(): JSX.Element {
       await action();
       toast.show(success, 'info', 2200);
       await refresh();
+      await refreshReconciliation();
     } catch (err) {
       toast.show(pageActionError('操作失败', err), 'error');
     } finally {
@@ -129,6 +168,16 @@ export function AdminPartnerReviewPage(): JSX.Element {
       },
       '实名状态已更新',
     );
+  }
+
+  async function copyReconciliationCsv(): Promise<void> {
+    if (!reconciliation?.enabled) return;
+    try {
+      await navigator.clipboard.writeText(partnerReconciliationCsv(reconciliation));
+      toast.show('对账 CSV 已复制', 'info', 1600);
+    } catch (err) {
+      toast.show(pageActionError('复制失败', err), 'error');
+    }
   }
 
   const enabled = data?.enabled ? data : null;
@@ -180,6 +229,11 @@ export function AdminPartnerReviewPage(): JSX.Element {
       ) : enabled && visibleData?.enabled ? (
         <EnabledAdminPartnerReview
           data={visibleData}
+          reconciliation={reconciliation}
+          reconciliationLoading={reconciliationLoading}
+          reconciliationError={reconciliationError}
+          reconciliationFrom={reconciliationFrom}
+          reconciliationTo={reconciliationTo}
           queueSearch={queueSearch}
           pendingAction={pendingAction}
           kycUserExternalId={kycUserExternalId}
@@ -200,7 +254,11 @@ export function AdminPartnerReviewPage(): JSX.Element {
           setOrderReviewNotes={setOrderReviewNotes}
           setWithdrawalReasons={setWithdrawalReasons}
           setPayoutIds={setPayoutIds}
+          setReconciliationFrom={setReconciliationFrom}
+          setReconciliationTo={setReconciliationTo}
           setQueueSearch={setQueueSearch}
+          refreshReconciliation={refreshReconciliation}
+          copyReconciliationCsv={copyReconciliationCsv}
           submitManualKyc={submitManualKyc}
           runAction={runAction}
         />
@@ -211,6 +269,11 @@ export function AdminPartnerReviewPage(): JSX.Element {
 
 function EnabledAdminPartnerReview({
   data,
+  reconciliation,
+  reconciliationLoading,
+  reconciliationError,
+  reconciliationFrom,
+  reconciliationTo,
   queueSearch,
   pendingAction,
   kycUserExternalId,
@@ -231,11 +294,20 @@ function EnabledAdminPartnerReview({
   setOrderReviewNotes,
   setWithdrawalReasons,
   setPayoutIds,
+  setReconciliationFrom,
+  setReconciliationTo,
   setQueueSearch,
+  refreshReconciliation,
+  copyReconciliationCsv,
   submitManualKyc,
   runAction,
 }: {
   data: EnabledOverviewState;
+  reconciliation: PartnerReconciliationState | null;
+  reconciliationLoading: boolean;
+  reconciliationError: string | null;
+  reconciliationFrom: string;
+  reconciliationTo: string;
   queueSearch: string;
   pendingAction: string | null;
   kycUserExternalId: string;
@@ -256,7 +328,11 @@ function EnabledAdminPartnerReview({
   setOrderReviewNotes: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   setWithdrawalReasons: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   setPayoutIds: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  setReconciliationFrom: (value: string) => void;
+  setReconciliationTo: (value: string) => void;
   setQueueSearch: (value: string) => void;
+  refreshReconciliation: () => Promise<void>;
+  copyReconciliationCsv: () => Promise<void>;
   submitManualKyc: () => Promise<void>;
   runAction: (actionKey: string, action: () => Promise<void>, success: string) => Promise<void>;
 }): JSX.Element {
@@ -273,6 +349,18 @@ function EnabledAdminPartnerReview({
         <MetricCard label="已退回" value={data.metrics.returnedWithdrawalCount} />
         <MetricCard label="风险批次" value={data.metrics.riskLotCount} tone={data.metrics.riskLotCount > 0 ? 'danger' : 'normal'} />
       </section>
+
+      <ReconciliationPanel
+        state={reconciliation}
+        loading={reconciliationLoading}
+        error={reconciliationError}
+        from={reconciliationFrom}
+        to={reconciliationTo}
+        setFrom={setReconciliationFrom}
+        setTo={setReconciliationTo}
+        onRefresh={() => void refreshReconciliation()}
+        onCopy={() => void copyReconciliationCsv()}
+      />
 
       <ManualKycPanel
         userExternalId={kycUserExternalId}
@@ -322,6 +410,143 @@ function EnabledAdminPartnerReview({
       />
       <WithdrawalHistory rows={data.withdrawalHistory} />
       <RiskLotQueue rows={data.riskLots} />
+    </div>
+  );
+}
+
+function ReconciliationPanel({
+  state,
+  loading,
+  error,
+  from,
+  to,
+  setFrom,
+  setTo,
+  onRefresh,
+  onCopy,
+}: {
+  state: PartnerReconciliationState | null;
+  loading: boolean;
+  error: string | null;
+  from: string;
+  to: string;
+  setFrom: (value: string) => void;
+  setTo: (value: string) => void;
+  onRefresh: () => void;
+  onCopy: () => void;
+}): JSX.Element {
+  const enabled = state?.enabled ? state : null;
+  const metrics = enabled?.metrics;
+  return (
+    <section className="rounded-[8px] border border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
+      <div className="flex flex-col gap-3 border-b border-[#EFEFEF] px-5 py-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="min-w-0">
+          <h2 className="text-[15px] font-semibold">对账</h2>
+          <div className="mt-0.5 text-[12px] text-muted-foreground">
+            {enabled ? `${enabled.range.from} 至 ${enabled.range.to} · ${enabled.range.basis}` : '—'}
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            type="date"
+            value={from}
+            onChange={(event) => setFrom(event.target.value)}
+            className="h-9 rounded-[8px] border border-[#DCDDDD] px-3 text-[13px] outline-none focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
+            aria-label="对账开始日期"
+          />
+          <input
+            type="date"
+            value={to}
+            onChange={(event) => setTo(event.target.value)}
+            className="h-9 rounded-[8px] border border-[#DCDDDD] px-3 text-[13px] outline-none focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
+            aria-label="对账结束日期"
+          />
+          <ActionButton icon={RefreshCw} label="刷新" compact pending={loading} onClick={onRefresh} />
+          <ActionButton icon={Clipboard} label="复制 CSV" compact pending={loading} onClick={onCopy} />
+        </div>
+      </div>
+
+      <div className="space-y-4 px-5 py-4">
+        {error && (
+          <div className="rounded-[8px] border border-[#EA1F59]/20 bg-[#EA1F59]/5 px-3 py-2 text-[13px] text-[#EA1F59]">
+            {error}
+          </div>
+        )}
+        {loading && !enabled ? (
+          <div className="py-5 text-center text-[13px] text-muted-foreground">
+            <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />
+            加载中…
+          </div>
+        ) : state?.enabled === false ? (
+          <div className="py-5 text-[13px] text-muted-foreground">合伙人账本未启用</div>
+        ) : metrics ? (
+          <>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
+              <ReconciliationMetric label="订单数" value={formatInteger(metrics.orderCount)} />
+              <ReconciliationMetric label="完成订单" value={formatInteger(metrics.completedOrderCount)} />
+              <ReconciliationMetric label="年费收入" value={formatPartnerMoneyCents(metrics.membershipRevenueCnyCents)} />
+              <ReconciliationMetric label="充值本金" value={formatPartnerMoneyCents(metrics.rechargePrincipalCnyCents)} />
+              <ReconciliationMetric label="已出款" value={formatPartnerCreditCents(metrics.paidWithdrawalCreditCents)} />
+              <ReconciliationMetric
+                label="需复核订单"
+                value={formatInteger(metrics.reviewRequiredOrderCount)}
+                tone={metrics.reviewRequiredOrderCount > 0 ? 'danger' : 'normal'}
+              />
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[560px] text-[13px]">
+                <thead>
+                  <tr className="border-b border-[#EFEFEF] text-left text-[11px] uppercase text-muted-foreground">
+                    <th className="py-2 pr-4 font-medium">渠道</th>
+                    <th className="py-2 pr-4 font-medium">订单数</th>
+                    <th className="py-2 pr-4 font-medium">完成</th>
+                    <th className="py-2 pr-4 font-medium">完成金额</th>
+                    <th className="py-2 font-medium">需复核</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {enabled.providerBreakdown.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="py-5 text-center text-muted-foreground">
+                        暂无数据
+                      </td>
+                    </tr>
+                  ) : (
+                    enabled.providerBreakdown.map((row) => (
+                      <tr key={row.provider} className="border-b border-[#EFEFEF] last:border-b-0">
+                        <td className="py-2 pr-4 font-medium">{row.provider}</td>
+                        <td className="py-2 pr-4 tabular-nums">{formatInteger(row.orderCount)}</td>
+                        <td className="py-2 pr-4 tabular-nums">{formatInteger(row.completedOrderCount)}</td>
+                        <td className="py-2 pr-4 tabular-nums">{formatPartnerMoneyCents(row.completedAmountCnyCents)}</td>
+                        <td className="py-2 tabular-nums">{formatInteger(row.reviewRequiredOrderCount)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+function ReconciliationMetric({
+  label,
+  value,
+  tone = 'normal',
+}: {
+  label: string;
+  value: string;
+  tone?: 'normal' | 'danger';
+}): JSX.Element {
+  return (
+    <div className="min-w-0">
+      <div className="text-[12px] text-muted-foreground">{label}</div>
+      <div className={cn('mt-1 truncate text-[16px] font-semibold tabular-nums', tone === 'danger' && 'text-[#EA1F59]')}>
+        {value}
+      </div>
     </div>
   );
 }
@@ -916,4 +1141,12 @@ function ActionButton({
       {label}
     </button>
   );
+}
+
+function addDays(date: Date, days: number): Date {
+  return new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
+}
+
+function isoDay(date: Date): string {
+  return date.toISOString().slice(0, 10);
 }

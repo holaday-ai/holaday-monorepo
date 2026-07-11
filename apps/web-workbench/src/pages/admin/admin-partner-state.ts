@@ -275,6 +275,120 @@ export function normalizeAdminPartnerOverview(value: unknown) {
 type AdminPartnerOverviewState = ReturnType<typeof normalizeAdminPartnerOverview>;
 type EnabledAdminPartnerOverviewState = Extract<AdminPartnerOverviewState, { enabled: true }>;
 
+export function normalizePartnerReconciliation(value: unknown) {
+  const root = asRecord(value);
+  if (root.enabled === false) {
+    return { enabled: false as const };
+  }
+  const range = asRecord(root.range);
+  const metrics = asRecord(root.metrics);
+  return {
+    enabled: true as const,
+    range: {
+      from: safeText(range.from, ''),
+      to: safeText(range.to, ''),
+      basis: safeText(range.basis, 'updated_at'),
+    },
+    metrics: {
+      orderCount: Math.round(nonNegativeNumber(metrics.orderCount)),
+      completedOrderCount: Math.round(nonNegativeNumber(metrics.completedOrderCount)),
+      pendingOrderCount: Math.round(nonNegativeNumber(metrics.pendingOrderCount)),
+      reviewRequiredOrderCount: Math.round(nonNegativeNumber(metrics.reviewRequiredOrderCount)),
+      completedOrderAmountCnyCents: Math.round(nonNegativeNumber(metrics.completedOrderAmountCnyCents)),
+      membershipRevenueCnyCents: Math.round(nonNegativeNumber(metrics.membershipRevenueCnyCents)),
+      rechargePrincipalCnyCents: Math.round(nonNegativeNumber(metrics.rechargePrincipalCnyCents)),
+      withdrawalCount: Math.round(nonNegativeNumber(metrics.withdrawalCount)),
+      requestedWithdrawalCount: Math.round(nonNegativeNumber(metrics.requestedWithdrawalCount)),
+      approvedWithdrawalCount: Math.round(nonNegativeNumber(metrics.approvedWithdrawalCount)),
+      paidWithdrawalCount: Math.round(nonNegativeNumber(metrics.paidWithdrawalCount)),
+      rejectedWithdrawalCount: Math.round(nonNegativeNumber(metrics.rejectedWithdrawalCount)),
+      returnedWithdrawalCount: Math.round(nonNegativeNumber(metrics.returnedWithdrawalCount)),
+      approvedWithdrawalCreditCents: Math.round(nonNegativeNumber(metrics.approvedWithdrawalCreditCents)),
+      paidWithdrawalCreditCents: Math.round(nonNegativeNumber(metrics.paidWithdrawalCreditCents)),
+    },
+    providerBreakdown: safeArray(root.providerBreakdown).map((raw) => {
+      const row = asRecord(raw);
+      return {
+        provider: safeText(row.provider, 'unknown'),
+        orderCount: Math.round(nonNegativeNumber(row.orderCount)),
+        completedOrderCount: Math.round(nonNegativeNumber(row.completedOrderCount)),
+        completedAmountCnyCents: Math.round(nonNegativeNumber(row.completedAmountCnyCents)),
+        reviewRequiredOrderCount: Math.round(nonNegativeNumber(row.reviewRequiredOrderCount)),
+      };
+    }),
+    orders: safeArray(root.orders).map((raw) => {
+      const row = asRecord(raw);
+      return {
+        orderExternalId: safeText(row.orderExternalId, ''),
+        userExternalId: safeText(row.userExternalId, ''),
+        email: safeText(row.email, ''),
+        displayName: safeText(row.displayName, ''),
+        provider: safeText(row.provider, ''),
+        providerCaptureId: safeText(row.providerCaptureId, ''),
+        orderKind: safeText(row.orderKind, ''),
+        status: safeText(row.status, ''),
+        amountCnyCents: Math.round(nonNegativeNumber(row.amountCnyCents)),
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+      };
+    }),
+    withdrawals: safeArray(root.withdrawals).map((raw) => {
+      const row = asRecord(raw);
+      return {
+        withdrawalExternalId: safeText(row.withdrawalExternalId, ''),
+        userExternalId: safeText(row.userExternalId, ''),
+        email: safeText(row.email, ''),
+        displayName: safeText(row.displayName, ''),
+        status: safeText(row.status, ''),
+        amountCreditCents: Math.round(nonNegativeNumber(row.amountCreditCents)),
+        bankAccountFingerprint: safeText(row.bankAccountFingerprint, ''),
+        providerPayoutId: safeText(row.providerPayoutId, ''),
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+      };
+    }),
+  };
+}
+
+export type PartnerReconciliationState = ReturnType<typeof normalizePartnerReconciliation>;
+
+function csvCell(value: unknown): string {
+  const text = String(value ?? '');
+  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+export function partnerReconciliationCsv(state: PartnerReconciliationState): string {
+  if (!state.enabled) return '';
+  const rows = [
+    ['rowType', 'externalId', 'userExternalId', 'status', 'kind', 'provider', 'amountCnyCents', 'amountCreditCents', 'providerRef', 'updatedAt'],
+    ...state.orders.map((row) => [
+      'order',
+      row.orderExternalId,
+      row.userExternalId,
+      row.status,
+      row.orderKind,
+      row.provider,
+      row.amountCnyCents,
+      '',
+      row.providerCaptureId,
+      row.updatedAt,
+    ]),
+    ...state.withdrawals.map((row) => [
+      'withdrawal',
+      row.withdrawalExternalId,
+      row.userExternalId,
+      row.status,
+      'withdrawal',
+      '',
+      '',
+      row.amountCreditCents,
+      row.providerPayoutId || row.bankAccountFingerprint,
+      row.updatedAt,
+    ]),
+  ];
+  return rows.map((row) => row.map(csvCell).join(',')).join('\n');
+}
+
 export function filterAdminPartnerOverview(
   state: AdminPartnerOverviewState,
   query: string,
