@@ -4,8 +4,10 @@ import { describe, expect, it } from 'vitest';
 import type { DB } from '../db/client.js';
 import { users } from '../db/schema/users.js';
 import {
+  partnerLots,
   partnerWithdrawalRequests,
   type PartnerKycProfile,
+  type PartnerLot,
   type PartnerMembership,
   type PartnerWithdrawalRequest,
 } from '../db/schema/partner.js';
@@ -47,6 +49,7 @@ const ACTIVE_WITHDRAWAL_CAP_STATUSES = new Set(['requested', 'reviewing', 'appro
 
 class FakeWithdrawalDb {
   readonly rows: PartnerWithdrawalRequest[];
+  readonly lots: PartnerLot[];
   readonly insertAttempts: FakeWithdrawalInsert[] = [];
   readonly wherePredicateTexts: string[] = [];
   readonly updatePredicateTexts: string[] = [];
@@ -56,8 +59,9 @@ class FakeWithdrawalDb {
   rowsCreated = 0;
   private nextId: number;
 
-  constructor(rows: PartnerWithdrawalRequest[] = []) {
+  constructor(rows: PartnerWithdrawalRequest[] = [], input: { lots?: PartnerLot[] } = {}) {
     this.rows = [...rows];
+    this.lots = [...(input.lots ?? [])];
     this.nextId = Math.max(0, ...rows.map((row) => row.id)) + 1;
   }
 
@@ -157,10 +161,15 @@ class FakeWithdrawalDb {
     table: unknown,
     predicateText: string,
     selection?: unknown,
-  ): PartnerWithdrawalRequest[] | Array<{ id: number }> | Array<{ totalCreditCents: number }> {
+  ): PartnerWithdrawalRequest[] | PartnerLot[] | Array<{ id: number }> | Array<{ totalCreditCents: number }> {
     if (table === users) {
       const userId = Number(predicateText.match(/value:\s*(\d+)/)?.[1] ?? 0);
       return userId > 0 ? [{ id: userId }] : [];
+    }
+    if (table === partnerLots) {
+      return this.lots.filter(
+        (lot) => lot.status === 'frozen' || lot.riskStatus === 'frozen',
+      );
     }
     if (table !== partnerWithdrawalRequests) return [];
     if (
@@ -318,6 +327,33 @@ function fakeWithdrawalRequest(overrides: Partial<PartnerWithdrawalRequest> = {}
     riskScore: 12,
     idempotencyKey: 'withdrawal-idem-1',
     rejectionReason: null,
+    metadata: null,
+    createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    ...overrides,
+  };
+}
+
+function fakeLot(overrides: Partial<PartnerLot> = {}): PartnerLot {
+  return {
+    id: 10,
+    externalId: 'pay_risk_lot_1',
+    userId: 123,
+    rechargeOrderId: 77,
+    status: 'accumulating',
+    riskStatus: 'normal',
+    principalCreditCents: 10_000_00,
+    tierMultiplierBps: 10_500,
+    apiUnits: 10_500_000,
+    bonusCapCreditCents: 2_000_00,
+    lockedBonusCreditCents: 0,
+    releasedPrincipalCreditCents: 0,
+    releasedBonusCreditCents: 0,
+    carryForwardCreditCents: 0,
+    accumulationStartsAt: new Date('2026-07-01T03:04:05.006Z'),
+    accumulationEndsAt: new Date('2026-10-29T03:04:05.006Z'),
+    releaseStartsAt: new Date('2026-10-30T03:04:05.006Z'),
+    releaseEndsAt: new Date('2027-10-30T03:04:05.006Z'),
     metadata: null,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
@@ -691,6 +727,21 @@ describe('WithdrawalService requestWithdrawal', () => {
     });
     expect(db.rowsCreated).toBe(0);
     expect(ledger.entries).toHaveLength(1);
+  });
+
+  it('blocks withdrawals while any user lot is frozen by risk review', async () => {
+    const { db, ledger, service } = serviceWithDeps({
+      db: new FakeWithdrawalDb([], {
+        lots: [fakeLot({ status: 'frozen', riskStatus: 'frozen' })],
+      }),
+    });
+
+    await expect(service.requestWithdrawal(validWithdrawalInput)).rejects.toBeInstanceOf(WithdrawalGateError);
+    await expect(service.requestWithdrawal(validWithdrawalInput)).rejects.toMatchObject({
+      reason: 'risk_frozen',
+    });
+    expect(db.rowsCreated).toBe(0);
+    expect(ledger.entries).toHaveLength(0);
   });
 
   it('blocks requests above the daily platform withdrawal cap', async () => {

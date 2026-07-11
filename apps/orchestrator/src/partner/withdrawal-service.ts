@@ -1,8 +1,13 @@
 import { newExternalId } from '@holaday/shared-types';
-import { and, eq, gte, inArray, lt, sql } from 'drizzle-orm';
+import { and, eq, gte, inArray, lt, or, sql } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
 import { readAffectedRows } from '../db/mysql-result.js';
-import { partnerWithdrawalRequests, type PartnerKycProfile, type PartnerWithdrawalRequest } from '../db/schema/partner.js';
+import {
+  partnerLots,
+  partnerWithdrawalRequests,
+  type PartnerKycProfile,
+  type PartnerWithdrawalRequest,
+} from '../db/schema/partner.js';
 import { users } from '../db/schema/users.js';
 import { CreditLedgerService } from './credit-ledger-service.js';
 import { KycService, canWithdrawWithKycStatus, normalizeKycStatus } from './kyc-service.js';
@@ -236,6 +241,7 @@ type WithdrawalRequestInput = {
 
 type WithdrawalStatus = 'requested' | 'reviewing';
 type WithdrawalLedger = Pick<CreditLedgerService, 'postEntry' | 'summarizeUser'>;
+type WithdrawalLedgerSummary = Awaited<ReturnType<WithdrawalLedger['summarizeUser']>>;
 type WithdrawalKyc = Pick<KycService, 'getProfile'>;
 type WithdrawalMembership = Pick<PartnerMembershipService, 'getActiveMembership'>;
 
@@ -472,9 +478,31 @@ export class WithdrawalService {
     return aggregateCreditCents(row?.totalCreditCents);
   }
 
-  private async assertAccountNotFrozen(ledger: WithdrawalLedger, userId: number): Promise<void> {
-    const summary = await ledger.summarizeUser(userId);
+  private async hasFrozenPartnerLot(db: DB, userId: number): Promise<boolean> {
+    const [row] = await db
+      .select({ id: partnerLots.id })
+      .from(partnerLots)
+      .where(
+        and(
+          eq(partnerLots.userId, userId),
+          or(eq(partnerLots.status, 'frozen'), eq(partnerLots.riskStatus, 'frozen')),
+        ),
+      )
+      .limit(1);
+    return Boolean(row);
+  }
+
+  private async assertAccountNotFrozen(
+    db: DB,
+    ledger: WithdrawalLedger,
+    userId: number,
+    existingSummary?: WithdrawalLedgerSummary,
+  ): Promise<void> {
+    const summary = existingSummary ?? (await ledger.summarizeUser(userId));
     if (summary.frozenCreditCents > 0) {
+      throw new WithdrawalGateError('risk_frozen');
+    }
+    if (await this.hasFrozenPartnerLot(db, userId)) {
       throw new WithdrawalGateError('risk_frozen');
     }
   }
@@ -598,9 +626,7 @@ export class WithdrawalService {
     }
 
     const summary = await ledger.summarizeUser(request.userId);
-    if (summary.frozenCreditCents > 0) {
-      throw new WithdrawalGateError('risk_frozen');
-    }
+    await this.assertAccountNotFrozen(db, ledger, request.userId, summary);
 
     const validation = validateWithdrawalRequest({
       amountCreditCents: request.amountCreditCents,
@@ -672,7 +698,7 @@ export class WithdrawalService {
       if (row.status !== 'requested' && row.status !== 'reviewing') {
         throw transitionErrorForTerminalStatus(row.status, 'not_reviewable');
       }
-      await this.assertAccountNotFrozen(ledger, row.userId);
+      await this.assertAccountNotFrozen(db, ledger, row.userId);
 
       const metadata = {
         ...metadataRecord(row.metadata),
@@ -762,7 +788,7 @@ export class WithdrawalService {
       if (row.status !== 'approved') {
         throw transitionErrorForTerminalStatus(row.status, 'not_approved');
       }
-      await this.assertAccountNotFrozen(ledger, row.userId);
+      await this.assertAccountNotFrozen(db, ledger, row.userId);
 
       const metadata = {
         ...metadataRecord(row.metadata),

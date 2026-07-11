@@ -161,6 +161,8 @@ Use Freeze when a lot needs manual containment. The service:
 - Saves the pre-freeze lot status and risk status into metadata.
 - Sets both `status` and `risk_status` to `frozen`.
 - Writes a `partner_risk_events` row with reviewer id and reason.
+- Stops new withdrawal requests, withdrawal approval, and paid marking
+  while any user lot remains frozen.
 
 Use Resume only after review evidence is cleared. The service restores
 the pre-freeze status from metadata, writes a `lot_resumed` risk event,
