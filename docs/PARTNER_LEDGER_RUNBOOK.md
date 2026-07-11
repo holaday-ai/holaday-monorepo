@@ -168,6 +168,11 @@ Use Resume only after review evidence is cleared. The service restores
 the pre-freeze status from metadata, writes a `lot_resumed` risk event,
 and leaves the original freeze audit trail intact.
 
+Use Close only after refund, fraud handling, or another terminal finance
+decision is complete. The service sets `status='closed'`, keeps
+`risk_status='frozen'`, writes a `lot_closed` risk event, and blocks
+future resume attempts for that lot.
+
 If the incident requires refund, fraud handling, or account-wide
 containment, keep the lot frozen and handle the finance action manually
 before resuming or closing the customer path.

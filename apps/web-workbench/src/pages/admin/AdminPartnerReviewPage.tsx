@@ -988,7 +988,9 @@ function RiskLotQueue({
         {rows.map((row) => {
           const action = partnerRiskLotQueueAction(row);
           const actionKey = `risk-${action.action}:${row.lotExternalId}`;
+          const closeActionKey = `risk-close:${row.lotExternalId}`;
           const pending = pendingAction === actionKey;
+          const closePending = pendingAction === closeActionKey;
           const riskDetail = [
             row.riskFreezeReason,
             row.riskFrozenByUserId > 0 ? `冻结人 #${row.riskFrozenByUserId}` : '',
@@ -996,6 +998,9 @@ function RiskLotQueue({
             row.riskResumeNote,
             row.riskResumedByUserId > 0 ? `恢复人 #${row.riskResumedByUserId}` : '',
             row.riskResumedAt ? `恢复 ${formatDateTime(row.riskResumedAt)}` : '',
+            row.riskCloseReason,
+            row.riskClosedByUserId > 0 ? `关闭人 #${row.riskClosedByUserId}` : '',
+            row.riskClosedAt ? `关闭 ${formatDateTime(row.riskClosedAt)}` : '',
           ]
             .filter(Boolean)
             .join(' / ');
@@ -1010,32 +1015,59 @@ function RiskLotQueue({
               <td className="px-3 py-3 text-muted-foreground">{truncate(riskDetail, 52) || '—'}</td>
               <td className="px-3 py-3 text-muted-foreground">{formatDateTime(row.updatedAt as string | Date | null)}</td>
               <td className="px-5 py-3">
-                <ActionButton
-                  icon={action.action === 'freeze' ? ShieldCheck : RefreshCw}
-                  label={pending ? action.pendingLabel : action.label}
-                  compact
-                  tone={action.action === 'freeze' ? 'danger' : 'primary'}
-                  pending={pending}
-                  onClick={() =>
-                    void runAction(
-                      actionKey,
-                      async () => {
-                        if (action.action === 'freeze') {
-                          await trpc.admin.partner.freezeRiskLot.mutate({
-                            lotExternalId: row.lotExternalId,
-                            reason: '后台风险冻结',
-                          });
-                          return;
-                        }
-                        await trpc.admin.partner.resumeRiskLot.mutate({
-                          lotExternalId: row.lotExternalId,
-                          note: '后台风险恢复',
-                        });
-                      },
-                      action.action === 'freeze' ? '批次已冻结' : '批次已恢复',
-                    )
-                  }
-                />
+                <div className="flex flex-wrap gap-2">
+                  {action.action === 'closed' ? (
+                    <span className="text-[12px] text-muted-foreground">已关闭</span>
+                  ) : (
+                    <ActionButton
+                      icon={action.action === 'freeze' ? ShieldCheck : RefreshCw}
+                      label={pending ? action.pendingLabel : action.label}
+                      compact
+                      tone={action.action === 'freeze' ? 'danger' : 'primary'}
+                      pending={pending}
+                      onClick={() =>
+                        void runAction(
+                          actionKey,
+                          async () => {
+                            if (action.action === 'freeze') {
+                              await trpc.admin.partner.freezeRiskLot.mutate({
+                                lotExternalId: row.lotExternalId,
+                                reason: '后台风险冻结',
+                              });
+                              return;
+                            }
+                            await trpc.admin.partner.resumeRiskLot.mutate({
+                              lotExternalId: row.lotExternalId,
+                              note: '后台风险恢复',
+                            });
+                          },
+                          action.action === 'freeze' ? '批次已冻结' : '批次已恢复',
+                        )
+                      }
+                    />
+                  )}
+                  {action.canClose && (
+                    <ActionButton
+                      icon={XCircle}
+                      label={closePending ? '关闭中' : '关闭'}
+                      compact
+                      tone="danger"
+                      pending={closePending}
+                      onClick={() =>
+                        void runAction(
+                          closeActionKey,
+                          async () => {
+                            await trpc.admin.partner.closeRiskLot.mutate({
+                              lotExternalId: row.lotExternalId,
+                              reason: '后台关闭风险批次',
+                            });
+                          },
+                          '批次已关闭',
+                        )
+                      }
+                    />
+                  )}
+                </div>
               </td>
             </tr>
           );

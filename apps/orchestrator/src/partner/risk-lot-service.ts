@@ -10,7 +10,7 @@ import {
 
 const REVIEW_NOTE_MAX_LENGTH = 1000;
 
-export type PartnerRiskLotTransitionReason = 'not_found' | 'not_frozen';
+export type PartnerRiskLotTransitionReason = 'not_found' | 'not_frozen' | 'closed';
 
 export interface FreezePartnerRiskLotInput {
   lotExternalId: string;
@@ -23,6 +23,13 @@ export interface ResumePartnerRiskLotInput {
   lotExternalId: string;
   reviewerUserId: number;
   note?: string;
+  now?: Date;
+}
+
+export interface ClosePartnerRiskLotInput {
+  lotExternalId: string;
+  reviewerUserId: number;
+  reason: string;
   now?: Date;
 }
 
@@ -48,6 +55,9 @@ export class PartnerRiskLotService {
       const lot = await readLotByExternalId(txDb, lotExternalId);
       if (!lot) {
         throw new PartnerRiskLotTransitionError('not_found');
+      }
+      if (lot.status === 'closed') {
+        return lot;
       }
       if (lot.status === 'frozen' || lot.riskStatus === 'frozen') {
         return lot;
@@ -107,6 +117,9 @@ export class PartnerRiskLotService {
       if (!lot) {
         throw new PartnerRiskLotTransitionError('not_found');
       }
+      if (lot.status === 'closed') {
+        throw new PartnerRiskLotTransitionError('closed');
+      }
       if (lot.status !== 'frozen' && lot.riskStatus !== 'frozen') {
         throw new PartnerRiskLotTransitionError('not_frozen');
       }
@@ -149,6 +162,64 @@ export class PartnerRiskLotService {
           lotExternalId,
           restoredStatus,
           restoredRiskStatus,
+        },
+      });
+
+      return updatedLot;
+    });
+  }
+
+  async closeLot(input: ClosePartnerRiskLotInput): Promise<PartnerLot> {
+    const lotExternalId = normalizeNonEmptyText(input.lotExternalId, 'lotExternalId');
+    const reviewerUserId = normalizePositiveSafeInteger(input.reviewerUserId, 'reviewerUserId');
+    const reason = normalizeNonEmptyText(input.reason, 'reason', REVIEW_NOTE_MAX_LENGTH);
+    const now = normalizeDate(input.now ?? new Date(), 'now');
+
+    return this.db.transaction(async (tx) => {
+      const txDb = tx as unknown as DB;
+      const lot = await readLotByExternalId(txDb, lotExternalId);
+      if (!lot) {
+        throw new PartnerRiskLotTransitionError('not_found');
+      }
+      if (lot.status === 'closed') {
+        return lot;
+      }
+
+      const metadata = {
+        ...metadataRecord(lot.metadata),
+        riskClosedByUserId: reviewerUserId,
+        riskClosedAt: now.toISOString(),
+        riskCloseReason: reason,
+        statusBeforeClose: lot.status,
+        riskStatusBeforeClose: lot.riskStatus,
+      };
+      const updatedLot = {
+        ...lot,
+        status: 'closed',
+        riskStatus: 'frozen',
+        metadata,
+        updatedAt: now,
+      };
+
+      await txDb
+        .update(partnerLots)
+        .set({
+          status: updatedLot.status,
+          riskStatus: updatedLot.riskStatus,
+          metadata,
+          updatedAt: now,
+        })
+        .where(eq(partnerLots.externalId, lotExternalId));
+      await insertRiskEvent(txDb, {
+        lot,
+        eventType: 'lot_closed',
+        severity: 'high',
+        status: 'closed',
+        now,
+        metadata: {
+          reviewerUserId,
+          reason,
+          lotExternalId,
         },
       });
 

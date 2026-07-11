@@ -17,6 +17,7 @@ const {
   markWithdrawalPaidMock,
   freezeRiskLotMock,
   resumeRiskLotMock,
+  closeRiskLotMock,
 } = vi.hoisted(() => ({
   confirmCapturedOrderMock: vi.fn(),
   approveReviewRequiredOrderMock: vi.fn(),
@@ -26,6 +27,7 @@ const {
   markWithdrawalPaidMock: vi.fn(),
   freezeRiskLotMock: vi.fn(),
   resumeRiskLotMock: vi.fn(),
+  closeRiskLotMock: vi.fn(),
 }));
 
 vi.mock('../../partner/payment-confirm-service.js', async (importOriginal) => {
@@ -68,6 +70,7 @@ vi.mock('../../partner/risk-lot-service.js', async (importOriginal) => {
     PartnerRiskLotService: vi.fn(() => ({
       freezeLot: freezeRiskLotMock,
       resumeLot: resumeRiskLotMock,
+      closeLot: closeRiskLotMock,
     })),
   };
 });
@@ -240,6 +243,7 @@ describe('admin.partner router', () => {
     markWithdrawalPaidMock.mockReset();
     freezeRiskLotMock.mockReset();
     resumeRiskLotMock.mockReset();
+    closeRiskLotMock.mockReset();
   });
 
   afterEach(() => {
@@ -427,9 +431,10 @@ describe('admin.partner router', () => {
     });
   });
 
-  it('passes risk lot freeze and resume actions through the risk lot service', async () => {
+  it('passes risk lot freeze, resume, and close actions through the risk lot service', async () => {
     freezeRiskLotMock.mockResolvedValueOnce(fakeLot({ status: 'frozen', riskStatus: 'frozen' }));
     resumeRiskLotMock.mockResolvedValueOnce(fakeLot({ status: 'releasing', riskStatus: 'review' }));
+    closeRiskLotMock.mockResolvedValueOnce(fakeLot({ status: 'closed', riskStatus: 'frozen' }));
     const caller = adminRouter.createCaller(makeContext()).partner;
 
     await expect(
@@ -444,6 +449,12 @@ describe('admin.partner router', () => {
         note: 'manual review cleared',
       }),
     ).resolves.toMatchObject({ lotExternalId: 'pay_risk_lot_1', status: 'releasing', riskStatus: 'review' });
+    await expect(
+      caller.closeRiskLot({
+        lotExternalId: 'pay_risk_lot_1',
+        reason: 'provider refund completed',
+      }),
+    ).resolves.toMatchObject({ lotExternalId: 'pay_risk_lot_1', status: 'closed', riskStatus: 'frozen' });
 
     expect(freezeRiskLotMock).toHaveBeenCalledWith({
       lotExternalId: 'pay_risk_lot_1',
@@ -454,6 +465,11 @@ describe('admin.partner router', () => {
       lotExternalId: 'pay_risk_lot_1',
       reviewerUserId: 1,
       note: 'manual review cleared',
+    });
+    expect(closeRiskLotMock).toHaveBeenCalledWith({
+      lotExternalId: 'pay_risk_lot_1',
+      reviewerUserId: 1,
+      reason: 'provider refund completed',
     });
   });
 
@@ -678,6 +694,9 @@ describe('admin.partner router', () => {
         riskResumedByUserId: 100,
         riskResumedAt: '2026-07-04T10:00:00.000Z',
         riskResumeNote: 'manual review cleared',
+        riskClosedByUserId: 101,
+        riskClosedAt: '2026-07-05T11:00:00.000Z',
+        riskCloseReason: 'provider refund completed',
       },
     });
     expect(riskLot).toMatchObject({
@@ -688,6 +707,9 @@ describe('admin.partner router', () => {
       riskResumedByUserId: 100,
       riskResumedAt: '2026-07-04T10:00:00.000Z',
       riskResumeNote: 'manual review cleared',
+      riskClosedByUserId: 101,
+      riskClosedAt: '2026-07-05T11:00:00.000Z',
+      riskCloseReason: 'provider refund completed',
     });
     expect(riskLot).not.toHaveProperty('metadata');
   });

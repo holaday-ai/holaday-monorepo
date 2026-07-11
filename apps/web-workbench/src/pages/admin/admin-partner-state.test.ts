@@ -40,11 +40,19 @@ describe('partnerRiskLotQueueAction', () => {
       action: 'freeze',
       label: '冻结',
       pendingLabel: '冻结中',
+      canClose: false,
     });
     expect(partnerRiskLotQueueAction({ status: 'frozen', riskStatus: 'frozen' })).toEqual({
       action: 'resume',
       label: '恢复',
       pendingLabel: '恢复中',
+      canClose: true,
+    });
+    expect(partnerRiskLotQueueAction({ status: 'closed', riskStatus: 'frozen' })).toEqual({
+      action: 'closed',
+      label: '已关闭',
+      pendingLabel: '已关闭',
+      canClose: false,
     });
   });
 });
@@ -206,6 +214,9 @@ describe('normalizeAdminPartnerOverview', () => {
           riskResumedByUserId: 100,
           riskResumedAt: '2026-07-04T10:00:00.000Z',
           riskResumeNote: 'manual review cleared',
+          riskClosedByUserId: 101,
+          riskClosedAt: '2026-07-05T11:00:00.000Z',
+          riskCloseReason: 'provider refund completed',
         },
       ],
     });
@@ -219,6 +230,9 @@ describe('normalizeAdminPartnerOverview', () => {
       riskResumedByUserId: 100,
       riskResumedAt: '2026-07-04T10:00:00.000Z',
       riskResumeNote: 'manual review cleared',
+      riskClosedByUserId: 101,
+      riskClosedAt: '2026-07-05T11:00:00.000Z',
+      riskCloseReason: 'provider refund completed',
     });
   });
 
@@ -304,6 +318,7 @@ describe('normalizeAdminPartnerOverview', () => {
           status: 'frozen',
           riskStatus: 'normal',
           riskFreezeReason: 'bank dispute signal',
+          riskCloseReason: 'provider refund completed',
         },
       ],
     });
@@ -369,6 +384,11 @@ describe('normalizeAdminPartnerOverview', () => {
     expect(byRiskReason.enabled).toBe(true);
     if (!byRiskReason.enabled) throw new Error('expected enabled state');
     expect(byRiskReason.riskLots).toHaveLength(1);
+
+    const byCloseReason = filterAdminPartnerOverview(state, 'refund completed');
+    expect(byCloseReason.enabled).toBe(true);
+    if (!byCloseReason.enabled) throw new Error('expected enabled state');
+    expect(byCloseReason.riskLots).toHaveLength(1);
 
     const byProviderRef = filterAdminPartnerOverview(state, 'bankcard-flow');
     expect(byProviderRef.enabled).toBe(true);

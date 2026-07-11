@@ -247,6 +247,9 @@ function summarizeRiskLotAudit(metadataValue: unknown) {
     riskResumedByUserId: metadataNumber(metadata, 'riskResumedByUserId'),
     riskResumedAt: metadataText(metadata, 'riskResumedAt'),
     riskResumeNote: metadataText(metadata, 'riskResumeNote'),
+    riskClosedByUserId: metadataNumber(metadata, 'riskClosedByUserId'),
+    riskClosedAt: metadataText(metadata, 'riskClosedAt'),
+    riskCloseReason: metadataText(metadata, 'riskCloseReason'),
   };
 }
 
@@ -446,6 +449,9 @@ function mapRiskLotError(error: unknown): never {
     }
     if (error.reason === 'not_frozen') {
       throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'partner risk lot is not frozen' });
+    }
+    if (error.reason === 'closed') {
+      throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'partner risk lot is closed' });
     }
     throw new TRPCError({ code: 'PRECONDITION_FAILED', message: error.message });
   }
@@ -923,6 +929,28 @@ export const adminPartnerRouter = router({
           lotExternalId: input.lotExternalId,
           reviewerUserId: adminUser.id,
           note: input.note,
+        });
+        return summarizeRiskLot(row);
+      } catch (error) {
+        return mapRiskLotError(error);
+      }
+    }),
+
+  closeRiskLot: adminProcedure
+    .input(
+      z.object({
+        lotExternalId: z.string().trim().min(1).max(32),
+        reason: z.string().trim().min(1).max(1000),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      requirePartnerLedgerEnabled();
+      const adminUser = await resolveUserByExternalId(ctx.db, ctx.userId);
+      try {
+        const row = await new PartnerRiskLotService(ctx.db).closeLot({
+          lotExternalId: input.lotExternalId,
+          reviewerUserId: adminUser.id,
+          reason: input.reason,
         });
         return summarizeRiskLot(row);
       } catch (error) {

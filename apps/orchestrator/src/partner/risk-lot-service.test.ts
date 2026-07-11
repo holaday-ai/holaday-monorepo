@@ -231,11 +231,89 @@ describe('PartnerRiskLotService', () => {
     const fakeDb = new FakeRiskLotDb();
     const service = new PartnerRiskLotService(fakeDb.asDB());
 
-  await expect(
+    await expect(
       service.resumeLot({
         lotExternalId: 'pay_risk_lot_1',
         reviewerUserId: 10,
       }),
     ).rejects.toEqual(new PartnerRiskLotTransitionError('not_frozen'));
+  });
+
+  it('closes a frozen lot with audit metadata and a terminal risk event', async () => {
+    const now = new Date('2026-07-05T11:00:00.000Z');
+    const fakeDb = new FakeRiskLotDb({
+      lots: [
+        fakeLot({
+          status: 'frozen',
+          riskStatus: 'frozen',
+          metadata: {
+            riskFrozenByUserId: 9,
+            riskFrozenAt: '2026-07-03T09:00:00.000Z',
+            riskFreezeReason: 'bank dispute signal',
+            statusBeforeFreeze: 'releasing',
+            riskStatusBeforeFreeze: 'review',
+          },
+        }),
+      ],
+    });
+    const service = new PartnerRiskLotService(fakeDb.asDB());
+
+    const row = await service.closeLot({
+      lotExternalId: 'pay_risk_lot_1',
+      reviewerUserId: 11,
+      reason: 'provider refund completed',
+      now,
+    });
+
+    expect(row).toMatchObject({
+      externalId: 'pay_risk_lot_1',
+      status: 'closed',
+      riskStatus: 'frozen',
+      updatedAt: now,
+    });
+    expect(row.metadata).toMatchObject({
+      riskClosedByUserId: 11,
+      riskClosedAt: now.toISOString(),
+      riskCloseReason: 'provider refund completed',
+    });
+    expect(fakeDb.riskEventRows).toHaveLength(1);
+    expect(fakeDb.riskEventRows[0]).toMatchObject({
+      userId: 123,
+      lotId: 1,
+      eventType: 'lot_closed',
+      severity: 'high',
+      status: 'closed',
+      metadata: {
+        reviewerUserId: 11,
+        reason: 'provider refund completed',
+        lotExternalId: 'pay_risk_lot_1',
+      },
+      createdAt: now,
+      updatedAt: now,
+    });
+  });
+
+  it('rejects resume for a terminally closed lot', async () => {
+    const fakeDb = new FakeRiskLotDb({
+      lots: [
+        fakeLot({
+          status: 'closed',
+          riskStatus: 'frozen',
+          metadata: {
+            riskClosedByUserId: 11,
+            riskClosedAt: '2026-07-05T11:00:00.000Z',
+            riskCloseReason: 'provider refund completed',
+          },
+        }),
+      ],
+    });
+    const service = new PartnerRiskLotService(fakeDb.asDB());
+
+    await expect(
+      service.resumeLot({
+        lotExternalId: 'pay_risk_lot_1',
+        reviewerUserId: 10,
+      }),
+    ).rejects.toEqual(new PartnerRiskLotTransitionError('closed'));
   });
 });

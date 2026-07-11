@@ -131,11 +131,14 @@ export function partnerOrderActionLabel(status: unknown): '确认' | '放行' {
 export function partnerRiskLotQueueAction(row: {
   readonly status: string;
   readonly riskStatus: string;
-}): { action: 'freeze' | 'resume'; label: string; pendingLabel: string } {
-  if (row.status === 'frozen' || row.riskStatus === 'frozen') {
-    return { action: 'resume', label: '恢复', pendingLabel: '恢复中' };
+}): { action: 'freeze' | 'resume' | 'closed'; label: string; pendingLabel: string; canClose: boolean } {
+  if (row.status === 'closed') {
+    return { action: 'closed', label: '已关闭', pendingLabel: '已关闭', canClose: false };
   }
-  return { action: 'freeze', label: '冻结', pendingLabel: '冻结中' };
+  if (row.status === 'frozen' || row.riskStatus === 'frozen') {
+    return { action: 'resume', label: '恢复', pendingLabel: '恢复中', canClose: true };
+  }
+  return { action: 'freeze', label: '冻结', pendingLabel: '冻结中', canClose: false };
 }
 
 export function partnerKycQueueReviewPayload(
@@ -282,6 +285,9 @@ export function normalizeAdminPartnerOverview(value: unknown) {
         riskResumedByUserId: Math.round(nonNegativeNumber(row.riskResumedByUserId)),
         riskResumedAt: safeText(row.riskResumedAt),
         riskResumeNote: safeText(row.riskResumeNote),
+        riskClosedByUserId: Math.round(nonNegativeNumber(row.riskClosedByUserId)),
+        riskClosedAt: safeText(row.riskClosedAt),
+        riskCloseReason: safeText(row.riskCloseReason),
         updatedAt: row.updatedAt,
       };
     }),
@@ -486,6 +492,8 @@ export function filterAdminPartnerOverview(
         'riskFrozenAt',
         'riskResumeNote',
         'riskResumedAt',
+        'riskCloseReason',
+        'riskClosedAt',
       ]),
     ),
   } satisfies EnabledAdminPartnerOverviewState;
