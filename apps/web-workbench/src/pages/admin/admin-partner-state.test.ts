@@ -152,6 +152,7 @@ describe('normalizeAdminPartnerOverview', () => {
         returnedWithdrawalCount: 1,
         overdueWithdrawalCount: 0,
         riskLotCount: 3,
+        riskEventCount: 4,
       },
       orders: [
         {
@@ -179,6 +180,7 @@ describe('normalizeAdminPartnerOverview', () => {
     expect(state.metrics.paidWithdrawalCount).toBe(2);
     expect(state.metrics.rejectedWithdrawalCount).toBe(3);
     expect(state.metrics.returnedWithdrawalCount).toBe(1);
+    expect(state.metrics.riskEventCount).toBe(4);
     expect(state.orders[0]).toMatchObject({
       orderExternalId: 'pay_order_1',
       amountCnyCents: 1_000_000,

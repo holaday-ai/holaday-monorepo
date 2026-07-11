@@ -245,6 +245,7 @@ export function normalizeAdminPartnerOverview(value: unknown) {
       returnedWithdrawalCount: Math.round(nonNegativeNumber(metrics.returnedWithdrawalCount)),
       overdueWithdrawalCount: Math.round(nonNegativeNumber(metrics.overdueWithdrawalCount)),
       riskLotCount: Math.round(nonNegativeNumber(metrics.riskLotCount)),
+      riskEventCount: Math.round(nonNegativeNumber(metrics.riskEventCount)),
     },
     orders: safeArray(root.orders).map((raw) => {
       const row = asRecord(raw);

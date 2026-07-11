@@ -672,6 +672,7 @@ export const adminPartnerRouter = router({
           reviewRequiredOrderCount: orderRows.filter((row) => row.status === 'review_required').length,
           ...withdrawalMetrics,
           riskLotCount: riskLotRows.length,
+          riskEventCount: riskEventRows.length,
         },
         orders: orderRows.map(({ metadata, ...row }) => ({
           ...row,

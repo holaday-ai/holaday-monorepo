@@ -347,7 +347,7 @@ function EnabledAdminPartnerReview({
 }): JSX.Element {
   return (
     <div className="space-y-5">
-      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-9">
+      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-10">
         <MetricCard label="待实名" value={data.metrics.pendingKycCount} />
         <MetricCard label="待确认订单" value={data.metrics.pendingOrderCount} />
         <MetricCard label="需复核订单" value={data.metrics.reviewRequiredOrderCount} />
@@ -357,6 +357,7 @@ function EnabledAdminPartnerReview({
         <MetricCard label="已拒绝" value={data.metrics.rejectedWithdrawalCount} />
         <MetricCard label="已退回" value={data.metrics.returnedWithdrawalCount} />
         <MetricCard label="风险批次" value={data.metrics.riskLotCount} tone={data.metrics.riskLotCount > 0 ? 'danger' : 'normal'} />
+        <MetricCard label="风险事件" value={data.metrics.riskEventCount} tone={data.metrics.riskEventCount > 0 ? 'danger' : 'normal'} />
       </section>
 
       <ReconciliationPanel
