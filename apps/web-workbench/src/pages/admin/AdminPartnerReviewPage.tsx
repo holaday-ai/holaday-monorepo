@@ -411,6 +411,7 @@ function EnabledAdminPartnerReview({
       />
       <WithdrawalHistory rows={data.withdrawalHistory} />
       <RiskLotQueue rows={data.riskLots} pendingAction={pendingAction} runAction={runAction} />
+      <RiskEventHistory rows={data.riskEvents} />
     </div>
   );
 }
@@ -1069,6 +1070,39 @@ function RiskLotQueue({
                   )}
                 </div>
               </td>
+            </tr>
+          );
+        })}
+      </DataTable>
+    </QueueSection>
+  );
+}
+
+function RiskEventHistory({ rows }: { rows: EnabledOverviewState['riskEvents'] }): JSX.Element {
+  return (
+    <QueueSection title="风险事件" empty="暂无风险事件">
+      <DataTable
+        headers={['用户', '批次', '事件', '严重度', '状态', '处理信息', '时间']}
+        empty={rows.length === 0}
+        colSpan={7}
+      >
+        {rows.map((row) => {
+          const detail = [
+            row.riskReason,
+            row.riskNote,
+            row.reviewerUserId > 0 ? `处理人 #${row.reviewerUserId}` : '',
+          ]
+            .filter(Boolean)
+            .join(' / ');
+          return (
+            <tr key={row.riskEventExternalId} className="border-b border-[#EFEFEF] last:border-b-0 hover:bg-[#EFEFEF]/35">
+              <UserCell userExternalId={row.userExternalId} email={row.email} displayName={row.displayName} />
+              <td className="px-3 py-3 text-muted-foreground">{truncate(row.lotExternalId, 18) || '—'}</td>
+              <td className="px-3 py-3 text-muted-foreground">{row.eventType || '—'}</td>
+              <td className="px-3 py-3 text-muted-foreground">{row.severity || '—'}</td>
+              <td className="px-3 py-3 text-muted-foreground">{row.status || '—'}</td>
+              <td className="px-3 py-3 text-muted-foreground">{truncate(detail, 56) || '—'}</td>
+              <td className="px-3 py-3 text-muted-foreground">{formatDateTime(row.createdAt as string | Date | null)}</td>
             </tr>
           );
         })}

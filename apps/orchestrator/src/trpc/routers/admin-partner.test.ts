@@ -712,5 +712,29 @@ describe('admin.partner router', () => {
       riskCloseReason: 'provider refund completed',
     });
     expect(riskLot).not.toHaveProperty('metadata');
+
+    const riskEvent = (
+      __adminPartnerInternals as typeof __adminPartnerInternals & {
+        summarizeRiskEventQueueRow: (row: Record<string, unknown>) => Record<string, unknown>;
+      }
+    ).summarizeRiskEventQueueRow({
+      riskEventExternalId: 'pay_risk_event_1',
+      eventType: 'lot_closed',
+      severity: 'high',
+      status: 'closed',
+      metadata: {
+        reviewerUserId: 101,
+        reason: 'provider refund completed',
+        note: 'manual close after refund',
+      },
+    });
+    expect(riskEvent).toMatchObject({
+      riskEventExternalId: 'pay_risk_event_1',
+      eventType: 'lot_closed',
+      reviewerUserId: 101,
+      riskReason: 'provider refund completed',
+      riskNote: 'manual close after refund',
+    });
+    expect(riskEvent).not.toHaveProperty('metadata');
   });
 });

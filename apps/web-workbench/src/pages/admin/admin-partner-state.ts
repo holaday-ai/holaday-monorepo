@@ -291,6 +291,24 @@ export function normalizeAdminPartnerOverview(value: unknown) {
         updatedAt: row.updatedAt,
       };
     }),
+    riskEvents: safeArray(root.riskEvents).map((raw) => {
+      const row = asRecord(raw);
+      return {
+        riskEventExternalId: safeText(row.riskEventExternalId),
+        userExternalId: safeText(row.userExternalId),
+        email: safeText(row.email),
+        displayName: safeText(row.displayName),
+        lotExternalId: safeText(row.lotExternalId),
+        eventType: safeText(row.eventType),
+        severity: safeText(row.severity),
+        status: safeText(row.status),
+        reviewerUserId: Math.round(nonNegativeNumber(row.reviewerUserId)),
+        riskReason: safeText(row.riskReason),
+        riskNote: safeText(row.riskNote),
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+      };
+    }),
   };
 }
 
@@ -494,6 +512,20 @@ export function filterAdminPartnerOverview(
         'riskResumedAt',
         'riskCloseReason',
         'riskClosedAt',
+      ]),
+    ),
+    riskEvents: state.riskEvents.filter((row) =>
+      rowMatches(needle, row, [
+        'riskEventExternalId',
+        'userExternalId',
+        'email',
+        'displayName',
+        'lotExternalId',
+        'eventType',
+        'severity',
+        'status',
+        'riskReason',
+        'riskNote',
       ]),
     ),
   } satisfies EnabledAdminPartnerOverviewState;

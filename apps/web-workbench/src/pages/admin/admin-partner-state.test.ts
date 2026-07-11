@@ -148,6 +148,7 @@ describe('normalizeAdminPartnerOverview', () => {
       ],
       kycProfiles: 'not-array',
       riskLots: [],
+      riskEvents: 'not-array',
     });
 
     expect(state.enabled).toBe(true);
@@ -163,6 +164,7 @@ describe('normalizeAdminPartnerOverview', () => {
     });
     expect(state.withdrawals[0].riskScore).toBe(100);
     expect(state.kycProfiles).toEqual([]);
+    expect(state.riskEvents).toEqual([]);
   });
 
   it('preserves KYC review audit fields for the admin queue', () => {
@@ -233,6 +235,42 @@ describe('normalizeAdminPartnerOverview', () => {
       riskClosedByUserId: 101,
       riskClosedAt: '2026-07-05T11:00:00.000Z',
       riskCloseReason: 'provider refund completed',
+    });
+  });
+
+  it('preserves risk event audit fields for the admin queue', () => {
+    const state = normalizeAdminPartnerOverview({
+      enabled: true,
+      metrics: {},
+      orders: [],
+      kycProfiles: [],
+      withdrawals: [],
+      riskLots: [],
+      riskEvents: [
+        {
+          riskEventExternalId: 'pay_risk_event_1',
+          userExternalId: 'usr_risk',
+          lotExternalId: 'pay_risk_lot_1',
+          eventType: 'lot_closed',
+          severity: 'high',
+          status: 'closed',
+          reviewerUserId: 101,
+          riskReason: 'provider refund completed',
+          riskNote: 'manual close after refund',
+          createdAt: '2026-07-05T11:00:00.000Z',
+        },
+      ],
+    });
+
+    expect(state.enabled).toBe(true);
+    if (!state.enabled) throw new Error('expected enabled state');
+    expect(state.riskEvents[0]).toMatchObject({
+      riskEventExternalId: 'pay_risk_event_1',
+      lotExternalId: 'pay_risk_lot_1',
+      eventType: 'lot_closed',
+      reviewerUserId: 101,
+      riskReason: 'provider refund completed',
+      riskNote: 'manual close after refund',
     });
   });
 
@@ -321,6 +359,21 @@ describe('normalizeAdminPartnerOverview', () => {
           riskCloseReason: 'provider refund completed',
         },
       ],
+      riskEvents: [
+        {
+          riskEventExternalId: 'pay_risk_event_1',
+          userExternalId: 'usr_risk',
+          email: 'risk@holaday.local',
+          displayName: 'Risk Partner',
+          lotExternalId: 'lot_risk_1',
+          eventType: 'lot_closed',
+          severity: 'high',
+          status: 'closed',
+          reviewerUserId: 101,
+          riskReason: 'provider refund completed',
+          riskNote: 'manual close after refund',
+        },
+      ],
     });
     expect(state.enabled).toBe(true);
     if (!state.enabled) throw new Error('expected enabled state');
@@ -332,6 +385,7 @@ describe('normalizeAdminPartnerOverview', () => {
     expect(byUser.kycProfiles).toHaveLength(0);
     expect(byUser.withdrawals).toHaveLength(0);
     expect(byUser.riskLots).toHaveLength(0);
+    expect(byUser.riskEvents).toHaveLength(0);
     expect(byUser.orders[0]?.reviewReason).toBe('annual_recharge_cap_exceeded');
 
     const byReviewReason = filterAdminPartnerOverview(state, 'annual_recharge');
@@ -389,6 +443,12 @@ describe('normalizeAdminPartnerOverview', () => {
     expect(byCloseReason.enabled).toBe(true);
     if (!byCloseReason.enabled) throw new Error('expected enabled state');
     expect(byCloseReason.riskLots).toHaveLength(1);
+    expect(byCloseReason.riskEvents).toHaveLength(1);
+
+    const byRiskEventNote = filterAdminPartnerOverview(state, 'manual close');
+    expect(byRiskEventNote.enabled).toBe(true);
+    if (!byRiskEventNote.enabled) throw new Error('expected enabled state');
+    expect(byRiskEventNote.riskEvents).toHaveLength(1);
 
     const byProviderRef = filterAdminPartnerOverview(state, 'bankcard-flow');
     expect(byProviderRef.enabled).toBe(true);

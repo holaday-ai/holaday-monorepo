@@ -6,6 +6,7 @@ import {
   partnerKycProfiles,
   partnerLots,
   partnerRechargeOrders,
+  partnerRiskEvents,
   partnerWithdrawalRequests,
   type PartnerLot,
   type PartnerRechargeOrder,
@@ -181,6 +182,18 @@ function riskLotSearchCondition(pattern: string) {
   );
 }
 
+function riskEventSearchCondition(pattern: string) {
+  return or(
+    userSearchCondition(pattern),
+    like(partnerRiskEvents.externalId, pattern),
+    like(partnerRiskEvents.eventType, pattern),
+    like(partnerRiskEvents.severity, pattern),
+    like(partnerRiskEvents.status, pattern),
+    like(partnerLots.externalId, pattern),
+    metadataLike(partnerRiskEvents.metadata, pattern),
+  );
+}
+
 function summarizeKycAudit(metadataValue: unknown) {
   const metadata = metadataRecord(metadataValue);
   return {
@@ -258,6 +271,23 @@ function summarizeRiskLotQueueRow<T extends { metadata?: unknown }>(row: T) {
   return {
     ...rest,
     ...summarizeRiskLotAudit(metadata),
+  };
+}
+
+function summarizeRiskEventAudit(metadataValue: unknown) {
+  const metadata = metadataRecord(metadataValue);
+  return {
+    reviewerUserId: metadataNumber(metadata, 'reviewerUserId'),
+    riskReason: metadataText(metadata, 'reason'),
+    riskNote: metadataText(metadata, 'note'),
+  };
+}
+
+function summarizeRiskEventQueueRow<T extends { metadata?: unknown }>(row: T) {
+  const { metadata, ...rest } = row;
+  return {
+    ...rest,
+    ...summarizeRiskEventAudit(metadata),
   };
 }
 
@@ -480,7 +510,7 @@ export const adminPartnerRouter = router({
       const query = normalizeOverviewSearchQuery(input?.query);
       const searchPattern = query ? `%${query}%` : undefined;
       const now = new Date();
-      const [orderRows, kycRows, withdrawalRows, withdrawalHistoryRows, riskLotRows] = await Promise.all([
+      const [orderRows, kycRows, withdrawalRows, withdrawalHistoryRows, riskLotRows, riskEventRows] = await Promise.all([
         ctx.db
           .select({
             orderExternalId: partnerRechargeOrders.externalId,
@@ -607,6 +637,26 @@ export const adminPartnerRouter = router({
           )
           .orderBy(desc(partnerLots.updatedAt))
           .limit(limit),
+        ctx.db
+          .select({
+            riskEventExternalId: partnerRiskEvents.externalId,
+            userExternalId: users.externalId,
+            email: users.email,
+            displayName: users.displayName,
+            lotExternalId: partnerLots.externalId,
+            eventType: partnerRiskEvents.eventType,
+            severity: partnerRiskEvents.severity,
+            status: partnerRiskEvents.status,
+            metadata: partnerRiskEvents.metadata,
+            createdAt: partnerRiskEvents.createdAt,
+            updatedAt: partnerRiskEvents.updatedAt,
+          })
+          .from(partnerRiskEvents)
+          .innerJoin(users, eq(users.id, partnerRiskEvents.userId))
+          .leftJoin(partnerLots, eq(partnerLots.id, partnerRiskEvents.lotId))
+          .where(searchPattern ? riskEventSearchCondition(searchPattern) : undefined)
+          .orderBy(desc(partnerRiskEvents.createdAt))
+          .limit(limit),
       ]);
 
       const withdrawalMetrics = summarizeWithdrawalMetrics(
@@ -637,6 +687,7 @@ export const adminPartnerRouter = router({
           ...summarizeWithdrawalAudit(metadata),
         })),
         riskLots: riskLotRows.map(summarizeRiskLotQueueRow),
+        riskEvents: riskEventRows.map(summarizeRiskEventQueueRow),
       };
     }),
 
@@ -963,6 +1014,7 @@ export const __adminPartnerInternals = {
   summarizeKycProfile,
   summarizeOrder,
   summarizePartnerReconciliation,
+  summarizeRiskEventQueueRow,
   summarizeRiskLotQueueRow,
   summarizeWithdrawal,
   summarizeWithdrawalMetrics,
