@@ -187,6 +187,41 @@ describe('normalizeAdminPartnerOverview', () => {
     });
   });
 
+  it('preserves risk lot audit fields for the admin queue', () => {
+    const state = normalizeAdminPartnerOverview({
+      enabled: true,
+      metrics: {},
+      orders: [],
+      kycProfiles: [],
+      withdrawals: [],
+      riskLots: [
+        {
+          lotExternalId: 'pay_risk_lot_1',
+          userExternalId: 'usr_risk',
+          status: 'frozen',
+          riskStatus: 'frozen',
+          riskFrozenByUserId: 99,
+          riskFrozenAt: '2026-07-03T09:00:00.000Z',
+          riskFreezeReason: 'bank dispute signal',
+          riskResumedByUserId: 100,
+          riskResumedAt: '2026-07-04T10:00:00.000Z',
+          riskResumeNote: 'manual review cleared',
+        },
+      ],
+    });
+
+    expect(state.enabled).toBe(true);
+    if (!state.enabled) throw new Error('expected enabled state');
+    expect(state.riskLots[0]).toMatchObject({
+      riskFrozenByUserId: 99,
+      riskFrozenAt: '2026-07-03T09:00:00.000Z',
+      riskFreezeReason: 'bank dispute signal',
+      riskResumedByUserId: 100,
+      riskResumedAt: '2026-07-04T10:00:00.000Z',
+      riskResumeNote: 'manual review cleared',
+    });
+  });
+
   it('filters enabled overview queues by user and queue identifiers', () => {
     const state = normalizeAdminPartnerOverview({
       enabled: true,
@@ -268,6 +303,7 @@ describe('normalizeAdminPartnerOverview', () => {
           displayName: 'Risk Partner',
           status: 'frozen',
           riskStatus: 'normal',
+          riskFreezeReason: 'bank dispute signal',
         },
       ],
     });
@@ -328,6 +364,11 @@ describe('normalizeAdminPartnerOverview', () => {
       status: 'frozen',
       riskStatus: 'normal',
     });
+
+    const byRiskReason = filterAdminPartnerOverview(state, 'dispute signal');
+    expect(byRiskReason.enabled).toBe(true);
+    if (!byRiskReason.enabled) throw new Error('expected enabled state');
+    expect(byRiskReason.riskLots).toHaveLength(1);
 
     const byProviderRef = filterAdminPartnerOverview(state, 'bankcard-flow');
     expect(byProviderRef.enabled).toBe(true);

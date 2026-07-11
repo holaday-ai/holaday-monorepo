@@ -276,6 +276,12 @@ export function normalizeAdminPartnerOverview(value: unknown) {
         riskStatus: safeText(row.riskStatus),
         principalCreditCents: Math.round(nonNegativeNumber(row.principalCreditCents)),
         apiUnits: Math.round(nonNegativeNumber(row.apiUnits)),
+        riskFrozenByUserId: Math.round(nonNegativeNumber(row.riskFrozenByUserId)),
+        riskFrozenAt: safeText(row.riskFrozenAt),
+        riskFreezeReason: safeText(row.riskFreezeReason),
+        riskResumedByUserId: Math.round(nonNegativeNumber(row.riskResumedByUserId)),
+        riskResumedAt: safeText(row.riskResumedAt),
+        riskResumeNote: safeText(row.riskResumeNote),
         updatedAt: row.updatedAt,
       };
     }),
@@ -469,7 +475,18 @@ export function filterAdminPartnerOverview(
       ]),
     ),
     riskLots: state.riskLots.filter((row) =>
-      rowMatches(needle, row, ['lotExternalId', 'userExternalId', 'email', 'displayName', 'status', 'riskStatus']),
+      rowMatches(needle, row, [
+        'lotExternalId',
+        'userExternalId',
+        'email',
+        'displayName',
+        'status',
+        'riskStatus',
+        'riskFreezeReason',
+        'riskFrozenAt',
+        'riskResumeNote',
+        'riskResumedAt',
+      ]),
     ),
   } satisfies EnabledAdminPartnerOverviewState;
 }

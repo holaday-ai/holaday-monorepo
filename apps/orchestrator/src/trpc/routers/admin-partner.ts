@@ -177,6 +177,7 @@ function riskLotSearchCondition(pattern: string) {
     like(partnerLots.externalId, pattern),
     like(partnerLots.status, pattern),
     like(partnerLots.riskStatus, pattern),
+    metadataLike(partnerLots.metadata, pattern),
   );
 }
 
@@ -234,6 +235,26 @@ function summarizeRiskLot(lot: PartnerLot) {
     principalCreditCents: lot.principalCreditCents,
     apiUnits: lot.apiUnits,
     updatedAt: lot.updatedAt,
+  };
+}
+
+function summarizeRiskLotAudit(metadataValue: unknown) {
+  const metadata = metadataRecord(metadataValue);
+  return {
+    riskFrozenByUserId: metadataNumber(metadata, 'riskFrozenByUserId'),
+    riskFrozenAt: metadataText(metadata, 'riskFrozenAt'),
+    riskFreezeReason: metadataText(metadata, 'riskFreezeReason'),
+    riskResumedByUserId: metadataNumber(metadata, 'riskResumedByUserId'),
+    riskResumedAt: metadataText(metadata, 'riskResumedAt'),
+    riskResumeNote: metadataText(metadata, 'riskResumeNote'),
+  };
+}
+
+function summarizeRiskLotQueueRow<T extends { metadata?: unknown }>(row: T) {
+  const { metadata, ...rest } = row;
+  return {
+    ...rest,
+    ...summarizeRiskLotAudit(metadata),
   };
 }
 
@@ -567,6 +588,7 @@ export const adminPartnerRouter = router({
             apiUnits: partnerLots.apiUnits,
             accumulationEndsAt: partnerLots.accumulationEndsAt,
             releaseStartsAt: partnerLots.releaseStartsAt,
+            metadata: partnerLots.metadata,
             updatedAt: partnerLots.updatedAt,
           })
           .from(partnerLots)
@@ -608,7 +630,7 @@ export const adminPartnerRouter = router({
           ...row,
           ...summarizeWithdrawalAudit(metadata),
         })),
-        riskLots: riskLotRows,
+        riskLots: riskLotRows.map(summarizeRiskLotQueueRow),
       };
     }),
 
@@ -913,6 +935,7 @@ export const __adminPartnerInternals = {
   summarizeKycProfile,
   summarizeOrder,
   summarizePartnerReconciliation,
+  summarizeRiskLotQueueRow,
   summarizeWithdrawal,
   summarizeWithdrawalMetrics,
 };

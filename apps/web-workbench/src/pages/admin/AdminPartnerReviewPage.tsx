@@ -981,14 +981,24 @@ function RiskLotQueue({
   return (
     <QueueSection title="风险批次" empty="暂无风险批次">
       <DataTable
-        headers={['用户', '批次', '本金', 'API Units', '批次状态', '风险状态', '更新时间', '操作']}
+        headers={['用户', '批次', '本金', 'API Units', '批次状态', '风险状态', '风险信息', '更新时间', '操作']}
         empty={rows.length === 0}
-        colSpan={8}
+        colSpan={9}
       >
         {rows.map((row) => {
           const action = partnerRiskLotQueueAction(row);
           const actionKey = `risk-${action.action}:${row.lotExternalId}`;
           const pending = pendingAction === actionKey;
+          const riskDetail = [
+            row.riskFreezeReason,
+            row.riskFrozenByUserId > 0 ? `冻结人 #${row.riskFrozenByUserId}` : '',
+            row.riskFrozenAt ? `冻结 ${formatDateTime(row.riskFrozenAt)}` : '',
+            row.riskResumeNote,
+            row.riskResumedByUserId > 0 ? `恢复人 #${row.riskResumedByUserId}` : '',
+            row.riskResumedAt ? `恢复 ${formatDateTime(row.riskResumedAt)}` : '',
+          ]
+            .filter(Boolean)
+            .join(' / ');
           return (
             <tr key={row.lotExternalId} className="border-b border-[#EFEFEF] last:border-b-0 hover:bg-[#EFEFEF]/35">
               <UserCell userExternalId={row.userExternalId} email={row.email} displayName={row.displayName} />
@@ -997,6 +1007,7 @@ function RiskLotQueue({
               <td className="px-3 py-3 tabular-nums text-muted-foreground">{formatInteger(row.apiUnits)}</td>
               <td className="px-3 py-3 text-muted-foreground">{row.status === 'frozen' ? '已冻结' : row.status || '—'}</td>
               <td className="px-3 py-3"><StatusBadge kind="risk" status={row.riskStatus} /></td>
+              <td className="px-3 py-3 text-muted-foreground">{truncate(riskDetail, 52) || '—'}</td>
               <td className="px-3 py-3 text-muted-foreground">{formatDateTime(row.updatedAt as string | Date | null)}</td>
               <td className="px-5 py-3">
                 <ActionButton

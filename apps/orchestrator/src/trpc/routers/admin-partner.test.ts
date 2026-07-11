@@ -590,7 +590,7 @@ describe('admin.partner router', () => {
     });
   });
 
-  it('summarizes partner order, KYC, and withdrawal audit metadata for review queues', () => {
+  it('summarizes partner order, KYC, withdrawal, and risk lot audit metadata for review queues', () => {
     const order = __adminPartnerInternals.summarizeOrder(
       fakeOrder({
         status: 'review_required',
@@ -662,5 +662,33 @@ describe('admin.partner router', () => {
       providerPayoutId: 'bank-payout-1',
       paidAt: '2026-07-03T06:00:00.000Z',
     });
+
+    const riskLot = (
+      __adminPartnerInternals as typeof __adminPartnerInternals & {
+        summarizeRiskLotQueueRow: (row: Record<string, unknown>) => Record<string, unknown>;
+      }
+    ).summarizeRiskLotQueueRow({
+      lotExternalId: 'pay_risk_lot_1',
+      status: 'frozen',
+      riskStatus: 'frozen',
+      metadata: {
+        riskFrozenByUserId: 99,
+        riskFrozenAt: '2026-07-03T09:00:00.000Z',
+        riskFreezeReason: 'bank dispute signal',
+        riskResumedByUserId: 100,
+        riskResumedAt: '2026-07-04T10:00:00.000Z',
+        riskResumeNote: 'manual review cleared',
+      },
+    });
+    expect(riskLot).toMatchObject({
+      lotExternalId: 'pay_risk_lot_1',
+      riskFrozenByUserId: 99,
+      riskFrozenAt: '2026-07-03T09:00:00.000Z',
+      riskFreezeReason: 'bank dispute signal',
+      riskResumedByUserId: 100,
+      riskResumedAt: '2026-07-04T10:00:00.000Z',
+      riskResumeNote: 'manual review cleared',
+    });
+    expect(riskLot).not.toHaveProperty('metadata');
   });
 });
