@@ -7,6 +7,13 @@ the gateway returns a QR / redirect URL, the wallet calls back to
 this host, and we bridge the verified result over the internal
 shared-secret channel back to Vultr.
 
+The same `/payment/create` endpoint also serves the partner ledger
+online-payment path. For partner purchases, Vultr passes the existing
+`partner_recharge_orders.external_id` as `partnerOrderExternalId`; the
+gateway uses that value as `out_trade_no`, and verified callbacks are
+bridged to `/api/internal/partner-payment/confirm` instead of the
+legacy `/api/internal/payment/confirm`.
+
 ## Prerequisites
 
 Before deploy can finish, BOSS needs to have:
@@ -121,6 +128,10 @@ the orchestrator:
 # Phase 11 — CN payment gateway bridge
 CN_PAYMENT_URL=https://hd-pay.orangebench.tech
 INTERNAL_SHARED_SECRET=<same 64-char hex as Aliyun>
+
+# Partner ledger must also be explicitly enabled before partner
+# membership / recharge payment callbacks are accepted.
+PARTNER_LEDGER_ENABLED=true
 ```
 
 ## Smoke after deploy
@@ -136,6 +147,17 @@ INTERNAL_SHARED_SECRET=<same 64-char hex as Aliyun>
    - Toast shows "基础版 支付成功", `users.plan` flips on Vultr.
 3. Repeat for 支付宝 — different end-of-flow (new tab opens to Alipay
    gateway) but same internal-confirm bridge.
+4. From `/partner`, create a partner membership order with 微信支付:
+   - The create response should contain a real wallet QR `codeUrl`,
+     not a `partner-payment://` local placeholder.
+   - Gateway logs should show `purchase.kind=partner_membership`
+     with `outTradeNo` equal to the partner order external id.
+   - After payment, Vultr should receive
+     `/api/internal/partner-payment/confirm`, and
+     `partner_recharge_orders.status` should move to `completed`.
+5. Repeat a partner recharge order after KYC passes; the callback
+   should create the partner lot and leave the original `payments`
+   table untouched.
 
 ## Troubleshooting
 
@@ -156,3 +178,10 @@ INTERNAL_SHARED_SECRET=<same 64-char hex as Aliyun>
   "verified"** — sync POST to Vultr is failing. Check Aliyun's pm2
   logs for `sync: Vultr rejected confirm` lines; the body field has
   the upstream error.
+- **partner order still shows a `partner-payment://` URL** —
+  Vultr is missing `CN_PAYMENT_URL` or `INTERNAL_SHARED_SECRET`, so
+  the orchestrator is using the local development fallback instead of
+  calling the gateway.
+- **partner callback returns `partner_ledger_disabled`** —
+  `PARTNER_LEDGER_ENABLED=true` is missing on Vultr. The cn-payment
+  process will retry provider notifications while Vultr returns 5xx.

@@ -1,0 +1,956 @@
+import { PARTNER_MEMBERSHIP_PRICE_CNY_CENTS } from '@holaday/shared-types';
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
+import { users } from '../../db/schema/users.js';
+
+const {
+  createPendingOrderMock,
+  getActiveMembershipMock,
+  getKycProfileMock,
+  getKycStatusMock,
+  getActivitySummaryMock,
+  recordInviteMock,
+  recordDailyCheckInMock,
+  upsertKycStatusMock,
+  requestWithdrawalMock,
+} = vi.hoisted(() => ({
+  createPendingOrderMock: vi.fn(),
+  getActiveMembershipMock: vi.fn(),
+  getKycProfileMock: vi.fn(),
+  getKycStatusMock: vi.fn(),
+  getActivitySummaryMock: vi.fn(),
+  recordInviteMock: vi.fn(),
+  recordDailyCheckInMock: vi.fn(),
+  upsertKycStatusMock: vi.fn(),
+  requestWithdrawalMock: vi.fn(),
+}));
+
+vi.mock('../../partner/recharge-service.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../partner/recharge-service.js')>();
+  return {
+    ...actual,
+    RechargeService: vi.fn(() => ({
+      createPendingOrder: createPendingOrderMock,
+    })),
+  };
+});
+
+vi.mock('../../partner/kyc-service.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../partner/kyc-service.js')>();
+  return {
+    ...actual,
+    KycService: vi.fn(() => ({
+      getProfile: getKycProfileMock,
+      getStatus: getKycStatusMock,
+      upsertStatus: upsertKycStatusMock,
+    })),
+  };
+});
+
+vi.mock('../../partner/membership-service.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../partner/membership-service.js')>();
+  return {
+    ...actual,
+    PartnerMembershipService: vi.fn(() => ({
+      getActiveMembership: getActiveMembershipMock,
+    })),
+  };
+});
+
+vi.mock('../../partner/withdrawal-service.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../partner/withdrawal-service.js')>();
+  return {
+    ...actual,
+    WithdrawalService: vi.fn(() => ({
+      requestWithdrawal: requestWithdrawalMock,
+    })),
+  };
+});
+
+vi.mock('../../partner/referral-service.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../partner/referral-service.js')>();
+  return {
+    ...actual,
+    ReferralService: vi.fn(() => ({
+      recordInvite: recordInviteMock,
+    })),
+  };
+});
+
+vi.mock('../../partner/activity-service.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../partner/activity-service.js')>();
+  return {
+    ...actual,
+    PartnerActivityService: vi.fn(() => ({
+      recordDailyCheckIn: recordDailyCheckInMock,
+      getActivitySummary: getActivitySummaryMock,
+    })),
+  };
+});
+
+import {
+  RechargeGateError,
+  RechargeOrderIdempotencyConflictError,
+} from '../../partner/recharge-service.js';
+import { PartnerReferralConflictError } from '../../partner/referral-service.js';
+import {
+  WithdrawalGateError,
+  WithdrawalRequestIdempotencyConflictError,
+  WithdrawalValidationError,
+} from '../../partner/withdrawal-service.js';
+import { partnerRouter } from './partner.js';
+
+class FakeUserLookupDb {
+  readonly users: Array<{ id: number; externalId: string }>;
+  readonly selectTables: string[] = [];
+
+  constructor(usersInput: Array<{ id: number; externalId: string }> = [
+    { id: 123, externalId: 'usr_partner' },
+    { id: 456, externalId: 'usr_inviter' },
+  ]) {
+    this.users = usersInput;
+  }
+
+  select(_selection?: unknown) {
+    return {
+      from: (table: unknown) => {
+        this.selectTables.push(tableName(table));
+        return {
+          where: (predicate: unknown) => ({
+            limit: async () => {
+              if (table !== users) return [];
+              const predicateStrings = extractPredicateStrings(predicate);
+              return this.users
+                .filter((user) => predicateStrings.includes(user.externalId))
+                .slice(0, 1);
+            },
+          }),
+        };
+      },
+    };
+  }
+}
+
+function tableName(table: unknown): string {
+  return (table as Record<symbol, string> | null)?.[Symbol.for('drizzle:Name')] ?? 'unknown';
+}
+
+function extractPredicateStrings(value: unknown): string[] {
+  const strings: string[] = [];
+  const seen = new WeakSet<object>();
+
+  function visit(current: unknown, depth: number): void {
+    if (depth > 8 || current == null) return;
+    if (typeof current === 'string') {
+      strings.push(current);
+      return;
+    }
+    if (typeof current !== 'object') return;
+    if (seen.has(current)) return;
+    seen.add(current);
+
+    if (Array.isArray(current)) {
+      for (const item of current) visit(item, depth + 1);
+      return;
+    }
+
+    for (const item of Object.values(current as Record<string, unknown>)) {
+      visit(item, depth + 1);
+    }
+  }
+
+  visit(value, 0);
+  return strings;
+}
+
+function makeContext(db = new FakeUserLookupDb()) {
+  return {
+    db,
+    userId: 'usr_partner',
+    logger: {
+      info: () => undefined,
+      warn: () => undefined,
+      error: () => undefined,
+      debug: () => undefined,
+      child: () => undefined,
+    },
+  } as unknown as Parameters<typeof partnerRouter.createCaller>[0];
+}
+
+describe('partnerRouter mutations', () => {
+  const originalFlag = process.env.PARTNER_LEDGER_ENABLED;
+  const originalNodeEnv = process.env.NODE_ENV;
+  const originalCnPaymentUrl = process.env.CN_PAYMENT_URL;
+  const originalInternalSharedSecret = process.env.INTERNAL_SHARED_SECRET;
+
+  beforeEach(() => {
+    process.env.PARTNER_LEDGER_ENABLED = 'true';
+    process.env.NODE_ENV = 'test';
+    delete process.env.CN_PAYMENT_URL;
+    delete process.env.INTERNAL_SHARED_SECRET;
+    createPendingOrderMock.mockReset();
+    getActiveMembershipMock.mockReset();
+    getKycProfileMock.mockReset();
+    getKycStatusMock.mockReset();
+    getActivitySummaryMock.mockReset();
+    recordInviteMock.mockReset();
+    recordDailyCheckInMock.mockReset();
+    upsertKycStatusMock.mockReset();
+    requestWithdrawalMock.mockReset();
+  });
+
+  afterEach(() => {
+    if (originalFlag === undefined) {
+      delete process.env.PARTNER_LEDGER_ENABLED;
+    } else {
+      process.env.PARTNER_LEDGER_ENABLED = originalFlag;
+    }
+    if (originalNodeEnv === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = originalNodeEnv;
+    }
+    if (originalCnPaymentUrl === undefined) {
+      delete process.env.CN_PAYMENT_URL;
+    } else {
+      process.env.CN_PAYMENT_URL = originalCnPaymentUrl;
+    }
+    if (originalInternalSharedSecret === undefined) {
+      delete process.env.INTERNAL_SHARED_SECRET;
+    } else {
+      process.env.INTERNAL_SHARED_SECRET = originalInternalSharedSecret;
+    }
+    vi.unstubAllGlobals();
+  });
+
+  it('blocks new mutations when the partner ledger flag is disabled', async () => {
+    delete process.env.PARTNER_LEDGER_ENABLED;
+    const fakeDb = new FakeUserLookupDb();
+    const caller = partnerRouter.createCaller(makeContext(fakeDb));
+
+    await expect(
+      caller.createMembershipOrder({ idempotencyKey: 'membership-disabled' }),
+    ).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+      message: 'partner ledger is disabled',
+    });
+    await expect(
+      caller.createRechargeOrder({
+        amountCnyCents: 10_000_00,
+        idempotencyKey: 'recharge-disabled',
+      }),
+    ).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+      message: 'partner ledger is disabled',
+    });
+    await expect(
+      caller.requestWithdrawal({
+        amountCreditCents: 500_00,
+        bankAccountFingerprint: 'bank-fp-disabled',
+        idempotencyKey: 'withdrawal-disabled',
+      }),
+    ).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+      message: 'partner ledger is disabled',
+    });
+    await expect(
+      caller.recordInvite({
+        inviterExternalId: 'usr_inviter',
+      }),
+    ).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+      message: 'partner ledger is disabled',
+    });
+    await expect(caller.submitKyc({ providerRef: 'provider-disabled' })).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+      message: 'partner ledger is disabled',
+    });
+    await expect(caller.claimDailyActivity()).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+      message: 'partner ledger is disabled',
+    });
+    expect(fakeDb.selectTables).toEqual([]);
+    expect(createPendingOrderMock).not.toHaveBeenCalled();
+    expect(getActiveMembershipMock).not.toHaveBeenCalled();
+    expect(getKycStatusMock).not.toHaveBeenCalled();
+    expect(recordInviteMock).not.toHaveBeenCalled();
+    expect(recordDailyCheckInMock).not.toHaveBeenCalled();
+    expect(upsertKycStatusMock).not.toHaveBeenCalled();
+    expect(requestWithdrawalMock).not.toHaveBeenCalled();
+  });
+
+  it('creates a membership order with the fixed price and returns a pending summary', async () => {
+    const createdAt = new Date('2026-07-10T10:00:00.000Z');
+    createPendingOrderMock.mockResolvedValueOnce({
+      externalId: 'payment_membership_1',
+      provider: 'wechat',
+      orderKind: 'membership',
+      amountCnyCents: PARTNER_MEMBERSHIP_PRICE_CNY_CENTS,
+      status: 'pending',
+      createdAt,
+    });
+
+    await expect(
+      partnerRouter.createCaller(makeContext()).createMembershipOrder({
+        provider: 'wechat',
+        idempotencyKey: 'membership-idem-1',
+      }),
+    ).resolves.toMatchObject({
+      orderExternalId: 'payment_membership_1',
+      provider: 'wechat',
+      orderKind: 'membership',
+      amountCnyCents: PARTNER_MEMBERSHIP_PRICE_CNY_CENTS,
+      status: 'pending',
+      paymentIntent: {
+        provider: 'wechat',
+        mode: 'qr',
+        codeUrl: expect.stringContaining('payment_membership_1'),
+        expiresAt: new Date('2026-07-10T10:30:00.000Z'),
+      },
+    });
+    expect(createPendingOrderMock).toHaveBeenCalledWith({
+      userId: 123,
+      provider: 'wechat',
+      orderKind: 'membership',
+      amountCnyCents: PARTNER_MEMBERSHIP_PRICE_CNY_CENTS,
+      idempotencyKey: 'membership-idem-1',
+    });
+  });
+
+  it('creates an online membership payment through the cn-payment gateway when configured', async () => {
+    process.env.CN_PAYMENT_URL = 'https://pay.example.test/';
+    process.env.INTERNAL_SHARED_SECRET = 'internal-secret';
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        provider: 'wechat',
+        outTradeNo: 'payment_membership_1',
+        codeUrl: 'weixin://wxpay/bizpayurl?pr=partner',
+        amountCents: PARTNER_MEMBERSHIP_PRICE_CNY_CENTS,
+        description: 'HOLA DAY 合伙人年费',
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    createPendingOrderMock.mockResolvedValueOnce({
+      externalId: 'payment_membership_1',
+      provider: 'wechat',
+      orderKind: 'membership',
+      amountCnyCents: PARTNER_MEMBERSHIP_PRICE_CNY_CENTS,
+      status: 'pending',
+      createdAt: new Date('2026-07-10T10:00:00.000Z'),
+    });
+
+    await expect(
+      partnerRouter.createCaller(makeContext()).createMembershipOrder({
+        provider: 'wechat',
+        idempotencyKey: 'membership-online',
+      }),
+    ).resolves.toMatchObject({
+      orderExternalId: 'payment_membership_1',
+      paymentIntent: {
+        provider: 'wechat',
+        mode: 'qr',
+        codeUrl: 'weixin://wxpay/bizpayurl?pr=partner',
+        expiresAt: new Date('2026-07-10T10:30:00.000Z'),
+      },
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith('https://pay.example.test/payment/create', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-internal-secret': 'internal-secret',
+      },
+      body: JSON.stringify({
+        provider: 'wechat',
+        userId: 'usr_partner',
+        purchase: {
+          kind: 'partner_membership',
+          partnerOrderExternalId: 'payment_membership_1',
+          amountCnyCents: PARTNER_MEMBERSHIP_PRICE_CNY_CENTS,
+        },
+      }),
+    });
+  });
+
+  it('trims idempotency keys before creating membership orders', async () => {
+    createPendingOrderMock.mockResolvedValueOnce({
+      externalId: 'payment_membership_1',
+      provider: 'manual',
+      orderKind: 'membership',
+      amountCnyCents: PARTNER_MEMBERSHIP_PRICE_CNY_CENTS,
+      status: 'pending',
+    });
+
+    await partnerRouter.createCaller(makeContext()).createMembershipOrder({
+      idempotencyKey: '  membership-idem-trimmed  ',
+    });
+
+    expect(createPendingOrderMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        idempotencyKey: 'membership-idem-trimmed',
+      }),
+    );
+  });
+
+  it('maps recharge membership and KYC gate failures to precondition errors', async () => {
+    const caller = partnerRouter.createCaller(makeContext());
+    createPendingOrderMock.mockRejectedValueOnce(new RechargeGateError('membership_required'));
+    createPendingOrderMock.mockRejectedValueOnce(new RechargeGateError('kyc_required'));
+
+    await expect(
+      caller.createRechargeOrder({
+        amountCnyCents: 10_000_00,
+        idempotencyKey: 'recharge-membership-gate',
+      }),
+    ).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+      message: 'partner membership required',
+    });
+    await expect(
+      caller.createRechargeOrder({
+        amountCnyCents: 10_000_00,
+        idempotencyKey: 'recharge-kyc-gate',
+      }),
+    ).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+      message: 'partner KYC must be passed before recharge',
+    });
+  });
+
+  it('returns a recharge pending summary when the service succeeds', async () => {
+    const createdAt = new Date('2026-07-10T11:00:00.000Z');
+    createPendingOrderMock.mockResolvedValueOnce({
+      externalId: 'payment_recharge_1',
+      provider: 'alipay',
+      orderKind: 'recharge',
+      amountCnyCents: 10_000_00,
+      status: 'pending',
+      createdAt,
+    });
+
+    await expect(
+      partnerRouter.createCaller(makeContext()).createRechargeOrder({
+        amountCnyCents: 10_000_00,
+        provider: 'alipay',
+        idempotencyKey: 'recharge-idem-1',
+      }),
+    ).resolves.toMatchObject({
+      orderExternalId: 'payment_recharge_1',
+      provider: 'alipay',
+      orderKind: 'recharge',
+      amountCnyCents: 10_000_00,
+      status: 'pending',
+      paymentIntent: {
+        provider: 'alipay',
+        mode: 'redirect',
+        payUrl: expect.stringContaining('payment_recharge_1'),
+        expiresAt: new Date('2026-07-10T11:30:00.000Z'),
+      },
+    });
+    expect(createPendingOrderMock).toHaveBeenCalledWith({
+      userId: 123,
+      provider: 'alipay',
+      orderKind: 'recharge',
+      amountCnyCents: 10_000_00,
+      idempotencyKey: 'recharge-idem-1',
+    });
+  });
+
+  it('rejects non-integer recharge amounts before calling the service', async () => {
+    await expect(
+      partnerRouter.createCaller(makeContext()).createRechargeOrder({
+        amountCnyCents: 10_000_00.5,
+        idempotencyKey: 'recharge-fractional',
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(createPendingOrderMock).not.toHaveBeenCalled();
+  });
+
+  it('maps recharge validation and idempotency errors', async () => {
+    const caller = partnerRouter.createCaller(makeContext());
+    createPendingOrderMock.mockRejectedValueOnce(new RangeError('below_minimum'));
+    createPendingOrderMock.mockRejectedValueOnce(new RechargeOrderIdempotencyConflictError());
+
+    await expect(
+      caller.createRechargeOrder({
+        amountCnyCents: 9_999_00,
+        idempotencyKey: 'recharge-range-error',
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST', message: 'below_minimum' });
+    await expect(
+      caller.createRechargeOrder({
+        amountCnyCents: 10_000_00,
+        idempotencyKey: 'recharge-conflict',
+      }),
+    ).rejects.toMatchObject({ code: 'CONFLICT' });
+  });
+
+  it('sanitizes unknown recharge service errors', async () => {
+    createPendingOrderMock.mockRejectedValueOnce(new Error('database stack details'));
+
+    await expect(
+      partnerRouter.createCaller(makeContext()).createRechargeOrder({
+        amountCnyCents: 10_000_00,
+        idempotencyKey: 'recharge-unknown-error',
+      }),
+    ).rejects.toMatchObject({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: 'failed to create partner recharge order',
+    });
+  });
+
+  it('records an invite for the current user from an inviter external id', async () => {
+    recordInviteMock.mockResolvedValueOnce({
+      externalId: 'payment_referral_1',
+      inviterUserId: 456,
+      inviteeUserId: 123,
+      status: 'pending',
+      assisted: 1,
+    });
+
+    await expect(
+      partnerRouter.createCaller(makeContext()).recordInvite({
+        inviterExternalId: '  usr_inviter  ',
+        assisted: true,
+      }),
+    ).resolves.toEqual({
+      referralExternalId: 'payment_referral_1',
+      inviterExternalId: 'usr_inviter',
+      inviteeExternalId: 'usr_partner',
+      status: 'pending',
+      assisted: true,
+    });
+    expect(recordInviteMock).toHaveBeenCalledWith({
+      inviterUserId: 456,
+      inviteeUserId: 123,
+      assisted: true,
+    });
+  });
+
+  it('claims daily activity after membership is active and returns the updated summary', async () => {
+    getActiveMembershipMock.mockResolvedValueOnce({
+      id: 55,
+      userId: 123,
+      status: 'active',
+      expiresAt: new Date('2027-07-03T00:00:00.000Z'),
+    });
+    recordDailyCheckInMock.mockResolvedValueOnce({
+      externalId: 'payment_activity_1',
+      userId: 123,
+      activityDate: '2026-07-03',
+      eventType: 'daily_checkin',
+      points: 1,
+    });
+    getActivitySummaryMock.mockResolvedValueOnce({
+      activityDate: '2026-07-03',
+      checkedInToday: true,
+      loginDays: 3,
+      completedTasks: 0,
+      validInvites: 0,
+      activityFactorBps: 10_300,
+    });
+
+    await expect(partnerRouter.createCaller(makeContext()).claimDailyActivity()).resolves.toEqual({
+      activityDate: '2026-07-03',
+      checkedInToday: true,
+      loginDays: 3,
+      completedTasks: 0,
+      validInvites: 0,
+      activityFactorBps: 10_300,
+    });
+    expect(getActiveMembershipMock).toHaveBeenCalledWith(123);
+    expect(recordDailyCheckInMock).toHaveBeenCalledWith({ userId: 123 });
+    expect(getActivitySummaryMock).toHaveBeenCalledWith(123);
+  });
+
+  it('blocks daily activity before membership is active', async () => {
+    getActiveMembershipMock.mockResolvedValueOnce(null);
+
+    await expect(partnerRouter.createCaller(makeContext()).claimDailyActivity()).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+      message: 'partner membership required',
+    });
+    expect(recordDailyCheckInMock).not.toHaveBeenCalled();
+    expect(getActivitySummaryMock).not.toHaveBeenCalled();
+  });
+
+  it('submits provider-backed bank card KYC as passed after membership is active', async () => {
+    const reviewedAt = new Date('2026-07-03T02:30:00.000Z');
+    getActiveMembershipMock.mockResolvedValueOnce({
+      id: 55,
+      userId: 123,
+      status: 'active',
+      expiresAt: new Date('2027-07-03T00:00:00.000Z'),
+    });
+    getKycStatusMock.mockResolvedValueOnce('not_started');
+    upsertKycStatusMock.mockResolvedValueOnce({
+      externalId: 'payment_kyc_1',
+      userId: 123,
+      status: 'passed',
+      country: 'CN',
+      provider: 'cn-bankcard',
+      providerRef: 'bankcard-flow-1',
+      bankCardHash: 'bank_hash_123',
+      reviewedAt,
+    });
+
+    await expect(
+      partnerRouter.createCaller(makeContext()).submitKyc({
+        providerRef: '  bankcard-flow-1  ',
+        bankAccountFingerprint: '  bank_hash_123  ',
+      }),
+    ).resolves.toEqual({
+      kycExternalId: 'payment_kyc_1',
+      status: 'passed',
+      country: 'CN',
+      provider: 'cn-bankcard',
+      providerRef: 'bankcard-flow-1',
+      bankCardVerified: true,
+      reviewedAt,
+    });
+    expect(getActiveMembershipMock).toHaveBeenCalledWith(123);
+    expect(getKycStatusMock).toHaveBeenCalledWith(123);
+    expect(upsertKycStatusMock).toHaveBeenCalledWith({
+      userId: 123,
+      status: 'passed',
+      provider: 'cn-bankcard',
+      providerRef: 'bankcard-flow-1',
+      bankCardHash: 'bank_hash_123',
+      note: 'same-name bank card verified by provider',
+    });
+  });
+
+  it('falls back to KYC review_required when provider evidence is incomplete', async () => {
+    const reviewedAt = new Date('2026-07-03T03:00:00.000Z');
+    getActiveMembershipMock.mockResolvedValueOnce({
+      id: 55,
+      userId: 123,
+      status: 'active',
+      expiresAt: new Date('2027-07-03T00:00:00.000Z'),
+    });
+    getKycStatusMock.mockResolvedValueOnce('not_started');
+    upsertKycStatusMock.mockResolvedValueOnce({
+      externalId: 'payment_kyc_review',
+      userId: 123,
+      status: 'review_required',
+      country: 'CN',
+      provider: 'cn-bankcard',
+      providerRef: null,
+      bankCardHash: 'bank_hash_123',
+      reviewedAt,
+    });
+
+    await expect(
+      partnerRouter.createCaller(makeContext()).submitKyc({
+        bankAccountFingerprint: 'bank_hash_123',
+      }),
+    ).resolves.toEqual({
+      kycExternalId: 'payment_kyc_review',
+      status: 'review_required',
+      country: 'CN',
+      provider: 'cn-bankcard',
+      providerRef: null,
+      bankCardVerified: true,
+      reviewedAt,
+    });
+    expect(upsertKycStatusMock).toHaveBeenCalledWith({
+      userId: 123,
+      status: 'review_required',
+      provider: 'cn-bankcard',
+      providerRef: null,
+      bankCardHash: 'bank_hash_123',
+      note: 'cn bank card provider reference missing; manual review required',
+    });
+  });
+
+  it('does not auto-pass client supplied provider references in production', async () => {
+    process.env.NODE_ENV = 'production';
+    const reviewedAt = new Date('2026-07-03T03:30:00.000Z');
+    getActiveMembershipMock.mockResolvedValueOnce({
+      id: 55,
+      userId: 123,
+      status: 'active',
+      expiresAt: new Date('2027-07-03T00:00:00.000Z'),
+    });
+    getKycStatusMock.mockResolvedValueOnce('not_started');
+    upsertKycStatusMock.mockResolvedValueOnce({
+      externalId: 'payment_kyc_prod_review',
+      userId: 123,
+      status: 'review_required',
+      country: 'CN',
+      provider: 'cn-bankcard',
+      providerRef: 'bankcard-flow-prod',
+      bankCardHash: 'bank_hash_prod',
+      reviewedAt,
+    });
+
+    await expect(
+      partnerRouter.createCaller(makeContext()).submitKyc({
+        providerRef: 'bankcard-flow-prod',
+        bankAccountFingerprint: 'bank_hash_prod',
+      }),
+    ).resolves.toEqual({
+      kycExternalId: 'payment_kyc_prod_review',
+      status: 'review_required',
+      country: 'CN',
+      provider: 'cn-bankcard',
+      providerRef: 'bankcard-flow-prod',
+      bankCardVerified: true,
+      reviewedAt,
+    });
+    expect(upsertKycStatusMock).toHaveBeenCalledWith({
+      userId: 123,
+      status: 'review_required',
+      provider: 'cn-bankcard',
+      providerRef: 'bankcard-flow-prod',
+      bankCardHash: 'bank_hash_prod',
+      note: 'cn bank card provider reference requires server verification; manual review required',
+    });
+  });
+
+  it('blocks KYC submission before membership and does not regress passed KYC', async () => {
+    getActiveMembershipMock.mockResolvedValueOnce(null);
+    await expect(
+      partnerRouter.createCaller(makeContext()).submitKyc({}),
+    ).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+      message: 'partner membership required',
+    });
+    expect(upsertKycStatusMock).not.toHaveBeenCalled();
+
+    getActiveMembershipMock.mockResolvedValueOnce({
+      id: 55,
+      userId: 123,
+      status: 'active',
+      expiresAt: new Date('2027-07-03T00:00:00.000Z'),
+    });
+    getKycStatusMock.mockResolvedValueOnce('passed');
+    await expect(
+      partnerRouter.createCaller(makeContext()).submitKyc({}),
+    ).rejects.toMatchObject({
+      code: 'CONFLICT',
+      message: 'partner KYC already passed',
+    });
+    expect(upsertKycStatusMock).not.toHaveBeenCalled();
+  });
+
+  it('maps missing inviter and referral conflicts for invite recording', async () => {
+    await expect(
+      partnerRouter.createCaller(makeContext(new FakeUserLookupDb([{ id: 123, externalId: 'usr_partner' }]))).recordInvite({
+        inviterExternalId: 'usr_missing',
+      }),
+    ).rejects.toMatchObject({
+      code: 'BAD_REQUEST',
+      message: 'inviter user was not found',
+    });
+    expect(recordInviteMock).not.toHaveBeenCalled();
+
+    recordInviteMock.mockRejectedValueOnce(new PartnerReferralConflictError());
+    await expect(
+      partnerRouter.createCaller(makeContext()).recordInvite({
+        inviterExternalId: 'usr_inviter',
+      }),
+    ).rejects.toMatchObject({
+      code: 'CONFLICT',
+      message: 'partner referral attribution conflict',
+    });
+  });
+
+  it('derives normal-risk withdrawal requests when the bank fingerprint matches KYC', async () => {
+    const reviewDueAt = new Date('2026-04-15T00:00:00.000Z');
+    getKycProfileMock.mockResolvedValueOnce({
+      status: 'passed',
+      bankCardHash: 'bank-fp-1',
+    });
+    requestWithdrawalMock.mockResolvedValueOnce({
+      externalId: 'payment_withdrawal_1',
+      amountCreditCents: 1_000_00,
+      status: 'requested',
+      reviewDueAt,
+      riskScore: 0,
+    });
+
+    await expect(
+      partnerRouter.createCaller(makeContext()).requestWithdrawal({
+        amountCreditCents: 1_000_00,
+        bankAccountFingerprint: 'bank-fp-1',
+        idempotencyKey: 'withdrawal-idem-1',
+      }),
+    ).resolves.toEqual({
+      withdrawalExternalId: 'payment_withdrawal_1',
+      amountCreditCents: 1_000_00,
+      status: 'requested',
+      reviewDueAt,
+      riskScore: 0,
+    });
+    expect(getKycProfileMock).toHaveBeenCalledWith(123);
+    expect(requestWithdrawalMock).toHaveBeenCalledWith({
+      userId: 123,
+      amountCreditCents: 1_000_00,
+      bankAccountFingerprint: 'bank-fp-1',
+      highRisk: false,
+      riskScore: 0,
+      idempotencyKey: 'withdrawal-idem-1',
+    });
+  });
+
+  it('trims withdrawal string inputs and rejects non-integer amounts before the service', async () => {
+    const reviewDueAt = new Date('2026-04-15T00:00:00.000Z');
+    getKycProfileMock.mockResolvedValueOnce({
+      status: 'passed',
+      bankCardHash: 'bank-fp-trimmed',
+    });
+    requestWithdrawalMock.mockResolvedValueOnce({
+      externalId: 'payment_withdrawal_1',
+      amountCreditCents: 1_000_00,
+      status: 'requested',
+      reviewDueAt,
+      riskScore: 0,
+    });
+
+    await partnerRouter.createCaller(makeContext()).requestWithdrawal({
+      amountCreditCents: 1_000_00,
+      bankAccountFingerprint: '  bank-fp-trimmed  ',
+      idempotencyKey: '  withdrawal-idem-trimmed  ',
+    });
+    expect(requestWithdrawalMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bankAccountFingerprint: 'bank-fp-trimmed',
+        idempotencyKey: 'withdrawal-idem-trimmed',
+      }),
+    );
+
+    await expect(
+      partnerRouter.createCaller(makeContext()).requestWithdrawal({
+        amountCreditCents: 500_00.5,
+        bankAccountFingerprint: 'bank-fp-fractional',
+        idempotencyKey: 'withdrawal-fractional',
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(requestWithdrawalMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('maps withdrawal gate, validation, and idempotency errors', async () => {
+    const caller = partnerRouter.createCaller(makeContext());
+    getKycProfileMock.mockResolvedValue({
+      status: 'passed',
+      bankCardHash: 'bank-fp-membership',
+    });
+    requestWithdrawalMock.mockRejectedValueOnce(new WithdrawalGateError('membership_required'));
+    requestWithdrawalMock.mockRejectedValueOnce(new WithdrawalGateError('kyc_required'));
+    requestWithdrawalMock.mockRejectedValueOnce(new WithdrawalGateError('bank_account_required'));
+    requestWithdrawalMock.mockRejectedValueOnce(new WithdrawalGateError('bank_account_mismatch'));
+    requestWithdrawalMock.mockRejectedValueOnce(new WithdrawalGateError('bank_card_cooling_down'));
+    requestWithdrawalMock.mockRejectedValueOnce(new WithdrawalGateError('risk_frozen'));
+    requestWithdrawalMock.mockRejectedValueOnce(new WithdrawalValidationError('below_minimum'));
+    requestWithdrawalMock.mockRejectedValueOnce(
+      new WithdrawalValidationError('insufficient_withdrawable_credit'),
+    );
+    requestWithdrawalMock.mockRejectedValueOnce(new WithdrawalRequestIdempotencyConflictError());
+
+    await expect(
+      caller.requestWithdrawal({
+        amountCreditCents: 500_00,
+        bankAccountFingerprint: 'bank-fp-membership',
+        idempotencyKey: 'withdrawal-membership-gate',
+      }),
+    ).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+      message: 'partner membership required',
+    });
+    await expect(
+      caller.requestWithdrawal({
+        amountCreditCents: 500_00,
+        bankAccountFingerprint: 'bank-fp-kyc',
+        idempotencyKey: 'withdrawal-kyc-gate',
+      }),
+    ).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+      message: 'partner KYC must be passed before withdrawal',
+    });
+    await expect(
+      caller.requestWithdrawal({
+        amountCreditCents: 500_00,
+        bankAccountFingerprint: 'bank-fp-required',
+        idempotencyKey: 'withdrawal-bank-required',
+      }),
+    ).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+      message: 'partner withdrawal requires a verified bank account',
+    });
+    await expect(
+      caller.requestWithdrawal({
+        amountCreditCents: 500_00,
+        bankAccountFingerprint: 'bank-fp-mismatch',
+        idempotencyKey: 'withdrawal-bank-mismatch',
+      }),
+    ).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+      message: 'partner withdrawal bank account must match KYC bank card',
+    });
+    await expect(
+      caller.requestWithdrawal({
+        amountCreditCents: 500_00,
+        bankAccountFingerprint: 'bank-fp-cooldown',
+        idempotencyKey: 'withdrawal-bank-cooldown',
+      }),
+    ).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+      message: 'partner withdrawal bank account is cooling down',
+    });
+    await expect(
+      caller.requestWithdrawal({
+        amountCreditCents: 500_00,
+        bankAccountFingerprint: 'bank-fp-risk-frozen',
+        idempotencyKey: 'withdrawal-risk-frozen',
+      }),
+    ).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+      message: 'partner withdrawal is frozen by risk control',
+    });
+    await expect(
+      caller.requestWithdrawal({
+        amountCreditCents: 499_00,
+        bankAccountFingerprint: 'bank-fp-below-minimum',
+        idempotencyKey: 'withdrawal-below-minimum',
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST', message: 'below_minimum' });
+    await expect(
+      caller.requestWithdrawal({
+        amountCreditCents: 10_000_00,
+        bankAccountFingerprint: 'bank-fp-insufficient',
+        idempotencyKey: 'withdrawal-insufficient',
+      }),
+    ).rejects.toMatchObject({
+      code: 'BAD_REQUEST',
+      message: 'insufficient_withdrawable_credit',
+    });
+    await expect(
+      caller.requestWithdrawal({
+        amountCreditCents: 500_00,
+        bankAccountFingerprint: 'bank-fp-conflict',
+        idempotencyKey: 'withdrawal-conflict',
+      }),
+    ).rejects.toMatchObject({ code: 'CONFLICT' });
+  });
+
+  it('sanitizes unknown withdrawal service errors', async () => {
+    getKycProfileMock.mockResolvedValueOnce({
+      status: 'passed',
+      bankCardHash: 'bank-fp-unknown-error',
+    });
+    requestWithdrawalMock.mockRejectedValueOnce(new Error('withdrawal stack details'));
+
+    await expect(
+      partnerRouter.createCaller(makeContext()).requestWithdrawal({
+        amountCreditCents: 500_00,
+        bankAccountFingerprint: 'bank-fp-unknown-error',
+        idempotencyKey: 'withdrawal-unknown-error',
+      }),
+    ).rejects.toMatchObject({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: 'failed to request partner withdrawal',
+    });
+  });
+});

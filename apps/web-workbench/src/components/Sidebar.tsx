@@ -20,6 +20,7 @@ import {
   Sparkles,
   Trash2,
   TrendingUp,
+  Wallet,
   X,
 } from 'lucide-react';
 import * as React from 'react';
@@ -58,6 +59,10 @@ import {
   deletableTaskIdsForBatchSelection,
   pruneBatchSelection,
 } from '@/lib/sidebar-batch-selection';
+import {
+  filterSidebarFeatureNavItems,
+  isPartnerNavEnabled,
+} from '@/lib/sidebar-feature-nav';
 import type { ProjectFilterChipState } from '@/lib/project-task-filter-state';
 import { cn } from '@/lib/utils';
 import { useTaskStore } from '@/stores/task-store';
@@ -971,6 +976,7 @@ interface FeatureItem {
 const FEATURES: readonly FeatureItem[] = [
   { icon: Sparkles, label: '技能', href: '/skills' },
   { icon: TrendingUp, label: '股市任务', href: '/stocks' },
+  { icon: Wallet, label: '合伙人计划', href: '/partner' },
   { icon: MoonStar, label: '今日能量', href: '/cosmic' },
   { icon: Clapperboard, label: '创建视频', href: '/video' },
   { icon: ImagePlus, label: '创作图片', href: '/image' },
@@ -1001,9 +1007,10 @@ function FeatureNav({ userRole }: { userRole: 'user' | 'admin' }): JSX.Element {
     <SidebarGroup className="shrink-0 border-b border-[#DCDDDD]/70 dark:border-white/10">
       <SidebarGroupContent>
         <SidebarMenu>
-          {FEATURES.filter(
-            (feature) => feature.href !== '/cosmic' || isCosmicEnabled(),
-          ).map(({ icon: Icon, label, href }) => {
+          {filterSidebarFeatureNavItems(FEATURES, {
+            cosmicEnabled: isCosmicEnabled(),
+            partnerEnabled: isPartnerNavEnabled(),
+          }).map(({ icon: Icon, label, href }) => {
             if (href) {
               const isActive = pathname === href;
               return (

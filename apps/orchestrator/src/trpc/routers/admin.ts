@@ -28,6 +28,7 @@ import { users } from '../../db/schema/users.js';
 import { adminProcedure, router } from '../trpc.js';
 import { adminFinanceRouter } from './admin-finance.js';
 import { adminLearningRouter } from './admin-learning.js';
+import { adminPartnerRouter } from './admin-partner.js';
 
 /** Start of the Beijing day that contains `at`, expressed as a UTC instant. */
 function beijingDayStartUtc(at: Date, daysAgo = 0): Date {
@@ -582,6 +583,8 @@ export const adminRouter = router({
 
   // Phase 27B — nested finance namespace (revenue + cost).
   finance: adminFinanceRouter,
+  // Phase 28 — partner ledger operations review queue.
+  partner: adminPartnerRouter,
   // Phase 27C — nested learning namespace (per-domain stats).
   learning: adminLearningRouter,
 });

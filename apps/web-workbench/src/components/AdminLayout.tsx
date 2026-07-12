@@ -17,7 +17,7 @@
  * pages get the resolved `me` via `useOutletContext`.
  */
 
-import { LayoutDashboard, LogOut, Users, BarChart3, GraduationCap, type LucideIcon } from 'lucide-react';
+import { LayoutDashboard, LogOut, Users, BarChart3, GraduationCap, ShieldCheck, type LucideIcon } from 'lucide-react';
 import * as React from 'react';
 import { Link, Navigate, Outlet, useLocation } from 'react-router-dom';
 import { BrandIcon, BrandWordmark } from '@/components/BrandLogo';
@@ -144,6 +144,12 @@ function AdminSideNav({ me }: { me: AdminMe }): JSX.Element {
           label="营收与成本"
           to="/admin/finance"
           active={pathname.startsWith('/admin/finance')}
+        />
+        <AdminNavItem
+          icon={ShieldCheck}
+          label="合伙人审核"
+          to="/admin/partners"
+          active={pathname.startsWith('/admin/partners')}
         />
         <AdminNavItem
           icon={GraduationCap}

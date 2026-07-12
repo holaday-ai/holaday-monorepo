@@ -7,6 +7,7 @@ import {
   RouteLoadingFallback,
 } from '@/components/LazyLoadBoundary';
 import { ToastProvider } from '@/components/ui/toast';
+import { partnerWorkbenchRedirectTarget, type PartnerWorkbenchSection } from '@/lib/partner-page-state';
 import { LoginPage } from '@/pages/LoginPage';
 import { RedirectIfAuthed } from '@/pages/RedirectIfAuthed';
 import { RegisterPage } from '@/pages/RegisterPage';
@@ -19,6 +20,7 @@ const AdminLearningDomainPage = lazyRoute(
   'AdminLearningDomainPage',
 );
 const AdminLearningPage = lazyRoute(() => import('@/pages/admin/AdminLearningPage'), 'AdminLearningPage');
+const AdminPartnerReviewPage = lazyRoute(() => import('@/pages/admin/AdminPartnerReviewPage'), 'AdminPartnerReviewPage');
 const AdminUserDetailPage = lazyRoute(() => import('@/pages/admin/AdminUserDetailPage'), 'AdminUserDetailPage');
 const AdminUsersPage = lazyRoute(() => import('@/pages/admin/AdminUsersPage'), 'AdminUsersPage');
 const AstrologyPage = lazyRoute(() => import('@/pages/AstrologyPage'), 'AstrologyPage');
@@ -28,6 +30,7 @@ const ConnectionsPage = lazyRoute(() => import('@/pages/ConnectionsPage'), 'Conn
 const FilesPage = lazyRoute(() => import('@/pages/FilesPage'), 'FilesPage');
 const HistoryPage = lazyRoute(() => import('@/pages/HistoryPage'), 'HistoryPage');
 const NotFoundPage = lazyRoute(() => import('@/pages/NotFoundPage'), 'NotFoundPage');
+const PartnerPage = lazyRoute(() => import('@/pages/PartnerPage'), 'PartnerPage');
 const PlanPage = lazyRoute(() => import('@/pages/PlanPage'), 'PlanPage');
 const PrivacyPage = lazyRoute(() => import('@/pages/PrivacyPage'), 'PrivacyPage');
 const ProfilePage = lazyRoute(() => import('@/pages/ProfilePage'), 'ProfilePage');
@@ -123,6 +126,7 @@ export function App(): JSX.Element {
           <Route path="/admin/users" element={lazyElement(<AdminUsersPage />)} />
           <Route path="/admin/users/:userId" element={lazyElement(<AdminUserDetailPage />)} />
           <Route path="/admin/finance" element={lazyElement(<AdminFinancePage />)} />
+          <Route path="/admin/partners" element={lazyElement(<AdminPartnerReviewPage />)} />
           <Route path="/admin/learning" element={lazyElement(<AdminLearningPage />)} />
           <Route path="/admin/learning/:domain" element={lazyElement(<AdminLearningDomainPage />)} />
         </Route>
@@ -132,6 +136,10 @@ export function App(): JSX.Element {
           <Route path="/profile" element={lazyElement(<ProfilePage />)} />
           <Route path="/settings" element={lazyElement(<SettingsPage />)} />
           <Route path="/settings/roles" element={lazyElement(<RolesPage />)} />
+          <Route path="/partner" element={lazyElement(<PartnerPage />)} />
+          <Route path="/partner/recharge" element={<PartnerWorkbenchSectionRedirect section="recharge" />} />
+          <Route path="/partner/ledger" element={<PartnerWorkbenchSectionRedirect section="ledger" />} />
+          <Route path="/partner/withdraw" element={<PartnerWorkbenchSectionRedirect section="withdraw" />} />
           <Route path="/plan" element={lazyElement(<PlanPage />)} />
           <Route path="/billing" element={lazyElement(<BillingPage />)} />
           <Route path="/usage" element={lazyElement(<UsagePage />)} />
@@ -195,6 +203,17 @@ function LegacySettingsSectionRedirect({ section }: { section: string }): JSX.El
   return (
     <Navigate
       to={{ pathname: '/settings', search: location.search, hash: `#${section}` }}
+      replace
+    />
+  );
+}
+
+function PartnerWorkbenchSectionRedirect({ section }: { section: PartnerWorkbenchSection }): JSX.Element {
+  const location = useLocation();
+  const target = partnerWorkbenchRedirectTarget(section);
+  return (
+    <Navigate
+      to={{ pathname: target.pathname, search: location.search, hash: target.hash }}
       replace
     />
   );

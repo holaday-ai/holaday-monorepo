@@ -41,6 +41,14 @@ import {
   uploadByteLimit,
 } from './files/file-service.js';
 import { nextExpiryFor, type PayPalAdapter, type PlanId } from './payment/index.js';
+import {
+  PartnerPaymentConfirmConflictError,
+  PartnerPaymentConfirmReviewRequiredError,
+  PartnerPaymentConfirmService,
+  PartnerPaymentProviderCaptureConflictError,
+  validatePartnerPaymentConfirmHttpRequest,
+} from './partner/payment-confirm-service.js';
+import { partnerConfig } from './partner/partner-config.js';
 import { QuotaService } from './quota/quota-service.js';
 import {
   ADDON_PACK_CATALOGUE,
@@ -1005,6 +1013,71 @@ export function createHttpApp(deps: HttpAppDeps) {
   // — the trailing slash on the upstream URL is what strips it).
   // External callers still hit https://holaday.ai/api/internal/...,
   // and the gateway's `VULTR_INTERNAL_URL` keeps that public form.
+  app.post('/internal/partner-payment/confirm', async (req, res) => {
+    const validation = validatePartnerPaymentConfirmHttpRequest({
+      expectedSecret: process.env.INTERNAL_SHARED_SECRET,
+      providedSecret: req.headers['x-internal-secret'],
+      partnerLedgerEnabled: partnerConfig().enabled,
+      body: req.body,
+    });
+
+    if (!validation.ok) {
+      if (validation.error === 'internal_secret_not_configured') {
+        logger.error('partner-internal-confirm: INTERNAL_SHARED_SECRET unset — refusing all calls');
+      } else if (validation.error === 'unauthorized') {
+        const provided = req.headers['x-internal-secret'];
+        logger.warn(
+          { presentedLength: typeof provided === 'string' ? provided.length : -1 },
+          'partner-internal-confirm: shared-secret mismatch',
+        );
+      } else if (validation.error === 'partner_ledger_disabled') {
+        logger.warn('partner-internal-confirm: partner ledger disabled');
+      }
+      res.status(validation.statusCode).json({ error: validation.error });
+      return;
+    }
+
+    try {
+      const result = await new PartnerPaymentConfirmService(db).confirmCapturedOrder({
+        orderExternalId: validation.input.orderExternalId,
+        provider: validation.input.provider,
+        providerCaptureId: validation.input.providerCaptureId,
+        amountCnyCents: validation.input.amountCnyCents,
+      });
+      const { ok: _ok, ...payload } = result;
+      res.status(200).json({ ok: true, ...payload });
+    } catch (err) {
+      if (err instanceof RangeError) {
+        res.status(400).json({ error: 'invalid_partner_payment_confirm' });
+        return;
+      }
+      if (err instanceof PartnerPaymentConfirmReviewRequiredError) {
+        logger.warn(
+          { err: err.message, orderExternalId: err.orderExternalId },
+          'partner-internal-confirm: review required',
+        );
+        res.status(409).json({ error: 'partner_payment_review_required' });
+        return;
+      }
+      if (
+        err instanceof PartnerPaymentConfirmConflictError ||
+        err instanceof PartnerPaymentProviderCaptureConflictError
+      ) {
+        logger.warn(
+          { err: err.message },
+          'partner-internal-confirm: confirmation rejected',
+        );
+        res.status(409).json({ error: 'partner_payment_confirm_conflict' });
+        return;
+      }
+      logger.error(
+        { err: err instanceof Error ? err.message : String(err) },
+        'partner-internal-confirm: handler crashed',
+      );
+      res.status(500).json({ error: 'internal_error' });
+    }
+  });
+
   app.post('/internal/payment/confirm', async (req, res) => {
     const expectedSecret = process.env.INTERNAL_SHARED_SECRET;
     if (!expectedSecret) {

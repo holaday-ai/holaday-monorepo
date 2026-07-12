@@ -12,6 +12,7 @@ import {
   notificationChannelsRouter,
   notificationsRouter,
 } from './routers/notifications.js';
+import { partnerRouter } from './routers/partner.js';
 import { paymentRouter } from './routers/payment.js';
 import { projectsRouter } from './routers/projects.js';
 import { quotaRouter } from './routers/quota.js';
@@ -50,6 +51,7 @@ export const appRouter = router({
   usage: usageRouter,
   notifications: notificationsRouter,
   notificationChannels: notificationChannelsRouter,
+  partner: partnerRouter,
   admin: adminRouter,
   watchlists: watchlistsRouter,
   videoOnboarding: videoOnboardingRouter,
