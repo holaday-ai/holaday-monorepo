@@ -70,8 +70,6 @@ export async function downloadFileAuthed(
     setTimeout(() => URL.revokeObjectURL(objectUrl), 5_000);
     return { ok: true, status: res.status, message: 'ok' };
   } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error('[downloadFileAuthed] failed', err);
     return {
       ok: false,
       status: null,

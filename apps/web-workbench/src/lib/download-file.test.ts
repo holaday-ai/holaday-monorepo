@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   downloadFailureMessage,
+  downloadFileAuthed,
   fetchFileBlobAuthed,
   safeDownloadFilename,
 } from './download-file';
@@ -48,6 +49,27 @@ describe('fetchFileBlobAuthed', () => {
     }));
 
     const result = await fetchFileBlobAuthed({ url: '/api/files/stale/download' });
+
+    expect(result).toMatchObject({
+      ok: false,
+      status: null,
+      message: 'Failed to fetch',
+    });
+    expect(consoleError).not.toHaveBeenCalled();
+  });
+});
+
+describe('downloadFileAuthed', () => {
+  it('returns a quiet failure when a user-triggered download fetch is blocked', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      throw new TypeError('Failed to fetch');
+    }));
+
+    const result = await downloadFileAuthed({
+      url: '/api/files/stale/download',
+      filename: 'stale.png',
+    });
 
     expect(result).toMatchObject({
       ok: false,
