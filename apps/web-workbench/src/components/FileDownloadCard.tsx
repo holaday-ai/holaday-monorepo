@@ -176,6 +176,10 @@ export function FileDownloadCard({ payload }: { payload: FileDownloadPayload }):
           <Loader2 className="h-4 w-4 animate-spin text-[#57479C]" />
           {kind === 'video' ? '视频加载中…' : '图片加载中…'}
         </span>
+      ) : previewState === 'failed' ? (
+        <span className="flex h-40 w-full items-center justify-center rounded-[6px] border border-dashed border-[#DCDDDD] bg-[#EFEFEF]/35 px-4 text-center text-[11px] leading-5 text-muted-foreground dark:border-white/10 dark:bg-white/5">
+          {kind === 'video' ? '视频预览暂不可用，可尝试下载。' : '图片预览暂不可用，可尝试下载。'}
+        </span>
       ) : null}
       <button
         type="button"
