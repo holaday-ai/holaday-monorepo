@@ -315,7 +315,7 @@ describe('ReferralService.settleRechargeReward', () => {
       userId: 123,
       entryType: 'referral_recharge_reward',
       direction: 'credit',
-      bucket: 'available',
+      bucket: 'locked',
       amountCreditCents: 2_000_00,
       idempotencyKey: 'referral:recharge_reward:1:77',
     });

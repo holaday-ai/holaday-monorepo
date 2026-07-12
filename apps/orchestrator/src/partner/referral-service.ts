@@ -222,7 +222,7 @@ export class ReferralService {
       lotId: null,
       entryType: 'referral_recharge_reward',
       direction: 'credit',
-      bucket: 'available',
+      bucket: 'locked',
       amountCreditCents: input.rewardCreditCents,
       idempotencyKey: `referral:recharge_reward:${referral.id}:${input.rechargeOrderId}`,
       metadata: {
