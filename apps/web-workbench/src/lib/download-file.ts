@@ -114,8 +114,6 @@ export async function fetchFileBlobAuthed(
     const mime = res.headers.get('content-type') ?? blob.type ?? '';
     return { ok: true, blob, mime, status: res.status, message: 'ok' };
   } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error('[fetchFileBlobAuthed] failed', err);
     return {
       ok: false,
       status: null,

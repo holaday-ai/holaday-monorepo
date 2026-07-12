@@ -1,5 +1,14 @@
-import { describe, expect, it } from 'vitest';
-import { downloadFailureMessage, safeDownloadFilename } from './download-file';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  downloadFailureMessage,
+  fetchFileBlobAuthed,
+  safeDownloadFilename,
+} from './download-file';
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 describe('safeDownloadFilename', () => {
   it('keeps ordinary filenames readable', () => {
@@ -28,5 +37,23 @@ describe('downloadFailureMessage', () => {
     expect(downloadFailureMessage(403)).toContain('刷新页面后重试');
     expect(downloadFailureMessage(404)).toContain('链接已过期');
     expect(downloadFailureMessage(410)).toContain('链接已过期');
+  });
+});
+
+describe('fetchFileBlobAuthed', () => {
+  it('returns a quiet failure when an inline preview fetch is blocked', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      throw new TypeError('Failed to fetch');
+    }));
+
+    const result = await fetchFileBlobAuthed({ url: '/api/files/stale/download' });
+
+    expect(result).toMatchObject({
+      ok: false,
+      status: null,
+      message: 'Failed to fetch',
+    });
+    expect(consoleError).not.toHaveBeenCalled();
   });
 });
