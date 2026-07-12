@@ -23,6 +23,8 @@ export interface FileDownloadPayload {
   downloadUrl: string;
 }
 
+const MEDIA_PREVIEW_TIMEOUT_MS = 8_000;
+
 /**
  * Card surfaced inside an agent summary whenever the model emits a
  * fenced code block tagged `holaday-file`. The fence body is JSON
@@ -91,7 +93,7 @@ export function FileDownloadCard({ payload }: { payload: FileDownloadPayload }):
     setPreviewState('loading');
     void (async () => {
       try {
-        const res = await fetchFileBlobAuthed({ url: payload.downloadUrl });
+        const res = await withMediaPreviewTimeout(fetchFileBlobAuthed({ url: payload.downloadUrl }));
         if (cancelled) return;
         if (res.ok && res.blob) {
           if (kind === 'image') {
@@ -234,6 +236,20 @@ export function FileDownloadCard({ payload }: { payload: FileDownloadPayload }):
       </button>
     </div>
   );
+}
+
+function withMediaPreviewTimeout<T extends { ok: boolean; status: number | null; message: string }>(
+  promise: Promise<T>,
+): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((resolve) => {
+      setTimeout(
+        () => resolve({ ok: false, status: null, message: 'preview timeout' } as T),
+        MEDIA_PREVIEW_TIMEOUT_MS,
+      );
+    }),
+  ]);
 }
 
 function FileTypeIcon({ kind }: { kind: DownloadFileKind }): JSX.Element {
