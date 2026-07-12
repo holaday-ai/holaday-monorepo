@@ -93,17 +93,33 @@ export function FileDownloadCard({ payload }: { payload: FileDownloadPayload }):
     setPreviewState('loading');
     void (async () => {
       try {
-        const res = await withMediaPreviewTimeout(fetchFileBlobAuthed({ url: payload.downloadUrl }));
-        if (cancelled) return;
-        if (res.ok && res.blob) {
-          if (kind === 'image') {
-            const dataUrl = await blobToDataUrl(res.blob);
-            if (cancelled) return;
-            setPreviewUrl(dataUrl);
-          } else {
-            objectUrl = URL.createObjectURL(res.blob);
-            setPreviewUrl(objectUrl);
+        const res = await withMediaPreviewTimeout((async () => {
+          const fetched = await fetchFileBlobAuthed({ url: payload.downloadUrl });
+          if (!fetched.ok || !fetched.blob) {
+            return { ok: false, status: fetched.status, message: fetched.message };
           }
+          if (kind === 'image') {
+            return {
+              ok: true,
+              status: fetched.status,
+              message: fetched.message,
+              previewUrl: await blobToDataUrl(fetched.blob),
+              objectUrl: null,
+            };
+          }
+          const nextObjectUrl = URL.createObjectURL(fetched.blob);
+          return {
+            ok: true,
+            status: fetched.status,
+            message: fetched.message,
+            previewUrl: nextObjectUrl,
+            objectUrl: nextObjectUrl,
+          };
+        })());
+        if (cancelled) return;
+        if (res.ok && res.previewUrl) {
+          objectUrl = res.objectUrl;
+          setPreviewUrl(res.previewUrl);
           setPreviewState('ready');
         } else {
           setPreviewState('failed'); // fall back to the icon-only card
@@ -238,7 +254,15 @@ export function FileDownloadCard({ payload }: { payload: FileDownloadPayload }):
   );
 }
 
-function withMediaPreviewTimeout<T extends { ok: boolean; status: number | null; message: string }>(
+interface MediaPreviewResult {
+  ok: boolean;
+  status: number | null;
+  message: string;
+  previewUrl?: string;
+  objectUrl?: string | null;
+}
+
+function withMediaPreviewTimeout<T extends MediaPreviewResult>(
   promise: Promise<T>,
 ): Promise<T> {
   return Promise.race([
