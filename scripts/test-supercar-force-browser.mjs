@@ -16,9 +16,17 @@
  * this overrides it at the task level.
  */
 
+function requireEnv(name) {
+  const value = process.env[name]?.trim();
+  if (!value) {
+    throw new Error(`${name} is required. Set it in your shell; do not commit test credentials.`);
+  }
+  return value;
+}
+
 const BASE = process.env.HOLADAY_BASE ?? 'https://holaday.ai/api/trpc';
-const EMAIL = process.env.HOLADAY_EMAIL ?? 'yaleiqi716@gmail.com';
-const PASSWORD = process.env.HOLADAY_PASSWORD ?? 'ox3gwr95St8uslbxAa1!';
+const EMAIL = requireEnv('HOLADAY_EMAIL');
+const PASSWORD = requireEnv('HOLADAY_PASSWORD');
 const POLL_INTERVAL_MS = 5_000;
 const TASK_TIMEOUT_MS = 10 * 60 * 1_000;
 const GAP_MS = 5_000;
