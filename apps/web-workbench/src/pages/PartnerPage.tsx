@@ -884,6 +884,7 @@ function PartnerWorkbench({
       </Section>
 
       <Section
+        id="partner-ledger"
         title="最近批次"
         description="展示最近创建的合伙人账本批次和释放窗口。"
         className="rounded-[8px] border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]"
@@ -973,6 +974,7 @@ function PartnerWorkbench({
         </Section>
 
         <Section
+          id="partner-withdraw"
           title="提现申请"
           description="提交后进入审核，审批和出款都不是立即完成。"
           className="rounded-[8px] border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]"
@@ -1022,6 +1024,7 @@ function PartnerWorkbench({
       </div>
 
       <Section
+        id="partner-recharge"
         title="充值预览与订单"
         description="单笔 ¥10,000 至 ¥200,000，预览会计入过去 30 天已完成充值和当前金额。"
         className="rounded-[8px] border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]"

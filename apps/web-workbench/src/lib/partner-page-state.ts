@@ -11,8 +11,15 @@ type PartnerKycStatus = 'not_started' | 'pending' | 'passed' | 'review_required'
 type PartnerLotStatus = 'accumulating' | 'release_pending' | 'releasing' | 'completed' | 'frozen' | 'closed';
 type PartnerRiskStatus = 'normal' | 'review' | 'review_required' | 'frozen';
 export type PartnerPaymentProvider = 'wechat' | 'alipay' | 'manual';
+export type PartnerWorkbenchSection = 'ledger' | 'recharge' | 'withdraw';
 
 export const PARTNER_PAYMENT_PROVIDERS: readonly PartnerPaymentProvider[] = ['wechat', 'alipay', 'manual'];
+
+const PARTNER_WORKBENCH_SECTION_HASHES: Record<PartnerWorkbenchSection, string> = {
+  ledger: '#partner-ledger',
+  recharge: '#partner-recharge',
+  withdraw: '#partner-withdraw',
+};
 
 export function normalizePartnerPaymentProvider(value: unknown): PartnerPaymentProvider {
   return typeof value === 'string' && PARTNER_PAYMENT_PROVIDERS.includes(value as PartnerPaymentProvider)
@@ -30,6 +37,16 @@ export function partnerPaymentProviderLabel(value: unknown): string {
 export function partnerPaymentProviderHint(value: unknown): string {
   const provider = normalizePartnerPaymentProvider(value);
   return provider === 'manual' ? '人工兜底通道，后台确认后生效。' : '支付成功后等待渠道回调确认。';
+}
+
+export function partnerWorkbenchRedirectTarget(value: unknown): { pathname: '/partner'; hash: string } {
+  return {
+    pathname: '/partner',
+    hash:
+      typeof value === 'string' && value in PARTNER_WORKBENCH_SECTION_HASHES
+        ? PARTNER_WORKBENCH_SECTION_HASHES[value as PartnerWorkbenchSection]
+        : '',
+  };
 }
 
 export interface PartnerPaymentIntentDisplay {

@@ -7,6 +7,7 @@ import {
   RouteLoadingFallback,
 } from '@/components/LazyLoadBoundary';
 import { ToastProvider } from '@/components/ui/toast';
+import { partnerWorkbenchRedirectTarget, type PartnerWorkbenchSection } from '@/lib/partner-page-state';
 import { LoginPage } from '@/pages/LoginPage';
 import { RedirectIfAuthed } from '@/pages/RedirectIfAuthed';
 import { RegisterPage } from '@/pages/RegisterPage';
@@ -136,6 +137,9 @@ export function App(): JSX.Element {
           <Route path="/settings" element={lazyElement(<SettingsPage />)} />
           <Route path="/settings/roles" element={lazyElement(<RolesPage />)} />
           <Route path="/partner" element={lazyElement(<PartnerPage />)} />
+          <Route path="/partner/recharge" element={<PartnerWorkbenchSectionRedirect section="recharge" />} />
+          <Route path="/partner/ledger" element={<PartnerWorkbenchSectionRedirect section="ledger" />} />
+          <Route path="/partner/withdraw" element={<PartnerWorkbenchSectionRedirect section="withdraw" />} />
           <Route path="/plan" element={lazyElement(<PlanPage />)} />
           <Route path="/billing" element={lazyElement(<BillingPage />)} />
           <Route path="/usage" element={lazyElement(<UsagePage />)} />
@@ -199,6 +203,17 @@ function LegacySettingsSectionRedirect({ section }: { section: string }): JSX.El
   return (
     <Navigate
       to={{ pathname: '/settings', search: location.search, hash: `#${section}` }}
+      replace
+    />
+  );
+}
+
+function PartnerWorkbenchSectionRedirect({ section }: { section: PartnerWorkbenchSection }): JSX.Element {
+  const location = useLocation();
+  const target = partnerWorkbenchRedirectTarget(section);
+  return (
+    <Navigate
+      to={{ pathname: target.pathname, search: location.search, hash: target.hash }}
       replace
     />
   );

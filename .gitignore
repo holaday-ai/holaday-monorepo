@@ -19,6 +19,9 @@ out/
 .turbo/
 .worktrees/
 
+# Local Superpowers/subagent execution ledgers.
+.superpowers/
+
 # Coverage
 coverage/
 .nyc_output/

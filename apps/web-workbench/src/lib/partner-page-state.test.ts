@@ -14,6 +14,7 @@ import {
   partnerPaymentProviderLabel,
   partnerPaymentIntentDisplay,
   partnerRechargeGate,
+  partnerWorkbenchRedirectTarget,
   partnerWithdrawalGate,
 } from './partner-page-state';
 
@@ -69,6 +70,25 @@ describe('partner page state helpers', () => {
       detail: '人工确认通道，后台确认后生效。',
     });
     expect(partnerPaymentIntentDisplay(null)).toBeNull();
+  });
+
+  it('maps legacy partner subpage routes to workbench section anchors', () => {
+    expect(partnerWorkbenchRedirectTarget('recharge')).toEqual({
+      pathname: '/partner',
+      hash: '#partner-recharge',
+    });
+    expect(partnerWorkbenchRedirectTarget('ledger')).toEqual({
+      pathname: '/partner',
+      hash: '#partner-ledger',
+    });
+    expect(partnerWorkbenchRedirectTarget('withdraw')).toEqual({
+      pathname: '/partner',
+      hash: '#partner-withdraw',
+    });
+    expect(partnerWorkbenchRedirectTarget('surprise')).toEqual({
+      pathname: '/partner',
+      hash: '',
+    });
   });
 
   it('normalizes a disabled dashboard into a disabled page state', () => {
