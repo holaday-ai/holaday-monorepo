@@ -561,6 +561,10 @@ describe('normalizePartnerReconciliation', () => {
         membershipRevenueCnyCents: 999_00,
         rechargePrincipalCnyCents: 10_000_00,
         paidWithdrawalCreditCents: 600_00,
+        referralCount: 2,
+        rewardedReferralCount: 1,
+        pendingReferralCount: 1,
+        totalReferralRewardCreditCents: 2_000_00,
       },
       providerBreakdown: [
         { provider: 'wechat', orderCount: 2, completedOrderCount: 1, completedAmountCnyCents: 999_00 },
@@ -586,6 +590,18 @@ describe('normalizePartnerReconciliation', () => {
           updatedAt: '2026-07-03T01:00:00.000Z',
         },
       ],
+      referrals: [
+        {
+          referralExternalId: 'pay_referral_rewarded',
+          inviterExternalId: 'usr_partner',
+          inviteeExternalId: 'usr_friend',
+          rewardCreditCents: 2_000_00,
+          rewardRateBps: 2_000,
+          status: 'rewarded',
+          assisted: false,
+          updatedAt: '2026-07-04T01:00:00.000Z',
+        },
+      ],
     });
 
     expect(state).toMatchObject({
@@ -597,6 +613,9 @@ describe('normalizePartnerReconciliation', () => {
         membershipRevenueCnyCents: 999_00,
         rechargePrincipalCnyCents: 10_000_00,
         paidWithdrawalCreditCents: 600_00,
+        referralCount: 2,
+        rewardedReferralCount: 1,
+        totalReferralRewardCreditCents: 2_000_00,
       },
       providerBreakdown: [
         {
@@ -609,8 +628,10 @@ describe('normalizePartnerReconciliation', () => {
     });
     expect(state.enabled && state.orders[0]?.amountCnyCents).toBe(999_00);
     expect(state.enabled && state.withdrawals[0]?.amountCreditCents).toBe(600_00);
+    expect(state.enabled && state.referrals[0]?.rewardCreditCents).toBe(2_000_00);
     expect(partnerReconciliationCsv(state)).toContain('order,pay_membership_completed,usr_partner');
     expect(partnerReconciliationCsv(state)).toContain('withdrawal,pay_withdrawal_paid,usr_partner');
+    expect(partnerReconciliationCsv(state)).toContain('referral,pay_referral_rewarded,usr_partner');
   });
 
   it('keeps disabled reconciliation state inert', () => {

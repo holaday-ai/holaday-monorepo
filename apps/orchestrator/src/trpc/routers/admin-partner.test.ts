@@ -550,6 +550,7 @@ describe('admin.partner router', () => {
         summarizePartnerReconciliation: (input: {
           orders: Array<Record<string, unknown>>;
           withdrawals: Array<Record<string, unknown>>;
+          referrals: Array<Record<string, unknown>>;
         }) => Record<string, unknown>;
       }
     ).summarizePartnerReconciliation;
@@ -599,6 +600,35 @@ describe('admin.partner router', () => {
             status: 'approved',
           },
         ],
+        referrals: [
+          {
+            referralExternalId: 'pay_referral_direct',
+            inviterExternalId: 'usr_partner',
+            inviteeExternalId: 'usr_friend',
+            status: 'rewarded',
+            assisted: false,
+            rewardCreditCents: 2_000_00,
+            rewardRateBps: 2_000,
+          },
+          {
+            referralExternalId: 'pay_referral_assisted',
+            inviterExternalId: 'usr_partner',
+            inviteeExternalId: 'usr_vip',
+            status: 'rewarded',
+            assisted: true,
+            rewardCreditCents: 1_000_00,
+            rewardRateBps: 1_000,
+          },
+          {
+            referralExternalId: 'pay_referral_pending',
+            inviterExternalId: 'usr_partner',
+            inviteeExternalId: 'usr_waiting',
+            status: 'pending',
+            assisted: false,
+            rewardCreditCents: 0,
+            rewardRateBps: 0,
+          },
+        ],
       }),
     ).toMatchObject({
       metrics: {
@@ -610,6 +640,12 @@ describe('admin.partner router', () => {
         rechargePrincipalCnyCents: 10_000_00,
         paidWithdrawalCreditCents: 600_00,
         approvedWithdrawalCreditCents: 700_00,
+        referralCount: 3,
+        rewardedReferralCount: 2,
+        pendingReferralCount: 1,
+        directReferralRewardCreditCents: 2_000_00,
+        assistedReferralRewardCreditCents: 1_000_00,
+        totalReferralRewardCreditCents: 3_000_00,
       },
       providerBreakdown: [
         {
@@ -621,6 +657,35 @@ describe('admin.partner router', () => {
           provider: 'wechat',
           completedOrderCount: 1,
           completedAmountCnyCents: 999_00,
+        },
+      ],
+      referrals: [
+        {
+          referralExternalId: 'pay_referral_direct',
+          inviterExternalId: 'usr_partner',
+          inviteeExternalId: 'usr_friend',
+          status: 'rewarded',
+          assisted: false,
+          rewardCreditCents: 2_000_00,
+          rewardRateBps: 2_000,
+        },
+        {
+          referralExternalId: 'pay_referral_assisted',
+          inviterExternalId: 'usr_partner',
+          inviteeExternalId: 'usr_vip',
+          status: 'rewarded',
+          assisted: true,
+          rewardCreditCents: 1_000_00,
+          rewardRateBps: 1_000,
+        },
+        {
+          referralExternalId: 'pay_referral_pending',
+          inviterExternalId: 'usr_partner',
+          inviteeExternalId: 'usr_waiting',
+          status: 'pending',
+          assisted: false,
+          rewardCreditCents: 0,
+          rewardRateBps: 0,
         },
       ],
     });

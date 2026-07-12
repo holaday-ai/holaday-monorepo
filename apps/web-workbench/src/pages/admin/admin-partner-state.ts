@@ -417,6 +417,12 @@ export function normalizePartnerReconciliation(value: unknown) {
       returnedWithdrawalCount: Math.round(nonNegativeNumber(metrics.returnedWithdrawalCount)),
       approvedWithdrawalCreditCents: Math.round(nonNegativeNumber(metrics.approvedWithdrawalCreditCents)),
       paidWithdrawalCreditCents: Math.round(nonNegativeNumber(metrics.paidWithdrawalCreditCents)),
+      referralCount: Math.round(nonNegativeNumber(metrics.referralCount)),
+      rewardedReferralCount: Math.round(nonNegativeNumber(metrics.rewardedReferralCount)),
+      pendingReferralCount: Math.round(nonNegativeNumber(metrics.pendingReferralCount)),
+      directReferralRewardCreditCents: Math.round(nonNegativeNumber(metrics.directReferralRewardCreditCents)),
+      assistedReferralRewardCreditCents: Math.round(nonNegativeNumber(metrics.assistedReferralRewardCreditCents)),
+      totalReferralRewardCreditCents: Math.round(nonNegativeNumber(metrics.totalReferralRewardCreditCents)),
     },
     providerBreakdown: safeArray(root.providerBreakdown).map((raw) => {
       const row = asRecord(raw);
@@ -459,6 +465,20 @@ export function normalizePartnerReconciliation(value: unknown) {
         updatedAt: row.updatedAt,
       };
     }),
+    referrals: safeArray(root.referrals).map((raw) => {
+      const row = asRecord(raw);
+      return {
+        referralExternalId: safeText(row.referralExternalId, ''),
+        inviterExternalId: safeText(row.inviterExternalId, ''),
+        inviteeExternalId: safeText(row.inviteeExternalId, ''),
+        status: safeText(row.status, ''),
+        assisted: row.assisted === true,
+        rewardCreditCents: Math.round(nonNegativeNumber(row.rewardCreditCents)),
+        rewardRateBps: Math.round(nonNegativeNumber(row.rewardRateBps)),
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+      };
+    }),
   };
 }
 
@@ -495,6 +515,18 @@ export function partnerReconciliationCsv(state: PartnerReconciliationState): str
       '',
       row.amountCreditCents,
       row.providerPayoutId || row.bankAccountFingerprint,
+      row.updatedAt,
+    ]),
+    ...state.referrals.map((row) => [
+      'referral',
+      row.referralExternalId,
+      row.inviterExternalId,
+      row.status,
+      row.assisted ? 'assisted_referral' : 'direct_referral',
+      '',
+      '',
+      row.rewardCreditCents,
+      row.inviteeExternalId,
       row.updatedAt,
     ]),
   ];

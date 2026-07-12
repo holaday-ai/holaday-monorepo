@@ -528,12 +528,14 @@ function ReconciliationPanel({
           <div className="py-5 text-[13px] text-muted-foreground">合伙人账本未启用</div>
         ) : metrics ? (
           <>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
               <ReconciliationMetric label="订单数" value={formatInteger(metrics.orderCount)} />
               <ReconciliationMetric label="完成订单" value={formatInteger(metrics.completedOrderCount)} />
               <ReconciliationMetric label="年费收入" value={formatPartnerMoneyCents(metrics.membershipRevenueCnyCents)} />
               <ReconciliationMetric label="充值本金" value={formatPartnerMoneyCents(metrics.rechargePrincipalCnyCents)} />
               <ReconciliationMetric label="已出款" value={formatPartnerCreditCents(metrics.paidWithdrawalCreditCents)} />
+              <ReconciliationMetric label="邀请数" value={formatInteger(metrics.referralCount)} />
+              <ReconciliationMetric label="邀请奖励" value={formatPartnerCreditCents(metrics.totalReferralRewardCreditCents)} />
               <ReconciliationMetric
                 label="需复核订单"
                 value={formatInteger(metrics.reviewRequiredOrderCount)}

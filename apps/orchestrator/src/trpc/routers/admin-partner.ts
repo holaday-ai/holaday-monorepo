@@ -1,10 +1,12 @@
 import { TRPCError } from '@trpc/server';
 import { and, desc, eq, gte, inArray, like, lt, or, sql } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/mysql-core';
 import { z } from 'zod';
 import type { DB } from '../../db/client.js';
 import {
   partnerKycProfiles,
   partnerLots,
+  partnerReferrals,
   partnerRechargeOrders,
   partnerRiskEvents,
   partnerWithdrawalRequests,
@@ -27,6 +29,8 @@ import { adminProcedure, router } from '../trpc.js';
 const OVERVIEW_LIMIT_CAP = 100;
 const RECONCILIATION_LIMIT_CAP = 1000;
 const ISO_DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const referralInviterUsers = alias(users, 'partner_referral_inviter_users');
+const referralInviteeUsers = alias(users, 'partner_referral_invitee_users');
 
 function partnerLedgerEnabled(): boolean {
   return process.env.PARTNER_LEDGER_ENABLED === 'true';
@@ -92,6 +96,10 @@ function rowText(value: unknown): string {
 
 function rowNonNegativeInteger(value: unknown): number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : 0;
+}
+
+function rowBoolean(value: unknown): boolean {
+  return value === true || value === 1;
 }
 
 function summarizeOrderAudit(metadataValue: unknown) {
@@ -316,6 +324,7 @@ function summarizeWithdrawalMetrics(
 function summarizePartnerReconciliation(input: {
   orders: Array<Record<string, unknown>>;
   withdrawals: Array<Record<string, unknown>>;
+  referrals?: Array<Record<string, unknown>>;
 }) {
   const orders = input.orders.map((row) => ({
     ...row,
@@ -333,6 +342,16 @@ function summarizePartnerReconciliation(input: {
     userExternalId: rowText(row.userExternalId),
     status: rowText(row.status),
     amountCreditCents: rowNonNegativeInteger(row.amountCreditCents),
+  }));
+  const referrals = (input.referrals ?? []).map((row) => ({
+    ...row,
+    referralExternalId: rowText(row.referralExternalId),
+    inviterExternalId: rowText(row.inviterExternalId),
+    inviteeExternalId: rowText(row.inviteeExternalId),
+    status: rowText(row.status),
+    assisted: rowBoolean(row.assisted),
+    rewardCreditCents: rowNonNegativeInteger(row.rewardCreditCents),
+    rewardRateBps: rowNonNegativeInteger(row.rewardRateBps),
   }));
   const providerBreakdown = Array.from(
     orders.reduce(
@@ -368,6 +387,7 @@ function summarizePartnerReconciliation(input: {
     ).values(),
   ).sort((a, b) => a.provider.localeCompare(b.provider));
   const completedOrders = orders.filter((row) => row.status === 'completed');
+  const rewardedReferrals = referrals.filter((row) => row.status === 'rewarded');
 
   return {
     metrics: {
@@ -394,10 +414,21 @@ function summarizePartnerReconciliation(input: {
       paidWithdrawalCreditCents: withdrawals
         .filter((row) => row.status === 'paid')
         .reduce((sum, row) => sum + row.amountCreditCents, 0),
+      referralCount: referrals.length,
+      rewardedReferralCount: rewardedReferrals.length,
+      pendingReferralCount: referrals.filter((row) => row.status === 'pending').length,
+      directReferralRewardCreditCents: rewardedReferrals
+        .filter((row) => !row.assisted)
+        .reduce((sum, row) => sum + row.rewardCreditCents, 0),
+      assistedReferralRewardCreditCents: rewardedReferrals
+        .filter((row) => row.assisted)
+        .reduce((sum, row) => sum + row.rewardCreditCents, 0),
+      totalReferralRewardCreditCents: rewardedReferrals.reduce((sum, row) => sum + row.rewardCreditCents, 0),
     },
     providerBreakdown,
     orders,
     withdrawals,
+    referrals,
   };
 }
 
@@ -725,7 +756,7 @@ export const adminPartnerRouter = router({
       }
 
       const limit = input?.limit ?? 500;
-      const [orders, withdrawals] = await Promise.all([
+      const [orders, withdrawals, referrals] = await Promise.all([
         ctx.db
           .select({
             orderExternalId: partnerRechargeOrders.externalId,
@@ -775,6 +806,29 @@ export const adminPartnerRouter = router({
           )
           .orderBy(desc(partnerWithdrawalRequests.updatedAt))
           .limit(limit),
+        ctx.db
+          .select({
+            referralExternalId: partnerReferrals.externalId,
+            inviterExternalId: referralInviterUsers.externalId,
+            inviteeExternalId: referralInviteeUsers.externalId,
+            status: partnerReferrals.status,
+            assisted: partnerReferrals.assisted,
+            rewardCreditCents: partnerReferrals.rewardCreditCents,
+            rewardRateBps: partnerReferrals.rewardRateBps,
+            createdAt: partnerReferrals.createdAt,
+            updatedAt: partnerReferrals.updatedAt,
+          })
+          .from(partnerReferrals)
+          .innerJoin(referralInviterUsers, eq(referralInviterUsers.id, partnerReferrals.inviterUserId))
+          .innerJoin(referralInviteeUsers, eq(referralInviteeUsers.id, partnerReferrals.inviteeUserId))
+          .where(
+            and(
+              gte(partnerReferrals.updatedAt, window.fromDate),
+              lt(partnerReferrals.updatedAt, window.toExclusiveDate),
+            ),
+          )
+          .orderBy(desc(partnerReferrals.updatedAt))
+          .limit(limit),
       ]);
 
       return {
@@ -784,7 +838,7 @@ export const adminPartnerRouter = router({
           to: window.toDay,
           basis: 'updated_at' as const,
         },
-        ...summarizePartnerReconciliation({ orders, withdrawals }),
+        ...summarizePartnerReconciliation({ orders, withdrawals, referrals }),
       };
     }),
 
