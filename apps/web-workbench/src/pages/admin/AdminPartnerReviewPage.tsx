@@ -30,12 +30,14 @@ import {
   partnerReconciliationCsv,
   partnerKycQueueReviewPayload,
   partnerOrderActionLabel,
+  partnerRiskCloseResolutionKindLabel,
   partnerRiskEventSeverityLabel,
   partnerRiskEventTypeLabel,
   partnerRiskLotActionPayload,
   partnerRiskLotQueueAction,
   partnerReviewStatusToken,
   type AdminPartnerStatusKind,
+  type PartnerRiskLotCloseResolutionKind,
   type PartnerReconciliationState,
 } from './admin-partner-state';
 
@@ -67,6 +69,10 @@ export function AdminPartnerReviewPage(): JSX.Element {
   const [withdrawalReasons, setWithdrawalReasons] = React.useState<Record<string, string>>({});
   const [payoutIds, setPayoutIds] = React.useState<Record<string, string>>({});
   const [riskLotNotes, setRiskLotNotes] = React.useState<Record<string, string>>({});
+  const [riskLotResolutionKinds, setRiskLotResolutionKinds] = React.useState<
+    Record<string, PartnerRiskLotCloseResolutionKind>
+  >({});
+  const [riskLotResolutionRefs, setRiskLotResolutionRefs] = React.useState<Record<string, string>>({});
   const [queueSearch, setQueueSearch] = React.useState('');
   const [serverQueueSearch, setServerQueueSearch] = React.useState('');
 
@@ -251,6 +257,8 @@ export function AdminPartnerReviewPage(): JSX.Element {
           withdrawalReasons={withdrawalReasons}
           payoutIds={payoutIds}
           riskLotNotes={riskLotNotes}
+          riskLotResolutionKinds={riskLotResolutionKinds}
+          riskLotResolutionRefs={riskLotResolutionRefs}
           setKycUserExternalId={setKycUserExternalId}
           setKycStatus={setKycStatus}
           setKycProvider={setKycProvider}
@@ -261,6 +269,8 @@ export function AdminPartnerReviewPage(): JSX.Element {
           setWithdrawalReasons={setWithdrawalReasons}
           setPayoutIds={setPayoutIds}
           setRiskLotNotes={setRiskLotNotes}
+          setRiskLotResolutionKinds={setRiskLotResolutionKinds}
+          setRiskLotResolutionRefs={setRiskLotResolutionRefs}
           setReconciliationFrom={setReconciliationFrom}
           setReconciliationTo={setReconciliationTo}
           setQueueSearch={setQueueSearch}
@@ -293,6 +303,8 @@ function EnabledAdminPartnerReview({
   withdrawalReasons,
   payoutIds,
   riskLotNotes,
+  riskLotResolutionKinds,
+  riskLotResolutionRefs,
   setKycUserExternalId,
   setKycStatus,
   setKycProvider,
@@ -303,6 +315,8 @@ function EnabledAdminPartnerReview({
   setWithdrawalReasons,
   setPayoutIds,
   setRiskLotNotes,
+  setRiskLotResolutionKinds,
+  setRiskLotResolutionRefs,
   setReconciliationFrom,
   setReconciliationTo,
   setQueueSearch,
@@ -329,6 +343,8 @@ function EnabledAdminPartnerReview({
   withdrawalReasons: Record<string, string>;
   payoutIds: Record<string, string>;
   riskLotNotes: Record<string, string>;
+  riskLotResolutionKinds: Record<string, PartnerRiskLotCloseResolutionKind>;
+  riskLotResolutionRefs: Record<string, string>;
   setKycUserExternalId: (value: string) => void;
   setKycStatus: (value: KycStatusInput) => void;
   setKycProvider: (value: string) => void;
@@ -339,6 +355,8 @@ function EnabledAdminPartnerReview({
   setWithdrawalReasons: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   setPayoutIds: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   setRiskLotNotes: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  setRiskLotResolutionKinds: React.Dispatch<React.SetStateAction<Record<string, PartnerRiskLotCloseResolutionKind>>>;
+  setRiskLotResolutionRefs: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   setReconciliationFrom: (value: string) => void;
   setReconciliationTo: (value: string) => void;
   setQueueSearch: (value: string) => void;
@@ -425,7 +443,11 @@ function EnabledAdminPartnerReview({
         rows={data.riskLots}
         pendingAction={pendingAction}
         riskLotNotes={riskLotNotes}
+        riskLotResolutionKinds={riskLotResolutionKinds}
+        riskLotResolutionRefs={riskLotResolutionRefs}
         setRiskLotNotes={setRiskLotNotes}
+        setRiskLotResolutionKinds={setRiskLotResolutionKinds}
+        setRiskLotResolutionRefs={setRiskLotResolutionRefs}
         runAction={runAction}
       />
       <RiskEventHistory rows={data.riskEvents} />
@@ -991,13 +1013,21 @@ function RiskLotQueue({
   rows,
   pendingAction,
   riskLotNotes,
+  riskLotResolutionKinds,
+  riskLotResolutionRefs,
   setRiskLotNotes,
+  setRiskLotResolutionKinds,
+  setRiskLotResolutionRefs,
   runAction,
 }: {
   rows: EnabledOverviewState['riskLots'];
   pendingAction: string | null;
   riskLotNotes: Record<string, string>;
+  riskLotResolutionKinds: Record<string, PartnerRiskLotCloseResolutionKind>;
+  riskLotResolutionRefs: Record<string, string>;
   setRiskLotNotes: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  setRiskLotResolutionKinds: React.Dispatch<React.SetStateAction<Record<string, PartnerRiskLotCloseResolutionKind>>>;
+  setRiskLotResolutionRefs: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   runAction: (actionKey: string, action: () => Promise<void>, success: string) => Promise<void>;
 }): JSX.Element {
   return (
@@ -1014,6 +1044,8 @@ function RiskLotQueue({
           const pending = pendingAction === actionKey;
           const closePending = pendingAction === closeActionKey;
           const operatorNote = riskLotNotes[row.lotExternalId] ?? '';
+          const resolutionKind = riskLotResolutionKinds[row.lotExternalId] ?? 'manual';
+          const resolutionRef = riskLotResolutionRefs[row.lotExternalId] ?? '';
           const riskDetail = [
             row.riskFreezeReason,
             row.riskFrozenByUserId > 0 ? `冻结人 #${row.riskFrozenByUserId}` : '',
@@ -1022,6 +1054,10 @@ function RiskLotQueue({
             row.riskResumedByUserId > 0 ? `恢复人 #${row.riskResumedByUserId}` : '',
             row.riskResumedAt ? `恢复 ${formatDateTime(row.riskResumedAt)}` : '',
             row.riskCloseReason,
+            row.riskCloseResolutionKind
+              ? `处理 ${partnerRiskCloseResolutionKindLabel(row.riskCloseResolutionKind)}`
+              : '',
+            row.riskCloseResolutionRef ? `凭证 ${truncate(row.riskCloseResolutionRef, 24)}` : '',
             row.riskClosedByUserId > 0 ? `关闭人 #${row.riskClosedByUserId}` : '',
             row.riskClosedAt ? `关闭 ${formatDateTime(row.riskClosedAt)}` : '',
           ]
@@ -1083,25 +1119,56 @@ function RiskLotQueue({
                     </>
                   )}
                   {action.canClose && (
-                    <ActionButton
-                      icon={XCircle}
-                      label={closePending ? '关闭中' : '关闭'}
-                      compact
-                      tone="danger"
-                      pending={closePending}
-                      onClick={() =>
-                        void runAction(
-                          closeActionKey,
-                          async () => {
-                            await trpc.admin.partner.closeRiskLot.mutate({
-                              lotExternalId: row.lotExternalId,
-                              ...partnerRiskLotActionPayload('close', operatorNote),
-                            });
-                          },
-                          '批次已关闭',
-                        )
-                      }
-                    />
+                    <>
+                      <select
+                        value={resolutionKind}
+                        onChange={(event) =>
+                          setRiskLotResolutionKinds((current) => ({
+                            ...current,
+                            [row.lotExternalId]: event.target.value as PartnerRiskLotCloseResolutionKind,
+                          }))
+                        }
+                        aria-label="关闭处理类型"
+                        className="h-8 w-24 rounded-[8px] border border-[#DCDDDD] bg-white px-2 text-[12px] outline-none focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
+                      >
+                        <option value="manual">人工</option>
+                        <option value="refund">退款</option>
+                        <option value="fraud">欺诈</option>
+                      </select>
+                      <input
+                        value={resolutionRef}
+                        onChange={(event) =>
+                          setRiskLotResolutionRefs((current) => ({
+                            ...current,
+                            [row.lotExternalId]: event.target.value,
+                          }))
+                        }
+                        placeholder="处理凭证"
+                        className="h-8 w-32 rounded-[8px] border border-[#DCDDDD] px-2 text-[12px] outline-none focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
+                      />
+                      <ActionButton
+                        icon={XCircle}
+                        label={closePending ? '关闭中' : '关闭'}
+                        compact
+                        tone="danger"
+                        pending={closePending}
+                        onClick={() =>
+                          void runAction(
+                            closeActionKey,
+                            async () => {
+                              await trpc.admin.partner.closeRiskLot.mutate({
+                                lotExternalId: row.lotExternalId,
+                                ...partnerRiskLotActionPayload('close', operatorNote, {
+                                  resolutionKind,
+                                  resolutionRef,
+                                }),
+                              });
+                            },
+                            '批次已关闭',
+                          )
+                        }
+                      />
+                    </>
                   )}
                 </div>
               </td>
@@ -1124,6 +1191,8 @@ function RiskEventHistory({ rows }: { rows: EnabledOverviewState['riskEvents'] }
         {rows.map((row) => {
           const detail = [
             row.riskReason,
+            row.riskResolutionKind ? `处理 ${partnerRiskCloseResolutionKindLabel(row.riskResolutionKind)}` : '',
+            row.riskResolutionRef ? `凭证 ${truncate(row.riskResolutionRef, 24)}` : '',
             row.riskNote,
             row.reviewerUserId > 0 ? `处理人 #${row.reviewerUserId}` : '',
           ]

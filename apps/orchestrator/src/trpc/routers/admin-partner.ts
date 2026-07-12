@@ -263,6 +263,8 @@ function summarizeRiskLotAudit(metadataValue: unknown) {
     riskClosedByUserId: metadataNumber(metadata, 'riskClosedByUserId'),
     riskClosedAt: metadataText(metadata, 'riskClosedAt'),
     riskCloseReason: metadataText(metadata, 'riskCloseReason'),
+    riskCloseResolutionKind: metadataText(metadata, 'riskCloseResolutionKind'),
+    riskCloseResolutionRef: metadataText(metadata, 'riskCloseResolutionRef'),
   };
 }
 
@@ -279,6 +281,8 @@ function summarizeRiskEventAudit(metadataValue: unknown) {
   return {
     reviewerUserId: metadataNumber(metadata, 'reviewerUserId'),
     riskReason: metadataText(metadata, 'reason'),
+    riskResolutionKind: metadataText(metadata, 'resolutionKind'),
+    riskResolutionRef: metadataText(metadata, 'resolutionRef'),
     riskNote: metadataText(metadata, 'note'),
   };
 }
@@ -993,6 +997,8 @@ export const adminPartnerRouter = router({
       z.object({
         lotExternalId: z.string().trim().min(1).max(32),
         reason: z.string().trim().min(1).max(1000),
+        resolutionKind: z.enum(['manual', 'refund', 'fraud']).optional(),
+        resolutionRef: z.string().trim().min(1).max(128).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -1003,6 +1009,8 @@ export const adminPartnerRouter = router({
           lotExternalId: input.lotExternalId,
           reviewerUserId: adminUser.id,
           reason: input.reason,
+          resolutionKind: input.resolutionKind,
+          resolutionRef: input.resolutionRef,
         });
         return summarizeRiskLot(row);
       } catch (error) {

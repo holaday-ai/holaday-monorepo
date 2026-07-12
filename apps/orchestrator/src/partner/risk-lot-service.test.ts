@@ -262,6 +262,8 @@ describe('PartnerRiskLotService', () => {
       lotExternalId: 'pay_risk_lot_1',
       reviewerUserId: 11,
       reason: 'provider refund completed',
+      resolutionKind: 'refund',
+      resolutionRef: 'wx-refund-20260705',
       now,
     });
 
@@ -275,6 +277,8 @@ describe('PartnerRiskLotService', () => {
       riskClosedByUserId: 11,
       riskClosedAt: now.toISOString(),
       riskCloseReason: 'provider refund completed',
+      riskCloseResolutionKind: 'refund',
+      riskCloseResolutionRef: 'wx-refund-20260705',
     });
     expect(fakeDb.riskEventRows).toHaveLength(1);
     expect(fakeDb.riskEventRows[0]).toMatchObject({
@@ -286,6 +290,8 @@ describe('PartnerRiskLotService', () => {
       metadata: {
         reviewerUserId: 11,
         reason: 'provider refund completed',
+        resolutionKind: 'refund',
+        resolutionRef: 'wx-refund-20260705',
         lotExternalId: 'pay_risk_lot_1',
       },
       createdAt: now,

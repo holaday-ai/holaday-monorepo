@@ -453,6 +453,8 @@ describe('admin.partner router', () => {
       caller.closeRiskLot({
         lotExternalId: 'pay_risk_lot_1',
         reason: 'provider refund completed',
+        resolutionKind: 'refund',
+        resolutionRef: 'wx-refund-20260705',
       }),
     ).resolves.toMatchObject({ lotExternalId: 'pay_risk_lot_1', status: 'closed', riskStatus: 'frozen' });
 
@@ -470,6 +472,8 @@ describe('admin.partner router', () => {
       lotExternalId: 'pay_risk_lot_1',
       reviewerUserId: 1,
       reason: 'provider refund completed',
+      resolutionKind: 'refund',
+      resolutionRef: 'wx-refund-20260705',
     });
   });
 
@@ -697,6 +701,8 @@ describe('admin.partner router', () => {
         riskClosedByUserId: 101,
         riskClosedAt: '2026-07-05T11:00:00.000Z',
         riskCloseReason: 'provider refund completed',
+        riskCloseResolutionKind: 'refund',
+        riskCloseResolutionRef: 'wx-refund-20260705',
       },
     });
     expect(riskLot).toMatchObject({
@@ -710,6 +716,8 @@ describe('admin.partner router', () => {
       riskClosedByUserId: 101,
       riskClosedAt: '2026-07-05T11:00:00.000Z',
       riskCloseReason: 'provider refund completed',
+      riskCloseResolutionKind: 'refund',
+      riskCloseResolutionRef: 'wx-refund-20260705',
     });
     expect(riskLot).not.toHaveProperty('metadata');
 
@@ -725,6 +733,8 @@ describe('admin.partner router', () => {
       metadata: {
         reviewerUserId: 101,
         reason: 'provider refund completed',
+        resolutionKind: 'refund',
+        resolutionRef: 'wx-refund-20260705',
         note: 'manual close after refund',
       },
     });
@@ -733,6 +743,8 @@ describe('admin.partner router', () => {
       eventType: 'lot_closed',
       reviewerUserId: 101,
       riskReason: 'provider refund completed',
+      riskResolutionKind: 'refund',
+      riskResolutionRef: 'wx-refund-20260705',
       riskNote: 'manual close after refund',
     });
     expect(riskEvent).not.toHaveProperty('metadata');

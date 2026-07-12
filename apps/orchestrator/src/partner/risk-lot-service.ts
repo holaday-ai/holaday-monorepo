@@ -9,8 +9,11 @@ import {
 } from '../db/schema/partner.js';
 
 const REVIEW_NOTE_MAX_LENGTH = 1000;
+const CLOSE_RESOLUTION_REF_MAX_LENGTH = 128;
+const CLOSE_RESOLUTION_KINDS = ['manual', 'refund', 'fraud'] as const;
 
 export type PartnerRiskLotTransitionReason = 'not_found' | 'not_frozen' | 'closed';
+export type PartnerRiskLotCloseResolutionKind = (typeof CLOSE_RESOLUTION_KINDS)[number];
 
 export interface FreezePartnerRiskLotInput {
   lotExternalId: string;
@@ -30,6 +33,8 @@ export interface ClosePartnerRiskLotInput {
   lotExternalId: string;
   reviewerUserId: number;
   reason: string;
+  resolutionKind?: PartnerRiskLotCloseResolutionKind;
+  resolutionRef?: string;
   now?: Date;
 }
 
@@ -173,6 +178,8 @@ export class PartnerRiskLotService {
     const lotExternalId = normalizeNonEmptyText(input.lotExternalId, 'lotExternalId');
     const reviewerUserId = normalizePositiveSafeInteger(input.reviewerUserId, 'reviewerUserId');
     const reason = normalizeNonEmptyText(input.reason, 'reason', REVIEW_NOTE_MAX_LENGTH);
+    const resolutionKind = normalizeCloseResolutionKind(input.resolutionKind);
+    const resolutionRef = normalizeOptionalText(input.resolutionRef, 'resolutionRef', CLOSE_RESOLUTION_REF_MAX_LENGTH);
     const now = normalizeDate(input.now ?? new Date(), 'now');
 
     return this.db.transaction(async (tx) => {
@@ -193,6 +200,8 @@ export class PartnerRiskLotService {
         riskClosedByUserId: reviewerUserId,
         riskClosedAt: now.toISOString(),
         riskCloseReason: reason,
+        riskCloseResolutionKind: resolutionKind,
+        ...(resolutionRef ? { riskCloseResolutionRef: resolutionRef } : {}),
         statusBeforeClose: lot.status,
         riskStatusBeforeClose: lot.riskStatus,
       };
@@ -222,6 +231,8 @@ export class PartnerRiskLotService {
         metadata: {
           reviewerUserId,
           reason,
+          resolutionKind,
+          ...(resolutionRef ? { resolutionRef } : {}),
           lotExternalId,
         },
       });
@@ -302,6 +313,12 @@ function normalizeOptionalText(value: string | undefined, field: string, maxLeng
     throw new RangeError(`${field} must be at most ${maxLength} characters`);
   }
   return normalized;
+}
+
+function normalizeCloseResolutionKind(value: PartnerRiskLotCloseResolutionKind | undefined): PartnerRiskLotCloseResolutionKind {
+  if (value === undefined) return 'manual';
+  if (CLOSE_RESOLUTION_KINDS.includes(value)) return value;
+  throw new RangeError('resolutionKind must be manual, refund, or fraud');
 }
 
 function normalizePositiveSafeInteger(value: number, field: string): number {

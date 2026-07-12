@@ -9,6 +9,7 @@ import {
   normalizeRiskScore,
   partnerKycQueueReviewPayload,
   partnerOrderActionLabel,
+  partnerRiskCloseResolutionKindLabel,
   partnerRiskEventSeverityLabel,
   partnerRiskEventTypeLabel,
   partnerRiskLotActionPayload,
@@ -69,6 +70,8 @@ describe('partner risk event labels', () => {
     expect(partnerRiskEventSeverityLabel('high')).toBe('高');
     expect(partnerRiskEventSeverityLabel('medium')).toBe('中');
     expect(partnerRiskEventSeverityLabel('provider_surprise')).toBe('未知');
+    expect(partnerRiskCloseResolutionKindLabel('refund')).toBe('退款完成');
+    expect(partnerRiskCloseResolutionKindLabel('provider_surprise')).toBe('人工处理');
   });
 });
 
@@ -82,13 +85,27 @@ describe('partnerRiskLotActionPayload', () => {
     });
     expect(partnerRiskLotActionPayload('close', '  已完成退款  ')).toEqual({
       reason: '已完成退款',
+      resolutionKind: 'manual',
+    });
+    expect(
+      partnerRiskLotActionPayload('close', '  已完成退款  ', {
+        resolutionKind: 'refund',
+        resolutionRef: ' wx-refund-20260705 ',
+      }),
+    ).toEqual({
+      reason: '已完成退款',
+      resolutionKind: 'refund',
+      resolutionRef: 'wx-refund-20260705',
     });
   });
 
   it('uses audited fallback copy when the operator note is blank', () => {
     expect(partnerRiskLotActionPayload('freeze', '   ')).toEqual({ reason: '后台风险冻结' });
     expect(partnerRiskLotActionPayload('resume', '')).toEqual({ note: '后台风险恢复' });
-    expect(partnerRiskLotActionPayload('close', '')).toEqual({ reason: '后台关闭风险批次' });
+    expect(partnerRiskLotActionPayload('close', '')).toEqual({
+      reason: '后台关闭风险批次',
+      resolutionKind: 'manual',
+    });
   });
 });
 
@@ -256,6 +273,8 @@ describe('normalizeAdminPartnerOverview', () => {
           riskClosedByUserId: 101,
           riskClosedAt: '2026-07-05T11:00:00.000Z',
           riskCloseReason: 'provider refund completed',
+          riskCloseResolutionKind: 'refund',
+          riskCloseResolutionRef: 'wx-refund-20260705',
         },
       ],
     });
@@ -272,6 +291,8 @@ describe('normalizeAdminPartnerOverview', () => {
       riskClosedByUserId: 101,
       riskClosedAt: '2026-07-05T11:00:00.000Z',
       riskCloseReason: 'provider refund completed',
+      riskCloseResolutionKind: 'refund',
+      riskCloseResolutionRef: 'wx-refund-20260705',
     });
   });
 
@@ -293,6 +314,8 @@ describe('normalizeAdminPartnerOverview', () => {
           status: 'closed',
           reviewerUserId: 101,
           riskReason: 'provider refund completed',
+          riskResolutionKind: 'refund',
+          riskResolutionRef: 'wx-refund-20260705',
           riskNote: 'manual close after refund',
           createdAt: '2026-07-05T11:00:00.000Z',
         },
@@ -307,6 +330,8 @@ describe('normalizeAdminPartnerOverview', () => {
       eventType: 'lot_closed',
       reviewerUserId: 101,
       riskReason: 'provider refund completed',
+      riskResolutionKind: 'refund',
+      riskResolutionRef: 'wx-refund-20260705',
       riskNote: 'manual close after refund',
     });
   });
@@ -394,6 +419,8 @@ describe('normalizeAdminPartnerOverview', () => {
           riskStatus: 'normal',
           riskFreezeReason: 'bank dispute signal',
           riskCloseReason: 'provider refund completed',
+          riskCloseResolutionKind: 'refund',
+          riskCloseResolutionRef: 'wx-refund-20260705',
         },
       ],
       riskEvents: [
@@ -408,6 +435,8 @@ describe('normalizeAdminPartnerOverview', () => {
           status: 'closed',
           reviewerUserId: 101,
           riskReason: 'provider refund completed',
+          riskResolutionKind: 'refund',
+          riskResolutionRef: 'wx-refund-20260705',
           riskNote: 'manual close after refund',
         },
       ],
@@ -481,6 +510,12 @@ describe('normalizeAdminPartnerOverview', () => {
     if (!byCloseReason.enabled) throw new Error('expected enabled state');
     expect(byCloseReason.riskLots).toHaveLength(1);
     expect(byCloseReason.riskEvents).toHaveLength(1);
+
+    const byResolutionRef = filterAdminPartnerOverview(state, 'wx-refund');
+    expect(byResolutionRef.enabled).toBe(true);
+    if (!byResolutionRef.enabled) throw new Error('expected enabled state');
+    expect(byResolutionRef.riskLots).toHaveLength(1);
+    expect(byResolutionRef.riskEvents).toHaveLength(1);
 
     const byRiskEventNote = filterAdminPartnerOverview(state, 'manual close');
     expect(byRiskEventNote.enabled).toBe(true);

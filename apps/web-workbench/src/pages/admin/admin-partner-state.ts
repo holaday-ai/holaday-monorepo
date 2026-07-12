@@ -141,18 +141,40 @@ export function partnerRiskLotQueueAction(row: {
   return { action: 'freeze', label: '冻结', pendingLabel: '冻结中', canClose: false };
 }
 
-export function partnerRiskLotActionPayload(action: 'freeze' | 'close', operatorNote: string): { reason: string };
+export type PartnerRiskLotCloseResolutionKind = 'manual' | 'refund' | 'fraud';
+
+export interface PartnerRiskLotCloseResolutionInput {
+  readonly resolutionKind?: PartnerRiskLotCloseResolutionKind;
+  readonly resolutionRef?: string;
+}
+
+export function partnerRiskLotActionPayload(action: 'freeze', operatorNote: string): { reason: string };
+export function partnerRiskLotActionPayload(
+  action: 'close',
+  operatorNote: string,
+): { reason: string; resolutionKind: PartnerRiskLotCloseResolutionKind };
+export function partnerRiskLotActionPayload(
+  action: 'close',
+  operatorNote: string,
+  resolution: PartnerRiskLotCloseResolutionInput,
+): { reason: string; resolutionKind: PartnerRiskLotCloseResolutionKind; resolutionRef?: string };
 export function partnerRiskLotActionPayload(action: 'resume', operatorNote: string): { note: string };
 export function partnerRiskLotActionPayload(
   action: 'freeze' | 'resume' | 'close',
   operatorNote: string,
-): { reason: string } | { note: string } {
+  resolution?: PartnerRiskLotCloseResolutionInput,
+): { reason: string; resolutionKind?: PartnerRiskLotCloseResolutionKind; resolutionRef?: string } | { note: string } {
   const normalized = operatorNote.trim();
   if (action === 'resume') {
     return { note: normalized || '后台风险恢复' };
   }
   if (action === 'close') {
-    return { reason: normalized || '后台关闭风险批次' };
+    const resolutionRef = resolution?.resolutionRef?.trim();
+    return {
+      reason: normalized || '后台关闭风险批次',
+      resolutionKind: resolution?.resolutionKind ?? 'manual',
+      ...(resolutionRef ? { resolutionRef } : {}),
+    };
   }
   return { reason: normalized || '后台风险冻结' };
 }
@@ -173,6 +195,15 @@ export function partnerRiskEventSeverityLabel(value: unknown): string {
     medium: '中',
     low: '低',
   }[severity] ?? '未知';
+}
+
+export function partnerRiskCloseResolutionKindLabel(value: unknown): string {
+  const resolutionKind = typeof value === 'string' ? value : '';
+  return {
+    manual: '人工处理',
+    refund: '退款完成',
+    fraud: '欺诈关闭',
+  }[resolutionKind] ?? '人工处理';
 }
 
 export function partnerKycQueueReviewPayload(
@@ -323,6 +354,8 @@ export function normalizeAdminPartnerOverview(value: unknown) {
         riskClosedByUserId: Math.round(nonNegativeNumber(row.riskClosedByUserId)),
         riskClosedAt: safeText(row.riskClosedAt),
         riskCloseReason: safeText(row.riskCloseReason),
+        riskCloseResolutionKind: safeText(row.riskCloseResolutionKind),
+        riskCloseResolutionRef: safeText(row.riskCloseResolutionRef),
         updatedAt: row.updatedAt,
       };
     }),
@@ -339,6 +372,8 @@ export function normalizeAdminPartnerOverview(value: unknown) {
         status: safeText(row.status),
         reviewerUserId: Math.round(nonNegativeNumber(row.reviewerUserId)),
         riskReason: safeText(row.riskReason),
+        riskResolutionKind: safeText(row.riskResolutionKind),
+        riskResolutionRef: safeText(row.riskResolutionRef),
         riskNote: safeText(row.riskNote),
         createdAt: row.createdAt,
         updatedAt: row.updatedAt,
@@ -546,6 +581,8 @@ export function filterAdminPartnerOverview(
         'riskResumeNote',
         'riskResumedAt',
         'riskCloseReason',
+        'riskCloseResolutionKind',
+        'riskCloseResolutionRef',
         'riskClosedAt',
       ]),
     ),
@@ -560,6 +597,8 @@ export function filterAdminPartnerOverview(
         'severity',
         'status',
         'riskReason',
+        'riskResolutionKind',
+        'riskResolutionRef',
         'riskNote',
       ]),
     ),
