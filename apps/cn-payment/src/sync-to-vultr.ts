@@ -169,7 +169,7 @@ export class VultrSync {
  * base URL. Lets a future endpoint share the same env without an
  * additional VULTR_*_URL field.
  */
-function deriveBase(fullConfirmUrl: string): string {
+export function deriveBase(fullConfirmUrl: string): string {
   const idx = fullConfirmUrl.indexOf('/api/internal/');
   if (idx >= 0) return fullConfirmUrl.slice(0, idx);
   // Fallback: trust the caller to have set a bare base if they
