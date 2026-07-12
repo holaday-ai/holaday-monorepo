@@ -146,7 +146,8 @@ Use `/admin/partners` for:
 - Pending or review-required partner orders.
 - Withdrawal approval, rejection, and paid marking.
 - Risk lots requiring investigation.
-- Date-window reconciliation and CSV copy.
+- Date-window reconciliation and CSV copy, including referral reward
+  rows and reward totals.
 
 Reconciliation is based on `updated_at`, not `created_at`. Use it for
 settlement activity in a window, not raw order origination.
@@ -214,6 +215,9 @@ Daily:
 - Compare cn-payment successful provider notifications with
   `partner_recharge_orders.status='completed'`.
 - Search admin reconciliation by date window.
+- Confirm referral rewards in `partner_referrals` match locked referral
+  credit ledger rows and appear in reconciliation CSV as `referral`
+  rows.
 - Confirm `payments` table remains unchanged by partner purchases.
 - Confirm `partner_recharge_orders.provider_capture_id` is unique per
   provider.
@@ -288,3 +292,27 @@ retry while the issue is fixed.
 Do not roll back database migrations unless explicitly approved. The
 partner schema is additive and isolated; disabling the flag is the safe
 rollback path.
+
+## Verification Snapshot
+
+Local worktree verification on 2026-07-12 covered:
+
+- Partner backend domain and routers:
+  `pnpm --filter @holaday/orchestrator exec vitest run src/partner src/trpc/routers/partner.test.ts src/trpc/routers/partner-mutations.test.ts src/trpc/routers/admin-partner.test.ts`
+- Partner frontend state:
+  `pnpm --filter @holaday/web-workbench exec vitest run src/lib/partner-page-state.test.ts src/pages/admin/admin-partner-state.test.ts`
+- Type checks:
+  `pnpm --filter @holaday/shared-types typecheck`,
+  `pnpm --filter @holaday/orchestrator exec tsc --noEmit`,
+  `pnpm --filter @holaday/web-workbench exec tsc --noEmit`
+- Existing payment isolation:
+  `pnpm --filter @holaday/orchestrator exec vitest run src/trpc/routers/payment.test.ts src/trpc/routers/admin-finance.test.ts`,
+  `pnpm --filter @holaday/web-workbench exec vitest run src/lib/plan-payment-state.test.ts src/lib/billing-page-state.test.ts`
+- Partner nav dark launch:
+  `pnpm --filter @holaday/web-workbench exec vitest run src/lib/sidebar-feature-nav.test.ts`
+
+The current frontend implementation intentionally uses a single
+`/partner` workbench page instead of separate `/partner/recharge`,
+`/partner/ledger`, and `/partner/withdraw` pages. Recharge, ledger, KYC,
+invite, daily activity, order history, withdrawal, and referral history
+are all contained in that isolated workbench.
