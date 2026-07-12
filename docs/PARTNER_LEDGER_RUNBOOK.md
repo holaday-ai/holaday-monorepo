@@ -311,8 +311,8 @@ Local worktree verification on 2026-07-12 covered:
 - Partner nav dark launch:
   `pnpm --filter @holaday/web-workbench exec vitest run src/lib/sidebar-feature-nav.test.ts`
 
-The current frontend implementation intentionally uses a single
-`/partner` workbench page instead of separate `/partner/recharge`,
-`/partner/ledger`, and `/partner/withdraw` pages. Recharge, ledger, KYC,
-invite, daily activity, order history, withdrawal, and referral history
-are all contained in that isolated workbench.
+The current frontend implementation uses a single `/partner` workbench
+page for recharge, ledger, KYC, invite, daily activity, order history,
+withdrawal, and referral history. Legacy deep links for
+`/partner/recharge`, `/partner/ledger`, and `/partner/withdraw` redirect
+to the corresponding section anchors inside that isolated workbench.
