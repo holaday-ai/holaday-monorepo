@@ -438,7 +438,13 @@ function EnabledAdminPartnerReview({
         setPayoutIds={setPayoutIds}
         runAction={runAction}
       />
-      <WithdrawalHistory rows={data.withdrawalHistory} />
+      <WithdrawalHistory
+        rows={data.withdrawalHistory}
+        pendingAction={pendingAction}
+        withdrawalReasons={withdrawalReasons}
+        setWithdrawalReasons={setWithdrawalReasons}
+        runAction={runAction}
+      />
       <RiskLotQueue
         rows={data.riskLots}
         pendingAction={pendingAction}
@@ -974,20 +980,36 @@ function WithdrawalQueue({
   );
 }
 
-function WithdrawalHistory({ rows }: { rows: EnabledOverviewState['withdrawalHistory'] }): JSX.Element {
+function WithdrawalHistory({
+  rows,
+  pendingAction,
+  withdrawalReasons,
+  setWithdrawalReasons,
+  runAction,
+}: {
+  rows: EnabledOverviewState['withdrawalHistory'];
+  pendingAction: string | null;
+  withdrawalReasons: Record<string, string>;
+  setWithdrawalReasons: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  runAction: (actionKey: string, action: () => Promise<void>, success: string) => Promise<void>;
+}): JSX.Element {
   return (
     <QueueSection title="提现历史" empty="暂无提现历史">
       <DataTable
-        headers={['用户', '金额', '状态', '银行指纹', '处理信息', '更新时间']}
+        headers={['用户', '金额', '状态', '银行指纹', '处理信息', '更新时间', '操作']}
         empty={rows.length === 0}
-        colSpan={6}
+        colSpan={7}
       >
         {rows.map((row) => {
+          const returnReason = withdrawalReasons[row.withdrawalExternalId] ?? '';
           const detail =
             row.status === 'paid'
               ? [row.providerPayoutId, row.paidAt ? `出款 ${formatDateTime(row.paidAt)}` : ''].filter(Boolean).join(' / ')
               : row.status === 'returned'
-                ? ['资金退回', formatDateTime(row.updatedAt as string | Date | null)]
+                ? [
+                    row.returnedReason || '资金退回',
+                    row.returnedAt ? `退回 ${formatDateTime(row.returnedAt)}` : '',
+                  ]
                     .filter(Boolean)
                     .join(' / ')
                 : [row.rejectionReason, row.rejectedAt ? `拒绝 ${formatDateTime(row.rejectedAt)}` : '']
@@ -1001,6 +1023,44 @@ function WithdrawalHistory({ rows }: { rows: EnabledOverviewState['withdrawalHis
               <td className="px-3 py-3 text-muted-foreground">{truncate(row.bankAccountFingerprint, 24) || '—'}</td>
               <td className="px-3 py-3 text-muted-foreground">{truncate(detail, 42) || '—'}</td>
               <td className="px-3 py-3 text-muted-foreground">{formatDateTime(row.updatedAt as string | Date | null)}</td>
+              <td className="px-5 py-3">
+                {row.status === 'paid' ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      value={returnReason}
+                      onChange={(event) =>
+                        setWithdrawalReasons((current) => ({
+                          ...current,
+                          [row.withdrawalExternalId]: event.target.value,
+                        }))
+                      }
+                      placeholder="退回原因"
+                      className="h-8 w-36 rounded-[8px] border border-[#DCDDDD] px-2 text-[12px] outline-none focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
+                    />
+                    <ActionButton
+                      icon={RefreshCw}
+                      label="退回"
+                      compact
+                      tone="danger"
+                      pending={pendingAction === `withdraw-return:${row.withdrawalExternalId}`}
+                      onClick={() =>
+                        void runAction(
+                          `withdraw-return:${row.withdrawalExternalId}`,
+                          async () => {
+                            await trpc.admin.partner.markWithdrawalReturned.mutate({
+                              withdrawalExternalId: row.withdrawalExternalId,
+                              reason: returnReason.trim() || '银行退回',
+                            });
+                          },
+                          '提现已退回',
+                        )
+                      }
+                    />
+                  </div>
+                ) : (
+                  <span className="text-[12px] text-muted-foreground">—</span>
+                )}
+              </td>
             </tr>
           );
         })}

@@ -1203,6 +1203,56 @@ describe('WithdrawalService admin transitions', () => {
     ]);
   });
 
+  it('marks a paid withdrawal returned and restores withdrawable credit once', async () => {
+    const existing = fakeWithdrawalRequest({
+      status: 'paid',
+      metadata: {
+        paidByUserId: 999,
+        providerPayoutId: 'bank-payout-1',
+        paidAt: '2026-07-03T05:00:00.000Z',
+      },
+    });
+    const { ledger, service } = serviceWithDeps({
+      db: new FakeWithdrawalDb([existing]),
+      ledger: new FakeLedgerService(0),
+    });
+
+    const row = await service.markWithdrawalReturned({
+      withdrawalExternalId: 'pay_existing_withdrawal',
+      reviewerUserId: 1001,
+      reason: 'bank account returned funds',
+      now: new Date('2026-07-04T06:00:00.000Z'),
+    });
+    const retry = await service.markWithdrawalReturned({
+      withdrawalExternalId: 'pay_existing_withdrawal',
+      reviewerUserId: 1001,
+      reason: 'bank account returned funds',
+      now: new Date('2026-07-04T06:01:00.000Z'),
+    });
+
+    expect(retry).toBe(row);
+    expect(row).toMatchObject({
+      status: 'returned',
+      metadata: {
+        paidByUserId: 999,
+        providerPayoutId: 'bank-payout-1',
+        paidAt: '2026-07-03T05:00:00.000Z',
+        returnedByUserId: 1001,
+        returnedReason: 'bank account returned funds',
+        returnedAt: '2026-07-04T06:00:00.000Z',
+      },
+    });
+    expect(ledger.entries).toEqual([
+      expect.objectContaining({
+        entryType: 'withdrawal_returned_reversal',
+        direction: 'credit',
+        bucket: 'withdrawable',
+        amountCreditCents: 600_00,
+        idempotencyKey: 'withdrawal:return:withdrawable:withdrawal-idem-1',
+      }),
+    ]);
+  });
+
   it('blocks payout when the account becomes frozen after approval', async () => {
     const existing = fakeWithdrawalRequest({ status: 'approved' });
     const { db, ledger, service } = serviceWithDeps({
@@ -1261,5 +1311,18 @@ describe('WithdrawalService admin transitions', () => {
       }),
     ).rejects.toMatchObject({ reason: 'already_paid' });
     expect(ledger.entries).toHaveLength(0);
+
+    const { ledger: approvedLedger, service: approvedService } = serviceWithDeps({
+      db: new FakeWithdrawalDb([fakeWithdrawalRequest({ status: 'approved' })]),
+      ledger: new FakeLedgerService(0),
+    });
+    await expect(
+      approvedService.markWithdrawalReturned({
+        withdrawalExternalId: 'pay_existing_withdrawal',
+        reviewerUserId: 999,
+        reason: 'return too early',
+      }),
+    ).rejects.toMatchObject({ reason: 'not_paid' });
+    expect(approvedLedger.entries).toHaveLength(0);
   });
 });

@@ -406,6 +406,8 @@ describe('normalizeAdminPartnerOverview', () => {
           email: 'returned@holaday.local',
           displayName: 'Returned Partner',
           status: 'returned',
+          returnedReason: 'bank returned funds',
+          returnedAt: '2026-07-04T06:00:00.000Z',
           amountCreditCents: 800_00,
         },
       ],
@@ -490,6 +492,16 @@ describe('normalizeAdminPartnerOverview', () => {
     if (!byReturned.enabled) throw new Error('expected enabled state');
     expect(byReturned.withdrawalHistory).toHaveLength(1);
     expect(byReturned.withdrawalHistory[0]?.status).toBe('returned');
+
+    const byReturnedReason = filterAdminPartnerOverview(state, 'returned funds');
+    expect(byReturnedReason.enabled).toBe(true);
+    if (!byReturnedReason.enabled) throw new Error('expected enabled state');
+    expect(byReturnedReason.withdrawalHistory).toHaveLength(1);
+    expect(byReturnedReason.withdrawalHistory[0]).toMatchObject({
+      status: 'returned',
+      returnedReason: 'bank returned funds',
+      returnedAt: '2026-07-04T06:00:00.000Z',
+    });
 
     const byRiskLot = filterAdminPartnerOverview(state, 'LOT_RISK');
     expect(byRiskLot.enabled).toBe(true);

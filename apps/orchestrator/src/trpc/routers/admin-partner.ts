@@ -222,6 +222,9 @@ function summarizeWithdrawalAudit(metadataValue: unknown) {
     paidByUserId: metadataNumber(metadata, 'paidByUserId'),
     providerPayoutId: metadataText(metadata, 'providerPayoutId'),
     paidAt: metadataText(metadata, 'paidAt'),
+    returnedByUserId: metadataNumber(metadata, 'returnedByUserId'),
+    returnedReason: metadataText(metadata, 'returnedReason'),
+    returnedAt: metadataText(metadata, 'returnedAt'),
   };
 }
 
@@ -941,6 +944,28 @@ export const adminPartnerRouter = router({
           withdrawalExternalId: input.withdrawalExternalId,
           reviewerUserId: adminUser.id,
           providerPayoutId: input.providerPayoutId,
+        });
+        return summarizeWithdrawal(row);
+      } catch (error) {
+        return mapWithdrawalError(error);
+      }
+    }),
+
+  markWithdrawalReturned: adminProcedure
+    .input(
+      z.object({
+        withdrawalExternalId: z.string().trim().min(1).max(32),
+        reason: z.string().trim().min(1).max(1000),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      requirePartnerLedgerEnabled();
+      const adminUser = await resolveUserByExternalId(ctx.db, ctx.userId);
+      try {
+        const row = await new WithdrawalService(ctx.db).markWithdrawalReturned({
+          withdrawalExternalId: input.withdrawalExternalId,
+          reviewerUserId: adminUser.id,
+          reason: input.reason,
         });
         return summarizeWithdrawal(row);
       } catch (error) {

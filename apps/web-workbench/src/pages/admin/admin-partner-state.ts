@@ -270,6 +270,8 @@ function normalizeWithdrawalOverviewRow(raw: unknown) {
     approvedAt: safeText(row.approvedAt),
     rejectedAt: safeText(row.rejectedAt),
     paidAt: safeText(row.paidAt),
+    returnedReason: safeText(row.returnedReason),
+    returnedAt: safeText(row.returnedAt),
     updatedAt: row.updatedAt,
     riskScore: normalizeRiskScore(row.riskScore),
   };
@@ -566,6 +568,8 @@ export function filterAdminPartnerOverview(
         'approvedAt',
         'rejectedAt',
         'paidAt',
+        'returnedReason',
+        'returnedAt',
       ]),
     ),
     riskLots: state.riskLots.filter((row) =>

@@ -15,6 +15,7 @@ const {
   approveWithdrawalMock,
   rejectWithdrawalMock,
   markWithdrawalPaidMock,
+  markWithdrawalReturnedMock,
   freezeRiskLotMock,
   resumeRiskLotMock,
   closeRiskLotMock,
@@ -25,6 +26,7 @@ const {
   approveWithdrawalMock: vi.fn(),
   rejectWithdrawalMock: vi.fn(),
   markWithdrawalPaidMock: vi.fn(),
+  markWithdrawalReturnedMock: vi.fn(),
   freezeRiskLotMock: vi.fn(),
   resumeRiskLotMock: vi.fn(),
   closeRiskLotMock: vi.fn(),
@@ -59,6 +61,7 @@ vi.mock('../../partner/withdrawal-service.js', async (importOriginal) => {
       approveWithdrawal: approveWithdrawalMock,
       rejectWithdrawal: rejectWithdrawalMock,
       markWithdrawalPaid: markWithdrawalPaidMock,
+      markWithdrawalReturned: markWithdrawalReturnedMock,
     })),
   };
 });
@@ -241,6 +244,7 @@ describe('admin.partner router', () => {
     approveWithdrawalMock.mockReset();
     rejectWithdrawalMock.mockReset();
     markWithdrawalPaidMock.mockReset();
+    markWithdrawalReturnedMock.mockReset();
     freezeRiskLotMock.mockReset();
     resumeRiskLotMock.mockReset();
     closeRiskLotMock.mockReset();
@@ -365,6 +369,7 @@ describe('admin.partner router', () => {
     approveWithdrawalMock.mockResolvedValueOnce(fakeWithdrawal({ status: 'approved' }));
     rejectWithdrawalMock.mockResolvedValueOnce(fakeWithdrawal({ status: 'rejected', rejectionReason: 'bank mismatch' }));
     markWithdrawalPaidMock.mockResolvedValueOnce(fakeWithdrawal({ status: 'paid' }));
+    markWithdrawalReturnedMock.mockResolvedValueOnce(fakeWithdrawal({ status: 'returned' }));
     const caller = adminRouter.createCaller(makeContext()).partner;
 
     await expect(
@@ -385,6 +390,12 @@ describe('admin.partner router', () => {
         providerPayoutId: 'bank-payout-1',
       }),
     ).resolves.toMatchObject({ status: 'paid' });
+    await expect(
+      caller.markWithdrawalReturned({
+        withdrawalExternalId: 'pay_withdrawal_1',
+        reason: 'bank returned funds',
+      }),
+    ).resolves.toMatchObject({ status: 'returned' });
 
     expect(approveWithdrawalMock).toHaveBeenCalledWith({
       withdrawalExternalId: 'pay_withdrawal_1',
@@ -400,6 +411,11 @@ describe('admin.partner router', () => {
       withdrawalExternalId: 'pay_withdrawal_1',
       reviewerUserId: 1,
       providerPayoutId: 'bank-payout-1',
+    });
+    expect(markWithdrawalReturnedMock).toHaveBeenCalledWith({
+      withdrawalExternalId: 'pay_withdrawal_1',
+      reviewerUserId: 1,
+      reason: 'bank returned funds',
     });
   });
 
@@ -671,6 +687,9 @@ describe('admin.partner router', () => {
           approvalNote: 'bank checked',
           providerPayoutId: 'bank-payout-1',
           paidAt: '2026-07-03T06:00:00.000Z',
+          returnedByUserId: 89,
+          returnedReason: 'bank returned funds',
+          returnedAt: '2026-07-04T06:00:00.000Z',
         },
       }),
     );
@@ -681,6 +700,9 @@ describe('admin.partner router', () => {
       approvalNote: 'bank checked',
       providerPayoutId: 'bank-payout-1',
       paidAt: '2026-07-03T06:00:00.000Z',
+      returnedByUserId: 89,
+      returnedReason: 'bank returned funds',
+      returnedAt: '2026-07-04T06:00:00.000Z',
     });
 
     const riskLot = (

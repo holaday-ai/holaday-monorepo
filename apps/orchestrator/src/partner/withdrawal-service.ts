@@ -79,6 +79,7 @@ export class WithdrawalTransitionError extends Error {
       | 'already_paid'
       | 'already_rejected'
       | 'already_returned'
+      | 'not_paid'
       | 'payout_conflict'
       | 'update_conflict',
   ) {
@@ -269,6 +270,10 @@ type NormalizedMarkPaidWithdrawalInput = Required<WithdrawalAdminInputBase> & {
   providerPayoutId: string;
 };
 
+type NormalizedReturnedWithdrawalInput = Required<WithdrawalAdminInputBase> & {
+  reason: string;
+};
+
 function normalizeRequestInput(input: WithdrawalRequestInput): NormalizedWithdrawalRequest {
   const highRisk = assertBoolean(input.highRisk, 'highRisk');
   return {
@@ -324,6 +329,21 @@ function normalizeMarkPaidInput(
     ),
     reviewerUserId: assertPositiveSafeInteger(input.reviewerUserId, 'reviewerUserId'),
     providerPayoutId: assertBoundedNonEmptyString(input.providerPayoutId, 'providerPayoutId', 128),
+    now: assertValidDate(input.now ?? new Date(), 'now'),
+  };
+}
+
+function normalizeReturnedInput(
+  input: WithdrawalAdminInputBase & { reason: string },
+): NormalizedReturnedWithdrawalInput {
+  return {
+    withdrawalExternalId: assertBoundedNonEmptyString(
+      input.withdrawalExternalId,
+      'withdrawalExternalId',
+      32,
+    ),
+    reviewerUserId: assertPositiveSafeInteger(input.reviewerUserId, 'reviewerUserId'),
+    reason: assertBoundedNonEmptyString(input.reason, 'reason', 1000),
     now: assertValidDate(input.now ?? new Date(), 'now'),
   };
 }
@@ -585,6 +605,24 @@ export class WithdrawalService {
     });
   }
 
+  private async postReturnedReversalEntry(
+    ledger: WithdrawalLedger,
+    row: PartnerWithdrawalRequest,
+  ): Promise<void> {
+    await ledger.postEntry({
+      userId: row.userId,
+      entryType: 'withdrawal_returned_reversal',
+      direction: 'credit',
+      bucket: 'withdrawable',
+      amountCreditCents: row.amountCreditCents,
+      idempotencyKey: `withdrawal:return:withdrawable:${row.idempotencyKey}`,
+      metadata: {
+        withdrawalRequestId: row.id,
+        withdrawalRequestExternalId: row.externalId,
+      },
+    });
+  }
+
   private async requestWithdrawalInTransaction(
     db: DB,
     request: NormalizedWithdrawalRequest,
@@ -811,6 +849,50 @@ export class WithdrawalService {
       const updated = await this.readByExternalId(db, row.externalId);
       if (!updated) throw new WithdrawalTransitionError('not_found');
       await this.postPaidSettlementEntry(ledger, updated);
+      return updated;
+    });
+  }
+
+  async markWithdrawalReturned(
+    input: WithdrawalAdminInputBase & { reason: string },
+  ): Promise<PartnerWithdrawalRequest> {
+    const request = normalizeReturnedInput(input);
+    return this.db.transaction(async (tx) => {
+      const db = tx as unknown as DB;
+      const row = await this.readByExternalId(db, request.withdrawalExternalId);
+      if (!row) throw new WithdrawalTransitionError('not_found');
+      await this.lockUserForWithdrawal(db, row.userId);
+      const ledger = this.ledgerFor(db);
+
+      if (row.status === 'returned') {
+        await this.postReturnedReversalEntry(ledger, row);
+        return row;
+      }
+      if (row.status !== 'paid') {
+        throw transitionErrorForTerminalStatus(row.status, 'not_paid');
+      }
+
+      const metadata = {
+        ...metadataRecord(row.metadata),
+        returnedByUserId: request.reviewerUserId,
+        returnedReason: request.reason,
+        returnedAt: request.now.toISOString(),
+      };
+      const result = await db
+        .update(partnerWithdrawalRequests)
+        .set({
+          status: 'returned',
+          metadata,
+          updatedAt: request.now,
+        })
+        .where(eq(partnerWithdrawalRequests.externalId, row.externalId));
+      if (readAffectedRows(result) !== 1) {
+        throw new WithdrawalTransitionError('update_conflict');
+      }
+
+      const updated = await this.readByExternalId(db, row.externalId);
+      if (!updated) throw new WithdrawalTransitionError('not_found');
+      await this.postReturnedReversalEntry(ledger, updated);
       return updated;
     });
   }
