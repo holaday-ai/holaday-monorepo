@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { getTableConfig, type MySqlTable } from 'drizzle-orm/mysql-core';
 import { describe, expect, it } from 'vitest';
 import {
@@ -56,7 +56,7 @@ describe('partner schema contract', () => {
   });
 
   it('keeps the partner ledger migration additive', async () => {
-    const migration = await readFile(new URL('../../drizzle/0039_partner_ledger.sql', import.meta.url), 'utf8');
+    const migration = await readFile(new URL('../../drizzle/0040_partner_ledger.sql', import.meta.url), 'utf8');
 
     expect(migration.match(/\bCREATE TABLE\b/g)).toHaveLength(11);
     expect(migration).toContain('uk_partner_daily_allocations_lot_date');
@@ -70,8 +70,28 @@ describe('partner schema contract', () => {
     expect(migration).not.toMatch(/^\s*DELETE\b/im);
   });
 
+  it('keeps numbered migration prefixes unique', async () => {
+    const files = (await readdir(new URL('../../drizzle/', import.meta.url))).filter((file) =>
+      /^\d{4}_.+\.sql$/.test(file),
+    );
+    const seen = new Map<string, string>();
+    const duplicates: string[] = [];
+
+    for (const file of files) {
+      const prefix = file.slice(0, 4);
+      const existing = seen.get(prefix);
+      if (existing) {
+        duplicates.push(`${prefix}: ${existing}, ${file}`);
+      } else {
+        seen.set(prefix, file);
+      }
+    }
+
+    expect(duplicates).toEqual([]);
+  });
+
   it('keeps the partner activity migration additive', async () => {
-    const migration = await readFile(new URL('../../drizzle/0040_partner_activity_events.sql', import.meta.url), 'utf8');
+    const migration = await readFile(new URL('../../drizzle/0041_partner_activity_events.sql', import.meta.url), 'utf8');
 
     expect(migration.match(/\bCREATE TABLE\b/g)).toHaveLength(1);
     expect(migration).toContain('partner_activity_events');

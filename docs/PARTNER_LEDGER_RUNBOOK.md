@@ -44,8 +44,8 @@ from the same origin for partner callbacks.
    pnpm --filter @holaday/orchestrator db:migrate:numbered
    ```
 
-   Confirm `0039_partner_ledger.sql` and
-   `0040_partner_activity_events.sql` have applied.
+   Confirm `0040_partner_ledger.sql` and
+   `0041_partner_activity_events.sql` have applied.
 
 2. Deploy orchestrator with `PARTNER_LEDGER_ENABLED=false`.
 
