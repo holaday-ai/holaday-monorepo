@@ -268,6 +268,9 @@ describe('partner page state helpers', () => {
           providerPayoutId: '',
           paidAt: null,
           paidAtLabel: '—',
+          returnedReason: '',
+          returnedAt: null,
+          returnedAtLabel: '—',
           riskScore: 89,
         },
       ],
@@ -377,6 +380,13 @@ describe('partner page state helpers', () => {
           status: 'rejected',
           rejectionReason: 'bank mismatch',
         },
+        {
+          withdrawalExternalId: 'pay_withdrawal_returned',
+          amountCreditCents: 800_00,
+          status: 'returned',
+          returnedReason: 'bank returned funds',
+          returnedAt: '2026-07-04T06:00:00.000Z',
+        },
       ],
     });
 
@@ -393,6 +403,13 @@ describe('partner page state helpers', () => {
     expect(state.withdrawals[1]).toMatchObject({
       statusLabel: '未通过',
       statusHelp: '提现未通过：bank mismatch',
+    });
+    expect(state.withdrawals[2]).toMatchObject({
+      statusLabel: '已退回',
+      statusHelp: '提现已退回：bank returned funds',
+      returnedReason: 'bank returned funds',
+      returnedAt: '2026-07-04',
+      returnedAtLabel: '2026-07-04',
     });
   });
 

@@ -524,6 +524,15 @@ describe('partnerRouter', () => {
             paidAt: '2026-07-03T06:00:00.000Z',
           },
         }),
+        fakeWithdrawal({
+          id: 62,
+          externalId: 'pay_withdrawal_returned',
+          status: 'returned',
+          metadata: {
+            returnedReason: 'bank returned funds',
+            returnedAt: '2026-07-04T06:00:00.000Z',
+          },
+        }),
       ],
     });
 
@@ -551,6 +560,12 @@ describe('partnerRouter', () => {
           status: 'paid',
           providerPayoutId: 'bank-payout-1',
           paidAt: '2026-07-03T06:00:00.000Z',
+        },
+        {
+          withdrawalExternalId: 'pay_withdrawal_returned',
+          status: 'returned',
+          returnedReason: 'bank returned funds',
+          returnedAt: '2026-07-04T06:00:00.000Z',
         },
       ],
     });

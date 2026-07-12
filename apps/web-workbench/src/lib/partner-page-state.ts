@@ -172,6 +172,9 @@ export interface PartnerWithdrawalActivityState {
   readonly providerPayoutId: string;
   readonly paidAt: string | null;
   readonly paidAtLabel: string;
+  readonly returnedReason: string;
+  readonly returnedAt: string | null;
+  readonly returnedAtLabel: string;
   readonly riskScore: number;
 }
 
@@ -661,8 +664,10 @@ function normalizeWithdrawals(value: unknown): readonly PartnerWithdrawalActivit
     const status = safeTrimmedString(entry.status) || 'requested';
     const reviewDueAt = dateOnly(entry.reviewDueAt);
     const paidAt = dateOnly(entry.paidAt);
+    const returnedAt = dateOnly(entry.returnedAt);
     const rejectionReason = safeTrimmedString(entry.rejectionReason);
     const providerPayoutId = safeTrimmedString(entry.providerPayoutId);
+    const returnedReason = safeTrimmedString(entry.returnedReason);
     return [
       {
         key: withdrawalExternalId,
@@ -673,6 +678,7 @@ function normalizeWithdrawals(value: unknown): readonly PartnerWithdrawalActivit
         statusHelp: withdrawalStatusHelp(status, {
           rejectionReason,
           providerPayoutId,
+          returnedReason,
         }),
         reviewDueAt,
         reviewDueAtLabel: reviewDueAt ?? '—',
@@ -681,6 +687,9 @@ function normalizeWithdrawals(value: unknown): readonly PartnerWithdrawalActivit
         providerPayoutId,
         paidAt,
         paidAtLabel: paidAt ?? '—',
+        returnedReason,
+        returnedAt,
+        returnedAtLabel: returnedAt ?? '—',
         riskScore: safeRiskScore(entry.riskScore),
       },
     ];
@@ -722,6 +731,7 @@ function withdrawalStatusHelp(
   detail: {
     readonly rejectionReason: string;
     readonly providerPayoutId: string;
+    readonly returnedReason: string;
   },
 ): string {
   if (status === 'requested') return '提现申请已提交，等待后台复核。';
@@ -735,7 +745,9 @@ function withdrawalStatusHelp(
   if (status === 'rejected') {
     return detail.rejectionReason ? `提现未通过：${detail.rejectionReason}` : '提现未通过，资金已回到可用余额。';
   }
-  if (status === 'returned') return '提现已退回，资金会回到可用余额。';
+  if (status === 'returned') {
+    return detail.returnedReason ? `提现已退回：${detail.returnedReason}` : '提现已退回，资金会回到可用余额。';
+  }
   return '提现状态已更新，请刷新查看最新进度。';
 }
 

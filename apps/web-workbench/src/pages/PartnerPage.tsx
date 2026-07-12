@@ -1306,7 +1306,7 @@ function RecentWithdrawalsTable({ rows }: { rows: PartnerEnabledState['withdrawa
             <th scope="col" className="pb-2 pr-4 font-medium">状态</th>
             <th scope="col" className="pb-2 pr-4 font-medium">说明</th>
             <th scope="col" className="pb-2 pr-4 font-medium">银行指纹</th>
-            <th scope="col" className="pb-2 pr-4 font-medium">复核</th>
+            <th scope="col" className="pb-2 pr-4 font-medium">时间</th>
             <th scope="col" className="pb-2 font-medium">风险</th>
           </tr>
         </thead>
@@ -1322,7 +1322,7 @@ function RecentWithdrawalsTable({ rows }: { rows: PartnerEnabledState['withdrawa
                   {row.bankAccountFingerprint || '—'}
                 </span>
               </td>
-              <td className="py-3 pr-4 text-muted-foreground">{row.reviewDueAtLabel}</td>
+              <td className="py-3 pr-4 text-muted-foreground">{withdrawalTimelineLabel(row)}</td>
               <td className="py-3 tabular-nums text-muted-foreground">{row.riskScore}</td>
             </tr>
           ))}
@@ -1350,6 +1350,12 @@ function ReferralSummary({ referral }: { referral: PartnerReferralSummary }): JS
       <SummaryItem label="奖励类型" value={referral.assisted ? '代充值 10%' : '普通邀请 20%'} />
     </dl>
   );
+}
+
+function withdrawalTimelineLabel(row: PartnerEnabledState['withdrawals'][number]): string {
+  if (row.status === 'paid') return row.paidAtLabel;
+  if (row.status === 'returned') return row.returnedAtLabel;
+  return row.reviewDueAtLabel;
 }
 
 function KycSubmissionSummary({ submission }: { submission: PartnerKycSubmissionSummary }): JSX.Element {

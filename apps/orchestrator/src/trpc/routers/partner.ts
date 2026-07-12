@@ -290,6 +290,8 @@ function summarizePartnerWithdrawal(withdrawal: {
   const providerPayoutId = metadataText(metadata, 'providerPayoutId');
   const paidAt = metadataText(metadata, 'paidAt');
   const rejectedAt = metadataText(metadata, 'rejectedAt');
+  const returnedReason = metadataText(metadata, 'returnedReason');
+  const returnedAt = metadataText(metadata, 'returnedAt');
   return {
     withdrawalExternalId: withdrawal.externalId,
     amountCreditCents: withdrawal.amountCreditCents,
@@ -301,6 +303,8 @@ function summarizePartnerWithdrawal(withdrawal: {
     ...(providerPayoutId ? { providerPayoutId } : {}),
     ...(paidAt ? { paidAt } : {}),
     ...(rejectedAt ? { rejectedAt } : {}),
+    ...(returnedReason ? { returnedReason } : {}),
+    ...(returnedAt ? { returnedAt } : {}),
   };
 }
 
