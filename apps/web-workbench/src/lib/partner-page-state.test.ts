@@ -274,6 +274,7 @@ describe('partner page state helpers', () => {
           riskScore: 89,
         },
       ],
+      referrals: [],
     });
   });
 
@@ -388,6 +389,17 @@ describe('partner page state helpers', () => {
           returnedAt: '2026-07-04T06:00:00.000Z',
         },
       ],
+      referrals: [
+        {
+          referralExternalId: 'pay_referral_rewarded',
+          status: 'rewarded',
+          assisted: false,
+          rewardCreditCents: 2_000_00,
+          rewardRateBps: 2_000,
+          createdAt: '2026-07-01T00:00:00.000Z',
+          rewardedAt: '2026-07-04T06:00:00.000Z',
+        },
+      ],
     });
 
     expect(state.enabled).toBe(true);
@@ -410,6 +422,17 @@ describe('partner page state helpers', () => {
       returnedReason: 'bank returned funds',
       returnedAt: '2026-07-04',
       returnedAtLabel: '2026-07-04',
+    });
+    expect(state.referrals[0]).toMatchObject({
+      referralExternalId: 'pay_referral_rewarded',
+      status: 'rewarded',
+      statusLabel: '已入账',
+      statusHelp: '邀请奖励已锁定入账，后续按规则释放。',
+      rewardCreditCents: 2_000_00,
+      rewardRateLabel: '20%',
+      assistedLabel: '普通邀请',
+      createdAtLabel: '2026-07-01',
+      rewardedAtLabel: '2026-07-04',
     });
   });
 

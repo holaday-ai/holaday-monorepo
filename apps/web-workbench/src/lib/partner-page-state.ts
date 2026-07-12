@@ -82,6 +82,7 @@ export interface PartnerEnabledState {
   readonly lots: readonly PartnerLotState[];
   readonly orders: readonly PartnerOrderState[];
   readonly withdrawals: readonly PartnerWithdrawalActivityState[];
+  readonly referrals: readonly PartnerReferralActivityState[];
 }
 
 export interface NormalizedPartnerMembership {
@@ -178,6 +179,23 @@ export interface PartnerWithdrawalActivityState {
   readonly riskScore: number;
 }
 
+export interface PartnerReferralActivityState {
+  readonly key: string;
+  readonly referralExternalId: string;
+  readonly status: string;
+  readonly statusLabel: string;
+  readonly statusHelp: string;
+  readonly assisted: boolean;
+  readonly assistedLabel: string;
+  readonly rewardCreditCents: number;
+  readonly rewardRateBps: number;
+  readonly rewardRateLabel: string;
+  readonly createdAt: string | null;
+  readonly createdAtLabel: string;
+  readonly rewardedAt: string | null;
+  readonly rewardedAtLabel: string;
+}
+
 export type PartnerPageState = PartnerDisabledState | PartnerEnabledState;
 
 export interface PartnerIdempotencyDraft {
@@ -243,6 +261,11 @@ const WITHDRAWAL_STATUS_LABELS: Record<string, string> = {
   returned: '已退回',
 };
 
+const REFERRAL_STATUS_LABELS: Record<string, string> = {
+  pending: '待好友充值',
+  rewarded: '已入账',
+};
+
 const MEMBERSHIP_STATUSES = new Set<PartnerMembershipStatus>(['active', 'expired', 'cancelled']);
 const KYC_STATUSES = new Set<PartnerKycStatus>([
   'not_started',
@@ -304,6 +327,7 @@ export function normalizePartnerDashboard(value: unknown): PartnerPageState {
     lots,
     orders: normalizeOrders(value.orders),
     withdrawals: normalizeWithdrawals(value.withdrawals),
+    referrals: normalizeReferrals(value.referrals),
   };
 }
 
@@ -696,6 +720,37 @@ function normalizeWithdrawals(value: unknown): readonly PartnerWithdrawalActivit
   });
 }
 
+function normalizeReferrals(value: unknown): readonly PartnerReferralActivityState[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry, index) => {
+    if (!isRecord(entry)) return [];
+    const referralExternalId = safeTrimmedString(entry.referralExternalId) || `referral-${index + 1}`;
+    const status = safeTrimmedString(entry.status) || 'pending';
+    const assisted = entry.assisted === true;
+    const rewardRateBps = safeCount(entry.rewardRateBps);
+    const createdAt = dateOnly(entry.createdAt);
+    const rewardedAt = dateOnly(entry.rewardedAt);
+    return [
+      {
+        key: referralExternalId,
+        referralExternalId,
+        status,
+        statusLabel: referralStatusLabel(status),
+        statusHelp: referralStatusHelp(status),
+        assisted,
+        assistedLabel: assisted ? '代充值邀请' : '普通邀请',
+        rewardCreditCents: safeCents(entry.rewardCreditCents),
+        rewardRateBps,
+        rewardRateLabel: rewardRateDisplayLabel(rewardRateBps),
+        createdAt,
+        createdAtLabel: createdAt ?? '—',
+        rewardedAt,
+        rewardedAtLabel: rewardedAt ?? '—',
+      },
+    ];
+  });
+}
+
 function normalizeLotStatus(value: unknown): PartnerLotStatus {
   return typeof value === 'string' && LOT_STATUSES.has(value as PartnerLotStatus)
     ? (value as PartnerLotStatus)
@@ -749,6 +804,23 @@ function withdrawalStatusHelp(
     return detail.returnedReason ? `提现已退回：${detail.returnedReason}` : '提现已退回，资金会回到可用余额。';
   }
   return '提现状态已更新，请刷新查看最新进度。';
+}
+
+function referralStatusLabel(status: string): string {
+  return REFERRAL_STATUS_LABELS[status] ?? status;
+}
+
+function referralStatusHelp(status: string): string {
+  if (status === 'pending') return '好友完成首次充值后，奖励会锁定入账。';
+  if (status === 'rewarded') return '邀请奖励已锁定入账，后续按规则释放。';
+  return '邀请状态已更新，请刷新查看最新进度。';
+}
+
+function rewardRateDisplayLabel(value: number): string {
+  if (value <= 0) return '—';
+  const percent = value / 100;
+  if (Number.isInteger(percent)) return `${percent}%`;
+  return `${percent.toFixed(2).replace(/\.?0+$/, '')}%`;
 }
 
 function isMembershipStatus(value: unknown): value is PartnerMembershipStatus {

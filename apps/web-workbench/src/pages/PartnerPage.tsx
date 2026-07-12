@@ -880,6 +880,7 @@ function PartnerWorkbench({
           </Button>
         </div>
         {referral && <ReferralSummary referral={referral} />}
+        <RecentReferralsTable rows={state.referrals} />
       </Section>
 
       <Section
@@ -1332,6 +1333,42 @@ function RecentWithdrawalsTable({ rows }: { rows: PartnerEnabledState['withdrawa
   );
 }
 
+function RecentReferralsTable({ rows }: { rows: PartnerEnabledState['referrals'] }): JSX.Element {
+  if (rows.length === 0) {
+    return <EmptyInlineState title="暂无邀请记录" body="好友通过你的邀请码登记后会显示在这里。" />;
+  }
+  return (
+    <div className="mt-4 overflow-x-auto">
+      <table className="min-w-[760px] w-full text-left text-xs">
+        <thead className="border-b border-[#EFEFEF] text-[11px] text-muted-foreground">
+          <tr>
+            <th scope="col" className="pb-2 pr-4 font-medium">邀请</th>
+            <th scope="col" className="pb-2 pr-4 font-medium">类型</th>
+            <th scope="col" className="pb-2 pr-4 font-medium">状态</th>
+            <th scope="col" className="pb-2 pr-4 font-medium">奖励</th>
+            <th scope="col" className="pb-2 pr-4 font-medium">比例</th>
+            <th scope="col" className="pb-2 pr-4 font-medium">说明</th>
+            <th scope="col" className="pb-2 font-medium">时间</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-[#EFEFEF]">
+          {rows.map((row) => (
+            <tr key={row.key}>
+              <td className="py-3 pr-4 font-mono text-[11px] text-foreground/75">{row.referralExternalId}</td>
+              <td className="py-3 pr-4 text-muted-foreground">{row.assistedLabel}</td>
+              <td className="py-3 pr-4">{row.statusLabel}</td>
+              <td className="py-3 pr-4 tabular-nums">{formatHolaCreditCents(row.rewardCreditCents)}</td>
+              <td className="py-3 pr-4 tabular-nums text-muted-foreground">{row.rewardRateLabel}</td>
+              <td className="max-w-[240px] py-3 pr-4 text-muted-foreground">{row.statusHelp}</td>
+              <td className="py-3 text-muted-foreground">{referralTimelineLabel(row)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function EmptyInlineState({ title, body }: { title: string; body: string }): JSX.Element {
   return (
     <div className="border-y border-dashed border-[#DCDDDD] py-8 text-center">
@@ -1356,6 +1393,11 @@ function withdrawalTimelineLabel(row: PartnerEnabledState['withdrawals'][number]
   if (row.status === 'paid') return row.paidAtLabel;
   if (row.status === 'returned') return row.returnedAtLabel;
   return row.reviewDueAtLabel;
+}
+
+function referralTimelineLabel(row: PartnerEnabledState['referrals'][number]): string {
+  if (row.status === 'rewarded') return row.rewardedAtLabel;
+  return row.createdAtLabel;
 }
 
 function KycSubmissionSummary({ submission }: { submission: PartnerKycSubmissionSummary }): JSX.Element {

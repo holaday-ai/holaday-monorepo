@@ -9,6 +9,7 @@ import {
   partnerKycProfiles,
   partnerLots,
   partnerMemberships,
+  partnerReferrals,
   partnerRechargeOrders,
   partnerWithdrawalRequests,
   type HolaCreditLedgerEntry,
@@ -16,6 +17,7 @@ import {
   type PartnerKycProfile,
   type PartnerLot,
   type PartnerMembership,
+  type PartnerReferral,
   type PartnerRechargeOrder,
   type PartnerWithdrawalRequest,
 } from '../../db/schema/partner.js';
@@ -29,6 +31,7 @@ class FakePartnerDb {
   readonly lots: PartnerLot[];
   readonly orders: PartnerRechargeOrder[];
   readonly withdrawals: PartnerWithdrawalRequest[];
+  readonly referrals: PartnerReferral[];
   readonly selectTables: string[] = [];
 
   constructor(input: {
@@ -40,6 +43,7 @@ class FakePartnerDb {
     lots?: PartnerLot[];
     orders?: PartnerRechargeOrder[];
     withdrawals?: PartnerWithdrawalRequest[];
+    referrals?: PartnerReferral[];
   } = {}) {
     this.users = [...(input.users ?? [fakeUser()])];
     this.memberships = [...(input.memberships ?? [])];
@@ -49,6 +53,7 @@ class FakePartnerDb {
     this.lots = [...(input.lots ?? [])];
     this.orders = [...(input.orders ?? [])];
     this.withdrawals = [...(input.withdrawals ?? [])];
+    this.referrals = [...(input.referrals ?? [])];
   }
 
   asContext(userId = 'usr_partner') {
@@ -130,6 +135,9 @@ class FakePartnerDb {
     }
     if (table === partnerWithdrawalRequests) {
       return this.withdrawals.filter((withdrawal) => predicateText.includes(String(withdrawal.userId)));
+    }
+    if (table === partnerReferrals) {
+      return this.referrals.filter((referral) => predicateText.includes(String(referral.inviterUserId)));
     }
     return [];
   }
@@ -308,6 +316,24 @@ function fakeWithdrawal(overrides: Partial<PartnerWithdrawalRequest> = {}): Part
   };
 }
 
+function fakeReferral(overrides: Partial<PartnerReferral> = {}): PartnerReferral {
+  return {
+    id: 70,
+    externalId: 'pay_referral',
+    inviterUserId: 123,
+    inviteeUserId: 456,
+    rechargeOrderId: null,
+    status: 'pending',
+    rewardCreditCents: 0,
+    rewardRateBps: 0,
+    assisted: 0,
+    metadata: null,
+    createdAt: new Date('2026-07-01T00:00:00.000Z'),
+    updatedAt: new Date('2026-07-01T00:00:00.000Z'),
+    ...overrides,
+  };
+}
+
 describe('partnerRouter', () => {
   const originalFlag = process.env.PARTNER_LEDGER_ENABLED;
 
@@ -393,6 +419,7 @@ describe('partnerRouter', () => {
         }),
       ],
       withdrawals: [fakeWithdrawal()],
+      referrals: [fakeReferral()],
     });
 
     const result = await partnerRouter.createCaller(fakeDb.asContext()).dashboard();
@@ -467,6 +494,16 @@ describe('partnerRouter', () => {
           riskScore: 72,
         },
       ],
+      referrals: [
+        {
+          referralExternalId: 'pay_referral',
+          status: 'pending',
+          assisted: false,
+          rewardCreditCents: 0,
+          rewardRateBps: 0,
+          createdAt: new Date('2026-07-01T00:00:00.000Z'),
+        },
+      ],
     });
   });
 
@@ -534,6 +571,17 @@ describe('partnerRouter', () => {
           },
         }),
       ],
+      referrals: [
+        fakeReferral({
+          externalId: 'pay_referral_rewarded',
+          status: 'rewarded',
+          rewardCreditCents: 2_000_00,
+          rewardRateBps: 2_000,
+          metadata: {
+            rewardedAt: '2026-07-04T06:00:00.000Z',
+          },
+        }),
+      ],
     });
 
     const result = await partnerRouter.createCaller(fakeDb.asContext()).dashboard();
@@ -566,6 +614,17 @@ describe('partnerRouter', () => {
           status: 'returned',
           returnedReason: 'bank returned funds',
           returnedAt: '2026-07-04T06:00:00.000Z',
+        },
+      ],
+      referrals: [
+        {
+          referralExternalId: 'pay_referral_rewarded',
+          status: 'rewarded',
+          assisted: false,
+          rewardCreditCents: 2_000_00,
+          rewardRateBps: 2_000,
+          createdAt: new Date('2026-07-01T00:00:00.000Z'),
+          rewardedAt: '2026-07-04T06:00:00.000Z',
         },
       ],
     });

@@ -6,7 +6,12 @@ import { TRPCError } from '@trpc/server';
 import { and, desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { users } from '../../db/schema/users.js';
-import { partnerLots, partnerRechargeOrders, partnerWithdrawalRequests } from '../../db/schema/partner.js';
+import {
+  partnerLots,
+  partnerRechargeOrders,
+  partnerReferrals,
+  partnerWithdrawalRequests,
+} from '../../db/schema/partner.js';
 import { PartnerActivityService } from '../../partner/activity-service.js';
 import { CreditLedgerService } from '../../partner/credit-ledger-service.js';
 import {
@@ -308,6 +313,28 @@ function summarizePartnerWithdrawal(withdrawal: {
   };
 }
 
+function summarizePartnerReferralActivity(referral: {
+  externalId: string;
+  status: string;
+  rewardCreditCents: number;
+  rewardRateBps: number;
+  assisted: number;
+  createdAt?: Date;
+  metadata?: unknown;
+}) {
+  const metadata = metadataRecord(referral.metadata);
+  const rewardedAt = metadataText(metadata, 'rewardedAt');
+  return {
+    referralExternalId: referral.externalId,
+    status: referral.status,
+    assisted: referral.assisted === 1,
+    rewardCreditCents: referral.rewardCreditCents,
+    rewardRateBps: referral.rewardRateBps,
+    createdAt: referral.createdAt,
+    ...(rewardedAt ? { rewardedAt } : {}),
+  };
+}
+
 function summarizePartnerReferral(
   referral: {
     externalId: string;
@@ -512,7 +539,7 @@ export const partnerRouter = router({
     const ledgerService = new CreditLedgerService(ctx.db);
     const activityService = new PartnerActivityService(ctx.db);
 
-    const [membership, kycProfile, ledger, activity, lots, orders, withdrawals] = await Promise.all([
+    const [membership, kycProfile, ledger, activity, lots, orders, withdrawals, referrals] = await Promise.all([
       membershipService.getActiveMembership(userId),
       kycService.getProfile(userId),
       ledgerService.summarizeUser(userId),
@@ -564,6 +591,20 @@ export const partnerRouter = router({
         .where(eq(partnerWithdrawalRequests.userId, userId))
         .orderBy(desc(partnerWithdrawalRequests.createdAt))
         .limit(DASHBOARD_ACTIVITY_LIMIT),
+      ctx.db
+        .select({
+          externalId: partnerReferrals.externalId,
+          status: partnerReferrals.status,
+          rewardCreditCents: partnerReferrals.rewardCreditCents,
+          rewardRateBps: partnerReferrals.rewardRateBps,
+          assisted: partnerReferrals.assisted,
+          metadata: partnerReferrals.metadata,
+          createdAt: partnerReferrals.createdAt,
+        })
+        .from(partnerReferrals)
+        .where(eq(partnerReferrals.inviterUserId, userId))
+        .orderBy(desc(partnerReferrals.createdAt))
+        .limit(DASHBOARD_ACTIVITY_LIMIT),
     ]);
 
     const dashboardLedger = summarizeDashboardLedger(ledger);
@@ -601,6 +642,7 @@ export const partnerRouter = router({
       })),
       orders: orders.map((order) => summarizePartnerOrder(order)),
       withdrawals: withdrawals.map(summarizePartnerWithdrawal),
+      referrals: referrals.map(summarizePartnerReferralActivity),
     };
   }),
 
