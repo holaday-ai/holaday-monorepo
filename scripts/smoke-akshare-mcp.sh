@@ -4,6 +4,7 @@ set -euo pipefail
 
 BASE_URL="${AKSHARE_HTTP_URL:-http://127.0.0.1:8848}"
 RANK_TIMEOUT="${AKSHARE_SMOKE_RANK_TIMEOUT:-60}"
+REQUIRE_INTRADAY="${AKSHARE_SMOKE_REQUIRE_INTRADAY:-auto}"
 
 curl_json() {
   local path="$1"
@@ -11,24 +12,48 @@ curl_json() {
   curl -fsS --max-time "$timeout" "${BASE_URL}${path}"
 }
 
-require_payload() {
+validate_payload() {
   local label="$1"
   local payload="$2"
   if ! grep -Fq '"data":[' <<<"$payload"; then
     echo "❌ ${label}: response is not an AkShare data envelope" >&2
     echo "$payload" >&2
-    exit 1
+    return 1
   fi
   if grep -Fq '"error"' <<<"$payload"; then
     echo "❌ ${label}: upstream returned an error envelope" >&2
     echo "$payload" >&2
-    exit 1
+    return 1
   fi
   if grep -Fq '"count":0' <<<"$payload"; then
-    echo "❌ ${label}: ranking returned zero rows" >&2
+    echo "❌ ${label}: returned zero rows" >&2
     echo "$payload" >&2
+    return 1
+  fi
+}
+
+require_payload() {
+  local label="$1"
+  local payload="$2"
+  if ! validate_payload "$label" "$payload"; then
     exit 1
   fi
+}
+
+should_require_intraday() {
+  case "$REQUIRE_INTRADAY" in
+    1|true|yes) return 0 ;;
+    0|false|no) return 1 ;;
+    auto) ;;
+    *)
+      echo "❌ AKSHARE_SMOKE_REQUIRE_INTRADAY must be auto/true/false, got '$REQUIRE_INTRADAY'" >&2
+      exit 2
+      ;;
+  esac
+  local dow hhmm
+  dow="$(TZ=Asia/Shanghai date +%u)"
+  hhmm="$(TZ=Asia/Shanghai date +%H%M)"
+  [[ "$dow" -ge 1 && "$dow" -le 5 && "$hhmm" -ge 925 && "$hhmm" -le 1515 ]]
 }
 
 echo "→ akshare smoke: ${BASE_URL}/healthz"
@@ -47,7 +72,17 @@ AMOUNT="$(curl_json '/stock-rankings/amount?limit=1' "$RANK_TIMEOUT")"
 require_payload "amount" "$AMOUNT"
 
 echo "→ akshare smoke: intraday minute series"
-INTRADAY="$(curl_json '/intraday/601958' 20)"
-require_payload "intraday" "$INTRADAY"
+INTRADAY_REQUIRE=0
+if should_require_intraday; then
+  INTRADAY_REQUIRE=1
+fi
+if INTRADAY="$(curl_json '/intraday/601958' 20 2>&1)" && validate_payload "intraday" "$INTRADAY" 2>/dev/null; then
+  :
+elif [[ "$INTRADAY_REQUIRE" == "1" ]]; then
+  validate_payload "intraday" "$INTRADAY"
+  exit 1
+else
+  echo "⚠️ akshare smoke: intraday minute series unavailable outside trading window; not blocking deploy"
+fi
 
 echo "✅ akshare-mcp smoke OK"

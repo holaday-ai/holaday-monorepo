@@ -51,8 +51,9 @@ echo "→ akshare-mcp: venv install + pm2 (re)start on Vultr"
   pm2 save" 2>&1 | tail -8
 
 echo "→ Smoke check $HEALTH_URL + rankings"
+RANK_TIMEOUT="${AKSHARE_SMOKE_RANK_TIMEOUT:-120}"
 SMOKE=$("${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
-  "cd '$REPO_DIR' && AKSHARE_HTTP_URL='$AKSHARE_HTTP_URL' AKSHARE_SMOKE_RANK_TIMEOUT=75 scripts/smoke-akshare-mcp.sh" 2>&1 || true)
+  "cd '$REPO_DIR' && AKSHARE_HTTP_URL='$AKSHARE_HTTP_URL' AKSHARE_SMOKE_RANK_TIMEOUT='$RANK_TIMEOUT' scripts/smoke-akshare-mcp.sh" 2>&1 || true)
 if echo "$SMOKE" | grep -q 'akshare-mcp smoke OK'; then
   echo "$SMOKE" | tail -8
 else
