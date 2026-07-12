@@ -295,21 +295,30 @@ rollback path.
 
 ## Verification Snapshot
 
-Local worktree verification on 2026-07-12 covered:
+Integration worktree verification on 2026-07-12 covered:
 
 - Partner backend domain and routers:
   `pnpm --filter @holaday/orchestrator exec vitest run src/partner src/trpc/routers/partner.test.ts src/trpc/routers/partner-mutations.test.ts src/trpc/routers/admin-partner.test.ts`
 - Partner frontend state:
-  `pnpm --filter @holaday/web-workbench exec vitest run src/lib/partner-page-state.test.ts src/pages/admin/admin-partner-state.test.ts`
+  `pnpm --filter @holaday/web-workbench exec vitest run src/lib/partner-page-state.test.ts src/pages/admin/admin-partner-state.test.ts src/lib/sidebar-feature-nav.test.ts src/lib/plan-payment-state.test.ts src/lib/billing-page-state.test.ts`
+- CN payment partner bridge:
+  `pnpm --filter @holaday/cn-payment test -- src/sync-to-vultr.test.ts`,
+  `pnpm --filter @holaday/cn-payment typecheck`
 - Type checks:
   `pnpm --filter @holaday/shared-types typecheck`,
   `pnpm --filter @holaday/orchestrator exec tsc --noEmit`,
   `pnpm --filter @holaday/web-workbench exec tsc --noEmit`
+- Builds:
+  `pnpm --filter @holaday/orchestrator build`,
+  `pnpm --filter @holaday/web-workbench build`
 - Existing payment isolation:
-  `pnpm --filter @holaday/orchestrator exec vitest run src/trpc/routers/payment.test.ts src/trpc/routers/admin-finance.test.ts`,
-  `pnpm --filter @holaday/web-workbench exec vitest run src/lib/plan-payment-state.test.ts src/lib/billing-page-state.test.ts`
-- Partner nav dark launch:
-  `pnpm --filter @holaday/web-workbench exec vitest run src/lib/sidebar-feature-nav.test.ts`
+  `pnpm --filter @holaday/orchestrator exec vitest run src/trpc/routers/payment.test.ts src/trpc/routers/admin-finance.test.ts`
+
+After integration with `codex/trust-loop-round1`, partner migrations are
+numbered `0040_partner_ledger.sql` and
+`0041_partner_activity_events.sql` because `0039` is already occupied
+by `0039_batch_items_review_count.sql`. The partner schema contract
+test now checks numbered migration prefix uniqueness.
 
 The current frontend implementation uses a single `/partner` workbench
 page for recharge, ledger, KYC, invite, daily activity, order history,
