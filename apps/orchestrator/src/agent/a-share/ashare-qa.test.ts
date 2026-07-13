@@ -8,7 +8,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AkshareClient } from './akshare-client.js';
 import { buildAshareFactCard } from './ashare-fact-card.js';
-import { matchAshareQa } from './ashare-qa-matcher.js';
+import { matchAshareQa, resolveAshareInContext } from './ashare-qa-matcher.js';
 import type { ResolvedStock } from './ashare-qa-types.js';
 import { resolveStocks } from './ashare-stock-resolver.js';
 import type { AkEnvelope } from './briefing-types.js';
@@ -110,6 +110,27 @@ describe('matchAshareQa', () => {
     expect(
       matchAshareQa({ intent: '被套了怎么办', roleId: 'a-share-analyst', watchlist: WL, now: NOW }),
     ).toBeNull();
+  });
+
+  it('上下文内遇到非 A 股证券查询 → 放回通用路径，不给 A 股引导兜底', async () => {
+    const r = await resolveAshareInContext(
+      {
+        intent: '帮我查今天特斯拉股价并给出来源链接',
+        roleId: 'a-share-analyst',
+        watchlist: WL,
+        now: NOW,
+      },
+      async () => [],
+    );
+    expect(r).toEqual({ match: null, hasSignal: false, indexIntent: false });
+  });
+
+  it('上下文内 A 股持仓语境仍保留引导兜底', async () => {
+    const r = await resolveAshareInContext(
+      { intent: '被套了怎么办', roleId: 'a-share-analyst', watchlist: WL, now: NOW },
+      async () => [],
+    );
+    expect(r).toEqual({ match: null, hasSignal: true, indexIntent: false });
   });
 });
 

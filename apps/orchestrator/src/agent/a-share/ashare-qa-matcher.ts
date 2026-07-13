@@ -81,6 +81,52 @@ const ANOMALY_TERMS = [
 const WATCHLIST_TERMS = ['自选股', '我的股', '我的自选', '我的持仓', '持仓'];
 
 /**
+ * 非 A 股证券信号。A 股技能常驻时，泛化的“股价/股票”不能把 Tesla/TSLA
+ * 这类美股查询劫持到 A 股引导兜底；没有解析出 A 股个股/指数时应放回通用路径。
+ */
+const NON_A_SHARE_SECURITY_TERMS = [
+  '美股',
+  '港股',
+  '纳斯达克',
+  '道琼斯',
+  '标普',
+  'NASDAQ',
+  'NYSE',
+  'HKEX',
+  'TSLA',
+  'Tesla',
+  '特斯拉',
+  'NVDA',
+  'NVIDIA',
+  '英伟达',
+  'AAPL',
+  'Apple',
+  '苹果公司',
+  'MSFT',
+  'Microsoft',
+  '微软',
+  'AMZN',
+  'Amazon',
+  '亚马逊',
+  'GOOGL',
+  'GOOG',
+  'Google',
+  'Alphabet',
+  '谷歌',
+  'META',
+  'Meta',
+  '美元',
+  'US$',
+  '$',
+];
+
+function isNonAshareSecurityQuery(text: string): boolean {
+  const upper = text.toUpperCase();
+  return NON_A_SHARE_SECURITY_TERMS.some((term) =>
+    /[A-Z$]/.test(term) ? upper.includes(term.toUpperCase()) : text.includes(term));
+}
+
+/**
  * 指数/大盘级问句信号（E16 修）。命中 → 走**指数 lane**（三大指数速览卡），不进个股 lane，
  * 也**不做 name-search**（防「查今天A股三大指数收盘」里的「今天」被短名窗口误命中成
  * 「今天国际(300532)」）。仅在**没有显式个股**（代码/自选股名）时生效——有个股则个股优先。
@@ -268,6 +314,10 @@ export async function resolveAshareInContext(
   }
   if (stocks.length > 0) {
     return { match: toMatch(stocks), hasSignal: true, indexIntent: false };
+  }
+
+  if (isNonAshareSecurityQuery(text)) {
+    return { match: null, hasSignal: false, indexIntent: false };
   }
 
   // 无显式个股：指数/大盘问句 → 指数 lane（E16：不 name-search，不进个股 lane）。
