@@ -8,7 +8,7 @@
  */
 
 export type VideoTab = 'normal' | 'pet' | 'ip_person';
-export type VideoModel = 'veo_fast' | 'happyhorse' | 'veo_standard';
+export type VideoModel = 'veo_fast' | 'happyhorse' | 'veo_standard' | 'wanxiang';
 export type PetModel = 'wan_i2v' | 'happyhorse_i2v';
 export type VideoStyleOption = 'auto' | 'realistic' | 'atmospheric' | 'science';
 export type VideoAspect = '9:16' | '16:9' | '1:1' | '4:3' | '3:4';
@@ -36,6 +36,7 @@ const USD_PER_SEC: Record<VideoModel, Record<VideoResolution, number>> = {
   veo_fast: { '720p': 0.1, '1080p': 0.12 },
   veo_standard: { '720p': 0.4, '1080p': 0.4 },
   happyhorse: { '720p': 0.9 / 7.3, '1080p': 1.6 / 7.3 },
+  wanxiang: { '720p': 0.1, '1080p': 0.12 },
 };
 const USD_TO_CNY = 7.3;
 

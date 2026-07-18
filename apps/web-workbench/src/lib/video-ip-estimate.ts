@@ -1,5 +1,5 @@
 /**
- * Render-time estimate for the IP「真人换口型」"生成中" hint.
+ * Render-time estimate for the IP「IP人物视频」"生成中" hint.
  *
  * latentsync is ~12-14× realtime (measured: a 185-字 / ~35s clip took ~7min
  * end-to-end, incl. Qwen synth + compose). The real audioMs lives only on the
@@ -28,5 +28,5 @@ export function estimateIpRenderMinutes(text: string): number {
 
 /** The full hint string shown only in the ip_person 生成中 panel. */
 export function ipRenderingHint(text: string): string {
-  return `真人换口型较慢，预计约 ${estimateIpRenderMinutes(text)} 分钟，请耐心等待。`;
+  return `IP人物视频生成较慢，预计约 ${estimateIpRenderMinutes(text)} 分钟，请耐心等待。`;
 }
