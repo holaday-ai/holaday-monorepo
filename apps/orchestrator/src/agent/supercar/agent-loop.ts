@@ -80,6 +80,7 @@ import { buildSupercarSystemPrompt } from './system-prompt.js';
 import { classifyError as classifyToolError, extractDomain as extractDomainStat } from './stats-service.js';
 import { env as appEnv } from '../../config/env.js';
 import { buildCtripFlightHint, isCtripFlightResultsUrl } from './ctrip-flight-extractor.js';
+import { defaultBrowserNetworkPolicy } from '../browser-network-policy.js';
 
 /**
  * Anti-crawl stuck detection thresholds.
@@ -2571,6 +2572,21 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
                 {
                   type: 'text',
                   text: `navigate: URL must start with http:// or https:// (got ${targetUrl.slice(0, 80)})`,
+                },
+              ],
+              is_error: true,
+            });
+            continue;
+          }
+          const networkDecision = await defaultBrowserNetworkPolicy.check(targetUrl);
+          if (!networkDecision.allowed) {
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: toolUse.id,
+              content: [
+                {
+                  type: 'text',
+                  text: `navigate blocked by network policy: ${networkDecision.message}`,
                 },
               ],
               is_error: true,

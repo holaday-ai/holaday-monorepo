@@ -60,10 +60,16 @@ export interface CdpStreamerOptions {
   logger: Logger;
   /** JPEG quality 0..100. Default 60. */
   quality?: number;
-  /** Cap frame width. Default 1280 — matches the per-user Xvfb. */
+  /** Cap frame width. Default 1440 — matches the largest workbench viewport. */
   maxWidth?: number;
-  /** Cap frame height. Default 800 — matches the per-user Xvfb. */
+  /** Cap frame height. Default 1200 — matches the largest workbench viewport. */
   maxHeight?: number;
+  /**
+   * Re-applies the latest client viewport after a renderer-changing event.
+   * Chromium can discard device metrics during cross-origin navigation even
+   * while the CDP socket itself remains connected.
+   */
+  onViewportMayReset?: () => Promise<void> | void;
 }
 
 export interface ScreencastFrameMessage {
@@ -91,20 +97,23 @@ export class CdpStreamer {
   private lastFrameAt = 0;
   private watchdogTimer: NodeJS.Timeout | null = null;
   private restartInFlight = false;
-  /** No-frame gap that triggers a hard restart. 5s is generous —
-   *  truly idle pages still composite at >1Hz on Brave. */
+  /** No-frame gap that triggers a session health check. Static pages may not
+   * composite again at all, so the gap alone is never grounds for a restart. */
   private readonly stallThresholdMs = 5000;
   /** How often the watchdog inspects the frame gap. */
   private readonly watchdogIntervalMs = 1000;
-  private readonly opts: Required<Omit<CdpStreamerOptions, 'logger'>> & {
+  private readonly opts: Required<
+    Omit<CdpStreamerOptions, 'logger' | 'onViewportMayReset'>
+  > & {
     logger: Logger;
+    onViewportMayReset?: () => Promise<void> | void;
   };
 
   constructor(opts: CdpStreamerOptions) {
     this.opts = {
       quality: 60,
-      maxWidth: 1280,
-      maxHeight: 800,
+      maxWidth: 1440,
+      maxHeight: 1200,
       ...opts,
     };
   }
@@ -196,7 +205,7 @@ export class CdpStreamer {
       // renderer swaps (the watchdog catches what this misses) but
       // when it does fire it re-arms ~500ms faster than the
       // watchdog can react. Cheap to keep.
-      void this.armScreencast('frame-navigated', params.frame.url);
+      void this.rearmAfterNavigation('frame-navigated', params.frame.url);
     });
 
     // Codex Browser-UX #4 — `Page.frameNavigated` fires only on
@@ -232,8 +241,23 @@ export class CdpStreamer {
 
     cdp.on('Page.loadEventFired', () => {
       if (!this.streaming) return;
-      void this.armScreencast('load-event-fired', null);
+      void this.rearmAfterNavigation('load-event-fired', null);
     });
+  }
+
+  private async rearmAfterNavigation(
+    reason: string,
+    url: string | null,
+  ): Promise<void> {
+    await this.armScreencast(reason, url);
+    try {
+      await this.opts.onViewportMayReset?.();
+    } catch (err) {
+      this.opts.logger.debug(
+        { reason, err: errMsg(err) },
+        'cdp-streamer: viewport reapply failed',
+      );
+    }
   }
 
   /**
@@ -277,18 +301,23 @@ export class CdpStreamer {
   }
 
   /**
-   * One watchdog iteration. If the screencast hasn't produced a
-   * frame in `stallThresholdMs`, hard-restart the CDP session.
-   * No-ops if a restart is already in flight or if streaming
-   * has been stopped. The threshold is intentionally generous
-   * (5s) — Brave composites at >1Hz even on idle pages, so a 5s
-   * gap means something is genuinely wrong (orphaned session,
-   * crashed renderer, navigation that detached us).
+   * One watchdog iteration. A no-frame gap is normal on a static page, so
+   * first verify that this CDP session can still evaluate the URL of the
+   * Playwright page it is meant to mirror. Restart only when that health check
+   * fails or points at a different renderer.
    */
   private async watchdogTick(): Promise<void> {
     if (!this.streaming || this.restartInFlight) return;
     const gapMs = Date.now() - this.lastFrameAt;
     if (gapMs < this.stallThresholdMs) return;
+    if (await this.sessionMatchesCurrentPage()) {
+      this.lastFrameAt = Date.now();
+      this.opts.logger.debug(
+        { gapMs },
+        'cdp-streamer: static frame gap; session remains healthy',
+      );
+      return;
+    }
     this.opts.logger.warn(
       { gapMs },
       'cdp-streamer: frame stall detected, hard-restarting session',
@@ -306,6 +335,28 @@ export class CdpStreamer {
       // Reset the frame counter so we don't loop into another
       // restart 1s later if the new arm is still warming up.
       this.lastFrameAt = Date.now();
+    }
+  }
+
+  private async sessionMatchesCurrentPage(): Promise<boolean> {
+    const cdp = this.cdpSession;
+    if (!cdp) return false;
+    try {
+      const page = await this.opts.getPage();
+      const response = await cdp.send('Runtime.evaluate', {
+        expression: 'window.location.href',
+        returnByValue: true,
+      });
+      const currentUrl = (
+        response as { result?: { value?: unknown } }
+      ).result?.value;
+      return typeof currentUrl === 'string' && currentUrl === page.url();
+    } catch (err) {
+      this.opts.logger.debug(
+        { err: errMsg(err) },
+        'cdp-streamer: session health check failed',
+      );
+      return false;
     }
   }
 
@@ -344,6 +395,7 @@ export class CdpStreamer {
     this.wireListeners(this.cdpSession);
     await this.cdpSession.send('Page.enable');
     await this.armScreencast('hard-restart', page.url());
+    await this.opts.onViewportMayReset?.();
   }
 
   /**
@@ -381,13 +433,6 @@ export class CdpStreamer {
     return this.cdpSession;
   }
 
-  // BUG-11 (resolved by CSS scale on SPA side) — the runtime
-  // viewport-override pipeline was removed: it triggered page
-  // reflows + screencast stalls + watchdog restarts when the panel
-  // changed size. The SPA now scales the screencast canvas with
-  // CSS transform: scale(), so Brave keeps its spawn-time viewport
-  // and the panel just renders a smaller-but-complete version of
-  // the page. No CDP calls per resize.
 }
 
 function errMsg(err: unknown): string {

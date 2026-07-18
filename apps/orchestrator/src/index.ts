@@ -24,6 +24,7 @@ import {
   shouldUseLegacyPlanner,
 } from './agent/vision-loop/commander.js';
 import { PlaywrightExecutor } from './agent/vision-loop/playwright-executor.js';
+import { defaultBrowserNetworkPolicy } from './agent/browser-network-policy.js';
 import { BrowserPool, reapOrphans } from './browser-pool/index.js';
 import { createVncProxy } from './browser-pool/vnc-proxy.js';
 import { env } from './config/env.js';
@@ -75,7 +76,7 @@ async function main() {
   // legacy WS path automatically.
   let playwrightExecutor: PlaywrightExecutor | null = null;
   if (env.EXECUTOR_MODE !== 'legacy') {
-    const candidate = new PlaywrightExecutor();
+    const candidate = new PlaywrightExecutor({ networkPolicy: defaultBrowserNetworkPolicy });
     const connectResult = await candidate.connect(env.CDP_ENDPOINT);
     if (connectResult.ok) {
       playwrightExecutor = candidate;
@@ -93,10 +94,32 @@ async function main() {
       );
       process.exit(1);
     } else {
-      logger.warn(
-        { cdpEndpoint: env.CDP_ENDPOINT, error: connectResult.error },
-        'PlaywrightExecutor connect failed — falling back to legacy WS/SW path (EXECUTOR_MODE=auto)',
-      );
+      // Local QA must not require a developer to manually launch Chrome
+      // with a debugging port. Start a clean headless Chrome context in
+      // development; it is isolated from the user's normal Chrome profile.
+      const managedResult =
+        env.NODE_ENV === 'development'
+          ? await candidate.launchManaged({
+              ...(process.platform === 'darwin' ? { channel: 'chrome' } : {}),
+              headless: true,
+            })
+          : { ok: false as const, error: 'managed launch is development-only' };
+      if (managedResult.ok) {
+        playwrightExecutor = candidate;
+        logger.info(
+          { mode: env.EXECUTOR_MODE, browser: 'managed-isolated' },
+          'PlaywrightExecutor launched managed local browser',
+        );
+      } else {
+        logger.warn(
+          {
+            cdpEndpoint: env.CDP_ENDPOINT,
+            connectError: connectResult.error,
+            managedError: managedResult.error,
+          },
+          'PlaywrightExecutor unavailable — falling back to legacy WS/SW path',
+        );
+      }
     }
   } else {
     logger.info('EXECUTOR_MODE=legacy — skipping Playwright init');
@@ -112,7 +135,7 @@ async function main() {
   let headedExecutor: PlaywrightExecutor | null = null;
   const headedEndpoint = process.env.HEADED_CDP_ENDPOINT;
   if (headedEndpoint) {
-    const candidate = new PlaywrightExecutor();
+    const candidate = new PlaywrightExecutor({ networkPolicy: defaultBrowserNetworkPolicy });
     const r = await candidate.connect(headedEndpoint);
     if (r.ok) {
       headedExecutor = candidate;
@@ -158,12 +181,18 @@ async function main() {
   // throws) degrades to MULTI_USER=false behaviour, never aborts boot.
   let browserPool: BrowserPool | null = null;
   let taskQueue: TaskQueue | null = null;
-  if (env.MULTI_USER) {
+  const useNativeDevelopmentPool =
+    env.NODE_ENV === 'development' && process.platform === 'darwin';
+  if (env.MULTI_USER || useNativeDevelopmentPool) {
     try {
       const poolConfig = {
-        maxInstances: env.MAX_BROWSER_INSTANCES,
+        maxInstances: useNativeDevelopmentPool
+          ? Math.min(env.MAX_BROWSER_INSTANCES, 3)
+          : env.MAX_BROWSER_INSTANCES,
         idleTimeoutMs: env.BROWSER_IDLE_TIMEOUT_MS,
-        baseDir: env.BROWSER_POOL_DIR,
+        baseDir: useNativeDevelopmentPool
+          ? '/tmp/holaday-browser-pool'
+          : env.BROWSER_POOL_DIR,
         cdpPortStart: env.BROWSER_CDP_PORT_START,
         vncPortStart: env.BROWSER_VNC_PORT_START,
         wsPortStart: env.BROWSER_WS_PORT_START,
@@ -203,6 +232,7 @@ async function main() {
             poolConfig.cdpPortStart + poolConfig.maxInstances - 1
           }`,
           idleTimeoutMs: poolConfig.idleTimeoutMs,
+          runtime: useNativeDevelopmentPool ? 'native-chromium' : 'linux-sidecars',
         },
         // Phase 19c follow-up — the prior wording ("not yet routed —
         // task flow still on singleton") was stale. Tasks have been

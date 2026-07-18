@@ -14,7 +14,14 @@ import { TRPCError } from '@trpc/server';
 import { and, asc, desc, eq, gte, inArray, like, lt, lte, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { SkillCatalogueEntry } from '../../agent/planner.js';
+import {
+  extractDirectOpenUrl,
+  offlineBrowserUnavailableMessage,
+  runDirectOpen,
+  verifyDirectOpenUrlSafety,
+} from '../../agent/direct-open.js';
 import { injectResolvedUrl, resolveIntentUrl } from '../../agent/url-resolver.js';
+import { defaultBrowserNetworkPolicy } from '../../agent/browser-network-policy.js';
 import { env as appEnv } from '../../config/env.js';
 import { buildBaiduSmokePlan } from '../../agent/smoke-plans.js';
 import { friendlyTaskFailureReason } from '../../agent/task-failure-copy.js';
@@ -41,7 +48,10 @@ import { tryAcquire as rateLimitTryAcquire } from '../../quota/rate-limiter.js';
 import { describeSignal } from '../../agent/vision-loop/anti-bot-detector.js';
 import { classify as classifyDomain } from '../../agent/vision-loop/domain/classifier.js';
 import { startVisionLoopTask } from '../../agent/vision-loop/task-runner.js';
-import type { PlaywrightExecutor } from '../../agent/vision-loop/playwright-executor.js';
+import type {
+  PageLike,
+  PlaywrightExecutor,
+} from '../../agent/vision-loop/playwright-executor.js';
 import {
   classifyAsCrossPlatformAutomation,
   classifyAsSimpleSearch,
@@ -1051,6 +1061,61 @@ export const tasksRouter = router({
       typedWorkflowOverride ??
       expertWorkflow?.routeOverride ??
       classifiedExecutionMode;
+    if (
+      appEnv.NODE_ENV === 'production' &&
+      executionMode === 'browser' &&
+      !ctx.browserPool
+    ) {
+      // Server-side browser tasks must use the per-task pool because that
+      // path is pinned to BrowserEgressProxy. A shared CDP fallback can only
+      // apply app-level URL checks and cannot eliminate DNS rebinding or
+      // subresource access to cloud metadata.
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message: '安全浏览器执行环境尚未就绪，未创建任务。请稍后重试。',
+      });
+    }
+    const directOpenUrl =
+      executionMode === 'browser' ? extractDirectOpenUrl(input.intent) : null;
+    const directOpenSafetyError = directOpenUrl
+      ? await verifyDirectOpenUrlSafety(directOpenUrl)
+      : null;
+    if (directOpenSafetyError) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: directOpenSafetyError,
+      });
+    }
+    const directOpenFallbackExecutor = directOpenUrl
+      ? (ctx.playwrightExecutor ??
+        ctx.executionRouter?.getExecutor('headed') ??
+        ctx.executionRouter?.getExecutor('headless') ??
+        null)
+      : null;
+    const directOpenUsesBrowserPool = Boolean(
+      directOpenUrl && ctx.browserPool && shouldUseBrowserPool(ctx.userId),
+    );
+    if (directOpenUrl && !directOpenUsesBrowserPool && !directOpenFallbackExecutor) {
+      // Availability is deployment readiness. Reject before charging the
+      // user when no browser can produce the promised page evidence.
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message: '浏览器执行器尚未就绪，未创建空白任务。请稍后重试。',
+      });
+    }
+    const offlineUnavailable =
+      executionMode === 'browser' && !directOpenUrl
+        ? offlineBrowserUnavailableMessage(Boolean(appEnv.ANTHROPIC_API_KEY))
+        : null;
+    if (offlineUnavailable) {
+      // Reject before quota consumption and before inserting a row.
+      // A missing model controller is deployment readiness, not a
+      // user task attempt, and must never become a 20-minute zombie.
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message: offlineUnavailable,
+      });
+    }
     // Codex Round 2 P1-7 — explicit observability log at the dispatch
     // boundary. Lets BOSS run `pm2 logs | grep task:expert_dispatch`
     // to compare normal vs expert outcomes (expertModeRequested ==
@@ -3219,6 +3284,127 @@ export const tasksRouter = router({
     }
     // ===== end scrape-mode fork =====
 
+    // Deterministic direct-open lane. An explicit "打开 https://..."
+    // command needs no model judgement: navigate the managed browser,
+    // capture the real page, and finish. This also keeps offline local
+    // QA honest — it never creates StubPlanner's about:blank smoke plan.
+    if (directOpenUrl) {
+      const taskId = newExternalId('task');
+      const repo = new TaskRepository(ctx.db);
+      await repo.insertTask(
+        {
+          taskId,
+          status: 'executing',
+          plan: [],
+          cursor: 0,
+          pendingConfirm: null,
+        },
+        {
+          userId: userRow.id,
+          intent: input.intent,
+          roleId: dispatchRoleId,
+          opusUsed: opusActuallyConsumed,
+        },
+      );
+
+      void (async () => {
+        let executor = directOpenFallbackExecutor;
+        let allocatedPool = false;
+        try {
+          if (directOpenUsesBrowserPool && ctx.browserPool) {
+            const instance = await ctx.browserPool.allocate(
+              taskId,
+              ctx.userId,
+              input.viewportProfile,
+            );
+            if (instance.cdpPort < 9300 || instance.cdpPort > 9309) {
+              await ctx.browserPool.release(taskId, `direct-open-guard-${taskId}`).catch(() => {});
+              throw new Error('浏览器隔离校验失败');
+            }
+            executor = instance.executor;
+            allocatedPool = true;
+          }
+          if (!executor) throw new Error('浏览器执行器尚未就绪');
+          const readyExecutor = executor;
+
+          const directExecutor = {
+            resetPageForTask: () => readyExecutor.resetPageForTask(),
+            getPage: async () => (await readyExecutor.getPage()) as unknown as PageLike,
+            navigate: (page: PageLike, url: string) => readyExecutor.navigate(page, url),
+            screenshot: (page: PageLike) => readyExecutor.screenshot(page),
+          };
+          const evidence = await runDirectOpen(directExecutor, directOpenUrl);
+          const persisted = await repo.persistVisionOutcome(taskId, {
+            status: 'completed',
+            summary: `已打开 ${evidence.finalUrl}`,
+            tickCount: 1,
+            finalUrl: evidence.finalUrl,
+            finalScreenshot: evidence.finalScreenshot,
+            ...(evidence.finalViewport ? { finalViewport: evidence.finalViewport } : {}),
+            metadata: {
+              executionMode: 'browser',
+              lane: 'direct_open',
+            },
+          });
+          if (!persisted.persisted) return;
+
+          broadcastToUser(ctx.userId, {
+            type: 'server.vision.screencast',
+            taskId,
+            tickIndex: 1,
+            imageBase64: evidence.finalScreenshot,
+            url: evidence.finalUrl,
+            viewport: evidence.finalViewport ?? { width: 1280, height: 800 },
+            timestamp: new Date().toISOString(),
+          });
+          broadcastToUser(ctx.userId, {
+            type: 'server.task.terminal',
+            taskId,
+            status: 'completed',
+            summary: `已打开 ${evidence.finalUrl}`,
+          });
+        } catch (err) {
+          const reason = err instanceof Error ? err.message : String(err);
+          const persisted = await repo.persistVisionOutcome(taskId, {
+            status: 'failed',
+            reason: `浏览器打开失败：${reason}`.slice(0, 500),
+            errorCode: 'DIRECT_OPEN_FAILED',
+            tickCount: 0,
+            metadata: { executionMode: 'browser', lane: 'direct_open' },
+          });
+          if (persisted.persisted) {
+            broadcastToUser(ctx.userId, {
+              type: 'server.task.terminal',
+              taskId,
+              status: 'failed',
+              reason: `浏览器打开失败：${reason}`.slice(0, 200),
+            });
+          }
+        } finally {
+          if (allocatedPool && ctx.browserPool) {
+            const retained = ctx.browserPool.retain(
+              taskId,
+              appEnv.BROWSER_TERMINAL_RETENTION_MS,
+              'direct-open-review',
+            );
+            if (!retained) {
+              await ctx.browserPool
+                .release(taskId, `direct-open-${taskId}-done`)
+                .catch(() => {});
+            }
+            ctx.taskQueue?.signalSlotFreed();
+          }
+        }
+      })();
+
+      return {
+        taskId,
+        status: 'executing' as const,
+        steps: [],
+        executionMode: 'browser' as const,
+      };
+    }
+
     // Diagnostic: log the supercar-gate inputs on every tasks.create
     // so BOSS can tell from pm2 logs exactly why a task fell into the
     // legacy branch. Happens BEFORE the gate so the log always lands.
@@ -5207,19 +5393,25 @@ export const tasksRouter = router({
             // a no-op and the watchdog's release call has already
             // happened (idempotent with the regular release below).
             clearTimeout(watchdogTimer);
-            // Phase 24 — release the per-task Brave immediately on
-            // completion. One task = one Brave; no shared instance,
-            // no refcount. The per-user concurrency limit is enforced
-            // upstream at admit time via getActiveTaskCount.
+            // Keep the completed browser briefly available for the task's
+            // review workspace. The lease is bounded and reclaimable: a new
+            // task at capacity releases the oldest retained browser first.
             if (didAllocatePool && ctx.browserPool) {
-              void ctx.browserPool
-                .release(taskId, `task-${taskId}-done`)
-                .catch((relErr) => {
-                  ctx.logger.warn(
-                    { err: relErr, taskId, userId: ctx.userId },
-                    'pool: post-task release failed',
-                  );
-                });
+              const retained = ctx.browserPool.retain(
+                taskId,
+                appEnv.BROWSER_TERMINAL_RETENTION_MS,
+                'terminal-review',
+              );
+              if (!retained) {
+                void ctx.browserPool
+                  .release(taskId, `task-${taskId}-done`)
+                  .catch((relErr) => {
+                    ctx.logger.warn(
+                      { err: relErr, taskId, userId: ctx.userId },
+                      'pool: post-task release failed',
+                    );
+                  });
+              }
             }
             // Phase 24 RC follow-up — wake the TaskQueue worker so
             // the next queued task fires immediately instead of
@@ -7529,10 +7721,12 @@ export const tasksRouter = router({
       }
       const exec =
         poolInstance?.executor ??
-        ctx.executionRouter?.getExecutor('headed') ??
-        ctx.executionRouter?.getExecutor('headless') ??
-        ctx.playwrightExecutor ??
-        null;
+        (appEnv.NODE_ENV === 'production'
+          ? null
+          : ctx.executionRouter?.getExecutor('headed') ??
+            ctx.executionRouter?.getExecutor('headless') ??
+            ctx.playwrightExecutor ??
+            null);
       if (!exec) return { ok: false as const, reason: 'no_executor' };
       try {
         const page = await exec.getPage();
@@ -7562,6 +7756,18 @@ export const tasksRouter = router({
           }
           if (!/^https?:\/\//i.test(target)) {
             return { ok: false as const, reason: 'bad_scheme' };
+          }
+          const networkDecision = await defaultBrowserNetworkPolicy.check(target);
+          if (!networkDecision.allowed) {
+            ctx.logger.warn(
+              {
+                target,
+                reason: networkDecision.reason,
+                userId: ctx.userId,
+              },
+              'tasks.browserNav: target blocked by browser network policy',
+            );
+            return { ok: false as const, reason: 'blocked_target' };
           }
           await page.goto(target, navOpts);
         } else {

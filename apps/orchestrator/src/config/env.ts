@@ -328,6 +328,17 @@ const schema = z.object({
    * without paying a 3-5s cold-start spawn on every return.
    */
   BROWSER_IDLE_TIMEOUT_MS: z.coerce.number().int().positive().default(300_000),
+  /**
+   * Short, hard-bounded review lease after a browser task finishes.
+   * The retained browser remains interactive in the workbench, but the pool
+   * may reclaim it immediately when a new task needs capacity.
+   */
+  BROWSER_TERMINAL_RETENTION_MS: z.coerce
+    .number()
+    .int()
+    .nonnegative()
+    .max(3_600_000)
+    .default(600_000),
   /** First port in the contiguous pool used for per-user resources.
    *  Slot i consumes display :(100+i), CDP (cdp+i), RFB (vnc+i), WS (ws+i). */
   BROWSER_CDP_PORT_START: z.coerce.number().int().positive().default(9300),

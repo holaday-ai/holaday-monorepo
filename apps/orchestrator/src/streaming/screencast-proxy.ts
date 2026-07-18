@@ -27,11 +27,11 @@ import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import type { Logger } from 'pino';
 import { WebSocket, WebSocketServer } from 'ws';
-import { dimensionsForProfile } from '@holaday/shared-types';
 import { verifyStreamOrAccessToken } from '../auth/jwt.js';
 import type { BrowserPool } from '../browser-pool/index.js';
 import type { BrowserInstance } from '../browser-pool/types.js';
-import { CdpInputHandler, type InputMessage } from './cdp-input.js';
+import { CdpInputHandler } from './cdp-input.js';
+import { DeferredScreencastInputBridge } from './screencast-input-bridge.js';
 import { CdpStreamer } from './cdp-streamer.js';
 
 /**
@@ -180,6 +180,16 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
     let streamer: CdpStreamer | null = null;
     let inputHandler: CdpInputHandler | null = null;
     let stopped = false;
+    const inputBridge = new DeferredScreencastInputBridge({
+      onViewportApplied: (viewport) => {
+        if (args.ws.readyState !== WebSocket.OPEN) return;
+        try {
+          args.ws.send(JSON.stringify({ type: 'viewport-applied', ...viewport }));
+        } catch {
+          /* socket closed between readyState and send */
+        }
+      },
+    });
 
     async function teardown(reason: string): Promise<void> {
       if (stopped) return;
@@ -197,12 +207,23 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
       } catch {
         /* ignore */
       }
+      inputBridge.detach();
     }
 
     args.ws.on('close', () => void teardown('ws-close'));
     args.ws.on('error', (err) => {
       userLog.warn({ err: errMsg(err) }, 'screencast: ws error');
       void teardown('ws-error');
+    });
+    // Attach before the streamer starts. Chromium/CDP setup can take several
+    // hundred milliseconds; the SPA sends its viewport as soon as the socket
+    // opens, and losing that first message leaves the stream pinned to the
+    // spawn-time 430x760 profile. The bridge retains only the newest viewport
+    // and deliberately drops stale pointer/keyboard input.
+    args.ws.on('message', (raw) => {
+      void inputBridge.receive(raw.toString()).catch((err: unknown) => {
+        userLog.debug({ err: errMsg(err) }, 'screencast: input dispatch failed');
+      });
     });
 
     try {
@@ -213,21 +234,16 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
       // every task start, so a fixed reference would die after the
       // first task — see cdp-streamer.ts CdpStreamerOptions.getPage.
       const executor = args.instance!.executor;
-      // Optimization #3 R1 — pin the streamer's frame caps to the
-      // viewport profile the pool spawned this Brave with. The CDP
-      // contract caps frames at maxWidth × maxHeight; passing
-      // sidepanel (900×900) keeps a narrow panel from receiving
-      // 1280-px-wide frames that the SPA then downscales (wasted
-      // bandwidth + slightly fuzzier text). When the instance has
-      // no profile attached (back-compat), the streamer falls
-      // back to its built-in 1280×800 default.
+      // Keep the cap large enough for the live workbench. Chromium still sends
+      // frames at the current remote viewport size, so a narrow panel remains
+      // cheap; when the user expands the browser, the stream can grow instead
+      // of upscaling a permanently 430px-wide JPEG.
       const profile = args.instance!.viewportProfile;
-      const profileDims = profile ? dimensionsForProfile(profile) : null;
       userLog.info(
         {
           viewportProfile: profile ?? 'desktop',
-          frameCapWidth: profileDims?.width ?? 1280,
-          frameCapHeight: profileDims?.height ?? 800,
+          frameCapWidth: 1440,
+          frameCapHeight: 1200,
         },
         'screencast: resolved viewport profile',
       );
@@ -235,7 +251,7 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
         getPage: () => executor.getPage(),
         ws: args.ws,
         logger: userLog,
-        ...(profileDims ? { maxWidth: profileDims.width, maxHeight: profileDims.height } : {}),
+        onViewportMayReset: () => inputBridge.reapplyViewport(),
       });
       await streamer.start();
       if (!streamer.getSession()) {
@@ -250,19 +266,7 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
       // handler picks it up on the next dispatch.
       const streamerRef = streamer;
       inputHandler = new CdpInputHandler(() => streamerRef.getSession(), userLog);
-
-      args.ws.on('message', (raw) => {
-        if (!inputHandler) return;
-        let msg: { type?: string; payload?: InputMessage } | null = null;
-        try {
-          msg = JSON.parse(raw.toString());
-        } catch {
-          return; // swallow malformed
-        }
-        if (msg && msg.type === 'input' && msg.payload) {
-          void inputHandler.handle(msg.payload);
-        }
-      });
+      await inputBridge.attach(inputHandler);
 
       // Keep the pool's idle GC happy — every active screencast
       // counts as activity on its bound task even when the agent

@@ -18,6 +18,7 @@
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import type { Logger } from 'pino';
+import { chromium } from 'playwright';
 
 export interface SpawnedProcess {
   pid: number;
@@ -121,6 +122,8 @@ export interface SpawnBraveOptions {
   userDataDir: string;
   /** Defaults to 1280,800 — matches the Xvfb screen geometry. */
   windowSize?: string;
+  /** Loopback-only SSRF-safe forward proxy owned by BrowserPool. */
+  proxyServer?: string;
 }
 
 /**
@@ -138,6 +141,21 @@ export function spawnBrave(
   logger: Logger,
 ): SpawnedProcess {
   mkdirSync(opts.userDataDir, { recursive: true });
+  const args = buildBraveArgs(opts);
+  const label = `brave:${opts.cdpPort}`;
+  const options = {
+    ...baseSpawnOptions(label),
+    env: {
+      ...process.env,
+      DISPLAY: `:${opts.display}`,
+      HOLADAY_SPAWN_LABEL: label,
+    },
+  } satisfies SpawnOptions;
+  const child = spawn('/usr/bin/brave-browser', args, options);
+  return wrap(child, logger, label);
+}
+
+export function buildBraveArgs(opts: SpawnBraveOptions): string[] {
   const windowSize = opts.windowSize ?? '1280,800';
   // Round-2 change: dropped --kiosk + --start-fullscreen + --disable-infobars.
   // Users now see Brave's normal chrome (address bar + tab bar) in the
@@ -148,7 +166,7 @@ export function spawnBrave(
   //   --homepage=about:blank      so the new-tab default isn't Google
   //   --disable-features=ExternalProtocolDialog   stops "Open xdg-open?" popups
   //   --deny-permission-prompts   auto-rejects geolocation / notifications
-  const args = [
+  return [
     `--remote-debugging-port=${opts.cdpPort}`,
     '--remote-debugging-address=127.0.0.1',
     `--user-data-dir=${opts.userDataDir}`,
@@ -168,26 +186,48 @@ export function spawnBrave(
     // every Brave we might run against.
     '--disable-features=CalculateNativeWinOcclusion,ChromeWhatsNewUI,InfiniteSessionRestore,Translate,BravePrivateProductAnalytics,BraveWelcomePage,BraveRewards,BraveAIChat,BraveTalk,BraveVPN,ImportData,BraveNTPBrandedWallpaper,ExternalProtocolDialog,ExternalProtocolPrompts',
     '--disable-background-networking',
+    '--disable-quic',
     '--disable-sync',
     '--disable-translate',
     '--deny-permission-prompts',
+    '--force-webrtc-ip-handling-policy=disable_non_proxied_udp',
     '--homepage=about:blank',
     '--lang=zh-CN',
     `--window-size=${windowSize}`,
     '--window-position=0,0',
     '--start-maximized',
+    ...(opts.proxyServer
+      ? [
+          `--proxy-server=${opts.proxyServer}`,
+          // Chromium normally bypasses proxies for localhost. Disable that
+          // implicit exception so private targets always reach our guard.
+          '--proxy-bypass-list=<-loopback>',
+        ]
+      : []),
     'about:blank',
   ];
-  const label = `brave:${opts.cdpPort}`;
-  const options = {
-    ...baseSpawnOptions(label),
-    env: {
-      ...process.env,
-      DISPLAY: `:${opts.display}`,
-      HOLADAY_SPAWN_LABEL: label,
-    },
-  } satisfies SpawnOptions;
-  const child = spawn('/usr/bin/brave-browser', args, options);
+}
+
+/**
+ * Local development uses Playwright's bundled Chromium directly. This keeps
+ * the BrowserPool/CDP contract identical to production without requiring the
+ * Linux-only Xvfb, Brave, x11vnc, and websockify sidecars on macOS.
+ */
+export function buildNativeChromiumArgs(opts: SpawnBraveOptions): string[] {
+  return [
+    '--headless=new',
+    ...buildBraveArgs(opts).filter((arg) => arg !== '--start-maximized'),
+  ];
+}
+
+export function spawnNativeChromium(
+  opts: SpawnBraveOptions,
+  logger: Logger,
+): SpawnedProcess {
+  mkdirSync(opts.userDataDir, { recursive: true });
+  const args = buildNativeChromiumArgs(opts);
+  const label = `chromium:${opts.cdpPort}`;
+  const child = spawn(chromium.executablePath(), args, baseSpawnOptions(label));
   return wrap(child, logger, label);
 }
 

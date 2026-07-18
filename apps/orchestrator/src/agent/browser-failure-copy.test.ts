@@ -36,6 +36,12 @@ describe('friendlyBrowserFailureReason', () => {
     );
   });
 
+  it('separates a target site closing the connection from a browser session disconnect', () => {
+    expect(friendlyBrowserFailureReason('page.goto: net::ERR_CONNECTION_CLOSED')).toBe(
+      '无法连接到该站点。请稍后重试或换一个站点。',
+    );
+  });
+
   it('returns null for unrelated application errors', () => {
     expect(friendlyBrowserFailureReason('missing ANTHROPIC_API_KEY')).toBeNull();
   });

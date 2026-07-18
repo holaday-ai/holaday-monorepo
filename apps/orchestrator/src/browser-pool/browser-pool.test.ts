@@ -249,6 +249,50 @@ describe('BrowserPool — phase 24 per-task semantics', () => {
     });
   });
 
+  describe('terminal review lease', () => {
+    it('keeps a completed task browser available until the bounded lease expires', async () => {
+      vi.useFakeTimers();
+      try {
+        const leased = makePool(1);
+        await leased.pool.allocate('tsk_done', 'usr_review');
+
+        expect(leased.pool.retain('tsk_done', 30_000, 'terminal-review')).toBe(true);
+        expect(leased.pool.peek('tsk_done')).not.toBeNull();
+
+        await vi.advanceTimersByTimeAsync(29_999);
+        expect(leased.pool.peek('tsk_done')).not.toBeNull();
+
+        await vi.advanceTimersByTimeAsync(1);
+        expect(leased.pool.peek('tsk_done')).toBeNull();
+        expect(leased.tearDownSpy).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('reclaims a retained terminal browser before rejecting new work at capacity', async () => {
+      const leased = makePool(1);
+      await leased.pool.allocate('tsk_done', 'usr_review');
+      leased.pool.retain('tsk_done', 60_000, 'terminal-review');
+
+      expect(leased.pool.canAllocate()).toBe(true);
+      const next = await leased.pool.allocate('tsk_next', 'usr_review');
+
+      expect(next.taskId).toBe('tsk_next');
+      expect(leased.pool.peek('tsk_done')).toBeNull();
+      expect(leased.tearDownSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not retain unknown, draining, or invalid browser leases', async () => {
+      expect(pool.retain('tsk_missing', 60_000, 'terminal-review')).toBe(false);
+      const inst = await pool.allocate('tsk_draining', 'usr_review');
+      inst.status = 'draining';
+      expect(pool.retain('tsk_draining', 60_000, 'terminal-review')).toBe(false);
+      inst.status = 'ready';
+      expect(pool.retain('tsk_draining', 0, 'terminal-review')).toBe(false);
+    });
+  });
+
   describe('idle GC', () => {
     it('reaps tasks whose lastActiveAt is older than idleTimeoutMs', async () => {
       await pool.allocate('tsk_idle', 'u');

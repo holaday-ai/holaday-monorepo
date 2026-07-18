@@ -52,6 +52,13 @@ export interface BrowserInstance extends BrowserSlot {
   createdAt: number;
   status: InstanceStatus;
   /**
+   * Hard expiry for a completed task's short browser-review lease.
+   * Retained instances remain streamable after the task reaches a terminal
+   * state, but are always reclaimable when a new task needs pool capacity.
+   */
+  retainedUntil?: number;
+  retentionReason?: string;
+  /**
    * Optimization #3 R1 — viewport profile this instance was spawned
    * with. Used by the CDP streamer to cap frame dimensions to the
    * Brave's logical viewport, and by /screencast-ws/ handlers to
