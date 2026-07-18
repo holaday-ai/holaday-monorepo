@@ -67,4 +67,20 @@ describe('pickImageModel', () => {
     const pro = pickImageModel('海报', { proModel: 'nbpro-custom' });
     expect(pro.model).toBe('nbpro-custom');
   });
+
+  it('uses the structured model preference before prompt heuristics', () => {
+    const flash = pickImageModel('帮我做一张双十一促销海报', {
+      preferredTier: 'flash',
+    });
+    expect(flash.tier).toBe('flash');
+    expect(flash.model).toBe(DEFAULT_FLASH_MODEL);
+    expect(flash.reason).toContain('用户选择 Nano Banana 2');
+
+    const pro = pickImageModel('画一只在草地上的橘猫', {
+      preferredTier: 'pro',
+    });
+    expect(pro.tier).toBe('pro');
+    expect(pro.model).toBe(DEFAULT_PRO_MODEL);
+    expect(pro.reason).toContain('用户选择 Nano Banana Pro');
+  });
 });

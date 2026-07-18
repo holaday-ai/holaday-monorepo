@@ -8,7 +8,10 @@
  */
 
 export type VideoTab = 'normal' | 'pet' | 'ip_person';
-export type VideoModel = 'veo_fast' | 'happyhorse' | 'veo_standard' | 'wanxiang';
+export type NormalVideoModel = 'veo_fast' | 'happyhorse' | 'veo_standard' | 'wanxiang';
+export type CloneVideoModel = 'wan_animate_std' | 'wan_animate_pro';
+export type VideoModel = NormalVideoModel | CloneVideoModel;
+export type CloneVideoMode = 'wan-std' | 'wan-pro';
 export type PetModel = 'wan_i2v' | 'happyhorse_i2v';
 export type VideoStyleOption = 'auto' | 'realistic' | 'atmospheric' | 'science';
 export type VideoAspect = '9:16' | '16:9' | '1:1' | '4:3' | '3:4';
@@ -19,11 +22,17 @@ export type PetDuration = 3 | 5;
 export interface VideoCreationOptions {
   /** 'normal' 普通文生(默) / 'pet' 宠物图生 i2v. */
   tab?: VideoTab;
-  model?: VideoModel;
+  model?: NormalVideoModel;
   /** 宠物 i2v 档(tab='pet'). */
   petModel?: PetModel;
   /** 已上传宠物照片的 fileId(tab='pet' 必填). */
   petImageFileId?: string;
+  /** 已上传的复刻参考视频。 */
+  referenceVideoFileId?: string;
+  /** 从本地视频 metadata 读取，仅用于提交前价格估算。 */
+  referenceVideoDurationSeconds?: number;
+  /** Wan Animate 2.2 的真实服务档位。 */
+  cloneMode?: CloneVideoMode;
   style?: VideoStyleOption;
   aspectRatio?: VideoAspect;
   resolution?: VideoResolution;
@@ -32,13 +41,35 @@ export interface VideoCreationOptions {
 }
 
 /** 每秒美元单价(档 × 画质)。镜像后端 video-confirm.ts VEO_USD_PER_SEC。 */
-const USD_PER_SEC: Record<VideoModel, Record<VideoResolution, number>> = {
+const USD_PER_SEC: Record<NormalVideoModel, Record<VideoResolution, number>> = {
   veo_fast: { '720p': 0.1, '1080p': 0.12 },
   veo_standard: { '720p': 0.4, '1080p': 0.4 },
   happyhorse: { '720p': 0.9 / 7.3, '1080p': 1.6 / 7.3 },
   wanxiang: { '720p': 0.1, '1080p': 0.12 },
 };
 const USD_TO_CNY = 7.3;
+
+export function cloneModeFromVideoModel(model: VideoModel): CloneVideoMode | null {
+  if (model === 'wan_animate_std') return 'wan-std';
+  if (model === 'wan_animate_pro') return 'wan-pro';
+  return null;
+}
+
+export function normalVideoModelFromSelection(model: VideoModel): NormalVideoModel {
+  if (model === 'wan_animate_std' || model === 'wan_animate_pro') return 'veo_fast';
+  return model;
+}
+
+const CLONE_USD_PER_SEC: Record<CloneVideoMode, number> = {
+  'wan-std': 0.18,
+  'wan-pro': 0.26,
+};
+
+/** Wan Animate Singapore list price; final provider billing uses actual successful output duration. */
+export function estimateCloneCny(opts: { mode: CloneVideoMode; durationSeconds: number }): number {
+  const safeDuration = Math.min(30, Math.max(2, opts.durationSeconds));
+  return Math.max(1, Math.ceil(safeDuration * CLONE_USD_PER_SEC[opts.mode] * USD_TO_CNY));
+}
 
 /** 普通文生:单段预计人民币(向上取整),= 每段秒数 × 档/画质单价 × 汇率。 */
 export function estimatePerSegmentCny(

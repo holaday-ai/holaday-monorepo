@@ -10,6 +10,7 @@
  */
 import type { VideoSource } from './video-lane-simple.js';
 import type { PetI2vModel } from './video-pet-i2v.js';
+import type { WanAnimateMixMode } from './wan-animate-mix-client.js';
 
 export type VideoChoice = 'video' | 'image' | 'cancel' | 'unclear';
 
@@ -135,6 +136,30 @@ export function quotePetI2v(
     `（${I2V_LABEL[model]} · ${resolution} · 按 ${durationSeconds} 秒计费）。\n` +
     `点「确认制作」开始；不需要可「取消」。`;
   return { durationSeconds, videoCny, message };
+}
+
+// Wan 2.2 Animate Mix, Singapore international pricing snapshot (2026-07-15):
+// https://www.alibabacloud.com/help/en/model-studio/model-pricing
+// Successful output is billed by actual output duration; failed calls are free.
+const CLONE_USD_PER_SEC: Record<WanAnimateMixMode, number> = {
+  'wan-std': 0.18,
+  'wan-pro': 0.26,
+};
+
+export interface CloneVideoQuote {
+  readonly durationSeconds: number;
+  readonly videoCny: number;
+  readonly message: string;
+}
+
+export function quoteCloneVideo(durationSeconds: number, mode: WanAnimateMixMode): CloneVideoQuote {
+  const safeDuration = Math.min(30, Math.max(2, durationSeconds));
+  const videoCny = Math.max(1, Math.ceil(safeDuration * CLONE_USD_PER_SEC[mode] * USD_TO_CNY));
+  const label = mode === 'wan-pro' ? 'Pro' : 'Standard';
+  const message =
+    `将用 Wan Animate 2.2 ${label} 把主角照片替换进参考视频，按参考视频约 ${safeDuration.toFixed(1)} 秒估算费用约 ¥${videoCny}。\n` +
+    `最终按成功输出的实际输出时长计费；失败不计费。点「确认制作」开始；不需要可「取消」。`;
+  return { durationSeconds: safeDuration, videoCny, message };
 }
 
 // ---------------------------------------------------------------------------

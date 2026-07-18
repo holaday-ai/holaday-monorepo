@@ -927,6 +927,41 @@ describe('selectTask detail hydration', () => {
     });
   });
 
+  it('sends the selected image model as structured task metadata', async () => {
+    createMutate.mockResolvedValueOnce({
+      taskId: 'tsk_image',
+      status: 'executing',
+      executionMode: 'image',
+    } as never);
+    listQuery.mockResolvedValueOnce({ tasks: [], nextCursor: null } as never);
+
+    await useTaskStore.getState().createTask(
+      '生成图片：一张夏日海报',
+      [],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        model: 'nano_banana_pro',
+        aspectRatio: '4:3',
+        imageCount: 3,
+      },
+    );
+
+    expect(createMutate).toHaveBeenCalledWith({
+      intent: '生成图片：一张夏日海报',
+      imageOptions: {
+        model: 'nano_banana_pro',
+        aspectRatio: '4:3',
+        imageCount: 3,
+      },
+      viewportProfile: 'desktop',
+    });
+  });
+
   it('passes an explicit composer skill selection to task creation', async () => {
     createMutate.mockResolvedValueOnce({
       taskId: 'tsk_skill',

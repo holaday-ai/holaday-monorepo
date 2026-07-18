@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import net from 'node:net';
@@ -7,6 +8,8 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import mysql from 'mysql2/promise';
 import { chromium, request } from 'playwright';
+import { assertSafeQaDatabase } from './qa-db-safety.mjs';
+import { buildQaReportMetadata } from './qa-report-metadata.mjs';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ORCHESTRATOR_ROOT = path.resolve(SCRIPT_DIR, '..');
@@ -22,9 +25,12 @@ const CHROME_PATH = process.env.HOLADAY_WEB_QA_CHROME_PATH
   ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const LOCAL_QA_EMAIL = 'web-ui-qa@holaday.local';
 const LOCAL_QA_PASSWORD = 'holaday-ui-qa-password-2026';
-const BROWSER_FIXTURE_ID = 'tsk_browser_ui_qa';
+const QA_DATABASE_URL = process.env.DATABASE_URL
+  ?? 'mysql://holaday:holaday-dev@127.0.0.1:3306/holaday';
+const FIXTURE_SUFFIX = randomUUID().replaceAll('-', '').slice(0, 10);
+const BROWSER_FIXTURE_ID = `tsk_browser_qa_${FIXTURE_SUFFIX}`;
 const BROWSER_FIXTURE_TITLE = '浏览器界面验收';
-const BROWSER_TERMINAL_FIXTURE_ID = 'tsk_browser_terminal_ui_qa';
+const BROWSER_TERMINAL_FIXTURE_ID = `tsk_browser_term_${FIXTURE_SUFFIX}`;
 const BROWSER_TERMINAL_FIXTURE_TITLE = '浏览器终态证据验收';
 
 const VIEWPORTS = [
@@ -187,8 +193,7 @@ async function ensureLocalStack() {
         cwd: ORCHESTRATOR_ROOT,
         env: {
           ...process.env,
-          DATABASE_URL: process.env.DATABASE_URL
-            ?? 'mysql://holaday:holaday-dev@127.0.0.1:3306/holaday',
+          DATABASE_URL: QA_DATABASE_URL,
           REDIS_URL: process.env.REDIS_URL ?? 'redis://127.0.0.1:6379',
           JWT_SECRET: process.env.JWT_SECRET ?? 'holaday-local-web-qa-secret-at-least-32-characters',
           EXECUTOR_MODE: process.env.EXECUTOR_MODE ?? 'auto',
@@ -261,9 +266,7 @@ async function authenticate() {
 
 async function createLocalBrowserFixture(email) {
   if (!IS_LOCAL || !email) return null;
-  const connection = await mysql.createConnection(
-    process.env.DATABASE_URL ?? 'mysql://holaday:holaday-dev@127.0.0.1:3306/holaday',
-  );
+  const connection = await mysql.createConnection(QA_DATABASE_URL);
   try {
     const [users] = await connection.execute(
       'SELECT id FROM users WHERE email = ? LIMIT 1',
@@ -322,9 +325,7 @@ async function createLocalBrowserFixture(email) {
     await connection.end();
   }
   return async () => {
-    const cleanup = await mysql.createConnection(
-      process.env.DATABASE_URL ?? 'mysql://holaday:holaday-dev@127.0.0.1:3306/holaday',
-    );
+    const cleanup = await mysql.createConnection(QA_DATABASE_URL);
     try {
       await cleanup.execute('DELETE FROM tasks WHERE external_id IN (?, ?)', [
         BROWSER_FIXTURE_ID,
@@ -354,9 +355,7 @@ function isExpectedSyntheticBrowserSocketError(message) {
 
 async function resetDedicatedLocalQaQuota(email) {
   if (!IS_LOCAL || email !== LOCAL_QA_EMAIL) return;
-  const connection = await mysql.createConnection(
-    process.env.DATABASE_URL ?? 'mysql://holaday:holaday-dev@127.0.0.1:3306/holaday',
-  );
+  const connection = await mysql.createConnection(QA_DATABASE_URL);
   try {
     await connection.execute(
       `UPDATE task_quotas AS quota
@@ -1074,6 +1073,13 @@ async function checkInlineTerminalEvidence(browser, token, viewport) {
 async function main() {
   log(`Holaday web QA: ${BASE_URL}`);
   log(`Artifacts: ${OUTPUT_DIR}`);
+  const reportMetadata = buildQaReportMetadata({ isLocal: IS_LOCAL });
+  log('Scope: Chrome UI and fixture rendering only; live managed-browser egress is a separate release gate.');
+  if (IS_LOCAL) {
+    assertSafeQaDatabase(QA_DATABASE_URL, {
+      allowRemote: process.env.QA_ALLOW_REMOTE_DB === 'true',
+    });
+  }
   await ensureLocalStack();
   const auth = await authenticate();
   await resetDedicatedLocalQaQuota(auth.email);
@@ -1126,7 +1132,12 @@ async function main() {
   const failures = results.filter((result) => result.status !== 'passed');
   await fsp.writeFile(
     reportPath,
-    `${JSON.stringify({ baseUrl: BASE_URL, generatedAt: new Date().toISOString(), results }, null, 2)}\n`,
+    `${JSON.stringify({
+      baseUrl: BASE_URL,
+      generatedAt: new Date().toISOString(),
+      ...reportMetadata,
+      results,
+    }, null, 2)}\n`,
   );
   log(`Report: ${reportPath}`);
   if (failures.length > 0) {

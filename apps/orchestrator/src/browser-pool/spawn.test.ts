@@ -1,5 +1,43 @@
 import { describe, expect, it } from 'vitest';
-import { buildBraveArgs, buildNativeChromiumArgs } from './spawn.js';
+import {
+  assertSandboxedBrowserUser,
+  buildBraveArgs,
+  buildBrowserChildEnv,
+  buildNativeChromiumArgs,
+} from './spawn.js';
+
+describe('assertSandboxedBrowserUser', () => {
+  it('refuses to launch a managed browser as root', () => {
+    expect(() => assertSandboxedBrowserUser(0)).toThrow(/non-root/i);
+    expect(() => assertSandboxedBrowserUser(501)).not.toThrow();
+    expect(() => assertSandboxedBrowserUser(undefined)).not.toThrow();
+  });
+});
+
+describe('buildBrowserChildEnv', () => {
+  it('passes only non-secret runtime variables into the user-controlled browser process', () => {
+    const env = buildBrowserChildEnv(
+      {
+        PATH: '/usr/bin',
+        LANG: 'zh_CN.UTF-8',
+        DATABASE_URL: 'mysql://secret',
+        GEMINI_API_KEY: 'secret-key',
+        AWS_SECRET_ACCESS_KEY: 'secret-cloud-key',
+      },
+      { DISPLAY: ':100', HOLADAY_SPAWN_LABEL: 'brave:9300' },
+    );
+
+    expect(env).toEqual({
+      PATH: '/usr/bin',
+      LANG: 'zh_CN.UTF-8',
+      DISPLAY: ':100',
+      HOLADAY_SPAWN_LABEL: 'brave:9300',
+    });
+    expect(env).not.toHaveProperty('DATABASE_URL');
+    expect(env).not.toHaveProperty('GEMINI_API_KEY');
+    expect(env).not.toHaveProperty('AWS_SECRET_ACCESS_KEY');
+  });
+});
 
 describe('buildBraveArgs', () => {
   it('forces pooled browser traffic through the loopback egress guard', () => {
@@ -14,6 +52,7 @@ describe('buildBraveArgs', () => {
     expect(args).toContain('--proxy-bypass-list=<-loopback>');
     expect(args).toContain('--disable-quic');
     expect(args).toContain('--force-webrtc-ip-handling-policy=disable_non_proxied_udp');
+    expect(args).not.toContain('--no-sandbox');
   });
 });
 

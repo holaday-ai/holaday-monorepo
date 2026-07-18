@@ -64,8 +64,14 @@ export interface RunImageTaskOpts {
   baseUrl?: string;
   flashModel?: string;
   proModel?: string;
+  /** Explicit model tier selected by the image-task UI. */
+  preferredTier?: ImageModelTier;
   /** Per-call wall-clock; forwarded to the adapter. */
   timeoutMs?: number;
+  /** Exact number of independently generated options requested by the UI. */
+  imageCount?: 1 | 2 | 3 | 4;
+  /** Output geometry supported by the connected Gemini image models. */
+  aspectRatio?: '1:1' | '3:4' | '4:3' | '9:16' | '16:9';
   save: SaveImageFn;
   logger: Logger;
   /** Injectable adapter for tests; defaults to the real Gemini client. */
@@ -82,6 +88,7 @@ export async function runImageTask(opts: RunImageTaskOpts): Promise<RunImageTask
   const decision = pickImageModel(intent, {
     ...(opts.flashModel ? { flashModel: opts.flashModel } : {}),
     ...(opts.proModel ? { proModel: opts.proModel } : {}),
+    ...(opts.preferredTier ? { preferredTier: opts.preferredTier } : {}),
   });
   const generate = opts.generate ?? generateImages;
   const flashModel = opts.flashModel ?? DEFAULT_FLASH_MODEL;
@@ -96,6 +103,7 @@ export async function runImageTask(opts: RunImageTaskOpts): Promise<RunImageTask
       ...(opts.baseUrl ? { baseUrl: opts.baseUrl } : {}),
       ...(hasInputs ? { inputImages: opts.inputImages } : {}),
       ...(resolution ? { resolution } : {}),
+      ...(opts.aspectRatio ? { aspectRatio: opts.aspectRatio } : {}),
       ...(opts.timeoutMs ? { timeoutMs: opts.timeoutMs } : {}),
     });
 
@@ -156,9 +164,32 @@ export async function runImageTask(opts: RunImageTaskOpts): Promise<RunImageTask
     }
   }
 
+  const requestedCount = opts.imageCount ?? Math.max(1, result.images.length);
+  const generatedImages = result.images.slice(0, requestedCount);
+  while (generatedImages.length < requestedCount) {
+    try {
+      const next = await runGenerate(
+        degraded ? flashModel : decision.model,
+        degraded ? undefined : decision.resolution,
+      );
+      if (next.images.length === 0) break;
+      generatedImages.push(...next.images.slice(0, requestedCount - generatedImages.length));
+    } catch (err) {
+      opts.logger.warn(
+        {
+          err: err instanceof Error ? err.message : String(err),
+          generated: generatedImages.length,
+          requested: requestedCount,
+        },
+        'image: additional option generation failed',
+      );
+      break;
+    }
+  }
+
   const attachments: ImageAttachment[] = [];
-  for (let i = 0; i < result.images.length; i += 1) {
-    const image = result.images[i]!;
+  for (let i = 0; i < generatedImages.length; i += 1) {
+    const image = generatedImages[i]!;
     const safeMime = normalizeGeneratedImageMime(image.mimeType);
     if (!safeMime) {
       opts.logger.warn({ mimeType: image.mimeType, index: i }, 'image: unsupported mime skipped');

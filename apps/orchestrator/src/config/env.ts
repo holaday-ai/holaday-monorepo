@@ -346,6 +346,15 @@ const schema = z.object({
   BROWSER_WS_PORT_START: z.coerce.number().int().positive().default(6090),
   BROWSER_DISPLAY_START: z.coerce.number().int().nonnegative().default(100),
   /**
+   * Emergency-only noVNC transport. Disabled by default because a desktop
+   * stream exposes browser chrome and file pickers outside the CDP action
+   * policy. Production should use the authenticated CDP screencast path.
+   */
+  BROWSER_VNC_WS_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  /**
    * Xvfb screen geometry. Default 1280×800×24 (16:10) — sized so the
    * non-fullscreen side panel (~600 px wide) renders Brave at
    * roughly half scale, where text remains readable. Previously

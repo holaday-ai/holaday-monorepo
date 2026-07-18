@@ -822,6 +822,37 @@ describe('PlaywrightExecutor.navigate — goto-no-op fallback', () => {
     expect(gotoCalls).toBe(0);
   });
 
+  it('fails when navigation resolves on a policy-blocked redirect target', async () => {
+    let currentUrl = 'about:blank';
+    const checks: string[] = [];
+    const { page } = makeFakePage({
+      url: () => currentUrl,
+      goto: async () => {
+        currentUrl = 'http://127.0.0.1/internal';
+        return null;
+      },
+    });
+    const exec = new PlaywrightExecutor({
+      networkPolicy: {
+        check: async (url) => {
+          checks.push(url);
+          return url.includes('127.0.0.1')
+            ? { allowed: false, reason: 'private_network', message: '不能访问内网地址' }
+            : { allowed: true, url, addresses: ['203.0.113.10'] };
+        },
+      },
+    });
+
+    await expect(exec.navigate(page, 'https://public.example/redirect')).resolves.toEqual({
+      ok: false,
+      message: 'navigate redirect blocked: 不能访问内网地址',
+    });
+    expect(checks).toEqual([
+      'https://public.example/redirect',
+      'http://127.0.0.1/internal',
+    ]);
+  });
+
   it('detects url-stayed-blank, opens a fresh page, and retries the goto there', async () => {
     // Simulate the exact symptom: goto resolves OK, but page.url()
     // keeps returning about:blank. Fresh page behaves normally.

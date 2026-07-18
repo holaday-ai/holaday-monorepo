@@ -459,7 +459,7 @@ export class BrowserPool {
         'pool: Brave CDP ready',
       );
 
-      if (process.platform !== 'darwin') {
+      if (process.platform !== 'darwin' && this.config.vncEnabled === true) {
         x11vnc = spawnX11vnc(slot.display, slot.vncPort, this.logger);
         processes.push(x11vnc);
 

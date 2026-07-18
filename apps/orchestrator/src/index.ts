@@ -198,6 +198,7 @@ async function main() {
         wsPortStart: env.BROWSER_WS_PORT_START,
         displayStart: env.BROWSER_DISPLAY_START,
         screenSize: env.BROWSER_SCREEN_SIZE,
+        vncEnabled: env.BROWSER_VNC_WS_ENABLED,
         // Phase 17 — drain pending cookies (extension-shipped) into
         // the freshly-spawned context. Best-effort: errors logged
         // inside the helper, never bubble up to block allocate.
@@ -593,37 +594,35 @@ async function main() {
     }
   }
 
-  // Per-user VNC WebSocket proxy — only live when the pool is active.
-  // Nginx (Vultr or Aliyun edge) rewrites /vnc-ws/* → 127.0.0.1:4001/vnc-ws/*
-  // so this upgrade handler only fires on pool traffic; /ws (tRPC-WS
-  // at :4002) is untouched.
-  //
-  // Phase 14 audit follow-up — the MULTI_USER_USERS allowlist gate was
-  // retired here too. The proxy still requires JWT auth + checks the
-  // user owns a live pool instance, so dropping the allowlist doesn't
-  // open it to abuse — it just stops blocking new free-plan users
-  // from streaming THEIR OWN browser.
+  // Browser streaming is mounted only with the per-user pool. CDP is
+  // always available; the full-desktop VNC bridge remains disabled
+  // unless an operator explicitly enables the emergency compatibility
+  // path. /ws (tRPC-WS at :4002) is untouched.
   if (browserPool) {
-    const vncProxy = createVncProxy({ pool: browserPool, logger });
+    const vncProxy = env.BROWSER_VNC_WS_ENABLED
+      ? createVncProxy({ pool: browserPool, logger })
+      : null;
     // Phase 19 — CDP screencast proxy mounted SIDE-BY-SIDE with VNC.
-    // Both run; the SPA's BrowserPanel picks which transport to use
-    // via a localStorage feature flag (holaday.streamTransport=cdp).
-    // Default stays on VNC until BOSS verifies CDP path live in prod.
+    // CDP is always available. VNC is an explicit emergency-only
+    // fallback because it exposes a full interactive desktop surface.
     // See streaming/screencast-proxy.ts for the protocol contract.
     const screencastProxy = createScreencastProxy({ pool: browserPool, logger });
     httpServer.on('upgrade', (req, socket, head) => {
       const url = req.url ?? '';
-      // Try the CDP path first (cheaper regex, fewer matches), then
-      // fall through to VNC. Each handler is no-op when its path
-      // pattern doesn't match.
+      // Route each upgrade explicitly so disabled or unknown streaming
+      // paths never inherit a fallback transport.
       if (url.startsWith('/screencast-ws/')) {
         screencastProxy.handleUpgrade(req, socket, head as Buffer);
         return;
       }
-      vncProxy.handleUpgrade(req, socket, head as Buffer);
+      if (url.startsWith('/vnc-ws/')) {
+        if (vncProxy) vncProxy.handleUpgrade(req, socket, head as Buffer);
+        else socket.destroy();
+      }
     });
     logger.info(
-      'VNC WS proxy mounted at /vnc-ws/:userId; CDP screencast at /screencast-ws/:userId',
+      { vncEnabled: env.BROWSER_VNC_WS_ENABLED },
+      'browser streaming mounted: CDP screencast active; VNC is emergency-only',
     );
   }
 

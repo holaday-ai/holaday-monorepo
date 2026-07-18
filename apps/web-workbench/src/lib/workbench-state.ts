@@ -56,6 +56,7 @@ const BROWSER_TASK_VERBS = ['打开', '登录', '访问', '点击', '下载', '�
 export function hasBrowserRecordForWorkbench(task: UiTask | null): boolean {
   if (!task) return false;
   if (task.executionMode === 'browser') return true;
+  if (task.executionMode) return false;
   if (task.finalUrl?.trim() || task.finalScreenshot) return true;
   const intent = task.intent ?? '';
   if (/https?:\/\//i.test(intent)) return true;

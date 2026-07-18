@@ -37,8 +37,38 @@ function baseSpawnOptions(logLabel: string): SpawnOptions {
   return {
     detached: true,
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, HOLADAY_SPAWN_LABEL: logLabel },
+    env: buildBrowserChildEnv(process.env, { HOLADAY_SPAWN_LABEL: logLabel }),
   };
+}
+
+const BROWSER_ENV_ALLOWLIST = [
+  'PATH',
+  'LANG',
+  'LC_ALL',
+  'LC_CTYPE',
+  'TZ',
+  'XDG_RUNTIME_DIR',
+  'DBUS_SESSION_BUS_ADDRESS',
+] as const;
+
+export function buildBrowserChildEnv(
+  source: NodeJS.ProcessEnv,
+  additions: Record<string, string>,
+): NodeJS.ProcessEnv {
+  const safe: NodeJS.ProcessEnv = {};
+  for (const key of BROWSER_ENV_ALLOWLIST) {
+    const value = source[key];
+    if (value) safe[key] = value;
+  }
+  return { ...safe, ...additions };
+}
+
+export function assertSandboxedBrowserUser(uid: number | undefined): void {
+  if (uid === 0) {
+    throw new Error(
+      'Managed browser requires a non-root OS user so the Chromium sandbox stays enabled.',
+    );
+  }
 }
 
 function wrap(child: ChildProcess, logger: Logger, label: string): SpawnedProcess {
@@ -140,16 +170,16 @@ export function spawnBrave(
   opts: SpawnBraveOptions,
   logger: Logger,
 ): SpawnedProcess {
+  assertSandboxedBrowserUser(process.getuid?.());
   mkdirSync(opts.userDataDir, { recursive: true });
   const args = buildBraveArgs(opts);
   const label = `brave:${opts.cdpPort}`;
   const options = {
     ...baseSpawnOptions(label),
-    env: {
-      ...process.env,
+    env: buildBrowserChildEnv(process.env, {
       DISPLAY: `:${opts.display}`,
       HOLADAY_SPAWN_LABEL: label,
-    },
+    }),
   } satisfies SpawnOptions;
   const child = spawn('/usr/bin/brave-browser', args, options);
   return wrap(child, logger, label);
@@ -175,7 +205,6 @@ export function buildBraveArgs(opts: SpawnBraveOptions): string[] {
     '--disable-background-timer-throttling',
     '--no-first-run',
     '--no-default-browser-check',
-    '--no-sandbox',
     '--disable-dev-shm-usage',
     '--hide-crash-restore-bubble',
     '--disable-session-crashed-bubble',
@@ -224,10 +253,14 @@ export function spawnNativeChromium(
   opts: SpawnBraveOptions,
   logger: Logger,
 ): SpawnedProcess {
+  assertSandboxedBrowserUser(process.getuid?.());
   mkdirSync(opts.userDataDir, { recursive: true });
   const args = buildNativeChromiumArgs(opts);
   const label = `chromium:${opts.cdpPort}`;
-  const child = spawn(chromium.executablePath(), args, baseSpawnOptions(label));
+  const child = spawn(chromium.executablePath(), args, {
+    ...baseSpawnOptions(label),
+    env: buildBrowserChildEnv(process.env, { HOLADAY_SPAWN_LABEL: label }),
+  });
   return wrap(child, logger, label);
 }
 
@@ -281,8 +314,8 @@ export function spawnWebsockify(
 /**
  * Poll the CDP /json/version endpoint until Brave is accepting
  * connections, or the timeout elapses. Brave typically takes
- * 500-1500ms cold-start; headful Brave with our no-sandbox + fresh
- * profile is on the slower end, so the default is 10s.
+ * 500-1500ms cold-start; headful Brave with a fresh profile is on the
+ * slower end, so the default is 10s.
  *
  * Returns the version string on success; throws otherwise. Uses the
  * plain global fetch (Node 20+) and an AbortController for the

@@ -24,6 +24,7 @@ interface BrowserNetworkPolicyOptions {
   resolve?: HostResolver;
   now?: () => number;
   cacheTtlMs?: number;
+  maxCacheEntries?: number;
 }
 
 interface CachedResolution {
@@ -46,12 +47,14 @@ export class BrowserNetworkPolicy {
   private readonly resolve: HostResolver;
   private readonly now: () => number;
   private readonly cacheTtlMs: number;
+  private readonly maxCacheEntries: number;
   private readonly cache = new Map<string, CachedResolution>();
 
   constructor(options: BrowserNetworkPolicyOptions = {}) {
     this.resolve = options.resolve ?? defaultResolver;
     this.now = options.now ?? Date.now;
     this.cacheTtlMs = options.cacheTtlMs ?? 5_000;
+    this.maxCacheEntries = Math.max(1, options.maxCacheEntries ?? 512);
   }
 
   async check(rawUrl: string): Promise<BrowserNetworkDecision> {
@@ -109,6 +112,16 @@ export class BrowserNetworkPolicy {
     const now = this.now();
     const existing = this.cache.get(hostname);
     if (existing && existing.expiresAt > now) return existing.value;
+    if (existing) this.cache.delete(hostname);
+
+    for (const [cachedHostname, cached] of this.cache) {
+      if (cached.expiresAt <= now) this.cache.delete(cachedHostname);
+    }
+    while (this.cache.size >= this.maxCacheEntries) {
+      const oldestHostname = this.cache.keys().next().value as string | undefined;
+      if (!oldestHostname) break;
+      this.cache.delete(oldestHostname);
+    }
 
     const value = this.resolve(hostname);
     this.cache.set(hostname, {
@@ -230,13 +243,16 @@ function isPublicIpv6(address: string): boolean {
     normalized.startsWith('::ffff:') ||
     normalized.startsWith('::') ||
     (a & 0xfe00) === 0xfc00 ||
+    (a & 0xffc0) === 0xfec0 ||
     (a & 0xffc0) === 0xfe80 ||
     (a & 0xff00) === 0xff00 ||
     (a === 0x0100 && b === 0 && c === 0 && d === 0) ||
-    (a === 0x0064 && b === 0xff9b && c === 0x0001) ||
+    (a === 0x0064 && b === 0xff9b && (c === 0 || c === 0x0001)) ||
+    (a === 0x2001 && b === 0) ||
     (a === 0x2001 && b === 0x0002) ||
     (a === 0x2001 && b >= 0x0010 && b <= 0x001f) ||
     (a === 0x2001 && b === 0x0db8) ||
+    a === 0x2002 ||
     (a & 0xfff0) === 0x3ff0
   );
 }

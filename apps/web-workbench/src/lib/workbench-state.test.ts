@@ -52,6 +52,19 @@ describe('workbench state helpers', () => {
     ).toBe(false);
   });
 
+  it('does not reopen the browser for an explicitly non-browser task', () => {
+    expect(
+      hasBrowserRecordForWorkbench(
+        task({ executionMode: 'generate', intent: '总结 https://example.com 的内容' }),
+      ),
+    ).toBe(false);
+    expect(
+      hasBrowserRecordForWorkbench(
+        task({ executionMode: 'image', finalUrl: 'https://example.com/reference' }),
+      ),
+    ).toBe(false);
+  });
+
   it('recognizes saved browser evidence even when legacy intent has no browser verbs', () => {
     expect(
       hasBrowserRecordForWorkbench(

@@ -28,6 +28,8 @@ export interface ImageModelOptions {
   readonly flashModel?: string;
   /** Default 'gemini-3-pro-image'. */
   readonly proModel?: string;
+  /** Structured UI selection. When present, this wins over prompt heuristics. */
+  readonly preferredTier?: ImageModelTier;
 }
 
 export const DEFAULT_FLASH_MODEL = 'gemini-3.1-flash-image';
@@ -71,6 +73,21 @@ export function pickImageModel(
   const flashModel = opts?.flashModel ?? DEFAULT_FLASH_MODEL;
   const proModel = opts?.proModel ?? DEFAULT_PRO_MODEL;
   const text = intent ?? '';
+
+  if (opts?.preferredTier === 'flash') {
+    return {
+      model: flashModel,
+      tier: 'flash',
+      reason: '用户选择 Nano Banana 2',
+    };
+  }
+  if (opts?.preferredTier === 'pro') {
+    return {
+      model: proModel,
+      tier: 'pro',
+      reason: '用户选择 Nano Banana Pro',
+    };
+  }
 
   const matchedFlash = FORCE_FLASH_HINTS.find((re) => re.test(text));
   if (matchedFlash) {

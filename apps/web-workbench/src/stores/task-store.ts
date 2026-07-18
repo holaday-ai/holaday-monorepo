@@ -20,6 +20,7 @@ import type {
   UiWebSearchEvent,
 } from '@/types/task';
 import { isTerminalStatus } from '@/types/task';
+import type { ImageCreationOptions } from '@/types/image';
 import type { VideoCreationOptions } from '@/types/video';
 
 /**
@@ -247,6 +248,7 @@ export interface TaskStore {
      */
     videoOptions?: VideoCreationOptions,
     skillSelection?: UiSkillSelection,
+    imageOptions?: ImageCreationOptions,
   ): Promise<{ taskId: string } | { error: string }>;
   deleteTask(taskId: string): Promise<{ ok: true } | { error: string }>;
   renameTask(taskId: string, title: string): Promise<{ ok: true } | { error: string }>;
@@ -1217,6 +1219,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     viewportProfile,
     videoOptions,
     skillSelection,
+    imageOptions,
   ) {
     // Reject intents that are obviously control commands typed into
     // the wrong box (e.g. user typing "停止" into the composer
@@ -1263,6 +1266,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
             }
           : {}),
         ...(videoOptions ? { videoOptions } : {}),
+        ...(imageOptions ? { imageOptions } : {}),
         viewportProfile: pickedViewportProfile,
       });
       // Optimistic insert at the top so the UI feels instant; the next

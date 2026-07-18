@@ -77,19 +77,17 @@ import { isTerminalStatus } from '@/types/task';
 import { liveStatusLabel } from '@/utils/step-humanize';
 
 /**
- * VNC bridge URL. Relative path lets the browser auto-resolve the
- * scheme (wss on HTTPS, ws on HTTP dev) and host. The nginx block on
- * production strips `/vnc/` and proxies to websockify on :6080. In
- * dev, vite's proxy can forward the same path if desired; absent a
- * proxy the component gracefully reports 'error' and we fall back to
- * the static JPEG screencast.
+ * Emergency-only VNC bridge URL. CDP screencast is the production
+ * default; this path is inert unless both the frontend and backend
+ * explicitly enable VNC fallback.
  *
- * `VITE_VNC_PATH` overrides the default for environments that can't
- * use the production proxy path (e.g. a secondary orchestrator). Set
- * to empty string to disable the VNC layer entirely and stick with
- * screencast-only rendering.
+ * `VITE_VNC_PATH` is only for deployments that intentionally expose
+ * a separately secured VNC proxy. Empty keeps the legacy shared path
+ * disabled.
  */
-const VNC_PATH = (import.meta.env.VITE_VNC_PATH as string | undefined) ?? '/vnc/websockify';
+const VNC_PATH = (import.meta.env.VITE_VNC_PATH as string | undefined) ?? '';
+const VNC_FALLBACK_ENABLED =
+  (import.meta.env.VITE_ENABLE_VNC_FALLBACK as string | undefined) === 'true';
 const BROWSER_SURFACE =
   'border-[#DCDDDD] bg-white/95 shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-white/10 dark:bg-card/85';
 const BROWSER_DIVIDER = 'border-[#DCDDDD]/80 dark:border-white/10';
@@ -109,7 +107,7 @@ const BROWSER_TOOL_BUTTON =
  *     reload reconnects transparently; the URL itself isn't persisted
  *     anywhere.
  *
- * Returns null when VNC is explicitly disabled via VITE_VNC_PATH.
+ * Returns null when no enabled VNC route is available.
  */
 function buildVncUrl(
   activeTaskId: string | null,
@@ -165,13 +163,11 @@ function buildScreencastUrl(
 }
 
 /**
- * Phase 19f — CDP is now the default. VNC is kept as a manual
- * fallback: set `localStorage.holaday.streamTransport='vnc'` and
- * reload to opt back in. The VNC path will be deleted in a
- * follow-up once CDP has soaked in prod.
+ * CDP is the default. VNC can only be selected when the build-time
+ * emergency flag is enabled and the operator opts in through localStorage.
  */
 function readStreamTransport(): 'vnc' | 'cdp' {
-  if (typeof window === 'undefined') return 'cdp';
+  if (typeof window === 'undefined' || !VNC_FALLBACK_ENABLED) return 'cdp';
   try {
     return window.localStorage.getItem('holaday.streamTransport') === 'vnc'
       ? 'vnc'
@@ -448,10 +444,9 @@ export function BrowserPanel({
     }
   }, [activeTaskId, aborting, abortTask]);
 
-  // Phase 19 — pick the live-stream transport per user. The flag
-  // is a localStorage opt-in (`holaday.streamTransport='cdp'`); the
-  // default 'vnc' keeps the existing path unchanged until BOSS
-  // verifies CDP screencast in prod. Read once on mount — flipping
+  // Pick the live-stream transport per user. CDP is always the
+  // default; VNC requires both a build-time emergency flag and the
+  // localStorage opt-in. Read once on mount — flipping
   // the localStorage value mid-session requires a reload, which
   // matches how feature flags usually work and avoids tearing down
   // a live socket on every render.

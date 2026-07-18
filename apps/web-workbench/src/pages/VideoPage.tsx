@@ -44,12 +44,15 @@ import { ipRenderingHint } from '@/lib/video-ip-estimate';
 import { LazyPosterImg } from '@/components/LazyPosterImg';
 import { PageContainer, Section } from '@/pages/PageShell';
 import { useTaskStore } from '@/stores/task-store';
+import type { ImageCreationOptions, ImageModel } from '@/types/image';
 import type { UiTask } from '@/types/task';
 import {
+  cloneModeFromVideoModel,
+  estimateCloneCny,
   estimateIpVideo,
   estimatePerSegmentCny,
-  estimatePetCny,
-  type PetModel,
+  normalVideoModelFromSelection,
+  type NormalVideoModel,
   type VideoAspect,
   type VideoCreationOptions,
   type VideoDuration,
@@ -70,7 +73,6 @@ import {
 type CreativeMode = 'video' | 'image';
 type VideoTab = 'normal' | 'pet' | 'ip';
 type HistoryFilter = 'all' | 'recent' | 'favorite';
-type ImageModel = 'nano_banana_2' | 'nano_banana_pro';
 type ImageGenerationMode = 'free' | 'lock_subject';
 type CreativeModelValue = VideoModel | ImageModel;
 type ImageStyleKey =
@@ -235,22 +237,21 @@ const CREATIVE_MODEL_OPTIONS: ReadonlyArray<CreativeModelOption> = [
 
 const CLONE_MODEL_OPTIONS: ReadonlyArray<CreativeModelOption> = [
   {
-    value: 'happyhorse',
-    name: 'Happy Horse',
-    version: '1.1',
-    description: '更高质量的图生视频模型，适合更看重质感和动作稳定性的复刻。',
-    badges: ['主角照片', '参考视频', '高质量'],
-    tone: 'from-[#FFB23F] via-[#E54D2E] to-[#2E1914]',
+    value: 'wan_animate_std',
+    name: 'Wan Animate',
+    version: '2.2 Standard',
+    description: '使用主角照片替换参考视频主体，保留原视频动作、镜头节奏与音频。',
+    badges: ['主角替换', '参考视频', '标准模式'],
+    tone: 'from-[#2F6BFF] via-[#5C42E8] to-[#21C8B6]',
   },
   {
-    value: 'wanxiang',
-    name: 'Wanxiang',
-    version: '2.2 i2v',
-    description: '图生视频复刻模型，适合主角替换和短视频动作参考。',
-    badges: ['主角照片', '参考视频', '省钱'],
-    tone: 'from-[#1E9BFF] via-[#735CFF] to-[#EA1F59]',
+    value: 'wan_animate_pro',
+    name: 'Wan Animate',
+    version: '2.2 Pro',
+    description: '同一主角替换能力的高质量档，适合对人物边缘和动作一致性要求更高的成片。',
+    badges: ['主角替换', '参考视频', '高质量'],
+    tone: 'from-[#0B1838] via-[#3268D8] to-[#7CE7D8]',
   },
-  ...CREATIVE_MODEL_OPTIONS.filter((option) => option.value !== 'happyhorse'),
 ];
 
 const STYLE_GROUPS: Record<CreativeStyleGroup, { title: string; subtitle: string; icon: typeof Sparkles }> = {
@@ -410,13 +411,15 @@ function CreativeStudioPage({
   const [durationSeconds, setDurationSeconds] = React.useState<VideoDuration>(6);
   const [aspectRatio, setAspectRatio] = React.useState<VideoAspect>(mode === 'image' ? '1:1' : '16:9');
   const [resolution, setResolution] = React.useState<VideoResolution>('1080p');
-  const [imageCount, setImageCount] = React.useState(2);
+  const [imageCount, setImageCount] = React.useState<1 | 2 | 3 | 4>(2);
   const [attachments, setAttachments] = React.useState<DraftAttachment[]>([]);
   const [submitting, setSubmitting] = React.useState(false);
   const imageInputRef = React.useRef<HTMLInputElement>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const previousVideoTabRef = React.useRef<VideoTab>(videoTab);
   const isImage = mode === 'image';
+  const isCloneVideo = !isImage && videoTab === 'pet';
+  const isIpVideo = !isImage && videoTab === 'ip';
   const accent = isImage ? '#42C0EF' : '#EA1F59';
   const softBg = isImage ? 'bg-[#42C0EF]/10' : 'bg-[#EA1F59]/10';
   const title = isImage ? '图片任务' : '用AI创作视频';
@@ -437,10 +440,10 @@ function CreativeStudioPage({
     previousVideoTabRef.current = videoTab;
     if (isImage || previous === videoTab) return;
     if (videoTab === 'pet') {
-      setModel('happyhorse');
+      setModel('wan_animate_std');
       return;
     }
-    if (model === 'wanxiang') {
+    if (cloneModeFromVideoModel(model)) {
       setModel('veo_fast');
     }
   }, [isImage, model, videoTab]);
@@ -531,16 +534,28 @@ function CreativeStudioPage({
       lighting: lightingStyle,
       color: colorStyle,
     });
-    const styledImageIntent = buildImageIntentForSubmit(intent, imageStyle, imageGenerationMode, imageModel);
+    const styledImageIntent = buildImageIntentForSubmit(intent, imageStyle, imageGenerationMode);
+    const normalVideoModel = normalVideoModelFromSelection(model);
     const finalIntent = isImage
-      ? `生成图片：${styledImageIntent}${imageCount > 1 ? `。请生成 ${imageCount} 张可选方案。` : ''}`
+      ? `生成图片：${styledImageIntent}`
       : styledVideoIntent;
+    const imageOptions: ImageCreationOptions = { model: imageModel, aspectRatio, imageCount };
     try {
       const res = isImage
-        ? await createTask(finalIntent, fileIds)
+        ? await createTask(
+            finalIntent,
+            fileIds,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            imageOptions,
+          )
         : await createTask(finalIntent, fileIds, undefined, undefined, undefined, undefined, {
             tab: 'normal',
-            model,
+            model: normalVideoModel,
             style: inferVideoStyleOption('auto', {
               vibe: vibeStyle,
               lighting: lightingStyle,
@@ -611,7 +626,11 @@ function CreativeStudioPage({
                 'grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-4 2xl:items-end',
                 isImage
                   ? '2xl:grid-cols-[260px_minmax(360px,1fr)_230px_190px]'
-                  : '2xl:grid-cols-[190px_minmax(340px,1fr)_150px_210px_190px]',
+                  : isCloneVideo
+                    ? '2xl:grid-cols-[260px_minmax(360px,1fr)]'
+                    : isIpVideo
+                      ? '2xl:grid-cols-[280px_minmax(360px,1fr)_230px]'
+                      : '2xl:grid-cols-[190px_minmax(340px,1fr)_150px_210px_190px]',
               )}
             >
               {isImage ? (
@@ -624,10 +643,26 @@ function CreativeStudioPage({
                   accent={accent}
                   modelKind="image"
                 />
+              ) : isCloneVideo ? (
+                <CreativeModelPicker
+                  value={model}
+                  options={CLONE_MODEL_OPTIONS}
+                  open={modelPickerOpen}
+                  onOpenChange={setModelPickerOpen}
+                  onChange={(value) => setModel(value as VideoModel)}
+                  accent={accent}
+                  modelKind="video"
+                />
+              ) : isIpVideo ? (
+                <CreativeReadonlyField
+                  label="生成引擎"
+                  value="Qwen Voice + LatentSync"
+                  description="固定使用已准备的本人声纹与出镜底版"
+                />
               ) : (
                 <CreativeModelPicker
                   value={model}
-                  options={videoTab === 'pet' ? CLONE_MODEL_OPTIONS : CREATIVE_MODEL_OPTIONS}
+                  options={CREATIVE_MODEL_OPTIONS}
                   open={modelPickerOpen}
                   onOpenChange={setModelPickerOpen}
                   onChange={(value) => setModel(value as VideoModel)}
@@ -643,12 +678,12 @@ function CreativeStudioPage({
                   onChange={setImageStyle}
                   accent={accent}
                 />
-              ) : (
+              ) : videoTab === 'normal' ? (
                 <CreativeStyleSummaryPicker
                   vibe={vibeStyle}
                   lighting={lightingStyle}
                   color={colorStyle}
-                  previewSubject={videoTab === 'ip' ? 'human' : 'default'}
+                  previewSubject="default"
                   openGroup={stylePickerOpen}
                   onOpenGroupChange={setStylePickerOpen}
                   onVibeChange={setVibeStyle}
@@ -656,8 +691,20 @@ function CreativeStudioPage({
                   onColorChange={setColorStyle}
                   accent={accent}
                 />
+              ) : isCloneVideo ? (
+                <CreativeReadonlyField
+                  label="复刻范围"
+                  value="主角替换，其他跟随参考视频"
+                  description="动作、镜头、节奏、时长和音频均以参考视频为准"
+                />
+              ) : (
+                <CreativeReadonlyField
+                  label="人物一致性"
+                  value="本人底版 + 本人声音"
+                  description="可在下方重新上传或清除素材"
+                />
               )}
-              {!isImage && (
+              {!isImage && videoTab === 'normal' && (
                 <CreativeSegment
                   label="时长"
                   value={durationSeconds}
@@ -670,15 +717,17 @@ function CreativeStudioPage({
                   compact
                 />
               )}
-              <CreativeSegment
-                label="比例"
-                value={aspectRatio}
-                options={CREATIVE_ASPECT_OPTIONS}
-                onChange={(value) => setAspectRatio(value as VideoAspect)}
-                accent={accent}
-                compact
-                className="md:col-span-2 2xl:col-span-1"
-              />
+              {!isCloneVideo ? (
+                <CreativeSegment
+                  label="比例"
+                  value={aspectRatio}
+                  options={CREATIVE_ASPECT_OPTIONS}
+                  onChange={(value) => setAspectRatio(value as VideoAspect)}
+                  accent={accent}
+                  compact
+                  className="md:col-span-2 2xl:col-span-1"
+                />
+              ) : null}
               {isImage ? (
                 <CreativeSegment
                   label="生成数量"
@@ -689,18 +738,18 @@ function CreativeStudioPage({
                     { value: 3, label: '3' },
                     { value: 4, label: '4' },
                   ]}
-                  onChange={(value) => setImageCount(Number(value))}
+                  onChange={(value) => setImageCount(value as 1 | 2 | 3 | 4)}
                   accent={accent}
                   compact
                 />
-              ) : (
+              ) : videoTab === 'normal' ? (
                 <CreativeSelect
                   label="画质"
                   value={resolution === '1080p' ? '1080p 高清' : '720p 标清'}
                   options={['1080p 高清', '720p 标清']}
                   onPick={(value) => setResolution(value.includes('720') ? '720p' : '1080p')}
                 />
-              )}
+              ) : null}
             </div>
           </div>
 
@@ -721,23 +770,11 @@ function CreativeStudioPage({
                   <PetVideoForm
                     onTaskCreated={onTaskCreated}
                     model={model}
-                    vibe={vibeStyle}
-                    lighting={lightingStyle}
-                    color={colorStyle}
-                    aspectRatio={aspectRatio}
-                    resolution={resolution}
-                    durationSeconds={durationSeconds}
                   />
                 ) : (
                   <IpOnboardingWizard
                     onTaskCreated={onTaskCreated}
-                    model={model}
-                    vibe={vibeStyle}
-                    lighting={lightingStyle}
-                    color={colorStyle}
                     aspectRatio={aspectRatio}
-                    resolution={resolution}
-                    durationSeconds={durationSeconds}
                   />
                 )}
                 {currentTaskPanel ? <div className="mt-6">{currentTaskPanel}</div> : null}
@@ -1050,13 +1087,8 @@ export function buildImageIntentForSubmit(
   intent: string,
   imageStyle: ImageStyleKey,
   imageMode: ImageGenerationMode,
-  imageModel: ImageModel,
 ): string {
-  const modelDirective =
-    imageModel === 'nano_banana_pro'
-      ? '图片模型要求：使用 Nano Banana Pro。'
-      : '图片模型要求：使用 Nano Banana 2。';
-  return [modelDirective, buildImageIntentWithMode(intent, imageStyle, imageMode)].join('\n\n');
+  return buildImageIntentWithMode(intent, imageStyle, imageMode);
 }
 
 function styleOptionFor(group: CreativeStyleGroup, key: CreativeStyleKey): (typeof STYLE_OPTIONS_BY_GROUP)[CreativeStyleGroup][number] {
@@ -1089,12 +1121,18 @@ export function buildVideoIntentWithCreativeStyles(
 
 export function buildCloneVideoIntent(intent: string): string {
   const trimmed = intent.trim();
-  const userNote = trimmed.length > 0 ? `补充描述：${trimmed}` : '补充描述：保持参考视频的动作、镜头节奏和构图。';
-  return [
-    '复刻视频：请参考上传的视频作为动作、镜头节奏、构图和时长参考。',
-    '将视频主角替换为上传照片中的主角，尽量生成相同动作和相同画面节奏的视频。',
-    userNote,
-  ].join('\n');
+  const lines = ['复刻视频：使用上传照片替换参考视频中的主角，并保留参考视频的动作、镜头、节奏和音频。'];
+  if (trimmed.length > 0) {
+    lines.push(`任务备注（仅用于记录，不改变本次模型输入）：${trimmed}`);
+  }
+  return lines.join('\n');
+}
+
+export function buildIpVideoIntent(
+  intent: string,
+  _styles?: { vibe: CreativeStyleKey; lighting: CreativeStyleKey; color: CreativeStyleKey },
+): string {
+  return intent;
 }
 
 export function inferVideoStyleOption(
@@ -1107,10 +1145,6 @@ export function inferVideoStyleOption(
   if (styles.color !== 'random') return 'atmospheric';
   if (styles.vibe === 'pro_photo' || styles.vibe === 'stock_footage') return 'realistic';
   return 'auto';
-}
-
-function petModelFromCreativeModel(model: VideoModel): PetModel {
-  return model === 'happyhorse' ? 'happyhorse_i2v' : 'wan_i2v';
 }
 
 function CreativeModelPicker({
@@ -1626,6 +1660,28 @@ function ReferenceVideoUploadDialog({
   );
 }
 
+function CreativeReadonlyField({
+  label,
+  value,
+  description,
+}: {
+  label: string;
+  value: string;
+  description: string;
+}): JSX.Element {
+  return (
+    <div className="min-w-0">
+      <div className="mb-2 text-[13px] font-semibold text-[#ADADAD]">{label}</div>
+      <div className="flex min-h-11 min-w-0 items-center rounded-[10px] border border-[#DCDDDD] bg-white px-4 py-2.5">
+        <div className="min-w-0">
+          <div className="truncate text-[13px] font-semibold text-[#111827]">{value}</div>
+          <div className="mt-0.5 truncate text-[11px] text-[#8B93A6]">{description}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CreativeSelect({
   label,
   value,
@@ -2116,7 +2172,7 @@ function videoSubStatusCopy(subStatus: string | undefined): string {
 // 普通视频表单
 // ---------------------------------------------------------------------------
 
-const MODEL_OPTIONS: ReadonlyArray<{ value: VideoModel; label: string; hint?: string }> = [
+const MODEL_OPTIONS: ReadonlyArray<{ value: NormalVideoModel; label: string; hint?: string }> = [
   { value: 'veo_fast', label: 'Veo 3 Fast', hint: '推荐 · 性价比' },
   { value: 'happyhorse', label: 'Happy Horse 1.1', hint: '自带音效' },
   { value: 'veo_standard', label: 'Veo 3 Quality', hint: '高质量' },
@@ -2153,7 +2209,7 @@ export function NormalVideoForm({ onTaskCreated }: { onTaskCreated: (taskId: str
   const createTask = useTaskStore((s) => s.createTask);
 
   const [prompt, setPrompt] = React.useState('');
-  const [model, setModel] = React.useState<VideoModel>('veo_fast');
+  const [model, setModel] = React.useState<NormalVideoModel>('veo_fast');
   const [style, setStyle] = React.useState<VideoStyleOption>('auto');
   const [aspectRatio, setAspectRatio] = React.useState<VideoAspect>('9:16');
   const [resolution, setResolution] = React.useState<VideoResolution>('1080p');
@@ -2260,37 +2316,33 @@ export function NormalVideoForm({ onTaskCreated }: { onTaskCreated: (taskId: str
 export function PetVideoForm({
   onTaskCreated,
   model,
-  vibe,
-  lighting,
-  color,
-  aspectRatio,
-  resolution,
-  durationSeconds,
 }: {
   onTaskCreated: (taskId: string) => void;
   model: VideoModel;
-  vibe: CreativeStyleKey;
-  lighting: CreativeStyleKey;
-  color: CreativeStyleKey;
-  aspectRatio: VideoAspect;
-  resolution: VideoResolution;
-  durationSeconds: VideoDuration;
 }): JSX.Element {
   const toast = useToast();
   const createTask = useTaskStore((s) => s.createTask);
 
   const [prompt, setPrompt] = React.useState('');
   const [photo, setPhoto] = React.useState<{ fileId: string; name: string; previewUrl: string } | null>(null);
-  const [referenceVideo, setReferenceVideo] = React.useState<{ fileId: string; name: string; previewUrl: string } | null>(null);
+  const [referenceVideo, setReferenceVideo] = React.useState<{
+    fileId: string;
+    name: string;
+    previewUrl: string;
+    durationSeconds?: number;
+  } | null>(null);
   const [uploadingPhoto, setUploadingPhoto] = React.useState(false);
   const [uploadingVideo, setUploadingVideo] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
   const photoRef = React.useRef<HTMLInputElement>(null);
   const videoRef = React.useRef<HTMLInputElement>(null);
 
-  const petModel = petModelFromCreativeModel(model);
+  const cloneMode = cloneModeFromVideoModel(model);
   const selectedCloneModel = modelOptionFor(model, CLONE_MODEL_OPTIONS);
-  const estCny = estimatePetCny({ petModel, resolution, durationSeconds });
+  const estCny =
+    cloneMode && referenceVideo?.durationSeconds
+      ? estimateCloneCny({ mode: cloneMode, durationSeconds: referenceVideo.durationSeconds })
+      : null;
 
   React.useEffect(() => {
     const url = photo?.previewUrl;
@@ -2314,6 +2366,10 @@ export function PetVideoForm({
       toast.show('请上传 JPG / PNG / WebP 图片', 'error');
       return;
     }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.show('主角照片不能超过 5 MB', 'error');
+      return;
+    }
     setUploadingPhoto(true);
     try {
       const res = await uploadFile(file);
@@ -2334,6 +2390,10 @@ export function PetVideoForm({
     if (!file) return;
     if (!isCreativeReferenceVideo(file)) {
       toast.show('请上传 MP4 / MOV 参考视频', 'error');
+      return;
+    }
+    if (file.size > 200 * 1024 * 1024) {
+      toast.show('参考视频不能超过 200 MB', 'error');
       return;
     }
     setUploadingVideo(true);
@@ -2373,24 +2433,28 @@ export function PetVideoForm({
       toast.show('请先上传想要复刻的参考视频', 'error');
       return;
     }
-    const intent = prompt.trim();
-    if (intent.length < 2) {
-      toast.show('请补充想保留或调整的地方', 'error');
+    if (!cloneMode) {
+      toast.show('请选择 Wan Animate 2.2 Standard 或 Pro', 'error');
       return;
     }
+    const referenceDuration = referenceVideo.durationSeconds;
+    if (!referenceDuration || referenceDuration < 2 || referenceDuration > 30) {
+      toast.show('参考视频必须为 2-30 秒，请更换后重试', 'error');
+      return;
+    }
+    const intent = prompt.trim();
     if (submitting) return;
     setSubmitting(true);
-    const finalIntent = buildVideoIntentWithCreativeStyles(buildCloneVideoIntent(intent), { vibe, lighting, color });
+    const finalIntent = buildCloneVideoIntent(intent);
     const opts: VideoCreationOptions = {
       tab: 'pet',
       petImageFileId: photo.fileId,
-      petModel,
-      aspectRatio,
-      resolution,
-      durationSeconds,
+      referenceVideoFileId: referenceVideo.fileId,
+      referenceVideoDurationSeconds: referenceDuration,
+      cloneMode,
     };
     try {
-      const res = await createTask(finalIntent, [referenceVideo.fileId], undefined, undefined, undefined, undefined, opts);
+      const res = await createTask(finalIntent, undefined, undefined, undefined, undefined, undefined, opts);
       if ('error' in res) {
         toast.show(res.error || '提交失败,请重试', 'error');
         return;
@@ -2476,12 +2540,23 @@ export function PetVideoForm({
               controls
               muted
               playsInline
+              onLoadedMetadata={(event) => {
+                const duration = event.currentTarget.duration;
+                setReferenceVideo((current) =>
+                  current && Number.isFinite(duration) ? { ...current, durationSeconds: duration } : current,
+                );
+              }}
             />
             <div className="flex min-w-0 flex-col justify-center">
               <div className="truncate text-[13px] font-medium text-foreground">{referenceVideo.name}</div>
               <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
-                将参考它的动作、构图和节奏；最终会用上方主角照片替换视频主体。
+                保留它的动作、镜头、节奏、时长和音频；只替换为上方主角。
               </p>
+              <div className="mt-1 text-[11px] text-[#8B93A6]">
+                {referenceVideo.durationSeconds
+                  ? `${referenceVideo.durationSeconds.toFixed(1)} 秒 · 支持 2-30 秒`
+                  : '正在读取视频时长…'}
+              </div>
               <div className="mt-3 flex gap-2">
                 <Button variant="outline" size="sm" onClick={() => videoRef.current?.click()} disabled={uploadingVideo}>
                   {uploadingVideo ? '上传中…' : '换一个视频'}
@@ -2506,16 +2581,16 @@ export function PetVideoForm({
           >
             {uploadingVideo ? <Loader2 className="h-6 w-6 animate-spin" /> : <VideoIcon className="h-6 w-6" />}
             <span className="text-[13px]">{uploadingVideo ? '上传中…' : '点击上传参考视频'}</span>
-            <span className="text-[11px] text-muted-foreground">MP4 / MOV，建议 3-15 秒清晰短片</span>
+            <span className="text-[11px] text-muted-foreground">MP4 / MOV · 2-30 秒 · 不超过 200 MB</span>
           </button>
         )}
       </Section>
 
-      <Section title="复刻描述" description="说明哪些动作、镜头或氛围必须保留，哪些地方可以调整。" className={CREATIVE_SECTION_CLASS}>
+      <Section title="任务备注（可选）" description="备注仅用于任务记录，不会改变参考视频的动作、镜头、节奏或音频。" className={CREATIVE_SECTION_CLASS}>
         <Textarea
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
-          placeholder="例如：保留原视频舞步和镜头节奏，主角换成照片里的西高地，背景更干净。"
+          placeholder="例如：用于周五新品发布，成片后发给设计组。"
           rows={3}
           className="min-h-[128px] resize-y rounded-[18px] border-[#EFEFEF] bg-white text-[15px] leading-7"
         />
@@ -2523,14 +2598,17 @@ export function PetVideoForm({
 
       <Section title="价格预览" className={CREATIVE_PRICE_SECTION_CLASS}>
         <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2">
-          <span className="text-2xl font-semibold text-[#EA1F59]">约 ¥{estCny}</span>
+          <span className="text-2xl font-semibold text-[#EA1F59]">
+            {estCny === null ? '上传视频后估价' : `约 ¥${estCny}`}
+          </span>
           <span className="text-[13px] text-muted-foreground">
-            {selectedCloneModel.name} {selectedCloneModel.version} · {resolution} · {durationSeconds} 秒
+            {selectedCloneModel.name} {selectedCloneModel.version}
+            {referenceVideo?.durationSeconds ? ` · 参考视频 ${referenceVideo.durationSeconds.toFixed(1)} 秒` : ''}
           </span>
         </div>
         <p className="mt-2 text-[11px] text-muted-foreground">
-          主角照片 + 参考视频会一起提交;
-          <span className="font-medium text-[#595757]"> 确认报价后才扣费。</span>
+          按参考视频时长预估；供应商仅对成功输出的实际秒数计费，失败不计费。
+          <span className="font-medium text-[#595757]"> 确认报价后才开始生成。</span>
         </p>
       </Section>
 
@@ -2710,22 +2788,10 @@ interface OnboardingStatus {
 
 export function IpOnboardingWizard({
   onTaskCreated,
-  model,
-  vibe,
-  lighting,
-  color,
   aspectRatio,
-  resolution,
-  durationSeconds,
 }: {
   onTaskCreated: (taskId: string) => void;
-  model: VideoModel;
-  vibe: CreativeStyleKey;
-  lighting: CreativeStyleKey;
-  color: CreativeStyleKey;
   aspectRatio: VideoAspect;
-  resolution: VideoResolution;
-  durationSeconds: VideoDuration;
 }): JSX.Element {
   const toast = useToast();
   const [status, setStatus] = React.useState<OnboardingStatus | null>(null);
@@ -2939,13 +3005,7 @@ export function IpOnboardingWizard({
       {ready ? (
         <IpGenerateForm
           onTaskCreated={onTaskCreated}
-          model={model}
-          vibe={vibe}
-          lighting={lighting}
-          color={color}
           aspectRatio={aspectRatio}
-          resolution={resolution}
-          durationSeconds={durationSeconds}
         />
       ) : (
         <Section className={CREATIVE_SECTION_CLASS}>
@@ -2992,22 +3052,10 @@ export function IpOnboardingWizard({
 
 function IpGenerateForm({
   onTaskCreated,
-  model,
-  vibe,
-  lighting,
-  color,
   aspectRatio,
-  resolution,
-  durationSeconds,
 }: {
   onTaskCreated: (taskId: string) => void;
-  model: VideoModel;
-  vibe: CreativeStyleKey;
-  lighting: CreativeStyleKey;
-  color: CreativeStyleKey;
   aspectRatio: VideoAspect;
-  resolution: VideoResolution;
-  durationSeconds: VideoDuration;
 }): JSX.Element {
   const toast = useToast();
   const createTask = useTaskStore((s) => s.createTask);
@@ -3031,14 +3079,10 @@ function IpGenerateForm({
     }
     if (submitting) return;
     setSubmitting(true);
-    const finalIntent = buildVideoIntentWithCreativeStyles(intent, { vibe, lighting, color });
+    const finalIntent = buildIpVideoIntent(intent);
     const opts: VideoCreationOptions = {
       tab: 'ip_person',
-      model,
-      style: inferVideoStyleOption('auto', { vibe, lighting, color }),
       aspectRatio,
-      resolution,
-      durationSeconds,
     };
     try {
       await trpc.videoOnboarding.authorize.mutate();
@@ -3079,7 +3123,7 @@ function IpGenerateForm({
           <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
             <span className="text-xl font-semibold text-[#EA1F59]">约 ¥{est.videoCny}</span>
             <span className="text-[13px] text-muted-foreground">
-              IP人物视频 · {modelOptionFor(model).name} {modelOptionFor(model).version} · {aspectRatio} · {resolution} · {durationSeconds}s · 约 {est.chars} 字
+              Qwen Voice + LatentSync · {aspectRatio} · 约 {est.chars} 字
             </span>
           </div>
           {est.maybeTooLong && (

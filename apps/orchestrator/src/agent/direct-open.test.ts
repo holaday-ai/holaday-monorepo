@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   extractDirectOpenUrl,
+  extractRunnableDirectOpenUrl,
   directOpenUrlSafetyMessage,
   verifyDirectOpenUrlSafety,
   offlineBrowserUnavailableMessage,
@@ -60,6 +61,20 @@ describe('extractDirectOpenUrl', () => {
         }),
       }),
     ).resolves.toBe('blocked after DNS verification');
+  });
+});
+
+describe('extractRunnableDirectOpenUrl', () => {
+  it('never bypasses the user confirmation required by plan mode', () => {
+    expect(
+      extractRunnableDirectOpenUrl('打开 https://example.com', 'plan'),
+    ).toBeNull();
+    expect(
+      extractRunnableDirectOpenUrl('打开 https://example.com', 'auto'),
+    ).toBe('https://example.com/');
+    expect(
+      extractRunnableDirectOpenUrl('打开 https://example.com', undefined),
+    ).toBe('https://example.com/');
   });
 });
 

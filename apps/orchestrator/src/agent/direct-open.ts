@@ -22,6 +22,14 @@ export function extractDirectOpenUrl(intent: string): string | null {
   }
 }
 
+export function extractRunnableDirectOpenUrl(
+  intent: string,
+  mode: 'auto' | 'plan' | undefined,
+): string | null {
+  if (mode === 'plan') return null;
+  return extractDirectOpenUrl(intent);
+}
+
 export function directOpenUrlSafetyMessage(rawUrl: string): string | null {
   return staticBrowserUrlSafetyMessage(rawUrl);
 }

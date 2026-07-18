@@ -28,8 +28,12 @@ describe('isPublicInternetAddress', () => {
       '::1',
       '::ffff:127.0.0.1',
       'fc00::1',
+      'fec0::1',
       'fe80::1',
       'ff02::1',
+      '64:ff9b::7f00:1',
+      '2001::1',
+      '2002:7f00:1::1',
       '2001:db8::1',
     ]) {
       expect(isPublicInternetAddress(address), address).toBe(false);
@@ -109,5 +113,21 @@ describe('BrowserNetworkPolicy', () => {
     now += 1_001;
     await policy.check('https://example.com/c');
     expect(resolve).toHaveBeenCalledTimes(2);
+  });
+
+  it('bounds cached hostnames and evicts the oldest entry', async () => {
+    const resolve = vi.fn(async () => [{ address: '93.184.216.34', family: 4 as const }]);
+    const policy = new BrowserNetworkPolicy({
+      resolve,
+      cacheTtlMs: 60_000,
+      maxCacheEntries: 2,
+    });
+
+    await policy.check('https://one.example/');
+    await policy.check('https://two.example/');
+    await policy.check('https://three.example/');
+    await policy.check('https://one.example/');
+
+    expect(resolve).toHaveBeenCalledTimes(4);
   });
 });

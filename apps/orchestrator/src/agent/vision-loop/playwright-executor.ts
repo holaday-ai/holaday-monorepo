@@ -31,6 +31,7 @@
 import type { Browser, BrowserContext, ElementHandle, Page } from 'playwright';
 import sharp from 'sharp';
 import type { BrowserNetworkPolicy } from '../browser-network-policy.js';
+import { browserUrlForLog } from '../../browser-pool/log-url.js';
 import { logger } from '../../config/logger.js';
 import { humanClick, humanScroll, humanTypeText, isHumanizeEnabled } from './humanize.js';
 import { STEALTH_INIT_SCRIPT, isStealthEnabled } from './stealth-scripts.js';
@@ -308,8 +309,7 @@ export class PlaywrightExecutor {
         await this.applyStealthToContexts(this.browser);
       }
       // Best-effort: dismiss Brave's persistent chrome-side banners
-      // (privacy report invite, --no-sandbox warning, "unsupported
-      // command-line flag") that otherwise take up vertical space in
+      // (privacy report invite and first-run notices) that otherwise take up vertical space in
       // every screenshot. Runs once per connect, on every existing
       // context — the policy file suppresses most of these at the
       // browser level but a fresh profile still gets the first-run
@@ -1281,7 +1281,7 @@ export class PlaywrightExecutor {
         const decision = await this.networkPolicy.check(url);
         if (!decision.allowed) {
           logger.warn(
-            { action: 'navigate', target: url, reason: decision.reason },
+            { action: 'navigate', target: browserUrlForLog(url), reason: decision.reason },
             'page.goto blocked by browser network policy',
           );
           return { ok: false, message: `navigate blocked: ${decision.message}` };
@@ -1301,9 +1301,36 @@ export class PlaywrightExecutor {
         /* best-effort */
       }
       logger.info(
-        { action: 'navigate', target: url, urlBefore, urlAfter, httpStatus: status, title, elapsedMs },
+        {
+          action: 'navigate',
+          target: browserUrlForLog(url),
+          urlBefore: browserUrlForLog(urlBefore),
+          urlAfter: browserUrlForLog(urlAfter),
+          httpStatus: status,
+          title,
+          elapsedMs,
+        },
         'page.goto returned',
       );
+
+      if (this.networkPolicy && urlAfter !== url && !isBlankUrl(urlAfter)) {
+        const redirectDecision = await this.networkPolicy.check(urlAfter);
+        if (!redirectDecision.allowed) {
+          logger.warn(
+            {
+              action: 'navigate',
+              target: browserUrlForLog(url),
+              redirectTarget: browserUrlForLog(urlAfter),
+              reason: redirectDecision.reason,
+            },
+            'page.goto redirect blocked by browser network policy',
+          );
+          return {
+            ok: false,
+            message: `navigate redirect blocked: ${redirectDecision.message}`,
+          };
+        }
+      }
 
       // Goto-no-op fallback. We've seen Playwright + connectOverCDP
       // return successfully from goto() while the page silently stays
@@ -1311,14 +1338,18 @@ export class PlaywrightExecutor {
       // and heal by opening a fresh context page and retrying there.
       if (isBlankUrl(urlAfter) && !isBlankUrl(url)) {
         logger.warn(
-          { target: url, urlBefore, urlAfter },
+          {
+            target: browserUrlForLog(url),
+            urlBefore: browserUrlForLog(urlBefore),
+            urlAfter: browserUrlForLog(urlAfter),
+          },
           'navigate: page.goto returned but url stayed blank — falling back to fresh ctx.newPage()',
         );
         const fresh = await this.reopenActivePage(page);
         if (!fresh) {
           return {
             ok: false,
-            message: `navigate stuck: goto returned but url=${urlAfter}; no context to reopen`,
+            message: `navigate stuck: goto returned but url=${browserUrlForLog(urlAfter)}; no context to reopen`,
           };
         }
         const resp2 = (await fresh.goto(url, {
@@ -1328,21 +1359,46 @@ export class PlaywrightExecutor {
         const urlAfter2 = fresh.url();
         const status2 = typeof resp2?.status === 'function' ? resp2.status() : null;
         logger.info(
-          { target: url, urlAfter2, httpStatus: status2 },
+          {
+            target: browserUrlForLog(url),
+            urlAfter2: browserUrlForLog(urlAfter2),
+            httpStatus: status2,
+          },
           'navigate: fallback newPage goto done',
         );
         if (isBlankUrl(urlAfter2)) {
           return {
             ok: false,
-            message: `navigate still stuck after fresh-page fallback: url=${urlAfter2}`,
+            message: `navigate still stuck after fresh-page fallback: url=${browserUrlForLog(urlAfter2)}`,
           };
+        }
+        if (this.networkPolicy && urlAfter2 !== url) {
+          const redirectDecision = await this.networkPolicy.check(urlAfter2);
+          if (!redirectDecision.allowed) {
+            logger.warn(
+              {
+                action: 'navigate',
+                target: browserUrlForLog(url),
+                redirectTarget: browserUrlForLog(urlAfter2),
+                reason: redirectDecision.reason,
+              },
+              'fresh-page redirect blocked by browser network policy',
+            );
+            return {
+              ok: false,
+              message: `navigate redirect blocked: ${redirectDecision.message}`,
+            };
+          }
         }
         return { ok: true, message: `navigated to ${url} (via fresh page fallback)` };
       }
       return { ok: true, message: `navigated to ${url}` };
     } catch (err) {
       const message = errMsg(err);
-      logger.error({ target: url, urlBefore, err: message }, 'navigate threw');
+      logger.error(
+        { target: browserUrlForLog(url), urlBefore: browserUrlForLog(urlBefore), err: message },
+        'navigate threw',
+      );
       return { ok: false, message: `navigate failed: ${message}` };
     }
   }

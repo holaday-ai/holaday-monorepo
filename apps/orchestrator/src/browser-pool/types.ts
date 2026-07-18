@@ -79,6 +79,8 @@ export interface PoolConfig {
   displayStart: number;
   /** Xvfb screen geometry, e.g. '1720x1440x24'. */
   screenSize: string;
+  /** Emergency-only full desktop stream. CDP screencast does not need it. */
+  vncEnabled?: boolean;
   /**
    * Phase 17 — fired once per allocate, AFTER the PlaywrightExecutor
    * connects + status flips to 'ready'. Used by the cookie-sync

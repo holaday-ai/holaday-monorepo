@@ -15,7 +15,7 @@ import { and, asc, desc, eq, gte, inArray, like, lt, lte, or, sql } from 'drizzl
 import { z } from 'zod';
 import type { SkillCatalogueEntry } from '../../agent/planner.js';
 import {
-  extractDirectOpenUrl,
+  extractRunnableDirectOpenUrl,
   offlineBrowserUnavailableMessage,
   runDirectOpen,
   verifyDirectOpenUrlSafety,
@@ -128,10 +128,18 @@ import { taskEvents } from '../../db/schema/task-events.js';
 import { taskSteps } from '../../db/schema/task-steps.js';
 import { tasks as tasksTable } from '../../db/schema/tasks.js';
 import { readAffectedRows } from '../../db/mysql-result.js';
-import { decideVideoGate, parseVideoConfirm, quoteIpVideo, quotePetI2v, quoteVideo } from '../../agent/video/video-confirm.js';
+import {
+  decideVideoGate,
+  parseVideoConfirm,
+  quoteCloneVideo,
+  quoteIpVideo,
+  quoteVideo,
+} from '../../agent/video/video-confirm.js';
 import { deriveVideoType, mapVideoFailureReason } from '../../agent/video/video-confirm-meta.js';
 import type { AspectRatio, SimpleVideoConfig, VideoSource } from '../../agent/video/video-lane-simple.js';
 import type { PetI2vModel } from '../../agent/video/video-pet-i2v.js';
+import type { WanAnimateMixMode } from '../../agent/video/wan-animate-mix-client.js';
+import { probeCloneReferenceDurationSeconds } from '../../agent/video/video-clone-reference.js';
 import type { IpVideoConfig } from '../../agent/video/video-ip-lipsync.js';
 import type { VideoScript } from '../../agent/video/types.js';
 import type { VideoStyle } from '../../agent/video/video-script.js';
@@ -443,10 +451,23 @@ const createInput = z.object({
       petModel: z.enum(['wan_i2v', 'happyhorse_i2v']).optional(),
       /** 宠物照片的已上传 fileId(tab='pet' 必填). confirmVideo 据此 mint presigned GET 当 img_url. */
       petImageFileId: z.string().min(1).max(64).optional(),
+      /** 复刻视频的已上传参考视频 fileId(tab='pet' 必填). */
+      referenceVideoFileId: z.string().min(1).max(64).optional(),
+      /** 浏览器从真实视频 metadata 读取的时长，仅用于报价；供应商按实际输出时长计费。 */
+      referenceVideoDurationSeconds: z.number().min(2).max(30).optional(),
+      /** Wan Animate 2.2 character-swap service mode. */
+      cloneMode: z.enum(['wan-std', 'wan-pro']).optional(),
       style: z.enum(['auto', 'realistic', 'atmospheric', 'science']).optional(),
       aspectRatio: z.enum(['9:16', '16:9', '1:1', '4:3', '3:4']).optional(),
       resolution: z.enum(['720p', '1080p']).optional(),
       durationSeconds: z.number().int().min(3).max(15).optional(),
+    })
+    .optional(),
+  imageOptions: z
+    .object({
+      model: z.enum(['nano_banana_2', 'nano_banana_pro']).optional(),
+      aspectRatio: z.enum(['9:16', '16:9', '1:1', '4:3', '3:4']),
+      imageCount: z.number().int().min(1).max(4),
     })
     .optional(),
 });
@@ -1076,7 +1097,9 @@ export const tasksRouter = router({
       });
     }
     const directOpenUrl =
-      executionMode === 'browser' ? extractDirectOpenUrl(input.intent) : null;
+      executionMode === 'browser'
+        ? extractRunnableDirectOpenUrl(input.intent, input.mode)
+        : null;
     const directOpenSafetyError = directOpenUrl
       ? await verifyDirectOpenUrlSafety(directOpenUrl)
       : null;
@@ -1427,10 +1450,22 @@ export const tasksRouter = router({
           result = await runImageTask({
             intent: input.intent,
             ...(inputImages.length > 0 ? { inputImages } : {}),
+            ...(input.imageOptions?.aspectRatio ? { aspectRatio: input.imageOptions.aspectRatio } : {}),
+            ...(input.imageOptions?.imageCount
+              ? { imageCount: input.imageOptions.imageCount as 1 | 2 | 3 | 4 }
+              : {}),
             apiKey: appEnv.GEMINI_API_KEY,
             baseUrl: appEnv.GEMINI_BASE_URL,
             flashModel: appEnv.GEMINI_IMAGE_MODEL,
             proModel: appEnv.GEMINI_IMAGE_MODEL_PRO,
+            ...(input.imageOptions?.model
+              ? {
+                  preferredTier:
+                    input.imageOptions.model === 'nano_banana_pro'
+                      ? ('pro' as const)
+                      : ('flash' as const),
+                }
+              : {}),
             save,
             logger: ctx.logger,
           });
@@ -1441,6 +1476,7 @@ export const tasksRouter = router({
           finalExecutionMode: 'image' as const,
           model: result.model ?? null,
           imageTier: result.tier ?? null,
+          ...(input.imageOptions ? { imageOptions: input.imageOptions } : {}),
           elapsedMs: Date.now() - imageStartedAt,
           ...(result.attachments.length > 0 ? { attachments: result.attachments } : {}),
         };
@@ -1537,13 +1573,34 @@ export const tasksRouter = router({
         // Phase 2 第一期 — SPA「普通视频」面板把模型档/风格/画幅/画质/时长带上来。
         const vOpts = input.videoOptions ?? {};
 
-        // ===== 宠物 i2v 分支 (Phase 2 第二期) — 单图图生, 无 optimize/脚本/TTS =====
-        // tab='pet' + 已上传 petImageFileId → 跳过文生那套, 直接 i2v 报价 + 存 metadata.
-        // confirmVideo 原子抢占后 mint presigned GET 当 img_url → runPetVideoCreation.
-        if (vOpts.tab === 'pet' && vOpts.petImageFileId) {
-          const petModel: PetI2vModel = vOpts.petModel ?? 'wan_i2v';
-          const petDuration = vOpts.durationSeconds ?? 5;
-          const petQuote = quotePetI2v(petDuration, petModel, vOpts.resolution ?? '1080p');
+        // ===== 复刻视频 — Wan Animate 2.2 真实角色替换 =====
+        // 主角图片 + 参考视频均以独立 typed fileId 保存；确认后再签短期 URL
+        // 调用 character-swap。没有参考视频时绝不降级为单图 i2v。
+        if (vOpts.tab === 'pet') {
+          if (!vOpts.petImageFileId || !vOpts.referenceVideoFileId) {
+            throw new TRPCError({
+              code: 'BAD_REQUEST',
+              message: '复刻视频需要主角照片和参考视频。',
+            });
+          }
+          const [imageReachable, videoReachable] = await Promise.all([
+            fileService.signedReadUrl(vOpts.petImageFileId, userRow.id, 60),
+            fileService.signedReadUrl(vOpts.referenceVideoFileId, userRow.id, 60),
+          ]);
+          if (!imageReachable || !videoReachable) {
+            throw new TRPCError({ code: 'BAD_REQUEST', message: '主角照片或参考视频不可用，请重新上传。' });
+          }
+          let measuredDurationSeconds: number;
+          try {
+            measuredDurationSeconds = await probeCloneReferenceDurationSeconds(videoReachable);
+          } catch {
+            throw new TRPCError({
+              code: 'BAD_REQUEST',
+              message: '参考视频无法读取，或时长不在 2 到 30 秒之间，请重新上传。',
+            });
+          }
+          const cloneMode: WanAnimateMixMode = vOpts.cloneMode ?? 'wan-std';
+          const cloneQuote = quoteCloneVideo(measuredDurationSeconds, cloneMode);
           const taskId = newExternalId('task');
           const repo = new TaskRepository(ctx.db);
           await repo.insertTask(
@@ -1552,15 +1609,16 @@ export const tasksRouter = router({
           );
           const initialized = await repo.persistInitialAwaitingUser({
             taskExternalId: taskId,
-            question: petQuote.message,
+            question: cloneQuote.message,
             awaitingKind: 'video_quote',
             result: {
-              summary: petQuote.message,
+              summary: cloneQuote.message,
               metadata: {
                 lane: 'video_creation_confirm',
                 petImageFileId: vOpts.petImageFileId,
-                petModel,
-                i2vPrompt: input.intent,
+                referenceVideoFileId: vOpts.referenceVideoFileId,
+                referenceVideoDurationSeconds: measuredDurationSeconds,
+                cloneMode,
                 videoOptions: vOpts,
               },
             },
@@ -1569,18 +1627,18 @@ export const tasksRouter = router({
             throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '视频报价任务初始化失败，请重试。' });
           }
           ctx.logger.info(
-            { taskId, userId: ctx.userId, executorLane: 'video_creation_confirm', petModel, videoCny: petQuote.videoCny },
-            'task: executor lane selected (pet i2v)',
+            { taskId, userId: ctx.userId, executorLane: 'video_creation_confirm', cloneMode, videoCny: cloneQuote.videoCny },
+            'task: executor lane selected (clone video)',
           );
           broadcastToUser(ctx.userId, {
             type: 'server.supercar.awaiting_user',
             taskId,
-            question: petQuote.message,
+            question: cloneQuote.message,
             awaitingKind: 'video_quote',
           });
           return { taskId, status: 'awaiting_user' as const, steps: [], executionMode: 'generate' as const };
         }
-        // ===== end 宠物 i2v 分支 =====
+        // ===== end 复刻视频分支 =====
 
         // ===== IP 人物 换口型分支 (Phase 2 第三期, B 架构单 clip 口播) =====
         // 门控:三件齐(克隆声音 + 出镜底版 + 本人授权)才放行;缺则引导去 onboarding。
@@ -3291,10 +3349,11 @@ export const tasksRouter = router({
     if (directOpenUrl) {
       const taskId = newExternalId('task');
       const repo = new TaskRepository(ctx.db);
+      const willQueueDirectOpen = Boolean(ctx.taskQueue && directOpenUsesBrowserPool);
       await repo.insertTask(
         {
           taskId,
-          status: 'executing',
+          status: willQueueDirectOpen ? 'queued' : 'executing',
           plan: [],
           cursor: 0,
           pendingConfirm: null,
@@ -3307,7 +3366,7 @@ export const tasksRouter = router({
         },
       );
 
-      void (async () => {
+      const dispatchDirectOpen = async (): Promise<void> => {
         let executor = directOpenFallbackExecutor;
         let allocatedPool = false;
         try {
@@ -3317,10 +3376,6 @@ export const tasksRouter = router({
               ctx.userId,
               input.viewportProfile,
             );
-            if (instance.cdpPort < 9300 || instance.cdpPort > 9309) {
-              await ctx.browserPool.release(taskId, `direct-open-guard-${taskId}`).catch(() => {});
-              throw new Error('浏览器隔离校验失败');
-            }
             executor = instance.executor;
             allocatedPool = true;
           }
@@ -3365,20 +3420,27 @@ export const tasksRouter = router({
           });
         } catch (err) {
           const reason = err instanceof Error ? err.message : String(err);
-          const persisted = await repo.persistVisionOutcome(taskId, {
-            status: 'failed',
-            reason: `浏览器打开失败：${reason}`.slice(0, 500),
-            errorCode: 'DIRECT_OPEN_FAILED',
-            tickCount: 0,
-            metadata: { executionMode: 'browser', lane: 'direct_open' },
-          });
-          if (persisted.persisted) {
-            broadcastToUser(ctx.userId, {
-              type: 'server.task.terminal',
-              taskId,
+          try {
+            const persisted = await repo.persistVisionOutcome(taskId, {
               status: 'failed',
-              reason: `浏览器打开失败：${reason}`.slice(0, 200),
+              reason: `浏览器打开失败：${reason}`.slice(0, 500),
+              errorCode: 'DIRECT_OPEN_FAILED',
+              tickCount: 0,
+              metadata: { executionMode: 'browser', lane: 'direct_open' },
             });
+            if (persisted.persisted) {
+              broadcastToUser(ctx.userId, {
+                type: 'server.task.terminal',
+                taskId,
+                status: 'failed',
+                reason: `浏览器打开失败：${reason}`.slice(0, 200),
+              });
+            }
+          } catch (persistErr) {
+            ctx.logger.error(
+              { err: persistErr, taskId },
+              'direct-open: failed outcome could not be persisted',
+            );
           }
         } finally {
           if (allocatedPool && ctx.browserPool) {
@@ -3392,10 +3454,71 @@ export const tasksRouter = router({
                 .release(taskId, `direct-open-${taskId}-done`)
                 .catch(() => {});
             }
-            ctx.taskQueue?.signalSlotFreed();
           }
+          if (willQueueDirectOpen) ctx.taskQueue?.signalSlotFreed();
         }
-      })();
+      };
+
+      if (willQueueDirectOpen && ctx.taskQueue) {
+        const enqueueResult = ctx.taskQueue.enqueue({
+          taskId,
+          userId: ctx.userId,
+          runFn: dispatchDirectOpen,
+          onStart: async (): Promise<void> => {
+            await markQueuedTaskExecutingOrThrow({ repo, taskId, logger: ctx.logger });
+          },
+          onTimeout: async (): Promise<void> => {
+            const reason = '排队等待时间过长，任务已自动停止。请稍后重新执行。';
+            try {
+              const failed = await repo.markQueuedTaskFailed(taskId, `queue timeout: ${reason}`, {
+                errorCode: 'QUEUE_TIMEOUT',
+                source: 'direct_open_queue_timeout',
+              });
+              if (failed.persisted) {
+                broadcastToUser(ctx.userId, {
+                  type: 'server.task.terminal',
+                  taskId,
+                  status: 'failed',
+                  reason,
+                });
+              }
+            } catch (err) {
+              ctx.logger.error(
+                { err, taskId },
+                'direct-open: queue timeout could not be persisted',
+              );
+            }
+          },
+        });
+
+        if (enqueueResult.kind === 'rejected') {
+          await repo.markQueuedTaskFailed(taskId, enqueueResult.reason, {
+            errorCode: 'QUEUE_REJECTED',
+            source: 'direct_open_queue_rejected',
+          });
+          throw new TRPCError({
+            code: 'TOO_MANY_REQUESTS',
+            message: enqueueResult.reason,
+          });
+        }
+        if (enqueueResult.kind === 'queued') {
+          broadcastToUser(ctx.userId, {
+            type: 'server.task.queued',
+            taskId,
+            position: enqueueResult.position,
+          });
+        }
+        return {
+          taskId,
+          status: enqueueResult.kind === 'dispatched' ? ('executing' as const) : ('queued' as const),
+          steps: [],
+          executionMode: 'browser' as const,
+        };
+      }
+
+      void dispatchDirectOpen().catch((err) => {
+        ctx.logger.error({ err, taskId }, 'direct-open: detached dispatch rejected');
+      });
 
       return {
         taskId,
@@ -3615,34 +3738,6 @@ export const tasksRouter = router({
             ctx.userId,
             input.viewportProfile,
           );
-          // P0 SAFETY GUARD — Phase 24 RC follow-up. The per-task pool
-          // allocates CDP ports in the inclusive range
-          // [cdpPortStart, cdpPortStart + maxInstances - 1] = [9300,
-          // 9309]. Any executor returned with a port outside that
-          // window CANNOT be a server-side pool Brave — it would have
-          // to be a singleton fallback, the headed lane (9223), or
-          // worst-case the user's local Chrome via the extension's
-          // chrome.debugger surface. Refuse to dispatch on anything
-          // we don't recognise; release the instance so no Brave
-          // leaks. The caller's catch below logs and falls through.
-          if (instance.cdpPort < 9300 || instance.cdpPort > 9309) {
-            ctx.logger.error(
-              {
-                taskId,
-                userId: ctx.userId,
-                cdpPort: instance.cdpPort,
-              },
-              'pool: P0 GUARD — allocated port outside server-pool range [9300,9309]; refusing to dispatch',
-            );
-            await ctx.browserPool
-              .release(taskId, `P0-guard-${taskId}`)
-              .catch(() => {
-                /* best-effort */
-              });
-            throw new Error(
-              `P0 guard: refusing to dispatch on cdpPort=${instance.cdpPort} (outside server-pool range)`,
-            );
-          }
           perUserExec = instance.executor;
           ctx.logger.info(
             { taskId, userId: ctx.userId, cdpPort: instance.cdpPort, displayNum: instance.display },
@@ -6287,6 +6382,9 @@ export const tasksRouter = router({
               petImageFileId?: string;
               petModel?: PetI2vModel;
               i2vPrompt?: string;
+              referenceVideoFileId?: string;
+              referenceVideoDurationSeconds?: number;
+              cloneMode?: WanAnimateMixMode;
               // Phase 2 第三期 IP 人物 — full copy text, no script.
               ipCopyText?: string;
               videoOptions?: {
@@ -6301,6 +6399,7 @@ export const tasksRouter = router({
           } | null
         )?.metadata) ?? {};
       const isPet = !!meta.petImageFileId;
+      const isClone = isPet && !!meta.referenceVideoFileId;
       const isIp = meta.videoOptions?.tab === 'ip_person' || meta.ipCopyText !== undefined;
       const script = meta.videoScript;
       const tier: VideoSource = meta.videoTier ?? 'veo_fast';
@@ -6445,7 +6544,28 @@ export const tasksRouter = router({
         };
         try {
           let summary: string;
-          if (isPet) {
+          if (isClone) {
+            const { runCloneVideoCreation } = await import('../../agent/video/video-clone.js');
+            const [imageUrl, referenceVideoUrl] = await Promise.all([
+              fileService.signedReadUrl(meta.petImageFileId!, userInternalId),
+              fileService.signedReadUrl(meta.referenceVideoFileId!, userInternalId),
+            ]);
+            if (!imageUrl || !referenceVideoUrl) {
+              throw new Error('主角照片或参考视频不可用（已过期或无法生成访问链接）');
+            }
+            await fileService.linkToTask(
+              [meta.petImageFileId!, meta.referenceVideoFileId!],
+              taskInternalId,
+              userInternalId,
+            );
+            await runCloneVideoCreation(
+              { imageUrl, referenceVideoUrl },
+              buildVideoCfg(),
+              { mode: meta.cloneMode ?? 'wan-std' },
+              { storeOutput, workdir, logger },
+            );
+            summary = '复刻视频已生成。';
+          } else if (isPet) {
             // 宠物 i2v: fileId → presigned GET → i2v 单图 → pad+水印+静默 → store.
             const { runPetVideoCreation } = await import('../../agent/video/video-pet-i2v.js');
             const imageUrl = await fileService.signedReadUrl(meta.petImageFileId!, userInternalId);

@@ -9,6 +9,7 @@ import type { AddressInfo } from 'node:net';
 import type { Duplex } from 'node:stream';
 import type { BrowserNetworkPolicy } from '../agent/browser-network-policy.js';
 import { defaultBrowserNetworkPolicy } from '../agent/browser-network-policy.js';
+import { browserUrlForLog } from './log-url.js';
 
 interface BrowserEgressProxyOptions {
   policy?: Pick<BrowserNetworkPolicy, 'check'>;
@@ -240,7 +241,7 @@ export class BrowserEgressProxy {
   }
 
   private logBlocked(target: string, reason: string): void {
-    this.logger?.warn({ target, reason }, 'browser egress proxy blocked target');
+    this.logger?.warn({ target: browserUrlForLog(target), reason }, 'browser egress proxy blocked target');
   }
 
   private trackUpstreamSocket(socket: Socket): void {

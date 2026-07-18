@@ -52,6 +52,8 @@ export interface GenerateImagesParams {
    * '4096x4096'). Only sent when present so flash calls stay default.
    */
   readonly resolution?: string;
+  /** Official Gemini image output aspect ratio. */
+  readonly aspectRatio?: '1:1' | '3:4' | '4:3' | '9:16' | '16:9';
   /**
    * Some general multimodal models require an explicit
    * `responseModalities` to emit images. The dedicated `*-image`
@@ -174,7 +176,13 @@ export async function generateImages(
   }
 
   const generationConfig: Record<string, unknown> = {};
-  if (params.resolution) generationConfig.imageConfig = { resolution: params.resolution };
+  const imageResponseFormat: Record<string, string> = {};
+  if (params.aspectRatio) imageResponseFormat.aspectRatio = params.aspectRatio;
+  const imageSize = normalizeImageSize(params.resolution);
+  if (imageSize) imageResponseFormat.imageSize = imageSize;
+  if (Object.keys(imageResponseFormat).length > 0) {
+    generationConfig.responseFormat = { image: imageResponseFormat };
+  }
   if (params.responseModalities) generationConfig.responseModalities = params.responseModalities;
 
   const body: Record<string, unknown> = {
@@ -299,6 +307,16 @@ export async function generateImages(
     model: params.model,
     ...(finishReason ? { finishReason } : {}),
   };
+}
+
+function normalizeImageSize(value: string | undefined): '512' | '1K' | '2K' | '4K' | undefined {
+  if (!value) return undefined;
+  const normalized = value.trim().toUpperCase();
+  if (normalized === '512') return '512';
+  if (normalized === '1K' || normalized.includes('1024')) return '1K';
+  if (normalized === '2K' || normalized.includes('2048')) return '2K';
+  if (normalized === '4K' || normalized.includes('4096')) return '4K';
+  return undefined;
 }
 
 function isSafetyFinish(finishReason: string | undefined): boolean {

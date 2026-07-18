@@ -3,6 +3,7 @@ import {
   buildCloneVideoIntent,
   buildImageIntentForSubmit,
   buildImageIntentWithMode,
+  buildIpVideoIntent,
   buildVideoIntentWithCreativeStyles,
   inferVideoStyleOption,
 } from './VideoPage';
@@ -35,27 +36,30 @@ describe('video creative style state', () => {
     ).toBe('atmospheric');
   });
 
-  it('builds a clone-video instruction around the uploaded reference video', () => {
+  it('keeps clone-video notes honest about what changes the provider input', () => {
     expect(buildCloneVideoIntent('保留原视频舞步，主角换成我的狗').split('\n')).toEqual([
-      '复刻视频：请参考上传的视频作为动作、镜头节奏、构图和时长参考。',
-      '将视频主角替换为上传照片中的主角，尽量生成相同动作和相同画面节奏的视频。',
-      '补充描述：保留原视频舞步，主角换成我的狗',
+      '复刻视频：使用上传照片替换参考视频中的主角，并保留参考视频的动作、镜头、节奏和音频。',
+      '任务备注（仅用于记录，不改变本次模型输入）：保留原视频舞步，主角换成我的狗',
     ]);
+  });
+
+  it('keeps IP narration copy free of visual style instructions', () => {
+    expect(
+      buildIpVideoIntent('大家好，欢迎来到今天的产品介绍。', {
+        vibe: 'sci_fi',
+        lighting: 'golden_hour',
+        color: 'warm',
+      }),
+    ).toBe('大家好，欢迎来到今天的产品介绍。');
   });
 
   it('keeps normal image prompts lightweight in free mode', () => {
     expect(buildImageIntentWithMode('生成一张夏日海报', 'random', 'free')).toBe('生成一张夏日海报');
   });
 
-  it('adds the selected Nano Banana 2 model directive for image submits', () => {
-    expect(buildImageIntentForSubmit('生成一张夏日海报', 'random', 'free', 'nano_banana_2')).toContain(
-      '图片模型要求：使用 Nano Banana 2。',
-    );
-  });
-
-  it('adds the selected Nano Banana Pro model directive for image submits', () => {
-    expect(buildImageIntentForSubmit('生成一张夏日海报', 'random', 'free', 'nano_banana_pro')).toContain(
-      '图片模型要求：使用 Nano Banana Pro。',
+  it('keeps internal model metadata out of the image prompt', () => {
+    expect(buildImageIntentForSubmit('生成一张夏日海报', 'random', 'free')).toBe(
+      '生成一张夏日海报',
     );
   });
 

@@ -95,6 +95,26 @@ describe('runImageTask', () => {
     );
   });
 
+  it('generates the requested number of images and forwards the selected aspect ratio', async () => {
+    const generate = okGenerate();
+    const saveMany = vi.fn(async (_img, index: number) => attachmentFor(index));
+
+    const out = await runImageTask({
+      intent: '画一只橘猫',
+      imageCount: 3,
+      aspectRatio: '16:9',
+      apiKey: 'k',
+      save: saveMany,
+      logger: fakeLogger(),
+      generate,
+    });
+
+    expect(generate).toHaveBeenCalledTimes(3);
+    expect(generate).toHaveBeenCalledWith(expect.objectContaining({ aspectRatio: '16:9' }));
+    expect(out.attachments).toHaveLength(3);
+    expect(out.summary).toContain('已生成 3 张图片');
+  });
+
   it('routes poster asks to Pro and labels the summary', async () => {
     const generate = okGenerate();
     const out = await runImageTask({
