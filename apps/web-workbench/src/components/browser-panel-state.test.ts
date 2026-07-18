@@ -9,6 +9,7 @@ import {
   browserReleasedCardCopy,
   taskOwnedBrowserFrame,
   taskOwnedBrowserUrl,
+  terminalEvidenceFrameForTask,
   browserViewportFooterLabel,
   browserViewportFrameLabel,
   browserWakeFeedback,
@@ -158,6 +159,38 @@ describe('BrowserPanel state helpers', () => {
         finalEvidenceFrame: null,
       }),
     ).toBe(otherTaskFrame);
+  });
+
+  it('rehydrates persisted terminal screenshots as task-owned browser evidence', () => {
+    const liveFrame = {
+      tickIndex: 8,
+      imageBase64: 'stale-live-frame',
+      url: 'https://stale.example',
+      viewport: { width: 1280, height: 720 },
+      timestamp: '2026-07-17T00:00:00.000Z',
+    };
+
+    expect(
+      terminalEvidenceFrameForTask({
+        taskIsTerminal: true,
+        task: {
+          finalScreenshot: 'persisted-terminal-frame',
+          finalUrl: 'https://example.com/result',
+          finalViewport: { width: 1550, height: 650 },
+          createdAt: new Date('2026-07-18T00:00:00.000Z'),
+        },
+        liveFrame,
+      }),
+    ).toEqual({
+      frame: {
+        tickIndex: -1,
+        imageBase64: 'persisted-terminal-frame',
+        url: 'https://example.com/result',
+        viewport: { width: 1550, height: 650 },
+        timestamp: '2026-07-18T00:00:00.000Z',
+      },
+      source: 'saved-screenshot',
+    });
   });
 
   it('turns a bare domain into a browser task with a secure URL', () => {

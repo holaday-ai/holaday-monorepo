@@ -6750,7 +6750,6 @@ export const tasksRouter = router({
           pauseReason: tasksTable.pauseReason,
           errorCode: tasksTable.errorCode,
           errorMessage: tasksTable.errorMessage,
-          result: tasksTable.result,
           opusUsed: tasksTable.opusUsed,
           starred: tasksTable.starred,
           starredAt: tasksTable.starredAt,
@@ -6773,6 +6772,35 @@ export const tasksRouter = router({
           input.starred ? desc(tasksTable.starredAt) : desc(tasksTable.id),
         )
         .limit(input.limit);
+
+      // Keep the ordered history query free of large JSON values. Terminal
+      // browser screenshots live inside `result` and can exceed MySQL's sort
+      // buffer before the application has a chance to strip them. Fetch the
+      // selected rows' lightweight result JSON separately, with the screenshot
+      // removed in SQL so it never crosses the database boundary for a list.
+      const resultRows = rows.length > 0
+        ? await ctx.db
+            .select({
+              id: tasksTable.id,
+              result: sql<unknown>`JSON_REMOVE(${tasksTable.result}, '$.finalScreenshot')`.as(
+                'result',
+              ),
+            })
+            .from(tasksTable)
+            .where(
+              and(
+                eq(tasksTable.userId, userRow.id),
+                eq(tasksTable.origin, 'user'),
+                inArray(
+                  tasksTable.id,
+                  rows.map((row) => row.id),
+                ),
+              ),
+            )
+        : [];
+      const resultByTaskId = new Map(
+        resultRows.map((row) => [row.id, row.result] as const),
+      );
 
       // Resolve project external ids in one round-trip — mapping
       // bigint project_id back to the public prj_… string the SPA
@@ -6803,7 +6831,9 @@ export const tasksRouter = router({
           // overhead 33%); 100 tasks would bloat the list response by
           // ~8MB. tasks.detail still ships it for the BrowserPanel
           // evidence view; the sidebar doesn't render screenshots.
-          result: stripFinalScreenshot(normalizeOutput(r.result)),
+          result: stripFinalScreenshot(
+            normalizeOutput(resultByTaskId.get(r.id)),
+          ),
           starred: Boolean(r.starred),
           starredAt: r.starredAt,
           projectId: r.projectId != null ? projectExtById.get(r.projectId) ?? null : null,

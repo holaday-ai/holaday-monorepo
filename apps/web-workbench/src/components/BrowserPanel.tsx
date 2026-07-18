@@ -35,9 +35,15 @@ import {
   browserWakeFeedback,
   shouldShowBrowserHeader,
   shouldShowBrowserFullscreen,
+  shouldShowTerminalEvidenceLedger,
   shouldConnectBrowserStream,
+  taskOwnedBrowserFrame,
   taskOwnedBrowserUrl,
   terminalBrowserTakeoverMessage,
+  terminalEvidenceFrameForTask,
+  terminalEvidenceFrameLabel,
+  terminalEvidenceLayout,
+  type TerminalEvidenceScreenshotSource,
 } from '@/components/browser-panel-state';
 import {
   CdpScreencastViewport,
@@ -343,7 +349,21 @@ export function BrowserPanel({
     activeTaskId ? s.tasks.find((t) => t.taskId === activeTaskId) ?? null : null,
   );
   const taskIsTerminal = taskStatus ? isTerminalStatus(taskStatus) : false;
-  const displayFrame = frame ?? null;
+  const terminalEvidence = React.useMemo(
+    () =>
+      terminalEvidenceFrameForTask({
+        taskIsTerminal,
+        task: activeTask,
+        liveFrame: frame ?? null,
+      }),
+    [activeTask, frame, taskIsTerminal],
+  );
+  const finalEvidenceFrame = terminalEvidence?.frame ?? null;
+  const displayFrame = taskOwnedBrowserFrame({
+    taskIsTerminal,
+    liveFrame: frame ?? null,
+    finalEvidenceFrame,
+  });
   // P2 — URL fallback chain: task.finalUrl (persisted, survives
   // refreshes / awaiting_user pauses / screencast disconnects)
   // → displayFrame.url (live or evidence) → lastKnownUrl (in-memory
@@ -482,10 +502,12 @@ export function BrowserPanel({
     knownExecutionMode != null
       ? knownExecutionMode === 'browser'
       : hasActiveTask && !isNonPoolTask;
-  const shouldConnect = shouldConnectBrowserStream({
-    isBrowserTask,
-    taskIsTerminal: taskTerminal,
-  });
+  const shouldConnect =
+    !finalEvidenceFrame &&
+    shouldConnectBrowserStream({
+      isBrowserTask,
+      taskIsTerminal: taskTerminal,
+    });
   // Item 6 — short-lived stream token for screencast / VNC WS auth.
   // Refreshes every 45s; the WS URL gets rebuilt when token rotates,
   // which forces a benign reconnect (the connection itself doesn't
@@ -794,9 +816,11 @@ export function BrowserPanel({
   // VNC lane: the RFB canvas always has content once connected, so
   // `interactive` alone is the gate. JPEG fallback lane: needs a real
   // frame, otherwise there's nothing to map clicks against.
-  const interactiveActive = useVnc
-    ? interactive && (vncStatus === 'connected' || vncStatus === 'connecting')
-    : interactive && Boolean(frame) && !isBlankUrl(frame?.url);
+  const interactiveActive =
+    !taskIsTerminal &&
+    (useVnc
+      ? interactive && (vncStatus === 'connected' || vncStatus === 'connecting')
+      : interactive && Boolean(frame) && !isBlankUrl(frame?.url));
   const headerStatus = browserPanelHeaderStatus({
     dotStatus: status,
     liveStatus: vncStatus,
@@ -804,9 +828,12 @@ export function BrowserPanel({
     interactiveActive,
     showReconnect,
   });
-  const evidenceHeaderActive = terminalSessionUnavailable;
+  const evidenceHeaderActive = Boolean(finalEvidenceFrame) || terminalSessionUnavailable;
   const displayedHeaderStatus = evidenceHeaderActive
-    ? browserPanelEvidenceHeaderStatus(taskStatus, persistedFinalUrl)
+    ? browserPanelEvidenceHeaderStatus(
+        taskStatus,
+        finalEvidenceFrame?.url ?? persistedFinalUrl,
+      )
     : headerStatus;
 
   // BOSS-feedback follow-up — the blue "你正在直接操作浏览器" banner
@@ -866,7 +893,7 @@ export function BrowserPanel({
     shouldShowBrowserHeader({
       taskIsTerminal: taskIsTerminalForHeader,
       hasCurrentFrame: Boolean(frame),
-      hasFinalEvidence: Boolean(activeTask?.finalScreenshot || persistedFinalUrl),
+      hasFinalEvidence: Boolean(finalEvidenceFrame || persistedFinalUrl),
       interactiveActive,
     });
 
@@ -1040,7 +1067,7 @@ export function BrowserPanel({
       className={cn(
         'relative flex flex-col border-l border-[#DCDDDD] backdrop-blur-xl dark:border-white/10',
         isSheet
-          ? 'fixed inset-x-0 bottom-0 z-[75] h-[calc(100dvh-56px)] max-h-[calc(100dvh-56px)] rounded-t-lg border-t border-l-0 shadow-2xl animate-fade-in'
+          ? 'fixed inset-x-0 bottom-0 z-[75] h-[calc(100dvh-56px)] max-h-[calc(100dvh-56px)] rounded-t-lg border-t border-l-0 shadow-2xl animate-fade-in motion-reduce:animate-none'
           : 'h-full transition-[width] duration-150',
         // Desktop: fill the parent wrapper (App owns the flex-basis /
         // resize logic). The collapsed rail stays a local state the
@@ -1341,7 +1368,19 @@ export function BrowserPanel({
               'bg-[#F6F7F9] dark:bg-white/[0.03]',
             )}
           >
-            {hibernated ? (
+            {finalEvidenceFrame && terminalEvidence ? (
+              <TerminalEvidenceView
+                frame={finalEvidenceFrame}
+                source={terminalEvidence.source}
+                taskStatus={taskStatus}
+                isSheet={isSheet}
+                isNarrow={isNarrow}
+                fullscreen={fullscreen}
+                onToggleFullscreen={onToggleFullscreen}
+                onReExecute={onReExecute}
+                reExecuting={reExecuting}
+              />
+            ) : hibernated ? (
               <HibernationCard
                 lastFrame={displayFrame}
                 onWake={onWake}
@@ -1627,13 +1666,235 @@ export function BrowserPanel({
         <div
           aria-hidden="true"
           onClick={onClose}
-          className="fixed inset-0 z-[70] bg-black/30 backdrop-blur-sm animate-fade-in"
+          className="fixed inset-0 z-[70] bg-black/30 backdrop-blur-sm animate-fade-in motion-reduce:animate-none"
         />
         {section}
       </>
     );
   }
   return section;
+}
+
+function TerminalEvidenceView({
+  frame,
+  source,
+  taskStatus,
+  isSheet,
+  isNarrow,
+  fullscreen,
+  onToggleFullscreen,
+  onReExecute,
+  reExecuting,
+}: {
+  frame: UiScreencast;
+  source: TerminalEvidenceScreenshotSource;
+  taskStatus: UiTaskStatus | null | undefined;
+  isSheet: boolean;
+  isNarrow: boolean;
+  fullscreen: boolean;
+  onToggleFullscreen?: () => void;
+  onReExecute?: () => void;
+  reExecuting: boolean;
+}): JSX.Element {
+  const [viewMode, setViewMode] = React.useState<'contain' | 'readable'>(
+    'contain',
+  );
+  const [naturalSize, setNaturalSize] = React.useState<{
+    width: number;
+    height: number;
+  } | null>(null);
+
+  React.useEffect(() => {
+    setViewMode('contain');
+    setNaturalSize(null);
+  }, [frame.imageBase64]);
+
+  const sourceWidth = naturalSize?.width || frame.viewport.width;
+  const sourceHeight = naturalSize?.height || frame.viewport.height;
+  const sourceAspect =
+    sourceWidth > 0 && sourceHeight > 0 ? sourceWidth / sourceHeight : null;
+  const layout = terminalEvidenceLayout({
+    isNarrow,
+    isSheet,
+    fullscreen,
+    sourceAspect,
+    viewMode,
+  });
+  const compactPreview = layout === 'compact-preview';
+  const safeFinalUrl = safeExternalHttpHref(frame.url);
+  const title = terminalEvidenceFrameLabel({
+    status: taskStatus,
+    url: frame.url,
+  });
+  const screenshotCopy =
+    source === 'saved-screenshot' ? '任务结束时保存的页面' : '任务结束前最后可见页面';
+
+  return (
+    <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden bg-white dark:bg-background">
+      {shouldShowTerminalEvidenceLedger(fullscreen) && (
+        <div className={cn('shrink-0 border-b bg-white/96 dark:bg-background/95', BROWSER_DIVIDER)}>
+          <div className={cn('flex min-w-0 items-start gap-2', isSheet ? 'px-3 pb-2 pt-3' : 'px-3 py-2.5')}>
+            <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-[7px] bg-[#42C0EF]/12 text-[#118AB2] dark:text-[#42C0EF]">
+              <ListChecks className="h-3.5 w-3.5" aria-hidden />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
+                <span className="text-[12px] font-semibold text-foreground">
+                  终态证据
+                </span>
+                <span className="truncate text-[11px] text-muted-foreground">
+                  {title}
+                </span>
+              </div>
+              <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
+                {screenshotCopy}，用于复核页面状态；结果中的判断仍以来源和任务上下文为准。
+              </p>
+            </div>
+            {safeFinalUrl && !isSheet && (
+              <SafeExternalLinkButton
+                href={safeFinalUrl}
+                className="inline-flex h-7 shrink-0 items-center gap-1 rounded-[8px] border border-[#DCDDDD] bg-white px-2 text-[11px] font-medium text-[#595757] transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/60 dark:border-white/10 dark:bg-transparent dark:text-foreground/80 dark:hover:bg-white/10"
+              >
+                <ExternalLink className="h-3 w-3" aria-hidden />
+                打开
+              </SafeExternalLinkButton>
+            )}
+          </div>
+          <div className="flex min-w-0 items-center justify-between gap-2 border-t border-[#DCDDDD]/60 px-3 py-1.5 dark:border-white/10">
+            <span className="min-w-0 truncate text-[11px] text-muted-foreground">
+              {viewMode === 'contain' ? '按比例适应窗口' : '原始尺寸，可滑动查看'}
+            </span>
+            <div className="flex shrink-0 items-center gap-1.5">
+              {isSheet && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setViewMode((mode) =>
+                      mode === 'contain' ? 'readable' : 'contain',
+                    )
+                  }
+                  aria-label={
+                    viewMode === 'contain' ? '按原始尺寸查看' : '适应窗口查看'
+                  }
+                  className="inline-flex h-7 items-center rounded-[8px] border border-[#DCDDDD] bg-white px-2 text-[11px] font-medium text-foreground transition-colors hover:bg-[#EFEFEF]/60 dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10"
+                >
+                  {viewMode === 'contain' ? '原始尺寸' : '适应窗口'}
+                </button>
+              )}
+              {!isSheet && onToggleFullscreen && (
+                <button
+                  type="button"
+                  onClick={onToggleFullscreen}
+                  aria-label="全屏查看任务截图"
+                  title="全屏查看任务截图"
+                  className="inline-flex h-7 items-center gap-1 rounded-[8px] border border-[#DCDDDD] bg-white px-2 text-[11px] font-medium text-foreground transition-colors hover:bg-[#EFEFEF]/60 dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10"
+                >
+                  <Maximize2 className="h-3 w-3" aria-hidden />
+                  全屏查看
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div
+        className={cn(
+          'relative min-h-0 min-w-0 bg-[#F6F7F9] dark:bg-white/[0.03]',
+          compactPreview
+            ? 'shrink-0 overflow-hidden'
+            : viewMode === 'readable'
+              ? 'flex-1 overflow-auto'
+              : 'flex flex-1 items-center justify-center overflow-hidden',
+        )}
+        style={
+          compactPreview && sourceAspect
+            ? { aspectRatio: String(sourceAspect) }
+            : undefined
+        }
+      >
+        <div
+          className={cn(
+            'relative',
+            compactPreview
+              ? 'h-full w-full'
+              : viewMode === 'readable'
+                ? 'shrink-0'
+                : 'flex h-full w-full items-center justify-center',
+          )}
+          style={
+            viewMode === 'readable' && sourceWidth > 0 && sourceHeight > 0
+              ? { width: sourceWidth, height: sourceHeight }
+              : undefined
+          }
+        >
+          <img
+            src={`data:image/jpeg;base64,${frame.imageBase64}`}
+            alt="任务完成时的浏览器画面"
+            draggable={false}
+            onLoad={(event) => {
+              const image = event.currentTarget;
+              if (image.naturalWidth > 0 && image.naturalHeight > 0) {
+                setNaturalSize({
+                  width: image.naturalWidth,
+                  height: image.naturalHeight,
+                });
+              }
+            }}
+            className={cn(
+              'block border-0 object-contain',
+              compactPreview || viewMode === 'readable'
+                ? 'h-full w-full'
+                : 'max-h-full max-w-full',
+            )}
+          />
+          {!isSheet && compactPreview && (
+            <div className="pointer-events-none absolute inset-x-2 bottom-2 flex min-w-0 items-center justify-between gap-2 rounded-[7px] bg-black/55 px-2 py-1 text-[10px] text-white backdrop-blur">
+              <span className="truncate">{title}</span>
+              {safeFinalUrl && (
+                <span className="max-w-[52%] truncate font-mono opacity-80">
+                  {frame.url}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {!fullscreen && (
+        <div className={cn('flex shrink-0 min-w-0 items-center gap-2 border-t bg-white/96 px-3 py-2 text-[11px] dark:bg-background/95', BROWSER_DIVIDER)}>
+          <span className="min-w-0 flex-1 truncate text-muted-foreground">
+            {title}
+          </span>
+          {safeFinalUrl && isSheet && (
+            <SafeExternalLinkButton
+              href={safeFinalUrl}
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] border border-[#DCDDDD] bg-white text-foreground transition-colors hover:bg-[#EFEFEF]/60 dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10"
+              ariaLabel="打开最终页面"
+              title="打开最终页面"
+            >
+              <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+            </SafeExternalLinkButton>
+          )}
+          {onReExecute && (
+            <button
+              type="button"
+              onClick={onReExecute}
+              disabled={reExecuting}
+              aria-label={reExecuting ? '正在重新执行任务' : '重新执行任务'}
+              title={reExecuting ? '正在重新执行' : '重新执行'}
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] border border-[#DCDDDD] bg-white text-foreground transition-colors hover:bg-[#EFEFEF]/60 disabled:cursor-wait disabled:opacity-60 dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10"
+            >
+              <RotateCw
+                className={cn('h-3.5 w-3.5', reExecuting && 'animate-spin')}
+                aria-hidden
+              />
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 /**
@@ -2060,10 +2321,14 @@ function SafeExternalLinkButton({
   href,
   className,
   children,
+  ariaLabel,
+  title,
 }: {
   href: string | null | undefined;
   className?: string;
   children: React.ReactNode;
+  ariaLabel?: string;
+  title?: string;
 }): JSX.Element | null {
   const [pendingHref, setPendingHref] = React.useState<string | null>(null);
   const safeHref = safeExternalHttpHref(href);
@@ -2074,6 +2339,8 @@ function SafeExternalLinkButton({
         type="button"
         onClick={() => setPendingHref(safeHref)}
         className={className}
+        aria-label={ariaLabel}
+        title={title}
       >
         {children}
       </button>

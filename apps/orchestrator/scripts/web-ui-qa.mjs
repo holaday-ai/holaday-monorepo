@@ -345,6 +345,13 @@ function boxesOverlap(a, b) {
   );
 }
 
+function isExpectedSyntheticBrowserSocketError(message) {
+  return (
+    message.includes(`/screencast-ws/${BROWSER_FIXTURE_ID}`) &&
+    message.includes('Unexpected response code: 409')
+  );
+}
+
 async function resetDedicatedLocalQaQuota(email) {
   if (!IS_LOCAL || email !== LOCAL_QA_EMAIL) return;
   const connection = await mysql.createConnection(
@@ -619,7 +626,12 @@ async function checkRoute(browser, token, route, viewport) {
   const page = await context.newPage();
   const consoleErrors = [];
   page.on('console', (message) => {
-    if (message.type() === 'error') consoleErrors.push(message.text());
+    if (
+      message.type() === 'error' &&
+      !isExpectedSyntheticBrowserSocketError(message.text())
+    ) {
+      consoleErrors.push(message.text());
+    }
   });
   page.on('pageerror', (error) => consoleErrors.push(error.message));
 
@@ -718,7 +730,12 @@ async function checkResponsiveBrowserFixture(browser, token, viewport) {
   const page = await context.newPage();
   const consoleErrors = [];
   page.on('console', (message) => {
-    if (message.type() === 'error') consoleErrors.push(message.text());
+    if (
+      message.type() === 'error' &&
+      !isExpectedSyntheticBrowserSocketError(message.text())
+    ) {
+      consoleErrors.push(message.text());
+    }
   });
   page.on('pageerror', (error) => consoleErrors.push(error.message));
   const result = {

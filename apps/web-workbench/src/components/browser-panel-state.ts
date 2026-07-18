@@ -1,4 +1,4 @@
-import type { UiScreencast, UiTaskStatus } from '@/types/task';
+import type { UiScreencast, UiTask, UiTaskStatus } from '@/types/task';
 
 export type BrowserLiveStatus = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'error';
 export type BrowserPanelHeaderTone =
@@ -148,6 +148,62 @@ export function taskOwnedBrowserFrame(inputs: {
   return inputs.taskIsTerminal
     ? inputs.finalEvidenceFrame
     : (inputs.liveFrame ?? inputs.finalEvidenceFrame);
+}
+
+export type TerminalEvidenceScreenshotSource =
+  | 'saved-screenshot'
+  | 'last-frame';
+
+export interface TerminalEvidenceFrame {
+  frame: UiScreencast;
+  source: TerminalEvidenceScreenshotSource;
+}
+
+/**
+ * Rebuilds the selected task's read-only terminal browser evidence after a
+ * refresh. Persisted screenshots always win over an in-memory live frame so a
+ * stale frame can never be presented as the task's final page.
+ */
+export function terminalEvidenceFrameForTask(inputs: {
+  taskIsTerminal: boolean;
+  task: Pick<
+    UiTask,
+    'finalScreenshot' | 'finalUrl' | 'finalViewport' | 'createdAt'
+  > | null;
+  liveFrame: UiScreencast | null;
+}): TerminalEvidenceFrame | null {
+  if (!inputs.taskIsTerminal) return null;
+
+  const { task, liveFrame } = inputs;
+  if (task?.finalScreenshot) {
+    return {
+      frame: {
+        tickIndex: -1,
+        imageBase64: task.finalScreenshot,
+        url: task.finalUrl?.trim() || 'about:blank',
+        viewport: task.finalViewport ?? { width: 0, height: 0 },
+        timestamp: task.createdAt.toISOString(),
+      },
+      source: 'saved-screenshot',
+    };
+  }
+
+  if (!liveFrame || !liveFrame.imageBase64 || isBlankBrowserUrl(liveFrame.url)) {
+    return null;
+  }
+  return {
+    frame: {
+      ...liveFrame,
+      url: task?.finalUrl?.trim() || liveFrame.url,
+      viewport: task?.finalViewport ?? liveFrame.viewport,
+    },
+    source: 'last-frame',
+  };
+}
+
+function isBlankBrowserUrl(url: string | null | undefined): boolean {
+  const normalized = url?.trim().toLowerCase();
+  return !normalized || normalized === 'about:blank';
 }
 
 export interface TaskOwnedBrowserUrl {
