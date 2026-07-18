@@ -1225,7 +1225,6 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     const trimmed = intent.trim();
     if (CONTROL_WORDS.has(trimmed.toLowerCase())) {
       const msg = `"${trimmed}" 是控制词，不是任务指令。要停止任务请用 Panel 右上角的"停止"按钮。`;
-      set({ error: msg });
       return { error: msg };
     }
     const pickedViewportProfile =
@@ -1248,6 +1247,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     set((prev) => ({
       tasks: [pendingTask, ...prev.tasks],
       browserInteractive: false,
+      error: null,
     }));
     try {
       const res = await trpc.tasks.create.mutate({
@@ -1318,7 +1318,6 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     } catch (err) {
       const msg = taskStoreError(err);
       set((prev) => ({
-        error: msg,
         tasks: prev.tasks.filter((t) => t.taskId !== localTaskId),
       }));
       return { error: msg };

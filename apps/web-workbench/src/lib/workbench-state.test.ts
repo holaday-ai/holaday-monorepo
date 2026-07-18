@@ -2,12 +2,14 @@ import { describe, expect, it } from 'vitest';
 import type { UiTask } from '@/types/task';
 import {
   followUpTargetForTask,
+  hasBrowserRecordForWorkbench,
   isLiveBrowserTaskForWorkbench,
   networkTransitionToast,
   normalizeTaskActionCount,
   mobileBrowserSheetAutoOpenState,
   preserveBrowserRecordAfterLive,
   realtimeConnectionTransition,
+  taskFrameForWorkbench,
 } from './workbench-state';
 
 function task(overrides: Partial<UiTask> = {}): UiTask {
@@ -37,6 +39,61 @@ describe('workbench state helpers', () => {
     expect(isLiveBrowserTaskForWorkbench(task({ status: 'completed' }))).toBe(
       false,
     );
+  });
+
+  it('keeps legacy browser-like tasks attached to their browser record', () => {
+    const legacyTask = task({ executionMode: undefined });
+    expect(hasBrowserRecordForWorkbench(legacyTask)).toBe(true);
+    expect(isLiveBrowserTaskForWorkbench(legacyTask)).toBe(true);
+    expect(
+      hasBrowserRecordForWorkbench(
+        task({ executionMode: undefined, intent: '总结这段文字' }),
+      ),
+    ).toBe(false);
+  });
+
+  it('recognizes saved browser evidence even when legacy intent has no browser verbs', () => {
+    expect(
+      hasBrowserRecordForWorkbench(
+        task({
+          executionMode: undefined,
+          intent: '整理最终页面',
+          status: 'completed',
+          finalUrl: 'https://example.com/result',
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      hasBrowserRecordForWorkbench(
+        task({
+          executionMode: undefined,
+          intent: '整理最终页面',
+          status: 'completed',
+          finalScreenshot: 'saved-browser-frame',
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it('selects only the frame keyed to the active task', () => {
+    const first = {
+      tickIndex: 1,
+      imageBase64: 'first',
+      url: 'https://first.example',
+      viewport: { width: 1280, height: 720 },
+      timestamp: '2026-07-17T00:00:00.000Z',
+    };
+    const second = {
+      ...first,
+      tickIndex: 2,
+      imageBase64: 'second',
+      url: 'https://second.example',
+    };
+    const frames = { tsk_first: first, tsk_second: second };
+
+    expect(taskFrameForWorkbench('tsk_second', frames)).toBe(second);
+    expect(taskFrameForWorkbench('tsk_missing', frames)).toBeNull();
+    expect(taskFrameForWorkbench(null, frames)).toBeNull();
   });
 
   it('keeps paused browser tasks live even when a pause frame carries a result', () => {

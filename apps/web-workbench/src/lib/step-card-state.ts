@@ -31,10 +31,23 @@ export function stepDisplayStepsForTask<T extends Pick<UiStep, 'status'>>(
   steps: readonly T[],
   taskStatus: string | null | undefined,
 ): readonly T[] {
-  if (taskStatus !== 'cancelled') return steps;
+  const staleRunningStatus = (() => {
+    switch (taskStatus) {
+      case 'completed':
+        return 'done' as const;
+      case 'failed':
+        return 'failed' as const;
+      case 'partial_success':
+      case 'cancelled':
+        return 'cancelled' as const;
+      default:
+        return null;
+    }
+  })();
+  if (!staleRunningStatus) return steps;
   return steps.map((step) =>
     step.status === 'running'
-      ? { ...step, status: 'cancelled' as const }
+      ? { ...step, status: staleRunningStatus }
       : step,
   );
 }

@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { WifiOff } from 'lucide-react';
+import { Menu, PanelRight, WifiOff } from 'lucide-react';
 import {
   Outlet,
   useLocation,
@@ -16,6 +16,7 @@ import { Sidebar } from '@/components/Sidebar';
 import { UpdateBanner } from '@/components/UpdateBanner';
 import { UserMenu } from '@/components/UserMenu';
 import { AppSkeleton } from '@/components/Skeleton';
+import { Button } from '@/components/ui/button';
 import {
   SidebarInset,
   SidebarProvider,
@@ -35,6 +36,7 @@ import {
 import { authSessionExpiredMessage, isAuthSessionError } from '@/lib/auth-session';
 import { taskActionError } from '@/lib/error-copy';
 import { pageActionError, pageErrorMessage } from '@/lib/page-error-copy';
+import { cn } from '@/lib/utils';
 import {
   projectFilterChipState,
   projectTaskFilterAppendPage,
@@ -79,6 +81,10 @@ interface OutletContext {
   me: MeProfile | null;
   refreshProjects(): Promise<ProjectRefreshResult>;
   projects: readonly UiProject[];
+  browserWorkbenchOpen: boolean;
+  openBrowserWorkbench(): void;
+  closeBrowserWorkbench(): void;
+  setBrowserAdaptiveSidebarCollapsed(collapsed: boolean): void;
 }
 
 type ProjectRefreshResult =
@@ -131,6 +137,24 @@ export function AppShell(): JSX.Element {
   const [sidebarOpen, setSidebarOpen] = React.useState(false);
   const [feedbackOpen, setFeedbackOpen] = React.useState(false);
   const [searchOpen, setSearchOpen] = React.useState(false);
+  const [browserWorkbenchOpen, setBrowserWorkbenchOpen] = React.useState(false);
+  const [browserAdaptiveSidebarCollapsed, setBrowserAdaptiveSidebarCollapsed] =
+    React.useState(false);
+  const openBrowserWorkbench = React.useCallback(() => {
+    setBrowserWorkbenchOpen(true);
+    if (location.pathname !== '/') navigate('/');
+  }, [location.pathname, navigate]);
+  const closeBrowserWorkbench = React.useCallback(() => {
+    setBrowserWorkbenchOpen(false);
+  }, []);
+  const toggleBrowserWorkbench = React.useCallback(() => {
+    if (location.pathname !== '/') {
+      setBrowserWorkbenchOpen(true);
+      navigate('/');
+      return;
+    }
+    setBrowserWorkbenchOpen((open) => !open);
+  }, [location.pathname, navigate]);
   const [confirmDelete, setConfirmDelete] = React.useState<string | null>(null);
   const [confirmBulkDelete, setConfirmBulkDelete] = React.useState<
     string[] | null
@@ -676,6 +700,10 @@ export function AppShell(): JSX.Element {
     me,
     refreshProjects,
     projects,
+    browserWorkbenchOpen,
+    openBrowserWorkbench,
+    closeBrowserWorkbench,
+    setBrowserAdaptiveSidebarCollapsed,
   };
 
   return (
@@ -760,6 +788,7 @@ export function AppShell(): JSX.Element {
         userRole={me?.role ?? 'user'}
         userPlan={me?.plan ?? 'free'}
         videoEnabled={me?.videoEnabled ?? false}
+        adaptiveCollapsed={browserAdaptiveSidebarCollapsed}
         onOpenSearch={() => setSearchOpen(true)}
         mobileOpen={sidebarOpen}
         onMobileClose={() => setSidebarOpen(false)}
@@ -781,6 +810,9 @@ export function AppShell(): JSX.Element {
         <Outlet context={ctx} />
       </SidebarInset>
       <DesktopAccountDock
+        browserWorkbenchOpen={browserWorkbenchOpen}
+        onToggleBrowserWorkbench={toggleBrowserWorkbench}
+        taskSelected={Boolean(selectedTaskId)}
         displayName={displayName}
         email={me?.email ?? null}
         plan={me?.plan ?? 'free'}
@@ -789,7 +821,11 @@ export function AppShell(): JSX.Element {
         onOpenFeedback={() => setFeedbackOpen(true)}
         onClearUnsuccessfulTasks={() => setConfirmClearUnsuccessful(true)}
       />
-      <MobileNotificationBellSlot />
+      <MobileSubpageSidebarSlot />
+      <MobileNotificationBellSlot
+        browserWorkbenchOpen={browserWorkbenchOpen}
+        onToggleBrowserWorkbench={toggleBrowserWorkbench}
+      />
       <UpdateBanner />
 
       <SearchOverlay
@@ -968,17 +1004,54 @@ export function AppShell(): JSX.Element {
   );
 }
 
-function MobileNotificationBellSlot(): JSX.Element | null {
-  const { isMobile, openMobile } = useSidebar();
-  if (!isMobile || openMobile) return null;
+function MobileSubpageSidebarSlot(): JSX.Element | null {
+  const { isMobile, openMobile, setOpenMobile } = useSidebar();
+  const location = useLocation();
+  if (!isMobile || openMobile || location.pathname === '/') return null;
   return (
-    <div className="fixed right-3 top-1.5 z-40 md:hidden">
+    <div className="fixed left-3 top-1.5 z-40">
+      <Button
+        type="button"
+        variant="outline"
+        size="icon"
+        onClick={() => setOpenMobile(true)}
+        aria-label="打开任务列表"
+        title="打开任务列表"
+        className="h-9 w-9 rounded-[9px] border-[#DCDDDD] bg-white/92 text-[#595757] shadow-[0_1px_3px_rgba(17,24,39,0.05)] backdrop-blur hover:bg-[#EFEFEF] hover:text-[#EA1F59] dark:border-white/10 dark:bg-card/90 dark:text-foreground/75 dark:hover:bg-white/10"
+      >
+        <Menu className="h-4 w-4" aria-hidden />
+      </Button>
+    </div>
+  );
+}
+
+function MobileNotificationBellSlot({
+  browserWorkbenchOpen,
+  onToggleBrowserWorkbench,
+}: {
+  browserWorkbenchOpen: boolean;
+  onToggleBrowserWorkbench(): void;
+}): JSX.Element | null {
+  const { isMobile, openMobile } = useSidebar();
+  // The browser sheet / compact inline panel owns the right edge while open.
+  // Keeping this fixed dock above it made the bell and browser-entry button
+  // cover the browser toolbar at the 768px boundary.
+  if (!isMobile || openMobile || browserWorkbenchOpen) return null;
+  return (
+    <div className="fixed right-3 top-1.5 z-40 flex items-center gap-1">
+      <BrowserWorkbenchButton
+        open={browserWorkbenchOpen}
+        onToggle={onToggleBrowserWorkbench}
+      />
       <NotificationBell placement="mobile-header" />
     </div>
   );
 }
 
 function DesktopAccountDock({
+  browserWorkbenchOpen,
+  onToggleBrowserWorkbench,
+  taskSelected,
   displayName,
   email,
   plan,
@@ -987,6 +1060,9 @@ function DesktopAccountDock({
   onOpenFeedback,
   onClearUnsuccessfulTasks,
 }: {
+  browserWorkbenchOpen: boolean;
+  onToggleBrowserWorkbench(): void;
+  taskSelected: boolean;
   displayName: string;
   email: string | null;
   plan: string;
@@ -996,7 +1072,17 @@ function DesktopAccountDock({
   onClearUnsuccessfulTasks(): void;
 }): JSX.Element {
   return (
-    <div className="fixed right-7 top-5 z-40 hidden items-center gap-3 md:flex">
+    <div
+      aria-label="账户与通知"
+      data-testid="desktop-account-dock"
+      className="fixed top-5 z-30 hidden items-center gap-3 min-[769px]:flex"
+      style={{ right: 'calc(1.75rem + var(--holaday-browser-panel-inset, 0px))' }}
+    >
+      <BrowserWorkbenchButton
+        open={browserWorkbenchOpen}
+        onToggle={onToggleBrowserWorkbench}
+        className={taskSelected ? 'hidden min-[1360px]:inline-flex' : undefined}
+      />
       <NotificationBell placement="topbar" />
       <UserMenu
         placement="topbar"
@@ -1009,6 +1095,37 @@ function DesktopAccountDock({
         onClearUnsuccessfulTasks={onClearUnsuccessfulTasks}
       />
     </div>
+  );
+}
+
+function BrowserWorkbenchButton({
+  open,
+  onToggle,
+  className,
+}: {
+  open: boolean;
+  onToggle(): void;
+  className?: string;
+}): JSX.Element {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      onClick={onToggle}
+      aria-label="浏览器工作区"
+      aria-pressed={open}
+      title={open ? '收起浏览器工作区' : '打开浏览器工作区'}
+      className={cn(
+        'h-9 w-9 rounded-[9px] border text-[#595757] shadow-none transition-colors',
+        open
+          ? 'border-[#DCDDDD] bg-[#EFEFEF] text-[#1F2937] hover:bg-[#E8E8E8] dark:border-white/15 dark:bg-white/10 dark:text-foreground'
+          : 'border-transparent bg-transparent hover:border-[#DCDDDD] hover:bg-[#EFEFEF]/70 hover:text-[#1F2937] dark:text-foreground/75 dark:hover:border-white/10 dark:hover:bg-white/10 dark:hover:text-foreground',
+        className,
+      )}
+    >
+      <PanelRight className="h-[17px] w-[17px]" strokeWidth={1.8} aria-hidden />
+    </Button>
   );
 }
 

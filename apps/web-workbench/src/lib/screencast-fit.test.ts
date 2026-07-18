@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   fitScreencastContain,
   fitScreencastReadable,
+  fitTerminalEvidence,
   mapClientPointToScreencast,
   placeScreencastContainTop,
   placeScreencastReadableTop,
@@ -170,6 +171,39 @@ describe('fitScreencastReadable', () => {
       scale: 0.3080568720379147,
     });
     expect(readable).toEqual({ width: 390, height: 844, scale: 1 });
+  });
+});
+
+describe('fitTerminalEvidence', () => {
+  it('shows the complete terminal screenshot by default in a narrow workbench panel', () => {
+    expect(
+      fitTerminalEvidence({
+        hostWidth: 275,
+        hostHeight: 713,
+        sourceWidth: 1280,
+        sourceHeight: 720,
+      }),
+    ).toEqual({
+      width: 275,
+      height: 154,
+      scale: 0.21484375,
+    });
+  });
+
+  it('only uses the scrollable readable size after the user explicitly requests it', () => {
+    expect(
+      fitTerminalEvidence({
+        hostWidth: 275,
+        hostHeight: 713,
+        sourceWidth: 1280,
+        sourceHeight: 720,
+        viewMode: 'readable',
+      }),
+    ).toEqual({
+      width: 1267,
+      height: 713,
+      scale: 0.9902777777777778,
+    });
   });
 });
 

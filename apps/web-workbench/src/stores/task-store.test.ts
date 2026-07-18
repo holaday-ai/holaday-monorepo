@@ -871,6 +871,9 @@ describe('selectTask detail hydration', () => {
 
     await expect(resultPromise).resolves.toMatchObject({ error: expect.any(String) });
     expect(useTaskStore.getState().tasks.some((t) => t.taskId.startsWith('local_pending_'))).toBe(false);
+    // The caller owns contextual task-create feedback. Mirroring the same
+    // error into the shell-level channel renders a second toast.
+    expect(useTaskStore.getState().error).toBeNull();
   });
 
   it('sends a default viewport profile for non-workbench create entry points', async () => {

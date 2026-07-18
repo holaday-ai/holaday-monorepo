@@ -6,6 +6,7 @@ describe('classifyBrowserErrorKind', () => {
     expect(classifyBrowserErrorKind('net::ERR_NAME_NOT_RESOLVED at https://nope.example')).toBe('dns');
     expect(classifyBrowserErrorKind('net::ERR_CERT_AUTHORITY_INVALID')).toBe('ssl');
     expect(classifyBrowserErrorKind('net::ERR_CONNECTION_REFUSED')).toBe('connection');
+    expect(classifyBrowserErrorKind('无法连接到该站点，请稍后重试')).toBe('connection');
     expect(classifyBrowserErrorKind('net::ERR_ABORTED; maybe frame navigated')).toBe('page_switch');
   });
 
@@ -39,7 +40,7 @@ describe('classifyBrowserErrorKind', () => {
       ),
     ).toBe('transport_closed');
     expect(classifyBrowserErrorKind('net::ERR_CONNECTION_CLOSED')).toBe(
-      'transport_closed',
+      'connection',
     );
     expect(classifyBrowserErrorKind('Navigation timeout of 15000 ms exceeded')).toBe('timeout');
   });

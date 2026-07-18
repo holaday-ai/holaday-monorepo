@@ -9,6 +9,9 @@ describe('browserNavFailureMessage', () => {
     expect(browserNavFailureMessage('bad_scheme', 'goto')).toBe(
       '只支持打开 http(s) 链接',
     );
+    expect(browserNavFailureMessage('blocked_target', 'goto')).toBe(
+      '为保护账户安全，不能打开本机、内网或云服务元数据地址',
+    );
   });
 
   it('explains disconnected browser sessions', () => {
@@ -61,7 +64,7 @@ describe('browserNavFailureMessage', () => {
       ),
     ).toBe('浏览器连接中断，请重新执行任务');
     expect(browserNavExceptionMessage(new Error('net::ERR_CONNECTION_CLOSED'), 'goto')).toBe(
-      '浏览器连接中断，请重新执行任务',
+      '无法连接到该站点，请稍后重试或换一个站点',
     );
     expect(browserNavExceptionMessage(new Error('socket_closed: 浏览器扩展连接已断开'), 'reload')).toBe(
       '浏览器扩展连接已断开，请重新打开 HOLA DAY 扩展后重试',

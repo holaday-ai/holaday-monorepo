@@ -75,7 +75,7 @@ describe('error-copy', () => {
       ),
     ).toBe('浏览器连接中断，请重新执行任务。');
     expect(humaniseTaskError('net::ERR_CONNECTION_CLOSED')).toBe(
-      '浏览器连接中断，请重新执行任务。',
+      '无法连接到该站点，请稍后重试或换一个站点。',
     );
   });
 

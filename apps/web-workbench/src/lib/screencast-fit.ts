@@ -11,6 +11,8 @@ export interface ScreencastFitSize {
   scale: number;
 }
 
+export type TerminalEvidenceViewMode = 'contain' | 'readable';
+
 export interface ScreencastContainPlacement extends ScreencastFitSize {
   offsetX: number;
   offsetY: number;
@@ -137,6 +139,19 @@ export function fitScreencastReadable({
     height: Math.max(1, Math.floor(sourceHeight * readableScale)),
     scale: readableScale,
   };
+}
+
+/**
+ * Terminal screenshots are evidence, so the default must preserve the whole
+ * captured page. A user may explicitly opt into the larger, scrollable view
+ * when they need to inspect text at its captured size.
+ */
+export function fitTerminalEvidence(
+  input: ScreencastFitInput & { viewMode?: TerminalEvidenceViewMode },
+): ScreencastFitSize | null {
+  return input.viewMode === 'readable'
+    ? fitScreencastReadable(input)
+    : fitScreencastContain(input);
 }
 
 export function placeScreencastContainTop({

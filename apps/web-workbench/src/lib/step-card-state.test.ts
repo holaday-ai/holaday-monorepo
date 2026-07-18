@@ -60,6 +60,23 @@ describe('step-card-state', () => {
     });
   });
 
+  it('does not claim stale terminal steps are still executing', () => {
+    const source = [
+      { tickIndex: 0, status: 'running' as const },
+      { tickIndex: 1, status: 'done' as const },
+    ];
+
+    expect(
+      stepDisplayStepsForTask(source, 'failed').map((step) => step.status),
+    ).toEqual(['failed', 'done']);
+    expect(
+      stepDisplayStepsForTask(source, 'completed').map((step) => step.status),
+    ).toEqual(['done', 'done']);
+    expect(
+      stepDisplayStepsForTask(source, 'partial_success').map((step) => step.status),
+    ).toEqual(['cancelled', 'done']);
+  });
+
   it('provides localized status labels for step badges', () => {
     expect(stepStatusText('running')).toBe('执行中');
     expect(stepStatusLabel('failed', 2)).toBe('步骤 3 · 失败');
@@ -183,7 +200,7 @@ describe('step-card-state', () => {
         actionKind: 'navigate',
         message: 'net::ERR_CONNECTION_CLOSED',
       }),
-    ).toBe('浏览器连接中断，请重新执行任务。');
+    ).toBe('无法连接到该站点。请稍后重试，或换一个能直接访问的网址。');
   });
 
   it('explains extension host permission failures', () => {
