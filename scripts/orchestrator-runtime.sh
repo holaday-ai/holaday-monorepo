@@ -14,6 +14,9 @@ NODE_BIN="${ORCHESTRATOR_NODE_BIN:-/opt/node22/bin/node}"
 BROWSER_DIR="${BROWSER_POOL_DIR:-/var/lib/holaday-browsers}"
 PM2_HOME="${ORCHESTRATOR_PM2_HOME:-/root/.pm2}"
 START_SCRIPT="$REPO_ROOT/scripts/start-orchestrator-production.sh"
+ORCHESTRATOR_DIR="$REPO_ROOT/apps/orchestrator"
+HTTP_PORT="${ORCHESTRATOR_HTTP_PORT:-4001}"
+WS_PORT="${ORCHESTRATOR_WS_PORT:-4002}"
 
 die() {
   echo "orchestrator-runtime: $*" >&2
@@ -26,9 +29,105 @@ die() {
 [[ "$RUN_GROUP" =~ ^[a-z_][a-z0-9_-]*$ ]] || die "invalid runtime group"
 [[ "$BROWSER_DIR" == /* && "$BROWSER_DIR" != "/" ]] || die "unsafe browser pool directory"
 [[ "$PM2_HOME" == /* && "$PM2_HOME" != "/" ]] || die "unsafe PM2 home directory"
+[[ "$HTTP_PORT" =~ ^[1-9][0-9]{0,4}$ ]] || die "invalid HTTP port"
+[[ "$WS_PORT" =~ ^[1-9][0-9]{0,4}$ ]] || die "invalid WebSocket port"
+[[ "$HTTP_PORT" != "$WS_PORT" ]] || die "HTTP and WebSocket ports must differ"
 [[ -x "$NODE_BIN" ]] || die "node interpreter not executable: $NODE_BIN"
 [[ -f "$REPO_ROOT/apps/orchestrator/dist/index.js" ]] || die "orchestrator build missing"
 [[ -x "$START_SCRIPT" ]] || die "production start script missing or not executable"
+command -v ss >/dev/null 2>&1 || die "ss is required for listener ownership checks"
+
+listener_pids() {
+  local port="$1"
+  ss -H -ltnp "sport = :$port" 2>/dev/null \
+    | grep -oE 'pid=[0-9]+' \
+    | cut -d= -f2 \
+    | sort -un \
+    || true
+}
+
+is_verified_orchestrator_pid() {
+  local pid="$1"
+  local actual_uid cwd cmdline
+
+  [[ "$pid" =~ ^[1-9][0-9]*$ && -d "/proc/$pid" ]] || return 1
+  actual_uid="$(ps -o uid= -p "$pid" 2>/dev/null | tr -d '[:space:]')"
+  [[ "$actual_uid" == "$RUN_UID" ]] || return 1
+  cwd="$(readlink -f "/proc/$pid/cwd" 2>/dev/null || true)"
+  [[ "$cwd" == "$ORCHESTRATOR_DIR" ]] || return 1
+  cmdline="$(tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null || true)"
+  [[ "$cmdline" == *"$ORCHESTRATOR_DIR/dist/index.js"* || "$cmdline" == *" src/index.ts"* ]]
+}
+
+stop_verified_stale_orchestrators() {
+  local pid port_owner
+  local -a stale_pids=()
+
+  # Refuse to disturb an unrelated service that happens to own a configured
+  # port. Only the dedicated runtime UID, exact cwd and known entrypoint are
+  # eligible for cleanup.
+  while read -r port_owner; do
+    [[ -n "$port_owner" ]] || continue
+    is_verified_orchestrator_pid "$port_owner" \
+      || die "port $HTTP_PORT/$WS_PORT is owned by unrecognized pid $port_owner"
+  done < <({ listener_pids "$HTTP_PORT"; listener_pids "$WS_PORT"; } | sort -un)
+
+  for proc_dir in /proc/[0-9]*; do
+    pid="${proc_dir##*/}"
+    if is_verified_orchestrator_pid "$pid"; then
+      stale_pids+=("$pid")
+    fi
+  done
+
+  ((${#stale_pids[@]} > 0)) || return 0
+  printf 'orchestrator-runtime: stopping verified stale pids: %s\n' "${stale_pids[*]}"
+  kill -TERM "${stale_pids[@]}" 2>/dev/null || true
+  for _ in $(seq 1 20); do
+    local alive=0
+    for pid in "${stale_pids[@]}"; do
+      if kill -0 "$pid" 2>/dev/null; then
+        alive=1
+        break
+      fi
+    done
+    ((alive == 0)) && return 0
+    sleep 0.25
+  done
+  for pid in "${stale_pids[@]}"; do
+    kill -KILL "$pid" 2>/dev/null || true
+  done
+  for _ in $(seq 1 20); do
+    local alive=0
+    for pid in "${stale_pids[@]}"; do
+      if kill -0 "$pid" 2>/dev/null; then
+        alive=1
+        break
+      fi
+    done
+    ((alive == 0)) && return 0
+    sleep 0.1
+  done
+  die "verified stale orchestrator processes did not exit"
+}
+
+verify_single_listener_owner() {
+  local expected_pid="$1"
+  local -a http_pids ws_pids
+
+  for _ in $(seq 1 60); do
+    mapfile -t http_pids < <(listener_pids "$HTTP_PORT")
+    mapfile -t ws_pids < <(listener_pids "$WS_PORT")
+    if ((${#http_pids[@]} == 1 && ${#ws_pids[@]} == 1)) \
+      && [[ "${http_pids[0]}" == "$expected_pid" && "${ws_pids[0]}" == "$expected_pid" ]]; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  printf 'orchestrator-runtime: listener ownership mismatch: expected=%s http=%s ws=%s\n' \
+    "$expected_pid" "${http_pids[*]:-none}" "${ws_pids[*]:-none}" >&2
+  return 1
+}
 
 if [[ "${BROWSER_VNC_WS_ENABLED:-false}" != "false" && "${ALLOW_BROWSER_VNC_WS:-0}" != "1" ]]; then
   die "BROWSER_VNC_WS_ENABLED must remain false in the standard production environment"
@@ -75,6 +174,7 @@ export PM2_HOME
 # root identity, while `--uid/--gid` on start records the intended runtime
 # identity in PM2's process definition and survives `pm2 save`.
 pm2 delete "$APP_NAME" >/dev/null 2>&1 || true
+stop_verified_stale_orchestrators
 pm2 start "$START_SCRIPT" \
   --name "$APP_NAME" \
   --interpreter /usr/bin/bash \
@@ -96,6 +196,7 @@ done
 [[ "$PID" =~ ^[1-9][0-9]*$ ]] || die "PM2 did not publish an orchestrator pid"
 ACTUAL_UID="$(ps -o uid= -p "$PID" | tr -d '[:space:]')"
 [[ "$ACTUAL_UID" == "$RUN_UID" ]] || die "runtime uid mismatch: expected $RUN_UID, got ${ACTUAL_UID:-missing}"
+verify_single_listener_owner "$PID" || die "orchestrator ports are not owned by the PM2 process"
 
 printf 'ORCHESTRATOR_RUNTIME user=%s uid=%s gid=%s pid=%s vnc=%s browser_dir=%s\n' \
   "$RUN_USER" "$RUN_UID" "$RUN_GID" "$PID" "$BROWSER_VNC_WS_ENABLED" "$BROWSER_DIR"
