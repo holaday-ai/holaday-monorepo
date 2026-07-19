@@ -185,6 +185,10 @@ pm2 start "$START_SCRIPT" \
   --update-env >/dev/null
 pm2 save --force >/dev/null
 
+# PM2 creates service logs with the daemon's default umask. Keep request and
+# error logs readable only by root even after a fresh entry is created.
+chmod 0600 "$PM2_HOME/logs/$APP_NAME-out.log" "$PM2_HOME/logs/$APP_NAME-error.log"
+
 PID=""
 for _ in $(seq 1 20); do
   PID="$(pm2 pid "$APP_NAME" | head -1 | tr -d '[:space:]')"
