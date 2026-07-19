@@ -21,15 +21,15 @@ runtime_pm2_start_line="$(grep -n 'pm2 start ' "$RUNTIME_SCRIPT" | head -1 | cut
 grep -Eq '^export PM2_HOME$' "$RUNTIME_SCRIPT" || fail "runtime must export the pinned PM2 home"
 grep -Eq '^unset PM2_HOME$' "$START_SCRIPT" || fail "application child must not inherit root PM2 state"
 
-# PM2 must own the actual long-lived Node server. Running through tsx leaves a
-# loader child behind when PM2's managed PID is force-killed, which can split
-# HTTP and WebSocket traffic across two orchestrator instances.
-grep -Fq 'DIST_ENTRY="$ORCHESTRATOR_DIR/dist/index.js"' "$START_SCRIPT" \
-  || fail "production entrypoint must target the compiled orchestrator"
-grep -Fq 'exec "$NODE_BIN" "$DIST_ENTRY"' "$START_SCRIPT" \
-  || fail "production entrypoint must exec the compiled server directly"
-if grep -Ev '^[[:space:]]*#' "$START_SCRIPT" | grep -Eq 'tsx|src/index\.ts'; then
-  fail "production entrypoint must not spawn the tsx loader"
+# PM2 must own the actual long-lived Node server. The tsx CLI spawns a loader
+# child; importing tsx into the PM2-managed Node process preserves workspace
+# TypeScript resolution without creating a second process.
+grep -Fq 'SOURCE_ENTRY="$ORCHESTRATOR_DIR/src/index.ts"' "$START_SCRIPT" \
+  || fail "production entrypoint must target the orchestrator source entry"
+grep -Fq 'exec "$NODE_BIN" --import tsx "$SOURCE_ENTRY"' "$START_SCRIPT" \
+  || fail "production entrypoint must load TypeScript in the PM2-owned Node process"
+if grep -Ev '^[[:space:]]*#' "$START_SCRIPT" | grep -Eq 'pnpm.*tsx|tsx.*src/index\.ts'; then
+  fail "production entrypoint must not invoke the child-spawning tsx CLI"
 fi
 
 # A deploy from the historical tsx setup can inherit orphan listeners. The

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Run the compiled production entrypoint as the PM2-owned process. Avoiding the
-# tsx loader prevents a force-killed PM2 process from leaving its Node child
-# alive with one of the service ports.
+# Run TypeScript in the PM2-owned Node process. Invoking the tsx CLI creates a
+# child process that can survive a force-killed PM2 wrapper; importing tsx keeps
+# workspace source resolution and both service ports in one managed process.
 
 set -euo pipefail
 
@@ -10,7 +10,7 @@ DEFAULT_REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_ROOT="${ORCHESTRATOR_REPO_ROOT:-$DEFAULT_REPO_ROOT}"
 ORCHESTRATOR_DIR="$REPO_ROOT/apps/orchestrator"
 NODE_BIN="${ORCHESTRATOR_NODE_BIN:-/opt/node22/bin/node}"
-DIST_ENTRY="$ORCHESTRATOR_DIR/dist/index.js"
+SOURCE_ENTRY="$ORCHESTRATOR_DIR/src/index.ts"
 
 export PATH="/opt/node22/bin:$PATH"
 
@@ -27,10 +27,10 @@ unset PM2_HOME
   echo "start-orchestrator-production: node executable missing: $NODE_BIN" >&2
   exit 1
 }
-[[ -f "$DIST_ENTRY" ]] || {
-  echo "start-orchestrator-production: compiled entrypoint missing: $DIST_ENTRY" >&2
+[[ -f "$SOURCE_ENTRY" ]] || {
+  echo "start-orchestrator-production: source entrypoint missing: $SOURCE_ENTRY" >&2
   exit 1
 }
 
 cd "$ORCHESTRATOR_DIR"
-exec "$NODE_BIN" "$DIST_ENTRY"
+exec "$NODE_BIN" --import tsx "$SOURCE_ENTRY"
