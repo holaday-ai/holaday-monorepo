@@ -13,10 +13,13 @@ fail() {
 
 runtime_pm2_home_line="$(grep -n 'ORCHESTRATOR_PM2_HOME:-/root/.pm2' "$RUNTIME_SCRIPT" | head -1 | cut -d: -f1 || true)"
 runtime_pm2_start_line="$(grep -n 'pm2 start ' "$RUNTIME_SCRIPT" | head -1 | cut -d: -f1 || true)"
+runtime_log_permissions_line="$(grep -n 'chmod 0600 "$PM2_HOME/logs/$APP_NAME-out.log" "$PM2_HOME/logs/$APP_NAME-error.log"' "$RUNTIME_SCRIPT" | head -1 | cut -d: -f1 || true)"
 
 [[ "$runtime_pm2_home_line" =~ ^[1-9][0-9]*$ ]] || fail "runtime must pin PM2 to the root-owned process home"
 [[ "$runtime_pm2_start_line" =~ ^[1-9][0-9]*$ ]] || fail "runtime must start the PM2 application"
+[[ "$runtime_log_permissions_line" =~ ^[1-9][0-9]*$ ]] || fail "runtime must make orchestrator logs root-only"
 (( runtime_pm2_home_line < runtime_pm2_start_line )) || fail "PM2 home must be selected before PM2 is invoked"
+(( runtime_pm2_start_line < runtime_log_permissions_line )) || fail "log permissions must be secured after PM2 creates the files"
 
 grep -Eq '^export PM2_HOME$' "$RUNTIME_SCRIPT" || fail "runtime must export the pinned PM2 home"
 grep -Eq '^unset PM2_HOME$' "$START_SCRIPT" || fail "application child must not inherit root PM2 state"
