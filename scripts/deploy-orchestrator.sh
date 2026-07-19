@@ -42,9 +42,27 @@ VULTR_HOST="root@207.148.70.106"
 BRANCH="${1:-claude/musing-keller-ae1d05}"
 HEALTH_URL="http://localhost:4001/healthz"
 HEALTH_MARKER='"status":"ok"'
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RUNTIME_HELPER="$SCRIPT_DIR/orchestrator-runtime.sh"
+REMOTE_RUNTIME_DIR="/root/.holaday-deploy"
+REMOTE_RUNTIME_HELPER="$REMOTE_RUNTIME_DIR/orchestrator-runtime.sh"
+ORCHESTRATOR_RUN_USER="${ORCHESTRATOR_RUN_USER:-holaday}"
+ORCHESTRATOR_RUN_GROUP="${ORCHESTRATOR_RUN_GROUP:-$ORCHESTRATOR_RUN_USER}"
 
 if [[ -z "${VULTR_PASSWORD:-}" ]]; then
   echo "❌ VULTR_PASSWORD unset — refusing orchestrator deploy" >&2
+  exit 1
+fi
+if [[ ! -f "$RUNTIME_HELPER" ]]; then
+  echo "❌ Runtime helper missing: $RUNTIME_HELPER" >&2
+  exit 1
+fi
+if ! [[ "$ORCHESTRATOR_RUN_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
+  echo "❌ ORCHESTRATOR_RUN_USER is invalid" >&2
+  exit 1
+fi
+if ! [[ "$ORCHESTRATOR_RUN_GROUP" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
+  echo "❌ ORCHESTRATOR_RUN_GROUP is invalid" >&2
   exit 1
 fi
 build_ssh_password_prefix "$VULTR_PASSWORD"
@@ -90,6 +108,30 @@ run_with_retry() {
   done
 }
 
+stage_runtime_helper() {
+  echo "→ Staging non-root runtime helper"
+  run_with_retry "Vultr runtime-helper directory" \
+    "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
+    "install -d -o root -g root -m 700 '$REMOTE_RUNTIME_DIR'"
+  run_with_retry "Vultr runtime-helper upload" \
+    "${VULTR_AUTH_PREFIX[@]}" scp "${SSH_OPTS[@]}" \
+    "$RUNTIME_HELPER" "$VULTR_HOST:$REMOTE_RUNTIME_HELPER"
+  run_with_retry "Vultr runtime-helper permissions" \
+    "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
+    "chown root:root '$REMOTE_RUNTIME_HELPER' && chmod 700 '$REMOTE_RUNTIME_HELPER'"
+}
+
+restart_orchestrator_as_runtime_user() {
+  local label="$1"
+  run_with_retry "$label" \
+    "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
+      cd /opt/holaday-monorepo && \
+      set -a && . apps/orchestrator/.env && set +a && \
+      ORCHESTRATOR_RUN_USER='$ORCHESTRATOR_RUN_USER' \
+      ORCHESTRATOR_RUN_GROUP='$ORCHESTRATOR_RUN_GROUP' \
+      '$REMOTE_RUNTIME_HELPER' restart /opt/holaday-monorepo"
+}
+
 # Roll the live deploy back to a known-good commit + rebuild + restart
 # with the env reloaded. Called when a post-deploy verification fails so
 # we never silently leave a broken / keyless binary serving traffic.
@@ -100,13 +142,17 @@ rollback() {
     return
   fi
   echo "→ Rolling back to $target" >&2
-  run_with_retry "Vultr rollback" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
-    cd /opt/holaday-monorepo && \
-    git reset --hard $target && \
-    pnpm --filter @holaday/orchestrator build && \
-    set -a && . apps/orchestrator/.env && set +a && \
-    pm2 restart holaday-orchestrator --update-env" 2>&1 | tail -5 >&2 || true
+  if run_with_retry "Vultr rollback build" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
+      cd /opt/holaday-monorepo && \
+      git reset --hard $target && \
+      pnpm --filter @holaday/orchestrator build" 2>&1 | tail -5 >&2; then
+    restart_orchestrator_as_runtime_user "Vultr rollback restart" 2>&1 | tail -5 >&2 || true
+  else
+    echo "⚠️  Rollback build failed — keeping the currently running process untouched" >&2
+  fi
 }
+
+stage_runtime_helper
 
 echo "→ Capturing current HEAD for rollback"
 PREV_HEAD=$(run_with_retry "Vultr prev-head" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
@@ -179,9 +225,12 @@ run_with_retry "Vultr install/build" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@
   pnpm install && \
   pnpm --filter @holaday/orchestrator build" 2>&1 | tail -5
 
-echo "→ pm2 restart (--update-env so new .env keys load into the process)"
-run_with_retry "Vultr pm2 restart" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
-  "cd /opt/holaday-monorepo && set -a && . apps/orchestrator/.env && set +a && pm2 restart holaday-orchestrator --update-env"
+echo "→ PM2 restart as dedicated non-root runtime user"
+if ! restart_orchestrator_as_runtime_user "Vultr non-root PM2 restart"; then
+  echo "❌ Non-root runtime start failed — rolling back" >&2
+  rollback "$PREV_HEAD"
+  exit 1
+fi
 
 echo "→ Health check ($HEALTH_URL must return '$HEALTH_MARKER')"
 sleep 3
@@ -210,7 +259,7 @@ echo "✅ Orchestrator deployed — restart count: $RESTART"
 # this guard. We only print key NAMES that have a non-empty value (never
 # the secret). Failure rolls back rather than leaving the image lane
 # keyless (image intents would silently degrade to generate).
-REQUIRED_PROCESS_KEYS="${DEPLOY_REQUIRED_PROCESS_KEYS:-GEMINI_API_KEY ANTHROPIC_API_KEY}"
+REQUIRED_PROCESS_KEYS="${DEPLOY_REQUIRED_PROCESS_KEYS:-GEMINI_API_KEY ANTHROPIC_API_KEY DASHSCOPE_API_KEY}"
 echo "→ Verifying keys loaded in process: $REQUIRED_PROCESS_KEYS"
 PROC_KEYS=$(run_with_retry "Vultr key-check" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
   "PID=\$(pm2 pid holaday-orchestrator | head -1); tr '\\0' '\\n' < /proc/\$PID/environ 2>/dev/null | grep -oE '^[A-Z_]+=.' | grep -oE '^[A-Z_]+'" | tr -d '\r')
