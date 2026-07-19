@@ -12,6 +12,10 @@ TSX_BIN="$ORCHESTRATOR_DIR/node_modules/.bin/tsx"
 
 export PATH="/opt/node22/bin:$PATH"
 
+# PM2 remains root-owned, but the application child must not use or expose its
+# control directory after PM2 has dropped the process to the runtime user.
+unset PM2_HOME
+
 [[ -x "$TSX_BIN" ]] || {
   echo "start-orchestrator-production: tsx executable missing: $TSX_BIN" >&2
   exit 1

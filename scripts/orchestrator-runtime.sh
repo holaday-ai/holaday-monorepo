@@ -12,6 +12,7 @@ RUN_USER="${ORCHESTRATOR_RUN_USER:-holaday}"
 RUN_GROUP="${ORCHESTRATOR_RUN_GROUP:-$RUN_USER}"
 NODE_BIN="${ORCHESTRATOR_NODE_BIN:-/opt/node22/bin/node}"
 BROWSER_DIR="${BROWSER_POOL_DIR:-/var/lib/holaday-browsers}"
+PM2_HOME="${ORCHESTRATOR_PM2_HOME:-/root/.pm2}"
 START_SCRIPT="$REPO_ROOT/scripts/start-orchestrator-production.sh"
 
 die() {
@@ -24,6 +25,7 @@ die() {
 [[ "$RUN_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] || die "invalid runtime user"
 [[ "$RUN_GROUP" =~ ^[a-z_][a-z0-9_-]*$ ]] || die "invalid runtime group"
 [[ "$BROWSER_DIR" == /* && "$BROWSER_DIR" != "/" ]] || die "unsafe browser pool directory"
+[[ "$PM2_HOME" == /* && "$PM2_HOME" != "/" ]] || die "unsafe PM2 home directory"
 [[ -x "$NODE_BIN" ]] || die "node interpreter not executable: $NODE_BIN"
 [[ -f "$REPO_ROOT/apps/orchestrator/dist/index.js" ]] || die "orchestrator build missing"
 [[ -x "$START_SCRIPT" ]] || die "production start script missing or not executable"
@@ -67,6 +69,7 @@ export HOME="$RUN_HOME"
 export USER="$RUN_USER"
 export LOGNAME="$RUN_USER"
 export XDG_RUNTIME_DIR="$RUN_HOME/.runtime"
+export PM2_HOME
 
 # Recreate the PM2 entry deterministically. `pm2 restart` preserves the old
 # root identity, while `--uid/--gid` on start records the intended runtime
