@@ -20,5 +20,9 @@ grep -Fq 'ORCHESTRATOR_ROLLBACK_HEAD:-' "$ORCHESTRATOR_SCRIPT" \
 grep -Fq 'git cat-file -e' "$ORCHESTRATOR_SCRIPT" \
   && grep -Fq 'PREV_HEAD^{commit}' "$ORCHESTRATOR_SCRIPT" \
   || fail "orchestrator deploy must validate an explicit rollback commit"
+grep -Fq 'REMOTE_START_HELPER' "$ORCHESTRATOR_SCRIPT" \
+  || fail "deploy must stage the direct Node entrypoint outside the checkout"
+grep -Fq 'ORCHESTRATOR_START_SCRIPT=' "$ORCHESTRATOR_SCRIPT" \
+  || fail "runtime restart must use the staged entrypoint during deploy and rollback"
 
 echo "PASS: combined deploy preserves the pre-release rollback target"

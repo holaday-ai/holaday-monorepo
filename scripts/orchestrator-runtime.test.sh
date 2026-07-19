@@ -39,5 +39,9 @@ grep -Fq 'stop_verified_stale_orchestrators' "$RUNTIME_SCRIPT" \
   || fail "runtime must clean verified stale orchestrator listeners"
 grep -Fq 'verify_single_listener_owner' "$RUNTIME_SCRIPT" \
   || fail "runtime must verify one owner for HTTP and WebSocket ports"
+grep -Fq 'ORCHESTRATOR_START_SCRIPT:-' "$RUNTIME_SCRIPT" \
+  || fail "runtime must support a deploy-staged production entrypoint"
+grep -Fq 'ORCHESTRATOR_REPO_ROOT:-' "$START_SCRIPT" \
+  || fail "staged entrypoint must accept the live repository root"
 
 echo "PASS: orchestrator runtime keeps one root-owned PM2 daemon and a non-root application child"
