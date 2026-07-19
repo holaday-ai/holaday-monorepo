@@ -368,15 +368,6 @@ function AgentBlock({
       if (oldest) PLAYED_TERMINAL_REVEAL_TASK_IDS.delete(oldest);
     }
   }, [animateTerminalReveal, task.taskId]);
-  hdDebug('TaskStream render', {
-    taskId: task.taskId,
-    status: task.status,
-    hasBuffer: Boolean(streamingText),
-    hasResultText: Boolean(task.resultText),
-    bufferLen: streamingText?.length ?? 0,
-    hasProgress: Boolean(progressMessage),
-  });
-
   // Round-1 streaming rework: after humanizeStep filters tool_use
   // rows out of the main flow, the remaining lines are (almost)
   // entirely agent text preambles — Claude's own voice. We still

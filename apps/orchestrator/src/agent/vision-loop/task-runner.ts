@@ -24,6 +24,7 @@ import {
   requestVisionObservationFromSW,
 } from '../../ws/server.js';
 import { logger } from '../../config/logger.js';
+import { defaultBrowserNetworkPolicy } from '../browser-network-policy.js';
 import {
   type AntiBotSignal,
   describeSignal,
@@ -819,6 +820,13 @@ function buildPlaywrightTransport(executor: PlaywrightExecutor): {
         return { ok: true, message: 'noop — runner re-observes on next tick' };
       case 'navigate':
         try {
+          const networkDecision = await defaultBrowserNetworkPolicy.check(action.url);
+          if (!networkDecision.allowed) {
+            return {
+              ok: false,
+              message: `navigate blocked: ${networkDecision.message}`,
+            };
+          }
           await page.goto(action.url, { waitUntil: 'domcontentloaded', timeout: 20_000 });
           return { ok: true, message: `navigated to ${action.url}` };
         } catch (err) {

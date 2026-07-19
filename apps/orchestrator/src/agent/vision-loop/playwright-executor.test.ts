@@ -73,6 +73,46 @@ function makeFakePage(overrides: Partial<PageLike> = {}): {
 }
 
 describe('PlaywrightExecutor.connect', () => {
+  it('installs a request guard that aborts private-network traffic on attached contexts', async () => {
+    let routeHandler:
+      | ((
+          route: { abort: (code?: string) => Promise<void>; continue: () => Promise<void> },
+          request: { url: () => string },
+        ) => Promise<void>)
+      | null = null;
+    const context = {
+      pages: () => [],
+      route: async (_pattern: string, handler: typeof routeHandler) => {
+        routeHandler = handler;
+      },
+    };
+    const exec = new PlaywrightExecutor({
+      networkPolicy: {
+        check: async () => ({
+          allowed: false,
+          reason: 'private_network',
+          message: 'blocked',
+        }),
+      },
+      chromium: {
+        connectOverCDP: async () =>
+          ({ contexts: () => [context], close: async () => {} }) as never,
+      },
+    });
+    await exec.connect('http://127.0.0.1:9222');
+
+    const abort = vi.fn(async () => {});
+    const continueRequest = vi.fn(async () => {});
+    expect(routeHandler).not.toBeNull();
+    await routeHandler!(
+      { abort, continue: continueRequest },
+      { url: () => 'http://169.254.169.254/latest/meta-data/' },
+    );
+
+    expect(abort).toHaveBeenCalledWith('blockedbyclient');
+    expect(continueRequest).not.toHaveBeenCalled();
+  });
+
   it('returns ok when chromium.connectOverCDP succeeds', async () => {
     const exec = new PlaywrightExecutor({
       chromium: {
@@ -109,6 +149,142 @@ describe('PlaywrightExecutor.connect', () => {
     await exec.connect('http://a');
     await exec.connect('http://a');
     expect(calls).toBe(1);
+  });
+});
+
+describe('PlaywrightExecutor.launchManaged', () => {
+  it('launches an isolated context when CDP is unavailable', async () => {
+    const page = makeFakePage().page;
+    const context = {
+      pages: () => [page],
+      newPage: async () => page,
+      close: async () => {},
+      addInitScript: async () => {},
+      setDefaultTimeout: () => {},
+      setDefaultNavigationTimeout: () => {},
+    };
+    const browser = {
+      contexts: () => [context],
+      newContext: async () => context,
+      close: async () => {},
+    };
+    let launchOptions: unknown = null;
+    const exec = new PlaywrightExecutor({
+      chromium: {
+        connectOverCDP: async () => {
+          throw new Error('unused');
+        },
+        launch: async (options) => {
+          launchOptions = options;
+          return browser as never;
+        },
+      },
+    });
+
+    const result = await exec.launchManaged({ channel: 'chrome', headless: true });
+
+    expect(result.ok).toBe(true);
+    expect(launchOptions).toEqual({ channel: 'chrome', headless: true });
+    expect(await exec.getPage()).toBe(page);
+  });
+
+  it('returns a diagnostic instead of throwing when launch fails', async () => {
+    const exec = new PlaywrightExecutor({
+      chromium: {
+        connectOverCDP: async () => {
+          throw new Error('unused');
+        },
+        launch: async () => {
+          throw new Error('Chrome executable missing');
+        },
+      },
+    });
+
+    await expect(exec.launchManaged()).resolves.toEqual({
+      ok: false,
+      error: expect.stringMatching(/launch.*Chrome executable missing/),
+    });
+  });
+
+  it('closes a launched browser when isolated context setup fails', async () => {
+    let closeCalls = 0;
+    const exec = new PlaywrightExecutor({
+      chromium: {
+        connectOverCDP: async () => {
+          throw new Error('unused');
+        },
+        launch: async () =>
+          ({
+            contexts: () => [],
+            newContext: async () => {
+              throw new Error('context setup failed');
+            },
+            close: async () => {
+              closeCalls += 1;
+            },
+          }) as never,
+      },
+    });
+
+    await expect(exec.launchManaged()).resolves.toEqual({
+      ok: false,
+      error: expect.stringMatching(/context setup failed/),
+    });
+    expect(closeCalls).toBe(1);
+  });
+
+  it('closes a managed browser when the executor disconnects', async () => {
+    let closeCalls = 0;
+    const context = {
+      pages: () => [],
+      newPage: async () => makeFakePage().page,
+      close: async () => {},
+      addInitScript: async () => {},
+      setDefaultTimeout: () => {},
+      setDefaultNavigationTimeout: () => {},
+    };
+    const exec = new PlaywrightExecutor({
+      chromium: {
+        connectOverCDP: async () => {
+          throw new Error('unused');
+        },
+        launch: async () =>
+          ({
+            contexts: () => [context],
+            newContext: async () => context,
+            close: async () => {
+              closeCalls += 1;
+            },
+          }) as never,
+      },
+    });
+
+    await exec.launchManaged();
+    await exec.disconnect();
+
+    expect(closeCalls).toBe(1);
+  });
+});
+
+describe('PlaywrightExecutor.disconnect', () => {
+  it('releases an attached CDP handle without closing the external browser', async () => {
+    let closeCalls = 0;
+    const exec = new PlaywrightExecutor({
+      chromium: {
+        connectOverCDP: async () =>
+          ({
+            contexts: () => [],
+            close: async () => {
+              closeCalls += 1;
+            },
+          }) as never,
+      },
+    });
+
+    await exec.connect('http://127.0.0.1:9222');
+    await exec.disconnect();
+
+    expect(closeCalls).toBe(0);
   });
 });
 
@@ -621,6 +797,62 @@ describe('PlaywrightExecutor.navigate — goto-no-op fallback', () => {
   // value and reported `ok:true`, so the commander saw a green
   // navigate and tried to interact with a blank viewport. The fix is
   // to detect "url stayed blank" and retry on a fresh ctx.newPage().
+  it('blocks private-network navigation before page.goto is called', async () => {
+    let gotoCalls = 0;
+    const { page } = makeFakePage({
+      goto: async () => {
+        gotoCalls += 1;
+        return null;
+      },
+    });
+    const exec = new PlaywrightExecutor({
+      networkPolicy: {
+        check: async () => ({
+          allowed: false,
+          reason: 'private_network',
+          message: '不能访问内网地址',
+        }),
+      },
+    });
+
+    await expect(exec.navigate(page, 'http://127.0.0.1/admin')).resolves.toEqual({
+      ok: false,
+      message: 'navigate blocked: 不能访问内网地址',
+    });
+    expect(gotoCalls).toBe(0);
+  });
+
+  it('fails when navigation resolves on a policy-blocked redirect target', async () => {
+    let currentUrl = 'about:blank';
+    const checks: string[] = [];
+    const { page } = makeFakePage({
+      url: () => currentUrl,
+      goto: async () => {
+        currentUrl = 'http://127.0.0.1/internal';
+        return null;
+      },
+    });
+    const exec = new PlaywrightExecutor({
+      networkPolicy: {
+        check: async (url) => {
+          checks.push(url);
+          return url.includes('127.0.0.1')
+            ? { allowed: false, reason: 'private_network', message: '不能访问内网地址' }
+            : { allowed: true, url, addresses: ['203.0.113.10'] };
+        },
+      },
+    });
+
+    await expect(exec.navigate(page, 'https://public.example/redirect')).resolves.toEqual({
+      ok: false,
+      message: 'navigate redirect blocked: 不能访问内网地址',
+    });
+    expect(checks).toEqual([
+      'https://public.example/redirect',
+      'http://127.0.0.1/internal',
+    ]);
+  });
+
   it('detects url-stayed-blank, opens a fresh page, and retries the goto there', async () => {
     // Simulate the exact symptom: goto resolves OK, but page.url()
     // keeps returning about:blank. Fresh page behaves normally.
@@ -844,12 +1076,14 @@ describe('PlaywrightExecutor.resetPageForTask', () => {
     const old1 = {
       url: () => 'https://prev.task/',
       close: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 5));
         closeCalls.push('old1');
       },
     };
     const old2 = {
       url: () => 'about:blank',
       close: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 5));
         closeCalls.push('old2');
       },
     };
@@ -884,8 +1118,8 @@ describe('PlaywrightExecutor.resetPageForTask', () => {
     await exec.connect('http://a');
     exec.setViewportSize({ width: 390, height: 844 });
     await exec.resetPageForTask();
-    // Both priors got a close() queued. Fresh is NOT closed.
-    await new Promise((r) => setTimeout(r, 10)); // drain fire-and-forget
+    // Both prior closes have settled before reset returns. Navigation can start
+    // immediately without racing an old-target close. Fresh is NOT closed.
     expect(closeCalls.sort()).toEqual(['old1', 'old2']);
     // Subsequent getPage returns the pinned fresh page, not pages[0].
     const p = await exec.getPage();

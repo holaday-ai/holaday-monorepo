@@ -328,12 +328,32 @@ const schema = z.object({
    * without paying a 3-5s cold-start spawn on every return.
    */
   BROWSER_IDLE_TIMEOUT_MS: z.coerce.number().int().positive().default(300_000),
+  /**
+   * Short, hard-bounded review lease after a browser task finishes.
+   * The retained browser remains interactive in the workbench, but the pool
+   * may reclaim it immediately when a new task needs capacity.
+   */
+  BROWSER_TERMINAL_RETENTION_MS: z.coerce
+    .number()
+    .int()
+    .nonnegative()
+    .max(3_600_000)
+    .default(600_000),
   /** First port in the contiguous pool used for per-user resources.
    *  Slot i consumes display :(100+i), CDP (cdp+i), RFB (vnc+i), WS (ws+i). */
   BROWSER_CDP_PORT_START: z.coerce.number().int().positive().default(9300),
   BROWSER_VNC_PORT_START: z.coerce.number().int().positive().default(5910),
   BROWSER_WS_PORT_START: z.coerce.number().int().positive().default(6090),
   BROWSER_DISPLAY_START: z.coerce.number().int().nonnegative().default(100),
+  /**
+   * Emergency-only noVNC transport. Disabled by default because a desktop
+   * stream exposes browser chrome and file pickers outside the CDP action
+   * policy. Production should use the authenticated CDP screencast path.
+   */
+  BROWSER_VNC_WS_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
   /**
    * Xvfb screen geometry. Default 1280×800×24 (16:10) — sized so the
    * non-fullscreen side panel (~600 px wide) renders Brave at

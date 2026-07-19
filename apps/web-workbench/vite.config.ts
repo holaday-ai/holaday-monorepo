@@ -1,6 +1,15 @@
 import path from 'node:path';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
+import { resolveBrowserStreamProxyTarget } from './vite-browser-proxy';
+
+const devServerPort = Number(process.env.HOLADAY_WEB_PORT ?? 5173);
+const apiProxyTarget = process.env.HOLADAY_API_PROXY_TARGET ?? 'http://127.0.0.1:3001';
+const wsProxyTarget = process.env.HOLADAY_WS_PROXY_TARGET ?? 'ws://127.0.0.1:3002';
+const browserStreamProxyTarget = resolveBrowserStreamProxyTarget(
+  apiProxyTarget,
+  process.env.HOLADAY_BROWSER_WS_PROXY_TARGET,
+);
 
 // Dev server config for the Web Workbench.
 // Port 5173 is Vite's default; keeping it so README / muscle memory stays
@@ -80,22 +89,34 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5173,
+    port: devServerPort,
     strictPort: true,
     proxy: {
       // tRPC + REST land. `/api/...` → `http://127.0.0.1:3001/...`
       '/api': {
-        target: 'http://127.0.0.1:3001',
+        target: apiProxyTarget,
         changeOrigin: true,
         rewrite: (pathname) => pathname.replace(/^\/api/, ''),
       },
       // WS upgrade. `ws://.../ws` → `ws://127.0.0.1:3002`.
       '/ws': {
-        target: 'ws://127.0.0.1:3002',
+        target: wsProxyTarget,
         ws: true,
         rewriteWsOrigin: true,
         changeOrigin: true,
         rewrite: (pathname) => pathname.replace(/^\/ws/, ''),
+      },
+      // Browser workbench streams use dedicated task-scoped upgrade paths.
+      // Production nginx forwards these directly; local Vite must mirror that
+      // routing or the UI opens a socket against Vite itself and immediately
+      // falls back to an ended-session placeholder.
+      '/screencast-ws': {
+        target: browserStreamProxyTarget,
+        ws: true,
+      },
+      '/vnc-ws': {
+        target: browserStreamProxyTarget,
+        ws: true,
       },
     },
   },

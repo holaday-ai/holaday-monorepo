@@ -38,12 +38,13 @@ export type SidePanelOverride = 'open' | 'close' | null;
  * readable in one place and easy to test.
  *
  * Priority order:
- *   1. No selection or composer in new-task mode  → 'closed'
+ *   1. No selection                               → 'closed'
  *   2. User explicitly closed                     → 'closed'
  *   3. Agent needs the user in the viewport       → 'browser-live'
  *   4. Live browser task                          → 'browser-live'
- *   5. User explicitly opened (terminal task)     → 'browser-record'
- *   6. Default                                    → 'closed'
+ *   5. User explicitly opened the selected task   → 'browser-record'
+ *   6. Composer is genuinely in new-task mode      → 'closed'
+ *   7. Default                                    → 'closed'
  */
 export interface SidePanelComputeInput {
   hasSelectedTask: boolean;
@@ -56,11 +57,11 @@ export function computeSidePanelMode(
   input: SidePanelComputeInput,
 ): SidePanelMode {
   if (!input.hasSelectedTask) return 'closed';
-  if (input.isComposerNew) return 'closed';
   if (input.override === 'close') return 'closed';
   if (input.selectedNeedsBrowser) return 'browser-live';
   if (input.isLiveBrowserTask) return 'browser-live';
   if (input.override === 'open') return 'browser-record';
+  if (input.isComposerNew) return 'closed';
   return 'closed';
 }
 

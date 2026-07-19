@@ -8,6 +8,7 @@ import {
   Globe,
   Hand,
   Keyboard,
+  LockKeyhole,
   ListChecks,
   Maximize2,
   Minimize2,
@@ -22,19 +23,27 @@ import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button } from '@/components/ui/button';
 import {
   browserLiveOverlayCopy,
+  browserStartupTargetUrl,
+  browserWorkspaceTaskIntent,
   browserFrameCanPanInPortraitSheet,
   browserPanelEvidenceHeaderStatus,
   browserPanelHeaderStatus,
   type BrowserPanelHeaderStatus,
   browserPanelDotLabel,
   browserReleasedCardCopy,
-  browserViewportFrameLabel,
+  browserViewportFooterLabel,
   browserWakeFeedback,
-  isBrowserErrorUrl,
   shouldShowBrowserHeader,
-  terminalBrowserMissingFrameCopy,
+  shouldShowBrowserFullscreen,
+  shouldShowTerminalEvidenceLedger,
+  shouldConnectBrowserStream,
+  taskOwnedBrowserFrame,
+  taskOwnedBrowserUrl,
   terminalBrowserTakeoverMessage,
+  terminalEvidenceFrameForTask,
   terminalEvidenceFrameLabel,
+  terminalEvidenceLayout,
+  type TerminalEvidenceScreenshotSource,
 } from '@/components/browser-panel-state';
 import {
   CdpScreencastViewport,
@@ -67,34 +76,23 @@ import type { UiScreencast, UiStep, UiTaskStatus } from '@/types/task';
 import { isTerminalStatus } from '@/types/task';
 import { liveStatusLabel } from '@/utils/step-humanize';
 
-interface StaticEvidenceFit {
-  width: number;
-  height: number;
-  hostWidth: number;
-  sourceWidth: number;
-  sourceHeight: number;
-}
-
-type StaticEvidenceViewMode = 'readable' | 'contain';
-type TerminalEvidenceScreenshotSource = 'saved-screenshot' | 'last-frame';
-
 /**
- * VNC bridge URL. Relative path lets the browser auto-resolve the
- * scheme (wss on HTTPS, ws on HTTP dev) and host. The nginx block on
- * production strips `/vnc/` and proxies to websockify on :6080. In
- * dev, vite's proxy can forward the same path if desired; absent a
- * proxy the component gracefully reports 'error' and we fall back to
- * the static JPEG screencast.
+ * Emergency-only VNC bridge URL. CDP screencast is the production
+ * default; this path is inert unless both the frontend and backend
+ * explicitly enable VNC fallback.
  *
- * `VITE_VNC_PATH` overrides the default for environments that can't
- * use the production proxy path (e.g. a secondary orchestrator). Set
- * to empty string to disable the VNC layer entirely and stick with
- * screencast-only rendering.
+ * `VITE_VNC_PATH` is only for deployments that intentionally expose
+ * a separately secured VNC proxy. Empty keeps the legacy shared path
+ * disabled.
  */
-const VNC_PATH = (import.meta.env.VITE_VNC_PATH as string | undefined) ?? '/vnc/websockify';
+const VNC_PATH = (import.meta.env.VITE_VNC_PATH as string | undefined) ?? '';
+const VNC_FALLBACK_ENABLED =
+  (import.meta.env.VITE_ENABLE_VNC_FALLBACK as string | undefined) === 'true';
 const BROWSER_SURFACE =
   'border-[#DCDDDD] bg-white/95 shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-white/10 dark:bg-card/85';
 const BROWSER_DIVIDER = 'border-[#DCDDDD]/80 dark:border-white/10';
+const BROWSER_TOOL_BUTTON =
+  'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[9px] text-muted-foreground transition-colors hover:bg-[#EFEFEF] hover:text-foreground disabled:pointer-events-none disabled:opacity-45 dark:hover:bg-white/10';
 
 /**
  * Build the VNC WebSocket URL for the current panel session.
@@ -109,7 +107,7 @@ const BROWSER_DIVIDER = 'border-[#DCDDDD]/80 dark:border-white/10';
  *     reload reconnects transparently; the URL itself isn't persisted
  *     anywhere.
  *
- * Returns null when VNC is explicitly disabled via VITE_VNC_PATH.
+ * Returns null when no enabled VNC route is available.
  */
 function buildVncUrl(
   activeTaskId: string | null,
@@ -165,13 +163,11 @@ function buildScreencastUrl(
 }
 
 /**
- * Phase 19f — CDP is now the default. VNC is kept as a manual
- * fallback: set `localStorage.holaday.streamTransport='vnc'` and
- * reload to opt back in. The VNC path will be deleted in a
- * follow-up once CDP has soaked in prod.
+ * CDP is the default. VNC can only be selected when the build-time
+ * emergency flag is enabled and the operator opts in through localStorage.
  */
 function readStreamTransport(): 'vnc' | 'cdp' {
-  if (typeof window === 'undefined') return 'cdp';
+  if (typeof window === 'undefined' || !VNC_FALLBACK_ENABLED) return 'cdp';
   try {
     return window.localStorage.getItem('holaday.streamTransport') === 'vnc'
       ? 'vnc'
@@ -199,6 +195,14 @@ interface Props {
   awaitingKind?: 'clarification' | 'login' | 'captcha' | 'permission' | 'browser_action' | 'video_quote';
   /** Active task id — forwarded on user_input events so backend can correlate. */
   activeTaskId?: string | null;
+  /**
+   * Shell-level browser workspace opened without a browser task. The panel
+   * renders its browser chrome and an honest idle state, but never starts a
+   * screencast or enables controls that require a task-owned browser.
+   */
+  workspaceIdle?: boolean;
+  /** Start a real task-owned browser from the shell-level address bar. */
+  onStartWorkspaceTask?: (intent: string) => Promise<boolean>;
   /**
    * Mobile/tablet layout mode. When `sheet`, the panel renders as a
    * bottom-sheet rather than a fixed right column, with a backdrop
@@ -263,6 +267,8 @@ export function BrowserPanel({
   awaitingUser,
   awaitingKind,
   activeTaskId,
+  workspaceIdle = false,
+  onStartWorkspaceTask,
   layout = 'rail',
   open = true,
   onClose,
@@ -313,89 +319,47 @@ export function BrowserPanel({
     const el = panelRootRef.current;
     if (!el) return;
     if (typeof ResizeObserver === 'undefined') return;
+    const dockInsetProperty = '--holaday-browser-panel-inset';
     const ro = new ResizeObserver((entries) => {
       const w = entries[0]?.contentRect.width ?? el.clientWidth;
       setIsNarrow(w > 0 && w < 500);
+      if (!isSheet && w > 0) {
+        document.documentElement.style.setProperty(
+          dockInsetProperty,
+          `${Math.ceil(w) + 16}px`,
+        );
+      }
     });
     ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
+    return () => {
+      ro.disconnect();
+      if (!isSheet) document.documentElement.style.removeProperty(dockInsetProperty);
+    };
+  }, [isSheet]);
   // Interactive mode is in the global store so the TaskStream's
   // "Continue in browser" button can flip it on from the left panel.
   const interactive = useTaskStore((s) => s.browserInteractive);
   const setInteractive = useTaskStore((s) => s.setBrowserInteractive);
 
-  // When the selected task has no screencast of its own (e.g. a
-  // pending task the user clicked into before it produced frames),
-  // fall back to the most recently-updated frame from ANY task so
-  // the URL header still reflects what the live VNC stream is
-  // showing. Brave is a shared singleton, so whatever URL another
-  // task left it on is also what's on screen right now.
-  const screencastByTask = useTaskStore((s) => s.screencastByTask);
-  // R7 — terminal-state browser frame, synthesised from the
-  // captured-pre-release screenshot persisted on the task row. If
-  // the row has no finalScreenshot yet but still owns a last live
-  // frame, reuse that frame as a static final view. Memoised so the
-  // synthetic UiScreencast keeps a stable identity across renders
-  // (preventing the inner viewport's useEffect from refiring).
   const activeTask = useTaskStore((s) =>
     activeTaskId ? s.tasks.find((t) => t.taskId === activeTaskId) ?? null : null,
   );
-  const taskTerminalForEvidence = taskStatus ? isTerminalStatus(taskStatus) : false;
-  const finalEvidenceFrame = React.useMemo<UiScreencast | null>(() => {
-    if (activeTask?.finalScreenshot) {
-      return {
-        tickIndex: -1,
-        imageBase64: activeTask.finalScreenshot,
-        url: activeTask.finalUrl ?? 'about:blank',
-        viewport: activeTask.finalViewport ?? { width: 0, height: 0 },
-        timestamp: new Date().toISOString(),
-      };
-    }
-    if (!taskTerminalForEvidence || !frame || isBlankUrl(frame.url)) return null;
-    return {
-      ...frame,
-      url: activeTask?.finalUrl ?? frame.url,
-      viewport: activeTask?.finalViewport ?? frame.viewport,
-    };
-  }, [
-    activeTask?.finalScreenshot,
-    activeTask?.finalUrl,
-    activeTask?.finalViewport,
-    frame,
-    taskTerminalForEvidence,
-  ]);
-  const finalEvidenceSource: TerminalEvidenceScreenshotSource | null =
-    finalEvidenceFrame
-      ? activeTask?.finalScreenshot
-        ? 'saved-screenshot'
-        : 'last-frame'
-      : null;
-  const latestFrame = React.useMemo<UiScreencast | null>(() => {
-    const all = Object.values(screencastByTask);
-    if (all.length === 0) return null;
-    // Latest by timestamp; string ISO compare is correct for
-    // same-locale UTC ISO-8601.
-    return all.reduce((best, cur) =>
-      !best || cur.timestamp > best.timestamp ? cur : best,
-    null as UiScreencast | null) ?? null;
-  }, [screencastByTask]);
-  // P1.1 — terminal task fall-through policy:
-  //   1. If the task is terminal AND has a terminal browser frame
-  //      (finalEvidenceFrame), use ONLY that. Don't bleed
-  //      another task's latestFrame into the panel.
-  //   2. If the task is terminal WITHOUT a browser frame (legacy
-  //      task, or capture failed), don't fall through to another
-  //      task's latestFrame either — render the empty terminal state.
-  //   3. For active tasks, prefer live `frame`, then any latest
-  //      frame as a hint, then evidence (rare; would mean a task
-  //      ended but isn't marked terminal here yet).
-  // The previous "frame ?? finalEvidenceFrame ?? latestFrame" mixed
-  // task A's frame into task B's panel after a task switch.
-  const taskIsTerminal = taskTerminalForEvidence;
-  const displayFrame = taskIsTerminal
-    ? finalEvidenceFrame
-    : (frame ?? latestFrame ?? finalEvidenceFrame);
+  const taskIsTerminal = taskStatus ? isTerminalStatus(taskStatus) : false;
+  const terminalEvidence = React.useMemo(
+    () =>
+      terminalEvidenceFrameForTask({
+        taskIsTerminal,
+        task: activeTask,
+        liveFrame: frame ?? null,
+      }),
+    [activeTask, frame, taskIsTerminal],
+  );
+  const finalEvidenceFrame = terminalEvidence?.frame ?? null;
+  const displayFrame = taskOwnedBrowserFrame({
+    taskIsTerminal,
+    liveFrame: frame ?? null,
+    finalEvidenceFrame,
+  });
   // P2 — URL fallback chain: task.finalUrl (persisted, survives
   // refreshes / awaiting_user pauses / screencast disconnects)
   // → displayFrame.url (live or evidence) → lastKnownUrl (in-memory
@@ -421,13 +385,14 @@ export function BrowserPanel({
     displayFrame?.url && !isBlankUrl(displayFrame.url)
       ? displayFrame.url
       : null;
-  const [lastKnownUrl, setLastKnownUrl] = React.useState<string | null>(null);
+  const [lastKnownUrlState, setLastKnownUrlState] =
+    React.useState<{ taskId: string; url: string } | null>(null);
+  const lastKnownUrl = taskOwnedBrowserUrl(activeTaskId ?? null, lastKnownUrlState);
   React.useEffect(() => {
-    setLastKnownUrl(null);
-  }, [activeTaskId]);
-  React.useEffect(() => {
-    if (frameUrl) setLastKnownUrl(frameUrl);
-  }, [frameUrl]);
+    if (activeTaskId && frameUrl) {
+      setLastKnownUrlState({ taskId: activeTaskId, url: frameUrl });
+    }
+  }, [activeTaskId, frameUrl]);
   // Optimization #3 R2 — live CDP URL from the streamer's
   // `Page.frameNavigated` event. Tracks user / agent navigation on
   // the remote browser in real time (clicking a link, JS pushState,
@@ -436,19 +401,34 @@ export function BrowserPanel({
   // (which only updates on terminal / park). On terminal status we
   // fall back to the persisted final URL so the address bar matches
   // the captured evidence frame.
-  const [cdpLiveUrl, setCdpLiveUrl] = React.useState<string | null>(null);
-  React.useEffect(() => {
-    setCdpLiveUrl(null);
-  }, [activeTaskId]);
+  const [cdpLiveUrlState, setCdpLiveUrlState] =
+    React.useState<{ taskId: string; url: string } | null>(null);
+  const cdpLiveUrl = taskOwnedBrowserUrl(activeTaskId ?? null, cdpLiveUrlState);
   const onCdpUrlChange = React.useCallback((url: string) => {
-    if (!url || isBlankUrl(url)) return;
-    setCdpLiveUrl(url);
-    setLastKnownUrl(url); // also feed the grace cache
-  }, []);
+    if (!activeTaskId || !url || isBlankUrl(url)) return;
+    const taskUrl = { taskId: activeTaskId, url };
+    setCdpLiveUrlState(taskUrl);
+    setLastKnownUrlState(taskUrl);
+  }, [activeTaskId]);
   const terminalStatus = taskStatus ? isTerminalStatus(taskStatus) : false;
+  const startupTargetUrl =
+    !terminalStatus &&
+    !cdpLiveUrl &&
+    !frameUrl &&
+    !persistedFinalUrl &&
+    !lastKnownUrl
+      ? browserStartupTargetUrl(activeTask?.intent)
+      : null;
   const displayUrl = terminalStatus
     ? (persistedFinalUrl ?? cdpLiveUrl ?? frameUrl ?? lastKnownUrl ?? 'about:blank')
-    : (cdpLiveUrl ?? frameUrl ?? persistedFinalUrl ?? lastKnownUrl ?? 'about:blank');
+    : (cdpLiveUrl ??
+      frameUrl ??
+      persistedFinalUrl ??
+      lastKnownUrl ??
+      startupTargetUrl ??
+      'about:blank');
+  const displayUrlIsPendingTarget =
+    startupTargetUrl != null && displayUrl === startupTargetUrl;
   const abortTask = useTaskStore((s) => s.abortTask);
   const [aborting, setAborting] = React.useState(false);
   const isExecuting = taskStatus === 'executing';
@@ -464,10 +444,9 @@ export function BrowserPanel({
     }
   }, [activeTaskId, aborting, abortTask]);
 
-  // Phase 19 — pick the live-stream transport per user. The flag
-  // is a localStorage opt-in (`holaday.streamTransport='cdp'`); the
-  // default 'vnc' keeps the existing path unchanged until BOSS
-  // verifies CDP screencast in prod. Read once on mount — flipping
+  // Pick the live-stream transport per user. CDP is always the
+  // default; VNC requires both a build-time emergency flag and the
+  // localStorage opt-in. Read once on mount — flipping
   // the localStorage value mid-session requires a reload, which
   // matches how feature flags usually work and avoids tearing down
   // a live socket on every render.
@@ -485,11 +464,7 @@ export function BrowserPanel({
       poolUserId: poolUserId ?? null,
     });
   }, [streamTransport, activeTaskId, taskStatus, poolUserId]);
-  // Phase 24: completed/failed/cancelled tasks have had their per-task
-  // Brave released — connecting to /screencast-ws/<taskId> would 409
-  // and bounce through the noVNC retry/error loop. Compute taskTerminal
-  // up front so the URL memo can short-circuit cleanly.
-  const taskTerminal = taskStatus ? isTerminalStatus(taskStatus) : false;
+  const taskTerminal = taskIsTerminal;
   // Idle gate. The browser panel only connects when a selected task
   // actually owns a browser. The old no-active-task user-pool stream
   // was removed when HOLA DAY moved to per-task browsers.
@@ -522,7 +497,12 @@ export function BrowserPanel({
     knownExecutionMode != null
       ? knownExecutionMode === 'browser'
       : hasActiveTask && !isNonPoolTask;
-  const shouldConnect = isBrowserTask;
+  const shouldConnect =
+    !finalEvidenceFrame &&
+    shouldConnectBrowserStream({
+      isBrowserTask,
+      taskIsTerminal: taskTerminal,
+    });
   // Item 6 — short-lived stream token for screencast / VNC WS auth.
   // Refreshes every 45s; the WS URL gets rebuilt when token rotates,
   // which forces a benign reconnect (the connection itself doesn't
@@ -540,16 +520,12 @@ export function BrowserPanel({
   const screencastUrlForCdp = React.useMemo(() => {
     if (!shouldConnect) return null;
     if (!usingCdp) return null;
-    // Per-task pool: terminal tasks have no live Brave. Fall through
-    // to the static frame fallback (last-frame JPEG) instead of
-    // hammering the WS into 409s.
-    if (activeTaskId && taskTerminal) return null;
     // RC audit fix — non-pool tasks (generate / scrape) never have
     // a /screencast-ws/<taskId> backend; skip the WS so the
     // disconnect banner doesn't flicker every 5 s.
     if (activeTaskId && isNonPoolTask) return null;
     return buildScreencastUrl(activeTaskId ?? null, poolUserId, streamToken);
-  }, [activeTaskId, shouldConnect, poolUserId, usingCdp, taskTerminal, isNonPoolTask, streamToken]);
+  }, [activeTaskId, shouldConnect, poolUserId, usingCdp, isNonPoolTask, streamToken]);
   // [HD-DEBUG] log every URL change (or change to/from null). Token
   // redacted so console dumps stay safe to share.
   React.useEffect(() => {
@@ -672,27 +648,27 @@ export function BrowserPanel({
       }
     }
   }, [toast, waking]);
-  // Round-3 #5 (legacy): completed / failed / cancelled tasks used
-  // to switch to the static JPEG screencast — the rationale was
-  // that the SHARED singleton Brave would have moved on to another
-  // user's task, so the live VNC frame wouldn't match the task the
-  // user was inspecting. With per-user pool browsers (poolUserId
-  // set) that's no longer true: the user's Brave only renders THEIR
-  // tasks, so a "completed task" frame on the live VNC IS still the
-  // correct frame. Keeping VNC live also lets users use HOLA DAY's
-  // browser as a remote desktop after the agent finishes — exactly
-  // the China-edge product premise.
-  // (taskTerminal hoisted above the screencast-URL memo so it can
-  // short-circuit terminal-task connections at the URL layer.)
-  // When CDP is the active transport, "useVnc" still gates the
-  // canvas-vs-frame branch but the inner viewport renders
-  // CdpScreencastViewport. The flag stays the same name to keep
-  // the existing render-tree branching unchanged.
+  // Terminal browser tasks receive a bounded backend review lease. Keep the
+  // real stream connected during that lease; if an older/expired task rejects
+  // the stream twice, switch to an honest ended-session state instead of
+  // presenting the saved screenshot as if it were a live browser.
+  const [terminalConnectTimedOut, setTerminalConnectTimedOut] =
+    React.useState(false);
+  React.useEffect(() => {
+    setTerminalConnectTimedOut(false);
+    if (!taskTerminal || vncStatus === 'connected') return;
+    const timer = window.setTimeout(() => {
+      setTerminalConnectTimedOut(true);
+    }, 6_000);
+    return () => window.clearTimeout(timer);
+  }, [activeTaskId, taskTerminal, vncStatus]);
+  const terminalSessionUnavailable =
+    taskTerminal &&
+    (vncAttemptFails >= 2 || terminalConnectTimedOut) &&
+    vncStatus !== 'connected';
   const useVnc = usingCdp
-    ? Boolean(screencastUrlForCdp) && (poolUserId != null || !taskTerminal)
-    : Boolean(vncUrl) &&
-      vncStatus !== 'error' &&
-      (poolUserId != null || !taskTerminal);
+    ? Boolean(screencastUrlForCdp) && !terminalSessionUnavailable
+    : Boolean(vncUrl) && !terminalSessionUnavailable;
 
   // When the agent parks on awaiting-user (captcha, login wall, user
   // question the model injected), auto-flip the panel to interactive
@@ -734,13 +710,6 @@ export function BrowserPanel({
   const rippleIdRef = React.useRef(0);
   const imgRef = React.useRef<HTMLImageElement | null>(null);
   const screencastAutoScrolledKeyRef = React.useRef<string | null>(null);
-  const finalEvidenceScrollRef = React.useRef<HTMLDivElement | null>(null);
-  const finalEvidenceImgRef = React.useRef<HTMLImageElement | null>(null);
-  const finalEvidenceAutoScrolledKeyRef = React.useRef<string | null>(null);
-  const [finalEvidenceFit, setFinalEvidenceFit] =
-    React.useState<StaticEvidenceFit | null>(null);
-  const [finalEvidenceViewMode, setFinalEvidenceViewMode] =
-    React.useState<StaticEvidenceViewMode>('readable');
   /**
    * BUG-11 — pure-JS sizing for the JPEG-fallback img.
    *
@@ -796,61 +765,6 @@ export function BrowserPanel({
       host.scrollTo({ left: startLeft, top: 0 });
     }
   }, [frame?.imageBase64, interactive, isSheet]);
-  const fitFinalEvidenceImg = React.useCallback((): void => {
-    const host = finalEvidenceScrollRef.current;
-    const img = finalEvidenceImgRef.current;
-    if (!host || !img) return;
-    const savedViewport = finalEvidenceFrame?.viewport;
-    const natW =
-      img.naturalWidth > 0 ? img.naturalWidth : (savedViewport?.width ?? 0);
-    const natH =
-      img.naturalHeight > 0 ? img.naturalHeight : (savedViewport?.height ?? 0);
-    if (natW <= 0 || natH <= 0) return;
-    const hostW = host.clientWidth;
-    const hostH = host.clientHeight;
-    const fitFn =
-      isSheet && finalEvidenceViewMode === 'readable'
-        ? fitScreencastReadable
-        : fitScreencastContain;
-    const fit = fitFn({
-      hostWidth: hostW,
-      hostHeight: hostH,
-      sourceWidth: natW,
-      sourceHeight: natH,
-    });
-    if (!fit) return;
-    setFinalEvidenceFit({
-      width: fit.width,
-      height: fit.height,
-      hostWidth: hostW,
-      sourceWidth: natW,
-      sourceHeight: natH,
-    });
-    const evidenceKey = readableScreencastAutoScrollKey({
-      frameKey: finalEvidenceFrame?.imageBase64,
-      hostWidth: hostW,
-      hostHeight: hostH,
-      contentWidth: fit.width,
-      viewMode: finalEvidenceViewMode,
-    });
-    if (
-      isSheet &&
-      evidenceKey &&
-      finalEvidenceAutoScrolledKeyRef.current !== evidenceKey
-    ) {
-      finalEvidenceAutoScrolledKeyRef.current = evidenceKey;
-      const startLeft = readableScreencastStartScrollLeft({
-        contentWidth: fit.width,
-        hostWidth: hostW,
-      });
-      host.scrollTo({ left: startLeft, top: 0 });
-    }
-  }, [
-    finalEvidenceFrame?.imageBase64,
-    finalEvidenceFrame?.viewport,
-    finalEvidenceViewMode,
-    isSheet,
-  ]);
   React.useEffect(() => {
     const host = screencastHostRef.current;
     if (!host) return;
@@ -868,78 +782,9 @@ export function BrowserPanel({
     };
   }, [fitScreencastImg]);
   React.useEffect(() => {
-    const host = finalEvidenceScrollRef.current;
-    if (!host || !finalEvidenceFrame) return;
-    fitFinalEvidenceImg();
-    const raf =
-      typeof window !== 'undefined'
-        ? window.requestAnimationFrame(() => {
-            window.requestAnimationFrame(fitFinalEvidenceImg);
-          })
-        : null;
-    let ro: ResizeObserver | null = null;
-    if (typeof ResizeObserver !== 'undefined') {
-      ro = new ResizeObserver(() => fitFinalEvidenceImg());
-      ro.observe(host);
-    }
-    const onWin = () => fitFinalEvidenceImg();
-    window.addEventListener('resize', onWin);
-    return () => {
-      if (raf != null) window.cancelAnimationFrame(raf);
-      ro?.disconnect();
-      window.removeEventListener('resize', onWin);
-    };
-  }, [fitFinalEvidenceImg, finalEvidenceFrame, open]);
-  React.useEffect(() => {
     screencastAutoScrolledKeyRef.current = null;
     screencastHostRef.current?.scrollTo({ left: 0, top: 0 });
   }, [activeTaskId, frame?.imageBase64]);
-  React.useEffect(() => {
-    setFinalEvidenceFit(null);
-    setFinalEvidenceViewMode('readable');
-    finalEvidenceAutoScrolledKeyRef.current = null;
-    finalEvidenceScrollRef.current?.scrollTo({ left: 0, top: 0 });
-  }, [activeTaskId, finalEvidenceFrame?.imageBase64]);
-  const finalEvidenceBoxStyle = React.useMemo<React.CSSProperties>(() => {
-    if (!finalEvidenceFit) {
-      return {
-        width: '100%',
-      };
-    }
-    const centered =
-      isSheet && finalEvidenceFit.width < finalEvidenceFit.hostWidth;
-    return {
-      width: `${finalEvidenceFit.width}px`,
-      height: `${finalEvidenceFit.height}px`,
-      marginInline: centered ? 'auto' : undefined,
-    };
-  }, [finalEvidenceFit, isSheet]);
-  const finalEvidenceImageStyle = React.useMemo<React.CSSProperties>(() => {
-    if (!finalEvidenceFit) {
-      return {
-        height: 'auto',
-        maxHeight: '100%',
-        maxWidth: '100%',
-        width: '100%',
-      };
-    }
-    return {
-      width: `${finalEvidenceFit.width}px`,
-      height: `${finalEvidenceFit.height}px`,
-    };
-  }, [finalEvidenceFit]);
-  const finalEvidenceCanPan =
-    isSheet &&
-    finalEvidenceFit != null &&
-    finalEvidenceFit.width > finalEvidenceFit.hostWidth + 8;
-  const finalEvidenceWideSource =
-    isSheet &&
-    finalEvidenceFit != null &&
-    finalEvidenceFit.sourceWidth / finalEvidenceFit.sourceHeight > 1.12;
-  const finalEvidenceCanToggleFit =
-    isSheet &&
-    finalEvidenceFit != null &&
-    (finalEvidenceWideSource || finalEvidenceCanPan || finalEvidenceViewMode === 'contain');
   const liveBrowserCanPan = browserFrameCanPanInPortraitSheet({
     isSheet,
     viewport: displayFrame?.viewport,
@@ -966,9 +811,11 @@ export function BrowserPanel({
   // VNC lane: the RFB canvas always has content once connected, so
   // `interactive` alone is the gate. JPEG fallback lane: needs a real
   // frame, otherwise there's nothing to map clicks against.
-  const interactiveActive = useVnc
-    ? interactive && (vncStatus === 'connected' || vncStatus === 'connecting')
-    : interactive && Boolean(frame) && !isBlankUrl(frame?.url);
+  const interactiveActive =
+    !taskIsTerminal &&
+    (useVnc
+      ? interactive && (vncStatus === 'connected' || vncStatus === 'connecting')
+      : interactive && Boolean(frame) && !isBlankUrl(frame?.url));
   const headerStatus = browserPanelHeaderStatus({
     dotStatus: status,
     liveStatus: vncStatus,
@@ -976,10 +823,12 @@ export function BrowserPanel({
     interactiveActive,
     showReconnect,
   });
-  const evidenceHeaderActive =
-    taskIsTerminal && Boolean(finalEvidenceFrame);
+  const evidenceHeaderActive = Boolean(finalEvidenceFrame) || terminalSessionUnavailable;
   const displayedHeaderStatus = evidenceHeaderActive
-    ? browserPanelEvidenceHeaderStatus(taskStatus, finalEvidenceFrame?.url)
+    ? browserPanelEvidenceHeaderStatus(
+        taskStatus,
+        finalEvidenceFrame?.url ?? persistedFinalUrl,
+      )
     : headerStatus;
 
   // BOSS-feedback follow-up — the blue "你正在直接操作浏览器" banner
@@ -1013,7 +862,7 @@ export function BrowserPanel({
       // if it weren't. Refuse the takeover and direct the user to
       // start a fresh task — that's the only way to get a live
       // browser back under per-task pool semantics.
-      if (taskTerminal) {
+      if (terminalSessionUnavailable) {
         toast.show(terminalBrowserTakeoverMessage(taskStatus), 'info');
         return;
       }
@@ -1024,7 +873,7 @@ export function BrowserPanel({
       setShowTakeoverBanner(false);
     }
     setInteractive(next);
-  }, [interactive, taskStatus, taskTerminal, setInteractive, toast]);
+  }, [interactive, taskStatus, terminalSessionUnavailable, setInteractive, toast]);
 
   // Codex P2 — hide the address bar / nav / takeover chrome when
   // the panel is open on a terminal task with no viewable evidence
@@ -1034,12 +883,14 @@ export function BrowserPanel({
   // interactiveActive flips it back on if the user is mid-takeover
   // for some reason (shouldn't happen on terminal but defensive).
   const taskIsTerminalForHeader = taskStatus ? isTerminalStatus(taskStatus) : false;
-  const showHeader = shouldShowBrowserHeader({
-    taskIsTerminal: taskIsTerminalForHeader,
-    hasCurrentFrame: Boolean(frame),
-    hasFinalEvidence: Boolean(finalEvidenceFrame),
-    interactiveActive,
-  });
+  const showHeader =
+    workspaceIdle ||
+    shouldShowBrowserHeader({
+      taskIsTerminal: taskIsTerminalForHeader,
+      hasCurrentFrame: Boolean(frame),
+      hasFinalEvidence: Boolean(finalEvidenceFrame || persistedFinalUrl),
+      interactiveActive,
+    });
 
   const sendInput = React.useCallback(
     (payload: Omit<UserInputEvent, 'type' | 'taskId'>) => {
@@ -1206,11 +1057,12 @@ export function BrowserPanel({
   const section = (
     <section
       ref={panelRootRef}
-      data-narrow={isNarrow ? 'true' : 'false'}
+      aria-label="浏览器工作区"
+      data-narrow={isNarrow || isSheet ? 'true' : 'false'}
       className={cn(
         'relative flex flex-col border-l border-[#DCDDDD] backdrop-blur-xl dark:border-white/10',
         isSheet
-          ? 'fixed inset-x-0 bottom-0 z-[75] h-[calc(100dvh-16px)] max-h-[calc(100dvh-16px)] rounded-t-lg border-t border-l-0 shadow-2xl animate-fade-in'
+          ? 'fixed inset-x-0 bottom-0 z-[75] h-[calc(100dvh-56px)] max-h-[calc(100dvh-56px)] rounded-t-lg border-t border-l-0 shadow-2xl animate-fade-in motion-reduce:animate-none'
           : 'h-full transition-[width] duration-150',
         // Desktop: fill the parent wrapper (App owns the flex-basis /
         // resize logic). The collapsed rail stays a local state the
@@ -1224,7 +1076,7 @@ export function BrowserPanel({
       // the border-l divider is the only visible separator.
       style={{ backgroundColor: 'hsl(var(--background))' }}
     >
-      {!isSheet && (
+      {!isSheet && !fullscreen && (
         <Button
           variant="ghost"
           size="icon"
@@ -1237,7 +1089,7 @@ export function BrowserPanel({
              to top-1/2 (vertical center) so the collapse handle
              reads as a panel-edge affordance, not part of the
              browser nav row. */
-          className="absolute left-0 top-1/2 z-10 h-8 w-8 -translate-x-1/2 -translate-y-1/2 rounded-full border border-[#DCDDDD] bg-white shadow-[0_1px_3px_rgba(17,24,39,0.08)] hover:border-[#ADADAD] hover:bg-[#EFEFEF]/50 dark:border-white/10 dark:bg-card"
+          className="absolute left-0 top-1/2 z-30 h-8 w-8 -translate-x-1/2 -translate-y-1/2 rounded-full border border-[#DCDDDD] bg-white shadow-[0_1px_3px_rgba(17,24,39,0.08)] hover:border-[#ADADAD] hover:bg-[#EFEFEF]/50 dark:border-white/10 dark:bg-card"
         >
           {collapsed ? (
             <ChevronLeft className="h-3.5 w-3.5" />
@@ -1260,14 +1112,21 @@ export function BrowserPanel({
 
       {!isSheet && collapsed ? (
         <div className="flex flex-1 items-center justify-center">
-          <div className="rotate-180 text-[11px] tracking-wider text-muted-foreground [writing-mode:vertical-rl]">
-            浏览器
+          <div
+            className="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground"
+            title="展开浏览器"
+            aria-label="浏览器已收起"
+          >
+            <Globe className="h-4 w-4 text-[#118AB2] dark:text-[#42C0EF]" aria-hidden />
+            <div className="rotate-180 text-[11px] tracking-wider [writing-mode:vertical-rl]">
+              浏览器
+            </div>
           </div>
         </div>
       ) : (
         <>
           {/*
-           * Fullscreen renders WITHOUT the header / footer / banners —
+           * Fullscreen renders WITHOUT the fixed header / footer / banners —
            * BOSS reported the chrome was eating the top of the page
            * (Google logo blocked). In fullscreen, only a small floating
            * exit button + the canvas itself. Everything else falls back
@@ -1287,13 +1146,13 @@ export function BrowserPanel({
             // bottom of most sites.
             //
             // EXIT is NOT in this auto-hiding bar (see the persistent
-            // pill below): this is CSS pseudo-fullscreen, so the
-            // browser's own window close-X stays reachable top-right;
-            // once the bar auto-hid users had no in-page exit and hit
-            // that native X, closing the whole browser (real harm).
+            // pill below). Native fullscreen removes browser chrome,
+            // while the CSS fallback keeps this explicit exit visible;
+            // both paths therefore have the same reliable escape route.
             <>
               <FullscreenFloatingToolbar
                 displayUrl={displayUrl}
+                pendingTarget={displayUrlIsPendingTarget}
                 status={displayedHeaderStatus}
                 interactiveActive={interactiveActive}
                 interactive={interactive}
@@ -1324,36 +1183,44 @@ export function BrowserPanel({
               </div>
             </>
           )}
-          {!fullscreen && showHeader && (shouldConnect || evidenceHeaderActive) && (
+          {!fullscreen && showHeader && (shouldConnect || evidenceHeaderActive || workspaceIdle) && (
             <header
+              aria-label="浏览器工具栏"
               className={cn(
-                'flex items-center border-b',
-                isSheet ? 'h-10 gap-1.5 px-2 pt-3' : 'h-11 gap-2 px-3 pt-2',
+                'flex items-center border-b bg-white/92 backdrop-blur-md dark:bg-background/90',
+                isSheet ? 'h-11 gap-1.5 px-2 pt-3' : 'h-12 gap-2 px-3',
                 BROWSER_DIVIDER,
               )}
             >
-              <StatusDot status={displayedHeaderStatus.dotStatus} />
-              <BrowserConnectionChip state={displayedHeaderStatus} compact={isNarrow || isSheet} />
+              <BrowserIdentity
+                state={displayedHeaderStatus}
+                compact={isNarrow || isSheet}
+              />
+              {!(evidenceHeaderActive && (isNarrow || isSheet)) && (
+                <BrowserConnectionChip state={displayedHeaderStatus} compact={isNarrow || isSheet} />
+              )}
               {/* BOSS bug fix — when the panel is narrow (< 500px),
                   hide back/forward to keep the URL bar legible. The
                   agent rarely needs them, and the user can take over
                   + use Brave's own gestures if they really need to
                   go back. Reload stays — it's the highest-utility
                   button when a page hangs. */}
-              {!evidenceHeaderActive && !isNarrow && (
-                <>
+              {!evidenceHeaderActive && !workspaceIdle && !isNarrow && !isSheet && (
+                <div className="hidden items-center gap-1 sm:flex">
                   <NavButton direction="back" title="后退" navTaskId={activeTaskId ?? null} />
                   <NavButton direction="forward" title="前进" navTaskId={activeTaskId ?? null} />
-                </>
+                </div>
               )}
-              {!evidenceHeaderActive && (
+              {!evidenceHeaderActive && !workspaceIdle && (
                 <NavButton direction="reload" title="刷新" navTaskId={activeTaskId ?? null} />
               )}
               <UrlBar
-                displayUrl={displayUrl}
+                displayUrl={workspaceIdle ? '' : displayUrl}
                 interactiveActive={interactiveActive}
                 navTaskId={evidenceHeaderActive ? null : activeTaskId ?? null}
                 readOnly={evidenceHeaderActive}
+                pendingTarget={displayUrlIsPendingTarget}
+                onLaunchTask={workspaceIdle ? onStartWorkspaceTask : undefined}
               />
               {!evidenceHeaderActive && isExecuting && activeTaskId && (
                 <button
@@ -1363,7 +1230,8 @@ export function BrowserPanel({
                   title="停止当前任务"
                   aria-label="停止当前任务"
                   className={cn(
-                    'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border transition-colors',
+                    BROWSER_TOOL_BUTTON,
+                    'border',
                     aborting
                       ? 'cursor-wait border-[#DCDDDD] bg-[#EFEFEF] text-muted-foreground dark:border-white/10 dark:bg-white/5'
                       : 'border-[#EA1F59]/35 bg-white text-[#EA1F59] hover:bg-[#EA1F59]/10 dark:border-[#EA1F59]/35 dark:bg-transparent dark:hover:bg-[#EA1F59]/10',
@@ -1372,7 +1240,7 @@ export function BrowserPanel({
                   <Square className="h-3 w-3" strokeWidth={2.5} />
                 </button>
               )}
-              {!evidenceHeaderActive && (
+              {!evidenceHeaderActive && !workspaceIdle && (
                 <button
                   type="button"
                   onClick={handleUserTakeoverClick}
@@ -1384,7 +1252,7 @@ export function BrowserPanel({
                   aria-label={interactive ? '退出浏览器接管' : '接管浏览器'}
                   aria-pressed={interactive}
                   className={cn(
-                    'inline-flex h-8 w-8 items-center justify-center rounded-md border transition-colors',
+                    'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[9px] border transition-colors',
                     interactive
                       ? 'border-[#EA1F59]/35 bg-[#EA1F59]/10 text-[#EA1F59]'
                       : 'border-transparent bg-transparent text-muted-foreground hover:bg-foreground/5',
@@ -1401,7 +1269,13 @@ export function BrowserPanel({
                   narrow panels (BOSS bug — toolbar was crowded). The
                   user can still open fullscreen from the keyboard
                   shortcut or by widening the panel first. */}
-              {onToggleFullscreen && !isNarrow && (
+              {shouldShowBrowserFullscreen({
+                available: Boolean(onToggleFullscreen),
+                workspaceIdle,
+                isNarrow,
+                isSheet,
+                evidenceHeaderActive,
+              }) && (
                 <button
                   type="button"
                   onClick={onToggleFullscreen}
@@ -1409,8 +1283,7 @@ export function BrowserPanel({
                   aria-label={fullscreen ? '退出全屏' : '全屏浏览器模式'}
                   aria-pressed={fullscreen}
                   className={cn(
-                    'inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors',
-                    'hover:bg-foreground/5 hover:text-foreground',
+                    BROWSER_TOOL_BUTTON,
                   )}
                 >
                   {fullscreen ? (
@@ -1422,7 +1295,7 @@ export function BrowserPanel({
               )}
             </header>
           )}
-          {browserAwaiting && (
+          {browserAwaiting && !fullscreen && (
             <div
               role="alert"
               className={cn(
@@ -1484,15 +1357,25 @@ export function BrowserPanel({
           <div
             ref={screencastHostRef}
             className={cn(
-              'flex min-h-0 min-w-0 flex-1 items-start',
+              'relative flex min-h-0 min-w-0 flex-1 items-center',
               isSheet ? 'justify-start overflow-auto' : 'justify-center overflow-hidden',
-              fullscreen ? 'p-0' : isSheet ? 'p-1' : 'p-3',
-              interactiveActive
-                ? 'bg-[#EA1F59]/5'
-                : 'bg-[#EFEFEF]/50 dark:bg-white/[0.03]',
+              fullscreen || (useVnc && !isSheet) ? 'p-0' : isSheet ? 'p-1' : 'p-3',
+              'bg-[#F6F7F9] dark:bg-white/[0.03]',
             )}
           >
-            {hibernated ? (
+            {finalEvidenceFrame && terminalEvidence ? (
+              <TerminalEvidenceView
+                frame={finalEvidenceFrame}
+                source={terminalEvidence.source}
+                taskStatus={taskStatus}
+                isSheet={isSheet}
+                isNarrow={isNarrow}
+                fullscreen={fullscreen}
+                onToggleFullscreen={onToggleFullscreen}
+                onReExecute={onReExecute}
+                reExecuting={reExecuting}
+              />
+            ) : hibernated ? (
               <HibernationCard
                 lastFrame={displayFrame}
                 onWake={onWake}
@@ -1537,10 +1420,12 @@ export function BrowserPanel({
                     }
                     onUrlChange={onCdpUrlChange}
                     className={cn(
-                      'rounded-md border shadow-[0_1px_3px_rgba(17,24,39,0.06)]',
+                      isSheet && 'rounded-md border shadow-[0_1px_3px_rgba(17,24,39,0.06)]',
                       interactiveActive
-                        ? 'border-[#EA1F59]/45 ring-2 ring-[#EA1F59]/15'
-                        : 'border-black/[0.06]',
+                        ? fullscreen
+                          ? 'border-black/[0.06]'
+                          : 'ring-1 ring-inset ring-[#EA1F59]/25'
+                        : isSheet && 'border-black/[0.06]',
                     )}
                   />
                 ) : (
@@ -1552,68 +1437,14 @@ export function BrowserPanel({
                     onStatusChange={handleVncStatus}
                     fitMode={isSheet ? 'readable' : 'contain'}
                     className={cn(
-                      'rounded-md border shadow-[0_1px_3px_rgba(17,24,39,0.06)]',
+                      isSheet && 'rounded-md border shadow-[0_1px_3px_rgba(17,24,39,0.06)]',
                       interactiveActive
-                        ? 'border-[#EA1F59]/45 ring-2 ring-[#EA1F59]/15'
-                        : 'border-black/[0.06]',
+                        ? fullscreen
+                          ? 'border-black/[0.06]'
+                          : 'ring-1 ring-inset ring-[#EA1F59]/25'
+                        : isSheet && 'border-black/[0.06]',
                     )}
                   />
-                )}
-                {showLiveOverlay && (
-                  <div
-                    role="status"
-                    aria-live="polite"
-                    className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background/35 text-xs text-muted-foreground backdrop-blur-[1px]"
-                  >
-                    <div className="pointer-events-none max-w-[260px] text-center">
-                      <div className="font-medium text-foreground/80">{liveOverlayCopy.title}</div>
-                      <div className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-                        {liveOverlayCopy.detail}
-                      </div>
-                    </div>
-                    {showReconnect && (
-                      <button
-                        type="button"
-                        onClick={handleManualReconnect}
-                        aria-label={liveOverlayCopy.reconnectLabel}
-                        title={liveOverlayCopy.reconnectLabel}
-                        className="pointer-events-auto inline-flex h-8 items-center gap-1.5 rounded-md border border-[#DCDDDD] bg-white px-2.5 text-[11px] font-medium text-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/50 dark:border-white/10 dark:bg-card dark:hover:bg-white/10"
-                      >
-                        <RotateCw className="h-3 w-3" />
-                        刷新画面
-                      </button>
-                    )}
-                  </div>
-                )}
-                {vncStatus === 'disconnected' && showDisconnectBanner && (
-                  <div
-                    role="status"
-                    aria-live="polite"
-                    className="pointer-events-none absolute left-1/2 top-3 max-w-[calc(100%-1.5rem)] -translate-x-1/2 truncate rounded-full bg-[#FFC910]/95 px-3 py-1 text-[11px] font-semibold text-[#595757] shadow-sm"
-                  >
-                    浏览器画面断开，正在自动重连
-                  </div>
-                )}
-                {activityVisible && recentSteps.length > 0 && (
-                  <ActivityOverlay
-                    steps={recentSteps}
-                    compact={isSheet}
-                    onClose={() => setActivityVisible(false)}
-                  />
-                )}
-                {!activityVisible && recentSteps.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setActivityVisible(true)}
-                    className="absolute bottom-2 right-2 inline-flex h-8 w-8 items-center justify-center rounded bg-black/40 text-white backdrop-blur transition-colors hover:bg-black/60"
-                    aria-label="显示操作日志"
-                    title="显示操作日志"
-                  >
-                    <ListChecks className="h-3.5 w-3.5" aria-hidden />
-                  </button>
-                )}
-                {interactiveActive && (
-                  <CjkInputBar onSend={sendInsertText} fullscreen={fullscreen} />
                 )}
               </div>
             ) : !taskIsTerminal && frame ? (
@@ -1650,7 +1481,9 @@ export function BrowserPanel({
                     className={cn(
                       'block rounded-md border shadow-[0_1px_3px_rgba(17,24,39,0.06)]',
                       interactiveActive
-                        ? 'cursor-pointer border-[#EA1F59]/45 ring-2 ring-[#EA1F59]/15'
+                        ? fullscreen
+                          ? 'cursor-pointer border-black/[0.06]'
+                          : 'cursor-pointer border-[#EA1F59]/30 ring-1 ring-[#EA1F59]/10'
                         : 'border-black/[0.06]',
                     )}
                   />
@@ -1724,148 +1557,76 @@ export function BrowserPanel({
                   )}
                 </div>
               )
-            ) : finalEvidenceFrame ? (
-              // R7 — terminal task with captured evidence. The img
-              // is static (no clicks reach Brave). Per-task Brave has
-              // already been released, so this surface must stay an
-              // evidence viewer and offer a fresh re-run instead of a
-              // misleading live takeover.
-              <div className="relative flex h-full w-full flex-col">
-                <TerminalEvidenceLedger
-                  status={taskStatus}
-                  url={finalEvidenceFrame.url}
-                  screenshotSource={finalEvidenceSource ?? 'last-frame'}
-                  isSheet={isSheet}
-                />
-                <div
-                  ref={finalEvidenceScrollRef}
-                  className={cn(
-                    'relative flex min-h-0 min-w-0 flex-1 items-start',
-                    isSheet ? 'overflow-auto' : 'justify-center overflow-hidden',
-                  )}
-                >
-                  <div
-                    className="relative shrink-0"
-                    style={finalEvidenceBoxStyle}
-                  >
-                    <img
-                      ref={finalEvidenceImgRef}
-                      src={`data:image/jpeg;base64,${finalEvidenceFrame.imageBase64}`}
-                      alt="任务完成时的浏览器画面"
-                      draggable={false}
-                      onLoad={fitFinalEvidenceImg}
-                      style={finalEvidenceImageStyle}
-                      className="block rounded-md border border-black/[0.06] shadow-[0_1px_3px_rgba(17,24,39,0.06)]"
-                    />
-                    {!isSheet && (
-                      <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between gap-2 rounded bg-black/55 px-2 py-1 text-[11px] text-white backdrop-blur">
-                        <span className="truncate">
-                          {terminalEvidenceFrameLabel({
-                            status: taskStatus,
-                            url: finalEvidenceFrame.url,
-                          })}
-                        </span>
-                        {finalEvidenceFrame.url && finalEvidenceFrame.url !== 'about:blank' && (
-                          <span className="truncate font-mono opacity-80">{finalEvidenceFrame.url}</span>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-                {isSheet && (finalEvidenceCanToggleFit || finalEvidenceCanPan) && (
-                  <div className="pointer-events-none absolute left-2 right-2 top-2 z-20 flex flex-col items-stretch gap-1">
-                    <div className="flex min-w-0 items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        {finalEvidenceCanToggleFit && (
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setFinalEvidenceViewMode((mode) =>
-                                mode === 'readable' ? 'contain' : 'readable',
-                              )
-                            }
-                            aria-label={
-                              finalEvidenceViewMode === 'readable'
-                                ? '完整适应浏览器画面'
-                                : '清晰查看浏览器画面'
-                            }
-                            title={
-                              finalEvidenceViewMode === 'readable'
-                                ? '完整适应'
-                                : '清晰查看'
-                            }
-                            className="pointer-events-auto inline-flex h-8 shrink-0 items-center rounded-md border border-white/25 bg-black/45 px-2.5 text-[11px] font-medium text-white shadow-sm backdrop-blur transition-colors hover:bg-black/60"
-                          >
-                            {finalEvidenceViewMode === 'readable' ? '全貌' : '清晰'}
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                    {finalEvidenceCanPan && (
-                      <div className="mx-auto max-w-full truncate rounded-full bg-black/45 px-3 py-1 text-center text-[11px] font-medium text-white shadow-sm backdrop-blur">
-                        已居中，可左右滑动查看
-                      </div>
-                    )}
-                  </div>
-                )}
-                {isSheet && (
-                  <div className={cn('flex shrink-0 min-w-0 items-center gap-2 border-t bg-background/95 px-2 py-1.5 text-[11px] leading-tight shadow-sm backdrop-blur', BROWSER_DIVIDER)}>
-                    <div className="min-w-0 flex-1">
-                      <span className="block max-w-full truncate text-foreground/85">
-                        {terminalEvidenceFrameLabel({
-                          status: taskStatus,
-                          url: finalEvidenceFrame.url,
-                        })}
-                      </span>
-                      {finalEvidenceFrame.url && finalEvidenceFrame.url !== 'about:blank' && (
-                        <span className="block max-w-full truncate font-mono text-[11px] text-muted-foreground">
-                          {finalEvidenceFrame.url}
-                        </span>
-                      )}
-                    </div>
-                    {onReExecute && (
-                      <button
-                        type="button"
-                        onClick={onReExecute}
-                        disabled={reExecuting}
-                        aria-label={reExecuting ? '正在重新执行任务' : '重新执行任务'}
-                        title={reExecuting ? '正在重新执行' : '重新执行'}
-                        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-[#595757] transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/60 disabled:cursor-wait disabled:opacity-60 dark:border-white/10 dark:bg-transparent dark:text-foreground/80 dark:hover:bg-white/10"
-                      >
-                        <RotateCw className={cn('h-3.5 w-3.5', reExecuting && 'animate-spin')} />
-                      </button>
-                    )}
-                  </div>
-                )}
-                {!isSheet && (
-                  <div className={cn('flex shrink-0 items-center justify-center gap-2 border-t bg-background/70 px-3 py-2 text-[12px]', BROWSER_DIVIDER)}>
-                    <span className="text-muted-foreground">
-                      任务已结束；重新执行会新开一次尝试并保留当前记录。
-                    </span>
-                    {onReExecute && (
-                      <button
-                        type="button"
-                        onClick={onReExecute}
-                        disabled={reExecuting}
-                        aria-label={reExecuting ? '正在重新执行任务' : '重新执行任务'}
-                        title={reExecuting ? '正在重新执行' : '重新执行'}
-                        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[#DCDDDD] bg-white px-2.5 text-[11px] font-medium text-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/50 disabled:cursor-wait disabled:opacity-60 dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10"
-                      >
-                        <RotateCw className={cn('h-3 w-3', reExecuting && 'animate-spin')} />
-                        {reExecuting ? '重新执行中…' : '重新执行'}
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
             ) : (
               <EmptyBrowserState
                 taskStatus={taskStatus}
                 isBrowserTask={isBrowserTask}
+                workspaceIdle={workspaceIdle}
                 finalUrl={persistedFinalUrl}
+                hasSavedScreenshot={Boolean(activeTask?.finalScreenshot)}
+                onReopenFinalUrl={onStartWorkspaceTask}
                 onReExecute={onReExecute}
                 reExecuting={reExecuting}
               />
+            )}
+            {useVnc && showLiveOverlay && (
+              <div
+                role="status"
+                aria-live="polite"
+                className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-white/45 px-4 text-xs text-muted-foreground backdrop-blur-[2px] dark:bg-background/45"
+              >
+                <div className="pointer-events-none flex w-full max-w-[280px] flex-col items-center rounded-[18px] border border-[#E6E7EB] bg-white/90 px-5 py-4 text-center shadow-[0_18px_44px_rgba(17,24,39,0.10)] dark:border-white/10 dark:bg-card/90">
+                  <div className="mb-2 flex h-9 w-9 items-center justify-center rounded-full bg-[#42C0EF]/12 text-[#118AB2] dark:text-[#42C0EF]">
+                    <Globe className="h-4 w-4" aria-hidden />
+                  </div>
+                  <div className="font-semibold text-foreground">{liveOverlayCopy.title}</div>
+                  <div className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                    {liveOverlayCopy.detail}
+                  </div>
+                </div>
+                {showReconnect && (
+                  <button
+                    type="button"
+                    onClick={handleManualReconnect}
+                    aria-label={liveOverlayCopy.reconnectLabel}
+                    title={liveOverlayCopy.reconnectLabel}
+                    className="pointer-events-auto inline-flex h-8 items-center gap-1.5 rounded-[9px] border border-[#DCDDDD] bg-white px-2.5 text-[11px] font-medium text-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/50 dark:border-white/10 dark:bg-card dark:hover:bg-white/10"
+                  >
+                    <RotateCw className="h-3 w-3" />
+                    {liveOverlayCopy.reconnectLabel}
+                  </button>
+                )}
+              </div>
+            )}
+            {useVnc && vncStatus === 'disconnected' && showDisconnectBanner && (
+              <div
+                role="status"
+                aria-live="polite"
+                className="pointer-events-none absolute left-1/2 top-3 z-20 max-w-[calc(100%-1.5rem)] -translate-x-1/2 truncate rounded-full bg-[#FFC910]/95 px-3 py-1 text-[11px] font-semibold text-[#595757] shadow-sm"
+              >
+                浏览器画面断开，正在自动重连
+              </div>
+            )}
+            {useVnc && activityVisible && recentSteps.length > 0 && (
+              <ActivityOverlay
+                steps={recentSteps}
+                compact={isSheet}
+                onClose={() => setActivityVisible(false)}
+              />
+            )}
+            {useVnc && !activityVisible && recentSteps.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setActivityVisible(true)}
+                className="absolute bottom-2 right-2 z-20 inline-flex h-8 w-8 items-center justify-center rounded bg-black/40 text-white backdrop-blur transition-colors hover:bg-black/60"
+                aria-label="显示操作日志"
+                title="显示操作日志"
+              >
+                <ListChecks className="h-3.5 w-3.5" aria-hidden />
+              </button>
+            )}
+            {useVnc && interactiveActive && (
+              <CjkInputBar onSend={sendInsertText} fullscreen={fullscreen} />
             )}
           </div>
           {liveBrowserCanPan && !taskIsTerminal && !hibernated && !interactiveActive && !showLiveOverlay && (
@@ -1873,16 +1634,21 @@ export function BrowserPanel({
               左右滑动查看页面
             </div>
           )}
-          {!fullscreen && shouldConnect && showHeader && (
+          {!fullscreen && useVnc && showHeader && (
             <footer
-	              className={cn(
-	                'flex items-center justify-between border-t text-muted-foreground',
-	                isSheet ? 'h-7 px-2 text-[11px]' : 'h-7 px-3 text-[11px]',
-	                BROWSER_DIVIDER,
-	              )}
+              className={cn(
+                'flex items-center justify-between border-t bg-white/78 text-muted-foreground backdrop-blur dark:bg-background/75',
+                isSheet ? 'h-7 px-2 text-[11px]' : 'h-7 px-3 text-[11px]',
+                BROWSER_DIVIDER,
+              )}
             >
-              <span>{browserViewportFrameLabel(displayFrame?.viewport)}</span>
-              <span>{frame ? `第 ${frame.tickIndex + 1} 帧` : ''}</span>
+              <span>
+                {browserViewportFooterLabel({
+                  usingCdp,
+                  viewport: displayFrame?.viewport,
+                })}
+              </span>
+              <span>{vncStatus === 'connected' ? '画面实时同步' : ''}</span>
             </footer>
           )}
         </>
@@ -1895,13 +1661,235 @@ export function BrowserPanel({
         <div
           aria-hidden="true"
           onClick={onClose}
-          className="fixed inset-0 z-[70] bg-black/30 backdrop-blur-sm animate-fade-in"
+          className="fixed inset-0 z-[70] bg-black/30 backdrop-blur-sm animate-fade-in motion-reduce:animate-none"
         />
         {section}
       </>
     );
   }
   return section;
+}
+
+function TerminalEvidenceView({
+  frame,
+  source,
+  taskStatus,
+  isSheet,
+  isNarrow,
+  fullscreen,
+  onToggleFullscreen,
+  onReExecute,
+  reExecuting,
+}: {
+  frame: UiScreencast;
+  source: TerminalEvidenceScreenshotSource;
+  taskStatus: UiTaskStatus | null | undefined;
+  isSheet: boolean;
+  isNarrow: boolean;
+  fullscreen: boolean;
+  onToggleFullscreen?: () => void;
+  onReExecute?: () => void;
+  reExecuting: boolean;
+}): JSX.Element {
+  const [viewMode, setViewMode] = React.useState<'contain' | 'readable'>(
+    'contain',
+  );
+  const [naturalSize, setNaturalSize] = React.useState<{
+    width: number;
+    height: number;
+  } | null>(null);
+
+  React.useEffect(() => {
+    setViewMode('contain');
+    setNaturalSize(null);
+  }, [frame.imageBase64]);
+
+  const sourceWidth = naturalSize?.width || frame.viewport.width;
+  const sourceHeight = naturalSize?.height || frame.viewport.height;
+  const sourceAspect =
+    sourceWidth > 0 && sourceHeight > 0 ? sourceWidth / sourceHeight : null;
+  const layout = terminalEvidenceLayout({
+    isNarrow,
+    isSheet,
+    fullscreen,
+    sourceAspect,
+    viewMode,
+  });
+  const compactPreview = layout === 'compact-preview';
+  const safeFinalUrl = safeExternalHttpHref(frame.url);
+  const title = terminalEvidenceFrameLabel({
+    status: taskStatus,
+    url: frame.url,
+  });
+  const screenshotCopy =
+    source === 'saved-screenshot' ? '任务结束时保存的页面' : '任务结束前最后可见页面';
+
+  return (
+    <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden bg-white dark:bg-background">
+      {shouldShowTerminalEvidenceLedger(fullscreen) && (
+        <div className={cn('shrink-0 border-b bg-white/96 dark:bg-background/95', BROWSER_DIVIDER)}>
+          <div className={cn('flex min-w-0 items-start gap-2', isSheet ? 'px-3 pb-2 pt-3' : 'px-3 py-2.5')}>
+            <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-[7px] bg-[#42C0EF]/12 text-[#118AB2] dark:text-[#42C0EF]">
+              <ListChecks className="h-3.5 w-3.5" aria-hidden />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
+                <span className="text-[12px] font-semibold text-foreground">
+                  终态证据
+                </span>
+                <span className="truncate text-[11px] text-muted-foreground">
+                  {title}
+                </span>
+              </div>
+              <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
+                {screenshotCopy}，用于复核页面状态；结果中的判断仍以来源和任务上下文为准。
+              </p>
+            </div>
+            {safeFinalUrl && !isSheet && (
+              <SafeExternalLinkButton
+                href={safeFinalUrl}
+                className="inline-flex h-7 shrink-0 items-center gap-1 rounded-[8px] border border-[#DCDDDD] bg-white px-2 text-[11px] font-medium text-[#595757] transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/60 dark:border-white/10 dark:bg-transparent dark:text-foreground/80 dark:hover:bg-white/10"
+              >
+                <ExternalLink className="h-3 w-3" aria-hidden />
+                打开
+              </SafeExternalLinkButton>
+            )}
+          </div>
+          <div className="flex min-w-0 items-center justify-between gap-2 border-t border-[#DCDDDD]/60 px-3 py-1.5 dark:border-white/10">
+            <span className="min-w-0 truncate text-[11px] text-muted-foreground">
+              {viewMode === 'contain' ? '按比例适应窗口' : '原始尺寸，可滑动查看'}
+            </span>
+            <div className="flex shrink-0 items-center gap-1.5">
+              {isSheet && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setViewMode((mode) =>
+                      mode === 'contain' ? 'readable' : 'contain',
+                    )
+                  }
+                  aria-label={
+                    viewMode === 'contain' ? '按原始尺寸查看' : '适应窗口查看'
+                  }
+                  className="inline-flex h-7 items-center rounded-[8px] border border-[#DCDDDD] bg-white px-2 text-[11px] font-medium text-foreground transition-colors hover:bg-[#EFEFEF]/60 dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10"
+                >
+                  {viewMode === 'contain' ? '原始尺寸' : '适应窗口'}
+                </button>
+              )}
+              {!isSheet && onToggleFullscreen && (
+                <button
+                  type="button"
+                  onClick={onToggleFullscreen}
+                  aria-label="全屏查看任务截图"
+                  title="全屏查看任务截图"
+                  className="inline-flex h-7 items-center gap-1 rounded-[8px] border border-[#DCDDDD] bg-white px-2 text-[11px] font-medium text-foreground transition-colors hover:bg-[#EFEFEF]/60 dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10"
+                >
+                  <Maximize2 className="h-3 w-3" aria-hidden />
+                  全屏查看
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div
+        className={cn(
+          'relative min-h-0 min-w-0 bg-[#F6F7F9] dark:bg-white/[0.03]',
+          compactPreview
+            ? 'shrink-0 overflow-hidden'
+            : viewMode === 'readable'
+              ? 'flex-1 overflow-auto'
+              : 'flex flex-1 items-center justify-center overflow-hidden',
+        )}
+        style={
+          compactPreview && sourceAspect
+            ? { aspectRatio: String(sourceAspect) }
+            : undefined
+        }
+      >
+        <div
+          className={cn(
+            'relative',
+            compactPreview
+              ? 'h-full w-full'
+              : viewMode === 'readable'
+                ? 'shrink-0'
+                : 'flex h-full w-full items-center justify-center',
+          )}
+          style={
+            viewMode === 'readable' && sourceWidth > 0 && sourceHeight > 0
+              ? { width: sourceWidth, height: sourceHeight }
+              : undefined
+          }
+        >
+          <img
+            src={`data:image/jpeg;base64,${frame.imageBase64}`}
+            alt="任务完成时的浏览器画面"
+            draggable={false}
+            onLoad={(event) => {
+              const image = event.currentTarget;
+              if (image.naturalWidth > 0 && image.naturalHeight > 0) {
+                setNaturalSize({
+                  width: image.naturalWidth,
+                  height: image.naturalHeight,
+                });
+              }
+            }}
+            className={cn(
+              'block border-0 object-contain',
+              compactPreview || viewMode === 'readable'
+                ? 'h-full w-full'
+                : 'max-h-full max-w-full',
+            )}
+          />
+          {!isSheet && compactPreview && (
+            <div className="pointer-events-none absolute inset-x-2 bottom-2 flex min-w-0 items-center justify-between gap-2 rounded-[7px] bg-black/55 px-2 py-1 text-[10px] text-white backdrop-blur">
+              <span className="truncate">{title}</span>
+              {safeFinalUrl && (
+                <span className="max-w-[52%] truncate font-mono opacity-80">
+                  {frame.url}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {!fullscreen && (
+        <div className={cn('flex shrink-0 min-w-0 items-center gap-2 border-t bg-white/96 px-3 py-2 text-[11px] dark:bg-background/95', BROWSER_DIVIDER)}>
+          <span className="min-w-0 flex-1 truncate text-muted-foreground">
+            {title}
+          </span>
+          {safeFinalUrl && isSheet && (
+            <SafeExternalLinkButton
+              href={safeFinalUrl}
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] border border-[#DCDDDD] bg-white text-foreground transition-colors hover:bg-[#EFEFEF]/60 dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10"
+              ariaLabel="打开最终页面"
+              title="打开最终页面"
+            >
+              <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+            </SafeExternalLinkButton>
+          )}
+          {onReExecute && (
+            <button
+              type="button"
+              onClick={onReExecute}
+              disabled={reExecuting}
+              aria-label={reExecuting ? '正在重新执行任务' : '重新执行任务'}
+              title={reExecuting ? '正在重新执行' : '重新执行'}
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] border border-[#DCDDDD] bg-white text-foreground transition-colors hover:bg-[#EFEFEF]/60 disabled:cursor-wait disabled:opacity-60 dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10"
+            >
+              <RotateCw
+                className={cn('h-3.5 w-3.5', reExecuting && 'animate-spin')}
+                aria-hidden
+              />
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 /**
@@ -2207,104 +2195,13 @@ function HibernationCard({
   );
 }
 
-function TerminalEvidenceLedger({
-  status,
-  url,
-  screenshotSource,
-  isSheet,
-}: {
-  status: UiTaskStatus | null | undefined;
-  url: string | null | undefined;
-  screenshotSource: TerminalEvidenceScreenshotSource;
-  isSheet: boolean;
-}): JSX.Element {
-  const safeFinalUrl = safeExternalHttpHref(url);
-  const title = terminalEvidenceFrameLabel({
-    status,
-    url: url ?? 'about:blank',
-  });
-  const screenshotLabel =
-    screenshotSource === 'saved-screenshot'
-      ? '已观察：最终截图'
-      : '已观察：最后画面';
-  return (
-    <div
-      className={cn(
-        'shrink-0 border-b bg-background/95 backdrop-blur',
-        BROWSER_DIVIDER,
-        isSheet ? 'px-2 py-2' : 'px-3 py-2',
-      )}
-    >
-      <div className="flex min-w-0 items-start gap-2">
-        <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-[7px] bg-[#42C0EF]/12 text-[#118AB2] dark:text-[#42C0EF]">
-          <ListChecks className="h-3.5 w-3.5" aria-hidden />
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-            <span className="truncate text-[12px] font-semibold text-foreground">
-              终态证据
-            </span>
-            <span className="min-w-0 truncate text-[11px] text-muted-foreground">
-              {title}
-            </span>
-          </div>
-          <div className="mt-1 flex min-w-0 flex-wrap gap-1.5">
-            <EvidenceLedgerPill tone="observed" label={screenshotLabel} />
-            <EvidenceLedgerPill
-              tone="extracted"
-              label={safeFinalUrl ? '已记录：最终 URL' : '未记录：最终 URL'}
-            />
-            <EvidenceLedgerPill
-              tone="boundary"
-              label="未验证：结果内每条推断"
-            />
-          </div>
-          <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
-            这里证明任务结束时的页面状态；结论是否成立仍以结果卡中的来源、检查项和上下文为准。
-          </p>
-        </div>
-        {safeFinalUrl && !isSheet && (
-          <SafeExternalLinkButton
-            href={safeFinalUrl}
-            className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-[#DCDDDD] bg-white px-2 text-[11px] font-medium text-[#595757] transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/60 dark:border-white/10 dark:bg-transparent dark:text-foreground/80 dark:hover:bg-white/10"
-          >
-            <ExternalLink className="h-3 w-3" aria-hidden />
-            <span>打开</span>
-          </SafeExternalLinkButton>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function EvidenceLedgerPill({
-  tone,
-  label,
-}: {
-  tone: 'observed' | 'extracted' | 'boundary';
-  label: string;
-}): JSX.Element {
-  return (
-    <span
-      className={cn(
-        'inline-flex max-w-full items-center rounded-full border px-2 py-0.5 text-[10px] font-medium',
-        tone === 'observed' &&
-          'border-[#42C0EF]/25 bg-[#42C0EF]/10 text-[#118AB2] dark:text-[#7DD3FC]',
-        tone === 'extracted' &&
-          'border-[#57479C]/25 bg-[#57479C]/10 text-[#57479C] dark:text-[#DCDDDD]',
-        tone === 'boundary' &&
-          'border-[#DCDDDD]/80 bg-white/45 text-[#595757] dark:border-white/10 dark:bg-white/5 dark:text-foreground/70',
-      )}
-    >
-      <span className="truncate">{label}</span>
-    </span>
-  );
-}
-
 function EmptyBrowserState({
   taskStatus,
   isBrowserTask = true,
+  workspaceIdle = false,
   finalUrl,
+  hasSavedScreenshot = false,
+  onReopenFinalUrl,
   onReExecute,
   reExecuting = false,
 }: {
@@ -2318,31 +2215,25 @@ function EmptyBrowserState({
    * without active-task context.
    */
   isBrowserTask?: boolean;
-  /**
-   * When a terminal browser task has NO finalScreenshot we still
-   * usually have a persisted finalUrl. Surface it so the user can
-   * verify the agent's claim on the live page instead of staring at
-   * about:blank.
-   */
+  workspaceIdle?: boolean;
   finalUrl?: string | null;
-  /**
-   * Click handler for the "重新执行" button shown on terminal
-   * browser tasks with neither a screenshot nor a finalUrl saved.
-   * The legacy task has no recoverable evidence — best we can do
-   * is offer to re-run the same intent.
-   */
+  hasSavedScreenshot?: boolean;
+  onReopenFinalUrl?: (intent: string) => Promise<boolean>;
   onReExecute?: () => void;
   reExecuting?: boolean;
 }): JSX.Element {
+  const [reopening, setReopening] = React.useState(false);
   if (taskStatus === 'executing' && isBrowserTask) {
     return (
-      <div className={cn('flex flex-col items-center gap-2.5 rounded-lg px-6 py-4 text-center', BROWSER_SURFACE)}>
-        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#EA1F59]/10 text-[#EA1F59]">
+      <div className={cn('flex max-w-[320px] flex-col items-center gap-2.5 rounded-[18px] px-6 py-5 text-center', BROWSER_SURFACE)}>
+        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#EA1F59]/10 text-[#EA1F59]">
           <Globe className="h-4 w-4 animate-pulse-dot" aria-hidden />
         </div>
         <div>
-          <div className="text-sm font-medium text-foreground">等待浏览器画面</div>
-          <div className="mt-0.5 text-xs text-muted-foreground">正在连接当前任务的浏览器页面。</div>
+          <div className="text-sm font-semibold text-foreground">正在打开浏览器</div>
+          <div className="mt-1 text-xs leading-relaxed text-muted-foreground">
+            页面准备好后会自动显示在这里；你可以继续看左侧任务进度。
+          </div>
         </div>
       </div>
     );
@@ -2350,99 +2241,72 @@ function EmptyBrowserState({
   const terminal = taskStatus ? isTerminalStatus(taskStatus) : false;
   if (terminal && isBrowserTask) {
     const safeFinalUrl = safeExternalHttpHref(finalUrl);
-    const errorFinalUrl = isBrowserErrorUrl(finalUrl);
-    const missingFrameCopy = terminalBrowserMissingFrameCopy({
-      status: taskStatus,
-      hasFinalUrl: Boolean(safeFinalUrl),
-      finalUrlIsError: errorFinalUrl,
-    });
-    // Three branches: finalScreenshot is handled before reaching us
-    // (the parent renders `finalEvidenceFrame` directly). Here we
-    // only see "no screenshot" cases — either finalUrl exists (give
-    // the user a link to verify) or nothing was saved at all (offer
-    // to re-execute the intent).
-    if (errorFinalUrl) {
-      return (
-        <div className={cn('flex flex-col items-center px-6 py-4 text-center text-muted-foreground', BROWSER_SURFACE, 'rounded-lg')}>
-          <Globe className="h-10 w-10 text-[#EA1F59]/70" aria-hidden />
-          <div className="mt-3 text-sm font-medium text-foreground/80">
-            {missingFrameCopy.title}
-          </div>
-          <div className="mt-1 text-xs leading-relaxed">
-            {missingFrameCopy.body}
-          </div>
-          {onReExecute && (
-            <button
-              type="button"
-              onClick={onReExecute}
-              disabled={reExecuting}
-              aria-label={reExecuting ? '正在重新执行任务' : '重新执行任务'}
-              title={reExecuting ? '正在重新执行' : '重新执行'}
-              className="mt-3 inline-flex items-center gap-1.5 rounded-md border border-[#DCDDDD] bg-white px-2.5 py-1 text-[12px] text-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/50 disabled:cursor-wait disabled:opacity-60 dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10"
-            >
-              <RotateCw className={cn('h-3 w-3', reExecuting && 'animate-spin')} />
-              {reExecuting ? '重新执行中…' : '重新执行'}
-            </button>
-          )}
-        </div>
-      );
-    }
-    if (safeFinalUrl) {
-      return (
-        <div className={cn('flex flex-col items-center px-6 py-4 text-center text-muted-foreground', BROWSER_SURFACE, 'rounded-lg')}>
-          <Globe className="h-10 w-10 text-[#42C0EF]/70" aria-hidden />
-          <div className="mt-3 text-sm font-medium text-foreground/80">
-            {missingFrameCopy.title}
-          </div>
-          <div className="mt-1 text-xs leading-relaxed">
-            {missingFrameCopy.body}
-          </div>
-          <SafeExternalLinkButton
-            href={safeFinalUrl}
-            className="mt-3 inline-flex items-center gap-1.5 rounded-md border border-[#DCDDDD] bg-white px-2.5 py-1 text-[12px] text-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/50 dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10"
-          >
-            <ExternalLink className="h-3 w-3" />
-            <span>{missingFrameCopy.actionLabel}</span>
-            <span className="max-w-[160px] truncate font-mono text-[11px] text-muted-foreground">
-              {safeFinalUrl}
-            </span>
-          </SafeExternalLinkButton>
-        </div>
-      );
-    }
+    const canReopen = Boolean(safeFinalUrl && onReopenFinalUrl);
+    const actionBusy = canReopen ? reopening : reExecuting;
+    const actionLabel = canReopen
+      ? reopening
+        ? '正在重新打开…'
+        : '重新打开页面'
+      : reExecuting
+        ? '重新执行中…'
+        : '重新执行任务';
+    const runAction = async (): Promise<void> => {
+      if (actionBusy) return;
+      if (safeFinalUrl && onReopenFinalUrl) {
+        const intent = browserWorkspaceTaskIntent(safeFinalUrl);
+        if (!intent) return;
+        setReopening(true);
+        try {
+          await onReopenFinalUrl(intent);
+        } finally {
+          setReopening(false);
+        }
+        return;
+      }
+      onReExecute?.();
+    };
     return (
-      <div className={cn('flex flex-col items-center px-6 py-4 text-center text-muted-foreground', BROWSER_SURFACE, 'rounded-lg')}>
-        <Globe className="h-10 w-10 text-[#42C0EF]/70" aria-hidden />
-        <div className="mt-3 text-sm font-medium text-foreground/80">
-          {missingFrameCopy.title}
+      <div className={cn('flex w-full max-w-[360px] flex-col items-center px-7 py-6 text-center text-muted-foreground', BROWSER_SURFACE, 'rounded-lg')}>
+        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#42C0EF]/12 text-[#118AB2] dark:text-[#42C0EF]">
+          <Globe className="h-5 w-5" aria-hidden />
         </div>
-        <div className="mt-1 text-xs leading-relaxed">
-          {missingFrameCopy.body}
+        <div className="mt-3 text-sm font-semibold text-foreground">
+          浏览器会话已结束
         </div>
-        {onReExecute && (
+        <div className="mt-1 text-xs leading-relaxed text-muted-foreground">
+          任务结果{hasSavedScreenshot ? '和页面截图' : ''}已保存在左侧。重新打开会启动新的浏览器，不会改写原任务记录。
+        </div>
+        {(canReopen || onReExecute) && (
           <button
             type="button"
-            onClick={onReExecute}
-            disabled={reExecuting}
-            aria-label={reExecuting ? '正在重新执行任务' : '重新执行任务'}
-            title={reExecuting ? '正在重新执行' : '重新执行'}
-            className="mt-3 inline-flex items-center gap-1.5 rounded-md border border-[#DCDDDD] bg-white px-3 py-1 text-[12px] text-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/50 disabled:cursor-wait disabled:opacity-60 dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10"
+            onClick={() => void runAction()}
+            disabled={actionBusy}
+            aria-label={actionLabel}
+            title={actionLabel}
+            className="mt-4 inline-flex h-9 items-center gap-1.5 rounded-md border border-[#DCDDDD] bg-white px-3 text-[12px] font-medium text-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/50 disabled:cursor-wait disabled:opacity-60 dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10"
           >
-            <RotateCw className={cn('h-3 w-3', reExecuting && 'animate-spin')} />
-            {reExecuting ? '重新执行中…' : '重新执行'}
+            <RotateCw className={cn('h-3.5 w-3.5', actionBusy && 'animate-spin')} />
+            {actionLabel}
           </button>
         )}
       </div>
     );
   }
   return (
-    <div className={cn('flex flex-col items-center px-6 py-4 text-center text-muted-foreground', BROWSER_SURFACE, 'rounded-lg')}>
-      <Globe className="h-10 w-10 text-[#42C0EF]/70" aria-hidden />
-      <div className="mt-3 text-sm font-medium text-foreground/80">浏览器将在这里显示</div>
+    <div className={cn('flex max-w-[340px] flex-col items-center px-6 py-5 text-center text-muted-foreground', BROWSER_SURFACE, 'rounded-[18px]')}>
+      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#42C0EF]/12 text-[#118AB2]">
+        <Globe className="h-5 w-5" aria-hidden />
+      </div>
+      <div className="mt-3 text-sm font-semibold text-foreground">
+        {workspaceIdle ? '输入网址开始浏览' : '浏览器工作区'}
+      </div>
       <div className="mt-1 text-xs leading-relaxed">
-        创建一个任务后，HOLA DAY 的浏览器画面会显示在这里，
-        <br />
-        你可以观察或亲自接管。
+        {workspaceIdle
+          ? '在上方输入网址或搜索内容。HOLA DAY 会创建浏览任务，并在这里实时显示页面。'
+          : '当任务需要打开网页、登录、验证或读取页面时，HOLA DAY 会在这里显示浏览器。'}
+      </div>
+      <div className="mt-3 rounded-full bg-[#EFEFEF]/80 px-3 py-1 text-[11px] text-[#595757] dark:bg-white/10 dark:text-foreground/70">
+        {workspaceIdle ? '回车或点击箭头开始' : '支持观察进度和手动接管'}
       </div>
     </div>
   );
@@ -2452,10 +2316,14 @@ function SafeExternalLinkButton({
   href,
   className,
   children,
+  ariaLabel,
+  title,
 }: {
   href: string | null | undefined;
   className?: string;
   children: React.ReactNode;
+  ariaLabel?: string;
+  title?: string;
 }): JSX.Element | null {
   const [pendingHref, setPendingHref] = React.useState<string | null>(null);
   const safeHref = safeExternalHttpHref(href);
@@ -2466,6 +2334,8 @@ function SafeExternalLinkButton({
         type="button"
         onClick={() => setPendingHref(safeHref)}
         className={className}
+        aria-label={ariaLabel}
+        title={title}
       >
         {children}
       </button>
@@ -2579,8 +2449,13 @@ function deriveDotStatus(status: UiTaskStatus | null | undefined, hasFrame: bool
   return 'idle';
 }
 
-function StatusDot({ status }: { status: DotStatus }): JSX.Element {
-  const label = browserPanelDotLabel(status);
+function StatusDot({
+  status,
+  label = browserPanelDotLabel(status),
+}: {
+  status: DotStatus;
+  label?: string;
+}): JSX.Element {
   return (
     <span
       aria-label={label}
@@ -2592,6 +2467,27 @@ function StatusDot({ status }: { status: DotStatus }): JSX.Element {
         status === 'error' && 'bg-[#EA1F59]',
       )}
     />
+  );
+}
+
+function BrowserIdentity({
+  state,
+  compact,
+}: {
+  state: BrowserPanelHeaderStatus;
+  compact: boolean;
+}): JSX.Element {
+  const identityLabel = `HOLA DAY 浏览器 · ${state.tooltip}`;
+  return (
+    <span
+      title={identityLabel}
+      aria-label={identityLabel}
+      className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-[10px] border border-[#E6E7EB] bg-white px-2 text-[12px] font-semibold text-[#111827] shadow-[0_1px_2px_rgba(17,24,39,0.03)] dark:border-white/10 dark:bg-white/5 dark:text-foreground"
+    >
+      <Globe className="h-3.5 w-3.5 text-[#118AB2] dark:text-[#42C0EF]" aria-hidden />
+      {!compact && <span>浏览器</span>}
+      <StatusDot status={state.dotStatus} label={state.tooltip} />
+    </span>
   );
 }
 
@@ -2608,8 +2504,8 @@ function BrowserConnectionChip({
       title={state.tooltip}
       aria-label={state.tooltip}
       className={cn(
-        'inline-flex h-6 shrink-0 items-center rounded-md border px-2 text-[11px] font-medium leading-none transition-colors',
-        compact && state.tone === 'live' ? 'hidden' : null,
+        'inline-flex h-6 shrink-0 items-center rounded-md border text-[11px] font-medium leading-none transition-colors',
+        compact ? 'px-1.5' : 'px-2',
         state.tone === 'idle' &&
           'border-[#DCDDDD] bg-white/70 text-muted-foreground dark:border-white/10 dark:bg-white/5',
         state.tone === 'live' &&
@@ -2649,6 +2545,8 @@ function UrlBar({
   interactiveActive,
   navTaskId,
   readOnly = false,
+  pendingTarget = false,
+  onLaunchTask,
 }: {
   displayUrl: string;
   interactiveActive: boolean;
@@ -2661,6 +2559,10 @@ function UrlBar({
    */
   navTaskId: string | null;
   readOnly?: boolean;
+  /** Requested destination shown before the first observed page URL arrives. */
+  pendingTarget?: boolean;
+  /** Shell-level mode: create a task-owned browser instead of navigating a missing executor. */
+  onLaunchTask?: (intent: string) => Promise<boolean>;
 }): JSX.Element {
   const toast = useToast();
   // Local editing state. Resync to the prop whenever the agent
@@ -2679,17 +2581,33 @@ function UrlBar({
   React.useEffect(() => {
     if (!editing) setDraft(displayUrl);
   }, [displayUrl, editing]);
+  const normalizedDraft = draft.trim().toLowerCase();
+  const isSecurePage = normalizedDraft.startsWith('https://');
+  const isPageUrl =
+    normalizedDraft.startsWith('https://') ||
+    normalizedDraft.startsWith('http://');
+  const UrlIcon = pending || pendingTarget ? RotateCw : isSecurePage ? LockKeyhole : Globe;
 
   const submit = async (): Promise<void> => {
     if (readOnly) return;
     if (pending) return;
     const target = draft.trim();
-    if (!target || target === displayUrl) {
+    if (!target || (!onLaunchTask && target === displayUrl)) {
       setEditing(false);
       return;
     }
     setPending(true);
     try {
+      if (onLaunchTask) {
+        const intent = browserWorkspaceTaskIntent(target);
+        if (!intent) {
+          toast.show('请输入网址或搜索内容；不支持 file、data、javascript 等地址', 'error');
+          return;
+        }
+        const started = await onLaunchTask(intent);
+        if (mountedRef.current && started) setDraft('');
+        return;
+      }
       const res = await trpc.tasks.browserNav.mutate({
         direction: 'goto',
         url: target,
@@ -2715,46 +2633,84 @@ function UrlBar({
   };
 
   return (
-    <input
-      type="text"
-      spellCheck={false}
-      autoComplete="off"
-      value={draft}
-      title={draft}
-      placeholder="输入网址回车跳转"
-      readOnly={readOnly}
-      onFocus={() => {
-        if (!readOnly) setEditing(true);
-      }}
-      onBlur={() => setEditing(false)}
-      onChange={(e) => {
-        if (!readOnly) setDraft(e.target.value);
-      }}
-      onKeyDown={(e) => {
-        e.stopPropagation();
-        if (readOnly) return;
-        // Phase 4 R2 4c — composing-Enter guard. URL bar with a
-        // Chinese-domain IME commit (e.g. typing 中文.com) used to
-        // submit the partial composition.
-        if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
-          e.preventDefault();
-          void submit();
-        } else if (e.key === 'Escape') {
-          setDraft(displayUrl);
-          (e.target as HTMLInputElement).blur();
-        }
-      }}
-      disabled={pending}
-      aria-label={readOnly ? '浏览器最终地址' : '浏览器地址栏 (Enter 跳转, Esc 还原)'}
+    <div
       className={cn(
-        'h-8 min-w-0 flex-1 truncate rounded-md border bg-transparent px-2 font-mono text-[11px] outline-none transition-colors',
-        'border-transparent text-muted-foreground hover:border-[#DCDDDD] hover:bg-[#EFEFEF]/50 dark:hover:border-white/10 dark:hover:bg-white/5',
-        'focus:border-foreground/20 focus:bg-background focus:text-foreground focus:ring-0',
-        interactiveActive && 'border-[#EA1F59]/35',
-        readOnly && 'cursor-default hover:border-transparent hover:bg-transparent focus:border-transparent focus:bg-transparent',
-        pending && 'cursor-wait opacity-60',
+        'group flex h-8 min-w-0 flex-1 items-center gap-2 rounded-[10px] border px-2 transition-colors',
+        'border-[#E6E7EB] bg-[#F6F7F9] text-muted-foreground hover:border-[#DCDDDD] hover:bg-white',
+        'focus-within:border-[#ADADAD] focus-within:bg-white focus-within:text-foreground',
+        interactiveActive && 'border-[#EA1F59]/35 bg-[#EA1F59]/5',
+        readOnly && 'bg-white/70',
+        pending && 'cursor-wait opacity-75',
       )}
-    />
+      title={pendingTarget ? `正在打开 ${draft}` : draft}
+    >
+      <UrlIcon
+        className={cn(
+          'h-3.5 w-3.5 shrink-0',
+          (pending || pendingTarget) && 'animate-spin',
+          isSecurePage && 'text-[#0F9F6E]',
+          !isPageUrl && 'text-muted-foreground/70',
+        )}
+        aria-hidden
+      />
+      <input
+        type="text"
+        spellCheck={false}
+        autoComplete="off"
+        value={draft}
+        placeholder={onLaunchTask ? '输入网址或搜索内容' : '输入网址回车跳转'}
+        readOnly={readOnly}
+        onFocus={() => {
+          if (!readOnly) setEditing(true);
+        }}
+        onBlur={() => setEditing(false)}
+        onChange={(e) => {
+          if (!readOnly) setDraft(e.target.value);
+        }}
+        onKeyDown={(e) => {
+          e.stopPropagation();
+          if (readOnly) return;
+          // Phase 4 R2 4c — composing-Enter guard. URL bar with a
+          // Chinese-domain IME commit (e.g. typing 中文.com) used to
+          // submit the partial composition.
+          if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+            e.preventDefault();
+            void submit();
+          } else if (e.key === 'Escape') {
+            setDraft(displayUrl);
+            (e.target as HTMLInputElement).blur();
+          }
+        }}
+        disabled={pending}
+        aria-label={
+          readOnly
+            ? '浏览器最终地址'
+            : onLaunchTask
+              ? '浏览器启动栏 (输入网址或搜索内容，Enter 开始)'
+              : pendingTarget
+                ? '浏览器目标地址 (正在打开，尚未确认到达)'
+              : '浏览器地址栏 (Enter 跳转, Esc 还原)'
+        }
+        className={cn(
+          'h-full min-w-0 flex-1 truncate border-0 bg-transparent px-0 font-mono text-[11px] outline-none',
+          'text-[#374151] placeholder:text-muted-foreground/70 disabled:cursor-wait',
+          readOnly && 'cursor-default text-muted-foreground',
+        )}
+      />
+      {onLaunchTask && (
+        <button
+          type="button"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => void submit()}
+          disabled={pending || !draft.trim()}
+          title="开始浏览"
+          aria-label="开始浏览"
+          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[7px] bg-[#EA1F59] text-white transition-colors hover:bg-[#D71950] disabled:cursor-not-allowed disabled:bg-[#DCDDDD] disabled:text-white"
+        >
+          <ArrowRight className="h-3.5 w-3.5" />
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -2811,8 +2767,7 @@ function NavButton({
         }
       }}
       className={cn(
-        'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors',
-        'hover:bg-[#EFEFEF]/60 hover:text-foreground dark:hover:bg-white/10',
+        BROWSER_TOOL_BUTTON,
         pending && 'opacity-50',
       )}
     >
@@ -2852,6 +2807,7 @@ function NavButton({
  */
 function FullscreenFloatingToolbar({
   displayUrl,
+  pendingTarget,
   status,
   interactiveActive,
   interactive,
@@ -2863,6 +2819,7 @@ function FullscreenFloatingToolbar({
   onStop,
 }: {
   displayUrl: string;
+  pendingTarget: boolean;
   status: BrowserPanelHeaderStatus;
   interactiveActive: boolean;
   interactive: boolean;
@@ -2921,7 +2878,7 @@ function FullscreenFloatingToolbar({
       )}
       style={{ minWidth: 'min(640px, 90%)', maxWidth: '90%' }}
     >
-      <StatusDot status={status.dotStatus} />
+      <StatusDot status={status.dotStatus} label={status.tooltip} />
       <BrowserConnectionChip state={status} compact={false} />
       {controlsEnabled && (
         <>
@@ -2935,6 +2892,7 @@ function FullscreenFloatingToolbar({
         interactiveActive={interactiveActive}
         navTaskId={navTaskId}
         readOnly={!controlsEnabled}
+        pendingTarget={pendingTarget}
       />
       {isExecuting && navTaskId && (
         <button

@@ -2,15 +2,25 @@ import { describe, expect, it } from 'vitest';
 import {
   browserFrameCanPanInPortraitSheet,
   browserLiveOverlayCopy,
+  browserStartupTargetUrl,
+  browserWorkspaceTaskIntent,
   browserPanelHeaderStatus,
   browserPanelEvidenceHeaderStatus,
   browserReleasedCardCopy,
+  taskOwnedBrowserFrame,
+  taskOwnedBrowserUrl,
+  terminalEvidenceFrameForTask,
+  browserViewportFooterLabel,
   browserViewportFrameLabel,
   browserWakeFeedback,
   isBrowserErrorUrl,
   browserPanelDotLabel,
   browserLiveStatusLabel,
   shouldShowBrowserHeader,
+  shouldShowBrowserFullscreen,
+  shouldShowTerminalEvidenceLedger,
+  shouldConnectBrowserStream,
+  terminalEvidenceLayout,
   terminalBrowserMissingFrameCopy,
   terminalBrowserTakeoverMessage,
   terminalEvidenceFrameLabel,
@@ -18,6 +28,207 @@ import {
 } from './browser-panel-state';
 
 describe('BrowserPanel state helpers', () => {
+  it('keeps fullscreen available for every inline browser workspace without crowding phone sheets', () => {
+    expect(
+      shouldShowBrowserFullscreen({
+        available: true,
+        workspaceIdle: false,
+        isNarrow: true,
+        isSheet: false,
+        evidenceHeaderActive: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldShowBrowserFullscreen({
+        available: true,
+        workspaceIdle: false,
+        isNarrow: true,
+        isSheet: true,
+        evidenceHeaderActive: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldShowBrowserFullscreen({
+        available: true,
+        workspaceIdle: false,
+        isNarrow: true,
+        isSheet: false,
+        evidenceHeaderActive: false,
+      }),
+    ).toBe(true);
+  });
+
+  it('removes the evidence ledger from the fullscreen canvas', () => {
+    expect(shouldShowTerminalEvidenceLedger(false)).toBe(true);
+    expect(shouldShowTerminalEvidenceLedger(true)).toBe(false);
+  });
+
+  it('treats legacy desktop screenshots as compact previews in a narrow inline rail', () => {
+    expect(
+      terminalEvidenceLayout({
+        isNarrow: true,
+        isSheet: false,
+        fullscreen: false,
+        sourceAspect: 16 / 9,
+        viewMode: 'contain',
+      }),
+    ).toBe('compact-preview');
+    expect(
+      terminalEvidenceLayout({
+        isNarrow: true,
+        isSheet: false,
+        fullscreen: false,
+        sourceAspect: 430 / 760,
+        viewMode: 'contain',
+      }),
+    ).toBe('canvas');
+    expect(
+      terminalEvidenceLayout({
+        isNarrow: true,
+        isSheet: false,
+        fullscreen: true,
+        sourceAspect: 16 / 9,
+        viewMode: 'contain',
+      }),
+    ).toBe('canvas');
+    expect(
+      terminalEvidenceLayout({
+        isNarrow: false,
+        isSheet: true,
+        fullscreen: false,
+        sourceAspect: 16 / 9,
+        viewMode: 'contain',
+      }),
+    ).toBe('compact-preview');
+    expect(
+      terminalEvidenceLayout({
+        isNarrow: false,
+        isSheet: true,
+        fullscreen: false,
+        sourceAspect: 16 / 9,
+        viewMode: 'readable',
+      }),
+    ).toBe('canvas');
+  });
+
+  it('attempts the live stream for browser records, including retained terminal sessions', () => {
+    expect(
+      shouldConnectBrowserStream({ isBrowserTask: true, taskIsTerminal: false }),
+    ).toBe(true);
+    expect(
+      shouldConnectBrowserStream({ isBrowserTask: true, taskIsTerminal: true }),
+    ).toBe(true);
+    expect(
+      shouldConnectBrowserStream({ isBrowserTask: false, taskIsTerminal: false }),
+    ).toBe(false);
+  });
+
+  it('never exposes a cached URL owned by the previously selected task', () => {
+    const cachedUrl = {
+      taskId: 'tsk_previous',
+      url: 'https://previous.example',
+    };
+
+    expect(taskOwnedBrowserUrl('tsk_current', cachedUrl)).toBeNull();
+    expect(taskOwnedBrowserUrl('tsk_previous', cachedUrl)).toBe(
+      'https://previous.example',
+    );
+    expect(taskOwnedBrowserUrl(null, cachedUrl)).toBeNull();
+  });
+
+  it('never substitutes another task frame when the active task has no frame', () => {
+    const otherTaskFrame = {
+      tickIndex: 8,
+      imageBase64: 'other-task-frame',
+      url: 'https://other.example',
+      viewport: { width: 1280, height: 720 },
+      timestamp: '2026-07-17T00:00:00.000Z',
+    };
+
+    expect(
+      taskOwnedBrowserFrame({
+        taskIsTerminal: false,
+        liveFrame: null,
+        finalEvidenceFrame: null,
+      }),
+    ).toBeNull();
+    expect(
+      taskOwnedBrowserFrame({
+        taskIsTerminal: false,
+        liveFrame: otherTaskFrame,
+        finalEvidenceFrame: null,
+      }),
+    ).toBe(otherTaskFrame);
+  });
+
+  it('rehydrates persisted terminal screenshots as task-owned browser evidence', () => {
+    const liveFrame = {
+      tickIndex: 8,
+      imageBase64: 'stale-live-frame',
+      url: 'https://stale.example',
+      viewport: { width: 1280, height: 720 },
+      timestamp: '2026-07-17T00:00:00.000Z',
+    };
+
+    expect(
+      terminalEvidenceFrameForTask({
+        taskIsTerminal: true,
+        task: {
+          finalScreenshot: 'persisted-terminal-frame',
+          finalUrl: 'https://example.com/result',
+          finalViewport: { width: 1550, height: 650 },
+          createdAt: new Date('2026-07-18T00:00:00.000Z'),
+        },
+        liveFrame,
+      }),
+    ).toEqual({
+      frame: {
+        tickIndex: -1,
+        imageBase64: 'persisted-terminal-frame',
+        url: 'https://example.com/result',
+        viewport: { width: 1550, height: 650 },
+        timestamp: '2026-07-18T00:00:00.000Z',
+      },
+      source: 'saved-screenshot',
+    });
+  });
+
+  it('turns a bare domain into a browser task with a secure URL', () => {
+    expect(browserWorkspaceTaskIntent(' example.com/products ')).toBe(
+      '打开 https://example.com/products',
+    );
+  });
+
+  it('keeps explicit web URLs and converts plain text into a browser search task', () => {
+    expect(browserWorkspaceTaskIntent('http://localhost:3000/docs')).toBe(
+      '打开 http://localhost:3000/docs',
+    );
+    expect(browserWorkspaceTaskIntent('今天的 AI 新闻')).toBe(
+      '打开浏览器并搜索：今天的 AI 新闻',
+    );
+  });
+
+  it('refuses empty input and unsafe URL schemes', () => {
+    expect(browserWorkspaceTaskIntent('   ')).toBeNull();
+    expect(browserWorkspaceTaskIntent('javascript:alert(1)')).toBeNull();
+    expect(browserWorkspaceTaskIntent('file:///etc/passwd')).toBeNull();
+  });
+
+  it('recovers the requested URL while a browser task is still starting', () => {
+    expect(browserStartupTargetUrl('打开 https://example.com/products')).toBe(
+      'https://example.com/products',
+    );
+    expect(browserStartupTargetUrl('打开 http://localhost:3000/docs')).toBe(
+      'http://localhost:3000/docs',
+    );
+  });
+
+  it('does not present search prompts or arbitrary task text as a reached URL', () => {
+    expect(browserStartupTargetUrl('打开浏览器并搜索：今天的 AI 新闻')).toBeNull();
+    expect(browserStartupTargetUrl('分析 example.com 的首页')).toBeNull();
+    expect(browserStartupTargetUrl(null)).toBeNull();
+  });
+
   it('does not show browser chrome for a terminal task with no task-owned evidence', () => {
     expect(
       shouldShowBrowserHeader({
@@ -119,10 +330,10 @@ describe('BrowserPanel state helpers', () => {
     });
   });
 
-  it('labels terminal evidence headers without implying a live browser', () => {
+  it('labels expired terminal sessions without implying a live browser', () => {
     expect(browserPanelEvidenceHeaderStatus('completed')).toEqual({
-      label: '浏览器',
-      tooltip: '任务已完成，显示任务结束时的浏览器页面',
+      label: '会话已结束',
+      tooltip: '任务已完成，实时浏览器会话已结束；结果记录仍保留在左侧',
       tone: 'idle',
       dotStatus: 'idle',
       showLabel: true,
@@ -146,8 +357,8 @@ describe('BrowserPanel state helpers', () => {
         'chrome-error://chromewebdata/',
       ),
     ).toEqual({
-      label: '浏览器',
-      tooltip: '任务已完成，任务结束在浏览器错误页',
+      label: '会话已结束',
+      tooltip: '任务已完成，任务结束在浏览器错误页；结果记录仍保留在左侧',
       tone: 'attention',
       dotStatus: 'error',
       showLabel: true,
@@ -165,6 +376,21 @@ describe('BrowserPanel state helpers', () => {
     expect(browserViewportFrameLabel({ width: 1280, height: 800 })).toBe(
       '1280×800 · 桌面帧',
     );
+  });
+
+  it('does not present the saved task viewport as the live adaptive CDP size', () => {
+    expect(
+      browserViewportFooterLabel({
+        usingCdp: true,
+        viewport: { width: 430, height: 760 },
+      }),
+    ).toBe('自适应视口');
+    expect(
+      browserViewportFooterLabel({
+        usingCdp: false,
+        viewport: { width: 430, height: 760 },
+      }),
+    ).toBe('430×760 · 竖屏视口');
   });
 
   it('only hints horizontal panning for wide browser frames in portrait sheets', () => {
@@ -228,16 +454,16 @@ describe('BrowserPanel state helpers', () => {
     expect(
       browserLiveOverlayCopy({ status: 'connecting', showReconnect: false }),
     ).toEqual({
-      title: '正在连接浏览器画面',
+      title: '正在连接浏览器',
       detail: '浏览器正在启动或恢复连接，任务会继续执行。',
-      reconnectLabel: '刷新浏览器画面',
+      reconnectLabel: '重连画面',
     });
     expect(
       browserLiveOverlayCopy({ status: 'connecting', showReconnect: true }),
     ).toEqual({
-      title: '浏览器画面连接时间较久',
-      detail: '浏览器可能还在启动。可以继续等待，或手动刷新画面。',
-      reconnectLabel: '刷新浏览器画面',
+      title: '浏览器启动时间较久',
+      detail: '浏览器可能还在打开网页。可以继续等待，或手动重连画面。',
+      reconnectLabel: '重连画面',
     });
   });
 
@@ -245,16 +471,16 @@ describe('BrowserPanel state helpers', () => {
     expect(
       browserLiveOverlayCopy({ status: 'disconnected', showReconnect: false }),
     ).toEqual({
-      title: '浏览器画面正在恢复',
+      title: '正在恢复浏览器画面',
       detail: 'HOLA DAY 正在自动重连。你可以继续等待，任务不会重新提交。',
-      reconnectLabel: '刷新浏览器画面',
+      reconnectLabel: '重连画面',
     });
     expect(
       browserLiveOverlayCopy({ status: 'disconnected', showReconnect: true }),
     ).toEqual({
-      title: '浏览器画面已断开',
-      detail: '任务可能仍在执行。点击刷新只刷新画面，不会重新提交任务。',
-      reconnectLabel: '刷新浏览器画面',
+      title: '画面连接已断开',
+      detail: '任务可能仍在后台执行。刷新只会重连画面，不会重新提交任务。',
+      reconnectLabel: '重连画面',
     });
   });
 
@@ -262,9 +488,9 @@ describe('BrowserPanel state helpers', () => {
     expect(
       browserLiveOverlayCopy({ status: 'error', showReconnect: true }),
     ).toEqual({
-      title: '浏览器画面连接失败',
-      detail: '连接没有建立成功。点击刷新会刷新画面，任务本身会继续处理。',
-      reconnectLabel: '刷新浏览器画面',
+      title: '无法连接浏览器画面',
+      detail: '画面连接没有建立成功。任务本身可能仍在处理，可以先重连画面。',
+      reconnectLabel: '重连画面',
     });
   });
 
@@ -312,8 +538,8 @@ describe('BrowserPanel state helpers', () => {
 
   it('keeps the released-browser card about the browser, not task outcome', () => {
     expect(browserReleasedCardCopy()).toEqual({
-      title: '浏览器已释放',
-      detail: '当前没有正在运行的浏览器。新任务会自动打开新的浏览器。',
+      title: '浏览器会话已结束',
+      detail: '当前任务的浏览器已关闭。新任务会自动打开新的浏览器。',
       checkLabel: '检查状态',
       checkingLabel: '检查中',
     });

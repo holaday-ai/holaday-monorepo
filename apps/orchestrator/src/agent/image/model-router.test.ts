@@ -19,6 +19,20 @@ describe('pickImageModel', () => {
     expect(d.model).toBe(DEFAULT_PRO_MODEL);
   });
 
+  it('honours explicit Nano Banana 2 selection even for Pro-like prompts', () => {
+    const d = pickImageModel('图片模型要求：使用 Nano Banana 2。\n\n帮我做一张双十一促销海报');
+    expect(d.tier).toBe('flash');
+    expect(d.model).toBe(DEFAULT_FLASH_MODEL);
+    expect(d.reason).toContain('用户选择 Nano Banana 2');
+  });
+
+  it('honours explicit Nano Banana Pro selection for plain prompts', () => {
+    const d = pickImageModel('图片模型要求：使用 Nano Banana Pro。\n\n画一只在草地上的橘猫');
+    expect(d.tier).toBe('pro');
+    expect(d.model).toBe(DEFAULT_PRO_MODEL);
+    expect(d.reason).toContain('用户选择 Nano Banana Pro');
+  });
+
   it('routes embedded-text requests to Pro', () => {
     const d = pickImageModel('生成一张配图，上面要有"夏日特惠"几个字');
     expect(d.tier).toBe('pro');
@@ -52,5 +66,21 @@ describe('pickImageModel', () => {
     expect(flash.model).toBe('nb2-custom');
     const pro = pickImageModel('海报', { proModel: 'nbpro-custom' });
     expect(pro.model).toBe('nbpro-custom');
+  });
+
+  it('uses the structured model preference before prompt heuristics', () => {
+    const flash = pickImageModel('帮我做一张双十一促销海报', {
+      preferredTier: 'flash',
+    });
+    expect(flash.tier).toBe('flash');
+    expect(flash.model).toBe(DEFAULT_FLASH_MODEL);
+    expect(flash.reason).toContain('用户选择 Nano Banana 2');
+
+    const pro = pickImageModel('画一只在草地上的橘猫', {
+      preferredTier: 'pro',
+    });
+    expect(pro.tier).toBe('pro');
+    expect(pro.model).toBe(DEFAULT_PRO_MODEL);
+    expect(pro.reason).toContain('用户选择 Nano Banana Pro');
   });
 });

@@ -1,4 +1,4 @@
-import type { UiTaskStatus } from '@/types/task';
+import type { UiScreencast, UiTask, UiTaskStatus } from '@/types/task';
 
 export type BrowserLiveStatus = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'error';
 export type BrowserPanelHeaderTone =
@@ -17,6 +17,13 @@ export interface BrowserPanelHeaderStatus {
   showLabel: boolean;
 }
 
+export function shouldConnectBrowserStream(inputs: {
+  isBrowserTask: boolean;
+  taskIsTerminal: boolean;
+}): boolean {
+  return inputs.isBrowserTask;
+}
+
 export function shouldShowBrowserHeader(inputs: {
   taskIsTerminal: boolean;
   hasCurrentFrame: boolean;
@@ -29,6 +36,43 @@ export function shouldShowBrowserHeader(inputs: {
     inputs.hasFinalEvidence ||
     inputs.interactiveActive
   );
+}
+
+export function shouldShowBrowserFullscreen(inputs: {
+  available: boolean;
+  workspaceIdle: boolean;
+  isNarrow: boolean;
+  isSheet: boolean;
+  evidenceHeaderActive: boolean;
+}): boolean {
+  if (!inputs.available || inputs.workspaceIdle || inputs.isSheet) return false;
+  return true;
+}
+
+export function shouldShowTerminalEvidenceLedger(fullscreen: boolean): boolean {
+  return !fullscreen;
+}
+
+export type TerminalEvidenceLayout = 'canvas' | 'compact-preview';
+
+export function terminalEvidenceLayout(inputs: {
+  isNarrow: boolean;
+  isSheet: boolean;
+  fullscreen: boolean;
+  sourceAspect: number | null;
+  viewMode: 'contain' | 'readable';
+}): TerminalEvidenceLayout {
+  if (
+    inputs.fullscreen ||
+    inputs.viewMode === 'readable' ||
+    (!inputs.isNarrow && !inputs.isSheet)
+  ) {
+    return 'canvas';
+  }
+  if (inputs.sourceAspect == null || !Number.isFinite(inputs.sourceAspect)) {
+    return 'canvas';
+  }
+  return inputs.sourceAspect > 1.12 ? 'compact-preview' : 'canvas';
 }
 
 export function terminalEvidenceStatusLabel(
@@ -56,6 +100,123 @@ export function isBrowserErrorUrl(url: string | null | undefined): boolean {
     normalized.startsWith('edge-error://') ||
     normalized.startsWith('about:neterror')
   );
+}
+
+/**
+ * Converts the global browser address-bar value into the existing task
+ * creation contract. Browser instances are task-owned, so the shell starts a
+ * normal browser task instead of pretending an unallocated browser can
+ * navigate. Plain domains become HTTPS URLs; other text becomes a web search.
+ * Scheme-looking non-web values are rejected before they enter the task log.
+ */
+export function browserWorkspaceTaskIntent(rawValue: string): string | null {
+  const value = rawValue.trim();
+  if (!value) return null;
+
+  const explicitScheme = /^[a-z][a-z0-9+.-]*:/i.test(value);
+  if (explicitScheme && !/^https?:\/\//i.test(value)) return null;
+  if (/^https?:\/\//i.test(value)) return `打开 ${value}`;
+
+  const domainLike = /^(?:localhost|(?:\d{1,3}\.){3}\d{1,3}|(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,63})(?::\d{1,5})?(?:[/?#]\S*)?$/i;
+  if (domainLike.test(value)) return `打开 https://${value}`;
+
+  return `打开浏览器并搜索：${value}`;
+}
+
+/**
+ * Recovers the explicit target URL from a browser task created by the global
+ * workspace. This is only a requested destination, not evidence that the page
+ * was reached, so callers must keep it visually marked as a pending target.
+ */
+export function browserStartupTargetUrl(
+  intent: string | null | undefined,
+): string | null {
+  if (!intent) return null;
+  const match = intent.trim().match(/^打开\s+(https?:\/\/\S+)$/i);
+  return match?.[1] ?? null;
+}
+
+/**
+ * Selects only evidence owned by the active task. Callers must pass the
+ * active task's live frame rather than a workspace-wide latest frame.
+ */
+export function taskOwnedBrowserFrame(inputs: {
+  taskIsTerminal: boolean;
+  liveFrame: UiScreencast | null;
+  finalEvidenceFrame: UiScreencast | null;
+}): UiScreencast | null {
+  return inputs.taskIsTerminal
+    ? inputs.finalEvidenceFrame
+    : (inputs.liveFrame ?? inputs.finalEvidenceFrame);
+}
+
+export type TerminalEvidenceScreenshotSource =
+  | 'saved-screenshot'
+  | 'last-frame';
+
+export interface TerminalEvidenceFrame {
+  frame: UiScreencast;
+  source: TerminalEvidenceScreenshotSource;
+}
+
+/**
+ * Rebuilds the selected task's read-only terminal browser evidence after a
+ * refresh. Persisted screenshots always win over an in-memory live frame so a
+ * stale frame can never be presented as the task's final page.
+ */
+export function terminalEvidenceFrameForTask(inputs: {
+  taskIsTerminal: boolean;
+  task: Pick<
+    UiTask,
+    'finalScreenshot' | 'finalUrl' | 'finalViewport' | 'createdAt'
+  > | null;
+  liveFrame: UiScreencast | null;
+}): TerminalEvidenceFrame | null {
+  if (!inputs.taskIsTerminal) return null;
+
+  const { task, liveFrame } = inputs;
+  if (task?.finalScreenshot) {
+    return {
+      frame: {
+        tickIndex: -1,
+        imageBase64: task.finalScreenshot,
+        url: task.finalUrl?.trim() || 'about:blank',
+        viewport: task.finalViewport ?? { width: 0, height: 0 },
+        timestamp: task.createdAt.toISOString(),
+      },
+      source: 'saved-screenshot',
+    };
+  }
+
+  if (!liveFrame || !liveFrame.imageBase64 || isBlankBrowserUrl(liveFrame.url)) {
+    return null;
+  }
+  return {
+    frame: {
+      ...liveFrame,
+      url: task?.finalUrl?.trim() || liveFrame.url,
+      viewport: task?.finalViewport ?? liveFrame.viewport,
+    },
+    source: 'last-frame',
+  };
+}
+
+function isBlankBrowserUrl(url: string | null | undefined): boolean {
+  const normalized = url?.trim().toLowerCase();
+  return !normalized || normalized === 'about:blank';
+}
+
+export interface TaskOwnedBrowserUrl {
+  taskId: string;
+  url: string;
+}
+
+/** Prevents a state update effect from leaking the previous task's URL for one render. */
+export function taskOwnedBrowserUrl(
+  activeTaskId: string | null,
+  cached: TaskOwnedBrowserUrl | null,
+): string | null {
+  return activeTaskId && cached?.taskId === activeTaskId ? cached.url : null;
 }
 
 export function terminalEvidenceFrameLabel(inputs: {
@@ -175,14 +336,14 @@ export function browserPanelEvidenceHeaderStatus(
   status: UiTaskStatus | null | undefined,
   finalUrl?: string | null,
 ): BrowserPanelHeaderStatus {
-  const label = '浏览器';
+  const label = '会话已结束';
   const statusLabel = terminalEvidenceStatusLabel(status);
   const errorPage = isBrowserErrorUrl(finalUrl);
   return {
     label,
     tooltip: errorPage
-      ? `${statusLabel}，任务结束在浏览器错误页`
-      : `${statusLabel}，显示任务结束时的浏览器页面`,
+      ? `${statusLabel}，任务结束在浏览器错误页；结果记录仍保留在左侧`
+      : `${statusLabel}，实时浏览器会话已结束；结果记录仍保留在左侧`,
     tone: errorPage ? 'attention' : 'idle',
     dotStatus: errorPage ? 'error' : 'idle',
     showLabel: true,
@@ -199,6 +360,15 @@ export function browserViewportFrameLabel(
   if (viewport.width <= 720 && aspect < 0.9) return `${size} · 窄屏视口`;
   if (viewport.width >= 1200 && aspect > 1.3) return `${size} · 桌面帧`;
   return size;
+}
+
+export function browserViewportFooterLabel(inputs: {
+  usingCdp: boolean;
+  viewport: { width: number; height: number } | null | undefined;
+}): string {
+  return inputs.usingCdp
+    ? '自适应视口'
+    : browserViewportFrameLabel(inputs.viewport);
 }
 
 export function browserFrameCanPanInPortraitSheet(inputs: {
@@ -221,49 +391,49 @@ export function browserLiveOverlayCopy(inputs: {
   if (inputs.showReconnect) {
     if (inputs.status === 'disconnected') {
       return {
-        title: '浏览器画面已断开',
-        detail: '任务可能仍在执行。点击刷新只刷新画面，不会重新提交任务。',
-        reconnectLabel: '刷新浏览器画面',
+        title: '画面连接已断开',
+        detail: '任务可能仍在后台执行。刷新只会重连画面，不会重新提交任务。',
+        reconnectLabel: '重连画面',
       };
     }
     if (inputs.status === 'error') {
       return {
-        title: '浏览器画面连接失败',
-        detail: '连接没有建立成功。点击刷新会刷新画面，任务本身会继续处理。',
-        reconnectLabel: '刷新浏览器画面',
+        title: '无法连接浏览器画面',
+        detail: '画面连接没有建立成功。任务本身可能仍在处理，可以先重连画面。',
+        reconnectLabel: '重连画面',
       };
     }
     return {
-      title: '浏览器画面连接时间较久',
-      detail: '浏览器可能还在启动。可以继续等待，或手动刷新画面。',
-      reconnectLabel: '刷新浏览器画面',
+      title: '浏览器启动时间较久',
+      detail: '浏览器可能还在打开网页。可以继续等待，或手动重连画面。',
+      reconnectLabel: '重连画面',
     };
   }
   if (inputs.status === 'idle') {
     return {
-      title: '正在准备浏览器画面',
-      detail: '任务开始后会自动连接到浏览器。',
-      reconnectLabel: '刷新浏览器画面',
+      title: '正在准备浏览器',
+      detail: 'HOLA DAY 会在任务需要网页操作时自动打开浏览器。',
+      reconnectLabel: '重连画面',
     };
   }
   if (inputs.status === 'disconnected') {
     return {
-      title: '浏览器画面正在恢复',
+      title: '正在恢复浏览器画面',
       detail: 'HOLA DAY 正在自动重连。你可以继续等待，任务不会重新提交。',
-      reconnectLabel: '刷新浏览器画面',
+      reconnectLabel: '重连画面',
     };
   }
   if (inputs.status === 'error') {
     return {
       title: '浏览器画面暂时不可用',
       detail: '浏览器画面连接失败，任务可能仍在后台继续。',
-      reconnectLabel: '刷新浏览器画面',
+      reconnectLabel: '重连画面',
     };
   }
   return {
-    title: '正在连接浏览器画面',
+    title: '正在连接浏览器',
     detail: '浏览器正在启动或恢复连接，任务会继续执行。',
-    reconnectLabel: '刷新浏览器画面',
+    reconnectLabel: '重连画面',
   };
 }
 
@@ -278,8 +448,8 @@ export function browserReleasedCardCopy(): {
   checkingLabel: string;
 } {
   return {
-    title: '浏览器已释放',
-    detail: '当前没有正在运行的浏览器。新任务会自动打开新的浏览器。',
+    title: '浏览器会话已结束',
+    detail: '当前任务的浏览器已关闭。新任务会自动打开新的浏览器。',
     checkLabel: '检查状态',
     checkingLabel: '检查中',
   };

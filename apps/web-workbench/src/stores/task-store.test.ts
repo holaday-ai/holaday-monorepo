@@ -871,6 +871,9 @@ describe('selectTask detail hydration', () => {
 
     await expect(resultPromise).resolves.toMatchObject({ error: expect.any(String) });
     expect(useTaskStore.getState().tasks.some((t) => t.taskId.startsWith('local_pending_'))).toBe(false);
+    // The caller owns contextual task-create feedback. Mirroring the same
+    // error into the shell-level channel renders a second toast.
+    expect(useTaskStore.getState().error).toBeNull();
   });
 
   it('sends a default viewport profile for non-workbench create entry points', async () => {
@@ -921,6 +924,41 @@ describe('selectTask detail hydration', () => {
     expect(createMutate).toHaveBeenCalledWith({
       intent: '打开 https://example.com',
       viewportProfile: 'sidepanel',
+    });
+  });
+
+  it('sends the selected image model as structured task metadata', async () => {
+    createMutate.mockResolvedValueOnce({
+      taskId: 'tsk_image',
+      status: 'executing',
+      executionMode: 'image',
+    } as never);
+    listQuery.mockResolvedValueOnce({ tasks: [], nextCursor: null } as never);
+
+    await useTaskStore.getState().createTask(
+      '生成图片：一张夏日海报',
+      [],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        model: 'nano_banana_pro',
+        aspectRatio: '4:3',
+        imageCount: 3,
+      },
+    );
+
+    expect(createMutate).toHaveBeenCalledWith({
+      intent: '生成图片：一张夏日海报',
+      imageOptions: {
+        model: 'nano_banana_pro',
+        aspectRatio: '4:3',
+        imageCount: 3,
+      },
+      viewportProfile: 'desktop',
     });
   });
 

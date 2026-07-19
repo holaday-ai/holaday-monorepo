@@ -28,10 +28,22 @@ export interface ImageModelOptions {
   readonly flashModel?: string;
   /** Default 'gemini-3-pro-image'. */
   readonly proModel?: string;
+  /** Structured UI selection. When present, this wins over prompt heuristics. */
+  readonly preferredTier?: ImageModelTier;
 }
 
 export const DEFAULT_FLASH_MODEL = 'gemini-3.1-flash-image';
 export const DEFAULT_PRO_MODEL = 'gemini-3-pro-image';
+
+const FORCE_FLASH_HINTS: readonly RegExp[] = [
+  /\b(?:nano\s*banana\s*2|nb\s*2|gemini-3\.1-flash-image)\b/i,
+  /图片模型要求[：:]\s*使用\s*Nano\s*Banana\s*2/i,
+];
+
+const FORCE_PRO_HINTS: readonly RegExp[] = [
+  /\b(?:nano\s*banana\s*pro|nb\s*pro|gemini-3-pro-image)\b/i,
+  /图片模型要求[：:]\s*使用\s*Nano\s*Banana\s*Pro/i,
+];
 
 /**
  * Signals that the request needs Pro's strengths: rendering legible
@@ -61,6 +73,39 @@ export function pickImageModel(
   const flashModel = opts?.flashModel ?? DEFAULT_FLASH_MODEL;
   const proModel = opts?.proModel ?? DEFAULT_PRO_MODEL;
   const text = intent ?? '';
+
+  if (opts?.preferredTier === 'flash') {
+    return {
+      model: flashModel,
+      tier: 'flash',
+      reason: '用户选择 Nano Banana 2',
+    };
+  }
+  if (opts?.preferredTier === 'pro') {
+    return {
+      model: proModel,
+      tier: 'pro',
+      reason: '用户选择 Nano Banana Pro',
+    };
+  }
+
+  const matchedFlash = FORCE_FLASH_HINTS.find((re) => re.test(text));
+  if (matchedFlash) {
+    return {
+      model: flashModel,
+      tier: 'flash',
+      reason: '用户选择 Nano Banana 2',
+    };
+  }
+
+  const matchedForcedPro = FORCE_PRO_HINTS.find((re) => re.test(text));
+  if (matchedForcedPro) {
+    return {
+      model: proModel,
+      tier: 'pro',
+      reason: '用户选择 Nano Banana Pro',
+    };
+  }
 
   const matchedPro = PRO_HINTS.find((re) => re.test(text));
   if (matchedPro) {

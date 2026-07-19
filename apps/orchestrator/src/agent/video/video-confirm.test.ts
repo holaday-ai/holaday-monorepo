@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
-import { decideVideoGate, parseVideoConfirm, quoteIpVideo, quotePetI2v, quoteVideo } from './video-confirm.js';
+import {
+  decideVideoGate,
+  parseVideoConfirm,
+  quoteCloneVideo,
+  quoteIpVideo,
+  quotePetI2v,
+  quoteVideo,
+} from './video-confirm.js';
 
 describe('parseVideoConfirm — structured action wins', () => {
   it('maps button actions with zero text guessing', () => {
@@ -142,6 +149,21 @@ describe('quotePetI2v — 宠物 i2v 报价 (Phase 2 第二期, 原生 RMB/秒)'
     expect(quotePetI2v(8, 'happyhorse_i2v', '1080p').videoCny).toBeGreaterThan(
       quotePetI2v(3, 'happyhorse_i2v', '1080p').videoCny,
     );
+  });
+});
+
+describe('quoteCloneVideo — Wan Animate character swap', () => {
+  it('uses the official Singapore per-second prices and identifies the selected service mode', () => {
+    const standard = quoteCloneVideo(8.2, 'wan-std');
+    const professional = quoteCloneVideo(8.2, 'wan-pro');
+
+    expect(standard.durationSeconds).toBe(8.2);
+    expect(standard.videoCny).toBe(Math.ceil(8.2 * 0.18 * 7.3));
+    expect(professional.videoCny).toBe(Math.ceil(8.2 * 0.26 * 7.3));
+    expect(professional.videoCny).toBeGreaterThan(standard.videoCny);
+    expect(standard.message).toContain('Standard');
+    expect(professional.message).toContain('Pro');
+    expect(standard.message).toContain('实际输出时长');
   });
 });
 

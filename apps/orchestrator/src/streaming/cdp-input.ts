@@ -41,7 +41,8 @@ export type InputMessage =
       metaKey?: boolean;
       shiftKey?: boolean;
     }
-  | { type: 'insertText'; text: string };
+  | { type: 'insertText'; text: string }
+  | { type: 'viewport'; width: number; height: number };
 
 /** CDP modifier bitmask: alt=1, ctrl=2, meta=4, shift=8. */
 function modifiersBitmask(m: {
@@ -84,6 +85,29 @@ export class CdpInputHandler {
     }
     try {
       switch (msg.type) {
+        case 'viewport': {
+          if (
+            !Number.isFinite(msg.width) ||
+            !Number.isFinite(msg.height) ||
+            msg.width < 240 ||
+            msg.width > 1920 ||
+            msg.height < 240 ||
+            msg.height > 1600
+          ) {
+            return;
+          }
+          const width = Math.round(msg.width);
+          const height = Math.round(msg.height);
+          await session.send('Emulation.setDeviceMetricsOverride', {
+            width,
+            height,
+            deviceScaleFactor: 1,
+            mobile: false,
+            screenWidth: width,
+            screenHeight: height,
+          });
+          return;
+        }
         case 'mouseMove':
           await session.send('Input.dispatchMouseEvent', {
             type: 'mouseMoved',

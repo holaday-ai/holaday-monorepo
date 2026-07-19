@@ -19,17 +19,27 @@ import {
   pickWorkbenchBrowserViewportProfile,
 } from '@/lib/browser-viewport-profile';
 import {
+  enterBrowserFullscreen,
+  exitBrowserFullscreen,
+  isBrowserFullscreenActive,
+} from '@/lib/browser-fullscreen';
+import {
   isWorkbenchDesktopWidth,
   isWorkbenchMobileWidth,
+  isWorkbenchWideWidth,
+  workbenchInlineColumnMinimums,
   WORKBENCH_DESKTOP_BREAKPOINT_PX,
   WORKBENCH_MOBILE_BREAKPOINT_PX,
+  WORKBENCH_WIDE_BREAKPOINT_PX,
 } from '@/lib/workbench-breakpoints';
 import {
   followUpTargetForTask,
+  hasBrowserRecordForWorkbench,
   isLiveBrowserTaskForWorkbench,
   isWorkbenchTerminalTask,
   mobileBrowserSheetAutoOpenState,
   preserveBrowserRecordAfterLive,
+  taskFrameForWorkbench,
 } from '@/lib/workbench-state';
 import { useTaskStore } from '@/stores/task-store';
 import { isQuotaExhausted, useQuotaStatus } from '@/lib/use-quota-status';
@@ -63,7 +73,13 @@ type UiTaskAwaitingKind = NonNullable<UiTask['awaitingKind']> | undefined;
  */
 export function WorkbenchApp(): JSX.Element {
   const toast = useToast();
-  const { me } = useAppShellContext();
+  const {
+    me,
+    browserWorkbenchOpen,
+    openBrowserWorkbench,
+    closeBrowserWorkbench,
+    setBrowserAdaptiveSidebarCollapsed,
+  } = useAppShellContext();
   const { setOpenMobile } = useSidebar();
   const mountedRef = React.useRef(false);
 
@@ -82,25 +98,21 @@ export function WorkbenchApp(): JSX.Element {
    * BUG-11 follow-up — viewport breakpoint flag. The inline desktop
    * panel used to stay mounted behind CSS breakpoints, so hidden
    * and visible browser surfaces could both keep a screencast socket
-   * alive. Now the render tree has one lane per viewport:
-   * desktop inline, tablet overlay, mobile sheet.
+   * alive. Now the render tree has one lane per viewport: inline from
+   * tablet width upward, and a mobile sheet below that.
    *
    * Track the breakpoint in state (not just a ref) so the render
    * tree updates on resize. matchMedia keeps the listener cheap.
    */
   /**
-   * Codex Pack B2 + Round 2 P1-8 — three-tier responsive breakpoint:
-   *   - desktop  ≥ 1360px → inline split panel (resize handle, flex)
-   *   - tablet   1100-1359 → overlay panel (fixed right, backdrop)
-   *   - compact  < 1100px → bottom sheet
+   * Codex-style same-plane responsive breakpoint:
+   *   - tablet / desktop >= 768px → inline split panel
+   *   - compact < 768px → bottom workspace
+   *   - wide desktop >= 1360px → user-resizable split
    *
-   * Round 2 P1-8 bumped the inline threshold from 1200 → 1360. At
-   * 1200, the panel's 300-px floor + main's 480-px min-width left
-   * ~420 px for the panel header / toolbar / screencast canvas —
-   * tight enough that buttons started crowding when an expert
-   * report card sat alongside. 1360 gives ~580 px for the panel at
-   * its 540-px default. Narrow tablets and 1024-wide desktop windows
-   * use the bottom sheet so the task body is not squeezed sideways.
+   * Compact inline widths also collapse the app sidebar, leaving the
+   * task and browser as true flex siblings instead of floating the
+   * browser above task content. Only phone widths use a focused sheet.
    */
   const [isDesktop, setIsDesktop] = React.useState<boolean>(() => {
     if (typeof window === 'undefined') return true;
@@ -110,6 +122,10 @@ export function WorkbenchApp(): JSX.Element {
     if (typeof window === 'undefined') return false;
     return isWorkbenchMobileWidth(window.innerWidth);
   });
+  const [isWideDesktop, setIsWideDesktop] = React.useState<boolean>(() => {
+    if (typeof window === 'undefined') return true;
+    return isWorkbenchWideWidth(window.innerWidth);
+  });
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
     const desktopMq = window.matchMedia(
@@ -118,32 +134,37 @@ export function WorkbenchApp(): JSX.Element {
     const mobileMq = window.matchMedia(
       `(min-width: ${WORKBENCH_MOBILE_BREAKPOINT_PX}px)`,
     );
+    const wideMq = window.matchMedia(
+      `(min-width: ${WORKBENCH_WIDE_BREAKPOINT_PX}px)`,
+    );
     const onDesktop = (e: MediaQueryListEvent) => setIsDesktop(e.matches);
     const onMobile = (e: MediaQueryListEvent) => setIsMobile(!e.matches);
+    const onWide = (e: MediaQueryListEvent) => setIsWideDesktop(e.matches);
     desktopMq.addEventListener('change', onDesktop);
     mobileMq.addEventListener('change', onMobile);
+    wideMq.addEventListener('change', onWide);
     return () => {
       desktopMq.removeEventListener('change', onDesktop);
       mobileMq.removeEventListener('change', onMobile);
+      wideMq.removeEventListener('change', onWide);
     };
   }, []);
-  // tablet sits between desktop and mobile — the new overlay zone.
-  const isTablet = !isDesktop && !isMobile;
-  // Pre-B2 callers that branched on `isLg` (inline-vs-sheet) now read
-  // this alias so the existing render logic + cross-bridge effects
-  // keep working. Inline = desktop only; everything below desktop
-  // routes through a non-inline surface (overlay OR sheet).
+  const isCompactInlineViewport = isDesktop && !isWideDesktop;
+  const inlineColumnMinimums = React.useMemo(
+    () => workbenchInlineColumnMinimums({ isWideDesktop }),
+    [isWideDesktop],
+  );
+  // Pre-B2 callers that branched on `isLg` (inline-vs-sheet) keep this
+  // alias while the breakpoint now means tablet-and-up.
   const isLg = isDesktop;
+
+  React.useEffect(() => {
+    if (!isMobile && browserSheetOpen) setBrowserSheetOpen(false);
+  }, [browserSheetOpen, isMobile]);
   /**
-   * When the user crosses the inline boundary WHILE the inline panel
-   * was open, bridge to the appropriate non-inline surface so they
-   * don't suddenly see a blank main area:
-   *   - leaving desktop → tablet: overlay opens automatically (no
-   *     extra state — the conditional render below picks it up).
-   *   - leaving tablet → mobile: open the sheet so the panel content
-   *     stays visible (sheet is a stateful drawer, not a derived
-   *     render like overlay).
-   *   - growing back to desktop: close sheet if it was open.
+   * When the user crosses the inline boundary while the panel is open,
+   * bridge between the inline surface and the stateful mobile sheet so
+   * the browser does not disappear during a window resize.
    */
   const prevIsLgRef = React.useRef(isLg);
   React.useEffect(() => {
@@ -175,9 +196,33 @@ export function WorkbenchApp(): JSX.Element {
   const inputRef = React.useRef<HTMLTextAreaElement>(null);
 
   // BrowserPanel width — explicit px from drag, persisted in
-  // localStorage, clamped to PANEL_MIN_PX on read so a saved value
-  // below that floor doesn't render a sliver.
+  // localStorage, clamped against both panel and main-column floors so
+  // a stale saved width cannot crush the composer on the next visit.
   const contentRowRef = React.useRef<HTMLDivElement | null>(null);
+  const enterPanelFullscreen = React.useCallback(async (): Promise<void> => {
+    setPanelFullscreen(true);
+    const mode = await enterBrowserFullscreen(contentRowRef.current);
+    hdDebug('browser fullscreen entered', { mode });
+  }, []);
+  const exitPanelFullscreen = React.useCallback(async (): Promise<void> => {
+    await exitBrowserFullscreen(document, contentRowRef.current);
+    if (mountedRef.current) setPanelFullscreen(false);
+  }, []);
+  const togglePanelFullscreen = React.useCallback((): void => {
+    if (panelFullscreen) {
+      void exitPanelFullscreen();
+      return;
+    }
+    void enterPanelFullscreen();
+  }, [enterPanelFullscreen, exitPanelFullscreen, panelFullscreen]);
+  React.useEffect(() => {
+    const onFullscreenChange = (): void => {
+      if (isBrowserFullscreenActive(document, contentRowRef.current)) return;
+      setPanelFullscreen(false);
+    };
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', onFullscreenChange);
+  }, []);
   const [panelPx, setPanelPx] = React.useState<number | null>(() => {
     if (typeof window === 'undefined') return null;
     const raw = window.localStorage.getItem('holaday.panelPx');
@@ -195,14 +240,14 @@ export function WorkbenchApp(): JSX.Element {
 
   const computeInitialPanelPx = React.useCallback((): number => {
     const row = contentRowRef.current;
-    if (!row) return Math.max(PANEL_MIN_PX, Math.round(window.innerWidth * 0.55));
+    if (!row) return Math.max(PANEL_MIN_PX, Math.round(window.innerWidth * 0.5));
     const rect = row.getBoundingClientRect();
     return estimateInlineBrowserPanelWidth({
       rowWidth: rect.width,
       explicitPanelWidth: null,
       panelMinWidth: PANEL_MIN_PX,
       mainMinWidth: MAIN_PANEL_MIN_PX,
-    }) ?? Math.max(PANEL_MIN_PX, Math.round(window.innerWidth * 0.55));
+    }) ?? Math.max(PANEL_MIN_PX, Math.round(window.innerWidth * 0.5));
   }, []);
   const onPanelResizeDrag = React.useCallback(
     (dx: number) => {
@@ -225,7 +270,12 @@ export function WorkbenchApp(): JSX.Element {
     [computeInitialPanelPx],
   );
   React.useEffect(() => {
-    if (!isDesktop || panelPx == null || typeof ResizeObserver === 'undefined') return;
+    if (
+      !isDesktop ||
+      isCompactInlineViewport ||
+      panelPx == null ||
+      typeof ResizeObserver === 'undefined'
+    ) return;
     const row = contentRowRef.current;
     if (!row) return;
 
@@ -245,7 +295,7 @@ export function WorkbenchApp(): JSX.Element {
     const ro = new ResizeObserver(clampToRow);
     ro.observe(row);
     return () => ro.disconnect();
-  }, [isDesktop, panelPx]);
+  }, [isCompactInlineViewport, isDesktop, panelPx]);
   const onPanelResizeEnd = React.useCallback(() => {
     dragStartPxRef.current = null;
     const current = panelPxRef.current;
@@ -273,14 +323,14 @@ export function WorkbenchApp(): JSX.Element {
       viewportHeight,
       rowWidth: rowRect?.width ?? null,
       rowHeight: rowRect?.height ?? null,
-      explicitPanelWidth: panelPx,
-      isTablet,
+      explicitPanelWidth: isCompactInlineViewport ? null : panelPx,
+      isTablet: false,
       fullscreen: panelFullscreen,
-      panelMinWidth: PANEL_MIN_PX,
-      mainMinWidth: MAIN_PANEL_MIN_PX,
+      panelMinWidth: inlineColumnMinimums.browser,
+      mainMinWidth: inlineColumnMinimums.main,
       panelChromeHeight: PANEL_CHROME_ESTIMATE_PX,
     });
-  }, [isTablet, panelFullscreen, panelPx]);
+  }, [inlineColumnMinimums, isCompactInlineViewport, panelFullscreen, panelPx]);
   React.useEffect(() => {
     setDefaultViewportProfile(pickCurrentViewportProfile());
   }, [pickCurrentViewportProfile, setDefaultViewportProfile]);
@@ -361,10 +411,10 @@ export function WorkbenchApp(): JSX.Element {
   // BrowserPanel of nothing (or an empty mobile sheet). The composer
   // mode + URL strip is already handled inside the store action.
   React.useEffect(() => {
-    if (selectedTaskId) return;
-    setPanelFullscreen(false);
+    if (selectedTaskId || browserWorkbenchOpen) return;
+    void exitPanelFullscreen();
     setBrowserSheetOpen(false);
-  }, [selectedTaskId]);
+  }, [browserWorkbenchOpen, exitPanelFullscreen, selectedTaskId]);
 
   // Workbench-specific Esc routing. Closes panelFullscreen +
   // browserSheet, and steps out of the way when the BrowserPanel is in
@@ -385,16 +435,24 @@ export function WorkbenchApp(): JSX.Element {
       if (remoteOwnsEsc) return;
       if (browserSheetOpen) {
         setBrowserSheetOpen(false);
+        closeBrowserWorkbench();
         return;
       }
       if (panelFullscreen) {
-        setPanelFullscreen(false);
+        void exitPanelFullscreen();
         return;
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [browserSheetOpen, panelFullscreen, browserInteractive, selectedTaskId]);
+  }, [
+    browserSheetOpen,
+    panelFullscreen,
+    browserInteractive,
+    closeBrowserWorkbench,
+    exitPanelFullscreen,
+    selectedTaskId,
+  ]);
 
   // '/' to focus the composer.
   React.useEffect(() => {
@@ -452,7 +510,21 @@ export function WorkbenchApp(): JSX.Element {
     isLiveBrowserTask,
     override: sidePanelOverride,
   });
-  const showBrowserPanel = sidePanelMode !== 'closed';
+  const taskBrowserPanelOpen = sidePanelMode !== 'closed';
+  const selectedHasBrowserRecord = hasBrowserRecordForWorkbench(selectedTask);
+  const standaloneBrowserWorkspace =
+    browserWorkbenchOpen && !taskBrowserPanelOpen && !selectedHasBrowserRecord;
+  const showBrowserPanel = taskBrowserPanelOpen || browserWorkbenchOpen;
+  const useAdaptiveSidebar = showBrowserPanel && isCompactInlineViewport;
+  React.useEffect(() => {
+    setBrowserAdaptiveSidebarCollapsed(useAdaptiveSidebar);
+  }, [setBrowserAdaptiveSidebarCollapsed, useAdaptiveSidebar]);
+  React.useEffect(
+    () => () => setBrowserAdaptiveSidebarCollapsed(false),
+    [setBrowserAdaptiveSidebarCollapsed],
+  );
+  const browserPanelTask = standaloneBrowserWorkspace ? null : selectedTask;
+  const browserPanelTaskId = standaloneBrowserWorkspace ? null : selectedTaskId;
   const toolbarSidePanelMode = sidePanelModeForToolbar({
     sidePanelMode,
     isMobile,
@@ -471,6 +543,24 @@ export function WorkbenchApp(): JSX.Element {
     }
   }, [isMobile, selectedTaskId, sidePanelMode]);
 
+  React.useEffect(() => {
+    if (sidePanelMode !== 'closed') openBrowserWorkbench();
+  }, [openBrowserWorkbench, sidePanelMode]);
+
+  const previousBrowserWorkbenchOpenRef = React.useRef(browserWorkbenchOpen);
+  React.useEffect(() => {
+    const wasOpen = previousBrowserWorkbenchOpenRef.current;
+    previousBrowserWorkbenchOpenRef.current = browserWorkbenchOpen;
+    if (!wasOpen || browserWorkbenchOpen) return;
+    setSidePanelOverride('close');
+    setBrowserSheetOpen(false);
+    void exitPanelFullscreen();
+  }, [browserWorkbenchOpen, exitPanelFullscreen]);
+
+  React.useEffect(() => {
+    if (browserWorkbenchOpen && isMobile) setBrowserSheetOpen(true);
+  }, [browserWorkbenchOpen, isMobile]);
+
   const previousPanelStateRef = React.useRef<{
     taskId: string | null;
     mode: SidePanelMode;
@@ -482,7 +572,8 @@ export function WorkbenchApp(): JSX.Element {
       previousMode: previousPanelStateRef.current.mode,
       currentOverride: sidePanelOverride,
       isTerminalBrowserTask: Boolean(
-        selectedTask?.executionMode === 'browser' &&
+        selectedTask &&
+          hasBrowserRecordForWorkbench(selectedTask) &&
           isWorkbenchTerminalTask(selectedTask),
       ),
     });
@@ -491,10 +582,39 @@ export function WorkbenchApp(): JSX.Element {
       setSidePanelOverride(nextOverride);
     }
   }, [selectedTask, selectedTaskId, sidePanelMode, sidePanelOverride]);
-  // Toolbar click flips the panel: closed → open, anything-else → close.
+  const closeBrowserWorkspace = React.useCallback(() => {
+    closeBrowserWorkbench();
+    setSidePanelOverride('close');
+    setBrowserSheetOpen(false);
+    void exitPanelFullscreen();
+  }, [closeBrowserWorkbench, exitPanelFullscreen]);
+
+  const startWorkspaceBrowserTask = React.useCallback(
+    async (intent: string): Promise<boolean> => {
+      const result = await createTask(intent);
+      if ('error' in result) {
+        toast.show(taskActionError('启动浏览器失败', result.error), 'error');
+        return false;
+      }
+      openBrowserWorkbench();
+      setSidePanelOverride('open');
+      if (isMobile) setBrowserSheetOpen(true);
+      return true;
+    },
+    [createTask, isMobile, openBrowserWorkbench, toast],
+  );
+
+  // Toolbar and global shell entry share one source of truth: closing
+  // either control closes the visible surface; opening either control
+  // preserves the selected task when it has a browser record.
   const onToggleSidePanel = React.useCallback(() => {
-    setSidePanelOverride(sidePanelMode === 'closed' ? 'open' : 'close');
-  }, [sidePanelMode]);
+    if (showBrowserPanel) {
+      closeBrowserWorkspace();
+      return;
+    }
+    openBrowserWorkbench();
+    if (selectedTaskId) setSidePanelOverride('open');
+  }, [closeBrowserWorkspace, openBrowserWorkbench, selectedTaskId, showBrowserPanel]);
 
   return (
     <div
@@ -599,6 +719,7 @@ export function WorkbenchApp(): JSX.Element {
           onOpenSidebar={() => setOpenMobile(true)}
           sidePanelMode={toolbarSidePanelMode}
           browserAttentionNeeded={selectedNeedsBrowser}
+          browserPanelOpen={showBrowserPanel && isDesktop}
           onToggleSidePanel={() => {
             // BOSS bug fix — on mobile (bottom-sheet browser lane)
             // the bottom sheet IS the only browser surface, so the
@@ -609,7 +730,13 @@ export function WorkbenchApp(): JSX.Element {
             const mobileWidth =
               typeof window !== 'undefined' && isWorkbenchMobileWidth(window.innerWidth);
             if (mobileWidth) {
-              setBrowserSheetOpen((open) => !open);
+              if (browserSheetOpen) {
+                closeBrowserWorkspace();
+              } else {
+                openBrowserWorkbench();
+                setSidePanelOverride('open');
+                setBrowserSheetOpen(true);
+              }
               return;
             }
             // Desktop: flip the override (closed → open → close).
@@ -618,143 +745,112 @@ export function WorkbenchApp(): JSX.Element {
         />
       )}
 
-      {!panelFullscreen && showBrowserPanel && isDesktop && (
+      {!panelFullscreen && showBrowserPanel && isDesktop && !isCompactInlineViewport && (
         <ResizeHandle onDrag={onPanelResizeDrag} onDragEnd={onPanelResizeEnd} />
       )}
 
-      {/* Codex Pack B2 — three-tier panel rendering:
-          inline (desktop ≥1360) renders here as a flex sibling of the
-          main column; tablet (1100-1359) renders below in the overlay
-          branch (fixed right, backdrop); compact widths (<1100) go
-          through the sheet branch. Only ONE BrowserPanel mount per
-          moment so CdpScreencastViewport doesn't fight itself. */}
+      {/* Tablet and desktop render the browser as a true flex sibling
+          of the task workspace. Compact phone widths use the sheet
+          branch below. Only one BrowserPanel mount exists at a time. */}
       {(panelFullscreen || (showBrowserPanel && isDesktop)) && (
         <div
           className={
             panelFullscreen
               ? 'flex h-full w-full flex-col'
-              : 'h-full flex flex-col lg:shrink-0'
+              : 'flex h-full min-w-0 flex-col lg:shrink-0'
           }
           style={
             panelFullscreen
               ? undefined
-              : panelPx != null
-                ? { flex: `0 0 ${panelPx}px` }
-                : { flex: '3 1 0', minWidth: PANEL_MIN_PX }
+              : !isCompactInlineViewport && panelPx != null
+                ? {
+                    flex: `0 1 ${panelPx}px`,
+                    minWidth: inlineColumnMinimums.browser,
+                    maxWidth: `calc(100% - ${inlineColumnMinimums.main}px)`,
+                  }
+                : {
+                    flex: '2 1 0',
+                    minWidth: inlineColumnMinimums.browser,
+                    maxWidth: `calc(100% - ${inlineColumnMinimums.main}px)`,
+                  }
           }
         >
           <BrowserPanel
             frame={
-              selectedTask
-                ? (screencastByTask[selectedTask.taskId] ?? null)
-                : null
+              taskFrameForWorkbench(browserPanelTaskId, screencastByTask)
             }
-            taskStatus={selectedTask?.status ?? null}
+            taskStatus={browserPanelTask?.status ?? null}
             awaitingUser={
-              selectedTask
+              browserPanelTask
                 ? Boolean(
-                    captchaWaitByTask[selectedTask.taskId] ||
-                      awaitingUserByTask[selectedTask.taskId],
+                    captchaWaitByTask[browserPanelTask.taskId] ||
+                      awaitingUserByTask[browserPanelTask.taskId],
                   )
                 : false
             }
             awaitingKind={
-              selectedTask && captchaWaitByTask[selectedTask.taskId]
+              browserPanelTask && captchaWaitByTask[browserPanelTask.taskId]
                 ? 'captcha'
-                : selectedAwaitingKind
+                : browserPanelTask
+                  ? selectedAwaitingKind
+                  : undefined
             }
-            activeTaskId={selectedTaskId}
+            activeTaskId={browserPanelTaskId}
+            workspaceIdle={standaloneBrowserWorkspace}
+            onStartWorkspaceTask={startWorkspaceBrowserTask}
             poolUserId={me?.multiUser ? me.userId : null}
             fullscreen={panelFullscreen}
-            onToggleFullscreen={() => setPanelFullscreen((v) => !v)}
-            onToggleCollapse={() => setSidePanelOverride('close')}
-            onClose={() => setSidePanelOverride('close')}
-            onReExecute={selectedTask ? () => void handleBrowserReExecute() : undefined}
+            onToggleFullscreen={togglePanelFullscreen}
+            onToggleCollapse={closeBrowserWorkspace}
+            onClose={closeBrowserWorkspace}
+            onReExecute={browserPanelTask ? () => void handleBrowserReExecute() : undefined}
             reExecuting={browserReExecuting}
           />
         </div>
       )}
 
-      {/* Codex Pack B2 — overlay panel (tablet 1100-1359). Sits over
-          the main column as a fixed right-edge drawer with a backdrop
-          tap-to-close. No resize handle (the width is fixed at
-          560 px to fit comfortably while leaving room for the main
-          column underneath). */}
-      {!panelFullscreen && showBrowserPanel && isTablet && (
-        <>
-          <div
-            className="fixed inset-0 z-40 bg-black/20 backdrop-blur-[1px]"
-            aria-hidden
-            onClick={() => setSidePanelOverride('close')}
-          />
-          <div className="fixed right-0 top-0 bottom-0 z-50 flex w-[480px] max-w-[84vw] flex-col bg-background shadow-2xl">
-            <BrowserPanel
-              frame={
-                selectedTask
-                  ? (screencastByTask[selectedTask.taskId] ?? null)
-                  : null
-              }
-              taskStatus={selectedTask?.status ?? null}
-              awaitingUser={
-                selectedTask
-                  ? Boolean(
-                      captchaWaitByTask[selectedTask.taskId] ||
-                        awaitingUserByTask[selectedTask.taskId],
-                    )
-                  : false
-              }
-              awaitingKind={
-                selectedTask && captchaWaitByTask[selectedTask.taskId]
-                  ? 'captcha'
-                  : selectedAwaitingKind
-              }
-              activeTaskId={selectedTaskId}
-              poolUserId={me?.multiUser ? me.userId : null}
-              fullscreen={false}
-              onToggleFullscreen={() => setPanelFullscreen((v) => !v)}
-              onToggleCollapse={() => setSidePanelOverride('close')}
-              onClose={() => setSidePanelOverride('close')}
-              onReExecute={selectedTask ? () => void handleBrowserReExecute() : undefined}
-              reExecuting={browserReExecuting}
-            />
-          </div>
-        </>
-      )}
-
-      {/* Bottom-sheet panel: renders on compact widths (<1100px).
-          Tablet (1100-1359) routes through the overlay branch above, so
-          the sheet doesn't double-mount alongside an overlay. The
-          BrowserPanel internally returns null when `open=false`, but
-          we ALSO gate the wrapping div on isMobile so the React tree
-          never holds two parallel BrowserPanel mounts. */}
+      {/* Bottom workspace: compact phone widths only. BrowserPanel
+          internally returns null when `open=false`; the outer gate
+          also prevents a parallel screencast mount. */}
       {!panelFullscreen && isMobile && (
         <div>
+        {browserSheetOpen && (
+          <button
+            type="button"
+            aria-label="收起浏览器"
+            title="收起浏览器"
+            className="fixed inset-0 z-[70] cursor-default bg-black/20 backdrop-blur-[1px]"
+            onClick={closeBrowserWorkspace}
+          />
+        )}
         <BrowserPanel
           layout="sheet"
           open={browserSheetOpen}
-          onClose={() => setBrowserSheetOpen(false)}
+          onClose={closeBrowserWorkspace}
           frame={
-            selectedTask
-              ? (screencastByTask[selectedTask.taskId] ?? null)
-              : null
+            taskFrameForWorkbench(browserPanelTaskId, screencastByTask)
           }
-          taskStatus={selectedTask?.status ?? null}
+          taskStatus={browserPanelTask?.status ?? null}
           awaitingUser={
-            selectedTask
+            browserPanelTask
               ? Boolean(
-                  captchaWaitByTask[selectedTask.taskId] ||
-                    awaitingUserByTask[selectedTask.taskId],
+                  captchaWaitByTask[browserPanelTask.taskId] ||
+                    awaitingUserByTask[browserPanelTask.taskId],
                 )
               : false
           }
           awaitingKind={
-            selectedTask && captchaWaitByTask[selectedTask.taskId]
+            browserPanelTask && captchaWaitByTask[browserPanelTask.taskId]
               ? 'captcha'
-              : selectedAwaitingKind
+              : browserPanelTask
+                ? selectedAwaitingKind
+                : undefined
           }
-          activeTaskId={selectedTaskId}
+          activeTaskId={browserPanelTaskId}
+          workspaceIdle={standaloneBrowserWorkspace}
+          onStartWorkspaceTask={startWorkspaceBrowserTask}
           poolUserId={me?.multiUser ? me.userId : null}
-          onReExecute={selectedTask ? () => void handleBrowserReExecute() : undefined}
+          onReExecute={browserPanelTask ? () => void handleBrowserReExecute() : undefined}
           reExecuting={browserReExecuting}
         />
         </div>
@@ -796,15 +892,15 @@ export function WorkbenchApp(): JSX.Element {
  * Used by the localStorage clamp on seed, the drag handle floor, AND
  * the collapsed-flex fallback when no explicit panelPx is set.
  *
- * BUG-11 fix (2026-05-19): dropped from 560 → 300. At 560 + main's
- * lg:min-w-[420] = 980 the wrapper exceeded a typical 884-px content
- * column (1144 viewport − 260 sidebar) and the parent's overflow:hidden
- * clipped the right edge of search-result pages by ~108 px. CSS scale
- * on the screencast canvas already keeps the inner image readable at
- * narrower widths, so 300 is the new floor.
+ * The task workspace keeps 560px on wide layouts so the composer and
+ * result stream remain usable. The browser floor is 360px: 300px made
+ * saved desktop screenshots and browser controls technically fit but
+ * not meaningfully readable. Compact inline layouts ignore a saved
+ * width and collapse the app sidebar, so the two same-plane surfaces
+ * can still share the viewport without overlaying one another.
  */
-const PANEL_MIN_PX = 300;
-const MAIN_PANEL_MIN_PX = 420;
+const PANEL_MIN_PX = 360;
+const MAIN_PANEL_MIN_PX = 560;
 const PANEL_CHROME_ESTIMATE_PX = 140;
 
 function preferredDisplayName(

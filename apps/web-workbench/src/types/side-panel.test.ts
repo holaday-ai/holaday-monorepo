@@ -18,6 +18,18 @@ describe('side-panel helpers', () => {
     ).toBe('closed');
   });
 
+  it('honors an explicit browser open for a selected task even if composer state is stale', () => {
+    expect(
+      computeSidePanelMode({
+        hasSelectedTask: true,
+        isComposerNew: true,
+        selectedNeedsBrowser: false,
+        isLiveBrowserTask: false,
+        override: 'open',
+      }),
+    ).toBe('browser-record');
+  });
+
   it('reflects the mobile browser sheet open state in toolbar labels', () => {
     expect(
       sidePanelModeForToolbar({
