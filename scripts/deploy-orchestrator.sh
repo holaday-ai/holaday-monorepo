@@ -155,8 +155,18 @@ rollback() {
 stage_runtime_helper
 
 echo "→ Capturing current HEAD for rollback"
-PREV_HEAD=$(run_with_retry "Vultr prev-head" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
-  "cd /opt/holaday-monorepo && git rev-parse HEAD" | tail -1 | tr -d '[:space:]')
+PREV_HEAD="${ORCHESTRATOR_ROLLBACK_HEAD:-}"
+if [[ -z "$PREV_HEAD" ]]; then
+  PREV_HEAD=$(run_with_retry "Vultr prev-head" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
+    "cd /opt/holaday-monorepo && git rev-parse HEAD" | tail -1 | tr -d '[:space:]')
+fi
+if ! [[ "$PREV_HEAD" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "❌ Invalid rollback HEAD — refusing deploy" >&2
+  exit 1
+fi
+run_with_retry "Vultr rollback-head validation" \
+  "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
+  "cd /opt/holaday-monorepo && git cat-file -e '$PREV_HEAD^{commit}'"
 echo "   prev HEAD (LIVE): ${PREV_HEAD:-unknown}"
 
 # ── Pre-reset safety gate — SESSION_STATUS hard rule 7 (2026-06-13) ──────

@@ -20,6 +20,37 @@ TARGET="${1:-spa}"
 cd "$ROOT_DIR"
 # shellcheck source=scripts/load-deploy-env.sh
 source "$ROOT_DIR/scripts/load-deploy-env.sh"
+# shellcheck source=scripts/ssh-password-auth.sh
+source "$ROOT_DIR/scripts/ssh-password-auth.sh"
+
+VULTR_HOST="root@207.148.70.106"
+RELEASE_ROLLBACK_HEAD="${RELEASE_ROLLBACK_HEAD:-}"
+
+capture_release_rollback_head() {
+  if [[ -n "$RELEASE_ROLLBACK_HEAD" ]]; then
+    return 0
+  fi
+  if [[ -z "${VULTR_PASSWORD:-}" ]]; then
+    echo "❌ VULTR_PASSWORD unset — cannot capture the release rollback point" >&2
+    exit 1
+  fi
+
+  build_ssh_password_prefix "$VULTR_PASSWORD"
+  RELEASE_ROLLBACK_HEAD=$("${SSH_PASSWORD_PREFIX[@]}" ssh \
+    -o StrictHostKeyChecking=no \
+    -o ConnectTimeout=20 \
+    -o ServerAliveInterval=10 \
+    -o ServerAliveCountMax=3 \
+    "$VULTR_HOST" \
+    "cd /opt/holaday-monorepo && git rev-parse HEAD" \
+    | tail -1 \
+    | tr -d '[:space:]')
+  if ! [[ "$RELEASE_ROLLBACK_HEAD" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "❌ Could not capture a valid production rollback HEAD" >&2
+    exit 1
+  fi
+  echo "→ Release rollback HEAD: $RELEASE_ROLLBACK_HEAD"
+}
 
 fetch_current() {
   if [[ -n "$(git status --porcelain --untracked-files=no)" && "${ALLOW_DIRTY_DEPLOY:-0}" != "1" ]]; then
@@ -42,7 +73,8 @@ deploy_spa() {
 
 deploy_orchestrator() {
   echo "→ Deploying orchestrator"
-  "$ROOT_DIR/scripts/deploy-orchestrator.sh" "$BRANCH"
+  ORCHESTRATOR_ROLLBACK_HEAD="$RELEASE_ROLLBACK_HEAD" \
+    "$ROOT_DIR/scripts/deploy-orchestrator.sh" "$BRANCH"
 }
 
 deploy_akshare() {
@@ -85,6 +117,7 @@ case "$TARGET" in
     ;;
   orchestrator)
     fetch_current
+    capture_release_rollback_head
     deploy_akshare
     deploy_orchestrator
     verify_healthz
@@ -95,6 +128,7 @@ case "$TARGET" in
     ;;
   both)
     fetch_current
+    capture_release_rollback_head
     deploy_akshare
     deploy_orchestrator
     # Orchestrator deploy resets the shared Vultr checkout. Keep SPA last
