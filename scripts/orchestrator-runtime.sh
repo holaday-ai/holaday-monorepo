@@ -13,7 +13,7 @@ RUN_GROUP="${ORCHESTRATOR_RUN_GROUP:-$RUN_USER}"
 NODE_BIN="${ORCHESTRATOR_NODE_BIN:-/opt/node22/bin/node}"
 BROWSER_DIR="${BROWSER_POOL_DIR:-/var/lib/holaday-browsers}"
 PM2_HOME="${ORCHESTRATOR_PM2_HOME:-/root/.pm2}"
-START_SCRIPT="$REPO_ROOT/scripts/start-orchestrator-production.sh"
+START_SCRIPT="${ORCHESTRATOR_START_SCRIPT:-$REPO_ROOT/scripts/start-orchestrator-production.sh}"
 ORCHESTRATOR_DIR="$REPO_ROOT/apps/orchestrator"
 HTTP_PORT="${ORCHESTRATOR_HTTP_PORT:-4001}"
 WS_PORT="${ORCHESTRATOR_WS_PORT:-4002}"
@@ -169,6 +169,7 @@ export USER="$RUN_USER"
 export LOGNAME="$RUN_USER"
 export XDG_RUNTIME_DIR="$RUN_HOME/.runtime"
 export PM2_HOME
+export ORCHESTRATOR_REPO_ROOT="$REPO_ROOT"
 
 # Recreate the PM2 entry deterministically. `pm2 restart` preserves the old
 # root identity, while `--uid/--gid` on start records the intended runtime

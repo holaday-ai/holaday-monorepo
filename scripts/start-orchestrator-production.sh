@@ -6,12 +6,18 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+DEFAULT_REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="${ORCHESTRATOR_REPO_ROOT:-$DEFAULT_REPO_ROOT}"
 ORCHESTRATOR_DIR="$REPO_ROOT/apps/orchestrator"
 NODE_BIN="${ORCHESTRATOR_NODE_BIN:-/opt/node22/bin/node}"
 DIST_ENTRY="$ORCHESTRATOR_DIR/dist/index.js"
 
 export PATH="/opt/node22/bin:$PATH"
+
+[[ "$REPO_ROOT" == /* && "$REPO_ROOT" != "/" ]] || {
+  echo "start-orchestrator-production: invalid repository root: $REPO_ROOT" >&2
+  exit 1
+}
 
 # PM2 remains root-owned, but the application child must not use or expose its
 # control directory after PM2 has dropped the process to the runtime user.

@@ -44,8 +44,10 @@ HEALTH_URL="http://localhost:4001/healthz"
 HEALTH_MARKER='"status":"ok"'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUNTIME_HELPER="$SCRIPT_DIR/orchestrator-runtime.sh"
-REMOTE_RUNTIME_DIR="/root/.holaday-deploy"
+START_HELPER="$SCRIPT_DIR/start-orchestrator-production.sh"
+REMOTE_RUNTIME_DIR="/var/lib/holaday-deploy"
 REMOTE_RUNTIME_HELPER="$REMOTE_RUNTIME_DIR/orchestrator-runtime.sh"
+REMOTE_START_HELPER="$REMOTE_RUNTIME_DIR/start-orchestrator-production.sh"
 ORCHESTRATOR_RUN_USER="${ORCHESTRATOR_RUN_USER:-holaday}"
 ORCHESTRATOR_RUN_GROUP="${ORCHESTRATOR_RUN_GROUP:-$ORCHESTRATOR_RUN_USER}"
 
@@ -55,6 +57,10 @@ if [[ -z "${VULTR_PASSWORD:-}" ]]; then
 fi
 if [[ ! -f "$RUNTIME_HELPER" ]]; then
   echo "❌ Runtime helper missing: $RUNTIME_HELPER" >&2
+  exit 1
+fi
+if [[ ! -f "$START_HELPER" ]]; then
+  echo "❌ Production start helper missing: $START_HELPER" >&2
   exit 1
 fi
 if ! [[ "$ORCHESTRATOR_RUN_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
@@ -109,16 +115,17 @@ run_with_retry() {
 }
 
 stage_runtime_helper() {
-  echo "→ Staging non-root runtime helper"
+  echo "→ Staging non-root runtime helpers"
   run_with_retry "Vultr runtime-helper directory" \
     "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
-    "install -d -o root -g root -m 700 '$REMOTE_RUNTIME_DIR'"
+    "install -d -o root -g root -m 755 '$REMOTE_RUNTIME_DIR'"
   run_with_retry "Vultr runtime-helper upload" \
     "${VULTR_AUTH_PREFIX[@]}" scp "${SSH_OPTS[@]}" \
-    "$RUNTIME_HELPER" "$VULTR_HOST:$REMOTE_RUNTIME_HELPER"
+    "$RUNTIME_HELPER" "$START_HELPER" "$VULTR_HOST:$REMOTE_RUNTIME_DIR/"
   run_with_retry "Vultr runtime-helper permissions" \
     "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
-    "chown root:root '$REMOTE_RUNTIME_HELPER' && chmod 700 '$REMOTE_RUNTIME_HELPER'"
+    "chown root:root '$REMOTE_RUNTIME_HELPER' '$REMOTE_START_HELPER' && \
+     chmod 700 '$REMOTE_RUNTIME_HELPER' && chmod 755 '$REMOTE_START_HELPER'"
 }
 
 restart_orchestrator_as_runtime_user() {
@@ -129,6 +136,7 @@ restart_orchestrator_as_runtime_user() {
       set -a && . apps/orchestrator/.env && set +a && \
       ORCHESTRATOR_RUN_USER='$ORCHESTRATOR_RUN_USER' \
       ORCHESTRATOR_RUN_GROUP='$ORCHESTRATOR_RUN_GROUP' \
+      ORCHESTRATOR_START_SCRIPT='$REMOTE_START_HELPER' \
       '$REMOTE_RUNTIME_HELPER' restart /opt/holaday-monorepo"
 }
 
