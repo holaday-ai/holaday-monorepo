@@ -12,6 +12,7 @@ import {
   readableScreencastAutoScrollKey,
   readableScreencastStartScrollLeft,
 } from '@/lib/screencast-fit';
+import { retainScreencastInputFocus } from '@/lib/screencast-input-focus';
 import { cn } from '@/lib/utils';
 
 /**
@@ -463,8 +464,10 @@ export function CdpScreencastViewport({
   };
   const onMouseDown = (e: React.MouseEvent) => {
     if (viewOnly) return;
-    // Focus the hidden input so subsequent keys + IME flow through us.
-    hiddenInputRef.current?.focus();
+    retainScreencastInputFocus({
+      event: e,
+      input: hiddenInputRef.current,
+    });
     const { x, y } = getCoords(e);
     sendInput({
       type: 'mouseDown',
