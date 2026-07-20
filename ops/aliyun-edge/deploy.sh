@@ -22,7 +22,8 @@
 #
 # The script tars the current SPA dist + this nginx config and uses
 # scp + ssh to install. SSH password lives in $SSHPASS (export it
-# before invoking).
+# before invoking). Authentication uses sshpass when available and
+# falls back to the system expect binary on macOS.
 
 set -euo pipefail
 
@@ -39,12 +40,106 @@ DOMAIN="hd-app.orangebench.tech"
 RELEASE_ID="$(date -u +%Y%m%d%H%M%S)-$$"
 BUNDLE="/tmp/holaday-edge-$RELEASE_ID.tar.gz"
 INSTALL_UPLOAD="/tmp/install-remote-$RELEASE_ID.sh"
+PASSWORD_TRANSPORT=""
+EXPECT_BIN=""
 
 cleanup() {
   rm -f "$BUNDLE" "$INSTALL_UPLOAD"
 }
 
 trap cleanup EXIT
+
+if command -v sshpass >/dev/null 2>&1; then
+  PASSWORD_TRANSPORT="sshpass"
+elif command -v expect >/dev/null 2>&1; then
+  PASSWORD_TRANSPORT="expect"
+  EXPECT_BIN="$(command -v expect)"
+else
+  echo "error: neither sshpass nor expect is available for password authentication" >&2
+  exit 127
+fi
+
+run_scp() {
+  if [[ "$PASSWORD_TRANSPORT" == "sshpass" ]]; then
+    sshpass -e scp -O -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=password -o PubkeyAuthentication=no \
+      "$BUNDLE" "$INSTALL_UPLOAD" "$ALIYUN_HOST:/tmp/"
+    return
+  fi
+
+  export ALIYUN_HOST BUNDLE INSTALL_UPLOAD
+  "$EXPECT_BIN" <<'EXPECT'
+set timeout 300
+set password_sent 0
+
+spawn scp -O -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=password -o PubkeyAuthentication=no $env(BUNDLE) $env(INSTALL_UPLOAD) "$env(ALIYUN_HOST):/tmp/"
+expect {
+  -re {(?i)are you sure you want to continue connecting} {
+    send -- "yes\r"
+    exp_continue
+  }
+  -re {(?i)password:} {
+    if {$password_sent} {
+      puts stderr "error: Aliyun rejected the supplied root password"
+      exit 5
+    }
+    set password_sent 1
+    send -- "$env(SSHPASS)\r"
+    exp_continue
+  }
+  timeout {
+    puts stderr "error: timed out while uploading the edge bundle"
+    exit 124
+  }
+  eof
+}
+
+set wait_result [wait]
+exit [lindex $wait_result 3]
+EXPECT
+}
+
+run_ssh() {
+  local remote_command
+  remote_command="bash '$INSTALL_UPLOAD' '$DOMAIN' '$BUNDLE' '$RELEASE_ID' '$INSTALL_UPLOAD'"
+
+  if [[ "$PASSWORD_TRANSPORT" == "sshpass" ]]; then
+    sshpass -e ssh -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=password -o PubkeyAuthentication=no \
+      "$ALIYUN_HOST" "$remote_command"
+    return
+  fi
+
+  export ALIYUN_HOST
+  export REMOTE_COMMAND="$remote_command"
+  "$EXPECT_BIN" <<'EXPECT'
+set timeout 300
+set password_sent 0
+
+spawn ssh -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=password -o PubkeyAuthentication=no $env(ALIYUN_HOST) $env(REMOTE_COMMAND)
+expect {
+  -re {(?i)are you sure you want to continue connecting} {
+    send -- "yes\r"
+    exp_continue
+  }
+  -re {(?i)password:} {
+    if {$password_sent} {
+      puts stderr "error: Aliyun rejected the supplied root password"
+      exit 5
+    }
+    set password_sent 1
+    send -- "$env(SSHPASS)\r"
+    exp_continue
+  }
+  timeout {
+    puts stderr "error: timed out while installing the edge release"
+    exit 124
+  }
+  eof
+}
+
+set wait_result [wait]
+exit [lindex $wait_result 3]
+EXPECT
+}
 
 if [[ -z "${SSHPASS:-}" ]]; then
   echo "error: export SSHPASS=<aliyun root password> first" >&2
@@ -80,11 +175,9 @@ cp "$REMOTE_INSTALL_SCRIPT" "$INSTALL_UPLOAD"
 ls -lh "$BUNDLE"
 
 echo "==> uploading bundle to Aliyun"
-sshpass -e scp -O -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=password -o PubkeyAuthentication=no \
-  "$BUNDLE" "$INSTALL_UPLOAD" "$ALIYUN_HOST:/tmp/"
+run_scp
 
 echo "==> installing on Aliyun"
-sshpass -e ssh -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=password -o PubkeyAuthentication=no \
-  "$ALIYUN_HOST" "bash '$INSTALL_UPLOAD' '$DOMAIN' '$BUNDLE' '$RELEASE_ID' '$INSTALL_UPLOAD'"
+run_ssh
 
 echo "==> edge bundle uploaded and installed"
