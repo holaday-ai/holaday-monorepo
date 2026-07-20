@@ -71,6 +71,17 @@ function printableKeyText(m: {
   return m.key;
 }
 
+function editingCommands(m: {
+  key?: string;
+  ctrlKey?: boolean;
+  metaKey?: boolean;
+}): string[] | undefined {
+  if (!(m.ctrlKey || m.metaKey) || m.key?.toLowerCase() !== 'a') {
+    return undefined;
+  }
+  return ['selectAll'];
+}
+
 export class CdpInputHandler {
   /**
    * @param getSession Returns the streamer's CURRENT CDP session,
@@ -156,6 +167,7 @@ export class CdpInputHandler {
           return;
         case 'keyDown': {
           const text = printableKeyText(msg);
+          const commands = editingCommands(msg);
           await session.send('Input.dispatchKeyEvent', {
             type: 'keyDown',
             ...(msg.key ? { key: msg.key } : {}),
@@ -163,6 +175,7 @@ export class CdpInputHandler {
             ...(msg.keyCode != null ? { windowsVirtualKeyCode: msg.keyCode } : {}),
             modifiers: modifiersBitmask(msg),
             ...(text ? { text, unmodifiedText: text } : {}),
+            ...(commands ? { commands } : {}),
           });
           return;
         }
