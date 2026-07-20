@@ -43,4 +43,3 @@ test('passes screencast WebSocket requests through for mainland users', async ()
     globalThis.fetch = originalFetch;
   }
 });
-
