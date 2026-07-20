@@ -8,7 +8,8 @@
  *
  * Pass-through (no redirect):
  *   - Non-CN traffic.
- *   - CN traffic on API paths (/api/*, /trpc/*, /ws, /vnc-ws). These
+ *   - CN traffic on API paths (/api/*, /trpc/*, /ws, /screencast-ws,
+ *     /vnc-ws). These
  *     are XHR / WebSocket calls. A 302 here would break the SPA's
  *     fetch handlers (browsers don't auto-follow cross-origin
  *     redirects for credentialed XHR).
@@ -30,6 +31,7 @@ const PASS_THROUGH_PREFIXES = [
   '/api/',
   '/trpc/',
   '/ws',
+  '/screencast-ws',
   '/vnc-ws',
   '/static/',
   '/assets/',
