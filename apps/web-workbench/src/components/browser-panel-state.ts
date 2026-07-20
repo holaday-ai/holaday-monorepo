@@ -24,17 +24,49 @@ export function shouldConnectBrowserStream(inputs: {
   return inputs.isBrowserTask;
 }
 
+export function shouldUseTerminalEvidence(inputs: {
+  taskIsTerminal: boolean;
+  hasFinalEvidence: boolean;
+  liveSessionUnavailable: boolean;
+}): boolean {
+  return (
+    inputs.taskIsTerminal &&
+    inputs.hasFinalEvidence &&
+    inputs.liveSessionUnavailable
+  );
+}
+
+export function isBrowserInteractionActive(inputs: {
+  interactive: boolean;
+  taskIsTerminal: boolean;
+  useLiveStream: boolean;
+  liveStatus: BrowserLiveStatus;
+  hasLiveFrame: boolean;
+  liveSessionUnavailable: boolean;
+}): boolean {
+  if (!inputs.interactive || inputs.liveSessionUnavailable) return false;
+  if (inputs.useLiveStream) {
+    return (
+      inputs.liveStatus === 'connected' ||
+      inputs.liveStatus === 'connecting'
+    );
+  }
+  return !inputs.taskIsTerminal && inputs.hasLiveFrame;
+}
+
 export function shouldShowBrowserHeader(inputs: {
   taskIsTerminal: boolean;
   hasCurrentFrame: boolean;
   hasFinalEvidence: boolean;
   interactiveActive: boolean;
+  hasLiveStream?: boolean;
 }): boolean {
   if (!inputs.taskIsTerminal) return true;
   return (
     inputs.hasCurrentFrame ||
     inputs.hasFinalEvidence ||
-    inputs.interactiveActive
+    inputs.interactiveActive ||
+    inputs.hasLiveStream === true
   );
 }
 
@@ -144,10 +176,12 @@ export function taskOwnedBrowserFrame(inputs: {
   taskIsTerminal: boolean;
   liveFrame: UiScreencast | null;
   finalEvidenceFrame: UiScreencast | null;
+  preferLiveTerminalSession?: boolean;
 }): UiScreencast | null {
-  return inputs.taskIsTerminal
-    ? inputs.finalEvidenceFrame
-    : (inputs.liveFrame ?? inputs.finalEvidenceFrame);
+  if (inputs.taskIsTerminal && !inputs.preferLiveTerminalSession) {
+    return inputs.finalEvidenceFrame;
+  }
+  return inputs.liveFrame ?? inputs.finalEvidenceFrame;
 }
 
 export type TerminalEvidenceScreenshotSource =
@@ -387,7 +421,22 @@ export function browserFrameCanPanInPortraitSheet(inputs: {
 export function browserLiveOverlayCopy(inputs: {
   status: BrowserLiveStatus;
   showReconnect: boolean;
+  taskIsTerminal?: boolean;
 }): { title: string; detail: string; reconnectLabel: string } {
+  if (inputs.taskIsTerminal) {
+    if (inputs.showReconnect) {
+      return {
+        title: '浏览器会话连接较慢',
+        detail: '正在连接短时保留的浏览器。若会话已经释放，将自动回到任务截图。',
+        reconnectLabel: '重连浏览器',
+      };
+    }
+    return {
+      title: '正在恢复可操作浏览器',
+      detail: '任务已结束，正在连接短时保留的浏览器会话。连接后仍可点击和输入。',
+      reconnectLabel: '重连浏览器',
+    };
+  }
   if (inputs.showReconnect) {
     if (inputs.status === 'disconnected') {
       return {

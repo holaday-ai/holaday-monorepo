@@ -20,6 +20,8 @@ import {
   shouldShowBrowserFullscreen,
   shouldShowTerminalEvidenceLedger,
   shouldConnectBrowserStream,
+  shouldUseTerminalEvidence,
+  isBrowserInteractionActive,
   terminalEvidenceLayout,
   terminalBrowserMissingFrameCopy,
   terminalBrowserTakeoverMessage,
@@ -123,6 +125,63 @@ describe('BrowserPanel state helpers', () => {
     ).toBe(false);
   });
 
+  it('uses terminal evidence only after the retained browser becomes unavailable', () => {
+    expect(
+      shouldUseTerminalEvidence({
+        taskIsTerminal: true,
+        hasFinalEvidence: true,
+        liveSessionUnavailable: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldUseTerminalEvidence({
+        taskIsTerminal: true,
+        hasFinalEvidence: true,
+        liveSessionUnavailable: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldUseTerminalEvidence({
+        taskIsTerminal: false,
+        hasFinalEvidence: true,
+        liveSessionUnavailable: true,
+      }),
+    ).toBe(false);
+  });
+
+  it('allows takeover on a retained terminal stream but never on its screenshot fallback', () => {
+    expect(
+      isBrowserInteractionActive({
+        interactive: true,
+        taskIsTerminal: true,
+        useLiveStream: true,
+        liveStatus: 'connected',
+        hasLiveFrame: false,
+        liveSessionUnavailable: false,
+      }),
+    ).toBe(true);
+    expect(
+      isBrowserInteractionActive({
+        interactive: true,
+        taskIsTerminal: true,
+        useLiveStream: false,
+        liveStatus: 'disconnected',
+        hasLiveFrame: true,
+        liveSessionUnavailable: true,
+      }),
+    ).toBe(false);
+    expect(
+      isBrowserInteractionActive({
+        interactive: true,
+        taskIsTerminal: false,
+        useLiveStream: false,
+        liveStatus: 'idle',
+        hasLiveFrame: true,
+        liveSessionUnavailable: false,
+      }),
+    ).toBe(true);
+  });
+
   it('never exposes a cached URL owned by the previously selected task', () => {
     const cachedUrl = {
       taskId: 'tsk_previous',
@@ -159,6 +218,40 @@ describe('BrowserPanel state helpers', () => {
         finalEvidenceFrame: null,
       }),
     ).toBe(otherTaskFrame);
+  });
+
+  it('keeps a retained terminal browser live until the review session is unavailable', () => {
+    const retainedLiveFrame = {
+      tickIndex: 9,
+      imageBase64: 'retained-live-frame',
+      url: 'https://example.com/continued',
+      viewport: { width: 1280, height: 720 },
+      timestamp: '2026-07-20T00:00:00.000Z',
+    };
+    const savedEvidenceFrame = {
+      tickIndex: -1,
+      imageBase64: 'saved-terminal-evidence',
+      url: 'https://example.com/result',
+      viewport: { width: 1280, height: 720 },
+      timestamp: '2026-07-20T00:00:00.000Z',
+    };
+
+    expect(
+      taskOwnedBrowserFrame({
+        taskIsTerminal: true,
+        liveFrame: retainedLiveFrame,
+        finalEvidenceFrame: savedEvidenceFrame,
+        preferLiveTerminalSession: true,
+      }),
+    ).toBe(retainedLiveFrame);
+    expect(
+      taskOwnedBrowserFrame({
+        taskIsTerminal: true,
+        liveFrame: retainedLiveFrame,
+        finalEvidenceFrame: savedEvidenceFrame,
+        preferLiveTerminalSession: false,
+      }),
+    ).toBe(savedEvidenceFrame);
   });
 
   it('rehydrates persisted terminal screenshots as task-owned browser evidence', () => {
@@ -236,6 +329,7 @@ describe('BrowserPanel state helpers', () => {
         hasCurrentFrame: false,
         hasFinalEvidence: false,
         interactiveActive: false,
+        hasLiveStream: false,
       }),
     ).toBe(false);
   });
@@ -255,6 +349,15 @@ describe('BrowserPanel state helpers', () => {
         hasCurrentFrame: false,
         hasFinalEvidence: true,
         interactiveActive: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldShowBrowserHeader({
+        taskIsTerminal: true,
+        hasCurrentFrame: false,
+        hasFinalEvidence: false,
+        interactiveActive: false,
+        hasLiveStream: true,
       }),
     ).toBe(true);
   });
@@ -464,6 +567,20 @@ describe('BrowserPanel state helpers', () => {
       title: '浏览器启动时间较久',
       detail: '浏览器可能还在打开网页。可以继续等待，或手动重连画面。',
       reconnectLabel: '重连画面',
+    });
+  });
+
+  it('describes terminal review reconnection without claiming the task is still running', () => {
+    expect(
+      browserLiveOverlayCopy({
+        status: 'connecting',
+        showReconnect: false,
+        taskIsTerminal: true,
+      }),
+    ).toEqual({
+      title: '正在恢复可操作浏览器',
+      detail: '任务已结束，正在连接短时保留的浏览器会话。连接后仍可点击和输入。',
+      reconnectLabel: '重连浏览器',
     });
   });
 
