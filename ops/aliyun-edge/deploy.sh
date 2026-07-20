@@ -37,7 +37,12 @@ NGINX_CONF="ops/aliyun-edge/nginx-hd-app.conf"
 REMOTE_INSTALL_SCRIPT="ops/aliyun-edge/install-remote.sh"
 REMOTE_ROLLBACK_SCRIPT="ops/aliyun-edge/rollback-remote.sh"
 DOMAIN="hd-app.orangebench.tech"
-RELEASE_ID="$(date -u +%Y%m%d%H%M%S)-$$"
+DEFAULT_RELEASE_ID="$(date -u +%Y%m%d%H%M%S)-$$"
+RELEASE_ID="${HOLADAY_EDGE_RELEASE_ID:-$DEFAULT_RELEASE_ID}"
+if ! [[ "$RELEASE_ID" =~ ^[0-9]{14}-[0-9]+$ ]]; then
+  echo "error: invalid edge release id: $RELEASE_ID" >&2
+  exit 2
+fi
 BUNDLE="/tmp/holaday-edge-$RELEASE_ID.tar.gz"
 INSTALL_UPLOAD="/tmp/install-remote-$RELEASE_ID.sh"
 PASSWORD_TRANSPORT=""
