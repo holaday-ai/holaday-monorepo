@@ -16,6 +16,10 @@ import test from 'node:test';
 
 const config = await readFile(new URL('./nginx-hd-app.conf', import.meta.url), 'utf8');
 const deployScript = await readFile(new URL('./deploy.sh', import.meta.url), 'utf8');
+const spaDeployScript = await readFile(
+  new URL('../../scripts/deploy-spa.sh', import.meta.url),
+  'utf8',
+);
 const remoteInstaller = await readFile(
   new URL('./install-remote.sh', import.meta.url),
   'utf8',
@@ -89,6 +93,49 @@ test('runs the ops release gate before uploading', () => {
   assert.ok(gate >= 0, 'missing ops release gate');
   assert.ok(upload >= 0, 'missing upload command');
   assert.ok(gate < upload, 'ops release gate must run before upload');
+});
+
+test('publishes the Aliyun SPA through the atomic edge release path', () => {
+  assert.match(spaDeployScript, /ALIYUN_EDGE_DEPLOY=.*ops\/aliyun-edge\/deploy\.sh/);
+  assert.match(deployScript, /DEFAULT_RELEASE_ID="\$\(date -u \+%Y%m%d%H%M%S\)-\$\$"/);
+  assert.match(
+    deployScript,
+    /RELEASE_ID="\$\{HOLADAY_EDGE_RELEASE_ID:-\$DEFAULT_RELEASE_ID\}"/,
+  );
+  assert.match(spaDeployScript, /ALIYUN_RELEASE_ID="\$\(date -u \+%Y%m%d%H%M%S\)-\$\$"/);
+  assert.match(
+    spaDeployScript,
+    /HOLADAY_EDGE_RELEASE_ID="\$ALIYUN_RELEASE_ID" SSHPASS="\$ALIYUN_PASSWORD" "\$ALIYUN_EDGE_DEPLOY"/,
+  );
+  assert.match(
+    spaDeployScript,
+    /ALIYUN_EDGE_RELEASE_SPA_PATH="\$ALIYUN_EDGE_ROOT\/releases\/\$ALIYUN_RELEASE_ID\/apps\/web-workbench\/dist"/,
+  );
+  assert.match(spaDeployScript, /rollback-remote\.sh/);
+  assert.equal(
+    spaDeployScript.match(/^\s+rollback_aliyun_edge "\$ALIYUN_RELEASE_ID"$/gm)?.length,
+    2,
+  );
+  assert.equal(
+    spaDeployScript.match(/^assert_aliyun_release_active "\$ALIYUN_RELEASE_ID"$/gm)?.length,
+    2,
+  );
+  assert.doesNotMatch(spaDeployScript, /ALIYUN_RELEASE_ID=\$\(run_with_retry/);
+  assert.doesNotMatch(spaDeployScript, /\/opt\/holaday-spa\/dist/);
+});
+
+test('keeps the Vultr backup, switch, smoke, and rollback sequence intact', () => {
+  const upload = spaDeployScript.indexOf('echo "→ Uploading tarball to Vultr"');
+  const stage = spaDeployScript.indexOf('echo "→ Staging Vultr dist"', upload);
+  const swap = spaDeployScript.indexOf('echo "→ Switching Vultr dist"', stage);
+  const smoke = spaDeployScript.indexOf('echo "→ Vultr smoke check', swap);
+  const rollback = spaDeployScript.indexOf('"Vultr rollback"', smoke);
+
+  assert.ok(upload >= 0, 'missing Vultr upload');
+  assert.ok(stage > upload, 'Vultr stage must follow upload');
+  assert.ok(swap > stage, 'Vultr switch must follow stage');
+  assert.ok(smoke > swap, 'Vultr smoke must follow switch');
+  assert.ok(rollback > smoke, 'Vultr rollback must remain after smoke failure');
 });
 
 test('supports password deployment on macOS without exposing the password', () => {
