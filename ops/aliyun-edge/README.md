@@ -13,15 +13,17 @@ itself is unreachable from China. The Aliyun edge fixes that.
         ▼
 hd-app.orangebench.tech  ──→  Aliyun (47.99.169.186, China-accessible)
                                   │
-                                  ├─ /        →  /opt/holaday-spa/dist (SPA static)
-                                  ├─ /api/*   →  http://207.148.70.106:4001  (Vultr orchestrator HTTP)
-                                  └─ /ws      →  ws://207.148.70.106:4002    (Vultr orchestrator WS)
+                                  ├─ /                 → local landing / SPA
+                                  ├─ /api/*            → holaday.ai via Cloudflare
+                                  ├─ /ws, /vnc-ws/*    → holaday.ai via Cloudflare
+                                  └─ /screencast-ws/*  → Vultr TLS origin directly
 ```
 
-Aliyun → Vultr egress is open from China (outbound TCP to Singapore
-isn't blocked even when inbound holaday.ai is). The SPA's tRPC + WS
-clients are origin-relative, so the same hostname serves all three
-slots — no CORS, no env switching at runtime.
+The interactive screencast channel bypasses Cloudflare because a geo
+redirect on a newly introduced WebSocket path turns the HTTP upgrade
+into a 302 loop. It still uses SNI and `Host: holaday.ai` at the Vultr
+TLS origin. The SPA's clients remain origin-relative, so there is no
+CORS or runtime environment switch.
 
 ## One-time setup BOSS owns
 

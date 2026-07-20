@@ -151,7 +151,7 @@ The Worker's `PASS_THROUGH_PREFIXES` list keeps these on origin:
 
 - `/api/*` — orchestrator HTTP (tRPC, REST, webhooks)
 - `/trpc/*` — alias for tRPC
-- `/ws`, `/vnc-ws` — WebSockets
+- `/ws`, `/screencast-ws`, `/vnc-ws` — WebSockets
 - `/static/`, `/assets/` — bundled SPA assets (the SPA's script src
   must resolve deterministically)
 - `/_workers` — reserved for future inner Worker calls
