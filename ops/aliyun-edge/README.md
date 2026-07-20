@@ -14,16 +14,16 @@ itself is unreachable from China. The Aliyun edge fixes that.
 hd-app.orangebench.tech  ──→  Aliyun (47.99.169.186, China-accessible)
                                   │
                                   ├─ /                 → local landing / SPA
-                                  ├─ /api/*            → holaday.ai via Cloudflare
-                                  ├─ /ws, /vnc-ws/*    → holaday.ai via Cloudflare
-                                  └─ /screencast-ws/*  → Vultr TLS origin directly
+                                  ├─ /api/*            → Vultr TLS origin directly
+                                  └─ all WebSockets    → Vultr TLS origin directly
 ```
 
-The interactive screencast channel bypasses Cloudflare because a geo
-redirect on a newly introduced WebSocket path turns the HTTP upgrade
-into a 302 loop. It still uses SNI and `Host: holaday.ai` at the Vultr
-TLS origin. The SPA's clients remain origin-relative, so there is no
-CORS or runtime environment switch.
+The API and WebSocket channels bypass Cloudflare so redirects cannot
+interrupt upgrades or rewrite the browser-facing OAuth host. Aliyun
+connects to the Vultr IP over TLS, verifies the `holaday.ai`
+certificate through SNI, and preserves `Host: hd-app.orangebench.tech`
+for API/OAuth requests. The SPA's clients remain origin-relative, so
+there is no CORS or runtime environment switch.
 
 ## One-time setup BOSS owns
 
@@ -56,29 +56,40 @@ https://hd-app.orangebench.tech/api/auth/google/callback
 
 ### 3. nothing else
 
-- TLS cert: certbot (script will run it once cert files don't exist)
+- TLS cert: provision once with certbot; later deploys validate and
+  reload nginx automatically
 - nginx: same instance that already serves `hd-pay.orangebench.tech`
-- Vultr orchestrator: NO change. Its HTTP port 4001 + WS port 4002
-  are already exposed; Aliyun reaches them by IP.
+- Vultr orchestrator: no change. Aliyun reaches its nginx TLS origin
+  on port 443; internal Orchestrator ports remain private.
 
 ## Deploy
 
 From the monorepo root:
 
 ```bash
-# 1. Build the SPA
+# 1. First deployment only: provision the certificate before installing
+#    the TLS vhost. The port-80 ACME webroot may be served by the existing
+#    default vhost while DNS points at this host.
+ssh root@47.99.169.186
+mkdir -p /var/www/certbot
+certbot certonly --webroot -w /var/www/certbot \
+  -d hd-app.orangebench.tech \
+  --non-interactive --agree-tos -m ops@orangebench.tech
+exit
+
+# 2. Build the SPA
 pnpm --filter @holaday/web-workbench build
 
-# 2. Push to Aliyun (uploads SPA + nginx vhost, doesn't reload yet)
+# 3. Push to Aliyun (uploads SPA, landing site, and nginx vhost)
 export SSHPASS='<aliyun root password — see boss notes>'
 ./ops/aliyun-edge/deploy.sh
-
-# 3. SSH into Aliyun and finish certificate + reload
-ssh root@47.99.169.186
-certbot --nginx -d hd-app.orangebench.tech \
-  --redirect --non-interactive --agree-tos -m ops@orangebench.tech
-nginx -t && nginx -s reload
 ```
+
+Every release is extracted under `/opt/holaday-edge/releases/`. The
+installer validates the certificate before active changes, takes an
+exclusive deployment lock, switches the `current` symlink atomically,
+and restores the previous web/config links if `nginx -t` or reload fails.
+Recovery backups are retained under `/opt/holaday-edge/backups/`.
 
 ## Verify
 
@@ -86,13 +97,14 @@ From a China network without VPN:
 
 1. `curl -I https://hd-app.orangebench.tech/` → 200
 2. `curl https://hd-app.orangebench.tech/api/healthz` → orchestrator health JSON
-3. Browser → `https://hd-app.orangebench.tech/` → SPA loads
-4. Sign in (email/code or Google) → submit "打开 Google" task → completes
+3. WebSocket probe for `/screencast-ws/*` → Orchestrator auth response, never 302
+4. Browser → `https://hd-app.orangebench.tech/` → SPA loads
+5. Sign in (email/code or Google) → submit "打开 Google" task → completes
 
 If step 1 fails: DNS not propagated yet, or Aliyun ECS security group
 blocks 443. If step 2 fails: nginx vhost mis-installed, or
 Aliyun→Vultr egress is throttled (rare). If step 3 fails: SPA build
-not extracted to /opt/holaday-spa/dist.
+not extracted to `/opt/holaday-edge/current/apps/web-workbench/dist`.
 
 ## Coexistence
 
@@ -108,12 +120,18 @@ can use either entry. We don't take down the original.
 
 ```bash
 ssh root@47.99.169.186
-rm /etc/nginx/sites-enabled/hd-app.orangebench.tech
-nginx -t && nginx -s reload
+ls -1 /opt/holaday-edge/backups
+FAILED_RELEASE='<release-id-to-undo>'
+bash "/opt/holaday-edge/releases/$FAILED_RELEASE/ops/aliyun-edge/rollback-remote.sh" \
+  hd-app.orangebench.tech "$FAILED_RELEASE"
 ```
 
-DNS record stays (just stops resolving to a serving vhost — 502 from
-nginx default). To fully remove, drop the A record at the registrar.
+This restores the previous static-release target and the exact prior
+`sites-available` / `sites-enabled` state. It also handles the first
+versioned deployment, where there was no prior `current` symlink. The
+command refuses to roll back a release that is no longer active and
+restores the failed release if the old Nginx configuration cannot be
+validated or reloaded.
 
 ## Open questions / follow-ups
 
