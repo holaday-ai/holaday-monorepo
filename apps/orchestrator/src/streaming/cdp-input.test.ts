@@ -80,4 +80,25 @@ describe('CdpInputHandler keyboard input', () => {
       modifiers: 4,
     });
   });
+
+  it('dispatches the native select-all command for Meta+A', async () => {
+    const { handler, send } = handlerWithSend();
+
+    await handler.handle({
+      type: 'keyDown',
+      key: 'a',
+      code: 'KeyA',
+      keyCode: 65,
+      metaKey: true,
+    });
+
+    expect(send).toHaveBeenCalledWith('Input.dispatchKeyEvent', {
+      type: 'keyDown',
+      key: 'a',
+      code: 'KeyA',
+      windowsVirtualKeyCode: 65,
+      modifiers: 4,
+      commands: ['selectAll'],
+    });
+  });
 });
