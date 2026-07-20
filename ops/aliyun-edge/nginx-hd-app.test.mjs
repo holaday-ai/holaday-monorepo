@@ -84,11 +84,22 @@ test('packages and installs the landing site with the edge deployment', () => {
 
 test('runs the ops release gate before uploading', () => {
   const gate = deployScript.indexOf('pnpm test:ops');
-  const upload = deployScript.indexOf('sshpass -e scp');
+  const upload = deployScript.indexOf('\nrun_scp\n', gate);
 
   assert.ok(gate >= 0, 'missing ops release gate');
   assert.ok(upload >= 0, 'missing upload command');
   assert.ok(gate < upload, 'ops release gate must run before upload');
+});
+
+test('supports password deployment on macOS without exposing the password', () => {
+  assert.match(deployScript, /command -v sshpass/);
+  assert.match(deployScript, /command -v expect/);
+  assert.match(deployScript, /sshpass -e/);
+  assert.match(deployScript, /\$env\(SSHPASS\)/);
+  assert.match(deployScript, /run_scp/);
+  assert.match(deployScript, /run_ssh/);
+  assert.match(deployScript, /neither sshpass nor expect is available/);
+  assert.doesNotMatch(deployScript, /spawn .*\$env\(SSHPASS\)/);
 });
 
 test('uses unique remote inputs and serializes deployments', () => {
