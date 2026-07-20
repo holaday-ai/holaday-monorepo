@@ -38,3 +38,46 @@ describe('CdpInputHandler responsive viewport', () => {
     expect(send).not.toHaveBeenCalled();
   });
 });
+
+describe('CdpInputHandler keyboard input', () => {
+  it('includes text when dispatching a printable key', async () => {
+    const { handler, send } = handlerWithSend();
+
+    await handler.handle({
+      type: 'keyDown',
+      key: 'h',
+      code: 'KeyH',
+      keyCode: 72,
+    });
+
+    expect(send).toHaveBeenCalledWith('Input.dispatchKeyEvent', {
+      type: 'keyDown',
+      key: 'h',
+      code: 'KeyH',
+      windowsVirtualKeyCode: 72,
+      modifiers: 0,
+      text: 'h',
+      unmodifiedText: 'h',
+    });
+  });
+
+  it('does not insert text for keyboard shortcuts', async () => {
+    const { handler, send } = handlerWithSend();
+
+    await handler.handle({
+      type: 'keyDown',
+      key: 'c',
+      code: 'KeyC',
+      keyCode: 67,
+      metaKey: true,
+    });
+
+    expect(send).toHaveBeenCalledWith('Input.dispatchKeyEvent', {
+      type: 'keyDown',
+      key: 'c',
+      code: 'KeyC',
+      windowsVirtualKeyCode: 67,
+      modifiers: 4,
+    });
+  });
+});
