@@ -59,6 +59,18 @@ function modifiersBitmask(m: {
   return bits;
 }
 
+function printableKeyText(m: {
+  key?: string;
+  altKey?: boolean;
+  ctrlKey?: boolean;
+  metaKey?: boolean;
+}): string | undefined {
+  if (m.altKey || m.ctrlKey || m.metaKey || m.key?.length !== 1) {
+    return undefined;
+  }
+  return m.key;
+}
+
 export class CdpInputHandler {
   /**
    * @param getSession Returns the streamer's CURRENT CDP session,
@@ -142,15 +154,18 @@ export class CdpInputHandler {
             deltaY: msg.deltaY ?? 0,
           });
           return;
-        case 'keyDown':
+        case 'keyDown': {
+          const text = printableKeyText(msg);
           await session.send('Input.dispatchKeyEvent', {
             type: 'keyDown',
             ...(msg.key ? { key: msg.key } : {}),
             ...(msg.code ? { code: msg.code } : {}),
             ...(msg.keyCode != null ? { windowsVirtualKeyCode: msg.keyCode } : {}),
             modifiers: modifiersBitmask(msg),
+            ...(text ? { text, unmodifiedText: text } : {}),
           });
           return;
+        }
         case 'keyUp':
           await session.send('Input.dispatchKeyEvent', {
             type: 'keyUp',
