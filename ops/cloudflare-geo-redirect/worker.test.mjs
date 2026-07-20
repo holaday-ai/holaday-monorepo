@@ -2,10 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-const workerSource = await readFile(
-  new URL('./worker.js', import.meta.url),
-  'utf8',
-);
+const workerSource = await readFile(new URL('./worker.js', import.meta.url), 'utf8');
 const workerModule = await import(
   `data:text/javascript;base64,${Buffer.from(workerSource).toString('base64')}`
 );
@@ -39,6 +36,27 @@ test('passes screencast WebSocket requests through for mainland users', async ()
 
     assert.equal(response.status, 200);
     assert.equal(forwardedUrl, request.url);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('does not treat similarly named pages as screencast routes', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response('origin', { status: 200 });
+
+  try {
+    const response = await workerModule.default.fetch(
+      requestFromChina('/screencast-ws-old'),
+      {},
+      {},
+    );
+
+    assert.equal(response.status, 302);
+    assert.equal(
+      response.headers.get('location'),
+      'https://hd-app.orangebench.tech/screencast-ws-old',
+    );
   } finally {
     globalThis.fetch = originalFetch;
   }

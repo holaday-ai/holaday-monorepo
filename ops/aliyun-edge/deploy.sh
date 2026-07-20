@@ -13,11 +13,9 @@
 #      - /var/www/certbot/ exists (or http-01 webroot path)
 #
 # What this script does on the Aliyun box:
-#   - extracts the SPA bundle to /opt/holaday-spa/dist
-#   - drops the nginx vhost into /etc/nginx/sites-available/
-#   - symlinks into sites-enabled
-#   - reloads nginx
-#   - issues TLS cert via certbot
+#   - stages and validates the SPA, landing site, and nginx vhost
+#   - swaps the active release with rollback on validation failure
+#   - tests and reloads nginx
 #
 # Usage (run from your laptop, AFTER pre-conditions are met):
 #   ./ops/aliyun-edge/deploy.sh
@@ -28,11 +26,25 @@
 
 set -euo pipefail
 
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$ROOT_DIR"
+
 ALIYUN_HOST="root@47.99.169.186"
 SPA_DIR="apps/web-workbench/dist"
+LANDING_DIR="apps/holaday-landing"
 NGINX_CONF="ops/aliyun-edge/nginx-hd-app.conf"
+REMOTE_INSTALL_SCRIPT="ops/aliyun-edge/install-remote.sh"
+REMOTE_ROLLBACK_SCRIPT="ops/aliyun-edge/rollback-remote.sh"
 DOMAIN="hd-app.orangebench.tech"
-BUNDLE="/tmp/holaday-edge-bundle.tar.gz"
+RELEASE_ID="$(date -u +%Y%m%d%H%M%S)-$$"
+BUNDLE="/tmp/holaday-edge-$RELEASE_ID.tar.gz"
+INSTALL_UPLOAD="/tmp/install-remote-$RELEASE_ID.sh"
+
+cleanup() {
+  rm -f "$BUNDLE" "$INSTALL_UPLOAD"
+}
+
+trap cleanup EXIT
 
 if [[ -z "${SSHPASS:-}" ]]; then
   echo "error: export SSHPASS=<aliyun root password> first" >&2
@@ -42,51 +54,37 @@ if [[ ! -d "$SPA_DIR" ]]; then
   echo "error: $SPA_DIR not found — run \`pnpm --filter @holaday/web-workbench build\` first" >&2
   exit 1
 fi
+if [[ ! -d "$LANDING_DIR" ]]; then
+  echo "error: $LANDING_DIR not found" >&2
+  exit 1
+fi
 if [[ ! -f "$NGINX_CONF" ]]; then
   echo "error: $NGINX_CONF not found — run from monorepo root" >&2
   exit 1
 fi
+if [[ ! -f "$REMOTE_INSTALL_SCRIPT" ]]; then
+  echo "error: $REMOTE_INSTALL_SCRIPT not found" >&2
+  exit 1
+fi
+if [[ ! -f "$REMOTE_ROLLBACK_SCRIPT" ]]; then
+  echo "error: $REMOTE_ROLLBACK_SCRIPT not found" >&2
+  exit 1
+fi
 
-echo "==> packing SPA dist + nginx config"
-tar czf "$BUNDLE" -C "$(dirname "$SPA_DIR")" "$(basename "$SPA_DIR")" "$NGINX_CONF"
+echo "==> running edge release gate"
+pnpm test:ops
+
+echo "==> packing SPA, landing site, and nginx config"
+tar czf "$BUNDLE" "$SPA_DIR" "$NGINX_CONF" "$LANDING_DIR" "$REMOTE_ROLLBACK_SCRIPT"
+cp "$REMOTE_INSTALL_SCRIPT" "$INSTALL_UPLOAD"
 ls -lh "$BUNDLE"
 
 echo "==> uploading bundle to Aliyun"
-sshpass -e scp -O -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no \
-  "$BUNDLE" "$ALIYUN_HOST:/tmp/"
+sshpass -e scp -O -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=password -o PubkeyAuthentication=no \
+  "$BUNDLE" "$INSTALL_UPLOAD" "$ALIYUN_HOST:/tmp/"
 
 echo "==> installing on Aliyun"
-sshpass -e ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no \
-  "$ALIYUN_HOST" "set -euo pipefail
-    # 1. Unpack SPA → /opt/holaday-spa/dist
-    mkdir -p /opt/holaday-spa
-    rm -rf /opt/holaday-spa/dist
-    cd /opt/holaday-spa
-    tar xzf /tmp/holaday-edge-bundle.tar.gz dist
-    ls dist | head -5
-    # 2. Drop the nginx vhost (rename ops/... path to short name)
-    mkdir -p /tmp/edge-extract
-    tar xzf /tmp/holaday-edge-bundle.tar.gz -C /tmp/edge-extract ops/aliyun-edge/nginx-hd-app.conf
-    cp /tmp/edge-extract/ops/aliyun-edge/nginx-hd-app.conf /etc/nginx/sites-available/$DOMAIN
-    ln -sf /etc/nginx/sites-available/$DOMAIN /etc/nginx/sites-enabled/$DOMAIN
-    rm -rf /tmp/edge-extract
-    rm -f /tmp/holaday-edge-bundle.tar.gz
-    # 3. Make sure the upgrade map exists (idempotent)
-    if ! grep -q 'connection_upgrade' /etc/nginx/conf.d/*.conf 2>/dev/null; then
-      cat > /etc/nginx/conf.d/00-upgrade.conf <<'MAP'
-map \$http_upgrade \$connection_upgrade {
-    default upgrade;
-    ''      close;
-}
-MAP
-    fi
-    # 4. Test + reload (vhost references certs that don't exist yet —
-    #    nginx will fail; uncomment after certbot succeeds)
-    # nginx -t && nginx -s reload
-    echo 'NEXT STEPS (run on the Aliyun box):'
-    echo '  certbot --nginx -d $DOMAIN --redirect --non-interactive --agree-tos -m ops@orangebench.tech'
-    echo '  nginx -t && nginx -s reload'
-"
+sshpass -e ssh -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=password -o PubkeyAuthentication=no \
+  "$ALIYUN_HOST" "bash '$INSTALL_UPLOAD' '$DOMAIN' '$BUNDLE' '$RELEASE_ID' '$INSTALL_UPLOAD'"
 
-rm -f "$BUNDLE"
-echo "==> bundle uploaded + installed (cert + reload pending)"
+echo "==> edge bundle uploaded and installed"
