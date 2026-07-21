@@ -63,8 +63,11 @@ export interface DirectOpenResult {
 export async function runDirectOpen<TPage extends { url(): string }>(
   executor: DirectOpenExecutor<TPage>,
   url: string,
+  options: { preserveExistingPage?: boolean } = {},
 ): Promise<DirectOpenResult> {
-  await executor.resetPageForTask();
+  if (!options.preserveExistingPage) {
+    await executor.resetPageForTask();
+  }
   const initialPage = await executor.getPage();
   const navigation = await executor.navigate(initialPage, url);
   if (!navigation.ok) {
