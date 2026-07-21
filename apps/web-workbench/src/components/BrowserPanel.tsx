@@ -42,6 +42,7 @@ import {
   taskOwnedBrowserFrame,
   taskOwnedBrowserUrl,
   terminalBrowserTakeoverMessage,
+  terminalEvidenceContinuation,
   terminalEvidenceFrameForTask,
   terminalEvidenceFrameLabel,
   terminalEvidenceLayout,
@@ -681,15 +682,15 @@ export function BrowserPanel({
       'about:blank');
   const displayUrlIsPendingTarget =
     startupTargetUrl != null && displayUrl === startupTargetUrl;
-  const retryTerminalBrowser = React.useCallback(() => {
-    setTerminalConnectTimedOut(false);
-    setShowReconnect(false);
-    setVncAttemptFails(0);
-    setVncStatus('idle');
-    setReconnectEpoch((value) => value + 1);
-    toast.show('正在重新连接浏览器会话', 'info');
-  }, [toast]);
-
+  const continueInNewSession = React.useCallback(
+    async (intent: string): Promise<boolean> => {
+      if (!onStartWorkspaceTask) return false;
+      const started = await onStartWorkspaceTask(intent);
+      if (started) setInteractive(true);
+      return started;
+    },
+    [onStartWorkspaceTask, setInteractive],
+  );
   // When the agent parks on awaiting-user (captcha, login wall, user
   // question the model injected), auto-flip the panel to interactive
   // mode — the user almost certainly needs to click into the browser
@@ -1393,7 +1394,9 @@ export function BrowserPanel({
                 onToggleFullscreen={onToggleFullscreen}
                 onReExecute={onReExecute}
                 reExecuting={reExecuting}
-                onRetryLive={retryTerminalBrowser}
+                onContinueInNewSession={
+                  onStartWorkspaceTask ? continueInNewSession : undefined
+                }
               />
             ) : hibernated ? (
               <HibernationCard
@@ -1700,7 +1703,7 @@ function TerminalEvidenceView({
   onToggleFullscreen,
   onReExecute,
   reExecuting,
-  onRetryLive,
+  onContinueInNewSession,
 }: {
   frame: UiScreencast;
   source: TerminalEvidenceScreenshotSource;
@@ -1711,7 +1714,7 @@ function TerminalEvidenceView({
   onToggleFullscreen?: () => void;
   onReExecute?: () => void;
   reExecuting: boolean;
-  onRetryLive: () => void;
+  onContinueInNewSession?: (intent: string) => Promise<boolean>;
 }): JSX.Element {
   const [viewMode, setViewMode] = React.useState<'contain' | 'readable'>(
     'contain',
@@ -1739,12 +1742,25 @@ function TerminalEvidenceView({
   });
   const compactPreview = layout === 'compact-preview';
   const safeFinalUrl = safeExternalHttpHref(frame.url);
+  const continuation = terminalEvidenceContinuation(safeFinalUrl);
+  const [continuing, setContinuing] = React.useState(false);
   const title = terminalEvidenceFrameLabel({
     status: taskStatus,
     url: frame.url,
   });
   const screenshotCopy =
-    source === 'saved-screenshot' ? '任务结束时保存的页面' : '任务结束前最后可见页面';
+    source === 'saved-screenshot'
+      ? '任务结束时保存的只读截图'
+      : '任务结束前最后可见的只读截图';
+  const continueInNewSession = async (): Promise<void> => {
+    if (!continuation || !onContinueInNewSession || continuing) return;
+    setContinuing(true);
+    try {
+      await onContinueInNewSession(continuation.intent);
+    } finally {
+      setContinuing(false);
+    }
+  };
 
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden bg-white dark:bg-background">
@@ -1757,14 +1773,14 @@ function TerminalEvidenceView({
             <div className="min-w-0 flex-1">
               <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
                 <span className="text-[12px] font-semibold text-foreground">
-                  终态证据
+                  终态截图 · 只读
                 </span>
                 <span className="truncate text-[11px] text-muted-foreground">
                   {title}
                 </span>
               </div>
               <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
-                {screenshotCopy}，用于复核页面状态；结果中的判断仍以来源和任务上下文为准。
+                {screenshotCopy}，不能点击或输入；结果中的判断仍以来源和任务上下文为准。
               </p>
             </div>
             {safeFinalUrl && !isSheet && (
@@ -1773,7 +1789,7 @@ function TerminalEvidenceView({
                 className="inline-flex h-7 shrink-0 items-center gap-1 rounded-[8px] border border-[#DCDDDD] bg-white px-2 text-[11px] font-medium text-[#595757] transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/60 dark:border-white/10 dark:bg-transparent dark:text-foreground/80 dark:hover:bg-white/10"
               >
                 <ExternalLink className="h-3 w-3" aria-hidden />
-                打开
+                外部打开
               </SafeExternalLinkButton>
             )}
           </div>
@@ -1782,16 +1798,24 @@ function TerminalEvidenceView({
               {viewMode === 'contain' ? '按比例适应窗口' : '原始尺寸，可滑动查看'}
             </span>
             <div className="flex shrink-0 items-center gap-1.5">
-              <button
-                type="button"
-                onClick={onRetryLive}
-                aria-label="重新连接实时浏览器"
-                title="重新连接实时浏览器"
-                className="inline-flex h-7 items-center gap-1 rounded-[8px] border border-[#DCDDDD] bg-white px-2 text-[11px] font-medium text-foreground transition-colors hover:bg-[#EFEFEF]/60 dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10"
-              >
-                <RotateCw className="h-3 w-3" aria-hidden />
-                {isNarrow || isSheet ? '重连' : '重连浏览器'}
-              </button>
+              {continuation && onContinueInNewSession && (
+                <button
+                  type="button"
+                  onClick={() => void continueInNewSession()}
+                  disabled={continuing}
+                  aria-label={
+                    continuing ? continuation.pendingLabel : continuation.label
+                  }
+                  title={continuation.description}
+                  className="inline-flex h-7 items-center gap-1 rounded-[8px] border border-[#DCDDDD] bg-white px-2 text-[11px] font-medium text-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/60 disabled:cursor-wait disabled:opacity-60 dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10"
+                >
+                  <Globe
+                    className={cn('h-3 w-3', continuing && 'animate-pulse')}
+                    aria-hidden
+                  />
+                  {continuing ? continuation.pendingLabel : continuation.label}
+                </button>
+              )}
               {isSheet && (
                 <button
                   type="button"

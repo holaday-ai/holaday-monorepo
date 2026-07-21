@@ -10,6 +10,7 @@ import {
   taskOwnedBrowserFrame,
   taskOwnedBrowserUrl,
   terminalEvidenceFrameForTask,
+  terminalEvidenceContinuation,
   browserViewportFooterLabel,
   browserViewportFrameLabel,
   browserWakeFeedback,
@@ -435,12 +436,26 @@ describe('BrowserPanel state helpers', () => {
 
   it('labels expired terminal sessions without implying a live browser', () => {
     expect(browserPanelEvidenceHeaderStatus('completed')).toEqual({
-      label: '会话已结束',
-      tooltip: '任务已完成，实时浏览器会话已结束；结果记录仍保留在左侧',
+      label: '只读记录',
+      tooltip: '任务已完成；当前为结束时保存的截图，不能点击或输入',
       tone: 'idle',
       dotStatus: 'idle',
       showLabel: true,
     });
+  });
+
+  it('continues terminal evidence in a fresh browser session instead of reconnecting a released task', () => {
+    expect(
+      terminalEvidenceContinuation('https://example.com/final?from=task'),
+    ).toEqual({
+      intent: '打开 https://example.com/final?from=task',
+      label: '在新会话继续',
+      pendingLabel: '正在启动新会话…',
+      description: '从任务结束页面启动新的可操作浏览器，原任务记录保持不变。',
+    });
+    expect(terminalEvidenceContinuation('chrome-error://chromewebdata/')).toBeNull();
+    expect(terminalEvidenceContinuation('javascript:alert(1)')).toBeNull();
+    expect(terminalEvidenceContinuation(null)).toBeNull();
   });
 
   it('marks browser error pages as unsuccessful final browser evidence', () => {
@@ -460,8 +475,8 @@ describe('BrowserPanel state helpers', () => {
         'chrome-error://chromewebdata/',
       ),
     ).toEqual({
-      label: '会话已结束',
-      tooltip: '任务已完成，任务结束在浏览器错误页；结果记录仍保留在左侧',
+      label: '只读记录',
+      tooltip: '任务已完成；当前为浏览器错误页截图，不能点击或输入',
       tone: 'attention',
       dotStatus: 'error',
       showLabel: true,
