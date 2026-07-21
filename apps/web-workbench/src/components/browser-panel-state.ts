@@ -155,6 +155,35 @@ export function browserWorkspaceTaskIntent(rawValue: string): string | null {
   return `打开浏览器并搜索：${value}`;
 }
 
+export interface TerminalEvidenceContinuation {
+  intent: string;
+  label: string;
+  pendingLabel: string;
+  description: string;
+}
+
+/**
+ * Builds the honest recovery action for a released terminal browser. A saved
+ * screenshot cannot become interactive again, so recovery must create a new
+ * task-owned browser at the last verified HTTP(S) URL.
+ */
+export function terminalEvidenceContinuation(
+  finalUrl: string | null | undefined,
+): TerminalEvidenceContinuation | null {
+  const value = finalUrl?.trim();
+  if (!value || !/^https?:\/\//i.test(value) || isBrowserErrorUrl(value)) {
+    return null;
+  }
+  const intent = browserWorkspaceTaskIntent(value);
+  if (!intent) return null;
+  return {
+    intent,
+    label: '在新会话继续',
+    pendingLabel: '正在启动新会话…',
+    description: '从任务结束页面启动新的可操作浏览器，原任务记录保持不变。',
+  };
+}
+
 /**
  * Recovers the explicit target URL from a browser task created by the global
  * workspace. This is only a requested destination, not evidence that the page
@@ -370,14 +399,14 @@ export function browserPanelEvidenceHeaderStatus(
   status: UiTaskStatus | null | undefined,
   finalUrl?: string | null,
 ): BrowserPanelHeaderStatus {
-  const label = '会话已结束';
+  const label = '只读记录';
   const statusLabel = terminalEvidenceStatusLabel(status);
   const errorPage = isBrowserErrorUrl(finalUrl);
   return {
     label,
     tooltip: errorPage
-      ? `${statusLabel}，任务结束在浏览器错误页；结果记录仍保留在左侧`
-      : `${statusLabel}，实时浏览器会话已结束；结果记录仍保留在左侧`,
+      ? `${statusLabel}；当前为浏览器错误页截图，不能点击或输入`
+      : `${statusLabel}；当前为结束时保存的截图，不能点击或输入`,
     tone: errorPage ? 'attention' : 'idle',
     dotStatus: errorPage ? 'error' : 'idle',
     showLabel: true,
