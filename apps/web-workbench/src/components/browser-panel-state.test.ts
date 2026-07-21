@@ -5,6 +5,8 @@ import {
   browserStartupTargetUrl,
   browserWorkspaceTaskIntent,
   browserPanelHeaderStatus,
+  browserControlAction,
+  browserInputFallbackMode,
   browserPanelEvidenceHeaderStatus,
   browserReleasedCardCopy,
   taskOwnedBrowserFrame,
@@ -25,12 +27,126 @@ import {
   isBrowserInteractionActive,
   terminalEvidenceLayout,
   terminalBrowserMissingFrameCopy,
+  terminalBrowserSessionUnavailable,
   terminalBrowserTakeoverMessage,
+  terminalBrowserRecoveryRetryDelay,
   terminalEvidenceFrameLabel,
   terminalEvidenceStatusLabel,
 } from './browser-panel-state';
 
 describe('BrowserPanel state helpers', () => {
+  it('turns a terminal takeover handoff into a focused AI follow-up', () => {
+    expect(
+      browserControlAction({ interactive: true, taskIsTerminal: true }),
+    ).toEqual({
+      nextInteractive: false,
+      focusFollowUp: true,
+      label: '交给 AI',
+      ariaLabel: '交给 AI 继续',
+      title: '交给 AI — 输入下一步指令后从当前页面继续',
+    });
+    expect(
+      browserControlAction({ interactive: true, taskIsTerminal: false }),
+    ).toEqual({
+      nextInteractive: false,
+      focusFollowUp: false,
+      label: '交给 AI',
+      ariaLabel: '退出浏览器接管',
+      title: '退出接管 — AI 继续当前执行',
+    });
+    expect(
+      browserControlAction({ interactive: false, taskIsTerminal: true }),
+    ).toEqual({
+      nextInteractive: true,
+      focusFollowUp: false,
+      label: '接管',
+      ariaLabel: '接管浏览器',
+      title: '接管浏览器 — 你的鼠标键盘直接控制浏览器',
+    });
+  });
+
+  it('explains that a terminal browser needs a follow-up before AI resumes', () => {
+    expect(
+      browserPanelHeaderStatus({
+        dotStatus: 'live',
+        liveStatus: 'connected',
+        browserAwaiting: false,
+        interactiveActive: true,
+        showReconnect: false,
+        taskIsTerminal: true,
+      }),
+    ).toMatchObject({
+      label: '接管中',
+      tooltip: '你正在直接操作浏览器；需要 AI 时点“交给 AI”并输入下一步指令',
+    });
+  });
+
+  it('keeps the CDP text fallback compact until the user asks for it', () => {
+    expect(
+      browserInputFallbackMode({
+        interactiveActive: false,
+        usingCdp: true,
+        fallbackOpen: false,
+      }),
+    ).toBe('hidden');
+    expect(
+      browserInputFallbackMode({
+        interactiveActive: true,
+        usingCdp: true,
+        fallbackOpen: false,
+      }),
+    ).toBe('toggle');
+    expect(
+      browserInputFallbackMode({
+        interactiveActive: true,
+        usingCdp: true,
+        fallbackOpen: true,
+      }),
+    ).toBe('bar');
+    expect(
+      browserInputFallbackMode({
+        interactiveActive: true,
+        usingCdp: false,
+        fallbackOpen: false,
+      }),
+    ).toBe('bar');
+  });
+
+  it('retries a terminal browser restore quickly, then caps the quiet backoff', () => {
+    expect(terminalBrowserRecoveryRetryDelay(1)).toBe(2_000);
+    expect(terminalBrowserRecoveryRetryDelay(2)).toBe(4_000);
+    expect(terminalBrowserRecoveryRetryDelay(3)).toBe(8_000);
+    expect(terminalBrowserRecoveryRetryDelay(4)).toBe(15_000);
+    expect(terminalBrowserRecoveryRetryDelay(9)).toBe(15_000);
+  });
+
+  it('keeps static evidence stable while background recovery retries', () => {
+    expect(
+      terminalBrowserSessionUnavailable({
+        sessionSuspected: true,
+        canRestore: true,
+        recoveryState: 'restoring',
+        recoveryAttempt: 1,
+      }),
+    ).toBe(true);
+    expect(
+      terminalBrowserSessionUnavailable({
+        sessionSuspected: true,
+        canRestore: true,
+        recoveryState: 'ready',
+        recoveryAttempt: 0,
+      }),
+    ).toBe(false);
+    expect(
+      terminalBrowserSessionUnavailable({
+        sessionSuspected: true,
+        canRestore: true,
+        recoveryState: 'connected',
+        recoveryAttempt: 2,
+      }),
+    ).toBe(false);
+  });
+
   it('keeps fullscreen available for every inline browser workspace without crowding phone sheets', () => {
     expect(
       shouldShowBrowserFullscreen({
@@ -444,14 +560,14 @@ describe('BrowserPanel state helpers', () => {
     });
   });
 
-  it('continues terminal evidence in a fresh browser session instead of reconnecting a released task', () => {
+  it('restores terminal evidence into the current task browser session', () => {
     expect(
       terminalEvidenceContinuation('https://example.com/final?from=task'),
     ).toEqual({
       intent: '打开 https://example.com/final?from=task',
-      label: '在新会话继续',
-      pendingLabel: '正在启动新会话…',
-      description: '从任务结束页面启动新的可操作浏览器，原任务记录保持不变。',
+      label: '恢复可操作浏览器',
+      pendingLabel: '正在恢复浏览器…',
+      description: '在当前任务恢复到最后页面，继续点击、输入或交给 AI。',
     });
     expect(terminalEvidenceContinuation('chrome-error://chromewebdata/')).toBeNull();
     expect(terminalEvidenceContinuation('javascript:alert(1)')).toBeNull();
@@ -593,8 +709,8 @@ describe('BrowserPanel state helpers', () => {
         taskIsTerminal: true,
       }),
     ).toEqual({
-      title: '正在恢复可操作浏览器',
-      detail: '任务已结束，正在连接短时保留的浏览器会话。连接后仍可点击和输入。',
+      title: '正在连接浏览器工作区',
+      detail: '任务已结束，浏览器仍可接管操作，也可以继续交给 AI。',
       reconnectLabel: '重连浏览器',
     });
   });
@@ -628,7 +744,7 @@ describe('BrowserPanel state helpers', () => {
 
   it('keeps terminal takeover refusal tied to task state', () => {
     expect(terminalBrowserTakeoverMessage('failed')).toBe(
-      '任务未完成，浏览器已关闭。重新执行任务可打开新浏览器。',
+      '任务未完成，正在恢复当前任务的浏览器。',
     );
   });
 

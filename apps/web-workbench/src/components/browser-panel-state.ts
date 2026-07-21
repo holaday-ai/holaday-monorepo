@@ -17,6 +17,61 @@ export interface BrowserPanelHeaderStatus {
   showLabel: boolean;
 }
 
+export interface BrowserControlAction {
+  nextInteractive: boolean;
+  focusFollowUp: boolean;
+  label: '接管' | '交给 AI';
+  ariaLabel: string;
+  title: string;
+}
+
+/**
+ * Resolves the browser ownership toggle into an honest user action. A running
+ * task can resume immediately when takeover ends. A terminal task has no
+ * active agent, so handing it back must focus a follow-up instruction instead
+ * of pretending that AI work restarted on its own.
+ */
+export function browserControlAction(inputs: {
+  interactive: boolean;
+  taskIsTerminal: boolean;
+}): BrowserControlAction {
+  if (!inputs.interactive) {
+    return {
+      nextInteractive: true,
+      focusFollowUp: false,
+      label: '接管',
+      ariaLabel: '接管浏览器',
+      title: '接管浏览器 — 你的鼠标键盘直接控制浏览器',
+    };
+  }
+  if (inputs.taskIsTerminal) {
+    return {
+      nextInteractive: false,
+      focusFollowUp: true,
+      label: '交给 AI',
+      ariaLabel: '交给 AI 继续',
+      title: '交给 AI — 输入下一步指令后从当前页面继续',
+    };
+  }
+  return {
+    nextInteractive: false,
+    focusFollowUp: false,
+    label: '交给 AI',
+    ariaLabel: '退出浏览器接管',
+    title: '退出接管 — AI 继续当前执行',
+  };
+}
+
+export function browserInputFallbackMode(inputs: {
+  interactiveActive: boolean;
+  usingCdp: boolean;
+  fallbackOpen: boolean;
+}): 'hidden' | 'toggle' | 'bar' {
+  if (!inputs.interactiveActive) return 'hidden';
+  if (!inputs.usingCdp || inputs.fallbackOpen) return 'bar';
+  return 'toggle';
+}
+
 export function shouldConnectBrowserStream(inputs: {
   isBrowserTask: boolean;
   taskIsTerminal: boolean;
@@ -34,6 +89,46 @@ export function shouldUseTerminalEvidence(inputs: {
     inputs.hasFinalEvidence &&
     inputs.liveSessionUnavailable
   );
+}
+
+/**
+ * Silent retry cadence for a terminal browser whose backend process is still
+ * restarting. The cap keeps a long outage quiet while allowing the workspace
+ * to recover by itself when the service returns.
+ */
+export function terminalBrowserRecoveryRetryDelay(attempt: number): number {
+  const safeAttempt = Math.max(1, Math.floor(attempt));
+  return Math.min(15_000, 2_000 * 2 ** (safeAttempt - 1));
+}
+
+export type TerminalBrowserRecoveryState =
+  | 'idle'
+  | 'restoring'
+  | 'ready'
+  | 'connected'
+  | 'failed';
+
+/**
+ * Keep the saved evidence visible after a recovery failure while retries run
+ * quietly in the background. The panel should return to the live browser only
+ * after a restore has actually succeeded, never for each retry attempt.
+ */
+export function terminalBrowserSessionUnavailable(inputs: {
+  sessionSuspected: boolean;
+  canRestore: boolean;
+  recoveryState: TerminalBrowserRecoveryState;
+  recoveryAttempt: number;
+}): boolean {
+  if (!inputs.sessionSuspected) return false;
+  if (!inputs.canRestore || inputs.recoveryState === 'failed') return true;
+  if (
+    inputs.recoveryAttempt > 0 &&
+    inputs.recoveryState !== 'ready' &&
+    inputs.recoveryState !== 'connected'
+  ) {
+    return true;
+  }
+  return false;
 }
 
 export function isBrowserInteractionActive(inputs: {
@@ -163,9 +258,9 @@ export interface TerminalEvidenceContinuation {
 }
 
 /**
- * Builds the honest recovery action for a released terminal browser. A saved
- * screenshot cannot become interactive again, so recovery must create a new
- * task-owned browser at the last verified HTTP(S) URL.
+ * Builds the honest recovery action for a released terminal browser. The
+ * screenshot remains read-only; the action restores a managed browser under
+ * the same task at the last verified HTTP(S) URL.
  */
 export function terminalEvidenceContinuation(
   finalUrl: string | null | undefined,
@@ -178,9 +273,9 @@ export function terminalEvidenceContinuation(
   if (!intent) return null;
   return {
     intent,
-    label: '在新会话继续',
-    pendingLabel: '正在启动新会话…',
-    description: '从任务结束页面启动新的可操作浏览器，原任务记录保持不变。',
+    label: '恢复可操作浏览器',
+    pendingLabel: '正在恢复浏览器…',
+    description: '在当前任务恢复到最后页面，继续点击、输入或交给 AI。',
   };
 }
 
@@ -326,6 +421,7 @@ export function browserPanelHeaderStatus(inputs: {
   browserAwaiting: boolean;
   interactiveActive: boolean;
   showReconnect: boolean;
+  taskIsTerminal?: boolean;
 }): BrowserPanelHeaderStatus {
   if (inputs.browserAwaiting) {
     return {
@@ -339,7 +435,9 @@ export function browserPanelHeaderStatus(inputs: {
   if (inputs.interactiveActive) {
     return {
       label: '接管中',
-      tooltip: '你正在直接操作浏览器，点接管按钮可交还给 AI',
+      tooltip: inputs.taskIsTerminal
+        ? '你正在直接操作浏览器；需要 AI 时点“交给 AI”并输入下一步指令'
+        : '你正在直接操作浏览器，点“交给 AI”可继续当前执行',
       tone: 'takeover',
       dotStatus: 'live',
       showLabel: true,
@@ -455,14 +553,14 @@ export function browserLiveOverlayCopy(inputs: {
   if (inputs.taskIsTerminal) {
     if (inputs.showReconnect) {
       return {
-        title: '浏览器会话连接较慢',
-        detail: '正在连接短时保留的浏览器。若会话已经释放，将自动回到任务截图。',
+        title: '浏览器工作区连接较慢',
+        detail: '正在恢复当前任务的浏览器；成功后可以继续点击、输入或交给 AI。',
         reconnectLabel: '重连浏览器',
       };
     }
     return {
-      title: '正在恢复可操作浏览器',
-      detail: '任务已结束，正在连接短时保留的浏览器会话。连接后仍可点击和输入。',
+      title: '正在连接浏览器工作区',
+      detail: '任务已结束，浏览器仍可接管操作，也可以继续交给 AI。',
       reconnectLabel: '重连浏览器',
     };
   }
@@ -516,7 +614,7 @@ export function browserLiveOverlayCopy(inputs: {
 }
 
 export function terminalBrowserTakeoverMessage(status: UiTaskStatus | null | undefined): string {
-  return `${terminalEvidenceStatusLabel(status)}，浏览器已关闭。重新执行任务可打开新浏览器。`;
+  return `${terminalEvidenceStatusLabel(status)}，正在恢复当前任务的浏览器。`;
 }
 
 export function browserReleasedCardCopy(): {

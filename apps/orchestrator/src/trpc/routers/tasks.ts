@@ -22,6 +22,10 @@ import {
 } from '../../agent/direct-open.js';
 import { injectResolvedUrl, resolveIntentUrl } from '../../agent/url-resolver.js';
 import { defaultBrowserNetworkPolicy } from '../../agent/browser-network-policy.js';
+import {
+  BrowserSessionRestoreFlights,
+  restorableBrowserTarget,
+} from '../../browser-pool/browser-session-recovery.js';
 import { env as appEnv } from '../../config/env.js';
 import { buildBaiduSmokePlan } from '../../agent/smoke-plans.js';
 import { friendlyTaskFailureReason } from '../../agent/task-failure-copy.js';
@@ -792,6 +796,8 @@ function isSafeUrl(raw: string): boolean {
     return false;
   }
 }
+
+const browserSessionRestoreFlights = new BrowserSessionRestoreFlights();
 
 export const tasksRouter = router({
   create: protectedProcedure.input(createInput).mutation(async ({ ctx, input }) => {
@@ -3369,15 +3375,26 @@ export const tasksRouter = router({
       const dispatchDirectOpen = async (): Promise<void> => {
         let executor = directOpenFallbackExecutor;
         let allocatedPool = false;
+        let adoptedBrowserSession = false;
         try {
           if (directOpenUsesBrowserPool && ctx.browserPool) {
-            const instance = await ctx.browserPool.allocate(
-              taskId,
-              ctx.userId,
-              input.viewportProfile,
-            );
+            const adopted = input.replyToTaskId
+              ? ctx.browserPool.adoptRetained(
+                  input.replyToTaskId,
+                  taskId,
+                  ctx.userId,
+                )
+              : null;
+            const instance =
+              adopted ??
+              (await ctx.browserPool.allocate(
+                taskId,
+                ctx.userId,
+                input.viewportProfile,
+              ));
             executor = instance.executor;
             allocatedPool = true;
+            adoptedBrowserSession = adopted != null;
           }
           if (!executor) throw new Error('浏览器执行器尚未就绪');
           const readyExecutor = executor;
@@ -3388,7 +3405,9 @@ export const tasksRouter = router({
             navigate: (page: PageLike, url: string) => readyExecutor.navigate(page, url),
             screenshot: (page: PageLike) => readyExecutor.screenshot(page),
           };
-          const evidence = await runDirectOpen(directExecutor, directOpenUrl);
+          const evidence = await runDirectOpen(directExecutor, directOpenUrl, {
+            preserveExistingPage: adoptedBrowserSession,
+          });
           const persisted = await repo.persistVisionOutcome(taskId, {
             status: 'completed',
             summary: `已打开 ${evidence.finalUrl}`,
@@ -3722,6 +3741,7 @@ export const tasksRouter = router({
       // .enqueue vs `void runFn()`).
       const dispatchToBrave = async (): Promise<void> => {
       let perUserExec = null;
+      let adoptedBrowserSession = false;
       if (
         ctx.browserPool &&
         shouldUseBrowserPool(ctx.userId) &&
@@ -3733,12 +3753,22 @@ export const tasksRouter = router({
           // .finally below calls release(taskId) to tear down
           // immediately on completion. Per-user concurrency is gated
           // upstream via getActiveTaskCount + plan limits.
-          const instance = await ctx.browserPool.allocate(
-            taskId,
-            ctx.userId,
-            input.viewportProfile,
-          );
+          const adopted = input.replyToTaskId
+            ? ctx.browserPool.adoptRetained(
+                input.replyToTaskId,
+                taskId,
+                ctx.userId,
+              )
+            : null;
+          const instance =
+            adopted ??
+            (await ctx.browserPool.allocate(
+              taskId,
+              ctx.userId,
+              input.viewportProfile,
+            ));
           perUserExec = instance.executor;
+          adoptedBrowserSession = adopted != null;
           ctx.logger.info(
             { taskId, userId: ctx.userId, cdpPort: instance.cdpPort, displayNum: instance.display },
             'pool: allocated browser for task',
@@ -4101,6 +4131,7 @@ export const tasksRouter = router({
               }
             : {}),
           executor: primaryExecutor,
+          preserveExistingPage: adoptedBrowserSession,
           domain: classification.domain,
           // Swap target: the NON-primary browser. When headed was
           // used as primary, a stuck/anti-bot signal falls back to
@@ -7779,6 +7810,206 @@ export const tasksRouter = router({
       reason: 'no_active_task — submit a task to spawn a browser',
     };
   }),
+
+  /**
+   * Re-establish the interactive browser owned by an existing terminal task.
+   * This does not create a task, consume quota, or manufacture continuity from
+   * a screenshot. If the original process is gone, a fresh managed browser is
+   * opened under the same task id at the last persisted, policy-checked URL.
+   */
+  ensureBrowserSession: protectedProcedure
+    .input(z.object({ taskId: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      if (!ctx.browserPool || !shouldUseBrowserPool(ctx.userId)) {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: '当前浏览器工作区不可用',
+        });
+      }
+      const browserPool = ctx.browserPool;
+
+      const [userRow] = await ctx.db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.externalId, ctx.userId))
+        .limit(1);
+      if (!userRow) {
+        throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
+      }
+      const [taskRow] = await ctx.db
+        .select({
+          status: tasksTable.status,
+          origin: tasksTable.origin,
+          result: tasksTable.result,
+        })
+        .from(tasksTable)
+        .where(
+          and(
+            eq(tasksTable.externalId, input.taskId),
+            eq(tasksTable.userId, userRow.id),
+            eq(tasksTable.origin, 'user'),
+          ),
+        )
+        .limit(1);
+      if (!taskRow) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: '找不到浏览器任务' });
+      }
+      const target = restorableBrowserTarget(taskRow);
+      if (!target) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: '这个任务没有可恢复的真实浏览器页面',
+        });
+      }
+
+      return browserSessionRestoreFlights.run(
+        browserPool,
+        input.taskId,
+        async () => {
+          const existing = browserPool.peek(input.taskId);
+          if (existing?.status === 'ready') {
+            if (existing.userId !== ctx.userId) {
+              throw new TRPCError({
+                code: 'FORBIDDEN',
+                message: '浏览器归属校验失败',
+              });
+            }
+            browserPool.retain(
+              input.taskId,
+              appEnv.BROWSER_TERMINAL_RETENTION_MS,
+              'terminal-workspace',
+            );
+            return {
+              status: 'ready' as const,
+              restored: false,
+              url: target.url,
+            };
+          }
+          if (existing) {
+            throw new TRPCError({
+              code: 'CONFLICT',
+              message: '浏览器工作区正在释放，请稍后重试',
+            });
+          }
+
+          const decision = await defaultBrowserNetworkPolicy.check(target.url);
+          if (!decision.allowed) {
+            throw new TRPCError({
+              code: 'BAD_REQUEST',
+              message: decision.message,
+            });
+          }
+
+          let allocated = false;
+          try {
+            const instance = await browserPool.allocate(
+              input.taskId,
+              ctx.userId,
+            );
+            allocated = true;
+            await instance.executor.resetPageForTask();
+            const page = (await instance.executor.getPage()) as unknown as PageLike;
+            const navigation = await instance.executor.navigate(page, target.url);
+            if (!navigation.ok) {
+              throw new Error(navigation.message ?? '无法恢复最后页面');
+            }
+            const restoredPage = await instance.executor.getPage();
+            const restoredUrl = restoredPage.url();
+            browserPool.retain(
+              input.taskId,
+              appEnv.BROWSER_TERMINAL_RETENTION_MS,
+              'terminal-workspace',
+            );
+            return {
+              status: 'ready' as const,
+              restored: true,
+              url: restoredUrl || target.url,
+            };
+          } catch (err) {
+            if (allocated) {
+              await browserPool
+                .release(input.taskId, 'terminal-workspace-restore-failed')
+                .catch(() => {});
+            }
+            ctx.logger.warn(
+              {
+                taskId: input.taskId,
+                userId: ctx.userId,
+                err: err instanceof Error ? err.message : String(err),
+              },
+              'tasks.ensureBrowserSession: restore failed',
+            );
+            throw new TRPCError({
+              code: 'INTERNAL_SERVER_ERROR',
+              message: '浏览器工作区恢复失败，请稍后重试',
+            });
+          }
+        },
+      );
+    }),
+
+  /** Persist user-driven terminal navigation so a later process-level restore
+   * returns to the page the user actually reached, not the agent's older final
+   * URL. The live pool ownership check prevents clients from rewriting an
+   * unrelated or already-released task record. */
+  checkpointBrowserSession: protectedProcedure
+    .input(
+      z.object({
+        taskId: z.string().min(1),
+        url: z.string().min(1).max(2048),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      if (!isSafeUrl(input.url) || !ctx.browserPool) {
+        return { ok: false as const, reason: 'invalid_or_unavailable' as const };
+      }
+      const instance = ctx.browserPool.peek(input.taskId);
+      if (
+        !instance ||
+        instance.status !== 'ready' ||
+        instance.userId !== ctx.userId
+      ) {
+        return { ok: false as const, reason: 'session_not_live' as const };
+      }
+      const [userRow] = await ctx.db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.externalId, ctx.userId))
+        .limit(1);
+      if (!userRow) {
+        throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
+      }
+      const [taskRow] = await ctx.db
+        .select({ status: tasksTable.status, result: tasksTable.result })
+        .from(tasksTable)
+        .where(
+          and(
+            eq(tasksTable.externalId, input.taskId),
+            eq(tasksTable.userId, userRow.id),
+            eq(tasksTable.origin, 'user'),
+          ),
+        )
+        .limit(1);
+      if (!taskRow || !isTaskTerminalStatus(taskRow.status)) {
+        return { ok: false as const, reason: 'task_not_terminal' as const };
+      }
+      const previous =
+        taskRow.result && typeof taskRow.result === 'object'
+          ? (taskRow.result as Record<string, unknown>)
+          : {};
+      await ctx.db
+        .update(tasksTable)
+        .set({ result: { ...previous, finalUrl: input.url } })
+        .where(
+          and(
+            eq(tasksTable.externalId, input.taskId),
+            eq(tasksTable.userId, userRow.id),
+            eq(tasksTable.status, taskRow.status),
+          ),
+        );
+      ctx.browserPool.touch(input.taskId);
+      return { ok: true as const };
+    }),
 
   resetBrowser: protectedProcedure.mutation(async ({ ctx }) => {
     // Pool users reset their own Brave; everyone else resets the

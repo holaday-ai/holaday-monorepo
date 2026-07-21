@@ -1,6 +1,7 @@
 import {
   ArrowLeft,
   ArrowRight,
+  Bot,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -13,7 +14,6 @@ import {
   Maximize2,
   Minimize2,
   MousePointerClick,
-  Power,
   RotateCw,
   Square,
   X,
@@ -23,12 +23,15 @@ import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button } from '@/components/ui/button';
 import {
   browserLiveOverlayCopy,
+  browserControlAction,
+  browserInputFallbackMode,
   browserStartupTargetUrl,
   browserWorkspaceTaskIntent,
   browserFrameCanPanInPortraitSheet,
   browserPanelEvidenceHeaderStatus,
   browserPanelHeaderStatus,
   type BrowserPanelHeaderStatus,
+  type BrowserControlAction,
   browserPanelDotLabel,
   browserReleasedCardCopy,
   browserViewportFooterLabel,
@@ -41,11 +44,13 @@ import {
   isBrowserInteractionActive,
   taskOwnedBrowserFrame,
   taskOwnedBrowserUrl,
-  terminalBrowserTakeoverMessage,
   terminalEvidenceContinuation,
   terminalEvidenceFrameForTask,
   terminalEvidenceFrameLabel,
   terminalEvidenceLayout,
+  terminalBrowserRecoveryRetryDelay,
+  terminalBrowserSessionUnavailable,
+  type TerminalBrowserRecoveryState,
   type TerminalEvidenceScreenshotSource,
 } from '@/components/browser-panel-state';
 import {
@@ -153,16 +158,14 @@ function buildVncUrl(
 function buildScreencastUrl(
   activeTaskId: string | null,
   poolUserId: string | null,
-  streamToken: string | null,
 ): string | null {
   if (typeof window === 'undefined') return null;
   const arg = activeTaskId ?? poolUserId;
   if (!arg) return null;
-  if (!streamToken) return null;
   const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
   return `${scheme}://${window.location.host}/screencast-ws/${encodeURIComponent(
     arg,
-  )}?token=${encodeURIComponent(streamToken)}`;
+  )}`;
 }
 
 /**
@@ -251,6 +254,8 @@ interface Props {
   onReExecute?: () => void;
   /** True while the parent is creating the fresh replacement task. */
   reExecuting?: boolean;
+  /** Focus the current task's follow-up composer before handing a terminal page back to AI. */
+  onRequestAgentHelp?: () => void;
 }
 
 /**
@@ -282,6 +287,7 @@ export function BrowserPanel({
   onToggleCollapse,
   onReExecute,
   reExecuting = false,
+  onRequestAgentHelp,
 }: Props): JSX.Element | null {
   const isSheet = layout === 'sheet';
   // P2-A — only the non-clarification kinds need browser takeover.
@@ -395,7 +401,7 @@ export function BrowserPanel({
   // `Page.frameNavigated` event. Tracks user / agent navigation on
   // the remote browser in real time (clicking a link, JS pushState,
   // page reload). When set, takes priority over `persistedFinalUrl`
-  // during a live session — including the bounded review lease after
+  // during a live session — including the renewable idle lease after
   // completion. The persisted final URL only wins after that real
   // browser is no longer available and the panel falls back to evidence.
   const [cdpLiveUrlState, setCdpLiveUrlState] =
@@ -407,6 +413,30 @@ export function BrowserPanel({
     setCdpLiveUrlState(taskUrl);
     setLastKnownUrlState(taskUrl);
   }, [activeTaskId]);
+  const lastCheckpointRef = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    lastCheckpointRef.current = null;
+  }, [activeTaskId]);
+  React.useEffect(() => {
+    if (
+      !activeTaskId ||
+      !taskIsTerminal ||
+      !cdpLiveUrl ||
+      !safeExternalHttpHref(cdpLiveUrl) ||
+      lastCheckpointRef.current === cdpLiveUrl
+    ) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      lastCheckpointRef.current = cdpLiveUrl;
+      void trpc.tasks.checkpointBrowserSession
+        .mutate({ taskId: activeTaskId, url: cdpLiveUrl })
+        .catch(() => {
+          lastCheckpointRef.current = null;
+        });
+    }, 750);
+    return () => window.clearTimeout(timer);
+  }, [activeTaskId, cdpLiveUrl, taskIsTerminal]);
   const terminalStatus = taskStatus ? isTerminalStatus(taskStatus) : false;
   const startupTargetUrl =
     !terminalStatus &&
@@ -489,12 +519,12 @@ export function BrowserPanel({
     taskIsTerminal: taskTerminal,
   });
   // Item 6 — short-lived stream token for screencast / VNC WS auth.
-  // Refreshes every 45s; the WS URL gets rebuilt when token rotates,
-  // which forces a benign reconnect (the connection itself doesn't
-  // need re-auth, but the URL needs the latest token for the next
-  // failed-connect retry). Skipped when neither path enabled the
-  // panel — the hook drops its token and stops fetching.
-  const { token: streamToken } = useStreamToken(shouldConnect);
+  // Refreshes every 45s. CDP receives the token separately from its stable
+  // endpoint and consumes the latest value only when a real reconnect is
+  // needed, so credential rotation never tears down a healthy browser input
+  // session. VNC remains URL-authenticated as an emergency-only fallback.
+  const { token: streamToken, refresh: refreshStreamToken } =
+    useStreamToken(shouldConnect);
   // VNC live stream — memoised so prop identity is stable across
   // re-renders (the viewport's effect re-runs on any URL change).
   const vncUrl = React.useMemo(() => {
@@ -509,8 +539,8 @@ export function BrowserPanel({
     // a /screencast-ws/<taskId> backend; skip the WS so the
     // disconnect banner doesn't flicker every 5 s.
     if (activeTaskId && isNonPoolTask) return null;
-    return buildScreencastUrl(activeTaskId ?? null, poolUserId, streamToken);
-  }, [activeTaskId, shouldConnect, poolUserId, usingCdp, isNonPoolTask, streamToken]);
+    return buildScreencastUrl(activeTaskId ?? null, poolUserId);
+  }, [activeTaskId, shouldConnect, poolUserId, usingCdp, isNonPoolTask]);
   // [HD-DEBUG] log every URL change (or change to/from null). Token
   // redacted so console dumps stay safe to share.
   React.useEffect(() => {
@@ -518,9 +548,7 @@ export function BrowserPanel({
       activeTaskId: activeTaskId ?? null,
       taskTerminal,
       isNonPoolTask,
-      url: screencastUrlForCdp
-        ? screencastUrlForCdp.replace(/token=[^&]+/, 'token=…')
-        : null,
+      url: screencastUrlForCdp,
     });
   }, [screencastUrlForCdp, activeTaskId, taskTerminal, isNonPoolTask]);
   const [vncStatus, setVncStatus] = React.useState<VncStatus>('idle');
@@ -597,16 +625,16 @@ export function BrowserPanel({
   }, [vncStatus]);
   // Phase 24: hibernation is a userId-pool concept (idle GC after
   // 5min). Per-task pool has no hibernation — retained terminal and
-  // executing task sessions use bounded/continuous reconnect logic
+  // executing task sessions use renewable/continuous reconnect logic
   // instead. Only fire the hibernation card on the LEGACY userId-scoped
   // panel state (no task selected).
   // This prevents the "浏览器已休眠" flicker BOSS reported on both
   // executing tasks (transient WS hiccups) and terminal tasks (Brave
   // released after task end).
   const hibernated = poolUserId != null && vncAttemptFails >= 3 && !activeTaskId;
-  // P3 wake/check call. Per-task browsers cannot be resurrected once
-  // released, so the endpoint may report "unavailable"; surface that
-  // clearly instead of silently returning to the same card.
+  // Legacy no-task wake/check call. Task-bound recovery uses
+  // ensureBrowserSession below so it can restore the selected task at its last
+  // trusted page instead of probing an unrelated user-level browser.
   const [waking, setWaking] = React.useState(false);
   const onWake = React.useCallback(async () => {
     if (waking) return;
@@ -636,12 +664,20 @@ export function BrowserPanel({
       }
     }
   }, [toast, waking]);
-  // Terminal browser tasks receive a bounded backend review lease. Keep the
-  // real stream connected during that lease; if an older/expired task rejects
-  // the stream twice, switch to an honest ended-session state instead of
-  // presenting the saved screenshot as if it were a live browser.
+  // Terminal browser tasks receive a renewable backend idle lease. Keep the
+  // real stream connected while the user is present; if the process is gone,
+  // restore the same task at its last trusted page before falling back to an
+  // honestly labelled screenshot.
   const [terminalConnectTimedOut, setTerminalConnectTimedOut] =
     React.useState(false);
+  const [terminalRecoveryState, setTerminalRecoveryState] =
+    React.useState<TerminalBrowserRecoveryState>('idle');
+  const [terminalRecoveryAttempt, setTerminalRecoveryAttempt] =
+    React.useState(0);
+  React.useEffect(() => {
+    setTerminalRecoveryState('idle');
+    setTerminalRecoveryAttempt(0);
+  }, [activeTaskId]);
   React.useEffect(() => {
     setTerminalConnectTimedOut(false);
     if (!taskTerminal || vncStatus === 'connected') return;
@@ -650,10 +686,117 @@ export function BrowserPanel({
     }, 6_000);
     return () => window.clearTimeout(timer);
   }, [activeTaskId, taskTerminal, vncStatus]);
-  const terminalSessionUnavailable =
+  const terminalSessionSuspected =
     taskTerminal &&
     (vncAttemptFails >= 2 || terminalConnectTimedOut) &&
     vncStatus !== 'connected';
+  const terminalRestoreUrl =
+    safeExternalHttpHref(persistedFinalUrl) ??
+    safeExternalHttpHref(finalEvidenceFrame?.url);
+  const terminalCanRestore = Boolean(activeTaskId && terminalRestoreUrl);
+  const restoreTerminalSession = React.useCallback(
+    async (announce = false): Promise<boolean> => {
+      if (!activeTaskId || !taskTerminal || !terminalCanRestore) return false;
+      setTerminalRecoveryState('restoring');
+      try {
+        const result = await trpc.tasks.ensureBrowserSession.mutate({
+          taskId: activeTaskId,
+        });
+        if (!mountedRef.current) return false;
+        // A process restart invalidates the prior server's short-lived stream
+        // credential even when its nominal TTL has not elapsed. Refresh it as
+        // part of recovery so the remounted viewport can authenticate now
+        // instead of waiting for the 45-second background rotation.
+        await refreshStreamToken();
+        if (!mountedRef.current) return false;
+        setTerminalConnectTimedOut(false);
+        setVncAttemptFails(0);
+        setShowReconnect(false);
+        setVncStatus('idle');
+        setTerminalRecoveryState('ready');
+        setTerminalRecoveryAttempt(0);
+        setReconnectEpoch((epoch) => epoch + 1);
+        if (announce) {
+          toast.show(
+            result.restored
+              ? '浏览器已恢复，可以继续操作'
+              : '浏览器仍在，可以继续操作',
+            'info',
+          );
+        }
+        return true;
+      } catch {
+        if (mountedRef.current) {
+          setTerminalRecoveryState('failed');
+          setTerminalRecoveryAttempt((attempt) => attempt + 1);
+          if (announce) toast.show('浏览器恢复失败，请稍后重试', 'error');
+        }
+        return false;
+      }
+    }, [
+      activeTaskId,
+      refreshStreamToken,
+      taskTerminal,
+      terminalCanRestore,
+      toast,
+    ]);
+  React.useEffect(() => {
+    if (!taskTerminal) return;
+    if (vncStatus === 'connected') {
+      setTerminalRecoveryState('connected');
+      setTerminalRecoveryAttempt(0);
+      return;
+    }
+    if (!terminalSessionSuspected || !terminalCanRestore) return;
+    if (
+      terminalRecoveryState !== 'idle' &&
+      terminalRecoveryState !== 'connected'
+    ) {
+      return;
+    }
+    void restoreTerminalSession(false);
+  }, [
+    restoreTerminalSession,
+    taskTerminal,
+    terminalCanRestore,
+    terminalRecoveryState,
+    terminalSessionSuspected,
+    vncStatus,
+  ]);
+  React.useEffect(() => {
+    if (
+      terminalRecoveryState !== 'failed' ||
+      !taskTerminal ||
+      !terminalSessionSuspected ||
+      !terminalCanRestore
+    ) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setTerminalRecoveryState('idle');
+    }, terminalBrowserRecoveryRetryDelay(terminalRecoveryAttempt));
+    return () => window.clearTimeout(timer);
+  }, [
+    taskTerminal,
+    terminalCanRestore,
+    terminalRecoveryAttempt,
+    terminalRecoveryState,
+    terminalSessionSuspected,
+  ]);
+  React.useEffect(() => {
+    if (terminalRecoveryState !== 'ready' || vncStatus === 'connected') return;
+    const timer = window.setTimeout(() => {
+      setTerminalRecoveryState('failed');
+      setTerminalRecoveryAttempt((attempt) => attempt + 1);
+    }, 8_000);
+    return () => window.clearTimeout(timer);
+  }, [terminalRecoveryState, vncStatus]);
+  const terminalSessionUnavailable = terminalBrowserSessionUnavailable({
+    sessionSuspected: terminalSessionSuspected,
+    canRestore: terminalCanRestore,
+    recoveryState: terminalRecoveryState,
+    recoveryAttempt: terminalRecoveryAttempt,
+  });
   const useVnc = usingCdp
     ? shouldConnect && !terminalSessionUnavailable
     : Boolean(vncUrl) && !terminalSessionUnavailable;
@@ -682,15 +825,6 @@ export function BrowserPanel({
       'about:blank');
   const displayUrlIsPendingTarget =
     startupTargetUrl != null && displayUrl === startupTargetUrl;
-  const continueInNewSession = React.useCallback(
-    async (intent: string): Promise<boolean> => {
-      if (!onStartWorkspaceTask) return false;
-      const started = await onStartWorkspaceTask(intent);
-      if (started) setInteractive(true);
-      return started;
-    },
-    [onStartWorkspaceTask, setInteractive],
-  );
   // When the agent parks on awaiting-user (captcha, login wall, user
   // question the model injected), auto-flip the panel to interactive
   // mode — the user almost certainly needs to click into the browser
@@ -846,6 +980,7 @@ export function BrowserPanel({
     browserAwaiting,
     interactiveActive,
     showReconnect,
+    taskIsTerminal,
   });
   const evidenceHeaderActive = terminalSessionUnavailable;
   const displayedHeaderStatus = evidenceHeaderActive
@@ -855,44 +990,41 @@ export function BrowserPanel({
       )
     : headerStatus;
 
-  // BOSS-feedback follow-up — the blue "你正在直接操作浏览器" banner
-  // was confusing average users because it appeared whenever the
-  // agent parked on captcha / login (browserAwaiting auto-flipped
-  // `interactive=true` in the effect below). Hide it unless the user
-  // explicitly clicked the takeover toggle. The ref tracks intent
-  // and resets when `interactive` flips back to false (next task).
-  const userInteractedRef = React.useRef(false);
-  const [showTakeoverBanner, setShowTakeoverBanner] = React.useState(false);
+  const browserControl = browserControlAction({
+    interactive,
+    taskIsTerminal,
+  });
+  const inputFallbackMode = browserInputFallbackMode({
+    interactiveActive,
+    usingCdp,
+    fallbackOpen: cjkFallbackOpen,
+  });
   React.useEffect(() => {
-    userInteractedRef.current = false;
-    setShowTakeoverBanner(false);
     setActivityVisible(true);
     setCjkFallbackOpen(false);
   }, [activeTaskId]);
-  React.useEffect(() => {
-    if (!interactive) {
-      userInteractedRef.current = false;
-      setShowTakeoverBanner(false);
-    }
-  }, [interactive]);
   const handleUserTakeoverClick = React.useCallback(() => {
-    const next = !interactive;
+    const next = browserControl.nextInteractive;
     if (next) {
-      // A terminal task is interactive only during its bounded review
-      // lease. Once the retained browser is unavailable, refuse takeover
-      // instead of putting live controls over static evidence.
+      // If a terminal process was released, takeover first restores the same
+      // task's browser. Static evidence never receives interactive controls.
       if (terminalSessionUnavailable) {
-        toast.show(terminalBrowserTakeoverMessage(taskStatus), 'info');
+        void restoreTerminalSession(true).then((restored) => {
+          if (!restored || !mountedRef.current) return;
+          setInteractive(true);
+        });
         return;
       }
-      userInteractedRef.current = true;
-      setShowTakeoverBanner(true);
-    } else {
-      userInteractedRef.current = false;
-      setShowTakeoverBanner(false);
     }
     setInteractive(next);
-  }, [interactive, taskStatus, terminalSessionUnavailable, setInteractive, toast]);
+    if (browserControl.focusFollowUp) onRequestAgentHelp?.();
+  }, [
+    browserControl,
+    onRequestAgentHelp,
+    restoreTerminalSession,
+    terminalSessionUnavailable,
+    setInteractive,
+  ]);
 
   // Codex P2 — hide the address bar / nav / takeover chrome when
   // the panel is open on a terminal task with no viewable evidence
@@ -1176,6 +1308,7 @@ export function BrowserPanel({
                 status={displayedHeaderStatus}
                 interactiveActive={interactiveActive}
                 interactive={interactive}
+                controlAction={browserControl}
                 onToggleInteractive={handleUserTakeoverClick}
                 navTaskId={evidenceHeaderActive ? null : activeTaskId ?? null}
                 controlsEnabled={!evidenceHeaderActive}
@@ -1264,24 +1397,24 @@ export function BrowserPanel({
                 <button
                   type="button"
                   onClick={handleUserTakeoverClick}
-                  title={
-                    interactive
-                      ? '退出接管 — 让 AI 继续操作'
-                      : '接管浏览器 — 你的鼠标键盘直接控制 Brave'
-                  }
-                  aria-label={interactive ? '退出浏览器接管' : '接管浏览器'}
+                  title={browserControl.title}
+                  aria-label={browserControl.ariaLabel}
                   aria-pressed={interactive}
                   className={cn(
-                    'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[9px] border transition-colors',
+                    'inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-[9px] border transition-colors',
+                    taskIsTerminal && !isNarrow && !isSheet ? 'px-2.5' : 'w-8',
                     interactive
                       ? 'border-[#EA1F59]/35 bg-[#EA1F59]/10 text-[#EA1F59]'
                       : 'border-transparent bg-transparent text-muted-foreground hover:bg-foreground/5',
                   )}
                 >
                   {interactive ? (
-                    <MousePointerClick className="h-3.5 w-3.5" />
+                    <Bot className="h-3.5 w-3.5" />
                   ) : (
-                    <Power className="h-3.5 w-3.5" />
+                    <MousePointerClick className="h-3.5 w-3.5" />
+                  )}
+                  {taskIsTerminal && !isNarrow && !isSheet && (
+                    <span className="text-[11px] font-medium">{browserControl.label}</span>
                   )}
                 </button>
               )}
@@ -1369,11 +1502,6 @@ export function BrowserPanel({
               </div>
             </div>
           )}
-          {interactiveActive && showTakeoverBanner && !fullscreen && (
-            <div className="mx-3 mt-2 rounded-md border border-[#EA1F59]/25 bg-[#EA1F59]/10 px-3 py-1.5 text-center text-[11px] font-medium text-[#EA1F59] dark:border-[#EA1F59]/35">
-              你正在直接操作浏览器 · 点工具栏的接管按钮可让 AI 继续
-            </div>
-          )}
           <div
             ref={screencastHostRef}
             className={cn(
@@ -1394,8 +1522,10 @@ export function BrowserPanel({
                 onToggleFullscreen={onToggleFullscreen}
                 onReExecute={onReExecute}
                 reExecuting={reExecuting}
-                onContinueInNewSession={
-                  onStartWorkspaceTask ? continueInNewSession : undefined
+                onRestoreSession={
+                  terminalCanRestore
+                    ? () => restoreTerminalSession(true)
+                    : undefined
                 }
               />
             ) : hibernated ? (
@@ -1433,6 +1563,7 @@ export function BrowserPanel({
                     // "刷新画面" button after 5s of connecting.
                     key={`cdp-${reconnectEpoch}`}
                     wsUrl={screencastUrlForCdp}
+                    streamToken={streamToken}
                     viewOnly={!interactiveActive}
                     fitMode={isSheet ? 'readable' : 'contain'}
                     onStatusChange={(s: CdpScreencastStatus) =>
@@ -1648,8 +1779,23 @@ export function BrowserPanel({
                 <ListChecks className="h-3.5 w-3.5" aria-hidden />
               </button>
             )}
-            {useVnc && interactiveActive && (
-              <CjkInputBar onSend={sendInsertText} fullscreen={fullscreen} />
+            {useVnc && inputFallbackMode === 'toggle' && (
+              <button
+                type="button"
+                onClick={() => setCjkFallbackOpen(true)}
+                className="absolute bottom-3 left-3 z-20 inline-flex h-8 w-8 items-center justify-center rounded-[9px] border border-white/20 bg-black/45 text-white shadow-sm backdrop-blur transition-colors hover:bg-black/60"
+                aria-label="打开文字输入辅助"
+                title="文字输入辅助"
+              >
+                <Keyboard className="h-3.5 w-3.5" aria-hidden />
+              </button>
+            )}
+            {useVnc && inputFallbackMode === 'bar' && (
+              <CjkInputBar
+                onSend={sendInsertText}
+                fullscreen={fullscreen}
+                onClose={usingCdp ? () => setCjkFallbackOpen(false) : undefined}
+              />
             )}
           </div>
           {liveBrowserCanPan && !terminalSessionUnavailable && !hibernated && !interactiveActive && !showLiveOverlay && (
@@ -1703,7 +1849,7 @@ function TerminalEvidenceView({
   onToggleFullscreen,
   onReExecute,
   reExecuting,
-  onContinueInNewSession,
+  onRestoreSession,
 }: {
   frame: UiScreencast;
   source: TerminalEvidenceScreenshotSource;
@@ -1714,7 +1860,7 @@ function TerminalEvidenceView({
   onToggleFullscreen?: () => void;
   onReExecute?: () => void;
   reExecuting: boolean;
-  onContinueInNewSession?: (intent: string) => Promise<boolean>;
+  onRestoreSession?: () => Promise<boolean>;
 }): JSX.Element {
   const [viewMode, setViewMode] = React.useState<'contain' | 'readable'>(
     'contain',
@@ -1752,11 +1898,11 @@ function TerminalEvidenceView({
     source === 'saved-screenshot'
       ? '任务结束时保存的只读截图'
       : '任务结束前最后可见的只读截图';
-  const continueInNewSession = async (): Promise<void> => {
-    if (!continuation || !onContinueInNewSession || continuing) return;
+  const restoreSession = async (): Promise<void> => {
+    if (!continuation || !onRestoreSession || continuing) return;
     setContinuing(true);
     try {
-      await onContinueInNewSession(continuation.intent);
+      await onRestoreSession();
     } finally {
       setContinuing(false);
     }
@@ -1798,10 +1944,10 @@ function TerminalEvidenceView({
               {viewMode === 'contain' ? '按比例适应窗口' : '原始尺寸，可滑动查看'}
             </span>
             <div className="flex shrink-0 items-center gap-1.5">
-              {continuation && onContinueInNewSession && (
+              {continuation && onRestoreSession && (
                 <button
                   type="button"
-                  onClick={() => void continueInNewSession()}
+                  onClick={() => void restoreSession()}
                   disabled={continuing}
                   aria-label={
                     continuing ? continuation.pendingLabel : continuation.label
@@ -2853,13 +2999,13 @@ function NavButton({
  *   - URL bar (read-only display; the same UrlBar component the
  *     header uses, so clipboard + edit-to-navigate behave
  *     identically)
- *   - takeover toggle (Hand icon, mirrors the header button)
+ *   - browser ownership toggle (mirrors the header button)
  *   - stop button (when executing)
  *   - exit fullscreen
  *
- * Terminal evidence mode reuses the toolbar as a passive viewer: the
- * task's Brave has already been released, so nav / stop / takeover
- * controls are hidden and the URL bar becomes read-only.
+ * Terminal evidence mode reuses the toolbar as a passive viewer while the
+ * live browser is unavailable. Navigation and takeover return after the
+ * current task's managed browser has been restored.
  */
 function FullscreenFloatingToolbar({
   displayUrl,
@@ -2867,6 +3013,7 @@ function FullscreenFloatingToolbar({
   status,
   interactiveActive,
   interactive,
+  controlAction,
   onToggleInteractive,
   navTaskId,
   controlsEnabled,
@@ -2879,6 +3026,7 @@ function FullscreenFloatingToolbar({
   status: BrowserPanelHeaderStatus;
   interactiveActive: boolean;
   interactive: boolean;
+  controlAction: BrowserControlAction;
   onToggleInteractive: () => void;
   navTaskId: string | null;
   controlsEnabled: boolean;
@@ -2971,14 +3119,18 @@ function FullscreenFloatingToolbar({
         <button
           type="button"
           onClick={onToggleInteractive}
-          title={interactive ? '退出接管 — 让 AI 继续操作' : '接管 — 你自己操作浏览器'}
-          aria-label={interactive ? '退出接管' : '接管'}
+          title={controlAction.title}
+          aria-label={controlAction.ariaLabel}
           className={cn(
             'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-white/85 transition-colors hover:bg-white/10',
             interactive && 'bg-[#EA1F59]/35 text-white',
           )}
         >
-          <Hand className="h-3.5 w-3.5" />
+          {interactive ? (
+            <Bot className="h-3.5 w-3.5" />
+          ) : (
+            <Hand className="h-3.5 w-3.5" />
+          )}
         </button>
       )}
     </div>

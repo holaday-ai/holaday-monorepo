@@ -88,6 +88,10 @@ const KILL_GRACE_MS = 3_000;
 export class BrowserPool {
   /** Keyed by taskId — one entry per allocated browser. */
   private readonly instances = new Map<string, BrowserInstance>();
+  private readonly allocationPromises = new Map<
+    string,
+    { userId: string; promise: Promise<BrowserInstance> }
+  >();
   private readonly retentionTimers = new Map<string, NodeJS.Timeout>();
   private readonly allocator: SlotAllocator;
   private gcTimer: NodeJS.Timeout | null = null;
@@ -131,14 +135,36 @@ export class BrowserPool {
       // existing instance rather than spawning a duplicate.
       const inst = this.instances.get(taskId);
       if (inst && inst.status === 'ready') {
+        if (inst.userId !== userId) {
+          throw new Error('BrowserPool: task browser owner mismatch');
+        }
         inst.lastActiveAt = Date.now();
         return inst;
       }
     }
-    if (this.allocator.isFull()) {
-      await this.releaseOldestRetained('capacity-reclaim');
+    const pending = this.allocationPromises.get(taskId);
+    if (pending) {
+      if (pending.userId !== userId) {
+        throw new Error('BrowserPool: task browser allocation owner mismatch');
+      }
+      return pending.promise;
     }
-    return this.spawnInstance(taskId, userId, viewportProfile);
+
+    const promise = (async (): Promise<BrowserInstance> => {
+      if (this.allocator.isFull()) {
+        await this.releaseOldestRetained('capacity-reclaim');
+      }
+      return this.spawnInstance(taskId, userId, viewportProfile);
+    })();
+    this.allocationPromises.set(taskId, { userId, promise });
+    try {
+      return await promise;
+    } finally {
+      const current = this.allocationPromises.get(taskId);
+      if (current?.promise === promise) {
+        this.allocationPromises.delete(taskId);
+      }
+    }
   }
 
   /**
@@ -148,11 +174,17 @@ export class BrowserPool {
    */
   touch(taskId: string): void {
     const inst = this.instances.get(taskId);
-    if (inst) inst.lastActiveAt = Date.now();
+    if (!inst) return;
+    const now = Date.now();
+    inst.lastActiveAt = now;
+    if (inst.retainedUntil != null && inst.retentionTtlMs != null) {
+      inst.retainedUntil = now + inst.retentionTtlMs;
+      this.scheduleRetentionExpiry(taskId);
+    }
   }
 
   /**
-   * Keep a completed task's browser alive for a bounded review window.
+   * Keep a completed task's browser alive on a renewable idle lease.
    * A retained instance never reserves capacity ahead of new work: allocate()
    * reclaims the oldest retained browser before returning PoolCapacityError.
    */
@@ -169,22 +201,90 @@ export class BrowserPool {
 
     const durationMs = Math.max(1, Math.floor(ttlMs));
     const retainedUntil = Date.now() + durationMs;
-    const existingTimer = this.retentionTimers.get(taskId);
-    if (existingTimer) clearTimeout(existingTimer);
-
     inst.retainedUntil = retainedUntil;
     inst.retentionReason = reason;
-    const timer = setTimeout(() => {
-      this.retentionTimers.delete(taskId);
-      void this.release(taskId, `${reason}-expired`);
-    }, durationMs);
-    timer.unref?.();
-    this.retentionTimers.set(taskId, timer);
+    inst.retentionTtlMs = durationMs;
+    this.scheduleRetentionExpiry(taskId);
     this.logger.info(
       { taskId, userId: inst.userId, reason, retainedUntil },
       'pool: retained terminal browser for review',
     );
     return true;
+  }
+
+  /**
+   * Move a retained terminal browser to a follow-up task. The browser process,
+   * profile, cookies and current page stay intact; only the pool ownership key
+   * changes. This is deliberately limited to retained instances so a follow-up
+   * can never steal a browser from an executing task.
+   */
+  adoptRetained(
+    sourceTaskId: string,
+    destinationTaskId: string,
+    userId: string,
+  ): BrowserInstance | null {
+    if (sourceTaskId === destinationTaskId) return null;
+    if (this.instances.has(destinationTaskId)) return null;
+    const inst = this.instances.get(sourceTaskId);
+    if (
+      !inst ||
+      inst.status !== 'ready' ||
+      inst.userId !== userId ||
+      inst.retainedUntil == null
+    ) {
+      return null;
+    }
+
+    const retentionTimer = this.retentionTimers.get(sourceTaskId);
+    if (retentionTimer) clearTimeout(retentionTimer);
+    this.retentionTimers.delete(sourceTaskId);
+    this.instances.delete(sourceTaskId);
+
+    inst.taskId = destinationTaskId;
+    inst.lastActiveAt = Date.now();
+    delete inst.retainedUntil;
+    delete inst.retentionReason;
+    delete inst.retentionTtlMs;
+    this.instances.set(destinationTaskId, inst);
+    this.logger.info(
+      { sourceTaskId, destinationTaskId, userId },
+      'pool: adopted terminal browser for follow-up task',
+    );
+    return inst;
+  }
+
+  /**
+   * Release whichever task currently owns an instance after a child process
+   * dies. The task id is intentionally read from the mutable instance here:
+   * retained browsers can be adopted by a follow-up task without respawning,
+   * so a listener that captured the original id would leave a dead entry under
+   * the new task key and make every later restore conflict forever.
+   */
+  private handleUnexpectedChildDeath(
+    instance: BrowserInstance,
+    label: string,
+  ): void {
+    if (instance.status !== 'ready' && instance.status !== 'allocating') return;
+    const activeTaskId = instance.taskId;
+    instance.status = 'dead';
+    this.logger.warn(
+      {
+        taskId: activeTaskId,
+        userId: instance.userId,
+        label,
+        cdpPort: instance.cdpPort,
+      },
+      'pool: child died unexpectedly — marking dead + auto-releasing',
+    );
+    void this.release(activeTaskId, `${label}-died`).catch((err) => {
+      this.logger.warn(
+        {
+          taskId: activeTaskId,
+          err: err instanceof Error ? err.message : String(err),
+        },
+        'pool: auto-release after child death failed',
+      );
+    });
   }
 
   /**
@@ -228,6 +328,31 @@ export class BrowserPool {
       );
     }
     return true;
+  }
+
+  private scheduleRetentionExpiry(taskId: string): void {
+    const existingTimer = this.retentionTimers.get(taskId);
+    if (existingTimer) clearTimeout(existingTimer);
+
+    const inst = this.instances.get(taskId);
+    if (!inst || inst.retainedUntil == null) {
+      this.retentionTimers.delete(taskId);
+      return;
+    }
+    const delayMs = Math.max(1, inst.retainedUntil - Date.now());
+    const timer = setTimeout(() => {
+      this.retentionTimers.delete(taskId);
+      const current = this.instances.get(taskId);
+      if (!current || current.retainedUntil == null) return;
+      if (current.retainedUntil > Date.now()) {
+        this.scheduleRetentionExpiry(taskId);
+        return;
+      }
+      const reason = current.retentionReason ?? 'terminal-review';
+      void this.release(taskId, `${reason}-expired`);
+    }, delayMs);
+    timer.unref?.();
+    this.retentionTimers.set(taskId, timer);
   }
 
   /**
@@ -518,22 +643,8 @@ export class BrowserPool {
       // flips status to 'dead' and triggers an asynchronous release.
       // The status check makes this a no-op when release() is already
       // the one killing the children (release sets 'draining' first).
-      const onChildDeath = (label: string) => () => {
-        if (instance.status === 'ready' || instance.status === 'allocating') {
-          this.logger.warn(
-            { taskId, userId, label, cdpPort: instance.cdpPort },
-            'pool: child died unexpectedly — marking dead + auto-releasing',
-          );
-          instance.status = 'dead';
-          void this.release(taskId, `${label}-died`).catch((err) => {
-            this.logger.warn(
-              { taskId, err: err instanceof Error ? err.message : String(err) },
-              'pool: auto-release after child death failed',
-            );
-          });
-        }
-        // status 'draining' or 'dead' => release in progress, no-op.
-      };
+      const onChildDeath = (label: string) => () =>
+        this.handleUnexpectedChildDeath(instance, label);
       browserProcess.child.on('exit', onChildDeath('browser'));
       x11vnc?.child.on('exit', onChildDeath('x11vnc'));
       websockify?.child.on('exit', onChildDeath('websockify'));

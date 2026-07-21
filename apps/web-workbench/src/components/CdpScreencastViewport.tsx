@@ -13,6 +13,7 @@ import {
   readableScreencastStartScrollLeft,
 } from '@/lib/screencast-fit';
 import { retainScreencastInputFocus } from '@/lib/screencast-input-focus';
+import { appendBrowserStreamToken } from '@/lib/browser-stream-url';
 import { cn } from '@/lib/utils';
 
 /**
@@ -46,8 +47,10 @@ export type CdpScreencastStatus =
   | 'error';
 
 interface Props {
-  /** WS URL to /screencast-ws/:userId?token=… . Null disables. */
+  /** Stable WS URL to /screencast-ws/:taskId, without credentials. */
   wsUrl: string | null;
+  /** Latest short-lived credential, read only when a socket is opened. */
+  streamToken: string | null;
   /** Block input forwarding when true (mirror VncViewport semantics). */
   viewOnly?: boolean;
   onStatusChange?: (status: CdpScreencastStatus) => void;
@@ -94,6 +97,7 @@ interface InputPayload {
 
 export function CdpScreencastViewport({
   wsUrl,
+  streamToken,
   viewOnly = true,
   onStatusChange,
   onUrlChange,
@@ -114,6 +118,11 @@ export function CdpScreencastViewport({
    *  effect when canvas.width/height changes (a new source size). */
   const sourceDimsRecomputeRef = React.useRef<(() => void) | null>(null);
   const wsRef = React.useRef<WebSocket | null>(null);
+  const streamTokenRef = React.useRef(streamToken);
+  React.useEffect(() => {
+    streamTokenRef.current = streamToken;
+  }, [streamToken]);
+  const hasStreamToken = Boolean(streamToken);
   // Cached <img> + frame sequence guard so async image loads cannot
   // paint stale frames after a newer frame, wsUrl change, or unmount.
   const imgRef = React.useRef<HTMLImageElement | null>(null);
@@ -295,10 +304,11 @@ export function CdpScreencastViewport({
   // event-coupling between the BrowserPanel's wake button and
   // this viewport.
   //
-  // The viewport tears down only on unmount or `wsUrl` change
-  // (e.g. user logged out, switched accounts).
+  // The viewport tears down only on unmount, target change, or auth being
+  // removed. Rotating the 60-second token does not interrupt a healthy socket;
+  // the latest token ref is consumed by the next genuine reconnect.
   React.useEffect(() => {
-    if (!wsUrl) {
+    if (!wsUrl || !hasStreamToken) {
       setStatus('idle');
       return;
     }
@@ -315,9 +325,14 @@ export function CdpScreencastViewport({
 
     function connect(): void {
       if (disposed) return;
+      const socketUrl = appendBrowserStreamToken(wsUrl, streamTokenRef.current);
+      if (!socketUrl) {
+        setStatus('idle');
+        return;
+      }
       attempt += 1;
       setStatus('connecting');
-      const ws = new WebSocket(wsUrl!);
+      const ws = new WebSocket(socketUrl);
       activeWs = ws;
       wsRef.current = ws;
 
@@ -410,7 +425,7 @@ export function CdpScreencastViewport({
       }
       wsRef.current = null;
     };
-  }, [wsUrl]);
+  }, [hasStreamToken, wsUrl]);
 
   // Decode a base64 JPEG and paint into the canvas. The img +
   // canvas are reused; canvas is resized to match the source so the

@@ -59,6 +59,12 @@ export interface BrowserInstance extends BrowserSlot {
   retainedUntil?: number;
   retentionReason?: string;
   /**
+   * Idle lease duration for a terminal browser. Every verified stream/input
+   * touch pushes `retainedUntil` forward by this amount, so an actively used
+   * browser is never reaped by the original task-completion deadline.
+   */
+  retentionTtlMs?: number;
+  /**
    * Optimization #3 R1 — viewport profile this instance was spawned
    * with. Used by the CDP streamer to cap frame dimensions to the
    * Brave's logical viewport, and by /screencast-ws/ handlers to

@@ -118,6 +118,29 @@ describe('runDirectOpen', () => {
     });
   });
 
+  it('keeps the current page context when continuing in an adopted browser', async () => {
+    const calls: string[] = [];
+    const page = { url: () => 'https://example.com/continued' };
+
+    await runDirectOpen(
+      {
+        resetPageForTask: async () => {
+          calls.push('reset');
+        },
+        getPage: async () => page,
+        navigate: async (_page, url) => {
+          calls.push(`navigate:${url}`);
+          return { ok: true };
+        },
+        screenshot: async () => ({ base64: 'continued-frame' }),
+      },
+      'https://example.com/continued',
+      { preserveExistingPage: true },
+    );
+
+    expect(calls).toEqual(['navigate:https://example.com/continued']);
+  });
+
   it('fails immediately when navigation does not succeed', async () => {
     const page = { url: () => 'about:blank' };
     await expect(
