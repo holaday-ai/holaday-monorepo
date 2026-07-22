@@ -92,6 +92,7 @@ export class CdpInputHandler {
   constructor(
     private readonly getSession: () => CDPSession | null,
     private readonly logger: Logger,
+    private readonly onInputDispatched?: (message: InputMessage) => void,
   ) {}
 
   /**
@@ -129,7 +130,7 @@ export class CdpInputHandler {
             screenWidth: width,
             screenHeight: height,
           });
-          return;
+          break;
         }
         case 'mouseMove':
           await session.send('Input.dispatchMouseEvent', {
@@ -137,7 +138,7 @@ export class CdpInputHandler {
             x: msg.x,
             y: msg.y,
           });
-          return;
+          break;
         case 'mouseDown':
           await session.send('Input.dispatchMouseEvent', {
             type: 'mousePressed',
@@ -146,7 +147,7 @@ export class CdpInputHandler {
             button: msg.button ?? 'left',
             clickCount: msg.clickCount ?? 1,
           });
-          return;
+          break;
         case 'mouseUp':
           await session.send('Input.dispatchMouseEvent', {
             type: 'mouseReleased',
@@ -155,7 +156,7 @@ export class CdpInputHandler {
             button: msg.button ?? 'left',
             clickCount: msg.clickCount ?? 1,
           });
-          return;
+          break;
         case 'scroll':
           await session.send('Input.dispatchMouseEvent', {
             type: 'mouseWheel',
@@ -164,7 +165,7 @@ export class CdpInputHandler {
             deltaX: msg.deltaX ?? 0,
             deltaY: msg.deltaY ?? 0,
           });
-          return;
+          break;
         case 'keyDown': {
           const text = printableKeyText(msg);
           const commands = editingCommands(msg);
@@ -177,7 +178,7 @@ export class CdpInputHandler {
             ...(text ? { text, unmodifiedText: text } : {}),
             ...(commands ? { commands } : {}),
           });
-          return;
+          break;
         }
         case 'keyUp':
           await session.send('Input.dispatchKeyEvent', {
@@ -187,11 +188,12 @@ export class CdpInputHandler {
             ...(msg.keyCode != null ? { windowsVirtualKeyCode: msg.keyCode } : {}),
             modifiers: modifiersBitmask(msg),
           });
-          return;
+          break;
         case 'insertText':
           await session.send('Input.insertText', { text: msg.text });
-          return;
+          break;
       }
+      this.onInputDispatched?.(msg);
     } catch (err) {
       this.logger.debug(
         { err: err instanceof Error ? err.message : String(err), type: msg.type },

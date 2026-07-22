@@ -40,6 +40,7 @@ import {
   shouldShowBrowserLiveOverlay,
   shouldPreserveBrowserCanvasOnTaskSwitch,
   shouldRemountBrowserStreamAfterRestore,
+  shouldSuspectTerminalBrowserSession,
   shouldShowBrowserFullscreen,
   shouldShowTerminalEvidenceLedger,
   shouldConnectBrowserStream,
@@ -51,6 +52,7 @@ import {
   terminalEvidenceFrameForTask,
   terminalEvidenceFrameLabel,
   terminalEvidenceLayout,
+  terminalBrowserRecoveryWindow,
   terminalBrowserRecoveryRetryDelay,
   terminalBrowserSessionUnavailable,
   type TerminalBrowserRecoveryState,
@@ -688,22 +690,40 @@ export function BrowserPanel({
     React.useState<TerminalBrowserRecoveryState>('idle');
   const [terminalRecoveryAttempt, setTerminalRecoveryAttempt] =
     React.useState(0);
+  const terminalDisconnectedAtRef = React.useRef<number | null>(null);
   React.useEffect(() => {
     setTerminalRecoveryState('idle');
     setTerminalRecoveryAttempt(0);
+    terminalDisconnectedAtRef.current = null;
   }, [activeTaskId]);
+  const terminalBrowserDisconnected =
+    taskTerminal && vncStatus !== 'connected';
   React.useEffect(() => {
-    setTerminalConnectTimedOut(false);
-    if (!taskTerminal || vncStatus === 'connected') return;
+    const recoveryWindow = terminalBrowserRecoveryWindow({
+      disconnected: terminalBrowserDisconnected,
+      disconnectedAt: terminalDisconnectedAtRef.current,
+      now: Date.now(),
+      hasPresentedFrame: hasPresentedLiveFrame,
+    });
+    terminalDisconnectedAtRef.current = recoveryWindow.disconnectedAt;
+    setTerminalConnectTimedOut(recoveryWindow.timedOut);
+    if (!terminalBrowserDisconnected || recoveryWindow.timedOut) return;
     const timer = window.setTimeout(() => {
       setTerminalConnectTimedOut(true);
-    }, 6_000);
+    }, recoveryWindow.remainingMs);
     return () => window.clearTimeout(timer);
-  }, [activeTaskId, taskTerminal, vncStatus]);
-  const terminalSessionSuspected =
-    taskTerminal &&
-    (vncAttemptFails >= 2 || terminalConnectTimedOut) &&
-    vncStatus !== 'connected';
+  }, [
+    activeTaskId,
+    hasPresentedLiveFrame,
+    terminalBrowserDisconnected,
+  ]);
+  const terminalSessionSuspected = shouldSuspectTerminalBrowserSession({
+    taskIsTerminal: taskTerminal,
+    liveStatus: vncStatus,
+    failedAttempts: vncAttemptFails,
+    connectTimedOut: terminalConnectTimedOut,
+    hasPresentedFrame: hasPresentedLiveFrame,
+  });
   const terminalRestoreUrl =
     safeExternalHttpHref(persistedFinalUrl) ??
     safeExternalHttpHref(finalEvidenceFrame?.url);
@@ -999,6 +1019,7 @@ export function BrowserPanel({
     interactiveActive,
     interactiveOwned: interactive && !terminalSessionUnavailable,
     showReconnect,
+    hasPresentedFrame: hasPresentedLiveFrame,
     taskIsTerminal,
   });
   const evidenceHeaderActive = terminalSessionUnavailable;

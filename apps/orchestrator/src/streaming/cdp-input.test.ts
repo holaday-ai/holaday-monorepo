@@ -40,6 +40,20 @@ describe('CdpInputHandler responsive viewport', () => {
 });
 
 describe('CdpInputHandler keyboard input', () => {
+  it('requests a visible-frame refresh after accepted input', async () => {
+    const send = vi.fn().mockResolvedValue(undefined);
+    const refreshFrame = vi.fn();
+    const handler = new CdpInputHandler(
+      () => ({ send }) as unknown as CDPSession,
+      pino({ level: 'silent' }),
+      refreshFrame,
+    );
+
+    await handler.handle({ type: 'insertText', text: '继续' });
+
+    expect(refreshFrame).toHaveBeenCalledOnce();
+  });
+
   it('includes text when dispatching a printable key', async () => {
     const { handler, send } = handlerWithSend();
 

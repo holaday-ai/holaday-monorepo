@@ -101,6 +101,49 @@ export function terminalBrowserRecoveryRetryDelay(attempt: number): number {
   return Math.min(15_000, 2_000 * 2 ** (safeAttempt - 1));
 }
 
+export function terminalBrowserRecoveryWindow(inputs: {
+  disconnected: boolean;
+  disconnectedAt: number | null;
+  now: number;
+  hasPresentedFrame: boolean;
+}): {
+  disconnectedAt: number | null;
+  remainingMs: number;
+  timedOut: boolean;
+} {
+  if (!inputs.disconnected) {
+    return { disconnectedAt: null, remainingMs: 0, timedOut: false };
+  }
+  const disconnectedAt = inputs.disconnectedAt ?? inputs.now;
+  const graceMs = inputs.hasPresentedFrame ? 12_000 : 6_000;
+  const remainingMs = Math.max(0, disconnectedAt + graceMs - inputs.now);
+  return {
+    disconnectedAt,
+    remainingMs,
+    timedOut: remainingMs === 0,
+  };
+}
+
+/**
+ * A retained terminal browser gets a quiet grace period after it has already
+ * painted a usable frame. Repeated socket closes alone are not enough to
+ * restart that live process; recovery starts only after the grace timer also
+ * expires. A browser that never produced a frame can recover sooner.
+ */
+export function shouldSuspectTerminalBrowserSession(inputs: {
+  taskIsTerminal: boolean;
+  liveStatus: BrowserLiveStatus;
+  failedAttempts: number;
+  connectTimedOut: boolean;
+  hasPresentedFrame: boolean;
+}): boolean {
+  if (!inputs.taskIsTerminal || inputs.liveStatus === 'connected') return false;
+  if (inputs.hasPresentedFrame) {
+    return inputs.failedAttempts >= 2 && inputs.connectTimedOut;
+  }
+  return inputs.failedAttempts >= 2 || inputs.connectTimedOut;
+}
+
 export type TerminalBrowserRecoveryState =
   | 'idle'
   | 'restoring'
@@ -419,6 +462,7 @@ export function browserPanelHeaderStatus(inputs: {
   interactiveActive: boolean;
   interactiveOwned?: boolean;
   showReconnect: boolean;
+  hasPresentedFrame?: boolean;
   taskIsTerminal?: boolean;
 }): BrowserPanelHeaderStatus {
   if (inputs.browserAwaiting) {
@@ -448,6 +492,21 @@ export function browserPanelHeaderStatus(inputs: {
         ? '你正在直接操作浏览器；需要 AI 时点“交给 AI”并输入下一步指令'
         : '你正在直接操作浏览器，点“交给 AI”可继续当前执行',
       tone: 'takeover',
+      dotStatus: 'live',
+      showLabel: true,
+    };
+  }
+  if (
+    inputs.hasPresentedFrame &&
+    !inputs.showReconnect &&
+    (inputs.liveStatus === 'connecting' ||
+      inputs.liveStatus === 'disconnected' ||
+      inputs.liveStatus === 'error')
+  ) {
+    return {
+      label: '续接中',
+      tooltip: '连接短暂中断，最后画面已保留，正在自动续接',
+      tone: 'recovering',
       dotStatus: 'live',
       showLabel: true,
     };
