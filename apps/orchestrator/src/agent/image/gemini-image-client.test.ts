@@ -60,7 +60,7 @@ describe('generateImages', () => {
 
     const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
     expect(url).toBe(
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image:generateContent',
+      'https://generativelanguage.googleapis.com/v1/models/gemini-3.1-flash-image:generateContent',
     );
     expect((init.headers as Record<string, string>)['x-goog-api-key']).toBe('test-key');
     const body = JSON.parse(init.body as string);
@@ -77,7 +77,7 @@ describe('generateImages', () => {
 
     const [url] = fetchImpl.mock.calls[0] as [string];
     expect(url).toBe(
-      'https://gw.internal/v1beta/models/gemini-3.1-flash-image:generateContent',
+      'https://gw.internal/v1/models/gemini-3.1-flash-image:generateContent',
     );
   });
 

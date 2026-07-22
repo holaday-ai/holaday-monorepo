@@ -132,7 +132,11 @@ export async function runImageTask(opts: RunImageTaskOpts): Promise<RunImageTask
         effectiveTier = 'flash';
       } catch (err2) {
         opts.logger.warn(
-          { err: err2 instanceof Error ? err2.message : String(err2) },
+          {
+            err: err2 instanceof Error ? err2.message : String(err2),
+            status: err2 instanceof GeminiImageError ? err2.status : undefined,
+            detail: err2 instanceof GeminiImageError ? err2.detail : undefined,
+          },
           'image: NB2 fallback also failed',
         );
         return {
@@ -149,6 +153,8 @@ export async function runImageTask(opts: RunImageTaskOpts): Promise<RunImageTask
         {
           err: err instanceof Error ? err.message : String(err),
           kind: err instanceof GeminiImageError ? err.kind : 'unknown',
+          status: err instanceof GeminiImageError ? err.status : undefined,
+          detail: err instanceof GeminiImageError ? err.detail : undefined,
           model: decision.model,
         },
         'image: generate failed',

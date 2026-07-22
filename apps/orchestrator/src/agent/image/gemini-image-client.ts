@@ -10,7 +10,7 @@
  *
  * API surface (verified 2026-06 against
  * https://ai.google.dev/gemini-api/docs/image-generation):
- *   POST {baseUrl}/v1beta/models/{model}:generateContent
+ *   POST {baseUrl}/v1/models/{model}:generateContent
  *   header  x-goog-api-key: <key>
  *   body    { contents: [{ parts: [ {text}, {inlineData:{mimeType,data}} ] }],
  *            generationConfig: { imageConfig?: { resolution } } }
@@ -167,7 +167,10 @@ export async function generateImages(
   }
 
   const baseUrl = (params.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, '');
-  const url = `${baseUrl}/v1beta/models/${encodeURIComponent(params.model)}:generateContent`;
+  // Gemini 3 image models expose the stable responseFormat image schema on
+  // v1. The v1beta schema treats values such as "16:9" as an incompatible
+  // enum and rejects otherwise-valid image requests with HTTP 400.
+  const url = `${baseUrl}/v1/models/${encodeURIComponent(params.model)}:generateContent`;
   const fetchImpl = params.fetchImpl ?? fetch;
 
   const parts: Array<Record<string, unknown>> = [{ text: params.prompt }];
