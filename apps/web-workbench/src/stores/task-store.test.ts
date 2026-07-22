@@ -884,6 +884,26 @@ describe('selectTask detail hydration', () => {
     ]);
   });
 
+  it('keeps optimistic browser ownership while an active canonical row has no result metadata yet', () => {
+    const optimistic = task({
+      taskId: 'tsk_browser_starting',
+      executionMode: 'browser',
+    });
+    const canonical = task({
+      taskId: 'tsk_browser_starting',
+      executionMode: undefined,
+    });
+
+    expect(
+      mergeTaskPagesReplacingDuplicates([optimistic], [canonical]),
+    ).toEqual([
+      expect.objectContaining({
+        taskId: 'tsk_browser_starting',
+        executionMode: 'browser',
+      }),
+    ]);
+  });
+
   it('removes the local pending task row when createTask fails', async () => {
     createMutate.mockRejectedValueOnce(new Error('offline') as never);
 
@@ -2602,6 +2622,59 @@ describe('applyServerMessage queued lifecycle', () => {
       status: 'executing',
     });
     expect(useTaskStore.getState().tasks[0]?.queuePosition).toBeUndefined();
+  });
+
+  it('does not reclassify a browser task when its first progress phase is planning', () => {
+    useTaskStore.setState({
+      tasks: [
+        task({
+          taskId: 'tsk_browser_planning',
+          status: 'queued',
+          queuePosition: 1,
+          executionMode: 'browser',
+        }),
+      ],
+    });
+
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.task.progress',
+      taskId: 'tsk_browser_planning',
+      message: '正在规划任务…',
+      subStatus: 'planning',
+    });
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.task.progress',
+      taskId: 'tsk_browser_planning',
+      message: '正在验证结果…',
+      subStatus: 'verifying',
+    });
+
+    expect(useTaskStore.getState().tasks[0]).toMatchObject({
+      status: 'executing',
+      executionMode: 'browser',
+    });
+  });
+
+  it('recognizes a legacy task as browser-owned when browsing progress arrives', () => {
+    useTaskStore.setState({
+      tasks: [
+        task({
+          taskId: 'tsk_legacy_browsing',
+          status: 'executing',
+          executionMode: undefined,
+          intent: '继续当前页面',
+        }),
+      ],
+    });
+
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.task.progress',
+      taskId: 'tsk_legacy_browsing',
+      message: '正在操作浏览器…',
+      subStatus: 'browsing',
+    });
+
+    expect(useTaskStore.getState().tasks[0]?.executionMode).toBe('browser');
   });
 
   it('flips queued tasks to executing on first stream frame', () => {

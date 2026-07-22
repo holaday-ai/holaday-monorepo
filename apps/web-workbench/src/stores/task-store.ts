@@ -498,8 +498,19 @@ function preserveFinalTaskRows(
 }
 
 function preserveClientTaskContext(current: UiTask, incoming: UiTask): UiTask {
-  if (incoming.replyToTaskId || !current.replyToTaskId) return incoming;
-  return { ...incoming, replyToTaskId: current.replyToTaskId };
+  const replyToTaskId = incoming.replyToTaskId ?? current.replyToTaskId;
+  const executionMode = incoming.executionMode ?? current.executionMode;
+  if (
+    replyToTaskId === incoming.replyToTaskId &&
+    executionMode === incoming.executionMode
+  ) {
+    return incoming;
+  }
+  return {
+    ...incoming,
+    ...(replyToTaskId ? { replyToTaskId } : {}),
+    ...(executionMode ? { executionMode } : {}),
+  };
 }
 
 function shouldPreserveFinalTaskRow(current: UiTask, incoming: UiTask): boolean {
@@ -1785,16 +1796,22 @@ export const useTaskStore = create<TaskStore>((set, get) => {
             [msg.taskId]: msg.message,
           },
           subStatusByTask: nextSubStatus,
-          // Pre-B1: progress notes only came from generate / scrape, so
-          // we eagerly flipped executionMode='generate' to keep the
-          // BrowserPanel from rendering for non-browser tasks. Pack B1
-          // adds supercar/browser progress events; skip the flip when
-          // the new subStatus is `browsing` (real browser session) so
-          // the panel stays mounted.
+          // Progress phases are shared by browser and generate lanes:
+          // browser runs emit planning → browsing → verifying. Never
+          // overwrite an execution mode that was already decided by
+          // tasks.create or task hydration. For legacy rows with no mode,
+          // only the lane-specific phases are strong enough to infer one.
           tasks: prev.tasks.map((t) => {
             if (t.taskId !== msg.taskId) return t;
             const liveTask = markTaskRunningFromLiveSignal(t);
-            if (liveTask.executionMode !== 'generate' && typedSubStatus !== 'browsing') {
+            if (liveTask.executionMode) return liveTask;
+            if (typedSubStatus === 'browsing') {
+              return { ...liveTask, executionMode: 'browser' as const };
+            }
+            if (typedSubStatus === 'generating_image') {
+              return { ...liveTask, executionMode: 'image' as const };
+            }
+            if (typedSubStatus === 'generating') {
               return { ...liveTask, executionMode: 'generate' as const };
             }
             return liveTask;

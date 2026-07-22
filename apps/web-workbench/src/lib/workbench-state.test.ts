@@ -9,6 +9,7 @@ import {
   mobileBrowserSheetAutoOpenState,
   preserveBrowserRecordAfterLive,
   realtimeConnectionTransition,
+  shouldConnectTaskBrowserForWorkbench,
   taskFrameForWorkbench,
 } from './workbench-state';
 
@@ -62,6 +63,40 @@ describe('workbench state helpers', () => {
       hasBrowserRecordForWorkbench(
         task({ executionMode: 'image', finalUrl: 'https://example.com/reference' }),
       ),
+    ).toBe(false);
+  });
+
+  it('keeps an owned browser connected even when generic progress buffers exist', () => {
+    expect(
+      shouldConnectTaskBrowserForWorkbench({
+        task: task({ executionMode: 'browser' }),
+        hasRuntimeTextSignal: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldConnectTaskBrowserForWorkbench({
+        task: task({
+          executionMode: undefined,
+          status: 'completed',
+          finalUrl: 'https://example.com/result',
+        }),
+        hasRuntimeTextSignal: true,
+      }),
+    ).toBe(true);
+  });
+
+  it('uses runtime text only as a fallback for tasks with no browser ownership signal', () => {
+    expect(
+      shouldConnectTaskBrowserForWorkbench({
+        task: task({ executionMode: undefined, intent: '总结这段文字' }),
+        hasRuntimeTextSignal: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldConnectTaskBrowserForWorkbench({
+        task: task({ executionMode: 'generate' }),
+        hasRuntimeTextSignal: false,
+      }),
     ).toBe(false);
   });
 
