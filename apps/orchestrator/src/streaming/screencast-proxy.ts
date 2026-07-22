@@ -265,7 +265,11 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
       // watchdog) — the streamer swaps in a fresh session, the
       // handler picks it up on the next dispatch.
       const streamerRef = streamer;
-      inputHandler = new CdpInputHandler(() => streamerRef.getSession(), userLog);
+      inputHandler = new CdpInputHandler(
+        () => streamerRef.getSession(),
+        userLog,
+        () => streamerRef.requestFrameRefresh(),
+      );
       await inputBridge.attach(inputHandler);
 
       // Keep the pool's idle GC happy — every active screencast

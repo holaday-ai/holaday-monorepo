@@ -23,6 +23,7 @@ import {
   shouldShowBrowserLiveOverlay,
   shouldPreserveBrowserCanvasOnTaskSwitch,
   shouldRemountBrowserStreamAfterRestore,
+  shouldSuspectTerminalBrowserSession,
   shouldShowBrowserFullscreen,
   shouldShowTerminalEvidenceLedger,
   shouldConnectBrowserStream,
@@ -33,6 +34,7 @@ import {
   terminalBrowserSessionUnavailable,
   terminalBrowserTakeoverMessage,
   terminalBrowserRecoveryRetryDelay,
+  terminalBrowserRecoveryWindow,
   terminalEvidenceFrameLabel,
   terminalEvidenceStatusLabel,
 } from './browser-panel-state';
@@ -121,6 +123,75 @@ describe('BrowserPanel state helpers', () => {
     expect(terminalBrowserRecoveryRetryDelay(3)).toBe(8_000);
     expect(terminalBrowserRecoveryRetryDelay(4)).toBe(15_000);
     expect(terminalBrowserRecoveryRetryDelay(9)).toBe(15_000);
+  });
+
+  it('keeps a painted terminal browser quiet through a brief reconnect', () => {
+    expect(
+      shouldSuspectTerminalBrowserSession({
+        taskIsTerminal: true,
+        liveStatus: 'disconnected',
+        failedAttempts: 3,
+        connectTimedOut: false,
+        hasPresentedFrame: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldSuspectTerminalBrowserSession({
+        taskIsTerminal: true,
+        liveStatus: 'disconnected',
+        failedAttempts: 3,
+        connectTimedOut: true,
+        hasPresentedFrame: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldSuspectTerminalBrowserSession({
+        taskIsTerminal: true,
+        liveStatus: 'disconnected',
+        failedAttempts: 2,
+        connectTimedOut: false,
+        hasPresentedFrame: false,
+      }),
+    ).toBe(true);
+  });
+
+  it('measures terminal recovery from the first disconnect, not each retry state', () => {
+    const started = terminalBrowserRecoveryWindow({
+      disconnected: true,
+      disconnectedAt: null,
+      now: 1_000,
+      hasPresentedFrame: true,
+    });
+    expect(started).toEqual({
+      disconnectedAt: 1_000,
+      remainingMs: 12_000,
+      timedOut: false,
+    });
+
+    expect(
+      terminalBrowserRecoveryWindow({
+        disconnected: true,
+        disconnectedAt: started.disconnectedAt,
+        now: 8_000,
+        hasPresentedFrame: true,
+      }),
+    ).toEqual({
+      disconnectedAt: 1_000,
+      remainingMs: 5_000,
+      timedOut: false,
+    });
+    expect(
+      terminalBrowserRecoveryWindow({
+        disconnected: true,
+        disconnectedAt: started.disconnectedAt,
+        now: 13_000,
+        hasPresentedFrame: true,
+      }),
+    ).toEqual({
+      disconnectedAt: 1_000,
+      remainingMs: 0,
+      timedOut: true,
+    });
   });
 
   it('keeps the live surface mounted while a restorable terminal browser retries', () => {
@@ -604,6 +675,21 @@ describe('BrowserPanel state helpers', () => {
   });
 
   it('derives compact header labels from the browser live state', () => {
+    expect(
+      browserPanelHeaderStatus({
+        dotStatus: 'live',
+        liveStatus: 'disconnected',
+        browserAwaiting: false,
+        interactiveActive: false,
+        showReconnect: false,
+        hasPresentedFrame: true,
+      }),
+    ).toMatchObject({
+      label: '续接中',
+      tone: 'recovering',
+      dotStatus: 'live',
+      showLabel: true,
+    });
     expect(
       browserPanelHeaderStatus({
         dotStatus: 'live',

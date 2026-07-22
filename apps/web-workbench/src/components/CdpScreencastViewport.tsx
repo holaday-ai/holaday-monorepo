@@ -133,10 +133,11 @@ export function CdpScreencastViewport({
     streamTokenRef.current = streamToken;
   }, [streamToken]);
   const hasStreamToken = Boolean(streamToken);
-  // Cached <img> + frame sequence guard so async image loads cannot
-  // paint stale frames after a newer frame, wsUrl change, or unmount.
+  // Per-frame <img> + connection/frame sequence guards so async decodes cannot
+  // paint stale pixels after a newer frame, reconnect, wsUrl change, or unmount.
   const imgRef = React.useRef<HTMLImageElement | null>(null);
   const frameSeqRef = React.useRef(0);
+  const connectionSeqRef = React.useRef(0);
   const mountedRef = React.useRef(false);
   const readableAutoScrollKeyRef = React.useRef<string | null>(null);
   React.useEffect(() => {
@@ -190,7 +191,10 @@ export function CdpScreencastViewport({
   const [connectionEpoch, setConnectionEpoch] = React.useState(0);
   React.useEffect(() => {
     const host = hostRef.current;
-    if (!host || status !== 'connected') return;
+    // Publish the viewport as soon as the socket is opening/open. Waiting for
+    // the first frame would make the fallback capture use the tiny spawn-time
+    // viewport, then visibly resize a moment later.
+    if (!host || (status !== 'connecting' && status !== 'connected')) return;
     let timer: ReturnType<typeof setTimeout> | null = null;
     const publish = (): void => {
       const rect = host.getBoundingClientRect();
@@ -341,17 +345,27 @@ export function CdpScreencastViewport({
         return;
       }
       attempt += 1;
+      const connectionSeq = ++connectionSeqRef.current;
       setStatus('connecting');
       const ws = new WebSocket(socketUrl);
       activeWs = ws;
       wsRef.current = ws;
 
       ws.onopen = () => {
-        if (disposed) return;
+        if (
+          disposed ||
+          connectionSeq !== connectionSeqRef.current ||
+          activeWs !== ws
+        ) {
+          return;
+        }
         attempt = 0; // reset backoff on a successful connect
         lastViewportRef.current = null;
         setConnectionEpoch((epoch) => epoch + 1);
-        setStatus('connected');
+        // An open socket only proves transport readiness. Keep the public
+        // status at `connecting` until a real current-page frame is painted;
+        // otherwise BrowserPanel enables takeover against a blank/stale canvas.
+        setStatus('connecting');
         hdDebug('screencast WS', {
           event: 'open',
           readyState: ws.readyState,
@@ -359,7 +373,13 @@ export function CdpScreencastViewport({
         });
       };
       ws.onmessage = (event) => {
-        if (disposed) return;
+        if (
+          disposed ||
+          connectionSeq !== connectionSeqRef.current ||
+          activeWs !== ws
+        ) {
+          return;
+        }
         let msg: { type?: string; data?: string; url?: string } | null = null;
         try {
           msg = JSON.parse(typeof event.data === 'string' ? event.data : '');
@@ -377,10 +397,16 @@ export function CdpScreencastViewport({
           return;
         }
         if (msg.type !== 'frame' || typeof msg.data !== 'string') return;
-        drawFrame(msg.data);
+        drawFrame(msg.data, connectionSeq);
       };
       ws.onerror = () => {
-        if (disposed) return;
+        if (
+          disposed ||
+          connectionSeq !== connectionSeqRef.current ||
+          activeWs !== ws
+        ) {
+          return;
+        }
         hdDebug('screencast WS', {
           event: 'error',
           readyState: ws.readyState,
@@ -389,7 +415,13 @@ export function CdpScreencastViewport({
         setStatus('error');
       };
       ws.onclose = (event) => {
-        if (disposed) return;
+        if (
+          disposed ||
+          connectionSeq !== connectionSeqRef.current ||
+          activeWs !== ws
+        ) {
+          return;
+        }
         hdDebug('screencast WS', {
           event: 'close',
           readyState: ws.readyState,
@@ -412,6 +444,7 @@ export function CdpScreencastViewport({
 
     return () => {
       disposed = true;
+      connectionSeqRef.current += 1;
       frameSeqRef.current += 1;
       if (retryTimer) clearTimeout(retryTimer);
       try {
@@ -437,15 +470,24 @@ export function CdpScreencastViewport({
     };
   }, [hasStreamToken, reconnectSignal, wsUrl]);
 
-  // Decode a base64 JPEG and paint into the canvas. The img +
-  // canvas are reused; canvas is resized to match the source so the
-  // `object-contain` style on the host element handles letterboxing.
-  function drawFrame(base64: string): void {
-    if (!imgRef.current) imgRef.current = new Image();
-    const img = imgRef.current;
+  // Decode a base64 JPEG and paint into the reused canvas. Each frame gets a
+  // fresh Image so a delayed decode cannot inherit another frame's handlers.
+  function drawFrame(base64: string, connectionSeq: number): void {
+    if (imgRef.current) {
+      imgRef.current.onload = null;
+      imgRef.current.onerror = null;
+    }
+    const img = new Image();
+    imgRef.current = img;
     const frameSeq = ++frameSeqRef.current;
     img.onload = () => {
-      if (!mountedRef.current || frameSeq !== frameSeqRef.current) return;
+      if (
+        !mountedRef.current ||
+        connectionSeq !== connectionSeqRef.current ||
+        frameSeq !== frameSeqRef.current
+      ) {
+        return;
+      }
       const canvas = canvasRef.current;
       if (!canvas) return;
       const ctx = canvas.getContext('2d');
@@ -455,12 +497,28 @@ export function CdpScreencastViewport({
       if (canvas.width !== img.width) canvas.width = img.width;
       if (canvas.height !== img.height) canvas.height = img.height;
       ctx.drawImage(img, 0, 0);
+      setStatus('connected');
       onFrameReadyRef.current?.();
       // A new renderer can emit one frame at its startup size before the
       // saved viewport is reapplied. Recompute immediately so that frame is
       // still contained without affecting the surrounding flex layout.
       if (sizeChanged) sourceDimsRecomputeRef.current?.();
       requestAnimationFrame(() => sourceDimsRecomputeRef.current?.());
+    };
+    img.onerror = () => {
+      if (
+        !mountedRef.current ||
+        connectionSeq !== connectionSeqRef.current ||
+        frameSeq !== frameSeqRef.current
+      ) {
+        return;
+      }
+      setStatus('error');
+      try {
+        wsRef.current?.close(1011, 'frame-decode-failed');
+      } catch {
+        /* the close handler will retry if the transport is already closing */
+      }
     };
     img.src = `data:image/jpeg;base64,${base64}`;
   }
