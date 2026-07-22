@@ -20,6 +20,9 @@ import {
   browserPanelDotLabel,
   browserLiveStatusLabel,
   shouldShowBrowserHeader,
+  shouldShowBrowserLiveOverlay,
+  shouldPreserveBrowserCanvasOnTaskSwitch,
+  shouldRemountBrowserStreamAfterRestore,
   shouldShowBrowserFullscreen,
   shouldShowTerminalEvidenceLedger,
   shouldConnectBrowserStream,
@@ -120,7 +123,7 @@ describe('BrowserPanel state helpers', () => {
     expect(terminalBrowserRecoveryRetryDelay(9)).toBe(15_000);
   });
 
-  it('keeps static evidence stable while background recovery retries', () => {
+  it('keeps the live surface mounted while a restorable terminal browser retries', () => {
     expect(
       terminalBrowserSessionUnavailable({
         sessionSuspected: true,
@@ -128,7 +131,15 @@ describe('BrowserPanel state helpers', () => {
         recoveryState: 'restoring',
         recoveryAttempt: 1,
       }),
-    ).toBe(true);
+    ).toBe(false);
+    expect(
+      terminalBrowserSessionUnavailable({
+        sessionSuspected: true,
+        canRestore: true,
+        recoveryState: 'failed',
+        recoveryAttempt: 3,
+      }),
+    ).toBe(false);
     expect(
       terminalBrowserSessionUnavailable({
         sessionSuspected: true,
@@ -143,6 +154,52 @@ describe('BrowserPanel state helpers', () => {
         canRestore: true,
         recoveryState: 'connected',
         recoveryAttempt: 2,
+      }),
+    ).toBe(false);
+    expect(
+      terminalBrowserSessionUnavailable({
+        sessionSuspected: true,
+        canRestore: false,
+        hasPresentedFrame: true,
+        recoveryState: 'failed',
+        recoveryAttempt: 3,
+      }),
+    ).toBe(false);
+    expect(
+      terminalBrowserSessionUnavailable({
+        sessionSuspected: true,
+        canRestore: false,
+        hasPresentedFrame: false,
+        recoveryState: 'failed',
+        recoveryAttempt: 3,
+      }),
+    ).toBe(true);
+  });
+
+  it('reconnects CDP in place after backend restore so the painted frame survives', () => {
+    expect(
+      shouldRemountBrowserStreamAfterRestore({ usingCdp: true }),
+    ).toBe(false);
+    expect(
+      shouldRemountBrowserStreamAfterRestore({ usingCdp: false }),
+    ).toBe(true);
+  });
+
+  it('preserves the painted canvas only for a browser follow-up of the visible task', () => {
+    expect(
+      shouldPreserveBrowserCanvasOnTaskSwitch({
+        previousTaskId: 'tsk_parent',
+        nextTaskId: 'tsk_child',
+        nextReplyToTaskId: 'tsk_parent',
+        nextExecutionMode: 'browser',
+      }),
+    ).toBe(true);
+    expect(
+      shouldPreserveBrowserCanvasOnTaskSwitch({
+        previousTaskId: 'tsk_parent',
+        nextTaskId: 'tsk_other',
+        nextReplyToTaskId: null,
+        nextExecutionMode: 'browser',
       }),
     ).toBe(false);
   });
@@ -281,6 +338,16 @@ describe('BrowserPanel state helpers', () => {
       isBrowserInteractionActive({
         interactive: true,
         taskIsTerminal: true,
+        useLiveStream: true,
+        liveStatus: 'disconnected',
+        hasLiveFrame: false,
+        liveSessionUnavailable: false,
+      }),
+    ).toBe(false);
+    expect(
+      isBrowserInteractionActive({
+        interactive: true,
+        taskIsTerminal: true,
         useLiveStream: false,
         liveStatus: 'disconnected',
         hasLiveFrame: true,
@@ -297,6 +364,37 @@ describe('BrowserPanel state helpers', () => {
         liveSessionUnavailable: false,
       }),
     ).toBe(true);
+  });
+
+  it('keeps a rendered browser visible while its live transport reconnects', () => {
+    expect(
+      shouldShowBrowserLiveOverlay({
+        liveStatus: 'connecting',
+        showReconnect: false,
+        hasPresentedFrame: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldShowBrowserLiveOverlay({
+        liveStatus: 'connected',
+        showReconnect: false,
+        hasPresentedFrame: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldShowBrowserLiveOverlay({
+        liveStatus: 'connecting',
+        showReconnect: false,
+        hasPresentedFrame: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldShowBrowserLiveOverlay({
+        liveStatus: 'disconnected',
+        showReconnect: true,
+        hasPresentedFrame: true,
+      }),
+    ).toBe(false);
   });
 
   it('never exposes a cached URL owned by the previously selected task', () => {
@@ -672,14 +770,15 @@ describe('BrowserPanel state helpers', () => {
     expect(
       browserPanelHeaderStatus({
         dotStatus: 'live',
-        liveStatus: 'connected',
+        liveStatus: 'disconnected',
         browserAwaiting: false,
-        interactiveActive: true,
+        interactiveActive: false,
+        interactiveOwned: true,
         showReconnect: false,
       }),
     ).toMatchObject({
-      label: '接管中',
-      tone: 'takeover',
+      label: '接管保留',
+      tone: 'recovering',
       dotStatus: 'live',
     });
   });

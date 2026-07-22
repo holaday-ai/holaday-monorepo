@@ -96,11 +96,19 @@ import {
   extractDomain,
 } from '../../agent/supercar/stats-service.js';
 import {
+  followUpParentHasBrowserContext,
   followUpParentReasonLabel,
   followUpTerminalGuardMessage,
+  resolveBrowserFollowUpContinuation,
+  resolveFollowUpExecutionMode,
 } from './task-followup-copy.js';
 import { markQueuedTaskExecutingOrThrow } from './task-queue-start.js';
-import { persistAndBroadcastVisionLoopThrow } from './task-terminal-recovery.js';
+import {
+  captureBrowserFinalState as captureFinalState,
+  persistAndBroadcastBrowserDispatchFailure,
+  persistAndBroadcastVisionLoopThrow,
+  type CapturedBrowserFinalState as CapturedFinalState,
+} from './task-terminal-recovery.js';
 import {
   formatForPrompt as formatPlaybooksForPrompt,
   matchPlaybooks,
@@ -858,6 +866,8 @@ export const tasksRouter = router({
      * a workflow task.
      */
     let parentWorkflowId: string | null = null;
+    let parentHasBrowserContext = false;
+    let parentBrowserRestoreUrl: string | null = null;
     if (input.replyToTaskId) {
       const [parent] = await ctx.db
         .select({
@@ -891,8 +901,15 @@ export const tasksRouter = router({
         | {
             summary?: string;
             reason?: string;
-            metadata?: { expertWorkflowId?: string | null };
+            metadata?: {
+              expertWorkflowId?: string | null;
+              executionMode?: string | null;
+              finalUrl?: string | null;
+            };
             expertWorkflowId?: string | null;
+            executionMode?: string | null;
+            finalUrl?: string | null;
+            finalScreenshot?: unknown;
           }
         | null;
       // Workflow id can be either nested under metadata (newer tasks)
@@ -905,6 +922,21 @@ export const tasksRouter = router({
       if (typeof candidateWfId === 'string' && candidateWfId.length > 0) {
         parentWorkflowId = candidateWfId;
       }
+      parentHasBrowserContext = followUpParentHasBrowserContext({
+        executionMode:
+          parentResult?.metadata?.executionMode ??
+          parentResult?.executionMode ??
+          null,
+        finalUrl: parentResult?.finalUrl ?? null,
+        hasFinalScreenshot: Boolean(parentResult?.finalScreenshot),
+        intent: parent.intent,
+      });
+      const parentFinalUrl =
+        parentResult?.finalUrl ?? parentResult?.metadata?.finalUrl ?? null;
+      parentBrowserRestoreUrl =
+        typeof parentFinalUrl === 'string' && isSafeUrl(parentFinalUrl)
+          ? parentFinalUrl.trim().slice(0, 2048)
+          : null;
       const summary = parentResult?.summary?.trim() ?? '';
       const reason =
         parentResult?.reason?.trim() ?? (parent.errorMessage ?? '').trim();
@@ -1084,10 +1116,12 @@ export const tasksRouter = router({
       typedWorkflow != null && expertWorkflow?.routeOverride !== 'browser'
         ? ('generate' as const)
         : null;
-    const executionMode =
-      typedWorkflowOverride ??
-      expertWorkflow?.routeOverride ??
-      classifiedExecutionMode;
+    const executionMode = resolveFollowUpExecutionMode({
+      parentHasBrowserContext,
+      typedWorkflowOverride,
+      expertRouteOverride: expertWorkflow?.routeOverride,
+      classifiedExecutionMode,
+    });
     if (
       appEnv.NODE_ENV === 'production' &&
       executionMode === 'browser' &&
@@ -3760,15 +3794,79 @@ export const tasksRouter = router({
                 ctx.userId,
               )
             : null;
-          const instance =
-            adopted ??
-            (await ctx.browserPool.allocate(
-              taskId,
-              ctx.userId,
-              input.viewportProfile,
-            ));
+          let allocatedForContinuation = false;
+          const instance = adopted
+            ? adopted
+            : await ctx.browserPool.allocate(
+                taskId,
+                ctx.userId,
+                input.viewportProfile,
+              );
+          allocatedForContinuation = adopted == null;
+          const continuation = resolveBrowserFollowUpContinuation({
+            hasParentTask: Boolean(input.replyToTaskId),
+            parentHasBrowserContext,
+            adopted: adopted != null,
+            restoreUrl: parentBrowserRestoreUrl,
+          });
+          if (continuation === 'unavailable') {
+            await ctx.browserPool
+              .release(taskId, 'follow-up-page-unavailable')
+              .catch(() => {});
+            throw new Error(
+              '当前浏览器页面已过期，且没有可恢复地址。请重新打开目标页面。',
+            );
+          }
+          if (continuation === 'restore') {
+            if (!parentBrowserRestoreUrl) {
+              await ctx.browserPool.release(
+                taskId,
+                'follow-up-page-unavailable',
+              );
+              throw new Error(
+                '当前浏览器页面已过期，且没有可恢复地址。请重新打开目标页面。',
+              );
+            }
+            const decision = await defaultBrowserNetworkPolicy.check(
+              parentBrowserRestoreUrl,
+            );
+            if (!decision.allowed) {
+              await ctx.browserPool.release(taskId, 'follow-up-url-blocked');
+              throw new Error(decision.message);
+            }
+            try {
+              await instance.executor.resetPageForTask();
+              const page = (await instance.executor.getPage()) as unknown as PageLike;
+              const navigation = await instance.executor.navigate(
+                page,
+                parentBrowserRestoreUrl,
+              );
+              if (!navigation.ok) {
+                throw new Error(
+                  navigation.message ?? '无法恢复前一个任务的页面',
+                );
+              }
+              ctx.logger.info(
+                {
+                  sourceTaskId: input.replyToTaskId,
+                  destinationTaskId: taskId,
+                  userId: ctx.userId,
+                  url: parentBrowserRestoreUrl,
+                },
+                'pool: restored follow-up page after retained browser expired',
+              );
+            } catch (err) {
+              if (allocatedForContinuation) {
+                await ctx.browserPool
+                  .release(taskId, 'follow-up-page-restore-failed')
+                  .catch(() => {});
+              }
+              throw err;
+            }
+          }
           perUserExec = instance.executor;
-          adoptedBrowserSession = adopted != null;
+          adoptedBrowserSession =
+            continuation === 'adopted' || continuation === 'restore';
           ctx.logger.info(
             { taskId, userId: ctx.userId, cdpPort: instance.cdpPort, displayNum: instance.display },
             'pool: allocated browser for task',
@@ -3785,9 +3883,21 @@ export const tasksRouter = router({
             { err: err instanceof Error ? err.message : String(err), userId: ctx.userId, taskId },
             'pool: allocate failed — refusing to fall back to singleton, failing task',
           );
-          throw err instanceof Error
-            ? err
-            : new Error(`pool allocate failed: ${String(err)}`);
+          const reason =
+            err instanceof Error ? err.message : `pool allocate failed: ${String(err)}`;
+          try {
+            await persistAndBroadcastBrowserDispatchFailure({
+              repo,
+              taskId,
+              userId: ctx.userId,
+              reason,
+              logger: ctx.logger,
+              broadcastToUser,
+            });
+          } finally {
+            if (willQueueDispatch) ctx.taskQueue?.signalSlotFreed();
+          }
+          return;
         }
       }
 
@@ -4418,7 +4528,18 @@ export const tasksRouter = router({
                 // — best-effort, returns {} on any failure (no
                 // executor / page closed / capture timeout).
                 const captured = perUserExec
-                  ? await captureFinalState(perUserExec, ctx.logger, taskId)
+                  ? await captureFinalState({
+                      executor: {
+                        getPage: () => perUserExec.getPage(),
+                        screenshot: (page, options) =>
+                          perUserExec.screenshot(
+                            page as unknown as Parameters<PlaywrightExecutor['screenshot']>[0],
+                            options,
+                          ),
+                      },
+                      logger: ctx.logger,
+                      taskId,
+                    })
                   : {};
                 const [row] = await ctx.db
                   .select({ result: tasksTable.result })
@@ -4905,7 +5026,18 @@ export const tasksRouter = router({
             // when executionMode='generate' / 'scrape' — there's no
             // browser to screenshot).
             const finalState = perUserExec
-              ? await captureFinalState(perUserExec, ctx.logger, taskId)
+              ? await captureFinalState({
+                  executor: {
+                    getPage: () => perUserExec.getPage(),
+                    screenshot: (page, options) =>
+                      perUserExec.screenshot(
+                        page as unknown as Parameters<PlaywrightExecutor['screenshot']>[0],
+                        options,
+                      ),
+                  },
+                  logger: ctx.logger,
+                  taskId,
+                })
               : {};
             // B3 — structured eval log fields. Persisted under
             // result.metadata so tasks.detail consumers (Codex eval
@@ -5488,10 +5620,38 @@ export const tasksRouter = router({
             // terminal-failed and clobber the park state.
             let catchPersisted = false;
             try {
+              const failureFinalState = perUserExec
+                ? await captureFinalState({
+                    executor: {
+                      getPage: () => perUserExec.getPage(),
+                      screenshot: (page, options) =>
+                        perUserExec.screenshot(
+                          page as unknown as Parameters<PlaywrightExecutor['screenshot']>[0],
+                          options,
+                        ),
+                    },
+                    logger: ctx.logger,
+                    taskId,
+                  })
+                : {};
               const out = await repo.persistVisionOutcome(taskId, {
                 status: 'failed',
                 reason: `runner threw: ${reason}`.slice(0, 500),
                 tickCount: 0,
+                ...(failureFinalState.finalUrl
+                  ? { finalUrl: failureFinalState.finalUrl }
+                  : {}),
+                ...(failureFinalState.finalScreenshot
+                  ? { finalScreenshot: failureFinalState.finalScreenshot }
+                  : {}),
+                ...(failureFinalState.finalViewport
+                  ? { finalViewport: failureFinalState.finalViewport }
+                  : {}),
+                metadata: {
+                  executionMode,
+                  finalExecutionMode: executionMode,
+                  lane: 'supercar_exception',
+                },
               });
               catchPersisted = out.persisted;
             } catch (persistErr) {
@@ -7854,14 +8014,6 @@ export const tasksRouter = router({
       if (!taskRow) {
         throw new TRPCError({ code: 'NOT_FOUND', message: '找不到浏览器任务' });
       }
-      const target = restorableBrowserTarget(taskRow);
-      if (!target) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: '这个任务没有可恢复的真实浏览器页面',
-        });
-      }
-
       return browserSessionRestoreFlights.run(
         browserPool,
         input.taskId,
@@ -7879,16 +8031,31 @@ export const tasksRouter = router({
               appEnv.BROWSER_TERMINAL_RETENTION_MS,
               'terminal-workspace',
             );
+            let currentUrl = 'about:blank';
+            try {
+              currentUrl = (await existing.executor.getPage()).url();
+            } catch {
+              const target = restorableBrowserTarget(taskRow);
+              if (target) currentUrl = target.url;
+            }
             return {
               status: 'ready' as const,
               restored: false,
-              url: target.url,
+              url: currentUrl,
             };
           }
           if (existing) {
             throw new TRPCError({
               code: 'CONFLICT',
               message: '浏览器工作区正在释放，请稍后重试',
+            });
+          }
+
+          const target = restorableBrowserTarget(taskRow);
+          if (!target) {
+            throw new TRPCError({
+              code: 'BAD_REQUEST',
+              message: '这个任务没有可恢复的真实浏览器页面',
             });
           }
 
@@ -8916,58 +9083,12 @@ async function convergePlanStatusOnSuccess(
  * and the persisted result simply omits the screenshot. The caller
  * doesn't need to differentiate.
  */
-interface CapturedFinalState {
-  finalScreenshot?: string;
-  finalUrl?: string;
-  finalViewport?: { width: number; height: number };
-}
-
 function finalStatePersistFields(finalState: CapturedFinalState): CapturedFinalState {
   return {
     ...(finalState.finalScreenshot ? { finalScreenshot: finalState.finalScreenshot } : {}),
     ...(finalState.finalUrl ? { finalUrl: finalState.finalUrl } : {}),
     ...(finalState.finalViewport ? { finalViewport: finalState.finalViewport } : {}),
   };
-}
-
-async function captureFinalState(
-  executor: PlaywrightExecutor | null,
-  logger: import('pino').Logger,
-  taskId: string,
-): Promise<CapturedFinalState> {
-  if (!executor) return {};
-  try {
-    const page = await executor.getPage();
-    const shot = await executor.screenshot(
-      page as unknown as Parameters<PlaywrightExecutor['screenshot']>[0],
-      { timeoutMs: 5_000 },
-    );
-    if (shot.error || !shot.base64) return {};
-    let finalUrl: string | undefined;
-    try {
-      finalUrl = (page as unknown as { url: () => string }).url();
-    } catch {
-      finalUrl = undefined;
-    }
-    return {
-      finalScreenshot: shot.base64,
-      ...(finalUrl ? { finalUrl } : {}),
-      ...(shot.viewportWidth && shot.viewportHeight
-        ? {
-            finalViewport: {
-              width: shot.viewportWidth,
-              height: shot.viewportHeight,
-            },
-          }
-        : {}),
-    };
-  } catch (err) {
-    logger.warn(
-      { err: err instanceof Error ? err.message : String(err), taskId },
-      'captureFinalState: screenshot capture failed (non-fatal)',
-    );
-    return {};
-  }
 }
 
 /**

@@ -109,26 +109,23 @@ export type TerminalBrowserRecoveryState =
   | 'failed';
 
 /**
- * Keep the saved evidence visible after a recovery failure while retries run
- * quietly in the background. The panel should return to the live browser only
- * after a restore has actually succeeded, never for each retry attempt.
+ * A recoverable terminal browser keeps its live viewport mounted while the
+ * socket and backend session retry. Unmounting it on each failed attempt turns
+ * the last useful frame into a static screenshot and also drops user takeover.
+ * Evidence-only mode is reserved for tasks with no trusted URL to restore.
  */
 export function terminalBrowserSessionUnavailable(inputs: {
   sessionSuspected: boolean;
   canRestore: boolean;
+  hasPresentedFrame?: boolean;
   recoveryState: TerminalBrowserRecoveryState;
   recoveryAttempt: number;
 }): boolean {
-  if (!inputs.sessionSuspected) return false;
-  if (!inputs.canRestore || inputs.recoveryState === 'failed') return true;
-  if (
-    inputs.recoveryAttempt > 0 &&
-    inputs.recoveryState !== 'ready' &&
-    inputs.recoveryState !== 'connected'
-  ) {
-    return true;
-  }
-  return false;
+  return (
+    inputs.sessionSuspected &&
+    !inputs.canRestore &&
+    !inputs.hasPresentedFrame
+  );
 }
 
 export function isBrowserInteractionActive(inputs: {
@@ -141,10 +138,10 @@ export function isBrowserInteractionActive(inputs: {
 }): boolean {
   if (!inputs.interactive || inputs.liveSessionUnavailable) return false;
   if (inputs.useLiveStream) {
-    return (
-      inputs.liveStatus === 'connected' ||
-      inputs.liveStatus === 'connecting'
-    );
+    // `interactive` preserves takeover ownership through a reconnect. Active
+    // forwarding still waits for an open transport so input is never accepted
+    // and then silently discarded.
+    return inputs.liveStatus === 'connected';
   }
   return !inputs.taskIsTerminal && inputs.hasLiveFrame;
 }
@@ -420,6 +417,7 @@ export function browserPanelHeaderStatus(inputs: {
   liveStatus: BrowserLiveStatus;
   browserAwaiting: boolean;
   interactiveActive: boolean;
+  interactiveOwned?: boolean;
   showReconnect: boolean;
   taskIsTerminal?: boolean;
 }): BrowserPanelHeaderStatus {
@@ -429,6 +427,17 @@ export function browserPanelHeaderStatus(inputs: {
       tooltip: '等待你在浏览器里完成登录、验证或授权',
       tone: 'attention',
       dotStatus: 'error',
+      showLabel: true,
+    };
+  }
+  const interactiveOwned =
+    inputs.interactiveOwned ?? inputs.interactiveActive;
+  if (interactiveOwned && !inputs.interactiveActive) {
+    return {
+      label: '接管保留',
+      tooltip: '浏览器连接恢复后可直接继续输入，无需再次接管',
+      tone: 'recovering',
+      dotStatus: inputs.showReconnect ? 'error' : 'live',
       showLabel: true,
     };
   }
@@ -491,6 +500,45 @@ export function browserPanelHeaderStatus(inputs: {
     dotStatus: inputs.dotStatus,
     showLabel: inputs.dotStatus === 'live',
   };
+}
+
+/**
+ * A live canvas is a working surface, not a loading placeholder. Once a frame
+ * has been presented, preserve it through transport retries and report a long
+ * outage with a compact recovery affordance instead of covering the page.
+ */
+export function shouldShowBrowserLiveOverlay(inputs: {
+  liveStatus: BrowserLiveStatus;
+  showReconnect: boolean;
+  hasPresentedFrame: boolean;
+}): boolean {
+  return !inputs.hasPresentedFrame;
+}
+
+/**
+ * The CDP viewport owns an indefinite reconnect loop and keeps its canvas
+ * between socket attempts. Let it reconnect in place after backend recovery;
+ * the legacy VNC viewer still needs a remount to restart its transport.
+ */
+export function shouldRemountBrowserStreamAfterRestore(inputs: {
+  usingCdp: boolean;
+}): boolean {
+  return !inputs.usingCdp;
+}
+
+export function shouldPreserveBrowserCanvasOnTaskSwitch(inputs: {
+  previousTaskId: string | null;
+  nextTaskId: string | null;
+  nextReplyToTaskId: string | null;
+  nextExecutionMode: UiTask['executionMode'];
+}): boolean {
+  return Boolean(
+    inputs.previousTaskId &&
+      inputs.nextTaskId &&
+      inputs.previousTaskId !== inputs.nextTaskId &&
+      inputs.nextReplyToTaskId === inputs.previousTaskId &&
+      inputs.nextExecutionMode === 'browser',
+  );
 }
 
 export function browserPanelEvidenceHeaderStatus(

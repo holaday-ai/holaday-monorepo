@@ -863,6 +863,27 @@ describe('selectTask detail hydration', () => {
     expect(['executing', 'queued']).toContain(useTaskStore.getState().tasks[0]?.status);
   });
 
+  it('keeps browser follow-up lineage while the canonical list replaces the optimistic row', () => {
+    const optimistic = task({
+      taskId: 'tsk_child',
+      executionMode: 'browser',
+      replyToTaskId: 'tsk_parent',
+    });
+    const canonical = task({
+      taskId: 'tsk_child',
+      executionMode: 'browser',
+    });
+
+    expect(
+      mergeTaskPagesReplacingDuplicates([optimistic], [canonical]),
+    ).toEqual([
+      expect.objectContaining({
+        taskId: 'tsk_child',
+        replyToTaskId: 'tsk_parent',
+      }),
+    ]);
+  });
+
   it('removes the local pending task row when createTask fails', async () => {
     createMutate.mockRejectedValueOnce(new Error('offline') as never);
 

@@ -88,9 +88,13 @@ export function isWorkbenchTerminalTask(task: UiTask): boolean {
 }
 
 export function terminalTaskHasFollowUpContext(task: UiTask): boolean {
-  if (task.status !== 'completed' && task.status !== 'partial_success') {
-    return false;
+  if (task.status === 'failed' || task.status === 'cancelled') {
+    // A terminal browser can still own a retained, interactive session. Keep
+    // that page available for a same-context follow-up even when the preceding
+    // run failed or the user cancelled the AI portion of the task.
+    return hasBrowserRecordForWorkbench(task);
   }
+  if (task.status !== 'completed' && task.status !== 'partial_success') return false;
   return Boolean(
     task.resultText?.trim() ||
       task.finalUrl?.trim() ||
