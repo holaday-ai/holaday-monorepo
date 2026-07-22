@@ -136,6 +136,16 @@ type CreativeStyleKey =
 const CREATIVE_ACCEPT_IMAGES = '.png,.jpg,.jpeg,.webp,.gif,image/*';
 const CREATIVE_ACCEPT_REFERENCE_VIDEO = '.mp4,.mov,video/mp4,video/quicktime';
 const CREATIVE_MAX_ATTACHMENTS = 5;
+export const DEFAULT_IMAGE_COUNT: 1 | 2 | 3 | 4 = 1;
+
+export function buildImageCreationOptions(
+  model: ImageModel,
+  aspectRatio: VideoAspect,
+  imageCount: 1 | 2 | 3 | 4 = DEFAULT_IMAGE_COUNT,
+): ImageCreationOptions {
+  return { model, aspectRatio, imageCount };
+}
+
 const CREATIVE_SECTION_CLASS = 'rounded-[22px] border-[#EFEFEF] bg-white shadow-[0_14px_34px_rgba(17,24,39,0.04)]';
 const CREATIVE_PRICE_SECTION_CLASS = 'rounded-[22px] border-[#EFEFEF] bg-white shadow-[0_14px_34px_rgba(17,24,39,0.04)]';
 const CREATIVE_ASPECT_OPTIONS: ReadonlyArray<{ value: VideoAspect; label: string }> = [
@@ -411,7 +421,7 @@ function CreativeStudioPage({
   const [durationSeconds, setDurationSeconds] = React.useState<VideoDuration>(6);
   const [aspectRatio, setAspectRatio] = React.useState<VideoAspect>(mode === 'image' ? '1:1' : '16:9');
   const [resolution, setResolution] = React.useState<VideoResolution>('1080p');
-  const [imageCount, setImageCount] = React.useState<1 | 2 | 3 | 4>(2);
+  const [imageCount, setImageCount] = React.useState<1 | 2 | 3 | 4>(DEFAULT_IMAGE_COUNT);
   const [attachments, setAttachments] = React.useState<DraftAttachment[]>([]);
   const [submitting, setSubmitting] = React.useState(false);
   const imageInputRef = React.useRef<HTMLInputElement>(null);
@@ -539,7 +549,7 @@ function CreativeStudioPage({
     const finalIntent = isImage
       ? `生成图片：${styledImageIntent}`
       : styledVideoIntent;
-    const imageOptions: ImageCreationOptions = { model: imageModel, aspectRatio, imageCount };
+    const imageOptions = buildImageCreationOptions(imageModel, aspectRatio, imageCount);
     try {
       const res = isImage
         ? await createTask(

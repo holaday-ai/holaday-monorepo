@@ -10,7 +10,7 @@
  *
  * API surface (verified 2026-06 against
  * https://ai.google.dev/gemini-api/docs/image-generation):
- *   POST {baseUrl}/v1/models/{model}:generateContent
+ *   POST {baseUrl}/{apiVersion}/models/{model}:generateContent
  *   header  x-goog-api-key: <key>
  *   body    { contents: [{ parts: [ {text}, {inlineData:{mimeType,data}} ] }],
  *            generationConfig: { imageConfig?: { aspectRatio, imageSize } } }
@@ -36,6 +36,8 @@ export interface GeminiImageInput {
   readonly mimeType: string;
 }
 
+export type GeminiApiVersion = 'v1' | 'v1beta';
+
 export interface GenerateImagesParams {
   /** Google AI Studio API key. Empty → throws `no_api_key`. */
   readonly apiKey: string;
@@ -43,6 +45,8 @@ export interface GenerateImagesParams {
   readonly prompt: string;
   /** Full model id, e.g. 'gemini-3.1-flash-image'. */
   readonly model: string;
+  /** API surface selected by the model tier. Defaults to stable `v1`. */
+  readonly apiVersion?: GeminiApiVersion;
   /** Defaults to https://generativelanguage.googleapis.com. No trailing slash needed. */
   readonly baseUrl?: string;
   /** Optional input images → image-editing mode. */
@@ -167,8 +171,8 @@ export async function generateImages(
   }
 
   const baseUrl = (params.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, '');
-  // Gemini 3 image models expose their stable endpoint on v1.
-  const url = `${baseUrl}/v1/models/${encodeURIComponent(params.model)}:generateContent`;
+  const apiVersion = params.apiVersion ?? 'v1';
+  const url = `${baseUrl}/${apiVersion}/models/${encodeURIComponent(params.model)}:generateContent`;
   const fetchImpl = params.fetchImpl ?? fetch;
 
   const parts: Array<Record<string, unknown>> = [{ text: params.prompt }];

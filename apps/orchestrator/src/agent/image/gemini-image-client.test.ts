@@ -69,6 +69,24 @@ describe('generateImages', () => {
     expect(body.generationConfig).toBeUndefined();
   });
 
+  it('uses an explicit API version for a configurable Pro model and gateway', async () => {
+    const b64 = Buffer.from('x').toString('base64');
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(okImageBody(b64)));
+
+    await generateImages({
+      ...BASE,
+      model: 'custom-pro-model',
+      apiVersion: 'v1beta',
+      baseUrl: 'https://gw.internal/',
+      fetchImpl,
+    });
+
+    const [url] = fetchImpl.mock.calls[0] as [string];
+    expect(url).toBe(
+      'https://gw.internal/v1beta/models/custom-pro-model:generateContent',
+    );
+  });
+
   it('honours a custom baseUrl (proxy/gateway override)', async () => {
     const b64 = Buffer.from('x').toString('base64');
     const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(okImageBody(b64)));

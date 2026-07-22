@@ -15,6 +15,7 @@ import type { Logger } from 'pino';
 import {
   generateImages,
   GeminiImageError,
+  type GeminiApiVersion,
   type GeminiImageInput,
 } from './gemini-image-client.js';
 import { pickImageModel, DEFAULT_FLASH_MODEL, type ImageModelTier } from './model-router.js';
@@ -95,11 +96,18 @@ export async function runImageTask(opts: RunImageTaskOpts): Promise<RunImageTask
   // P0 compliance — marketing/poster images must NOT invent promo copy.
   const promptText = buildImagePrompt(intent, decision.tier);
 
-  const runGenerate = (model: string, resolution?: string) =>
+  const apiVersionForTier = (tier: ImageModelTier): GeminiApiVersion =>
+    tier === 'pro' ? 'v1beta' : 'v1';
+  const runGenerate = (
+    model: string,
+    apiVersion: GeminiApiVersion,
+    resolution?: string,
+  ) =>
     generate({
       apiKey: opts.apiKey,
       prompt: promptText,
       model,
+      apiVersion,
       ...(opts.baseUrl ? { baseUrl: opts.baseUrl } : {}),
       ...(hasInputs ? { inputImages: opts.inputImages } : {}),
       ...(resolution ? { resolution } : {}),
@@ -116,7 +124,11 @@ export async function runImageTask(opts: RunImageTaskOpts): Promise<RunImageTask
   let effectiveTier = decision.tier;
   let degraded = false;
   try {
-    result = await runGenerate(decision.model, decision.resolution);
+    result = await runGenerate(
+      decision.model,
+      apiVersionForTier(decision.tier),
+      decision.resolution,
+    );
   } catch (err) {
     // Pro overloaded (503/429/timeout after the client's own retries)
     // → degrade to NB2 so the user still gets an image (lower text
@@ -127,7 +139,7 @@ export async function runImageTask(opts: RunImageTaskOpts): Promise<RunImageTask
         'image: Pro overloaded — degrading to NB2',
       );
       try {
-        result = await runGenerate(flashModel); // drop hi-res on the NB2 fallback
+        result = await runGenerate(flashModel, 'v1'); // drop hi-res on the NB2 fallback
         degraded = true;
         effectiveTier = 'flash';
       } catch (err2) {
@@ -176,6 +188,7 @@ export async function runImageTask(opts: RunImageTaskOpts): Promise<RunImageTask
     try {
       const next = await runGenerate(
         degraded ? flashModel : decision.model,
+        degraded ? 'v1' : apiVersionForTier(decision.tier),
         degraded ? undefined : decision.resolution,
       );
       if (next.images.length === 0) break;

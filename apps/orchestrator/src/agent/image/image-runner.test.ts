@@ -128,7 +128,30 @@ describe('runImageTask', () => {
     expect(out.tier).toBe('pro');
     expect(out.summary).toContain('Nano Banana Pro');
     expect(generate).toHaveBeenCalledWith(
-      expect.objectContaining({ model: 'gemini-3-pro-image' }),
+      expect.objectContaining({ model: 'gemini-3-pro-image', apiVersion: 'v1beta' }),
+    );
+  });
+
+  it('keeps a configured Pro model on v1beta without relying on its model id', async () => {
+    const generate = okGenerate();
+
+    await runImageTask({
+      intent: '做一张产品海报',
+      preferredTier: 'pro',
+      proModel: 'custom-pro-model',
+      baseUrl: 'https://gw.internal',
+      apiKey: 'k',
+      save,
+      logger: fakeLogger(),
+      generate,
+    });
+
+    expect(generate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: 'custom-pro-model',
+        apiVersion: 'v1beta',
+        baseUrl: 'https://gw.internal',
+      }),
     );
   });
 
@@ -152,7 +175,7 @@ describe('runImageTask', () => {
     );
   });
 
-  it('routes a 4K poster to Pro without an explicit resolution (v1)', async () => {
+  it('routes a 4K poster to Pro without an unverified explicit resolution', async () => {
     const generate = okGenerate();
     const out = await runImageTask({
       intent: '做一张4K高清电影海报',
@@ -162,7 +185,7 @@ describe('runImageTask', () => {
       generate,
     });
     expect(out.tier).toBe('pro');
-    // v1: resolution dropped (API rejected 4096x4096) — not sent.
+    // Keep resolution unset until accepted imageSize values are live-verified for this model.
     const call = generate.mock.calls[0]![0];
     expect(call.model).toBe('gemini-3-pro-image');
     expect(call.resolution).toBeUndefined();
@@ -267,7 +290,9 @@ describe('runImageTask', () => {
     expect(out.summary).toContain('Pro 档繁忙');
     // first attempt used the Pro model, fallback used flash
     expect(generate.mock.calls[0]![0].model).toBe('gemini-3-pro-image');
+    expect(generate.mock.calls[0]![0].apiVersion).toBe('v1beta');
     expect(generate.mock.calls[1]![0].model).toBe('gemini-3.1-flash-image');
+    expect(generate.mock.calls[1]![0].apiVersion).toBe('v1');
   });
 
   it('does NOT degrade when NB2 itself fails (no Pro to fall back from)', async () => {

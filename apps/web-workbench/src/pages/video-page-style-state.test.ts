@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DEFAULT_IMAGE_COUNT,
+  buildImageCreationOptions,
   buildCloneVideoIntent,
   buildImageIntentForSubmit,
   buildImageIntentWithMode,
@@ -9,6 +11,23 @@ import {
 } from './VideoPage';
 
 describe('video creative style state', () => {
+  it('defaults image generation to one output to avoid silent duplicate spend', () => {
+    expect(DEFAULT_IMAGE_COUNT).toBe(1);
+    expect(buildImageCreationOptions('nano_banana_2', '1:1')).toEqual({
+      model: 'nano_banana_2',
+      aspectRatio: '1:1',
+      imageCount: 1,
+    });
+  });
+
+  it('preserves an explicit multi-image selection', () => {
+    expect(buildImageCreationOptions('nano_banana_pro', '4:3', 3)).toEqual({
+      model: 'nano_banana_pro',
+      aspectRatio: '4:3',
+      imageCount: 3,
+    });
+  });
+
   it('keeps randomized style choices out of the user prompt', () => {
     expect(
       buildVideoIntentWithCreativeStyles('拍一条新品介绍短视频', {
