@@ -477,7 +477,7 @@ export function mergeTaskPagesReplacingDuplicates(
     if (existing && shouldPreserveFinalTaskRow(existing, task)) {
       continue;
     }
-    merged[existingIndex] = task;
+    merged[existingIndex] = preserveClientTaskContext(existing, task);
   }
 
   return merged;
@@ -490,8 +490,16 @@ function preserveFinalTaskRows(
   const currentByTaskId = new Map(current.map((task) => [task.taskId, task]));
   return incoming.map((task) => {
     const existing = currentByTaskId.get(task.taskId);
-    return existing && shouldPreserveFinalTaskRow(existing, task) ? existing : task;
+    if (!existing) return task;
+    return shouldPreserveFinalTaskRow(existing, task)
+      ? existing
+      : preserveClientTaskContext(existing, task);
   });
+}
+
+function preserveClientTaskContext(current: UiTask, incoming: UiTask): UiTask {
+  if (incoming.replyToTaskId || !current.replyToTaskId) return incoming;
+  return { ...incoming, replyToTaskId: current.replyToTaskId };
 }
 
 function shouldPreserveFinalTaskRow(current: UiTask, incoming: UiTask): boolean {
@@ -1246,6 +1254,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       tickCount: 0,
       createdAt,
       executionMode: inferExecutionModeFromIntent(intent),
+      ...(replyToTaskId ? { replyToTaskId } : {}),
     };
     set((prev) => ({
       tasks: [pendingTask, ...prev.tasks],
@@ -1292,6 +1301,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         tickCount: 0,
         createdAt,
         executionMode: serverExecutionMode ?? inferExecutionModeFromIntent(intent),
+        ...(replyToTaskId ? { replyToTaskId } : {}),
       };
       // composerMode flips back to 'task' here. Without this, a user
       // who clicked 发新任务 (composerMode='new') and submitted ends

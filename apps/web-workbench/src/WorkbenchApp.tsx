@@ -701,7 +701,11 @@ export function WorkbenchApp(): JSX.Element {
                 toast.show(taskActionError('追问失败', res.error), 'error');
                 return keepComposerOnSubmitFailure;
               }
-              toast.show('已基于上一个任务追问');
+              toast.show(
+                selectedHasBrowserRecord
+                  ? 'AI 已接手当前页面继续执行'
+                  : '已基于上一个任务追问',
+              );
               return clearComposerOnSubmitSuccess;
             }
             const res = await createTask(

@@ -149,10 +149,37 @@ describe('workbench state helpers', () => {
     });
   });
 
-  it('suppresses follow-up for failed, cancelled, or empty terminal tasks', () => {
+  it('keeps browser follow-up available after failed or cancelled terminal tasks', () => {
+    for (const status of ['failed', 'cancelled'] as const) {
+      expect(
+        followUpTargetForTask({
+          selectedTask: task({
+            status,
+            executionMode: 'browser',
+            finalUrl: 'https://example.com/recoverable',
+          }),
+          selectedTaskId: 'tsk_test',
+          selectedNeedsUser: false,
+        }),
+      ).toEqual({
+        taskId: 'tsk_test',
+        title: '打开 https://example.com 并总结结果',
+      });
+    }
+  });
+
+  it('suppresses follow-up for failed non-browser tasks or empty successful tasks', () => {
     for (const selectedTask of [
-      task({ status: 'failed', resultText: 'Browser timeout' }),
-      task({ status: 'cancelled', resultText: '已取消，未产生任何费用。' }),
+      task({
+        status: 'failed',
+        executionMode: 'generate',
+        resultText: 'Generation timeout',
+      }),
+      task({
+        status: 'cancelled',
+        executionMode: 'generate',
+        resultText: '已取消，未产生任何费用。',
+      }),
       task({ status: 'completed' }),
       task({ status: 'partial_success' }),
     ]) {

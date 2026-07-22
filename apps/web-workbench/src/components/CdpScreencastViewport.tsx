@@ -54,6 +54,10 @@ interface Props {
   /** Block input forwarding when true (mirror VncViewport semantics). */
   viewOnly?: boolean;
   onStatusChange?: (status: CdpScreencastStatus) => void;
+  /** Fired after the first real frame is painted for the current viewport. */
+  onFrameReady?: () => void;
+  /** Restarts the transport without remounting or clearing the canvas. */
+  reconnectSignal?: number;
   /**
    * Optimization #3 R2 — fired on every top-level
    * `Page.frameNavigated` (the CDP streamer already publishes
@@ -100,6 +104,8 @@ export function CdpScreencastViewport({
   streamToken,
   viewOnly = true,
   onStatusChange,
+  onFrameReady,
+  reconnectSignal = 0,
   onUrlChange,
   fitMode = 'contain',
   className,
@@ -110,6 +116,10 @@ export function CdpScreencastViewport({
   React.useEffect(() => {
     onUrlChangeRef.current = onUrlChange;
   }, [onUrlChange]);
+  const onFrameReadyRef = React.useRef(onFrameReady);
+  React.useEffect(() => {
+    onFrameReadyRef.current = onFrameReady;
+  }, [onFrameReady]);
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
   const hiddenInputRef = React.useRef<HTMLInputElement>(null);
   /** Host <div> ref — source of truth for the live remote viewport. */
@@ -425,7 +435,7 @@ export function CdpScreencastViewport({
       }
       wsRef.current = null;
     };
-  }, [hasStreamToken, wsUrl]);
+  }, [hasStreamToken, reconnectSignal, wsUrl]);
 
   // Decode a base64 JPEG and paint into the canvas. The img +
   // canvas are reused; canvas is resized to match the source so the
@@ -445,6 +455,7 @@ export function CdpScreencastViewport({
       if (canvas.width !== img.width) canvas.width = img.width;
       if (canvas.height !== img.height) canvas.height = img.height;
       ctx.drawImage(img, 0, 0);
+      onFrameReadyRef.current?.();
       // A new renderer can emit one frame at its startup size before the
       // saved viewport is reapplied. Recompute immediately so that frame is
       // still contained without affecting the surrounding flex layout.

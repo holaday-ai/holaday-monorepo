@@ -37,6 +37,9 @@ import {
   browserViewportFooterLabel,
   browserWakeFeedback,
   shouldShowBrowserHeader,
+  shouldShowBrowserLiveOverlay,
+  shouldPreserveBrowserCanvasOnTaskSwitch,
+  shouldRemountBrowserStreamAfterRestore,
   shouldShowBrowserFullscreen,
   shouldShowTerminalEvidenceLedger,
   shouldConnectBrowserStream,
@@ -561,22 +564,40 @@ export function BrowserPanel({
   const [vncAttemptFails, setVncAttemptFails] = React.useState(0);
   const [showReconnect, setShowReconnect] = React.useState(false);
   const [reconnectEpoch, setReconnectEpoch] = React.useState(0);
+  const [hasPresentedLiveFrame, setHasPresentedLiveFrame] = React.useState(false);
+  const previousActiveTaskIdRef = React.useRef<string | null>(
+    activeTaskId ?? null,
+  );
+  const handlePresentedLiveFrame = React.useCallback(() => {
+    setHasPresentedLiveFrame(true);
+  }, []);
   // Phase 24: switching tasks must reset the attempt counter so a
   // prior task's stale failures or reconnect affordance don't leak
   // into a freshly selected task.
   React.useEffect(() => {
+    const preserveCanvas = shouldPreserveBrowserCanvasOnTaskSwitch({
+      previousTaskId: previousActiveTaskIdRef.current,
+      nextTaskId: activeTaskId ?? null,
+      nextReplyToTaskId: activeTask?.replyToTaskId ?? null,
+      nextExecutionMode: activeTask?.executionMode,
+    });
     setVncAttemptFails(0);
     setVncStatus('idle');
     setShowReconnect(false);
-  }, [activeTaskId]);
+    if (!preserveCanvas) setHasPresentedLiveFrame(false);
+    previousActiveTaskIdRef.current = activeTaskId ?? null;
+  }, [activeTask?.executionMode, activeTask?.replyToTaskId, activeTaskId]);
   const handleVncStatus = React.useCallback((status: VncStatus) => {
     setVncStatus(status);
+    if (!usingCdp && status === 'connected') setHasPresentedLiveFrame(true);
     setVncAttemptFails((n) => {
       if (status === 'connected') return 0;
-      if (status === 'disconnected' || status === 'error') return n + 1;
+      // CDP reports `error` and then `close` for one failed socket. Count the
+      // close only so a single transient failure is not treated as two outages.
+      if (status === 'disconnected') return n + 1;
       return n;
     });
-  }, []);
+  }, [usingCdp]);
   // Codex Pack B2 — long-connecting reconnect affordance. The viewer
   // sits in `connecting` state when noVNC is still finishing its TLS
   // handshake / RFB protocol negotiation. Usually 1-3s; if it drags
@@ -584,45 +605,38 @@ export function BrowserPanel({
   // fresh browser-frame attempt instead of staring at the placeholder text.
   // Tracked separately from `vncAttemptFails` (which counts
   // disconnected/error, not slow-connect).
+  const browserConnectionReady = vncStatus === 'connected';
   React.useEffect(() => {
-    if (vncStatus === 'connected') {
+    if (browserConnectionReady) {
       setShowReconnect(false);
       return;
     }
     const timer = window.setTimeout(() => setShowReconnect(true), 5000);
     return () => window.clearTimeout(timer);
-  }, [vncStatus, reconnectEpoch]);
+  }, [activeTaskId, browserConnectionReady, reconnectEpoch]);
   const handleManualReconnect = React.useCallback(() => {
     setShowReconnect(false);
     setVncStatus('idle');
     setVncAttemptFails(0);
-    setReconnectEpoch((n) => n + 1);
+    if (!usingCdp) setHasPresentedLiveFrame(false);
+    void refreshStreamToken().finally(() => {
+      if (mountedRef.current) setReconnectEpoch((n) => n + 1);
+    });
     toast.show('正在刷新浏览器画面', 'info');
-  }, [toast]);
+  }, [refreshStreamToken, toast, usingCdp]);
   const liveOverlayCopy = browserLiveOverlayCopy({
     status: vncStatus,
     showReconnect,
     taskIsTerminal: taskTerminal,
   });
-  const showLiveOverlay =
-    vncStatus === 'idle' ||
-    vncStatus === 'connecting' ||
-    ((vncStatus === 'disconnected' || vncStatus === 'error') && showReconnect);
-  // RC audit fix — banner grace period. The "浏览器画面断开，正在自动重连"
-  // banner used to flip ON instantly when the WS closed, and stay on
-  // for the entire backoff window (up to 5 s). For transient closes
-  // (network jitter, CDP frame stalls) the banner would flash on/off
-  // a few times during a healthy stream. Defer the visible flag by
-  // 1.5 s so a fast reconnect leaves no banner trail.
-  const [showDisconnectBanner, setShowDisconnectBanner] = React.useState(false);
-  React.useEffect(() => {
-    if (vncStatus !== 'disconnected') {
-      setShowDisconnectBanner(false);
-      return;
-    }
-    const timer = setTimeout(() => setShowDisconnectBanner(true), 1500);
-    return () => clearTimeout(timer);
-  }, [vncStatus]);
+  const showLiveOverlay = shouldShowBrowserLiveOverlay({
+    liveStatus: vncStatus,
+    showReconnect,
+    hasPresentedFrame: hasPresentedLiveFrame,
+  });
+  // Keep transient transport jitter silent. The last painted frame remains
+  // visible; only an outage that survives the existing five-second grace gets
+  // a compact, non-blocking reconnect affordance below.
   // Phase 24: hibernation is a userId-pool concept (idle GC after
   // 5min). Per-task pool has no hibernation — retained terminal and
   // executing task sessions use renewable/continuous reconnect logic
@@ -715,7 +729,9 @@ export function BrowserPanel({
         setVncStatus('idle');
         setTerminalRecoveryState('ready');
         setTerminalRecoveryAttempt(0);
-        setReconnectEpoch((epoch) => epoch + 1);
+        if (shouldRemountBrowserStreamAfterRestore({ usingCdp })) {
+          setReconnectEpoch((epoch) => epoch + 1);
+        }
         if (announce) {
           toast.show(
             result.restored
@@ -739,6 +755,7 @@ export function BrowserPanel({
       taskTerminal,
       terminalCanRestore,
       toast,
+      usingCdp,
     ]);
   React.useEffect(() => {
     if (!taskTerminal) return;
@@ -794,6 +811,7 @@ export function BrowserPanel({
   const terminalSessionUnavailable = terminalBrowserSessionUnavailable({
     sessionSuspected: terminalSessionSuspected,
     canRestore: terminalCanRestore,
+    hasPresentedFrame: hasPresentedLiveFrame,
     recoveryState: terminalRecoveryState,
     recoveryAttempt: terminalRecoveryAttempt,
   });
@@ -979,6 +997,7 @@ export function BrowserPanel({
     liveStatus: vncStatus,
     browserAwaiting,
     interactiveActive,
+    interactiveOwned: interactive && !terminalSessionUnavailable,
     showReconnect,
     taskIsTerminal,
   });
@@ -1557,13 +1576,9 @@ export function BrowserPanel({
               >
                 {usingCdp ? (
                   <CdpScreencastViewport
-                    // Codex Pack B2 — bumping reconnectEpoch forces a
-                    // fresh CdpScreencastViewport mount, which closes
-                    // the existing WS and opens a new one. Drives the
-                    // "刷新画面" button after 5s of connecting.
-                    key={`cdp-${reconnectEpoch}`}
                     wsUrl={screencastUrlForCdp}
                     streamToken={streamToken}
+                    reconnectSignal={reconnectEpoch}
                     viewOnly={!interactiveActive}
                     fitMode={isSheet ? 'readable' : 'contain'}
                     onStatusChange={(s: CdpScreencastStatus) =>
@@ -1573,6 +1588,7 @@ export function BrowserPanel({
                       handleVncStatus(s as VncStatus)
                     }
                     onUrlChange={onCdpUrlChange}
+                    onFrameReady={handlePresentedLiveFrame}
                     className={cn(
                       isSheet && 'rounded-md border shadow-[0_1px_3px_rgba(17,24,39,0.06)]',
                       interactiveActive
@@ -1752,13 +1768,26 @@ export function BrowserPanel({
                 )}
               </div>
             )}
-            {useVnc && vncStatus === 'disconnected' && showDisconnectBanner && (
+            {useVnc &&
+              hasPresentedLiveFrame &&
+              showReconnect &&
+              vncStatus !== 'connected' && (
               <div
                 role="status"
                 aria-live="polite"
-                className="pointer-events-none absolute left-1/2 top-3 z-20 max-w-[calc(100%-1.5rem)] -translate-x-1/2 truncate rounded-full bg-[#FFC910]/95 px-3 py-1 text-[11px] font-semibold text-[#595757] shadow-sm"
+                className="absolute left-1/2 top-3 z-30 flex max-w-[calc(100%-1.5rem)] -translate-x-1/2 items-center gap-2 rounded-[9px] border border-[#DCDDDD] bg-white/95 py-1 pl-2.5 pr-1 text-[11px] text-muted-foreground shadow-[0_4px_16px_rgba(17,24,39,0.10)] backdrop-blur dark:border-white/10 dark:bg-card/95"
               >
-                浏览器画面断开，正在自动重连
+                <span className="truncate">连接恢复较慢，接管状态已保留</span>
+                <button
+                  type="button"
+                  onClick={handleManualReconnect}
+                  aria-label={liveOverlayCopy.reconnectLabel}
+                  title={liveOverlayCopy.reconnectLabel}
+                  className="inline-flex h-7 shrink-0 items-center gap-1 rounded-[7px] px-2 font-medium text-foreground transition-colors hover:bg-foreground/5"
+                >
+                  <RotateCw className="h-3 w-3" aria-hidden />
+                  重连
+                </button>
               </div>
             )}
             {useVnc && activityVisible && recentSteps.length > 0 && (
