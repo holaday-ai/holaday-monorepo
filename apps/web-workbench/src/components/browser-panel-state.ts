@@ -101,6 +101,18 @@ export function terminalBrowserRecoveryRetryDelay(attempt: number): number {
   return Math.min(15_000, 2_000 * 2 ** (safeAttempt - 1));
 }
 
+/**
+ * Once a terminal page has painted, brief socket churn should be invisible:
+ * the canvas remains useful and takeover ownership is preserved. Surface the
+ * compact reconnect affordance only after recovery has had time to complete.
+ */
+export function browserReconnectAffordanceDelay(inputs: {
+  taskIsTerminal: boolean;
+  hasPresentedFrame: boolean;
+}): number {
+  return inputs.taskIsTerminal && inputs.hasPresentedFrame ? 15_000 : 5_000;
+}
+
 export function terminalBrowserRecoveryWindow(inputs: {
   disconnected: boolean;
   disconnectedAt: number | null;
@@ -504,11 +516,11 @@ export function browserPanelHeaderStatus(inputs: {
       inputs.liveStatus === 'error')
   ) {
     return {
-      label: '续接中',
+      label: '已连接',
       tooltip: '连接短暂中断，最后画面已保留，正在自动续接',
       tone: 'recovering',
       dotStatus: 'live',
-      showLabel: true,
+      showLabel: false,
     };
   }
   if (inputs.liveStatus === 'connected') {

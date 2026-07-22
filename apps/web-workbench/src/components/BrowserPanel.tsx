@@ -23,6 +23,7 @@ import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button } from '@/components/ui/button';
 import {
   browserLiveOverlayCopy,
+  browserReconnectAffordanceDelay,
   browserControlAction,
   browserInputFallbackMode,
   browserStartupTargetUrl,
@@ -82,6 +83,7 @@ import {
 import { hdDebug } from '@/lib/hd-debug';
 import { trpc } from '@/lib/trpc';
 import { useStreamToken } from '@/lib/use-stream-token';
+import { shouldConnectTaskBrowserForWorkbench } from '@/lib/workbench-state';
 import { send as wsSend } from '@/lib/ws';
 import { cn } from '@/lib/utils';
 import { useTaskStore } from '@/stores/task-store';
@@ -490,14 +492,9 @@ export function BrowserPanel({
   // Idle gate. The browser panel only connects when a selected task
   // actually owns a browser. The old no-active-task user-pool stream
   // was removed when HOLA DAY moved to per-task browsers.
-  const hasActiveTask = Boolean(activeTaskId);
-  // RC follow-up audit fix — generate / scrape tasks have NO pool
-  // slot (no Brave allocated), so /screencast-ws/<taskId> 409s in a
-  // loop and the user sees "浏览器画面断开，正在自动重连" cycling every ~5s
-  // forever. Detect non-pool tasks via the streaming/progress
-  // buffers (those types only ever populate for generate/scrape
-  // runners) and skip the WS entirely. Browser tasks never populate
-  // those buffers, so they keep working unchanged.
+  // Text/runtime buffers identify legacy generate tasks when no execution
+  // mode has arrived yet. Browser tasks also emit progress phases, so this is
+  // deliberately a fallback signal rather than a pool-ownership veto.
   const streamingForActive = useTaskStore((s) =>
     activeTaskId ? s.streamingByTask[activeTaskId] : undefined,
   );
@@ -505,20 +502,14 @@ export function BrowserPanel({
     activeTaskId ? s.progressByTask[activeTaskId] : undefined,
   );
   const isNonPoolTask = Boolean(streamingForActive ?? progressForActive);
-  // P3 — gate the panel on whether this task actually needs a browser.
-  // Earlier code connected screencast for ANY active task, so a fresh
-  // generate / intake task (no Brave allocated, never will be) showed
-  // about:blank + URL bar + "第 1 帧" + Stop button — confusing. Now
-  // we trust `activeTask.executionMode` first (set by the store from
-  // tasks.detail's `result.executionMode` / `result.metadata.executionMode`,
-  // or inferred from the first server.task.stream / progress event).
-  // For the brief window before that lands, fall back to `!isNonPoolTask`
-  // (i.e. no streaming buffer yet → could be browser, treat optimistic).
-  const knownExecutionMode = activeTask?.executionMode;
-  const isBrowserTask =
-    knownExecutionMode != null
-      ? knownExecutionMode === 'browser'
-      : hasActiveTask && !isNonPoolTask;
+  // Browser ownership is authoritative. Generic progress buffers also exist
+  // on the browser lane (planning / verifying), so they can only help classify
+  // a legacy task with no browser evidence; they must never veto a browser the
+  // task already owns.
+  const isBrowserTask = shouldConnectTaskBrowserForWorkbench({
+    task: activeTask,
+    hasRuntimeTextSignal: isNonPoolTask,
+  });
   const shouldConnect = shouldConnectBrowserStream({
     isBrowserTask,
     taskIsTerminal: taskTerminal,
@@ -540,12 +531,8 @@ export function BrowserPanel({
   const screencastUrlForCdp = React.useMemo(() => {
     if (!shouldConnect) return null;
     if (!usingCdp) return null;
-    // RC audit fix — non-pool tasks (generate / scrape) never have
-    // a /screencast-ws/<taskId> backend; skip the WS so the
-    // disconnect banner doesn't flicker every 5 s.
-    if (activeTaskId && isNonPoolTask) return null;
     return buildScreencastUrl(activeTaskId ?? null, poolUserId);
-  }, [activeTaskId, shouldConnect, poolUserId, usingCdp, isNonPoolTask]);
+  }, [activeTaskId, shouldConnect, poolUserId, usingCdp]);
   // [HD-DEBUG] log every URL change (or change to/from null). Token
   // redacted so console dumps stay safe to share.
   React.useEffect(() => {
@@ -613,9 +600,21 @@ export function BrowserPanel({
       setShowReconnect(false);
       return;
     }
-    const timer = window.setTimeout(() => setShowReconnect(true), 5000);
+    const timer = window.setTimeout(
+      () => setShowReconnect(true),
+      browserReconnectAffordanceDelay({
+        taskIsTerminal: taskTerminal,
+        hasPresentedFrame: hasPresentedLiveFrame,
+      }),
+    );
     return () => window.clearTimeout(timer);
-  }, [activeTaskId, browserConnectionReady, reconnectEpoch]);
+  }, [
+    activeTaskId,
+    browserConnectionReady,
+    hasPresentedLiveFrame,
+    reconnectEpoch,
+    taskTerminal,
+  ]);
   const handleManualReconnect = React.useCallback(() => {
     setShowReconnect(false);
     setVncStatus('idle');
@@ -637,7 +636,7 @@ export function BrowserPanel({
     hasPresentedFrame: hasPresentedLiveFrame,
   });
   // Keep transient transport jitter silent. The last painted frame remains
-  // visible; only an outage that survives the existing five-second grace gets
+  // visible; only an outage that survives the reconnect grace period gets
   // a compact, non-blocking reconnect affordance below.
   // Phase 24: hibernation is a userId-pool concept (idle GC after
   // 5min). Per-task pool has no hibernation — retained terminal and

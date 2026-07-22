@@ -63,6 +63,16 @@ export function hasBrowserRecordForWorkbench(task: UiTask | null): boolean {
   return BROWSER_TASK_VERBS.some((verb) => intent.includes(verb));
 }
 
+export function shouldConnectTaskBrowserForWorkbench(input: {
+  task: UiTask | null;
+  hasRuntimeTextSignal: boolean;
+}): boolean {
+  if (!input.task) return false;
+  if (hasBrowserRecordForWorkbench(input.task)) return true;
+  if (input.task.executionMode) return false;
+  return !input.hasRuntimeTextSignal;
+}
+
 export function taskFrameForWorkbench(
   taskId: string | null,
   framesByTask: Record<string, UiScreencast | undefined>,

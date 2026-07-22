@@ -34,6 +34,7 @@ import {
   terminalBrowserSessionUnavailable,
   terminalBrowserTakeoverMessage,
   terminalBrowserRecoveryRetryDelay,
+  browserReconnectAffordanceDelay,
   terminalBrowserRecoveryWindow,
   terminalEvidenceFrameLabel,
   terminalEvidenceStatusLabel,
@@ -123,6 +124,27 @@ describe('BrowserPanel state helpers', () => {
     expect(terminalBrowserRecoveryRetryDelay(3)).toBe(8_000);
     expect(terminalBrowserRecoveryRetryDelay(4)).toBe(15_000);
     expect(terminalBrowserRecoveryRetryDelay(9)).toBe(15_000);
+  });
+
+  it('keeps brief terminal reconnects silent after a usable frame was shown', () => {
+    expect(
+      browserReconnectAffordanceDelay({
+        taskIsTerminal: true,
+        hasPresentedFrame: true,
+      }),
+    ).toBe(15_000);
+    expect(
+      browserReconnectAffordanceDelay({
+        taskIsTerminal: true,
+        hasPresentedFrame: false,
+      }),
+    ).toBe(5_000);
+    expect(
+      browserReconnectAffordanceDelay({
+        taskIsTerminal: false,
+        hasPresentedFrame: true,
+      }),
+    ).toBe(5_000);
   });
 
   it('keeps a painted terminal browser quiet through a brief reconnect', () => {
@@ -685,10 +707,10 @@ describe('BrowserPanel state helpers', () => {
         hasPresentedFrame: true,
       }),
     ).toMatchObject({
-      label: '续接中',
+      label: '已连接',
       tone: 'recovering',
       dotStatus: 'live',
-      showLabel: true,
+      showLabel: false,
     });
     expect(
       browserPanelHeaderStatus({
