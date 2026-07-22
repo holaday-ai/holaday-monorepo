@@ -48,6 +48,7 @@ export async function downloadFileAuthed(
   const token = getAccessToken();
   try {
     const res = await fetch(input.url, {
+      cache: 'no-store',
       headers: token ? { authorization: `Bearer ${token}` } : {},
     });
     if (!res.ok) {
@@ -99,6 +100,7 @@ export async function fetchFileBlobAuthed(
   const token = getAccessToken();
   try {
     const res = await fetch(input.url, {
+      cache: 'no-store',
       headers: token ? { authorization: `Bearer ${token}` } : {},
     });
     if (!res.ok) {

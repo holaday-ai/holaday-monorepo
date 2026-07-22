@@ -44,12 +44,17 @@ describe('downloadFailureMessage', () => {
 describe('fetchFileBlobAuthed', () => {
   it('returns a quiet failure when an inline preview fetch is blocked', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    vi.stubGlobal('fetch', vi.fn(async () => {
+    const fetchMock = vi.fn(async () => {
       throw new TypeError('Failed to fetch');
-    }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
 
     const result = await fetchFileBlobAuthed({ url: '/api/files/stale/download' });
 
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/files/stale/download',
+      expect.objectContaining({ cache: 'no-store' }),
+    );
     expect(result).toMatchObject({
       ok: false,
       status: null,
@@ -62,15 +67,20 @@ describe('fetchFileBlobAuthed', () => {
 describe('downloadFileAuthed', () => {
   it('returns a quiet failure when a user-triggered download fetch is blocked', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    vi.stubGlobal('fetch', vi.fn(async () => {
+    const fetchMock = vi.fn(async () => {
       throw new TypeError('Failed to fetch');
-    }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
 
     const result = await downloadFileAuthed({
       url: '/api/files/stale/download',
       filename: 'stale.png',
     });
 
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/files/stale/download',
+      expect.objectContaining({ cache: 'no-store' }),
+    );
     expect(result).toMatchObject({
       ok: false,
       status: null,
