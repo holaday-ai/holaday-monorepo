@@ -13,7 +13,7 @@
  *   POST {baseUrl}/v1/models/{model}:generateContent
  *   header  x-goog-api-key: <key>
  *   body    { contents: [{ parts: [ {text}, {inlineData:{mimeType,data}} ] }],
- *            generationConfig: { imageConfig?: { resolution } } }
+ *            generationConfig: { imageConfig?: { aspectRatio, imageSize } } }
  *   resp    candidates[].content.parts[].inlineData.{mimeType,data(base64 PNG)}
  *
  * Model IDs come from the caller (env-overridable) — the BOSS sprint
@@ -167,9 +167,7 @@ export async function generateImages(
   }
 
   const baseUrl = (params.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, '');
-  // Gemini 3 image models expose the stable responseFormat image schema on
-  // v1. The v1beta schema treats values such as "16:9" as an incompatible
-  // enum and rejects otherwise-valid image requests with HTTP 400.
+  // Gemini 3 image models expose their stable endpoint on v1.
   const url = `${baseUrl}/v1/models/${encodeURIComponent(params.model)}:generateContent`;
   const fetchImpl = params.fetchImpl ?? fetch;
 
@@ -179,12 +177,15 @@ export async function generateImages(
   }
 
   const generationConfig: Record<string, unknown> = {};
-  const imageResponseFormat: Record<string, string> = {};
-  if (params.aspectRatio) imageResponseFormat.aspectRatio = params.aspectRatio;
+  const imageConfig: Record<string, string> = {};
+  if (params.aspectRatio) imageConfig.aspectRatio = params.aspectRatio;
   const imageSize = normalizeImageSize(params.resolution);
-  if (imageSize) imageResponseFormat.imageSize = imageSize;
-  if (Object.keys(imageResponseFormat).length > 0) {
-    generationConfig.responseFormat = { image: imageResponseFormat };
+  if (imageSize) imageConfig.imageSize = imageSize;
+  if (Object.keys(imageConfig).length > 0) {
+    // The REST responseFormat schema currently parses aspectRatio as a proto
+    // enum and rejects documented strings such as "1:1". imageConfig is the
+    // documented string-based compatibility surface for these same controls.
+    generationConfig.imageConfig = imageConfig;
   }
   if (params.responseModalities) generationConfig.responseModalities = params.responseModalities;
 

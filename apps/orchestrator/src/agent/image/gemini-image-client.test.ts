@@ -100,24 +100,24 @@ describe('generateImages', () => {
     });
   });
 
-  it('normalizes legacy pixel resolution into the official imageSize field', async () => {
+  it('normalizes legacy pixel resolution into imageConfig.imageSize', async () => {
     const b64 = Buffer.from('x').toString('base64');
     const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(okImageBody(b64)));
 
     await generateImages({ ...BASE, resolution: '4096x4096', fetchImpl });
 
     const body = JSON.parse((fetchImpl.mock.calls[0]![1] as RequestInit).body as string);
-    expect(body.generationConfig.responseFormat).toEqual({ image: { imageSize: '4K' } });
+    expect(body.generationConfig.imageConfig).toEqual({ imageSize: '4K' });
   });
 
-  it('sends the requested output aspect ratio through the official response format', async () => {
+  it('sends the requested output aspect ratio through imageConfig', async () => {
     const b64 = Buffer.from('x').toString('base64');
     const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(okImageBody(b64)));
 
     await generateImages({ ...BASE, aspectRatio: '16:9', fetchImpl });
 
     const body = JSON.parse((fetchImpl.mock.calls[0]![1] as RequestInit).body as string);
-    expect(body.generationConfig.responseFormat).toEqual({ image: { aspectRatio: '16:9' } });
+    expect(body.generationConfig.imageConfig).toEqual({ aspectRatio: '16:9' });
   });
 
   it('collects images across multiple candidates (batch)', async () => {
