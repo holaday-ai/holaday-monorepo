@@ -1,4 +1,8 @@
 import { getAccessToken } from '@/lib/auth';
+import {
+  isFileUnavailable,
+  markFileUnavailableFromStatus,
+} from '@/lib/unavailable-file-registry';
 
 /**
  * Shared authed file download / fetch helpers. Centralised so the
@@ -45,6 +49,9 @@ interface BaseInput {
 export async function downloadFileAuthed(
   input: BaseInput,
 ): Promise<DownloadResult> {
+  if (isFileUnavailable(input.url)) {
+    return { ok: false, status: 410, message: 'known unavailable file' };
+  }
   const token = getAccessToken();
   try {
     const res = await fetch(input.url, {
@@ -52,6 +59,7 @@ export async function downloadFileAuthed(
       headers: token ? { authorization: `Bearer ${token}` } : {},
     });
     if (!res.ok) {
+      markFileUnavailableFromStatus(input.url, res.status);
       return {
         ok: false,
         status: res.status,
@@ -103,6 +111,9 @@ export function isUnavailableFileStatus(
 export async function fetchFileBlobAuthed(
   input: { url: string },
 ): Promise<FetchBlobResult> {
+  if (isFileUnavailable(input.url)) {
+    return { ok: false, status: 410, message: 'known unavailable file' };
+  }
   const token = getAccessToken();
   try {
     const res = await fetch(input.url, {
@@ -110,6 +121,7 @@ export async function fetchFileBlobAuthed(
       headers: token ? { authorization: `Bearer ${token}` } : {},
     });
     if (!res.ok) {
+      markFileUnavailableFromStatus(input.url, res.status);
       return {
         ok: false,
         status: res.status,

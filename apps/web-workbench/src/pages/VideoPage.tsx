@@ -62,6 +62,11 @@ import {
   type VideoType,
 } from '@/lib/video-history-row';
 import { normalizeTaskHubCursor } from '@/lib/task-hub-state';
+import {
+  isFileUnavailable,
+  markFileUnavailable,
+  useUnavailableFiles,
+} from '@/lib/unavailable-file-registry';
 import { ipRenderingHint } from '@/lib/video-ip-estimate';
 import { LazyPosterImg } from '@/components/LazyPosterImg';
 import { PageContainer, Section } from '@/pages/PageShell';
@@ -1922,6 +1927,7 @@ function CreativeHistory({
   const navigate = useNavigate();
   const toast = useToast();
   const togglePin = useTaskStore((state) => state.togglePin);
+  const unavailableFiles = useUnavailableFiles();
   const [{ rows, loading, error: loadError }, dispatchLoad] = React.useReducer(
     creativeHistoryLoadReducer,
     { rows: null, loading: false, error: false },
@@ -1934,9 +1940,6 @@ function CreativeHistory({
   );
   const [loadingMore, setLoadingMore] = React.useState(false);
   const [loadMoreError, setLoadMoreError] = React.useState(false);
-  const [unavailablePosterUrls, setUnavailablePosterUrls] = React.useState<
-    ReadonlySet<string>
-  >(() => new Set());
   const mountedRef = React.useRef(true);
   const loadRequestRef = React.useRef(0);
 
@@ -1991,14 +1994,30 @@ function CreativeHistory({
     return filterCreativeHistoryRows(rows, { mode, videoType, filter });
   }, [filter, mode, rows, videoType]);
 
-  const markPosterUnavailable = React.useCallback((posterUrl: string) => {
-    setUnavailablePosterUrls((current) => {
-      if (current.has(posterUrl)) return current;
-      const next = new Set(current);
-      next.add(posterUrl);
-      return next;
+  React.useEffect(() => {
+    if (!rows) return;
+    rows.forEach((row) => {
+      if (row.posterUnavailable && row.posterUrl) {
+        markFileUnavailable(row.posterUrl);
+      }
+      if (row.download?.unavailable) {
+        markFileUnavailable({
+          fileId: row.download.fileId,
+          url: row.download.downloadUrl,
+        });
+      }
     });
-  }, []);
+  }, [rows]);
+
+  const unavailablePosterUrls = React.useMemo(() => {
+    const urls = new Set<string>();
+    rows?.forEach((row) => {
+      if (row.posterUrl && isFileUnavailable(row.posterUrl, unavailableFiles)) {
+        urls.add(row.posterUrl);
+      }
+    });
+    return urls;
+  }, [rows, unavailableFiles]);
 
   const emptyCopy =
     filter === 'pinned'
@@ -2176,14 +2195,22 @@ function CreativeHistory({
             const download = row.download;
             if (!download) return null;
             const displayTitle = creativeHistoryDisplayTitle(row, mode);
+            const artifactUnavailable =
+              creativeHistoryArtifactAvailability(download) === 'unavailable' ||
+              isFileUnavailable(
+                { fileId: download.fileId, url: download.downloadUrl },
+                unavailableFiles,
+              );
+            const availabilityAwareDownload =
+              artifactUnavailable && !download.unavailable
+                ? { ...download, unavailable: true }
+                : download;
             const previewAvailability = creativeHistoryPreviewAvailability({
-              download,
+              download: availabilityAwareDownload,
               posterUrl: row.posterUrl,
               posterUnavailable: row.posterUnavailable,
               unavailablePosterUrls,
             });
-            const artifactUnavailable =
-              creativeHistoryArtifactAvailability(download) === 'unavailable';
             const artifactExpired = previewAvailability === 'expired';
             const previewUnavailable = previewAvailability === 'unavailable';
             return (
@@ -2234,7 +2261,6 @@ function CreativeHistory({
                     posterUrl={row.posterUrl}
                     alt={displayTitle}
                     className="h-full w-full rounded-[22px] object-cover"
-                    onUnavailable={() => markPosterUnavailable(row.posterUrl!)}
                   />
                 ) : (
                   <div className="flex h-full min-h-[210px] items-center justify-center text-[#ADADAD]">

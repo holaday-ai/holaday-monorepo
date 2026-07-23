@@ -8,6 +8,10 @@ import {
 } from '@/lib/download-file';
 import { formatFileSize } from '@/lib/file-size';
 import { filePreviewKind } from '@/lib/file-preview-kind';
+import {
+  markFileUnavailableFromStatus,
+  useFileUnavailable,
+} from '@/lib/unavailable-file-registry';
 import { useToast } from '@/components/ui/toast';
 import {
   Tooltip,
@@ -60,7 +64,17 @@ export function FilePreviewModal({
   const [downloading, setDownloading] = React.useState(false);
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
   const [resolvedMime, setResolvedMime] = React.useState<string>('');
-  const [unavailable, setUnavailable] = React.useState(false);
+  const fileReference = React.useMemo(
+    () =>
+      payload
+        ? {
+            fileId: payload.fileId,
+            url: payload.url,
+          }
+        : null,
+    [payload],
+  );
+  const unavailable = useFileUnavailable(fileReference);
 
   React.useEffect(() => {
     onUnavailableRef.current = onUnavailable;
@@ -85,13 +99,22 @@ export function FilePreviewModal({
       setErrorMessage(null);
       setResolvedMime('');
       setDownloading(false);
-      setUnavailable(false);
+      return;
+    }
+    if (unavailable) {
+      setLoading(false);
+      setErrorMessage(downloadFailureMessage(404));
+      setResolvedMime('');
+      setObjectUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return null;
+      });
+      setTextBody(null);
       return;
     }
     let cancelled = false;
     setLoading(true);
     setErrorMessage(null);
-    setUnavailable(false);
     setObjectUrl((prev) => {
       if (prev) URL.revokeObjectURL(prev);
       return null;
@@ -102,7 +125,7 @@ export function FilePreviewModal({
       if (cancelled) return;
       if (!res.ok || !res.blob) {
         if (isUnavailableFileStatus(res.status)) {
-          setUnavailable(true);
+          markFileUnavailableFromStatus(fileReference, res.status);
           onUnavailableRef.current?.(payload.fileId);
         }
         setErrorMessage(downloadFailureMessage(res.status));
@@ -142,7 +165,7 @@ export function FilePreviewModal({
     return () => {
       cancelled = true;
     };
-  }, [payload]);
+  }, [fileReference, payload, unavailable]);
 
   // Revoke any object URL we held when the modal closes / the file
   // changes. setObjectUrl(null) takes care of state — this just
@@ -175,7 +198,7 @@ export function FilePreviewModal({
       if (!mountedRef.current) return;
       if (!res.ok) {
         if (isUnavailableFileStatus(res.status)) {
-          setUnavailable(true);
+          markFileUnavailableFromStatus(fileReference, res.status);
           setErrorMessage(downloadFailureMessage(res.status));
           onUnavailableRef.current?.(payload.fileId);
         }

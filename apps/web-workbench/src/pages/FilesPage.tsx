@@ -36,7 +36,6 @@ import { useToast } from '@/components/ui/toast';
 import {
   downloadFailureMessage,
   downloadFileAuthed,
-  isUnavailableFileStatus,
 } from '@/lib/download-file';
 import { formatFileSize } from '@/lib/file-size';
 import {
@@ -48,6 +47,12 @@ import {
 import { filesEmptyCopy, type FileFilter } from '@/lib/files-empty-copy';
 import { pageActionError } from '@/lib/page-error-copy';
 import { trpc } from '@/lib/trpc';
+import {
+  isFileUnavailable,
+  markFileUnavailable,
+  markFileUnavailableFromStatus,
+  useUnavailableFiles,
+} from '@/lib/unavailable-file-registry';
 import { useDebouncedValue } from '@/lib/use-debounced-value';
 import { cn } from '@/lib/utils';
 import { PageContainer, PageHeader, PageLoadingPanel } from '@/pages/PageShell';
@@ -80,19 +85,8 @@ export function FilesPage(): JSX.Element {
   const [previewing, setPreviewing] = React.useState<FilePreviewPayload | null>(
     null,
   );
-  const [unavailableFileIds, setUnavailableFileIds] = React.useState<
-    ReadonlySet<string>
-  >(() => new Set());
+  const unavailableFiles = useUnavailableFiles();
   const debouncedQuery = useDebouncedValue(q.trim(), 250);
-
-  const markFileUnavailable = React.useCallback((fileId: string) => {
-    setUnavailableFileIds((current) => {
-      if (current.has(fileId)) return current;
-      const next = new Set(current);
-      next.add(fileId);
-      return next;
-    });
-  }, []);
 
   const refresh = React.useCallback(async () => {
     const requestId = ++requestIdRef.current;
@@ -126,7 +120,7 @@ export function FilesPage(): JSX.Element {
   }
 
   function onPreview(f: UiFile): void {
-    if (unavailableFileIds.has(f.fileId)) return;
+    if (isFileUnavailable({ fileId: f.fileId, url: downloadUrl(f.fileId) })) return;
     // In-product authed preview. The previous `window.open` path
     // opened a top-level GET that browsers refuse to send the Bearer
     // header on — users on hd-app would land on a 401 page from the
@@ -143,16 +137,15 @@ export function FilesPage(): JSX.Element {
   }
 
   async function onDownload(f: UiFile): Promise<void> {
-    if (unavailableFileIds.has(f.fileId)) return;
+    const reference = { fileId: f.fileId, url: downloadUrl(f.fileId) };
+    if (isFileUnavailable(reference)) return;
     const res = await downloadFileAuthed({
-      url: downloadUrl(f.fileId),
+      url: reference.url,
       filename: f.filename,
     });
     if (!mountedRef.current) return;
     if (!res.ok) {
-      if (isUnavailableFileStatus(res.status)) {
-        markFileUnavailable(f.fileId);
-      }
+      markFileUnavailableFromStatus(reference, res.status);
       toast.show(downloadFailureMessage(res.status), 'error');
     }
   }
@@ -164,6 +157,7 @@ export function FilesPage(): JSX.Element {
   }
 
   function onUseInNewTask(f: UiFile): void {
+    if (isFileUnavailable({ fileId: f.fileId, url: downloadUrl(f.fileId) })) return;
     navigate('/', {
       state: {
         attachFile: {
@@ -196,6 +190,7 @@ export function FilesPage(): JSX.Element {
     try {
       await trpc.files.delete.mutate({ fileId: f.fileId });
       if (!mountedRef.current) return;
+      markFileUnavailable(f.fileId);
       toast.show('文件已删除');
       await refresh();
     } catch (err) {
@@ -271,7 +266,10 @@ export function FilesPage(): JSX.Element {
                 <FileRow
                   key={f.fileId}
                   file={f}
-                  unavailable={unavailableFileIds.has(f.fileId)}
+                  unavailable={isFileUnavailable(
+                    { fileId: f.fileId, url: downloadUrl(f.fileId) },
+                    unavailableFiles,
+                  )}
                   onPreview={() => onPreview(f)}
                   onUseInNewTask={() => onUseInNewTask(f)}
                   onDownload={() => void onDownload(f)}
@@ -285,7 +283,6 @@ export function FilesPage(): JSX.Element {
         <FilePreviewModal
           payload={previewing}
           onClose={() => setPreviewing(null)}
-          onUnavailable={markFileUnavailable}
         />
         <ConfirmDialog
           open={pendingDelete !== null}

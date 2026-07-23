@@ -6,10 +6,16 @@ import {
   isUnavailableFileStatus,
   safeDownloadFilename,
 } from './download-file';
+import {
+  isFileUnavailable,
+  markFileUnavailable,
+  resetUnavailableFilesForTests,
+} from './unavailable-file-registry';
 
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  resetUnavailableFilesForTests();
 });
 
 describe('safeDownloadFilename', () => {
@@ -53,6 +59,34 @@ describe('isUnavailableFileStatus', () => {
 });
 
 describe('fetchFileBlobAuthed', () => {
+  it('remembers a definitive missing-file response for other consumers', async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 404 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await fetchFileBlobAuthed({
+      url: '/api/files/stale/download',
+    });
+
+    expect(result.status).toBe(404);
+    expect(isFileUnavailable('/files/stale/download')).toBe(true);
+  });
+
+  it('does not fetch a file already known to be unavailable', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    markFileUnavailable('/api/files/stale/download');
+
+    const result = await fetchFileBlobAuthed({
+      url: '/files/stale/download',
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      ok: false,
+      status: 410,
+    });
+  });
+
   it('returns a quiet failure when an inline preview fetch is blocked', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const fetchMock = vi.fn(async () => {
@@ -76,6 +110,23 @@ describe('fetchFileBlobAuthed', () => {
 });
 
 describe('downloadFileAuthed', () => {
+  it('does not fetch a file already known to be unavailable', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    markFileUnavailable('stale');
+
+    const result = await downloadFileAuthed({
+      url: '/api/files/stale/download',
+      filename: 'stale.png',
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      ok: false,
+      status: 410,
+    });
+  });
+
   it('returns a quiet failure when a user-triggered download fetch is blocked', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const fetchMock = vi.fn(async () => {

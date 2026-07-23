@@ -6,7 +6,6 @@ import {
   downloadFailureMessage,
   downloadFileAuthed,
   fetchFileBlobAuthed,
-  isUnavailableFileStatus,
 } from '@/lib/download-file';
 import {
   classifyDownloadFileKind,
@@ -16,6 +15,11 @@ import {
   type DownloadFileKind,
 } from '@/lib/file-download-card-copy';
 import { formatFileSize } from '@/lib/file-size';
+import {
+  markFileUnavailable,
+  markFileUnavailableFromStatus,
+  useFileUnavailable,
+} from '@/lib/unavailable-file-registry';
 import { cn } from '@/lib/utils';
 
 export interface FileDownloadPayload {
@@ -66,13 +70,19 @@ export function FileDownloadCard({
     'idle' | 'loading' | 'ready' | 'failed'
   >('idle');
   const knownUnavailable = initialUnavailable || payload.unavailable === true;
-  const [serverUnavailable, setServerUnavailable] =
-    React.useState(knownUnavailable);
+  const fileReference = React.useMemo(
+    () => ({
+      fileId: payload.fileId,
+      url: payload.downloadUrl,
+    }),
+    [payload.downloadUrl, payload.fileId],
+  );
+  const registryUnavailable = useFileUnavailable(fileReference);
   const kind = classifyDownloadFileKind(payload.filename);
   const kindLabel = downloadFileKindLabel(kind);
   const knownAvailability = downloadFileAvailability(payload.expiresAt);
   const expired = knownAvailability === 'expired';
-  const unavailable = serverUnavailable;
+  const unavailable = knownUnavailable || registryUnavailable;
   const inactive = expired || unavailable;
   const metaLabel = downloadFileMetaLabel({
     filename: payload.filename,
@@ -89,6 +99,9 @@ export function FileDownloadCard({
     };
   }, []);
   React.useEffect(() => {
+    if (knownUnavailable) markFileUnavailable(fileReference);
+  }, [fileReference, knownUnavailable]);
+  React.useEffect(() => {
     if (state !== 'failed') return;
     const t = setTimeout(() => {
       if (mountedRef.current) setState('idle');
@@ -102,11 +115,10 @@ export function FileDownloadCard({
   // (revoked on unmount / url change). Non-media kinds keep the
   // icon-only card; a fetch failure silently falls back to the icon.
   React.useEffect(() => {
-    setServerUnavailable(knownUnavailable);
     if (
       !showPreview ||
       knownAvailability === 'expired' ||
-      knownUnavailable
+      unavailable
     ) {
       setPreviewUrl(null);
       setPreviewState('idle');
@@ -154,7 +166,7 @@ export function FileDownloadCard({
           setPreviewUrl(res.previewUrl);
           setPreviewState('ready');
         } else {
-          if (isUnavailableFileStatus(res.status)) setServerUnavailable(true);
+          markFileUnavailableFromStatus(fileReference, res.status);
           setPreviewState('failed'); // fall back to the icon-only card
         }
       } catch {
@@ -169,10 +181,11 @@ export function FileDownloadCard({
     };
   }, [
     kind,
-    knownUnavailable,
+    fileReference,
     knownAvailability,
     payload.downloadUrl,
     showPreview,
+    unavailable,
   ]);
 
   const handleClick = async (): Promise<void> => {
@@ -186,7 +199,7 @@ export function FileDownloadCard({
     if (result.ok) {
       setState('idle');
     } else {
-      if (isUnavailableFileStatus(result.status)) setServerUnavailable(true);
+      markFileUnavailableFromStatus(fileReference, result.status);
       setState('failed');
       toast.show(downloadFailureMessage(result.status), 'error');
     }

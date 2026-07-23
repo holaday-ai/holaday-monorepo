@@ -5,6 +5,10 @@ import {
   fetchFileBlobAuthed,
   isUnavailableFileStatus,
 } from '@/lib/download-file';
+import {
+  markFileUnavailableFromStatus,
+  useFileUnavailable,
+} from '@/lib/unavailable-file-registry';
 import { cn } from '@/lib/utils';
 
 /**
@@ -30,6 +34,7 @@ export function LazyPosterImg({
 }): JSX.Element {
   const ref = React.useRef<HTMLDivElement>(null);
   const onUnavailableRef = React.useRef(onUnavailable);
+  const unavailable = useFileUnavailable(posterUrl);
   const [visible, setVisible] = React.useState(false);
   const [state, setState] = React.useState<'idle' | 'loading' | 'ready' | 'failed'>('idle');
   const [url, setUrl] = React.useState<string | null>(null);
@@ -64,6 +69,11 @@ export function LazyPosterImg({
   // setState inside can't re-trigger it → no render churn).
   React.useEffect(() => {
     if (!visible) return;
+    if (unavailable) {
+      setUrl(null);
+      setState('failed');
+      return;
+    }
     let cancelled = false;
     setState('loading');
     void fetchFileBlobAuthed({ url: posterUrl }).then((res) => {
@@ -78,6 +88,7 @@ export function LazyPosterImg({
         });
       } else {
         if (isUnavailableFileStatus(res.status)) {
+          markFileUnavailableFromStatus(posterUrl, res.status);
           onUnavailableRef.current?.(res.status);
         }
         setState('failed');
@@ -86,7 +97,7 @@ export function LazyPosterImg({
     return () => {
       cancelled = true;
     };
-  }, [visible, posterUrl]);
+  }, [posterUrl, unavailable, visible]);
 
   return (
     <div
