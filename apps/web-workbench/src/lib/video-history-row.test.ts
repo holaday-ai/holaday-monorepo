@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   asVideoType,
+  creativeHistoryArtifactAvailability,
   creativeHistoryDisplayTitle,
   creativeHistoryLoadReducer,
   filterCreativeHistoryRows,
@@ -13,6 +14,25 @@ import {
   toImageRow,
   toVideoRow,
 } from './video-history-row';
+
+describe('creative history artifact availability', () => {
+  it('distinguishes active, expired, and unknown history files', () => {
+    const now = Date.parse('2026-07-23T10:00:00.000Z');
+    expect(
+      creativeHistoryArtifactAvailability(
+        { expiresAt: '2026-07-23T10:00:01.000Z' },
+        now,
+      ),
+    ).toBe('available');
+    expect(
+      creativeHistoryArtifactAvailability(
+        { expiresAt: '2026-07-23T09:59:59.000Z' },
+        now,
+      ),
+    ).toBe('expired');
+    expect(creativeHistoryArtifactAvailability(undefined, now)).toBe('unknown');
+  });
+});
 
 describe('showImageOption — 图片版 gate (B2)', () => {
   it('hides 图片版 for ip_person only', () => {

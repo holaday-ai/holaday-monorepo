@@ -1,4 +1,8 @@
 import type { FileDownloadPayload } from '@/components/FileDownloadCard';
+import {
+  downloadFileAvailability,
+  type DownloadFileAvailability,
+} from '@/lib/file-download-card-copy';
 
 /**
  * Pure helpers for the /video 生成历史 list. Extracted from VideoPage so
@@ -41,6 +45,13 @@ export interface VideoRow {
   /** Server-persisted task pin state, reused by the creative history surface. */
   starred?: boolean;
   starredAt?: string | number | Date | null;
+}
+
+export function creativeHistoryArtifactAvailability(
+  download: Pick<FileDownloadPayload, 'expiresAt'> | undefined,
+  now = Date.now(),
+): DownloadFileAvailability {
+  return downloadFileAvailability(download?.expiresAt, now);
 }
 
 export interface CreativeHistoryLoadState {

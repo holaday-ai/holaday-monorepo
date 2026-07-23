@@ -47,7 +47,13 @@ const MEDIA_PREVIEW_TIMEOUT_MS = 8_000;
  *   - on failure: toast "下载失败或链接已过期" + brief error tone
  *   - on success: silent (browser's own download UI takes over)
  */
-export function FileDownloadCard({ payload }: { payload: FileDownloadPayload }): JSX.Element {
+export function FileDownloadCard({
+  payload,
+  showPreview = true,
+}: {
+  payload: FileDownloadPayload;
+  showPreview?: boolean;
+}): JSX.Element {
   const toast = useToast();
   const mountedRef = React.useRef(false);
   const [state, setState] = React.useState<'idle' | 'loading' | 'failed'>('idle');
@@ -89,7 +95,7 @@ export function FileDownloadCard({ payload }: { payload: FileDownloadPayload }):
   // icon-only card; a fetch failure silently falls back to the icon.
   React.useEffect(() => {
     setServerExpired(false);
-    if (knownAvailability === 'expired') {
+    if (!showPreview || knownAvailability === 'expired') {
       setPreviewUrl(null);
       setPreviewState('idle');
       return;
@@ -149,7 +155,7 @@ export function FileDownloadCard({ payload }: { payload: FileDownloadPayload }):
       setPreviewUrl(null);
       setPreviewState('idle');
     };
-  }, [kind, knownAvailability, payload.downloadUrl]);
+  }, [kind, knownAvailability, payload.downloadUrl, showPreview]);
 
   const handleClick = async (): Promise<void> => {
     if (state === 'loading' || expired) return;
@@ -184,11 +190,11 @@ export function FileDownloadCard({ payload }: { payload: FileDownloadPayload }):
             : 'border-[#DCDDDD] hover:border-[#ADADAD] hover:bg-[#EFEFEF]/35 dark:border-white/10 dark:hover:border-white/20 dark:hover:bg-white/[0.04]',
       )}
     >
-      {expired && (kind === 'image' || kind === 'video') ? (
+      {showPreview && expired && (kind === 'image' || kind === 'video') ? (
         <span className="flex h-40 w-full items-center justify-center rounded-[6px] border border-dashed border-[#DCDDDD] bg-[#EFEFEF]/35 px-4 text-center text-[11px] leading-5 text-muted-foreground dark:border-white/10 dark:bg-white/5">
           文件已过期，无法预览。
         </span>
-      ) : previewState === 'ready' && previewUrl ? (
+      ) : showPreview && previewState === 'ready' && previewUrl ? (
         kind === 'video' ? (
           <video
             src={previewUrl}
@@ -210,7 +216,7 @@ export function FileDownloadCard({ payload }: { payload: FileDownloadPayload }):
             className="max-h-64 w-full rounded-[6px] border border-[#DCDDDD] object-contain dark:border-white/10"
           />
         )
-      ) : previewState === 'loading' ? (
+      ) : showPreview && previewState === 'loading' ? (
         <span
           aria-label={kind === 'video' ? '视频加载中' : '图片加载中'}
           className="flex h-40 w-full animate-pulse items-center justify-center gap-2 rounded-[6px] border border-[#DCDDDD] bg-[#EFEFEF]/50 text-[11px] text-muted-foreground dark:border-white/10 dark:bg-white/5"
@@ -218,7 +224,7 @@ export function FileDownloadCard({ payload }: { payload: FileDownloadPayload }):
           <Loader2 className="h-4 w-4 animate-spin text-[#57479C]" />
           {kind === 'video' ? '视频加载中…' : '图片加载中…'}
         </span>
-      ) : previewState === 'failed' ? (
+      ) : showPreview && previewState === 'failed' ? (
         <span className="flex h-40 w-full items-center justify-center rounded-[6px] border border-dashed border-[#DCDDDD] bg-[#EFEFEF]/35 px-4 text-center text-[11px] leading-5 text-muted-foreground dark:border-white/10 dark:bg-white/5">
           {kind === 'video' ? '视频预览暂不可用，可尝试下载。' : '图片预览暂不可用，可尝试下载。'}
         </span>

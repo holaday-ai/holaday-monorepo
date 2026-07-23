@@ -46,6 +46,7 @@ import {
   videoTaskStatusLabel,
 } from '@/lib/video-task-selectors';
 import {
+  creativeHistoryArtifactAvailability,
   creativeHistoryDisplayTitle,
   creativeHistoryLoadReducer,
   filterCreativeHistoryRows,
@@ -2161,17 +2162,38 @@ function CreativeHistory({
             const download = row.download;
             if (!download) return null;
             const displayTitle = creativeHistoryDisplayTitle(row, mode);
+            const artifactExpired =
+              creativeHistoryArtifactAvailability(download) === 'expired';
             return (
             <article
               key={row.taskId}
-              className="grid gap-5 rounded-[26px] bg-white p-4 shadow-[0_16px_40px_rgba(89,87,87,0.06)] md:grid-cols-[minmax(260px,520px)_1fr]"
+              className={cn(
+                'grid gap-5 rounded-[26px] bg-white p-4 shadow-[0_16px_40px_rgba(89,87,87,0.06)]',
+                artifactExpired
+                  ? 'md:grid-cols-[minmax(180px,300px)_1fr]'
+                  : 'md:grid-cols-[minmax(260px,520px)_1fr]',
+              )}
             >
               <button
                 type="button"
                 onClick={() => navigate(`/${mode}?task=${encodeURIComponent(row.taskId)}`)}
-                className={cn('relative min-h-[210px] overflow-hidden rounded-[22px] text-left', softBg)}
+                className={cn(
+                  'relative overflow-hidden rounded-[22px] text-left',
+                  artifactExpired ? 'min-h-[160px]' : 'min-h-[210px]',
+                  softBg,
+                )}
               >
-                {row.posterUrl ? (
+                {artifactExpired ? (
+                  <div className="flex h-full min-h-[160px] flex-col items-center justify-center px-5 text-center text-[#8B93A6]">
+                    <Clock className="h-6 w-6" aria-hidden />
+                    <span className="mt-3 text-[13px] font-semibold text-[#595757]">
+                      文件已过期
+                    </span>
+                    <span className="mt-1 text-[11px] leading-5">
+                      历史记录仍保留，预览与下载已停止。
+                    </span>
+                  </div>
+                ) : row.posterUrl ? (
                   <LazyPosterImg
                     posterUrl={row.posterUrl}
                     alt={displayTitle}
@@ -2238,7 +2260,7 @@ function CreativeHistory({
                   </div>
                 </div>
                 <div className="mt-5">
-                  <FileDownloadCard payload={download} />
+                  <FileDownloadCard payload={download} showPreview={false} />
                 </div>
               </div>
             </article>
