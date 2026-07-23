@@ -180,6 +180,8 @@ export interface UiTerminalAttachment {
   mimetype: string;
   sizeBytes: number;
   expiresAt: string;
+  /** Server confirmed that the file row or stored bytes are no longer usable. */
+  availability?: 'unavailable';
   /**
    * 'screenshot' (L1 auto-save) or 'pdf' (L2 save_page_as_pdf).
    * Other strings tolerated — the renderer falls through to a

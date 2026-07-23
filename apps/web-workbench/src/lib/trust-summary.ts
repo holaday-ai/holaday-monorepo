@@ -72,7 +72,7 @@ export function buildTrustSummary(input: TrustSummaryInput): TrustSummaryModel {
   const sourceCount = countVisibleSourceUrls(input.resultText, input.currentUrl);
   const hasFinalUrl = hasHttpUrl(input.currentUrl);
   const hasScreenshot = Boolean(input.finalScreenshot);
-  const attachmentCount = input.attachments?.length ?? 0;
+  const attachmentCount = countUsableAttachments(input.attachments);
   const hardFailure = input.status === 'failed' || input.failureLevel === 'hard_fail';
   const awaitingUser = input.status === 'awaiting_user';
   const flagged =
@@ -234,7 +234,17 @@ export function hasTrustEvidence(input: TrustEvidenceInput): boolean {
     countVisibleSourceUrls(input.resultText, input.currentUrl) > 0 ||
     hasHttpUrl(input.currentUrl) ||
     Boolean(input.finalScreenshot) ||
-    (input.attachments?.length ?? 0) > 0
+    countUsableAttachments(input.attachments) > 0
+  );
+}
+
+function countUsableAttachments(
+  attachments: UiTask['attachments'] | undefined,
+): number {
+  return (
+    attachments?.filter(
+      (attachment) => attachment.availability !== 'unavailable',
+    ).length ?? 0
   );
 }
 

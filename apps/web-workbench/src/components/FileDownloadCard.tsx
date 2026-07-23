@@ -24,6 +24,7 @@ export interface FileDownloadPayload {
   size: number;
   downloadUrl: string;
   expiresAt?: string;
+  unavailable?: boolean;
 }
 
 const MEDIA_PREVIEW_TIMEOUT_MS = 8_000;
@@ -64,8 +65,9 @@ export function FileDownloadCard({
   const [previewState, setPreviewState] = React.useState<
     'idle' | 'loading' | 'ready' | 'failed'
   >('idle');
+  const knownUnavailable = initialUnavailable || payload.unavailable === true;
   const [serverUnavailable, setServerUnavailable] =
-    React.useState(initialUnavailable);
+    React.useState(knownUnavailable);
   const kind = classifyDownloadFileKind(payload.filename);
   const kindLabel = downloadFileKindLabel(kind);
   const knownAvailability = downloadFileAvailability(payload.expiresAt);
@@ -100,11 +102,11 @@ export function FileDownloadCard({
   // (revoked on unmount / url change). Non-media kinds keep the
   // icon-only card; a fetch failure silently falls back to the icon.
   React.useEffect(() => {
-    setServerUnavailable(initialUnavailable);
+    setServerUnavailable(knownUnavailable);
     if (
       !showPreview ||
       knownAvailability === 'expired' ||
-      initialUnavailable
+      knownUnavailable
     ) {
       setPreviewUrl(null);
       setPreviewState('idle');
@@ -166,8 +168,8 @@ export function FileDownloadCard({
       setPreviewState('idle');
     };
   }, [
-    initialUnavailable,
     kind,
+    knownUnavailable,
     knownAvailability,
     payload.downloadUrl,
     showPreview,

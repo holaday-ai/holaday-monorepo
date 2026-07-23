@@ -2481,14 +2481,18 @@ function TerminalSummary({
   const safeCurrentUrl = safeExternalHttpHref(currentUrl);
   const hasRealUrl = safeCurrentUrl !== null;
   const endedOnBrowserErrorPage = isBrowserErrorUrl(currentUrl);
+  const usableAttachmentCount =
+    attachments?.filter(
+      (attachment) => attachment.availability !== 'unavailable',
+    ).length ?? 0;
   const fallbackPlainText = React.useMemo(
     () =>
       terminalArtifactFallbackText({
         text: displayText,
-        attachmentCount: attachments?.length ?? 0,
+        attachmentCount: usableAttachmentCount,
         finalUrl: safeCurrentUrl,
       }),
-    [attachments?.length, displayText, safeCurrentUrl],
+    [displayText, safeCurrentUrl, usableAttachmentCount],
   );
   // Strip markdown syntax for the plain-text Copy. Keeps `[label](url)` →
   // `label`, drops `**bold**` markers, code fences, list bullets — the
@@ -2614,7 +2618,7 @@ function TerminalSummary({
           displayText,
           revealedText: sanitized,
           intent,
-          attachmentCount: attachments?.length ?? 0,
+          attachmentCount: usableAttachmentCount,
         })) {
           const copy = terminalInsufficientCopy();
           return (
@@ -2714,7 +2718,11 @@ function TerminalSummary({
               size: a.sizeBytes,
               downloadUrl: a.downloadUrl,
               expiresAt: a.expiresAt,
+              unavailable: a.availability === 'unavailable',
             };
+            if (payload.unavailable) {
+              return <FileDownloadCard key={a.fileId} payload={payload} />;
+            }
             // Phase 4 R2 — screenshots get a thumbnail preview; other
             // kinds (PDF, generic file) keep the icon-only card.
             if (a.kind === 'screenshot' || a.mimetype.startsWith('image/')) {

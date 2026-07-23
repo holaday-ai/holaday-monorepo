@@ -2675,6 +2675,9 @@ function parseUiAttachments(arr: unknown): UiTask['attachments'] | undefined {
         sizeBytes: e.sizeBytes,
         expiresAt: e.expiresAt,
         kind: e.kind,
+        ...(e.availability === 'unavailable'
+          ? { availability: 'unavailable' as const }
+          : {}),
       };
     })
     .filter((v): v is NonNullable<typeof v> => v !== null);

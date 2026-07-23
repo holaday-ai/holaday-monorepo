@@ -12,7 +12,21 @@ import {
   type PlanId,
 } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
-import { and, asc, desc, eq, gte, inArray, like, lt, lte, or, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  gte,
+  inArray,
+  isNull,
+  like,
+  lt,
+  lte,
+  or,
+  sql,
+} from 'drizzle-orm';
 import { z } from 'zod';
 import type { SkillCatalogueEntry } from '../../agent/planner.js';
 import {
@@ -104,6 +118,7 @@ import {
   resolveFollowUpExecutionMode,
 } from './task-followup-copy.js';
 import { markQueuedTaskExecutingOrThrow } from './task-queue-start.js';
+import { annotateTaskResultAttachmentAvailability } from './task-result-attachment-availability.js';
 import {
   captureBrowserFinalState as captureFinalState,
   persistAndBroadcastBrowserDispatchFailure,
@@ -138,6 +153,7 @@ import {
 import { projects } from '../../db/schema/projects.js';
 import { skills } from '../../db/schema/skills.js';
 import { taskEvents } from '../../db/schema/task-events.js';
+import { taskFiles } from '../../db/schema/task-files.js';
 import { taskSteps } from '../../db/schema/task-steps.js';
 import { tasks as tasksTable } from '../../db/schema/tasks.js';
 import { readAffectedRows } from '../../db/mysql-result.js';
@@ -7145,6 +7161,39 @@ export const tasksRouter = router({
       const resultByTaskId = new Map(
         resultRows.map((row) => [row.id, row.result] as const),
       );
+      const attachmentNow = new Date();
+      const availableAttachmentRows =
+        rows.length > 0
+          ? await ctx.db
+              .select({
+                taskId: taskFiles.taskId,
+                externalId: taskFiles.externalId,
+              })
+              .from(taskFiles)
+              .where(
+                and(
+                  eq(taskFiles.userId, userRow.id),
+                  inArray(
+                    taskFiles.taskId,
+                    rows.map((row) => row.id),
+                  ),
+                  eq(taskFiles.kind, 'output'),
+                  eq(taskFiles.status, 'active'),
+                  or(
+                    isNull(taskFiles.expiresAt),
+                    gt(taskFiles.expiresAt, attachmentNow),
+                  ),
+                ),
+              )
+          : [];
+      const availableAttachmentIdsByTaskId = new Map<number, Set<string>>();
+      for (const file of availableAttachmentRows) {
+        if (file.taskId == null) continue;
+        const ids =
+          availableAttachmentIdsByTaskId.get(file.taskId) ?? new Set<string>();
+        ids.add(file.externalId);
+        availableAttachmentIdsByTaskId.set(file.taskId, ids);
+      }
 
       // Resolve project external ids in one round-trip — mapping
       // bigint project_id back to the public prj_… string the SPA
@@ -7178,7 +7227,11 @@ export const tasksRouter = router({
           // ~8MB. tasks.detail still ships it for the BrowserPanel
           // evidence view; the sidebar doesn't render screenshots.
           result: stripFinalScreenshot(
-            normalizeOutput(resultByTaskId.get(r.id)),
+            annotateTaskResultAttachmentAvailability(
+              normalizeOutput(resultByTaskId.get(r.id)),
+              availableAttachmentIdsByTaskId.get(r.id) ?? new Set<string>(),
+              attachmentNow,
+            ),
           ),
           starred: Boolean(r.starred),
           starredAt: r.starredAt,
@@ -7257,6 +7310,25 @@ export const tasksRouter = router({
           .limit(1);
         return proj?.externalId ?? null;
       })();
+      const attachmentNow = new Date();
+      const availableAttachmentRows = await ctx.db
+        .select({ externalId: taskFiles.externalId })
+        .from(taskFiles)
+        .where(
+          and(
+            eq(taskFiles.userId, userRow.id),
+            eq(taskFiles.taskId, taskRow.id),
+            eq(taskFiles.kind, 'output'),
+            eq(taskFiles.status, 'active'),
+            or(
+              isNull(taskFiles.expiresAt),
+              gt(taskFiles.expiresAt, attachmentNow),
+            ),
+          ),
+        );
+      const availableAttachmentIds = new Set(
+        availableAttachmentRows.map((file) => file.externalId),
+      );
       return {
         taskId: taskRow.externalId,
         intent: taskRow.intent,
@@ -7281,7 +7353,11 @@ export const tasksRouter = router({
         starred: Boolean(taskRow.starred),
         starredAt: taskRow.starredAt,
         projectId: projectExternalId,
-        result: normalizeOutput(taskRow.result),
+        result: annotateTaskResultAttachmentAvailability(
+          normalizeOutput(taskRow.result),
+          availableAttachmentIds,
+          attachmentNow,
+        ),
         // Phase 13 Dim 1 — surface plan body so a re-opened tab
         // re-renders the PlanCard from persisted state instead of
         // waiting for a (now-impossible) WS replay.

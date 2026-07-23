@@ -345,6 +345,7 @@ describe('toUiTask', () => {
               sizeBytes: 418_513,
               expiresAt: '2026-07-02T00:00:00.000Z',
               kind: 'output',
+              availability: 'unavailable',
             },
             {
               fileId: 'bad_file',
@@ -377,6 +378,7 @@ describe('toUiTask', () => {
         sizeBytes: 418_513,
         expiresAt: '2026-07-02T00:00:00.000Z',
         kind: 'output',
+        availability: 'unavailable',
       },
     ]);
   });

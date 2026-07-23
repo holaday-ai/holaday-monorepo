@@ -28,6 +28,7 @@ export interface VideoResultMeta {
     sizeBytes?: number;
     posterUrl?: string;
     expiresAt?: string;
+    availability?: 'unavailable';
   }>;
 }
 
@@ -48,9 +49,10 @@ export interface VideoRow {
 }
 
 export function creativeHistoryArtifactAvailability(
-  download: Pick<FileDownloadPayload, 'expiresAt'> | undefined,
+  download: Pick<FileDownloadPayload, 'expiresAt' | 'unavailable'> | undefined,
   now = Date.now(),
 ): DownloadFileAvailability {
+  if (download?.unavailable === true) return 'unavailable';
   return downloadFileAvailability(download?.expiresAt, now);
 }
 
@@ -61,17 +63,21 @@ export type CreativeHistoryPreviewAvailability =
   | 'missing';
 
 export function creativeHistoryPreviewAvailability(options: {
-  download: Pick<FileDownloadPayload, 'expiresAt'> | undefined;
+  download:
+    | Pick<FileDownloadPayload, 'expiresAt' | 'unavailable'>
+    | undefined;
   posterUrl?: string;
   unavailablePosterUrls: ReadonlySet<string>;
   now?: number;
 }): CreativeHistoryPreviewAvailability {
-  if (
-    creativeHistoryArtifactAvailability(options.download, options.now) ===
-    'expired'
-  ) {
+  const artifactAvailability = creativeHistoryArtifactAvailability(
+    options.download,
+    options.now,
+  );
+  if (artifactAvailability === 'expired') {
     return 'expired';
   }
+  if (artifactAvailability === 'unavailable') return 'unavailable';
   if (!options.posterUrl) return 'missing';
   return options.unavailablePosterUrls.has(options.posterUrl)
     ? 'unavailable'
@@ -267,6 +273,7 @@ export function toVideoRow(raw: unknown): VideoRow | null {
       filename: att.filename,
       size: att.sizeBytes,
       ...(typeof att.expiresAt === 'string' ? { expiresAt: att.expiresAt } : {}),
+      ...(att.availability === 'unavailable' ? { unavailable: true } : {}),
     },
     ...(videoType ? { videoType } : {}),
     ...(posterUrl ? { posterUrl } : {}),
@@ -312,6 +319,7 @@ export function toImageRow(raw: unknown): VideoRow | null {
       filename: att.filename,
       size: att.sizeBytes,
       ...(typeof att.expiresAt === 'string' ? { expiresAt: att.expiresAt } : {}),
+      ...(att.availability === 'unavailable' ? { unavailable: true } : {}),
     },
     posterUrl: downloadUrl,
     starred: r.starred === true,

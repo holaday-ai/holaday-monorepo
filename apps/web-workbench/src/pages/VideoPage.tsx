@@ -48,6 +48,7 @@ import {
 } from '@/lib/video-task-selectors';
 import {
   creativeHistoryDisplayTitle,
+  creativeHistoryArtifactAvailability,
   creativeHistoryLoadReducer,
   creativeHistoryPreviewAvailability,
   filterCreativeHistoryRows,
@@ -2180,6 +2181,8 @@ function CreativeHistory({
               posterUrl: row.posterUrl,
               unavailablePosterUrls,
             });
+            const artifactUnavailable =
+              creativeHistoryArtifactAvailability(download) === 'unavailable';
             const artifactExpired = previewAvailability === 'expired';
             const previewUnavailable = previewAvailability === 'unavailable';
             return (
@@ -2217,10 +2220,12 @@ function CreativeHistory({
                   <div className="flex h-full min-h-[160px] flex-col items-center justify-center px-5 text-center text-[#8B93A6]">
                     <CircleSlash className="h-6 w-6" aria-hidden />
                     <span className="mt-3 text-[13px] font-semibold text-[#595757]">
-                      预览已失效
+                      {artifactUnavailable ? '文件已失效' : '预览已失效'}
                     </span>
                     <span className="mt-1 text-[11px] leading-5">
-                      成片记录仍保留，可在右侧尝试下载。
+                      {artifactUnavailable
+                        ? '历史记录仍保留，预览与下载已停止。'
+                        : '成片记录仍保留，可在右侧尝试下载。'}
                     </span>
                   </div>
                 ) : row.posterUrl ? (

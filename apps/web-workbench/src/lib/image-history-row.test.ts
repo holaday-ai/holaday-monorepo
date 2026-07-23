@@ -49,6 +49,18 @@ describe('toImageHistoryRow', () => {
     expect(row?.download.filename).toBe('holaday-image.jpg');
   });
 
+  it('preserves server-confirmed unavailability for the history card', () => {
+    const row = toImageHistoryRow(
+      task({
+        attachments: [
+          { ...imageAttachment, availability: 'unavailable' },
+        ],
+      }),
+    );
+
+    expect(row?.download.unavailable).toBe(true);
+  });
+
   it('drops failed, running, non-image, and missing-artifact rows', () => {
     expect(toImageHistoryRow(task({ status: 'failed' }))).toBeNull();
     expect(toImageHistoryRow(task({ status: 'executing' }))).toBeNull();

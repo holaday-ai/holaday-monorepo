@@ -97,6 +97,30 @@ describe('trust summary', () => {
     );
   });
 
+  it('does not count a server-confirmed unavailable file as downloadable evidence', () => {
+    const summary = buildTrustSummary({
+      status: 'completed',
+      resultText: '任务已完成，但产物存储已失效。',
+      attachments: [
+        {
+          fileId: 'file_missing',
+          downloadUrl: '/api/files/file_missing/download',
+          filename: 'result.pdf',
+          mimetype: 'application/pdf',
+          sizeBytes: 1200,
+          expiresAt: '2026-07-24T00:00:00Z',
+          availability: 'unavailable',
+          kind: 'pdf',
+        },
+      ],
+    });
+
+    expect(summary.rows.find((row) => row.label === '产物文件')).toBeUndefined();
+    expect(
+      summary.ledger.find((item) => item.label === '产物文件'),
+    ).toBeUndefined();
+  });
+
   it('does not frame awaiting-user states as result review', () => {
     const summary = buildTrustSummary({
       status: 'awaiting_user',
