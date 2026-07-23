@@ -55,6 +55,7 @@ import {
   downloadFailureMessage,
   downloadFileAuthed,
   fetchFileBlobAuthed,
+  isUnavailableFileStatus,
 } from '@/lib/download-file';
 import { taskActionError } from '@/lib/error-copy';
 import { EXPERT_RESULT_LABELS, expertResultUsageCopy } from '@/lib/expert-result-usage';
@@ -2039,12 +2040,16 @@ function ScreenshotThumbnailCard({
   const mountedRef = useMountedRef();
   const [previewUrl, setPreviewUrl] = React.useState<string | null>(null);
   const [failed, setFailed] = React.useState(false);
+  const [unavailable, setUnavailable] = React.useState(false);
   const [downloadState, setDownloadState] = React.useState<
     'idle' | 'loading' | 'failed'
   >('idle');
   React.useEffect(() => {
     let cancelled = false;
     let createdUrl: string | null = null;
+    setPreviewUrl(null);
+    setFailed(false);
+    setUnavailable(false);
     void fetchFileBlobAuthed({ url: payload.downloadUrl }).then((res) => {
       if (cancelled) return;
       if (!res.ok || !res.blob) {
@@ -2057,6 +2062,7 @@ function ScreenshotThumbnailCard({
           message: res.message,
           url: payload.downloadUrl,
         });
+        setUnavailable(isUnavailableFileStatus(res.status));
         setFailed(true);
         return;
       }
@@ -2088,7 +2094,12 @@ function ScreenshotThumbnailCard({
   // Auth fetch failed — fall back to the original card so the user
   // can still try a manual click (which retries the fetch).
   if (failed) {
-    return <FileDownloadCard payload={payload} />;
+    return (
+      <FileDownloadCard
+        payload={payload}
+        initialUnavailable={unavailable}
+      />
+    );
   }
   const handleClick = async (): Promise<void> => {
     if (downloadState === 'loading') return;

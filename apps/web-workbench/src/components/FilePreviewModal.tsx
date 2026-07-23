@@ -1,9 +1,10 @@
-import { Download, ExternalLink, FileText, Loader2, X } from 'lucide-react';
+import { CircleSlash, Download, ExternalLink, FileText, Loader2, X } from 'lucide-react';
 import * as React from 'react';
 import {
   downloadFailureMessage,
   downloadFileAuthed,
   fetchFileBlobAuthed,
+  isUnavailableFileStatus,
 } from '@/lib/download-file';
 import { formatFileSize } from '@/lib/file-size';
 import { filePreviewKind } from '@/lib/file-preview-kind';
@@ -29,6 +30,7 @@ interface Props {
   /** When `payload` is non-null the modal is visible. */
   payload: FilePreviewPayload | null;
   onClose(): void;
+  onUnavailable?(fileId: string): void;
 }
 
 /**
@@ -44,15 +46,25 @@ interface Props {
  * path failed because top-level navigation can't send the Bearer
  * header — the user would land on a 401.
  */
-export function FilePreviewModal({ payload, onClose }: Props): JSX.Element | null {
+export function FilePreviewModal({
+  payload,
+  onClose,
+  onUnavailable,
+}: Props): JSX.Element | null {
   const toast = useToast();
   const mountedRef = React.useRef(false);
+  const onUnavailableRef = React.useRef(onUnavailable);
   const [objectUrl, setObjectUrl] = React.useState<string | null>(null);
   const [textBody, setTextBody] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [downloading, setDownloading] = React.useState(false);
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
   const [resolvedMime, setResolvedMime] = React.useState<string>('');
+  const [unavailable, setUnavailable] = React.useState(false);
+
+  React.useEffect(() => {
+    onUnavailableRef.current = onUnavailable;
+  }, [onUnavailable]);
 
   React.useEffect(() => {
     mountedRef.current = true;
@@ -73,11 +85,13 @@ export function FilePreviewModal({ payload, onClose }: Props): JSX.Element | nul
       setErrorMessage(null);
       setResolvedMime('');
       setDownloading(false);
+      setUnavailable(false);
       return;
     }
     let cancelled = false;
     setLoading(true);
     setErrorMessage(null);
+    setUnavailable(false);
     setObjectUrl((prev) => {
       if (prev) URL.revokeObjectURL(prev);
       return null;
@@ -87,6 +101,10 @@ export function FilePreviewModal({ payload, onClose }: Props): JSX.Element | nul
     void fetchFileBlobAuthed({ url: payload.url }).then(async (res) => {
       if (cancelled) return;
       if (!res.ok || !res.blob) {
+        if (isUnavailableFileStatus(res.status)) {
+          setUnavailable(true);
+          onUnavailableRef.current?.(payload.fileId);
+        }
         setErrorMessage(downloadFailureMessage(res.status));
         setLoading(false);
         return;
@@ -147,7 +165,7 @@ export function FilePreviewModal({ payload, onClose }: Props): JSX.Element | nul
   if (!payload) return null;
 
   const handleDownload = async (): Promise<void> => {
-    if (downloading) return;
+    if (downloading || unavailable) return;
     setDownloading(true);
     try {
       const res = await downloadFileAuthed({
@@ -156,6 +174,11 @@ export function FilePreviewModal({ payload, onClose }: Props): JSX.Element | nul
       });
       if (!mountedRef.current) return;
       if (!res.ok) {
+        if (isUnavailableFileStatus(res.status)) {
+          setUnavailable(true);
+          setErrorMessage(downloadFailureMessage(res.status));
+          onUnavailableRef.current?.(payload.fileId);
+        }
         toast.show(downloadFailureMessage(res.status), 'error');
       }
     } finally {
@@ -189,13 +212,17 @@ export function FilePreviewModal({ payload, onClose }: Props): JSX.Element | nul
                 {formatFileSize(payload.sizeBytes)} · {mime || '未知类型'}
               </div>
             </div>
-            <IconTooltip label={downloading ? '下载中' : '下载'}>
+            <IconTooltip
+              label={unavailable ? '文件已失效' : downloading ? '下载中' : '下载'}
+            >
               <button
                 type="button"
                 onClick={() => void handleDownload()}
-                disabled={downloading}
-                aria-label="下载到本地"
-                title={downloading ? '下载中' : '下载'}
+                disabled={downloading || unavailable}
+                aria-label={unavailable ? '文件已失效' : '下载到本地'}
+                title={
+                  unavailable ? '文件已失效' : downloading ? '下载中' : '下载'
+                }
                 className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-muted-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/55 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/10 dark:bg-card dark:hover:bg-white/10"
               >
                 {downloading ? (
@@ -223,9 +250,19 @@ export function FilePreviewModal({ payload, onClose }: Props): JSX.Element | nul
             )}
             {!loading && errorMessage && (
               <div className="flex flex-col items-center gap-2 px-6 text-center text-sm text-muted-foreground">
-                <ExternalLink className="h-8 w-8 text-[#EA1F59]" />
-                <div className="font-medium text-foreground/85">无法加载预览</div>
-                <div className="text-xs">{errorMessage}</div>
+                {unavailable ? (
+                  <CircleSlash className="h-8 w-8 text-[#8B93A6]" />
+                ) : (
+                  <ExternalLink className="h-8 w-8 text-[#EA1F59]" />
+                )}
+                <div className="font-medium text-foreground/85">
+                  {unavailable ? '文件已失效' : '无法加载预览'}
+                </div>
+                <div className="max-w-sm text-xs">
+                  {unavailable
+                    ? '文件记录仍保留，但内容已无法预览、下载或用于新任务。'
+                    : errorMessage}
+                </div>
               </div>
             )}
             {!loading && !errorMessage && objectUrl && kind === 'image' && (

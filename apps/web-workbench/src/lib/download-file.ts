@@ -88,6 +88,12 @@ export interface FetchBlobResult {
   message: string;
 }
 
+export function isUnavailableFileStatus(
+  status: number | null,
+): status is 404 | 410 {
+  return status === 404 || status === 410;
+}
+
 /**
  * Authed fetch → blob. No anchor click. Used by the in-product
  * preview modal to render the response inline (image / pdf / etc.).
@@ -143,8 +149,8 @@ export function downloadFailureMessage(status: number | null): string {
   if (status === 401 || status === 403) {
     return '下载失败，请刷新页面后重试。';
   }
-  if (status === 404 || status === 410) {
-    return '链接已过期，产出文件保留 24 小时。';
+  if (isUnavailableFileStatus(status)) {
+    return '文件已失效，无法下载。';
   }
   return '下载失败，或链接已过期。';
 }

@@ -1,6 +1,10 @@
 import { Film } from 'lucide-react';
 import * as React from 'react';
-import { blobToDataUrl, fetchFileBlobAuthed } from '@/lib/download-file';
+import {
+  blobToDataUrl,
+  fetchFileBlobAuthed,
+  isUnavailableFileStatus,
+} from '@/lib/download-file';
 import { cn } from '@/lib/utils';
 
 /**
@@ -73,7 +77,7 @@ export function LazyPosterImg({
           if (!cancelled) setState('failed');
         });
       } else {
-        if (res.status === 404 || res.status === 410) {
+        if (isUnavailableFileStatus(res.status)) {
           onUnavailableRef.current?.(res.status);
         }
         setState('failed');

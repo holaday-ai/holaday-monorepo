@@ -1,4 +1,4 @@
-import { Clock3, Download, File, FileSpreadsheet, FileText, Film, Image as ImageIcon, Loader2, Presentation } from 'lucide-react';
+import { CircleSlash, Clock3, Download, File, FileSpreadsheet, FileText, Film, Image as ImageIcon, Loader2, Presentation } from 'lucide-react';
 import * as React from 'react';
 import { useToast } from '@/components/ui/toast';
 import {
@@ -6,6 +6,7 @@ import {
   downloadFailureMessage,
   downloadFileAuthed,
   fetchFileBlobAuthed,
+  isUnavailableFileStatus,
 } from '@/lib/download-file';
 import {
   classifyDownloadFileKind,
@@ -41,7 +42,7 @@ const MEDIA_PREVIEW_TIMEOUT_MS = 8_000;
  *
  * Surface loading, expiry, and failure states. Known-expired files
  * never issue a preview or download request; unexpected 404/410
- * responses promote an unknown file to the same honest expired state.
+ * responses promote an unknown file to an honest unavailable state.
  *   - while fetching: spinner + dim
  *   - after expiry: disabled action + explicit expiry copy
  *   - on failure: toast "下载失败或链接已过期" + brief error tone
@@ -50,9 +51,11 @@ const MEDIA_PREVIEW_TIMEOUT_MS = 8_000;
 export function FileDownloadCard({
   payload,
   showPreview = true,
+  initialUnavailable = false,
 }: {
   payload: FileDownloadPayload;
   showPreview?: boolean;
+  initialUnavailable?: boolean;
 }): JSX.Element {
   const toast = useToast();
   const mountedRef = React.useRef(false);
@@ -61,16 +64,19 @@ export function FileDownloadCard({
   const [previewState, setPreviewState] = React.useState<
     'idle' | 'loading' | 'ready' | 'failed'
   >('idle');
-  const [serverExpired, setServerExpired] = React.useState(false);
+  const [serverUnavailable, setServerUnavailable] =
+    React.useState(initialUnavailable);
   const kind = classifyDownloadFileKind(payload.filename);
   const kindLabel = downloadFileKindLabel(kind);
   const knownAvailability = downloadFileAvailability(payload.expiresAt);
-  const expired = knownAvailability === 'expired' || serverExpired;
+  const expired = knownAvailability === 'expired';
+  const unavailable = serverUnavailable;
+  const inactive = expired || unavailable;
   const metaLabel = downloadFileMetaLabel({
     filename: payload.filename,
     formattedSize: formatFileSize(payload.size),
     expiresAt: payload.expiresAt,
-    ...(serverExpired ? { availability: 'expired' as const } : {}),
+    ...(unavailable ? { availability: 'unavailable' as const } : {}),
   });
   // Reset transient 'failed' state ~3s after firing so a retry click
   // looks fresh instead of stuck red.
@@ -94,8 +100,12 @@ export function FileDownloadCard({
   // (revoked on unmount / url change). Non-media kinds keep the
   // icon-only card; a fetch failure silently falls back to the icon.
   React.useEffect(() => {
-    setServerExpired(false);
-    if (!showPreview || knownAvailability === 'expired') {
+    setServerUnavailable(initialUnavailable);
+    if (
+      !showPreview ||
+      knownAvailability === 'expired' ||
+      initialUnavailable
+    ) {
       setPreviewUrl(null);
       setPreviewState('idle');
       return;
@@ -142,7 +152,7 @@ export function FileDownloadCard({
           setPreviewUrl(res.previewUrl);
           setPreviewState('ready');
         } else {
-          if (res.status === 404 || res.status === 410) setServerExpired(true);
+          if (isUnavailableFileStatus(res.status)) setServerUnavailable(true);
           setPreviewState('failed'); // fall back to the icon-only card
         }
       } catch {
@@ -155,10 +165,16 @@ export function FileDownloadCard({
       setPreviewUrl(null);
       setPreviewState('idle');
     };
-  }, [kind, knownAvailability, payload.downloadUrl, showPreview]);
+  }, [
+    initialUnavailable,
+    kind,
+    knownAvailability,
+    payload.downloadUrl,
+    showPreview,
+  ]);
 
   const handleClick = async (): Promise<void> => {
-    if (state === 'loading' || expired) return;
+    if (state === 'loading' || inactive) return;
     setState('loading');
     const result = await downloadFileAuthed({
       url: payload.downloadUrl,
@@ -168,20 +184,20 @@ export function FileDownloadCard({
     if (result.ok) {
       setState('idle');
     } else {
-      if (result.status === 404 || result.status === 410) setServerExpired(true);
+      if (isUnavailableFileStatus(result.status)) setServerUnavailable(true);
       setState('failed');
       toast.show(downloadFailureMessage(result.status), 'error');
     }
   };
-  const actionLabel = expired
-    ? `${kindLabel}已过期 ${payload.filename}`
+  const actionLabel = inactive
+    ? `${kindLabel}${expired ? '已过期' : '已失效'} ${payload.filename}`
     : `下载${kindLabel} ${payload.filename}`;
 
   return (
     <div
       className={cn(
         'group my-2 flex w-full max-w-md flex-col gap-2 rounded-[8px] border bg-white px-3 py-3 text-left text-sm shadow-[0_1px_3px_rgba(17,24,39,0.05)] transition-colors dark:bg-card/85 sm:px-4',
-        expired
+        inactive
           ? 'border-[#DCDDDD] bg-[#EFEFEF]/35'
           : state === 'failed'
           ? 'border-[#EA1F59]/40 bg-[#EA1F59]/5'
@@ -190,9 +206,9 @@ export function FileDownloadCard({
             : 'border-[#DCDDDD] hover:border-[#ADADAD] hover:bg-[#EFEFEF]/35 dark:border-white/10 dark:hover:border-white/20 dark:hover:bg-white/[0.04]',
       )}
     >
-      {showPreview && expired && (kind === 'image' || kind === 'video') ? (
+      {showPreview && inactive && (kind === 'image' || kind === 'video') ? (
         <span className="flex h-40 w-full items-center justify-center rounded-[6px] border border-dashed border-[#DCDDDD] bg-[#EFEFEF]/35 px-4 text-center text-[11px] leading-5 text-muted-foreground dark:border-white/10 dark:bg-white/5">
-          文件已过期，无法预览。
+          {expired ? '文件已过期，无法预览。' : '文件已失效，无法预览。'}
         </span>
       ) : showPreview && previewState === 'ready' && previewUrl ? (
         kind === 'video' ? (
@@ -232,7 +248,7 @@ export function FileDownloadCard({
       <button
         type="button"
         onClick={() => void handleClick()}
-        disabled={state === 'loading' || expired}
+        disabled={state === 'loading' || inactive}
         aria-busy={state === 'loading'}
         aria-label={actionLabel}
         title={actionLabel}
@@ -241,7 +257,7 @@ export function FileDownloadCard({
         <span
           className={cn(
             'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] border',
-            expired
+            inactive
               ? 'border-[#DCDDDD] bg-[#EFEFEF]/70 text-[#ADADAD]'
               : state === 'failed'
               ? 'border-[#EA1F59]/35 bg-[#EA1F59]/10 text-[#EA1F59]'
@@ -259,10 +275,12 @@ export function FileDownloadCard({
           <div
             className={cn(
               'text-[11px]',
-              state === 'failed' && !expired ? 'text-[#EA1F59]' : 'text-muted-foreground',
+              state === 'failed' && !inactive
+                ? 'text-[#EA1F59]'
+                : 'text-muted-foreground',
             )}
           >
-            {expired
+            {inactive
               ? metaLabel
               : state === 'loading'
               ? '正在下载…'
@@ -271,8 +289,12 @@ export function FileDownloadCard({
                 : metaLabel}
           </div>
         </div>
-        {expired ? (
-          <Clock3 className="h-4 w-4 shrink-0 text-[#ADADAD]" aria-hidden />
+        {inactive ? (
+          expired ? (
+            <Clock3 className="h-4 w-4 shrink-0 text-[#ADADAD]" aria-hidden />
+          ) : (
+            <CircleSlash className="h-4 w-4 shrink-0 text-[#ADADAD]" aria-hidden />
+          )
         ) : state === 'loading' ? (
           <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[#EA1F59]" />
         ) : (

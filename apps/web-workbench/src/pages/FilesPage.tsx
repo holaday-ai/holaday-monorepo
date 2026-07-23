@@ -36,6 +36,7 @@ import { useToast } from '@/components/ui/toast';
 import {
   downloadFailureMessage,
   downloadFileAuthed,
+  isUnavailableFileStatus,
 } from '@/lib/download-file';
 import { formatFileSize } from '@/lib/file-size';
 import {
@@ -79,7 +80,19 @@ export function FilesPage(): JSX.Element {
   const [previewing, setPreviewing] = React.useState<FilePreviewPayload | null>(
     null,
   );
+  const [unavailableFileIds, setUnavailableFileIds] = React.useState<
+    ReadonlySet<string>
+  >(() => new Set());
   const debouncedQuery = useDebouncedValue(q.trim(), 250);
+
+  const markFileUnavailable = React.useCallback((fileId: string) => {
+    setUnavailableFileIds((current) => {
+      if (current.has(fileId)) return current;
+      const next = new Set(current);
+      next.add(fileId);
+      return next;
+    });
+  }, []);
 
   const refresh = React.useCallback(async () => {
     const requestId = ++requestIdRef.current;
@@ -113,6 +126,7 @@ export function FilesPage(): JSX.Element {
   }
 
   function onPreview(f: UiFile): void {
+    if (unavailableFileIds.has(f.fileId)) return;
     // In-product authed preview. The previous `window.open` path
     // opened a top-level GET that browsers refuse to send the Bearer
     // header on — users on hd-app would land on a 401 page from the
@@ -129,12 +143,16 @@ export function FilesPage(): JSX.Element {
   }
 
   async function onDownload(f: UiFile): Promise<void> {
+    if (unavailableFileIds.has(f.fileId)) return;
     const res = await downloadFileAuthed({
       url: downloadUrl(f.fileId),
       filename: f.filename,
     });
     if (!mountedRef.current) return;
     if (!res.ok) {
+      if (isUnavailableFileStatus(res.status)) {
+        markFileUnavailable(f.fileId);
+      }
       toast.show(downloadFailureMessage(res.status), 'error');
     }
   }
@@ -253,6 +271,7 @@ export function FilesPage(): JSX.Element {
                 <FileRow
                   key={f.fileId}
                   file={f}
+                  unavailable={unavailableFileIds.has(f.fileId)}
                   onPreview={() => onPreview(f)}
                   onUseInNewTask={() => onUseInNewTask(f)}
                   onDownload={() => void onDownload(f)}
@@ -263,7 +282,11 @@ export function FilesPage(): JSX.Element {
             </div>
           </div>
         )}
-        <FilePreviewModal payload={previewing} onClose={() => setPreviewing(null)} />
+        <FilePreviewModal
+          payload={previewing}
+          onClose={() => setPreviewing(null)}
+          onUnavailable={markFileUnavailable}
+        />
         <ConfirmDialog
           open={pendingDelete !== null}
           title="删除这个文件？"
@@ -314,6 +337,7 @@ function FilterTab({
 
 function FileRow({
   file,
+  unavailable,
   onPreview,
   onUseInNewTask,
   onDownload,
@@ -321,6 +345,7 @@ function FileRow({
   onDelete,
 }: {
   file: UiFile;
+  unavailable: boolean;
   onPreview: () => void;
   onUseInNewTask: () => void;
   onDownload: () => void;
@@ -329,19 +354,46 @@ function FileRow({
 }): JSX.Element {
   const Icon = iconForMime(file.mimetype);
   return (
-    <div className="flex flex-col gap-1.5 px-4 py-2.5 transition-colors hover:bg-[#EFEFEF]/35 sm:grid sm:grid-cols-[1fr_auto_auto_auto] sm:items-center sm:gap-3">
+    <div
+      className={cn(
+        'flex flex-col gap-1.5 px-4 py-2.5 transition-colors sm:grid sm:grid-cols-[1fr_auto_auto_auto] sm:items-center sm:gap-3',
+        unavailable ? 'bg-[#EFEFEF]/35' : 'hover:bg-[#EFEFEF]/35',
+      )}
+    >
       {/* Filename = preview. Always reachable, no hover required. */}
       <button
         type="button"
         onClick={onPreview}
-        title={`预览 ${file.filename}`}
-        className="group flex min-w-0 items-center gap-2.5 text-left"
+        disabled={unavailable}
+        title={unavailable ? `${file.filename} 已失效` : `预览 ${file.filename}`}
+        className="group flex min-w-0 items-center gap-2.5 text-left disabled:cursor-not-allowed"
       >
-        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-[#595757] transition-colors group-hover:border-[#ADADAD]">
+        <span
+          className={cn(
+            'flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[#DCDDDD] bg-white transition-colors',
+            unavailable
+              ? 'text-[#ADADAD]'
+              : 'text-[#595757] group-hover:border-[#ADADAD]',
+          )}
+        >
           <Icon className="h-4 w-4" aria-hidden />
         </span>
-        <span className="min-w-0 truncate text-sm font-medium text-foreground group-hover:text-[#EA1F59]">
-          {file.filename}
+        <span className="flex min-w-0 items-center gap-2">
+          <span
+            className={cn(
+              'min-w-0 truncate text-sm font-medium',
+              unavailable
+                ? 'text-[#8B93A6]'
+                : 'text-foreground group-hover:text-[#EA1F59]',
+            )}
+          >
+            {file.filename}
+          </span>
+          {unavailable ? (
+            <span className="shrink-0 rounded-full bg-[#EFEFEF] px-2 py-0.5 text-[10px] font-medium text-[#8B93A6]">
+              已失效
+            </span>
+          ) : null}
         </span>
       </button>
       {/* Size + time always rendered. Mobile shows them inline beneath
@@ -359,9 +411,14 @@ function FileRow({
           <button
             type="button"
             onClick={onUseInNewTask}
+            disabled={unavailable}
             aria-label={`把 ${file.filename} 用于新任务`}
-            title={`把 ${file.filename} 用于新任务`}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-[#595757] transition-colors hover:border-[#EA1F59]/35 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59]"
+            title={
+              unavailable
+                ? `${file.filename} 已失效`
+                : `把 ${file.filename} 用于新任务`
+            }
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-[#595757] transition-colors hover:border-[#EA1F59]/35 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:text-[#ADADAD] disabled:hover:border-[#DCDDDD] disabled:hover:bg-white"
           >
             <Plus className="h-3.5 w-3.5" />
           </button>
@@ -380,15 +437,15 @@ function FileRow({
             </DropdownMenuTrigger>
           </IconTooltip>
           <DropdownMenuContent align="end" className="w-44">
-            <DropdownMenuItem onSelect={onPreview}>
+            <DropdownMenuItem onSelect={onPreview} disabled={unavailable}>
               <Eye className="text-muted-foreground" />
               <span>预览</span>
             </DropdownMenuItem>
-            <DropdownMenuItem onSelect={onDownload}>
+            <DropdownMenuItem onSelect={onDownload} disabled={unavailable}>
               <Download className="text-muted-foreground" />
               <span>下载</span>
             </DropdownMenuItem>
-            <DropdownMenuItem onSelect={onCopyReference}>
+            <DropdownMenuItem onSelect={onCopyReference} disabled={unavailable}>
               <Copy className="text-muted-foreground" />
               <span>复制引用</span>
             </DropdownMenuItem>

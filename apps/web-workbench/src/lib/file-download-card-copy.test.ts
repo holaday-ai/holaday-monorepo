@@ -47,6 +47,16 @@ describe('file-download-card-copy', () => {
     ).toBe('表格文件 · 1 KB · 文件已过期');
   });
 
+  it('keeps a missing server file distinct from known expiry', () => {
+    expect(
+      downloadFileMetaLabel({
+        filename: 'report.csv',
+        formattedSize: '1 KB',
+        availability: 'unavailable',
+      }),
+    ).toBe('表格文件 · 1 KB · 文件已失效');
+  });
+
   it('states the retention policy without claiming unknown files are active', () => {
     expect(
       downloadFileMetaLabel({ filename: 'report.csv', formattedSize: '1 KB' }),

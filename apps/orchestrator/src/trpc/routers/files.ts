@@ -9,7 +9,7 @@
  */
 
 import { TRPCError } from '@trpc/server';
-import { and, desc, eq, like, or } from 'drizzle-orm';
+import { and, desc, eq, gt, isNull, like, or } from 'drizzle-orm';
 import { z } from 'zod';
 import { readAffectedRows } from '../../db/mysql-result.js';
 import { taskFiles } from '../../db/schema/task-files.js';
@@ -51,7 +51,17 @@ export const filesRouter = router({
     )
     .query(async ({ ctx, input }) => {
       const userId = await requireUserId(ctx);
-      const conds = [eq(taskFiles.userId, userId), eq(taskFiles.kind, 'input')];
+      const now = new Date();
+      const conds = [
+        eq(taskFiles.userId, userId),
+        eq(taskFiles.kind, 'input'),
+        eq(taskFiles.status, 'active'),
+      ];
+      const notExpired = or(
+        isNull(taskFiles.expiresAt),
+        gt(taskFiles.expiresAt, now),
+      );
+      if (notExpired) conds.push(notExpired);
       if (input.q && input.q.trim()) {
         conds.push(like(taskFiles.filename, `%${input.q.trim()}%`));
       }
@@ -62,13 +72,17 @@ export const filesRouter = router({
           mimetype: taskFiles.mimetype,
           sizeBytes: taskFiles.sizeBytes,
           createdAt: taskFiles.createdAt,
+          status: taskFiles.status,
+          expiresAt: taskFiles.expiresAt,
         })
         .from(taskFiles)
         .where(and(...conds))
         .orderBy(desc(taskFiles.createdAt))
         .limit(200);
-      const filtered = rows.filter((r) =>
-        fileMatchesLibraryFilter(r.mimetype, input.type),
+      const filtered = rows.filter(
+        (r) =>
+          fileIsAvailableInLibrary(r, now) &&
+          fileMatchesLibraryFilter(r.mimetype, input.type),
       );
       return filtered.map((r) => ({
         fileId: r.externalId,
@@ -100,11 +114,17 @@ export const filesRouter = router({
     }),
 });
 
-// Suppress unused-import warning for `or` if not used yet — kept for
-// future filename+mime OR composition.
-void or;
-
 type LibraryFileFilter = 'all' | 'images' | 'videos' | 'documents';
+
+function fileIsAvailableInLibrary(
+  row: { status: string; expiresAt: Date | null },
+  now = new Date(),
+): boolean {
+  return (
+    row.status === 'active' &&
+    (row.expiresAt === null || row.expiresAt.getTime() > now.getTime())
+  );
+}
 
 function fileMatchesLibraryFilter(mimetype: string, filter: LibraryFileFilter): boolean {
   const normalized = mimetype.toLowerCase();
@@ -117,5 +137,6 @@ function fileMatchesLibraryFilter(mimetype: string, filter: LibraryFileFilter): 
 }
 
 export const __filesRouterInternals = {
+  fileIsAvailableInLibrary,
   fileMatchesLibraryFilter,
 };

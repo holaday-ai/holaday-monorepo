@@ -3,6 +3,7 @@ import {
   downloadFailureMessage,
   downloadFileAuthed,
   fetchFileBlobAuthed,
+  isUnavailableFileStatus,
   safeDownloadFilename,
 } from './download-file';
 
@@ -33,11 +34,21 @@ describe('safeDownloadFilename', () => {
 });
 
 describe('downloadFailureMessage', () => {
-  it('keeps auth and expiry failures specific', () => {
+  it('keeps auth and unavailable-file failures specific', () => {
     expect(downloadFailureMessage(401)).toContain('刷新页面后重试');
     expect(downloadFailureMessage(403)).toContain('刷新页面后重试');
-    expect(downloadFailureMessage(404)).toContain('链接已过期');
-    expect(downloadFailureMessage(410)).toContain('链接已过期');
+    expect(downloadFailureMessage(404)).toBe('文件已失效，无法下载。');
+    expect(downloadFailureMessage(410)).toBe('文件已失效，无法下载。');
+  });
+});
+
+describe('isUnavailableFileStatus', () => {
+  it('only treats permanent missing-file responses as unavailable', () => {
+    expect(isUnavailableFileStatus(404)).toBe(true);
+    expect(isUnavailableFileStatus(410)).toBe(true);
+    expect(isUnavailableFileStatus(401)).toBe(false);
+    expect(isUnavailableFileStatus(500)).toBe(false);
+    expect(isUnavailableFileStatus(null)).toBe(false);
   });
 });
 
