@@ -7,6 +7,8 @@ import type { FileDownloadPayload } from '@/components/FileDownloadCard';
 
 /** Backend-stamped 成片 type (deriveVideoType in video-confirm-meta.ts). */
 export type VideoType = 'normal' | 'pet' | 'ip_person';
+export type CreativeHistoryMode = 'video' | 'image';
+export type CreativeHistoryFilter = 'all' | 'recent' | 'pinned';
 
 export interface VideoResultMeta {
   lane?: string;
@@ -35,6 +37,9 @@ export interface VideoRow {
   videoType?: VideoType;
   /** First-frame poster (R2, Bearer-gated) — rendered as a lazy thumbnail. */
   posterUrl?: string;
+  /** Server-persisted task pin state, reused by the creative history surface. */
+  starred?: boolean;
+  starredAt?: string | number | Date | null;
 }
 
 export function isVideoLane(lane: string | undefined): boolean {
@@ -77,6 +82,8 @@ export function toVideoRow(raw: unknown): VideoRow | null {
     title?: string | null;
     status?: string;
     createdAt?: string | number | Date;
+    starred?: boolean;
+    starredAt?: string | number | Date | null;
     result?: { metadata?: VideoResultMeta } | null;
   };
   const meta = r.result?.metadata;
@@ -110,6 +117,8 @@ export function toVideoRow(raw: unknown): VideoRow | null {
     },
     ...(videoType ? { videoType } : {}),
     ...(posterUrl ? { posterUrl } : {}),
+    starred: r.starred === true,
+    starredAt: r.starredAt ?? null,
   };
 }
 
@@ -121,6 +130,8 @@ export function toImageRow(raw: unknown): VideoRow | null {
     title?: string | null;
     status?: string;
     createdAt?: string | number | Date;
+    starred?: boolean;
+    starredAt?: string | number | Date | null;
     result?: { metadata?: VideoResultMeta } | null;
   };
   const meta = r.result?.metadata;
@@ -149,11 +160,67 @@ export function toImageRow(raw: unknown): VideoRow | null {
       size: att.sizeBytes,
     },
     posterUrl: downloadUrl,
+    starred: r.starred === true,
+    starredAt: r.starredAt ?? null,
   };
+}
+
+export function filterCreativeHistoryRows(
+  rows: readonly VideoRow[],
+  {
+    mode,
+    videoType,
+    filter,
+    now = Date.now(),
+  }: {
+    mode: CreativeHistoryMode;
+    videoType?: VideoType;
+    filter: CreativeHistoryFilter;
+    now?: number;
+  },
+): VideoRow[] {
+  const scopedRows = rows.filter((row) => {
+    const filename = row.download?.filename ?? '';
+    const imageFile = /\.(png|jpe?g|webp|gif)$/i.test(filename);
+    return mode === 'image'
+      ? imageFile
+      : !imageFile && (row.videoType ?? 'normal') === videoType;
+  });
+  if (filter === 'recent') {
+    return scopedRows.filter((row) => isRecentCreativeHistoryRow(row.createdAt, now));
+  }
+  if (filter === 'pinned') return scopedRows.filter((row) => row.starred === true);
+  return scopedRows;
+}
+
+export function creativeHistoryDisplayTitle(
+  row: Pick<VideoRow, 'title' | 'intent'>,
+  mode: CreativeHistoryMode,
+): string {
+  const source = row.title?.trim() || row.intent.trim();
+  if (mode !== 'image') return source || '视频作品';
+  const withoutInternalInstructions = source.split(/主体一致性要求[：:]/u, 1)[0]?.trim() ?? '';
+  const withoutLanePrefix = withoutInternalInstructions
+    .replace(/^生成(?:一张)?图片[：:]\s*/u, '')
+    .trim();
+  return withoutLanePrefix || '图片作品';
+}
+
+export function isLockedSubjectImageIntent(intent: string): boolean {
+  return /主体一致性要求[：:]/u.test(intent);
 }
 
 function isDownloadableTerminalOutput(status: string): boolean {
   return status === 'completed' || status === 'partial_success';
+}
+
+function isRecentCreativeHistoryRow(
+  value: string | number | Date,
+  now: number,
+): boolean {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return false;
+  return now - date.getTime() <= 7 * 24 * 60 * 60 * 1000;
 }
 
 function normaliseAttachmentDownloadUrl(raw: string): string | null {

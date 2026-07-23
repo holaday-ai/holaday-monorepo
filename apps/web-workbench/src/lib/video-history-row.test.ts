@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { asVideoType, isImageLane, isVideoLane, showImageOption, toImageRow, toVideoRow } from './video-history-row';
+import {
+  asVideoType,
+  creativeHistoryDisplayTitle,
+  filterCreativeHistoryRows,
+  isImageLane,
+  isLockedSubjectImageIntent,
+  isVideoLane,
+  showImageOption,
+  toImageRow,
+  toVideoRow,
+} from './video-history-row';
 
 describe('showImageOption — 图片版 gate (B2)', () => {
   it('hides 图片版 for ip_person only', () => {
@@ -96,6 +106,13 @@ describe('toVideoRow — 生成历史 only lists completed 成片 with an attach
       filename: 'holaday-video.mp4',
       size: 6_000_000,
     });
+  });
+
+  it('carries the persisted pin state into video history', () => {
+    const starredAt = '2026-07-23T08:30:00.000Z';
+    const out = toVideoRow(row({ starred: true, starredAt }));
+    expect(out?.starred).toBe(true);
+    expect(out?.starredAt).toBe(starredAt);
   });
 
   it('normalizes backend /files download URLs to the frontend /api/files path', () => {
@@ -251,5 +268,100 @@ describe('toImageRow — 图片历史 only lists completed image outputs', () =>
     const out = toImageRow(imageRow({ status: 'partial_success' }));
     expect(out?.status).toBe('partial_success');
     expect(out?.posterUrl).toBe('/api/files/file_img/download');
+  });
+
+  it('carries the persisted pin state into creative history', () => {
+    const starredAt = '2026-07-23T08:30:00.000Z';
+    const out = toImageRow(imageRow({ starred: true, starredAt }));
+    expect(out?.starred).toBe(true);
+    expect(out?.starredAt).toBe(starredAt);
+  });
+});
+
+describe('creative history filters', () => {
+  const imageDownload = {
+    fileId: 'file_img',
+    downloadUrl: '/api/files/file_img/download',
+    filename: 'holaday-image.jpg',
+    size: 512_000,
+  };
+  const videoDownload = {
+    fileId: 'file_video',
+    downloadUrl: '/api/files/file_video/download',
+    filename: 'holaday-video.mp4',
+    size: 3_000_000,
+  };
+  const rows = [
+    {
+      taskId: 'img_pinned',
+      intent: '生成图片：置顶图片',
+      title: null,
+      status: 'completed',
+      createdAt: '2026-07-23T00:00:00.000Z',
+      download: imageDownload,
+      starred: true,
+    },
+    {
+      taskId: 'img_regular',
+      intent: '生成图片：普通图片',
+      title: null,
+      status: 'completed',
+      createdAt: '2026-07-22T00:00:00.000Z',
+      download: imageDownload,
+      starred: false,
+    },
+    {
+      taskId: 'video_pinned',
+      intent: '生成视频：置顶视频',
+      title: null,
+      status: 'completed',
+      createdAt: '2026-07-23T00:00:00.000Z',
+      download: videoDownload,
+      videoType: 'normal' as const,
+      starred: true,
+    },
+  ];
+
+  it('shows only persisted pinned image rows in the pinned filter', () => {
+    expect(
+      filterCreativeHistoryRows(rows, {
+        mode: 'image',
+        filter: 'pinned',
+        now: Date.parse('2026-07-24T00:00:00.000Z'),
+      }).map((row) => row.taskId),
+    ).toEqual(['img_pinned']);
+  });
+
+  it('keeps video history scoped to the active video type', () => {
+    expect(
+      filterCreativeHistoryRows(rows, {
+        mode: 'video',
+        videoType: 'normal',
+        filter: 'all',
+        now: Date.parse('2026-07-24T00:00:00.000Z'),
+      }).map((row) => row.taskId),
+    ).toEqual(['video_pinned']);
+  });
+});
+
+describe('creative history display copy', () => {
+  const lockedIntent = [
+    '生成图片：Keep the same blue ceramic mug on a walnut table.',
+    '主体一致性要求：请以用户上传的第一张图片作为锁定主角。',
+    '尽量保持主角身份与商品结构不变。',
+  ].join('\n\n');
+
+  it('hides internal subject-consistency instructions from the visible title', () => {
+    expect(
+      creativeHistoryDisplayTitle(
+        { title: null, intent: lockedIntent },
+        'image',
+      ),
+    ).toBe('Keep the same blue ceramic mug on a walnut table.');
+  });
+
+  it('detects locked-subject image history so the UI can show a concise badge', () => {
+    expect(isLockedSubjectImageIntent(lockedIntent)).toBe(true);
+    expect(isLockedSubjectImageIntent('生成图片：普通产品图')).toBe(false);
   });
 });

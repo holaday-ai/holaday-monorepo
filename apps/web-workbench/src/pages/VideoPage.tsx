@@ -18,6 +18,7 @@ import {
   Lock,
   Mic,
   Palette,
+  Pin,
   Sparkles,
   Trash2,
   UserRound,
@@ -44,7 +45,17 @@ import {
   videoTaskStatusIconKind,
   videoTaskStatusLabel,
 } from '@/lib/video-task-selectors';
-import { showImageOption, toImageRow, toVideoRow, type VideoRow, type VideoType } from '@/lib/video-history-row';
+import {
+  creativeHistoryDisplayTitle,
+  filterCreativeHistoryRows,
+  isLockedSubjectImageIntent,
+  showImageOption,
+  toImageRow,
+  toVideoRow,
+  type CreativeHistoryFilter,
+  type VideoRow,
+  type VideoType,
+} from '@/lib/video-history-row';
 import { ipRenderingHint } from '@/lib/video-ip-estimate';
 import { LazyPosterImg } from '@/components/LazyPosterImg';
 import { PageContainer, Section } from '@/pages/PageShell';
@@ -77,7 +88,6 @@ import {
 
 type CreativeMode = 'video' | 'image';
 type VideoTab = 'normal' | 'pet' | 'ip';
-type HistoryFilter = 'all' | 'recent' | 'favorite';
 type ImageGenerationMode = 'free' | 'lock_subject';
 type CreativeModelValue = VideoModel | ImageModel;
 type ImageStyleKey =
@@ -1899,8 +1909,11 @@ function CreativeHistory({
   refreshKey?: string;
 }): JSX.Element {
   const navigate = useNavigate();
+  const toast = useToast();
+  const togglePin = useTaskStore((state) => state.togglePin);
   const [rows, setRows] = React.useState<VideoRow[] | null>(null);
-  const [filter, setFilter] = React.useState<HistoryFilter>('all');
+  const [filter, setFilter] = React.useState<CreativeHistoryFilter>('all');
+  const [pinningTaskId, setPinningTaskId] = React.useState<string | null>(null);
   const mountedRef = React.useRef(true);
 
   React.useEffect(() => {
@@ -1920,24 +1933,46 @@ function CreativeHistory({
 
   const visible = React.useMemo(() => {
     if (!rows) return rows;
-    const scopedRows = rows.filter((row) => {
-      const filename = row.download?.filename ?? '';
-      const imageFile = /\.(png|jpe?g|webp)$/i.test(filename);
-      return mode === 'image'
-        ? imageFile
-        : !imageFile && (row.videoType ?? 'normal') === videoType;
-    });
-    if (filter === 'recent') return scopedRows.filter((row) => isRecentHistoryRow(row.createdAt));
-    if (filter === 'favorite') return [];
-    return scopedRows;
+    return filterCreativeHistoryRows(rows, { mode, videoType, filter });
   }, [filter, mode, rows, videoType]);
 
   const emptyCopy =
-    filter === 'favorite'
-      ? `暂无收藏${mode === 'image' ? '图片' : '视频'}作品。`
+    filter === 'pinned'
+      ? `暂无置顶${mode === 'image' ? '图片' : '视频'}作品。`
       : filter === 'recent'
         ? `最近 7 天暂无${mode === 'image' ? '图片' : '视频'}作品。`
         : `暂无${mode === 'image' ? '图片' : '视频'}作品，先在上方创建一个。`;
+
+  const handleTogglePin = React.useCallback(
+    async (row: VideoRow) => {
+      if (pinningTaskId) return;
+      const next = row.starred !== true;
+      setPinningTaskId(row.taskId);
+      setRows((current) =>
+        current?.map((item) =>
+          item.taskId === row.taskId
+            ? { ...item, starred: next, starredAt: next ? new Date() : null }
+            : item,
+        ) ?? current,
+      );
+      try {
+        await togglePin(row.taskId, next);
+        toast.show(next ? '已置顶作品' : '已取消置顶', 'info', 1800);
+      } catch {
+        setRows((current) =>
+          current?.map((item) =>
+            item.taskId === row.taskId
+              ? { ...item, starred: row.starred, starredAt: row.starredAt ?? null }
+              : item,
+          ) ?? current,
+        );
+        toast.show('置顶状态更新失败，请重试', 'error');
+      } finally {
+        if (mountedRef.current) setPinningTaskId(null);
+      }
+    },
+    [pinningTaskId, toast, togglePin],
+  );
 
   return (
     <section className="relative z-10 mt-10 rounded-[28px] border border-[#EFEFEF] bg-white p-5 shadow-[0_16px_40px_rgba(17,24,39,0.04)]">
@@ -1954,7 +1989,7 @@ function CreativeHistory({
           {[
             { id: 'all' as const, label: '全部' },
             { id: 'recent' as const, label: '最近' },
-            { id: 'favorite' as const, label: '收藏' },
+            { id: 'pinned' as const, label: '置顶' },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -2005,11 +2040,33 @@ function CreativeHistory({
               </button>
               <div className="flex min-w-0 flex-col justify-between py-3 pr-3">
                 <div>
-                  <div className="mb-5 text-right text-[13px] font-semibold text-[#ADADAD]">
-                    {formatDateOnly(row.createdAt)}
+                  <div className="mb-5 flex items-center justify-end gap-2">
+                    <span className="text-[13px] font-semibold text-[#ADADAD]">
+                      {formatDateOnly(row.createdAt)}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => void handleTogglePin(row)}
+                      disabled={pinningTaskId !== null}
+                      aria-pressed={row.starred === true}
+                      aria-label={row.starred ? '取消置顶作品' : '置顶作品'}
+                      title={row.starred ? '取消置顶作品' : '置顶作品'}
+                      className={cn(
+                        'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] border transition-colors focus-visible:outline-none focus-visible:ring-2',
+                        row.starred
+                          ? 'border-[#EA1F59]/30 bg-[#EA1F59]/10 text-[#EA1F59] focus-visible:ring-[#EA1F59]/20'
+                          : 'border-[#DCDDDD] bg-white text-[#ADADAD] hover:border-[#EA1F59]/30 hover:text-[#EA1F59] focus-visible:ring-[#EA1F59]/20',
+                      )}
+                    >
+                      {pinningTaskId === row.taskId ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Pin className={cn('h-3.5 w-3.5', row.starred && 'fill-current')} />
+                      )}
+                    </button>
                   </div>
                   <h2 className="line-clamp-3 text-[15px] font-semibold leading-7 text-[#8B93A6]">
-                    {row.title?.trim() || row.intent || (mode === 'image' ? '图片作品' : '视频作品')}
+                    {creativeHistoryDisplayTitle(row, mode)}
                   </h2>
                   <div className="mt-5 flex flex-wrap gap-2">
                     {row.status === 'partial_success' ? (
@@ -2020,6 +2077,12 @@ function CreativeHistory({
                     {mode === 'video' && row.videoType ? (
                       <span className="rounded-full bg-[#EA1F59]/10 px-3 py-1 text-[11px] font-medium text-[#595757]">
                         {videoTypeLabel(row.videoType)}
+                      </span>
+                    ) : null}
+                    {mode === 'image' && isLockedSubjectImageIntent(row.intent) ? (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-[#42C0EF]/10 px-3 py-1 text-[11px] font-medium text-[#237B9D]">
+                        <Lock className="h-3 w-3" />
+                        锁定主角
                       </span>
                     ) : null}
                     {download.filename ? (
@@ -2854,12 +2917,6 @@ function formatDateOnly(value: string | number | Date): string {
   const mm = `${d.getMonth() + 1}`.padStart(2, '0');
   const dd = `${d.getDate()}`.padStart(2, '0');
   return `${yyyy}-${mm}-${dd}`;
-}
-
-function isRecentHistoryRow(value: string | number | Date): boolean {
-  const d = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(d.getTime())) return false;
-  return Date.now() - d.getTime() <= 7 * 24 * 60 * 60 * 1000;
 }
 
 function fileKindLabel(filename: string): string {
