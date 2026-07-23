@@ -56,11 +56,9 @@ const MEDIA_PREVIEW_TIMEOUT_MS = 8_000;
 export function FileDownloadCard({
   payload,
   showPreview = true,
-  initialUnavailable = false,
 }: {
   payload: FileDownloadPayload;
   showPreview?: boolean;
-  initialUnavailable?: boolean;
 }): JSX.Element {
   const toast = useToast();
   const mountedRef = React.useRef(false);
@@ -69,7 +67,7 @@ export function FileDownloadCard({
   const [previewState, setPreviewState] = React.useState<
     'idle' | 'loading' | 'ready' | 'failed'
   >('idle');
-  const knownUnavailable = initialUnavailable || payload.unavailable === true;
+  const knownUnavailable = payload.unavailable === true;
   const fileReference = React.useMemo(
     () => ({
       fileId: payload.fileId,
