@@ -17,7 +17,12 @@ export function resolveFollowUpExecutionMode(input: {
   typedWorkflowOverride: ExecutionMode | null;
   expertRouteOverride: ExecutionMode | null | undefined;
   classifiedExecutionMode: ExecutionMode;
+  explicitMediaMode?: Extract<ExecutionMode, 'image' | 'video_creation'> | null;
 }): ExecutionMode {
+  // The media workbenches send structured options only when the user is
+  // submitting an image/video job. That explicit UI contract must win over
+  // prompt keywords such as "上传", which otherwise look like browser actions.
+  if (input.explicitMediaMode) return input.explicitMediaMode;
   if (input.parentHasBrowserContext) return 'browser';
   return (
     input.typedWorkflowOverride ??

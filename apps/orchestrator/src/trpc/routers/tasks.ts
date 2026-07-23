@@ -1121,6 +1121,11 @@ export const tasksRouter = router({
       typedWorkflowOverride,
       expertRouteOverride: expertWorkflow?.routeOverride,
       classifiedExecutionMode,
+      explicitMediaMode: input.imageOptions
+        ? 'image'
+        : input.videoOptions
+          ? 'video_creation'
+          : null,
     });
     if (
       appEnv.NODE_ENV === 'production' &&

@@ -39,6 +39,27 @@ describe('task follow-up copy', () => {
     ).toBe('scrape');
   });
 
+  it('lets explicit media controls override ambiguous prompt routing', () => {
+    expect(
+      resolveFollowUpExecutionMode({
+        parentHasBrowserContext: false,
+        typedWorkflowOverride: null,
+        expertRouteOverride: null,
+        classifiedExecutionMode: 'browser',
+        explicitMediaMode: 'image',
+      }),
+    ).toBe('image');
+    expect(
+      resolveFollowUpExecutionMode({
+        parentHasBrowserContext: true,
+        typedWorkflowOverride: 'generate',
+        expertRouteOverride: 'browser',
+        classifiedExecutionMode: 'browser',
+        explicitMediaMode: 'video_creation',
+      }),
+    ).toBe('video_creation');
+  });
+
   it('recognizes legacy browser evidence without overriding explicit non-browser tasks', () => {
     expect(
       followUpParentHasBrowserContext({
