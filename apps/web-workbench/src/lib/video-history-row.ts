@@ -29,6 +29,7 @@ export interface VideoResultMeta {
     posterUrl?: string;
     expiresAt?: string;
     availability?: 'unavailable';
+    posterAvailability?: 'unavailable';
   }>;
 }
 
@@ -43,6 +44,8 @@ export interface VideoRow {
   videoType?: VideoType;
   /** First-frame poster (R2, Bearer-gated) — rendered as a lazy thumbnail. */
   posterUrl?: string;
+  /** Server confirmed the separate poster file is no longer available. */
+  posterUnavailable?: boolean;
   /** Server-persisted task pin state, reused by the creative history surface. */
   starred?: boolean;
   starredAt?: string | number | Date | null;
@@ -67,6 +70,7 @@ export function creativeHistoryPreviewAvailability(options: {
     | Pick<FileDownloadPayload, 'expiresAt' | 'unavailable'>
     | undefined;
   posterUrl?: string;
+  posterUnavailable?: boolean;
   unavailablePosterUrls: ReadonlySet<string>;
   now?: number;
 }): CreativeHistoryPreviewAvailability {
@@ -78,6 +82,7 @@ export function creativeHistoryPreviewAvailability(options: {
     return 'expired';
   }
   if (artifactAvailability === 'unavailable') return 'unavailable';
+  if (options.posterUnavailable === true) return 'unavailable';
   if (!options.posterUrl) return 'missing';
   return options.unavailablePosterUrls.has(options.posterUrl)
     ? 'unavailable'
@@ -277,6 +282,9 @@ export function toVideoRow(raw: unknown): VideoRow | null {
     },
     ...(videoType ? { videoType } : {}),
     ...(posterUrl ? { posterUrl } : {}),
+    ...(att.posterAvailability === 'unavailable'
+      ? { posterUnavailable: true }
+      : {}),
     starred: r.starred === true,
     starredAt: r.starredAt ?? null,
   };

@@ -182,6 +182,10 @@ export interface UiTerminalAttachment {
   expiresAt: string;
   /** Server confirmed that the file row or stored bytes are no longer usable. */
   availability?: 'unavailable';
+  /** Same-origin first-frame poster for video outputs. */
+  posterUrl?: string;
+  /** Server confirmed that the separately stored video poster is unavailable. */
+  posterAvailability?: 'unavailable';
   /**
    * 'screenshot' (L1 auto-save) or 'pdf' (L2 save_page_as_pdf).
    * Other strings tolerated — the renderer falls through to a

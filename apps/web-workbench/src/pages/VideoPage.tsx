@@ -2179,6 +2179,7 @@ function CreativeHistory({
             const previewAvailability = creativeHistoryPreviewAvailability({
               download,
               posterUrl: row.posterUrl,
+              posterUnavailable: row.posterUnavailable,
               unavailablePosterUrls,
             });
             const artifactUnavailable =

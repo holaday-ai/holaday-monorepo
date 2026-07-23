@@ -2667,6 +2667,10 @@ function parseUiAttachments(arr: unknown): UiTask['attachments'] | undefined {
       }
       const downloadUrl = normaliseAttachmentDownloadUrl(e.downloadUrl);
       if (!downloadUrl) return null;
+      const posterUrl =
+        typeof e.posterUrl === 'string'
+          ? normaliseAttachmentDownloadUrl(e.posterUrl)
+          : null;
       return {
         fileId: e.fileId,
         downloadUrl,
@@ -2677,6 +2681,10 @@ function parseUiAttachments(arr: unknown): UiTask['attachments'] | undefined {
         kind: e.kind,
         ...(e.availability === 'unavailable'
           ? { availability: 'unavailable' as const }
+          : {}),
+        ...(posterUrl ? { posterUrl } : {}),
+        ...(posterUrl && e.posterAvailability === 'unavailable'
+          ? { posterAvailability: 'unavailable' as const }
           : {}),
       };
     })

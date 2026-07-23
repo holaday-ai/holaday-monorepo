@@ -84,6 +84,18 @@ describe('creative history preview availability', () => {
     ).toBe('unavailable');
   });
 
+  it('does not request a server-confirmed unavailable poster', () => {
+    expect(
+      creativeHistoryPreviewAvailability({
+        download: { expiresAt: '2026-07-23T11:00:00.000Z' },
+        posterUrl: '/api/files/poster-missing/download',
+        posterUnavailable: true,
+        unavailablePosterUrls: new Set(),
+        now,
+      }),
+    ).toBe('unavailable');
+  });
+
   it('distinguishes a fetchable poster from a missing poster', () => {
     expect(
       creativeHistoryPreviewAvailability({
@@ -147,6 +159,33 @@ describe('toVideoRow — videoType + posterUrl extraction (A4/A5)', () => {
     expect(out?.posterUrl).toBe('/api/files/p/download');
     expect(out?.download?.expiresAt).toBe('2026-07-24T10:00:00.000Z');
   });
+
+  it('preserves a server-confirmed unavailable poster state', () => {
+    const out = toVideoRow({
+      taskId: 'tsk_poster_unavailable',
+      status: 'completed',
+      createdAt: '2026-07-16T00:00:00.000Z',
+      result: {
+        metadata: {
+          lane: 'video_creation',
+          attachments: [
+            {
+              fileId: 'file_video',
+              downloadUrl: '/api/files/file_video/download',
+              filename: 'holaday-video.mp4',
+              sizeBytes: 2048,
+              posterUrl: '/api/files/file_poster/download',
+              posterAvailability: 'unavailable',
+            },
+          ],
+        },
+      },
+    });
+
+    expect(out?.posterUrl).toBe('/api/files/file_poster/download');
+    expect(out?.posterUnavailable).toBe(true);
+  });
+
   it('omits videoType when invalid/absent, posterUrl when absent', () => {
     const out = toVideoRow({
       taskId: 'tsk_n', status: 'completed',

@@ -57,4 +57,59 @@ describe('task result attachment availability', () => {
       annotateTaskResultAttachmentAvailability(result, new Set(), now),
     ).toEqual(result);
   });
+
+  it('marks a missing local poster unavailable without touching external posters', () => {
+    const result = {
+      metadata: {
+        attachments: [
+          {
+            fileId: 'file_video',
+            posterUrl: '/api/files/file_poster_missing/download?preview=1',
+          },
+          {
+            fileId: 'file_video_legacy',
+            posterUrl: '/files/file_poster_active/download',
+          },
+          {
+            fileId: 'file_video_external',
+            posterUrl: 'https://media.example/poster.jpg',
+          },
+        ],
+      },
+    };
+
+    expect(
+      annotateTaskResultAttachmentAvailability(
+        result,
+        new Set([
+          'file_video',
+          'file_video_legacy',
+          'file_video_external',
+          'file_poster_active',
+        ]),
+        now,
+      ),
+    ).toEqual({
+      metadata: {
+        attachments: [
+          {
+            fileId: 'file_video',
+            posterUrl: '/api/files/file_poster_missing/download?preview=1',
+            posterAvailability: 'unavailable',
+          },
+          {
+            fileId: 'file_video_legacy',
+            posterUrl: '/files/file_poster_active/download',
+          },
+          {
+            fileId: 'file_video_external',
+            posterUrl: 'https://media.example/poster.jpg',
+          },
+        ],
+      },
+    });
+    expect(result.metadata.attachments[0]).not.toHaveProperty(
+      'posterAvailability',
+    );
+  });
 });
