@@ -132,6 +132,40 @@ export function asVideoType(value: unknown): VideoType | undefined {
   return value === 'normal' || value === 'pet' || value === 'ip_person' ? value : undefined;
 }
 
+const IP_ONBOARDING_COPY_MARKERS = [
+  '声音样本在克隆出声纹后',
+  '出镜底版加密存储',
+  '云端声纹 + 出镜底版 + 授权记录',
+] as const;
+
+const CLONE_VIDEO_ROUTING_COPY =
+  '复刻视频：使用上传照片替换参考视频中的主角，并保留参考视频的动作、镜头、节奏和音频。';
+const CLONE_VIDEO_NOTE_PREFIX = '任务备注（仅用于记录，不改变本次模型输入）：';
+
+function isIpOnboardingCopy(value: string): boolean {
+  return IP_ONBOARDING_COPY_MARKERS.filter((marker) => value.includes(marker)).length >= 2;
+}
+
+function inferCreativeVideoType({
+  explicitType,
+  filename,
+  intent,
+  title,
+}: {
+  explicitType: unknown;
+  filename: string;
+  intent: string;
+  title?: string | null;
+}): VideoType | undefined {
+  const explicit = asVideoType(explicitType);
+  if (explicit) return explicit;
+  if (/^holaday-ip-video\.mp4$/i.test(filename)) return 'ip_person';
+  const visibleCopy = `${title ?? ''}\n${intent}`;
+  if (isIpOnboardingCopy(visibleCopy)) return 'ip_person';
+  if (visibleCopy.includes(CLONE_VIDEO_ROUTING_COPY)) return 'pet';
+  return undefined;
+}
+
 /**
  * Whether the 「图片版」 (confirm_image) option should show on a video_quote
  * card (B2). Static image is meaningless for 真人换口型 (you can't lip-sync a
@@ -175,7 +209,12 @@ export function toVideoRow(raw: unknown): VideoRow | null {
   }
   const downloadUrl = normaliseAttachmentDownloadUrl(att.downloadUrl);
   if (!downloadUrl) return null;
-  const videoType = asVideoType(meta?.videoType);
+  const videoType = inferCreativeVideoType({
+    explicitType: meta?.videoType,
+    filename: att.filename,
+    intent: r.intent ?? '',
+    title: r.title,
+  });
   const posterUrl =
     typeof att.posterUrl === 'string' && att.posterUrl.length > 0
       ? normaliseAttachmentDownloadUrl(att.posterUrl) ?? undefined
@@ -271,16 +310,43 @@ export function filterCreativeHistoryRows(
 }
 
 export function creativeHistoryDisplayTitle(
-  row: Pick<VideoRow, 'title' | 'intent'>,
+  row: Pick<VideoRow, 'title' | 'intent' | 'videoType'>,
   mode: CreativeHistoryMode,
 ): string {
   const source = row.title?.trim() || row.intent.trim();
-  if (mode !== 'image') return source || '视频作品';
+  if (mode !== 'image') {
+    if (isIpOnboardingCopy(source)) {
+      const intent = row.intent.trim();
+      if (intent && intent !== source && !isIpOnboardingCopy(intent)) {
+        return cleanVideoHistoryTitle(intent, row.videoType);
+      }
+      return videoHistoryFallbackTitle('ip_person');
+    }
+    return cleanVideoHistoryTitle(source, row.videoType);
+  }
   const withoutInternalInstructions = source.split(/主体一致性要求[：:]/u, 1)[0]?.trim() ?? '';
   const withoutLanePrefix = withoutInternalInstructions
     .replace(/^生成(?:一张)?图片[：:]\s*/u, '')
     .trim();
   return withoutLanePrefix || '图片作品';
+}
+
+function cleanVideoHistoryTitle(source: string, videoType: VideoType | undefined): string {
+  if (source.startsWith(CLONE_VIDEO_ROUTING_COPY)) {
+    const note = source
+      .slice(CLONE_VIDEO_ROUTING_COPY.length)
+      .trim()
+      .replace(new RegExp(`^${CLONE_VIDEO_NOTE_PREFIX}`, 'u'), '')
+      .trim();
+    return note || videoHistoryFallbackTitle('pet');
+  }
+  return source || videoHistoryFallbackTitle(videoType);
+}
+
+function videoHistoryFallbackTitle(videoType: VideoType | undefined): string {
+  if (videoType === 'pet') return '复刻视频';
+  if (videoType === 'ip_person') return 'IP人物视频';
+  return '视频作品';
 }
 
 export function isLockedSubjectImageIntent(intent: string): boolean {

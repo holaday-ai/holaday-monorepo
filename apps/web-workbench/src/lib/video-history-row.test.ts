@@ -59,6 +59,50 @@ describe('toVideoRow — videoType + posterUrl extraction (A4/A5)', () => {
     expect(out?.videoType).toBeUndefined();
     expect(out?.posterUrl).toBeUndefined();
   });
+
+  it('recovers the IP-person type from the legacy output filename', () => {
+    const out = toVideoRow({
+      taskId: 'tsk_legacy_ip',
+      intent: '欢迎来到今天的产品介绍。',
+      status: 'completed',
+      result: {
+        metadata: {
+          lane: 'video_creation',
+          attachments: [
+            {
+              fileId: 'f_ip',
+              downloadUrl: '/api/files/f_ip/download',
+              filename: 'holaday-ip-video.mp4',
+              sizeBytes: 5_000_000,
+            },
+          ],
+        },
+      },
+    });
+    expect(out?.videoType).toBe('ip_person');
+  });
+
+  it('recovers the clone-video type from the product-stamped legacy intent', () => {
+    const out = toVideoRow({
+      taskId: 'tsk_legacy_clone',
+      intent: '复刻视频：使用上传照片替换参考视频中的主角，并保留参考视频的动作、镜头、节奏和音频。',
+      status: 'completed',
+      result: {
+        metadata: {
+          lane: 'video_creation',
+          attachments: [
+            {
+              fileId: 'f_clone',
+              downloadUrl: '/api/files/f_clone/download',
+              filename: 'holaday-video.mp4',
+              sizeBytes: 5_000_000,
+            },
+          ],
+        },
+      },
+    });
+    expect(out?.videoType).toBe('pet');
+  });
 });
 
 const ATT = {
@@ -366,6 +410,66 @@ describe('creative history display copy', () => {
   it('detects locked-subject image history so the UI can show a concise badge', () => {
     expect(isLockedSubjectImageIntent(lockedIntent)).toBe(true);
     expect(isLockedSubjectImageIntent('生成图片：普通产品图')).toBe(false);
+  });
+
+  it('replaces leaked IP onboarding boilerplate with the product type label', () => {
+    const internalCopy = [
+      '· 声音样本在克隆出声纹后即刻删除,我们只保留声纹用于合成。',
+      '· 出镜底版加密存储、仅用于你本人的视频,可随时删除/重传。',
+      '· 一键清除会删掉云端声纹 + 出镜底版 + 授权记录。',
+    ].join(' ');
+    expect(
+      creativeHistoryDisplayTitle(
+        {
+          title: internalCopy,
+          intent: internalCopy,
+          videoType: 'ip_person',
+        },
+        'video',
+      ),
+    ).toBe('IP人物视频');
+  });
+
+  it('keeps a real user video prompt visible', () => {
+    expect(
+      creativeHistoryDisplayTitle(
+        {
+          title: null,
+          intent: '让西高地在海边奔跑，镜头平稳跟随。',
+          videoType: 'normal',
+        },
+        'video',
+      ),
+    ).toBe('让西高地在海边奔跑，镜头平稳跟随。');
+  });
+
+  it('shows the user note instead of clone-video routing instructions', () => {
+    expect(
+      creativeHistoryDisplayTitle(
+        {
+          title: null,
+          intent: [
+            '复刻视频：使用上传照片替换参考视频中的主角，并保留参考视频的动作、镜头、节奏和音频。',
+            '任务备注（仅用于记录，不改变本次模型输入）：把主角换成我的西高地。',
+          ].join('\n'),
+          videoType: 'pet',
+        },
+        'video',
+      ),
+    ).toBe('把主角换成我的西高地。');
+  });
+
+  it('uses the clone-video label when there is no user note', () => {
+    expect(
+      creativeHistoryDisplayTitle(
+        {
+          title: null,
+          intent: '复刻视频：使用上传照片替换参考视频中的主角，并保留参考视频的动作、镜头、节奏和音频。',
+          videoType: 'pet',
+        },
+        'video',
+      ),
+    ).toBe('复刻视频');
   });
 });
 
