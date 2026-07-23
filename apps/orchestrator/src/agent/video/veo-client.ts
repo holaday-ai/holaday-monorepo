@@ -24,6 +24,7 @@
  *   The result video URI is served for ~2 days; download with x-goog-api-key.
  */
 
+import { videoParameterIssue } from '@holaday/shared-types';
 import { fetchWithTimeout, safeText, sleep, VideoHttpError } from './video-http.js';
 
 const DEFAULT_BASE_URL = 'https://generativelanguage.googleapis.com';
@@ -34,6 +35,7 @@ const DEFAULT_MAX_WAIT_MS = 360_000; // Veo can take up to ~6min at peak.
 
 export type VeoErrorKind =
   | 'no_api_key'
+  | 'invalid_argument'
   | 'permission_denied'
   | 'http'
   | 'op_failed'
@@ -108,13 +110,32 @@ export async function generateVeoVideo(p: GenerateVeoParams): Promise<VeoResult>
     throw new VeoError('GEMINI_API_KEY not configured', 'no_api_key');
   }
   const model = p.model ?? DEFAULT_MODEL;
+  const durationSeconds = p.durationSeconds ?? 4;
+  const resolution = p.resolution ?? '720p';
+  if (
+    videoParameterIssue({
+      model: model.includes('lite')
+        ? 'veo_lite'
+        : model.includes('fast')
+          ? 'veo_fast'
+          : 'veo_standard',
+      resolution,
+      durationSeconds,
+    })
+  ) {
+    throw new VeoError(
+      'Veo 1080p requires an 8-second duration',
+      'invalid_argument',
+      400,
+    );
+  }
   const fetchImpl = p.fetchImpl ?? fetch;
   const startedAt = Date.now();
 
   // --- submit ---
   const parameters: Record<string, unknown> = {
     aspectRatio: p.aspectRatio ?? '9:16',
-    durationSeconds: p.durationSeconds ?? 4,
+    durationSeconds,
   };
   if (p.resolution) parameters.resolution = p.resolution;
   let subRes: Response;

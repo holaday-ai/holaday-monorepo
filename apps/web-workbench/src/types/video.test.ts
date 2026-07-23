@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  reconcileNormalVideoParameters,
+  videoParameterIssue,
+} from '@holaday/shared-types';
+import {
   cloneModeFromVideoModel,
   estimateCloneCny,
   normalVideoModelFromSelection,
@@ -28,5 +32,51 @@ describe('clone video model contract', () => {
     expect(normalVideoModelFromSelection('veo_standard')).toBe('veo_standard');
     expect(normalVideoModelFromSelection('wan_animate_std')).toBe('veo_fast');
     expect(normalVideoModelFromSelection('wan_animate_pro')).toBe('veo_fast');
+  });
+});
+
+describe('normal video provider capability contract', () => {
+  it('marks Veo 1080p + 6 seconds as unsupported', () => {
+    expect(
+      videoParameterIssue({
+        model: 'veo_fast',
+        resolution: '1080p',
+        durationSeconds: 6,
+      }),
+    ).toBe('veo_1080p_requires_8s');
+  });
+
+  it('switches to 720p when the user explicitly chooses 6 seconds', () => {
+    expect(
+      reconcileNormalVideoParameters(
+        {
+          model: 'veo_fast',
+          resolution: '1080p',
+          durationSeconds: 6,
+        },
+        'duration',
+      ),
+    ).toEqual({
+      model: 'veo_fast',
+      resolution: '720p',
+      durationSeconds: 6,
+    });
+  });
+
+  it('switches to 8 seconds when the user explicitly chooses 1080p', () => {
+    expect(
+      reconcileNormalVideoParameters(
+        {
+          model: 'veo_fast',
+          resolution: '1080p',
+          durationSeconds: 6,
+        },
+        'resolution',
+      ),
+    ).toEqual({
+      model: 'veo_fast',
+      resolution: '1080p',
+      durationSeconds: 8,
+    });
   });
 });

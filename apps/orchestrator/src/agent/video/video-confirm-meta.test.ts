@@ -51,6 +51,15 @@ describe('mapVideoFailureReason — safe, whitelisted, no leak', () => {
     expect(mapVideoFailureReason({ name: 'IpVideoError', kind: 'config' })).toBe(VIDEO_FAILURE_REASONS.ipAssets);
   });
 
+  it('provider capability mismatches → actionable parameter copy', () => {
+    expect(
+      mapVideoFailureReason({ name: 'SimpleVideoError', kind: 'invalid_options' }),
+    ).toBe(VIDEO_FAILURE_REASONS.invalidOptions);
+    expect(
+      mapVideoFailureReason({ name: 'VeoError', kind: 'invalid_argument' }),
+    ).toBe(VIDEO_FAILURE_REASONS.invalidOptions);
+  });
+
   it('SimpleVideoError / unknown / null / string → generic', () => {
     expect(mapVideoFailureReason({ name: 'SimpleVideoError', kind: 'compose' })).toBe(VIDEO_FAILURE_REASONS.generic);
     expect(mapVideoFailureReason(new Error('raw internal boom'))).toBe(VIDEO_FAILURE_REASONS.generic);

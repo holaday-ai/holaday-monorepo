@@ -62,6 +62,27 @@ describe('generateVeoVideo', () => {
     });
   });
 
+  it('rejects 1080p + 6 seconds before making a paid provider request', async () => {
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls += 1;
+      throw new Error('provider request must not start');
+    }) as unknown as typeof fetch;
+
+    await expect(
+      generateVeoVideo({
+        apiKey: KEY,
+        prompt: 'x',
+        resolution: '1080p',
+        durationSeconds: 6,
+        fetchImpl,
+      }),
+    ).rejects.toMatchObject({
+      kind: 'invalid_argument',
+    });
+    expect(calls).toBe(0);
+  });
+
   it('throws no_api_key when key empty', async () => {
     await expect(generateVeoVideo({ apiKey: '', prompt: 'x' })).rejects.toMatchObject({ kind: 'no_api_key' });
   });

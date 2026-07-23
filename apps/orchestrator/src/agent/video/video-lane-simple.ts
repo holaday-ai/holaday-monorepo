@@ -25,6 +25,7 @@
 
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { videoParameterIssue } from '@holaday/shared-types';
 import { generateImages } from '../image/gemini-image-client.js';
 import { ffprobeDurationMs, renderImageClip, renderVideoClip, runFfmpeg } from './ffmpeg-exec.js';
 import { synthesizeSpeech } from './qwen-voice-clone-client.js';
@@ -125,7 +126,7 @@ function resolveVeoModel(source: VideoSource, cfg: SimpleVideoConfig): string {
   }
 }
 
-export type SimpleVideoErrorKind = 'config' | 'compose';
+export type SimpleVideoErrorKind = 'config' | 'compose' | 'invalid_options';
 export class SimpleVideoError extends Error {
   constructor(
     message: string,
@@ -372,6 +373,19 @@ export async function runSimpleVideoCreation(
   if (!cfg.dashscopeApiKey) throw new SimpleVideoError('DASHSCOPE_API_KEY not configured', 'config');
   const visualMode = opts.visualMode ?? 'video';
   const videoSource = opts.videoSource ?? 'veo_fast';
+  if (
+    visualMode === 'video' &&
+    videoParameterIssue({
+      model: videoSource,
+      resolution: opts.veoResolution ?? '1080p',
+      durationSeconds: opts.veoDurationSeconds ?? 8,
+    })
+  ) {
+    throw new SimpleVideoError(
+      'Veo 1080p requires an 8-second duration',
+      'invalid_options',
+    );
+  }
   const aspect = resolveAspect(opts.aspectRatio ?? '9:16');
   // Veo (any tier) AND nano banana image both run on the shared Google key.
   const needsGemini = visualMode === 'image' || (visualMode === 'video' && isVeoSource(videoSource));

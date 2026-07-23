@@ -1,4 +1,8 @@
 import {
+  reconcileNormalVideoParameters,
+  type NormalVideoModelId,
+} from '@holaday/shared-types';
+import {
   AlertCircle,
   ArrowUp,
   ChevronDown,
@@ -138,6 +142,30 @@ const CREATIVE_ACCEPT_IMAGES = '.png,.jpg,.jpeg,.webp,.gif,image/*';
 const CREATIVE_ACCEPT_REFERENCE_VIDEO = '.mp4,.mov,video/mp4,video/quicktime';
 const CREATIVE_MAX_ATTACHMENTS = 5;
 export const DEFAULT_IMAGE_COUNT: 1 | 2 | 3 | 4 = 1;
+
+export function normalVideoParametersAfterTabReturn(
+  model: VideoModel,
+  resolution: VideoResolution,
+  durationSeconds: VideoDuration,
+): {
+  model: NormalVideoModel;
+  resolution: VideoResolution;
+  durationSeconds: VideoDuration;
+} {
+  const next = reconcileNormalVideoParameters(
+    {
+      model: normalVideoModelFromSelection(model) as NormalVideoModelId,
+      resolution,
+      durationSeconds,
+    },
+    'resolution',
+  );
+  return {
+    model: next.model as NormalVideoModel,
+    resolution: next.resolution,
+    durationSeconds: next.durationSeconds as VideoDuration,
+  };
+}
 
 export function buildImageCreationOptions(
   model: ImageModel,
@@ -419,7 +447,7 @@ function CreativeStudioPage({
   const [vibeStyle, setVibeStyle] = React.useState<CreativeStyleKey>('random');
   const [lightingStyle, setLightingStyle] = React.useState<CreativeStyleKey>('random');
   const [colorStyle, setColorStyle] = React.useState<CreativeStyleKey>('random');
-  const [durationSeconds, setDurationSeconds] = React.useState<VideoDuration>(6);
+  const [durationSeconds, setDurationSeconds] = React.useState<VideoDuration>(8);
   const [aspectRatio, setAspectRatio] = React.useState<VideoAspect>(mode === 'image' ? '1:1' : '16:9');
   const [resolution, setResolution] = React.useState<VideoResolution>('1080p');
   const [imageCount, setImageCount] = React.useState<1 | 2 | 3 | 4>(DEFAULT_IMAGE_COUNT);
@@ -455,9 +483,60 @@ function CreativeStudioPage({
       return;
     }
     if (cloneModeFromVideoModel(model)) {
-      setModel('veo_fast');
+      const next = normalVideoParametersAfterTabReturn(model, resolution, durationSeconds);
+      setModel(next.model);
+      setResolution(next.resolution);
+      setDurationSeconds(next.durationSeconds);
     }
-  }, [isImage, model, videoTab]);
+  }, [durationSeconds, isImage, model, resolution, videoTab]);
+
+  function applyNormalVideoModel(nextModel: NormalVideoModel): void {
+    const next = reconcileNormalVideoParameters(
+      {
+        model: nextModel as NormalVideoModelId,
+        resolution,
+        durationSeconds,
+      },
+      'resolution',
+    );
+    setModel(nextModel);
+    if (next.durationSeconds !== durationSeconds) {
+      setDurationSeconds(next.durationSeconds as VideoDuration);
+      toast.show('Veo 1080p 仅支持 8 秒，已同步调整时长。', 'info', 3000);
+    }
+  }
+
+  function applyNormalVideoDuration(nextDuration: VideoDuration): void {
+    const next = reconcileNormalVideoParameters(
+      {
+        model: normalVideoModelFromSelection(model) as NormalVideoModelId,
+        resolution,
+        durationSeconds: nextDuration,
+      },
+      'duration',
+    );
+    setDurationSeconds(next.durationSeconds as VideoDuration);
+    if (next.resolution !== resolution) {
+      setResolution(next.resolution);
+      toast.show('Veo 6 秒仅支持 720p，已同步切换为 720p 标清。', 'info', 3000);
+    }
+  }
+
+  function applyNormalVideoResolution(nextResolution: VideoResolution): void {
+    const next = reconcileNormalVideoParameters(
+      {
+        model: normalVideoModelFromSelection(model) as NormalVideoModelId,
+        resolution: nextResolution,
+        durationSeconds,
+      },
+      'resolution',
+    );
+    setResolution(next.resolution);
+    if (next.durationSeconds !== durationSeconds) {
+      setDurationSeconds(next.durationSeconds as VideoDuration);
+      toast.show('Veo 1080p 仅支持 8 秒，已同步调整时长。', 'info', 3000);
+    }
+  }
 
   async function ingestCreativeFiles(files: FileList | File[], imageOnly = false): Promise<void> {
     const list = Array.from(files);
@@ -676,7 +755,7 @@ function CreativeStudioPage({
                   options={CREATIVE_MODEL_OPTIONS}
                   open={modelPickerOpen}
                   onOpenChange={setModelPickerOpen}
-                  onChange={(value) => setModel(value as VideoModel)}
+                  onChange={(value) => applyNormalVideoModel(value as NormalVideoModel)}
                   accent={accent}
                   modelKind="video"
                 />
@@ -723,7 +802,7 @@ function CreativeStudioPage({
                     { value: 6, label: '6s' },
                     { value: 8, label: '8s' },
                   ]}
-                  onChange={(value) => setDurationSeconds(value as VideoDuration)}
+                  onChange={(value) => applyNormalVideoDuration(value as VideoDuration)}
                   accent={accent}
                   compact
                 />
@@ -758,7 +837,9 @@ function CreativeStudioPage({
                   label="画质"
                   value={resolution === '1080p' ? '1080p 高清' : '720p 标清'}
                   options={['1080p 高清', '720p 标清']}
-                  onPick={(value) => setResolution(value.includes('720') ? '720p' : '1080p')}
+                  onPick={(value) =>
+                    applyNormalVideoResolution(value.includes('720') ? '720p' : '1080p')
+                  }
                 />
               ) : null}
             </div>

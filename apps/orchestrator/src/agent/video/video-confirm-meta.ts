@@ -25,6 +25,7 @@ export const VIDEO_FAILURE_REASONS = {
   face: '出镜底版检测不到清晰人脸，请换一段正脸清晰的视频后重试。',
   tooLong: '文案过长，请缩短后重试。',
   ipAssets: 'IP 素材或授权缺失，请重新完成「IP 人物」三步素材准备后重试。',
+  invalidOptions: '所选画质与时长不兼容，请返回修改参数后重试。',
   generic: '视频生成失败，请稍后重试。',
 } as const;
 
@@ -63,6 +64,12 @@ export function mapVideoFailureReason(err: unknown): string {
     if (kind === 'too_long') return VIDEO_FAILURE_REASONS.tooLong;
     if (kind === 'config') return VIDEO_FAILURE_REASONS.ipAssets;
     return VIDEO_FAILURE_REASONS.generic;
+  }
+  if (
+    (name === 'SimpleVideoError' && kind === 'invalid_options') ||
+    (name === 'VeoError' && kind === 'invalid_argument')
+  ) {
+    return VIDEO_FAILURE_REASONS.invalidOptions;
   }
   // SimpleVideoError (config/compose) + anything else → don't expose details.
   return VIDEO_FAILURE_REASONS.generic;

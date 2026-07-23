@@ -7,6 +7,7 @@ import {
   newExternalId,
   normalizeSkillIds,
   OPEN_POOL_ROLE_IDS,
+  videoParameterIssue,
   skillById,
   type PlanId,
 } from '@holaday/shared-types';
@@ -1731,6 +1732,19 @@ export const tasksRouter = router({
         // ===== end IP 人物分支 =====
 
         const style = vOpts.style as VideoStyle | undefined;
+        const tier: VideoSource = vOpts.model ?? 'veo_fast';
+        if (
+          videoParameterIssue({
+            model: tier,
+            resolution: vOpts.resolution ?? '1080p',
+            durationSeconds: vOpts.durationSeconds ?? 8,
+          })
+        ) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'Veo 1080p 仅支持 8 秒，请选择 8 秒或改用 720p 标清。',
+          });
+        }
         let script: VideoScript | null = null;
         try {
           // optimize = LLM(~¥0.01),**非 Veo**。出真实段数以便动态报价;风格只调画面语气。
@@ -1756,7 +1770,6 @@ export const tasksRouter = router({
           ctx.logger.error({ err, userId: ctx.userId }, 'video_creation: optimize(报价前) failed — 落通用');
         }
         if (script) {
-          const tier: VideoSource = vOpts.model ?? 'veo_fast';
           const quote = quoteVideo(script.segments.length, tier, {
             ...(vOpts.resolution ? { resolution: vOpts.resolution } : {}),
             ...(vOpts.durationSeconds ? { durationSeconds: vOpts.durationSeconds } : {}),
@@ -6600,6 +6613,19 @@ export const tasksRouter = router({
       const script = meta.videoScript;
       const tier: VideoSource = meta.videoTier ?? 'veo_fast';
       const vOpts = meta.videoOptions ?? {};
+      if (
+        choice === 'video' &&
+        videoParameterIssue({
+          model: tier,
+          resolution: vOpts.resolution ?? '1080p',
+          durationSeconds: vOpts.durationSeconds ?? 8,
+        })
+      ) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Veo 1080p 仅支持 8 秒，请返回视频任务修改参数后重新提交。',
+        });
+      }
       // 宠物 i2v / IP 换口型无脚本;普通文生必须有脚本(报价时存的).
       if (!isPet && !isIp && !script) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '报价脚本丢失' });
 

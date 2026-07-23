@@ -8,6 +8,7 @@ import {
   buildIpVideoIntent,
   buildVideoIntentWithCreativeStyles,
   inferVideoStyleOption,
+  normalVideoParametersAfterTabReturn,
 } from './VideoPage';
 
 describe('video creative style state', () => {
@@ -36,6 +37,14 @@ describe('video creative style state', () => {
         color: 'random',
       }),
     ).toBe('拍一条新品介绍短视频');
+  });
+
+  it('reconciles a clone-only 1080p + 6s selection when returning to normal video', () => {
+    expect(normalVideoParametersAfterTabReturn('wan_animate_std', '1080p', 6)).toEqual({
+      model: 'veo_fast',
+      resolution: '1080p',
+      durationSeconds: 8,
+    });
   });
 
   it('maps visual style picks onto supported backend style buckets', () => {

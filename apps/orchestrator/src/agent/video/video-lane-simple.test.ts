@@ -95,6 +95,27 @@ describe('runSimpleVideoCreation — video (default = veo_fast)', () => {
     expect(out.segments).toBe(2);
     expect(out.totalDurationMs).toBe(5000);
   });
+
+  it('rejects unsupported Veo parameters before TTS or video generation starts', async () => {
+    const { svc, mocks } = makeServices();
+
+    await expect(
+      runSimpleVideoCreation(
+        { userText: '讲讲夏天防晒' },
+        CFG,
+        {
+          videoSource: 'veo_fast',
+          veoResolution: '1080p',
+          veoDurationSeconds: 6,
+        },
+        svc,
+      ),
+    ).rejects.toMatchObject({
+      kind: 'invalid_options',
+    });
+    expect(mocks.synthesizeSpeech).not.toHaveBeenCalled();
+    expect(mocks.generateVeoVideo).not.toHaveBeenCalled();
+  });
 });
 
 describe('runSimpleVideoCreation — image (nano banana, static)', () => {

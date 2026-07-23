@@ -288,6 +288,46 @@ describe('tasks.confirm tRPC mutation (awaiting_user → executing | cancelled)'
     });
   });
 
+  it('confirmVideo rejects stale Veo 1080p + 6s quotes before consuming them', async () => {
+    const { userExternalId, taskId } = await makeUserWithVideoQuoteTask();
+    const { db } = await import('../../db/client.js');
+    const { eq } = await import('drizzle-orm');
+    const { tasks } = await import('../../db/schema/tasks.js');
+    await db
+      .update(tasks)
+      .set({
+        result: {
+          summary: '报价：确认制作 / 图片版 / 取消。',
+          metadata: {
+            lane: 'video_creation_confirm',
+            videoTier: 'veo_fast',
+            videoOptions: {
+              tab: 'normal',
+              model: 'veo_fast',
+              resolution: '1080p',
+              durationSeconds: 6,
+            },
+          },
+        },
+      })
+      .where(eq(tasks.externalId, taskId));
+
+    const { status } = await callTrpc(
+      'confirmVideo',
+      { taskId, choice: 'confirm_video' },
+      userExternalId,
+    );
+    expect(status).toBe(400);
+
+    const taskRow = must(
+      (await db.select().from(tasks).where(eq(tasks.externalId, taskId)))[0],
+      'taskRow',
+    );
+    expect(taskRow.status).toBe('awaiting_user');
+    expect(taskRow.awaitingKind).toBe('video_quote');
+    expect(taskRow.completedAt).toBeNull();
+  });
+
   it('confirmVideo cancel records a user cancellation event', async () => {
     const { userExternalId, taskId } = await makeUserWithVideoQuoteTask();
     const { status, json } = await callTrpc(
