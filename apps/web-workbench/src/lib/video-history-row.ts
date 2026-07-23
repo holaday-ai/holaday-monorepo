@@ -42,6 +42,54 @@ export interface VideoRow {
   starredAt?: string | number | Date | null;
 }
 
+export interface CreativeHistoryLoadState {
+  rows: VideoRow[] | null;
+  loading: boolean;
+  error: boolean;
+}
+
+export type CreativeHistoryLoadAction =
+  | { type: 'reset' }
+  | { type: 'start' }
+  | { type: 'success'; rows: VideoRow[] }
+  | { type: 'failure' }
+  | {
+      type: 'update_pin';
+      taskId: string;
+      starred: boolean;
+      starredAt: VideoRow['starredAt'];
+    };
+
+export function creativeHistoryLoadReducer(
+  state: CreativeHistoryLoadState,
+  action: CreativeHistoryLoadAction,
+): CreativeHistoryLoadState {
+  switch (action.type) {
+    case 'reset':
+      return { rows: null, loading: false, error: false };
+    case 'start':
+      return { ...state, loading: true, error: false };
+    case 'success':
+      return { rows: action.rows, loading: false, error: false };
+    case 'failure':
+      return { ...state, loading: false, error: true };
+    case 'update_pin':
+      return {
+        ...state,
+        rows:
+          state.rows?.map((row) =>
+            row.taskId === action.taskId
+              ? {
+                  ...row,
+                  starred: action.starred,
+                  starredAt: action.starredAt,
+                }
+              : row,
+          ) ?? null,
+      };
+  }
+}
+
 export function isVideoLane(lane: string | undefined): boolean {
   return typeof lane === 'string' && lane.startsWith('video_creation');
 }

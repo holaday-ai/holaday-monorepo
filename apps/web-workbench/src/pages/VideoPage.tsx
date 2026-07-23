@@ -47,6 +47,7 @@ import {
 } from '@/lib/video-task-selectors';
 import {
   creativeHistoryDisplayTitle,
+  creativeHistoryLoadReducer,
   filterCreativeHistoryRows,
   isLockedSubjectImageIntent,
   showImageOption,
@@ -1911,25 +1912,44 @@ function CreativeHistory({
   const navigate = useNavigate();
   const toast = useToast();
   const togglePin = useTaskStore((state) => state.togglePin);
-  const [rows, setRows] = React.useState<VideoRow[] | null>(null);
+  const [{ rows, loading, error: loadError }, dispatchLoad] = React.useReducer(
+    creativeHistoryLoadReducer,
+    { rows: null, loading: false, error: false },
+  );
   const [filter, setFilter] = React.useState<CreativeHistoryFilter>('all');
   const [pinningTaskId, setPinningTaskId] = React.useState<string | null>(null);
   const mountedRef = React.useRef(true);
+  const loadRequestRef = React.useRef(0);
 
   React.useEffect(() => {
     mountedRef.current = true;
-    void trpc.tasks.list.query({ limit: 30 }).then((res) => {
-      if (!mountedRef.current) return;
-      const mapper = mode === 'image' ? toImageRow : toVideoRow;
-      const list = (res?.tasks ?? []).map(mapper).filter((v): v is VideoRow => v != null);
-      setRows(list);
-    }).catch(() => {
-      if (mountedRef.current) setRows([]);
-    });
     return () => {
       mountedRef.current = false;
     };
-  }, [mode, refreshKey]);
+  }, []);
+
+  const loadHistory = React.useCallback(async () => {
+    const requestId = ++loadRequestRef.current;
+    dispatchLoad({ type: 'start' });
+    try {
+      const res = await trpc.tasks.list.query({ limit: 30 });
+      if (!mountedRef.current || requestId !== loadRequestRef.current) return;
+      const mapper = mode === 'image' ? toImageRow : toVideoRow;
+      const list = (res?.tasks ?? []).map(mapper).filter((v): v is VideoRow => v != null);
+      dispatchLoad({ type: 'success', rows: list });
+    } catch {
+      if (!mountedRef.current || requestId !== loadRequestRef.current) return;
+      dispatchLoad({ type: 'failure' });
+    }
+  }, [mode]);
+
+  React.useEffect(() => {
+    dispatchLoad({ type: 'reset' });
+  }, [mode]);
+
+  React.useEffect(() => {
+    void loadHistory();
+  }, [loadHistory, refreshKey]);
 
   const visible = React.useMemo(() => {
     if (!rows) return rows;
@@ -1948,25 +1968,25 @@ function CreativeHistory({
       if (pinningTaskId) return;
       const next = row.starred !== true;
       setPinningTaskId(row.taskId);
-      setRows((current) =>
-        current?.map((item) =>
-          item.taskId === row.taskId
-            ? { ...item, starred: next, starredAt: next ? new Date() : null }
-            : item,
-        ) ?? current,
-      );
+      dispatchLoad({
+        type: 'update_pin',
+        taskId: row.taskId,
+        starred: next,
+        starredAt: next ? new Date() : null,
+      });
       try {
         await togglePin(row.taskId, next);
         toast.show(next ? '已置顶作品' : '已取消置顶', 'info', 1800);
       } catch {
-        setRows((current) =>
-          current?.map((item) =>
-            item.taskId === row.taskId
-              ? { ...item, starred: row.starred, starredAt: row.starredAt ?? null }
-              : item,
-          ) ?? current,
-        );
-        toast.show('置顶状态更新失败，请重试', 'error');
+        if (mountedRef.current) {
+          dispatchLoad({
+            type: 'update_pin',
+            taskId: row.taskId,
+            starred: row.starred === true,
+            starredAt: row.starredAt ?? null,
+          });
+          toast.show('置顶状态更新失败，请重试', 'error');
+        }
       } finally {
         if (mountedRef.current) setPinningTaskId(null);
       }
@@ -2003,10 +2023,53 @@ function CreativeHistory({
           ))}
         </div>
       </div>
-      {visible === null ? (
-        <div className="flex min-h-[260px] items-center justify-center rounded-[24px] border border-dashed border-[#DCDDDD] bg-white p-8 text-[13px] text-muted-foreground">
-          历史加载中…
+      {loadError && rows !== null ? (
+        <div
+          className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-[8px] border border-[#F6D3DD] bg-[#FFF7F9] px-4 py-3 text-[13px] text-[#595757]"
+          role="status"
+        >
+          <span className="inline-flex items-center gap-2">
+            <AlertCircle className="h-4 w-4 shrink-0 text-[#EA1F59]" aria-hidden />
+            未能同步最新作品，当前展示上次已加载的内容。
+          </span>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => void loadHistory()}
+            disabled={loading}
+            className="h-8 border-[#F1B8C8] bg-white text-[#595757] hover:bg-white hover:text-[#EA1F59]"
+          >
+            {loading ? '重试中…' : '重新加载'}
+          </Button>
         </div>
+      ) : null}
+      {visible === null ? (
+        loadError ? (
+          <div
+            className="flex min-h-[260px] flex-col items-center justify-center rounded-[24px] border border-dashed border-[#DCDDDD] bg-white p-8 text-center"
+            role="alert"
+          >
+            <AlertCircle className="h-7 w-7 text-[#EA1F59]" aria-hidden />
+            <div className="mt-3 text-[14px] font-semibold text-[#111827]">历史生成暂时无法加载</div>
+            <div className="mt-1 text-[13px] text-muted-foreground">请检查网络后重试，加载失败不会删除已有作品。</div>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => void loadHistory()}
+              disabled={loading}
+              className="mt-4 border-[#DCDDDD] bg-white text-[#595757] hover:bg-white hover:text-[#EA1F59]"
+            >
+              {loading ? '重试中…' : '重新加载'}
+            </Button>
+          </div>
+        ) : (
+          <div className="flex min-h-[260px] items-center justify-center gap-2 rounded-[24px] border border-dashed border-[#DCDDDD] bg-white p-8 text-[13px] text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+            历史加载中…
+          </div>
+        )
       ) : visible.length === 0 ? (
         <div className="flex min-h-[260px] items-center justify-center rounded-[24px] border border-dashed border-[#DCDDDD] bg-white p-10 text-center text-[13px] text-muted-foreground">
           {emptyCopy}
@@ -2016,6 +2079,7 @@ function CreativeHistory({
           {visible.slice(0, 4).map((row) => {
             const download = row.download;
             if (!download) return null;
+            const displayTitle = creativeHistoryDisplayTitle(row, mode);
             return (
             <article
               key={row.taskId}
@@ -2029,7 +2093,7 @@ function CreativeHistory({
                 {row.posterUrl ? (
                   <LazyPosterImg
                     posterUrl={row.posterUrl}
-                    alt={row.title?.trim() || row.intent || '作品缩略图'}
+                    alt={displayTitle}
                     className="h-full w-full rounded-[22px] object-cover"
                   />
                 ) : (
@@ -2066,7 +2130,7 @@ function CreativeHistory({
                     </button>
                   </div>
                   <h2 className="line-clamp-3 text-[15px] font-semibold leading-7 text-[#8B93A6]">
-                    {creativeHistoryDisplayTitle(row, mode)}
+                    {displayTitle}
                   </h2>
                   <div className="mt-5 flex flex-wrap gap-2">
                     {row.status === 'partial_success' ? (

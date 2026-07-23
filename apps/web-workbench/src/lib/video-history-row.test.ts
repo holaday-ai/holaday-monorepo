@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   asVideoType,
   creativeHistoryDisplayTitle,
+  creativeHistoryLoadReducer,
   filterCreativeHistoryRows,
   isImageLane,
   isLockedSubjectImageIntent,
@@ -363,5 +364,79 @@ describe('creative history display copy', () => {
   it('detects locked-subject image history so the UI can show a concise badge', () => {
     expect(isLockedSubjectImageIntent(lockedIntent)).toBe(true);
     expect(isLockedSubjectImageIntent('生成图片：普通产品图')).toBe(false);
+  });
+});
+
+describe('creative history load state', () => {
+  const existingRow = {
+    taskId: 'img_existing',
+    intent: '生成图片：已存在作品',
+    title: null,
+    status: 'completed',
+    createdAt: '2026-07-23T00:00:00.000Z',
+    download: {
+      fileId: 'file_img',
+      downloadUrl: '/api/files/file_img/download',
+      filename: 'holaday-image.jpg',
+      size: 512_000,
+    },
+  };
+
+  it('shows an honest error state when the initial request fails', () => {
+    const loading = creativeHistoryLoadReducer(
+      { rows: null, loading: false, error: false },
+      { type: 'start' },
+    );
+    expect(creativeHistoryLoadReducer(loading, { type: 'failure' })).toEqual({
+      rows: null,
+      loading: false,
+      error: true,
+    });
+  });
+
+  it('preserves previously loaded work when a refresh fails', () => {
+    const current = { rows: [existingRow], loading: true, error: false };
+    expect(creativeHistoryLoadReducer(current, { type: 'failure' })).toEqual({
+      rows: [existingRow],
+      loading: false,
+      error: true,
+    });
+  });
+
+  it('replaces rows and clears the error after a successful retry', () => {
+    expect(
+      creativeHistoryLoadReducer(
+        { rows: null, loading: true, error: true },
+        { type: 'success', rows: [existingRow] },
+      ),
+    ).toEqual({
+      rows: [existingRow],
+      loading: false,
+      error: false,
+    });
+  });
+
+  it('updates one pin without clearing an in-flight load or cached error state', () => {
+    expect(
+      creativeHistoryLoadReducer(
+        { rows: [existingRow], loading: true, error: true },
+        {
+          type: 'update_pin',
+          taskId: existingRow.taskId,
+          starred: true,
+          starredAt: '2026-07-23T08:30:00.000Z',
+        },
+      ),
+    ).toEqual({
+      rows: [
+        {
+          ...existingRow,
+          starred: true,
+          starredAt: '2026-07-23T08:30:00.000Z',
+        },
+      ],
+      loading: true,
+      error: true,
+    });
   });
 });
