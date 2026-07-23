@@ -60,6 +60,30 @@ export function isVideoTaskRunning(status: string): boolean {
   );
 }
 
+export function currentMediaTaskText(input: {
+  status: string;
+  awaitingQuestion?: string;
+  liveSubStatusText?: string;
+  progress?: string;
+  streamingText?: string;
+  latestStepSummary?: string;
+  resultText?: string;
+}): string {
+  if (!isVideoTaskRunning(input.status) && input.status !== 'awaiting_user') {
+    return input.resultText?.trim() ?? '';
+  }
+
+  return (
+    input.awaitingQuestion?.trim() ||
+    input.liveSubStatusText?.trim() ||
+    input.progress?.trim() ||
+    input.streamingText?.trim() ||
+    input.latestStepSummary?.trim() ||
+    input.resultText?.trim() ||
+    ''
+  );
+}
+
 export function videoTaskStatusLabel(status: string): string {
   switch (status) {
     case 'awaiting_user':

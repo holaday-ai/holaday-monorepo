@@ -33,6 +33,7 @@ import { trpc } from '@/lib/trpc';
 import { uploadFailureMessage, uploadFile, uploadMediaFile } from '@/lib/upload-file';
 import { cn } from '@/lib/utils';
 import {
+  currentMediaTaskText,
   isVideoTaskRunning,
   selectStepsFor,
   shouldRefreshForTask,
@@ -1980,14 +1981,15 @@ function CurrentVideoTaskPanel({
   const abortTask = useTaskStore((s) => s.abortTask);
   const [confirming, setConfirming] = React.useState<string | null>(null);
   const latestStep = steps[steps.length - 1];
-  const liveText =
-    awaiting?.question ||
-    videoSubStatusCopy(subStatus) ||
-    progress ||
-    streamingText ||
-    latestStep?.actionSummary ||
-    task?.resultText ||
-    '';
+  const liveText = currentMediaTaskText({
+    status: task?.status ?? 'unknown',
+    awaitingQuestion: awaiting?.question,
+    liveSubStatusText: videoSubStatusCopy(subStatus),
+    progress,
+    streamingText,
+    latestStepSummary: latestStep?.actionSummary,
+    resultText: task?.resultText,
+  });
 
   async function confirmVideo(choice: 'confirm_video' | 'confirm_image' | 'cancel'): Promise<void> {
     if (confirming) return;

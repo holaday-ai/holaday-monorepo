@@ -135,6 +135,27 @@ describe('normaliseDetailStepStatus', () => {
 });
 
 describe('toUiTask', () => {
+  it('hydrates a persisted video quote awaiting kind from tasks.list', () => {
+    const task = toUiTask({
+      taskId: 'tsk_video_quote',
+      intent: '生成视频',
+      title: null,
+      status: 'awaiting_user',
+      awaitingKind: 'video_quote',
+      result: { summary: '请确认制作' },
+      errorMessage: null,
+      createdAt: new Date('2026-07-23T00:00:00Z'),
+      opusUsed: false,
+      starred: false,
+      starredAt: null,
+      projectId: null,
+      verificationPassed: null,
+      failureLevel: null,
+    } as never);
+
+    expect(task.awaitingKind).toBe('video_quote');
+  });
+
   it('preserves persisted pre-execution statuses for the product state machine', () => {
     for (const status of ['pending', 'planning', 'queued'] as const) {
       const task = toUiTask({
@@ -644,6 +665,39 @@ describe('task page merging', () => {
 });
 
 describe('refreshTaskList', () => {
+  it('keeps video quote controls stable while detail hydration follows a list refresh', async () => {
+    listQuery.mockResolvedValueOnce({
+      tasks: [
+        taskRow({
+          taskId: 'tsk_quote_refresh',
+          status: 'awaiting_user',
+          result: { summary: '请确认制作' },
+        }),
+      ],
+      nextCursor: null,
+    } as never);
+    detailQuery.mockReturnValueOnce(new Promise(() => {}) as never);
+    useTaskStore.setState({
+      selectedTaskId: 'tsk_quote_refresh',
+      composerMode: 'task',
+      tasks: [
+        task({
+          taskId: 'tsk_quote_refresh',
+          status: 'awaiting_user',
+          awaitingKind: 'video_quote',
+        }),
+      ],
+    });
+
+    await useTaskStore.getState().refreshTaskList();
+
+    expect(useTaskStore.getState().tasks[0]).toMatchObject({
+      taskId: 'tsk_quote_refresh',
+      status: 'awaiting_user',
+      awaitingKind: 'video_quote',
+    });
+  });
+
   it('does not let stale active first-page rows overwrite live terminal tasks', async () => {
     listQuery.mockResolvedValueOnce({
       tasks: [

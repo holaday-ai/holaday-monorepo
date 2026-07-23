@@ -500,16 +500,24 @@ function preserveFinalTaskRows(
 function preserveClientTaskContext(current: UiTask, incoming: UiTask): UiTask {
   const replyToTaskId = incoming.replyToTaskId ?? current.replyToTaskId;
   const executionMode = incoming.executionMode ?? current.executionMode;
+  const awaitingKind =
+    incoming.status === 'awaiting_user'
+      ? incoming.awaitingKind ??
+        (current.status === 'awaiting_user' ? current.awaitingKind : undefined)
+      : undefined;
   if (
     replyToTaskId === incoming.replyToTaskId &&
-    executionMode === incoming.executionMode
+    executionMode === incoming.executionMode &&
+    awaitingKind === incoming.awaitingKind
   ) {
     return incoming;
   }
+  const { awaitingKind: _incomingAwaitingKind, ...incomingWithoutAwaitingKind } = incoming;
   return {
-    ...incoming,
+    ...incomingWithoutAwaitingKind,
     ...(replyToTaskId ? { replyToTaskId } : {}),
     ...(executionMode ? { executionMode } : {}),
+    ...(awaitingKind ? { awaitingKind } : {}),
   };
 }
 
@@ -646,16 +654,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           detailStatus === 'awaiting_user'
             ? safeTaskListText(detail.awaitingQuestion) || null
             : null;
-        const awaitingKindRaw = detail.awaitingKind;
-        const awaitingKind: UiAwaitingUser['awaitingKind'] =
-          awaitingKindRaw === 'login' ||
-          awaitingKindRaw === 'captcha' ||
-          awaitingKindRaw === 'permission' ||
-          awaitingKindRaw === 'browser_action' ||
-          awaitingKindRaw === 'clarification' ||
-          awaitingKindRaw === 'video_quote'
-            ? awaitingKindRaw
-            : undefined;
+        const awaitingKind = normalizeAwaitingKind(detail.awaitingKind);
         const executionMode = extractExecutionMode(detail.result);
         const failedChecks = extractFailedChecks(detail.result);
         // Codex Pack A4 — verifier verdict columns from tasks.detail.
@@ -2563,6 +2562,10 @@ export function toUiTask(row: ListRow): UiTask {
     failureLevelRaw === 'hard_fail'
       ? failureLevelRaw
       : null;
+  const awaitingKind =
+    status === 'awaiting_user'
+      ? normalizeAwaitingKind((row as { awaitingKind?: unknown }).awaitingKind)
+      : undefined;
   return {
     taskId: safeTaskListText((row as { taskId?: unknown }).taskId),
     intent: safeTaskListText((row as { intent?: unknown }).intent) || '未命名任务',
@@ -2580,6 +2583,7 @@ export function toUiTask(row: ListRow): UiTask {
     ...(finalScreenshot ? { finalScreenshot } : {}),
     ...(finalUrl ? { finalUrl } : {}),
     ...(finalViewport ? { finalViewport } : {}),
+    ...(awaitingKind ? { awaitingKind } : {}),
     // tRPC serializes Date to string over the wire; coerce back.
     createdAt: new Date(safeTaskListDate((row as { createdAt?: unknown }).createdAt) ?? 0),
     modelLabel: opusUsed ? 'opus' : 'sonnet',
@@ -2596,6 +2600,17 @@ export function toUiTask(row: ListRow): UiTask {
 function safeNullableTaskListText(value: unknown): string | null {
   const text = safeTaskListText(value);
   return text || null;
+}
+
+function normalizeAwaitingKind(value: unknown): UiAwaitingUser['awaitingKind'] {
+  return value === 'login' ||
+    value === 'captcha' ||
+    value === 'permission' ||
+    value === 'browser_action' ||
+    value === 'clarification' ||
+    value === 'video_quote'
+    ? value
+    : undefined;
 }
 
 function safeTaskListText(value: unknown): string {

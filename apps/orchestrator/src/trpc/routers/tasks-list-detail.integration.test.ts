@@ -189,6 +189,55 @@ describe('tRPC tasks.list + tasks.detail', () => {
     }
   });
 
+  it('tasks.list includes awaiting metadata needed to render stable recovery controls', async () => {
+    const user = await seedUser();
+    const { newExternalId } = await import('@holaday/shared-types');
+    const { db } = await import('../../db/client.js');
+    const { tasks } = await import('../../db/schema/tasks.js');
+    const { eq } = await import('drizzle-orm');
+    const taskId = newExternalId('task');
+    await db.insert(tasks).values({
+      externalId: taskId,
+      userId: user.internalId,
+      status: 'awaiting_user',
+      intent: 'video quote awaiting confirmation',
+      awaitingKind: 'video_quote',
+      awaitingQuestion: '确认制作这个视频吗？',
+      result: { summary: '请确认制作' },
+    });
+
+    const { port, signAccessToken, close } = await bootTrpcServer();
+    try {
+      const token = await signAccessToken({ sub: user.external, plan: 'free' });
+      const response = await fetch(
+        `http://127.0.0.1:${port}/trpc/tasks.list?input=${encodeURIComponent(
+          JSON.stringify({ limit: 10 }),
+        )}`,
+        { headers: { authorization: `Bearer ${token}` } },
+      );
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as {
+        result: {
+          data: {
+            tasks: Array<{
+              taskId: string;
+              awaitingKind?: string | null;
+              awaitingQuestion?: string | null;
+            }>;
+          };
+        };
+      };
+      const listed = body.result.data.tasks.find((task) => task.taskId === taskId);
+      expect(listed).toMatchObject({
+        awaitingKind: 'video_quote',
+        awaitingQuestion: '确认制作这个视频吗？',
+      });
+    } finally {
+      await close();
+      await db.delete(tasks).where(eq(tasks.externalId, taskId));
+    }
+  });
+
   it('tasks.list omits a large terminal screenshot before returning history rows', async () => {
     const user = await seedUser();
     const { newExternalId } = await import('@holaday/shared-types');

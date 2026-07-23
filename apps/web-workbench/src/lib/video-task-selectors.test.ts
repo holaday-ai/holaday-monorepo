@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { UiStep } from '@/types/task';
 import {
   EMPTY_STEPS,
+  currentMediaTaskText,
   isVideoTaskRunning,
   selectStepsFor,
   shouldRefreshForTask,
@@ -99,5 +100,42 @@ describe('video task product status helpers', () => {
     expect(videoTaskStatusIconKind('failed')).toBe('failed');
     expect(videoTaskStatusIconKind('cancelled')).toBe('inactive');
     expect(videoTaskStatusIconKind('executing')).toBe('running');
+  });
+
+  it('never leaks stale live progress into a terminal media task', () => {
+    expect(
+      currentMediaTaskText({
+        status: 'completed',
+        resultText: '图片生成完成。',
+        liveSubStatusText: '正在生成图片…',
+        progress: '正在生成图片…',
+        streamingText: '仍在处理中…',
+      }),
+    ).toBe('图片生成完成。');
+
+    expect(
+      currentMediaTaskText({
+        status: 'completed',
+        progress: '正在生成图片…',
+      }),
+    ).toBe('');
+  });
+
+  it('keeps live progress visible while a media task is active or awaiting confirmation', () => {
+    expect(
+      currentMediaTaskText({
+        status: 'executing',
+        liveSubStatusText: '正在生成视频…',
+        progress: '已完成 1/3 段',
+      }),
+    ).toBe('正在生成视频…');
+
+    expect(
+      currentMediaTaskText({
+        status: 'awaiting_user',
+        awaitingQuestion: '请确认报价',
+        progress: '正在估价…',
+      }),
+    ).toBe('请确认报价');
   });
 });
