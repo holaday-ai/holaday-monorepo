@@ -34,6 +34,7 @@ import { FileDownloadCard } from '@/components/FileDownloadCard';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/toast';
+import { revokeCreativePreviewUrls } from '@/lib/creative-preview-urls';
 import { taskDisplaySource } from '@/lib/task-display-copy';
 import { trpc } from '@/lib/trpc';
 import { uploadFailureMessage, uploadFile, uploadMediaFile } from '@/lib/upload-file';
@@ -478,6 +479,8 @@ function CreativeStudioPage({
   const [resolution, setResolution] = React.useState<VideoResolution>('1080p');
   const [imageCount, setImageCount] = React.useState<1 | 2 | 3 | 4>(DEFAULT_IMAGE_COUNT);
   const [attachments, setAttachments] = React.useState<DraftAttachment[]>([]);
+  const attachmentsRef = React.useRef(attachments);
+  attachmentsRef.current = attachments;
   const [submitting, setSubmitting] = React.useState(false);
   const imageInputRef = React.useRef<HTMLInputElement>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
@@ -499,6 +502,13 @@ function CreativeStudioPage({
   React.useEffect(() => {
     setAspectRatio(isImage ? '1:1' : '16:9');
   }, [isImage]);
+
+  React.useEffect(
+    () => () => {
+      revokeCreativePreviewUrls(attachmentsRef.current);
+    },
+    [],
+  );
 
   React.useEffect(() => {
     const previous = previousVideoTabRef.current;
