@@ -50,6 +50,7 @@ import {
   creativeHistoryLoadReducer,
   filterCreativeHistoryRows,
   isLockedSubjectImageIntent,
+  nextCreativeHistoryVisibleCount,
   showImageOption,
   toImageRow,
   toVideoRow,
@@ -57,6 +58,7 @@ import {
   type VideoRow,
   type VideoType,
 } from '@/lib/video-history-row';
+import { normalizeTaskHubCursor } from '@/lib/task-hub-state';
 import { ipRenderingHint } from '@/lib/video-ip-estimate';
 import { LazyPosterImg } from '@/components/LazyPosterImg';
 import { PageContainer, Section } from '@/pages/PageShell';
@@ -88,6 +90,11 @@ import {
  */
 
 type CreativeMode = 'video' | 'image';
+
+const CREATIVE_HISTORY_FETCH_SIZE = 50;
+const CREATIVE_HISTORY_VISIBLE_PAGE_SIZE = 4;
+const CREATIVE_HISTORY_SCAN_PAGES_PER_CLICK = 5;
+const CREATIVE_HISTORY_TERMINAL_STATUSES = ['completed', 'partial_success'] as const;
 type VideoTab = 'normal' | 'pet' | 'ip';
 type ImageGenerationMode = 'free' | 'lock_subject';
 type CreativeModelValue = VideoModel | ImageModel;
@@ -1918,6 +1925,12 @@ function CreativeHistory({
   );
   const [filter, setFilter] = React.useState<CreativeHistoryFilter>('all');
   const [pinningTaskId, setPinningTaskId] = React.useState<string | null>(null);
+  const [nextCursor, setNextCursor] = React.useState<number | null>(null);
+  const [visibleCount, setVisibleCount] = React.useState(
+    CREATIVE_HISTORY_VISIBLE_PAGE_SIZE,
+  );
+  const [loadingMore, setLoadingMore] = React.useState(false);
+  const [loadMoreError, setLoadMoreError] = React.useState(false);
   const mountedRef = React.useRef(true);
   const loadRequestRef = React.useRef(0);
 
@@ -1931,12 +1944,19 @@ function CreativeHistory({
   const loadHistory = React.useCallback(async () => {
     const requestId = ++loadRequestRef.current;
     dispatchLoad({ type: 'start' });
+    setLoadingMore(false);
+    setLoadMoreError(false);
     try {
-      const res = await trpc.tasks.list.query({ limit: 30 });
+      const res = await trpc.tasks.list.query({
+        limit: CREATIVE_HISTORY_FETCH_SIZE,
+        status: [...CREATIVE_HISTORY_TERMINAL_STATUSES],
+      });
       if (!mountedRef.current || requestId !== loadRequestRef.current) return;
       const mapper = mode === 'image' ? toImageRow : toVideoRow;
       const list = (res?.tasks ?? []).map(mapper).filter((v): v is VideoRow => v != null);
       dispatchLoad({ type: 'success', rows: list });
+      setNextCursor(normalizeTaskHubCursor(res?.nextCursor));
+      setVisibleCount(CREATIVE_HISTORY_VISIBLE_PAGE_SIZE);
     } catch {
       if (!mountedRef.current || requestId !== loadRequestRef.current) return;
       dispatchLoad({ type: 'failure' });
@@ -1945,11 +1965,20 @@ function CreativeHistory({
 
   React.useEffect(() => {
     dispatchLoad({ type: 'reset' });
+    setNextCursor(null);
+    setVisibleCount(CREATIVE_HISTORY_VISIBLE_PAGE_SIZE);
+    setLoadingMore(false);
+    setLoadMoreError(false);
   }, [mode]);
 
   React.useEffect(() => {
     void loadHistory();
   }, [loadHistory, refreshKey]);
+
+  React.useEffect(() => {
+    setVisibleCount(CREATIVE_HISTORY_VISIBLE_PAGE_SIZE);
+    setLoadMoreError(false);
+  }, [filter, videoType]);
 
   const visible = React.useMemo(() => {
     if (!rows) return rows;
@@ -1962,6 +1991,58 @@ function CreativeHistory({
       : filter === 'recent'
         ? `最近 7 天暂无${mode === 'image' ? '图片' : '视频'}作品。`
         : `暂无${mode === 'image' ? '图片' : '视频'}作品，先在上方创建一个。`;
+
+  const loadOlderHistory = React.useCallback(async () => {
+    if (loadingMore || nextCursor === null) return;
+
+    const requestId = ++loadRequestRef.current;
+    let cursor: number | null = nextCursor;
+    const collected: VideoRow[] = [];
+    let foundVisibleRow = false;
+
+    setLoadingMore(true);
+    setLoadMoreError(false);
+    try {
+      for (
+        let page = 0;
+        cursor !== null &&
+        !foundVisibleRow &&
+        page < CREATIVE_HISTORY_SCAN_PAGES_PER_CLICK;
+        page += 1
+      ) {
+        const res = await trpc.tasks.list.query({
+          limit: CREATIVE_HISTORY_FETCH_SIZE,
+          cursor,
+          status: [...CREATIVE_HISTORY_TERMINAL_STATUSES],
+        });
+        if (!mountedRef.current || requestId !== loadRequestRef.current) return;
+
+        const mapper = mode === 'image' ? toImageRow : toVideoRow;
+        const pageRows = (res?.tasks ?? [])
+          .map(mapper)
+          .filter((value): value is VideoRow => value != null);
+        collected.push(...pageRows);
+        foundVisibleRow =
+          filterCreativeHistoryRows(pageRows, { mode, videoType, filter }).length > 0;
+        cursor = normalizeTaskHubCursor(res?.nextCursor);
+      }
+
+      if (!mountedRef.current || requestId !== loadRequestRef.current) return;
+      dispatchLoad({ type: 'append', rows: collected });
+      setNextCursor(cursor);
+      if (foundVisibleRow) {
+        setVisibleCount((count) => count + CREATIVE_HISTORY_VISIBLE_PAGE_SIZE);
+      }
+    } catch {
+      if (mountedRef.current && requestId === loadRequestRef.current) {
+        setLoadMoreError(true);
+      }
+    } finally {
+      if (mountedRef.current && requestId === loadRequestRef.current) {
+        setLoadingMore(false);
+      }
+    }
+  }, [filter, loadingMore, mode, nextCursor, videoType]);
 
   const handleTogglePin = React.useCallback(
     async (row: VideoRow) => {
@@ -2076,7 +2157,7 @@ function CreativeHistory({
         </div>
       ) : (
         <div className="space-y-5">
-          {visible.slice(0, 4).map((row) => {
+          {visible.slice(0, visibleCount).map((row) => {
             const download = row.download;
             if (!download) return null;
             const displayTitle = creativeHistoryDisplayTitle(row, mode);
@@ -2165,6 +2246,56 @@ function CreativeHistory({
           })}
         </div>
       )}
+      {visible !== null &&
+      (visibleCount < visible.length || nextCursor !== null || loadMoreError) ? (
+        <div className="mt-6 flex flex-col items-center gap-3 border-t border-[#EFEFEF] pt-5">
+          {loadMoreError ? (
+            <div
+              className="inline-flex items-center gap-2 text-[13px] text-[#8B93A6]"
+              role="alert"
+            >
+              <AlertCircle className="h-4 w-4 text-[#EA1F59]" aria-hidden />
+              更早作品暂时无法加载，当前内容已保留。
+            </div>
+          ) : null}
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={loadingMore}
+            onClick={() => {
+              if (visibleCount < visible.length) {
+                setVisibleCount((count) =>
+                  nextCreativeHistoryVisibleCount(
+                    count,
+                    visible.length,
+                    CREATIVE_HISTORY_VISIBLE_PAGE_SIZE,
+                  ),
+                );
+                return;
+              }
+              void loadOlderHistory();
+            }}
+            className="h-9 min-w-[148px] gap-2 rounded-[8px] border-[#DCDDDD] bg-white px-4 text-[#595757] shadow-none hover:border-[#B8BBC2] hover:bg-[#FAFAFA] hover:text-[#111827]"
+          >
+            {loadingMore ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                正在查找…
+              </>
+            ) : (
+              <>
+                <ChevronDown className="h-4 w-4" aria-hidden />
+                {visibleCount < visible.length
+                  ? '显示更多作品'
+                  : filter === 'pinned'
+                    ? '查找更早置顶作品'
+                    : '查找更早作品'}
+              </>
+            )}
+          </Button>
+        </div>
+      ) : null}
     </section>
   );
 }

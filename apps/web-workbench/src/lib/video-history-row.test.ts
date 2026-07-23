@@ -7,6 +7,8 @@ import {
   isImageLane,
   isLockedSubjectImageIntent,
   isVideoLane,
+  mergeCreativeHistoryRows,
+  nextCreativeHistoryVisibleCount,
   showImageOption,
   toImageRow,
   toVideoRow,
@@ -438,5 +440,28 @@ describe('creative history load state', () => {
       loading: true,
       error: true,
     });
+  });
+
+  it('appends older pages without duplicating rows already shown', () => {
+    const olderRow = {
+      ...existingRow,
+      taskId: 'img_older',
+      createdAt: '2026-07-22T00:00:00.000Z',
+    };
+    expect(
+      creativeHistoryLoadReducer(
+        { rows: [existingRow], loading: false, error: false },
+        { type: 'append', rows: [existingRow, olderRow] },
+      ).rows?.map((row) => row.taskId),
+    ).toEqual(['img_existing', 'img_older']);
+    expect(mergeCreativeHistoryRows([existingRow], [existingRow, olderRow])).toHaveLength(2);
+  });
+});
+
+describe('creative history progressive disclosure', () => {
+  it('reveals four more rows at a time and clamps to the total', () => {
+    expect(nextCreativeHistoryVisibleCount(4, 11)).toBe(8);
+    expect(nextCreativeHistoryVisibleCount(8, 11)).toBe(11);
+    expect(nextCreativeHistoryVisibleCount(11, 11)).toBe(11);
   });
 });

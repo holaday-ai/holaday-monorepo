@@ -52,6 +52,7 @@ export type CreativeHistoryLoadAction =
   | { type: 'reset' }
   | { type: 'start' }
   | { type: 'success'; rows: VideoRow[] }
+  | { type: 'append'; rows: VideoRow[] }
   | { type: 'failure' }
   | {
       type: 'update_pin';
@@ -71,6 +72,11 @@ export function creativeHistoryLoadReducer(
       return { ...state, loading: true, error: false };
     case 'success':
       return { rows: action.rows, loading: false, error: false };
+    case 'append':
+      return {
+        ...state,
+        rows: mergeCreativeHistoryRows(state.rows ?? [], action.rows),
+      };
     case 'failure':
       return { ...state, loading: false, error: true };
     case 'update_pin':
@@ -88,6 +94,29 @@ export function creativeHistoryLoadReducer(
           ) ?? null,
       };
   }
+}
+
+export function mergeCreativeHistoryRows(
+  current: readonly VideoRow[],
+  incoming: readonly VideoRow[],
+): VideoRow[] {
+  const seen = new Set(current.map((row) => row.taskId));
+  return [
+    ...current,
+    ...incoming.filter((row) => {
+      if (seen.has(row.taskId)) return false;
+      seen.add(row.taskId);
+      return true;
+    }),
+  ];
+}
+
+export function nextCreativeHistoryVisibleCount(
+  current: number,
+  total: number,
+  pageSize = 4,
+): number {
+  return Math.min(total, current + pageSize);
 }
 
 export function isVideoLane(lane: string | undefined): boolean {
