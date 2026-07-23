@@ -2,6 +2,7 @@ import type { UiScreencast, UiTask } from '@/types/task';
 import type { ConnStatus } from '@/lib/ws';
 import type { SidePanelMode, SidePanelOverride } from '@/types/side-panel';
 import { deriveTaskProductState } from '@/lib/task-product-state';
+import { taskDisplayTitle } from '@/lib/task-display-copy';
 
 export interface WorkbenchToastCopy {
   message: string;
@@ -126,7 +127,7 @@ export function followUpTargetForTask(input: {
 
   return {
     taskId: selectedTaskId,
-    title: (selectedTask.title || selectedTask.intent || '').slice(0, 40),
+    title: taskDisplayTitle(selectedTask, 40),
   };
 }
 

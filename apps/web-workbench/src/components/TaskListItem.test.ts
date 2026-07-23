@@ -63,6 +63,17 @@ describe('taskDisplayTitle', () => {
       ),
     ).toBe('夏日新品主视觉。');
   });
+
+  it('does not treat an ordinary question about image settings as routing copy', () => {
+    const row = task({ intent: '请解释图片设置：尺寸和压缩率分别有什么影响？' });
+
+    expect(taskDisplaySource(row)).toBe(
+      '请解释图片设置：尺寸和压缩率分别有什么影响？',
+    );
+    expect(taskDisplayTitle(row, 40)).toBe(
+      '解释图片设置：尺寸和压缩率分别有什么影响？',
+    );
+  });
 });
 
 describe('taskListItemSubtitle', () => {

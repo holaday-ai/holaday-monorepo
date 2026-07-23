@@ -1,5 +1,6 @@
 import { pageErrorMessage } from './page-error-copy';
 import type { AwaitingKind } from './awaiting-user-copy';
+import { taskDisplayTitle } from './task-display-copy';
 import { deriveTaskProductState } from './task-product-state';
 
 export type HistoryStatusFilter = 'all' | 'completed' | 'review' | 'failed' | 'running';
@@ -65,6 +66,13 @@ export interface NormalizedTaskHubRow {
 export interface TaskHubInlineErrorCopy {
   readonly title: string;
   readonly body: string;
+}
+
+export function taskHubRowTitle(
+  row: Pick<NormalizedTaskHubRow, 'intent' | 'title'>,
+  maxLength = 60,
+): string {
+  return taskDisplayTitle(row, maxLength);
 }
 
 export function hasHistoryFilters({

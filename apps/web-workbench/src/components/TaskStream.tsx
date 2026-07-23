@@ -109,6 +109,7 @@ import { trpc } from '@/lib/trpc';
 import { useTaskStore } from '@/stores/task-store';
 import { showImageOption } from '@/lib/video-history-row';
 import { cn } from '@/lib/utils';
+import { taskDisplayIntent } from '@/lib/task-display-copy';
 import type {
   UiAwaitingUser,
   UiCaptchaWait,
@@ -251,7 +252,7 @@ export function TaskStream({
 
   return (
     <div className="mx-auto max-w-3xl space-y-4 px-6 pb-10 pt-8 sm:pb-6">
-      <UserBubble intent={task.intent} />
+      <UserBubble intent={taskDisplayIntent(task.intent)} />
       {userReplies.map((r) => (
         <UserBubble key={r.at} intent={r.text} />
       ))}

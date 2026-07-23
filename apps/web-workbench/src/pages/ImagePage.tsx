@@ -15,6 +15,7 @@ import { useToast } from '@/components/ui/toast';
 import { toImageHistoryRow, type ImageHistoryRow } from '@/lib/image-history-row';
 import { uploadFailureMessage, uploadFile } from '@/lib/upload-file';
 import { cn } from '@/lib/utils';
+import { taskDisplaySource } from '@/lib/task-display-copy';
 import { PageContainer, Section } from '@/pages/PageShell';
 import { useTaskStore } from '@/stores/task-store';
 
@@ -266,7 +267,7 @@ function ImageHistory({ rows }: { rows: ImageHistoryRow[] }): JSX.Element {
                   className="min-w-0 text-left"
                 >
                   <div className="truncate text-[13px] font-semibold text-foreground hover:text-[#1688AA]">
-                    {row.title || row.intent || '图片任务'}
+                    {taskDisplaySource(row)}
                   </div>
                   <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
                     <span>{formatTime(row.createdAt)}</span>

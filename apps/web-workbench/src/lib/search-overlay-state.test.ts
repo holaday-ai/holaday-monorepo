@@ -185,6 +185,38 @@ describe('search overlay state helpers', () => {
     });
   });
 
+  it('shows only the user prompt for image tasks with internal routing copy', () => {
+    const intent = [
+      '生成图片：让同一只西高地坐在海边。',
+      '图片风格要求：电影感、柔和逆光。',
+      '主体一致性要求：请以用户上传的第一张图片作为锁定主角。',
+    ].join('\n\n');
+
+    expect(
+      searchOverlayRowCopy({
+        intent,
+        title: '主体一致性要求：请以用户上传的第一张图片作为锁定主角。',
+        status: 'completed',
+        awaitingKind: null,
+      }),
+    ).toEqual({
+      title: '让同一只西高地坐在海边。',
+      secondary: '',
+    });
+
+    expect(
+      searchOverlayRowCopy({
+        intent,
+        title: '夏日活动主视觉',
+        status: 'completed',
+        awaitingKind: null,
+      }),
+    ).toEqual({
+      title: '夏日活动主视觉',
+      secondary: '让同一只西高地坐在海边。',
+    });
+  });
+
   it('preserves unknown string statuses so search results do not fake queued state', () => {
     expect(
       normalizeSearchOverlayRows([

@@ -18,6 +18,7 @@ import {
   taskHubLoadErrorCopy,
   taskHubLoadMoreErrorCopy,
   taskHubNeedsAttention,
+  taskHubRowTitle,
   taskHubRowTone,
   taskHubStatusIconKind,
   type HistoryRangeFilter,
@@ -398,7 +399,7 @@ export function HistoryPage(): JSX.Element {
                       <StatusIcon task={t} />
                       <div className="min-w-0 flex-1 px-1">
                         <div className="truncate text-sm font-medium group-hover:text-[#EA1F59]">
-                          {t.intent || '未命名任务'}
+                          {taskHubRowTitle(t)}
                         </div>
                         <div className="mt-0.5 text-[11px] text-muted-foreground">
                           {needsAttention ? (

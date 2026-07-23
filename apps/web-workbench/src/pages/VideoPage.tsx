@@ -34,6 +34,7 @@ import { FileDownloadCard } from '@/components/FileDownloadCard';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/toast';
+import { taskDisplaySource } from '@/lib/task-display-copy';
 import { trpc } from '@/lib/trpc';
 import { uploadFailureMessage, uploadFile, uploadMediaFile } from '@/lib/upload-file';
 import { cn } from '@/lib/utils';
@@ -2414,7 +2415,7 @@ function CurrentVideoTaskPanel({
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-[14px] font-medium text-foreground">
-                  {task.title?.trim() || task.intent || '视频任务'}
+                  {taskDisplaySource(task)}
                 </span>
                 <span className="rounded-full border border-[#DCDDDD] bg-white px-2 py-0.5 text-[11px] text-muted-foreground">
                   {videoTaskStatusLabel(task.status)}

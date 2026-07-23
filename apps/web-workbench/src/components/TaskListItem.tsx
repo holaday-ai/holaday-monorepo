@@ -1,10 +1,15 @@
 import { Check, MoreHorizontal } from 'lucide-react';
 import * as React from 'react';
 import { awaitingUserCopy } from '@/lib/awaiting-user-copy';
+import {
+  taskDisplaySource,
+  taskDisplayTitle,
+} from '@/lib/task-display-copy';
 import { deriveTaskProductState } from '@/lib/task-product-state';
 import { cn } from '@/lib/utils';
 import { type UiTask, isActive } from '@/types/task';
-import { summariseIntent } from '@/utils/summarise-intent';
+
+export { taskDisplaySource, taskDisplayTitle } from '@/lib/task-display-copy';
 
 interface Props {
   task: UiTask;
@@ -56,59 +61,6 @@ const LIVE_SUB_STATUS_LABELS: Record<TaskLiveSubStatus, string> = {
   generating: '正在生成回答',
   generating_image: '正在生成图片',
 };
-
-/**
- * Returns the user-facing source copy for a task row. Image-generation
- * routing details remain on the stored intent for execution and audit, but
- * must not leak into sidebar labels, hover text, or rename inputs.
- */
-export function taskDisplaySource(
-  task: Pick<UiTask, 'intent' | 'title'>,
-): string {
-  const rawTitle = task.title?.trim() ?? '';
-  const cleanTitle = cleanCreativeTaskCopy(rawTitle);
-  if (cleanTitle) return cleanTitle;
-
-  const rawIntent = task.intent.trim();
-  const cleanIntent = cleanCreativeTaskCopy(rawIntent);
-  return cleanIntent || rawTitle || rawIntent || '未命名任务';
-}
-
-/**
- * Resolves the short display label for a task row. A real user-created title
- * keeps priority; generated intents additionally use the existing polite-copy
- * summariser before truncation.
- */
-export function taskDisplayTitle(task: UiTask, maxLen = 24): string {
-  const source = taskDisplaySource(task);
-  const rawTitle = task.title?.trim() ?? '';
-  if (rawTitle && cleanCreativeTaskCopy(rawTitle)) {
-    return truncateTaskDisplayText(source, maxLen);
-  }
-  const summary = summariseIntent(source, maxLen);
-  return summary || truncateTaskDisplayText(source, maxLen);
-}
-
-function cleanCreativeTaskCopy(source: string): string {
-  if (!source) return '';
-  let clean = source.trim();
-  const internalSection = clean.search(
-    /(?:图片设置|图片风格要求|主体一致性要求)[：:]/u,
-  );
-  if (internalSection >= 0) {
-    clean = clean.slice(0, internalSection).trim();
-  }
-  return clean
-    .replace(/^生成(?:一张)?图片[：:]\s*/u, '')
-    .replace(/^基于上传的参考图片进行图生图或图片编辑[：:]\s*/u, '')
-    .trim();
-}
-
-function truncateTaskDisplayText(source: string, maxLen: number): string {
-  if (source.length <= maxLen) return source;
-  if (maxLen <= 1) return '…';
-  return `${source.slice(0, maxLen - 1).trim()}…`;
-}
 
 /**
  * One row in the sidebar task list, Claude-style. Single-line intent

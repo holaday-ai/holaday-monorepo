@@ -184,6 +184,29 @@ describe('workbench state helpers', () => {
     });
   });
 
+  it('uses cleaned user copy in the follow-up target label', () => {
+    expect(
+      followUpTargetForTask({
+        selectedTask: task({
+          status: 'completed',
+          executionMode: 'image',
+          resultText: '图片已生成。',
+          title: '主体一致性要求：请以用户上传的第一张图片作为锁定主角。',
+          intent: [
+            '生成图片：让同一只西高地坐在海边。',
+            '图片风格要求：电影感、柔和逆光。',
+            '主体一致性要求：请以用户上传的第一张图片作为锁定主角。',
+          ].join('\n\n'),
+        }),
+        selectedTaskId: 'tsk_test',
+        selectedNeedsUser: false,
+      }),
+    ).toEqual({
+      taskId: 'tsk_test',
+      title: '让同一只西高地坐在海边。',
+    });
+  });
+
   it('keeps browser follow-up available after failed or cancelled terminal tasks', () => {
     for (const status of ['failed', 'cancelled'] as const) {
       expect(

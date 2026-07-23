@@ -22,6 +22,7 @@ import { Button } from '@/components/ui/button';
 import type { ComposerSubmitResult } from '@/components/composer-submit';
 import { shouldResetComposerOnSelectionChange } from '@/components/composer-reset';
 import { cn } from '@/lib/utils';
+import { taskDisplayIntent, taskDisplaySource } from '@/lib/task-display-copy';
 import { taskStatusLabel } from '@/lib/task-status-copy';
 import { useTaskStore } from '@/stores/task-store';
 import type { AwaitingKind } from '@/lib/awaiting-user-copy';
@@ -203,7 +204,7 @@ export function MainPanel({
         </Button>
         <div className="ml-2 min-w-0 flex-1 truncate pr-12 text-sm font-medium text-[#595757] dark:text-foreground/85">
           {task ? (
-            task.intent
+            taskDisplayIntent(task.intent)
           ) : (
             <BrandWordmark className="h-3.5" />
           )}
@@ -402,7 +403,7 @@ function StaticTaskDetailFallback({ task }: { task: UiTask }): JSX.Element {
             任务摘要
           </div>
           <h2 className="mt-1 break-words text-base font-semibold leading-snug text-foreground">
-            {task.title || task.intent}
+            {taskDisplaySource(task)}
           </h2>
         </div>
         <span className="rounded-md border border-[#DCDDDD] bg-[#EFEFEF]/55 px-2 py-0.5 text-[11px] font-medium text-[#595757] dark:border-white/10 dark:bg-white/5 dark:text-foreground/80">

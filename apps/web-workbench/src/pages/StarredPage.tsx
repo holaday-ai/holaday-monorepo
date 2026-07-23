@@ -15,6 +15,7 @@ import {
   taskHubLoadErrorCopy,
   taskHubLoadMoreErrorCopy,
   taskHubNeedsAttention,
+  taskHubRowTitle,
   taskHubRowTone,
   taskHubStatusIconKind,
   type NormalizedTaskHubRow,
@@ -34,11 +35,6 @@ import { PageContainer, PageHeader, PageLoadingPanel } from '@/pages/PageShell';
  */
 
 type PinnedRow = NormalizedTaskHubRow;
-
-function pinnedTaskTitle(row: Pick<PinnedRow, 'title' | 'intent'>, maxLength = 60): string {
-  const title = row.title?.trim() || row.intent;
-  return title.length > maxLength ? `${title.slice(0, maxLength - 1)}…` : title;
-}
 
 export function StarredPage(): JSX.Element {
   const toast = useToast();
@@ -232,7 +228,7 @@ export function StarredPage(): JSX.Element {
                     className="min-w-0 flex-1 text-left"
                   >
                     <div className="truncate text-sm text-foreground group-hover:text-[#EA1F59]">
-                      {pinnedTaskTitle(t)}
+                      {taskHubRowTitle(t)}
                     </div>
                     <div className="mt-0.5 text-[11px] text-muted-foreground">
                       {needsAttention ? (

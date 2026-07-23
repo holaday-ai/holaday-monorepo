@@ -1,5 +1,6 @@
 import { pageErrorMessage } from './page-error-copy';
 import type { AwaitingKind } from './awaiting-user-copy';
+import { taskDisplayIntent, taskDisplaySource } from './task-display-copy';
 import { deriveTaskProductState } from './task-product-state';
 
 export interface SearchOverlayRow {
@@ -79,10 +80,11 @@ export function normalizeSearchOverlayRows(value: unknown): SearchOverlayRow[] {
 export function searchOverlayRowCopy(
   row: Pick<SearchOverlayRow, 'awaitingKind' | 'intent' | 'status' | 'title'>,
 ): { readonly title: string; readonly secondary: string } {
-  const title = row.title && row.title.trim().length > 0 ? row.title : row.intent;
+  const title = taskDisplaySource(row);
+  const intent = taskDisplayIntent(row.intent);
   return {
     title,
-    secondary: title === row.intent ? '' : row.intent,
+    secondary: title === intent ? '' : intent,
   };
 }
 
