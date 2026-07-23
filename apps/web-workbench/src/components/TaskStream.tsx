@@ -2701,6 +2701,7 @@ function TerminalSummary({
               filename: a.filename,
               size: a.sizeBytes,
               downloadUrl: a.downloadUrl,
+              expiresAt: a.expiresAt,
             };
             // Phase 4 R2 — screenshots get a thumbnail preview; other
             // kinds (PDF, generic file) keep the icon-only card.

@@ -44,11 +44,19 @@ describe('toVideoRow — videoType + posterUrl extraction (A4/A5)', () => {
       taskId: 'tsk_ip', status: 'completed',
       result: { metadata: {
         lane: 'video_creation', videoType: 'ip_person',
-        attachments: [{ fileId: 'f', downloadUrl: '/api/files/f/download', filename: 'v.mp4', sizeBytes: 5_000_000, posterUrl: '/api/files/p/download' }],
+        attachments: [{
+          fileId: 'f',
+          downloadUrl: '/api/files/f/download',
+          filename: 'v.mp4',
+          sizeBytes: 5_000_000,
+          posterUrl: '/api/files/p/download',
+          expiresAt: '2026-07-24T10:00:00.000Z',
+        }],
       } },
     });
     expect(out?.videoType).toBe('ip_person');
     expect(out?.posterUrl).toBe('/api/files/p/download');
+    expect(out?.download?.expiresAt).toBe('2026-07-24T10:00:00.000Z');
   });
   it('omits videoType when invalid/absent, posterUrl when absent', () => {
     const out = toVideoRow({

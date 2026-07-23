@@ -2493,6 +2493,7 @@ function CurrentVideoTaskPanel({
                     filename: attachment.filename,
                     size: attachment.sizeBytes,
                     downloadUrl: attachment.downloadUrl,
+                    expiresAt: attachment.expiresAt,
                   }}
                 />
               ))}

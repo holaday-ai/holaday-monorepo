@@ -38,6 +38,7 @@ describe('toImageHistoryRow', () => {
         downloadUrl: '/api/files/file_img/download',
         filename: 'holaday-image.jpg',
         size: 418_513,
+        expiresAt: '2026-07-02T00:00:00.000Z',
       },
     });
   });

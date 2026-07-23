@@ -1,4 +1,4 @@
-import { Download, File, FileSpreadsheet, FileText, Film, Image as ImageIcon, Loader2, Presentation } from 'lucide-react';
+import { Clock3, Download, File, FileSpreadsheet, FileText, Film, Image as ImageIcon, Loader2, Presentation } from 'lucide-react';
 import * as React from 'react';
 import { useToast } from '@/components/ui/toast';
 import {
@@ -9,6 +9,7 @@ import {
 } from '@/lib/download-file';
 import {
   classifyDownloadFileKind,
+  downloadFileAvailability,
   downloadFileKindLabel,
   downloadFileMetaLabel,
   type DownloadFileKind,
@@ -21,6 +22,7 @@ export interface FileDownloadPayload {
   filename: string;
   size: number;
   downloadUrl: string;
+  expiresAt?: string;
 }
 
 const MEDIA_PREVIEW_TIMEOUT_MS = 8_000;
@@ -37,10 +39,11 @@ const MEDIA_PREVIEW_TIMEOUT_MS = 8_000;
  * attach the Authorization header on a top-level GET; the blob hop
  * is the cleanest workaround without a per-link signed URL flow.
  *
- * Phase 4 Codex follow-up — surface loading + failure states. The
- * 24h TTL means a stale card eventually 404s; previously the click
- * just printed to console.error with no user feedback. Now:
+ * Surface loading, expiry, and failure states. Known-expired files
+ * never issue a preview or download request; unexpected 404/410
+ * responses promote an unknown file to the same honest expired state.
  *   - while fetching: spinner + dim
+ *   - after expiry: disabled action + explicit expiry copy
  *   - on failure: toast "下载失败或链接已过期" + brief error tone
  *   - on success: silent (browser's own download UI takes over)
  */
@@ -52,11 +55,16 @@ export function FileDownloadCard({ payload }: { payload: FileDownloadPayload }):
   const [previewState, setPreviewState] = React.useState<
     'idle' | 'loading' | 'ready' | 'failed'
   >('idle');
+  const [serverExpired, setServerExpired] = React.useState(false);
   const kind = classifyDownloadFileKind(payload.filename);
   const kindLabel = downloadFileKindLabel(kind);
+  const knownAvailability = downloadFileAvailability(payload.expiresAt);
+  const expired = knownAvailability === 'expired' || serverExpired;
   const metaLabel = downloadFileMetaLabel({
     filename: payload.filename,
     formattedSize: formatFileSize(payload.size),
+    expiresAt: payload.expiresAt,
+    ...(serverExpired ? { availability: 'expired' as const } : {}),
   });
   // Reset transient 'failed' state ~3s after firing so a retry click
   // looks fresh instead of stuck red.
@@ -80,6 +88,12 @@ export function FileDownloadCard({ payload }: { payload: FileDownloadPayload }):
   // (revoked on unmount / url change). Non-media kinds keep the
   // icon-only card; a fetch failure silently falls back to the icon.
   React.useEffect(() => {
+    setServerExpired(false);
+    if (knownAvailability === 'expired') {
+      setPreviewUrl(null);
+      setPreviewState('idle');
+      return;
+    }
     if (kind !== 'image' && kind !== 'video') {
       setPreviewUrl(null);
       setPreviewState('idle');
@@ -122,6 +136,7 @@ export function FileDownloadCard({ payload }: { payload: FileDownloadPayload }):
           setPreviewUrl(res.previewUrl);
           setPreviewState('ready');
         } else {
+          if (res.status === 404 || res.status === 410) setServerExpired(true);
           setPreviewState('failed'); // fall back to the icon-only card
         }
       } catch {
@@ -134,10 +149,10 @@ export function FileDownloadCard({ payload }: { payload: FileDownloadPayload }):
       setPreviewUrl(null);
       setPreviewState('idle');
     };
-  }, [kind, payload.downloadUrl]);
+  }, [kind, knownAvailability, payload.downloadUrl]);
 
   const handleClick = async (): Promise<void> => {
-    if (state === 'loading') return;
+    if (state === 'loading' || expired) return;
     setState('loading');
     const result = await downloadFileAuthed({
       url: payload.downloadUrl,
@@ -147,24 +162,33 @@ export function FileDownloadCard({ payload }: { payload: FileDownloadPayload }):
     if (result.ok) {
       setState('idle');
     } else {
+      if (result.status === 404 || result.status === 410) setServerExpired(true);
       setState('failed');
       toast.show(downloadFailureMessage(result.status), 'error');
     }
   };
-  const actionLabel = `下载${kindLabel} ${payload.filename}`;
+  const actionLabel = expired
+    ? `${kindLabel}已过期 ${payload.filename}`
+    : `下载${kindLabel} ${payload.filename}`;
 
   return (
     <div
       className={cn(
         'group my-2 flex w-full max-w-md flex-col gap-2 rounded-[8px] border bg-white px-3 py-3 text-left text-sm shadow-[0_1px_3px_rgba(17,24,39,0.05)] transition-colors dark:bg-card/85 sm:px-4',
-        state === 'failed'
+        expired
+          ? 'border-[#DCDDDD] bg-[#EFEFEF]/35'
+          : state === 'failed'
           ? 'border-[#EA1F59]/40 bg-[#EA1F59]/5'
           : state === 'loading'
             ? 'border-[#57479C]/40 bg-[#57479C]/5 opacity-90'
             : 'border-[#DCDDDD] hover:border-[#ADADAD] hover:bg-[#EFEFEF]/35 dark:border-white/10 dark:hover:border-white/20 dark:hover:bg-white/[0.04]',
       )}
     >
-      {previewState === 'ready' && previewUrl ? (
+      {expired && (kind === 'image' || kind === 'video') ? (
+        <span className="flex h-40 w-full items-center justify-center rounded-[6px] border border-dashed border-[#DCDDDD] bg-[#EFEFEF]/35 px-4 text-center text-[11px] leading-5 text-muted-foreground dark:border-white/10 dark:bg-white/5">
+          文件已过期，无法预览。
+        </span>
+      ) : previewState === 'ready' && previewUrl ? (
         kind === 'video' ? (
           <video
             src={previewUrl}
@@ -202,7 +226,7 @@ export function FileDownloadCard({ payload }: { payload: FileDownloadPayload }):
       <button
         type="button"
         onClick={() => void handleClick()}
-        disabled={state === 'loading'}
+        disabled={state === 'loading' || expired}
         aria-busy={state === 'loading'}
         aria-label={actionLabel}
         title={actionLabel}
@@ -211,7 +235,9 @@ export function FileDownloadCard({ payload }: { payload: FileDownloadPayload }):
         <span
           className={cn(
             'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] border',
-            state === 'failed'
+            expired
+              ? 'border-[#DCDDDD] bg-[#EFEFEF]/70 text-[#ADADAD]'
+              : state === 'failed'
               ? 'border-[#EA1F59]/35 bg-[#EA1F59]/10 text-[#EA1F59]'
               : state === 'loading'
                 ? 'border-[#57479C]/30 bg-[#57479C]/10 text-[#57479C]'
@@ -227,17 +253,21 @@ export function FileDownloadCard({ payload }: { payload: FileDownloadPayload }):
           <div
             className={cn(
               'text-[11px]',
-              state === 'failed' ? 'text-[#EA1F59]' : 'text-muted-foreground',
+              state === 'failed' && !expired ? 'text-[#EA1F59]' : 'text-muted-foreground',
             )}
           >
-            {state === 'loading'
+            {expired
+              ? metaLabel
+              : state === 'loading'
               ? '正在下载…'
               : state === 'failed'
                 ? '下载失败，点击重试'
                 : metaLabel}
           </div>
         </div>
-        {state === 'loading' ? (
+        {expired ? (
+          <Clock3 className="h-4 w-4 shrink-0 text-[#ADADAD]" aria-hidden />
+        ) : state === 'loading' ? (
           <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[#EA1F59]" />
         ) : (
           <Download
@@ -306,17 +336,26 @@ export function parseHoladayFilePayload(raw: string): FileDownloadPayload | null
     ) {
       const downloadUrl = normaliseFileDownloadUrl(obj.downloadUrl);
       if (!downloadUrl) return null;
+      const expiresAt = normaliseExpiry(obj.expiresAt);
       return {
         fileId: obj.fileId.trim(),
         filename: obj.filename.trim(),
         size: obj.size,
         downloadUrl,
+        ...(expiresAt ? { expiresAt } : {}),
       };
     }
   } catch {
     // Fall through to null
   }
   return null;
+}
+
+function normaliseExpiry(raw: unknown): string | undefined {
+  if (typeof raw !== 'string') return undefined;
+  const trimmed = raw.trim();
+  if (trimmed.length === 0 || !Number.isFinite(new Date(trimmed).getTime())) return undefined;
+  return trimmed;
 }
 
 function normaliseFileDownloadUrl(raw: string): string | null {

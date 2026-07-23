@@ -23,6 +23,7 @@ export interface VideoResultMeta {
     mimetype?: string;
     sizeBytes?: number;
     posterUrl?: string;
+    expiresAt?: string;
   }>;
 }
 
@@ -230,6 +231,7 @@ export function toVideoRow(raw: unknown): VideoRow | null {
       downloadUrl,
       filename: att.filename,
       size: att.sizeBytes,
+      ...(typeof att.expiresAt === 'string' ? { expiresAt: att.expiresAt } : {}),
     },
     ...(videoType ? { videoType } : {}),
     ...(posterUrl ? { posterUrl } : {}),
@@ -274,6 +276,7 @@ export function toImageRow(raw: unknown): VideoRow | null {
       downloadUrl,
       filename: att.filename,
       size: att.sizeBytes,
+      ...(typeof att.expiresAt === 'string' ? { expiresAt: att.expiresAt } : {}),
     },
     posterUrl: downloadUrl,
     starred: r.starred === true,
