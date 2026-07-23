@@ -4,6 +4,7 @@ import {
   creativeHistoryArtifactAvailability,
   creativeHistoryDisplayTitle,
   creativeHistoryLoadReducer,
+  creativeHistoryPreviewAvailability,
   filterCreativeHistoryRows,
   isImageLane,
   isLockedSubjectImageIntent,
@@ -31,6 +32,50 @@ describe('creative history artifact availability', () => {
       ),
     ).toBe('expired');
     expect(creativeHistoryArtifactAvailability(undefined, now)).toBe('unknown');
+  });
+});
+
+describe('creative history preview availability', () => {
+  const now = Date.parse('2026-07-23T10:00:00.000Z');
+
+  it('keeps an unavailable poster distinct from an expired output file', () => {
+    expect(
+      creativeHistoryPreviewAvailability({
+        download: {},
+        posterUrl: '/api/files/poster-stale/download',
+        unavailablePosterUrls: new Set(['/api/files/poster-stale/download']),
+        now,
+      }),
+    ).toBe('unavailable');
+  });
+
+  it('lets known file expiry take precedence over poster state', () => {
+    expect(
+      creativeHistoryPreviewAvailability({
+        download: { expiresAt: '2026-07-23T09:59:59.000Z' },
+        posterUrl: '/api/files/poster-stale/download',
+        unavailablePosterUrls: new Set(['/api/files/poster-stale/download']),
+        now,
+      }),
+    ).toBe('expired');
+  });
+
+  it('distinguishes a fetchable poster from a missing poster', () => {
+    expect(
+      creativeHistoryPreviewAvailability({
+        download: {},
+        posterUrl: '/api/files/poster-active/download',
+        unavailablePosterUrls: new Set(),
+        now,
+      }),
+    ).toBe('available');
+    expect(
+      creativeHistoryPreviewAvailability({
+        download: {},
+        unavailablePosterUrls: new Set(),
+        now,
+      }),
+    ).toBe('missing');
   });
 });
 

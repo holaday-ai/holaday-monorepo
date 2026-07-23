@@ -54,6 +54,30 @@ export function creativeHistoryArtifactAvailability(
   return downloadFileAvailability(download?.expiresAt, now);
 }
 
+export type CreativeHistoryPreviewAvailability =
+  | 'available'
+  | 'expired'
+  | 'unavailable'
+  | 'missing';
+
+export function creativeHistoryPreviewAvailability(options: {
+  download: Pick<FileDownloadPayload, 'expiresAt'> | undefined;
+  posterUrl?: string;
+  unavailablePosterUrls: ReadonlySet<string>;
+  now?: number;
+}): CreativeHistoryPreviewAvailability {
+  if (
+    creativeHistoryArtifactAvailability(options.download, options.now) ===
+    'expired'
+  ) {
+    return 'expired';
+  }
+  if (!options.posterUrl) return 'missing';
+  return options.unavailablePosterUrls.has(options.posterUrl)
+    ? 'unavailable'
+    : 'available';
+}
+
 export interface CreativeHistoryLoadState {
   rows: VideoRow[] | null;
   loading: boolean;

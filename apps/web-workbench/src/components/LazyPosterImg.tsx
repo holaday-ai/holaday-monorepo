@@ -17,15 +17,22 @@ export function LazyPosterImg({
   posterUrl,
   alt,
   className,
+  onUnavailable,
 }: {
   posterUrl: string;
   alt: string;
   className?: string;
+  onUnavailable?: (status: 404 | 410) => void;
 }): JSX.Element {
   const ref = React.useRef<HTMLDivElement>(null);
+  const onUnavailableRef = React.useRef(onUnavailable);
   const [visible, setVisible] = React.useState(false);
   const [state, setState] = React.useState<'idle' | 'loading' | 'ready' | 'failed'>('idle');
   const [url, setUrl] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    onUnavailableRef.current = onUnavailable;
+  }, [onUnavailable]);
 
   // Reveal once scrolled near the viewport.
   React.useEffect(() => {
@@ -66,6 +73,9 @@ export function LazyPosterImg({
           if (!cancelled) setState('failed');
         });
       } else {
+        if (res.status === 404 || res.status === 410) {
+          onUnavailableRef.current?.(res.status);
+        }
         setState('failed');
       }
     });

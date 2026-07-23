@@ -47,9 +47,9 @@ import {
   videoTaskStatusLabel,
 } from '@/lib/video-task-selectors';
 import {
-  creativeHistoryArtifactAvailability,
   creativeHistoryDisplayTitle,
   creativeHistoryLoadReducer,
+  creativeHistoryPreviewAvailability,
   filterCreativeHistoryRows,
   isLockedSubjectImageIntent,
   nextCreativeHistoryVisibleCount,
@@ -1933,6 +1933,9 @@ function CreativeHistory({
   );
   const [loadingMore, setLoadingMore] = React.useState(false);
   const [loadMoreError, setLoadMoreError] = React.useState(false);
+  const [unavailablePosterUrls, setUnavailablePosterUrls] = React.useState<
+    ReadonlySet<string>
+  >(() => new Set());
   const mountedRef = React.useRef(true);
   const loadRequestRef = React.useRef(0);
 
@@ -1986,6 +1989,15 @@ function CreativeHistory({
     if (!rows) return rows;
     return filterCreativeHistoryRows(rows, { mode, videoType, filter });
   }, [filter, mode, rows, videoType]);
+
+  const markPosterUnavailable = React.useCallback((posterUrl: string) => {
+    setUnavailablePosterUrls((current) => {
+      if (current.has(posterUrl)) return current;
+      const next = new Set(current);
+      next.add(posterUrl);
+      return next;
+    });
+  }, []);
 
   const emptyCopy =
     filter === 'pinned'
@@ -2163,14 +2175,19 @@ function CreativeHistory({
             const download = row.download;
             if (!download) return null;
             const displayTitle = creativeHistoryDisplayTitle(row, mode);
-            const artifactExpired =
-              creativeHistoryArtifactAvailability(download) === 'expired';
+            const previewAvailability = creativeHistoryPreviewAvailability({
+              download,
+              posterUrl: row.posterUrl,
+              unavailablePosterUrls,
+            });
+            const artifactExpired = previewAvailability === 'expired';
+            const previewUnavailable = previewAvailability === 'unavailable';
             return (
             <article
               key={row.taskId}
               className={cn(
                 'grid gap-5 rounded-[26px] bg-white p-4 shadow-[0_16px_40px_rgba(89,87,87,0.06)]',
-                artifactExpired
+                artifactExpired || previewUnavailable
                   ? 'md:grid-cols-[minmax(180px,300px)_1fr]'
                   : 'md:grid-cols-[minmax(260px,520px)_1fr]',
               )}
@@ -2180,7 +2197,9 @@ function CreativeHistory({
                 onClick={() => navigate(`/${mode}?task=${encodeURIComponent(row.taskId)}`)}
                 className={cn(
                   'relative overflow-hidden rounded-[22px] text-left',
-                  artifactExpired ? 'min-h-[160px]' : 'min-h-[210px]',
+                  artifactExpired || previewUnavailable
+                    ? 'min-h-[160px]'
+                    : 'min-h-[210px]',
                   softBg,
                 )}
               >
@@ -2194,11 +2213,22 @@ function CreativeHistory({
                       历史记录仍保留，预览与下载已停止。
                     </span>
                   </div>
+                ) : previewUnavailable ? (
+                  <div className="flex h-full min-h-[160px] flex-col items-center justify-center px-5 text-center text-[#8B93A6]">
+                    <CircleSlash className="h-6 w-6" aria-hidden />
+                    <span className="mt-3 text-[13px] font-semibold text-[#595757]">
+                      预览已失效
+                    </span>
+                    <span className="mt-1 text-[11px] leading-5">
+                      成片记录仍保留，可在右侧尝试下载。
+                    </span>
+                  </div>
                 ) : row.posterUrl ? (
                   <LazyPosterImg
                     posterUrl={row.posterUrl}
                     alt={displayTitle}
                     className="h-full w-full rounded-[22px] object-cover"
+                    onUnavailable={() => markPosterUnavailable(row.posterUrl!)}
                   />
                 ) : (
                   <div className="flex h-full min-h-[210px] items-center justify-center text-[#ADADAD]">
