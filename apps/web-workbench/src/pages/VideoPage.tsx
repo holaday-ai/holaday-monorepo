@@ -750,14 +750,14 @@ function CreativeStudioPage({
           <div className="relative z-40 mt-5 rounded-[22px] border border-[#EFEFEF] bg-white px-5 py-4 shadow-[0_16px_42px_rgba(17,24,39,0.05)]">
             <div
               className={cn(
-                'grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-4 2xl:items-end',
+                'grid grid-cols-1 gap-3 2xl:items-end',
                 isImage
-                  ? '2xl:grid-cols-[260px_minmax(360px,1fr)_230px_190px]'
+                  ? 'sm:grid-cols-2 md:grid-cols-4 2xl:grid-cols-[260px_minmax(360px,1fr)_230px_190px]'
                   : isCloneVideo
-                    ? '2xl:grid-cols-[260px_minmax(360px,1fr)]'
+                    ? 'sm:grid-cols-2 2xl:grid-cols-[260px_minmax(360px,1fr)]'
                     : isIpVideo
-                      ? '2xl:grid-cols-[280px_minmax(360px,1fr)_230px]'
-                      : '2xl:grid-cols-[190px_minmax(340px,1fr)_150px_210px_190px]',
+                      ? 'max-w-[760px]'
+                      : 'sm:grid-cols-2 md:grid-cols-4 2xl:grid-cols-[190px_minmax(340px,1fr)_150px_210px_190px]',
               )}
             >
               {isImage ? (
@@ -780,13 +780,7 @@ function CreativeStudioPage({
                   accent={accent}
                   modelKind="video"
                 />
-              ) : isIpVideo ? (
-                <CreativeReadonlyField
-                  label="生成引擎"
-                  value="Qwen Voice + LatentSync"
-                  description="固定使用已准备的本人声纹与出镜底版"
-                />
-              ) : (
+              ) : !isIpVideo ? (
                 <CreativeModelPicker
                   value={model}
                   options={CREATIVE_MODEL_OPTIONS}
@@ -796,7 +790,7 @@ function CreativeStudioPage({
                   accent={accent}
                   modelKind="video"
                 />
-              )}
+              ) : null}
               {isImage ? (
                 <ImageStyleSummaryPicker
                   value={imageStyle}
@@ -824,13 +818,7 @@ function CreativeStudioPage({
                   value="主角替换，其他跟随参考视频"
                   description="动作、镜头、节奏、时长和音频均以参考视频为准"
                 />
-              ) : (
-                <CreativeReadonlyField
-                  label="人物一致性"
-                  value="本人底版 + 本人声音"
-                  description="可在下方重新上传或清除素材"
-                />
-              )}
+              ) : null}
               {!isImage && videoTab === 'normal' && (
                 <CreativeSegment
                   label="时长"
@@ -852,7 +840,7 @@ function CreativeStudioPage({
                   onChange={(value) => setAspectRatio(value as VideoAspect)}
                   accent={accent}
                   compact
-                  className="md:col-span-2 2xl:col-span-1"
+                  className={isIpVideo ? 'max-w-[720px]' : 'md:col-span-2 2xl:col-span-1'}
                 />
               ) : null}
               {isImage ? (
