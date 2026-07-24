@@ -527,7 +527,7 @@ describe('creative history filters', () => {
     ).toEqual(['video_pinned']);
   });
 
-  it('queries pinned history from the persisted server index', () => {
+  it('builds persisted pin and rolling recent server constraints', () => {
     expect(creativeHistoryListInput('pinned')).toEqual({
       limit: 50,
       status: ['completed', 'partial_success'],
@@ -537,6 +537,17 @@ describe('creative history filters', () => {
       limit: 50,
       cursor: 1700000000000,
       status: ['completed', 'partial_success'],
+    });
+    expect(
+      creativeHistoryListInput(
+        'recent',
+        undefined,
+        Date.parse('2026-07-24T00:00:00.000Z'),
+      ),
+    ).toEqual({
+      limit: 50,
+      status: ['completed', 'partial_success'],
+      dateFrom: new Date('2026-07-17T00:00:00.000Z'),
     });
   });
 });

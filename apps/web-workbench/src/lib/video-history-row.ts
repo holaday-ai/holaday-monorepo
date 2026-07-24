@@ -20,17 +20,22 @@ export interface CreativeHistoryListInput {
   cursor?: number;
   status: CreativeHistoryTerminalStatus[];
   starred?: true;
+  dateFrom?: Date;
 }
 
 export function creativeHistoryListInput(
   filter: CreativeHistoryFilter,
   cursor?: number,
+  now = Date.now(),
 ): CreativeHistoryListInput {
   return {
     limit: 50,
     ...(cursor === undefined ? {} : { cursor }),
     status: ['completed', 'partial_success'],
     ...(filter === 'pinned' ? { starred: true as const } : {}),
+    ...(filter === 'recent'
+      ? { dateFrom: new Date(now - 7 * 24 * 60 * 60 * 1000) }
+      : {}),
   };
 }
 

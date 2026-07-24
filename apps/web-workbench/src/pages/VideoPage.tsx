@@ -1965,18 +1965,43 @@ function CreativeHistory({
     setLoadingMore(false);
     setLoadMoreError(false);
     try {
-      const res = await trpc.tasks.list.query(creativeHistoryListInput(filter));
-      if (!mountedRef.current || requestId !== loadRequestRef.current) return;
+      let cursor: number | null = null;
+      const list: VideoRow[] = [];
+      let foundVisibleRow = false;
       const mapper = mode === 'image' ? toImageRow : toVideoRow;
-      const list = (res?.tasks ?? []).map(mapper).filter((v): v is VideoRow => v != null);
+
+      for (
+        let page = 0;
+        !foundVisibleRow && page < CREATIVE_HISTORY_SCAN_PAGES_PER_CLICK;
+        page += 1
+      ) {
+        const res = await trpc.tasks.list.query(
+          creativeHistoryListInput(filter, cursor ?? undefined),
+        );
+        if (!mountedRef.current || requestId !== loadRequestRef.current) return;
+
+        const pageRows = (res?.tasks ?? [])
+          .map(mapper)
+          .filter((value): value is VideoRow => value != null);
+        list.push(...pageRows);
+        foundVisibleRow =
+          filterCreativeHistoryRows(pageRows, {
+            mode,
+            videoType,
+            filter,
+          }).length > 0;
+        cursor = normalizeTaskHubCursor(res?.nextCursor);
+        if (cursor === null) break;
+      }
+
       dispatchLoad({ type: 'success', rows: list });
-      setNextCursor(normalizeTaskHubCursor(res?.nextCursor));
+      setNextCursor(cursor);
       setVisibleCount(CREATIVE_HISTORY_VISIBLE_PAGE_SIZE);
     } catch {
       if (!mountedRef.current || requestId !== loadRequestRef.current) return;
       dispatchLoad({ type: 'failure' });
     }
-  }, [filter, mode]);
+  }, [filter, mode, videoType]);
 
   React.useEffect(() => {
     dispatchLoad({ type: 'reset' });
@@ -1984,7 +2009,7 @@ function CreativeHistory({
     setVisibleCount(CREATIVE_HISTORY_VISIBLE_PAGE_SIZE);
     setLoadingMore(false);
     setLoadMoreError(false);
-  }, [filter, mode]);
+  }, [filter, mode, videoType]);
 
   React.useEffect(() => {
     void loadHistory();
