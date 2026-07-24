@@ -26,6 +26,7 @@ export const VIDEO_FAILURE_REASONS = {
   tooLong: '文案过长，请缩短后重试。',
   ipAssets: 'IP 素材或授权缺失，请重新完成「IP 人物」三步素材准备后重试。',
   invalidOptions: '所选画质与时长不兼容，请返回修改参数后重试。',
+  quality: '成片自动质检未通过（检测到异常肢体或画面偏离），问题视频未交付，请重试。',
   generic: '视频生成失败，请稍后重试。',
 } as const;
 
@@ -70,6 +71,9 @@ export function mapVideoFailureReason(err: unknown): string {
     (name === 'VeoError' && kind === 'invalid_argument')
   ) {
     return VIDEO_FAILURE_REASONS.invalidOptions;
+  }
+  if (name === 'SimpleVideoError' && kind === 'quality') {
+    return VIDEO_FAILURE_REASONS.quality;
   }
   // SimpleVideoError (config/compose) + anything else → don't expose details.
   return VIDEO_FAILURE_REASONS.generic;

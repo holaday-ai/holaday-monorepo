@@ -60,6 +60,16 @@ describe('mapVideoFailureReason — safe, whitelisted, no leak', () => {
     ).toBe(VIDEO_FAILURE_REASONS.invalidOptions);
   });
 
+  it('automated anatomy failure → explicit quality rejection without internal detail', () => {
+    expect(
+      mapVideoFailureReason({
+        name: 'SimpleVideoError',
+        kind: 'quality',
+        message: 'fused_hands frame 3 raw provider detail',
+      }),
+    ).toBe(VIDEO_FAILURE_REASONS.quality);
+  });
+
   it('SimpleVideoError / unknown / null / string → generic', () => {
     expect(mapVideoFailureReason({ name: 'SimpleVideoError', kind: 'compose' })).toBe(VIDEO_FAILURE_REASONS.generic);
     expect(mapVideoFailureReason(new Error('raw internal boom'))).toBe(VIDEO_FAILURE_REASONS.generic);

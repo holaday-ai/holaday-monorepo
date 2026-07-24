@@ -141,15 +141,13 @@ describe('optimizeUserScript (原方案 — faithful to user draft)', () => {
     expect(p).toContain('只输出 JSON');
   });
 
-  it('范围2松绑: 关联性引导 + 保留压产品乱码 + 删掉"任何文字"一刀切', () => {
+  it('文字和品牌按需保留：未要求不乱加，明确要求则逐字准确', () => {
     const p = buildOptimizeSystemPrompt(6);
-    // 关联性(范围3): 画面视觉化该段旁白的核心动作/对象
     expect(p).toMatch(/视觉化该段旁白|核心动作或对象/);
-    // 收窄保留: 不画含文字特写 + 产品乱码假字
-    expect(p).toMatch(/不要画含文字的特写|含文字的特写构图/);
-    expect(p).toMatch(/产品包装|瓶身|标签/);
-    expect(p).toMatch(/编造乱码/);
-    // 松绑: 一刀切"画面中不能(出现|有)任何文字"必须已删
+    expect(p).toMatch(/未要求.*不要凭空新增|不得凭空新增/);
+    expect(p).toMatch(/逐字准确|清晰可读/);
+    expect(p).toMatch(/品牌|Logo|包装/);
+    expect(p).not.toMatch(/一律不画|不要画含文字的特写/);
     expect(p).not.toContain('画面中不能出现任何文字');
     expect(p).not.toContain('画面中不能有任何文字');
   });
@@ -175,6 +173,13 @@ describe('optimizeUserScript (原方案 — faithful to user draft)', () => {
     expect(p).toMatch(/多余手臂|畸形手/);
     // and the old text-free example must no longer suggest a 手部特写
     expect(p).not.toContain('户外涂防晒的手部特写');
+  });
+
+  it('does not invent people or hand interaction when the original request does not require them', () => {
+    const p = buildOptimizeSystemPrompt(6);
+    expect(p).toMatch(/用户原始需求没有要求人物|未要求人物/);
+    expect(p).toMatch(/不得新增人物、手|不要新增人物、手/);
+    expect(p).toMatch(/拿起、触碰或操作/);
   });
 });
 

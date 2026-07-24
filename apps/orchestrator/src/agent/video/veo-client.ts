@@ -63,6 +63,8 @@ export interface GenerateVeoParams {
   /** Default veo-3.0-fast-generate-001. */
   readonly model?: string;
   readonly prompt: string;
+  /** Elements that should not appear in the generated video. */
+  readonly negativePrompt?: string;
   /** Default '9:16' (vertical). */
   readonly aspectRatio?: '9:16' | '16:9';
   /** Default 4. MUST be a number (string → 400). */
@@ -138,6 +140,7 @@ export async function generateVeoVideo(p: GenerateVeoParams): Promise<VeoResult>
     durationSeconds,
   };
   if (p.resolution) parameters.resolution = p.resolution;
+  if (p.negativePrompt) parameters.negativePrompt = p.negativePrompt;
   let subRes: Response;
   try {
     subRes = await fetchWithTimeout(

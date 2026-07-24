@@ -15,12 +15,10 @@
  *   price tier. We DISCARD that track and dub with Qwen Cherry, so the Veo
  *   audio is paid-for but unused. Don't try to turn it off.
  *
- * Anatomy: every visual prompt carries explicit anatomy constraints (single
- *   subject / arms traceable to shoulders / five fingers / no extra limbs /
- *   avoid hand-object-hand stacked framing) — AI t2v/t2i otherwise grows extra
- *   arms (observed on BOTH Veo Lite and nano banana). Veo & nano banana have no
- *   separate negative-prompt field, so the constraint lives in the prompt text;
- *   wanxiang t2v additionally takes NO_TEXT_NEGATIVE.
+ * Anatomy: visual prompts use the original user request to decide whether
+ *   people/hands belong in the scene. Object-only scenes explicitly exclude
+ *   unrequested body parts; human scenes carry strict anatomy constraints.
+ *   Veo and DashScope video providers also receive a matching negative prompt.
  */
 
 import { promises as fs } from 'node:fs';
@@ -36,27 +34,69 @@ import { downloadToBuffer } from './video-http.js';
 import { runVideoPipeline, type PipelineLogger, type VideoPipelineDeps } from './video-pipeline.js';
 import { generatePosterFile } from './video-poster.js';
 import { optimizeUserScript, type LlmComplete, type VideoStyle } from './video-script.js';
+import type {
+  VideoQualityResult,
+  VerifyFinalVideoQualityInput,
+} from './video-quality-verifier.js';
 import type { VideoScript } from './types.js';
 import { generateBrollVideo } from './wanxiang-client.js';
 
-// 收窄(范围2,BOSS 松绑):不再全禁"任何文字"(那是过度一刀切,也拖累画面-文案关联)。
-// 只阻止 AI 把【含文字的物体】画成主体/特写(瓶身标签/招牌/屏幕…AI 会编乱码假字);
-// 想要的文字(字幕/信息点字卡)由合成层 ASS 字体叠加,不经 AI、永不乱码。环境远景文字不强禁。
+// 文字与品牌不做一刀切。用户未要求时不让模型擅自添加；用户明确要求时保留，
+// 并要求逐字准确。字幕仍由合成层 ASS 叠加，生成画面里的其它文字由终态质检复核。
 // 解剖约束保留:画「手-物-手竖直叠帧」会长出多余手臂(Veo Lite / nano banana 都吐过)。
-const CLEAN_SCENE_SUFFIX =
-  '，画面整洁，纯场景/人物/氛围；' +
-  '单人出镜，双臂可追溯到肩膀，五指完整、手部解剖正确，' +
-  '不出现多余肢体、断肢或悬空小臂，避开手-物-手竖直叠帧这类高解剖风险构图；' +
-  '不要把产品包装、瓶身标签、招牌、屏幕、书本等含文字物体作为画面主体或特写（AI 会在上面编造乱码假字）';
-const NO_TEXT_NEGATIVE = [
-  // 中文 — 只压 AI 会编乱码的产品文字载体 + 乱码本身(不再全禁通用文字)
-  '瓶身文字, 包装文字, 标签文字, 招牌文字, 屏幕文字, 书本文字, 错乱的字, 乱码假字',
+const COMMON_SCENE_SUFFIX =
+  '，画面整洁；' +
+  '用户未要求时不要凭空添加文字、品牌或 Logo；' +
+  '若需求包含文字、品牌、包装、标牌或屏幕内容，必须逐字准确、清晰可读，不得替换、增删或拼错';
+const HUMAN_SCENE_SUFFIX =
+  '；若人物出镜，双臂必须可追溯到肩膀，五指完整、手部解剖正确，' +
+  '不得出现融合手、多余手臂、多指、断肢、悬空小臂或不可能的关节，' +
+  '避开手-物-手竖直叠帧这类高解剖风险构图';
+const OBJECT_ONLY_SCENE_SUFFIX =
+  '；这是纯物体/环境镜头，不得出现人物、手、手臂或身体部位，' +
+  '不要新增拿起、触碰或操作主体的动作，只保留用户指定的主体、环境和运动';
+const BASE_NEGATIVE = [
+  // 中文 — 只压错误文字，不禁止用户明确要求的文字载体或品牌。
+  '错别字, 错误品牌, 错误 Logo, 错乱的字, 乱码假字, 不可读文字',
   // 中文 — 解剖
-  '多余手臂, 多手, 多臂, 第三只手, 畸形手, 多指, 断肢, 悬空手臂, 解剖错误',
+  '融合手, 多余手臂, 多手, 多臂, 第三只手, 畸形手, 多指, 断肢, 悬空手臂, 解剖错误',
   // English
-  'garbled text, fake text, gibberish text, packaging label text, signage text, deformed text,' +
-    ' extra arm, extra hand, third arm, deformed hands, extra fingers, floating limb, anatomical error',
+  'garbled text, fake text, gibberish text, misspelled text, unreadable text, incorrect logo, malformed logo,' +
+    ' fused hands, extra arm, extra hand, third arm, deformed hands, extra fingers, floating limb, anatomical error',
 ].join(', ');
+const OBJECT_ONLY_NEGATIVE =
+  `${BASE_NEGATIVE}, person, people, human, face, hand, hands, arm, arms, body parts, ` +
+  'holding object, touching object, picking up object';
+
+type HumanPresencePolicy = 'explicit-human' | 'object-only' | 'conditional';
+
+const HUMAN_INTENT_RE =
+  /(?:人物|人像|真人|人类|男人|女人|男性|女性|男士|女士|男孩|女孩|儿童|孩子|老人|模特|演员|主持人|主播|手部|双手|左手|右手|手臂|拿起|端起|握住|触碰|操作|person|people|human|man|woman|boy|girl|child|model|actor|presenter|host|hand|hands|arm|arms|hold|holding|touch|pick(?:ing)? up)/iu;
+const OBJECT_ONLY_INTENT_RE =
+  /(?:静物|物体|产品|商品|杯|瓶|桌面|器皿|家具|食物|饮料|风景|景观|建筑|车辆|动物|宠物|固定镜头|无人物|无人|不出现人物|不出现人手|object|product|still life|landscape|building|vehicle|animal|pet|locked camera|no people|without people)/iu;
+
+function humanPresencePolicy(userText: string): HumanPresencePolicy {
+  if (HUMAN_INTENT_RE.test(userText)) return 'explicit-human';
+  if (OBJECT_ONLY_INTENT_RE.test(userText)) return 'object-only';
+  return 'conditional';
+}
+
+function scenePromptPolicy(userText: string): {
+  suffix: string;
+  negativePrompt: string;
+} {
+  const policy = humanPresencePolicy(userText);
+  if (policy === 'object-only') {
+    return {
+      suffix: COMMON_SCENE_SUFFIX + OBJECT_ONLY_SCENE_SUFFIX,
+      negativePrompt: OBJECT_ONLY_NEGATIVE,
+    };
+  }
+  return {
+    suffix: COMMON_SCENE_SUFFIX + HUMAN_SCENE_SUFFIX,
+    negativePrompt: BASE_NEGATIVE,
+  };
+}
 
 export type VisualMode = 'image' | 'video';
 /**
@@ -126,7 +166,11 @@ function resolveVeoModel(source: VideoSource, cfg: SimpleVideoConfig): string {
   }
 }
 
-export type SimpleVideoErrorKind = 'config' | 'compose' | 'invalid_options';
+export type SimpleVideoErrorKind =
+  | 'config'
+  | 'compose'
+  | 'invalid_options'
+  | 'quality';
 export class SimpleVideoError extends Error {
   constructor(
     message: string,
@@ -204,6 +248,9 @@ export interface SimpleVideoServices {
   workdir: string;
   logger: PipelineLogger;
   llm: LlmComplete;
+  verifyFinalVideo?: (
+    input: VerifyFinalVideoQualityInput,
+  ) => Promise<VideoQualityResult>;
   overrides?: Partial<SimpleFns>;
 }
 
@@ -228,6 +275,7 @@ export function createSimplePipelineDeps(
   cfg: SimpleVideoConfig,
   opts: SimpleVideoOptions,
   svc: SimpleVideoServices,
+  userText = '',
 ): VideoPipelineDeps {
   const fns = { ...realFns(), ...(svc.overrides ?? {}) };
   const ws = cfg.dashscopeWorkspaceId ? { workspaceId: cfg.dashscopeWorkspaceId } : {};
@@ -236,6 +284,7 @@ export function createSimplePipelineDeps(
   const videoSource = opts.videoSource ?? 'veo_fast';
   const aspect = resolveAspect(opts.aspectRatio ?? '9:16');
   const aspectLabel = aspectCopy(opts.aspectRatio);
+  const scenePolicy = scenePromptPolicy(userText);
 
   return {
     logger: svc.logger,
@@ -269,7 +318,7 @@ export function createSimplePipelineDeps(
           apiKey: cfg.geminiApiKey ?? '',
           ...(cfg.geminiBaseUrl ? { baseUrl: cfg.geminiBaseUrl } : {}),
           model: cfg.geminiImageModel ?? 'gemini-3.1-flash-image',
-          prompt: `${visual}${CLEAN_SCENE_SUFFIX}，${aspectLabel} 构图`,
+          prompt: `${visual}${scenePolicy.suffix}，${aspectLabel} 构图`,
         });
         const first = img.images[0];
         if (!first) throw new SimpleVideoError(`nano banana seg ${index} produced no image`, 'compose');
@@ -289,7 +338,8 @@ export function createSimplePipelineDeps(
           apiKey: cfg.geminiApiKey ?? '',
           ...(cfg.geminiBaseUrl ? { baseUrl: cfg.geminiBaseUrl } : {}),
           model: resolveVeoModel(videoSource, cfg),
-          prompt: visual + CLEAN_SCENE_SUFFIX,
+          prompt: visual + scenePolicy.suffix,
+          negativePrompt: scenePolicy.negativePrompt,
           aspectRatio: aspect.veoAspect, // 1:1 时用 9:16 出, compose pad 到方形
           durationSeconds: opts.veoDurationSeconds ?? 8,
           resolution: opts.veoResolution ?? '1080p',
@@ -304,8 +354,8 @@ export function createSimplePipelineDeps(
           baseUrl: cfg.dashscopeBaseUrl,
           ...ws,
           model: isHH ? (cfg.happyhorseModel ?? DEFAULT_HAPPYHORSE_MODEL) : cfg.wanxiangT2vModel,
-          prompt: visual + CLEAN_SCENE_SUFFIX,
-          negativePrompt: NO_TEXT_NEGATIVE,
+          prompt: visual + scenePolicy.suffix,
+          negativePrompt: scenePolicy.negativePrompt,
           // HappyHorse 1080P 按画幅; wanxiang 兜底保持 720 竖屏(第一期不做多尺寸).
           size: isHH ? aspect.hhSize : (cfg.wanxiangVideoSize ?? '720*1280'),
         });
@@ -409,7 +459,7 @@ export async function runSimpleVideoCreation(
       { llm: svc.llm },
     ));
   // ②-⑤ runner (synth preset voice + visual + clip per segment)
-  const deps = createSimplePipelineDeps(cfg, opts, svc);
+  const deps = createSimplePipelineDeps(cfg, opts, svc, input.userText);
   const result = await runVideoPipeline(
     { script, ...(input.retries !== undefined ? { retries: input.retries } : {}) },
     deps,
@@ -441,6 +491,31 @@ export async function runSimpleVideoCreation(
     ffOpts,
   );
   await fns.runFfmpeg(cmd, ffOpts);
+  if (svc.verifyFinalVideo) {
+    const verification = await svc.verifyFinalVideo({
+      videoPath: outPath,
+      workdir: svc.workdir,
+      durationMs: result.timeline.totalDurationMs,
+      userText: input.userText,
+      expectedSubtitleText: script.segments.map((segment) => segment.text),
+      expectedBrandText: 'HOLA DAY · AI',
+      ...(cfg.ffmpegBin ? { ffmpegBin: cfg.ffmpegBin } : {}),
+    });
+    if (verification.status !== 'pass') {
+      svc.logger.warn(
+        {
+          status: verification.status,
+          failedChecks: verification.failedChecks,
+          reason: verification.reason,
+        },
+        'video: final quality gate rejected generated artifact',
+      );
+      throw new SimpleVideoError(
+        'final video failed automated quality verification',
+        'quality',
+      );
+    }
+  }
   const finalBuffer = await fns.readFile(outPath);
   const stored = await svc.storeOutput({ filename: 'video.mp4', mimetype: 'video/mp4', buffer: finalBuffer });
   // 首帧 poster（非致命：抽帧失败只 log，成片照常完成）。

@@ -6721,6 +6721,11 @@ export const tasksRouter = router({
         const taskInternalId = await taskInternalIdFor(db, newTaskId);
         if (taskInternalId == null) return;
         const { runSimpleVideoCreation } = await import('../../agent/video/video-lane-simple.js');
+        const { runFfmpeg } = await import('../../agent/video/ffmpeg-exec.js');
+        const {
+          createAnthropicVideoQualityAnalyzer,
+          verifyFinalVideoQuality,
+        } = await import('../../agent/video/video-quality-verifier.js');
         const os = await import('node:os');
         const path = await import('node:path');
         const { promises: fsp } = await import('node:fs');
@@ -6740,6 +6745,9 @@ export const tasksRouter = router({
           const b = resp.content[0];
           return b && b.type === 'text' ? b.text : '';
         };
+        const analyzeVideoQuality = anthropicClient
+          ? createAnthropicVideoQualityAnalyzer(anthropicClient)
+          : async () => '';
         // 仅最终 video.mp4 落用户文件;中间段产物只用 workdir 副本(pipeline 用本地路径)。
         const storeOutput = async (i: { filename: string; mimetype: string; buffer: Buffer }) => {
           if (i.filename === 'poster.jpg') {
@@ -6889,7 +6897,18 @@ export const tasksRouter = router({
                 ...(vOpts.resolution ? { veoResolution: vOpts.resolution } : {}),
                 ...(vOpts.durationSeconds ? { veoDurationSeconds: vOpts.durationSeconds } : {}),
               },
-              { storeOutput, workdir, logger, llm },
+              {
+                storeOutput,
+                workdir,
+                logger,
+                llm,
+                verifyFinalVideo: (qualityInput) =>
+                  verifyFinalVideoQuality(qualityInput, {
+                    runFfmpeg,
+                    readFile: (filePath) => fsp.readFile(filePath),
+                    analyzeFrames: analyzeVideoQuality,
+                  }),
+              },
             );
             summary = `视频已生成（${result.segments} 段 / ${Math.round(result.totalDurationMs / 1000)} 秒）。`;
           }

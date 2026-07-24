@@ -46,6 +46,33 @@ describe('generateVeoVideo', () => {
     expect(body.instances[0].prompt).toBe('a beach');
   });
 
+  it('forwards the negative prompt to the Gemini video request', async () => {
+    const { fetchImpl, calls } = jsonQueue([
+      { body: { name: 'op/negative' } },
+      {
+        body: {
+          done: true,
+          response: {
+            generateVideoResponse: {
+              generatedSamples: [{ video: { uri: 'https://generativelanguage.googleapis.com/v.mp4' } }],
+            },
+          },
+        },
+      },
+    ]);
+
+    await generateVeoVideo({
+      apiKey: KEY,
+      prompt: 'a blue cup on a table',
+      negativePrompt: 'person, hands, arms, body parts',
+      fetchImpl,
+      ...TINY,
+    });
+
+    const submit = JSON.parse(calls[0]?.init.body as string);
+    expect(submit.parameters.negativePrompt).toBe('person, hands, arms, body parts');
+  });
+
   it('maps 403 → permission_denied (key not allowlisted)', async () => {
     const { fetchImpl } = jsonQueue([{ status: 403, body: { error: { message: 'PERMISSION_DENIED' } } }]);
     await expect(generateVeoVideo({ apiKey: KEY, prompt: 'x', fetchImpl })).rejects.toMatchObject({

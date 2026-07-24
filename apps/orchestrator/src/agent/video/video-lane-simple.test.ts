@@ -58,7 +58,7 @@ function makeServices() {
 }
 
 describe('runSimpleVideoCreation — video (default = veo_fast)', () => {
-  it('empty opts → Cherry synth → Veo 3.1 Fast (8s/1080p/9:16, anatomy prompt) → renderVideoClip → compose', async () => {
+  it('empty opts → Cherry synth → Veo 3.1 Fast (8s/1080p/9:16) → renderVideoClip → compose', async () => {
     const { svc, mocks } = makeServices();
     // BOSS 2026-06-15: 万相手部畸形 + Lite 解剖不稳 → 默认 Veo 3.1 Fast.
     const out = await runSimpleVideoCreation({ userText: '讲讲夏天防晒' }, CFG, {}, svc);
@@ -74,18 +74,26 @@ describe('runSimpleVideoCreation — video (default = veo_fast)', () => {
     expect(mocks.generateImages).not.toHaveBeenCalled();
     expect(mocks.renderImageClip).not.toHaveBeenCalled();
     const veoArg = (mocks.generateVeoVideo.mock.calls[0] as unknown[])[0] as {
-      model: string; prompt: string; aspectRatio: string; durationSeconds: number; resolution: string;
+      model: string;
+      prompt: string;
+      negativePrompt: string;
+      aspectRatio: string;
+      durationSeconds: number;
+      resolution: string;
     };
     expect(veoArg.model).toBe('veo-3.1-fast-generate-preview');
     expect(veoArg.aspectRatio).toBe('9:16');
     expect(veoArg.durationSeconds).toBe(8); // BOSS: 8s
     expect(veoArg.resolution).toBe('1080p'); // BOSS: 1080p
-    // anatomy constraints ride in the prompt
+    // Generic topics keep conditional anatomy guidance without forcing a person into frame.
     expect(veoArg.prompt).toContain('画面整洁');
     expect(veoArg.prompt).toMatch(/五指完整|多余肢体|双臂可追溯/);
-    // 范围2 收窄: 仍压"含文字物体/编造乱码假字", 但删掉"任何文字"一刀切
-    expect(veoArg.prompt).toMatch(/含文字物体|编造乱码假字/);
+    expect(veoArg.prompt).not.toContain('单人出镜');
+    // Text and brands are allowed when requested, but must be exact.
+    expect(veoArg.prompt).toMatch(/未要求时不要凭空添加|逐字准确/);
+    expect(veoArg.prompt).not.toMatch(/不要把.*含文字物体.*主体/);
     expect(veoArg.prompt).not.toContain('不能有任何文字');
+    expect(veoArg.negativePrompt).not.toMatch(/包装文字|标签文字|signage text/);
     expect(mocks.runFfmpeg).toHaveBeenCalledTimes(2); // compose + 首帧 poster
     expect(mocks.storeOutput).toHaveBeenCalledWith(
       expect.objectContaining({ filename: 'poster.jpg', mimetype: 'image/jpeg' }),
@@ -94,6 +102,99 @@ describe('runSimpleVideoCreation — video (default = veo_fast)', () => {
     expect(out.fileId).toBe('f_video.mp4');
     expect(out.segments).toBe(2);
     expect(out.totalDurationMs).toBe(5000);
+  });
+
+  it('a pure object request forbids unrequested people, hands and body parts', async () => {
+    const { svc, mocks } = makeServices();
+    const objectScript: VideoScript = {
+      title: '蓝色陶瓷杯',
+      segments: [
+        {
+          text: '一只蓝色陶瓷杯静静放在白色桌面。',
+          type: 'broll',
+          visual: '蓝色陶瓷杯放在白色桌面，固定镜头，蒸汽缓慢上升',
+        },
+      ],
+    };
+
+    await runSimpleVideoCreation(
+      {
+        userText: '一只蓝色陶瓷杯放在白色桌面，固定镜头，轻微蒸汽上升。',
+        script: objectScript,
+      },
+      CFG,
+      {},
+      svc,
+    );
+
+    const veoArg = (mocks.generateVeoVideo.mock.calls[0] as unknown[])[0] as {
+      prompt: string;
+      negativePrompt?: string;
+    };
+    expect(veoArg.prompt).toMatch(/不得出现人物、手、手臂或身体部位/);
+    expect(veoArg.prompt).toMatch(/不要新增拿起、触碰或操作主体的动作/);
+    expect(veoArg.prompt).not.toContain('单人出镜');
+    expect(veoArg.negativePrompt).toMatch(/person|hand|body parts/);
+  });
+
+  it('allows a requested brand or packaging label while requiring exact rendering', async () => {
+    const { svc, mocks } = makeServices();
+    const brandedScript: VideoScript = {
+      title: '品牌杯展示',
+      segments: [
+        {
+          text: 'HOLA DAY 限定杯放在白色桌面。 ',
+          type: 'broll',
+          visual: '正面展示印有 HOLA DAY 的蓝色陶瓷杯',
+        },
+      ],
+    };
+
+    await runSimpleVideoCreation(
+      {
+        userText: '展示印有 HOLA DAY 的蓝色陶瓷杯，品牌字样必须清晰准确。',
+        script: brandedScript,
+      },
+      CFG,
+      {},
+      svc,
+    );
+
+    const veoArg = (mocks.generateVeoVideo.mock.calls[0] as unknown[])[0] as {
+      prompt: string;
+      negativePrompt?: string;
+    };
+    expect(veoArg.prompt).toMatch(/文字、品牌|逐字准确/);
+    expect(veoArg.prompt).not.toMatch(/不要把.*包装|不能有任何文字|禁止品牌/);
+    expect(veoArg.negativePrompt).not.toMatch(/包装文字|标签文字|packaging label text/);
+  });
+
+  it('an explicit human request keeps strict anatomy constraints', async () => {
+    const { svc, mocks } = makeServices();
+    const humanScript: VideoScript = {
+      title: '人物持杯',
+      segments: [
+        {
+          text: '一位女性端起蓝色陶瓷杯。',
+          type: 'broll',
+          visual: '一位女性侧身端起蓝色陶瓷杯，手部自然清晰',
+        },
+      ],
+    };
+
+    await runSimpleVideoCreation(
+      { userText: '一位女性用右手端起蓝色陶瓷杯。', script: humanScript },
+      CFG,
+      {},
+      svc,
+    );
+
+    const veoArg = (mocks.generateVeoVideo.mock.calls[0] as unknown[])[0] as {
+      prompt: string;
+    };
+    expect(veoArg.prompt).toMatch(/若人物出镜/);
+    expect(veoArg.prompt).toMatch(/双臂可追溯到肩膀|五指完整|解剖正确/);
+    expect(veoArg.prompt).not.toContain('不得出现人物、手、手臂或身体部位');
   });
 
   it('rejects unsupported Veo parameters before TTS or video generation starts', async () => {
@@ -245,6 +346,68 @@ describe('runSimpleVideoCreation — config gates', () => {
     await expect(
       runSimpleVideoCreation({ userText: 'x' }, { ...CFG, geminiApiKey: '' }, { visualMode: 'image' }, svc),
     ).rejects.toMatchObject({ kind: 'config' });
+  });
+});
+
+describe('runSimpleVideoCreation — final quality gate', () => {
+  it('stores the final artifact only after frame verification passes', async () => {
+    const { svc, mocks } = makeServices();
+    const verifyFinalVideo = vi.fn(async () => ({
+      status: 'pass' as const,
+      failedChecks: [],
+      reason: '画面、主体和文字均通过',
+    }));
+
+    const out = await runSimpleVideoCreation(
+      { userText: '一只蓝色陶瓷杯放在白色桌面', script: SCRIPT },
+      CFG,
+      {},
+      { ...svc, verifyFinalVideo },
+    );
+
+    expect(verifyFinalVideo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        videoPath: '/tmp/wd/final.mp4',
+        userText: '一只蓝色陶瓷杯放在白色桌面',
+        expectedBrandText: 'HOLA DAY · AI',
+      }),
+    );
+    expect(out.fileId).toBe('f_video.mp4');
+    expect(mocks.storeOutput).toHaveBeenCalledWith(
+      expect.objectContaining({ filename: 'video.mp4' }),
+    );
+  });
+
+  it('blocks an abnormal-hand video before it is stored or marked deliverable', async () => {
+    const { svc, mocks } = makeServices();
+    const verifyFinalVideo = vi.fn(async () => ({
+      status: 'fail' as const,
+      failedChecks: ['fused_hands', 'unrequested_human'],
+      reason: '画面出现融合手和未请求的人物肢体',
+    }));
+
+    await expect(
+      runSimpleVideoCreation(
+        { userText: '一只蓝色陶瓷杯放在白色桌面', script: SCRIPT },
+        CFG,
+        {},
+        { ...svc, verifyFinalVideo },
+      ),
+    ).rejects.toMatchObject({
+      name: 'SimpleVideoError',
+      kind: 'quality',
+    });
+
+    expect(
+      mocks.storeOutput.mock.calls.some(
+        (call) => ((call as unknown[])[0] as { filename?: string }).filename === 'video.mp4',
+      ),
+    ).toBe(false);
+    expect(
+      mocks.storeOutput.mock.calls.some(
+        (call) => ((call as unknown[])[0] as { filename?: string }).filename === 'poster.jpg',
+      ),
+    ).toBe(false);
   });
 });
 
