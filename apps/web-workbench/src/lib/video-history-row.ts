@@ -191,6 +191,18 @@ export function nextCreativeHistoryVisibleCount(
   return Math.min(total, current + pageSize);
 }
 
+export function canLoadOlderCreativeHistory(options: {
+  loading: boolean;
+  loadingMore: boolean;
+  nextCursor: number | null;
+}): boolean {
+  return (
+    !options.loading &&
+    !options.loadingMore &&
+    options.nextCursor !== null
+  );
+}
+
 export function isVideoLane(lane: string | undefined): boolean {
   return typeof lane === 'string' && lane.startsWith('video_creation');
 }

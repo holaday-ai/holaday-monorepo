@@ -48,6 +48,7 @@ import {
   videoTaskStatusLabel,
 } from '@/lib/video-task-selectors';
 import {
+  canLoadOlderCreativeHistory,
   creativeHistoryArtifactAvailability,
   creativeHistoryDisplayTitle,
   creativeHistoryListInput,
@@ -2058,7 +2059,15 @@ function CreativeHistory({
         : `暂无${mode === 'image' ? '图片' : '视频'}作品，先在上方创建一个。`;
 
   const loadOlderHistory = React.useCallback(async () => {
-    if (loadingMore || nextCursor === null) return;
+    if (
+      !canLoadOlderCreativeHistory({
+        loading,
+        loadingMore,
+        nextCursor,
+      })
+    ) {
+      return;
+    }
 
     const requestId = ++loadRequestRef.current;
     let cursor: number | null = nextCursor;
@@ -2105,7 +2114,7 @@ function CreativeHistory({
         setLoadingMore(false);
       }
     }
-  }, [filter, loadingMore, mode, nextCursor, videoType]);
+  }, [filter, loading, loadingMore, mode, nextCursor, videoType]);
 
   const handleTogglePin = React.useCallback(
     async (row: VideoRow) => {
@@ -2376,7 +2385,7 @@ function CreativeHistory({
             type="button"
             size="sm"
             variant="outline"
-            disabled={loadingMore}
+            disabled={loading || loadingMore}
             onClick={() => {
               if (visibleCount < visible.length) {
                 setVisibleCount((count) =>

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   asVideoType,
+  canLoadOlderCreativeHistory,
   creativeHistoryArtifactAvailability,
   creativeHistoryDisplayTitle,
   creativeHistoryListInput,
@@ -728,5 +729,36 @@ describe('creative history progressive disclosure', () => {
     expect(nextCreativeHistoryVisibleCount(4, 11)).toBe(8);
     expect(nextCreativeHistoryVisibleCount(8, 11)).toBe(11);
     expect(nextCreativeHistoryVisibleCount(11, 11)).toBe(11);
+  });
+
+  it('does not start an older-page request while a refresh is active', () => {
+    expect(
+      canLoadOlderCreativeHistory({
+        loading: true,
+        loadingMore: false,
+        nextCursor: 120,
+      }),
+    ).toBe(false);
+    expect(
+      canLoadOlderCreativeHistory({
+        loading: false,
+        loadingMore: true,
+        nextCursor: 120,
+      }),
+    ).toBe(false);
+    expect(
+      canLoadOlderCreativeHistory({
+        loading: false,
+        loadingMore: false,
+        nextCursor: null,
+      }),
+    ).toBe(false);
+    expect(
+      canLoadOlderCreativeHistory({
+        loading: false,
+        loadingMore: false,
+        nextCursor: 120,
+      }),
+    ).toBe(true);
   });
 });
