@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { VideoScript } from './types.js';
 import {
-  runSimpleVideoCreation,
   type SimpleVideoConfig,
   type SimpleVideoOptions,
   type SimpleVideoServices,
+  runSimpleVideoCreation,
 } from './video-lane-simple.js';
-import type { VideoScript } from './types.js';
 
 const CFG: SimpleVideoConfig = {
   dashscopeApiKey: 'dk',
@@ -35,26 +35,49 @@ function makeServices() {
   const mocks = {
     optimizeUserScript: vi.fn(async () => SCRIPT),
     synthesizeSpeech: vi.fn(async () => ({ audioUrl: 'https://oss/a.wav', characters: 5 })),
-    generateImages: vi.fn(async () => ({ images: [{ buffer: Buffer.from('img'), mimeType: 'image/png' }], model: 'nb' })),
-    generateBrollVideo: vi.fn(async () => ({ taskStatus: 'SUCCEEDED', imageUrls: [], videoUrl: 'https://oss/v.mp4' })),
+    generateImages: vi.fn(async () => ({
+      images: [{ buffer: Buffer.from('img'), mimeType: 'image/png' }],
+      model: 'nb',
+    })),
+    generateBrollVideo: vi.fn(async () => ({
+      taskStatus: 'SUCCEEDED',
+      imageUrls: [],
+      videoUrl: 'https://oss/v.mp4',
+    })),
     generateVeoVideo: vi.fn(async () => ({ videoUri: 'https://gl/veo.mp4', elapsedMs: 1 })),
     downloadToBuffer: vi.fn(async () => ({ buffer: Buffer.from('x'), sizeBytes: 1 })),
-    ffprobeDurationMs: vi.fn(async () => 2500),
+    downloadToFile: vi.fn(async () => ({ contentType: 'video/mp4', sizeBytes: 42_000_000 })),
+    ffprobeDurationMs: vi.fn(async (filePath: string) =>
+      filePath.endsWith('/final.mp4') ? 5000 : 2500,
+    ),
     renderImageClip: vi.fn(async () => undefined),
     renderVideoClip: vi.fn(async () => undefined),
     runFfmpeg: vi.fn(async () => undefined),
     writeFile: vi.fn(async () => undefined),
     readFile: vi.fn(async () => Buffer.from('final')),
   };
-  const storeOutput = vi.fn(async (i: { filename: string }) => ({ fileId: `f_${i.filename}`, storagePath: `sp/${i.filename}` }));
+  const storeOutput = vi.fn(async (i: { filename: string }) => ({
+    fileId: `f_${i.filename}`,
+    storagePath: `sp/${i.filename}`,
+  }));
+  const storeOutputFile = vi.fn(async (i: { filename: string }) => ({
+    fileId: `f_${i.filename}`,
+    storagePath: `sp/${i.filename}`,
+  }));
   const svc: SimpleVideoServices = {
     storeOutput,
+    storeOutputFile,
     workdir: '/tmp/wd',
     logger,
     llm: async () => '{}',
+    verifyFinalVideo: async () => ({
+      status: 'pass',
+      failedChecks: [],
+      reason: 'test verifier passed',
+    }),
     overrides: mocks as unknown as SimpleVideoServices['overrides'],
   };
-  return { svc, mocks: { ...mocks, storeOutput } };
+  return { svc, mocks: { ...mocks, storeOutput, storeOutputFile } };
 }
 
 describe('runSimpleVideoCreation — video (default = veo_fast)', () => {
@@ -64,7 +87,10 @@ describe('runSimpleVideoCreation — video (default = veo_fast)', () => {
     const out = await runSimpleVideoCreation({ userText: '讲讲夏天防晒' }, CFG, {}, svc);
 
     expect(mocks.optimizeUserScript).toHaveBeenCalledTimes(1);
-    const synthArg = (mocks.synthesizeSpeech.mock.calls[0] as unknown[])[0] as { voiceId: string; model: string };
+    const synthArg = (mocks.synthesizeSpeech.mock.calls[0] as unknown[])[0] as {
+      voiceId: string;
+      model: string;
+    };
     expect(synthArg.voiceId).toBe('Cherry');
     expect(synthArg.model).toBe('qwen3-tts-flash');
     // default video visual: Veo Fast + renderVideoClip (NOT nano banana / wanxiang)
@@ -225,7 +251,10 @@ describe('runSimpleVideoCreation — image (nano banana, static)', () => {
     const opts: SimpleVideoOptions = { visualMode: 'image' };
     const out = await runSimpleVideoCreation({ userText: '讲讲夏天防晒' }, CFG, opts, svc);
     expect(mocks.generateImages).toHaveBeenCalledTimes(2);
-    const imgArg = (mocks.generateImages.mock.calls[0] as unknown[])[0] as { model: string; prompt: string };
+    const imgArg = (mocks.generateImages.mock.calls[0] as unknown[])[0] as {
+      model: string;
+      prompt: string;
+    };
     expect(imgArg.model).toBe('gemini-3.1-flash-image'); // nano banana
     expect(imgArg.prompt).toContain('竖屏'); // 9:16 ridden in prompt (no aspectRatio param)
     expect(imgArg.prompt).toMatch(/五指完整|多余肢体/); // anatomy
@@ -241,31 +270,57 @@ describe('runSimpleVideoCreation — image (nano banana, static)', () => {
 describe('runSimpleVideoCreation — Veo tiers (explicit)', () => {
   it('veo_lite (省钱) → lite model', async () => {
     const { svc, mocks } = makeServices();
-    await runSimpleVideoCreation({ userText: 'x' }, CFG, { visualMode: 'video', videoSource: 'veo_lite' }, svc);
+    await runSimpleVideoCreation(
+      { userText: 'x' },
+      CFG,
+      { visualMode: 'video', videoSource: 'veo_lite' },
+      svc,
+    );
     const veoArg = (mocks.generateVeoVideo.mock.calls[0] as unknown[])[0] as { model: string };
     expect(veoArg.model).toBe('veo-3.1-lite-generate-preview');
   });
 
   it('veo_standard (高质量) → standard model + x-goog-api-key download', async () => {
     const { svc, mocks } = makeServices();
-    await runSimpleVideoCreation({ userText: 'x' }, CFG, { visualMode: 'video', videoSource: 'veo_standard' }, svc);
+    await runSimpleVideoCreation(
+      { userText: 'x' },
+      CFG,
+      { visualMode: 'video', videoSource: 'veo_standard' },
+      svc,
+    );
     const veoArg = (mocks.generateVeoVideo.mock.calls[0] as unknown[])[0] as { model: string };
     expect(veoArg.model).toBe('veo-3.1-generate-preview');
-    const dlVeo = mocks.downloadToBuffer.mock.calls.find(
+    const dlVeo = mocks.downloadToFile.mock.calls.find(
       (c) => ((c as unknown[])[0] as string) === 'https://gl/veo.mp4',
     ) as unknown[] | undefined;
-    expect((((dlVeo?.[1] as { headers?: Record<string, string> })?.headers ?? {}) as Record<string, string>)['x-goog-api-key']).toBe('gk');
+    expect(
+      (
+        ((dlVeo?.[2] as { headers?: Record<string, string> })?.headers ?? {}) as Record<
+          string,
+          string
+        >
+      )['x-goog-api-key'],
+    ).toBe('gk');
   });
 });
 
 describe('runSimpleVideoCreation — wanxiang (fallback, explicit)', () => {
   it('videoSource=wanxiang → t2v (no-text+anatomy negative) + renderVideoClip', async () => {
     const { svc, mocks } = makeServices();
-    await runSimpleVideoCreation({ userText: 'x' }, CFG, { visualMode: 'video', videoSource: 'wanxiang' }, svc);
+    await runSimpleVideoCreation(
+      { userText: 'x' },
+      CFG,
+      { visualMode: 'video', videoSource: 'wanxiang' },
+      svc,
+    );
     expect(mocks.generateBrollVideo).toHaveBeenCalledTimes(2);
     expect(mocks.generateVeoVideo).not.toHaveBeenCalled();
     expect(mocks.renderVideoClip).toHaveBeenCalledTimes(2);
-    const t2vArg = (mocks.generateBrollVideo.mock.calls[0] as unknown[])[0] as { prompt: string; negativePrompt?: string; size?: string };
+    const t2vArg = (mocks.generateBrollVideo.mock.calls[0] as unknown[])[0] as {
+      prompt: string;
+      negativePrompt?: string;
+      size?: string;
+    };
     expect(t2vArg.prompt).toContain('画面整洁');
     expect(t2vArg.negativePrompt ?? '').toMatch(/乱码|多余手臂|extra arm/);
     expect(t2vArg.size).toBe('720*1280');
@@ -275,10 +330,18 @@ describe('runSimpleVideoCreation — wanxiang (fallback, explicit)', () => {
 describe('runSimpleVideoCreation — happyhorse (Phase 2)', () => {
   it('videoSource=happyhorse → generateBrollVideo with happyhorse-1.0-t2v + 1080P size', async () => {
     const { svc, mocks } = makeServices();
-    await runSimpleVideoCreation({ userText: 'x' }, CFG, { visualMode: 'video', videoSource: 'happyhorse' }, svc);
+    await runSimpleVideoCreation(
+      { userText: 'x' },
+      CFG,
+      { visualMode: 'video', videoSource: 'happyhorse' },
+      svc,
+    );
     expect(mocks.generateBrollVideo).toHaveBeenCalledTimes(2);
     expect(mocks.generateVeoVideo).not.toHaveBeenCalled();
-    const arg = (mocks.generateBrollVideo.mock.calls[0] as unknown[])[0] as { model: string; size?: string };
+    const arg = (mocks.generateBrollVideo.mock.calls[0] as unknown[])[0] as {
+      model: string;
+      size?: string;
+    };
     expect(arg.model).toBe('happyhorse-1.0-t2v'); // 同端点改 model
     expect(arg.size).toBe('1080*1920'); // 默认 9:16 1080P
   });
@@ -287,40 +350,80 @@ describe('runSimpleVideoCreation — happyhorse (Phase 2)', () => {
 describe('runSimpleVideoCreation — aspectRatio (Phase 2 多画幅)', () => {
   it('16:9 → veo aspectRatio 16:9 + render/compose 1920×1080', async () => {
     const { svc, mocks } = makeServices();
-    await runSimpleVideoCreation({ userText: 'x' }, CFG, { visualMode: 'video', videoSource: 'veo_fast', aspectRatio: '16:9' }, svc);
-    const veoArg = (mocks.generateVeoVideo.mock.calls[0] as unknown[])[0] as { aspectRatio: string };
+    await runSimpleVideoCreation(
+      { userText: 'x' },
+      CFG,
+      { visualMode: 'video', videoSource: 'veo_fast', aspectRatio: '16:9' },
+      svc,
+    );
+    const veoArg = (mocks.generateVeoVideo.mock.calls[0] as unknown[])[0] as {
+      aspectRatio: string;
+    };
     expect(veoArg.aspectRatio).toBe('16:9');
-    const clipArg = (mocks.renderVideoClip.mock.calls[0] as unknown[])[0] as { width: number; height: number };
+    const clipArg = (mocks.renderVideoClip.mock.calls[0] as unknown[])[0] as {
+      width: number;
+      height: number;
+    };
     expect(clipArg.width).toBe(1920);
     expect(clipArg.height).toBe(1080);
   });
 
   it('1:1 → veo aspectRatio falls back to 9:16, render/compose 1080×1080', async () => {
     const { svc, mocks } = makeServices();
-    await runSimpleVideoCreation({ userText: 'x' }, CFG, { visualMode: 'video', videoSource: 'veo_fast', aspectRatio: '1:1' }, svc);
-    const veoArg = (mocks.generateVeoVideo.mock.calls[0] as unknown[])[0] as { aspectRatio: string };
+    await runSimpleVideoCreation(
+      { userText: 'x' },
+      CFG,
+      { visualMode: 'video', videoSource: 'veo_fast', aspectRatio: '1:1' },
+      svc,
+    );
+    const veoArg = (mocks.generateVeoVideo.mock.calls[0] as unknown[])[0] as {
+      aspectRatio: string;
+    };
     expect(veoArg.aspectRatio).toBe('9:16'); // Veo 无 1:1 → 9:16 出, compose pad 到方形
-    const clipArg = (mocks.renderVideoClip.mock.calls[0] as unknown[])[0] as { width: number; height: number };
+    const clipArg = (mocks.renderVideoClip.mock.calls[0] as unknown[])[0] as {
+      width: number;
+      height: number;
+    };
     expect(clipArg.width).toBe(1080);
     expect(clipArg.height).toBe(1080);
   });
 
   it('4:3 → veo aspectRatio uses 16:9 source, render/compose 1440×1080', async () => {
     const { svc, mocks } = makeServices();
-    await runSimpleVideoCreation({ userText: 'x' }, CFG, { visualMode: 'video', videoSource: 'veo_fast', aspectRatio: '4:3' }, svc);
-    const veoArg = (mocks.generateVeoVideo.mock.calls[0] as unknown[])[0] as { aspectRatio: string };
+    await runSimpleVideoCreation(
+      { userText: 'x' },
+      CFG,
+      { visualMode: 'video', videoSource: 'veo_fast', aspectRatio: '4:3' },
+      svc,
+    );
+    const veoArg = (mocks.generateVeoVideo.mock.calls[0] as unknown[])[0] as {
+      aspectRatio: string;
+    };
     expect(veoArg.aspectRatio).toBe('16:9');
-    const clipArg = (mocks.renderVideoClip.mock.calls[0] as unknown[])[0] as { width: number; height: number };
+    const clipArg = (mocks.renderVideoClip.mock.calls[0] as unknown[])[0] as {
+      width: number;
+      height: number;
+    };
     expect(clipArg.width).toBe(1440);
     expect(clipArg.height).toBe(1080);
   });
 
   it('3:4 → veo aspectRatio uses 9:16 source, render/compose 1080×1440', async () => {
     const { svc, mocks } = makeServices();
-    await runSimpleVideoCreation({ userText: 'x' }, CFG, { visualMode: 'video', videoSource: 'veo_fast', aspectRatio: '3:4' }, svc);
-    const veoArg = (mocks.generateVeoVideo.mock.calls[0] as unknown[])[0] as { aspectRatio: string };
+    await runSimpleVideoCreation(
+      { userText: 'x' },
+      CFG,
+      { visualMode: 'video', videoSource: 'veo_fast', aspectRatio: '3:4' },
+      svc,
+    );
+    const veoArg = (mocks.generateVeoVideo.mock.calls[0] as unknown[])[0] as {
+      aspectRatio: string;
+    };
     expect(veoArg.aspectRatio).toBe('9:16');
-    const clipArg = (mocks.renderVideoClip.mock.calls[0] as unknown[])[0] as { width: number; height: number };
+    const clipArg = (mocks.renderVideoClip.mock.calls[0] as unknown[])[0] as {
+      width: number;
+      height: number;
+    };
     expect(clipArg.width).toBe(1080);
     expect(clipArg.height).toBe(1440);
   });
@@ -344,12 +447,34 @@ describe('runSimpleVideoCreation — config gates', () => {
   it('throws config when image (nano banana) but GEMINI key missing', async () => {
     const { svc } = makeServices();
     await expect(
-      runSimpleVideoCreation({ userText: 'x' }, { ...CFG, geminiApiKey: '' }, { visualMode: 'image' }, svc),
+      runSimpleVideoCreation(
+        { userText: 'x' },
+        { ...CFG, geminiApiKey: '' },
+        { visualMode: 'image' },
+        svc,
+      ),
     ).rejects.toMatchObject({ kind: 'config' });
   });
 });
 
 describe('runSimpleVideoCreation — final quality gate', () => {
+  it('rejects a missing verifier before any paid generation call', async () => {
+    const { svc, mocks } = makeServices();
+    const miswired = { ...svc, verifyFinalVideo: undefined } as unknown as SimpleVideoServices;
+
+    await expect(
+      runSimpleVideoCreation(
+        { userText: '一只蓝色陶瓷杯放在白色桌面', script: SCRIPT },
+        CFG,
+        {},
+        miswired,
+      ),
+    ).rejects.toMatchObject({ name: 'SimpleVideoError', kind: 'config' });
+
+    expect(mocks.generateVeoVideo).not.toHaveBeenCalled();
+    expect(mocks.generateBrollVideo).not.toHaveBeenCalled();
+  });
+
   it('stores the final artifact only after frame verification passes', async () => {
     const { svc, mocks } = makeServices();
     const verifyFinalVideo = vi.fn(async () => ({
@@ -368,47 +493,57 @@ describe('runSimpleVideoCreation — final quality gate', () => {
     expect(verifyFinalVideo).toHaveBeenCalledWith(
       expect.objectContaining({
         videoPath: '/tmp/wd/final.mp4',
+        durationMs: 5000,
         userText: '一只蓝色陶瓷杯放在白色桌面',
-        expectedBrandText: 'HOLA DAY · AI',
+        requiredBrandTexts: ['HOLA DAY · AI'],
+        brandPolicy: expect.stringMatching(/错误品牌/),
       }),
     );
+    expect(mocks.ffprobeDurationMs).toHaveBeenCalledWith('/tmp/wd/final.mp4', {});
     expect(out.fileId).toBe('f_video.mp4');
-    expect(mocks.storeOutput).toHaveBeenCalledWith(
-      expect.objectContaining({ filename: 'video.mp4' }),
+    expect(mocks.storeOutputFile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        filename: 'video.mp4',
+        sourcePath: '/tmp/wd/final.mp4',
+      }),
     );
   });
 
-  it('blocks an abnormal-hand video before it is stored or marked deliverable', async () => {
-    const { svc, mocks } = makeServices();
-    const verifyFinalVideo = vi.fn(async () => ({
-      status: 'fail' as const,
-      failedChecks: ['fused_hands', 'unrequested_human'],
-      reason: '画面出现融合手和未请求的人物肢体',
-    }));
+  it.each(['fail', 'unknown'] as const)(
+    'blocks a %s verdict before the video is stored or marked deliverable',
+    async (status) => {
+      const { svc, mocks } = makeServices();
+      const verifyFinalVideo = vi.fn(async () => ({
+        status,
+        failedChecks:
+          status === 'fail' ? ['fused_hands', 'unrequested_human'] : ['verifier_inconclusive'],
+        reason: status === 'fail' ? '画面出现融合手和未请求的人物肢体' : '质检服务未得出结论',
+      }));
 
-    await expect(
-      runSimpleVideoCreation(
-        { userText: '一只蓝色陶瓷杯放在白色桌面', script: SCRIPT },
-        CFG,
-        {},
-        { ...svc, verifyFinalVideo },
-      ),
-    ).rejects.toMatchObject({
-      name: 'SimpleVideoError',
-      kind: 'quality',
-    });
+      await expect(
+        runSimpleVideoCreation(
+          { userText: '一只蓝色陶瓷杯放在白色桌面', script: SCRIPT },
+          CFG,
+          {},
+          { ...svc, verifyFinalVideo },
+        ),
+      ).rejects.toMatchObject({
+        name: 'SimpleVideoError',
+        kind: 'quality',
+      });
 
-    expect(
-      mocks.storeOutput.mock.calls.some(
-        (call) => ((call as unknown[])[0] as { filename?: string }).filename === 'video.mp4',
-      ),
-    ).toBe(false);
-    expect(
-      mocks.storeOutput.mock.calls.some(
-        (call) => ((call as unknown[])[0] as { filename?: string }).filename === 'poster.jpg',
-      ),
-    ).toBe(false);
-  });
+      expect(
+        mocks.storeOutputFile.mock.calls.some(
+          (call) => ((call as unknown[])[0] as { filename?: string }).filename === 'video.mp4',
+        ),
+      ).toBe(false);
+      expect(
+        mocks.storeOutput.mock.calls.some(
+          (call) => ((call as unknown[])[0] as { filename?: string }).filename === 'poster.jpg',
+        ),
+      ).toBe(false);
+    },
+  );
 });
 
 describe('runSimpleVideoCreation — pre-optimized script (Phase-1 quote reuse)', () => {

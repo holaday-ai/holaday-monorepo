@@ -18,8 +18,11 @@ import { users } from './users.js';
  *   'input'  → user upload that the agent reads. Storage stays as
  *              long as the parent task exists. `expires_at` null.
  *   'output' → file the agent created via the `create_file` tool.
- *              `expires_at` = uploaded_at + 24h; cron deletes the
- *              row + on-disk file when expired.
+ *              `expires_at` follows the configured output retention
+ *              (30 days by default); cron deletes expired storage.
+ *   'temp'   → hidden provider-handoff artifact. It uses a short TTL,
+ *              is excluded from result/file listings, and gives cleanup-cron
+ *              a durable recovery path after process interruption.
  *
  * `task_id` is nullable: input files are uploaded BEFORE the task
  * exists (the SPA calls `/api/files/upload` first, then includes
@@ -34,10 +37,9 @@ export const taskFiles = mysqlTable(
     userId: bigint('user_id', { mode: 'number', unsigned: true })
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
-    taskId: bigint('task_id', { mode: 'number', unsigned: true }).references(
-      () => tasks.id,
-      { onDelete: 'cascade' },
-    ),
+    taskId: bigint('task_id', { mode: 'number', unsigned: true }).references(() => tasks.id, {
+      onDelete: 'cascade',
+    }),
     kind: varchar('kind', { length: 8 }).notNull(),
     filename: varchar('filename', { length: 255 }).notNull(),
     mimetype: varchar('mimetype', { length: 96 }).notNull(),

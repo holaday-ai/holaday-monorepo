@@ -27,18 +27,15 @@ import { videoParameterIssue } from '@holaday/shared-types';
 import { generateImages } from '../image/gemini-image-client.js';
 import { ffprobeDurationMs, renderImageClip, renderVideoClip, runFfmpeg } from './ffmpeg-exec.js';
 import { synthesizeSpeech } from './qwen-voice-clone-client.js';
-import { generateVeoVideo } from './veo-client.js';
 import { buildAss } from './timeline.js';
-import { buildComposeCommand } from './video-compose.js';
-import { downloadToBuffer } from './video-http.js';
-import { runVideoPipeline, type PipelineLogger, type VideoPipelineDeps } from './video-pipeline.js';
-import { generatePosterFile } from './video-poster.js';
-import { optimizeUserScript, type LlmComplete, type VideoStyle } from './video-script.js';
-import type {
-  VideoQualityResult,
-  VerifyFinalVideoQualityInput,
-} from './video-quality-verifier.js';
 import type { VideoScript } from './types.js';
+import { generateVeoVideo } from './veo-client.js';
+import { buildComposeCommand } from './video-compose.js';
+import { downloadToBuffer, downloadToFile } from './video-http.js';
+import { type PipelineLogger, type VideoPipelineDeps, runVideoPipeline } from './video-pipeline.js';
+import { generatePosterFile } from './video-poster.js';
+import type { VerifyFinalVideoQualityInput, VideoQualityResult } from './video-quality-verifier.js';
+import { type LlmComplete, type VideoStyle, optimizeUserScript } from './video-script.js';
 import { generateBrollVideo } from './wanxiang-client.js';
 
 // 文字与品牌不做一刀切。用户未要求时不让模型擅自添加；用户明确要求时保留，
@@ -64,9 +61,7 @@ const BASE_NEGATIVE = [
   'garbled text, fake text, gibberish text, misspelled text, unreadable text, incorrect logo, malformed logo,' +
     ' fused hands, extra arm, extra hand, third arm, deformed hands, extra fingers, floating limb, anatomical error',
 ].join(', ');
-const OBJECT_ONLY_NEGATIVE =
-  `${BASE_NEGATIVE}, person, people, human, face, hand, hands, arm, arms, body parts, ` +
-  'holding object, touching object, picking up object';
+const OBJECT_ONLY_NEGATIVE = `${BASE_NEGATIVE}, person, people, human, face, hand, hands, arm, arms, body parts, holding object, touching object, picking up object`;
 
 type HumanPresencePolicy = 'explicit-human' | 'object-only' | 'conditional';
 
@@ -166,11 +161,7 @@ function resolveVeoModel(source: VideoSource, cfg: SimpleVideoConfig): string {
   }
 }
 
-export type SimpleVideoErrorKind =
-  | 'config'
-  | 'compose'
-  | 'invalid_options'
-  | 'quality';
+export type SimpleVideoErrorKind = 'config' | 'compose' | 'invalid_options' | 'quality';
 export class SimpleVideoError extends Error {
   constructor(
     message: string,
@@ -231,6 +222,7 @@ interface SimpleFns {
   generateBrollVideo: typeof generateBrollVideo; // wanxiang t2v (fallback)
   generateVeoVideo: typeof generateVeoVideo;
   downloadToBuffer: typeof downloadToBuffer;
+  downloadToFile: typeof downloadToFile;
   ffprobeDurationMs: typeof ffprobeDurationMs;
   renderImageClip: typeof renderImageClip; // STATIC (no Ken Burns)
   renderVideoClip: typeof renderVideoClip;
@@ -245,12 +237,18 @@ export interface SimpleVideoServices {
     fileId: string;
     storagePath: string;
   }>;
+  storeOutputFile(input: {
+    filename: string;
+    mimetype: string;
+    sourcePath: string;
+  }): Promise<{
+    fileId: string;
+    storagePath: string;
+  }>;
   workdir: string;
   logger: PipelineLogger;
   llm: LlmComplete;
-  verifyFinalVideo?: (
-    input: VerifyFinalVideoQualityInput,
-  ) => Promise<VideoQualityResult>;
+  verifyFinalVideo: (input: VerifyFinalVideoQualityInput) => Promise<VideoQualityResult>;
   overrides?: Partial<SimpleFns>;
 }
 
@@ -261,6 +259,7 @@ function realFns(): SimpleFns {
     generateBrollVideo,
     generateVeoVideo,
     downloadToBuffer,
+    downloadToFile,
     ffprobeDurationMs,
     renderImageClip,
     renderVideoClip,
@@ -300,7 +299,11 @@ export function createSimplePipelineDeps(
         text,
       });
       const dl = await fns.downloadToBuffer(synth.audioUrl);
-      await svc.storeOutput({ filename: `seg${index}-audio.wav`, mimetype: 'audio/wav', buffer: dl.buffer });
+      await svc.storeOutput({
+        filename: `seg${index}-audio.wav`,
+        mimetype: 'audio/wav',
+        buffer: dl.buffer,
+      });
       const localPath = path.join(svc.workdir, `seg${index}-audio.wav`);
       await fns.writeFile(localPath, dl.buffer);
       const durationMs = await fns.ffprobeDurationMs(
@@ -321,8 +324,13 @@ export function createSimplePipelineDeps(
           prompt: `${visual}${scenePolicy.suffix}，${aspectLabel} 构图`,
         });
         const first = img.images[0];
-        if (!first) throw new SimpleVideoError(`nano banana seg ${index} produced no image`, 'compose');
-        await svc.storeOutput({ filename: `seg${index}-img.png`, mimetype: first.mimeType, buffer: first.buffer });
+        if (!first)
+          throw new SimpleVideoError(`nano banana seg ${index} produced no image`, 'compose');
+        await svc.storeOutput({
+          filename: `seg${index}-img.png`,
+          mimetype: first.mimeType,
+          buffer: first.buffer,
+        });
         const localPath = path.join(svc.workdir, `seg${index}-img.png`);
         await fns.writeFile(localPath, first.buffer);
         return { visualRef: localPath };
@@ -359,13 +367,15 @@ export function createSimplePipelineDeps(
           // HappyHorse 1080P 按画幅; wanxiang 兜底保持 720 竖屏(第一期不做多尺寸).
           size: isHH ? aspect.hhSize : (cfg.wanxiangVideoSize ?? '720*1280'),
         });
-        if (!v.videoUrl) throw new SimpleVideoError(`broll video seg ${index} produced no url`, 'compose');
+        if (!v.videoUrl)
+          throw new SimpleVideoError(`broll video seg ${index} produced no url`, 'compose');
         url = v.videoUrl;
       }
-      const dl = await fns.downloadToBuffer(url, headers ? { headers } : {});
-      await svc.storeOutput({ filename: `seg${index}-vid.mp4`, mimetype: 'video/mp4', buffer: dl.buffer });
       const localPath = path.join(svc.workdir, `seg${index}-vid.mp4`);
-      await fns.writeFile(localPath, dl.buffer);
+      await fns.downloadToFile(url, localPath, {
+        ...(headers ? { headers } : {}),
+        maxBytes: 500 * 1024 * 1024,
+      });
       return { visualRef: localPath };
     },
 
@@ -373,9 +383,29 @@ export function createSimplePipelineDeps(
       const outPath = path.join(svc.workdir, `seg${index}-clip.mp4`);
       if (visualMode === 'image') {
         // 静态图(无 Ken Burns 运镜)— BOSS 2026-06-15.
-        await fns.renderImageClip({ imagePath: visualRef, audioPath: audioRef, outPath, durationMs, width: aspect.width, height: aspect.height }, ffOpts);
+        await fns.renderImageClip(
+          {
+            imagePath: visualRef,
+            audioPath: audioRef,
+            outPath,
+            durationMs,
+            width: aspect.width,
+            height: aspect.height,
+          },
+          ffOpts,
+        );
       } else {
-        await fns.renderVideoClip({ videoPath: visualRef, audioPath: audioRef, outPath, durationMs, width: aspect.width, height: aspect.height }, ffOpts);
+        await fns.renderVideoClip(
+          {
+            videoPath: visualRef,
+            audioPath: audioRef,
+            outPath,
+            durationMs,
+            width: aspect.width,
+            height: aspect.height,
+          },
+          ffOpts,
+        );
       }
       return { clipRef: outPath };
     },
@@ -420,7 +450,11 @@ export async function runSimpleVideoCreation(
   opts: SimpleVideoOptions,
   svc: SimpleVideoServices,
 ): Promise<SimpleVideoResult> {
-  if (!cfg.dashscopeApiKey) throw new SimpleVideoError('DASHSCOPE_API_KEY not configured', 'config');
+  if (!cfg.dashscopeApiKey)
+    throw new SimpleVideoError('DASHSCOPE_API_KEY not configured', 'config');
+  if (typeof svc.verifyFinalVideo !== 'function') {
+    throw new SimpleVideoError('video quality verifier not configured', 'config');
+  }
   const visualMode = opts.visualMode ?? 'video';
   const videoSource = opts.videoSource ?? 'veo_fast';
   if (
@@ -431,16 +465,17 @@ export async function runSimpleVideoCreation(
       durationSeconds: opts.veoDurationSeconds ?? 8,
     })
   ) {
-    throw new SimpleVideoError(
-      'Veo 1080p requires an 8-second duration',
-      'invalid_options',
-    );
+    throw new SimpleVideoError('Veo 1080p requires an 8-second duration', 'invalid_options');
   }
   const aspect = resolveAspect(opts.aspectRatio ?? '9:16');
   // Veo (any tier) AND nano banana image both run on the shared Google key.
-  const needsGemini = visualMode === 'image' || (visualMode === 'video' && isVeoSource(videoSource));
+  const needsGemini =
+    visualMode === 'image' || (visualMode === 'video' && isVeoSource(videoSource));
   if (needsGemini && !cfg.geminiApiKey) {
-    throw new SimpleVideoError('Veo/nano banana selected but GEMINI_API_KEY not configured', 'config');
+    throw new SimpleVideoError(
+      'Veo/nano banana selected but GEMINI_API_KEY not configured',
+      'config',
+    );
   }
   const fns = { ...realFns(), ...(svc.overrides ?? {}) };
   const ffOpts = cfg.ffmpegBin ? { ffmpegBin: cfg.ffmpegBin } : {};
@@ -491,48 +526,61 @@ export async function runSimpleVideoCreation(
     ffOpts,
   );
   await fns.runFfmpeg(cmd, ffOpts);
-  if (svc.verifyFinalVideo) {
-    const verification = await svc.verifyFinalVideo({
-      videoPath: outPath,
-      workdir: svc.workdir,
-      durationMs: result.timeline.totalDurationMs,
-      userText: input.userText,
-      expectedSubtitleText: script.segments.map((segment) => segment.text),
-      expectedBrandText: 'HOLA DAY · AI',
-      ...(cfg.ffmpegBin ? { ffmpegBin: cfg.ffmpegBin } : {}),
-    });
-    if (verification.status !== 'pass') {
-      svc.logger.warn(
-        {
-          status: verification.status,
-          failedChecks: verification.failedChecks,
-          reason: verification.reason,
-        },
-        'video: final quality gate rejected generated artifact',
-      );
-      throw new SimpleVideoError(
-        'final video failed automated quality verification',
-        'quality',
-      );
-    }
+  const finalDurationMs = await fns.ffprobeDurationMs(
+    outPath,
+    cfg.ffprobeBin ? { ffprobeBin: cfg.ffprobeBin } : {},
+  );
+  const verification = await svc.verifyFinalVideo({
+    videoPath: outPath,
+    workdir: svc.workdir,
+    durationMs: finalDurationMs,
+    userText: input.userText,
+    expectedSubtitleText: script.segments.map((segment) => segment.text),
+    requiredBrandTexts: ['HOLA DAY · AI'],
+    brandPolicy: '用户明确要求的其它文字或品牌必须逐字准确；未要求时不得新增乱码、错字或错误品牌。',
+    ...(cfg.ffmpegBin ? { ffmpegBin: cfg.ffmpegBin } : {}),
+  });
+  if (verification.status !== 'pass') {
+    svc.logger.warn(
+      {
+        status: verification.status,
+        failedChecks: verification.failedChecks,
+        reason: verification.reason,
+      },
+      'video: final quality gate rejected generated artifact',
+    );
+    throw new SimpleVideoError('final video failed automated quality verification', 'quality');
   }
-  const finalBuffer = await fns.readFile(outPath);
-  const stored = await svc.storeOutput({ filename: 'video.mp4', mimetype: 'video/mp4', buffer: finalBuffer });
+  const stored = await svc.storeOutputFile({
+    filename: 'video.mp4',
+    mimetype: 'video/mp4',
+    sourcePath: outPath,
+  });
   // 首帧 poster（非致命：抽帧失败只 log，成片照常完成）。
   await generatePosterFile({
     videoPath: outPath,
     posterPath: path.join(svc.workdir, 'poster.jpg'),
-    deps: { runFfmpeg: fns.runFfmpeg, readFile: fns.readFile, storeOutput: svc.storeOutput, logger: svc.logger },
+    deps: {
+      runFfmpeg: fns.runFfmpeg,
+      readFile: fns.readFile,
+      storeOutput: svc.storeOutput,
+      logger: svc.logger,
+    },
     ffOpts,
   });
   svc.logger.info(
-    { fileId: stored.fileId, segments: result.segments.length, visualMode, totalDurationMs: result.timeline.totalDurationMs },
+    {
+      fileId: stored.fileId,
+      segments: result.segments.length,
+      visualMode,
+      totalDurationMs: finalDurationMs,
+    },
     'video: simplified creation complete',
   );
   return {
     fileId: stored.fileId,
     downloadUrl: `/api/files/${stored.fileId}/download`,
-    totalDurationMs: result.timeline.totalDurationMs,
+    totalDurationMs: finalDurationMs,
     segments: result.segments.length,
     visualMode,
   };

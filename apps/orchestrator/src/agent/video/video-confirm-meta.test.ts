@@ -1,8 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
+  VIDEO_FAILURE_REASONS,
+  claimVideoConfirmAfterVerifierPreflight,
   deriveVideoType,
   mapVideoFailureReason,
-  VIDEO_FAILURE_REASONS,
+  videoVerifierPreflightIssue,
 } from './video-confirm-meta.js';
 
 describe('deriveVideoType', () => {
@@ -17,6 +19,33 @@ describe('deriveVideoType', () => {
   });
   it('defaults to normal', () => {
     expect(deriveVideoType({ isPet: false, isIp: false })).toBe('normal');
+  });
+});
+
+describe('videoVerifierPreflightIssue', () => {
+  it('blocks paid video generation when no quality verifier client exists', () => {
+    expect(videoVerifierPreflightIssue({ choice: 'video', hasVerifier: false })).toMatch(
+      /尚未开始制作/,
+    );
+  });
+
+  it('blocks image-based video fallback too, and allows either path with a verifier', () => {
+    expect(videoVerifierPreflightIssue({ choice: 'image', hasVerifier: false })).toMatch(
+      /尚未开始制作/,
+    );
+    expect(videoVerifierPreflightIssue({ choice: 'video', hasVerifier: true })).toBeNull();
+    expect(videoVerifierPreflightIssue({ choice: 'image', hasVerifier: true })).toBeNull();
+  });
+
+  it('does not consume the quote when the verifier is unavailable', async () => {
+    const consume = vi.fn(async () => true);
+    const result = await claimVideoConfirmAfterVerifierPreflight(
+      { choice: 'video', hasVerifier: false },
+      consume,
+    );
+
+    expect(result).toMatchObject({ claimed: false, issue: expect.stringMatching(/尚未开始制作/) });
+    expect(consume).not.toHaveBeenCalled();
   });
 });
 
@@ -35,29 +64,36 @@ describe('mapVideoFailureReason — safe, whitelisted, no leak', () => {
       name: 'FalLipSyncError',
       kind: 'http',
       status: 422,
-      detail: '{"detail":[{"type":"face_detection_error","input":"https://r2/usr_X/file_Y/secret"}]}',
+      detail:
+        '{"detail":[{"type":"face_detection_error","input":"https://r2/usr_X/file_Y/secret"}]}',
     };
     expect(mapVideoFailureReason(err)).toBe(VIDEO_FAILURE_REASONS.face);
   });
 
   it('fal timeout/network/job_failed → 服务繁忙', () => {
     for (const kind of ['timeout', 'network', 'job_failed']) {
-      expect(mapVideoFailureReason({ name: 'FalLipSyncError', kind })).toBe(VIDEO_FAILURE_REASONS.busy);
+      expect(mapVideoFailureReason({ name: 'FalLipSyncError', kind })).toBe(
+        VIDEO_FAILURE_REASONS.busy,
+      );
     }
   });
 
   it('IpVideoError too_long → 文案过长; config → IP 素材缺失', () => {
-    expect(mapVideoFailureReason({ name: 'IpVideoError', kind: 'too_long' })).toBe(VIDEO_FAILURE_REASONS.tooLong);
-    expect(mapVideoFailureReason({ name: 'IpVideoError', kind: 'config' })).toBe(VIDEO_FAILURE_REASONS.ipAssets);
+    expect(mapVideoFailureReason({ name: 'IpVideoError', kind: 'too_long' })).toBe(
+      VIDEO_FAILURE_REASONS.tooLong,
+    );
+    expect(mapVideoFailureReason({ name: 'IpVideoError', kind: 'config' })).toBe(
+      VIDEO_FAILURE_REASONS.ipAssets,
+    );
   });
 
   it('provider capability mismatches → actionable parameter copy', () => {
-    expect(
-      mapVideoFailureReason({ name: 'SimpleVideoError', kind: 'invalid_options' }),
-    ).toBe(VIDEO_FAILURE_REASONS.invalidOptions);
-    expect(
-      mapVideoFailureReason({ name: 'VeoError', kind: 'invalid_argument' }),
-    ).toBe(VIDEO_FAILURE_REASONS.invalidOptions);
+    expect(mapVideoFailureReason({ name: 'SimpleVideoError', kind: 'invalid_options' })).toBe(
+      VIDEO_FAILURE_REASONS.invalidOptions,
+    );
+    expect(mapVideoFailureReason({ name: 'VeoError', kind: 'invalid_argument' })).toBe(
+      VIDEO_FAILURE_REASONS.invalidOptions,
+    );
   });
 
   it('automated anatomy failure → explicit quality rejection without internal detail', () => {
@@ -68,11 +104,22 @@ describe('mapVideoFailureReason — safe, whitelisted, no leak', () => {
         message: 'fused_hands frame 3 raw provider detail',
       }),
     ).toBe(VIDEO_FAILURE_REASONS.quality);
+    expect(
+      mapVideoFailureReason({
+        name: 'IpVideoError',
+        kind: 'quality',
+        message: 'raw verifier details',
+      }),
+    ).toBe(VIDEO_FAILURE_REASONS.quality);
   });
 
   it('SimpleVideoError / unknown / null / string → generic', () => {
-    expect(mapVideoFailureReason({ name: 'SimpleVideoError', kind: 'compose' })).toBe(VIDEO_FAILURE_REASONS.generic);
-    expect(mapVideoFailureReason(new Error('raw internal boom'))).toBe(VIDEO_FAILURE_REASONS.generic);
+    expect(mapVideoFailureReason({ name: 'SimpleVideoError', kind: 'compose' })).toBe(
+      VIDEO_FAILURE_REASONS.generic,
+    );
+    expect(mapVideoFailureReason(new Error('raw internal boom'))).toBe(
+      VIDEO_FAILURE_REASONS.generic,
+    );
     expect(mapVideoFailureReason(null)).toBe(VIDEO_FAILURE_REASONS.generic);
     expect(mapVideoFailureReason('some string')).toBe(VIDEO_FAILURE_REASONS.generic);
   });
@@ -83,12 +130,21 @@ describe('mapVideoFailureReason — safe, whitelisted, no leak', () => {
       kind: 'http',
       status: 422,
       message: 'fal result returned 422',
-      detail: 'https://holaday-files-prod.r2.cloudflarestorage.com/usr_EeYp/input/file_LMywvC9UKjLThWSDqu4Hw',
+      detail:
+        'https://holaday-files-prod.r2.cloudflarestorage.com/usr_EeYp/input/file_LMywvC9UKjLThWSDqu4Hw',
       stack: 'FalLipSyncError: ...\n at fal-lipsync-client.ts:130',
     };
     const out = mapVideoFailureReason(sensitive);
     expect(isWhitelisted(out)).toBe(true);
-    for (const leak of ['http', 'r2', 'file_', 'usr_', 'fal-lipsync-client', '422', 'cloudflarestorage']) {
+    for (const leak of [
+      'http',
+      'r2',
+      'file_',
+      'usr_',
+      'fal-lipsync-client',
+      '422',
+      'cloudflarestorage',
+    ]) {
       expect(out).not.toContain(leak);
     }
   });

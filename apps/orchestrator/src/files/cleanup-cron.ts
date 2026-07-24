@@ -4,8 +4,9 @@
  *
  * Each run:
  *   1. SELECT every task_files row with status IN ('active','pending')
- *      AND expires_at < NOW(). 'output' rows and abandoned presigned
- *      uploads have a 24h TTL; ordinary input rows leave expires_at
+ *      AND expires_at < NOW(). Output rows use the configured retention,
+ *      hidden provider-handoff rows use a short TTL, and abandoned presigned
+ *      uploads retain their 24h TTL. Ordinary input rows leave expires_at
  *      NULL and are never matched.
  *   2. For each row, delete storage_path via the configured storage
  *      provider (local disk or R2). Log per-file result so a botched
@@ -26,12 +27,12 @@
  *       in `pm2 list` for ops visibility.
  */
 
-import { eq, inArray } from 'drizzle-orm';
-import mysql from 'mysql2/promise';
+import { and, asc, eq, inArray, lt } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/mysql2';
+import mysql from 'mysql2/promise';
+import { logger } from '../config/logger.js';
 import * as schema from '../db/schema/index.js';
 import { taskFiles } from '../db/schema/task-files.js';
-import { logger } from '../config/logger.js';
 import { getSharedStorageProvider } from './storage-provider.js';
 
 async function main(): Promise<void> {
@@ -52,25 +53,26 @@ async function main(): Promise<void> {
   logger.info({ kind: 'cleanup-cron' }, 'cleanup-cron: scanning task_files for expired rows');
   const storage = getSharedStorageProvider({ logger });
 
-  // Gather candidates. Bound the batch — under steady-state usage we
+  // Gather expired candidates in the database. Filtering only after an
+  // un-ordered LIMIT can permanently starve short-lived temp rows behind a
+  // large set of active, non-expiring inputs.
+  //
+  // Bound the batch — under steady-state usage we
   // expect < 1000 expirations per hour; if something unusual lands a
   // huge backlog, the next tick picks up the rest.
-  const candidates = await db
+  const now = new Date();
+  const expired = await db
     .select()
     .from(taskFiles)
-    .where(inArray(taskFiles.status, ['active', 'pending']))
+    .where(and(inArray(taskFiles.status, ['active', 'pending']), lt(taskFiles.expiresAt, now)))
+    .orderBy(asc(taskFiles.expiresAt))
     .limit(2000);
-  const now = Date.now();
-  const expired = candidates.filter(
-    (row) => row.expiresAt != null && row.expiresAt.getTime() < now,
-  );
   logger.info(
-    { kind: 'cleanup-cron', scanned: candidates.length, expired: expired.length },
+    { kind: 'cleanup-cron', expired: expired.length },
     'cleanup-cron: candidate set assembled',
   );
 
   let unlinked = 0;
-  let alreadyMissing = 0;
   let errored = 0;
   for (const row of expired) {
     try {
@@ -92,10 +94,7 @@ async function main(): Promise<void> {
       );
       continue; // Don't flip status when storage side failed.
     }
-    await db
-      .update(taskFiles)
-      .set({ status: 'expired' })
-      .where(eq(taskFiles.id, row.id));
+    await db.update(taskFiles).set({ status: 'expired' }).where(eq(taskFiles.id, row.id));
   }
 
   await pool.end();
@@ -103,7 +102,6 @@ async function main(): Promise<void> {
     {
       kind: 'cleanup-cron',
       unlinked,
-      alreadyMissing,
       errored,
       durationMs: Date.now() - startedAt,
     },

@@ -19,6 +19,25 @@ export function deriveVideoType(input: {
   return 'normal';
 }
 
+export function videoVerifierPreflightIssue(input: {
+  choice: 'video' | 'image';
+  hasVerifier: boolean;
+}): string | null {
+  if ((input.choice === 'video' || input.choice === 'image') && !input.hasVerifier) {
+    return '成片质检服务暂不可用，尚未开始制作，请稍后重试。';
+  }
+  return null;
+}
+
+export async function claimVideoConfirmAfterVerifierPreflight(
+  input: { choice: 'video' | 'image'; hasVerifier: boolean },
+  consume: () => Promise<boolean>,
+): Promise<{ issue: string | null; claimed: boolean }> {
+  const issue = videoVerifierPreflightIssue(input);
+  if (issue) return { issue, claimed: false };
+  return { issue: null, claimed: await consume() };
+}
+
 /** Whitelisted, user-safe failure copy. NEVER include raw error text. */
 export const VIDEO_FAILURE_REASONS = {
   busy: '服务繁忙，请稍后再试。',
@@ -61,6 +80,9 @@ export function mapVideoFailureReason(err: unknown): string {
     }
     return VIDEO_FAILURE_REASONS.generic;
   }
+  if ((name === 'SimpleVideoError' || name === 'IpVideoError') && kind === 'quality') {
+    return VIDEO_FAILURE_REASONS.quality;
+  }
   if (name === 'IpVideoError') {
     if (kind === 'too_long') return VIDEO_FAILURE_REASONS.tooLong;
     if (kind === 'config') return VIDEO_FAILURE_REASONS.ipAssets;
@@ -71,9 +93,6 @@ export function mapVideoFailureReason(err: unknown): string {
     (name === 'VeoError' && kind === 'invalid_argument')
   ) {
     return VIDEO_FAILURE_REASONS.invalidOptions;
-  }
-  if (name === 'SimpleVideoError' && kind === 'quality') {
-    return VIDEO_FAILURE_REASONS.quality;
   }
   // SimpleVideoError (config/compose) + anything else → don't expose details.
   return VIDEO_FAILURE_REASONS.generic;

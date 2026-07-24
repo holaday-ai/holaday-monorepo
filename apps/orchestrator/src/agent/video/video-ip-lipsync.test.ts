@@ -1,13 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   IP_MAX_AUDIO_MS,
-  runIpVideoCreation,
-  splitIpCues,
   type IpFns,
   type IpVideoConfig,
   type IpVideoContext,
   type IpVideoServices,
+  runIpVideoCreation,
+  splitIpCues,
 } from './video-ip-lipsync.js';
+import type { VideoQualityResult } from './video-quality-verifier.js';
 
 const CFG: IpVideoConfig = {
   dashscopeApiKey: 'dk',
@@ -22,46 +23,156 @@ const CTX: IpVideoContext = { voiceId: 'qwen-tts-vc-x', baseVideoUrl: 'https://r
 const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 
 function makeServices(durationMs = 8000) {
-  const synthesizeSpeech = vi.fn(async () => ({ audioUrl: 'https://oss/voice.wav', characters: 42 }));
-  const runLipSync = vi.fn(async () => ({ videoUrl: 'https://v3.fal.media/out.mp4', requestId: 'r1', elapsedMs: 1000 }));
-  const downloadToBuffer = vi.fn(async () => ({ buffer: Buffer.from('x'), contentType: 'application/octet-stream', sizeBytes: 1 }));
+  const synthesizeSpeech = vi.fn(async () => ({
+    audioUrl: 'https://oss/voice.wav',
+    characters: 42,
+  }));
+  const runLipSync = vi.fn(async () => ({
+    videoUrl: 'https://v3.fal.media/out.mp4',
+    requestId: 'r1',
+    elapsedMs: 1000,
+  }));
+  const downloadToBuffer = vi.fn(async () => ({
+    buffer: Buffer.from('x'),
+    contentType: 'application/octet-stream',
+    sizeBytes: 1,
+  }));
+  const downloadToFile = vi.fn(async () => ({
+    contentType: 'video/mp4',
+    sizeBytes: 42_000_000,
+  }));
   const ffprobeDurationMs = vi.fn(async () => durationMs);
   const runFfmpeg = vi.fn(async () => {});
   const writeFile = vi.fn(async () => {});
   const readFile = vi.fn(async () => Buffer.from('final'));
   const storeOutput = vi.fn(async (i: { filename: string }) => ({ fileId: `f_${i.filename}` }));
-  const presignByFileId = vi.fn(async (fid: string) => `https://r2/${fid}?sig`);
+  const storeOutputFile = vi.fn(async (i: { filename: string }) => ({
+    fileId: `f_${i.filename}`,
+  }));
+  const storeTemporaryAudio = vi.fn(async () => ({ fileId: 'f_ip-voice.wav' }));
+  const presignByFileId = vi.fn(
+    async (fid: string): Promise<string | null> => `https://r2/${fid}?sig`,
+  );
+  const deleteOutput = vi.fn(async () => true);
+  const verifyFinalVideo = vi.fn(
+    async (): Promise<VideoQualityResult> => ({
+      status: 'pass' as const,
+      failedChecks: [],
+      reason: '人物、口型和字幕均通过',
+    }),
+  );
   const overrides: Partial<IpFns> = {
     synthesizeSpeech: synthesizeSpeech as unknown as IpFns['synthesizeSpeech'],
     runLipSync: runLipSync as unknown as IpFns['runLipSync'],
     downloadToBuffer: downloadToBuffer as unknown as IpFns['downloadToBuffer'],
+    downloadToFile: downloadToFile as unknown as IpFns['downloadToFile'],
     ffprobeDurationMs: ffprobeDurationMs as unknown as IpFns['ffprobeDurationMs'],
     runFfmpeg,
     writeFile,
     readFile,
   };
-  const svc: IpVideoServices = { storeOutput, presignByFileId, workdir: '/tmp/ipwd', logger, overrides };
-  return { svc, mocks: { synthesizeSpeech, runLipSync, downloadToBuffer, ffprobeDurationMs, runFfmpeg, storeOutput, presignByFileId } };
+  const svc: IpVideoServices = {
+    storeOutput,
+    storeOutputFile,
+    storeTemporaryAudio,
+    presignByFileId,
+    deleteOutput,
+    workdir: '/tmp/ipwd',
+    logger,
+    verifyFinalVideo,
+    overrides,
+  };
+  return {
+    svc,
+    mocks: {
+      synthesizeSpeech,
+      runLipSync,
+      downloadToBuffer,
+      downloadToFile,
+      ffprobeDurationMs,
+      runFfmpeg,
+      storeOutput,
+      storeOutputFile,
+      storeTemporaryAudio,
+      presignByFileId,
+      deleteOutput,
+      verifyFinalVideo,
+    },
+  };
 }
 
 describe('runIpVideoCreation — B 架构单 clip 口播', () => {
   it('全文案 1 次合成(克隆音)→ 1 次 fal 换口型(loop_mode)→ compose → store', async () => {
     const { svc, mocks } = makeServices(8000);
-    const res = await runIpVideoCreation({ copyText: '大家好,这是我本人口播。今天聊三件事。' }, CFG, CTX, {}, svc);
+    const res = await runIpVideoCreation(
+      { copyText: '大家好,这是我本人口播。今天聊三件事。' },
+      CFG,
+      CTX,
+      {},
+      svc,
+    );
+    expect(mocks.downloadToFile).toHaveBeenCalledWith(
+      CTX.baseVideoUrl,
+      '/tmp/ipwd/ip-base-reference.mp4',
+      { maxBytes: 200 * 1024 * 1024 },
+    );
+    expect(mocks.downloadToBuffer).not.toHaveBeenCalledWith(CTX.baseVideoUrl);
+    expect(mocks.downloadToFile).toHaveBeenCalledWith(
+      'https://v3.fal.media/out.mp4',
+      '/tmp/ipwd/ip-lipsync.mp4',
+      { maxBytes: 500 * 1024 * 1024 },
+    );
+    expect(mocks.downloadToBuffer).not.toHaveBeenCalledWith('https://v3.fal.media/out.mp4');
     // ① 合成用用户 voice_id + 全文案
-    const synthArg = (mocks.synthesizeSpeech.mock.calls[0] as unknown[])[0] as { voiceId: string; text: string };
+    const synthArg = (mocks.synthesizeSpeech.mock.calls[0] as unknown[])[0] as {
+      voiceId: string;
+      text: string;
+    };
     expect(synthArg.voiceId).toBe('qwen-tts-vc-x');
     expect(synthArg.text).toContain('今天聊三件事');
     // ② fal: base video + presigned 克隆音 + loop_mode
-    const lipArg = (mocks.runLipSync.mock.calls[0] as unknown[])[0] as { videoUrl: string; audioUrl: string; extra?: Record<string, unknown> };
+    const lipArg = (mocks.runLipSync.mock.calls[0] as unknown[])[0] as {
+      videoUrl: string;
+      audioUrl: string;
+      extra?: Record<string, unknown>;
+    };
     expect(lipArg.videoUrl).toBe('https://r2/base.mp4?sig');
     expect(lipArg.audioUrl).toContain('https://r2/'); // presigned 克隆音
     expect(lipArg.extra?.loop_mode).toBe('loop');
     // 只 1 次 fal(B 架构 = 1 clip)
     expect(mocks.runLipSync).toHaveBeenCalledTimes(1);
+    expect(mocks.storeTemporaryAudio).toHaveBeenCalledWith({
+      filename: 'ip-voice.wav',
+      mimetype: 'audio/wav',
+      buffer: Buffer.from('x'),
+    });
+    expect(mocks.storeOutput).not.toHaveBeenCalledWith(
+      expect.objectContaining({ filename: 'ip-voice.wav' }),
+    );
+    expect(mocks.deleteOutput).toHaveBeenCalledWith('f_ip-voice.wav');
+    expect(mocks.verifyFinalVideo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        videoPath: '/tmp/ipwd/ip-final.mp4',
+        durationMs: 8000,
+        userText: '大家好,这是我本人口播。今天聊三件事。',
+        qualityContext: expect.stringMatching(/底版人物.*身份.*口型/),
+        expectedSubtitleText: ['大家好,这是我本人口播。', '今天聊三件事。'],
+        referenceVideos: [
+          expect.objectContaining({
+            videoPath: '/tmp/ipwd/ip-base-reference.mp4',
+            label: '用户本人出镜底版',
+          }),
+        ],
+      }),
+    );
     // ③ compose + 最终 store + 首帧 poster
     expect(mocks.runFfmpeg).toHaveBeenCalledTimes(2); // compose + poster
-    expect(mocks.storeOutput).toHaveBeenCalledWith(expect.objectContaining({ filename: 'video.mp4' }));
+    expect(mocks.storeOutputFile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        filename: 'video.mp4',
+        sourcePath: '/tmp/ipwd/ip-final.mp4',
+      }),
+    );
     expect(mocks.storeOutput).toHaveBeenCalledWith(
       expect.objectContaining({ filename: 'poster.jpg', mimetype: 'image/jpeg' }),
     );
@@ -71,15 +182,61 @@ describe('runIpVideoCreation — B 架构单 clip 口播', () => {
 
   it('音频 >40s → too_long(不调 fal,B 平价边界)', async () => {
     const { svc, mocks } = makeServices(IP_MAX_AUDIO_MS + 1000);
-    await expect(runIpVideoCreation({ copyText: '很长的文案'.repeat(50) }, CFG, CTX, {}, svc)).rejects.toMatchObject({ kind: 'too_long' });
+    await expect(
+      runIpVideoCreation({ copyText: '很长的文案'.repeat(50) }, CFG, CTX, {}, svc),
+    ).rejects.toMatchObject({ kind: 'too_long' });
     expect(mocks.runLipSync).not.toHaveBeenCalled();
   });
 
   it('config error: 缺 voiceId / 缺底版 url / 缺 key', async () => {
     const { svc } = makeServices();
-    await expect(runIpVideoCreation({ copyText: 'x' }, CFG, { voiceId: '', baseVideoUrl: 'u' }, {}, svc)).rejects.toMatchObject({ kind: 'config' });
-    await expect(runIpVideoCreation({ copyText: 'x' }, { ...CFG, falApiKey: '' }, CTX, {}, svc)).rejects.toMatchObject({ kind: 'config' });
+    await expect(
+      runIpVideoCreation({ copyText: 'x' }, CFG, { voiceId: '', baseVideoUrl: 'u' }, {}, svc),
+    ).rejects.toMatchObject({ kind: 'config' });
+    await expect(
+      runIpVideoCreation({ copyText: 'x' }, { ...CFG, falApiKey: '' }, CTX, {}, svc),
+    ).rejects.toMatchObject({ kind: 'config' });
   });
+
+  it('removes the temporary cloned audio when presigning fails', async () => {
+    const { svc, mocks } = makeServices();
+    mocks.presignByFileId.mockResolvedValueOnce(null);
+
+    await expect(
+      runIpVideoCreation({ copyText: '欢迎回来。' }, CFG, CTX, {}, svc),
+    ).rejects.toMatchObject({ name: 'IpVideoError', kind: 'config' });
+
+    expect(mocks.runLipSync).not.toHaveBeenCalled();
+    expect(mocks.deleteOutput).toHaveBeenCalledWith('f_ip-voice.wav');
+  });
+
+  it.each(['fail', 'unknown'] as const)(
+    'blocks a %s IP verdict before storing the final video or poster',
+    async (status) => {
+      const { svc, mocks } = makeServices(8000);
+      mocks.verifyFinalVideo.mockResolvedValueOnce({
+        status,
+        failedChecks: status === 'fail' ? ['fused_hands', 'face_drift'] : ['verifier_inconclusive'],
+        reason: status === 'fail' ? '人物手部异常且面部漂移' : '质检服务未得出结论',
+      });
+
+      await expect(
+        runIpVideoCreation({ copyText: '欢迎关注我们的新品。' }, CFG, CTX, {}, svc),
+      ).rejects.toMatchObject({ name: 'IpVideoError', kind: 'quality' });
+
+      expect(
+        mocks.storeOutputFile.mock.calls.some(
+          (call) => ((call as unknown[])[0] as { filename?: string }).filename === 'video.mp4',
+        ),
+      ).toBe(false);
+      expect(
+        mocks.storeOutput.mock.calls.some(
+          (call) => ((call as unknown[])[0] as { filename?: string }).filename === 'poster.jpg',
+        ),
+      ).toBe(false);
+      expect(mocks.deleteOutput).toHaveBeenCalledWith('f_ip-voice.wav');
+    },
+  );
 });
 
 describe('splitIpCues — 全文案按字数比例切逐句字幕', () => {
@@ -90,7 +247,9 @@ describe('splitIpCues — 全文案按字数比例切逐句字幕', () => {
     expect(durations.reduce((a, b) => a + b, 0)).toBe(4000);
     expect(durations.every((d) => d >= 1)).toBe(true);
     // 较长的第二句时长更大
-    expect(durations[1]!).toBeGreaterThan(durations[0]!);
+    expect(durations).toHaveLength(2);
+    const [firstDuration = 0, secondDuration = 0] = durations;
+    expect(secondDuration).toBeGreaterThan(firstDuration);
   });
 
   it('无标点单句 → 1 个 cue 占满', () => {

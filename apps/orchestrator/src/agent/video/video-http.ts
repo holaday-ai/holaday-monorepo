@@ -9,6 +9,11 @@
  * `VideoHttpError` (timeout / network) propagate or maps it.
  */
 
+import { promises as fs, createWriteStream } from 'node:fs';
+import path from 'node:path';
+import { Readable, Transform } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
+
 export type VideoHttpErrorKind = 'timeout' | 'network';
 
 export class VideoHttpError extends Error {
@@ -85,6 +90,7 @@ export async function downloadToBuffer(
     headers?: Record<string, string>;
   } = {},
 ): Promise<{ buffer: Buffer; contentType?: string; sizeBytes: number }> {
+  const maxBytes = opts.maxBytes ?? 64 * 1024 * 1024;
   const res = await fetchWithTimeout(
     url,
     { method: 'GET', ...(opts.headers ? { headers: opts.headers } : {}) },
@@ -93,14 +99,124 @@ export async function downloadToBuffer(
   if (!res.ok) {
     throw new VideoHttpError(`download failed: HTTP ${res.status}`, 'network');
   }
-  const arrayBuffer = await res.arrayBuffer();
-  const buffer = Buffer.from(arrayBuffer);
-  if (opts.maxBytes !== undefined && buffer.length > opts.maxBytes) {
+  if (!res.body) {
+    throw new VideoHttpError('download failed: response body is empty', 'network');
+  }
+  const declaredLength = Number(res.headers.get('content-length'));
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+    await res.body.cancel().catch(() => {});
     throw new VideoHttpError(
-      `downloaded ${buffer.length} bytes exceeds maxBytes ${opts.maxBytes}`,
+      `declared ${declaredLength} bytes exceeds maxBytes ${maxBytes}`,
       'network',
     );
   }
+  const reader = res.body.getReader();
+  const chunks: Buffer[] = [];
+  let sizeBytes = 0;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const bodyTimeout = new Promise<never>((_resolve, reject) => {
+    timeout = setTimeout(
+      () =>
+        reject(
+          new VideoHttpError(
+            `download body timed out after ${opts.timeoutMs ?? 120_000}ms`,
+            'timeout',
+          ),
+        ),
+      opts.timeoutMs ?? 120_000,
+    );
+  });
+  try {
+    for (;;) {
+      const { done, value } = await Promise.race([reader.read(), bodyTimeout]);
+      if (done) break;
+      const chunk = Buffer.from(value);
+      sizeBytes += chunk.length;
+      if (sizeBytes > maxBytes) {
+        throw new VideoHttpError(
+          `downloaded ${sizeBytes} bytes exceeds maxBytes ${maxBytes}`,
+          'network',
+        );
+      }
+      chunks.push(chunk);
+    }
+  } catch (err) {
+    await reader.cancel().catch(() => {});
+    if (err instanceof VideoHttpError) throw err;
+    throw new VideoHttpError(`download failed: ${(err as Error).message}`, 'network', err);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+    reader.releaseLock();
+  }
+  const buffer = Buffer.concat(chunks, sizeBytes);
   const contentType = res.headers.get('content-type') ?? undefined;
-  return { buffer, ...(contentType ? { contentType } : {}), sizeBytes: buffer.length };
+  return { buffer, ...(contentType ? { contentType } : {}), sizeBytes };
+}
+
+/**
+ * Stream a remote artifact directly to disk. This is the required path for
+ * user-supplied videos, which may be hundreds of megabytes and must never be
+ * materialized as one Buffer inside the Orchestrator process.
+ */
+export async function downloadToFile(
+  url: string,
+  destination: string,
+  opts: {
+    fetchImpl?: typeof fetch;
+    timeoutMs?: number;
+    maxBytes?: number;
+    headers?: Record<string, string>;
+  } = {},
+): Promise<{ contentType?: string; sizeBytes: number }> {
+  const timeoutMs = opts.timeoutMs ?? 120_000;
+  const res = await fetchWithTimeout(
+    url,
+    { method: 'GET', ...(opts.headers ? { headers: opts.headers } : {}) },
+    { timeoutMs, fetchImpl: opts.fetchImpl },
+  );
+  if (!res.ok) {
+    throw new VideoHttpError(`download failed: HTTP ${res.status}`, 'network');
+  }
+  if (!res.body) {
+    throw new VideoHttpError('download failed: response body is empty', 'network');
+  }
+
+  await fs.mkdir(path.dirname(destination), { recursive: true });
+  let sizeBytes = 0;
+  const byteCounter = new Transform({
+    transform(chunk: Buffer, _encoding, callback) {
+      sizeBytes += chunk.length;
+      if (opts.maxBytes !== undefined && sizeBytes > opts.maxBytes) {
+        callback(
+          new VideoHttpError(
+            `downloaded ${sizeBytes} bytes exceeds maxBytes ${opts.maxBytes}`,
+            'network',
+          ),
+        );
+        return;
+      }
+      callback(null, chunk);
+    },
+  });
+  const bodyController = new AbortController();
+  const timer = setTimeout(() => bodyController.abort(), timeoutMs);
+  try {
+    await pipeline(
+      Readable.fromWeb(res.body),
+      byteCounter,
+      createWriteStream(destination, { flags: 'wx' }),
+      { signal: bodyController.signal },
+    );
+  } catch (err) {
+    await fs.rm(destination, { force: true }).catch(() => {});
+    if (bodyController.signal.aborted) {
+      throw new VideoHttpError(`download body timed out after ${timeoutMs}ms`, 'timeout', err);
+    }
+    if (err instanceof VideoHttpError) throw err;
+    throw new VideoHttpError(`download failed: ${(err as Error).message}`, 'network', err);
+  } finally {
+    clearTimeout(timer);
+  }
+  const contentType = res.headers.get('content-type') ?? undefined;
+  return { ...(contentType ? { contentType } : {}), sizeBytes };
 }

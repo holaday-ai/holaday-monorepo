@@ -1,18 +1,18 @@
-import path from 'node:path';
 import { promises as fs } from 'node:fs';
-import { runFfmpeg } from './ffmpeg-exec.js';
-import { downloadToBuffer } from './video-http.js';
+import path from 'node:path';
+import { ffprobeDurationMs, runFfmpeg } from './ffmpeg-exec.js';
+import { downloadToBuffer, downloadToFile } from './video-http.js';
+import { type SimpleVideoConfig, SimpleVideoError } from './video-lane-simple.js';
 import type { PipelineLogger } from './video-pipeline.js';
-import { SimpleVideoError, type SimpleVideoConfig } from './video-lane-simple.js';
-import {
-  generateWanAnimateMix,
-  type WanAnimateMixMode,
-} from './wan-animate-mix-client.js';
 import { generatePosterFile } from './video-poster.js';
+import type { VerifyFinalVideoQualityInput, VideoQualityResult } from './video-quality-verifier.js';
+import { prepareVideoQualityReferenceImage } from './video-quality-verifier.js';
+import { type WanAnimateMixMode, generateWanAnimateMix } from './wan-animate-mix-client.js';
 
 export interface CloneVideoInput {
   readonly imageUrl: string;
   readonly referenceVideoUrl: string;
+  readonly description?: string;
 }
 
 export interface CloneVideoOptions {
@@ -24,16 +24,26 @@ export interface CloneVideoServices {
     fileId: string;
     storagePath: string;
   }>;
+  storeOutputFile(input: {
+    filename: string;
+    mimetype: string;
+    sourcePath: string;
+  }): Promise<{
+    fileId: string;
+    storagePath: string;
+  }>;
   workdir: string;
   logger: PipelineLogger;
+  verifyFinalVideo(input: VerifyFinalVideoQualityInput): Promise<VideoQualityResult>;
   overrides?: Partial<CloneVideoFns>;
 }
 
 export interface CloneVideoFns {
   generateWanAnimateMix: typeof generateWanAnimateMix;
   downloadToBuffer: typeof downloadToBuffer;
+  downloadToFile: typeof downloadToFile;
   runFfmpeg: typeof runFfmpeg;
-  writeFile: (filePath: string, buffer: Buffer) => Promise<void>;
+  ffprobeDurationMs: typeof ffprobeDurationMs;
   readFile: (filePath: string) => Promise<Buffer>;
 }
 
@@ -47,8 +57,9 @@ function realFns(): CloneVideoFns {
   return {
     generateWanAnimateMix,
     downloadToBuffer,
+    downloadToFile,
     runFfmpeg,
-    writeFile: (filePath, buffer) => fs.writeFile(filePath, buffer),
+    ffprobeDurationMs,
     readFile: (filePath) => fs.readFile(filePath),
   };
 }
@@ -64,11 +75,34 @@ export async function runCloneVideoCreation(
   opts: CloneVideoOptions,
   services: CloneVideoServices,
 ): Promise<CloneVideoResult> {
-  if (!cfg.dashscopeApiKey) throw new SimpleVideoError('DASHSCOPE_API_KEY not configured', 'config');
+  if (!cfg.dashscopeApiKey)
+    throw new SimpleVideoError('DASHSCOPE_API_KEY not configured', 'config');
   if (!input.imageUrl || !input.referenceVideoUrl) {
-    throw new SimpleVideoError('clone video requires a character image and reference video', 'config');
+    throw new SimpleVideoError(
+      'clone video requires a character image and reference video',
+      'config',
+    );
+  }
+  if (typeof services.verifyFinalVideo !== 'function') {
+    throw new SimpleVideoError('video quality verifier not configured', 'config');
   }
   const fns = { ...realFns(), ...(services.overrides ?? {}) };
+  // Preserve source evidence locally before the paid provider job starts.
+  // Signed input URLs are intentionally short-lived.
+  const referenceVideoPath = path.join(services.workdir, 'clone-reference.mp4');
+  const [subjectSource] = await Promise.all([
+    fns.downloadToBuffer(input.imageUrl, { maxBytes: 12 * 1024 * 1024 }),
+    fns.downloadToFile(input.referenceVideoUrl, referenceVideoPath, {
+      maxBytes: 200 * 1024 * 1024,
+    }),
+  ]);
+  const subjectReference = await prepareVideoQualityReferenceImage({
+    buffer: subjectSource.buffer,
+    contentType: subjectSource.contentType,
+    label: '上传的主角照片',
+  });
+  const ffprobeOpts = cfg.ffprobeBin ? { ffprobeBin: cfg.ffprobeBin } : {};
+  const referenceDurationMs = await fns.ffprobeDurationMs(referenceVideoPath, ffprobeOpts);
   const generated = await fns.generateWanAnimateMix({
     apiKey: cfg.dashscopeApiKey,
     baseUrl: cfg.dashscopeBaseUrl,
@@ -77,13 +111,47 @@ export async function runCloneVideoCreation(
     referenceVideoUrl: input.referenceVideoUrl,
     mode: opts.mode,
   });
-  const downloaded = await fns.downloadToBuffer(generated.videoUrl);
   const outputPath = path.join(services.workdir, 'clone-final.mp4');
-  await fns.writeFile(outputPath, downloaded.buffer);
-  const stored = await services.storeOutput({
+  await fns.downloadToFile(generated.videoUrl, outputPath, {
+    maxBytes: 500 * 1024 * 1024,
+  });
+  const durationMs = await fns.ffprobeDurationMs(outputPath, ffprobeOpts);
+  const verification = await services.verifyFinalVideo({
+    videoPath: outputPath,
+    workdir: services.workdir,
+    durationMs,
+    userText: input.description?.trim() || '复刻参考视频动作，并保持上传主角的身份和外观一致。',
+    qualityContext:
+      '抽样帧必须保持上传主角的身份、脸部和身体外形一致，并核对可见的粗粒度姿态与场景是否明显偏离参考；不得出现融合手、多余肢体或主体漂移。静态抽样不证明连续动作、节奏或镜头运动已验证。',
+    referenceImages: [subjectReference],
+    referenceVideos: [
+      {
+        videoPath: referenceVideoPath,
+        durationMs: referenceDurationMs,
+        label: '用户上传的参考动作视频',
+      },
+    ],
+    expectedSubtitleText: [],
+    requiredBrandTexts: ['Generated by Qwen AI'],
+    brandPolicy:
+      '参考视频原有文字或品牌可以保留，但必须清晰稳定；供应商 AI 生成标识必须完整准确，不得新增乱码或错误品牌。',
+    ...(cfg.ffmpegBin ? { ffmpegBin: cfg.ffmpegBin } : {}),
+  });
+  if (verification.status !== 'pass') {
+    services.logger.warn(
+      {
+        status: verification.status,
+        failedChecks: verification.failedChecks,
+        reason: verification.reason,
+      },
+      'video: clone quality gate rejected generated artifact',
+    );
+    throw new SimpleVideoError('clone video failed automated quality verification', 'quality');
+  }
+  const stored = await services.storeOutputFile({
     filename: 'video.mp4',
     mimetype: 'video/mp4',
-    buffer: downloaded.buffer,
+    sourcePath: outputPath,
   });
 
   const ffOpts = cfg.ffmpegBin ? { ffmpegBin: cfg.ffmpegBin } : {};
@@ -105,6 +173,6 @@ export async function runCloneVideoCreation(
   return {
     fileId: stored.fileId,
     downloadUrl: `/api/files/${stored.fileId}/download`,
-    ...(generated.durationSeconds !== undefined ? { durationSeconds: generated.durationSeconds } : {}),
+    durationSeconds: durationMs / 1000,
   };
 }

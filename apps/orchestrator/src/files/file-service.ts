@@ -18,14 +18,12 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import {
-  newExternalId,
-  type PlanId,
-} from '@holaday/shared-types';
-import type { Logger } from 'pino';
+import { promises as fs } from 'node:fs';
+import { type PlanId, newExternalId } from '@holaday/shared-types';
 import { and, eq } from 'drizzle-orm';
+import type { Logger } from 'pino';
 import type { DB } from '../db/client.js';
-import { taskFiles, type TaskFile } from '../db/schema/task-files.js';
+import { type TaskFile, taskFiles } from '../db/schema/task-files.js';
 import { tasks } from '../db/schema/tasks.js';
 import type { StorageProvider } from './storage-provider.js';
 import { getSharedStorageProvider } from './storage-provider.js';
@@ -47,6 +45,7 @@ export const FILES_ROOT = process.env.HOLADAY_FILES_ROOT ?? '/tmp/holaday-files'
  * presigned-pending rows keep their own separate (24h) TTLs, unchanged.
  */
 export const DEFAULT_OUTPUT_FILE_TTL_DAYS = 30;
+export const TEMPORARY_OUTPUT_TTL_MS = 15 * 60 * 1000;
 export function outputFileTtlMs(): number {
   const raw = Number(process.env.OUTPUT_FILE_TTL_DAYS);
   const days = Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_OUTPUT_FILE_TTL_DAYS;
@@ -88,8 +87,19 @@ export const ACCEPTED_MIMES = new Set<string>([
 
 /** Loose extension fallback for clients that send octet-stream. */
 export const ACCEPTED_EXTENSIONS = new Set<string>([
-  '.txt', '.csv', '.md', '.json', '.pdf', '.xlsx', '.xls', '.docx',
-  '.png', '.jpg', '.jpeg', '.webp', '.gif',
+  '.txt',
+  '.csv',
+  '.md',
+  '.json',
+  '.pdf',
+  '.xlsx',
+  '.xls',
+  '.docx',
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.webp',
+  '.gif',
 ]);
 
 /**
@@ -116,8 +126,15 @@ export const MEDIA_ACCEPTED_MIMES = new Set<string>([
 ]);
 
 export const MEDIA_ACCEPTED_EXTENSIONS = new Set<string>([
-  '.mp4', '.mov', '.webm', '.m4v',
-  '.wav', '.mp3', '.m4a', '.aac', '.ogg',
+  '.mp4',
+  '.mov',
+  '.webm',
+  '.m4v',
+  '.wav',
+  '.mp3',
+  '.m4a',
+  '.aac',
+  '.ogg',
 ]);
 
 /**
@@ -178,8 +195,7 @@ export function isAcceptedUpload(filename: string, mimetype: string): boolean {
   const dotIdx = filename.lastIndexOf('.');
   const ext = dotIdx >= 0 ? filename.slice(dotIdx).toLowerCase() : '';
   return (
-    ACCEPTED_MIMES.has(mimetype.toLowerCase()) ||
-    (ext.length > 0 && ACCEPTED_EXTENSIONS.has(ext))
+    ACCEPTED_MIMES.has(mimetype.toLowerCase()) || (ext.length > 0 && ACCEPTED_EXTENSIONS.has(ext))
   );
 }
 
@@ -404,7 +420,10 @@ export class FileService {
     if (!meta) return { ok: false, reason: 'not_uploaded' };
     // Cap is derived from the STORED mime/filename (what actually landed),
     // not anything the client re-sends at confirm time.
-    const cap = uploadByteLimit(classifyUpload(row.filename, row.mimetype) ?? 'document', opts.plan);
+    const cap = uploadByteLimit(
+      classifyUpload(row.filename, row.mimetype) ?? 'document',
+      opts.plan,
+    );
     if (meta.sizeBytes > cap) {
       await this.storage.delete(row.storagePath);
       await this.db.delete(taskFiles).where(eq(taskFiles.externalId, opts.fileExternalId));
@@ -474,6 +493,130 @@ export class FileService {
   }
 
   /**
+   * Persist a generated artifact from a local file path. Video lanes use this
+   * path so multi-hundred-megabyte MP4s are copied/streamed to storage instead
+   * of being read into the Orchestrator heap.
+   */
+  async storeOutputFile(opts: {
+    userIdInternal: number;
+    userExternalId: string;
+    taskIdInternal: number;
+    filename: string;
+    mimetype: string;
+    sourcePath: string;
+  }): Promise<TaskFile> {
+    const externalId = newExternalId('file');
+    const safeFilename = sanitiseFilename(opts.filename);
+    const meta = await fs.stat(opts.sourcePath);
+    if (!meta.isFile()) throw new Error('storeOutputFile: source is not a regular file');
+    if (meta.size > 0xffff_ffff) {
+      throw new Error('storeOutputFile: artifact exceeds task_files size limit');
+    }
+    const { storagePath } = await this.storage.putFile({
+      userExternalId: opts.userExternalId,
+      kind: 'output',
+      fileExternalId: externalId,
+      filename: safeFilename,
+      sourcePath: opts.sourcePath,
+      sizeBytes: meta.size,
+      mimetype: opts.mimetype,
+    });
+    const expiresAt = new Date(Date.now() + outputFileTtlMs());
+    try {
+      await this.db.insert(taskFiles).values({
+        externalId,
+        userId: opts.userIdInternal,
+        taskId: opts.taskIdInternal,
+        kind: 'output',
+        filename: safeFilename,
+        mimetype: opts.mimetype,
+        sizeBytes: meta.size,
+        storagePath,
+        expiresAt,
+      });
+      const [row] = await this.db
+        .select()
+        .from(taskFiles)
+        .where(eq(taskFiles.externalId, externalId))
+        .limit(1);
+      if (!row) throw new Error('storeOutputFile: row vanished after insert');
+      return row;
+    } catch (err) {
+      try {
+        await this.storage.delete(storagePath);
+      } catch (cleanupErr) {
+        this.logger.error(
+          { cleanupErr, storagePath, fileId: externalId },
+          'file: failed to compensate streamed output after DB failure',
+        );
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Persist a provider-handoff artifact that must never appear as a user
+   * deliverable. The storage object uses the ordinary output namespace, while
+   * the DB row is kind='temp' so result/file listings exclude it. A short TTL
+   * lets the hourly cleanup job recover objects left behind by a process crash;
+   * normal callers still delete the row immediately after provider ingestion.
+   */
+  async storeTemporaryOutput(opts: {
+    userIdInternal: number;
+    userExternalId: string;
+    taskIdInternal: number;
+    filename: string;
+    mimetype: string;
+    buffer: Buffer;
+  }): Promise<TaskFile> {
+    const externalId = newExternalId('file');
+    const safeFilename = sanitiseFilename(opts.filename);
+    const storageInput = {
+      userExternalId: opts.userExternalId,
+      kind: 'output',
+      fileExternalId: externalId,
+      filename: safeFilename,
+    } as const;
+    const storagePath = this.storage.pathFor(storageInput);
+    const expiresAt = new Date(Date.now() + TEMPORARY_OUTPUT_TTL_MS);
+    // Reserve the exact storage path before uploading. If the process dies
+    // anywhere after this insert, cleanup-cron can still remove the object (or
+    // harmlessly confirm it never landed) after the short TTL.
+    await this.db.insert(taskFiles).values({
+      externalId,
+      userId: opts.userIdInternal,
+      taskId: opts.taskIdInternal,
+      kind: 'temp',
+      filename: safeFilename,
+      mimetype: opts.mimetype,
+      sizeBytes: opts.buffer.length,
+      storagePath,
+      status: 'pending',
+      expiresAt,
+    });
+    const stored = await this.storage.put({
+      ...storageInput,
+      buffer: opts.buffer,
+      mimetype: opts.mimetype,
+    });
+    if (stored.storagePath !== storagePath) {
+      await this.storage.delete(stored.storagePath);
+      throw new Error('storeTemporaryOutput: storage provider path mismatch');
+    }
+    await this.db
+      .update(taskFiles)
+      .set({ status: 'active' })
+      .where(eq(taskFiles.externalId, externalId));
+    const [row] = await this.db
+      .select()
+      .from(taskFiles)
+      .where(eq(taskFiles.externalId, externalId))
+      .limit(1);
+    if (!row) throw new Error('storeTemporaryOutput: row vanished after upload');
+    return row;
+  }
+
+  /**
    * Mint a short-lived public GET URL for an uploaded file (ownership +
    * expiry checked). Phase 2 第二期: the pet i2v lane needs a PUBLIC img_url
    * the DashScope model can fetch — R2 presigned GET does that. Returns
@@ -501,8 +644,9 @@ export class FileService {
    * checked. Used by the video onboarding flow: 样本即弃 (delete the voice
    * sample right after enrollment mints the voice_id) + base-video removal
    * when the user clears their IP assets. Returns false when missing /
-   * not-owned (idempotent-friendly); R2 delete is best-effort (a missing
-   * object still drops the row). Server-side only — no plan/quota gating.
+   * not-owned (idempotent-friendly). The DB row is retained when storage
+   * deletion fails so cleanup-cron can retry instead of losing the only
+   * durable reference to a sensitive temporary object.
    */
   async deleteForUser(fileExternalId: string, userIdInternal: number): Promise<boolean> {
     const [row] = await this.db
@@ -511,7 +655,7 @@ export class FileService {
       .where(eq(taskFiles.externalId, fileExternalId))
       .limit(1);
     if (!row || row.userId !== userIdInternal) return false;
-    await this.storage.delete(row.storagePath).catch(() => {});
+    await this.storage.delete(row.storagePath);
     await this.db.delete(taskFiles).where(eq(taskFiles.externalId, fileExternalId));
     return true;
   }
@@ -606,10 +750,7 @@ export class FileService {
    * download cards on completed tasks.
    */
   async listForTask(taskIdInternal: number): Promise<TaskFile[]> {
-    return this.db
-      .select()
-      .from(taskFiles)
-      .where(eq(taskFiles.taskId, taskIdInternal));
+    return this.db.select().from(taskFiles).where(eq(taskFiles.taskId, taskIdInternal));
   }
 }
 
@@ -618,10 +759,7 @@ export class FileService {
  * one the SPA / API surface uses). Helper for routes that take the
  * external id and need to operate against the db row.
  */
-export async function taskInternalIdFor(
-  db: DB,
-  taskExternalId: string,
-): Promise<number | null> {
+export async function taskInternalIdFor(db: DB, taskExternalId: string): Promise<number | null> {
   const [row] = await db
     .select({ id: tasks.id, userId: tasks.userId })
     .from(tasks)
