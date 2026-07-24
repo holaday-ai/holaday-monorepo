@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   asVideoType,
+  canChangeCreativeHistoryFilter,
   canLoadOlderCreativeHistory,
   creativeHistoryArtifactAvailability,
   creativeHistoryDisplayTitle,
@@ -729,6 +730,11 @@ describe('creative history progressive disclosure', () => {
     expect(nextCreativeHistoryVisibleCount(4, 11)).toBe(8);
     expect(nextCreativeHistoryVisibleCount(8, 11)).toBe(11);
     expect(nextCreativeHistoryVisibleCount(11, 11)).toBe(11);
+  });
+
+  it('keeps the active filter stable while a pin write is pending', () => {
+    expect(canChangeCreativeHistoryFilter(null)).toBe(true);
+    expect(canChangeCreativeHistoryFilter('tsk_pinning')).toBe(false);
   });
 
   it('does not start an older-page request while a refresh is active', () => {

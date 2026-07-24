@@ -48,6 +48,7 @@ import {
   videoTaskStatusLabel,
 } from '@/lib/video-task-selectors';
 import {
+  canChangeCreativeHistoryFilter,
   canLoadOlderCreativeHistory,
   creativeHistoryArtifactAvailability,
   creativeHistoryDisplayTitle,
@@ -2168,7 +2169,11 @@ function CreativeHistory({
               key={tab.id}
               type="button"
               onClick={() => setFilter(tab.id)}
-              className={cn('pb-2 text-[#ADADAD] transition-colors hover:text-[#595757]', filter === tab.id && 'border-b-2')}
+              disabled={!canChangeCreativeHistoryFilter(pinningTaskId)}
+              className={cn(
+                'pb-2 text-[#ADADAD] transition-colors hover:text-[#595757] disabled:cursor-wait disabled:opacity-60',
+                filter === tab.id && 'border-b-2',
+              )}
               style={filter === tab.id ? { color: accent, borderColor: accent } : undefined}
             >
               {tab.label}

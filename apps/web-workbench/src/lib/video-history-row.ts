@@ -191,6 +191,12 @@ export function nextCreativeHistoryVisibleCount(
   return Math.min(total, current + pageSize);
 }
 
+export function canChangeCreativeHistoryFilter(
+  pinningTaskId: string | null,
+): boolean {
+  return pinningTaskId === null;
+}
+
 export function canLoadOlderCreativeHistory(options: {
   loading: boolean;
   loadingMore: boolean;
