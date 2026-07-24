@@ -204,9 +204,12 @@ describe('runPetVideoCreation — 宠物 i2v 单图', () => {
     ).rejects.toMatchObject({ kind: 'compose' });
   });
 
-  it.each(['fail', 'unknown'] as const)(
+  it.each([
+    ['fail', 'quality'],
+    ['unknown', 'quality_unavailable'],
+  ] as const)(
     'blocks a %s pet verdict before storing the final video or poster',
-    async (status) => {
+    async (status, expectedKind) => {
       const { svc, mocks } = makeServices();
       mocks.verifyFinalVideo.mockResolvedValueOnce({
         status,
@@ -221,7 +224,7 @@ describe('runPetVideoCreation — 宠物 i2v 单图', () => {
           { durationSeconds: 6 },
           svc,
         ),
-      ).rejects.toMatchObject({ name: 'SimpleVideoError', kind: 'quality' });
+      ).rejects.toMatchObject({ name: 'SimpleVideoError', kind: expectedKind });
 
       expect(
         mocks.storeOutputFile.mock.calls.some(

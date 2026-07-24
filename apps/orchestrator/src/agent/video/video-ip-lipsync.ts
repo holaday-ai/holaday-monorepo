@@ -28,7 +28,12 @@ import type { VerifyFinalVideoQualityInput, VideoQualityResult } from './video-q
 /** B 架构平价边界:总音频 ≤40s(fal flat fee);超则要进阶档/截短。 */
 export const IP_MAX_AUDIO_MS = 40_000;
 
-export type IpVideoErrorKind = 'config' | 'too_long' | 'compose' | 'quality';
+export type IpVideoErrorKind =
+  | 'config'
+  | 'too_long'
+  | 'compose'
+  | 'quality'
+  | 'quality_unavailable';
 export class IpVideoError extends Error {
   constructor(
     message: string,
@@ -315,7 +320,10 @@ export async function runIpVideoCreation(
       },
       'video: IP quality gate rejected generated artifact',
     );
-    throw new IpVideoError('IP video failed automated quality verification', 'quality');
+    throw new IpVideoError(
+      'IP video failed automated quality verification',
+      verification.status === 'unknown' ? 'quality_unavailable' : 'quality',
+    );
   }
 
   const stored = await svc.storeOutputFile({

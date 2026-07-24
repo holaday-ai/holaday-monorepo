@@ -176,9 +176,12 @@ describe('runCloneVideoCreation', () => {
     expect(mocks.generateWanAnimateMix).not.toHaveBeenCalled();
   });
 
-  it.each(['fail', 'unknown'] as const)(
+  it.each([
+    ['fail', 'quality'],
+    ['unknown', 'quality_unavailable'],
+  ] as const)(
     'blocks a %s clone verdict before storing the final video or poster',
-    async (status) => {
+    async (status, expectedKind) => {
       const { services, mocks } = makeServices();
       mocks.verifyFinalVideo.mockResolvedValueOnce({
         status,
@@ -198,7 +201,7 @@ describe('runCloneVideoCreation', () => {
           { mode: 'wan-pro' },
           services,
         ),
-      ).rejects.toMatchObject({ name: 'SimpleVideoError', kind: 'quality' });
+      ).rejects.toMatchObject({ name: 'SimpleVideoError', kind: expectedKind });
 
       expect(
         mocks.storeOutputFile.mock.calls.some(

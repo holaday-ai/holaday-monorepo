@@ -161,7 +161,12 @@ function resolveVeoModel(source: VideoSource, cfg: SimpleVideoConfig): string {
   }
 }
 
-export type SimpleVideoErrorKind = 'config' | 'compose' | 'invalid_options' | 'quality';
+export type SimpleVideoErrorKind =
+  | 'config'
+  | 'compose'
+  | 'invalid_options'
+  | 'quality'
+  | 'quality_unavailable';
 export class SimpleVideoError extends Error {
   constructor(
     message: string,
@@ -549,7 +554,10 @@ export async function runSimpleVideoCreation(
       },
       'video: final quality gate rejected generated artifact',
     );
-    throw new SimpleVideoError('final video failed automated quality verification', 'quality');
+    throw new SimpleVideoError(
+      'final video failed automated quality verification',
+      verification.status === 'unknown' ? 'quality_unavailable' : 'quality',
+    );
   }
   const stored = await svc.storeOutputFile({
     filename: 'video.mp4',

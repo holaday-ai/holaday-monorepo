@@ -113,6 +113,23 @@ describe('mapVideoFailureReason — safe, whitelisted, no leak', () => {
     ).toBe(VIDEO_FAILURE_REASONS.quality);
   });
 
+  it('inconclusive verifier → honest unavailable copy without claiming a detected defect', () => {
+    expect(
+      mapVideoFailureReason({
+        name: 'SimpleVideoError',
+        kind: 'quality_unavailable',
+        message: 'raw verifier timeout',
+      }),
+    ).toBe(VIDEO_FAILURE_REASONS.qualityUnavailable);
+    expect(
+      mapVideoFailureReason({
+        name: 'IpVideoError',
+        kind: 'quality_unavailable',
+        message: 'raw verifier malformed response',
+      }),
+    ).toBe(VIDEO_FAILURE_REASONS.qualityUnavailable);
+  });
+
   it('SimpleVideoError / unknown / null / string → generic', () => {
     expect(mapVideoFailureReason({ name: 'SimpleVideoError', kind: 'compose' })).toBe(
       VIDEO_FAILURE_REASONS.generic,

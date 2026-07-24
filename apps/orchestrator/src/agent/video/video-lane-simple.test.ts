@@ -509,9 +509,12 @@ describe('runSimpleVideoCreation — final quality gate', () => {
     );
   });
 
-  it.each(['fail', 'unknown'] as const)(
+  it.each([
+    ['fail', 'quality'],
+    ['unknown', 'quality_unavailable'],
+  ] as const)(
     'blocks a %s verdict before the video is stored or marked deliverable',
-    async (status) => {
+    async (status, expectedKind) => {
       const { svc, mocks } = makeServices();
       const verifyFinalVideo = vi.fn(async () => ({
         status,
@@ -529,7 +532,7 @@ describe('runSimpleVideoCreation — final quality gate', () => {
         ),
       ).rejects.toMatchObject({
         name: 'SimpleVideoError',
-        kind: 'quality',
+        kind: expectedKind,
       });
 
       expect(

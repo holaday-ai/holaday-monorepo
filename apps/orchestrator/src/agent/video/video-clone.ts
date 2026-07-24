@@ -146,7 +146,10 @@ export async function runCloneVideoCreation(
       },
       'video: clone quality gate rejected generated artifact',
     );
-    throw new SimpleVideoError('clone video failed automated quality verification', 'quality');
+    throw new SimpleVideoError(
+      'clone video failed automated quality verification',
+      verification.status === 'unknown' ? 'quality_unavailable' : 'quality',
+    );
   }
   const stored = await services.storeOutputFile({
     filename: 'video.mp4',

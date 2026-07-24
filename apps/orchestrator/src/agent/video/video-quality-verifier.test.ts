@@ -131,7 +131,9 @@ describe('verifyFinalVideoQuality', () => {
     expect(analysisInput.prompt).toContain('HOLA DAY · AI');
     expect(analysisInput.prompt).toContain('静物视频不得凭空出现人物或手部');
     expect(analysisInput.prompt).toMatch(/逐字准确|错误品牌标识/);
-    expect(analysisInput.prompt).toMatch(/未要求时擅自添加文字或品牌/);
+    expect(analysisInput.prompt).toMatch(/输入参数明确列为允许.*不能仅因.*用户原始需求.*判失败/);
+    expect(analysisInput.prompt).toMatch(/允许范围之外.*文字或品牌/);
+    expect(analysisInput.prompt).not.toMatch(/未要求时擅自添加文字或品牌/);
     expect(analysisInput.prompt).toMatch(/静态抽样帧.*连续运动|不能验证.*口型同步/);
     expect(result.status).toBe('fail');
   });

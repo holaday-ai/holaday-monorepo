@@ -201,7 +201,10 @@ export async function runPetVideoCreation(
       },
       'video: pet quality gate rejected generated artifact',
     );
-    throw new SimpleVideoError('pet video failed automated quality verification', 'quality');
+    throw new SimpleVideoError(
+      'pet video failed automated quality verification',
+      verification.status === 'unknown' ? 'quality_unavailable' : 'quality',
+    );
   }
 
   // ⑤ store final

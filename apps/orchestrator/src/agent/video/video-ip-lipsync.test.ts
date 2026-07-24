@@ -210,9 +210,12 @@ describe('runIpVideoCreation — B 架构单 clip 口播', () => {
     expect(mocks.deleteOutput).toHaveBeenCalledWith('f_ip-voice.wav');
   });
 
-  it.each(['fail', 'unknown'] as const)(
+  it.each([
+    ['fail', 'quality'],
+    ['unknown', 'quality_unavailable'],
+  ] as const)(
     'blocks a %s IP verdict before storing the final video or poster',
-    async (status) => {
+    async (status, expectedKind) => {
       const { svc, mocks } = makeServices(8000);
       mocks.verifyFinalVideo.mockResolvedValueOnce({
         status,
@@ -222,7 +225,7 @@ describe('runIpVideoCreation — B 架构单 clip 口播', () => {
 
       await expect(
         runIpVideoCreation({ copyText: '欢迎关注我们的新品。' }, CFG, CTX, {}, svc),
-      ).rejects.toMatchObject({ name: 'IpVideoError', kind: 'quality' });
+      ).rejects.toMatchObject({ name: 'IpVideoError', kind: expectedKind });
 
       expect(
         mocks.storeOutputFile.mock.calls.some(
