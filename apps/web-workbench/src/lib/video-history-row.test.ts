@@ -3,6 +3,7 @@ import {
   asVideoType,
   creativeHistoryArtifactAvailability,
   creativeHistoryDisplayTitle,
+  creativeHistoryListInput,
   creativeHistoryLoadReducer,
   creativeHistoryPreviewAvailability,
   filterCreativeHistoryRows,
@@ -524,6 +525,19 @@ describe('creative history filters', () => {
         now: Date.parse('2026-07-24T00:00:00.000Z'),
       }).map((row) => row.taskId),
     ).toEqual(['video_pinned']);
+  });
+
+  it('queries pinned history from the persisted server index', () => {
+    expect(creativeHistoryListInput('pinned')).toEqual({
+      limit: 50,
+      status: ['completed', 'partial_success'],
+      starred: true,
+    });
+    expect(creativeHistoryListInput('all', 1700000000000)).toEqual({
+      limit: 50,
+      cursor: 1700000000000,
+      status: ['completed', 'partial_success'],
+    });
   });
 });
 

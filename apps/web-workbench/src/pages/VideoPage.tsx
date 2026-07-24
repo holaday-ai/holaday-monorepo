@@ -48,8 +48,9 @@ import {
   videoTaskStatusLabel,
 } from '@/lib/video-task-selectors';
 import {
-  creativeHistoryDisplayTitle,
   creativeHistoryArtifactAvailability,
+  creativeHistoryDisplayTitle,
+  creativeHistoryListInput,
   creativeHistoryLoadReducer,
   creativeHistoryPreviewAvailability,
   filterCreativeHistoryRows,
@@ -100,10 +101,8 @@ import {
 
 type CreativeMode = 'video' | 'image';
 
-const CREATIVE_HISTORY_FETCH_SIZE = 50;
 const CREATIVE_HISTORY_VISIBLE_PAGE_SIZE = 4;
 const CREATIVE_HISTORY_SCAN_PAGES_PER_CLICK = 5;
-const CREATIVE_HISTORY_TERMINAL_STATUSES = ['completed', 'partial_success'] as const;
 type VideoTab = 'normal' | 'pet' | 'ip';
 type ImageGenerationMode = 'free' | 'lock_subject';
 type CreativeModelValue = VideoModel | ImageModel;
@@ -1966,10 +1965,7 @@ function CreativeHistory({
     setLoadingMore(false);
     setLoadMoreError(false);
     try {
-      const res = await trpc.tasks.list.query({
-        limit: CREATIVE_HISTORY_FETCH_SIZE,
-        status: [...CREATIVE_HISTORY_TERMINAL_STATUSES],
-      });
+      const res = await trpc.tasks.list.query(creativeHistoryListInput(filter));
       if (!mountedRef.current || requestId !== loadRequestRef.current) return;
       const mapper = mode === 'image' ? toImageRow : toVideoRow;
       const list = (res?.tasks ?? []).map(mapper).filter((v): v is VideoRow => v != null);
@@ -1980,7 +1976,7 @@ function CreativeHistory({
       if (!mountedRef.current || requestId !== loadRequestRef.current) return;
       dispatchLoad({ type: 'failure' });
     }
-  }, [mode]);
+  }, [filter, mode]);
 
   React.useEffect(() => {
     dispatchLoad({ type: 'reset' });
@@ -1988,7 +1984,7 @@ function CreativeHistory({
     setVisibleCount(CREATIVE_HISTORY_VISIBLE_PAGE_SIZE);
     setLoadingMore(false);
     setLoadMoreError(false);
-  }, [mode]);
+  }, [filter, mode]);
 
   React.useEffect(() => {
     void loadHistory();
@@ -2054,11 +2050,9 @@ function CreativeHistory({
         page < CREATIVE_HISTORY_SCAN_PAGES_PER_CLICK;
         page += 1
       ) {
-        const res = await trpc.tasks.list.query({
-          limit: CREATIVE_HISTORY_FETCH_SIZE,
-          cursor,
-          status: [...CREATIVE_HISTORY_TERMINAL_STATUSES],
-        });
+        const res = await trpc.tasks.list.query(
+          creativeHistoryListInput(filter, cursor),
+        );
         if (!mountedRef.current || requestId !== loadRequestRef.current) return;
 
         const mapper = mode === 'image' ? toImageRow : toVideoRow;

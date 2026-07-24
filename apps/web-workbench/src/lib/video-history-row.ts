@@ -13,6 +13,26 @@ import {
 export type VideoType = 'normal' | 'pet' | 'ip_person';
 export type CreativeHistoryMode = 'video' | 'image';
 export type CreativeHistoryFilter = 'all' | 'recent' | 'pinned';
+export type CreativeHistoryTerminalStatus = 'completed' | 'partial_success';
+
+export interface CreativeHistoryListInput {
+  limit: number;
+  cursor?: number;
+  status: CreativeHistoryTerminalStatus[];
+  starred?: true;
+}
+
+export function creativeHistoryListInput(
+  filter: CreativeHistoryFilter,
+  cursor?: number,
+): CreativeHistoryListInput {
+  return {
+    limit: 50,
+    ...(cursor === undefined ? {} : { cursor }),
+    status: ['completed', 'partial_success'],
+    ...(filter === 'pinned' ? { starred: true as const } : {}),
+  };
+}
 
 export interface VideoResultMeta {
   lane?: string;
