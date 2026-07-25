@@ -358,24 +358,49 @@ describe('verifyFinalVideoQuality', () => {
 });
 
 describe('createAnthropicVideoQualityAnalyzer', () => {
-  it('bounds each quality-analysis request because the verifier owns retry policy', async () => {
+  it('forces every bounded quality-analysis request through the structured verdict tool', async () => {
     const create = vi.fn(async () => ({
-      content: [{ type: 'text' as const, text: '{"status":"pass","failedChecks":[]}' }],
+      content: [
+        {
+          type: 'tool_use' as const,
+          id: 'toolu_video_quality',
+          name: 'submit_video_quality_verdict',
+          input: {
+            status: 'pass',
+            failedChecks: [],
+            reason: '九帧均通过',
+          },
+        },
+      ],
     }));
     const analyzer = createAnthropicVideoQualityAnalyzer({
       messages: { create },
     } as unknown as Anthropic);
 
-    await analyzer({
+    const response = await analyzer({
       references: [],
       frames: [],
       prompt: 'check the final video',
     });
 
+    expect(JSON.parse(response)).toEqual({
+      status: 'pass',
+      failedChecks: [],
+      reason: '九帧均通过',
+    });
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({
         model: 'claude-sonnet-4-6',
         max_tokens: 512,
+        tools: [
+          expect.objectContaining({
+            name: 'submit_video_quality_verdict',
+          }),
+        ],
+        tool_choice: {
+          type: 'tool',
+          name: 'submit_video_quality_verdict',
+        },
       }),
       {
         timeout: 45_000,

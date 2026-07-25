@@ -3,6 +3,29 @@ import sharp from 'sharp';
 import type { FfmpegExecOpts } from './ffmpeg-exec.js';
 
 const QUALITY_MODEL = 'claude-sonnet-4-6';
+const QUALITY_VERDICT_TOOL_NAME = 'submit_video_quality_verdict';
+const QUALITY_VERDICT_TOOL: Anthropic.Tool = {
+  name: QUALITY_VERDICT_TOOL_NAME,
+  description: 'Submit the final structured quality verdict for the sampled video frames.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      status: {
+        type: 'string',
+        enum: ['pass', 'fail', 'unknown'],
+      },
+      failedChecks: {
+        type: 'array',
+        items: { type: 'string' },
+      },
+      reason: {
+        type: 'string',
+      },
+    },
+    required: ['status', 'failedChecks', 'reason'],
+    additionalProperties: false,
+  },
+};
 const SAMPLE_RATIOS = [0.05, 0.15, 0.25, 0.375, 0.5, 0.625, 0.75, 0.85, 0.95] as const;
 const REFERENCE_SAMPLE_RATIOS = [0.1, 0.3, 0.5, 0.7, 0.9] as const;
 const VIDEO_QUALITY_MAX_SOURCE_IMAGE_BYTES = 12 * 1024 * 1024;
@@ -295,6 +318,8 @@ export function createAnthropicVideoQualityAnalyzer(client: Anthropic): VideoQua
       {
         model: QUALITY_MODEL,
         max_tokens: 512,
+        tools: [QUALITY_VERDICT_TOOL],
+        tool_choice: { type: 'tool', name: QUALITY_VERDICT_TOOL_NAME },
         messages: [{ role: 'user', content }],
       },
       {
@@ -302,8 +327,11 @@ export function createAnthropicVideoQualityAnalyzer(client: Anthropic): VideoQua
         maxRetries: 0,
       },
     );
-    const block = response.content.find((item) => item.type === 'text');
-    return block && block.type === 'text' ? block.text : '';
+    const block = response.content.find(
+      (item): item is Anthropic.ToolUseBlock =>
+        item.type === 'tool_use' && item.name === QUALITY_VERDICT_TOOL_NAME,
+    );
+    return block ? JSON.stringify(block.input) : '';
   };
 }
 
