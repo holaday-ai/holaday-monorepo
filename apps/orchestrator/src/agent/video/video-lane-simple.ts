@@ -46,8 +46,8 @@ const COMMON_SCENE_SUFFIX =
   '用户未要求时不要凭空添加文字、品牌或 Logo；' +
   '若需求包含文字、品牌、包装、标牌或屏幕内容，必须逐字准确、清晰可读，不得替换、增删或拼错';
 const HUMAN_SCENE_SUFFIX =
-  '；若人物出镜，双臂必须可追溯到肩膀，五指完整、手部解剖正确，' +
-  '不得出现融合手、多余手臂、多指、断肢、悬空小臂或不可能的关节，' +
+  '；若人物出镜，双臂必须可追溯到肩膀，每只可见的手必须五指完整，恰好五根手指且彼此独立清晰，手部解剖正确，' +
+  '不得出现少指、手指粘连、融合手、多余手臂、多余肢体、多指、断肢、悬空小臂或不可能的关节，' +
   '避开手-物-手竖直叠帧这类高解剖风险构图';
 const OBJECT_ONLY_SCENE_SUFFIX =
   '；这是纯物体/环境镜头，不得出现人物、手、手臂或身体部位，' +
@@ -56,10 +56,10 @@ const BASE_NEGATIVE = [
   // 中文 — 只压错误文字，不禁止用户明确要求的文字载体或品牌。
   '错别字, 错误品牌, 错误 Logo, 错乱的字, 乱码假字, 不可读文字',
   // 中文 — 解剖
-  '融合手, 多余手臂, 多手, 多臂, 第三只手, 畸形手, 多指, 断肢, 悬空手臂, 解剖错误',
+  '融合手, 手指粘连, 少指, 多余手臂, 多手, 多臂, 第三只手, 畸形手, 多指, 断肢, 悬空手臂, 解剖错误',
   // English
   'garbled text, fake text, gibberish text, misspelled text, unreadable text, incorrect logo, malformed logo,' +
-    ' fused hands, extra arm, extra hand, third arm, deformed hands, extra fingers, floating limb, anatomical error',
+    ' fused hands, fused fingers, missing fingers, extra arm, extra hand, third arm, deformed hands, extra fingers, floating limb, anatomical error',
 ].join(', ');
 const OBJECT_ONLY_NEGATIVE = `${BASE_NEGATIVE}, person, people, human, face, hand, hands, arm, arms, body parts, holding object, touching object, picking up object`;
 
@@ -458,6 +458,14 @@ export function createSimplePipelineDeps(
         }
         if (candidateQuality.status === 'pass') return { visualRef: localPath };
         if (candidateQuality.status === 'unknown') {
+          svc.logger.warn(
+            {
+              segmentIndex: index,
+              failedChecks: candidateQuality.failedChecks,
+              reason: candidateQuality.reason,
+            },
+            'video: segment quality verification inconclusive',
+          );
           throw new SimpleVideoError(
             'generated segment quality verification unavailable',
             'quality_unavailable',

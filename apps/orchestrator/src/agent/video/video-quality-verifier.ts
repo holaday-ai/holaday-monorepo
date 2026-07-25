@@ -191,10 +191,10 @@ export function parseVideoQualityResponse(text: string): VideoQualityResult {
       failedChecks?: unknown;
       reason?: unknown;
     };
-    if (value.status !== 'pass' && value.status !== 'fail') {
+    if (value.status !== 'pass' && value.status !== 'fail' && value.status !== 'unknown') {
       return unknownResult('质检返回状态无效');
     }
-    const failedChecks = Array.isArray(value.failedChecks)
+    let failedChecks = Array.isArray(value.failedChecks)
       ? value.failedChecks.filter((item): item is string => typeof item === 'string')
       : [];
     const reason =
@@ -202,9 +202,14 @@ export function parseVideoQualityResponse(text: string): VideoQualityResult {
         ? value.reason.trim()
         : value.status === 'pass'
           ? '成片质检通过'
-          : '成片质检未通过';
+          : value.status === 'fail'
+            ? '成片质检未通过'
+            : '成片质检未得出结论';
     if (value.status === 'pass' && failedChecks.length > 0) {
       return unknownResult('质检结论与检查项冲突');
+    }
+    if (value.status === 'unknown' && failedChecks.length === 0) {
+      failedChecks = ['verifier_inconclusive'];
     }
     return { status: value.status, failedChecks, reason };
   } catch {
@@ -230,6 +235,7 @@ function buildQualityPrompt(input: VerifyFinalVideoQualityInput): string {
     '',
     '任何一项命中都必须 status=fail：',
     '1. 人体或手部异常：多指、少指、融合手、手指粘连、额外的手/手臂、断肢、悬浮肢体、异常关节、肢体来源不可能。',
+    '   每只可见的手应能确认五根彼此独立的手指。若因生成瑕疵导致手指看不清、无法确认数量或无法确认彼此分离，也必须 fail，并使用 hand_anatomy_uncertain；不能把可疑手部交付给用户。',
     '2. 用户原始需求没有人物或手部动作，但静物任务出现人物或手、有人拿起/触碰/操作主体。',
     '3. 主体、动作、数量、颜色、构图或场景明显偏离用户需求；主体跨帧身份或形态明显漂移。',
     '   若用户要求进入、拿起、移动、放回等分阶段动作，必须按九张帧的时间顺序核对每个关键结果状态。任何要求的阶段在全部抽样帧中都没有可见证据，必须 fail，并使用 required_action_missing；不得假设它发生在帧与帧之间。',
@@ -242,9 +248,9 @@ function buildQualityPrompt(input: VerifyFinalVideoQualityInput): string {
     subtitles,
     '只核对抽样帧中实际出现的对应字幕；某句未出现在这九张抽样帧时，不得仅据此判定缺失。',
     '',
-    '不要因为整体风格好看而放过局部异常。无法确认时 status=unknown，不得猜测通过。',
+    '不要因为整体风格好看而放过局部异常。status=unknown 只用于帧损坏、帧缺失或分析服务无法读取等技术原因；不得因手部或画质存疑而返回 unknown，这类质量不确定性必须 fail closed。',
     '只输出 JSON：',
-    '{"status":"pass|fail","failedChecks":["snake_case_code"],"reason":"一句中文结论"}',
+    '{"status":"pass|fail|unknown","failedChecks":["snake_case_code"],"reason":"一句中文结论"}',
   ].join('\n');
 }
 

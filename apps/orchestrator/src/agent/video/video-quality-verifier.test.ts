@@ -87,6 +87,18 @@ describe('parseVideoQualityResponse', () => {
       parseVideoQualityResponse('{"status":"maybe","failedChecks":[],"reason":"?"}'),
     ).toMatchObject({ status: 'unknown' });
   });
+
+  it('preserves a verifier-declared technical unknown for diagnosis', () => {
+    expect(
+      parseVideoQualityResponse(
+        '{"status":"unknown","failedChecks":["frame_unreadable"],"reason":"第 5 帧无法读取"}',
+      ),
+    ).toEqual({
+      status: 'unknown',
+      failedChecks: ['frame_unreadable'],
+      reason: '第 5 帧无法读取',
+    });
+  });
 });
 
 describe('verifyFinalVideoQuality', () => {
@@ -163,6 +175,8 @@ describe('verifyFinalVideoQuality', () => {
     };
     expect(analysisInput.frames).toHaveLength(9);
     expect(analysisInput.prompt).toMatch(/多指|融合手|额外肢体|异常关节/);
+    expect(analysisInput.prompt).toMatch(/看不清.*手指|hand_anatomy_uncertain/);
+    expect(analysisInput.prompt).toMatch(/unknown.*技术原因|不得.*画质存疑.*unknown/);
     expect(analysisInput.prompt).toContain('静物任务出现人物或手');
     expect(analysisInput.prompt).toContain('HOLA DAY · AI');
     expect(analysisInput.prompt).toContain('静物视频不得凭空出现人物或手部');

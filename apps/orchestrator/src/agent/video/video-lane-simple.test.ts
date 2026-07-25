@@ -218,9 +218,12 @@ describe('runSimpleVideoCreation — video (default = veo_fast)', () => {
 
     const veoArg = (mocks.generateVeoVideo.mock.calls[0] as unknown[])[0] as {
       prompt: string;
+      negativePrompt?: string;
     };
     expect(veoArg.prompt).toMatch(/若人物出镜/);
     expect(veoArg.prompt).toMatch(/双臂可追溯到肩膀|五指完整|解剖正确/);
+    expect(veoArg.prompt).toMatch(/每只可见的手.*五根.*独立.*清晰/);
+    expect(veoArg.negativePrompt).toMatch(/少指|手指粘连|missing fingers|fused fingers/);
     expect(veoArg.prompt).not.toContain('不得出现人物、手、手臂或身体部位');
   });
 
@@ -693,6 +696,7 @@ describe('runSimpleVideoCreation — final quality gate', () => {
 
   it('does not spend on a replacement when segment verification is unavailable', async () => {
     const { svc, mocks } = makeServices();
+    logger.warn.mockClear();
     const oneShot: VideoScript = {
       title: '单镜头持杯',
       segments: [
@@ -724,6 +728,13 @@ describe('runSimpleVideoCreation — final quality gate', () => {
     expect(mocks.generateVeoVideo).toHaveBeenCalledTimes(1);
     expect(mocks.renderVideoClip).not.toHaveBeenCalled();
     expect(mocks.storeOutputFile).not.toHaveBeenCalled();
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        failedChecks: ['verifier_inconclusive'],
+        reason: '质检服务未得出结论',
+      }),
+      'video: segment quality verification inconclusive',
+    );
   });
 
   it('does not spend on a replacement when segment verification throws', async () => {
