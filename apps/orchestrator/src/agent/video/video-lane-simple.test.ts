@@ -55,6 +55,7 @@ function makeServices() {
     runFfmpeg: vi.fn(async () => undefined),
     writeFile: vi.fn(async () => undefined),
     readFile: vi.fn(async () => Buffer.from('final')),
+    removeFile: vi.fn(async () => undefined),
   };
   const storeOutput = vi.fn(async (i: { filename: string }) => ({
     fileId: `f_${i.filename}`,
@@ -522,6 +523,17 @@ describe('runSimpleVideoCreation — final quality gate', () => {
       ],
     };
     let segmentChecks = 0;
+    let candidateExists = false;
+    mocks.removeFile.mockImplementation(async () => {
+      candidateExists = false;
+    });
+    mocks.downloadToFile.mockImplementation(async () => {
+      if (candidateExists) {
+        throw Object.assign(new Error('file already exists'), { code: 'EEXIST' });
+      }
+      candidateExists = true;
+      return { contentType: 'video/mp4', sizeBytes: 42_000_000 };
+    });
     const verifyFinalVideo = vi.fn(async (input: { videoPath: string }) => {
       if (input.videoPath.endsWith('/seg0-vid.mp4')) {
         segmentChecks += 1;
@@ -553,6 +565,8 @@ describe('runSimpleVideoCreation — final quality gate', () => {
 
     expect(out.fileId).toBe('f_video.mp4');
     expect(mocks.generateVeoVideo).toHaveBeenCalledTimes(2);
+    expect(mocks.removeFile).toHaveBeenCalledTimes(2);
+    expect(mocks.downloadToFile).toHaveBeenCalledTimes(2);
     const retryRequest = (mocks.generateVeoVideo.mock.calls[1] as unknown[])[0] as {
       prompt: string;
     };
@@ -563,6 +577,70 @@ describe('runSimpleVideoCreation — final quality gate', () => {
         (call) => ((call as unknown[])[0] as { filename?: string }).filename === 'video.mp4',
       ),
     ).toHaveLength(1);
+  });
+
+  it('retries a generated URL download without buying another candidate', async () => {
+    const { svc, mocks } = makeServices();
+    const oneShot: VideoScript = {
+      title: '单镜头持杯',
+      segments: [
+        {
+          text: '右手拿起蓝色陶瓷杯再放回桌面。',
+          type: 'broll',
+          visual: '固定镜头，右手从画面右侧进入，拿起蓝色陶瓷杯再放回白色桌面',
+        },
+      ],
+    };
+    mocks.downloadToFile.mockRejectedValue(new Error('temporary download failure'));
+
+    await expect(
+      runSimpleVideoCreation(
+        { userText: '固定镜头，右手拿起蓝色陶瓷杯再放回桌面。', script: oneShot },
+        CFG,
+        { videoSource: 'veo_fast', aspectRatio: '16:9' },
+        svc,
+      ),
+    ).rejects.toMatchObject({
+      name: 'SimpleVideoError',
+      kind: 'compose',
+      retryable: false,
+    });
+
+    expect(mocks.generateVeoVideo).toHaveBeenCalledTimes(1);
+    expect(mocks.downloadToFile).toHaveBeenCalledTimes(2);
+    expect(mocks.removeFile).toHaveBeenCalledTimes(2);
+  });
+
+  it('fails closed when a generated candidate path cannot be prepared', async () => {
+    const { svc, mocks } = makeServices();
+    const oneShot: VideoScript = {
+      title: '单镜头持杯',
+      segments: [
+        {
+          text: '右手拿起蓝色陶瓷杯再放回桌面。',
+          type: 'broll',
+          visual: '固定镜头，右手从画面右侧进入，拿起蓝色陶瓷杯再放回白色桌面',
+        },
+      ],
+    };
+    mocks.removeFile.mockRejectedValue(new Error('candidate path is not writable'));
+
+    await expect(
+      runSimpleVideoCreation(
+        { userText: '固定镜头，右手拿起蓝色陶瓷杯再放回桌面。', script: oneShot },
+        CFG,
+        { videoSource: 'veo_fast', aspectRatio: '16:9' },
+        svc,
+      ),
+    ).rejects.toMatchObject({
+      name: 'SimpleVideoError',
+      kind: 'compose',
+      retryable: false,
+    });
+
+    expect(mocks.generateVeoVideo).toHaveBeenCalledTimes(1);
+    expect(mocks.removeFile).toHaveBeenCalledTimes(2);
+    expect(mocks.downloadToFile).not.toHaveBeenCalled();
   });
 
   it('does not spend on a replacement when segment verification is unavailable', async () => {
@@ -593,6 +671,40 @@ describe('runSimpleVideoCreation — final quality gate', () => {
     ).rejects.toMatchObject({
       name: 'SimpleVideoError',
       kind: 'quality_unavailable',
+    });
+
+    expect(mocks.generateVeoVideo).toHaveBeenCalledTimes(1);
+    expect(mocks.renderVideoClip).not.toHaveBeenCalled();
+    expect(mocks.storeOutputFile).not.toHaveBeenCalled();
+  });
+
+  it('does not spend on a replacement when segment verification throws', async () => {
+    const { svc, mocks } = makeServices();
+    const oneShot: VideoScript = {
+      title: '单镜头持杯',
+      segments: [
+        {
+          text: '右手拿起蓝色陶瓷杯再放回桌面。',
+          type: 'broll',
+          visual: '固定镜头，右手从画面右侧进入，拿起蓝色陶瓷杯再放回白色桌面',
+        },
+      ],
+    };
+    const verifyFinalVideo = vi.fn(async () => {
+      throw new Error('quality verifier unavailable');
+    });
+
+    await expect(
+      runSimpleVideoCreation(
+        { userText: '固定镜头，右手拿起蓝色陶瓷杯再放回桌面。', script: oneShot },
+        CFG,
+        { videoSource: 'veo_fast', aspectRatio: '16:9' },
+        { ...svc, verifyFinalVideo },
+      ),
+    ).rejects.toMatchObject({
+      name: 'SimpleVideoError',
+      kind: 'quality_unavailable',
+      retryable: false,
     });
 
     expect(mocks.generateVeoVideo).toHaveBeenCalledTimes(1);

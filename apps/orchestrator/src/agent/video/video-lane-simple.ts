@@ -173,11 +173,16 @@ export class SimpleVideoError extends Error {
   constructor(
     message: string,
     readonly kind: SimpleVideoErrorKind,
+    retryable = kind !== 'quality' && kind !== 'quality_unavailable',
   ) {
     super(message);
     this.name = 'SimpleVideoError';
-    this.retryable = kind !== 'quality' && kind !== 'quality_unavailable';
+    this.retryable = retryable;
   }
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
 export interface SimpleVideoConfig {
@@ -238,6 +243,7 @@ interface SimpleFns {
   optimizeUserScript: typeof optimizeUserScript;
   writeFile: (p: string, b: Buffer) => Promise<void>;
   readFile: (p: string) => Promise<Buffer>;
+  removeFile: (p: string) => Promise<void>;
 }
 
 export interface SimpleVideoServices {
@@ -275,6 +281,7 @@ function realFns(): SimpleFns {
     optimizeUserScript,
     writeFile: (p, b) => fs.writeFile(p, b),
     readFile: (p) => fs.readFile(p),
+    removeFile: (p) => fs.rm(p, { force: true }),
   };
 }
 
@@ -384,26 +391,69 @@ export function createSimplePipelineDeps(
             throw new SimpleVideoError(`broll video seg ${index} produced no url`, 'compose');
           url = v.videoUrl;
         }
-        await fns.downloadToFile(url, localPath, {
-          ...(headers ? { headers } : {}),
-          maxBytes: 500 * 1024 * 1024,
-        });
-        const candidateDurationMs = await fns.ffprobeDurationMs(
-          localPath,
-          cfg.ffprobeBin ? { ffprobeBin: cfg.ffprobeBin } : {},
-        );
-        const candidateQuality = await svc.verifyFinalVideo({
-          videoPath: localPath,
-          workdir: svc.workdir,
-          durationMs: candidateDurationMs,
-          userText,
-          qualityContext: `这是最终成片中的第 ${index + 1} 个原始动态片段。片段画面要求：${visual}`,
-          expectedSubtitleText: [],
-          requiredBrandTexts: [],
-          brandPolicy:
-            '用户明确要求的文字或品牌必须逐字准确；未要求时不得新增乱码、错字或错误品牌。',
-          ...(cfg.ffmpegBin ? { ffmpegBin: cfg.ffmpegBin } : {}),
-        });
+        let downloaded = false;
+        let downloadError: unknown;
+        for (let downloadAttempt = 0; downloadAttempt < 2; downloadAttempt += 1) {
+          try {
+            await fns.removeFile(localPath);
+            await fns.downloadToFile(url, localPath, {
+              ...(headers ? { headers } : {}),
+              maxBytes: 500 * 1024 * 1024,
+            });
+            downloaded = true;
+            break;
+          } catch (err) {
+            downloadError = err;
+            if (downloadAttempt === 0) {
+              svc.logger.warn(
+                { segmentIndex: index, err: errorMessage(err) },
+                'video: generated segment download failed — retrying the same URL',
+              );
+            }
+          }
+        }
+        if (!downloaded) {
+          throw new SimpleVideoError(
+            `generated segment download failed after provider completed: ${errorMessage(downloadError)}`,
+            'compose',
+            false,
+          );
+        }
+
+        let candidateDurationMs: number;
+        try {
+          candidateDurationMs = await fns.ffprobeDurationMs(
+            localPath,
+            cfg.ffprobeBin ? { ffprobeBin: cfg.ffprobeBin } : {},
+          );
+        } catch (err) {
+          throw new SimpleVideoError(
+            `generated segment inspection failed after provider completed: ${errorMessage(err)}`,
+            'compose',
+            false,
+          );
+        }
+
+        let candidateQuality: VideoQualityResult;
+        try {
+          candidateQuality = await svc.verifyFinalVideo({
+            videoPath: localPath,
+            workdir: svc.workdir,
+            durationMs: candidateDurationMs,
+            userText,
+            qualityContext: `这是最终成片中的第 ${index + 1} 个原始动态片段。片段画面要求：${visual}`,
+            expectedSubtitleText: [],
+            requiredBrandTexts: [],
+            brandPolicy:
+              '用户明确要求的文字或品牌必须逐字准确；未要求时不得新增乱码、错字或错误品牌。',
+            ...(cfg.ffmpegBin ? { ffmpegBin: cfg.ffmpegBin } : {}),
+          });
+        } catch (err) {
+          throw new SimpleVideoError(
+            `generated segment quality verification failed after provider completed: ${errorMessage(err)}`,
+            'quality_unavailable',
+          );
+        }
         if (candidateQuality.status === 'pass') return { visualRef: localPath };
         if (candidateQuality.status === 'unknown') {
           throw new SimpleVideoError(
