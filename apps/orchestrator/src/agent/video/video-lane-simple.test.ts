@@ -254,8 +254,10 @@ describe('runSimpleVideoCreation — video (default = veo_fast)', () => {
       negativePrompt?: string;
     };
     expect(veoArg.prompt).toMatch(/若人物出镜/);
-    expect(veoArg.prompt).toMatch(/双臂可追溯到肩膀|五指完整|解剖正确/);
-    expect(veoArg.prompt).toMatch(/每只可见的手.*五根.*独立.*清晰/);
+    expect(veoArg.prompt).toMatch(/双臂可追溯到肩膀|解剖正确/);
+    expect(veoArg.prompt).toMatch(/自然遮挡关系|自然抓握/);
+    expect(veoArg.prompt).toMatch(/可见手指.*边界.*必须自然/);
+    expect(veoArg.prompt).not.toMatch(/每只可见的手.*恰好五根.*独立清晰/);
     expect(veoArg.prompt).toMatch(/按顺序完整执行所有动作/);
     expect(veoArg.prompt).toMatch(/结尾应清楚呈现完成状态/);
     expect(veoArg.prompt).not.toMatch(/未明确要求人物或手部时.*不要主动加入手或手臂/);
@@ -660,6 +662,9 @@ describe('runSimpleVideoCreation — final quality gate', () => {
     expect(retryRequest.prompt).toContain('质量修复重试');
     expect(retryRequest.prompt).toContain('手指边缘融合');
     expect(retryRequest.prompt).toContain('只保留用户要求的手和手臂');
+    expect(retryRequest.prompt).toMatch(/自然抓握.*遮挡/);
+    expect(retryRequest.prompt).not.toContain('抓握处无遮挡');
+    expect(retryRequest.prompt).not.toMatch(/恰好五根彼此独立、清晰可辨/);
     expect(retryRequest.prompt).toContain('按用户原始顺序完整执行全部动作');
     expect(retryRequest.prompt).toContain('最后至少 1 秒展示动作完成后的稳定终态');
     expect(

@@ -46,7 +46,8 @@ const COMMON_SCENE_SUFFIX =
   '用户未要求时不要凭空添加文字、品牌或 Logo；' +
   '若需求包含文字、品牌、包装、标牌或屏幕内容，必须逐字准确、清晰可读，不得替换、增删或拼错';
 const HUMAN_SCENE_SUFFIX =
-  '；若人物出镜，双臂必须可追溯到肩膀，每只可见的手必须五指完整，恰好五根手指且彼此独立清晰，手部解剖正确，' +
+  '；若人物出镜，双臂必须可追溯到肩膀，手部解剖正确并符合当前姿势与自然遮挡关系；' +
+  '可见手指的边界、指根和关节方向必须自然，抓握时允许被物体合理遮挡，' +
   '不得出现少指、手指粘连、融合手、多余手臂、多余肢体、多指、断肢、悬空小臂或不可能的关节，' +
   '避开手-物-手竖直叠帧这类高解剖风险构图';
 const OBJECT_ONLY_SCENE_SUFFIX =
@@ -128,7 +129,8 @@ function qualityRepairInstruction(
   let anatomyRepair = '';
   if (hasAnatomyIssue && scenePolicy.handRequired) {
     anatomyRepair =
-      '；手部修复要求：只保留用户要求的手和手臂，手掌与手臂连续自然，抓握处无遮挡；每只可见手都必须恰好五根彼此独立、清晰可辨的手指，不得融合、缺失、增生或扭曲';
+      '；手部修复要求：只保留用户要求的手和手臂，手掌与手臂连续自然，保持符合动作的自然抓握和合理遮挡；' +
+      '可见手指的边界、指根和关节方向必须自然，杯柄或物体不得与手指融为一体，不得融合、缺失、增生或扭曲';
   } else if (hasAnatomyIssue && scenePolicy.presencePolicy === 'object-only') {
     anatomyRepair = '；上一版出现了非必要手部，必须移除所有手和手臂，改用主体或镜头运动完成表达';
   } else if (hasAnatomyIssue) {

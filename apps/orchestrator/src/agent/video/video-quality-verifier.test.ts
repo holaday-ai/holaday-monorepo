@@ -175,7 +175,10 @@ describe('verifyFinalVideoQuality', () => {
     };
     expect(analysisInput.frames).toHaveLength(9);
     expect(analysisInput.prompt).toMatch(/多指|融合手|额外肢体|异常关节/);
-    expect(analysisInput.prompt).toMatch(/看不清.*手指|hand_anatomy_uncertain/);
+    expect(analysisInput.prompt).toMatch(/自然抓握.*遮挡.*不得仅据此.*fail/);
+    expect(analysisInput.prompt).toMatch(/hand_anatomy_uncertain/);
+    expect(analysisInput.prompt).toMatch(/明确.*融合|数量矛盾|异常关节/);
+    expect(analysisInput.prompt).not.toMatch(/每只可见的手应能确认五根彼此独立的手指/);
     expect(analysisInput.prompt).toMatch(/unknown.*技术原因|不得.*画质存疑.*unknown/);
     expect(analysisInput.prompt).toContain('静物任务出现人物或手');
     expect(analysisInput.prompt).toContain('HOLA DAY · AI');
