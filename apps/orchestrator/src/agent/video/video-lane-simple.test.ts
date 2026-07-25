@@ -599,6 +599,79 @@ describe('runSimpleVideoCreation — final quality gate', () => {
     );
   });
 
+  it('repairs one final-gate rejection with the original one-shot sequence and bounded timing', async () => {
+    const { svc, mocks } = makeServices();
+    const userText =
+      '固定镜头，一只手从右侧拿起桌上的蓝色杯子，停一下，再放回去并离开。真实产品摄影。';
+    const oneShot: VideoScript = {
+      title: '单镜头持杯',
+      segments: [
+        {
+          text: '拿起杯子，再放回。',
+          type: 'broll',
+          visual: '固定镜头，右手拿起蓝色杯子',
+        },
+      ],
+    };
+    let finalChecks = 0;
+    const verifyFinalVideo = vi.fn(async (input: { videoPath: string }) => {
+      if (input.videoPath.endsWith('/seg0-vid.mp4')) {
+        return {
+          status: 'pass' as const,
+          failedChecks: [],
+          reason: '原始片段通过',
+        };
+      }
+      finalChecks += 1;
+      if (finalChecks === 1) {
+        return {
+          status: 'fail' as const,
+          failedChecks: ['hand_anatomy_uncertain', 'required_action_missing'],
+          reason: '手指与杯柄疑似融合，且没有看到放回后手离开',
+        };
+      }
+      return {
+        status: 'pass' as const,
+        failedChecks: [],
+        reason: '替换成片通过',
+      };
+    });
+
+    const out = await runSimpleVideoCreation(
+      { userText, script: oneShot },
+      CFG,
+      {
+        videoSource: 'veo_fast',
+        aspectRatio: '16:9',
+        veoDurationSeconds: 6,
+        veoResolution: '720p',
+      },
+      { ...svc, verifyFinalVideo },
+    );
+
+    expect(out.fileId).toBe('f_video.mp4');
+    expect(mocks.generateVeoVideo).toHaveBeenCalledTimes(2);
+    expect(finalChecks).toBe(2);
+    const initialRequest = (mocks.generateVeoVideo.mock.calls[0] as unknown[])[0] as {
+      prompt: string;
+    };
+    expect(initialRequest.prompt).toContain(userText);
+    expect(initialRequest.prompt).toMatch(/最后.*1 秒.*稳定终态/);
+    expect(initialRequest.prompt).toMatch(/手腕.*连续|三分之四侧面/);
+    const replacementRequest = (mocks.generateVeoVideo.mock.calls[1] as unknown[])[0] as {
+      prompt: string;
+    };
+    expect(replacementRequest.prompt).toContain('质量修复重试');
+    expect(replacementRequest.prompt).toContain('手指与杯柄疑似融合');
+    expect(replacementRequest.prompt).toContain('放回后手离开');
+    expect(replacementRequest.prompt).toContain(userText);
+    expect(
+      mocks.storeOutputFile.mock.calls.filter(
+        (call) => ((call as unknown[])[0] as { filename?: string }).filename === 'video.mp4',
+      ),
+    ).toHaveLength(1);
+  });
+
   it('replaces a rejected segment once, then delivers only the passing candidate', async () => {
     const { svc, mocks } = makeServices();
     const oneShot: VideoScript = {
@@ -961,6 +1034,9 @@ describe('runSimpleVideoCreation — final quality gate', () => {
           (call) => ((call as unknown[])[0] as { filename?: string }).filename === 'poster.jpg',
         ),
       ).toBe(false);
+      expect(mocks.generateVeoVideo).toHaveBeenCalledTimes(
+        status === 'fail' ? SCRIPT.segments.length * 2 : SCRIPT.segments.length,
+      );
     },
   );
 });

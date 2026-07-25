@@ -50,6 +50,9 @@ const HUMAN_SCENE_SUFFIX =
   '可见手指的边界、指根和关节方向必须自然，抓握时允许被物体合理遮挡，' +
   '不得出现少指、手指粘连、融合手、多余手臂、多余肢体、多指、断肢、悬空小臂或不可能的关节，' +
   '避开手-物-手竖直叠帧这类高解剖风险构图';
+const REQUIRED_HAND_SCENE_SUFFIX =
+  '；在不违背用户指定构图的前提下，必要手部动作优先采用单手、手腕与前臂连续、' +
+  '三分之四侧面或侧面构图，让可见手指轮廓与物体边界自然可辨，避免手指和杯柄或物体边缘完全重叠融合';
 const OBJECT_ONLY_SCENE_SUFFIX =
   '；这是纯物体/环境镜头，不得出现人物、手、手臂或身体部位，' +
   '不要新增拿起、触碰或操作主体的动作，只保留用户指定的主体、环境和运动';
@@ -108,7 +111,10 @@ function scenePromptPolicy(userText: string): {
     };
   }
   return {
-    suffix: COMMON_SCENE_SUFFIX + HUMAN_SCENE_SUFFIX,
+    suffix:
+      COMMON_SCENE_SUFFIX +
+      HUMAN_SCENE_SUFFIX +
+      (HAND_INTENT_RE.test(userText) ? REQUIRED_HAND_SCENE_SUFFIX : ''),
     negativePrompt: BASE_NEGATIVE,
     presencePolicy: policy,
     handRequired: HAND_INTENT_RE.test(userText),
@@ -116,7 +122,10 @@ function scenePromptPolicy(userText: string): {
 }
 
 function motionCompletionInstruction(durationSeconds: number): string {
-  return `；若需求包含连续动作，必须在 ${durationSeconds} 秒内按顺序完整执行所有动作，结尾应清楚呈现完成状态，不得在动作途中结束或省略收尾；镜头语言、节奏和构图可自由发挥`;
+  const finalHoldSeconds =
+    durationSeconds >= 4 ? 1 : Math.min(1, Math.max(0.5, durationSeconds * 0.15));
+  const finishBySeconds = Math.max(0.5, durationSeconds - finalHoldSeconds);
+  return `；若需求包含连续动作，必须在 ${durationSeconds} 秒内按顺序完整执行所有动作：开头迅速建立初始状态，中段完成核心动作，最晚在第 ${finishBySeconds.toFixed(1)} 秒前完成放回、离开等收尾；结尾应清楚呈现完成状态，最后至少 ${finalHoldSeconds.toFixed(0)} 秒展示动作完成后的稳定终态，不得在动作途中结束或省略收尾；镜头语言、节奏和构图在满足动作顺序与终态的前提下可自由发挥`;
 }
 
 function qualityRepairInstruction(
@@ -313,6 +322,11 @@ export interface SimpleVideoServices {
   overrides?: Partial<SimpleFns>;
 }
 
+interface SimplePipelinePromptContext {
+  readonly includeFullUserRequirement?: boolean;
+  readonly initialRepairInstruction?: string;
+}
+
 function realFns(): SimpleFns {
   return {
     synthesizeSpeech,
@@ -337,6 +351,7 @@ export function createSimplePipelineDeps(
   opts: SimpleVideoOptions,
   svc: SimpleVideoServices,
   userText = '',
+  promptContext: SimplePipelinePromptContext = {},
 ): VideoPipelineDeps {
   const fns = { ...realFns(), ...(svc.overrides ?? {}) };
   const ws = cfg.dashscopeWorkspaceId ? { workspaceId: cfg.dashscopeWorkspaceId } : {};
@@ -347,6 +362,11 @@ export function createSimplePipelineDeps(
   const aspect = resolveAspect(opts.aspectRatio ?? '9:16');
   const aspectLabel = aspectCopy(opts.aspectRatio);
   const scenePolicy = scenePromptPolicy(userText);
+  const originalUserRequirement =
+    promptContext.includeFullUserRequirement && userText.trim()
+      ? `；用户原始需求（每个动作阶段都必须完整覆盖）：${userText.trim()}`
+      : '';
+  const initialRepairInstruction = promptContext.initialRepairInstruction ?? '';
 
   return {
     logger: svc.logger,
@@ -401,10 +421,14 @@ export function createSimplePipelineDeps(
       const localPath = path.join(svc.workdir, `seg${index}-vid.mp4`);
       const durationSeconds = opts.veoDurationSeconds ?? 8;
       const completionInstruction = motionCompletionInstruction(durationSeconds);
-      let repairInstruction = '';
+      let repairInstruction = initialRepairInstruction;
       for (let attempt = 0; attempt < 2; attempt += 1) {
         const candidatePrompt =
-          visual + repairInstruction + scenePolicy.suffix + completionInstruction;
+          visual +
+          originalUserRequirement +
+          repairInstruction +
+          scenePolicy.suffix +
+          completionInstruction;
         let url: string;
         let headers: Record<string, string> | undefined;
         if (isVeoSource(videoSource)) {
@@ -541,11 +565,9 @@ export function createSimplePipelineDeps(
           },
           'video: segment quality rejected — generating one replacement candidate',
         );
-        repairInstruction = qualityRepairInstruction(
-          candidateQuality,
-          durationSeconds,
-          scenePolicy,
-        );
+        repairInstruction =
+          initialRepairInstruction +
+          qualityRepairInstruction(candidateQuality, durationSeconds, scenePolicy);
       }
       throw new SimpleVideoError('video segment quality retry exhausted', 'quality');
     },
@@ -665,76 +687,106 @@ export async function runSimpleVideoCreation(
       },
       { llm: svc.llm },
     ));
-  // ②-⑤ runner (synth preset voice + visual + clip per segment)
-  const deps = createSimplePipelineDeps(cfg, opts, svc, input.userText);
-  const result = await runVideoPipeline(
-    {
-      script,
-      minimumSegmentDurationMs,
-      ...(input.retries !== undefined ? { retries: input.retries } : {}),
-    },
-    deps,
-  );
-  // ⑤ subtitle file — styled ASS (CJK font + safe margins + auto-wrap, fixes overflow P0-1)
   const assPath = path.join(svc.workdir, 'subtitles.ass');
-  await fns.writeFile(
-    assPath,
-    Buffer.from(
-      buildAss(result.timeline, {
-        ...(cfg.subtitleFontName ? { fontName: cfg.subtitleFontName } : {}),
-        width: aspect.width, // PlayRes 跟随画幅, 字幕边距按真实像素
-        height: aspect.height,
-      }),
-      'utf-8',
-    ),
-  );
-  // ⑥ compose — ASS subtitles + English watermark (+ optional CJK fontfile), W×H 按画幅
   const outPath = path.join(svc.workdir, 'final.mp4');
-  const cmd = buildComposeCommand(
-    {
-      segmentClipPaths: result.segments.map((s) => s.clipRef),
-      outputPath: outPath,
+  const canRegenerateVisuals =
+    visualMode === 'video' && script.segments.every((segment) => segment.type === 'broll');
+  const scenePolicy = scenePromptPolicy(input.userText);
+  let finalRepairInstruction = '';
+  let result: Awaited<ReturnType<typeof runVideoPipeline>> | undefined;
+  let finalDurationMs = 0;
+
+  for (let finalAttempt = 0; finalAttempt < 2; finalAttempt += 1) {
+    // ②-⑤ runner (synth preset voice + visual + clip per segment).
+    const deps = createSimplePipelineDeps(cfg, opts, svc, input.userText, {
+      includeFullUserRequirement: script.segments.length === 1,
+      ...(finalRepairInstruction ? { initialRepairInstruction: finalRepairInstruction } : {}),
+    });
+    result = await runVideoPipeline(
+      {
+        script,
+        minimumSegmentDurationMs,
+        ...(input.retries !== undefined ? { retries: input.retries } : {}),
+      },
+      deps,
+    );
+
+    // ⑤ subtitle file — styled ASS (CJK font + safe margins + auto-wrap, fixes overflow P0-1)
+    await fns.writeFile(
       assPath,
-      width: aspect.width,
-      height: aspect.height,
-      ...(cfg.watermarkFontFile ? { watermark: { fontFile: cfg.watermarkFontFile } } : {}),
-    },
-    ffOpts,
-  );
-  await fns.runFfmpeg(cmd, ffOpts);
-  const finalDurationMs = await fns.ffprobeDurationMs(
-    outPath,
-    cfg.ffprobeBin ? { ffprobeBin: cfg.ffprobeBin } : {},
-  );
-  const verification = await svc.verifyFinalVideo({
-    videoPath: outPath,
-    workdir: svc.workdir,
-    durationMs: finalDurationMs,
-    minimumDurationMs: script.segments.length * minimumSegmentDurationMs,
-    userText: input.userText,
-    qualityContext:
-      script.segments.length === 1
-        ? '这是单一连续镜头，不应出现切镜、构图突变或场景跳变。'
-        : `这是由 ${script.segments.length} 个脚本分段组成的短视频。分段边界允许正常切镜，不得仅因镜头变化判失败；每段内部仍须稳定且符合对应画面要求。`,
-    expectedSubtitleText: script.segments.map((segment) => segment.text),
-    requiredBrandTexts: ['HOLA DAY · AI'],
-    brandPolicy: '用户明确要求的其它文字或品牌必须逐字准确；未要求时不得新增乱码、错字或错误品牌。',
-    ...(cfg.ffmpegBin ? { ffmpegBin: cfg.ffmpegBin } : {}),
-  });
-  if (verification.status !== 'pass') {
+      Buffer.from(
+        buildAss(result.timeline, {
+          ...(cfg.subtitleFontName ? { fontName: cfg.subtitleFontName } : {}),
+          width: aspect.width,
+          height: aspect.height,
+        }),
+        'utf-8',
+      ),
+    );
+    // ⑥ compose — ASS subtitles + English watermark (+ optional CJK fontfile), W×H 按画幅
+    const cmd = buildComposeCommand(
+      {
+        segmentClipPaths: result.segments.map((s) => s.clipRef),
+        outputPath: outPath,
+        assPath,
+        width: aspect.width,
+        height: aspect.height,
+        ...(cfg.watermarkFontFile ? { watermark: { fontFile: cfg.watermarkFontFile } } : {}),
+      },
+      ffOpts,
+    );
+    await fns.runFfmpeg(cmd, ffOpts);
+    finalDurationMs = await fns.ffprobeDurationMs(
+      outPath,
+      cfg.ffprobeBin ? { ffprobeBin: cfg.ffprobeBin } : {},
+    );
+    const verification = await svc.verifyFinalVideo({
+      videoPath: outPath,
+      workdir: svc.workdir,
+      durationMs: finalDurationMs,
+      minimumDurationMs: script.segments.length * minimumSegmentDurationMs,
+      userText: input.userText,
+      qualityContext:
+        script.segments.length === 1
+          ? '这是单一连续镜头，不应出现切镜、构图突变或场景跳变。'
+          : `这是由 ${script.segments.length} 个脚本分段组成的短视频。分段边界允许正常切镜，不得仅因镜头变化判失败；每段内部仍须稳定且符合对应画面要求。`,
+      expectedSubtitleText: script.segments.map((segment) => segment.text),
+      requiredBrandTexts: ['HOLA DAY · AI'],
+      brandPolicy:
+        '用户明确要求的其它文字或品牌必须逐字准确；未要求时不得新增乱码、错字或错误品牌。',
+      ...(cfg.ffmpegBin ? { ffmpegBin: cfg.ffmpegBin } : {}),
+    });
+    if (verification.status === 'pass') break;
+
     svc.logger.warn(
       {
         status: verification.status,
         failedChecks: verification.failedChecks,
         reason: verification.reason,
+        finalAttempt,
       },
       'video: final quality gate rejected generated artifact',
     );
-    throw new SimpleVideoError(
-      'final video failed automated quality verification',
-      verification.status === 'unknown' ? 'quality_unavailable' : 'quality',
+    if (verification.status === 'unknown' || !canRegenerateVisuals || finalAttempt === 1) {
+      throw new SimpleVideoError(
+        'final video failed automated quality verification',
+        verification.status === 'unknown' ? 'quality_unavailable' : 'quality',
+      );
+    }
+    finalRepairInstruction = qualityRepairInstruction(
+      verification,
+      opts.veoDurationSeconds ?? 8,
+      scenePolicy,
+    );
+    svc.logger.warn(
+      {
+        failedChecks: verification.failedChecks,
+        reason: verification.reason,
+      },
+      'video: final quality rejected — regenerating one replacement video',
     );
   }
+  if (!result) throw new SimpleVideoError('video pipeline produced no result', 'compose');
   const stored = await svc.storeOutputFile({
     filename: 'video.mp4',
     mimetype: 'video/mp4',

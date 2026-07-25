@@ -181,6 +181,14 @@ describe('optimizeUserScript (原方案 — faithful to user draft)', () => {
     expect(p).toMatch(/不得新增人物、手|不要新增人物、手/);
     expect(p).toMatch(/拿起、触碰或操作/);
   });
+
+  it('preserves every phase and the stable end state of a continuous action', () => {
+    const p = buildOptimizeSystemPrompt(1);
+    expect(p).toMatch(/连续动作/);
+    expect(p).toMatch(/进入.*拿起.*放回.*离开|每个动作阶段/);
+    expect(p).toMatch(/最终稳定状态|收尾动作/);
+    expect(p).toMatch(/不得省略|不可省略/);
+  });
 });
 
 describe('段数按内容量动态定 (Problem 1 — 短文案不被硬凑成 6 段)', () => {
