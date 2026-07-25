@@ -45,6 +45,11 @@ export interface VideoResultMeta {
   finalExecutionMode?: string;
   visualMode?: string;
   videoType?: string;
+  qualityVerification?: {
+    status?: string;
+    gateVersion?: string;
+    verifiedAt?: string;
+  };
   attachments?: ReadonlyArray<{
     fileId?: string;
     downloadUrl?: string;
@@ -74,6 +79,12 @@ export interface VideoRow {
   /** Server-persisted task pin state, reused by the creative history surface. */
   starred?: boolean;
   starredAt?: string | number | Date | null;
+  /** Present only when the current final-video quality gate passed. */
+  qualityVerification?: {
+    status: 'passed';
+    gateVersion: string;
+    verifiedAt: string;
+  };
 }
 
 export function creativeHistoryArtifactAvailability(
@@ -222,6 +233,25 @@ export function asVideoType(value: unknown): VideoType | undefined {
   return value === 'normal' || value === 'pet' || value === 'ip_person' ? value : undefined;
 }
 
+function asPassedQualityVerification(
+  value: VideoResultMeta['qualityVerification'],
+): VideoRow['qualityVerification'] {
+  if (
+    value?.status !== 'passed' ||
+    typeof value.gateVersion !== 'string' ||
+    value.gateVersion.length === 0 ||
+    typeof value.verifiedAt !== 'string' ||
+    value.verifiedAt.length === 0
+  ) {
+    return undefined;
+  }
+  return {
+    status: 'passed',
+    gateVersion: value.gateVersion,
+    verifiedAt: value.verifiedAt,
+  };
+}
+
 const IP_ONBOARDING_COPY_MARKERS = [
   '声音样本在克隆出声纹后',
   '出镜底版加密存储',
@@ -309,6 +339,7 @@ export function toVideoRow(raw: unknown): VideoRow | null {
     typeof att.posterUrl === 'string' && att.posterUrl.length > 0
       ? normaliseAttachmentDownloadUrl(att.posterUrl) ?? undefined
       : undefined;
+  const qualityVerification = asPassedQualityVerification(meta?.qualityVerification);
   return {
     taskId: r.taskId,
     intent: r.intent ?? '',
@@ -328,6 +359,7 @@ export function toVideoRow(raw: unknown): VideoRow | null {
     ...(att.posterAvailability === 'unavailable'
       ? { posterUnavailable: true }
       : {}),
+    ...(qualityVerification ? { qualityVerification } : {}),
     starred: r.starred === true,
     starredAt: r.starredAt ?? null,
   };

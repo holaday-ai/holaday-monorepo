@@ -101,6 +101,7 @@ import {
   claimVideoConfirmAfterVerifierPreflight,
   deriveVideoType,
   mapVideoFailureReason,
+  videoQualityVerificationMetadata,
 } from '../../agent/video/video-confirm-meta.js';
 import {
   decideVideoGate,
@@ -7048,6 +7049,7 @@ export const tasksRouter = router({
               lane: 'video_creation',
               visualMode,
               videoType: deriveVideoType({ isPet, isIp, tab: vOpts.tab }),
+              ...videoQualityVerificationMetadata(),
               ...(finalAtt ? { attachments: [finalAtt] } : {}),
             },
           });

@@ -4,6 +4,7 @@ import {
   claimVideoConfirmAfterVerifierPreflight,
   deriveVideoType,
   mapVideoFailureReason,
+  videoQualityVerificationMetadata,
   videoVerifierPreflightIssue,
 } from './video-confirm-meta.js';
 
@@ -46,6 +47,20 @@ describe('videoVerifierPreflightIssue', () => {
 
     expect(result).toMatchObject({ claimed: false, issue: expect.stringMatching(/尚未开始制作/) });
     expect(consume).not.toHaveBeenCalled();
+  });
+});
+
+describe('videoQualityVerificationMetadata', () => {
+  it('stamps completed deliverables with an auditable quality-gate result', () => {
+    expect(
+      videoQualityVerificationMetadata(new Date('2026-07-25T06:00:00.000Z')),
+    ).toEqual({
+      qualityVerification: {
+        status: 'passed',
+        gateVersion: 'video-final-v1',
+        verifiedAt: '2026-07-25T06:00:00.000Z',
+      },
+    });
   });
 });
 

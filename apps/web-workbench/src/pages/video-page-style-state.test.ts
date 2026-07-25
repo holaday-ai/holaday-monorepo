@@ -20,6 +20,17 @@ describe('video creative style state', () => {
     expect(source).not.toContain('label="人物一致性"');
   });
 
+  it('keeps history details readable in narrow workbench panes and exposes the real video', () => {
+    const source = readFileSync(new URL('./VideoPage.tsx', import.meta.url), 'utf8');
+
+    expect(source).toContain(
+      'grid-cols-[repeat(auto-fit,minmax(min(100%,22rem),1fr))]',
+    );
+    expect(source).not.toContain("md:grid-cols-[minmax(260px,520px)_1fr]");
+    expect(source).toContain('播放成片');
+    expect(source).toContain('未记录当前质检');
+  });
+
   it('defaults image generation to one output to avoid silent duplicate spend', () => {
     expect(DEFAULT_IMAGE_COUNT).toBe(1);
     expect(buildImageCreationOptions('nano_banana_2', '1:1')).toEqual({

@@ -301,6 +301,28 @@ describe('toVideoRow — 生成历史 only lists completed 成片 with an attach
     expect(out?.starredAt).toBe(starredAt);
   });
 
+  it('distinguishes quality-gated deliverables from legacy completed videos', () => {
+    const verified = toVideoRow(
+      row({
+        result: {
+          metadata: {
+            lane: 'video_creation',
+            attachments: [ATT],
+            qualityVerification: {
+              status: 'passed',
+              gateVersion: 'video-final-v1',
+              verifiedAt: '2026-07-25T06:00:00.000Z',
+            },
+          },
+        },
+      }),
+    );
+    const legacy = toVideoRow(row());
+
+    expect(verified?.qualityVerification?.status).toBe('passed');
+    expect(legacy?.qualityVerification).toBeUndefined();
+  });
+
   it('normalizes backend /files download URLs to the frontend /api/files path', () => {
     const out = toVideoRow(
       row({

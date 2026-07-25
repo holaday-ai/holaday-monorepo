@@ -13,6 +13,7 @@ import { promises as fs, createWriteStream } from 'node:fs';
 import path from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
+import type { ReadableStream as NodeReadableStream } from 'node:stream/web';
 
 export type VideoHttpErrorKind = 'timeout' | 'network';
 
@@ -202,7 +203,7 @@ export async function downloadToFile(
   const timer = setTimeout(() => bodyController.abort(), timeoutMs);
   try {
     await pipeline(
-      Readable.fromWeb(res.body),
+      Readable.fromWeb(res.body as unknown as NodeReadableStream<Uint8Array>),
       byteCounter,
       createWriteStream(destination, { flags: 'wx' }),
       { signal: bodyController.signal },

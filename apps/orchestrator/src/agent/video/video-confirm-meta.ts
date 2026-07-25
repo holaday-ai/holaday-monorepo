@@ -9,6 +9,26 @@
 
 export type VideoType = 'normal' | 'pet' | 'ip_person';
 
+export const VIDEO_QUALITY_GATE_VERSION = 'video-final-v1';
+
+export function videoQualityVerificationMetadata(
+  verifiedAt = new Date(),
+): {
+  qualityVerification: {
+    status: 'passed';
+    gateVersion: typeof VIDEO_QUALITY_GATE_VERSION;
+    verifiedAt: string;
+  };
+} {
+  return {
+    qualityVerification: {
+      status: 'passed',
+      gateVersion: VIDEO_QUALITY_GATE_VERSION,
+      verifiedAt: verifiedAt.toISOString(),
+    },
+  };
+}
+
 export function deriveVideoType(input: {
   isPet: boolean;
   isIp: boolean;

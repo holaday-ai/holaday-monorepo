@@ -19,6 +19,7 @@ import {
   Mic,
   Palette,
   Pin,
+  Play,
   Sparkles,
   Trash2,
   UserRound,
@@ -2247,12 +2248,7 @@ function CreativeHistory({
             return (
             <article
               key={row.taskId}
-              className={cn(
-                'grid gap-5 rounded-[26px] bg-white p-4 shadow-[0_16px_40px_rgba(89,87,87,0.06)]',
-                artifactExpired || previewUnavailable
-                  ? 'md:grid-cols-[minmax(180px,300px)_1fr]'
-                  : 'md:grid-cols-[minmax(260px,520px)_1fr]',
-              )}
+              className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,22rem),1fr))] gap-5 rounded-[26px] bg-white p-4 shadow-[0_16px_40px_rgba(89,87,87,0.06)]"
             >
               <button
                 type="button"
@@ -2298,6 +2294,12 @@ function CreativeHistory({
                     {mode === 'image' ? <ImagePlus className="h-10 w-10" /> : <Clapperboard className="h-10 w-10" />}
                   </div>
                 )}
+                {mode === 'video' && !artifactExpired && !previewUnavailable ? (
+                  <span className="absolute bottom-4 left-4 inline-flex items-center gap-2 rounded-full bg-black/70 px-3 py-2 text-[12px] font-semibold text-white shadow-sm backdrop-blur-sm">
+                    <Play className="h-3.5 w-3.5 fill-current" aria-hidden />
+                    播放成片
+                  </span>
+                ) : null}
               </button>
               <div className="flex min-w-0 flex-col justify-between py-3 pr-3">
                 <div>
@@ -2334,6 +2336,19 @@ function CreativeHistory({
                       <span className="rounded-full bg-[#FFC910]/20 px-3 py-1 text-[11px] font-medium text-[#8A6A00]">
                         {videoTaskStatusLabel(row.status)}
                       </span>
+                    ) : null}
+                    {mode === 'video' ? (
+                      row.qualityVerification?.status === 'passed' ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-[#15A371]/10 px-3 py-1 text-[11px] font-medium text-[#0C7A55]">
+                          <CheckCircle2 className="h-3 w-3" aria-hidden />
+                          已通过成片质检
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-[#F2F3F5] px-3 py-1 text-[11px] font-medium text-[#737B8C]">
+                          <Clock className="h-3 w-3" aria-hidden />
+                          未记录当前质检
+                        </span>
+                      )
                     ) : null}
                     {mode === 'video' && row.videoType ? (
                       <span className="rounded-full bg-[#EA1F59]/10 px-3 py-1 text-[11px] font-medium text-[#595757]">
