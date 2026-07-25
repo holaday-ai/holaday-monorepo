@@ -218,6 +218,13 @@ function normalizeOptimized(raw: unknown): unknown {
  * optimizeUserScript's maxSegments so a ~50-char 文案 → ≤2 段, long 文案 → 6.
  */
 export function segmentCapForText(text: string): number {
+  if (
+    /(?:固定镜头|固定机位|单镜头|一镜到底|single[- ]?shot|one[- ]?take|locked[- ]?camera|continuous[- ]?shot)/iu.test(
+      text,
+    )
+  ) {
+    return 1;
+  }
   const chars = (text ?? '').replace(/\s/g, '').length;
   return Math.min(6, Math.max(1, Math.round(chars / 30)));
 }

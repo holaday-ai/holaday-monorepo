@@ -509,19 +509,119 @@ describe('runSimpleVideoCreation — final quality gate', () => {
     );
   });
 
+  it('replaces a rejected segment once, then delivers only the passing candidate', async () => {
+    const { svc, mocks } = makeServices();
+    const oneShot: VideoScript = {
+      title: '单镜头持杯',
+      segments: [
+        {
+          text: '右手拿起蓝色陶瓷杯再放回桌面。',
+          type: 'broll',
+          visual: '固定镜头，右手从画面右侧进入，拿起蓝色陶瓷杯再放回白色桌面',
+        },
+      ],
+    };
+    let segmentChecks = 0;
+    const verifyFinalVideo = vi.fn(async (input: { videoPath: string }) => {
+      if (input.videoPath.endsWith('/seg0-vid.mp4')) {
+        segmentChecks += 1;
+        if (segmentChecks === 1) {
+          return {
+            status: 'fail' as const,
+            failedChecks: ['hand_structure_abnormal'],
+            reason: '手指边缘融合，无法确认五指清晰分离',
+          };
+        }
+      }
+      return {
+        status: 'pass' as const,
+        failedChecks: [],
+        reason: '画面通过',
+      };
+    });
+
+    const out = await runSimpleVideoCreation(
+      {
+        userText:
+          '固定镜头，一只自然成年人的右手拿起蓝色陶瓷杯再放回桌面，杯身文字 HOLA DAY 必须准确。',
+        script: oneShot,
+      },
+      CFG,
+      { videoSource: 'veo_fast', aspectRatio: '16:9' },
+      { ...svc, verifyFinalVideo },
+    );
+
+    expect(out.fileId).toBe('f_video.mp4');
+    expect(mocks.generateVeoVideo).toHaveBeenCalledTimes(2);
+    const retryRequest = (mocks.generateVeoVideo.mock.calls[1] as unknown[])[0] as {
+      prompt: string;
+    };
+    expect(retryRequest.prompt).toContain('质量修复重试');
+    expect(retryRequest.prompt).toContain('手指边缘融合');
+    expect(
+      mocks.storeOutputFile.mock.calls.filter(
+        (call) => ((call as unknown[])[0] as { filename?: string }).filename === 'video.mp4',
+      ),
+    ).toHaveLength(1);
+  });
+
+  it('does not spend on a replacement when segment verification is unavailable', async () => {
+    const { svc, mocks } = makeServices();
+    const oneShot: VideoScript = {
+      title: '单镜头持杯',
+      segments: [
+        {
+          text: '右手拿起蓝色陶瓷杯再放回桌面。',
+          type: 'broll',
+          visual: '固定镜头，右手从画面右侧进入，拿起蓝色陶瓷杯再放回白色桌面',
+        },
+      ],
+    };
+    const verifyFinalVideo = vi.fn(async () => ({
+      status: 'unknown' as const,
+      failedChecks: ['verifier_inconclusive'],
+      reason: '质检服务未得出结论',
+    }));
+
+    await expect(
+      runSimpleVideoCreation(
+        { userText: '固定镜头，右手拿起蓝色陶瓷杯再放回桌面。', script: oneShot },
+        CFG,
+        { videoSource: 'veo_fast', aspectRatio: '16:9' },
+        { ...svc, verifyFinalVideo },
+      ),
+    ).rejects.toMatchObject({
+      name: 'SimpleVideoError',
+      kind: 'quality_unavailable',
+    });
+
+    expect(mocks.generateVeoVideo).toHaveBeenCalledTimes(1);
+    expect(mocks.renderVideoClip).not.toHaveBeenCalled();
+    expect(mocks.storeOutputFile).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['fail', 'quality'],
     ['unknown', 'quality_unavailable'],
   ] as const)(
-    'blocks a %s verdict before the video is stored or marked deliverable',
+    'blocks a final %s verdict before the video is stored or marked deliverable',
     async (status, expectedKind) => {
       const { svc, mocks } = makeServices();
-      const verifyFinalVideo = vi.fn(async () => ({
-        status,
-        failedChecks:
-          status === 'fail' ? ['fused_hands', 'unrequested_human'] : ['verifier_inconclusive'],
-        reason: status === 'fail' ? '画面出现融合手和未请求的人物肢体' : '质检服务未得出结论',
-      }));
+      const verifyFinalVideo = vi.fn(async (input: { videoPath: string }) => {
+        if (!input.videoPath.endsWith('/final.mp4')) {
+          return {
+            status: 'pass' as const,
+            failedChecks: [],
+            reason: '原始片段通过',
+          };
+        }
+        return {
+          status,
+          failedChecks:
+            status === 'fail' ? ['fused_hands', 'unrequested_human'] : ['verifier_inconclusive'],
+          reason: status === 'fail' ? '画面出现融合手和未请求的人物肢体' : '质检服务未得出结论',
+        };
+      });
 
       await expect(
         runSimpleVideoCreation(
@@ -535,6 +635,12 @@ describe('runSimpleVideoCreation — final quality gate', () => {
         kind: expectedKind,
       });
 
+      expect(verifyFinalVideo).toHaveBeenCalledWith(
+        expect.objectContaining({
+          videoPath: '/tmp/wd/final.mp4',
+          qualityContext: expect.stringMatching(/2 个脚本分段.*允许正常切镜/),
+        }),
+      );
       expect(
         mocks.storeOutputFile.mock.calls.some(
           (call) => ((call as unknown[])[0] as { filename?: string }).filename === 'video.mp4',

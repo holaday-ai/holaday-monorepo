@@ -203,6 +203,14 @@ describe('段数按内容量动态定 (Problem 1 — 短文案不被硬凑成 6 
     expect(segmentCapForText('防晒')).toBe(1);
   });
 
+  it('固定镜头的一段连续动作即使描述很长也只生成一个片段', () => {
+    const oneShot =
+      '固定镜头，一只自然成年人的右手从画面右侧进入，稳稳拿起蓝色陶瓷杯，再把杯子放回白色桌面，手部始终保持正常人体结构，杯身文字 HOLA DAY 必须完全正确，柔和自然光，真实产品摄影，6 秒。';
+
+    expect(oneShot.replace(/\s/g, '').length).toBeGreaterThan(60);
+    expect(segmentCapForText(oneShot)).toBe(1);
+  });
+
   it('系统提示下限随 maxSegments 缩: 1→「1~1」, 2→「1~2」, 6→「4~6」+ 别硬凑', () => {
     expect(buildOptimizeSystemPrompt(1)).toContain('1~1 个分段');
     expect(buildOptimizeSystemPrompt(2)).toContain('1~2 个分段');

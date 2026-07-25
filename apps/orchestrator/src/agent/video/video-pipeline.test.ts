@@ -89,6 +89,21 @@ describe('runVideoPipeline', () => {
     expect(out.segments[0]?.clipRef).toBe('clip_0');
   });
 
+  it('does not retry a step that explicitly marks its failure as non-retryable', async () => {
+    let attempts = 0;
+    const { deps } = makeDeps({
+      async generateBroll() {
+        attempts += 1;
+        throw Object.assign(new Error('quality gate unavailable'), { retryable: false });
+      },
+    });
+
+    await expect(runVideoPipeline({ script: SCRIPT, retries: 3 }, deps)).rejects.toThrow(
+      'quality gate unavailable',
+    );
+    expect(attempts).toBe(1);
+  });
+
   it('throws after exhausting retries on a persistently failing句', async () => {
     const { deps } = makeDeps({
       async lipSyncSegment() {

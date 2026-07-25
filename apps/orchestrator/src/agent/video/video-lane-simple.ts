@@ -168,12 +168,15 @@ export type SimpleVideoErrorKind =
   | 'quality'
   | 'quality_unavailable';
 export class SimpleVideoError extends Error {
+  readonly retryable: boolean;
+
   constructor(
     message: string,
     readonly kind: SimpleVideoErrorKind,
   ) {
     super(message);
     this.name = 'SimpleVideoError';
+    this.retryable = kind !== 'quality' && kind !== 'quality_unavailable';
   }
 }
 
@@ -340,48 +343,93 @@ export function createSimplePipelineDeps(
         await fns.writeFile(localPath, first.buffer);
         return { visualRef: localPath };
       }
-      // video visual
-      let url: string;
-      let headers: Record<string, string> | undefined;
-      if (isVeoSource(videoSource)) {
-        // Veo (default veo_fast). NOTE: the Gemini Developer API ALWAYS renders
-        // an audio track — it can't be disabled (generateAudio:false → 400) and
-        // there's no audio-off price tier. We discard it and dub with Qwen Cherry.
-        const v = await fns.generateVeoVideo({
-          apiKey: cfg.geminiApiKey ?? '',
-          ...(cfg.geminiBaseUrl ? { baseUrl: cfg.geminiBaseUrl } : {}),
-          model: resolveVeoModel(videoSource, cfg),
-          prompt: visual + scenePolicy.suffix,
-          negativePrompt: scenePolicy.negativePrompt,
-          aspectRatio: aspect.veoAspect, // 1:1 时用 9:16 出, compose pad 到方形
-          durationSeconds: opts.veoDurationSeconds ?? 8,
-          resolution: opts.veoResolution ?? '1080p',
-        });
-        url = v.videoUri;
-        headers = { 'x-goog-api-key': cfg.geminiApiKey ?? '' }; // Veo uri needs the key
-      } else {
-        // wanxiang / happyhorse t2v — 同 DashScope video-synthesis 端点, 改 model + size.
-        const isHH = videoSource === 'happyhorse';
-        const v = await fns.generateBrollVideo({
-          apiKey: cfg.dashscopeApiKey,
-          baseUrl: cfg.dashscopeBaseUrl,
-          ...ws,
-          model: isHH ? (cfg.happyhorseModel ?? DEFAULT_HAPPYHORSE_MODEL) : cfg.wanxiangT2vModel,
-          prompt: visual + scenePolicy.suffix,
-          negativePrompt: scenePolicy.negativePrompt,
-          // HappyHorse 1080P 按画幅; wanxiang 兜底保持 720 竖屏(第一期不做多尺寸).
-          size: isHH ? aspect.hhSize : (cfg.wanxiangVideoSize ?? '720*1280'),
-        });
-        if (!v.videoUrl)
-          throw new SimpleVideoError(`broll video seg ${index} produced no url`, 'compose');
-        url = v.videoUrl;
-      }
       const localPath = path.join(svc.workdir, `seg${index}-vid.mp4`);
-      await fns.downloadToFile(url, localPath, {
-        ...(headers ? { headers } : {}),
-        maxBytes: 500 * 1024 * 1024,
-      });
-      return { visualRef: localPath };
+      let repairInstruction = '';
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const candidatePrompt = visual + repairInstruction + scenePolicy.suffix;
+        let url: string;
+        let headers: Record<string, string> | undefined;
+        if (isVeoSource(videoSource)) {
+          // Veo (default veo_fast). NOTE: the Gemini Developer API ALWAYS renders
+          // an audio track — it can't be disabled (generateAudio:false → 400) and
+          // there's no audio-off price tier. We discard it and dub with Qwen Cherry.
+          const v = await fns.generateVeoVideo({
+            apiKey: cfg.geminiApiKey ?? '',
+            ...(cfg.geminiBaseUrl ? { baseUrl: cfg.geminiBaseUrl } : {}),
+            model: resolveVeoModel(videoSource, cfg),
+            prompt: candidatePrompt,
+            negativePrompt: scenePolicy.negativePrompt,
+            aspectRatio: aspect.veoAspect, // 1:1 时用 9:16 出, compose pad 到方形
+            durationSeconds: opts.veoDurationSeconds ?? 8,
+            resolution: opts.veoResolution ?? '1080p',
+          });
+          url = v.videoUri;
+          headers = { 'x-goog-api-key': cfg.geminiApiKey ?? '' }; // Veo uri needs the key
+        } else {
+          // wanxiang / happyhorse t2v — 同 DashScope video-synthesis 端点, 改 model + size.
+          const isHH = videoSource === 'happyhorse';
+          const v = await fns.generateBrollVideo({
+            apiKey: cfg.dashscopeApiKey,
+            baseUrl: cfg.dashscopeBaseUrl,
+            ...ws,
+            model: isHH
+              ? (cfg.happyhorseModel ?? DEFAULT_HAPPYHORSE_MODEL)
+              : cfg.wanxiangT2vModel,
+            prompt: candidatePrompt,
+            negativePrompt: scenePolicy.negativePrompt,
+            // HappyHorse 1080P 按画幅; wanxiang 兜底保持 720 竖屏(第一期不做多尺寸).
+            size: isHH ? aspect.hhSize : (cfg.wanxiangVideoSize ?? '720*1280'),
+          });
+          if (!v.videoUrl)
+            throw new SimpleVideoError(`broll video seg ${index} produced no url`, 'compose');
+          url = v.videoUrl;
+        }
+        await fns.downloadToFile(url, localPath, {
+          ...(headers ? { headers } : {}),
+          maxBytes: 500 * 1024 * 1024,
+        });
+        const candidateDurationMs = await fns.ffprobeDurationMs(
+          localPath,
+          cfg.ffprobeBin ? { ffprobeBin: cfg.ffprobeBin } : {},
+        );
+        const candidateQuality = await svc.verifyFinalVideo({
+          videoPath: localPath,
+          workdir: svc.workdir,
+          durationMs: candidateDurationMs,
+          userText,
+          qualityContext: `这是最终成片中的第 ${index + 1} 个原始动态片段。片段画面要求：${visual}`,
+          expectedSubtitleText: [],
+          requiredBrandTexts: [],
+          brandPolicy:
+            '用户明确要求的文字或品牌必须逐字准确；未要求时不得新增乱码、错字或错误品牌。',
+          ...(cfg.ffmpegBin ? { ffmpegBin: cfg.ffmpegBin } : {}),
+        });
+        if (candidateQuality.status === 'pass') return { visualRef: localPath };
+        if (candidateQuality.status === 'unknown') {
+          throw new SimpleVideoError(
+            'generated segment quality verification unavailable',
+            'quality_unavailable',
+          );
+        }
+        if (attempt === 1) {
+          throw new SimpleVideoError(
+            'generated segment failed automated quality verification',
+            'quality',
+          );
+        }
+        svc.logger.warn(
+          {
+            segmentIndex: index,
+            failedChecks: candidateQuality.failedChecks,
+            reason: candidateQuality.reason,
+          },
+          'video: segment quality rejected — generating one replacement candidate',
+        );
+        repairInstruction =
+          `；质量修复重试：上一版未通过检查（${candidateQuality.reason}）。` +
+          '必须修正该问题，同时保持主体、动作、颜色、文字、构图和镜头要求不变';
+      }
+      throw new SimpleVideoError('video segment quality retry exhausted', 'quality');
     },
 
     async renderBrollClip({ index, visualRef, audioRef, durationMs }) {
@@ -540,6 +588,10 @@ export async function runSimpleVideoCreation(
     workdir: svc.workdir,
     durationMs: finalDurationMs,
     userText: input.userText,
+    qualityContext:
+      script.segments.length === 1
+        ? '这是单一连续镜头，不应出现切镜、构图突变或场景跳变。'
+        : `这是由 ${script.segments.length} 个脚本分段组成的短视频。分段边界允许正常切镜，不得仅因镜头变化判失败；每段内部仍须稳定且符合对应画面要求。`,
     expectedSubtitleText: script.segments.map((segment) => segment.text),
     requiredBrandTexts: ['HOLA DAY · AI'],
     brandPolicy: '用户明确要求的其它文字或品牌必须逐字准确；未要求时不得新增乱码、错字或错误品牌。',

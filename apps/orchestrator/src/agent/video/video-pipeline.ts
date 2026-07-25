@@ -83,6 +83,15 @@ function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+function isExplicitlyNonRetryable(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    'retryable' in err &&
+    (err as { retryable?: unknown }).retryable === false
+  );
+}
+
 /** Run `fn`, retrying up to `retries` extra times. Only this step is retried (单句重试). */
 async function withRetry<T>(
   label: string,
@@ -96,6 +105,10 @@ async function withRetry<T>(
       return await fn();
     } catch (err) {
       lastErr = err;
+      if (isExplicitlyNonRetryable(err)) {
+        logger.error({ label, attempt, err: errMsg(err) }, 'video: segment step is non-retryable');
+        throw err;
+      }
       if (attempt < retries) {
         logger.warn(
           { label, attempt, err: errMsg(err) },
