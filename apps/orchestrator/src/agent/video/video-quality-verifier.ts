@@ -3,8 +3,8 @@ import sharp from 'sharp';
 import type { FfmpegExecOpts } from './ffmpeg-exec.js';
 
 const QUALITY_MODEL = 'claude-sonnet-4-6';
-const SAMPLE_RATIOS = [0.1, 0.3, 0.5, 0.7, 0.9] as const;
-const REFERENCE_SAMPLE_RATIOS = SAMPLE_RATIOS;
+const SAMPLE_RATIOS = [0.05, 0.15, 0.25, 0.375, 0.5, 0.625, 0.75, 0.85, 0.95] as const;
+const REFERENCE_SAMPLE_RATIOS = [0.1, 0.3, 0.5, 0.7, 0.9] as const;
 const VIDEO_QUALITY_MAX_SOURCE_IMAGE_BYTES = 12 * 1024 * 1024;
 export const VIDEO_QUALITY_MAX_IMAGE_BYTES = 1_500_000;
 export const VIDEO_QUALITY_MAX_TOTAL_IMAGE_BYTES = 12 * 1024 * 1024;
@@ -54,6 +54,8 @@ export interface VerifyFinalVideoQualityInput {
   readonly videoPath: string;
   readonly workdir: string;
   readonly durationMs: number;
+  /** Minimum deliverable duration selected or quoted for this artifact. */
+  readonly minimumDurationMs?: number;
   readonly userText: string;
   /** Lane-specific invariants visible in sampled frames, such as identity and scene. */
   readonly qualityContext?: string;
@@ -218,7 +220,7 @@ function buildQualityPrompt(input: VerifyFinalVideoQualityInput): string {
   const requiredBrands =
     input.requiredBrandTexts.length > 0 ? input.requiredBrandTexts.join('；') : '无';
   return [
-    '你是生成视频的成片质量审核器。待验收内容是从最终视频抽取的五张静态抽样帧。',
+    '你是生成视频的成片质量审核器。待验收内容是从最终视频按时间顺序抽取的九张静态抽样帧。',
     `用户原始需求：${input.userText}`,
     `任务链路约束：${input.qualityContext?.trim() || '无额外约束'}`,
     input.referenceImages?.length || input.referenceVideos?.length
@@ -230,6 +232,7 @@ function buildQualityPrompt(input: VerifyFinalVideoQualityInput): string {
     '1. 人体或手部异常：多指、少指、融合手、手指粘连、额外的手/手臂、断肢、悬浮肢体、异常关节、肢体来源不可能。',
     '2. 用户原始需求没有人物或手部动作，但静物任务出现人物或手、有人拿起/触碰/操作主体。',
     '3. 主体、动作、数量、颜色、构图或场景明显偏离用户需求；主体跨帧身份或形态明显漂移。',
+    '   若用户要求进入、拿起、移动、放回等分阶段动作，必须按九张帧的时间顺序核对每个关键结果状态。任何要求的阶段在全部抽样帧中都没有可见证据，必须 fail，并使用 required_action_missing；不得假设它发生在帧与帧之间。',
     '4. 用户指定或输入参数明确列为允许的文字、品牌或 Logo 没有逐字准确呈现，或画面中出现乱码、错字、不可读/错误品牌标识；允许范围之外又不符合其它文字与品牌规则的文字或品牌；字幕或品牌文字被裁切、严重遮挡、明显拼错。预期字幕和必须出现的品牌属于已允许内容，不能仅因它没有写在用户原始需求中而判失败。',
     '5. 抽样帧中实际可见的物体融化、穿模、突然消失、跨帧形态跳变或其它足以让用户拒收的画面瑕疵；不得仅凭静态帧判定运动流畅度、节奏或音画同步。',
     '',
@@ -237,7 +240,7 @@ function buildQualityPrompt(input: VerifyFinalVideoQualityInput): string {
     `其它文字与品牌规则：${input.brandPolicy}`,
     '预期字幕文本（不同时间帧只需出现对应句，不要求每帧同时出现）：',
     subtitles,
-    '只核对抽样帧中实际出现的对应字幕；某句未出现在这五张抽样帧时，不得仅据此判定缺失。',
+    '只核对抽样帧中实际出现的对应字幕；某句未出现在这九张抽样帧时，不得仅据此判定缺失。',
     '',
     '不要因为整体风格好看而放过局部异常。无法确认时 status=unknown，不得猜测通过。',
     '只输出 JSON：',
@@ -275,7 +278,7 @@ export function createAnthropicVideoQualityAnalyzer(client: Anthropic): VideoQua
     const content = [
       ...referenceContent,
       ...(input.references.length > 0
-        ? [{ type: 'text' as const, text: '以下为待验收成片的五个时间点：' }]
+        ? [{ type: 'text' as const, text: '以下为待验收成片的九个时间点：' }]
         : []),
       ...frameContent,
       { type: 'text' as const, text: input.prompt },
@@ -302,6 +305,18 @@ export async function verifyFinalVideoQuality(
   input: VerifyFinalVideoQualityInput,
   deps: VideoQualityVerifierDeps,
 ): Promise<VideoQualityResult> {
+  if (input.minimumDurationMs !== undefined) {
+    const toleranceMs = Math.max(250, input.minimumDurationMs * 0.05);
+    if (input.durationMs < input.minimumDurationMs - toleranceMs) {
+      return {
+        status: 'fail',
+        failedChecks: ['duration_too_short'],
+        reason:
+          `成片时长 ${(input.durationMs / 1000).toFixed(2)} 秒，` +
+          `短于要求的 ${(input.minimumDurationMs / 1000).toFixed(2)} 秒`,
+      };
+    }
+  }
   const normalizeImage = deps.normalizeImage ?? normalizeVideoQualityImage;
   let totalImageBytes = 0;
   const prepareForAnalysis = async (buffer: Buffer): Promise<Buffer> => {

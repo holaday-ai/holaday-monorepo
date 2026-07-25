@@ -120,6 +120,7 @@ export async function runCloneVideoCreation(
     videoPath: outputPath,
     workdir: services.workdir,
     durationMs,
+    minimumDurationMs: referenceDurationMs,
     userText: input.description?.trim() || '复刻参考视频动作，并保持上传主角的身份和外观一致。',
     qualityContext:
       '抽样帧必须保持上传主角的身份、脸部和身体外形一致，并核对可见的粗粒度姿态与场景是否明显偏离参考；不得出现融合手、多余肢体或主体漂移。静态抽样不证明连续动作、节奏或镜头运动已验证。',

@@ -183,6 +183,9 @@ export async function runPetVideoCreation(
     videoPath: outPath,
     workdir: svc.workdir,
     durationMs,
+    ...(opts.durationSeconds !== undefined
+      ? { minimumDurationMs: opts.durationSeconds * 1000 }
+      : {}),
     userText: input.motionPrompt,
     qualityContext:
       '抽样帧必须保持输入宠物的身份、品种、毛色、脸部特征和身体比例一致；四肢数量与可见关节必须自然，不得出现融合、增生、消失或主体漂移。静态抽样不证明连续运动流畅性已验证。',

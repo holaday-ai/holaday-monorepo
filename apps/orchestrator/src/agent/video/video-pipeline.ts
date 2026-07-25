@@ -13,7 +13,7 @@
  *
  * Constraints baked in here:
  *   - 单句独立处理、失败只重试该句 (withRetry per segment step).
- *   - 以音频时长为基准 (buildTimeline from measured audio durations).
+ *   - 以音频时长为基础；有明确成片时长时，每段不得短于该时长。
  *   - fire-and-poll lives inside `lipSyncSegment` (the dep wraps
  *     fal runLipSync); the runner itself is meant to run in a background
  *     coroutine — the lane never awaits it on the request thread.
@@ -60,6 +60,8 @@ export interface VideoPipelineInput {
   readonly script: VideoScript;
   /** Per-segment-step retry count (single failed句 only retries that句). Default 1 → 2 attempts. */
   readonly retries?: number;
+  /** Keep each rendered segment at least this long, padding shorter narration with silence. */
+  readonly minimumSegmentDurationMs?: number;
 }
 
 export interface SegmentResult {
@@ -152,8 +154,12 @@ export async function runVideoPipeline(
     );
   }
 
-  // ⑤ timeline + subtitles (audio duration = source of truth).
-  const timeline = buildTimeline(segs, audio.map((a) => a.durationMs));
+  // ⑤ timeline + subtitles. Preserve the selected/quoted visual duration even
+  // when narration is shorter; longer narration still remains intact.
+  const segmentDurations = audio.map((item) =>
+    Math.max(item.durationMs, input.minimumSegmentDurationMs ?? 0),
+  );
+  const timeline = buildTimeline(segs, segmentDurations);
   const srt = buildSrt(timeline);
 
   // ③/④ per-segment clip.
@@ -161,11 +167,12 @@ export async function runVideoPipeline(
   for (let i = 0; i < total; i += 1) {
     const seg = segs[i]!;
     const a = audio[i]!;
+    const durationMs = segmentDurations[i]!;
     if (seg.type === 'voiceover') {
       deps.onProgress?.({ stage: 'lipsync', segmentIndex: i, done: i, total });
       const r = await withRetry(
         `lipsync#${i}`,
-        () => deps.lipSyncSegment({ index: i, audioRef: a.audioRef, durationMs: a.durationMs }),
+        () => deps.lipSyncSegment({ index: i, audioRef: a.audioRef, durationMs }),
         retries,
         deps.logger,
       );
@@ -174,7 +181,7 @@ export async function runVideoPipeline(
         type: seg.type,
         text: seg.text,
         audioRef: a.audioRef,
-        durationMs: a.durationMs,
+        durationMs,
         clipRef: r.clipRef,
       });
     } else {
@@ -193,7 +200,7 @@ export async function runVideoPipeline(
             index: i,
             visualRef: b.visualRef,
             audioRef: a.audioRef,
-            durationMs: a.durationMs,
+            durationMs,
           }),
         retries,
         deps.logger,
@@ -203,7 +210,7 @@ export async function runVideoPipeline(
         type: seg.type,
         text: seg.text,
         audioRef: a.audioRef,
-        durationMs: a.durationMs,
+        durationMs,
         visualRef: b.visualRef,
         clipRef: c.clipRef,
       });

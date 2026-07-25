@@ -296,6 +296,7 @@ export function createSimplePipelineDeps(
   const ffOpts = cfg.ffmpegBin ? { ffmpegBin: cfg.ffmpegBin } : {};
   const visualMode = opts.visualMode ?? 'video';
   const videoSource = opts.videoSource ?? 'veo_fast';
+  const minimumSegmentDurationMs = (opts.veoDurationSeconds ?? 8) * 1000;
   const aspect = resolveAspect(opts.aspectRatio ?? '9:16');
   const aspectLabel = aspectCopy(opts.aspectRatio);
   const scenePolicy = scenePromptPolicy(userText);
@@ -440,6 +441,7 @@ export function createSimplePipelineDeps(
             videoPath: localPath,
             workdir: svc.workdir,
             durationMs: candidateDurationMs,
+            minimumDurationMs: minimumSegmentDurationMs,
             userText,
             qualityContext: `这是最终成片中的第 ${index + 1} 个原始动态片段。片段画面要求：${visual}`,
             expectedSubtitleText: [],
@@ -560,6 +562,7 @@ export async function runSimpleVideoCreation(
   }
   const visualMode = opts.visualMode ?? 'video';
   const videoSource = opts.videoSource ?? 'veo_fast';
+  const minimumSegmentDurationMs = (opts.veoDurationSeconds ?? 8) * 1000;
   if (
     visualMode === 'video' &&
     videoParameterIssue({
@@ -599,7 +602,11 @@ export async function runSimpleVideoCreation(
   // ②-⑤ runner (synth preset voice + visual + clip per segment)
   const deps = createSimplePipelineDeps(cfg, opts, svc, input.userText);
   const result = await runVideoPipeline(
-    { script, ...(input.retries !== undefined ? { retries: input.retries } : {}) },
+    {
+      script,
+      minimumSegmentDurationMs,
+      ...(input.retries !== undefined ? { retries: input.retries } : {}),
+    },
     deps,
   );
   // ⑤ subtitle file — styled ASS (CJK font + safe margins + auto-wrap, fixes overflow P0-1)
@@ -637,6 +644,7 @@ export async function runSimpleVideoCreation(
     videoPath: outPath,
     workdir: svc.workdir,
     durationMs: finalDurationMs,
+    minimumDurationMs: script.segments.length * minimumSegmentDurationMs,
     userText: input.userText,
     qualityContext:
       script.segments.length === 1

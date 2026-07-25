@@ -38,7 +38,7 @@ describe('prepareVideoQualityReferenceImage', () => {
 });
 
 describe('buildVideoQualityFrameCommands', () => {
-  it('samples five points across the final video instead of judging one poster frame', () => {
+  it('samples nine ordered points across the final video instead of judging sparse poster frames', () => {
     const commands = buildVideoQualityFrameCommands({
       videoPath: '/tmp/final.mp4',
       workdir: '/tmp/quality',
@@ -46,14 +46,16 @@ describe('buildVideoQualityFrameCommands', () => {
       ffmpegBin: '/opt/ffmpeg',
     });
 
-    expect(commands).toHaveLength(5);
-    expect(commands.map((item) => item.timestampSeconds)).toEqual([1, 3, 5, 7, 9]);
+    expect(commands).toHaveLength(9);
+    expect(commands.map((item) => item.timestampSeconds)).toEqual([
+      0.5, 1.5, 2.5, 3.75, 5, 6.25, 7.5, 8.5, 9.5,
+    ]);
     expect(commands[0]?.command).toEqual({
       bin: '/opt/ffmpeg',
       args: [
         '-y',
         '-ss',
-        '1.000',
+        '0.500',
         '-i',
         '/tmp/final.mp4',
         '-frames:v',
@@ -88,6 +90,40 @@ describe('parseVideoQualityResponse', () => {
 });
 
 describe('verifyFinalVideoQuality', () => {
+  it('fails closed before frame analysis when the artifact is materially shorter than requested', async () => {
+    const runFfmpeg = vi.fn(async () => undefined);
+    const analyzeFrames = vi.fn(async () =>
+      JSON.stringify({ status: 'pass', failedChecks: [], reason: '不应执行' }),
+    );
+
+    const result = await verifyFinalVideoQuality(
+      {
+        videoPath: '/tmp/final.mp4',
+        workdir: '/tmp/quality',
+        durationMs: 4_567,
+        minimumDurationMs: 6_000,
+        userText: '一只手拿起杯子再放回桌面',
+        expectedSubtitleText: [],
+        requiredBrandTexts: [],
+        brandPolicy: '无品牌要求。',
+      },
+      {
+        runFfmpeg,
+        readFile: vi.fn(async () => Buffer.from('jpeg')),
+        analyzeFrames,
+        normalizeImage: async (buffer) => buffer,
+      },
+    );
+
+    expect(result).toEqual({
+      status: 'fail',
+      failedChecks: ['duration_too_short'],
+      reason: '成片时长 4.57 秒，短于要求的 6.00 秒',
+    });
+    expect(runFfmpeg).not.toHaveBeenCalled();
+    expect(analyzeFrames).not.toHaveBeenCalled();
+  });
+
   it('sends all sampled frames and strict anatomy/text requirements to one bounded analysis', async () => {
     const runFfmpeg = vi.fn(async () => undefined);
     const readFile = vi.fn(async (framePath: string) => Buffer.from(`jpeg:${framePath}`));
@@ -118,14 +154,14 @@ describe('verifyFinalVideoQuality', () => {
       },
     );
 
-    expect(runFfmpeg).toHaveBeenCalledTimes(5);
-    expect(readFile).toHaveBeenCalledTimes(5);
+    expect(runFfmpeg).toHaveBeenCalledTimes(9);
+    expect(readFile).toHaveBeenCalledTimes(9);
     expect(analyzeFrames).toHaveBeenCalledTimes(1);
     const analysisInput = (analyzeFrames.mock.calls[0] as unknown[])[0] as {
       frames: Array<{ data: string }>;
       prompt: string;
     };
-    expect(analysisInput.frames).toHaveLength(5);
+    expect(analysisInput.frames).toHaveLength(9);
     expect(analysisInput.prompt).toMatch(/多指|融合手|额外肢体|异常关节/);
     expect(analysisInput.prompt).toContain('静物任务出现人物或手');
     expect(analysisInput.prompt).toContain('HOLA DAY · AI');
@@ -135,6 +171,8 @@ describe('verifyFinalVideoQuality', () => {
     expect(analysisInput.prompt).toMatch(/允许范围之外.*文字或品牌/);
     expect(analysisInput.prompt).not.toMatch(/未要求时擅自添加文字或品牌/);
     expect(analysisInput.prompt).toMatch(/静态抽样帧.*连续运动|不能验证.*口型同步/);
+    expect(analysisInput.prompt).toMatch(/进入.*拿起.*放回|分阶段动作/);
+    expect(analysisInput.prompt).toMatch(/required_action_missing/);
     expect(result.status).toBe('fail');
   });
 
@@ -208,7 +246,7 @@ describe('verifyFinalVideoQuality', () => {
       },
     );
 
-    expect(runFfmpeg).toHaveBeenCalledTimes(10);
+    expect(runFfmpeg).toHaveBeenCalledTimes(14);
     const analysisInput = (analyzeFrames.mock.calls[0] as unknown[])[0] as {
       references: Array<{ label: string; data: string }>;
       frames: Array<{ data: string }>;
@@ -223,7 +261,7 @@ describe('verifyFinalVideoQuality', () => {
       '用户上传的参考动作视频 · 70%',
       '用户上传的参考动作视频 · 90%',
     ]);
-    expect(analysisInput.frames).toHaveLength(5);
+    expect(analysisInput.frames).toHaveLength(9);
     expect(analysisInput.prompt).toMatch(/先比较参考素材与待验收成片/);
   });
 

@@ -64,7 +64,8 @@ describe('renderImageClip', () => {
     );
     const args = calls[0]!.args;
     expect(args).toEqual(expect.arrayContaining(['-loop', '1', '-i', '/r2/img.png', '-i', '/r2/a.wav']));
-    expect(args).toEqual(expect.arrayContaining(['-t', '3.200', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-shortest']));
+    expect(args).toEqual(expect.arrayContaining(['-t', '3.200', '-af', 'apad', '-c:v', 'libx264', '-pix_fmt', 'yuv420p']));
+    expect(args).not.toContain('-shortest');
     expect(args.join(' ')).toContain('scale=1080:1920');
     expect(args[args.length - 1]).toBe('/r2/clip.mp4');
   });
@@ -111,7 +112,7 @@ describe('renderImageKenBurns', () => {
 });
 
 describe('renderVideoClip', () => {
-  it('loops+trims a bg video to audio length, muxing the narration audio', async () => {
+  it('loops+trims a bg video to the requested length and pads shorter narration with silence', async () => {
     const { fn, calls } = fakeSpawn({ code: 0 });
     await renderVideoClip(
       { videoPath: '/r2/veo.mp4', audioPath: '/r2/a.wav', outPath: '/r2/clip.mp4', durationMs: 3500 },
@@ -121,6 +122,7 @@ describe('renderVideoClip', () => {
     // -stream_loop before the bg video, -t to the audio length, map narration audio (1:a)
     expect(args).toEqual(expect.arrayContaining(['-stream_loop', '-1', '-i', '/r2/veo.mp4', '-t', '3.500']));
     expect(args).toEqual(expect.arrayContaining(['-map', '0:v:0', '-map', '1:a:0']));
+    expect(args).toEqual(expect.arrayContaining(['-af', 'apad']));
     expect(args.join(' ')).toContain('scale=1080:1920');
   });
 });

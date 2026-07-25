@@ -9,7 +9,7 @@
 
 export type VideoType = 'normal' | 'pet' | 'ip_person';
 
-export const VIDEO_QUALITY_GATE_VERSION = 'video-final-v1';
+export const VIDEO_QUALITY_GATE_VERSION = 'video-final-v2';
 
 export function videoQualityVerificationMetadata(
   verifiedAt = new Date(),
@@ -66,7 +66,7 @@ export const VIDEO_FAILURE_REASONS = {
   ipAssets: 'IP 素材或授权缺失，请重新完成「IP 人物」三步素材准备后重试。',
   invalidOptions: '所选画质与时长不兼容，请返回修改参数后重试。',
   quality:
-    '成片自动质检未通过（检测到异常肢体、主体/画面偏离或文字/品牌不准确），问题视频未交付，请重试。',
+    '成片自动质检未通过（检测到时长不足、动作未完成、异常肢体、画面偏离或文字/品牌不准确），问题视频未交付，请重试。',
   qualityUnavailable: '成片自动质检暂时未得出结论，问题视频未交付，请稍后重试。',
   generic: '视频生成失败，请稍后重试。',
 } as const;

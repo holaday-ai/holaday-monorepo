@@ -154,6 +154,7 @@ describe('runIpVideoCreation — B 架构单 clip 口播', () => {
       expect.objectContaining({
         videoPath: '/tmp/ipwd/ip-final.mp4',
         durationMs: 8000,
+        minimumDurationMs: 8000,
         userText: '大家好,这是我本人口播。今天聊三件事。',
         qualityContext: expect.stringMatching(/底版人物.*身份.*口型/),
         expectedSubtitleText: ['大家好,这是我本人口播。', '今天聊三件事。'],

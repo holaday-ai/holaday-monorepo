@@ -495,6 +495,7 @@ describe('runSimpleVideoCreation — final quality gate', () => {
       expect.objectContaining({
         videoPath: '/tmp/wd/final.mp4',
         durationMs: 5000,
+        minimumDurationMs: 16000,
         userText: '一只蓝色陶瓷杯放在白色桌面',
         requiredBrandTexts: ['HOLA DAY · AI'],
         brandPolicy: expect.stringMatching(/错误品牌/),
@@ -506,6 +507,53 @@ describe('runSimpleVideoCreation — final quality gate', () => {
       expect.objectContaining({
         filename: 'video.mp4',
         sourcePath: '/tmp/wd/final.mp4',
+      }),
+    );
+  });
+
+  it('preserves the selected per-segment duration through render and final verification', async () => {
+    const { svc, mocks } = makeServices();
+    const oneShot: VideoScript = {
+      title: '单镜头持杯',
+      segments: [
+        {
+          text: '右手拿起蓝色陶瓷杯再放回桌面。',
+          type: 'broll',
+          visual: '固定镜头，右手进入，拿起蓝色陶瓷杯，再放回桌面',
+        },
+      ],
+    };
+    const verifyFinalVideo = vi.fn(async () => ({
+      status: 'pass' as const,
+      failedChecks: [],
+      reason: '画面通过',
+    }));
+
+    await runSimpleVideoCreation(
+      { userText: '右手进入，拿起蓝色陶瓷杯，再放回桌面。', script: oneShot },
+      CFG,
+      {
+        videoSource: 'veo_fast',
+        veoResolution: '720p',
+        veoDurationSeconds: 6,
+      },
+      { ...svc, verifyFinalVideo },
+    );
+
+    expect(mocks.renderVideoClip).toHaveBeenCalledWith(
+      expect.objectContaining({ durationMs: 6_000 }),
+      expect.anything(),
+    );
+    expect(verifyFinalVideo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        videoPath: '/tmp/wd/seg0-vid.mp4',
+        minimumDurationMs: 6_000,
+      }),
+    );
+    expect(verifyFinalVideo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        videoPath: '/tmp/wd/final.mp4',
+        minimumDurationMs: 6_000,
       }),
     );
   });

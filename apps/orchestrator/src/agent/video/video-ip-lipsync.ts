@@ -296,6 +296,7 @@ export async function runIpVideoCreation(
     videoPath: outPath,
     workdir: svc.workdir,
     durationMs: finalDurationMs,
+    minimumDurationMs: audioMs,
     userText: text,
     qualityContext:
       '抽样帧必须保持底版人物的身份、脸部结构、身体、服装和背景稳定，不得出现面部漂移、异常手部、额外肢体或身体融化。静态抽样只能发现可见嘴部异常，不能验证音频与口型同步。',

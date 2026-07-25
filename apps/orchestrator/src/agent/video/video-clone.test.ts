@@ -130,6 +130,7 @@ describe('runCloneVideoCreation', () => {
       expect.objectContaining({
         videoPath: '/tmp/clone-video/clone-final.mp4',
         durationMs: 8200,
+        minimumDurationMs: 8200,
         userText: '保持参考动作，把主角替换为上传角色',
         qualityContext: expect.stringMatching(/主角.*身份.*粗粒度姿态.*静态抽样/),
         referenceImages: [

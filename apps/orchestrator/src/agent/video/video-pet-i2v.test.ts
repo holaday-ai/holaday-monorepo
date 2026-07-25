@@ -99,7 +99,7 @@ describe('runPetVideoCreation — 宠物 i2v 单图', () => {
     const res = await runPetVideoCreation(
       { imageUrl: 'https://r2/pet.jpg', motionPrompt: '小猫眨眨眼' },
       CFG,
-      {},
+      { durationSeconds: 8 },
       svc,
     );
     expect(mocks.downloadToFile).toHaveBeenCalledWith(
@@ -122,6 +122,7 @@ describe('runPetVideoCreation — 宠物 i2v 单图', () => {
       expect.objectContaining({
         videoPath: '/tmp/petwd/pet-final.mp4',
         durationMs: 8000,
+        minimumDurationMs: 8000,
         userText: '小猫眨眨眼',
         qualityContext: expect.stringMatching(/宠物.*身份.*四肢/),
         referenceImages: [

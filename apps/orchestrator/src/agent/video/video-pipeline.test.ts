@@ -71,6 +71,32 @@ describe('runVideoPipeline', () => {
     expect(out.segments[0]?.visualRef).toBeUndefined();
   });
 
+  it('keeps every generated segment at least as long as the selected model duration', async () => {
+    const renderBrollClip = vi.fn(async () => ({ clipRef: 'clip_1' }));
+    const lipSyncSegment = vi.fn(async ({ index }: { index: number }) => ({
+      clipRef: `clip_${index}`,
+    }));
+    const { deps } = makeDeps({ renderBrollClip, lipSyncSegment });
+
+    const out = await runVideoPipeline(
+      { script: SCRIPT, minimumSegmentDurationMs: 2_500 },
+      deps,
+    );
+
+    expect(out.timeline.segments.map((segment) => segment.durationMs)).toEqual([
+      2_500, 2_500, 3_000,
+    ]);
+    expect(out.timeline.segments.map((segment) => segment.startMs)).toEqual([0, 2_500, 5_000]);
+    expect(out.timeline.totalDurationMs).toBe(8_000);
+    expect(lipSyncSegment).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ index: 0, durationMs: 2_500 }),
+    );
+    expect(renderBrollClip).toHaveBeenCalledWith(
+      expect.objectContaining({ index: 1, durationMs: 2_500 }),
+    );
+  });
+
   it('retries only the failed句 (single transient failure recovers)', async () => {
     let lipFails = 1;
     const { deps, calls } = makeDeps({

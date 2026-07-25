@@ -57,7 +57,7 @@ describe('videoQualityVerificationMetadata', () => {
     ).toEqual({
       qualityVerification: {
         status: 'passed',
-        gateVersion: 'video-final-v1',
+        gateVersion: 'video-final-v2',
         verifiedAt: '2026-07-25T06:00:00.000Z',
       },
     });

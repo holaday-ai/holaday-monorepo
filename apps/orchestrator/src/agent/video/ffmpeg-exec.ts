@@ -111,7 +111,8 @@ export interface RenderImageClipInput {
 /**
  * Render a still B-roll image over its narration audio into a fixed-length
  * vertical mp4 clip (so a B-roll segment becomes a concat-able clip the same
- * length as its audio). libx264 + aac + yuv420p, scaled+padded to W×H.
+ * requested by the pipeline). Short narration is padded with silence so it
+ * cannot truncate the selected visual duration.
  */
 export async function renderImageClip(
   input: RenderImageClipInput,
@@ -135,6 +136,8 @@ export async function renderImageClip(
     durSec,
     '-vf',
     `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=${FPS}`,
+    '-af',
+    'apad',
     '-c:v',
     'libx264',
     '-pix_fmt',
@@ -143,7 +146,6 @@ export async function renderImageClip(
     'aac',
     '-b:a',
     '192k',
-    '-shortest',
     input.outPath,
   ];
   await runProcess(opts.ffmpegBin ?? 'ffmpeg', args, opts);
@@ -225,7 +227,7 @@ export interface RenderVideoClipInput {
 
 /**
  * 原方案 optional video visual — loop+trim a generated background video to the
- * narration audio length and mux the NARRATION audio (drop the source video's
+ * requested clip length and mux the NARRATION audio (drop the source video's
  * audio, e.g. Veo's bundled track) → a fixed-length vertical clip. `-stream_loop`
  * covers the case where the bg video is shorter than the narration.
  */
@@ -254,6 +256,8 @@ export async function renderVideoClip(
     '0:v:0',
     '-map',
     '1:a:0',
+    '-af',
+    'apad',
     '-c:v',
     'libx264',
     '-pix_fmt',
