@@ -111,6 +111,20 @@ describe('mapVideoFailureReason — safe, whitelisted, no leak', () => {
     );
   });
 
+  it('hard provider quota exhaustion → actionable model-switch copy without leaking billing detail', () => {
+    const out = mapVideoFailureReason({
+      name: 'VeoError',
+      kind: 'quota_exhausted',
+      status: 429,
+      detail:
+        'You exceeded your current quota. https://ai.dev/rate-limit account-plan-secret',
+    });
+
+    expect(out).toBe(VIDEO_FAILURE_REASONS.providerQuota);
+    expect(out).toMatch(/切换其他模型|稍后重试/);
+    expect(out).not.toMatch(/account|plan|billing|https?:/i);
+  });
+
   it('automated anatomy failure → explicit quality rejection without internal detail', () => {
     expect(
       mapVideoFailureReason({

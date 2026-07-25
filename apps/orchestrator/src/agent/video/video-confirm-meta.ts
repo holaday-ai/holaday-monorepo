@@ -65,6 +65,8 @@ export const VIDEO_FAILURE_REASONS = {
   tooLong: '文案过长，请缩短后重试。',
   ipAssets: 'IP 素材或授权缺失，请重新完成「IP 人物」三步素材准备后重试。',
   invalidOptions: '所选画质与时长不兼容，请返回修改参数后重试。',
+  providerQuota:
+    '当前视频模型暂时不可用，本次未生成成片。请切换其他模型，或稍后重试。',
   quality:
     '成片自动质检未通过（检测到时长不足、动作未完成、异常肢体、画面偏离或文字/品牌不准确），问题视频未交付，请重试。',
   qualityUnavailable: '成片自动质检暂时未得出结论，问题视频未交付，请稍后重试。',
@@ -118,6 +120,17 @@ export function mapVideoFailureReason(err: unknown): string {
     (name === 'VeoError' && kind === 'invalid_argument')
   ) {
     return VIDEO_FAILURE_REASONS.invalidOptions;
+  }
+  if (
+    name === 'VeoError' &&
+    (kind === 'quota_exhausted' ||
+      (e.status === 429 &&
+        typeof e.detail === 'string' &&
+        /(?:exceeded\s+your\s+current\s+quota|check\s+your\s+plan\s+and\s+billing)/i.test(
+          e.detail,
+        )))
+  ) {
+    return VIDEO_FAILURE_REASONS.providerQuota;
   }
   // SimpleVideoError (config/compose) + anything else → don't expose details.
   return VIDEO_FAILURE_REASONS.generic;

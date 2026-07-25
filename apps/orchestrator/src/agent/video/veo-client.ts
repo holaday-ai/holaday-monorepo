@@ -40,6 +40,7 @@ export type VeoErrorKind =
   | 'no_api_key'
   | 'invalid_argument'
   | 'permission_denied'
+  | 'quota_exhausted'
   | 'http'
   | 'op_failed'
   | 'timeout'
@@ -115,6 +116,15 @@ function base(p: GenerateVeoParams): string {
 
 function isTransientStatus(status: number): boolean {
   return status === 408 || status === 429 || (status >= 500 && status <= 599);
+}
+
+function isHardQuotaExhaustion(status: number, detail: string): boolean {
+  return (
+    status === 429 &&
+    /(?:exceeded\s+your\s+current\s+quota|check\s+your\s+plan\s+and\s+billing|current\s+quota\s+(?:has\s+been\s+)?exceeded)/i.test(
+      detail,
+    )
+  );
 }
 
 function durationMs(value: unknown): number | undefined {
@@ -208,6 +218,15 @@ async function fetchVeoWithBackoff(
         'permission_denied',
         403,
         detail.slice(0, 300),
+        false,
+      );
+    }
+    if (isHardQuotaExhaustion(res.status, responseBody)) {
+      throw new VeoError(
+        'Veo account quota exhausted',
+        'quota_exhausted',
+        res.status,
+        detail,
         false,
       );
     }

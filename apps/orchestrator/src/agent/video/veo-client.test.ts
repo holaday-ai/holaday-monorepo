@@ -181,6 +181,40 @@ describe('generateVeoVideo', () => {
     expect(calls).toHaveLength(3);
   });
 
+  it('does not retry a hard account quota exhaustion response', async () => {
+    const { fetchImpl, calls } = jsonQueue([
+      {
+        status: 429,
+        body: {
+          error: {
+            status: 'RESOURCE_EXHAUSTED',
+            message:
+              'You exceeded your current quota, please check your plan and billing details.',
+          },
+        },
+      },
+    ]);
+    const retryDelays: number[] = [];
+
+    await expect(
+      generateVeoVideo({
+        apiKey: KEY,
+        prompt: 'x',
+        fetchImpl,
+        maxRetries: 4,
+        sleepImpl: async (ms) => {
+          retryDelays.push(ms);
+        },
+      }),
+    ).rejects.toMatchObject({
+      kind: 'quota_exhausted',
+      status: 429,
+      retryable: false,
+    });
+    expect(calls).toHaveLength(1);
+    expect(retryDelays).toEqual([]);
+  });
+
   it('retries transient polling errors without submitting a second paid operation', async () => {
     const { fetchImpl, calls } = jsonQueue([
       { body: { name: 'op/poll-retry' } },
