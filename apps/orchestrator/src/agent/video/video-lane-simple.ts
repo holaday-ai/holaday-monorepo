@@ -52,6 +52,8 @@ const HUMAN_SCENE_SUFFIX =
 const OBJECT_ONLY_SCENE_SUFFIX =
   '；这是纯物体/环境镜头，不得出现人物、手、手臂或身体部位，' +
   '不要新增拿起、触碰或操作主体的动作，只保留用户指定的主体、环境和运动';
+const AVOID_UNREQUESTED_HAND_SUFFIX =
+  '；未明确要求人物或手部时，优先通过主体运动、镜头运动或环境变化表达，不要主动加入手或手臂';
 const BASE_NEGATIVE = [
   // 中文 — 只压错误文字，不禁止用户明确要求的文字载体或品牌。
   '错别字, 错误品牌, 错误 Logo, 错乱的字, 乱码假字, 不可读文字',
@@ -67,10 +69,15 @@ type HumanPresencePolicy = 'explicit-human' | 'object-only' | 'conditional';
 
 const HUMAN_INTENT_RE =
   /(?:人物|人像|真人|人类|男人|女人|男性|女性|男士|女士|男孩|女孩|儿童|孩子|老人|模特|演员|主持人|主播|手部|双手|左手|右手|手臂|拿起|端起|握住|触碰|操作|person|people|human|man|woman|boy|girl|child|model|actor|presenter|host|hand|hands|arm|arms|hold|holding|touch|pick(?:ing)? up)/iu;
+const HAND_INTENT_RE =
+  /(?:手部|双手|左手|右手|手臂|拿起|端起|握住|触碰|操作|hand|hands|arm|arms|hold|holding|touch|grab|pick(?:ing)? up)/iu;
+const NO_HUMAN_INTENT_RE =
+  /(?:无人物|无人出镜|不要人物|不出现人物|不出现人手|不要人手|不要手|无手部|no people|without people|no hands|without hands)/iu;
 const OBJECT_ONLY_INTENT_RE =
   /(?:静物|物体|产品|商品|杯|瓶|桌面|器皿|家具|食物|饮料|风景|景观|建筑|车辆|动物|宠物|固定镜头|无人物|无人|不出现人物|不出现人手|object|product|still life|landscape|building|vehicle|animal|pet|locked camera|no people|without people)/iu;
 
 function humanPresencePolicy(userText: string): HumanPresencePolicy {
+  if (NO_HUMAN_INTENT_RE.test(userText)) return 'object-only';
   if (HUMAN_INTENT_RE.test(userText)) return 'explicit-human';
   if (OBJECT_ONLY_INTENT_RE.test(userText)) return 'object-only';
   return 'conditional';
@@ -79,18 +86,56 @@ function humanPresencePolicy(userText: string): HumanPresencePolicy {
 function scenePromptPolicy(userText: string): {
   suffix: string;
   negativePrompt: string;
+  presencePolicy: HumanPresencePolicy;
+  handRequired: boolean;
 } {
   const policy = humanPresencePolicy(userText);
   if (policy === 'object-only') {
     return {
       suffix: COMMON_SCENE_SUFFIX + OBJECT_ONLY_SCENE_SUFFIX,
       negativePrompt: OBJECT_ONLY_NEGATIVE,
+      presencePolicy: policy,
+      handRequired: false,
+    };
+  }
+  if (policy === 'conditional') {
+    return {
+      suffix: COMMON_SCENE_SUFFIX + AVOID_UNREQUESTED_HAND_SUFFIX + HUMAN_SCENE_SUFFIX,
+      negativePrompt: BASE_NEGATIVE,
+      presencePolicy: policy,
+      handRequired: false,
     };
   }
   return {
     suffix: COMMON_SCENE_SUFFIX + HUMAN_SCENE_SUFFIX,
     negativePrompt: BASE_NEGATIVE,
+    presencePolicy: policy,
+    handRequired: HAND_INTENT_RE.test(userText),
   };
+}
+
+function motionCompletionInstruction(durationSeconds: number): string {
+  return `；若需求包含连续动作，必须在 ${durationSeconds} 秒内按顺序完整执行所有动作，结尾应清楚呈现完成状态，不得在动作途中结束或省略收尾；镜头语言、节奏和构图可自由发挥`;
+}
+
+function qualityRepairInstruction(
+  quality: VideoQualityResult,
+  durationSeconds: number,
+  scenePolicy: ReturnType<typeof scenePromptPolicy>,
+): string {
+  const diagnostic = `${quality.failedChecks.join(' ')} ${quality.reason}`;
+  const hasAnatomyIssue = /(?:hand|finger|arm|limb|anatom|手|指|臂|肢)/iu.test(diagnostic);
+  let anatomyRepair = '';
+  if (hasAnatomyIssue && scenePolicy.handRequired) {
+    anatomyRepair =
+      '；手部修复要求：只保留用户要求的手和手臂，手掌与手臂连续自然，抓握处无遮挡；每只可见手都必须恰好五根彼此独立、清晰可辨的手指，不得融合、缺失、增生或扭曲';
+  } else if (hasAnatomyIssue && scenePolicy.presencePolicy === 'object-only') {
+    anatomyRepair = '；上一版出现了非必要手部，必须移除所有手和手臂，改用主体或镜头运动完成表达';
+  } else if (hasAnatomyIssue) {
+    anatomyRepair = '；上一版出现了非必要手部，改为不露手构图，不要让手或手臂进入画面';
+  }
+
+  return `；质量修复重试：上一版未通过检查（${quality.reason}）。必须修正该问题，同时保持主体、动作、颜色、文字、构图和镜头要求不变${anatomyRepair}；动作修复要求：必须在 ${durationSeconds} 秒内按用户原始顺序完整执行全部动作，最后至少 1 秒展示动作完成后的稳定终态`;
 }
 
 export type VisualMode = 'image' | 'video';
@@ -352,9 +397,12 @@ export function createSimplePipelineDeps(
         return { visualRef: localPath };
       }
       const localPath = path.join(svc.workdir, `seg${index}-vid.mp4`);
+      const durationSeconds = opts.veoDurationSeconds ?? 8;
+      const completionInstruction = motionCompletionInstruction(durationSeconds);
       let repairInstruction = '';
       for (let attempt = 0; attempt < 2; attempt += 1) {
-        const candidatePrompt = visual + repairInstruction + scenePolicy.suffix;
+        const candidatePrompt =
+          visual + repairInstruction + scenePolicy.suffix + completionInstruction;
         let url: string;
         let headers: Record<string, string> | undefined;
         if (isVeoSource(videoSource)) {
@@ -368,7 +416,7 @@ export function createSimplePipelineDeps(
             prompt: candidatePrompt,
             negativePrompt: scenePolicy.negativePrompt,
             aspectRatio: aspect.veoAspect, // 1:1 时用 9:16 出, compose pad 到方形
-            durationSeconds: opts.veoDurationSeconds ?? 8,
+            durationSeconds,
             resolution: opts.veoResolution ?? '1080p',
           });
           url = v.videoUri;
@@ -380,9 +428,7 @@ export function createSimplePipelineDeps(
             apiKey: cfg.dashscopeApiKey,
             baseUrl: cfg.dashscopeBaseUrl,
             ...ws,
-            model: isHH
-              ? (cfg.happyhorseModel ?? DEFAULT_HAPPYHORSE_MODEL)
-              : cfg.wanxiangT2vModel,
+            model: isHH ? (cfg.happyhorseModel ?? DEFAULT_HAPPYHORSE_MODEL) : cfg.wanxiangT2vModel,
             prompt: candidatePrompt,
             negativePrompt: scenePolicy.negativePrompt,
             // HappyHorse 1080P 按画幅; wanxiang 兜底保持 720 竖屏(第一期不做多尺寸).
@@ -472,6 +518,14 @@ export function createSimplePipelineDeps(
           );
         }
         if (attempt === 1) {
+          svc.logger.warn(
+            {
+              segmentIndex: index,
+              failedChecks: candidateQuality.failedChecks,
+              reason: candidateQuality.reason,
+            },
+            'video: replacement segment quality rejected',
+          );
           throw new SimpleVideoError(
             'generated segment failed automated quality verification',
             'quality',
@@ -485,9 +539,11 @@ export function createSimplePipelineDeps(
           },
           'video: segment quality rejected — generating one replacement candidate',
         );
-        repairInstruction =
-          `；质量修复重试：上一版未通过检查（${candidateQuality.reason}）。` +
-          '必须修正该问题，同时保持主体、动作、颜色、文字、构图和镜头要求不变';
+        repairInstruction = qualityRepairInstruction(
+          candidateQuality,
+          durationSeconds,
+          scenePolicy,
+        );
       }
       throw new SimpleVideoError('video segment quality retry exhausted', 'quality');
     },

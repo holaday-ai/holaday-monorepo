@@ -116,6 +116,7 @@ describe('runSimpleVideoCreation — video (default = veo_fast)', () => {
     expect(veoArg.prompt).toContain('画面整洁');
     expect(veoArg.prompt).toMatch(/五指完整|多余肢体|双臂可追溯/);
     expect(veoArg.prompt).not.toContain('单人出镜');
+    expect(veoArg.prompt).toMatch(/未明确要求人物或手部时.*优先.*不要主动加入手或手臂/);
     // Text and brands are allowed when requested, but must be exact.
     expect(veoArg.prompt).toMatch(/未要求时不要凭空添加|逐字准确/);
     expect(veoArg.prompt).not.toMatch(/不要把.*含文字物体.*主体/);
@@ -162,6 +163,38 @@ describe('runSimpleVideoCreation — video (default = veo_fast)', () => {
     expect(veoArg.prompt).toMatch(/不要新增拿起、触碰或操作主体的动作/);
     expect(veoArg.prompt).not.toContain('单人出镜');
     expect(veoArg.negativePrompt).toMatch(/person|hand|body parts/);
+  });
+
+  it('honors an explicit no-person or no-hand request even when the prompt contains human words', async () => {
+    const { svc, mocks } = makeServices();
+    const objectScript: VideoScript = {
+      title: '无人产品镜头',
+      segments: [
+        {
+          text: '杯子自动转向镜头。',
+          type: 'broll',
+          visual: '蓝色杯子自动转向镜头，桌面保持整洁',
+        },
+      ],
+    };
+
+    await runSimpleVideoCreation(
+      {
+        userText: '不要人物或手，蓝色杯子自动转向镜头。',
+        script: objectScript,
+      },
+      CFG,
+      {},
+      svc,
+    );
+
+    const veoArg = (mocks.generateVeoVideo.mock.calls[0] as unknown[])[0] as {
+      prompt: string;
+      negativePrompt?: string;
+    };
+    expect(veoArg.prompt).toMatch(/不得出现人物、手、手臂或身体部位/);
+    expect(veoArg.negativePrompt).toMatch(/person|hand|body parts/);
+    expect(veoArg.prompt).not.toContain('只保留用户要求的手和手臂');
   });
 
   it('allows a requested brand or packaging label while requiring exact rendering', async () => {
@@ -223,6 +256,9 @@ describe('runSimpleVideoCreation — video (default = veo_fast)', () => {
     expect(veoArg.prompt).toMatch(/若人物出镜/);
     expect(veoArg.prompt).toMatch(/双臂可追溯到肩膀|五指完整|解剖正确/);
     expect(veoArg.prompt).toMatch(/每只可见的手.*五根.*独立.*清晰/);
+    expect(veoArg.prompt).toMatch(/按顺序完整执行所有动作/);
+    expect(veoArg.prompt).toMatch(/结尾应清楚呈现完成状态/);
+    expect(veoArg.prompt).not.toMatch(/未明确要求人物或手部时.*不要主动加入手或手臂/);
     expect(veoArg.negativePrompt).toMatch(/少指|手指粘连|missing fingers|fused fingers/);
     expect(veoArg.prompt).not.toContain('不得出现人物、手、手臂或身体部位');
   });
@@ -623,11 +659,109 @@ describe('runSimpleVideoCreation — final quality gate', () => {
     };
     expect(retryRequest.prompt).toContain('质量修复重试');
     expect(retryRequest.prompt).toContain('手指边缘融合');
+    expect(retryRequest.prompt).toContain('只保留用户要求的手和手臂');
+    expect(retryRequest.prompt).toContain('按用户原始顺序完整执行全部动作');
+    expect(retryRequest.prompt).toContain('最后至少 1 秒展示动作完成后的稳定终态');
     expect(
       mocks.storeOutputFile.mock.calls.filter(
         (call) => ((call as unknown[])[0] as { filename?: string }).filename === 'video.mp4',
       ),
     ).toHaveLength(1);
+  });
+
+  it('removes an unrequested hand from a repair candidate instead of constraining the composition around it', async () => {
+    const { svc, mocks } = makeServices();
+    const oneShot: VideoScript = {
+      title: '咖啡产品镜头',
+      segments: [
+        {
+          text: '蓝色咖啡杯在晨光中旋转。',
+          type: 'broll',
+          visual: '蓝色咖啡杯在晨光中缓慢旋转，镜头平稳环绕',
+        },
+      ],
+    };
+    const verifyFinalVideo = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: 'fail' as const,
+        failedChecks: ['hand_anatomy_uncertain'],
+        reason: '画面边缘出现了不完整的手',
+      })
+      .mockResolvedValue({
+        status: 'pass' as const,
+        failedChecks: [],
+        reason: '画面通过',
+      });
+
+    await runSimpleVideoCreation(
+      { userText: '做一个蓝色咖啡杯的晨光产品镜头。', script: oneShot },
+      CFG,
+      { videoSource: 'veo_fast', aspectRatio: '16:9' },
+      { ...svc, verifyFinalVideo },
+    );
+
+    const retryRequest = (mocks.generateVeoVideo.mock.calls[1] as unknown[])[0] as {
+      prompt: string;
+    };
+    expect(retryRequest.prompt).toContain('上一版出现了非必要手部');
+    expect(retryRequest.prompt).toContain('移除所有手和手臂');
+    expect(retryRequest.prompt).not.toContain('只保留用户要求的手和手臂');
+  });
+
+  it('records the exact reason when the repair candidate is also rejected', async () => {
+    const { svc, mocks } = makeServices();
+    logger.warn.mockClear();
+    const oneShot: VideoScript = {
+      title: '单镜头持杯',
+      segments: [
+        {
+          text: '右手拿起蓝色陶瓷杯再放回桌面。',
+          type: 'broll',
+          visual: '固定镜头，右手从画面右侧进入，拿起蓝色陶瓷杯再放回白色桌面',
+        },
+      ],
+    };
+    const verifyFinalVideo = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: 'fail' as const,
+        failedChecks: ['hand_anatomy_uncertain', 'required_action_missing'],
+        reason: '手部不清晰且放回动作缺失',
+      })
+      .mockResolvedValueOnce({
+        status: 'fail' as const,
+        failedChecks: ['required_action_missing'],
+        reason: '第二版仍未展示放回后的稳定终态',
+      });
+
+    await expect(
+      runSimpleVideoCreation(
+        { userText: '一只手拿起杯子，停一下，再放回并离开。', script: oneShot },
+        CFG,
+        {
+          videoSource: 'veo_fast',
+          aspectRatio: '16:9',
+          veoDurationSeconds: 6,
+          veoResolution: '720p',
+        },
+        { ...svc, verifyFinalVideo },
+      ),
+    ).rejects.toMatchObject({
+      name: 'SimpleVideoError',
+      kind: 'quality',
+      retryable: false,
+    });
+
+    expect(mocks.generateVeoVideo).toHaveBeenCalledTimes(2);
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        segmentIndex: 0,
+        failedChecks: ['required_action_missing'],
+        reason: '第二版仍未展示放回后的稳定终态',
+      }),
+      'video: replacement segment quality rejected',
+    );
   });
 
   it('retries a generated URL download without buying another candidate', async () => {
