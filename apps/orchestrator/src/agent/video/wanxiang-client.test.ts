@@ -202,6 +202,27 @@ describe('generateBrollVideo', () => {
     const init = calls[0]?.init as RequestInit;
     expect(JSON.parse(init.body as string)).toMatchObject({ input: { negative_prompt: '乱码, gibberish' } });
   });
+
+  it('passes the selected HappyHorse duration instead of using the provider default', async () => {
+    const { fetchImpl, calls } = jsonQueue([
+      { body: { output: { task_id: 'v', task_status: 'PENDING' } } },
+      { body: { output: { task_id: 'v', task_status: 'SUCCEEDED', video_url: 'https://oss/v.mp4' } } },
+    ]);
+    await generateBrollVideo({
+      apiKey: KEY,
+      model: 'happyhorse-1.1-t2v',
+      prompt: 'clip',
+      size: '1920*1080',
+      durationSeconds: 6,
+      fetchImpl,
+      ...TINY,
+    });
+    const init = calls[0]?.init as RequestInit;
+    expect(JSON.parse(init.body as string)).toMatchObject({
+      model: 'happyhorse-1.1-t2v',
+      parameters: { size: '1920*1080', duration: 6 },
+    });
+  });
 });
 
 describe('WanxiangError', () => {

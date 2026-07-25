@@ -165,7 +165,7 @@ const VEO_MODEL_DEFAULT: Record<'veo_fast' | 'veo_lite' | 'veo_standard', string
   veo_lite: 'veo-3.1-lite-generate-preview',
   veo_standard: 'veo-3.1-generate-preview',
 };
-const DEFAULT_HAPPYHORSE_MODEL = 'happyhorse-1.0-t2v';
+const DEFAULT_HAPPYHORSE_MODEL = 'happyhorse-1.1-t2v';
 const isVeoSource = (s: VideoSource): boolean =>
   s === 'veo_fast' || s === 'veo_lite' || s === 'veo_standard';
 
@@ -255,7 +255,7 @@ export interface SimpleVideoConfig {
   readonly wanxiangT2vModel: string; // wan2.1-t2v-turbo (兜底)
   /** t2v 竖屏 size `W*H`. Default '720*1280' (fills 1080×1920, no letterbox). */
   readonly wanxiangVideoSize?: string;
-  /** HappyHorse t2v model (阿里 DashScope, 同 key 同端点). Default 'happyhorse-1.0-t2v'. */
+  /** HappyHorse t2v model (阿里 DashScope, 同 key 同端点). Default 'happyhorse-1.1-t2v'. */
   readonly happyhorseModel?: string;
   /** i2v 图生视频 model ids (Phase 2 第二期 宠物视频, 同 DashScope video-synthesis 端点). */
   readonly wanI2vModel?: string; // 默认 wan2.2-i2v-flash
@@ -459,6 +459,7 @@ export function createSimplePipelineDeps(
             negativePrompt: scenePolicy.negativePrompt,
             // HappyHorse 1080P 按画幅; wanxiang 兜底保持 720 竖屏(第一期不做多尺寸).
             size: isHH ? aspect.hhSize : (cfg.wanxiangVideoSize ?? '720*1280'),
+            ...(isHH ? { durationSeconds } : {}),
           });
           if (!v.videoUrl)
             throw new SimpleVideoError(`broll video seg ${index} produced no url`, 'compose');

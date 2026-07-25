@@ -370,12 +370,12 @@ describe('runSimpleVideoCreation — wanxiang (fallback, explicit)', () => {
 });
 
 describe('runSimpleVideoCreation — happyhorse (Phase 2)', () => {
-  it('videoSource=happyhorse → generateBrollVideo with happyhorse-1.0-t2v + 1080P size', async () => {
+  it('videoSource=happyhorse → generateBrollVideo with HappyHorse 1.1 + selected duration', async () => {
     const { svc, mocks } = makeServices();
     await runSimpleVideoCreation(
       { userText: 'x' },
       CFG,
-      { visualMode: 'video', videoSource: 'happyhorse' },
+      { visualMode: 'video', videoSource: 'happyhorse', veoDurationSeconds: 6 },
       svc,
     );
     expect(mocks.generateBrollVideo).toHaveBeenCalledTimes(2);
@@ -383,9 +383,11 @@ describe('runSimpleVideoCreation — happyhorse (Phase 2)', () => {
     const arg = (mocks.generateBrollVideo.mock.calls[0] as unknown[])[0] as {
       model: string;
       size?: string;
+      durationSeconds?: number;
     };
-    expect(arg.model).toBe('happyhorse-1.0-t2v'); // 同端点改 model
+    expect(arg.model).toBe('happyhorse-1.1-t2v');
     expect(arg.size).toBe('1080*1920'); // 默认 9:16 1080P
+    expect(arg.durationSeconds).toBe(6);
   });
 });
 

@@ -345,7 +345,7 @@ function buildVideoCfg(): SimpleVideoConfig {
     presetVoice: 'Cherry',
     geminiImageModel: appEnv.GEMINI_IMAGE_MODEL,
     wanxiangT2vModel: appEnv.WANXIANG_T2V_MODEL,
-    happyhorseModel: appEnv.HAPPYHORSE_T2V_MODEL ?? 'happyhorse-1.0-t2v',
+    happyhorseModel: appEnv.HAPPYHORSE_T2V_MODEL ?? 'happyhorse-1.1-t2v',
     wanI2vModel: appEnv.WANXIANG_I2V_MODEL ?? 'wan2.2-i2v-flash',
     happyhorseI2vModel: appEnv.HAPPYHORSE_I2V_MODEL ?? 'happyhorse-1.0-i2v',
     watermarkFontFile: '/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc',
