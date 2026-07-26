@@ -285,18 +285,14 @@ export async function generateVeoVideo(p: GenerateVeoParams): Promise<VeoResult>
   const instance: Record<string, unknown> = { prompt: p.prompt };
   if (p.startImage) {
     instance.image = {
-      inlineData: {
-        mimeType: p.startImage.mimeType,
-        data: p.startImage.data,
-      },
+      bytesBase64Encoded: p.startImage.data,
+      mimeType: p.startImage.mimeType,
     };
   }
   if (p.lastFrameImage) {
     instance.lastFrame = {
-      inlineData: {
-        mimeType: p.lastFrameImage.mimeType,
-        data: p.lastFrameImage.data,
-      },
+      bytesBase64Encoded: p.lastFrameImage.data,
+      mimeType: p.lastFrameImage.mimeType,
     };
   }
   const subRes = await fetchVeoWithBackoff(

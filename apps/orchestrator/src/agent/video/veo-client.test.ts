@@ -82,7 +82,7 @@ describe('generateVeoVideo', () => {
     expect(submit.parameters.negativePrompt).toBe('person, hands, arms, body parts');
   });
 
-  it('sends optional start and last frames as inline image constraints', async () => {
+  it('sends optional start and last frames using the Gemini video image wire format', async () => {
     const { fetchImpl, calls } = jsonQueue([
       { body: { name: 'op/frames' } },
       {
@@ -113,18 +113,16 @@ describe('generateVeoVideo', () => {
     expect(submit.instances[0]).toMatchObject({
       prompt: 'a hand briefly lifts a cup and returns it',
       image: {
-        inlineData: {
-          mimeType: 'image/png',
-          data: 'START_B64',
-        },
+        bytesBase64Encoded: 'START_B64',
+        mimeType: 'image/png',
       },
       lastFrame: {
-        inlineData: {
-          mimeType: 'image/jpeg',
-          data: 'END_B64',
-        },
+        bytesBase64Encoded: 'END_B64',
+        mimeType: 'image/jpeg',
       },
     });
+    expect(submit.instances[0].image.inlineData).toBeUndefined();
+    expect(submit.instances[0].lastFrame.inlineData).toBeUndefined();
   });
 
   it('maps 403 → permission_denied (key not allowlisted)', async () => {
