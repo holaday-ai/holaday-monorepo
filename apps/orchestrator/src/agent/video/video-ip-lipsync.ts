@@ -195,6 +195,9 @@ export async function runIpVideoCreation(
     maxBytes: 200 * 1024 * 1024,
   });
   const baseVideoDurationMs = await fns.ffprobeDurationMs(baseVideoPath, ffprobeOpts);
+  if (baseVideoDurationMs < 2_000 || baseVideoDurationMs > 60_000) {
+    throw new IpVideoError('本人出镜底版需为 2 到 60 秒的视频。', 'config');
+  }
 
   // ① 全文案 → 克隆音(用户 voice_id)。
   const synth = await fns.synthesizeSpeech({

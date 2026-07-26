@@ -98,6 +98,59 @@ export async function ffprobeDurationMs(filePath: string, opts: FfmpegExecOpts =
   return Math.round(sec * 1000);
 }
 
+export interface VideoMetadata {
+  readonly width: number;
+  readonly height: number;
+  readonly durationMs: number;
+}
+
+/** Probe the first video stream plus container duration in one ffprobe call. */
+export async function ffprobeVideoMetadata(
+  filePath: string,
+  opts: FfmpegExecOpts = {},
+): Promise<VideoMetadata> {
+  const args = [
+    '-v',
+    'error',
+    '-select_streams',
+    'v:0',
+    '-show_entries',
+    'stream=width,height:format=duration',
+    '-of',
+    'json',
+    filePath,
+  ];
+  const { stdout } = await runProcess(opts.ffprobeBin ?? 'ffprobe', args, opts);
+  let payload: {
+    streams?: Array<{ width?: number; height?: number }>;
+    format?: { duration?: string | number };
+  };
+  try {
+    payload = JSON.parse(stdout) as typeof payload;
+  } catch {
+    throw new Error(`ffprobe: bad video metadata for ${filePath}`);
+  }
+  const stream = payload.streams?.[0];
+  const width = Number(stream?.width);
+  const height = Number(stream?.height);
+  const durationSeconds = Number(payload.format?.duration);
+  if (
+    !Number.isFinite(width) ||
+    width <= 0 ||
+    !Number.isFinite(height) ||
+    height <= 0 ||
+    !Number.isFinite(durationSeconds) ||
+    durationSeconds <= 0
+  ) {
+    throw new Error(`ffprobe: bad video metadata for ${filePath}`);
+  }
+  return {
+    width: Math.round(width),
+    height: Math.round(height),
+    durationMs: Math.round(durationSeconds * 1000),
+  };
+}
+
 export interface RenderImageClipInput {
   imagePath: string;
   audioPath: string;

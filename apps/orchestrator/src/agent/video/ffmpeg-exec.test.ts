@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import { describe, expect, it } from 'vitest';
 import {
   ffprobeDurationMs,
+  ffprobeVideoMetadata,
   renderImageClip,
   renderImageKenBurns,
   renderVideoClip,
@@ -52,6 +53,42 @@ describe('ffprobeDurationMs', () => {
   it('rejects on a non-zero exit', async () => {
     const { fn } = fakeSpawn({ code: 1, stderr: 'no such file' });
     await expect(ffprobeDurationMs('/missing', { spawnFn: fn })).rejects.toThrow(/exited 1/);
+  });
+});
+
+describe('ffprobeVideoMetadata', () => {
+  it('parses the first video stream dimensions and media duration', async () => {
+    const { fn, calls } = fakeSpawn({
+      stdout: JSON.stringify({
+        streams: [{ width: 1080, height: 1920 }],
+        format: { duration: '12.345' },
+      }),
+    });
+
+    await expect(ffprobeVideoMetadata('/r2/reference.mp4', { spawnFn: fn })).resolves.toEqual({
+      width: 1080,
+      height: 1920,
+      durationMs: 12_345,
+    });
+    expect(calls[0]?.args).toEqual(
+      expect.arrayContaining([
+        '-select_streams',
+        'v:0',
+        '-show_entries',
+        'stream=width,height:format=duration',
+        '/r2/reference.mp4',
+      ]),
+    );
+  });
+
+  it('rejects missing or malformed video dimensions', async () => {
+    const { fn } = fakeSpawn({
+      stdout: JSON.stringify({ streams: [], format: { duration: '8' } }),
+    });
+
+    await expect(ffprobeVideoMetadata('/r2/not-video.bin', { spawnFn: fn })).rejects.toThrow(
+      /bad video metadata/,
+    );
   });
 });
 

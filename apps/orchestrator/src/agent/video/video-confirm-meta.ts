@@ -67,6 +67,8 @@ export const VIDEO_FAILURE_REASONS = {
   invalidOptions: '所选画质与时长不兼容，请返回修改参数后重试。',
   providerQuota:
     '当前视频模型暂时不可用，本次未生成成片。请切换其他模型，或稍后重试。',
+  cloneProviderUnavailable:
+    '当前复刻视频模型暂时不可用，本次未开始生成成片。请稍后重试。',
   quality:
     '成片自动质检未通过（检测到时长不足、动作未完成、异常肢体、画面偏离或文字/品牌不准确），问题视频未交付，请重试。',
   qualityUnavailable: '成片自动质检暂时未得出结论，问题视频未交付，请稍后重试。',
@@ -82,7 +84,14 @@ export const VIDEO_FAILURE_REASONS = {
 export function mapVideoFailureReason(err: unknown): string {
   const e =
     err && typeof err === 'object'
-      ? (err as { name?: unknown; kind?: unknown; status?: unknown; detail?: unknown })
+      ? (err as {
+          name?: unknown;
+          kind?: unknown;
+          status?: unknown;
+          code?: unknown;
+          detail?: unknown;
+          message?: unknown;
+        })
       : null;
   if (!e) return VIDEO_FAILURE_REASONS.generic;
   const name = typeof e.name === 'string' ? e.name : '';
@@ -141,6 +150,18 @@ export function mapVideoFailureReason(err: unknown): string {
         )))
   ) {
     return VIDEO_FAILURE_REASONS.providerQuota;
+  }
+  if (
+    name === 'WanAnimateMixError' &&
+    (e.status === 429 ||
+      (typeof e.code === 'string' &&
+        /^(?:Arrearage|QuotaExceeded|InsufficientBalance)$/i.test(e.code)) ||
+      (typeof e.message === 'string' &&
+        /(?:overdue[\s-]*payment|account\s+is\s+not\s+in\s+good\s+standing|insufficient\s+(?:account\s+)?balance|quota\s+(?:is\s+)?(?:exhausted|exceeded))/i.test(
+          e.message,
+        )))
+  ) {
+    return VIDEO_FAILURE_REASONS.cloneProviderUnavailable;
   }
   // SimpleVideoError (config/compose) + anything else → don't expose details.
   return VIDEO_FAILURE_REASONS.generic;

@@ -1,6 +1,12 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { ffprobeDurationMs, runFfmpeg } from './ffmpeg-exec.js';
+import sharp from 'sharp';
+import {
+  ffprobeDurationMs,
+  ffprobeVideoMetadata,
+  runFfmpeg,
+  type VideoMetadata,
+} from './ffmpeg-exec.js';
 import { downloadToBuffer, downloadToFile } from './video-http.js';
 import { type SimpleVideoConfig, SimpleVideoError } from './video-lane-simple.js';
 import type { PipelineLogger } from './video-pipeline.js';
@@ -44,6 +50,8 @@ export interface CloneVideoFns {
   downloadToFile: typeof downloadToFile;
   runFfmpeg: typeof runFfmpeg;
   ffprobeDurationMs: typeof ffprobeDurationMs;
+  ffprobeVideoMetadata: typeof ffprobeVideoMetadata;
+  readImageMetadata: (buffer: Buffer) => Promise<{ width: number; height: number }>;
   readFile: (filePath: string) => Promise<Buffer>;
 }
 
@@ -60,8 +68,50 @@ function realFns(): CloneVideoFns {
     downloadToFile,
     runFfmpeg,
     ffprobeDurationMs,
+    ffprobeVideoMetadata,
+    readImageMetadata: async (buffer) => {
+      const metadata = await sharp(buffer, { failOn: 'warning' }).rotate().metadata();
+      const width = metadata.autoOrient.width;
+      const height = metadata.autoOrient.height;
+      if (!width || !height) throw new Error('无法读取主角照片尺寸。');
+      return { width, height };
+    },
     readFile: (filePath) => fs.readFile(filePath),
   };
+}
+
+function dimensionRatio(width: number, height: number): number {
+  return width / height;
+}
+
+function validateCloneImageDimensions(width: number, height: number): void {
+  const ratio = dimensionRatio(width, height);
+  if (width < 200 || height < 200 || width > 4096 || height > 4096 || ratio < 1 / 3 || ratio > 3) {
+    throw new SimpleVideoError(
+      '主角照片需为 200-4096 像素，宽高比需在 1:3 到 3:1 之间。',
+      'invalid_options',
+    );
+  }
+}
+
+function validateCloneReferenceMetadata(metadata: VideoMetadata): void {
+  const ratio = dimensionRatio(metadata.width, metadata.height);
+  if (
+    metadata.width < 200 ||
+    metadata.height < 200 ||
+    metadata.width > 2048 ||
+    metadata.height > 2048 ||
+    ratio < 1 / 3 ||
+    ratio > 3
+  ) {
+    throw new SimpleVideoError(
+      '参考视频需为 200-2048 像素，宽高比需在 1:3 到 3:1 之间。',
+      'invalid_options',
+    );
+  }
+  if (metadata.durationMs < 2_000 || metadata.durationMs > 30_000) {
+    throw new SimpleVideoError('参考视频时长必须在 2 到 30 秒之间。', 'invalid_options');
+  }
 }
 
 /**
@@ -96,13 +146,22 @@ export async function runCloneVideoCreation(
       maxBytes: 200 * 1024 * 1024,
     }),
   ]);
+  const [subjectMetadata, referenceMetadata] = await Promise.all([
+    fns.readImageMetadata(subjectSource.buffer),
+    fns.ffprobeVideoMetadata(
+      referenceVideoPath,
+      cfg.ffprobeBin ? { ffprobeBin: cfg.ffprobeBin } : {},
+    ),
+  ]);
+  validateCloneImageDimensions(subjectMetadata.width, subjectMetadata.height);
+  validateCloneReferenceMetadata(referenceMetadata);
   const subjectReference = await prepareVideoQualityReferenceImage({
     buffer: subjectSource.buffer,
     contentType: subjectSource.contentType,
     label: '上传的主角照片',
   });
   const ffprobeOpts = cfg.ffprobeBin ? { ffprobeBin: cfg.ffprobeBin } : {};
-  const referenceDurationMs = await fns.ffprobeDurationMs(referenceVideoPath, ffprobeOpts);
+  const referenceDurationMs = referenceMetadata.durationMs;
   const generated = await fns.generateWanAnimateMix({
     apiKey: cfg.dashscopeApiKey,
     baseUrl: cfg.dashscopeBaseUrl,

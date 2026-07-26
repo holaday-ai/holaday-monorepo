@@ -84,10 +84,17 @@ describe('video creative style state', () => {
   });
 
   it('keeps clone-video notes honest about what changes the provider input', () => {
-    expect(buildCloneVideoIntent('保留原视频舞步，主角换成我的狗').split('\n')).toEqual([
-      '复刻视频：使用上传照片替换参考视频中的主角，并保留参考视频的动作、镜头、节奏和音频。',
-      '任务备注（仅用于记录，不改变本次模型输入）：保留原视频舞步，主角换成我的狗',
+    expect(buildCloneVideoIntent('保留原视频舞步，主角换成我的角色').split('\n')).toEqual([
+      '复刻视频：使用单个人物或角色照片替换参考视频中的主角，并保留参考视频的动作、镜头、节奏和音频。',
+      '任务备注（仅用于记录，不改变本次模型输入）：保留原视频舞步，主角换成我的角色',
     ]);
+  });
+
+  it('does not promise unsupported pet or product replacement in the clone upload copy', () => {
+    const source = readFileSync(new URL('./VideoPage.tsx', import.meta.url), 'utf8');
+
+    expect(source).toContain('上传单个人物或角色的清晰照片');
+    expect(source).not.toContain('可以是宠物、人物或产品主体');
   });
 
   it('keeps IP narration copy free of visual style instructions', () => {

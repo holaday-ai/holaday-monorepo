@@ -41,6 +41,12 @@ function makeServices() {
   const readFile = vi.fn(async () => Buffer.from('poster'));
   const runFfmpeg = vi.fn(async () => {});
   const ffprobeDurationMs = vi.fn(async () => 8200);
+  const ffprobeVideoMetadata = vi.fn(async () => ({
+    width: 1080,
+    height: 1920,
+    durationMs: 8200,
+  }));
+  const readImageMetadata = vi.fn(async () => ({ width: 1024, height: 1024 }));
   const storeOutput = vi.fn(async (input: { filename: string }) => ({
     fileId: `f_${input.filename}`,
     storagePath: `s_${input.filename}`,
@@ -64,6 +70,8 @@ function makeServices() {
     readFile,
     runFfmpeg,
     ffprobeDurationMs,
+    ffprobeVideoMetadata,
+    readImageMetadata,
   };
   const services: CloneVideoServices = {
     storeOutput,
@@ -82,6 +90,8 @@ function makeServices() {
       readFile,
       runFfmpeg,
       ffprobeDurationMs,
+      ffprobeVideoMetadata,
+      readImageMetadata,
       storeOutput,
       storeOutputFile,
       verifyFinalVideo,
@@ -174,6 +184,48 @@ describe('runCloneVideoCreation', () => {
         services,
       ),
     ).rejects.toMatchObject({ kind: 'config' });
+    expect(mocks.generateWanAnimateMix).not.toHaveBeenCalled();
+  });
+
+  it('rejects unsupported source dimensions before starting the paid provider job', async () => {
+    const { services, mocks } = makeServices();
+    mocks.readImageMetadata.mockResolvedValueOnce({ width: 120, height: 120 });
+
+    await expect(
+      runCloneVideoCreation(
+        {
+          imageUrl: 'https://r2.example/subject.jpg',
+          referenceVideoUrl: 'https://r2.example/reference.mp4',
+        },
+        CFG,
+        { mode: 'wan-pro' },
+        services,
+      ),
+    ).rejects.toMatchObject({ name: 'SimpleVideoError', kind: 'invalid_options' });
+
+    expect(mocks.generateWanAnimateMix).not.toHaveBeenCalled();
+  });
+
+  it('rejects an out-of-range reference before starting the paid provider job', async () => {
+    const { services, mocks } = makeServices();
+    mocks.ffprobeVideoMetadata.mockResolvedValueOnce({
+      width: 1080,
+      height: 1920,
+      durationMs: 31_000,
+    });
+
+    await expect(
+      runCloneVideoCreation(
+        {
+          imageUrl: 'https://r2.example/subject.jpg',
+          referenceVideoUrl: 'https://r2.example/reference.mp4',
+        },
+        CFG,
+        { mode: 'wan-pro' },
+        services,
+      ),
+    ).rejects.toMatchObject({ name: 'SimpleVideoError', kind: 'invalid_options' });
+
     expect(mocks.generateWanAnimateMix).not.toHaveBeenCalled();
   });
 

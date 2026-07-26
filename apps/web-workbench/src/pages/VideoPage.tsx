@@ -1239,7 +1239,7 @@ export function buildVideoIntentWithCreativeStyles(
 
 export function buildCloneVideoIntent(intent: string): string {
   const trimmed = intent.trim();
-  const lines = ['复刻视频：使用上传照片替换参考视频中的主角，并保留参考视频的动作、镜头、节奏和音频。'];
+  const lines = ['复刻视频：使用单个人物或角色照片替换参考视频中的主角，并保留参考视频的动作、镜头、节奏和音频。'];
   if (trimmed.length > 0) {
     lines.push(`任务备注（仅用于记录，不改变本次模型输入）：${trimmed}`);
   }
@@ -2955,7 +2955,7 @@ export function PetVideoForm({
     <div className="space-y-6">
       <Section
         title="主角照片"
-        description="上传要替换进视频的主角照片，可以是宠物、人物或产品主体。"
+        description="上传单个人物或角色的清晰照片，主体完整、无遮挡时效果更稳定。"
         className={CREATIVE_SECTION_CLASS}
       >
         <input

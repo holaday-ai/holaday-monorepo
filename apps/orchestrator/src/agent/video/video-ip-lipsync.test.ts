@@ -102,6 +102,23 @@ function makeServices(durationMs = 8000) {
 }
 
 describe('runIpVideoCreation — B 架构单 clip 口播', () => {
+  it('rejects an out-of-range base video before voice synthesis or paid lip sync', async () => {
+    const { svc, mocks } = makeServices(61_000);
+
+    await expect(
+      runIpVideoCreation(
+        { copyText: '这是一段验收文案。' },
+        CFG,
+        CTX,
+        { aspectRatio: '9:16' },
+        svc,
+      ),
+    ).rejects.toMatchObject({ name: 'IpVideoError', kind: 'config' });
+
+    expect(mocks.synthesizeSpeech).not.toHaveBeenCalled();
+    expect(mocks.runLipSync).not.toHaveBeenCalled();
+  });
+
   it('全文案 1 次合成(克隆音)→ 1 次 fal 换口型(loop_mode)→ compose → store', async () => {
     const { svc, mocks } = makeServices(8000);
     const res = await runIpVideoCreation(

@@ -139,6 +139,20 @@ describe('mapVideoFailureReason — safe, whitelisted, no leak', () => {
     expect(out).not.toMatch(/Arrearage|account|overdue|payment|request_id|secret/i);
   });
 
+  it('Wan Animate account billing failure → provider-unavailable copy without leaking billing detail', () => {
+    const out = mapVideoFailureReason({
+      name: 'WanAnimateMixError',
+      kind: 'http',
+      status: 400,
+      code: 'Arrearage',
+      message:
+        'Access denied, please make sure your account is in good standing due to an overdue payment.',
+    });
+
+    expect(out).toBe(VIDEO_FAILURE_REASONS.cloneProviderUnavailable);
+    expect(out).not.toMatch(/Arrearage|account|overdue|payment/i);
+  });
+
   it('automated anatomy failure → explicit quality rejection without internal detail', () => {
     expect(
       mapVideoFailureReason({
