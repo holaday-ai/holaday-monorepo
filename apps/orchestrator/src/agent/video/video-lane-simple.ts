@@ -104,11 +104,16 @@ function requiredHandSafeFramingSuffix(userText: string): string {
   const motion = EXPLICIT_LARGE_HAND_MOTION_RE.test(userText)
     ? '；保留用户明确要求的大幅度动作，并为完整运动轨迹预留足够上下左右空间'
     : '；用户未指定大幅度动作时，只做完成动作所需的最小幅度抬升，让操作主体停留在安全区域';
+  const subjectSize = CUP_OBJECT_RE.test(userText)
+    ? '杯体初始占画面高度不超过 30%'
+    : '操作主体初始占画面高度不超过 30%';
   const safeStaging = preserveRequestedMotion
     ? ''
-    : '；动作安全排布：让操作主体初始位于画面中央偏下，主体中心始终保持在画面中央 50% 的安全区域内；' +
+    : `；动作安全排布：采用固定中远景，${subjectSize}，主体上下左右始终保留至少 20% 安全留白；` +
+      '让操作主体初始位于画面中央偏下，主体中心始终保持在画面中央 50% 的安全区域内；' +
       (CUP_OBJECT_RE.test(userText)
-        ? '拿起杯子时仅垂直抬升到足以离开桌面的高度，桌面始终在杯子下方留有可见空间；若用户要求悬停或停留，必须清楚停留至少 1 秒，再在原位放回'
+        ? '拿起杯子时仅垂直抬升到足以离开桌面的高度，抬升距离不超过一个杯身高度，桌面始终在杯子下方留有可见空间；' +
+          '若用户要求悬停或停留，必须清楚停留至少 1 秒，再放回原来的桌面落点，保持把手方向与画面大小和开场一致'
         : '只做完成动作所需的最短稳定轨迹，并在用户要求的位置完成收尾');
   return framing + camera + motion + safeStaging;
 }

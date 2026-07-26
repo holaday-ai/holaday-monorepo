@@ -931,9 +931,35 @@ describe('runSimpleVideoCreation — final quality gate', () => {
       prompt: string;
     };
     expect(request.prompt).toMatch(/主体中心.*画面中央 50%/);
+    expect(request.prompt).toMatch(/中远景.*杯体.*画面高度.*30%/);
+    expect(request.prompt).toMatch(/上下左右.*20%.*安全留白/);
     expect(request.prompt).toMatch(/仅垂直抬升.*足以离开桌面/);
-    expect(request.prompt).toMatch(/清楚停留至少 1 秒.*原位放回/);
+    expect(request.prompt).toMatch(/抬升距离.*不超过一个杯身高度/);
+    expect(request.prompt).toMatch(/清楚停留至少 1 秒.*放回原来的桌面落点/);
+    expect(request.prompt).toMatch(/原来的桌面落点.*把手方向.*画面大小/);
     expect(request.prompt).toContain('桌面始终在杯子下方留有可见空间');
+  });
+
+  it('uses subject-generic framing language for a non-cup hand action', async () => {
+    const { svc, mocks } = makeServices();
+    const userText = '右手拿起桌面上的黑色相机，停留一秒，再放回原位。';
+    const oneShot: VideoScript = {
+      title: '拿起相机',
+      segments: [{ text: userText, type: 'broll', visual: userText }],
+    };
+
+    await runSimpleVideoCreation(
+      { userText, script: oneShot },
+      CFG,
+      { videoSource: 'wanxiang', aspectRatio: '16:9' },
+      svc,
+    );
+
+    const request = (mocks.generateBrollVideo.mock.calls[0] as unknown[])[0] as {
+      prompt: string;
+    };
+    expect(request.prompt).toMatch(/操作主体初始占画面高度不超过 30%/);
+    expect(request.prompt).not.toContain('杯体初始占画面高度');
   });
 
   it('preserves explicitly requested camera motion and large hand movement while keeping the subject in frame', async () => {
