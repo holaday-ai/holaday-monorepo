@@ -905,6 +905,37 @@ describe('runSimpleVideoCreation — final quality gate', () => {
     ).toHaveLength(1);
   });
 
+  it('stages a modest hand-object action inside a central motion corridor', async () => {
+    const { svc, mocks } = makeServices();
+    const userText =
+      '一个成年人的右手从画面右侧进入，拿起白色桌面上的蓝色陶瓷杯，在空中停一秒，再把杯子放回原位，然后手离开画面。真实产品摄影。';
+    const oneShot: VideoScript = {
+      title: '安全持杯',
+      segments: [
+        {
+          text: userText,
+          type: 'broll',
+          visual: userText,
+        },
+      ],
+    };
+
+    await runSimpleVideoCreation(
+      { userText, script: oneShot },
+      CFG,
+      { videoSource: 'wanxiang', aspectRatio: '16:9' },
+      svc,
+    );
+
+    const request = (mocks.generateBrollVideo.mock.calls[0] as unknown[])[0] as {
+      prompt: string;
+    };
+    expect(request.prompt).toMatch(/主体中心.*画面中央 50%/);
+    expect(request.prompt).toMatch(/仅垂直抬升.*足以离开桌面/);
+    expect(request.prompt).toMatch(/清楚停留至少 1 秒.*原位放回/);
+    expect(request.prompt).toContain('桌面始终在杯子下方留有可见空间');
+  });
+
   it('preserves explicitly requested camera motion and large hand movement while keeping the subject in frame', async () => {
     const { svc, mocks } = makeServices();
     const userText = '环绕镜头，右手高高举起蓝色杯子，再把杯子放回桌面。';
@@ -946,6 +977,8 @@ describe('runSimpleVideoCreation — final quality gate', () => {
     expect(initialRequest.prompt).toContain('保留用户明确要求的大幅度动作');
     expect(initialRequest.prompt).not.toContain('使用固定机位，不得推近、变焦或跟随抬升');
     expect(initialRequest.prompt).not.toContain('只做完成动作所需的最小幅度抬升');
+    expect(initialRequest.prompt).not.toContain('主体中心始终保持在画面中央 50%');
+    expect(initialRequest.prompt).not.toContain('仅垂直抬升到足以离开桌面');
 
     const retryRequest = (mocks.generateVeoVideo.mock.calls[1] as unknown[])[0] as {
       prompt: string;
@@ -954,6 +987,8 @@ describe('runSimpleVideoCreation — final quality gate', () => {
     expect(retryRequest.prompt).toContain('保留用户明确要求的大幅度动作');
     expect(retryRequest.prompt).not.toMatch(/构图修复要求.*固定略宽中景/);
     expect(retryRequest.prompt).not.toContain('只做完成动作所需的最小运动幅度');
+    expect(retryRequest.prompt).not.toContain('主体中心始终保持在画面中央 50%');
+    expect(retryRequest.prompt).not.toContain('仅垂直抬升到足以离开桌面');
   });
 
   it('removes an unrequested hand from a repair candidate instead of constraining the composition around it', async () => {

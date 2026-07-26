@@ -61,6 +61,8 @@ const EXPLICIT_DYNAMIC_CAMERA_RE =
   /(?:跟拍|跟随镜头|镜头跟随|环绕镜头|镜头环绕|绕拍|升降镜头|推镜|拉镜|变焦|运镜|摇镜|移镜|手持镜头|tracking shot|follow(?:ing)? camera|dolly|zoom|pan|tilt|handheld|orbit(?:ing)?(?: shot| camera)?)/iu;
 const EXPLICIT_LARGE_HAND_MOTION_RE =
   /(?:高高举起|举过|抬到|大幅度|快速抬起|甩动|挥动|overhead|above (?:the )?head|raise (?:it )?high|large movement)/iu;
+const EXPLICIT_HAND_RELOCATION_RE =
+  /(?:移到|移至|移动到|搬到|递给|传递给|倒入|倒进|放到(?!原位)|move .{0,24} to|transfer .{0,24} to|carry .{0,24} to|place .{0,24} (?:on|in|at)|pour .{0,24} into)/iu;
 const EXPLICIT_PARTIAL_FRAMING_RE =
   /(?:局部特写|细节特写|(?:杯|手|手部|主体|产品|物体|细节)(?:的)?特写|特写(?:镜头|画面|构图)|局部画面|裁切构图|只拍(?:手|手部|杯|主体|局部)|close[- ]?up|detail shot|cropped framing|partial view)/iu;
 const CUP_OBJECT_RE = /(?:杯|马克杯|茶杯|咖啡杯|cup|mug)/iu;
@@ -88,6 +90,11 @@ const OBJECT_ONLY_NEGATIVE = `${BASE_NEGATIVE}, person, people, human, face, han
 type HumanPresencePolicy = 'explicit-human' | 'object-only' | 'conditional';
 
 function requiredHandSafeFramingSuffix(userText: string): string {
+  const preserveRequestedMotion =
+    EXPLICIT_DYNAMIC_CAMERA_RE.test(userText) ||
+    EXPLICIT_LARGE_HAND_MOTION_RE.test(userText) ||
+    EXPLICIT_HAND_RELOCATION_RE.test(userText) ||
+    EXPLICIT_PARTIAL_FRAMING_RE.test(userText);
   const framing = EXPLICIT_PARTIAL_FRAMING_RE.test(userText)
     ? '；按用户明确要求的特写或局部构图执行；被要求保留的局部、动作接触点和关键结构必须持续清楚，不得发生非预期裁切或结构消失'
     : '；采用中景或略宽景别并提前预留完整动作空间：手、手腕、前臂和操作主体必须全程完整保留在画面内，操作主体四周保留至少 15% 安全边距；拿起、悬停、移动和放回时不得裁切主体顶部、底部或关键结构件';
@@ -97,7 +104,13 @@ function requiredHandSafeFramingSuffix(userText: string): string {
   const motion = EXPLICIT_LARGE_HAND_MOTION_RE.test(userText)
     ? '；保留用户明确要求的大幅度动作，并为完整运动轨迹预留足够上下左右空间'
     : '；用户未指定大幅度动作时，只做完成动作所需的最小幅度抬升，让操作主体停留在安全区域';
-  return framing + camera + motion;
+  const safeStaging = preserveRequestedMotion
+    ? ''
+    : '；动作安全排布：让操作主体初始位于画面中央偏下，主体中心始终保持在画面中央 50% 的安全区域内；' +
+      (CUP_OBJECT_RE.test(userText)
+        ? '拿起杯子时仅垂直抬升到足以离开桌面的高度，桌面始终在杯子下方留有可见空间；若用户要求悬停或停留，必须清楚停留至少 1 秒，再在原位放回'
+        : '只做完成动作所需的最短稳定轨迹，并在用户要求的位置完成收尾');
+  return framing + camera + motion + safeStaging;
 }
 
 function requiredHandFramingRepairInstruction(userText: string): string {
