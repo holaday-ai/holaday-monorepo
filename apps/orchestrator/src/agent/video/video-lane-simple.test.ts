@@ -631,6 +631,7 @@ describe('runSimpleVideoCreation — final quality gate', () => {
       expect.objectContaining({
         videoPath: '/tmp/wd/final.mp4',
         minimumDurationMs: 6_000,
+        strictRequiredActions: true,
       }),
     );
   });

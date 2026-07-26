@@ -754,6 +754,7 @@ export async function runSimpleVideoCreation(
       workdir: svc.workdir,
       durationMs: finalDurationMs,
       minimumDurationMs: script.segments.length * minimumSegmentDurationMs,
+      strictRequiredActions: true,
       userText: input.userText,
       qualityContext:
         script.segments.length === 1

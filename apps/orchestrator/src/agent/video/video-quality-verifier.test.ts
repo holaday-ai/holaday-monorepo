@@ -193,6 +193,55 @@ describe('verifyFinalVideoQuality', () => {
     expect(result.status).toBe('fail');
   });
 
+  it('requires a second fail-closed action audit before passing a hand-object sequence', async () => {
+    const analyzeFrames = vi
+      .fn()
+      .mockResolvedValueOnce(
+        JSON.stringify({ status: 'pass', failedChecks: [], reason: '整体画面无明显异常' }),
+      )
+      .mockResolvedValueOnce(
+        JSON.stringify({
+          status: 'fail',
+          failedChecks: ['required_action_missing'],
+          reason: '只看到手接触杯子，没有看到杯底离开桌面，末帧手仍在画面中',
+        }),
+      );
+
+    const result = await verifyFinalVideoQuality(
+      {
+        videoPath: '/tmp/final.mp4',
+        workdir: '/tmp/quality',
+        durationMs: 6_000,
+        minimumDurationMs: 6_000,
+        userText: '一只右手进入画面，拿起杯子，停留一下，再放回桌面并离开。',
+        strictRequiredActions: true,
+        expectedSubtitleText: ['拿起杯子，再放回桌面。'],
+        requiredBrandTexts: ['HOLA DAY · AI'],
+        brandPolicy: '不得新增其它文字或品牌。',
+      },
+      {
+        runFfmpeg: vi.fn(async () => undefined),
+        readFile: vi.fn(async () => Buffer.from('jpeg')),
+        analyzeFrames,
+        normalizeImage: async (buffer) => buffer,
+      },
+    );
+
+    expect(analyzeFrames).toHaveBeenCalledTimes(2);
+    const auditInput = (analyzeFrames.mock.calls[1] as unknown[])[0] as {
+      prompt: string;
+    };
+    expect(auditInput.prompt).toMatch(/独立动作证据复核/);
+    expect(auditInput.prompt).toMatch(/杯底.*离开.*桌面|明确.*悬空/);
+    expect(auditInput.prompt).toMatch(/手接触.*不能算.*拿起/);
+    expect(auditInput.prompt).toMatch(/95%.*动作主体.*已经离场/);
+    expect(result).toEqual({
+      status: 'fail',
+      failedChecks: ['required_action_missing'],
+      reason: '只看到手接触杯子，没有看到杯底离开桌面，末帧手仍在画面中',
+    });
+  });
+
   it('retries one inconclusive analysis and never silently passes an unknown result', async () => {
     const analyzeFrames = vi
       .fn()

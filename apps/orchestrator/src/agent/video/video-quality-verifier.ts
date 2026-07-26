@@ -79,6 +79,8 @@ export interface VerifyFinalVideoQualityInput {
   readonly durationMs: number;
   /** Minimum deliverable duration selected or quoted for this artifact. */
   readonly minimumDurationMs?: number;
+  /** Run an independent fail-closed audit for visibly required action states. */
+  readonly strictRequiredActions?: boolean;
   readonly userText: string;
   /** Lane-specific invariants visible in sampled frames, such as identity and scene. */
   readonly qualityContext?: string;
@@ -279,6 +281,73 @@ function buildQualityPrompt(input: VerifyFinalVideoQualityInput): string {
   ].join('\n');
 }
 
+const ENTER_FRAME_ACTION_RE =
+  /(?:进入画面|伸入画面|从画面.+进入|enter(?:s|ing)? (?:the )?frame|come(?:s|ing)? into (?:the )?frame)/iu;
+const LIFT_ACTION_RE =
+  /(?:拿起|提起|端起|举起|抬起|离开桌面|离开支撑面|pick(?:s|ing)? up|lift(?:s|ing)?|raise(?:s|d|ing)?)/iu;
+const PAUSE_ACTION_RE =
+  /(?:停顿|停留|悬停|保持.+(?:秒|片刻)|pause(?:s|d|ing)?|hold(?:s|ing)? (?:it )?(?:still|up|for))/iu;
+const RETURN_ACTION_RE =
+  /(?:放回|放下|归位|回到原位|put(?:s|ting)? (?:it )?back|set(?:s|ting)? (?:it )?down|return(?:s|ed|ing)? .+ (?:table|support|place))/iu;
+const EXIT_FRAME_ACTION_RE =
+  /(?:离开画面|退出画面|移出画面|手离开|手臂离开|(?:并|再|随后)离开(?:画面)?|leave(?:s|ing)? (?:the )?frame|exit(?:s|ing)? (?:the )?frame|withdraw(?:s|n|ing)?)/iu;
+
+function buildStrictRequiredActionPrompt(input: VerifyFinalVideoQualityInput): string {
+  const checks: string[] = [];
+  if (ENTER_FRAME_ACTION_RE.test(input.userText)) {
+    checks.push(
+      '进入画面：前段应先看不到用户指定的动作主体，随后抽样帧必须清楚看到同一主体从指定方向进入。',
+    );
+  }
+  if (LIFT_ACTION_RE.test(input.userText)) {
+    checks.push(
+      '拿起/提起：至少一个接触后的抽样帧必须清楚看到主体底部离开桌面或原支撑面，出现明确悬空、可见间隙或明显垂直位移。',
+    );
+  }
+  if (PAUSE_ACTION_RE.test(input.userText)) {
+    checks.push(
+      '停顿/停留：必须先有明确拿起证据，再由一个或多个后续抽样帧显示主体保持在离开支撑面的状态；只在桌面上停着不算。',
+    );
+  }
+  if (RETURN_ACTION_RE.test(input.userText)) {
+    checks.push(
+      '放回/放下：必须在明确拿起之后，后段抽样帧重新看到同一主体接触原支撑面；没有拿起证据时不得声称已经放回。',
+    );
+  }
+  if (EXIT_FRAME_ACTION_RE.test(input.userText)) {
+    checks.push(
+      '离开画面：时间点约为视频时长 95% 的末段抽样帧中，用户指定的动作主体必须已经离场；仍抓握、接触或停留时不得判定完成。',
+    );
+  }
+  return [
+    '这是第二次独立动作证据复核。只审核用户明确要求的动作阶段是否在九张按时间排序的抽样帧中有清楚、直接、可复核的视觉证据。',
+    `用户原始需求：${input.userText}`,
+    '本任务需要逐项复核：',
+    ...checks.map((check, index) => `${index + 1}. ${check}`),
+    '',
+    '判定红线：',
+    '- 手接触主体、握住把手或遮挡主体，但主体仍留在原支撑面上，不能算“拿起”。',
+    '- 不得根据动作意图、相邻帧姿势或“可能发生在抽样帧之间”来脑补缺失阶段。',
+    '- 每个列出的阶段都必须有明确证据；任何一项缺失、含糊或无法确认，必须 status=fail，并包含 required_action_missing。',
+    '- 只有所有列出的动作阶段都被清楚观察到，才可以 status=pass。',
+    '- status=unknown 仅用于帧损坏、帧缺失或分析服务无法读取；动作证据不清楚必须 fail closed。',
+    '',
+    '只输出 JSON：',
+    '{"status":"pass|fail|unknown","failedChecks":["snake_case_code"],"reason":"一句中文结论"}',
+  ].join('\n');
+}
+
+function shouldRunStrictRequiredActionAudit(input: VerifyFinalVideoQualityInput): boolean {
+  if (!input.strictRequiredActions) return false;
+  return (
+    ENTER_FRAME_ACTION_RE.test(input.userText) ||
+    LIFT_ACTION_RE.test(input.userText) ||
+    PAUSE_ACTION_RE.test(input.userText) ||
+    RETURN_ACTION_RE.test(input.userText) ||
+    EXIT_FRAME_ACTION_RE.test(input.userText)
+  );
+}
+
 export function createAnthropicVideoQualityAnalyzer(client: Anthropic): VideoQualityAnalyzer {
   return async (input) => {
     const referenceContent = input.references.flatMap((reference) => [
@@ -440,17 +509,24 @@ export async function verifyFinalVideoQuality(
     return unknownResult('无法抽取成片质检帧');
   }
 
-  const prompt = buildQualityPrompt(input);
-  let lastResult = unknownResult('成片质检未得出结论');
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      lastResult = parseVideoQualityResponse(
-        await deps.analyzeFrames({ references, frames, prompt }),
-      );
-      if (lastResult.status !== 'unknown') return lastResult;
-    } catch {
-      lastResult = unknownResult('成片质检服务暂时不可用');
+  const analyzeWithRetry = async (prompt: string): Promise<VideoQualityResult> => {
+    let lastResult = unknownResult('成片质检未得出结论');
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        lastResult = parseVideoQualityResponse(
+          await deps.analyzeFrames({ references, frames, prompt }),
+        );
+        if (lastResult.status !== 'unknown') return lastResult;
+      } catch {
+        lastResult = unknownResult('成片质检服务暂时不可用');
+      }
     }
+    return lastResult;
+  };
+
+  const primaryResult = await analyzeWithRetry(buildQualityPrompt(input));
+  if (primaryResult.status !== 'pass' || !shouldRunStrictRequiredActionAudit(input)) {
+    return primaryResult;
   }
-  return lastResult;
+  return analyzeWithRetry(buildStrictRequiredActionPrompt(input));
 }
