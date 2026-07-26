@@ -43,6 +43,7 @@ import { cn } from '@/lib/utils';
 import {
   currentMediaTaskText,
   isVideoTaskRunning,
+  resolveVideoAwaitingKind,
   selectStepsFor,
   shouldRefreshForTask,
   videoTaskStatusIconKind,
@@ -2461,6 +2462,10 @@ function CurrentVideoTaskPanel({
   const steps = useTaskStore(selectStepsFor(taskId));
   const abortTask = useTaskStore((s) => s.abortTask);
   const [confirming, setConfirming] = React.useState<string | null>(null);
+  const awaitingKind = resolveVideoAwaitingKind(
+    task?.awaitingKind,
+    awaiting?.awaitingKind,
+  );
   const latestStep = steps[steps.length - 1];
   const liveText = currentMediaTaskText({
     status: task?.status ?? 'unknown',
@@ -2555,7 +2560,7 @@ function CurrentVideoTaskPanel({
             </div>
           </div>
 
-          {task.status === 'awaiting_user' && task.awaitingKind === 'video_quote' && (
+          {task.status === 'awaiting_user' && awaitingKind === 'video_quote' && (
             <div className="flex flex-wrap items-center gap-2 rounded-[8px] border border-[#FFC910]/55 bg-white px-3 py-3 text-[12px]">
               <span className="mr-auto text-muted-foreground">确认后才会开始制作并消耗额度。</span>
               <Button
@@ -2595,7 +2600,7 @@ function CurrentVideoTaskPanel({
           )}
 
           {(isVideoTaskRunning(task.status) || task.status === 'awaiting_user') &&
-            task.awaitingKind !== 'video_quote' && (
+            awaitingKind !== 'video_quote' && (
               <div className="flex justify-end">
                 <Button
                   type="button"

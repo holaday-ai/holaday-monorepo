@@ -1,5 +1,5 @@
 import type { TaskStore } from '@/stores/task-store';
-import type { UiStep } from '@/types/task';
+import type { UiAwaitingUser, UiStep, UiTask } from '@/types/task';
 
 /**
  * Stable, shared empty array for "this task has no steps yet".
@@ -58,6 +58,20 @@ export function isVideoTaskRunning(status: string): boolean {
     status === 'queued' ||
     status === 'executing'
   );
+}
+
+/**
+ * The awaiting-user WebSocket frame can arrive before the optimistic task row
+ * is replaced with the server row. In that race the live store already knows
+ * this is a quote, while `task.awaitingKind` is still empty. Prefer the row
+ * once hydrated, but keep the live kind as the immediate fallback so the
+ * confirm controls never disappear.
+ */
+export function resolveVideoAwaitingKind(
+  taskKind: UiTask['awaitingKind'],
+  liveKind: UiAwaitingUser['awaitingKind'],
+): UiTask['awaitingKind'] {
+  return taskKind ?? liveKind;
 }
 
 export function currentMediaTaskText(input: {

@@ -4,6 +4,7 @@ import {
   EMPTY_STEPS,
   currentMediaTaskText,
   isVideoTaskRunning,
+  resolveVideoAwaitingKind,
   selectStepsFor,
   shouldRefreshForTask,
   videoTaskStatusIconKind,
@@ -83,6 +84,12 @@ describe('shouldRefreshForTask — one-time deep-link refresh guard', () => {
 });
 
 describe('video task product status helpers', () => {
+  it('keeps quote actions visible when the live awaiting event wins the create-task race', () => {
+    expect(resolveVideoAwaitingKind(undefined, 'video_quote')).toBe('video_quote');
+    expect(resolveVideoAwaitingKind('login', 'video_quote')).toBe('login');
+    expect(resolveVideoAwaitingKind(undefined, undefined)).toBeUndefined();
+  });
+
   it('treats pre-execution and executing statuses as generating', () => {
     for (const status of ['pending', 'planning', 'queued', 'executing'] as const) {
       expect(isVideoTaskRunning(status)).toBe(true);
