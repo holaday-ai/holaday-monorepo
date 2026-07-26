@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_IMAGE_COUNT,
+  IP_ASSET_AUTHORIZATION_COPY,
   buildImageCreationOptions,
   buildCloneVideoIntent,
   buildImageIntentForSubmit,
@@ -114,6 +115,12 @@ describe('video creative style state', () => {
         color: 'warm',
       }),
     ).toBe('大家好，欢迎来到今天的产品介绍。');
+  });
+
+  it('allows truthful authorization for owned fictional AI assets', () => {
+    expect(IP_ASSET_AUTHORIZATION_COPY).toContain('虚构 AI 资产');
+    expect(IP_ASSET_AUTHORIZATION_COPY).toContain('合法授权');
+    expect(IP_ASSET_AUTHORIZATION_COPY).not.toContain('均为本人');
   });
 
   it('keeps normal image prompts lightweight in free mode', () => {

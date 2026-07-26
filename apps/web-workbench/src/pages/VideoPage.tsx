@@ -3270,8 +3270,11 @@ function fileKindLabel(filename: string): string {
 
 // ---------------------------------------------------------------------------
 // IP人物视频 — 素材准备向导 (Phase 2 第三期 阶段2)
-// 两个必要前提:本人声音(克隆) + 本人出镜底版。授权声明放在生成前确认。
+// 两个必要前提:已获授权的声音(克隆) + 出镜底版。授权声明放在生成前确认。
 // ---------------------------------------------------------------------------
+
+export const IP_ASSET_AUTHORIZATION_COPY =
+  '我确认：口播所用的声音和出镜底版属于本人、已获合法授权，或为我拥有使用权的虚构 AI 资产；勾选即表示同意';
 
 interface OnboardingStatus {
   hasVoice: boolean;
@@ -3403,7 +3406,7 @@ export function IpOnboardingWizard({
 
       <Section
         title="IP人物视频素材准备"
-        description="生成前需要先准备本人声音和出镜底版；授权确认会放在生成视频前。"
+        description="生成前需要先准备声音和出镜底版；可使用本人素材、已获合法授权的素材或拥有使用权的虚构 AI 资产。"
         className={CREATIVE_SECTION_CLASS}
       >
         <div className="space-y-4">
@@ -3429,7 +3432,7 @@ export function IpOnboardingWizard({
             index={1}
             done={status.hasVoice}
             icon={Mic}
-            title="本人声音(克隆)"
+            title="声音(克隆)"
             locked={false}
           >
             <div className="space-y-2">
@@ -3463,7 +3466,7 @@ export function IpOnboardingWizard({
             index={2}
             done={status.hasBaseVideo}
             icon={VideoIcon}
-            title="本人出镜底版"
+            title="出镜底版"
             locked={false}
           >
             <div className="space-y-2">
@@ -3516,7 +3519,7 @@ export function IpOnboardingWizard({
       <Section title="隐私与素材管理" className={CREATIVE_SECTION_CLASS}>
         <ul className="mb-3 space-y-1 text-[12px] leading-relaxed text-muted-foreground">
           <li>· 声音样本在克隆出声纹后<span className="font-medium text-[#595757]">即刻删除</span>,我们只保留声纹用于合成。</li>
-          <li>· 出镜底版加密存储、仅用于你本人的视频,可随时删除/重传。</li>
+          <li>· 出镜底版加密存储、仅用于你已确认授权的 IP 视频,可随时删除/重传。</li>
           <li>· 一键清除会删掉云端声纹 + 出镜底版 + 授权记录。</li>
         </ul>
         <Button
@@ -3567,7 +3570,7 @@ function IpGenerateForm({
       return;
     }
     if (!consent) {
-      toast.show('请先勾选「本人肖像、已获授权」确认', 'error');
+      toast.show('请先确认声音和出镜底版的使用授权', 'error');
       return;
     }
     if (submitting) return;
@@ -3597,18 +3600,18 @@ function IpGenerateForm({
     <div className="space-y-6">
     <Section
       title="生成视频"
-      description="素材已就绪 —— 用你本人的声音 + 出镜底版,把文案口播出来。"
+      description="素材已就绪 —— 使用已准备的声音和出镜底版，把文案口播出来。"
       className={CREATIVE_SECTION_CLASS}
     >
       <div className="space-y-5">
         <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
           <CheckCircle2 className="h-4 w-4 text-[#EA1F59]" />
-          使用你已上传的本人声音 + 出镜底版(可在上方重传/清除)。
+          使用你已上传的声音 + 出镜底版(可在上方重传/清除)。
         </div>
         <Textarea
           value={copy}
           onChange={(e) => setCopy(e.target.value)}
-          placeholder="写你要口播的文案,会用你本人的声音讲出来(单条 ≤40 秒,约 160 字内)。"
+          placeholder="写你要口播的文案,会用已准备的声音讲出来(单条 ≤40 秒,约 160 字内)。"
           rows={4}
           className="min-h-[150px] resize-y rounded-[18px] border-[#EFEFEF] bg-white text-[15px] leading-7"
         />
@@ -3626,7 +3629,7 @@ function IpGenerateForm({
         </div>
         {/* per-generate 授权确认:用户点生成前勾选,提交时写入后端授权记录。 */}
         <div className="rounded-[16px] border border-[#EFEFEF] bg-white px-4 py-3">
-          <div className="text-[13px] font-semibold text-[#111827]">本人授权声明</div>
+          <div className="text-[13px] font-semibold text-[#111827]">素材授权声明</div>
           <label className="mt-2 flex cursor-pointer items-start gap-2 text-[12px] leading-relaxed text-foreground">
             <input
               type="checkbox"
@@ -3635,7 +3638,7 @@ function IpGenerateForm({
               className="mt-0.5 h-4 w-4 shrink-0 accent-[#EA1F59]"
             />
             <span>
-              我承诺:口播所用的声音与出镜底版<strong>均为本人</strong>、已获授权;勾选即表示同意
+              {IP_ASSET_AUTHORIZATION_COPY}
               <Link to="/terms" target="_blank" className="text-[#EA1F59] underline">
                 《服务条款》
               </Link>
