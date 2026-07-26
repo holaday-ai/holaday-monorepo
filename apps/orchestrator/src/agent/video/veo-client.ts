@@ -68,6 +68,16 @@ export interface GenerateVeoParams {
   /** Default veo-3.0-fast-generate-001. */
   readonly model?: string;
   readonly prompt: string;
+  /** Optional first-frame composition constraint (Veo 3.1 image-to-video). */
+  readonly startImage?: {
+    readonly data: string;
+    readonly mimeType: 'image/png' | 'image/jpeg';
+  };
+  /** Optional final-frame composition constraint (Veo 3.1 interpolation). */
+  readonly lastFrameImage?: {
+    readonly data: string;
+    readonly mimeType: 'image/png' | 'image/jpeg';
+  };
   /** Elements that should not appear in the generated video. */
   readonly negativePrompt?: string;
   /** Default '9:16' (vertical). */
@@ -272,6 +282,23 @@ export async function generateVeoVideo(p: GenerateVeoParams): Promise<VeoResult>
   };
   if (p.resolution) parameters.resolution = p.resolution;
   if (p.negativePrompt) parameters.negativePrompt = p.negativePrompt;
+  const instance: Record<string, unknown> = { prompt: p.prompt };
+  if (p.startImage) {
+    instance.image = {
+      inlineData: {
+        mimeType: p.startImage.mimeType,
+        data: p.startImage.data,
+      },
+    };
+  }
+  if (p.lastFrameImage) {
+    instance.lastFrame = {
+      inlineData: {
+        mimeType: p.lastFrameImage.mimeType,
+        data: p.lastFrameImage.data,
+      },
+    };
+  }
   const subRes = await fetchVeoWithBackoff(
     p,
     fetchImpl,
@@ -280,7 +307,7 @@ export async function generateVeoVideo(p: GenerateVeoParams): Promise<VeoResult>
     {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-goog-api-key': p.apiKey },
-      body: JSON.stringify({ instances: [{ prompt: p.prompt }], parameters }),
+      body: JSON.stringify({ instances: [instance], parameters }),
     },
   );
   let sub: SubmitResponse;

@@ -68,6 +68,10 @@ const EXPLICIT_PARTIAL_FRAMING_RE =
 const CUP_OBJECT_RE = /(?:杯|马克杯|茶杯|咖啡杯|cup|mug)/iu;
 const EXPLICIT_HANDLE_GRIP_RE =
   /(?:抓住杯柄|握住杯柄|拿住杯柄|抓住把手|握住把手|by (?:the )?handle|grip (?:the )?handle)/iu;
+const MODEST_LIFT_ACTION_RE =
+  /(?:拿起|提起|端起|抬起|离开桌面|离开支撑面|pick(?:s|ing)? up|lift(?:s|ing)?|raise(?:s|d|ing)?)/iu;
+const RETURN_TO_ORIGIN_RE =
+  /(?:放回|归位|回到原位|put(?:s|ting)? (?:it )?back|return(?:s|ed|ing)? .+ (?:table|support|place))/iu;
 const OBJECT_ONLY_SCENE_SUFFIX =
   '；这是纯物体/环境镜头，不得出现人物、手、手臂或身体部位，' +
   '不要新增拿起、触碰或操作主体的动作，只保留用户指定的主体、环境和运动';
@@ -118,6 +122,32 @@ function requiredHandSafeFramingSuffix(userText: string): string {
           '若用户要求悬停或停留，必须清楚停留至少 1 秒，再放回原来的桌面落点，保持把手方向与画面大小和开场一致'
         : '只做完成动作所需的最短稳定轨迹，并在用户要求的位置完成收尾');
   return framing + camera + motion + safeStaging;
+}
+
+function shouldUseRequiredHandCompositionAnchor(userText: string): boolean {
+  return (
+    HAND_INTENT_RE.test(userText) &&
+    MODEST_LIFT_ACTION_RE.test(userText) &&
+    RETURN_TO_ORIGIN_RE.test(userText) &&
+    !EXPLICIT_DYNAMIC_CAMERA_RE.test(userText) &&
+    !EXPLICIT_LARGE_HAND_MOTION_RE.test(userText) &&
+    !EXPLICIT_HAND_RELOCATION_RE.test(userText) &&
+    !EXPLICIT_PARTIAL_FRAMING_RE.test(userText)
+  );
+}
+
+function requiredHandCompositionAnchorPrompt(
+  userText: string,
+  aspectLabel: string,
+): string {
+  return (
+    `生成一张用于视频动作开始前的稳定静帧。参考需求中的场景、操作主体、颜色、材质和环境：${userText}。` +
+    '此时动作尚未发生，人物、手和手臂均不入画，不要表现拿起、悬停或放回。' +
+    `采用${aspectLabel}全桌面宽景，操作主体完整放在画面下半部中央区域，占画面高度不超过 15%，` +
+    '主体上下左右保留至少 30% 安全留白，顶部、底部、左右边界和全部结构件清楚可见；' +
+    '固定机位、真实产品摄影、桌面与主体比例自然。' +
+    COMMON_SCENE_SUFFIX
+  );
 }
 
 function requiredHandFramingRepairInstruction(userText: string): string {
@@ -580,6 +610,35 @@ export function createSimplePipelineDeps(
       const durationSeconds = opts.veoDurationSeconds ?? 8;
       const resolution = opts.veoResolution ?? '1080p';
       const completionInstruction = motionCompletionInstruction(durationSeconds);
+      let compositionAnchor:
+        | { data: string; mimeType: 'image/png' | 'image/jpeg' }
+        | undefined;
+      if (
+        isVeoSource(videoSource) &&
+        shouldUseRequiredHandCompositionAnchor(userText)
+      ) {
+        const generatedAnchor = await fns.generateImages({
+          apiKey: cfg.geminiApiKey ?? '',
+          ...(cfg.geminiBaseUrl ? { baseUrl: cfg.geminiBaseUrl } : {}),
+          model: cfg.geminiImageModel ?? 'gemini-3.1-flash-image',
+          prompt: requiredHandCompositionAnchorPrompt(userText, aspectLabel),
+          aspectRatio: aspect.veoAspect,
+        });
+        const firstAnchor = generatedAnchor.images[0];
+        if (!firstAnchor) {
+          throw new SimpleVideoError('composition anchor produced no image', 'compose');
+        }
+        if (firstAnchor.mimeType !== 'image/png' && firstAnchor.mimeType !== 'image/jpeg') {
+          throw new SimpleVideoError(
+            `composition anchor returned unsupported image type ${firstAnchor.mimeType}`,
+            'compose',
+          );
+        }
+        compositionAnchor = {
+          data: firstAnchor.buffer.toString('base64'),
+          mimeType: firstAnchor.mimeType,
+        };
+      }
       let repairInstruction = initialRepairInstruction;
       for (let attempt = 0; attempt < 2; attempt += 1) {
         const candidatePrompt =
@@ -601,6 +660,12 @@ export function createSimplePipelineDeps(
             model: resolveVeoModel(videoSource, cfg),
             prompt: candidatePrompt,
             negativePrompt: scenePolicy.negativePrompt,
+            ...(compositionAnchor
+              ? {
+                  startImage: compositionAnchor,
+                  lastFrameImage: compositionAnchor,
+                }
+              : {}),
             aspectRatio: aspect.veoAspect, // 1:1 时用 9:16 出, compose pad 到方形
             durationSeconds,
             resolution,

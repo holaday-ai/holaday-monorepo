@@ -872,18 +872,37 @@ describe('runSimpleVideoCreation — final quality gate', () => {
 
     expect(out.fileId).toBe('f_video.mp4');
     expect(mocks.generateVeoVideo).toHaveBeenCalledTimes(2);
+    expect(mocks.generateImages).toHaveBeenCalledTimes(1);
+    expect(mocks.generateImages).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: 'gemini-3.1-flash-image',
+        aspectRatio: '16:9',
+        prompt: expect.stringMatching(/动作开始前.*蓝色陶瓷杯.*画面下半部/),
+      }),
+    );
     expect(mocks.removeFile).toHaveBeenCalledTimes(2);
     expect(mocks.downloadToFile).toHaveBeenCalledTimes(2);
     const initialRequest = (mocks.generateVeoVideo.mock.calls[0] as unknown[])[0] as {
       prompt: string;
+      startImage?: { data: string; mimeType: string };
+      lastFrameImage?: { data: string; mimeType: string };
     };
+    expect(initialRequest.startImage).toEqual({
+      data: Buffer.from('img').toString('base64'),
+      mimeType: 'image/png',
+    });
+    expect(initialRequest.lastFrameImage).toEqual(initialRequest.startImage);
     expect(initialRequest.prompt).toMatch(/操作主体.*全程完整保留在画面内/);
     expect(initialRequest.prompt).toMatch(/四周保留.*安全留白/);
     expect(initialRequest.prompt).toMatch(/固定机位.*不得推近、变焦或跟随抬升/);
     expect(initialRequest.prompt).toMatch(/只做完成动作所需的最小幅度抬升/);
     const retryRequest = (mocks.generateVeoVideo.mock.calls[1] as unknown[])[0] as {
       prompt: string;
+      startImage?: { data: string; mimeType: string };
+      lastFrameImage?: { data: string; mimeType: string };
     };
+    expect(retryRequest.startImage).toEqual(initialRequest.startImage);
+    expect(retryRequest.lastFrameImage).toEqual(initialRequest.lastFrameImage);
     expect(retryRequest.prompt).toContain('质量修复重试');
     expect(retryRequest.prompt).toContain('手指边缘融合');
     expect(retryRequest.prompt).toContain('杯口越过画面上边界');
@@ -1002,6 +1021,7 @@ describe('runSimpleVideoCreation — final quality gate', () => {
     expect(mocks.generateVeoVideo).toHaveBeenCalledTimes(2);
     const initialRequest = (mocks.generateVeoVideo.mock.calls[0] as unknown[])[0] as {
       prompt: string;
+      startImage?: { data: string; mimeType: string };
     };
     expect(initialRequest.prompt).toContain('保留用户明确要求的跟拍、变焦或其它运镜');
     expect(initialRequest.prompt).toContain('保留用户明确要求的大幅度动作');
@@ -1009,6 +1029,8 @@ describe('runSimpleVideoCreation — final quality gate', () => {
     expect(initialRequest.prompt).not.toContain('只做完成动作所需的最小幅度抬升');
     expect(initialRequest.prompt).not.toContain('主体中心始终保持在画面中央 50%');
     expect(initialRequest.prompt).not.toContain('仅垂直抬升到足以离开桌面');
+    expect(initialRequest.startImage).toBeUndefined();
+    expect(mocks.generateImages).not.toHaveBeenCalled();
 
     const retryRequest = (mocks.generateVeoVideo.mock.calls[1] as unknown[])[0] as {
       prompt: string;

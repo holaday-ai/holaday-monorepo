@@ -82,6 +82,51 @@ describe('generateVeoVideo', () => {
     expect(submit.parameters.negativePrompt).toBe('person, hands, arms, body parts');
   });
 
+  it('sends optional start and last frames as inline image constraints', async () => {
+    const { fetchImpl, calls } = jsonQueue([
+      { body: { name: 'op/frames' } },
+      {
+        body: {
+          done: true,
+          response: {
+            generateVideoResponse: {
+              generatedSamples: [
+                { video: { uri: 'https://generativelanguage.googleapis.com/framed.mp4' } },
+              ],
+            },
+          },
+        },
+      },
+    ]);
+
+    await generateVeoVideo({
+      apiKey: KEY,
+      model: 'veo-3.1-fast-generate-preview',
+      prompt: 'a hand briefly lifts a cup and returns it',
+      startImage: { data: 'START_B64', mimeType: 'image/png' },
+      lastFrameImage: { data: 'END_B64', mimeType: 'image/jpeg' },
+      fetchImpl,
+      ...TINY,
+    });
+
+    const submit = JSON.parse(calls[0]?.init.body as string);
+    expect(submit.instances[0]).toMatchObject({
+      prompt: 'a hand briefly lifts a cup and returns it',
+      image: {
+        inlineData: {
+          mimeType: 'image/png',
+          data: 'START_B64',
+        },
+      },
+      lastFrame: {
+        inlineData: {
+          mimeType: 'image/jpeg',
+          data: 'END_B64',
+        },
+      },
+    });
+  });
+
   it('maps 403 → permission_denied (key not allowlisted)', async () => {
     const { fetchImpl } = jsonQueue([
       { status: 403, body: { error: { message: 'PERMISSION_DENIED' } } },
