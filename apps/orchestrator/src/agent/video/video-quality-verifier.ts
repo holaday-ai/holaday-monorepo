@@ -67,11 +67,8 @@ const REQUIRED_ACTION_EVIDENCE_TOOL: Anthropic.Tool = {
           additionalProperties: false,
         },
       },
-      reason: {
-        type: 'string',
-      },
     },
-    required: ['checks', 'reason'],
+    required: ['checks'],
     additionalProperties: false,
   },
 };
@@ -402,7 +399,7 @@ interface RequiredActionEvidence {
     readonly evidenceFrameSeconds: number[];
     readonly reason: string;
   }>;
-  readonly reason: string;
+  readonly reason?: string;
 }
 
 function getRequiredActionChecks(input: VerifyFinalVideoQualityInput): RequiredActionCheck[] {
@@ -484,9 +481,10 @@ function buildStrictRequiredActionPrompt(
     '- observed=true 时必须从图片标签逐字抄录至少一个对应的时间秒数到 evidenceFrameSeconds；没有直接证据必须 observed=false。',
     ...subjectContainmentRule,
     '- 不要提交 pass、fail、unknown 或 failedChecks。最终结论由程序根据逐项证据确定。',
+    '- 每项 reason 只写直接可见证据，不超过 30 个汉字；不要提交 checks 之外的顶层摘要。',
     '',
     '只输出 JSON：',
-    '{"checks":[{"id":"lift","observed":true,"evidenceFrameSeconds":[2.250],"reason":"杯底与桌面之间有清楚间隙"}],"reason":"一句中文整体说明"}',
+    '{"checks":[{"id":"lift","observed":true,"evidenceFrameSeconds":[2.250],"reason":"杯底与桌面之间有清楚间隙"}]}',
   ].join('\n');
 }
 
@@ -503,7 +501,7 @@ function parseRequiredActionEvidenceResponse(text: string): RequiredActionEviden
       checks?: unknown;
       reason?: unknown;
     };
-    if (!Array.isArray(value.checks) || typeof value.reason !== 'string') return null;
+    if (!Array.isArray(value.checks)) return null;
     const seen = new Set<RequiredActionId>();
     const checks: RequiredActionEvidence['checks'] = [];
     for (const item of value.checks) {
@@ -540,7 +538,9 @@ function parseRequiredActionEvidenceResponse(text: string): RequiredActionEviden
     }
     return {
       checks,
-      reason: value.reason.trim(),
+      ...(typeof value.reason === 'string' && value.reason.trim()
+        ? { reason: value.reason.trim() }
+        : {}),
     };
   } catch {
     return null;
@@ -654,7 +654,7 @@ export function createAnthropicVideoQualityAnalyzer(client: Anthropic): VideoQua
     const response = await client.messages.create(
       {
         model: QUALITY_MODEL,
-        max_tokens: outputMode === 'required_action_evidence' ? 768 : 512,
+        max_tokens: outputMode === 'required_action_evidence' ? 1_536 : 512,
         tools: [selectedTool],
         tool_choice: { type: 'tool', name: selectedTool.name },
         messages: [{ role: 'user', content }],

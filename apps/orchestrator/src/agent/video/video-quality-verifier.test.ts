@@ -352,6 +352,63 @@ describe('verifyFinalVideoQuality', () => {
     });
   });
 
+  it('uses per-check evidence when the model omits the redundant top-level action summary', async () => {
+    const analyzeFrames = vi
+      .fn()
+      .mockResolvedValueOnce(
+        JSON.stringify({ status: 'pass', failedChecks: [], reason: '整体画面无明显异常' }),
+      )
+      .mockResolvedValueOnce(
+        JSON.stringify({
+          checks: [
+            {
+              id: 'lift',
+              observed: true,
+              evidenceFrameSeconds: [2.25],
+              reason: '杯底离开桌面',
+            },
+            {
+              id: 'return',
+              observed: true,
+              evidenceFrameSeconds: [4.5],
+              reason: '杯子重新接触桌面',
+            },
+            {
+              id: 'subject_containment',
+              observed: true,
+              evidenceFrameSeconds: [0.3, 0.9, 1.5, 2.25, 3, 3.75, 4.5, 5.1, 5.7],
+              reason: '九张抽样帧中的杯子均完整',
+            },
+          ],
+        }),
+      );
+
+    const result = await verifyFinalVideoQuality(
+      {
+        videoPath: '/tmp/final.mp4',
+        workdir: '/tmp/quality',
+        durationMs: 6_000,
+        userText: '拿起杯子，再放回桌面。',
+        strictRequiredActions: true,
+        expectedSubtitleText: [],
+        requiredBrandTexts: [],
+        brandPolicy: '无品牌要求。',
+      },
+      {
+        runFfmpeg: vi.fn(async () => undefined),
+        readFile: vi.fn(async () => Buffer.from('jpeg')),
+        analyzeFrames,
+        normalizeImage: async (buffer) => buffer,
+      },
+    );
+
+    expect(result).toEqual({
+      status: 'pass',
+      failedChecks: [],
+      reason: '动作证据复核通过：拿起/提起、放回/放下、关键主体全程完整',
+    });
+  });
+
   it('respects an explicit partial close-up without requiring the full subject to remain in frame', async () => {
     const analyzeFrames = vi
       .fn()
@@ -914,7 +971,7 @@ describe('createAnthropicVideoQualityAnalyzer', () => {
           expect.objectContaining({
             name: 'submit_required_action_evidence',
             input_schema: expect.objectContaining({
-              required: ['checks', 'reason'],
+              required: ['checks'],
               properties: expect.objectContaining({
                 checks: expect.any(Object),
               }),
@@ -925,6 +982,7 @@ describe('createAnthropicVideoQualityAnalyzer', () => {
           type: 'tool',
           name: 'submit_required_action_evidence',
         },
+        max_tokens: 1_536,
       }),
       {
         timeout: 75_000,
