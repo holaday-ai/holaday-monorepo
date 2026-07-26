@@ -265,6 +265,40 @@ describe('runSimpleVideoCreation — video (default = veo_fast)', () => {
     expect(veoArg.prompt).not.toContain('不得出现人物、手、手臂或身体部位');
   });
 
+  it('locks object identity across frames when a requested hand manipulates it', async () => {
+    const { svc, mocks } = makeServices();
+    const handActionScript: VideoScript = {
+      title: '拿起杯子',
+      segments: [
+        {
+          text: '拿起杯子，再放回桌面。',
+          type: 'broll',
+          visual: '右手拿起蓝色陶瓷杯，停顿后放回原位',
+        },
+      ],
+    };
+
+    await runSimpleVideoCreation(
+      {
+        userText: '一只右手拿起蓝色陶瓷杯，停顿一秒，再放回原位。',
+        script: handActionScript,
+      },
+      CFG,
+      { videoSource: 'happyhorse', veoDurationSeconds: 6 },
+      svc,
+    );
+
+    const happyHorseArg = (mocks.generateBrollVideo.mock.calls[0] as unknown[])[0] as {
+      prompt: string;
+      negativePrompt?: string;
+    };
+    expect(happyHorseArg.prompt).toMatch(/同一个物体|主体身份/);
+    expect(happyHorseArg.prompt).toMatch(/类别、轮廓、颜色.*把手/);
+    expect(happyHorseArg.negativePrompt).toMatch(
+      /object morphing|subject identity drift|handle appearing or disappearing/,
+    );
+  });
+
   it('rejects unsupported Veo parameters before TTS or video generation starts', async () => {
     const { svc, mocks } = makeServices();
 

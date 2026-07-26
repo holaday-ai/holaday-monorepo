@@ -53,6 +53,9 @@ const HUMAN_SCENE_SUFFIX =
 const REQUIRED_HAND_SCENE_SUFFIX =
   '；在不违背用户指定构图的前提下，必要手部动作优先采用单手、手腕与前臂连续、' +
   '三分之四侧面或侧面构图，让可见手指轮廓与物体边界自然可辨，避免手指和杯柄或物体边缘完全重叠融合';
+const REQUIRED_HAND_OBJECT_IDENTITY_SUFFIX =
+  '；手正在操作的主体必须始终是同一个物体，主体身份与类别、轮廓、颜色、材质和结构件（例如杯子的把手）跨帧保持一致，' +
+  '不得在动作中变成另一种物体，不得让把手或其它结构件凭空出现或消失';
 const OBJECT_ONLY_SCENE_SUFFIX =
   '；这是纯物体/环境镜头，不得出现人物、手、手臂或身体部位，' +
   '不要新增拿起、触碰或操作主体的动作，只保留用户指定的主体、环境和运动';
@@ -67,6 +70,9 @@ const BASE_NEGATIVE = [
   'garbled text, fake text, gibberish text, misspelled text, unreadable text, incorrect logo, malformed logo,' +
     ' fused hands, fused fingers, missing fingers, extra arm, extra hand, third arm, deformed hands, extra fingers, floating limb, anatomical error',
 ].join(', ');
+const REQUIRED_HAND_OBJECT_NEGATIVE =
+  `${BASE_NEGATIVE}, 物体变形, 主体身份漂移, 物体类别变化, 把手凭空出现或消失, ` +
+  'object morphing, subject identity drift, changing object shape, object category change, handle appearing or disappearing';
 const OBJECT_ONLY_NEGATIVE = `${BASE_NEGATIVE}, person, people, human, face, hand, hands, arm, arms, body parts, holding object, touching object, picking up object`;
 
 type HumanPresencePolicy = 'explicit-human' | 'object-only' | 'conditional';
@@ -114,8 +120,10 @@ function scenePromptPolicy(userText: string): {
     suffix:
       COMMON_SCENE_SUFFIX +
       HUMAN_SCENE_SUFFIX +
-      (HAND_INTENT_RE.test(userText) ? REQUIRED_HAND_SCENE_SUFFIX : ''),
-    negativePrompt: BASE_NEGATIVE,
+      (HAND_INTENT_RE.test(userText)
+        ? REQUIRED_HAND_SCENE_SUFFIX + REQUIRED_HAND_OBJECT_IDENTITY_SUFFIX
+        : ''),
+    negativePrompt: HAND_INTENT_RE.test(userText) ? REQUIRED_HAND_OBJECT_NEGATIVE : BASE_NEGATIVE,
     presencePolicy: policy,
     handRequired: HAND_INTENT_RE.test(userText),
   };
