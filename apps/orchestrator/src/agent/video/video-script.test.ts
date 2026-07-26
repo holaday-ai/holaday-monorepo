@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildFallbackVideoScript,
   buildOptimizeSystemPrompt,
   buildScriptSystemPrompt,
   generateVideoScript,
@@ -120,6 +121,32 @@ describe('optimizeUserScript (原方案 — faithful to user draft)', () => {
       expect(s.text.length).toBeGreaterThan(0);
       expect(s.visual && s.visual.length).toBeGreaterThan(0);
     }
+  });
+
+  it('parses the first complete JSON object when the model appends another object', async () => {
+    const reply = `${OPTIMIZED}\n{"note":"extra model commentary"}`;
+    const out = await optimizeUserScript(
+      { userText: '我想做个讲夏天防晒的视频，提醒大家涂够量' },
+      { llm: llmReturning(reply) },
+    );
+
+    expect(out.title).toBe('夏季防晒');
+    expect(out.segments).toHaveLength(2);
+  });
+
+  it('builds a faithful one-segment fallback from the original request', () => {
+    const out = buildFallbackVideoScript(
+      '一个成年人的右手拿起蓝色陶瓷杯，停一秒，再放回原位。',
+    );
+
+    expect(out.title).toBe('按原描述生成');
+    expect(out.segments).toEqual([
+      {
+        text: '一个成年人的右手拿起蓝色陶瓷杯，停一秒，再放回原位。',
+        type: 'broll',
+        visual: '一个成年人的右手拿起蓝色陶瓷杯，停一秒，再放回原位。',
+      },
+    ]);
   });
 
   it('throws empty on a blank user draft', async () => {

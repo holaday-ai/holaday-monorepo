@@ -1695,7 +1695,7 @@ export const tasksRouter = router({
         input.videoOptions?.tab !== undefined;
       if (appEnv.VIDEO_CREATION_ENABLED && videoIntent && videoAllowed && anthropicForResolver) {
         const anthropicClient = anthropicForResolver;
-        const { optimizeUserScript, segmentCapForText } = await import(
+        const { buildFallbackVideoScript, optimizeUserScript, segmentCapForText } = await import(
           '../../agent/video/video-script.js'
         );
         // Phase 2 第一期 — SPA「普通视频」面板把模型档/风格/画幅/画质/时长带上来。
@@ -1886,10 +1886,11 @@ export const tasksRouter = router({
             },
           );
         } catch (err) {
-          ctx.logger.error(
+          ctx.logger.warn(
             { err, userId: ctx.userId },
-            'video_creation: optimize(报价前) failed — 落通用',
+            'video_creation: optimize(报价前) failed — using faithful single-segment fallback',
           );
+          script = buildFallbackVideoScript(input.intent);
         }
         if (script) {
           const quote = quoteVideo(script.segments.length, tier, {

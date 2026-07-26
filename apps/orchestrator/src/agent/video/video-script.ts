@@ -74,15 +74,45 @@ export function buildScriptSystemPrompt(maxSegments: number): string {
   ].join('\n');
 }
 
-/** Strip markdown fences / prose and parse the first JSON object. */
+function firstCompleteJsonObject(text: string): string | null {
+  const start = text.indexOf('{');
+  if (start < 0) return null;
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === '\\') {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+    if (char === '{') {
+      depth += 1;
+    } else if (char === '}') {
+      depth -= 1;
+      if (depth === 0) return text.slice(start, index + 1);
+    }
+  }
+  return null;
+}
+
+/** Strip markdown fences / prose and parse the first complete JSON object. */
 function parseJsonLoose(text: string): unknown {
   let t = text.trim();
   const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/i);
   if (fence?.[1]) t = fence[1].trim();
-  const start = t.indexOf('{');
-  const end = t.lastIndexOf('}');
-  if (start >= 0 && end > start) t = t.slice(start, end + 1);
-  return JSON.parse(t);
+  return JSON.parse(firstCompleteJsonObject(t) ?? t);
 }
 
 function normType(v: unknown): string {
@@ -164,6 +194,21 @@ export interface OptimizeScriptInput {
   readonly maxSegments?: number;
   /** Picture style (Phase 2). 'auto' / undefined → no style line. */
   readonly style?: VideoStyle;
+}
+
+export function buildFallbackVideoScript(userText: string): VideoScript {
+  const faithfulText = userText.trim();
+  if (!faithfulText) throw new VideoScriptError('user script text is empty', 'empty');
+  return {
+    title: '按原描述生成',
+    segments: [
+      {
+        text: faithfulText,
+        type: 'broll',
+        visual: faithfulText,
+      },
+    ],
+  };
 }
 
 export function buildOptimizeSystemPrompt(maxSegments: number, style?: VideoStyle): string {
