@@ -201,9 +201,39 @@ describe('verifyFinalVideoQuality', () => {
       )
       .mockResolvedValueOnce(
         JSON.stringify({
-          status: 'fail',
-          failedChecks: ['required_action_missing'],
-          reason: '只看到手接触杯子，没有看到杯底离开桌面，末帧手仍在画面中',
+          checks: [
+            {
+              id: 'enter_frame',
+              observed: true,
+              evidenceFrameSeconds: [0.3, 0.9],
+              reason: '前段无手，随后右手进入画面',
+            },
+            {
+              id: 'lift',
+              observed: false,
+              evidenceFrameSeconds: [],
+              reason: '只看到手接触杯子，杯底始终贴着桌面',
+            },
+            {
+              id: 'pause',
+              observed: false,
+              evidenceFrameSeconds: [],
+              reason: '没有杯子离开桌面后的停留证据',
+            },
+            {
+              id: 'return',
+              observed: false,
+              evidenceFrameSeconds: [],
+              reason: '没有先拿起，因此不能确认放回',
+            },
+            {
+              id: 'exit_frame',
+              observed: false,
+              evidenceFrameSeconds: [5.7],
+              reason: '末段手仍在画面中',
+            },
+          ],
+          reason: '动作链未完整完成',
         }),
       );
 
@@ -230,15 +260,160 @@ describe('verifyFinalVideoQuality', () => {
     expect(analyzeFrames).toHaveBeenCalledTimes(2);
     const auditInput = (analyzeFrames.mock.calls[1] as unknown[])[0] as {
       prompt: string;
+      outputMode: string;
     };
+    expect(auditInput.outputMode).toBe('required_action_evidence');
     expect(auditInput.prompt).toMatch(/独立动作证据复核/);
     expect(auditInput.prompt).toMatch(/杯底.*离开.*桌面|明确.*悬空/);
     expect(auditInput.prompt).toMatch(/手接触.*不能算.*拿起/);
     expect(auditInput.prompt).toMatch(/95%.*动作主体.*已经离场/);
     expect(result).toEqual({
       status: 'fail',
-      failedChecks: ['required_action_missing'],
-      reason: '只看到手接触杯子，没有看到杯底离开桌面，末帧手仍在画面中',
+      failedChecks: [
+        'required_action_missing_lift',
+        'required_action_missing_pause',
+        'required_action_missing_return',
+        'required_action_missing_exit_frame',
+      ],
+      reason:
+        '拿起/提起：只看到手接触杯子，杯底始终贴着桌面；' +
+        '停顿/停留：没有杯子离开桌面后的停留证据；' +
+        '放回/放下：没有先拿起，因此不能确认放回；' +
+        '离开画面：末段手仍在画面中',
+    });
+  });
+
+  it('passes required actions only when every requested action has direct frame evidence', async () => {
+    const analyzeFrames = vi
+      .fn()
+      .mockResolvedValueOnce(
+        JSON.stringify({ status: 'pass', failedChecks: [], reason: '整体画面无明显异常' }),
+      )
+      .mockResolvedValueOnce(
+        JSON.stringify({
+          checks: [
+            {
+              id: 'lift',
+              observed: true,
+              evidenceFrameSeconds: [1.5, 2.25],
+              reason: '杯底与桌面之间有清楚间隙',
+            },
+            {
+              id: 'return',
+              observed: true,
+              evidenceFrameSeconds: [4.5],
+              reason: '杯子在后段重新接触桌面',
+            },
+          ],
+          reason: '两个动作均有直接证据',
+        }),
+      );
+
+    const result = await verifyFinalVideoQuality(
+      {
+        videoPath: '/tmp/final.mp4',
+        workdir: '/tmp/quality',
+        durationMs: 6_000,
+        userText: '拿起杯子，再放回桌面。',
+        strictRequiredActions: true,
+        expectedSubtitleText: [],
+        requiredBrandTexts: [],
+        brandPolicy: '无品牌要求。',
+      },
+      {
+        runFfmpeg: vi.fn(async () => undefined),
+        readFile: vi.fn(async () => Buffer.from('jpeg')),
+        analyzeFrames,
+        normalizeImage: async (buffer) => buffer,
+      },
+    );
+
+    expect(result).toEqual({
+      status: 'pass',
+      failedChecks: [],
+      reason: '动作证据复核通过：拿起/提起、放回/放下',
+    });
+  });
+
+  it('fails closed when the action evidence response omits a requested action', async () => {
+    const analyzeFrames = vi
+      .fn()
+      .mockResolvedValueOnce(
+        JSON.stringify({ status: 'pass', failedChecks: [], reason: '整体画面无明显异常' }),
+      )
+      .mockResolvedValueOnce(
+        JSON.stringify({
+          checks: [
+            {
+              id: 'lift',
+              observed: true,
+              evidenceFrameSeconds: [1.5],
+              reason: '杯子离开桌面',
+            },
+          ],
+          reason: '只提交了拿起证据',
+        }),
+      );
+
+    const result = await verifyFinalVideoQuality(
+      {
+        videoPath: '/tmp/final.mp4',
+        workdir: '/tmp/quality',
+        durationMs: 6_000,
+        userText: '拿起杯子，再放回桌面。',
+        strictRequiredActions: true,
+        expectedSubtitleText: [],
+        requiredBrandTexts: [],
+        brandPolicy: '无品牌要求。',
+      },
+      {
+        runFfmpeg: vi.fn(async () => undefined),
+        readFile: vi.fn(async () => Buffer.from('jpeg')),
+        analyzeFrames,
+        normalizeImage: async (buffer) => buffer,
+      },
+    );
+
+    expect(result).toEqual({
+      status: 'fail',
+      failedChecks: ['required_action_missing_return'],
+      reason: '放回/放下：质检未提交该动作的直接证据',
+    });
+  });
+
+  it('returns unknown after two malformed required-action evidence responses', async () => {
+    const analyzeFrames = vi
+      .fn()
+      .mockResolvedValueOnce(
+        JSON.stringify({ status: 'pass', failedChecks: [], reason: '整体画面无明显异常' }),
+      )
+      .mockResolvedValueOnce('not-json')
+      .mockResolvedValueOnce('still-not-json');
+
+    const result = await verifyFinalVideoQuality(
+      {
+        videoPath: '/tmp/final.mp4',
+        workdir: '/tmp/quality',
+        durationMs: 6_000,
+        userText: '拿起杯子。',
+        strictRequiredActions: true,
+        expectedSubtitleText: [],
+        requiredBrandTexts: [],
+        brandPolicy: '无品牌要求。',
+      },
+      {
+        runFfmpeg: vi.fn(async () => undefined),
+        readFile: vi.fn(async () => Buffer.from('jpeg')),
+        analyzeFrames,
+        normalizeImage: async (buffer) => buffer,
+      },
+    );
+
+    expect(analyzeFrames).toHaveBeenCalledTimes(3);
+    expect(result).toEqual({
+      status: 'unknown',
+      failedChecks: ['verifier_inconclusive'],
+      reason: '动作证据质检返回无法解析',
     });
   });
 
@@ -449,6 +624,66 @@ describe('createAnthropicVideoQualityAnalyzer', () => {
         tool_choice: {
           type: 'tool',
           name: 'submit_video_quality_verdict',
+        },
+      }),
+      {
+        timeout: 45_000,
+        maxRetries: 0,
+      },
+    );
+  });
+
+  it('uses a separate evidence-only tool for required-action analysis', async () => {
+    const create = vi.fn(async () => ({
+      content: [
+        {
+          type: 'tool_use' as const,
+          id: 'toolu_required_actions',
+          name: 'submit_required_action_evidence',
+          input: {
+            checks: [
+              {
+                id: 'lift',
+                observed: true,
+                evidenceFrameSeconds: [2.25],
+                reason: '杯底清楚离开桌面',
+              },
+            ],
+            reason: '动作有直接证据',
+          },
+        },
+      ],
+    }));
+    const analyzer = createAnthropicVideoQualityAnalyzer({
+      messages: { create },
+    } as unknown as Anthropic);
+
+    const response = await analyzer({
+      references: [],
+      frames: [],
+      prompt: 'check required actions',
+      outputMode: 'required_action_evidence',
+    });
+
+    expect(JSON.parse(response)).toMatchObject({
+      checks: [expect.objectContaining({ id: 'lift', observed: true })],
+    });
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tools: [
+          expect.objectContaining({
+            name: 'submit_required_action_evidence',
+            input_schema: expect.objectContaining({
+              required: ['checks', 'reason'],
+              properties: expect.objectContaining({
+                checks: expect.any(Object),
+              }),
+            }),
+          }),
+        ],
+        tool_choice: {
+          type: 'tool',
+          name: 'submit_required_action_evidence',
         },
       }),
       {

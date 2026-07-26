@@ -26,6 +26,48 @@ const QUALITY_VERDICT_TOOL: Anthropic.Tool = {
     additionalProperties: false,
   },
 };
+const REQUIRED_ACTION_EVIDENCE_TOOL_NAME = 'submit_required_action_evidence';
+const REQUIRED_ACTION_IDS = ['enter_frame', 'lift', 'pause', 'return', 'exit_frame'] as const;
+type RequiredActionId = (typeof REQUIRED_ACTION_IDS)[number];
+const REQUIRED_ACTION_EVIDENCE_TOOL: Anthropic.Tool = {
+  name: REQUIRED_ACTION_EVIDENCE_TOOL_NAME,
+  description:
+    'Submit direct sampled-frame evidence for each explicitly requested action without a top-level verdict.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      checks: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            id: {
+              type: 'string',
+              enum: [...REQUIRED_ACTION_IDS],
+            },
+            observed: {
+              type: 'boolean',
+            },
+            evidenceFrameSeconds: {
+              type: 'array',
+              items: { type: 'number' },
+            },
+            reason: {
+              type: 'string',
+            },
+          },
+          required: ['id', 'observed', 'evidenceFrameSeconds', 'reason'],
+          additionalProperties: false,
+        },
+      },
+      reason: {
+        type: 'string',
+      },
+    },
+    required: ['checks', 'reason'],
+    additionalProperties: false,
+  },
+};
 const SAMPLE_RATIOS = [0.05, 0.15, 0.25, 0.375, 0.5, 0.625, 0.75, 0.85, 0.95] as const;
 const REFERENCE_SAMPLE_RATIOS = [0.1, 0.3, 0.5, 0.7, 0.9] as const;
 const VIDEO_QUALITY_MAX_SOURCE_IMAGE_BYTES = 12 * 1024 * 1024;
@@ -69,6 +111,7 @@ export interface VideoQualityAnalysisInput {
     readonly timestampSeconds: number;
   }>;
   readonly prompt: string;
+  readonly outputMode?: 'quality_verdict' | 'required_action_evidence';
 }
 
 export type VideoQualityAnalyzer = (input: VideoQualityAnalysisInput) => Promise<string>;
@@ -292,64 +335,197 @@ const RETURN_ACTION_RE =
 const EXIT_FRAME_ACTION_RE =
   /(?:离开画面|退出画面|移出画面|手离开|手臂离开|(?:并|再|随后)离开(?:画面)?|leave(?:s|ing)? (?:the )?frame|exit(?:s|ing)? (?:the )?frame|withdraw(?:s|n|ing)?)/iu;
 
-function buildStrictRequiredActionPrompt(input: VerifyFinalVideoQualityInput): string {
-  const checks: string[] = [];
+interface RequiredActionCheck {
+  readonly id: RequiredActionId;
+  readonly label: string;
+  readonly requirement: string;
+}
+
+interface RequiredActionEvidence {
+  readonly checks: Array<{
+    readonly id: RequiredActionId;
+    readonly observed: boolean;
+    readonly evidenceFrameSeconds: number[];
+    readonly reason: string;
+  }>;
+  readonly reason: string;
+}
+
+function getRequiredActionChecks(input: VerifyFinalVideoQualityInput): RequiredActionCheck[] {
+  const checks: RequiredActionCheck[] = [];
   if (ENTER_FRAME_ACTION_RE.test(input.userText)) {
-    checks.push(
-      '进入画面：前段应先看不到用户指定的动作主体，随后抽样帧必须清楚看到同一主体从指定方向进入。',
-    );
+    checks.push({
+      id: 'enter_frame',
+      label: '进入画面',
+      requirement:
+        '前段应先看不到用户指定的动作主体，随后抽样帧必须清楚看到同一主体从指定方向进入。',
+    });
   }
   if (LIFT_ACTION_RE.test(input.userText)) {
-    checks.push(
-      '拿起/提起：至少一个接触后的抽样帧必须清楚看到主体底部离开桌面或原支撑面，出现明确悬空、可见间隙或明显垂直位移。',
-    );
+    checks.push({
+      id: 'lift',
+      label: '拿起/提起',
+      requirement:
+        '至少一个接触后的抽样帧必须清楚看到主体底部离开桌面或原支撑面，出现明确悬空、可见间隙或明显垂直位移。',
+    });
   }
   if (PAUSE_ACTION_RE.test(input.userText)) {
-    checks.push(
-      '停顿/停留：必须先有明确拿起证据，再由一个或多个后续抽样帧显示主体保持在离开支撑面的状态；只在桌面上停着不算。',
-    );
+    checks.push({
+      id: 'pause',
+      label: '停顿/停留',
+      requirement:
+        '必须先有明确拿起证据，再由一个或多个后续抽样帧显示主体保持在离开支撑面的状态；只在桌面上停着不算。',
+    });
   }
   if (RETURN_ACTION_RE.test(input.userText)) {
-    checks.push(
-      '放回/放下：必须在明确拿起之后，后段抽样帧重新看到同一主体接触原支撑面；没有拿起证据时不得声称已经放回。',
-    );
+    checks.push({
+      id: 'return',
+      label: '放回/放下',
+      requirement:
+        '必须在明确拿起之后，后段抽样帧重新看到同一主体接触原支撑面；没有拿起证据时不得声称已经放回。',
+    });
   }
   if (EXIT_FRAME_ACTION_RE.test(input.userText)) {
-    checks.push(
-      '离开画面：时间点约为视频时长 95% 的末段抽样帧中，用户指定的动作主体必须已经离场；仍抓握、接触或停留时不得判定完成。',
-    );
+    checks.push({
+      id: 'exit_frame',
+      label: '离开画面',
+      requirement:
+        '时间点约为视频时长 95% 的末段抽样帧中，用户指定的动作主体必须已经离场；仍抓握、接触或停留时不得判定完成。',
+    });
   }
+  return checks;
+}
+
+function buildStrictRequiredActionPrompt(
+  input: VerifyFinalVideoQualityInput,
+  checks: readonly RequiredActionCheck[],
+): string {
   return [
     '这是第二次独立动作证据复核。只审核用户明确要求的动作阶段是否在九张按时间排序的抽样帧中有清楚、直接、可复核的视觉证据。',
     `用户原始需求：${input.userText}`,
     '本任务需要逐项复核：',
-    ...checks.map((check, index) => `${index + 1}. ${check}`),
+    ...checks.map(
+      (check, index) => `${index + 1}. ${check.id}（${check.label}）：${check.requirement}`,
+    ),
     '',
     '判定红线：',
     '- 手接触主体、握住把手或遮挡主体，但主体仍留在原支撑面上，不能算“拿起”。',
     '- 不得根据动作意图、相邻帧姿势或“可能发生在抽样帧之间”来脑补缺失阶段。',
-    '- 每个列出的阶段都必须有明确证据；任何一项缺失、含糊或无法确认，必须 status=fail，并包含 required_action_missing。',
-    '- 只有所有列出的动作阶段都被清楚观察到，才可以 status=pass。',
-    '- status=unknown 仅用于帧损坏、帧缺失或分析服务无法读取；动作证据不清楚必须 fail closed。',
+    '- 必须严格按上方清单逐项返回，每个 id 恰好一次，不得漏项、重复或增加其它 id。',
+    '- observed=true 时必须从图片标签逐字抄录至少一个对应的时间秒数到 evidenceFrameSeconds；没有直接证据必须 observed=false。',
+    '- 不要提交 pass、fail、unknown 或 failedChecks。最终结论由程序根据逐项证据确定。',
     '',
     '只输出 JSON：',
-    '{"status":"pass|fail|unknown","failedChecks":["snake_case_code"],"reason":"一句中文结论"}',
+    '{"checks":[{"id":"lift","observed":true,"evidenceFrameSeconds":[2.250],"reason":"杯底与桌面之间有清楚间隙"}],"reason":"一句中文整体说明"}',
   ].join('\n');
 }
 
 function shouldRunStrictRequiredActionAudit(input: VerifyFinalVideoQualityInput): boolean {
-  if (!input.strictRequiredActions) return false;
-  return (
-    ENTER_FRAME_ACTION_RE.test(input.userText) ||
-    LIFT_ACTION_RE.test(input.userText) ||
-    PAUSE_ACTION_RE.test(input.userText) ||
-    RETURN_ACTION_RE.test(input.userText) ||
-    EXIT_FRAME_ACTION_RE.test(input.userText)
-  );
+  return Boolean(input.strictRequiredActions && getRequiredActionChecks(input).length > 0);
+}
+
+function parseRequiredActionEvidenceResponse(text: string): RequiredActionEvidence | null {
+  try {
+    const start = text.indexOf('{');
+    const end = text.lastIndexOf('}');
+    if (start < 0 || end <= start) return null;
+    const value = JSON.parse(text.slice(start, end + 1)) as {
+      checks?: unknown;
+      reason?: unknown;
+    };
+    if (!Array.isArray(value.checks) || typeof value.reason !== 'string') return null;
+    const seen = new Set<RequiredActionId>();
+    const checks: RequiredActionEvidence['checks'] = [];
+    for (const item of value.checks) {
+      if (!item || typeof item !== 'object') return null;
+      const check = item as {
+        id?: unknown;
+        observed?: unknown;
+        evidenceFrameSeconds?: unknown;
+        reason?: unknown;
+      };
+      if (
+        typeof check.id !== 'string' ||
+        !REQUIRED_ACTION_IDS.includes(check.id as RequiredActionId) ||
+        seen.has(check.id as RequiredActionId) ||
+        typeof check.observed !== 'boolean' ||
+        !Array.isArray(check.evidenceFrameSeconds) ||
+        !check.evidenceFrameSeconds.every(
+          (timestamp) =>
+            typeof timestamp === 'number' && Number.isFinite(timestamp) && timestamp >= 0,
+        ) ||
+        typeof check.reason !== 'string' ||
+        !check.reason.trim()
+      ) {
+        return null;
+      }
+      const id = check.id as RequiredActionId;
+      seen.add(id);
+      checks.push({
+        id,
+        observed: check.observed,
+        evidenceFrameSeconds: check.evidenceFrameSeconds as number[],
+        reason: check.reason.trim(),
+      });
+    }
+    return {
+      checks,
+      reason: value.reason.trim(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function aggregateRequiredActionEvidence(input: {
+  expectedChecks: readonly RequiredActionCheck[];
+  evidence: RequiredActionEvidence;
+  sampledFrameSeconds: readonly number[];
+}): VideoQualityResult {
+  const evidenceById = new Map(input.evidence.checks.map((check) => [check.id, check]));
+  const failures: Array<{ check: RequiredActionCheck; reason: string }> = [];
+  for (const expected of input.expectedChecks) {
+    const evidence = evidenceById.get(expected.id);
+    if (!evidence) {
+      failures.push({
+        check: expected,
+        reason: '质检未提交该动作的直接证据',
+      });
+      continue;
+    }
+    const hasSampledFrameEvidence = evidence.evidenceFrameSeconds.some((timestamp) =>
+      input.sampledFrameSeconds.some((sampled) => Math.abs(sampled - timestamp) <= 0.01),
+    );
+    if (!evidence.observed) {
+      failures.push({ check: expected, reason: evidence.reason });
+    } else if (!hasSampledFrameEvidence) {
+      failures.push({
+        check: expected,
+        reason: '未引用任何实际抽样帧作为直接证据',
+      });
+    }
+  }
+  if (failures.length > 0) {
+    return {
+      status: 'fail',
+      failedChecks: failures.map(({ check }) => `required_action_missing_${check.id}`),
+      reason: failures.map(({ check, reason }) => `${check.label}：${reason}`).join('；'),
+    };
+  }
+  return {
+    status: 'pass',
+    failedChecks: [],
+    reason: `动作证据复核通过：${input.expectedChecks.map((check) => check.label).join('、')}`,
+  };
 }
 
 export function createAnthropicVideoQualityAnalyzer(client: Anthropic): VideoQualityAnalyzer {
   return async (input) => {
+    const outputMode = input.outputMode ?? 'quality_verdict';
+    const selectedTool =
+      outputMode === 'required_action_evidence'
+        ? REQUIRED_ACTION_EVIDENCE_TOOL
+        : QUALITY_VERDICT_TOOL;
     const referenceContent = input.references.flatMap((reference) => [
       { type: 'text' as const, text: `参考素材：${reference.label}` },
       {
@@ -386,9 +562,9 @@ export function createAnthropicVideoQualityAnalyzer(client: Anthropic): VideoQua
     const response = await client.messages.create(
       {
         model: QUALITY_MODEL,
-        max_tokens: 512,
-        tools: [QUALITY_VERDICT_TOOL],
-        tool_choice: { type: 'tool', name: QUALITY_VERDICT_TOOL_NAME },
+        max_tokens: outputMode === 'required_action_evidence' ? 768 : 512,
+        tools: [selectedTool],
+        tool_choice: { type: 'tool', name: selectedTool.name },
         messages: [{ role: 'user', content }],
       },
       {
@@ -398,7 +574,7 @@ export function createAnthropicVideoQualityAnalyzer(client: Anthropic): VideoQua
     );
     const block = response.content.find(
       (item): item is Anthropic.ToolUseBlock =>
-        item.type === 'tool_use' && item.name === QUALITY_VERDICT_TOOL_NAME,
+        item.type === 'tool_use' && item.name === selectedTool.name,
     );
     return block ? JSON.stringify(block.input) : '';
   };
@@ -528,5 +704,30 @@ export async function verifyFinalVideoQuality(
   if (primaryResult.status !== 'pass' || !shouldRunStrictRequiredActionAudit(input)) {
     return primaryResult;
   }
-  return analyzeWithRetry(buildStrictRequiredActionPrompt(input));
+  const requiredActionChecks = getRequiredActionChecks(input);
+  let lastActionResult = unknownResult('动作证据质检返回无法解析');
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const evidence = parseRequiredActionEvidenceResponse(
+        await deps.analyzeFrames({
+          references,
+          frames,
+          prompt: buildStrictRequiredActionPrompt(input, requiredActionChecks),
+          outputMode: 'required_action_evidence',
+        }),
+      );
+      if (!evidence) {
+        lastActionResult = unknownResult('动作证据质检返回无法解析');
+        continue;
+      }
+      return aggregateRequiredActionEvidence({
+        expectedChecks: requiredActionChecks,
+        evidence,
+        sampledFrameSeconds: frames.map((frame) => frame.timestampSeconds),
+      });
+    } catch {
+      lastActionResult = unknownResult('动作证据质检服务暂时不可用');
+    }
+  }
+  return lastActionResult;
 }
