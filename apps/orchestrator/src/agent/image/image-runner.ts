@@ -61,6 +61,8 @@ export interface RunImageTaskOpts {
   intent: string;
   /** Input images → image-editing mode (图生图). */
   inputImages?: readonly GeminiImageInput[];
+  /** First input image remains the identity anchor while requested surroundings change. */
+  mode?: 'free' | 'lock_subject';
   apiKey: string;
   baseUrl?: string;
   flashModel?: string;
@@ -82,6 +84,14 @@ export interface RunImageTaskOpts {
 export async function runImageTask(opts: RunImageTaskOpts): Promise<RunImageTaskResult> {
   const intent = opts.intent.trim();
   const hasInputs = Boolean(opts.inputImages && opts.inputImages.length > 0);
+  if (opts.mode === 'lock_subject' && !hasInputs) {
+    return {
+      status: 'failed',
+      summary: '',
+      reason: '锁定主角模式需要先上传一张清晰的主角图。',
+      attachments: [],
+    };
+  }
   if (!intent && !hasInputs) {
     return { status: 'failed', summary: '', reason: '请描述你想生成的图片。', attachments: [] };
   }
@@ -94,7 +104,7 @@ export async function runImageTask(opts: RunImageTaskOpts): Promise<RunImageTask
   const generate = opts.generate ?? generateImages;
   const flashModel = opts.flashModel ?? DEFAULT_FLASH_MODEL;
   // P0 compliance — marketing/poster images must NOT invent promo copy.
-  const promptText = buildImagePrompt(intent, decision.tier);
+  const promptText = buildImageExecutionPrompt(intent, decision.tier, opts.mode);
 
   const apiVersionForTier = (tier: ImageModelTier): GeminiApiVersion =>
     tier === 'pro' ? 'v1beta' : 'v1';
@@ -237,7 +247,13 @@ export async function runImageTask(opts: RunImageTaskOpts): Promise<RunImageTask
 
   return {
     status: 'completed',
-    summary: buildSummary(attachments.length, effectiveTier, hasInputs, degraded),
+    summary: buildSummary(
+      attachments.length,
+      effectiveTier,
+      hasInputs,
+      degraded,
+      opts.mode === 'lock_subject',
+    ),
     attachments,
     model: result.model ?? decision.model,
     tier: effectiveTier,
@@ -278,14 +294,35 @@ export function buildImagePrompt(intent: string, tier: ImageModelTier): string {
   return `${intent}\n\n${MARKETING_CONSTRAINT}`;
 }
 
+const LOCK_SUBJECT_CONSTRAINT =
+  '【严格约束·锁定主角】第一张输入图片是必须锁定的主角。保持其身份与可识别特征一致，' +
+  '包括脸型五官、体态比例、毛色/花纹、商品结构、Logo/包装关键特征或 IP 核心造型；' +
+  '不得将第二张及后续参考图中的主体身份替换到主角上。只改变用户明确要求的背景、风格、' +
+  '光线、场景、动作、姿态或构图。若描述与主角身份冲突，优先保持第一张图片中的主角身份。';
+
+function buildImageExecutionPrompt(
+  intent: string,
+  tier: ImageModelTier,
+  mode: RunImageTaskOpts['mode'],
+): string {
+  const prompt = buildImagePrompt(intent, tier);
+  if (mode !== 'lock_subject') return prompt;
+  return `${prompt}\n\n${LOCK_SUBJECT_CONSTRAINT}`;
+}
+
 function buildSummary(
   count: number,
   tier: ImageModelTier,
   isEdit: boolean,
   degraded: boolean,
+  lockedSubject: boolean,
 ): string {
   const modelLabel = tier === 'pro' ? 'Nano Banana Pro' : 'Nano Banana 2';
-  const action = isEdit ? '已按你的要求编辑图片' : `已生成 ${count} 张图片`;
+  const action = lockedSubject
+    ? '已按锁定主角要求生成图片'
+    : isEdit
+      ? '已按你的要求编辑图片'
+      : `已生成 ${count} 张图片`;
   const note = degraded ? '（Pro 档繁忙，已自动改用 Nano Banana 2 出图）' : '';
   return `${action}（${modelLabel}）${note}。下载链接见下方，24 小时内有效。`;
 }

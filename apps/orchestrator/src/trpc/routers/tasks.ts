@@ -477,6 +477,7 @@ const createInput = z.object({
       model: z.enum(['nano_banana_2', 'nano_banana_pro']).optional(),
       aspectRatio: z.enum(['9:16', '16:9', '1:1', '4:3', '3:4']),
       imageCount: z.number().int().min(1).max(4),
+      mode: z.enum(['free', 'lock_subject']).optional(),
     })
     .optional(),
 });
@@ -1582,6 +1583,7 @@ export const tasksRouter = router({
             ...(input.imageOptions?.imageCount
               ? { imageCount: input.imageOptions.imageCount as 1 | 2 | 3 | 4 }
               : {}),
+            ...(input.imageOptions?.mode ? { mode: input.imageOptions.mode } : {}),
             apiKey: appEnv.GEMINI_API_KEY,
             baseUrl: appEnv.GEMINI_BASE_URL,
             flashModel: appEnv.GEMINI_IMAGE_MODEL,

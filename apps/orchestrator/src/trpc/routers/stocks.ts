@@ -48,6 +48,7 @@ interface StockSnapshot {
   sparkKind: 'daily_close' | 'intraday';
   sparkBaseline: number | null;
   sparkTradeDate?: string | null;
+  tradeDate?: string | null;
   turnoverAmount: number | null;
   averageTurnoverAmount: number | null;
   volume: number | null;
@@ -104,6 +105,7 @@ interface DashboardFreshness {
 
 interface DashboardSnapshot {
   updatedAt: string;
+  observedTradeDate?: string | null;
   source: 'akshare';
   isFallbackWatchlist: boolean;
   watchlistStocks: StockSnapshot[];
@@ -166,6 +168,7 @@ function unavailableStock(entry: WatchlistEntry, note = '真实行情暂不可�
     sparkKind: 'daily_close',
     sparkBaseline: null,
     sparkTradeDate: null,
+    tradeDate: null,
     turnoverAmount: null,
     averageTurnoverAmount: null,
     volume: null,
@@ -347,6 +350,7 @@ function buildPartialDashboardSnapshot(
   return withFreshness(
     {
       updatedAt: now.toISOString(),
+      observedTradeDate: null,
       source: 'akshare',
       isFallbackWatchlist: false,
       watchlistStocks,
@@ -545,6 +549,15 @@ function observedIntradayStockForNow(stockRow: StockSnapshot, now: Date): StockS
   };
 }
 
+function observedTradeDateFromStocks(stocks: StockSnapshot[]): string | null {
+  const dates = stocks
+    .flatMap((stockRow) => [stockRow.sparkTradeDate, stockRow.tradeDate])
+    .map((value) => datePart(value ?? undefined))
+    .filter((value): value is string => value !== null)
+    .sort();
+  return dates.at(-1) ?? null;
+}
+
 function dashboardWithObservedIntraday(snapshot: DashboardSnapshot, now: Date): DashboardSnapshot {
   const watchlistStocks = snapshot.watchlistStocks.map((stockRow) => observedIntradayStockForNow(stockRow, now));
   const bySymbol = new Map(watchlistStocks.map((stockRow) => [stockRow.symbol, stockRow]));
@@ -552,6 +565,7 @@ function dashboardWithObservedIntraday(snapshot: DashboardSnapshot, now: Date): 
     bySymbol.get(stockRow.symbol) ?? observedIntradayStockForNow(stockRow, now));
   return {
     ...snapshot,
+    observedTradeDate: observedTradeDateFromStocks(watchlistStocks),
     watchlistStocks,
     starStocks,
   };
@@ -592,6 +606,7 @@ async function stockSnapshot(
   const intradaySeries = intradayEnv.error ? { values: [], labels: [] } : sparkSeriesFromIntraday(intradayEnv.data, now);
   const hasIntraday = intradaySeries.values.length >= 2;
   const sparkTradeDate = hasIntraday ? datePart(intradaySeries.labels[intradaySeries.labels.length - 1]) : null;
+  const tradeDate = datePart(String(last ? pick(last, ['日期', 'date']) ?? '' : '')) ?? sparkTradeDate;
   const latestIntraday = hasIntraday ? intradaySeries.values[intradaySeries.values.length - 1] : null;
   const close = quote
     ? pick(quote, ['最新价', 'price', '收盘', 'close'])
@@ -635,6 +650,7 @@ async function stockSnapshot(
     sparkKind: 'intraday',
     sparkBaseline,
     sparkTradeDate,
+    tradeDate,
     turnoverAmount,
     averageTurnoverAmount,
     volume,
@@ -912,6 +928,7 @@ async function buildDashboardSnapshot(args: {
   return withFreshness(
     {
       updatedAt: now.toISOString(),
+      observedTradeDate: observedTradeDateFromStocks(stocks),
       source: 'akshare',
       isFallbackWatchlist: false,
       watchlistStocks: stocks,
@@ -1000,6 +1017,7 @@ function withPreservedSlowSignals(snapshot: DashboardSnapshot, previous?: Dashbo
 
   return {
     ...snapshot,
+    observedTradeDate: observedTradeDateFromStocks(watchlistStocks),
     watchlistStocks,
     starStocks: shouldPreserveWatchlistStocks
       ? previous.starStocks

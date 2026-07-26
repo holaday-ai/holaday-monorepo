@@ -48,6 +48,15 @@ describe('video creative style state', () => {
     });
   });
 
+  it('passes locked-subject mode as structured image metadata', () => {
+    expect(buildImageCreationOptions('nano_banana_2', '1:1', 1, 'lock_subject')).toEqual({
+      model: 'nano_banana_2',
+      aspectRatio: '1:1',
+      imageCount: 1,
+      mode: 'lock_subject',
+    });
+  });
+
   it('keeps randomized style choices out of the user prompt', () => {
     expect(
       buildVideoIntentWithCreativeStyles('拍一条新品介绍短视频', {

@@ -6,4 +6,5 @@ export interface ImageCreationOptions {
   model: ImageModel;
   aspectRatio: VideoAspect;
   imageCount: 1 | 2 | 3 | 4;
+  mode?: 'free' | 'lock_subject';
 }

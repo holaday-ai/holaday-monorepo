@@ -200,8 +200,14 @@ export function buildImageCreationOptions(
   model: ImageModel,
   aspectRatio: VideoAspect,
   imageCount: 1 | 2 | 3 | 4 = DEFAULT_IMAGE_COUNT,
+  mode: ImageGenerationMode = 'free',
 ): ImageCreationOptions {
-  return { model, aspectRatio, imageCount };
+  return {
+    model,
+    aspectRatio,
+    imageCount,
+    ...(mode === 'lock_subject' ? { mode } : {}),
+  };
 }
 
 const CREATIVE_SECTION_CLASS = 'rounded-[22px] border-[#EFEFEF] bg-white shadow-[0_14px_34px_rgba(17,24,39,0.04)]';
@@ -667,7 +673,12 @@ function CreativeStudioPage({
     const finalIntent = isImage
       ? `生成图片：${styledImageIntent}`
       : styledVideoIntent;
-    const imageOptions = buildImageCreationOptions(imageModel, aspectRatio, imageCount);
+    const imageOptions = buildImageCreationOptions(
+      imageModel,
+      aspectRatio,
+      imageCount,
+      imageGenerationMode,
+    );
     try {
       const res = isImage
         ? await createTask(

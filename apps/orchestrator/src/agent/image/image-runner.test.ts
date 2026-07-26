@@ -175,6 +175,45 @@ describe('runImageTask', () => {
     );
   });
 
+  it('rejects locked-subject mode without a subject image before generation', async () => {
+    const generate = okGenerate();
+    const out = await runImageTask({
+      intent: '把主角放到雪山背景里',
+      mode: 'lock_subject',
+      apiKey: 'k',
+      save,
+      logger: fakeLogger(),
+      generate,
+    });
+
+    expect(out.status).toBe('failed');
+    expect(out.reason).toContain('主角图');
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it('enforces first-image identity preservation for locked-subject generation', async () => {
+    const generate = okGenerate();
+    const out = await runImageTask({
+      intent: '把背景换成雪山',
+      mode: 'lock_subject',
+      inputImages: [
+        { data: 'SUBJECT', mimeType: 'image/jpeg' },
+        { data: 'STYLE', mimeType: 'image/png' },
+      ],
+      apiKey: 'k',
+      save,
+      logger: fakeLogger(),
+      generate,
+    });
+
+    const sentPrompt = generate.mock.calls[0]![0].prompt;
+    expect(sentPrompt).toContain('第一张输入图片是必须锁定的主角');
+    expect(sentPrompt).toContain('不得将第二张及后续参考图中的主体身份替换到主角上');
+    expect(sentPrompt).toContain('只改变用户明确要求的背景、风格、光线、场景、动作、姿态或构图');
+    expect(out.status).toBe('completed');
+    expect(out.summary).toContain('锁定主角');
+  });
+
   it('routes a 4K poster to Pro without an unverified explicit resolution', async () => {
     const generate = okGenerate();
     const out = await runImageTask({

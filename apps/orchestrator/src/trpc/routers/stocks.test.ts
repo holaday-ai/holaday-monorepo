@@ -443,6 +443,7 @@ describe('stocks dashboard snapshot', () => {
       ...previous.watchlistStocks[0]!,
       sparkTradeDate: '2026-06-30',
     });
+    expect(merged.observedTradeDate).toBe('2026-06-30');
     expect(merged.freshness.status).toBe('stale');
     expect(merged.freshness.message).toContain('关注股票');
   });
