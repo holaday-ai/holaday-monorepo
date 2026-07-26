@@ -57,6 +57,10 @@ const REQUIRED_HAND_SCENE_SUFFIX =
 const REQUIRED_HAND_OBJECT_IDENTITY_SUFFIX =
   '；手正在操作的主体必须始终是同一个物体，主体身份与类别、轮廓、颜色、材质和结构件（例如杯子的把手）跨帧保持一致，' +
   '不得在动作中变成另一种物体，不得让把手或其它结构件凭空出现或消失';
+const REQUIRED_HAND_SAFE_FRAMING_SUFFIX =
+  '；采用中景或略宽景别并提前预留完整动作空间：手、手腕、前臂和操作主体必须全程完整保留在画面内，' +
+  '操作主体四周保留约 10% 安全边距；拿起、悬停、移动和放回时不得裁切主体顶部、底部或关键结构件，' +
+  '镜头可以自然跟随，但不得让主体出框、突然缩放或因运动改变形态';
 const CUP_OBJECT_RE = /(?:杯|马克杯|茶杯|咖啡杯|cup|mug)/iu;
 const EXPLICIT_HANDLE_GRIP_RE =
   /(?:抓住杯柄|握住杯柄|拿住杯柄|抓住把手|握住把手|by (?:the )?handle|grip (?:the )?handle)/iu;
@@ -125,7 +129,9 @@ function scenePromptPolicy(userText: string): {
       COMMON_SCENE_SUFFIX +
       HUMAN_SCENE_SUFFIX +
       (HAND_INTENT_RE.test(userText)
-        ? REQUIRED_HAND_SCENE_SUFFIX + REQUIRED_HAND_OBJECT_IDENTITY_SUFFIX
+        ? REQUIRED_HAND_SCENE_SUFFIX +
+          REQUIRED_HAND_OBJECT_IDENTITY_SUFFIX +
+          REQUIRED_HAND_SAFE_FRAMING_SUFFIX
         : ''),
     negativePrompt: HAND_INTENT_RE.test(userText) ? REQUIRED_HAND_OBJECT_NEGATIVE : BASE_NEGATIVE,
     presencePolicy: policy,
@@ -171,7 +177,7 @@ function qualityRepairInstruction(
     anatomyRepair = '；上一版出现了非必要手部，改为不露手构图，不要让手或手臂进入画面';
   }
 
-  return `；质量修复重试：上一版未通过检查（${quality.reason}）。必须修正该问题，同时保持主体、动作、颜色、文字、构图和镜头要求不变${anatomyRepair}；动作修复要求：必须在 ${durationSeconds} 秒内按用户原始顺序完整执行全部动作，最后至少 1 秒展示动作完成后的稳定终态`;
+  return `；质量修复重试：上一版未通过检查（${quality.reason}）。必须修正该问题，同时保持用户明确要求的主体、动作、颜色、文字和镜头意图不变；允许调整上一版有缺陷的构图、景别和主体运动幅度，确保缺陷不再出现${anatomyRepair}；动作修复要求：必须在 ${durationSeconds} 秒内按用户原始顺序完整执行全部动作，最后至少 1 秒展示动作完成后的稳定终态`;
 }
 
 export type VisualMode = 'image' | 'video';

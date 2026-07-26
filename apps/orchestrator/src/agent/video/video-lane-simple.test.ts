@@ -874,6 +874,11 @@ describe('runSimpleVideoCreation — final quality gate', () => {
     expect(mocks.generateVeoVideo).toHaveBeenCalledTimes(2);
     expect(mocks.removeFile).toHaveBeenCalledTimes(2);
     expect(mocks.downloadToFile).toHaveBeenCalledTimes(2);
+    const initialRequest = (mocks.generateVeoVideo.mock.calls[0] as unknown[])[0] as {
+      prompt: string;
+    };
+    expect(initialRequest.prompt).toMatch(/操作主体.*全程完整保留在画面内/);
+    expect(initialRequest.prompt).toMatch(/四周保留.*安全边距/);
     const retryRequest = (mocks.generateVeoVideo.mock.calls[1] as unknown[])[0] as {
       prompt: string;
     };
@@ -883,6 +888,8 @@ describe('runSimpleVideoCreation — final quality gate', () => {
     expect(retryRequest.prompt).toMatch(/自然抓握.*遮挡/);
     expect(retryRequest.prompt).not.toContain('抓握处无遮挡');
     expect(retryRequest.prompt).not.toMatch(/恰好五根彼此独立、清晰可辨/);
+    expect(retryRequest.prompt).toContain('允许调整上一版有缺陷的构图');
+    expect(retryRequest.prompt).not.toContain('构图和镜头要求不变');
     expect(retryRequest.prompt).toContain('按用户原始顺序完整执行全部动作');
     expect(retryRequest.prompt).toContain('最后至少 1 秒展示动作完成后的稳定终态');
     expect(
