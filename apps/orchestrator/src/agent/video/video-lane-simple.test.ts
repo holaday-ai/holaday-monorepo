@@ -878,7 +878,7 @@ describe('runSimpleVideoCreation — final quality gate', () => {
       prompt: string;
     };
     expect(initialRequest.prompt).toMatch(/操作主体.*全程完整保留在画面内/);
-    expect(initialRequest.prompt).toMatch(/四周保留.*安全边距/);
+    expect(initialRequest.prompt).toMatch(/四周保留.*安全留白/);
     expect(initialRequest.prompt).toMatch(/固定机位.*不得推近、变焦或跟随抬升/);
     expect(initialRequest.prompt).toMatch(/只做完成动作所需的最小幅度抬升/);
     const retryRequest = (mocks.generateVeoVideo.mock.calls[1] as unknown[])[0] as {
@@ -893,8 +893,10 @@ describe('runSimpleVideoCreation — final quality gate', () => {
     expect(retryRequest.prompt).not.toMatch(/恰好五根彼此独立、清晰可辨/);
     expect(retryRequest.prompt).toContain('允许调整上一版有缺陷的构图');
     expect(retryRequest.prompt).toMatch(
-      /构图修复要求.*中景或略宽景别.*至少 15% 安全边距.*使用固定机位/,
+      /构图修复要求.*全桌面宽景.*画面高度不超过 15%.*至少 30% 安全留白.*使用固定机位/,
     );
+    expect(retryRequest.prompt).toMatch(/杯底.*离开桌面.*3-5 厘米/);
+    expect(retryRequest.prompt).toContain('不得进入画面上半部');
     expect(retryRequest.prompt).not.toContain('构图和镜头要求不变');
     expect(retryRequest.prompt).toContain('按用户原始顺序完整执行全部动作');
     expect(retryRequest.prompt).toContain('最后至少 1 秒展示动作完成后的稳定终态');
@@ -930,11 +932,13 @@ describe('runSimpleVideoCreation — final quality gate', () => {
     const request = (mocks.generateBrollVideo.mock.calls[0] as unknown[])[0] as {
       prompt: string;
     };
-    expect(request.prompt).toMatch(/主体中心.*画面中央 50%/);
-    expect(request.prompt).toMatch(/中远景.*杯体.*画面高度.*30%/);
-    expect(request.prompt).toMatch(/上下左右.*20%.*安全留白/);
+    expect(request.prompt).toMatch(/主体中心.*画面下半部中央区域/);
+    expect(request.prompt).toMatch(/全桌面宽景.*杯体.*画面高度.*20%/);
+    expect(request.prompt).toMatch(/上下左右.*25%.*安全留白/);
     expect(request.prompt).toMatch(/仅垂直抬升.*足以离开桌面/);
-    expect(request.prompt).toMatch(/抬升距离.*不超过一个杯身高度/);
+    expect(request.prompt).toMatch(/杯底.*离开桌面.*3-5 厘米/);
+    expect(request.prompt).toMatch(/抬升距离.*不超过半个杯身高度/);
+    expect(request.prompt).toContain('不得进入画面上半部');
     expect(request.prompt).toMatch(/清楚停留至少 1 秒.*放回原来的桌面落点/);
     expect(request.prompt).toMatch(/原来的桌面落点.*把手方向.*画面大小/);
     expect(request.prompt).toContain('桌面始终在杯子下方留有可见空间');
@@ -958,7 +962,7 @@ describe('runSimpleVideoCreation — final quality gate', () => {
     const request = (mocks.generateBrollVideo.mock.calls[0] as unknown[])[0] as {
       prompt: string;
     };
-    expect(request.prompt).toMatch(/操作主体初始占画面高度不超过 30%/);
+    expect(request.prompt).toMatch(/操作主体初始占画面高度不超过 20%/);
     expect(request.prompt).not.toContain('杯体初始占画面高度');
   });
 

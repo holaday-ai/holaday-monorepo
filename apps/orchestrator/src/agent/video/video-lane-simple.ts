@@ -97,7 +97,9 @@ function requiredHandSafeFramingSuffix(userText: string): string {
     EXPLICIT_PARTIAL_FRAMING_RE.test(userText);
   const framing = EXPLICIT_PARTIAL_FRAMING_RE.test(userText)
     ? '；按用户明确要求的特写或局部构图执行；被要求保留的局部、动作接触点和关键结构必须持续清楚，不得发生非预期裁切或结构消失'
-    : '；采用中景或略宽景别并提前预留完整动作空间：手、手腕、前臂和操作主体必须全程完整保留在画面内，操作主体四周保留至少 15% 安全边距；拿起、悬停、移动和放回时不得裁切主体顶部、底部或关键结构件';
+    : preserveRequestedMotion
+      ? '；采用足以覆盖完整运动轨迹的宽景：手、手腕、前臂和操作主体必须全程完整保留在画面内，拿起、悬停、移动和放回时不得裁切主体顶部、底部或关键结构件'
+      : '；采用全桌面宽景并提前预留完整动作空间：手、手腕、前臂和操作主体必须全程完整保留在画面内，操作主体四周保留至少 25% 安全留白；拿起、悬停和放回时不得裁切主体顶部、底部或关键结构件';
   const camera = EXPLICIT_DYNAMIC_CAMERA_RE.test(userText)
     ? '；保留用户明确要求的跟拍、变焦或其它运镜，但镜头必须提前扩宽并连续跟随，不能因运镜让关键主体意外出框'
     : '；使用固定机位，不得推近、变焦或跟随抬升';
@@ -105,29 +107,38 @@ function requiredHandSafeFramingSuffix(userText: string): string {
     ? '；保留用户明确要求的大幅度动作，并为完整运动轨迹预留足够上下左右空间'
     : '；用户未指定大幅度动作时，只做完成动作所需的最小幅度抬升，让操作主体停留在安全区域';
   const subjectSize = CUP_OBJECT_RE.test(userText)
-    ? '杯体初始占画面高度不超过 30%'
-    : '操作主体初始占画面高度不超过 30%';
+    ? '杯体初始占画面高度不超过 20%'
+    : '操作主体初始占画面高度不超过 20%';
   const safeStaging = preserveRequestedMotion
     ? ''
-    : `；动作安全排布：采用固定中远景，${subjectSize}，主体上下左右始终保留至少 20% 安全留白；` +
-      '让操作主体初始位于画面中央偏下，主体中心始终保持在画面中央 50% 的安全区域内；' +
+    : `；动作安全排布：采用固定全桌面宽景，${subjectSize}，主体上下左右始终保留至少 25% 安全留白；` +
+      '让操作主体初始位于画面中央偏下，主体中心在整个动作中始终停留在画面下半部中央区域，不得进入画面上半部；' +
       (CUP_OBJECT_RE.test(userText)
-        ? '拿起杯子时仅垂直抬升到足以离开桌面的高度，抬升距离不超过一个杯身高度，桌面始终在杯子下方留有可见空间；' +
+        ? '拿起杯子时仅垂直抬升到足以离开桌面的高度，杯底只离开桌面约 3-5 厘米，抬升距离不超过半个杯身高度，桌面始终在杯子下方留有可见空间；' +
           '若用户要求悬停或停留，必须清楚停留至少 1 秒，再放回原来的桌面落点，保持把手方向与画面大小和开场一致'
         : '只做完成动作所需的最短稳定轨迹，并在用户要求的位置完成收尾');
   return framing + camera + motion + safeStaging;
 }
 
 function requiredHandFramingRepairInstruction(userText: string): string {
+  const preserveRequestedMotion =
+    EXPLICIT_DYNAMIC_CAMERA_RE.test(userText) ||
+    EXPLICIT_LARGE_HAND_MOTION_RE.test(userText) ||
+    EXPLICIT_HAND_RELOCATION_RE.test(userText) ||
+    EXPLICIT_PARTIAL_FRAMING_RE.test(userText);
   const framing = EXPLICIT_PARTIAL_FRAMING_RE.test(userText)
     ? '保留用户明确要求的特写或局部构图，被要求保留的局部、动作接触点和关键结构必须持续清楚，不得发生非预期裁切或结构消失'
-    : '采用中景或略宽景别并提前预留完整动作空间，操作主体四周保留至少 15% 安全边距，从动作开始到结束都必须完整看到主体顶部、底部、左右边界和关键结构件';
+    : preserveRequestedMotion
+      ? '采用足以覆盖用户完整运动轨迹的宽景，从动作开始到结束都必须完整看到主体顶部、底部、左右边界和关键结构件'
+      : `改用全桌面宽景，${CUP_OBJECT_RE.test(userText) ? '杯体' : '操作主体'}初始占画面高度不超过 15%，主体上下左右始终保留至少 30% 安全留白，主体中心全程停留在画面下半部中央区域且不得进入画面上半部`;
   const camera = EXPLICIT_DYNAMIC_CAMERA_RE.test(userText)
     ? '保持用户明确要求的跟拍、变焦或其它运镜，镜头提前扩宽并连续跟随，不得因运镜让关键主体意外出框'
     : '使用固定机位，不得推近、变焦或跟随主体抬升';
   const motion = EXPLICIT_LARGE_HAND_MOTION_RE.test(userText)
     ? '保留用户明确要求的大幅度动作，为完整运动轨迹预留足够上下左右空间'
-    : '用户未指定大幅度动作时，只做完成动作所需的最小运动幅度';
+    : CUP_OBJECT_RE.test(userText) && !preserveRequestedMotion
+      ? '杯底只离开桌面约 3-5 厘米且不超过半个杯身高度，只做完成拿起所需的最小运动幅度'
+      : '用户未指定大幅度动作时，只做完成动作所需的最小运动幅度';
   return `；构图修复要求：${framing}；${camera}；${motion}`;
 }
 
@@ -574,8 +585,8 @@ export function createSimplePipelineDeps(
         const candidatePrompt =
           visual +
           originalUserRequirement +
-          repairInstruction +
           scenePolicy.suffix +
+          repairInstruction +
           requiredHandChoreography(userText) +
           completionInstruction;
         let url: string;
