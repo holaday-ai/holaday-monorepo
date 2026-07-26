@@ -190,6 +190,9 @@ describe('verifyFinalVideoQuality', () => {
     expect(analysisInput.prompt).toMatch(/静态抽样帧.*连续运动|不能验证.*口型同步/);
     expect(analysisInput.prompt).toMatch(/进入.*拿起.*放回|分阶段动作/);
     expect(analysisInput.prompt).toMatch(/required_action_missing/);
+    expect(analysisInput.prompt).toMatch(
+      /关键主体.*触碰或越过.*画面边缘.*subject_out_of_frame/,
+    );
     expect(result.status).toBe('fail');
   });
 
@@ -232,6 +235,12 @@ describe('verifyFinalVideoQuality', () => {
               evidenceFrameSeconds: [5.7],
               reason: '末段手仍在画面中',
             },
+            {
+              id: 'subject_containment',
+              observed: true,
+              evidenceFrameSeconds: [0.3, 0.9, 1.5, 2.25, 3, 3.75, 4.5, 5.1, 5.7],
+              reason: '九张抽样帧中的杯子均完整保留在画面内',
+            },
           ],
           reason: '动作链未完整完成',
         }),
@@ -267,6 +276,8 @@ describe('verifyFinalVideoQuality', () => {
     expect(auditInput.prompt).toMatch(/杯底.*离开.*桌面|明确.*悬空/);
     expect(auditInput.prompt).toMatch(/手接触.*不能算.*拿起/);
     expect(auditInput.prompt).toMatch(/95%.*动作主体.*已经离场/);
+    expect(auditInput.prompt).toMatch(/逐帧.*被操作.*画面边缘/);
+    expect(auditInput.prompt).toMatch(/subject_containment.*每一个.*时间秒数/);
     expect(result).toEqual({
       status: 'fail',
       failedChecks: [
@@ -304,8 +315,14 @@ describe('verifyFinalVideoQuality', () => {
               evidenceFrameSeconds: [4.5],
               reason: '杯子在后段重新接触桌面',
             },
+            {
+              id: 'subject_containment',
+              observed: true,
+              evidenceFrameSeconds: [0.3, 0.9, 1.5, 2.25, 3, 3.75, 4.5, 5.1, 5.7],
+              reason: '每一张抽样帧都已核对，杯子始终完整在画面内',
+            },
           ],
-          reason: '两个动作均有直接证据',
+          reason: '两个动作均有直接证据，主体未出框',
         }),
       );
 
@@ -331,7 +348,119 @@ describe('verifyFinalVideoQuality', () => {
     expect(result).toEqual({
       status: 'pass',
       failedChecks: [],
+      reason: '动作证据复核通过：拿起/提起、放回/放下、关键主体全程完整',
+    });
+  });
+
+  it('respects an explicit partial close-up without requiring the full subject to remain in frame', async () => {
+    const analyzeFrames = vi
+      .fn()
+      .mockResolvedValueOnce(
+        JSON.stringify({ status: 'pass', failedChecks: [], reason: '整体画面无明显异常' }),
+      )
+      .mockResolvedValueOnce(
+        JSON.stringify({
+          checks: [
+            {
+              id: 'lift',
+              observed: true,
+              evidenceFrameSeconds: [2.25],
+              reason: '特写中能看到杯底离开桌面',
+            },
+            {
+              id: 'return',
+              observed: true,
+              evidenceFrameSeconds: [4.5],
+              reason: '特写中能看到杯子重新接触桌面',
+            },
+          ],
+          reason: '用户明确要求局部特写，两个动作均有直接证据',
+        }),
+      );
+
+    const result = await verifyFinalVideoQuality(
+      {
+        videoPath: '/tmp/final.mp4',
+        workdir: '/tmp/quality',
+        durationMs: 6_000,
+        userText: '杯子特写镜头，手部拿起杯子，再把杯子放回桌面。',
+        strictRequiredActions: true,
+        expectedSubtitleText: [],
+        requiredBrandTexts: [],
+        brandPolicy: '无品牌要求。',
+      },
+      {
+        runFfmpeg: vi.fn(async () => undefined),
+        readFile: vi.fn(async () => Buffer.from('jpeg')),
+        analyzeFrames,
+        normalizeImage: async (buffer) => buffer,
+      },
+    );
+
+    const auditInput = (analyzeFrames.mock.calls[1] as unknown[])[0] as { prompt: string };
+    expect(auditInput.prompt).not.toContain('subject_containment');
+    expect(result).toEqual({
+      status: 'pass',
+      failedChecks: [],
       reason: '动作证据复核通过：拿起/提起、放回/放下',
+    });
+  });
+
+  it('fails when a handled subject crosses the frame boundary even if all actions are visible', async () => {
+    const analyzeFrames = vi
+      .fn()
+      .mockResolvedValueOnce(
+        JSON.stringify({ status: 'pass', failedChecks: [], reason: '整体画面无明显异常' }),
+      )
+      .mockResolvedValueOnce(
+        JSON.stringify({
+          checks: [
+            {
+              id: 'lift',
+              observed: true,
+              evidenceFrameSeconds: [2.25],
+              reason: '杯底离开桌面',
+            },
+            {
+              id: 'return',
+              observed: true,
+              evidenceFrameSeconds: [4.5],
+              reason: '杯子重新接触桌面',
+            },
+            {
+              id: 'subject_containment',
+              observed: false,
+              evidenceFrameSeconds: [3],
+              reason: '3.000 秒时杯口越过画面上边界',
+            },
+          ],
+          reason: '动作完成，但关键主体曾出框',
+        }),
+      );
+
+    const result = await verifyFinalVideoQuality(
+      {
+        videoPath: '/tmp/final.mp4',
+        workdir: '/tmp/quality',
+        durationMs: 6_000,
+        userText: '拿起杯子，再放回桌面。',
+        strictRequiredActions: true,
+        expectedSubtitleText: [],
+        requiredBrandTexts: [],
+        brandPolicy: '无品牌要求。',
+      },
+      {
+        runFfmpeg: vi.fn(async () => undefined),
+        readFile: vi.fn(async () => Buffer.from('jpeg')),
+        analyzeFrames,
+        normalizeImage: async (buffer) => buffer,
+      },
+    );
+
+    expect(result).toEqual({
+      status: 'fail',
+      failedChecks: ['subject_out_of_frame'],
+      reason: '关键主体全程完整：3.000 秒时杯口越过画面上边界',
     });
   });
 
@@ -359,6 +488,12 @@ describe('verifyFinalVideoQuality', () => {
               observed: true,
               evidenceFrameSeconds: [4.5],
               reason: '杯子重新接触桌面',
+            },
+            {
+              id: 'subject_containment',
+              observed: true,
+              evidenceFrameSeconds: [0.3, 0.9, 1.5, 2.25, 3, 3.75, 4.5, 5.1, 5.7],
+              reason: '每一张抽样帧中的杯子均完整在画面内',
             },
           ],
           reason: '动作阶段均有直接证据',
@@ -404,6 +539,12 @@ describe('verifyFinalVideoQuality', () => {
               observed: true,
               evidenceFrameSeconds: [1.5],
               reason: '杯子离开桌面',
+            },
+            {
+              id: 'subject_containment',
+              observed: true,
+              evidenceFrameSeconds: [0.3, 0.9, 1.5, 2.25, 3, 3.75, 4.5, 5.1, 5.7],
+              reason: '每一张抽样帧中的杯子均完整在画面内',
             },
           ],
           reason: '只提交了拿起证据',

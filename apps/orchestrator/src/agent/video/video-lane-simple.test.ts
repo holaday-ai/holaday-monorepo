@@ -847,8 +847,8 @@ describe('runSimpleVideoCreation — final quality gate', () => {
         if (segmentChecks === 1) {
           return {
             status: 'fail' as const,
-            failedChecks: ['hand_structure_abnormal'],
-            reason: '手指边缘融合，无法确认五指清晰分离',
+            failedChecks: ['hand_structure_abnormal', 'subject_out_of_frame'],
+            reason: '手指边缘融合，且杯口越过画面上边界',
           };
         }
       }
@@ -879,16 +879,22 @@ describe('runSimpleVideoCreation — final quality gate', () => {
     };
     expect(initialRequest.prompt).toMatch(/操作主体.*全程完整保留在画面内/);
     expect(initialRequest.prompt).toMatch(/四周保留.*安全边距/);
+    expect(initialRequest.prompt).toMatch(/固定机位.*不得推近、变焦或跟随抬升/);
+    expect(initialRequest.prompt).toMatch(/只做完成动作所需的最小幅度抬升/);
     const retryRequest = (mocks.generateVeoVideo.mock.calls[1] as unknown[])[0] as {
       prompt: string;
     };
     expect(retryRequest.prompt).toContain('质量修复重试');
     expect(retryRequest.prompt).toContain('手指边缘融合');
+    expect(retryRequest.prompt).toContain('杯口越过画面上边界');
     expect(retryRequest.prompt).toContain('只保留用户要求的手和手臂');
     expect(retryRequest.prompt).toMatch(/自然抓握.*遮挡/);
     expect(retryRequest.prompt).not.toContain('抓握处无遮挡');
     expect(retryRequest.prompt).not.toMatch(/恰好五根彼此独立、清晰可辨/);
     expect(retryRequest.prompt).toContain('允许调整上一版有缺陷的构图');
+    expect(retryRequest.prompt).toMatch(
+      /构图修复要求.*中景或略宽景别.*至少 15% 安全边距.*使用固定机位/,
+    );
     expect(retryRequest.prompt).not.toContain('构图和镜头要求不变');
     expect(retryRequest.prompt).toContain('按用户原始顺序完整执行全部动作');
     expect(retryRequest.prompt).toContain('最后至少 1 秒展示动作完成后的稳定终态');
@@ -897,6 +903,57 @@ describe('runSimpleVideoCreation — final quality gate', () => {
         (call) => ((call as unknown[])[0] as { filename?: string }).filename === 'video.mp4',
       ),
     ).toHaveLength(1);
+  });
+
+  it('preserves explicitly requested camera motion and large hand movement while keeping the subject in frame', async () => {
+    const { svc, mocks } = makeServices();
+    const userText = '环绕镜头，右手高高举起蓝色杯子，再把杯子放回桌面。';
+    const oneShot: VideoScript = {
+      title: '跟拍举杯',
+      segments: [
+        {
+          text: userText,
+          type: 'broll',
+          visual: userText,
+        },
+      ],
+    };
+    const verifyFinalVideo = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: 'fail' as const,
+        failedChecks: ['subject_out_of_frame'],
+        reason: '杯口在抬升时越过画面上边界',
+      })
+      .mockResolvedValue({
+        status: 'pass' as const,
+        failedChecks: [],
+        reason: '替换成片通过',
+      });
+
+    await runSimpleVideoCreation(
+      { userText, script: oneShot },
+      CFG,
+      { videoSource: 'veo_fast', aspectRatio: '16:9' },
+      { ...svc, verifyFinalVideo },
+    );
+
+    expect(mocks.generateVeoVideo).toHaveBeenCalledTimes(2);
+    const initialRequest = (mocks.generateVeoVideo.mock.calls[0] as unknown[])[0] as {
+      prompt: string;
+    };
+    expect(initialRequest.prompt).toContain('保留用户明确要求的跟拍、变焦或其它运镜');
+    expect(initialRequest.prompt).toContain('保留用户明确要求的大幅度动作');
+    expect(initialRequest.prompt).not.toContain('使用固定机位，不得推近、变焦或跟随抬升');
+    expect(initialRequest.prompt).not.toContain('只做完成动作所需的最小幅度抬升');
+
+    const retryRequest = (mocks.generateVeoVideo.mock.calls[1] as unknown[])[0] as {
+      prompt: string;
+    };
+    expect(retryRequest.prompt).toContain('保持用户明确要求的跟拍、变焦或其它运镜');
+    expect(retryRequest.prompt).toContain('保留用户明确要求的大幅度动作');
+    expect(retryRequest.prompt).not.toMatch(/构图修复要求.*固定略宽中景/);
+    expect(retryRequest.prompt).not.toContain('只做完成动作所需的最小运动幅度');
   });
 
   it('removes an unrequested hand from a repair candidate instead of constraining the composition around it', async () => {

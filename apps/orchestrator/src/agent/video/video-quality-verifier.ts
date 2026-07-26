@@ -27,7 +27,14 @@ const QUALITY_VERDICT_TOOL: Anthropic.Tool = {
   },
 };
 const REQUIRED_ACTION_EVIDENCE_TOOL_NAME = 'submit_required_action_evidence';
-const REQUIRED_ACTION_IDS = ['enter_frame', 'lift', 'pause', 'return', 'exit_frame'] as const;
+const REQUIRED_ACTION_IDS = [
+  'enter_frame',
+  'lift',
+  'pause',
+  'return',
+  'exit_frame',
+  'subject_containment',
+] as const;
 type RequiredActionId = (typeof REQUIRED_ACTION_IDS)[number];
 const REQUIRED_ACTION_EVIDENCE_TOOL: Anthropic.Tool = {
   name: REQUIRED_ACTION_EVIDENCE_TOOL_NAME,
@@ -309,8 +316,9 @@ function buildQualityPrompt(input: VerifyFinalVideoQualityInput): string {
     '2. 用户原始需求没有人物或手部动作，但静物任务出现人物或手、有人拿起/触碰/操作主体。',
     '3. 主体、动作、数量、颜色、构图或场景明显偏离用户需求；主体跨帧身份或形态明显漂移。',
     '   若用户要求进入、拿起、移动、放回等分阶段动作，必须按九张帧的时间顺序核对每个关键结果状态。任何要求的阶段在全部抽样帧中都没有可见证据，必须 fail，并使用 required_action_missing；不得假设它发生在帧与帧之间。',
-    '4. 用户指定或输入参数明确列为允许的文字、品牌或 Logo 没有逐字准确呈现，或画面中出现乱码、错字、不可读/错误品牌标识；允许范围之外又不符合其它文字与品牌规则的文字或品牌；字幕或品牌文字被裁切、严重遮挡、明显拼错。预期字幕和必须出现的品牌属于已允许内容，不能仅因它没有写在用户原始需求中而判失败。',
-    '5. 抽样帧中实际可见的物体融化、穿模、突然消失、跨帧形态跳变或其它足以让用户拒收的画面瑕疵；不得仅凭静态帧判定运动流畅度、节奏或音画同步。',
+    '4. 除非用户明确要求特写、局部或裁切构图，关键主体在任一抽样帧中触碰或越过画面边缘、顶部/底部/左右部分不可见、关键结构件出框，都必须 fail，并使用 subject_out_of_frame。不得用其它帧完整、动作已完成或整体观感良好来抵消任一帧的出框。手或手臂自然进入/退出画面时可以接触边缘，但被操作的关键主体仍必须完整可见。',
+    '5. 用户指定或输入参数明确列为允许的文字、品牌或 Logo 没有逐字准确呈现，或画面中出现乱码、错字、不可读/错误品牌标识；允许范围之外又不符合其它文字与品牌规则的文字或品牌；字幕或品牌文字被裁切、严重遮挡、明显拼错。预期字幕和必须出现的品牌属于已允许内容，不能仅因它没有写在用户原始需求中而判失败。',
+    '6. 抽样帧中实际可见的物体融化、穿模、突然消失、跨帧形态跳变或其它足以让用户拒收的画面瑕疵；不得仅凭静态帧判定运动流畅度、节奏或音画同步。',
     '',
     `必须逐字准确出现的品牌标识：${requiredBrands}`,
     `其它文字与品牌规则：${input.brandPolicy}`,
@@ -334,6 +342,8 @@ const RETURN_ACTION_RE =
   /(?:放回|放下|归位|回到原位|put(?:s|ting)? (?:it )?back|set(?:s|ting)? (?:it )?down|return(?:s|ed|ing)? .+ (?:table|support|place))/iu;
 const EXIT_FRAME_ACTION_RE =
   /(?:离开画面|退出画面|移出画面|手离开|手臂离开|(?:并|再|随后)离开(?:画面)?|leave(?:s|ing)? (?:the )?frame|exit(?:s|ing)? (?:the )?frame|withdraw(?:s|n|ing)?)/iu;
+const EXPLICIT_PARTIAL_FRAMING_RE =
+  /(?:局部特写|细节特写|(?:杯|手|手部|主体|产品|物体|细节)(?:的)?特写|特写(?:镜头|画面|构图)|局部画面|裁切构图|只拍(?:手|手部|杯|主体|局部)|近距离细节|close[- ]?up|detail shot|cropped framing|partial view)/iu;
 
 interface RequiredActionCheck {
   readonly id: RequiredActionId;
@@ -353,6 +363,8 @@ interface RequiredActionEvidence {
 
 function getRequiredActionChecks(input: VerifyFinalVideoQualityInput): RequiredActionCheck[] {
   const checks: RequiredActionCheck[] = [];
+  const requiresLift = LIFT_ACTION_RE.test(input.userText);
+  const requiresReturn = RETURN_ACTION_RE.test(input.userText);
   if (ENTER_FRAME_ACTION_RE.test(input.userText)) {
     checks.push({
       id: 'enter_frame',
@@ -361,7 +373,7 @@ function getRequiredActionChecks(input: VerifyFinalVideoQualityInput): RequiredA
         '前段应先看不到用户指定的动作主体，随后抽样帧必须清楚看到同一主体从指定方向进入。',
     });
   }
-  if (LIFT_ACTION_RE.test(input.userText)) {
+  if (requiresLift) {
     checks.push({
       id: 'lift',
       label: '拿起/提起',
@@ -377,7 +389,7 @@ function getRequiredActionChecks(input: VerifyFinalVideoQualityInput): RequiredA
         '必须先有明确拿起证据，再由一个或多个后续抽样帧显示主体保持在离开支撑面的状态；只在桌面上停着不算。',
     });
   }
-  if (RETURN_ACTION_RE.test(input.userText)) {
+  if (requiresReturn) {
     checks.push({
       id: 'return',
       label: '放回/放下',
@@ -393,6 +405,14 @@ function getRequiredActionChecks(input: VerifyFinalVideoQualityInput): RequiredA
         '时间点约为视频时长 95% 的末段抽样帧中，用户指定的动作主体必须已经离场；仍抓握、接触或停留时不得判定完成。',
     });
   }
+  if ((requiresLift || requiresReturn) && !EXPLICIT_PARTIAL_FRAMING_RE.test(input.userText)) {
+    checks.push({
+      id: 'subject_containment',
+      label: '关键主体全程完整',
+      requirement:
+        '必须逐帧检查被操作的关键主体。主体从第一次可见到最后一次可见都应整体完整，顶部、底部、左右边界和把手等关键结构件不得触碰或越过画面边缘。自然进出画面的手臂可以接触边缘，但被操作主体不可以。observed=true 时 evidenceFrameSeconds 必须列出九张抽样帧的每一个时间秒数，表示已经逐帧核对；任一帧出框时 observed=false，并列出违规帧秒数。',
+    });
+  }
   return checks;
 }
 
@@ -400,6 +420,11 @@ function buildStrictRequiredActionPrompt(
   input: VerifyFinalVideoQualityInput,
   checks: readonly RequiredActionCheck[],
 ): string {
+  const subjectContainmentRule = checks.some((check) => check.id === 'subject_containment')
+    ? [
+        '- subject_containment 是全帧审计：不得用一张完整帧代表全片；observed=true 必须列出九张抽样帧的每一个时间秒数。任一帧中的被操作主体触边、顶部/底部被裁掉或关键结构出框，必须 observed=false 并列出违规时间。',
+      ]
+    : [];
   return [
     '这是第二次独立动作证据复核。只审核用户明确要求的动作阶段是否在九张按时间排序的抽样帧中有清楚、直接、可复核的视觉证据。',
     `用户原始需求：${input.userText}`,
@@ -413,6 +438,7 @@ function buildStrictRequiredActionPrompt(
     '- 不得根据动作意图、相邻帧姿势或“可能发生在抽样帧之间”来脑补缺失阶段。',
     '- 必须严格按上方清单逐项返回，每个 id 恰好一次，不得漏项、重复或增加其它 id。',
     '- observed=true 时必须从图片标签逐字抄录至少一个对应的时间秒数到 evidenceFrameSeconds；没有直接证据必须 observed=false。',
+    ...subjectContainmentRule,
     '- 不要提交 pass、fail、unknown 或 failedChecks。最终结论由程序根据逐项证据确定。',
     '',
     '只输出 JSON：',
@@ -483,32 +509,54 @@ function aggregateRequiredActionEvidence(input: {
   sampledFrameSeconds: readonly number[];
 }): VideoQualityResult {
   const evidenceById = new Map(input.evidence.checks.map((check) => [check.id, check]));
-  const failures: Array<{ check: RequiredActionCheck; reason: string }> = [];
+  const failures: Array<{ check: RequiredActionCheck; reason: string; code: string }> = [];
   for (const expected of input.expectedChecks) {
     const evidence = evidenceById.get(expected.id);
     if (!evidence) {
       failures.push({
         check: expected,
         reason: '质检未提交该动作的直接证据',
+        code:
+          expected.id === 'subject_containment'
+            ? 'subject_containment_unverified'
+            : `required_action_missing_${expected.id}`,
       });
       continue;
     }
-    const hasSampledFrameEvidence = evidence.evidenceFrameSeconds.some((timestamp) =>
-      input.sampledFrameSeconds.some((sampled) => Math.abs(sampled - timestamp) <= 0.01),
+    const referencedSampledFrames = input.sampledFrameSeconds.filter((sampled) =>
+      evidence.evidenceFrameSeconds.some((timestamp) => Math.abs(sampled - timestamp) <= 0.01),
     );
+    const hasSampledFrameEvidence = referencedSampledFrames.length > 0;
     if (!evidence.observed) {
-      failures.push({ check: expected, reason: evidence.reason });
+      failures.push({
+        check: expected,
+        reason: evidence.reason,
+        code:
+          expected.id === 'subject_containment'
+            ? 'subject_out_of_frame'
+            : `required_action_missing_${expected.id}`,
+      });
+    } else if (
+      expected.id === 'subject_containment' &&
+      referencedSampledFrames.length !== input.sampledFrameSeconds.length
+    ) {
+      failures.push({
+        check: expected,
+        reason: '未逐帧引用全部抽样时间，无法确认关键主体始终完整在框内',
+        code: 'subject_containment_unverified',
+      });
     } else if (!hasSampledFrameEvidence) {
       failures.push({
         check: expected,
         reason: '未引用任何实际抽样帧作为直接证据',
+        code: `required_action_missing_${expected.id}`,
       });
     }
   }
   if (failures.length > 0) {
     return {
       status: 'fail',
-      failedChecks: failures.map(({ check }) => `required_action_missing_${check.id}`),
+      failedChecks: [...new Set(failures.map(({ code }) => code))],
       reason: failures.map(({ check, reason }) => `${check.label}：${reason}`).join('；'),
     };
   }

@@ -57,10 +57,12 @@ const REQUIRED_HAND_SCENE_SUFFIX =
 const REQUIRED_HAND_OBJECT_IDENTITY_SUFFIX =
   '；手正在操作的主体必须始终是同一个物体，主体身份与类别、轮廓、颜色、材质和结构件（例如杯子的把手）跨帧保持一致，' +
   '不得在动作中变成另一种物体，不得让把手或其它结构件凭空出现或消失';
-const REQUIRED_HAND_SAFE_FRAMING_SUFFIX =
-  '；采用中景或略宽景别并提前预留完整动作空间：手、手腕、前臂和操作主体必须全程完整保留在画面内，' +
-  '操作主体四周保留约 10% 安全边距；拿起、悬停、移动和放回时不得裁切主体顶部、底部或关键结构件，' +
-  '镜头可以自然跟随，但不得让主体出框、突然缩放或因运动改变形态';
+const EXPLICIT_DYNAMIC_CAMERA_RE =
+  /(?:跟拍|跟随镜头|镜头跟随|环绕镜头|镜头环绕|绕拍|升降镜头|推镜|拉镜|变焦|运镜|摇镜|移镜|手持镜头|tracking shot|follow(?:ing)? camera|dolly|zoom|pan|tilt|handheld|orbit(?:ing)?(?: shot| camera)?)/iu;
+const EXPLICIT_LARGE_HAND_MOTION_RE =
+  /(?:高高举起|举过|抬到|大幅度|快速抬起|甩动|挥动|overhead|above (?:the )?head|raise (?:it )?high|large movement)/iu;
+const EXPLICIT_PARTIAL_FRAMING_RE =
+  /(?:局部特写|细节特写|(?:杯|手|手部|主体|产品|物体|细节)(?:的)?特写|特写(?:镜头|画面|构图)|局部画面|裁切构图|只拍(?:手|手部|杯|主体|局部)|close[- ]?up|detail shot|cropped framing|partial view)/iu;
 const CUP_OBJECT_RE = /(?:杯|马克杯|茶杯|咖啡杯|cup|mug)/iu;
 const EXPLICIT_HANDLE_GRIP_RE =
   /(?:抓住杯柄|握住杯柄|拿住杯柄|抓住把手|握住把手|by (?:the )?handle|grip (?:the )?handle)/iu;
@@ -84,6 +86,32 @@ const REQUIRED_HAND_OBJECT_NEGATIVE =
 const OBJECT_ONLY_NEGATIVE = `${BASE_NEGATIVE}, person, people, human, face, hand, hands, arm, arms, body parts, holding object, touching object, picking up object`;
 
 type HumanPresencePolicy = 'explicit-human' | 'object-only' | 'conditional';
+
+function requiredHandSafeFramingSuffix(userText: string): string {
+  const framing = EXPLICIT_PARTIAL_FRAMING_RE.test(userText)
+    ? '；按用户明确要求的特写或局部构图执行；被要求保留的局部、动作接触点和关键结构必须持续清楚，不得发生非预期裁切或结构消失'
+    : '；采用中景或略宽景别并提前预留完整动作空间：手、手腕、前臂和操作主体必须全程完整保留在画面内，操作主体四周保留至少 15% 安全边距；拿起、悬停、移动和放回时不得裁切主体顶部、底部或关键结构件';
+  const camera = EXPLICIT_DYNAMIC_CAMERA_RE.test(userText)
+    ? '；保留用户明确要求的跟拍、变焦或其它运镜，但镜头必须提前扩宽并连续跟随，不能因运镜让关键主体意外出框'
+    : '；使用固定机位，不得推近、变焦或跟随抬升';
+  const motion = EXPLICIT_LARGE_HAND_MOTION_RE.test(userText)
+    ? '；保留用户明确要求的大幅度动作，并为完整运动轨迹预留足够上下左右空间'
+    : '；用户未指定大幅度动作时，只做完成动作所需的最小幅度抬升，让操作主体停留在安全区域';
+  return framing + camera + motion;
+}
+
+function requiredHandFramingRepairInstruction(userText: string): string {
+  const framing = EXPLICIT_PARTIAL_FRAMING_RE.test(userText)
+    ? '保留用户明确要求的特写或局部构图，被要求保留的局部、动作接触点和关键结构必须持续清楚，不得发生非预期裁切或结构消失'
+    : '采用中景或略宽景别并提前预留完整动作空间，操作主体四周保留至少 15% 安全边距，从动作开始到结束都必须完整看到主体顶部、底部、左右边界和关键结构件';
+  const camera = EXPLICIT_DYNAMIC_CAMERA_RE.test(userText)
+    ? '保持用户明确要求的跟拍、变焦或其它运镜，镜头提前扩宽并连续跟随，不得因运镜让关键主体意外出框'
+    : '使用固定机位，不得推近、变焦或跟随主体抬升';
+  const motion = EXPLICIT_LARGE_HAND_MOTION_RE.test(userText)
+    ? '保留用户明确要求的大幅度动作，为完整运动轨迹预留足够上下左右空间'
+    : '用户未指定大幅度动作时，只做完成动作所需的最小运动幅度';
+  return `；构图修复要求：${framing}；${camera}；${motion}`;
+}
 
 const HUMAN_INTENT_RE =
   /(?:人物|人像|真人|人类|男人|女人|男性|女性|男士|女士|男孩|女孩|儿童|孩子|老人|模特|演员|主持人|主播|手部|双手|左手|右手|手臂|拿起|端起|握住|触碰|操作|person|people|human|man|woman|boy|girl|child|model|actor|presenter|host|hand|hands|arm|arms|hold|holding|touch|pick(?:ing)? up)/iu;
@@ -131,7 +159,7 @@ function scenePromptPolicy(userText: string): {
       (HAND_INTENT_RE.test(userText)
         ? REQUIRED_HAND_SCENE_SUFFIX +
           REQUIRED_HAND_OBJECT_IDENTITY_SUFFIX +
-          REQUIRED_HAND_SAFE_FRAMING_SUFFIX
+          requiredHandSafeFramingSuffix(userText)
         : ''),
     negativePrompt: HAND_INTENT_RE.test(userText) ? REQUIRED_HAND_OBJECT_NEGATIVE : BASE_NEGATIVE,
     presencePolicy: policy,
@@ -163,9 +191,14 @@ function qualityRepairInstruction(
   quality: VideoQualityResult,
   durationSeconds: number,
   scenePolicy: ReturnType<typeof scenePromptPolicy>,
+  userText: string,
 ): string {
   const diagnostic = `${quality.failedChecks.join(' ')} ${quality.reason}`;
   const hasAnatomyIssue = /(?:hand|finger|arm|limb|anatom|手|指|臂|肢)/iu.test(diagnostic);
+  const hasFramingIssue =
+    /(?:subject_out_of_frame|subject_containment|out.of.frame|crop|边界|出框|裁切|越过画面)/iu.test(
+      diagnostic,
+    );
   let anatomyRepair = '';
   if (hasAnatomyIssue && scenePolicy.handRequired) {
     anatomyRepair =
@@ -176,8 +209,9 @@ function qualityRepairInstruction(
   } else if (hasAnatomyIssue) {
     anatomyRepair = '；上一版出现了非必要手部，改为不露手构图，不要让手或手臂进入画面';
   }
+  const framingRepair = hasFramingIssue ? requiredHandFramingRepairInstruction(userText) : '';
 
-  return `；质量修复重试：上一版未通过检查（${quality.reason}）。必须修正该问题，同时保持用户明确要求的主体、动作、颜色、文字和镜头意图不变；允许调整上一版有缺陷的构图、景别和主体运动幅度，确保缺陷不再出现${anatomyRepair}；动作修复要求：必须在 ${durationSeconds} 秒内按用户原始顺序完整执行全部动作，最后至少 1 秒展示动作完成后的稳定终态`;
+  return `；质量修复重试：上一版未通过检查（${quality.reason}）。必须修正该问题，同时保持用户明确要求的主体、动作、颜色、文字和镜头意图不变；允许调整上一版有缺陷的构图、景别和主体运动幅度，确保缺陷不再出现${anatomyRepair}${framingRepair}；动作修复要求：必须在 ${durationSeconds} 秒内按用户原始顺序完整执行全部动作，最后至少 1 秒展示动作完成后的稳定终态`;
 }
 
 export type VisualMode = 'image' | 'video';
@@ -675,7 +709,7 @@ export function createSimplePipelineDeps(
         );
         repairInstruction =
           initialRepairInstruction +
-          qualityRepairInstruction(candidateQuality, durationSeconds, scenePolicy);
+          qualityRepairInstruction(candidateQuality, durationSeconds, scenePolicy, userText);
       }
       throw new SimpleVideoError('video segment quality retry exhausted', 'quality');
     },
@@ -896,6 +930,7 @@ export async function runSimpleVideoCreation(
       verification,
       opts.veoDurationSeconds ?? 8,
       scenePolicy,
+      input.userText,
     );
     svc.logger.warn(
       {
