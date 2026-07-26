@@ -6770,6 +6770,12 @@ export const tasksRouter = router({
             runFfmpeg,
             readFile: (filePath) => fsp.readFile(filePath),
             analyzeFrames: analyzeVideoQuality,
+            onAnalysisIssue: (issue) => {
+              logger.warn(
+                { taskId: newTaskId, ...issue },
+                'video: automated quality analysis did not return a usable verdict',
+              );
+            },
           });
         // 仅最终 video.mp4 落用户文件;中间段产物只用 workdir 副本(pipeline 用本地路径)。
         const storeOutput = async (i: { filename: string; mimetype: string; buffer: Buffer }) => {

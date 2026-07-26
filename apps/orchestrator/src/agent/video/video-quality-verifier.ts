@@ -123,6 +123,17 @@ export interface VideoQualityAnalysisInput {
 
 export type VideoQualityAnalyzer = (input: VideoQualityAnalysisInput) => Promise<string>;
 
+export interface VideoQualityAnalysisIssue {
+  readonly phase: 'quality_verdict' | 'required_action_evidence';
+  readonly attempt: number;
+  readonly maxAttempts: number;
+  readonly kind: 'inconclusive' | 'service_error';
+  readonly reason?: string;
+  readonly errorName?: string;
+  readonly status?: number;
+  readonly code?: string;
+}
+
 export interface VerifyFinalVideoQualityInput {
   readonly videoPath: string;
   readonly workdir: string;
@@ -150,6 +161,7 @@ export interface VideoQualityVerifierDeps {
   readonly readFile: (path: string) => Promise<Buffer>;
   readonly analyzeFrames: VideoQualityAnalyzer;
   readonly normalizeImage?: (buffer: Buffer) => Promise<Buffer>;
+  readonly onAnalysisIssue?: (issue: VideoQualityAnalysisIssue) => void;
 }
 
 function unknownResult(reason: string): VideoQualityResult {
@@ -157,6 +169,38 @@ function unknownResult(reason: string): VideoQualityResult {
     status: 'unknown',
     failedChecks: ['verifier_inconclusive'],
     reason,
+  };
+}
+
+function reportAnalysisIssue(
+  deps: VideoQualityVerifierDeps,
+  issue: VideoQualityAnalysisIssue,
+): void {
+  try {
+    deps.onAnalysisIssue?.(issue);
+  } catch {
+    // Observability must never change the fail-closed quality result.
+  }
+}
+
+function serviceErrorIssue(
+  phase: VideoQualityAnalysisIssue['phase'],
+  attempt: number,
+  maxAttempts: number,
+  error: unknown,
+): VideoQualityAnalysisIssue {
+  const record =
+    error && typeof error === 'object'
+      ? (error as { name?: unknown; status?: unknown; code?: unknown })
+      : undefined;
+  return {
+    phase,
+    attempt,
+    maxAttempts,
+    kind: 'service_error',
+    ...(typeof record?.name === 'string' ? { errorName: record.name } : {}),
+    ...(typeof record?.status === 'number' ? { status: record.status } : {}),
+    ...(typeof record?.code === 'string' ? { code: record.code } : {}),
   };
 }
 
@@ -616,8 +660,11 @@ export function createAnthropicVideoQualityAnalyzer(client: Anthropic): VideoQua
         messages: [{ role: 'user', content }],
       },
       {
-        timeout: 45_000,
-        maxRetries: 0,
+        // Nine high-resolution frames can legitimately take longer than a
+        // text-only request. SDK retries handle 408/409/429/5xx with backoff
+        // before the business layer fails closed.
+        timeout: 75_000,
+        maxRetries: 2,
       },
     );
     const block = response.content.find(
@@ -733,28 +780,46 @@ export async function verifyFinalVideoQuality(
     return unknownResult('无法抽取成片质检帧');
   }
 
-  const analyzeWithRetry = async (prompt: string): Promise<VideoQualityResult> => {
+  const maxAnalysisAttempts = 2;
+  const analyzeWithRetry = async (
+    prompt: string,
+    phase: VideoQualityAnalysisIssue['phase'],
+  ): Promise<VideoQualityResult> => {
     let lastResult = unknownResult('成片质检未得出结论');
-    for (let attempt = 0; attempt < 2; attempt += 1) {
+    for (let attempt = 1; attempt <= maxAnalysisAttempts; attempt += 1) {
       try {
         lastResult = parseVideoQualityResponse(
           await deps.analyzeFrames({ references, frames, prompt }),
         );
         if (lastResult.status !== 'unknown') return lastResult;
-      } catch {
-        lastResult = unknownResult('成片质检服务暂时不可用');
+        reportAnalysisIssue(deps, {
+          phase,
+          attempt,
+          maxAttempts: maxAnalysisAttempts,
+          kind: 'inconclusive',
+          reason: lastResult.reason,
+        });
+      } catch (error) {
+        reportAnalysisIssue(
+          deps,
+          serviceErrorIssue(phase, attempt, maxAnalysisAttempts, error),
+        );
+        // The production Anthropic analyzer owns transport retries and
+        // Retry-After backoff. Repeating it again here would multiply a
+        // provider outage into up to six identical requests.
+        return unknownResult('成片质检服务暂时不可用');
       }
     }
     return lastResult;
   };
 
-  const primaryResult = await analyzeWithRetry(buildQualityPrompt(input));
+  const primaryResult = await analyzeWithRetry(buildQualityPrompt(input), 'quality_verdict');
   if (!shouldRunStrictRequiredActionAudit(input)) return primaryResult;
   if (primaryResult.status === 'unknown') return primaryResult;
 
   const requiredActionChecks = getRequiredActionChecks(input);
   let lastActionResult = unknownResult('动作证据质检返回无法解析');
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  for (let attempt = 1; attempt <= maxAnalysisAttempts; attempt += 1) {
     try {
       const evidence = parseRequiredActionEvidenceResponse(
         await deps.analyzeFrames({
@@ -766,6 +831,13 @@ export async function verifyFinalVideoQuality(
       );
       if (!evidence) {
         lastActionResult = unknownResult('动作证据质检返回无法解析');
+        reportAnalysisIssue(deps, {
+          phase: 'required_action_evidence',
+          attempt,
+          maxAttempts: maxAnalysisAttempts,
+          kind: 'inconclusive',
+          reason: lastActionResult.reason,
+        });
         continue;
       }
       const actionResult = aggregateRequiredActionEvidence({
@@ -792,8 +864,17 @@ export async function verifyFinalVideoQuality(
         failedChecks: [...new Set([...primaryNonActionChecks, ...actionResult.failedChecks])],
         reason: `${primaryResult.reason}；${actionResult.reason}`,
       };
-    } catch {
-      lastActionResult = unknownResult('动作证据质检服务暂时不可用');
+    } catch (error) {
+      reportAnalysisIssue(
+        deps,
+        serviceErrorIssue(
+          'required_action_evidence',
+          attempt,
+          maxAnalysisAttempts,
+          error,
+        ),
+      );
+      return unknownResult('动作证据质检服务暂时不可用');
     }
   }
   return lastActionResult;

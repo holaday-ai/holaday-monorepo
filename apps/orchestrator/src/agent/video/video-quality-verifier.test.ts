@@ -643,6 +643,50 @@ describe('verifyFinalVideoQuality', () => {
     expect(result.status).toBe('pass');
   });
 
+  it('reports an exhausted transport failure without multiplying analyzer retries', async () => {
+    const analyzeFrames = vi.fn(async () => {
+      const error = new Error('provider request failed');
+      Object.assign(error, { status: 529, code: 'overloaded_error' });
+      throw error;
+    });
+    const onAnalysisIssue = vi.fn();
+
+    const result = await verifyFinalVideoQuality(
+      {
+        videoPath: '/tmp/final.mp4',
+        workdir: '/tmp/quality',
+        durationMs: 8_000,
+        userText: '蓝色陶瓷杯',
+        expectedSubtitleText: [],
+        requiredBrandTexts: [],
+        brandPolicy: '无品牌要求。',
+      },
+      {
+        runFfmpeg: vi.fn(async () => undefined),
+        readFile: vi.fn(async () => Buffer.from('jpeg')),
+        analyzeFrames,
+        normalizeImage: async (buffer) => buffer,
+        onAnalysisIssue,
+      },
+    );
+
+    expect(analyzeFrames).toHaveBeenCalledTimes(1);
+    expect(onAnalysisIssue).toHaveBeenCalledWith({
+      phase: 'quality_verdict',
+      attempt: 1,
+      maxAttempts: 2,
+      kind: 'service_error',
+      errorName: 'Error',
+      status: 529,
+      code: 'overloaded_error',
+    });
+    expect(result).toEqual({
+      status: 'unknown',
+      failedChecks: ['verifier_inconclusive'],
+      reason: '成片质检服务暂时不可用',
+    });
+  });
+
   it('compares the final frames with source images and sampled source-video frames', async () => {
     const runFfmpeg = vi.fn(async () => undefined);
     const readFile = vi.fn(async (framePath: string) => Buffer.from(`jpeg:${framePath}`));
@@ -823,8 +867,8 @@ describe('createAnthropicVideoQualityAnalyzer', () => {
         },
       }),
       {
-        timeout: 45_000,
-        maxRetries: 0,
+        timeout: 75_000,
+        maxRetries: 2,
       },
     );
   });
@@ -883,8 +927,8 @@ describe('createAnthropicVideoQualityAnalyzer', () => {
         },
       }),
       {
-        timeout: 45_000,
-        maxRetries: 0,
+        timeout: 75_000,
+        maxRetries: 2,
       },
     );
   });
