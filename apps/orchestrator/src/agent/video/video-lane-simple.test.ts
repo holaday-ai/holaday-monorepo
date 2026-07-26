@@ -35,6 +35,12 @@ function makeServices() {
   const mocks = {
     optimizeUserScript: vi.fn(async () => SCRIPT),
     synthesizeSpeech: vi.fn(async () => ({ audioUrl: 'https://oss/a.wav', characters: 5 })),
+    synthesizeGeminiSpeech: vi.fn(async () => ({
+      audioBuffer: Buffer.from('gemini-wav'),
+      mimeType: 'audio/wav' as const,
+      model: 'gemini-2.5-flash-preview-tts',
+      voiceName: 'Kore',
+    })),
     generateImages: vi.fn(async () => ({
       images: [{ buffer: Buffer.from('img'), mimeType: 'image/png' }],
       model: 'nb',
@@ -130,6 +136,55 @@ describe('runSimpleVideoCreation — video (default = veo_fast)', () => {
     expect(out.fileId).toBe('f_video.mp4');
     expect(out.segments).toBe(2);
     expect(out.totalDurationMs).toBe(5000);
+    expect(out.audioEngine).toBe('qwen');
+  });
+
+  it('falls back to Gemini TTS when the primary DashScope voice account is unavailable', async () => {
+    const { svc, mocks } = makeServices();
+    mocks.synthesizeSpeech.mockRejectedValue(
+      Object.assign(new Error('DashScope returned 400'), {
+        name: 'QwenVoiceCloneError',
+        status: 400,
+        detail: '{"code":"Arrearage","message":"account is not in good standing"}',
+        retryable: false,
+      }),
+    );
+    const oneSegmentScript: VideoScript = {
+      title: '蓝色陶瓷杯',
+      segments: [
+        {
+          text: '一只右手拿起蓝色陶瓷杯，停一秒，再放回原位。',
+          type: 'broll',
+          visual: '一只右手拿起蓝色陶瓷杯，停一秒，再放回原位。',
+        },
+      ],
+    };
+
+    const out = await runSimpleVideoCreation(
+      {
+        userText: '一只右手拿起蓝色陶瓷杯，停一秒，再放回原位。',
+        script: oneSegmentScript,
+      },
+      CFG,
+      { videoSource: 'veo_fast', veoDurationSeconds: 8, veoResolution: '720p' },
+      svc,
+    );
+
+    expect(mocks.synthesizeSpeech).toHaveBeenCalledTimes(1);
+    expect(mocks.synthesizeGeminiSpeech).toHaveBeenCalledWith(
+      expect.objectContaining({
+        apiKey: 'gk',
+        text: oneSegmentScript.segments[0]?.text,
+      }),
+    );
+    expect(mocks.storeOutput).toHaveBeenCalledWith(
+      expect.objectContaining({
+        filename: 'seg0-audio.wav',
+        mimetype: 'audio/wav',
+        buffer: Buffer.from('gemini-wav'),
+      }),
+    );
+    expect(out.audioEngine).toBe('gemini');
   });
 
   it('a pure object request forbids unrequested people, hands and body parts', async () => {
@@ -524,11 +579,33 @@ describe('runSimpleVideoCreation — aspectRatio (Phase 2 多画幅)', () => {
 });
 
 describe('runSimpleVideoCreation — config gates', () => {
-  it('throws config when DASHSCOPE key missing', async () => {
+  it('uses Gemini narration directly when the primary DashScope key is missing', async () => {
+    const { svc, mocks } = makeServices();
+    const out = await runSimpleVideoCreation(
+      { userText: 'x', script: SCRIPT },
+      { ...CFG, dashscopeApiKey: '' },
+      {},
+      svc,
+    );
+
+    expect(mocks.synthesizeSpeech).not.toHaveBeenCalled();
+    expect(mocks.synthesizeGeminiSpeech).toHaveBeenCalledTimes(2);
+    expect(out.audioEngine).toBe('gemini');
+  });
+
+  it('throws config when no narration engine is configured', async () => {
     const { svc } = makeServices();
     await expect(
-      runSimpleVideoCreation({ userText: 'x' }, { ...CFG, dashscopeApiKey: '' }, {}, svc),
-    ).rejects.toMatchObject({ kind: 'config' });
+      runSimpleVideoCreation(
+        { userText: 'x' },
+        { ...CFG, dashscopeApiKey: '', geminiApiKey: '' },
+        { videoSource: 'wanxiang' },
+        svc,
+      ),
+    ).rejects.toMatchObject({
+      kind: 'config',
+      message: expect.stringContaining('narration'),
+    });
   });
 
   it('throws config when video (default Veo) but GEMINI key missing', async () => {
@@ -536,6 +613,21 @@ describe('runSimpleVideoCreation — config gates', () => {
     await expect(
       runSimpleVideoCreation({ userText: 'x' }, { ...CFG, geminiApiKey: '' }, {}, svc),
     ).rejects.toMatchObject({ kind: 'config' });
+  });
+
+  it('throws config when Wanxiang is selected without a DashScope key', async () => {
+    const { svc } = makeServices();
+    await expect(
+      runSimpleVideoCreation(
+        { userText: 'x' },
+        { ...CFG, dashscopeApiKey: '' },
+        { videoSource: 'wanxiang' },
+        svc,
+      ),
+    ).rejects.toMatchObject({
+      kind: 'config',
+      message: expect.stringContaining('Wanxiang'),
+    });
   });
 
   it('throws config when image (nano banana) but GEMINI key missing', async () => {

@@ -26,6 +26,7 @@ import path from 'node:path';
 import { videoParameterIssue } from '@holaday/shared-types';
 import { generateImages } from '../image/gemini-image-client.js';
 import { ffprobeDurationMs, renderImageClip, renderVideoClip, runFfmpeg } from './ffmpeg-exec.js';
+import { synthesizeGeminiSpeech } from './gemini-tts-client.js';
 import { synthesizeSpeech } from './qwen-voice-clone-client.js';
 import { buildAss } from './timeline.js';
 import type { VideoScript } from './types.js';
@@ -298,6 +299,9 @@ export interface SimpleVideoConfig {
   /** Shared Google key (same one as #5 nano banana) — Veo video AND nano banana image. */
   readonly geminiApiKey?: string;
   readonly geminiBaseUrl?: string;
+  /** Automatic narration fallback when DashScope TTS is unavailable. */
+  readonly geminiTtsModel?: string;
+  readonly geminiTtsVoice?: string;
   readonly qwenTtsModel: string; // qwen3-tts-flash
   readonly presetVoice: string; // 'Cherry'
   /** Image source = nano banana. Default 'gemini-3.1-flash-image'. */
@@ -337,6 +341,7 @@ export interface SimpleVideoOptions {
 
 interface SimpleFns {
   synthesizeSpeech: typeof synthesizeSpeech;
+  synthesizeGeminiSpeech: typeof synthesizeGeminiSpeech;
   generateImages: typeof generateImages; // nano banana (image source)
   generateBrollVideo: typeof generateBrollVideo; // wanxiang t2v (fallback)
   generateVeoVideo: typeof generateVeoVideo;
@@ -375,11 +380,13 @@ export interface SimpleVideoServices {
 interface SimplePipelinePromptContext {
   readonly includeFullUserRequirement?: boolean;
   readonly initialRepairInstruction?: string;
+  readonly onAudioEngine?: (engine: 'qwen' | 'gemini') => void;
 }
 
 function realFns(): SimpleFns {
   return {
     synthesizeSpeech,
+    synthesizeGeminiSpeech,
     generateImages,
     generateBrollVideo,
     generateVeoVideo,
@@ -417,28 +424,60 @@ export function createSimplePipelineDeps(
       ? `；用户原始需求（每个动作阶段都必须完整覆盖）：${userText.trim()}`
       : '';
   const initialRepairInstruction = promptContext.initialRepairInstruction ?? '';
+  let useGeminiTts = !cfg.dashscopeApiKey;
 
   return {
     logger: svc.logger,
 
     async synthesizeSegmentAudio({ index, text }) {
-      // Qwen3-TTS PRESET voice (no clone): pass the preset voice name as `voiceId`.
-      const synth = await fns.synthesizeSpeech({
-        apiKey: cfg.dashscopeApiKey,
-        baseUrl: cfg.dashscopeBaseUrl,
-        ...ws,
-        model: cfg.qwenTtsModel,
-        voiceId: cfg.presetVoice,
-        text,
-      });
-      const dl = await fns.downloadToBuffer(synth.audioUrl);
+      let audioBuffer: Buffer | undefined;
+      if (!useGeminiTts) {
+        try {
+          // Qwen3-TTS PRESET voice (no clone): pass the preset voice name as `voiceId`.
+          const synth = await fns.synthesizeSpeech({
+            apiKey: cfg.dashscopeApiKey,
+            baseUrl: cfg.dashscopeBaseUrl,
+            ...ws,
+            model: cfg.qwenTtsModel,
+            voiceId: cfg.presetVoice,
+            text,
+          });
+          const dl = await fns.downloadToBuffer(synth.audioUrl);
+          audioBuffer = dl.buffer;
+          promptContext.onAudioEngine?.('qwen');
+        } catch (err) {
+          if (!cfg.geminiApiKey) throw err;
+          useGeminiTts = true;
+          svc.logger.warn(
+            { primary: 'qwen', fallback: 'gemini', err: errorMessage(err) },
+            'video: primary TTS unavailable — switching remaining narration to Gemini TTS',
+          );
+        }
+      }
+      if (useGeminiTts) {
+        if (!cfg.geminiApiKey) {
+          throw new SimpleVideoError('Gemini TTS fallback key is unavailable', 'config', false);
+        }
+        const synth = await fns.synthesizeGeminiSpeech({
+          apiKey: cfg.geminiApiKey,
+          ...(cfg.geminiBaseUrl ? { baseUrl: cfg.geminiBaseUrl } : {}),
+          ...(cfg.geminiTtsModel ? { model: cfg.geminiTtsModel } : {}),
+          ...(cfg.geminiTtsVoice ? { voiceName: cfg.geminiTtsVoice } : {}),
+          text,
+        });
+        audioBuffer = synth.audioBuffer;
+        promptContext.onAudioEngine?.('gemini');
+      }
+      if (!audioBuffer) {
+        throw new SimpleVideoError('No narration audio was produced', 'compose', false);
+      }
       await svc.storeOutput({
         filename: `seg${index}-audio.wav`,
         mimetype: 'audio/wav',
-        buffer: dl.buffer,
+        buffer: audioBuffer,
       });
       const localPath = path.join(svc.workdir, `seg${index}-audio.wav`);
-      await fns.writeFile(localPath, dl.buffer);
+      await fns.writeFile(localPath, audioBuffer);
       const durationMs = await fns.ffprobeDurationMs(
         localPath,
         cfg.ffprobeBin ? { ffprobeBin: cfg.ffprobeBin } : {},
@@ -694,6 +733,7 @@ export interface SimpleVideoResult {
   readonly totalDurationMs: number;
   readonly segments: number;
   readonly visualMode: VisualMode;
+  readonly audioEngine: 'qwen' | 'gemini' | 'mixed';
 }
 
 /**
@@ -706,8 +746,9 @@ export async function runSimpleVideoCreation(
   opts: SimpleVideoOptions,
   svc: SimpleVideoServices,
 ): Promise<SimpleVideoResult> {
-  if (!cfg.dashscopeApiKey)
-    throw new SimpleVideoError('DASHSCOPE_API_KEY not configured', 'config');
+  if (!cfg.dashscopeApiKey && !cfg.geminiApiKey) {
+    throw new SimpleVideoError('No narration engine is configured', 'config');
+  }
   if (typeof svc.verifyFinalVideo !== 'function') {
     throw new SimpleVideoError('video quality verifier not configured', 'config');
   }
@@ -734,6 +775,12 @@ export async function runSimpleVideoCreation(
       'config',
     );
   }
+  if (visualMode === 'video' && videoSource === 'wanxiang' && !cfg.dashscopeApiKey) {
+    throw new SimpleVideoError(
+      'Wanxiang selected but DASHSCOPE_API_KEY not configured',
+      'config',
+    );
+  }
   const fns = { ...realFns(), ...(svc.overrides ?? {}) };
   const ffOpts = cfg.ffmpegBin ? { ffmpegBin: cfg.ffmpegBin } : {};
 
@@ -755,6 +802,7 @@ export async function runSimpleVideoCreation(
   const canRegenerateVisuals =
     visualMode === 'video' && script.segments.every((segment) => segment.type === 'broll');
   const scenePolicy = scenePromptPolicy(input.userText);
+  const audioEngines = new Set<'qwen' | 'gemini'>();
   let finalRepairInstruction = '';
   let result: Awaited<ReturnType<typeof runVideoPipeline>> | undefined;
   let finalDurationMs = 0;
@@ -764,6 +812,7 @@ export async function runSimpleVideoCreation(
     const deps = createSimplePipelineDeps(cfg, opts, svc, input.userText, {
       includeFullUserRequirement: script.segments.length === 1,
       ...(finalRepairInstruction ? { initialRepairInstruction: finalRepairInstruction } : {}),
+      onAudioEngine: (engine) => audioEngines.add(engine),
     });
     result = await runVideoPipeline(
       {
@@ -883,5 +932,7 @@ export async function runSimpleVideoCreation(
     totalDurationMs: finalDurationMs,
     segments: result.segments.length,
     visualMode,
+    audioEngine:
+      audioEngines.size > 1 ? 'mixed' : (audioEngines.values().next().value ?? 'qwen'),
   };
 }

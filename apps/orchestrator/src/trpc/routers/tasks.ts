@@ -6845,6 +6845,7 @@ export const tasksRouter = router({
         };
         try {
           let summary: string;
+          let audioEngine: 'qwen' | 'gemini' | 'mixed' | undefined;
           if (isClone) {
             const { runCloneVideoCreation } = await import('../../agent/video/video-clone.js');
             const petImageFileId = meta.petImageFileId;
@@ -7039,7 +7040,12 @@ export const tasksRouter = router({
                 verifyFinalVideo,
               },
             );
-            summary = `视频已生成（${result.segments} 段 / ${Math.round(result.totalDurationMs / 1000)} 秒）。`;
+            audioEngine = result.audioEngine;
+            const audioNote =
+              result.audioEngine === 'qwen'
+                ? ''
+                : '，主语音服务不可用，已自动切换备用音色';
+            summary = `视频已生成（${result.segments} 段 / ${Math.round(result.totalDurationMs / 1000)} 秒${audioNote}）。`;
           }
           const persisted = await repo.persistVisionOutcome(newTaskId, {
             status: 'completed',
@@ -7050,6 +7056,7 @@ export const tasksRouter = router({
               lane: 'video_creation',
               visualMode,
               videoType: deriveVideoType({ isPet, isIp, tab: vOpts.tab }),
+              ...(audioEngine ? { audioEngine } : {}),
               ...videoQualityVerificationMetadata(),
               ...(finalAtt ? { attachments: [finalAtt] } : {}),
             },
