@@ -124,7 +124,7 @@ describe('quoteVideo — dynamic by segment count', () => {
     expect(q.message).not.toContain('Veo Fast'); // 不再硬写 Fast
   });
 
-  it('wan2.6 uses the official Singapore price for the selected resolution', () => {
+  it('Wan 2.7 uses the official Singapore price for the selected resolution', () => {
     const p720 = quoteVideo(1, 'wanxiang', {
       resolution: '720p',
       durationSeconds: 8,
@@ -137,7 +137,7 @@ describe('quoteVideo — dynamic by segment count', () => {
     expect(p720.videoCny).toBe(Math.ceil(8 * 0.1 * 7.3));
     expect(p1080.videoCny).toBe(Math.ceil(8 * 0.15 * 7.3));
     expect(p1080.videoCny).toBeGreaterThan(p720.videoCny);
-    expect(p720.message).toContain('Wan 2.6');
+    expect(p720.message).toContain('Wan 2.7');
   });
 });
 

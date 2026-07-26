@@ -294,6 +294,8 @@ describe('runSimpleVideoCreation — video (default = veo_fast)', () => {
     };
     expect(happyHorseArg.prompt).toMatch(/同一个物体|主体身份/);
     expect(happyHorseArg.prompt).toMatch(/类别、轮廓、颜色.*把手/);
+    expect(happyHorseArg.prompt).toMatch(/杯身侧面.*稳定抓握/);
+    expect(happyHorseArg.prompt).toMatch(/单一连续镜头.*时间段/);
     expect(happyHorseArg.negativePrompt).toMatch(
       /object morphing|subject identity drift|handle appearing or disappearing/,
     );
@@ -381,11 +383,11 @@ describe('runSimpleVideoCreation — Veo tiers (explicit)', () => {
 });
 
 describe('runSimpleVideoCreation — wanxiang (fallback, explicit)', () => {
-  it('videoSource=wanxiang → Wan 2.6 with selected duration, resolution and aspect ratio', async () => {
+  it('videoSource=wanxiang → Wan 2.7 with selected duration, resolution and aspect ratio', async () => {
     const { svc, mocks } = makeServices();
     await runSimpleVideoCreation(
       { userText: 'x' },
-      { ...CFG, wanxiangT2vModel: 'wan2.6-t2v' },
+      { ...CFG, wanxiangT2vModel: 'wan2.7-t2v-2026-06-12' },
       {
         visualMode: 'video',
         videoSource: 'wanxiang',
@@ -403,12 +405,16 @@ describe('runSimpleVideoCreation — wanxiang (fallback, explicit)', () => {
       prompt: string;
       negativePrompt?: string;
       size?: string;
+      resolution?: string;
+      ratio?: string;
       durationSeconds?: number;
     };
-    expect(t2vArg.model).toBe('wan2.6-t2v');
+    expect(t2vArg.model).toBe('wan2.7-t2v-2026-06-12');
     expect(t2vArg.prompt).toContain('画面整洁');
     expect(t2vArg.negativePrompt ?? '').toMatch(/乱码|多余手臂|extra arm/);
     expect(t2vArg.size).toBe('1280*720');
+    expect(t2vArg.resolution).toBe('720P');
+    expect(t2vArg.ratio).toBe('16:9');
     expect(t2vArg.durationSeconds).toBe(8);
   });
 });

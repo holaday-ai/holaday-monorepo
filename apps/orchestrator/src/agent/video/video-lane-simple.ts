@@ -56,6 +56,9 @@ const REQUIRED_HAND_SCENE_SUFFIX =
 const REQUIRED_HAND_OBJECT_IDENTITY_SUFFIX =
   '；手正在操作的主体必须始终是同一个物体，主体身份与类别、轮廓、颜色、材质和结构件（例如杯子的把手）跨帧保持一致，' +
   '不得在动作中变成另一种物体，不得让把手或其它结构件凭空出现或消失';
+const CUP_OBJECT_RE = /(?:杯|马克杯|茶杯|咖啡杯|cup|mug)/iu;
+const EXPLICIT_HANDLE_GRIP_RE =
+  /(?:抓住杯柄|握住杯柄|拿住杯柄|抓住把手|握住把手|by (?:the )?handle|grip (?:the )?handle)/iu;
 const OBJECT_ONLY_SCENE_SUFFIX =
   '；这是纯物体/环境镜头，不得出现人物、手、手臂或身体部位，' +
   '不要新增拿起、触碰或操作主体的动作，只保留用户指定的主体、环境和运动';
@@ -136,6 +139,19 @@ function motionCompletionInstruction(durationSeconds: number): string {
   return `；若需求包含连续动作，必须在 ${durationSeconds} 秒内按顺序完整执行所有动作：开头迅速建立初始状态，中段完成核心动作，最晚在第 ${finishBySeconds.toFixed(1)} 秒前完成放回、离开等收尾；结尾应清楚呈现完成状态，最后至少 ${finalHoldSeconds.toFixed(0)} 秒展示动作完成后的稳定终态，不得在动作途中结束或省略收尾；镜头语言、节奏和构图在满足动作顺序与终态的前提下可自由发挥`;
 }
 
+function requiredHandChoreography(userText: string): string {
+  if (!HAND_INTENT_RE.test(userText)) return '';
+  const lowRiskGrip =
+    CUP_OBJECT_RE.test(userText) && !EXPLICIT_HANDLE_GRIP_RE.test(userText)
+      ? '；用户未指定抓握杯柄时，优先从杯身侧面用单手稳定抓握，保持手指与杯身接触边界清楚，不把手指穿入狭窄杯柄'
+      : '；在不改变用户动作意图的前提下，选择接触边界清楚、遮挡较少的自然抓握方式';
+  return (
+    lowRiskGrip +
+    '；采用单一连续镜头并划分清楚时间段：前 20% 建立初始状态，20%-65% 完成核心动作，' +
+    '65%-85% 完成用户要求的放回或收尾，最后 15% 保持稳定终态；不得瞬移、跳切或让主体位置突然跳变'
+  );
+}
+
 function qualityRepairInstruction(
   quality: VideoQualityResult,
   durationSeconds: number,
@@ -164,7 +180,7 @@ export type VisualMode = 'image' | 'video';
  *   'veo_fast'     — Veo 3.1 Fast, DEFAULT (8s/1080p ≈ ¥7/条, 解剖稳).
  *   'veo_lite'     — Veo 3.1 Lite, 省钱档 (≈ ¥4.6/条, 解剖偶失,一字可改).
  *   'veo_standard' — Veo 3.1 Standard, 高质量可选 (≈ ¥23/条).
- *   'wanxiang'     — Wan 2.6, 支持 2–15 秒与 720p/1080p (Veo 不可用时).
+ *   'wanxiang'     — Wan 2.7, 支持 2–15 秒与 720p/1080p (Veo 不可用时).
  */
 export type VideoSource = 'veo_fast' | 'veo_lite' | 'veo_standard' | 'happyhorse' | 'wanxiang';
 
@@ -286,7 +302,7 @@ export interface SimpleVideoConfig {
   readonly presetVoice: string; // 'Cherry'
   /** Image source = nano banana. Default 'gemini-3.1-flash-image'. */
   readonly geminiImageModel?: string;
-  readonly wanxiangT2vModel: string; // wan2.6-t2v (Veo 不可用时)
+  readonly wanxiangT2vModel: string; // wan2.7-t2v-2026-06-12 (Veo 不可用时)
   /** Optional Wan t2v size override. Normally derived from selected aspect/resolution. */
   readonly wanxiangVideoSize?: string;
   /** HappyHorse t2v model (阿里 DashScope, 同 key 同端点). Default 'happyhorse-1.1-t2v'. */
@@ -463,6 +479,7 @@ export function createSimplePipelineDeps(
           originalUserRequirement +
           repairInstruction +
           scenePolicy.suffix +
+          requiredHandChoreography(userText) +
           completionInstruction;
         let url: string;
         let headers: Record<string, string> | undefined;
@@ -492,12 +509,18 @@ export function createSimplePipelineDeps(
             model: isHH ? (cfg.happyhorseModel ?? DEFAULT_HAPPYHORSE_MODEL) : cfg.wanxiangT2vModel,
             prompt: candidatePrompt,
             negativePrompt: scenePolicy.negativePrompt,
-            // HappyHorse retains its established size contract. Wan 2.6 supports
-            // the official 720P/1080P size matrix for every visible aspect ratio.
+            // HappyHorse retains its established size contract. Wan 2.7 uses
+            // resolution + ratio; size remains populated only for legacy overrides.
             size: isHH
               ? aspect.hhSize
               : (cfg.wanxiangVideoSize ??
                 resolveWanVideoSize(opts.aspectRatio ?? '9:16', resolution)),
+            ...(!isHH
+              ? {
+                  resolution: resolution === '1080p' ? ('1080P' as const) : ('720P' as const),
+                  ratio: opts.aspectRatio ?? '9:16',
+                }
+              : {}),
             durationSeconds,
           });
           if (!v.videoUrl)

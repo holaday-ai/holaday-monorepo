@@ -37,7 +37,7 @@ describe('clone video model contract', () => {
 });
 
 describe('normal video provider capability contract', () => {
-  it('mirrors the official Wan 2.6 Singapore price for 720p and 1080p', () => {
+  it('mirrors the official Wan 2.7 Singapore price for 720p and 1080p', () => {
     expect(
       estimatePerSegmentCny({
         model: 'wanxiang',

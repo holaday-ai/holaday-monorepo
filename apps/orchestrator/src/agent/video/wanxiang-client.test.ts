@@ -105,13 +105,36 @@ describe('createVideoTask — i2v 图生 (Phase 2 第二期)', () => {
     });
   });
 
-  it('t2v defaults to Wan 2.6 and omits img_url + duration when unspecified', async () => {
+  it('t2v defaults to the pinned Wan 2.7 release and omits optional parameters', async () => {
     const { fetchImpl, calls } = jsonQueue([{ body: { output: { task_id: 'v2', task_status: 'PENDING' } } }]);
     await createVideoTask({ apiKey: KEY, prompt: 'a beach', fetchImpl });
     const body = JSON.parse((calls[0]?.init as RequestInit).body as string);
-    expect(body.model).toBe('wan2.6-t2v');
+    expect(body.model).toBe('wan2.7-t2v-2026-06-12');
     expect(body.input.img_url).toBeUndefined();
     expect(body.parameters?.duration).toBeUndefined();
+  });
+
+  it('uses the Wan 2.7 resolution and ratio protocol instead of the legacy size field', async () => {
+    const { fetchImpl, calls } = jsonQueue([
+      { body: { output: { task_id: 'v27', task_status: 'PENDING' } } },
+    ]);
+    await createVideoTask({
+      apiKey: KEY,
+      model: 'wan2.7-t2v-2026-06-12',
+      prompt: 'single-shot product video',
+      size: '1280*720',
+      resolution: '720P',
+      ratio: '16:9',
+      durationSeconds: 8,
+      fetchImpl,
+    });
+    const body = JSON.parse((calls[0]?.init as RequestInit).body as string);
+    expect(body.parameters).toEqual({
+      resolution: '720P',
+      ratio: '16:9',
+      duration: 8,
+    });
+    expect(body.parameters.size).toBeUndefined();
   });
 });
 

@@ -101,7 +101,7 @@ const schema = z.object({
    * one-env-var fix, never a redeploy — the adapters never hard-code them.
    */
   WANXIANG_T2I_MODEL: z.string().default('wan2.2-t2i-flash'),
-  WANXIANG_T2V_MODEL: z.string().default('wan2.6-t2v'),
+  WANXIANG_T2V_MODEL: z.string().default('wan2.7-t2v-2026-06-12'),
   /** HappyHorse-1.1 文生视频(同 DashScope intl 端点/同 key,仅改 model). */
   HAPPYHORSE_T2V_MODEL: z.string().default('happyhorse-1.1-t2v'),
   /**

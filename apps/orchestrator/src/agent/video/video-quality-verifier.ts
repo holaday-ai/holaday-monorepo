@@ -701,9 +701,9 @@ export async function verifyFinalVideoQuality(
   };
 
   const primaryResult = await analyzeWithRetry(buildQualityPrompt(input));
-  if (primaryResult.status !== 'pass' || !shouldRunStrictRequiredActionAudit(input)) {
-    return primaryResult;
-  }
+  if (!shouldRunStrictRequiredActionAudit(input)) return primaryResult;
+  if (primaryResult.status === 'unknown') return primaryResult;
+
   const requiredActionChecks = getRequiredActionChecks(input);
   let lastActionResult = unknownResult('动作证据质检返回无法解析');
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -720,11 +720,30 @@ export async function verifyFinalVideoQuality(
         lastActionResult = unknownResult('动作证据质检返回无法解析');
         continue;
       }
-      return aggregateRequiredActionEvidence({
+      const actionResult = aggregateRequiredActionEvidence({
         expectedChecks: requiredActionChecks,
         evidence,
         sampledFrameSeconds: frames.map((frame) => frame.timestampSeconds),
       });
+      if (primaryResult.status === 'pass') return actionResult;
+      if (actionResult.status === 'unknown') return actionResult;
+
+      const primaryNonActionChecks = primaryResult.failedChecks.filter(
+        (check) => !check.startsWith('required_action_missing'),
+      );
+      if (actionResult.status === 'pass') {
+        if (primaryNonActionChecks.length === 0) return actionResult;
+        return {
+          status: 'fail',
+          failedChecks: primaryNonActionChecks,
+          reason: `${actionResult.reason}；仍存在其它画面质量问题：${primaryResult.reason}`,
+        };
+      }
+      return {
+        status: 'fail',
+        failedChecks: [...new Set([...primaryNonActionChecks, ...actionResult.failedChecks])],
+        reason: `${primaryResult.reason}；${actionResult.reason}`,
+      };
     } catch {
       lastActionResult = unknownResult('动作证据质检服务暂时不可用');
     }

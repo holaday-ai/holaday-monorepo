@@ -34,7 +34,7 @@ import { fetchWithTimeout, safeText, sleep, VideoHttpError } from './video-http.
 
 const DEFAULT_BASE_URL = 'https://dashscope-intl.aliyuncs.com';
 const DEFAULT_IMAGE_MODEL = 'wan2.2-t2i-flash';
-const DEFAULT_VIDEO_MODEL = 'wan2.6-t2v';
+const DEFAULT_VIDEO_MODEL = 'wan2.7-t2v-2026-06-12';
 const DEFAULT_TIMEOUT_MS = 30_000;
 // Image gen is ~10-30s, video 1-5min — these are POLL ceilings, not the
 // per-HTTP timeout above.
@@ -110,6 +110,10 @@ export interface CreateVideoTaskParams extends WanxiangBaseParams {
   readonly negativePrompt?: string;
   /** e.g. '1280*720'. Default omitted (model default). */
   readonly size?: string;
+  /** Wan 2.7 protocol resolution tier. */
+  readonly resolution?: '720P' | '1080P';
+  /** Wan 2.7 protocol output ratio. */
+  readonly ratio?: '16:9' | '9:16' | '1:1' | '4:3' | '3:4';
   /** Clip length in seconds → parameters.duration. Omit = model default. */
   readonly durationSeconds?: number;
 }
@@ -245,7 +249,13 @@ export async function createVideoTask(
   assertKey(p.apiKey);
   const model = p.model ?? DEFAULT_VIDEO_MODEL;
   const parameters: Record<string, unknown> = {};
-  if (p.size) parameters.size = p.size;
+  const usesWan27TextProtocol = model.startsWith('wan2.7-t2v');
+  if (usesWan27TextProtocol) {
+    if (p.resolution) parameters.resolution = p.resolution;
+    if (p.ratio) parameters.ratio = p.ratio;
+  } else if (p.size) {
+    parameters.size = p.size;
+  }
   if (p.durationSeconds !== undefined) parameters.duration = p.durationSeconds;
   const input: Record<string, unknown> = { prompt: p.prompt };
   if (p.imageUrl) input.img_url = p.imageUrl;

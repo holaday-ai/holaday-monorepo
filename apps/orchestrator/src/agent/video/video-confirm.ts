@@ -63,7 +63,7 @@ export function decideVideoGate(choice: VideoChoice, claimed: boolean): VideoGat
 // TODO(pricing): 价表/汇率为硬编码快照，Google/阿里 可能调价 → 需手动同步
 //   https://ai.google.dev/gemini-api/docs/pricing (Veo 每秒价 + nano banana 图片价)。
 //   HappyHorse: 阿里 DashScope 控制台(720P ¥0.9/s · 1080P ¥1.6/s)。
-//   Wan 2.6: Alibaba Model Studio Singapore list price
+//   Wan 2.7: Alibaba Model Studio Singapore list price
 //   (720P $0.10/s · 1080P $0.15/s).
 type Resolution = '720p' | '1080p';
 /** 每秒美元单价 — 按档 × 画质。720p/1080p 影响真实计费,据此诚实定价(不一律按 1080p)。*/
@@ -80,7 +80,7 @@ const TIER_LABEL: Record<VideoSource, string> = {
   veo_lite: 'Veo Lite',
   veo_standard: 'Veo 高质量',
   happyhorse: '快马 HappyHorse',
-  wanxiang: 'Wan 2.6',
+  wanxiang: 'Wan 2.7',
 };
 const NB_USD_PER_IMG = 0.067; // nano banana 1K/张
 const USD_TO_CNY = 7.3;

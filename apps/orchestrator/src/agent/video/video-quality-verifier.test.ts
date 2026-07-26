@@ -335,6 +335,61 @@ describe('verifyFinalVideoQuality', () => {
     });
   });
 
+  it('removes a contradictory action-missing tag when the independent action audit passes', async () => {
+    const analyzeFrames = vi
+      .fn()
+      .mockResolvedValueOnce(
+        JSON.stringify({
+          status: 'fail',
+          failedChecks: ['required_action_missing', 'hand_anatomy_uncertain'],
+          reason: '动作似乎缺失，且拇指与杯柄疑似融合',
+        }),
+      )
+      .mockResolvedValueOnce(
+        JSON.stringify({
+          checks: [
+            {
+              id: 'lift',
+              observed: true,
+              evidenceFrameSeconds: [1.5],
+              reason: '杯底离开桌面',
+            },
+            {
+              id: 'return',
+              observed: true,
+              evidenceFrameSeconds: [4.5],
+              reason: '杯子重新接触桌面',
+            },
+          ],
+          reason: '动作阶段均有直接证据',
+        }),
+      );
+
+    const result = await verifyFinalVideoQuality(
+      {
+        videoPath: '/tmp/final.mp4',
+        workdir: '/tmp/quality',
+        durationMs: 6_000,
+        userText: '拿起杯子，再放回桌面。',
+        strictRequiredActions: true,
+        expectedSubtitleText: [],
+        requiredBrandTexts: [],
+        brandPolicy: '无品牌要求。',
+      },
+      {
+        runFfmpeg: vi.fn(async () => undefined),
+        readFile: vi.fn(async () => Buffer.from('jpeg')),
+        analyzeFrames,
+        normalizeImage: async (buffer) => buffer,
+      },
+    );
+
+    expect(analyzeFrames).toHaveBeenCalledTimes(2);
+    expect(result.status).toBe('fail');
+    expect(result.failedChecks).toEqual(['hand_anatomy_uncertain']);
+    expect(result.reason).toMatch(/动作证据复核通过/);
+  });
+
   it('fails closed when the action evidence response omits a requested action', async () => {
     const analyzeFrames = vi
       .fn()
