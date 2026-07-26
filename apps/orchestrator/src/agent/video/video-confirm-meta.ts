@@ -132,6 +132,16 @@ export function mapVideoFailureReason(err: unknown): string {
   ) {
     return VIDEO_FAILURE_REASONS.providerQuota;
   }
+  if (
+    name === 'WanxiangError' &&
+    (e.status === 429 ||
+      (typeof e.detail === 'string' &&
+        /(?:\bArrearage\b|overdue[\s-]*payment|account\s+is\s+not\s+in\s+good\s+standing|insufficient\s+(?:account\s+)?balance|quota\s+(?:is\s+)?(?:exhausted|exceeded))/i.test(
+          e.detail,
+        )))
+  ) {
+    return VIDEO_FAILURE_REASONS.providerQuota;
+  }
   // SimpleVideoError (config/compose) + anything else → don't expose details.
   return VIDEO_FAILURE_REASONS.generic;
 }

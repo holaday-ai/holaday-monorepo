@@ -58,6 +58,7 @@ export class WanxiangError extends Error {
     readonly kind: WanxiangErrorKind,
     readonly status?: number,
     readonly detail?: string,
+    readonly retryable = true,
   ) {
     super(message);
     this.name = 'WanxiangError';
@@ -163,6 +164,10 @@ function base(p: WanxiangBaseParams): string {
   return (p.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, '');
 }
 
+function isRetryableHttpStatus(status: number): boolean {
+  return status === 408 || status === 409 || status === 425 || status === 429 || status >= 500;
+}
+
 /** POST a create-task body with X-DashScope-Async, retrying transient 429/503. */
 async function postCreate(
   url: string,
@@ -205,6 +210,7 @@ async function postCreate(
       'http',
       res.status,
       errBody.slice(0, 800),
+      isRetryableHttpStatus(res.status),
     );
   }
   let json: DashScopeCreateResponse;

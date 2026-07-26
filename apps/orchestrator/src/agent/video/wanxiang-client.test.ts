@@ -61,6 +61,28 @@ describe('createImageTask', () => {
     });
   });
 
+  it('marks a permanent account billing failure non-retryable', async () => {
+    const { fetchImpl, calls } = jsonQueue([
+      {
+        status: 400,
+        body: {
+          code: 'Arrearage',
+          message: 'The account is not in good standing due to an overdue payment.',
+        },
+      },
+    ]);
+
+    await expect(
+      createImageTask({ apiKey: KEY, prompt: 'x', fetchImpl }),
+    ).rejects.toMatchObject({
+      name: 'WanxiangError',
+      kind: 'http',
+      status: 400,
+      retryable: false,
+    });
+    expect(calls).toHaveLength(1);
+  });
+
   it('retries transient 429 then succeeds', async () => {
     const { fetchImpl, calls } = jsonQueue([
       { status: 429, body: { code: 'Throttling', message: 'slow down' } },

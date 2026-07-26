@@ -125,6 +125,20 @@ describe('mapVideoFailureReason — safe, whitelisted, no leak', () => {
     expect(out).not.toMatch(/account|plan|billing|https?:/i);
   });
 
+  it('Wan account billing failure → actionable model-switch copy without leaking provider detail', () => {
+    const out = mapVideoFailureReason({
+      name: 'WanxiangError',
+      kind: 'http',
+      status: 400,
+      detail:
+        '{"code":"Arrearage","message":"The account is not in good standing due to an overdue payment.","request_id":"secret"}',
+    });
+
+    expect(out).toBe(VIDEO_FAILURE_REASONS.providerQuota);
+    expect(out).toMatch(/切换其他模型|稍后重试/);
+    expect(out).not.toMatch(/Arrearage|account|overdue|payment|request_id|secret/i);
+  });
+
   it('automated anatomy failure → explicit quality rejection without internal detail', () => {
     expect(
       mapVideoFailureReason({
