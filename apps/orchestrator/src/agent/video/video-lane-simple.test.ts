@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { GeminiImageError } from '../image/gemini-image-client.js';
 import type { VideoScript } from './types.js';
 import {
   type SimpleVideoConfig,
@@ -924,6 +925,109 @@ describe('runSimpleVideoCreation — final quality gate', () => {
         (call) => ((call as unknown[])[0] as { filename?: string }).filename === 'video.mp4',
       ),
     ).toHaveLength(1);
+  });
+
+  it('falls back to Nano Banana 2 Lite when the required-hand composition anchor times out', async () => {
+    const { svc, mocks } = makeServices();
+    const fallbackAnchor = Buffer.from('lite-anchor');
+    mocks.generateImages
+      .mockRejectedValueOnce(new GeminiImageError('primary timed out', 'timeout'))
+      .mockResolvedValueOnce({
+        images: [{ buffer: fallbackAnchor, mimeType: 'image/png' }],
+        model: 'gemini-3.1-flash-lite-image',
+      });
+    const oneShot: VideoScript = {
+      title: '单镜头持杯',
+      segments: [
+        {
+          text: '右手拿起蓝色陶瓷杯，停一秒，再放回原位。',
+          type: 'broll',
+          visual: '固定镜头，右手拿起蓝色陶瓷杯，停一秒，再放回白色桌面',
+        },
+      ],
+    };
+
+    await runSimpleVideoCreation(
+      {
+        userText:
+          '一个成年人的右手从画面右侧进入，拿起白色桌面上的蓝色陶瓷杯，在空中停一秒，再把杯子放回原位，然后手离开画面。',
+        script: oneShot,
+      },
+      CFG,
+      { videoSource: 'veo_fast', aspectRatio: '16:9' },
+      svc,
+    );
+
+    expect(mocks.generateImages).toHaveBeenCalledTimes(2);
+    const primaryCall = (mocks.generateImages.mock.calls[0] as unknown[])[0] as {
+      model: string;
+      apiVersion?: string;
+      timeoutMs?: number;
+      maxRetries?: number;
+    };
+    const fallbackCall = (mocks.generateImages.mock.calls[1] as unknown[])[0] as {
+      model: string;
+      apiVersion?: string;
+      timeoutMs?: number;
+      maxRetries?: number;
+    };
+    expect(primaryCall).toMatchObject({
+      model: 'gemini-3.1-flash-image',
+      apiVersion: 'v1',
+      timeoutMs: 60_000,
+      maxRetries: 0,
+    });
+    expect(fallbackCall).toMatchObject({
+      model: 'gemini-3.1-flash-lite-image',
+      apiVersion: 'v1',
+      timeoutMs: 60_000,
+      maxRetries: 0,
+    });
+    const veoCall = (mocks.generateVeoVideo.mock.calls[0] as unknown[])[0] as {
+      startImage?: { data: string; mimeType: string };
+      lastFrameImage?: { data: string; mimeType: string };
+    };
+    expect(veoCall.startImage).toEqual({
+      data: fallbackAnchor.toString('base64'),
+      mimeType: 'image/png',
+    });
+    expect(veoCall.lastFrameImage).toEqual(veoCall.startImage);
+  });
+
+  it('does not rerun the whole segment when both composition-anchor models are unavailable', async () => {
+    const { svc, mocks } = makeServices();
+    mocks.generateImages
+      .mockRejectedValueOnce(new GeminiImageError('primary unavailable', 'network'))
+      .mockRejectedValueOnce(new GeminiImageError('fallback unavailable', 'timeout'));
+    const oneShot: VideoScript = {
+      title: '单镜头持杯',
+      segments: [
+        {
+          text: '右手拿起蓝色陶瓷杯再放回原位。',
+          type: 'broll',
+          visual: '固定镜头，右手拿起蓝色陶瓷杯再放回白色桌面',
+        },
+      ],
+    };
+
+    await expect(
+      runSimpleVideoCreation(
+        {
+          userText: '右手拿起白色桌面上的蓝色陶瓷杯，再把杯子放回原位。',
+          script: oneShot,
+        },
+        CFG,
+        { videoSource: 'veo_fast', aspectRatio: '16:9' },
+        svc,
+      ),
+    ).rejects.toMatchObject({
+      name: 'SimpleVideoError',
+      kind: 'compose',
+      retryable: false,
+    });
+
+    expect(mocks.generateImages).toHaveBeenCalledTimes(2);
+    expect(mocks.generateVeoVideo).not.toHaveBeenCalled();
   });
 
   it('stages a modest hand-object action inside a central motion corridor', async () => {

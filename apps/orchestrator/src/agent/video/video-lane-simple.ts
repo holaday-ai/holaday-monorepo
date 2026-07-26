@@ -24,7 +24,11 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { videoParameterIssue } from '@holaday/shared-types';
-import { generateImages } from '../image/gemini-image-client.js';
+import {
+  GeminiImageError,
+  generateImages,
+  type GenerateImagesResult,
+} from '../image/gemini-image-client.js';
 import { ffprobeDurationMs, renderImageClip, renderVideoClip, runFfmpeg } from './ffmpeg-exec.js';
 import { synthesizeGeminiSpeech } from './gemini-tts-client.js';
 import { synthesizeSpeech } from './qwen-voice-clone-client.js';
@@ -72,6 +76,9 @@ const MODEST_LIFT_ACTION_RE =
   /(?:拿起|提起|端起|抬起|离开桌面|离开支撑面|pick(?:s|ing)? up|lift(?:s|ing)?|raise(?:s|d|ing)?)/iu;
 const RETURN_TO_ORIGIN_RE =
   /(?:放回|归位|回到原位|put(?:s|ting)? (?:it )?back|return(?:s|ed|ing)? .+ (?:table|support|place))/iu;
+const DEFAULT_COMPOSITION_ANCHOR_MODEL = 'gemini-3.1-flash-image';
+const COMPOSITION_ANCHOR_FALLBACK_MODEL = 'gemini-3.1-flash-lite-image';
+const COMPOSITION_ANCHOR_TIMEOUT_MS = 60_000;
 const OBJECT_ONLY_SCENE_SUFFIX =
   '；这是纯物体/环境镜头，不得出现人物、手、手臂或身体部位，' +
   '不要新增拿起、触碰或操作主体的动作，只保留用户指定的主体、环境和运动';
@@ -456,6 +463,88 @@ interface SimpleFns {
   removeFile: (p: string) => Promise<void>;
 }
 
+function isRetryableCompositionAnchorError(err: unknown): boolean {
+  if (!(err instanceof GeminiImageError)) return false;
+  if (err.kind === 'timeout' || err.kind === 'network') return true;
+  return err.kind === 'http' && (err.status === 429 || err.status === 503);
+}
+
+function compositionAnchorErrorKind(err: unknown): string {
+  return err instanceof GeminiImageError ? err.kind : 'unknown';
+}
+
+async function generateRequiredHandCompositionAnchor(
+  input: {
+    prompt: string;
+    aspectRatio: '9:16' | '16:9';
+  },
+  cfg: SimpleVideoConfig,
+  fns: Pick<SimpleFns, 'generateImages'>,
+  logger: PipelineLogger,
+): Promise<{ data: string; mimeType: 'image/png' | 'image/jpeg' }> {
+  const primaryModel = cfg.geminiImageModel ?? DEFAULT_COMPOSITION_ANCHOR_MODEL;
+  const callModel = (model: string): Promise<GenerateImagesResult> =>
+    fns.generateImages({
+      apiKey: cfg.geminiApiKey ?? '',
+      ...(cfg.geminiBaseUrl ? { baseUrl: cfg.geminiBaseUrl } : {}),
+      model,
+      apiVersion: 'v1',
+      prompt: input.prompt,
+      aspectRatio: input.aspectRatio,
+      timeoutMs: COMPOSITION_ANCHOR_TIMEOUT_MS,
+      maxRetries: 0,
+    });
+
+  let generatedAnchor: GenerateImagesResult;
+  try {
+    generatedAnchor = await callModel(primaryModel);
+  } catch (err) {
+    if (
+      !isRetryableCompositionAnchorError(err) ||
+      primaryModel === COMPOSITION_ANCHOR_FALLBACK_MODEL
+    ) {
+      throw new SimpleVideoError(
+        `composition anchor unavailable (${compositionAnchorErrorKind(err)})`,
+        'compose',
+        false,
+      );
+    }
+    logger.warn(
+      {
+        fromModel: primaryModel,
+        toModel: COMPOSITION_ANCHOR_FALLBACK_MODEL,
+        errorKind: compositionAnchorErrorKind(err),
+      },
+      'video: composition anchor primary unavailable; trying fast fallback',
+    );
+    try {
+      generatedAnchor = await callModel(COMPOSITION_ANCHOR_FALLBACK_MODEL);
+    } catch (fallbackErr) {
+      throw new SimpleVideoError(
+        `composition anchor fallback unavailable (${compositionAnchorErrorKind(fallbackErr)})`,
+        'compose',
+        false,
+      );
+    }
+  }
+
+  const firstAnchor = generatedAnchor.images[0];
+  if (!firstAnchor) {
+    throw new SimpleVideoError('composition anchor produced no image', 'compose', false);
+  }
+  if (firstAnchor.mimeType !== 'image/png' && firstAnchor.mimeType !== 'image/jpeg') {
+    throw new SimpleVideoError(
+      `composition anchor returned unsupported image type ${firstAnchor.mimeType}`,
+      'compose',
+      false,
+    );
+  }
+  return {
+    data: firstAnchor.buffer.toString('base64'),
+    mimeType: firstAnchor.mimeType,
+  };
+}
+
 export interface SimpleVideoServices {
   storeOutput(input: { filename: string; mimetype: string; buffer: Buffer }): Promise<{
     fileId: string;
@@ -617,27 +706,15 @@ export function createSimplePipelineDeps(
         isVeoSource(videoSource) &&
         shouldUseRequiredHandCompositionAnchor(userText)
       ) {
-        const generatedAnchor = await fns.generateImages({
-          apiKey: cfg.geminiApiKey ?? '',
-          ...(cfg.geminiBaseUrl ? { baseUrl: cfg.geminiBaseUrl } : {}),
-          model: cfg.geminiImageModel ?? 'gemini-3.1-flash-image',
-          prompt: requiredHandCompositionAnchorPrompt(userText, aspectLabel),
-          aspectRatio: aspect.veoAspect,
-        });
-        const firstAnchor = generatedAnchor.images[0];
-        if (!firstAnchor) {
-          throw new SimpleVideoError('composition anchor produced no image', 'compose');
-        }
-        if (firstAnchor.mimeType !== 'image/png' && firstAnchor.mimeType !== 'image/jpeg') {
-          throw new SimpleVideoError(
-            `composition anchor returned unsupported image type ${firstAnchor.mimeType}`,
-            'compose',
-          );
-        }
-        compositionAnchor = {
-          data: firstAnchor.buffer.toString('base64'),
-          mimeType: firstAnchor.mimeType,
-        };
+        compositionAnchor = await generateRequiredHandCompositionAnchor(
+          {
+            prompt: requiredHandCompositionAnchorPrompt(userText, aspectLabel),
+            aspectRatio: aspect.veoAspect,
+          },
+          cfg,
+          fns,
+          svc.logger,
+        );
       }
       let repairInstruction = initialRepairInstruction;
       for (let attempt = 0; attempt < 2; attempt += 1) {
