@@ -34,7 +34,7 @@ import { fetchWithTimeout, safeText, sleep, VideoHttpError } from './video-http.
 
 const DEFAULT_BASE_URL = 'https://dashscope-intl.aliyuncs.com';
 const DEFAULT_IMAGE_MODEL = 'wan2.2-t2i-flash';
-const DEFAULT_VIDEO_MODEL = 'wan2.1-t2v-turbo';
+const DEFAULT_VIDEO_MODEL = 'wan2.6-t2v';
 const DEFAULT_TIMEOUT_MS = 30_000;
 // Image gen is ~10-30s, video 1-5min — these are POLL ceilings, not the
 // per-HTTP timeout above.
@@ -110,7 +110,7 @@ export interface CreateVideoTaskParams extends WanxiangBaseParams {
   readonly negativePrompt?: string;
   /** e.g. '1280*720'. Default omitted (model default). */
   readonly size?: string;
-  /** Clip length in seconds → parameters.duration (i2v 宠物视频 时长). Omit = model default. */
+  /** Clip length in seconds → parameters.duration. Omit = model default. */
   readonly durationSeconds?: number;
 }
 

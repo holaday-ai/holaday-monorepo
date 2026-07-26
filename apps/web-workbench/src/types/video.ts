@@ -45,7 +45,7 @@ const USD_PER_SEC: Record<NormalVideoModel, Record<VideoResolution, number>> = {
   veo_fast: { '720p': 0.1, '1080p': 0.12 },
   veo_standard: { '720p': 0.4, '1080p': 0.4 },
   happyhorse: { '720p': 0.9 / 7.3, '1080p': 1.6 / 7.3 },
-  wanxiang: { '720p': 0.1, '1080p': 0.12 },
+  wanxiang: { '720p': 0.1, '1080p': 0.15 },
 };
 const USD_TO_CNY = 7.3;
 

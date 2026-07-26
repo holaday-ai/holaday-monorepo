@@ -105,10 +105,11 @@ describe('createVideoTask — i2v 图生 (Phase 2 第二期)', () => {
     });
   });
 
-  it('t2v (no imageUrl) omits img_url + duration', async () => {
+  it('t2v defaults to Wan 2.6 and omits img_url + duration when unspecified', async () => {
     const { fetchImpl, calls } = jsonQueue([{ body: { output: { task_id: 'v2', task_status: 'PENDING' } } }]);
     await createVideoTask({ apiKey: KEY, prompt: 'a beach', fetchImpl });
     const body = JSON.parse((calls[0]?.init as RequestInit).body as string);
+    expect(body.model).toBe('wan2.6-t2v');
     expect(body.input.img_url).toBeUndefined();
     expect(body.parameters?.duration).toBeUndefined();
   });

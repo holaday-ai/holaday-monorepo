@@ -164,7 +164,7 @@ export type VisualMode = 'image' | 'video';
  *   'veo_fast'     — Veo 3.1 Fast, DEFAULT (8s/1080p ≈ ¥7/条, 解剖稳).
  *   'veo_lite'     — Veo 3.1 Lite, 省钱档 (≈ ¥4.6/条, 解剖偶失,一字可改).
  *   'veo_standard' — Veo 3.1 Standard, 高质量可选 (≈ ¥23/条).
- *   'wanxiang'     — wan2.1-t2v-turbo, 便宜兜底 (Veo 降级时).
+ *   'wanxiang'     — Wan 2.6, 支持 2–15 秒与 720p/1080p (Veo 不可用时).
  */
 export type VideoSource = 'veo_fast' | 'veo_lite' | 'veo_standard' | 'happyhorse' | 'wanxiang';
 
@@ -197,6 +197,32 @@ export function resolveAspect(ar: AspectRatio): {
     default: // 9:16 竖屏
       return { width: 1080, height: 1920, veoAspect: '9:16', hhSize: '1080*1920' };
   }
+}
+
+function resolveWanVideoSize(
+  ar: AspectRatio,
+  resolution: '720p' | '1080p',
+): string {
+  const sizes: Record<
+    '720p' | '1080p',
+    Record<AspectRatio, string>
+  > = {
+    '720p': {
+      '16:9': '1280*720',
+      '9:16': '720*1280',
+      '1:1': '960*960',
+      '4:3': '1088*832',
+      '3:4': '832*1088',
+    },
+    '1080p': {
+      '16:9': '1920*1080',
+      '9:16': '1080*1920',
+      '1:1': '1440*1440',
+      '4:3': '1632*1248',
+      '3:4': '1248*1632',
+    },
+  };
+  return sizes[resolution][ar];
 }
 
 function aspectCopy(ar: AspectRatio | undefined): string {
@@ -260,8 +286,8 @@ export interface SimpleVideoConfig {
   readonly presetVoice: string; // 'Cherry'
   /** Image source = nano banana. Default 'gemini-3.1-flash-image'. */
   readonly geminiImageModel?: string;
-  readonly wanxiangT2vModel: string; // wan2.1-t2v-turbo (兜底)
-  /** t2v 竖屏 size `W*H`. Default '720*1280' (fills 1080×1920, no letterbox). */
+  readonly wanxiangT2vModel: string; // wan2.6-t2v (Veo 不可用时)
+  /** Optional Wan t2v size override. Normally derived from selected aspect/resolution. */
   readonly wanxiangVideoSize?: string;
   /** HappyHorse t2v model (阿里 DashScope, 同 key 同端点). Default 'happyhorse-1.1-t2v'. */
   readonly happyhorseModel?: string;
@@ -428,6 +454,7 @@ export function createSimplePipelineDeps(
       }
       const localPath = path.join(svc.workdir, `seg${index}-vid.mp4`);
       const durationSeconds = opts.veoDurationSeconds ?? 8;
+      const resolution = opts.veoResolution ?? '1080p';
       const completionInstruction = motionCompletionInstruction(durationSeconds);
       let repairInstruction = initialRepairInstruction;
       for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -451,7 +478,7 @@ export function createSimplePipelineDeps(
             negativePrompt: scenePolicy.negativePrompt,
             aspectRatio: aspect.veoAspect, // 1:1 时用 9:16 出, compose pad 到方形
             durationSeconds,
-            resolution: opts.veoResolution ?? '1080p',
+            resolution,
           });
           url = v.videoUri;
           headers = { 'x-goog-api-key': cfg.geminiApiKey ?? '' }; // Veo uri needs the key
@@ -465,9 +492,13 @@ export function createSimplePipelineDeps(
             model: isHH ? (cfg.happyhorseModel ?? DEFAULT_HAPPYHORSE_MODEL) : cfg.wanxiangT2vModel,
             prompt: candidatePrompt,
             negativePrompt: scenePolicy.negativePrompt,
-            // HappyHorse 1080P 按画幅; wanxiang 兜底保持 720 竖屏(第一期不做多尺寸).
-            size: isHH ? aspect.hhSize : (cfg.wanxiangVideoSize ?? '720*1280'),
-            ...(isHH ? { durationSeconds } : {}),
+            // HappyHorse retains its established size contract. Wan 2.6 supports
+            // the official 720P/1080P size matrix for every visible aspect ratio.
+            size: isHH
+              ? aspect.hhSize
+              : (cfg.wanxiangVideoSize ??
+                resolveWanVideoSize(opts.aspectRatio ?? '9:16', resolution)),
+            durationSeconds,
           });
           if (!v.videoUrl)
             throw new SimpleVideoError(`broll video seg ${index} produced no url`, 'compose');

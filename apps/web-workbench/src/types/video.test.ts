@@ -6,6 +6,7 @@ import {
 import {
   cloneModeFromVideoModel,
   estimateCloneCny,
+  estimatePerSegmentCny,
   normalVideoModelFromSelection,
   type VideoModel,
 } from './video';
@@ -36,6 +37,23 @@ describe('clone video model contract', () => {
 });
 
 describe('normal video provider capability contract', () => {
+  it('mirrors the official Wan 2.6 Singapore price for 720p and 1080p', () => {
+    expect(
+      estimatePerSegmentCny({
+        model: 'wanxiang',
+        resolution: '720p',
+        durationSeconds: 8,
+      }),
+    ).toBe(Math.ceil(8 * 0.1 * 7.3));
+    expect(
+      estimatePerSegmentCny({
+        model: 'wanxiang',
+        resolution: '1080p',
+        durationSeconds: 8,
+      }),
+    ).toBe(Math.ceil(8 * 0.15 * 7.3));
+  });
+
   it('marks Veo 1080p + 6 seconds as unsupported', () => {
     expect(
       videoParameterIssue({

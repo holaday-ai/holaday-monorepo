@@ -381,25 +381,35 @@ describe('runSimpleVideoCreation — Veo tiers (explicit)', () => {
 });
 
 describe('runSimpleVideoCreation — wanxiang (fallback, explicit)', () => {
-  it('videoSource=wanxiang → t2v (no-text+anatomy negative) + renderVideoClip', async () => {
+  it('videoSource=wanxiang → Wan 2.6 with selected duration, resolution and aspect ratio', async () => {
     const { svc, mocks } = makeServices();
     await runSimpleVideoCreation(
       { userText: 'x' },
-      CFG,
-      { visualMode: 'video', videoSource: 'wanxiang' },
+      { ...CFG, wanxiangT2vModel: 'wan2.6-t2v' },
+      {
+        visualMode: 'video',
+        videoSource: 'wanxiang',
+        aspectRatio: '16:9',
+        veoResolution: '720p',
+        veoDurationSeconds: 8,
+      },
       svc,
     );
     expect(mocks.generateBrollVideo).toHaveBeenCalledTimes(2);
     expect(mocks.generateVeoVideo).not.toHaveBeenCalled();
     expect(mocks.renderVideoClip).toHaveBeenCalledTimes(2);
     const t2vArg = (mocks.generateBrollVideo.mock.calls[0] as unknown[])[0] as {
+      model: string;
       prompt: string;
       negativePrompt?: string;
       size?: string;
+      durationSeconds?: number;
     };
+    expect(t2vArg.model).toBe('wan2.6-t2v');
     expect(t2vArg.prompt).toContain('画面整洁');
     expect(t2vArg.negativePrompt ?? '').toMatch(/乱码|多余手臂|extra arm/);
-    expect(t2vArg.size).toBe('720*1280');
+    expect(t2vArg.size).toBe('1280*720');
+    expect(t2vArg.durationSeconds).toBe(8);
   });
 });
 

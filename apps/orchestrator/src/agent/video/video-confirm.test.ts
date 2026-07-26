@@ -123,6 +123,22 @@ describe('quoteVideo — dynamic by segment count', () => {
     expect(q.message).toContain('横屏');
     expect(q.message).not.toContain('Veo Fast'); // 不再硬写 Fast
   });
+
+  it('wan2.6 uses the official Singapore price for the selected resolution', () => {
+    const p720 = quoteVideo(1, 'wanxiang', {
+      resolution: '720p',
+      durationSeconds: 8,
+    });
+    const p1080 = quoteVideo(1, 'wanxiang', {
+      resolution: '1080p',
+      durationSeconds: 8,
+    });
+
+    expect(p720.videoCny).toBe(Math.ceil(8 * 0.1 * 7.3));
+    expect(p1080.videoCny).toBe(Math.ceil(8 * 0.15 * 7.3));
+    expect(p1080.videoCny).toBeGreaterThan(p720.videoCny);
+    expect(p720.message).toContain('Wan 2.6');
+  });
 });
 
 describe('quotePetI2v — 宠物 i2v 报价 (Phase 2 第二期, 原生 RMB/秒)', () => {
