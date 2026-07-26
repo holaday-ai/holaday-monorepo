@@ -189,7 +189,9 @@ describe('quoteIpVideo — IP 真人换口型 B 架构 (Phase 3)', () => {
     expect(q.videoCny).toBe(Math.max(1, Math.ceil((0.2 + (q.chars / 10000) * 0.13) * 7.3))); // ≈ ¥2
     expect(q.videoCny).toBeGreaterThanOrEqual(1);
     expect(q.maybeTooLong).toBe(false);
-    expect(q.message).toContain('真人换口型');
+    expect(q.message).toContain('IP人物视频');
+    expect(q.message).toContain('已授权的声音 + 出镜底版');
+    expect(q.message).not.toContain('你本人的声音');
     expect(q.message).not.toContain('图片版');
   });
 

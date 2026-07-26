@@ -107,6 +107,7 @@ type CreativeMode = 'video' | 'image';
 
 const CREATIVE_HISTORY_VISIBLE_PAGE_SIZE = 4;
 const CREATIVE_HISTORY_SCAN_PAGES_PER_CLICK = 5;
+export const IP_VIDEO_ASPECT_RATIO: VideoAspect = '9:16';
 type VideoTab = 'normal' | 'pet' | 'ip';
 type ImageGenerationMode = 'free' | 'lock_subject';
 type CreativeModelValue = VideoModel | ImageModel;
@@ -845,7 +846,13 @@ function CreativeStudioPage({
                   compact
                 />
               )}
-              {!isCloneVideo ? (
+              {isIpVideo ? (
+                <CreativeReadonlyField
+                  label="画幅"
+                  value="9:16"
+                  description="跟随竖屏底版"
+                />
+              ) : !isCloneVideo ? (
                 <CreativeSegment
                   label="比例"
                   value={aspectRatio}
@@ -853,7 +860,7 @@ function CreativeStudioPage({
                   onChange={(value) => setAspectRatio(value as VideoAspect)}
                   accent={accent}
                   compact
-                  className={isIpVideo ? 'max-w-[720px]' : 'md:col-span-2 2xl:col-span-1'}
+                  className="md:col-span-2 2xl:col-span-1"
                 />
               ) : null}
               {isImage ? (
@@ -902,10 +909,7 @@ function CreativeStudioPage({
                     model={model}
                   />
                 ) : (
-                  <IpOnboardingWizard
-                    onTaskCreated={onTaskCreated}
-                    aspectRatio={aspectRatio}
-                  />
+                  <IpOnboardingWizard onTaskCreated={onTaskCreated} />
                 )}
                 {currentTaskPanel ? <div className="mt-6">{currentTaskPanel}</div> : null}
               </div>
@@ -3284,10 +3288,8 @@ interface OnboardingStatus {
 
 export function IpOnboardingWizard({
   onTaskCreated,
-  aspectRatio,
 }: {
   onTaskCreated: (taskId: string) => void;
-  aspectRatio: VideoAspect;
 }): JSX.Element {
   const toast = useToast();
   const [status, setStatus] = React.useState<OnboardingStatus | null>(null);
@@ -3499,10 +3501,7 @@ export function IpOnboardingWizard({
 
       {/* 就绪 → 生成表单;未就绪 → 引导 */}
       {ready ? (
-        <IpGenerateForm
-          onTaskCreated={onTaskCreated}
-          aspectRatio={aspectRatio}
-        />
+        <IpGenerateForm onTaskCreated={onTaskCreated} />
       ) : (
         <Section className={CREATIVE_SECTION_CLASS}>
           <div className="flex items-center justify-between gap-3">
@@ -3548,10 +3547,8 @@ export function IpOnboardingWizard({
 
 function IpGenerateForm({
   onTaskCreated,
-  aspectRatio,
 }: {
   onTaskCreated: (taskId: string) => void;
-  aspectRatio: VideoAspect;
 }): JSX.Element {
   const toast = useToast();
   const createTask = useTaskStore((s) => s.createTask);
@@ -3578,7 +3575,7 @@ function IpGenerateForm({
     const finalIntent = buildIpVideoIntent(intent);
     const opts: VideoCreationOptions = {
       tab: 'ip_person',
-      aspectRatio,
+      aspectRatio: IP_VIDEO_ASPECT_RATIO,
     };
     try {
       await trpc.videoOnboarding.authorize.mutate();
@@ -3619,7 +3616,7 @@ function IpGenerateForm({
           <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
             <span className="text-xl font-semibold text-[#EA1F59]">约 ¥{est.videoCny}</span>
             <span className="text-[13px] text-muted-foreground">
-              Qwen Voice + LatentSync · {aspectRatio} · 约 {est.chars} 字
+              Qwen Voice + LatentSync · {IP_VIDEO_ASPECT_RATIO} · 约 {est.chars} 字
             </span>
           </div>
           {est.maybeTooLong && (

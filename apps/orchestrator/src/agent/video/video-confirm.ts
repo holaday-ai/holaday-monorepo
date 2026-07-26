@@ -191,8 +191,8 @@ export function quoteIpVideo(copyText: string): IpVideoQuote {
   const videoCny = Math.max(1, Math.ceil(usd * USD_TO_CNY));
   const maybeTooLong = chars > IP_CHAR_WARN;
   const message =
-    `将用你本人的声音 + 出镜底版,把这段文案口播出来,预计费用约 ¥${videoCny}` +
-    `（真人换口型 · 单条 ≤40 秒）。\n` +
+    `将使用已授权的声音 + 出镜底版生成 IP人物视频,预计费用约 ¥${videoCny}` +
+    `（单条 ≤40 秒）。\n` +
     (maybeTooLong
       ? `⚠️ 文案约 ${chars} 字,可能超过 40 秒上限;过长会被拒,请适当截短。\n`
       : '') +

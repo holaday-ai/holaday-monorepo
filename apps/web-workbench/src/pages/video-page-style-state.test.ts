@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_IMAGE_COUNT,
+  IP_VIDEO_ASPECT_RATIO,
   IP_ASSET_AUTHORIZATION_COPY,
   buildImageCreationOptions,
   buildCloneVideoIntent,
@@ -121,6 +122,15 @@ describe('video creative style state', () => {
     expect(IP_ASSET_AUTHORIZATION_COPY).toContain('虚构 AI 资产');
     expect(IP_ASSET_AUTHORIZATION_COPY).toContain('合法授权');
     expect(IP_ASSET_AUTHORIZATION_COPY).not.toContain('均为本人');
+  });
+
+  it('keeps IP videos aligned to the required portrait base instead of inheriting normal-video ratio', () => {
+    const source = readFileSync(new URL('./VideoPage.tsx', import.meta.url), 'utf8');
+
+    expect(IP_VIDEO_ASPECT_RATIO).toBe('9:16');
+    expect(source).toContain('label="画幅"');
+    expect(source).toContain('value="9:16"');
+    expect(source).toContain('description="跟随竖屏底版"');
   });
 
   it('keeps normal image prompts lightweight in free mode', () => {
