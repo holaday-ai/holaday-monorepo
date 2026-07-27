@@ -20,6 +20,7 @@ const CFG: SimpleVideoConfig = {
   falApiKey: 'fk',
   falBaseUrl: 'https://queue.fal.run',
   falLipsyncModel: 'fal-ai/latentsync',
+  falCloneLipsyncModel: 'fal-ai/sync-lipsync/v3',
   qwenTtsModel: 'qwen3-tts-flash',
   presetVoice: 'Cherry',
   wanxiangT2vModel: 'wan2.1-t2v-turbo',
@@ -181,10 +182,10 @@ describe('runCloneVideoCreation', () => {
       expect.objectContaining({
         apiKey: 'fk',
         baseUrl: 'https://queue.fal.run',
-        model: 'fal-ai/latentsync',
+        model: 'fal-ai/sync-lipsync/v3',
         videoUrl: 'https://dashscope-result-sgp/clone.mp4',
         audioUrl: 'https://r2.example/f_clone-audio.wav?sig',
-        extra: { loop_mode: 'loop' },
+        extra: { sync_mode: 'cut_off' },
       }),
     );
     expect(mocks.storeTemporaryAudio).toHaveBeenCalledWith({

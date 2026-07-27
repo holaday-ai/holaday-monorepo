@@ -127,6 +127,12 @@ function validateCloneReferenceMetadata(metadata: VideoMetadata): void {
   }
 }
 
+function cloneLipSyncExtra(model: string): Record<string, unknown> {
+  return /^fal-ai\/sync-lipsync\/v(?:2|3)$/.test(model)
+    ? { sync_mode: 'cut_off' }
+    : { loop_mode: 'loop' };
+}
+
 /**
  * Replace the main subject in a reference video with the uploaded character.
  * Wan replaces the main subject. When the reference contains audible speech,
@@ -241,7 +247,7 @@ export async function runCloneVideoCreation(
   if (sourceHasAudibleAudio) {
     const falApiKey = cfg.falApiKey;
     const falBaseUrl = cfg.falBaseUrl;
-    const falLipsyncModel = cfg.falLipsyncModel;
+    const falLipsyncModel = cfg.falCloneLipsyncModel ?? cfg.falLipsyncModel;
     if (!falApiKey || !falBaseUrl || !falLipsyncModel) {
       throw new SimpleVideoError('clone lip-sync provider not configured', 'config');
     }
@@ -283,7 +289,7 @@ export async function runCloneVideoCreation(
         model: falLipsyncModel,
         videoUrl: generated.videoUrl,
         audioUrl,
-        extra: { loop_mode: 'loop' },
+        extra: cloneLipSyncExtra(falLipsyncModel),
         maxWaitMs: lipSyncMaxWaitMs(referenceDurationMs),
       });
       finalVideoUrl = lipSync.videoUrl;

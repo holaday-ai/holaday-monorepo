@@ -343,6 +343,7 @@ function buildVideoCfg(): SimpleVideoConfig {
     falApiKey: appEnv.FAL_KEY,
     falBaseUrl: appEnv.FAL_BASE_URL,
     falLipsyncModel: appEnv.FAL_LIPSYNC_MODEL,
+    falCloneLipsyncModel: appEnv.FAL_CLONE_LIPSYNC_MODEL,
     geminiApiKey: appEnv.GEMINI_API_KEY,
     geminiBaseUrl: appEnv.GEMINI_BASE_URL,
     qwenTtsModel: 'qwen3-tts-flash',

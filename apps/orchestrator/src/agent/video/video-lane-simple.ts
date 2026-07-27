@@ -410,6 +410,8 @@ export interface SimpleVideoConfig {
   readonly falApiKey?: string;
   readonly falBaseUrl?: string;
   readonly falLipsyncModel?: string;
+  /** Clone-video override; defaults independently to Sync Lipsync 3. */
+  readonly falCloneLipsyncModel?: string;
   /** Shared Google key (same one as #5 nano banana) — Veo video AND nano banana image. */
   readonly geminiApiKey?: string;
   readonly geminiBaseUrl?: string;

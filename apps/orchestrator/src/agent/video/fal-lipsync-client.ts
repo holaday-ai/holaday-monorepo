@@ -116,6 +116,8 @@ export interface LipSyncResult {
 interface FalSubmitResponse {
   request_id?: string;
   status?: string;
+  status_url?: string;
+  response_url?: string;
   detail?: string;
 }
 interface FalStatusResponse {
@@ -141,6 +143,20 @@ function modelPath(p: FalBaseParams): string {
 }
 function authHeaders(apiKey: string): Record<string, string> {
   return { authorization: `Key ${apiKey}`, 'content-type': 'application/json' };
+}
+
+function trustedQueueUrl(value: string | undefined, p: FalBaseParams): string | undefined {
+  if (!value) return undefined;
+  try {
+    const candidate = new URL(value);
+    const configuredBase = new URL(base(p));
+    if (candidate.protocol !== 'https:' || candidate.origin !== configuredBase.origin) {
+      return undefined;
+    }
+    return candidate.toString();
+  } catch {
+    return undefined;
+  }
 }
 
 /** Map a non-2xx fal response to a typed error (403 balance vs other http). */
@@ -175,7 +191,12 @@ async function falFetch(
 
 export async function submitLipSync(
   p: SubmitLipSyncParams,
-): Promise<{ requestId: string; status: FalStatus }> {
+): Promise<{
+  requestId: string;
+  status: FalStatus;
+  statusUrl?: string;
+  responseUrl?: string;
+}> {
   assertKey(p.apiKey);
   const body = { video_url: p.videoUrl, audio_url: p.audioUrl, ...(p.extra ?? {}) };
   const res = await falFetch(
@@ -193,15 +214,23 @@ export async function submitLipSync(
   if (!json.request_id) {
     throw new FalLipSyncError('fal submit returned no request_id', 'bad_response', undefined, json.detail);
   }
-  return { requestId: json.request_id, status: (json.status as FalStatus) ?? 'IN_QUEUE' };
+  const statusUrl = trustedQueueUrl(json.status_url, p);
+  const responseUrl = trustedQueueUrl(json.response_url, p);
+  return {
+    requestId: json.request_id,
+    status: (json.status as FalStatus) ?? 'IN_QUEUE',
+    ...(statusUrl ? { statusUrl } : {}),
+    ...(responseUrl ? { responseUrl } : {}),
+  };
 }
 
 export async function getLipSyncStatus(
-  p: FalBaseParams & { requestId: string },
+  p: FalBaseParams & { requestId: string; statusUrl?: string },
 ): Promise<{ status: FalStatus }> {
   assertKey(p.apiKey);
   const res = await falFetch(
-    `${base(p)}/${modelPath(p)}/requests/${encodeURIComponent(p.requestId)}/status`,
+    p.statusUrl ??
+      `${base(p)}/${modelPath(p)}/requests/${encodeURIComponent(p.requestId)}/status`,
     { method: 'GET', headers: authHeaders(p.apiKey) },
     p,
   );
@@ -216,11 +245,12 @@ export async function getLipSyncStatus(
 }
 
 export async function getLipSyncResult(
-  p: FalBaseParams & { requestId: string },
+  p: FalBaseParams & { requestId: string; responseUrl?: string },
 ): Promise<LipSyncResult> {
   assertKey(p.apiKey);
   const res = await falFetch(
-    `${base(p)}/${modelPath(p)}/requests/${encodeURIComponent(p.requestId)}`,
+    p.responseUrl ??
+      `${base(p)}/${modelPath(p)}/requests/${encodeURIComponent(p.requestId)}`,
     { method: 'GET', headers: authHeaders(p.apiKey) },
     p,
   );
@@ -262,7 +292,7 @@ export async function runLipSync(
   const startedAt = Date.now();
   const pollIntervalMs = p.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
   const maxWaitMs = p.maxWaitMs ?? DEFAULT_MAX_WAIT_MS;
-  const { requestId } = await submitLipSync(p);
+  const { requestId, statusUrl, responseUrl } = await submitLipSync(p);
   for (;;) {
     const { status } = await getLipSyncStatus({
       apiKey: p.apiKey,
@@ -271,6 +301,7 @@ export async function runLipSync(
       ...(p.model ? { model: p.model } : {}),
       ...(p.fetchImpl ? { fetchImpl: p.fetchImpl } : {}),
       ...(p.signal ? { signal: p.signal } : {}),
+      ...(statusUrl ? { statusUrl } : {}),
     });
     p.onStatus?.(status);
     if (status === 'COMPLETED') {
@@ -281,6 +312,7 @@ export async function runLipSync(
         ...(p.model ? { model: p.model } : {}),
         ...(p.fetchImpl ? { fetchImpl: p.fetchImpl } : {}),
         ...(p.signal ? { signal: p.signal } : {}),
+        ...(responseUrl ? { responseUrl } : {}),
       });
       return { ...result, requestId, elapsedMs: Date.now() - startedAt };
     }
