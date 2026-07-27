@@ -284,6 +284,9 @@ export async function runCloneVideoCreation(
     throw new SimpleVideoError(
       'clone video failed automated quality verification',
       verification.status === 'unknown' ? 'quality_unavailable' : 'quality',
+      verification.status === 'unknown',
+      verification.failedChecks,
+      verification.reason,
     );
   }
   const stored = await services.storeOutputFile({

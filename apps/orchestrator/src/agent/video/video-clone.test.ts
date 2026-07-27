@@ -401,7 +401,13 @@ describe('runCloneVideoCreation', () => {
           { mode: 'wan-pro' },
           services,
         ),
-      ).rejects.toMatchObject({ name: 'SimpleVideoError', kind: expectedKind });
+      ).rejects.toMatchObject({
+        name: 'SimpleVideoError',
+        kind: expectedKind,
+        failedChecks:
+          status === 'fail' ? ['fused_hands', 'identity_drift'] : ['verifier_inconclusive'],
+        qualityReason: status === 'fail' ? '手部融合且主角身份漂移' : '质检服务未得出结论',
+      });
 
       expect(
         mocks.storeOutputFile.mock.calls.some(
