@@ -1,3 +1,4 @@
+import sharp from 'sharp';
 import type { FfmpegExecOpts } from './ffmpeg-exec.js';
 import {
   normalizeVideoQualityImage,
@@ -27,6 +28,7 @@ export interface CloneVideoCompatibilityDeps {
   readonly readFile: (path: string) => Promise<Buffer>;
   readonly analyzeFrames: VideoQualityAnalyzer;
   readonly normalizeImage?: (buffer: Buffer) => Promise<Buffer>;
+  readonly createSubjectBodyDetail?: (buffer: Buffer) => Promise<Buffer>;
 }
 
 function unknownResult(reason: string): VideoQualityResult {
@@ -71,7 +73,7 @@ const COMPATIBILITY_PROMPT = `你正在进行视频主角替换的付费前兼�
 请把“上传的主角照片”与参考视频的五个抽样帧分开检查：
 1. 主角照片必须只包含一位清晰可见的人类主体，可以是真人或写实虚构人物；宠物、动物、物体、纯插画角色、多人合照、严重遮挡均不通过。
 2. 参考视频必须有且只有一位持续可识别的主要人类主体；多人共同出镜、没有人物或主体长期不可见均不通过。
-3. 取景兼容性是单向约束：只在参考帧需要的身体区域在主角照片中缺失时，才返回 fail 并标记 framing_mismatch。只比较参考帧需要的可见身体范围，不要要求两者保持同一姿态或同一构图。只要任一参考帧清楚出现手臂、双手、腹部或腿部，而这些区域在主角照片中没有完整可见，就必须返回 fail；不要假设模型可以可靠补全缺失身体。主角照片的身体范围比参考帧更完整，或额外显示腹部、腿部，不能单独标记 framing_mismatch。姿态、手势不同不能单独作为 framing_mismatch。手臂和双手已经完整可见时，即使接近画面边缘也不视为缺失。明显的头肩照替换需要双手、腹部或腿部的动作仍不通过。
+3. “主角照片下半区域放大”与第一张是同一张主角照片的细节裁切，只用于核对手臂和双手，不能当成第二个人。取景兼容性是单向约束：只在参考帧需要的身体区域在主角照片中缺失时，才返回 fail 并标记 framing_mismatch。只比较参考帧需要的可见身体范围，不要要求两者保持同一姿态或同一构图。只要任一参考帧清楚出现手臂、双手、腹部或腿部，而这些区域在主角照片中没有完整可见，就必须返回 fail；不要假设模型可以可靠补全缺失身体。主角照片的身体范围比参考帧更完整，或额外显示腹部、腿部，不能单独标记 framing_mismatch。姿态、手势不同不能单独作为 framing_mismatch。手臂和双手已经完整可见时，即使接近画面边缘也不视为缺失。明显的头肩照替换需要双手、腹部或腿部的动作仍不通过。
 4. 不要比较两者是否为同一身份、同一性别、同一服装或同一肤色；本功能的目的正是替换身份。
 
 只提交结构化结论。失败项只使用：
@@ -81,6 +83,24 @@ const COMPATIBILITY_PROMPT = `你正在进行视频主角替换的付费前兼�
 - subject_occluded
 
 只有技术原因导致素材无法看清时才返回 unknown；不要因为身份不同而返回 fail。`;
+
+async function createCloneSubjectBodyDetail(buffer: Buffer): Promise<Buffer> {
+  const source = sharp(buffer, { failOn: 'warning' });
+  const metadata = await source.metadata();
+  if (!metadata.width || !metadata.height) {
+    throw new Error('subject image dimensions unavailable');
+  }
+  const top = Math.floor(metadata.height * 0.28);
+  return source
+    .extract({
+      left: 0,
+      top,
+      width: metadata.width,
+      height: metadata.height - top,
+    })
+    .jpeg({ quality: 88, mozjpeg: true })
+    .toBuffer();
+}
 
 export async function verifyCloneVideoCompatibility(
   input: VerifyCloneVideoCompatibilityInput,
@@ -107,21 +127,32 @@ export async function verifyCloneVideoCompatibility(
     return unknownResult('无法抽取参考视频兼容性检查帧');
   }
 
-  const subject = await normalizeImage(Buffer.from(input.subjectImage.data, 'base64'))
-    .then((buffer) => ({
-      data: buffer.toString('base64'),
-      mediaType: 'image/jpeg' as const,
-      label: input.subjectImage.label,
-    }))
-    .catch(() => null);
-  if (!subject) return unknownResult('无法读取主角照片');
+  const subjectBuffer = Buffer.from(input.subjectImage.data, 'base64');
+  const [subject, subjectBodyDetail] = await Promise.all([
+    normalizeImage(subjectBuffer)
+      .then((buffer) => ({
+        data: buffer.toString('base64'),
+        mediaType: 'image/jpeg' as const,
+        label: input.subjectImage.label,
+      }))
+      .catch(() => null),
+    (deps.createSubjectBodyDetail ?? createCloneSubjectBodyDetail)(subjectBuffer)
+      .then(normalizeImage)
+      .then((buffer) => ({
+        data: buffer.toString('base64'),
+        mediaType: 'image/jpeg' as const,
+        label: '主角照片下半区域放大',
+      }))
+      .catch(() => null),
+  ]);
+  if (!subject || !subjectBodyDetail) return unknownResult('无法读取主角照片');
 
   let lastResult = unknownResult('素材兼容性检查未得出结论');
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     try {
       lastResult = parseVideoQualityResponse(
         await deps.analyzeFrames({
-          references: [subject],
+          references: [subject, subjectBodyDetail],
           frames,
           prompt: COMPATIBILITY_PROMPT,
         }),

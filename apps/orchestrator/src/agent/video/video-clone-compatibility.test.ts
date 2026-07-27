@@ -15,6 +15,9 @@ function makeDeps() {
   const runFfmpeg = vi.fn(async () => {});
   const readFile = vi.fn(async () => Buffer.from('frame'));
   const normalizeImage = vi.fn(async (buffer: Buffer) => buffer);
+  const createSubjectBodyDetail = vi.fn(async (buffer: Buffer) =>
+    Buffer.concat([buffer, Buffer.from('-body-detail')]),
+  );
   const analyzeFrames = vi.fn(async (_input: VideoQualityAnalysisInput) =>
     JSON.stringify({
       status: 'pass',
@@ -23,8 +26,20 @@ function makeDeps() {
     }),
   );
   return {
-    deps: { runFfmpeg, readFile, normalizeImage, analyzeFrames },
-    mocks: { runFfmpeg, readFile, normalizeImage, analyzeFrames },
+    deps: {
+      runFfmpeg,
+      readFile,
+      normalizeImage,
+      createSubjectBodyDetail,
+      analyzeFrames,
+    },
+    mocks: {
+      runFfmpeg,
+      readFile,
+      normalizeImage,
+      createSubjectBodyDetail,
+      analyzeFrames,
+    },
   };
 }
 
@@ -71,7 +86,10 @@ describe('clone-video compatibility preflight', () => {
     expect(mocks.runFfmpeg).toHaveBeenCalledTimes(5);
     expect(mocks.analyzeFrames).toHaveBeenCalledWith(
       expect.objectContaining({
-        references: [expect.objectContaining({ label: '上传的主角照片' })],
+        references: [
+          expect.objectContaining({ label: '上传的主角照片' }),
+          expect.objectContaining({ label: '主角照片下半区域放大' }),
+        ],
         frames: expect.arrayContaining([
           expect.objectContaining({ timestampSeconds: 1 }),
           expect.objectContaining({ timestampSeconds: 9 }),
@@ -99,6 +117,10 @@ describe('clone-video compatibility preflight', () => {
     expect(mocks.analyzeFrames.mock.calls[0]?.[0].prompt).toMatch(
       /主角照片.*身体范围比参考帧更完整.*不能.*framing_mismatch/,
     );
+    expect(mocks.analyzeFrames.mock.calls[0]?.[0].prompt).toMatch(
+      /下半区域放大.*同一张主角照片.*核对.*手臂.*双手/,
+    );
+    expect(mocks.createSubjectBodyDetail).toHaveBeenCalledTimes(1);
   });
 
   it('retries an inconclusive verdict once and returns the next structured result', async () => {
