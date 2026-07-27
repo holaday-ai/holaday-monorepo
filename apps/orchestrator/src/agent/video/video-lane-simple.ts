@@ -378,6 +378,8 @@ export type SimpleVideoErrorKind =
   | 'config'
   | 'compose'
   | 'invalid_options'
+  | 'clone_incompatible'
+  | 'clone_compatibility_unavailable'
   | 'quality'
   | 'quality_unavailable';
 export class SimpleVideoError extends Error {

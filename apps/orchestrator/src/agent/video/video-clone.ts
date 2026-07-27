@@ -11,6 +11,7 @@ import { downloadToBuffer, downloadToFile } from './video-http.js';
 import { type SimpleVideoConfig, SimpleVideoError } from './video-lane-simple.js';
 import type { PipelineLogger } from './video-pipeline.js';
 import { generatePosterFile } from './video-poster.js';
+import type { VerifyCloneVideoCompatibilityInput } from './video-clone-compatibility.js';
 import type { VerifyFinalVideoQualityInput, VideoQualityResult } from './video-quality-verifier.js';
 import { prepareVideoQualityReferenceImage } from './video-quality-verifier.js';
 import { type WanAnimateMixMode, generateWanAnimateMix } from './wan-animate-mix-client.js';
@@ -40,6 +41,7 @@ export interface CloneVideoServices {
   }>;
   workdir: string;
   logger: PipelineLogger;
+  verifyCloneInputs(input: VerifyCloneVideoCompatibilityInput): Promise<VideoQualityResult>;
   verifyFinalVideo(input: VerifyFinalVideoQualityInput): Promise<VideoQualityResult>;
   overrides?: Partial<CloneVideoFns>;
 }
@@ -136,6 +138,9 @@ export async function runCloneVideoCreation(
   if (typeof services.verifyFinalVideo !== 'function') {
     throw new SimpleVideoError('video quality verifier not configured', 'config');
   }
+  if (typeof services.verifyCloneInputs !== 'function') {
+    throw new SimpleVideoError('clone compatibility verifier not configured', 'config');
+  }
   const fns = { ...realFns(), ...(services.overrides ?? {}) };
   // Preserve source evidence locally before the paid provider job starts.
   // Signed input URLs are intentionally short-lived.
@@ -162,6 +167,32 @@ export async function runCloneVideoCreation(
   });
   const ffprobeOpts = cfg.ffprobeBin ? { ffprobeBin: cfg.ffprobeBin } : {};
   const referenceDurationMs = referenceMetadata.durationMs;
+  const compatibility = await services.verifyCloneInputs({
+    subjectImage: subjectReference,
+    referenceVideoPath,
+    referenceVideoDurationMs: referenceDurationMs,
+    workdir: services.workdir,
+    ...(cfg.ffmpegBin ? { ffmpegBin: cfg.ffmpegBin } : {}),
+  });
+  if (compatibility.status !== 'pass') {
+    services.logger.warn(
+      {
+        status: compatibility.status,
+        failedChecks: compatibility.failedChecks,
+        reason: compatibility.reason,
+      },
+      'video: clone compatibility preflight rejected source assets',
+    );
+    throw new SimpleVideoError(
+      compatibility.status === 'unknown'
+        ? 'clone video compatibility verification unavailable'
+        : 'clone video source assets are incompatible',
+      compatibility.status === 'unknown'
+        ? 'clone_compatibility_unavailable'
+        : 'clone_incompatible',
+      compatibility.status === 'unknown',
+    );
+  }
   const generated = await fns.generateWanAnimateMix({
     apiKey: cfg.dashscopeApiKey,
     baseUrl: cfg.dashscopeBaseUrl,

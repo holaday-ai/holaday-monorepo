@@ -198,6 +198,23 @@ describe('mapVideoFailureReason — safe, whitelisted, no leak', () => {
     expect(mapVideoFailureReason('some string')).toBe(VIDEO_FAILURE_REASONS.generic);
   });
 
+  it('maps clone compatibility failures without exposing raw analyzer output', () => {
+    expect(
+      mapVideoFailureReason({
+        name: 'SimpleVideoError',
+        kind: 'clone_incompatible',
+        message: 'raw model reason must not leak',
+      }),
+    ).toBe(VIDEO_FAILURE_REASONS.cloneIncompatible);
+    expect(
+      mapVideoFailureReason({
+        name: 'SimpleVideoError',
+        kind: 'clone_compatibility_unavailable',
+        message: 'provider detail must not leak',
+      }),
+    ).toBe(VIDEO_FAILURE_REASONS.cloneCompatibilityUnavailable);
+  });
+
   it('★ NEVER leaks internal detail (url / file id / stack / message)', () => {
     const sensitive = {
       name: 'FalLipSyncError',

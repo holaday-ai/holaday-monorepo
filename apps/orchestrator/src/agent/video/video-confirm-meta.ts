@@ -69,6 +69,10 @@ export const VIDEO_FAILURE_REASONS = {
     '当前视频模型暂时不可用，本次未生成成片。请切换其他模型，或稍后重试。',
   cloneProviderUnavailable:
     '当前复刻视频模型暂时不可用，本次未开始生成成片。请稍后重试。',
+  cloneIncompatible:
+    '主角照片与参考视频不适配，本次未开始付费生成。当前仅支持单人换单人，请使用清晰单人照片，并选择人物取景和身体比例相近的参考视频。',
+  cloneCompatibilityUnavailable:
+    '暂时无法确认主角照片与参考视频是否适配，本次未开始付费生成。请稍后重试。',
   quality:
     '成片自动质检未通过（检测到时长不足、动作未完成、异常肢体、画面偏离或文字/品牌不准确），问题视频未交付，请重试。',
   qualityUnavailable: '成片自动质检暂时未得出结论，问题视频未交付，请稍后重试。',
@@ -118,6 +122,12 @@ export function mapVideoFailureReason(err: unknown): string {
   }
   if ((name === 'SimpleVideoError' || name === 'IpVideoError') && kind === 'quality_unavailable') {
     return VIDEO_FAILURE_REASONS.qualityUnavailable;
+  }
+  if (name === 'SimpleVideoError' && kind === 'clone_incompatible') {
+    return VIDEO_FAILURE_REASONS.cloneIncompatible;
+  }
+  if (name === 'SimpleVideoError' && kind === 'clone_compatibility_unavailable') {
+    return VIDEO_FAILURE_REASONS.cloneCompatibilityUnavailable;
   }
   if (name === 'IpVideoError') {
     if (kind === 'too_long') return VIDEO_FAILURE_REASONS.tooLong;

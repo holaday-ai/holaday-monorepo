@@ -6745,6 +6745,9 @@ export const tasksRouter = router({
         const { createAnthropicVideoQualityAnalyzer, verifyFinalVideoQuality } = await import(
           '../../agent/video/video-quality-verifier.js'
         );
+        const { verifyCloneVideoCompatibility } = await import(
+          '../../agent/video/video-clone-compatibility.js'
+        );
         const os = await import('node:os');
         const path = await import('node:path');
         const { promises: fsp } = await import('node:fs');
@@ -6778,6 +6781,14 @@ export const tasksRouter = router({
                 'video: automated quality analysis did not return a usable verdict',
               );
             },
+          });
+        const verifyCloneInputs = (
+          compatibilityInput: Parameters<typeof verifyCloneVideoCompatibility>[0],
+        ) =>
+          verifyCloneVideoCompatibility(compatibilityInput, {
+            runFfmpeg,
+            readFile: (filePath) => fsp.readFile(filePath),
+            analyzeFrames: analyzeVideoQuality,
           });
         // 仅最终 video.mp4 落用户文件;中间段产物只用 workdir 副本(pipeline 用本地路径)。
         const storeOutput = async (i: { filename: string; mimetype: string; buffer: Buffer }) => {
@@ -6881,7 +6892,14 @@ export const tasksRouter = router({
               },
               buildVideoCfg(),
               { mode: meta.cloneMode ?? 'wan-std' },
-              { storeOutput, storeOutputFile, workdir, logger, verifyFinalVideo },
+              {
+                storeOutput,
+                storeOutputFile,
+                workdir,
+                logger,
+                verifyCloneInputs,
+                verifyFinalVideo,
+              },
             );
             summary = '复刻视频已生成。';
           } else if (isPet) {

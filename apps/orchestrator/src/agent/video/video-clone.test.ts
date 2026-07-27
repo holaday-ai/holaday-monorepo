@@ -62,6 +62,13 @@ function makeServices() {
       reason: '主体、动作和肢体均通过',
     }),
   );
+  const verifyCloneInputs = vi.fn(
+    async (): Promise<VideoQualityResult> => ({
+      status: 'pass' as const,
+      failedChecks: [],
+      reason: '单人主体和参考视频取景相容',
+    }),
+  );
   const overrides: Partial<CloneVideoFns> = {
     generateWanAnimateMix:
       generateWanAnimateMix as unknown as CloneVideoFns['generateWanAnimateMix'],
@@ -78,8 +85,11 @@ function makeServices() {
     storeOutputFile,
     workdir: '/tmp/clone-video',
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    verifyCloneInputs,
     verifyFinalVideo,
     overrides,
+  } as CloneVideoServices & {
+    verifyCloneInputs(input: unknown): Promise<VideoQualityResult>;
   };
   return {
     services,
@@ -94,6 +104,7 @@ function makeServices() {
       readImageMetadata,
       storeOutput,
       storeOutputFile,
+      verifyCloneInputs,
       verifyFinalVideo,
     },
   };
@@ -135,6 +146,16 @@ describe('runCloneVideoCreation', () => {
     expect(mocks.downloadToBuffer).not.toHaveBeenCalledWith('https://r2.example/reference.mp4');
     expect(mocks.downloadToBuffer).not.toHaveBeenCalledWith(
       'https://dashscope-result-sgp/clone.mp4',
+    );
+    expect(mocks.verifyCloneInputs).toHaveBeenCalledWith(
+      expect.objectContaining({
+        subjectImage: expect.objectContaining({
+          label: '上传的主角照片',
+        }),
+        referenceVideoPath: '/tmp/clone-video/clone-reference.mp4',
+        referenceVideoDurationMs: 8200,
+        workdir: '/tmp/clone-video',
+      }),
     );
     expect(mocks.verifyFinalVideo).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -228,6 +249,50 @@ describe('runCloneVideoCreation', () => {
 
     expect(mocks.generateWanAnimateMix).not.toHaveBeenCalled();
   });
+
+  it.each([
+    [
+      'fail',
+      'clone_incompatible',
+      ['subject_not_single_human', 'framing_mismatch'],
+      '主角不是单人，且取景与参考视频不一致',
+    ],
+    [
+      'unknown',
+      'clone_compatibility_unavailable',
+      ['verifier_inconclusive'],
+      '素材兼容性检查未得出结论',
+    ],
+  ] as const)(
+    'blocks a %s compatibility verdict before starting the paid provider job',
+    async (status, expectedKind, failedChecks, reason) => {
+      const { services, mocks } = makeServices();
+      mocks.verifyCloneInputs.mockResolvedValueOnce({
+        status,
+        failedChecks: [...failedChecks],
+        reason,
+      });
+
+      await expect(
+        runCloneVideoCreation(
+          {
+            imageUrl: 'https://r2.example/subject.jpg',
+            referenceVideoUrl: 'https://r2.example/reference.mp4',
+          },
+          CFG,
+          { mode: 'wan-pro' },
+          services,
+        ),
+      ).rejects.toMatchObject({
+        name: 'SimpleVideoError',
+        kind: expectedKind,
+      });
+
+      expect(mocks.generateWanAnimateMix).not.toHaveBeenCalled();
+      expect(mocks.verifyFinalVideo).not.toHaveBeenCalled();
+      expect(mocks.storeOutputFile).not.toHaveBeenCalled();
+    },
+  );
 
   it.each([
     ['fail', 'quality'],
