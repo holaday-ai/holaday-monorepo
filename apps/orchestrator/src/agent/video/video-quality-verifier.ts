@@ -72,6 +72,47 @@ const REQUIRED_ACTION_EVIDENCE_TOOL: Anthropic.Tool = {
     additionalProperties: false,
   },
 };
+const CLONE_COMPATIBILITY_CHECK_IDS = [
+  'subject_single_human',
+  'reference_single_human',
+  'subject_not_occluded',
+  'framing_compatible',
+] as const;
+const CLONE_COMPATIBILITY_EVIDENCE_TOOL_NAME = 'submit_clone_compatibility_evidence';
+const CLONE_COMPATIBILITY_EVIDENCE_TOOL: Anthropic.Tool = {
+  name: CLONE_COMPATIBILITY_EVIDENCE_TOOL_NAME,
+  description:
+    'Submit observable evidence for each clone-video compatibility check without a top-level verdict.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      checks: {
+        type: 'array',
+        minItems: CLONE_COMPATIBILITY_CHECK_IDS.length,
+        maxItems: CLONE_COMPATIBILITY_CHECK_IDS.length,
+        items: {
+          type: 'object',
+          properties: {
+            id: {
+              type: 'string',
+              enum: [...CLONE_COMPATIBILITY_CHECK_IDS],
+            },
+            passed: {
+              type: 'boolean',
+            },
+            reason: {
+              type: 'string',
+            },
+          },
+          required: ['id', 'passed', 'reason'],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ['checks'],
+    additionalProperties: false,
+  },
+};
 const SAMPLE_RATIOS = [0.05, 0.15, 0.25, 0.375, 0.5, 0.625, 0.75, 0.85, 0.95] as const;
 const REFERENCE_SAMPLE_RATIOS = [0.1, 0.3, 0.5, 0.7, 0.9] as const;
 const VIDEO_QUALITY_MAX_SOURCE_IMAGE_BYTES = 12 * 1024 * 1024;
@@ -115,7 +156,10 @@ export interface VideoQualityAnalysisInput {
     readonly timestampSeconds: number;
   }>;
   readonly prompt: string;
-  readonly outputMode?: 'quality_verdict' | 'required_action_evidence';
+  readonly outputMode?:
+    | 'quality_verdict'
+    | 'required_action_evidence'
+    | 'clone_compatibility_evidence';
 }
 
 export type VideoQualityAnalyzer = (input: VideoQualityAnalysisInput) => Promise<string>;
@@ -617,7 +661,9 @@ export function createAnthropicVideoQualityAnalyzer(client: Anthropic): VideoQua
     const selectedTool =
       outputMode === 'required_action_evidence'
         ? REQUIRED_ACTION_EVIDENCE_TOOL
-        : QUALITY_VERDICT_TOOL;
+        : outputMode === 'clone_compatibility_evidence'
+          ? CLONE_COMPATIBILITY_EVIDENCE_TOOL
+          : QUALITY_VERDICT_TOOL;
     const referenceContent = input.references.flatMap((reference) => [
       { type: 'text' as const, text: `参考素材：${reference.label}` },
       {
@@ -654,7 +700,12 @@ export function createAnthropicVideoQualityAnalyzer(client: Anthropic): VideoQua
     const response = await client.messages.create(
       {
         model: QUALITY_MODEL,
-        max_tokens: outputMode === 'required_action_evidence' ? 1_536 : 512,
+        max_tokens:
+          outputMode === 'required_action_evidence'
+            ? 1_536
+            : outputMode === 'clone_compatibility_evidence'
+              ? 1_024
+              : 512,
         tools: [selectedTool],
         tool_choice: { type: 'tool', name: selectedTool.name },
         messages: [{ role: 'user', content }],

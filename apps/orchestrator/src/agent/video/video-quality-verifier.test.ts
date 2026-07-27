@@ -990,4 +990,80 @@ describe('createAnthropicVideoQualityAnalyzer', () => {
       },
     );
   });
+
+  it('uses a verdict-free evidence tool for clone compatibility analysis', async () => {
+    const create = vi.fn(async () => ({
+      content: [
+        {
+          type: 'tool_use' as const,
+          id: 'toolu_clone_compatibility',
+          name: 'submit_clone_compatibility_evidence',
+          input: {
+            checks: [
+              {
+                id: 'subject_single_human',
+                passed: true,
+                reason: '主角照片只有一位人物',
+              },
+              {
+                id: 'reference_single_human',
+                passed: true,
+                reason: '参考帧只有一位人物',
+              },
+              {
+                id: 'subject_not_occluded',
+                passed: true,
+                reason: '主角无遮挡',
+              },
+              {
+                id: 'framing_compatible',
+                passed: true,
+                reason: '所需身体区域均完整可见',
+              },
+            ],
+          },
+        },
+      ],
+    }));
+    const analyzer = createAnthropicVideoQualityAnalyzer({
+      messages: { create },
+    } as unknown as Anthropic);
+
+    const response = await analyzer({
+      references: [],
+      frames: [],
+      prompt: 'check clone compatibility',
+      outputMode: 'clone_compatibility_evidence',
+    });
+
+    const parsed = JSON.parse(response) as {
+      checks: Array<{ id: string; passed: boolean }>;
+    };
+    expect(parsed.checks).toHaveLength(4);
+    expect(parsed.checks[0]).toMatchObject({
+      id: 'subject_single_human',
+      passed: true,
+    });
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tools: [
+          expect.objectContaining({
+            name: 'submit_clone_compatibility_evidence',
+            input_schema: expect.objectContaining({
+              required: ['checks'],
+            }),
+          }),
+        ],
+        tool_choice: {
+          type: 'tool',
+          name: 'submit_clone_compatibility_evidence',
+        },
+        max_tokens: 1_024,
+      }),
+      {
+        timeout: 75_000,
+        maxRetries: 2,
+      },
+    );
+  });
 });

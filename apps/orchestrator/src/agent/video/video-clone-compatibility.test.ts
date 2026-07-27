@@ -20,9 +20,12 @@ function makeDeps() {
   );
   const analyzeFrames = vi.fn(async (_input: VideoQualityAnalysisInput) =>
     JSON.stringify({
-      status: 'pass',
-      failedChecks: [],
-      reason: '单人主体和参考视频取景相容',
+      checks: [
+        { id: 'subject_single_human', passed: true, reason: '主角照片只有一位清晰人物' },
+        { id: 'reference_single_human', passed: true, reason: '参考帧只有一位持续人物' },
+        { id: 'subject_not_occluded', passed: true, reason: '主角身体区域清晰可见' },
+        { id: 'framing_compatible', passed: true, reason: '参考所需身体区域均在照片中可见' },
+      ],
     }),
   );
   return {
@@ -95,6 +98,7 @@ describe('clone-video compatibility preflight', () => {
           expect.objectContaining({ timestampSeconds: 9 }),
         ]),
         prompt: expect.stringMatching(/不要比较.*身份/),
+        outputMode: 'clone_compatibility_evidence',
       }),
     );
     expect(mocks.analyzeFrames.mock.calls[0]?.[0].prompt).toMatch(/仅支持单人换单人/);
@@ -123,21 +127,59 @@ describe('clone-video compatibility preflight', () => {
     expect(mocks.createSubjectBodyDetail).toHaveBeenCalledTimes(1);
   });
 
-  it('retries an inconclusive verdict once and returns the next structured result', async () => {
+  it('derives the verdict from per-check evidence instead of contradictory top-level fields', async () => {
+    const { deps, mocks } = makeDeps();
+    mocks.analyzeFrames.mockResolvedValueOnce(
+      JSON.stringify({
+        status: 'fail',
+        failedChecks: ['framing_mismatch'],
+        reason: '所有检查均通过，应返回 pass',
+        checks: [
+          { id: 'subject_single_human', passed: true, reason: '单人主体' },
+          { id: 'reference_single_human', passed: true, reason: '单人参考' },
+          { id: 'subject_not_occluded', passed: true, reason: '无遮挡' },
+          { id: 'framing_compatible', passed: true, reason: '身体区域完整覆盖' },
+        ],
+      }),
+    );
+
+    const result = await verifyCloneVideoCompatibility(
+      {
+        subjectImage: SUBJECT,
+        referenceVideoPath: '/tmp/reference.mp4',
+        referenceVideoDurationMs: 10_000,
+        workdir: '/tmp/clone',
+      },
+      deps,
+    );
+
+    expect(result).toEqual({
+      status: 'pass',
+      failedChecks: [],
+      reason: '素材兼容性检查通过',
+    });
+  });
+
+  it('retries malformed evidence once and deterministically maps the next failed check', async () => {
     const { deps, mocks } = makeDeps();
     mocks.analyzeFrames
       .mockResolvedValueOnce(
         JSON.stringify({
-          status: 'unknown',
-          failedChecks: ['verifier_inconclusive'],
-          reason: '首轮无法判断',
+          checks: [{ id: 'subject_single_human', passed: true, reason: '缺少其它检查项' }],
         }),
       )
       .mockResolvedValueOnce(
         JSON.stringify({
-          status: 'fail',
-          failedChecks: ['framing_mismatch'],
-          reason: '照片为近景，参考视频为全身',
+          checks: [
+            { id: 'subject_single_human', passed: true, reason: '单人主体' },
+            { id: 'reference_single_human', passed: true, reason: '单人参考' },
+            { id: 'subject_not_occluded', passed: true, reason: '无遮挡' },
+            {
+              id: 'framing_compatible',
+              passed: false,
+              reason: '照片为近景，参考视频需要完整双手',
+            },
+          ],
         }),
       );
 
@@ -154,7 +196,7 @@ describe('clone-video compatibility preflight', () => {
     expect(result).toEqual({
       status: 'fail',
       failedChecks: ['framing_mismatch'],
-      reason: '照片为近景，参考视频为全身',
+      reason: '取景范围不兼容：照片为近景，参考视频需要完整双手',
     });
     expect(mocks.analyzeFrames).toHaveBeenCalledTimes(2);
   });
