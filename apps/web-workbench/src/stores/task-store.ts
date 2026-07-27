@@ -1647,6 +1647,8 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         const incomingAttachments = parseUiAttachments(
           (msg as { attachments?: unknown }).attachments,
         );
+        const incomingVerificationPassed =
+          typeof msg.verificationPassed === 'boolean' ? msg.verificationPassed : null;
         return {
           tasks: prev.tasks.map((t) =>
             t.taskId === msg.taskId
@@ -1659,6 +1661,9 @@ export const useTaskStore = create<TaskStore>((set, get) => {
                     ? { failedChecks: incomingFailedChecks }
                     : {}),
                   ...(incomingAttachments ? { attachments: incomingAttachments } : {}),
+                  ...(incomingVerificationPassed !== null
+                    ? { verificationPassed: incomingVerificationPassed }
+                    : {}),
                 }
               : t,
           ),

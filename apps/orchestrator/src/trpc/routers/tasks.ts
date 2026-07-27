@@ -7077,6 +7077,7 @@ export const tasksRouter = router({
             status: 'completed',
             summary,
             tickCount: 1,
+            verificationPassed: true,
             metadata: {
               executionMode: 'generate',
               lane: 'video_creation',
@@ -7093,6 +7094,7 @@ export const tasksRouter = router({
               taskId: newTaskId,
               status: 'completed',
               summary,
+              verificationPassed: true,
               ...(finalAtt ? { attachments: [finalAtt] } : {}),
             });
           }

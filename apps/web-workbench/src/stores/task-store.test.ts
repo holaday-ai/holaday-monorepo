@@ -2582,6 +2582,32 @@ describe('applyServerMessage terminal and pause cleanup', () => {
     });
   });
 
+  it('applies a live terminal verification verdict without waiting for detail hydration', () => {
+    useTaskStore.setState({
+      tasks: [
+        task({
+          taskId: 'tsk_video_verified',
+          status: 'executing',
+          verificationPassed: null,
+        }),
+      ],
+    });
+
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.task.terminal',
+      taskId: 'tsk_video_verified',
+      status: 'completed',
+      summary: '视频已生成',
+      verificationPassed: true,
+    });
+
+    expect(useTaskStore.getState().tasks[0]).toMatchObject({
+      status: 'completed',
+      resultText: '视频已生成',
+      verificationPassed: true,
+    });
+  });
+
   it('keeps paused recoverable and clears stale live blockers without terminal reveal animation', () => {
     useTaskStore.setState({
       tasks: [task({ taskId: 'tsk_paused_terminal', status: 'executing' })],

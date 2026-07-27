@@ -288,6 +288,23 @@ describe('TaskRepository.persistVisionOutcome — awaiting_user state guard (Pha
     });
   });
 
+  it('persists an explicit passed verification verdict with the terminal outcome', async () => {
+    const { db, captured } = fakeDbWithAffectedRows(1);
+    const repo = new TaskRepository(db);
+
+    await repo.persistVisionOutcome('tsk_video_verified', {
+      status: 'completed',
+      summary: '视频已生成',
+      tickCount: 1,
+      verificationPassed: true,
+    });
+
+    expect(captured.taskUpdate).toMatchObject({
+      status: 'completed',
+      verificationPassed: true,
+    });
+  });
+
   it('guards completed writes to active running rows at SQL level', async () => {
     const { db, captured } = fakeDbWithAffectedRows(1);
     const repo = new TaskRepository(db);
