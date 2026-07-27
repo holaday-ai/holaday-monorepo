@@ -84,6 +84,15 @@ describe('clone-video compatibility preflight', () => {
     expect(mocks.analyzeFrames.mock.calls[0]?.[0].prompt).toMatch(
       /参考帧.*手臂.*双手.*主角照片.*完整可见.*framing_mismatch/,
     );
+    expect(mocks.analyzeFrames.mock.calls[0]?.[0].prompt).toMatch(
+      /姿态.*手势.*不同.*不能单独.*framing_mismatch/,
+    );
+    expect(mocks.analyzeFrames.mock.calls[0]?.[0].prompt).toMatch(
+      /完整可见.*接近画面边缘.*不视为缺失/,
+    );
+    expect(mocks.analyzeFrames.mock.calls[0]?.[0].prompt).toMatch(
+      /只比较.*可见身体范围.*不要要求.*同一姿态/,
+    );
   });
 
   it('retries an inconclusive verdict once and returns the next structured result', async () => {
