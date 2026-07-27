@@ -81,6 +81,9 @@ describe('clone-video compatibility preflight', () => {
     );
     expect(mocks.analyzeFrames.mock.calls[0]?.[0].prompt).toMatch(/仅支持单人换单人/);
     expect(mocks.analyzeFrames.mock.calls[0]?.[0].prompt).toMatch(/取景.*身体比例/);
+    expect(mocks.analyzeFrames.mock.calls[0]?.[0].prompt).toMatch(
+      /参考帧.*手臂.*双手.*主角照片.*完整可见.*framing_mismatch/,
+    );
   });
 
   it('retries an inconclusive verdict once and returns the next structured result', async () => {
