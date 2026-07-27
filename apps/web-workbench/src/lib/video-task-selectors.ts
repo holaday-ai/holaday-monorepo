@@ -60,6 +60,23 @@ export function isVideoTaskRunning(status: string): boolean {
   );
 }
 
+export type VideoProductTab = 'normal' | 'pet' | 'ip';
+
+export function videoTabForTaskType(
+  videoType: UiTask['videoType'],
+): VideoProductTab | null {
+  switch (videoType) {
+    case 'normal':
+      return 'normal';
+    case 'pet':
+      return 'pet';
+    case 'ip_person':
+      return 'ip';
+    default:
+      return null;
+  }
+}
+
 /**
  * The awaiting-user WebSocket frame can arrive before the optimistic task row
  * is replaced with the server row. In that race the live store already knows

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { MediaIntegrityReport } from './ffmpeg-exec.js';
 import {
   type CloneVideoFns,
   type CloneVideoServices,
@@ -69,6 +70,14 @@ function makeServices() {
       reason: '单人主体和参考视频取景相容',
     }),
   );
+  const inspectMediaIntegrity = vi.fn(async (): Promise<MediaIntegrityReport> => ({
+    durationMs: 8200,
+    hasVideo: true,
+    hasAudio: true,
+    frozenRatio: 0.1,
+    audioMeanVolumeDb: -24,
+    audioMaxVolumeDb: -8,
+  }));
   const overrides: Partial<CloneVideoFns> = {
     generateWanAnimateMix:
       generateWanAnimateMix as unknown as CloneVideoFns['generateWanAnimateMix'],
@@ -79,6 +88,7 @@ function makeServices() {
     ffprobeDurationMs,
     ffprobeVideoMetadata,
     readImageMetadata,
+    inspectMediaIntegrity,
   };
   const services: CloneVideoServices = {
     storeOutput,
@@ -106,6 +116,7 @@ function makeServices() {
       storeOutputFile,
       verifyCloneInputs,
       verifyFinalVideo,
+      inspectMediaIntegrity,
     },
   };
 }
@@ -250,6 +261,36 @@ describe('runCloneVideoCreation', () => {
     expect(mocks.generateWanAnimateMix).not.toHaveBeenCalled();
   });
 
+  it('rejects a still-image reference before starting the paid provider job', async () => {
+    const { services, mocks } = makeServices();
+    mocks.inspectMediaIntegrity.mockResolvedValueOnce({
+      durationMs: 8200,
+      hasVideo: true,
+      hasAudio: false,
+      frozenRatio: 1,
+      audioMeanVolumeDb: null,
+      audioMaxVolumeDb: null,
+    });
+
+    await expect(
+      runCloneVideoCreation(
+        {
+          imageUrl: 'https://r2.example/subject.jpg',
+          referenceVideoUrl: 'https://r2.example/reference.mp4',
+        },
+        CFG,
+        { mode: 'wan-pro' },
+        services,
+      ),
+    ).rejects.toMatchObject({
+      name: 'SimpleVideoError',
+      kind: 'clone_incompatible',
+      failedChecks: ['source_motion_missing'],
+    });
+
+    expect(mocks.generateWanAnimateMix).not.toHaveBeenCalled();
+  });
+
   it.each([
     [
       'fail',
@@ -293,6 +334,47 @@ describe('runCloneVideoCreation', () => {
       expect(mocks.storeOutputFile).not.toHaveBeenCalled();
     },
   );
+
+  it('blocks an output that drops audible reference audio', async () => {
+    const { services, mocks } = makeServices();
+    mocks.inspectMediaIntegrity
+      .mockResolvedValueOnce({
+        durationMs: 8200,
+        hasVideo: true,
+        hasAudio: true,
+        frozenRatio: 0.1,
+        audioMeanVolumeDb: -22,
+        audioMaxVolumeDb: -7,
+      })
+      .mockResolvedValueOnce({
+        durationMs: 8200,
+        hasVideo: true,
+        hasAudio: false,
+        frozenRatio: 0.1,
+        audioMeanVolumeDb: null,
+        audioMaxVolumeDb: null,
+      });
+
+    await expect(
+      runCloneVideoCreation(
+        {
+          imageUrl: 'https://r2.example/subject.jpg',
+          referenceVideoUrl: 'https://r2.example/reference.mp4',
+          description: '复刻动作并保留原片声音',
+        },
+        CFG,
+        { mode: 'wan-pro' },
+        services,
+      ),
+    ).rejects.toMatchObject({
+      name: 'SimpleVideoError',
+      kind: 'quality',
+      failedChecks: ['output_audio_missing'],
+    });
+
+    expect(mocks.verifyFinalVideo).not.toHaveBeenCalled();
+    expect(mocks.storeOutputFile).not.toHaveBeenCalled();
+  });
 
   it.each([
     ['fail', 'quality'],

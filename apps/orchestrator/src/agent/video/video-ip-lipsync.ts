@@ -14,7 +14,11 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { lipSyncMaxWaitMs, runLipSync } from './fal-lipsync-client.js';
-import { ffprobeDurationMs, runFfmpeg } from './ffmpeg-exec.js';
+import {
+  ffprobeDurationMs,
+  inspectMediaIntegrity,
+  runFfmpeg,
+} from './ffmpeg-exec.js';
 import { synthesizeSpeech } from './qwen-voice-clone-client.js';
 import { buildAss, buildTimeline } from './timeline.js';
 import type { VideoSegment } from './types.js';
@@ -104,6 +108,7 @@ export interface IpFns {
   downloadToBuffer: typeof downloadToBuffer;
   downloadToFile: typeof downloadToFile;
   ffprobeDurationMs: typeof ffprobeDurationMs;
+  inspectMediaIntegrity: typeof inspectMediaIntegrity;
   runFfmpeg: typeof runFfmpeg;
   writeFile: (p: string, b: Buffer) => Promise<void>;
   readFile: (p: string) => Promise<Buffer>;
@@ -116,6 +121,7 @@ function realFns(): IpFns {
     downloadToBuffer,
     downloadToFile,
     ffprobeDurationMs,
+    inspectMediaIntegrity,
     runFfmpeg,
     writeFile: (p, b) => fs.writeFile(p, b),
     readFile: (p) => fs.readFile(p),
@@ -199,6 +205,18 @@ export async function runIpVideoCreation(
   const baseVideoDurationMs = await fns.ffprobeDurationMs(baseVideoPath, ffprobeOpts);
   if (baseVideoDurationMs < 2_000 || baseVideoDurationMs > 60_000) {
     throw new IpVideoError('本人出镜底版需为 2 到 60 秒的视频。', 'config');
+  }
+  const baseIntegrity = await fns.inspectMediaIntegrity(baseVideoPath, {
+    ...ffOpts,
+    ...ffprobeOpts,
+  });
+  if (!baseIntegrity.hasVideo || baseIntegrity.frozenRatio >= 0.98) {
+    throw new IpVideoError(
+      '本人出镜底版缺少可识别的人物运动。',
+      'quality',
+      ['source_motion_missing'],
+      '出镜底版几乎全程静止，无法生成可信口型。',
+    );
   }
 
   // ① 全文案 → 克隆音(用户 voice_id)。
@@ -296,6 +314,29 @@ export async function runIpVideoCreation(
   );
   await fns.runFfmpeg(cmd, ffOpts);
   const finalDurationMs = await fns.ffprobeDurationMs(outPath, ffprobeOpts);
+  const finalIntegrity = await fns.inspectMediaIntegrity(outPath, {
+    ...ffOpts,
+    ...ffprobeOpts,
+  });
+  const mediaFailures: string[] = [];
+  if (!finalIntegrity.hasVideo) mediaFailures.push('output_video_missing');
+  if (!finalIntegrity.hasAudio) {
+    mediaFailures.push('output_audio_missing');
+  } else if (
+    finalIntegrity.audioMaxVolumeDb === null ||
+    finalIntegrity.audioMaxVolumeDb <= -50
+  ) {
+    mediaFailures.push('output_audio_inaudible');
+  }
+  if (finalIntegrity.frozenRatio >= 0.95) mediaFailures.push('output_motion_missing');
+  if (mediaFailures.length > 0) {
+    throw new IpVideoError(
+      'IP video failed deterministic media verification',
+      'quality',
+      mediaFailures,
+      '成片缺少可确认的画面运动、口播声音或有效视频轨。',
+    );
+  }
 
   const verification = await svc.verifyFinalVideo({
     videoPath: outPath,

@@ -11,7 +11,7 @@ import {
 
 /** Backend-stamped 成片 type (deriveVideoType in video-confirm-meta.ts). */
 export type VideoType = 'normal' | 'pet' | 'ip_person';
-const CURRENT_VIDEO_QUALITY_GATE_VERSION = 'video-final-v2';
+const CURRENT_VIDEO_QUALITY_GATE_VERSION = 'video-final-v3';
 export type CreativeHistoryMode = 'video' | 'image';
 export type CreativeHistoryFilter = 'all' | 'recent' | 'pinned';
 export type CreativeHistoryTerminalStatus = 'completed' | 'partial_success';

@@ -46,6 +46,7 @@ import {
   resolveVideoAwaitingKind,
   selectStepsFor,
   shouldRefreshForTask,
+  videoTabForTaskType,
   videoTaskStatusIconKind,
   videoTaskStatusLabel,
 } from '@/lib/video-task-selectors';
@@ -427,6 +428,12 @@ export function VideoPage({ mode = 'video' }: VideoPageProps): JSX.Element {
     }, 4000);
     return () => window.clearInterval(timer);
   }, [currentTask?.status, refreshTasks, taskId]);
+
+  React.useEffect(() => {
+    if (mode !== 'video' || !taskId) return;
+    const taskTab = videoTabForTaskType(currentTask?.videoType);
+    if (taskTab) setVideoTab(taskTab);
+  }, [currentTask?.videoType, mode, taskId]);
 
   return (
     <CreativeStudioPage
@@ -3044,7 +3051,6 @@ export function PetVideoForm({
               src={referenceVideo.previewUrl}
               className="h-[124px] w-full rounded-[18px] border border-[#DCDDDD] bg-black object-cover"
               controls
-              muted
               playsInline
               onLoadedMetadata={(event) => {
                 const duration = event.currentTarget.duration;

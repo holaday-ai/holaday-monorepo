@@ -7,6 +7,7 @@ import {
   resolveVideoAwaitingKind,
   selectStepsFor,
   shouldRefreshForTask,
+  videoTabForTaskType,
   videoTaskStatusIconKind,
   videoTaskStatusLabel,
 } from './video-task-selectors';
@@ -84,6 +85,13 @@ describe('shouldRefreshForTask — one-time deep-link refresh guard', () => {
 });
 
 describe('video task product status helpers', () => {
+  it('opens a deep-linked video task in its actual product tab', () => {
+    expect(videoTabForTaskType('normal')).toBe('normal');
+    expect(videoTabForTaskType('pet')).toBe('pet');
+    expect(videoTabForTaskType('ip_person')).toBe('ip');
+    expect(videoTabForTaskType(undefined)).toBeNull();
+  });
+
   it('keeps quote actions visible when the live awaiting event wins the create-task race', () => {
     expect(resolveVideoAwaitingKind(undefined, 'video_quote')).toBe('video_quote');
     expect(resolveVideoAwaitingKind('login', 'video_quote')).toBe('login');

@@ -58,7 +58,7 @@ describe('videoQualityVerificationMetadata', () => {
     ).toEqual({
       qualityVerification: {
         status: 'passed',
-        gateVersion: 'video-final-v2',
+        gateVersion: 'video-final-v3',
         verifiedAt: '2026-07-25T06:00:00.000Z',
       },
     });
@@ -89,7 +89,7 @@ describe('videoQualityVerificationMetadata', () => {
       metadata: {
         qualityVerification: {
           status: 'failed',
-          gateVersion: 'video-final-v2',
+          gateVersion: 'video-final-v3',
           verifiedAt: '2026-07-27T05:00:00.000Z',
           failedChecks: ['fused_hands', 'face_drift'],
         },
@@ -114,7 +114,7 @@ describe('videoQualityVerificationMetadata', () => {
       metadata: {
         qualityVerification: {
           status: 'unknown',
-          gateVersion: 'video-final-v2',
+          gateVersion: 'video-final-v3',
           verifiedAt: '2026-07-27T05:00:00.000Z',
           failedChecks: ['verifier_inconclusive'],
         },
@@ -268,6 +268,13 @@ describe('mapVideoFailureReason — safe, whitelisted, no leak', () => {
         failedChecks: ['subtitle_mismatch'],
       }),
     ).toBe(VIDEO_FAILURE_REASONS.qualityText);
+    expect(
+      mapVideoFailureReason({
+        name: 'IpVideoError',
+        kind: 'quality',
+        failedChecks: ['output_audio_inaudible'],
+      }),
+    ).toBe(VIDEO_FAILURE_REASONS.qualityAudio);
   });
 
   it('inconclusive verifier → honest unavailable copy without claiming a detected defect', () => {

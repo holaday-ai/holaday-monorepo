@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { MediaIntegrityReport } from './ffmpeg-exec.js';
 import {
   IP_MAX_AUDIO_MS,
   type IpFns,
@@ -61,6 +62,14 @@ function makeServices(durationMs = 8000) {
       reason: '人物、口型和字幕均通过',
     }),
   );
+  const inspectMediaIntegrity = vi.fn(async (): Promise<MediaIntegrityReport> => ({
+    durationMs,
+    hasVideo: true,
+    hasAudio: true,
+    frozenRatio: 0.1,
+    audioMeanVolumeDb: -24,
+    audioMaxVolumeDb: -8,
+  }));
   const overrides: Partial<IpFns> = {
     synthesizeSpeech: synthesizeSpeech as unknown as IpFns['synthesizeSpeech'],
     runLipSync: runLipSync as unknown as IpFns['runLipSync'],
@@ -70,6 +79,7 @@ function makeServices(durationMs = 8000) {
     runFfmpeg,
     writeFile,
     readFile,
+    inspectMediaIntegrity,
   };
   const svc: IpVideoServices = {
     storeOutput,
@@ -97,6 +107,7 @@ function makeServices(durationMs = 8000) {
       presignByFileId,
       deleteOutput,
       verifyFinalVideo,
+      inspectMediaIntegrity,
     },
   };
 }
@@ -114,6 +125,35 @@ describe('runIpVideoCreation — B 架构单 clip 口播', () => {
         svc,
       ),
     ).rejects.toMatchObject({ name: 'IpVideoError', kind: 'config' });
+
+    expect(mocks.synthesizeSpeech).not.toHaveBeenCalled();
+    expect(mocks.runLipSync).not.toHaveBeenCalled();
+  });
+
+  it('rejects a still-image base video before voice synthesis or paid lip sync', async () => {
+    const { svc, mocks } = makeServices(15_000);
+    mocks.inspectMediaIntegrity.mockResolvedValueOnce({
+      durationMs: 15_000,
+      hasVideo: true,
+      hasAudio: false,
+      frozenRatio: 1,
+      audioMeanVolumeDb: null,
+      audioMaxVolumeDb: null,
+    });
+
+    await expect(
+      runIpVideoCreation(
+        { copyText: '这是一段验收文案。' },
+        CFG,
+        CTX,
+        { aspectRatio: '9:16' },
+        svc,
+      ),
+    ).rejects.toMatchObject({
+      name: 'IpVideoError',
+      kind: 'quality',
+      failedChecks: ['source_motion_missing'],
+    });
 
     expect(mocks.synthesizeSpeech).not.toHaveBeenCalled();
     expect(mocks.runLipSync).not.toHaveBeenCalled();
@@ -204,6 +244,70 @@ describe('runIpVideoCreation — B 架构单 clip 口播', () => {
       runIpVideoCreation({ copyText: '很长的文案'.repeat(50) }, CFG, CTX, {}, svc),
     ).rejects.toMatchObject({ kind: 'too_long' });
     expect(mocks.runLipSync).not.toHaveBeenCalled();
+  });
+
+  it('blocks a frozen lip-sync output even when static-frame verification passes', async () => {
+    const { svc, mocks } = makeServices(8000);
+    mocks.inspectMediaIntegrity
+      .mockResolvedValueOnce({
+        durationMs: 8000,
+        hasVideo: true,
+        hasAudio: false,
+        frozenRatio: 0.1,
+        audioMeanVolumeDb: null,
+        audioMaxVolumeDb: null,
+      })
+      .mockResolvedValueOnce({
+        durationMs: 8000,
+        hasVideo: true,
+        hasAudio: true,
+        frozenRatio: 1,
+        audioMeanVolumeDb: -23,
+        audioMaxVolumeDb: -8,
+      });
+
+    await expect(
+      runIpVideoCreation({ copyText: '欢迎关注我们的新品。' }, CFG, CTX, {}, svc),
+    ).rejects.toMatchObject({
+      name: 'IpVideoError',
+      kind: 'quality',
+      failedChecks: ['output_motion_missing'],
+    });
+
+    expect(mocks.verifyFinalVideo).not.toHaveBeenCalled();
+    expect(mocks.storeOutputFile).not.toHaveBeenCalled();
+  });
+
+  it('blocks an IP output without a clearly audible audio track', async () => {
+    const { svc, mocks } = makeServices(8000);
+    mocks.inspectMediaIntegrity
+      .mockResolvedValueOnce({
+        durationMs: 8000,
+        hasVideo: true,
+        hasAudio: false,
+        frozenRatio: 0.1,
+        audioMeanVolumeDb: null,
+        audioMaxVolumeDb: null,
+      })
+      .mockResolvedValueOnce({
+        durationMs: 8000,
+        hasVideo: true,
+        hasAudio: true,
+        frozenRatio: 0.1,
+        audioMeanVolumeDb: -80,
+        audioMaxVolumeDb: -70,
+      });
+
+    await expect(
+      runIpVideoCreation({ copyText: '欢迎关注我们的新品。' }, CFG, CTX, {}, svc),
+    ).rejects.toMatchObject({
+      name: 'IpVideoError',
+      kind: 'quality',
+      failedChecks: ['output_audio_inaudible'],
+    });
+
+    expect(mocks.verifyFinalVideo).not.toHaveBeenCalled();
+    expect(mocks.storeOutputFile).not.toHaveBeenCalled();
   });
 
   it('config error: 缺 voiceId / 缺底版 url / 缺 key', async () => {

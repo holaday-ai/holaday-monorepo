@@ -4,6 +4,7 @@ import sharp from 'sharp';
 import {
   ffprobeDurationMs,
   ffprobeVideoMetadata,
+  inspectMediaIntegrity,
   runFfmpeg,
   type VideoMetadata,
 } from './ffmpeg-exec.js';
@@ -53,6 +54,7 @@ export interface CloneVideoFns {
   runFfmpeg: typeof runFfmpeg;
   ffprobeDurationMs: typeof ffprobeDurationMs;
   ffprobeVideoMetadata: typeof ffprobeVideoMetadata;
+  inspectMediaIntegrity: typeof inspectMediaIntegrity;
   readImageMetadata: (buffer: Buffer) => Promise<{ width: number; height: number }>;
   readFile: (filePath: string) => Promise<Buffer>;
 }
@@ -71,6 +73,7 @@ function realFns(): CloneVideoFns {
     runFfmpeg,
     ffprobeDurationMs,
     ffprobeVideoMetadata,
+    inspectMediaIntegrity,
     readImageMetadata: async (buffer) => {
       const metadata = await sharp(buffer, { failOn: 'warning' }).rotate().metadata();
       const width = metadata.autoOrient.width;
@@ -160,6 +163,19 @@ export async function runCloneVideoCreation(
   ]);
   validateCloneImageDimensions(subjectMetadata.width, subjectMetadata.height);
   validateCloneReferenceMetadata(referenceMetadata);
+  const referenceIntegrity = await fns.inspectMediaIntegrity(referenceVideoPath, {
+    ...(cfg.ffmpegBin ? { ffmpegBin: cfg.ffmpegBin } : {}),
+    ...(cfg.ffprobeBin ? { ffprobeBin: cfg.ffprobeBin } : {}),
+  });
+  if (!referenceIntegrity.hasVideo || referenceIntegrity.frozenRatio >= 0.98) {
+    throw new SimpleVideoError(
+      'clone video source lacks meaningful motion',
+      'clone_incompatible',
+      false,
+      ['source_motion_missing'],
+      '参考视频几乎全程静止，不能作为动作复刻来源。',
+    );
+  }
   const subjectReference = await prepareVideoQualityReferenceImage({
     buffer: subjectSource.buffer,
     contentType: subjectSource.contentType,
@@ -206,6 +222,34 @@ export async function runCloneVideoCreation(
     maxBytes: 500 * 1024 * 1024,
   });
   const durationMs = await fns.ffprobeDurationMs(outputPath, ffprobeOpts);
+  const outputIntegrity = await fns.inspectMediaIntegrity(outputPath, {
+    ...(cfg.ffmpegBin ? { ffmpegBin: cfg.ffmpegBin } : {}),
+    ...(cfg.ffprobeBin ? { ffprobeBin: cfg.ffprobeBin } : {}),
+  });
+  const mediaFailures: string[] = [];
+  if (!outputIntegrity.hasVideo) mediaFailures.push('output_video_missing');
+  if (outputIntegrity.frozenRatio >= 0.95) mediaFailures.push('output_motion_missing');
+  const sourceHasAudibleAudio =
+    referenceIntegrity.hasAudio &&
+    referenceIntegrity.audioMaxVolumeDb !== null &&
+    referenceIntegrity.audioMaxVolumeDb > -50;
+  if (sourceHasAudibleAudio && !outputIntegrity.hasAudio) {
+    mediaFailures.push('output_audio_missing');
+  } else if (
+    sourceHasAudibleAudio &&
+    (outputIntegrity.audioMaxVolumeDb === null || outputIntegrity.audioMaxVolumeDb <= -50)
+  ) {
+    mediaFailures.push('output_audio_inaudible');
+  }
+  if (mediaFailures.length > 0) {
+    throw new SimpleVideoError(
+      'clone video failed deterministic media verification',
+      'quality',
+      false,
+      mediaFailures,
+      '成片没有保留可确认的动作或参考视频中的可听声音。',
+    );
+  }
   const verification = await services.verifyFinalVideo({
     videoPath: outputPath,
     workdir: services.workdir,

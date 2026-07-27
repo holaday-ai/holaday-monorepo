@@ -9,7 +9,7 @@
 
 export type VideoType = 'normal' | 'pet' | 'ip_person';
 
-export const VIDEO_QUALITY_GATE_VERSION = 'video-final-v2';
+export const VIDEO_QUALITY_GATE_VERSION = 'video-final-v3';
 
 export function videoQualityVerificationMetadata(
   verifiedAt = new Date(),
@@ -61,6 +61,7 @@ function qualityCheckDetail(check: string): string {
     return '成片手部或肢体结构异常';
   }
   if (/action|motion|movement|sequence|stage/.test(check)) return '要求的动作或阶段未完整呈现';
+  if (/audio|voice|sound|volume|silent/.test(check)) return '成片缺少可听声音';
   if (/subtitle|text|brand|logo|watermark|copy/.test(check)) {
     return '成片文字或品牌标识未准确呈现';
   }
@@ -167,6 +168,7 @@ export const VIDEO_FAILURE_REASONS = {
   qualityDuration: '成片时长未达到生成要求，问题视频未交付，请重试。',
   qualityAnatomy: '成片检测到人物或肢体结构异常，问题视频未交付，请重试。',
   qualityAction: '成片未完整呈现要求的动作或阶段，问题视频未交付，请重试。',
+  qualityAudio: '成片缺少可听声音或没有保留原片音频，问题视频未交付，请重试。',
   qualityText: '成片文字或品牌标识未准确呈现，问题视频未交付，请重试。',
   qualityConsistency: '成片人物、主体或画面稳定性未通过，问题视频未交付，请重试。',
   qualityUnavailable: '成片自动质检暂时未得出结论，问题视频未交付，请稍后重试。',
@@ -222,6 +224,9 @@ export function mapVideoFailureReason(err: unknown): string {
     }
     if (checks.some((check) => /action|motion|movement|sequence|stage/.test(check))) {
       return VIDEO_FAILURE_REASONS.qualityAction;
+    }
+    if (checks.some((check) => /audio|voice|sound|volume|silent/.test(check))) {
+      return VIDEO_FAILURE_REASONS.qualityAudio;
     }
     if (checks.some((check) => /subtitle|text|brand|logo|watermark|copy/.test(check))) {
       return VIDEO_FAILURE_REASONS.qualityText;

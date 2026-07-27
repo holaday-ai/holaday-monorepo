@@ -310,7 +310,7 @@ describe('toVideoRow — 生成历史 only lists completed 成片 with an attach
             attachments: [ATT],
             qualityVerification: {
               status: 'passed',
-              gateVersion: 'video-final-v2',
+              gateVersion: 'video-final-v3',
               verifiedAt: '2026-07-25T06:00:00.000Z',
             },
           },

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ffprobeDurationMs,
   ffprobeVideoMetadata,
+  inspectMediaIntegrity,
   renderImageClip,
   renderImageKenBurns,
   renderVideoClip,
@@ -15,6 +16,35 @@ function fakeSpawn(behaviour: { code?: number; stdout?: string; stderr?: string;
   const calls: Array<{ bin: string; args: readonly string[] }> = [];
   const fn: SpawnFn = (bin, args) => {
     calls.push({ bin, args });
+    const proc = new EventEmitter() as EventEmitter & {
+      stdout: EventEmitter;
+      stderr: EventEmitter;
+      kill: () => void;
+    };
+    proc.stdout = new EventEmitter();
+    proc.stderr = new EventEmitter();
+    proc.kill = () => {};
+    queueMicrotask(() => {
+      if (behaviour.error) {
+        proc.emit('error', new Error(behaviour.error));
+        return;
+      }
+      if (behaviour.stdout) proc.stdout.emit('data', Buffer.from(behaviour.stdout));
+      if (behaviour.stderr) proc.stderr.emit('data', Buffer.from(behaviour.stderr));
+      proc.emit('close', behaviour.code ?? 0);
+    });
+    return proc as unknown as ReturnType<SpawnFn>;
+  };
+  return { fn, calls };
+}
+
+function fakeSpawnSequence(
+  behaviours: Array<{ code?: number; stdout?: string; stderr?: string; error?: string }>,
+) {
+  const calls: Array<{ bin: string; args: readonly string[] }> = [];
+  const fn: SpawnFn = (bin, args) => {
+    calls.push({ bin, args });
+    const behaviour = behaviours[calls.length - 1] ?? {};
     const proc = new EventEmitter() as EventEmitter & {
       stdout: EventEmitter;
       stderr: EventEmitter;
@@ -89,6 +119,68 @@ describe('ffprobeVideoMetadata', () => {
     await expect(ffprobeVideoMetadata('/r2/not-video.bin', { spawnFn: fn })).rejects.toThrow(
       /bad video metadata/,
     );
+  });
+});
+
+describe('inspectMediaIntegrity', () => {
+  it('detects a trailing full-video freeze and an audible audio track', async () => {
+    const { fn, calls } = fakeSpawnSequence([
+      {
+        stdout: JSON.stringify({
+          streams: [
+            { codec_type: 'video' },
+            { codec_type: 'audio' },
+          ],
+          format: { duration: '8.967' },
+        }),
+      },
+      {
+        stderr:
+          '[freezedetect] lavfi.freezedetect.freeze_start: 0\n' +
+          '[freezedetect] lavfi.freezedetect.freeze_duration: 3.6\n' +
+          '[freezedetect] lavfi.freezedetect.freeze_end: 3.6\n' +
+          '[freezedetect] lavfi.freezedetect.freeze_start: 3.6\n',
+      },
+      {
+        stderr:
+          '[Parsed_volumedetect] mean_volume: -23.4 dB\n' +
+          '[Parsed_volumedetect] max_volume: -7.9 dB\n',
+      },
+    ]);
+
+    await expect(inspectMediaIntegrity('/tmp/final.mp4', { spawnFn: fn })).resolves.toEqual({
+      durationMs: 8967,
+      hasVideo: true,
+      hasAudio: true,
+      frozenRatio: 1,
+      audioMeanVolumeDb: -23.4,
+      audioMaxVolumeDb: -7.9,
+    });
+    expect(calls).toHaveLength(3);
+    expect(calls[1]?.args.join(' ')).toContain('freezedetect=');
+    expect(calls[2]?.args).toEqual(expect.arrayContaining(['-af', 'volumedetect']));
+  });
+
+  it('does not run audio analysis when the media has no audio stream', async () => {
+    const { fn, calls } = fakeSpawnSequence([
+      {
+        stdout: JSON.stringify({
+          streams: [{ codec_type: 'video' }],
+          format: { duration: '15' },
+        }),
+      },
+      { stderr: '' },
+    ]);
+
+    await expect(inspectMediaIntegrity('/tmp/silent.mp4', { spawnFn: fn })).resolves.toEqual({
+      durationMs: 15_000,
+      hasVideo: true,
+      hasAudio: false,
+      frozenRatio: 0,
+      audioMeanVolumeDb: null,
+      audioMaxVolumeDb: null,
+    });
+    expect(calls).toHaveLength(2);
   });
 });
 

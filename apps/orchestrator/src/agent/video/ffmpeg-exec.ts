@@ -104,6 +104,140 @@ export interface VideoMetadata {
   readonly durationMs: number;
 }
 
+export interface MediaIntegrityReport {
+  readonly durationMs: number;
+  readonly hasVideo: boolean;
+  readonly hasAudio: boolean;
+  /** Fraction of the container duration covered by ffmpeg's freeze detector. */
+  readonly frozenRatio: number;
+  readonly audioMeanVolumeDb: number | null;
+  readonly audioMaxVolumeDb: number | null;
+}
+
+function parseDbValue(stderr: string, key: 'mean_volume' | 'max_volume'): number | null {
+  const value = stderr.match(new RegExp(`${key}:\\s*(-?(?:\\d+(?:\\.\\d+)?|inf))\\s*dB`, 'i'))?.[1];
+  if (!value || value.toLowerCase() === '-inf') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function frozenDurationSeconds(stderr: string, durationSeconds: number): number {
+  const starts = [...stderr.matchAll(/lavfi\.freezedetect\.freeze_start:\s*([\d.]+)/g)].map(
+    (match) => Number(match[1]),
+  );
+  const durations = [
+    ...stderr.matchAll(/lavfi\.freezedetect\.freeze_duration:\s*([\d.]+)/g),
+  ].map((match) => Number(match[1]));
+  let total = durations.reduce(
+    (sum, duration) => sum + (Number.isFinite(duration) && duration > 0 ? duration : 0),
+    0,
+  );
+  if (starts.length > durations.length) {
+    const trailingStart = starts.at(-1);
+    if (trailingStart !== undefined && Number.isFinite(trailingStart)) {
+      total += Math.max(0, durationSeconds - trailingStart);
+    }
+  }
+  return Math.min(durationSeconds, Math.max(0, total));
+}
+
+/**
+ * Deterministic media gate used before the visual LLM verifier. Static frame
+ * sampling cannot prove that a video moves or that its audio is audible.
+ */
+export async function inspectMediaIntegrity(
+  filePath: string,
+  opts: FfmpegExecOpts = {},
+): Promise<MediaIntegrityReport> {
+  const { stdout } = await runProcess(
+    opts.ffprobeBin ?? 'ffprobe',
+    [
+      '-v',
+      'error',
+      '-show_entries',
+      'stream=codec_type:format=duration',
+      '-of',
+      'json',
+      filePath,
+    ],
+    opts,
+  );
+  let payload: {
+    streams?: Array<{ codec_type?: string }>;
+    format?: { duration?: string | number };
+  };
+  try {
+    payload = JSON.parse(stdout) as typeof payload;
+  } catch {
+    throw new Error(`ffprobe: bad media integrity metadata for ${filePath}`);
+  }
+  const durationSeconds = Number(payload.format?.duration);
+  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
+    throw new Error(`ffprobe: bad media integrity duration for ${filePath}`);
+  }
+  const hasVideo = payload.streams?.some((stream) => stream.codec_type === 'video') ?? false;
+  const hasAudio = payload.streams?.some((stream) => stream.codec_type === 'audio') ?? false;
+
+  let frozenRatio = 0;
+  if (hasVideo) {
+    const { stderr } = await runProcess(
+      opts.ffmpegBin ?? 'ffmpeg',
+      [
+        '-hide_banner',
+        '-i',
+        filePath,
+        '-map',
+        '0:v:0',
+        '-vf',
+        'freezedetect=n=-40dB:d=0.5',
+        '-an',
+        '-f',
+        'null',
+        '-',
+      ],
+      opts,
+    );
+    frozenRatio = Number(
+      (frozenDurationSeconds(stderr, durationSeconds) / durationSeconds).toFixed(4),
+    );
+  }
+
+  let audioMeanVolumeDb: number | null = null;
+  let audioMaxVolumeDb: number | null = null;
+  if (hasAudio) {
+    const { stderr } = await runProcess(
+      opts.ffmpegBin ?? 'ffmpeg',
+      [
+        '-hide_banner',
+        '-i',
+        filePath,
+        '-map',
+        '0:a:0',
+        '-af',
+        'volumedetect',
+        '-vn',
+        '-sn',
+        '-dn',
+        '-f',
+        'null',
+        '-',
+      ],
+      opts,
+    );
+    audioMeanVolumeDb = parseDbValue(stderr, 'mean_volume');
+    audioMaxVolumeDb = parseDbValue(stderr, 'max_volume');
+  }
+
+  return {
+    durationMs: Math.round(durationSeconds * 1000),
+    hasVideo,
+    hasAudio,
+    frozenRatio,
+    audioMeanVolumeDb,
+    audioMaxVolumeDb,
+  };
+}
+
 /** Probe the first video stream plus container duration in one ffprobe call. */
 export async function ffprobeVideoMetadata(
   filePath: string,
