@@ -243,7 +243,13 @@ describe('runIpVideoCreation — B 架构单 clip 口播', () => {
 
       await expect(
         runIpVideoCreation({ copyText: '欢迎关注我们的新品。' }, CFG, CTX, {}, svc),
-      ).rejects.toMatchObject({ name: 'IpVideoError', kind: expectedKind });
+      ).rejects.toMatchObject({
+        name: 'IpVideoError',
+        kind: expectedKind,
+        failedChecks:
+          status === 'fail' ? ['fused_hands', 'face_drift'] : ['verifier_inconclusive'],
+        qualityReason: status === 'fail' ? '人物手部异常且面部漂移' : '质检服务未得出结论',
+      });
 
       expect(
         mocks.storeOutputFile.mock.calls.some(

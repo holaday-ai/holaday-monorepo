@@ -29,6 +29,95 @@ export function videoQualityVerificationMetadata(
   };
 }
 
+type QualityErrorRecord = {
+  name?: unknown;
+  kind?: unknown;
+  failedChecks?: unknown;
+};
+
+const SAFE_QUALITY_CHECK_RE = /^[a-z][a-z0-9_]{0,63}$/;
+const MAX_QUALITY_CHECKS = 12;
+
+function qualityErrorRecord(err: unknown): QualityErrorRecord | null {
+  return err && typeof err === 'object' ? (err as QualityErrorRecord) : null;
+}
+
+function safeQualityChecks(err: unknown): string[] {
+  const checks = qualityErrorRecord(err)?.failedChecks;
+  if (!Array.isArray(checks)) return [];
+  return [
+    ...new Set(
+      checks.filter(
+        (check): check is string =>
+          typeof check === 'string' && SAFE_QUALITY_CHECK_RE.test(check),
+      ),
+    ),
+  ].slice(0, MAX_QUALITY_CHECKS);
+}
+
+function qualityCheckDetail(check: string): string {
+  if (/duration|length|too_short/.test(check)) return '成片时长未达到生成要求';
+  if (/hand|finger|limb|arm|body|anatom|melt|fused|extra/.test(check)) {
+    return '成片手部或肢体结构异常';
+  }
+  if (/action|motion|movement|sequence|stage/.test(check)) return '要求的动作或阶段未完整呈现';
+  if (/subtitle|text|brand|logo|watermark|copy/.test(check)) {
+    return '成片文字或品牌标识未准确呈现';
+  }
+  if (/face|identity|subject|frame|composition|scene|drift|containment/.test(check)) {
+    return '人物或主体跨帧不一致';
+  }
+  if (/inconclusive|unavailable|service/.test(check)) return '自动质检未能得出结论';
+  return '成片自动质检未通过';
+}
+
+export function videoQualityFailureOutcome(
+  err: unknown,
+  verifiedAt = new Date(),
+): {
+  verificationPassed?: false;
+  failedChecks?: Array<{ type: string; detail: string }>;
+  metadata?: {
+    qualityVerification: {
+      status: 'failed' | 'unknown';
+      gateVersion: typeof VIDEO_QUALITY_GATE_VERSION;
+      verifiedAt: string;
+      failedChecks: string[];
+    };
+  };
+} {
+  const record = qualityErrorRecord(err);
+  const name = typeof record?.name === 'string' ? record.name : '';
+  const kind = typeof record?.kind === 'string' ? record.kind : '';
+  if (
+    (name !== 'SimpleVideoError' && name !== 'IpVideoError') ||
+    (kind !== 'quality' && kind !== 'quality_unavailable')
+  ) {
+    return {};
+  }
+
+  const failedChecks = safeQualityChecks(err);
+  return {
+    ...(kind === 'quality' ? { verificationPassed: false as const } : {}),
+    ...(failedChecks.length > 0
+      ? {
+          failedChecks: failedChecks.map((type) => ({
+            type,
+            detail: qualityCheckDetail(type),
+          })),
+        }
+      : {}),
+    metadata: {
+      qualityVerification: {
+        status: kind === 'quality' ? 'failed' : 'unknown',
+        gateVersion: VIDEO_QUALITY_GATE_VERSION,
+        verifiedAt: verifiedAt.toISOString(),
+        failedChecks,
+      },
+    },
+  };
+}
+
 export function deriveVideoType(input: {
   isPet: boolean;
   isIp: boolean;
@@ -75,6 +164,11 @@ export const VIDEO_FAILURE_REASONS = {
     '暂时无法确认主角照片与参考视频是否适配，本次未开始付费生成。请稍后重试。',
   quality:
     '成片自动质检未通过（检测到时长不足、动作未完成、异常肢体、画面偏离或文字/品牌不准确），问题视频未交付，请重试。',
+  qualityDuration: '成片时长未达到生成要求，问题视频未交付，请重试。',
+  qualityAnatomy: '成片检测到人物或肢体结构异常，问题视频未交付，请重试。',
+  qualityAction: '成片未完整呈现要求的动作或阶段，问题视频未交付，请重试。',
+  qualityText: '成片文字或品牌标识未准确呈现，问题视频未交付，请重试。',
+  qualityConsistency: '成片人物、主体或画面稳定性未通过，问题视频未交付，请重试。',
   qualityUnavailable: '成片自动质检暂时未得出结论，问题视频未交付，请稍后重试。',
   generic: '视频生成失败，请稍后重试。',
 } as const;
@@ -95,6 +189,7 @@ export function mapVideoFailureReason(err: unknown): string {
           code?: unknown;
           detail?: unknown;
           message?: unknown;
+          failedChecks?: unknown;
         })
       : null;
   if (!e) return VIDEO_FAILURE_REASONS.generic;
@@ -118,6 +213,26 @@ export function mapVideoFailureReason(err: unknown): string {
     return VIDEO_FAILURE_REASONS.generic;
   }
   if ((name === 'SimpleVideoError' || name === 'IpVideoError') && kind === 'quality') {
+    const checks = safeQualityChecks(err);
+    if (checks.some((check) => /duration|length|too_short/.test(check))) {
+      return VIDEO_FAILURE_REASONS.qualityDuration;
+    }
+    if (checks.some((check) => /hand|finger|limb|arm|body|anatom|melt|fused|extra/.test(check))) {
+      return VIDEO_FAILURE_REASONS.qualityAnatomy;
+    }
+    if (checks.some((check) => /action|motion|movement|sequence|stage/.test(check))) {
+      return VIDEO_FAILURE_REASONS.qualityAction;
+    }
+    if (checks.some((check) => /subtitle|text|brand|logo|watermark|copy/.test(check))) {
+      return VIDEO_FAILURE_REASONS.qualityText;
+    }
+    if (
+      checks.some((check) =>
+        /face|identity|subject|frame|composition|scene|drift|containment/.test(check),
+      )
+    ) {
+      return VIDEO_FAILURE_REASONS.qualityConsistency;
+    }
     return VIDEO_FAILURE_REASONS.quality;
   }
   if ((name === 'SimpleVideoError' || name === 'IpVideoError') && kind === 'quality_unavailable') {

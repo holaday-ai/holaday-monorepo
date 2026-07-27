@@ -409,6 +409,23 @@ describe('TaskRepository.persistVisionOutcome — awaiting_user state guard (Pha
     });
   });
 
+  it('persists an explicit failed verification verdict with a hard-failed quality gate', async () => {
+    const { db, captured } = fakeDbWithAffectedRows(1);
+    const repo = new TaskRepository(db);
+
+    await repo.persistVisionOutcome('tsk_failed_verification', {
+      status: 'failed',
+      reason: '成片质检未通过',
+      tickCount: 1,
+      verificationPassed: false,
+    });
+
+    expect(captured.taskUpdate).toMatchObject({
+      status: 'failed',
+      verificationPassed: false,
+    });
+  });
+
   it('UPDATE applied → event row written (paused → cancelled)', async () => {
     const { db, captured } = fakeDbWithAffectedRows(1);
     const repo = new TaskRepository(db);

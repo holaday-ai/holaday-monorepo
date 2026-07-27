@@ -711,6 +711,8 @@ export class TaskRepository {
           finalViewport?: { width: number; height: number };
           metadata?: Record<string, unknown>;
           failedChecks?: Array<{ type: string; detail: string }>;
+          /** Explicit failed verifier verdict for terminal trust UI. */
+          verificationPassed?: boolean;
         }
       | {
           status: 'paused';
@@ -780,6 +782,9 @@ export class TaskRepository {
       if (outcome.metadata) result.metadata = outcome.metadata;
       if (outcome.failedChecks && outcome.failedChecks.length > 0) {
         result.failedChecks = outcome.failedChecks;
+      }
+      if (typeof outcome.verificationPassed === 'boolean') {
+        update.verificationPassed = outcome.verificationPassed;
       }
       eventPayload = { ...eventPayload, reason: outcome.reason };
     } else if (outcome.status === 'paused') {

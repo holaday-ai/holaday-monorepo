@@ -389,6 +389,8 @@ export class SimpleVideoError extends Error {
     message: string,
     readonly kind: SimpleVideoErrorKind,
     retryable = kind !== 'quality' && kind !== 'quality_unavailable',
+    readonly failedChecks: readonly string[] = [],
+    readonly qualityReason?: string,
   ) {
     super(message);
     this.name = 'SimpleVideoError';
@@ -856,6 +858,9 @@ export function createSimplePipelineDeps(
           throw new SimpleVideoError(
             'generated segment quality verification unavailable',
             'quality_unavailable',
+            false,
+            candidateQuality.failedChecks,
+            candidateQuality.reason,
           );
         }
         if (attempt === 1) {
@@ -870,6 +875,9 @@ export function createSimplePipelineDeps(
           throw new SimpleVideoError(
             'generated segment failed automated quality verification',
             'quality',
+            false,
+            candidateQuality.failedChecks,
+            candidateQuality.reason,
           );
         }
         svc.logger.warn(
@@ -1097,6 +1105,9 @@ export async function runSimpleVideoCreation(
       throw new SimpleVideoError(
         'final video failed automated quality verification',
         verification.status === 'unknown' ? 'quality_unavailable' : 'quality',
+        false,
+        verification.failedChecks,
+        verification.reason,
       );
     }
     finalRepairInstruction = qualityRepairInstruction(

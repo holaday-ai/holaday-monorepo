@@ -4,6 +4,7 @@ import {
   claimVideoConfirmAfterVerifierPreflight,
   deriveVideoType,
   mapVideoFailureReason,
+  videoQualityFailureOutcome,
   videoQualityVerificationMetadata,
   videoVerifierPreflightIssue,
 } from './video-confirm-meta.js';
@@ -61,6 +62,74 @@ describe('videoQualityVerificationMetadata', () => {
         verifiedAt: '2026-07-25T06:00:00.000Z',
       },
     });
+  });
+
+  it('stamps rejected deliverables with safe structured checks and an explicit false verdict', () => {
+    expect(
+      videoQualityFailureOutcome(
+        {
+          name: 'IpVideoError',
+          kind: 'quality',
+          failedChecks: [
+            'fused_hands',
+            'face_drift',
+            'https://secret.example/file_123',
+            'fused_hands',
+          ],
+          qualityReason: 'raw verifier text must remain internal',
+        },
+        new Date('2026-07-27T05:00:00.000Z'),
+      ),
+    ).toEqual({
+      verificationPassed: false,
+      failedChecks: [
+        { type: 'fused_hands', detail: '成片手部或肢体结构异常' },
+        { type: 'face_drift', detail: '人物或主体跨帧不一致' },
+      ],
+      metadata: {
+        qualityVerification: {
+          status: 'failed',
+          gateVersion: 'video-final-v2',
+          verifiedAt: '2026-07-27T05:00:00.000Z',
+          failedChecks: ['fused_hands', 'face_drift'],
+        },
+      },
+    });
+  });
+
+  it('keeps inconclusive verification distinct from a known failed verdict', () => {
+    expect(
+      videoQualityFailureOutcome(
+        {
+          name: 'SimpleVideoError',
+          kind: 'quality_unavailable',
+          failedChecks: ['verifier_inconclusive'],
+        },
+        new Date('2026-07-27T05:00:00.000Z'),
+      ),
+    ).toEqual({
+      failedChecks: [
+        { type: 'verifier_inconclusive', detail: '自动质检未能得出结论' },
+      ],
+      metadata: {
+        qualityVerification: {
+          status: 'unknown',
+          gateVersion: 'video-final-v2',
+          verifiedAt: '2026-07-27T05:00:00.000Z',
+          failedChecks: ['verifier_inconclusive'],
+        },
+      },
+    });
+  });
+
+  it('does not manufacture quality metadata for unrelated failures', () => {
+    expect(
+      videoQualityFailureOutcome({
+        name: 'IpVideoError',
+        kind: 'config',
+        failedChecks: ['fused_hands'],
+      }),
+    ).toEqual({});
   });
 });
 
@@ -168,6 +237,37 @@ describe('mapVideoFailureReason — safe, whitelisted, no leak', () => {
         message: 'raw verifier details',
       }),
     ).toBe(VIDEO_FAILURE_REASONS.quality);
+  });
+
+  it('uses the failed check category to give a precise safe retry reason', () => {
+    expect(
+      mapVideoFailureReason({
+        name: 'IpVideoError',
+        kind: 'quality',
+        failedChecks: ['duration_too_short'],
+      }),
+    ).toBe(VIDEO_FAILURE_REASONS.qualityDuration);
+    expect(
+      mapVideoFailureReason({
+        name: 'IpVideoError',
+        kind: 'quality',
+        failedChecks: ['fused_hands'],
+      }),
+    ).toBe(VIDEO_FAILURE_REASONS.qualityAnatomy);
+    expect(
+      mapVideoFailureReason({
+        name: 'SimpleVideoError',
+        kind: 'quality',
+        failedChecks: ['required_action_missing'],
+      }),
+    ).toBe(VIDEO_FAILURE_REASONS.qualityAction);
+    expect(
+      mapVideoFailureReason({
+        name: 'SimpleVideoError',
+        kind: 'quality',
+        failedChecks: ['subtitle_mismatch'],
+      }),
+    ).toBe(VIDEO_FAILURE_REASONS.qualityText);
   });
 
   it('inconclusive verifier → honest unavailable copy without claiming a detected defect', () => {

@@ -38,6 +38,8 @@ export class IpVideoError extends Error {
   constructor(
     message: string,
     readonly kind: IpVideoErrorKind,
+    readonly failedChecks: readonly string[] = [],
+    readonly qualityReason?: string,
   ) {
     super(message);
     this.name = 'IpVideoError';
@@ -327,6 +329,8 @@ export async function runIpVideoCreation(
     throw new IpVideoError(
       'IP video failed automated quality verification',
       verification.status === 'unknown' ? 'quality_unavailable' : 'quality',
+      verification.failedChecks,
+      verification.reason,
     );
   }
 

@@ -1229,6 +1229,8 @@ describe('runSimpleVideoCreation — final quality gate', () => {
       name: 'SimpleVideoError',
       kind: 'quality',
       retryable: false,
+      failedChecks: ['required_action_missing'],
+      qualityReason: '第二版仍未展示放回后的稳定终态',
     });
 
     expect(mocks.generateVeoVideo).toHaveBeenCalledTimes(2);

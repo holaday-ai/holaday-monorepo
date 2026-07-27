@@ -101,6 +101,7 @@ import {
   claimVideoConfirmAfterVerifierPreflight,
   deriveVideoType,
   mapVideoFailureReason,
+  videoQualityFailureOutcome,
   videoQualityVerificationMetadata,
 } from '../../agent/video/video-confirm-meta.js';
 import {
@@ -7103,12 +7104,23 @@ export const tasksRouter = router({
           // to the user — never leak stack / detail / urls / file ids.
           logger.error({ err, taskId: newTaskId }, 'video_creation: lane failed');
           const friendlyReason = mapVideoFailureReason(err);
+          const qualityFailure = videoQualityFailureOutcome(err);
           const persisted = await repo
             .persistVisionOutcome(newTaskId, {
               status: 'failed',
               reason: friendlyReason,
               tickCount: 1,
-              metadata: { executionMode: 'generate', lane: 'video_creation' },
+              ...(typeof qualityFailure.verificationPassed === 'boolean'
+                ? { verificationPassed: qualityFailure.verificationPassed }
+                : {}),
+              ...(qualityFailure.failedChecks
+                ? { failedChecks: qualityFailure.failedChecks }
+                : {}),
+              metadata: {
+                executionMode: 'generate',
+                lane: 'video_creation',
+                ...qualityFailure.metadata,
+              },
             })
             .catch(() => ({ persisted: false }));
           if (persisted.persisted) {
