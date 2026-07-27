@@ -80,7 +80,7 @@ describe('clone-video compatibility preflight', () => {
       }),
     );
     expect(mocks.analyzeFrames.mock.calls[0]?.[0].prompt).toMatch(/仅支持单人换单人/);
-    expect(mocks.analyzeFrames.mock.calls[0]?.[0].prompt).toMatch(/取景.*身体比例/);
+    expect(mocks.analyzeFrames.mock.calls[0]?.[0].prompt).toMatch(/取景兼容性.*单向约束/);
     expect(mocks.analyzeFrames.mock.calls[0]?.[0].prompt).toMatch(
       /参考帧.*手臂.*双手.*主角照片.*完整可见.*framing_mismatch/,
     );
@@ -92,6 +92,12 @@ describe('clone-video compatibility preflight', () => {
     );
     expect(mocks.analyzeFrames.mock.calls[0]?.[0].prompt).toMatch(
       /只比较.*可见身体范围.*不要要求.*同一姿态/,
+    );
+    expect(mocks.analyzeFrames.mock.calls[0]?.[0].prompt).toMatch(
+      /只在参考帧需要的身体区域.*主角照片.*缺失.*framing_mismatch/,
+    );
+    expect(mocks.analyzeFrames.mock.calls[0]?.[0].prompt).toMatch(
+      /主角照片.*身体范围比参考帧更完整.*不能.*framing_mismatch/,
     );
   });
 
