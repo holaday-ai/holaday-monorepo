@@ -406,6 +406,10 @@ export interface SimpleVideoConfig {
   readonly dashscopeApiKey: string;
   readonly dashscopeBaseUrl: string;
   readonly dashscopeWorkspaceId?: string;
+  /** Dedicated post-generation lip-sync for clone-video outputs with audible source audio. */
+  readonly falApiKey?: string;
+  readonly falBaseUrl?: string;
+  readonly falLipsyncModel?: string;
   /** Shared Google key (same one as #5 nano banana) — Veo video AND nano banana image. */
   readonly geminiApiKey?: string;
   readonly geminiBaseUrl?: string;

@@ -8,6 +8,7 @@ import {
   runFfmpeg,
   type VideoMetadata,
 } from './ffmpeg-exec.js';
+import { lipSyncMaxWaitMs, runLipSync } from './fal-lipsync-client.js';
 import { downloadToBuffer, downloadToFile } from './video-http.js';
 import { type SimpleVideoConfig, SimpleVideoError } from './video-lane-simple.js';
 import type { PipelineLogger } from './video-pipeline.js';
@@ -40,6 +41,11 @@ export interface CloneVideoServices {
     fileId: string;
     storagePath: string;
   }>;
+  storeTemporaryAudio(input: { filename: string; mimetype: string; buffer: Buffer }): Promise<{
+    fileId: string;
+  }>;
+  presignByFileId(fileId: string): Promise<string | null>;
+  deleteOutput(fileId: string): Promise<boolean>;
   workdir: string;
   logger: PipelineLogger;
   verifyCloneInputs(input: VerifyCloneVideoCompatibilityInput): Promise<VideoQualityResult>;
@@ -49,6 +55,7 @@ export interface CloneVideoServices {
 
 export interface CloneVideoFns {
   generateWanAnimateMix: typeof generateWanAnimateMix;
+  runLipSync: typeof runLipSync;
   downloadToBuffer: typeof downloadToBuffer;
   downloadToFile: typeof downloadToFile;
   runFfmpeg: typeof runFfmpeg;
@@ -68,6 +75,7 @@ export interface CloneVideoResult {
 function realFns(): CloneVideoFns {
   return {
     generateWanAnimateMix,
+    runLipSync,
     downloadToBuffer,
     downloadToFile,
     runFfmpeg,
@@ -121,8 +129,9 @@ function validateCloneReferenceMetadata(metadata: VideoMetadata): void {
 
 /**
  * Replace the main subject in a reference video with the uploaded character.
- * The provider output is stored directly so its original timing and audio are
- * preserved; Wan adds the required AI-generated watermark at generation time.
+ * Wan replaces the main subject. When the reference contains audible speech,
+ * its original audio is extracted and a dedicated lip-sync pass redraws the
+ * cloned subject's mouth before the final artifact is verified and stored.
  */
 export async function runCloneVideoCreation(
   input: CloneVideoInput,
@@ -209,6 +218,16 @@ export async function runCloneVideoCreation(
       compatibility.status === 'unknown',
     );
   }
+  const sourceHasAudibleAudio =
+    referenceIntegrity.hasAudio &&
+    referenceIntegrity.audioMaxVolumeDb !== null &&
+    referenceIntegrity.audioMaxVolumeDb > -50;
+  if (
+    sourceHasAudibleAudio &&
+    (!cfg.falApiKey || !cfg.falBaseUrl || !cfg.falLipsyncModel)
+  ) {
+    throw new SimpleVideoError('clone lip-sync provider not configured', 'config');
+  }
   const generated = await fns.generateWanAnimateMix({
     apiKey: cfg.dashscopeApiKey,
     baseUrl: cfg.dashscopeBaseUrl,
@@ -217,8 +236,77 @@ export async function runCloneVideoCreation(
     referenceVideoUrl: input.referenceVideoUrl,
     mode: opts.mode,
   });
+  let finalVideoUrl = generated.videoUrl;
+  let lipSyncRequestId: string | undefined;
+  if (sourceHasAudibleAudio) {
+    const falApiKey = cfg.falApiKey;
+    const falBaseUrl = cfg.falBaseUrl;
+    const falLipsyncModel = cfg.falLipsyncModel;
+    if (!falApiKey || !falBaseUrl || !falLipsyncModel) {
+      throw new SimpleVideoError('clone lip-sync provider not configured', 'config');
+    }
+    const referenceAudioPath = path.join(services.workdir, 'clone-reference-audio.wav');
+    await fns.runFfmpeg(
+      {
+        bin: cfg.ffmpegBin ?? 'ffmpeg',
+        args: [
+          '-y',
+          '-i',
+          referenceVideoPath,
+          '-map',
+          '0:a:0',
+          '-vn',
+          '-ac',
+          '1',
+          '-ar',
+          '16000',
+          '-c:a',
+          'pcm_s16le',
+          referenceAudioPath,
+        ],
+      },
+      cfg.ffmpegBin ? { ffmpegBin: cfg.ffmpegBin } : {},
+    );
+    const audioStored = await services.storeTemporaryAudio({
+      filename: 'clone-reference-audio.wav',
+      mimetype: 'audio/wav',
+      buffer: await fns.readFile(referenceAudioPath),
+    });
+    try {
+      const audioUrl = await services.presignByFileId(audioStored.fileId);
+      if (!audioUrl) {
+        throw new SimpleVideoError('clone audio presign failed', 'config');
+      }
+      const lipSync = await fns.runLipSync({
+        apiKey: falApiKey,
+        baseUrl: falBaseUrl,
+        model: falLipsyncModel,
+        videoUrl: generated.videoUrl,
+        audioUrl,
+        extra: { loop_mode: 'loop' },
+        maxWaitMs: lipSyncMaxWaitMs(referenceDurationMs),
+      });
+      finalVideoUrl = lipSync.videoUrl;
+      lipSyncRequestId = lipSync.requestId;
+    } finally {
+      try {
+        const deleted = await services.deleteOutput(audioStored.fileId);
+        if (!deleted) {
+          services.logger.warn(
+            { fileId: audioStored.fileId },
+            'video: temporary clone audio row was already absent',
+          );
+        }
+      } catch (err) {
+        services.logger.warn(
+          { err, fileId: audioStored.fileId },
+          'video: failed to remove temporary clone audio file',
+        );
+      }
+    }
+  }
   const outputPath = path.join(services.workdir, 'clone-final.mp4');
-  await fns.downloadToFile(generated.videoUrl, outputPath, {
+  await fns.downloadToFile(finalVideoUrl, outputPath, {
     maxBytes: 500 * 1024 * 1024,
   });
   const durationMs = await fns.ffprobeDurationMs(outputPath, ffprobeOpts);
@@ -229,10 +317,6 @@ export async function runCloneVideoCreation(
   const mediaFailures: string[] = [];
   if (!outputIntegrity.hasVideo) mediaFailures.push('output_video_missing');
   if (outputIntegrity.frozenRatio >= 0.95) mediaFailures.push('output_motion_missing');
-  const sourceHasAudibleAudio =
-    referenceIntegrity.hasAudio &&
-    referenceIntegrity.audioMaxVolumeDb !== null &&
-    referenceIntegrity.audioMaxVolumeDb > -50;
   if (sourceHasAudibleAudio && !outputIntegrity.hasAudio) {
     mediaFailures.push('output_audio_missing');
   } else if (
@@ -257,7 +341,7 @@ export async function runCloneVideoCreation(
     minimumDurationMs: referenceDurationMs,
     userText: input.description?.trim() || '复刻参考视频动作，并保持上传主角的身份和外观一致。',
     qualityContext:
-      '抽样帧必须保持上传主角的身份、脸部和身体外形一致，并核对可见的粗粒度姿态与场景是否明显偏离参考；不得出现融合手、多余肢体或主体漂移。静态抽样不证明连续动作、节奏或镜头运动已验证。',
+      '抽样帧必须保持上传主角的身份、脸部和身体外形一致，并核对可见的粗粒度姿态与场景是否明显偏离参考；不得出现融合手、多余肢体或主体漂移。有声参考视频已在人物替换后执行专门口型同步，但静态抽样不证明音画同步、连续动作、节奏或镜头运动已验证。',
     referenceImages: [subjectReference],
     referenceVideos: [
       {
@@ -308,7 +392,12 @@ export async function runCloneVideoCreation(
     ffOpts,
   });
   services.logger.info(
-    { fileId: stored.fileId, providerTaskId: generated.taskId, mode: opts.mode },
+    {
+      fileId: stored.fileId,
+      providerTaskId: generated.taskId,
+      ...(lipSyncRequestId ? { lipSyncRequestId } : {}),
+      mode: opts.mode,
+    },
     'video: clone complete',
   );
   return {

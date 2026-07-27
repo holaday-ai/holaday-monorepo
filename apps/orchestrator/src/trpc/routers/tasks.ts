@@ -340,6 +340,9 @@ function buildVideoCfg(): SimpleVideoConfig {
     ...(appEnv.DASHSCOPE_WORKSPACE_ID
       ? { dashscopeWorkspaceId: appEnv.DASHSCOPE_WORKSPACE_ID }
       : {}),
+    falApiKey: appEnv.FAL_KEY,
+    falBaseUrl: appEnv.FAL_BASE_URL,
+    falLipsyncModel: appEnv.FAL_LIPSYNC_MODEL,
     geminiApiKey: appEnv.GEMINI_API_KEY,
     geminiBaseUrl: appEnv.GEMINI_BASE_URL,
     qwenTtsModel: 'qwen3-tts-flash',
@@ -6896,6 +6899,20 @@ export const tasksRouter = router({
               {
                 storeOutput,
                 storeOutputFile,
+                storeTemporaryAudio: async (i) => {
+                  const stored = await fileService.storeTemporaryOutput({
+                    userIdInternal: userInternalId,
+                    userExternalId,
+                    taskIdInternal: taskInternalId,
+                    filename: i.filename,
+                    mimetype: i.mimetype,
+                    buffer: i.buffer,
+                  });
+                  return { fileId: stored.externalId };
+                },
+                presignByFileId: (fileId) =>
+                  fileService.signedReadUrl(fileId, userInternalId, 900),
+                deleteOutput: (fileId) => fileService.deleteForUser(fileId, userInternalId),
                 workdir,
                 logger,
                 verifyCloneInputs,

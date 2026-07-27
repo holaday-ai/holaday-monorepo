@@ -17,6 +17,9 @@ const CFG: SimpleVideoConfig = {
   dashscopeApiKey: 'dk',
   dashscopeBaseUrl: 'https://dashscope-intl.aliyuncs.com',
   dashscopeWorkspaceId: 'ws-test',
+  falApiKey: 'fk',
+  falBaseUrl: 'https://queue.fal.run',
+  falLipsyncModel: 'fal-ai/latentsync',
   qwenTtsModel: 'qwen3-tts-flash',
   presetVoice: 'Cherry',
   wanxiangT2vModel: 'wan2.1-t2v-turbo',
@@ -39,6 +42,11 @@ function makeServices() {
     contentType: 'video/mp4',
     sizeBytes: 42_000_000,
   }));
+  const runLipSync = vi.fn(async () => ({
+    videoUrl: 'https://v3.fal.media/clone-lipsynced.mp4',
+    requestId: 'lip-1',
+    elapsedMs: 120_000,
+  }));
   const readFile = vi.fn(async () => Buffer.from('poster'));
   const runFfmpeg = vi.fn(async () => {});
   const ffprobeDurationMs = vi.fn(async () => 8200);
@@ -56,6 +64,9 @@ function makeServices() {
     fileId: `f_${input.filename}`,
     storagePath: `s_${input.filename}`,
   }));
+  const storeTemporaryAudio = vi.fn(async () => ({ fileId: 'f_clone-audio.wav' }));
+  const presignByFileId = vi.fn(async () => 'https://r2.example/f_clone-audio.wav?sig');
+  const deleteOutput = vi.fn(async () => true);
   const verifyFinalVideo = vi.fn(
     async (): Promise<VideoQualityResult> => ({
       status: 'pass' as const,
@@ -81,6 +92,7 @@ function makeServices() {
   const overrides: Partial<CloneVideoFns> = {
     generateWanAnimateMix:
       generateWanAnimateMix as unknown as CloneVideoFns['generateWanAnimateMix'],
+    runLipSync: runLipSync as unknown as CloneVideoFns['runLipSync'],
     downloadToBuffer: downloadToBuffer as unknown as CloneVideoFns['downloadToBuffer'],
     downloadToFile: downloadToFile as unknown as CloneVideoFns['downloadToFile'],
     readFile,
@@ -93,6 +105,9 @@ function makeServices() {
   const services: CloneVideoServices = {
     storeOutput,
     storeOutputFile,
+    storeTemporaryAudio,
+    presignByFileId,
+    deleteOutput,
     workdir: '/tmp/clone-video',
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     verifyCloneInputs,
@@ -105,6 +120,7 @@ function makeServices() {
     services,
     mocks: {
       generateWanAnimateMix,
+      runLipSync,
       downloadToBuffer,
       downloadToFile,
       readFile,
@@ -114,6 +130,9 @@ function makeServices() {
       readImageMetadata,
       storeOutput,
       storeOutputFile,
+      storeTemporaryAudio,
+      presignByFileId,
+      deleteOutput,
       verifyCloneInputs,
       verifyFinalVideo,
       inspectMediaIntegrity,
@@ -122,7 +141,7 @@ function makeServices() {
 }
 
 describe('runCloneVideoCreation', () => {
-  it('sends both user assets to Wan Animate and stores the provider video without stripping its audio', async () => {
+  it('lip-syncs an audible clone with the original audio before quality verification and storage', async () => {
     const { services, mocks } = makeServices();
     const result = await runCloneVideoCreation(
       {
@@ -145,7 +164,7 @@ describe('runCloneVideoCreation', () => {
       }),
     );
     expect(mocks.downloadToFile).toHaveBeenCalledWith(
-      'https://dashscope-result-sgp/clone.mp4',
+      'https://v3.fal.media/clone-lipsynced.mp4',
       '/tmp/clone-video/clone-final.mp4',
       { maxBytes: 500 * 1024 * 1024 },
     );
@@ -158,6 +177,22 @@ describe('runCloneVideoCreation', () => {
     expect(mocks.downloadToBuffer).not.toHaveBeenCalledWith(
       'https://dashscope-result-sgp/clone.mp4',
     );
+    expect(mocks.runLipSync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        apiKey: 'fk',
+        baseUrl: 'https://queue.fal.run',
+        model: 'fal-ai/latentsync',
+        videoUrl: 'https://dashscope-result-sgp/clone.mp4',
+        audioUrl: 'https://r2.example/f_clone-audio.wav?sig',
+        extra: { loop_mode: 'loop' },
+      }),
+    );
+    expect(mocks.storeTemporaryAudio).toHaveBeenCalledWith({
+      filename: 'clone-reference-audio.wav',
+      mimetype: 'audio/wav',
+      buffer: Buffer.from('poster'),
+    });
+    expect(mocks.deleteOutput).toHaveBeenCalledWith('f_clone-audio.wav');
     expect(mocks.verifyCloneInputs).toHaveBeenCalledWith(
       expect.objectContaining({
         subjectImage: expect.objectContaining({
@@ -195,7 +230,28 @@ describe('runCloneVideoCreation', () => {
       mimetype: 'video/mp4',
       sourcePath: '/tmp/clone-video/clone-final.mp4',
     });
-    expect(mocks.runFfmpeg).toHaveBeenCalledTimes(1);
+    expect(mocks.runFfmpeg).toHaveBeenCalledWith(
+      {
+        bin: 'ffmpeg',
+        args: [
+          '-y',
+          '-i',
+          '/tmp/clone-video/clone-reference.mp4',
+          '-map',
+          '0:a:0',
+          '-vn',
+          '-ac',
+          '1',
+          '-ar',
+          '16000',
+          '-c:a',
+          'pcm_s16le',
+          '/tmp/clone-video/clone-reference-audio.wav',
+        ],
+      },
+      {},
+    );
+    expect(mocks.runFfmpeg).toHaveBeenCalledTimes(2);
     expect(mocks.storeOutput).toHaveBeenCalledWith(
       expect.objectContaining({ filename: 'poster.jpg', mimetype: 'image/jpeg' }),
     );
@@ -204,6 +260,67 @@ describe('runCloneVideoCreation', () => {
       downloadUrl: '/api/files/f_video.mp4/download',
       durationSeconds: 8.2,
     });
+  });
+
+  it('keeps the direct clone path when the reference video has no audible audio', async () => {
+    const { services, mocks } = makeServices();
+    mocks.inspectMediaIntegrity
+      .mockResolvedValueOnce({
+        durationMs: 8200,
+        hasVideo: true,
+        hasAudio: false,
+        frozenRatio: 0.1,
+        audioMeanVolumeDb: null,
+        audioMaxVolumeDb: null,
+      })
+      .mockResolvedValueOnce({
+        durationMs: 8200,
+        hasVideo: true,
+        hasAudio: false,
+        frozenRatio: 0.1,
+        audioMeanVolumeDb: null,
+        audioMaxVolumeDb: null,
+      });
+
+    await runCloneVideoCreation(
+      {
+        imageUrl: 'https://r2.example/subject.jpg',
+        referenceVideoUrl: 'https://r2.example/reference.mp4',
+      },
+      CFG,
+      { mode: 'wan-pro' },
+      services,
+    );
+
+    expect(mocks.runLipSync).not.toHaveBeenCalled();
+    expect(mocks.storeTemporaryAudio).not.toHaveBeenCalled();
+    expect(mocks.downloadToFile).toHaveBeenCalledWith(
+      'https://dashscope-result-sgp/clone.mp4',
+      '/tmp/clone-video/clone-final.mp4',
+      { maxBytes: 500 * 1024 * 1024 },
+    );
+  });
+
+  it('rejects an audible clone before the paid Wan job when lip-sync is not configured', async () => {
+    const { services, mocks } = makeServices();
+
+    await expect(
+      runCloneVideoCreation(
+        {
+          imageUrl: 'https://r2.example/subject.jpg',
+          referenceVideoUrl: 'https://r2.example/reference.mp4',
+        },
+        { ...CFG, falApiKey: undefined },
+        { mode: 'wan-pro' },
+        services,
+      ),
+    ).rejects.toMatchObject({
+      name: 'SimpleVideoError',
+      kind: 'config',
+    });
+
+    expect(mocks.generateWanAnimateMix).not.toHaveBeenCalled();
+    expect(mocks.storeTemporaryAudio).not.toHaveBeenCalled();
   });
 
   it('rejects a missing reference video before calling the provider', async () => {
