@@ -20,7 +20,14 @@
 
 import { TRPCError } from '@trpc/server';
 import { eq } from 'drizzle-orm';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { z } from 'zod';
+import {
+  inspectMediaIntegrity,
+  type MediaIntegrityReport,
+} from '../../agent/video/ffmpeg-exec.js';
 import { deleteVoice, enrollVoice } from '../../agent/video/qwen-voice-clone-client.js';
 import { env as appEnv } from '../../config/env.js';
 import { FileService } from '../../files/file-service.js';
@@ -82,6 +89,30 @@ export function enrollMimeFor(uploadedMime: string): string | null {
   if (m === 'audio/mpeg' || m === 'audio/mp3') return 'audio/mpeg';
   if (m === 'audio/mp4' || m === 'audio/x-m4a' || m === 'audio/m4a') return 'audio/mp4';
   return null; // aac/ogg/video/etc — Qwen clone wants WAV/MP3/M4A
+}
+
+export function validateBaseVideoReport(report: MediaIntegrityReport): string | null {
+  if (report.durationMs < 2_000 || report.durationMs > 60_000) {
+    return '本人出镜底版需为 2 到 60 秒的视频';
+  }
+  if (!report.hasVideo) {
+    return '无法识别出镜底版中的视频画面，请重新上传 MP4 / MOV 文件';
+  }
+  if (report.frozenRatio >= 0.98) {
+    return '出镜底版几乎全程静止，请上传有眨眼、说话或肢体动作的视频';
+  }
+  return null;
+}
+
+async function inspectUploadedBaseVideo(buffer: Buffer): Promise<MediaIntegrityReport> {
+  const workdir = await mkdtemp(path.join(tmpdir(), 'holaday-ip-base-'));
+  const localPath = path.join(workdir, 'base-video.mp4');
+  try {
+    await writeFile(localPath, buffer);
+    return await inspectMediaIntegrity(localPath);
+  } finally {
+    await rm(workdir, { recursive: true, force: true });
+  }
 }
 
 export const videoOnboardingRouter = router({
@@ -169,6 +200,23 @@ export const videoOnboardingRouter = router({
       if (!loaded) throw new TRPCError({ code: 'NOT_FOUND', message: '找不到上传的出镜视频' });
       if (!loaded.row.mimetype.startsWith('video/')) {
         throw new TRPCError({ code: 'BAD_REQUEST', message: '出镜底版需为视频文件（MP4 / MOV）' });
+      }
+      let report: MediaIntegrityReport;
+      try {
+        report = await inspectUploadedBaseVideo(loaded.buffer);
+      } catch (err) {
+        ctx.logger.warn(
+          { err, userId: ctx.userId, fileId: input.videoFileId },
+          'video onboarding: base video inspection failed',
+        );
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: '无法读取出镜底版，请确认文件可正常播放后重新上传',
+        });
+      }
+      const validationMessage = validateBaseVideoReport(report);
+      if (validationMessage) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: validationMessage });
       }
       const retained = await fileService.retainInputForUser(input.videoFileId, u.id);
       if (!retained) {

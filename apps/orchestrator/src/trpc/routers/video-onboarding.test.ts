@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { enrollMimeFor, resolveOnboardingStatus } from './video-onboarding.js';
+import type { MediaIntegrityReport } from '../../agent/video/ffmpeg-exec.js';
+import {
+  enrollMimeFor,
+  resolveOnboardingStatus,
+  validateBaseVideoReport,
+} from './video-onboarding.js';
 
 describe('enrollMimeFor — onboarding 语音样本格式闸 (Phase 3 阶段1)', () => {
   it('maps WAV variants → audio/wav', () => {
@@ -66,5 +71,41 @@ describe('resolveOnboardingStatus — durable asset readiness', () => {
       authorizedAt: null,
       baseVideoIssue: null,
     });
+  });
+});
+
+describe('validateBaseVideoReport — reject unusable IP base before retention', () => {
+  const movingBase: MediaIntegrityReport = {
+    durationMs: 9_000,
+    hasVideo: true,
+    hasAudio: true,
+    frozenRatio: 0.12,
+    audioMeanVolumeDb: -24,
+    audioMaxVolumeDb: -8,
+  };
+
+  it('accepts a 2–60 second video with visible motion', () => {
+    expect(validateBaseVideoReport(movingBase)).toBeNull();
+  });
+
+  it('rejects a still-image video before it can be marked ready', () => {
+    expect(
+      validateBaseVideoReport({
+        ...movingBase,
+        frozenRatio: 0.99,
+      }),
+    ).toBe('出镜底版几乎全程静止，请上传有眨眼、说话或肢体动作的视频');
+  });
+
+  it('rejects missing video and out-of-range duration with actionable copy', () => {
+    expect(validateBaseVideoReport({ ...movingBase, hasVideo: false })).toBe(
+      '无法识别出镜底版中的视频画面，请重新上传 MP4 / MOV 文件',
+    );
+    expect(validateBaseVideoReport({ ...movingBase, durationMs: 1_999 })).toBe(
+      '本人出镜底版需为 2 到 60 秒的视频',
+    );
+    expect(validateBaseVideoReport({ ...movingBase, durationMs: 60_001 })).toBe(
+      '本人出镜底版需为 2 到 60 秒的视频',
+    );
   });
 });
