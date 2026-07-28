@@ -618,6 +618,64 @@ export class FileService {
   }
 
   /**
+   * Stream a provider-handoff artifact from disk while preserving the same
+   * hidden-row and crash-recovery semantics as storeTemporaryOutput.
+   */
+  async storeTemporaryOutputFile(opts: {
+    userIdInternal: number;
+    userExternalId: string;
+    taskIdInternal: number;
+    filename: string;
+    mimetype: string;
+    sourcePath: string;
+  }): Promise<TaskFile> {
+    const meta = await fs.stat(opts.sourcePath);
+    const externalId = newExternalId('file');
+    const safeFilename = sanitiseFilename(opts.filename);
+    const storageInput = {
+      userExternalId: opts.userExternalId,
+      kind: 'output',
+      fileExternalId: externalId,
+      filename: safeFilename,
+    } as const;
+    const storagePath = this.storage.pathFor(storageInput);
+    const expiresAt = new Date(Date.now() + TEMPORARY_OUTPUT_TTL_MS);
+    await this.db.insert(taskFiles).values({
+      externalId,
+      userId: opts.userIdInternal,
+      taskId: opts.taskIdInternal,
+      kind: 'temp',
+      filename: safeFilename,
+      mimetype: opts.mimetype,
+      sizeBytes: meta.size,
+      storagePath,
+      status: 'pending',
+      expiresAt,
+    });
+    const stored = await this.storage.putFile({
+      ...storageInput,
+      sourcePath: opts.sourcePath,
+      sizeBytes: meta.size,
+      mimetype: opts.mimetype,
+    });
+    if (stored.storagePath !== storagePath) {
+      await this.storage.delete(stored.storagePath);
+      throw new Error('storeTemporaryOutputFile: storage provider path mismatch');
+    }
+    await this.db
+      .update(taskFiles)
+      .set({ status: 'active' })
+      .where(eq(taskFiles.externalId, externalId));
+    const [row] = await this.db
+      .select()
+      .from(taskFiles)
+      .where(eq(taskFiles.externalId, externalId))
+      .limit(1);
+    if (!row) throw new Error('storeTemporaryOutputFile: row vanished after upload');
+    return row;
+  }
+
+  /**
    * Check whether an uploaded file is still a real, readable object for this
    * user. A non-null DB id alone is not readiness: cleanup may already have
    * expired the row or removed the backing object.

@@ -150,6 +150,77 @@ describe('storeOutput — stamps the configurable output TTL', () => {
 });
 
 describe('storeTemporaryOutput — crash-safe provider handoff', () => {
+  it('streams a hidden temporary video to storage without buffering the artifact', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'temporary-output-file-'));
+    const sourcePath = path.join(dir, 'provider-video.mp4');
+    await fs.writeFile(sourcePath, Buffer.from('provider-video'));
+    try {
+      const { db, logger, storage } = harness();
+      const putFile = vi.spyOn(storage, 'putFile');
+      const svc = new FileService(db, logger, storage as any);
+      const before = Date.now();
+      const row = await svc.storeTemporaryOutputFile({
+        userIdInternal: 7,
+        userExternalId: 'usr_owner',
+        taskIdInternal: 9,
+        filename: 'provider-video.mp4',
+        mimetype: 'video/mp4',
+        sourcePath,
+      });
+      const after = Date.now();
+
+      expect(putFile).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sourcePath,
+          sizeBytes: 14,
+          mimetype: 'video/mp4',
+        }),
+      );
+      expect(row).toMatchObject({ kind: 'temp', status: 'active', sizeBytes: 14 });
+      const exp = (row.expiresAt as Date).getTime();
+      expect(exp).toBeGreaterThanOrEqual(before + TEMPORARY_OUTPUT_TTL_MS - 50);
+      expect(exp).toBeLessThanOrEqual(after + TEMPORARY_OUTPUT_TTL_MS + 50);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves a pending cleanup row when a streamed temporary upload fails', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'temporary-output-file-failure-'));
+    const sourcePath = path.join(dir, 'provider-video.mp4');
+    await fs.writeFile(sourcePath, Buffer.from('provider-video'));
+    try {
+      const { db, logger, getInserted } = harness();
+      const storage = {
+        pathFor: () => 'usr/output/file/provider-video.mp4',
+        putFile: vi.fn(async () => {
+          throw new Error('R2 unavailable');
+        }),
+      } as any;
+      const svc = new FileService(db, logger, storage);
+
+      await expect(
+        svc.storeTemporaryOutputFile({
+          userIdInternal: 7,
+          userExternalId: 'usr_owner',
+          taskIdInternal: 9,
+          filename: 'provider-video.mp4',
+          mimetype: 'video/mp4',
+          sourcePath,
+        }),
+      ).rejects.toThrow('R2 unavailable');
+
+      expect(getInserted()).toMatchObject({
+        kind: 'temp',
+        status: 'pending',
+        storagePath: 'usr/output/file/provider-video.mp4',
+        sizeBytes: 14,
+      });
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it('stores a hidden temp row with a short cleanup TTL', async () => {
     const { db, logger, storage } = harness();
     const svc = new FileService(db, logger, storage);

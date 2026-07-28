@@ -6938,6 +6938,17 @@ export const tasksRouter = router({
               {
                 storeOutput,
                 storeOutputFile,
+                storeTemporaryVideoFile: async (i) => {
+                  const stored = await fileService.storeTemporaryOutputFile({
+                    userIdInternal: userInternalId,
+                    userExternalId,
+                    taskIdInternal: taskInternalId,
+                    filename: i.filename,
+                    mimetype: i.mimetype,
+                    sourcePath: i.sourcePath,
+                  });
+                  return { fileId: stored.externalId };
+                },
                 storeTemporaryAudio: async (i) => {
                   const stored = await fileService.storeTemporaryOutput({
                     userIdInternal: userInternalId,

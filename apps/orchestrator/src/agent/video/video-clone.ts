@@ -41,6 +41,13 @@ export interface CloneVideoServices {
     fileId: string;
     storagePath: string;
   }>;
+  storeTemporaryVideoFile(input: {
+    filename: string;
+    mimetype: string;
+    sourcePath: string;
+  }): Promise<{
+    fileId: string;
+  }>;
   storeTemporaryAudio(input: { filename: string; mimetype: string; buffer: Buffer }): Promise<{
     fileId: string;
   }>;
@@ -252,34 +259,51 @@ export async function runCloneVideoCreation(
     if (!falApiKey || !falBaseUrl || !falLipsyncModel) {
       throw new SimpleVideoError('clone lip-sync provider not configured', 'config');
     }
-    const referenceAudioPath = path.join(services.workdir, 'clone-reference-audio.wav');
-    await fns.runFfmpeg(
-      {
-        bin: cfg.ffmpegBin ?? 'ffmpeg',
-        args: [
-          '-y',
-          '-i',
-          referenceVideoPath,
-          '-map',
-          '0:a:0',
-          '-vn',
-          '-ac',
-          '1',
-          '-ar',
-          '16000',
-          '-c:a',
-          'pcm_s16le',
-          referenceAudioPath,
-        ],
-      },
-      cfg.ffmpegBin ? { ffmpegBin: cfg.ffmpegBin } : {},
-    );
-    const audioStored = await services.storeTemporaryAudio({
-      filename: 'clone-reference-audio.wav',
-      mimetype: 'audio/wav',
-      buffer: await fns.readFile(referenceAudioPath),
-    });
+    const temporaryFileIds: string[] = [];
     try {
+      const providerVideoPath = path.join(services.workdir, 'clone-provider-output.mp4');
+      await fns.downloadToFile(generated.videoUrl, providerVideoPath, {
+        maxBytes: 500 * 1024 * 1024,
+      });
+      const videoStored = await services.storeTemporaryVideoFile({
+        filename: 'clone-provider-output.mp4',
+        mimetype: 'video/mp4',
+        sourcePath: providerVideoPath,
+      });
+      temporaryFileIds.push(videoStored.fileId);
+      const providerVideoUrl = await services.presignByFileId(videoStored.fileId);
+      if (!providerVideoUrl) {
+        throw new SimpleVideoError('clone provider video presign failed', 'config');
+      }
+
+      const referenceAudioPath = path.join(services.workdir, 'clone-reference-audio.wav');
+      await fns.runFfmpeg(
+        {
+          bin: cfg.ffmpegBin ?? 'ffmpeg',
+          args: [
+            '-y',
+            '-i',
+            referenceVideoPath,
+            '-map',
+            '0:a:0',
+            '-vn',
+            '-ac',
+            '1',
+            '-ar',
+            '16000',
+            '-c:a',
+            'pcm_s16le',
+            referenceAudioPath,
+          ],
+        },
+        cfg.ffmpegBin ? { ffmpegBin: cfg.ffmpegBin } : {},
+      );
+      const audioStored = await services.storeTemporaryAudio({
+        filename: 'clone-reference-audio.wav',
+        mimetype: 'audio/wav',
+        buffer: await fns.readFile(referenceAudioPath),
+      });
+      temporaryFileIds.push(audioStored.fileId);
       const audioUrl = await services.presignByFileId(audioStored.fileId);
       if (!audioUrl) {
         throw new SimpleVideoError('clone audio presign failed', 'config');
@@ -288,7 +312,7 @@ export async function runCloneVideoCreation(
         apiKey: falApiKey,
         baseUrl: falBaseUrl,
         model: falLipsyncModel,
-        videoUrl: generated.videoUrl,
+        videoUrl: providerVideoUrl,
         audioUrl,
         extra: cloneLipSyncExtra(falLipsyncModel),
         maxWaitMs: lipSyncMaxWaitMs(referenceDurationMs),
@@ -296,19 +320,21 @@ export async function runCloneVideoCreation(
       finalVideoUrl = lipSync.videoUrl;
       lipSyncRequestId = lipSync.requestId;
     } finally {
-      try {
-        const deleted = await services.deleteOutput(audioStored.fileId);
-        if (!deleted) {
+      for (const fileId of temporaryFileIds.reverse()) {
+        try {
+          const deleted = await services.deleteOutput(fileId);
+          if (!deleted) {
+            services.logger.warn(
+              { fileId },
+              'video: temporary clone handoff row was already absent',
+            );
+          }
+        } catch (err) {
           services.logger.warn(
-            { fileId: audioStored.fileId },
-            'video: temporary clone audio row was already absent',
+            { err, fileId },
+            'video: failed to remove temporary clone handoff file',
           );
         }
-      } catch (err) {
-        services.logger.warn(
-          { err, fileId: audioStored.fileId },
-          'video: failed to remove temporary clone audio file',
-        );
       }
     }
   }
