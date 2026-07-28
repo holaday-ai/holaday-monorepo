@@ -1,12 +1,12 @@
 /**
  * IP 人物 真人换口型 — B 架构「单 clip 口播」lane (Phase 2 第三期 阶段3).
  *
- * 与 A 架构(video-lane.ts runVideoCreation,多段、每句一次 lip-sync = N×$0.20)
- * 不同:B 把【全文案】一次合成 1 条克隆音 → 对底版做【1 次】fal latentsync 换口型
- * (底版短于音频用 loop_mode 补够)→ 1 次 compose(画幅 pad + 字幕 + 水印)→ store。
- * 上限 ≤40s(fal 平价边界,每条 $0.20),超长抛 'too_long'(报价/前端已提示)。
+ * 与 A 架构(video-lane.ts runVideoCreation,多段、每句一次 lip-sync)
+ * 不同:B 把【全文案】一次合成 1 条克隆音 → 对底版做【1 次】fal 换口型
+ * (底版短于音频时循环补够)→ 1 次 compose(画幅 pad + 字幕 + 水印)→ store。
+ * 上限 ≤40s,超长抛 'too_long'(报价/前端已提示)。
  *
- * 复用既有件:synthesizeSpeech(克隆音)/ runLipSync(extra.loop_mode)/
+ * 复用既有件:synthesizeSpeech(克隆音)/ runLipSync(模型对应的循环参数)/
  * buildTimeline+buildAss(把全文案按字数比例切成逐句字幕)/ buildComposeCommand
  * (单 clip,clip 自带克隆音轨)。fire-and-poll 在 confirmVideo 后台协程。
  */
@@ -29,8 +29,14 @@ import type { PipelineLogger } from './video-pipeline.js';
 import { generatePosterFile } from './video-poster.js';
 import type { VerifyFinalVideoQualityInput, VideoQualityResult } from './video-quality-verifier.js';
 
-/** B 架构平价边界:总音频 ≤40s(fal flat fee);超则要进阶档/截短。 */
+/** B 架构产品边界:总音频 ≤40s;超则要进阶档/截短。 */
 export const IP_MAX_AUDIO_MS = 40_000;
+
+function ipLipSyncExtra(model: string): Record<string, unknown> {
+  return /^fal-ai\/sync-lipsync\/v(?:2|3)$/.test(model)
+    ? { sync_mode: 'loop' }
+    : { loop_mode: 'loop' };
+}
 
 export type IpVideoErrorKind =
   | 'config'
@@ -245,7 +251,7 @@ export async function runIpVideoCreation(
     buffer: audioDl.buffer,
   });
 
-  // ② 1 次 fal latentsync 换口型(底版短→loop_mode 补够音频长)。fire-and-poll。
+  // ② 1 次 fal 换口型。底版短于口播时，使用对应模型的循环参数补足。
   const lip = await (async () => {
     try {
       const audioUrl = await svc.presignByFileId(audioStored.fileId);
@@ -258,9 +264,9 @@ export async function runIpVideoCreation(
         model: cfg.falLipsyncModel,
         videoUrl: ctx.baseVideoUrl,
         audioUrl,
-        extra: { loop_mode: 'loop' },
-        // latentsync ~12-14× realtime → poll ceiling scales with audio length so
-        // long clips don't false-"timeout" at the old fixed 300s (audioMs ≤ 40s here).
+        extra: ipLipSyncExtra(cfg.falLipsyncModel),
+        // Provider queue time grows with output length. Keep the existing
+        // conservative ceiling so in-spec clips do not surface false timeouts.
         maxWaitMs: lipSyncMaxWaitMs(audioMs),
       });
     } finally {

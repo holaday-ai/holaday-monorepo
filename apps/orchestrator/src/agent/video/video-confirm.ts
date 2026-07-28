@@ -167,13 +167,14 @@ export function quoteCloneVideo(durationSeconds: number, mode: WanAnimateMixMode
 // ---------------------------------------------------------------------------
 // IP 人物 真人换口型 报价 (Phase 2 第三期, B 架构单 clip 口播).
 // ---------------------------------------------------------------------------
-// 成本由 clip 数主导(B = 1 clip):fal latentsync $0.20/clip(≤40s 平价) +
-// Qwen3-TTS-VC 合成按字符(此规模 <1% 可忽略)。
-// TODO(pricing): fal $0.20/clip、Qwen ~$0.13/万字、汇率 7.3 为硬编码快照,需手动同步:
-//   https://fal.ai/models/fal-ai/latentsync (≤40s $0.20,>40s +$0.005/s)
+// Sync Lipsync 2.0 按输出时长计费($3/min = $0.05/s),任务创建阶段
+// 尚未合成真实音轨，因此按 Qwen 实测约 5 字/秒保守预估。
+// TODO(pricing): fal $3/min、Qwen ~$0.13/万字、汇率 7.3 为硬编码快照,需手动同步:
+//   https://fal.ai/models/fal-ai/sync-lipsync/v2
 //   阿里 Model Studio qwen-tts 计费(按字符)。
-const FAL_USD_PER_CLIP = 0.2;
+const FAL_USD_PER_SECOND = 0.05;
 const QWEN_USD_PER_10K_CHARS = 0.13;
+const IP_ESTIMATED_CHARS_PER_SECOND = 5;
 // B 架构 ~40s 对应的中文字数粗界(~4 字/秒 → ~160 字),超则提示可能 >40s。
 const IP_CHAR_WARN = 180;
 
@@ -184,19 +185,21 @@ export interface IpVideoQuote {
   readonly message: string;
 }
 
-/** IP 口播报价 — videoCny = (1×fal + 字符×Qwen) × 汇率(原生 USD 折人民币). */
+/** IP 口播报价 — videoCny = (预估时长×fal 秒价 + 字符×Qwen) × 汇率. */
 export function quoteIpVideo(copyText: string): IpVideoQuote {
   const chars = copyText.trim().length;
-  const usd = FAL_USD_PER_CLIP + (chars / 10_000) * QWEN_USD_PER_10K_CHARS;
+  const estimatedSeconds = Math.max(1, Math.ceil(chars / IP_ESTIMATED_CHARS_PER_SECOND));
+  const usd =
+    estimatedSeconds * FAL_USD_PER_SECOND + (chars / 10_000) * QWEN_USD_PER_10K_CHARS;
   const videoCny = Math.max(1, Math.ceil(usd * USD_TO_CNY));
   const maybeTooLong = chars > IP_CHAR_WARN;
   const message =
-    `将使用已授权的声音 + 出镜底版生成 IP人物视频,预计费用约 ¥${videoCny}` +
-    `（单条 ≤40 秒）。\n` +
+    `将使用已授权的声音 + 出镜底版，通过 Sync Lipsync 2.0 生成 IP人物视频，` +
+    `按约 ${estimatedSeconds} 秒口播预估费用 ¥${videoCny}（单条 ≤40 秒）。\n` +
     (maybeTooLong
       ? `⚠️ 文案约 ${chars} 字,可能超过 40 秒上限;过长会被拒,请适当截短。\n`
       : '') +
-    `点「确认制作」开始;不需要可「取消」。`;
+    `点「确认制作」开始；不需要可「取消」。`;
   return { chars, videoCny, maybeTooLong, message };
 }
 

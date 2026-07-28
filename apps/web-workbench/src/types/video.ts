@@ -97,12 +97,13 @@ export function estimatePetCny(
 }
 
 /**
- * IP 真人换口型(B 架构单 clip)预计价。镜像后端 quoteIpVideo:
- * 1 clip × fal $0.20 + 字符 × Qwen(~$0.13/万字)→ 折人民币 floor ¥1。
+ * IP 真人换口型预计价。镜像后端 quoteIpVideo:
+ * Sync Lipsync 2.0 $3/min,按约 5 字/秒估算时长，再加 Qwen 字符费。
  * maybeTooLong: 文案 >180 字可能超 40s 上限。
  */
 export function estimateIpVideo(copyText: string): { videoCny: number; chars: number; maybeTooLong: boolean } {
   const chars = copyText.trim().length;
-  const usd = 0.2 + (chars / 10_000) * 0.13;
+  const estimatedSeconds = Math.max(1, Math.ceil(chars / 5));
+  const usd = estimatedSeconds * 0.05 + (chars / 10_000) * 0.13;
   return { videoCny: Math.max(1, Math.ceil(usd * 7.3)), chars, maybeTooLong: chars > 180 };
 }

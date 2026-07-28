@@ -3625,13 +3625,13 @@ function IpGenerateForm({
           <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
             <span className="text-xl font-semibold text-[#EA1F59]">约 ¥{est.videoCny}</span>
             <span className="text-[13px] text-muted-foreground">
-              Qwen Voice + LatentSync · {IP_VIDEO_ASPECT_RATIO} · 约 {est.chars} 字
+              Qwen Voice + Sync Lipsync 2.0 · {IP_VIDEO_ASPECT_RATIO} · 约 {est.chars} 字
             </span>
           </div>
           {est.maybeTooLong && (
             <p className="mt-1 text-[11px] text-[#B45309]">⚠️ 文案偏长,可能超过 40 秒上限;过长会被拒,请适当截短。</p>
           )}
-          <p className="mt-1 text-[11px] text-muted-foreground">提交后会先给精确报价,确认后才扣费。</p>
+          <p className="mt-1 text-[11px] text-muted-foreground">提交后会先给预估报价,确认后才扣费。</p>
         </div>
         {/* per-generate 授权确认:用户点生成前勾选,提交时写入后端授权记录。 */}
         <div className="rounded-[16px] border border-[#EFEFEF] bg-white px-4 py-3">

@@ -17,7 +17,7 @@ const CFG: IpVideoConfig = {
   qwenTtsVcModel: 'qwen3-tts-vc-2026-01-22',
   falApiKey: 'fk',
   falBaseUrl: 'https://queue.fal.run',
-  falLipsyncModel: 'fal-ai/latentsync',
+  falLipsyncModel: 'fal-ai/sync-lipsync/v2',
   watermarkFontFile: '/fonts/wqy.ttc',
 };
 const CTX: IpVideoContext = { voiceId: 'qwen-tts-vc-x', baseVideoUrl: 'https://r2/base.mp4?sig' };
@@ -159,7 +159,7 @@ describe('runIpVideoCreation — B 架构单 clip 口播', () => {
     expect(mocks.runLipSync).not.toHaveBeenCalled();
   });
 
-  it('全文案 1 次合成(克隆音)→ 1 次 fal 换口型(loop_mode)→ compose → store', async () => {
+  it('全文案 1 次合成(克隆音)→ 1 次 Sync Lipsync 换口型→ compose → store', async () => {
     const { svc, mocks } = makeServices(8000);
     const res = await runIpVideoCreation(
       { copyText: '大家好,这是我本人口播。今天聊三件事。' },
@@ -187,15 +187,17 @@ describe('runIpVideoCreation — B 架构单 clip 口播', () => {
     };
     expect(synthArg.voiceId).toBe('qwen-tts-vc-x');
     expect(synthArg.text).toContain('今天聊三件事');
-    // ② fal: base video + presigned 克隆音 + loop_mode
+    // ② fal: base video + presigned 克隆音 + provider-native loop mode
     const lipArg = (mocks.runLipSync.mock.calls[0] as unknown[])[0] as {
+      model: string;
       videoUrl: string;
       audioUrl: string;
       extra?: Record<string, unknown>;
     };
+    expect(lipArg.model).toBe('fal-ai/sync-lipsync/v2');
     expect(lipArg.videoUrl).toBe('https://r2/base.mp4?sig');
     expect(lipArg.audioUrl).toContain('https://r2/'); // presigned 克隆音
-    expect(lipArg.extra?.loop_mode).toBe('loop');
+    expect(lipArg.extra).toEqual({ sync_mode: 'loop' });
     // 只 1 次 fal(B 架构 = 1 clip)
     expect(mocks.runLipSync).toHaveBeenCalledTimes(1);
     expect(mocks.storeTemporaryAudio).toHaveBeenCalledWith({

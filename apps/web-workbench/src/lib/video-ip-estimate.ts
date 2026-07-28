@@ -1,7 +1,7 @@
 /**
  * Render-time estimate for the IP「IP人物视频」"生成中" hint.
  *
- * latentsync is ~12-14× realtime (measured: a 185-字 / ~35s clip took ~7min
+ * Provider queue time is variable (a 185-字 / ~35s clip has taken ~7min
  * end-to-end, incl. Qwen synth + compose). The real audioMs lives only on the
  * backend (ffprobe, same source as fal's maxWaitMs); the panel can't fetch it
  * without a new field, so we ESTIMATE audio length from the 文案 char count

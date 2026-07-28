@@ -6,6 +6,7 @@ import {
 import {
   cloneModeFromVideoModel,
   estimateCloneCny,
+  estimateIpVideo,
   estimatePerSegmentCny,
   normalVideoModelFromSelection,
   type VideoModel,
@@ -33,6 +34,18 @@ describe('clone video model contract', () => {
     expect(normalVideoModelFromSelection('veo_standard')).toBe('veo_standard');
     expect(normalVideoModelFromSelection('wan_animate_std')).toBe('veo_fast');
     expect(normalVideoModelFromSelection('wan_animate_pro')).toBe('veo_fast');
+  });
+});
+
+describe('IP person video estimate', () => {
+  it('mirrors the Sync Lipsync 2.0 per-second quote instead of the old flat clip price', () => {
+    const estimate = estimateIpVideo('字'.repeat(43));
+
+    expect(estimate).toEqual({
+      videoCny: Math.ceil((9 * 0.05 + (43 / 10_000) * 0.13) * 7.3),
+      chars: 43,
+      maybeTooLong: false,
+    });
   });
 });
 

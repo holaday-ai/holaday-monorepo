@@ -112,7 +112,7 @@ const schema = z.object({
    */
   WANXIANG_I2V_MODEL: z.string().default('wan2.2-i2v-flash'),
   HAPPYHORSE_I2V_MODEL: z.string().default('happyhorse-1.0-i2v'),
-  FAL_LIPSYNC_MODEL: z.string().default('fal-ai/latentsync'),
+  FAL_LIPSYNC_MODEL: z.string().default('fal-ai/sync-lipsync/v2'),
   /**
    * Clone-video-only lip-sync model. Kept separate from the IP-person lane
    * because the two workflows have different duration and identity needs.

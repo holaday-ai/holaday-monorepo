@@ -1,6 +1,6 @@
 /**
- * fal.ai lip-sync client (fal-ai/latentsync) — real-human-video mouth
- * re-draw from a cloned-voice audio track.
+ * fal.ai lip-sync client — redraw a real-human video's mouth from an audio
+ * track. The caller selects the provider model through config.
  *
  * Pure adapter over fal's QUEUE API. NO orchestrator / DB / storage
  * coupling — the runner persists the result to R2. Verified 2026-06-13
@@ -41,14 +41,12 @@ const LIPSYNC_BASE_MS = 60_000;
 const LIPSYNC_MS_PER_AUDIO_SEC = 16_000;
 
 /**
- * Dynamic poll ceiling for latentsync, scaled by output length (= audio
- * length, since loop_mode loops the base to cover the audio).
+ * Conservative poll ceiling scaled by output length. The IP lane loops the
+ * base video when needed so output length follows the synthesized audio.
  *
- * Root cause this fixes: latentsync is diffusion-based ~12-14× realtime, so a
- * fixed 300s ceiling timed out anything past ~20s output (16s clip ≈ 225s OK,
- * 37s clip needs ~460-520s → the client gave up at 300s and surfaced a false
- * "timeout" / "服务繁忙"). Retry is useless here (deterministic slowness, not a
- * flake) — the patient fix is to wait proportionally.
+ * Root cause this fixes: provider processing and queue time grow with clip
+ * length. A fixed 300s ceiling previously surfaced false "timeout" /
+ * "服务繁忙" failures for valid longer clips.
  *
  * `60s + audioSec × 16s`, clamped to [300s floor, 720s ceiling]. The IP lane
  * caps audio at 40s (IP_MAX_AUDIO_MS) before calling fal, so the realistic max
@@ -89,7 +87,7 @@ export interface FalBaseParams {
   readonly apiKey: string;
   /** Defaults to https://queue.fal.run. No trailing slash needed. */
   readonly baseUrl?: string;
-  /** Model id path segment. Default 'fal-ai/latentsync'. */
+  /** Model id path segment. Legacy fallback is 'fal-ai/latentsync'. */
   readonly model?: string;
   /** Per-HTTP wall-clock timeout. Default 30s. */
   readonly timeoutMs?: number;
@@ -102,7 +100,7 @@ export interface SubmitLipSyncParams extends FalBaseParams {
   readonly videoUrl: string;
   /** PUBLIC https URL to the cloned-voice audio (wav/mp3/m4a/aac/ogg). */
   readonly audioUrl: string;
-  /** Extra model params (guidance_scale, seed, loop_mode, …). */
+  /** Extra model params (sync_mode, loop_mode, guidance_scale, seed, …). */
   readonly extra?: Record<string, unknown>;
 }
 

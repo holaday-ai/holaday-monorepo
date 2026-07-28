@@ -184,12 +184,17 @@ describe('quoteCloneVideo — Wan Animate character swap', () => {
 });
 
 describe('quoteIpVideo — IP 真人换口型 B 架构 (Phase 3)', () => {
-  it('videoCny ≈ 1 clip fal $0.20 × 7.3 (字符费可忽略),floor ¥1', () => {
+  it('按约 5 字/秒估算 Sync Lipsync 2.0 的时长成本', () => {
     const q = quoteIpVideo('大家好这是一段不太长的口播文案。');
-    expect(q.videoCny).toBe(Math.max(1, Math.ceil((0.2 + (q.chars / 10000) * 0.13) * 7.3))); // ≈ ¥2
+    const estimatedSeconds = Math.max(1, Math.ceil(q.chars / 5));
+    expect(q.videoCny).toBe(
+      Math.max(1, Math.ceil((estimatedSeconds * 0.05 + (q.chars / 10000) * 0.13) * 7.3)),
+    );
     expect(q.videoCny).toBeGreaterThanOrEqual(1);
     expect(q.maybeTooLong).toBe(false);
     expect(q.message).toContain('IP人物视频');
+    expect(q.message).toContain('Sync Lipsync 2.0');
+    expect(q.message).toContain('预估');
     expect(q.message).toContain('已授权的声音 + 出镜底版');
     expect(q.message).not.toContain('你本人的声音');
     expect(q.message).not.toContain('图片版');

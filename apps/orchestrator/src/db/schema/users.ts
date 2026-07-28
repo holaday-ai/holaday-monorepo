@@ -55,7 +55,7 @@ export const users = mysqlTable(
      * - `qwenVoiceId`: voice_id from Qwen3-TTS-VC enrollment
      *   (DashScope-intl), reused on every synthesis call.
      * - `baseVideoFileId`: task_files.external_id of the user's base
-     *   on-camera video (kind='input') — the LatentSync lip-sync base.
+     *   on-camera video (kind='input') — the IP lip-sync base.
      *   Soft reference (no FK) so it stays nullable and decoupled from
      *   task_files retention.
      */
