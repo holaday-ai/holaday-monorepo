@@ -181,12 +181,33 @@ export interface CloneVideoQuote {
   readonly message: string;
 }
 
-export function quoteCloneVideo(durationSeconds: number, mode: WanAnimateMixMode): CloneVideoQuote {
+export interface CloneVideoQuoteOptions {
+  readonly hasAudibleAudio: boolean;
+  readonly lipSyncModel: IpLipSyncModel;
+}
+
+export function quoteCloneVideo(
+  durationSeconds: number,
+  mode: WanAnimateMixMode,
+  options: CloneVideoQuoteOptions,
+): CloneVideoQuote {
   const safeDuration = Math.min(30, Math.max(2, durationSeconds));
-  const videoCny = Math.max(1, Math.ceil(safeDuration * CLONE_USD_PER_SEC[mode] * USD_TO_CNY));
+  const lipSyncUsdPerSecond = options.hasAudibleAudio
+    ? FAL_USD_PER_SECOND[options.lipSyncModel]
+    : 0;
+  const videoCny = Math.max(
+    1,
+    Math.ceil(
+      safeDuration * (CLONE_USD_PER_SEC[mode] + lipSyncUsdPerSecond) * USD_TO_CNY,
+    ),
+  );
   const label = mode === 'wan-pro' ? 'Pro' : 'Standard';
+  const audioNote = options.hasAudibleAudio
+    ? `检测到可听声音，报价已包含 ${options.lipSyncModel.endsWith('/v3') ? 'Sync Lipsync 3.0' : 'Sync Lipsync 2.0'} 口型同步。`
+    : '未检测到可听声音，不追加口型同步成本。';
   const message =
     `将用 Wan Animate 2.2 ${label} 把主角照片替换进参考视频，按参考视频约 ${safeDuration.toFixed(1)} 秒估算费用约 ¥${videoCny}。\n` +
+    `${audioNote}\n` +
     `最终按成功输出的实际输出时长计费；失败不计费。点「确认制作」开始；不需要可「取消」。`;
   return { durationSeconds: safeDuration, videoCny, message };
 }
@@ -194,13 +215,20 @@ export function quoteCloneVideo(durationSeconds: number, mode: WanAnimateMixMode
 // ---------------------------------------------------------------------------
 // IP 人物 真人换口型 报价 (Phase 2 第三期, B 架构单 clip 口播).
 // ---------------------------------------------------------------------------
-// Sync Lipsync 2.0 按输出时长计费($3/min = $0.05/s),任务创建阶段
-// 尚未合成真实音轨，因此按 Qwen 实测约 5 字/秒保守预估。
-// TODO(pricing): fal $3/min、Qwen ~$0.13/万字、汇率 7.3 为硬编码快照,需手动同步:
+// Sync Lipsync 按输出时长计费，任务创建阶段尚未合成真实音轨，
+// 因此按 Qwen 实测约 5 字/秒保守预估。
+// TODO(pricing): fal 单价、Qwen $0.115/万字、汇率 7.3 为硬编码快照,需手动同步:
 //   https://fal.ai/models/fal-ai/sync-lipsync/v2
+//   https://fal.ai/models/fal-ai/sync-lipsync/v3
 //   阿里 Model Studio qwen-tts 计费(按字符)。
-const FAL_USD_PER_SECOND = 0.05;
-const QWEN_USD_PER_10K_CHARS = 0.13;
+export type IpLipSyncModel =
+  | 'fal-ai/sync-lipsync/v2'
+  | 'fal-ai/sync-lipsync/v3';
+const FAL_USD_PER_SECOND: Record<IpLipSyncModel, number> = {
+  'fal-ai/sync-lipsync/v2': 3 / 60,
+  'fal-ai/sync-lipsync/v3': 8 / 60,
+};
+const QWEN_USD_PER_10K_CHARS = 0.115;
 const IP_ESTIMATED_CHARS_PER_SECOND = 5;
 // B 架构 ~40s 对应的中文字数粗界(~4 字/秒 → ~160 字),超则提示可能 >40s。
 const IP_CHAR_WARN = 180;
@@ -213,15 +241,22 @@ export interface IpVideoQuote {
 }
 
 /** IP 口播报价 — videoCny = (预估时长×fal 秒价 + 字符×Qwen) × 汇率. */
-export function quoteIpVideo(copyText: string): IpVideoQuote {
+export function quoteIpVideo(
+  copyText: string,
+  model: IpLipSyncModel = 'fal-ai/sync-lipsync/v3',
+): IpVideoQuote {
   const chars = copyText.trim().length;
   const estimatedSeconds = Math.max(1, Math.ceil(chars / IP_ESTIMATED_CHARS_PER_SECOND));
   const usd =
-    estimatedSeconds * FAL_USD_PER_SECOND + (chars / 10_000) * QWEN_USD_PER_10K_CHARS;
+    estimatedSeconds * FAL_USD_PER_SECOND[model] +
+    (chars / 10_000) * QWEN_USD_PER_10K_CHARS;
   const videoCny = Math.max(1, Math.ceil(usd * USD_TO_CNY));
   const maybeTooLong = chars > IP_CHAR_WARN;
+  const modelLabel = model.endsWith('/v3')
+    ? 'Sync Lipsync 3.0'
+    : 'Sync Lipsync 2.0';
   const message =
-    `将使用已授权的声音 + 出镜底版，通过 Sync Lipsync 2.0 生成 IP人物视频，` +
+    `将使用已授权的声音 + 出镜底版，通过 ${modelLabel} 生成 IP人物视频，` +
     `按约 ${estimatedSeconds} 秒口播预估费用 ¥${videoCny}（单条 ≤40 秒）。\n` +
     (maybeTooLong
       ? `⚠️ 文案约 ${chars} 字,可能超过 40 秒上限;过长会被拒,请适当截短。\n`

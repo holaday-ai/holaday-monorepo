@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { probeCloneReferenceDurationSeconds } from './video-clone-reference.js';
+import {
+  probeCloneReferenceDurationSeconds,
+  probeCloneReferenceQuoteFacts,
+} from './video-clone-reference.js';
 
 describe('probeCloneReferenceDurationSeconds', () => {
   it('uses server-probed media duration for pricing', async () => {
@@ -17,5 +20,41 @@ describe('probeCloneReferenceDurationSeconds', () => {
     await expect(
       probeCloneReferenceDurationSeconds('https://storage.example/long.mp4', async () => 30_100),
     ).rejects.toThrow(/2.*30/);
+  });
+});
+
+describe('probeCloneReferenceQuoteFacts', () => {
+  it('returns the measured duration and audible-audio fact used by the quote', async () => {
+    const probe = vi.fn(async () => ({
+      durationMs: 8_240,
+      hasVideo: true,
+      hasAudio: true,
+      frozenRatio: 0.1,
+      audioMeanVolumeDb: -21,
+      audioMaxVolumeDb: -7,
+    }));
+
+    await expect(
+      probeCloneReferenceQuoteFacts('https://storage.example/reference.mp4', probe),
+    ).resolves.toEqual({
+      durationSeconds: 8.2,
+      hasAudibleAudio: true,
+    });
+  });
+
+  it('does not bill lip-sync for a silent audio track', async () => {
+    await expect(
+      probeCloneReferenceQuoteFacts('https://storage.example/reference.mp4', async () => ({
+        durationMs: 8_240,
+        hasVideo: true,
+        hasAudio: true,
+        frozenRatio: 0.1,
+        audioMeanVolumeDb: -80,
+        audioMaxVolumeDb: -60,
+      })),
+    ).resolves.toEqual({
+      durationSeconds: 8.2,
+      hasAudibleAudio: false,
+    });
   });
 });

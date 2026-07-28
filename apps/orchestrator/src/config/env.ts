@@ -112,12 +112,16 @@ const schema = z.object({
    */
   WANXIANG_I2V_MODEL: z.string().default('wan2.2-i2v-flash'),
   HAPPYHORSE_I2V_MODEL: z.string().default('happyhorse-1.0-i2v'),
-  FAL_LIPSYNC_MODEL: z.string().default('fal-ai/sync-lipsync/v2'),
+  FAL_LIPSYNC_MODEL: z
+    .literal('fal-ai/sync-lipsync/v3')
+    .default('fal-ai/sync-lipsync/v3'),
   /**
    * Clone-video-only lip-sync model. Kept separate from the IP-person lane
    * because the two workflows have different duration and identity needs.
    */
-  FAL_CLONE_LIPSYNC_MODEL: z.string().default('fal-ai/sync-lipsync/v3'),
+  FAL_CLONE_LIPSYNC_MODEL: z
+    .enum(['fal-ai/sync-lipsync/v2', 'fal-ai/sync-lipsync/v3'])
+    .default('fal-ai/sync-lipsync/v3'),
   QWEN_TTS_VC_MODEL: z.string().default('qwen3-tts-vc-2026-01-22'),
   /**
    * Video-creation lane gate. Default OFF — video_creation intents fall

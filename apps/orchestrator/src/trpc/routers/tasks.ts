@@ -96,13 +96,14 @@ import {
 import { injectResolvedUrl, resolveIntentUrl } from '../../agent/url-resolver.js';
 import type { VideoScript } from '../../agent/video/types.js';
 import { VIDEO_CREATION_ALLOWLIST } from '../../agent/video/video-access.js';
-import { probeCloneReferenceDurationSeconds } from '../../agent/video/video-clone-reference.js';
+import { probeCloneReferenceQuoteFacts } from '../../agent/video/video-clone-reference.js';
 import {
   claimVideoConfirmAfterVerifierPreflight,
   deriveVideoType,
   mapVideoFailureReason,
   videoQualityFailureOutcome,
   videoQualityVerificationMetadata,
+  type VideoAudioVerificationCoverage,
 } from '../../agent/video/video-confirm-meta.js';
 import {
   decideVideoGate,
@@ -1721,7 +1722,7 @@ export const tasksRouter = router({
           }
           const [imageReachable, videoReachable] = await Promise.all([
             fileService.signedReadUrl(vOpts.petImageFileId, userRow.id, 60),
-            fileService.signedReadUrl(vOpts.referenceVideoFileId, userRow.id, 60),
+            fileService.signedReadUrl(vOpts.referenceVideoFileId, userRow.id, 300),
           ]);
           if (!imageReachable || !videoReachable) {
             throw new TRPCError({
@@ -1729,9 +1730,9 @@ export const tasksRouter = router({
               message: '主角照片或参考视频不可用，请重新上传。',
             });
           }
-          let measuredDurationSeconds: number;
+          let quoteFacts: Awaited<ReturnType<typeof probeCloneReferenceQuoteFacts>>;
           try {
-            measuredDurationSeconds = await probeCloneReferenceDurationSeconds(videoReachable);
+            quoteFacts = await probeCloneReferenceQuoteFacts(videoReachable);
           } catch {
             throw new TRPCError({
               code: 'BAD_REQUEST',
@@ -1739,7 +1740,10 @@ export const tasksRouter = router({
             });
           }
           const cloneMode: WanAnimateMixMode = vOpts.cloneMode ?? 'wan-std';
-          const cloneQuote = quoteCloneVideo(measuredDurationSeconds, cloneMode);
+          const cloneQuote = quoteCloneVideo(quoteFacts.durationSeconds, cloneMode, {
+            hasAudibleAudio: quoteFacts.hasAudibleAudio,
+            lipSyncModel: appEnv.FAL_CLONE_LIPSYNC_MODEL,
+          });
           const taskId = newExternalId('task');
           const repo = new TaskRepository(ctx.db);
           await repo.insertTask(
@@ -1756,7 +1760,8 @@ export const tasksRouter = router({
                 lane: 'video_creation_confirm',
                 petImageFileId: vOpts.petImageFileId,
                 referenceVideoFileId: vOpts.referenceVideoFileId,
-                referenceVideoDurationSeconds: measuredDurationSeconds,
+                referenceVideoDurationSeconds: quoteFacts.durationSeconds,
+                referenceVideoHasAudibleAudio: quoteFacts.hasAudibleAudio,
                 cloneMode,
                 videoOptions: vOpts,
               },
@@ -1807,7 +1812,10 @@ export const tasksRouter = router({
               message: '请先在「视频任务 → IP 人物」完成素材准备(本人授权 + 声音 + 出镜底版)。',
             });
           }
-          const ipQuote = quoteIpVideo(input.intent);
+          const ipQuote = quoteIpVideo(
+            input.intent,
+            appEnv.FAL_LIPSYNC_MODEL,
+          );
           const taskId = newExternalId('task');
           const repo = new TaskRepository(ctx.db);
           await repo.insertTask(
@@ -6896,6 +6904,10 @@ export const tasksRouter = router({
         try {
           let summary: string;
           let audioEngine: 'qwen' | 'gemini' | 'mixed' | undefined;
+          let audioCoverage: VideoAudioVerificationCoverage = {
+            audibleAudio: 'not_verified',
+            audiovisualSync: 'not_applicable',
+          };
           if (isClone) {
             const { runCloneVideoCreation } = await import('../../agent/video/video-clone.js');
             const petImageFileId = meta.petImageFileId;
@@ -6915,7 +6927,7 @@ export const tasksRouter = router({
               taskInternalId,
               userInternalId,
             );
-            await runCloneVideoCreation(
+            const result = await runCloneVideoCreation(
               {
                 imageUrl,
                 referenceVideoUrl,
@@ -6946,6 +6958,12 @@ export const tasksRouter = router({
                 verifyFinalVideo,
               },
             );
+            if (result.audibleAudioVerified) {
+              audioCoverage = {
+                audibleAudio: 'verified',
+                audiovisualSync: 'not_verified',
+              };
+            }
             summary = '复刻视频已生成。';
           } else if (isPet) {
             // 宠物 i2v: fileId → presigned GET → i2v 单图 → pad+水印+静默 → store.
@@ -7083,6 +7101,10 @@ export const tasksRouter = router({
                 verifyFinalVideo,
               },
             );
+            audioCoverage = {
+              audibleAudio: 'verified',
+              audiovisualSync: 'not_verified',
+            };
             summary = `真人换口型视频已生成（约 ${Math.round(result.totalDurationMs / 1000)} 秒）。`;
           } else {
             if (!script) {
@@ -7129,7 +7151,7 @@ export const tasksRouter = router({
               visualMode,
               videoType: deriveVideoType({ isPet, isIp, tab: vOpts.tab }),
               ...(audioEngine ? { audioEngine } : {}),
-              ...videoQualityVerificationMetadata(),
+              ...videoQualityVerificationMetadata(new Date(), audioCoverage),
               ...(finalAtt ? { attachments: [finalAtt] } : {}),
             },
           });

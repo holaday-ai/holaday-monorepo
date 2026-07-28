@@ -38,14 +38,22 @@ describe('clone video model contract', () => {
 });
 
 describe('IP person video estimate', () => {
-  it('mirrors the Sync Lipsync 2.0 per-second quote instead of the old flat clip price', () => {
+  it('mirrors the default Sync Lipsync 3.0 per-second quote instead of the old flat clip price', () => {
     const estimate = estimateIpVideo('字'.repeat(43));
 
     expect(estimate).toEqual({
-      videoCny: Math.ceil((9 * 0.05 + (43 / 10_000) * 0.13) * 7.3),
+      videoCny: Math.ceil((9 * (8 / 60) + (43 / 10_000) * 0.115) * 7.3),
       chars: 43,
       maybeTooLong: false,
     });
+  });
+
+  it('locks the Qwen character-price snapshot independently of currency rounding', () => {
+    const estimate = estimateIpVideo('字'.repeat(100_000));
+
+    expect(estimate.videoCny).toBe(
+      Math.ceil((20_000 * (8 / 60) + (100_000 / 10_000) * 0.115) * 7.3),
+    );
   });
 });
 

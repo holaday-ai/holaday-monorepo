@@ -209,9 +209,15 @@ describe('quotePetI2v — 宠物 i2v 报价 (Phase 2 第二期, 原生 RMB/秒)'
 });
 
 describe('quoteCloneVideo — Wan Animate character swap', () => {
-  it('uses the official Singapore per-second prices and identifies the selected service mode', () => {
-    const standard = quoteCloneVideo(8.2, 'wan-std');
-    const professional = quoteCloneVideo(8.2, 'wan-pro');
+  it('uses only the Wan price for a silent reference video', () => {
+    const standard = quoteCloneVideo(8.2, 'wan-std', {
+      hasAudibleAudio: false,
+      lipSyncModel: 'fal-ai/sync-lipsync/v3',
+    });
+    const professional = quoteCloneVideo(8.2, 'wan-pro', {
+      hasAudibleAudio: false,
+      lipSyncModel: 'fal-ai/sync-lipsync/v3',
+    });
 
     expect(standard.durationSeconds).toBe(8.2);
     expect(standard.videoCny).toBe(Math.ceil(8.2 * 0.18 * 7.3));
@@ -220,24 +226,77 @@ describe('quoteCloneVideo — Wan Animate character swap', () => {
     expect(standard.message).toContain('Standard');
     expect(professional.message).toContain('Pro');
     expect(standard.message).toContain('实际输出时长');
+    expect(standard.message).toContain('未检测到可听声音');
+  });
+
+  it('includes the selected Fal lip-sync price for an audible reference video', () => {
+    const v2 = quoteCloneVideo(8.2, 'wan-std', {
+      hasAudibleAudio: true,
+      lipSyncModel: 'fal-ai/sync-lipsync/v2',
+    });
+    const v3 = quoteCloneVideo(8.2, 'wan-std', {
+      hasAudibleAudio: true,
+      lipSyncModel: 'fal-ai/sync-lipsync/v3',
+    });
+
+    expect(v2.videoCny).toBe(Math.ceil(8.2 * (0.18 + 3 / 60) * 7.3));
+    expect(v3.videoCny).toBe(Math.ceil(8.2 * (0.18 + 8 / 60) * 7.3));
+    expect(v3.videoCny).toBeGreaterThan(v2.videoCny);
+    expect(v2.message).toContain('Sync Lipsync 2.0');
+    expect(v3.message).toContain('Sync Lipsync 3.0');
   });
 });
 
 describe('quoteIpVideo — IP 真人换口型 B 架构 (Phase 3)', () => {
-  it('按约 5 字/秒估算 Sync Lipsync 2.0 的时长成本', () => {
+  it('按约 5 字/秒估算默认 Sync Lipsync 3.0 的时长成本', () => {
     const q = quoteIpVideo('大家好这是一段不太长的口播文案。');
     const estimatedSeconds = Math.max(1, Math.ceil(q.chars / 5));
     expect(q.videoCny).toBe(
-      Math.max(1, Math.ceil((estimatedSeconds * 0.05 + (q.chars / 10000) * 0.13) * 7.3)),
+      Math.max(
+        1,
+        Math.ceil(
+          (estimatedSeconds * (8 / 60) + (q.chars / 10000) * 0.115) *
+            7.3,
+        ),
+      ),
     );
     expect(q.videoCny).toBeGreaterThanOrEqual(1);
     expect(q.maybeTooLong).toBe(false);
     expect(q.message).toContain('IP人物视频');
-    expect(q.message).toContain('Sync Lipsync 2.0');
+    expect(q.message).toContain('Sync Lipsync 3.0');
     expect(q.message).toContain('预估');
     expect(q.message).toContain('已授权的声音 + 出镜底版');
     expect(q.message).not.toContain('你本人的声音');
     expect(q.message).not.toContain('图片版');
+  });
+
+  it('keeps the quote aligned when an environment explicitly selects v2', () => {
+    const q = quoteIpVideo(
+      '字'.repeat(100_000),
+      'fal-ai/sync-lipsync/v2',
+    );
+    const estimatedSeconds = Math.max(1, Math.ceil(q.chars / 5));
+    expect(q.videoCny).toBe(
+      Math.max(
+        1,
+        Math.ceil(
+          (estimatedSeconds * (3 / 60) + (q.chars / 10000) * 0.115) *
+            7.3,
+        ),
+      ),
+    );
+    expect(q.message).toContain('Sync Lipsync 2.0');
+  });
+
+  it('locks the Qwen character-price snapshot independently of currency rounding', () => {
+    const q = quoteIpVideo('字'.repeat(100_000));
+    const estimatedSeconds = Math.ceil(q.chars / 5);
+
+    expect(q.videoCny).toBe(
+      Math.ceil(
+        (estimatedSeconds * (8 / 60) + (q.chars / 10_000) * 0.115) * 7.3,
+      ),
+    );
   });
 
   it('超长文案 → maybeTooLong + 文案里有 40 秒提示', () => {

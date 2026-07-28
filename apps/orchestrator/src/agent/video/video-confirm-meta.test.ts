@@ -60,6 +60,36 @@ describe('videoQualityVerificationMetadata', () => {
         status: 'passed',
         gateVersion: 'video-final-v3',
         verifiedAt: '2026-07-25T06:00:00.000Z',
+        coverage: {
+          playableVideo: 'verified',
+          sampledFrames: 'verified',
+          audibleAudio: 'not_verified',
+          audiovisualSync: 'not_applicable',
+        },
+      },
+    });
+  });
+
+  it('records the exact verification boundary for lip-synced deliverables', () => {
+    expect(
+      videoQualityVerificationMetadata(
+        new Date('2026-07-25T06:00:00.000Z'),
+        {
+          audibleAudio: 'verified',
+          audiovisualSync: 'not_verified',
+        },
+      ),
+    ).toEqual({
+      qualityVerification: {
+        status: 'passed',
+        gateVersion: 'video-final-v3',
+        verifiedAt: '2026-07-25T06:00:00.000Z',
+        coverage: {
+          playableVideo: 'verified',
+          sampledFrames: 'verified',
+          audibleAudio: 'verified',
+          audiovisualSync: 'not_verified',
+        },
       },
     });
   });

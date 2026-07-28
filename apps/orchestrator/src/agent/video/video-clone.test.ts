@@ -260,6 +260,7 @@ describe('runCloneVideoCreation', () => {
       fileId: 'f_video.mp4',
       downloadUrl: '/api/files/f_video.mp4/download',
       durationSeconds: 8.2,
+      audibleAudioVerified: true,
     });
   });
 
@@ -283,7 +284,7 @@ describe('runCloneVideoCreation', () => {
         audioMaxVolumeDb: null,
       });
 
-    await runCloneVideoCreation(
+    const result = await runCloneVideoCreation(
       {
         imageUrl: 'https://r2.example/subject.jpg',
         referenceVideoUrl: 'https://r2.example/reference.mp4',
@@ -300,6 +301,7 @@ describe('runCloneVideoCreation', () => {
       '/tmp/clone-video/clone-final.mp4',
       { maxBytes: 500 * 1024 * 1024 },
     );
+    expect(result.audibleAudioVerified).toBe(false);
   });
 
   it('rejects an audible clone before the paid Wan job when lip-sync is not configured', async () => {

@@ -11,13 +11,35 @@ export type VideoType = 'normal' | 'pet' | 'ip_person';
 
 export const VIDEO_QUALITY_GATE_VERSION = 'video-final-v3';
 
+export interface VideoQualityVerificationCoverage {
+  playableVideo: 'verified';
+  sampledFrames: 'verified';
+  audibleAudio: 'verified' | 'not_verified';
+  audiovisualSync: 'not_verified' | 'not_applicable';
+}
+
+export type VideoAudioVerificationCoverage =
+  | {
+      audibleAudio: 'verified';
+      audiovisualSync: 'not_verified';
+    }
+  | {
+      audibleAudio: 'not_verified';
+      audiovisualSync: 'not_applicable';
+    };
+
 export function videoQualityVerificationMetadata(
   verifiedAt = new Date(),
+  audioCoverage: VideoAudioVerificationCoverage = {
+    audibleAudio: 'not_verified',
+    audiovisualSync: 'not_applicable',
+  },
 ): {
   qualityVerification: {
     status: 'passed';
     gateVersion: typeof VIDEO_QUALITY_GATE_VERSION;
     verifiedAt: string;
+    coverage: VideoQualityVerificationCoverage;
   };
 } {
   return {
@@ -25,6 +47,11 @@ export function videoQualityVerificationMetadata(
       status: 'passed',
       gateVersion: VIDEO_QUALITY_GATE_VERSION,
       verifiedAt: verifiedAt.toISOString(),
+      coverage: {
+        playableVideo: 'verified',
+        sampledFrames: 'verified',
+        ...audioCoverage,
+      },
     },
   };
 }

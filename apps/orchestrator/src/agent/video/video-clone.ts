@@ -70,6 +70,7 @@ export interface CloneVideoResult {
   readonly fileId: string;
   readonly downloadUrl: string;
   readonly durationSeconds?: number;
+  readonly audibleAudioVerified: boolean;
 }
 
 function realFns(): CloneVideoFns {
@@ -410,5 +411,6 @@ export async function runCloneVideoCreation(
     fileId: stored.fileId,
     downloadUrl: `/api/files/${stored.fileId}/download`,
     durationSeconds: durationMs / 1000,
+    audibleAudioVerified: sourceHasAudibleAudio,
   };
 }

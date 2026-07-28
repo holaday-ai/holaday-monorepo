@@ -98,12 +98,12 @@ export function estimatePetCny(
 
 /**
  * IP 真人换口型预计价。镜像后端 quoteIpVideo:
- * Sync Lipsync 2.0 $3/min,按约 5 字/秒估算时长，再加 Qwen 字符费。
+ * 默认 Sync Lipsync 3.0 $8/min,按约 5 字/秒估算时长，再加 Qwen 字符费。
  * maybeTooLong: 文案 >180 字可能超 40s 上限。
  */
 export function estimateIpVideo(copyText: string): { videoCny: number; chars: number; maybeTooLong: boolean } {
   const chars = copyText.trim().length;
   const estimatedSeconds = Math.max(1, Math.ceil(chars / 5));
-  const usd = estimatedSeconds * 0.05 + (chars / 10_000) * 0.13;
+  const usd = estimatedSeconds * (8 / 60) + (chars / 10_000) * 0.115;
   return { videoCny: Math.max(1, Math.ceil(usd * 7.3)), chars, maybeTooLong: chars > 180 };
 }

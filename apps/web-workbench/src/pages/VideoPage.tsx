@@ -2365,14 +2365,29 @@ function CreativeHistory({
                     ) : null}
                     {mode === 'video' ? (
                       row.qualityVerification?.status === 'passed' ? (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-[#15A371]/10 px-3 py-1 text-[11px] font-medium text-[#0C7A55]">
-                          <CheckCircle2 className="h-3 w-3" aria-hidden />
-                          已通过成片质检
-                        </span>
+                        <>
+                          <span
+                            className="inline-flex items-center gap-1 rounded-full bg-[#15A371]/10 px-3 py-1 text-[11px] font-medium text-[#0C7A55]"
+                            title="已检查视频可播放与抽样画面质量"
+                          >
+                            <CheckCircle2 className="h-3 w-3" aria-hidden />
+                            基础成片检查通过
+                          </span>
+                          {row.qualityVerification.coverage?.audibleAudio === 'verified' &&
+                          row.qualityVerification.coverage.audiovisualSync === 'not_verified' ? (
+                            <span
+                              className="inline-flex items-center gap-1 rounded-full bg-[#FFC910]/15 px-3 py-1 text-[11px] font-medium text-[#806500]"
+                              title="当前自动检查确认了可听声音，但尚未独立验证声音与嘴形同步"
+                            >
+                              <Clock className="h-3 w-3" aria-hidden />
+                              音画同步未验证
+                            </span>
+                          ) : null}
+                        </>
                       ) : (
                         <span className="inline-flex items-center gap-1 rounded-full bg-[#F2F3F5] px-3 py-1 text-[11px] font-medium text-[#737B8C]">
                           <Clock className="h-3 w-3" aria-hidden />
-                          未记录当前质检
+                          未记录当前基础检查
                         </span>
                       )
                     ) : null}
@@ -3111,7 +3126,7 @@ export function PetVideoForm({
       <Section title="价格预览" className={CREATIVE_PRICE_SECTION_CLASS}>
         <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2">
           <span className="text-2xl font-semibold text-[#EA1F59]">
-            {estCny === null ? '上传视频后估价' : `约 ¥${estCny}`}
+            {estCny === null ? '上传视频后估价' : `约 ¥${estCny} 起`}
           </span>
           <span className="text-[13px] text-muted-foreground">
             {selectedCloneModel.name} {selectedCloneModel.version}
@@ -3119,7 +3134,8 @@ export function PetVideoForm({
           </span>
         </div>
         <p className="mt-2 text-[11px] text-muted-foreground">
-          按参考视频时长预估；供应商仅对成功输出的实际秒数计费，失败不计费。
+          此处为 Wan Animate 基础价；提交后由服务端检查参考视频声音，有声视频的确认报价会包含口型同步。
+          供应商仅对成功输出的实际秒数计费，失败不计费。
           <span className="font-medium text-[#595757]"> 确认报价后才开始生成。</span>
         </p>
       </Section>
@@ -3645,7 +3661,7 @@ function IpGenerateForm({
           <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
             <span className="text-xl font-semibold text-[#EA1F59]">约 ¥{est.videoCny}</span>
             <span className="text-[13px] text-muted-foreground">
-              Qwen Voice + Sync Lipsync 2.0 · {IP_VIDEO_ASPECT_RATIO} · 约 {est.chars} 字
+              Qwen Voice + Sync Lipsync 3.0 · {IP_VIDEO_ASPECT_RATIO} · 约 {est.chars} 字
             </span>
           </div>
           {est.maybeTooLong && (

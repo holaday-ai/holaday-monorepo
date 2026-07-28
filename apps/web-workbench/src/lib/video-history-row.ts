@@ -50,6 +50,12 @@ export interface VideoResultMeta {
     status?: string;
     gateVersion?: string;
     verifiedAt?: string;
+    coverage?: {
+      playableVideo?: string;
+      sampledFrames?: string;
+      audibleAudio?: string;
+      audiovisualSync?: string;
+    };
   };
   attachments?: ReadonlyArray<{
     fileId?: string;
@@ -85,6 +91,12 @@ export interface VideoRow {
     status: 'passed';
     gateVersion: string;
     verifiedAt: string;
+    coverage?: {
+      playableVideo: 'verified';
+      sampledFrames: 'verified';
+      audibleAudio: 'verified' | 'not_verified';
+      audiovisualSync: 'not_verified' | 'not_applicable';
+    };
   };
 }
 
@@ -246,10 +258,29 @@ function asPassedQualityVerification(
   ) {
     return undefined;
   }
+  const audibleAudio = value.coverage?.audibleAudio;
+  const audiovisualSync = value.coverage?.audiovisualSync;
+  const hasLegalAudioCoverage =
+    (audibleAudio === 'verified' && audiovisualSync === 'not_verified') ||
+    (audibleAudio === 'not_verified' && audiovisualSync === 'not_applicable');
+  const coverage =
+    value.coverage?.playableVideo === 'verified' &&
+    value.coverage.sampledFrames === 'verified' &&
+    hasLegalAudioCoverage
+      ? {
+          playableVideo: 'verified' as const,
+          sampledFrames: 'verified' as const,
+          audibleAudio: audibleAudio as 'verified' | 'not_verified',
+          audiovisualSync: audiovisualSync as
+            | 'not_verified'
+            | 'not_applicable',
+        }
+      : undefined;
   return {
     status: 'passed',
     gateVersion: value.gateVersion,
     verifiedAt: value.verifiedAt,
+    ...(coverage ? { coverage } : {}),
   };
 }
 

@@ -312,6 +312,12 @@ describe('toVideoRow — 生成历史 only lists completed 成片 with an attach
               status: 'passed',
               gateVersion: 'video-final-v3',
               verifiedAt: '2026-07-25T06:00:00.000Z',
+              coverage: {
+                playableVideo: 'verified',
+                sampledFrames: 'verified',
+                audibleAudio: 'verified',
+                audiovisualSync: 'not_verified',
+              },
             },
           },
         },
@@ -335,8 +341,40 @@ describe('toVideoRow — 生成历史 only lists completed 成片 with an attach
     const legacy = toVideoRow(row());
 
     expect(verified?.qualityVerification?.status).toBe('passed');
+    expect(verified?.qualityVerification?.coverage).toEqual({
+      playableVideo: 'verified',
+      sampledFrames: 'verified',
+      audibleAudio: 'verified',
+      audiovisualSync: 'not_verified',
+    });
     expect(superseded?.qualityVerification).toBeUndefined();
     expect(legacy?.qualityVerification).toBeUndefined();
+  });
+
+  it('rejects contradictory audio coverage instead of showing an AV-sync warning', () => {
+    const contradictory = toVideoRow(
+      row({
+        result: {
+          metadata: {
+            lane: 'video_creation',
+            attachments: [ATT],
+            qualityVerification: {
+              status: 'passed',
+              gateVersion: 'video-final-v3',
+              verifiedAt: '2026-07-25T06:00:00.000Z',
+              coverage: {
+                playableVideo: 'verified',
+                sampledFrames: 'verified',
+                audibleAudio: 'not_verified',
+                audiovisualSync: 'not_verified',
+              },
+            },
+          },
+        },
+      }),
+    );
+
+    expect(contradictory?.qualityVerification?.coverage).toBeUndefined();
   });
 
   it('normalizes backend /files download URLs to the frontend /api/files path', () => {
