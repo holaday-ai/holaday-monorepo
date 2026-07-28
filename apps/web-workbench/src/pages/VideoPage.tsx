@@ -3293,6 +3293,7 @@ interface OnboardingStatus {
   hasVoice: boolean;
   hasBaseVideo: boolean;
   authorized: boolean;
+  baseVideoIssue: 'unavailable' | null;
 }
 
 export function IpOnboardingWizard({
@@ -3315,11 +3316,21 @@ export function IpOnboardingWizard({
     try {
       const s = await trpc.videoOnboarding.status.query();
       if (!mountedRef.current) return;
-      setStatus({ hasVoice: s.hasVoice, hasBaseVideo: s.hasBaseVideo, authorized: s.authorized });
+      setStatus({
+        hasVoice: s.hasVoice,
+        hasBaseVideo: s.hasBaseVideo,
+        authorized: s.authorized,
+        baseVideoIssue: s.baseVideoIssue,
+      });
     } catch {
       if (!mountedRef.current) return;
       setLoadError(true);
-      setStatus({ hasVoice: false, hasBaseVideo: false, authorized: false });
+      setStatus({
+        hasVoice: false,
+        hasBaseVideo: false,
+        authorized: false,
+        baseVideoIssue: null,
+      });
     }
   }, []);
 
@@ -3489,16 +3500,25 @@ export function IpOnboardingWizard({
                   </Button>
                 </div>
               ) : (
-                <Button type="button" size="sm" onClick={() => videoRef.current?.click()} disabled={uploadingVideo}>
-                  {uploadingVideo ? (
-                    <>
-                      <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-                      上传中…
-                    </>
-                  ) : (
-                    '上传出镜视频'
-                  )}
-                </Button>
+                <div className="space-y-2">
+                  {status.baseVideoIssue === 'unavailable' ? (
+                    <p className="text-[12px] font-medium text-[#B45309]">
+                      原出镜底版当前不可用，请稍后重试；若持续出现，请重新上传。
+                    </p>
+                  ) : null}
+                  <Button type="button" size="sm" onClick={() => videoRef.current?.click()} disabled={uploadingVideo}>
+                    {uploadingVideo ? (
+                      <>
+                        <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                        上传中…
+                      </>
+                    ) : status.baseVideoIssue === 'unavailable' ? (
+                      '重新上传出镜视频'
+                    ) : (
+                      '上传出镜视频'
+                    )}
+                  </Button>
+                </div>
               )}
               <p className="text-[11px] leading-relaxed text-muted-foreground">
                 MP4 / MOV,10-60 秒竖屏口播。<span className="font-medium text-[#595757]">为保证人物视频质量:正脸面对镜头、光线均匀打亮脸部、画面只有你一人、对焦清晰、安静环境、嘴部不被遮挡。</span>侧脸/逆光/模糊会明显变差。

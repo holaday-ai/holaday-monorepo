@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   decideVideoGate,
   parseVideoConfirm,
+  preflightIpVideoAssets,
   quoteCloneVideo,
   quoteIpVideo,
   quotePetI2v,
@@ -52,6 +53,45 @@ describe('decideVideoGate — Veo burns ONLY on generate_*', () => {
   it('video/image with claim → generate', () => {
     expect(decideVideoGate('video', true)).toBe('generate_video');
     expect(decideVideoGate('image', true)).toBe('generate_image');
+  });
+});
+
+describe('preflightIpVideoAssets — validate durable inputs before quote consumption', () => {
+  it('blocks an unreadable base video with an actionable re-upload message', async () => {
+    const signBaseVideo = vi.fn(async () => null);
+
+    await expect(
+      preflightIpVideoAssets(
+        {
+          voiceId: 'voice_ready',
+          baseVideoFileId: 'file_stale',
+          authorized: true,
+        },
+        signBaseVideo,
+      ),
+    ).resolves.toEqual({
+      baseVideoUrl: null,
+      issue: '出镜底版当前不可用，请稍后重试；若持续出现，请重新上传。',
+    });
+    expect(signBaseVideo).toHaveBeenCalledWith('file_stale');
+  });
+
+  it('returns the signed base-video URL when all durable inputs are ready', async () => {
+    const signBaseVideo = vi.fn(async () => 'https://r2.example/base.mp4');
+
+    await expect(
+      preflightIpVideoAssets(
+        {
+          voiceId: 'voice_ready',
+          baseVideoFileId: 'file_ready',
+          authorized: true,
+        },
+        signBaseVideo,
+      ),
+    ).resolves.toEqual({
+      baseVideoUrl: 'https://r2.example/base.mp4',
+      issue: null,
+    });
   });
 });
 

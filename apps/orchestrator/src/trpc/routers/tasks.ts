@@ -107,6 +107,7 @@ import {
 import {
   decideVideoGate,
   parseVideoConfirm,
+  preflightIpVideoAssets,
   quoteCloneVideo,
   quoteIpVideo,
   quoteVideo,
@@ -6659,6 +6660,31 @@ export const tasksRouter = router({
       // 宠物 i2v / IP 换口型无脚本;普通文生必须有脚本(报价时存的).
       if (!isPet && !isIp && !script)
         throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '报价脚本丢失' });
+      const fileServiceForConfirm = new FileService(ctx.db, ctx.logger);
+      const ipPreflight = isIp
+        ? await preflightIpVideoAssets(
+            {
+              voiceId: userRow.qwenVoiceId,
+              baseVideoFileId: userRow.baseVideoFileId,
+              authorized: !!userRow.videoSelfUseAuthorizedAt,
+            },
+            async (fileId) => {
+              const retained = await fileServiceForConfirm.retainInputForUser(
+                fileId,
+                userRow.id,
+              );
+              return retained
+                ? fileServiceForConfirm.signedReadUrl(fileId, userRow.id)
+                : null;
+            },
+          )
+        : { baseVideoUrl: null, issue: null };
+      if (ipPreflight.issue) {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: ipPreflight.issue,
+        });
+      }
       const preflight = await claimVideoConfirmAfterVerifierPreflight(
         {
           choice,
@@ -6950,8 +6976,8 @@ export const tasksRouter = router({
             if (!ipVoiceId || !ipBaseFileId || !ipAuthorized) {
               throw new Error('IP 素材或授权缺失(可能已被清除),请重新完成 onboarding');
             }
-            const baseVideoUrl = await fileService.signedReadUrl(ipBaseFileId, userInternalId);
-            if (!baseVideoUrl) throw new Error('出镜底版不可用(无法生成访问链接)');
+            const baseVideoUrl = ipPreflight.baseVideoUrl;
+            if (!baseVideoUrl) throw new Error('出镜底版不可用(确认前预检未通过)');
             // IP final outputs stay user-visible. Cloned audio uses a hidden
             // short-TTL row so an Orchestrator crash cannot leave it behind as
             // an ordinary deliverable; normal completion still deletes it.

@@ -41,8 +41,9 @@ export const FILES_ROOT = process.env.HOLADAY_FILES_ROOT ?? '/tmp/holaday-files'
  *
  * Read per-call (not a boot-time const) so it is unit-testable via `vi.stubEnv`
  * without reloading the module; prod sets it once via .env so the per-call cost
- * is irrelevant. ONLY `output` files use this — `input` uploads and
- * presigned-pending rows keep their own separate (24h) TTLs, unchanged.
+ * is irrelevant. ONLY `output` files use this — direct media uploads keep
+ * their own 24h lifecycle unless a product flow explicitly retains one as a
+ * durable user asset.
  */
 export const DEFAULT_OUTPUT_FILE_TTL_DAYS = 30;
 export const TEMPORARY_OUTPUT_TTL_MS = 15 * 60 * 1000;
@@ -617,8 +618,41 @@ export class FileService {
   }
 
   /**
-   * Mint a short-lived public GET URL for an uploaded file (ownership +
-   * expiry checked). Phase 2 第二期: the pet i2v lane needs a PUBLIC img_url
+   * Check whether an uploaded file is still a real, readable object for this
+   * user. A non-null DB id alone is not readiness: cleanup may already have
+   * expired the row or removed the backing object.
+   */
+  async isReadableForUser(fileExternalId: string, userIdInternal: number): Promise<boolean> {
+    return (await this.readableRowForUser(fileExternalId, userIdInternal)) !== null;
+  }
+
+  /**
+   * Promote a readable input to a durable user asset. Ordinary direct media
+   * uploads retain their 24h cleanup window; onboarding calls this only after
+   * the user designates a file as their reusable IP-video base.
+   */
+  async retainInputForUser(fileExternalId: string, userIdInternal: number): Promise<boolean> {
+    const row = await this.readableRowForUser(fileExternalId, userIdInternal);
+    if (!row || row.kind !== 'input') return false;
+    if (row.expiresAt) {
+      await this.db
+        .update(taskFiles)
+        .set({ expiresAt: null })
+        .where(
+          and(
+            eq(taskFiles.externalId, fileExternalId),
+            eq(taskFiles.userId, userIdInternal),
+            eq(taskFiles.status, 'active'),
+          ),
+        );
+    }
+    return true;
+  }
+
+  /**
+   * Mint a short-lived public GET URL for an uploaded file (ownership,
+   * active status, expiry and backing-object existence checked). Phase 2
+   * 第二期: the pet i2v lane needs a PUBLIC img_url
    * the DashScope model can fetch — R2 presigned GET does that. Returns
    * null when missing / not-owned / expired, or when the provider can't
    * sign (LocalStorageProvider → no signed url in dev). `userIdInternal`
@@ -629,14 +663,25 @@ export class FileService {
     userIdInternal: number,
     expiresInSeconds = 3600,
   ): Promise<string | null> {
+    const row = await this.readableRowForUser(fileExternalId, userIdInternal);
+    if (!row) return null;
+    return this.storage.getSignedUrl(row.storagePath, { expiresInSeconds });
+  }
+
+  private async readableRowForUser(
+    fileExternalId: string,
+    userIdInternal: number,
+  ): Promise<TaskFile | null> {
     const [row] = await this.db
       .select()
       .from(taskFiles)
       .where(eq(taskFiles.externalId, fileExternalId))
       .limit(1);
     if (!row || row.userId !== userIdInternal) return null;
+    if (row.status !== 'active') return null;
     if (row.expiresAt && row.expiresAt < new Date()) return null;
-    return this.storage.getSignedUrl(row.storagePath, { expiresInSeconds });
+    const meta = await this.storage.stat(row.storagePath);
+    return meta ? row : null;
   }
 
   /**
@@ -667,7 +712,7 @@ export class FileService {
    */
   async loadForUser(
     fileExternalId: string,
-    userExternalId: string,
+    userIdInternal: number,
   ): Promise<{ row: TaskFile; buffer: Buffer } | null> {
     const [row] = await this.db
       .select()
@@ -675,14 +720,8 @@ export class FileService {
       .where(eq(taskFiles.externalId, fileExternalId))
       .limit(1);
     if (!row) return null;
+    if (row.userId !== userIdInternal) return null;
     if (row.status !== 'active') return null;
-    // Look up the user by id since task_files stores user_id internal.
-    // The cheapest way to verify ownership without an extra lookup is
-    // to compare via the file's storage path, but that's brittle.
-    // Instead the caller passes their externalId and we fetch their
-    // internal id once — happens at the route layer; here we trust
-    // the ownership has been pre-checked.
-    void userExternalId;
     if (row.expiresAt && row.expiresAt < new Date()) return null;
     const buffer = await this.storage.get(row.storagePath);
     if (!buffer) return null;

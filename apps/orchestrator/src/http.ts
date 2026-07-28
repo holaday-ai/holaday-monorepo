@@ -774,8 +774,8 @@ export function createHttpApp(deps: HttpAppDeps) {
         res.status(401).json({ error: 'unknown user' });
         return;
       }
-      const loaded = await fileService.loadForUser(fileId, userExternalId);
-      if (!loaded || loaded.row.userId !== user.id) {
+      const loaded = await fileService.loadForUser(fileId, user.id);
+      if (!loaded) {
         res.status(404).json({ error: 'not_found' });
         return;
       }

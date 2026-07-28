@@ -59,6 +59,33 @@ export function decideVideoGate(choice: VideoChoice, claimed: boolean): VideoGat
   return choice === 'image' ? 'generate_image' : 'generate_video';
 }
 
+export async function preflightIpVideoAssets(
+  input: {
+    voiceId: string | null;
+    baseVideoFileId: string | null;
+    authorized: boolean;
+  },
+  signBaseVideo: (fileId: string) => Promise<string | null>,
+): Promise<{ baseVideoUrl: string | null; issue: string | null }> {
+  if (!input.voiceId) {
+    return { baseVideoUrl: null, issue: '声音素材已失效，请重新上传后再确认制作。' };
+  }
+  if (!input.baseVideoFileId) {
+    return { baseVideoUrl: null, issue: '请先上传出镜底版，再确认制作。' };
+  }
+  if (!input.authorized) {
+    return { baseVideoUrl: null, issue: '请先确认声音和出镜底版的使用授权。' };
+  }
+  const baseVideoUrl = await signBaseVideo(input.baseVideoFileId);
+  if (!baseVideoUrl) {
+    return {
+      baseVideoUrl: null,
+      issue: '出镜底版当前不可用，请稍后重试；若持续出现，请重新上传。',
+    };
+  }
+  return { baseVideoUrl, issue: null };
+}
+
 // 报价:硬编码的只有官方单价表 + 汇率;动态部分 = 本次真实段数 + 选定档/画质/时长。
 // TODO(pricing): 价表/汇率为硬编码快照，Google/阿里 可能调价 → 需手动同步
 //   https://ai.google.dev/gemini-api/docs/pricing (Veo 每秒价 + nano banana 图片价)。

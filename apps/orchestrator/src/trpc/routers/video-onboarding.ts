@@ -7,9 +7,9 @@
  *
  *   - enrollVoice   : 读已上传音频 buffer → base64 → Qwen enrollVoice(免费)
  *                     → 存 qwen_voice_id → **样本即弃**(delete R2 + row).
- *   - setBaseVideo  : 记下用户出镜底版的 fileId(input 文件无 TTL = 长存).
+ *   - setBaseVideo  : 校验并保留用户出镜底版，清除该 input 的临时上传 TTL.
  *   - authorize     : 写「本人授权声明」时间戳(合规闸,video-lane 硬要求).
- *   - status        : { hasVoice, hasBaseVideo, authorized } 供前端向导.
+ *   - status        : 复核底版实物后返回 onboarding 状态，不凭文件 ID 猜测就绪.
  *   - deleteAssets  : 清声纹(调 Qwen delete-voice 清云端)+ 删底版(R2)+ 清授权.
  *
  * Upload itself stays on the existing two-stage media endpoints
@@ -29,11 +29,27 @@ import { protectedProcedure, router } from '../trpc.js';
 
 const MAX_VOICE_SAMPLE_BYTES = 10 * 1024 * 1024; // Qwen enroll 上限 ≈10MB
 
-interface OnboardingUserRow {
+export interface OnboardingUserRow {
   id: number;
   qwenVoiceId: string | null;
   baseVideoFileId: string | null;
   videoSelfUseAuthorizedAt: Date | null;
+}
+
+export async function resolveOnboardingStatus(
+  u: OnboardingUserRow,
+  fileService: Pick<FileService, 'isReadableForUser'>,
+) {
+  const hasBaseVideo = u.baseVideoFileId
+    ? await fileService.isReadableForUser(u.baseVideoFileId, u.id)
+    : false;
+  return {
+    hasVoice: !!u.qwenVoiceId,
+    hasBaseVideo,
+    authorized: !!u.videoSelfUseAuthorizedAt,
+    authorizedAt: u.videoSelfUseAuthorizedAt,
+    baseVideoIssue: u.baseVideoFileId && !hasBaseVideo ? ('unavailable' as const) : null,
+  };
 }
 
 async function requireOnboardingUser(ctx: {
@@ -72,12 +88,8 @@ export const videoOnboardingRouter = router({
   /** 前端向导进度判断:三个资产各自就绪与否(不返回敏感值)。 */
   status: protectedProcedure.query(async ({ ctx }) => {
     const u = await requireOnboardingUser(ctx);
-    return {
-      hasVoice: !!u.qwenVoiceId,
-      hasBaseVideo: !!u.baseVideoFileId,
-      authorized: !!u.videoSelfUseAuthorizedAt,
-      authorizedAt: u.videoSelfUseAuthorizedAt,
-    };
+    const fileService = new FileService(ctx.db, ctx.logger);
+    return resolveOnboardingStatus(u, fileService);
   }),
 
   /** 写「本人授权声明」时间戳。幂等:已授权再点返回 alreadyAuthorized。 */
@@ -103,7 +115,7 @@ export const videoOnboardingRouter = router({
       }
       const u = await requireOnboardingUser(ctx);
       const fileService = new FileService(ctx.db, ctx.logger);
-      const loaded = await fileService.loadForUser(input.audioFileId, ctx.userId);
+      const loaded = await fileService.loadForUser(input.audioFileId, u.id);
       if (!loaded) throw new TRPCError({ code: 'NOT_FOUND', message: '找不到上传的语音样本' });
       if (loaded.buffer.byteLength > MAX_VOICE_SAMPLE_BYTES) {
         throw new TRPCError({ code: 'BAD_REQUEST', message: '语音样本过大（上限 10MB）' });
@@ -145,18 +157,22 @@ export const videoOnboardingRouter = router({
     }),
 
   /**
-   * 记下用户出镜底版的 fileId（input 文件无 TTL = 长存,不进 24h 任务产物回收）。
-   * 校验该文件归属当前用户且为视频类型。换底版:覆盖旧 fileId,删旧 R2 对象。
+   * 记下用户出镜底版的 fileId，并将这个已确认的 input 转为长期资产。
+   * 其他直接上传仍保留 24h TTL。换底版:覆盖旧 fileId,删旧 R2 对象。
    */
   setBaseVideo: protectedProcedure
     .input(z.object({ videoFileId: z.string().min(1).max(64) }))
     .mutation(async ({ ctx, input }) => {
       const u = await requireOnboardingUser(ctx);
       const fileService = new FileService(ctx.db, ctx.logger);
-      const loaded = await fileService.loadForUser(input.videoFileId, ctx.userId);
+      const loaded = await fileService.loadForUser(input.videoFileId, u.id);
       if (!loaded) throw new TRPCError({ code: 'NOT_FOUND', message: '找不到上传的出镜视频' });
       if (!loaded.row.mimetype.startsWith('video/')) {
         throw new TRPCError({ code: 'BAD_REQUEST', message: '出镜底版需为视频文件（MP4 / MOV）' });
+      }
+      const retained = await fileService.retainInputForUser(input.videoFileId, u.id);
+      if (!retained) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: '出镜底版上传未完成，请重新上传' });
       }
       const oldId = u.baseVideoFileId;
       await ctx.db.update(users).set({ baseVideoFileId: input.videoFileId }).where(eq(users.id, u.id));
