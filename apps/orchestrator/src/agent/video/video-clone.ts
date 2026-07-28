@@ -78,6 +78,7 @@ export interface CloneVideoResult {
   readonly downloadUrl: string;
   readonly durationSeconds?: number;
   readonly audibleAudioVerified: boolean;
+  readonly lipSyncProcessingCompleted: boolean;
 }
 
 function realFns(): CloneVideoFns {
@@ -438,5 +439,6 @@ export async function runCloneVideoCreation(
     downloadUrl: `/api/files/${stored.fileId}/download`,
     durationSeconds: durationMs / 1000,
     audibleAudioVerified: sourceHasAudibleAudio,
+    lipSyncProcessingCompleted: sourceHasAudibleAudio && lipSyncRequestId !== undefined,
   };
 }

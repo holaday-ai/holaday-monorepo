@@ -64,6 +64,7 @@ import {
   showImageOption,
   toImageRow,
   toVideoRow,
+  videoAudioVerificationBadge,
   type CreativeHistoryFilter,
   type VideoRow,
   type VideoType,
@@ -2271,6 +2272,9 @@ function CreativeHistory({
             });
             const artifactExpired = previewAvailability === 'expired';
             const previewUnavailable = previewAvailability === 'unavailable';
+            const audioVerificationBadge = videoAudioVerificationBadge(
+              row.qualityVerification,
+            );
             return (
             <article
               key={row.taskId}
@@ -2373,14 +2377,13 @@ function CreativeHistory({
                             <CheckCircle2 className="h-3 w-3" aria-hidden />
                             基础成片检查通过
                           </span>
-                          {row.qualityVerification.coverage?.audibleAudio === 'verified' &&
-                          row.qualityVerification.coverage.audiovisualSync === 'not_verified' ? (
+                          {audioVerificationBadge ? (
                             <span
                               className="inline-flex items-center gap-1 rounded-full bg-[#FFC910]/15 px-3 py-1 text-[11px] font-medium text-[#806500]"
-                              title="当前自动检查确认了可听声音，但尚未独立验证声音与嘴形同步"
+                              title={audioVerificationBadge.title}
                             >
                               <Clock className="h-3 w-3" aria-hidden />
-                              音画同步未验证
+                              {audioVerificationBadge.label}
                             </span>
                           ) : null}
                         </>

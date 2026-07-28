@@ -17,6 +17,7 @@ import {
   showImageOption,
   toImageRow,
   toVideoRow,
+  videoAudioVerificationBadge,
 } from './video-history-row';
 
 describe('creative history artifact availability', () => {
@@ -317,6 +318,7 @@ describe('toVideoRow — 生成历史 only lists completed 成片 with an attach
                 sampledFrames: 'verified',
                 audibleAudio: 'verified',
                 audiovisualSync: 'not_verified',
+                lipSyncProcessing: 'completed',
               },
             },
           },
@@ -346,6 +348,7 @@ describe('toVideoRow — 生成历史 only lists completed 成片 with an attach
       sampledFrames: 'verified',
       audibleAudio: 'verified',
       audiovisualSync: 'not_verified',
+      lipSyncProcessing: 'completed',
     });
     expect(superseded?.qualityVerification).toBeUndefined();
     expect(legacy?.qualityVerification).toBeUndefined();
@@ -375,6 +378,119 @@ describe('toVideoRow — 生成历史 only lists completed 成片 with an attach
     );
 
     expect(contradictory?.qualityVerification?.coverage).toBeUndefined();
+  });
+
+  it('keeps current-gate legacy rows readable without manufacturing a lip-sync process result', () => {
+    const legacyCoverage = toVideoRow(
+      row({
+        result: {
+          metadata: {
+            lane: 'video_creation',
+            attachments: [ATT],
+            qualityVerification: {
+              status: 'passed',
+              gateVersion: 'video-final-v3',
+              verifiedAt: '2026-07-25T06:00:00.000Z',
+              coverage: {
+                playableVideo: 'verified',
+                sampledFrames: 'verified',
+                audibleAudio: 'verified',
+                audiovisualSync: 'not_verified',
+              },
+            },
+          },
+        },
+      }),
+    );
+
+    expect(legacyCoverage?.qualityVerification?.coverage).toEqual({
+      playableVideo: 'verified',
+      sampledFrames: 'verified',
+      audibleAudio: 'verified',
+      audiovisualSync: 'not_verified',
+    });
+  });
+
+  it('rejects a claimed audible lip-sync result when processing is marked not applicable', () => {
+    const contradictoryProcess = toVideoRow(
+      row({
+        result: {
+          metadata: {
+            lane: 'video_creation',
+            attachments: [ATT],
+            qualityVerification: {
+              status: 'passed',
+              gateVersion: 'video-final-v3',
+              verifiedAt: '2026-07-25T06:00:00.000Z',
+              coverage: {
+                playableVideo: 'verified',
+                sampledFrames: 'verified',
+                audibleAudio: 'verified',
+                audiovisualSync: 'not_verified',
+                lipSyncProcessing: 'not_applicable',
+              },
+            },
+          },
+        },
+      }),
+    );
+
+    expect(contradictoryProcess?.qualityVerification?.coverage).toBeUndefined();
+  });
+
+  it('renders provider processing separately from independent AV-sync verification', () => {
+    const processed = toVideoRow(
+      row({
+        result: {
+          metadata: {
+            lane: 'video_creation',
+            attachments: [ATT],
+            qualityVerification: {
+              status: 'passed',
+              gateVersion: 'video-final-v3',
+              verifiedAt: '2026-07-25T06:00:00.000Z',
+              coverage: {
+                playableVideo: 'verified',
+                sampledFrames: 'verified',
+                audibleAudio: 'verified',
+                audiovisualSync: 'not_verified',
+                lipSyncProcessing: 'completed',
+              },
+            },
+          },
+        },
+      }),
+    );
+    const legacy = toVideoRow(
+      row({
+        result: {
+          metadata: {
+            lane: 'video_creation',
+            attachments: [ATT],
+            qualityVerification: {
+              status: 'passed',
+              gateVersion: 'video-final-v3',
+              verifiedAt: '2026-07-25T06:00:00.000Z',
+              coverage: {
+                playableVideo: 'verified',
+                sampledFrames: 'verified',
+                audibleAudio: 'verified',
+                audiovisualSync: 'not_verified',
+              },
+            },
+          },
+        },
+      }),
+    );
+
+    expect(videoAudioVerificationBadge(processed?.qualityVerification)).toMatchObject({
+      label: '口型已处理 · 准确度待确认',
+      title: expect.stringContaining('尚未独立验证'),
+    });
+    expect(videoAudioVerificationBadge(legacy?.qualityVerification)).toMatchObject({
+      label: '音画同步未验证',
+    });
+    expect(videoAudioVerificationBadge(undefined)).toBeNull();
   });
 
   it('normalizes backend /files download URLs to the frontend /api/files path', () => {

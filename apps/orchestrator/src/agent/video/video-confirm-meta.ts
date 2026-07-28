@@ -16,24 +16,42 @@ export interface VideoQualityVerificationCoverage {
   sampledFrames: 'verified';
   audibleAudio: 'verified' | 'not_verified';
   audiovisualSync: 'not_verified' | 'not_applicable';
+  lipSyncProcessing: 'completed' | 'not_applicable';
 }
 
 export type VideoAudioVerificationCoverage =
   | {
       audibleAudio: 'verified';
       audiovisualSync: 'not_verified';
+      lipSyncProcessing: 'completed';
     }
   | {
       audibleAudio: 'not_verified';
       audiovisualSync: 'not_applicable';
+      lipSyncProcessing: 'not_applicable';
     };
+
+export function videoAudioVerificationCoverage(input?: {
+  audibleAudioVerified?: boolean;
+  lipSyncProcessingCompleted?: boolean;
+}): VideoAudioVerificationCoverage {
+  if (input?.audibleAudioVerified && input.lipSyncProcessingCompleted) {
+    return {
+      audibleAudio: 'verified',
+      audiovisualSync: 'not_verified',
+      lipSyncProcessing: 'completed',
+    };
+  }
+  return {
+    audibleAudio: 'not_verified',
+    audiovisualSync: 'not_applicable',
+    lipSyncProcessing: 'not_applicable',
+  };
+}
 
 export function videoQualityVerificationMetadata(
   verifiedAt = new Date(),
-  audioCoverage: VideoAudioVerificationCoverage = {
-    audibleAudio: 'not_verified',
-    audiovisualSync: 'not_applicable',
-  },
+  audioCoverage: VideoAudioVerificationCoverage = videoAudioVerificationCoverage(),
 ): {
   qualityVerification: {
     status: 'passed';

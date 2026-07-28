@@ -101,6 +101,7 @@ import {
   claimVideoConfirmAfterVerifierPreflight,
   deriveVideoType,
   mapVideoFailureReason,
+  videoAudioVerificationCoverage,
   videoQualityFailureOutcome,
   videoQualityVerificationMetadata,
   type VideoAudioVerificationCoverage,
@@ -6904,10 +6905,8 @@ export const tasksRouter = router({
         try {
           let summary: string;
           let audioEngine: 'qwen' | 'gemini' | 'mixed' | undefined;
-          let audioCoverage: VideoAudioVerificationCoverage = {
-            audibleAudio: 'not_verified',
-            audiovisualSync: 'not_applicable',
-          };
+          let audioCoverage: VideoAudioVerificationCoverage =
+            videoAudioVerificationCoverage();
           if (isClone) {
             const { runCloneVideoCreation } = await import('../../agent/video/video-clone.js');
             const petImageFileId = meta.petImageFileId;
@@ -6969,12 +6968,10 @@ export const tasksRouter = router({
                 verifyFinalVideo,
               },
             );
-            if (result.audibleAudioVerified) {
-              audioCoverage = {
-                audibleAudio: 'verified',
-                audiovisualSync: 'not_verified',
-              };
-            }
+            audioCoverage = videoAudioVerificationCoverage({
+              audibleAudioVerified: result.audibleAudioVerified,
+              lipSyncProcessingCompleted: result.lipSyncProcessingCompleted,
+            });
             summary = '复刻视频已生成。';
           } else if (isPet) {
             // 宠物 i2v: fileId → presigned GET → i2v 单图 → pad+水印+静默 → store.
@@ -7112,10 +7109,10 @@ export const tasksRouter = router({
                 verifyFinalVideo,
               },
             );
-            audioCoverage = {
-              audibleAudio: 'verified',
-              audiovisualSync: 'not_verified',
-            };
+            audioCoverage = videoAudioVerificationCoverage({
+              audibleAudioVerified: true,
+              lipSyncProcessingCompleted: true,
+            });
             summary = `真人换口型视频已生成（约 ${Math.round(result.totalDurationMs / 1000)} 秒）。`;
           } else {
             if (!script) {

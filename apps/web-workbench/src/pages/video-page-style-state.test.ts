@@ -31,7 +31,7 @@ describe('video creative style state', () => {
     expect(source).not.toContain("md:grid-cols-[minmax(260px,520px)_1fr]");
     expect(source).toContain('播放成片');
     expect(source).toContain('基础成片检查通过');
-    expect(source).toContain('音画同步未验证');
+    expect(source).toContain('videoAudioVerificationBadge');
     expect(source).toContain('未记录当前基础检查');
   });
 

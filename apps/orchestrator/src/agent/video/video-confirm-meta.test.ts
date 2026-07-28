@@ -4,6 +4,7 @@ import {
   claimVideoConfirmAfterVerifierPreflight,
   deriveVideoType,
   mapVideoFailureReason,
+  videoAudioVerificationCoverage,
   videoQualityFailureOutcome,
   videoQualityVerificationMetadata,
   videoVerifierPreflightIssue,
@@ -52,6 +53,39 @@ describe('videoVerifierPreflightIssue', () => {
 });
 
 describe('videoQualityVerificationMetadata', () => {
+  it('only records completed lip-sync processing when provider processing and audible audio are both confirmed', () => {
+    expect(
+      videoAudioVerificationCoverage({
+        audibleAudioVerified: true,
+        lipSyncProcessingCompleted: true,
+      }),
+    ).toEqual({
+      audibleAudio: 'verified',
+      audiovisualSync: 'not_verified',
+      lipSyncProcessing: 'completed',
+    });
+    expect(
+      videoAudioVerificationCoverage({
+        audibleAudioVerified: true,
+        lipSyncProcessingCompleted: false,
+      }),
+    ).toEqual({
+      audibleAudio: 'not_verified',
+      audiovisualSync: 'not_applicable',
+      lipSyncProcessing: 'not_applicable',
+    });
+    expect(
+      videoAudioVerificationCoverage({
+        audibleAudioVerified: false,
+        lipSyncProcessingCompleted: true,
+      }),
+    ).toEqual({
+      audibleAudio: 'not_verified',
+      audiovisualSync: 'not_applicable',
+      lipSyncProcessing: 'not_applicable',
+    });
+  });
+
   it('stamps completed deliverables with an auditable quality-gate result', () => {
     expect(
       videoQualityVerificationMetadata(new Date('2026-07-25T06:00:00.000Z')),
@@ -65,6 +99,7 @@ describe('videoQualityVerificationMetadata', () => {
           sampledFrames: 'verified',
           audibleAudio: 'not_verified',
           audiovisualSync: 'not_applicable',
+          lipSyncProcessing: 'not_applicable',
         },
       },
     });
@@ -77,6 +112,7 @@ describe('videoQualityVerificationMetadata', () => {
         {
           audibleAudio: 'verified',
           audiovisualSync: 'not_verified',
+          lipSyncProcessing: 'completed',
         },
       ),
     ).toEqual({
@@ -89,6 +125,7 @@ describe('videoQualityVerificationMetadata', () => {
           sampledFrames: 'verified',
           audibleAudio: 'verified',
           audiovisualSync: 'not_verified',
+          lipSyncProcessing: 'completed',
         },
       },
     });

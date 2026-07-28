@@ -69,10 +69,11 @@ function makeServices() {
     fileId: 'f_clone-provider-video.mp4',
   }));
   const storeTemporaryAudio = vi.fn(async () => ({ fileId: 'f_clone-audio.wav' }));
-  const presignByFileId = vi.fn(async (fileId: string) =>
-    fileId === 'f_clone-provider-video.mp4'
-      ? 'https://r2.example/f_clone-provider-video.mp4?sig'
-      : 'https://r2.example/f_clone-audio.wav?sig',
+  const presignByFileId = vi.fn(
+    async (fileId: string): Promise<string | null> =>
+      fileId === 'f_clone-provider-video.mp4'
+        ? 'https://r2.example/f_clone-provider-video.mp4?sig'
+        : 'https://r2.example/f_clone-audio.wav?sig',
   );
   const deleteOutput = vi.fn(async () => true);
   const verifyFinalVideo = vi.fn(
@@ -278,6 +279,7 @@ describe('runCloneVideoCreation', () => {
       downloadUrl: '/api/files/f_video.mp4/download',
       durationSeconds: 8.2,
       audibleAudioVerified: true,
+      lipSyncProcessingCompleted: true,
     });
   });
 
@@ -320,6 +322,7 @@ describe('runCloneVideoCreation', () => {
       { maxBytes: 500 * 1024 * 1024 },
     );
     expect(result.audibleAudioVerified).toBe(false);
+    expect(result.lipSyncProcessingCompleted).toBe(false);
   });
 
   it('removes the bridged provider video when its public URL cannot be issued', async () => {

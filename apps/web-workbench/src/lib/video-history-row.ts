@@ -55,6 +55,7 @@ export interface VideoResultMeta {
       sampledFrames?: string;
       audibleAudio?: string;
       audiovisualSync?: string;
+      lipSyncProcessing?: string;
     };
   };
   attachments?: ReadonlyArray<{
@@ -96,8 +97,37 @@ export interface VideoRow {
       sampledFrames: 'verified';
       audibleAudio: 'verified' | 'not_verified';
       audiovisualSync: 'not_verified' | 'not_applicable';
+      lipSyncProcessing?: 'completed' | 'not_applicable';
     };
   };
+}
+
+export interface VideoAudioVerificationBadge {
+  label: '口型已处理 · 准确度待确认' | '音画同步未验证';
+  title: string;
+}
+
+export function videoAudioVerificationBadge(
+  verification: VideoRow['qualityVerification'],
+): VideoAudioVerificationBadge | null {
+  const coverage = verification?.coverage;
+  if (
+    verification?.status !== 'passed' ||
+    coverage?.audibleAudio !== 'verified' ||
+    coverage.audiovisualSync !== 'not_verified'
+  ) {
+    return null;
+  }
+  return coverage.lipSyncProcessing === 'completed'
+    ? {
+        label: '口型已处理 · 准确度待确认',
+        title:
+          '口型同步供应商已完成处理；当前自动检查确认了可听声音，但尚未独立验证声音与嘴形是否准确同步',
+      }
+    : {
+        label: '音画同步未验证',
+        title: '当前自动检查确认了可听声音，但尚未独立验证声音与嘴形同步',
+      };
 }
 
 export function creativeHistoryArtifactAvailability(
@@ -260,10 +290,21 @@ function asPassedQualityVerification(
   }
   const audibleAudio = value.coverage?.audibleAudio;
   const audiovisualSync = value.coverage?.audiovisualSync;
+  const lipSyncProcessing = value.coverage?.lipSyncProcessing;
+  const normalizedLipSyncProcessing =
+    lipSyncProcessing === 'completed' || lipSyncProcessing === 'not_applicable'
+      ? lipSyncProcessing
+      : undefined;
   const hasLegalAudioCoverage =
-    (audibleAudio === 'verified' && audiovisualSync === 'not_verified') ||
-    (audibleAudio === 'not_verified' && audiovisualSync === 'not_applicable');
-  const coverage =
+    (audibleAudio === 'verified' &&
+      audiovisualSync === 'not_verified' &&
+      (lipSyncProcessing === undefined || lipSyncProcessing === 'completed')) ||
+    (audibleAudio === 'not_verified' &&
+      audiovisualSync === 'not_applicable' &&
+      (lipSyncProcessing === undefined || lipSyncProcessing === 'not_applicable'));
+  const coverage: NonNullable<
+    NonNullable<VideoRow['qualityVerification']>['coverage']
+  > | undefined =
     value.coverage?.playableVideo === 'verified' &&
     value.coverage.sampledFrames === 'verified' &&
     hasLegalAudioCoverage
@@ -274,6 +315,9 @@ function asPassedQualityVerification(
           audiovisualSync: audiovisualSync as
             | 'not_verified'
             | 'not_applicable',
+          ...(normalizedLipSyncProcessing
+            ? { lipSyncProcessing: normalizedLipSyncProcessing }
+            : {}),
         }
       : undefined;
   return {
