@@ -235,4 +235,51 @@ describe('generateImages', () => {
       kind: 'network',
     });
   });
+
+  it('times out when response headers arrive but the body never finishes', async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"candidates":['));
+      },
+    });
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(body, {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+
+    const outcome = await Promise.race([
+      generateImages({ ...BASE, timeoutMs: 20, fetchImpl }).catch((err) => err),
+      new Promise<'test-timeout'>((resolve) => setTimeout(() => resolve('test-timeout'), 100)),
+    ]);
+
+    expect(outcome).toMatchObject({ kind: 'timeout' });
+  });
+
+  it('keeps an aborted response body classified as timeout', async () => {
+    const fetchImpl = vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
+      const signal = init?.signal;
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{"candidates":['));
+          signal?.addEventListener(
+            'abort',
+            () => controller.error(new DOMException('Aborted', 'AbortError')),
+            { once: true },
+          );
+        },
+      });
+      return Promise.resolve(
+        new Response(body, {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+    });
+
+    await expect(
+      generateImages({ ...BASE, timeoutMs: 20, fetchImpl }),
+    ).rejects.toMatchObject({ kind: 'timeout' });
+  });
 });

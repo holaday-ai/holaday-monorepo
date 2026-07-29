@@ -205,13 +205,44 @@ export function buildImageCreationOptions(
   aspectRatio: VideoAspect,
   imageCount: 1 | 2 | 3 | 4 = DEFAULT_IMAGE_COUNT,
   mode: ImageGenerationMode = 'free',
+  subjectFileId?: string,
 ): ImageCreationOptions {
   return {
     model,
     aspectRatio,
     imageCount,
     ...(mode === 'lock_subject' ? { mode } : {}),
+    ...(mode === 'lock_subject' && subjectFileId ? { subjectFileId } : {}),
   };
+}
+
+type ImageFileOrderAttachment = Pick<
+  DraftAttachment,
+  'clientId' | 'fileId' | 'mimetype' | 'status'
+>;
+
+export function buildImageFileOrder(
+  attachments: readonly ImageFileOrderAttachment[],
+  mode: ImageGenerationMode,
+  subjectClientId?: string | null,
+): string[] {
+  const ready = attachments.filter(
+    (attachment) => attachment.status === 'ready' && Boolean(attachment.fileId),
+  );
+  if (mode !== 'lock_subject') return ready.map((attachment) => attachment.fileId);
+  const subject =
+    ready.find(
+      (attachment) =>
+        attachment.clientId === subjectClientId && attachment.mimetype.startsWith('image/'),
+    ) ??
+    ready.find((attachment) => attachment.mimetype.startsWith('image/'));
+  if (!subject) return ready.map((attachment) => attachment.fileId);
+  return [
+    subject.fileId,
+    ...ready
+      .filter((attachment) => attachment.fileId !== subject.fileId)
+      .map((attachment) => attachment.fileId),
+  ];
 }
 
 const CREATIVE_SECTION_CLASS = 'rounded-[22px] border-[#EFEFEF] bg-white shadow-[0_14px_34px_rgba(17,24,39,0.04)]';
@@ -489,6 +520,9 @@ function CreativeStudioPage({
   const [referenceVideoDialogOpen, setReferenceVideoDialogOpen] = React.useState(false);
   const [imageStyle, setImageStyle] = React.useState<ImageStyleKey>('random');
   const [imageGenerationMode, setImageGenerationMode] = React.useState<ImageGenerationMode>('free');
+  const [subjectAttachmentClientId, setSubjectAttachmentClientId] = React.useState<string | null>(
+    null,
+  );
   const [vibeStyle, setVibeStyle] = React.useState<CreativeStyleKey>('random');
   const [lightingStyle, setLightingStyle] = React.useState<CreativeStyleKey>('random');
   const [colorStyle, setColorStyle] = React.useState<CreativeStyleKey>('random');
@@ -513,9 +547,15 @@ function CreativeStudioPage({
     ? '描述你想让 HOLA DAY 创作的图片内容 ...'
     : '描述你想让 HOLA DAY 创作的视频内容 ...';
   const submitLabel = isImage ? '生成图片' : '生成视频';
-  const readyImageAttachmentCount = attachments.filter(
+  const readyImageAttachments = attachments.filter(
     (attachment) => attachment.status === 'ready' && attachment.fileId && attachment.mimetype.startsWith('image/'),
-  ).length;
+  );
+  const selectedSubjectAttachment =
+    readyImageAttachments.find(
+      (attachment) => attachment.clientId === subjectAttachmentClientId,
+    ) ??
+    readyImageAttachments[0] ??
+    null;
 
   React.useEffect(() => {
     setAspectRatio(isImage ? '1:1' : '16:9');
@@ -665,14 +705,16 @@ function CreativeStudioPage({
       toast.show('文件上传中，请稍候');
       return;
     }
-    if (isImage && imageGenerationMode === 'lock_subject' && readyImageAttachmentCount === 0) {
+    if (isImage && imageGenerationMode === 'lock_subject' && !selectedSubjectAttachment) {
       toast.show('请先上传一张清晰的主角图', 'error');
       return;
     }
     setSubmitting(true);
-    const fileIds = attachments
-      .filter((attachment) => attachment.status === 'ready' && attachment.fileId)
-      .map((attachment) => attachment.fileId);
+    const fileIds = buildImageFileOrder(
+      attachments,
+      imageGenerationMode,
+      selectedSubjectAttachment?.clientId,
+    );
     const styledVideoIntent = buildVideoIntentWithCreativeStyles(intent, {
       vibe: vibeStyle,
       lighting: lightingStyle,
@@ -688,6 +730,7 @@ function CreativeStudioPage({
       aspectRatio,
       imageCount,
       imageGenerationMode,
+      selectedSubjectAttachment?.fileId,
     );
     try {
       const res = isImage
@@ -723,6 +766,7 @@ function CreativeStudioPage({
           if (attachment.previewDataUrl?.startsWith('blob:')) URL.revokeObjectURL(attachment.previewDataUrl);
         }
         setAttachments([]);
+        setSubjectAttachmentClientId(null);
         setPrompt('');
       }
       toast.show(isImage ? '已提交，图片生成中' : '已提交，请确认报价后开始制作', 'info', 3000);
@@ -774,24 +818,26 @@ function CreativeStudioPage({
               className={cn(
                 'grid grid-cols-1 gap-3 2xl:items-end',
                 isImage
-                  ? 'sm:grid-cols-2 md:grid-cols-4 2xl:grid-cols-[260px_minmax(360px,1fr)_230px_190px]'
+                  ? 'sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-[260px_minmax(360px,1fr)_230px_190px]'
                   : isCloneVideo
                     ? 'sm:grid-cols-2 2xl:grid-cols-[260px_minmax(360px,1fr)]'
                     : isIpVideo
                       ? 'max-w-[760px]'
-                      : 'sm:grid-cols-2 md:grid-cols-4 2xl:grid-cols-[190px_minmax(340px,1fr)_150px_210px_190px]',
+                      : 'sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-[190px_minmax(340px,1fr)_150px_210px_190px]',
               )}
             >
               {isImage ? (
-                <CreativeModelPicker
-                  value={imageModel}
-                  options={IMAGE_MODEL_OPTIONS}
-                  open={modelPickerOpen}
-                  onOpenChange={setModelPickerOpen}
-                  onChange={(value) => setImageModel(value as ImageModel)}
-                  accent={accent}
-                  modelKind="image"
-                />
+                <div className="sm:col-span-2 xl:col-span-1">
+                  <CreativeModelPicker
+                    value={imageModel}
+                    options={IMAGE_MODEL_OPTIONS}
+                    open={modelPickerOpen}
+                    onOpenChange={setModelPickerOpen}
+                    onChange={(value) => setImageModel(value as ImageModel)}
+                    accent={accent}
+                    modelKind="image"
+                  />
+                </div>
               ) : isCloneVideo ? (
                 <CreativeModelPicker
                   value={model}
@@ -868,7 +914,11 @@ function CreativeStudioPage({
                   onChange={(value) => setAspectRatio(value as VideoAspect)}
                   accent={accent}
                   compact
-                  className="md:col-span-2 2xl:col-span-1"
+                  className={
+                    isImage
+                      ? 'sm:col-span-2 xl:col-span-1'
+                      : 'md:col-span-2 2xl:col-span-1'
+                  }
                 />
               ) : null}
               {isImage ? (
@@ -884,6 +934,7 @@ function CreativeStudioPage({
                   onChange={(value) => setImageCount(value as 1 | 2 | 3 | 4)}
                   accent={accent}
                   compact
+                  className="sm:col-span-2 xl:col-span-1"
                 />
               ) : videoTab === 'normal' ? (
                 <CreativeSelect
@@ -903,7 +954,8 @@ function CreativeStudioPage({
               value={imageGenerationMode}
               onChange={setImageGenerationMode}
               onAddSubject={() => imageInputRef.current?.click()}
-              subjectImageCount={readyImageAttachmentCount}
+              subjectImageName={selectedSubjectAttachment?.filename}
+              referenceImageCount={Math.max(0, readyImageAttachments.length - 1)}
               accent={accent}
             />
           ) : null}
@@ -947,6 +999,30 @@ function CreativeStudioPage({
                     key={attachment.clientId ?? `${attachment.filename}-${index}`}
                     attachment={attachment}
                     onRemove={() => removeCreativeAttachment(attachment.clientId, index)}
+                    badge={
+                      isImage &&
+                      imageGenerationMode === 'lock_subject' &&
+                      attachment.status === 'ready' &&
+                      attachment.mimetype.startsWith('image/')
+                        ? attachment.clientId === selectedSubjectAttachment?.clientId
+                          ? '主角'
+                          : '参考'
+                        : undefined
+                    }
+                    actionLabel={
+                      isImage &&
+                      imageGenerationMode === 'lock_subject' &&
+                      attachment.status === 'ready' &&
+                      attachment.mimetype.startsWith('image/') &&
+                      attachment.clientId !== selectedSubjectAttachment?.clientId
+                        ? '设为主角'
+                        : undefined
+                    }
+                    onAction={
+                      attachment.clientId
+                        ? () => setSubjectAttachmentClientId(attachment.clientId ?? null)
+                        : undefined
+                    }
                   />
                 ))}
               </div>
@@ -1076,13 +1152,15 @@ function ImageModeChooser({
   value,
   onChange,
   onAddSubject,
-  subjectImageCount,
+  subjectImageName,
+  referenceImageCount,
   accent,
 }: {
   value: ImageGenerationMode;
   onChange(value: ImageGenerationMode): void;
   onAddSubject(): void;
-  subjectImageCount: number;
+  subjectImageName?: string;
+  referenceImageCount: number;
   accent: string;
 }): JSX.Element {
   const locked = value === 'lock_subject';
@@ -1092,7 +1170,7 @@ function ImageModeChooser({
         <div>
           <div className="text-[13px] font-semibold text-[#ADADAD]">图片生成方式</div>
           <div className="mt-1 text-[13px] leading-5 text-[#6B7280]">
-            锁定主角会优先保留上传图里的主体，只改画面表达。
+            选择一张主角图作为身份锚点；其他图片只作风格或场景参考。
           </div>
         </div>
         {locked ? (
@@ -1102,7 +1180,7 @@ function ImageModeChooser({
             className="inline-flex h-9 items-center gap-2 rounded-full border border-[#DCDDDD] bg-white px-3 text-[13px] font-semibold text-[#111827] hover:border-[#ADADAD]"
           >
             <ImagePlus className="h-4 w-4" />
-            添加主角图
+            {subjectImageName ? '添加参考图' : '添加主角图'}
           </button>
         ) : null}
       </div>
@@ -1119,8 +1197,12 @@ function ImageModeChooser({
           active={locked}
           icon={<Lock className="h-5 w-5" />}
           title="锁定主角"
-          description="上传人物、宠物、商品或 IP 图后，保持主体一致，只换背景、风格、光线、动作和构图。"
-          meta={subjectImageCount > 0 ? `已就绪 ${subjectImageCount} 张主角图` : '需要至少 1 张主角图'}
+          description="上传人物、宠物、商品或 IP 图后，优先保持主体身份，只换背景、风格、光线、动作和构图。"
+          meta={
+            subjectImageName
+              ? `主角：${subjectImageName}${referenceImageCount > 0 ? ` · ${referenceImageCount} 张参考图` : ''}`
+              : '需要 1 张清晰主角图'
+          }
           onClick={() => onChange('lock_subject')}
           accent={accent}
         />
@@ -1172,7 +1254,14 @@ function ImageModeOption({
           ) : null}
         </span>
         <span className="mt-1 block text-[13px] leading-5 text-[#6B7280]">{description}</span>
-        {meta ? <span className="mt-2 block text-[12px] font-semibold text-[#8B93A6]">{meta}</span> : null}
+        {meta ? (
+          <span
+            className="mt-2 block truncate text-[12px] font-semibold text-[#8B93A6]"
+            title={meta}
+          >
+            {meta}
+          </span>
+        ) : null}
       </span>
     </button>
   );
@@ -1456,7 +1545,7 @@ function CreativeStyleSummaryPicker({
     .filter((label) => label !== '随机');
   const summary = selected.length === 0 ? '随机' : selected.join(' / ');
   return (
-    <div className="md:col-span-2 2xl:col-span-1">
+    <div className="sm:col-span-2 xl:col-span-1">
       <div className="mb-2 text-[13px] font-semibold text-[#ADADAD]">风格样式</div>
       <button
         type="button"
@@ -1514,7 +1603,7 @@ function ImageStyleSummaryPicker({
 }): JSX.Element {
   const selected = imageStyleOptionFor(value);
   return (
-    <div className="md:col-span-2 2xl:col-span-1">
+    <div className="sm:col-span-2 xl:col-span-1">
       <div className="mb-2 text-[13px] font-semibold text-[#ADADAD]">风格样式</div>
       <button
         type="button"
@@ -2408,7 +2497,9 @@ function CreativeHistory({
                         {videoTypeLabel(row.videoType)}
                       </span>
                     ) : null}
-                    {mode === 'image' && isLockedSubjectImageIntent(row.intent) ? (
+                    {mode === 'image' &&
+                    (row.imageMode === 'lock_subject' ||
+                      isLockedSubjectImageIntent(row.intent)) ? (
                       <span className="inline-flex items-center gap-1 rounded-full bg-[#42C0EF]/10 px-3 py-1 text-[11px] font-medium text-[#237B9D]">
                         <Lock className="h-3 w-3" />
                         锁定主角

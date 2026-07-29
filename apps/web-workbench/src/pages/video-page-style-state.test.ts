@@ -5,6 +5,7 @@ import {
   IP_VIDEO_ASPECT_RATIO,
   IP_ASSET_AUTHORIZATION_COPY,
   buildImageCreationOptions,
+  buildImageFileOrder,
   buildCloneVideoIntent,
   buildImageIntentForSubmit,
   buildImageIntentWithMode,
@@ -53,11 +54,39 @@ describe('video creative style state', () => {
   });
 
   it('passes locked-subject mode as structured image metadata', () => {
-    expect(buildImageCreationOptions('nano_banana_2', '1:1', 1, 'lock_subject')).toEqual({
+    expect(
+      buildImageCreationOptions('nano_banana_2', '1:1', 1, 'lock_subject', 'file_subject'),
+    ).toEqual({
       model: 'nano_banana_2',
       aspectRatio: '1:1',
       imageCount: 1,
       mode: 'lock_subject',
+      subjectFileId: 'file_subject',
+    });
+  });
+
+  it('puts the explicitly selected subject first without dropping other references', () => {
+    expect(
+      buildImageFileOrder(
+        [
+          { clientId: 'style', fileId: 'file_style', mimetype: 'image/png', status: 'ready' },
+          { clientId: 'notes', fileId: 'file_notes', mimetype: 'text/plain', status: 'ready' },
+          { clientId: 'subject', fileId: 'file_subject', mimetype: 'image/jpeg', status: 'ready' },
+          { clientId: 'pending', fileId: '', mimetype: 'image/png', status: 'uploading' },
+        ],
+        'lock_subject',
+        'subject',
+      ),
+    ).toEqual(['file_subject', 'file_style', 'file_notes']);
+  });
+
+  it('does not stamp a subject id onto free image generation', () => {
+    expect(
+      buildImageCreationOptions('nano_banana_2', '1:1', 1, 'free', 'file_subject'),
+    ).toEqual({
+      model: 'nano_banana_2',
+      aspectRatio: '1:1',
+      imageCount: 1,
     });
   });
 

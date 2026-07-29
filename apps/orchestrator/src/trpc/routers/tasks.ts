@@ -28,6 +28,7 @@ import {
   type RunImageTaskResult,
   runImageTask,
 } from '../../agent/image/image-runner.js';
+import { orderImageAttachmentIds } from '../../agent/image/image-input-order.js';
 import { classifyExecutionMode } from '../../agent/intent-classifier.js';
 import { DrizzleLlmCallRecorder } from '../../agent/llm-call-recorder.js';
 // Phase 24 RC follow-up — nav-failure safety net. Catches the
@@ -487,6 +488,7 @@ const createInput = z.object({
       aspectRatio: z.enum(['9:16', '16:9', '1:1', '4:3', '3:4']),
       imageCount: z.number().int().min(1).max(4),
       mode: z.enum(['free', 'lock_subject']).optional(),
+      subjectFileId: z.string().min(1).max(64).optional(),
     })
     .optional(),
 });
@@ -1433,17 +1435,55 @@ export const tasksRouter = router({
     // file rather than failing creation outright.
     const fileService = new FileService(ctx.db, ctx.logger);
     const attachmentBlocks: Awaited<ReturnType<typeof parseFileForPrompt>>['blocks'] = [];
-    if (input.fileIds && input.fileIds.length > 0) {
-      const loaded = await fileService.loadMany(input.fileIds, userRow.id);
+    let orderedFileIds: string[];
+    try {
+      orderedFileIds = orderImageAttachmentIds(
+        input.fileIds ?? [],
+        input.imageOptions?.mode,
+        input.imageOptions?.subjectFileId,
+      );
+    } catch (err) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: err instanceof Error ? err.message : '主角图选择无效，请重新选择',
+      });
+    }
+    if (orderedFileIds.length > 0) {
+      const loaded = await fileService.loadMany(orderedFileIds, userRow.id);
+      if (input.imageOptions?.mode === 'lock_subject' && input.imageOptions.subjectFileId) {
+        const subject = loaded.find(
+          (file) => file.row.externalId === input.imageOptions?.subjectFileId,
+        );
+        if (!subject || !subject.row.mimetype.startsWith('image/')) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: '主角图不可用或不是图片，请重新上传',
+          });
+        }
+      }
       for (const f of loaded) {
+        const isLockedSubject =
+          input.imageOptions?.mode === 'lock_subject' &&
+          f.row.externalId === input.imageOptions.subjectFileId;
         try {
           const parsed = await parseFileForPrompt(f.buffer, f.row.filename, f.row.mimetype);
+          if (isLockedSubject && !parsed.blocks.some((block) => block.type === 'image')) {
+            throw new Error('主角图未解析为图像');
+          }
           attachmentBlocks.push(...parsed.blocks);
         } catch (err) {
           ctx.logger.warn(
             { err: err instanceof Error ? err.message : String(err), fileId: f.row.externalId },
-            'tasks.create: file parse failed — skipping',
+            isLockedSubject
+              ? 'tasks.create: locked subject parse failed'
+              : 'tasks.create: file parse failed — skipping',
           );
+          if (isLockedSubject) {
+            throw new TRPCError({
+              code: 'BAD_REQUEST',
+              message: '主角图读取失败，请重新上传一张清晰图片',
+            });
+          }
         }
       }
     }
@@ -1678,7 +1718,37 @@ export const tasksRouter = router({
         } catch (err) {
           ctx.logger.warn({ err, taskId }, 'image: broadcast terminal failed');
         }
-      })();
+      })().catch(async (err) => {
+        const reason = '图片生成异常中断，请重试。';
+        ctx.logger.error({ err, taskId }, 'image: detached runner rejected');
+        try {
+          const persisted = await repo.persistVisionOutcome(taskId, {
+            status: 'failed',
+            reason,
+            tickCount: 1,
+            metadata: {
+              executionMode: 'image',
+              finalExecutionMode: 'image',
+              ...(input.imageOptions ? { imageOptions: input.imageOptions } : {}),
+              elapsedMs: Date.now() - imageStartedAt,
+              failureSource: 'detached_runner',
+            },
+          });
+          if (persisted.persisted) {
+            broadcastToUser(ctx.userId, {
+              type: 'server.task.terminal',
+              taskId,
+              status: 'failed',
+              reason,
+            });
+          }
+        } catch (persistErr) {
+          ctx.logger.error(
+            { err: persistErr, taskId },
+            'image: detached failure could not be persisted',
+          );
+        }
+      });
 
       return {
         taskId,

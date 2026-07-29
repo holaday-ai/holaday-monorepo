@@ -7,4 +7,6 @@ export interface ImageCreationOptions {
   aspectRatio: VideoAspect;
   imageCount: 1 | 2 | 3 | 4;
   mode?: 'free' | 'lock_subject';
+  /** Explicit identity anchor for lock_subject generation. */
+  subjectFileId?: string;
 }

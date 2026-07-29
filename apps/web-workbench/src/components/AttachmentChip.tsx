@@ -27,6 +27,9 @@ export interface DraftAttachment {
 interface Props {
   attachment: DraftAttachment;
   onRemove(): void;
+  badge?: string;
+  actionLabel?: string;
+  onAction?(): void;
 }
 
 /**
@@ -39,7 +42,13 @@ interface Props {
  * Pure presentation — caller (InputArea) owns the attachment list
  * and dispatches the actual upload via lib/upload-file.
  */
-export function AttachmentChip({ attachment, onRemove }: Props): JSX.Element {
+export function AttachmentChip({
+  attachment,
+  onRemove,
+  badge,
+  actionLabel,
+  onAction,
+}: Props): JSX.Element {
   const isError = attachment.status === 'error';
   const isUploading = attachment.status === 'uploading';
   const copy = attachmentChipCopy(attachment);
@@ -88,8 +97,15 @@ export function AttachmentChip({ attachment, onRemove }: Props): JSX.Element {
         </span>
       )}
       <span className="min-w-0 flex-1">
-        <span className="block truncate font-medium text-foreground">
-          {attachment.filename || '未命名附件'}
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="block min-w-0 truncate font-medium text-foreground">
+            {attachment.filename || '未命名附件'}
+          </span>
+          {badge ? (
+            <span className="shrink-0 rounded-full bg-[#42C0EF]/[0.12] px-1.5 py-0.5 text-[9px] font-semibold text-[#237B9D]">
+              {badge}
+            </span>
+          ) : null}
         </span>
         <span
           className={cn(
@@ -100,6 +116,15 @@ export function AttachmentChip({ attachment, onRemove }: Props): JSX.Element {
           {isUploading ? copy.statusText : copy.detailText}
         </span>
       </span>
+      {actionLabel && onAction ? (
+        <button
+          type="button"
+          onClick={onAction}
+          className="shrink-0 rounded-[6px] px-1.5 py-1 text-[10px] font-semibold text-[#237B9D] transition-colors hover:bg-[#42C0EF]/10"
+        >
+          {actionLabel}
+        </button>
+      ) : null}
       <button
         type="button"
         onClick={onRemove}

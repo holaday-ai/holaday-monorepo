@@ -737,6 +737,28 @@ describe('toImageRow — 图片历史 only lists completed image outputs', () =>
     expect(out?.starred).toBe(true);
     expect(out?.starredAt).toBe(starredAt);
   });
+
+  it('carries structured locked-subject metadata into image history', () => {
+    const out = toImageRow(
+      imageRow({
+        result: {
+          metadata: {
+            executionMode: 'image',
+            imageOptions: {
+              model: 'nano_banana_2',
+              aspectRatio: '1:1',
+              imageCount: 1,
+              mode: 'lock_subject',
+              subjectFileId: 'file_subject',
+            },
+            attachments: [imageAtt],
+          },
+        },
+      }),
+    );
+
+    expect(out?.imageMode).toBe('lock_subject');
+  });
 });
 
 describe('creative history filters', () => {

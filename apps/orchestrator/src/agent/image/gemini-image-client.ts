@@ -200,38 +200,77 @@ export async function generateImages(
 
   // One HTTP attempt: own timeout + caller-signal composition.
   const timeoutMs = params.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const attemptFetch = async (): Promise<Response> => {
+  type ConsumeResponseBody = <T>(
+    reader: () => Promise<T>,
+    cancel?: () => Promise<unknown> | unknown,
+  ) => Promise<T>;
+  const attemptFetch = async (): Promise<{
+    response: Response;
+    consumeBody: ConsumeResponseBody;
+  }> => {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let timedOut = false;
+    let rejectDeadline: ((reason: GeminiImageError) => void) | undefined;
+    const deadlinePromise = new Promise<never>((_resolve, reject) => {
+      rejectDeadline = reject;
+    });
+    const timeoutError = () =>
+      new GeminiImageError(`Gemini image request timed out after ${timeoutMs}ms`, 'timeout');
+    const timer = setTimeout(() => {
+      timedOut = true;
+      rejectDeadline?.(timeoutError());
+      controller.abort();
+    }, timeoutMs);
     const onCallerAbort = () => controller.abort();
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      clearTimeout(timer);
+      if (params.signal) params.signal.removeEventListener('abort', onCallerAbort);
+    };
     if (params.signal) {
       if (params.signal.aborted) controller.abort();
       else params.signal.addEventListener('abort', onCallerAbort, { once: true });
     }
     try {
-      return await fetchImpl(url, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'x-goog-api-key': params.apiKey,
-        },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
+      const response = await Promise.race([
+        fetchImpl(url, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-goog-api-key': params.apiKey,
+          },
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        }),
+        deadlinePromise,
+      ]);
+      const consumeBody: ConsumeResponseBody = async (reader, cancel) => {
+        try {
+          return await Promise.race([reader(), deadlinePromise]);
+        } catch (err) {
+          if (timedOut) {
+            try {
+              await cancel?.();
+            } catch {
+              // Best effort: the controller abort above already cancels real fetch bodies.
+            }
+            throw err instanceof GeminiImageError ? err : timeoutError();
+          }
+          throw err;
+        } finally {
+          release();
+        }
+      };
+      return { response, consumeBody };
     } catch (err) {
-      if (controller.signal.aborted && !(params.signal?.aborted ?? false)) {
-        throw new GeminiImageError(
-          `Gemini image request timed out after ${timeoutMs}ms`,
-          'timeout',
-        );
-      }
+      release();
+      if (timedOut) throw err instanceof GeminiImageError ? err : timeoutError();
       throw new GeminiImageError(
         `Gemini image request failed: ${(err as Error).message}`,
         'network',
       );
-    } finally {
-      clearTimeout(timer);
-      if (params.signal) params.signal.removeEventListener('abort', onCallerAbort);
     }
   };
 
@@ -241,15 +280,18 @@ export async function generateImages(
   const maxRetries = params.maxRetries ?? 2;
   const retryBaseMs = params.retryBaseMs ?? 1000;
   let res!: Response;
+  let consumeResponseBody!: ConsumeResponseBody;
   for (let attempt = 0; ; attempt += 1) {
-    res = await attemptFetch();
+    const responseAttempt = await attemptFetch();
+    res = responseAttempt.response;
+    consumeResponseBody = responseAttempt.consumeBody;
     if (res.ok) break;
     if ((res.status === 503 || res.status === 429) && attempt < maxRetries) {
-      await safeText(res); // drain body so the socket frees up
+      await safeText(res, consumeResponseBody); // drain body so the socket frees up
       await sleep(retryBaseMs * 2 ** attempt);
       continue;
     }
-    const errBody = await safeText(res);
+    const errBody = await safeText(res, consumeResponseBody);
     throw new GeminiImageError(
       `Gemini image API returned ${res.status}`,
       'http',
@@ -260,8 +302,10 @@ export async function generateImages(
 
   let json: GenerateContentResponse;
   try {
-    json = (await res.json()) as GenerateContentResponse;
+    const responseText = await readResponseText(res, consumeResponseBody);
+    json = JSON.parse(responseText) as GenerateContentResponse;
   } catch (err) {
+    if (err instanceof GeminiImageError) throw err;
     throw new GeminiImageError(
       `Gemini image response was not valid JSON: ${(err as Error).message}`,
       'bad_response',
@@ -332,11 +376,39 @@ function isSafetyFinish(finishReason: string | undefined): boolean {
   return /SAFETY|PROHIBITED|BLOCK|RECITATION|IMAGE_SAFETY/i.test(finishReason);
 }
 
-async function safeText(res: Response): Promise<string> {
+async function safeText(res: Response, consumeBody: <T>(reader: () => Promise<T>) => Promise<T>) {
   try {
-    return await res.text();
-  } catch {
+    return await readResponseText(res, consumeBody);
+  } catch (err) {
+    if (err instanceof GeminiImageError) throw err;
     return '';
+  }
+}
+
+async function readResponseText(
+  res: Response,
+  consumeBody: <T>(
+    reader: () => Promise<T>,
+    cancel?: () => Promise<unknown> | unknown,
+  ) => Promise<T>,
+): Promise<string> {
+  if (!res.body) return consumeBody(() => Promise.resolve(''));
+  const reader = res.body.getReader();
+  try {
+    return await consumeBody(
+      async () => {
+        const decoder = new TextDecoder();
+        let text = '';
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) return text + decoder.decode();
+          text += decoder.decode(value, { stream: true });
+        }
+      },
+      () => reader.cancel(),
+    );
+  } finally {
+    reader.releaseLock();
   }
 }
 

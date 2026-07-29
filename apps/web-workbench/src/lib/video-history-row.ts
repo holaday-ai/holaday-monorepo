@@ -48,6 +48,10 @@ export interface VideoResultMeta {
   finalExecutionMode?: string;
   visualMode?: string;
   videoType?: string;
+  imageOptions?: {
+    mode?: 'free' | 'lock_subject';
+    subjectFileId?: string;
+  };
   qualityVerification?: {
     status?: string;
     gateVersion?: string;
@@ -89,6 +93,8 @@ export interface VideoRow {
   download?: FileDownloadPayload;
   /** Backend-stamped type — drives per-tab history isolation + the type chip. */
   videoType?: VideoType;
+  /** Structured image mode persisted by the image execution lane. */
+  imageMode?: 'free' | 'lock_subject';
   /** First-frame poster (R2, Bearer-gated) — rendered as a lazy thumbnail. */
   posterUrl?: string;
   /** Server confirmed the separate poster file is no longer available. */
@@ -545,6 +551,7 @@ export function toImageRow(raw: unknown): VideoRow | null {
       ...(att.availability === 'unavailable' ? { unavailable: true } : {}),
     },
     posterUrl: downloadUrl,
+    ...(meta?.imageOptions?.mode ? { imageMode: meta.imageOptions.mode } : {}),
     starred: r.starred === true,
     starredAt: r.starredAt ?? null,
   };
