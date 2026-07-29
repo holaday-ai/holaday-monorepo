@@ -120,6 +120,13 @@ describe('CdpInputHandler keyboard input', () => {
     const { handler, send } = handlerWithSend();
 
     await handler.handle({
+      type: 'keyDown',
+      key: 'Meta',
+      code: 'MetaLeft',
+      keyCode: 91,
+      metaKey: true,
+    });
+    await handler.handle({
       type: 'keyUp',
       key: 'Meta',
       code: 'MetaLeft',
@@ -127,12 +134,62 @@ describe('CdpInputHandler keyboard input', () => {
       metaKey: true,
     });
 
-    expect(send).toHaveBeenCalledWith('Input.dispatchKeyEvent', {
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send).toHaveBeenLastCalledWith('Input.dispatchKeyEvent', {
       type: 'keyUp',
       key: 'Meta',
       code: 'MetaLeft',
       windowsVirtualKeyCode: 91,
       modifiers: 0,
+    });
+  });
+
+  it('releases a stale Meta modifier before the next plain key when keyup was lost', async () => {
+    const { handler, send } = handlerWithSend();
+
+    await handler.handle({
+      type: 'keyDown',
+      key: 'Meta',
+      code: 'MetaLeft',
+      keyCode: 91,
+      metaKey: true,
+    });
+    await handler.handle({
+      type: 'keyDown',
+      key: 'a',
+      code: 'KeyA',
+      keyCode: 65,
+      metaKey: true,
+    });
+    await handler.handle({
+      type: 'keyUp',
+      key: 'a',
+      code: 'KeyA',
+      keyCode: 65,
+      metaKey: true,
+    });
+    await handler.handle({
+      type: 'keyDown',
+      key: 'x',
+      code: 'KeyX',
+      keyCode: 88,
+    });
+
+    expect(send).toHaveBeenNthCalledWith(4, 'Input.dispatchKeyEvent', {
+      type: 'keyUp',
+      key: 'Meta',
+      code: 'MetaLeft',
+      windowsVirtualKeyCode: 91,
+      modifiers: 0,
+    });
+    expect(send).toHaveBeenNthCalledWith(5, 'Input.dispatchKeyEvent', {
+      type: 'keyDown',
+      key: 'x',
+      code: 'KeyX',
+      windowsVirtualKeyCode: 88,
+      modifiers: 0,
+      text: 'x',
+      unmodifiedText: 'x',
     });
   });
 });
