@@ -24,16 +24,10 @@ describe('creative history artifact availability', () => {
   it('distinguishes active, expired, and unknown history files', () => {
     const now = Date.parse('2026-07-23T10:00:00.000Z');
     expect(
-      creativeHistoryArtifactAvailability(
-        { expiresAt: '2026-07-23T10:00:01.000Z' },
-        now,
-      ),
+      creativeHistoryArtifactAvailability({ expiresAt: '2026-07-23T10:00:01.000Z' }, now),
     ).toBe('available');
     expect(
-      creativeHistoryArtifactAvailability(
-        { expiresAt: '2026-07-23T09:59:59.000Z' },
-        now,
-      ),
+      creativeHistoryArtifactAvailability({ expiresAt: '2026-07-23T09:59:59.000Z' }, now),
     ).toBe('expired');
     expect(creativeHistoryArtifactAvailability(undefined, now)).toBe('unknown');
   });
@@ -146,18 +140,24 @@ describe('asVideoType — enum narrowing (A3/A5)', () => {
 describe('toVideoRow — videoType + posterUrl extraction (A4/A5)', () => {
   it('extracts metadata.videoType + attachment.posterUrl', () => {
     const out = toVideoRow({
-      taskId: 'tsk_ip', status: 'completed',
-      result: { metadata: {
-        lane: 'video_creation', videoType: 'ip_person',
-        attachments: [{
-          fileId: 'f',
-          downloadUrl: '/api/files/f/download',
-          filename: 'v.mp4',
-          sizeBytes: 5_000_000,
-          posterUrl: '/api/files/p/download',
-          expiresAt: '2026-07-24T10:00:00.000Z',
-        }],
-      } },
+      taskId: 'tsk_ip',
+      status: 'completed',
+      result: {
+        metadata: {
+          lane: 'video_creation',
+          videoType: 'ip_person',
+          attachments: [
+            {
+              fileId: 'f',
+              downloadUrl: '/api/files/f/download',
+              filename: 'v.mp4',
+              sizeBytes: 5_000_000,
+              posterUrl: '/api/files/p/download',
+              expiresAt: '2026-07-24T10:00:00.000Z',
+            },
+          ],
+        },
+      },
     });
     expect(out?.videoType).toBe('ip_person');
     expect(out?.posterUrl).toBe('/api/files/p/download');
@@ -192,8 +192,22 @@ describe('toVideoRow — videoType + posterUrl extraction (A4/A5)', () => {
 
   it('omits videoType when invalid/absent, posterUrl when absent', () => {
     const out = toVideoRow({
-      taskId: 'tsk_n', status: 'completed',
-      result: { metadata: { lane: 'video_creation', videoType: 'weird', attachments: [{ fileId: 'f', downloadUrl: '/api/files/f/download', filename: 'v.mp4', sizeBytes: 1000 }] } },
+      taskId: 'tsk_n',
+      status: 'completed',
+      result: {
+        metadata: {
+          lane: 'video_creation',
+          videoType: 'weird',
+          attachments: [
+            {
+              fileId: 'f',
+              downloadUrl: '/api/files/f/download',
+              filename: 'v.mp4',
+              sizeBytes: 1000,
+            },
+          ],
+        },
+      },
     });
     expect(out).not.toBeNull();
     expect(out?.videoType).toBeUndefined();
@@ -225,7 +239,8 @@ describe('toVideoRow — videoType + posterUrl extraction (A4/A5)', () => {
   it('recovers the clone-video type from the product-stamped legacy intent', () => {
     const out = toVideoRow({
       taskId: 'tsk_legacy_clone',
-      intent: '复刻视频：使用上传照片替换参考视频中的主角，并保留参考视频的动作、镜头、节奏和音频。',
+      intent:
+        '复刻视频：使用上传照片替换参考视频中的主角，并保留参考视频的动作、镜头、节奏和音频。',
       status: 'completed',
       result: {
         metadata: {
@@ -493,6 +508,62 @@ describe('toVideoRow — 生成历史 only lists completed 成片 with an attach
     expect(videoAudioVerificationBadge(undefined)).toBeNull();
   });
 
+  it('labels independent multimodal review without presenting it as human verification', () => {
+    expect(
+      videoAudioVerificationBadge({
+        status: 'passed',
+        gateVersion: 'video-final-v4',
+        verifiedAt: '2026-07-29T00:00:00.000Z',
+        audiovisualSyncReview: {
+          model: 'gemini-3.6-flash',
+          evidence: [
+            { startSeconds: 0.5, endSeconds: 2 },
+            { startSeconds: 4, endSeconds: 6 },
+          ],
+        },
+        coverage: {
+          playableVideo: 'verified',
+          sampledFrames: 'verified',
+          audibleAudio: 'verified',
+          audiovisualSync: 'verified_ai',
+          lipSyncProcessing: 'completed',
+        },
+      }),
+    ).toEqual({
+      label: '音画同步 AI 复核通过',
+      title:
+        '独立多模态模型已检查声音和嘴部运动；证据时间窗：0.5–2 秒、4–6 秒。这是自动复核，不替代人工逐帧验收',
+    });
+  });
+
+  it('does not surface a current-gate verified badge without auditable time windows', () => {
+    const unsubstantiated = toVideoRow(
+      row({
+        result: {
+          metadata: {
+            lane: 'video_creation',
+            attachments: [ATT],
+            qualityVerification: {
+              status: 'passed',
+              gateVersion: 'video-final-v4',
+              verifiedAt: '2026-07-29T00:00:00.000Z',
+              coverage: {
+                playableVideo: 'verified',
+                sampledFrames: 'verified',
+                audibleAudio: 'verified',
+                audiovisualSync: 'verified_ai',
+                lipSyncProcessing: 'completed',
+              },
+            },
+          },
+        },
+      }),
+    );
+
+    expect(unsubstantiated?.qualityVerification?.coverage).toBeUndefined();
+    expect(videoAudioVerificationBadge(unsubstantiated?.qualityVerification)).toBeNull();
+  });
+
   it('normalizes backend /files download URLs to the frontend /api/files path', () => {
     const out = toVideoRow(
       row({
@@ -515,7 +586,9 @@ describe('toVideoRow — 生成历史 only lists completed 成片 with an attach
   });
 
   it('DROPS failed (the face-detection failure no longer pollutes history)', () => {
-    expect(toVideoRow(row({ status: 'failed', result: { metadata: { lane: 'video_creation' } } }))).toBeNull();
+    expect(
+      toVideoRow(row({ status: 'failed', result: { metadata: { lane: 'video_creation' } } })),
+    ).toBeNull();
   });
 
   it('keeps review-needed video outputs when a downloadable attachment exists', () => {
@@ -539,21 +612,29 @@ describe('toVideoRow — 生成历史 only lists completed 成片 with an attach
   });
 
   it('DROPS executing (still generating)', () => {
-    expect(toVideoRow(row({ status: 'executing', result: { metadata: { lane: 'video_creation' } } }))).toBeNull();
+    expect(
+      toVideoRow(row({ status: 'executing', result: { metadata: { lane: 'video_creation' } } })),
+    ).toBeNull();
   });
 
   it('DROPS completed but NO attachment', () => {
-    expect(toVideoRow(row({ result: { metadata: { lane: 'video_creation', attachments: [] } } }))).toBeNull();
+    expect(
+      toVideoRow(row({ result: { metadata: { lane: 'video_creation', attachments: [] } } })),
+    ).toBeNull();
     expect(toVideoRow(row({ result: { metadata: { lane: 'video_creation' } } }))).toBeNull();
   });
 
   it('DROPS completed attachment missing sizeBytes (incomplete payload)', () => {
     const bad = { fileId: 'f', downloadUrl: '/api/files/f/download', filename: 'v.mp4' };
-    expect(toVideoRow(row({ result: { metadata: { lane: 'video_creation', attachments: [bad] } } }))).toBeNull();
+    expect(
+      toVideoRow(row({ result: { metadata: { lane: 'video_creation', attachments: [bad] } } })),
+    ).toBeNull();
   });
 
   it('DROPS non-video lane even when completed with an attachment', () => {
-    expect(toVideoRow(row({ result: { metadata: { lane: 'generate', attachments: [ATT] } } }))).toBeNull();
+    expect(
+      toVideoRow(row({ result: { metadata: { lane: 'generate', attachments: [ATT] } } })),
+    ).toBeNull();
   });
 
   it('DROPS junk input', () => {
@@ -627,7 +708,9 @@ describe('toImageRow — 图片历史 only lists completed image outputs', () =>
 
   it('DROPS failed or non-image outputs', () => {
     expect(toImageRow(imageRow({ status: 'failed' }))).toBeNull();
-    expect(toImageRow(imageRow({ result: { metadata: { executionMode: 'image', attachments: [] } } }))).toBeNull();
+    expect(
+      toImageRow(imageRow({ result: { metadata: { executionMode: 'image', attachments: [] } } })),
+    ).toBeNull();
     expect(
       toImageRow(
         imageRow({
@@ -733,11 +816,7 @@ describe('creative history filters', () => {
       status: ['completed', 'partial_success'],
     });
     expect(
-      creativeHistoryListInput(
-        'recent',
-        undefined,
-        Date.parse('2026-07-24T00:00:00.000Z'),
-      ),
+      creativeHistoryListInput('recent', undefined, Date.parse('2026-07-24T00:00:00.000Z')),
     ).toEqual({
       limit: 50,
       status: ['completed', 'partial_success'],
@@ -754,12 +833,9 @@ describe('creative history display copy', () => {
   ].join('\n\n');
 
   it('hides internal subject-consistency instructions from the visible title', () => {
-    expect(
-      creativeHistoryDisplayTitle(
-        { title: null, intent: lockedIntent },
-        'image',
-      ),
-    ).toBe('Keep the same blue ceramic mug on a walnut table.');
+    expect(creativeHistoryDisplayTitle({ title: null, intent: lockedIntent }, 'image')).toBe(
+      'Keep the same blue ceramic mug on a walnut table.',
+    );
   });
 
   it('detects locked-subject image history so the UI can show a concise badge', () => {
@@ -819,7 +895,8 @@ describe('creative history display copy', () => {
       creativeHistoryDisplayTitle(
         {
           title: null,
-          intent: '复刻视频：使用上传照片替换参考视频中的主角，并保留参考视频的动作、镜头、节奏和音频。',
+          intent:
+            '复刻视频：使用上传照片替换参考视频中的主角，并保留参考视频的动作、镜头、节奏和音频。',
           videoType: 'pet',
         },
         'video',

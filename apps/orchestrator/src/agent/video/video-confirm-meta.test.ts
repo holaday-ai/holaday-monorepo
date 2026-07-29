@@ -86,13 +86,25 @@ describe('videoQualityVerificationMetadata', () => {
     });
   });
 
-  it('stamps completed deliverables with an auditable quality-gate result', () => {
+  it('records independent audio-visual review separately from provider processing', () => {
     expect(
-      videoQualityVerificationMetadata(new Date('2026-07-25T06:00:00.000Z')),
+      videoAudioVerificationCoverage({
+        audibleAudioVerified: true,
+        lipSyncProcessingCompleted: true,
+        audiovisualSyncVerified: true,
+      }),
     ).toEqual({
+      audibleAudio: 'verified',
+      audiovisualSync: 'verified_ai',
+      lipSyncProcessing: 'completed',
+    });
+  });
+
+  it('stamps completed deliverables with an auditable quality-gate result', () => {
+    expect(videoQualityVerificationMetadata(new Date('2026-07-25T06:00:00.000Z'))).toEqual({
       qualityVerification: {
         status: 'passed',
-        gateVersion: 'video-final-v3',
+        gateVersion: 'video-final-v4',
         verifiedAt: '2026-07-25T06:00:00.000Z',
         coverage: {
           playableVideo: 'verified',
@@ -107,18 +119,15 @@ describe('videoQualityVerificationMetadata', () => {
 
   it('records the exact verification boundary for lip-synced deliverables', () => {
     expect(
-      videoQualityVerificationMetadata(
-        new Date('2026-07-25T06:00:00.000Z'),
-        {
-          audibleAudio: 'verified',
-          audiovisualSync: 'not_verified',
-          lipSyncProcessing: 'completed',
-        },
-      ),
+      videoQualityVerificationMetadata(new Date('2026-07-25T06:00:00.000Z'), {
+        audibleAudio: 'verified',
+        audiovisualSync: 'not_verified',
+        lipSyncProcessing: 'completed',
+      }),
     ).toEqual({
       qualityVerification: {
         status: 'passed',
-        gateVersion: 'video-final-v3',
+        gateVersion: 'video-final-v4',
         verifiedAt: '2026-07-25T06:00:00.000Z',
         coverage: {
           playableVideo: 'verified',
@@ -128,6 +137,32 @@ describe('videoQualityVerificationMetadata', () => {
           lipSyncProcessing: 'completed',
         },
       },
+    });
+  });
+
+  it('persists privacy-safe time evidence for a passed independent sync review', () => {
+    expect(
+      videoQualityVerificationMetadata(
+        new Date('2026-07-25T06:00:00.000Z'),
+        {
+          audibleAudio: 'verified',
+          audiovisualSync: 'verified_ai',
+          lipSyncProcessing: 'completed',
+        },
+        {
+          model: 'gemini-3.6-flash',
+          evidence: [
+            { startSeconds: 0.5, endSeconds: 2 },
+            { startSeconds: 4, endSeconds: 6 },
+          ],
+        },
+      ).qualityVerification.audiovisualSyncReview,
+    ).toEqual({
+      model: 'gemini-3.6-flash',
+      evidence: [
+        { startSeconds: 0.5, endSeconds: 2 },
+        { startSeconds: 4, endSeconds: 6 },
+      ],
     });
   });
 
@@ -156,12 +191,27 @@ describe('videoQualityVerificationMetadata', () => {
       metadata: {
         qualityVerification: {
           status: 'failed',
-          gateVersion: 'video-final-v3',
+          gateVersion: 'video-final-v4',
           verifiedAt: '2026-07-27T05:00:00.000Z',
           failedChecks: ['fused_hands', 'face_drift'],
         },
       },
     });
+  });
+
+  it('explains an audio-visual mismatch as a sync problem instead of missing audio', () => {
+    expect(
+      videoQualityFailureOutcome({
+        name: 'SimpleVideoError',
+        kind: 'quality',
+        failedChecks: ['audiovisual_sync_mismatch'],
+      }).failedChecks,
+    ).toEqual([
+      {
+        type: 'audiovisual_sync_mismatch',
+        detail: '成片声音与口型未同步',
+      },
+    ]);
   });
 
   it('keeps inconclusive verification distinct from a known failed verdict', () => {
@@ -175,13 +225,11 @@ describe('videoQualityVerificationMetadata', () => {
         new Date('2026-07-27T05:00:00.000Z'),
       ),
     ).toEqual({
-      failedChecks: [
-        { type: 'verifier_inconclusive', detail: '自动质检未能得出结论' },
-      ],
+      failedChecks: [{ type: 'verifier_inconclusive', detail: '自动质检未能得出结论' }],
       metadata: {
         qualityVerification: {
           status: 'unknown',
-          gateVersion: 'video-final-v3',
+          gateVersion: 'video-final-v4',
           verifiedAt: '2026-07-27T05:00:00.000Z',
           failedChecks: ['verifier_inconclusive'],
         },
@@ -252,8 +300,7 @@ describe('mapVideoFailureReason — safe, whitelisted, no leak', () => {
       name: 'VeoError',
       kind: 'quota_exhausted',
       status: 429,
-      detail:
-        'You exceeded your current quota. https://ai.dev/rate-limit account-plan-secret',
+      detail: 'You exceeded your current quota. https://ai.dev/rate-limit account-plan-secret',
     });
 
     expect(out).toBe(VIDEO_FAILURE_REASONS.providerQuota);

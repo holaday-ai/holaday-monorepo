@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { MediaIntegrityReport } from './ffmpeg-exec.js';
+import type { VideoAvSyncReview } from './video-av-sync-verifier.js';
 import {
   IP_MAX_AUDIO_MS,
   type IpFns,
@@ -62,14 +63,27 @@ function makeServices(durationMs = 8000) {
       reason: '人物、口型和字幕均通过',
     }),
   );
-  const inspectMediaIntegrity = vi.fn(async (): Promise<MediaIntegrityReport> => ({
-    durationMs,
-    hasVideo: true,
-    hasAudio: true,
-    frozenRatio: 0.1,
-    audioMeanVolumeDb: -24,
-    audioMaxVolumeDb: -8,
-  }));
+  const verifyAudioVisualSync = vi.fn(
+    async (): Promise<VideoAvSyncReview> => ({
+      status: 'pass',
+      reason: '口播声音和嘴部运动同步。',
+      evidence: [
+        { startSeconds: 0.5, endSeconds: 2, observation: '语音和开口同时开始' },
+        { startSeconds: 4, endSeconds: 6, observation: '停顿时嘴部同步停止' },
+      ],
+      model: 'gemini-3.6-flash',
+    }),
+  );
+  const inspectMediaIntegrity = vi.fn(
+    async (): Promise<MediaIntegrityReport> => ({
+      durationMs,
+      hasVideo: true,
+      hasAudio: true,
+      frozenRatio: 0.1,
+      audioMeanVolumeDb: -24,
+      audioMaxVolumeDb: -8,
+    }),
+  );
   const overrides: Partial<IpFns> = {
     synthesizeSpeech: synthesizeSpeech as unknown as IpFns['synthesizeSpeech'],
     runLipSync: runLipSync as unknown as IpFns['runLipSync'],
@@ -90,6 +104,7 @@ function makeServices(durationMs = 8000) {
     workdir: '/tmp/ipwd',
     logger,
     verifyFinalVideo,
+    verifyAudioVisualSync,
     overrides,
   };
   return {
@@ -107,6 +122,7 @@ function makeServices(durationMs = 8000) {
       presignByFileId,
       deleteOutput,
       verifyFinalVideo,
+      verifyAudioVisualSync,
       inspectMediaIntegrity,
     },
   };
@@ -225,6 +241,10 @@ describe('runIpVideoCreation — B 架构单 clip 口播', () => {
         ],
       }),
     );
+    expect(mocks.verifyAudioVisualSync).toHaveBeenCalledWith({
+      videoPath: '/tmp/ipwd/ip-final.mp4',
+      durationMs: 8000,
+    });
     // ③ compose + 最终 store + 首帧 poster
     expect(mocks.runFfmpeg).toHaveBeenCalledTimes(2); // compose + poster
     expect(mocks.storeOutputFile).toHaveBeenCalledWith(
@@ -238,6 +258,67 @@ describe('runIpVideoCreation — B 架构单 clip 口播', () => {
     );
     expect(res.fileId).toBe('f_video.mp4');
     expect(res.totalDurationMs).toBe(8000);
+    expect(res.audiovisualSyncVerified).toBe(true);
+    expect(res.audiovisualSyncReview).toEqual({
+      model: 'gemini-3.6-flash',
+      evidence: [
+        { startSeconds: 0.5, endSeconds: 2 },
+        { startSeconds: 4, endSeconds: 6 },
+      ],
+    });
+  });
+
+  it('blocks an IP video when independent review finds audio-visual drift', async () => {
+    const { svc, mocks } = makeServices(8000);
+    logger.warn.mockClear();
+    mocks.verifyAudioVisualSync.mockResolvedValueOnce({
+      status: 'fail',
+      reason: '声音结束后嘴部仍持续运动。',
+      evidence: [{ startSeconds: 4.5, endSeconds: 6.5, observation: '声音停止后嘴部仍运动' }],
+      model: 'gemini-3.6-flash',
+    });
+
+    await expect(
+      runIpVideoCreation({ copyText: '欢迎关注我们的新品。' }, CFG, CTX, {}, svc),
+    ).rejects.toMatchObject({
+      name: 'IpVideoError',
+      kind: 'quality',
+      failedChecks: ['audiovisual_sync_mismatch'],
+    });
+
+    expect(mocks.runLipSync).toHaveBeenCalledTimes(1);
+    expect(mocks.storeOutputFile).not.toHaveBeenCalled();
+    expect(logger.warn).toHaveBeenCalledWith(
+      {
+        status: 'fail',
+        model: 'gemini-3.6-flash',
+        evidenceWindows: [{ startSeconds: 4.5, endSeconds: 6.5 }],
+      },
+      'video: IP audio-visual sync review rejected generated artifact',
+    );
+    expect(JSON.stringify(logger.warn.mock.calls)).not.toContain('声音结束后嘴部仍持续运动');
+    expect(JSON.stringify(logger.warn.mock.calls)).not.toContain('声音停止后嘴部仍运动');
+  });
+
+  it('keeps the IP artifact but does not claim verification when review is inconclusive', async () => {
+    const { svc, mocks } = makeServices(8000);
+    mocks.verifyAudioVisualSync.mockResolvedValueOnce({
+      status: 'unknown',
+      reason: '人物嘴部被遮挡，无法可靠判断。',
+      evidence: [],
+      model: 'gemini-3.6-flash',
+    });
+
+    const result = await runIpVideoCreation(
+      { copyText: '欢迎关注我们的新品。' },
+      CFG,
+      CTX,
+      {},
+      svc,
+    );
+
+    expect(result.audiovisualSyncVerified).toBe(false);
+    expect(mocks.storeOutputFile).toHaveBeenCalledTimes(1);
   });
 
   it('音频 >40s → too_long(不调 fal,B 平价边界)', async () => {
@@ -352,8 +433,7 @@ describe('runIpVideoCreation — B 架构单 clip 口播', () => {
       ).rejects.toMatchObject({
         name: 'IpVideoError',
         kind: expectedKind,
-        failedChecks:
-          status === 'fail' ? ['fused_hands', 'face_drift'] : ['verifier_inconclusive'],
+        failedChecks: status === 'fail' ? ['fused_hands', 'face_drift'] : ['verifier_inconclusive'],
         qualityReason: status === 'fail' ? '人物手部异常且面部漂移' : '质检服务未得出结论',
       });
 

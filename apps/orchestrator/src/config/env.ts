@@ -73,6 +73,8 @@ const schema = z.object({
    */
   GEMINI_IMAGE_MODEL: z.string().default('gemini-3.1-flash-image'),
   GEMINI_IMAGE_MODEL_PRO: z.string().default('gemini-3-pro-image'),
+  /** Independent multimodal review for final lip-synced video artifacts. */
+  GEMINI_VIDEO_REVIEW_MODEL: z.string().default('gemini-3.6-flash'),
 
   /**
    * Phase 1 #4 — video creation pipeline (script → Qwen3-TTS-VC voice
@@ -112,9 +114,7 @@ const schema = z.object({
    */
   WANXIANG_I2V_MODEL: z.string().default('wan2.2-i2v-flash'),
   HAPPYHORSE_I2V_MODEL: z.string().default('happyhorse-1.0-i2v'),
-  FAL_LIPSYNC_MODEL: z
-    .literal('fal-ai/sync-lipsync/v3')
-    .default('fal-ai/sync-lipsync/v3'),
+  FAL_LIPSYNC_MODEL: z.literal('fal-ai/sync-lipsync/v3').default('fal-ai/sync-lipsync/v3'),
   /**
    * Clone-video-only lip-sync model. Kept separate from the IP-person lane
    * because the two workflows have different duration and identity needs.

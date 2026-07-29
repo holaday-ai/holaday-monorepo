@@ -14,14 +14,16 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { lipSyncMaxWaitMs, runLipSync } from './fal-lipsync-client.js';
-import {
-  ffprobeDurationMs,
-  inspectMediaIntegrity,
-  runFfmpeg,
-} from './ffmpeg-exec.js';
+import { ffprobeDurationMs, inspectMediaIntegrity, runFfmpeg } from './ffmpeg-exec.js';
 import { synthesizeSpeech } from './qwen-voice-clone-client.js';
 import { buildAss, buildTimeline } from './timeline.js';
 import type { VideoSegment } from './types.js';
+import {
+  type VideoAvSyncAudit,
+  type VideoAvSyncReview,
+  videoAvSyncAudit,
+  videoAvSyncLogContext,
+} from './video-av-sync-verifier.js';
 import { buildComposeCommand } from './video-compose.js';
 import { downloadToBuffer, downloadToFile } from './video-http.js';
 import { type AspectRatio, resolveAspect } from './video-lane-simple.js';
@@ -105,6 +107,10 @@ export interface IpVideoServices {
   workdir: string;
   logger: PipelineLogger;
   verifyFinalVideo(input: VerifyFinalVideoQualityInput): Promise<VideoQualityResult>;
+  verifyAudioVisualSync(input: {
+    videoPath: string;
+    durationMs: number;
+  }): Promise<VideoAvSyncReview>;
   overrides?: Partial<IpFns>;
 }
 
@@ -175,6 +181,8 @@ export interface IpVideoResult {
   readonly fileId: string;
   readonly downloadUrl: string;
   readonly totalDurationMs: number;
+  readonly audiovisualSyncVerified: boolean;
+  readonly audiovisualSyncReview?: VideoAvSyncAudit;
 }
 
 /**
@@ -196,6 +204,9 @@ export async function runIpVideoCreation(
   if (!text) throw new IpVideoError('文案为空', 'config');
   if (typeof svc.verifyFinalVideo !== 'function') {
     throw new IpVideoError('video quality verifier not configured', 'config');
+  }
+  if (typeof svc.verifyAudioVisualSync !== 'function') {
+    throw new IpVideoError('audio-visual sync verifier not configured', 'config');
   }
 
   const fns = { ...realFns(), ...(svc.overrides ?? {}) };
@@ -328,10 +339,7 @@ export async function runIpVideoCreation(
   if (!finalIntegrity.hasVideo) mediaFailures.push('output_video_missing');
   if (!finalIntegrity.hasAudio) {
     mediaFailures.push('output_audio_missing');
-  } else if (
-    finalIntegrity.audioMaxVolumeDb === null ||
-    finalIntegrity.audioMaxVolumeDb <= -50
-  ) {
+  } else if (finalIntegrity.audioMaxVolumeDb === null || finalIntegrity.audioMaxVolumeDb <= -50) {
     mediaFailures.push('output_audio_inaudible');
   }
   if (finalIntegrity.frozenRatio >= 0.95) mediaFailures.push('output_motion_missing');
@@ -380,6 +388,30 @@ export async function runIpVideoCreation(
       verification.reason,
     );
   }
+  const syncReview = await svc.verifyAudioVisualSync({
+    videoPath: outPath,
+    durationMs: finalDurationMs,
+  });
+  if (syncReview.status === 'fail') {
+    svc.logger.warn(
+      videoAvSyncLogContext(syncReview),
+      'video: IP audio-visual sync review rejected generated artifact',
+    );
+    throw new IpVideoError(
+      'IP video failed audio-visual sync verification',
+      'quality',
+      ['audiovisual_sync_mismatch'],
+      '独立音画同步复核发现持续不同步。',
+    );
+  }
+  const audiovisualSyncVerified = syncReview.status === 'pass';
+  const audiovisualSyncReview = videoAvSyncAudit(syncReview);
+  if (syncReview.status === 'unknown') {
+    svc.logger.warn(
+      videoAvSyncLogContext(syncReview),
+      'video: IP audio-visual sync review was inconclusive',
+    );
+  }
 
   const stored = await svc.storeOutputFile({
     filename: 'video.mp4',
@@ -406,5 +438,7 @@ export async function runIpVideoCreation(
     fileId: stored.fileId,
     downloadUrl: `/api/files/${stored.fileId}/download`,
     totalDurationMs: finalDurationMs,
+    audiovisualSyncVerified,
+    ...(audiovisualSyncReview ? { audiovisualSyncReview } : {}),
   };
 }

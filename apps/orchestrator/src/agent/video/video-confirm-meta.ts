@@ -9,20 +9,28 @@
 
 export type VideoType = 'normal' | 'pet' | 'ip_person';
 
-export const VIDEO_QUALITY_GATE_VERSION = 'video-final-v3';
+export const VIDEO_QUALITY_GATE_VERSION = 'video-final-v4';
 
 export interface VideoQualityVerificationCoverage {
   playableVideo: 'verified';
   sampledFrames: 'verified';
   audibleAudio: 'verified' | 'not_verified';
-  audiovisualSync: 'not_verified' | 'not_applicable';
+  audiovisualSync: 'verified_ai' | 'not_verified' | 'not_applicable';
   lipSyncProcessing: 'completed' | 'not_applicable';
+}
+
+export interface VideoAudioVisualSyncAudit {
+  model: string;
+  evidence: Array<{
+    startSeconds: number;
+    endSeconds: number;
+  }>;
 }
 
 export type VideoAudioVerificationCoverage =
   | {
       audibleAudio: 'verified';
-      audiovisualSync: 'not_verified';
+      audiovisualSync: 'verified_ai' | 'not_verified';
       lipSyncProcessing: 'completed';
     }
   | {
@@ -34,11 +42,12 @@ export type VideoAudioVerificationCoverage =
 export function videoAudioVerificationCoverage(input?: {
   audibleAudioVerified?: boolean;
   lipSyncProcessingCompleted?: boolean;
+  audiovisualSyncVerified?: boolean;
 }): VideoAudioVerificationCoverage {
   if (input?.audibleAudioVerified && input.lipSyncProcessingCompleted) {
     return {
       audibleAudio: 'verified',
-      audiovisualSync: 'not_verified',
+      audiovisualSync: input.audiovisualSyncVerified ? 'verified_ai' : 'not_verified',
       lipSyncProcessing: 'completed',
     };
   }
@@ -52,12 +61,14 @@ export function videoAudioVerificationCoverage(input?: {
 export function videoQualityVerificationMetadata(
   verifiedAt = new Date(),
   audioCoverage: VideoAudioVerificationCoverage = videoAudioVerificationCoverage(),
+  audiovisualSyncReview?: VideoAudioVisualSyncAudit,
 ): {
   qualityVerification: {
     status: 'passed';
     gateVersion: typeof VIDEO_QUALITY_GATE_VERSION;
     verifiedAt: string;
     coverage: VideoQualityVerificationCoverage;
+    audiovisualSyncReview?: VideoAudioVisualSyncAudit;
   };
 } {
   return {
@@ -70,6 +81,9 @@ export function videoQualityVerificationMetadata(
         sampledFrames: 'verified',
         ...audioCoverage,
       },
+      ...(audioCoverage.audiovisualSync === 'verified_ai' && audiovisualSyncReview
+        ? { audiovisualSyncReview }
+        : {}),
     },
   };
 }
@@ -93,8 +107,7 @@ function safeQualityChecks(err: unknown): string[] {
   return [
     ...new Set(
       checks.filter(
-        (check): check is string =>
-          typeof check === 'string' && SAFE_QUALITY_CHECK_RE.test(check),
+        (check): check is string => typeof check === 'string' && SAFE_QUALITY_CHECK_RE.test(check),
       ),
     ),
   ].slice(0, MAX_QUALITY_CHECKS);
@@ -106,6 +119,7 @@ function qualityCheckDetail(check: string): string {
     return '成片手部或肢体结构异常';
   }
   if (/action|motion|movement|sequence|stage/.test(check)) return '要求的动作或阶段未完整呈现';
+  if (/audiovisual|lip.?sync|sync_mismatch/.test(check)) return '成片声音与口型未同步';
   if (/audio|voice|sound|volume|silent/.test(check)) return '成片缺少可听声音';
   if (/subtitle|text|brand|logo|watermark|copy/.test(check)) {
     return '成片文字或品牌标识未准确呈现';
@@ -200,10 +214,8 @@ export const VIDEO_FAILURE_REASONS = {
   tooLong: '文案过长，请缩短后重试。',
   ipAssets: 'IP 素材或授权缺失，请重新完成「IP 人物」三步素材准备后重试。',
   invalidOptions: '所选画质与时长不兼容，请返回修改参数后重试。',
-  providerQuota:
-    '当前视频模型暂时不可用，本次未生成成片。请切换其他模型，或稍后重试。',
-  cloneProviderUnavailable:
-    '当前复刻视频模型暂时不可用，本次未开始生成成片。请稍后重试。',
+  providerQuota: '当前视频模型暂时不可用，本次未生成成片。请切换其他模型，或稍后重试。',
+  cloneProviderUnavailable: '当前复刻视频模型暂时不可用，本次未开始生成成片。请稍后重试。',
   cloneIncompatible:
     '主角照片与参考视频不适配，本次未开始付费生成。当前仅支持单人换单人，请使用清晰单人照片，并选择人物取景和身体比例相近的参考视频。',
   cloneCompatibilityUnavailable:

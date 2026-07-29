@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { MediaIntegrityReport } from './ffmpeg-exec.js';
+import type { VideoAvSyncReview } from './video-av-sync-verifier.js';
 import {
   type CloneVideoFns,
   type CloneVideoServices,
@@ -90,14 +91,28 @@ function makeServices() {
       reason: '单人主体和参考视频取景相容',
     }),
   );
-  const inspectMediaIntegrity = vi.fn(async (): Promise<MediaIntegrityReport> => ({
-    durationMs: 8200,
-    hasVideo: true,
-    hasAudio: true,
-    frozenRatio: 0.1,
-    audioMeanVolumeDb: -24,
-    audioMaxVolumeDb: -8,
-  }));
+  const verifyAudioVisualSync = vi.fn(
+    async (): Promise<VideoAvSyncReview> => ({
+      status: 'pass',
+      reason: '可见口播片段的嘴部运动与声音同步。',
+      evidence: [
+        { startSeconds: 1, endSeconds: 2.5, observation: '语音和开口同时开始' },
+        { startSeconds: 4, endSeconds: 5.5, observation: '停顿和闭口同时发生' },
+      ],
+      model: 'gemini-3.6-flash',
+    }),
+  );
+  const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+  const inspectMediaIntegrity = vi.fn(
+    async (): Promise<MediaIntegrityReport> => ({
+      durationMs: 8200,
+      hasVideo: true,
+      hasAudio: true,
+      frozenRatio: 0.1,
+      audioMeanVolumeDb: -24,
+      audioMaxVolumeDb: -8,
+    }),
+  );
   const overrides: Partial<CloneVideoFns> = {
     generateWanAnimateMix:
       generateWanAnimateMix as unknown as CloneVideoFns['generateWanAnimateMix'],
@@ -119,9 +134,10 @@ function makeServices() {
     presignByFileId,
     deleteOutput,
     workdir: '/tmp/clone-video',
-    logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    logger,
     verifyCloneInputs,
     verifyFinalVideo,
+    verifyAudioVisualSync,
     overrides,
   } as CloneVideoServices & {
     verifyCloneInputs(input: unknown): Promise<VideoQualityResult>;
@@ -146,7 +162,9 @@ function makeServices() {
       deleteOutput,
       verifyCloneInputs,
       verifyFinalVideo,
+      verifyAudioVisualSync,
       inspectMediaIntegrity,
+      logger,
     },
   };
 }
@@ -249,6 +267,10 @@ describe('runCloneVideoCreation', () => {
       mimetype: 'video/mp4',
       sourcePath: '/tmp/clone-video/clone-final.mp4',
     });
+    expect(mocks.verifyAudioVisualSync).toHaveBeenCalledWith({
+      videoPath: '/tmp/clone-video/clone-final.mp4',
+      durationMs: 8200,
+    });
     expect(mocks.runFfmpeg).toHaveBeenCalledWith(
       {
         bin: 'ffmpeg',
@@ -280,6 +302,14 @@ describe('runCloneVideoCreation', () => {
       durationSeconds: 8.2,
       audibleAudioVerified: true,
       lipSyncProcessingCompleted: true,
+      audiovisualSyncVerified: true,
+      audiovisualSyncReview: {
+        model: 'gemini-3.6-flash',
+        evidence: [
+          { startSeconds: 1, endSeconds: 2.5 },
+          { startSeconds: 4, endSeconds: 5.5 },
+        ],
+      },
     });
   });
 
@@ -323,6 +353,71 @@ describe('runCloneVideoCreation', () => {
     );
     expect(result.audibleAudioVerified).toBe(false);
     expect(result.lipSyncProcessingCompleted).toBe(false);
+    expect(result.audiovisualSyncVerified).toBe(false);
+    expect(mocks.verifyAudioVisualSync).not.toHaveBeenCalled();
+  });
+
+  it('rejects a clone with an independently observed audio-visual mismatch', async () => {
+    const { services, mocks } = makeServices();
+    mocks.verifyAudioVisualSync.mockResolvedValueOnce({
+      status: 'fail',
+      reason: '嘴部运动持续晚于声音。',
+      evidence: [{ startSeconds: 1, endSeconds: 3, observation: '声音开始后嘴部才开始运动' }],
+      model: 'gemini-3.6-flash',
+    });
+
+    await expect(
+      runCloneVideoCreation(
+        {
+          imageUrl: 'https://r2.example/subject.jpg',
+          referenceVideoUrl: 'https://r2.example/reference.mp4',
+        },
+        CFG,
+        { mode: 'wan-pro' },
+        services,
+      ),
+    ).rejects.toMatchObject({
+      name: 'SimpleVideoError',
+      kind: 'quality',
+      failedChecks: ['audiovisual_sync_mismatch'],
+    });
+
+    expect(mocks.generateWanAnimateMix).toHaveBeenCalledTimes(1);
+    expect(mocks.runLipSync).toHaveBeenCalledTimes(1);
+    expect(mocks.storeOutputFile).not.toHaveBeenCalled();
+    expect(mocks.logger.warn).toHaveBeenCalledWith(
+      {
+        status: 'fail',
+        model: 'gemini-3.6-flash',
+        evidenceWindows: [{ startSeconds: 1, endSeconds: 3 }],
+      },
+      'video: clone audio-visual sync review rejected generated artifact',
+    );
+    expect(JSON.stringify(mocks.logger.warn.mock.calls)).not.toContain('嘴部运动持续晚于声音');
+    expect(JSON.stringify(mocks.logger.warn.mock.calls)).not.toContain('声音开始后嘴部才开始运动');
+  });
+
+  it('keeps the clone artifact but does not claim verification when review is inconclusive', async () => {
+    const { services, mocks } = makeServices();
+    mocks.verifyAudioVisualSync.mockResolvedValueOnce({
+      status: 'unknown',
+      reason: '人物嘴部被遮挡，无法可靠判断。',
+      evidence: [],
+      model: 'gemini-3.6-flash',
+    });
+
+    const result = await runCloneVideoCreation(
+      {
+        imageUrl: 'https://r2.example/subject.jpg',
+        referenceVideoUrl: 'https://r2.example/reference.mp4',
+      },
+      CFG,
+      { mode: 'wan-pro' },
+      services,
+    );
+
+    expect(result.audiovisualSyncVerified).toBe(false);
+    expect(mocks.storeOutputFile).toHaveBeenCalledTimes(1);
   });
 
   it('removes the bridged provider video when its public URL cannot be issued', async () => {

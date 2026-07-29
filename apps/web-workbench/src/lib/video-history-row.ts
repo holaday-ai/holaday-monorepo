@@ -1,7 +1,7 @@
 import type { FileDownloadPayload } from '@/components/FileDownloadCard';
 import {
-  downloadFileAvailability,
   type DownloadFileAvailability,
+  downloadFileAvailability,
 } from '@/lib/file-download-card-copy';
 
 /**
@@ -11,7 +11,11 @@ import {
 
 /** Backend-stamped 成片 type (deriveVideoType in video-confirm-meta.ts). */
 export type VideoType = 'normal' | 'pet' | 'ip_person';
-const CURRENT_VIDEO_QUALITY_GATE_VERSION = 'video-final-v3';
+const CURRENT_VIDEO_QUALITY_GATE_VERSION = 'video-final-v4';
+const SUPPORTED_VIDEO_QUALITY_GATE_VERSIONS = new Set([
+  'video-final-v3',
+  CURRENT_VIDEO_QUALITY_GATE_VERSION,
+]);
 export type CreativeHistoryMode = 'video' | 'image';
 export type CreativeHistoryFilter = 'all' | 'recent' | 'pinned';
 export type CreativeHistoryTerminalStatus = 'completed' | 'partial_success';
@@ -34,9 +38,7 @@ export function creativeHistoryListInput(
     ...(cursor === undefined ? {} : { cursor }),
     status: ['completed', 'partial_success'],
     ...(filter === 'pinned' ? { starred: true as const } : {}),
-    ...(filter === 'recent'
-      ? { dateFrom: new Date(now - 7 * 24 * 60 * 60 * 1000) }
-      : {}),
+    ...(filter === 'recent' ? { dateFrom: new Date(now - 7 * 24 * 60 * 60 * 1000) } : {}),
   };
 }
 
@@ -56,6 +58,13 @@ export interface VideoResultMeta {
       audibleAudio?: string;
       audiovisualSync?: string;
       lipSyncProcessing?: string;
+    };
+    audiovisualSyncReview?: {
+      model?: string;
+      evidence?: ReadonlyArray<{
+        startSeconds?: number;
+        endSeconds?: number;
+      }>;
     };
   };
   attachments?: ReadonlyArray<{
@@ -96,14 +105,21 @@ export interface VideoRow {
       playableVideo: 'verified';
       sampledFrames: 'verified';
       audibleAudio: 'verified' | 'not_verified';
-      audiovisualSync: 'not_verified' | 'not_applicable';
+      audiovisualSync: 'verified_ai' | 'not_verified' | 'not_applicable';
       lipSyncProcessing?: 'completed' | 'not_applicable';
+    };
+    audiovisualSyncReview?: {
+      model: string;
+      evidence: Array<{
+        startSeconds: number;
+        endSeconds: number;
+      }>;
     };
   };
 }
 
 export interface VideoAudioVerificationBadge {
-  label: '口型已处理 · 准确度待确认' | '音画同步未验证';
+  label: '音画同步 AI 复核通过' | '口型已处理 · 准确度待确认' | '音画同步未验证';
   title: string;
 }
 
@@ -111,6 +127,22 @@ export function videoAudioVerificationBadge(
   verification: VideoRow['qualityVerification'],
 ): VideoAudioVerificationBadge | null {
   const coverage = verification?.coverage;
+  if (
+    verification?.status === 'passed' &&
+    coverage?.audibleAudio === 'verified' &&
+    coverage.audiovisualSync === 'verified_ai' &&
+    coverage.lipSyncProcessing === 'completed' &&
+    verification.audiovisualSyncReview?.evidence.length
+  ) {
+    const windows =
+      verification.audiovisualSyncReview?.evidence
+        .map(({ startSeconds, endSeconds }) => `${startSeconds}–${endSeconds} 秒`)
+        .join('、') ?? '';
+    return {
+      label: '音画同步 AI 复核通过',
+      title: `独立多模态模型已检查声音和嘴部运动；证据时间窗：${windows}。这是自动复核，不替代人工逐帧验收`,
+    };
+  }
   if (
     verification?.status !== 'passed' ||
     coverage?.audibleAudio !== 'verified' ||
@@ -145,27 +177,20 @@ export type CreativeHistoryPreviewAvailability =
   | 'missing';
 
 export function creativeHistoryPreviewAvailability(options: {
-  download:
-    | Pick<FileDownloadPayload, 'expiresAt' | 'unavailable'>
-    | undefined;
+  download: Pick<FileDownloadPayload, 'expiresAt' | 'unavailable'> | undefined;
   posterUrl?: string;
   posterUnavailable?: boolean;
   unavailablePosterUrls: ReadonlySet<string>;
   now?: number;
 }): CreativeHistoryPreviewAvailability {
-  const artifactAvailability = creativeHistoryArtifactAvailability(
-    options.download,
-    options.now,
-  );
+  const artifactAvailability = creativeHistoryArtifactAvailability(options.download, options.now);
   if (artifactAvailability === 'expired') {
     return 'expired';
   }
   if (artifactAvailability === 'unavailable') return 'unavailable';
   if (options.posterUnavailable === true) return 'unavailable';
   if (!options.posterUrl) return 'missing';
-  return options.unavailablePosterUrls.has(options.posterUrl)
-    ? 'unavailable'
-    : 'available';
+  return options.unavailablePosterUrls.has(options.posterUrl) ? 'unavailable' : 'available';
 }
 
 export interface CreativeHistoryLoadState {
@@ -245,9 +270,7 @@ export function nextCreativeHistoryVisibleCount(
   return Math.min(total, current + pageSize);
 }
 
-export function canChangeCreativeHistoryFilter(
-  pinningTaskId: string | null,
-): boolean {
+export function canChangeCreativeHistoryFilter(pinningTaskId: string | null): boolean {
   return pinningTaskId === null;
 }
 
@@ -256,11 +279,7 @@ export function canLoadOlderCreativeHistory(options: {
   loadingMore: boolean;
   nextCursor: number | null;
 }): boolean {
-  return (
-    !options.loading &&
-    !options.loadingMore &&
-    options.nextCursor !== null
-  );
+  return !options.loading && !options.loadingMore && options.nextCursor !== null;
 }
 
 export function isVideoLane(lane: string | undefined): boolean {
@@ -276,13 +295,53 @@ export function asVideoType(value: unknown): VideoType | undefined {
   return value === 'normal' || value === 'pet' || value === 'ip_person' ? value : undefined;
 }
 
+function asAudioVisualSyncReview(
+  value: NonNullable<VideoResultMeta['qualityVerification']>['audiovisualSyncReview'],
+): NonNullable<NonNullable<VideoRow['qualityVerification']>['audiovisualSyncReview']> | undefined {
+  if (
+    typeof value?.model !== 'string' ||
+    value.model.length === 0 ||
+    value.model.length > 100 ||
+    !Array.isArray(value.evidence)
+  ) {
+    return undefined;
+  }
+  const evidence = value.evidence
+    .map(({ startSeconds, endSeconds }) => ({ startSeconds, endSeconds }))
+    .filter(
+      (
+        window,
+      ): window is {
+        startSeconds: number;
+        endSeconds: number;
+      } =>
+        Number.isFinite(window.startSeconds) &&
+        Number.isFinite(window.endSeconds) &&
+        typeof window.startSeconds === 'number' &&
+        typeof window.endSeconds === 'number' &&
+        window.startSeconds >= 0 &&
+        window.endSeconds > window.startSeconds,
+    )
+    .sort(
+      (left, right) => left.startSeconds - right.startSeconds || left.endSeconds - right.endSeconds,
+    )
+    .slice(0, 8);
+  if (evidence.length === 0) return undefined;
+  for (let index = 1; index < evidence.length; index += 1) {
+    const previous = evidence[index - 1];
+    const current = evidence[index];
+    if (!previous || !current || current.startSeconds < previous.endSeconds) return undefined;
+  }
+  return { model: value.model, evidence };
+}
+
 function asPassedQualityVerification(
   value: VideoResultMeta['qualityVerification'],
 ): VideoRow['qualityVerification'] {
   if (
     value?.status !== 'passed' ||
     typeof value.gateVersion !== 'string' ||
-    value.gateVersion !== CURRENT_VIDEO_QUALITY_GATE_VERSION ||
+    !SUPPORTED_VIDEO_QUALITY_GATE_VERSIONS.has(value.gateVersion) ||
     typeof value.verifiedAt !== 'string' ||
     value.verifiedAt.length === 0
   ) {
@@ -295,16 +354,22 @@ function asPassedQualityVerification(
     lipSyncProcessing === 'completed' || lipSyncProcessing === 'not_applicable'
       ? lipSyncProcessing
       : undefined;
+  const audiovisualSyncReview = asAudioVisualSyncReview(value.audiovisualSyncReview);
   const hasLegalAudioCoverage =
+    (value.gateVersion === CURRENT_VIDEO_QUALITY_GATE_VERSION &&
+      audibleAudio === 'verified' &&
+      audiovisualSync === 'verified_ai' &&
+      lipSyncProcessing === 'completed' &&
+      audiovisualSyncReview !== undefined) ||
     (audibleAudio === 'verified' &&
       audiovisualSync === 'not_verified' &&
       (lipSyncProcessing === undefined || lipSyncProcessing === 'completed')) ||
     (audibleAudio === 'not_verified' &&
       audiovisualSync === 'not_applicable' &&
       (lipSyncProcessing === undefined || lipSyncProcessing === 'not_applicable'));
-  const coverage: NonNullable<
-    NonNullable<VideoRow['qualityVerification']>['coverage']
-  > | undefined =
+  const coverage:
+    | NonNullable<NonNullable<VideoRow['qualityVerification']>['coverage']>
+    | undefined =
     value.coverage?.playableVideo === 'verified' &&
     value.coverage.sampledFrames === 'verified' &&
     hasLegalAudioCoverage
@@ -312,9 +377,7 @@ function asPassedQualityVerification(
           playableVideo: 'verified' as const,
           sampledFrames: 'verified' as const,
           audibleAudio: audibleAudio as 'verified' | 'not_verified',
-          audiovisualSync: audiovisualSync as
-            | 'not_verified'
-            | 'not_applicable',
+          audiovisualSync: audiovisualSync as 'verified_ai' | 'not_verified' | 'not_applicable',
           ...(normalizedLipSyncProcessing
             ? { lipSyncProcessing: normalizedLipSyncProcessing }
             : {}),
@@ -325,6 +388,9 @@ function asPassedQualityVerification(
     gateVersion: value.gateVersion,
     verifiedAt: value.verifiedAt,
     ...(coverage ? { coverage } : {}),
+    ...(coverage?.audiovisualSync === 'verified_ai' && audiovisualSyncReview
+      ? { audiovisualSyncReview }
+      : {}),
   };
 }
 
@@ -413,7 +479,7 @@ export function toVideoRow(raw: unknown): VideoRow | null {
   });
   const posterUrl =
     typeof att.posterUrl === 'string' && att.posterUrl.length > 0
-      ? normaliseAttachmentDownloadUrl(att.posterUrl) ?? undefined
+      ? (normaliseAttachmentDownloadUrl(att.posterUrl) ?? undefined)
       : undefined;
   const qualityVerification = asPassedQualityVerification(meta?.qualityVerification);
   return {
@@ -432,9 +498,7 @@ export function toVideoRow(raw: unknown): VideoRow | null {
     },
     ...(videoType ? { videoType } : {}),
     ...(posterUrl ? { posterUrl } : {}),
-    ...(att.posterAvailability === 'unavailable'
-      ? { posterUnavailable: true }
-      : {}),
+    ...(att.posterAvailability === 'unavailable' ? { posterUnavailable: true } : {}),
     ...(qualityVerification ? { qualityVerification } : {}),
     starred: r.starred === true,
     starredAt: r.starredAt ?? null,
@@ -503,9 +567,7 @@ export function filterCreativeHistoryRows(
   const scopedRows = rows.filter((row) => {
     const filename = row.download?.filename ?? '';
     const imageFile = /\.(png|jpe?g|webp|gif)$/i.test(filename);
-    return mode === 'image'
-      ? imageFile
-      : !imageFile && (row.videoType ?? 'normal') === videoType;
+    return mode === 'image' ? imageFile : !imageFile && (row.videoType ?? 'normal') === videoType;
   });
   if (filter === 'recent') {
     return scopedRows.filter((row) => isRecentCreativeHistoryRow(row.createdAt, now));
@@ -562,10 +624,7 @@ function isDownloadableTerminalOutput(status: string): boolean {
   return status === 'completed' || status === 'partial_success';
 }
 
-function isRecentCreativeHistoryRow(
-  value: string | number | Date,
-  now: number,
-): boolean {
+function isRecentCreativeHistoryRow(value: string | number | Date, now: number): boolean {
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) return false;
   return now - date.getTime() <= 7 * 24 * 60 * 60 * 1000;

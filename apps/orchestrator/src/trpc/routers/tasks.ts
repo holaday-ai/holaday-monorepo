@@ -104,6 +104,7 @@ import {
   videoAudioVerificationCoverage,
   videoQualityFailureOutcome,
   videoQualityVerificationMetadata,
+  type VideoAudioVisualSyncAudit,
   type VideoAudioVerificationCoverage,
 } from '../../agent/video/video-confirm-meta.js';
 import {
@@ -6785,6 +6786,9 @@ export const tasksRouter = router({
         const { createAnthropicVideoQualityAnalyzer, verifyFinalVideoQuality } = await import(
           '../../agent/video/video-quality-verifier.js'
         );
+        const { verifyAudioVisualSync } = await import(
+          '../../agent/video/video-av-sync-verifier.js'
+        );
         const { verifyCloneVideoCompatibility } = await import(
           '../../agent/video/video-clone-compatibility.js'
         );
@@ -6830,6 +6834,23 @@ export const tasksRouter = router({
             readFile: (filePath) => fsp.readFile(filePath),
             analyzeFrames: analyzeVideoQuality,
           });
+        const reviewAudioVisualSync = (input: {
+          videoPath: string;
+          durationMs: number;
+        }) =>
+          verifyAudioVisualSync(
+            {
+              ...input,
+              workdir,
+              apiKey: appEnv.GEMINI_API_KEY,
+              baseUrl: appEnv.GEMINI_BASE_URL,
+              model: appEnv.GEMINI_VIDEO_REVIEW_MODEL,
+            },
+            {
+              runFfmpeg,
+              readFile: (filePath) => fsp.readFile(filePath),
+            },
+          );
         // 仅最终 video.mp4 落用户文件;中间段产物只用 workdir 副本(pipeline 用本地路径)。
         const storeOutput = async (i: { filename: string; mimetype: string; buffer: Buffer }) => {
           if (i.filename === 'poster.jpg') {
@@ -6907,6 +6928,7 @@ export const tasksRouter = router({
           let audioEngine: 'qwen' | 'gemini' | 'mixed' | undefined;
           let audioCoverage: VideoAudioVerificationCoverage =
             videoAudioVerificationCoverage();
+          let audiovisualSyncReview: VideoAudioVisualSyncAudit | undefined;
           if (isClone) {
             const { runCloneVideoCreation } = await import('../../agent/video/video-clone.js');
             const petImageFileId = meta.petImageFileId;
@@ -6966,12 +6988,15 @@ export const tasksRouter = router({
                 logger,
                 verifyCloneInputs,
                 verifyFinalVideo,
+                verifyAudioVisualSync: reviewAudioVisualSync,
               },
             );
             audioCoverage = videoAudioVerificationCoverage({
               audibleAudioVerified: result.audibleAudioVerified,
               lipSyncProcessingCompleted: result.lipSyncProcessingCompleted,
+              audiovisualSyncVerified: result.audiovisualSyncVerified,
             });
+            audiovisualSyncReview = result.audiovisualSyncReview;
             summary = '复刻视频已生成。';
           } else if (isPet) {
             // 宠物 i2v: fileId → presigned GET → i2v 单图 → pad+水印+静默 → store.
@@ -7107,12 +7132,15 @@ export const tasksRouter = router({
                 workdir,
                 logger,
                 verifyFinalVideo,
+                verifyAudioVisualSync: reviewAudioVisualSync,
               },
             );
             audioCoverage = videoAudioVerificationCoverage({
               audibleAudioVerified: true,
               lipSyncProcessingCompleted: true,
+              audiovisualSyncVerified: result.audiovisualSyncVerified,
             });
+            audiovisualSyncReview = result.audiovisualSyncReview;
             summary = `真人换口型视频已生成（约 ${Math.round(result.totalDurationMs / 1000)} 秒）。`;
           } else {
             if (!script) {
@@ -7159,7 +7187,11 @@ export const tasksRouter = router({
               visualMode,
               videoType: deriveVideoType({ isPet, isIp, tab: vOpts.tab }),
               ...(audioEngine ? { audioEngine } : {}),
-              ...videoQualityVerificationMetadata(new Date(), audioCoverage),
+              ...videoQualityVerificationMetadata(
+                new Date(),
+                audioCoverage,
+                audiovisualSyncReview,
+              ),
               ...(finalAtt ? { attachments: [finalAtt] } : {}),
             },
           });

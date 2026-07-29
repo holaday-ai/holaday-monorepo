@@ -2379,10 +2379,19 @@ function CreativeHistory({
                           </span>
                           {audioVerificationBadge ? (
                             <span
-                              className="inline-flex items-center gap-1 rounded-full bg-[#FFC910]/15 px-3 py-1 text-[11px] font-medium text-[#806500]"
+                              className={cn(
+                                'inline-flex items-center gap-1 rounded-full px-3 py-1 text-[11px] font-medium',
+                                audioVerificationBadge.label === '音画同步 AI 复核通过'
+                                  ? 'bg-[#15A371]/10 text-[#0C7A55]'
+                                  : 'bg-[#FFC910]/15 text-[#806500]',
+                              )}
                               title={audioVerificationBadge.title}
                             >
-                              <Clock className="h-3 w-3" aria-hidden />
+                              {audioVerificationBadge.label === '音画同步 AI 复核通过' ? (
+                                <CheckCircle2 className="h-3 w-3" aria-hidden />
+                              ) : (
+                                <Clock className="h-3 w-3" aria-hidden />
+                              )}
                               {audioVerificationBadge.label}
                             </span>
                           ) : null}

@@ -1,19 +1,25 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import sharp from 'sharp';
+import { lipSyncMaxWaitMs, runLipSync } from './fal-lipsync-client.js';
 import {
+  type VideoMetadata,
   ffprobeDurationMs,
   ffprobeVideoMetadata,
   inspectMediaIntegrity,
   runFfmpeg,
-  type VideoMetadata,
 } from './ffmpeg-exec.js';
-import { lipSyncMaxWaitMs, runLipSync } from './fal-lipsync-client.js';
+import {
+  type VideoAvSyncAudit,
+  type VideoAvSyncReview,
+  videoAvSyncAudit,
+  videoAvSyncLogContext,
+} from './video-av-sync-verifier.js';
+import type { VerifyCloneVideoCompatibilityInput } from './video-clone-compatibility.js';
 import { downloadToBuffer, downloadToFile } from './video-http.js';
 import { type SimpleVideoConfig, SimpleVideoError } from './video-lane-simple.js';
 import type { PipelineLogger } from './video-pipeline.js';
 import { generatePosterFile } from './video-poster.js';
-import type { VerifyCloneVideoCompatibilityInput } from './video-clone-compatibility.js';
 import type { VerifyFinalVideoQualityInput, VideoQualityResult } from './video-quality-verifier.js';
 import { prepareVideoQualityReferenceImage } from './video-quality-verifier.js';
 import { type WanAnimateMixMode, generateWanAnimateMix } from './wan-animate-mix-client.js';
@@ -57,6 +63,10 @@ export interface CloneVideoServices {
   logger: PipelineLogger;
   verifyCloneInputs(input: VerifyCloneVideoCompatibilityInput): Promise<VideoQualityResult>;
   verifyFinalVideo(input: VerifyFinalVideoQualityInput): Promise<VideoQualityResult>;
+  verifyAudioVisualSync(input: {
+    videoPath: string;
+    durationMs: number;
+  }): Promise<VideoAvSyncReview>;
   overrides?: Partial<CloneVideoFns>;
 }
 
@@ -79,6 +89,8 @@ export interface CloneVideoResult {
   readonly durationSeconds?: number;
   readonly audibleAudioVerified: boolean;
   readonly lipSyncProcessingCompleted: boolean;
+  readonly audiovisualSyncVerified: boolean;
+  readonly audiovisualSyncReview?: VideoAvSyncAudit;
 }
 
 function realFns(): CloneVideoFns {
@@ -168,6 +180,9 @@ export async function runCloneVideoCreation(
   if (typeof services.verifyCloneInputs !== 'function') {
     throw new SimpleVideoError('clone compatibility verifier not configured', 'config');
   }
+  if (typeof services.verifyAudioVisualSync !== 'function') {
+    throw new SimpleVideoError('audio-visual sync verifier not configured', 'config');
+  }
   const fns = { ...realFns(), ...(services.overrides ?? {}) };
   // Preserve source evidence locally before the paid provider job starts.
   // Signed input URLs are intentionally short-lived.
@@ -227,9 +242,7 @@ export async function runCloneVideoCreation(
       compatibility.status === 'unknown'
         ? 'clone video compatibility verification unavailable'
         : 'clone video source assets are incompatible',
-      compatibility.status === 'unknown'
-        ? 'clone_compatibility_unavailable'
-        : 'clone_incompatible',
+      compatibility.status === 'unknown' ? 'clone_compatibility_unavailable' : 'clone_incompatible',
       compatibility.status === 'unknown',
     );
   }
@@ -237,10 +250,7 @@ export async function runCloneVideoCreation(
     referenceIntegrity.hasAudio &&
     referenceIntegrity.audioMaxVolumeDb !== null &&
     referenceIntegrity.audioMaxVolumeDb > -50;
-  if (
-    sourceHasAudibleAudio &&
-    (!cfg.falApiKey || !cfg.falBaseUrl || !cfg.falLipsyncModel)
-  ) {
+  if (sourceHasAudibleAudio && (!cfg.falApiKey || !cfg.falBaseUrl || !cfg.falLipsyncModel)) {
     throw new SimpleVideoError('clone lip-sync provider not configured', 'config');
   }
   const generated = await fns.generateWanAnimateMix({
@@ -407,6 +417,35 @@ export async function runCloneVideoCreation(
       verification.reason,
     );
   }
+  let audiovisualSyncVerified = false;
+  let audiovisualSyncReview: VideoAvSyncAudit | undefined;
+  if (sourceHasAudibleAudio) {
+    const syncReview = await services.verifyAudioVisualSync({
+      videoPath: outputPath,
+      durationMs,
+    });
+    if (syncReview.status === 'fail') {
+      services.logger.warn(
+        videoAvSyncLogContext(syncReview),
+        'video: clone audio-visual sync review rejected generated artifact',
+      );
+      throw new SimpleVideoError(
+        'clone video failed audio-visual sync verification',
+        'quality',
+        false,
+        ['audiovisual_sync_mismatch'],
+        '独立音画同步复核发现持续不同步。',
+      );
+    }
+    audiovisualSyncVerified = syncReview.status === 'pass';
+    audiovisualSyncReview = videoAvSyncAudit(syncReview);
+    if (syncReview.status === 'unknown') {
+      services.logger.warn(
+        videoAvSyncLogContext(syncReview),
+        'video: clone audio-visual sync review was inconclusive',
+      );
+    }
+  }
   const stored = await services.storeOutputFile({
     filename: 'video.mp4',
     mimetype: 'video/mp4',
@@ -440,5 +479,7 @@ export async function runCloneVideoCreation(
     durationSeconds: durationMs / 1000,
     audibleAudioVerified: sourceHasAudibleAudio,
     lipSyncProcessingCompleted: sourceHasAudibleAudio && lipSyncRequestId !== undefined,
+    audiovisualSyncVerified,
+    ...(audiovisualSyncReview ? { audiovisualSyncReview } : {}),
   };
 }
