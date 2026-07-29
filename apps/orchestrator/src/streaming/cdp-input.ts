@@ -59,6 +59,26 @@ function modifiersBitmask(m: {
   return bits;
 }
 
+function keyUpModifiersBitmask(m: {
+  key?: string;
+  code?: string;
+  altKey?: boolean;
+  ctrlKey?: boolean;
+  metaKey?: boolean;
+  shiftKey?: boolean;
+}): number {
+  let bits = modifiersBitmask(m);
+  const key = m.key?.toLowerCase();
+  const code = m.code?.toLowerCase();
+
+  if (key === 'alt' || code?.startsWith('alt')) bits &= ~1;
+  if (key === 'control' || code?.startsWith('control')) bits &= ~2;
+  if (key === 'meta' || key === 'os' || code?.startsWith('meta')) bits &= ~4;
+  if (key === 'shift' || code?.startsWith('shift')) bits &= ~8;
+
+  return bits;
+}
+
 function printableKeyText(m: {
   key?: string;
   altKey?: boolean;
@@ -186,7 +206,7 @@ export class CdpInputHandler {
             ...(msg.key ? { key: msg.key } : {}),
             ...(msg.code ? { code: msg.code } : {}),
             ...(msg.keyCode != null ? { windowsVirtualKeyCode: msg.keyCode } : {}),
-            modifiers: modifiersBitmask(msg),
+            modifiers: keyUpModifiersBitmask(msg),
           });
           break;
         case 'insertText':

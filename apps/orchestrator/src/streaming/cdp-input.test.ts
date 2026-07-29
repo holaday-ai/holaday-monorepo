@@ -115,4 +115,24 @@ describe('CdpInputHandler keyboard input', () => {
       commands: ['selectAll'],
     });
   });
+
+  it('clears a released modifier even when the DOM keyup still reports it pressed', async () => {
+    const { handler, send } = handlerWithSend();
+
+    await handler.handle({
+      type: 'keyUp',
+      key: 'Meta',
+      code: 'MetaLeft',
+      keyCode: 91,
+      metaKey: true,
+    });
+
+    expect(send).toHaveBeenCalledWith('Input.dispatchKeyEvent', {
+      type: 'keyUp',
+      key: 'Meta',
+      code: 'MetaLeft',
+      windowsVirtualKeyCode: 91,
+      modifiers: 0,
+    });
+  });
 });
