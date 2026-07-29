@@ -108,9 +108,10 @@ export function isUnavailableFileStatus(
  * Caller is responsible for revoking the object URL it builds from
  * the blob.
  */
-export async function fetchFileBlobAuthed(
-  input: { url: string },
-): Promise<FetchBlobResult> {
+export async function fetchFileBlobAuthed(input: {
+  url: string;
+  signal?: AbortSignal;
+}): Promise<FetchBlobResult> {
   if (isFileUnavailable(input.url)) {
     return { ok: false, status: 410, message: 'known unavailable file' };
   }
@@ -119,6 +120,7 @@ export async function fetchFileBlobAuthed(
     const res = await fetch(input.url, {
       cache: 'no-store',
       headers: token ? { authorization: `Bearer ${token}` } : {},
+      signal: input.signal,
     });
     if (!res.ok) {
       markFileUnavailableFromStatus(input.url, res.status);

@@ -107,6 +107,22 @@ describe('fetchFileBlobAuthed', () => {
     });
     expect(consoleError).not.toHaveBeenCalled();
   });
+
+  it('forwards an abort signal so slow preview requests can be cancelled', async () => {
+    const controller = new AbortController();
+    const fetchMock = vi.fn(async () => new Response(new Blob(['video'])));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await fetchFileBlobAuthed({
+      url: '/api/files/slow/download',
+      signal: controller.signal,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/files/slow/download',
+      expect.objectContaining({ signal: controller.signal }),
+    );
+  });
 });
 
 describe('downloadFileAuthed', () => {

@@ -1,4 +1,4 @@
-import { CircleSlash, Clock3, Download, File, FileSpreadsheet, FileText, Film, Image as ImageIcon, Loader2, Presentation } from 'lucide-react';
+import { CircleSlash, Clock3, Download, File, FileSpreadsheet, FileText, Film, Image as ImageIcon, Loader2, Presentation, RotateCcw } from 'lucide-react';
 import * as React from 'react';
 import { useToast } from '@/components/ui/toast';
 import {
@@ -31,7 +31,7 @@ export interface FileDownloadPayload {
   unavailable?: boolean;
 }
 
-const MEDIA_PREVIEW_TIMEOUT_MS = 8_000;
+const MEDIA_PREVIEW_TIMEOUT_MS = 30_000;
 
 /**
  * Card surfaced inside an agent summary whenever the model emits a
@@ -67,6 +67,7 @@ export function FileDownloadCard({
   const [previewState, setPreviewState] = React.useState<
     'idle' | 'loading' | 'ready' | 'failed'
   >('idle');
+  const [previewRetryKey, setPreviewRetryKey] = React.useState(0);
   const knownUnavailable = payload.unavailable === true;
   const fileReference = React.useMemo(
     () => ({
@@ -113,6 +114,9 @@ export function FileDownloadCard({
   // (revoked on unmount / url change). Non-media kinds keep the
   // icon-only card; a fetch failure silently falls back to the icon.
   React.useEffect(() => {
+    // This state is an explicit request token: changing it reruns the
+    // authenticated preview fetch without mutating the file URL.
+    void previewRetryKey;
     if (
       !showPreview ||
       knownAvailability === 'expired' ||
@@ -129,50 +133,46 @@ export function FileDownloadCard({
     }
     let cancelled = false;
     let objectUrl: string | null = null;
+    const previewController = new AbortController();
+    const previewTimeout = window.setTimeout(
+      () => previewController.abort(),
+      MEDIA_PREVIEW_TIMEOUT_MS,
+    );
     // Show the placeholder immediately so the image slot is visible
     // from the start — fixes the P1 gap where the summary text rendered
     // first and the thumbnail popped in seconds later.
     setPreviewState('loading');
     void (async () => {
       try {
-        const res = await withMediaPreviewTimeout((async () => {
-          const fetched = await fetchFileBlobAuthed({ url: payload.downloadUrl });
-          if (!fetched.ok || !fetched.blob) {
-            return { ok: false, status: fetched.status, message: fetched.message };
-          }
-          if (kind === 'image') {
-            return {
-              ok: true,
-              status: fetched.status,
-              message: fetched.message,
-              previewUrl: await blobToDataUrl(fetched.blob),
-              objectUrl: null,
-            };
-          }
-          const nextObjectUrl = URL.createObjectURL(fetched.blob);
-          return {
-            ok: true,
-            status: fetched.status,
-            message: fetched.message,
-            previewUrl: nextObjectUrl,
-            objectUrl: nextObjectUrl,
-          };
-        })());
+        const fetched = await fetchFileBlobAuthed({
+          url: payload.downloadUrl,
+          signal: previewController.signal,
+        });
         if (cancelled) return;
-        if (res.ok && res.previewUrl) {
-          objectUrl = res.objectUrl;
-          setPreviewUrl(res.previewUrl);
-          setPreviewState('ready');
-        } else {
-          markFileUnavailableFromStatus(fileReference, res.status);
+        if (!fetched.ok || !fetched.blob) {
+          markFileUnavailableFromStatus(fileReference, fetched.status);
           setPreviewState('failed'); // fall back to the icon-only card
+          return;
         }
+        if (kind === 'image') {
+          const dataUrl = await blobToDataUrl(fetched.blob);
+          if (cancelled) return;
+          setPreviewUrl(dataUrl);
+        } else {
+          objectUrl = URL.createObjectURL(fetched.blob);
+          setPreviewUrl(objectUrl);
+        }
+        setPreviewState('ready');
       } catch {
         if (!cancelled) setPreviewState('failed');
+      } finally {
+        window.clearTimeout(previewTimeout);
       }
     })();
     return () => {
       cancelled = true;
+      previewController.abort();
+      window.clearTimeout(previewTimeout);
       if (objectUrl) URL.revokeObjectURL(objectUrl);
       setPreviewUrl(null);
       setPreviewState('idle');
@@ -182,6 +182,7 @@ export function FileDownloadCard({
     fileReference,
     knownAvailability,
     payload.downloadUrl,
+    previewRetryKey,
     showPreview,
     unavailable,
   ]);
@@ -254,9 +255,21 @@ export function FileDownloadCard({
           {kind === 'video' ? '视频加载中…' : '图片加载中…'}
         </span>
       ) : showPreview && previewState === 'failed' ? (
-        <span className="flex h-40 w-full items-center justify-center rounded-[6px] border border-dashed border-[#DCDDDD] bg-[#EFEFEF]/35 px-4 text-center text-[11px] leading-5 text-muted-foreground dark:border-white/10 dark:bg-white/5">
-          {kind === 'video' ? '视频预览暂不可用，可尝试下载。' : '图片预览暂不可用，可尝试下载。'}
-        </span>
+        <div className="flex h-40 w-full flex-col items-center justify-center gap-3 rounded-[6px] border border-dashed border-[#DCDDDD] bg-[#EFEFEF]/35 px-4 text-center text-[11px] leading-5 text-muted-foreground dark:border-white/10 dark:bg-white/5">
+          <span>
+            {kind === 'video'
+              ? '视频预览暂不可用，可重试或下载。'
+              : '图片预览暂不可用，可重试或下载。'}
+          </span>
+          <button
+            type="button"
+            onClick={() => setPreviewRetryKey((value) => value + 1)}
+            className="inline-flex h-8 items-center gap-1.5 rounded-[6px] border border-[#DCDDDD] bg-white px-3 text-[11px] font-medium text-[#595757] transition-colors hover:border-[#EA1F59]/35 hover:text-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20 dark:border-white/10 dark:bg-white/10 dark:text-foreground"
+          >
+            <RotateCcw className="h-3.5 w-3.5" aria-hidden />
+            重新加载预览
+          </button>
+        </div>
       ) : null}
       <button
         type="button"
@@ -323,28 +336,6 @@ export function FileDownloadCard({
       </button>
     </div>
   );
-}
-
-interface MediaPreviewResult {
-  ok: boolean;
-  status: number | null;
-  message: string;
-  previewUrl?: string;
-  objectUrl?: string | null;
-}
-
-function withMediaPreviewTimeout<T extends MediaPreviewResult>(
-  promise: Promise<T>,
-): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<T>((resolve) => {
-      setTimeout(
-        () => resolve({ ok: false, status: null, message: 'preview timeout' } as T),
-        MEDIA_PREVIEW_TIMEOUT_MS,
-      );
-    }),
-  ]);
 }
 
 function FileTypeIcon({ kind }: { kind: DownloadFileKind }): JSX.Element {
