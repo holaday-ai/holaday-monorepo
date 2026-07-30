@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { __filesRouterInternals } from './files.js';
 
 const { fileIsAvailableInLibrary, fileMatchesLibraryFilter } =
@@ -64,5 +64,36 @@ describe('files router library filters', () => {
     expect(fileMatchesLibraryFilter('image/png', 'all')).toBe(true);
     expect(fileMatchesLibraryFilter('image/png', 'images')).toBe(true);
     expect(fileMatchesLibraryFilter('video/mp4', 'images')).toBe(false);
+  });
+});
+
+describe('files router library deletion', () => {
+  it('delegates deletion to FileService so backing storage is removed', async () => {
+    const deleteForUser = vi.fn(async () => true);
+
+    await expect(
+      __filesRouterInternals.deleteLibraryFile(
+        { deleteForUser },
+        'file_owned',
+        7,
+      ),
+    ).resolves.toEqual({ ok: true });
+
+    expect(deleteForUser).toHaveBeenCalledWith('file_owned', 7);
+  });
+
+  it('keeps unknown and foreign files indistinguishable', async () => {
+    const deleteForUser = vi.fn(async () => false);
+
+    await expect(
+      __filesRouterInternals.deleteLibraryFile(
+        { deleteForUser },
+        'file_foreign',
+        7,
+      ),
+    ).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+      message: 'file not found',
+    });
   });
 });

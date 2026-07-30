@@ -11,9 +11,9 @@
 import { TRPCError } from '@trpc/server';
 import { and, desc, eq, gt, isNull, like, or } from 'drizzle-orm';
 import { z } from 'zod';
-import { readAffectedRows } from '../../db/mysql-result.js';
 import { taskFiles } from '../../db/schema/task-files.js';
 import { users } from '../../db/schema/users.js';
+import { FileService } from '../../files/file-service.js';
 import { protectedProcedure, router } from '../trpc.js';
 
 async function requireUserId(
@@ -28,6 +28,18 @@ async function requireUserId(
     throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
   }
   return row.id;
+}
+
+async function deleteLibraryFile(
+  fileService: Pick<FileService, 'deleteForUser'>,
+  fileId: string,
+  userId: number,
+): Promise<{ ok: true }> {
+  const deleted = await fileService.deleteForUser(fileId, userId);
+  if (!deleted) {
+    throw new TRPCError({ code: 'NOT_FOUND', message: 'file not found' });
+  }
+  return { ok: true };
 }
 
 export const filesRouter = router({
@@ -93,24 +105,13 @@ export const filesRouter = router({
       }));
     }),
 
-  /**
-   * Delete a file by external id. The on-disk bytes are reaped by
-   * the existing files/cleanup-cron.ts pass — this row mark is
-   * sufficient for the user-facing UX.
-   */
+  /** Delete the owned backing object first, then remove its index row. */
   delete: protectedProcedure
     .input(z.object({ fileId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       const userId = await requireUserId(ctx);
-      const result = await ctx.db
-        .delete(taskFiles)
-        .where(
-          and(eq(taskFiles.externalId, input.fileId), eq(taskFiles.userId, userId)),
-        );
-      if (readAffectedRows(result) === 0) {
-        throw new TRPCError({ code: 'NOT_FOUND', message: 'file not found' });
-      }
-      return { ok: true as const };
+      const fileService = new FileService(ctx.db, ctx.logger);
+      return deleteLibraryFile(fileService, input.fileId, userId);
     }),
 });
 
@@ -137,6 +138,7 @@ function fileMatchesLibraryFilter(mimetype: string, filter: LibraryFileFilter): 
 }
 
 export const __filesRouterInternals = {
+  deleteLibraryFile,
   fileIsAvailableInLibrary,
   fileMatchesLibraryFilter,
 };
