@@ -32,6 +32,7 @@ import { users } from '../../db/schema/users.js';
 import {
   buildPayload,
   sendWebhook,
+  validateWebhookTarget,
   type NotificationPlatform,
   type WebhookContext,
 } from '../../notifications/webhook-sender.js';
@@ -74,6 +75,20 @@ function normaliseTemplate(
   // Preset platforms ignore any template the caller sent — null it
   // out so the column doesn't get polluted with stale data.
   return null;
+}
+
+async function requireSafeWebhookTarget(webhookUrl: string): Promise<void> {
+  try {
+    await validateWebhookTarget(webhookUrl);
+  } catch (err) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message:
+        err instanceof Error
+          ? err.message
+          : 'Webhook 地址未通过公网安全校验。',
+    });
+  }
 }
 
 export const notificationsRouter = router({
@@ -193,6 +208,7 @@ export const notificationChannelsRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const userId = await requireUserId(ctx);
+      await requireSafeWebhookTarget(input.webhookUrl);
       const template = normaliseTemplate(input.platform, input.customTemplate);
       const externalId = newExternalId('notificationChannel');
       await ctx.db.insert(notificationChannels).values({
@@ -234,6 +250,9 @@ export const notificationChannelsRouter = router({
         .limit(1);
       if (!row) {
         throw new TRPCError({ code: 'NOT_FOUND', message: '通知渠道不存在' });
+      }
+      if (input.webhookUrl !== undefined) {
+        await requireSafeWebhookTarget(input.webhookUrl);
       }
       const updates: Partial<typeof notificationChannels.$inferInsert> = {};
       const effectivePlatform = (input.platform ?? row.platform) as NotificationPlatform;
@@ -341,6 +360,7 @@ export const notificationChannelsRouter = router({
         // surface the "must include template" error via SendResult.
         customTemplate = input.customTemplate;
       }
+      await requireSafeWebhookTarget(webhookUrl);
       const ctxBody: WebhookContext = {
         title: 'HOLA DAY 测试消息',
         message: '这是一条来自 HOLA DAY 的测试消息，证明你的 webhook 配置可用。',

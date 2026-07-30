@@ -5,6 +5,7 @@ import {
   maskWebhookUrl,
   sendWebhook,
   substituteTemplate,
+  validateWebhookTarget,
   type WebhookChannel,
   type WebhookContext,
 } from './webhook-sender.js';
@@ -15,6 +16,10 @@ const CTX: WebhookContext = {
   status: 'success',
   taskName: '每日新闻',
 };
+
+const PUBLIC_RESOLVER = vi.fn(async () => [
+  { address: '93.184.216.34', family: 4 as const },
+]);
 
 describe('formatPresetMessage', () => {
   it('composes lines from non-empty fields', () => {
@@ -167,6 +172,7 @@ describe('sendWebhook — HTTP behaviour', () => {
     const res = await sendWebhook(channel, CTX, {
       fetch: fetchMock as typeof fetch,
       maxAttempts: 2,
+      resolve: PUBLIC_RESOLVER,
     });
     expect(res.ok).toBe(true);
     expect(res.status).toBe(200);
@@ -182,6 +188,7 @@ describe('sendWebhook — HTTP behaviour', () => {
     const res = await sendWebhook(channel, CTX, {
       fetch: fetchMock as typeof fetch,
       maxAttempts: 2,
+      resolve: PUBLIC_RESOLVER,
     });
     expect(res.ok).toBe(true);
     expect(res.attempt).toBe(2);
@@ -193,6 +200,7 @@ describe('sendWebhook — HTTP behaviour', () => {
     const res = await sendWebhook(channel, CTX, {
       fetch: fetchMock as typeof fetch,
       maxAttempts: 2,
+      resolve: PUBLIC_RESOLVER,
     });
     expect(res.ok).toBe(false);
     expect(res.status).toBe(401);
@@ -209,6 +217,7 @@ describe('sendWebhook — HTTP behaviour', () => {
     const res = await sendWebhook(channel, CTX, {
       fetch: fetchMock as typeof fetch,
       maxAttempts: 2,
+      resolve: PUBLIC_RESOLVER,
     });
     expect(res.ok).toBe(false);
     expect(res.attempt).toBe(2);
@@ -220,11 +229,175 @@ describe('sendWebhook — HTTP behaviour', () => {
     const res = await sendWebhook(
       { platform: 'custom', webhookUrl: 'https://example.test/x' },
       CTX,
-      { fetch: fetchMock as typeof fetch },
+      { fetch: fetchMock as typeof fetch, resolve: PUBLIC_RESOLVER },
     );
     expect(res.ok).toBe(false);
     expect(res.error).toContain('customTemplate');
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('validateWebhookTarget — SSRF boundary', () => {
+  it.each([
+    'ftp://example.com/hook',
+    'http://localhost/hook',
+    'http://service.local/hook',
+    'http://127.0.0.1/hook',
+    'http://2130706433/hook',
+    'http://0x7f000001/hook',
+    'http://017700000001/hook',
+    'http://10.0.0.1/hook',
+    'http://100.64.0.1/hook',
+    'http://169.254.169.254/latest/meta-data',
+    'http://172.16.0.1/hook',
+    'http://192.168.1.1/hook',
+    'http://[::1]/hook',
+    'http://[fc00::1]/hook',
+    'http://[fe80::1]/hook',
+    'http://[::ffff:127.0.0.1]/hook',
+  ])('rejects non-public target %s without resolving it', async (url) => {
+    const resolve = vi.fn();
+    await expect(validateWebhookTarget(url, { resolve })).rejects.toThrow(
+      /公网|http|https/,
+    );
+    expect(resolve).not.toHaveBeenCalled();
+  });
+
+  it('rejects a hostname when any DNS answer is private', async () => {
+    await expect(
+      validateWebhookTarget('https://hooks.example.com/notify', {
+        resolve: vi.fn(async () => [
+          { address: '93.184.216.34', family: 4 as const },
+          { address: '10.0.0.7', family: 4 as const },
+        ]),
+      }),
+    ).rejects.toThrow(/公网/);
+  });
+
+  it('rejects a hostname whose DNS result cannot be verified', async () => {
+    await expect(
+      validateWebhookTarget('https://hooks.example.com/notify', {
+        resolve: vi.fn(async () => []),
+      }),
+    ).rejects.toThrow(/解析/);
+  });
+
+  it('returns every verified public address for connection pinning', async () => {
+    const result = await validateWebhookTarget(
+      'https://hooks.example.com/notify',
+      {
+        resolve: vi.fn(async () => [
+          { address: '93.184.216.34', family: 4 as const },
+          { address: '2606:2800:220:1:248:1893:25c8:1946', family: 6 as const },
+        ]),
+      },
+    );
+    expect(result).toEqual({
+      url: 'https://hooks.example.com/notify',
+      hostname: 'hooks.example.com',
+      addresses: [
+        { address: '93.184.216.34', family: 4 },
+        { address: '2606:2800:220:1:248:1893:25c8:1946', family: 6 },
+      ],
+    });
+  });
+});
+
+describe('sendWebhook — SSRF-safe delivery', () => {
+  const channel: WebhookChannel = {
+    platform: 'custom',
+    webhookUrl: 'https://hooks.example.com/start',
+    customTemplate: { text: '{{message}}' },
+  };
+
+  it('re-resolves and validates the target before every retry attempt', async () => {
+    const resolve = vi
+      .fn()
+      .mockResolvedValueOnce([{ address: '93.184.216.34', family: 4 }])
+      .mockResolvedValueOnce([{ address: '93.184.216.35', family: 4 }]);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response('', { status: 502 }))
+      .mockResolvedValueOnce(new Response('{}', { status: 200 }));
+
+    const result = await sendWebhook(channel, CTX, {
+      fetch: fetchMock as typeof fetch,
+      resolve,
+      maxAttempts: 2,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(resolve).toHaveBeenCalledTimes(2);
+  });
+
+  it('refuses a redirect to a private target before the second request', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('', {
+        status: 302,
+        headers: { location: 'http://169.254.169.254/latest/meta-data' },
+      }),
+    );
+
+    const result = await sendWebhook(channel, CTX, {
+      fetch: fetchMock as typeof fetch,
+      resolve: PUBLIC_RESOLVER,
+      maxAttempts: 1,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/公网/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('blocks a DNS rebind to a private address before a retry connects', async () => {
+    const resolve = vi
+      .fn()
+      .mockResolvedValueOnce([{ address: '93.184.216.34', family: 4 }])
+      .mockResolvedValueOnce([{ address: '127.0.0.1', family: 4 }]);
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('', { status: 502 }),
+    );
+
+    const result = await sendWebhook(channel, CTX, {
+      fetch: fetchMock as typeof fetch,
+      resolve,
+      maxAttempts: 2,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/公网/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('validates every public redirect hop and disables automatic redirects', async () => {
+    const resolve = vi.fn(async () => [
+      { address: '93.184.216.34', family: 4 as const },
+    ]);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response('', {
+          status: 307,
+          headers: { location: 'https://delivery.example.net/final' },
+        }),
+      )
+      .mockResolvedValueOnce(new Response('{}', { status: 200 }));
+
+    const result = await sendWebhook(channel, CTX, {
+      fetch: fetchMock as typeof fetch,
+      resolve,
+      maxAttempts: 1,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(resolve).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      redirect: 'manual',
+      dispatcher: expect.anything(),
+    });
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(
+      'https://delivery.example.net/final',
+    );
   });
 });
 
