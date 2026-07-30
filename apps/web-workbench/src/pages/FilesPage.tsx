@@ -1,4 +1,5 @@
 import {
+  AlertCircle,
   Download,
   Copy,
   Eye,
@@ -7,6 +8,7 @@ import {
   FileText,
   Film,
   Image as ImageIcon,
+  Loader2,
   MoreHorizontal,
   Plus,
   Search,
@@ -25,6 +27,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Button } from '@/components/ui/button';
 import {
   Tooltip,
   TooltipContent,
@@ -41,7 +44,7 @@ import { formatFileSize } from '@/lib/file-size';
 import {
   fileReferenceText,
   formatFileRelativeDate,
-  normalizeFileRows,
+  normalizeFilesListPage,
   type NormalizedFileRow,
 } from '@/lib/files-page-state';
 import { filesEmptyCopy, type FileFilter } from '@/lib/files-empty-copy';
@@ -81,6 +84,9 @@ export function FilesPage(): JSX.Element {
   const [q, setQ] = React.useState('');
   const [files, setFiles] = React.useState<UiFile[]>([]);
   const [loading, setLoading] = React.useState(true);
+  const [loadingMore, setLoadingMore] = React.useState(false);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
+  const [nextCursor, setNextCursor] = React.useState<number | null>(null);
   const [pendingDelete, setPendingDelete] = React.useState<UiFile | null>(null);
   const [previewing, setPreviewing] = React.useState<FilePreviewPayload | null>(
     null,
@@ -91,20 +97,50 @@ export function FilesPage(): JSX.Element {
   const refresh = React.useCallback(async () => {
     const requestId = ++requestIdRef.current;
     setLoading(true);
+    setLoadError(null);
     try {
-      const list = await trpc.files.list.query({
+      const page = normalizeFilesListPage(await trpc.files.list.query({
         type: filter,
         q: debouncedQuery || undefined,
-      });
+        limit: 50,
+      }));
       if (!mountedRef.current || requestId !== requestIdRef.current) return;
-      setFiles(normalizeFileRows(list));
+      setFiles(page.items);
+      setNextCursor(page.nextCursor);
     } catch (err) {
       if (!mountedRef.current || requestId !== requestIdRef.current) return;
-      toast.show(pageActionError('文件暂时无法加载', err), 'error');
+      setFiles([]);
+      setNextCursor(null);
+      setLoadError(pageActionError('文件暂时无法加载', err));
     } finally {
       if (mountedRef.current && requestId === requestIdRef.current) setLoading(false);
     }
-  }, [debouncedQuery, filter, toast]);
+  }, [debouncedQuery, filter]);
+
+  const loadMore = React.useCallback(async () => {
+    if (loadingMore || nextCursor === null) return;
+    setLoadingMore(true);
+    setLoadError(null);
+    try {
+      const page = normalizeFilesListPage(await trpc.files.list.query({
+        type: filter,
+        q: debouncedQuery || undefined,
+        cursor: nextCursor,
+        limit: 50,
+      }));
+      if (!mountedRef.current) return;
+      setFiles((current) => {
+        const seen = new Set(current.map((file) => file.fileId));
+        return [...current, ...page.items.filter((file) => !seen.has(file.fileId))];
+      });
+      setNextCursor(page.nextCursor);
+    } catch (err) {
+      if (!mountedRef.current) return;
+      setLoadError(pageActionError('更多文件暂时无法加载', err));
+    } finally {
+      if (mountedRef.current) setLoadingMore(false);
+    }
+  }, [debouncedQuery, filter, loadingMore, nextCursor]);
 
   React.useEffect(() => {
     mountedRef.current = true;
@@ -174,6 +210,8 @@ export function FilesPage(): JSX.Element {
   const emptyCopy = filesEmptyCopy({ query: q, filter });
   const summary = loading
     ? '文件加载中…'
+    : loadError && files.length === 0
+      ? '文件暂时无法加载'
     : files.length > 0
       ? `已加载 ${files.length} 个文件`
       : q.trim()
@@ -243,6 +281,15 @@ export function FilesPage(): JSX.Element {
 
         {loading ? (
           <PageLoadingPanel label="文件加载中" description="正在整理文件库" />
+        ) : loadError && files.length === 0 ? (
+          <div className="flex flex-col items-center gap-3 rounded-[8px] border border-[#DCDDDD] bg-white px-6 py-12 text-center shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
+            <AlertCircle className="h-8 w-8 text-[#EA1F59]" aria-hidden />
+            <div className="text-sm font-medium text-foreground/80">文件暂时无法加载</div>
+            <div className="max-w-md text-xs leading-5 text-muted-foreground">{loadError}</div>
+            <Button type="button" size="sm" onClick={() => void refresh()}>
+              重试
+            </Button>
+          </div>
         ) : files.length === 0 ? (
           <div className="flex flex-col items-center gap-2 rounded-[8px] border border-dashed border-[#DCDDDD] bg-white px-6 py-12 text-center shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
             <FileIcon className="h-8 w-8 text-muted-foreground/40" />
@@ -278,6 +325,33 @@ export function FilesPage(): JSX.Element {
                 />
               ))}
             </div>
+            {loadError ? (
+              <div className="flex flex-col gap-2 border-t border-[#EFEFEF] bg-[#EA1F59]/[0.03] px-4 py-3 text-xs text-[#595757] sm:flex-row sm:items-center sm:justify-between">
+                <span>{loadError}</span>
+                <Button type="button" variant="outline" size="sm" onClick={() => void loadMore()}>
+                  重试
+                </Button>
+              </div>
+            ) : nextCursor !== null ? (
+              <div className="flex justify-center border-t border-[#EFEFEF] px-4 py-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void loadMore()}
+                  disabled={loadingMore}
+                >
+                  {loadingMore ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                      加载中…
+                    </>
+                  ) : (
+                    '加载更多'
+                  )}
+                </Button>
+              </div>
+            ) : null}
           </div>
         )}
         <FilePreviewModal

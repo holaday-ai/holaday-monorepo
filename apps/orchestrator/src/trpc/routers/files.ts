@@ -9,7 +9,7 @@
  */
 
 import { TRPCError } from '@trpc/server';
-import { and, desc, eq, gt, isNull, like, or } from 'drizzle-orm';
+import { and, desc, eq, gt, isNull, like, lt, notLike, or } from 'drizzle-orm';
 import { z } from 'zod';
 import { taskFiles } from '../../db/schema/task-files.js';
 import { users } from '../../db/schema/users.js';
@@ -58,6 +58,8 @@ export const filesRouter = router({
         .object({
           type: z.enum(['all', 'images', 'videos', 'documents']).default('all'),
           q: z.string().max(100).optional(),
+          cursor: z.number().int().positive().optional(),
+          limit: z.number().int().min(1).max(100).default(50),
         })
         .default({ type: 'all' }),
     )
@@ -77,8 +79,24 @@ export const filesRouter = router({
       if (input.q && input.q.trim()) {
         conds.push(like(taskFiles.filename, `%${input.q.trim()}%`));
       }
+      if (input.type === 'images') {
+        conds.push(like(taskFiles.mimetype, 'image/%'));
+      } else if (input.type === 'videos') {
+        conds.push(like(taskFiles.mimetype, 'video/%'));
+      } else if (input.type === 'documents') {
+        conds.push(
+          and(
+            notLike(taskFiles.mimetype, 'image/%'),
+            notLike(taskFiles.mimetype, 'video/%'),
+          )!,
+        );
+      }
+      if (input.cursor) {
+        conds.push(lt(taskFiles.id, input.cursor));
+      }
       const rows = await ctx.db
         .select({
+          id: taskFiles.id,
           externalId: taskFiles.externalId,
           filename: taskFiles.filename,
           mimetype: taskFiles.mimetype,
@@ -89,20 +107,20 @@ export const filesRouter = router({
         })
         .from(taskFiles)
         .where(and(...conds))
-        .orderBy(desc(taskFiles.createdAt))
-        .limit(200);
-      const filtered = rows.filter(
-        (r) =>
-          fileIsAvailableInLibrary(r, now) &&
-          fileMatchesLibraryFilter(r.mimetype, input.type),
-      );
-      return filtered.map((r) => ({
-        fileId: r.externalId,
-        filename: r.filename,
-        mimetype: r.mimetype,
-        sizeBytes: Number(r.sizeBytes),
-        createdAt: r.createdAt,
-      }));
+        .orderBy(desc(taskFiles.id))
+        .limit(input.limit + 1);
+      const hasMore = rows.length > input.limit;
+      const page = rows.slice(0, input.limit);
+      return {
+        items: page.map((r) => ({
+          fileId: r.externalId,
+          filename: r.filename,
+          mimetype: r.mimetype,
+          sizeBytes: Number(r.sizeBytes),
+          createdAt: r.createdAt,
+        })),
+        nextCursor: hasMore ? (page[page.length - 1]?.id ?? null) : null,
+      };
     }),
 
   /** Delete the owned backing object first, then remove its index row. */

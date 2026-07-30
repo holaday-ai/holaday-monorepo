@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   fileReferenceText,
   formatFileRelativeDate,
+  normalizeFilesListPage,
   normalizeFileRows,
 } from './files-page-state';
 
@@ -63,6 +64,44 @@ describe('normalizeFileRows', () => {
         createdAt: '',
       },
     ]);
+  });
+});
+
+describe('normalizeFilesListPage', () => {
+  it('normalizes paginated file responses', () => {
+    expect(
+      normalizeFilesListPage({
+        items: [
+          {
+            fileId: 'file_1',
+            filename: 'Report.pdf',
+            mimetype: 'application/pdf',
+            sizeBytes: 2048,
+            createdAt: '2026-05-17T12:00:00Z',
+          },
+        ],
+        nextCursor: 42,
+      }),
+    ).toEqual({
+      items: [
+        {
+          fileId: 'file_1',
+          filename: 'Report.pdf',
+          mimetype: 'application/pdf',
+          sizeBytes: 2048,
+          createdAt: '2026-05-17T12:00:00Z',
+        },
+      ],
+      nextCursor: 42,
+    });
+  });
+
+  it('fails closed for malformed pagination metadata', () => {
+    expect(normalizeFilesListPage(null)).toEqual({ items: [], nextCursor: null });
+    expect(normalizeFilesListPage({ items: [], nextCursor: -1 })).toEqual({
+      items: [],
+      nextCursor: null,
+    });
   });
 });
 

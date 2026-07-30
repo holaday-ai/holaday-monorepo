@@ -6,6 +6,25 @@ export interface NormalizedFileRow {
   readonly createdAt: string | number | Date;
 }
 
+export interface NormalizedFilesListPage {
+  readonly items: NormalizedFileRow[];
+  readonly nextCursor: number | null;
+}
+
+export function normalizeFilesListPage(value: unknown): NormalizedFilesListPage {
+  if (!isRecord(value)) return { items: [], nextCursor: null };
+  const cursor =
+    typeof value.nextCursor === 'number' &&
+    Number.isSafeInteger(value.nextCursor) &&
+    value.nextCursor > 0
+      ? value.nextCursor
+      : null;
+  return {
+    items: normalizeFileRows(value.items),
+    nextCursor: cursor,
+  };
+}
+
 export function normalizeFileRows(value: unknown): NormalizedFileRow[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((entry) => {
