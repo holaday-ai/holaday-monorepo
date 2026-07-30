@@ -107,6 +107,7 @@ import {
   videoQualityVerificationMetadata,
   type VideoAudioVisualSyncAudit,
   type VideoAudioVerificationCoverage,
+  type VideoType,
 } from '../../agent/video/video-confirm-meta.js';
 import {
   decideVideoGate,
@@ -177,6 +178,7 @@ import { getSharedStorageProvider } from '../../files/storage-provider.js';
 import { allowedFormatsForPlan, isCreateFileFormat, renderFile } from '../../files/writers.js';
 import { TaskActionCaptureRepository } from '../../playbook/task-action-capture-repository.js';
 import {
+  type ConsumeReason,
   QuotaService,
   concurrencyExhaustedMessage,
   getConcurrencyLimit,
@@ -315,6 +317,69 @@ const QUOTA_BYPASS_USERS: ReadonlySet<string> = new Set(['usr_EeYpvsvLtyDzN4VLQi
 const BYPASS_CONCURRENCY = 100;
 const BYPASS_RATE = { max: 30, windowMs: 60_000 };
 const GLOBAL_QUEUE_DEPTH_LIMIT = 100;
+
+function shouldConsumeTaskQuotaOnCreate(input: {
+  isBypass: boolean;
+  isFollowUp: boolean;
+  willCreateVideoQuote: boolean;
+}): boolean {
+  return !input.isBypass && !input.isFollowUp && !input.willCreateVideoQuote;
+}
+
+async function claimVideoConfirmWithQuota(input: {
+  isBypass: boolean;
+  tryConsume: () => Promise<{ ok: true } | { ok: false; reason: ConsumeReason }>;
+  refund: () => Promise<void>;
+  claim: () => Promise<boolean>;
+}): Promise<{ ok: true; claimed: boolean } | { ok: false; reason: ConsumeReason }> {
+  if (input.isBypass) {
+    return { ok: true, claimed: await input.claim() };
+  }
+  const consumed = await input.tryConsume();
+  if (!consumed.ok) return consumed;
+  try {
+    const claimed = await input.claim();
+    if (!claimed) await input.refund();
+    return { ok: true, claimed };
+  } catch (err) {
+    await input.refund();
+    throw err;
+  }
+}
+
+function assertVideoImageChoiceAllowed(input: {
+  choice: 'video' | 'image';
+  isClone: boolean;
+  isIp: boolean;
+}): void {
+  if (input.choice === 'image' && (input.isClone || input.isIp)) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: input.isClone
+        ? '复刻视频不支持切换为图片版，请确认制作视频或取消。'
+        : 'IP 人物不支持切换为图片版，请确认制作视频或取消。',
+    });
+  }
+}
+
+function buildVideoExecutionMetadata(input: {
+  isPet: boolean;
+  isIp: boolean;
+  tab?: VideoType;
+  visualMode: 'image' | 'video';
+}): {
+  executionMode: 'generate';
+  lane: 'video_creation';
+  visualMode: 'image' | 'video';
+  videoType: VideoType;
+} {
+  return {
+    executionMode: 'generate',
+    lane: 'video_creation',
+    visualMode: input.visualMode,
+    videoType: deriveVideoType(input),
+  };
+}
 
 // Phase 1 #2 ④ — a-share 问答灰度白名单（ASHARE_QA_ALLOWLIST CSV）。flag off 或
 // 不在名单 → a-share 问句落通用路径。空名单 = 全量（widen 后）；非空 = 灰度。
@@ -962,6 +1027,66 @@ export const tasksRouter = router({
       throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
     }
     const taskSkillId = resolveTaskSkillContext(input, userRow.selectedSkills);
+    const videoAllowed =
+      VIDEO_CREATION_ALLOWLIST.size === 0 || VIDEO_CREATION_ALLOWLIST.has(ctx.userId);
+
+    // Resolve and validate attachments before any quota consumption. Locked
+    // subjects are a hard input contract: a missing, non-image, or unreadable
+    // anchor must return BAD_REQUEST without charging the task.
+    const fileService = new FileService(ctx.db, ctx.logger);
+    const attachmentBlocks: Awaited<ReturnType<typeof parseFileForPrompt>>['blocks'] = [];
+    let orderedFileIds: string[];
+    try {
+      orderedFileIds = orderImageAttachmentIds(
+        input.fileIds ?? [],
+        input.imageOptions?.mode,
+        input.imageOptions?.subjectFileId,
+      );
+    } catch (err) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: err instanceof Error ? err.message : '主角图选择无效，请重新选择',
+      });
+    }
+    if (orderedFileIds.length > 0) {
+      const loaded = await fileService.loadMany(orderedFileIds, userRow.id);
+      if (input.imageOptions?.mode === 'lock_subject' && input.imageOptions.subjectFileId) {
+        const subject = loaded.find(
+          (file) => file.row.externalId === input.imageOptions?.subjectFileId,
+        );
+        if (!subject || !subject.row.mimetype.startsWith('image/')) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: '主角图不可用或不是图片，请重新上传',
+          });
+        }
+      }
+      for (const f of loaded) {
+        const isLockedSubject =
+          input.imageOptions?.mode === 'lock_subject' &&
+          f.row.externalId === input.imageOptions.subjectFileId;
+        try {
+          const parsed = await parseFileForPrompt(f.buffer, f.row.filename, f.row.mimetype);
+          if (isLockedSubject && !parsed.blocks.some((block) => block.type === 'image')) {
+            throw new Error('主角图未解析为图像');
+          }
+          attachmentBlocks.push(...parsed.blocks);
+        } catch (err) {
+          ctx.logger.warn(
+            { err: err instanceof Error ? err.message : String(err), fileId: f.row.externalId },
+            isLockedSubject
+              ? 'tasks.create: locked subject parse failed'
+              : 'tasks.create: file parse failed — skipping',
+          );
+          if (isLockedSubject) {
+            throw new TRPCError({
+              code: 'BAD_REQUEST',
+              message: '主角图读取失败，请重新上传一张清晰图片',
+            });
+          }
+        }
+      }
+    }
 
     // Phase 14 audit follow-up — multi-turn 追问. When `replyToTaskId`
     // is set, the new task piggybacks on a previously completed/failed
@@ -1230,6 +1355,27 @@ export const tasksRouter = router({
           ? 'video_creation'
           : null,
     });
+    const videoIntent =
+      executionMode === 'video_creation' ||
+      input.roleId === 'video-creator' ||
+      input.videoOptions?.tab !== undefined;
+    if (videoIntent && (!appEnv.VIDEO_CREATION_ENABLED || !videoAllowed)) {
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message: '视频生成功能尚未向当前账号开放，未创建任务或扣除额度。',
+      });
+    }
+    if (videoIntent && !anthropicForResolver) {
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message: '视频生成服务尚未就绪，未创建任务或扣除额度。',
+      });
+    }
+    const willCreateVideoQuote =
+      appEnv.VIDEO_CREATION_ENABLED &&
+      videoAllowed &&
+      Boolean(anthropicForResolver) &&
+      videoIntent;
     if (appEnv.NODE_ENV === 'production' && executionMode === 'browser' && !ctx.browserPool) {
       // Server-side browser tasks must use the per-task pool because that
       // path is pinned to BrowserEgressProxy. A shared CDP fallback can only
@@ -1376,15 +1522,19 @@ export const tasksRouter = router({
       }
     }
 
-    // Follow-ups are free — they reuse the cost of the parent task. Skip
-    // tryConsume entirely so a quota-exhausted user can still ask
-    // "为什么失败" without paying again. opus_used flag stays false on
-    // the DB row for the same reason (the follow-up doesn't count).
+    // Follow-ups are free, and video quote creation is not a generated
+    // task yet. The latter consumes one regular task only after the user
+    // confirms a valid quote in confirmVideo.
     //
     // Bypass users also skip tryConsume — they're not on a metered
     // plan for testing purposes. Concurrency + rate-limit + global
     // queue-depth (above) provide all the throttling we need.
     let opusActuallyConsumed = false;
+    const consumeTaskQuotaOnCreate = shouldConsumeTaskQuotaOnCreate({
+      isBypass,
+      isFollowUp,
+      willCreateVideoQuote,
+    });
     if (isBypass) {
       opusActuallyConsumed = willConsumeOpus;
       ctx.logger.info(
@@ -1396,7 +1546,7 @@ export const tasksRouter = router({
         },
         'tasks.create: bypass admit (concurrency + rate-limit ok)',
       );
-    } else if (!isFollowUp) {
+    } else if (consumeTaskQuotaOnCreate) {
       const consume = await quotaService.tryConsume(userRow.id, planId, willConsumeOpus);
       if (!consume.ok) {
         // Pro running out of Opus mid-task should downgrade to Sonnet
@@ -1416,7 +1566,7 @@ export const tasksRouter = router({
         }
       }
       opusActuallyConsumed = consume.ok && willConsumeOpus;
-    } else {
+    } else if (isFollowUp) {
       ctx.logger.info(
         {
           userId: ctx.userId,
@@ -1425,67 +1575,14 @@ export const tasksRouter = router({
         },
         'tasks.create: follow-up reply mode (quota skipped)',
       );
-    }
-
-    // Phase 10 Tier 3 — resolve attachments BEFORE the supercar / vision
-    // branch decision. We read the buffers + parse them up front so the
-    // user message we hand the agent is fully baked; both paths get
-    // identical attachment semantics. Failures (missing file, expired
-    // row, parse error) log + skip — the task still runs without that
-    // file rather than failing creation outright.
-    const fileService = new FileService(ctx.db, ctx.logger);
-    const attachmentBlocks: Awaited<ReturnType<typeof parseFileForPrompt>>['blocks'] = [];
-    let orderedFileIds: string[];
-    try {
-      orderedFileIds = orderImageAttachmentIds(
-        input.fileIds ?? [],
-        input.imageOptions?.mode,
-        input.imageOptions?.subjectFileId,
+    } else {
+      ctx.logger.info(
+        {
+          userId: ctx.userId,
+          taskIntent: input.intent.slice(0, 60),
+        },
+        'tasks.create: video quote mode (quota deferred until confirmation)',
       );
-    } catch (err) {
-      throw new TRPCError({
-        code: 'BAD_REQUEST',
-        message: err instanceof Error ? err.message : '主角图选择无效，请重新选择',
-      });
-    }
-    if (orderedFileIds.length > 0) {
-      const loaded = await fileService.loadMany(orderedFileIds, userRow.id);
-      if (input.imageOptions?.mode === 'lock_subject' && input.imageOptions.subjectFileId) {
-        const subject = loaded.find(
-          (file) => file.row.externalId === input.imageOptions?.subjectFileId,
-        );
-        if (!subject || !subject.row.mimetype.startsWith('image/')) {
-          throw new TRPCError({
-            code: 'BAD_REQUEST',
-            message: '主角图不可用或不是图片，请重新上传',
-          });
-        }
-      }
-      for (const f of loaded) {
-        const isLockedSubject =
-          input.imageOptions?.mode === 'lock_subject' &&
-          f.row.externalId === input.imageOptions.subjectFileId;
-        try {
-          const parsed = await parseFileForPrompt(f.buffer, f.row.filename, f.row.mimetype);
-          if (isLockedSubject && !parsed.blocks.some((block) => block.type === 'image')) {
-            throw new Error('主角图未解析为图像');
-          }
-          attachmentBlocks.push(...parsed.blocks);
-        } catch (err) {
-          ctx.logger.warn(
-            { err: err instanceof Error ? err.message : String(err), fileId: f.row.externalId },
-            isLockedSubject
-              ? 'tasks.create: locked subject parse failed'
-              : 'tasks.create: file parse failed — skipping',
-          );
-          if (isLockedSubject) {
-            throw new TRPCError({
-              code: 'BAD_REQUEST',
-              message: '主角图读取失败，请重新上传一张清晰图片',
-            });
-          }
-        }
-      }
     }
 
     // Compute these once — used both by the diagnostic log AND by the
@@ -1765,19 +1862,14 @@ export const tasksRouter = router({
     // ===== video-creation fork (Phase 1 #4 原方案, flag + allowlist 灰度) =====
     // 两段式:Phase1 出 awaiting_user 报价卡(只跑 optimize=LLM,零 Veo);确认走
     // tasks.confirmVideo(结构化按钮)。Veo 烧钱严格在 confirmVideo 的原子抢占之后。
-    // 默认 VIDEO_CREATION_ENABLED=false → video 意图落通用 generate(诚实说不能出视频)。
+    // 默认 VIDEO_CREATION_ENABLED=false：视频意图会在扣额前硬拒绝，
+    // 绝不静默降级到通用 generate。
     {
-      const videoAllowed =
-        VIDEO_CREATION_ALLOWLIST.size === 0 || VIDEO_CREATION_ALLOWLIST.has(ctx.userId);
       // 视频意图:分类器命中 video_creation,或选了 video-creator 技能,**或**前端「视频任务」
       // 界面显式带了 videoOptions.tab(普通/宠物/IP)。后者是关键——宠物动作 prompt / IP 口播文案
       // 本身不含「视频」关键词,分类器会判 generate;只有 videoOptions.tab 这个显式信号能可靠把
       // 三类 tab 提交都送进视频 fork(只有视频界面会设它,其它 createTask 路径绝不带)。
-      const videoIntent =
-        executionMode === 'video_creation' ||
-        input.roleId === 'video-creator' ||
-        input.videoOptions?.tab !== undefined;
-      if (appEnv.VIDEO_CREATION_ENABLED && videoIntent && videoAllowed && anthropicForResolver) {
+      if (willCreateVideoQuote && anthropicForResolver) {
         const anthropicClient = anthropicForResolver;
         const { buildFallbackVideoScript, optimizeUserScript, segmentCapForText } = await import(
           '../../agent/video/video-script.js'
@@ -6627,6 +6719,7 @@ export const tasksRouter = router({
       const [userRow] = await ctx.db
         .select({
           id: users.id,
+          plan: users.plan,
           // Phase 2 第三期 — IP 人物 lane 需要克隆声音 + 出镜底版 + 本人授权(合规硬闸)。
           qwenVoiceId: users.qwenVoiceId,
           baseVideoFileId: users.baseVideoFileId,
@@ -6636,6 +6729,9 @@ export const tasksRouter = router({
         .where(eq(users.externalId, ctx.userId))
         .limit(1);
       if (!userRow) throw new TRPCError({ code: 'UNAUTHORIZED', message: 'user not found' });
+      const planId: PlanId =
+        userRow.plan === 'basic' || userRow.plan === 'pro' ? userRow.plan : 'free';
+      const isBypass = QUOTA_BYPASS_USERS.has(ctx.userId);
       const repo = new TaskRepository(ctx.db);
       const [row] = await ctx.db
         .select({
@@ -6727,6 +6823,7 @@ export const tasksRouter = router({
       const script = meta.videoScript;
       const tier: VideoSource = meta.videoTier ?? 'veo_fast';
       const vOpts = meta.videoOptions ?? {};
+      assertVideoImageChoiceAllowed({ choice, isClone, isIp });
       if (
         choice === 'video' &&
         videoParameterIssue({
@@ -6768,12 +6865,22 @@ export const tasksRouter = router({
           message: ipPreflight.issue,
         });
       }
+      const quotaService = new QuotaService(ctx.db);
       const preflight = await claimVideoConfirmAfterVerifierPreflight(
         {
           choice,
           hasVerifier: Boolean(anthropicForResolver),
         },
-        () => repo.consumeVideoConfirm(input.taskId),
+        async () => {
+          const quotaClaim = await claimVideoConfirmWithQuota({
+            isBypass,
+            tryConsume: () => quotaService.tryConsume(userRow.id, planId, false),
+            refund: () => quotaService.refund(userRow.id, planId, false),
+            claim: () => repo.consumeVideoConfirm(input.taskId),
+          });
+          if (!quotaClaim.ok) throw quotaErrorFor(quotaClaim.reason);
+          return quotaClaim.claimed;
+        },
       );
       if (preflight.issue) {
         throw new TRPCError({
@@ -6834,12 +6941,22 @@ export const tasksRouter = router({
 
       // generate_video | generate_image — Veo 在此之后(已过原子抢占=确认后)。
       const visualMode = action === 'generate_image' ? ('image' as const) : ('video' as const);
+      const executionMetadata = buildVideoExecutionMetadata({
+        isPet,
+        isIp,
+        tab: vOpts.tab,
+        visualMode,
+      });
 
       const newTaskId = newExternalId('task');
       await repo.insertTask(
         { taskId: newTaskId, status: 'executing', plan: [], cursor: 0, pendingConfirm: null },
         { userId: userRow.id, intent: row.intent, roleId: 'video-creator', opusUsed: false },
       );
+      await ctx.db
+        .update(tasksTable)
+        .set({ result: { metadata: executionMetadata } })
+        .where(and(eq(tasksTable.externalId, newTaskId), eq(tasksTable.status, 'executing')));
       broadcastSubStatus(ctx.userId, newTaskId, 'generating');
 
       const anthropicClient = anthropicForResolver;
@@ -7255,10 +7372,7 @@ export const tasksRouter = router({
             tickCount: 1,
             verificationPassed: true,
             metadata: {
-              executionMode: 'generate',
-              lane: 'video_creation',
-              visualMode,
-              videoType: deriveVideoType({ isPet, isIp, tab: vOpts.tab }),
+              ...executionMetadata,
               ...(audioEngine ? { audioEngine } : {}),
               ...videoQualityVerificationMetadata(
                 new Date(),
@@ -7296,8 +7410,7 @@ export const tasksRouter = router({
                 ? { failedChecks: qualityFailure.failedChecks }
                 : {}),
               metadata: {
-                executionMode: 'generate',
-                lane: 'video_creation',
+                ...executionMetadata,
                 ...qualityFailure.metadata,
               },
             })
@@ -9879,9 +9992,13 @@ function unionAllowedOrigins(catalogue: SkillCatalogueEntry[]): readonly string[
 }
 
 export const __tasksInternals = {
+  assertVideoImageChoiceAllowed,
   assertManualSkillSelectionEnabled,
+  buildVideoExecutionMetadata,
   buildPlannerIntent,
   buildPlannerSkillCatalogue,
+  claimVideoConfirmWithQuota,
   resolveTaskDispatchSkillId,
   resolveTaskSkillContext,
+  shouldConsumeTaskQuotaOnCreate,
 };
