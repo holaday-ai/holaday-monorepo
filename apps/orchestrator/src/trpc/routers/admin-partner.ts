@@ -844,14 +844,27 @@ export const adminPartnerRouter = router({
 
   setKycStatus: adminProcedure
     .input(
-      z.object({
-        userExternalId: z.string().trim().min(1).max(32),
-        status: z.enum(['pending', 'passed', 'review_required', 'rejected']),
-        provider: z.string().trim().min(1).max(32).default('manual'),
-        providerRef: z.string().trim().min(1).max(128).optional(),
-        bankCardHash: z.string().trim().min(1).max(128).optional(),
-        note: z.string().trim().min(1).max(1000).optional(),
-      }),
+      z
+        .object({
+          userExternalId: z.string().trim().min(1).max(32),
+          status: z.enum(['pending', 'passed', 'review_required', 'rejected']),
+          provider: z.string().trim().min(1).max(32).default('manual'),
+          providerRef: z.string().trim().min(1).max(128).optional(),
+          bankCardHash: z.string().trim().min(1).max(128).optional(),
+          note: z.string().trim().min(1).max(1000),
+        })
+        .superRefine((value, context) => {
+          if (
+            (value.status === 'passed' || value.status === 'rejected') &&
+            !value.providerRef
+          ) {
+            context.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ['providerRef'],
+              message: '通过或拒绝实名必须提供认证流水',
+            });
+          }
+        }),
     )
     .mutation(async ({ ctx, input }) => {
       requirePartnerLedgerEnabled();
@@ -890,7 +903,7 @@ export const adminPartnerRouter = router({
     .input(
       z.object({
         orderExternalId: z.string().trim().min(1).max(32),
-        providerCaptureId: z.string().trim().min(1).max(128).optional(),
+        providerCaptureId: z.string().trim().min(1).max(128),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -900,7 +913,7 @@ export const adminPartnerRouter = router({
         const result = await new PartnerPaymentConfirmService(ctx.db).confirmCapturedOrder({
           orderExternalId: order.externalId,
           provider: order.provider,
-          providerCaptureId: input.providerCaptureId ?? `manual:${order.externalId}`,
+          providerCaptureId: input.providerCaptureId,
           amountCnyCents: order.amountCnyCents,
         });
         return result;
@@ -922,7 +935,7 @@ export const adminPartnerRouter = router({
     .input(
       z.object({
         orderExternalId: z.string().trim().min(1).max(32),
-        note: z.string().trim().min(1).max(1000).optional(),
+        note: z.string().trim().min(1).max(1000),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -943,7 +956,7 @@ export const adminPartnerRouter = router({
     .input(
       z.object({
         withdrawalExternalId: z.string().trim().min(1).max(32),
-        note: z.string().trim().min(1).max(1000).optional(),
+        note: z.string().trim().min(1).max(1000),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -1053,7 +1066,7 @@ export const adminPartnerRouter = router({
     .input(
       z.object({
         lotExternalId: z.string().trim().min(1).max(32),
-        note: z.string().trim().min(1).max(1000).optional(),
+        note: z.string().trim().min(1).max(1000),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -1076,8 +1089,8 @@ export const adminPartnerRouter = router({
       z.object({
         lotExternalId: z.string().trim().min(1).max(32),
         reason: z.string().trim().min(1).max(1000),
-        resolutionKind: z.enum(['manual', 'refund', 'fraud']).optional(),
-        resolutionRef: z.string().trim().min(1).max(128).optional(),
+        resolutionKind: z.enum(['manual', 'refund', 'fraud']),
+        resolutionRef: z.string().trim().min(1).max(128),
       }),
     )
     .mutation(async ({ ctx, input }) => {

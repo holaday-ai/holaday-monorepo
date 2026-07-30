@@ -8,6 +8,18 @@ import {
 
 export type AdminPartnerStatusKind = 'kyc' | 'order' | 'withdrawal' | 'risk';
 
+export function adminPartnerActionConfirmation(actionLabel: string): {
+  title: string;
+  description: string;
+} {
+  const label = actionLabel.trim() || '该审核动作';
+  return {
+    title: `确认执行“${label}”？`,
+    description:
+      '该操作会立即写入生产审核或账务状态。请再次核对对象、金额、原因和凭证信息。',
+  };
+}
+
 interface AdminPartnerStatusToken {
   label: string;
   textClass: string;

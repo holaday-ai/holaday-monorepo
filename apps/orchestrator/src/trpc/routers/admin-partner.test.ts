@@ -324,6 +324,7 @@ describe('admin.partner router', () => {
 
     const result = await adminRouter.createCaller(makeContext()).partner.confirmOrder({
       orderExternalId: 'pay_order_1',
+      providerCaptureId: 'manual-capture-1',
     });
 
     expect(result).toMatchObject({
@@ -334,7 +335,7 @@ describe('admin.partner router', () => {
     expect(confirmCapturedOrderMock).toHaveBeenCalledWith({
       orderExternalId: 'pay_order_1',
       provider: 'manual',
-      providerCaptureId: 'manual:pay_order_1',
+      providerCaptureId: 'manual-capture-1',
       amountCnyCents: 10_000_00,
     });
   });
@@ -363,6 +364,45 @@ describe('admin.partner router', () => {
       reviewerUserId: 1,
       note: '人工复核放行',
     });
+  });
+
+  it('rejects high-risk state changes without operator evidence', async () => {
+    const caller = adminRouter.createCaller(makeContext()).partner;
+
+    await expect(
+      caller.setKycStatus({
+        userExternalId: 'usr_partner',
+        status: 'passed',
+        provider: 'manual',
+        note: 'reviewed',
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(
+      caller.confirmOrder({
+        orderExternalId: 'pay_order_1',
+      } as never),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(
+      caller.approveReviewRequiredOrder({
+        orderExternalId: 'pay_order_1',
+      } as never),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(
+      caller.approveWithdrawal({
+        withdrawalExternalId: 'pay_withdrawal_1',
+      } as never),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(
+      caller.resumeRiskLot({
+        lotExternalId: 'pay_risk_lot_1',
+      } as never),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(
+      caller.closeRiskLot({
+        lotExternalId: 'pay_risk_lot_1',
+        reason: 'manual review complete',
+      } as never),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
   });
 
   it('passes withdrawal review actions through the ledger-aware service', async () => {

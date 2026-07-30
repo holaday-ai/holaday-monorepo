@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  adminPartnerActionConfirmation,
   formatPartnerCreditCents,
   formatPartnerMoneyCents,
   partnerReconciliationCsv,
@@ -16,6 +17,16 @@ import {
   partnerRiskLotQueueAction,
   partnerReviewStatusToken,
 } from './admin-partner-state';
+
+describe('adminPartnerActionConfirmation', () => {
+  it('names the pending operation and explains the production impact', () => {
+    expect(adminPartnerActionConfirmation('提现已出款')).toEqual({
+      title: '确认执行“提现已出款”？',
+      description:
+        '该操作会立即写入生产审核或账务状态。请再次核对对象、金额、原因和凭证信息。',
+    });
+  });
+});
 
 describe('partnerReviewStatusToken', () => {
   it('uses partner-domain labels instead of raw enum names', () => {

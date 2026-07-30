@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import * as React from 'react';
 import { Link } from 'react-router-dom';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { useToast } from '@/components/ui/toast';
 import { pageActionError, pageErrorMessage } from '@/lib/page-error-copy';
 import { trpc } from '@/lib/trpc';
@@ -22,6 +23,7 @@ import {
   useMountedRef,
 } from './admin-shared';
 import {
+  adminPartnerActionConfirmation,
   formatPartnerCreditCents,
   formatPartnerMoneyCents,
   filterAdminPartnerOverview,
@@ -45,6 +47,12 @@ type OverviewState = ReturnType<typeof normalizeAdminPartnerOverview>;
 type EnabledOverviewState = Extract<OverviewState, { enabled: true }>;
 type KycStatusInput = 'pending' | 'passed' | 'review_required' | 'rejected';
 
+interface PendingAdminConfirmation {
+  actionKey: string;
+  action: () => Promise<void>;
+  success: string;
+}
+
 export function AdminPartnerReviewPage(): JSX.Element {
   const mountedRef = useMountedRef();
   const toast = useToast();
@@ -57,6 +65,8 @@ export function AdminPartnerReviewPage(): JSX.Element {
   const [error, setError] = React.useState<string | null>(null);
   const [reconciliationError, setReconciliationError] = React.useState<string | null>(null);
   const [pendingAction, setPendingAction] = React.useState<string | null>(null);
+  const [pendingConfirmation, setPendingConfirmation] =
+    React.useState<PendingAdminConfirmation | null>(null);
   const [reconciliationTo, setReconciliationTo] = React.useState(() => isoDay(new Date()));
   const [reconciliationFrom, setReconciliationFrom] = React.useState(() => isoDay(addDays(new Date(), -6)));
   const [kycUserExternalId, setKycUserExternalId] = React.useState('');
@@ -66,6 +76,7 @@ export function AdminPartnerReviewPage(): JSX.Element {
   const [kycBankCardHash, setKycBankCardHash] = React.useState('');
   const [kycNote, setKycNote] = React.useState('');
   const [orderReviewNotes, setOrderReviewNotes] = React.useState<Record<string, string>>({});
+  const [orderCaptureIds, setOrderCaptureIds] = React.useState<Record<string, string>>({});
   const [withdrawalReasons, setWithdrawalReasons] = React.useState<Record<string, string>>({});
   const [payoutIds, setPayoutIds] = React.useState<Record<string, string>>({});
   const [riskLotNotes, setRiskLotNotes] = React.useState<Record<string, string>>({});
@@ -138,20 +149,29 @@ export function AdminPartnerReviewPage(): JSX.Element {
   }, [refreshReconciliation]);
 
   async function runAction(actionKey: string, action: () => Promise<void>, success: string): Promise<void> {
-    if (pendingAction) {
+    if (pendingAction || pendingConfirmation) {
       toast.show('已有审核动作处理中', 'info', 1600);
       return;
     }
-    setPendingAction(actionKey);
+    setPendingConfirmation({ actionKey, action, success });
+  }
+
+  async function executeConfirmedAction(): Promise<void> {
+    const pending = pendingConfirmation;
+    if (!pending || pendingAction) return;
+    setPendingAction(pending.actionKey);
     try {
-      await action();
-      toast.show(success, 'info', 2200);
+      await pending.action();
+      toast.show(pending.success, 'info', 2200);
       await refresh();
       await refreshReconciliation();
     } catch (err) {
       toast.show(pageActionError('操作失败', err), 'error');
     } finally {
-      if (mountedRef.current) setPendingAction(null);
+      if (mountedRef.current) {
+        setPendingAction(null);
+        setPendingConfirmation(null);
+      }
     }
   }
 
@@ -160,6 +180,14 @@ export function AdminPartnerReviewPage(): JSX.Element {
     const provider = kycProvider.trim() || 'manual';
     if (!userExternalId) {
       toast.show('请填写用户 ID', 'error');
+      return;
+    }
+    if ((kycStatus === 'passed' || kycStatus === 'rejected') && !kycProviderRef.trim()) {
+      toast.show('通过或拒绝实名前，请填写认证流水', 'error');
+      return;
+    }
+    if (!kycNote.trim()) {
+      toast.show('请填写本次实名状态变更的审核备注', 'error');
       return;
     }
     await runAction(
@@ -171,7 +199,7 @@ export function AdminPartnerReviewPage(): JSX.Element {
           provider,
           providerRef: kycProviderRef.trim() || undefined,
           bankCardHash: kycBankCardHash.trim() || undefined,
-          note: kycNote.trim() || undefined,
+          note: kycNote.trim(),
         });
         setKycProviderRef('');
         setKycBankCardHash('');
@@ -254,6 +282,7 @@ export function AdminPartnerReviewPage(): JSX.Element {
           kycBankCardHash={kycBankCardHash}
           kycNote={kycNote}
           orderReviewNotes={orderReviewNotes}
+          orderCaptureIds={orderCaptureIds}
           withdrawalReasons={withdrawalReasons}
           payoutIds={payoutIds}
           riskLotNotes={riskLotNotes}
@@ -266,6 +295,7 @@ export function AdminPartnerReviewPage(): JSX.Element {
           setKycBankCardHash={setKycBankCardHash}
           setKycNote={setKycNote}
           setOrderReviewNotes={setOrderReviewNotes}
+          setOrderCaptureIds={setOrderCaptureIds}
           setWithdrawalReasons={setWithdrawalReasons}
           setPayoutIds={setPayoutIds}
           setRiskLotNotes={setRiskLotNotes}
@@ -280,6 +310,16 @@ export function AdminPartnerReviewPage(): JSX.Element {
           runAction={runAction}
         />
       ) : null}
+      <ConfirmDialog
+        open={pendingConfirmation !== null}
+        {...adminPartnerActionConfirmation(pendingConfirmation?.success ?? '')}
+        confirmLabel="确认执行"
+        destructive
+        onConfirm={executeConfirmedAction}
+        onClose={() => {
+          if (!pendingAction) setPendingConfirmation(null);
+        }}
+      />
     </div>
   );
 }
@@ -300,6 +340,7 @@ function EnabledAdminPartnerReview({
   kycBankCardHash,
   kycNote,
   orderReviewNotes,
+  orderCaptureIds,
   withdrawalReasons,
   payoutIds,
   riskLotNotes,
@@ -312,6 +353,7 @@ function EnabledAdminPartnerReview({
   setKycBankCardHash,
   setKycNote,
   setOrderReviewNotes,
+  setOrderCaptureIds,
   setWithdrawalReasons,
   setPayoutIds,
   setRiskLotNotes,
@@ -340,6 +382,7 @@ function EnabledAdminPartnerReview({
   kycBankCardHash: string;
   kycNote: string;
   orderReviewNotes: Record<string, string>;
+  orderCaptureIds: Record<string, string>;
   withdrawalReasons: Record<string, string>;
   payoutIds: Record<string, string>;
   riskLotNotes: Record<string, string>;
@@ -352,6 +395,7 @@ function EnabledAdminPartnerReview({
   setKycBankCardHash: (value: string) => void;
   setKycNote: (value: string) => void;
   setOrderReviewNotes: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  setOrderCaptureIds: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   setWithdrawalReasons: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   setPayoutIds: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   setRiskLotNotes: React.Dispatch<React.SetStateAction<Record<string, string>>>;
@@ -426,7 +470,9 @@ function EnabledAdminPartnerReview({
         rows={data.orders}
         pendingAction={pendingAction}
         orderReviewNotes={orderReviewNotes}
+        orderCaptureIds={orderCaptureIds}
         setOrderReviewNotes={setOrderReviewNotes}
+        setOrderCaptureIds={setOrderCaptureIds}
         runAction={runAction}
       />
       <WithdrawalQueue
@@ -768,13 +814,17 @@ function OrderQueue({
   rows,
   pendingAction,
   orderReviewNotes,
+  orderCaptureIds,
   setOrderReviewNotes,
+  setOrderCaptureIds,
   runAction,
 }: {
   rows: EnabledOverviewState['orders'];
   pendingAction: string | null;
   orderReviewNotes: Record<string, string>;
+  orderCaptureIds: Record<string, string>;
   setOrderReviewNotes: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  setOrderCaptureIds: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   runAction: (actionKey: string, action: () => Promise<void>, success: string) => Promise<void>;
 }): JSX.Element {
   return (
@@ -788,6 +838,7 @@ function OrderQueue({
           const reviewRequired = row.status === 'review_required';
           const actionKey = `${reviewRequired ? 'order-approve' : 'order'}:${row.orderExternalId}`;
           const reviewNote = orderReviewNotes[row.orderExternalId] ?? '';
+          const captureId = orderCaptureIds[row.orderExternalId] ?? '';
           const reviewSummary =
             [row.reviewReason, row.reviewErrorName, row.reviewErrorMessage].filter(Boolean).join(' / ') ||
             row.reviewApprovalNote;
@@ -815,11 +866,30 @@ function OrderQueue({
                       className="h-8 w-40 rounded-[8px] border border-[#DCDDDD] px-2 text-[12px] outline-none focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
                     />
                   )}
+                  {!reviewRequired && (
+                    <input
+                      value={captureId}
+                      onChange={(event) =>
+                        setOrderCaptureIds((current) => ({
+                          ...current,
+                          [row.orderExternalId]: event.target.value,
+                        }))
+                      }
+                      placeholder="支付流水"
+                      className="h-8 w-40 rounded-[8px] border border-[#DCDDDD] px-2 text-[12px] outline-none focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
+                    />
+                  )}
                   <ActionButton
                     icon={CheckCircle2}
                     label={partnerOrderActionLabel(row.status)}
                     compact
                     pending={pendingAction === actionKey}
+                    disabled={
+                      reviewRequired ? !reviewNote.trim() : !captureId.trim()
+                    }
+                    disabledReason={
+                      reviewRequired ? '请先填写放行备注' : '请先填写真实支付流水'
+                    }
                     onClick={() =>
                       void runAction(
                         actionKey,
@@ -827,12 +897,13 @@ function OrderQueue({
                           if (reviewRequired) {
                             await trpc.admin.partner.approveReviewRequiredOrder.mutate({
                               orderExternalId: row.orderExternalId,
-                              note: reviewNote.trim() || '后台复核放行',
+                              note: reviewNote.trim(),
                             });
                             return;
                           }
                           const result = await trpc.admin.partner.confirmOrder.mutate({
                             orderExternalId: row.orderExternalId,
+                            providerCaptureId: captureId.trim(),
                           });
                           if (result.status === 'review_required') {
                             throw new Error('订单仍需人工复核');
@@ -895,13 +966,15 @@ function WithdrawalQueue({
                       label="通过"
                       compact
                       pending={pendingAction === `withdraw-approve:${row.withdrawalExternalId}`}
+                      disabled={!reason.trim()}
+                      disabledReason="请先填写审核原因"
                       onClick={() =>
                         void runAction(
                           `withdraw-approve:${row.withdrawalExternalId}`,
                           async () => {
                             await trpc.admin.partner.approveWithdrawal.mutate({
                               withdrawalExternalId: row.withdrawalExternalId,
-                              note: '后台复核通过',
+                              note: reason.trim(),
                             });
                           },
                           '提现已通过',
@@ -917,7 +990,7 @@ function WithdrawalQueue({
                         [row.withdrawalExternalId]: e.target.value,
                       }))
                     }
-                    placeholder="拒绝原因"
+                    placeholder="审核 / 拒绝原因"
                     className="h-8 w-36 rounded-[8px] border border-[#DCDDDD] px-2 text-[12px] outline-none focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
                   />
                   <ActionButton
@@ -926,13 +999,15 @@ function WithdrawalQueue({
                     compact
                     tone="danger"
                     pending={pendingAction === `withdraw-reject:${row.withdrawalExternalId}`}
+                    disabled={!reason.trim()}
+                    disabledReason="请先填写拒绝原因"
                     onClick={() =>
                       void runAction(
                         `withdraw-reject:${row.withdrawalExternalId}`,
                         async () => {
                           await trpc.admin.partner.rejectWithdrawal.mutate({
                             withdrawalExternalId: row.withdrawalExternalId,
-                            reason: reason.trim() || '后台复核拒绝',
+                            reason: reason.trim(),
                           });
                         },
                         '提现已拒绝',
@@ -957,13 +1032,15 @@ function WithdrawalQueue({
                         label="出款"
                         compact
                         pending={pendingAction === `withdraw-paid:${row.withdrawalExternalId}`}
+                        disabled={!payoutId.trim()}
+                        disabledReason="请先填写真实出款流水"
                         onClick={() =>
                           void runAction(
                             `withdraw-paid:${row.withdrawalExternalId}`,
                             async () => {
                               await trpc.admin.partner.markWithdrawalPaid.mutate({
                                 withdrawalExternalId: row.withdrawalExternalId,
-                                providerPayoutId: payoutId.trim() || `manual:${row.withdrawalExternalId}`,
+                                providerPayoutId: payoutId.trim(),
                               });
                             },
                             '提现已出款',
@@ -1045,13 +1122,15 @@ function WithdrawalHistory({
                       compact
                       tone="danger"
                       pending={pendingAction === `withdraw-return:${row.withdrawalExternalId}`}
+                      disabled={!returnReason.trim()}
+                      disabledReason="请先填写退回原因"
                       onClick={() =>
                         void runAction(
                           `withdraw-return:${row.withdrawalExternalId}`,
                           async () => {
                             await trpc.admin.partner.markWithdrawalReturned.mutate({
                               withdrawalExternalId: row.withdrawalExternalId,
-                              reason: returnReason.trim() || '银行退回',
+                              reason: returnReason.trim(),
                             });
                           },
                           '提现已退回',
@@ -1158,6 +1237,8 @@ function RiskLotQueue({
                         compact
                         tone={action.action === 'freeze' ? 'danger' : 'primary'}
                         pending={pending}
+                        disabled={!operatorNote.trim()}
+                        disabledReason="请先填写风险处置备注"
                         onClick={() =>
                           void runAction(
                             actionKey,
@@ -1214,16 +1295,19 @@ function RiskLotQueue({
                         compact
                         tone="danger"
                         pending={closePending}
+                        disabled={!operatorNote.trim() || !resolutionRef.trim()}
+                        disabledReason={
+                          !operatorNote.trim() ? '请先填写风险处置备注' : '请先填写处理凭证'
+                        }
                         onClick={() =>
                           void runAction(
                             closeActionKey,
                             async () => {
                               await trpc.admin.partner.closeRiskLot.mutate({
                                 lotExternalId: row.lotExternalId,
-                                ...partnerRiskLotActionPayload('close', operatorNote, {
-                                  resolutionKind,
-                                  resolutionRef,
-                                }),
+                                reason: operatorNote.trim(),
+                                resolutionKind,
+                                resolutionRef: resolutionRef.trim(),
                               });
                             },
                             '批次已关闭',
@@ -1394,6 +1478,8 @@ function ActionButton({
   icon: Icon,
   label,
   pending,
+  disabled,
+  disabledReason,
   onClick,
   compact,
   tone = 'primary',
@@ -1401,6 +1487,8 @@ function ActionButton({
   icon: LucideIcon;
   label: string;
   pending?: boolean;
+  disabled?: boolean;
+  disabledReason?: string;
   onClick: () => void;
   compact?: boolean;
   tone?: 'primary' | 'danger';
@@ -1409,7 +1497,8 @@ function ActionButton({
     <button
       type="button"
       onClick={onClick}
-      disabled={pending}
+      disabled={pending || disabled}
+      title={disabled && disabledReason ? disabledReason : undefined}
       className={cn(
         'inline-flex items-center justify-center gap-1.5 rounded-[8px] border text-[12px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60',
         compact ? 'h-8 px-2.5' : 'h-9 px-3',
