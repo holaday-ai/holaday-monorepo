@@ -8,7 +8,7 @@
 #      web-workbench / cn-payment / extension)
 #   2. Unit tests
 #        browser-driver / skill-sdk / orchestrator / web-workbench /
-#        cn-payment
+#        cn-payment / akshare-mcp
 #   3. Integration tests
 #        orchestrator (real MariaDB + Redis + real Express+tRPC+WS)
 #   4. Database schema verification
@@ -35,6 +35,8 @@
 #                            else still runs). Default: 0.
 #   HOLADAY_SKIP_INTEGRATION=1  skip the orchestrator integration suite
 #                            (needs MariaDB + Redis). Default: 0.
+#   HOLADAY_AKSHARE_PYTHON      Python with apps/akshare-mcp dev dependencies.
+#                            Default: apps/akshare-mcp/.venv/bin/python.
 
 set -uo pipefail
 
@@ -93,6 +95,14 @@ run_check 'unit @holaday/skill-sdk'           pnpm --filter @holaday/skill-sdk  
 run_check 'unit @holaday/orchestrator'        pnpm --filter @holaday/orchestrator   test
 run_check 'unit @holaday/web-workbench'       pnpm --filter @holaday/web-workbench  test
 run_check 'unit @holaday/cn-payment'           pnpm --filter @holaday/cn-payment     test
+AKSHARE_PYTHON="${HOLADAY_AKSHARE_PYTHON:-$REPO_ROOT/apps/akshare-mcp/.venv/bin/python}"
+if [ -x "$AKSHARE_PYTHON" ]; then
+  run_check 'unit @holaday/akshare-mcp' \
+    "$AKSHARE_PYTHON" -m pytest -q "$REPO_ROOT/apps/akshare-mcp/tests"
+else
+  run_check 'unit @holaday/akshare-mcp' \
+    bash -c 'echo "Install apps/akshare-mcp dev dependencies or set HOLADAY_AKSHARE_PYTHON."; exit 1'
+fi
 
 # ---------- integration tests ----------
 # Integration tests spin up their OWN WS server on :3002 and an
