@@ -392,11 +392,12 @@ function asPassedQualityVerification(
             : {}),
         }
       : undefined;
+  if (!coverage) return undefined;
   return {
     status: 'passed',
     gateVersion: value.gateVersion,
     verifiedAt: value.verifiedAt,
-    ...(coverage ? { coverage } : {}),
+    coverage,
     ...(coverage?.audiovisualSync === 'verified_ai' && audiovisualSyncReview
       ? { audiovisualSyncReview }
       : {}),

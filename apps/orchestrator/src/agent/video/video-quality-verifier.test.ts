@@ -352,6 +352,63 @@ describe('verifyFinalVideoQuality', () => {
     });
   });
 
+  it('fails when requested action evidence is present but occurs out of sequence', async () => {
+    const analyzeFrames = vi
+      .fn()
+      .mockResolvedValueOnce(
+        JSON.stringify({ status: 'pass', failedChecks: [], reason: '整体画面无明显异常' }),
+      )
+      .mockResolvedValueOnce(
+        JSON.stringify({
+          checks: [
+            {
+              id: 'lift',
+              observed: true,
+              evidenceFrameSeconds: [4.5],
+              reason: '杯底离开桌面',
+            },
+            {
+              id: 'return',
+              observed: true,
+              evidenceFrameSeconds: [2.25],
+              reason: '杯子接触桌面',
+            },
+            {
+              id: 'subject_containment',
+              observed: true,
+              evidenceFrameSeconds: [0.3, 0.9, 1.5, 2.25, 3, 3.75, 4.5, 5.1, 5.7],
+              reason: '每一张抽样帧中的杯子均完整',
+            },
+          ],
+        }),
+      );
+
+    const result = await verifyFinalVideoQuality(
+      {
+        videoPath: '/tmp/final.mp4',
+        workdir: '/tmp/quality',
+        durationMs: 6_000,
+        userText: '拿起杯子，再放回桌面。',
+        strictRequiredActions: true,
+        expectedSubtitleText: [],
+        requiredBrandTexts: [],
+        brandPolicy: '无品牌要求。',
+      },
+      {
+        runFfmpeg: vi.fn(async () => undefined),
+        readFile: vi.fn(async () => Buffer.from('jpeg')),
+        analyzeFrames,
+        normalizeImage: async (buffer) => buffer,
+      },
+    );
+
+    expect(result).toEqual({
+      status: 'fail',
+      failedChecks: ['required_action_missing_return'],
+      reason: '放回/放下：证据时间不晚于“拿起/提起”，无法确认动作按要求完成',
+    });
+  });
+
   it('uses per-check evidence when the model omits the redundant top-level action summary', async () => {
     const analyzeFrames = vi
       .fn()

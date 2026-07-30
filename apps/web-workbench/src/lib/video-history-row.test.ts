@@ -392,7 +392,7 @@ describe('toVideoRow — 生成历史 only lists completed 成片 with an attach
       }),
     );
 
-    expect(contradictory?.qualityVerification?.coverage).toBeUndefined();
+    expect(contradictory?.qualityVerification).toBeUndefined();
   });
 
   it('keeps current-gate legacy rows readable without manufacturing a lip-sync process result', () => {
@@ -450,7 +450,7 @@ describe('toVideoRow — 生成历史 only lists completed 成片 with an attach
       }),
     );
 
-    expect(contradictoryProcess?.qualityVerification?.coverage).toBeUndefined();
+    expect(contradictoryProcess?.qualityVerification).toBeUndefined();
   });
 
   it('renders provider processing separately from independent AV-sync verification', () => {
@@ -560,7 +560,7 @@ describe('toVideoRow — 生成历史 only lists completed 成片 with an attach
       }),
     );
 
-    expect(unsubstantiated?.qualityVerification?.coverage).toBeUndefined();
+    expect(unsubstantiated?.qualityVerification).toBeUndefined();
     expect(videoAudioVerificationBadge(unsubstantiated?.qualityVerification)).toBeNull();
   });
 

@@ -41,6 +41,32 @@ describe('video creative style state', () => {
     expect(source).toContain('未记录当前基础检查');
   });
 
+  it('lets a deep-linked media task retry an interrupted detail sync', () => {
+    const source = readFileSync(new URL('./VideoPage.tsx', import.meta.url), 'utf8');
+    const panelSource = source.slice(
+      source.indexOf('function CurrentVideoTaskPanel'),
+      source.indexOf('function videoSubStatusCopy'),
+    );
+
+    expect(panelSource).toContain("selectTask(taskId, 'url')");
+    expect(panelSource).toContain('重新同步任务');
+  });
+
+  it('keeps stale IP onboarding loads and overlapping asset mutations from rolling status back', () => {
+    const source = readFileSync(new URL('./VideoPage.tsx', import.meta.url), 'utf8');
+    const wizardSource = source.slice(
+      source.indexOf('export function IpOnboardingWizard'),
+      source.indexOf('function IpGenerateForm'),
+    );
+
+    expect(wizardSource).toContain('const loadRequestRef = React.useRef(0)');
+    expect(wizardSource).toContain('const requestId = ++loadRequestRef.current');
+    expect(wizardSource).toContain('requestId !== loadRequestRef.current');
+    expect(wizardSource).toContain('disabled={uploadingVoice || clearing}');
+    expect(wizardSource).toContain('disabled={uploadingVideo || clearing}');
+    expect(wizardSource).toContain('disabled={!anyAsset || clearing || uploadingVoice || uploadingVideo}');
+  });
+
   it('defaults image generation to one output to avoid silent duplicate spend', () => {
     expect(DEFAULT_IMAGE_COUNT).toBe(1);
     expect(buildImageCreationOptions('nano_banana_2', '1:1')).toEqual({

@@ -2678,6 +2678,7 @@ function CurrentVideoTaskPanel({
   const streamingText = useTaskStore((s) => s.streamingByTask[taskId]);
   const awaiting = useTaskStore((s) => s.awaitingUserByTask[taskId]);
   const steps = useTaskStore(selectStepsFor(taskId));
+  const selectTask = useTaskStore((s) => s.selectTask);
   const abortTask = useTaskStore((s) => s.abortTask);
   const [confirming, setConfirming] = React.useState<string | null>(null);
   const [actionGuard] = React.useState(createMediaActionGuard);
@@ -2749,9 +2750,19 @@ function CurrentVideoTaskPanel({
       className="mb-6 rounded-[22px] border-[#EFEFEF] bg-white shadow-[0_14px_34px_rgba(17,24,39,0.04)]"
     >
       {!task ? (
-        <div className="flex items-center gap-2 py-2 text-[13px] text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          正在同步{preferredConfirm === 'image' ? '图片' : '视频'}任务…
+        <div className="flex flex-wrap items-center gap-3 py-2 text-[13px] text-muted-foreground">
+          <span className="inline-flex min-w-0 items-center gap-2">
+            <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+            正在同步{preferredConfirm === 'image' ? '图片' : '视频'}任务…
+          </span>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => selectTask(taskId, 'url')}
+          >
+            重新同步任务
+          </Button>
         </div>
       ) : (
         <div className="space-y-4">
@@ -3516,12 +3527,14 @@ export function IpOnboardingWizard({
   const voiceRef = React.useRef<HTMLInputElement>(null);
   const videoRef = React.useRef<HTMLInputElement>(null);
   const mountedRef = React.useRef(true);
+  const loadRequestRef = React.useRef(0);
 
   const load = React.useCallback(async () => {
+    const requestId = ++loadRequestRef.current;
     setLoadError(false);
     try {
       const s = await trpc.videoOnboarding.status.query();
-      if (!mountedRef.current) return;
+      if (!mountedRef.current || requestId !== loadRequestRef.current) return;
       setStatus({
         hasVoice: s.hasVoice,
         hasBaseVideo: s.hasBaseVideo,
@@ -3529,7 +3542,7 @@ export function IpOnboardingWizard({
         baseVideoIssue: s.baseVideoIssue,
       });
     } catch {
-      if (!mountedRef.current) return;
+      if (!mountedRef.current || requestId !== loadRequestRef.current) return;
       setLoadError(true);
       setStatus({
         hasVoice: false,
@@ -3551,7 +3564,7 @@ export function IpOnboardingWizard({
   async function handleVoice(e: React.ChangeEvent<HTMLInputElement>): Promise<void> {
     const file = e.target.files?.[0];
     e.target.value = '';
-    if (!file) return;
+    if (!file || clearing) return;
     if (!/\.(wav|mp3|m4a)$/i.test(file.name) && !/^audio\/(wav|mpeg|mp4|x-m4a)$/i.test(file.type)) {
       toast.show('声音样本请用 WAV / MP3 / M4A', 'error');
       return;
@@ -3572,7 +3585,7 @@ export function IpOnboardingWizard({
   async function handleVideo(e: React.ChangeEvent<HTMLInputElement>): Promise<void> {
     const file = e.target.files?.[0];
     e.target.value = '';
-    if (!file) return;
+    if (!file || clearing) return;
     if (!/\.(mp4|mov)$/i.test(file.name) && !/^video\/(mp4|quicktime)$/i.test(file.type)) {
       toast.show('出镜底版请用 MP4 / MOV', 'error');
       return;
@@ -3591,7 +3604,7 @@ export function IpOnboardingWizard({
   }
 
   async function handleClear(): Promise<void> {
-    if (clearing) return;
+    if (clearing || uploadingVoice || uploadingVideo) return;
     setClearing(true);
     try {
       await trpc.videoOnboarding.deleteAssets.mutate();
@@ -3667,12 +3680,12 @@ export function IpOnboardingWizard({
               {status.hasVoice ? (
                 <div className="flex flex-wrap items-center gap-2 text-[13px] text-muted-foreground">
                   <span>声音已就绪 ✓</span>
-                  <Button variant="outline" size="sm" onClick={() => voiceRef.current?.click()} disabled={uploadingVoice}>
+                  <Button variant="outline" size="sm" onClick={() => voiceRef.current?.click()} disabled={uploadingVoice || clearing}>
                     {uploadingVoice ? '上传中…' : '重新上传'}
                   </Button>
                 </div>
               ) : (
-                <Button type="button" size="sm" onClick={() => voiceRef.current?.click()} disabled={uploadingVoice}>
+                <Button type="button" size="sm" onClick={() => voiceRef.current?.click()} disabled={uploadingVoice || clearing}>
                   {uploadingVoice ? (
                     <>
                       <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
@@ -3701,7 +3714,7 @@ export function IpOnboardingWizard({
               {status.hasBaseVideo ? (
                 <div className="flex flex-wrap items-center gap-2 text-[13px] text-muted-foreground">
                   <span>底版已就绪 ✓</span>
-                  <Button variant="outline" size="sm" onClick={() => videoRef.current?.click()} disabled={uploadingVideo}>
+                  <Button variant="outline" size="sm" onClick={() => videoRef.current?.click()} disabled={uploadingVideo || clearing}>
                     {uploadingVideo ? '上传中…' : '重新上传'}
                   </Button>
                 </div>
@@ -3712,7 +3725,7 @@ export function IpOnboardingWizard({
                       原出镜底版当前不可用，请稍后重试；若持续出现，请重新上传。
                     </p>
                   ) : null}
-                  <Button type="button" size="sm" onClick={() => videoRef.current?.click()} disabled={uploadingVideo}>
+                  <Button type="button" size="sm" onClick={() => videoRef.current?.click()} disabled={uploadingVideo || clearing}>
                     {uploadingVideo ? (
                       <>
                         <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
@@ -3760,7 +3773,7 @@ export function IpOnboardingWizard({
           variant="outline"
           size="sm"
           onClick={() => void handleClear()}
-          disabled={!anyAsset || clearing}
+          disabled={!anyAsset || clearing || uploadingVoice || uploadingVideo}
           className="border-[#DCDDDD] text-[#595757] hover:border-[#EA1F59]/40 hover:text-[#EA1F59]"
         >
           {clearing ? (

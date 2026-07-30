@@ -521,6 +521,7 @@ function buildStrictRequiredActionPrompt(
     '判定红线：',
     '- 手接触主体、握住把手或遮挡主体，但主体仍留在原支撑面上，不能算“拿起”。',
     '- 不得根据动作意图、相邻帧姿势或“可能发生在抽样帧之间”来脑补缺失阶段。',
+    '- 动作阶段必须按清单顺序发生；后一个动作的证据时间必须晚于前一个动作。',
     '- 必须严格按上方清单逐项返回，每个 id 恰好一次，不得漏项、重复或增加其它 id。',
     '- observed=true 时必须从图片标签逐字抄录至少一个对应的时间秒数到 evidenceFrameSeconds；没有直接证据必须 observed=false。',
     ...subjectContainmentRule,
@@ -598,6 +599,7 @@ function aggregateRequiredActionEvidence(input: {
 }): VideoQualityResult {
   const evidenceById = new Map(input.evidence.checks.map((check) => [check.id, check]));
   const failures: Array<{ check: RequiredActionCheck; reason: string; code: string }> = [];
+  const sampledEvidenceByAction = new Map<RequiredActionId, number[]>();
   for (const expected of input.expectedChecks) {
     const evidence = evidenceById.get(expected.id);
     if (!evidence) {
@@ -639,6 +641,33 @@ function aggregateRequiredActionEvidence(input: {
         reason: '未引用任何实际抽样帧作为直接证据',
         code: `required_action_missing_${expected.id}`,
       });
+    } else if (expected.id !== 'subject_containment') {
+      sampledEvidenceByAction.set(expected.id, referencedSampledFrames);
+    }
+  }
+  const sequentialChecks = input.expectedChecks.filter(
+    (check) => check.id !== 'subject_containment',
+  );
+  if (
+    sequentialChecks.length > 1 &&
+    sequentialChecks.every((check) => sampledEvidenceByAction.has(check.id))
+  ) {
+    let previousTimestamp = Number.NEGATIVE_INFINITY;
+    let previousCheck: RequiredActionCheck | undefined;
+    for (const check of sequentialChecks) {
+      const timestamp = sampledEvidenceByAction
+        .get(check.id)
+        ?.find((candidate) => candidate > previousTimestamp);
+      if (timestamp === undefined) {
+        failures.push({
+          check,
+          reason: `证据时间不晚于“${previousCheck?.label ?? '前一动作'}”，无法确认动作按要求完成`,
+          code: `required_action_missing_${check.id}`,
+        });
+        continue;
+      }
+      previousTimestamp = timestamp;
+      previousCheck = check;
     }
   }
   if (failures.length > 0) {
