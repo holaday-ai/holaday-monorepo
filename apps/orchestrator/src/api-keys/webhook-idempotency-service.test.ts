@@ -8,8 +8,7 @@
  *     different hash → replay-with-conflictsWith, expired → fresh,
  *     placeholder claim → in_flight
  *   - recordClaim: success → claimed, DUP + populated → replay,
- *     DUP + placeholder → in_flight, DUP + stale placeholder →
- *     orphan-takeover + claimed
+ *     DUP + placeholder → in_flight for the full idempotency TTL
  *   - finalizeClaim: UPDATE flips placeholder to real values;
  *     no-op when another process raced to finalize first
  *   - releaseClaim: deletes placeholder rows; idempotent against
@@ -26,7 +25,6 @@ import {
   canonicalize,
   cleanup,
   CLAIM_PLACEHOLDER_TASK_ID,
-  CLAIM_STALE_AFTER_MS,
   finalizeClaim,
   hashBody,
   lookup,
@@ -95,7 +93,7 @@ function makeFakeDb(initialRows: FakeRow[] = []) {
       if (!s.includes(`value: ${row.userId}`)) return false;
       // idempotency_key predicate.
       if (!s.includes(`value: '${row.idempotencyKey}'`)) return false;
-      // Placeholder-task_id predicate (orphan DELETE + releaseClaim
+      // Placeholder-task_id predicate (expired DELETE + releaseClaim
       // + finalize WHERE-guard). `value: ''` only appears when one
       // of the eq calls binds the placeholder string.
       if (s.includes("value: ''")) {
@@ -395,7 +393,7 @@ describe('recordClaim (atomic-claim flow, Codex P1)', () => {
     expect(r.kind).toBe('in_flight');
   });
 
-  it('DUP + stale placeholder → orphan-takeover + claimed', async () => {
+  it('DUP + old unexpired placeholder stays in_flight instead of risking duplicate dispatch', async () => {
     const { db, rows } = makeFakeDb([
       {
         userId: 42,
@@ -404,12 +402,13 @@ describe('recordClaim (atomic-claim flow, Codex P1)', () => {
         taskId: CLAIM_PLACEHOLDER_TASK_ID,
         responseJson: {},
         expiresAt: new Date(Date.now() + 60_000),
-        createdAt: new Date(Date.now() - CLAIM_STALE_AFTER_MS - 5_000),
+        createdAt: new Date(Date.now() - 10 * 60_000),
       },
     ]);
     const r = await recordClaim({ db, logger: fakeLogger }, 42, 'key-a', { prompt: 'x' });
-    expect(r.kind).toBe('claimed');
-    // The orphan is replaced — one row remains, with our hash.
+    expect(r.kind).toBe('in_flight');
+    // Fail closed for the advertised TTL: the original claim remains
+    // authoritative even when dispatch legitimately takes minutes.
     expect(rows).toHaveLength(1);
     expect(rows[0]?.taskId).toBe(CLAIM_PLACEHOLDER_TASK_ID);
   });

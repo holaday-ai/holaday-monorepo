@@ -36,9 +36,20 @@ import {
   type NotificationPlatform,
   type WebhookContext,
 } from '../../notifications/webhook-sender.js';
+import { tryAcquire as rateLimitTryAcquire } from '../../quota/rate-limiter.js';
 import { protectedProcedure, router } from '../trpc.js';
 
 const PLATFORMS = ['wecom', 'feishu', 'dingtalk', 'custom'] as const;
+const MAX_NOTIFICATION_CHANNELS_PER_USER = 10;
+const MAX_CUSTOM_TEMPLATE_BYTES = 32 * 1024;
+const NOTIFICATION_CHANNEL_CREATE_RATE = {
+  windowMs: 60_000,
+  max: 10,
+} as const;
+const NOTIFICATION_CHANNEL_TEST_RATE = {
+  windowMs: 60_000,
+  max: 10,
+} as const;
 
 async function requireUserId(
   ctx: { db: typeof import('../../db/client.js').db; userId: string },
@@ -70,11 +81,41 @@ function normaliseTemplate(
         message: '自定义平台必须提供 JSON 模板',
       });
     }
+    let serialized: string | undefined;
+    try {
+      serialized = JSON.stringify(template);
+    } catch {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: '自定义模板必须是可序列化的 JSON',
+      });
+    }
+    if (
+      serialized === undefined ||
+      Buffer.byteLength(serialized, 'utf8') > MAX_CUSTOM_TEMPLATE_BYTES
+    ) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: '自定义模板不能超过 32 KiB',
+      });
+    }
     return template;
   }
   // Preset platforms ignore any template the caller sent — null it
   // out so the column doesn't get polluted with stale data.
   return null;
+}
+
+function requireNotificationRateLimit(
+  bucket: string,
+  limit: { readonly windowMs: number; readonly max: number },
+): void {
+  const result = rateLimitTryAcquire(bucket, limit);
+  if (result.ok) return;
+  throw new TRPCError({
+    code: 'TOO_MANY_REQUESTS',
+    message: `操作过于频繁，请在 ${Math.max(1, Math.ceil(result.retryAfterMs / 1_000))} 秒后重试`,
+  });
 }
 
 async function requireSafeWebhookTarget(webhookUrl: string): Promise<void> {
@@ -207,9 +248,24 @@ export const notificationChannelsRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      requireNotificationRateLimit(
+        `notification-channel-create:${ctx.userId}`,
+        NOTIFICATION_CHANNEL_CREATE_RATE,
+      );
       const userId = await requireUserId(ctx);
-      await requireSafeWebhookTarget(input.webhookUrl);
       const template = normaliseTemplate(input.platform, input.customTemplate);
+      await requireSafeWebhookTarget(input.webhookUrl);
+      const existingChannels = await ctx.db
+        .select({ id: notificationChannels.id })
+        .from(notificationChannels)
+        .where(eq(notificationChannels.userId, userId))
+        .limit(MAX_NOTIFICATION_CHANNELS_PER_USER);
+      if (existingChannels.length >= MAX_NOTIFICATION_CHANNELS_PER_USER) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `每个账号最多可保存 ${MAX_NOTIFICATION_CHANNELS_PER_USER} 个通知渠道`,
+        });
+      }
       const externalId = newExternalId('notificationChannel');
       await ctx.db.insert(notificationChannels).values({
         externalId,
@@ -256,6 +312,14 @@ export const notificationChannelsRouter = router({
       }
       const updates: Partial<typeof notificationChannels.$inferInsert> = {};
       const effectivePlatform = (input.platform ?? row.platform) as NotificationPlatform;
+      if (
+        effectivePlatform === 'custom' &&
+        input.platform === 'custom' &&
+        row.platform !== 'custom' &&
+        input.customTemplate === undefined
+      ) {
+        normaliseTemplate('custom', undefined);
+      }
       if (input.platform !== undefined) updates.platform = input.platform;
       if (input.webhookUrl !== undefined) updates.webhookUrl = input.webhookUrl;
       if (input.customTemplate !== undefined) {
@@ -328,6 +392,10 @@ export const notificationChannelsRouter = router({
       ]),
     )
     .mutation(async ({ ctx, input }) => {
+      requireNotificationRateLimit(
+        `notification-channel-test:${ctx.userId}`,
+        NOTIFICATION_CHANNEL_TEST_RATE,
+      );
       const userId = await requireUserId(ctx);
       let platform: NotificationPlatform;
       let webhookUrl: string;

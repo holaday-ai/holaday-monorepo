@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   normalizeCnPaymentOptions,
   normalizePaymentOptions,
+  planFirstMonthOfferCopy,
   planPaymentCtaState,
   planPaymentErrorMessage,
   planPaymentOptionsLoading,
+  planSettlementNotice,
 } from './plan-payment-state';
 
 describe('normalizePaymentOptions', () => {
@@ -177,5 +179,45 @@ describe('planPaymentOptionsLoading', () => {
         cnPaymentOptionsLoaded: true,
       }),
     ).toBe(false);
+  });
+});
+
+describe('plan pricing copy', () => {
+  it('describes first-month pricing as conditional and checkout-authoritative', () => {
+    expect(
+      planFirstMonthOfferCopy({
+        zh: true,
+        regularPrice: '¥29',
+        promoPrice: '¥9.9',
+      }),
+    ).toEqual({
+      priceMain: '¥29',
+      priceUnit: '/ 月',
+      hint: '符合新付费用户优惠条件时，首月 ¥9.9；实际金额以结账页为准',
+    });
+
+    expect(
+      planFirstMonthOfferCopy({
+        zh: false,
+        regularPrice: '$4',
+        promoPrice: '$1.50',
+      }),
+    ).toEqual({
+      priceMain: '$4',
+      priceUnit: '/ month',
+      hint: 'Eligible new paid users get the first month for $1.50; checkout shows the final amount',
+    });
+  });
+
+  it('describes settlement currency for the payment methods actually available', () => {
+    expect(planSettlementNotice({ zh: true, cnEnabled: true })).toBe(
+      '选择微信或支付宝时按页面人民币金额结算；选择 PayPal 时以美元结算，实际金额以结账页为准。',
+    );
+    expect(planSettlementNotice({ zh: true, cnEnabled: false })).toBe(
+      '当前在线支付通过 PayPal 以美元结算；人民币价格仅供对照，实际金额以结账页为准。',
+    );
+    expect(planSettlementNotice({ zh: false, cnEnabled: true })).toBe(
+      'WeChat Pay and Alipay settle in CNY; PayPal settles in USD. Checkout shows the final amount.',
+    );
   });
 });

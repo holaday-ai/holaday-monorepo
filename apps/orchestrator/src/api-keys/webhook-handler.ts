@@ -53,6 +53,7 @@ import type { Context } from '../trpc/context.js';
 const IDEMPOTENCY_KEY_HEADER = 'idempotency-key';
 const MAX_IDEMPOTENCY_KEY_LENGTH = 128;
 const IDEMPOTENCY_KEY_RE = /^[A-Za-z0-9._\-:/]{1,128}$/;
+const IDEMPOTENCY_FINALIZE_ATTEMPTS = 3;
 
 export interface WebhookDeps {
   db: DB;
@@ -132,7 +133,20 @@ export async function resolveApiKey(
 export function createWebhookTasksHandler(deps: WebhookDeps) {
   return async function handle(req: Request, res: Response): Promise<void> {
     const bearer = extractBearer(req.header('authorization'));
-    const resolution = await resolveApiKey(bearer, deps.db);
+    let resolution: Awaited<ReturnType<typeof resolveApiKey>>;
+    try {
+      resolution = await resolveApiKey(bearer, deps.db);
+    } catch (err) {
+      deps.logger.error(
+        {
+          err: err instanceof Error ? err.message : String(err),
+          path: req.path,
+        },
+        'webhook: API key lookup failed',
+      );
+      res.status(500).json({ error: 'internal_error' });
+      return;
+    }
     if (!resolution.ok) {
       // Don't leak whether the key was malformed vs unknown vs revoked
       // vs expired — all four are "your bearer doesn't work". The log
@@ -306,6 +320,13 @@ export function createWebhookTasksHandler(deps: WebhookDeps) {
         { err: err instanceof Error ? err.message : String(err) },
         'webhook: failed to build context',
       );
+      if (claimedKey) {
+        await idempotencyRelease(
+          { db: deps.db, logger: deps.logger },
+          resolution.userInternalId,
+          idempotencyKey,
+        );
+      }
       res.status(500).json({ error: 'internal_error' });
       return;
     }
@@ -313,37 +334,44 @@ export function createWebhookTasksHandler(deps: WebhookDeps) {
     try {
       const result = await deps.dispatch(ctx, { intent: prompt });
       const response = { taskId: result.taskId, status: result.status };
-      // Finalize the idempotency claim BEFORE responding so a retry
-      // that lands before we flush the cache still gets the recorded
-      // response. Failure here is non-fatal: we still 200 the caller
-      // (their task was dispatched OK), they just lose replay
-      // guarantee for the duration the cache row would have lived.
+      // Finalize the idempotency claim BEFORE acknowledging success.
+      // A 200 without the durable key → task mapping would let a later
+      // retry create a duplicate after the idempotency window.
       if (claimedKey) {
-        try {
-          await idempotencyFinalize(
-            { db: deps.db, logger: deps.logger },
-            resolution.userInternalId,
-            idempotencyKey,
-            result.taskId,
-            response,
-          );
-        } catch (err) {
-          deps.logger.warn(
+        const finalized = await finalizeIdempotencyClaimWithRetry(
+          deps,
+          resolution.userInternalId,
+          idempotencyKey,
+          result.taskId,
+          response,
+        );
+        if (!finalized) {
+          deps.logger.error(
             {
-              err: err instanceof Error ? err.message : String(err),
               idempotencyKey,
+              taskId: result.taskId,
+              attempts: IDEMPOTENCY_FINALIZE_ATTEMPTS,
             },
-            'webhook: idempotency finalize failed (non-fatal — caller still got 200)',
+            'webhook: idempotency finalize exhausted retries; refusing unsafe success response',
           );
+          res
+            .status(503)
+            .setHeader('Retry-After', '2')
+            .json({
+              error: 'idempotency_unavailable',
+              message:
+                'Task was created, but its idempotency result could not be persisted. Contact support before retrying with a new key.',
+              taskId: result.taskId,
+            });
+          return;
         }
       }
       res.status(200).json(response);
     } catch (err) {
       // Codex P1 — release the claim so retries aren't blocked by
       // the placeholder row. Without this, a quota-failure retry
-      // would 425 in-flight for 60s (until orphan-takeover) then
-      // hit the same quota error — surfacing as a confusing latency
-      // for the user. releaseClaim is a no-op on already-finalized
+      // would remain 425 in-flight for the full 24-hour idempotency
+      // window. releaseClaim is a no-op on already-finalized
       // rows so it's safe to fire unconditionally before the
       // error-shaping block.
       if (claimedKey) {
@@ -379,6 +407,29 @@ export function createWebhookTasksHandler(deps: WebhookDeps) {
       res.status(500).json({ error: 'internal_error' });
     }
   };
+}
+
+async function finalizeIdempotencyClaimWithRetry(
+  deps: Pick<WebhookDeps, 'db' | 'logger'>,
+  userInternalId: number,
+  idempotencyKey: string,
+  taskId: string,
+  response: unknown,
+): Promise<boolean> {
+  for (let attempt = 1; attempt <= IDEMPOTENCY_FINALIZE_ATTEMPTS; attempt += 1) {
+    const finalized = await idempotencyFinalize(
+      { db: deps.db, logger: deps.logger },
+      userInternalId,
+      idempotencyKey,
+      taskId,
+      response,
+    );
+    if (finalized) return true;
+    if (attempt < IDEMPOTENCY_FINALIZE_ATTEMPTS) {
+      await new Promise<void>((resolve) => setTimeout(resolve, attempt * 25));
+    }
+  }
+  return false;
 }
 
 // Re-export for tests + suppress unused-import warning on the

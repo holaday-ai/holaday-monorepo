@@ -1,5 +1,7 @@
 import type { NotificationPlatform } from './notification-channel-copy';
 
+const MAX_CUSTOM_TEMPLATE_BYTES = 32 * 1024;
+
 export interface NotificationChannelDraft {
   platform: NotificationPlatform;
   webhookUrl: string;
@@ -18,10 +20,16 @@ export function buildNotificationChannelDraft({
   const trimmedUrl = webhookUrl.trim();
   if (!trimmedUrl) return { error: '请填写通知地址' };
 
+  let parsedUrl: URL;
   try {
-    new URL(trimmedUrl);
+    parsedUrl = new URL(trimmedUrl);
   } catch {
     return { error: '通知地址格式不正确，请以 http:// 或 https:// 开头' };
+  }
+  if (parsedUrl.protocol !== 'https:') {
+    return {
+      error: '通知地址必须使用 https://，以免通知内容或凭据被窃取',
+    };
   }
 
   if (platform !== 'custom') {
@@ -32,6 +40,12 @@ export function buildNotificationChannelDraft({
     const parsed = JSON.parse(templateJson) as unknown;
     if (parsed === null) {
       return { error: '自定义模板不能为空，请填写可发送的 JSON 内容' };
+    }
+    if (
+      new TextEncoder().encode(JSON.stringify(parsed)).byteLength >
+      MAX_CUSTOM_TEMPLATE_BYTES
+    ) {
+      return { error: '自定义模板不能超过 32 KiB' };
     }
     return {
       platform,

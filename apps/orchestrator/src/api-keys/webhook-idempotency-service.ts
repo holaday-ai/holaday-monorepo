@@ -24,11 +24,10 @@
  *      hash → return cached, different hash → caller 409s) OR
  *      `{kind: 'in_flight'}` (claim row exists but not yet
  *      finalized — claimant is mid-dispatch).
- *   4. Orphan recovery: if a `'claimed'` process crashes before
- *      `finalizeClaim`, the row sits with placeholder data forever.
- *      `recordClaim` treats a claim older than `CLAIM_STALE_AFTER_MS`
- *      as orphaned and atomically deletes it before retrying, so a
- *      legitimate retry days later isn't blocked by a corpse.
+ *   4. An unfinished claim remains authoritative until the advertised
+ *      24-hour TTL expires. Reclaiming a merely "old" placeholder is
+ *      unsafe because planning can legitimately take minutes; another
+ *      dispatcher must never create a duplicate during that window.
  *
  * Hash is SHA-256 of the request body, applied to a CANONICAL
  * representation: we sort object keys + drop undefined so two
@@ -60,16 +59,6 @@ export const CLAIM_PLACEHOLDER_TASK_ID = '';
  * satisfies NOT NULL without leaking ambiguous data.
  */
 export const CLAIM_PLACEHOLDER_RESPONSE: Record<string, unknown> = {};
-
-/**
- * Claim older than this is treated as orphaned (the original
- * dispatcher crashed or hung) and `recordClaim` will atomically
- * delete-and-retake it. 60s comfortably exceeds the upper bound of
- * a single dispatch (task row INSERT + WS broadcast — usually
- * <100ms) without being so long that a legitimate user retry gets
- * blocked.
- */
-export const CLAIM_STALE_AFTER_MS = 60_000;
 
 export type LookupResult =
   | { kind: 'fresh' }
@@ -188,9 +177,9 @@ export async function lookup(
  * caller to one of:
  *   - 'replay'    — the other side already finalized
  *   - 'in_flight' — the other side is still dispatching
- *   - 'claimed'   — the orphan-takeover path: existing claim is
- *                   older than `CLAIM_STALE_AFTER_MS` so we
- *                   atomically deleted it + re-INSERTed
+ *   - 'claimed'   — the expired-row takeover path: the prior
+ *                   idempotency window ended, so the old row was
+ *                   atomically deleted and replaced
  */
 export async function recordClaim(
   deps: IdempotencyServiceDeps,
@@ -219,8 +208,8 @@ export async function recordClaim(
   } catch (err) {
     const code = (err as { code?: string }).code;
     if (code !== 'ER_DUP_ENTRY') throw err;
-    // Collision — re-read the existing row to decide replay vs
-    // in_flight vs orphan-takeover.
+    // Collision — re-read the existing row to decide replay,
+    // in_flight, or expired-row replacement.
     const [row] = await deps.db
       .select({
         requestHash: webhookIdempotency.requestHash,
@@ -247,11 +236,10 @@ export async function recordClaim(
       // hit the unique index because cleanup hadn't run yet. Try
       // to delete-and-retake. If delete succeeds we recurse once;
       // otherwise surface as in_flight.
-      const reclaimed = await tryReclaim(
+      const reclaimed = await tryReplaceExpiredClaim(
         deps,
         userInternalId,
         key,
-        row.createdAt,
         hash,
         nowFn,
       );
@@ -259,36 +247,8 @@ export async function recordClaim(
       return { kind: 'in_flight', claimedAt: row.createdAt };
     }
     if (row.taskId === CLAIM_PLACEHOLDER_TASK_ID) {
-      // Real claim in flight — or an orphan from a crashed dispatcher.
-      const ageMs = nowFn().getTime() - row.createdAt.getTime();
-      if (ageMs > CLAIM_STALE_AFTER_MS) {
-        // Orphan: take it over.
-        const reclaimed = await tryReclaim(
-          deps,
-          userInternalId,
-          key,
-          row.createdAt,
-          hash,
-          nowFn,
-        );
-        if (reclaimed) {
-          deps.logger.info(
-            {
-              userInternalId,
-              idempotencyKey: key,
-              orphanedAgeMs: ageMs,
-            },
-            'webhook-idempotency: orphan claim taken over (previous dispatcher crashed before finalize)',
-          );
-          return { kind: 'claimed' };
-        }
-        // Couldn't reclaim — someone else (probably the original
-        // claimant finalizing right now) touched it. Look up again
-        // to find the resolved state.
-        const after = await lookup(deps, userInternalId, key, requestBody);
-        if (after.kind === 'replay') return after;
-        return { kind: 'in_flight', claimedAt: row.createdAt };
-      }
+      // Fail closed for the full TTL. A planner call can legitimately
+      // exceed a minute, so age alone cannot prove the dispatcher died.
       return { kind: 'in_flight', claimedAt: row.createdAt };
     }
     // Row has real task_id — replay.
@@ -303,7 +263,7 @@ export async function recordClaim(
 }
 
 /**
- * Atomically delete a stale claim and re-INSERT ours. Qualifying
+ * Atomically delete an expired claim and re-INSERT ours. Qualifying
  * the DELETE on `task_id = '' (placeholder)` is enough for race
  * safety: the unique index on `(user_id, idempotency_key)`
  * guarantees at most one row exists, and a concurrent finalize that
@@ -312,11 +272,10 @@ export async function recordClaim(
  * is no longer in placeholder state). On a zero-match DELETE we
  * fall back to the lookup path.
  */
-async function tryReclaim(
+async function tryReplaceExpiredClaim(
   deps: IdempotencyServiceDeps,
   userInternalId: number,
   key: string,
-  _observedCreatedAt: Date,
   hash: string,
   nowFn: () => Date,
 ): Promise<boolean> {
@@ -333,7 +292,7 @@ async function tryReclaim(
     const affected = readAffectedRows(delResult);
     if (affected === 0) return false;
     // DELETE succeeded; now INSERT our claim. On the off chance
-    // someone else also took the orphan we'd get DUP again here —
+    // someone else also replaced the expired row we'd get DUP here —
     // surface that as "lost the race" so caller's recordClaim
     // collision branch handles it via a fresh lookup.
     try {
@@ -356,7 +315,7 @@ async function tryReclaim(
   } catch (err) {
     deps.logger.warn(
       { err: err instanceof Error ? err.message : String(err) },
-      'webhook-idempotency: orphan reclaim failed (non-fatal)',
+      'webhook-idempotency: expired claim replacement failed (non-fatal)',
     );
     return false;
   }
@@ -388,8 +347,7 @@ export async function finalizeClaim(
           eq(webhookIdempotency.userId, userInternalId),
           eq(webhookIdempotency.idempotencyKey, key),
           // Guard: only flip the placeholder. If another process
-          // already finalized (unlikely but possible after an
-          // orphan-takeover), this UPDATE matches zero rows and
+          // already finalized, this UPDATE matches zero rows and
           // we keep their finalized state.
           eq(webhookIdempotency.taskId, CLAIM_PLACEHOLDER_TASK_ID),
         ),
@@ -413,7 +371,7 @@ export async function finalizeClaim(
  * Drop a claim row whose dispatch failed (quota, TRPC error,
  * unexpected throw). Without this, the failed claim sits with
  * placeholder data for 24h and any retry of the same key gets
- * stuck on `in_flight` until orphan timeout. Releasing returns
+ * stuck on `in_flight` until expiry. Releasing returns
  * the slot to "fresh" so the caller's next retry behaves like a
  * brand-new request.
  *
@@ -444,7 +402,7 @@ export async function releaseClaim(
         userInternalId,
         idempotencyKey: key,
       },
-      'webhook-idempotency: releaseClaim failed (non-fatal — claim row will be orphan-swept later)',
+      'webhook-idempotency: releaseClaim failed (non-fatal — claim expires at the TTL boundary)',
     );
     return false;
   }

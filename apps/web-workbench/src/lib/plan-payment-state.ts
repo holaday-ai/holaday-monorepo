@@ -21,6 +21,12 @@ interface PaymentOptionsLoadingInput {
   cnPaymentOptionsLoaded: boolean;
 }
 
+export interface PlanFirstMonthOfferCopy {
+  readonly priceMain: string;
+  readonly priceUnit: string;
+  readonly hint: string;
+}
+
 export function normalizePaymentOptions(value: unknown): PaymentOptions {
   if (!isRecord(value)) return emptyPaymentOptions();
   const paypalClientId = safeText(value.paypalClientId);
@@ -92,6 +98,38 @@ export function planPaymentErrorMessage(rawMsg: string | null | undefined, zh: b
   return zh
     ? '支付未完成，请稍后重试；如果已经扣款，请联系 support@holaday.ai。'
     : 'Payment was not completed. Please try again later, or contact support@holaday.ai if you were charged.';
+}
+
+export function planFirstMonthOfferCopy(input: {
+  readonly zh: boolean;
+  readonly regularPrice: string;
+  readonly promoPrice: string;
+}): PlanFirstMonthOfferCopy {
+  return input.zh
+    ? {
+        priceMain: input.regularPrice,
+        priceUnit: '/ 月',
+        hint: `符合新付费用户优惠条件时，首月 ${input.promoPrice}；实际金额以结账页为准`,
+      }
+    : {
+        priceMain: input.regularPrice,
+        priceUnit: '/ month',
+        hint: `Eligible new paid users get the first month for ${input.promoPrice}; checkout shows the final amount`,
+      };
+}
+
+export function planSettlementNotice(input: {
+  readonly zh: boolean;
+  readonly cnEnabled: boolean;
+}): string {
+  if (input.zh) {
+    return input.cnEnabled
+      ? '选择微信或支付宝时按页面人民币金额结算；选择 PayPal 时以美元结算，实际金额以结账页为准。'
+      : '当前在线支付通过 PayPal 以美元结算；人民币价格仅供对照，实际金额以结账页为准。';
+  }
+  return input.cnEnabled
+    ? 'WeChat Pay and Alipay settle in CNY; PayPal settles in USD. Checkout shows the final amount.'
+    : 'PayPal settles in USD. CNY prices are for reference; checkout shows the final amount.';
 }
 
 function emptyPaymentOptions(): PaymentOptions {

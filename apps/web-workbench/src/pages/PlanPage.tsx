@@ -21,9 +21,11 @@ import { normalizeAuthMeProfile } from '@/lib/auth-me-state';
 import {
   normalizeCnPaymentOptions,
   normalizePaymentOptions,
+  planFirstMonthOfferCopy,
   planPaymentCtaState,
   planPaymentErrorMessage,
   planPaymentOptionsLoading,
+  planSettlementNotice,
   type CnPaymentOptions,
   type PaymentOptions,
 } from '@/lib/plan-payment-state';
@@ -36,9 +38,8 @@ import { PageContainer, PageHeader } from '@/pages/PageShell';
 
 /**
  * Pick currency by browser locale. zh-* (mainland + HK + TW) gets ¥;
- * everywhere else gets $. PayPal still charges USD until WeChat Pay /
- * Alipay land in Phase 2 — for CN users we render ¥ as primary and
- * surface a small "(charged in USD via PayPal)" note below the cards.
+ * everywhere else gets $. The settlement notice below the cards
+ * distinguishes CNY local-payment checkout from USD PayPal checkout.
  */
 function detectCurrency(): Currency {
   if (typeof navigator === 'undefined') return 'usd';
@@ -111,7 +112,7 @@ export function PlanPage(): JSX.Element {
     return () => cancelAnimationFrame(id);
   }, [currentPlan, location.hash, paymentOpts?.paypal, paymentOpts?.paypalClientId]);
 
-  const isFirstMonthEligible = currentPlan === 'free';
+  const mayQualifyForFirstMonthOffer = currentPlan === 'free';
   const isPaidPlan = currentPlan === 'basic' || currentPlan === 'pro';
   const canBuyAddons = Boolean(
     isPaidPlan && paymentOpts?.paypal && paymentOpts.paypalClientId,
@@ -218,7 +219,6 @@ export function PlanPage(): JSX.Element {
           // the yearly rate).
           let priceMain = '';
           let priceUnit = '';
-          let priceStrike = '';
           let firstMonthHint = '';
           if (planId === 'free') {
             priceMain = formatPrice(0, currency);
@@ -230,13 +230,15 @@ export function PlanPage(): JSX.Element {
           } else {
             const regular = getPlanPriceCents(planId, 'monthly', currency, false);
             const promoCents = def[currency].firstMonthCents;
-            if (isFirstMonthEligible && promoCents != null) {
-              priceMain = formatPrice(promoCents, currency);
-              priceUnit = zh ? '/ 首月' : '/ first month';
-              priceStrike = formatPrice(regular, currency);
-              firstMonthHint = zh
-                ? `之后每月 ${formatPrice(regular, currency)}`
-                : `then ${formatPrice(regular, currency)}/mo`;
+            if (mayQualifyForFirstMonthOffer && promoCents != null) {
+              const offer = planFirstMonthOfferCopy({
+                zh,
+                regularPrice: formatPrice(regular, currency),
+                promoPrice: formatPrice(promoCents, currency),
+              });
+              priceMain = offer.priceMain;
+              priceUnit = offer.priceUnit;
+              firstMonthHint = offer.hint;
             } else {
               priceMain = formatPrice(regular, currency);
               priceUnit = zh ? '/ 月' : '/ month';
@@ -280,9 +282,6 @@ export function PlanPage(): JSX.Element {
               <div className="mb-2 flex flex-wrap items-baseline gap-x-2 gap-y-1">
                 <span className="text-3xl font-semibold tracking-tight">{priceMain}</span>
                 <span className="text-xs text-muted-foreground">{priceUnit}</span>
-                {priceStrike && (
-                  <span className="text-xs text-muted-foreground line-through">{priceStrike}</span>
-                )}
               </div>
               {firstMonthHint ? (
                 <p className="mb-4 text-xs text-muted-foreground">{firstMonthHint}</p>
@@ -305,11 +304,11 @@ export function PlanPage(): JSX.Element {
                         ? `每月 ${def.tasks.count} 个任务`
                         : `${def.tasks.count} tasks/month`}
                 </div>
-                {def.tasks.firstMonthBonus && isFirstMonthEligible && cycle === 'monthly' && (
+                {def.tasks.firstMonthBonus && mayQualifyForFirstMonthOffer && cycle === 'monthly' && (
                   <div className="text-muted-foreground">
                     {zh
-                      ? `首月额外赠送 ${def.tasks.firstMonthBonus} 次`
-                      : `+${def.tasks.firstMonthBonus} bonus first month`}
+                      ? `符合首月优惠条件时额外赠送 ${def.tasks.firstMonthBonus} 次`
+                      : `Eligible first-month offers include +${def.tasks.firstMonthBonus} bonus tasks`}
                   </div>
                 )}
                 <div className="text-muted-foreground">
@@ -567,12 +566,13 @@ export function PlanPage(): JSX.Element {
           </div>
         ))}
 
-      {/* CN-locale note: PayPal still settles in USD */}
+      {/* CN-locale settlement note reflects the providers available now. */}
       {currency === 'cny' && (
         <div className="mx-auto mt-6 max-w-xl rounded-[8px] border border-[#DCDDDD] border-l-[#42C0EF] bg-white p-3 text-center text-xs text-muted-foreground shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
-          {zh
-            ? '当前通过 PayPal 以美元结算（按当日汇率折算 ≈ ¥）。本地支付和企业付款可联系支持开通。'
-            : "Charged via PayPal in USD (¥ shown at today's rate). Contact support for local payment or business billing."}
+          {planSettlementNotice({
+            zh,
+            cnEnabled: cnOpts?.enabled ?? false,
+          })}
         </div>
       )}
 

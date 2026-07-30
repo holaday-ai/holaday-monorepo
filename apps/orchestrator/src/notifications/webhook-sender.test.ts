@@ -238,6 +238,17 @@ describe('sendWebhook — HTTP behaviour', () => {
 });
 
 describe('validateWebhookTarget — SSRF boundary', () => {
+  it('rejects public HTTP targets before DNS resolution', async () => {
+    const resolve = vi.fn(async () => [
+      { address: '93.184.216.34', family: 4 as const },
+    ]);
+
+    await expect(
+      validateWebhookTarget('http://hooks.example.com/notify', { resolve }),
+    ).rejects.toThrow(/https/i);
+    expect(resolve).not.toHaveBeenCalled();
+  });
+
   it.each([
     'ftp://example.com/hook',
     'http://localhost/hook',
@@ -330,7 +341,7 @@ describe('sendWebhook — SSRF-safe delivery', () => {
     expect(resolve).toHaveBeenCalledTimes(2);
   });
 
-  it('refuses a redirect to a private target before the second request', async () => {
+  it('refuses an HTTPS downgrade to a private target before the second request', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response('', {
         status: 302,
@@ -345,7 +356,7 @@ describe('sendWebhook — SSRF-safe delivery', () => {
     });
 
     expect(result.ok).toBe(false);
-    expect(result.error).toMatch(/公网/);
+    expect(result.error).toMatch(/https|公网/i);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 

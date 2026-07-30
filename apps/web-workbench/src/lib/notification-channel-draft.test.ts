@@ -35,6 +35,28 @@ describe('buildNotificationChannelDraft', () => {
     });
   });
 
+  it('rejects non-HTTPS webhook URLs before save or test', () => {
+    expect(
+      buildNotificationChannelDraft({
+        platform: 'custom',
+        webhookUrl: 'http://hooks.example.com/notify',
+        templateJson: '{"text":"{{message}}"}',
+      }),
+    ).toEqual({
+      error: '通知地址必须使用 https://，以免通知内容或凭据被窃取',
+    });
+
+    expect(
+      buildNotificationChannelDraft({
+        platform: 'custom',
+        webhookUrl: 'javascript:alert(1)',
+        templateJson: '{"text":"{{message}}"}',
+      }),
+    ).toEqual({
+      error: '通知地址必须使用 https://，以免通知内容或凭据被窃取',
+    });
+  });
+
   it('parses custom JSON templates before saving or testing', () => {
     expect(
       buildNotificationChannelDraft({
@@ -70,6 +92,18 @@ describe('buildNotificationChannelDraft', () => {
       }),
     ).toEqual({
       error: '自定义模板不能为空，请填写可发送的 JSON 内容',
+    });
+  });
+
+  it('rejects oversized custom templates before save or test', () => {
+    expect(
+      buildNotificationChannelDraft({
+        platform: 'custom',
+        webhookUrl: 'https://example.com/webhook',
+        templateJson: JSON.stringify({ text: 'x'.repeat(32_769) }),
+      }),
+    ).toEqual({
+      error: '自定义模板不能超过 32 KiB',
     });
   });
 });

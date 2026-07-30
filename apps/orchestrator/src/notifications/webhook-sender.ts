@@ -152,8 +152,8 @@ export async function validateWebhookTarget(
     throw new Error('Webhook 地址格式无效，请检查后重试。');
   }
 
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    throw new Error('Webhook 地址只允许使用 http 或 https 协议。');
+  if (url.protocol !== 'https:') {
+    throw new Error('Webhook 地址必须使用 https 协议，以保护通知内容和凭据。');
   }
   if (url.username || url.password) {
     throw new Error('Webhook 地址不能包含用户名或密码。');

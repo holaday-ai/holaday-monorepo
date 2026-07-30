@@ -405,6 +405,36 @@ describe('createWebhookTasksHandler', () => {
     );
     expect(captured.status).toBe(500);
   });
+
+  it('500 JSON: API-key lookup failure does not escape the webhook handler', async () => {
+    const { plaintext } = generateApiKey();
+    const db = {
+      select() {
+        throw new Error('database connection lost');
+      },
+    } as unknown as Parameters<typeof createWebhookTasksHandler>[0]['db'];
+    const dispatch = vi.fn();
+    const handler = createWebhookTasksHandler({
+      db,
+      logger: fakeLogger,
+      buildContextForUser: vi.fn(),
+      dispatch,
+    });
+    const { res, captured } = makeRes();
+
+    await expect(
+      handler(
+        makeReq({
+          auth: `Bearer ${plaintext}`,
+          body: { prompt: 'x' },
+        }),
+        res,
+      ),
+    ).resolves.toBeUndefined();
+    expect(captured.status).toBe(500);
+    expect(captured.json).toEqual({ error: 'internal_error' });
+    expect(dispatch).not.toHaveBeenCalled();
+  });
 });
 
 describe('createWebhookTasksHandler — idempotency (Phase 5d follow-up)', () => {
@@ -421,7 +451,9 @@ describe('createWebhookTasksHandler — idempotency (Phase 5d follow-up)', () =>
    *   - INSERT INTO webhook_idempotency appends to state.idempotency
    *   - UPDATE api_keys last_used_at is silently accepted
    */
-  function setup() {
+  function setup(options: {
+    buildContextForUser?: (userExternalId: string) => import('../trpc/context.js').Context;
+  } = {}) {
     const { plaintext, hash } = generateApiKey();
     interface IdemRow {
       userId: number;
@@ -616,8 +648,10 @@ describe('createWebhookTasksHandler — idempotency (Phase 5d follow-up)', () =>
     const handler = createWebhookTasksHandler({
       db,
       logger: fakeLogger,
-      buildContextForUser: (userExternalId) =>
-        ({ userId: userExternalId }) as unknown as import('../trpc/context.js').Context,
+      buildContextForUser:
+        options.buildContextForUser ??
+        ((userExternalId) =>
+          ({ userId: userExternalId }) as unknown as import('../trpc/context.js').Context),
       dispatch,
     });
     // Codex P2 — expose the db handle so tests can mutate
@@ -867,6 +901,115 @@ describe('createWebhookTasksHandler — idempotency (Phase 5d follow-up)', () =>
     expect(r2.captured.status).toBe(200);
     expect(state.idempotency).toHaveLength(1);
     expect(state.idempotency[0]?.taskId).toBe('tsk_fresh');
+  });
+
+  it('context construction failure releases the claim before returning 500', async () => {
+    const { handler, plaintext, dispatch, state } = setup({
+      buildContextForUser: () => {
+        throw new Error('context unavailable');
+      },
+    });
+    const r = makeRes();
+
+    await handler(
+      makeReq({
+        auth: `Bearer ${plaintext}`,
+        body: { prompt: 'retry after context failure' },
+        headers: { 'Idempotency-Key': 'zap-context-failure' },
+      }),
+      r.res,
+    );
+
+    expect(r.captured.status).toBe(500);
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(state.idempotency).toEqual([]);
+  });
+
+  it('retries a transient idempotency-finalize failure before responding', async () => {
+    const { handler, plaintext, dispatch, state, db } = setup();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const originalUpdate = (db as any).update.bind(db);
+    let failFinalizeOnce = true;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (db as any).update = (table: any) => {
+      const name =
+        table[Symbol.for('drizzle:Name')] ??
+        table?._?.name ??
+        String(table?.name ?? '');
+      if (name === 'webhook_idempotency' && failFinalizeOnce) {
+        return {
+          set() {
+            return {
+              async where() {
+                failFinalizeOnce = false;
+                throw new Error('transient finalize failure');
+              },
+            };
+          },
+        };
+      }
+      return originalUpdate(table);
+    };
+    const r = makeRes();
+
+    await handler(
+      makeReq({
+        auth: `Bearer ${plaintext}`,
+        body: { prompt: 'finalize safely' },
+        headers: { 'Idempotency-Key': 'zap-finalize-retry' },
+      }),
+      r.res,
+    );
+
+    expect(r.captured.status).toBe(200);
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(state.idempotency[0]?.taskId).toBe('tsk_fresh');
+  });
+
+  it('fails closed when the idempotency mapping cannot be finalized', async () => {
+    const { handler, plaintext, dispatch, state, db } = setup();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const originalUpdate = (db as any).update.bind(db);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (db as any).update = (table: any) => {
+      const name =
+        table[Symbol.for('drizzle:Name')] ??
+        table?._?.name ??
+        String(table?.name ?? '');
+      if (name === 'webhook_idempotency') {
+        return {
+          set() {
+            return {
+              async where() {
+                throw new Error('persistent finalize failure');
+              },
+            };
+          },
+        };
+      }
+      return originalUpdate(table);
+    };
+    const r = makeRes();
+
+    await handler(
+      makeReq({
+        auth: `Bearer ${plaintext}`,
+        body: { prompt: 'do not acknowledge an unsafe replay state' },
+        headers: { 'Idempotency-Key': 'zap-finalize-exhausted' },
+      }),
+      r.res,
+    );
+
+    expect(r.captured.status).toBe(503);
+    expect(r.captured.headers?.['Retry-After']).toBe('2');
+    expect(r.captured.json).toEqual({
+      error: 'idempotency_unavailable',
+      message:
+        'Task was created, but its idempotency result could not be persisted. Contact support before retrying with a new key.',
+      taskId: 'tsk_fresh',
+    });
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(state.idempotency[0]?.taskId).toBe('');
   });
 
   it('body-key order insensitive — different JSON serialization order → same hash → replay', async () => {
