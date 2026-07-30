@@ -152,6 +152,8 @@ async function main(): Promise<void> {
         userId,
         planId: purchase.planId,
         cycle: purchase.cycle,
+        isFirstMonth:
+          purchase.cycle === 'monthly' && purchase.isFirstMonth === true,
       });
     } else if (purchase.kind === 'addon') {
       const pack = ADDON_PACK_CATALOGUE[purchase.packId as keyof typeof ADDON_PACK_CATALOGUE];
@@ -401,7 +403,13 @@ async function handleSuccessfulPayment(
   attachJson: string,
 ): Promise<void> {
   let attach:
-    | { kind: 'subscription'; userId: string; planId: PlanId; cycle: BillingCycle }
+    | {
+        kind: 'subscription';
+        userId: string;
+        planId: PlanId;
+        cycle: BillingCycle;
+        isFirstMonth?: boolean;
+      }
     | { kind: 'addon'; userId: string; packId: string }
     | { kind: 'partner_membership'; userId: string; partnerOrderExternalId: string }
     | { kind: 'partner_recharge'; userId: string; partnerOrderExternalId: string }
@@ -428,7 +436,7 @@ async function handleSuccessfulPayment(
     if (attach.planId !== 'basic' && attach.planId !== 'pro') {
       throw new Error(`bad planId: ${attach.planId}`);
     }
-    await sync.confirm({
+    const confirmPayload = {
       provider,
       userId: attach.userId,
       planId: attach.planId,
@@ -437,10 +445,16 @@ async function handleSuccessfulPayment(
       transactionId,
       amountCents,
       kind: 'subscription',
-    });
+      isFirstMonth:
+        attach.cycle === 'monthly' && attach.isFirstMonth === true,
+    } as const;
+    const result = await sync.confirm(confirmPayload);
+    if (!result.ok) {
+      throw new Error(`payment confirm failed: ${result.reason}`);
+    }
     return;
   }
-  await sync.confirm({
+  const result = await sync.confirm({
     provider,
     userId: attach.userId,
     planId: 'basic', // ignored on the Vultr side for kind='addon'
@@ -451,6 +465,9 @@ async function handleSuccessfulPayment(
     kind: 'addon',
     addonPackId: attach.packId,
   });
+  if (!result.ok) {
+    throw new Error(`payment confirm failed: ${result.reason}`);
+  }
 }
 
 main().catch((err) => {

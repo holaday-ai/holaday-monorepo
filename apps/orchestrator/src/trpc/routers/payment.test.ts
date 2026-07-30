@@ -12,7 +12,7 @@
  * using the REAL array envelope the runtime returns.
  */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { applyAddonPackSpy, grantFirstMonthBonusSpy } = vi.hoisted(() => ({
   applyAddonPackSpy: vi.fn(async () => {}),
@@ -20,8 +20,7 @@ const { applyAddonPackSpy, grantFirstMonthBonusSpy } = vi.hoisted(() => ({
 }));
 
 vi.mock('../../quota/quota-service.js', async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import('../../quota/quota-service.js')>();
+  const actual = await importOriginal<typeof import('../../quota/quota-service.js')>();
   return {
     ...actual,
     QuotaService: vi.fn(() => ({
@@ -51,8 +50,7 @@ function makeCtx(opts: {
           // The payments status-flip is the guarded transition; every
           // other write (users.plan) is unconditional → affectedRows 1.
           // Returns the REAL mysql2/drizzle envelope [header, fields].
-          const affected =
-            tName === 'payments' && 'status' in setObj ? opts.gateAffected : 1;
+          const affected = tName === 'payments' && 'status' in setObj ? opts.gateAffected : 1;
           return Promise.resolve([{ affectedRows: affected }, null]);
         },
       };
@@ -62,24 +60,36 @@ function makeCtx(opts: {
     select() {
       return {
         from(table: unknown) {
-          return {
+          const tName = drizzleName(table);
+          const rows =
+            tName === 'payments' ? [opts.orderRow] : tName === 'users' ? [opts.userRow] : [];
+          const query = {
             where() {
-              return {
-                limit() {
-                  const tName = drizzleName(table);
-                  if (tName === 'payments') return Promise.resolve([opts.orderRow]);
-                  if (tName === 'users') return Promise.resolve([opts.userRow]);
-                  return Promise.resolve([]);
-                },
-              };
+              return query;
+            },
+            limit() {
+              return query;
+            },
+            for() {
+              return query;
+            },
+            // biome-ignore lint/suspicious/noThenProperty: Drizzle query builders are awaitable.
+            then<TResult1 = unknown, TResult2 = never>(
+              onfulfilled?:
+                | ((value: Record<string, unknown>[]) => TResult1 | PromiseLike<TResult1>)
+                | null,
+              onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+            ) {
+              return Promise.resolve(rows).then(onfulfilled, onrejected);
             },
           };
+          return query;
         },
       };
     },
     update: makeUpdate(),
     async transaction(cb: (tx: unknown) => Promise<unknown>) {
-      return cb({ update: makeUpdate() });
+      return cb(db);
     },
   };
   const paypalAdapter = {
@@ -172,9 +182,7 @@ describe('captureOrder — affectedRows-gated entitlement (regression)', () => {
       .createCaller(ctx)
       .captureOrder({ paymentId: 'pay_sub', orderId: 'ord_sub' });
     expect(res).toEqual({ ok: true, plan: 'pro' });
-    expect(
-      updates.some((u) => u.table === 'users' && u.set.plan === 'pro'),
-    ).toBe(true);
+    expect(updates.some((u) => u.table === 'users' && u.set.plan === 'pro')).toBe(true);
     expect(grantFirstMonthBonusSpy).toHaveBeenCalledTimes(1);
     expect(grantFirstMonthBonusSpy).toHaveBeenCalledWith(42, 'pro');
   });
@@ -189,9 +197,403 @@ describe('captureOrder — affectedRows-gated entitlement (regression)', () => {
       .createCaller(ctx)
       .captureOrder({ paymentId: 'pay_sub', orderId: 'ord_sub' });
     expect(res).toEqual({ ok: true, plan: 'pro' });
-    expect(
-      updates.some((u) => u.table === 'users' && u.set.plan === 'pro'),
-    ).toBe(false);
+    expect(updates.some((u) => u.table === 'users' && u.set.plan === 'pro')).toBe(false);
     expect(grantFirstMonthBonusSpy).not.toHaveBeenCalled();
+  });
+});
+
+type MutablePayment = typeof subOrder & {
+  provider?: string;
+  amountCents?: number;
+};
+
+function makeStatefulCaptureCtx(opts: {
+  orderRow: MutablePayment;
+  userRow: typeof freeUser;
+}) {
+  const paymentState = { ...opts.orderRow };
+  const userState = { ...opts.userRow };
+
+  const makeDb = () => {
+    const db = {
+      select() {
+        return {
+          from(table: unknown) {
+            const rows =
+              drizzleName(table) === 'payments'
+                ? [{ ...paymentState }]
+                : drizzleName(table) === 'users'
+                  ? [{ ...userState }]
+                  : [];
+            const query = {
+              where() {
+                return query;
+              },
+              limit() {
+                return query;
+              },
+              for() {
+                return query;
+              },
+              // biome-ignore lint/suspicious/noThenProperty: Drizzle query builders are awaitable.
+              then<TResult1 = unknown, TResult2 = never>(
+                onfulfilled?:
+                  | ((value: Record<string, unknown>[]) => TResult1 | PromiseLike<TResult1>)
+                  | null,
+                onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+              ) {
+                return Promise.resolve(rows).then(onfulfilled, onrejected);
+              },
+            };
+            return query;
+          },
+        };
+      },
+      update(table: unknown) {
+        return {
+          set(values: Record<string, unknown>) {
+            return {
+              where() {
+                if (drizzleName(table) === 'payments') Object.assign(paymentState, values);
+                if (drizzleName(table) === 'users') Object.assign(userState, values);
+                return Promise.resolve([{ affectedRows: 1 }, null]);
+              },
+            };
+          },
+        };
+      },
+      async transaction<T>(callback: (tx: unknown) => Promise<T>): Promise<T> {
+        const paymentBefore = { ...paymentState };
+        const userBefore = { ...userState };
+        try {
+          return await callback(db);
+        } catch (error) {
+          Object.assign(paymentState, paymentBefore);
+          Object.assign(userState, userBefore);
+          throw error;
+        }
+      },
+    };
+    return db;
+  };
+
+  const paypalAdapter = {
+    env: 'sandbox',
+    createOrder: vi.fn(),
+    captureOrder: vi.fn(async () => ({
+      captureId: 'cap_stateful',
+      status: 'COMPLETED',
+      amountCents: opts.orderRow.amountCents ?? 690,
+      currency: 'USD',
+      payerEmail: 'payer@example.com',
+    })),
+  };
+  const ctx = {
+    db: makeDb(),
+    userId: 'usr_test',
+    paypalAdapter,
+    logger: {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+      child: vi.fn(),
+    },
+  } as unknown as Parameters<typeof paymentRouter.createCaller>[0];
+  return { ctx, paymentState, userState, paypalAdapter };
+}
+
+function makeCreateCtx(opts: {
+  userRow?: Record<string, unknown>;
+  existingPayments?: Record<string, unknown>[];
+}) {
+  const inserted: Record<string, unknown>[] = [];
+  const existingPayments = opts.existingPayments ?? [];
+  const userRow = opts.userRow ?? {
+    id: 42,
+    externalId: 'usr_test',
+    plan: 'free',
+    planExpiresAt: null,
+  };
+  const db = {
+    select() {
+      return {
+        from(table: unknown) {
+          const rows =
+            drizzleName(table) === 'users'
+              ? [userRow]
+              : drizzleName(table) === 'payments'
+                ? existingPayments
+                : [];
+          const query = {
+            where() {
+              return query;
+            },
+            limit() {
+              return query;
+            },
+            for() {
+              return query;
+            },
+            // biome-ignore lint/suspicious/noThenProperty: Drizzle query builders are awaitable.
+            then<TResult1 = unknown, TResult2 = never>(
+              onfulfilled?:
+                | ((value: Record<string, unknown>[]) => TResult1 | PromiseLike<TResult1>)
+                | null,
+              onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+            ) {
+              return Promise.resolve(rows).then(onfulfilled, onrejected);
+            },
+          };
+          return query;
+        },
+      };
+    },
+    insert() {
+      return {
+        values(value: Record<string, unknown>) {
+          inserted.push(value);
+          return Promise.resolve();
+        },
+      };
+    },
+    async transaction<T>(callback: (tx: unknown) => Promise<T>): Promise<T> {
+      return callback(db);
+    },
+  };
+  const paypalAdapter = {
+    env: 'sandbox',
+    createOrder: vi.fn(async () => ({
+      orderId: 'ord_new',
+      approveUrl: 'https://paypal.test/ord_new',
+    })),
+    captureOrder: vi.fn(),
+  };
+  const ctx = {
+    db,
+    userId: 'usr_test',
+    paypalAdapter,
+    req: {
+      protocol: 'https',
+      get: vi.fn(() => 'holaday.test'),
+    },
+    logger: {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+      child: vi.fn(),
+    },
+  } as unknown as Parameters<typeof paymentRouter.createCaller>[0];
+  return { ctx, inserted, paypalAdapter };
+}
+
+describe('first-month checkout serialization', () => {
+  beforeEach(() => {
+    applyAddonPackSpy.mockReset().mockResolvedValue(undefined);
+    grantFirstMonthBonusSpy.mockReset().mockResolvedValue(undefined);
+  });
+
+  it('reuses an existing pending PayPal first-month checkout instead of pre-creating another', async () => {
+    const existing = {
+      id: 9,
+      externalId: 'pay_existing',
+      userExternalId: 'usr_test',
+      provider: 'paypal',
+      providerOrderId: 'ord_existing',
+      status: 'pending',
+      kind: 'subscription',
+      plan: 'pro',
+      amountCents: 690,
+      metadata: {
+        firstMonth: true,
+        cycle: 'monthly',
+        approveUrl: 'https://paypal.test/ord_existing',
+      },
+    };
+    const { ctx, inserted, paypalAdapter } = makeCreateCtx({
+      existingPayments: [existing],
+    });
+
+    await expect(
+      paymentRouter.createCaller(ctx).createOrder({ plan: 'pro', cycle: 'monthly' }),
+    ).resolves.toEqual({
+      paymentId: 'pay_existing',
+      orderId: 'ord_existing',
+      approveUrl: 'https://paypal.test/ord_existing',
+    });
+    expect(paypalAdapter.createOrder).not.toHaveBeenCalled();
+    expect(inserted).toHaveLength(0);
+  });
+
+  it('never stamps a yearly order as a first-month promotion', async () => {
+    const { ctx, inserted } = makeCreateCtx({});
+
+    await paymentRouter.createCaller(ctx).createOrder({ plan: 'pro', cycle: 'yearly' });
+
+    expect(inserted).toHaveLength(1);
+    expect(inserted[0]?.metadata).toMatchObject({ cycle: 'yearly', firstMonth: false });
+  });
+});
+
+describe('CN first-month checkout reservation', () => {
+  beforeEach(() => {
+    vi.stubEnv('CN_PAYMENT_URL', 'https://cn-pay.test');
+    vi.stubEnv('INTERNAL_SHARED_SECRET', 'cn-secret');
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it('persists a CN first-month checkout as pending before returning it', async () => {
+    const fetchSpy = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            provider: 'wechat',
+            outTradeNo: 'pay_cn_new',
+            codeUrl: 'weixin://wxpay/new',
+            amountCents: 4900,
+            description: 'HOLA DAY 专业版（月付）',
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+    );
+    vi.stubGlobal('fetch', fetchSpy);
+    const { ctx, inserted } = makeCreateCtx({});
+
+    const result = await paymentRouter.createCaller(ctx).createCnOrder({
+      provider: 'wechat',
+      purchase: { kind: 'subscription', planId: 'pro', cycle: 'monthly' },
+    });
+
+    expect(result).toMatchObject({
+      provider: 'wechat',
+      outTradeNo: 'pay_cn_new',
+      codeUrl: 'weixin://wxpay/new',
+    });
+    expect(inserted).toHaveLength(1);
+    expect(inserted[0]).toMatchObject({
+      userExternalId: 'usr_test',
+      provider: 'wechat',
+      providerOrderId: 'pay_cn_new',
+      plan: 'pro',
+      kind: 'subscription',
+      amountCents: 4900,
+      currency: 'CNY',
+      status: 'pending',
+      metadata: {
+        cycle: 'monthly',
+        firstMonth: true,
+      },
+    });
+  });
+
+  it('reuses an existing pending CN first-month checkout without calling the gateway again', async () => {
+    const checkout = {
+      provider: 'wechat',
+      outTradeNo: 'pay_cn_existing',
+      codeUrl: 'weixin://wxpay/existing',
+      amountCents: 4900,
+      description: 'HOLA DAY 专业版（月付）',
+    };
+    const fetchSpy = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            provider: 'wechat',
+            outTradeNo: 'pay_cn_duplicate',
+            codeUrl: 'weixin://wxpay/duplicate',
+            amountCents: 4900,
+            description: 'duplicate',
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+    );
+    vi.stubGlobal('fetch', fetchSpy);
+    const { ctx, inserted } = makeCreateCtx({
+      existingPayments: [
+        {
+          id: 10,
+          externalId: 'pay_local_existing',
+          userExternalId: 'usr_test',
+          provider: 'wechat',
+          providerOrderId: 'pay_cn_existing',
+          status: 'pending',
+          kind: 'subscription',
+          plan: 'pro',
+          amountCents: 4900,
+          metadata: {
+            firstMonth: true,
+            cycle: 'monthly',
+            checkout,
+          },
+        },
+      ],
+    });
+
+    await expect(
+      paymentRouter.createCaller(ctx).createCnOrder({
+        provider: 'wechat',
+        purchase: { kind: 'subscription', planId: 'pro', cycle: 'monthly' },
+      }),
+    ).resolves.toEqual(checkout);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(inserted).toHaveLength(0);
+  });
+});
+
+describe('captureOrder — settlement-time eligibility and atomic entitlements', () => {
+  beforeEach(() => {
+    applyAddonPackSpy.mockReset().mockResolvedValue(undefined);
+    grantFirstMonthBonusSpy.mockReset().mockResolvedValue(undefined);
+  });
+
+  it('rejects a stale first-month order before asking PayPal to capture it', async () => {
+    const { ctx, paymentState, paypalAdapter } = makeStatefulCaptureCtx({
+      orderRow: { ...subOrder, amountCents: 690 },
+      userRow: { ...freeUser, plan: 'pro' },
+    });
+
+    await expect(
+      paymentRouter.createCaller(ctx).captureOrder({ paymentId: 'pay_sub', orderId: 'ord_sub' }),
+    ).rejects.toMatchObject({ code: 'CONFLICT' });
+    expect(paypalAdapter.captureOrder).not.toHaveBeenCalled();
+    expect(paymentState.status).toBe('pending');
+  });
+
+  it('rolls back subscription completion and plan upgrade when first-month quota grant fails', async () => {
+    grantFirstMonthBonusSpy.mockRejectedValueOnce(new Error('quota unavailable'));
+    const { ctx, paymentState, userState } = makeStatefulCaptureCtx({
+      orderRow: { ...subOrder, amountCents: 690 },
+      userRow: { ...freeUser },
+    });
+
+    await expect(
+      paymentRouter.createCaller(ctx).captureOrder({ paymentId: 'pay_sub', orderId: 'ord_sub' }),
+    ).rejects.toThrow('quota unavailable');
+    expect(paymentState.status).toBe('pending');
+    expect(userState.plan).toBe('free');
+  });
+
+  it('rolls back addon completion when quota application fails', async () => {
+    applyAddonPackSpy.mockRejectedValueOnce(new Error('quota unavailable'));
+    const { ctx, paymentState } = makeStatefulCaptureCtx({
+      orderRow: {
+        ...addonOrder,
+        plan: 'pack-20',
+        amountCents: 150,
+      } as MutablePayment,
+      userRow: { ...freeUser, plan: 'pro' },
+    });
+
+    await expect(
+      paymentRouter
+        .createCaller(ctx)
+        .captureOrder({ paymentId: 'pay_addon', orderId: 'ord_addon' }),
+    ).rejects.toThrow('quota unavailable');
+    expect(paymentState.status).toBe('pending');
   });
 });
