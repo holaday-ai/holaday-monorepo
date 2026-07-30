@@ -37,6 +37,38 @@ describe('stock dashboard trust state', () => {
     });
   });
 
+  it('does not treat a previous-session snapshot as fresh during a weekday session', () => {
+    expect(
+      dashboardTrust.stockDashboardTrustState({
+        freshnessStatus: 'fresh',
+        observedTradeDate: '2026-07-24',
+        refreshedAt: '2026-07-27T02:00:00.000Z',
+        now: new Date('2026-07-27T02:00:00.000Z'),
+      }),
+    ).toMatchObject({
+      tone: 'stale',
+      statusLabel: '数据过期',
+      canGenerateBriefing: false,
+      dataDateLabel: '数据日期 07/24',
+    });
+  });
+
+  it('accepts the latest Friday snapshot on a weekend', () => {
+    expect(
+      dashboardTrust.stockDashboardTrustState({
+        freshnessStatus: 'fresh',
+        observedTradeDate: '2026-07-24',
+        refreshedAt: '2026-07-25T02:00:00.000Z',
+        now: new Date('2026-07-25T02:00:00.000Z'),
+      }),
+    ).toMatchObject({
+      tone: 'fresh',
+      statusLabel: 'AkShare',
+      canGenerateBriefing: true,
+      dataDateLabel: '数据日期 07/24',
+    });
+  });
+
   it('treats a dashboard without an observed date as unverified', () => {
     expect(
       dashboardTrust.stockDashboardTrustState({

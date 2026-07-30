@@ -469,8 +469,24 @@ function intradayMinuteOfDay(value: string | undefined): number | null {
   if (!match) return null;
   const hour = Number(match[1]);
   const minute = Number(match[2]);
-  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+  if (
+    !Number.isFinite(hour) ||
+    !Number.isFinite(minute) ||
+    hour < 0 ||
+    hour > 23 ||
+    minute < 0 ||
+    minute > 59
+  ) {
+    return null;
+  }
   return hour * 60 + minute;
+}
+
+function isAShareSessionMinute(minuteOfDay: number): boolean {
+  return (
+    (minuteOfDay >= 9 * 60 + 30 && minuteOfDay <= 11 * 60 + 30) ||
+    (minuteOfDay >= 13 * 60 && minuteOfDay <= 15 * 60)
+  );
 }
 
 function shanghaiDateMinute(now: Date): { date: string; minuteOfDay: number } {
@@ -503,6 +519,8 @@ function observedIntradayPointsForNow(
       labelDate !== null &&
       labelDate <= current.date &&
       labelMinute !== null &&
+      isAShareSessionMinute(labelMinute) &&
+      (labelDate < current.date || labelMinute <= current.minuteOfDay) &&
       Number.isFinite(point.value)
     );
   });
@@ -512,7 +530,15 @@ function observedIntradayPointsForNow(
     .sort()
     .at(-1);
   if (!tradeDate) return [];
-  return datedPoints.filter((point) => intradayLabelBelongsToObservedSession(point.label, now, tradeDate));
+  const sorted = datedPoints
+    .filter((point) => intradayLabelBelongsToObservedSession(point.label, now, tradeDate))
+    .sort((left, right) => left.label.localeCompare(right.label));
+  const byMinute = new Map<string, { label: string; value: number }>();
+  for (const point of sorted) {
+    const minute = intradayMinuteOfDay(point.label);
+    if (minute !== null) byMinute.set(`${tradeDate}:${minute}`, point);
+  }
+  return [...byMinute.values()];
 }
 
 function intradayLabelBelongsToObservedSession(label: string, now: Date, tradeDate: string): boolean {
@@ -538,7 +564,14 @@ function observedIntradayStockForNow(stockRow: StockSnapshot, now: Date): StockS
       Number.isFinite(point.value));
   const points = observedIntradayPointsForNow(rawPoints, now);
   const sparkTradeDate = points.length >= 2 ? datePart(points[points.length - 1]?.label) : null;
-  if (points.length === stockRow.spark.length) {
+  const pointsUnchanged =
+    points.length === stockRow.spark.length &&
+    points.every(
+      (point, index) =>
+        point.label === stockRow.sparkLabels[index] &&
+        point.value === stockRow.spark[index],
+    );
+  if (pointsUnchanged) {
     return stockRow.sparkTradeDate === sparkTradeDate ? stockRow : { ...stockRow, sparkTradeDate };
   }
   return {
@@ -615,12 +648,14 @@ async function stockSnapshot(
       : latestIntraday;
   if (close == null) return unavailableStock(entry, 'AkShare 暂未返回该股票行情');
   const sparkBaseline = previousCloseFromSeries(sparkSeries, intradaySeries.labels[0]);
-  const changePct = toNum(quote ? pick(quote, ['涨跌幅', 'changePct']) : last ? pick(last, ['涨跌幅', 'changePct']) : null)
-    ?? (
-      typeof sparkBaseline === 'number' && sparkBaseline > 0
-        ? ((toNum(close) ?? sparkBaseline) - sparkBaseline) / sparkBaseline * 100
-        : 0
-    );
+  const changePct =
+    toNum(quote ? pick(quote, ['涨跌幅', 'changePct']) : last ? pick(last, ['涨跌幅', 'changePct']) : null) ??
+    (typeof sparkBaseline === 'number' && sparkBaseline > 0
+      ? (((toNum(close) ?? sparkBaseline) - sparkBaseline) / sparkBaseline) * 100
+      : null);
+  if (changePct === null) {
+    return unavailableStock(entry, '真实价格已返回，但缺少昨收基准；未估算涨跌幅');
+  }
   const quoteVolume = toNum(quote ? pick(quote, ['成交量', 'volume']) : null);
   const quoteAmount = toNum(quote ? pick(quote, ['成交额', 'amount', 'turnover']) : null);
   const dailyVolume = toNum(last ? pick(last, ['成交量', 'volume']) : null);
@@ -1283,6 +1318,9 @@ export const __stocksDashboardTest = {
   buildDashboardSnapshot,
   dashboardCache,
   hasDisplayableRealDashboardData,
+  observedIntradayPointsForNow,
+  observedIntradayStockForNow,
   resolveDashboardSnapshot,
+  stockSnapshot,
   withPreservedSlowSignals,
 };

@@ -20,6 +20,83 @@ describe('stocks dashboard snapshot', () => {
     __stocksDashboardTest.dashboardCache.clear();
   });
 
+  it('filters, sorts, and deduplicates persisted intraday points to A-share sessions', () => {
+    const points = __stocksDashboardTest.observedIntradayPointsForNow(
+      [
+        { label: '2026-07-30 14:59:00', value: 90 },
+        { label: '2026-07-31 11:31:00', value: 999 },
+        { label: '2026-07-31 09:31:20', value: 100 },
+        { label: '2026-07-31 15:01:00', value: 999 },
+        { label: '2026-07-31 13:00:00', value: 102 },
+        { label: '2026-07-31 09:31:50', value: 101 },
+      ],
+      new Date('2026-07-31T07:10:00.000Z'),
+    );
+
+    expect(points).toEqual([
+      { label: '2026-07-31 09:31:50', value: 101 },
+      { label: '2026-07-31 13:00:00', value: 102 },
+    ]);
+  });
+
+  it('rewrites a persisted intraday stock when points are only out of order', () => {
+    const stock = __stocksDashboardTest.observedIntradayStockForNow(
+      {
+        symbol: '603528',
+        name: '多伦科技',
+        market: 'A',
+        price: '5.92',
+        changePct: 0.85,
+        signal: '偏强',
+        report: '待生成',
+        spark: [5.92, 5.9],
+        sparkLabels: ['2026-07-31 13:00:00', '2026-07-31 09:31:00'],
+        sparkKind: 'intraday',
+        sparkBaseline: 5.87,
+        sparkTradeDate: '2026-07-31',
+        tradeDate: '2026-07-31',
+        turnoverAmount: null,
+        averageTurnoverAmount: null,
+        volume: null,
+        averageVolume: null,
+        volumeRatio: null,
+        volumeSignal: '待观察',
+        newsCount: 0,
+        note: '来源 AkShare',
+      },
+      new Date('2026-07-31T07:10:00.000Z'),
+    );
+
+    expect(stock.spark).toEqual([5.9, 5.92]);
+    expect(stock.sparkLabels).toEqual([
+      '2026-07-31 09:31:00',
+      '2026-07-31 13:00:00',
+    ]);
+  });
+
+  it('does not turn a quote without a previous-close baseline into a flat 0 percent move', async () => {
+    const client = {
+      getStockKline: vi.fn(async () => envelope([])),
+      getStockIntraday: vi.fn(async () => envelope([])),
+      getStockQuote: vi.fn(async () => envelope([
+        { 代码: 'sh603528', 最新价: 5.92, 成交额: 70_081_500 },
+      ])),
+    };
+
+    const stock = await __stocksDashboardTest.stockSnapshot(
+      client as never,
+      { symbol: '603528', market: 'A', displayName: '多伦科技' },
+      0,
+      new Date('2026-07-31T07:10:00.000Z'),
+    );
+
+    expect(stock).toMatchObject({
+      price: '—',
+      signal: '待观察',
+      note: '真实价格已返回，但缺少昨收基准；未估算涨跌幅',
+    });
+  });
+
   it('keeps watchlist quotes available when slow market signals are deferred', async () => {
     const requestedPaths: string[] = [];
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {

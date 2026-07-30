@@ -1203,7 +1203,7 @@ function StockHighlightCard({
             </div>
             <div className="text-right">
               <div className="whitespace-nowrap text-[22px] font-medium leading-none tracking-normal tabular-nums text-[#121826]">{formatStockPrice(stock)}</div>
-              <StockChangeBadge value={stock.changePct} className="mt-1.5 justify-end" />
+              <StockChangeBadge value={stock.price === '—' ? null : stock.changePct} className="mt-1.5 justify-end" />
             </div>
           </div>
           {stock.spark.length >= 2 ? (
@@ -2148,10 +2148,17 @@ function StockChangeBadge({
   value,
   className,
 }: {
-  value: number;
+  value: number | null;
   className?: string;
 }): JSX.Element {
-  if (!Number.isFinite(value) || value === 0) {
+  if (value === null || !Number.isFinite(value)) {
+    return (
+      <span className={cn('inline-flex items-center rounded-[4px] bg-[#F2F4F7] px-1.5 py-1 text-[12px] font-semibold tabular-nums text-[#667085]', className)}>
+        —
+      </span>
+    );
+  }
+  if (value === 0) {
     return (
       <span className={cn('inline-flex items-center rounded-[4px] bg-[#F2F4F7] px-1.5 py-1 text-[12px] font-semibold tabular-nums text-[#667085]', className)}>
         0.00%

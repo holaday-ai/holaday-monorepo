@@ -37,17 +37,35 @@ function formatRefreshTime(value?: string | null): string {
   }).format(date)}`;
 }
 
-function calendarDayGap(observedTradeDate: string, now: Date): number {
-  const observed = new Date(`${observedTradeDate}T00:00:00+08:00`);
-  if (Number.isNaN(observed.getTime())) return Number.POSITIVE_INFINITY;
-  const currentDate = new Intl.DateTimeFormat('en-CA', {
+function shanghaiCalendarDate(now: Date): string {
+  return new Intl.DateTimeFormat('en-CA', {
     timeZone: SHANGHAI_TIME_ZONE,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
   }).format(now);
-  const current = new Date(`${currentDate}T00:00:00+08:00`);
+}
+
+function calendarDayGap(observedTradeDate: string, now: Date): number {
+  const observed = new Date(`${observedTradeDate}T00:00:00+08:00`);
+  if (Number.isNaN(observed.getTime())) return Number.POSITIVE_INFINITY;
+  const current = new Date(`${shanghaiCalendarDate(now)}T00:00:00+08:00`);
   return Math.floor((current.getTime() - observed.getTime()) / 86_400_000);
+}
+
+function requiresCurrentTradeDate(now: Date): boolean {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: SHANGHAI_TIME_ZONE,
+    weekday: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(now);
+  const value = (type: Intl.DateTimeFormatPartTypes): string =>
+    parts.find((part) => part.type === type)?.value ?? '';
+  const weekday = value('weekday');
+  const minuteOfDay = Number(value('hour')) * 60 + Number(value('minute'));
+  return weekday !== 'Sat' && weekday !== 'Sun' && minuteOfDay >= 9 * 60 + 32;
 }
 
 export function stockDashboardTrustState(input: StockDashboardTrustInput): StockDashboardTrustState {
@@ -64,7 +82,12 @@ export function stockDashboardTrustState(input: StockDashboardTrustInput): Stock
     };
   }
 
-  const dateIsCurrentEnough = calendarDayGap(input.observedTradeDate, input.now ?? new Date()) <= 3;
+  const now = input.now ?? new Date();
+  const dayGap = calendarDayGap(input.observedTradeDate, now);
+  const dateIsCurrentEnough =
+    dayGap >= 0 &&
+    dayGap <= 3 &&
+    (!requiresCurrentTradeDate(now) || input.observedTradeDate === shanghaiCalendarDate(now));
   if (input.freshnessStatus === 'fresh' && dateIsCurrentEnough) {
     return {
       tone: 'fresh',
