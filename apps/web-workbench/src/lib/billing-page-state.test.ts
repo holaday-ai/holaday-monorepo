@@ -7,9 +7,9 @@ import {
   billingPlanLabel,
   cancellationMailBody,
   isPaidBillingPlan,
-  nextBillingAmountText,
-  nextBillingDateText,
   normalizeBillingSnapshot,
+  planValidUntilText,
+  renewalMethodText,
 } from './billing-page-state';
 
 describe('billing page state helpers', () => {
@@ -55,12 +55,13 @@ describe('billing page state helpers', () => {
     expect(isPaidBillingPlan(null)).toBe(false);
   });
 
-  it('formats next billing amount and date only for paid plans', () => {
-    expect(nextBillingAmountText('free')).toBe('—');
-    expect(nextBillingAmountText('basic')).toMatch(/^¥/);
-    expect(nextBillingDateText('free', '2026-06-24T00:00:00.000Z')).toBe('—');
-    expect(nextBillingDateText('basic', '2026-06-24T00:00:00.000Z')).toBe('2026-06-24');
-    expect(nextBillingDateText('basic', 'not a date')).toBe('—');
+  it('shows the paid service validity without promising automatic renewal', () => {
+    expect(planValidUntilText('free', '2026-06-24T00:00:00.000Z')).toBe('—');
+    expect(planValidUntilText('basic', '2026-06-24T00:00:00.000Z')).toBe('2026-06-24');
+    expect(planValidUntilText('basic', 'not a date')).toBe('—');
+    expect(renewalMethodText('free')).toBe('无需续费');
+    expect(renewalMethodText('basic')).toBe('到期前手动续费');
+    expect(renewalMethodText('pro')).toBe('到期前手动续费');
   });
 
   it('summarizes loading, failed, and loaded subscription states', () => {

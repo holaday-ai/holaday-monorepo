@@ -1,4 +1,4 @@
-import { formatCny, getPlanPriceCents, type PaidPlanId } from '@holaday/shared-types';
+import type { PaidPlanId } from '@holaday/shared-types';
 import { pageErrorMessage } from './page-error-copy';
 
 export interface BillingSnapshot {
@@ -34,16 +34,18 @@ export function isPaidBillingPlan(plan: string | null | undefined): plan is Paid
   return plan === 'pro' || plan === 'basic';
 }
 
-export function nextBillingAmountText(plan: string | null | undefined): string {
-  if (!isPaidBillingPlan(plan)) return '—';
-  return formatCny(getPlanPriceCents(plan, 'monthly', 'cny', false));
-}
-
-export function nextBillingDateText(plan: string | null | undefined, planExpiresAt: string | null): string {
+export function planValidUntilText(
+  plan: string | null | undefined,
+  planExpiresAt: string | null,
+): string {
   if (!isPaidBillingPlan(plan) || !planExpiresAt) return '—';
   const timestamp = Date.parse(planExpiresAt);
   if (!Number.isFinite(timestamp)) return '—';
   return new Date(timestamp).toISOString().slice(0, 10);
+}
+
+export function renewalMethodText(plan: string | null | undefined): string {
+  return isPaidBillingPlan(plan) ? '到期前手动续费' : '无需续费';
 }
 
 export function billingPageSummary(options: {

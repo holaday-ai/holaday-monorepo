@@ -11,9 +11,9 @@ import {
   cancellationMailBody,
   type BillingSnapshot,
   isPaidBillingPlan,
-  nextBillingAmountText,
-  nextBillingDateText,
   normalizeBillingSnapshot,
+  planValidUntilText,
+  renewalMethodText,
 } from '@/lib/billing-page-state';
 import { SUPPORT_EMAIL, supportMailtoHref } from '@/lib/support-links';
 import { trpc } from '@/lib/trpc';
@@ -55,8 +55,8 @@ export function BillingPage(): JSX.Element {
   const planLabel = billingPlanLabel(plan);
   const planActionLabel = billingPlanActionLabel(plan);
   const isPaid = isPaidBillingPlan(plan);
-  const nextAmountText = nextBillingAmountText(plan);
-  const nextBillingDate = nextBillingDateText(plan, snapshot?.planExpiresAt ?? null);
+  const planValidUntil = planValidUntilText(plan, snapshot?.planExpiresAt ?? null);
+  const renewalMethod = renewalMethodText(plan);
   const summary = billingPageSummary({ loading, error: loadError, plan });
   const loadErrorCopy = billingLoadErrorCopy(loadError);
 
@@ -64,7 +64,7 @@ export function BillingPage(): JSX.Element {
     <PageContainer width="list">
       <PageHeader
         title="账单与订阅"
-        description="订阅状态、支付支持和发票记录"
+        description="套餐有效期、续费方式和付款支持"
         action={
           <div className="inline-flex items-center rounded-full border border-[#DCDDDD] bg-white px-3 py-1 text-[12px] font-medium text-[#595757] shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
             {summary}
@@ -122,11 +122,11 @@ export function BillingPage(): JSX.Element {
                   </Button>
                 </div>
               </Row>
-              <Row label="下次扣款日期">
-                <span className="text-sm text-muted-foreground">{nextBillingDate}</span>
+              <Row label="套餐有效期">
+                <span className="text-sm text-muted-foreground">{planValidUntil}</span>
               </Row>
-              <Row label="下次扣款金额">
-                <span className="text-sm text-muted-foreground">{nextAmountText}</span>
+              <Row label="续费方式">
+                <span className="text-sm text-muted-foreground">{renewalMethod}</span>
               </Row>
               {isPaid && (
                 <div className="mt-4 flex flex-col items-end gap-1.5">
@@ -193,9 +193,9 @@ export function BillingPage(): JSX.Element {
               </div>
             </Section>
 
-            <Section title="账单记录" description="付款和发票历史" className="rounded-[8px] border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
+            <Section title="付款与发票" description="付款凭证与发票支持" className="rounded-[8px] border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
               <div className="rounded-[8px] border border-dashed border-[#DCDDDD] bg-white px-6 py-10 text-center">
-                <p className="text-sm text-muted-foreground">暂无账单记录</p>
+                <p className="text-sm text-muted-foreground">付款记录暂未在此页开放</p>
                 <p className="mt-1 text-[11px] text-muted-foreground">
                   已付款用户如需发票或付款凭证，可联系 {SUPPORT_EMAIL}。
                 </p>
