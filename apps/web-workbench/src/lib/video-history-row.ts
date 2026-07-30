@@ -3,6 +3,7 @@ import {
   type DownloadFileAvailability,
   downloadFileAvailability,
 } from '@/lib/file-download-card-copy';
+import { normaliseAttachmentDownloadUrl } from '@/lib/attachment-download-url';
 
 /**
  * Pure helpers for the /video 生成历史 list. Extracted from VideoPage so
@@ -644,11 +645,4 @@ function isRecentCreativeHistoryRow(value: string | number | Date, now: number):
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) return false;
   return now - date.getTime() <= 7 * 24 * 60 * 60 * 1000;
-}
-
-function normaliseAttachmentDownloadUrl(raw: string): string | null {
-  const trimmed = raw.trim();
-  if (/^\/api\/files\/[^/]+\/download(?:[?#].*)?$/.test(trimmed)) return trimmed;
-  if (/^\/files\/[^/]+\/download(?:[?#].*)?$/.test(trimmed)) return `/api${trimmed}`;
-  return null;
 }

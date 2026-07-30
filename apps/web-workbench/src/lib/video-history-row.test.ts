@@ -717,6 +717,28 @@ describe('toImageRow — 图片历史 only lists completed image outputs', () =>
     expect(out?.posterUrl).toBe('/api/files/file_img/download');
   });
 
+  it('normalizes trusted absolute production download URLs onto the current app origin', () => {
+    const out = toImageRow(
+      imageRow({
+        result: {
+          metadata: {
+            executionMode: 'image',
+            attachments: [
+              {
+                ...imageAtt,
+                downloadUrl: 'https://holaday.ai/files/file_img/download?token=short-lived',
+              },
+            ],
+          },
+        },
+      }),
+    );
+
+    expect(out?.download?.downloadUrl).toBe(
+      '/api/files/file_img/download?token=short-lived',
+    );
+  });
+
   it('accepts image extension when mimetype is absent', () => {
     const out = toImageRow(
       imageRow({

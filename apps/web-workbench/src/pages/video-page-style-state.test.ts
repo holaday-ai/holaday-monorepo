@@ -11,8 +11,10 @@ import {
   buildImageIntentWithMode,
   buildIpVideoIntent,
   buildVideoIntentWithCreativeStyles,
+  creativeRetryPath,
   inferVideoStyleOption,
   normalVideoParametersAfterTabReturn,
+  supportsReferenceVideo,
 } from './VideoPage';
 
 describe('video creative style state', () => {
@@ -43,6 +45,16 @@ describe('video creative style state', () => {
       aspectRatio: '1:1',
       imageCount: 1,
     });
+  });
+
+  it('keeps failed image retries inside the image workspace', () => {
+    expect(creativeRetryPath('image')).toBe('/image');
+    expect(creativeRetryPath('video')).toBe('/video');
+  });
+
+  it('does not advertise reference-video input for image generation', () => {
+    expect(supportsReferenceVideo('image')).toBe(false);
+    expect(supportsReferenceVideo('video')).toBe(true);
   });
 
   it('preserves an explicit multi-image selection', () => {

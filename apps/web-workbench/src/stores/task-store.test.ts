@@ -1218,6 +1218,40 @@ describe('selectTask detail hydration', () => {
     );
   });
 
+  it('normalizes trusted absolute production attachment URLs from detail rows', async () => {
+    detailQuery.mockResolvedValueOnce({
+      intent: '生成图片',
+      title: null,
+      status: 'completed',
+      createdAt: '2026-07-01T00:00:00.000Z',
+      steps: [],
+      result: {
+        summary: '已生成图片',
+        metadata: {
+          attachments: [
+            {
+              fileId: 'file_img',
+              downloadUrl:
+                'https://hd-app.orangebench.tech/files/file_img/download?token=short-lived',
+              filename: 'holaday-image-1.jpg',
+              mimetype: 'image/jpeg',
+              sizeBytes: 418_513,
+              expiresAt: '2026-07-02T00:00:00.000Z',
+              kind: 'output',
+            },
+          ],
+        },
+      },
+    } as never);
+
+    useTaskStore.getState().selectTask('tsk_img_absolute_detail', 'ui');
+    await flushPromises();
+
+    expect(useTaskStore.getState().tasks[0]?.attachments?.[0]?.downloadUrl).toBe(
+      '/api/files/file_img/download?token=short-lived',
+    );
+  });
+
   it('hydrates final screenshot viewport dimensions from task detail', async () => {
     detailQuery.mockResolvedValueOnce({
       intent: '打开移动页面',

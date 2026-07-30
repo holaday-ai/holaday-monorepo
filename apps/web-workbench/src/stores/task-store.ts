@@ -1,6 +1,7 @@
 import type { BrowserViewportProfile, ServerMessage } from '@holaday/shared-types';
 import { create } from 'zustand';
 import { batchConfirmQuestion, singleConfirmQuestion } from '@/lib/batch-confirm-copy';
+import { normaliseAttachmentDownloadUrl } from '@/lib/attachment-download-url';
 import { pickDefaultBrowserViewportProfile } from '@/lib/browser-viewport-profile';
 import { humaniseTaskError } from '@/lib/error-copy';
 import { pageErrorMessage } from '@/lib/page-error-copy';
@@ -2695,13 +2696,6 @@ function parseUiAttachments(arr: unknown): UiTask['attachments'] | undefined {
     })
     .filter((v): v is NonNullable<typeof v> => v !== null);
   return cleaned.length > 0 ? cleaned : undefined;
-}
-
-function normaliseAttachmentDownloadUrl(raw: string): string | null {
-  const trimmed = raw.trim();
-  if (/^\/api\/files\/[^/]+\/download(?:[?#].*)?$/.test(trimmed)) return trimmed;
-  if (/^\/files\/[^/]+\/download(?:[?#].*)?$/.test(trimmed)) return `/api${trimmed}`;
-  return null;
 }
 
 function safeNullableTaskListDate(value: unknown): Date | null {

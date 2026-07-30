@@ -107,6 +107,14 @@ import {
 
 type CreativeMode = 'video' | 'image';
 
+export function creativeRetryPath(mode: CreativeMode): '/video' | '/image' {
+  return mode === 'image' ? '/image' : '/video';
+}
+
+export function supportsReferenceVideo(mode: CreativeMode): boolean {
+  return mode === 'video';
+}
+
 const CREATIVE_HISTORY_VISIBLE_PAGE_SIZE = 4;
 const CREATIVE_HISTORY_SCAN_PAGES_PER_CLICK = 5;
 export const IP_VIDEO_ASPECT_RATIO: VideoAspect = '9:16';
@@ -1038,15 +1046,17 @@ function CreativeStudioPage({
                 >
                   <ImagePlus className="h-5 w-5" />
                 </button>
-                <button
-                  type="button"
-                  title="添加参考视频"
-                  aria-label="添加参考视频"
-                  onClick={() => setReferenceVideoDialogOpen(true)}
-                  className="rounded-[8px] p-1.5 outline-none hover:bg-[#EFEFEF] hover:text-[#595757] focus-visible:bg-[#EA1F59]/10 focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20"
-                >
-                  <VideoIcon className="h-5 w-5" />
-                </button>
+                {supportsReferenceVideo(mode) ? (
+                  <button
+                    type="button"
+                    title="添加参考视频"
+                    aria-label="添加参考视频"
+                    onClick={() => setReferenceVideoDialogOpen(true)}
+                    className="rounded-[8px] p-1.5 outline-none hover:bg-[#EFEFEF] hover:text-[#595757] focus-visible:bg-[#EA1F59]/10 focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20"
+                  >
+                    <VideoIcon className="h-5 w-5" />
+                  </button>
+                ) : null}
                 <input
                   ref={imageInputRef}
                   type="file"
@@ -1088,7 +1098,7 @@ function CreativeStudioPage({
                 </span>
               </button>
             </div>
-            {referenceVideoDialogOpen ? (
+            {supportsReferenceVideo(mode) && referenceVideoDialogOpen ? (
               <ReferenceVideoUploadDialog
                 onClose={() => setReferenceVideoDialogOpen(false)}
                 onChoose={() => fileInputRef.current?.click()}
@@ -2692,7 +2702,7 @@ function CurrentVideoTaskPanel({
   // task alone. We send the user back to the form (cleared ?task=) where the
   // 报价卡→确认制作 flow is the inherent spend confirmation (防误点).
   function retryFailed(): void {
-    navigate('/video');
+    navigate(creativeRetryPath(preferredConfirm));
   }
 
   return (
