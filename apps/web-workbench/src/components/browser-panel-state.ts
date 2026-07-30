@@ -612,6 +612,14 @@ export function shouldPreserveBrowserCanvasOnTaskSwitch(inputs: {
   );
 }
 
+export function shouldApplyBrowserTaskOperation(inputs: {
+  mounted: boolean;
+  expectedTaskId: string;
+  currentTaskId: string | null;
+}): boolean {
+  return inputs.mounted && inputs.expectedTaskId === inputs.currentTaskId;
+}
+
 export function browserPanelEvidenceHeaderStatus(
   status: UiTaskStatus | null | undefined,
   finalUrl?: string | null,

@@ -21,6 +21,7 @@ import {
   browserLiveStatusLabel,
   shouldShowBrowserHeader,
   shouldShowBrowserLiveOverlay,
+  shouldApplyBrowserTaskOperation,
   shouldPreserveBrowserCanvasOnTaskSwitch,
   shouldRemountBrowserStreamAfterRestore,
   shouldSuspectTerminalBrowserSession,
@@ -276,6 +277,30 @@ describe('BrowserPanel state helpers', () => {
     expect(
       shouldRemountBrowserStreamAfterRestore({ usingCdp: false }),
     ).toBe(true);
+  });
+
+  it('drops a terminal restore result after the user switches tasks', () => {
+    expect(
+      shouldApplyBrowserTaskOperation({
+        mounted: true,
+        expectedTaskId: 'tsk_old',
+        currentTaskId: 'tsk_new',
+      }),
+    ).toBe(false);
+    expect(
+      shouldApplyBrowserTaskOperation({
+        mounted: true,
+        expectedTaskId: 'tsk_current',
+        currentTaskId: 'tsk_current',
+      }),
+    ).toBe(true);
+    expect(
+      shouldApplyBrowserTaskOperation({
+        mounted: false,
+        expectedTaskId: 'tsk_current',
+        currentTaskId: 'tsk_current',
+      }),
+    ).toBe(false);
   });
 
   it('preserves the painted canvas only for a browser follow-up of the visible task', () => {

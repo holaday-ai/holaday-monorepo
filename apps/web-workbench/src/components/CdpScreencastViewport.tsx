@@ -1,4 +1,15 @@
 import * as React from 'react';
+import {
+  INITIAL_CDP_INPUT_BRIDGE_STATE,
+  INITIAL_CDP_RECONNECT_STATE,
+  cdpCompositionEndTransition,
+  cdpCompositionStartTransition,
+  cdpKeyTransition,
+  cdpReconnectTransition,
+  cdpTextInputTransition,
+  shouldPaintCdpFrame,
+  type CdpInputBridgeState,
+} from '@/components/cdp-screencast-state';
 import { hdDebug } from '@/lib/hd-debug';
 import {
   browserViewportForHost,
@@ -122,6 +133,9 @@ export function CdpScreencastViewport({
   }, [onFrameReady]);
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
   const hiddenInputRef = React.useRef<HTMLInputElement>(null);
+  const inputBridgeStateRef = React.useRef<CdpInputBridgeState>(
+    INITIAL_CDP_INPUT_BRIDGE_STATE,
+  );
   /** Host <div> ref — source of truth for the live remote viewport. */
   const hostRef = React.useRef<HTMLDivElement>(null);
   /** Imperative hook the frame-paint path uses to nudge the scale
@@ -160,6 +174,8 @@ export function CdpScreencastViewport({
   React.useEffect(() => {
     readableAutoScrollKeyRef.current = null;
     hostRef.current?.scrollTo({ left: 0, top: 0 });
+    inputBridgeStateRef.current = INITIAL_CDP_INPUT_BRIDGE_STATE;
+    if (hiddenInputRef.current) hiddenInputRef.current.value = '';
   }, [fitMode, wsUrl]);
 
   const [status, setStatus] = React.useState<CdpScreencastStatus>('idle');
@@ -327,7 +343,7 @@ export function CdpScreencastViewport({
       return;
     }
     let disposed = false;
-    let attempt = 0;
+    let reconnectState = INITIAL_CDP_RECONNECT_STATE;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     let activeWs: WebSocket | null = null;
     // One-time mount diagnostic so BOSS can confirm in DevTools
@@ -344,7 +360,6 @@ export function CdpScreencastViewport({
         setStatus('idle');
         return;
       }
-      attempt += 1;
       const connectionSeq = ++connectionSeqRef.current;
       setStatus('connecting');
       const ws = new WebSocket(socketUrl);
@@ -359,7 +374,10 @@ export function CdpScreencastViewport({
         ) {
           return;
         }
-        attempt = 0; // reset backoff on a successful connect
+        reconnectState = cdpReconnectTransition(
+          reconnectState,
+          'socket-opened',
+        ).state;
         lastViewportRef.current = null;
         setConnectionEpoch((epoch) => epoch + 1);
         // An open socket only proves transport readiness. Keep the public
@@ -369,7 +387,7 @@ export function CdpScreencastViewport({
         hdDebug('screencast WS', {
           event: 'open',
           readyState: ws.readyState,
-          attempt,
+          attempt: reconnectState.consecutiveFailures + 1,
         });
       };
       ws.onmessage = (event) => {
@@ -397,7 +415,12 @@ export function CdpScreencastViewport({
           return;
         }
         if (msg.type !== 'frame' || typeof msg.data !== 'string') return;
-        drawFrame(msg.data, connectionSeq);
+        drawFrame(msg.data, connectionSeq, () => {
+          reconnectState = cdpReconnectTransition(
+            reconnectState,
+            'frame-ready',
+          ).state;
+        });
       };
       ws.onerror = () => {
         if (
@@ -410,7 +433,7 @@ export function CdpScreencastViewport({
         hdDebug('screencast WS', {
           event: 'error',
           readyState: ws.readyState,
-          attempt,
+          attempt: reconnectState.consecutiveFailures + 1,
         });
         setStatus('error');
       };
@@ -425,7 +448,7 @@ export function CdpScreencastViewport({
         hdDebug('screencast WS', {
           event: 'close',
           readyState: ws.readyState,
-          attempt,
+          attempt: reconnectState.consecutiveFailures + 1,
           code: event.code,
           reason: event.reason || '(none)',
         });
@@ -435,8 +458,12 @@ export function CdpScreencastViewport({
         // the viewport keeps trying so a wake (task submit, manual
         // wake button) attaches within 5 s without any external
         // trigger.
-        const delay = Math.min(5_000, 500 * 2 ** Math.min(attempt - 1, 4));
-        retryTimer = setTimeout(() => connect(), delay);
+        const transition = cdpReconnectTransition(
+          reconnectState,
+          'socket-closed',
+        );
+        reconnectState = transition.state;
+        retryTimer = setTimeout(() => connect(), transition.delayMs ?? 500);
       };
     }
 
@@ -472,7 +499,11 @@ export function CdpScreencastViewport({
 
   // Decode a base64 JPEG and paint into the reused canvas. Each frame gets a
   // fresh Image so a delayed decode cannot inherit another frame's handlers.
-  function drawFrame(base64: string, connectionSeq: number): void {
+  function drawFrame(
+    base64: string,
+    connectionSeq: number,
+    onPaint: () => void,
+  ): void {
     if (imgRef.current) {
       imgRef.current.onload = null;
       imgRef.current.onerror = null;
@@ -481,11 +512,14 @@ export function CdpScreencastViewport({
     imgRef.current = img;
     const frameSeq = ++frameSeqRef.current;
     img.onload = () => {
-      if (
-        !mountedRef.current ||
-        connectionSeq !== connectionSeqRef.current ||
-        frameSeq !== frameSeqRef.current
-      ) {
+      if (!shouldPaintCdpFrame({
+        mounted: mountedRef.current,
+        connectionSeq,
+        currentConnectionSeq: connectionSeqRef.current,
+        frameSeq,
+        currentFrameSeq: frameSeqRef.current,
+        socketOpen: wsRef.current?.readyState === WebSocket.OPEN,
+      })) {
         return;
       }
       const canvas = canvasRef.current;
@@ -497,6 +531,7 @@ export function CdpScreencastViewport({
       if (canvas.width !== img.width) canvas.width = img.width;
       if (canvas.height !== img.height) canvas.height = img.height;
       ctx.drawImage(img, 0, 0);
+      onPaint();
       setStatus('connected');
       onFrameReadyRef.current?.();
       // A new renderer can emit one frame at its startup size before the
@@ -506,11 +541,14 @@ export function CdpScreencastViewport({
       requestAnimationFrame(() => sourceDimsRecomputeRef.current?.());
     };
     img.onerror = () => {
-      if (
-        !mountedRef.current ||
-        connectionSeq !== connectionSeqRef.current ||
-        frameSeq !== frameSeqRef.current
-      ) {
+      if (!shouldPaintCdpFrame({
+        mounted: mountedRef.current,
+        connectionSeq,
+        currentConnectionSeq: connectionSeqRef.current,
+        frameSeq,
+        currentFrameSeq: frameSeqRef.current,
+        socketOpen: wsRef.current?.readyState === WebSocket.OPEN,
+      })) {
         return;
       }
       setStatus('error');
@@ -583,25 +621,28 @@ export function CdpScreencastViewport({
   // doesn't fight the browser for default-action handling.
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (viewOnly) return;
+    const transition = cdpKeyTransition(inputBridgeStateRef.current, {
+      phase: 'down',
+      key: e.key,
+      code: e.code,
+      keyCode: e.keyCode,
+      altKey: e.altKey,
+      ctrlKey: e.ctrlKey,
+      metaKey: e.metaKey,
+      shiftKey: e.shiftKey,
+      isComposing: e.nativeEvent.isComposing,
+    });
+    inputBridgeStateRef.current = transition.state;
+    if (!transition.payload) return;
     // Don't preventDefault on Tab — that lets the user escape the
     // capture if focus gets stuck.
     if (e.key !== 'Tab') e.preventDefault();
-    sendInput({
-      type: 'keyDown',
-      key: e.key,
-      code: e.code,
-      keyCode: e.keyCode,
-      altKey: e.altKey,
-      ctrlKey: e.ctrlKey,
-      metaKey: e.metaKey,
-      shiftKey: e.shiftKey,
-    });
+    sendInput(transition.payload);
   };
   const onKeyUp = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (viewOnly) return;
-    if (e.key !== 'Tab') e.preventDefault();
-    sendInput({
-      type: 'keyUp',
+    const transition = cdpKeyTransition(inputBridgeStateRef.current, {
+      phase: 'up',
       key: e.key,
       code: e.code,
       keyCode: e.keyCode,
@@ -609,15 +650,24 @@ export function CdpScreencastViewport({
       ctrlKey: e.ctrlKey,
       metaKey: e.metaKey,
       shiftKey: e.shiftKey,
+      isComposing: e.nativeEvent.isComposing,
     });
+    inputBridgeStateRef.current = transition.state;
+    if (!transition.payload) return;
+    if (e.key !== 'Tab') e.preventDefault();
+    sendInput(transition.payload);
   };
   // CJK / IME — composition end carries the composed string.
   // We send insertText, NOT a sequence of keys, so the IME's
   // candidate selection lands verbatim in Brave's focused element.
   const onCompositionEnd = (e: React.CompositionEvent<HTMLInputElement>) => {
     if (viewOnly) return;
-    const text = e.data;
-    if (text) sendInput({ type: 'insertText', text });
+    const transition = cdpCompositionEndTransition(
+      inputBridgeStateRef.current,
+      e.data,
+    );
+    inputBridgeStateRef.current = transition.state;
+    if (transition.payload) sendInput(transition.payload);
     // Clear the hidden input so the next composition starts fresh.
     if (hiddenInputRef.current) hiddenInputRef.current.value = '';
   };
@@ -625,15 +675,16 @@ export function CdpScreencastViewport({
   // (e.g. paste). Forward as insertText too.
   const onHiddenInputInput = (e: React.FormEvent<HTMLInputElement>) => {
     if (viewOnly) return;
-    // composition events fire `onInput` mid-composition — ignore
-    // those (the keyDown/keyUp + final compositionend cover it).
     const native = e.nativeEvent as InputEvent;
-    if (native.isComposing) return;
     const target = e.currentTarget;
-    if (target.value) {
-      sendInput({ type: 'insertText', text: target.value });
-      target.value = '';
-    }
+    const transition = cdpTextInputTransition(inputBridgeStateRef.current, {
+      value: target.value,
+      inputType: native.inputType,
+      isComposing: native.isComposing,
+    });
+    inputBridgeStateRef.current = transition.state;
+    if (transition.payload) sendInput(transition.payload);
+    if (transition.clearInput) target.value = '';
   };
 
   return (
@@ -680,6 +731,11 @@ export function CdpScreencastViewport({
         spellCheck={false}
         onKeyDown={onKeyDown}
         onKeyUp={onKeyUp}
+        onCompositionStart={() => {
+          inputBridgeStateRef.current = cdpCompositionStartTransition(
+            inputBridgeStateRef.current,
+          );
+        }}
         onCompositionEnd={onCompositionEnd}
         onInput={onHiddenInputInput}
         aria-hidden="true"

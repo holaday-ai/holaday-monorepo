@@ -39,6 +39,7 @@ import {
   browserWakeFeedback,
   shouldShowBrowserHeader,
   shouldShowBrowserLiveOverlay,
+  shouldApplyBrowserTaskOperation,
   shouldPreserveBrowserCanvasOnTaskSwitch,
   shouldRemountBrowserStreamAfterRestore,
   shouldSuspectTerminalBrowserSession,
@@ -311,6 +312,8 @@ export function BrowserPanel({
     awaitingKind !== 'video_quote';
   const toast = useToast();
   const mountedRef = React.useRef(false);
+  const activeTaskIdRef = React.useRef<string | null>(activeTaskId ?? null);
+  activeTaskIdRef.current = activeTaskId ?? null;
   const [collapsedLocal, setCollapsedLocal] = React.useState(false);
   const collapsed = collapsedProp ?? collapsedLocal;
   const toggleCollapsed = onToggleCollapse ?? (() => setCollapsedLocal((c) => !c));
@@ -730,18 +733,25 @@ export function BrowserPanel({
   const restoreTerminalSession = React.useCallback(
     async (announce = false): Promise<boolean> => {
       if (!activeTaskId || !taskTerminal || !terminalCanRestore) return false;
+      const requestedTaskId = activeTaskId;
+      const requestIsCurrent = (): boolean =>
+        shouldApplyBrowserTaskOperation({
+          mounted: mountedRef.current,
+          expectedTaskId: requestedTaskId,
+          currentTaskId: activeTaskIdRef.current,
+        });
       setTerminalRecoveryState('restoring');
       try {
         const result = await trpc.tasks.ensureBrowserSession.mutate({
-          taskId: activeTaskId,
+          taskId: requestedTaskId,
         });
-        if (!mountedRef.current) return false;
+        if (!requestIsCurrent()) return false;
         // A process restart invalidates the prior server's short-lived stream
         // credential even when its nominal TTL has not elapsed. Refresh it as
         // part of recovery so the remounted viewport can authenticate now
         // instead of waiting for the 45-second background rotation.
         await refreshStreamToken();
-        if (!mountedRef.current) return false;
+        if (!requestIsCurrent()) return false;
         setTerminalConnectTimedOut(false);
         setVncAttemptFails(0);
         setShowReconnect(false);
@@ -761,7 +771,7 @@ export function BrowserPanel({
         }
         return true;
       } catch {
-        if (mountedRef.current) {
+        if (requestIsCurrent()) {
           setTerminalRecoveryState('failed');
           setTerminalRecoveryAttempt((attempt) => attempt + 1);
           if (announce) toast.show('浏览器恢复失败，请稍后重试', 'error');
