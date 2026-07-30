@@ -176,12 +176,6 @@ export function TaskListItem({
             // also bubble to the parent and double-toggle.
             if (batchMode) e.stopPropagation();
           }}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault();
-              handleRowClick(e);
-            }
-          }}
           aria-pressed={selected && !batchMode ? true : undefined}
           className={cn(
             'flex h-8 min-w-0 flex-1 items-center truncate bg-transparent text-left text-[13px] leading-5 outline-none focus-visible:ring-1 focus-visible:ring-[#EA1F59]/45',

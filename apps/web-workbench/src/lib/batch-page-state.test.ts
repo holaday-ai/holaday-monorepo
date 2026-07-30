@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  batchDetailRemainingCount,
   batchDetailSummary,
   batchErrorMessage,
   batchFinishedCount,
@@ -9,6 +10,7 @@ import {
   batchShouldPoll,
   batchStatusLabel,
   batchStatusCopy,
+  batchPromptImportStateReset,
   normalizeBatchDetail,
   normalizeBatchRows,
   safeBatchCount,
@@ -102,6 +104,38 @@ describe('batch page state helpers', () => {
         cancelled: 1,
       }),
     ).toBe(0);
+  });
+
+  it('includes review-needed items when deriving detail remaining work', () => {
+    expect(
+      batchDetailRemainingCount({
+        itemsTotal: 10,
+        itemsDone: 4,
+        itemsReview: 2,
+        itemsFailed: 1,
+        itemsCancelled: 1,
+      }),
+    ).toBe(2);
+  });
+
+  it('clears imported prompt state through router navigation without changing the URL', () => {
+    expect(
+      batchPromptImportStateReset({
+        pathname: '/batch',
+        search: '?source=composer',
+        hash: '#new',
+      }),
+    ).toEqual({
+      to: {
+        pathname: '/batch',
+        search: '?source=composer',
+        hash: '#new',
+      },
+      options: {
+        replace: true,
+        state: null,
+      },
+    });
   });
 
   it('normalizes unknown errors', () => {

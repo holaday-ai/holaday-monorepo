@@ -66,6 +66,7 @@ import {
   scheduledCalendarErrorMessage,
   scheduledCalendarStatusCopy,
   scheduledCalendarSummary,
+  shouldOpenScheduledCalendarPopover,
 } from './scheduled-calendar-state';
 import { scheduledEventToggleSuccessMessage } from './event-detail-state';
 import './calendar-styles.css';
@@ -460,14 +461,22 @@ export function ScheduledCalendarPage(): JSX.Element {
     // popoverClosedAtRef. This `click` is the SAME gesture — if it
     // landed inside the cooldown window, drop it instead of opening
     // a new popover. The user must click again to open.
-    if (Date.now() - popoverClosedAtRef.current < 250) return;
+    if (
+      !shouldOpenScheduledCalendarPopover({
+        quickCreateOpen: quickCreate !== null,
+        popoverClosedAt: popoverClosedAtRef.current,
+        now: Date.now(),
+      })
+    ) {
+      return;
+    }
     // The clicked cell's center as the anchor for the popover. arg.jsEvent
     // gives us the source MouseEvent so we can read clientX/Y directly.
     const x = arg.jsEvent.clientX;
     const y = arg.jsEvent.clientY;
     const clicked = nextQuickCreateDate(new Date(arg.date));
     setQuickCreate({ anchor: { x, y }, date: clicked });
-  }, []);
+  }, [quickCreate]);
 
   const handleEventClick = React.useCallback(
     (arg: EventClickArg) => {
@@ -475,7 +484,15 @@ export function ScheduledCalendarPage(): JSX.Element {
       // Same cooldown rule as handleDateClick — the outside-click on
       // mousedown closed the previous popover; this click is part of
       // the same gesture, so we drop it.
-      if (Date.now() - popoverClosedAtRef.current < 250) return;
+      if (
+        !shouldOpenScheduledCalendarPopover({
+          quickCreateOpen: quickCreate !== null,
+          popoverClosedAt: popoverClosedAtRef.current,
+          now: Date.now(),
+        })
+      ) {
+        return;
+      }
       const id = arg.event.id;
       const row = rows.find((r) => r.scheduledTaskId === id);
       if (!row) return;
@@ -484,7 +501,7 @@ export function ScheduledCalendarPage(): JSX.Element {
         row,
       });
     },
-    [rows],
+    [quickCreate, rows],
   );
 
   const handleEventDrop = React.useCallback(
