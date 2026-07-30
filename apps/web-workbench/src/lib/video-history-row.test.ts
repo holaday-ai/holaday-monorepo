@@ -677,6 +677,31 @@ describe('toImageRow — 图片历史 only lists completed image outputs', () =>
     });
   });
 
+  it('keeps every generated image in a multi-output history row', () => {
+    const secondImage = {
+      ...imageAtt,
+      fileId: 'file_img_2',
+      downloadUrl: '/api/files/file_img_2/download',
+      filename: 'holaday-image-2.png',
+      sizeBytes: 750_000,
+    };
+    const out = toImageRow(
+      imageRow({
+        result: {
+          metadata: {
+            executionMode: 'image',
+            attachments: [imageAtt, secondImage],
+          },
+        },
+      }),
+    );
+
+    expect(out?.downloads).toEqual([
+      expect.objectContaining({ fileId: 'file_img', filename: 'holaday-image-1.png' }),
+      expect.objectContaining({ fileId: 'file_img_2', filename: 'holaday-image-2.png' }),
+    ]);
+  });
+
   it('normalizes image backend /files URLs before rendering previews', () => {
     const out = toImageRow(
       imageRow({

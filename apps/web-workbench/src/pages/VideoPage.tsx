@@ -2138,12 +2138,20 @@ function CreativeHistory({
       if (row.posterUnavailable && row.posterUrl) {
         markFileUnavailable(row.posterUrl);
       }
-      if (row.download?.unavailable) {
-        markFileUnavailable({
-          fileId: row.download.fileId,
-          url: row.download.downloadUrl,
-        });
-      }
+      const downloads =
+        row.downloads && row.downloads.length > 0
+          ? row.downloads
+          : row.download
+            ? [row.download]
+            : [];
+      downloads.forEach((download) => {
+        if (download.unavailable) {
+          markFileUnavailable({
+            fileId: download.fileId,
+            url: download.downloadUrl,
+          });
+        }
+      });
     });
   }, [rows]);
 
@@ -2340,21 +2348,27 @@ function CreativeHistory({
       ) : (
         <div className="space-y-5">
           {visible.slice(0, visibleCount).map((row) => {
-            const download = row.download;
-            if (!download) return null;
-            const displayTitle = creativeHistoryDisplayTitle(row, mode);
-            const artifactUnavailable =
-              creativeHistoryArtifactAvailability(download) === 'unavailable' ||
+            const downloads =
+              row.downloads && row.downloads.length > 0
+                ? row.downloads
+                : row.download
+                  ? [row.download]
+                  : [];
+            const availabilityAwareDownloads = downloads.map((download) =>
               isFileUnavailable(
                 { fileId: download.fileId, url: download.downloadUrl },
                 unavailableFiles,
-              );
-            const availabilityAwareDownload =
-              artifactUnavailable && !download.unavailable
+              ) && !download.unavailable
                 ? { ...download, unavailable: true }
-                : download;
+                : download,
+            );
+            const download = availabilityAwareDownloads[0];
+            if (!download) return null;
+            const displayTitle = creativeHistoryDisplayTitle(row, mode);
+            const artifactUnavailable =
+              creativeHistoryArtifactAvailability(download) === 'unavailable';
             const previewAvailability = creativeHistoryPreviewAvailability({
-              download: availabilityAwareDownload,
+              download,
               posterUrl: row.posterUrl,
               posterUnavailable: row.posterUnavailable,
               unavailablePosterUrls,
@@ -2401,6 +2415,26 @@ function CreativeHistory({
                         ? '历史记录仍保留，预览与下载已停止。'
                         : '成片记录仍保留，可在右侧尝试下载。'}
                     </span>
+                  </div>
+                ) : mode === 'image' && availabilityAwareDownloads.length > 1 ? (
+                  <div className="grid h-full min-h-[210px] grid-cols-2 gap-1 overflow-hidden rounded-[22px] bg-[#F2F3F5]">
+                    {availabilityAwareDownloads.slice(0, 4).map((item, index) =>
+                      item.unavailable ? (
+                        <div
+                          key={item.fileId}
+                          className="flex min-h-[210px] items-center justify-center bg-[#F7F7F8] text-[#ADADAD]"
+                        >
+                          <CircleSlash className="h-6 w-6" aria-hidden />
+                        </div>
+                      ) : (
+                        <LazyPosterImg
+                          key={item.fileId}
+                          posterUrl={item.downloadUrl}
+                          alt={`${displayTitle} 第 ${index + 1} 张`}
+                          className="h-full min-h-[210px] w-full object-cover"
+                        />
+                      ),
+                    )}
                   </div>
                 ) : row.posterUrl ? (
                   <LazyPosterImg
@@ -2507,13 +2541,21 @@ function CreativeHistory({
                     ) : null}
                     {download.filename ? (
                       <span className="rounded-full px-3 py-1 text-[11px] font-medium text-[#595757]" style={{ backgroundColor: `${accent}1A` }}>
-                        {fileKindLabel(download.filename)}
+                        {availabilityAwareDownloads.length > 1
+                          ? `${availabilityAwareDownloads.length} 个 ${fileKindLabel(download.filename)}`
+                          : fileKindLabel(download.filename)}
                       </span>
                     ) : null}
                   </div>
                 </div>
-                <div className="mt-5">
-                  <FileDownloadCard payload={download} showPreview={false} />
+                <div className="mt-5 space-y-2">
+                  {availabilityAwareDownloads.map((item) => (
+                    <FileDownloadCard
+                      key={item.fileId}
+                      payload={item}
+                      showPreview={false}
+                    />
+                  ))}
                 </div>
               </div>
             </article>

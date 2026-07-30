@@ -91,6 +91,8 @@ export interface VideoRow {
   status: string;
   createdAt: string | number | Date;
   download?: FileDownloadPayload;
+  /** All downloadable outputs for multi-image tasks; `download` remains the primary artifact. */
+  downloads?: FileDownloadPayload[];
   /** Backend-stamped type — drives per-tab history isolation + the type chip. */
   videoType?: VideoType;
   /** Structured image mode persisted by the image execution lane. */
@@ -526,31 +528,38 @@ export function toImageRow(raw: unknown): VideoRow | null {
   const meta = r.result?.metadata;
   if (!isImageLane(meta)) return null;
   if (!r.taskId || !r.status || !isDownloadableTerminalOutput(r.status)) return null;
-  const att = meta?.attachments?.find((a) => {
-    if (!a.fileId || !a.downloadUrl || !a.filename || typeof a.sizeBytes !== 'number') return false;
-    if (typeof a.mimetype === 'string' && a.mimetype.startsWith('image/')) return true;
-    return /\.(png|jpe?g|webp|gif)$/i.test(a.filename);
+  const downloads = (meta?.attachments ?? []).flatMap((att) => {
+    if (!att.fileId || !att.downloadUrl || !att.filename || typeof att.sizeBytes !== 'number') {
+      return [];
+    }
+    const isImage =
+      (typeof att.mimetype === 'string' && att.mimetype.startsWith('image/')) ||
+      /\.(png|jpe?g|webp|gif)$/i.test(att.filename);
+    if (!isImage) return [];
+    const downloadUrl = normaliseAttachmentDownloadUrl(att.downloadUrl);
+    if (!downloadUrl) return [];
+    return [
+      {
+        fileId: att.fileId,
+        downloadUrl,
+        filename: att.filename,
+        size: att.sizeBytes,
+        ...(typeof att.expiresAt === 'string' ? { expiresAt: att.expiresAt } : {}),
+        ...(att.availability === 'unavailable' ? { unavailable: true } : {}),
+      },
+    ];
   });
-  if (!att?.fileId || !att.downloadUrl || !att.filename || typeof att.sizeBytes !== 'number') {
-    return null;
-  }
-  const downloadUrl = normaliseAttachmentDownloadUrl(att.downloadUrl);
-  if (!downloadUrl) return null;
+  const download = downloads[0];
+  if (!download) return null;
   return {
     taskId: r.taskId,
     intent: r.intent ?? '',
     title: r.title ?? null,
     status: r.status,
     createdAt: r.createdAt ?? new Date(),
-    download: {
-      fileId: att.fileId,
-      downloadUrl,
-      filename: att.filename,
-      size: att.sizeBytes,
-      ...(typeof att.expiresAt === 'string' ? { expiresAt: att.expiresAt } : {}),
-      ...(att.availability === 'unavailable' ? { unavailable: true } : {}),
-    },
-    posterUrl: downloadUrl,
+    download,
+    downloads,
+    posterUrl: download.downloadUrl,
     ...(meta?.imageOptions?.mode ? { imageMode: meta.imageOptions.mode } : {}),
     starred: r.starred === true,
     starredAt: r.starredAt ?? null,
