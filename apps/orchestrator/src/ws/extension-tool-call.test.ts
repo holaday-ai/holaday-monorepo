@@ -42,7 +42,10 @@ describe('extension tool-call websocket lifecycle', () => {
         const parsed = parseServerMessage(raw.toString());
         if (parsed.success && parsed.data.type === 'server.extension.tool_call') {
           clearTimeout(timer);
-          client.close();
+          // Simulate the abrupt disconnect this path is meant to recover
+          // from. A graceful close handshake can be delayed by a loaded CI
+          // worker and makes the lifecycle assertion nondeterministic.
+          client.terminate();
           resolve();
         }
       });
