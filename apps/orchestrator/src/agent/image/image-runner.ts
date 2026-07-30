@@ -40,7 +40,7 @@ export interface ImageAttachment {
 }
 
 export interface RunImageTaskResult {
-  status: 'completed' | 'failed';
+  status: 'completed' | 'partial_success' | 'failed';
   /** Short Chinese summary shown above the download cards. */
   summary: string;
   attachments: ImageAttachment[];
@@ -245,10 +245,12 @@ export async function runImageTask(opts: RunImageTaskOpts): Promise<RunImageTask
     };
   }
 
+  const isPartial = attachments.length < requestedCount;
   return {
-    status: 'completed',
+    status: isPartial ? 'partial_success' : 'completed',
     summary: buildSummary(
       attachments.length,
+      requestedCount,
       effectiveTier,
       hasInputs,
       degraded,
@@ -312,19 +314,25 @@ function buildImageExecutionPrompt(
 
 function buildSummary(
   count: number,
+  requestedCount: number,
   tier: ImageModelTier,
   isEdit: boolean,
   degraded: boolean,
   lockedSubject: boolean,
 ): string {
   const modelLabel = tier === 'pro' ? 'Nano Banana Pro' : 'Nano Banana 2';
+  const isPartial = count < requestedCount;
+  const quantity = isPartial ? `${count}/${requestedCount} 张` : `${count} 张`;
   const action = lockedSubject
-    ? '已按锁定主角要求生成图片'
+    ? `已按锁定主角要求生成 ${quantity}图片`
     : isEdit
-      ? '已按你的要求编辑图片'
-      : `已生成 ${count} 张图片`;
+      ? `已按你的要求生成 ${quantity}编辑图片`
+      : `已生成 ${quantity}图片`;
   const note = degraded ? '（Pro 档繁忙，已自动改用 Nano Banana 2 出图）' : '';
-  return `${action}（${modelLabel}）${note}。下载链接见下方，24 小时内有效。`;
+  const partialNote = isPartial
+    ? '其余图片未完成；已生成图片可下载，可重新提交补齐。'
+    : '下载链接见下方，24 小时内有效。';
+  return `${action}（${modelLabel}）${note}。${partialNote}`;
 }
 
 /** Map a thrown error → a clean, user-facing Chinese reason. */

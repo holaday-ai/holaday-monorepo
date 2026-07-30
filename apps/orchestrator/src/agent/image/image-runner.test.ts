@@ -115,6 +115,33 @@ describe('runImageTask', () => {
     expect(out.summary).toContain('已生成 3 张图片');
   });
 
+  it('reports partial success when fewer images are delivered than requested', async () => {
+    const generate = vi
+      .fn()
+      .mockResolvedValueOnce({
+        images: [{ buffer: Buffer.from('FIRST'), mimeType: 'image/png' }],
+        model: 'gemini-3.1-flash-image',
+      })
+      .mockRejectedValueOnce(
+        new GeminiImageError('request timed out', 'timeout'),
+      );
+    const saveOne = vi.fn(async (_img, index: number) => attachmentFor(index));
+
+    const out = await runImageTask({
+      intent: '生成两张产品图',
+      imageCount: 2,
+      apiKey: 'k',
+      save: saveOne,
+      logger: fakeLogger(),
+      generate,
+    });
+
+    expect(out.status).toBe('partial_success');
+    expect(out.attachments).toHaveLength(1);
+    expect(out.summary).toContain('已生成 1/2 张图片');
+    expect(out.summary).toContain('未完成');
+  });
+
   it('routes poster asks to Pro and labels the summary', async () => {
     const generate = okGenerate();
     const out = await runImageTask({
@@ -261,8 +288,9 @@ describe('runImageTask', () => {
       logger: fakeLogger(),
       generate,
     });
-    expect(out.status).toBe('completed');
+    expect(out.status).toBe('partial_success');
     expect(out.attachments).toHaveLength(1);
+    expect(out.summary).toContain('已生成 1/2 张图片');
     expect(saveMimeTypes).toEqual(['image/png']);
   });
 

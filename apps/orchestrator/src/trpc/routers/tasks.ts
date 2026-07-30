@@ -1673,9 +1673,9 @@ export const tasksRouter = router({
 
         let imagePersisted = false;
         try {
-          if (result.status === 'completed') {
+          if (result.status === 'completed' || result.status === 'partial_success') {
             const persisted = await repo.persistVisionOutcome(taskId, {
-              status: 'completed',
+              status: result.status,
               summary: result.summary,
               tickCount: 1,
               metadata,
@@ -1695,11 +1695,14 @@ export const tasksRouter = router({
         }
 
         try {
-          if (imagePersisted && result.status === 'completed') {
+          if (
+            imagePersisted &&
+            (result.status === 'completed' || result.status === 'partial_success')
+          ) {
             broadcastToUser(ctx.userId, {
               type: 'server.task.terminal',
               taskId,
-              status: 'completed',
+              status: result.status,
               ...(result.summary ? { summary: result.summary } : {}),
               // P1 timing fix: ship attachments ON the terminal frame so
               // the SPA renders the image card WITH the summary text
