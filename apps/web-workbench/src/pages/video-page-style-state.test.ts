@@ -11,7 +11,10 @@ import {
   buildImageIntentWithMode,
   buildIpVideoIntent,
   buildVideoIntentWithCreativeStyles,
+  creativeModelDisplayName,
   creativeRetryPath,
+  creativeTaskPath,
+  currentMediaDownloadPayload,
   inferVideoStyleOption,
   normalVideoParametersAfterTabReturn,
   supportsReferenceVideo,
@@ -50,6 +53,43 @@ describe('video creative style state', () => {
   it('keeps failed image retries inside the image workspace', () => {
     expect(creativeRetryPath('image')).toBe('/image');
     expect(creativeRetryPath('video')).toBe('/video');
+  });
+
+  it('keeps confirmed media tasks inside the workspace that created them', () => {
+    expect(creativeTaskPath('image', 'task image/1')).toBe(
+      '/image?task=task%20image%2F1',
+    );
+    expect(creativeTaskPath('video', 'task video/1')).toBe(
+      '/video?task=task%20video%2F1',
+    );
+  });
+
+  it('labels paid video models with the connected provider versions', () => {
+    expect(creativeModelDisplayName('veo_fast')).toBe('Veo 3.1 Fast');
+    expect(creativeModelDisplayName('veo_standard')).toBe('Veo 3.1 Standard');
+    expect(creativeModelDisplayName('happyhorse')).toBe('Happy Horse 1.1');
+  });
+
+  it('preserves server-confirmed file loss in the current-task download card', () => {
+    expect(
+      currentMediaDownloadPayload({
+        fileId: 'file_gone',
+        downloadUrl: '/api/files/file_gone/download',
+        filename: 'result.mp4',
+        mimetype: 'video/mp4',
+        sizeBytes: 123,
+        expiresAt: '2026-08-01T00:00:00.000Z',
+        availability: 'unavailable',
+        kind: 'output',
+      }),
+    ).toEqual({
+      fileId: 'file_gone',
+      downloadUrl: '/api/files/file_gone/download',
+      filename: 'result.mp4',
+      size: 123,
+      expiresAt: '2026-08-01T00:00:00.000Z',
+      unavailable: true,
+    });
   });
 
   it('does not advertise reference-video input for image generation', () => {

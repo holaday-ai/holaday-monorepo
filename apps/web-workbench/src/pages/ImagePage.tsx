@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/toast';
 import { toImageHistoryRow, type ImageHistoryRow } from '@/lib/image-history-row';
+import { createMediaActionGuard } from '@/lib/media-action-guard';
 import { uploadFailureMessage, uploadFile } from '@/lib/upload-file';
 import { cn } from '@/lib/utils';
 import { taskDisplaySource } from '@/lib/task-display-copy';
@@ -67,6 +68,7 @@ export function ImagePage(): JSX.Element {
   const [reference, setReference] = React.useState<ReferenceImage | null>(null);
   const [uploading, setUploading] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
+  const [submitGuard] = React.useState(createMediaActionGuard);
   const fileRef = React.useRef<HTMLInputElement>(null);
 
   React.useEffect(() => {
@@ -127,7 +129,7 @@ export function ImagePage(): JSX.Element {
       toast.show('请先描述你想生成的图片，至少 4 个字', 'error');
       return;
     }
-    if (submitting || uploading) return;
+    if (uploading || !submitGuard.acquire()) return;
     setSubmitting(true);
     try {
       const intent = reference
@@ -143,6 +145,7 @@ export function ImagePage(): JSX.Element {
     } catch (err) {
       toast.show(err instanceof Error ? err.message : '提交失败，请重试', 'error');
     } finally {
+      submitGuard.release();
       setSubmitting(false);
     }
   }

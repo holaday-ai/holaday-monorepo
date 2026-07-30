@@ -2,11 +2,12 @@ import { describe, expect, it } from 'vitest';
 import type { UiStep } from '@/types/task';
 import {
   EMPTY_STEPS,
+  currentMediaTaskTitle,
   currentMediaTaskText,
+  hydrateMissingMediaTask,
   isVideoTaskRunning,
   resolveVideoAwaitingKind,
   selectStepsFor,
-  shouldRefreshForTask,
   videoTabForTaskType,
   videoTaskStatusIconKind,
   videoTaskStatusLabel,
@@ -69,18 +70,44 @@ describe('selectStepsFor — #185 regression (referentially-stable snapshot)', (
   });
 });
 
-describe('shouldRefreshForTask — one-time deep-link refresh guard', () => {
-  it('true only on the first miss for a deep-linked id', () => {
-    expect(shouldRefreshForTask({ taskId: 'tsk_x', hasTask: false, already: false })).toBe(true);
+describe('hydrateMissingMediaTask — one-time deep-link detail recovery', () => {
+  it('hydrates the exact older history task when it is absent from the first list page', () => {
+    const hydrated: string[] = [];
+
+    expect(
+      hydrateMissingMediaTask(
+        { taskId: 'tsk_older', hasTask: false, already: false },
+        (taskId) => hydrated.push(taskId),
+      ),
+    ).toBe(true);
+    expect(hydrated).toEqual(['tsk_older']);
   });
-  it('false once already refreshed (stops the effect feeding itself)', () => {
-    expect(shouldRefreshForTask({ taskId: 'tsk_x', hasTask: false, already: true })).toBe(false);
-  });
-  it('false when the row is already in the store', () => {
-    expect(shouldRefreshForTask({ taskId: 'tsk_x', hasTask: true, already: false })).toBe(false);
-  });
-  it('false when there is no ?task= id', () => {
-    expect(shouldRefreshForTask({ taskId: null, hasTask: false, already: false })).toBe(false);
+
+  it('does not rehydrate an existing, already attempted, or missing task id', () => {
+    const hydrated: string[] = [];
+    const hydrate = (taskId: string): void => {
+      hydrated.push(taskId);
+    };
+
+    expect(
+      hydrateMissingMediaTask(
+        { taskId: 'tsk_existing', hasTask: true, already: false },
+        hydrate,
+      ),
+    ).toBe(false);
+    expect(
+      hydrateMissingMediaTask(
+        { taskId: 'tsk_attempted', hasTask: false, already: true },
+        hydrate,
+      ),
+    ).toBe(false);
+    expect(
+      hydrateMissingMediaTask(
+        { taskId: null, hasTask: false, already: false },
+        hydrate,
+      ),
+    ).toBe(false);
+    expect(hydrated).toEqual([]);
   });
 });
 
@@ -152,5 +179,15 @@ describe('video task product status helpers', () => {
         progress: '正在估价…',
       }),
     ).toBe('请确认报价');
+  });
+
+  it('bounds an unbroken current-task title for narrow workbench panes', () => {
+    const title = currentMediaTaskTitle({
+      intent: `生成视频：https://example.com/${'unbroken'.repeat(20)}`,
+      title: null,
+    });
+
+    expect(title.length).toBeLessThanOrEqual(64);
+    expect(title.endsWith('…')).toBe(true);
   });
 });

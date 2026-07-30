@@ -31,21 +31,25 @@ import * as React from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { AttachmentChip, type DraftAttachment } from '@/components/AttachmentChip';
-import { FileDownloadCard } from '@/components/FileDownloadCard';
+import {
+  FileDownloadCard,
+  type FileDownloadPayload,
+} from '@/components/FileDownloadCard';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/toast';
 import { revokeCreativePreviewUrls } from '@/lib/creative-preview-urls';
-import { taskDisplaySource } from '@/lib/task-display-copy';
+import { createMediaActionGuard } from '@/lib/media-action-guard';
 import { trpc } from '@/lib/trpc';
 import { uploadFailureMessage, uploadFile, uploadMediaFile } from '@/lib/upload-file';
 import { cn } from '@/lib/utils';
 import {
+  currentMediaTaskTitle,
   currentMediaTaskText,
+  hydrateMissingMediaTask,
   isVideoTaskRunning,
   resolveVideoAwaitingKind,
   selectStepsFor,
-  shouldRefreshForTask,
   videoTabForTaskType,
   videoTaskStatusIconKind,
   videoTaskStatusLabel,
@@ -80,7 +84,7 @@ import { LazyPosterImg } from '@/components/LazyPosterImg';
 import { PageContainer, Section } from '@/pages/PageShell';
 import { useTaskStore } from '@/stores/task-store';
 import type { ImageCreationOptions, ImageModel } from '@/types/image';
-import type { UiTask } from '@/types/task';
+import type { UiTask, UiTerminalAttachment } from '@/types/task';
 import {
   cloneModeFromVideoModel,
   estimateCloneCny,
@@ -111,8 +115,25 @@ export function creativeRetryPath(mode: CreativeMode): '/video' | '/image' {
   return mode === 'image' ? '/image' : '/video';
 }
 
+export function creativeTaskPath(mode: CreativeMode, taskId: string): string {
+  return `${creativeRetryPath(mode)}?task=${encodeURIComponent(taskId)}`;
+}
+
 export function supportsReferenceVideo(mode: CreativeMode): boolean {
   return mode === 'video';
+}
+
+export function currentMediaDownloadPayload(
+  attachment: UiTerminalAttachment,
+): FileDownloadPayload {
+  return {
+    fileId: attachment.fileId,
+    filename: attachment.filename,
+    size: attachment.sizeBytes,
+    downloadUrl: attachment.downloadUrl,
+    expiresAt: attachment.expiresAt,
+    ...(attachment.availability === 'unavailable' ? { unavailable: true } : {}),
+  };
 }
 
 const CREATIVE_HISTORY_VISIBLE_PAGE_SIZE = 4;
@@ -329,7 +350,7 @@ const CREATIVE_MODEL_OPTIONS: ReadonlyArray<CreativeModelOption> = [
   {
     value: 'veo_fast',
     name: 'Veo',
-    version: '3 Fast',
+    version: '3.1 Fast',
     description: '快速生成，适合日常短视频草稿与轻量创意验证。',
     badges: ['文本成片', '图像参考', '性价比'],
     tone: 'from-[#1E9BFF] via-[#735CFF] to-[#EA1F59]',
@@ -337,7 +358,7 @@ const CREATIVE_MODEL_OPTIONS: ReadonlyArray<CreativeModelOption> = [
   {
     value: 'veo_standard',
     name: 'Veo',
-    version: '3 Quality',
+    version: '3.1 Standard',
     description: '画面稳定度和细节更高，适合正式成片前的高质量版本。',
     badges: ['文本成片', '高质量', '1080p'],
     tone: 'from-[#8A63FF] via-[#EA1F59] to-[#FFB23F]',
@@ -437,27 +458,30 @@ export function VideoPage({ mode = 'video' }: VideoPageProps): JSX.Element {
   const [searchParams] = useSearchParams();
   const tasks = useTaskStore((s) => s.tasks);
   const refreshTasks = useTaskStore((s) => s.refreshTasks);
+  const selectTask = useTaskStore((s) => s.selectTask);
   const [videoTab, setVideoTab] = React.useState<VideoTab>('normal');
   const taskId = searchParams.get('task');
   const currentTask = taskId ? tasks.find((task) => task.taskId === taskId) ?? null : null;
   const handleTaskCreated = React.useCallback(
     (createdTaskId: string) => {
-      navigate(`/${mode}?task=${encodeURIComponent(createdTaskId)}`);
+      navigate(creativeTaskPath(mode, createdTaskId));
     },
     [mode, navigate],
   );
 
-  // Deep-linked `?task=` whose row isn't in the store yet → fetch the
-  // list ONCE. The ref guard stops the effect feeding itself (refresh →
-  // store change → re-render → refresh …); without it a row that the
-  // list never returns would loop.
-  const refreshedTaskIds = React.useRef<Set<string>>(new Set());
+  // History can link to tasks older than the first list page. Hydrate the
+  // exact detail row once so the current-task panel does not spin forever.
+  const hydratedTaskIds = React.useRef<Set<string>>(new Set());
   React.useEffect(() => {
-    const already = taskId ? refreshedTaskIds.current.has(taskId) : false;
-    if (!shouldRefreshForTask({ taskId, hasTask: Boolean(currentTask), already })) return;
-    if (taskId) refreshedTaskIds.current.add(taskId);
-    void refreshTasks();
-  }, [currentTask, refreshTasks, taskId]);
+    const already = taskId ? hydratedTaskIds.current.has(taskId) : false;
+    hydrateMissingMediaTask(
+      { taskId, hasTask: Boolean(currentTask), already },
+      (missingTaskId) => {
+        hydratedTaskIds.current.add(missingTaskId);
+        selectTask(missingTaskId, 'url');
+      },
+    );
+  }, [currentTask, selectTask, taskId]);
 
   React.useEffect(() => {
     if (!taskId) return;
@@ -542,6 +566,7 @@ function CreativeStudioPage({
   const attachmentsRef = React.useRef(attachments);
   attachmentsRef.current = attachments;
   const [submitting, setSubmitting] = React.useState(false);
+  const [submitGuard] = React.useState(createMediaActionGuard);
   const imageInputRef = React.useRef<HTMLInputElement>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const previousVideoTabRef = React.useRef<VideoTab>(videoTab);
@@ -708,7 +733,6 @@ function CreativeStudioPage({
       toast.show(isImage ? '请先描述想生成的图片内容' : '请先描述想生成的视频内容', 'error');
       return;
     }
-    if (submitting) return;
     if (attachments.some((attachment) => attachment.status === 'uploading')) {
       toast.show('文件上传中，请稍候');
       return;
@@ -717,6 +741,7 @@ function CreativeStudioPage({
       toast.show('请先上传一张清晰的主角图', 'error');
       return;
     }
+    if (!submitGuard.acquire()) return;
     setSubmitting(true);
     const fileIds = buildImageFileOrder(
       attachments,
@@ -782,6 +807,7 @@ function CreativeStudioPage({
     } catch (err) {
       toast.show(err instanceof Error ? err.message : '提交失败，请重试', 'error');
     } finally {
+      submitGuard.release();
       setSubmitting(false);
     }
   }
@@ -1285,6 +1311,14 @@ function modelOptionFor(model: CreativeModelValue, options: ReadonlyArray<Creati
   return options.find((option) => option.value === model) ?? options[0] ?? CREATIVE_MODEL_OPTIONS[0];
 }
 
+function modelOptionDisplayName(option: CreativeModelOption): string {
+  return `${option.name} ${option.version}`;
+}
+
+export function creativeModelDisplayName(model: NormalVideoModel): string {
+  return modelOptionDisplayName(modelOptionFor(model, CREATIVE_MODEL_OPTIONS));
+}
+
 function modelPreviewSrc(model: CreativeModelValue): string {
   if (model === 'nano_banana_2') return '/video-style-previews/models/nano_banana_2.svg';
   if (model === 'nano_banana_pro') return '/video-style-previews/models/nano_banana_pro.svg';
@@ -1433,7 +1467,7 @@ function CreativeModelPicker({
             模型
           </span>
           <span className="block truncate text-[14px] font-semibold leading-5 text-[#111827]">
-            {selected.name} {selected.version}
+            {modelOptionDisplayName(selected)}
           </span>
         </span>
         <ChevronDown className="h-4 w-4 text-[#595757]" />
@@ -1489,7 +1523,7 @@ function CreativeModelPicker({
                     <span className="min-w-0 py-1">
                       <span className="flex flex-wrap items-center gap-2">
                         <span className="text-[15px] font-semibold text-[#111827]">
-                          {option.name} {option.version}
+                          {modelOptionDisplayName(option)}
                         </span>
                         {active ? (
                           <span className="rounded-full px-2 py-0.5 text-[11px] font-semibold text-white" style={{ backgroundColor: accent }}>
@@ -2646,6 +2680,7 @@ function CurrentVideoTaskPanel({
   const steps = useTaskStore(selectStepsFor(taskId));
   const abortTask = useTaskStore((s) => s.abortTask);
   const [confirming, setConfirming] = React.useState<string | null>(null);
+  const [actionGuard] = React.useState(createMediaActionGuard);
   const awaitingKind = resolveVideoAwaitingKind(
     task?.awaitingKind,
     awaiting?.awaitingKind,
@@ -2662,7 +2697,7 @@ function CurrentVideoTaskPanel({
   });
 
   async function confirmVideo(choice: 'confirm_video' | 'confirm_image' | 'cancel'): Promise<void> {
-    if (confirming) return;
+    if (!actionGuard.acquire()) return;
     setConfirming(choice);
     try {
       const result = await trpc.tasks.confirmVideo.mutate({ taskId, choice });
@@ -2671,17 +2706,18 @@ function CurrentVideoTaskPanel({
         toast.show('已取消，未产生费用', 'info', 2000);
       } else {
         toast.show('已确认，开始制作', 'info', 2000);
-        navigate(`/video?task=${encodeURIComponent(result.taskId)}`);
+        navigate(creativeTaskPath(preferredConfirm, result.taskId));
       }
     } catch (err) {
       toast.show(err instanceof Error ? err.message : '操作失败，请重试', 'error');
     } finally {
+      actionGuard.release();
       setConfirming(null);
     }
   }
 
   async function cancelTask(): Promise<void> {
-    if (confirming) return;
+    if (!actionGuard.acquire()) return;
     setConfirming('abort');
     try {
       const res = await abortTask(taskId);
@@ -2692,6 +2728,7 @@ function CurrentVideoTaskPanel({
       }
       await refreshTasks().catch(() => undefined);
     } finally {
+      actionGuard.release();
       setConfirming(null);
     }
   }
@@ -2714,16 +2751,16 @@ function CurrentVideoTaskPanel({
       {!task ? (
         <div className="flex items-center gap-2 py-2 text-[13px] text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />
-          正在同步视频任务…
+          正在同步{preferredConfirm === 'image' ? '图片' : '视频'}任务…
         </div>
       ) : (
         <div className="space-y-4">
           <div className="flex items-start gap-3">
             <VideoStatusIcon status={task.status} />
-            <div className="min-w-0 flex-1">
+            <div className="min-w-0 flex-1 [overflow-wrap:anywhere]">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-[14px] font-medium text-foreground">
-                  {taskDisplaySource(task)}
+                  {currentMediaTaskTitle(task)}
                 </span>
                 <span className="rounded-full border border-[#DCDDDD] bg-white px-2 py-0.5 text-[11px] text-muted-foreground">
                   {videoTaskStatusLabel(task.status)}
@@ -2819,13 +2856,7 @@ function CurrentVideoTaskPanel({
               {task.attachments.map((attachment) => (
                 <FileDownloadCard
                   key={attachment.fileId}
-                  payload={{
-                    fileId: attachment.fileId,
-                    filename: attachment.filename,
-                    size: attachment.sizeBytes,
-                    downloadUrl: attachment.downloadUrl,
-                    expiresAt: attachment.expiresAt,
-                  }}
+                  payload={currentMediaDownloadPayload(attachment)}
                 />
               ))}
             </div>
@@ -2856,9 +2887,9 @@ function videoSubStatusCopy(subStatus: string | undefined): string {
 // ---------------------------------------------------------------------------
 
 const MODEL_OPTIONS: ReadonlyArray<{ value: NormalVideoModel; label: string; hint?: string }> = [
-  { value: 'veo_fast', label: 'Veo 3 Fast', hint: '推荐 · 性价比' },
+  { value: 'veo_fast', label: 'Veo 3.1 Fast', hint: '推荐 · 性价比' },
   { value: 'happyhorse', label: 'Happy Horse 1.1', hint: '自带音效' },
-  { value: 'veo_standard', label: 'Veo 3 Quality', hint: '高质量' },
+  { value: 'veo_standard', label: 'Veo 3.1 Standard', hint: '高质量' },
 ];
 const STYLE_OPTIONS: ReadonlyArray<{ value: VideoStyleOption; label: string }> = [
   { value: 'auto', label: '自动' },
@@ -2898,6 +2929,7 @@ export function NormalVideoForm({ onTaskCreated }: { onTaskCreated: (taskId: str
   const [resolution, setResolution] = React.useState<VideoResolution>('1080p');
   const [durationSeconds, setDurationSeconds] = React.useState<VideoDuration>(8);
   const [submitting, setSubmitting] = React.useState(false);
+  const [submitGuard] = React.useState(createMediaActionGuard);
 
   const perSegCny = estimatePerSegmentCny({ model, resolution, durationSeconds });
   const estVideoCny = perSegCny * SEG_ESTIMATE;
@@ -2909,7 +2941,7 @@ export function NormalVideoForm({ onTaskCreated }: { onTaskCreated: (taskId: str
       toast.show('请先写一段文案或想法(至少 4 个字)', 'error');
       return;
     }
-    if (submitting) return;
+    if (!submitGuard.acquire()) return;
     setSubmitting(true);
     const opts: VideoCreationOptions = { tab: 'normal', model, style, aspectRatio, resolution, durationSeconds };
     try {
@@ -2923,6 +2955,7 @@ export function NormalVideoForm({ onTaskCreated }: { onTaskCreated: (taskId: str
     } catch (err) {
       toast.show(err instanceof Error ? err.message : '提交失败,请重试', 'error');
     } finally {
+      submitGuard.release();
       setSubmitting(false);
     }
   }
@@ -3017,6 +3050,7 @@ export function PetVideoForm({
   const [uploadingPhoto, setUploadingPhoto] = React.useState(false);
   const [uploadingVideo, setUploadingVideo] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
+  const [submitGuard] = React.useState(createMediaActionGuard);
   const photoRef = React.useRef<HTMLInputElement>(null);
   const videoRef = React.useRef<HTMLInputElement>(null);
 
@@ -3126,7 +3160,7 @@ export function PetVideoForm({
       return;
     }
     const intent = prompt.trim();
-    if (submitting) return;
+    if (!submitGuard.acquire()) return;
     setSubmitting(true);
     const finalIntent = buildCloneVideoIntent(intent);
     const opts: VideoCreationOptions = {
@@ -3147,6 +3181,7 @@ export function PetVideoForm({
     } catch (err) {
       toast.show(err instanceof Error ? err.message : '提交失败,请重试', 'error');
     } finally {
+      submitGuard.release();
       setSubmitting(false);
     }
   }
@@ -3754,6 +3789,7 @@ function IpGenerateForm({
   const createTask = useTaskStore((s) => s.createTask);
   const [copy, setCopy] = React.useState('');
   const [submitting, setSubmitting] = React.useState(false);
+  const [submitGuard] = React.useState(createMediaActionGuard);
   // ① 合规闸 — per-generate 授权确认。与 onboarding 的一次性 consent 双保险:
   // 每次生成都要重新勾(默认 false),不勾禁止提交。
   const [consent, setConsent] = React.useState(false);
@@ -3770,7 +3806,7 @@ function IpGenerateForm({
       toast.show('请先确认声音和出镜底版的使用授权', 'error');
       return;
     }
-    if (submitting) return;
+    if (!submitGuard.acquire()) return;
     setSubmitting(true);
     const finalIntent = buildIpVideoIntent(intent);
     const opts: VideoCreationOptions = {
@@ -3789,6 +3825,7 @@ function IpGenerateForm({
     } catch (err) {
       toast.show(err instanceof Error ? err.message : '提交失败,请重试', 'error');
     } finally {
+      submitGuard.release();
       setSubmitting(false);
     }
   }
