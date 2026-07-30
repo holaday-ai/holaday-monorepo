@@ -8,6 +8,9 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { drizzle } from 'drizzle-orm/mysql2';
+import * as schema from '../../db/schema/index.js';
+import { payments } from '../../db/schema/payments.js';
 import { __financeInternals } from './admin-finance.js';
 
 const { paymentRowCnyCents, usdToCnyCents, SERVER_FIXED_CNY_CENTS_MONTHLY, USD_TO_CNY } =
@@ -24,8 +27,8 @@ describe('paymentRowCnyCents', () => {
     expect(paymentRowCnyCents(1370, 'usd')).toBe(Math.round(1370 * USD_TO_CNY));
   });
 
-  it('passes unknown currency through verbatim (defensive)', () => {
-    expect(paymentRowCnyCents(123, 'EUR')).toBe(123);
+  it('fails closed for an unsupported currency instead of labelling it CNY', () => {
+    expect(() => paymentRowCnyCents(123, 'EUR')).toThrow(/unsupported payment currency/i);
   });
 });
 
@@ -60,5 +63,117 @@ describe('SERVER_FIXED_CNY_CENTS_MONTHLY', () => {
 
   it('is positive (a hardcode mismatch would zero it out)', () => {
     expect(SERVER_FIXED_CNY_CENTS_MONTHLY).toBeGreaterThan(0);
+  });
+});
+
+describe('finance month boundaries', () => {
+  it('starts the business month at midnight Beijing time', () => {
+    const beijingMonthStartUtc = (
+      __financeInternals as unknown as {
+        beijingMonthStartUtc?: (at: Date, monthsAgo?: number) => Date;
+      }
+    ).beijingMonthStartUtc;
+
+    expect(beijingMonthStartUtc).toBeTypeOf('function');
+    expect(
+      beijingMonthStartUtc?.(new Date('2026-08-31T16:30:00.000Z')).toISOString(),
+    ).toBe('2026-08-31T16:00:00.000Z');
+    expect(
+      beijingMonthStartUtc?.(new Date('2026-08-31T16:30:00.000Z'), 1).toISOString(),
+    ).toBe('2026-07-31T16:00:00.000Z');
+  });
+
+  it('recognizes completed revenue by immutable completion time', () => {
+    const completedPaymentPeriodCondition = (
+      __financeInternals as unknown as {
+        completedPaymentPeriodCondition?: (start: Date) => unknown;
+      }
+    ).completedPaymentPeriodCondition;
+
+    expect(completedPaymentPeriodCondition).toBeTypeOf('function');
+    if (!completedPaymentPeriodCondition) return;
+
+    const mockDb = drizzle.mock({ schema, mode: 'default', casing: 'snake_case' });
+    const generated = mockDb
+      .select()
+      .from(payments)
+      .where(
+        completedPaymentPeriodCondition(
+          new Date('2026-07-31T16:00:00.000Z'),
+        ) as never,
+      )
+      .toSQL();
+
+    expect(generated.sql).toContain('`payments`.`completed_at` >=');
+    expect(generated.sql).not.toContain('`payments`.`updated_at` >=');
+    expect(generated.sql).not.toContain('`payments`.`created_at` >=');
+  });
+});
+
+describe('finance revenue products', () => {
+  it('keeps add-on and future-plan revenue visible in the breakdown', () => {
+    const buildRevenueProductRows = (
+      __financeInternals as unknown as {
+        buildRevenueProductRows?: (input: {
+          userCounts: Array<{ plan: string; count: number }>;
+          revenue: Array<{
+            kind: string;
+            plan: string;
+            revenueCnyCents: number;
+          }>;
+        }) => Array<{
+          kind: string;
+          plan: string;
+          userCount: number;
+          monthRevenueCnyCents: number;
+        }>;
+      }
+    ).buildRevenueProductRows;
+
+    expect(buildRevenueProductRows).toBeTypeOf('function');
+    expect(
+      buildRevenueProductRows?.({
+        userCounts: [
+          { plan: 'basic', count: 2 },
+          { plan: 'enterprise', count: 1 },
+        ],
+        revenue: [
+          { kind: 'subscription', plan: 'basic', revenueCnyCents: 5_800 },
+          { kind: 'subscription', plan: 'enterprise', revenueCnyCents: 99_900 },
+          { kind: 'addon', plan: 'pack-20', revenueCnyCents: 2_000 },
+        ],
+      }),
+    ).toEqual([
+      {
+        kind: 'subscription',
+        plan: 'free',
+        userCount: 0,
+        monthRevenueCnyCents: 0,
+      },
+      {
+        kind: 'subscription',
+        plan: 'basic',
+        userCount: 2,
+        monthRevenueCnyCents: 5_800,
+      },
+      {
+        kind: 'subscription',
+        plan: 'pro',
+        userCount: 0,
+        monthRevenueCnyCents: 0,
+      },
+      {
+        kind: 'subscription',
+        plan: 'enterprise',
+        userCount: 1,
+        monthRevenueCnyCents: 99_900,
+      },
+      {
+        kind: 'addon',
+        plan: 'pack-20',
+        userCount: 0,
+        monthRevenueCnyCents: 2_000,
+      },
+    ]);
   });
 });

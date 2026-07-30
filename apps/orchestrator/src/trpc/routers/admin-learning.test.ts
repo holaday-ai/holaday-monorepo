@@ -241,3 +241,55 @@ describe('aggregateByDomain', () => {
     expect(result.get('example.com')?.total).toBe(2);
   });
 });
+
+describe('recent domain evidence selection', () => {
+  it('sorts by creation time before applying the recent-row limit', () => {
+    const selectRecentDomainRows = (
+      __learningInternals as unknown as {
+        selectRecentDomainRows?: <T extends { createdAt: Date }>(rows: T[], limit: number) => T[];
+      }
+    ).selectRecentDomainRows;
+    const rows = [
+      makeScanRow({
+        id: 30,
+        status: 'failed',
+        intent: 'https://example.com/older-id',
+        createdAt: new Date('2026-07-01T00:00:00.000Z'),
+      }),
+      makeScanRow({
+        id: 20,
+        status: 'failed',
+        intent: 'https://example.com/newest',
+        createdAt: new Date('2026-07-03T00:00:00.000Z'),
+      }),
+      makeScanRow({
+        id: 10,
+        status: 'failed',
+        intent: 'https://example.com/middle',
+        createdAt: new Date('2026-07-02T00:00:00.000Z'),
+      }),
+    ];
+
+    expect(selectRecentDomainRows).toBeTypeOf('function');
+    expect(selectRecentDomainRows?.(rows, 2).map((row) => row.id)).toEqual([20, 10]);
+  });
+});
+
+describe('learning scan coverage', () => {
+  it('marks a bounded scan as truncated instead of presenting it as complete', () => {
+    const capLearningScanRows = (
+      __learningInternals as unknown as {
+        capLearningScanRows?: <T>(rows: T[], limit: number) => {
+          rows: T[];
+          truncated: boolean;
+        };
+      }
+    ).capLearningScanRows;
+
+    expect(capLearningScanRows).toBeTypeOf('function');
+    expect(capLearningScanRows?.([{ id: 1 }, { id: 2 }, { id: 3 }], 2)).toEqual({
+      rows: [{ id: 1 }, { id: 2 }],
+      truncated: true,
+    });
+  });
+});

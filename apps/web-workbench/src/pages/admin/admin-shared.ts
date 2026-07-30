@@ -73,6 +73,11 @@ const STATUS_MAP: Record<string, StatusToken> = {
     textClass: 'text-[#595757]',
     bgClass: 'bg-[#EFEFEF]',
   },
+  queued: {
+    label: '排队中',
+    textClass: 'text-[#595757]',
+    bgClass: 'bg-[#EFEFEF]',
+  },
 };
 
 export function statusToken(status: string): StatusToken {

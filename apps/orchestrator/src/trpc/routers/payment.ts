@@ -157,6 +157,7 @@ export async function completePaymentInTransaction(
     .update(payments)
     .set({
       status: 'completed',
+      completedAt: new Date(),
       providerCaptureId: capture.captureId,
       metadata: {
         ...metadata,

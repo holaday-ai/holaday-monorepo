@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import * as adminPartnerState from './admin-partner-state';
 import {
   adminPartnerActionConfirmation,
   formatPartnerCreditCents,
@@ -18,12 +19,49 @@ import {
   partnerReviewStatusToken,
 } from './admin-partner-state';
 
+describe('partner reconciliation date range', () => {
+  it('uses Beijing calendar days at the UTC day boundary', () => {
+    const defaultPartnerReconciliationRange = (
+      adminPartnerState as unknown as {
+        defaultPartnerReconciliationRange?: (at: Date) => {
+          from: string;
+          to: string;
+        };
+      }
+    ).defaultPartnerReconciliationRange;
+
+    expect(defaultPartnerReconciliationRange).toBeTypeOf('function');
+    expect(
+      defaultPartnerReconciliationRange?.(
+        new Date('2026-07-30T16:30:00.000Z'),
+      ),
+    ).toEqual({
+      from: '2026-07-25',
+      to: '2026-07-31',
+    });
+  });
+});
+
 describe('adminPartnerActionConfirmation', () => {
   it('names the pending operation and explains the production impact', () => {
     expect(adminPartnerActionConfirmation('提现已出款')).toEqual({
       title: '确认执行“提现已出款”？',
       description:
         '该操作会立即写入生产审核或账务状态。请再次核对对象、金额、原因和凭证信息。',
+    });
+  });
+
+  it('includes the exact target, amount, and evidence snapshot', () => {
+    expect(
+      adminPartnerActionConfirmation('提现已出款', [
+        '提现：pay_withdrawal_1',
+        '金额：600.00 Credit',
+        '出款流水：bank-payout-1',
+      ]),
+    ).toEqual({
+      title: '确认执行“提现已出款”？',
+      description:
+        '该操作会立即写入生产审核或账务状态。请再次核对对象、金额、原因和凭证信息。\n提现：pay_withdrawal_1\n金额：600.00 Credit\n出款流水：bank-payout-1',
     });
   });
 });
@@ -177,6 +215,24 @@ describe('partner money helpers', () => {
 });
 
 describe('normalizeAdminPartnerOverview', () => {
+  it('preserves server queue truncation metadata for operator warnings', () => {
+    const state = normalizeAdminPartnerOverview({
+      enabled: true,
+      coverage: {
+        limit: 50,
+        truncatedQueues: ['orders', 'riskLots', 'unknown'],
+      },
+    });
+
+    expect(state).toMatchObject({
+      enabled: true,
+      coverage: {
+        limit: 50,
+        truncatedQueues: ['orders', 'riskLots'],
+      },
+    });
+  });
+
   it('preserves disabled state without inventing queues', () => {
     expect(normalizeAdminPartnerOverview({ enabled: false })).toEqual({ enabled: false });
   });
@@ -260,6 +316,26 @@ describe('normalizeAdminPartnerOverview', () => {
       reviewNote: '银行卡四要素通过，证件照待复核',
       reviewSource: 'cn-bankcard',
     });
+  });
+
+  it('keeps missing KYC provider references empty for action guards', () => {
+    const state = normalizeAdminPartnerOverview({
+      enabled: true,
+      metrics: {},
+      kycProfiles: [
+        {
+          kycExternalId: 'pay_kyc_missing_ref',
+          userExternalId: 'usr_missing_ref',
+          status: 'review_required',
+          provider: 'manual',
+          providerRef: null,
+        },
+      ],
+    });
+
+    expect(state.enabled).toBe(true);
+    if (!state.enabled) throw new Error('expected enabled state');
+    expect(state.kycProfiles[0]?.providerRef).toBe('');
   });
 
   it('preserves risk lot audit fields for the admin queue', () => {

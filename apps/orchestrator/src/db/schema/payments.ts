@@ -50,6 +50,12 @@ export const payments = mysqlTable(
     currency: varchar('currency', { length: 8 }).notNull().default('USD'),
     status: varchar('status', { length: 16 }).notNull().default('pending'),
     metadata: json('metadata'),
+    /**
+     * Immutable settlement timestamp. Set exactly when a pending row
+     * transitions to completed; unlike updatedAt it never moves when
+     * metadata or another operational field changes later.
+     */
+    completedAt: datetime('completed_at', { mode: 'date', fsp: 3 }),
     createdAt: datetime('created_at', { mode: 'date', fsp: 3 })
       .notNull()
       .default(sql`CURRENT_TIMESTAMP(3)`),
@@ -61,6 +67,7 @@ export const payments = mysqlTable(
   (t) => [
     uniqueIndex('uk_payments_external_id').on(t.externalId),
     index('ix_payments_user_status').on(t.userExternalId, t.status),
+    index('ix_payments_status_completed').on(t.status, t.completedAt),
     index('ix_payments_provider_order').on(t.provider, t.providerOrderId),
     // Race-safe idempotency for capture writes — both PayPal's
     // capture id and the WX/Alipay transactionId land in

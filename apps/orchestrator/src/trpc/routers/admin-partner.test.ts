@@ -89,6 +89,7 @@ type FakeUserRow = {
   email: string | null;
   displayName: string | null;
   role: string;
+  status: string;
 };
 
 class FakeAdminPartnerDb {
@@ -99,6 +100,7 @@ class FakeAdminPartnerDb {
       email: 'admin@holaday.local',
       displayName: 'Admin',
       role: 'admin',
+      status: 'active',
     },
     {
       id: 123,
@@ -106,6 +108,7 @@ class FakeAdminPartnerDb {
       email: 'partner@holaday.local',
       displayName: 'Partner User',
       role: 'user',
+      status: 'active',
     },
   ];
   readonly orders: PartnerRechargeOrder[];
@@ -374,6 +377,15 @@ describe('admin.partner router', () => {
         userExternalId: 'usr_partner',
         status: 'passed',
         provider: 'manual',
+        note: 'reviewed',
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(
+      caller.setKycStatus({
+        userExternalId: 'usr_partner',
+        status: 'passed',
+        provider: 'manual',
+        providerRef: '—',
         note: 'reviewed',
       }),
     ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
@@ -875,5 +887,58 @@ describe('admin.partner router', () => {
       riskNote: 'manual close after refund',
     });
     expect(riskEvent).not.toHaveProperty('metadata');
+  });
+});
+
+describe('partner reconciliation safety', () => {
+  it('uses Beijing calendar-day boundaries for the operator date range', () => {
+    const normalizeReconciliationWindow = (
+      __adminPartnerInternals as unknown as {
+        normalizeReconciliationWindow?: (input: { from: string; to: string }) => {
+          fromDate: Date;
+          toExclusiveDate: Date;
+        };
+      }
+    ).normalizeReconciliationWindow;
+
+    expect(normalizeReconciliationWindow).toBeTypeOf('function');
+    const window = normalizeReconciliationWindow?.({
+      from: '2026-07-01',
+      to: '2026-07-07',
+    });
+    expect(window?.fromDate.toISOString()).toBe('2026-06-30T16:00:00.000Z');
+    expect(window?.toExclusiveDate.toISOString()).toBe('2026-07-07T16:00:00.000Z');
+  });
+
+  it('rejects a silently truncated financial export', () => {
+    const requireCompleteReconciliationRows = (
+      __adminPartnerInternals as unknown as {
+        requireCompleteReconciliationRows?: <T>(rows: T[], limit: number, label: string) => T[];
+      }
+    ).requireCompleteReconciliationRows;
+
+    expect(requireCompleteReconciliationRows).toBeTypeOf('function');
+    expect(() =>
+      requireCompleteReconciliationRows?.([{ id: 1 }, { id: 2 }], 1, 'orders'),
+    ).toThrow(/narrow the date range/i);
+  });
+});
+
+describe('partner overview coverage', () => {
+  it('returns the requested page and marks hidden queue rows', () => {
+    const capOverviewRows = (
+      __adminPartnerInternals as unknown as {
+        capOverviewRows?: <T>(rows: T[], limit: number) => {
+          rows: T[];
+          truncated: boolean;
+        };
+      }
+    ).capOverviewRows;
+
+    expect(capOverviewRows).toBeTypeOf('function');
+    expect(capOverviewRows?.([{ id: 1 }, { id: 2 }, { id: 3 }], 2)).toEqual({
+      rows: [{ id: 1 }, { id: 2 }],
+      truncated: true,
+    });
   });
 });

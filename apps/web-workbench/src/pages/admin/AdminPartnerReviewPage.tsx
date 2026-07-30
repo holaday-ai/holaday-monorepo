@@ -24,6 +24,7 @@ import {
 } from './admin-shared';
 import {
   adminPartnerActionConfirmation,
+  defaultPartnerReconciliationRange,
   formatPartnerCreditCents,
   formatPartnerMoneyCents,
   filterAdminPartnerOverview,
@@ -39,6 +40,7 @@ import {
   partnerRiskLotQueueAction,
   partnerReviewStatusToken,
   type AdminPartnerStatusKind,
+  type AdminPartnerQueueName,
   type PartnerRiskLotCloseResolutionKind,
   type PartnerReconciliationState,
 } from './admin-partner-state';
@@ -46,12 +48,21 @@ import {
 type OverviewState = ReturnType<typeof normalizeAdminPartnerOverview>;
 type EnabledOverviewState = Extract<OverviewState, { enabled: true }>;
 type KycStatusInput = 'pending' | 'passed' | 'review_required' | 'rejected';
+const PARTNER_QUEUE_LIMIT_MAX = 500;
 
 interface PendingAdminConfirmation {
   actionKey: string;
   action: () => Promise<void>;
   success: string;
+  confirmation: ReturnType<typeof adminPartnerActionConfirmation>;
 }
+
+type RunAdminAction = (
+  actionKey: string,
+  action: () => Promise<void>,
+  success: string,
+  confirmationDetails?: readonly string[],
+) => Promise<void>;
 
 export function AdminPartnerReviewPage(): JSX.Element {
   const mountedRef = useMountedRef();
@@ -67,8 +78,16 @@ export function AdminPartnerReviewPage(): JSX.Element {
   const [pendingAction, setPendingAction] = React.useState<string | null>(null);
   const [pendingConfirmation, setPendingConfirmation] =
     React.useState<PendingAdminConfirmation | null>(null);
-  const [reconciliationTo, setReconciliationTo] = React.useState(() => isoDay(new Date()));
-  const [reconciliationFrom, setReconciliationFrom] = React.useState(() => isoDay(addDays(new Date(), -6)));
+  const reconciliationDefaultRange = React.useMemo(
+    () => defaultPartnerReconciliationRange(new Date()),
+    [],
+  );
+  const [reconciliationTo, setReconciliationTo] = React.useState(
+    reconciliationDefaultRange.to,
+  );
+  const [reconciliationFrom, setReconciliationFrom] = React.useState(
+    reconciliationDefaultRange.from,
+  );
   const [kycUserExternalId, setKycUserExternalId] = React.useState('');
   const [kycStatus, setKycStatus] = React.useState<KycStatusInput>('passed');
   const [kycProvider, setKycProvider] = React.useState('manual');
@@ -86,6 +105,7 @@ export function AdminPartnerReviewPage(): JSX.Element {
   const [riskLotResolutionRefs, setRiskLotResolutionRefs] = React.useState<Record<string, string>>({});
   const [queueSearch, setQueueSearch] = React.useState('');
   const [serverQueueSearch, setServerQueueSearch] = React.useState('');
+  const [queueLimit, setQueueLimit] = React.useState(50);
 
   const refresh = React.useCallback(async () => {
     const requestId = ++requestIdRef.current;
@@ -94,7 +114,10 @@ export function AdminPartnerReviewPage(): JSX.Element {
     try {
       const query = serverQueueSearch.trim();
       const res = normalizeAdminPartnerOverview(
-        await trpc.admin.partner.overview.query(query ? { query } : undefined),
+        await trpc.admin.partner.overview.query({
+          limit: queueLimit,
+          ...(query ? { query } : {}),
+        }),
       );
       if (mountedRef.current && requestIdRef.current === requestId) setData(res);
     } catch (err) {
@@ -104,7 +127,7 @@ export function AdminPartnerReviewPage(): JSX.Element {
     } finally {
       if (mountedRef.current && requestIdRef.current === requestId) setLoading(false);
     }
-  }, [mountedRef, serverQueueSearch]);
+  }, [mountedRef, queueLimit, serverQueueSearch]);
 
   const refreshReconciliation = React.useCallback(async () => {
     const requestId = ++reconciliationRequestIdRef.current;
@@ -148,12 +171,22 @@ export function AdminPartnerReviewPage(): JSX.Element {
     };
   }, [refreshReconciliation]);
 
-  async function runAction(actionKey: string, action: () => Promise<void>, success: string): Promise<void> {
+  async function runAction(
+    actionKey: string,
+    action: () => Promise<void>,
+    success: string,
+    confirmationDetails: readonly string[] = [],
+  ): Promise<void> {
     if (pendingAction || pendingConfirmation) {
       toast.show('已有审核动作处理中', 'info', 1600);
       return;
     }
-    setPendingConfirmation({ actionKey, action, success });
+    setPendingConfirmation({
+      actionKey,
+      action,
+      success,
+      confirmation: adminPartnerActionConfirmation(success, confirmationDetails),
+    });
   }
 
   async function executeConfirmedAction(): Promise<void> {
@@ -206,6 +239,12 @@ export function AdminPartnerReviewPage(): JSX.Element {
         setKycNote('');
       },
       '实名状态已更新',
+      [
+        `用户：${userExternalId}`,
+        `状态：${kycStatus}`,
+        `认证流水：${kycProviderRef.trim() || '无'}`,
+        `审核备注：${kycNote.trim()}`,
+      ],
     );
   }
 
@@ -274,6 +313,7 @@ export function AdminPartnerReviewPage(): JSX.Element {
           reconciliationFrom={reconciliationFrom}
           reconciliationTo={reconciliationTo}
           queueSearch={queueSearch}
+          queueLimit={queueLimit}
           pendingAction={pendingAction}
           kycUserExternalId={kycUserExternalId}
           kycStatus={kycStatus}
@@ -304,6 +344,7 @@ export function AdminPartnerReviewPage(): JSX.Element {
           setReconciliationFrom={setReconciliationFrom}
           setReconciliationTo={setReconciliationTo}
           setQueueSearch={setQueueSearch}
+          setQueueLimit={setQueueLimit}
           refreshReconciliation={refreshReconciliation}
           copyReconciliationCsv={copyReconciliationCsv}
           submitManualKyc={submitManualKyc}
@@ -312,7 +353,8 @@ export function AdminPartnerReviewPage(): JSX.Element {
       ) : null}
       <ConfirmDialog
         open={pendingConfirmation !== null}
-        {...adminPartnerActionConfirmation(pendingConfirmation?.success ?? '')}
+        {...(pendingConfirmation?.confirmation ??
+          adminPartnerActionConfirmation(''))}
         confirmLabel="确认执行"
         destructive
         onConfirm={executeConfirmedAction}
@@ -332,6 +374,7 @@ function EnabledAdminPartnerReview({
   reconciliationFrom,
   reconciliationTo,
   queueSearch,
+  queueLimit,
   pendingAction,
   kycUserExternalId,
   kycStatus,
@@ -362,6 +405,7 @@ function EnabledAdminPartnerReview({
   setReconciliationFrom,
   setReconciliationTo,
   setQueueSearch,
+  setQueueLimit,
   refreshReconciliation,
   copyReconciliationCsv,
   submitManualKyc,
@@ -374,6 +418,7 @@ function EnabledAdminPartnerReview({
   reconciliationFrom: string;
   reconciliationTo: string;
   queueSearch: string;
+  queueLimit: number;
   pendingAction: string | null;
   kycUserExternalId: string;
   kycStatus: KycStatusInput;
@@ -404,25 +449,54 @@ function EnabledAdminPartnerReview({
   setReconciliationFrom: (value: string) => void;
   setReconciliationTo: (value: string) => void;
   setQueueSearch: (value: string) => void;
+  setQueueLimit: React.Dispatch<React.SetStateAction<number>>;
   refreshReconciliation: () => Promise<void>;
   copyReconciliationCsv: () => Promise<void>;
   submitManualKyc: () => Promise<void>;
-  runAction: (actionKey: string, action: () => Promise<void>, success: string) => Promise<void>;
+  runAction: RunAdminAction;
 }): JSX.Element {
+  const truncatedQueues = new Set<AdminPartnerQueueName>(
+    data.coverage.truncatedQueues,
+  );
+  const hasHiddenRows = truncatedQueues.size > 0;
+
   return (
     <div className="space-y-5">
       <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-10">
-        <MetricCard label="待实名" value={data.metrics.pendingKycCount} />
-        <MetricCard label="待确认订单" value={data.metrics.pendingOrderCount} />
-        <MetricCard label="需复核订单" value={data.metrics.reviewRequiredOrderCount} />
-        <MetricCard label="待提现复核" value={data.metrics.pendingWithdrawalCount} />
-        <MetricCard label="待出款" value={data.metrics.approvedWithdrawalCount} />
-        <MetricCard label="已出款" value={data.metrics.paidWithdrawalCount} />
-        <MetricCard label="已拒绝" value={data.metrics.rejectedWithdrawalCount} />
-        <MetricCard label="已退回" value={data.metrics.returnedWithdrawalCount} />
-        <MetricCard label="风险批次" value={data.metrics.riskLotCount} tone={data.metrics.riskLotCount > 0 ? 'danger' : 'normal'} />
-        <MetricCard label="风险事件" value={data.metrics.riskEventCount} tone={data.metrics.riskEventCount > 0 ? 'danger' : 'normal'} />
+        <MetricCard label="待实名" value={data.metrics.pendingKycCount} truncated={truncatedQueues.has('kycProfiles')} />
+        <MetricCard label="待确认订单" value={data.metrics.pendingOrderCount} truncated={truncatedQueues.has('orders')} />
+        <MetricCard label="需复核订单" value={data.metrics.reviewRequiredOrderCount} truncated={truncatedQueues.has('orders')} />
+        <MetricCard label="待提现复核" value={data.metrics.pendingWithdrawalCount} truncated={truncatedQueues.has('withdrawals')} />
+        <MetricCard label="待出款" value={data.metrics.approvedWithdrawalCount} truncated={truncatedQueues.has('withdrawals')} />
+        <MetricCard label="已出款" value={data.metrics.paidWithdrawalCount} truncated={truncatedQueues.has('withdrawalHistory')} />
+        <MetricCard label="已拒绝" value={data.metrics.rejectedWithdrawalCount} truncated={truncatedQueues.has('withdrawalHistory')} />
+        <MetricCard label="已退回" value={data.metrics.returnedWithdrawalCount} truncated={truncatedQueues.has('withdrawalHistory')} />
+        <MetricCard label="风险批次" value={data.metrics.riskLotCount} truncated={truncatedQueues.has('riskLots')} tone={data.metrics.riskLotCount > 0 ? 'danger' : 'normal'} />
+        <MetricCard label="风险事件" value={data.metrics.riskEventCount} truncated={truncatedQueues.has('riskEvents')} tone={data.metrics.riskEventCount > 0 ? 'danger' : 'normal'} />
       </section>
+
+      {hasHiddenRows && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-[8px] border border-[#FFC910]/60 bg-[#FFC910]/10 px-4 py-3 text-[13px] text-[#595757]">
+          <span>
+            部分队列超过当前每类 {formatInteger(data.coverage.limit)} 条，计数以“+”标记。
+          </span>
+          {queueLimit < PARTNER_QUEUE_LIMIT_MAX ? (
+            <button
+              type="button"
+              onClick={() =>
+                setQueueLimit((current) =>
+                  Math.min(PARTNER_QUEUE_LIMIT_MAX, current + 50),
+                )
+              }
+              className="rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-1.5 text-[12px] font-medium text-[#595757] hover:border-[#ADADAD] hover:text-[#EA1F59]"
+            >
+              加载更多
+            </button>
+          ) : (
+            <span className="text-[12px]">已达单次上限，请用搜索缩小范围。</span>
+          )}
+        </div>
+      )}
 
       <ReconciliationPanel
         state={reconciliation}
@@ -742,7 +816,7 @@ function KycQueue({
 }: {
   rows: EnabledOverviewState['kycProfiles'];
   pendingAction: string | null;
-  runAction: (actionKey: string, action: () => Promise<void>, success: string) => Promise<void>;
+  runAction: RunAdminAction;
 }): JSX.Element {
   return (
     <QueueSection title="实名队列" empty="暂无实名复核">
@@ -770,6 +844,8 @@ function KycQueue({
                     label="通过"
                     compact
                     pending={pendingAction === `kyc-pass:${row.userExternalId}`}
+                    disabled={!row.providerRef.trim()}
+                    disabledReason="缺少认证流水，请使用上方实名状态表单补充"
                     onClick={() =>
                       void runAction(
                         `kyc-pass:${row.userExternalId}`,
@@ -779,6 +855,12 @@ function KycQueue({
                           );
                         },
                         '实名已通过',
+                        [
+                          `用户：${row.userExternalId}`,
+                          '状态：通过',
+                          `认证流水：${row.providerRef}`,
+                          `provider：${row.provider}`,
+                        ],
                       )
                     }
                   />
@@ -788,6 +870,8 @@ function KycQueue({
                     compact
                     tone="danger"
                     pending={pendingAction === `kyc-reject:${row.userExternalId}`}
+                    disabled={!row.providerRef.trim()}
+                    disabledReason="缺少认证流水，请使用上方实名状态表单补充"
                     onClick={() =>
                       void runAction(
                         `kyc-reject:${row.userExternalId}`,
@@ -797,6 +881,12 @@ function KycQueue({
                           );
                         },
                         '实名已拒绝',
+                        [
+                          `用户：${row.userExternalId}`,
+                          '状态：拒绝',
+                          `认证流水：${row.providerRef}`,
+                          `provider：${row.provider}`,
+                        ],
                       )
                     }
                   />
@@ -825,7 +915,7 @@ function OrderQueue({
   orderCaptureIds: Record<string, string>;
   setOrderReviewNotes: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   setOrderCaptureIds: React.Dispatch<React.SetStateAction<Record<string, string>>>;
-  runAction: (actionKey: string, action: () => Promise<void>, success: string) => Promise<void>;
+  runAction: RunAdminAction;
 }): JSX.Element {
   return (
     <QueueSection title="订单确认" empty="暂无待确认订单">
@@ -910,6 +1000,14 @@ function OrderQueue({
                           }
                         },
                         reviewRequired ? '订单已放行' : '订单已确认',
+                        [
+                          `订单：${row.orderExternalId}`,
+                          `金额：${formatPartnerMoneyCents(row.amountCnyCents)}`,
+                          reviewRequired
+                            ? `放行备注：${reviewNote.trim()}`
+                            : `支付流水：${captureId.trim()}`,
+                          `provider：${row.provider}`,
+                        ],
                       )
                     }
                   />
@@ -938,7 +1036,7 @@ function WithdrawalQueue({
   payoutIds: Record<string, string>;
   setWithdrawalReasons: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   setPayoutIds: React.Dispatch<React.SetStateAction<Record<string, string>>>;
-  runAction: (actionKey: string, action: () => Promise<void>, success: string) => Promise<void>;
+  runAction: RunAdminAction;
 }): JSX.Element {
   return (
     <QueueSection title="提现复核" empty="暂无提现申请">
@@ -978,6 +1076,11 @@ function WithdrawalQueue({
                             });
                           },
                           '提现已通过',
+                          [
+                            `提现：${row.withdrawalExternalId}`,
+                            `金额：${formatPartnerCreditCents(row.amountCreditCents)}`,
+                            `审核原因：${reason.trim()}`,
+                          ],
                         )
                       }
                     />
@@ -1011,6 +1114,11 @@ function WithdrawalQueue({
                           });
                         },
                         '提现已拒绝',
+                        [
+                          `提现：${row.withdrawalExternalId}`,
+                          `金额：${formatPartnerCreditCents(row.amountCreditCents)}`,
+                          `拒绝原因：${reason.trim()}`,
+                        ],
                       )
                     }
                   />
@@ -1044,6 +1152,11 @@ function WithdrawalQueue({
                               });
                             },
                             '提现已出款',
+                            [
+                              `提现：${row.withdrawalExternalId}`,
+                              `金额：${formatPartnerCreditCents(row.amountCreditCents)}`,
+                              `出款流水：${payoutId.trim()}`,
+                            ],
                           )
                         }
                       />
@@ -1070,7 +1183,7 @@ function WithdrawalHistory({
   pendingAction: string | null;
   withdrawalReasons: Record<string, string>;
   setWithdrawalReasons: React.Dispatch<React.SetStateAction<Record<string, string>>>;
-  runAction: (actionKey: string, action: () => Promise<void>, success: string) => Promise<void>;
+  runAction: RunAdminAction;
 }): JSX.Element {
   return (
     <QueueSection title="提现历史" empty="暂无提现历史">
@@ -1134,6 +1247,11 @@ function WithdrawalHistory({
                             });
                           },
                           '提现已退回',
+                          [
+                            `提现：${row.withdrawalExternalId}`,
+                            `金额：${formatPartnerCreditCents(row.amountCreditCents)}`,
+                            `退回原因：${returnReason.trim()}`,
+                          ],
                         )
                       }
                     />
@@ -1169,7 +1287,7 @@ function RiskLotQueue({
   setRiskLotNotes: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   setRiskLotResolutionKinds: React.Dispatch<React.SetStateAction<Record<string, PartnerRiskLotCloseResolutionKind>>>;
   setRiskLotResolutionRefs: React.Dispatch<React.SetStateAction<Record<string, string>>>;
-  runAction: (actionKey: string, action: () => Promise<void>, success: string) => Promise<void>;
+  runAction: RunAdminAction;
 }): JSX.Element {
   return (
     <QueueSection title="风险批次" empty="暂无风险批次">
@@ -1256,6 +1374,12 @@ function RiskLotQueue({
                               });
                             },
                             action.action === 'freeze' ? '批次已冻结' : '批次已恢复',
+                            [
+                              `批次：${row.lotExternalId}`,
+                              `本金：${formatPartnerCreditCents(row.principalCreditCents)}`,
+                              `动作：${action.action === 'freeze' ? '冻结' : '恢复'}`,
+                              `风险备注：${operatorNote.trim()}`,
+                            ],
                           )
                         }
                       />
@@ -1311,6 +1435,13 @@ function RiskLotQueue({
                               });
                             },
                             '批次已关闭',
+                            [
+                              `批次：${row.lotExternalId}`,
+                              `本金：${formatPartnerCreditCents(row.principalCreditCents)}`,
+                              `处理类型：${partnerRiskCloseResolutionKindLabel(resolutionKind)}`,
+                              `处理凭证：${resolutionRef.trim()}`,
+                              `风险备注：${operatorNote.trim()}`,
+                            ],
                           )
                         }
                       />
@@ -1364,17 +1495,19 @@ function RiskEventHistory({ rows }: { rows: EnabledOverviewState['riskEvents'] }
 function MetricCard({
   label,
   value,
+  truncated = false,
   tone = 'normal',
 }: {
   label: string;
   value: number;
+  truncated?: boolean;
   tone?: 'normal' | 'danger';
 }): JSX.Element {
   return (
     <div className="rounded-[8px] border border-[#DCDDDD] bg-white px-4 py-3">
       <div className="text-[12px] text-muted-foreground">{label}</div>
       <div className={cn('mt-2 text-2xl font-semibold tabular-nums', tone === 'danger' && 'text-[#EA1F59]')}>
-        {formatInteger(value)}
+        {formatInteger(value)}{truncated ? '+' : ''}
       </div>
     </div>
   );
@@ -1515,12 +1648,4 @@ function ActionButton({
       {label}
     </button>
   );
-}
-
-function addDays(date: Date, days: number): Date {
-  return new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
-}
-
-function isoDay(date: Date): string {
-  return date.toISOString().slice(0, 10);
 }

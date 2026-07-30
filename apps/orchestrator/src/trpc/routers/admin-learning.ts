@@ -105,8 +105,18 @@ interface DomainAggregate {
   topFailureCategory: ErrorCategory | null;
 }
 
+function capLearningScanRows<T>(rows: T[], limit: number) {
+  return {
+    rows: rows.slice(0, limit),
+    truncated: rows.length > limit,
+  };
+}
+
 /** Scan the recent task slice in one query; intent truncated to 1KB. */
-async function scanRecentTasks(db: unknown): Promise<TaskScanRow[]> {
+async function scanRecentTasks(db: unknown): Promise<{
+  rows: TaskScanRow[];
+  truncated: boolean;
+}> {
   const windowStart = new Date(Date.now() - SCAN_WINDOW_DAYS * 86_400_000);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const rows = await (db as any)
@@ -122,9 +132,9 @@ async function scanRecentTasks(db: unknown): Promise<TaskScanRow[]> {
     })
     .from(tasks)
     .where(and(gte(tasks.createdAt, windowStart), eq(tasks.origin, 'user')))
-    .orderBy(desc(tasks.id))
-    .limit(SCAN_LIMIT);
-  return rows as TaskScanRow[];
+    .orderBy(desc(tasks.createdAt), desc(tasks.id))
+    .limit(SCAN_LIMIT + 1);
+  return capLearningScanRows(rows as TaskScanRow[], SCAN_LIMIT);
 }
 
 /** Group a scan into per-domain aggregates. */
@@ -173,6 +183,15 @@ function aggregateByDomain(scanRows: TaskScanRow[]): Map<string, DomainAggregate
   return byDomain;
 }
 
+function selectRecentDomainRows<T extends { createdAt: Date }>(
+  rows: T[],
+  limit: number,
+): T[] {
+  return [...rows]
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+    .slice(0, limit);
+}
+
 export const adminLearningRouter = router({
   // ────────────────────────────────────────────────────────── overview ──
   overview: adminProcedure
@@ -194,7 +213,8 @@ export const adminLearningRouter = router({
         offset: 0,
         limit: 50,
       };
-      const scanRows = await scanRecentTasks(ctx.db);
+      const scan = await scanRecentTasks(ctx.db);
+      const scanRows = scan.rows;
       const byDomain = aggregateByDomain(scanRows);
 
       // High-risk + AI-memory counts feed the three top-level cards.
@@ -251,6 +271,11 @@ export const adminLearningRouter = router({
           highRiskCount,
           aiMemoriesCount,
         },
+        coverage: {
+          windowDays: SCAN_WINDOW_DAYS,
+          scannedTasks: scanRows.length,
+          truncated: scan.truncated,
+        },
         domains: page.map((d) => ({
           domain: d.domain,
           total: d.total,
@@ -278,7 +303,8 @@ export const adminLearningRouter = router({
     .input(z.object({ domain: z.string().min(1).max(253) }))
     .query(async ({ ctx, input }) => {
       const targetDomain = input.domain.toLowerCase();
-      const scanRows = await scanRecentTasks(ctx.db);
+      const scan = await scanRecentTasks(ctx.db);
+      const scanRows = scan.rows;
 
       // Filter to tasks whose extracted domain matches the request.
       const matching: TaskScanRow[] = [];
@@ -286,6 +312,12 @@ export const adminLearningRouter = router({
         if (extractDomain(row.intent) === targetDomain) matching.push(row);
       }
       if (matching.length === 0) {
+        if (scan.truncated) {
+          throw new TRPCError({
+            code: 'PRECONDITION_FAILED',
+            message: `the ${SCAN_WINDOW_DAYS}-day scan is truncated; narrow the query before concluding ${targetDomain} has no tasks`,
+          });
+        }
         throw new TRPCError({
           code: 'NOT_FOUND',
           message: `no tasks in the last ${SCAN_WINDOW_DAYS} days for ${targetDomain}`,
@@ -328,9 +360,7 @@ export const adminLearningRouter = router({
       // intent + error_message now (the scan truncated the intent
       // to 1KB), so do a second query keyed on the task ids of the
       // matching rows.
-      const recentMatching = matching
-        .slice(0, 20)
-        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+      const recentMatching = selectRecentDomainRows(matching, 20);
       const ids = recentMatching.map((r) => r.id);
       let recentRows: Array<{
         id: number;
@@ -390,6 +420,11 @@ export const adminLearningRouter = router({
 
       return {
         domain: targetDomain,
+        coverage: {
+          windowDays: SCAN_WINDOW_DAYS,
+          scannedTasks: scanRows.length,
+          truncated: scan.truncated,
+        },
         stats: {
           total,
           success,
@@ -433,4 +468,9 @@ export const adminLearningRouter = router({
 });
 
 // Helpers re-exported for tests.
-export const __learningInternals = { aggregateByDomain, scanRecentTasks };
+export const __learningInternals = {
+  aggregateByDomain,
+  capLearningScanRows,
+  scanRecentTasks,
+  selectRecentDomainRows,
+};
