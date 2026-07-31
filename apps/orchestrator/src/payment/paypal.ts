@@ -21,7 +21,7 @@
  *   PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET — required to construct.
  *   PAYPAL_ENV = 'sandbox' | 'live' (default 'sandbox' so we can't
  *     accidentally charge real cards before BOSS flips the switch).
- *   PAYPAL_WEBHOOK_ID — required only for webhook signature verification.
+ *   PAYPAL_WEBHOOK_ID — required in production for webhook signature verification.
  */
 
 import { logger } from '../config/logger.js';

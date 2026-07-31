@@ -116,8 +116,19 @@ export function createWsServer(port: number, opts: WsServerOpts = {}) {
   injectedPlanner = opts.planner ?? null;
   injectedExecutor = opts.playwrightExecutor ?? null;
   injectedBrowserPool = opts.browserPool ?? null;
-  const authenticateToken =
+  const configuredAuthenticateToken =
     opts.authenticateToken ?? ((token: string) => authenticateAccessToken(db, token));
+  const authenticateToken = async (token: string): Promise<string | null> => {
+    try {
+      return await configuredAuthenticateToken(token);
+    } catch (err) {
+      logger.warn(
+        { err: err instanceof Error ? err.message : String(err) },
+        'websocket authentication failed closed',
+      );
+      return null;
+    }
+  };
 
   const wss = new WebSocketServer({ port, handleProtocols });
 

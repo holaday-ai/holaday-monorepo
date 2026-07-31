@@ -85,7 +85,7 @@ export function createVncProxy(opts: VncProxyOptions): VncProxy {
       return reject(socket, 401, 'missing bearer token');
     }
 
-    // verifyStreamOrAccessToken accepts either a short-lived stream
+    // authenticateStreamOrAccessToken accepts either a short-lived stream
     // token (preferred — fresh per connect, 60s TTL) or the legacy
     // long-lived workbench JWT (kept for SPA versions that haven't
     // shipped the stream-token swap yet). Kick off async; if

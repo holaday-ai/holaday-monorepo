@@ -173,4 +173,51 @@ describe('WS server end-to-end', () => {
     expect(authenticateToken).toHaveBeenCalledWith('revoked-access-token');
     client.close();
   });
+
+  it('fails closed when the connection authenticator throws', async () => {
+    const port = Number(process.env.WS_PORT) + 3;
+    const { default: WebSocket } = await import('ws');
+    const { createWsServer } = await import('./server.js');
+    const { WS_SUBPROTOCOL, parseServerMessage } = await import('@holaday/shared-types');
+    const authenticateToken = vi.fn(async () => {
+      throw new Error('database unavailable');
+    });
+    const ws = createWsServer(port, { authenticateToken });
+    close = async () => {
+      await ws.close();
+    };
+    const client = new WebSocket(`ws://127.0.0.1:${port}`, [
+      WS_SUBPROTOCOL,
+      'jwt.signed-access-token',
+    ]);
+
+    await new Promise<void>((resolve, reject) => {
+      client.once('open', resolve);
+      client.once('error', reject);
+    });
+    const unauthorized = new Promise<{ code: string }>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('unauthorized timeout')), 5_000);
+      client.on('message', (raw) => {
+        const parsed = parseServerMessage(raw.toString());
+        if (parsed.success && parsed.data.type === 'server.error') {
+          clearTimeout(timer);
+          resolve(parsed.data);
+        }
+      });
+      client.once('error', reject);
+    });
+    client.send(
+      JSON.stringify({
+        type: 'client.hello',
+        token: 'signed-access-token',
+        extensionVersion: 'web-workbench',
+      }),
+    );
+
+    expect((await unauthorized).code).toBe('UNAUTHORIZED');
+    expect(authenticateToken).toHaveBeenCalledTimes(2);
+    expect(authenticateToken).toHaveBeenNthCalledWith(1, 'signed-access-token');
+    expect(authenticateToken).toHaveBeenNthCalledWith(2, 'signed-access-token');
+    client.close();
+  });
 });
