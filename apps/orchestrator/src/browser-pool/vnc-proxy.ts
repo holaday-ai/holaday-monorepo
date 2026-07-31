@@ -24,7 +24,8 @@ import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import type { Logger } from 'pino';
 import { WebSocket, WebSocketServer } from 'ws';
-import { verifyStreamOrAccessToken } from '../auth/jwt.js';
+import { authenticateStreamOrAccessToken } from '../auth/middleware.js';
+import { db } from '../db/client.js';
 import type { BrowserPool } from './browser-pool.js';
 
 export interface VncProxyOptions {
@@ -42,6 +43,7 @@ export interface VncProxyOptions {
    * every authenticated caller is eligible.
    */
   allowedUserIds?: Set<string>;
+  authenticateToken?: (token: string) => Promise<string | null>;
 }
 
 export interface VncProxy {
@@ -59,6 +61,8 @@ export function createVncProxy(opts: VncProxyOptions): VncProxy {
   const pathPattern = opts.pathPattern ?? /^\/vnc-ws\/([^/?#]+)/;
   const wss = new WebSocketServer({ noServer: true });
   const log = opts.logger.child({ module: 'vnc-proxy' });
+  const authenticateToken =
+    opts.authenticateToken ?? ((token: string) => authenticateStreamOrAccessToken(db, token));
 
   function handleUpgrade(
     req: IncomingMessage,
@@ -87,12 +91,11 @@ export function createVncProxy(opts: VncProxyOptions): VncProxy {
     // shipped the stream-token swap yet). Kick off async; if
     // rejected or null we close the raw TCP socket, never calling
     // wss.handleUpgrade.
-    verifyStreamOrAccessToken(token).then((claims) => {
-      if (!claims) {
+    authenticateToken(token).then((callerUserId) => {
+      if (!callerUserId) {
         log.warn({}, 'jwt verify returned null — invalid token');
         return reject(socket, 401, 'invalid token');
       }
-      const callerUserId = claims.sub;
 
       if (opts.allowedUserIds && !opts.allowedUserIds.has(callerUserId)) {
         return reject(socket, 403, 'user not on canary allow-list');

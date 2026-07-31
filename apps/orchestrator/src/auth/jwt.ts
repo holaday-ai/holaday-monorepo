@@ -78,15 +78,11 @@ export async function signStreamToken(sub: string): Promise<{ token: string; exp
 }
 
 /**
- * Verify a stream token (or fall through to a regular access
- * token for the legacy clients still pinning the long-lived JWT in
- * the URL). Returns the user's external id on success. Stream
- * tokens carry only `sub` — no plan claim — so callers that need
- * plan must look it up server-side. For WS proxies this is fine,
- * the only check they care about is "does this user own that
- * task / browser instance".
+ * Verify only the short-lived streaming token. Long-lived access
+ * token fallback requires a database-backed account/session check
+ * and therefore lives in auth/middleware.ts.
  */
-export async function verifyStreamOrAccessToken(token: string): Promise<{ sub: string } | null> {
+export async function verifyStreamToken(token: string): Promise<{ sub: string } | null> {
   try {
     const { payload } = await jwtVerify(token, key, {
       algorithms: [ALGORITHM],
@@ -96,10 +92,6 @@ export async function verifyStreamOrAccessToken(token: string): Promise<{ sub: s
     if (typeof payload.sub !== 'string') return null;
     return { sub: payload.sub };
   } catch {
-    // Fall back to the long-lived workbench access token. Lets old
-    // SPA bundles keep working until the stream-token build rolls
-    // out everywhere; new bundles always use the stream token.
-    const claims = await verifyAccessToken(token);
-    return claims ? { sub: claims.sub } : null;
+    return null;
   }
 }

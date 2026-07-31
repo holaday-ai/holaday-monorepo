@@ -7,6 +7,11 @@ beforeAll(() => {
   process.env.JWT_SECRET ??= 'integration-test-secret-must-be-32-chars-or-more-please';
 });
 
+async function authenticateSignedTestToken(token: string): Promise<string | null> {
+  const { verifyAccessToken } = await import('../auth/jwt.js');
+  return (await verifyAccessToken(token))?.sub ?? null;
+}
+
 describe('extension tool-call websocket lifecycle', () => {
   let close: () => Promise<void> = async () => {};
 
@@ -22,7 +27,7 @@ describe('extension tool-call websocket lifecycle', () => {
     const { default: WebSocket } = await import('ws');
 
     const port = 38224;
-    const server = createWsServer(port);
+    const server = createWsServer(port, { authenticateToken: authenticateSignedTestToken });
     close = async () => {
       await server.close();
     };
@@ -104,7 +109,7 @@ describe('extension tool-call websocket lifecycle', () => {
     const { default: WebSocket } = await import('ws');
 
     const port = 38229;
-    const server = createWsServer(port);
+    const server = createWsServer(port, { authenticateToken: authenticateSignedTestToken });
     close = async () => {
       await server.close();
     };
@@ -145,7 +150,7 @@ describe('extension tool-call websocket lifecycle', () => {
     const { default: WebSocket } = await import('ws');
 
     const port = 38230;
-    const server = createWsServer(port);
+    const server = createWsServer(port, { authenticateToken: authenticateSignedTestToken });
     close = async () => {
       await server.close();
     };
@@ -209,7 +214,7 @@ describe('extension tool-call websocket lifecycle', () => {
     const { default: WebSocket } = await import('ws');
 
     const port = 38231;
-    const server = createWsServer(port);
+    const server = createWsServer(port, { authenticateToken: authenticateSignedTestToken });
     close = async () => {
       await server.close();
     };
@@ -299,7 +304,7 @@ describe('extension tool-call websocket lifecycle', () => {
     const { default: WebSocket } = await import('ws');
 
     const port = 38225;
-    const server = createWsServer(port);
+    const server = createWsServer(port, { authenticateToken: authenticateSignedTestToken });
     close = async () => {
       await server.close();
     };
@@ -429,7 +434,7 @@ describe('extension tool-call websocket lifecycle', () => {
     const sendSpy = vi.spyOn(WebSocket.prototype, 'send');
 
     const port = 38233;
-    const server = createWsServer(port);
+    const server = createWsServer(port, { authenticateToken: authenticateSignedTestToken });
     close = async () => {
       sendSpy.mockRestore();
       await server.close();
@@ -554,7 +559,7 @@ describe('extension tool-call websocket lifecycle', () => {
     const debug = vi.spyOn(logger, 'debug').mockImplementation(() => undefined);
 
     const port = 38232;
-    const server = createWsServer(port);
+    const server = createWsServer(port, { authenticateToken: authenticateSignedTestToken });
     close = async () => {
       await server.close();
     };
@@ -649,7 +654,7 @@ describe('extension tool-call websocket lifecycle', () => {
     const { default: WebSocket } = await import('ws');
 
     const port = 38226;
-    const server = createWsServer(port);
+    const server = createWsServer(port, { authenticateToken: authenticateSignedTestToken });
     close = async () => {
       await server.close();
     };

@@ -7,6 +7,11 @@ beforeAll(() => {
   process.env.WS_PORT ??= '38216';
 });
 
+async function authenticateSignedTestToken(token: string): Promise<string | null> {
+  const { verifyAccessToken } = await import('../auth/jwt.js');
+  return (await verifyAccessToken(token))?.sub ?? null;
+}
+
 function must<T>(v: T | null | undefined, n: string): T {
   if (v == null) throw new Error(`${n} missing`);
   return v;
@@ -101,7 +106,7 @@ describe('restart recovery: executing re-emits server.task.dispatch', () => {
     expect(summary.taskCount).toBeGreaterThanOrEqual(1);
 
     const port = Number(process.env.WS_PORT);
-    const ws = createWsServer(port);
+    const ws = createWsServer(port, { authenticateToken: authenticateSignedTestToken });
     close = async () => {
       await ws.close();
     };
@@ -208,7 +213,7 @@ describe('restart recovery: executing re-emits server.task.dispatch', () => {
     expect(summary.taskCount).toBeGreaterThanOrEqual(1);
 
     const port = Number(process.env.WS_PORT);
-    const ws = createWsServer(port);
+    const ws = createWsServer(port, { authenticateToken: authenticateSignedTestToken });
     close = async () => {
       await ws.close();
     };
@@ -327,7 +332,7 @@ describe('restart recovery: executing re-emits server.task.dispatch', () => {
     expect(summary.taskCount).toBeGreaterThanOrEqual(1);
 
     const port = Number(process.env.WS_PORT);
-    const ws = createWsServer(port);
+    const ws = createWsServer(port, { authenticateToken: authenticateSignedTestToken });
     close = async () => {
       await ws.close();
     };

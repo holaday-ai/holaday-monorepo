@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
 import { db } from '../db/client.js';
 import { users } from '../db/schema/users.js';
-import { verifyAccessToken } from './jwt.js';
+import { verifyAccessToken, verifyStreamToken } from './jwt.js';
 
 const BEARER_PREFIX = 'Bearer ';
 
@@ -13,6 +13,13 @@ export async function authenticateBearerHeader(
 ): Promise<string | null> {
   if (!header?.startsWith(BEARER_PREFIX)) return null;
   const token = header.slice(BEARER_PREFIX.length).trim();
+  return authenticateAccessToken(database, token);
+}
+
+export async function authenticateAccessToken(
+  database: DB,
+  token: string,
+): Promise<string | null> {
   const claims = await verifyAccessToken(token);
   if (!claims) return null;
 
@@ -33,6 +40,15 @@ export async function authenticateBearerHeader(
     return null;
   }
   return user.externalId;
+}
+
+export async function authenticateStreamOrAccessToken(
+  database: DB,
+  token: string,
+): Promise<string | null> {
+  const streamClaims = await verifyStreamToken(token);
+  if (streamClaims) return streamClaims.sub;
+  return authenticateAccessToken(database, token);
 }
 
 export async function bearerAuth(req: Request, _res: Response, next: NextFunction): Promise<void> {

@@ -15,7 +15,7 @@ import type { PlaywrightExecutor } from '../agent/vision-loop/playwright-executo
 import type { BrowserPool } from '../browser-pool/browser-pool.js';
 import { type RehydratedTask, TaskRepository } from '../agent/task-repository.js';
 import { failTaskWithEventIfStatus } from '../agent/task-maintenance.js';
-import { verifyAccessToken } from '../auth/jwt.js';
+import { authenticateAccessToken } from '../auth/middleware.js';
 import { logger } from '../config/logger.js';
 import { db } from '../db/client.js';
 import {
@@ -109,17 +109,20 @@ export interface WsServerOpts {
    * the singleton if the caller has no pool instance.
    */
   browserPool?: BrowserPool | null;
+  authenticateToken?: (token: string) => Promise<string | null>;
 }
 
 export function createWsServer(port: number, opts: WsServerOpts = {}) {
   injectedPlanner = opts.planner ?? null;
   injectedExecutor = opts.playwrightExecutor ?? null;
   injectedBrowserPool = opts.browserPool ?? null;
+  const authenticateToken =
+    opts.authenticateToken ?? ((token: string) => authenticateAccessToken(db, token));
 
   const wss = new WebSocketServer({ port, handleProtocols });
 
   wss.on('connection', (socket, req) => {
-    void handleConnection(socket, req);
+    void handleConnection(socket, req, authenticateToken);
   });
 
   const heartbeat = setInterval(() => sweep(wss), HEARTBEAT_INTERVAL_MS);
@@ -689,7 +692,11 @@ function handleProtocols(protocols: Set<string>): string | false {
   return false;
 }
 
-async function handleConnection(socket: WebSocket, req: IncomingMessage) {
+async function handleConnection(
+  socket: WebSocket,
+  req: IncomingMessage,
+  authenticateToken: (token: string) => Promise<string | null>,
+) {
   const state: ClientState = {
     id: randomUUID(),
     userId: null,
@@ -710,7 +717,7 @@ async function handleConnection(socket: WebSocket, req: IncomingMessage) {
   const jwtProto = requestedProtos.find((p) => p.startsWith('jwt.'));
   if (jwtProto) {
     const token = jwtProto.slice('jwt.'.length);
-    const userId = await verifyToken(token);
+    const userId = await authenticateToken(token);
     if (userId) {
       state.userId = userId;
       state.authed = true;
@@ -742,7 +749,7 @@ async function handleConnection(socket: WebSocket, req: IncomingMessage) {
       });
       return;
     }
-    await handleClientMessage(state, result.data, authTimer);
+    await handleClientMessage(state, result.data, authTimer, authenticateToken);
   });
 
   socket.on('pong', () => {
@@ -768,9 +775,10 @@ async function handleClientMessage(
   state: ClientState,
   msg: ClientMessage,
   authTimer: NodeJS.Timeout,
+  authenticateToken: (token: string) => Promise<string | null>,
 ) {
   if (msg.type === 'client.hello') {
-    const userId = await verifyToken(msg.token);
+    const userId = await authenticateToken(msg.token);
     if (!userId) {
       send(state.socket, { type: 'server.error', code: 'UNAUTHORIZED', message: 'bad token' });
       state.socket.close(4401, 'unauthorized');
@@ -1407,15 +1415,6 @@ function extractDiagnostic(data: unknown): Diagnostic | null {
     strategies,
     ...(typeof d.screenshot === 'string' ? { screenshot: d.screenshot } : {}),
   };
-}
-
-async function verifyToken(token: string): Promise<string | null> {
-  // Delegate to the canonical verifyAccessToken so WS auth checks
-  // the same issuer + audience claims the HTTP /trpc bearerAuth
-  // checks. The previous local jwtVerify only validated the
-  // signature + algorithm, leaving WS strictly weaker than HTTP.
-  const claims = await verifyAccessToken(token);
-  return claims?.sub ?? null;
 }
 
 function send(socket: WebSocket, msg: ServerMessage): boolean {

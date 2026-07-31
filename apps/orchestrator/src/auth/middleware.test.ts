@@ -87,3 +87,65 @@ describe('authenticateBearerHeader', () => {
     ).resolves.toBeNull();
   });
 });
+
+describe('realtime token authentication', () => {
+  it('accepts a short-lived stream token without querying the user table', async () => {
+    const { signStreamToken } = await import('./jwt.js');
+    const { authenticateStreamOrAccessToken } = await import('./middleware.js');
+    const { token } = await signStreamToken('usr_stream_active');
+    let selectCalls = 0;
+    const database = {
+      select() {
+        selectCalls += 1;
+        throw new Error('stream tokens must not query the database');
+      },
+    };
+
+    await expect(
+      authenticateStreamOrAccessToken(database as never, token),
+    ).resolves.toBe('usr_stream_active');
+    expect(selectCalls).toBe(0);
+  });
+
+  it('rejects an inactive user using a valid long-lived access token', async () => {
+    const { signAccessToken } = await import('./jwt.js');
+    const { authenticateStreamOrAccessToken } = await import('./middleware.js');
+    const token = await signAccessToken({
+      sub: 'usr_stream_suspended',
+      plan: 'pro',
+      authVersion: 3,
+    });
+
+    await expect(
+      authenticateStreamOrAccessToken(
+        fakeDbFor({
+          externalId: 'usr_stream_suspended',
+          status: 'suspended',
+          authVersion: 3,
+        }) as never,
+        token,
+      ),
+    ).resolves.toBeNull();
+  });
+
+  it('rejects a legacy stream fallback token after authVersion changes', async () => {
+    const { signAccessToken } = await import('./jwt.js');
+    const { authenticateStreamOrAccessToken } = await import('./middleware.js');
+    const token = await signAccessToken({
+      sub: 'usr_stream_reset',
+      plan: 'pro',
+      authVersion: 6,
+    });
+
+    await expect(
+      authenticateStreamOrAccessToken(
+        fakeDbFor({
+          externalId: 'usr_stream_reset',
+          status: 'active',
+          authVersion: 7,
+        }) as never,
+        token,
+      ),
+    ).resolves.toBeNull();
+  });
+});

@@ -7,6 +7,11 @@ beforeAll(() => {
   process.env.WS_PORT ??= '38217';
 });
 
+async function authenticateSignedTestToken(token: string): Promise<string | null> {
+  const { verifyAccessToken } = await import('../auth/jwt.js');
+  return (await verifyAccessToken(token))?.sub ?? null;
+}
+
 function must<T>(v: T | null | undefined, n: string): T {
   if (v == null) throw new Error(`${n} missing`);
   return v;
@@ -72,7 +77,7 @@ describe('restart recovery: transient queued tasks fail visibly', () => {
     expect(summary.taskCount).toBeGreaterThanOrEqual(1);
 
     const port = Number(process.env.WS_PORT);
-    const ws = createWsServer(port);
+    const ws = createWsServer(port, { authenticateToken: authenticateSignedTestToken });
     close = async () => {
       await ws.close();
     };
@@ -209,7 +214,7 @@ describe('restart recovery: transient queued tasks fail visibly', () => {
       .where(eq(tasks.externalId, taskId));
 
     const port = Number(process.env.WS_PORT);
-    const ws = createWsServer(port);
+    const ws = createWsServer(port, { authenticateToken: authenticateSignedTestToken });
     close = async () => {
       await ws.close();
     };

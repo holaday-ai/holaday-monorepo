@@ -27,8 +27,9 @@ import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import type { Logger } from 'pino';
 import { WebSocket, WebSocketServer } from 'ws';
-import { verifyStreamOrAccessToken } from '../auth/jwt.js';
+import { authenticateStreamOrAccessToken } from '../auth/middleware.js';
 import type { BrowserPool } from '../browser-pool/index.js';
+import { db } from '../db/client.js';
 import type { BrowserInstance } from '../browser-pool/types.js';
 import { CdpInputHandler } from './cdp-input.js';
 import { DeferredScreencastInputBridge } from './screencast-input-bridge.js';
@@ -85,6 +86,7 @@ export interface ScreencastProxyOptions {
   logger: Logger;
   /** Override route. Default: `/screencast-ws/:userId`. */
   pathPattern?: RegExp;
+  authenticateToken?: (token: string) => Promise<string | null>;
 }
 
 export interface ScreencastProxy {
@@ -100,6 +102,8 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
   const pathPattern = opts.pathPattern ?? /^\/screencast-ws\/([^/?#]+)/;
   const wss = new WebSocketServer({ noServer: true });
   const log = opts.logger.child({ module: 'screencast-proxy' });
+  const authenticateToken =
+    opts.authenticateToken ?? ((token: string) => authenticateStreamOrAccessToken(db, token));
 
   function handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
     const url = req.url ?? '';
@@ -126,13 +130,12 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
       return reject(socket, 401, 'missing bearer token');
     }
 
-    verifyStreamOrAccessToken(token).then(
-      (claims) => {
-        if (!claims) {
+    authenticateToken(token).then(
+      (callerUserId) => {
+        if (!callerUserId) {
           log.warn({}, 'jwt verify returned null');
           return reject(socket, 401, 'invalid token');
         }
-        const callerUserId = claims.sub;
 
         // Phase 24 fix #2 — dispatch by ID prefix. tsk_… targets a
         // specific in-flight task; everything else falls through to
