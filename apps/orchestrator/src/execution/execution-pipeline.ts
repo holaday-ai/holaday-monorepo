@@ -49,7 +49,10 @@ import type {
   ContractInputs,
   ExecutionContract,
 } from './execution-contract.js';
-import { buildContract } from './execution-contract.js';
+import {
+  buildContract,
+  isResearchOrRetrievalIntent,
+} from './execution-contract.js';
 import {
   disposeLedger,
   EvidenceLedger,
@@ -201,7 +204,8 @@ const NULL_OUTPUT = (text: string): VerifyOutput => ({
  * 'awaiting_user') is taken as the input; verifier verdict overrides
  * a 'completed' that didn't actually clear the structural checks:
  *
- *   verification null OR passed                 → keep input status
+ *   verification null OR passed + no source gap → keep input status
+ *   completed research with no clickable source → 'partial_success'
  *   passed=false, failureLevel='hard_fail'      → 'failed'
  *   passed=false, failureLevel='fixable'        → 'partial_success'
  *   passed=false, failureLevel='needs_clarification'
@@ -209,9 +213,9 @@ const NULL_OUTPUT = (text: string): VerifyOutput => ({
  *                  (intake gate should have caught this earlier; if
  *                   we reach here with a summary, treat as partial)
  *
- * Returns the original status when input wasn't 'completed' — the
- * verifier never escalates a failed task and the intermediate
- * 'awaiting_user' status is the runner's call alone.
+ * Returns the original status when input wasn't 'completed' — neither
+ * the verifier nor the source guard escalates a failed task, and the
+ * intermediate 'awaiting_user' status is the runner's call alone.
  */
 export type FinalTerminalStatus =
   | 'completed'
@@ -221,21 +225,56 @@ export type FinalTerminalStatus =
   | 'cancelled'
   | 'paused';
 
+export interface ResearchSourceTrustReview {
+  requiresReview: boolean;
+  failedChecks: Array<{ type: 'source_count'; detail: string }>;
+}
+
+export function assessResearchSourceTrust(input: {
+  intent?: string;
+  resultText?: string;
+  currentUrl?: string | null;
+}): ResearchSourceTrustReview {
+  const hasClickableSource = [input.resultText ?? '', input.currentUrl ?? ''].some(
+    (value) => /https?:\/\/[^\s,;'")\]>]+/i.test(value),
+  );
+  if (
+    !input.resultText?.trim() ||
+    !isResearchOrRetrievalIntent(input.intent ?? '') ||
+    hasClickableSource
+  ) {
+    return { requiresReview: false, failedChecks: [] };
+  }
+  return {
+    requiresReview: true,
+    failedChecks: [
+      {
+        type: 'source_count',
+        detail: '研究或检索结果缺少可点击来源，关键事实未验证',
+      },
+    ],
+  };
+}
+
 export function deriveFinalStatus(
   runnerStatus: string,
   verification: VerificationResult | null,
+  sourceTrust?: ResearchSourceTrustReview,
 ): FinalTerminalStatus {
   // Coerce to the typed alphabet; any unrecognised status falls
   // through unchanged (the runner is the source of truth for those).
   const original = runnerStatus as FinalTerminalStatus;
-  if (!verification || verification.passed) return original;
   if (runnerStatus !== 'completed') return original;
-  if (verification.failureLevel === 'hard_fail') return 'failed';
+  if (verification && !verification.passed) {
+    if (verification.failureLevel === 'hard_fail') return 'failed';
+    return 'partial_success';
+  }
+  if (sourceTrust?.requiresReview) return 'partial_success';
   // 'fixable' AND 'needs_clarification' both map to partial_success
   // when the runner already produced a usable summary. The
   // alternative ('awaiting_user' for needs_clarification) would
   // re-open a task the user already closed; that's worse UX.
-  return 'partial_success';
+  return original;
 }
 
 /**

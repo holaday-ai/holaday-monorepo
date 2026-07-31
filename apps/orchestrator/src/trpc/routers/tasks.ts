@@ -154,6 +154,7 @@ import type { VerificationResult } from '../../execution/answer-verifier.js';
 import {
   type FinalTerminalStatus,
   type VerifyOutput,
+  assessResearchSourceTrust,
   deriveFinalStatus,
   disposeExecution,
   extractFailedChecks,
@@ -2918,6 +2919,11 @@ export const tasksRouter = router({
           executionVerification = verified.verification;
         }
 
+        const generateResearchSourceTrust = assessResearchSourceTrust({
+          intent: input.intent,
+          resultText: outcome.status === 'completed' ? outcome.summary : '',
+        });
+
         // Codex Pack A3 — derive the terminal status from the runner
         // outcome + verifier verdict. Soft-fail (fixable) becomes
         // partial_success (keeps summary, SPA shows yellow banner);
@@ -2926,6 +2932,7 @@ export const tasksRouter = router({
         const terminalStatus: FinalTerminalStatus = deriveFinalStatus(
           outcome.status,
           executionVerification,
+          generateResearchSourceTrust,
         );
         const failureSummary =
           terminalStatus === 'failed' && executionVerification
@@ -3012,6 +3019,9 @@ export const tasksRouter = router({
           ...(executionVerification && !executionVerification.passed
             ? extractFailedChecks(executionVerification)
             : []),
+          ...(executionVerification && !executionVerification.passed
+            ? []
+            : generateResearchSourceTrust.failedChecks),
           ...generateExtraFailedChecks,
         ];
         let generateTerminalPersisted = false;
@@ -3482,10 +3492,16 @@ export const tasksRouter = router({
           executionVerification = verified.verification;
         }
 
+        const scrapeResearchSourceTrust = assessResearchSourceTrust({
+          intent: input.intent,
+          resultText: outcome.status === 'completed' ? outcome.summary : '',
+        });
+
         // Codex Pack A3 — verifier verdict drives the terminal status.
         const terminalStatus: FinalTerminalStatus = deriveFinalStatus(
           outcome.status,
           executionVerification,
+          scrapeResearchSourceTrust,
         );
         const failureSummary =
           terminalStatus === 'failed' && executionVerification
@@ -3561,6 +3577,9 @@ export const tasksRouter = router({
           ...(executionVerification && !executionVerification.passed
             ? extractFailedChecks(executionVerification)
             : []),
+          ...(executionVerification && !executionVerification.passed
+            ? []
+            : scrapeResearchSourceTrust.failedChecks),
           ...scrapeExtraFailedChecks,
         ];
         let scrapeTerminalPersisted = false;
@@ -5547,6 +5566,12 @@ export const tasksRouter = router({
               }
               executionVerification = verified.verification;
             }
+            const supercarResearchSourceTrust = assessResearchSourceTrust({
+              intent: input.intent,
+              resultText: outcome.status === 'completed' ? outcome.summary : '',
+              currentUrl: finalState.finalUrl,
+            });
+
             // Codex Pack A3 — verifier verdict drives the supercar lane
             // terminal status. The override flows through both
             // persistSupercarOutcome (DB write) and buildTaskTerminalMessage
@@ -5554,15 +5579,20 @@ export const tasksRouter = router({
             const supercarTerminalStatus: FinalTerminalStatus = deriveFinalStatus(
               outcome.status,
               executionVerification,
+              supercarResearchSourceTrust,
             );
             const supercarFailureSummary =
               supercarTerminalStatus === 'failed' && executionVerification
                 ? summariseVerificationFailure(executionVerification)
                 : null;
-            const supercarFailedChecks =
-              executionVerification && !executionVerification.passed
+            const supercarFailedChecks = [
+              ...(executionVerification && !executionVerification.passed
                 ? extractFailedChecks(executionVerification)
-                : undefined;
+                : []),
+              ...(executionVerification && !executionVerification.passed
+                ? []
+                : supercarResearchSourceTrust.failedChecks),
+            ];
             const supercarStateTransition = classifySupercarTaskStateTransition({
               status: outcome.status,
               question: outcome.question,
@@ -5669,7 +5699,7 @@ export const tasksRouter = router({
                 metadata,
                 supercarTerminalStatus,
                 supercarFailureSummary,
-                supercarFailedChecks,
+                supercarFailedChecks.length > 0 ? supercarFailedChecks : undefined,
               );
               terminalPersisted = terminalResult.persisted;
             }
@@ -5762,9 +5792,8 @@ export const tasksRouter = router({
             }
             if (runTerminalSideEffects) {
               try {
-                // Codex Round 2 P1-6 — surface verifier failed checks
-                // to the SPA banner. Only populated when verifier
-                // verdict failed; empty list omitted by helper.
+                // Surface verifier or deterministic source checks to
+                // the SPA banner; empty lists are omitted by helper.
                 broadcastToUser(
                   userId,
                   buildTaskTerminalMessage(

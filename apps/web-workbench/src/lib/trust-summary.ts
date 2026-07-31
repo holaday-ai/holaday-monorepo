@@ -19,6 +19,7 @@ export interface TrustLedgerItem {
 }
 
 export interface TrustSummaryModel {
+  presentation: 'full' | 'compact';
   tone: TrustTone;
   title: string;
   verdict: string;
@@ -40,6 +41,7 @@ export interface RecoveryAction {
 
 export interface TrustSummaryInput {
   status: UiTask['status'];
+  intent?: string;
   resultText?: string;
   currentUrl?: string | null;
   finalScreenshot?: string | null;
@@ -60,6 +62,7 @@ interface RecoveryInput {
   status: UiTask['status'];
   intent?: string;
   resultText?: string;
+  currentUrl?: string | null;
   awaitingKind?: AwaitingKind | null;
   failureLevel?: UiTask['failureLevel'];
   failedChecks?: Array<VerificationCheck> | null;
@@ -70,6 +73,25 @@ export function buildTrustSummary(input: TrustSummaryInput): TrustSummaryModel {
   const checks = dedupe(failedChecks.map(verificationCheckLabel)).slice(0, 4);
   const hiddenCheckCount = Math.max(0, failedChecks.length - checks.length);
   const sourceCount = countVisibleSourceUrls(input.resultText, input.currentUrl);
+  const missingResearchSources =
+    hasMissingResearchSources(input) &&
+    failedChecks.every((check) => isSourceEvidenceCheck(check.type));
+
+  if (missingResearchSources) {
+    return {
+      presentation: 'compact',
+      tone: 'warning',
+      title: '结果需复核',
+      verdict: '缺少可核验来源',
+      boundary:
+        '结果包含研究或检索结论，但没有可点击来源；关键事实未验证。请补充来源后再采用。',
+      rows: [],
+      ledger: [],
+      checks: [],
+      hiddenCheckCount: 0,
+    };
+  }
+
   const hasFinalUrl = hasHttpUrl(input.currentUrl);
   const hasScreenshot = Boolean(input.finalScreenshot);
   const attachmentCount = countUsableAttachments(input.attachments);
@@ -98,6 +120,7 @@ export function buildTrustSummary(input: TrustSummaryInput): TrustSummaryModel {
   });
 
   return {
+    presentation: 'full',
     tone,
     title: awaitingUser
       ? '等待你处理'
@@ -211,6 +234,7 @@ export function shouldShowTrustSummary(input: TrustSummaryInput): boolean {
   const failedCheckCount = input.failedChecks?.length ?? 0;
   const hasEvidence = hasTrustEvidence(input);
 
+  if (hasMissingResearchSources(input)) return true;
   if (input.status === 'cancelled') {
     return hasEvidence || failedCheckCount > 0 || Boolean(input.failureLevel);
   }
@@ -290,6 +314,7 @@ export function buildRecoveryActions(input: RecoveryInput): RecoveryAction[] {
   const intent = input.intent?.trim();
   const actions: RecoveryAction[] = [];
   const checkTypes = new Set((input.failedChecks ?? []).map((c) => c.type));
+  const missingResearchSources = hasMissingResearchSources(input);
 
   if (input.status === 'awaiting_user' && input.awaitingKind) {
     if (input.awaitingKind === 'login') {
@@ -330,7 +355,7 @@ export function buildRecoveryActions(input: RecoveryInput): RecoveryAction[] {
     }
   }
 
-  if (intent && input.status === 'partial_success') {
+  if (intent && (input.status === 'partial_success' || missingResearchSources)) {
     actions.push({
       kind: 'prefill',
       label: '带已完成信息重试',
@@ -340,6 +365,7 @@ export function buildRecoveryActions(input: RecoveryInput): RecoveryAction[] {
   }
 
   if (
+    missingResearchSources ||
     checkTypes.has('url_count') ||
     checkTypes.has('source_count') ||
     checkTypes.has('generic.url_grounding')
@@ -418,6 +444,41 @@ function countVisibleSourceUrls(text?: string, currentUrl?: string | null): numb
     for (const match of matches) urls.add(match);
   }
   return urls.size;
+}
+
+function hasMissingResearchSources(input: {
+  status: UiTask['status'];
+  intent?: string;
+  resultText?: string;
+  currentUrl?: string | null;
+}): boolean {
+  if (input.status !== 'completed' && input.status !== 'partial_success') return false;
+  if (!input.resultText?.trim() || !isResearchOrRetrievalIntent(input.intent)) return false;
+  return countVisibleSourceUrls(input.resultText, input.currentUrl) === 0;
+}
+
+function isResearchOrRetrievalIntent(intent?: string): boolean {
+  const text = intent?.trim() ?? '';
+  if (!text) return false;
+  if (/股价|股票|股市|A股|港股|美股|stock\s+(?:price|quote)/i.test(text)) {
+    return false;
+  }
+  return (
+    /^(?:(?:请|麻烦|劳烦)?\s*(?:帮我|帮忙|给我|替我)?\s*)?(?:研究|调研|检索|搜索|搜集|搜寻|查询|查找|调查|查(?!看|验|错|重))/i.test(
+      text,
+    ) ||
+    /^(?:(?:please|could you|can you)\s+)?(?:research|search(?:\s+for)?|look\s+up|investigate)\b/i.test(
+      text,
+    )
+  );
+}
+
+function isSourceEvidenceCheck(type: string): boolean {
+  return (
+    type === 'url_count' ||
+    type === 'source_count' ||
+    type === 'generic.url_grounding'
+  );
 }
 
 function hasHttpUrl(url?: string | null): boolean {

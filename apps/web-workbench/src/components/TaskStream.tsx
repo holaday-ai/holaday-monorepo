@@ -713,6 +713,7 @@ function TrustSummaryCard({
     () =>
       buildTrustSummary({
         status: task.status,
+        intent: task.intent,
         resultText: task.resultText,
         currentUrl,
         finalScreenshot: task.finalScreenshot ?? null,
@@ -727,6 +728,7 @@ function TrustSummaryCard({
       task.failedChecks,
       task.failureLevel,
       task.finalScreenshot,
+      task.intent,
       task.resultText,
       task.status,
       task.verificationPassed,
@@ -738,11 +740,13 @@ function TrustSummaryCard({
         status: task.status,
         intent: task.intent,
         resultText: task.resultText,
+        currentUrl,
         awaitingKind: task.awaitingKind ?? null,
         failureLevel: task.failureLevel,
         failedChecks: task.failedChecks ?? null,
       }),
     [
+      currentUrl,
       task.awaitingKind,
       task.failedChecks,
       task.failureLevel,
@@ -840,31 +844,33 @@ function TrustSummaryCard({
               )}
             </div>
           )}
-          <details className="mt-3 rounded-[7px] border border-[#DCDDDD]/70 bg-white/45 px-3 py-2 text-xs dark:border-white/10 dark:bg-white/5">
-            <summary className="cursor-pointer select-none text-[11px] font-medium text-muted-foreground">
-              查看证据边界
-            </summary>
-            <div className="mt-2 grid gap-1.5">
-              {summary.ledger.map((item) => (
-                <div
-                  key={`${item.stage}-${item.label}`}
-                  className="grid gap-1 rounded-[6px] bg-[#FCFCFD]/80 px-2 py-1.5 sm:grid-cols-[96px_1fr] dark:bg-white/[0.03]"
-                >
-                  <div className="flex min-w-0 items-center gap-1.5">
-                    <TrustLedgerStagePill stage={item.stage} />
-                    <span className="truncate text-[11px] font-medium text-foreground">
-                      {item.label}
-                    </span>
+          {summary.presentation === 'full' && summary.ledger.length > 0 && (
+            <details className="mt-3 rounded-[7px] border border-[#DCDDDD]/70 bg-white/45 px-3 py-2 text-xs dark:border-white/10 dark:bg-white/5">
+              <summary className="cursor-pointer select-none text-[11px] font-medium text-muted-foreground">
+                查看证据边界
+              </summary>
+              <div className="mt-2 grid gap-1.5">
+                {summary.ledger.map((item) => (
+                  <div
+                    key={`${item.stage}-${item.label}`}
+                    className="grid gap-1 rounded-[6px] bg-[#FCFCFD]/80 px-2 py-1.5 sm:grid-cols-[96px_1fr] dark:bg-white/[0.03]"
+                  >
+                    <div className="flex min-w-0 items-center gap-1.5">
+                      <TrustLedgerStagePill stage={item.stage} />
+                      <span className="truncate text-[11px] font-medium text-foreground">
+                        {item.label}
+                      </span>
+                    </div>
+                    <div className="min-w-0 text-[11px] leading-4 text-muted-foreground">
+                      <span className="font-medium text-foreground/85">{item.value}</span>
+                      <span className="mx-1 text-muted-foreground/55">·</span>
+                      <span>{item.detail}</span>
+                    </div>
                   </div>
-                  <div className="min-w-0 text-[11px] leading-4 text-muted-foreground">
-                    <span className="font-medium text-foreground/85">{item.value}</span>
-                    <span className="mx-1 text-muted-foreground/55">·</span>
-                    <span>{item.detail}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </details>
+                ))}
+              </div>
+            </details>
+          )}
           {recoveryActions.length > 0 && (
             <div className="mt-3 border-t border-[#DCDDDD]/70 pt-3 dark:border-white/10">
               <div className="mb-2 text-[11px] font-medium text-muted-foreground">下一步</div>
@@ -963,6 +969,7 @@ function failureLevelLabel(level: NonNullable<UiTask['failureLevel']>): string {
 function shouldShowTrustSummaryCard(task: UiTask, currentUrl?: string | null): boolean {
   return shouldShowTrustSummary({
     status: task.status,
+    intent: task.intent,
     resultText: task.resultText,
     currentUrl,
     finalScreenshot: task.finalScreenshot ?? null,

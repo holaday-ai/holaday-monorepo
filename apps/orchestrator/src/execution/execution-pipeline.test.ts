@@ -20,6 +20,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { _resetLedgerRegistryForTest, getLedger } from './evidence-ledger.js';
 import {
   _resetExecutionPipelineForTest,
+  assessResearchSourceTrust,
   disposeExecution,
   deriveFinalStatus,
   extractFailedChecks,
@@ -77,6 +78,35 @@ function makeStubClient(textOut: string): AnthropicLikeClient {
 // ---------------------------------------------------------------------------
 
 describe('flags off (default)', () => {
+  it('still downgrades an explicit research result with no source', () => {
+    const review = assessResearchSourceTrust({
+      intent: '研究 2026 年 AI 行业趋势',
+      resultText: 'AI 行业仍在快速增长。',
+    });
+
+    expect(review).toEqual({
+      requiresReview: true,
+      failedChecks: [
+        {
+          type: 'source_count',
+          detail: '研究或检索结果缺少可点击来源，关键事实未验证',
+        },
+      ],
+    });
+    expect(deriveFinalStatus('completed', null, review)).toBe('partial_success');
+  });
+
+  it('keeps stock results outside the generic research source guard', () => {
+    const review = assessResearchSourceTrust({
+      intent: '查今天特斯拉股价并给出来源',
+      resultText: '特斯拉当前股价为 123.45 美元。',
+    });
+
+    expect(review.requiresReview).toBe(false);
+    expect(review.failedChecks).toEqual([]);
+    expect(deriveFinalStatus('completed', null, review)).toBe('completed');
+  });
+
   it('initExecution returns null contract + null ledger', () => {
     const out = initExecution({
       taskId: 'tsk_off1',
@@ -194,6 +224,38 @@ describe('all flags on — generate happy path', () => {
     expect(out.verification!.passed).toBe(true);
     expect(out.verification!.tier).toBe('deterministic');
     expect(out.finalText).toContain('Today the weather');
+  });
+
+  it('downgrades research without a clickable source to partial success', async () => {
+    initExecution({
+      taskId: 'tsk_g2',
+      intent: '研究 2026 年 AI 行业趋势',
+      executionMode: 'generate',
+    });
+    recordEvidence('tsk_g2', {
+      fact: 'response_length=120',
+      sourceType: 'tool_result',
+      sourceDetail: 'llm_generate_response',
+      confidence: 'observed',
+    });
+
+    const out = await verifyAndFinalize({
+      taskId: 'tsk_g2',
+      answerText:
+        'AI 行业正在从通用模型竞争转向推理效率、智能体执行和企业落地。' +
+        '未来一年，成本控制、数据治理和监管合规会成为商业化的重要约束。',
+    });
+
+    expect(out.verification?.passed).toBe(false);
+    expect(out.verification?.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          criterionType: 'url_count',
+          passed: false,
+        }),
+      ]),
+    );
+    expect(deriveFinalStatus('completed', out.verification)).toBe('partial_success');
   });
 });
 
