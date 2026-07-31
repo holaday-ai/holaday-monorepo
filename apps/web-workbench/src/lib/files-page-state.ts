@@ -11,6 +11,13 @@ export interface NormalizedFilesListPage {
   readonly nextCursor: number | null;
 }
 
+export function canApplyFilesResponse(
+  requestId: number,
+  activeRequestId: number,
+): boolean {
+  return requestId === activeRequestId;
+}
+
 export function normalizeFilesListPage(value: unknown): NormalizedFilesListPage {
   if (!isRecord(value)) return { items: [], nextCursor: null };
   const cursor =

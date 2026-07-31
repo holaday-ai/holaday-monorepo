@@ -42,6 +42,7 @@ import {
 } from '@/lib/download-file';
 import { formatFileSize } from '@/lib/file-size';
 import {
+  canApplyFilesResponse,
   fileReferenceText,
   formatFileRelativeDate,
   normalizeFilesListPage,
@@ -97,6 +98,7 @@ export function FilesPage(): JSX.Element {
   const refresh = React.useCallback(async () => {
     const requestId = ++requestIdRef.current;
     setLoading(true);
+    setLoadingMore(false);
     setLoadError(null);
     try {
       const page = normalizeFilesListPage(await trpc.files.list.query({
@@ -119,6 +121,7 @@ export function FilesPage(): JSX.Element {
 
   const loadMore = React.useCallback(async () => {
     if (loadingMore || nextCursor === null) return;
+    const requestId = requestIdRef.current;
     setLoadingMore(true);
     setLoadError(null);
     try {
@@ -128,17 +131,32 @@ export function FilesPage(): JSX.Element {
         cursor: nextCursor,
         limit: 50,
       }));
-      if (!mountedRef.current) return;
+      if (
+        !mountedRef.current ||
+        !canApplyFilesResponse(requestId, requestIdRef.current)
+      ) {
+        return;
+      }
       setFiles((current) => {
         const seen = new Set(current.map((file) => file.fileId));
         return [...current, ...page.items.filter((file) => !seen.has(file.fileId))];
       });
       setNextCursor(page.nextCursor);
     } catch (err) {
-      if (!mountedRef.current) return;
+      if (
+        !mountedRef.current ||
+        !canApplyFilesResponse(requestId, requestIdRef.current)
+      ) {
+        return;
+      }
       setLoadError(pageActionError('更多文件暂时无法加载', err));
     } finally {
-      if (mountedRef.current) setLoadingMore(false);
+      if (
+        mountedRef.current &&
+        canApplyFilesResponse(requestId, requestIdRef.current)
+      ) {
+        setLoadingMore(false);
+      }
     }
   }, [debouncedQuery, filter, loadingMore, nextCursor]);
 

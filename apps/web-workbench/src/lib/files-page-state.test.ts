@@ -1,10 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import {
+  canApplyFilesResponse,
   fileReferenceText,
   formatFileRelativeDate,
   normalizeFilesListPage,
   normalizeFileRows,
 } from './files-page-state';
+
+describe('canApplyFilesResponse', () => {
+  it('rejects a pagination response after the active filter request changes', () => {
+    expect(canApplyFilesResponse(7, 8)).toBe(false);
+    expect(canApplyFilesResponse(8, 8)).toBe(true);
+  });
+});
 
 describe('normalizeFileRows', () => {
   it('returns an empty list for malformed payloads', () => {

@@ -112,8 +112,8 @@ export function AdminUsersPage(): JSX.Element {
         </p>
       </header>
 
-      <div className="mb-4 flex items-center gap-3">
-        <div className="relative flex-1 max-w-md">
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="relative w-full sm:max-w-md sm:flex-1">
           <Search
             className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
             aria-hidden
@@ -126,27 +126,27 @@ export function AdminUsersPage(): JSX.Element {
             className="w-full rounded-[8px] border border-[#DCDDDD] bg-white py-2 pl-9 pr-3 text-[13px] outline-none transition-colors focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
           />
         </div>
-        <span className="text-[12px] text-muted-foreground">
-          排序：
-        </span>
-        <SortPill
-          label="注册日期"
-          active={sort === 'createdAt'}
-          order={sort === 'createdAt' ? order : null}
-          onClick={() => toggleSort('createdAt')}
-        />
-        <SortPill
-          label="本月任务数"
-          active={sort === 'taskCount'}
-          order={sort === 'taskCount' ? order : null}
-          onClick={() => toggleSort('taskCount')}
-        />
-        <SortPill
-          label="最后活跃"
-          active={sort === 'lastActive'}
-          order={sort === 'lastActive' ? order : null}
-          onClick={() => toggleSort('lastActive')}
-        />
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[12px] text-muted-foreground">排序：</span>
+          <SortPill
+            label="注册日期"
+            active={sort === 'createdAt'}
+            order={sort === 'createdAt' ? order : null}
+            onClick={() => toggleSort('createdAt')}
+          />
+          <SortPill
+            label="本月任务数"
+            active={sort === 'taskCount'}
+            order={sort === 'taskCount' ? order : null}
+            onClick={() => toggleSort('taskCount')}
+          />
+          <SortPill
+            label="最后活跃"
+            active={sort === 'lastActive'}
+            order={sort === 'lastActive' ? order : null}
+            onClick={() => toggleSort('lastActive')}
+          />
+        </div>
       </div>
 
       <section className="rounded-[8px] border border-[#DCDDDD] bg-white p-0 shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
@@ -236,7 +236,7 @@ export function AdminUsersPage(): JSX.Element {
           </table>
         </div>
         {/* Pagination */}
-        <div className="flex items-center justify-between border-t border-[#EFEFEF] px-5 py-3 text-[12px] text-muted-foreground">
+        <div className="flex flex-col items-stretch gap-3 border-t border-[#EFEFEF] px-5 py-3 text-[12px] text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
           <div>
             {total > 0 && (
               <>
@@ -244,7 +244,7 @@ export function AdminUsersPage(): JSX.Element {
               </>
             )}
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center justify-between gap-1 sm:justify-end">
             <button
               type="button"
               disabled={!hasPrev}

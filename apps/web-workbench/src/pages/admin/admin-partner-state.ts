@@ -559,7 +559,10 @@ export type PartnerReconciliationState = ReturnType<typeof normalizePartnerRecon
 
 function csvCell(value: unknown): string {
   const text = String(value ?? '');
-  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  const safeText = /^[\t\r\n ]*[=+\-@]/.test(text) ? `'${text}` : text;
+  return /[",\n\r]/.test(safeText)
+    ? `"${safeText.replace(/"/g, '""')}"`
+    : safeText;
 }
 
 export function partnerReconciliationCsv(state: PartnerReconciliationState): string {

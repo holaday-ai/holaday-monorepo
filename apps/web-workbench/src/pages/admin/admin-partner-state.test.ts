@@ -725,4 +725,32 @@ describe('normalizePartnerReconciliation', () => {
     expect(normalizePartnerReconciliation({ enabled: false })).toEqual({ enabled: false });
     expect(partnerReconciliationCsv({ enabled: false })).toBe('');
   });
+
+  it('neutralizes spreadsheet formulas in provider-controlled CSV fields', () => {
+    const state = normalizePartnerReconciliation({
+      enabled: true,
+      orders: [
+        {
+          orderExternalId: 'pay_membership_completed',
+          userExternalId: 'usr_partner',
+          orderKind: 'membership',
+          provider: 'wechat',
+          amountCnyCents: 999_00,
+          status: 'completed',
+          providerCaptureId: '=HYPERLINK("https://attacker.invalid","open")',
+          updatedAt: '2026-07-02T01:00:00.000Z',
+        },
+      ],
+      withdrawals: [],
+      referrals: [],
+    });
+
+    const csv = partnerReconciliationCsv(state);
+    expect(csv).toContain(
+      `"'=HYPERLINK(""https://attacker.invalid"",""open"")"`,
+    );
+    expect(csv).not.toContain(
+      `"=HYPERLINK(""https://attacker.invalid"",""open"")"`,
+    );
+  });
 });
