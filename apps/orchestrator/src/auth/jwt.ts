@@ -21,10 +21,13 @@ const key = new TextEncoder().encode(env.JWT_SECRET);
 export interface AccessTokenClaims {
   sub: string; // user external_id (usr_...)
   plan: string;
+  authVersion: number;
 }
 
-export async function signAccessToken(claims: AccessTokenClaims): Promise<string> {
-  return new SignJWT({ plan: claims.plan })
+export async function signAccessToken(
+  claims: Omit<AccessTokenClaims, 'authVersion'> & { authVersion?: number },
+): Promise<string> {
+  return new SignJWT({ plan: claims.plan, authVersion: claims.authVersion ?? 0 })
     .setProtectedHeader({ alg: ALGORITHM })
     .setSubject(claims.sub)
     .setIssuer(ISSUER)
@@ -42,7 +45,16 @@ export async function verifyAccessToken(token: string): Promise<AccessTokenClaim
       audience: AUDIENCE,
     });
     if (typeof payload.sub !== 'string' || typeof payload.plan !== 'string') return null;
-    return { sub: payload.sub, plan: payload.plan };
+    const authVersion =
+      payload.authVersion === undefined
+        ? 0
+        : typeof payload.authVersion === 'number' &&
+            Number.isInteger(payload.authVersion) &&
+            payload.authVersion >= 0
+          ? payload.authVersion
+          : null;
+    if (authVersion === null) return null;
+    return { sub: payload.sub, plan: payload.plan, authVersion };
   } catch {
     return null;
   }

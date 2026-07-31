@@ -373,7 +373,16 @@ export function createHttpApp(deps: HttpAppDeps) {
         return;
       }
     } else {
-      logger.warn('paypal webhook: PAYPAL_WEBHOOK_ID unset — accepting without signature check (dev only)');
+      if (process.env.NODE_ENV === 'production') {
+        logger.error(
+          'paypal webhook: PAYPAL_WEBHOOK_ID unset in production — rejecting unsigned event',
+        );
+        res.status(503).json({ error: 'webhook verification unavailable' });
+        return;
+      }
+      logger.warn(
+        'paypal webhook: PAYPAL_WEBHOOK_ID unset — accepting without signature check (non-production only)',
+      );
     }
     const event = req.body as {
       event_type?: string;

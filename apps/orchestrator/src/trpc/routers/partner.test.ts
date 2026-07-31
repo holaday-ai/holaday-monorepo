@@ -161,6 +161,7 @@ function fakeUser(overrides: Partial<User> = {}): User {
     role: 'user',
     planExpiresAt: null,
     status: 'active',
+    authVersion: 0,
     displayName: 'Partner User',
     googleId: null,
     avatarUrl: null,

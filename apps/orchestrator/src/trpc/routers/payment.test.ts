@@ -97,6 +97,8 @@ function makeCtx(opts: {
     captureOrder: vi.fn(async () => ({
       captureId: 'cap_1',
       status: 'COMPLETED',
+      amountCents: opts.orderRow.amountCents,
+      currency: opts.orderRow.currency,
       payerEmail: 'payer@example.com',
     })),
   };
@@ -123,6 +125,8 @@ const addonOrder = {
   status: 'pending',
   kind: 'addon',
   plan: 'pack-20',
+  amountCents: 150,
+  currency: 'USD',
   metadata: {},
 };
 const proUser = { id: 42, plan: 'pro', planExpiresAt: null };
@@ -135,6 +139,8 @@ const subOrder = {
   status: 'pending',
   kind: 'subscription',
   plan: 'pro',
+  amountCents: 690,
+  currency: 'USD',
   metadata: { firstMonth: true, cycle: 'monthly' },
 };
 const freeUser = { id: 42, plan: 'free', planExpiresAt: null };
@@ -205,6 +211,7 @@ describe('captureOrder — affectedRows-gated entitlement (regression)', () => {
 type MutablePayment = typeof subOrder & {
   provider?: string;
   amountCents?: number;
+  currency?: string;
 };
 
 function makeStatefulCaptureCtx(opts: {
@@ -284,7 +291,7 @@ function makeStatefulCaptureCtx(opts: {
       captureId: 'cap_stateful',
       status: 'COMPLETED',
       amountCents: opts.orderRow.amountCents ?? 690,
-      currency: 'USD',
+      currency: opts.orderRow.currency ?? 'USD',
       payerEmail: 'payer@example.com',
     })),
   };
@@ -595,5 +602,98 @@ describe('captureOrder — settlement-time eligibility and atomic entitlements',
         .captureOrder({ paymentId: 'pay_addon', orderId: 'ord_addon' }),
     ).rejects.toThrow('quota unavailable');
     expect(paymentState.status).toBe('pending');
+  });
+
+  it('rejects a completed capture whose amount does not match the stored order', async () => {
+    const { ctx, paymentState, paypalAdapter } = makeStatefulCaptureCtx({
+      orderRow: { ...subOrder },
+      userRow: { ...freeUser },
+    });
+    paypalAdapter.captureOrder.mockResolvedValueOnce({
+      captureId: 'cap_wrong_amount',
+      status: 'COMPLETED',
+      amountCents: 1,
+      currency: 'USD',
+      payerEmail: 'payer@example.com',
+    });
+
+    await expect(
+      paymentRouter.createCaller(ctx).captureOrder({ paymentId: 'pay_sub', orderId: 'ord_sub' }),
+    ).rejects.toMatchObject({ code: 'CONFLICT' });
+    expect(paymentState.status).toBe('pending');
+    expect(grantFirstMonthBonusSpy).not.toHaveBeenCalled();
+  });
+
+  it('rejects a completed capture whose currency does not match the stored order', async () => {
+    const { ctx, paymentState, paypalAdapter } = makeStatefulCaptureCtx({
+      orderRow: { ...subOrder },
+      userRow: { ...freeUser },
+    });
+    paypalAdapter.captureOrder.mockResolvedValueOnce({
+      captureId: 'cap_wrong_currency',
+      status: 'COMPLETED',
+      amountCents: 690,
+      currency: 'CNY',
+      payerEmail: 'payer@example.com',
+    });
+
+    await expect(
+      paymentRouter.createCaller(ctx).captureOrder({ paymentId: 'pay_sub', orderId: 'ord_sub' }),
+    ).rejects.toMatchObject({ code: 'CONFLICT' });
+    expect(paymentState.status).toBe('pending');
+    expect(grantFirstMonthBonusSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('cnStatus — tenant isolation', () => {
+  it('does not reveal another user payment status', async () => {
+    const db = {
+      select() {
+        return {
+          from() {
+            const query = {
+              where() {
+                return query;
+              },
+              limit() {
+                return query;
+              },
+              // biome-ignore lint/suspicious/noThenProperty: Drizzle query builders are awaitable.
+              then<TResult1 = unknown, TResult2 = never>(
+                onfulfilled?:
+                  | ((value: Record<string, unknown>[]) => TResult1 | PromiseLike<TResult1>)
+                  | null,
+                onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+              ) {
+                return Promise.resolve([
+                  {
+                    status: 'completed',
+                    plan: 'pro',
+                    kind: 'subscription',
+                    userExternalId: 'usr_other',
+                  },
+                ]).then(onfulfilled, onrejected);
+              },
+            };
+            return query;
+          },
+        };
+      },
+    };
+    const ctx = {
+      db,
+      userId: 'usr_test',
+      logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn(),
+        child: vi.fn(),
+      },
+    } as unknown as Parameters<typeof paymentRouter.createCaller>[0];
+
+    await expect(
+      paymentRouter.createCaller(ctx).cnStatus({ outTradeNo: 'pay_cn_other' }),
+    ).resolves.toEqual({ status: 'pending' });
   });
 });

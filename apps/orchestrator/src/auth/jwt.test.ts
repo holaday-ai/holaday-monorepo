@@ -11,7 +11,21 @@ describe('JWT access tokens', () => {
     const { signAccessToken, verifyAccessToken } = await import('./jwt.js');
     const token = await signAccessToken({ sub: 'usr_abc123', plan: 'free' });
     const claims = await verifyAccessToken(token);
-    expect(claims).toEqual({ sub: 'usr_abc123', plan: 'free' });
+    expect(claims).toEqual({ sub: 'usr_abc123', plan: 'free', authVersion: 0 });
+  });
+
+  it('round-trips the session invalidation version', async () => {
+    const { signAccessToken, verifyAccessToken } = await import('./jwt.js');
+    const token = await signAccessToken({
+      sub: 'usr_versioned',
+      plan: 'pro',
+      authVersion: 3,
+    });
+    await expect(verifyAccessToken(token)).resolves.toEqual({
+      sub: 'usr_versioned',
+      plan: 'pro',
+      authVersion: 3,
+    });
   });
 
   it('returns null for a tampered token', async () => {

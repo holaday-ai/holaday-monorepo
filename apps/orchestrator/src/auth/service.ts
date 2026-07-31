@@ -1,5 +1,5 @@
 import { newExternalId } from '@holaday/shared-types';
-import { eq, or } from 'drizzle-orm';
+import { eq, or, sql } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
 import { users } from '../db/schema/users.js';
 import { signAccessToken } from './jwt.js';
@@ -80,7 +80,7 @@ export class AuthService {
       throw new Error('user disappeared after insert');
     }
 
-    const accessToken = await signAccessToken({ sub: row.externalId, plan: row.plan });
+    const accessToken = await issueAccessToken(row);
 
     return { user: toPublic(row), accessToken };
   }
@@ -95,10 +95,7 @@ export class AuthService {
     const normalized = email.trim().toLowerCase();
     const [existing] = await this.db.select().from(users).where(eq(users.email, normalized)).limit(1);
     if (existing) {
-      const accessToken = await signAccessToken({
-        sub: existing.externalId,
-        plan: existing.plan,
-      });
+      const accessToken = await issueAccessToken(existing);
       return { user: toPublic(existing), accessToken };
     }
     const externalId = newExternalId('user');
@@ -114,7 +111,7 @@ export class AuthService {
       .where(eq(users.externalId, externalId))
       .limit(1);
     if (!row) throw new Error('user disappeared after insert');
-    const accessToken = await signAccessToken({ sub: row.externalId, plan: row.plan });
+    const accessToken = await issueAccessToken(row);
     return { user: toPublic(row), accessToken };
   }
 
@@ -155,7 +152,7 @@ export class AuthService {
         .where(eq(users.id, existing.id))
         .limit(1);
       if (!row) throw new Error('user disappeared after google upsert');
-      const accessToken = await signAccessToken({ sub: row.externalId, plan: row.plan });
+      const accessToken = await issueAccessToken(row);
       return { user: toPublic(row), accessToken };
     }
 
@@ -180,7 +177,7 @@ export class AuthService {
       .where(eq(users.externalId, externalId))
       .limit(1);
     if (!row) throw new Error('user disappeared after insert');
-    const accessToken = await signAccessToken({ sub: row.externalId, plan: row.plan });
+    const accessToken = await issueAccessToken(row);
     return { user: toPublic(row), accessToken };
   }
 
@@ -197,9 +194,17 @@ export class AuthService {
       throw new AuthError('INVALID_CREDENTIALS', 'email not registered');
     }
     const passwordHash = await hashPassword(newPassword);
-    await this.db.update(users).set({ passwordHash }).where(eq(users.id, existing.id));
-    const accessToken = await signAccessToken({ sub: existing.externalId, plan: existing.plan });
-    return { user: toPublic(existing), accessToken };
+    await this.db
+      .update(users)
+      .set({
+        passwordHash,
+        authVersion: sql`${users.authVersion} + 1`,
+      })
+      .where(eq(users.id, existing.id));
+    const [updated] = await this.db.select().from(users).where(eq(users.id, existing.id)).limit(1);
+    if (!updated) throw new Error('user disappeared after password reset');
+    const accessToken = await issueAccessToken(updated);
+    return { user: toPublic(updated), accessToken };
   }
 
   /**
@@ -232,10 +237,7 @@ export class AuthService {
           .set({ phoneVerified: true })
           .where(eq(users.id, existing.id));
       }
-      const accessToken = await signAccessToken({
-        sub: existing.externalId,
-        plan: existing.plan,
-      });
+      const accessToken = await issueAccessToken(existing);
       return { user: toPublic(existing), accessToken };
     }
     const externalId = newExternalId('user');
@@ -263,7 +265,7 @@ export class AuthService {
       .where(eq(users.externalId, externalId))
       .limit(1);
     if (!row) throw new Error('user disappeared after sms insert');
-    const accessToken = await signAccessToken({ sub: row.externalId, plan: row.plan });
+    const accessToken = await issueAccessToken(row);
     return { user: toPublic(row), accessToken };
   }
 
@@ -279,7 +281,7 @@ export class AuthService {
       throw new AuthError('INVALID_CREDENTIALS', 'email or password incorrect');
     }
 
-    const accessToken = await signAccessToken({ sub: row.externalId, plan: row.plan });
+    const accessToken = await issueAccessToken(row);
     return { user: toPublic(row), accessToken };
   }
 }
@@ -293,4 +295,14 @@ function toPublic(row: typeof users.$inferSelect): PublicUser {
     avatarUrl: row.avatarUrl,
     createdAt: row.createdAt,
   };
+}
+
+function issueAccessToken(
+  row: Pick<typeof users.$inferSelect, 'externalId' | 'plan' | 'authVersion'>,
+): Promise<string> {
+  return signAccessToken({
+    sub: row.externalId,
+    plan: row.plan,
+    authVersion: row.authVersion,
+  });
 }

@@ -42,6 +42,12 @@ export const users = mysqlTable(
     role: varchar('role', { length: 16 }).notNull().default('user'),
     planExpiresAt: datetime('plan_expires_at', { mode: 'date', fsp: 3 }),
     status: varchar('status', { length: 16 }).notNull().default('active'),
+    /**
+     * Incremented whenever all existing access tokens must be revoked
+     * (currently password reset). Tokens carry the issuing version and
+     * HTTP authentication accepts only the current value.
+     */
+    authVersion: int('auth_version').notNull().default(0),
     displayName: varchar('display_name', { length: 128 }),
     googleId: varchar('google_id', { length: 64 }),
     avatarUrl: varchar('avatar_url', { length: 512 }),

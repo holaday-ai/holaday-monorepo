@@ -145,6 +145,7 @@ restart_orchestrator_as_runtime_user() {
 # we never silently leave a broken / keyless binary serving traffic.
 rollback() {
   local target="$1"
+  echo "⚠️  Database changes are forward-only; code rollback does not revert applied migrations." >&2
   if [[ -z "$target" ]]; then
     echo "⚠️  No rollback target captured — manual intervention needed" >&2
     return
@@ -242,6 +243,18 @@ run_with_retry "Vultr install/build" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@
   cd /opt/holaday-monorepo && \
   pnpm install && \
   pnpm --filter @holaday/orchestrator build" 2>&1 | tail -5
+
+echo "→ Applying numbered migrations and verifying the production schema"
+if ! run_with_retry "Vultr database migration gate" \
+  "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
+    cd /opt/holaday-monorepo && \
+    set -a && . apps/orchestrator/.env && set +a && \
+    pnpm --filter @holaday/orchestrator db:migrate:numbered && \
+    pnpm --filter @holaday/orchestrator db:verify"; then
+  echo "❌ Database migration/schema verification failed — orchestrator was not restarted." >&2
+  echo "   Existing process remains live. Inspect the failed migration before retrying." >&2
+  exit 1
+fi
 
 echo "→ PM2 restart as dedicated non-root runtime user"
 if ! restart_orchestrator_as_runtime_user "Vultr non-root PM2 restart"; then

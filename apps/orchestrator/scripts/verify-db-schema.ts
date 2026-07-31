@@ -53,6 +53,7 @@ const REQUIRED_COLUMNS: Record<string, readonly string[]> = {
     'role',
     'plan_expires_at',
     'status',
+    'auth_version',
     'display_name',
     'google_id',
     'avatar_url',

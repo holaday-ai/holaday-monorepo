@@ -155,6 +155,28 @@ async function postInternalConfirm(body: Record<string, unknown>) {
   });
 }
 
+async function postPaypalWebhook(
+  body: Record<string, unknown>,
+  paypalAdapter: {
+    verifyWebhookSignature: ReturnType<typeof vi.fn>;
+  },
+) {
+  const app = createHttpApp({
+    planner: {} as never,
+    paypalAdapter: paypalAdapter as never,
+  });
+  const activeServer = createServer(app);
+  server = activeServer;
+  await new Promise<void>((resolve) => activeServer.listen(0, '127.0.0.1', resolve));
+  const address = activeServer.address();
+  if (!address || typeof address === 'string') throw new Error('server has no TCP address');
+  return fetch(`http://127.0.0.1:${address.port}/payment/paypal/webhook`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
 const firstMonthConfirm = {
   userId: 'usr_cn_test',
   planId: 'pro',
@@ -208,5 +230,33 @@ describe('internal payment confirmation', () => {
     expect(response.status).toBe(500);
     expect(paymentRows.some((row) => row.status === 'completed')).toBe(false);
     expect(userState.plan).toBe('free');
+  });
+});
+
+describe('PayPal webhook verification', () => {
+  beforeEach(() => {
+    vi.stubEnv('NODE_ENV', 'production');
+    delete process.env.PAYPAL_WEBHOOK_ID;
+  });
+
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    await new Promise<void>((resolve, reject) => {
+      if (!server) return resolve();
+      server.close((error) => (error ? reject(error) : resolve()));
+    });
+    server = null;
+  });
+
+  it('fails closed in production when PAYPAL_WEBHOOK_ID is missing', async () => {
+    const verifyWebhookSignature = vi.fn(async () => true);
+
+    const response = await postPaypalWebhook(
+      { event_type: 'PAYMENT.CAPTURE.COMPLETED', resource: {} },
+      { verifyWebhookSignature },
+    );
+
+    expect(response.status).toBe(503);
+    expect(verifyWebhookSignature).not.toHaveBeenCalled();
   });
 });

@@ -398,6 +398,25 @@ export const paymentRouter = router({
           .where(eq(payments.id, lockedRow.id));
         return { kind: 'incomplete' as const, status: capture.status };
       }
+      if (
+        capture.amountCents !== lockedRow.amountCents ||
+        capture.currency.toUpperCase() !== lockedRow.currency.toUpperCase()
+      ) {
+        ctx.logger.error(
+          {
+            paymentId: lockedRow.externalId,
+            expectedAmountCents: lockedRow.amountCents,
+            capturedAmountCents: capture.amountCents,
+            expectedCurrency: lockedRow.currency,
+            capturedCurrency: capture.currency,
+          },
+          'paypal capture settlement mismatch',
+        );
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: 'PayPal 结算金额或币种与订单不一致，请联系客服核查',
+        });
+      }
 
       const completed = await completePaymentInTransaction(tx, lockedRow, settlement, {
         captureId: capture.captureId,
@@ -702,14 +721,20 @@ export const paymentRouter = router({
           status: payments.status,
           plan: payments.plan,
           kind: payments.kind,
+          userExternalId: payments.userExternalId,
         })
         .from(payments)
-        .where(eq(payments.providerOrderId, input.outTradeNo))
+        .where(
+          and(
+            eq(payments.providerOrderId, input.outTradeNo),
+            eq(payments.userExternalId, ctx.userId),
+          ),
+        )
         .limit(1);
       // Until the cn-payment gateway POSTs to /api/internal/payment/
       // confirm, no row exists for this outTradeNo. Surface 'pending'
       // so the SPA keeps polling.
-      if (!row) return { status: 'pending' as const };
+      if (!row || row.userExternalId !== ctx.userId) return { status: 'pending' as const };
       return {
         status: row.status as 'pending' | 'completed' | 'failed',
         plan: row.plan,
