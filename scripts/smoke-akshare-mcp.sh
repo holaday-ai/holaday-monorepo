@@ -169,8 +169,8 @@ health = load_json(health_path, "healthz")
 if health.get("status") != "ok" or health.get("adapter_ready") is not True:
     fail("healthz does not report a ready real-data adapter")
 
-data_envelope(gainers_path, "gainers")
-data_envelope(amount_path, "amount")
+gainers = data_envelope(gainers_path, "gainers")
+amount = data_envelope(amount_path, "amount")
 calendar = data_envelope(calendar_path, "trading calendar")
 calendar_row = calendar["data"][0]
 if not isinstance(calendar_row, dict) or calendar_row.get("date", "").replace("-", "") != today.replace("-", ""):
@@ -215,11 +215,13 @@ def fetched_at(payload: dict[str, Any], label: str) -> datetime:
     age = (now - fetched).total_seconds()
     if age < -MAX_FETCH_AGE:
         fail(f"{label} fetched_at is in the future")
-    if active_market and age > MAX_FETCH_AGE:
+    if age > MAX_FETCH_AGE:
         fail(f"{label} fetched_at is stale ({int(age)}s old)")
     return fetched
 
 
+fetched_at(gainers, "gainers")
+fetched_at(amount, "amount")
 fetched_at(quote, "quote")
 if intraday is not None:
     fetched_at(intraday, "intraday")

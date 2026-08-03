@@ -13,10 +13,14 @@ fake_payload() {
   local quote_time="2026-07-31 10:04:00"
   local quote_fetched="2026-07-31T02:04:30+00:00"
   local minute_fetched="2026-07-31T02:04:30+00:00"
+  local gainers_fetched="$AKSHARE_SMOKE_NOW"
+  local amount_fetched="$AKSHARE_SMOKE_NOW"
   local minute_one="2026-07-31 10:03:00"
   local minute_two="2026-07-31 10:04:00"
   local trading_day=true
   local source="akshare:stock_zh_a_minute(sina,1m)"
+  local gainers_source="akshare:stock_zh_a_spot(sina,gainers)"
+  local amount_source="akshare:stock_zh_a_spot(sina,amount)"
 
   case "$scenario" in
     future_minute)
@@ -34,6 +38,30 @@ fake_payload() {
       ;;
     stale_minute_fetch)
       minute_fetched="2026-07-31T01:50:00+00:00"
+      ;;
+    stale_gainers_fetch)
+      gainers_fetched="2026-07-31T01:50:00+00:00"
+      ;;
+    stale_amount_fetch_weekend)
+      trading_day=false
+      gainers_fetched="2026-08-02T02:04:30+00:00"
+      amount_fetched="2026-08-02T01:50:00+00:00"
+      quote_fetched="2026-08-02T02:04:30+00:00"
+      minute_fetched="2026-08-02T02:04:30+00:00"
+      ;;
+    stale_quote_fetch_weekend)
+      trading_day=false
+      gainers_fetched="2026-08-02T02:04:30+00:00"
+      amount_fetched="2026-08-02T02:04:30+00:00"
+      quote_fetched="2026-08-02T01:50:00+00:00"
+      minute_fetched="2026-08-02T02:04:30+00:00"
+      ;;
+    stale_minute_fetch_weekend)
+      trading_day=false
+      gainers_fetched="2026-08-02T02:04:30+00:00"
+      amount_fetched="2026-08-02T02:04:30+00:00"
+      quote_fetched="2026-08-02T02:04:30+00:00"
+      minute_fetched="2026-08-02T01:50:00+00:00"
       ;;
     stale_market_time)
       quote_time="2026-07-31 09:50:00"
@@ -54,13 +82,26 @@ fake_payload() {
       quote_time="2026-07-31 11:30:00"
       quote_fetched="2026-07-31T04:14:30+00:00"
       minute_fetched="2026-07-31T04:14:30+00:00"
+      gainers_fetched="2026-07-31T04:14:30+00:00"
+      amount_fetched="2026-07-31T04:14:30+00:00"
       minute_one="2026-07-31 11:29:00"
       minute_two="2026-07-31 11:30:00"
+      ;;
+    after_close)
+      quote_time="2026-07-31 15:00:00"
+      quote_fetched="2026-07-31T07:09:30+00:00"
+      minute_fetched="2026-07-31T07:09:30+00:00"
+      gainers_fetched="2026-07-31T07:09:30+00:00"
+      amount_fetched="2026-07-31T07:09:30+00:00"
+      minute_one="2026-07-31 14:59:00"
+      minute_two="2026-07-31 15:00:00"
       ;;
     weekend)
       trading_day=false
       quote_fetched="2026-08-02T02:04:30+00:00"
       minute_fetched="2026-08-02T02:04:30+00:00"
+      gainers_fetched="2026-08-02T02:04:30+00:00"
+      amount_fetched="2026-08-02T02:04:30+00:00"
       ;;
     holiday)
       trading_day=false
@@ -68,6 +109,8 @@ fake_payload() {
       quote_time="2026-09-30 15:00:00"
       quote_fetched="2026-10-01T02:04:30+00:00"
       minute_fetched="2026-10-01T02:04:30+00:00"
+      gainers_fetched="2026-10-01T02:04:30+00:00"
+      amount_fetched="2026-10-01T02:04:30+00:00"
       minute_one="2026-09-30 14:59:00"
       minute_two="2026-09-30 15:00:00"
       ;;
@@ -75,9 +118,14 @@ fake_payload() {
       trading_day=false
       quote_fetched="2026-08-02T02:04:30+00:00"
       minute_fetched="2026-08-02T02:04:30+00:00"
+      gainers_fetched="2026-08-02T02:04:30+00:00"
+      amount_fetched="2026-08-02T02:04:30+00:00"
       ;;
     mock_source)
       source="mock:intraday"
+      ;;
+    mock_ranking_source)
+      gainers_source="mock:rankings"
       ;;
   esac
 
@@ -86,10 +134,12 @@ fake_payload() {
       printf '%s\n' '{"status":"ok","adapter_ready":true}'
       ;;
     */stock-rankings/gainers*)
-      printf '%s\n' '{"data":[{"代码":"600000","最新价":10}],"count":1,"source":"akshare:stock_zh_a_spot(sina,gainers)","fetched_at":"2026-07-31T02:04:30+00:00"}'
+      printf '{"data":[{"代码":"600000","最新价":10}],"count":1,"source":"%s","fetched_at":"%s"}\n' \
+        "$gainers_source" "$gainers_fetched"
       ;;
     */stock-rankings/amount*)
-      printf '%s\n' '{"data":[{"代码":"600000","成交额":100000}],"count":1,"source":"akshare:stock_zh_a_spot(sina,amount)","fetched_at":"2026-07-31T02:04:30+00:00"}'
+      printf '{"data":[{"代码":"600000","成交额":100000}],"count":1,"source":"%s","fetched_at":"%s"}\n' \
+        "$amount_source" "$amount_fetched"
       ;;
     */trading-day/*)
       printf '{"data":[{"date":"%s","is_trading_day":%s}],"count":1,"source":"akshare:tool_trade_date_hist_sina","fetched_at":"2026-07-31T02:04:30+00:00"}\n' \
@@ -145,12 +195,19 @@ run_smoke() {
 assert_passes() {
   local scenario="$1"
   local now="$2"
+  local expected_phase="${3:-}"
   local output
   if ! output="$(run_smoke "$scenario" "$now")"; then
     echo "$output" >&2
     fail "$scenario should pass"
   fi
   grep -Fq 'akshare-mcp smoke OK' <<<"$output" || fail "$scenario did not report success"
+  if [[ -n "$expected_phase" ]]; then
+    grep -Fq "phase=$expected_phase" <<<"$output" || {
+      echo "$output" >&2
+      fail "$scenario did not report phase=$expected_phase"
+    }
+  fi
 }
 
 assert_fails_with() {
@@ -172,20 +229,26 @@ assert_fails_with() {
   }
 }
 
-assert_passes valid_active '2026-07-31T10:05:00+08:00'
+assert_passes open_session '2026-07-31T10:05:00+08:00' active
 assert_fails_with future_minute '2026-07-31T10:05:00+08:00' 'future minute point'
 assert_fails_with future_weekend '2026-08-02T10:05:00+08:00' 'future minute point'
 assert_fails_with stale_quote_fetch '2026-07-31T10:05:00+08:00' 'quote fetched_at is stale'
 assert_fails_with stale_minute_fetch '2026-07-31T10:05:00+08:00' 'intraday fetched_at is stale'
+assert_fails_with stale_gainers_fetch '2026-07-31T10:05:00+08:00' 'gainers fetched_at is stale'
+assert_fails_with stale_amount_fetch_weekend '2026-08-02T10:05:00+08:00' 'amount fetched_at is stale'
+assert_fails_with stale_quote_fetch_weekend '2026-08-02T10:05:00+08:00' 'quote fetched_at is stale'
+assert_fails_with stale_minute_fetch_weekend '2026-08-02T10:05:00+08:00' 'intraday fetched_at is stale'
 assert_fails_with stale_market_time '2026-07-31T10:05:00+08:00' 'latest market minute is stale'
 assert_fails_with wrong_trade_date '2026-07-31T10:05:00+08:00' 'trade date does not match current trading day'
 assert_fails_with cross_date_mismatch '2026-07-31T10:05:00+08:00' 'trade dates are inconsistent'
 assert_fails_with intraday_unavailable_active '2026-07-31T10:05:00+08:00' 'intraday upstream returned'
 assert_fails_with mock_source '2026-07-31T10:05:00+08:00' 'non-production data source'
 assert_fails_with mock_source '2026-08-02T10:05:00+08:00' 'non-production data source'
-assert_passes lunch_break '2026-07-31T12:15:00+08:00'
-assert_passes weekend '2026-08-02T10:05:00+08:00'
-assert_passes intraday_unavailable_weekend '2026-08-02T10:05:00+08:00'
-assert_passes holiday '2026-10-01T10:05:00+08:00'
+assert_fails_with mock_ranking_source '2026-07-31T10:05:00+08:00' 'gainers has a non-production data source'
+assert_passes lunch_break '2026-07-31T12:15:00+08:00' paused-session
+assert_passes after_close '2026-07-31T15:10:00+08:00' paused-session
+assert_passes weekend '2026-08-02T10:05:00+08:00' closed-session
+assert_passes intraday_unavailable_weekend '2026-08-02T10:05:00+08:00' closed-session
+assert_passes holiday '2026-10-01T10:05:00+08:00' closed-session
 
 echo 'PASS: strict AKShare smoke freshness and trading-session rules'
