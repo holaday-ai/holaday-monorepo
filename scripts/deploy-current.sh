@@ -127,6 +127,34 @@ deploy_akshare() {
     "$ROOT_DIR/scripts/deploy-akshare-mcp.sh" "$BRANCH"
 }
 
+deploy_services_atomically() {
+  local akshare_rc orchestrator_rc
+
+  if deploy_akshare; then
+    :
+  else
+    akshare_rc=$?
+    return "$akshare_rc"
+  fi
+
+  if deploy_orchestrator; then
+    return 0
+  else
+    orchestrator_rc=$?
+  fi
+
+  echo "⚠️  Orchestrator deploy failed (exit $orchestrator_rc); restoring AKShare to $RELEASE_ROLLBACK_HEAD" >&2
+  if AKSHARE_ROLLBACK_ONLY=1 \
+    AKSHARE_ROLLBACK_HEAD="$RELEASE_ROLLBACK_HEAD" \
+    "$ROOT_DIR/scripts/deploy-akshare-mcp.sh"; then
+    echo "✅ AKShare restored after Orchestrator deploy failure" >&2
+    return "$orchestrator_rc"
+  fi
+
+  echo "❌ Orchestrator deploy failed and the AKShare combined rollback is incomplete" >&2
+  return 2
+}
+
 verify_healthz() {
   local urls=(
     "https://holaday.ai/api/healthz"
@@ -164,8 +192,7 @@ case "$TARGET" in
     fetch_current
     preflight_release_branch
     verify_paypal_preflight
-    deploy_akshare
-    deploy_orchestrator
+    deploy_services_atomically
     verify_healthz
     ;;
   akshare)
@@ -177,8 +204,7 @@ case "$TARGET" in
     fetch_current
     preflight_release_branch
     verify_paypal_preflight
-    deploy_akshare
-    deploy_orchestrator
+    deploy_services_atomically
     # Orchestrator deploy resets the shared Vultr checkout. Keep SPA last
     # so tracked/stale dist files in the checkout cannot overwrite the
     # freshly uploaded web bundle.

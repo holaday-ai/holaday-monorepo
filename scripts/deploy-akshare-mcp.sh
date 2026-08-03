@@ -8,7 +8,9 @@
 #
 # Usage:   scripts/deploy-akshare-mcp.sh
 # Env:     VULTR_PASSWORD（经 load-deploy-env.sh）
-# Exits:   0 成功；1 smoke 失败。
+#          AKSHARE_ROLLBACK_ONLY=1 restores AKSHARE_ROLLBACK_HEAD only.
+# Exits:   0 success; 1 deploy failed and rollback completed;
+#          2 automatic rollback failed.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -94,10 +96,17 @@ rollback_akshare() {
     echo "✅ AKShare restored to the original LIVE version" >&2
   else
     echo "❌ AKShare automatic rollback failed; manual recovery is required" >&2
+    return 1
   fi
 }
 
 capture_rollback_head
+if [[ "${AKSHARE_ROLLBACK_ONLY:-0}" == "1" ]]; then
+  if rollback_akshare "combined release rollback"; then
+    exit 0
+  fi
+  exit 2
+fi
 preflight_remote_checkout
 
 if [[ -n "$BRANCH" ]]; then
@@ -106,8 +115,10 @@ if [[ -n "$BRANCH" ]]; then
       cd '$REPO_DIR' && \
       git fetch origin '+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH' && \
       git reset --hard 'origin/$BRANCH'"; then
-    rollback_akshare "checkout sync"
-    exit 1
+    if rollback_akshare "checkout sync"; then
+      exit 1
+    fi
+    exit 2
   fi
 fi
 
@@ -125,8 +136,10 @@ INSTALL_RC=$?
 set -e
 echo "$INSTALL_OUTPUT" | tail -8
 if (( INSTALL_RC != 0 )); then
-  rollback_akshare "installation or restart"
-  exit 1
+  if rollback_akshare "installation or restart"; then
+    exit 1
+  fi
+  exit 2
 fi
 
 echo "→ Smoke check $HEALTH_URL + rankings"
@@ -141,6 +154,8 @@ else
   echo "→ Last akshare-mcp logs" >&2
   "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
     "pm2 logs akshare-mcp-http --lines 40 --nostream" >&2 || true
-  rollback_akshare "smoke verification"
-  exit 1
+  if rollback_akshare "smoke verification"; then
+    exit 1
+  fi
+  exit 2
 fi

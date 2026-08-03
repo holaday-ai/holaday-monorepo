@@ -20,9 +20,9 @@
 #          ALLOW_DIVERGENT_DEPLOY=1   proceed despite a non-fast-forward
 #                                     (divergent) target — required for an
 #                                     intentional branch cutover / rollback.
-# Exits:   0 success; 1 health/keys failure; 3 divergent-target gate
-#          tripped; 4 could-not-verify-live-state. PM2 keeps last-good
-#          binary on build break.
+# Exits:   0 success; 1 deploy failed and rollback completed;
+#          2 automatic rollback failed; 3 divergent-target gate tripped;
+#          4 could-not-verify-live-state.
 
 set -euo pipefail
 
@@ -149,20 +149,53 @@ restart_orchestrator_as_runtime_user() {
 # we never silently leave a broken / keyless binary serving traffic.
 rollback() {
   local target="$1"
+  local rollback_output rollback_rc
+
   echo "⚠️  Database changes are forward-only; code rollback does not revert applied migrations." >&2
   if [[ -z "$target" ]]; then
-    echo "⚠️  No rollback target captured — manual intervention needed" >&2
-    return
+    echo "❌ No rollback target captured — manual recovery is required" >&2
+    return 1
   fi
   echo "→ Rolling back to $target" >&2
-  if run_with_retry "Vultr rollback build" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
+
+  set +e
+  rollback_output=$(run_with_retry "Vultr rollback build" \
+    "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
       cd /opt/holaday-monorepo && \
-      git reset --hard $target && \
-      pnpm --filter @holaday/orchestrator build" 2>&1 | tail -5 >&2; then
-    restart_orchestrator_as_runtime_user "Vultr rollback restart" 2>&1 | tail -5 >&2 || true
-  else
-    echo "⚠️  Rollback build failed — keeping the currently running process untouched" >&2
+      git reset --hard '$target' && \
+      pnpm --filter @holaday/orchestrator build" 2>&1)
+  rollback_rc=$?
+  set -e
+  echo "$rollback_output" | tail -5 >&2
+  if (( rollback_rc != 0 )); then
+    echo "❌ Rollback checkout/build failed; manual recovery is required" >&2
+    return 1
   fi
+
+  set +e
+  rollback_output=$(restart_orchestrator_as_runtime_user "Vultr rollback restart" 2>&1)
+  rollback_rc=$?
+  set -e
+  echo "$rollback_output" | tail -5 >&2
+  if (( rollback_rc != 0 )); then
+    echo "❌ Rollback restart failed; checkout is restored but manual recovery is required" >&2
+    return 1
+  fi
+
+  echo "✅ Previous checkout and Orchestrator restored to $target" >&2
+}
+
+abort_with_rollback() {
+  local reason="$1"
+
+  echo "❌ $reason — rolling back" >&2
+  if rollback "$PREV_HEAD"; then
+    echo "❌ Deploy FAILED ($reason) — checkout and Orchestrator restored" >&2
+    exit 1
+  fi
+
+  echo "❌ Deploy FAILED ($reason) — rollback is incomplete; manual recovery is required" >&2
+  exit 2
 }
 
 stage_runtime_helper
@@ -233,20 +266,26 @@ case "$GATE_RC" in
 esac
 
 echo "→ Fetching $BRANCH on Vultr"
-run_with_retry "Vultr fetch" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
-  cd /opt/holaday-monorepo && \
-  git fetch origin '+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH' && \
-  git reset --hard origin/$BRANCH && \
-  git rev-parse HEAD" | tail -5
+if ! run_with_retry "Vultr fetch" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
+    cd /opt/holaday-monorepo && \
+    git fetch origin '+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH' && \
+    git reset --hard origin/$BRANCH && \
+    git rev-parse HEAD" | tail -5; then
+  abort_with_rollback "checkout sync failed"
+fi
 
-NEW_HEAD=$(run_with_retry "Vultr new-head" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
-  "cd /opt/holaday-monorepo && git rev-parse --short HEAD" | tail -1 | tr -d '[:space:]')
+if ! NEW_HEAD=$(run_with_retry "Vultr new-head" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
+    "cd /opt/holaday-monorepo && git rev-parse --short HEAD" | tail -1 | tr -d '[:space:]'); then
+  abort_with_rollback "deployed HEAD verification failed"
+fi
 
 echo "→ Installing + building"
-run_with_retry "Vultr install/build" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
-  cd /opt/holaday-monorepo && \
-  pnpm install && \
-  pnpm --filter @holaday/orchestrator build" 2>&1 | tail -5
+if ! run_with_retry "Vultr install/build" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
+    cd /opt/holaday-monorepo && \
+    pnpm install && \
+    pnpm --filter @holaday/orchestrator build" 2>&1 | tail -5; then
+  abort_with_rollback "install/build failed"
+fi
 
 echo "→ Applying numbered migrations and verifying the production schema"
 if ! run_with_retry "Vultr database migration gate" \
@@ -255,16 +294,12 @@ if ! run_with_retry "Vultr database migration gate" \
     set -a && . apps/orchestrator/.env && set +a && \
     pnpm --filter @holaday/orchestrator db:migrate:numbered && \
     pnpm --filter @holaday/orchestrator db:verify"; then
-  echo "❌ Database migration/schema verification failed — orchestrator was not restarted." >&2
-  echo "   Existing process remains live. Inspect the failed migration before retrying." >&2
-  exit 1
+  abort_with_rollback "database migration/schema verification failed"
 fi
 
 echo "→ PM2 restart as dedicated non-root runtime user"
 if ! restart_orchestrator_as_runtime_user "Vultr non-root PM2 restart"; then
-  echo "❌ Non-root runtime start failed — rolling back" >&2
-  rollback "$PREV_HEAD"
-  exit 1
+  abort_with_rollback "non-root runtime start failed"
 fi
 
 echo "→ Health check ($HEALTH_URL must return '$HEALTH_MARKER')"
@@ -278,14 +313,14 @@ else
   echo "Response: $HEALTH_OUT" >&2
   echo "→ Last 10 error log lines:"
   run_with_retry "Vultr pm2 error logs" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
-    "pm2 logs holaday-orchestrator --lines 10 --nostream --err 2>&1 | tail -15" >&2
-  rollback "$PREV_HEAD"
-  echo "❌ Deploy FAILED (health check) — rolled back to ${PREV_HEAD:-unknown}" >&2
-  exit 1
+    "pm2 logs holaday-orchestrator --lines 10 --nostream --err 2>&1 | tail -15" >&2 || true
+  abort_with_rollback "health check failed"
 fi
 
-RESTART=$(run_with_retry "Vultr restart count" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
-  "node -e \"const list=JSON.parse(require('child_process').execFileSync('pm2',['jlist'],{encoding:'utf8'})); const app=list.find((p)=>p.name==='holaday-orchestrator'); process.stdout.write(String(app?.pm2_env?.restart_time ?? 'unknown'));\"")
+if ! RESTART=$(run_with_retry "Vultr restart count" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
+    "node -e \"const list=JSON.parse(require('child_process').execFileSync('pm2',['jlist'],{encoding:'utf8'})); const app=list.find((p)=>p.name==='holaday-orchestrator'); process.stdout.write(String(app?.pm2_env?.restart_time ?? 'unknown'));\""); then
+  abort_with_rollback "restart count verification failed"
+fi
 echo "✅ Orchestrator deployed — restart count: $RESTART"
 
 # Verify the required LLM keys actually made it INTO the running process
@@ -296,17 +331,17 @@ echo "✅ Orchestrator deployed — restart count: $RESTART"
 # keyless (image intents would silently degrade to generate).
 REQUIRED_PROCESS_KEYS="${DEPLOY_REQUIRED_PROCESS_KEYS:-GEMINI_API_KEY ANTHROPIC_API_KEY DASHSCOPE_API_KEY}"
 echo "→ Verifying keys loaded in process: $REQUIRED_PROCESS_KEYS"
-PROC_KEYS=$(run_with_retry "Vultr key-check" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
-  "PID=\$(pm2 pid holaday-orchestrator | head -1); tr '\\0' '\\n' < /proc/\$PID/environ 2>/dev/null | grep -oE '^[A-Z_]+=.' | grep -oE '^[A-Z_]+'" | tr -d '\r')
+if ! PROC_KEYS=$(run_with_retry "Vultr key-check" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
+    "PID=\$(pm2 pid holaday-orchestrator | head -1); tr '\\0' '\\n' < /proc/\$PID/environ 2>/dev/null | grep -oE '^[A-Z_]+=.' | grep -oE '^[A-Z_]+'" | tr -d '\r'); then
+  abort_with_rollback "process key verification failed"
+fi
 KEY_MISS=""
 for k in $REQUIRED_PROCESS_KEYS; do
   echo "$PROC_KEYS" | grep -qx "$k" || KEY_MISS="$KEY_MISS $k"
 done
 if [[ -n "$KEY_MISS" ]]; then
   echo "❌ Required keys missing/empty in process:$KEY_MISS" >&2
-  rollback "$PREV_HEAD"
-  echo "❌ Deploy FAILED (keys not loaded into process) — rolled back to ${PREV_HEAD:-unknown}" >&2
-  exit 1
+  abort_with_rollback "keys not loaded into process"
 fi
 echo "✅ Keys present in process"
 

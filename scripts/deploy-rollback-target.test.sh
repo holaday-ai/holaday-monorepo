@@ -49,18 +49,20 @@ STUB
     "$harness_dir/repo/scripts/verify-paypal-production.sh"
 }
 
-test_deploy_current_preflights_before_akshare() {
-  local harness_dir event_log output refuse_rc
-  harness_dir="$(mktemp -d)"
-  event_log="$harness_dir/events"
-  output="$harness_dir/output"
-  : > "$event_log"
+write_deploy_current_harness() {
+  local harness_dir="$1"
+
   write_common_deploy_stubs "$harness_dir"
   cp "$CURRENT_SCRIPT" "$harness_dir/repo/scripts/deploy-current.sh"
   chmod +x "$harness_dir/repo/scripts/deploy-current.sh"
 
   cat > "$harness_dir/repo/scripts/deploy-akshare-mcp.sh" <<'STUB'
 #!/usr/bin/env bash
+if [[ "${AKSHARE_ROLLBACK_ONLY:-0}" == "1" ]]; then
+  echo "akshare-rollback" >> "$TEST_EVENT_LOG"
+  [[ "$AKSHARE_ROLLBACK_HEAD" == "1111111111111111111111111111111111111111" ]] || exit 19
+  exit "${TEST_AKSHARE_ROLLBACK_RC:-0}"
+fi
 echo "akshare" >> "$TEST_EVENT_LOG"
 STUB
   chmod +x "$harness_dir/repo/scripts/deploy-akshare-mcp.sh"
@@ -69,6 +71,7 @@ STUB
 #!/usr/bin/env bash
 echo "orchestrator" >> "$TEST_EVENT_LOG"
 [[ "${PAYPAL_PREFLIGHT_VERIFIED:-0}" == "1" ]]
+exit "${TEST_ORCHESTRATOR_RC:-0}"
 STUB
   chmod +x "$harness_dir/repo/scripts/deploy-orchestrator.sh"
 
@@ -117,6 +120,15 @@ printf '%s' '{"status":"ok"}' > "$output_file"
 printf '200'
 STUB
   chmod +x "$harness_dir/bin/curl"
+}
+
+test_deploy_current_preflights_before_akshare() {
+  local harness_dir event_log output refuse_rc
+  harness_dir="$(mktemp -d)"
+  event_log="$harness_dir/events"
+  output="$harness_dir/output"
+  : > "$event_log"
+  write_deploy_current_harness "$harness_dir"
 
   if ! PATH="$harness_dir/bin:$PATH" \
     TEST_EVENT_LOG="$event_log" \
@@ -156,6 +168,40 @@ STUB
     fail "deploy-current must preserve the explicit divergent cutover override"
   fi
   assert_event_order "$event_log" capture-head preflight akshare
+  rm -rf "$harness_dir"
+}
+
+test_combined_orchestrator_failure_rolls_back_akshare() {
+  local rollback_rc="$1"
+  local expected_rc="$2"
+  local harness_dir event_log output rc
+  harness_dir="$(mktemp -d)"
+  event_log="$harness_dir/events"
+  output="$harness_dir/output"
+  : > "$event_log"
+  write_deploy_current_harness "$harness_dir"
+
+  set +e
+  PATH="$harness_dir/bin:$PATH" \
+    TEST_EVENT_LOG="$event_log" \
+    TEST_ORCHESTRATOR_RC=7 \
+    TEST_AKSHARE_ROLLBACK_RC="$rollback_rc" \
+    VULTR_PASSWORD="unit-secret" \
+    BRANCH="codex/release-candidate" \
+    "$harness_dir/repo/scripts/deploy-current.sh" orchestrator > "$output" 2>&1
+  rc=$?
+  set -e
+
+  (( rc == expected_rc )) || fail "combined rollback exit: got $rc, want $expected_rc"
+  assert_event_order "$event_log" capture-head preflight paypal akshare orchestrator akshare-rollback
+  if (( rollback_rc == 0 )); then
+    grep -Fq "AKShare restored after Orchestrator deploy failure" "$output" \
+      || fail "combined deploy must report successful AKShare restoration"
+  else
+    grep -Fq "combined rollback is incomplete" "$output" \
+      || fail "combined deploy must surface AKShare rollback failure"
+  fi
+  ! grep -Fq "unit-secret" "$output" || fail "combined rollback must not print credentials"
   rm -rf "$harness_dir"
 }
 
@@ -269,7 +315,40 @@ test_akshare_failure_restores_live_head() {
   rm -rf "$harness_dir"
 }
 
+test_akshare_rollback_only_restores_without_deploying() {
+  local harness_dir event_log output
+  harness_dir="$(mktemp -d)"
+  event_log="$harness_dir/events"
+  output="$harness_dir/output"
+  : > "$event_log"
+  write_common_deploy_stubs "$harness_dir"
+  cp "$AKSHARE_SCRIPT" "$harness_dir/repo/scripts/deploy-akshare-mcp.sh"
+  chmod +x "$harness_dir/repo/scripts/deploy-akshare-mcp.sh"
+  write_akshare_ssh_stub "$harness_dir"
+
+  if ! PATH="$harness_dir/bin:$PATH" \
+    TEST_EVENT_LOG="$event_log" \
+    TEST_LIVE_HEAD="1111111111111111111111111111111111111111" \
+    TEST_FAIL_PHASE="none" \
+    AKSHARE_ROLLBACK_ONLY=1 \
+    AKSHARE_ROLLBACK_HEAD="1111111111111111111111111111111111111111" \
+    VULTR_PASSWORD="unit-secret" \
+    "$harness_dir/repo/scripts/deploy-akshare-mcp.sh" > "$output" 2>&1; then
+    cat "$output" >&2
+    fail "AKShare rollback-only mode should restore the requested release"
+  fi
+
+  assert_event_order "$event_log" rollback-restart
+  ! grep -Fxq "reset-new" "$event_log" || fail "rollback-only mode must not deploy a new checkout"
+  ! grep -Fxq "install-new" "$event_log" || fail "rollback-only mode must not run the candidate install"
+  ! grep -Fxq "smoke" "$event_log" || fail "rollback-only mode must not run the candidate smoke"
+  rm -rf "$harness_dir"
+}
+
 test_deploy_current_preflights_before_akshare
+test_combined_orchestrator_failure_rolls_back_akshare 0 7
+test_combined_orchestrator_failure_rolls_back_akshare 29 2
+test_akshare_rollback_only_restores_without_deploying
 test_akshare_failure_restores_live_head install
 test_akshare_failure_restores_live_head smoke
 test_akshare_divergence_override 0
