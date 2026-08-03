@@ -3,6 +3,10 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config as loadDotenv } from 'dotenv';
 import mysql from 'mysql2/promise';
+import {
+  isSkippableAlreadyAppliedError,
+  splitMigrationStatements,
+} from './release-db-contract.mjs';
 
 function loadDotenvAllowingEmpty(path: string): void {
   const result = loadDotenv({ path, override: false });
@@ -20,34 +24,6 @@ loadDotenvAllowingEmpty(resolve(repoRoot, '.env'));
 loadDotenvAllowingEmpty(resolve(repoRoot, '.env.local'));
 loadDotenvAllowingEmpty(resolve(appRoot, '.env.local'));
 
-const SKIPPABLE_ERROR_CODES = new Set([
-  'ER_TABLE_EXISTS_ERROR',
-  'ER_DUP_FIELDNAME',
-  'ER_DUP_KEYNAME',
-  'ER_FK_DUP_NAME',
-  'ER_MULTIPLE_PRI_KEY',
-]);
-
-function isSkippableAlreadyAppliedError(err: unknown): boolean {
-  if (!err || typeof err !== 'object') return false;
-  const e = err as { code?: string; message?: string };
-  if (e.code && SKIPPABLE_ERROR_CODES.has(e.code)) return true;
-  const message = e.message ?? '';
-  return /already exists|duplicate column|duplicate key name|duplicate foreign key/i.test(
-    message,
-  );
-}
-
-function splitStatements(sql: string): string[] {
-  return sql
-    .split(/--> statement-breakpoint/g)
-    .flatMap((chunk) =>
-      chunk.split(/;\s*(?=(?:--[^\n]*\n\s*)*(?:CREATE|ALTER|INSERT|UPDATE|DELETE|$))/i),
-    )
-    .map((s) => s.trim().replace(/;$/, '').trim())
-    .filter(Boolean);
-}
-
 async function main(): Promise<void> {
   const url = process.env.DATABASE_URL ?? 'mysql://holaday:holaday-dev@127.0.0.1:3306/holaday';
   const conn = await mysql.createConnection({ uri: url, multipleStatements: false });
@@ -62,12 +38,12 @@ async function main(): Promise<void> {
 
     for (const file of files) {
       const raw = await readFile(resolve(migrationsDir, file), 'utf8');
-      for (const statement of splitStatements(raw)) {
+      for (const statement of splitMigrationStatements(raw)) {
         try {
           await conn.query(statement);
           applied += 1;
         } catch (err) {
-          if (isSkippableAlreadyAppliedError(err)) {
+          if (isSkippableAlreadyAppliedError(err, { file, statement })) {
             skipped += 1;
             continue;
           }

@@ -15,7 +15,7 @@
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
-    "test": "node --test scripts/qa-db-safety.test.mjs scripts/qa-report-metadata.test.mjs && vitest run",
+    "test": "node --test scripts/qa-db-safety.test.mjs scripts/qa-report-metadata.test.mjs scripts/release-db-contract.test.mjs && vitest run",
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "qa:web": "node scripts/web-ui-qa.mjs",
