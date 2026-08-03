@@ -64,3 +64,38 @@ def test_health_exposes_successful_source_fallbacks():
     assert result["count"] == 1
     assert after["fallbacks_total"] == before["fallbacks_total"] + 1
     assert after["last_fallback_source"] == result["source"]
+
+
+def test_background_prewarm_keeps_fast_rankings_and_slow_symbol_tables_warm(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(http_server, "_rank", lambda metric, limit: ([], "akshare:test", "now"))
+    monkeypatch.setattr(adp, "refresh_symbol_table", lambda: calls.append("symbols"))
+    monkeypatch.setattr(adp, "warm_risk_tables", lambda: calls.append("risks"))
+    monkeypatch.setattr(http_server, "_safe", lambda fn, *args: calls.append((fn, args)))
+
+    http_server._warm_market_caches_once()
+
+    assert calls[0][1] == ("gainers", 8)
+    assert calls[1:] == ["symbols", "risks"]
+
+
+def test_background_prewarm_isolates_symbol_refresh_failure(monkeypatch, caplog):
+    calls = []
+
+    monkeypatch.setattr(http_server, "_rank", lambda metric, limit: ([], "akshare:test", "now"))
+
+    def fail_symbols():
+        calls.append("symbols")
+        raise adp.AkShareUnavailable("symbol source offline")
+
+    monkeypatch.setattr(adp, "refresh_symbol_table", fail_symbols)
+    monkeypatch.setattr(adp, "warm_risk_tables", lambda: calls.append("risks"))
+    monkeypatch.setattr(http_server, "_safe", lambda fn, *args: calls.append((fn, args)))
+
+    with caplog.at_level(logging.WARNING, logger="akshare_mcp.http"):
+        http_server._warm_market_caches_once()
+
+    assert calls[0][1] == ("gainers", 8)
+    assert calls[1:] == ["symbols", "risks"]
+    assert "symbol-table prewarm failed" in caplog.text

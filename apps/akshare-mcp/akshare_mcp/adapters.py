@@ -42,6 +42,8 @@ import threading
 import time
 from typing import Any
 
+import requests
+
 try:
     import akshare as ak  # type: ignore
 except Exception:  # pragma: no cover - akshare optional at import time
@@ -74,8 +76,8 @@ TTL_TRADECAL = _ttl("TRADECAL", 86400)  # 交易日历日内基本不变，缓�
 TTL_FUND = _ttl("FUND", 86400)  # 财报季度才变，缓存 1 天
 TTL_VAL = _ttl("VAL", 3600)  # 估值日级，缓存 1 小时
 TTL_RISK = _ttl("RISK", 21600)  # ④ 风险源(质押/商誉/预告)粗粒度变更，缓存 6h
-TTL_RANK = _ttl("RANK", 300)
-TTL_SPOT = _ttl("SPOT", TTL_RANK)
+TTL_RANK = _ttl("RANK", 60)
+TTL_SPOT = _ttl("SPOT", 300)
 
 # Row caps so a single tool call can't dump thousands of rows into the
 # model's context.
@@ -261,24 +263,90 @@ def get_quote(symbol: str) -> tuple[list[dict[str, Any]], str]:
     return hit[:1], "akshare:stock_zh_a_spot(sina,filter,fallback)"
 
 
+_SINA_A_RANK_URL = (
+    "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/"
+    "Market_Center.getHQNodeData"
+)
+
+
+def _sina_ranking_rows(metric: str, limit: int) -> list[dict[str, Any]]:
+    """Fetch one server-sorted Sina page instead of crawling every A-share page."""
+    sort_field, ascending = {
+        "gainers": ("changepercent", "0"),
+        "losers": ("changepercent", "1"),
+        "amount": ("amount", "0"),
+    }[metric]
+    page_size = min(80, max(20, limit * 2))
+    timeout = max(1.0, float(os.environ.get("AKSHARE_MCP_SINA_RANK_TIMEOUT", "15")))
+    params = {
+        "page": "1",
+        "num": str(page_size),
+        "sort": sort_field,
+        "asc": ascending,
+        "node": "hs_a",
+        "symbol": "",
+        "_s_r_a": "page",
+    }
+
+    try:
+        response = _retry(
+            lambda: requests.get(_SINA_A_RANK_URL, params=params, timeout=timeout),
+            attempts=2,
+            sleep=0.4,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except Exception as exc:  # noqa: BLE001 - normalize upstream transport/parser errors
+        raise AkShareUnavailable("新浪排行真实数据暂不可用") from exc
+
+    if not isinstance(payload, list):
+        raise AkShareUnavailable("新浪排行真实数据格式异常")
+
+    rows: list[dict[str, Any]] = []
+    for raw in payload:
+        if not isinstance(raw, dict):
+            continue
+        code = _strip_market_prefix(str(raw.get("code") or raw.get("symbol") or ""))
+        price = _to_float(raw.get("trade"))
+        change = _to_float(raw.get("changepercent"))
+        amount = _to_float(raw.get("amount"))
+        if not re.fullmatch(r"\d{6}", code) or price is None or change is None or amount is None:
+            continue
+        rows.append(
+            {
+                "代码": code,
+                "名称": str(raw.get("name") or "").strip(),
+                "最新价": price,
+                "涨跌额": _to_float(raw.get("pricechange")),
+                "涨跌幅": change,
+                "买入": _to_float(raw.get("buy")),
+                "卖出": _to_float(raw.get("sell")),
+                "昨收": _to_float(raw.get("settlement")),
+                "今开": _to_float(raw.get("open")),
+                "最高": _to_float(raw.get("high")),
+                "最低": _to_float(raw.get("low")),
+                "成交量": _to_float(raw.get("volume")),
+                "成交额": amount,
+                "时间戳": str(raw.get("ticktime") or "").strip(),
+            }
+        )
+
+    if metric == "amount":
+        rows.sort(key=lambda row: _to_float(row.get("成交额")) or 0, reverse=True)
+    elif metric == "losers":
+        rows.sort(key=lambda row: _to_float(row.get("涨跌幅")) or 0)
+    else:
+        rows.sort(key=lambda row: _to_float(row.get("涨跌幅")) or 0, reverse=True)
+    return rows[:limit]
+
+
 def get_stock_rankings(metric: str = "gainers", limit: int = 20) -> tuple[list[dict[str, Any]], str]:
-    """A股全市场榜单。metric: gainers | losers | amount。"""
+    """A股全市场榜单。由新浪服务端排序后只取首页真实数据。"""
     m = (metric or "gainers").strip().lower()
     if m not in {"gainers", "losers", "amount"}:
         raise AkShareUnavailable("不支持的榜单类型，仅支持 gainers/losers/amount")
     cap = max(1, min(int(limit or 20), 50))
-    rows = [
-        r for r in _get_a_spot_records()
-        if _to_float(r.get("最新价")) is not None and _to_float(r.get("涨跌幅")) is not None
-    ]
-    if m == "amount":
-        rows = [r for r in rows if _to_float(r.get("成交额")) is not None]
-        rows.sort(key=lambda r: _to_float(r.get("成交额")) or 0, reverse=True)
-    elif m == "losers":
-        rows.sort(key=lambda r: _to_float(r.get("涨跌幅")) or 0)
-    else:
-        rows.sort(key=lambda r: _to_float(r.get("涨跌幅")) or 0, reverse=True)
-    return rows[:cap], f"akshare:stock_zh_a_spot(sina,{m})"
+    return _sina_ranking_rows(m, cap), f"akshare:sina-stock-rankings({m})"
 
 
 def get_kline(

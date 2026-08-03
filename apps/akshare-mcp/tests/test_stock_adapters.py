@@ -1,9 +1,6 @@
 """Stock quote and intraday integrity tests without live upstream calls."""
 
 import datetime
-import threading
-import time
-from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -103,38 +100,71 @@ def test_intraday_rows_keep_latest_session_and_sort_dedupe():
     ]
 
 
-def test_rankings_share_one_full_market_cold_fetch(monkeypatch):
-    pd = pytest.importorskip("pandas")
+@pytest.mark.parametrize(
+    ("metric", "expected_sort", "expected_asc", "expected_codes"),
+    [
+        ("gainers", "changepercent", "0", ["300001", "600001"]),
+        ("losers", "changepercent", "1", ["600001", "300001"]),
+        ("amount", "amount", "0", ["600001", "300001"]),
+    ],
+)
+def test_rankings_use_one_sorted_sina_page(
+    monkeypatch,
+    metric,
+    expected_sort,
+    expected_asc,
+    expected_codes,
+):
     clear_cache()
-    calls = {"n": 0}
-    calls_lock = threading.Lock()
-    started = threading.Event()
-    release = threading.Event()
+    calls = []
 
-    class _SpotAk:
+    class _Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return [
+                {
+                    "symbol": "sz300001",
+                    "code": "300001",
+                    "name": "特锐德",
+                    "trade": "12.30",
+                    "changepercent": "4.50",
+                    "amount": "1000",
+                    "ticktime": "10:01:02",
+                },
+                {
+                    "symbol": "sh600001",
+                    "code": "600001",
+                    "name": "邯郸钢铁",
+                    "trade": "8.10",
+                    "changepercent": "-2.00",
+                    "amount": "3000",
+                    "ticktime": "10:01:01",
+                },
+            ]
+
+    class _Requests:
+        def get(self, url, *, params, timeout):
+            calls.append((url, params, timeout))
+            return _Response()
+
+    class _FullMarketMustNotRun:
         def stock_zh_a_spot(self):
-            with calls_lock:
-                calls["n"] += 1
-            started.set()
-            assert release.wait(timeout=2)
-            return pd.DataFrame(
-                [
-                    {"代码": "sh600519", "名称": "贵州茅台", "最新价": 1500, "涨跌幅": 1.2, "成交额": 10},
-                    {"代码": "sz000001", "名称": "平安银行", "最新价": 10, "涨跌幅": -0.5, "成交额": 20},
-                ]
-            )
+            raise AssertionError("rankings must not fetch every A-share page")
 
-    monkeypatch.setattr(adp, "ak", _SpotAk())
+    monkeypatch.setattr(adp, "requests", _Requests(), raising=False)
+    monkeypatch.setattr(adp, "ak", _FullMarketMustNotRun())
 
-    with ThreadPoolExecutor(max_workers=3) as pool:
-        futures = [
-            pool.submit(adp.get_stock_rankings, metric, 2)
-            for metric in ("gainers", "losers", "amount")
-        ]
-        assert started.wait(timeout=1)
-        time.sleep(0.05)
-        release.set()
-        results = [future.result(timeout=2) for future in futures]
+    rows, source = adp.get_stock_rankings(metric, 2)
 
-    assert all(len(rows) == 2 for rows, _source in results)
-    assert calls["n"] == 1
+    assert len(calls) == 1
+    url, params, timeout = calls[0]
+    assert url.startswith("https://")
+    assert params["page"] == "1"
+    assert params["sort"] == expected_sort
+    assert params["asc"] == expected_asc
+    assert 2 <= int(params["num"]) <= 80
+    assert timeout > 0
+    assert [row["代码"] for row in rows] == expected_codes
+    assert source == f"akshare:sina-stock-rankings({metric})"

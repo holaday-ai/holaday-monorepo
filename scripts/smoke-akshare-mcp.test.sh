@@ -19,8 +19,8 @@ fake_payload() {
   local minute_two="2026-07-31 10:04:00"
   local trading_day=true
   local source="akshare:stock_zh_a_minute(sina,1m)"
-  local gainers_source="akshare:stock_zh_a_spot(sina,gainers)"
-  local amount_source="akshare:stock_zh_a_spot(sina,amount)"
+  local gainers_source="akshare:sina-stock-rankings(gainers)"
+  local amount_source="akshare:sina-stock-rankings(amount)"
   local gainers_row='{"代码":"600000","最新价":10,"涨跌幅":1.2,"成交额":100000}'
   local amount_row='{"代码":"600000","最新价":10,"涨跌幅":1.2,"成交额":100000}'
 

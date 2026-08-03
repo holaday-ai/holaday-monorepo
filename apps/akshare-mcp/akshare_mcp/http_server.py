@@ -319,6 +319,19 @@ def risk_warm() -> dict[str, Any]:
         return {"error": f"接口调用失败: {exc}", "data": [], "count": 0, "disclaimer": DISCLAIMER}
 
 
+def _warm_market_caches_once() -> None:
+    """Warm independent fast-ranking, symbol-table, and risk snapshots."""
+    _safe(_rank, "gainers", 8)
+    try:
+        adp.refresh_symbol_table()
+    except Exception:  # noqa: BLE001 - each cache must warm independently
+        _LOGGER.exception("akshare symbol-table prewarm failed")
+    try:
+        adp.warm_risk_tables()
+    except Exception:  # noqa: BLE001 - each cache must warm independently
+        _LOGGER.exception("akshare risk-table prewarm failed")
+
+
 @app.on_event("startup")
 def _prewarm_risk_on_startup() -> None:
     """启动后台预热风险表 + 周期重热(<TTL_RISK 保持热)。daemon 线程，**不阻塞 startup**
@@ -329,8 +342,7 @@ def _prewarm_risk_on_startup() -> None:
     def _loop() -> None:
         while True:
             try:
-                _safe(_rank, "gainers", 8)
-                adp.warm_risk_tables()
+                _warm_market_caches_once()
             except Exception:  # noqa: BLE001 - 预热失败不影响服务
                 _LOGGER.exception("akshare background prewarm failed")
             time.sleep(5 * 3600)  # < TTL_RISK(6h)，周期重热

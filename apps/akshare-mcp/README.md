@@ -18,11 +18,12 @@ Thin **MCP wrapper over [AkShare](https://akshare.akfamily.xyz/)** for A股
 | `get_dragon_tiger(start_date, end_date)` | 龙虎榜 | 3600s |
 | `get_northbound_flow()` | 北向资金流向 | 60s |
 | `get_index_quote(market)` | 港/美/A股指数（hk/us/cn） | 60s |
-| `get_stock_rankings(metric, limit)` | A股榜单（gainers/losers/amount） | 300s |
+| `get_stock_rankings(metric, limit)` | A股榜单（gainers/losers/amount） | 60s |
 | `get_share_unlock(symbol)` | 个股限售解禁（G2） | 3600s |
 
-个股 quote 与分时图共享 `stock_zh_a_minute(sina)` 单股票缓存；榜单继续使用
-`stock_zh_a_spot(sina)` 全市场缓存。单股票分钟源失败时 quote 才退回全市场真实快照。
+个股 quote 与分时图共享 `stock_zh_a_minute(sina)` 单股票缓存；榜单使用新浪行情中心
+服务端排序后的 HTTPS 单页真实数据，避免每次冷缓存串行抓取 5500+ 只股票。全市场
+`stock_zh_a_spot(sina)` 只保留给代码名称表预热，以及单股票分钟源失败时的真实快照降级。
 TTL 全部 env 可覆盖（`AKSHARE_MCP_TTL_*`，见 `.env.example`）。
 
 ## 结构
@@ -116,8 +117,9 @@ PM2 进程名：`akshare-mcp-http`。日志默认写入 `/var/log/holaday/akshar
 3. **龙虎榜含官方 `解读` 列**：`stock_lhb_detail_em` 自带一行中性解读（如「主力做T」），
    零成本接入盘后简报（非我们生成，合规）。
 
-4. **全市场榜单只提供可验证字段**：当前可稳定取得涨幅榜、跌幅榜、成交额榜；
-   换手率榜源暂未纳入，不用模拟字段补假数据。消费侧应禁用换手率 tab 或展示数据源说明。
+4. **全市场榜单只提供可验证字段**：当前从新浪行情中心 HTTPS 接口按涨跌幅/成交额
+   服务端排序，只取所需首页，稳定取得涨幅榜、跌幅榜、成交额榜；换手率榜源暂未纳入，
+   不用模拟字段补假数据。消费侧应禁用换手率 tab 或展示数据源说明。
 
 > 升级 AkShare 后用 `pip show akshare` 看版本，对照 <https://akshare.akfamily.xyz/>
 > 核对 `adapters.py` 里的 `ak.*`（集中于此，工具契约不变）。
