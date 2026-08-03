@@ -25,6 +25,7 @@ import type { Duplex } from 'node:stream';
 import type { Logger } from 'pino';
 import { WebSocket, WebSocketServer } from 'ws';
 import { authenticateStreamOrAccessToken } from '../auth/middleware.js';
+import { startWebSocketSessionRevalidation } from '../auth/websocket-session-revalidation.js';
 import { db } from '../db/client.js';
 import type { BrowserPool } from './browser-pool.js';
 
@@ -44,6 +45,8 @@ export interface VncProxyOptions {
    */
   allowedUserIds?: Set<string>;
   authenticateToken?: (token: string) => Promise<string | null>;
+  /** Defaults to the task-WebSocket heartbeat period. */
+  sessionRevalidationIntervalMs?: number;
 }
 
 export interface VncProxy {
@@ -146,6 +149,14 @@ export function createVncProxy(opts: VncProxyOptions): VncProxy {
       // selectSubProtocol resolves to the same thing websockify will
       // speak.
       wss.handleUpgrade(req, socket, head, (client) => {
+        startWebSocketSessionRevalidation({
+          socket: client,
+          token,
+          expectedUserId: callerUserId,
+          authenticateToken,
+          logger: log,
+          intervalMs: opts.sessionRevalidationIntervalMs,
+        });
         const upstreamUrl = `ws://127.0.0.1:${instance.wsPort}/`;
         const upstream = new WebSocket(upstreamUrl, ['binary']);
         pipe(client, upstream, instance.taskId, log, opts.pool);

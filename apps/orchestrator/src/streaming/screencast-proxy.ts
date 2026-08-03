@@ -28,6 +28,7 @@ import type { Duplex } from 'node:stream';
 import type { Logger } from 'pino';
 import { WebSocket, WebSocketServer } from 'ws';
 import { authenticateStreamOrAccessToken } from '../auth/middleware.js';
+import { startWebSocketSessionRevalidation } from '../auth/websocket-session-revalidation.js';
 import type { BrowserPool } from '../browser-pool/index.js';
 import { db } from '../db/client.js';
 import type { BrowserInstance } from '../browser-pool/types.js';
@@ -87,6 +88,8 @@ export interface ScreencastProxyOptions {
   /** Override route. Default: `/screencast-ws/:userId`. */
   pathPattern?: RegExp;
   authenticateToken?: (token: string) => Promise<string | null>;
+  /** Defaults to the task-WebSocket heartbeat period. */
+  sessionRevalidationIntervalMs?: number;
 }
 
 export interface ScreencastProxy {
@@ -164,6 +167,14 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
 
         const instance = picked.instance;
         wss.handleUpgrade(req, socket, head, (ws) => {
+          startWebSocketSessionRevalidation({
+            socket: ws,
+            token,
+            expectedUserId: callerUserId,
+            authenticateToken,
+            logger: log,
+            intervalMs: opts.sessionRevalidationIntervalMs,
+          });
           void wireUpClient({ ws, callerUserId, instance });
         });
       },
