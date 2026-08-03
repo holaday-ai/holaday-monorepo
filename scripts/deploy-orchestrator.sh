@@ -92,6 +92,10 @@ if ! [[ "$REMOTE_RETRY_SLEEP" =~ ^[0-9]+$ ]]; then
   exit 1
 fi
 
+if [[ "${PAYPAL_PREFLIGHT_VERIFIED:-0}" != "1" ]]; then
+  "$SCRIPT_DIR/verify-paypal-production.sh"
+fi
+
 run_with_retry() {
   local label="$1"
   shift

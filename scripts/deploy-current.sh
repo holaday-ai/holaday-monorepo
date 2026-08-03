@@ -112,8 +112,13 @@ deploy_spa() {
 
 deploy_orchestrator() {
   echo "→ Deploying orchestrator"
-  ORCHESTRATOR_ROLLBACK_HEAD="$RELEASE_ROLLBACK_HEAD" \
+  PAYPAL_PREFLIGHT_VERIFIED=1 \
+    ORCHESTRATOR_ROLLBACK_HEAD="$RELEASE_ROLLBACK_HEAD" \
     "$ROOT_DIR/scripts/deploy-orchestrator.sh" "$BRANCH"
+}
+
+verify_paypal_preflight() {
+  "$ROOT_DIR/scripts/verify-paypal-production.sh"
 }
 
 deploy_akshare() {
@@ -158,6 +163,7 @@ case "$TARGET" in
   orchestrator)
     fetch_current
     preflight_release_branch
+    verify_paypal_preflight
     deploy_akshare
     deploy_orchestrator
     verify_healthz
@@ -170,6 +176,7 @@ case "$TARGET" in
   both)
     fetch_current
     preflight_release_branch
+    verify_paypal_preflight
     deploy_akshare
     deploy_orchestrator
     # Orchestrator deploy resets the shared Vultr checkout. Keep SPA last

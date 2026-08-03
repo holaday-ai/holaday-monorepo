@@ -40,8 +40,13 @@ build_ssh_password_prefix() {
   SSH_PASSWORD_PREFIX=(env)
 }
 STUB
+  cat > "$harness_dir/repo/scripts/verify-paypal-production.sh" <<'STUB'
+#!/usr/bin/env bash
+echo "paypal" >> "$TEST_EVENT_LOG"
+STUB
   chmod +x "$harness_dir/repo/scripts/load-deploy-env.sh" \
-    "$harness_dir/repo/scripts/ssh-password-auth.sh"
+    "$harness_dir/repo/scripts/ssh-password-auth.sh" \
+    "$harness_dir/repo/scripts/verify-paypal-production.sh"
 }
 
 test_deploy_current_preflights_before_akshare() {
@@ -59,6 +64,13 @@ test_deploy_current_preflights_before_akshare() {
 echo "akshare" >> "$TEST_EVENT_LOG"
 STUB
   chmod +x "$harness_dir/repo/scripts/deploy-akshare-mcp.sh"
+
+  cat > "$harness_dir/repo/scripts/deploy-orchestrator.sh" <<'STUB'
+#!/usr/bin/env bash
+echo "orchestrator" >> "$TEST_EVENT_LOG"
+[[ "${PAYPAL_PREFLIGHT_VERIFIED:-0}" == "1" ]]
+STUB
+  chmod +x "$harness_dir/repo/scripts/deploy-orchestrator.sh"
 
   cat > "$harness_dir/bin/git" <<'STUB'
 #!/usr/bin/env bash
@@ -90,16 +102,32 @@ fi
 STUB
   chmod +x "$harness_dir/bin/git" "$harness_dir/bin/ssh"
 
+  cat > "$harness_dir/bin/curl" <<'STUB'
+#!/usr/bin/env bash
+output_file=""
+while (($#)); do
+  if [[ "$1" == "-o" ]]; then
+    output_file="$2"
+    shift 2
+    continue
+  fi
+  shift
+done
+printf '%s' '{"status":"ok"}' > "$output_file"
+printf '200'
+STUB
+  chmod +x "$harness_dir/bin/curl"
+
   if ! PATH="$harness_dir/bin:$PATH" \
     TEST_EVENT_LOG="$event_log" \
     VULTR_PASSWORD="unit-secret" \
     BRANCH="codex/release-candidate" \
-    "$harness_dir/repo/scripts/deploy-current.sh" akshare > "$output" 2>&1; then
+    "$harness_dir/repo/scripts/deploy-current.sh" orchestrator > "$output" 2>&1; then
     cat "$output" >&2
-    fail "deploy-current akshare harness should complete"
+    fail "deploy-current orchestrator harness should complete"
   fi
 
-  assert_event_order "$event_log" capture-head preflight akshare
+  assert_event_order "$event_log" capture-head preflight paypal akshare orchestrator
   ! grep -Fq "unit-secret" "$output" || fail "deploy-current must not print credentials"
 
   : > "$event_log"
