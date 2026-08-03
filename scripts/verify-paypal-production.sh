@@ -21,13 +21,21 @@ if [[ ! -f "$CHECK_SCRIPT" ]]; then
 fi
 
 build_ssh_password_prefix "$VULTR_PASSWORD"
+CHECK_SCRIPT_B64="$(base64 < "$CHECK_SCRIPT" | tr -d '\n')"
 
 echo "→ Verifying production PayPal credentials and webhook"
-"${SSH_PASSWORD_PREFIX[@]}" ssh \
+if ! PREFLIGHT_OUTPUT=$("${SSH_PASSWORD_PREFIX[@]}" ssh \
   -o StrictHostKeyChecking=no \
   -o ConnectTimeout=20 \
   -o ServerAliveInterval=10 \
   -o ServerAliveCountMax=3 \
   "$VULTR_HOST" \
-  "set -e; cd /opt/holaday-monorepo; set -a; . apps/orchestrator/.env; set +a; node" \
-  < "$CHECK_SCRIPT"
+  "set -e; cd /opt/holaday-monorepo; set -a; . apps/orchestrator/.env; set +a; printf '%s' '$CHECK_SCRIPT_B64' | base64 --decode | node --input-type=module"); then
+  exit 1
+fi
+
+printf '%s\n' "$PREFLIGHT_OUTPUT"
+if ! grep -Eq '^PAYPAL_PREFLIGHT=(ready|disabled) environment=(live|sandbox)$' <<< "$PREFLIGHT_OUTPUT"; then
+  echo "PayPal production preflight failed: verifier returned no readiness marker" >&2
+  exit 1
+fi
