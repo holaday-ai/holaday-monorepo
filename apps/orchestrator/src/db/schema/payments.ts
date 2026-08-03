@@ -68,7 +68,10 @@ export const payments = mysqlTable(
     uniqueIndex('uk_payments_external_id').on(t.externalId),
     index('ix_payments_user_status').on(t.userExternalId, t.status),
     index('ix_payments_status_completed').on(t.status, t.completedAt),
-    index('ix_payments_provider_order').on(t.provider, t.providerOrderId),
+    // A provider order is a single checkout identity. MySQL permits
+    // multiple NULL values here, so rows created before an order exists
+    // remain valid while duplicate provider callbacks cannot fork state.
+    uniqueIndex('uk_payments_provider_order').on(t.provider, t.providerOrderId),
     // Race-safe idempotency for capture writes — both PayPal's
     // capture id and the WX/Alipay transactionId land in
     // provider_capture_id. MySQL allows multiple NULLs in a UNIQUE
