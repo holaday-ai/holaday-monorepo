@@ -1,10 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
+const WS_TEST_PORT = Number(process.env.WS_PORT ?? '38200') + 2;
+
 beforeAll(() => {
   process.env.DATABASE_URL ??= 'mysql://holaday:holaday-dev@127.0.0.1:3306/holaday';
   process.env.REDIS_URL ??= 'redis://127.0.0.1:6379/0';
   process.env.JWT_SECRET ??= 'integration-test-secret-must-be-32-chars-or-more-please';
-  process.env.WS_PORT ??= '38202';
 });
 
 describe('WS server end-to-end', () => {
@@ -15,7 +16,7 @@ describe('WS server end-to-end', () => {
   });
 
   it('JWT subprotocol auth -> welcome -> task.dispatch on planted task', async () => {
-    const port = Number(process.env.WS_PORT);
+    const port = WS_TEST_PORT;
     const { default: WebSocket } = await import('ws');
     const { signAccessToken, verifyAccessToken } = await import('../auth/jwt.js');
     const { createWsServer } = await import('./server.js');
@@ -99,7 +100,7 @@ describe('WS server end-to-end', () => {
   });
 
   it('uses the connection authenticator once for an accepted subprotocol token', async () => {
-    const port = Number(process.env.WS_PORT) + 1;
+    const port = WS_TEST_PORT + 1;
     const { default: WebSocket } = await import('ws');
     const { createWsServer } = await import('./server.js');
     const { WS_SUBPROTOCOL, parseServerMessage } = await import('@holaday/shared-types');
@@ -131,7 +132,7 @@ describe('WS server end-to-end', () => {
   });
 
   it('rejects a revoked access token supplied in client.hello', async () => {
-    const port = Number(process.env.WS_PORT) + 2;
+    const port = WS_TEST_PORT + 2;
     const { default: WebSocket } = await import('ws');
     const { createWsServer } = await import('./server.js');
     const { WS_SUBPROTOCOL, parseServerMessage } = await import('@holaday/shared-types');
@@ -175,7 +176,7 @@ describe('WS server end-to-end', () => {
   });
 
   it('fails closed when the connection authenticator throws', async () => {
-    const port = Number(process.env.WS_PORT) + 3;
+    const port = WS_TEST_PORT + 3;
     const { default: WebSocket } = await import('ws');
     const { createWsServer } = await import('./server.js');
     const { WS_SUBPROTOCOL, parseServerMessage } = await import('@holaday/shared-types');
@@ -222,7 +223,7 @@ describe('WS server end-to-end', () => {
   });
 
   it('closes an established connection when its session is revoked', async () => {
-    const port = Number(process.env.WS_PORT) + 4;
+    const port = WS_TEST_PORT + 4;
     const { default: WebSocket } = await import('ws');
     const { createWsServer } = await import('./server.js');
     const { WS_SUBPROTOCOL, parseServerMessage } = await import('@holaday/shared-types');
@@ -275,7 +276,7 @@ describe('WS server end-to-end', () => {
   });
 
   it('fails an established connection closed when session revalidation errors', async () => {
-    const port = Number(process.env.WS_PORT) + 5;
+    const port = WS_TEST_PORT + 5;
     const { default: WebSocket } = await import('ws');
     const { createWsServer } = await import('./server.js');
     const { WS_SUBPROTOCOL, parseServerMessage } = await import('@holaday/shared-types');

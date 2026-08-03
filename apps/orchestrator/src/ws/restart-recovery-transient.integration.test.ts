@@ -1,10 +1,11 @@
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 
+const WS_TEST_PORT = Number(process.env.WS_PORT ?? '38200') + 17;
+
 beforeAll(() => {
   process.env.DATABASE_URL ??= 'mysql://holaday:holaday-dev@127.0.0.1:3306/holaday';
   process.env.REDIS_URL ??= 'redis://127.0.0.1:6379/0';
   process.env.JWT_SECRET ??= 'integration-test-secret-must-be-32-chars-or-more-please';
-  process.env.WS_PORT ??= '38217';
 });
 
 async function authenticateSignedTestToken(token: string): Promise<string | null> {
@@ -76,7 +77,7 @@ describe('restart recovery: transient queued tasks fail visibly', () => {
     const summary = await loadRehydratedTasks();
     expect(summary.taskCount).toBeGreaterThanOrEqual(1);
 
-    const port = Number(process.env.WS_PORT);
+    const port = WS_TEST_PORT;
     const ws = createWsServer(port, { authenticateToken: authenticateSignedTestToken });
     close = async () => {
       await ws.close();
@@ -213,7 +214,7 @@ describe('restart recovery: transient queued tasks fail visibly', () => {
       .set({ status: 'completed', completedAt: new Date() })
       .where(eq(tasks.externalId, taskId));
 
-    const port = Number(process.env.WS_PORT);
+    const port = WS_TEST_PORT;
     const ws = createWsServer(port, { authenticateToken: authenticateSignedTestToken });
     close = async () => {
       await ws.close();
