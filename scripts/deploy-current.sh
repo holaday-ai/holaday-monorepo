@@ -52,6 +52,45 @@ capture_release_rollback_head() {
   echo "→ Release rollback HEAD: $RELEASE_ROLLBACK_HEAD"
 }
 
+preflight_release_branch() {
+  local gate_rc
+
+  capture_release_rollback_head
+  echo "→ Pre-reset production gate: $RELEASE_ROLLBACK_HEAD must be an ancestor of origin/$BRANCH"
+  set +e
+  "${SSH_PASSWORD_PREFIX[@]}" ssh \
+    -o StrictHostKeyChecking=no \
+    -o ConnectTimeout=20 \
+    -o ServerAliveInterval=10 \
+    -o ServerAliveCountMax=3 \
+    "$VULTR_HOST" \
+    "set -e; cd /opt/holaday-monorepo; \
+      git fetch origin '+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH' >/dev/null 2>&1 || exit 2; \
+      git cat-file -e '$RELEASE_ROLLBACK_HEAD^{commit}' || exit 2; \
+      git merge-base --is-ancestor '$RELEASE_ROLLBACK_HEAD' 'origin/$BRANCH'" \
+    >/dev/null
+  gate_rc=$?
+  set -e
+
+  case "$gate_rc" in
+    0)
+      echo "   ✅ Production branch preflight passed"
+      ;;
+    1)
+      if [[ "${ALLOW_DIVERGENT_DEPLOY:-0}" != "1" ]]; then
+        echo "⛔ LIVE HEAD is not an ancestor of origin/$BRANCH; refusing production reset." >&2
+        echo "   Reconcile the branch or set ALLOW_DIVERGENT_DEPLOY=1 for an intentional cutover." >&2
+        exit 3
+      fi
+      echo "⚠️  ALLOW_DIVERGENT_DEPLOY=1 set — proceeding despite divergence." >&2
+      ;;
+    *)
+      echo "⛔ Could not verify origin/$BRANCH against the LIVE HEAD; refusing production reset." >&2
+      exit 4
+      ;;
+  esac
+}
+
 fetch_current() {
   if [[ -n "$(git status --porcelain --untracked-files=no)" && "${ALLOW_DIRTY_DEPLOY:-0}" != "1" ]]; then
     echo "❌ Refusing deploy with uncommitted tracked changes." >&2
@@ -79,7 +118,8 @@ deploy_orchestrator() {
 
 deploy_akshare() {
   echo "→ Deploying akshare-mcp"
-  "$ROOT_DIR/scripts/deploy-akshare-mcp.sh" "$BRANCH"
+  AKSHARE_ROLLBACK_HEAD="$RELEASE_ROLLBACK_HEAD" \
+    "$ROOT_DIR/scripts/deploy-akshare-mcp.sh" "$BRANCH"
 }
 
 verify_healthz() {
@@ -117,18 +157,19 @@ case "$TARGET" in
     ;;
   orchestrator)
     fetch_current
-    capture_release_rollback_head
+    preflight_release_branch
     deploy_akshare
     deploy_orchestrator
     verify_healthz
     ;;
   akshare)
     fetch_current
+    preflight_release_branch
     deploy_akshare
     ;;
   both)
     fetch_current
-    capture_release_rollback_head
+    preflight_release_branch
     deploy_akshare
     deploy_orchestrator
     # Orchestrator deploy resets the shared Vultr checkout. Keep SPA last
