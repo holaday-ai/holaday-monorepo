@@ -84,6 +84,13 @@ export interface HttpAppDeps {
   downloadManager?: import('./files/download-manager.js').DownloadManager | null;
 }
 
+function parsePayPalAmountCents(value: unknown): number | null {
+  if (typeof value !== 'string' || !/^\d+(?:\.\d{1,2})?$/.test(value)) return null;
+  const [whole, fraction = ''] = value.split('.');
+  const cents = Number(whole) * 100 + Number(fraction.padEnd(2, '0'));
+  return Number.isSafeInteger(cents) ? cents : null;
+}
+
 export function createHttpApp(deps: HttpAppDeps) {
   const app = express();
 
@@ -388,6 +395,8 @@ export function createHttpApp(deps: HttpAppDeps) {
       event_type?: string;
       resource?: {
         id?: string;
+        status?: string;
+        amount?: { currency_code?: string; value?: string };
         supplementary_data?: { related_ids?: { order_id?: string } };
       };
     };
@@ -398,6 +407,9 @@ export function createHttpApp(deps: HttpAppDeps) {
       return;
     }
     const captureId = event.resource?.id ?? null;
+    const captureStatus = event.resource?.status ?? null;
+    const captureAmountCents = parsePayPalAmountCents(event.resource?.amount?.value);
+    const captureCurrency = event.resource?.amount?.currency_code?.toUpperCase() ?? null;
     const orderId = event.resource?.supplementary_data?.related_ids?.order_id ?? null;
     if (!captureId || !orderId) {
       logger.warn({ event }, 'paypal webhook: missing capture/order id');
@@ -428,7 +440,29 @@ export function createHttpApp(deps: HttpAppDeps) {
           return { kind: 'deduped' as const, row };
         }
         if (row.status !== 'pending') {
-          return { kind: 'review' as const, row };
+          return { kind: 'review' as const, row, reason: 'unexpected_payment_status' };
+        }
+        if (
+          captureStatus !== 'COMPLETED' ||
+          captureAmountCents !== row.amountCents ||
+          captureCurrency !== row.currency.toUpperCase()
+        ) {
+          await tx
+            .update(payments)
+            .set({
+              status: 'failed',
+              providerCaptureId: captureId,
+              metadata: {
+                ...((row.metadata as Record<string, unknown> | null) ?? {}),
+                webhookEventType: event.event_type,
+                reason: 'capture_settlement_mismatch',
+                captureStatus,
+                captureAmountCents,
+                captureCurrency,
+              },
+            })
+            .where(and(eq(payments.id, row.id), eq(payments.status, 'pending')));
+          return { kind: 'review' as const, row, reason: 'capture_settlement_mismatch' };
         }
         if (
           settlement.firstMonthRequested &&
@@ -446,12 +480,12 @@ export function createHttpApp(deps: HttpAppDeps) {
               },
             })
             .where(and(eq(payments.id, row.id), eq(payments.status, 'pending')));
-          return { kind: 'review' as const, row };
+          return { kind: 'review' as const, row, reason: 'first_month_no_longer_eligible' };
         }
 
         const completed = await completePaymentInTransaction(tx, row, settlement, {
           captureId,
-          captureStatus: 'COMPLETED',
+          captureStatus,
           metadata: { webhookEventType: event.event_type },
         });
         return {
@@ -469,9 +503,9 @@ export function createHttpApp(deps: HttpAppDeps) {
           {
             paymentId: outcome.row.externalId,
             captureId,
-            reason: 'first_month_no_longer_eligible',
+            reason: outcome.reason,
           },
-          'paypal webhook: captured stale promo requires refund review',
+          'paypal webhook capture requires refund review',
         );
         res.status(200).send('review required');
         return;

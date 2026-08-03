@@ -189,6 +189,23 @@ const firstMonthConfirm = {
   isFirstMonth: true,
 };
 
+function seedPendingPaypalPayment() {
+  paymentRows.push({
+    id: 1,
+    externalId: 'pay_paypal_test',
+    userExternalId: 'usr_cn_test',
+    provider: 'paypal',
+    providerOrderId: 'ORDER-123',
+    providerCaptureId: null,
+    status: 'pending',
+    kind: 'subscription',
+    plan: 'pro',
+    amountCents: 4900,
+    currency: 'USD',
+    metadata: { cycle: 'monthly', firstMonth: false },
+  });
+}
+
 describe('internal payment confirmation', () => {
   beforeEach(() => {
     process.env.INTERNAL_SHARED_SECRET = 'test-payment-secret';
@@ -236,7 +253,14 @@ describe('internal payment confirmation', () => {
 describe('PayPal webhook verification', () => {
   beforeEach(() => {
     vi.stubEnv('NODE_ENV', 'production');
-    delete process.env.PAYPAL_WEBHOOK_ID;
+    paymentRows.length = 0;
+    Object.assign(userState, {
+      id: 42,
+      externalId: 'usr_cn_test',
+      plan: 'free',
+      planExpiresAt: null,
+    });
+    grantFirstMonthBonusSpy.mockReset().mockResolvedValue(undefined);
   });
 
   afterEach(async () => {
@@ -249,6 +273,7 @@ describe('PayPal webhook verification', () => {
   });
 
   it('fails closed in production when PAYPAL_WEBHOOK_ID is missing', async () => {
+    delete process.env.PAYPAL_WEBHOOK_ID;
     const verifyWebhookSignature = vi.fn(async () => true);
 
     const response = await postPaypalWebhook(
@@ -258,5 +283,53 @@ describe('PayPal webhook verification', () => {
 
     expect(response.status).toBe(503);
     expect(verifyWebhookSignature).not.toHaveBeenCalled();
+  });
+
+  it('does not grant entitlements when a signed capture amount mismatches the order', async () => {
+    vi.stubEnv('PAYPAL_WEBHOOK_ID', 'WH-TEST');
+    seedPendingPaypalPayment();
+    const verifyWebhookSignature = vi.fn(async () => true);
+
+    const response = await postPaypalWebhook(
+      {
+        event_type: 'PAYMENT.CAPTURE.COMPLETED',
+        resource: {
+          id: 'CAPTURE-123',
+          status: 'COMPLETED',
+          amount: { currency_code: 'USD', value: '1.00' },
+          supplementary_data: { related_ids: { order_id: 'ORDER-123' } },
+        },
+      },
+      { verifyWebhookSignature },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe('review required');
+    expect(userState.plan).toBe('free');
+    expect(paymentRows[0]?.status).toBe('failed');
+  });
+
+  it('settles a signed capture only when status, amount and currency match', async () => {
+    vi.stubEnv('PAYPAL_WEBHOOK_ID', 'WH-TEST');
+    seedPendingPaypalPayment();
+    const verifyWebhookSignature = vi.fn(async () => true);
+
+    const response = await postPaypalWebhook(
+      {
+        event_type: 'PAYMENT.CAPTURE.COMPLETED',
+        resource: {
+          id: 'CAPTURE-123',
+          status: 'COMPLETED',
+          amount: { currency_code: 'USD', value: '49.00' },
+          supplementary_data: { related_ids: { order_id: 'ORDER-123' } },
+        },
+      },
+      { verifyWebhookSignature },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe('ok');
+    expect(userState.plan).toBe('pro');
+    expect(paymentRows[0]?.status).toBe('completed');
   });
 });
