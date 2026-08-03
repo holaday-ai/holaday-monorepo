@@ -12,6 +12,7 @@ from __future__ import annotations
 import functools
 import threading
 import time
+from dataclasses import dataclass, field
 from typing import Any, Callable, Hashable, TypeVar
 
 T = TypeVar("T")
@@ -48,23 +49,61 @@ class TTLCache:
 _CACHE = TTLCache()
 
 
+@dataclass
+class _Flight:
+    event: threading.Event = field(default_factory=threading.Event)
+    value: Any = None
+    error: BaseException | None = None
+
+
+_FLIGHTS: dict[Hashable, _Flight] = {}
+_FLIGHTS_LOCK = threading.Lock()
+
+
 def cached(ttl_seconds: float) -> Callable[[Callable[..., T]], Callable[..., T]]:
     """Decorator: cache the wrapped fetch for `ttl_seconds`.
 
-    Keyed by function name + positional + keyword args, so each
+    Keyed by function identity + positional + keyword args, so each
     distinct query (symbol / date / period) caches independently.
     """
 
     def decorator(fn: Callable[..., T]) -> Callable[..., T]:
         @functools.wraps(fn)
         def wrapper(*args: Any, **kwargs: Any) -> T:
-            key = (fn.__name__, args, tuple(sorted(kwargs.items())))
+            key = (fn, args, tuple(sorted(kwargs.items())))
             value, hit = _CACHE.get(key, ttl_seconds)
             if hit:
                 return value  # type: ignore[return-value]
-            value = fn(*args, **kwargs)
-            _CACHE.set(key, value)
-            return value
+
+            with _FLIGHTS_LOCK:
+                value, hit = _CACHE.get(key, ttl_seconds)
+                if hit:
+                    return value  # type: ignore[return-value]
+                flight = _FLIGHTS.get(key)
+                owns_flight = flight is None
+                if flight is None:
+                    flight = _Flight()
+                    _FLIGHTS[key] = flight
+
+            if not owns_flight:
+                flight.event.wait()
+                if flight.error is not None:
+                    raise flight.error
+                return flight.value  # type: ignore[return-value]
+
+            try:
+                value = fn(*args, **kwargs)
+                _CACHE.set(key, value)
+                flight.value = value
+                return value
+            except BaseException as exc:
+                flight.error = exc
+                raise
+            finally:
+                flight.event.set()
+                with _FLIGHTS_LOCK:
+                    if _FLIGHTS.get(key) is flight:
+                        _FLIGHTS.pop(key, None)
 
         return wrapper
 

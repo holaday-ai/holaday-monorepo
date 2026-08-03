@@ -2,6 +2,7 @@
 # renames interfaces between releases (see adapters.py TODO(verify) notes).
 mcp>=1.2.0
 akshare>=1.14.0
+requests>=2.31
 # HTTP transport (薄 FastAPI；orchestrator 同机 HTTP 直取，确定性简报不走 LLM)
 fastapi>=0.110
 uvicorn>=0.29

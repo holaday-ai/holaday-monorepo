@@ -18,8 +18,9 @@ module.exports = {
       env: {
         AKSHARE_HTTP_PORT: '8848',
         AKSHARE_MCP_TTL_QUOTE: '15',
-        AKSHARE_MCP_TTL_RANK: '300',
+        AKSHARE_MCP_TTL_RANK: '60',
         AKSHARE_MCP_TTL_SPOT: '300',
+        AKSHARE_MCP_SINA_RANK_TIMEOUT: '15',
         AKSHARE_MCP_TTL_INDEX: '60',
         AKSHARE_MCP_MAX_ROWS: '50',
       },
