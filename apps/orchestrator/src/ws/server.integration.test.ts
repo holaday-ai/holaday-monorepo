@@ -220,4 +220,104 @@ describe('WS server end-to-end', () => {
     expect(authenticateToken).toHaveBeenNthCalledWith(2, 'signed-access-token');
     client.close();
   });
+
+  it('closes an established connection when its session is revoked', async () => {
+    const port = Number(process.env.WS_PORT) + 4;
+    const { default: WebSocket } = await import('ws');
+    const { createWsServer } = await import('./server.js');
+    const { WS_SUBPROTOCOL, parseServerMessage } = await import('@holaday/shared-types');
+    const authenticateToken = vi
+      .fn<(token: string) => Promise<string | null>>()
+      .mockResolvedValueOnce('usr_ws_active')
+      .mockResolvedValueOnce(null);
+    const ws = createWsServer(port, {
+      authenticateToken,
+      sessionRevalidationIntervalMs: 25,
+    });
+    const client = new WebSocket(`ws://127.0.0.1:${port}`, [
+      WS_SUBPROTOCOL,
+      'jwt.signed-access-token',
+    ]);
+
+    try {
+      const closed = new Promise<{ code: number; reason: string }>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('session revocation timeout')), 1_000);
+        client.once('close', (code, reason) => {
+          clearTimeout(timer);
+          resolve({ code, reason: reason.toString() });
+        });
+        client.once('error', reject);
+      });
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('welcome timeout')), 1_000);
+        client.on('message', (raw) => {
+          const parsed = parseServerMessage(raw.toString());
+          if (parsed.success && parsed.data.type === 'server.welcome') {
+            clearTimeout(timer);
+            resolve();
+          }
+        });
+        client.once('error', reject);
+      });
+
+      await expect(closed).resolves.toEqual({ code: 4401, reason: 'session revoked' });
+      expect(authenticateToken).toHaveBeenCalledTimes(2);
+      expect(authenticateToken).toHaveBeenNthCalledWith(1, 'signed-access-token');
+      expect(authenticateToken).toHaveBeenNthCalledWith(2, 'signed-access-token');
+    } finally {
+      client.close();
+      await ws.close();
+    }
+
+    const callsAfterClose = authenticateToken.mock.calls.length;
+    await new Promise((resolve) => setTimeout(resolve, 75));
+    expect(authenticateToken).toHaveBeenCalledTimes(callsAfterClose);
+  });
+
+  it('fails an established connection closed when session revalidation errors', async () => {
+    const port = Number(process.env.WS_PORT) + 5;
+    const { default: WebSocket } = await import('ws');
+    const { createWsServer } = await import('./server.js');
+    const { WS_SUBPROTOCOL, parseServerMessage } = await import('@holaday/shared-types');
+    const authenticateToken = vi
+      .fn<(token: string) => Promise<string | null>>()
+      .mockResolvedValueOnce('usr_ws_active')
+      .mockRejectedValueOnce(new Error('database unavailable'));
+    const ws = createWsServer(port, {
+      authenticateToken,
+      sessionRevalidationIntervalMs: 25,
+    });
+    const client = new WebSocket(`ws://127.0.0.1:${port}`, [
+      WS_SUBPROTOCOL,
+      'jwt.signed-access-token',
+    ]);
+
+    try {
+      const closed = new Promise<{ code: number; reason: string }>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('session revalidation timeout')), 1_000);
+        client.once('close', (code, reason) => {
+          clearTimeout(timer);
+          resolve({ code, reason: reason.toString() });
+        });
+        client.once('error', reject);
+      });
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('welcome timeout')), 1_000);
+        client.on('message', (raw) => {
+          const parsed = parseServerMessage(raw.toString());
+          if (parsed.success && parsed.data.type === 'server.welcome') {
+            clearTimeout(timer);
+            resolve();
+          }
+        });
+        client.once('error', reject);
+      });
+
+      await expect(closed).resolves.toEqual({ code: 4401, reason: 'session revoked' });
+      expect(authenticateToken).toHaveBeenCalledTimes(2);
+    } finally {
+      client.close();
+      await ws.close();
+    }
+  });
 });
