@@ -10,6 +10,8 @@ const completeEnv = {
   PAYPAL_WEBHOOK_ID: 'WH-123',
 };
 
+const productionWebhook = 'https://hd-app.orangebench.tech/api/payment/paypal/webhook';
+
 function response(status, payload) {
   return {
     ok: status >= 200 && status < 300,
@@ -46,6 +48,26 @@ test('rejects partial live configuration before making a request', async () => {
   );
 });
 
+test('rejects a configured sandbox account for a production deployment', async () => {
+  let requested = false;
+
+  await assert.rejects(
+    verifyPayPalProduction(
+      {
+        ...completeEnv,
+        PAYPAL_ENV: 'sandbox',
+      },
+      async () => {
+        requested = true;
+        return response(200, {});
+      },
+    ),
+    /PAYPAL_ENV must be live for production deployment/,
+  );
+
+  assert.equal(requested, false);
+});
+
 test('rejects invalid OAuth credentials without exposing them', async () => {
   await assert.rejects(
     verifyPayPalProduction(completeEnv, async () => response(401, {})),
@@ -60,7 +82,10 @@ test('rejects invalid OAuth credentials without exposing them', async () => {
 test('rejects a webhook without capture completion events', async () => {
   const replies = [
     response(200, { access_token: 'access-token' }),
-    response(200, { event_types: [{ name: 'CHECKOUT.ORDER.APPROVED' }] }),
+    response(200, {
+      url: productionWebhook,
+      event_types: [{ name: 'CHECKOUT.ORDER.APPROVED' }],
+    }),
   ];
 
   await assert.rejects(
@@ -69,11 +94,29 @@ test('rejects a webhook without capture completion events', async () => {
   );
 });
 
+test('rejects a webhook registered to an unapproved URL', async () => {
+  const replies = [
+    response(200, { access_token: 'access-token' }),
+    response(200, {
+      url: 'https://example.com/paypal/webhook',
+      event_types: [{ name: 'PAYMENT.CAPTURE.COMPLETED' }],
+    }),
+  ];
+
+  await assert.rejects(
+    verifyPayPalProduction(completeEnv, async () => replies.shift()),
+    /webhook URL does not match an approved Holaday production endpoint/,
+  );
+});
+
 test('passes valid credentials and capture webhook configuration', async () => {
   const requests = [];
   const replies = [
     response(200, { access_token: 'access-token' }),
-    response(200, { event_types: [{ name: 'PAYMENT.CAPTURE.COMPLETED' }] }),
+    response(200, {
+      url: productionWebhook,
+      event_types: [{ name: 'PAYMENT.CAPTURE.COMPLETED' }],
+    }),
   ];
   const result = await verifyPayPalProduction(completeEnv, async (url, options) => {
     requests.push({ url, options });

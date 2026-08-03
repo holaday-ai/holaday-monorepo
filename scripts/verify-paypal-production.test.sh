@@ -29,6 +29,8 @@ cat > "$HARNESS_DIR/bin/ssh" <<'STUB'
 case "${TEST_SSH_RESULT:-ready}" in
   ready) echo 'PAYPAL_PREFLIGHT=ready environment=live' ;;
   disabled) echo 'PAYPAL_PREFLIGHT=disabled environment=sandbox' ;;
+  ready_sandbox) echo 'PAYPAL_PREFLIGHT=ready environment=sandbox' ;;
+  disabled_live) echo 'PAYPAL_PREFLIGHT=disabled environment=live' ;;
   empty) exit 0 ;;
   error) echo 'PayPal production preflight failed: OAuth returned HTTP 401' >&2; exit 1 ;;
 esac
@@ -49,7 +51,7 @@ for result in ready disabled; do
   ! grep -Fq 'unit-secret' "$output"
 done
 
-for result in empty error; do
+for result in ready_sandbox disabled_live empty error; do
   output="$HARNESS_DIR/$result.out"
   if PATH="$HARNESS_DIR/bin:$PATH" \
     TEST_SSH_RESULT="$result" \

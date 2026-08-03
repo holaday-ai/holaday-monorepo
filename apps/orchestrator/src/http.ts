@@ -412,7 +412,14 @@ export function createHttpApp(deps: HttpAppDeps) {
     const captureCurrency = event.resource?.amount?.currency_code?.toUpperCase() ?? null;
     const orderId = event.resource?.supplementary_data?.related_ids?.order_id ?? null;
     if (!captureId || !orderId) {
-      logger.warn({ event }, 'paypal webhook: missing capture/order id');
+      logger.warn(
+        {
+          eventType: event.event_type ?? null,
+          resourceId: event.resource?.id ?? null,
+          hasOrderId: Boolean(orderId),
+        },
+        'paypal webhook: missing capture/order id',
+      );
       res.status(200).send('skipped');
       return;
     }
@@ -420,7 +427,7 @@ export function createHttpApp(deps: HttpAppDeps) {
       const [observedRow] = await db
         .select()
         .from(payments)
-        .where(eq(payments.providerOrderId, orderId))
+        .where(and(eq(payments.provider, 'paypal'), eq(payments.providerOrderId, orderId)))
         .limit(1);
       if (!observedRow) {
         logger.warn({ orderId }, 'paypal webhook: no matching payments row');

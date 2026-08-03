@@ -1,6 +1,10 @@
 import { pathToFileURL } from 'node:url';
 
 const REQUIRED_CAPTURE_EVENT = 'PAYMENT.CAPTURE.COMPLETED';
+const DEFAULT_ALLOWED_WEBHOOK_URLS = [
+  'https://holaday.ai/api/payment/paypal/webhook',
+  'https://hd-app.orangebench.tech/api/payment/paypal/webhook',
+];
 
 function nonEmpty(value) {
   return typeof value === 'string' && value.trim().length > 0;
@@ -8,6 +12,31 @@ function nonEmpty(value) {
 
 function fail(message) {
   throw new Error(`PayPal production preflight failed: ${message}`);
+}
+
+function normalizeWebhookUrl(value) {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) {
+      return null;
+    }
+    const pathname = url.pathname.replace(/\/+$/, '') || '/';
+    return `${url.origin}${pathname}`;
+  } catch {
+    return null;
+  }
+}
+
+function allowedWebhookUrls(env) {
+  const configured = env.PAYPAL_ALLOWED_WEBHOOK_URLS;
+  const candidates = nonEmpty(configured)
+    ? configured.split(',').map((value) => value.trim()).filter(Boolean)
+    : DEFAULT_ALLOWED_WEBHOOK_URLS;
+  const normalized = candidates.map(normalizeWebhookUrl);
+  if (normalized.some((value) => value === null) || normalized.length === 0) {
+    fail('PAYPAL_ALLOWED_WEBHOOK_URLS must contain valid HTTPS URLs');
+  }
+  return new Set(normalized);
 }
 
 export async function verifyPayPalProduction(
@@ -25,8 +54,8 @@ export async function verifyPayPalProduction(
     return { status: 'disabled', environment: paypalEnv };
   }
 
-  if (paypalEnv !== 'live' && paypalEnv !== 'sandbox') {
-    fail('PAYPAL_ENV must be live or sandbox');
+  if (paypalEnv !== 'live') {
+    fail('PAYPAL_ENV must be live for production deployment');
   }
 
   const missing = [];
@@ -41,9 +70,7 @@ export async function verifyPayPalProduction(
     fail('Node fetch is unavailable');
   }
 
-  const baseUrl = paypalEnv === 'live'
-    ? 'https://api-m.paypal.com'
-    : 'https://api-m.sandbox.paypal.com';
+  const baseUrl = 'https://api-m.paypal.com';
   const timeoutMs = Number(env.PAYPAL_PREFLIGHT_TIMEOUT_MS || 10_000);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -80,6 +107,10 @@ export async function verifyPayPalProduction(
     }
 
     const webhook = await webhookResponse.json();
+    const webhookUrl = normalizeWebhookUrl(webhook?.url);
+    if (!webhookUrl || !allowedWebhookUrls(env).has(webhookUrl)) {
+      fail('webhook URL does not match an approved Holaday production endpoint');
+    }
     const eventNames = Array.isArray(webhook?.event_types)
       ? webhook.event_types.map((event) => event?.name).filter(Boolean)
       : [];
