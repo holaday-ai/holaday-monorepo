@@ -70,6 +70,7 @@ python3 - \
 from __future__ import annotations
 
 import json
+import math
 import re
 import sys
 from datetime import datetime, timedelta, timezone
@@ -215,11 +216,44 @@ def fetched_at(payload: dict[str, Any], label: str) -> datetime:
     age = (now - fetched).total_seconds()
     if age < -MAX_FETCH_AGE:
         fail(f"{label} fetched_at is in the future")
+    # fetched_at measures when the adapter contacted the real upstream. It must
+    # stay fresh even when the exchange itself is paused or closed.
     if age > MAX_FETCH_AGE:
         fail(f"{label} fetched_at is stale ({int(age)}s old)")
     return fetched
 
 
+def finite_number(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def validate_ranking(payload: dict[str, Any], label: str) -> None:
+    row = payload["data"][0]
+    if not isinstance(row, dict):
+        fail(f"{label} row is not a real market ranking")
+    code = str(row.get("代码", "")).strip()
+    price = finite_number(row.get("最新价"))
+    change = finite_number(row.get("涨跌幅"))
+    amount_value = finite_number(row.get("成交额"))
+    if (
+        re.fullmatch(r"\d{6}", code) is None
+        or price is None
+        or price <= 0
+        or change is None
+        or amount_value is None
+        or amount_value <= 0
+    ):
+        fail(f"{label} row is not a real market ranking")
+
+
+validate_ranking(gainers, "gainers")
+validate_ranking(amount, "amount")
 fetched_at(gainers, "gainers")
 fetched_at(amount, "amount")
 fetched_at(quote, "quote")
@@ -235,6 +269,11 @@ def market_time(row: Any, keys: tuple[str, ...], label: str) -> datetime:
 
 
 quote_time = market_time(quote["data"][0], ("行情时间", "时间"), "quote market time")
+quote_row = quote["data"][0]
+quote_code = str(quote_row.get("代码", "")).strip() if isinstance(quote_row, dict) else ""
+quote_price = finite_number(quote_row.get("最新价")) if isinstance(quote_row, dict) else None
+if quote_code != "601958" or quote_price is None or quote_price <= 0:
+    fail("quote row is not a real market quote")
 if quote_time.replace(second=0, microsecond=0) > now_minute:
     fail("quote contains a future market minute")
 
@@ -263,15 +302,27 @@ if is_trading_day and minute_of_day >= 9 * 60 + 35:
     if quote_date != today or (intraday_date is not None and intraday_date != today):
         fail("trade date does not match current trading day")
 
+def require_market_cutoff(reference: datetime, context: str) -> None:
+    points = [("quote", quote_time)]
+    if minute_times:
+        points.append(("intraday", max(minute_times)))
+    for label, point in points:
+        lag = (reference - point).total_seconds()
+        if lag < 0:
+            fail(f"{label} contains a market minute outside {context}")
+        if lag > MAX_MARKET_LAG:
+            fail(f"latest market minute is stale {context} ({label}: {int(lag)}s behind)")
+
+
 if active_market:
-    latest_market_time = max([quote_time, *minute_times])
-    lag = (now - latest_market_time).total_seconds()
-    if lag > MAX_MARKET_LAG:
-        fail(f"latest market minute is stale ({int(lag)}s behind)")
-    if (now - quote_time).total_seconds() > MAX_MARKET_LAG:
-        fail("latest market minute is stale (quote timestamp)")
-    if minute_times and (now - max(minute_times)).total_seconds() > MAX_MARKET_LAG:
-        fail("latest market minute is stale (intraday timestamp)")
+    require_market_cutoff(now, "during active session")
+elif is_trading_day and 11 * 60 + 30 < minute_of_day < 13 * 60 + 5:
+    require_market_cutoff(now.replace(hour=11, minute=30, second=0, microsecond=0), "for lunch break")
+elif is_trading_day and minute_of_day > 15 * 60:
+    require_market_cutoff(now.replace(hour=15, minute=0, second=0, microsecond=0), "after close")
+elif quote_date < today:
+    prior_close = quote_time.replace(hour=15, minute=0, second=0, microsecond=0)
+    require_market_cutoff(prior_close, "for the latest closed session")
 
 if intraday is None:
     print("⚠️ akshare smoke: intraday unavailable outside the required trading window; not blocking deploy")
