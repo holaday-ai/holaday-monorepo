@@ -5,6 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOCAL_SCRIPT="$SCRIPT_DIR/deploy-cn-payment.sh"
 REMOTE_SCRIPT="$SCRIPT_DIR/deploy-cn-payment-remote.sh"
+VERIFY_SCRIPT="$SCRIPT_DIR/verify-cn-payment-production.sh"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -13,6 +14,7 @@ fail() {
 
 [[ -f "$LOCAL_SCRIPT" ]] || fail "local CN payment deploy script is missing"
 [[ -f "$REMOTE_SCRIPT" ]] || fail "remote CN payment deploy script is missing"
+[[ -f "$VERIFY_SCRIPT" ]] || fail "CN payment production verifier is missing"
 
 bash -n "$LOCAL_SCRIPT"
 bash -n "$REMOTE_SCRIPT"
@@ -33,5 +35,13 @@ grep -Fq '"bridge":"ready"' "$REMOTE_SCRIPT" \
   || fail "remote smoke must verify the Vultr settlement bridge"
 grep -Fq 'pm2 restart holaday-cn-payment --update-env' "$REMOTE_SCRIPT" \
   || fail "remote deploy must reload the gateway process environment"
+grep -Fq 'StrictHostKeyChecking=yes' "$LOCAL_SCRIPT" \
+  || fail "CN payment deploy must enforce the pinned known_hosts entry"
+grep -Fq 'StrictHostKeyChecking=yes' "$VERIFY_SCRIPT" \
+  || fail "CN payment verifier must enforce the pinned known_hosts entry"
+! grep -Fq 'StrictHostKeyChecking=no' "$LOCAL_SCRIPT" \
+  || fail "CN payment deploy must not disable SSH host verification"
+! grep -Fq 'StrictHostKeyChecking=no' "$VERIFY_SCRIPT" \
+  || fail "CN payment verifier must not disable SSH host verification"
 
 echo "PASS: CN payment deploy validates, atomically activates, smokes and rolls back releases"

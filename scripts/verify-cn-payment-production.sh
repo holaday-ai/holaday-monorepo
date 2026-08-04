@@ -31,7 +31,7 @@ CHECK_SCRIPT_B64="$(base64 < "$CHECK_SCRIPT" | tr -d '\n')"
 
 echo "→ Verifying production WeChat Pay and Alipay order creation"
 if ! PREFLIGHT_OUTPUT=$("${SSH_PASSWORD_PREFIX[@]}" ssh \
-  -o StrictHostKeyChecking=no \
+  -o StrictHostKeyChecking=yes \
   -o ConnectTimeout=20 \
   -o ServerAliveInterval=10 \
   -o ServerAliveCountMax=3 \

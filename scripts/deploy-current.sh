@@ -37,7 +37,7 @@ capture_release_rollback_head() {
 
   build_ssh_password_prefix "$VULTR_PASSWORD"
   RELEASE_ROLLBACK_HEAD=$("${SSH_PASSWORD_PREFIX[@]}" ssh \
-    -o StrictHostKeyChecking=no \
+    -o StrictHostKeyChecking=yes \
     -o ConnectTimeout=20 \
     -o ServerAliveInterval=10 \
     -o ServerAliveCountMax=3 \
@@ -59,7 +59,7 @@ preflight_release_branch() {
   echo "→ Pre-reset production gate: $RELEASE_ROLLBACK_HEAD must be an ancestor of origin/$BRANCH"
   set +e
   "${SSH_PASSWORD_PREFIX[@]}" ssh \
-    -o StrictHostKeyChecking=no \
+    -o StrictHostKeyChecking=yes \
     -o ConnectTimeout=20 \
     -o ServerAliveInterval=10 \
     -o ServerAliveCountMax=3 \

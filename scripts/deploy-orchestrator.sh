@@ -74,7 +74,7 @@ fi
 build_ssh_password_prefix "$VULTR_PASSWORD"
 VULTR_AUTH_PREFIX=("${SSH_PASSWORD_PREFIX[@]}")
 SSH_OPTS=(
-  -o StrictHostKeyChecking=no
+  -o StrictHostKeyChecking=yes
   -o ConnectTimeout=20
   -o ServerAliveInterval=10
   -o ServerAliveCountMax=3

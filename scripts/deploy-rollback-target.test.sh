@@ -413,5 +413,11 @@ grep -Fq 'ORCHESTRATOR_START_SCRIPT=' "$ORCHESTRATOR_SCRIPT" \
 grep -Fq 'deploy-cn-payment.sh' "$CURRENT_SCRIPT" \
   || fail "combined deploy must publish the CN gateway before its production preflight"
 [[ -f "$CN_PAYMENT_SCRIPT" ]] || fail "CN payment deploy script is missing"
+for secure_script in "$CURRENT_SCRIPT" "$AKSHARE_SCRIPT" "$ORCHESTRATOR_SCRIPT"; do
+  grep -Fq 'StrictHostKeyChecking=yes' "$secure_script" \
+    || fail "$(basename "$secure_script") must enforce known_hosts verification"
+  ! grep -Fq 'StrictHostKeyChecking=no' "$secure_script" \
+    || fail "$(basename "$secure_script") must not disable SSH host verification"
+done
 
 echo "PASS: combined deploy preserves the pre-release rollback target"

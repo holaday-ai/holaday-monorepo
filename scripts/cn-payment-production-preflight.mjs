@@ -124,6 +124,9 @@ export async function verifyCnPaymentProduction(env = process.env, fetchImpl = f
   if (health?.providers?.alipay !== 'ready') {
     fail('Alipay provider is not ready');
   }
+  if (!['platform_certificate', 'public_key'].includes(health?.callbackVerification?.wechat)) {
+    fail('WeChat callback verification is not ready');
+  }
   if (health?.bridge !== 'ready') {
     fail('Vultr settlement bridge is not ready');
   }

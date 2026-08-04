@@ -58,10 +58,24 @@ test('fails closed when the Vultr settlement bridge is not ready', async () => {
       response(200, {
         status: 'ok',
         providers: { wechat: 'ready', alipay: 'ready' },
+        callbackVerification: { wechat: 'public_key' },
         bridge: 'unavailable: upstream rejected health check',
       }),
     ),
     /Vultr settlement bridge is not ready/,
+  );
+});
+
+test('fails closed when WeChat callback verification is not confirmed', async () => {
+  await assert.rejects(
+    verifyCnPaymentProduction(completeEnv, async () =>
+      response(200, {
+        status: 'ok',
+        providers: { wechat: 'ready', alipay: 'ready' },
+        bridge: 'ready',
+      }),
+    ),
+    /WeChat callback verification is not ready/,
   );
 });
 
@@ -70,6 +84,7 @@ test('rejects a provider order with the wrong amount', async () => {
     response(200, {
       status: 'ok',
       providers: { wechat: 'ready', alipay: 'ready' },
+      callbackVerification: { wechat: 'public_key' },
       bridge: 'ready',
     }),
     response(200, {
@@ -92,6 +107,7 @@ test('creates real unpaid orders for both providers without exposing payment tok
     response(200, {
       status: 'ok',
       providers: { wechat: 'ready', alipay: 'ready' },
+      callbackVerification: { wechat: 'platform_certificate' },
       bridge: 'ready',
     }),
     response(200, {
