@@ -98,6 +98,193 @@ export async function ffprobeDurationMs(filePath: string, opts: FfmpegExecOpts =
   return Math.round(sec * 1000);
 }
 
+export interface VideoMetadata {
+  readonly width: number;
+  readonly height: number;
+  readonly durationMs: number;
+}
+
+export interface MediaIntegrityReport {
+  readonly durationMs: number;
+  readonly hasVideo: boolean;
+  readonly hasAudio: boolean;
+  /** Fraction of the container duration covered by ffmpeg's freeze detector. */
+  readonly frozenRatio: number;
+  readonly audioMeanVolumeDb: number | null;
+  readonly audioMaxVolumeDb: number | null;
+}
+
+function parseDbValue(stderr: string, key: 'mean_volume' | 'max_volume'): number | null {
+  const value = stderr.match(new RegExp(`${key}:\\s*(-?(?:\\d+(?:\\.\\d+)?|inf))\\s*dB`, 'i'))?.[1];
+  if (!value || value.toLowerCase() === '-inf') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function frozenDurationSeconds(stderr: string, durationSeconds: number): number {
+  const starts = [...stderr.matchAll(/lavfi\.freezedetect\.freeze_start:\s*([\d.]+)/g)].map(
+    (match) => Number(match[1]),
+  );
+  const durations = [
+    ...stderr.matchAll(/lavfi\.freezedetect\.freeze_duration:\s*([\d.]+)/g),
+  ].map((match) => Number(match[1]));
+  let total = durations.reduce(
+    (sum, duration) => sum + (Number.isFinite(duration) && duration > 0 ? duration : 0),
+    0,
+  );
+  if (starts.length > durations.length) {
+    const trailingStart = starts.at(-1);
+    if (trailingStart !== undefined && Number.isFinite(trailingStart)) {
+      total += Math.max(0, durationSeconds - trailingStart);
+    }
+  }
+  return Math.min(durationSeconds, Math.max(0, total));
+}
+
+/**
+ * Deterministic media gate used before the visual LLM verifier. Static frame
+ * sampling cannot prove that a video moves or that its audio is audible.
+ */
+export async function inspectMediaIntegrity(
+  filePath: string,
+  opts: FfmpegExecOpts = {},
+): Promise<MediaIntegrityReport> {
+  const { stdout } = await runProcess(
+    opts.ffprobeBin ?? 'ffprobe',
+    [
+      '-v',
+      'error',
+      '-show_entries',
+      'stream=codec_type:format=duration',
+      '-of',
+      'json',
+      filePath,
+    ],
+    opts,
+  );
+  let payload: {
+    streams?: Array<{ codec_type?: string }>;
+    format?: { duration?: string | number };
+  };
+  try {
+    payload = JSON.parse(stdout) as typeof payload;
+  } catch {
+    throw new Error(`ffprobe: bad media integrity metadata for ${filePath}`);
+  }
+  const durationSeconds = Number(payload.format?.duration);
+  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
+    throw new Error(`ffprobe: bad media integrity duration for ${filePath}`);
+  }
+  const hasVideo = payload.streams?.some((stream) => stream.codec_type === 'video') ?? false;
+  const hasAudio = payload.streams?.some((stream) => stream.codec_type === 'audio') ?? false;
+
+  let frozenRatio = 0;
+  if (hasVideo) {
+    const { stderr } = await runProcess(
+      opts.ffmpegBin ?? 'ffmpeg',
+      [
+        '-hide_banner',
+        '-i',
+        filePath,
+        '-map',
+        '0:v:0',
+        '-vf',
+        'freezedetect=n=-40dB:d=0.5',
+        '-an',
+        '-f',
+        'null',
+        '-',
+      ],
+      opts,
+    );
+    frozenRatio = Number(
+      (frozenDurationSeconds(stderr, durationSeconds) / durationSeconds).toFixed(4),
+    );
+  }
+
+  let audioMeanVolumeDb: number | null = null;
+  let audioMaxVolumeDb: number | null = null;
+  if (hasAudio) {
+    const { stderr } = await runProcess(
+      opts.ffmpegBin ?? 'ffmpeg',
+      [
+        '-hide_banner',
+        '-i',
+        filePath,
+        '-map',
+        '0:a:0',
+        '-af',
+        'volumedetect',
+        '-vn',
+        '-sn',
+        '-dn',
+        '-f',
+        'null',
+        '-',
+      ],
+      opts,
+    );
+    audioMeanVolumeDb = parseDbValue(stderr, 'mean_volume');
+    audioMaxVolumeDb = parseDbValue(stderr, 'max_volume');
+  }
+
+  return {
+    durationMs: Math.round(durationSeconds * 1000),
+    hasVideo,
+    hasAudio,
+    frozenRatio,
+    audioMeanVolumeDb,
+    audioMaxVolumeDb,
+  };
+}
+
+/** Probe the first video stream plus container duration in one ffprobe call. */
+export async function ffprobeVideoMetadata(
+  filePath: string,
+  opts: FfmpegExecOpts = {},
+): Promise<VideoMetadata> {
+  const args = [
+    '-v',
+    'error',
+    '-select_streams',
+    'v:0',
+    '-show_entries',
+    'stream=width,height:format=duration',
+    '-of',
+    'json',
+    filePath,
+  ];
+  const { stdout } = await runProcess(opts.ffprobeBin ?? 'ffprobe', args, opts);
+  let payload: {
+    streams?: Array<{ width?: number; height?: number }>;
+    format?: { duration?: string | number };
+  };
+  try {
+    payload = JSON.parse(stdout) as typeof payload;
+  } catch {
+    throw new Error(`ffprobe: bad video metadata for ${filePath}`);
+  }
+  const stream = payload.streams?.[0];
+  const width = Number(stream?.width);
+  const height = Number(stream?.height);
+  const durationSeconds = Number(payload.format?.duration);
+  if (
+    !Number.isFinite(width) ||
+    width <= 0 ||
+    !Number.isFinite(height) ||
+    height <= 0 ||
+    !Number.isFinite(durationSeconds) ||
+    durationSeconds <= 0
+  ) {
+    throw new Error(`ffprobe: bad video metadata for ${filePath}`);
+  }
+  return {
+    width: Math.round(width),
+    height: Math.round(height),
+    durationMs: Math.round(durationSeconds * 1000),
+  };
+}
+
 export interface RenderImageClipInput {
   imagePath: string;
   audioPath: string;
@@ -111,7 +298,8 @@ export interface RenderImageClipInput {
 /**
  * Render a still B-roll image over its narration audio into a fixed-length
  * vertical mp4 clip (so a B-roll segment becomes a concat-able clip the same
- * length as its audio). libx264 + aac + yuv420p, scaled+padded to W×H.
+ * requested by the pipeline). Short narration is padded with silence so it
+ * cannot truncate the selected visual duration.
  */
 export async function renderImageClip(
   input: RenderImageClipInput,
@@ -135,6 +323,8 @@ export async function renderImageClip(
     durSec,
     '-vf',
     `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=${FPS}`,
+    '-af',
+    'apad',
     '-c:v',
     'libx264',
     '-pix_fmt',
@@ -143,7 +333,6 @@ export async function renderImageClip(
     'aac',
     '-b:a',
     '192k',
-    '-shortest',
     input.outPath,
   ];
   await runProcess(opts.ffmpegBin ?? 'ffmpeg', args, opts);
@@ -225,7 +414,7 @@ export interface RenderVideoClipInput {
 
 /**
  * 原方案 optional video visual — loop+trim a generated background video to the
- * narration audio length and mux the NARRATION audio (drop the source video's
+ * requested clip length and mux the NARRATION audio (drop the source video's
  * audio, e.g. Veo's bundled track) → a fixed-length vertical clip. `-stream_loop`
  * covers the case where the bg video is shorter than the narration.
  */
@@ -254,6 +443,8 @@ export async function renderVideoClip(
     '0:v:0',
     '-map',
     '1:a:0',
+    '-af',
+    'apad',
     '-c:v',
     'libx264',
     '-pix_fmt',

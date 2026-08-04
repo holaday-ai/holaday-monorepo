@@ -15,6 +15,7 @@ import {
   taskHubLoadErrorCopy,
   taskHubLoadMoreErrorCopy,
   taskHubNeedsAttention,
+  taskHubRowTitle,
   taskHubStatusIconKind,
   taskHubRowTone,
   taskHubStatusTone,
@@ -32,6 +33,19 @@ describe('taskHubRowTone — P2-B resting tone', () => {
 });
 
 describe('task hub state helpers', () => {
+  it('hides image-generation routing copy from history and pinned task titles', () => {
+    expect(
+      taskHubRowTitle({
+        title: '主体一致性要求：请以用户上传的第一张图片作为锁定主角。',
+        intent: [
+          '生成图片：让同一只西高地坐在海边。',
+          '图片风格要求：电影感、柔和逆光。',
+          '主体一致性要求：请以用户上传的第一张图片作为锁定主角。',
+        ].join('\n\n'),
+      }),
+    ).toBe('让同一只西高地坐在海边。');
+  });
+
   it('treats the default history range as the unfiltered baseline', () => {
     expect(hasHistoryFilters({ query: '', status: 'all', range: '30d' })).toBe(false);
     expect(hasHistoryFilters({ query: ' invoice ', status: 'all', range: '30d' })).toBe(true);

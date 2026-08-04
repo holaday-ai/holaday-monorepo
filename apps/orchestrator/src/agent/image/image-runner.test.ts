@@ -95,6 +95,53 @@ describe('runImageTask', () => {
     );
   });
 
+  it('generates the requested number of images and forwards the selected aspect ratio', async () => {
+    const generate = okGenerate();
+    const saveMany = vi.fn(async (_img, index: number) => attachmentFor(index));
+
+    const out = await runImageTask({
+      intent: '画一只橘猫',
+      imageCount: 3,
+      aspectRatio: '16:9',
+      apiKey: 'k',
+      save: saveMany,
+      logger: fakeLogger(),
+      generate,
+    });
+
+    expect(generate).toHaveBeenCalledTimes(3);
+    expect(generate).toHaveBeenCalledWith(expect.objectContaining({ aspectRatio: '16:9' }));
+    expect(out.attachments).toHaveLength(3);
+    expect(out.summary).toContain('已生成 3 张图片');
+  });
+
+  it('reports partial success when fewer images are delivered than requested', async () => {
+    const generate = vi
+      .fn()
+      .mockResolvedValueOnce({
+        images: [{ buffer: Buffer.from('FIRST'), mimeType: 'image/png' }],
+        model: 'gemini-3.1-flash-image',
+      })
+      .mockRejectedValueOnce(
+        new GeminiImageError('request timed out', 'timeout'),
+      );
+    const saveOne = vi.fn(async (_img, index: number) => attachmentFor(index));
+
+    const out = await runImageTask({
+      intent: '生成两张产品图',
+      imageCount: 2,
+      apiKey: 'k',
+      save: saveOne,
+      logger: fakeLogger(),
+      generate,
+    });
+
+    expect(out.status).toBe('partial_success');
+    expect(out.attachments).toHaveLength(1);
+    expect(out.summary).toContain('已生成 1/2 张图片');
+    expect(out.summary).toContain('未完成');
+  });
+
   it('routes poster asks to Pro and labels the summary', async () => {
     const generate = okGenerate();
     const out = await runImageTask({
@@ -108,7 +155,30 @@ describe('runImageTask', () => {
     expect(out.tier).toBe('pro');
     expect(out.summary).toContain('Nano Banana Pro');
     expect(generate).toHaveBeenCalledWith(
-      expect.objectContaining({ model: 'gemini-3-pro-image' }),
+      expect.objectContaining({ model: 'gemini-3-pro-image', apiVersion: 'v1beta' }),
+    );
+  });
+
+  it('keeps a configured Pro model on v1beta without relying on its model id', async () => {
+    const generate = okGenerate();
+
+    await runImageTask({
+      intent: '做一张产品海报',
+      preferredTier: 'pro',
+      proModel: 'custom-pro-model',
+      baseUrl: 'https://gw.internal',
+      apiKey: 'k',
+      save,
+      logger: fakeLogger(),
+      generate,
+    });
+
+    expect(generate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: 'custom-pro-model',
+        apiVersion: 'v1beta',
+        baseUrl: 'https://gw.internal',
+      }),
     );
   });
 
@@ -132,7 +202,46 @@ describe('runImageTask', () => {
     );
   });
 
-  it('routes a 4K poster to Pro without an explicit resolution (v1)', async () => {
+  it('rejects locked-subject mode without a subject image before generation', async () => {
+    const generate = okGenerate();
+    const out = await runImageTask({
+      intent: '把主角放到雪山背景里',
+      mode: 'lock_subject',
+      apiKey: 'k',
+      save,
+      logger: fakeLogger(),
+      generate,
+    });
+
+    expect(out.status).toBe('failed');
+    expect(out.reason).toContain('主角图');
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it('enforces first-image identity preservation for locked-subject generation', async () => {
+    const generate = okGenerate();
+    const out = await runImageTask({
+      intent: '把背景换成雪山',
+      mode: 'lock_subject',
+      inputImages: [
+        { data: 'SUBJECT', mimeType: 'image/jpeg' },
+        { data: 'STYLE', mimeType: 'image/png' },
+      ],
+      apiKey: 'k',
+      save,
+      logger: fakeLogger(),
+      generate,
+    });
+
+    const sentPrompt = generate.mock.calls[0]![0].prompt;
+    expect(sentPrompt).toContain('第一张输入图片是必须锁定的主角');
+    expect(sentPrompt).toContain('不得将第二张及后续参考图中的主体身份替换到主角上');
+    expect(sentPrompt).toContain('只改变用户明确要求的背景、风格、光线、场景、动作、姿态或构图');
+    expect(out.status).toBe('completed');
+    expect(out.summary).toContain('锁定主角');
+  });
+
+  it('routes a 4K poster to Pro without an unverified explicit resolution', async () => {
     const generate = okGenerate();
     const out = await runImageTask({
       intent: '做一张4K高清电影海报',
@@ -142,7 +251,7 @@ describe('runImageTask', () => {
       generate,
     });
     expect(out.tier).toBe('pro');
-    // v1: resolution dropped (API rejected 4096x4096) — not sent.
+    // Keep resolution unset until accepted imageSize values are live-verified for this model.
     const call = generate.mock.calls[0]![0];
     expect(call.model).toBe('gemini-3-pro-image');
     expect(call.resolution).toBeUndefined();
@@ -179,8 +288,9 @@ describe('runImageTask', () => {
       logger: fakeLogger(),
       generate,
     });
-    expect(out.status).toBe('completed');
+    expect(out.status).toBe('partial_success');
     expect(out.attachments).toHaveLength(1);
+    expect(out.summary).toContain('已生成 1/2 张图片');
     expect(saveMimeTypes).toEqual(['image/png']);
   });
 
@@ -247,7 +357,9 @@ describe('runImageTask', () => {
     expect(out.summary).toContain('Pro 档繁忙');
     // first attempt used the Pro model, fallback used flash
     expect(generate.mock.calls[0]![0].model).toBe('gemini-3-pro-image');
+    expect(generate.mock.calls[0]![0].apiVersion).toBe('v1beta');
     expect(generate.mock.calls[1]![0].model).toBe('gemini-3.1-flash-image');
+    expect(generate.mock.calls[1]![0].apiVersion).toBe('v1');
   });
 
   it('does NOT degrade when NB2 itself fails (no Pro to fall back from)', async () => {

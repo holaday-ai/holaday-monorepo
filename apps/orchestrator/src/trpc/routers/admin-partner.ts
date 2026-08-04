@@ -26,7 +26,7 @@ import { PartnerRiskLotService, PartnerRiskLotTransitionError } from '../../part
 import { WithdrawalGateError, WithdrawalService, WithdrawalTransitionError } from '../../partner/withdrawal-service.js';
 import { adminProcedure, router } from '../trpc.js';
 
-const OVERVIEW_LIMIT_CAP = 100;
+const OVERVIEW_LIMIT_CAP = 500;
 const RECONCILIATION_LIMIT_CAP = 1000;
 const ISO_DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const referralInviterUsers = alias(users, 'partner_referral_inviter_users');
@@ -321,6 +321,13 @@ function summarizeWithdrawalMetrics(
   };
 }
 
+function capOverviewRows<T>(rows: T[], limit: number) {
+  return {
+    rows: rows.slice(0, limit),
+    truncated: rows.length > limit,
+  };
+}
+
 function summarizePartnerReconciliation(input: {
   orders: Array<Record<string, unknown>>;
   withdrawals: Array<Record<string, unknown>>;
@@ -436,6 +443,10 @@ function isoDay(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
+function beijingIsoDay(date: Date): string {
+  return isoDay(new Date(date.getTime() + 8 * 60 * 60 * 1000));
+}
+
 function parseIsoDay(value: string, fieldName: string): Date {
   if (!ISO_DAY_PATTERN.test(value)) {
     throw new RangeError(`${fieldName} must be YYYY-MM-DD`);
@@ -452,20 +463,35 @@ function addUtcDays(date: Date, days: number): Date {
 }
 
 function normalizeReconciliationWindow(input: { from?: string; to?: string } | undefined) {
-  const defaultToDay = isoDay(new Date());
+  const defaultToDay = beijingIsoDay(new Date());
   const toDay = input?.to ?? defaultToDay;
   const toDate = parseIsoDay(toDay, 'to');
   const fromDay = input?.from ?? isoDay(addUtcDays(toDate, -6));
-  const fromDate = parseIsoDay(fromDay, 'from');
-  if (fromDate.getTime() > toDate.getTime()) {
+  const fromCalendarDay = parseIsoDay(fromDay, 'from');
+  if (fromCalendarDay.getTime() > toDate.getTime()) {
     throw new RangeError('from must be on or before to');
   }
+  const beijingOffsetMs = 8 * 60 * 60 * 1000;
   return {
     fromDay,
     toDay,
-    fromDate,
-    toExclusiveDate: addUtcDays(toDate, 1),
+    fromDate: new Date(fromCalendarDay.getTime() - beijingOffsetMs),
+    toExclusiveDate: new Date(addUtcDays(toDate, 1).getTime() - beijingOffsetMs),
   };
+}
+
+function requireCompleteReconciliationRows<T>(
+  rows: T[],
+  limit: number,
+  label: string,
+): T[] {
+  if (rows.length > limit) {
+    throw new TRPCError({
+      code: 'PRECONDITION_FAILED',
+      message: `${label} exceed the export limit; narrow the date range`,
+    });
+  }
+  return rows;
 }
 
 function mapPaymentError(error: unknown): never {
@@ -548,7 +574,14 @@ export const adminPartnerRouter = router({
       const query = normalizeOverviewSearchQuery(input?.query);
       const searchPattern = query ? `%${query}%` : undefined;
       const now = new Date();
-      const [orderRows, kycRows, withdrawalRows, withdrawalHistoryRows, riskLotRows, riskEventRows] = await Promise.all([
+      const [
+        rawOrderRows,
+        rawKycRows,
+        rawWithdrawalRows,
+        rawWithdrawalHistoryRows,
+        rawRiskLotRows,
+        rawRiskEventRows,
+      ] = await Promise.all([
         ctx.db
           .select({
             orderExternalId: partnerRechargeOrders.externalId,
@@ -573,7 +606,7 @@ export const adminPartnerRouter = router({
             ),
           )
           .orderBy(desc(partnerRechargeOrders.createdAt))
-          .limit(limit),
+          .limit(limit + 1),
         ctx.db
           .select({
             kycExternalId: partnerKycProfiles.externalId,
@@ -597,7 +630,7 @@ export const adminPartnerRouter = router({
             ),
           )
           .orderBy(desc(partnerKycProfiles.updatedAt))
-          .limit(limit),
+          .limit(limit + 1),
         ctx.db
           .select({
             withdrawalExternalId: partnerWithdrawalRequests.externalId,
@@ -623,7 +656,7 @@ export const adminPartnerRouter = router({
             ),
           )
           .orderBy(desc(partnerWithdrawalRequests.reviewDueAt))
-          .limit(limit),
+          .limit(limit + 1),
         ctx.db
           .select({
             withdrawalExternalId: partnerWithdrawalRequests.externalId,
@@ -649,7 +682,7 @@ export const adminPartnerRouter = router({
             ),
           )
           .orderBy(desc(partnerWithdrawalRequests.updatedAt))
-          .limit(limit),
+          .limit(limit + 1),
         ctx.db
           .select({
             lotExternalId: partnerLots.externalId,
@@ -674,7 +707,7 @@ export const adminPartnerRouter = router({
             ),
           )
           .orderBy(desc(partnerLots.updatedAt))
-          .limit(limit),
+          .limit(limit + 1),
         ctx.db
           .select({
             riskEventExternalId: partnerRiskEvents.externalId,
@@ -694,8 +727,28 @@ export const adminPartnerRouter = router({
           .leftJoin(partnerLots, eq(partnerLots.id, partnerRiskEvents.lotId))
           .where(searchPattern ? riskEventSearchCondition(searchPattern) : undefined)
           .orderBy(desc(partnerRiskEvents.createdAt))
-          .limit(limit),
+          .limit(limit + 1),
       ]);
+      const ordersPage = capOverviewRows(rawOrderRows, limit);
+      const kycPage = capOverviewRows(rawKycRows, limit);
+      const withdrawalsPage = capOverviewRows(rawWithdrawalRows, limit);
+      const withdrawalHistoryPage = capOverviewRows(rawWithdrawalHistoryRows, limit);
+      const riskLotsPage = capOverviewRows(rawRiskLotRows, limit);
+      const riskEventsPage = capOverviewRows(rawRiskEventRows, limit);
+      const orderRows = ordersPage.rows;
+      const kycRows = kycPage.rows;
+      const withdrawalRows = withdrawalsPage.rows;
+      const withdrawalHistoryRows = withdrawalHistoryPage.rows;
+      const riskLotRows = riskLotsPage.rows;
+      const riskEventRows = riskEventsPage.rows;
+      const truncatedQueues = [
+        ordersPage.truncated ? 'orders' : null,
+        kycPage.truncated ? 'kycProfiles' : null,
+        withdrawalsPage.truncated ? 'withdrawals' : null,
+        withdrawalHistoryPage.truncated ? 'withdrawalHistory' : null,
+        riskLotsPage.truncated ? 'riskLots' : null,
+        riskEventsPage.truncated ? 'riskEvents' : null,
+      ].filter((value): value is string => value !== null);
 
       const withdrawalMetrics = summarizeWithdrawalMetrics(
         [...withdrawalRows, ...withdrawalHistoryRows],
@@ -704,6 +757,10 @@ export const adminPartnerRouter = router({
 
       return {
         enabled: true as const,
+        coverage: {
+          limit,
+          truncatedQueues,
+        },
         metrics: {
           pendingKycCount: kycRows.length,
           pendingOrderCount: orderRows.filter((row) => row.status === 'pending').length,
@@ -756,7 +813,7 @@ export const adminPartnerRouter = router({
       }
 
       const limit = input?.limit ?? 500;
-      const [orders, withdrawals, referrals] = await Promise.all([
+      const [orderRows, withdrawalRows, referralRows] = await Promise.all([
         ctx.db
           .select({
             orderExternalId: partnerRechargeOrders.externalId,
@@ -780,7 +837,7 @@ export const adminPartnerRouter = router({
             ),
           )
           .orderBy(desc(partnerRechargeOrders.updatedAt))
-          .limit(limit),
+          .limit(limit + 1),
         ctx.db
           .select({
             withdrawalExternalId: partnerWithdrawalRequests.externalId,
@@ -805,7 +862,7 @@ export const adminPartnerRouter = router({
             ),
           )
           .orderBy(desc(partnerWithdrawalRequests.updatedAt))
-          .limit(limit),
+          .limit(limit + 1),
         ctx.db
           .select({
             referralExternalId: partnerReferrals.externalId,
@@ -828,8 +885,19 @@ export const adminPartnerRouter = router({
             ),
           )
           .orderBy(desc(partnerReferrals.updatedAt))
-          .limit(limit),
+          .limit(limit + 1),
       ]);
+      const orders = requireCompleteReconciliationRows(orderRows, limit, 'orders');
+      const withdrawals = requireCompleteReconciliationRows(
+        withdrawalRows,
+        limit,
+        'withdrawals',
+      );
+      const referrals = requireCompleteReconciliationRows(
+        referralRows,
+        limit,
+        'referrals',
+      );
 
       return {
         enabled: true as const,
@@ -844,14 +912,35 @@ export const adminPartnerRouter = router({
 
   setKycStatus: adminProcedure
     .input(
-      z.object({
-        userExternalId: z.string().trim().min(1).max(32),
-        status: z.enum(['pending', 'passed', 'review_required', 'rejected']),
-        provider: z.string().trim().min(1).max(32).default('manual'),
-        providerRef: z.string().trim().min(1).max(128).optional(),
-        bankCardHash: z.string().trim().min(1).max(128).optional(),
-        note: z.string().trim().min(1).max(1000).optional(),
-      }),
+      z
+        .object({
+          userExternalId: z.string().trim().min(1).max(32),
+          status: z.enum(['pending', 'passed', 'review_required', 'rejected']),
+          provider: z.string().trim().min(1).max(32).default('manual'),
+          providerRef: z
+            .string()
+            .trim()
+            .min(1)
+            .max(128)
+            .refine((value) => value !== '—' && value !== '-', {
+              message: '认证流水不能使用占位符',
+            })
+            .optional(),
+          bankCardHash: z.string().trim().min(1).max(128).optional(),
+          note: z.string().trim().min(1).max(1000),
+        })
+        .superRefine((value, context) => {
+          if (
+            (value.status === 'passed' || value.status === 'rejected') &&
+            !value.providerRef
+          ) {
+            context.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ['providerRef'],
+              message: '通过或拒绝实名必须提供认证流水',
+            });
+          }
+        }),
     )
     .mutation(async ({ ctx, input }) => {
       requirePartnerLedgerEnabled();
@@ -890,7 +979,7 @@ export const adminPartnerRouter = router({
     .input(
       z.object({
         orderExternalId: z.string().trim().min(1).max(32),
-        providerCaptureId: z.string().trim().min(1).max(128).optional(),
+        providerCaptureId: z.string().trim().min(1).max(128),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -900,7 +989,7 @@ export const adminPartnerRouter = router({
         const result = await new PartnerPaymentConfirmService(ctx.db).confirmCapturedOrder({
           orderExternalId: order.externalId,
           provider: order.provider,
-          providerCaptureId: input.providerCaptureId ?? `manual:${order.externalId}`,
+          providerCaptureId: input.providerCaptureId,
           amountCnyCents: order.amountCnyCents,
         });
         return result;
@@ -922,7 +1011,7 @@ export const adminPartnerRouter = router({
     .input(
       z.object({
         orderExternalId: z.string().trim().min(1).max(32),
-        note: z.string().trim().min(1).max(1000).optional(),
+        note: z.string().trim().min(1).max(1000),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -943,7 +1032,7 @@ export const adminPartnerRouter = router({
     .input(
       z.object({
         withdrawalExternalId: z.string().trim().min(1).max(32),
-        note: z.string().trim().min(1).max(1000).optional(),
+        note: z.string().trim().min(1).max(1000),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -1053,7 +1142,7 @@ export const adminPartnerRouter = router({
     .input(
       z.object({
         lotExternalId: z.string().trim().min(1).max(32),
-        note: z.string().trim().min(1).max(1000).optional(),
+        note: z.string().trim().min(1).max(1000),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -1076,8 +1165,8 @@ export const adminPartnerRouter = router({
       z.object({
         lotExternalId: z.string().trim().min(1).max(32),
         reason: z.string().trim().min(1).max(1000),
-        resolutionKind: z.enum(['manual', 'refund', 'fraud']).optional(),
-        resolutionRef: z.string().trim().min(1).max(128).optional(),
+        resolutionKind: z.enum(['manual', 'refund', 'fraud']),
+        resolutionRef: z.string().trim().min(1).max(128),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -1099,6 +1188,9 @@ export const adminPartnerRouter = router({
 });
 
 export const __adminPartnerInternals = {
+  capOverviewRows,
+  normalizeReconciliationWindow,
+  requireCompleteReconciliationRows,
   summarizeKycProfile,
   summarizeOrder,
   summarizePartnerReconciliation,

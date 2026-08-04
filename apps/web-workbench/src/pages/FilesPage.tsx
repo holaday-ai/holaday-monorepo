@@ -1,4 +1,5 @@
 import {
+  AlertCircle,
   Download,
   Copy,
   Eye,
@@ -7,6 +8,7 @@ import {
   FileText,
   Film,
   Image as ImageIcon,
+  Loader2,
   MoreHorizontal,
   Plus,
   Search,
@@ -25,6 +27,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Button } from '@/components/ui/button';
 import {
   Tooltip,
   TooltipContent,
@@ -39,14 +42,21 @@ import {
 } from '@/lib/download-file';
 import { formatFileSize } from '@/lib/file-size';
 import {
+  canApplyFilesResponse,
   fileReferenceText,
   formatFileRelativeDate,
-  normalizeFileRows,
+  normalizeFilesListPage,
   type NormalizedFileRow,
 } from '@/lib/files-page-state';
 import { filesEmptyCopy, type FileFilter } from '@/lib/files-empty-copy';
 import { pageActionError } from '@/lib/page-error-copy';
 import { trpc } from '@/lib/trpc';
+import {
+  isFileUnavailable,
+  markFileUnavailable,
+  markFileUnavailableFromStatus,
+  useUnavailableFiles,
+} from '@/lib/unavailable-file-registry';
 import { useDebouncedValue } from '@/lib/use-debounced-value';
 import { cn } from '@/lib/utils';
 import { PageContainer, PageHeader, PageLoadingPanel } from '@/pages/PageShell';
@@ -75,29 +85,80 @@ export function FilesPage(): JSX.Element {
   const [q, setQ] = React.useState('');
   const [files, setFiles] = React.useState<UiFile[]>([]);
   const [loading, setLoading] = React.useState(true);
+  const [loadingMore, setLoadingMore] = React.useState(false);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
+  const [nextCursor, setNextCursor] = React.useState<number | null>(null);
   const [pendingDelete, setPendingDelete] = React.useState<UiFile | null>(null);
   const [previewing, setPreviewing] = React.useState<FilePreviewPayload | null>(
     null,
   );
+  const unavailableFiles = useUnavailableFiles();
   const debouncedQuery = useDebouncedValue(q.trim(), 250);
 
   const refresh = React.useCallback(async () => {
     const requestId = ++requestIdRef.current;
     setLoading(true);
+    setLoadingMore(false);
+    setLoadError(null);
     try {
-      const list = await trpc.files.list.query({
+      const page = normalizeFilesListPage(await trpc.files.list.query({
         type: filter,
         q: debouncedQuery || undefined,
-      });
+        limit: 50,
+      }));
       if (!mountedRef.current || requestId !== requestIdRef.current) return;
-      setFiles(normalizeFileRows(list));
+      setFiles(page.items);
+      setNextCursor(page.nextCursor);
     } catch (err) {
       if (!mountedRef.current || requestId !== requestIdRef.current) return;
-      toast.show(pageActionError('文件暂时无法加载', err), 'error');
+      setFiles([]);
+      setNextCursor(null);
+      setLoadError(pageActionError('文件暂时无法加载', err));
     } finally {
       if (mountedRef.current && requestId === requestIdRef.current) setLoading(false);
     }
-  }, [debouncedQuery, filter, toast]);
+  }, [debouncedQuery, filter]);
+
+  const loadMore = React.useCallback(async () => {
+    if (loadingMore || nextCursor === null) return;
+    const requestId = requestIdRef.current;
+    setLoadingMore(true);
+    setLoadError(null);
+    try {
+      const page = normalizeFilesListPage(await trpc.files.list.query({
+        type: filter,
+        q: debouncedQuery || undefined,
+        cursor: nextCursor,
+        limit: 50,
+      }));
+      if (
+        !mountedRef.current ||
+        !canApplyFilesResponse(requestId, requestIdRef.current)
+      ) {
+        return;
+      }
+      setFiles((current) => {
+        const seen = new Set(current.map((file) => file.fileId));
+        return [...current, ...page.items.filter((file) => !seen.has(file.fileId))];
+      });
+      setNextCursor(page.nextCursor);
+    } catch (err) {
+      if (
+        !mountedRef.current ||
+        !canApplyFilesResponse(requestId, requestIdRef.current)
+      ) {
+        return;
+      }
+      setLoadError(pageActionError('更多文件暂时无法加载', err));
+    } finally {
+      if (
+        mountedRef.current &&
+        canApplyFilesResponse(requestId, requestIdRef.current)
+      ) {
+        setLoadingMore(false);
+      }
+    }
+  }, [debouncedQuery, filter, loadingMore, nextCursor]);
 
   React.useEffect(() => {
     mountedRef.current = true;
@@ -113,6 +174,7 @@ export function FilesPage(): JSX.Element {
   }
 
   function onPreview(f: UiFile): void {
+    if (isFileUnavailable({ fileId: f.fileId, url: downloadUrl(f.fileId) })) return;
     // In-product authed preview. The previous `window.open` path
     // opened a top-level GET that browsers refuse to send the Bearer
     // header on — users on hd-app would land on a 401 page from the
@@ -129,12 +191,15 @@ export function FilesPage(): JSX.Element {
   }
 
   async function onDownload(f: UiFile): Promise<void> {
+    const reference = { fileId: f.fileId, url: downloadUrl(f.fileId) };
+    if (isFileUnavailable(reference)) return;
     const res = await downloadFileAuthed({
-      url: downloadUrl(f.fileId),
+      url: reference.url,
       filename: f.filename,
     });
     if (!mountedRef.current) return;
     if (!res.ok) {
+      markFileUnavailableFromStatus(reference, res.status);
       toast.show(downloadFailureMessage(res.status), 'error');
     }
   }
@@ -146,6 +211,7 @@ export function FilesPage(): JSX.Element {
   }
 
   function onUseInNewTask(f: UiFile): void {
+    if (isFileUnavailable({ fileId: f.fileId, url: downloadUrl(f.fileId) })) return;
     navigate('/', {
       state: {
         attachFile: {
@@ -162,6 +228,8 @@ export function FilesPage(): JSX.Element {
   const emptyCopy = filesEmptyCopy({ query: q, filter });
   const summary = loading
     ? '文件加载中…'
+    : loadError && files.length === 0
+      ? '文件暂时无法加载'
     : files.length > 0
       ? `已加载 ${files.length} 个文件`
       : q.trim()
@@ -178,6 +246,7 @@ export function FilesPage(): JSX.Element {
     try {
       await trpc.files.delete.mutate({ fileId: f.fileId });
       if (!mountedRef.current) return;
+      markFileUnavailable(f.fileId);
       toast.show('文件已删除');
       await refresh();
     } catch (err) {
@@ -230,6 +299,15 @@ export function FilesPage(): JSX.Element {
 
         {loading ? (
           <PageLoadingPanel label="文件加载中" description="正在整理文件库" />
+        ) : loadError && files.length === 0 ? (
+          <div className="flex flex-col items-center gap-3 rounded-[8px] border border-[#DCDDDD] bg-white px-6 py-12 text-center shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
+            <AlertCircle className="h-8 w-8 text-[#EA1F59]" aria-hidden />
+            <div className="text-sm font-medium text-foreground/80">文件暂时无法加载</div>
+            <div className="max-w-md text-xs leading-5 text-muted-foreground">{loadError}</div>
+            <Button type="button" size="sm" onClick={() => void refresh()}>
+              重试
+            </Button>
+          </div>
         ) : files.length === 0 ? (
           <div className="flex flex-col items-center gap-2 rounded-[8px] border border-dashed border-[#DCDDDD] bg-white px-6 py-12 text-center shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
             <FileIcon className="h-8 w-8 text-muted-foreground/40" />
@@ -253,6 +331,10 @@ export function FilesPage(): JSX.Element {
                 <FileRow
                   key={f.fileId}
                   file={f}
+                  unavailable={isFileUnavailable(
+                    { fileId: f.fileId, url: downloadUrl(f.fileId) },
+                    unavailableFiles,
+                  )}
                   onPreview={() => onPreview(f)}
                   onUseInNewTask={() => onUseInNewTask(f)}
                   onDownload={() => void onDownload(f)}
@@ -261,9 +343,39 @@ export function FilesPage(): JSX.Element {
                 />
               ))}
             </div>
+            {loadError ? (
+              <div className="flex flex-col gap-2 border-t border-[#EFEFEF] bg-[#EA1F59]/[0.03] px-4 py-3 text-xs text-[#595757] sm:flex-row sm:items-center sm:justify-between">
+                <span>{loadError}</span>
+                <Button type="button" variant="outline" size="sm" onClick={() => void loadMore()}>
+                  重试
+                </Button>
+              </div>
+            ) : nextCursor !== null ? (
+              <div className="flex justify-center border-t border-[#EFEFEF] px-4 py-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void loadMore()}
+                  disabled={loadingMore}
+                >
+                  {loadingMore ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                      加载中…
+                    </>
+                  ) : (
+                    '加载更多'
+                  )}
+                </Button>
+              </div>
+            ) : null}
           </div>
         )}
-        <FilePreviewModal payload={previewing} onClose={() => setPreviewing(null)} />
+        <FilePreviewModal
+          payload={previewing}
+          onClose={() => setPreviewing(null)}
+        />
         <ConfirmDialog
           open={pendingDelete !== null}
           title="删除这个文件？"
@@ -314,6 +426,7 @@ function FilterTab({
 
 function FileRow({
   file,
+  unavailable,
   onPreview,
   onUseInNewTask,
   onDownload,
@@ -321,6 +434,7 @@ function FileRow({
   onDelete,
 }: {
   file: UiFile;
+  unavailable: boolean;
   onPreview: () => void;
   onUseInNewTask: () => void;
   onDownload: () => void;
@@ -329,19 +443,46 @@ function FileRow({
 }): JSX.Element {
   const Icon = iconForMime(file.mimetype);
   return (
-    <div className="flex flex-col gap-1.5 px-4 py-2.5 transition-colors hover:bg-[#EFEFEF]/35 sm:grid sm:grid-cols-[1fr_auto_auto_auto] sm:items-center sm:gap-3">
+    <div
+      className={cn(
+        'flex flex-col gap-1.5 px-4 py-2.5 transition-colors sm:grid sm:grid-cols-[1fr_auto_auto_auto] sm:items-center sm:gap-3',
+        unavailable ? 'bg-[#EFEFEF]/35' : 'hover:bg-[#EFEFEF]/35',
+      )}
+    >
       {/* Filename = preview. Always reachable, no hover required. */}
       <button
         type="button"
         onClick={onPreview}
-        title={`预览 ${file.filename}`}
-        className="group flex min-w-0 items-center gap-2.5 text-left"
+        disabled={unavailable}
+        title={unavailable ? `${file.filename} 已失效` : `预览 ${file.filename}`}
+        className="group flex min-w-0 items-center gap-2.5 text-left disabled:cursor-not-allowed"
       >
-        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-[#595757] transition-colors group-hover:border-[#ADADAD]">
+        <span
+          className={cn(
+            'flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[#DCDDDD] bg-white transition-colors',
+            unavailable
+              ? 'text-[#ADADAD]'
+              : 'text-[#595757] group-hover:border-[#ADADAD]',
+          )}
+        >
           <Icon className="h-4 w-4" aria-hidden />
         </span>
-        <span className="min-w-0 truncate text-sm font-medium text-foreground group-hover:text-[#EA1F59]">
-          {file.filename}
+        <span className="flex min-w-0 items-center gap-2">
+          <span
+            className={cn(
+              'min-w-0 truncate text-sm font-medium',
+              unavailable
+                ? 'text-[#8B93A6]'
+                : 'text-foreground group-hover:text-[#EA1F59]',
+            )}
+          >
+            {file.filename}
+          </span>
+          {unavailable ? (
+            <span className="shrink-0 rounded-full bg-[#EFEFEF] px-2 py-0.5 text-[10px] font-medium text-[#8B93A6]">
+              已失效
+            </span>
+          ) : null}
         </span>
       </button>
       {/* Size + time always rendered. Mobile shows them inline beneath
@@ -359,9 +500,14 @@ function FileRow({
           <button
             type="button"
             onClick={onUseInNewTask}
+            disabled={unavailable}
             aria-label={`把 ${file.filename} 用于新任务`}
-            title={`把 ${file.filename} 用于新任务`}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-[#595757] transition-colors hover:border-[#EA1F59]/35 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59]"
+            title={
+              unavailable
+                ? `${file.filename} 已失效`
+                : `把 ${file.filename} 用于新任务`
+            }
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-[#595757] transition-colors hover:border-[#EA1F59]/35 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:text-[#ADADAD] disabled:hover:border-[#DCDDDD] disabled:hover:bg-white"
           >
             <Plus className="h-3.5 w-3.5" />
           </button>
@@ -380,15 +526,15 @@ function FileRow({
             </DropdownMenuTrigger>
           </IconTooltip>
           <DropdownMenuContent align="end" className="w-44">
-            <DropdownMenuItem onSelect={onPreview}>
+            <DropdownMenuItem onSelect={onPreview} disabled={unavailable}>
               <Eye className="text-muted-foreground" />
               <span>预览</span>
             </DropdownMenuItem>
-            <DropdownMenuItem onSelect={onDownload}>
+            <DropdownMenuItem onSelect={onDownload} disabled={unavailable}>
               <Download className="text-muted-foreground" />
               <span>下载</span>
             </DropdownMenuItem>
-            <DropdownMenuItem onSelect={onCopyReference}>
+            <DropdownMenuItem onSelect={onCopyReference} disabled={unavailable}>
               <Copy className="text-muted-foreground" />
               <span>复制引用</span>
             </DropdownMenuItem>

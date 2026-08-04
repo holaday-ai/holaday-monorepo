@@ -2,9 +2,13 @@ import { describe, expect, it } from 'vitest';
 import type { UiStep } from '@/types/task';
 import {
   EMPTY_STEPS,
+  currentMediaTaskTitle,
+  currentMediaTaskText,
+  hydrateMissingMediaTask,
   isVideoTaskRunning,
+  resolveVideoAwaitingKind,
   selectStepsFor,
-  shouldRefreshForTask,
+  videoTabForTaskType,
   videoTaskStatusIconKind,
   videoTaskStatusLabel,
 } from './video-task-selectors';
@@ -66,22 +70,61 @@ describe('selectStepsFor — #185 regression (referentially-stable snapshot)', (
   });
 });
 
-describe('shouldRefreshForTask — one-time deep-link refresh guard', () => {
-  it('true only on the first miss for a deep-linked id', () => {
-    expect(shouldRefreshForTask({ taskId: 'tsk_x', hasTask: false, already: false })).toBe(true);
+describe('hydrateMissingMediaTask — one-time deep-link detail recovery', () => {
+  it('hydrates the exact older history task when it is absent from the first list page', () => {
+    const hydrated: string[] = [];
+
+    expect(
+      hydrateMissingMediaTask(
+        { taskId: 'tsk_older', hasTask: false, already: false },
+        (taskId) => hydrated.push(taskId),
+      ),
+    ).toBe(true);
+    expect(hydrated).toEqual(['tsk_older']);
   });
-  it('false once already refreshed (stops the effect feeding itself)', () => {
-    expect(shouldRefreshForTask({ taskId: 'tsk_x', hasTask: false, already: true })).toBe(false);
-  });
-  it('false when the row is already in the store', () => {
-    expect(shouldRefreshForTask({ taskId: 'tsk_x', hasTask: true, already: false })).toBe(false);
-  });
-  it('false when there is no ?task= id', () => {
-    expect(shouldRefreshForTask({ taskId: null, hasTask: false, already: false })).toBe(false);
+
+  it('does not rehydrate an existing, already attempted, or missing task id', () => {
+    const hydrated: string[] = [];
+    const hydrate = (taskId: string): void => {
+      hydrated.push(taskId);
+    };
+
+    expect(
+      hydrateMissingMediaTask(
+        { taskId: 'tsk_existing', hasTask: true, already: false },
+        hydrate,
+      ),
+    ).toBe(false);
+    expect(
+      hydrateMissingMediaTask(
+        { taskId: 'tsk_attempted', hasTask: false, already: true },
+        hydrate,
+      ),
+    ).toBe(false);
+    expect(
+      hydrateMissingMediaTask(
+        { taskId: null, hasTask: false, already: false },
+        hydrate,
+      ),
+    ).toBe(false);
+    expect(hydrated).toEqual([]);
   });
 });
 
 describe('video task product status helpers', () => {
+  it('opens a deep-linked video task in its actual product tab', () => {
+    expect(videoTabForTaskType('normal')).toBe('normal');
+    expect(videoTabForTaskType('pet')).toBe('pet');
+    expect(videoTabForTaskType('ip_person')).toBe('ip');
+    expect(videoTabForTaskType(undefined)).toBeNull();
+  });
+
+  it('keeps quote actions visible when the live awaiting event wins the create-task race', () => {
+    expect(resolveVideoAwaitingKind(undefined, 'video_quote')).toBe('video_quote');
+    expect(resolveVideoAwaitingKind('login', 'video_quote')).toBe('login');
+    expect(resolveVideoAwaitingKind(undefined, undefined)).toBeUndefined();
+  });
+
   it('treats pre-execution and executing statuses as generating', () => {
     for (const status of ['pending', 'planning', 'queued', 'executing'] as const) {
       expect(isVideoTaskRunning(status)).toBe(true);
@@ -99,5 +142,52 @@ describe('video task product status helpers', () => {
     expect(videoTaskStatusIconKind('failed')).toBe('failed');
     expect(videoTaskStatusIconKind('cancelled')).toBe('inactive');
     expect(videoTaskStatusIconKind('executing')).toBe('running');
+  });
+
+  it('never leaks stale live progress into a terminal media task', () => {
+    expect(
+      currentMediaTaskText({
+        status: 'completed',
+        resultText: '图片生成完成。',
+        liveSubStatusText: '正在生成图片…',
+        progress: '正在生成图片…',
+        streamingText: '仍在处理中…',
+      }),
+    ).toBe('图片生成完成。');
+
+    expect(
+      currentMediaTaskText({
+        status: 'completed',
+        progress: '正在生成图片…',
+      }),
+    ).toBe('');
+  });
+
+  it('keeps live progress visible while a media task is active or awaiting confirmation', () => {
+    expect(
+      currentMediaTaskText({
+        status: 'executing',
+        liveSubStatusText: '正在生成视频…',
+        progress: '已完成 1/3 段',
+      }),
+    ).toBe('正在生成视频…');
+
+    expect(
+      currentMediaTaskText({
+        status: 'awaiting_user',
+        awaitingQuestion: '请确认报价',
+        progress: '正在估价…',
+      }),
+    ).toBe('请确认报价');
+  });
+
+  it('bounds an unbroken current-task title for narrow workbench panes', () => {
+    const title = currentMediaTaskTitle({
+      intent: `生成视频：https://example.com/${'unbroken'.repeat(20)}`,
+      title: null,
+    });
+
+    expect(title.length).toBeLessThanOrEqual(64);
+    expect(title.endsWith('…')).toBe(true);
   });
 });

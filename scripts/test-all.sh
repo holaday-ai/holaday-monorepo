@@ -1,22 +1,20 @@
 #!/usr/bin/env bash
 #
-# scripts/test-all.sh — everything Claude Code must pass before pushing.
+# scripts/test-all.sh — release gate that must pass before pushing.
 #
 # Runs, in order:
 #
-#   1. Typechecks (shared-types / browser-driver / orchestrator / extension)
+#   1. Typechecks (shared-types / browser-driver / orchestrator /
+#      web-workbench / cn-payment / extension)
 #   2. Unit tests
-#        browser-driver     (17 expected)
-#        skill-sdk          (6 expected)
-#        orchestrator       (66 expected — includes planner, smoke-plans,
-#                            llm-call-recorder, task-controller, http,
-#                            jwt, auth.service)
+#        browser-driver / skill-sdk / orchestrator / web-workbench /
+#        cn-payment / akshare-mcp
 #   3. Integration tests
-#        orchestrator       (21 expected — real MariaDB + Redis +
-#                            real Express+tRPC+WS)
-#   4. Extension build
-#   5. Lint (biome check)
-#   6. E2E smoke (HTTP-side only, no live Chrome required)
+#        orchestrator (real MariaDB + Redis + real Express+tRPC+WS)
+#   4. Database schema verification
+#   5. Production builds (orchestrator / web-workbench / extension)
+#   6. Web lint + deploy/ops tests + git diff whitespace check
+#   7. E2E smoke (HTTP-side only, no live Chrome required)
 #        - boots orchestrator via scripts/start.sh if not up
 #        - curl registers + logs in a test user
 #        - curl POSTs /trpc/tasks.smokeTest (Baidu hardcoded plan —
@@ -37,6 +35,8 @@
 #                            else still runs). Default: 0.
 #   HOLADAY_SKIP_INTEGRATION=1  skip the orchestrator integration suite
 #                            (needs MariaDB + Redis). Default: 0.
+#   HOLADAY_AKSHARE_PYTHON      Python with apps/akshare-mcp dev dependencies.
+#                            Default: apps/akshare-mcp/.venv/bin/python.
 
 set -uo pipefail
 
@@ -85,12 +85,24 @@ run_check() {
 run_check 'typecheck @holaday/shared-types'   pnpm --filter @holaday/shared-types  typecheck
 run_check 'typecheck @holaday/browser-driver' pnpm --filter @holaday/browser-driver typecheck
 run_check 'typecheck @holaday/orchestrator'   pnpm --filter @holaday/orchestrator   typecheck
+run_check 'typecheck @holaday/web-workbench'  pnpm --filter @holaday/web-workbench typecheck
+run_check 'typecheck @holaday/cn-payment'      pnpm --filter @holaday/cn-payment    typecheck
 run_check 'typecheck @holaday/extension'      pnpm --filter @holaday/extension      typecheck
 
 # ---------- unit tests ----------
 run_check 'unit @holaday/browser-driver'      pnpm --filter @holaday/browser-driver test
 run_check 'unit @holaday/skill-sdk'           pnpm --filter @holaday/skill-sdk      test
 run_check 'unit @holaday/orchestrator'        pnpm --filter @holaday/orchestrator   test
+run_check 'unit @holaday/web-workbench'       pnpm --filter @holaday/web-workbench  test
+run_check 'unit @holaday/cn-payment'           pnpm --filter @holaday/cn-payment     test
+AKSHARE_PYTHON="${HOLADAY_AKSHARE_PYTHON:-$REPO_ROOT/apps/akshare-mcp/.venv/bin/python}"
+if [ -x "$AKSHARE_PYTHON" ]; then
+  run_check 'unit @holaday/akshare-mcp' \
+    "$AKSHARE_PYTHON" -m pytest -q "$REPO_ROOT/apps/akshare-mcp/tests"
+else
+  run_check 'unit @holaday/akshare-mcp' \
+    bash -c 'echo "Install apps/akshare-mcp dev dependencies or set HOLADAY_AKSHARE_PYTHON."; exit 1'
+fi
 
 # ---------- integration tests ----------
 # Integration tests spin up their OWN WS server on :3002 and an
@@ -127,11 +139,21 @@ else
     pnpm --filter @holaday/orchestrator test:integration
 fi
 
-# ---------- extension build ----------
+# ---------- database contract ----------
+run_check 'database schema verify' pnpm --filter @holaday/orchestrator db:verify
+
+# ---------- production builds ----------
+run_check 'orchestrator build' pnpm --filter @holaday/orchestrator build
+run_check 'web-workbench build' pnpm --filter @holaday/web-workbench build
 run_check 'extension build (vite)' pnpm --filter @holaday/extension build
 
-# ---------- lint ----------
-run_check 'lint (biome)' pnpm lint
+# ---------- repository quality ----------
+# The root Biome command intentionally scans every directory, including local
+# worktrees and protected draft folders. Keep the release gate focused on the
+# production web sources; typecheck/test/build cover the remaining packages.
+run_check 'lint @holaday/web-workbench' pnpm --filter @holaday/web-workbench lint
+run_check 'deploy/ops tests' pnpm test:ops
+run_check 'git diff whitespace check' git diff --check
 
 # ---------- E2E smoke (HTTP-side only) ----------
 # Now bring the live orchestrator up (integration tests are done and

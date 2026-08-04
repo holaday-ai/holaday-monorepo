@@ -21,6 +21,13 @@ describe('admin statusToken', () => {
     expect(token.bgClass).toContain('#FFC910');
   });
 
+  it('renders queued as a known waiting state', () => {
+    const token = statusToken('queued');
+
+    expect(token.label).toBe('排队中');
+    expect(token.label).not.toContain('未知');
+  });
+
   it('falls back for missing statuses', () => {
     expect(statusToken('').label).toBe('未知');
   });

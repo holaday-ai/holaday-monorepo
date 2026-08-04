@@ -73,6 +73,8 @@ const schema = z.object({
    */
   GEMINI_IMAGE_MODEL: z.string().default('gemini-3.1-flash-image'),
   GEMINI_IMAGE_MODEL_PRO: z.string().default('gemini-3-pro-image'),
+  /** Independent multimodal review for final lip-synced video artifacts. */
+  GEMINI_VIDEO_REVIEW_MODEL: z.string().default('gemini-3.6-flash'),
 
   /**
    * Phase 1 #4 — video creation pipeline (script → Qwen3-TTS-VC voice
@@ -101,9 +103,9 @@ const schema = z.object({
    * one-env-var fix, never a redeploy — the adapters never hard-code them.
    */
   WANXIANG_T2I_MODEL: z.string().default('wan2.2-t2i-flash'),
-  WANXIANG_T2V_MODEL: z.string().default('wan2.1-t2v-turbo'),
-  /** HappyHorse-1.0 文生视频(同 DashScope intl 端点/同 key,仅改 model). */
-  HAPPYHORSE_T2V_MODEL: z.string().default('happyhorse-1.0-t2v'),
+  WANXIANG_T2V_MODEL: z.string().default('wan2.7-t2v-2026-06-12'),
+  /** HappyHorse-1.1 文生视频(同 DashScope intl 端点/同 key,仅改 model). */
+  HAPPYHORSE_T2V_MODEL: z.string().default('happyhorse-1.1-t2v'),
   /**
    * 图生视频 i2v (Phase 2 第二期 宠物视频). 同 DashScope video-synthesis 端点,
    * input.img_url 走单图. 默认 wan2.2-i2v-flash(更省 + 已证同 intl 端点/key);
@@ -112,7 +114,14 @@ const schema = z.object({
    */
   WANXIANG_I2V_MODEL: z.string().default('wan2.2-i2v-flash'),
   HAPPYHORSE_I2V_MODEL: z.string().default('happyhorse-1.0-i2v'),
-  FAL_LIPSYNC_MODEL: z.string().default('fal-ai/latentsync'),
+  FAL_LIPSYNC_MODEL: z.literal('fal-ai/sync-lipsync/v3').default('fal-ai/sync-lipsync/v3'),
+  /**
+   * Clone-video-only lip-sync model. Kept separate from the IP-person lane
+   * because the two workflows have different duration and identity needs.
+   */
+  FAL_CLONE_LIPSYNC_MODEL: z
+    .enum(['fal-ai/sync-lipsync/v2', 'fal-ai/sync-lipsync/v3'])
+    .default('fal-ai/sync-lipsync/v3'),
   QWEN_TTS_VC_MODEL: z.string().default('qwen3-tts-vc-2026-01-22'),
   /**
    * Video-creation lane gate. Default OFF — video_creation intents fall
@@ -328,12 +337,32 @@ const schema = z.object({
    * without paying a 3-5s cold-start spawn on every return.
    */
   BROWSER_IDLE_TIMEOUT_MS: z.coerce.number().int().positive().default(300_000),
+  /**
+   * Short, hard-bounded review lease after a browser task finishes.
+   * The retained browser remains interactive in the workbench, but the pool
+   * may reclaim it immediately when a new task needs capacity.
+   */
+  BROWSER_TERMINAL_RETENTION_MS: z.coerce
+    .number()
+    .int()
+    .nonnegative()
+    .max(3_600_000)
+    .default(600_000),
   /** First port in the contiguous pool used for per-user resources.
    *  Slot i consumes display :(100+i), CDP (cdp+i), RFB (vnc+i), WS (ws+i). */
   BROWSER_CDP_PORT_START: z.coerce.number().int().positive().default(9300),
   BROWSER_VNC_PORT_START: z.coerce.number().int().positive().default(5910),
   BROWSER_WS_PORT_START: z.coerce.number().int().positive().default(6090),
   BROWSER_DISPLAY_START: z.coerce.number().int().nonnegative().default(100),
+  /**
+   * Emergency-only noVNC transport. Disabled by default because a desktop
+   * stream exposes browser chrome and file pickers outside the CDP action
+   * policy. Production should use the authenticated CDP screencast path.
+   */
+  BROWSER_VNC_WS_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
   /**
    * Xvfb screen geometry. Default 1280×800×24 (16:10) — sized so the
    * non-fullscreen side panel (~600 px wide) renders Brave at

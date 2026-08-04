@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildFallbackVideoScript,
   buildOptimizeSystemPrompt,
   buildScriptSystemPrompt,
   generateVideoScript,
@@ -122,6 +123,32 @@ describe('optimizeUserScript (原方案 — faithful to user draft)', () => {
     }
   });
 
+  it('parses the first complete JSON object when the model appends another object', async () => {
+    const reply = `${OPTIMIZED}\n{"note":"extra model commentary"}`;
+    const out = await optimizeUserScript(
+      { userText: '我想做个讲夏天防晒的视频，提醒大家涂够量' },
+      { llm: llmReturning(reply) },
+    );
+
+    expect(out.title).toBe('夏季防晒');
+    expect(out.segments).toHaveLength(2);
+  });
+
+  it('builds a faithful one-segment fallback from the original request', () => {
+    const out = buildFallbackVideoScript(
+      '一个成年人的右手拿起蓝色陶瓷杯，停一秒，再放回原位。',
+    );
+
+    expect(out.title).toBe('按原描述生成');
+    expect(out.segments).toEqual([
+      {
+        text: '一个成年人的右手拿起蓝色陶瓷杯，停一秒，再放回原位。',
+        type: 'broll',
+        visual: '一个成年人的右手拿起蓝色陶瓷杯，停一秒，再放回原位。',
+      },
+    ]);
+  });
+
   it('throws empty on a blank user draft', async () => {
     await expect(optimizeUserScript({ userText: '   ' }, { llm: llmReturning('x') })).rejects.toMatchObject({
       kind: 'empty',
@@ -141,15 +168,13 @@ describe('optimizeUserScript (原方案 — faithful to user draft)', () => {
     expect(p).toContain('只输出 JSON');
   });
 
-  it('范围2松绑: 关联性引导 + 保留压产品乱码 + 删掉"任何文字"一刀切', () => {
+  it('文字和品牌按需保留：未要求不乱加，明确要求则逐字准确', () => {
     const p = buildOptimizeSystemPrompt(6);
-    // 关联性(范围3): 画面视觉化该段旁白的核心动作/对象
     expect(p).toMatch(/视觉化该段旁白|核心动作或对象/);
-    // 收窄保留: 不画含文字特写 + 产品乱码假字
-    expect(p).toMatch(/不要画含文字的特写|含文字的特写构图/);
-    expect(p).toMatch(/产品包装|瓶身|标签/);
-    expect(p).toMatch(/编造乱码/);
-    // 松绑: 一刀切"画面中不能(出现|有)任何文字"必须已删
+    expect(p).toMatch(/未要求.*不要凭空新增|不得凭空新增/);
+    expect(p).toMatch(/逐字准确|清晰可读/);
+    expect(p).toMatch(/品牌|Logo|包装/);
+    expect(p).not.toMatch(/一律不画|不要画含文字的特写/);
     expect(p).not.toContain('画面中不能出现任何文字');
     expect(p).not.toContain('画面中不能有任何文字');
   });
@@ -176,6 +201,21 @@ describe('optimizeUserScript (原方案 — faithful to user draft)', () => {
     // and the old text-free example must no longer suggest a 手部特写
     expect(p).not.toContain('户外涂防晒的手部特写');
   });
+
+  it('does not invent people or hand interaction when the original request does not require them', () => {
+    const p = buildOptimizeSystemPrompt(6);
+    expect(p).toMatch(/用户原始需求没有要求人物|未要求人物/);
+    expect(p).toMatch(/不得新增人物、手|不要新增人物、手/);
+    expect(p).toMatch(/拿起、触碰或操作/);
+  });
+
+  it('preserves every phase and the stable end state of a continuous action', () => {
+    const p = buildOptimizeSystemPrompt(1);
+    expect(p).toMatch(/连续动作/);
+    expect(p).toMatch(/进入.*拿起.*放回.*离开|每个动作阶段/);
+    expect(p).toMatch(/最终稳定状态|收尾动作/);
+    expect(p).toMatch(/不得省略|不可省略/);
+  });
 });
 
 describe('段数按内容量动态定 (Problem 1 — 短文案不被硬凑成 6 段)', () => {
@@ -196,6 +236,14 @@ describe('段数按内容量动态定 (Problem 1 — 短文案不被硬凑成 6 
     expect(segmentCapForText('夏'.repeat(1000))).toBe(6); // clamped
     expect(segmentCapForText('')).toBe(1);
     expect(segmentCapForText('防晒')).toBe(1);
+  });
+
+  it('固定镜头的一段连续动作即使描述很长也只生成一个片段', () => {
+    const oneShot =
+      '固定镜头，一只自然成年人的右手从画面右侧进入，稳稳拿起蓝色陶瓷杯，再把杯子放回白色桌面，手部始终保持正常人体结构，杯身文字 HOLA DAY 必须完全正确，柔和自然光，真实产品摄影，6 秒。';
+
+    expect(oneShot.replace(/\s/g, '').length).toBeGreaterThan(60);
+    expect(segmentCapForText(oneShot)).toBe(1);
   });
 
   it('系统提示下限随 maxSegments 缩: 1→「1~1」, 2→「1~2」, 6→「4~6」+ 别硬凑', () => {

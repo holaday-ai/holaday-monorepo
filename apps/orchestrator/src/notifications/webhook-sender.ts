@@ -27,7 +27,11 @@
  * who want platform-native rich formatting can switch to 'custom'.
  */
 
+import { lookup } from 'node:dns/promises';
+import { isIP } from 'node:net';
 import type { Logger } from 'pino';
+import { Agent, fetch as undiciFetch, type Dispatcher } from 'undici';
+import { isPublicInternetAddress } from '../agent/browser-network-policy.js';
 
 export type NotificationPlatform = 'wecom' | 'feishu' | 'dingtalk' | 'custom';
 
@@ -70,6 +74,7 @@ export interface SendResult {
 
 export interface WebhookSenderDeps {
   fetch?: typeof globalThis.fetch;
+  resolve?: WebhookHostResolver;
   logger?: Pick<Logger, 'info' | 'warn'>;
   /** Override the per-attempt timeout. Default 10s. */
   timeoutMs?: number;
@@ -77,8 +82,218 @@ export interface WebhookSenderDeps {
   maxAttempts?: number;
 }
 
+export interface WebhookResolvedAddress {
+  address: string;
+  family: 4 | 6;
+}
+
+export type WebhookHostResolver = (
+  hostname: string,
+) => Promise<readonly WebhookResolvedAddress[]>;
+
+export interface ValidatedWebhookTarget {
+  url: string;
+  hostname: string;
+  addresses: WebhookResolvedAddress[];
+}
+
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_ATTEMPTS = 2;
+const MAX_REDIRECTS = 5;
+const PRIVATE_TARGET_MESSAGE =
+  'Webhook 仅允许连接安全的公网地址，不能使用本机、内网、链路本地或云元数据地址。';
+const DNS_TARGET_MESSAGE = 'Webhook 目标暂时无法安全解析，请检查地址后重试。';
+
+function normaliseHostname(hostname: string): string {
+  return hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+}
+
+function isBlockedHostname(hostname: string): boolean {
+  return (
+    !hostname ||
+    !hostname.includes('.') ||
+    hostname === 'localhost' ||
+    hostname.endsWith('.localhost') ||
+    hostname === 'metadata' ||
+    hostname === 'metadata.google.internal' ||
+    hostname.endsWith('.local') ||
+    hostname.endsWith('.internal') ||
+    hostname.endsWith('.lan') ||
+    hostname.endsWith('.home')
+  );
+}
+
+async function defaultWebhookResolver(
+  hostname: string,
+): Promise<readonly WebhookResolvedAddress[]> {
+  const resolved = await lookup(hostname, { all: true, verbatim: true });
+  return resolved
+    .filter(
+      (entry): entry is { address: string; family: 4 | 6 } =>
+        entry.family === 4 || entry.family === 6,
+    )
+    .map(({ address, family }) => ({ address, family }));
+}
+
+/**
+ * Resolve and validate a webhook destination immediately before use.
+ * Every DNS answer must be globally routable; mixed public/private answers are
+ * rejected to avoid selecting the public address while leaving a rebinding
+ * path to the private member.
+ */
+export async function validateWebhookTarget(
+  rawUrl: string,
+  options: { resolve?: WebhookHostResolver } = {},
+): Promise<ValidatedWebhookTarget> {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    throw new Error('Webhook 地址格式无效，请检查后重试。');
+  }
+
+  if (url.protocol !== 'https:') {
+    throw new Error('Webhook 地址必须使用 https 协议，以保护通知内容和凭据。');
+  }
+  if (url.username || url.password) {
+    throw new Error('Webhook 地址不能包含用户名或密码。');
+  }
+
+  const hostname = normaliseHostname(url.hostname);
+  const literalFamily = isIP(hostname);
+  if (isBlockedHostname(hostname)) {
+    throw new Error(PRIVATE_TARGET_MESSAGE);
+  }
+  if (literalFamily !== 0) {
+    if (!isPublicInternetAddress(hostname)) {
+      throw new Error(PRIVATE_TARGET_MESSAGE);
+    }
+    return {
+      url: url.href,
+      hostname,
+      addresses: [
+        {
+          address: hostname,
+          family: literalFamily as 4 | 6,
+        },
+      ],
+    };
+  }
+
+  let resolved: readonly WebhookResolvedAddress[];
+  try {
+    resolved = await (options.resolve ?? defaultWebhookResolver)(hostname);
+  } catch {
+    throw new Error(DNS_TARGET_MESSAGE);
+  }
+  if (resolved.length === 0) {
+    throw new Error(DNS_TARGET_MESSAGE);
+  }
+  if (
+    resolved.some(
+      ({ address, family }) =>
+        isIP(address) !== family || !isPublicInternetAddress(address),
+    )
+  ) {
+    throw new Error(PRIVATE_TARGET_MESSAGE);
+  }
+
+  const addresses = Array.from(
+    new Map(
+      resolved.map((entry) => [
+        `${entry.family}:${entry.address}`,
+        { address: entry.address, family: entry.family },
+      ]),
+    ).values(),
+  );
+  return { url: url.href, hostname, addresses };
+}
+
+function createPinnedDispatcher(target: ValidatedWebhookTarget): Dispatcher {
+  const selected = target.addresses[0];
+  if (!selected) {
+    throw new Error(DNS_TARGET_MESSAGE);
+  }
+  return new Agent({
+    connect: {
+      lookup(hostname, _options, callback) {
+        if (normaliseHostname(hostname) !== target.hostname) {
+          callback(
+            new Error('Webhook 连接目标与已校验域名不一致。'),
+            selected.address,
+            selected.family,
+          );
+          return;
+        }
+        callback(null, selected.address, selected.family);
+      },
+    },
+  });
+}
+
+async function closeDispatcher(dispatcher: Dispatcher): Promise<void> {
+  try {
+    await dispatcher.close();
+  } catch {
+    // Closing an already-failed connection must not mask the delivery result.
+  }
+}
+
+async function fetchWebhookHop(
+  fetchImpl: typeof globalThis.fetch,
+  target: ValidatedWebhookTarget,
+  body: string,
+  signal: AbortSignal,
+): Promise<Response> {
+  const dispatcher = createPinnedDispatcher(target);
+  try {
+    const response = await fetchImpl(
+      target.url,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+        signal,
+        redirect: 'manual',
+        dispatcher,
+      } as unknown as RequestInit,
+    );
+    const snapshot = new Response(null, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    });
+    await response.body?.cancel();
+    return snapshot;
+  } finally {
+    await closeDispatcher(dispatcher);
+  }
+}
+
+async function fetchWebhookWithRedirects(
+  initialUrl: string,
+  body: string,
+  signal: AbortSignal,
+  fetchImpl: typeof globalThis.fetch,
+  resolve: WebhookHostResolver | undefined,
+): Promise<Response> {
+  let currentUrl = initialUrl;
+  for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount += 1) {
+    const target = await validateWebhookTarget(currentUrl, { resolve });
+    const response = await fetchWebhookHop(fetchImpl, target, body, signal);
+    if (response.status < 300 || response.status >= 400) {
+      return response;
+    }
+
+    const location = response.headers.get('location');
+    if (!location) return response;
+    if (redirectCount === MAX_REDIRECTS) {
+      throw new Error('Webhook 重定向次数过多，已停止发送。');
+    }
+    currentUrl = new URL(location, target.url).href;
+  }
+  throw new Error('Webhook 重定向次数过多，已停止发送。');
+}
 
 /**
  * Format the platform-text-preset message string. Composes a single
@@ -185,7 +400,8 @@ export async function sendWebhook(
   ctx: WebhookContext,
   deps: WebhookSenderDeps = {},
 ): Promise<SendResult> {
-  const fetchImpl = deps.fetch ?? globalThis.fetch;
+  const fetchImpl =
+    deps.fetch ?? (undiciFetch as unknown as typeof globalThis.fetch);
   const timeoutMs = deps.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxAttempts = deps.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
 
@@ -206,12 +422,13 @@ export async function sendWebhook(
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const res = await fetchImpl(channel.webhookUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const res = await fetchWebhookWithRedirects(
+        channel.webhookUrl,
         body,
-        signal: controller.signal,
-      });
+        controller.signal,
+        fetchImpl,
+        deps.resolve,
+      );
       clearTimeout(timer);
       lastStatus = res.status;
       if (res.ok) {

@@ -42,6 +42,8 @@ import threading
 import time
 from typing import Any
 
+import requests
+
 try:
     import akshare as ak  # type: ignore
 except Exception:  # pragma: no cover - akshare optional at import time
@@ -67,23 +69,19 @@ TTL_KLINE = _ttl("KLINE", 600)
 TTL_ANNOUNCE = _ttl("ANNOUNCE", 1800)
 TTL_LHB = _ttl("LHB", 3600)
 TTL_NORTHBOUND = _ttl("NORTHBOUND", 600)
-TTL_INDEX = _ttl("INDEX", 600)
+TTL_INDEX = _ttl("INDEX", 60)
+TTL_PULSE = _ttl("PULSE", 600)
 TTL_UNLOCK = _ttl("UNLOCK", 3600)
 TTL_TRADECAL = _ttl("TRADECAL", 86400)  # 交易日历日内基本不变，缓存 1 天
 TTL_FUND = _ttl("FUND", 86400)  # 财报季度才变，缓存 1 天
 TTL_VAL = _ttl("VAL", 3600)  # 估值日级，缓存 1 小时
 TTL_RISK = _ttl("RISK", 21600)  # ④ 风险源(质押/商誉/预告)粗粒度变更，缓存 6h
-TTL_RANK = _ttl("RANK", 300)
-TTL_SPOT = _ttl("SPOT", TTL_RANK)
+TTL_RANK = _ttl("RANK", 60)
+TTL_SPOT = _ttl("SPOT", 300)
 
 # Row caps so a single tool call can't dump thousands of rows into the
 # model's context.
 MAX_ROWS = int(os.environ.get("AKSHARE_MCP_MAX_ROWS", "50"))
-
-_spot_lock = threading.Lock()
-_spot_records: list[dict[str, Any]] = []
-_spot_ts: float = 0.0
-
 
 class AkShareUnavailable(RuntimeError):
     """Raised when akshare isn't importable or an interface call fails."""
@@ -191,54 +189,164 @@ def _hydrate_symbol_table_from_spot(recs: list[dict[str, Any]]) -> None:
         _symbol_ts = time.time()
 
 
-def _get_a_spot_records(ttl: int = TTL_SPOT) -> list[dict[str, Any]]:
+@_cached(TTL_SPOT)
+def _get_a_spot_records() -> list[dict[str, Any]]:
     """Fetch and cache full A-share spot rows once per process TTL window."""
-    global _spot_records, _spot_ts
-    now = time.time()
-    with _spot_lock:
-        if _spot_records and now - _spot_ts < ttl:
-            return list(_spot_records)
-
     a = _require_ak()
     df = a.stock_zh_a_spot()
     recs = _records(df, limit=6000)
-    with _spot_lock:
-        _spot_records = recs
-        _spot_ts = time.time()
     _hydrate_symbol_table_from_spot(recs)
     return list(recs)
 
 
-def get_quote(symbol: str) -> tuple[list[dict[str, Any]], str]:
-    """实时行情快照（最新价 / 涨跌幅 / 成交额）。symbol 形如 '600519'。
+@_cached(TTL_INTRADAY)
+def _get_sina_minute_frame(symbol: str) -> Any:
+    """Single-symbol Sina minute payload shared by quote and chart requests."""
+    a = _require_ak()
+    return a.stock_zh_a_minute(symbol=sina_prefix(symbol), period="1", adjust="")
 
-    走 sina 全市场 spot 再按代码过滤（push2 stock_bid_ask_em 从 Vultr 不可达）。
-    注：全市场快照较重，④ 即时问答可后续换更轻的单只 sina 实时接口。
+
+def get_quote(symbol: str) -> tuple[list[dict[str, Any]], str]:
+    """实时行情快照（最新价 / 成交量 / 成交额）。symbol 形如 '600519'。
+
+    优先走单只 Sina 分钟线，避免每只股票触发 5500+ 行全市场快照。分钟线
+    不直接提供昨收，涨跌幅留空，由上层已有日线基准计算。Sina 分钟接口异常时
+    才退回真实全市场 spot；不生成模拟价格。
     """
-    recs = _get_a_spot_records()
     code = symbol.strip()
+    try:
+        minute_frame = _get_sina_minute_frame(code)
+        minute_rows = _intraday_rows(minute_frame)
+        if minute_rows:
+            latest = minute_rows[-1]
+            latest_date = str(latest["时间"])[:10]
+            previous_date = next(
+                (date for date in reversed(_intraday_dates(minute_frame)) if date < latest_date),
+                None,
+            )
+            previous_rows = (
+                _intraday_rows(minute_frame, expected_date=previous_date)
+                if previous_date
+                else []
+            )
+            change_pct = pct_change(
+                previous_rows[-1]["最新价"] if previous_rows else None,
+                latest["最新价"],
+            )
+            if change_pct is None:
+                raise AkShareUnavailable("分钟线缺少上一交易日收盘")
+            volume = sum(
+                value
+                for value in (_to_float(row.get("成交量")) for row in minute_rows)
+                if value is not None
+            )
+            amount = sum(
+                value
+                for value in (_to_float(row.get("成交额")) for row in minute_rows)
+                if value is not None
+            )
+            return [
+                {
+                    "代码": code,
+                    "最新价": latest["最新价"],
+                    "涨跌幅": change_pct,
+                    "成交量": volume,
+                    "成交额": amount,
+                    "行情时间": latest["时间"],
+                }
+            ], "akshare:stock_zh_a_minute(sina,1m,latest)"
+    except Exception:  # noqa: BLE001 - fall through to the other real source
+        pass
+
+    recs = _get_a_spot_records()
     hit = [r for r in recs if str(r.get("代码", "")).endswith(code)]
-    return hit[:1], "akshare:stock_zh_a_spot(sina,filter)"
+    return hit[:1], "akshare:stock_zh_a_spot(sina,filter,fallback)"
+
+
+_SINA_A_RANK_URL = (
+    "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/"
+    "Market_Center.getHQNodeData"
+)
+
+
+def _sina_ranking_rows(metric: str, limit: int) -> list[dict[str, Any]]:
+    """Fetch one server-sorted Sina page instead of crawling every A-share page."""
+    sort_field, ascending = {
+        "gainers": ("changepercent", "0"),
+        "losers": ("changepercent", "1"),
+        "amount": ("amount", "0"),
+    }[metric]
+    page_size = min(80, max(20, limit * 2))
+    timeout = max(1.0, float(os.environ.get("AKSHARE_MCP_SINA_RANK_TIMEOUT", "15")))
+    params = {
+        "page": "1",
+        "num": str(page_size),
+        "sort": sort_field,
+        "asc": ascending,
+        "node": "hs_a",
+        "symbol": "",
+        "_s_r_a": "page",
+    }
+
+    try:
+        response = _retry(
+            lambda: requests.get(_SINA_A_RANK_URL, params=params, timeout=timeout),
+            attempts=2,
+            sleep=0.4,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except Exception as exc:  # noqa: BLE001 - normalize upstream transport/parser errors
+        raise AkShareUnavailable("新浪排行真实数据暂不可用") from exc
+
+    if not isinstance(payload, list):
+        raise AkShareUnavailable("新浪排行真实数据格式异常")
+
+    rows: list[dict[str, Any]] = []
+    for raw in payload:
+        if not isinstance(raw, dict):
+            continue
+        code = _strip_market_prefix(str(raw.get("code") or raw.get("symbol") or ""))
+        price = _to_float(raw.get("trade"))
+        change = _to_float(raw.get("changepercent"))
+        amount = _to_float(raw.get("amount"))
+        if not re.fullmatch(r"\d{6}", code) or price is None or change is None or amount is None:
+            continue
+        rows.append(
+            {
+                "代码": code,
+                "名称": str(raw.get("name") or "").strip(),
+                "最新价": price,
+                "涨跌额": _to_float(raw.get("pricechange")),
+                "涨跌幅": change,
+                "买入": _to_float(raw.get("buy")),
+                "卖出": _to_float(raw.get("sell")),
+                "昨收": _to_float(raw.get("settlement")),
+                "今开": _to_float(raw.get("open")),
+                "最高": _to_float(raw.get("high")),
+                "最低": _to_float(raw.get("low")),
+                "成交量": _to_float(raw.get("volume")),
+                "成交额": amount,
+                "时间戳": str(raw.get("ticktime") or "").strip(),
+            }
+        )
+
+    if metric == "amount":
+        rows.sort(key=lambda row: _to_float(row.get("成交额")) or 0, reverse=True)
+    elif metric == "losers":
+        rows.sort(key=lambda row: _to_float(row.get("涨跌幅")) or 0)
+    else:
+        rows.sort(key=lambda row: _to_float(row.get("涨跌幅")) or 0, reverse=True)
+    return rows[:limit]
 
 
 def get_stock_rankings(metric: str = "gainers", limit: int = 20) -> tuple[list[dict[str, Any]], str]:
-    """A股全市场榜单。metric: gainers | losers | amount。"""
+    """A股全市场榜单。由新浪服务端排序后只取首页真实数据。"""
     m = (metric or "gainers").strip().lower()
     if m not in {"gainers", "losers", "amount"}:
         raise AkShareUnavailable("不支持的榜单类型，仅支持 gainers/losers/amount")
     cap = max(1, min(int(limit or 20), 50))
-    rows = [
-        r for r in _get_a_spot_records()
-        if _to_float(r.get("最新价")) is not None and _to_float(r.get("涨跌幅")) is not None
-    ]
-    if m == "amount":
-        rows = [r for r in rows if _to_float(r.get("成交额")) is not None]
-        rows.sort(key=lambda r: _to_float(r.get("成交额")) or 0, reverse=True)
-    elif m == "losers":
-        rows.sort(key=lambda r: _to_float(r.get("涨跌幅")) or 0)
-    else:
-        rows.sort(key=lambda r: _to_float(r.get("涨跌幅")) or 0, reverse=True)
-    return rows[:cap], f"akshare:stock_zh_a_spot(sina,{m})"
+    return _sina_ranking_rows(m, cap), f"akshare:sina-stock-rankings({m})"
 
 
 def get_kline(
@@ -302,13 +410,22 @@ def get_kline(
 
 
 def get_intraday(symbol: str) -> tuple[list[dict[str, Any]], str]:
-    """A股真实分钟线。只返回 AkShare 给出的实际分钟点，不补齐、不外推、不造收盘后价格。"""
+    """A股真实分钟线。返回最近交易日的实际分钟点，不补齐、不外推。"""
     a = _require_ak()
     cn_today = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).date()
     today = cn_today.strftime("%Y-%m-%d")
-    start = f"{today} 09:30:00"
+    start = f"{(cn_today - datetime.timedelta(days=21)).isoformat()} 09:30:00"
     end = f"{today} 15:00:00"
     errors: list[str] = []
+
+    if hasattr(a, "stock_zh_a_minute"):
+        try:
+            df = _get_sina_minute_frame(symbol)
+            rows = _intraday_rows(df)
+            if rows:
+                return rows, "akshare:stock_zh_a_minute(sina,1m)"
+        except Exception as exc:  # noqa: BLE001 - try next AkShare adapter
+            errors.append(f"stock_zh_a_minute: {exc}")
 
     if hasattr(a, "stock_zh_a_hist_min_em"):
         try:
@@ -319,20 +436,11 @@ def get_intraday(symbol: str) -> tuple[list[dict[str, Any]], str]:
                 period="1",
                 adjust="",
             )
-            rows = _intraday_rows(df, expected_date=today)
+            rows = _intraday_rows(df)
             if rows:
                 return rows, "akshare:stock_zh_a_hist_min_em(1m)"
         except Exception as exc:  # noqa: BLE001 - try next AkShare adapter
             errors.append(f"stock_zh_a_hist_min_em: {exc}")
-
-    if hasattr(a, "stock_zh_a_minute"):
-        try:
-            df = a.stock_zh_a_minute(symbol=sina_prefix(symbol), period="1", adjust="")
-            rows = _intraday_rows(df, expected_date=today)
-            if rows:
-                return rows, "akshare:stock_zh_a_minute(sina,1m)"
-        except Exception as exc:  # noqa: BLE001 - report all attempted real sources
-            errors.append(f"stock_zh_a_minute: {exc}")
 
     if hasattr(a, "stock_intraday_sina"):
         try:
@@ -351,21 +459,20 @@ def _intraday_rows(
     df: Any,
     expected_date: str | None = None,
     allow_time_only_date: bool = False,
+    *,
+    now: datetime.datetime | None = None,
 ) -> list[dict[str, Any]]:
     if df is None or len(df) == 0:
         return []
-    rows: list[dict[str, Any]] = []
+    shanghai = datetime.timezone(datetime.timedelta(hours=8))
+    current = now or datetime.datetime.now(shanghai)
+    if current.tzinfo is not None:
+        current = current.astimezone(shanghai).replace(tzinfo=None)
+    current_minute = current.replace(second=0, microsecond=0)
+    candidates: list[tuple[datetime.datetime, dict[str, Any]]] = []
     source = df.tail(MAX_ROWS * 20) if hasattr(df, "tail") else df
     for raw in _records(source, limit=MAX_ROWS * 20):
-        time_value = (
-            raw.get("时间")
-            or raw.get("日期")
-            or raw.get("day")
-            or raw.get("time")
-            or raw.get("datetime")
-            or raw.get("ticktime")
-            or raw.get("成交时间")
-        )
+        time_value = _intraday_time_value(raw)
         price = _to_float(
             raw.get("收盘")
             or raw.get("最新价")
@@ -377,32 +484,88 @@ def _intraday_rows(
         if price is None or time_value is None:
             continue
         time_text = str(time_value)
-        if expected_date:
-            date_match = re.search(r"(\d{4})[-/]?(\d{2})[-/]?(\d{2})", time_text)
-            if not date_match:
-                if not allow_time_only_date:
-                    continue
-                time_text = f"{expected_date} {time_text}"
-                date_match = re.search(r"(\d{4})[-/]?(\d{2})[-/]?(\d{2})", time_text)
-            if not date_match:
+        date_match = re.search(r"(\d{4})[-/]?(\d{2})[-/]?(\d{2})", time_text)
+        if not date_match:
+            if not expected_date or not allow_time_only_date:
                 continue
+            row_date = expected_date
+        else:
             row_date = f"{date_match.group(1)}-{date_match.group(2)}-{date_match.group(3)}"
-            if row_date != expected_date:
-                continue
+        if expected_date and row_date != expected_date:
+            continue
+        time_match = re.search(r"(\d{1,2}):(\d{2})(?::(\d{2}))?", time_text)
+        if not time_match:
+            continue
+        hour = int(time_match.group(1))
+        minute = int(time_match.group(2))
+        second = int(time_match.group(3) or 0)
+        minute_of_day = hour * 60 + minute
+        if not (
+            9 * 60 + 30 <= minute_of_day <= 11 * 60 + 30
+            or 13 * 60 <= minute_of_day <= 15 * 60
+        ):
+            continue
+        try:
+            timestamp = datetime.datetime.fromisoformat(
+                f"{row_date} {hour:02d}:{minute:02d}:{second:02d}"
+            )
+        except ValueError:
+            continue
+        # Sina can label the still-forming bar with the next minute. Never let
+        # that provider convention become a future quote or chart point.
+        if timestamp.replace(second=0, microsecond=0) > current_minute:
+            continue
         row = {
-            "时间": time_text,
+            "时间": timestamp.strftime("%Y-%m-%d %H:%M:%S"),
             "最新价": price,
             "成交量": _to_float(raw.get("成交量") or raw.get("volume")),
             "成交额": _to_float(raw.get("成交额") or raw.get("amount")),
         }
-        if allow_time_only_date:
-            minute_key = time_text[:16]
-            if rows and rows[-1].get("时间", "")[:16] == minute_key:
-                rows[-1] = row
-                continue
-        rows.append(row)
+        candidates.append((timestamp, row))
+
+    if not candidates:
+        return []
+    latest_date = expected_date or max(timestamp.date() for timestamp, _ in candidates).isoformat()
+    latest = [
+        (timestamp, row)
+        for timestamp, row in candidates
+        if timestamp.date().isoformat() == latest_date
+    ]
+    latest.sort(key=lambda item: item[0])
+    by_minute: dict[str, dict[str, Any]] = {}
+    for timestamp, row in latest:
+        by_minute[timestamp.strftime("%Y-%m-%d %H:%M")] = row
+    rows = list(by_minute.values())
     # A 股分钟线最多约 240 点；保留尾部实际交易点，避免大响应拖慢前端。
     return rows[-260:]
+
+
+def _intraday_time_value(raw: dict[str, Any]) -> Any:
+    return (
+        raw.get("时间")
+        or raw.get("日期")
+        or raw.get("day")
+        or raw.get("time")
+        or raw.get("datetime")
+        or raw.get("ticktime")
+        or raw.get("成交时间")
+    )
+
+
+def _intraday_dates(df: Any) -> list[str]:
+    """Return ascending source dates from the bounded minute-data window."""
+    if df is None or len(df) == 0:
+        return []
+    source = df.tail(MAX_ROWS * 20) if hasattr(df, "tail") else df
+    dates: set[str] = set()
+    for raw in _records(source, limit=MAX_ROWS * 20):
+        match = re.search(
+            r"(\d{4})[-/]?(\d{2})[-/]?(\d{2})",
+            str(_intraday_time_value(raw) or ""),
+        )
+        if match:
+            dates.add(f"{match.group(1)}-{match.group(2)}-{match.group(3)}")
+    return sorted(dates)
 
 
 # --- 公告 ------------------------------------------------------------

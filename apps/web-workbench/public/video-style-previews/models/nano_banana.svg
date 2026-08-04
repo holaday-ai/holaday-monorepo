@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-label="Nano Banana model icon">
+  <defs>
+    <linearGradient id="bg" x1="12" y1="10" x2="86" y2="88" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#fff7a8"/>
+      <stop offset="0.42" stop-color="#ffd43d"/>
+      <stop offset="0.72" stop-color="#42c0ef"/>
+      <stop offset="1" stop-color="#6f5bff"/>
+    </linearGradient>
+    <radialGradient id="shine" cx="28" cy="20" r="46" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#fff" stop-opacity=".85"/>
+      <stop offset=".52" stop-color="#fff" stop-opacity=".12"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="8" flood-color="#111827" flood-opacity=".22"/>
+    </filter>
+  </defs>
+  <rect width="96" height="96" rx="24" fill="url(#bg)"/>
+  <rect width="96" height="96" rx="24" fill="url(#shine)"/>
+  <g filter="url(#shadow)">
+    <path d="M31 58c4 12 20 18 32 8 10-8 11-24 1-34-3 19-15 29-33 26Z" fill="#fff4ad"/>
+    <path d="M31 58c18 3 30-7 33-26 5 16-7 37-27 35-3-2-5-5-6-9Z" fill="#ffcc2f"/>
+    <path d="M34 35c6-8 15-12 27-9-12 1-20 5-25 13-3 5-4 10-5 18-3-8-2-15 3-22Z" fill="#fff9d7"/>
+    <path d="M60 26c5 1 9 3 12 6-3 1-6 0-8-2-2-1-4-2-4-4Z" fill="#5a3d1f"/>
+  </g>
+  <path d="M25 73c14 8 37 7 49-8" fill="none" stroke="#fff" stroke-opacity=".55" stroke-width="3" stroke-linecap="round"/>
+</svg>

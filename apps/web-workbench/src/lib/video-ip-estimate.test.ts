@@ -40,6 +40,6 @@ describe('estimateIpRenderMinutes — ceil((audioSec×11+70)/60), 高估, floor 
 
 describe('ipRenderingHint', () => {
   it('renders the full Chinese hint with the estimate', () => {
-    expect(ipRenderingHint('字'.repeat(185))).toBe('真人换口型较慢，预计约 8 分钟，请耐心等待。');
+    expect(ipRenderingHint('字'.repeat(185))).toBe('IP人物视频生成较慢，预计约 8 分钟，请耐心等待。');
   });
 });

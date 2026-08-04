@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { createExpressMiddleware } from '@trpc/server/adapters/express';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import express from 'express';
 import multer from 'multer';
 import { pinoHttp } from 'pino-http';
@@ -40,7 +40,7 @@ import {
   contentDispositionAttachment,
   uploadByteLimit,
 } from './files/file-service.js';
-import { nextExpiryFor, type PayPalAdapter, type PlanId } from './payment/index.js';
+import type { PayPalAdapter, PlanId } from './payment/index.js';
 import {
   PartnerPaymentConfirmConflictError,
   PartnerPaymentConfirmReviewRequiredError,
@@ -49,17 +49,21 @@ import {
   validatePartnerPaymentConfirmHttpRequest,
 } from './partner/payment-confirm-service.js';
 import { partnerConfig } from './partner/partner-config.js';
-import { QuotaService } from './quota/quota-service.js';
 import {
   ADDON_PACK_CATALOGUE,
+  getAddonPackPriceCents,
+  getPlanPriceCents,
   isAddonPackId,
-  newExternalId,
   type AddonPackId,
   type BillingCycle,
 } from '@holaday/shared-types';
 import { createWebhookTasksHandler } from './api-keys/webhook-handler.js';
 import { makeCreateContext } from './trpc/context.js';
 import { appRouter } from './trpc/router.js';
+import {
+  completePaymentInTransaction,
+  lockSettlementContext,
+} from './trpc/routers/payment.js';
 import { tasksRouter } from './trpc/routers/tasks.js';
 
 export interface HttpAppDeps {
@@ -77,6 +81,13 @@ export interface HttpAppDeps {
    * tasks.ts checks for null at the L1 screenshot save site.
    */
   downloadManager?: import('./files/download-manager.js').DownloadManager | null;
+}
+
+function parsePayPalAmountCents(value: unknown): number | null {
+  if (typeof value !== 'string' || !/^\d+(?:\.\d{1,2})?$/.test(value)) return null;
+  const [whole, fraction = ''] = value.split('.');
+  const cents = Number(whole) * 100 + Number(fraction.padEnd(2, '0'));
+  return Number.isSafeInteger(cents) ? cents : null;
 }
 
 export function createHttpApp(deps: HttpAppDeps) {
@@ -368,12 +379,23 @@ export function createHttpApp(deps: HttpAppDeps) {
         return;
       }
     } else {
-      logger.warn('paypal webhook: PAYPAL_WEBHOOK_ID unset — accepting without signature check (dev only)');
+      if (process.env.NODE_ENV === 'production') {
+        logger.error(
+          'paypal webhook: PAYPAL_WEBHOOK_ID unset in production — rejecting unsigned event',
+        );
+        res.status(503).json({ error: 'webhook verification unavailable' });
+        return;
+      }
+      logger.warn(
+        'paypal webhook: PAYPAL_WEBHOOK_ID unset — accepting without signature check (non-production only)',
+      );
     }
     const event = req.body as {
       event_type?: string;
       resource?: {
         id?: string;
+        status?: string;
+        amount?: { currency_code?: string; value?: string };
         supplementary_data?: { related_ids?: { order_id?: string } };
       };
     };
@@ -384,52 +406,122 @@ export function createHttpApp(deps: HttpAppDeps) {
       return;
     }
     const captureId = event.resource?.id ?? null;
+    const captureStatus = event.resource?.status ?? null;
+    const captureAmountCents = parsePayPalAmountCents(event.resource?.amount?.value);
+    const captureCurrency = event.resource?.amount?.currency_code?.toUpperCase() ?? null;
     const orderId = event.resource?.supplementary_data?.related_ids?.order_id ?? null;
     if (!captureId || !orderId) {
-      logger.warn({ event }, 'paypal webhook: missing capture/order id');
+      logger.warn(
+        {
+          eventType: event.event_type ?? null,
+          resourceId: event.resource?.id ?? null,
+          hasOrderId: Boolean(orderId),
+        },
+        'paypal webhook: missing capture/order id',
+      );
       res.status(200).send('skipped');
       return;
     }
     try {
-      const [row] = await db
+      const [observedRow] = await db
         .select()
         .from(payments)
-        .where(eq(payments.providerOrderId, orderId))
+        .where(and(eq(payments.provider, 'paypal'), eq(payments.providerOrderId, orderId)))
         .limit(1);
-      if (!row) {
+      if (!observedRow) {
         logger.warn({ orderId }, 'paypal webhook: no matching payments row');
         res.status(200).send('unknown order');
         return;
       }
-      if (row.status === 'completed') {
-        // Already finalised by tRPC capture or a prior webhook — idempotent.
+      const outcome = await db.transaction(async (tx) => {
+        const settlement = await lockSettlementContext(tx, observedRow);
+        const [row] = await tx
+          .select()
+          .from(payments)
+          .where(eq(payments.id, observedRow.id))
+          .limit(1)
+          .for('update');
+        if (!row) throw new Error('payment row vanished during PayPal settlement');
+        if (row.status === 'completed') {
+          return { kind: 'deduped' as const, row };
+        }
+        if (row.status !== 'pending') {
+          return { kind: 'review' as const, row, reason: 'unexpected_payment_status' };
+        }
+        if (
+          captureStatus !== 'COMPLETED' ||
+          captureAmountCents !== row.amountCents ||
+          captureCurrency !== row.currency.toUpperCase()
+        ) {
+          await tx
+            .update(payments)
+            .set({
+              status: 'failed',
+              providerCaptureId: captureId,
+              metadata: {
+                ...((row.metadata as Record<string, unknown> | null) ?? {}),
+                webhookEventType: event.event_type,
+                reason: 'capture_settlement_mismatch',
+                captureStatus,
+                captureAmountCents,
+                captureCurrency,
+              },
+            })
+            .where(and(eq(payments.id, row.id), eq(payments.status, 'pending')));
+          return { kind: 'review' as const, row, reason: 'capture_settlement_mismatch' };
+        }
+        if (
+          settlement.firstMonthRequested &&
+          !settlement.firstMonthEligible
+        ) {
+          await tx
+            .update(payments)
+            .set({
+              status: 'failed',
+              providerCaptureId: captureId,
+              metadata: {
+                ...((row.metadata as Record<string, unknown> | null) ?? {}),
+                webhookEventType: event.event_type,
+                reason: 'first_month_no_longer_eligible',
+              },
+            })
+            .where(and(eq(payments.id, row.id), eq(payments.status, 'pending')));
+          return { kind: 'review' as const, row, reason: 'first_month_no_longer_eligible' };
+        }
+
+        const completed = await completePaymentInTransaction(tx, row, settlement, {
+          captureId,
+          captureStatus,
+          metadata: { webhookEventType: event.event_type },
+        });
+        return {
+          kind: completed ? ('completed' as const) : ('deduped' as const),
+          row,
+        };
+      });
+
+      if (outcome.kind === 'deduped') {
         res.status(200).send('already completed');
         return;
       }
-      // Pull cycle from the metadata stamped at createOrder time;
-      // legacy rows pre-dating the field default to monthly.
-      const meta = (row.metadata as Record<string, unknown> | null) ?? {};
-      const cycle: BillingCycle = meta.cycle === 'yearly' ? 'yearly' : 'monthly';
-      const expiry = nextExpiryFor(row.plan as PlanId, cycle, null);
-      await db.transaction(async (tx) => {
-        await tx
-          .update(payments)
-          .set({
-            status: 'completed',
-            providerCaptureId: captureId,
-            metadata: {
-              ...(row.metadata as Record<string, unknown> | null),
-              webhookEventType: event.event_type,
-            },
-          })
-          .where(eq(payments.id, row.id));
-        await tx
-          .update(users)
-          .set({ plan: row.plan, planExpiresAt: expiry })
-          .where(eq(users.externalId, row.userExternalId));
-      });
+      if (outcome.kind === 'review') {
+        logger.error(
+          {
+            paymentId: outcome.row.externalId,
+            captureId,
+            reason: outcome.reason,
+          },
+          'paypal webhook capture requires refund review',
+        );
+        res.status(200).send('review required');
+        return;
+      }
       logger.info(
-        { paymentId: row.externalId, plan: row.plan, captureId },
+        {
+          paymentId: outcome.row.externalId,
+          plan: outcome.row.plan,
+          captureId,
+        },
         'paypal webhook: capture completed → plan upgraded',
       );
       res.status(200).send('ok');
@@ -774,8 +866,8 @@ export function createHttpApp(deps: HttpAppDeps) {
         res.status(401).json({ error: 'unknown user' });
         return;
       }
-      const loaded = await fileService.loadForUser(fileId, userExternalId);
-      if (!loaded || loaded.row.userId !== user.id) {
+      const loaded = await fileService.loadForUser(fileId, user.id);
+      if (!loaded) {
         res.status(404).json({ error: 'not_found' });
         return;
       }
@@ -1007,7 +1099,6 @@ export function createHttpApp(deps: HttpAppDeps) {
   // hd-pay.orangebench.tech). Mismatch → 401 + payment stuck pending
   // (cn-payment will retry from logs).
   // ---------------------------------------------------------------------
-  const internalConfirmService = new QuotaService(db);
   // NB: route registered WITHOUT the `/api/` prefix because nginx
   // strips it (location /api/ → proxy_pass http://127.0.0.1:4001/;
   // — the trailing slash on the upstream URL is what strips it).
@@ -1078,6 +1169,19 @@ export function createHttpApp(deps: HttpAppDeps) {
     }
   });
 
+  app.get('/internal/payment/health', (req, res) => {
+    const expectedSecret = process.env.INTERNAL_SHARED_SECRET;
+    if (!expectedSecret) {
+      res.status(503).json({ error: 'internal_secret_not_configured' });
+      return;
+    }
+    if (req.headers['x-internal-secret'] !== expectedSecret) {
+      res.status(401).json({ error: 'unauthorized' });
+      return;
+    }
+    res.status(200).json({ status: 'ok', paymentBridge: 'ready' });
+  });
+
   app.post('/internal/payment/confirm', async (req, res) => {
     const expectedSecret = process.env.INTERNAL_SHARED_SECRET;
     if (!expectedSecret) {
@@ -1104,36 +1208,71 @@ export function createHttpApp(deps: HttpAppDeps) {
       amountCents?: number;
       kind?: string;
       addonPackId?: string;
+      isFirstMonth?: boolean;
     };
-    const required: Array<keyof typeof body> = ['userId', 'transactionId', 'amountCents', 'kind', 'provider'];
+    const required: Array<keyof typeof body> = [
+      'userId',
+      'transactionId',
+      'outTradeNo',
+      'amountCents',
+      'kind',
+      'provider',
+    ];
     for (const k of required) {
       if (body[k] == null) {
         res.status(400).json({ error: `missing field: ${String(k)}` });
         return;
       }
     }
+    if (
+      typeof body.userId !== 'string' ||
+      typeof body.transactionId !== 'string' ||
+      typeof body.outTradeNo !== 'string'
+    ) {
+      res.status(400).json({ error: 'bad_request' });
+      return;
+    }
+    const userExternalId = body.userId;
     const provider = body.provider as 'wechat' | 'alipay';
-    const transactionId = body.transactionId!;
-    const outTradeNo = body.outTradeNo ?? null;
+    const transactionId = body.transactionId;
+    const outTradeNo = body.outTradeNo;
     const amountCents = Number(body.amountCents);
     const kind = body.kind as 'subscription' | 'addon';
+    if (provider !== 'wechat' && provider !== 'alipay') {
+      res.status(400).json({ error: 'bad_provider' });
+      return;
+    }
+    if (kind !== 'subscription' && kind !== 'addon') {
+      res.status(400).json({ error: 'bad_kind' });
+      return;
+    }
+    if (!Number.isSafeInteger(amountCents) || amountCents <= 0) {
+      res.status(400).json({ error: 'bad_amount' });
+      return;
+    }
+    if (
+      body.isFirstMonth !== undefined &&
+      typeof body.isFirstMonth !== 'boolean'
+    ) {
+      res.status(400).json({ error: 'bad_first_month' });
+      return;
+    }
 
     try {
       const [user] = await db
         .select()
         .from(users)
-        .where(eq(users.externalId, body.userId!))
+        .where(eq(users.externalId, userExternalId))
         .limit(1);
       if (!user) {
         res.status(404).json({ error: 'unknown_user' });
         return;
       }
 
-      const externalId = newExternalId('payment');
-
+      const planId = body.planId as 'basic' | 'pro';
+      const cycle = body.cycle as BillingCycle;
+      const packId = body.addonPackId;
       if (kind === 'subscription') {
-        const planId = body.planId as PlanId;
-        const cycle = body.cycle as BillingCycle;
         if (planId !== 'basic' && planId !== 'pro') {
           res.status(400).json({ error: 'bad_plan' });
           return;
@@ -1142,123 +1281,178 @@ export function createHttpApp(deps: HttpAppDeps) {
           res.status(400).json({ error: 'bad_cycle' });
           return;
         }
-        const expiry = nextExpiryFor(planId, cycle, user.planExpiresAt ?? null);
-        // Insert-or-noop on the (provider, capture_id) unique key.
-        // If a concurrent retry already wrote this transactionId, the
-        // INSERT noops via ON DUPLICATE KEY UPDATE and the subsequent
-        // SELECT shows that retry's externalId — we treat that as a
-        // dedup and skip the user-plan extension. Only the writer
-        // whose externalId actually landed extends the plan.
-        const deduped = await db.transaction(async (tx) => {
-          await tx
-            .insert(payments)
-            .values({
-              externalId,
-              userExternalId: user.externalId,
-              provider,
-              providerOrderId: outTradeNo,
-              providerCaptureId: transactionId,
-              plan: planId,
-              amountCents,
-              currency: 'CNY',
-              status: 'completed',
-              kind: 'subscription',
-              metadata: { cycle, source: 'cn-payment-gateway' },
-            })
-            .onDuplicateKeyUpdate({
-              set: { externalId: sql`external_id` },
-            });
-          const [winner] = await tx
-            .select({ externalId: payments.externalId })
-            .from(payments)
-            .where(
-              and(
-                eq(payments.provider, provider),
-                eq(payments.providerCaptureId, transactionId),
-              ),
-            )
-            .limit(1);
-          if (!winner) {
-            throw new Error('payments row vanished after upsert');
-          }
-          if (winner.externalId !== externalId) return true;
-          await tx
-            .update(users)
-            .set({ plan: planId, planExpiresAt: expiry })
-            .where(eq(users.externalId, user.externalId));
-          return false;
-        });
-        logger.info(
-          { userId: user.externalId, planId, cycle, provider, transactionId, deduped },
-          deduped ? 'internal-confirm: subscription deduped' : 'internal-confirm: subscription completed',
-        );
-        res.status(200).json({ ok: true, deduped });
-        return;
-      }
-
-      if (kind === 'addon') {
-        const packId = body.addonPackId;
-        if (!packId || !isAddonPackId(packId)) {
-          res.status(400).json({ error: 'bad_addon_pack' });
+        if (cycle === 'yearly' && body.isFirstMonth === true) {
+          res.status(400).json({ error: 'bad_first_month' });
           return;
         }
-        const pack = ADDON_PACK_CATALOGUE[packId as AddonPackId];
-        // Same insert-or-noop pattern as the subscription path. The
-        // applyAddonPack call lives outside the transaction because
-        // task_quotas upserts use their own onDuplicateKeyUpdate that
-        // doesn't compose with Drizzle's tx wrapper — so the txn is
-        // just the row insert + winner check, and we only fire the
-        // entitlement when we actually inserted (i.e. not a dup).
-        const deduped = await db.transaction(async (tx) => {
-          await tx
-            .insert(payments)
-            .values({
-              externalId,
-              userExternalId: user.externalId,
-              provider,
-              providerOrderId: outTradeNo,
-              providerCaptureId: transactionId,
-              plan: packId,
-              amountCents,
-              currency: 'CNY',
-              status: 'completed',
-              kind: 'addon',
-              metadata: { source: 'cn-payment-gateway', tasks: pack.tasks, opus: pack.opus },
-            })
-            .onDuplicateKeyUpdate({
-              set: { externalId: sql`external_id` },
-            });
-          const [winner] = await tx
-            .select({ externalId: payments.externalId })
+      } else if (!packId || !isAddonPackId(packId)) {
+        res.status(400).json({ error: 'bad_addon_pack' });
+        return;
+      }
+      const paymentPlan =
+        kind === 'subscription' ? planId : (packId as AddonPackId);
+
+      const outcome = await db.transaction(async (tx) => {
+        const [lockedUser] = await tx
+          .select({ id: users.id })
+          .from(users)
+          .where(eq(users.externalId, user.externalId))
+          .limit(1)
+          .for('update');
+        if (!lockedUser) {
+          throw new Error('user vanished during CN payment settlement');
+        }
+        const [capturedRow] = await tx
+          .select()
+          .from(payments)
+          .where(
+            and(
+              eq(payments.provider, provider),
+              eq(payments.providerCaptureId, transactionId),
+            ),
+          )
+          .limit(1)
+          .for('update');
+        if (capturedRow?.status === 'completed') {
+          return { kind: 'deduped' as const, row: capturedRow };
+        }
+        if (capturedRow && capturedRow.status !== 'pending') {
+          return { kind: 'review' as const, row: capturedRow };
+        }
+
+        let row = capturedRow;
+        if (!row && outTradeNo) {
+          const [pendingOrder] = await tx
+            .select()
             .from(payments)
             .where(
               and(
                 eq(payments.provider, provider),
-                eq(payments.providerCaptureId, transactionId),
+                eq(payments.providerOrderId, outTradeNo),
               ),
             )
-            .limit(1);
-          if (!winner) {
-            throw new Error('payments row vanished after upsert');
-          }
-          return winner.externalId !== externalId;
-        });
-        if (!deduped) {
-          await internalConfirmService.applyAddonPack(
-            user.id,
-            (user.plan === 'pro' ? 'pro' : 'basic'),
-            packId as AddonPackId,
-          );
+            .limit(1)
+            .for('update');
+          row = pendingOrder;
         }
-        logger.info(
-          { userId: user.externalId, packId, provider, transactionId, deduped },
-          deduped ? 'internal-confirm: addon deduped' : 'internal-confirm: addon pack applied',
-        );
-        res.status(200).json({ ok: true, deduped });
-        return;
-      }
+        if (row && row.status !== 'pending') {
+          return { kind: 'review' as const, row };
+        }
 
-      res.status(400).json({ error: 'bad_kind' });
+        const callbackMetadata =
+          kind === 'subscription'
+            ? {
+                cycle,
+                firstMonth:
+                  cycle === 'monthly' && body.isFirstMonth === true,
+                source: 'cn-payment-gateway',
+              }
+            : {
+                source: 'cn-payment-gateway',
+                tasks: ADDON_PACK_CATALOGUE[packId as AddonPackId].tasks,
+                opus: ADDON_PACK_CATALOGUE[packId as AddonPackId].opus,
+              };
+
+        if (!row) {
+          throw new Error('cn payment callback has no pending Holaday order');
+        }
+        if (!row.providerCaptureId) {
+          await tx
+            .update(payments)
+            .set({
+              providerCaptureId: transactionId,
+              metadata: {
+                ...((row.metadata as Record<string, unknown> | null) ?? {}),
+                ...callbackMetadata,
+              },
+            })
+            .where(and(eq(payments.id, row.id), eq(payments.status, 'pending')));
+          row = {
+            ...row,
+            providerCaptureId: transactionId,
+            metadata: {
+              ...((row.metadata as Record<string, unknown> | null) ?? {}),
+              ...callbackMetadata,
+            },
+          };
+        }
+
+        if (
+          row.userExternalId !== user.externalId ||
+          row.providerOrderId !== outTradeNo ||
+          row.kind !== kind ||
+          row.plan !== paymentPlan ||
+          row.amountCents !== amountCents
+        ) {
+          throw new Error('cn payment callback does not match pending order');
+        }
+
+        const settlement = await lockSettlementContext(tx, row);
+        const expectedAmount =
+          kind === 'subscription'
+            ? getPlanPriceCents(
+                planId,
+                cycle,
+                'cny',
+                settlement.firstMonthRequested &&
+                  settlement.firstMonthEligible,
+              )
+            : getAddonPackPriceCents(packId as AddonPackId, 'cny');
+        if (
+          (settlement.firstMonthRequested &&
+            !settlement.firstMonthEligible) ||
+          amountCents !== expectedAmount
+        ) {
+          await tx
+            .update(payments)
+            .set({
+              status: 'failed',
+              metadata: {
+                ...((row.metadata as Record<string, unknown> | null) ?? {}),
+                reason:
+                  amountCents !== expectedAmount
+                    ? 'amount_mismatch'
+                    : 'first_month_no_longer_eligible',
+              },
+            })
+            .where(and(eq(payments.id, row.id), eq(payments.status, 'pending')));
+          return { kind: 'review' as const, row };
+        }
+
+        const completed = await completePaymentInTransaction(tx, row, settlement, {
+          captureId: transactionId,
+          captureStatus: 'COMPLETED',
+          metadata: { source: 'cn-payment-gateway' },
+        });
+        return {
+          kind: completed ? ('completed' as const) : ('deduped' as const),
+          row,
+        };
+      });
+
+      const deduped = outcome.kind === 'deduped';
+      logger.info(
+        {
+          userId: user.externalId,
+          planId: kind === 'subscription' ? planId : undefined,
+          packId: kind === 'addon' ? packId : undefined,
+          cycle: kind === 'subscription' ? cycle : undefined,
+          provider,
+          transactionId,
+          deduped,
+          reviewRequired: outcome.kind === 'review',
+        },
+        outcome.kind === 'review'
+          ? 'internal-confirm: captured payment requires refund review'
+          : deduped
+            ? 'internal-confirm: payment deduped'
+            : 'internal-confirm: payment completed',
+      );
+      res.status(200).json({
+        ok: true,
+        deduped,
+        ...(outcome.kind === 'review' ? { reviewRequired: true } : {}),
+      });
     } catch (err) {
       logger.error(
         { err: err instanceof Error ? err.message : String(err), provider, transactionId },

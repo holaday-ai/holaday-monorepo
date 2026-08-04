@@ -20,7 +20,8 @@
  *    profit card should always reflect the full liability.
  */
 
-import { and, desc, eq, gte, inArray, sql } from 'drizzle-orm';
+import { TRPCError } from '@trpc/server';
+import { and, desc, eq, gte, inArray, ne, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { llmCalls } from '../../db/schema/llm-calls.js';
 import { payments } from '../../db/schema/payments.js';
@@ -36,7 +37,7 @@ export const SERVER_FIXED_CNY_CENTS_MONTHLY = Math.round(
   (VULTR_USD_MONTHLY * USD_TO_CNY + ALIYUN_CNY_MONTHLY) * 100,
 );
 
-/** Convert a payments row to CNY cents. Falls through on unknown currency. */
+/** Convert a payments row to CNY cents. Unknown currencies must not be mislabeled as CNY. */
 export function paymentRowCnyCents(
   amountCents: number,
   currency: string,
@@ -44,9 +45,10 @@ export function paymentRowCnyCents(
   const c = currency.toUpperCase();
   if (c === 'CNY') return amountCents;
   if (c === 'USD') return Math.round(amountCents * USD_TO_CNY);
-  // Anything else (shouldn't happen given the schema) — pass through
-  // verbatim rather than silently drop the row to 0.
-  return amountCents;
+  throw new TRPCError({
+    code: 'PRECONDITION_FAILED',
+    message: `unsupported payment currency: ${c || 'empty'}`,
+  });
 }
 
 /** USD decimal string (from llm_calls.cost_usd) → CNY cents. */
@@ -56,14 +58,19 @@ export function usdToCnyCents(usd: number | string): number {
   return Math.round(n * USD_TO_CNY * 100);
 }
 
-function currentMonthStartUtc(): Date {
-  const now = new Date();
-  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+function beijingMonthStartUtc(at: Date, monthsAgo = 0): Date {
+  const shifted = new Date(at.getTime() + 8 * 3600_000);
+  const localMonthStartAsUtc = new Date(
+    Date.UTC(shifted.getUTCFullYear(), shifted.getUTCMonth() - monthsAgo, 1),
+  );
+  return new Date(localMonthStartAsUtc.getTime() - 8 * 3600_000);
 }
 
-function monthsAgoStartUtc(monthsAgo: number): Date {
-  const now = new Date();
-  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - monthsAgo, 1));
+function completedPaymentPeriodCondition(start: Date) {
+  return and(
+    gte(payments.completedAt, start),
+    eq(payments.status, 'completed'),
+  );
 }
 
 /** Beijing-day start (UTC instant), daysAgo back. */
@@ -91,10 +98,69 @@ function beijingDayString(at: Date, daysAgo = 0): string {
   return d.toISOString().slice(0, 10);
 }
 
+function buildRevenueProductRows(input: {
+  userCounts: Array<{ plan: string; count: number }>;
+  revenue: Array<{ kind: string; plan: string; revenueCnyCents: number }>;
+}) {
+  const userCountByPlan = new Map(
+    input.userCounts.map((row) => [row.plan, Number(row.count)]),
+  );
+  const revenueByProduct = new Map<string, number>();
+  for (const row of input.revenue) {
+    const key = `${row.kind}:${row.plan}`;
+    revenueByProduct.set(
+      key,
+      (revenueByProduct.get(key) ?? 0) + row.revenueCnyCents,
+    );
+  }
+
+  const baselinePlans = ['free', 'basic', 'pro'];
+  const subscriptionPlans = new Set([
+    ...baselinePlans,
+    ...userCountByPlan.keys(),
+    ...input.revenue
+      .filter((row) => row.kind === 'subscription')
+      .map((row) => row.plan),
+  ]);
+  const orderedSubscriptionPlans = [
+    ...baselinePlans,
+    ...Array.from(subscriptionPlans)
+      .filter((plan) => !baselinePlans.includes(plan))
+      .sort(),
+  ];
+  const extraProducts = Array.from(
+    new Set(
+      input.revenue
+        .filter((row) => row.kind !== 'subscription')
+        .map((row) => `${row.kind}:${row.plan}`),
+    ),
+  ).sort();
+
+  return [
+    ...orderedSubscriptionPlans.map((plan) => ({
+      kind: 'subscription',
+      plan,
+      userCount: userCountByPlan.get(plan) ?? 0,
+      monthRevenueCnyCents: revenueByProduct.get(`subscription:${plan}`) ?? 0,
+    })),
+    ...extraProducts.map((key) => {
+      const separator = key.indexOf(':');
+      const kind = key.slice(0, separator);
+      const plan = key.slice(separator + 1);
+      return {
+        kind,
+        plan,
+        userCount: 0,
+        monthRevenueCnyCents: revenueByProduct.get(key) ?? 0,
+      };
+    }),
+  ];
+}
+
 export const adminFinanceRouter = router({
   // ────────────────────────────────────────────────────────── summary ──
   summary: adminProcedure.query(async ({ ctx }) => {
-    const monthStart = currentMonthStartUtc();
+    const monthStart = beijingMonthStartUtc(new Date());
 
     // Revenue — completed payments this month, grouped by currency
     // so the USD → CNY conversion happens once per currency, not
@@ -105,12 +171,7 @@ export const adminFinanceRouter = router({
         sumCents: sql<number>`COALESCE(SUM(${payments.amountCents}), 0)`,
       })
       .from(payments)
-      .where(
-        and(
-          gte(payments.createdAt, monthStart),
-          eq(payments.status, 'completed'),
-        ),
-      )
+      .where(completedPaymentPeriodCondition(monthStart))
       .groupBy(payments.currency);
     let monthRevenueCnyCents = 0;
     for (const row of paymentRows) {
@@ -150,42 +211,48 @@ export const adminFinanceRouter = router({
         count: sql<number>`COUNT(*)`,
       })
       .from(users)
+      .where(ne(users.role, 'system'))
       .groupBy(users.plan);
-    const userCountByPlan = new Map<string, number>();
-    for (const r of userRows) {
-      userCountByPlan.set(r.plan, Number(r.count));
-    }
 
     // Revenue per plan — sum completed payments this month, grouped
     // by (plan, currency) so we can convert per group.
-    const monthStart = currentMonthStartUtc();
+    const monthStart = beijingMonthStartUtc(new Date());
     const paymentRows = await ctx.db
       .select({
+        kind: payments.kind,
         plan: payments.plan,
         currency: payments.currency,
         sumCents: sql<number>`COALESCE(SUM(${payments.amountCents}), 0)`,
       })
       .from(payments)
-      .where(
-        and(
-          gte(payments.createdAt, monthStart),
-          eq(payments.status, 'completed'),
-        ),
-      )
-      .groupBy(payments.plan, payments.currency);
+      .where(completedPaymentPeriodCondition(monthStart))
+      .groupBy(payments.kind, payments.plan, payments.currency);
 
-    const revenueByPlan = new Map<string, number>();
+    const revenueByProduct = new Map<string, {
+      kind: string;
+      plan: string;
+      revenueCnyCents: number;
+    }>();
     for (const r of paymentRows) {
       const cny = paymentRowCnyCents(Number(r.sumCents) || 0, r.currency);
-      revenueByPlan.set(r.plan, (revenueByPlan.get(r.plan) ?? 0) + cny);
+      const key = `${r.kind}:${r.plan}`;
+      const current = revenueByProduct.get(key) ?? {
+        kind: r.kind,
+        plan: r.plan,
+        revenueCnyCents: 0,
+      };
+      current.revenueCnyCents += cny;
+      revenueByProduct.set(key, current);
     }
 
     return {
-      plans: ['free', 'basic', 'pro'].map((plan) => ({
-        plan,
-        userCount: userCountByPlan.get(plan) ?? 0,
-        monthRevenueCnyCents: revenueByPlan.get(plan) ?? 0,
-      })),
+      plans: buildRevenueProductRows({
+        userCounts: userRows.map((row) => ({
+          plan: row.plan,
+          count: Number(row.count),
+        })),
+        revenue: Array.from(revenueByProduct.values()),
+      }),
     };
   }),
 
@@ -193,22 +260,18 @@ export const adminFinanceRouter = router({
   revenueByMonth: adminProcedure.query(async ({ ctx }) => {
     // Pull 6 calendar months ending with the current one. Group at
     // YYYY-MM granularity using the MySQL DATE_FORMAT extension.
-    const startWindow = monthsAgoStartUtc(5);
+    const now = new Date();
+    const startWindow = beijingMonthStartUtc(now, 5);
     const rows = await ctx.db
       .select({
-        month: sql<string>`DATE_FORMAT(${payments.createdAt}, '%Y-%m')`,
+        month: sql<string>`DATE_FORMAT(DATE_ADD(${payments.completedAt}, INTERVAL 8 HOUR), '%Y-%m')`,
         currency: payments.currency,
         sumCents: sql<number>`COALESCE(SUM(${payments.amountCents}), 0)`,
       })
       .from(payments)
-      .where(
-        and(
-          gte(payments.createdAt, startWindow),
-          eq(payments.status, 'completed'),
-        ),
-      )
+      .where(completedPaymentPeriodCondition(startWindow))
       .groupBy(
-        sql`DATE_FORMAT(${payments.createdAt}, '%Y-%m')`,
+        sql`DATE_FORMAT(DATE_ADD(${payments.completedAt}, INTERVAL 8 HOUR), '%Y-%m')`,
         payments.currency,
       );
 
@@ -220,7 +283,7 @@ export const adminFinanceRouter = router({
 
     const series: Array<{ month: string; revenueCnyCents: number }> = [];
     for (let i = 5; i >= 0; i--) {
-      const d = monthsAgoStartUtc(i);
+      const d = new Date(beijingMonthStartUtc(now, i).getTime() + 8 * 3600_000);
       const ym = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
       series.push({ month: ym, revenueCnyCents: byMonth.get(ym) ?? 0 });
     }
@@ -231,12 +294,15 @@ export const adminFinanceRouter = router({
   conversionFunnel: adminProcedure.query(async ({ ctx }) => {
     const [totalUsersRow] = await ctx.db
       .select({ count: sql<number>`COUNT(*)` })
-      .from(users);
+      .from(users)
+      .where(ne(users.role, 'system'));
     const totalSignups = Number(totalUsersRow?.count ?? 0);
 
     const [withTaskRow] = await ctx.db
       .select({ count: sql<number>`COUNT(DISTINCT ${tasks.userId})` })
-      .from(tasks);
+      .from(tasks)
+      .innerJoin(users, eq(users.id, tasks.userId))
+      .where(and(eq(tasks.origin, 'user'), ne(users.role, 'system')));
     const withTask = Number(withTaskRow?.count ?? 0);
 
     const [paidRow] = await ctx.db
@@ -304,7 +370,7 @@ export const adminFinanceRouter = router({
 
   // ─────────────────────────────────────────────────── costBreakdown ──
   costBreakdown: adminProcedure.query(async ({ ctx }) => {
-    const monthStart = currentMonthStartUtc();
+    const monthStart = beijingMonthStartUtc(new Date());
     const rows = await ctx.db
       .select({
         model: llmCalls.model,
@@ -382,7 +448,7 @@ export const adminFinanceRouter = router({
     .input(z.object({ limit: z.number().int().min(5).max(50).default(10) }).optional())
     .query(async ({ ctx, input }) => {
       const limit = input?.limit ?? 10;
-      const monthStart = currentMonthStartUtc();
+      const monthStart = beijingMonthStartUtc(new Date());
 
       // Aggregate per task_id first (task_id can be null for some
       // commander-only calls; we filter those out).
@@ -484,6 +550,9 @@ export const adminFinanceRouter = router({
 
 // Helpers exported for unit tests.
 export const __financeInternals = {
+  beijingMonthStartUtc,
+  buildRevenueProductRows,
+  completedPaymentPeriodCondition,
   paymentRowCnyCents,
   usdToCnyCents,
   SERVER_FIXED_CNY_CENTS_MONTHLY,

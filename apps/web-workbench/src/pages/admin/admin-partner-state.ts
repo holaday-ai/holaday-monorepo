@@ -7,6 +7,67 @@ import {
 } from './admin-shared';
 
 export type AdminPartnerStatusKind = 'kyc' | 'order' | 'withdrawal' | 'risk';
+export type AdminPartnerQueueName =
+  | 'orders'
+  | 'kycProfiles'
+  | 'withdrawals'
+  | 'withdrawalHistory'
+  | 'riskLots'
+  | 'riskEvents';
+
+const ADMIN_PARTNER_QUEUE_NAMES = new Set<AdminPartnerQueueName>([
+  'orders',
+  'kycProfiles',
+  'withdrawals',
+  'withdrawalHistory',
+  'riskLots',
+  'riskEvents',
+]);
+
+function beijingDayString(at: Date, daysAgo = 0): string {
+  const shifted = new Date(at.getTime() + 8 * 60 * 60 * 1000);
+  const day = new Date(
+    Date.UTC(
+      shifted.getUTCFullYear(),
+      shifted.getUTCMonth(),
+      shifted.getUTCDate() - daysAgo,
+    ),
+  );
+  return day.toISOString().slice(0, 10);
+}
+
+export function defaultPartnerReconciliationRange(at: Date): {
+  from: string;
+  to: string;
+} {
+  return {
+    from: beijingDayString(at, 6),
+    to: beijingDayString(at),
+  };
+}
+
+export function adminPartnerActionConfirmation(
+  actionLabel: string,
+  details: readonly string[] = [],
+): {
+  title: string;
+  description: string;
+} {
+  const label = actionLabel.trim() || '该审核动作';
+  const evidenceLines = details
+    .map((detail) => detail.trim())
+    .filter(Boolean)
+    .map((detail) => detail.slice(0, 180));
+  const baseDescription =
+    '该操作会立即写入生产审核或账务状态。请再次核对对象、金额、原因和凭证信息。';
+  return {
+    title: `确认执行“${label}”？`,
+    description:
+      evidenceLines.length > 0
+        ? `${baseDescription}\n${evidenceLines.join('\n')}`
+        : baseDescription,
+  };
+}
 
 interface AdminPartnerStatusToken {
   label: string;
@@ -283,8 +344,18 @@ export function normalizeAdminPartnerOverview(value: unknown) {
     return { enabled: false as const };
   }
   const metrics = asRecord(root.metrics);
+  const coverage = asRecord(root.coverage);
+  const truncatedQueues = safeArray(coverage.truncatedQueues).filter(
+    (value): value is AdminPartnerQueueName =>
+      typeof value === 'string' &&
+      ADMIN_PARTNER_QUEUE_NAMES.has(value as AdminPartnerQueueName),
+  );
   return {
     enabled: true as const,
+    coverage: {
+      limit: Math.round(nonNegativeNumber(coverage.limit, 50)),
+      truncatedQueues,
+    },
     metrics: {
       pendingKycCount: Math.round(nonNegativeNumber(metrics.pendingKycCount)),
       pendingOrderCount: Math.round(nonNegativeNumber(metrics.pendingOrderCount)),
@@ -327,7 +398,9 @@ export function normalizeAdminPartnerOverview(value: unknown) {
         status: safeText(row.status),
         country: safeText(row.country, 'CN'),
         provider: safeText(row.provider),
-        providerRef: safeText(row.providerRef),
+        // Keep machine state empty so action guards cannot mistake the
+        // display placeholder for real KYC evidence.
+        providerRef: safeText(row.providerRef, ''),
         reviewerUserId: Math.round(nonNegativeNumber(row.reviewerUserId)),
         reviewNote: safeText(row.reviewNote),
         reviewSource: safeText(row.reviewSource),
@@ -486,7 +559,10 @@ export type PartnerReconciliationState = ReturnType<typeof normalizePartnerRecon
 
 function csvCell(value: unknown): string {
   const text = String(value ?? '');
-  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  const safeText = /^[\t\r\n ]*[=+\-@]/.test(text) ? `'${text}` : text;
+  return /[",\n\r]/.test(safeText)
+    ? `"${safeText.replace(/"/g, '""')}"`
+    : safeText;
 }
 
 export function partnerReconciliationCsv(state: PartnerReconciliationState): string {

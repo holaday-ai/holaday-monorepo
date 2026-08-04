@@ -61,6 +61,28 @@ describe('createImageTask', () => {
     });
   });
 
+  it('marks a permanent account billing failure non-retryable', async () => {
+    const { fetchImpl, calls } = jsonQueue([
+      {
+        status: 400,
+        body: {
+          code: 'Arrearage',
+          message: 'The account is not in good standing due to an overdue payment.',
+        },
+      },
+    ]);
+
+    await expect(
+      createImageTask({ apiKey: KEY, prompt: 'x', fetchImpl }),
+    ).rejects.toMatchObject({
+      name: 'WanxiangError',
+      kind: 'http',
+      status: 400,
+      retryable: false,
+    });
+    expect(calls).toHaveLength(1);
+  });
+
   it('retries transient 429 then succeeds', async () => {
     const { fetchImpl, calls } = jsonQueue([
       { status: 429, body: { code: 'Throttling', message: 'slow down' } },
@@ -105,12 +127,36 @@ describe('createVideoTask — i2v 图生 (Phase 2 第二期)', () => {
     });
   });
 
-  it('t2v (no imageUrl) omits img_url + duration', async () => {
+  it('t2v defaults to the pinned Wan 2.7 release and omits optional parameters', async () => {
     const { fetchImpl, calls } = jsonQueue([{ body: { output: { task_id: 'v2', task_status: 'PENDING' } } }]);
     await createVideoTask({ apiKey: KEY, prompt: 'a beach', fetchImpl });
     const body = JSON.parse((calls[0]?.init as RequestInit).body as string);
+    expect(body.model).toBe('wan2.7-t2v-2026-06-12');
     expect(body.input.img_url).toBeUndefined();
     expect(body.parameters?.duration).toBeUndefined();
+  });
+
+  it('uses the Wan 2.7 resolution and ratio protocol instead of the legacy size field', async () => {
+    const { fetchImpl, calls } = jsonQueue([
+      { body: { output: { task_id: 'v27', task_status: 'PENDING' } } },
+    ]);
+    await createVideoTask({
+      apiKey: KEY,
+      model: 'wan2.7-t2v-2026-06-12',
+      prompt: 'single-shot product video',
+      size: '1280*720',
+      resolution: '720P',
+      ratio: '16:9',
+      durationSeconds: 8,
+      fetchImpl,
+    });
+    const body = JSON.parse((calls[0]?.init as RequestInit).body as string);
+    expect(body.parameters).toEqual({
+      resolution: '720P',
+      ratio: '16:9',
+      duration: 8,
+    });
+    expect(body.parameters.size).toBeUndefined();
   });
 });
 
@@ -201,6 +247,27 @@ describe('generateBrollVideo', () => {
     await generateBrollVideo({ apiKey: KEY, prompt: 'clip', negativePrompt: '乱码, gibberish', fetchImpl, ...TINY });
     const init = calls[0]?.init as RequestInit;
     expect(JSON.parse(init.body as string)).toMatchObject({ input: { negative_prompt: '乱码, gibberish' } });
+  });
+
+  it('passes the selected HappyHorse duration instead of using the provider default', async () => {
+    const { fetchImpl, calls } = jsonQueue([
+      { body: { output: { task_id: 'v', task_status: 'PENDING' } } },
+      { body: { output: { task_id: 'v', task_status: 'SUCCEEDED', video_url: 'https://oss/v.mp4' } } },
+    ]);
+    await generateBrollVideo({
+      apiKey: KEY,
+      model: 'happyhorse-1.1-t2v',
+      prompt: 'clip',
+      size: '1920*1080',
+      durationSeconds: 6,
+      fetchImpl,
+      ...TINY,
+    });
+    const init = calls[0]?.init as RequestInit;
+    expect(JSON.parse(init.body as string)).toMatchObject({
+      model: 'happyhorse-1.1-t2v',
+      parameters: { size: '1920*1080', duration: 6 },
+    });
   });
 });
 

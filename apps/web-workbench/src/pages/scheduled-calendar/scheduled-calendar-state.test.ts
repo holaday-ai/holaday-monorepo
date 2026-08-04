@@ -3,6 +3,7 @@ import {
   scheduledCalendarErrorMessage,
   scheduledCalendarStatusCopy,
   scheduledCalendarSummary,
+  shouldOpenScheduledCalendarPopover,
 } from './scheduled-calendar-state';
 
 describe('scheduled calendar state helpers', () => {
@@ -47,5 +48,29 @@ describe('scheduled calendar state helpers', () => {
     );
     expect(scheduledCalendarErrorMessage('计划不存在')).toBe('计划不存在');
     expect(scheduledCalendarErrorMessage({})).toBe('请稍后重试');
+  });
+
+  it('does not let a calendar click bypass an open quick-create draft', () => {
+    expect(
+      shouldOpenScheduledCalendarPopover({
+        quickCreateOpen: true,
+        popoverClosedAt: 0,
+        now: 1_000,
+      }),
+    ).toBe(false);
+    expect(
+      shouldOpenScheduledCalendarPopover({
+        quickCreateOpen: false,
+        popoverClosedAt: 900,
+        now: 1_000,
+      }),
+    ).toBe(false);
+    expect(
+      shouldOpenScheduledCalendarPopover({
+        quickCreateOpen: false,
+        popoverClosedAt: 0,
+        now: 1_000,
+      }),
+    ).toBe(true);
   });
 });

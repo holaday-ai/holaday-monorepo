@@ -87,7 +87,14 @@ function makeFakeStorage(opts: { failOn?: string } = {}) {
   const puts: Array<Record<string, unknown>> = [];
   const deletes: string[] = [];
   const storage: StorageProvider = {
+    pathFor(input) {
+      return `bucket/${input.fileExternalId}/${input.filename}`;
+    },
     async put(input) {
+      puts.push(input as unknown as Record<string, unknown>);
+      return { storagePath: `bucket/${input.fileExternalId}/${input.filename}` };
+    },
+    async putFile(input) {
       puts.push(input as unknown as Record<string, unknown>);
       return { storagePath: `bucket/${input.fileExternalId}/${input.filename}` };
     },

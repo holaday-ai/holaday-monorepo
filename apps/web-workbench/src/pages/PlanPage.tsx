@@ -1,44 +1,46 @@
-import { Check, Plus } from 'lucide-react';
-import * as React from 'react';
-import { useLocation } from 'react-router-dom';
-import {
-  ADDON_PACK_CATALOGUE,
-  ADDON_PACK_IDS,
-  PLAN_CATALOGUE,
-  formatPrice,
-  getAddonPackPriceCents,
-  getPlanPriceCents,
-  type AddonPackId,
-  type BillingCycle,
-  type Currency,
-  type PlanId,
-} from '@holaday/shared-types';
 import { AddonPackButton } from '@/components/AddonPackButton';
 import { CnPaymentDialog, type CnProvider, type CnPurchase } from '@/components/CnPaymentDialog';
 import { PayPalButton } from '@/components/PayPalButton';
 import { Button } from '@/components/ui/button';
+import { useToast } from '@/components/ui/toast';
 import { normalizeAuthMeProfile } from '@/lib/auth-me-state';
+import { shouldScrollPlanAddons } from '@/lib/plan-page-hash';
 import {
+  type CnPaymentOptions,
+  type PaymentOptions,
   normalizeCnPaymentOptions,
   normalizePaymentOptions,
+  planAddonPaymentAvailable,
+  planFirstMonthOfferCopy,
   planPaymentCtaState,
   planPaymentErrorMessage,
   planPaymentOptionsLoading,
-  type CnPaymentOptions,
-  type PaymentOptions,
+  planSettlementNotice,
 } from '@/lib/plan-payment-state';
-import { shouldScrollPlanAddons } from '@/lib/plan-page-hash';
-import { useToast } from '@/components/ui/toast';
 import { supportMailtoHref } from '@/lib/support-links';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import { PageContainer, PageHeader } from '@/pages/PageShell';
+import {
+  ADDON_PACK_CATALOGUE,
+  ADDON_PACK_IDS,
+  type AddonPackId,
+  type BillingCycle,
+  type Currency,
+  PLAN_CATALOGUE,
+  type PlanId,
+  formatPrice,
+  getAddonPackPriceCents,
+  getPlanPriceCents,
+} from '@holaday/shared-types';
+import { Check, Plus } from 'lucide-react';
+import * as React from 'react';
+import { useLocation } from 'react-router-dom';
 
 /**
  * Pick currency by browser locale. zh-* (mainland + HK + TW) gets ¥;
- * everywhere else gets $. PayPal still charges USD until WeChat Pay /
- * Alipay land in Phase 2 — for CN users we render ¥ as primary and
- * surface a small "(charged in USD via PayPal)" note below the cards.
+ * everywhere else gets $. The settlement notice below the cards
+ * distinguishes CNY local-payment checkout from USD PayPal checkout.
  */
 function detectCurrency(): Currency {
   if (typeof navigator === 'undefined') return 'usd';
@@ -98,7 +100,7 @@ export function PlanPage(): JSX.Element {
     );
     trpc.payment.cnOptions.query().then(
       (res) => setCnOpts(normalizeCnPaymentOptions(res)),
-      () => setCnOpts({ enabled: false }),
+      () => setCnOpts({ enabled: false, wechat: false, alipay: false }),
     );
   }, [refreshUser]);
 
@@ -109,12 +111,17 @@ export function PlanPage(): JSX.Element {
       document.getElementById('addons')?.scrollIntoView({ block: 'start' });
     });
     return () => cancelAnimationFrame(id);
-  }, [currentPlan, location.hash, paymentOpts?.paypal, paymentOpts?.paypalClientId]);
+  }, [location.hash]);
 
-  const isFirstMonthEligible = currentPlan === 'free';
+  const mayQualifyForFirstMonthOffer = currentPlan === 'free';
   const isPaidPlan = currentPlan === 'basic' || currentPlan === 'pro';
   const canBuyAddons = Boolean(
-    isPaidPlan && paymentOpts?.paypal && paymentOpts.paypalClientId,
+    isPaidPlan &&
+      planAddonPaymentAvailable({
+        zh,
+        cnEnabled: cnOpts?.enabled ?? false,
+        paypalEnabled: Boolean(paymentOpts?.paypal && paymentOpts.paypalClientId),
+      }),
   );
 
   const handlePaymentSuccess = React.useCallback(
@@ -157,6 +164,7 @@ export function PlanPage(): JSX.Element {
       <div className="mx-auto mb-7 flex items-center justify-center">
         <div className="inline-flex rounded-[8px] border border-[#DCDDDD] bg-[#EFEFEF]/55 p-0.5 text-sm shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
           <button
+            type="button"
             onClick={() => setCycle('monthly')}
             className={cn(
               'rounded-md px-4 py-1.5 transition-colors',
@@ -168,6 +176,7 @@ export function PlanPage(): JSX.Element {
             {zh ? '按月' : 'Monthly'}
           </button>
           <button
+            type="button"
             onClick={() => setCycle('yearly')}
             className={cn(
               'flex items-center gap-1.5 rounded-md px-4 py-1.5 transition-colors',
@@ -218,7 +227,6 @@ export function PlanPage(): JSX.Element {
           // the yearly rate).
           let priceMain = '';
           let priceUnit = '';
-          let priceStrike = '';
           let firstMonthHint = '';
           if (planId === 'free') {
             priceMain = formatPrice(0, currency);
@@ -230,13 +238,15 @@ export function PlanPage(): JSX.Element {
           } else {
             const regular = getPlanPriceCents(planId, 'monthly', currency, false);
             const promoCents = def[currency].firstMonthCents;
-            if (isFirstMonthEligible && promoCents != null) {
-              priceMain = formatPrice(promoCents, currency);
-              priceUnit = zh ? '/ 首月' : '/ first month';
-              priceStrike = formatPrice(regular, currency);
-              firstMonthHint = zh
-                ? `之后每月 ${formatPrice(regular, currency)}`
-                : `then ${formatPrice(regular, currency)}/mo`;
+            if (mayQualifyForFirstMonthOffer && promoCents != null) {
+              const offer = planFirstMonthOfferCopy({
+                zh,
+                regularPrice: formatPrice(regular, currency),
+                promoPrice: formatPrice(promoCents, currency),
+              });
+              priceMain = offer.priceMain;
+              priceUnit = offer.priceUnit;
+              firstMonthHint = offer.hint;
             } else {
               priceMain = formatPrice(regular, currency);
               priceUnit = zh ? '/ 月' : '/ month';
@@ -280,9 +290,6 @@ export function PlanPage(): JSX.Element {
               <div className="mb-2 flex flex-wrap items-baseline gap-x-2 gap-y-1">
                 <span className="text-3xl font-semibold tracking-tight">{priceMain}</span>
                 <span className="text-xs text-muted-foreground">{priceUnit}</span>
-                {priceStrike && (
-                  <span className="text-xs text-muted-foreground line-through">{priceStrike}</span>
-                )}
               </div>
               {firstMonthHint ? (
                 <p className="mb-4 text-xs text-muted-foreground">{firstMonthHint}</p>
@@ -305,13 +312,15 @@ export function PlanPage(): JSX.Element {
                         ? `每月 ${def.tasks.count} 个任务`
                         : `${def.tasks.count} tasks/month`}
                 </div>
-                {def.tasks.firstMonthBonus && isFirstMonthEligible && cycle === 'monthly' && (
-                  <div className="text-muted-foreground">
-                    {zh
-                      ? `首月额外赠送 ${def.tasks.firstMonthBonus} 次`
-                      : `+${def.tasks.firstMonthBonus} bonus first month`}
-                  </div>
-                )}
+                {def.tasks.firstMonthBonus &&
+                  mayQualifyForFirstMonthOffer &&
+                  cycle === 'monthly' && (
+                    <div className="text-muted-foreground">
+                      {zh
+                        ? `符合首月优惠条件时额外赠送 ${def.tasks.firstMonthBonus} 次`
+                        : `Eligible first-month offers include +${def.tasks.firstMonthBonus} bonus tasks`}
+                    </div>
+                  )}
                 <div className="text-muted-foreground">
                   {zh
                     ? `${def.concurrency} 并发 · ${
@@ -363,33 +372,45 @@ export function PlanPage(): JSX.Element {
                     {zh ? '降级到体验版' : 'Downgrade'}
                   </a>
                 </Button>
-              ) : isOpen && (zh && cnOpts?.enabled) ? (
+              ) : isOpen && zh && cnOpts?.enabled ? (
                 // zh locale + CN gateway live → show 微信/支付宝/PayPal trio
                 <div className="flex flex-col gap-2">
-                  <Button
-                    variant="default"
-                    className="w-full"
-                    onClick={() =>
-                      setCnDialog({
-                        provider: 'wechat',
-                        purchase: { kind: 'subscription', planId: planId as Exclude<PlanId, 'free'>, cycle },
-                      })
-                    }
-                  >
-                    微信支付
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="w-full border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
-                    onClick={() =>
-                      setCnDialog({
-                        provider: 'alipay',
-                        purchase: { kind: 'subscription', planId: planId as Exclude<PlanId, 'free'>, cycle },
-                      })
-                    }
-                  >
-                    支付宝
-                  </Button>
+                  {cnOpts.wechat && (
+                    <Button
+                      variant="default"
+                      className="w-full"
+                      onClick={() =>
+                        setCnDialog({
+                          provider: 'wechat',
+                          purchase: {
+                            kind: 'subscription',
+                            planId: planId as Exclude<PlanId, 'free'>,
+                            cycle,
+                          },
+                        })
+                      }
+                    >
+                      微信支付
+                    </Button>
+                  )}
+                  {cnOpts.alipay && (
+                    <Button
+                      variant="outline"
+                      className="w-full border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+                      onClick={() =>
+                        setCnDialog({
+                          provider: 'alipay',
+                          purchase: {
+                            kind: 'subscription',
+                            planId: planId as Exclude<PlanId, 'free'>,
+                            cycle,
+                          },
+                        })
+                      }
+                    >
+                      支付宝
+                    </Button>
+                  )}
                   {paymentOpts?.paypal && paymentOpts.paypalClientId && (
                     <PayPalButton
                       plan={planId as Exclude<PlanId, 'free'>}
@@ -504,20 +525,49 @@ export function PlanPage(): JSX.Element {
                       <div className="mt-4 text-xs text-muted-foreground">
                         {zh ? '专业版可购买' : 'Pro plan only'}
                       </div>
-                    ) : isOpen && paymentOpts.paypalClientId ? (
-                      <div className="mt-4">
-                        <AddonPackButton
-                          packId={packId}
-                          clientId={paymentOpts.paypalClientId}
-                          env={paymentOpts.paypalEnv ?? 'sandbox'}
-                          onSuccess={() => {
-                            setOpenAddonFor(null);
-                            toast.show(
-                              zh ? '加量包已生效，立即可用' : 'Top-up applied',
-                            );
-                          }}
-                          onError={handlePaymentError}
-                        />
+                    ) : isOpen ? (
+                      <div className="mt-4 flex flex-col gap-2">
+                        {zh && cnOpts?.wechat && (
+                          <Button
+                            size="sm"
+                            className="w-full"
+                            onClick={() =>
+                              setCnDialog({
+                                provider: 'wechat',
+                                purchase: { kind: 'addon', packId },
+                              })
+                            }
+                          >
+                            微信支付
+                          </Button>
+                        )}
+                        {zh && cnOpts?.alipay && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="w-full border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+                            onClick={() =>
+                              setCnDialog({
+                                provider: 'alipay',
+                                purchase: { kind: 'addon', packId },
+                              })
+                            }
+                          >
+                            支付宝
+                          </Button>
+                        )}
+                        {paymentOpts.paypal && paymentOpts.paypalClientId && (
+                          <AddonPackButton
+                            packId={packId}
+                            clientId={paymentOpts.paypalClientId}
+                            env={paymentOpts.paypalEnv ?? 'sandbox'}
+                            onSuccess={() => {
+                              setOpenAddonFor(null);
+                              toast.show(zh ? '加量包已生效，立即可用' : 'Top-up applied');
+                            }}
+                            onError={handlePaymentError}
+                          />
+                        )}
                       </div>
                     ) : (
                       <Button
@@ -567,19 +617,24 @@ export function PlanPage(): JSX.Element {
           </div>
         ))}
 
-      {/* CN-locale note: PayPal still settles in USD */}
+      {/* CN-locale settlement note reflects the providers available now. */}
       {currency === 'cny' && (
         <div className="mx-auto mt-6 max-w-xl rounded-[8px] border border-[#DCDDDD] border-l-[#42C0EF] bg-white p-3 text-center text-xs text-muted-foreground shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
-          {zh
-            ? '当前通过 PayPal 以美元结算（按当日汇率折算 ≈ ¥）。本地支付和企业付款可联系支持开通。'
-            : "Charged via PayPal in USD (¥ shown at today's rate). Contact support for local payment or business billing."}
+          {planSettlementNotice({
+            zh,
+            wechat: cnOpts?.wechat ?? false,
+            alipay: cnOpts?.alipay ?? false,
+            paypalEnabled: paymentOpts?.paypal ?? false,
+          })}
         </div>
       )}
 
       {/* Sandbox-mode warning */}
       {paymentOpts?.paypalEnv === 'sandbox' && (
         <div className="mx-auto mt-3 max-w-xl rounded-[8px] border border-[#DCDDDD] border-l-[#FFC910] bg-white p-3 text-center text-xs text-[#595757] shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
-          {zh ? '提示：PayPal 处于 sandbox 模式，任何支付都不会实际扣款' : 'Notice: PayPal is in sandbox mode, no real charges'}
+          {zh
+            ? '提示：PayPal 处于 sandbox 模式，任何支付都不会实际扣款'
+            : 'Notice: PayPal is in sandbox mode, no real charges'}
         </div>
       )}
 

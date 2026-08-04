@@ -41,7 +41,8 @@ export type InputMessage =
       metaKey?: boolean;
       shiftKey?: boolean;
     }
-  | { type: 'insertText'; text: string };
+  | { type: 'insertText'; text: string }
+  | { type: 'viewport'; width: number; height: number };
 
 /** CDP modifier bitmask: alt=1, ctrl=2, meta=4, shift=8. */
 function modifiersBitmask(m: {
@@ -58,7 +59,71 @@ function modifiersBitmask(m: {
   return bits;
 }
 
+function keyUpModifiersBitmask(m: {
+  key?: string;
+  code?: string;
+  altKey?: boolean;
+  ctrlKey?: boolean;
+  metaKey?: boolean;
+  shiftKey?: boolean;
+}): number {
+  let bits = modifiersBitmask(m);
+  const key = m.key?.toLowerCase();
+  const code = m.code?.toLowerCase();
+
+  if (key === 'alt' || code?.startsWith('alt')) bits &= ~1;
+  if (key === 'control' || code?.startsWith('control')) bits &= ~2;
+  if (key === 'meta' || key === 'os' || code?.startsWith('meta')) bits &= ~4;
+  if (key === 'shift' || code?.startsWith('shift')) bits &= ~8;
+
+  return bits;
+}
+
+const MODIFIER_KEYS = [
+  { bit: 1, key: 'Alt', code: 'AltLeft', keyCode: 18 },
+  { bit: 2, key: 'Control', code: 'ControlLeft', keyCode: 17 },
+  { bit: 4, key: 'Meta', code: 'MetaLeft', keyCode: 91 },
+  { bit: 8, key: 'Shift', code: 'ShiftLeft', keyCode: 16 },
+] as const;
+
+function modifierBit(m: { key?: string; code?: string }): number {
+  const key = m.key?.toLowerCase();
+  const code = m.code?.toLowerCase();
+
+  if (key === 'alt' || code?.startsWith('alt')) return 1;
+  if (key === 'control' || code?.startsWith('control')) return 2;
+  if (key === 'meta' || key === 'os' || code?.startsWith('meta')) return 4;
+  if (key === 'shift' || code?.startsWith('shift')) return 8;
+  return 0;
+}
+
+function printableKeyText(m: {
+  key?: string;
+  altKey?: boolean;
+  ctrlKey?: boolean;
+  metaKey?: boolean;
+}): string | undefined {
+  if (m.altKey || m.ctrlKey || m.metaKey || m.key?.length !== 1) {
+    return undefined;
+  }
+  return m.key;
+}
+
+function editingCommands(m: {
+  key?: string;
+  ctrlKey?: boolean;
+  metaKey?: boolean;
+}): string[] | undefined {
+  if (!(m.ctrlKey || m.metaKey) || m.key?.toLowerCase() !== 'a') {
+    return undefined;
+  }
+  return ['selectAll'];
+}
+
 export class CdpInputHandler {
+  private activeModifiers = 0;
+  private activeSession: CDPSession | null = null;
+
   /**
    * @param getSession Returns the streamer's CURRENT CDP session,
    *   or null if torn down. Looked up lazily on every dispatch so
@@ -68,6 +133,7 @@ export class CdpInputHandler {
   constructor(
     private readonly getSession: () => CDPSession | null,
     private readonly logger: Logger,
+    private readonly onInputDispatched?: (message: InputMessage) => void,
   ) {}
 
   /**
@@ -82,15 +148,42 @@ export class CdpInputHandler {
       this.logger.debug({ type: msg.type }, 'cdp-input: no session, dropping');
       return;
     }
+    if (session !== this.activeSession) {
+      this.activeSession = session;
+      this.activeModifiers = 0;
+    }
     try {
       switch (msg.type) {
+        case 'viewport': {
+          if (
+            !Number.isFinite(msg.width) ||
+            !Number.isFinite(msg.height) ||
+            msg.width < 240 ||
+            msg.width > 1920 ||
+            msg.height < 240 ||
+            msg.height > 1600
+          ) {
+            return;
+          }
+          const width = Math.round(msg.width);
+          const height = Math.round(msg.height);
+          await session.send('Emulation.setDeviceMetricsOverride', {
+            width,
+            height,
+            deviceScaleFactor: 1,
+            mobile: false,
+            screenWidth: width,
+            screenHeight: height,
+          });
+          break;
+        }
         case 'mouseMove':
           await session.send('Input.dispatchMouseEvent', {
             type: 'mouseMoved',
             x: msg.x,
             y: msg.y,
           });
-          return;
+          break;
         case 'mouseDown':
           await session.send('Input.dispatchMouseEvent', {
             type: 'mousePressed',
@@ -99,7 +192,7 @@ export class CdpInputHandler {
             button: msg.button ?? 'left',
             clickCount: msg.clickCount ?? 1,
           });
-          return;
+          break;
         case 'mouseUp':
           await session.send('Input.dispatchMouseEvent', {
             type: 'mouseReleased',
@@ -108,7 +201,7 @@ export class CdpInputHandler {
             button: msg.button ?? 'left',
             clickCount: msg.clickCount ?? 1,
           });
-          return;
+          break;
         case 'scroll':
           await session.send('Input.dispatchMouseEvent', {
             type: 'mouseWheel',
@@ -117,34 +210,75 @@ export class CdpInputHandler {
             deltaX: msg.deltaX ?? 0,
             deltaY: msg.deltaY ?? 0,
           });
-          return;
-        case 'keyDown':
+          break;
+        case 'keyDown': {
+          const reportedModifiers = modifiersBitmask(msg) | modifierBit(msg);
+          await this.releaseStaleModifiers(session, reportedModifiers);
+          const text = printableKeyText(msg);
+          const commands = editingCommands(msg);
           await session.send('Input.dispatchKeyEvent', {
             type: 'keyDown',
             ...(msg.key ? { key: msg.key } : {}),
             ...(msg.code ? { code: msg.code } : {}),
             ...(msg.keyCode != null ? { windowsVirtualKeyCode: msg.keyCode } : {}),
-            modifiers: modifiersBitmask(msg),
+            modifiers: reportedModifiers,
+            ...(text ? { text, unmodifiedText: text } : {}),
+            ...(commands ? { commands } : {}),
           });
-          return;
-        case 'keyUp':
+          this.activeModifiers = reportedModifiers;
+          break;
+        }
+        case 'keyUp': {
+          const releasedModifier = modifierBit(msg);
+          const reportedModifiers = keyUpModifiersBitmask(msg);
+          await this.releaseStaleModifiers(
+            session,
+            reportedModifiers,
+            releasedModifier,
+          );
           await session.send('Input.dispatchKeyEvent', {
             type: 'keyUp',
             ...(msg.key ? { key: msg.key } : {}),
             ...(msg.code ? { code: msg.code } : {}),
             ...(msg.keyCode != null ? { windowsVirtualKeyCode: msg.keyCode } : {}),
-            modifiers: modifiersBitmask(msg),
+            modifiers: reportedModifiers,
           });
-          return;
+          this.activeModifiers = reportedModifiers;
+          break;
+        }
         case 'insertText':
           await session.send('Input.insertText', { text: msg.text });
-          return;
+          break;
       }
+      this.onInputDispatched?.(msg);
     } catch (err) {
       this.logger.debug(
         { err: err instanceof Error ? err.message : String(err), type: msg.type },
         'cdp-input: dispatch failed',
       );
+    }
+  }
+
+  private async releaseStaleModifiers(
+    session: CDPSession,
+    reportedModifiers: number,
+    modifierHandledByCurrentKeyUp = 0,
+  ): Promise<void> {
+    const staleModifiers =
+      this.activeModifiers & ~reportedModifiers & ~modifierHandledByCurrentKeyUp;
+
+    for (const modifier of MODIFIER_KEYS) {
+      if (!(staleModifiers & modifier.bit)) continue;
+
+      const nextModifiers = this.activeModifiers & ~modifier.bit;
+      await session.send('Input.dispatchKeyEvent', {
+        type: 'keyUp',
+        key: modifier.key,
+        code: modifier.code,
+        windowsVirtualKeyCode: modifier.keyCode,
+        modifiers: nextModifiers,
+      });
+      this.activeModifiers = nextModifiers;
     }
   }
 }

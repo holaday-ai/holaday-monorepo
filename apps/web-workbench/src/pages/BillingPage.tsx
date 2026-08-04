@@ -1,30 +1,37 @@
-import { AlertCircle, CreditCard, Mail } from 'lucide-react';
-import * as React from 'react';
-import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import {
+  type BillingPaymentReturnStatus,
+  type BillingSnapshot,
   billingLoadErrorCopy,
   billingLoadErrorMessage,
   billingPageSummary,
+  billingPaymentReturnCopy,
   billingPlanActionLabel,
   billingPlanLabel,
   cancellationMailBody,
-  type BillingSnapshot,
   isPaidBillingPlan,
-  nextBillingAmountText,
-  nextBillingDateText,
   normalizeBillingSnapshot,
+  normalizePaymentReturnOrder,
+  planValidUntilText,
+  renewalMethodText,
 } from '@/lib/billing-page-state';
 import { SUPPORT_EMAIL, supportMailtoHref } from '@/lib/support-links';
 import { trpc } from '@/lib/trpc';
 import { PageContainer, PageHeader, Row, Section } from '@/pages/PageShell';
+import { AlertCircle, CheckCircle2, CreditCard, Loader2, Mail } from 'lucide-react';
+import * as React from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 
 export function BillingPage(): JSX.Element {
+  const [searchParams] = useSearchParams();
   const mountedRef = React.useRef(false);
   const requestIdRef = React.useRef(0);
   const [snapshot, setSnapshot] = React.useState<BillingSnapshot | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [loadError, setLoadError] = React.useState<string | null>(null);
+  const paymentReturnOrder = normalizePaymentReturnOrder(searchParams.get('payment'));
+  const [paymentReturnStatus, setPaymentReturnStatus] =
+    React.useState<BillingPaymentReturnStatus | null>(paymentReturnOrder ? 'checking' : null);
 
   const refresh = React.useCallback(async () => {
     const requestId = ++requestIdRef.current;
@@ -51,20 +58,65 @@ export function BillingPage(): JSX.Element {
     };
   }, [refresh]);
 
+  React.useEffect(() => {
+    if (!paymentReturnOrder) {
+      setPaymentReturnStatus(null);
+      return;
+    }
+    let cancelled = false;
+    let timer: number | undefined;
+    const startedAt = Date.now();
+    setPaymentReturnStatus('checking');
+
+    const poll = async (): Promise<void> => {
+      try {
+        const result = (await trpc.payment.cnStatus.query({
+          outTradeNo: paymentReturnOrder,
+        })) as { status: 'pending' | 'completed' | 'failed' };
+        if (cancelled) return;
+        if (result.status === 'completed') {
+          setPaymentReturnStatus('completed');
+          await refresh();
+          return;
+        }
+        if (result.status === 'failed') {
+          setPaymentReturnStatus('failed');
+          return;
+        }
+      } catch {
+        // Keep the order visible while a transient network failure clears.
+      }
+      if (Date.now() - startedAt >= 2 * 60 * 1_000) {
+        setPaymentReturnStatus('timeout');
+        return;
+      }
+      timer = window.setTimeout(() => void poll(), 2_500);
+    };
+
+    void poll();
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [paymentReturnOrder, refresh]);
+
   const plan = snapshot?.plan ?? null;
   const planLabel = billingPlanLabel(plan);
   const planActionLabel = billingPlanActionLabel(plan);
   const isPaid = isPaidBillingPlan(plan);
-  const nextAmountText = nextBillingAmountText(plan);
-  const nextBillingDate = nextBillingDateText(plan, snapshot?.planExpiresAt ?? null);
+  const planValidUntil = planValidUntilText(plan, snapshot?.planExpiresAt ?? null);
+  const renewalMethod = renewalMethodText(plan);
   const summary = billingPageSummary({ loading, error: loadError, plan });
   const loadErrorCopy = billingLoadErrorCopy(loadError);
+  const paymentReturnCopy = paymentReturnStatus
+    ? billingPaymentReturnCopy(paymentReturnStatus)
+    : null;
 
   return (
     <PageContainer width="list">
       <PageHeader
         title="账单与订阅"
-        description="订阅状态、支付支持和发票记录"
+        description="套餐有效期、续费方式和付款支持"
         action={
           <div className="inline-flex items-center rounded-full border border-[#DCDDDD] bg-white px-3 py-1 text-[12px] font-medium text-[#595757] shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
             {summary}
@@ -72,6 +124,33 @@ export function BillingPage(): JSX.Element {
         }
       />
       <div className="space-y-6">
+        {paymentReturnCopy && (
+          <div
+            className={`flex items-start gap-3 rounded-[8px] border px-4 py-3 text-sm shadow-[0_1px_2px_rgba(15,23,42,0.03)] ${
+              paymentReturnCopy.tone === 'success'
+                ? 'border-emerald-200 bg-emerald-50/60 text-emerald-950'
+                : paymentReturnCopy.tone === 'warning'
+                  ? 'border-amber-200 bg-amber-50/60 text-amber-950'
+                  : 'border-[#DCDDDD] bg-white text-[#1f1f1f]'
+            }`}
+            aria-live="polite"
+          >
+            {paymentReturnStatus === 'checking' ? (
+              <Loader2
+                className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-[#EA1F59]"
+                aria-hidden
+              />
+            ) : paymentReturnStatus === 'completed' ? (
+              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" aria-hidden />
+            ) : (
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" aria-hidden />
+            )}
+            <div className="min-w-0">
+              <div className="font-medium">{paymentReturnCopy.title}</div>
+              <div className="mt-0.5 text-xs leading-5 opacity-75">{paymentReturnCopy.body}</div>
+            </div>
+          </div>
+        )}
         {loading ? (
           <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
             订阅加载中…
@@ -106,7 +185,10 @@ export function BillingPage(): JSX.Element {
           </div>
         ) : (
           <>
-            <Section title="当前订阅" className="rounded-[8px] border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
+            <Section
+              title="当前订阅"
+              className="rounded-[8px] border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]"
+            >
               <Row label="套餐" description="查看完整对比">
                 <div className="flex items-center gap-3">
                   <span className="rounded-full border border-[#57479C]/30 bg-white px-2 py-1 text-xs font-medium text-[#57479C]">
@@ -122,11 +204,11 @@ export function BillingPage(): JSX.Element {
                   </Button>
                 </div>
               </Row>
-              <Row label="下次扣款日期">
-                <span className="text-sm text-muted-foreground">{nextBillingDate}</span>
+              <Row label="套餐有效期">
+                <span className="text-sm text-muted-foreground">{planValidUntil}</span>
               </Row>
-              <Row label="下次扣款金额">
-                <span className="text-sm text-muted-foreground">{nextAmountText}</span>
+              <Row label="续费方式">
+                <span className="text-sm text-muted-foreground">{renewalMethod}</span>
               </Row>
               {isPaid && (
                 <div className="mt-4 flex flex-col items-end gap-1.5">
@@ -164,7 +246,10 @@ export function BillingPage(): JSX.Element {
               )}
             </Section>
 
-            <Section title="支付方式" className="rounded-[8px] border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
+            <Section
+              title="支付方式"
+              className="rounded-[8px] border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]"
+            >
               <div className="space-y-3">
                 <div className="flex flex-col gap-3 rounded-[8px] border border-[#DCDDDD] bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex items-center gap-3">
@@ -193,9 +278,13 @@ export function BillingPage(): JSX.Element {
               </div>
             </Section>
 
-            <Section title="账单记录" description="付款和发票历史" className="rounded-[8px] border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
+            <Section
+              title="付款与发票"
+              description="付款凭证与发票支持"
+              className="rounded-[8px] border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]"
+            >
               <div className="rounded-[8px] border border-dashed border-[#DCDDDD] bg-white px-6 py-10 text-center">
-                <p className="text-sm text-muted-foreground">暂无账单记录</p>
+                <p className="text-sm text-muted-foreground">付款记录暂未在此页开放</p>
                 <p className="mt-1 text-[11px] text-muted-foreground">
                   已付款用户如需发票或付款凭证，可联系 {SUPPORT_EMAIL}。
                 </p>

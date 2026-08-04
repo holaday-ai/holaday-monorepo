@@ -80,6 +80,7 @@ import { buildSupercarSystemPrompt } from './system-prompt.js';
 import { classifyError as classifyToolError, extractDomain as extractDomainStat } from './stats-service.js';
 import { env as appEnv } from '../../config/env.js';
 import { buildCtripFlightHint, isCtripFlightResultsUrl } from './ctrip-flight-extractor.js';
+import { defaultBrowserNetworkPolicy } from '../browser-network-policy.js';
 
 /**
  * Anti-crawl stuck detection thresholds.
@@ -757,6 +758,12 @@ export interface RunSupercarOptions {
    * reason rather than crashing on `executor.observe()`.
    */
   executor: PlaywrightExecutor | null;
+  /**
+   * Continue from an adopted terminal browser instead of clearing its page.
+   * Used for follow-up instructions after the user has taken over and changed
+   * the live page; preserving that state is the reason to adopt the session.
+   */
+  preserveExistingPage?: boolean;
   /** API key; defaults to `ANTHROPIC_API_KEY`. */
   apiKey?: string;
   /** Override the default model (`claude-sonnet-4-6`). */
@@ -1338,12 +1345,15 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
     return true;
   }
 
-  // Park the tab on a fresh about:blank so stale overlays from prior
-  // tasks don't leak into the first screenshot.
-  try {
-    await executor.resetPageForTask();
-  } catch (err) {
-    logger.warn({ err, taskId: opts.taskId }, 'supercar: resetPageForTask failed — continuing');
+  // Fresh tasks start from a clean tab. Follow-ups that adopted the user's
+  // terminal browser deliberately keep its current page, cookies, focus and
+  // navigation state so AI can continue after manual takeover.
+  if (!opts.preserveExistingPage) {
+    try {
+      await executor.resetPageForTask();
+    } catch (err) {
+      logger.warn({ err, taskId: opts.taskId }, 'supercar: resetPageForTask failed — continuing');
+    }
   }
 
   let page = (await executor.getPage()) as unknown as PageLike;
@@ -2571,6 +2581,21 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
                 {
                   type: 'text',
                   text: `navigate: URL must start with http:// or https:// (got ${targetUrl.slice(0, 80)})`,
+                },
+              ],
+              is_error: true,
+            });
+            continue;
+          }
+          const networkDecision = await defaultBrowserNetworkPolicy.check(targetUrl);
+          if (!networkDecision.allowed) {
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: toolUse.id,
+              content: [
+                {
+                  type: 'text',
+                  text: `navigate blocked by network policy: ${networkDecision.message}`,
                 },
               ],
               is_error: true,

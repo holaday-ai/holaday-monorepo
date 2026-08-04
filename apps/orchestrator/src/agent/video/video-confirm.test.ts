@@ -1,5 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
-import { decideVideoGate, parseVideoConfirm, quoteIpVideo, quotePetI2v, quoteVideo } from './video-confirm.js';
+import {
+  decideVideoGate,
+  parseVideoConfirm,
+  preflightIpVideoAssets,
+  quoteCloneVideo,
+  quoteIpVideo,
+  quotePetI2v,
+  quoteVideo,
+} from './video-confirm.js';
 
 describe('parseVideoConfirm — structured action wins', () => {
   it('maps button actions with zero text guessing', () => {
@@ -45,6 +53,45 @@ describe('decideVideoGate — Veo burns ONLY on generate_*', () => {
   it('video/image with claim → generate', () => {
     expect(decideVideoGate('video', true)).toBe('generate_video');
     expect(decideVideoGate('image', true)).toBe('generate_image');
+  });
+});
+
+describe('preflightIpVideoAssets — validate durable inputs before quote consumption', () => {
+  it('blocks an unreadable base video with an actionable re-upload message', async () => {
+    const signBaseVideo = vi.fn(async () => null);
+
+    await expect(
+      preflightIpVideoAssets(
+        {
+          voiceId: 'voice_ready',
+          baseVideoFileId: 'file_stale',
+          authorized: true,
+        },
+        signBaseVideo,
+      ),
+    ).resolves.toEqual({
+      baseVideoUrl: null,
+      issue: '出镜底版当前不可用，请稍后重试；若持续出现，请重新上传。',
+    });
+    expect(signBaseVideo).toHaveBeenCalledWith('file_stale');
+  });
+
+  it('returns the signed base-video URL when all durable inputs are ready', async () => {
+    const signBaseVideo = vi.fn(async () => 'https://r2.example/base.mp4');
+
+    await expect(
+      preflightIpVideoAssets(
+        {
+          voiceId: 'voice_ready',
+          baseVideoFileId: 'file_ready',
+          authorized: true,
+        },
+        signBaseVideo,
+      ),
+    ).resolves.toEqual({
+      baseVideoUrl: 'https://r2.example/base.mp4',
+      issue: null,
+    });
   });
 });
 
@@ -116,6 +163,22 @@ describe('quoteVideo — dynamic by segment count', () => {
     expect(q.message).toContain('横屏');
     expect(q.message).not.toContain('Veo Fast'); // 不再硬写 Fast
   });
+
+  it('Wan 2.7 uses the official Singapore price for the selected resolution', () => {
+    const p720 = quoteVideo(1, 'wanxiang', {
+      resolution: '720p',
+      durationSeconds: 8,
+    });
+    const p1080 = quoteVideo(1, 'wanxiang', {
+      resolution: '1080p',
+      durationSeconds: 8,
+    });
+
+    expect(p720.videoCny).toBe(Math.ceil(8 * 0.1 * 7.3));
+    expect(p1080.videoCny).toBe(Math.ceil(8 * 0.15 * 7.3));
+    expect(p1080.videoCny).toBeGreaterThan(p720.videoCny);
+    expect(p720.message).toContain('Wan 2.7');
+  });
 });
 
 describe('quotePetI2v — 宠物 i2v 报价 (Phase 2 第二期, 原生 RMB/秒)', () => {
@@ -145,14 +208,95 @@ describe('quotePetI2v — 宠物 i2v 报价 (Phase 2 第二期, 原生 RMB/秒)'
   });
 });
 
+describe('quoteCloneVideo — Wan Animate character swap', () => {
+  it('uses only the Wan price for a silent reference video', () => {
+    const standard = quoteCloneVideo(8.2, 'wan-std', {
+      hasAudibleAudio: false,
+      lipSyncModel: 'fal-ai/sync-lipsync/v3',
+    });
+    const professional = quoteCloneVideo(8.2, 'wan-pro', {
+      hasAudibleAudio: false,
+      lipSyncModel: 'fal-ai/sync-lipsync/v3',
+    });
+
+    expect(standard.durationSeconds).toBe(8.2);
+    expect(standard.videoCny).toBe(Math.ceil(8.2 * 0.18 * 7.3));
+    expect(professional.videoCny).toBe(Math.ceil(8.2 * 0.26 * 7.3));
+    expect(professional.videoCny).toBeGreaterThan(standard.videoCny);
+    expect(standard.message).toContain('Standard');
+    expect(professional.message).toContain('Pro');
+    expect(standard.message).toContain('实际输出时长');
+    expect(standard.message).toContain('未检测到可听声音');
+  });
+
+  it('includes the selected Fal lip-sync price for an audible reference video', () => {
+    const v2 = quoteCloneVideo(8.2, 'wan-std', {
+      hasAudibleAudio: true,
+      lipSyncModel: 'fal-ai/sync-lipsync/v2',
+    });
+    const v3 = quoteCloneVideo(8.2, 'wan-std', {
+      hasAudibleAudio: true,
+      lipSyncModel: 'fal-ai/sync-lipsync/v3',
+    });
+
+    expect(v2.videoCny).toBe(Math.ceil(8.2 * (0.18 + 3 / 60) * 7.3));
+    expect(v3.videoCny).toBe(Math.ceil(8.2 * (0.18 + 8 / 60) * 7.3));
+    expect(v3.videoCny).toBeGreaterThan(v2.videoCny);
+    expect(v2.message).toContain('Sync Lipsync 2.0');
+    expect(v3.message).toContain('Sync Lipsync 3.0');
+  });
+});
+
 describe('quoteIpVideo — IP 真人换口型 B 架构 (Phase 3)', () => {
-  it('videoCny ≈ 1 clip fal $0.20 × 7.3 (字符费可忽略),floor ¥1', () => {
+  it('按约 5 字/秒估算默认 Sync Lipsync 3.0 的时长成本', () => {
     const q = quoteIpVideo('大家好这是一段不太长的口播文案。');
-    expect(q.videoCny).toBe(Math.max(1, Math.ceil((0.2 + (q.chars / 10000) * 0.13) * 7.3))); // ≈ ¥2
+    const estimatedSeconds = Math.max(1, Math.ceil(q.chars / 5));
+    expect(q.videoCny).toBe(
+      Math.max(
+        1,
+        Math.ceil(
+          (estimatedSeconds * (8 / 60) + (q.chars / 10000) * 0.115) *
+            7.3,
+        ),
+      ),
+    );
     expect(q.videoCny).toBeGreaterThanOrEqual(1);
     expect(q.maybeTooLong).toBe(false);
-    expect(q.message).toContain('真人换口型');
+    expect(q.message).toContain('IP人物视频');
+    expect(q.message).toContain('Sync Lipsync 3.0');
+    expect(q.message).toContain('预估');
+    expect(q.message).toContain('已授权的声音 + 出镜底版');
+    expect(q.message).not.toContain('你本人的声音');
     expect(q.message).not.toContain('图片版');
+  });
+
+  it('keeps the quote aligned when an environment explicitly selects v2', () => {
+    const q = quoteIpVideo(
+      '字'.repeat(100_000),
+      'fal-ai/sync-lipsync/v2',
+    );
+    const estimatedSeconds = Math.max(1, Math.ceil(q.chars / 5));
+    expect(q.videoCny).toBe(
+      Math.max(
+        1,
+        Math.ceil(
+          (estimatedSeconds * (3 / 60) + (q.chars / 10000) * 0.115) *
+            7.3,
+        ),
+      ),
+    );
+    expect(q.message).toContain('Sync Lipsync 2.0');
+  });
+
+  it('locks the Qwen character-price snapshot independently of currency rounding', () => {
+    const q = quoteIpVideo('字'.repeat(100_000));
+    const estimatedSeconds = Math.ceil(q.chars / 5);
+
+    expect(q.videoCny).toBe(
+      Math.ceil(
+        (estimatedSeconds * (8 / 60) + (q.chars / 10_000) * 0.115) * 7.3,
+      ),
+    );
   });
 
   it('超长文案 → maybeTooLong + 文案里有 40 秒提示', () => {

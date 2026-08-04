@@ -15,7 +15,7 @@ import type { PlaywrightExecutor } from '../agent/vision-loop/playwright-executo
 import type { BrowserPool } from '../browser-pool/browser-pool.js';
 import { type RehydratedTask, TaskRepository } from '../agent/task-repository.js';
 import { failTaskWithEventIfStatus } from '../agent/task-maintenance.js';
-import { verifyAccessToken } from '../auth/jwt.js';
+import { authenticateAccessToken } from '../auth/middleware.js';
 import { logger } from '../config/logger.js';
 import { db } from '../db/client.js';
 import {
@@ -27,9 +27,11 @@ import {
 interface ClientState {
   id: string;
   userId: string | null;
+  authToken: string | null;
   socket: WebSocket;
   lastPongAt: number;
   authed: boolean;
+  sessionRevalidationInFlight: boolean;
   // taskId -> state. Phase 0 in-memory; persistence writes through on every
   // transition. Restart recovery rehydrates this map per-user at auth time.
   tasks: Map<string, TaskState>;
@@ -109,26 +111,49 @@ export interface WsServerOpts {
    * the singleton if the caller has no pool instance.
    */
   browserPool?: BrowserPool | null;
+  authenticateToken?: (token: string) => Promise<string | null>;
+  /** Defaults to the WS heartbeat period. Exposed so integration tests do not wait 30 seconds. */
+  sessionRevalidationIntervalMs?: number;
 }
 
 export function createWsServer(port: number, opts: WsServerOpts = {}) {
   injectedPlanner = opts.planner ?? null;
   injectedExecutor = opts.playwrightExecutor ?? null;
   injectedBrowserPool = opts.browserPool ?? null;
+  const configuredAuthenticateToken =
+    opts.authenticateToken ?? ((token: string) => authenticateAccessToken(db, token));
+  const authenticateToken = async (token: string): Promise<string | null> => {
+    try {
+      return await configuredAuthenticateToken(token);
+    } catch (err) {
+      logger.warn(
+        { err: err instanceof Error ? err.message : String(err) },
+        'websocket authentication failed closed',
+      );
+      return null;
+    }
+  };
 
   const wss = new WebSocketServer({ port, handleProtocols });
+  const clientStates = new WeakMap<WebSocket, ClientState>();
 
   wss.on('connection', (socket, req) => {
-    void handleConnection(socket, req);
+    void handleConnection(socket, req, authenticateToken, clientStates);
   });
 
   const heartbeat = setInterval(() => sweep(wss), HEARTBEAT_INTERVAL_MS);
   heartbeat.unref();
+  const sessionRevalidation = setInterval(
+    () => revalidateSessions(wss, clientStates, authenticateToken),
+    opts.sessionRevalidationIntervalMs ?? HEARTBEAT_INTERVAL_MS,
+  );
+  sessionRevalidation.unref();
 
   return {
     wss,
     close: () => {
       clearInterval(heartbeat);
+      clearInterval(sessionRevalidation);
       return new Promise<void>((resolve) => wss.close(() => resolve()));
     },
   };
@@ -689,17 +714,25 @@ function handleProtocols(protocols: Set<string>): string | false {
   return false;
 }
 
-async function handleConnection(socket: WebSocket, req: IncomingMessage) {
+async function handleConnection(
+  socket: WebSocket,
+  req: IncomingMessage,
+  authenticateToken: (token: string) => Promise<string | null>,
+  clientStates: WeakMap<WebSocket, ClientState>,
+) {
   const state: ClientState = {
     id: randomUUID(),
     userId: null,
+    authToken: null,
     socket,
     lastPongAt: Date.now(),
     authed: false,
+    sessionRevalidationInFlight: false,
     tasks: new Map(),
     healedStepIds: new Set(),
     isExtension: false,
   };
+  clientStates.set(socket, state);
 
   const requestedProtos = (req.headers['sec-websocket-protocol'] ?? '')
     .toString()
@@ -710,9 +743,10 @@ async function handleConnection(socket: WebSocket, req: IncomingMessage) {
   const jwtProto = requestedProtos.find((p) => p.startsWith('jwt.'));
   if (jwtProto) {
     const token = jwtProto.slice('jwt.'.length);
-    const userId = await verifyToken(token);
+    const userId = await authenticateToken(token);
     if (userId) {
       state.userId = userId;
+      state.authToken = token;
       state.authed = true;
       addClientForUser(userId, state);
       send(socket, {
@@ -742,7 +776,7 @@ async function handleConnection(socket: WebSocket, req: IncomingMessage) {
       });
       return;
     }
-    await handleClientMessage(state, result.data, authTimer);
+    await handleClientMessage(state, result.data, authTimer, authenticateToken);
   });
 
   socket.on('pong', () => {
@@ -751,6 +785,9 @@ async function handleConnection(socket: WebSocket, req: IncomingMessage) {
 
   socket.on('close', () => {
     clearTimeout(authTimer);
+    state.authed = false;
+    state.authToken = null;
+    clientStates.delete(socket);
     const settledExtensionCalls = settlePendingExtensionCallsForClient(state.id);
     if (state.userId) removeClientForUser(state.userId, state);
     logger.info(
@@ -768,9 +805,10 @@ async function handleClientMessage(
   state: ClientState,
   msg: ClientMessage,
   authTimer: NodeJS.Timeout,
+  authenticateToken: (token: string) => Promise<string | null>,
 ) {
   if (msg.type === 'client.hello') {
-    const userId = await verifyToken(msg.token);
+    const userId = await authenticateToken(msg.token);
     if (!userId) {
       send(state.socket, { type: 'server.error', code: 'UNAUTHORIZED', message: 'bad token' });
       state.socket.close(4401, 'unauthorized');
@@ -788,6 +826,7 @@ async function handleClientMessage(
       }
     }
     state.userId = userId;
+    state.authToken = msg.token;
     state.authed = true;
     // Phase 25 — flag this socket as a Chrome extension only when the
     // hello frame carries a real extension version. The web app sends a
@@ -1409,15 +1448,6 @@ function extractDiagnostic(data: unknown): Diagnostic | null {
   };
 }
 
-async function verifyToken(token: string): Promise<string | null> {
-  // Delegate to the canonical verifyAccessToken so WS auth checks
-  // the same issuer + audience claims the HTTP /trpc bearerAuth
-  // checks. The previous local jwtVerify only validated the
-  // signature + algorithm, leaving WS strictly weaker than HTTP.
-  const claims = await verifyAccessToken(token);
-  return claims?.sub ?? null;
-}
-
 function send(socket: WebSocket, msg: ServerMessage): boolean {
   if (socket.readyState === WebSocket.OPEN) {
     try {
@@ -1442,5 +1472,57 @@ function sweep(wss: WebSocketServer) {
     }
     client.ping();
     lastPingAt.set(client, now);
+  }
+}
+
+function revalidateSessions(
+  wss: WebSocketServer,
+  clientStates: WeakMap<WebSocket, ClientState>,
+  authenticateToken: (token: string) => Promise<string | null>,
+): void {
+  for (const socket of wss.clients) {
+    if (socket.readyState !== WebSocket.OPEN) continue;
+    const state = clientStates.get(socket);
+    if (
+      !state?.authed ||
+      !state.userId ||
+      !state.authToken ||
+      state.sessionRevalidationInFlight
+    ) {
+      continue;
+    }
+    void revalidateSession(state, authenticateToken);
+  }
+}
+
+async function revalidateSession(
+  state: ClientState,
+  authenticateToken: (token: string) => Promise<string | null>,
+): Promise<void> {
+  const token = state.authToken;
+  const expectedUserId = state.userId;
+  if (!token || !expectedUserId) return;
+
+  state.sessionRevalidationInFlight = true;
+  try {
+    const userId = await authenticateToken(token);
+    if (
+      state.socket.readyState !== WebSocket.OPEN ||
+      !state.authed ||
+      state.authToken !== token ||
+      state.userId !== expectedUserId
+    ) {
+      return;
+    }
+    if (userId !== expectedUserId) {
+      send(state.socket, {
+        type: 'server.error',
+        code: 'UNAUTHORIZED',
+        message: 'session revoked',
+      });
+      state.socket.close(4401, 'session revoked');
+    }
+  } finally {
+    state.sessionRevalidationInFlight = false;
   }
 }

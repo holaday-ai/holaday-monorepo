@@ -24,7 +24,10 @@ import {
   scheduledEventFailureDetail,
   scheduledEventToggleLabel,
 } from './event-detail-state';
-import type { ScheduledTaskRow } from './event-mapping';
+import {
+  scheduledTaskDisplayTitle,
+  type ScheduledTaskRow,
+} from './event-mapping';
 
 interface Props {
   anchor: { x: number; y: number };
@@ -122,7 +125,7 @@ export function EventDetailPopover({
             )}
           </div>
           <p className="mt-2 break-words text-sm text-foreground">
-            {row.intent}
+            {scheduledTaskDisplayTitle(row.intent)}
           </p>
         </div>
       </div>

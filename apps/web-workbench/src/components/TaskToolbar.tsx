@@ -3,6 +3,7 @@ import type { SidePanelMode } from '@/types/side-panel';
 import type { UiTask } from '@/types/task';
 import { awaitingUserCopy } from '@/lib/awaiting-user-copy';
 import { cn } from '@/lib/utils';
+import { hasBrowserRecordForWorkbench } from '@/lib/workbench-state';
 
 /**
  * Codex IA close-out: per-task toolbar pinned to the top-right of the
@@ -26,12 +27,8 @@ import { cn } from '@/lib/utils';
  * populated still get the icon if the intent mentions a URL or one
  * of an explicit set of browser verbs.
  */
-const BROWSER_VERBS = ['打开', '登录', '访问', '点击', '下载', '搜索'];
 export function isBrowserLikely(task: UiTask): boolean {
-  if (task.executionMode === 'browser') return true;
-  const intent = task.intent ?? '';
-  if (/https?:\/\//i.test(intent)) return true;
-  return BROWSER_VERBS.some((v) => intent.includes(v));
+  return hasBrowserRecordForWorkbench(task);
 }
 
 export function browserToolbarLabel(

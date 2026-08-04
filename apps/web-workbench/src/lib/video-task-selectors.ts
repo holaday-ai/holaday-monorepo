@@ -1,5 +1,6 @@
 import type { TaskStore } from '@/stores/task-store';
-import type { UiStep } from '@/types/task';
+import type { UiAwaitingUser, UiStep, UiTask } from '@/types/task';
+import { taskDisplayTitle } from '@/lib/task-display-copy';
 
 /**
  * Stable, shared empty array for "this task has no steps yet".
@@ -30,24 +31,16 @@ export const selectStepsFor =
   (s: Pick<TaskStore, 'stepsByTask'>): readonly UiStep[] =>
     s.stepsByTask[taskId] ?? EMPTY_STEPS;
 
-/**
- * Should VideoPage fire a one-time `refreshTasks()` for a deep-linked
- * `?task=` whose row isn't in the store yet?
- *
- * True only when the id is present, its row is absent, AND we haven't
- * already refreshed for this id. The `already` guard is what stops the
- * effect feeding itself: refresh → store update → re-render → (row still
- * absent for a beat) → refresh → … The caller records the id in a ref the
- * first time so a given `?task=` triggers at most one refresh.
- */
-export function shouldRefreshForTask(input: {
-  taskId: string | null;
-  hasTask: boolean;
-  already: boolean;
-}): boolean {
-  if (!input.taskId) return false;
-  if (input.hasTask) return false;
-  if (input.already) return false;
+export function hydrateMissingMediaTask(
+  input: {
+    taskId: string | null;
+    hasTask: boolean;
+    already: boolean;
+  },
+  hydrate: (taskId: string) => void,
+): boolean {
+  if (!input.taskId || input.hasTask || input.already) return false;
+  hydrate(input.taskId);
   return true;
 }
 
@@ -58,6 +51,67 @@ export function isVideoTaskRunning(status: string): boolean {
     status === 'queued' ||
     status === 'executing'
   );
+}
+
+export type VideoProductTab = 'normal' | 'pet' | 'ip';
+
+export function videoTabForTaskType(
+  videoType: UiTask['videoType'],
+): VideoProductTab | null {
+  switch (videoType) {
+    case 'normal':
+      return 'normal';
+    case 'pet':
+      return 'pet';
+    case 'ip_person':
+      return 'ip';
+    default:
+      return null;
+  }
+}
+
+/**
+ * The awaiting-user WebSocket frame can arrive before the optimistic task row
+ * is replaced with the server row. In that race the live store already knows
+ * this is a quote, while `task.awaitingKind` is still empty. Prefer the row
+ * once hydrated, but keep the live kind as the immediate fallback so the
+ * confirm controls never disappear.
+ */
+export function resolveVideoAwaitingKind(
+  taskKind: UiTask['awaitingKind'],
+  liveKind: UiAwaitingUser['awaitingKind'],
+): UiTask['awaitingKind'] {
+  return taskKind ?? liveKind;
+}
+
+export function currentMediaTaskText(input: {
+  status: string;
+  awaitingQuestion?: string;
+  liveSubStatusText?: string;
+  progress?: string;
+  streamingText?: string;
+  latestStepSummary?: string;
+  resultText?: string;
+}): string {
+  if (!isVideoTaskRunning(input.status) && input.status !== 'awaiting_user') {
+    return input.resultText?.trim() ?? '';
+  }
+
+  return (
+    input.awaitingQuestion?.trim() ||
+    input.liveSubStatusText?.trim() ||
+    input.progress?.trim() ||
+    input.streamingText?.trim() ||
+    input.latestStepSummary?.trim() ||
+    input.resultText?.trim() ||
+    ''
+  );
+}
+
+export function currentMediaTaskTitle(
+  task: Pick<UiTask, 'intent' | 'title'>,
+): string {
+  return taskDisplayTitle(task, 64);
 }
 
 export function videoTaskStatusLabel(status: string): string {

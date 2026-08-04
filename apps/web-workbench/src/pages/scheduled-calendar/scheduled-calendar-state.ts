@@ -1,5 +1,22 @@
 import { pageErrorMessage } from '@/lib/page-error-copy';
 
+const POPOVER_REOPEN_COOLDOWN_MS = 250;
+
+export function shouldOpenScheduledCalendarPopover({
+  quickCreateOpen,
+  popoverClosedAt,
+  now,
+}: {
+  readonly quickCreateOpen: boolean;
+  readonly popoverClosedAt: number;
+  readonly now: number;
+}): boolean {
+  return (
+    !quickCreateOpen &&
+    now - popoverClosedAt >= POPOVER_REOPEN_COOLDOWN_MS
+  );
+}
+
 export function scheduledCalendarSummary({
   loading,
   error,

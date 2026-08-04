@@ -119,6 +119,13 @@ export function AdminLearningPage(): JSX.Element {
         />
       </div>
 
+      {data && normalized.coverage.truncated && (
+        <div className="mt-4 rounded-[8px] border border-[#FFC910]/60 bg-[#FFC910]/10 px-4 py-3 text-[13px] text-[#595757]">
+          最近 90 天任务超过扫描上限；当前统计基于最新{' '}
+          {formatInteger(normalized.coverage.scannedTasks)} 条用户任务。
+        </div>
+      )}
+
       <div className="mt-6 flex flex-wrap items-center gap-2">
         <div className="relative max-w-xs flex-1">
           <Search
@@ -235,11 +242,16 @@ export function AdminLearningPage(): JSX.Element {
 function normalizeLearningOverview(value: OverviewData | null) {
   const root = asRecord(value);
   const metrics = asRecord(root.metrics);
+  const coverage = asRecord(root.coverage);
   return {
     metrics: {
       analyzedDomainsCount: nonNegativeNumber(metrics.analyzedDomainsCount),
       highRiskCount: nonNegativeNumber(metrics.highRiskCount),
       aiMemoriesCount: nonNegativeNumber(metrics.aiMemoriesCount),
+    },
+    coverage: {
+      scannedTasks: nonNegativeNumber(coverage.scannedTasks),
+      truncated: coverage.truncated === true,
     },
     total: nonNegativeNumber(root.total),
     domains: safeArray(root.domains).map((item, index) => {

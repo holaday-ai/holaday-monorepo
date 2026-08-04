@@ -20,21 +20,22 @@
 import {
   ADDON_PACK_CATALOGUE,
   ADDON_PACK_IDS,
+  type AddonPackId,
+  type BillingCycle,
+  type PlanId,
   getAddonPackPriceCents,
   getPlanPriceCents,
   isAddonPackId,
   newExternalId,
-  type AddonPackId,
-  type BillingCycle,
-  type PlanId,
 } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
 import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
-import { describePlanOrder, isPaidPlan, nextExpiryFor } from '../../payment/plans.js';
+import type { DB } from '../../db/client.js';
 import { readAffectedRows } from '../../db/mysql-result.js';
-import { payments } from '../../db/schema/payments.js';
+import { type Payment, payments } from '../../db/schema/payments.js';
 import { users } from '../../db/schema/users.js';
+import { describePlanOrder, isPaidPlan, nextExpiryFor } from '../../payment/plans.js';
 import { QuotaService } from '../../quota/quota-service.js';
 import { protectedProcedure, publicProcedure, router } from '../trpc.js';
 
@@ -57,6 +58,154 @@ const captureOrderInput = z.object({
 const createAddonOrderInput = z.object({
   packId: z.enum(ADDON_PACK_IDS),
 });
+
+type PaymentTransaction = Parameters<Parameters<DB['transaction']>[0]>[0];
+
+interface SettlementContext {
+  readonly user: {
+    readonly id: number;
+    readonly plan: string;
+    readonly planExpiresAt: Date | null;
+  };
+  readonly cycle: BillingCycle;
+  readonly firstMonthRequested: boolean;
+  readonly firstMonthEligible: boolean;
+}
+
+function paymentMetadata(row: Pick<Payment, 'metadata'>): Record<string, unknown> {
+  return (row.metadata as Record<string, unknown> | null) ?? {};
+}
+
+function isPendingFirstMonthPayment(row: Payment): boolean {
+  const metadata = paymentMetadata(row);
+  return (
+    row.kind === 'subscription' &&
+    row.status === 'pending' &&
+    metadata.firstMonth === true &&
+    metadata.cycle !== 'yearly'
+  );
+}
+
+async function lockSubscriptionPayments(
+  tx: PaymentTransaction,
+  userExternalId: string,
+): Promise<Payment[]> {
+  return tx
+    .select()
+    .from(payments)
+    .where(and(eq(payments.userExternalId, userExternalId), eq(payments.kind, 'subscription')))
+    .for('update');
+}
+
+export async function lockSettlementContext(
+  tx: PaymentTransaction,
+  row: Payment,
+): Promise<SettlementContext> {
+  const [user] = await tx
+    .select({
+      id: users.id,
+      plan: users.plan,
+      planExpiresAt: users.planExpiresAt,
+    })
+    .from(users)
+    .where(eq(users.externalId, row.userExternalId))
+    .limit(1)
+    .for('update');
+  if (!user) {
+    throw new TRPCError({ code: 'NOT_FOUND', message: '用户不存在' });
+  }
+
+  const metadata = paymentMetadata(row);
+  const cycle: BillingCycle = metadata.cycle === 'yearly' ? 'yearly' : 'monthly';
+  const firstMonthRequested =
+    row.kind === 'subscription' && cycle === 'monthly' && metadata.firstMonth === true;
+  let firstMonthEligible = false;
+  if (firstMonthRequested) {
+    const subscriptionPayments = await lockSubscriptionPayments(tx, row.userExternalId);
+    firstMonthEligible =
+      user.plan === 'free' &&
+      !subscriptionPayments.some(
+        (candidate) =>
+          candidate.id !== row.id &&
+          candidate.kind === 'subscription' &&
+          candidate.status === 'completed',
+      );
+  }
+
+  return {
+    user,
+    cycle,
+    firstMonthRequested,
+    firstMonthEligible,
+  };
+}
+
+export async function completePaymentInTransaction(
+  tx: PaymentTransaction,
+  row: Payment,
+  settlement: SettlementContext,
+  capture: {
+    readonly captureId: string;
+    readonly payerEmail?: string | null;
+    readonly captureStatus: string;
+    readonly metadata?: Record<string, unknown>;
+  },
+): Promise<boolean> {
+  const metadata = paymentMetadata(row);
+  const firstMonthConsumed = settlement.firstMonthRequested && settlement.firstMonthEligible;
+  const updateResult = await tx
+    .update(payments)
+    .set({
+      status: 'completed',
+      completedAt: new Date(),
+      providerCaptureId: capture.captureId,
+      metadata: {
+        ...metadata,
+        ...capture.metadata,
+        payerEmail: capture.payerEmail,
+        captureStatus: capture.captureStatus,
+        firstMonthConsumed,
+      },
+    })
+    .where(and(eq(payments.id, row.id), eq(payments.status, 'pending')));
+  if (readAffectedRows(updateResult) !== 1) return false;
+
+  const quotaService = new QuotaService(tx as unknown as DB);
+  if (row.kind === 'addon') {
+    if (!isAddonPackId(row.plan)) {
+      throw new TRPCError({
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'addon 订单 plan 字段非法',
+      });
+    }
+    const planId: PlanId =
+      settlement.user.plan === 'basic' || settlement.user.plan === 'pro'
+        ? settlement.user.plan
+        : 'free';
+    if (planId === 'free') {
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message: '当前账户已降级，加量包未生效',
+      });
+    }
+    await quotaService.applyAddonPack(settlement.user.id, planId, row.plan as AddonPackId);
+    return true;
+  }
+
+  const nextExpiry = nextExpiryFor(
+    row.plan as 'basic' | 'pro',
+    settlement.cycle,
+    settlement.user.planExpiresAt,
+  );
+  await tx
+    .update(users)
+    .set({ plan: row.plan, planExpiresAt: nextExpiry })
+    .where(eq(users.externalId, row.userExternalId));
+  if (firstMonthConsumed) {
+    await quotaService.grantFirstMonthBonus(settlement.user.id, row.plan as PlanId);
+  }
+  return true;
+}
 
 export const paymentRouter = router({
   /**
@@ -81,72 +230,100 @@ export const paymentRouter = router({
         message: 'PayPal 暂未配置（PAYPAL_CLIENT_ID / _SECRET 未设置）',
       });
     }
+    const paypalAdapter = ctx.paypalAdapter;
+    const userExternalId = ctx.userId;
+    if (!userExternalId) {
+      throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
+    }
     if (!isPaidPlan(input.plan)) {
       // The zod input narrows to 'basic' | 'pro' already, but keep this
       // defensive in case the enum widens.
       throw new TRPCError({ code: 'BAD_REQUEST', message: 'free 套餐无需支付' });
     }
 
-    const [user] = await ctx.db
-      .select()
-      .from(users)
-      .where(eq(users.externalId, ctx.userId!))
-      .limit(1);
-    if (!user) {
-      throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
-    }
+    return ctx.db.transaction(async (tx) => {
+      const [user] = await tx
+        .select()
+        .from(users)
+        .where(eq(users.externalId, userExternalId))
+        .limit(1)
+        .for('update');
+      if (!user) {
+        throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
+      }
+      const subscriptionPayments = await lockSubscriptionPayments(tx, user.externalId);
+      const isFirstMonth =
+        input.cycle === 'monthly' &&
+        user.plan === 'free' &&
+        !subscriptionPayments.some((row) => row.status === 'completed');
 
-    // First-month promo eligibility: only when the user has never
-    // had a paid plan (i.e. still on free). Returning customers
-    // resubscribing after a lapse pay the regular monthly rate.
-    // Yearly cycle skips the promo regardless — discount is in the
-    // catalogue's yearly column itself.
-    const isFirstMonth = user.plan === 'free';
-    const amountCents = getPlanPriceCents(input.plan, input.cycle, 'usd', isFirstMonth);
+      if (isFirstMonth) {
+        const pending = subscriptionPayments.find(isPendingFirstMonthPayment);
+        if (pending) {
+          const metadata = paymentMetadata(pending);
+          if (
+            pending.provider === 'paypal' &&
+            pending.plan === input.plan &&
+            metadata.cycle === input.cycle &&
+            typeof metadata.approveUrl === 'string' &&
+            pending.providerOrderId
+          ) {
+            return {
+              paymentId: pending.externalId,
+              orderId: pending.providerOrderId,
+              approveUrl: metadata.approveUrl,
+            };
+          }
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message: '已有首月优惠订单待支付，请先完成或取消该订单',
+          });
+        }
+      }
 
-    const externalId = newExternalId('payment');
-    const origin = ctx.req.protocol + '://' + ctx.req.get('host');
+      const amountCents = getPlanPriceCents(input.plan, input.cycle, 'usd', isFirstMonth);
+      const externalId = newExternalId('payment');
+      const origin = `${ctx.req.protocol}://${ctx.req.get('host')}`;
+      const order = await paypalAdapter.createOrder({
+        amountCents,
+        currency: 'USD',
+        referenceId: externalId,
+        description: describePlanOrder(input.plan, input.cycle),
+        returnUrl: `${origin}/billing/return?payment=${externalId}`,
+        cancelUrl: `${origin}/billing/cancel?payment=${externalId}`,
+      });
 
-    const order = await ctx.paypalAdapter.createOrder({
-      amountCents,
-      currency: 'USD',
-      referenceId: externalId,
-      description: describePlanOrder(input.plan, input.cycle),
-      // Approval popup posts back to these URLs. The SPA listens for the
-      // popup-close event and triggers captureOrder via tRPC; the
-      // return/cancel pages just need to exist + not 404.
-      returnUrl: `${origin}/billing/return?payment=${externalId}`,
-      cancelUrl: `${origin}/billing/cancel?payment=${externalId}`,
+      await tx.insert(payments).values({
+        externalId,
+        userExternalId: user.externalId,
+        provider: 'paypal',
+        providerOrderId: order.orderId,
+        plan: input.plan,
+        kind: 'subscription',
+        amountCents,
+        currency: 'USD',
+        status: 'pending',
+        metadata: {
+          env: paypalAdapter.env,
+          cycle: input.cycle,
+          firstMonth: isFirstMonth,
+          approveUrl: order.approveUrl,
+        },
+      });
+
+      return {
+        paymentId: externalId,
+        orderId: order.orderId,
+        approveUrl: order.approveUrl,
+      };
     });
-
-    await ctx.db.insert(payments).values({
-      externalId,
-      userExternalId: user.externalId,
-      provider: 'paypal',
-      providerOrderId: order.orderId,
-      plan: input.plan,
-      kind: 'subscription',
-      amountCents,
-      currency: 'USD',
-      status: 'pending',
-      // Stash cycle + firstMonth flag in metadata so captureOrder /
-      // the webhook can pick the right expiry math without a schema
-      // migration. `cycle` is always present; `firstMonth` is only
-      // true on the promo path.
-      metadata: { env: ctx.paypalAdapter.env, cycle: input.cycle, firstMonth: isFirstMonth },
-    });
-
-    return {
-      paymentId: externalId,
-      orderId: order.orderId,
-      approveUrl: order.approveUrl,
-    };
   }),
 
   captureOrder: protectedProcedure.input(captureOrderInput).mutation(async ({ ctx, input }) => {
     if (!ctx.paypalAdapter) {
       throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'PayPal 未配置' });
     }
+    const paypalAdapter = ctx.paypalAdapter;
     const [row] = await ctx.db
       .select()
       .from(payments)
@@ -164,152 +341,97 @@ export const paymentRouter = router({
       throw new TRPCError({ code: 'BAD_REQUEST', message: '订单号不匹配' });
     }
 
-    // Already finalised (webhook beat us, or user double-clicked)?
-    if (row.status === 'completed') {
-      return { ok: true as const, plan: row.plan };
-    }
-
-    const capture = await ctx.paypalAdapter.captureOrder(input.orderId);
-    if (capture.status !== 'COMPLETED') {
-      // Only mark failed for terminal capture statuses; PENDING means
-      // PayPal still has it under review and the webhook will resolve.
-      const nextStatus = capture.status === 'DECLINED' ? 'failed' : 'pending';
-      await ctx.db
-        .update(payments)
-        .set({
-          status: nextStatus,
-          providerCaptureId: capture.captureId || null,
-          metadata: {
-            ...(row.metadata as Record<string, unknown> | null),
-            lastCaptureStatus: capture.status,
-            payerEmail: capture.payerEmail,
-          },
-        })
-        .where(eq(payments.id, row.id));
-      throw new TRPCError({
-        code: 'BAD_REQUEST',
-        message: `PayPal 状态：${capture.status}`,
-      });
-    }
-
-    // Capture succeeded. Two flavours of capture follow-up depending
-    // on what was bought:
-    //
-    //   - kind='subscription' → flip status, extend planExpiresAt,
-    //                            and (when this is the user's first
-    //                            paid month) seed bonus_tasks via
-    //                            QuotaService.grantFirstMonthBonus.
-    //   - kind='addon'        → flip status, top up bonus on the
-    //                            active task_quotas row. No plan
-    //                            change.
-    const meta = (row.metadata as Record<string, unknown> | null) ?? {};
-
-    if (row.kind === 'addon') {
-      const [userRow] = await ctx.db
-        .select({ id: users.id, plan: users.plan })
-        .from(users)
-        .where(eq(users.externalId, row.userExternalId))
-        .limit(1);
-      if (!userRow) {
-        throw new TRPCError({ code: 'NOT_FOUND', message: '用户不存在' });
+    const result = await ctx.db.transaction(async (tx) => {
+      // Lock order is always user -> payment(s), matching createOrder /
+      // createCnOrder and the HTTP callback paths. Keeping one global
+      // order avoids a create-vs-capture deadlock under concurrency.
+      const settlement = await lockSettlementContext(tx, row);
+      const [lockedRow] = await tx
+        .select()
+        .from(payments)
+        .where(eq(payments.id, row.id))
+        .limit(1)
+        .for('update');
+      if (!lockedRow) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: '支付订单不存在' });
       }
-      if (!isAddonPackId(row.plan)) {
+      if (lockedRow.status === 'completed') {
+        return { kind: 'completed' as const };
+      }
+      if (lockedRow.status !== 'pending') {
         throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: 'addon 订单 plan 字段非法',
+          code: 'CONFLICT',
+          message: `支付订单当前状态不可结算：${lockedRow.status}`,
         });
       }
-      const planId: PlanId =
-        userRow.plan === 'basic' || userRow.plan === 'pro' ? userRow.plan : 'free';
-      if (planId === 'free') {
-        // Edge case: user downgraded mid-checkout. Refuse to apply
-        // (would credit a free user with paid bonus). Mark the
-        // payment failed so the SPA can refund manually.
-        await ctx.db
-          .update(payments)
-          .set({ status: 'failed', metadata: { ...meta, captureStatus: capture.status, reason: 'plan_downgraded' } })
-          .where(eq(payments.id, row.id));
+      if (settlement.firstMonthRequested && !settlement.firstMonthEligible) {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: '首月优惠资格已被其他订单使用，请重新下单',
+        });
+      }
+      if (
+        lockedRow.kind === 'addon' &&
+        settlement.user.plan !== 'basic' &&
+        settlement.user.plan !== 'pro'
+      ) {
         throw new TRPCError({
           code: 'PRECONDITION_FAILED',
           message: '当前账户已降级，加量包未生效',
         });
       }
-      const quotaService = new QuotaService(ctx.db);
-      // Conditional pending→completed transition. Only the writer
-      // that flips the row applies the entitlement. A retry that
-      // races with this one (or arrives after a successful run)
-      // sees status='completed' already, affectedRows=0, and
-      // skips applyAddonPack — preventing a double bonus grant.
-      const updateResult = await ctx.db
-        .update(payments)
-        .set({
-          status: 'completed',
-          providerCaptureId: capture.captureId,
-          metadata: {
-            ...meta,
-            payerEmail: capture.payerEmail,
-            captureStatus: capture.status,
-          },
-        })
-        .where(and(eq(payments.id, row.id), eq(payments.status, 'pending')));
-      const transitioned = readAffectedRows(updateResult) === 1;
-      if (transitioned) {
-        await quotaService.applyAddonPack(userRow.id, planId, row.plan as AddonPackId);
+
+      const capture = await paypalAdapter.captureOrder(input.orderId);
+      if (capture.status !== 'COMPLETED') {
+        const nextStatus = capture.status === 'DECLINED' ? 'failed' : 'pending';
+        await tx
+          .update(payments)
+          .set({
+            status: nextStatus,
+            providerCaptureId: capture.captureId || null,
+            metadata: {
+              ...paymentMetadata(lockedRow),
+              lastCaptureStatus: capture.status,
+              payerEmail: capture.payerEmail,
+            },
+          })
+          .where(eq(payments.id, lockedRow.id));
+        return { kind: 'incomplete' as const, status: capture.status };
       }
-      return { ok: true as const, plan: row.plan };
-    }
-
-    const [planRow] = await ctx.db
-      .select({ id: users.id, plan: users.plan, planExpiresAt: users.planExpiresAt })
-      .from(users)
-      .where(eq(users.externalId, row.userExternalId))
-      .limit(1);
-    if (!planRow) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: '用户不存在' });
-    }
-    // First-month bonus: only when the user was on free at order
-    // creation time AND the catalogue defines a bonus AND the cycle
-    // is monthly. The createOrder flow stamps `firstMonth: true` in
-    // metadata, so we reuse that — easier than re-deriving from a
-    // race-prone read of the user's current plan.
-    const firstMonthFlag = meta.firstMonth === true;
-    // Pull cycle from metadata stamped at createOrder time; default to
-    // monthly for legacy rows that pre-date the cycle field.
-    const cycle: BillingCycle = meta.cycle === 'yearly' ? 'yearly' : 'monthly';
-    const nextExpiry = nextExpiryFor(row.plan as 'basic' | 'pro', cycle, planRow?.planExpiresAt ?? null);
-
-    // Same single-finalize-per-payment guard as the addon branch:
-    // condition the UPDATE on status='pending' so a concurrent
-    // capture (or a retry after a network blip) becomes a noop. We
-    // only extend the user's plan / grant the first-month bonus
-    // when this call is the one that flipped the row.
-    const transitioned = await ctx.db.transaction(async (tx) => {
-      const updateResult = await tx
-        .update(payments)
-        .set({
-          status: 'completed',
-          providerCaptureId: capture.captureId,
-          metadata: {
-            ...meta,
-            payerEmail: capture.payerEmail,
-            captureStatus: capture.status,
+      if (
+        capture.amountCents !== lockedRow.amountCents ||
+        capture.currency.toUpperCase() !== lockedRow.currency.toUpperCase()
+      ) {
+        ctx.logger.error(
+          {
+            paymentId: lockedRow.externalId,
+            expectedAmountCents: lockedRow.amountCents,
+            capturedAmountCents: capture.amountCents,
+            expectedCurrency: lockedRow.currency,
+            capturedCurrency: capture.currency,
           },
-        })
-        .where(and(eq(payments.id, row.id), eq(payments.status, 'pending')));
-      const affected = readAffectedRows(updateResult);
-      if (affected !== 1) return false;
-      await tx
-        .update(users)
-        .set({ plan: row.plan, planExpiresAt: nextExpiry })
-        .where(eq(users.externalId, row.userExternalId));
-      return true;
+          'paypal capture settlement mismatch',
+        );
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: 'PayPal 结算金额或币种与订单不一致，请联系客服核查',
+        });
+      }
+
+      const completed = await completePaymentInTransaction(tx, lockedRow, settlement, {
+        captureId: capture.captureId,
+        payerEmail: capture.payerEmail,
+        captureStatus: capture.status,
+      });
+      return { kind: completed ? ('completed' as const) : ('deduped' as const) };
     });
 
-    if (transitioned && firstMonthFlag && cycle === 'monthly') {
-      const quotaService = new QuotaService(ctx.db);
-      await quotaService.grantFirstMonthBonus(planRow.id, row.plan as PlanId);
+    if (result.kind === 'incomplete') {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: `PayPal 状态：${result.status}`,
+      });
     }
-
     return { ok: true as const, plan: row.plan };
   }),
 
@@ -332,6 +454,10 @@ export const paymentRouter = router({
           message: 'PayPal 暂未配置（PAYPAL_CLIENT_ID / _SECRET 未设置）',
         });
       }
+      const userExternalId = ctx.userId;
+      if (!userExternalId) {
+        throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
+      }
       const pack = ADDON_PACK_CATALOGUE[input.packId];
       if (!pack) {
         throw new TRPCError({ code: 'BAD_REQUEST', message: '加量包不存在' });
@@ -340,13 +466,12 @@ export const paymentRouter = router({
       const [user] = await ctx.db
         .select()
         .from(users)
-        .where(eq(users.externalId, ctx.userId!))
+        .where(eq(users.externalId, userExternalId))
         .limit(1);
       if (!user) {
         throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
       }
-      const planId: PlanId =
-        user.plan === 'basic' || user.plan === 'pro' ? user.plan : 'free';
+      const planId: PlanId = user.plan === 'basic' || user.plan === 'pro' ? user.plan : 'free';
       if (planId === 'free') {
         throw new TRPCError({
           code: 'PRECONDITION_FAILED',
@@ -362,7 +487,7 @@ export const paymentRouter = router({
 
       const amountCents = getAddonPackPriceCents(input.packId, 'usd');
       const externalId = newExternalId('payment');
-      const origin = ctx.req.protocol + '://' + ctx.req.get('host');
+      const origin = `${ctx.req.protocol}://${ctx.req.get('host')}`;
 
       const order = await ctx.paypalAdapter.createOrder({
         amountCents,
@@ -404,13 +529,33 @@ export const paymentRouter = router({
   //
   // All three procs gracefully no-op when the gateway URL or
   // shared secret aren't configured (CN_PAYMENT_URL /
-  // INTERNAL_SHARED_SECRET unset). cnOptions.enabled drives the
-  // SPA's "show 微信/支付宝 buttons or not" decision; mirrors the
-  // existing payment.options shape for PayPal.
+  // INTERNAL_SHARED_SECRET unset). cnOptions checks the live
+  // gateway so the SPA only advertises providers that are ready.
   // ----------------------------------------------------------------
-  cnOptions: publicProcedure.query(() => ({
-    enabled: Boolean(process.env.CN_PAYMENT_URL && process.env.INTERNAL_SHARED_SECRET),
-  })),
+  cnOptions: publicProcedure.query(async () => {
+    const cnUrl = process.env.CN_PAYMENT_URL;
+    const secret = process.env.INTERNAL_SHARED_SECRET;
+    const unavailable = { enabled: false, wechat: false, alipay: false };
+    if (!cnUrl || !secret) return unavailable;
+
+    try {
+      const response = await fetch(`${cnUrl.replace(/\/$/, '')}/healthz`, {
+        signal: AbortSignal.timeout(2500),
+      });
+      if (!response.ok) return unavailable;
+      const health = (await response.json()) as {
+        status?: unknown;
+        providers?: { wechat?: unknown; alipay?: unknown };
+        bridge?: unknown;
+      };
+      if (health.status !== 'ok' || health.bridge !== 'ready') return unavailable;
+      const wechat = health.providers?.wechat === 'ready';
+      const alipay = health.providers?.alipay === 'ready';
+      return { enabled: wechat || alipay, wechat, alipay };
+    } catch {
+      return unavailable;
+    }
+  }),
   createCnOrder: protectedProcedure
     .input(
       z.object({
@@ -434,49 +579,159 @@ export const paymentRouter = router({
           message: '微信/支付宝 暂未配置（CN_PAYMENT_URL / INTERNAL_SHARED_SECRET 未设置）',
         });
       }
-      const [user] = await ctx.db
-        .select()
-        .from(users)
-        .where(eq(users.externalId, ctx.userId!))
-        .limit(1);
-      if (!user) {
+      const userExternalId = ctx.userId;
+      if (!userExternalId) {
         throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
       }
-      const purchase =
-        input.purchase.kind === 'subscription'
-          ? {
-              kind: 'subscription' as const,
-              planId: input.purchase.planId,
-              cycle: input.purchase.cycle,
-              isFirstMonth: user.plan === 'free',
+      return ctx.db.transaction(async (tx) => {
+        const [user] = await tx
+          .select()
+          .from(users)
+          .where(eq(users.externalId, userExternalId))
+          .limit(1)
+          .for('update');
+        if (!user) {
+          throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
+        }
+
+        let isFirstMonth = false;
+        if (input.purchase.kind === 'subscription') {
+          const subscriptionPayments = await lockSubscriptionPayments(tx, user.externalId);
+          isFirstMonth =
+            input.purchase.cycle === 'monthly' &&
+            user.plan === 'free' &&
+            !subscriptionPayments.some((row) => row.status === 'completed');
+          if (isFirstMonth) {
+            const pending = subscriptionPayments.find(isPendingFirstMonthPayment);
+            if (pending) {
+              const metadata = paymentMetadata(pending);
+              if (
+                pending.provider === input.provider &&
+                pending.plan === input.purchase.planId &&
+                metadata.cycle === input.purchase.cycle &&
+                metadata.checkout &&
+                typeof metadata.checkout === 'object'
+              ) {
+                return metadata.checkout as Record<string, unknown>;
+              }
+              throw new TRPCError({
+                code: 'CONFLICT',
+                message: '已有首月优惠订单待支付，请先完成或取消该订单',
+              });
             }
-          : { kind: 'addon' as const, packId: input.purchase.packId };
-      const res = await fetch(`${cnUrl.replace(/\/$/, '')}/payment/create`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-internal-secret': secret },
-        body: JSON.stringify({
+          }
+        } else {
+          const planId: PlanId = user.plan === 'basic' || user.plan === 'pro' ? user.plan : 'free';
+          const pack = ADDON_PACK_CATALOGUE[input.purchase.packId];
+          if (planId === 'free') {
+            throw new TRPCError({
+              code: 'PRECONDITION_FAILED',
+              message: '加量包仅对付费用户开放，请先升级到基础版',
+            });
+          }
+          if (!pack.availableTo.includes(planId)) {
+            throw new TRPCError({
+              code: 'FORBIDDEN',
+              message: 'Opus 加量包仅专业版可购买',
+            });
+          }
+        }
+
+        const purchase =
+          input.purchase.kind === 'subscription'
+            ? {
+                kind: 'subscription' as const,
+                planId: input.purchase.planId,
+                cycle: input.purchase.cycle,
+                isFirstMonth,
+              }
+            : {
+                kind: 'addon' as const,
+                packId: input.purchase.packId,
+              };
+        let response: Response;
+        try {
+          response = await fetch(`${cnUrl.replace(/\/$/, '')}/payment/create`, {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              'x-internal-secret': secret,
+            },
+            body: JSON.stringify({
+              provider: input.provider,
+              userId: userExternalId,
+              purchase,
+            }),
+            signal: AbortSignal.timeout(8000),
+          });
+        } catch (error) {
+          ctx.logger.warn(
+            { error: error instanceof Error ? error.message : String(error) },
+            'cn-payment: create call could not be completed',
+          );
+          throw new TRPCError({
+            code: 'INTERNAL_SERVER_ERROR',
+            message: '支付服务暂时不可用，请稍后重试',
+          });
+        }
+        if (!response.ok) {
+          const body = await response.text();
+          ctx.logger.warn(
+            { status: response.status, body: body.slice(0, 400) },
+            'cn-payment: create call failed',
+          );
+          throw new TRPCError({
+            code: 'INTERNAL_SERVER_ERROR',
+            message: '支付服务暂时不可用，请稍后重试',
+          });
+        }
+
+        const data = (await response.json()) as Record<string, unknown>;
+        const outTradeNo = data.outTradeNo;
+        const amountCents = data.amountCents;
+        const expectedAmount =
+          input.purchase.kind === 'subscription'
+            ? getPlanPriceCents(input.purchase.planId, input.purchase.cycle, 'cny', isFirstMonth)
+            : getAddonPackPriceCents(input.purchase.packId, 'cny');
+        if (
+          data.provider !== input.provider ||
+          typeof outTradeNo !== 'string' ||
+          !outTradeNo ||
+          amountCents !== expectedAmount
+        ) {
+          throw new TRPCError({
+            code: 'INTERNAL_SERVER_ERROR',
+            message: 'cn-payment 返回了不匹配的订单',
+          });
+        }
+
+        await tx.insert(payments).values({
+          externalId: outTradeNo,
+          userExternalId: user.externalId,
           provider: input.provider,
-          userId: ctx.userId,
-          purchase,
-        }),
-      });
-      if (!res.ok) {
-        const body = await res.text();
-        ctx.logger.warn(
-          { status: res.status, body: body.slice(0, 400) },
-          'cn-payment: create call failed',
-        );
-        throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: `cn-payment ${res.status}: ${body.slice(0, 200)}`,
+          providerOrderId: outTradeNo,
+          plan:
+            input.purchase.kind === 'subscription' ? input.purchase.planId : input.purchase.packId,
+          kind: input.purchase.kind,
+          amountCents: expectedAmount,
+          currency: 'CNY',
+          status: 'pending',
+          metadata:
+            input.purchase.kind === 'subscription'
+              ? {
+                  cycle: input.purchase.cycle,
+                  firstMonth: isFirstMonth,
+                  checkout: data,
+                  source: 'cn-payment-create',
+                }
+              : {
+                  packId: input.purchase.packId,
+                  checkout: data,
+                  source: 'cn-payment-create',
+                },
         });
-      }
-      // The gateway's create response shape:
-      //   wechat → { provider: 'wechat', outTradeNo, codeUrl, amountCents, description }
-      //   alipay → { provider: 'alipay', outTradeNo, payUrl,  amountCents, description }
-      // The SPA uses outTradeNo as the polling key.
-      const data = (await res.json()) as Record<string, unknown>;
-      return data;
+        return data;
+      });
     }),
   /**
    * Polled by the SPA after the user scans / pays. Returns 'pending'
@@ -499,14 +754,20 @@ export const paymentRouter = router({
           status: payments.status,
           plan: payments.plan,
           kind: payments.kind,
+          userExternalId: payments.userExternalId,
         })
         .from(payments)
-        .where(eq(payments.providerOrderId, input.outTradeNo))
+        .where(
+          and(
+            eq(payments.providerOrderId, input.outTradeNo),
+            eq(payments.userExternalId, ctx.userId),
+          ),
+        )
         .limit(1);
       // Until the cn-payment gateway POSTs to /api/internal/payment/
       // confirm, no row exists for this outTradeNo. Surface 'pending'
       // so the SPA keeps polling.
-      if (!row) return { status: 'pending' as const };
+      if (!row || row.userExternalId !== ctx.userId) return { status: 'pending' as const };
       return {
         status: row.status as 'pending' | 'completed' | 'failed',
         plan: row.plan,

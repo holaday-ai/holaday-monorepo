@@ -1,7 +1,8 @@
-import type { UiTask } from '@/types/task';
+import type { UiScreencast, UiTask } from '@/types/task';
 import type { ConnStatus } from '@/lib/ws';
 import type { SidePanelMode, SidePanelOverride } from '@/types/side-panel';
 import { deriveTaskProductState } from '@/lib/task-product-state';
+import { taskDisplayTitle } from '@/lib/task-display-copy';
 
 export interface WorkbenchToastCopy {
   message: string;
@@ -46,10 +47,44 @@ export function realtimeConnectionTransition(input: {
   return { hadDisconnect: input.hadDisconnect, toast: null };
 }
 
+const BROWSER_TASK_VERBS = ['打开', '登录', '访问', '点击', '下载', '搜索'];
+
+/**
+ * Legacy task rows may predate executionMode while still owning browser
+ * evidence. Keep one shared heuristic for the toolbar and workbench shell so
+ * reopening those tasks cannot detach them from their browser record.
+ */
+export function hasBrowserRecordForWorkbench(task: UiTask | null): boolean {
+  if (!task) return false;
+  if (task.executionMode === 'browser') return true;
+  if (task.executionMode) return false;
+  if (task.finalUrl?.trim() || task.finalScreenshot) return true;
+  const intent = task.intent ?? '';
+  if (/https?:\/\//i.test(intent)) return true;
+  return BROWSER_TASK_VERBS.some((verb) => intent.includes(verb));
+}
+
+export function shouldConnectTaskBrowserForWorkbench(input: {
+  task: UiTask | null;
+  hasRuntimeTextSignal: boolean;
+}): boolean {
+  if (!input.task) return false;
+  if (hasBrowserRecordForWorkbench(input.task)) return true;
+  if (input.task.executionMode) return false;
+  return !input.hasRuntimeTextSignal;
+}
+
+export function taskFrameForWorkbench(
+  taskId: string | null,
+  framesByTask: Record<string, UiScreencast | undefined>,
+): UiScreencast | null {
+  return taskId ? (framesByTask[taskId] ?? null) : null;
+}
+
 export function isLiveBrowserTaskForWorkbench(task: UiTask | null): boolean {
   return Boolean(
     task &&
-      task.executionMode === 'browser' &&
+      hasBrowserRecordForWorkbench(task) &&
       !isWorkbenchTerminalTask(task),
   );
 }
@@ -64,9 +99,13 @@ export function isWorkbenchTerminalTask(task: UiTask): boolean {
 }
 
 export function terminalTaskHasFollowUpContext(task: UiTask): boolean {
-  if (task.status !== 'completed' && task.status !== 'partial_success') {
-    return false;
+  if (task.status === 'failed' || task.status === 'cancelled') {
+    // A terminal browser can still own a retained, interactive session. Keep
+    // that page available for a same-context follow-up even when the preceding
+    // run failed or the user cancelled the AI portion of the task.
+    return hasBrowserRecordForWorkbench(task);
   }
+  if (task.status !== 'completed' && task.status !== 'partial_success') return false;
   return Boolean(
     task.resultText?.trim() ||
       task.finalUrl?.trim() ||
@@ -88,7 +127,7 @@ export function followUpTargetForTask(input: {
 
   return {
     taskId: selectedTaskId,
-    title: (selectedTask.title || selectedTask.intent || '').slice(0, 40),
+    title: taskDisplayTitle(selectedTask, 40),
   };
 }
 

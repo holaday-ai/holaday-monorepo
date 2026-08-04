@@ -2,12 +2,15 @@ import { describe, expect, it } from 'vitest';
 import type { UiTask } from '@/types/task';
 import {
   followUpTargetForTask,
+  hasBrowserRecordForWorkbench,
   isLiveBrowserTaskForWorkbench,
   networkTransitionToast,
   normalizeTaskActionCount,
   mobileBrowserSheetAutoOpenState,
   preserveBrowserRecordAfterLive,
   realtimeConnectionTransition,
+  shouldConnectTaskBrowserForWorkbench,
+  taskFrameForWorkbench,
 } from './workbench-state';
 
 function task(overrides: Partial<UiTask> = {}): UiTask {
@@ -37,6 +40,108 @@ describe('workbench state helpers', () => {
     expect(isLiveBrowserTaskForWorkbench(task({ status: 'completed' }))).toBe(
       false,
     );
+  });
+
+  it('keeps legacy browser-like tasks attached to their browser record', () => {
+    const legacyTask = task({ executionMode: undefined });
+    expect(hasBrowserRecordForWorkbench(legacyTask)).toBe(true);
+    expect(isLiveBrowserTaskForWorkbench(legacyTask)).toBe(true);
+    expect(
+      hasBrowserRecordForWorkbench(
+        task({ executionMode: undefined, intent: '总结这段文字' }),
+      ),
+    ).toBe(false);
+  });
+
+  it('does not reopen the browser for an explicitly non-browser task', () => {
+    expect(
+      hasBrowserRecordForWorkbench(
+        task({ executionMode: 'generate', intent: '总结 https://example.com 的内容' }),
+      ),
+    ).toBe(false);
+    expect(
+      hasBrowserRecordForWorkbench(
+        task({ executionMode: 'image', finalUrl: 'https://example.com/reference' }),
+      ),
+    ).toBe(false);
+  });
+
+  it('keeps an owned browser connected even when generic progress buffers exist', () => {
+    expect(
+      shouldConnectTaskBrowserForWorkbench({
+        task: task({ executionMode: 'browser' }),
+        hasRuntimeTextSignal: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldConnectTaskBrowserForWorkbench({
+        task: task({
+          executionMode: undefined,
+          status: 'completed',
+          finalUrl: 'https://example.com/result',
+        }),
+        hasRuntimeTextSignal: true,
+      }),
+    ).toBe(true);
+  });
+
+  it('uses runtime text only as a fallback for tasks with no browser ownership signal', () => {
+    expect(
+      shouldConnectTaskBrowserForWorkbench({
+        task: task({ executionMode: undefined, intent: '总结这段文字' }),
+        hasRuntimeTextSignal: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldConnectTaskBrowserForWorkbench({
+        task: task({ executionMode: 'generate' }),
+        hasRuntimeTextSignal: false,
+      }),
+    ).toBe(false);
+  });
+
+  it('recognizes saved browser evidence even when legacy intent has no browser verbs', () => {
+    expect(
+      hasBrowserRecordForWorkbench(
+        task({
+          executionMode: undefined,
+          intent: '整理最终页面',
+          status: 'completed',
+          finalUrl: 'https://example.com/result',
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      hasBrowserRecordForWorkbench(
+        task({
+          executionMode: undefined,
+          intent: '整理最终页面',
+          status: 'completed',
+          finalScreenshot: 'saved-browser-frame',
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it('selects only the frame keyed to the active task', () => {
+    const first = {
+      tickIndex: 1,
+      imageBase64: 'first',
+      url: 'https://first.example',
+      viewport: { width: 1280, height: 720 },
+      timestamp: '2026-07-17T00:00:00.000Z',
+    };
+    const second = {
+      ...first,
+      tickIndex: 2,
+      imageBase64: 'second',
+      url: 'https://second.example',
+    };
+    const frames = { tsk_first: first, tsk_second: second };
+
+    expect(taskFrameForWorkbench('tsk_second', frames)).toBe(second);
+    expect(taskFrameForWorkbench('tsk_missing', frames)).toBeNull();
+    expect(taskFrameForWorkbench(null, frames)).toBeNull();
   });
 
   it('keeps paused browser tasks live even when a pause frame carries a result', () => {
@@ -79,10 +184,60 @@ describe('workbench state helpers', () => {
     });
   });
 
-  it('suppresses follow-up for failed, cancelled, or empty terminal tasks', () => {
+  it('uses cleaned user copy in the follow-up target label', () => {
+    expect(
+      followUpTargetForTask({
+        selectedTask: task({
+          status: 'completed',
+          executionMode: 'image',
+          resultText: '图片已生成。',
+          title: '主体一致性要求：请以用户上传的第一张图片作为锁定主角。',
+          intent: [
+            '生成图片：让同一只西高地坐在海边。',
+            '图片风格要求：电影感、柔和逆光。',
+            '主体一致性要求：请以用户上传的第一张图片作为锁定主角。',
+          ].join('\n\n'),
+        }),
+        selectedTaskId: 'tsk_test',
+        selectedNeedsUser: false,
+      }),
+    ).toEqual({
+      taskId: 'tsk_test',
+      title: '让同一只西高地坐在海边。',
+    });
+  });
+
+  it('keeps browser follow-up available after failed or cancelled terminal tasks', () => {
+    for (const status of ['failed', 'cancelled'] as const) {
+      expect(
+        followUpTargetForTask({
+          selectedTask: task({
+            status,
+            executionMode: 'browser',
+            finalUrl: 'https://example.com/recoverable',
+          }),
+          selectedTaskId: 'tsk_test',
+          selectedNeedsUser: false,
+        }),
+      ).toEqual({
+        taskId: 'tsk_test',
+        title: '打开 https://example.com 并总结结果',
+      });
+    }
+  });
+
+  it('suppresses follow-up for failed non-browser tasks or empty successful tasks', () => {
     for (const selectedTask of [
-      task({ status: 'failed', resultText: 'Browser timeout' }),
-      task({ status: 'cancelled', resultText: '已取消，未产生任何费用。' }),
+      task({
+        status: 'failed',
+        executionMode: 'generate',
+        resultText: 'Generation timeout',
+      }),
+      task({
+        status: 'cancelled',
+        executionMode: 'generate',
+        resultText: '已取消，未产生任何费用。',
+      }),
       task({ status: 'completed' }),
       task({ status: 'partial_success' }),
     ]) {

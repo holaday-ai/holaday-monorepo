@@ -6,9 +6,28 @@ import {
 } from './trust-summary';
 
 describe('trust summary', () => {
+  it('uses a compact warning for completed research results without clickable sources', () => {
+    const summary = buildTrustSummary({
+      status: 'completed',
+      intent: '研究主流 SaaS 定价模式',
+      resultText: '按席位、按量和按功能定价各有优劣。',
+      currentUrl: null,
+    });
+
+    expect(summary.presentation).toBe('compact');
+    expect(summary.tone).toBe('warning');
+    expect(summary.title).toBe('结果需复核');
+    expect(summary.verdict).toBe('缺少可核验来源');
+    expect(summary.boundary).toContain('关键事实未验证');
+    expect(summary.rows).toEqual([]);
+    expect(summary.checks).toEqual([]);
+    expect(summary.ledger).toEqual([]);
+  });
+
   it('states evidence boundaries without implying fact-level certainty', () => {
     const summary = buildTrustSummary({
       status: 'completed',
+      intent: '研究行业报告',
       resultText: '来源：https://example.com/report',
       currentUrl: 'https://example.com/report',
       finalScreenshot: 'base64',
@@ -26,6 +45,7 @@ describe('trust summary', () => {
       verificationPassed: true,
     });
 
+    expect(summary.presentation).toBe('full');
     expect(summary.tone).toBe('neutral');
     expect(summary.verdict).toContain('仍需按来源复核关键事实');
     expect(summary.boundary).toContain('不会被当作已验证事实');
@@ -97,6 +117,30 @@ describe('trust summary', () => {
     );
   });
 
+  it('does not count a server-confirmed unavailable file as downloadable evidence', () => {
+    const summary = buildTrustSummary({
+      status: 'completed',
+      resultText: '任务已完成，但产物存储已失效。',
+      attachments: [
+        {
+          fileId: 'file_missing',
+          downloadUrl: '/api/files/file_missing/download',
+          filename: 'result.pdf',
+          mimetype: 'application/pdf',
+          sizeBytes: 1200,
+          expiresAt: '2026-07-24T00:00:00Z',
+          availability: 'unavailable',
+          kind: 'pdf',
+        },
+      ],
+    });
+
+    expect(summary.rows.find((row) => row.label === '产物文件')).toBeUndefined();
+    expect(
+      summary.ledger.find((item) => item.label === '产物文件'),
+    ).toBeUndefined();
+  });
+
   it('does not frame awaiting-user states as result review', () => {
     const summary = buildTrustSummary({
       status: 'awaiting_user',
@@ -118,6 +162,36 @@ describe('trust summary', () => {
 });
 
 describe('shouldShowTrustSummary', () => {
+  it('shows completed research results when no clickable source was returned', () => {
+    expect(
+      shouldShowTrustSummary({
+        status: 'completed',
+        intent: '检索 2026 年 AI 行业趋势',
+        resultText: '行业仍在快速增长。',
+      }),
+    ).toBe(true);
+  });
+
+  it('does not warn on completed non-research prose without sources', () => {
+    expect(
+      shouldShowTrustSummary({
+        status: 'completed',
+        intent: '把这句话翻译成英文',
+        resultText: 'The weather is nice today.',
+      }),
+    ).toBe(false);
+  });
+
+  it('does not apply the generic research warning to stock tasks', () => {
+    expect(
+      shouldShowTrustSummary({
+        status: 'completed',
+        intent: '查今天特斯拉股价并给出来源',
+        resultText: '特斯拉当前股价为 123.45 美元。',
+      }),
+    ).toBe(false);
+  });
+
   it('hides cancelled empty evidence states to avoid fake review counters', () => {
     expect(
       shouldShowTrustSummary({
@@ -152,6 +226,21 @@ describe('shouldShowTrustSummary', () => {
 });
 
 describe('recovery actions', () => {
+  it('offers source-focused recovery for completed research with no links', () => {
+    const actions = buildRecoveryActions({
+      status: 'completed',
+      intent: '研究主流 SaaS 定价模式',
+      resultText: '按席位、按量和按功能定价各有优劣。',
+    });
+
+    expect(actions.find((action) => action.label === '带已完成信息重试')?.prompt).toContain(
+      '按席位、按量和按功能定价',
+    );
+    expect(actions.find((action) => action.label === '指定可信来源')?.prompt).toContain(
+      '请只使用以下可信来源',
+    );
+  });
+
   it('offers login continuation while awaiting user', () => {
     const actions = buildRecoveryActions({
       status: 'awaiting_user',

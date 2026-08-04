@@ -3,7 +3,8 @@
 #
 # White-screen postmortem (1de57cc) made the smoke check
 # non-negotiable: build, ship, then verify the live HTML responds
-# with our marker string. If smoke fails, restore dist.bak in ~10s.
+# with our marker string. Aliyun rolls back its atomic edge release;
+# Vultr restores dist.bak.
 #
 # BOSS-feedback follow-up (2026-05-18) — script now pushes to BOTH
 # Aliyun AND Vultr. The Aliyun-only flow let Vultr's SPA dist sit
@@ -20,6 +21,9 @@
 
 set -euo pipefail
 
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
 # Optional local credentials. The file is ignored by git when using
 # .env.deploy.local, so deploys no longer need passwords pasted in chat.
 DEPLOY_ENV_LOADER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/load-deploy-env.sh"
@@ -33,8 +37,9 @@ unset DEPLOY_ENV_LOADER
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ssh-password-auth.sh"
 
 ALIYUN_HOST="root@47.99.169.186"
-SPA_PATH="/opt/holaday-spa/dist"
-BACKUP_PATH="/opt/holaday-spa/dist.bak"
+ALIYUN_DOMAIN="hd-app.orangebench.tech"
+ALIYUN_EDGE_DEPLOY="$ROOT_DIR/ops/aliyun-edge/deploy.sh"
+ALIYUN_EDGE_ROOT="/opt/holaday-edge"
 DIST_DIR="apps/web-workbench/dist"
 # Probe the SPA entry, not the marketing root, so the response contains
 # both the smoke marker and the deployed bundle hash.
@@ -185,6 +190,26 @@ vultr_remote_smoke_check() {
   return 1
 }
 
+rollback_aliyun_edge() {
+  local release_id="$1"
+
+  run_with_retry "Aliyun edge rollback" "${ALIYUN_SSH[@]}" "$ALIYUN_HOST" \
+    "bash '$ALIYUN_EDGE_ROOT/releases/$release_id/ops/aliyun-edge/rollback-remote.sh' '$ALIYUN_DOMAIN' '$release_id'"
+}
+
+assert_aliyun_release_active() {
+  local expected_release_id="$1"
+  local active_release_id
+
+  active_release_id=$(run_with_retry "Aliyun active release" "${ALIYUN_SSH[@]}" "$ALIYUN_HOST" \
+    "current_target=\$(readlink '$ALIYUN_EDGE_ROOT/current') && basename \"\$current_target\"")
+  active_release_id=$(printf '%s\n' "$active_release_id" | tail -1 | tr -d '[:space:]')
+  if [[ "$active_release_id" != "$expected_release_id" ]]; then
+    echo "❌ Aliyun release $expected_release_id was superseded by ${active_release_id:-unknown}" >&2
+    return 1
+  fi
+}
+
 if [[ ! -d "$DIST_DIR" ]]; then
   echo "❌ $DIST_DIR not found. Run: pnpm --filter @holaday/web-workbench build" >&2
   exit 1
@@ -194,40 +219,37 @@ NEW_HASH=$(grep -o 'index-[^"]*\.js' "$DIST_DIR/index.html" | head -1 || echo un
 echo "📦 Local bundle: $NEW_HASH"
 
 ALIYUN_SSH=("${ALIYUN_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}")
-ALIYUN_SCP=("${ALIYUN_AUTH_PREFIX[@]}" scp "${SSH_OPTS[@]}")
+ALIYUN_RELEASE_ID="$(date -u +%Y%m%d%H%M%S)-$$"
+ALIYUN_EDGE_RELEASE_SPA_PATH="$ALIYUN_EDGE_ROOT/releases/$ALIYUN_RELEASE_ID/apps/web-workbench/dist"
 
-echo "→ Backing up current dist on Aliyun"
-run_with_retry "Aliyun backup" "${ALIYUN_SSH[@]}" "$ALIYUN_HOST" \
-  "rm -rf $BACKUP_PATH && cp -r $SPA_PATH $BACKUP_PATH"
-
-echo "→ Packing + uploading $DIST_DIR"
+echo "→ Packing $DIST_DIR for the Vultr mirror"
 rm -f "$TARBALL"
 COPYFILE_DISABLE=1 tar czf "$TARBALL" -C apps/web-workbench dist
-run_with_retry "Aliyun upload" "${ALIYUN_SCP[@]}" "$TARBALL" "$ALIYUN_HOST:/tmp/" >/dev/null
 
-echo "→ Extracting on Aliyun"
-run_with_retry_filtered "Aliyun extract" "${ALIYUN_SSH[@]}" "$ALIYUN_HOST" \
-  "cd /opt/holaday-spa && tar xzf /tmp/holaday-spa-dist.tar.gz"
+echo "→ Publishing Aliyun through the atomic edge release"
+HOLADAY_EDGE_RELEASE_ID="$ALIYUN_RELEASE_ID" SSHPASS="$ALIYUN_PASSWORD" "$ALIYUN_EDGE_DEPLOY"
+assert_aliyun_release_active "$ALIYUN_RELEASE_ID"
+
+DEPLOYED_HASH=$(run_with_retry "Aliyun bundle hash" "${ALIYUN_SSH[@]}" "$ALIYUN_HOST" \
+  "grep -o 'index-[^\"]*\.js' $ALIYUN_EDGE_RELEASE_SPA_PATH/index.html | head -1")
+echo "✅ Aliyun bundle: $DEPLOYED_HASH"
+if [[ "$DEPLOYED_HASH" != "$NEW_HASH" ]]; then
+  echo "❌ Hash mismatch — local $NEW_HASH vs Aliyun $DEPLOYED_HASH" >&2
+  rollback_aliyun_edge "$ALIYUN_RELEASE_ID"
+  exit 1
+fi
 
 echo "→ Smoke check ($SMOKE_URL must return '$SMOKE_MARKER' + $NEW_HASH)"
 sleep 2
 if ! smoke_check "Aliyun" "$SMOKE_URL" /tmp/smoke-resp.html; then
-  echo "❌ Smoke check FAILED — rolling back"
+  echo "❌ Smoke check FAILED — rolling back edge release $ALIYUN_RELEASE_ID"
   echo "Last response head:"
   head -5 /tmp/smoke-resp.html 2>/dev/null | sed 's/^/   /'
-  run_with_retry "Aliyun rollback" "${ALIYUN_SSH[@]}" "$ALIYUN_HOST" \
-    "rm -rf $SPA_PATH && mv $BACKUP_PATH $SPA_PATH"
-  echo "🔄 Rolled back to previous version"
+  rollback_aliyun_edge "$ALIYUN_RELEASE_ID"
+  echo "🔄 Aliyun edge rolled back to the previous release"
   exit 1
 fi
-
-DEPLOYED_HASH=$(run_with_retry "Aliyun bundle hash" "${ALIYUN_SSH[@]}" "$ALIYUN_HOST" \
-  "grep -o 'index-[^\"]*\.js' $SPA_PATH/index.html | head -1")
-echo "✅ Aliyun bundle: $DEPLOYED_HASH"
-if [[ "$DEPLOYED_HASH" != "$NEW_HASH" ]]; then
-  echo "❌ Hash mismatch — local $NEW_HASH vs Aliyun $DEPLOYED_HASH" >&2
-  exit 1
-fi
+assert_aliyun_release_active "$ALIYUN_RELEASE_ID"
 
 # ───────────────────────── Vultr mirror ─────────────────────────
 #

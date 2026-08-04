@@ -20,6 +20,41 @@ describe('parseHoladayFilePayload', () => {
     });
   });
 
+  it('keeps a valid optional expiry timestamp', () => {
+    expect(
+      parseHoladayFilePayload(
+        JSON.stringify({
+          fileId: 'file_123',
+          filename: 'report.csv',
+          size: 1024,
+          downloadUrl: '/api/files/file_123/download',
+          expiresAt: '2026-07-24T10:00:00.000Z',
+        }),
+      ),
+    ).toMatchObject({
+      expiresAt: '2026-07-24T10:00:00.000Z',
+    });
+  });
+
+  it('drops an invalid optional expiry without dropping the file card', () => {
+    expect(
+      parseHoladayFilePayload(
+        JSON.stringify({
+          fileId: 'file_123',
+          filename: 'report.csv',
+          size: 1024,
+          downloadUrl: '/api/files/file_123/download',
+          expiresAt: 'not-a-date',
+        }),
+      ),
+    ).toEqual({
+      fileId: 'file_123',
+      filename: 'report.csv',
+      size: 1024,
+      downloadUrl: '/api/files/file_123/download',
+    });
+  });
+
   it('rejects malformed JSON and incomplete payloads', () => {
     expect(parseHoladayFilePayload('{not json')).toBeNull();
     expect(parseHoladayFilePayload(JSON.stringify({ fileId: 'file_123' }))).toBeNull();

@@ -9,3 +9,4 @@ export * from './addon-packs.js';
 export * from './browser-viewport-profile.js';
 export * from './skills.js';
 export * from './partner.js';
+export * from './video-capabilities.js';

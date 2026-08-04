@@ -148,6 +148,27 @@ describe('BrowserPool — phase 24 per-task semantics', () => {
       );
     });
 
+    it('deduplicates concurrent allocation attempts for the same task', async () => {
+      const originalSpawn = spawnSpy.getMockImplementation();
+      let unblock: () => void = () => {};
+      const gate = new Promise<void>((resolve) => {
+        unblock = resolve;
+      });
+      spawnSpy.mockImplementationOnce(async (...args: unknown[]) => {
+        await gate;
+        return originalSpawn!(...args);
+      });
+
+      const first = pool.allocate('tsk_same', 'usr_owner');
+      const second = pool.allocate('tsk_same', 'usr_owner');
+      expect(spawnSpy).toHaveBeenCalledTimes(1);
+
+      unblock();
+      const [a, b] = await Promise.all([first, second]);
+      expect(a).toBe(b);
+      expect(spawnSpy).toHaveBeenCalledTimes(1);
+    });
+
     it('release(t1) tears down only t1; t2 and t3 stay alive', async () => {
       const user = 'usr_X';
       await pool.allocate('tsk_x1', user);
@@ -246,6 +267,144 @@ describe('BrowserPool — phase 24 per-task semantics', () => {
       // Now a new task can allocate; it should reuse the slot's port.
       const b = await small.pool.allocate('t2', 'u');
       expect(b.cdpPort).toBe(aPort);
+    });
+  });
+
+  describe('terminal review lease', () => {
+    it('keeps a completed task browser available until the bounded lease expires', async () => {
+      vi.useFakeTimers();
+      try {
+        const leased = makePool(1);
+        await leased.pool.allocate('tsk_done', 'usr_review');
+
+        expect(leased.pool.retain('tsk_done', 30_000, 'terminal-review')).toBe(true);
+        expect(leased.pool.peek('tsk_done')).not.toBeNull();
+
+        await vi.advanceTimersByTimeAsync(29_999);
+        expect(leased.pool.peek('tsk_done')).not.toBeNull();
+
+        await vi.advanceTimersByTimeAsync(1);
+        expect(leased.pool.peek('tsk_done')).toBeNull();
+        expect(leased.tearDownSpy).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('renews the terminal lease while the user is actively connected', async () => {
+      vi.useFakeTimers();
+      try {
+        const leased = makePool(1);
+        await leased.pool.allocate('tsk_done', 'usr_review');
+
+        expect(leased.pool.retain('tsk_done', 30_000, 'terminal-review')).toBe(true);
+        await vi.advanceTimersByTimeAsync(20_000);
+        leased.pool.touch('tsk_done');
+
+        await vi.advanceTimersByTimeAsync(20_000);
+        expect(leased.pool.peek('tsk_done')).not.toBeNull();
+
+        await vi.advanceTimersByTimeAsync(10_000);
+        expect(leased.pool.peek('tsk_done')).toBeNull();
+        expect(leased.tearDownSpy).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('reclaims a retained terminal browser before rejecting new work at capacity', async () => {
+      const leased = makePool(1);
+      await leased.pool.allocate('tsk_done', 'usr_review');
+      leased.pool.retain('tsk_done', 60_000, 'terminal-review');
+
+      expect(leased.pool.canAllocate()).toBe(true);
+      const next = await leased.pool.allocate('tsk_next', 'usr_review');
+
+      expect(next.taskId).toBe('tsk_next');
+      expect(leased.pool.peek('tsk_done')).toBeNull();
+      expect(leased.tearDownSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not retain unknown, draining, or invalid browser leases', async () => {
+      expect(pool.retain('tsk_missing', 60_000, 'terminal-review')).toBe(false);
+      const inst = await pool.allocate('tsk_draining', 'usr_review');
+      inst.status = 'draining';
+      expect(pool.retain('tsk_draining', 60_000, 'terminal-review')).toBe(false);
+      inst.status = 'ready';
+      expect(pool.retain('tsk_draining', 0, 'terminal-review')).toBe(false);
+    });
+  });
+
+  describe('terminal browser handoff', () => {
+    it('adopts the retained browser into a follow-up task without spawning', async () => {
+      const source = await pool.allocate('tsk_parent', 'usr_owner', 'desktop');
+      pool.retain('tsk_parent', 60_000, 'terminal-review');
+
+      const adopted = pool.adoptRetained(
+        'tsk_parent',
+        'tsk_follow_up',
+        'usr_owner',
+      );
+
+      expect(adopted).toBe(source);
+      expect(adopted?.taskId).toBe('tsk_follow_up');
+      expect(adopted?.retainedUntil).toBeUndefined();
+      expect(adopted?.retentionReason).toBeUndefined();
+      expect(pool.peek('tsk_parent')).toBeNull();
+      expect(pool.peek('tsk_follow_up')).toBe(source);
+      expect(spawnSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('releases the adopted task key when its browser dies later', async () => {
+      const source = await pool.allocate('tsk_parent', 'usr_owner');
+      pool.retain('tsk_parent', 60_000, 'terminal-review');
+      const adopted = pool.adoptRetained(
+        'tsk_parent',
+        'tsk_follow_up',
+        'usr_owner',
+      );
+
+      expect(adopted).toBe(source);
+      (
+        pool as unknown as {
+          handleUnexpectedChildDeath: (
+            instance: BrowserInstance,
+            label: string,
+          ) => void;
+        }
+      ).handleUnexpectedChildDeath(source, 'browser');
+
+      await vi.waitFor(() => {
+        expect(pool.peek('tsk_follow_up')).toBeNull();
+      });
+      expect(pool.peek('tsk_parent')).toBeNull();
+      expect(tearDownSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('refuses handoff when the source is not retained or has another owner', async () => {
+      await pool.allocate('tsk_active', 'usr_owner');
+      expect(
+        pool.adoptRetained('tsk_active', 'tsk_next', 'usr_owner'),
+      ).toBeNull();
+
+      pool.retain('tsk_active', 60_000, 'terminal-review');
+      expect(
+        pool.adoptRetained('tsk_active', 'tsk_next', 'usr_other'),
+      ).toBeNull();
+      expect(pool.peek('tsk_active')).not.toBeNull();
+      expect(pool.peek('tsk_next')).toBeNull();
+    });
+
+    it('refuses to replace an existing destination browser', async () => {
+      await pool.allocate('tsk_parent', 'usr_owner');
+      pool.retain('tsk_parent', 60_000, 'terminal-review');
+      const destination = await pool.allocate('tsk_next', 'usr_owner');
+
+      expect(
+        pool.adoptRetained('tsk_parent', 'tsk_next', 'usr_owner'),
+      ).toBeNull();
+      expect(pool.peek('tsk_next')).toBe(destination);
+      expect(pool.peek('tsk_parent')).not.toBeNull();
     });
   });
 

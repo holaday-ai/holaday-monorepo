@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { authSessionExpiredMessage, isAuthSessionError } from './auth-session';
+import {
+  authGateFailureStatus,
+  authSessionExpiredMessage,
+  isAuthSessionError,
+} from './auth-session';
 
 describe('auth session helpers', () => {
   it('detects tRPC unauthorized codes', () => {
@@ -19,5 +23,14 @@ describe('auth session helpers', () => {
 
   it('keeps a user-facing expired-session message', () => {
     expect(authSessionExpiredMessage()).toContain('重新登录');
+  });
+
+  it('keeps transient gate failures retryable instead of expiring the session', () => {
+    expect(authGateFailureStatus({ data: { code: 'UNAUTHORIZED' } })).toBe(
+      'no-auth',
+    );
+    expect(authGateFailureStatus(new Error('Failed to fetch'))).toBe(
+      'error',
+    );
   });
 });

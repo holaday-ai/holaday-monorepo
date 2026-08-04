@@ -104,6 +104,13 @@ export interface UiTask {
    */
   executionMode?: 'browser' | 'generate' | 'scrape' | 'image';
   /**
+   * Client-side continuation lineage for a newly-created follow-up. The API
+   * does not persist this field yet; the store keeps it while replacing the
+   * optimistic row so BrowserPanel can hand the same painted canvas from the
+   * parent task to its child without a screenshot flash.
+   */
+  replyToTaskId?: string;
+  /**
    * Phase 2 video batch-2 — backend-stamped 成片 type (deriveVideoType),
    * hydrated from `result.metadata.videoType`. Drives per-tab history
    * isolation, the type chip, and the IP-only "生成中较慢" hint.
@@ -173,6 +180,12 @@ export interface UiTerminalAttachment {
   mimetype: string;
   sizeBytes: number;
   expiresAt: string;
+  /** Server confirmed that the file row or stored bytes are no longer usable. */
+  availability?: 'unavailable';
+  /** Same-origin first-frame poster for video outputs. */
+  posterUrl?: string;
+  /** Server confirmed that the separately stored video poster is unavailable. */
+  posterAvailability?: 'unavailable';
   /**
    * 'screenshot' (L1 auto-save) or 'pdf' (L2 save_page_as_pdf).
    * Other strings tolerated — the renderer falls through to a

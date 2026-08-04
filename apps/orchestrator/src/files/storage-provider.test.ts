@@ -13,7 +13,7 @@
  * local, explicit r2 with creds, r2 with missing creds throws.
  */
 
-import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -55,11 +55,33 @@ describe('LocalStorageProvider', () => {
       mimetype: 'text/plain',
     });
     // Layout: <root>/<user>/<kind>/<file>/<filename>
-    expect(storagePath).toBe(
-      path.join(root, 'usr_test', 'output', 'file_abc', 'greeting.txt'),
-    );
+    expect(storagePath).toBe(path.join(root, 'usr_test', 'output', 'file_abc', 'greeting.txt'));
     const got = await provider.get(storagePath);
     expect(got?.toString('utf-8')).toBe('hello world');
+  });
+
+  it('putFile copies a local artifact without requiring a Buffer', async () => {
+    const provider = new LocalStorageProvider(root, fakeLogger);
+    const sourcePath = path.join(root, 'source.mp4');
+    await writeFile(sourcePath, Buffer.from('streamed-video'));
+    const { storagePath } = await provider.putFile({
+      userExternalId: 'usr_test',
+      kind: 'output',
+      fileExternalId: 'file_video',
+      filename: 'video.mp4',
+      sourcePath,
+      sizeBytes: 14,
+      mimetype: 'video/mp4',
+    });
+    expect(storagePath).toBe(
+      provider.pathFor({
+        userExternalId: 'usr_test',
+        kind: 'output',
+        fileExternalId: 'file_video',
+        filename: 'video.mp4',
+      }),
+    );
+    expect((await readFile(storagePath)).toString()).toBe('streamed-video');
   });
 
   it('delete removes the file, second delete is idempotent (no throw)', async () => {
@@ -126,18 +148,20 @@ describe('R2StorageProvider — stubbed S3Client', () => {
   function makeFakeClient() {
     const sent: Array<{ commandName: string; input: Record<string, unknown> }> = [];
     const client = {
-      send: vi.fn(async (cmd: { constructor: { name: string }; input: Record<string, unknown> }) => {
-        sent.push({ commandName: cmd.constructor.name, input: cmd.input });
-        if (cmd.constructor.name === 'GetObjectCommand') {
-          // Return a fake readable stream with the bytes for the round
-          // trip; consumer awaits `for await (chunk of body)`.
-          async function* body(): AsyncGenerator<Buffer> {
-            yield Buffer.from('stub-bytes');
+      send: vi.fn(
+        async (cmd: { constructor: { name: string }; input: Record<string, unknown> }) => {
+          sent.push({ commandName: cmd.constructor.name, input: cmd.input });
+          if (cmd.constructor.name === 'GetObjectCommand') {
+            // Return a fake readable stream with the bytes for the round
+            // trip; consumer awaits `for await (chunk of body)`.
+            async function* body(): AsyncGenerator<Buffer> {
+              yield Buffer.from('stub-bytes');
+            }
+            return { Body: body() };
           }
-          return { Body: body() };
-        }
-        return {};
-      }),
+          return {};
+        },
+      ),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any;
     return { client, sent };
@@ -171,6 +195,43 @@ describe('R2StorageProvider — stubbed S3Client', () => {
       Key: 'usr_q/input/file_q/q.png',
       ContentType: 'image/png',
     });
+  });
+
+  it('putFile streams a local artifact into PutObjectCommand', async () => {
+    const { client, sent } = makeFakeClient();
+    const provider = new R2StorageProvider(
+      {
+        endpoint: 'https://r2.example',
+        accessKeyId: 'x',
+        secretAccessKey: 'y',
+        bucket: 'holaday-files',
+      },
+      fakeLogger,
+      { client },
+    );
+    const sourcePath = path.join(tmpdir(), `holaday-r2-put-${Date.now()}.mp4`);
+    await writeFile(sourcePath, Buffer.from('streamed-video'));
+    try {
+      const { storagePath } = await provider.putFile({
+        userExternalId: 'usr_q',
+        kind: 'output',
+        fileExternalId: 'file_video',
+        filename: 'video.mp4',
+        sourcePath,
+        sizeBytes: 14,
+        mimetype: 'video/mp4',
+      });
+      expect(storagePath).toBe('usr_q/output/file_video/video.mp4');
+      expect(sent[0]?.input).toMatchObject({
+        Bucket: 'holaday-files',
+        Key: 'usr_q/output/file_video/video.mp4',
+        ContentLength: 14,
+        ContentType: 'video/mp4',
+      });
+      expect(sent[0]?.input.Body).toBeDefined();
+    } finally {
+      await rm(sourcePath, { force: true });
+    }
   });
 
   it('get reads back bytes from the stubbed stream', async () => {
@@ -210,6 +271,27 @@ describe('R2StorageProvider — stubbed S3Client', () => {
     );
     expect(await provider.get('missing/key')).toBeNull();
   });
+
+  it('delete surfaces provider failures so durable cleanup rows can be retried', async () => {
+    const client = {
+      send: vi.fn(async () => {
+        throw new Error('R2 unavailable');
+      }),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any;
+    const provider = new R2StorageProvider(
+      {
+        endpoint: 'https://r2.example',
+        accessKeyId: 'x',
+        secretAccessKey: 'y',
+        bucket: 'b',
+      },
+      fakeLogger,
+      { client },
+    );
+
+    await expect(provider.delete('usr/output/file/video.mp4')).rejects.toThrow('R2 unavailable');
+  });
 });
 
 describe('createStorageProvider — env-driven factory', () => {
@@ -223,7 +305,7 @@ describe('createStorageProvider — env-driven factory', () => {
   });
 
   it('default (no STORAGE_PROVIDER set) returns LocalStorageProvider', () => {
-    delete process.env.STORAGE_PROVIDER;
+    Reflect.deleteProperty(process.env, 'STORAGE_PROVIDER');
     const p = createStorageProvider({ logger: fakeLogger, localRoot: '/tmp/test' });
     expect(p).toBeInstanceOf(LocalStorageProvider);
   });
@@ -246,10 +328,10 @@ describe('createStorageProvider — env-driven factory', () => {
 
   it('STORAGE_PROVIDER=r2 with missing creds throws (LOUD fail)', () => {
     process.env.STORAGE_PROVIDER = 'r2';
-    delete process.env.R2_ENDPOINT;
-    delete process.env.R2_ACCESS_KEY_ID;
-    delete process.env.R2_SECRET_ACCESS_KEY;
-    delete process.env.R2_BUCKET;
+    Reflect.deleteProperty(process.env, 'R2_ENDPOINT');
+    Reflect.deleteProperty(process.env, 'R2_ACCESS_KEY_ID');
+    Reflect.deleteProperty(process.env, 'R2_SECRET_ACCESS_KEY');
+    Reflect.deleteProperty(process.env, 'R2_BUCKET');
     expect(() => createStorageProvider({ logger: fakeLogger })).toThrow(
       /STORAGE_PROVIDER=r2 requires/,
     );

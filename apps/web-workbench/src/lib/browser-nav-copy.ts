@@ -4,6 +4,7 @@ export type BrowserNavDirection = 'back' | 'forward' | 'reload' | 'goto';
 
 export type BrowserNavFailureReason =
   | 'bad_scheme'
+  | 'blocked_target'
   | 'missing_url'
   | 'nav_failed'
   | 'no_executor'
@@ -22,6 +23,7 @@ export function browserNavFailureMessage(
         : null;
   }
   if (reason === 'bad_scheme') return '只支持打开 http(s) 链接';
+  if (reason === 'blocked_target') return '为保护账户安全，不能打开本机、内网或云服务元数据地址';
   if (reason === 'missing_url') return '请输入要打开的网址';
   if (reason === 'no_executor') {
     return direction === 'goto'

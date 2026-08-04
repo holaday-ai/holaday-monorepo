@@ -9,9 +9,11 @@ function makeEnv(url: string): Env {
     PORT: 4010,
     LOG_LEVEL: 'silent',
     PUBLIC_ORIGIN: 'https://hd-pay.orangebench.tech',
+    APP_ORIGIN: 'https://holaday.ai',
     VULTR_INTERNAL_URL: url,
     INTERNAL_SHARED_SECRET: '0123456789abcdef',
     ALIPAY_MODE: 'sandbox',
+    VULTR_SYNC_TIMEOUT_MS: 3_500,
   };
 }
 
@@ -36,6 +38,50 @@ describe('VultrSync partner bridge', () => {
     );
     expect(deriveBase('https://holaday.ai')).toBe('https://holaday.ai');
     expect(deriveBase('https://holaday.ai/')).toBe('https://holaday.ai');
+  });
+
+  it('checks the authenticated Vultr payment bridge health endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ status: 'ok', paymentBridge: 'ready' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const sync = new VultrSync(
+      makeEnv('https://holaday.ai/api/internal/payment/confirm'),
+      makeLogger(),
+    );
+
+    await expect(sync.health()).resolves.toEqual({ ok: true });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://holaday.ai/api/internal/payment/health',
+      expect.objectContaining({
+        headers: { 'x-internal-secret': '0123456789abcdef' },
+        signal: expect.any(AbortSignal),
+      }),
+    );
+  });
+
+  it('fails bridge health when Vultr does not return the ready contract', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ status: 'ok' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      ),
+    );
+    const sync = new VultrSync(
+      makeEnv('https://holaday.ai/api/internal/payment/confirm'),
+      makeLogger(),
+    );
+
+    await expect(sync.health()).resolves.toEqual({
+      ok: false,
+      reason: 'unexpected bridge health response',
+    });
   });
 
   it('posts partner confirmations to the partner ledger endpoint', async () => {

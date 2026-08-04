@@ -44,6 +44,9 @@ export function normalizeBatchProgressFrame(value: unknown): BatchProgressFrame 
   const itemsReview = hasOwn(value, 'itemsReview')
     ? safeProgressCount(value.itemsReview)
     : undefined;
+  const itemsCancelled = hasOwn(value, 'itemsCancelled')
+    ? safeProgressCount(value.itemsCancelled)
+    : undefined;
   return {
     type: 'server.batch.progress',
     batchId,
@@ -52,7 +55,7 @@ export function normalizeBatchProgressFrame(value: unknown): BatchProgressFrame 
     itemsDone: safeProgressCount(value.itemsDone),
     ...(itemsReview !== undefined ? { itemsReview } : {}),
     itemsFailed: safeProgressCount(value.itemsFailed),
-    itemsCancelled: safeProgressCount(value.itemsCancelled),
+    ...(itemsCancelled !== undefined ? { itemsCancelled } : {}),
     ...(item ? { item } : {}),
   };
 }

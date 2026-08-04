@@ -29,6 +29,34 @@ export interface NormalizedBatchDetail extends NormalizedBatchRow {
   readonly items: NormalizedBatchItem[];
 }
 
+export function batchPromptImportStateReset(location: {
+  readonly pathname: string;
+  readonly search: string;
+  readonly hash: string;
+}): {
+  readonly to: {
+    readonly pathname: string;
+    readonly search: string;
+    readonly hash: string;
+  };
+  readonly options: {
+    readonly replace: true;
+    readonly state: null;
+  };
+} {
+  return {
+    to: {
+      pathname: location.pathname,
+      search: location.search,
+      hash: location.hash,
+    },
+    options: {
+      replace: true,
+      state: null,
+    },
+  };
+}
+
 export function batchListSummary({
   loading,
   error,
@@ -153,6 +181,21 @@ export function batchRemainingCount({
   const safeTotal = safeBatchCount(total);
   const finished = batchFinishedCount({ done, review, failed, cancelled });
   return Math.max(0, safeTotal - finished);
+}
+
+export function batchDetailRemainingCount(
+  detail: Pick<
+    NormalizedBatchRow,
+    'itemsTotal' | 'itemsDone' | 'itemsReview' | 'itemsFailed' | 'itemsCancelled'
+  >,
+): number {
+  return batchRemainingCount({
+    total: detail.itemsTotal,
+    done: detail.itemsDone,
+    review: detail.itemsReview,
+    failed: detail.itemsFailed,
+    cancelled: detail.itemsCancelled,
+  });
 }
 
 export function batchErrorMessage(err: unknown, fallback = '请稍后重试'): string {

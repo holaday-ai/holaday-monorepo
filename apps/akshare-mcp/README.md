@@ -12,16 +12,18 @@ Thin **MCP wrapper over [AkShare](https://akshare.akfamily.xyz/)** for A股
 
 | MCP 工具 | 用途 | 缓存 TTL |
 |---|---|---|
-| `get_stock_quote(symbol)` | 行情 — 实时（最新价/买卖盘） | 15s |
+| `get_stock_quote(symbol)` | 行情 — 单股票分钟快照（最新价/成交量/成交额） | 15s |
 | `get_stock_kline(symbol, period, start_date, end_date, adjust)` | 行情 — 历史 K 线 | 300s |
 | `get_stock_announcements(symbol, start_date, end_date)` | 公告（巨潮） | 1800s |
 | `get_dragon_tiger(start_date, end_date)` | 龙虎榜 | 3600s |
 | `get_northbound_flow()` | 北向资金流向 | 60s |
 | `get_index_quote(market)` | 港/美/A股指数（hk/us/cn） | 60s |
-| `get_stock_rankings(metric, limit)` | A股榜单（gainers/losers/amount） | 300s |
+| `get_stock_rankings(metric, limit)` | A股榜单（gainers/losers/amount） | 60s |
 | `get_share_unlock(symbol)` | 个股限售解禁（G2） | 3600s |
 
-榜单和个股 quote 共享 `stock_zh_a_spot(sina)` 全市场缓存，避免页面多个板块同时触发重复全量拉取。
+个股 quote 与分时图共享 `stock_zh_a_minute(sina)` 单股票缓存；榜单使用新浪行情中心
+服务端排序后的 HTTPS 单页真实数据，避免每次冷缓存串行抓取 5500+ 只股票。全市场
+`stock_zh_a_spot(sina)` 只保留给代码名称表预热，以及单股票分钟源失败时的真实快照降级。
 TTL 全部 env 可覆盖（`AKSHARE_MCP_TTL_*`，见 `.env.example`）。
 
 ## 结构
@@ -100,7 +102,7 @@ PM2 进程名：`akshare-mcp-http`。日志默认写入 `/var/log/holaday/akshar
 
    | 用途 | 原（push2，死） | 现（sina，活） |
    |---|---|---|
-   | 行情 quote | `stock_bid_ask_em` | `stock_zh_a_spot` + 代码过滤 |
+   | 行情 quote | `stock_bid_ask_em` | `stock_zh_a_minute` 单股票分钟快照；失败退 `stock_zh_a_spot` |
    | 日 K 线 | `stock_zh_a_hist` | `stock_zh_a_daily`（末 2 行算涨跌幅） |
    | A股指数 spot | `stock_zh_index_spot_em` | `stock_zh_index_spot_sina`（取 sh000001/sz399001/sz399006） |
    | 港股指数 spot | `stock_hk_index_spot_em` | `stock_hk_index_spot_sina`（按名称取恒生指数） |
@@ -115,8 +117,9 @@ PM2 进程名：`akshare-mcp-http`。日志默认写入 `/var/log/holaday/akshar
 3. **龙虎榜含官方 `解读` 列**：`stock_lhb_detail_em` 自带一行中性解读（如「主力做T」），
    零成本接入盘后简报（非我们生成，合规）。
 
-4. **全市场榜单只提供可验证字段**：当前可稳定取得涨幅榜、跌幅榜、成交额榜；
-   换手率榜源暂未纳入，不用模拟字段补假数据。消费侧应禁用换手率 tab 或展示数据源说明。
+4. **全市场榜单只提供可验证字段**：当前从新浪行情中心 HTTPS 接口按涨跌幅/成交额
+   服务端排序，只取所需首页，稳定取得涨幅榜、跌幅榜、成交额榜；换手率榜源暂未纳入，
+   不用模拟字段补假数据。消费侧应禁用换手率 tab 或展示数据源说明。
 
 > 升级 AkShare 后用 `pip show akshare` 看版本，对照 <https://akshare.akfamily.xyz/>
 > 核对 `adapters.py` 里的 `ak.*`（集中于此，工具契约不变）。

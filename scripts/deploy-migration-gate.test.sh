@@ -1,0 +1,165 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEPLOY_SCRIPT="$SCRIPT_DIR/deploy-orchestrator.sh"
+LIVE_HEAD="1111111111111111111111111111111111111111"
+
+fail() {
+  echo "FAIL: $*" >&2
+  exit 1
+}
+
+assert_event_order() {
+  local event_log="$1"
+  shift
+  local previous_line=0 event line
+
+  for event in "$@"; do
+    line="$(grep -nFx "$event" "$event_log" | head -1 | cut -d: -f1 || true)"
+    [[ "$line" =~ ^[1-9][0-9]*$ ]] || fail "missing event '$event' in $(tr '\n' ' ' < "$event_log")"
+    (( line > previous_line )) || fail "event '$event' ran out of order"
+    previous_line="$line"
+  done
+}
+
+write_orchestrator_harness() {
+  local harness_dir="$1"
+
+  mkdir -p "$harness_dir/repo/scripts" "$harness_dir/bin"
+  cp "$DEPLOY_SCRIPT" "$harness_dir/repo/scripts/deploy-orchestrator.sh"
+  chmod +x "$harness_dir/repo/scripts/deploy-orchestrator.sh"
+
+  cat > "$harness_dir/repo/scripts/load-deploy-env.sh" <<'STUB'
+#!/usr/bin/env bash
+: "${VULTR_PASSWORD:=unit-secret}"
+export VULTR_PASSWORD
+STUB
+  cat > "$harness_dir/repo/scripts/ssh-password-auth.sh" <<'STUB'
+#!/usr/bin/env bash
+build_ssh_password_prefix() {
+  SSH_PASSWORD_PREFIX=(env)
+}
+STUB
+  cat > "$harness_dir/repo/scripts/orchestrator-runtime.sh" <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  cat > "$harness_dir/repo/scripts/start-orchestrator-production.sh" <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  chmod +x "$harness_dir/repo/scripts/"*.sh
+
+  cat > "$harness_dir/bin/scp" <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+
+  cat > "$harness_dir/bin/ssh" <<'STUB'
+#!/usr/bin/env bash
+command_text="${!#}"
+
+if [[ "$command_text" == *"git reset --hard origin/"* ]]; then
+  echo "reset-new" >> "$TEST_EVENT_LOG"
+  [[ "$TEST_FAIL_PHASE" != "checkout" ]] || exit 41
+  echo "2222222222222222222222222222222222222222"
+elif [[ "$command_text" == *"git rev-parse --short HEAD"* ]]; then
+  echo "2222222"
+elif [[ "$command_text" == *"pnpm install"* ]]; then
+  echo "build-new" >> "$TEST_EVENT_LOG"
+  [[ "$TEST_FAIL_PHASE" != "build" ]] || exit 42
+elif [[ "$command_text" == *"db:migrate:numbered"* ]]; then
+  if [[ "$command_text" != *"db:migrate:numbered"*"db:verify"* ]]; then
+    echo "migration-contract-error" >> "$TEST_EVENT_LOG"
+    exit 44
+  fi
+  echo "migration" >> "$TEST_EVENT_LOG"
+  [[ "$TEST_FAIL_PHASE" != "migration" ]] || exit 43
+elif [[ "$command_text" == *"git reset --hard '$TEST_LIVE_HEAD'"* ]]; then
+  echo "rollback-checkout" >> "$TEST_EVENT_LOG"
+  [[ "${TEST_ROLLBACK_BUILD_RC:-0}" == "0" ]] || exit "$TEST_ROLLBACK_BUILD_RC"
+elif [[ "$command_text" == *"orchestrator-runtime.sh' restart"* ]]; then
+  if grep -Fxq "rollback-checkout" "$TEST_EVENT_LOG"; then
+    echo "rollback-restart" >> "$TEST_EVENT_LOG"
+    exit "${TEST_ROLLBACK_RESTART_RC:-0}"
+  fi
+  echo "restart-new" >> "$TEST_EVENT_LOG"
+  [[ "$TEST_FAIL_PHASE" != "restart" ]] || exit 45
+elif [[ "$command_text" == *"git cat-file -e"* ]]; then
+  exit 0
+elif [[ "$command_text" == *"git fetch origin"* ]]; then
+  exit 0
+elif [[ "$command_text" == *"deploy-preflight.sh"* ]]; then
+  exit 0
+fi
+STUB
+  chmod +x "$harness_dir/bin/scp" "$harness_dir/bin/ssh"
+}
+
+run_failure_case() {
+  local fail_phase="$1"
+  local rollback_restart_rc="$2"
+  local expected_rc="$3"
+  local harness_dir event_log output rc
+  harness_dir="$(mktemp -d)"
+  event_log="$harness_dir/events"
+  output="$harness_dir/output"
+  : > "$event_log"
+  write_orchestrator_harness "$harness_dir"
+
+  set +e
+  PATH="$harness_dir/bin:$PATH" \
+    TEST_EVENT_LOG="$event_log" \
+    TEST_LIVE_HEAD="$LIVE_HEAD" \
+    TEST_FAIL_PHASE="$fail_phase" \
+    TEST_ROLLBACK_RESTART_RC="$rollback_restart_rc" \
+    VULTR_PASSWORD="unit-secret" \
+    CN_PAYMENT_PREFLIGHT_VERIFIED=1 \
+    PAYPAL_PREFLIGHT_VERIFIED=1 \
+    DEPLOY_REMOTE_RETRIES=1 \
+    DEPLOY_REMOTE_RETRY_SLEEP=0 \
+    ORCHESTRATOR_ROLLBACK_HEAD="$LIVE_HEAD" \
+    "$harness_dir/repo/scripts/deploy-orchestrator.sh" \
+      "codex/release-candidate" > "$output" 2>&1
+  rc=$?
+  set -e
+
+  (( rc == expected_rc )) || {
+    cat "$output" >&2
+    fail "$fail_phase failure exit: got $rc, want $expected_rc"
+  }
+  if [[ "$fail_phase" == "checkout" ]]; then
+    assert_event_order "$event_log" reset-new rollback-checkout rollback-restart
+  elif [[ "$fail_phase" == "build" ]]; then
+    assert_event_order "$event_log" reset-new build-new rollback-checkout rollback-restart
+  elif [[ "$fail_phase" == "migration" ]]; then
+    assert_event_order "$event_log" reset-new build-new migration rollback-checkout rollback-restart
+    ! grep -Fxq "restart-new" "$event_log" \
+      || fail "migration failure must not restart the candidate orchestrator"
+    grep -Fq "Database changes are forward-only" "$output" \
+      || fail "migration rollback must disclose forward-only database changes"
+  else
+    assert_event_order "$event_log" reset-new build-new migration restart-new rollback-checkout rollback-restart
+  fi
+  if (( rollback_restart_rc == 0 )); then
+    grep -Fq "checkout and Orchestrator restored" "$output" \
+      || fail "$fail_phase failure must report a completed rollback"
+  else
+    grep -Fq "Rollback restart failed" "$output" \
+      || fail "rollback restart failure must be surfaced"
+    grep -Fq "manual recovery is required" "$output" \
+      || fail "rollback restart failure must request manual recovery"
+  fi
+  ! grep -Fq "unit-secret" "$output" || fail "deploy output must not print credentials"
+  rm -rf "$harness_dir"
+}
+
+run_failure_case checkout 0 1
+run_failure_case build 0 1
+run_failure_case migration 0 1
+run_failure_case restart 0 1
+run_failure_case migration 51 2
+
+echo "PASS: orchestrator deploy restores checkout and surfaces rollback restart failure"

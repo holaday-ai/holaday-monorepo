@@ -89,6 +89,7 @@ type FakeUserRow = {
   email: string | null;
   displayName: string | null;
   role: string;
+  status: string;
 };
 
 class FakeAdminPartnerDb {
@@ -99,6 +100,7 @@ class FakeAdminPartnerDb {
       email: 'admin@holaday.local',
       displayName: 'Admin',
       role: 'admin',
+      status: 'active',
     },
     {
       id: 123,
@@ -106,6 +108,7 @@ class FakeAdminPartnerDb {
       email: 'partner@holaday.local',
       displayName: 'Partner User',
       role: 'user',
+      status: 'active',
     },
   ];
   readonly orders: PartnerRechargeOrder[];
@@ -324,6 +327,7 @@ describe('admin.partner router', () => {
 
     const result = await adminRouter.createCaller(makeContext()).partner.confirmOrder({
       orderExternalId: 'pay_order_1',
+      providerCaptureId: 'manual-capture-1',
     });
 
     expect(result).toMatchObject({
@@ -334,7 +338,7 @@ describe('admin.partner router', () => {
     expect(confirmCapturedOrderMock).toHaveBeenCalledWith({
       orderExternalId: 'pay_order_1',
       provider: 'manual',
-      providerCaptureId: 'manual:pay_order_1',
+      providerCaptureId: 'manual-capture-1',
       amountCnyCents: 10_000_00,
     });
   });
@@ -363,6 +367,54 @@ describe('admin.partner router', () => {
       reviewerUserId: 1,
       note: '人工复核放行',
     });
+  });
+
+  it('rejects high-risk state changes without operator evidence', async () => {
+    const caller = adminRouter.createCaller(makeContext()).partner;
+
+    await expect(
+      caller.setKycStatus({
+        userExternalId: 'usr_partner',
+        status: 'passed',
+        provider: 'manual',
+        note: 'reviewed',
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(
+      caller.setKycStatus({
+        userExternalId: 'usr_partner',
+        status: 'passed',
+        provider: 'manual',
+        providerRef: '—',
+        note: 'reviewed',
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(
+      caller.confirmOrder({
+        orderExternalId: 'pay_order_1',
+      } as never),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(
+      caller.approveReviewRequiredOrder({
+        orderExternalId: 'pay_order_1',
+      } as never),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(
+      caller.approveWithdrawal({
+        withdrawalExternalId: 'pay_withdrawal_1',
+      } as never),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(
+      caller.resumeRiskLot({
+        lotExternalId: 'pay_risk_lot_1',
+      } as never),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(
+      caller.closeRiskLot({
+        lotExternalId: 'pay_risk_lot_1',
+        reason: 'manual review complete',
+      } as never),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
   });
 
   it('passes withdrawal review actions through the ledger-aware service', async () => {
@@ -835,5 +887,58 @@ describe('admin.partner router', () => {
       riskNote: 'manual close after refund',
     });
     expect(riskEvent).not.toHaveProperty('metadata');
+  });
+});
+
+describe('partner reconciliation safety', () => {
+  it('uses Beijing calendar-day boundaries for the operator date range', () => {
+    const normalizeReconciliationWindow = (
+      __adminPartnerInternals as unknown as {
+        normalizeReconciliationWindow?: (input: { from: string; to: string }) => {
+          fromDate: Date;
+          toExclusiveDate: Date;
+        };
+      }
+    ).normalizeReconciliationWindow;
+
+    expect(normalizeReconciliationWindow).toBeTypeOf('function');
+    const window = normalizeReconciliationWindow?.({
+      from: '2026-07-01',
+      to: '2026-07-07',
+    });
+    expect(window?.fromDate.toISOString()).toBe('2026-06-30T16:00:00.000Z');
+    expect(window?.toExclusiveDate.toISOString()).toBe('2026-07-07T16:00:00.000Z');
+  });
+
+  it('rejects a silently truncated financial export', () => {
+    const requireCompleteReconciliationRows = (
+      __adminPartnerInternals as unknown as {
+        requireCompleteReconciliationRows?: <T>(rows: T[], limit: number, label: string) => T[];
+      }
+    ).requireCompleteReconciliationRows;
+
+    expect(requireCompleteReconciliationRows).toBeTypeOf('function');
+    expect(() =>
+      requireCompleteReconciliationRows?.([{ id: 1 }, { id: 2 }], 1, 'orders'),
+    ).toThrow(/narrow the date range/i);
+  });
+});
+
+describe('partner overview coverage', () => {
+  it('returns the requested page and marks hidden queue rows', () => {
+    const capOverviewRows = (
+      __adminPartnerInternals as unknown as {
+        capOverviewRows?: <T>(rows: T[], limit: number) => {
+          rows: T[];
+          truncated: boolean;
+        };
+      }
+    ).capOverviewRows;
+
+    expect(capOverviewRows).toBeTypeOf('function');
+    expect(capOverviewRows?.([{ id: 1 }, { id: 2 }, { id: 3 }], 2)).toEqual({
+      rows: [{ id: 1 }, { id: 2 }],
+      truncated: true,
+    });
   });
 });

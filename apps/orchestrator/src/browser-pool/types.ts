@@ -52,6 +52,19 @@ export interface BrowserInstance extends BrowserSlot {
   createdAt: number;
   status: InstanceStatus;
   /**
+   * Hard expiry for a completed task's short browser-review lease.
+   * Retained instances remain streamable after the task reaches a terminal
+   * state, but are always reclaimable when a new task needs pool capacity.
+   */
+  retainedUntil?: number;
+  retentionReason?: string;
+  /**
+   * Idle lease duration for a terminal browser. Every verified stream/input
+   * touch pushes `retainedUntil` forward by this amount, so an actively used
+   * browser is never reaped by the original task-completion deadline.
+   */
+  retentionTtlMs?: number;
+  /**
    * Optimization #3 R1 — viewport profile this instance was spawned
    * with. Used by the CDP streamer to cap frame dimensions to the
    * Brave's logical viewport, and by /screencast-ws/ handlers to
@@ -72,6 +85,8 @@ export interface PoolConfig {
   displayStart: number;
   /** Xvfb screen geometry, e.g. '1720x1440x24'. */
   screenSize: string;
+  /** Emergency-only full desktop stream. CDP screencast does not need it. */
+  vncEnabled?: boolean;
   /**
    * Phase 17 — fired once per allocate, AFTER the PlaywrightExecutor
    * connects + status flips to 'ready'. Used by the cookie-sync

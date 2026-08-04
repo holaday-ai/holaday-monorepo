@@ -413,6 +413,12 @@ export const serverTaskTerminalSchema = z.object({
     )
     .optional(),
   /**
+   * Deterministic terminal verifier verdict. Optional for backwards
+   * compatibility; when present, the SPA can render the same bounded
+   * trust conclusion immediately instead of waiting for detail hydration.
+   */
+  verificationPassed: z.boolean().optional(),
+  /**
    * F4 — backend-orchestrated handoff. When the reply handler spawns
    * a follow-up task (e.g. user's clarification revealed the workflow
    * needs a browser lane), it includes the new task's id here. The

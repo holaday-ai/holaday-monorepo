@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { SimpleVideoConfig } from './video-lane-simple.js';
-import {
-  runPetVideoCreation,
-  type PetI2vFns,
-  type PetVideoServices,
-} from './video-pet-i2v.js';
+import { type PetI2vFns, type PetVideoServices, runPetVideoCreation } from './video-pet-i2v.js';
+import type { VideoQualityResult } from './video-quality-verifier.js';
+
+const TINY_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+  'base64',
+);
 
 const CFG: SimpleVideoConfig = {
   dashscopeApiKey: 'dk',
@@ -26,24 +28,69 @@ function makeServices() {
     imageUrls: [] as string[],
     videoUrl: 'https://dashscope-result-sgp/pet.mp4',
   }));
-  const downloadToBuffer = vi.fn(async () => ({
-    buffer: Buffer.from('rawvid'),
-    contentType: 'video/mp4',
+  const downloadToBuffer = vi.fn(async (url: string) => ({
+    buffer:
+      url.includes('/pet.') || url.includes('/dog.') || url.includes('/cat.') || url.includes('/x.')
+        ? TINY_PNG
+        : Buffer.from('rawvid'),
+    contentType:
+      url.includes('/pet.') || url.includes('/dog.') || url.includes('/cat.') || url.includes('/x.')
+        ? 'image/png'
+        : 'video/mp4',
     sizeBytes: 6,
   }));
+  const downloadToFile = vi.fn(async () => ({
+    contentType: 'video/mp4',
+    sizeBytes: 42_000_000,
+  }));
   const runFfmpeg = vi.fn(async () => {});
-  const writeFile = vi.fn(async () => {});
+  const ffprobeDurationMs = vi.fn(async () => 8000);
   const readFile = vi.fn(async () => Buffer.from('finalvid'));
-  const storeOutput = vi.fn(async (i: { filename: string }) => ({ fileId: `f_${i.filename}`, storagePath: `s_${i.filename}` }));
+  const storeOutput = vi.fn(async (i: { filename: string }) => ({
+    fileId: `f_${i.filename}`,
+    storagePath: `s_${i.filename}`,
+  }));
+  const storeOutputFile = vi.fn(async (i: { filename: string }) => ({
+    fileId: `f_${i.filename}`,
+    storagePath: `s_${i.filename}`,
+  }));
+  const verifyFinalVideo = vi.fn(
+    async (): Promise<VideoQualityResult> => ({
+      status: 'pass' as const,
+      failedChecks: [],
+      reason: '宠物身份和肢体均通过',
+    }),
+  );
   const overrides: Partial<PetI2vFns> = {
     generateBrollVideo: generateBrollVideo as unknown as PetI2vFns['generateBrollVideo'],
     downloadToBuffer: downloadToBuffer as unknown as PetI2vFns['downloadToBuffer'],
+    downloadToFile: downloadToFile as unknown as PetI2vFns['downloadToFile'],
     runFfmpeg,
-    writeFile,
+    ffprobeDurationMs,
     readFile,
   };
-  const svc: PetVideoServices = { storeOutput, workdir: '/tmp/petwd', logger, overrides };
-  return { svc, mocks: { generateBrollVideo, downloadToBuffer, runFfmpeg, writeFile, readFile, storeOutput } };
+  const svc: PetVideoServices = {
+    storeOutput,
+    storeOutputFile,
+    workdir: '/tmp/petwd',
+    logger,
+    verifyFinalVideo,
+    overrides,
+  };
+  return {
+    svc,
+    mocks: {
+      generateBrollVideo,
+      downloadToBuffer,
+      downloadToFile,
+      runFfmpeg,
+      ffprobeDurationMs,
+      readFile,
+      storeOutput,
+      storeOutputFile,
+      verifyFinalVideo,
+    },
+  };
 }
 
 describe('runPetVideoCreation — 宠物 i2v 单图', () => {
@@ -52,8 +99,13 @@ describe('runPetVideoCreation — 宠物 i2v 单图', () => {
     const res = await runPetVideoCreation(
       { imageUrl: 'https://r2/pet.jpg', motionPrompt: '小猫眨眨眼' },
       CFG,
-      {},
+      { durationSeconds: 8 },
       svc,
+    );
+    expect(mocks.downloadToFile).toHaveBeenCalledWith(
+      'https://dashscope-result-sgp/pet.mp4',
+      '/tmp/petwd/pet-i2v-raw.mp4',
+      { maxBytes: 500 * 1024 * 1024 },
     );
     const arg = (mocks.generateBrollVideo.mock.calls[0] as unknown[])[0] as {
       model: string;
@@ -65,9 +117,30 @@ describe('runPetVideoCreation — 宠物 i2v 单图', () => {
     expect(arg.imageUrl).toBe('https://r2/pet.jpg');
     expect(arg.size).toBe('1080*1920'); // 默认竖屏 9:16
     expect(arg.prompt).toContain('小猫眨眨眼');
+    expect(arg.prompt).toMatch(/肢体数量|关节|主体外观/);
+    expect(mocks.verifyFinalVideo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        videoPath: '/tmp/petwd/pet-final.mp4',
+        durationMs: 8000,
+        minimumDurationMs: 8000,
+        userText: '小猫眨眨眼',
+        qualityContext: expect.stringMatching(/宠物.*身份.*四肢/),
+        referenceImages: [
+          expect.objectContaining({
+            mediaType: 'image/jpeg',
+            label: '用户上传的宠物照片',
+          }),
+        ],
+      }),
+    );
     // composed via ffmpeg + final stored + 首帧 poster
     expect(mocks.runFfmpeg).toHaveBeenCalledTimes(2); // compose + poster
-    expect(mocks.storeOutput).toHaveBeenCalledWith(expect.objectContaining({ filename: 'video.mp4' }));
+    expect(mocks.storeOutputFile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        filename: 'video.mp4',
+        sourcePath: '/tmp/petwd/pet-final.mp4',
+      }),
+    );
     expect(mocks.storeOutput).toHaveBeenCalledWith(
       expect.objectContaining({ filename: 'poster.jpg', mimetype: 'image/jpeg' }),
     );
@@ -108,7 +181,12 @@ describe('runPetVideoCreation — 宠物 i2v 单图', () => {
   it('throws config error when no dashscope key / no image url', async () => {
     const { svc } = makeServices();
     await expect(
-      runPetVideoCreation({ imageUrl: 'https://r2/x.jpg', motionPrompt: 'x' }, { ...CFG, dashscopeApiKey: '' }, {}, svc),
+      runPetVideoCreation(
+        { imageUrl: 'https://r2/x.jpg', motionPrompt: 'x' },
+        { ...CFG, dashscopeApiKey: '' },
+        {},
+        svc,
+      ),
     ).rejects.toMatchObject({ kind: 'config' });
     await expect(
       runPetVideoCreation({ imageUrl: '', motionPrompt: 'x' }, CFG, {}, svc),
@@ -126,4 +204,39 @@ describe('runPetVideoCreation — 宠物 i2v 单图', () => {
       runPetVideoCreation({ imageUrl: 'https://r2/x.jpg', motionPrompt: 'x' }, CFG, {}, svc),
     ).rejects.toMatchObject({ kind: 'compose' });
   });
+
+  it.each([
+    ['fail', 'quality'],
+    ['unknown', 'quality_unavailable'],
+  ] as const)(
+    'blocks a %s pet verdict before storing the final video or poster',
+    async (status, expectedKind) => {
+      const { svc, mocks } = makeServices();
+      mocks.verifyFinalVideo.mockResolvedValueOnce({
+        status,
+        failedChecks: status === 'fail' ? ['extra_limbs'] : ['verifier_inconclusive'],
+        reason: status === 'fail' ? '宠物出现额外肢体' : '质检服务未得出结论',
+      });
+
+      await expect(
+        runPetVideoCreation(
+          { imageUrl: 'https://r2/dog.png', motionPrompt: '狗狗自然走向镜头' },
+          CFG,
+          { durationSeconds: 6 },
+          svc,
+        ),
+      ).rejects.toMatchObject({ name: 'SimpleVideoError', kind: expectedKind });
+
+      expect(
+        mocks.storeOutputFile.mock.calls.some(
+          (call) => ((call as unknown[])[0] as { filename?: string }).filename === 'video.mp4',
+        ),
+      ).toBe(false);
+      expect(
+        mocks.storeOutput.mock.calls.some(
+          (call) => ((call as unknown[])[0] as { filename?: string }).filename === 'poster.jpg',
+        ),
+      ).toBe(false);
+    },
+  );
 });

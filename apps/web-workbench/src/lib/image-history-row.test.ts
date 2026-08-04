@@ -38,6 +38,7 @@ describe('toImageHistoryRow', () => {
         downloadUrl: '/api/files/file_img/download',
         filename: 'holaday-image.jpg',
         size: 418_513,
+        expiresAt: '2026-07-02T00:00:00.000Z',
       },
     });
   });
@@ -46,6 +47,18 @@ describe('toImageHistoryRow', () => {
     const row = toImageHistoryRow(task({ status: 'partial_success' }));
     expect(row?.status).toBe('partial_success');
     expect(row?.download.filename).toBe('holaday-image.jpg');
+  });
+
+  it('preserves server-confirmed unavailability for the history card', () => {
+    const row = toImageHistoryRow(
+      task({
+        attachments: [
+          { ...imageAttachment, availability: 'unavailable' },
+        ],
+      }),
+    );
+
+    expect(row?.download.unavailable).toBe(true);
   });
 
   it('drops failed, running, non-image, and missing-artifact rows', () => {

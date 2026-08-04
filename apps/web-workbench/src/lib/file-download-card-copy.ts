@@ -6,6 +6,12 @@ export type DownloadFileKind =
   | 'document'
   | 'generic';
 
+export type DownloadFileAvailability =
+  | 'available'
+  | 'expired'
+  | 'unavailable'
+  | 'unknown';
+
 export function classifyDownloadFileKind(filename: string): DownloadFileKind {
   const ext = filename.toLowerCase().split('.').pop() ?? '';
   if (['xlsx', 'xls', 'csv'].includes(ext)) return 'spreadsheet';
@@ -28,7 +34,31 @@ export function downloadFileKindLabel(kind: DownloadFileKind): string {
 export function downloadFileMetaLabel(options: {
   readonly filename: string;
   readonly formattedSize: string;
+  readonly expiresAt?: string | Date | null;
+  readonly now?: number;
+  readonly availability?: DownloadFileAvailability;
 }): string {
   const kind = classifyDownloadFileKind(options.filename);
-  return `${downloadFileKindLabel(kind)} · ${options.formattedSize} · 24 小时内可下载`;
+  const availability =
+    options.availability ?? downloadFileAvailability(options.expiresAt, options.now);
+  const availabilityLabel =
+    availability === 'available'
+      ? '当前可下载'
+      : availability === 'expired'
+        ? '文件已过期'
+        : availability === 'unavailable'
+          ? '文件已失效'
+        : '文件生成后保留 24 小时';
+  return `${downloadFileKindLabel(kind)} · ${options.formattedSize} · ${availabilityLabel}`;
+}
+
+export function downloadFileAvailability(
+  expiresAt: string | Date | null | undefined,
+  now = Date.now(),
+): DownloadFileAvailability {
+  if (expiresAt == null) return 'unknown';
+  const expires = expiresAt instanceof Date ? expiresAt : new Date(expiresAt);
+  const timestamp = expires.getTime();
+  if (!Number.isFinite(timestamp)) return 'unknown';
+  return timestamp > now ? 'available' : 'expired';
 }

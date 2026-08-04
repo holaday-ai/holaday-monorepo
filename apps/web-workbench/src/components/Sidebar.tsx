@@ -127,6 +127,8 @@ interface Props {
   /** Mobile drawer state — ignored at md+ breakpoints. */
   mobileOpen?: boolean;
   onMobileClose?: () => void;
+  /** Temporarily use the icon rail while a compact inline browser is open. */
+  adaptiveCollapsed?: boolean;
   /**
    * Phase 10 polish — number of tasks the SPA hid because they're
    * older than the user's plan retention window. Drives the
@@ -190,6 +192,7 @@ export function Sidebar({
   userRole = 'user',
   mobileOpen,
   onMobileClose,
+  adaptiveCollapsed = false,
   hiddenTaskCount = 0,
   historyDays,
   pagerOverride,
@@ -334,7 +337,7 @@ export function Sidebar({
 
   return (
     <>
-      <SidebarShell collapsible="icon">
+      <SidebarShell collapsible="icon" forceCollapsed={adaptiveCollapsed}>
         {/* Codex info-architecture rework: the Sidebar reads as four
             stable segments. Header / SidebarNav / SidebarFooter are
             pinned; only the task list scrolls. The visual centre of
@@ -621,7 +624,7 @@ export function Sidebar({
             users can click to toggle expand/collapse. Lets the icon
             mode feel composable instead of "stuck" without users
             having to discover Cmd+B. */}
-        <SidebarRail />
+        {!adaptiveCollapsed && <SidebarRail />}
       </SidebarShell>
 
       <TaskContextMenu
@@ -978,8 +981,8 @@ const FEATURES: readonly FeatureItem[] = [
   { icon: TrendingUp, label: '股市任务', href: '/stocks' },
   { icon: Wallet, label: '合伙人计划', href: '/partner' },
   { icon: MoonStar, label: '今日能量', href: '/cosmic' },
-  { icon: Clapperboard, label: '创建视频', href: '/video' },
-  { icon: ImagePlus, label: '创作图片', href: '/image' },
+  { icon: Clapperboard, label: '视频任务', href: '/video' },
+  { icon: ImagePlus, label: '图片任务', href: '/image' },
   { icon: Clock, label: '定时任务', href: '/scheduled' },
   { icon: ListPlus, label: '批量任务', href: '/batch' },
   { icon: FolderOpen, label: '文件库', href: '/files' },

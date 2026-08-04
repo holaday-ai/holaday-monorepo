@@ -97,12 +97,19 @@ export class AlipayAdapter {
     // alipay-sdk 4.x exposes pageExecute returning a URL string for
     // page-style methods. Cast at the boundary since the lib's
     // dynamic method dispatch defeats inference.
-    const url = await (this.sdk as unknown as {
-      pageExecute: (
-        method: string,
-        params: { method: 'POST' | 'GET'; bizContent: Record<string, unknown>; notifyUrl?: string; returnUrl?: string },
-      ) => string;
-    }).pageExecute('alipay.trade.page.pay', {
+    const url = await (
+      this.sdk as unknown as {
+        pageExecute: (
+          method: string,
+          params: {
+            method: 'POST' | 'GET';
+            bizContent: Record<string, unknown>;
+            notifyUrl?: string;
+            returnUrl?: string;
+          },
+        ) => string;
+      }
+    ).pageExecute('alipay.trade.page.pay', {
       method: 'GET',
       notifyUrl: args.notifyUrl,
       returnUrl: args.returnUrl,
@@ -124,9 +131,11 @@ export class AlipayAdapter {
    */
   verifyNotify(body: Record<string, string>): boolean {
     if (!this.sdk) return false;
-    return (this.sdk as unknown as {
-      checkNotifySignV2: (body: Record<string, string>) => boolean;
-    }).checkNotifySignV2(body);
+    return (
+      this.sdk as unknown as {
+        checkNotifySignV2: (body: Record<string, string>) => boolean;
+      }
+    ).checkNotifySignV2(body);
   }
 
   /**
@@ -134,11 +143,29 @@ export class AlipayAdapter {
    * Caller is responsible for verifying first via verifyNotify().
    */
   parseNotifyBody(body: Record<string, string>): AlipayNotifyPayload {
+    if (!this.env.ALIPAY_APPID || body.app_id !== this.env.ALIPAY_APPID) {
+      throw new Error('alipay notify: app_id mismatch');
+    }
+    if (this.env.ALIPAY_SELLER_ID && body.seller_id !== this.env.ALIPAY_SELLER_ID) {
+      throw new Error('alipay notify: seller_id mismatch');
+    }
+    const amountText = body.total_amount ?? '';
+    const amountCents = /^\d+(?:\.\d{1,2})?$/.test(amountText)
+      ? Math.round(Number(amountText) * 100)
+      : Number.NaN;
+    if (
+      !body.out_trade_no ||
+      !body.trade_no ||
+      !Number.isSafeInteger(amountCents) ||
+      amountCents <= 0
+    ) {
+      throw new Error('alipay notify: invalid transaction payload');
+    }
     return {
       outTradeNo: body.out_trade_no ?? '',
       transactionId: body.trade_no ?? '',
       tradeStatus: body.trade_status ?? '',
-      amountCents: Math.round(Number.parseFloat(body.total_amount ?? '0') * 100),
+      amountCents,
       passback: body.passback_params ? decodeURIComponent(body.passback_params) : '',
     };
   }

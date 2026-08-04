@@ -136,6 +136,68 @@ describe('getLipSyncStatus / getLipSyncResult', () => {
 });
 
 describe('runLipSync (submit + poll to completion)', () => {
+  it('follows provider queue URLs for versioned model endpoints', async () => {
+    const statusUrl = 'https://queue.fal.run/fal-ai/sync-lipsync/requests/req-v2/status';
+    const responseUrl = 'https://queue.fal.run/fal-ai/sync-lipsync/requests/req-v2';
+    const { fetchImpl, calls } = jsonQueue([
+      {
+        body: {
+          status: 'IN_QUEUE',
+          request_id: 'req-v2',
+          status_url: statusUrl,
+          response_url: responseUrl,
+        },
+      },
+      { body: { status: 'COMPLETED' } },
+      { body: { video: { url: 'https://v3b.fal.media/versioned.mp4' } } },
+    ]);
+
+    const out = await runLipSync({
+      apiKey: KEY,
+      model: 'fal-ai/sync-lipsync/v2',
+      videoUrl: VID,
+      audioUrl: AUD,
+      fetchImpl,
+      ...TINY,
+    });
+
+    expect(out.videoUrl).toBe('https://v3b.fal.media/versioned.mp4');
+    expect(calls.map((call) => call.url)).toEqual([
+      'https://queue.fal.run/fal-ai/sync-lipsync/v2',
+      statusUrl,
+      responseUrl,
+    ]);
+  });
+
+  it('ignores cross-origin queue URLs returned by the provider', async () => {
+    const { fetchImpl, calls } = jsonQueue([
+      {
+        body: {
+          status: 'IN_QUEUE',
+          request_id: 'req-safe',
+          status_url: 'https://untrusted.example/requests/req-safe/status',
+          response_url: 'https://untrusted.example/requests/req-safe',
+        },
+      },
+      { body: { status: 'COMPLETED' } },
+      { body: { video: { url: 'https://v3b.fal.media/safe.mp4' } } },
+    ]);
+
+    await runLipSync({
+      apiKey: KEY,
+      videoUrl: VID,
+      audioUrl: AUD,
+      fetchImpl,
+      ...TINY,
+    });
+
+    expect(calls.map((call) => call.url)).toEqual([
+      'https://queue.fal.run/fal-ai/latentsync',
+      'https://queue.fal.run/fal-ai/latentsync/requests/req-safe/status',
+      'https://queue.fal.run/fal-ai/latentsync/requests/req-safe',
+    ]);
+  });
+
   it('submits, polls IN_PROGRESS→COMPLETED, returns the result', async () => {
     const { fetchImpl } = jsonQueue([
       { body: { status: 'IN_QUEUE', request_id: 'req1' } }, // submit

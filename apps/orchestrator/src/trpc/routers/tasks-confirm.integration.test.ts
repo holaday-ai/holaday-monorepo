@@ -288,6 +288,124 @@ describe('tasks.confirm tRPC mutation (awaiting_user → executing | cancelled)'
     });
   });
 
+  it('confirmVideo rejects stale Veo 1080p + 6s quotes before consuming them', async () => {
+    const { userExternalId, taskId } = await makeUserWithVideoQuoteTask();
+    const { db } = await import('../../db/client.js');
+    const { eq } = await import('drizzle-orm');
+    const { tasks } = await import('../../db/schema/tasks.js');
+    await db
+      .update(tasks)
+      .set({
+        result: {
+          summary: '报价：确认制作 / 图片版 / 取消。',
+          metadata: {
+            lane: 'video_creation_confirm',
+            videoTier: 'veo_fast',
+            videoOptions: {
+              tab: 'normal',
+              model: 'veo_fast',
+              resolution: '1080p',
+              durationSeconds: 6,
+            },
+          },
+        },
+      })
+      .where(eq(tasks.externalId, taskId));
+
+    const { status } = await callTrpc(
+      'confirmVideo',
+      { taskId, choice: 'confirm_video' },
+      userExternalId,
+    );
+    expect(status).toBe(400);
+
+    const taskRow = must(
+      (await db.select().from(tasks).where(eq(tasks.externalId, taskId)))[0],
+      'taskRow',
+    );
+    expect(taskRow.status).toBe('awaiting_user');
+    expect(taskRow.awaitingKind).toBe('video_quote');
+    expect(taskRow.completedAt).toBeNull();
+  });
+
+  it('confirmVideo keeps an IP quote unconsumed when its base video is unavailable', async () => {
+    const { newExternalId } = await import('@holaday/shared-types');
+    const { db } = await import('../../db/client.js');
+    const { and, eq } = await import('drizzle-orm');
+    const { taskFiles } = await import('../../db/schema/task-files.js');
+    const { tasks } = await import('../../db/schema/tasks.js');
+    const { users } = await import('../../db/schema/users.js');
+    const { userExternalId, taskId } = await makeUserWithVideoQuoteTask();
+    const user = must(
+      (await db.select().from(users).where(eq(users.externalId, userExternalId)))[0],
+      'user',
+    );
+    const baseVideoFileId = newExternalId('file');
+    await db.insert(taskFiles).values({
+      externalId: baseVideoFileId,
+      userId: user.id,
+      taskId: null,
+      kind: 'input',
+      filename: 'expired-base.mp4',
+      mimetype: 'video/mp4',
+      sizeBytes: 1024,
+      storagePath: `${userExternalId}/input/${baseVideoFileId}/expired-base.mp4`,
+      status: 'expired',
+      expiresAt: new Date(Date.now() - 60_000),
+    });
+    await db
+      .update(users)
+      .set({
+        qwenVoiceId: 'voice_ready',
+        baseVideoFileId,
+        videoSelfUseAuthorizedAt: new Date(),
+      })
+      .where(eq(users.id, user.id));
+    await db
+      .update(tasks)
+      .set({
+        result: {
+          summary: '报价：确认制作 / 取消。',
+          metadata: {
+            lane: 'video_creation_confirm',
+            ipCopyText: '这是一段 IP 人物视频测试。',
+            videoTier: 'veo_fast',
+            videoOptions: {
+              tab: 'ip_person',
+              model: 'veo_fast',
+              resolution: '1080p',
+              durationSeconds: 8,
+            },
+          },
+        },
+      })
+      .where(eq(tasks.externalId, taskId));
+
+    const before = await db
+      .select({ id: tasks.id })
+      .from(tasks)
+      .where(and(eq(tasks.userId, user.id), eq(tasks.origin, 'user')));
+    const { status } = await callTrpc(
+      'confirmVideo',
+      { taskId, choice: 'confirm_video' },
+      userExternalId,
+    );
+
+    expect(status).toBe(412);
+    const quote = must(
+      (await db.select().from(tasks).where(eq(tasks.externalId, taskId)))[0],
+      'quote',
+    );
+    expect(quote.status).toBe('awaiting_user');
+    expect(quote.awaitingKind).toBe('video_quote');
+    expect(quote.completedAt).toBeNull();
+    const after = await db
+      .select({ id: tasks.id })
+      .from(tasks)
+      .where(and(eq(tasks.userId, user.id), eq(tasks.origin, 'user')));
+    expect(after).toHaveLength(before.length);
+  });
+
   it('confirmVideo cancel records a user cancellation event', async () => {
     const { userExternalId, taskId } = await makeUserWithVideoQuoteTask();
     const { status, json } = await callTrpc(

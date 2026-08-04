@@ -51,6 +51,16 @@ export interface ScheduledTaskRow {
   createdAt: string | Date;
 }
 
+const SCHEDULED_TASK_PRODUCT_TITLES: Readonly<Record<string, string>> = {
+  __ashare_premarket_briefing__: 'A股盘前简报',
+  __ashare_postmarket_briefing__: 'A股盘后复盘',
+};
+
+export function scheduledTaskDisplayTitle(intent: string): string {
+  const normalizedIntent = intent.trim();
+  return SCHEDULED_TASK_PRODUCT_TITLES[normalizedIntent] ?? (normalizedIntent || '未命名任务');
+}
+
 export function normalizeScheduledTaskRows(value: unknown): ScheduledTaskRow[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((entry) => {
@@ -185,10 +195,11 @@ export function rowToEventInput(
   const color = pickStatusColor(row, nextRunAt, opts.now);
   const durationMinutes = Math.max(1, row.durationMinutes);
   const durationMs = durationMinutes * 60_000;
+  const displayTitle = scheduledTaskDisplayTitle(row.intent);
 
   const baseProps = {
     id: row.scheduledTaskId,
-    title: row.intent.length > 60 ? `${row.intent.slice(0, 60)}…` : row.intent,
+    title: displayTitle.length > 60 ? `${displayTitle.slice(0, 60)}…` : displayTitle,
     // FullCalendar's default backgroundColor / borderColor sets the
     // outer event wrapper. We override with TRANSPARENT so the
     // inner .fc-event-main can use the calendar-styles.css tinted
@@ -199,7 +210,7 @@ export function rowToEventInput(
     extendedProps: {
       scheduledTaskInternalId: row.scheduledTaskInternalId,
       scheduledTaskId: row.scheduledTaskId,
-      intent: row.intent,
+      intent: displayTitle,
       description: row.description ?? null,
       reminderMinutes: row.reminderMinutes ?? null,
       repeatType: row.repeatType,

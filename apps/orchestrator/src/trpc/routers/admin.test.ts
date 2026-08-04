@@ -13,7 +13,9 @@
  */
 
 import { TRPCError } from '@trpc/server';
+import { drizzle } from 'drizzle-orm/mysql2';
 import { describe, expect, it, vi } from 'vitest';
+import * as schema from '../../db/schema/index.js';
 import { __adminInternals, adminRouter, mapIpComplianceRow } from './admin.js';
 
 describe('mapIpComplianceRow — IP 合规追溯 row assembly', () => {
@@ -74,7 +76,11 @@ const fakeLogger = {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
 } as any;
 
-function makeCtx(roleByExternalId: Record<string, string | undefined>, userId: string | null) {
+function makeCtx(
+  roleByExternalId: Record<string, string | undefined>,
+  userId: string | null,
+  statusByExternalId: Record<string, string | undefined> = {},
+) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const db: any = {
     select(_fields?: unknown) {
@@ -83,7 +89,7 @@ function makeCtx(roleByExternalId: Record<string, string | undefined>, userId: s
           return {
             where(predicate: unknown) {
               return {
-                async limit(_n: number): Promise<Array<{ role: string }>> {
+                async limit(_n: number): Promise<Array<{ role: string; status: string }>> {
                   // eslint-disable-next-line @typescript-eslint/no-require-imports
                   const s = require('node:util').inspect(predicate, {
                     depth: 6,
@@ -92,7 +98,7 @@ function makeCtx(roleByExternalId: Record<string, string | undefined>, userId: s
                   // Find the externalId in the predicate match.
                   for (const [ext, role] of Object.entries(roleByExternalId)) {
                     if (s.includes(`value: '${ext}'`)) {
-                      return role ? [{ role }] : [];
+                      return role ? [{ role, status: statusByExternalId[ext] ?? 'active' }] : [];
                     }
                   }
                   return [];
@@ -123,6 +129,19 @@ describe('adminProcedure (via adminRouter.dashboard gate)', () => {
   it("rejects non-admin role='user' with FORBIDDEN", async () => {
     const ctx = makeCtx({ usr_alice: 'user' }, 'usr_alice');
     const caller = adminRouter.createCaller(ctx as never);
+    await expect(caller.dashboard()).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+    });
+  });
+
+  it('rejects an inactive admin account with FORBIDDEN', async () => {
+    const ctx = makeCtx(
+      { usr_suspended_admin: 'admin' },
+      'usr_suspended_admin',
+      { usr_suspended_admin: 'suspended' },
+    );
+    const caller = adminRouter.createCaller(ctx as never);
+
     await expect(caller.dashboard()).rejects.toMatchObject({
       code: 'FORBIDDEN',
     });
@@ -200,5 +219,84 @@ describe('buildDashboardDayStats', () => {
     ]).get('2026-05-21');
 
     expect(stats).toEqual({ total: 10, completed: 4, failed: 3 });
+  });
+});
+
+describe('admin user aggregate sorting query', () => {
+  it('paginates aggregate sorts in SQL without a 1000-user lookahead cap', () => {
+    const buildAdminUserPageQuery = (
+      __adminInternals as unknown as {
+        buildAdminUserPageQuery?: (
+          db: unknown,
+          input: {
+            search?: string;
+            sort: 'createdAt' | 'taskCount' | 'lastActive';
+            order: 'asc' | 'desc';
+            offset: number;
+            limit: number;
+          },
+          monthStart: Date,
+        ) => { toSQL(): { sql: string; params: unknown[] } };
+      }
+    ).buildAdminUserPageQuery;
+
+    expect(buildAdminUserPageQuery).toBeTypeOf('function');
+    if (!buildAdminUserPageQuery) return;
+
+    const mockDb = drizzle.mock({ schema, mode: 'default', casing: 'snake_case' });
+    const query = buildAdminUserPageQuery(
+      mockDb,
+      {
+        sort: 'taskCount',
+        order: 'desc',
+        offset: 1_200,
+        limit: 50,
+      },
+      new Date('2026-07-01T00:00:00.000Z'),
+    );
+    const generated = query.toSQL();
+
+    expect(generated.sql).toContain('left join');
+    expect(generated.sql).toContain('order by');
+    expect(generated.sql).not.toContain('limit 1000');
+    expect(generated.params).toContain(1_200);
+    expect(generated.params).toContain(50);
+  });
+
+  it('excludes system identities from the user page query', () => {
+    const buildAdminUserPageQuery = (
+      __adminInternals as unknown as {
+        buildAdminUserPageQuery?: (
+          db: unknown,
+          input: {
+            search?: string;
+            sort: 'createdAt' | 'taskCount' | 'lastActive';
+            order: 'asc' | 'desc';
+            offset: number;
+            limit: number;
+          },
+          monthStart: Date,
+        ) => { toSQL(): { sql: string; params: unknown[] } };
+      }
+    ).buildAdminUserPageQuery;
+
+    expect(buildAdminUserPageQuery).toBeTypeOf('function');
+    if (!buildAdminUserPageQuery) return;
+
+    const mockDb = drizzle.mock({ schema, mode: 'default', casing: 'snake_case' });
+    const generated = buildAdminUserPageQuery(
+      mockDb,
+      {
+        search: 'alice',
+        sort: 'taskCount',
+        order: 'desc',
+        offset: 0,
+        limit: 50,
+      },
+      new Date('2026-07-01T00:00:00.000Z'),
+    ).toSQL();
+
+    expect(generated.sql).toContain('`users`.`role` <>');
+    expect(generated.params).toContain('system');
   });
 });

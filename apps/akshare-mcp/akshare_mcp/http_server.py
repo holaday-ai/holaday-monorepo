@@ -12,6 +12,10 @@ Run（Vultr，仅监听 127.0.0.1，由 orchestrator 同机直取，不对外暴
 
 from __future__ import annotations
 
+import functools
+import logging
+import threading
+import time
 from datetime import datetime, timezone
 from typing import Any, Callable
 
@@ -21,55 +25,159 @@ from . import adapters as adp
 from .cache import cached
 
 DISCLAIMER = "数据来源 AkShare 聚合，仅供信息参考，不构成任何投资建议，不预测股价。"
+_LOGGER = logging.getLogger("akshare_mcp.http")
+_OPS_LOCK = threading.Lock()
+_OPS: dict[str, Any] = {
+    "requests_total": 0,
+    "errors_total": 0,
+    "fallbacks_total": 0,
+    "last_success_at": None,
+    "last_error_at": None,
+    "last_error_source": None,
+    "last_fallback_at": None,
+    "last_fallback_source": None,
+}
 
 
-def _envelope(records: list[dict[str, Any]], source: str) -> dict[str, Any]:
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _source_hint(fn: Callable[..., Any]) -> str:
+    name = getattr(fn, "__name__", "unknown")
+    return f"akshare:{name}"
+
+
+def _record_operation(*, source: str, succeeded: bool, fallback: bool = False) -> None:
+    now = _utc_now()
+    with _OPS_LOCK:
+        _OPS["requests_total"] += 1
+        if succeeded:
+            _OPS["last_success_at"] = now
+            if fallback:
+                _OPS["fallbacks_total"] += 1
+                _OPS["last_fallback_at"] = now
+                _OPS["last_fallback_source"] = source
+        else:
+            _OPS["errors_total"] += 1
+            _OPS["last_error_at"] = now
+            _OPS["last_error_source"] = source
+
+
+def _envelope(
+    records: list[dict[str, Any]],
+    source: str,
+    fetched_at: str | None = None,
+) -> dict[str, Any]:
     return {
         "data": records,
         "count": len(records),
         "source": source,
-        "fetched_at": datetime.now(timezone.utc).isoformat(),
+        "fetched_at": fetched_at or _utc_now(),
         "disclaimer": DISCLAIMER,
     }
 
 
-def _safe(fn: Callable[..., tuple[list[dict[str, Any]], str]], *args: Any, **kwargs: Any) -> dict[str, Any]:
+def _cached_adapter(
+    ttl_seconds: float,
+) -> Callable[[Callable[..., tuple[list[dict[str, Any]], str]]], Callable[..., tuple[list[dict[str, Any]], str, str]]]:
+    """Cache adapter data together with the time the upstream fetch completed."""
+
+    def decorator(
+        fn: Callable[..., tuple[list[dict[str, Any]], str]],
+    ) -> Callable[..., tuple[list[dict[str, Any]], str, str]]:
+        @cached(ttl_seconds)
+        @functools.wraps(fn)
+        def fetch(*args: Any, **kwargs: Any) -> tuple[list[dict[str, Any]], str, str]:
+            records, source = fn(*args, **kwargs)
+            return records, source, _utc_now()
+
+        return fetch
+
+    return decorator
+
+
+def _safe(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> dict[str, Any]:
     """Run an adapter, wrap success; degrade any error to a structured payload."""
+    started = time.monotonic()
+    source_hint = _source_hint(fn)
     try:
-        records, source = fn(*args, **kwargs)
-        return _envelope(records, source)
+        result = fn(*args, **kwargs)
+        if len(result) == 3:
+            records, source, fetched_at = result
+        else:
+            records, source = result
+            fetched_at = None
+        _record_operation(source=source, succeeded=True, fallback="fallback" in source.lower())
+        return _envelope(records, source, fetched_at)
     except adp.AkShareUnavailable as exc:
-        return {"error": str(exc), "data": [], "count": 0, "disclaimer": DISCLAIMER}
+        _record_operation(source=source_hint, succeeded=False)
+        _LOGGER.warning(
+            "akshare adapter unavailable source=%s elapsed_ms=%.1f error_type=%s",
+            source_hint,
+            (time.monotonic() - started) * 1000,
+            type(exc).__name__,
+        )
+        return {
+            "error": "真实数据源暂不可用",
+            "error_code": "AKSHARE_UNAVAILABLE",
+            "data": [],
+            "count": 0,
+            "source": source_hint,
+            "fetched_at": _utc_now(),
+            "disclaimer": DISCLAIMER,
+        }
     except Exception as exc:  # noqa: BLE001 - any akshare/network failure
-        return {"error": f"接口调用失败: {exc}", "data": [], "count": 0, "disclaimer": DISCLAIMER}
+        _record_operation(source=source_hint, succeeded=False)
+        _LOGGER.warning(
+            "akshare adapter failure source=%s elapsed_ms=%.1f error_type=%s",
+            source_hint,
+            (time.monotonic() - started) * 1000,
+            type(exc).__name__,
+        )
+        return {
+            "error": "真实数据源调用失败",
+            "error_code": "UPSTREAM_FAILURE",
+            "data": [],
+            "count": 0,
+            "source": source_hint,
+            "fetched_at": _utc_now(),
+            "disclaimer": DISCLAIMER,
+        }
 
 
 # Cached fetches — one TTL per interface (same as server.py).
-_quote = cached(adp.TTL_QUOTE)(adp.get_quote)
-_intraday = cached(adp.TTL_INTRADAY)(adp.get_intraday)
-_kline = cached(adp.TTL_KLINE)(adp.get_kline)
-_announce = cached(adp.TTL_ANNOUNCE)(adp.get_announcements)
-_lhb = cached(adp.TTL_LHB)(adp.get_dragon_tiger)
-_north = cached(adp.TTL_NORTHBOUND)(adp.get_northbound_flow)
-_index = cached(adp.TTL_INDEX)(adp.get_index_quote)
-_unlock = cached(adp.TTL_UNLOCK)(adp.get_share_unlock)
-_tradecal = cached(adp.TTL_TRADECAL)(adp.is_trading_day)
+_quote = _cached_adapter(adp.TTL_QUOTE)(adp.get_quote)
+_intraday = _cached_adapter(adp.TTL_INTRADAY)(adp.get_intraday)
+_kline = _cached_adapter(adp.TTL_KLINE)(adp.get_kline)
+_announce = _cached_adapter(adp.TTL_ANNOUNCE)(adp.get_announcements)
+_lhb = _cached_adapter(adp.TTL_LHB)(adp.get_dragon_tiger)
+_north = _cached_adapter(adp.TTL_NORTHBOUND)(adp.get_northbound_flow)
+_index = _cached_adapter(adp.TTL_INDEX)(adp.get_index_quote)
+_unlock = _cached_adapter(adp.TTL_UNLOCK)(adp.get_share_unlock)
+_tradecal = _cached_adapter(adp.TTL_TRADECAL)(adp.is_trading_day)
 # v2 简报：温度计+板块(含即时 ths/指数 spot)→ 短 TTL 覆盖投递窗口；涨停回顾(prevday 历史)→ 长 TTL。
-_pulse = cached(adp.TTL_INDEX)(adp.get_market_pulse)
-_ztsum = cached(adp.TTL_LHB)(adp.get_zt_pool_summary)
+_pulse = _cached_adapter(adp.TTL_PULSE)(adp.get_market_pulse)
+_ztsum = _cached_adapter(adp.TTL_LHB)(adp.get_zt_pool_summary)
 # Phase 2 全景速览 step1：④ 基本面（季度级长缓存）+ ⑤ 估值（日级缓存）。
-_fund = cached(adp.TTL_FUND)(adp.get_fundamentals)
-_val = cached(adp.TTL_VAL)(adp.get_valuation)
-_rank = cached(adp.TTL_RANK)(adp.get_stock_rankings)
+_fund = _cached_adapter(adp.TTL_FUND)(adp.get_fundamentals)
+_val = _cached_adapter(adp.TTL_VAL)(adp.get_valuation)
+_rank = _cached_adapter(adp.TTL_RANK)(adp.get_stock_rankings)
 
 app = FastAPI(title="akshare-cn-http", docs_url=None, redoc_url=None)
 
 
 @app.get("/health")
 @app.get("/healthz")
-def health() -> dict[str, str]:
-    """pm2 smoke check 用（/healthz，照 orchestrator 模式）。"""
-    return {"status": "ok"}
+def health() -> dict[str, Any]:
+    """Liveness plus compact adapter interruption counters for operations."""
+    with _OPS_LOCK:
+        ops = dict(_OPS)
+    return {
+        "status": "ok",
+        "adapter_ready": adp.ak is not None,
+        **ops,
+    }
 
 
 @app.get("/index/{market}")
@@ -211,6 +319,19 @@ def risk_warm() -> dict[str, Any]:
         return {"error": f"接口调用失败: {exc}", "data": [], "count": 0, "disclaimer": DISCLAIMER}
 
 
+def _warm_market_caches_once() -> None:
+    """Warm independent fast-ranking, symbol-table, and risk snapshots."""
+    _safe(_rank, "gainers", 8)
+    try:
+        adp.refresh_symbol_table()
+    except Exception:  # noqa: BLE001 - each cache must warm independently
+        _LOGGER.exception("akshare symbol-table prewarm failed")
+    try:
+        adp.warm_risk_tables()
+    except Exception:  # noqa: BLE001 - each cache must warm independently
+        _LOGGER.exception("akshare risk-table prewarm failed")
+
+
 @app.on_event("startup")
 def _prewarm_risk_on_startup() -> None:
     """启动后台预热风险表 + 周期重热(<TTL_RISK 保持热)。daemon 线程，**不阻塞 startup**
@@ -221,10 +342,9 @@ def _prewarm_risk_on_startup() -> None:
     def _loop() -> None:
         while True:
             try:
-                _safe(_rank, "gainers", 8)
-                adp.warm_risk_tables()
+                _warm_market_caches_once()
             except Exception:  # noqa: BLE001 - 预热失败不影响服务
-                pass
+                _LOGGER.exception("akshare background prewarm failed")
             time.sleep(5 * 3600)  # < TTL_RISK(6h)，周期重热
 
     threading.Thread(target=_loop, daemon=True).start()

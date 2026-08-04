@@ -28,11 +28,11 @@ export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
  */
 export const adminProcedure = protectedProcedure.use(async ({ ctx, next }) => {
   const [row] = await ctx.db
-    .select({ role: users.role })
+    .select({ role: users.role, status: users.status })
     .from(users)
     .where(eq(users.externalId, ctx.userId))
     .limit(1);
-  if (!row || row.role !== 'admin') {
+  if (!row || row.role !== 'admin' || row.status !== 'active') {
     throw new TRPCError({ code: 'FORBIDDEN', message: 'admin access required' });
   }
   return next({ ctx });

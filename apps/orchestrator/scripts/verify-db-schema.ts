@@ -2,6 +2,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config as loadDotenv } from 'dotenv';
 import mysql from 'mysql2/promise';
+import { findMissingRequiredIndexes } from './release-db-contract.mjs';
 
 function loadDotenvAllowingEmpty(path: string): void {
   const result = loadDotenv({ path, override: false });
@@ -53,6 +54,7 @@ const REQUIRED_COLUMNS: Record<string, readonly string[]> = {
     'role',
     'plan_expires_at',
     'status',
+    'auth_version',
     'display_name',
     'google_id',
     'avatar_url',
@@ -195,13 +197,38 @@ async function main(): Promise<void> {
       }
     }
 
-    if (missingTables.length > 0 || missingColumns.length > 0) {
+    const [indexRows] = await conn.query<
+      Array<{
+        table_name: string;
+        index_name: string;
+        non_unique: number;
+        seq_in_index: number;
+        column_name: string;
+        sub_part: number | null;
+      }>
+    >(
+      `SELECT table_name AS table_name,
+              index_name AS index_name,
+              non_unique AS non_unique,
+              seq_in_index AS seq_in_index,
+              column_name AS column_name,
+              sub_part AS sub_part
+       FROM information_schema.statistics
+       WHERE table_schema = ?`,
+      [database],
+    );
+    const missingIndexes = findMissingRequiredIndexes(indexRows);
+
+    if (missingTables.length > 0 || missingColumns.length > 0 || missingIndexes.length > 0) {
       console.error(`Database schema verification failed for ${database}.`);
       if (missingTables.length > 0) {
         console.error(`Missing tables: ${missingTables.join(', ')}`);
       }
       if (missingColumns.length > 0) {
         console.error(`Missing columns: ${missingColumns.join(', ')}`);
+      }
+      if (missingIndexes.length > 0) {
+        console.error(`Missing indexes: ${missingIndexes.join(', ')}`);
       }
       console.error('Run the numbered migrations or drizzle push before starting orchestrator.');
       process.exitCode = 1;

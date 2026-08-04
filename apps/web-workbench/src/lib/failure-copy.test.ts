@@ -112,11 +112,6 @@ describe('classifyFriendlyFailure', () => {
       subtitle: '浏览器会话已断开，请重新执行任务。',
       nextStep: '重新执行任务会建立新的浏览器会话。',
     });
-    expect(classifyFriendlyFailure('net::ERR_CONNECTION_CLOSED')).toEqual({
-      title: '浏览器连接中断',
-      subtitle: '浏览器会话已断开，请重新执行任务。',
-      nextStep: '重新执行任务会建立新的浏览器会话。',
-    });
   });
 
   it('classifies fast page changes as transient page switching', () => {
@@ -142,6 +137,16 @@ describe('classifyFriendlyFailure', () => {
       nextStep: '确认网址安全后重新执行，或换一个站点。',
     });
     expect(classifyFriendlyFailure('net::ERR_CONNECTION_REFUSED')).toEqual({
+      title: '无法连接到这个网站',
+      subtitle: '服务器拒绝连接或网络不可达。请稍后重试，或换一个站点。',
+      nextStep: '稍后重新执行，或换一个能直接访问的网址。',
+    });
+    expect(classifyFriendlyFailure('net::ERR_CONNECTION_CLOSED')).toEqual({
+      title: '无法连接到这个网站',
+      subtitle: '服务器拒绝连接或网络不可达。请稍后重试，或换一个站点。',
+      nextStep: '稍后重新执行，或换一个能直接访问的网址。',
+    });
+    expect(classifyFriendlyFailure('无法连接到该站点，请稍后重试或换一个站点。')).toEqual({
       title: '无法连接到这个网站',
       subtitle: '服务器拒绝连接或网络不可达。请稍后重试，或换一个站点。',
       nextStep: '稍后重新执行，或换一个能直接访问的网址。',

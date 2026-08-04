@@ -30,6 +30,8 @@
 
 import type { Browser, BrowserContext, ElementHandle, Page } from 'playwright';
 import sharp from 'sharp';
+import type { BrowserNetworkPolicy } from '../browser-network-policy.js';
+import { browserUrlForLog } from '../../browser-pool/log-url.js';
 import { logger } from '../../config/logger.js';
 import { humanClick, humanScroll, humanTypeText, isHumanizeEnabled } from './humanize.js';
 import { STEALTH_INIT_SCRIPT, isStealthEnabled } from './stealth-scripts.js';
@@ -213,6 +215,7 @@ export class PlaywrightExecutor {
    * empty. We detect that in getPage() and redial using this value.
    */
   private cdpEndpoint: string | null = null;
+  private ownsBrowserProcess = false;
   /**
    * Phase 1 Playbook ④ — gated CLEAN-CONTEXT mode (default OFF). When connect()
    * is called with { cleanContext: true } (explorer only), the executor uses a
@@ -226,7 +229,11 @@ export class PlaywrightExecutor {
   /** Dependency-injection seam for tests that want to bypass connect(). */
   private readonly chromium: {
     connectOverCDP: (endpoint: string) => Promise<Browser>;
+    launch?: (options: { channel?: string; headless?: boolean }) => Promise<Browser>;
   };
+  private readonly networkPolicy: Pick<BrowserNetworkPolicy, 'check'> | null;
+  private readonly guardRequests: boolean;
+  private readonly guardedContexts = new WeakSet<object>();
   /**
    * Pages we've already stealth-ified this session. Playwright's
    * `addInitScript` only fires on the NEXT navigation, so we also
@@ -239,13 +246,20 @@ export class PlaywrightExecutor {
 
   constructor(
     opts: {
-      chromium?: { connectOverCDP: (endpoint: string) => Promise<Browser> };
+      chromium?: {
+        connectOverCDP: (endpoint: string) => Promise<Browser>;
+        launch?: (options: { channel?: string; headless?: boolean }) => Promise<Browser>;
+      };
+      networkPolicy?: Pick<BrowserNetworkPolicy, 'check'>;
+      guardRequests?: boolean;
     } = {},
   ) {
     // Defer the real import so `require('playwright')` only happens
     // when we actually connect — avoids paying the native-binary load
     // cost on test-only code paths.
     this.chromium = opts.chromium ?? lazyPlaywrightChromium();
+    this.networkPolicy = opts.networkPolicy ?? null;
+    this.guardRequests = opts.guardRequests ?? Boolean(opts.networkPolicy);
   }
 
   /**
@@ -266,6 +280,7 @@ export class PlaywrightExecutor {
     if (this.browser) return { ok: true };
     try {
       this.browser = await this.chromium.connectOverCDP(cdpEndpoint);
+      this.ownsBrowserProcess = false;
       this.cdpEndpoint = cdpEndpoint;
       // Phase 1 Playbook ④ — gated CLEAN-CONTEXT mode (explorer only). Create a
       // FRESH isolated context and route getPage() to it. Off by default →
@@ -289,12 +304,12 @@ export class PlaywrightExecutor {
         this.cleanContext.setDefaultTimeout(opMs);
         this.cleanContext.setDefaultNavigationTimeout(opMs);
       }
+      await this.applyNetworkPolicyToContexts(this.browser);
       if (isStealthEnabled()) {
         await this.applyStealthToContexts(this.browser);
       }
       // Best-effort: dismiss Brave's persistent chrome-side banners
-      // (privacy report invite, --no-sandbox warning, "unsupported
-      // command-line flag") that otherwise take up vertical space in
+      // (privacy report invite and first-run notices) that otherwise take up vertical space in
       // every screenshot. Runs once per connect, on every existing
       // context — the policy file suppresses most of these at the
       // browser level but a fresh profile still gets the first-run
@@ -306,6 +321,48 @@ export class PlaywrightExecutor {
       return {
         ok: false,
         error: `connectOverCDP(${cdpEndpoint}) failed: ${errMsg(err)}`,
+      };
+    }
+  }
+
+  /**
+   * Development fallback for a machine without a pre-launched CDP
+   * browser. It starts a fresh, isolated Playwright context; it never
+   * imports the user's Chrome profile, cookies, or saved passwords.
+   */
+  async launchManaged(
+    options: { channel?: string; headless?: boolean } = { headless: true },
+  ): Promise<ConnectResult> {
+    if (this.browser) return { ok: true };
+    if (!this.chromium.launch) {
+      return { ok: false, error: 'playwright launch is unavailable' };
+    }
+
+    let launchedBrowser: Browser | null = null;
+    try {
+      const browser = await this.chromium.launch(options);
+      launchedBrowser = browser;
+      const context = await browser.newContext();
+      this.browser = browser;
+      this.ownsBrowserProcess = true;
+      this.cleanMode = true;
+      this.cleanContext = context;
+      context.setDefaultTimeout(45_000);
+      context.setDefaultNavigationTimeout(45_000);
+      await this.applyNetworkPolicyToContexts(browser);
+      await this.applyStealthToContexts(browser);
+      return { ok: true };
+    } catch (err) {
+      this.browser = null;
+      this.ownsBrowserProcess = false;
+      this.cleanMode = false;
+      this.cleanContext = null;
+      if (launchedBrowser) {
+        await launchedBrowser.close().catch(() => {});
+      }
+      return {
+        ok: false,
+        error: `playwright launch failed: ${err instanceof Error ? err.message : String(err)}`,
       };
     }
   }
@@ -471,17 +528,57 @@ export class PlaywrightExecutor {
     }
   }
 
+  private async applyNetworkPolicyToContexts(browser: Browser): Promise<void> {
+    if (!this.networkPolicy || !this.guardRequests) return;
+    const contexts = browser.contexts();
+    for (const context of contexts) {
+      if (this.guardedContexts.has(context)) continue;
+      const route = (context as BrowserContext).route;
+      if (typeof route !== 'function') continue;
+      await route.call(context, '**/*', async (routeHandle, request) => {
+        const rawUrl = request.url();
+        if (!/^https?:\/\//i.test(rawUrl)) {
+          await routeHandle.continue();
+          return;
+        }
+        try {
+          const decision = await this.networkPolicy!.check(rawUrl);
+          if (decision.allowed) {
+            await routeHandle.continue();
+            return;
+          }
+          logger.warn(
+            { target: rawUrl, reason: decision.reason },
+            'browser request blocked by network policy',
+          );
+        } catch (error) {
+          logger.warn(
+            { target: rawUrl, error: errMsg(error) },
+            'browser request policy failed closed',
+          );
+        }
+        await routeHandle.abort('blockedbyclient');
+      });
+      this.guardedContexts.add(context);
+    }
+  }
+
   /**
    * Release the browser handle. Idempotent — safe to call multiple
-   * times and when never connected. Does NOT close the browser
-   * process (we only attached to the user's existing Chrome; closing
-   * it would murder their whole session).
+   * times and when never connected. An externally attached CDP browser
+   * is left running; a browser launched by launchManaged() is owned by
+   * this executor and is closed here.
    */
   async disconnect(): Promise<void> {
     if (!this.browser) return;
     const b = this.browser;
+    const ownsBrowserProcess = this.ownsBrowserProcess;
     this.browser = null;
+    this.ownsBrowserProcess = false;
     this.activePage = null;
+    this.cdpEndpoint = null;
+    await this.disposeCleanContext();
+    if (!ownsBrowserProcess) return;
     try {
       await b.close();
     } catch {
@@ -528,6 +625,7 @@ export class PlaywrightExecutor {
       if (isStealthEnabled()) {
         await this.applyStealthToContexts(browser);
       }
+      await this.applyNetworkPolicyToContexts(browser);
       await this.dismissBraveBanners(browser);
       logger.info({ endpoint }, 'reconnectIfStale: reconnected CDP after stale');
       return true;
@@ -1179,6 +1277,16 @@ export class PlaywrightExecutor {
     const urlBefore = page.url();
     const t0 = Date.now();
     try {
+      if (this.networkPolicy) {
+        const decision = await this.networkPolicy.check(url);
+        if (!decision.allowed) {
+          logger.warn(
+            { action: 'navigate', target: browserUrlForLog(url), reason: decision.reason },
+            'page.goto blocked by browser network policy',
+          );
+          return { ok: false, message: `navigate blocked: ${decision.message}` };
+        }
+      }
       const resp = (await page.goto(url, {
         waitUntil: 'domcontentloaded',
         timeout: NAVIGATE_TIMEOUT_MS,
@@ -1193,9 +1301,36 @@ export class PlaywrightExecutor {
         /* best-effort */
       }
       logger.info(
-        { action: 'navigate', target: url, urlBefore, urlAfter, httpStatus: status, title, elapsedMs },
+        {
+          action: 'navigate',
+          target: browserUrlForLog(url),
+          urlBefore: browserUrlForLog(urlBefore),
+          urlAfter: browserUrlForLog(urlAfter),
+          httpStatus: status,
+          title,
+          elapsedMs,
+        },
         'page.goto returned',
       );
+
+      if (this.networkPolicy && urlAfter !== url && !isBlankUrl(urlAfter)) {
+        const redirectDecision = await this.networkPolicy.check(urlAfter);
+        if (!redirectDecision.allowed) {
+          logger.warn(
+            {
+              action: 'navigate',
+              target: browserUrlForLog(url),
+              redirectTarget: browserUrlForLog(urlAfter),
+              reason: redirectDecision.reason,
+            },
+            'page.goto redirect blocked by browser network policy',
+          );
+          return {
+            ok: false,
+            message: `navigate redirect blocked: ${redirectDecision.message}`,
+          };
+        }
+      }
 
       // Goto-no-op fallback. We've seen Playwright + connectOverCDP
       // return successfully from goto() while the page silently stays
@@ -1203,14 +1338,18 @@ export class PlaywrightExecutor {
       // and heal by opening a fresh context page and retrying there.
       if (isBlankUrl(urlAfter) && !isBlankUrl(url)) {
         logger.warn(
-          { target: url, urlBefore, urlAfter },
+          {
+            target: browserUrlForLog(url),
+            urlBefore: browserUrlForLog(urlBefore),
+            urlAfter: browserUrlForLog(urlAfter),
+          },
           'navigate: page.goto returned but url stayed blank — falling back to fresh ctx.newPage()',
         );
         const fresh = await this.reopenActivePage(page);
         if (!fresh) {
           return {
             ok: false,
-            message: `navigate stuck: goto returned but url=${urlAfter}; no context to reopen`,
+            message: `navigate stuck: goto returned but url=${browserUrlForLog(urlAfter)}; no context to reopen`,
           };
         }
         const resp2 = (await fresh.goto(url, {
@@ -1220,21 +1359,46 @@ export class PlaywrightExecutor {
         const urlAfter2 = fresh.url();
         const status2 = typeof resp2?.status === 'function' ? resp2.status() : null;
         logger.info(
-          { target: url, urlAfter2, httpStatus: status2 },
+          {
+            target: browserUrlForLog(url),
+            urlAfter2: browserUrlForLog(urlAfter2),
+            httpStatus: status2,
+          },
           'navigate: fallback newPage goto done',
         );
         if (isBlankUrl(urlAfter2)) {
           return {
             ok: false,
-            message: `navigate still stuck after fresh-page fallback: url=${urlAfter2}`,
+            message: `navigate still stuck after fresh-page fallback: url=${browserUrlForLog(urlAfter2)}`,
           };
+        }
+        if (this.networkPolicy && urlAfter2 !== url) {
+          const redirectDecision = await this.networkPolicy.check(urlAfter2);
+          if (!redirectDecision.allowed) {
+            logger.warn(
+              {
+                action: 'navigate',
+                target: browserUrlForLog(url),
+                redirectTarget: browserUrlForLog(urlAfter2),
+                reason: redirectDecision.reason,
+              },
+              'fresh-page redirect blocked by browser network policy',
+            );
+            return {
+              ok: false,
+              message: `navigate redirect blocked: ${redirectDecision.message}`,
+            };
+          }
         }
         return { ok: true, message: `navigated to ${url} (via fresh page fallback)` };
       }
       return { ok: true, message: `navigated to ${url}` };
     } catch (err) {
       const message = errMsg(err);
-      logger.error({ target: url, urlBefore, err: message }, 'navigate threw');
+      logger.error(
+        { target: browserUrlForLog(url), urlBefore: browserUrlForLog(urlBefore), err: message },
+        'navigate threw',
+      );
       return { ok: false, message: `navigate failed: ${message}` };
     }
   }
@@ -1299,18 +1463,29 @@ export class PlaywrightExecutor {
         ctx = this.browseContext(this.browser);
         if (!ctx) return;
       }
+      // Freeze the stale target set before opening the replacement. Calling
+      // ctx.pages() after newPage() and closing in the background races the
+      // caller's first navigation; on remote CDP that race can close the new
+      // target and produce "Target page, context or browser has been closed".
+      const stalePages = ctx.pages();
       const fresh = await ctx.newPage();
       const prior = this.activePage;
       this.activePage = fresh;
       await this.applyTargetViewportToPage(fresh as unknown as PageLike);
       await this.applyStealthToPageIfNeeded(fresh as unknown as PageLike);
-      // Close all existing pages that aren't our new one. Fire-and-
-      // forget so we don't block task start on a flaky close. Skips
-      // `fresh` itself because ctx.pages() includes it now.
-      for (const p of ctx.pages()) {
-        if (p === fresh) continue;
-        void p.close().catch(() => {});
-      }
+      // Finish the bounded stale-tab cleanup before returning so navigation
+      // starts against a stable target. A non-closable synthetic page in a
+      // test or an already-dead target is ignored.
+      await Promise.allSettled(
+        stalePages.map(async (page) => {
+          const close = page.close;
+          if (typeof close !== 'function') return;
+          await Promise.race([
+            close.call(page).catch(() => {}),
+            new Promise<void>((resolve) => setTimeout(resolve, 1_500)),
+          ]);
+        }),
+      );
       logger.info(
         {
           action: 'resetPageForTask',
@@ -1545,11 +1720,16 @@ export function annotateAriaSnapshot(yaml: string): {
  */
 function lazyPlaywrightChromium(): {
   connectOverCDP: (endpoint: string) => Promise<Browser>;
+  launch: (options: { channel?: string; headless?: boolean }) => Promise<Browser>;
 } {
   return {
     async connectOverCDP(endpoint: string): Promise<Browser> {
       const pw = await import('playwright');
       return pw.chromium.connectOverCDP(endpoint);
+    },
+    async launch(options): Promise<Browser> {
+      const pw = await import('playwright');
+      return pw.chromium.launch(options);
     },
   };
 }

@@ -1,5 +1,80 @@
 import { describe, expect, it } from 'vitest';
-import { taskListElapsedLabel, taskListItemSubtitle } from './TaskListItem';
+import type { UiTask } from '@/types/task';
+import {
+  taskDisplaySource,
+  taskDisplayTitle,
+  taskListElapsedLabel,
+  taskListItemSubtitle,
+} from './TaskListItem';
+
+function task(overrides: Partial<UiTask> = {}): UiTask {
+  return {
+    taskId: 'tsk_sidebar',
+    intent: '帮我整理今天的科技新闻',
+    title: null,
+    status: 'completed',
+    tickCount: 3,
+    createdAt: new Date('2026-07-23T00:00:00.000Z'),
+    ...overrides,
+  };
+}
+
+describe('taskDisplayTitle', () => {
+  const lockedSubjectIntent = [
+    '生成图片：让同一只西高地坐在海边。',
+    '图片风格要求：电影感、柔和逆光。',
+    '主体一致性要求：请以用户上传的第一张图片作为锁定主角。',
+    '尽量保持主角身份、脸型五官和毛色不变。',
+  ].join('\n\n');
+
+  it('keeps the user image prompt but hides internal generation instructions', () => {
+    const row = task({ intent: lockedSubjectIntent });
+
+    expect(taskDisplaySource(row)).toBe('让同一只西高地坐在海边。');
+    expect(taskDisplayTitle(row, 40)).toBe('让同一只西高地坐在海边。');
+  });
+
+  it('does not trust a generated title that contains only internal instructions', () => {
+    const row = task({
+      title: '主体一致性要求：请以用户上传的第一张图片作为锁定主角。',
+      intent: lockedSubjectIntent,
+    });
+
+    expect(taskDisplayTitle(row, 40)).toBe('让同一只西高地坐在海边。');
+  });
+
+  it('removes image settings while preserving a normal user-created title', () => {
+    expect(
+      taskDisplayTitle(
+        task({
+          title: '夏日新品主视觉',
+          intent: '生成一张图片：夏日新品主视觉。图片设置：模型 Nano Banana 2，比例 4:3。',
+        }),
+        40,
+      ),
+    ).toBe('夏日新品主视觉');
+
+    expect(
+      taskDisplayTitle(
+        task({
+          intent: '生成一张图片：夏日新品主视觉。图片设置：模型 Nano Banana 2，比例 4:3。',
+        }),
+        40,
+      ),
+    ).toBe('夏日新品主视觉。');
+  });
+
+  it('does not treat an ordinary question about image settings as routing copy', () => {
+    const row = task({ intent: '请解释图片设置：尺寸和压缩率分别有什么影响？' });
+
+    expect(taskDisplaySource(row)).toBe(
+      '请解释图片设置：尺寸和压缩率分别有什么影响？',
+    );
+    expect(taskDisplayTitle(row, 40)).toBe(
+      '解释图片设置：尺寸和压缩率分别有什么影响？',
+    );
+  });
+});
 
 describe('taskListItemSubtitle', () => {
   it('uses the live phase label for executing tasks before step ticks arrive', () => {

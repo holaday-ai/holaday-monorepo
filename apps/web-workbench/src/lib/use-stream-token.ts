@@ -9,9 +9,9 @@
  *
  * Refresh cadence: every 45s (15s safety margin under the 60s TTL).
  * The fetch is fire-and-forget — if it fails we keep the previous
- * token; the viewport's reconnect loop will retry. When token is
- * still null on first render the URL builders return null and the
- * viewports park in `idle` state until the token arrives.
+ * token; the viewport's reconnect loop will retry. Token rotation is
+ * intentionally independent from the stable CDP endpoint, so refreshing a
+ * credential does not interrupt a healthy interactive socket.
  */
 
 import * as React from 'react';

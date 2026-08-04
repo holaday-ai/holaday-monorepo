@@ -307,6 +307,28 @@ describe('buildContract — full tier (expert workflow)', () => {
 });
 
 describe('classifyIntentForOutputRequirement — real QA prompts', () => {
+  it('requires a clickable source for explicit research and retrieval intents', () => {
+    expect(
+      classifyIntentForOutputRequirement('研究 2026 年 AI 行业趋势'),
+    ).toEqual({
+      kind: 'general_with_links',
+      requirement: { kind: 'general_with_links', minUrls: 1 },
+    });
+    expect(
+      classifyIntentForOutputRequirement('检索最新的数据隐私法规'),
+    ).toEqual({
+      kind: 'general_with_links',
+      requirement: { kind: 'general_with_links', minUrls: 1 },
+    });
+  });
+
+  it('does not require sources for non-research transformations', () => {
+    expect(classifyIntentForOutputRequirement('把这句话翻译成英文')).toEqual({
+      kind: 'general',
+      requirement: null,
+    });
+  });
+
   it('keeps explicit stock source-link requests under the stock verifier', () => {
     const out = classifyIntentForOutputRequirement('帮我查今天特斯拉股价并给出来源链接');
     expect(out.kind).toBe('stock_quote');

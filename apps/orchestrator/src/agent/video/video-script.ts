@@ -74,15 +74,45 @@ export function buildScriptSystemPrompt(maxSegments: number): string {
   ].join('\n');
 }
 
-/** Strip markdown fences / prose and parse the first JSON object. */
+function firstCompleteJsonObject(text: string): string | null {
+  const start = text.indexOf('{');
+  if (start < 0) return null;
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === '\\') {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+    if (char === '{') {
+      depth += 1;
+    } else if (char === '}') {
+      depth -= 1;
+      if (depth === 0) return text.slice(start, index + 1);
+    }
+  }
+  return null;
+}
+
+/** Strip markdown fences / prose and parse the first complete JSON object. */
 function parseJsonLoose(text: string): unknown {
   let t = text.trim();
   const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/i);
   if (fence?.[1]) t = fence[1].trim();
-  const start = t.indexOf('{');
-  const end = t.lastIndexOf('}');
-  if (start >= 0 && end > start) t = t.slice(start, end + 1);
-  return JSON.parse(t);
+  return JSON.parse(firstCompleteJsonObject(t) ?? t);
 }
 
 function normType(v: unknown): string {
@@ -166,6 +196,21 @@ export interface OptimizeScriptInput {
   readonly style?: VideoStyle;
 }
 
+export function buildFallbackVideoScript(userText: string): VideoScript {
+  const faithfulText = userText.trim();
+  if (!faithfulText) throw new VideoScriptError('user script text is empty', 'empty');
+  return {
+    title: '按原描述生成',
+    segments: [
+      {
+        text: faithfulText,
+        type: 'broll',
+        visual: faithfulText,
+      },
+    ],
+  };
+}
+
 export function buildOptimizeSystemPrompt(maxSegments: number, style?: VideoStyle): string {
   const styleLine = style && style !== 'auto' ? STYLE_GUIDE[style] : null;
   return [
@@ -176,12 +221,16 @@ export function buildOptimizeSystemPrompt(maxSegments: number, style?: VideoStyl
     `- ${Math.max(1, maxSegments - 2)}~${maxSegments} 个分段，每段一句精炼旁白（text，口语化、保留用户原意）。段数按内容量定：短文案别硬凑、宁少勿多，不要为凑时长重复内容或加无关空镜。`,
     ...(styleLine ? [styleLine] : []),
     '- 每段一句画面描述（visual，用于 AI 文生图/文生视频）。【让画面视觉化该段旁白在说的核心动作或对象】：',
-    '  例如「选 SPF50」段→阳光下手在小臂上抹开乳白防晒乳的动作；「每两小时补涂」段→户外看时间、再次涂抹的画面；',
+    '  例如「选 SPF50」段→阳光下乳白防晒乳在皮肤上形成均匀薄层的侧面微距；「每两小时补涂」段→户外遮阳场景与时间流逝；',
     '  「紫外线很强」段→正午烈日暴晒的街景/皮肤。不要用与旁白无关的泛泛空镜（如随手一个草帽女）。',
-    '- 【不要画含文字的特写构图】：产品包装/瓶身/标签/招牌/屏幕/书本这类——AI 会在上面编造乱码假字，一律不画、不特写。',
-    '  环境里自然的远景文字（模糊路牌等）不强求避开，但别让文字成为画面主体或特写。',
+    '- 【不新增人物或肢体】：用户原始需求没有要求人物、手或手部交互时，visual 不得新增人物、手、手臂，',
+    '  不得擅自加入拿起、触碰或操作物体的动作；只有用户原文明确要求时才安排人物或手部动作。',
+    '- 【文字与品牌必须准确】：用户未要求文字、品牌或 Logo 时，visual 不得凭空新增；',
+    '  用户明确要求包装、标签、招牌、屏幕、品牌或 Logo 时必须保留，并在 visual 中写明原文，要求逐字准确、清晰可读，不得替换、增删或拼错。',
     '- 【避开高解剖风险构图】：AI 画「手-物-手竖直叠帧」「双手紧贴特写」会长出多余手臂或畸形手。',
     '  优先单人、半身或环境景；手部动作用侧面、单手的简单姿势，避免「一只手拿物、另一只手操作」的正面叠手特写。',
+    '- 【连续动作不可丢步骤】：用户要求进入、拿起、停留、移动、放回、离开等连续动作时，visual 必须按原顺序保留每个动作阶段和最终稳定状态，',
+    '  不得省略收尾动作，也不得把尚未完成的中间状态当成结尾；单镜头需求必须在同一个 visual 中完整写明。',
     '- 忠于用户文案：优化表达/分段/补画面，但不改变事实主张、不杜撰、不模仿或冒充他人。',
     '',
     '只输出 JSON（不要 markdown、不要解释）：',
@@ -216,6 +265,13 @@ function normalizeOptimized(raw: unknown): unknown {
  * optimizeUserScript's maxSegments so a ~50-char 文案 → ≤2 段, long 文案 → 6.
  */
 export function segmentCapForText(text: string): number {
+  if (
+    /(?:固定镜头|固定机位|单镜头|一镜到底|single[- ]?shot|one[- ]?take|locked[- ]?camera|continuous[- ]?shot)/iu.test(
+      text,
+    )
+  ) {
+    return 1;
+  }
   const chars = (text ?? '').replace(/\s/g, '').length;
   return Math.min(6, Math.max(1, Math.round(chars / 30)));
 }

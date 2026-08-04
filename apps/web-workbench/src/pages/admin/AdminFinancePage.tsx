@@ -284,7 +284,12 @@ function RevenueTab(): JSX.Element {
   const planRows = safeArray(plan.plans).map((item) => {
     const row = asRecord(item);
     return {
+      kind: safeText(row.kind, 'subscription'),
       plan: safeText(row.plan, '未知套餐'),
+      label:
+        safeText(row.kind, 'subscription') === 'addon'
+          ? `${safeText(row.plan, '未知套餐')} 加量包`
+          : safeText(row.plan, '未知套餐'),
       userCount: nonNegativeNumber(row.userCount),
       monthRevenueCnyCents: nonNegativeNumber(row.monthRevenueCnyCents),
     };
@@ -310,7 +315,7 @@ function RevenueTab(): JSX.Element {
     <div className="space-y-6">
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {/* Plan distribution */}
-        <Section title="按套餐分布" hint="本月营收 + 当前用户数">
+        <Section title="按商品分布" hint="本月营收 + 当前订阅用户数">
           {totalCnyPlan === 0 ? (
             <div className="flex h-44 items-center justify-center text-[12px] text-muted-foreground">
               本月暂无完成的订单
@@ -323,7 +328,7 @@ function RevenueTab(): JSX.Element {
                     <Pie
                       data={planRows.filter((p) => p.monthRevenueCnyCents > 0)}
                       dataKey="monthRevenueCnyCents"
-                      nameKey="plan"
+                      nameKey="label"
                       cx="50%"
                       cy="50%"
                       innerRadius={36}
@@ -340,8 +345,8 @@ function RevenueTab(): JSX.Element {
                       contentStyle={{ borderRadius: 8, border: `1px solid ${ADMIN_BORDER}`, fontSize: 12 }}
                       formatter={(value, _name, ctx) => {
                         const v = typeof value === 'number' ? value : Number(value ?? 0);
-                        const p = (ctx as { payload?: { plan?: string } } | undefined)?.payload;
-                        return [formatYuan(v), p?.plan ?? '套餐'];
+                        const p = (ctx as { payload?: { label?: string } } | undefined)?.payload;
+                        return [formatYuan(v), p?.label ?? '商品'];
                       }}
                     />
                   </PieChart>
@@ -349,14 +354,18 @@ function RevenueTab(): JSX.Element {
               </MeasuredChartFrame>
               <div className="min-w-0 flex-1 space-y-1.5 text-[12px]">
                 {planRows.map((p, i) => (
-                  <div key={p.plan} className="flex items-center gap-2">
+                  <div key={`${p.kind}:${p.plan}`} className="flex items-center gap-2">
                     <span
                       className="h-2.5 w-2.5 shrink-0 rounded-sm"
                       style={{ backgroundColor: PALETTE[i % PALETTE.length] }}
                     />
-                    <span className="min-w-0 flex-1 capitalize text-foreground">{p.plan}</span>
+                    <span className="min-w-0 flex-1 capitalize text-foreground">
+                      {p.kind === 'addon' ? `${p.plan} 加量包` : p.plan}
+                    </span>
                     <span className="tabular-nums text-muted-foreground">
-                      {formatInteger(p.userCount)} 人 · {formatYuanCompact(p.monthRevenueCnyCents)}
+                      {p.kind === 'addon'
+                        ? formatYuanCompact(p.monthRevenueCnyCents)
+                        : `${formatInteger(p.userCount)} 人 · ${formatYuanCompact(p.monthRevenueCnyCents)}`}
                     </span>
                   </div>
                 ))}

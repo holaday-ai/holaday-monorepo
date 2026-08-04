@@ -1,6 +1,14 @@
 import { Film } from 'lucide-react';
 import * as React from 'react';
-import { blobToDataUrl, fetchFileBlobAuthed } from '@/lib/download-file';
+import {
+  blobToDataUrl,
+  fetchFileBlobAuthed,
+  isUnavailableFileStatus,
+} from '@/lib/download-file';
+import {
+  markFileUnavailableFromStatus,
+  useFileUnavailable,
+} from '@/lib/unavailable-file-registry';
 import { cn } from '@/lib/utils';
 
 /**
@@ -17,15 +25,23 @@ export function LazyPosterImg({
   posterUrl,
   alt,
   className,
+  onUnavailable,
 }: {
   posterUrl: string;
   alt: string;
   className?: string;
+  onUnavailable?: (status: 404 | 410) => void;
 }): JSX.Element {
   const ref = React.useRef<HTMLDivElement>(null);
+  const onUnavailableRef = React.useRef(onUnavailable);
+  const unavailable = useFileUnavailable(posterUrl);
   const [visible, setVisible] = React.useState(false);
   const [state, setState] = React.useState<'idle' | 'loading' | 'ready' | 'failed'>('idle');
   const [url, setUrl] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    onUnavailableRef.current = onUnavailable;
+  }, [onUnavailable]);
 
   // Reveal once scrolled near the viewport.
   React.useEffect(() => {
@@ -53,6 +69,11 @@ export function LazyPosterImg({
   // setState inside can't re-trigger it → no render churn).
   React.useEffect(() => {
     if (!visible) return;
+    if (unavailable) {
+      setUrl(null);
+      setState('failed');
+      return;
+    }
     let cancelled = false;
     setState('loading');
     void fetchFileBlobAuthed({ url: posterUrl }).then((res) => {
@@ -66,13 +87,17 @@ export function LazyPosterImg({
           if (!cancelled) setState('failed');
         });
       } else {
+        if (isUnavailableFileStatus(res.status)) {
+          markFileUnavailableFromStatus(posterUrl, res.status);
+          onUnavailableRef.current?.(res.status);
+        }
         setState('failed');
       }
     });
     return () => {
       cancelled = true;
     };
-  }, [visible, posterUrl]);
+  }, [posterUrl, unavailable, visible]);
 
   return (
     <div

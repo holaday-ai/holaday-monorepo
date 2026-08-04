@@ -18,9 +18,11 @@ import { PageContainer, PageHeader, Section } from '@/pages/PageShell';
 import { BatchTaskDialog } from '@/components/BatchTaskDialog';
 import { batchUnsuccessfulCopy } from '@/lib/batch-copy';
 import {
+  batchDetailRemainingCount,
   batchDetailSummary,
   batchErrorMessage,
   batchListSummary,
+  batchPromptImportStateReset,
   normalizeBatchDetail,
   normalizeBatchRows,
   type NormalizedBatchDetail,
@@ -72,6 +74,7 @@ function BatchList(): JSX.Element {
   const toast = useToast();
   const navigate = useNavigate();
   const location = useLocation();
+  const { hash, pathname, search } = location;
   const [rows, setRows] = React.useState<NormalizedBatchRow[] | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [loadError, setLoadError] = React.useState<string | null>(null);
@@ -100,9 +103,10 @@ function BatchList(): JSX.Element {
   React.useEffect(() => {
     if (incomingPrompts) {
       // Clear the location.state so a re-mount doesn't re-trigger.
-      window.history.replaceState({}, '');
+      const reset = batchPromptImportStateReset({ hash, pathname, search });
+      navigate(reset.to, reset.options);
     }
-  }, [incomingPrompts]);
+  }, [hash, incomingPrompts, navigate, pathname, search]);
 
   const reload = React.useCallback(async () => {
     const requestId = reloadRequestRef.current + 1;
@@ -496,12 +500,7 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
     failed: detailFailed,
     cancelled: detailCancelled,
   });
-  const detailRemaining = batchRemainingCount({
-    total: detailTotal ?? 0,
-    done: detailDone,
-    failed: detailFailed,
-    cancelled: detailCancelled,
-  });
+  const detailRemaining = batchDetailRemainingCount(detail);
 
   const canCancel = detail.status === 'pending' || detail.status === 'running';
 

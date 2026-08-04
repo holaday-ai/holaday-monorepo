@@ -1,10 +1,15 @@
 import { Check, MoreHorizontal } from 'lucide-react';
 import * as React from 'react';
 import { awaitingUserCopy } from '@/lib/awaiting-user-copy';
+import {
+  taskDisplaySource,
+  taskDisplayTitle,
+} from '@/lib/task-display-copy';
 import { deriveTaskProductState } from '@/lib/task-product-state';
 import { cn } from '@/lib/utils';
 import { type UiTask, isActive } from '@/types/task';
-import { summariseIntent } from '@/utils/summarise-intent';
+
+export { taskDisplaySource, taskDisplayTitle } from '@/lib/task-display-copy';
 
 interface Props {
   task: UiTask;
@@ -58,21 +63,6 @@ const LIVE_SUB_STATUS_LABELS: Record<TaskLiveSubStatus, string> = {
 };
 
 /**
- * Resolves the display label for a task row. Priority:
- *   1. user-set task.title (raw, no summarisation — respect the choice)
- *   2. summariseIntent(task.intent) — rule-based cleanup
- *   3. raw task.intent — ultimate fallback so the row is never empty
- */
-export function taskDisplayTitle(task: UiTask, maxLen = 24): string {
-  if (task.title && task.title.trim().length > 0) {
-    const t = task.title.trim();
-    return t.length <= maxLen ? t : `${t.slice(0, maxLen - 1)}…`;
-  }
-  const summary = summariseIntent(task.intent, maxLen);
-  return summary || task.intent;
-}
-
-/**
  * One row in the sidebar task list, Claude-style. Single-line intent
  * with a colour-coded status dot to its left; no subtitle row. A 2px
  * blue left-bar marks the selected row. Hover tints the background.
@@ -124,7 +114,7 @@ export function TaskListItem({
     ? undefined
     : batchMode && batchDisabled
       ? '进行中的任务无法批量删除'
-      : `${task.intent}\n${taskListItemSubtitle(task, liveSubStatus, elapsedNow)}`;
+      : `${taskDisplaySource(task)}\n${taskListItemSubtitle(task, liveSubStatus, elapsedNow)}`;
   return (
     <div
       onContextMenu={
@@ -170,7 +160,7 @@ export function TaskListItem({
       <StatusDot status={task.status} />
       {renaming && onRenameCommit ? (
         <RenameInput
-          initial={task.title ?? summariseIntent(task.intent, 40) ?? task.intent}
+          initial={taskDisplaySource(task)}
           onCommit={(next) => onRenameCommit(task.taskId, next)}
           onCancel={onRenameCancel ?? (() => {})}
         />
@@ -185,12 +175,6 @@ export function TaskListItem({
             // Stop propagation here so a click on the title doesn't
             // also bubble to the parent and double-toggle.
             if (batchMode) e.stopPropagation();
-          }}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault();
-              handleRowClick(e);
-            }
           }}
           aria-pressed={selected && !batchMode ? true : undefined}
           className={cn(

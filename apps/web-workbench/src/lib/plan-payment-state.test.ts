@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   normalizeCnPaymentOptions,
   normalizePaymentOptions,
+  planAddonPaymentAvailable,
+  planFirstMonthOfferCopy,
   planPaymentCtaState,
   planPaymentErrorMessage,
   planPaymentOptionsLoading,
+  planSettlementNotice,
 } from './plan-payment-state';
 
 describe('normalizePaymentOptions', () => {
@@ -83,10 +86,30 @@ describe('planPaymentErrorMessage', () => {
 });
 
 describe('normalizeCnPaymentOptions', () => {
-  it('enables local payment only when explicitly true', () => {
-    expect(normalizeCnPaymentOptions({ enabled: true })).toEqual({ enabled: true });
-    expect(normalizeCnPaymentOptions({ enabled: 'true' })).toEqual({ enabled: false });
-    expect(normalizeCnPaymentOptions(null)).toEqual({ enabled: false });
+  it('keeps only providers explicitly reported ready', () => {
+    expect(normalizeCnPaymentOptions({ enabled: true, wechat: true, alipay: false })).toEqual({
+      enabled: true,
+      wechat: true,
+      alipay: false,
+    });
+    expect(normalizeCnPaymentOptions({ enabled: true, wechat: 'true', alipay: true })).toEqual({
+      enabled: true,
+      wechat: false,
+      alipay: true,
+    });
+  });
+
+  it('fails closed when provider readiness is missing', () => {
+    expect(normalizeCnPaymentOptions({ enabled: true })).toEqual({
+      enabled: false,
+      wechat: false,
+      alipay: false,
+    });
+    expect(normalizeCnPaymentOptions(null)).toEqual({
+      enabled: false,
+      wechat: false,
+      alipay: false,
+    });
   });
 });
 
@@ -177,5 +200,67 @@ describe('planPaymentOptionsLoading', () => {
         cnPaymentOptionsLoaded: true,
       }),
     ).toBe(false);
+  });
+});
+
+describe('planAddonPaymentAvailable', () => {
+  it('allows Chinese add-on checkout through either local provider', () => {
+    expect(planAddonPaymentAvailable({ zh: true, cnEnabled: true, paypalEnabled: false })).toBe(
+      true,
+    );
+  });
+
+  it('requires PayPal outside the Chinese checkout', () => {
+    expect(planAddonPaymentAvailable({ zh: false, cnEnabled: true, paypalEnabled: false })).toBe(
+      false,
+    );
+    expect(planAddonPaymentAvailable({ zh: false, cnEnabled: false, paypalEnabled: true })).toBe(
+      true,
+    );
+  });
+});
+
+describe('plan pricing copy', () => {
+  it('describes first-month pricing as conditional and checkout-authoritative', () => {
+    expect(
+      planFirstMonthOfferCopy({
+        zh: true,
+        regularPrice: '¥29',
+        promoPrice: '¥9.9',
+      }),
+    ).toEqual({
+      priceMain: '¥29',
+      priceUnit: '/ 月',
+      hint: '符合新付费用户优惠条件时，首月 ¥9.9；实际金额以结账页为准',
+    });
+
+    expect(
+      planFirstMonthOfferCopy({
+        zh: false,
+        regularPrice: '$4',
+        promoPrice: '$1.50',
+      }),
+    ).toEqual({
+      priceMain: '$4',
+      priceUnit: '/ month',
+      hint: 'Eligible new paid users get the first month for $1.50; checkout shows the final amount',
+    });
+  });
+
+  it('describes settlement currency for the payment methods actually available', () => {
+    expect(
+      planSettlementNotice({ zh: true, wechat: true, alipay: true, paypalEnabled: false }),
+    ).toBe('微信支付和支付宝均按页面人民币金额结算，实际金额以结账页为准。');
+    expect(
+      planSettlementNotice({ zh: true, wechat: true, alipay: false, paypalEnabled: false }),
+    ).toBe('微信支付按页面人民币金额结算，实际金额以结账页为准。');
+    expect(
+      planSettlementNotice({ zh: true, wechat: false, alipay: false, paypalEnabled: true }),
+    ).toBe('当前在线支付通过 PayPal 以美元结算；人民币价格仅供对照，实际金额以结账页为准。');
+    expect(
+      planSettlementNotice({ zh: false, wechat: true, alipay: true, paypalEnabled: true }),
+    ).toBe(
+      'WeChat Pay and Alipay settle in CNY; PayPal settles in USD. Checkout shows the final amount.',
+    );
   });
 });

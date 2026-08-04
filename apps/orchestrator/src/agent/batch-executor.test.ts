@@ -91,10 +91,8 @@ describe('runWithConcurrency — concurrent dispatch', () => {
     for (const s of startedAt) {
       expect(s).toBeLessThan(firstFinish);
     }
-    // Total elapsed clearly less than 2× the per-item delay (would
-    // mean serial). 60ms is generous slack for CI jitter.
-    const total = Date.now() - t0;
-    expect(total).toBeLessThan(60);
+    // The overlap assertion above proves parallel dispatch without
+    // depending on wall-clock speed under a loaded CI worker.
   });
 
   it('caps to `concurrency` when items > concurrency', async () => {

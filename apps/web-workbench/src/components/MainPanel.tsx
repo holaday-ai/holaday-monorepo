@@ -22,6 +22,7 @@ import { Button } from '@/components/ui/button';
 import type { ComposerSubmitResult } from '@/components/composer-submit';
 import { shouldResetComposerOnSelectionChange } from '@/components/composer-reset';
 import { cn } from '@/lib/utils';
+import { taskDisplayIntent, taskDisplaySource } from '@/lib/task-display-copy';
 import { taskStatusLabel } from '@/lib/task-status-copy';
 import { useTaskStore } from '@/stores/task-store';
 import type { AwaitingKind } from '@/lib/awaiting-user-copy';
@@ -82,6 +83,8 @@ interface Props {
   sidePanelMode?: SidePanelMode;
   browserAttentionNeeded?: boolean;
   onToggleSidePanel?: () => void;
+  /** True when the desktop browser is sharing the row with this panel. */
+  browserPanelOpen?: boolean;
   profileStorageScope?: string | null;
 }
 
@@ -110,6 +113,7 @@ export function MainPanel({
   sidePanelMode = 'closed',
   browserAttentionNeeded = false,
   onToggleSidePanel,
+  browserPanelOpen = false,
   profileStorageScope = null,
 }: Props): JSX.Element {
   // Suggestion-chip clicks (empty-state EmptyState picks + the
@@ -180,8 +184,14 @@ export function MainPanel({
   // workspace surface, not "header + scroll area + footer composer."
   const showEmptyHome = !task;
   return (
-    <main className="flex h-full min-w-0 flex-[2] flex-col bg-background lg:min-w-[420px]">
-      <div className="flex h-11 items-center border-b border-[#DCDDDD]/70 bg-white/70 px-3 backdrop-blur md:hidden dark:border-white/10 dark:bg-card/70">
+    <main
+      data-testid="workbench-main-panel"
+      className="flex h-full min-w-0 flex-[2] flex-col bg-background lg:min-w-[560px]"
+    >
+      <div
+        data-testid="mobile-task-header"
+        className="hidden h-11 items-center border-b border-[#DCDDDD]/70 bg-white/70 px-3 backdrop-blur max-[768px]:flex dark:border-white/10 dark:bg-card/70"
+      >
         <Button
           variant="ghost"
           size="icon"
@@ -194,7 +204,7 @@ export function MainPanel({
         </Button>
         <div className="ml-2 min-w-0 flex-1 truncate pr-12 text-sm font-medium text-[#595757] dark:text-foreground/85">
           {task ? (
-            task.intent
+            taskDisplayIntent(task.intent)
           ) : (
             <BrandWordmark className="h-3.5" />
           )}
@@ -202,7 +212,14 @@ export function MainPanel({
       </div>
       {showEmptyHome ? (
         <div className="flex-1 overflow-y-auto">
-          <div className="mx-auto w-full max-w-[1180px] px-6 pb-14 pt-[clamp(78px,10vh,92px)] sm:px-12 lg:px-14">
+          <div
+            className={cn(
+              'mx-auto w-full max-w-[1180px]',
+              browserPanelOpen
+                ? 'px-6 pb-10 pt-16'
+                : 'px-6 pb-14 pt-[clamp(78px,10vh,92px)] sm:px-12 lg:px-14',
+            )}
+          >
             <div className="mx-auto w-full max-w-[1040px]">
               <h1 className="text-left text-[28px] font-semibold leading-tight tracking-tight text-foreground sm:text-[34px]">
                 Hello, <span className="text-[#EA1F59]">{greetingName || '今天想做点什么'}</span>~
@@ -210,8 +227,20 @@ export function MainPanel({
               <p className="mt-2 text-left text-[14px] font-medium text-[#8B93A6] sm:text-[16px]">
                 欢迎回来！ 今天又是高效的一天呢！ 🚀
               </p>
-              <div className="mx-auto w-full max-w-[870px] sm:ml-[56px] sm:mr-0 sm:w-[calc(100%-112px)]">
-                <div className="relative mx-auto mt-4 h-[clamp(180px,15vw,209px)] overflow-visible">
+              <div
+                className={cn(
+                  'mx-auto w-full max-w-[870px]',
+                  !browserPanelOpen && 'sm:ml-[56px] sm:mr-0 sm:w-[calc(100%-112px)]',
+                )}
+              >
+                <div
+                  className={cn(
+                    'relative mx-auto overflow-visible',
+                    browserPanelOpen
+                      ? 'mt-3 h-[152px]'
+                      : 'mt-4 h-[clamp(180px,15vw,209px)]',
+                  )}
+                >
                   <div className="absolute inset-x-0 top-0 h-full overflow-hidden">
                     <img
                       src="/design-ref/home-hero.png?v=20260701"
@@ -221,7 +250,12 @@ export function MainPanel({
                       className="pointer-events-none absolute bottom-0 left-1/2 h-auto w-[min(1160px,calc(100%+300px))] max-w-none -translate-x-1/2 select-none"
                     />
                   </div>
-                  <div className="absolute bottom-4 left-0 z-40 w-[min(390px,calc(100%-2rem))]">
+                  <div
+                    className={cn(
+                      'absolute left-0 z-40 w-[min(390px,calc(100%-2rem))]',
+                      browserPanelOpen ? 'bottom-2' : 'bottom-4',
+                    )}
+                  >
                     <OnboardingHint />
                   </div>
                 </div>
@@ -244,7 +278,10 @@ export function MainPanel({
                     compact
                   />
                 </div>
-                <SuggestionChips onPick={handlePickFromEmptyState} />
+                <SuggestionChips
+                  compact={browserPanelOpen}
+                  onPick={handlePickFromEmptyState}
+                />
               </div>
               {userPlan ? (
                 <div className="mx-auto mt-8 max-w-[900px]">
@@ -259,21 +296,22 @@ export function MainPanel({
         </div>
       ) : (
         <>
-          {/* Per-task toolbar lives at the top of the column. Hosts
-              the browser-panel entry (Codex IA close-out moved it
-              off the result card so the result stays focused on the
-              work product). Only rendered for browser-shaped tasks
-              so generate / scrape don't pay a header height. */}
-          {isBrowserLikely(task) && (
-            <div className="flex h-10 items-center justify-start gap-2 border-b border-[#DCDDDD]/70 bg-white/60 px-3 backdrop-blur sm:justify-end sm:px-4 dark:border-white/10 dark:bg-card/50">
+          {/* Desktop tasks reserve one calm top band for the fixed account
+              dock. Browser-shaped tasks also place their per-task browser
+              action here; the result card stays focused on the work product. */}
+          <div
+            data-testid="desktop-task-header-band"
+            className="hidden h-16 shrink-0 items-center justify-end gap-2 border-b border-[#DCDDDD]/70 bg-white/60 px-4 pr-40 backdrop-blur min-[769px]:flex min-[1360px]:pr-52 dark:border-white/10 dark:bg-card/50"
+          >
+            {isBrowserLikely(task) && (
               <TaskToolbar
                 task={task}
                 sidePanelMode={sidePanelMode}
                 attentionNeeded={browserAttentionNeeded}
                 onToggleSidePanel={onToggleSidePanel ?? (() => {})}
               />
-            </div>
-          )}
+            )}
+          </div>
           <div className="flex-1 overflow-y-auto scroll-pb-40 pb-40">
             <LazyLoadBoundary
               surfaceLabel="任务详情"
@@ -365,7 +403,7 @@ function StaticTaskDetailFallback({ task }: { task: UiTask }): JSX.Element {
             任务摘要
           </div>
           <h2 className="mt-1 break-words text-base font-semibold leading-snug text-foreground">
-            {task.title || task.intent}
+            {taskDisplaySource(task)}
           </h2>
         </div>
         <span className="rounded-md border border-[#DCDDDD] bg-[#EFEFEF]/55 px-2 py-0.5 text-[11px] font-medium text-[#595757] dark:border-white/10 dark:bg-white/5 dark:text-foreground/80">
@@ -412,8 +450,10 @@ function StaticTaskDetailFallback({ task }: { task: UiTask }): JSX.Element {
  * and task management. Click fills the composer (does NOT submit).
  */
 function SuggestionChips({
+  compact = false,
   onPick,
 }: {
+  compact?: boolean;
   onPick(intent: string): void;
 }): JSX.Element {
   const allItems = SUGGESTION_GROUPS.flatMap((group) => group.items);
@@ -422,8 +462,8 @@ function SuggestionChips({
   ).filter((item): item is SuggestionItem => Boolean(item));
 
   return (
-    <div className="mx-auto mt-14 max-w-[900px]">
-      <div className="flex flex-wrap items-center justify-center gap-3">
+    <div className={cn('mx-auto max-w-[900px]', compact ? 'mt-8' : 'mt-14')}>
+      <div className={cn('flex flex-wrap items-center justify-center', compact ? 'gap-2' : 'gap-3')}>
         {primaryItems.map((s) => {
           const Icon = s.icon;
           const tone = suggestionTone(s.label);
@@ -434,7 +474,8 @@ function SuggestionChips({
               onClick={() => onPick(s.intent)}
               aria-label={`用示例填入：${s.label}`}
               className={cn(
-                'group inline-flex h-9 min-w-[118px] items-center justify-center gap-2 rounded-[7px] border px-4 text-[13px] font-semibold shadow-[0_7px_16px_rgba(17,24,39,0.035)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20',
+                'group inline-flex h-9 items-center justify-center gap-2 rounded-[7px] border font-semibold shadow-[0_7px_16px_rgba(17,24,39,0.035)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20',
+                compact ? 'min-w-[104px] px-3 text-[12px]' : 'min-w-[118px] px-4 text-[13px]',
                 tone.button,
               )}
             >

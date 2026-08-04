@@ -1,6 +1,7 @@
 import type { BrowserViewportProfile, ServerMessage } from '@holaday/shared-types';
 import { create } from 'zustand';
 import { batchConfirmQuestion, singleConfirmQuestion } from '@/lib/batch-confirm-copy';
+import { normaliseAttachmentDownloadUrl } from '@/lib/attachment-download-url';
 import { pickDefaultBrowserViewportProfile } from '@/lib/browser-viewport-profile';
 import { humaniseTaskError } from '@/lib/error-copy';
 import { pageErrorMessage } from '@/lib/page-error-copy';
@@ -20,6 +21,7 @@ import type {
   UiWebSearchEvent,
 } from '@/types/task';
 import { isTerminalStatus } from '@/types/task';
+import type { ImageCreationOptions } from '@/types/image';
 import type { VideoCreationOptions } from '@/types/video';
 
 /**
@@ -247,6 +249,7 @@ export interface TaskStore {
      */
     videoOptions?: VideoCreationOptions,
     skillSelection?: UiSkillSelection,
+    imageOptions?: ImageCreationOptions,
   ): Promise<{ taskId: string } | { error: string }>;
   deleteTask(taskId: string): Promise<{ ok: true } | { error: string }>;
   renameTask(taskId: string, title: string): Promise<{ ok: true } | { error: string }>;
@@ -475,7 +478,7 @@ export function mergeTaskPagesReplacingDuplicates(
     if (existing && shouldPreserveFinalTaskRow(existing, task)) {
       continue;
     }
-    merged[existingIndex] = task;
+    merged[existingIndex] = preserveClientTaskContext(existing, task);
   }
 
   return merged;
@@ -488,8 +491,35 @@ function preserveFinalTaskRows(
   const currentByTaskId = new Map(current.map((task) => [task.taskId, task]));
   return incoming.map((task) => {
     const existing = currentByTaskId.get(task.taskId);
-    return existing && shouldPreserveFinalTaskRow(existing, task) ? existing : task;
+    if (!existing) return task;
+    return shouldPreserveFinalTaskRow(existing, task)
+      ? existing
+      : preserveClientTaskContext(existing, task);
   });
+}
+
+function preserveClientTaskContext(current: UiTask, incoming: UiTask): UiTask {
+  const replyToTaskId = incoming.replyToTaskId ?? current.replyToTaskId;
+  const executionMode = incoming.executionMode ?? current.executionMode;
+  const awaitingKind =
+    incoming.status === 'awaiting_user'
+      ? incoming.awaitingKind ??
+        (current.status === 'awaiting_user' ? current.awaitingKind : undefined)
+      : undefined;
+  if (
+    replyToTaskId === incoming.replyToTaskId &&
+    executionMode === incoming.executionMode &&
+    awaitingKind === incoming.awaitingKind
+  ) {
+    return incoming;
+  }
+  const { awaitingKind: _incomingAwaitingKind, ...incomingWithoutAwaitingKind } = incoming;
+  return {
+    ...incomingWithoutAwaitingKind,
+    ...(replyToTaskId ? { replyToTaskId } : {}),
+    ...(executionMode ? { executionMode } : {}),
+    ...(awaitingKind ? { awaitingKind } : {}),
+  };
 }
 
 function shouldPreserveFinalTaskRow(current: UiTask, incoming: UiTask): boolean {
@@ -625,16 +655,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           detailStatus === 'awaiting_user'
             ? safeTaskListText(detail.awaitingQuestion) || null
             : null;
-        const awaitingKindRaw = detail.awaitingKind;
-        const awaitingKind: UiAwaitingUser['awaitingKind'] =
-          awaitingKindRaw === 'login' ||
-          awaitingKindRaw === 'captcha' ||
-          awaitingKindRaw === 'permission' ||
-          awaitingKindRaw === 'browser_action' ||
-          awaitingKindRaw === 'clarification' ||
-          awaitingKindRaw === 'video_quote'
-            ? awaitingKindRaw
-            : undefined;
+        const awaitingKind = normalizeAwaitingKind(detail.awaitingKind);
         const executionMode = extractExecutionMode(detail.result);
         const failedChecks = extractFailedChecks(detail.result);
         // Codex Pack A4 — verifier verdict columns from tasks.detail.
@@ -1217,6 +1238,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     viewportProfile,
     videoOptions,
     skillSelection,
+    imageOptions,
   ) {
     // Reject intents that are obviously control commands typed into
     // the wrong box (e.g. user typing "停止" into the composer
@@ -1225,7 +1247,6 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     const trimmed = intent.trim();
     if (CONTROL_WORDS.has(trimmed.toLowerCase())) {
       const msg = `"${trimmed}" 是控制词，不是任务指令。要停止任务请用 Panel 右上角的"停止"按钮。`;
-      set({ error: msg });
       return { error: msg };
     }
     const pickedViewportProfile =
@@ -1244,10 +1265,12 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       tickCount: 0,
       createdAt,
       executionMode: inferExecutionModeFromIntent(intent),
+      ...(replyToTaskId ? { replyToTaskId } : {}),
     };
     set((prev) => ({
       tasks: [pendingTask, ...prev.tasks],
       browserInteractive: false,
+      error: null,
     }));
     try {
       const res = await trpc.tasks.create.mutate({
@@ -1263,6 +1286,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
             }
           : {}),
         ...(videoOptions ? { videoOptions } : {}),
+        ...(imageOptions ? { imageOptions } : {}),
         viewportProfile: pickedViewportProfile,
       });
       // Optimistic insert at the top so the UI feels instant; the next
@@ -1288,6 +1312,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         tickCount: 0,
         createdAt,
         executionMode: serverExecutionMode ?? inferExecutionModeFromIntent(intent),
+        ...(replyToTaskId ? { replyToTaskId } : {}),
       };
       // composerMode flips back to 'task' here. Without this, a user
       // who clicked 发新任务 (composerMode='new') and submitted ends
@@ -1318,7 +1343,6 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     } catch (err) {
       const msg = taskStoreError(err);
       set((prev) => ({
-        error: msg,
         tasks: prev.tasks.filter((t) => t.taskId !== localTaskId),
       }));
       return { error: msg };
@@ -1624,6 +1648,8 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         const incomingAttachments = parseUiAttachments(
           (msg as { attachments?: unknown }).attachments,
         );
+        const incomingVerificationPassed =
+          typeof msg.verificationPassed === 'boolean' ? msg.verificationPassed : null;
         return {
           tasks: prev.tasks.map((t) =>
             t.taskId === msg.taskId
@@ -1636,6 +1662,9 @@ export const useTaskStore = create<TaskStore>((set, get) => {
                     ? { failedChecks: incomingFailedChecks }
                     : {}),
                   ...(incomingAttachments ? { attachments: incomingAttachments } : {}),
+                  ...(incomingVerificationPassed !== null
+                    ? { verificationPassed: incomingVerificationPassed }
+                    : {}),
                 }
               : t,
           ),
@@ -1772,16 +1801,22 @@ export const useTaskStore = create<TaskStore>((set, get) => {
             [msg.taskId]: msg.message,
           },
           subStatusByTask: nextSubStatus,
-          // Pre-B1: progress notes only came from generate / scrape, so
-          // we eagerly flipped executionMode='generate' to keep the
-          // BrowserPanel from rendering for non-browser tasks. Pack B1
-          // adds supercar/browser progress events; skip the flip when
-          // the new subStatus is `browsing` (real browser session) so
-          // the panel stays mounted.
+          // Progress phases are shared by browser and generate lanes:
+          // browser runs emit planning → browsing → verifying. Never
+          // overwrite an execution mode that was already decided by
+          // tasks.create or task hydration. For legacy rows with no mode,
+          // only the lane-specific phases are strong enough to infer one.
           tasks: prev.tasks.map((t) => {
             if (t.taskId !== msg.taskId) return t;
             const liveTask = markTaskRunningFromLiveSignal(t);
-            if (liveTask.executionMode !== 'generate' && typedSubStatus !== 'browsing') {
+            if (liveTask.executionMode) return liveTask;
+            if (typedSubStatus === 'browsing') {
+              return { ...liveTask, executionMode: 'browser' as const };
+            }
+            if (typedSubStatus === 'generating_image') {
+              return { ...liveTask, executionMode: 'image' as const };
+            }
+            if (typedSubStatus === 'generating') {
               return { ...liveTask, executionMode: 'generate' as const };
             }
             return liveTask;
@@ -2533,6 +2568,10 @@ export function toUiTask(row: ListRow): UiTask {
     failureLevelRaw === 'hard_fail'
       ? failureLevelRaw
       : null;
+  const awaitingKind =
+    status === 'awaiting_user'
+      ? normalizeAwaitingKind((row as { awaitingKind?: unknown }).awaitingKind)
+      : undefined;
   return {
     taskId: safeTaskListText((row as { taskId?: unknown }).taskId),
     intent: safeTaskListText((row as { intent?: unknown }).intent) || '未命名任务',
@@ -2550,6 +2589,7 @@ export function toUiTask(row: ListRow): UiTask {
     ...(finalScreenshot ? { finalScreenshot } : {}),
     ...(finalUrl ? { finalUrl } : {}),
     ...(finalViewport ? { finalViewport } : {}),
+    ...(awaitingKind ? { awaitingKind } : {}),
     // tRPC serializes Date to string over the wire; coerce back.
     createdAt: new Date(safeTaskListDate((row as { createdAt?: unknown }).createdAt) ?? 0),
     modelLabel: opusUsed ? 'opus' : 'sonnet',
@@ -2566,6 +2606,17 @@ export function toUiTask(row: ListRow): UiTask {
 function safeNullableTaskListText(value: unknown): string | null {
   const text = safeTaskListText(value);
   return text || null;
+}
+
+function normalizeAwaitingKind(value: unknown): UiAwaitingUser['awaitingKind'] {
+  return value === 'login' ||
+    value === 'captcha' ||
+    value === 'permission' ||
+    value === 'browser_action' ||
+    value === 'clarification' ||
+    value === 'video_quote'
+    ? value
+    : undefined;
 }
 
 function safeTaskListText(value: unknown): string {
@@ -2622,6 +2673,10 @@ function parseUiAttachments(arr: unknown): UiTask['attachments'] | undefined {
       }
       const downloadUrl = normaliseAttachmentDownloadUrl(e.downloadUrl);
       if (!downloadUrl) return null;
+      const posterUrl =
+        typeof e.posterUrl === 'string'
+          ? normaliseAttachmentDownloadUrl(e.posterUrl)
+          : null;
       return {
         fileId: e.fileId,
         downloadUrl,
@@ -2630,17 +2685,17 @@ function parseUiAttachments(arr: unknown): UiTask['attachments'] | undefined {
         sizeBytes: e.sizeBytes,
         expiresAt: e.expiresAt,
         kind: e.kind,
+        ...(e.availability === 'unavailable'
+          ? { availability: 'unavailable' as const }
+          : {}),
+        ...(posterUrl ? { posterUrl } : {}),
+        ...(posterUrl && e.posterAvailability === 'unavailable'
+          ? { posterAvailability: 'unavailable' as const }
+          : {}),
       };
     })
     .filter((v): v is NonNullable<typeof v> => v !== null);
   return cleaned.length > 0 ? cleaned : undefined;
-}
-
-function normaliseAttachmentDownloadUrl(raw: string): string | null {
-  const trimmed = raw.trim();
-  if (/^\/api\/files\/[^/]+\/download(?:[?#].*)?$/.test(trimmed)) return trimmed;
-  if (/^\/files\/[^/]+\/download(?:[?#].*)?$/.test(trimmed)) return `/api${trimmed}`;
-  return null;
 }
 
 function safeNullableTaskListDate(value: unknown): Date | null {

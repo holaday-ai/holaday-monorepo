@@ -37,6 +37,7 @@ import {
   stockLabelDatePart,
   stockChartAxisTicks,
 } from '@/lib/stock-chart-state';
+import { stockDashboardTrustState } from '@/lib/stock-dashboard-trust';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import { useTaskStore } from '@/stores/task-store';
@@ -281,6 +282,21 @@ export function StockTasksPage(): JSX.Element {
   const sampleWatchlist = false;
   const dashboardFreshness = dashboard?.freshness;
   const freshnessMessage = dashboardFreshness?.message;
+  const dashboardTrust = React.useMemo(
+    () =>
+      stockDashboardTrustState({
+        freshnessStatus: dashboardFreshness?.status,
+        observedTradeDate: dashboard?.observedTradeDate,
+        refreshedAt: dashboard?.updatedAt,
+      }),
+    [dashboard?.observedTradeDate, dashboard?.updatedAt, dashboardFreshness?.status],
+  );
+  const briefingUnavailable = sampleWatchlist || !dashboardTrust.canGenerateBriefing;
+  const briefingUnavailableTitle = sampleWatchlist
+    ? '添加真实关注股票后可生成日报'
+    : !dashboardTrust.canGenerateBriefing
+      ? '真实行情恢复并核验日期后可生成日报'
+      : undefined;
   const realWatchlist = watchlist ?? [];
   const commands = React.useMemo(() => quickCommands(stocks), [stocks]);
   const hasMarketSignals = Boolean(
@@ -328,7 +344,10 @@ export function StockTasksPage(): JSX.Element {
   const generateBriefing = React.useCallback(async () => {
     if (briefingGenerating) return;
     if (loadingDashboard) return;
-    if (sampleWatchlist) return;
+    if (briefingUnavailable) {
+      toast.show(briefingUnavailableTitle ?? '当前行情暂不可用于生成日报', 'error');
+      return;
+    }
     setBriefingGenerating(true);
     setLoadError(null);
     try {
@@ -341,7 +360,7 @@ export function StockTasksPage(): JSX.Element {
     } finally {
       setBriefingGenerating(false);
     }
-  }, [briefingGenerating, loadingDashboard, sampleWatchlist, toast]);
+  }, [briefingGenerating, briefingUnavailable, briefingUnavailableTitle, loadingDashboard, toast]);
 
   const addWatchlistStock = React.useCallback(async () => {
     const symbol = normalizeSymbol(stockForm.symbol);
@@ -424,7 +443,7 @@ export function StockTasksPage(): JSX.Element {
 
   const toggleBriefing = React.useCallback(async () => {
     if (loadingDashboard) return;
-    if (briefingBusy || sampleWatchlist) return;
+    if (briefingBusy || briefingUnavailable) return;
     setBriefingBusy(true);
     try {
       const next = enabled
@@ -436,23 +455,43 @@ export function StockTasksPage(): JSX.Element {
     } finally {
       setBriefingBusy(false);
     }
-  }, [briefingBusy, enabled, loadingDashboard, sampleWatchlist]);
+  }, [briefingBusy, briefingUnavailable, enabled, loadingDashboard]);
 
   return (
     <div className="min-h-full bg-[#FAFAFB] text-[#121826]">
       <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-5 px-4 py-5 sm:px-5 lg:px-6">
-        <header className="flex flex-col gap-3 border-b border-[#E7E7EB] pb-4 md:flex-row md:items-center md:justify-between">
+        <header className="flex flex-col gap-3 border-b border-[#E7E7EB] pb-4 min-[769px]:pr-[12rem] md:flex-row md:items-center md:justify-between">
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-[22px] font-semibold tracking-tight text-[#121826]">
               股市任务
             </h1>
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-[#D9F2E7] bg-[#F2FCF8] px-2.5 py-1 text-[12px] font-medium text-[#08764A]">
-              <span className="h-1.5 w-1.5 rounded-full bg-[#10A66E]" />
-              {dashboardStatusLabel({ loading: loadingDashboard, dashboard })}
+            <span
+              className={cn(
+                'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] font-medium',
+                dashboardTrust.tone === 'fresh'
+                  ? 'border-[#D9F2E7] bg-[#F2FCF8] text-[#08764A]'
+                  : dashboardTrust.tone === 'stale'
+                    ? 'border-[#F4D7A1] bg-[#FFF9EC] text-[#9A5B00]'
+                    : 'border-[#E1E3E8] bg-[#F7F8FA] text-[#667085]',
+              )}
+            >
+              <span
+                className={cn(
+                  'h-1.5 w-1.5 rounded-full',
+                  dashboardTrust.tone === 'fresh'
+                    ? 'bg-[#10A66E]'
+                    : dashboardTrust.tone === 'stale'
+                      ? 'bg-[#D98E04]'
+                      : 'bg-[#98A2B3]',
+                )}
+              />
+              {loadingDashboard && !dashboard ? '同步中' : dashboardTrust.statusLabel}
             </span>
-            <span className="text-[12px] text-[#7D8493]">{formatUpdateTime(dashboard?.updatedAt)} 更新</span>
+            <span className="text-[12px] text-[#7D8493]">
+              {dashboardTrust.dataDateLabel} · {dashboardTrust.refreshLabel}
+            </span>
           </div>
-          <div className="flex items-center gap-2 text-[13px] text-[#4F5868]">
+          <div className="flex flex-wrap items-center justify-end gap-2 text-[13px] text-[#4F5868]">
             <button
               type="button"
               onClick={() => void loadPageData('refresh')}
@@ -465,8 +504,8 @@ export function StockTasksPage(): JSX.Element {
             <button
               type="button"
               onClick={() => void generateBriefing()}
-              disabled={briefingGenerating || loadingDashboard || sampleWatchlist}
-              title={sampleWatchlist ? '添加真实关注股票后可生成日报' : undefined}
+              disabled={briefingGenerating || loadingDashboard || briefingUnavailable}
+              title={briefingUnavailableTitle}
               className="inline-flex h-8 items-center gap-2 rounded-[8px] border border-[#DCDDDD] bg-white px-3 transition-colors hover:border-[#EA1F59]/30 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {briefingGenerating ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <FileText className="h-3.5 w-3.5" aria-hidden />}
@@ -475,8 +514,8 @@ export function StockTasksPage(): JSX.Element {
             <button
               type="button"
               onClick={toggleBriefing}
-              disabled={briefingBusy || loadingDashboard || sampleWatchlist}
-              title={sampleWatchlist ? '添加关注股票后可开启日报' : undefined}
+              disabled={briefingBusy || loadingDashboard || briefingUnavailable}
+              title={briefingUnavailableTitle}
               className="inline-flex h-8 items-center gap-2 rounded-[8px] border border-[#DCDDDD] bg-white px-3 transition-colors hover:border-[#EA1F59]/30 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {briefingBusy ? (
@@ -496,9 +535,16 @@ export function StockTasksPage(): JSX.Element {
             部分股票数据暂时无法加载：{loadError}
           </div>
         ) : null}
-        {freshnessMessage ? (
-          <div className="rounded-[8px] border border-[#E1E3E8] bg-white px-4 py-3 text-[13px] text-[#4F5868]">
-            {refreshingDashboard ? '刷新中：' : null}{freshnessMessage}
+        {dashboardTrust.message || freshnessMessage ? (
+          <div
+            className={cn(
+              'rounded-[8px] border px-4 py-3 text-[13px]',
+              dashboardTrust.tone === 'fresh'
+                ? 'border-[#E1E3E8] bg-white text-[#4F5868]'
+                : 'border-[#F4D7A1] bg-[#FFF9EC] text-[#7A4B00]',
+            )}
+          >
+            {refreshingDashboard ? '刷新中：' : null}{dashboardTrust.message ?? freshnessMessage}
           </div>
         ) : refreshingDashboard && dashboard ? (
           <div className="rounded-[8px] border border-[#E1E3E8] bg-white px-4 py-3 text-[13px] text-[#4F5868]">
@@ -540,8 +586,8 @@ export function StockTasksPage(): JSX.Element {
               <button
                 key={command}
                 type="button"
-                disabled={loadingDashboard || (command === '生成今日关注日报' && sampleWatchlist)}
-                title={command === '生成今日关注日报' && sampleWatchlist ? '添加真实关注股票后可生成日报' : undefined}
+                disabled={loadingDashboard || (command === '生成今日关注日报' && briefingUnavailable)}
+                title={command === '生成今日关注日报' ? briefingUnavailableTitle : undefined}
                 onClick={() => {
                   setPrompt(command);
                   if (command === '生成今日关注日报') void generateBriefing();
@@ -572,6 +618,7 @@ export function StockTasksPage(): JSX.Element {
                 onEdit={() => setWatchlistSheetOpen(true)}
                 onGenerateBriefing={generateBriefing}
                 briefingGenerating={briefingGenerating}
+                canGenerateBriefing={!briefingUnavailable}
               />
               <DailyBriefing
                 stocks={stocks}
@@ -580,11 +627,14 @@ export function StockTasksPage(): JSX.Element {
                 news={news}
                 leaderboards={leaderboards}
                 updatedAt={dashboard?.updatedAt}
+                observedTradeDate={dashboard?.observedTradeDate}
                 briefing={briefingResult}
                 generating={briefingGenerating}
                 onGenerate={generateBriefing}
                 sampleWatchlist={sampleWatchlist}
                 hasMarketSignals={hasMarketSignals}
+                canGenerateBriefing={!briefingUnavailable}
+                trustMessage={dashboardTrust.message}
               />
               <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
                 <MarketTable
@@ -619,7 +669,7 @@ export function StockTasksPage(): JSX.Element {
 
         <footer className="flex flex-col gap-2 border-t border-[#E7E7EB] pt-3 text-[11px] text-[#8B92A1] sm:flex-row sm:items-center sm:justify-between">
           <span>仅供信息分析，不构成投资建议</span>
-          <span>数据来源：AkShare / Holaday 分析层 · 更新时间：{formatUpdateTime(dashboard?.updatedAt)}</span>
+          <span>数据来源：AkShare / Holaday 分析层 · {dashboardTrust.dataDateLabel} · {dashboardTrust.refreshLabel}</span>
         </footer>
       </div>
       <WatchlistManagerSheet
@@ -1048,6 +1098,7 @@ function MarketHighlights({
   marketIndices,
   loading,
   sample,
+  canGenerateBriefing,
   onEdit,
   onGenerateBriefing,
   briefingGenerating,
@@ -1056,6 +1107,7 @@ function MarketHighlights({
   marketIndices: IndexRow[];
   loading: boolean;
   sample: boolean;
+  canGenerateBriefing: boolean;
   onEdit: () => void;
   onGenerateBriefing: () => void;
   briefingGenerating: boolean;
@@ -1105,7 +1157,7 @@ function MarketHighlights({
               key={stock.symbol}
               stock={stock}
               marketIndex={primaryIndex}
-              canGenerateBriefing={!sample}
+              canGenerateBriefing={canGenerateBriefing}
               briefingGenerating={briefingGenerating}
               onGenerateBriefing={onGenerateBriefing}
             />
@@ -1151,7 +1203,7 @@ function StockHighlightCard({
             </div>
             <div className="text-right">
               <div className="whitespace-nowrap text-[22px] font-medium leading-none tracking-normal tabular-nums text-[#121826]">{formatStockPrice(stock)}</div>
-              <StockChangeBadge value={stock.changePct} className="mt-1.5 justify-end" />
+              <StockChangeBadge value={stock.price === '—' ? null : stock.changePct} className="mt-1.5 justify-end" />
             </div>
           </div>
           {stock.spark.length >= 2 ? (
@@ -1564,11 +1616,14 @@ function DailyBriefing({
   news,
   leaderboards,
   updatedAt,
+  observedTradeDate,
   briefing,
   generating,
   onGenerate,
   sampleWatchlist,
   hasMarketSignals,
+  canGenerateBriefing,
+  trustMessage,
 }: {
   stocks: StockSnapshot[];
   marketIndices: IndexRow[];
@@ -1576,11 +1631,14 @@ function DailyBriefing({
   news: NewsRow[];
   leaderboards: NonNullable<DashboardSnapshot['leaderboards']>;
   updatedAt?: string;
+  observedTradeDate?: string | null;
   briefing: GeneratedBriefing | null;
   generating: boolean;
   onGenerate: () => void;
   sampleWatchlist: boolean;
   hasMarketSignals: boolean;
+  canGenerateBriefing: boolean;
+  trustMessage: string | null;
 }): JSX.Element {
   const quoteStocks = stocks.filter((stock) => stock.price !== '—');
   const riskStock = quoteStocks.find((s) => s.signal === '偏弱' || s.signal === '风险升高');
@@ -1596,16 +1654,22 @@ function DailyBriefing({
         action={briefing ? '重新生成' : '立即生成'}
         onAction={onGenerate}
         actionBusy={generating}
-        actionDisabled={sampleWatchlist}
+        actionDisabled={sampleWatchlist || !canGenerateBriefing}
       />
       <div className="mt-4 rounded-[8px] border border-[#ECEEF3] bg-gradient-to-r from-[#FFFFFF] to-[#FFF9FB] px-4 py-3">
         <div className="text-[15px] font-semibold text-[#121826]">
-          {briefing ? `${briefing.title} 已生成` : dailyBriefingHeadline(stocks, riskStock)}
+          {briefing
+            ? `${briefing.title} 已生成`
+            : !canGenerateBriefing && observedTradeDate
+              ? `数据日期 ${formatObservedTradeDate(observedTradeDate)} 的历史行情仅供回看`
+              : dailyBriefingHeadline(stocks, riskStock)}
         </div>
         <div className="mt-1 text-[12px] leading-relaxed text-[#667085]">
           {briefing
             ? '已复用当前自选股和 AkShare 数据生成日报，可继续用上方输入框追问。'
-            : hasMarketSignals
+            : trustMessage
+              ? trustMessage
+              : hasMarketSignals
               ? dailyBriefingSourceLine(quoteStocks, marketIndices, sectors, news, leaderboards)
               : '当前真实市场数据不足。添加关注股票或稍后刷新后，可生成更完整的关注日报。'}
         </div>
@@ -2084,10 +2148,17 @@ function StockChangeBadge({
   value,
   className,
 }: {
-  value: number;
+  value: number | null;
   className?: string;
 }): JSX.Element {
-  if (!Number.isFinite(value) || value === 0) {
+  if (value === null || !Number.isFinite(value)) {
+    return (
+      <span className={cn('inline-flex items-center rounded-[4px] bg-[#F2F4F7] px-1.5 py-1 text-[12px] font-semibold tabular-nums text-[#667085]', className)}>
+        —
+      </span>
+    );
+  }
+  if (value === 0) {
     return (
       <span className={cn('inline-flex items-center rounded-[4px] bg-[#F2F4F7] px-1.5 py-1 text-[12px] font-semibold tabular-nums text-[#667085]', className)}>
         0.00%
@@ -3067,23 +3138,14 @@ function formatUpdateTime(value?: string): string {
   }).format(date);
 }
 
+function formatObservedTradeDate(value: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  return match ? `${match[2]}/${match[3]}` : value;
+}
+
 function formatDelta(value: number | null | undefined): string {
   if (value == null) return '—';
   return value > 0 ? `+${value}` : String(value);
-}
-
-function dashboardStatusLabel({
-  loading,
-  dashboard,
-}: {
-  loading: boolean;
-  dashboard: DashboardSnapshot | null;
-}): string {
-  if (loading && !dashboard) return '同步中';
-  if (!dashboard) return '待连接';
-  if (dashboard.freshness?.status === 'stale') return '缓存';
-  if (dashboard.freshness?.status === 'partial') return '部分数据';
-  return loading ? '刷新中' : 'AkShare';
 }
 
 function deltaPositive(value: number | null | undefined): boolean | undefined {

@@ -135,6 +135,27 @@ describe('normaliseDetailStepStatus', () => {
 });
 
 describe('toUiTask', () => {
+  it('hydrates a persisted video quote awaiting kind from tasks.list', () => {
+    const task = toUiTask({
+      taskId: 'tsk_video_quote',
+      intent: '生成视频',
+      title: null,
+      status: 'awaiting_user',
+      awaitingKind: 'video_quote',
+      result: { summary: '请确认制作' },
+      errorMessage: null,
+      createdAt: new Date('2026-07-23T00:00:00Z'),
+      opusUsed: false,
+      starred: false,
+      starredAt: null,
+      projectId: null,
+      verificationPassed: null,
+      failureLevel: null,
+    } as never);
+
+    expect(task.awaitingKind).toBe('video_quote');
+  });
+
   it('preserves persisted pre-execution statuses for the product state machine', () => {
     for (const status of ['pending', 'planning', 'queued'] as const) {
       const task = toUiTask({
@@ -324,6 +345,9 @@ describe('toUiTask', () => {
               sizeBytes: 418_513,
               expiresAt: '2026-07-02T00:00:00.000Z',
               kind: 'output',
+              availability: 'unavailable',
+              posterUrl: '/files/file_poster/download',
+              posterAvailability: 'unavailable',
             },
             {
               fileId: 'bad_file',
@@ -356,6 +380,9 @@ describe('toUiTask', () => {
         sizeBytes: 418_513,
         expiresAt: '2026-07-02T00:00:00.000Z',
         kind: 'output',
+        availability: 'unavailable',
+        posterUrl: '/api/files/file_poster/download',
+        posterAvailability: 'unavailable',
       },
     ]);
   });
@@ -644,6 +671,39 @@ describe('task page merging', () => {
 });
 
 describe('refreshTaskList', () => {
+  it('keeps video quote controls stable while detail hydration follows a list refresh', async () => {
+    listQuery.mockResolvedValueOnce({
+      tasks: [
+        taskRow({
+          taskId: 'tsk_quote_refresh',
+          status: 'awaiting_user',
+          result: { summary: '请确认制作' },
+        }),
+      ],
+      nextCursor: null,
+    } as never);
+    detailQuery.mockReturnValueOnce(new Promise(() => {}) as never);
+    useTaskStore.setState({
+      selectedTaskId: 'tsk_quote_refresh',
+      composerMode: 'task',
+      tasks: [
+        task({
+          taskId: 'tsk_quote_refresh',
+          status: 'awaiting_user',
+          awaitingKind: 'video_quote',
+        }),
+      ],
+    });
+
+    await useTaskStore.getState().refreshTaskList();
+
+    expect(useTaskStore.getState().tasks[0]).toMatchObject({
+      taskId: 'tsk_quote_refresh',
+      status: 'awaiting_user',
+      awaitingKind: 'video_quote',
+    });
+  });
+
   it('does not let stale active first-page rows overwrite live terminal tasks', async () => {
     listQuery.mockResolvedValueOnce({
       tasks: [
@@ -863,6 +923,47 @@ describe('selectTask detail hydration', () => {
     expect(['executing', 'queued']).toContain(useTaskStore.getState().tasks[0]?.status);
   });
 
+  it('keeps browser follow-up lineage while the canonical list replaces the optimistic row', () => {
+    const optimistic = task({
+      taskId: 'tsk_child',
+      executionMode: 'browser',
+      replyToTaskId: 'tsk_parent',
+    });
+    const canonical = task({
+      taskId: 'tsk_child',
+      executionMode: 'browser',
+    });
+
+    expect(
+      mergeTaskPagesReplacingDuplicates([optimistic], [canonical]),
+    ).toEqual([
+      expect.objectContaining({
+        taskId: 'tsk_child',
+        replyToTaskId: 'tsk_parent',
+      }),
+    ]);
+  });
+
+  it('keeps optimistic browser ownership while an active canonical row has no result metadata yet', () => {
+    const optimistic = task({
+      taskId: 'tsk_browser_starting',
+      executionMode: 'browser',
+    });
+    const canonical = task({
+      taskId: 'tsk_browser_starting',
+      executionMode: undefined,
+    });
+
+    expect(
+      mergeTaskPagesReplacingDuplicates([optimistic], [canonical]),
+    ).toEqual([
+      expect.objectContaining({
+        taskId: 'tsk_browser_starting',
+        executionMode: 'browser',
+      }),
+    ]);
+  });
+
   it('removes the local pending task row when createTask fails', async () => {
     createMutate.mockRejectedValueOnce(new Error('offline') as never);
 
@@ -871,6 +972,9 @@ describe('selectTask detail hydration', () => {
 
     await expect(resultPromise).resolves.toMatchObject({ error: expect.any(String) });
     expect(useTaskStore.getState().tasks.some((t) => t.taskId.startsWith('local_pending_'))).toBe(false);
+    // The caller owns contextual task-create feedback. Mirroring the same
+    // error into the shell-level channel renders a second toast.
+    expect(useTaskStore.getState().error).toBeNull();
   });
 
   it('sends a default viewport profile for non-workbench create entry points', async () => {
@@ -921,6 +1025,41 @@ describe('selectTask detail hydration', () => {
     expect(createMutate).toHaveBeenCalledWith({
       intent: '打开 https://example.com',
       viewportProfile: 'sidepanel',
+    });
+  });
+
+  it('sends the selected image model as structured task metadata', async () => {
+    createMutate.mockResolvedValueOnce({
+      taskId: 'tsk_image',
+      status: 'executing',
+      executionMode: 'image',
+    } as never);
+    listQuery.mockResolvedValueOnce({ tasks: [], nextCursor: null } as never);
+
+    await useTaskStore.getState().createTask(
+      '生成图片：一张夏日海报',
+      [],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        model: 'nano_banana_pro',
+        aspectRatio: '4:3',
+        imageCount: 3,
+      },
+    );
+
+    expect(createMutate).toHaveBeenCalledWith({
+      intent: '生成图片：一张夏日海报',
+      imageOptions: {
+        model: 'nano_banana_pro',
+        aspectRatio: '4:3',
+        imageCount: 3,
+      },
+      viewportProfile: 'desktop',
     });
   });
 
@@ -1076,6 +1215,40 @@ describe('selectTask detail hydration', () => {
 
     expect(useTaskStore.getState().tasks[0]?.attachments?.[0]?.downloadUrl).toBe(
       '/api/files/file_img/download',
+    );
+  });
+
+  it('normalizes trusted absolute production attachment URLs from detail rows', async () => {
+    detailQuery.mockResolvedValueOnce({
+      intent: '生成图片',
+      title: null,
+      status: 'completed',
+      createdAt: '2026-07-01T00:00:00.000Z',
+      steps: [],
+      result: {
+        summary: '已生成图片',
+        metadata: {
+          attachments: [
+            {
+              fileId: 'file_img',
+              downloadUrl:
+                'https://hd-app.orangebench.tech/files/file_img/download?token=short-lived',
+              filename: 'holaday-image-1.jpg',
+              mimetype: 'image/jpeg',
+              sizeBytes: 418_513,
+              expiresAt: '2026-07-02T00:00:00.000Z',
+              kind: 'output',
+            },
+          ],
+        },
+      },
+    } as never);
+
+    useTaskStore.getState().selectTask('tsk_img_absolute_detail', 'ui');
+    await flushPromises();
+
+    expect(useTaskStore.getState().tasks[0]?.attachments?.[0]?.downloadUrl).toBe(
+      '/api/files/file_img/download?token=short-lived',
     );
   });
 
@@ -2443,6 +2616,32 @@ describe('applyServerMessage terminal and pause cleanup', () => {
     });
   });
 
+  it('applies a live terminal verification verdict without waiting for detail hydration', () => {
+    useTaskStore.setState({
+      tasks: [
+        task({
+          taskId: 'tsk_video_verified',
+          status: 'executing',
+          verificationPassed: null,
+        }),
+      ],
+    });
+
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.task.terminal',
+      taskId: 'tsk_video_verified',
+      status: 'completed',
+      summary: '视频已生成',
+      verificationPassed: true,
+    });
+
+    expect(useTaskStore.getState().tasks[0]).toMatchObject({
+      status: 'completed',
+      resultText: '视频已生成',
+      verificationPassed: true,
+    });
+  });
+
   it('keeps paused recoverable and clears stale live blockers without terminal reveal animation', () => {
     useTaskStore.setState({
       tasks: [task({ taskId: 'tsk_paused_terminal', status: 'executing' })],
@@ -2543,6 +2742,59 @@ describe('applyServerMessage queued lifecycle', () => {
       status: 'executing',
     });
     expect(useTaskStore.getState().tasks[0]?.queuePosition).toBeUndefined();
+  });
+
+  it('does not reclassify a browser task when its first progress phase is planning', () => {
+    useTaskStore.setState({
+      tasks: [
+        task({
+          taskId: 'tsk_browser_planning',
+          status: 'queued',
+          queuePosition: 1,
+          executionMode: 'browser',
+        }),
+      ],
+    });
+
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.task.progress',
+      taskId: 'tsk_browser_planning',
+      message: '正在规划任务…',
+      subStatus: 'planning',
+    });
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.task.progress',
+      taskId: 'tsk_browser_planning',
+      message: '正在验证结果…',
+      subStatus: 'verifying',
+    });
+
+    expect(useTaskStore.getState().tasks[0]).toMatchObject({
+      status: 'executing',
+      executionMode: 'browser',
+    });
+  });
+
+  it('recognizes a legacy task as browser-owned when browsing progress arrives', () => {
+    useTaskStore.setState({
+      tasks: [
+        task({
+          taskId: 'tsk_legacy_browsing',
+          status: 'executing',
+          executionMode: undefined,
+          intent: '继续当前页面',
+        }),
+      ],
+    });
+
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.task.progress',
+      taskId: 'tsk_legacy_browsing',
+      message: '正在操作浏览器…',
+      subStatus: 'browsing',
+    });
+
+    expect(useTaskStore.getState().tasks[0]?.executionMode).toBe('browser');
   });
 
   it('flips queued tasks to executing on first stream frame', () => {

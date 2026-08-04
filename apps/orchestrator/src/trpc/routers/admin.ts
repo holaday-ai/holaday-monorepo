@@ -20,8 +20,9 @@
  */
 
 import { TRPCError } from '@trpc/server';
-import { and, desc, eq, gte, inArray, like, lte, ne, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, like, lte, ne, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
+import type { DB } from '../../db/client.js';
 import { llmCalls } from '../../db/schema/llm-calls.js';
 import { tasks } from '../../db/schema/tasks.js';
 import { users } from '../../db/schema/users.js';
@@ -60,6 +61,82 @@ function beijingDayString(at: Date, daysAgo = 0): string {
 function currentMonthStartUtc(): Date {
   const now = new Date();
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+}
+
+type AdminUserListInput = {
+  search?: string;
+  sort: 'createdAt' | 'taskCount' | 'lastActive';
+  order: 'asc' | 'desc';
+  offset: number;
+  limit: number;
+};
+
+function adminUserWhereClause(search: string | undefined) {
+  const searchPattern = search ? `%${search}%` : null;
+  return and(
+    ne(users.role, 'system'),
+    searchPattern
+      ? or(
+          like(users.email, searchPattern),
+          like(users.displayName, searchPattern),
+        )
+      : undefined,
+  );
+}
+
+function buildAdminUserPageQuery(
+  db: DB,
+  input: AdminUserListInput,
+  monthStart: Date,
+) {
+  const monthTasksByUser = db
+    .select({
+      userId: tasks.userId,
+      monthTaskCount: sql<number>`COUNT(*)`.as('month_task_count'),
+    })
+    .from(tasks)
+    .where(and(gte(tasks.createdAt, monthStart), eq(tasks.origin, 'user')))
+    .groupBy(tasks.userId)
+    .as('admin_month_tasks_by_user');
+  const lastActivityByUser = db
+    .select({
+      userId: tasks.userId,
+      lastActiveAt: sql<Date | null>`MAX(${tasks.createdAt})`.as('last_active_at'),
+    })
+    .from(tasks)
+    .where(eq(tasks.origin, 'user'))
+    .groupBy(tasks.userId)
+    .as('admin_last_activity_by_user');
+  const monthTaskCount = sql<number>`COALESCE(${monthTasksByUser.monthTaskCount}, 0)`;
+  const lastActiveAt = lastActivityByUser.lastActiveAt;
+  const direction = input.order === 'asc' ? asc : desc;
+  const sortExpression =
+    input.sort === 'taskCount'
+      ? monthTaskCount
+      : input.sort === 'lastActive'
+        ? lastActiveAt
+        : users.createdAt;
+
+  return db
+    .select({
+      id: users.id,
+      userId: users.externalId,
+      email: users.email,
+      displayName: users.displayName,
+      plan: users.plan,
+      role: users.role,
+      avatarUrl: users.avatarUrl,
+      createdAt: users.createdAt,
+      monthTaskCount,
+      lastActiveAt,
+    })
+    .from(users)
+    .leftJoin(monthTasksByUser, eq(monthTasksByUser.userId, users.id))
+    .leftJoin(lastActivityByUser, eq(lastActivityByUser.userId, users.id))
+    .where(adminUserWhereClause(input.search))
+    .orderBy(direction(sortExpression), direction(users.id))
+    .limit(input.limit)
+    .offset(input.offset);
 }
 
 type TrendStatusRow = { day: string; status: string; count: number };
@@ -299,14 +376,7 @@ export const adminRouter = router({
     )
     .query(async ({ ctx, input }) => {
       const monthStart = currentMonthStartUtc();
-      const searchPattern = input.search ? `%${input.search}%` : null;
-
-      const whereClause = searchPattern
-        ? or(
-            like(users.email, searchPattern),
-            like(users.displayName, searchPattern),
-          )
-        : undefined;
+      const whereClause = adminUserWhereClause(input.search);
 
       const [totalRow] = await ctx.db
         .select({ total: sql<number>`COUNT(*)` })
@@ -314,17 +384,6 @@ export const adminRouter = router({
         .where(whereClause);
       const total = Number(totalRow?.total ?? 0);
 
-      // Page the user rows first with whatever sort key is requested.
-      // Counts + last-active are joined in via a second query keyed
-      // by user_id so we keep the page size constant and avoid any
-      // correlated-subquery rendering surprises in drizzle.
-      //
-      // For sort='taskCount' / 'lastActive' the simple users-only
-      // sort can't be used — those values live in the aggregate
-      // tables. We grab a wider window of user ids (the whole page
-      // worth + a generous lookahead) and sort in JS after merging.
-      // For 'createdAt' (default) we use users.createdAt directly,
-      // paginate normally, and the aggregates ride along.
       const order = input.order;
 
       // Paginated user rows.
@@ -357,24 +416,21 @@ export const adminRouter = router({
           .limit(input.limit)
           .offset(input.offset);
       } else {
-        // Sort happens after we have the aggregate values for each
-        // user. We grab the entire matching set (capped at 1000 for
-        // safety) then sort + slice in JS.
-        const ALL_CAP = 1000;
-        pagedUsers = await ctx.db
-          .select({
-            id: users.id,
-            userId: users.externalId,
-            email: users.email,
-            displayName: users.displayName,
-            plan: users.plan,
-            role: users.role,
-            avatarUrl: users.avatarUrl,
-            createdAt: users.createdAt,
-          })
-          .from(users)
-          .where(whereClause)
-          .limit(ALL_CAP);
+        const rows = await buildAdminUserPageQuery(ctx.db, input, monthStart);
+        return {
+          users: rows.map((u) => ({
+            userId: u.userId,
+            email: u.email,
+            displayName: u.displayName,
+            plan: u.plan,
+            role: u.role as 'user' | 'admin',
+            avatarUrl: u.avatarUrl,
+            createdAt: u.createdAt,
+            monthTaskCount: Number(u.monthTaskCount),
+            lastActiveAt: u.lastActiveAt ?? null,
+          })),
+          total,
+        };
       }
 
       const userIds = pagedUsers.map((u) => u.id);
@@ -408,8 +464,7 @@ export const adminRouter = router({
         }
       }
 
-      // Merge + (for non-createdAt sorts) sort + paginate in JS.
-      let merged = pagedUsers.map((u) => ({
+      const merged = pagedUsers.map((u) => ({
         userId: u.userId,
         email: u.email,
         displayName: u.displayName,
@@ -420,24 +475,6 @@ export const adminRouter = router({
         monthTaskCount: monthCountByUser.get(u.id) ?? 0,
         lastActiveAt: lastActiveByUser.get(u.id) ?? null,
       }));
-
-      if (input.sort === 'taskCount') {
-        merged.sort((a, b) =>
-          order === 'asc'
-            ? a.monthTaskCount - b.monthTaskCount
-            : b.monthTaskCount - a.monthTaskCount,
-        );
-        merged = merged.slice(input.offset, input.offset + input.limit);
-      } else if (input.sort === 'lastActive') {
-        merged.sort((a, b) => {
-          const av = a.lastActiveAt ? a.lastActiveAt.getTime() : 0;
-          const bv = b.lastActiveAt ? b.lastActiveAt.getTime() : 0;
-          return order === 'asc' ? av - bv : bv - av;
-        });
-        merged = merged.slice(input.offset, input.offset + input.limit);
-      }
-      // For sort='createdAt' the DB already paginated; merged is
-      // exactly the page.
 
       return { users: merged, total };
     }),
@@ -591,6 +628,7 @@ export const adminRouter = router({
 
 // Re-export helpers for unit testing (no external consumers).
 export const __adminInternals = {
+  buildAdminUserPageQuery,
   beijingDayStartUtc,
   beijingDayString,
   buildDashboardDayStats,

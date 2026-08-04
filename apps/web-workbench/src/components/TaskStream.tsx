@@ -67,7 +67,9 @@ import { classifyFriendlyFailure, failureResultCopyText, friendlyFailureDetail, 
 import { formatFileSize } from '@/lib/file-size';
 import { downloadFileMetaLabel } from '@/lib/file-download-card-copy';
 import { downloadMarkdownFile } from '@/lib/markdown-download';
+import { screenshotThumbnailPresentation } from '@/lib/screenshot-thumbnail-state';
 import { terminalArtifactFallbackText } from '@/lib/terminal-artifact-copy';
+import { useFileUnavailable } from '@/lib/unavailable-file-registry';
 import {
   terminalEmptyAllowsRerun,
   terminalEmptyCopy,
@@ -109,6 +111,7 @@ import { trpc } from '@/lib/trpc';
 import { useTaskStore } from '@/stores/task-store';
 import { showImageOption } from '@/lib/video-history-row';
 import { cn } from '@/lib/utils';
+import { taskDisplayIntent } from '@/lib/task-display-copy';
 import type {
   UiAwaitingUser,
   UiCaptchaWait,
@@ -251,7 +254,7 @@ export function TaskStream({
 
   return (
     <div className="mx-auto max-w-3xl space-y-4 px-6 pb-10 pt-8 sm:pb-6">
-      <UserBubble intent={task.intent} />
+      <UserBubble intent={taskDisplayIntent(task.intent)} />
       {userReplies.map((r) => (
         <UserBubble key={r.at} intent={r.text} />
       ))}
@@ -368,15 +371,6 @@ function AgentBlock({
       if (oldest) PLAYED_TERMINAL_REVEAL_TASK_IDS.delete(oldest);
     }
   }, [animateTerminalReveal, task.taskId]);
-  hdDebug('TaskStream render', {
-    taskId: task.taskId,
-    status: task.status,
-    hasBuffer: Boolean(streamingText),
-    hasResultText: Boolean(task.resultText),
-    bufferLen: streamingText?.length ?? 0,
-    hasProgress: Boolean(progressMessage),
-  });
-
   // Round-1 streaming rework: after humanizeStep filters tool_use
   // rows out of the main flow, the remaining lines are (almost)
   // entirely agent text preambles — Claude's own voice. We still
@@ -719,6 +713,7 @@ function TrustSummaryCard({
     () =>
       buildTrustSummary({
         status: task.status,
+        intent: task.intent,
         resultText: task.resultText,
         currentUrl,
         finalScreenshot: task.finalScreenshot ?? null,
@@ -733,6 +728,7 @@ function TrustSummaryCard({
       task.failedChecks,
       task.failureLevel,
       task.finalScreenshot,
+      task.intent,
       task.resultText,
       task.status,
       task.verificationPassed,
@@ -744,11 +740,13 @@ function TrustSummaryCard({
         status: task.status,
         intent: task.intent,
         resultText: task.resultText,
+        currentUrl,
         awaitingKind: task.awaitingKind ?? null,
         failureLevel: task.failureLevel,
         failedChecks: task.failedChecks ?? null,
       }),
     [
+      currentUrl,
       task.awaitingKind,
       task.failedChecks,
       task.failureLevel,
@@ -846,31 +844,33 @@ function TrustSummaryCard({
               )}
             </div>
           )}
-          <details className="mt-3 rounded-[7px] border border-[#DCDDDD]/70 bg-white/45 px-3 py-2 text-xs dark:border-white/10 dark:bg-white/5">
-            <summary className="cursor-pointer select-none text-[11px] font-medium text-muted-foreground">
-              查看证据边界
-            </summary>
-            <div className="mt-2 grid gap-1.5">
-              {summary.ledger.map((item) => (
-                <div
-                  key={`${item.stage}-${item.label}`}
-                  className="grid gap-1 rounded-[6px] bg-[#FCFCFD]/80 px-2 py-1.5 sm:grid-cols-[96px_1fr] dark:bg-white/[0.03]"
-                >
-                  <div className="flex min-w-0 items-center gap-1.5">
-                    <TrustLedgerStagePill stage={item.stage} />
-                    <span className="truncate text-[11px] font-medium text-foreground">
-                      {item.label}
-                    </span>
+          {summary.presentation === 'full' && summary.ledger.length > 0 && (
+            <details className="mt-3 rounded-[7px] border border-[#DCDDDD]/70 bg-white/45 px-3 py-2 text-xs dark:border-white/10 dark:bg-white/5">
+              <summary className="cursor-pointer select-none text-[11px] font-medium text-muted-foreground">
+                查看证据边界
+              </summary>
+              <div className="mt-2 grid gap-1.5">
+                {summary.ledger.map((item) => (
+                  <div
+                    key={`${item.stage}-${item.label}`}
+                    className="grid gap-1 rounded-[6px] bg-[#FCFCFD]/80 px-2 py-1.5 sm:grid-cols-[96px_1fr] dark:bg-white/[0.03]"
+                  >
+                    <div className="flex min-w-0 items-center gap-1.5">
+                      <TrustLedgerStagePill stage={item.stage} />
+                      <span className="truncate text-[11px] font-medium text-foreground">
+                        {item.label}
+                      </span>
+                    </div>
+                    <div className="min-w-0 text-[11px] leading-4 text-muted-foreground">
+                      <span className="font-medium text-foreground/85">{item.value}</span>
+                      <span className="mx-1 text-muted-foreground/55">·</span>
+                      <span>{item.detail}</span>
+                    </div>
                   </div>
-                  <div className="min-w-0 text-[11px] leading-4 text-muted-foreground">
-                    <span className="font-medium text-foreground/85">{item.value}</span>
-                    <span className="mx-1 text-muted-foreground/55">·</span>
-                    <span>{item.detail}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </details>
+                ))}
+              </div>
+            </details>
+          )}
           {recoveryActions.length > 0 && (
             <div className="mt-3 border-t border-[#DCDDDD]/70 pt-3 dark:border-white/10">
               <div className="mb-2 text-[11px] font-medium text-muted-foreground">下一步</div>
@@ -969,6 +969,7 @@ function failureLevelLabel(level: NonNullable<UiTask['failureLevel']>): string {
 function shouldShowTrustSummaryCard(task: UiTask, currentUrl?: string | null): boolean {
   return shouldShowTrustSummary({
     status: task.status,
+    intent: task.intent,
     resultText: task.resultText,
     currentUrl,
     finalScreenshot: task.finalScreenshot ?? null,
@@ -2045,6 +2046,10 @@ function ScreenshotThumbnailCard({
 }): JSX.Element {
   const toast = useToast();
   const mountedRef = useMountedRef();
+  const fileUnavailable = useFileUnavailable({
+    fileId: payload.fileId,
+    url: payload.downloadUrl,
+  });
   const [previewUrl, setPreviewUrl] = React.useState<string | null>(null);
   const [failed, setFailed] = React.useState(false);
   const [downloadState, setDownloadState] = React.useState<
@@ -2053,6 +2058,8 @@ function ScreenshotThumbnailCard({
   React.useEffect(() => {
     let cancelled = false;
     let createdUrl: string | null = null;
+    setPreviewUrl(null);
+    setFailed(false);
     void fetchFileBlobAuthed({ url: payload.downloadUrl }).then((res) => {
       if (cancelled) return;
       if (!res.ok || !res.blob) {
@@ -2095,7 +2102,12 @@ function ScreenshotThumbnailCard({
 
   // Auth fetch failed — fall back to the original card so the user
   // can still try a manual click (which retries the fetch).
-  if (failed) {
+  if (
+    screenshotThumbnailPresentation({
+      previewFailed: failed,
+      fileUnavailable,
+    }) === 'file-card'
+  ) {
     return <FileDownloadCard payload={payload} />;
   }
   const handleClick = async (): Promise<void> => {
@@ -2478,14 +2490,18 @@ function TerminalSummary({
   const safeCurrentUrl = safeExternalHttpHref(currentUrl);
   const hasRealUrl = safeCurrentUrl !== null;
   const endedOnBrowserErrorPage = isBrowserErrorUrl(currentUrl);
+  const usableAttachmentCount =
+    attachments?.filter(
+      (attachment) => attachment.availability !== 'unavailable',
+    ).length ?? 0;
   const fallbackPlainText = React.useMemo(
     () =>
       terminalArtifactFallbackText({
         text: displayText,
-        attachmentCount: attachments?.length ?? 0,
+        attachmentCount: usableAttachmentCount,
         finalUrl: safeCurrentUrl,
       }),
-    [attachments?.length, displayText, safeCurrentUrl],
+    [displayText, safeCurrentUrl, usableAttachmentCount],
   );
   // Strip markdown syntax for the plain-text Copy. Keeps `[label](url)` →
   // `label`, drops `**bold**` markers, code fences, list bullets — the
@@ -2611,7 +2627,7 @@ function TerminalSummary({
           displayText,
           revealedText: sanitized,
           intent,
-          attachmentCount: attachments?.length ?? 0,
+          attachmentCount: usableAttachmentCount,
         })) {
           const copy = terminalInsufficientCopy();
           return (
@@ -2710,7 +2726,12 @@ function TerminalSummary({
               filename: a.filename,
               size: a.sizeBytes,
               downloadUrl: a.downloadUrl,
+              expiresAt: a.expiresAt,
+              unavailable: a.availability === 'unavailable',
             };
+            if (payload.unavailable) {
+              return <FileDownloadCard key={a.fileId} payload={payload} />;
+            }
             // Phase 4 R2 — screenshots get a thumbnail preview; other
             // kinds (PDF, generic file) keep the icon-only card.
             if (a.kind === 'screenshot' || a.mimetype.startsWith('image/')) {

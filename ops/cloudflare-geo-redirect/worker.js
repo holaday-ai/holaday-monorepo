@@ -8,7 +8,8 @@
  *
  * Pass-through (no redirect):
  *   - Non-CN traffic.
- *   - CN traffic on API paths (/api/*, /trpc/*, /ws, /vnc-ws). These
+ *   - CN traffic on API paths (/api/*, /trpc/*, /ws, /screencast-ws,
+ *     /vnc-ws). These
  *     are XHR / WebSocket calls. A 302 here would break the SPA's
  *     fetch handlers (browsers don't auto-follow cross-origin
  *     redirects for credentialed XHR).
@@ -30,6 +31,7 @@ const PASS_THROUGH_PREFIXES = [
   '/api/',
   '/trpc/',
   '/ws',
+  '/screencast-ws',
   '/vnc-ws',
   '/static/',
   '/assets/',
@@ -59,10 +61,13 @@ export default {
       return fetch(request);
     }
 
-    // Pass-through path check. Use startsWith so /api/anything
-    // (including nested paths) is matched in one rule.
+    // Pass through exact endpoints and their subtrees without also
+    // matching similarly named pages such as /screencast-ws-old.
     for (const prefix of PASS_THROUGH_PREFIXES) {
-      if (url.pathname === prefix || url.pathname.startsWith(prefix)) {
+      const matches = prefix.endsWith('/')
+        ? url.pathname.startsWith(prefix)
+        : url.pathname === prefix || url.pathname.startsWith(`${prefix}/`);
+      if (matches) {
         return fetch(request);
       }
     }
@@ -76,8 +81,7 @@ export default {
       return fetch(request);
     }
     const accept = request.headers.get('accept') ?? '';
-    const looksLikePage =
-      accept === '' || accept.includes('text/html') || accept.includes('*/*');
+    const looksLikePage = accept === '' || accept.includes('text/html') || accept.includes('*/*');
     if (!looksLikePage) {
       return fetch(request);
     }

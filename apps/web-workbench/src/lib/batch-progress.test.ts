@@ -95,6 +95,32 @@ describe('batch progress helpers', () => {
     ]);
   });
 
+  it('preserves existing cancellation count when an older progress frame omits it', () => {
+    const rows = [
+      {
+        batchId: 'batch_1',
+        status: 'partial',
+        itemsTotal: 4,
+        itemsDone: 1,
+        itemsReview: 0,
+        itemsFailed: 1,
+        itemsCancelled: 2,
+      },
+    ];
+
+    expect(
+      applyBatchProgressToRows(rows, {
+        type: 'server.batch.progress',
+        batchId: 'batch_1',
+        status: 'partial',
+        itemsTotal: 4,
+        itemsDone: 1,
+        itemsReview: 0,
+        itemsFailed: 1,
+      }),
+    ).toEqual(rows);
+  });
+
   it('patches the matching detail item from live progress', () => {
     const detail = {
       batchId: 'batch_1',
@@ -261,7 +287,6 @@ describe('batch progress helpers', () => {
       itemsDone: 0,
       itemsReview: 0,
       itemsFailed: 0,
-      itemsCancelled: 0,
       item: {
         batchItemId: 'item_new',
         status: 'needs_review',

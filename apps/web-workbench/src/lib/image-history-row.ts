@@ -31,6 +31,10 @@ export function toImageHistoryRow(task: UiTask): ImageHistoryRow | null {
       downloadUrl: imageAttachment.downloadUrl,
       filename: imageAttachment.filename,
       size: imageAttachment.sizeBytes,
+      expiresAt: imageAttachment.expiresAt,
+      ...(imageAttachment.availability === 'unavailable'
+        ? { unavailable: true }
+        : {}),
     },
   };
 }

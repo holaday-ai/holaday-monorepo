@@ -33,7 +33,7 @@
  * STORAGE_PROVIDER=r2) throws early and visibly.
  */
 
-import { promises as fs } from 'node:fs';
+import { promises as fs, createReadStream } from 'node:fs';
 import path from 'node:path';
 import {
   DeleteObjectCommand,
@@ -67,6 +67,20 @@ export interface PutInput {
   /** Raw bytes. Caller has already checked the plan's size cap. */
   buffer: Buffer;
   /** MIME type — passed through to providers that retain it on disk metadata. */
+  mimetype: string;
+}
+
+export interface StorageObjectInput {
+  userExternalId: string;
+  kind: FileKind;
+  fileExternalId: string;
+  filename: string;
+}
+
+export interface PutFileInput extends StorageObjectInput {
+  /** Local path to stream/copy from without materializing the file as one Buffer. */
+  sourcePath: string;
+  sizeBytes: number;
   mimetype: string;
 }
 
@@ -104,8 +118,16 @@ export interface StatResult {
 }
 
 export interface StorageProvider {
+  /**
+   * Resolve the exact path/key that a subsequent put will use. Temporary
+   * artifacts reserve this path in the DB before uploading, so a process crash
+   * cannot leave an unindexed object behind.
+   */
+  pathFor(input: StorageObjectInput): StoragePath;
   /** Persist a buffer; returns the opaque storage handle for later get/delete. */
   put(input: PutInput): Promise<{ storagePath: StoragePath }>;
+  /** Persist a local file without loading the whole artifact into memory. */
+  putFile(input: PutFileInput): Promise<{ storagePath: StoragePath }>;
   /** Read bytes. Returns null when the path doesn't exist (caller decides 404 vs 500). */
   get(storagePath: StoragePath): Promise<Buffer | null>;
   /** Remove. No-op when the path doesn't exist (idempotent — handles double-cleanup). */
@@ -124,9 +146,7 @@ export interface StorageProvider {
    * providers without native signing (local disk) — the caller then
    * falls back to the multipart `/files/upload` path.
    */
-  getSignedPutUrl(
-    input: PutUrlInput,
-  ): Promise<{ url: string; storagePath: StoragePath } | null>;
+  getSignedPutUrl(input: PutUrlInput): Promise<{ url: string; storagePath: StoragePath } | null>;
   /**
    * Cheap metadata read (HEAD) — size + content-type without fetching
    * the body. Used to verify a presigned-PUT upload actually landed and
@@ -156,11 +176,28 @@ export class LocalStorageProvider implements StorageProvider {
     private readonly logger: Logger,
   ) {}
 
+  pathFor(input: StorageObjectInput): StoragePath {
+    return path.join(
+      this.root,
+      input.userExternalId,
+      input.kind,
+      input.fileExternalId,
+      input.filename,
+    );
+  }
+
   async put(input: PutInput): Promise<{ storagePath: StoragePath }> {
     const dir = path.join(this.root, input.userExternalId, input.kind, input.fileExternalId);
     await fs.mkdir(dir, { recursive: true });
-    const storagePath = path.join(dir, input.filename);
+    const storagePath = this.pathFor(input);
     await fs.writeFile(storagePath, input.buffer);
+    return { storagePath };
+  }
+
+  async putFile(input: PutFileInput): Promise<{ storagePath: StoragePath }> {
+    const storagePath = this.pathFor(input);
+    await fs.mkdir(path.dirname(storagePath), { recursive: true });
+    await fs.copyFile(input.sourcePath, storagePath);
     return { storagePath };
   }
 
@@ -182,10 +219,8 @@ export class LocalStorageProvider implements StorageProvider {
     } catch (err) {
       // ENOENT is expected when the file's already gone (double-clean).
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-        this.logger.warn(
-          { err: errMsg(err), path: storagePath },
-          'storage:local: delete failed',
-        );
+        this.logger.warn({ err: errMsg(err), path: storagePath }, 'storage:local: delete failed');
+        throw err;
       }
     }
   }
@@ -211,10 +246,7 @@ export class LocalStorageProvider implements StorageProvider {
       return { sizeBytes: s.size };
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
-      this.logger.warn(
-        { err: errMsg(err), path: storagePath },
-        'storage:local: stat failed',
-      );
+      this.logger.warn({ err: errMsg(err), path: storagePath }, 'storage:local: stat failed');
       return null;
     }
   }
@@ -267,19 +299,14 @@ export class R2StorageProvider implements StorageProvider {
       });
   }
 
-  private keyFor(input: {
-    userExternalId: string;
-    kind: FileKind;
-    fileExternalId: string;
-    filename: string;
-  }): string {
+  pathFor(input: StorageObjectInput): StoragePath {
     // Same logical path shape as local for migration parity. R2 has no
     // notion of directories — slashes are just key characters.
     return `${input.userExternalId}/${input.kind}/${input.fileExternalId}/${input.filename}`;
   }
 
   async put(input: PutInput): Promise<{ storagePath: StoragePath }> {
-    const key = this.keyFor(input);
+    const key = this.pathFor(input);
     await this.client.send(
       new PutObjectCommand({
         Bucket: this.config.bucket,
@@ -291,6 +318,20 @@ export class R2StorageProvider implements StorageProvider {
     // Store the full key as storagePath; matches the local layout
     // pattern (path-shaped string) so migration scripts can swap one
     // for the other without re-encoding.
+    return { storagePath: key };
+  }
+
+  async putFile(input: PutFileInput): Promise<{ storagePath: StoragePath }> {
+    const key = this.pathFor(input);
+    await this.client.send(
+      new PutObjectCommand({
+        Bucket: this.config.bucket,
+        Key: key,
+        Body: createReadStream(input.sourcePath),
+        ContentLength: input.sizeBytes,
+        ContentType: input.mimetype,
+      }),
+    );
     return { storagePath: key };
   }
 
@@ -314,10 +355,7 @@ export class R2StorageProvider implements StorageProvider {
       // NoSuchKey is the R2/S3 404 — treat as missing, return null
       // so the route layer can 404 cleanly.
       if (code === 'NoSuchKey' || code === 'NotFound') return null;
-      this.logger.warn(
-        { err: errMsg(err), path: storagePath, code },
-        'storage:r2: get failed',
-      );
+      this.logger.warn({ err: errMsg(err), path: storagePath, code }, 'storage:r2: get failed');
       throw err;
     }
   }
@@ -333,17 +371,12 @@ export class R2StorageProvider implements StorageProvider {
     } catch (err) {
       const code = (err as { name?: string }).name;
       if (code === 'NoSuchKey' || code === 'NotFound') return;
-      this.logger.warn(
-        { err: errMsg(err), path: storagePath, code },
-        'storage:r2: delete failed',
-      );
+      this.logger.warn({ err: errMsg(err), path: storagePath, code }, 'storage:r2: delete failed');
+      throw err;
     }
   }
 
-  async getSignedUrl(
-    storagePath: StoragePath,
-    opts?: GetSignedUrlOptions,
-  ): Promise<string | null> {
+  async getSignedUrl(storagePath: StoragePath, opts?: GetSignedUrlOptions): Promise<string | null> {
     try {
       const cmd = new GetObjectCommand({
         Bucket: this.config.bucket,
@@ -358,10 +391,7 @@ export class R2StorageProvider implements StorageProvider {
         expiresIn: opts?.expiresInSeconds ?? 3600,
       });
     } catch (err) {
-      this.logger.warn(
-        { err: errMsg(err), path: storagePath },
-        'storage:r2: getSignedUrl failed',
-      );
+      this.logger.warn({ err: errMsg(err), path: storagePath }, 'storage:r2: getSignedUrl failed');
       return null;
     }
   }
@@ -369,7 +399,7 @@ export class R2StorageProvider implements StorageProvider {
   async getSignedPutUrl(
     input: PutUrlInput,
   ): Promise<{ url: string; storagePath: StoragePath } | null> {
-    const key = this.keyFor(input);
+    const key = this.pathFor(input);
     try {
       const cmd = new PutObjectCommand({
         Bucket: this.config.bucket,
@@ -381,10 +411,7 @@ export class R2StorageProvider implements StorageProvider {
       });
       return { url, storagePath: key };
     } catch (err) {
-      this.logger.warn(
-        { err: errMsg(err), path: key },
-        'storage:r2: getSignedPutUrl failed',
-      );
+      this.logger.warn({ err: errMsg(err), path: key }, 'storage:r2: getSignedPutUrl failed');
       return null;
     }
   }
@@ -405,10 +432,7 @@ export class R2StorageProvider implements StorageProvider {
       const code = (err as { name?: string }).name;
       // NoSuchKey/NotFound is the HEAD 404 — object never landed.
       if (code === 'NoSuchKey' || code === 'NotFound') return null;
-      this.logger.warn(
-        { err: errMsg(err), path: storagePath, code },
-        'storage:r2: stat failed',
-      );
+      this.logger.warn({ err: errMsg(err), path: storagePath, code }, 'storage:r2: stat failed');
       return null;
     }
   }
@@ -468,9 +492,7 @@ export function _resetSharedStorageProviderForTesting(): void {
  * Suppresses the random unused-var warning by exporting the helper
  * so config tests can drive it directly.
  */
-export function createStorageProvider(
-  opts: CreateStorageProviderOpts,
-): StorageProvider {
+export function createStorageProvider(opts: CreateStorageProviderOpts): StorageProvider {
   const flag = (process.env.STORAGE_PROVIDER ?? 'local').toLowerCase();
   if (flag === 'r2') {
     const endpoint = process.env.R2_ENDPOINT;
@@ -496,10 +518,7 @@ export function createStorageProvider(
   if (flag !== 'local') {
     // Unknown value → fall through to local, log a warning so a
     // typo (STORAGE_PROVIDER=R2 vs r2) doesn't silently downgrade.
-    opts.logger.warn(
-      { flag },
-      `storage: unknown STORAGE_PROVIDER value, falling back to local`,
-    );
+    opts.logger.warn({ flag }, 'storage: unknown STORAGE_PROVIDER value, falling back to local');
   }
   const root = opts.localRoot ?? process.env.HOLADAY_FILES_ROOT ?? '/tmp/holaday-files';
   return new LocalStorageProvider(root, opts.logger);

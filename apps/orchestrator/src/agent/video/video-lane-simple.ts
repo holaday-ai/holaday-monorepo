@@ -15,47 +15,270 @@
  *   price tier. We DISCARD that track and dub with Qwen Cherry, so the Veo
  *   audio is paid-for but unused. Don't try to turn it off.
  *
- * Anatomy: every visual prompt carries explicit anatomy constraints (single
- *   subject / arms traceable to shoulders / five fingers / no extra limbs /
- *   avoid hand-object-hand stacked framing) — AI t2v/t2i otherwise grows extra
- *   arms (observed on BOTH Veo Lite and nano banana). Veo & nano banana have no
- *   separate negative-prompt field, so the constraint lives in the prompt text;
- *   wanxiang t2v additionally takes NO_TEXT_NEGATIVE.
+ * Anatomy: visual prompts use the original user request to decide whether
+ *   people/hands belong in the scene. Object-only scenes explicitly exclude
+ *   unrequested body parts; human scenes carry strict anatomy constraints.
+ *   Veo and DashScope video providers also receive a matching negative prompt.
  */
 
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { generateImages } from '../image/gemini-image-client.js';
+import { videoParameterIssue } from '@holaday/shared-types';
+import {
+  GeminiImageError,
+  generateImages,
+  type GenerateImagesResult,
+} from '../image/gemini-image-client.js';
 import { ffprobeDurationMs, renderImageClip, renderVideoClip, runFfmpeg } from './ffmpeg-exec.js';
+import { synthesizeGeminiSpeech } from './gemini-tts-client.js';
 import { synthesizeSpeech } from './qwen-voice-clone-client.js';
-import { generateVeoVideo } from './veo-client.js';
 import { buildAss } from './timeline.js';
-import { buildComposeCommand } from './video-compose.js';
-import { downloadToBuffer } from './video-http.js';
-import { runVideoPipeline, type PipelineLogger, type VideoPipelineDeps } from './video-pipeline.js';
-import { generatePosterFile } from './video-poster.js';
-import { optimizeUserScript, type LlmComplete, type VideoStyle } from './video-script.js';
 import type { VideoScript } from './types.js';
+import { generateVeoVideo } from './veo-client.js';
+import { buildComposeCommand } from './video-compose.js';
+import { downloadToBuffer, downloadToFile } from './video-http.js';
+import { type PipelineLogger, type VideoPipelineDeps, runVideoPipeline } from './video-pipeline.js';
+import { generatePosterFile } from './video-poster.js';
+import type { VerifyFinalVideoQualityInput, VideoQualityResult } from './video-quality-verifier.js';
+import { type LlmComplete, type VideoStyle, optimizeUserScript } from './video-script.js';
 import { generateBrollVideo } from './wanxiang-client.js';
 
-// 收窄(范围2,BOSS 松绑):不再全禁"任何文字"(那是过度一刀切,也拖累画面-文案关联)。
-// 只阻止 AI 把【含文字的物体】画成主体/特写(瓶身标签/招牌/屏幕…AI 会编乱码假字);
-// 想要的文字(字幕/信息点字卡)由合成层 ASS 字体叠加,不经 AI、永不乱码。环境远景文字不强禁。
+// 文字与品牌不做一刀切。用户未要求时不让模型擅自添加；用户明确要求时保留，
+// 并要求逐字准确。字幕仍由合成层 ASS 叠加，生成画面里的其它文字由终态质检复核。
 // 解剖约束保留:画「手-物-手竖直叠帧」会长出多余手臂(Veo Lite / nano banana 都吐过)。
-const CLEAN_SCENE_SUFFIX =
-  '，画面整洁，纯场景/人物/氛围；' +
-  '单人出镜，双臂可追溯到肩膀，五指完整、手部解剖正确，' +
-  '不出现多余肢体、断肢或悬空小臂，避开手-物-手竖直叠帧这类高解剖风险构图；' +
-  '不要把产品包装、瓶身标签、招牌、屏幕、书本等含文字物体作为画面主体或特写（AI 会在上面编造乱码假字）';
-const NO_TEXT_NEGATIVE = [
-  // 中文 — 只压 AI 会编乱码的产品文字载体 + 乱码本身(不再全禁通用文字)
-  '瓶身文字, 包装文字, 标签文字, 招牌文字, 屏幕文字, 书本文字, 错乱的字, 乱码假字',
+const COMMON_SCENE_SUFFIX =
+  '，画面整洁；' +
+  '用户未要求时不要凭空添加文字、品牌或 Logo；' +
+  '若需求包含文字、品牌、包装、标牌或屏幕内容，必须逐字准确、清晰可读，不得替换、增删或拼错';
+const HUMAN_SCENE_SUFFIX =
+  '；若人物出镜，双臂必须可追溯到肩膀，手部解剖正确并符合当前姿势与自然遮挡关系；' +
+  '可见手指的边界、指根和关节方向必须自然，抓握时允许被物体合理遮挡，' +
+  '不得出现少指、手指粘连、融合手、多余手臂、多余肢体、多指、断肢、悬空小臂或不可能的关节，' +
+  '避开手-物-手竖直叠帧这类高解剖风险构图';
+const REQUIRED_HAND_SCENE_SUFFIX =
+  '；在不违背用户指定构图的前提下，必要手部动作优先采用单手、手腕与前臂连续、' +
+  '三分之四侧面或侧面构图，让可见手指轮廓与物体边界自然可辨，避免手指和杯柄或物体边缘完全重叠融合';
+const REQUIRED_HAND_OBJECT_IDENTITY_SUFFIX =
+  '；手正在操作的主体必须始终是同一个物体，主体身份与类别、轮廓、颜色、材质和结构件（例如杯子的把手）跨帧保持一致，' +
+  '不得在动作中变成另一种物体，不得让把手或其它结构件凭空出现或消失';
+const EXPLICIT_DYNAMIC_CAMERA_RE =
+  /(?:跟拍|跟随镜头|镜头跟随|环绕镜头|镜头环绕|绕拍|升降镜头|推镜|拉镜|变焦|运镜|摇镜|移镜|手持镜头|tracking shot|follow(?:ing)? camera|dolly|zoom|pan|tilt|handheld|orbit(?:ing)?(?: shot| camera)?)/iu;
+const EXPLICIT_LARGE_HAND_MOTION_RE =
+  /(?:高高举起|举过|抬到|大幅度|快速抬起|甩动|挥动|overhead|above (?:the )?head|raise (?:it )?high|large movement)/iu;
+const EXPLICIT_HAND_RELOCATION_RE =
+  /(?:移到|移至|移动到|搬到|递给|传递给|倒入|倒进|放到(?!原位)|move .{0,24} to|transfer .{0,24} to|carry .{0,24} to|place .{0,24} (?:on|in|at)|pour .{0,24} into)/iu;
+const EXPLICIT_PARTIAL_FRAMING_RE =
+  /(?:局部特写|细节特写|(?:杯|手|手部|主体|产品|物体|细节)(?:的)?特写|特写(?:镜头|画面|构图)|局部画面|裁切构图|只拍(?:手|手部|杯|主体|局部)|close[- ]?up|detail shot|cropped framing|partial view)/iu;
+const CUP_OBJECT_RE = /(?:杯|马克杯|茶杯|咖啡杯|cup|mug)/iu;
+const EXPLICIT_HANDLE_GRIP_RE =
+  /(?:抓住杯柄|握住杯柄|拿住杯柄|抓住把手|握住把手|by (?:the )?handle|grip (?:the )?handle)/iu;
+const MODEST_LIFT_ACTION_RE =
+  /(?:拿起|提起|端起|抬起|离开桌面|离开支撑面|pick(?:s|ing)? up|lift(?:s|ing)?|raise(?:s|d|ing)?)/iu;
+const RETURN_TO_ORIGIN_RE =
+  /(?:放回|归位|回到原位|put(?:s|ting)? (?:it )?back|return(?:s|ed|ing)? .+ (?:table|support|place))/iu;
+const DEFAULT_COMPOSITION_ANCHOR_MODEL = 'gemini-3.1-flash-image';
+const COMPOSITION_ANCHOR_FALLBACK_MODEL = 'gemini-3.1-flash-lite-image';
+const COMPOSITION_ANCHOR_TIMEOUT_MS = 60_000;
+const OBJECT_ONLY_SCENE_SUFFIX =
+  '；这是纯物体/环境镜头，不得出现人物、手、手臂或身体部位，' +
+  '不要新增拿起、触碰或操作主体的动作，只保留用户指定的主体、环境和运动';
+const AVOID_UNREQUESTED_HAND_SUFFIX =
+  '；未明确要求人物或手部时，优先通过主体运动、镜头运动或环境变化表达，不要主动加入手或手臂';
+const BASE_NEGATIVE = [
+  // 中文 — 只压错误文字，不禁止用户明确要求的文字载体或品牌。
+  '错别字, 错误品牌, 错误 Logo, 错乱的字, 乱码假字, 不可读文字',
   // 中文 — 解剖
-  '多余手臂, 多手, 多臂, 第三只手, 畸形手, 多指, 断肢, 悬空手臂, 解剖错误',
+  '融合手, 手指粘连, 少指, 多余手臂, 多手, 多臂, 第三只手, 畸形手, 多指, 断肢, 悬空手臂, 解剖错误',
   // English
-  'garbled text, fake text, gibberish text, packaging label text, signage text, deformed text,' +
-    ' extra arm, extra hand, third arm, deformed hands, extra fingers, floating limb, anatomical error',
+  'garbled text, fake text, gibberish text, misspelled text, unreadable text, incorrect logo, malformed logo,' +
+    ' fused hands, fused fingers, missing fingers, extra arm, extra hand, third arm, deformed hands, extra fingers, floating limb, anatomical error',
 ].join(', ');
+const REQUIRED_HAND_OBJECT_NEGATIVE =
+  `${BASE_NEGATIVE}, 物体变形, 主体身份漂移, 物体类别变化, 把手凭空出现或消失, ` +
+  'object morphing, subject identity drift, changing object shape, object category change, handle appearing or disappearing';
+const OBJECT_ONLY_NEGATIVE = `${BASE_NEGATIVE}, person, people, human, face, hand, hands, arm, arms, body parts, holding object, touching object, picking up object`;
+
+type HumanPresencePolicy = 'explicit-human' | 'object-only' | 'conditional';
+
+function requiredHandSafeFramingSuffix(userText: string): string {
+  const preserveRequestedMotion =
+    EXPLICIT_DYNAMIC_CAMERA_RE.test(userText) ||
+    EXPLICIT_LARGE_HAND_MOTION_RE.test(userText) ||
+    EXPLICIT_HAND_RELOCATION_RE.test(userText) ||
+    EXPLICIT_PARTIAL_FRAMING_RE.test(userText);
+  const framing = EXPLICIT_PARTIAL_FRAMING_RE.test(userText)
+    ? '；按用户明确要求的特写或局部构图执行；被要求保留的局部、动作接触点和关键结构必须持续清楚，不得发生非预期裁切或结构消失'
+    : preserveRequestedMotion
+      ? '；采用足以覆盖完整运动轨迹的宽景：手、手腕、前臂和操作主体必须全程完整保留在画面内，拿起、悬停、移动和放回时不得裁切主体顶部、底部或关键结构件'
+      : '；采用全桌面宽景并提前预留完整动作空间：手、手腕、前臂和操作主体必须全程完整保留在画面内，操作主体四周保留至少 25% 安全留白；拿起、悬停和放回时不得裁切主体顶部、底部或关键结构件';
+  const camera = EXPLICIT_DYNAMIC_CAMERA_RE.test(userText)
+    ? '；保留用户明确要求的跟拍、变焦或其它运镜，但镜头必须提前扩宽并连续跟随，不能因运镜让关键主体意外出框'
+    : '；使用固定机位，不得推近、变焦或跟随抬升';
+  const motion = EXPLICIT_LARGE_HAND_MOTION_RE.test(userText)
+    ? '；保留用户明确要求的大幅度动作，并为完整运动轨迹预留足够上下左右空间'
+    : '；用户未指定大幅度动作时，只做完成动作所需的最小幅度抬升，让操作主体停留在安全区域';
+  const subjectSize = CUP_OBJECT_RE.test(userText)
+    ? '杯体初始占画面高度不超过 20%'
+    : '操作主体初始占画面高度不超过 20%';
+  const safeStaging = preserveRequestedMotion
+    ? ''
+    : `；动作安全排布：采用固定全桌面宽景，${subjectSize}，主体上下左右始终保留至少 25% 安全留白；` +
+      '让操作主体初始位于画面中央偏下，主体中心在整个动作中始终停留在画面下半部中央区域，不得进入画面上半部；' +
+      (CUP_OBJECT_RE.test(userText)
+        ? '拿起杯子时仅垂直抬升到足以离开桌面的高度，杯底只离开桌面约 3-5 厘米，抬升距离不超过半个杯身高度，桌面始终在杯子下方留有可见空间；' +
+          '若用户要求悬停或停留，必须清楚停留至少 1 秒，再放回原来的桌面落点，保持把手方向与画面大小和开场一致'
+        : '只做完成动作所需的最短稳定轨迹，并在用户要求的位置完成收尾');
+  return framing + camera + motion + safeStaging;
+}
+
+function shouldUseRequiredHandCompositionAnchor(userText: string): boolean {
+  return (
+    HAND_INTENT_RE.test(userText) &&
+    MODEST_LIFT_ACTION_RE.test(userText) &&
+    RETURN_TO_ORIGIN_RE.test(userText) &&
+    !EXPLICIT_DYNAMIC_CAMERA_RE.test(userText) &&
+    !EXPLICIT_LARGE_HAND_MOTION_RE.test(userText) &&
+    !EXPLICIT_HAND_RELOCATION_RE.test(userText) &&
+    !EXPLICIT_PARTIAL_FRAMING_RE.test(userText)
+  );
+}
+
+function requiredHandCompositionAnchorPrompt(
+  userText: string,
+  aspectLabel: string,
+): string {
+  return (
+    `生成一张用于视频动作开始前的稳定静帧。参考需求中的场景、操作主体、颜色、材质和环境：${userText}。` +
+    '此时动作尚未发生，人物、手和手臂均不入画，不要表现拿起、悬停或放回。' +
+    `采用${aspectLabel}全桌面宽景，操作主体完整放在画面下半部中央区域，占画面高度不超过 15%，` +
+    '主体上下左右保留至少 30% 安全留白，顶部、底部、左右边界和全部结构件清楚可见；' +
+    '固定机位、真实产品摄影、桌面与主体比例自然。' +
+    COMMON_SCENE_SUFFIX
+  );
+}
+
+function requiredHandFramingRepairInstruction(userText: string): string {
+  const preserveRequestedMotion =
+    EXPLICIT_DYNAMIC_CAMERA_RE.test(userText) ||
+    EXPLICIT_LARGE_HAND_MOTION_RE.test(userText) ||
+    EXPLICIT_HAND_RELOCATION_RE.test(userText) ||
+    EXPLICIT_PARTIAL_FRAMING_RE.test(userText);
+  const framing = EXPLICIT_PARTIAL_FRAMING_RE.test(userText)
+    ? '保留用户明确要求的特写或局部构图，被要求保留的局部、动作接触点和关键结构必须持续清楚，不得发生非预期裁切或结构消失'
+    : preserveRequestedMotion
+      ? '采用足以覆盖用户完整运动轨迹的宽景，从动作开始到结束都必须完整看到主体顶部、底部、左右边界和关键结构件'
+      : `改用全桌面宽景，${CUP_OBJECT_RE.test(userText) ? '杯体' : '操作主体'}初始占画面高度不超过 15%，主体上下左右始终保留至少 30% 安全留白，主体中心全程停留在画面下半部中央区域且不得进入画面上半部`;
+  const camera = EXPLICIT_DYNAMIC_CAMERA_RE.test(userText)
+    ? '保持用户明确要求的跟拍、变焦或其它运镜，镜头提前扩宽并连续跟随，不得因运镜让关键主体意外出框'
+    : '使用固定机位，不得推近、变焦或跟随主体抬升';
+  const motion = EXPLICIT_LARGE_HAND_MOTION_RE.test(userText)
+    ? '保留用户明确要求的大幅度动作，为完整运动轨迹预留足够上下左右空间'
+    : CUP_OBJECT_RE.test(userText) && !preserveRequestedMotion
+      ? '杯底只离开桌面约 3-5 厘米且不超过半个杯身高度，只做完成拿起所需的最小运动幅度'
+      : '用户未指定大幅度动作时，只做完成动作所需的最小运动幅度';
+  return `；构图修复要求：${framing}；${camera}；${motion}`;
+}
+
+const HUMAN_INTENT_RE =
+  /(?:人物|人像|真人|人类|男人|女人|男性|女性|男士|女士|男孩|女孩|儿童|孩子|老人|模特|演员|主持人|主播|手部|双手|左手|右手|手臂|拿起|端起|握住|触碰|操作|person|people|human|man|woman|boy|girl|child|model|actor|presenter|host|hand|hands|arm|arms|hold|holding|touch|pick(?:ing)? up)/iu;
+const HAND_INTENT_RE =
+  /(?:手部|双手|左手|右手|手臂|拿起|端起|握住|触碰|操作|hand|hands|arm|arms|hold|holding|touch|grab|pick(?:ing)? up)/iu;
+const NO_HUMAN_INTENT_RE =
+  /(?:无人物|无人出镜|不要人物|不出现人物|不出现人手|不要人手|不要手|无手部|no people|without people|no hands|without hands)/iu;
+const OBJECT_ONLY_INTENT_RE =
+  /(?:静物|物体|产品|商品|杯|瓶|桌面|器皿|家具|食物|饮料|风景|景观|建筑|车辆|动物|宠物|固定镜头|无人物|无人|不出现人物|不出现人手|object|product|still life|landscape|building|vehicle|animal|pet|locked camera|no people|without people)/iu;
+
+function humanPresencePolicy(userText: string): HumanPresencePolicy {
+  if (NO_HUMAN_INTENT_RE.test(userText)) return 'object-only';
+  if (HUMAN_INTENT_RE.test(userText)) return 'explicit-human';
+  if (OBJECT_ONLY_INTENT_RE.test(userText)) return 'object-only';
+  return 'conditional';
+}
+
+function scenePromptPolicy(userText: string): {
+  suffix: string;
+  negativePrompt: string;
+  presencePolicy: HumanPresencePolicy;
+  handRequired: boolean;
+} {
+  const policy = humanPresencePolicy(userText);
+  if (policy === 'object-only') {
+    return {
+      suffix: COMMON_SCENE_SUFFIX + OBJECT_ONLY_SCENE_SUFFIX,
+      negativePrompt: OBJECT_ONLY_NEGATIVE,
+      presencePolicy: policy,
+      handRequired: false,
+    };
+  }
+  if (policy === 'conditional') {
+    return {
+      suffix: COMMON_SCENE_SUFFIX + AVOID_UNREQUESTED_HAND_SUFFIX + HUMAN_SCENE_SUFFIX,
+      negativePrompt: BASE_NEGATIVE,
+      presencePolicy: policy,
+      handRequired: false,
+    };
+  }
+  return {
+    suffix:
+      COMMON_SCENE_SUFFIX +
+      HUMAN_SCENE_SUFFIX +
+      (HAND_INTENT_RE.test(userText)
+        ? REQUIRED_HAND_SCENE_SUFFIX +
+          REQUIRED_HAND_OBJECT_IDENTITY_SUFFIX +
+          requiredHandSafeFramingSuffix(userText)
+        : ''),
+    negativePrompt: HAND_INTENT_RE.test(userText) ? REQUIRED_HAND_OBJECT_NEGATIVE : BASE_NEGATIVE,
+    presencePolicy: policy,
+    handRequired: HAND_INTENT_RE.test(userText),
+  };
+}
+
+function motionCompletionInstruction(durationSeconds: number): string {
+  const finalHoldSeconds =
+    durationSeconds >= 4 ? 1 : Math.min(1, Math.max(0.5, durationSeconds * 0.15));
+  const finishBySeconds = Math.max(0.5, durationSeconds - finalHoldSeconds);
+  return `；若需求包含连续动作，必须在 ${durationSeconds} 秒内按顺序完整执行所有动作：开头迅速建立初始状态，中段完成核心动作，最晚在第 ${finishBySeconds.toFixed(1)} 秒前完成放回、离开等收尾；结尾应清楚呈现完成状态，最后至少 ${finalHoldSeconds.toFixed(0)} 秒展示动作完成后的稳定终态，不得在动作途中结束或省略收尾；镜头语言、节奏和构图在满足动作顺序与终态的前提下可自由发挥`;
+}
+
+function requiredHandChoreography(userText: string): string {
+  if (!HAND_INTENT_RE.test(userText)) return '';
+  const lowRiskGrip =
+    CUP_OBJECT_RE.test(userText) && !EXPLICIT_HANDLE_GRIP_RE.test(userText)
+      ? '；用户未指定抓握杯柄时，优先从杯身侧面用单手稳定抓握，保持手指与杯身接触边界清楚，不把手指穿入狭窄杯柄'
+      : '；在不改变用户动作意图的前提下，选择接触边界清楚、遮挡较少的自然抓握方式';
+  return (
+    lowRiskGrip +
+    '；采用单一连续镜头并划分清楚时间段：前 20% 建立初始状态，20%-65% 完成核心动作，' +
+    '65%-85% 完成用户要求的放回或收尾，最后 15% 保持稳定终态；不得瞬移、跳切或让主体位置突然跳变'
+  );
+}
+
+function qualityRepairInstruction(
+  quality: VideoQualityResult,
+  durationSeconds: number,
+  scenePolicy: ReturnType<typeof scenePromptPolicy>,
+  userText: string,
+): string {
+  const diagnostic = `${quality.failedChecks.join(' ')} ${quality.reason}`;
+  const hasAnatomyIssue = /(?:hand|finger|arm|limb|anatom|手|指|臂|肢)/iu.test(diagnostic);
+  const hasFramingIssue =
+    /(?:subject_out_of_frame|subject_containment|out.of.frame|crop|边界|出框|裁切|越过画面)/iu.test(
+      diagnostic,
+    );
+  let anatomyRepair = '';
+  if (hasAnatomyIssue && scenePolicy.handRequired) {
+    anatomyRepair =
+      '；手部修复要求：只保留用户要求的手和手臂，手掌与手臂连续自然，保持符合动作的自然抓握和合理遮挡；' +
+      '可见手指的边界、指根和关节方向必须自然，杯柄或物体不得与手指融为一体，不得融合、缺失、增生或扭曲';
+  } else if (hasAnatomyIssue && scenePolicy.presencePolicy === 'object-only') {
+    anatomyRepair = '；上一版出现了非必要手部，必须移除所有手和手臂，改用主体或镜头运动完成表达';
+  } else if (hasAnatomyIssue) {
+    anatomyRepair = '；上一版出现了非必要手部，改为不露手构图，不要让手或手臂进入画面';
+  }
+  const framingRepair = hasFramingIssue ? requiredHandFramingRepairInstruction(userText) : '';
+
+  return `；质量修复重试：上一版未通过检查（${quality.reason}）。必须修正该问题，同时保持用户明确要求的主体、动作、颜色、文字和镜头意图不变；允许调整上一版有缺陷的构图、景别和主体运动幅度，确保缺陷不再出现${anatomyRepair}${framingRepair}；动作修复要求：必须在 ${durationSeconds} 秒内按用户原始顺序完整执行全部动作，最后至少 1 秒展示动作完成后的稳定终态`;
+}
 
 export type VisualMode = 'image' | 'video';
 /**
@@ -64,7 +287,7 @@ export type VisualMode = 'image' | 'video';
  *   'veo_fast'     — Veo 3.1 Fast, DEFAULT (8s/1080p ≈ ¥7/条, 解剖稳).
  *   'veo_lite'     — Veo 3.1 Lite, 省钱档 (≈ ¥4.6/条, 解剖偶失,一字可改).
  *   'veo_standard' — Veo 3.1 Standard, 高质量可选 (≈ ¥23/条).
- *   'wanxiang'     — wan2.1-t2v-turbo, 便宜兜底 (Veo 降级时).
+ *   'wanxiang'     — Wan 2.7, 支持 2–15 秒与 720p/1080p (Veo 不可用时).
  */
 export type VideoSource = 'veo_fast' | 'veo_lite' | 'veo_standard' | 'happyhorse' | 'wanxiang';
 
@@ -73,7 +296,7 @@ const VEO_MODEL_DEFAULT: Record<'veo_fast' | 'veo_lite' | 'veo_standard', string
   veo_lite: 'veo-3.1-lite-generate-preview',
   veo_standard: 'veo-3.1-generate-preview',
 };
-const DEFAULT_HAPPYHORSE_MODEL = 'happyhorse-1.0-t2v';
+const DEFAULT_HAPPYHORSE_MODEL = 'happyhorse-1.1-t2v';
 const isVeoSource = (s: VideoSource): boolean =>
   s === 'veo_fast' || s === 'veo_lite' || s === 'veo_standard';
 
@@ -97,6 +320,32 @@ export function resolveAspect(ar: AspectRatio): {
     default: // 9:16 竖屏
       return { width: 1080, height: 1920, veoAspect: '9:16', hhSize: '1080*1920' };
   }
+}
+
+function resolveWanVideoSize(
+  ar: AspectRatio,
+  resolution: '720p' | '1080p',
+): string {
+  const sizes: Record<
+    '720p' | '1080p',
+    Record<AspectRatio, string>
+  > = {
+    '720p': {
+      '16:9': '1280*720',
+      '9:16': '720*1280',
+      '1:1': '960*960',
+      '4:3': '1088*832',
+      '3:4': '832*1088',
+    },
+    '1080p': {
+      '16:9': '1920*1080',
+      '9:16': '1080*1920',
+      '1:1': '1440*1440',
+      '4:3': '1632*1248',
+      '3:4': '1248*1632',
+    },
+  };
+  return sizes[resolution][ar];
 }
 
 function aspectCopy(ar: AspectRatio | undefined): string {
@@ -125,32 +374,58 @@ function resolveVeoModel(source: VideoSource, cfg: SimpleVideoConfig): string {
   }
 }
 
-export type SimpleVideoErrorKind = 'config' | 'compose';
+export type SimpleVideoErrorKind =
+  | 'config'
+  | 'compose'
+  | 'invalid_options'
+  | 'clone_incompatible'
+  | 'clone_compatibility_unavailable'
+  | 'quality'
+  | 'quality_unavailable';
 export class SimpleVideoError extends Error {
+  readonly retryable: boolean;
+
   constructor(
     message: string,
     readonly kind: SimpleVideoErrorKind,
+    retryable = kind !== 'quality' && kind !== 'quality_unavailable',
+    readonly failedChecks: readonly string[] = [],
+    readonly qualityReason?: string,
   ) {
     super(message);
     this.name = 'SimpleVideoError';
+    this.retryable = retryable;
   }
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
 export interface SimpleVideoConfig {
   readonly dashscopeApiKey: string;
   readonly dashscopeBaseUrl: string;
   readonly dashscopeWorkspaceId?: string;
+  /** Dedicated post-generation lip-sync for clone-video outputs with audible source audio. */
+  readonly falApiKey?: string;
+  readonly falBaseUrl?: string;
+  readonly falLipsyncModel?: string;
+  /** Clone-video override; defaults independently to Sync Lipsync 3. */
+  readonly falCloneLipsyncModel?: string;
   /** Shared Google key (same one as #5 nano banana) — Veo video AND nano banana image. */
   readonly geminiApiKey?: string;
   readonly geminiBaseUrl?: string;
+  /** Automatic narration fallback when DashScope TTS is unavailable. */
+  readonly geminiTtsModel?: string;
+  readonly geminiTtsVoice?: string;
   readonly qwenTtsModel: string; // qwen3-tts-flash
   readonly presetVoice: string; // 'Cherry'
   /** Image source = nano banana. Default 'gemini-3.1-flash-image'. */
   readonly geminiImageModel?: string;
-  readonly wanxiangT2vModel: string; // wan2.1-t2v-turbo (兜底)
-  /** t2v 竖屏 size `W*H`. Default '720*1280' (fills 1080×1920, no letterbox). */
+  readonly wanxiangT2vModel: string; // wan2.7-t2v-2026-06-12 (Veo 不可用时)
+  /** Optional Wan t2v size override. Normally derived from selected aspect/resolution. */
   readonly wanxiangVideoSize?: string;
-  /** HappyHorse t2v model (阿里 DashScope, 同 key 同端点). Default 'happyhorse-1.0-t2v'. */
+  /** HappyHorse t2v model (阿里 DashScope, 同 key 同端点). Default 'happyhorse-1.1-t2v'. */
   readonly happyhorseModel?: string;
   /** i2v 图生视频 model ids (Phase 2 第二期 宠物视频, 同 DashScope video-synthesis 端点). */
   readonly wanI2vModel?: string; // 默认 wan2.2-i2v-flash
@@ -182,10 +457,12 @@ export interface SimpleVideoOptions {
 
 interface SimpleFns {
   synthesizeSpeech: typeof synthesizeSpeech;
+  synthesizeGeminiSpeech: typeof synthesizeGeminiSpeech;
   generateImages: typeof generateImages; // nano banana (image source)
   generateBrollVideo: typeof generateBrollVideo; // wanxiang t2v (fallback)
   generateVeoVideo: typeof generateVeoVideo;
   downloadToBuffer: typeof downloadToBuffer;
+  downloadToFile: typeof downloadToFile;
   ffprobeDurationMs: typeof ffprobeDurationMs;
   renderImageClip: typeof renderImageClip; // STATIC (no Ken Burns)
   renderVideoClip: typeof renderVideoClip;
@@ -193,6 +470,89 @@ interface SimpleFns {
   optimizeUserScript: typeof optimizeUserScript;
   writeFile: (p: string, b: Buffer) => Promise<void>;
   readFile: (p: string) => Promise<Buffer>;
+  removeFile: (p: string) => Promise<void>;
+}
+
+function isRetryableCompositionAnchorError(err: unknown): boolean {
+  if (!(err instanceof GeminiImageError)) return false;
+  if (err.kind === 'timeout' || err.kind === 'network') return true;
+  return err.kind === 'http' && (err.status === 429 || err.status === 503);
+}
+
+function compositionAnchorErrorKind(err: unknown): string {
+  return err instanceof GeminiImageError ? err.kind : 'unknown';
+}
+
+async function generateRequiredHandCompositionAnchor(
+  input: {
+    prompt: string;
+    aspectRatio: '9:16' | '16:9';
+  },
+  cfg: SimpleVideoConfig,
+  fns: Pick<SimpleFns, 'generateImages'>,
+  logger: PipelineLogger,
+): Promise<{ data: string; mimeType: 'image/png' | 'image/jpeg' }> {
+  const primaryModel = cfg.geminiImageModel ?? DEFAULT_COMPOSITION_ANCHOR_MODEL;
+  const callModel = (model: string): Promise<GenerateImagesResult> =>
+    fns.generateImages({
+      apiKey: cfg.geminiApiKey ?? '',
+      ...(cfg.geminiBaseUrl ? { baseUrl: cfg.geminiBaseUrl } : {}),
+      model,
+      apiVersion: 'v1',
+      prompt: input.prompt,
+      aspectRatio: input.aspectRatio,
+      timeoutMs: COMPOSITION_ANCHOR_TIMEOUT_MS,
+      maxRetries: 0,
+    });
+
+  let generatedAnchor: GenerateImagesResult;
+  try {
+    generatedAnchor = await callModel(primaryModel);
+  } catch (err) {
+    if (
+      !isRetryableCompositionAnchorError(err) ||
+      primaryModel === COMPOSITION_ANCHOR_FALLBACK_MODEL
+    ) {
+      throw new SimpleVideoError(
+        `composition anchor unavailable (${compositionAnchorErrorKind(err)})`,
+        'compose',
+        false,
+      );
+    }
+    logger.warn(
+      {
+        fromModel: primaryModel,
+        toModel: COMPOSITION_ANCHOR_FALLBACK_MODEL,
+        errorKind: compositionAnchorErrorKind(err),
+      },
+      'video: composition anchor primary unavailable; trying fast fallback',
+    );
+    try {
+      generatedAnchor = await callModel(COMPOSITION_ANCHOR_FALLBACK_MODEL);
+    } catch (fallbackErr) {
+      throw new SimpleVideoError(
+        `composition anchor fallback unavailable (${compositionAnchorErrorKind(fallbackErr)})`,
+        'compose',
+        false,
+      );
+    }
+  }
+
+  const firstAnchor = generatedAnchor.images[0];
+  if (!firstAnchor) {
+    throw new SimpleVideoError('composition anchor produced no image', 'compose', false);
+  }
+  if (firstAnchor.mimeType !== 'image/png' && firstAnchor.mimeType !== 'image/jpeg') {
+    throw new SimpleVideoError(
+      `composition anchor returned unsupported image type ${firstAnchor.mimeType}`,
+      'compose',
+      false,
+    );
+  }
+  return {
+    data: firstAnchor.buffer.toString('base64'),
+    mimeType: firstAnchor.mimeType,
+  };
 }
 
 export interface SimpleVideoServices {
@@ -200,19 +560,36 @@ export interface SimpleVideoServices {
     fileId: string;
     storagePath: string;
   }>;
+  storeOutputFile(input: {
+    filename: string;
+    mimetype: string;
+    sourcePath: string;
+  }): Promise<{
+    fileId: string;
+    storagePath: string;
+  }>;
   workdir: string;
   logger: PipelineLogger;
   llm: LlmComplete;
+  verifyFinalVideo: (input: VerifyFinalVideoQualityInput) => Promise<VideoQualityResult>;
   overrides?: Partial<SimpleFns>;
+}
+
+interface SimplePipelinePromptContext {
+  readonly includeFullUserRequirement?: boolean;
+  readonly initialRepairInstruction?: string;
+  readonly onAudioEngine?: (engine: 'qwen' | 'gemini') => void;
 }
 
 function realFns(): SimpleFns {
   return {
     synthesizeSpeech,
+    synthesizeGeminiSpeech,
     generateImages,
     generateBrollVideo,
     generateVeoVideo,
     downloadToBuffer,
+    downloadToFile,
     ffprobeDurationMs,
     renderImageClip,
     renderVideoClip,
@@ -220,6 +597,7 @@ function realFns(): SimpleFns {
     optimizeUserScript,
     writeFile: (p, b) => fs.writeFile(p, b),
     readFile: (p) => fs.readFile(p),
+    removeFile: (p) => fs.rm(p, { force: true }),
   };
 }
 
@@ -227,32 +605,77 @@ export function createSimplePipelineDeps(
   cfg: SimpleVideoConfig,
   opts: SimpleVideoOptions,
   svc: SimpleVideoServices,
+  userText = '',
+  promptContext: SimplePipelinePromptContext = {},
 ): VideoPipelineDeps {
   const fns = { ...realFns(), ...(svc.overrides ?? {}) };
   const ws = cfg.dashscopeWorkspaceId ? { workspaceId: cfg.dashscopeWorkspaceId } : {};
   const ffOpts = cfg.ffmpegBin ? { ffmpegBin: cfg.ffmpegBin } : {};
   const visualMode = opts.visualMode ?? 'video';
   const videoSource = opts.videoSource ?? 'veo_fast';
+  const minimumSegmentDurationMs = (opts.veoDurationSeconds ?? 8) * 1000;
   const aspect = resolveAspect(opts.aspectRatio ?? '9:16');
   const aspectLabel = aspectCopy(opts.aspectRatio);
+  const scenePolicy = scenePromptPolicy(userText);
+  const originalUserRequirement =
+    promptContext.includeFullUserRequirement && userText.trim()
+      ? `；用户原始需求（每个动作阶段都必须完整覆盖）：${userText.trim()}`
+      : '';
+  const initialRepairInstruction = promptContext.initialRepairInstruction ?? '';
+  let useGeminiTts = !cfg.dashscopeApiKey;
 
   return {
     logger: svc.logger,
 
     async synthesizeSegmentAudio({ index, text }) {
-      // Qwen3-TTS PRESET voice (no clone): pass the preset voice name as `voiceId`.
-      const synth = await fns.synthesizeSpeech({
-        apiKey: cfg.dashscopeApiKey,
-        baseUrl: cfg.dashscopeBaseUrl,
-        ...ws,
-        model: cfg.qwenTtsModel,
-        voiceId: cfg.presetVoice,
-        text,
+      let audioBuffer: Buffer | undefined;
+      if (!useGeminiTts) {
+        try {
+          // Qwen3-TTS PRESET voice (no clone): pass the preset voice name as `voiceId`.
+          const synth = await fns.synthesizeSpeech({
+            apiKey: cfg.dashscopeApiKey,
+            baseUrl: cfg.dashscopeBaseUrl,
+            ...ws,
+            model: cfg.qwenTtsModel,
+            voiceId: cfg.presetVoice,
+            text,
+          });
+          const dl = await fns.downloadToBuffer(synth.audioUrl);
+          audioBuffer = dl.buffer;
+          promptContext.onAudioEngine?.('qwen');
+        } catch (err) {
+          if (!cfg.geminiApiKey) throw err;
+          useGeminiTts = true;
+          svc.logger.warn(
+            { primary: 'qwen', fallback: 'gemini', err: errorMessage(err) },
+            'video: primary TTS unavailable — switching remaining narration to Gemini TTS',
+          );
+        }
+      }
+      if (useGeminiTts) {
+        if (!cfg.geminiApiKey) {
+          throw new SimpleVideoError('Gemini TTS fallback key is unavailable', 'config', false);
+        }
+        const synth = await fns.synthesizeGeminiSpeech({
+          apiKey: cfg.geminiApiKey,
+          ...(cfg.geminiBaseUrl ? { baseUrl: cfg.geminiBaseUrl } : {}),
+          ...(cfg.geminiTtsModel ? { model: cfg.geminiTtsModel } : {}),
+          ...(cfg.geminiTtsVoice ? { voiceName: cfg.geminiTtsVoice } : {}),
+          text,
+        });
+        audioBuffer = synth.audioBuffer;
+        promptContext.onAudioEngine?.('gemini');
+      }
+      if (!audioBuffer) {
+        throw new SimpleVideoError('No narration audio was produced', 'compose', false);
+      }
+      await svc.storeOutput({
+        filename: `seg${index}-audio.wav`,
+        mimetype: 'audio/wav',
+        buffer: audioBuffer,
       });
-      const dl = await fns.downloadToBuffer(synth.audioUrl);
-      await svc.storeOutput({ filename: `seg${index}-audio.wav`, mimetype: 'audio/wav', buffer: dl.buffer });
       const localPath = path.join(svc.workdir, `seg${index}-audio.wav`);
-      await fns.writeFile(localPath, dl.buffer);
+      await fns.writeFile(localPath, audioBuffer);
       const durationMs = await fns.ffprobeDurationMs(
         localPath,
         cfg.ffprobeBin ? { ffprobeBin: cfg.ffprobeBin } : {},
@@ -268,63 +691,243 @@ export function createSimplePipelineDeps(
           apiKey: cfg.geminiApiKey ?? '',
           ...(cfg.geminiBaseUrl ? { baseUrl: cfg.geminiBaseUrl } : {}),
           model: cfg.geminiImageModel ?? 'gemini-3.1-flash-image',
-          prompt: `${visual}${CLEAN_SCENE_SUFFIX}，${aspectLabel} 构图`,
+          prompt: `${visual}${scenePolicy.suffix}，${aspectLabel} 构图`,
         });
         const first = img.images[0];
-        if (!first) throw new SimpleVideoError(`nano banana seg ${index} produced no image`, 'compose');
-        await svc.storeOutput({ filename: `seg${index}-img.png`, mimetype: first.mimeType, buffer: first.buffer });
+        if (!first)
+          throw new SimpleVideoError(`nano banana seg ${index} produced no image`, 'compose');
+        await svc.storeOutput({
+          filename: `seg${index}-img.png`,
+          mimetype: first.mimeType,
+          buffer: first.buffer,
+        });
         const localPath = path.join(svc.workdir, `seg${index}-img.png`);
         await fns.writeFile(localPath, first.buffer);
         return { visualRef: localPath };
       }
-      // video visual
-      let url: string;
-      let headers: Record<string, string> | undefined;
-      if (isVeoSource(videoSource)) {
-        // Veo (default veo_fast). NOTE: the Gemini Developer API ALWAYS renders
-        // an audio track — it can't be disabled (generateAudio:false → 400) and
-        // there's no audio-off price tier. We discard it and dub with Qwen Cherry.
-        const v = await fns.generateVeoVideo({
-          apiKey: cfg.geminiApiKey ?? '',
-          ...(cfg.geminiBaseUrl ? { baseUrl: cfg.geminiBaseUrl } : {}),
-          model: resolveVeoModel(videoSource, cfg),
-          prompt: visual + CLEAN_SCENE_SUFFIX,
-          aspectRatio: aspect.veoAspect, // 1:1 时用 9:16 出, compose pad 到方形
-          durationSeconds: opts.veoDurationSeconds ?? 8,
-          resolution: opts.veoResolution ?? '1080p',
-        });
-        url = v.videoUri;
-        headers = { 'x-goog-api-key': cfg.geminiApiKey ?? '' }; // Veo uri needs the key
-      } else {
-        // wanxiang / happyhorse t2v — 同 DashScope video-synthesis 端点, 改 model + size.
-        const isHH = videoSource === 'happyhorse';
-        const v = await fns.generateBrollVideo({
-          apiKey: cfg.dashscopeApiKey,
-          baseUrl: cfg.dashscopeBaseUrl,
-          ...ws,
-          model: isHH ? (cfg.happyhorseModel ?? DEFAULT_HAPPYHORSE_MODEL) : cfg.wanxiangT2vModel,
-          prompt: visual + CLEAN_SCENE_SUFFIX,
-          negativePrompt: NO_TEXT_NEGATIVE,
-          // HappyHorse 1080P 按画幅; wanxiang 兜底保持 720 竖屏(第一期不做多尺寸).
-          size: isHH ? aspect.hhSize : (cfg.wanxiangVideoSize ?? '720*1280'),
-        });
-        if (!v.videoUrl) throw new SimpleVideoError(`broll video seg ${index} produced no url`, 'compose');
-        url = v.videoUrl;
-      }
-      const dl = await fns.downloadToBuffer(url, headers ? { headers } : {});
-      await svc.storeOutput({ filename: `seg${index}-vid.mp4`, mimetype: 'video/mp4', buffer: dl.buffer });
       const localPath = path.join(svc.workdir, `seg${index}-vid.mp4`);
-      await fns.writeFile(localPath, dl.buffer);
-      return { visualRef: localPath };
+      const durationSeconds = opts.veoDurationSeconds ?? 8;
+      const resolution = opts.veoResolution ?? '1080p';
+      const completionInstruction = motionCompletionInstruction(durationSeconds);
+      let compositionAnchor:
+        | { data: string; mimeType: 'image/png' | 'image/jpeg' }
+        | undefined;
+      if (
+        isVeoSource(videoSource) &&
+        shouldUseRequiredHandCompositionAnchor(userText)
+      ) {
+        compositionAnchor = await generateRequiredHandCompositionAnchor(
+          {
+            prompt: requiredHandCompositionAnchorPrompt(userText, aspectLabel),
+            aspectRatio: aspect.veoAspect,
+          },
+          cfg,
+          fns,
+          svc.logger,
+        );
+      }
+      let repairInstruction = initialRepairInstruction;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const candidatePrompt =
+          visual +
+          originalUserRequirement +
+          scenePolicy.suffix +
+          repairInstruction +
+          requiredHandChoreography(userText) +
+          completionInstruction;
+        let url: string;
+        let headers: Record<string, string> | undefined;
+        if (isVeoSource(videoSource)) {
+          // Veo (default veo_fast). NOTE: the Gemini Developer API ALWAYS renders
+          // an audio track — it can't be disabled (generateAudio:false → 400) and
+          // there's no audio-off price tier. We discard it and dub with Qwen Cherry.
+          const v = await fns.generateVeoVideo({
+            apiKey: cfg.geminiApiKey ?? '',
+            ...(cfg.geminiBaseUrl ? { baseUrl: cfg.geminiBaseUrl } : {}),
+            model: resolveVeoModel(videoSource, cfg),
+            prompt: candidatePrompt,
+            negativePrompt: scenePolicy.negativePrompt,
+            ...(compositionAnchor
+              ? {
+                  startImage: compositionAnchor,
+                  lastFrameImage: compositionAnchor,
+                }
+              : {}),
+            aspectRatio: aspect.veoAspect, // 1:1 时用 9:16 出, compose pad 到方形
+            durationSeconds,
+            resolution,
+          });
+          url = v.videoUri;
+          headers = { 'x-goog-api-key': cfg.geminiApiKey ?? '' }; // Veo uri needs the key
+        } else {
+          // wanxiang / happyhorse t2v — 同 DashScope video-synthesis 端点, 改 model + size.
+          const isHH = videoSource === 'happyhorse';
+          const v = await fns.generateBrollVideo({
+            apiKey: cfg.dashscopeApiKey,
+            baseUrl: cfg.dashscopeBaseUrl,
+            ...ws,
+            model: isHH ? (cfg.happyhorseModel ?? DEFAULT_HAPPYHORSE_MODEL) : cfg.wanxiangT2vModel,
+            prompt: candidatePrompt,
+            negativePrompt: scenePolicy.negativePrompt,
+            // HappyHorse retains its established size contract. Wan 2.7 uses
+            // resolution + ratio; size remains populated only for legacy overrides.
+            size: isHH
+              ? aspect.hhSize
+              : (cfg.wanxiangVideoSize ??
+                resolveWanVideoSize(opts.aspectRatio ?? '9:16', resolution)),
+            ...(!isHH
+              ? {
+                  resolution: resolution === '1080p' ? ('1080P' as const) : ('720P' as const),
+                  ratio: opts.aspectRatio ?? '9:16',
+                }
+              : {}),
+            durationSeconds,
+          });
+          if (!v.videoUrl)
+            throw new SimpleVideoError(`broll video seg ${index} produced no url`, 'compose');
+          url = v.videoUrl;
+        }
+        let downloaded = false;
+        let downloadError: unknown;
+        for (let downloadAttempt = 0; downloadAttempt < 2; downloadAttempt += 1) {
+          try {
+            await fns.removeFile(localPath);
+            await fns.downloadToFile(url, localPath, {
+              ...(headers ? { headers } : {}),
+              maxBytes: 500 * 1024 * 1024,
+            });
+            downloaded = true;
+            break;
+          } catch (err) {
+            downloadError = err;
+            if (downloadAttempt === 0) {
+              svc.logger.warn(
+                { segmentIndex: index, err: errorMessage(err) },
+                'video: generated segment download failed — retrying the same URL',
+              );
+            }
+          }
+        }
+        if (!downloaded) {
+          throw new SimpleVideoError(
+            `generated segment download failed after provider completed: ${errorMessage(downloadError)}`,
+            'compose',
+            false,
+          );
+        }
+
+        let candidateDurationMs: number;
+        try {
+          candidateDurationMs = await fns.ffprobeDurationMs(
+            localPath,
+            cfg.ffprobeBin ? { ffprobeBin: cfg.ffprobeBin } : {},
+          );
+        } catch (err) {
+          throw new SimpleVideoError(
+            `generated segment inspection failed after provider completed: ${errorMessage(err)}`,
+            'compose',
+            false,
+          );
+        }
+
+        let candidateQuality: VideoQualityResult;
+        try {
+          candidateQuality = await svc.verifyFinalVideo({
+            videoPath: localPath,
+            workdir: svc.workdir,
+            durationMs: candidateDurationMs,
+            minimumDurationMs: minimumSegmentDurationMs,
+            userText,
+            qualityContext: `这是最终成片中的第 ${index + 1} 个原始动态片段。片段画面要求：${visual}`,
+            expectedSubtitleText: [],
+            requiredBrandTexts: [],
+            brandPolicy:
+              '用户明确要求的文字或品牌必须逐字准确；未要求时不得新增乱码、错字或错误品牌。',
+            ...(cfg.ffmpegBin ? { ffmpegBin: cfg.ffmpegBin } : {}),
+          });
+        } catch (err) {
+          throw new SimpleVideoError(
+            `generated segment quality verification failed after provider completed: ${errorMessage(err)}`,
+            'quality_unavailable',
+          );
+        }
+        if (candidateQuality.status === 'pass') return { visualRef: localPath };
+        if (candidateQuality.status === 'unknown') {
+          svc.logger.warn(
+            {
+              segmentIndex: index,
+              failedChecks: candidateQuality.failedChecks,
+              reason: candidateQuality.reason,
+            },
+            'video: segment quality verification inconclusive',
+          );
+          throw new SimpleVideoError(
+            'generated segment quality verification unavailable',
+            'quality_unavailable',
+            false,
+            candidateQuality.failedChecks,
+            candidateQuality.reason,
+          );
+        }
+        if (attempt === 1) {
+          svc.logger.warn(
+            {
+              segmentIndex: index,
+              failedChecks: candidateQuality.failedChecks,
+              reason: candidateQuality.reason,
+            },
+            'video: replacement segment quality rejected',
+          );
+          throw new SimpleVideoError(
+            'generated segment failed automated quality verification',
+            'quality',
+            false,
+            candidateQuality.failedChecks,
+            candidateQuality.reason,
+          );
+        }
+        svc.logger.warn(
+          {
+            segmentIndex: index,
+            failedChecks: candidateQuality.failedChecks,
+            reason: candidateQuality.reason,
+          },
+          'video: segment quality rejected — generating one replacement candidate',
+        );
+        repairInstruction =
+          initialRepairInstruction +
+          qualityRepairInstruction(candidateQuality, durationSeconds, scenePolicy, userText);
+      }
+      throw new SimpleVideoError('video segment quality retry exhausted', 'quality');
     },
 
     async renderBrollClip({ index, visualRef, audioRef, durationMs }) {
       const outPath = path.join(svc.workdir, `seg${index}-clip.mp4`);
       if (visualMode === 'image') {
         // 静态图(无 Ken Burns 运镜)— BOSS 2026-06-15.
-        await fns.renderImageClip({ imagePath: visualRef, audioPath: audioRef, outPath, durationMs, width: aspect.width, height: aspect.height }, ffOpts);
+        await fns.renderImageClip(
+          {
+            imagePath: visualRef,
+            audioPath: audioRef,
+            outPath,
+            durationMs,
+            width: aspect.width,
+            height: aspect.height,
+          },
+          ffOpts,
+        );
       } else {
-        await fns.renderVideoClip({ videoPath: visualRef, audioPath: audioRef, outPath, durationMs, width: aspect.width, height: aspect.height }, ffOpts);
+        await fns.renderVideoClip(
+          {
+            videoPath: visualRef,
+            audioPath: audioRef,
+            outPath,
+            durationMs,
+            width: aspect.width,
+            height: aspect.height,
+          },
+          ffOpts,
+        );
       }
       return { clipRef: outPath };
     },
@@ -357,6 +960,7 @@ export interface SimpleVideoResult {
   readonly totalDurationMs: number;
   readonly segments: number;
   readonly visualMode: VisualMode;
+  readonly audioEngine: 'qwen' | 'gemini' | 'mixed';
 }
 
 /**
@@ -369,14 +973,40 @@ export async function runSimpleVideoCreation(
   opts: SimpleVideoOptions,
   svc: SimpleVideoServices,
 ): Promise<SimpleVideoResult> {
-  if (!cfg.dashscopeApiKey) throw new SimpleVideoError('DASHSCOPE_API_KEY not configured', 'config');
+  if (!cfg.dashscopeApiKey && !cfg.geminiApiKey) {
+    throw new SimpleVideoError('No narration engine is configured', 'config');
+  }
+  if (typeof svc.verifyFinalVideo !== 'function') {
+    throw new SimpleVideoError('video quality verifier not configured', 'config');
+  }
   const visualMode = opts.visualMode ?? 'video';
   const videoSource = opts.videoSource ?? 'veo_fast';
+  const minimumSegmentDurationMs = (opts.veoDurationSeconds ?? 8) * 1000;
+  if (
+    visualMode === 'video' &&
+    videoParameterIssue({
+      model: videoSource,
+      resolution: opts.veoResolution ?? '1080p',
+      durationSeconds: opts.veoDurationSeconds ?? 8,
+    })
+  ) {
+    throw new SimpleVideoError('Veo 1080p requires an 8-second duration', 'invalid_options');
+  }
   const aspect = resolveAspect(opts.aspectRatio ?? '9:16');
   // Veo (any tier) AND nano banana image both run on the shared Google key.
-  const needsGemini = visualMode === 'image' || (visualMode === 'video' && isVeoSource(videoSource));
+  const needsGemini =
+    visualMode === 'image' || (visualMode === 'video' && isVeoSource(videoSource));
   if (needsGemini && !cfg.geminiApiKey) {
-    throw new SimpleVideoError('Veo/nano banana selected but GEMINI_API_KEY not configured', 'config');
+    throw new SimpleVideoError(
+      'Veo/nano banana selected but GEMINI_API_KEY not configured',
+      'config',
+    );
+  }
+  if (visualMode === 'video' && videoSource === 'wanxiang' && !cfg.dashscopeApiKey) {
+    throw new SimpleVideoError(
+      'Wanxiang selected but DASHSCOPE_API_KEY not configured',
+      'config',
+    );
   }
   const fns = { ...realFns(), ...(svc.overrides ?? {}) };
   const ffOpts = cfg.ffmpegBin ? { ffmpegBin: cfg.ffmpegBin } : {};
@@ -394,57 +1024,146 @@ export async function runSimpleVideoCreation(
       },
       { llm: svc.llm },
     ));
-  // ②-⑤ runner (synth preset voice + visual + clip per segment)
-  const deps = createSimplePipelineDeps(cfg, opts, svc);
-  const result = await runVideoPipeline(
-    { script, ...(input.retries !== undefined ? { retries: input.retries } : {}) },
-    deps,
-  );
-  // ⑤ subtitle file — styled ASS (CJK font + safe margins + auto-wrap, fixes overflow P0-1)
   const assPath = path.join(svc.workdir, 'subtitles.ass');
-  await fns.writeFile(
-    assPath,
-    Buffer.from(
-      buildAss(result.timeline, {
-        ...(cfg.subtitleFontName ? { fontName: cfg.subtitleFontName } : {}),
-        width: aspect.width, // PlayRes 跟随画幅, 字幕边距按真实像素
-        height: aspect.height,
-      }),
-      'utf-8',
-    ),
-  );
-  // ⑥ compose — ASS subtitles + English watermark (+ optional CJK fontfile), W×H 按画幅
   const outPath = path.join(svc.workdir, 'final.mp4');
-  const cmd = buildComposeCommand(
-    {
-      segmentClipPaths: result.segments.map((s) => s.clipRef),
-      outputPath: outPath,
+  const canRegenerateVisuals =
+    visualMode === 'video' && script.segments.every((segment) => segment.type === 'broll');
+  const scenePolicy = scenePromptPolicy(input.userText);
+  const audioEngines = new Set<'qwen' | 'gemini'>();
+  let finalRepairInstruction = '';
+  let result: Awaited<ReturnType<typeof runVideoPipeline>> | undefined;
+  let finalDurationMs = 0;
+
+  for (let finalAttempt = 0; finalAttempt < 2; finalAttempt += 1) {
+    // ②-⑤ runner (synth preset voice + visual + clip per segment).
+    const deps = createSimplePipelineDeps(cfg, opts, svc, input.userText, {
+      includeFullUserRequirement: script.segments.length === 1,
+      ...(finalRepairInstruction ? { initialRepairInstruction: finalRepairInstruction } : {}),
+      onAudioEngine: (engine) => audioEngines.add(engine),
+    });
+    result = await runVideoPipeline(
+      {
+        script,
+        minimumSegmentDurationMs,
+        ...(input.retries !== undefined ? { retries: input.retries } : {}),
+      },
+      deps,
+    );
+
+    // ⑤ subtitle file — styled ASS (CJK font + safe margins + auto-wrap, fixes overflow P0-1)
+    await fns.writeFile(
       assPath,
-      width: aspect.width,
-      height: aspect.height,
-      ...(cfg.watermarkFontFile ? { watermark: { fontFile: cfg.watermarkFontFile } } : {}),
-    },
-    ffOpts,
-  );
-  await fns.runFfmpeg(cmd, ffOpts);
-  const finalBuffer = await fns.readFile(outPath);
-  const stored = await svc.storeOutput({ filename: 'video.mp4', mimetype: 'video/mp4', buffer: finalBuffer });
+      Buffer.from(
+        buildAss(result.timeline, {
+          ...(cfg.subtitleFontName ? { fontName: cfg.subtitleFontName } : {}),
+          width: aspect.width,
+          height: aspect.height,
+        }),
+        'utf-8',
+      ),
+    );
+    // ⑥ compose — ASS subtitles + English watermark (+ optional CJK fontfile), W×H 按画幅
+    const cmd = buildComposeCommand(
+      {
+        segmentClipPaths: result.segments.map((s) => s.clipRef),
+        outputPath: outPath,
+        assPath,
+        width: aspect.width,
+        height: aspect.height,
+        ...(cfg.watermarkFontFile ? { watermark: { fontFile: cfg.watermarkFontFile } } : {}),
+      },
+      ffOpts,
+    );
+    await fns.runFfmpeg(cmd, ffOpts);
+    finalDurationMs = await fns.ffprobeDurationMs(
+      outPath,
+      cfg.ffprobeBin ? { ffprobeBin: cfg.ffprobeBin } : {},
+    );
+    const verification = await svc.verifyFinalVideo({
+      videoPath: outPath,
+      workdir: svc.workdir,
+      durationMs: finalDurationMs,
+      minimumDurationMs: script.segments.length * minimumSegmentDurationMs,
+      strictRequiredActions: true,
+      userText: input.userText,
+      qualityContext:
+        script.segments.length === 1
+          ? '这是单一连续镜头，不应出现切镜、构图突变或场景跳变。'
+          : `这是由 ${script.segments.length} 个脚本分段组成的短视频。分段边界允许正常切镜，不得仅因镜头变化判失败；每段内部仍须稳定且符合对应画面要求。`,
+      expectedSubtitleText: script.segments.map((segment) => segment.text),
+      requiredBrandTexts: ['HOLA DAY · AI'],
+      brandPolicy:
+        '用户明确要求的其它文字或品牌必须逐字准确；未要求时不得新增乱码、错字或错误品牌。',
+      ...(cfg.ffmpegBin ? { ffmpegBin: cfg.ffmpegBin } : {}),
+    });
+    if (verification.status === 'pass') break;
+
+    svc.logger.warn(
+      {
+        status: verification.status,
+        failedChecks: verification.failedChecks,
+        reason: verification.reason,
+        finalAttempt,
+      },
+      'video: final quality gate rejected generated artifact',
+    );
+    if (verification.status === 'unknown' || !canRegenerateVisuals || finalAttempt === 1) {
+      throw new SimpleVideoError(
+        'final video failed automated quality verification',
+        verification.status === 'unknown' ? 'quality_unavailable' : 'quality',
+        false,
+        verification.failedChecks,
+        verification.reason,
+      );
+    }
+    finalRepairInstruction = qualityRepairInstruction(
+      verification,
+      opts.veoDurationSeconds ?? 8,
+      scenePolicy,
+      input.userText,
+    );
+    svc.logger.warn(
+      {
+        failedChecks: verification.failedChecks,
+        reason: verification.reason,
+      },
+      'video: final quality rejected — regenerating one replacement video',
+    );
+  }
+  if (!result) throw new SimpleVideoError('video pipeline produced no result', 'compose');
+  const stored = await svc.storeOutputFile({
+    filename: 'video.mp4',
+    mimetype: 'video/mp4',
+    sourcePath: outPath,
+  });
   // 首帧 poster（非致命：抽帧失败只 log，成片照常完成）。
   await generatePosterFile({
     videoPath: outPath,
     posterPath: path.join(svc.workdir, 'poster.jpg'),
-    deps: { runFfmpeg: fns.runFfmpeg, readFile: fns.readFile, storeOutput: svc.storeOutput, logger: svc.logger },
+    deps: {
+      runFfmpeg: fns.runFfmpeg,
+      readFile: fns.readFile,
+      storeOutput: svc.storeOutput,
+      logger: svc.logger,
+    },
     ffOpts,
   });
   svc.logger.info(
-    { fileId: stored.fileId, segments: result.segments.length, visualMode, totalDurationMs: result.timeline.totalDurationMs },
+    {
+      fileId: stored.fileId,
+      segments: result.segments.length,
+      visualMode,
+      totalDurationMs: finalDurationMs,
+    },
     'video: simplified creation complete',
   );
   return {
     fileId: stored.fileId,
     downloadUrl: `/api/files/${stored.fileId}/download`,
-    totalDurationMs: result.timeline.totalDurationMs,
+    totalDurationMs: finalDurationMs,
     segments: result.segments.length,
     visualMode,
+    audioEngine:
+      audioEngines.size > 1 ? 'mixed' : (audioEngines.values().next().value ?? 'qwen'),
   };
 }

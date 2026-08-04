@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   isAcceptedUpload,
   isMacroOfficeUpload,
@@ -208,6 +208,93 @@ describe('FileService.linkToTask ownership guard', () => {
     expect(pendingTtlMs).toBeLessThanOrEqual(24 * 60 * 60 * 1000 + 5_000);
   });
 
+  it('clears the upload expiry only when an input is retained as a durable asset', async () => {
+    let row: Record<string, unknown> = {
+      externalId: 'file_base',
+      userId: 7,
+      kind: 'input',
+      filename: 'base.mp4',
+      mimetype: 'video/mp4',
+      sizeBytes: 456,
+      storagePath: 'usr/input/file_base/base.mp4',
+      status: 'active',
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    };
+    const db = {
+      select: () => ({
+        from: () => ({
+          where: () => ({
+            limit: () => Promise.resolve([row]),
+          }),
+        }),
+      }),
+      update: () => ({
+        set: (values: Record<string, unknown>) => ({
+          where: () => {
+            row = { ...row, ...values };
+            return Promise.resolve();
+          },
+        }),
+      }),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any;
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any;
+    const storage = {
+      stat: vi.fn(async () => ({ sizeBytes: 456, contentType: 'video/mp4' })),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any;
+
+    const service = new FileService(db, logger, storage);
+    const retained = await service.retainInputForUser('file_base', 7);
+
+    expect(retained).toBe(true);
+    expect(row).toMatchObject({ status: 'active', expiresAt: null });
+  });
+
+  it('does not mint a provider URL for an inactive or missing storage object', async () => {
+    const row = {
+      externalId: 'file_stale',
+      userId: 7,
+      status: 'expired',
+      expiresAt: null,
+      storagePath: 'usr/input/file_stale/base.mp4',
+    };
+    const db = {
+      select: () => ({
+        from: () => ({
+          where: () => ({
+            limit: () => Promise.resolve([row]),
+          }),
+        }),
+      }),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any;
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any;
+    const storage = {
+      stat: vi.fn(async () => null),
+      getSignedUrl: vi.fn(async () => 'https://r2.example/stale'),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any;
+
+    const service = new FileService(db, logger, storage);
+
+    await expect(service.isReadableForUser('file_stale', 7)).resolves.toBe(false);
+    await expect(service.signedReadUrl('file_stale', 7)).resolves.toBeNull();
+    expect(storage.getSignedUrl).not.toHaveBeenCalled();
+  });
+
   it('updates attachment task_id only when external_id, owner user_id, and active status match', async () => {
     let whereClause: unknown;
     const db = {
@@ -306,6 +393,34 @@ describe('FileService.linkToTask ownership guard', () => {
     } as any;
 
     const service = new FileService(db, logger, storage);
-    await expect(service.loadForUser('file_pending', 'usr_owner')).resolves.toBeNull();
+    await expect(service.loadForUser('file_pending', 7)).resolves.toBeNull();
+  });
+
+  it('does not load another user’s file even when its external id is known', async () => {
+    const row = {
+      externalId: 'file_foreign',
+      userId: 99,
+      status: 'active',
+      expiresAt: null,
+      storagePath: 'usr_other/input/file_foreign/video.mp4',
+    };
+    const db = {
+      select: () => ({
+        from: () => ({
+          where: () => ({
+            limit: () => Promise.resolve([row]),
+          }),
+        }),
+      }),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any;
+    const storage = {
+      get: vi.fn(async () => Buffer.from('private')),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any;
+    const service = new FileService(db, {} as any, storage);
+
+    await expect(service.loadForUser('file_foreign', 7)).resolves.toBeNull();
+    expect(storage.get).not.toHaveBeenCalled();
   });
 });

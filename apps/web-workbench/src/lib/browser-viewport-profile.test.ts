@@ -82,7 +82,7 @@ describe('pickWorkbenchBrowserViewportProfile', () => {
         width: 980,
         rowWidth: 1180,
       }),
-    ).toBe(760);
+    ).toBe(620);
   });
 
   it('keeps inline panel widths above the readable minimum', () => {
@@ -100,7 +100,7 @@ describe('pickWorkbenchBrowserViewportProfile', () => {
         rowWidth: 1180,
         explicitPanelWidth: null,
       }),
-    ).toBe(708);
+    ).toBe(590);
 
     expect(
       pickWorkbenchBrowserViewportProfile({

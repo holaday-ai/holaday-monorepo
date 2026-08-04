@@ -24,6 +24,7 @@ import {
   shouldUseLegacyPlanner,
 } from './agent/vision-loop/commander.js';
 import { PlaywrightExecutor } from './agent/vision-loop/playwright-executor.js';
+import { defaultBrowserNetworkPolicy } from './agent/browser-network-policy.js';
 import { BrowserPool, reapOrphans } from './browser-pool/index.js';
 import { createVncProxy } from './browser-pool/vnc-proxy.js';
 import { env } from './config/env.js';
@@ -75,7 +76,7 @@ async function main() {
   // legacy WS path automatically.
   let playwrightExecutor: PlaywrightExecutor | null = null;
   if (env.EXECUTOR_MODE !== 'legacy') {
-    const candidate = new PlaywrightExecutor();
+    const candidate = new PlaywrightExecutor({ networkPolicy: defaultBrowserNetworkPolicy });
     const connectResult = await candidate.connect(env.CDP_ENDPOINT);
     if (connectResult.ok) {
       playwrightExecutor = candidate;
@@ -93,10 +94,32 @@ async function main() {
       );
       process.exit(1);
     } else {
-      logger.warn(
-        { cdpEndpoint: env.CDP_ENDPOINT, error: connectResult.error },
-        'PlaywrightExecutor connect failed — falling back to legacy WS/SW path (EXECUTOR_MODE=auto)',
-      );
+      // Local QA must not require a developer to manually launch Chrome
+      // with a debugging port. Start a clean headless Chrome context in
+      // development; it is isolated from the user's normal Chrome profile.
+      const managedResult =
+        env.NODE_ENV === 'development'
+          ? await candidate.launchManaged({
+              ...(process.platform === 'darwin' ? { channel: 'chrome' } : {}),
+              headless: true,
+            })
+          : { ok: false as const, error: 'managed launch is development-only' };
+      if (managedResult.ok) {
+        playwrightExecutor = candidate;
+        logger.info(
+          { mode: env.EXECUTOR_MODE, browser: 'managed-isolated' },
+          'PlaywrightExecutor launched managed local browser',
+        );
+      } else {
+        logger.warn(
+          {
+            cdpEndpoint: env.CDP_ENDPOINT,
+            connectError: connectResult.error,
+            managedError: managedResult.error,
+          },
+          'PlaywrightExecutor unavailable — falling back to legacy WS/SW path',
+        );
+      }
     }
   } else {
     logger.info('EXECUTOR_MODE=legacy — skipping Playwright init');
@@ -112,7 +135,7 @@ async function main() {
   let headedExecutor: PlaywrightExecutor | null = null;
   const headedEndpoint = process.env.HEADED_CDP_ENDPOINT;
   if (headedEndpoint) {
-    const candidate = new PlaywrightExecutor();
+    const candidate = new PlaywrightExecutor({ networkPolicy: defaultBrowserNetworkPolicy });
     const r = await candidate.connect(headedEndpoint);
     if (r.ok) {
       headedExecutor = candidate;
@@ -158,17 +181,24 @@ async function main() {
   // throws) degrades to MULTI_USER=false behaviour, never aborts boot.
   let browserPool: BrowserPool | null = null;
   let taskQueue: TaskQueue | null = null;
-  if (env.MULTI_USER) {
+  const useNativeDevelopmentPool =
+    env.NODE_ENV === 'development' && process.platform === 'darwin';
+  if (env.MULTI_USER || useNativeDevelopmentPool) {
     try {
       const poolConfig = {
-        maxInstances: env.MAX_BROWSER_INSTANCES,
+        maxInstances: useNativeDevelopmentPool
+          ? Math.min(env.MAX_BROWSER_INSTANCES, 3)
+          : env.MAX_BROWSER_INSTANCES,
         idleTimeoutMs: env.BROWSER_IDLE_TIMEOUT_MS,
-        baseDir: env.BROWSER_POOL_DIR,
+        baseDir: useNativeDevelopmentPool
+          ? '/tmp/holaday-browser-pool'
+          : env.BROWSER_POOL_DIR,
         cdpPortStart: env.BROWSER_CDP_PORT_START,
         vncPortStart: env.BROWSER_VNC_PORT_START,
         wsPortStart: env.BROWSER_WS_PORT_START,
         displayStart: env.BROWSER_DISPLAY_START,
         screenSize: env.BROWSER_SCREEN_SIZE,
+        vncEnabled: env.BROWSER_VNC_WS_ENABLED,
         // Phase 17 — drain pending cookies (extension-shipped) into
         // the freshly-spawned context. Best-effort: errors logged
         // inside the helper, never bubble up to block allocate.
@@ -203,6 +233,7 @@ async function main() {
             poolConfig.cdpPortStart + poolConfig.maxInstances - 1
           }`,
           idleTimeoutMs: poolConfig.idleTimeoutMs,
+          runtime: useNativeDevelopmentPool ? 'native-chromium' : 'linux-sidecars',
         },
         // Phase 19c follow-up — the prior wording ("not yet routed —
         // task flow still on singleton") was stale. Tasks have been
@@ -250,15 +281,22 @@ async function main() {
   // Constructs only when both client id + secret are present; null
   // otherwise so the payment router can return PRECONDITION_FAILED
   // and the SPA hides the upgrade button gracefully.
-  const paypalAdapter = createPayPalAdapter({
-    clientId: process.env.PAYPAL_CLIENT_ID ?? null,
-    clientSecret: process.env.PAYPAL_CLIENT_SECRET ?? null,
-    env: process.env.PAYPAL_ENV === 'live' ? 'live' : 'sandbox',
-  });
+  const paypalEnabled = process.env.PAYPAL_ENABLED?.trim().toLowerCase() === 'true';
+  const paypalAdapter = paypalEnabled
+    ? createPayPalAdapter({
+        clientId: process.env.PAYPAL_CLIENT_ID ?? null,
+        clientSecret: process.env.PAYPAL_CLIENT_SECRET ?? null,
+        env: process.env.PAYPAL_ENV === 'live' ? 'live' : 'sandbox',
+      })
+    : null;
   if (paypalAdapter) {
     logger.info({ env: paypalAdapter.env }, 'PayPal adapter ready');
   } else {
-    logger.info('PayPal adapter disabled — PAYPAL_CLIENT_ID/_SECRET not set');
+    logger.info(
+      paypalEnabled
+        ? 'PayPal adapter disabled — PAYPAL_CLIENT_ID/_SECRET not set'
+        : 'PayPal adapter disabled — PAYPAL_ENABLED=false',
+    );
   }
 
   // Phase 24 RC follow-up — Firecrawl adapter for the new 'scrape'
@@ -563,37 +601,35 @@ async function main() {
     }
   }
 
-  // Per-user VNC WebSocket proxy — only live when the pool is active.
-  // Nginx (Vultr or Aliyun edge) rewrites /vnc-ws/* → 127.0.0.1:4001/vnc-ws/*
-  // so this upgrade handler only fires on pool traffic; /ws (tRPC-WS
-  // at :4002) is untouched.
-  //
-  // Phase 14 audit follow-up — the MULTI_USER_USERS allowlist gate was
-  // retired here too. The proxy still requires JWT auth + checks the
-  // user owns a live pool instance, so dropping the allowlist doesn't
-  // open it to abuse — it just stops blocking new free-plan users
-  // from streaming THEIR OWN browser.
+  // Browser streaming is mounted only with the per-user pool. CDP is
+  // always available; the full-desktop VNC bridge remains disabled
+  // unless an operator explicitly enables the emergency compatibility
+  // path. /ws (tRPC-WS at :4002) is untouched.
   if (browserPool) {
-    const vncProxy = createVncProxy({ pool: browserPool, logger });
+    const vncProxy = env.BROWSER_VNC_WS_ENABLED
+      ? createVncProxy({ pool: browserPool, logger })
+      : null;
     // Phase 19 — CDP screencast proxy mounted SIDE-BY-SIDE with VNC.
-    // Both run; the SPA's BrowserPanel picks which transport to use
-    // via a localStorage feature flag (holaday.streamTransport=cdp).
-    // Default stays on VNC until BOSS verifies CDP path live in prod.
+    // CDP is always available. VNC is an explicit emergency-only
+    // fallback because it exposes a full interactive desktop surface.
     // See streaming/screencast-proxy.ts for the protocol contract.
     const screencastProxy = createScreencastProxy({ pool: browserPool, logger });
     httpServer.on('upgrade', (req, socket, head) => {
       const url = req.url ?? '';
-      // Try the CDP path first (cheaper regex, fewer matches), then
-      // fall through to VNC. Each handler is no-op when its path
-      // pattern doesn't match.
+      // Route each upgrade explicitly so disabled or unknown streaming
+      // paths never inherit a fallback transport.
       if (url.startsWith('/screencast-ws/')) {
         screencastProxy.handleUpgrade(req, socket, head as Buffer);
         return;
       }
-      vncProxy.handleUpgrade(req, socket, head as Buffer);
+      if (url.startsWith('/vnc-ws/')) {
+        if (vncProxy) vncProxy.handleUpgrade(req, socket, head as Buffer);
+        else socket.destroy();
+      }
     });
     logger.info(
-      'VNC WS proxy mounted at /vnc-ws/:userId; CDP screencast at /screencast-ws/:userId',
+      { vncEnabled: env.BROWSER_VNC_WS_ENABLED },
+      'browser streaming mounted: CDP screencast active; VNC is emergency-only',
     );
   }
 

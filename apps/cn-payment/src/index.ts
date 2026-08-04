@@ -101,7 +101,8 @@ async function main(): Promise<void> {
   const sms = new SmsAdapter(env, logger);
   const sync = new VultrSync(env, logger);
 
-  app.get('/healthz', (_req, res) => {
+  app.get('/healthz', async (_req, res) => {
+    const bridge = await sync.health();
     res.json({
       status: 'ok',
       env: env.NODE_ENV,
@@ -111,6 +112,10 @@ async function main(): Promise<void> {
         alipay: alipay.isReady() ? 'ready' : `unconfigured: ${alipay.why()}`,
         sms: sms.isReady() ? 'ready' : 'unconfigured: missing one or more aliyun sms credentials',
       },
+      callbackVerification: {
+        wechat: wx.callbackVerificationMode(),
+      },
+      bridge: bridge.ok ? 'ready' : `unavailable: ${bridge.reason}`,
     });
   });
 
@@ -152,6 +157,7 @@ async function main(): Promise<void> {
         userId,
         planId: purchase.planId,
         cycle: purchase.cycle,
+        isFirstMonth: purchase.cycle === 'monthly' && purchase.isFirstMonth === true,
       });
     } else if (purchase.kind === 'addon') {
       const pack = ADDON_PACK_CATALOGUE[purchase.packId as keyof typeof ADDON_PACK_CATALOGUE];
@@ -227,8 +233,8 @@ async function main(): Promise<void> {
         // The user lands here after Alipay closes; we just need a
         // page that exists. The SPA polls for status separately.
         returnUrl: isPartnerPurchase(purchase)
-          ? `https://holaday.ai/partner?payment=${outTradeNo}`
-          : `https://holaday.ai/billing/return?payment=${outTradeNo}`,
+          ? `${env.APP_ORIGIN}/partner?payment=${outTradeNo}`
+          : `${env.APP_ORIGIN}/billing?payment=${outTradeNo}`,
       });
       res.json({
         provider: 'alipay',
@@ -422,7 +428,13 @@ async function handleSuccessfulPayment(
   attachJson: string,
 ): Promise<void> {
   let attach:
-    | { kind: 'subscription'; userId: string; planId: PlanId; cycle: BillingCycle }
+    | {
+        kind: 'subscription';
+        userId: string;
+        planId: PlanId;
+        cycle: BillingCycle;
+        isFirstMonth?: boolean;
+      }
     | { kind: 'addon'; userId: string; packId: string }
     | { kind: 'partner_membership'; userId: string; partnerOrderExternalId: string }
     | { kind: 'partner_recharge'; userId: string; partnerOrderExternalId: string }
@@ -449,7 +461,7 @@ async function handleSuccessfulPayment(
     if (attach.planId !== 'basic' && attach.planId !== 'pro') {
       throw new Error(`bad planId: ${attach.planId}`);
     }
-    await sync.confirm({
+    const confirmPayload = {
       provider,
       userId: attach.userId,
       planId: attach.planId,
@@ -458,10 +470,15 @@ async function handleSuccessfulPayment(
       transactionId,
       amountCents,
       kind: 'subscription',
-    });
+      isFirstMonth: attach.cycle === 'monthly' && attach.isFirstMonth === true,
+    } as const;
+    const result = await sync.confirm(confirmPayload);
+    if (!result.ok) {
+      throw new Error(`payment confirm failed: ${result.reason}`);
+    }
     return;
   }
-  await sync.confirm({
+  const result = await sync.confirm({
     provider,
     userId: attach.userId,
     planId: 'basic', // ignored on the Vultr side for kind='addon'
@@ -472,6 +489,9 @@ async function handleSuccessfulPayment(
     kind: 'addon',
     addonPackId: attach.packId,
   });
+  if (!result.ok) {
+    throw new Error(`payment confirm failed: ${result.reason}`);
+  }
 }
 
 main().catch((err) => {

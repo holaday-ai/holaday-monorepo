@@ -1,4 +1,8 @@
 import { getAccessToken } from '@/lib/auth';
+import {
+  isFileUnavailable,
+  markFileUnavailableFromStatus,
+} from '@/lib/unavailable-file-registry';
 
 /**
  * Shared authed file download / fetch helpers. Centralised so the
@@ -45,12 +49,17 @@ interface BaseInput {
 export async function downloadFileAuthed(
   input: BaseInput,
 ): Promise<DownloadResult> {
+  if (isFileUnavailable(input.url)) {
+    return { ok: false, status: 410, message: 'known unavailable file' };
+  }
   const token = getAccessToken();
   try {
     const res = await fetch(input.url, {
+      cache: 'no-store',
       headers: token ? { authorization: `Bearer ${token}` } : {},
     });
     if (!res.ok) {
+      markFileUnavailableFromStatus(input.url, res.status);
       return {
         ok: false,
         status: res.status,
@@ -70,8 +79,6 @@ export async function downloadFileAuthed(
     setTimeout(() => URL.revokeObjectURL(objectUrl), 5_000);
     return { ok: true, status: res.status, message: 'ok' };
   } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error('[downloadFileAuthed] failed', err);
     return {
       ok: false,
       status: null,
@@ -89,21 +96,34 @@ export interface FetchBlobResult {
   message: string;
 }
 
+export function isUnavailableFileStatus(
+  status: number | null,
+): status is 404 | 410 {
+  return status === 404 || status === 410;
+}
+
 /**
  * Authed fetch → blob. No anchor click. Used by the in-product
  * preview modal to render the response inline (image / pdf / etc.).
  * Caller is responsible for revoking the object URL it builds from
  * the blob.
  */
-export async function fetchFileBlobAuthed(
-  input: { url: string },
-): Promise<FetchBlobResult> {
+export async function fetchFileBlobAuthed(input: {
+  url: string;
+  signal?: AbortSignal;
+}): Promise<FetchBlobResult> {
+  if (isFileUnavailable(input.url)) {
+    return { ok: false, status: 410, message: 'known unavailable file' };
+  }
   const token = getAccessToken();
   try {
     const res = await fetch(input.url, {
+      cache: 'no-store',
       headers: token ? { authorization: `Bearer ${token}` } : {},
+      signal: input.signal,
     });
     if (!res.ok) {
+      markFileUnavailableFromStatus(input.url, res.status);
       return {
         ok: false,
         status: res.status,
@@ -114,8 +134,6 @@ export async function fetchFileBlobAuthed(
     const mime = res.headers.get('content-type') ?? blob.type ?? '';
     return { ok: true, blob, mime, status: res.status, message: 'ok' };
   } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error('[fetchFileBlobAuthed] failed', err);
     return {
       ok: false,
       status: null,
@@ -145,8 +163,8 @@ export function downloadFailureMessage(status: number | null): string {
   if (status === 401 || status === 403) {
     return '下载失败，请刷新页面后重试。';
   }
-  if (status === 404 || status === 410) {
-    return '链接已过期，产出文件保留 24 小时。';
+  if (isUnavailableFileStatus(status)) {
+    return '文件已失效，无法下载。';
   }
   return '下载失败，或链接已过期。';
 }

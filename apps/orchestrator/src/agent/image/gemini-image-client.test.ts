@@ -60,13 +60,31 @@ describe('generateImages', () => {
 
     const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
     expect(url).toBe(
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image:generateContent',
+      'https://generativelanguage.googleapis.com/v1/models/gemini-3.1-flash-image:generateContent',
     );
     expect((init.headers as Record<string, string>)['x-goog-api-key']).toBe('test-key');
     const body = JSON.parse(init.body as string);
     expect(body.contents[0].parts[0].text).toBe('画一只橘猫');
     // No imageConfig / responseModalities unless asked.
     expect(body.generationConfig).toBeUndefined();
+  });
+
+  it('uses an explicit API version for a configurable Pro model and gateway', async () => {
+    const b64 = Buffer.from('x').toString('base64');
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(okImageBody(b64)));
+
+    await generateImages({
+      ...BASE,
+      model: 'custom-pro-model',
+      apiVersion: 'v1beta',
+      baseUrl: 'https://gw.internal/',
+      fetchImpl,
+    });
+
+    const [url] = fetchImpl.mock.calls[0] as [string];
+    expect(url).toBe(
+      'https://gw.internal/v1beta/models/custom-pro-model:generateContent',
+    );
   });
 
   it('honours a custom baseUrl (proxy/gateway override)', async () => {
@@ -77,7 +95,7 @@ describe('generateImages', () => {
 
     const [url] = fetchImpl.mock.calls[0] as [string];
     expect(url).toBe(
-      'https://gw.internal/v1beta/models/gemini-3.1-flash-image:generateContent',
+      'https://gw.internal/v1/models/gemini-3.1-flash-image:generateContent',
     );
   });
 
@@ -100,14 +118,24 @@ describe('generateImages', () => {
     });
   });
 
-  it('sets imageConfig.resolution only when resolution is provided', async () => {
+  it('normalizes legacy pixel resolution into imageConfig.imageSize', async () => {
     const b64 = Buffer.from('x').toString('base64');
     const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(okImageBody(b64)));
 
     await generateImages({ ...BASE, resolution: '4096x4096', fetchImpl });
 
     const body = JSON.parse((fetchImpl.mock.calls[0]![1] as RequestInit).body as string);
-    expect(body.generationConfig.imageConfig).toEqual({ resolution: '4096x4096' });
+    expect(body.generationConfig.imageConfig).toEqual({ imageSize: '4K' });
+  });
+
+  it('sends the requested output aspect ratio through imageConfig', async () => {
+    const b64 = Buffer.from('x').toString('base64');
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(okImageBody(b64)));
+
+    await generateImages({ ...BASE, aspectRatio: '16:9', fetchImpl });
+
+    const body = JSON.parse((fetchImpl.mock.calls[0]![1] as RequestInit).body as string);
+    expect(body.generationConfig.imageConfig).toEqual({ aspectRatio: '16:9' });
   });
 
   it('collects images across multiple candidates (batch)', async () => {
@@ -206,5 +234,52 @@ describe('generateImages', () => {
     await expect(generateImages({ ...BASE, fetchImpl })).rejects.toMatchObject({
       kind: 'network',
     });
+  });
+
+  it('times out when response headers arrive but the body never finishes', async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"candidates":['));
+      },
+    });
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(body, {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+
+    const outcome = await Promise.race([
+      generateImages({ ...BASE, timeoutMs: 20, fetchImpl }).catch((err) => err),
+      new Promise<'test-timeout'>((resolve) => setTimeout(() => resolve('test-timeout'), 100)),
+    ]);
+
+    expect(outcome).toMatchObject({ kind: 'timeout' });
+  });
+
+  it('keeps an aborted response body classified as timeout', async () => {
+    const fetchImpl = vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
+      const signal = init?.signal;
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{"candidates":['));
+          signal?.addEventListener(
+            'abort',
+            () => controller.error(new DOMException('Aborted', 'AbortError')),
+            { once: true },
+          );
+        },
+      });
+      return Promise.resolve(
+        new Response(body, {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+    });
+
+    await expect(
+      generateImages({ ...BASE, timeoutMs: 20, fetchImpl }),
+    ).rejects.toMatchObject({ kind: 'timeout' });
   });
 });

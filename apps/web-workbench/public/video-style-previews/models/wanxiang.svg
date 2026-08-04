@@ -1,0 +1,19 @@
+<svg width="144" height="144" viewBox="0 0 144 144" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="144" height="144" rx="34" fill="url(#bg)"/>
+  <path d="M31 78C44 44 69 30 95 41C116 50 121 74 109 91C96 110 64 115 45 100C33 90 27 73 35 60C45 43 72 41 91 55C108 67 109 90 93 100C76 111 51 103 46 84C42 68 55 53 73 53C88 53 101 63 102 77C103 90 92 101 77 103C60 105 46 95 44 80" stroke="white" stroke-width="9" stroke-linecap="round"/>
+  <path d="M31 78C44 44 69 30 95 41C116 50 121 74 109 91C96 110 64 115 45 100C33 90 27 73 35 60C45 43 72 41 91 55C108 67 109 90 93 100C76 111 51 103 46 84C42 68 55 53 73 53C88 53 101 63 102 77C103 90 92 101 77 103C60 105 46 95 44 80" stroke="url(#shine)" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="101" cy="43" r="8" fill="white" fill-opacity="0.82"/>
+  <circle cx="39" cy="88" r="5" fill="#C8FFF3"/>
+  <defs>
+    <linearGradient id="bg" x1="15" y1="17" x2="128" y2="130" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#063B5B"/>
+      <stop offset="0.42" stop-color="#0D8F9A"/>
+      <stop offset="1" stop-color="#7CF8D6"/>
+    </linearGradient>
+    <linearGradient id="shine" x1="36" y1="42" x2="105" y2="104" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#EFFFFB"/>
+      <stop offset="0.52" stop-color="#82F8FF"/>
+      <stop offset="1" stop-color="#C7FFE8"/>
+    </linearGradient>
+  </defs>
+</svg>

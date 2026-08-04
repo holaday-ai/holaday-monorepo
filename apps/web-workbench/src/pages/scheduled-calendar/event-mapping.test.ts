@@ -197,6 +197,15 @@ describe('rowToEventInput', () => {
     expect(events[0]?.title).toBe(`${'a'.repeat(60)}…`);
   });
 
+  it.each([
+    ['__ashare_premarket_briefing__', 'A股盘前简报'],
+    ['__ashare_postmarket_briefing__', 'A股盘后复盘'],
+  ])('maps the internal briefing sentinel %s to a product title', (intent, title) => {
+    const events = rowToEventInput(makeRow({ intent }), { now });
+    expect(events[0]?.title).toBe(title);
+    expect((events[0]?.extendedProps as Record<string, unknown>).intent).toBe(title);
+  });
+
   it('invalid nextRunAt → empty array (defensive)', () => {
     const events = rowToEventInput(
       makeRow({ nextRunAt: 'not-a-date' }),

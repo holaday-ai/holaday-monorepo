@@ -1,5 +1,21 @@
 import * as React from 'react';
+import {
+  INITIAL_CDP_INPUT_BRIDGE_STATE,
+  INITIAL_CDP_RECONNECT_STATE,
+  cdpCompositionEndTransition,
+  cdpCompositionStartTransition,
+  cdpKeyTransition,
+  cdpReconnectTransition,
+  cdpTextInputTransition,
+  shouldPaintCdpFrame,
+  type CdpInputBridgeState,
+} from '@/components/cdp-screencast-state';
 import { hdDebug } from '@/lib/hd-debug';
+import {
+  browserViewportForHost,
+  shouldSendBrowserViewport,
+  type BrowserViewportSize,
+} from '@/lib/browser-workspace-viewport';
 import {
   mapClientPointToScreencast,
   placeScreencastContainTop,
@@ -7,6 +23,8 @@ import {
   readableScreencastAutoScrollKey,
   readableScreencastStartScrollLeft,
 } from '@/lib/screencast-fit';
+import { retainScreencastInputFocus } from '@/lib/screencast-input-focus';
+import { appendBrowserStreamToken } from '@/lib/browser-stream-url';
 import { cn } from '@/lib/utils';
 
 /**
@@ -40,11 +58,17 @@ export type CdpScreencastStatus =
   | 'error';
 
 interface Props {
-  /** WS URL to /screencast-ws/:userId?token=… . Null disables. */
+  /** Stable WS URL to /screencast-ws/:taskId, without credentials. */
   wsUrl: string | null;
+  /** Latest short-lived credential, read only when a socket is opened. */
+  streamToken: string | null;
   /** Block input forwarding when true (mirror VncViewport semantics). */
   viewOnly?: boolean;
   onStatusChange?: (status: CdpScreencastStatus) => void;
+  /** Fired after the first real frame is painted for the current viewport. */
+  onFrameReady?: () => void;
+  /** Restarts the transport without remounting or clearing the canvas. */
+  reconnectSignal?: number;
   /**
    * Optimization #3 R2 — fired on every top-level
    * `Page.frameNavigated` (the CDP streamer already publishes
@@ -66,7 +90,8 @@ interface InputPayload {
     | 'scroll'
     | 'keyDown'
     | 'keyUp'
-    | 'insertText';
+    | 'insertText'
+    | 'viewport';
   x?: number;
   y?: number;
   button?: 'left' | 'middle' | 'right';
@@ -77,6 +102,8 @@ interface InputPayload {
   code?: string;
   keyCode?: number;
   text?: string;
+  width?: number;
+  height?: number;
   altKey?: boolean;
   ctrlKey?: boolean;
   metaKey?: boolean;
@@ -85,8 +112,11 @@ interface InputPayload {
 
 export function CdpScreencastViewport({
   wsUrl,
+  streamToken,
   viewOnly = true,
   onStatusChange,
+  onFrameReady,
+  reconnectSignal = 0,
   onUrlChange,
   fitMode = 'contain',
   className,
@@ -97,18 +127,31 @@ export function CdpScreencastViewport({
   React.useEffect(() => {
     onUrlChangeRef.current = onUrlChange;
   }, [onUrlChange]);
+  const onFrameReadyRef = React.useRef(onFrameReady);
+  React.useEffect(() => {
+    onFrameReadyRef.current = onFrameReady;
+  }, [onFrameReady]);
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
   const hiddenInputRef = React.useRef<HTMLInputElement>(null);
-  /** Host <div> ref — ResizeObserver target for BUG-11 scale sync. */
+  const inputBridgeStateRef = React.useRef<CdpInputBridgeState>(
+    INITIAL_CDP_INPUT_BRIDGE_STATE,
+  );
+  /** Host <div> ref — source of truth for the live remote viewport. */
   const hostRef = React.useRef<HTMLDivElement>(null);
   /** Imperative hook the frame-paint path uses to nudge the scale
    *  effect when canvas.width/height changes (a new source size). */
   const sourceDimsRecomputeRef = React.useRef<(() => void) | null>(null);
   const wsRef = React.useRef<WebSocket | null>(null);
-  // Cached <img> + frame sequence guard so async image loads cannot
-  // paint stale frames after a newer frame, wsUrl change, or unmount.
+  const streamTokenRef = React.useRef(streamToken);
+  React.useEffect(() => {
+    streamTokenRef.current = streamToken;
+  }, [streamToken]);
+  const hasStreamToken = Boolean(streamToken);
+  // Per-frame <img> + connection/frame sequence guards so async decodes cannot
+  // paint stale pixels after a newer frame, reconnect, wsUrl change, or unmount.
   const imgRef = React.useRef<HTMLImageElement | null>(null);
   const frameSeqRef = React.useRef(0);
+  const connectionSeqRef = React.useRef(0);
   const mountedRef = React.useRef(false);
   const readableAutoScrollKeyRef = React.useRef<string | null>(null);
   React.useEffect(() => {
@@ -131,6 +174,8 @@ export function CdpScreencastViewport({
   React.useEffect(() => {
     readableAutoScrollKeyRef.current = null;
     hostRef.current?.scrollTo({ left: 0, top: 0 });
+    inputBridgeStateRef.current = INITIAL_CDP_INPUT_BRIDGE_STATE;
+    if (hiddenInputRef.current) hiddenInputRef.current.value = '';
   }, [fitMode, wsUrl]);
 
   const [status, setStatus] = React.useState<CdpScreencastStatus>('idle');
@@ -142,15 +187,69 @@ export function CdpScreencastViewport({
     onStatusChangeRef.current?.(status);
   }, [status]);
 
-  // BUG-11 final — pure CSS scale. Brave keeps its spawn-time
-  // viewport; the SPA scales the screencast canvas with
-  // transform: scale() so the page is always rendered complete
-  // (no crop, no reflow, no CDP round-trip). ResizeObserver on
-  // the host watches container size; we compute scale from the
-  // canvas's intrinsic dimensions (= the screencast frame size,
-  // whatever Brave is producing right now). Applied as an inline
-  // CSS variable so the browser interpolates smoothly during a
-  // drag.
+  // Send transport/control messages even in view-only mode. View-only blocks
+  // user input, but the remote page still needs the real canvas dimensions so
+  // its responsive layout can reflow to this workspace.
+  const sendInput = React.useCallback((payload: InputPayload): boolean => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+    if (payload.type !== 'viewport' && viewOnlyRef.current) return false;
+    try {
+      ws.send(JSON.stringify({ type: 'input', payload }));
+      return true;
+    } catch {
+      /* socket closing in this tick — drop */
+      return false;
+    }
+  }, []);
+
+  const lastViewportRef = React.useRef<BrowserViewportSize | null>(null);
+  const [connectionEpoch, setConnectionEpoch] = React.useState(0);
+  React.useEffect(() => {
+    const host = hostRef.current;
+    // Publish the viewport as soon as the socket is opening/open. Waiting for
+    // the first frame would make the fallback capture use the tiny spawn-time
+    // viewport, then visibly resize a moment later.
+    if (!host || (status !== 'connecting' && status !== 'connected')) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const publish = (): void => {
+      const rect = host.getBoundingClientRect();
+      const next = browserViewportForHost({
+        hostWidth: rect.width,
+        hostHeight: rect.height,
+      });
+      if (!next || !shouldSendBrowserViewport(lastViewportRef.current, next)) {
+        return;
+      }
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (
+          sendInput({ type: 'viewport', width: next.width, height: next.height })
+        ) {
+          lastViewportRef.current = next;
+        }
+      }, 100);
+    };
+    publish();
+    const ro =
+      typeof ResizeObserver === 'undefined'
+        ? null
+        : new ResizeObserver(publish);
+    ro?.observe(host);
+    window.addEventListener('resize', publish);
+    return () => {
+      if (timer) clearTimeout(timer);
+      ro?.disconnect();
+      window.removeEventListener('resize', publish);
+    };
+  }, [connectionEpoch, sendInput, status, wsUrl]);
+  React.useEffect(() => {
+    lastViewportRef.current = null;
+  }, [wsUrl]);
+
+  // The backend normally reflows Chromium to the host dimensions. Keep a
+  // contain transform as a transient safety net while the first viewport
+  // handshake or a renderer-changing navigation is producing a new frame.
   React.useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
@@ -235,15 +334,16 @@ export function CdpScreencastViewport({
   // event-coupling between the BrowserPanel's wake button and
   // this viewport.
   //
-  // The viewport tears down only on unmount or `wsUrl` change
-  // (e.g. user logged out, switched accounts).
+  // The viewport tears down only on unmount, target change, or auth being
+  // removed. Rotating the 60-second token does not interrupt a healthy socket;
+  // the latest token ref is consumed by the next genuine reconnect.
   React.useEffect(() => {
-    if (!wsUrl) {
+    if (!wsUrl || !hasStreamToken) {
       setStatus('idle');
       return;
     }
     let disposed = false;
-    let attempt = 0;
+    let reconnectState = INITIAL_CDP_RECONNECT_STATE;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     let activeWs: WebSocket | null = null;
     // One-time mount diagnostic so BOSS can confirm in DevTools
@@ -255,24 +355,49 @@ export function CdpScreencastViewport({
 
     function connect(): void {
       if (disposed) return;
-      attempt += 1;
+      const socketUrl = appendBrowserStreamToken(wsUrl, streamTokenRef.current);
+      if (!socketUrl) {
+        setStatus('idle');
+        return;
+      }
+      const connectionSeq = ++connectionSeqRef.current;
       setStatus('connecting');
-      const ws = new WebSocket(wsUrl!);
+      const ws = new WebSocket(socketUrl);
       activeWs = ws;
       wsRef.current = ws;
 
       ws.onopen = () => {
-        if (disposed) return;
-        attempt = 0; // reset backoff on a successful connect
-        setStatus('connected');
+        if (
+          disposed ||
+          connectionSeq !== connectionSeqRef.current ||
+          activeWs !== ws
+        ) {
+          return;
+        }
+        reconnectState = cdpReconnectTransition(
+          reconnectState,
+          'socket-opened',
+        ).state;
+        lastViewportRef.current = null;
+        setConnectionEpoch((epoch) => epoch + 1);
+        // An open socket only proves transport readiness. Keep the public
+        // status at `connecting` until a real current-page frame is painted;
+        // otherwise BrowserPanel enables takeover against a blank/stale canvas.
+        setStatus('connecting');
         hdDebug('screencast WS', {
           event: 'open',
           readyState: ws.readyState,
-          attempt,
+          attempt: reconnectState.consecutiveFailures + 1,
         });
       };
       ws.onmessage = (event) => {
-        if (disposed) return;
+        if (
+          disposed ||
+          connectionSeq !== connectionSeqRef.current ||
+          activeWs !== ws
+        ) {
+          return;
+        }
         let msg: { type?: string; data?: string; url?: string } | null = null;
         try {
           msg = JSON.parse(typeof event.data === 'string' ? event.data : '');
@@ -290,23 +415,40 @@ export function CdpScreencastViewport({
           return;
         }
         if (msg.type !== 'frame' || typeof msg.data !== 'string') return;
-        drawFrame(msg.data);
+        drawFrame(msg.data, connectionSeq, () => {
+          reconnectState = cdpReconnectTransition(
+            reconnectState,
+            'frame-ready',
+          ).state;
+        });
       };
       ws.onerror = () => {
-        if (disposed) return;
+        if (
+          disposed ||
+          connectionSeq !== connectionSeqRef.current ||
+          activeWs !== ws
+        ) {
+          return;
+        }
         hdDebug('screencast WS', {
           event: 'error',
           readyState: ws.readyState,
-          attempt,
+          attempt: reconnectState.consecutiveFailures + 1,
         });
         setStatus('error');
       };
       ws.onclose = (event) => {
-        if (disposed) return;
+        if (
+          disposed ||
+          connectionSeq !== connectionSeqRef.current ||
+          activeWs !== ws
+        ) {
+          return;
+        }
         hdDebug('screencast WS', {
           event: 'close',
           readyState: ws.readyState,
-          attempt,
+          attempt: reconnectState.consecutiveFailures + 1,
           code: event.code,
           reason: event.reason || '(none)',
         });
@@ -316,8 +458,12 @@ export function CdpScreencastViewport({
         // the viewport keeps trying so a wake (task submit, manual
         // wake button) attaches within 5 s without any external
         // trigger.
-        const delay = Math.min(5_000, 500 * 2 ** Math.min(attempt - 1, 4));
-        retryTimer = setTimeout(() => connect(), delay);
+        const transition = cdpReconnectTransition(
+          reconnectState,
+          'socket-closed',
+        );
+        reconnectState = transition.state;
+        retryTimer = setTimeout(() => connect(), transition.delayMs ?? 500);
       };
     }
 
@@ -325,6 +471,7 @@ export function CdpScreencastViewport({
 
     return () => {
       disposed = true;
+      connectionSeqRef.current += 1;
       frameSeqRef.current += 1;
       if (retryTimer) clearTimeout(retryTimer);
       try {
@@ -348,17 +495,33 @@ export function CdpScreencastViewport({
       }
       wsRef.current = null;
     };
-  }, [wsUrl]);
+  }, [hasStreamToken, reconnectSignal, wsUrl]);
 
-  // Decode a base64 JPEG and paint into the canvas. The img +
-  // canvas are reused; canvas is resized to match the source so the
-  // `object-contain` style on the host element handles letterboxing.
-  function drawFrame(base64: string): void {
-    if (!imgRef.current) imgRef.current = new Image();
-    const img = imgRef.current;
+  // Decode a base64 JPEG and paint into the reused canvas. Each frame gets a
+  // fresh Image so a delayed decode cannot inherit another frame's handlers.
+  function drawFrame(
+    base64: string,
+    connectionSeq: number,
+    onPaint: () => void,
+  ): void {
+    if (imgRef.current) {
+      imgRef.current.onload = null;
+      imgRef.current.onerror = null;
+    }
+    const img = new Image();
+    imgRef.current = img;
     const frameSeq = ++frameSeqRef.current;
     img.onload = () => {
-      if (!mountedRef.current || frameSeq !== frameSeqRef.current) return;
+      if (!shouldPaintCdpFrame({
+        mounted: mountedRef.current,
+        connectionSeq,
+        currentConnectionSeq: connectionSeqRef.current,
+        frameSeq,
+        currentFrameSeq: frameSeqRef.current,
+        socketOpen: wsRef.current?.readyState === WebSocket.OPEN,
+      })) {
+        return;
+      }
       const canvas = canvasRef.current;
       if (!canvas) return;
       const ctx = canvas.getContext('2d');
@@ -368,31 +531,35 @@ export function CdpScreencastViewport({
       if (canvas.width !== img.width) canvas.width = img.width;
       if (canvas.height !== img.height) canvas.height = img.height;
       ctx.drawImage(img, 0, 0);
-      // BUG-11 — when the source frame size changes (first frame
-      // after attach, or Brave navigates to a page that emits a
-      // different size), kick the scale recomputer.
+      onPaint();
+      setStatus('connected');
+      onFrameReadyRef.current?.();
+      // A new renderer can emit one frame at its startup size before the
+      // saved viewport is reapplied. Recompute immediately so that frame is
+      // still contained without affecting the surrounding flex layout.
       if (sizeChanged) sourceDimsRecomputeRef.current?.();
       requestAnimationFrame(() => sourceDimsRecomputeRef.current?.());
     };
+    img.onerror = () => {
+      if (!shouldPaintCdpFrame({
+        mounted: mountedRef.current,
+        connectionSeq,
+        currentConnectionSeq: connectionSeqRef.current,
+        frameSeq,
+        currentFrameSeq: frameSeqRef.current,
+        socketOpen: wsRef.current?.readyState === WebSocket.OPEN,
+      })) {
+        return;
+      }
+      setStatus('error');
+      try {
+        wsRef.current?.close(1011, 'frame-decode-failed');
+      } catch {
+        /* the close handler will retry if the transport is already closing */
+      }
+    };
     img.src = `data:image/jpeg;base64,${base64}`;
   }
-
-  // ---- Input dispatch helpers ----
-  const sendInput = React.useCallback((payload: InputPayload) => {
-    const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    if (viewOnlyRef.current) return;
-    try {
-      ws.send(JSON.stringify({ type: 'input', payload }));
-    } catch {
-      /* socket closing in this tick — drop */
-    }
-  }, []);
-
-  // (BUG-11 final — viewport plumbing fully removed. CSS scale
-  // effect above is the only sizing logic. Brave keeps its
-  // spawn-time viewport; the canvas shrinks proportionally to
-  // fit the panel.)
 
   /** Map a DOM mouse event's clientX/Y to canvas-pixel space. */
   function getCoords(e: React.MouseEvent | React.WheelEvent): { x: number; y: number } {
@@ -419,8 +586,10 @@ export function CdpScreencastViewport({
   };
   const onMouseDown = (e: React.MouseEvent) => {
     if (viewOnly) return;
-    // Focus the hidden input so subsequent keys + IME flow through us.
-    hiddenInputRef.current?.focus();
+    retainScreencastInputFocus({
+      event: e,
+      input: hiddenInputRef.current,
+    });
     const { x, y } = getCoords(e);
     sendInput({
       type: 'mouseDown',
@@ -452,25 +621,28 @@ export function CdpScreencastViewport({
   // doesn't fight the browser for default-action handling.
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (viewOnly) return;
+    const transition = cdpKeyTransition(inputBridgeStateRef.current, {
+      phase: 'down',
+      key: e.key,
+      code: e.code,
+      keyCode: e.keyCode,
+      altKey: e.altKey,
+      ctrlKey: e.ctrlKey,
+      metaKey: e.metaKey,
+      shiftKey: e.shiftKey,
+      isComposing: e.nativeEvent.isComposing,
+    });
+    inputBridgeStateRef.current = transition.state;
+    if (!transition.payload) return;
     // Don't preventDefault on Tab — that lets the user escape the
     // capture if focus gets stuck.
     if (e.key !== 'Tab') e.preventDefault();
-    sendInput({
-      type: 'keyDown',
-      key: e.key,
-      code: e.code,
-      keyCode: e.keyCode,
-      altKey: e.altKey,
-      ctrlKey: e.ctrlKey,
-      metaKey: e.metaKey,
-      shiftKey: e.shiftKey,
-    });
+    sendInput(transition.payload);
   };
   const onKeyUp = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (viewOnly) return;
-    if (e.key !== 'Tab') e.preventDefault();
-    sendInput({
-      type: 'keyUp',
+    const transition = cdpKeyTransition(inputBridgeStateRef.current, {
+      phase: 'up',
       key: e.key,
       code: e.code,
       keyCode: e.keyCode,
@@ -478,15 +650,24 @@ export function CdpScreencastViewport({
       ctrlKey: e.ctrlKey,
       metaKey: e.metaKey,
       shiftKey: e.shiftKey,
+      isComposing: e.nativeEvent.isComposing,
     });
+    inputBridgeStateRef.current = transition.state;
+    if (!transition.payload) return;
+    if (e.key !== 'Tab') e.preventDefault();
+    sendInput(transition.payload);
   };
   // CJK / IME — composition end carries the composed string.
   // We send insertText, NOT a sequence of keys, so the IME's
   // candidate selection lands verbatim in Brave's focused element.
   const onCompositionEnd = (e: React.CompositionEvent<HTMLInputElement>) => {
     if (viewOnly) return;
-    const text = e.data;
-    if (text) sendInput({ type: 'insertText', text });
+    const transition = cdpCompositionEndTransition(
+      inputBridgeStateRef.current,
+      e.data,
+    );
+    inputBridgeStateRef.current = transition.state;
+    if (transition.payload) sendInput(transition.payload);
     // Clear the hidden input so the next composition starts fresh.
     if (hiddenInputRef.current) hiddenInputRef.current.value = '';
   };
@@ -494,15 +675,16 @@ export function CdpScreencastViewport({
   // (e.g. paste). Forward as insertText too.
   const onHiddenInputInput = (e: React.FormEvent<HTMLInputElement>) => {
     if (viewOnly) return;
-    // composition events fire `onInput` mid-composition — ignore
-    // those (the keyDown/keyUp + final compositionend cover it).
     const native = e.nativeEvent as InputEvent;
-    if (native.isComposing) return;
     const target = e.currentTarget;
-    if (target.value) {
-      sendInput({ type: 'insertText', text: target.value });
-      target.value = '';
-    }
+    const transition = cdpTextInputTransition(inputBridgeStateRef.current, {
+      value: target.value,
+      inputType: native.inputType,
+      isComposing: native.isComposing,
+    });
+    inputBridgeStateRef.current = transition.state;
+    if (transition.payload) sendInput(transition.payload);
+    if (transition.clearInput) target.value = '';
   };
 
   return (
@@ -529,23 +711,9 @@ export function CdpScreencastViewport({
         onMouseUp={onMouseUp}
         onWheel={onWheel}
         onContextMenu={(e) => e.preventDefault()}
-        /* BUG-11 final — pure CSS scale, ABSOLUTE positioning.
-         *
-         * The canvas keeps its intrinsic dimensions (set by
-         * drawFrame to match the source frame, typically 899×818).
-         * Crucially, `position: absolute` REMOVES it from layout
-         * flow — without that, the canvas's 899px layout box
-         * leaked through ancestor flex containers that didn't have
-         * min-w-0, expanding the host's measured width past the
-         * panel's real width and breaking the scale calc.
-         *
-         * Now the host's size is decoupled from the canvas's
-         * intrinsic dims. ResizeObserver reports the host's real
-         * width (= panel width); recompute writes --hd-scale and
-         * the translate offsets imperatively for native-FPS drag.
-         * origin top-left + translate centres the scaled canvas
-         * inside the host.
-         */
+        /* Absolute positioning keeps a transient source-frame size from
+         * expanding the surrounding flex columns during a resize or renderer
+         * swap. The host remains the layout authority. */
         className="absolute left-0 top-0 block origin-top-left will-change-transform"
         style={{
           cursor: viewOnly ? 'default' : 'crosshair',
@@ -563,6 +731,11 @@ export function CdpScreencastViewport({
         spellCheck={false}
         onKeyDown={onKeyDown}
         onKeyUp={onKeyUp}
+        onCompositionStart={() => {
+          inputBridgeStateRef.current = cdpCompositionStartTransition(
+            inputBridgeStateRef.current,
+          );
+        }}
         onCompositionEnd={onCompositionEnd}
         onInput={onHiddenInputInput}
         aria-hidden="true"

@@ -51,4 +51,20 @@ describe('server message schema', () => {
 
     expect(parsed.success).toBe(true);
   });
+
+  it('preserves the verification verdict on terminal websocket outcomes', () => {
+    const parsed = parseServerMessage(
+      JSON.stringify({
+        type: 'server.task.terminal',
+        taskId: 'tsk_video_verified',
+        status: 'completed',
+        summary: '视频已生成',
+        verificationPassed: true,
+      }),
+    );
+
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+    expect(parsed.data).toMatchObject({ verificationPassed: true });
+  });
 });

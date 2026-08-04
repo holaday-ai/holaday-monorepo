@@ -71,6 +71,32 @@ describe('runVideoPipeline', () => {
     expect(out.segments[0]?.visualRef).toBeUndefined();
   });
 
+  it('keeps every generated segment at least as long as the selected model duration', async () => {
+    const renderBrollClip = vi.fn(async () => ({ clipRef: 'clip_1' }));
+    const lipSyncSegment = vi.fn(async ({ index }: { index: number }) => ({
+      clipRef: `clip_${index}`,
+    }));
+    const { deps } = makeDeps({ renderBrollClip, lipSyncSegment });
+
+    const out = await runVideoPipeline(
+      { script: SCRIPT, minimumSegmentDurationMs: 2_500 },
+      deps,
+    );
+
+    expect(out.timeline.segments.map((segment) => segment.durationMs)).toEqual([
+      2_500, 2_500, 3_000,
+    ]);
+    expect(out.timeline.segments.map((segment) => segment.startMs)).toEqual([0, 2_500, 5_000]);
+    expect(out.timeline.totalDurationMs).toBe(8_000);
+    expect(lipSyncSegment).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ index: 0, durationMs: 2_500 }),
+    );
+    expect(renderBrollClip).toHaveBeenCalledWith(
+      expect.objectContaining({ index: 1, durationMs: 2_500 }),
+    );
+  });
+
   it('retries only the failed句 (single transient failure recovers)', async () => {
     let lipFails = 1;
     const { deps, calls } = makeDeps({
@@ -87,6 +113,21 @@ describe('runVideoPipeline', () => {
     // segment 0 lip-sync attempted twice (fail, then success); segment 2 once.
     expect(calls.lipsync).toEqual([0, 0, 2]);
     expect(out.segments[0]?.clipRef).toBe('clip_0');
+  });
+
+  it('does not retry a step that explicitly marks its failure as non-retryable', async () => {
+    let attempts = 0;
+    const { deps } = makeDeps({
+      async generateBroll() {
+        attempts += 1;
+        throw Object.assign(new Error('quality gate unavailable'), { retryable: false });
+      },
+    });
+
+    await expect(runVideoPipeline({ script: SCRIPT, retries: 3 }, deps)).rejects.toThrow(
+      'quality gate unavailable',
+    );
+    expect(attempts).toBe(1);
   });
 
   it('throws after exhausting retries on a persistently failing句', async () => {

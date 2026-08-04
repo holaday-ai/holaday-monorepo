@@ -42,6 +42,12 @@ export const users = mysqlTable(
     role: varchar('role', { length: 16 }).notNull().default('user'),
     planExpiresAt: datetime('plan_expires_at', { mode: 'date', fsp: 3 }),
     status: varchar('status', { length: 16 }).notNull().default('active'),
+    /**
+     * Incremented whenever all existing access tokens must be revoked
+     * (currently password reset). Tokens carry the issuing version and
+     * HTTP authentication accepts only the current value.
+     */
+    authVersion: int('auth_version').notNull().default(0),
     displayName: varchar('display_name', { length: 128 }),
     googleId: varchar('google_id', { length: 64 }),
     avatarUrl: varchar('avatar_url', { length: 512 }),
@@ -55,7 +61,7 @@ export const users = mysqlTable(
      * - `qwenVoiceId`: voice_id from Qwen3-TTS-VC enrollment
      *   (DashScope-intl), reused on every synthesis call.
      * - `baseVideoFileId`: task_files.external_id of the user's base
-     *   on-camera video (kind='input') — the LatentSync lip-sync base.
+     *   on-camera video (kind='input') — the IP lip-sync base.
      *   Soft reference (no FK) so it stays nullable and decoupled from
      *   task_files retention.
      */

@@ -20,9 +20,9 @@
 #          ALLOW_DIVERGENT_DEPLOY=1   proceed despite a non-fast-forward
 #                                     (divergent) target — required for an
 #                                     intentional branch cutover / rollback.
-# Exits:   0 success; 1 health/keys failure; 3 divergent-target gate
-#          tripped; 4 could-not-verify-live-state. PM2 keeps last-good
-#          binary on build break.
+# Exits:   0 success; 1 deploy failed and rollback completed;
+#          2 automatic rollback failed; 3 divergent-target gate tripped;
+#          4 could-not-verify-live-state.
 
 set -euo pipefail
 
@@ -42,15 +42,39 @@ VULTR_HOST="root@207.148.70.106"
 BRANCH="${1:-claude/musing-keller-ae1d05}"
 HEALTH_URL="http://localhost:4001/healthz"
 HEALTH_MARKER='"status":"ok"'
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RUNTIME_HELPER="$SCRIPT_DIR/orchestrator-runtime.sh"
+START_HELPER="$SCRIPT_DIR/start-orchestrator-production.sh"
+REMOTE_RUNTIME_DIR="/var/lib/holaday-deploy"
+REMOTE_RUNTIME_HELPER="$REMOTE_RUNTIME_DIR/orchestrator-runtime.sh"
+REMOTE_START_HELPER="$REMOTE_RUNTIME_DIR/start-orchestrator-production.sh"
+ORCHESTRATOR_RUN_USER="${ORCHESTRATOR_RUN_USER:-holaday}"
+ORCHESTRATOR_RUN_GROUP="${ORCHESTRATOR_RUN_GROUP:-$ORCHESTRATOR_RUN_USER}"
 
 if [[ -z "${VULTR_PASSWORD:-}" ]]; then
   echo "❌ VULTR_PASSWORD unset — refusing orchestrator deploy" >&2
   exit 1
 fi
+if [[ ! -f "$RUNTIME_HELPER" ]]; then
+  echo "❌ Runtime helper missing: $RUNTIME_HELPER" >&2
+  exit 1
+fi
+if [[ ! -f "$START_HELPER" ]]; then
+  echo "❌ Production start helper missing: $START_HELPER" >&2
+  exit 1
+fi
+if ! [[ "$ORCHESTRATOR_RUN_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
+  echo "❌ ORCHESTRATOR_RUN_USER is invalid" >&2
+  exit 1
+fi
+if ! [[ "$ORCHESTRATOR_RUN_GROUP" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
+  echo "❌ ORCHESTRATOR_RUN_GROUP is invalid" >&2
+  exit 1
+fi
 build_ssh_password_prefix "$VULTR_PASSWORD"
 VULTR_AUTH_PREFIX=("${SSH_PASSWORD_PREFIX[@]}")
 SSH_OPTS=(
-  -o StrictHostKeyChecking=no
+  -o StrictHostKeyChecking=yes
   -o ConnectTimeout=20
   -o ServerAliveInterval=10
   -o ServerAliveCountMax=3
@@ -66,6 +90,13 @@ fi
 if ! [[ "$REMOTE_RETRY_SLEEP" =~ ^[0-9]+$ ]]; then
   echo "❌ DEPLOY_REMOTE_RETRY_SLEEP must be a non-negative integer" >&2
   exit 1
+fi
+
+if [[ "${CN_PAYMENT_PREFLIGHT_VERIFIED:-0}" != "1" ]]; then
+  "$SCRIPT_DIR/verify-cn-payment-production.sh"
+fi
+if [[ "${PAYPAL_PREFLIGHT_VERIFIED:-0}" != "1" ]]; then
+  "$SCRIPT_DIR/verify-paypal-production.sh"
 fi
 
 run_with_retry() {
@@ -90,27 +121,101 @@ run_with_retry() {
   done
 }
 
+stage_runtime_helper() {
+  echo "→ Staging non-root runtime helpers"
+  run_with_retry "Vultr runtime-helper directory" \
+    "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
+    "install -d -o root -g root -m 755 '$REMOTE_RUNTIME_DIR'"
+  run_with_retry "Vultr runtime-helper upload" \
+    "${VULTR_AUTH_PREFIX[@]}" scp "${SSH_OPTS[@]}" \
+    "$RUNTIME_HELPER" "$START_HELPER" "$VULTR_HOST:$REMOTE_RUNTIME_DIR/"
+  run_with_retry "Vultr runtime-helper permissions" \
+    "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
+    "chown root:root '$REMOTE_RUNTIME_HELPER' '$REMOTE_START_HELPER' && \
+     chmod 700 '$REMOTE_RUNTIME_HELPER' && chmod 755 '$REMOTE_START_HELPER'"
+}
+
+restart_orchestrator_as_runtime_user() {
+  local label="$1"
+  run_with_retry "$label" \
+    "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
+      cd /opt/holaday-monorepo && \
+      set -a && . apps/orchestrator/.env && set +a && \
+      ORCHESTRATOR_RUN_USER='$ORCHESTRATOR_RUN_USER' \
+      ORCHESTRATOR_RUN_GROUP='$ORCHESTRATOR_RUN_GROUP' \
+      ORCHESTRATOR_START_SCRIPT='$REMOTE_START_HELPER' \
+      '$REMOTE_RUNTIME_HELPER' restart /opt/holaday-monorepo"
+}
+
 # Roll the live deploy back to a known-good commit + rebuild + restart
 # with the env reloaded. Called when a post-deploy verification fails so
 # we never silently leave a broken / keyless binary serving traffic.
 rollback() {
   local target="$1"
+  local rollback_output rollback_rc
+
+  echo "⚠️  Database changes are forward-only; code rollback does not revert applied migrations." >&2
   if [[ -z "$target" ]]; then
-    echo "⚠️  No rollback target captured — manual intervention needed" >&2
-    return
+    echo "❌ No rollback target captured — manual recovery is required" >&2
+    return 1
   fi
   echo "→ Rolling back to $target" >&2
-  run_with_retry "Vultr rollback" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
-    cd /opt/holaday-monorepo && \
-    git reset --hard $target && \
-    pnpm --filter @holaday/orchestrator build && \
-    set -a && . apps/orchestrator/.env && set +a && \
-    pm2 restart holaday-orchestrator --update-env" 2>&1 | tail -5 >&2 || true
+
+  set +e
+  rollback_output=$(run_with_retry "Vultr rollback build" \
+    "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
+      cd /opt/holaday-monorepo && \
+      git reset --hard '$target' && \
+      pnpm --filter @holaday/orchestrator build" 2>&1)
+  rollback_rc=$?
+  set -e
+  echo "$rollback_output" | tail -5 >&2
+  if (( rollback_rc != 0 )); then
+    echo "❌ Rollback checkout/build failed; manual recovery is required" >&2
+    return 1
+  fi
+
+  set +e
+  rollback_output=$(restart_orchestrator_as_runtime_user "Vultr rollback restart" 2>&1)
+  rollback_rc=$?
+  set -e
+  echo "$rollback_output" | tail -5 >&2
+  if (( rollback_rc != 0 )); then
+    echo "❌ Rollback restart failed; checkout is restored but manual recovery is required" >&2
+    return 1
+  fi
+
+  echo "✅ Previous checkout and Orchestrator restored to $target" >&2
 }
 
+abort_with_rollback() {
+  local reason="$1"
+
+  echo "❌ $reason — rolling back" >&2
+  if rollback "$PREV_HEAD"; then
+    echo "❌ Deploy FAILED ($reason) — checkout and Orchestrator restored" >&2
+    exit 1
+  fi
+
+  echo "❌ Deploy FAILED ($reason) — rollback is incomplete; manual recovery is required" >&2
+  exit 2
+}
+
+stage_runtime_helper
+
 echo "→ Capturing current HEAD for rollback"
-PREV_HEAD=$(run_with_retry "Vultr prev-head" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
-  "cd /opt/holaday-monorepo && git rev-parse HEAD" | tail -1 | tr -d '[:space:]')
+PREV_HEAD="${ORCHESTRATOR_ROLLBACK_HEAD:-}"
+if [[ -z "$PREV_HEAD" ]]; then
+  PREV_HEAD=$(run_with_retry "Vultr prev-head" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
+    "cd /opt/holaday-monorepo && git rev-parse HEAD" | tail -1 | tr -d '[:space:]')
+fi
+if ! [[ "$PREV_HEAD" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "❌ Invalid rollback HEAD — refusing deploy" >&2
+  exit 1
+fi
+run_with_retry "Vultr rollback-head validation" \
+  "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
+  "cd /opt/holaday-monorepo && git cat-file -e '$PREV_HEAD^{commit}'"
 echo "   prev HEAD (LIVE): ${PREV_HEAD:-unknown}"
 
 # ── Pre-reset safety gate — SESSION_STATUS hard rule 7 (2026-06-13) ──────
@@ -164,24 +269,41 @@ case "$GATE_RC" in
 esac
 
 echo "→ Fetching $BRANCH on Vultr"
-run_with_retry "Vultr fetch" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
-  cd /opt/holaday-monorepo && \
-  git fetch origin '+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH' && \
-  git reset --hard origin/$BRANCH && \
-  git rev-parse HEAD" | tail -5
+if ! run_with_retry "Vultr fetch" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
+    cd /opt/holaday-monorepo && \
+    git fetch origin '+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH' && \
+    git reset --hard origin/$BRANCH && \
+    git rev-parse HEAD" | tail -5; then
+  abort_with_rollback "checkout sync failed"
+fi
 
-NEW_HEAD=$(run_with_retry "Vultr new-head" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
-  "cd /opt/holaday-monorepo && git rev-parse --short HEAD" | tail -1 | tr -d '[:space:]')
+if ! NEW_HEAD=$(run_with_retry "Vultr new-head" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
+    "cd /opt/holaday-monorepo && git rev-parse --short HEAD" | tail -1 | tr -d '[:space:]'); then
+  abort_with_rollback "deployed HEAD verification failed"
+fi
 
 echo "→ Installing + building"
-run_with_retry "Vultr install/build" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
-  cd /opt/holaday-monorepo && \
-  pnpm install && \
-  pnpm --filter @holaday/orchestrator build" 2>&1 | tail -5
+if ! run_with_retry "Vultr install/build" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
+    cd /opt/holaday-monorepo && \
+    pnpm install && \
+    pnpm --filter @holaday/orchestrator build" 2>&1 | tail -5; then
+  abort_with_rollback "install/build failed"
+fi
 
-echo "→ pm2 restart (--update-env so new .env keys load into the process)"
-run_with_retry "Vultr pm2 restart" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
-  "cd /opt/holaday-monorepo && set -a && . apps/orchestrator/.env && set +a && pm2 restart holaday-orchestrator --update-env"
+echo "→ Applying numbered migrations and verifying the production schema"
+if ! run_with_retry "Vultr database migration gate" \
+  "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
+    cd /opt/holaday-monorepo && \
+    set -a && . apps/orchestrator/.env && set +a && \
+    pnpm --filter @holaday/orchestrator db:migrate:numbered && \
+    pnpm --filter @holaday/orchestrator db:verify"; then
+  abort_with_rollback "database migration/schema verification failed"
+fi
+
+echo "→ PM2 restart as dedicated non-root runtime user"
+if ! restart_orchestrator_as_runtime_user "Vultr non-root PM2 restart"; then
+  abort_with_rollback "non-root runtime start failed"
+fi
 
 echo "→ Health check ($HEALTH_URL must return '$HEALTH_MARKER')"
 sleep 3
@@ -194,14 +316,14 @@ else
   echo "Response: $HEALTH_OUT" >&2
   echo "→ Last 10 error log lines:"
   run_with_retry "Vultr pm2 error logs" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
-    "pm2 logs holaday-orchestrator --lines 10 --nostream --err 2>&1 | tail -15" >&2
-  rollback "$PREV_HEAD"
-  echo "❌ Deploy FAILED (health check) — rolled back to ${PREV_HEAD:-unknown}" >&2
-  exit 1
+    "pm2 logs holaday-orchestrator --lines 10 --nostream --err 2>&1 | tail -15" >&2 || true
+  abort_with_rollback "health check failed"
 fi
 
-RESTART=$(run_with_retry "Vultr restart count" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
-  "node -e \"const list=JSON.parse(require('child_process').execFileSync('pm2',['jlist'],{encoding:'utf8'})); const app=list.find((p)=>p.name==='holaday-orchestrator'); process.stdout.write(String(app?.pm2_env?.restart_time ?? 'unknown'));\"")
+if ! RESTART=$(run_with_retry "Vultr restart count" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
+    "node -e \"const list=JSON.parse(require('child_process').execFileSync('pm2',['jlist'],{encoding:'utf8'})); const app=list.find((p)=>p.name==='holaday-orchestrator'); process.stdout.write(String(app?.pm2_env?.restart_time ?? 'unknown'));\""); then
+  abort_with_rollback "restart count verification failed"
+fi
 echo "✅ Orchestrator deployed — restart count: $RESTART"
 
 # Verify the required LLM keys actually made it INTO the running process
@@ -210,19 +332,19 @@ echo "✅ Orchestrator deployed — restart count: $RESTART"
 # this guard. We only print key NAMES that have a non-empty value (never
 # the secret). Failure rolls back rather than leaving the image lane
 # keyless (image intents would silently degrade to generate).
-REQUIRED_PROCESS_KEYS="${DEPLOY_REQUIRED_PROCESS_KEYS:-GEMINI_API_KEY ANTHROPIC_API_KEY}"
+REQUIRED_PROCESS_KEYS="${DEPLOY_REQUIRED_PROCESS_KEYS:-GEMINI_API_KEY ANTHROPIC_API_KEY DASHSCOPE_API_KEY}"
 echo "→ Verifying keys loaded in process: $REQUIRED_PROCESS_KEYS"
-PROC_KEYS=$(run_with_retry "Vultr key-check" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
-  "PID=\$(pm2 pid holaday-orchestrator | head -1); tr '\\0' '\\n' < /proc/\$PID/environ 2>/dev/null | grep -oE '^[A-Z_]+=.' | grep -oE '^[A-Z_]+'" | tr -d '\r')
+if ! PROC_KEYS=$(run_with_retry "Vultr key-check" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
+    "PID=\$(pm2 pid holaday-orchestrator | head -1); tr '\\0' '\\n' < /proc/\$PID/environ 2>/dev/null | grep -oE '^[A-Z_]+=.' | grep -oE '^[A-Z_]+'" | tr -d '\r'); then
+  abort_with_rollback "process key verification failed"
+fi
 KEY_MISS=""
 for k in $REQUIRED_PROCESS_KEYS; do
   echo "$PROC_KEYS" | grep -qx "$k" || KEY_MISS="$KEY_MISS $k"
 done
 if [[ -n "$KEY_MISS" ]]; then
   echo "❌ Required keys missing/empty in process:$KEY_MISS" >&2
-  rollback "$PREV_HEAD"
-  echo "❌ Deploy FAILED (keys not loaded into process) — rolled back to ${PREV_HEAD:-unknown}" >&2
-  exit 1
+  abort_with_rollback "keys not loaded into process"
 fi
 echo "✅ Keys present in process"
 

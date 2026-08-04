@@ -49,7 +49,7 @@ export function friendlyBrowserFailureReason(raw: string | null | undefined): st
     return '该网站证书有问题，无法安全连接。请确认网址是否正确或换一个站点。';
   }
   if (
-    /err_connection_refused|err_connection_reset|err_address_unreachable|err_internet_disconnected/.test(
+    /err_connection_closed|err_connection_refused|err_connection_reset|err_address_unreachable|err_internet_disconnected/.test(
       r,
     )
   ) {

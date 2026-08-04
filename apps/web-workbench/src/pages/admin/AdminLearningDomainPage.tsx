@@ -165,6 +165,13 @@ export function AdminLearningDomainPage(): JSX.Element {
         </div>
       </header>
 
+      {view.coverage.truncated && (
+        <div className="mt-4 rounded-[8px] border border-[#FFC910]/60 bg-[#FFC910]/10 px-4 py-3 text-[13px] text-[#595757]">
+          当前详情基于最近扫描到的 {formatInteger(view.coverage.scannedTasks)} 条用户任务，
+          更早的同域名记录可能未计入。
+        </div>
+      )}
+
       {/* Unsuccessful breakdown: failed + review-needed terminal outcomes. */}
       <Section
         title="未成功模式分析"
@@ -375,8 +382,13 @@ export function AdminLearningDomainPage(): JSX.Element {
 function normalizeDomainDetail(value: DomainDetail, fallbackDomain: string) {
   const root = asRecord(value);
   const stats = asRecord(root.stats);
+  const coverage = asRecord(root.coverage);
   return {
     domain: safeText(root.domain, fallbackDomain),
+    coverage: {
+      scannedTasks: nonNegativeNumber(coverage.scannedTasks),
+      truncated: coverage.truncated === true,
+    },
     stats: {
       total: nonNegativeNumber(stats.total),
       successRate: clampNumber(stats.successRate, 0, 100),
