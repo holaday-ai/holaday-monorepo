@@ -9,8 +9,9 @@
  *
  * Alipay path:
  *   1. Call payment.createCnOrder({ provider: 'alipay', purchase })
- *   2. Open `payUrl` in a new window
- *   3. Same polling loop as WeChat (status comes from the same
+ *   2. Render the official checkout URL as a QR code
+ *   3. Offer desktop checkout as a secondary action
+ *   4. Same polling loop as WeChat (status comes from the same
  *      payments table, written by the gateway → internal-confirm
  *      bridge regardless of provider)
  */
@@ -92,7 +93,7 @@ export function CnPaymentDialog({
         setAmountCents(res.amountCents);
         setDescription(res.description);
         if (res.provider === 'wechat') {
-          // Render QR client-side from the code_url WX returns
+          // Render QR client-side from the code_url WX returns.
           const dataUrl = await QRCode.toDataURL(res.codeUrl, {
             margin: 2,
             width: 240,
@@ -101,12 +102,17 @@ export function CnPaymentDialog({
           if (cancelled) return;
           setQrDataUrl(dataUrl);
         } else {
-          // Alipay — pop the gateway page in a new tab. The user's
-          // session cookie isn't needed; the URL carries the full
-          // signed query string.
+          // Some desktop DNS resolvers cannot reach Alipay's cashier hosts.
+          // Make QR payment the primary path and keep desktop checkout as an
+          // explicit fallback instead of automatically opening an error tab.
           setPayUrl(res.payUrl);
-          const popup = window.open(res.payUrl, '_blank', 'noopener,noreferrer');
-          setPopupBlocked(popup === null);
+          const dataUrl = await QRCode.toDataURL(res.payUrl, {
+            margin: 2,
+            width: 240,
+            color: { dark: '#000000', light: '#ffffff' },
+          });
+          if (cancelled) return;
+          setQrDataUrl(dataUrl);
         }
         setPhase('awaiting');
       } catch (err) {
@@ -260,12 +266,20 @@ export function CnPaymentDialog({
             </div>
           )}
 
-          {phase === 'awaiting' && provider === 'alipay' && (
-            <div className="flex flex-col items-center gap-3 rounded-[8px] border border-[#DCDDDD] bg-white px-4 py-6 text-center text-sm shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
-              <Loader2 className="h-5 w-5 animate-spin text-[#EA1F59]" />
-              <div className="font-medium">等待支付宝付款确认</div>
-              <div className="text-xs text-[#595757]">
-                已尝试在新窗口打开支付宝，付款完成后此页会自动更新。
+          {phase === 'awaiting' && provider === 'alipay' && qrDataUrl && (
+            <div className="flex flex-col items-center gap-3">
+              <div className="rounded-[8px] border border-[#DCDDDD] bg-white p-2 shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
+                <img
+                  src={qrDataUrl}
+                  alt="支付宝付款二维码"
+                  width={240}
+                  height={240}
+                  className="rounded-md"
+                />
+              </div>
+              <div className="flex w-full items-center justify-center gap-2 rounded-[8px] border border-[#DCDDDD] border-l-[#1677FF] bg-white px-3 py-2 text-center text-xs text-[#595757] [border-left-width:3px]">
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-[#1677FF]" />
+                用支付宝扫码支付，完成后此页会自动更新
               </div>
               {payUrl && (
                 <button
@@ -274,12 +288,12 @@ export function CnPaymentDialog({
                   className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-1.5 text-sm font-medium text-[#EA1F59] transition-colors hover:border-[#EA1F59]/30 hover:bg-[#EA1F59]/10"
                 >
                   <ExternalLink className="h-3.5 w-3.5" />
-                  重新打开支付宝
+                  电脑打开支付宝
                 </button>
               )}
               {popupBlocked && (
                 <div className="rounded-[8px] border border-[#EA1F59]/20 bg-[#EA1F59]/[0.06] px-3 py-2 text-xs text-[#EA1F59]">
-                  浏览器可能拦截了付款窗口，请点击上方按钮手动打开。
+                  浏览器拦截了付款窗口，请使用上方二维码扫码支付。
                 </div>
               )}
             </div>
