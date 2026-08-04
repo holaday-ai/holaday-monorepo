@@ -8,11 +8,40 @@ RELEASES="$ROOT/releases"
 ACTION="${1:-deploy}"
 RELEASE_ID="${2:-}"
 ARCHIVE_PATH="${3:-}"
+GATEWAY_HEALTH_ATTEMPTS="${GATEWAY_HEALTH_ATTEMPTS:-12}"
+GATEWAY_HEALTH_RETRY_SECONDS="${GATEWAY_HEALTH_RETRY_SECONDS:-1}"
 
 if [[ ! "$RELEASE_ID" =~ ^[A-Za-z0-9._-]+$ ]]; then
   echo "CN payment deploy failed: invalid release id" >&2
   exit 2
 fi
+if [[ ! "$GATEWAY_HEALTH_ATTEMPTS" =~ ^[1-9][0-9]*$ ]]; then
+  echo "CN payment deploy failed: GATEWAY_HEALTH_ATTEMPTS must be a positive integer" >&2
+  exit 2
+fi
+if [[ ! "$GATEWAY_HEALTH_RETRY_SECONDS" =~ ^[0-9]+$ ]]; then
+  echo "CN payment deploy failed: GATEWAY_HEALTH_RETRY_SECONDS must be non-negative" >&2
+  exit 2
+fi
+
+wait_for_gateway_health() {
+  local required_marker="${1:-}"
+  local attempt health=""
+
+  for ((attempt = 1; attempt <= GATEWAY_HEALTH_ATTEMPTS; attempt++)); do
+    if health="$(curl -sf --max-time 10 http://127.0.0.1:4010/healthz 2>/dev/null)" &&
+      grep -Fq '"status":"ok"' <<< "$health" &&
+      { [[ -z "$required_marker" ]] || grep -Fq "$required_marker" <<< "$health"; }; then
+      return 0
+    fi
+    if (( attempt < GATEWAY_HEALTH_ATTEMPTS )); then
+      sleep "$GATEWAY_HEALTH_RETRY_SECONDS"
+    fi
+  done
+
+  [[ -z "$health" ]] || echo "Last gateway health response: $health" >&2
+  return 1
+}
 
 switch_current() {
   local target="$1"
@@ -36,8 +65,7 @@ rollback_release() {
   }
   switch_current "$previous_target"
   pm2 restart holaday-cn-payment --update-env >/dev/null
-  sleep 2
-  curl -sf --max-time 10 http://127.0.0.1:4010/healthz | grep -Fq '"status":"ok"'
+  wait_for_gateway_health
   echo "CN payment rollback complete"
 }
 
@@ -96,10 +124,7 @@ trap rollback_on_error ERR
 switch_current "$STAGE"
 activated=1
 pm2 restart holaday-cn-payment --update-env >/dev/null
-sleep 3
-health="$(curl -sf --max-time 10 http://127.0.0.1:4010/healthz)"
-grep -Fq '"status":"ok"' <<< "$health"
-grep -Fq '"bridge":"ready"' <<< "$health"
+wait_for_gateway_health '"bridge":"ready"'
 
 activated=0
 trap - ERR

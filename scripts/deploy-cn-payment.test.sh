@@ -33,6 +33,10 @@ grep -Fq 'rollback' "$REMOTE_SCRIPT" \
   || fail "remote deploy must define an automatic rollback path"
 grep -Fq '"bridge":"ready"' "$REMOTE_SCRIPT" \
   || fail "remote smoke must verify the Vultr settlement bridge"
+grep -Fq 'wait_for_gateway_health' "$REMOTE_SCRIPT" \
+  || fail "remote smoke must retry during the gateway cold-start window"
+grep -Fq 'GATEWAY_HEALTH_ATTEMPTS' "$REMOTE_SCRIPT" \
+  || fail "remote smoke retries must remain explicitly bounded"
 grep -Fq 'pm2 restart holaday-cn-payment --update-env' "$REMOTE_SCRIPT" \
   || fail "remote deploy must reload the gateway process environment"
 grep -Fq 'StrictHostKeyChecking=yes' "$LOCAL_SCRIPT" \
