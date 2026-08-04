@@ -38,6 +38,53 @@ export interface AlipayNotifyPayload {
   tradeStatus: string;
 }
 
+const ALIPAY_PRODUCTION_GATEWAY_HOST = 'openapi.alipay.com';
+const ALIPAY_CHECKOUT_RESOLVE_TIMEOUT_MS = 10_000;
+
+function isOfficialAlipayHost(hostname: string): boolean {
+  return hostname === 'alipay.com' || hostname.endsWith('.alipay.com');
+}
+
+/**
+ * Resolve the API gateway URL server-side to the browser-facing Alipay
+ * checkout. Some client DNS resolvers cannot reach openapi.alipay.com even
+ * though Alipay's cashier hosts are available; following Alipay's first
+ * signed redirect on the mainland gateway keeps checkout on official hosts
+ * without proxying payment HTML or credentials through HOLA DAY.
+ */
+export async function resolveAlipayCheckoutUrl(
+  signedGatewayUrl: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<string> {
+  const gatewayUrl = new URL(signedGatewayUrl);
+  if (
+    gatewayUrl.protocol !== 'https:' ||
+    gatewayUrl.hostname !== ALIPAY_PRODUCTION_GATEWAY_HOST ||
+    gatewayUrl.pathname !== '/gateway.do'
+  ) {
+    throw new Error('alipay: invalid signed gateway URL');
+  }
+
+  const response = await fetchImpl(gatewayUrl, {
+    redirect: 'manual',
+    signal: AbortSignal.timeout(ALIPAY_CHECKOUT_RESOLVE_TIMEOUT_MS),
+  });
+  const location = response.headers.get('location');
+  if (!location) {
+    throw new Error('alipay: checkout redirect unavailable');
+  }
+
+  const checkoutUrl = new URL(location, gatewayUrl);
+  if (
+    checkoutUrl.protocol !== 'https:' ||
+    !isOfficialAlipayHost(checkoutUrl.hostname) ||
+    checkoutUrl.hostname === ALIPAY_PRODUCTION_GATEWAY_HOST
+  ) {
+    throw new Error('alipay: invalid checkout redirect');
+  }
+  return checkoutUrl.toString();
+}
+
 export class AlipayAdapter {
   private sdk: AlipaySdk | null = null;
   private constructorErr: string | null = null;
@@ -121,7 +168,9 @@ export class AlipayAdapter {
         passback_params: encodeURIComponent(args.passback),
       },
     });
-    return { payUrl: url, outTradeNo: args.outTradeNo };
+    const payUrl =
+      this.env.ALIPAY_MODE === 'production' ? await resolveAlipayCheckoutUrl(url) : url;
+    return { payUrl, outTradeNo: args.outTradeNo };
   }
 
   /**

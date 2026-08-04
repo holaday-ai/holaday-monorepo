@@ -1,6 +1,6 @@
 import type { Logger } from 'pino';
 import { describe, expect, it, vi } from 'vitest';
-import { AlipayAdapter } from './alipay.js';
+import { AlipayAdapter, resolveAlipayCheckoutUrl } from './alipay.js';
 import type { Env } from './config/env.js';
 
 function makeAdapter(overrides: Partial<Env> = {}) {
@@ -66,5 +66,59 @@ describe('AlipayAdapter notifications', () => {
     expect(() => adapter.parseNotifyBody({ ...validBody, total_amount: '29.00CNY' })).toThrow(
       /invalid transaction payload/,
     );
+  });
+});
+
+describe('resolveAlipayCheckoutUrl', () => {
+  it('resolves the signed gateway URL to an official browser-facing checkout URL', async () => {
+    const fetchImpl = vi.fn(
+      async (_input: string | URL | Request, _init?: RequestInit) =>
+        new Response(null, {
+          status: 302,
+          headers: {
+            location: 'https://unitradeprod.alipay.com/pay/checkout.htm?token=opaque',
+          },
+        }),
+    );
+
+    await expect(
+      resolveAlipayCheckoutUrl(
+        'https://openapi.alipay.com/gateway.do?sign=signed-order',
+        fetchImpl,
+      ),
+    ).resolves.toBe('https://unitradeprod.alipay.com/pay/checkout.htm?token=opaque');
+    const [requestedUrl, options] = fetchImpl.mock.calls[0] ?? [];
+    expect(String(requestedUrl)).toBe(
+      'https://openapi.alipay.com/gateway.do?sign=signed-order',
+    );
+    expect(options?.redirect).toBe('manual');
+    expect(options?.signal).toBeDefined();
+  });
+
+  it('rejects a redirect outside the official Alipay domain', async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(null, {
+        status: 302,
+        headers: { location: 'https://checkout.example.com/pay' },
+      }),
+    );
+
+    await expect(
+      resolveAlipayCheckoutUrl(
+        'https://openapi.alipay.com/gateway.do?sign=signed-order',
+        fetchImpl,
+      ),
+    ).rejects.toThrow('invalid checkout redirect');
+  });
+
+  it('fails closed when the gateway does not return a redirect', async () => {
+    const fetchImpl = vi.fn(async () => new Response('<html></html>', { status: 200 }));
+
+    await expect(
+      resolveAlipayCheckoutUrl(
+        'https://openapi.alipay.com/gateway.do?sign=signed-order',
+        fetchImpl,
+      ),
+    ).rejects.toThrow('checkout redirect unavailable');
   });
 });

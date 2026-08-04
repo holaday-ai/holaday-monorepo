@@ -91,8 +91,14 @@ function validateAlipayOrder(order, expectedAmountCents) {
   } catch {
     fail('Alipay order did not return a valid payment URL');
   }
-  if (payUrl.protocol !== 'https:' || payUrl.hostname !== 'openapi.alipay.com') {
-    fail('Alipay order did not return the production gateway URL');
+  const isOfficialCheckoutHost =
+    payUrl.hostname === 'alipay.com' || payUrl.hostname.endsWith('.alipay.com');
+  if (
+    payUrl.protocol !== 'https:' ||
+    !isOfficialCheckoutHost ||
+    payUrl.hostname === 'openapi.alipay.com'
+  ) {
+    fail('Alipay order did not return a browser-facing checkout URL');
   }
 }
 

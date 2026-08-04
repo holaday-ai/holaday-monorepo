@@ -119,7 +119,7 @@ test('creates real unpaid orders for both providers without exposing payment tok
     response(200, {
       provider: 'alipay',
       outTradeNo: 'pay_alipay',
-      payUrl: 'https://openapi.alipay.com/gateway.do?sign=secret-signature',
+      payUrl: 'https://unitradeprod.alipay.com/pay/checkout.htm?token=secret-token',
       amountCents: 2900,
     }),
   ];
@@ -149,4 +149,32 @@ test('creates real unpaid orders for both providers without exposing payment tok
     });
   }
   assert.doesNotMatch(JSON.stringify(result), /secret-token|secret-signature|internal-secret/);
+});
+
+test('rejects an Alipay order that still exposes the API gateway to the browser', async () => {
+  const replies = [
+    response(200, {
+      status: 'ok',
+      providers: { wechat: 'ready', alipay: 'ready' },
+      callbackVerification: { wechat: 'public_key' },
+      bridge: 'ready',
+    }),
+    response(200, {
+      provider: 'wechat',
+      outTradeNo: 'pay_wechat',
+      codeUrl: 'weixin://wxpay/bizpayurl?pr=secret-token',
+      amountCents: 2900,
+    }),
+    response(200, {
+      provider: 'alipay',
+      outTradeNo: 'pay_alipay',
+      payUrl: 'https://openapi.alipay.com/gateway.do?sign=secret-signature',
+      amountCents: 2900,
+    }),
+  ];
+
+  await assert.rejects(
+    verifyCnPaymentProduction(completeEnv, async () => replies.shift()),
+    /browser-facing checkout URL/,
+  );
 });
