@@ -100,6 +100,28 @@ def test_intraday_rows_keep_latest_session_and_sort_dedupe():
     ]
 
 
+def test_intraday_rows_drop_provider_bar_ahead_of_current_market_minute():
+    pd = pytest.importorskip("pandas")
+    frame = pd.DataFrame(
+        [
+            {"day": "2026-08-04 10:55:00", "close": "21.92"},
+            {"day": "2026-08-04 10:56:00", "close": "21.96"},
+            # Sina can expose the still-forming bar with the next minute label.
+            {"day": "2026-08-04 10:57:00", "close": "21.96"},
+        ]
+    )
+
+    rows = adp._intraday_rows(
+        frame,
+        now=datetime.datetime(2026, 8, 4, 10, 56, 56),
+    )
+
+    assert [row["时间"] for row in rows] == [
+        "2026-08-04 10:55:00",
+        "2026-08-04 10:56:00",
+    ]
+
+
 @pytest.mark.parametrize(
     ("metric", "expected_sort", "expected_asc", "expected_codes"),
     [
