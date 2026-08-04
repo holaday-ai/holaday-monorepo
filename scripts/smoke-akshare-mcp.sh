@@ -120,6 +120,9 @@ def parse_timestamp(value: Any, label: str, *, assume_shanghai: bool = False) ->
     if not isinstance(value, str) or not value.strip():
         fail(f"{label} is missing")
     text = value.strip().replace("Z", "+00:00")
+    # GNU date emits offsets such as +0800, while Python 3.10's
+    # datetime.fromisoformat requires +08:00.
+    text = re.sub(r"([+-]\d{2})(\d{2})$", r"\1:\2", text)
     try:
         parsed = datetime.fromisoformat(text)
     except ValueError:

@@ -251,6 +251,7 @@ assert_fails_with() {
 }
 
 assert_passes open_session '2026-07-31T10:05:00+08:00' active
+assert_passes open_session '2026-07-31T10:05:00+0800' active
 assert_fails_with future_minute '2026-07-31T10:05:00+08:00' 'future minute point'
 assert_fails_with future_weekend '2026-08-02T10:05:00+08:00' 'future minute point'
 assert_fails_with stale_quote_fetch '2026-07-31T10:05:00+08:00' 'quote fetched_at is stale'
