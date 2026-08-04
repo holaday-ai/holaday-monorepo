@@ -459,9 +459,16 @@ def _intraday_rows(
     df: Any,
     expected_date: str | None = None,
     allow_time_only_date: bool = False,
+    *,
+    now: datetime.datetime | None = None,
 ) -> list[dict[str, Any]]:
     if df is None or len(df) == 0:
         return []
+    shanghai = datetime.timezone(datetime.timedelta(hours=8))
+    current = now or datetime.datetime.now(shanghai)
+    if current.tzinfo is not None:
+        current = current.astimezone(shanghai).replace(tzinfo=None)
+    current_minute = current.replace(second=0, microsecond=0)
     candidates: list[tuple[datetime.datetime, dict[str, Any]]] = []
     source = df.tail(MAX_ROWS * 20) if hasattr(df, "tail") else df
     for raw in _records(source, limit=MAX_ROWS * 20):
@@ -503,6 +510,10 @@ def _intraday_rows(
                 f"{row_date} {hour:02d}:{minute:02d}:{second:02d}"
             )
         except ValueError:
+            continue
+        # Sina can label the still-forming bar with the next minute. Never let
+        # that provider convention become a future quote or chart point.
+        if timestamp.replace(second=0, microsecond=0) > current_minute:
             continue
         row = {
             "时间": timestamp.strftime("%Y-%m-%d %H:%M:%S"),
