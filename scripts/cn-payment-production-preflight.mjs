@@ -1,7 +1,7 @@
 import { pathToFileURL } from 'node:url';
 
 const DEFAULT_EXPECTED_AMOUNT_CENTS = 2900;
-const DEFAULT_TIMEOUT_MS = 10000;
+const DEFAULT_TIMEOUT_MS = 15000;
 
 function fail(message) {
   throw new Error(`CN payment production preflight failed: ${message}`);
@@ -96,7 +96,10 @@ function validateAlipayOrder(order, expectedAmountCents) {
   if (
     payUrl.protocol !== 'https:' ||
     !isOfficialCheckoutHost ||
-    payUrl.hostname === 'openapi.alipay.com'
+    payUrl.hostname === 'openapi.alipay.com' ||
+    payUrl.username !== '' ||
+    payUrl.password !== '' ||
+    payUrl.port !== ''
   ) {
     fail('Alipay order did not return a browser-facing checkout URL');
   }

@@ -121,4 +121,39 @@ describe('resolveAlipayCheckoutUrl', () => {
       ),
     ).rejects.toThrow('checkout redirect unavailable');
   });
+
+  it('rejects a non-redirect response even when it includes a Location header', async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(null, {
+        status: 200,
+        headers: { location: 'https://unitradeprod.alipay.com/pay/checkout.htm' },
+      }),
+    );
+
+    await expect(
+      resolveAlipayCheckoutUrl(
+        'https://openapi.alipay.com/gateway.do?sign=signed-order',
+        fetchImpl,
+      ),
+    ).rejects.toThrow('checkout redirect unavailable');
+  });
+
+  it.each([
+    'https://user:secret@unitradeprod.alipay.com/pay/checkout.htm',
+    'https://unitradeprod.alipay.com:4443/pay/checkout.htm',
+  ])('rejects an official-host redirect with unsafe URL authority: %s', async (location) => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(null, {
+        status: 302,
+        headers: { location },
+      }),
+    );
+
+    await expect(
+      resolveAlipayCheckoutUrl(
+        'https://openapi.alipay.com/gateway.do?sign=signed-order',
+        fetchImpl,
+      ),
+    ).rejects.toThrow('invalid checkout redirect');
+  });
 });

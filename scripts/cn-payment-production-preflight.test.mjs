@@ -178,3 +178,36 @@ test('rejects an Alipay order that still exposes the API gateway to the browser'
     /browser-facing checkout URL/,
   );
 });
+
+test('rejects an Alipay checkout URL with credentials or a non-default port', async () => {
+  for (const payUrl of [
+    'https://user:secret@unitradeprod.alipay.com/pay/checkout.htm',
+    'https://unitradeprod.alipay.com:4443/pay/checkout.htm',
+  ]) {
+    const replies = [
+      response(200, {
+        status: 'ok',
+        providers: { wechat: 'ready', alipay: 'ready' },
+        callbackVerification: { wechat: 'public_key' },
+        bridge: 'ready',
+      }),
+      response(200, {
+        provider: 'wechat',
+        outTradeNo: 'pay_wechat',
+        codeUrl: 'weixin://wxpay/bizpayurl?pr=secret-token',
+        amountCents: 2900,
+      }),
+      response(200, {
+        provider: 'alipay',
+        outTradeNo: 'pay_alipay',
+        payUrl,
+        amountCents: 2900,
+      }),
+    ];
+
+    await assert.rejects(
+      verifyCnPaymentProduction(completeEnv, async () => replies.shift()),
+      /browser-facing checkout URL/,
+    );
+  }
+});

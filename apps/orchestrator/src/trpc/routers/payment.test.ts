@@ -30,7 +30,11 @@ vi.mock('../../quota/quota-service.js', async (importOriginal) => {
   };
 });
 
-import { paymentRouter } from './payment.js';
+import {
+  CN_PAYMENT_CREATE_TIMEOUT_MS,
+  CN_PAYMENT_HEALTH_TIMEOUT_MS,
+  paymentRouter,
+} from './payment.js';
 
 const drizzleName = (t: unknown): string =>
   (t as Record<symbol, string> | null)?.[Symbol.for('drizzle:Name')] ?? '';
@@ -738,6 +742,11 @@ describe('cnOptions — production provider readiness', () => {
         .cnOptions(),
     ).resolves.toEqual({ enabled: false, wechat: false, alipay: false });
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('allows the cross-region readiness probe the order-creation timeout budget', () => {
+    expect(CN_PAYMENT_HEALTH_TIMEOUT_MS).toBe(8_000);
+    expect(CN_PAYMENT_CREATE_TIMEOUT_MS).toBeGreaterThan(10_000);
   });
 
   it('returns readiness for each provider from the live gateway health response', async () => {

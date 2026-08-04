@@ -39,6 +39,9 @@ import { describePlanOrder, isPaidPlan, nextExpiryFor } from '../../payment/plan
 import { QuotaService } from '../../quota/quota-service.js';
 import { protectedProcedure, publicProcedure, router } from '../trpc.js';
 
+export const CN_PAYMENT_HEALTH_TIMEOUT_MS = 8_000;
+export const CN_PAYMENT_CREATE_TIMEOUT_MS = 15_000;
+
 const createOrderInput = z.object({
   plan: z.enum(['basic', 'pro']),
   /**
@@ -540,7 +543,11 @@ export const paymentRouter = router({
 
     try {
       const response = await fetch(`${cnUrl.replace(/\/$/, '')}/healthz`, {
-        signal: AbortSignal.timeout(2500),
+        // The gateway is in Aliyun and its health response also checks the
+        // settlement bridge back to this service. Give that cross-region
+        // round-trip the same budget as order creation so a transient network
+        // delay does not hide otherwise healthy payment methods from the SPA.
+        signal: AbortSignal.timeout(CN_PAYMENT_HEALTH_TIMEOUT_MS),
       });
       if (!response.ok) return unavailable;
       const health = (await response.json()) as {
@@ -662,7 +669,10 @@ export const paymentRouter = router({
               userId: userExternalId,
               purchase,
             }),
-            signal: AbortSignal.timeout(8000),
+            // The Aliyun gateway may spend up to 10 seconds resolving the
+            // signed Alipay gateway URL. Keep the caller's budget larger so a
+            // successful checkout is not abandoned while it is being created.
+            signal: AbortSignal.timeout(CN_PAYMENT_CREATE_TIMEOUT_MS),
           });
         } catch (error) {
           ctx.logger.warn(

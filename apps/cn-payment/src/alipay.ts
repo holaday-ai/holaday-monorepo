@@ -45,6 +45,10 @@ function isOfficialAlipayHost(hostname: string): boolean {
   return hostname === 'alipay.com' || hostname.endsWith('.alipay.com');
 }
 
+function isRedirectStatus(status: number): boolean {
+  return status === 301 || status === 302 || status === 303 || status === 307 || status === 308;
+}
+
 /**
  * Resolve the API gateway URL server-side to the browser-facing Alipay
  * checkout. Some client DNS resolvers cannot reach openapi.alipay.com even
@@ -60,7 +64,10 @@ export async function resolveAlipayCheckoutUrl(
   if (
     gatewayUrl.protocol !== 'https:' ||
     gatewayUrl.hostname !== ALIPAY_PRODUCTION_GATEWAY_HOST ||
-    gatewayUrl.pathname !== '/gateway.do'
+    gatewayUrl.pathname !== '/gateway.do' ||
+    gatewayUrl.username !== '' ||
+    gatewayUrl.password !== '' ||
+    gatewayUrl.port !== ''
   ) {
     throw new Error('alipay: invalid signed gateway URL');
   }
@@ -69,6 +76,9 @@ export async function resolveAlipayCheckoutUrl(
     redirect: 'manual',
     signal: AbortSignal.timeout(ALIPAY_CHECKOUT_RESOLVE_TIMEOUT_MS),
   });
+  if (!isRedirectStatus(response.status)) {
+    throw new Error('alipay: checkout redirect unavailable');
+  }
   const location = response.headers.get('location');
   if (!location) {
     throw new Error('alipay: checkout redirect unavailable');
@@ -78,7 +88,10 @@ export async function resolveAlipayCheckoutUrl(
   if (
     checkoutUrl.protocol !== 'https:' ||
     !isOfficialAlipayHost(checkoutUrl.hostname) ||
-    checkoutUrl.hostname === ALIPAY_PRODUCTION_GATEWAY_HOST
+    checkoutUrl.hostname === ALIPAY_PRODUCTION_GATEWAY_HOST ||
+    checkoutUrl.username !== '' ||
+    checkoutUrl.password !== '' ||
+    checkoutUrl.port !== ''
   ) {
     throw new Error('alipay: invalid checkout redirect');
   }
