@@ -62,6 +62,15 @@ fake_payload() {
       minute_one="2026-07-30 14:59:00"
       minute_two="2026-07-30 15:00:00"
       ;;
+    cross_minute_clock)
+      quote_time="2026-07-31 10:06:00"
+      quote_fetched="2026-07-31T02:05:30+00:00"
+      minute_fetched="2026-07-31T02:05:30+00:00"
+      gainers_fetched="2026-07-31T02:05:30+00:00"
+      amount_fetched="2026-07-31T02:05:30+00:00"
+      minute_one="2026-07-31 10:05:00"
+      minute_two="2026-07-31 10:06:00"
+      ;;
     lunch_break)
       quote_time="2026-07-31 11:30:00"
       quote_fetched="2026-07-31T04:14:30+00:00"
@@ -164,7 +173,7 @@ fake_payload() {
       ;;
     */trading-day/*)
       printf '{"data":[{"date":"%s","is_trading_day":%s}],"count":1,"source":"akshare:tool_trade_date_hist_sina","fetched_at":"2026-07-31T02:04:30+00:00"}\n' \
-        "${AKSHARE_SMOKE_NOW:0:10}" "$trading_day"
+        "${url##*/}" "$trading_day"
       ;;
     */quote/601958)
       printf '{"data":[{"代码":"601958","最新价":5.86,"行情时间":"%s"}],"count":1,"source":"%s","fetched_at":"%s"}\n' \
@@ -190,6 +199,17 @@ if [[ "$(basename "$0")" == "curl" ]]; then
   exit
 fi
 
+if [[ "$(basename "$0")" == "date" ]]; then
+  state_file="${SMOKE_TEST_DATE_STATE:?}"
+  if [[ -f "$state_file" ]]; then
+    printf '%s\n' '2026-07-31T10:06:00+0800'
+  else
+    : >"$state_file"
+    printf '%s\n' '2026-07-31T10:05:00+0800'
+  fi
+  exit
+fi
+
 fail() {
   echo "FAIL: $*" >&2
   exit 1
@@ -198,6 +218,7 @@ fail() {
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 ln -s "$TEST_SCRIPT" "$TMP_DIR/curl"
+ln -s "$TEST_SCRIPT" "$TMP_DIR/date"
 
 run_smoke() {
   local scenario="$1"
@@ -209,6 +230,20 @@ run_smoke() {
     export AKSHARE_SMOKE_REQUIRE_INTRADAY=auto
     export AKSHARE_SMOKE_MAX_FETCH_AGE_SECONDS=120
     export AKSHARE_SMOKE_MAX_MARKET_LAG_SECONDS=300
+    bash "$SMOKE_SCRIPT"
+  ) 2>&1
+}
+
+run_smoke_auto_clock() {
+  (
+    export PATH="$TMP_DIR:$PATH"
+    export SMOKE_TEST_SCENARIO=cross_minute_clock
+    export SMOKE_TEST_DATE_STATE="$TMP_DIR/date-state"
+    export AKSHARE_SMOKE_REQUIRE_INTRADAY=auto
+    export AKSHARE_SMOKE_MAX_FETCH_AGE_SECONDS=120
+    export AKSHARE_SMOKE_MAX_MARKET_LAG_SECONDS=300
+    rm -f "$SMOKE_TEST_DATE_STATE"
+    unset AKSHARE_SMOKE_NOW
     bash "$SMOKE_SCRIPT"
   ) 2>&1
 }
@@ -250,8 +285,18 @@ assert_fails_with() {
   }
 }
 
+assert_auto_clock_passes() {
+  local output
+  if ! output="$(run_smoke_auto_clock)"; then
+    echo "$output" >&2
+    fail "cross-minute live clock should pass"
+  fi
+  grep -Fq 'akshare-mcp smoke OK' <<<"$output" || fail "auto clock did not report success"
+}
+
 assert_passes open_session '2026-07-31T10:05:00+08:00' active
 assert_passes open_session '2026-07-31T10:05:00+0800' active
+assert_auto_clock_passes
 assert_fails_with future_minute '2026-07-31T10:05:00+08:00' 'future minute point'
 assert_fails_with future_weekend '2026-08-02T10:05:00+08:00' 'future minute point'
 assert_fails_with stale_quote_fetch '2026-07-31T10:05:00+08:00' 'quote fetched_at is stale'

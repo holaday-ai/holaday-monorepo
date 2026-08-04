@@ -55,6 +55,12 @@ if ! curl_json_to_file '/intraday/601958' 20 "$TMP_DIR/intraday.json"; then
   : >"$TMP_DIR/intraday.json"
 fi
 
+# Live requests can cross a minute boundary. Refresh the evaluation clock after
+# every response has arrived so a new real minute is not mislabeled as future.
+if [[ -z "${AKSHARE_SMOKE_NOW:-}" ]]; then
+  NOW_SHANGHAI="$(TZ=Asia/Shanghai date +%Y-%m-%dT%H:%M:%S%z)"
+fi
+
 python3 - \
   "$NOW_SHANGHAI" \
   "$REQUIRE_INTRADAY" \
