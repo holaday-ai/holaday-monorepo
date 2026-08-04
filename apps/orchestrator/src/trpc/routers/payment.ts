@@ -529,13 +529,33 @@ export const paymentRouter = router({
   //
   // All three procs gracefully no-op when the gateway URL or
   // shared secret aren't configured (CN_PAYMENT_URL /
-  // INTERNAL_SHARED_SECRET unset). cnOptions.enabled drives the
-  // SPA's "show 微信/支付宝 buttons or not" decision; mirrors the
-  // existing payment.options shape for PayPal.
+  // INTERNAL_SHARED_SECRET unset). cnOptions checks the live
+  // gateway so the SPA only advertises providers that are ready.
   // ----------------------------------------------------------------
-  cnOptions: publicProcedure.query(() => ({
-    enabled: Boolean(process.env.CN_PAYMENT_URL && process.env.INTERNAL_SHARED_SECRET),
-  })),
+  cnOptions: publicProcedure.query(async () => {
+    const cnUrl = process.env.CN_PAYMENT_URL;
+    const secret = process.env.INTERNAL_SHARED_SECRET;
+    const unavailable = { enabled: false, wechat: false, alipay: false };
+    if (!cnUrl || !secret) return unavailable;
+
+    try {
+      const response = await fetch(`${cnUrl.replace(/\/$/, '')}/healthz`, {
+        signal: AbortSignal.timeout(2500),
+      });
+      if (!response.ok) return unavailable;
+      const health = (await response.json()) as {
+        status?: unknown;
+        providers?: { wechat?: unknown; alipay?: unknown };
+        bridge?: unknown;
+      };
+      if (health.status !== 'ok' || health.bridge !== 'ready') return unavailable;
+      const wechat = health.providers?.wechat === 'ready';
+      const alipay = health.providers?.alipay === 'ready';
+      return { enabled: wechat || alipay, wechat, alipay };
+    } catch {
+      return unavailable;
+    }
+  }),
   createCnOrder: protectedProcedure
     .input(
       z.object({
@@ -629,18 +649,31 @@ export const paymentRouter = router({
                 kind: 'addon' as const,
                 packId: input.purchase.packId,
               };
-        const response = await fetch(`${cnUrl.replace(/\/$/, '')}/payment/create`, {
-          method: 'POST',
-          headers: {
-            'content-type': 'application/json',
-            'x-internal-secret': secret,
-          },
-          body: JSON.stringify({
-            provider: input.provider,
-            userId: userExternalId,
-            purchase,
-          }),
-        });
+        let response: Response;
+        try {
+          response = await fetch(`${cnUrl.replace(/\/$/, '')}/payment/create`, {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              'x-internal-secret': secret,
+            },
+            body: JSON.stringify({
+              provider: input.provider,
+              userId: userExternalId,
+              purchase,
+            }),
+            signal: AbortSignal.timeout(8000),
+          });
+        } catch (error) {
+          ctx.logger.warn(
+            { error: error instanceof Error ? error.message : String(error) },
+            'cn-payment: create call could not be completed',
+          );
+          throw new TRPCError({
+            code: 'INTERNAL_SERVER_ERROR',
+            message: '支付服务暂时不可用，请稍后重试',
+          });
+        }
         if (!response.ok) {
           const body = await response.text();
           ctx.logger.warn(
@@ -649,7 +682,7 @@ export const paymentRouter = router({
           );
           throw new TRPCError({
             code: 'INTERNAL_SERVER_ERROR',
-            message: `cn-payment ${response.status}: ${body.slice(0, 200)}`,
+            message: '支付服务暂时不可用，请稍后重试',
           });
         }
 

@@ -41,17 +41,21 @@ chmod +x "$HARNESS_DIR/repo/scripts/verify-paypal-production.sh" \
   "$HARNESS_DIR/repo/scripts/ssh-password-auth.sh" \
   "$HARNESS_DIR/bin/ssh"
 
-for result in ready disabled; do
+for result in ready disabled disabled_live; do
   output="$HARNESS_DIR/$result.out"
   PATH="$HARNESS_DIR/bin:$PATH" \
     TEST_SSH_RESULT="$result" \
     VULTR_PASSWORD='unit-secret' \
     "$HARNESS_DIR/repo/scripts/verify-paypal-production.sh" > "$output" 2>&1
-  grep -Fq "PAYPAL_PREFLIGHT=$result" "$output"
+  if [[ "$result" == "disabled_live" ]]; then
+    grep -Fq 'PAYPAL_PREFLIGHT=disabled environment=live' "$output"
+  else
+    grep -Fq "PAYPAL_PREFLIGHT=$result" "$output"
+  fi
   ! grep -Fq 'unit-secret' "$output"
 done
 
-for result in ready_sandbox disabled_live empty error; do
+for result in ready_sandbox empty error; do
   output="$HARNESS_DIR/$result.out"
   if PATH="$HARNESS_DIR/bin:$PATH" \
     TEST_SSH_RESULT="$result" \

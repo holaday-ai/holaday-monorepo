@@ -6,6 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CURRENT_SCRIPT="$SCRIPT_DIR/deploy-current.sh"
 AKSHARE_SCRIPT="$SCRIPT_DIR/deploy-akshare-mcp.sh"
 ORCHESTRATOR_SCRIPT="$SCRIPT_DIR/deploy-orchestrator.sh"
+CN_PAYMENT_SCRIPT="$SCRIPT_DIR/deploy-cn-payment.sh"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -44,8 +45,13 @@ STUB
 #!/usr/bin/env bash
 echo "paypal" >> "$TEST_EVENT_LOG"
 STUB
+  cat > "$harness_dir/repo/scripts/verify-cn-payment-production.sh" <<'STUB'
+#!/usr/bin/env bash
+echo "cn-payment-preflight" >> "$TEST_EVENT_LOG"
+STUB
   chmod +x "$harness_dir/repo/scripts/load-deploy-env.sh" \
     "$harness_dir/repo/scripts/ssh-password-auth.sh" \
+    "$harness_dir/repo/scripts/verify-cn-payment-production.sh" \
     "$harness_dir/repo/scripts/verify-paypal-production.sh"
 }
 
@@ -70,10 +76,21 @@ STUB
   cat > "$harness_dir/repo/scripts/deploy-orchestrator.sh" <<'STUB'
 #!/usr/bin/env bash
 echo "orchestrator" >> "$TEST_EVENT_LOG"
+[[ "${CN_PAYMENT_PREFLIGHT_VERIFIED:-0}" == "1" ]]
 [[ "${PAYPAL_PREFLIGHT_VERIFIED:-0}" == "1" ]]
 exit "${TEST_ORCHESTRATOR_RC:-0}"
 STUB
   chmod +x "$harness_dir/repo/scripts/deploy-orchestrator.sh"
+
+  cat > "$harness_dir/repo/scripts/deploy-cn-payment.sh" <<'STUB'
+#!/usr/bin/env bash
+echo "cn-payment-deploy" >> "$TEST_EVENT_LOG"
+if [[ "${TEST_CN_PAYMENT_RC:-0}" == "0" ]]; then
+  echo "cn-payment-preflight" >> "$TEST_EVENT_LOG"
+fi
+exit "${TEST_CN_PAYMENT_RC:-0}"
+STUB
+  chmod +x "$harness_dir/repo/scripts/deploy-cn-payment.sh"
 
   cat > "$harness_dir/bin/git" <<'STUB'
 #!/usr/bin/env bash
@@ -139,7 +156,7 @@ test_deploy_current_preflights_before_akshare() {
     fail "deploy-current orchestrator harness should complete"
   fi
 
-  assert_event_order "$event_log" capture-head preflight paypal akshare orchestrator
+  assert_event_order "$event_log" capture-head preflight paypal akshare orchestrator cn-payment-deploy cn-payment-preflight
   ! grep -Fq "unit-secret" "$output" || fail "deploy-current must not print credentials"
 
   : > "$event_log"
@@ -202,6 +219,31 @@ test_combined_orchestrator_failure_rolls_back_akshare() {
       || fail "combined deploy must surface AKShare rollback failure"
   fi
   ! grep -Fq "unit-secret" "$output" || fail "combined rollback must not print credentials"
+  rm -rf "$harness_dir"
+}
+
+test_cn_payment_deploy_failure_stops_before_preflight() {
+  local harness_dir event_log output rc
+  harness_dir="$(mktemp -d)"
+  event_log="$harness_dir/events"
+  output="$harness_dir/output"
+  : > "$event_log"
+  write_deploy_current_harness "$harness_dir"
+
+  set +e
+  PATH="$harness_dir/bin:$PATH" \
+    TEST_EVENT_LOG="$event_log" \
+    TEST_CN_PAYMENT_RC=23 \
+    VULTR_PASSWORD="unit-secret" \
+    BRANCH="codex/release-candidate" \
+    "$harness_dir/repo/scripts/deploy-current.sh" orchestrator > "$output" 2>&1
+  rc=$?
+  set -e
+
+  (( rc == 23 )) || fail "CN payment deploy failure exit: got $rc, want 23"
+  assert_event_order "$event_log" capture-head preflight paypal akshare orchestrator cn-payment-deploy
+  ! grep -Fxq "cn-payment-preflight" "$event_log" \
+    || fail "CN payment preflight must not run after its deploy failed"
   rm -rf "$harness_dir"
 }
 
@@ -348,6 +390,7 @@ test_akshare_rollback_only_restores_without_deploying() {
 test_deploy_current_preflights_before_akshare
 test_combined_orchestrator_failure_rolls_back_akshare 0 7
 test_combined_orchestrator_failure_rolls_back_akshare 29 2
+test_cn_payment_deploy_failure_stops_before_preflight
 test_akshare_rollback_only_restores_without_deploying
 test_akshare_failure_restores_live_head install
 test_akshare_failure_restores_live_head smoke
@@ -367,5 +410,8 @@ grep -Fq 'REMOTE_START_HELPER' "$ORCHESTRATOR_SCRIPT" \
   || fail "deploy must stage the direct Node entrypoint outside the checkout"
 grep -Fq 'ORCHESTRATOR_START_SCRIPT=' "$ORCHESTRATOR_SCRIPT" \
   || fail "runtime restart must use the staged entrypoint during deploy and rollback"
+grep -Fq 'deploy-cn-payment.sh' "$CURRENT_SCRIPT" \
+  || fail "combined deploy must publish the CN gateway before its production preflight"
+[[ -f "$CN_PAYMENT_SCRIPT" ]] || fail "CN payment deploy script is missing"
 
 echo "PASS: combined deploy preserves the pre-release rollback target"

@@ -4,6 +4,7 @@ import test from 'node:test';
 import { verifyPayPalProduction } from './paypal-production-preflight.mjs';
 
 const completeEnv = {
+  PAYPAL_ENABLED: 'true',
   PAYPAL_ENV: 'live',
   PAYPAL_CLIENT_ID: 'client-id',
   PAYPAL_CLIENT_SECRET: 'client-secret',
@@ -22,15 +23,29 @@ function response(status, payload) {
 
 test('passes when PayPal is completely disabled', async () => {
   let requested = false;
+  const result = await verifyPayPalProduction({ PAYPAL_ENV: 'sandbox' }, async () => {
+    requested = true;
+    return response(500, {});
+  });
+
+  assert.deepEqual(result, { status: 'disabled', environment: 'sandbox' });
+  assert.equal(requested, false);
+});
+
+test('honours an explicit disable switch even when legacy live credentials remain', async () => {
+  let requested = false;
   const result = await verifyPayPalProduction(
-    { PAYPAL_ENV: 'sandbox' },
+    {
+      ...completeEnv,
+      PAYPAL_ENABLED: 'false',
+    },
     async () => {
       requested = true;
       return response(500, {});
     },
   );
 
-  assert.deepEqual(result, { status: 'disabled', environment: 'sandbox' });
+  assert.deepEqual(result, { status: 'disabled', environment: 'live' });
   assert.equal(requested, false);
 });
 
@@ -38,6 +53,7 @@ test('rejects partial live configuration before making a request', async () => {
   await assert.rejects(
     verifyPayPalProduction(
       {
+        PAYPAL_ENABLED: 'true',
         PAYPAL_ENV: 'live',
         PAYPAL_CLIENT_ID: 'client-id',
         PAYPAL_CLIENT_SECRET: 'client-secret',

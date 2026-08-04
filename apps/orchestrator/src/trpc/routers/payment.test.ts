@@ -481,6 +481,10 @@ describe('CN first-month checkout reservation', () => {
       outTradeNo: 'pay_cn_new',
       codeUrl: 'weixin://wxpay/new',
     });
+    expect(fetchSpy).toHaveBeenCalledWith(
+      'https://cn-pay.test/payment/create',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
     expect(inserted).toHaveLength(1);
     expect(inserted[0]).toMatchObject({
       userExternalId: 'usr_test',
@@ -549,6 +553,24 @@ describe('CN first-month checkout reservation', () => {
     ).resolves.toEqual(checkout);
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(inserted).toHaveLength(0);
+  });
+
+  it('does not expose gateway diagnostics to the checkout UI', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('private provider diagnostic', { status: 503 })),
+    );
+    const { ctx } = makeCreateCtx({});
+
+    await expect(
+      paymentRouter.createCaller(ctx).createCnOrder({
+        provider: 'wechat',
+        purchase: { kind: 'subscription', planId: 'pro', cycle: 'monthly' },
+      }),
+    ).rejects.toMatchObject({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: '支付服务暂时不可用，请稍后重试',
+    });
   });
 });
 
@@ -695,5 +717,87 @@ describe('cnStatus — tenant isolation', () => {
     await expect(
       paymentRouter.createCaller(ctx).cnStatus({ outTradeNo: 'pay_cn_other' }),
     ).resolves.toEqual({ status: 'pending' });
+  });
+});
+
+describe('cnOptions — production provider readiness', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it('fails closed when the gateway is not configured', async () => {
+    vi.stubEnv('CN_PAYMENT_URL', '');
+    vi.stubEnv('INTERNAL_SHARED_SECRET', '');
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+
+    await expect(
+      paymentRouter
+        .createCaller({} as Parameters<typeof paymentRouter.createCaller>[0])
+        .cnOptions(),
+    ).resolves.toEqual({ enabled: false, wechat: false, alipay: false });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('returns readiness for each provider from the live gateway health response', async () => {
+    vi.stubEnv('CN_PAYMENT_URL', 'https://hd-pay.orangebench.tech/');
+    vi.stubEnv('INTERNAL_SHARED_SECRET', 'configured');
+    const fetchSpy = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        status: 'ok',
+        providers: { wechat: 'ready', alipay: 'unconfigured: missing credentials' },
+        bridge: 'ready',
+      }),
+    }));
+    vi.stubGlobal('fetch', fetchSpy);
+
+    await expect(
+      paymentRouter
+        .createCaller({} as Parameters<typeof paymentRouter.createCaller>[0])
+        .cnOptions(),
+    ).resolves.toEqual({ enabled: true, wechat: true, alipay: false });
+    expect(fetchSpy).toHaveBeenCalledWith(
+      'https://hd-pay.orangebench.tech/healthz',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
+  it('does not advertise payment providers when the settlement bridge is unavailable', async () => {
+    vi.stubEnv('CN_PAYMENT_URL', 'https://hd-pay.orangebench.tech');
+    vi.stubEnv('INTERNAL_SHARED_SECRET', 'configured');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          status: 'ok',
+          providers: { wechat: 'ready', alipay: 'ready' },
+          bridge: 'unavailable: Vultr health rejected',
+        }),
+      })),
+    );
+
+    await expect(
+      paymentRouter
+        .createCaller({} as Parameters<typeof paymentRouter.createCaller>[0])
+        .cnOptions(),
+    ).resolves.toEqual({ enabled: false, wechat: false, alipay: false });
+  });
+
+  it('fails closed when the gateway health request fails', async () => {
+    vi.stubEnv('CN_PAYMENT_URL', 'https://hd-pay.orangebench.tech');
+    vi.stubEnv('INTERNAL_SHARED_SECRET', 'configured');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Promise.reject(new Error('offline'))),
+    );
+
+    await expect(
+      paymentRouter
+        .createCaller({} as Parameters<typeof paymentRouter.createCaller>[0])
+        .cnOptions(),
+    ).resolves.toEqual({ enabled: false, wechat: false, alipay: false });
   });
 });

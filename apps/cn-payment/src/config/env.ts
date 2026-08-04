@@ -13,6 +13,7 @@ const Env = z.object({
   PORT: z.coerce.number().default(4010),
   LOG_LEVEL: z.string().default('info'),
   PUBLIC_ORIGIN: z.string().url().default('https://hd-pay.orangebench.tech'),
+  APP_ORIGIN: z.string().url().default('https://hd-app.orangebench.tech'),
 
   VULTR_INTERNAL_URL: z.string().url(),
   INTERNAL_SHARED_SECRET: z.string().min(16),
@@ -24,12 +25,17 @@ const Env = z.object({
   WX_CERT_PATH: z.string().optional(),
   WX_KEY_PATH: z.string().optional(),
   WX_PLATFORM_CERT_PATH: z.string().optional(),
+  WX_PUBLIC_KEY_ID: z.string().optional(),
+  WX_PUBLIC_KEY_PATH: z.string().optional(),
 
   // Alipay
   ALIPAY_APPID: z.string().optional(),
   ALIPAY_PRIVATE_KEY: z.string().optional(),
   ALIPAY_PUBLIC_KEY: z.string().optional(),
+  ALIPAY_SELLER_ID: z.string().optional(),
   ALIPAY_MODE: z.enum(['sandbox', 'production']).default('production'),
+
+  VULTR_SYNC_TIMEOUT_MS: z.coerce.number().int().positive().max(10_000).default(3_500),
 
   // Phase 12 — Aliyun SMS. All four required for the SMS lane to
   // boot; if any are missing, /api/sms/send returns a typed

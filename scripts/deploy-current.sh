@@ -112,9 +112,15 @@ deploy_spa() {
 
 deploy_orchestrator() {
   echo "→ Deploying orchestrator"
-  PAYPAL_PREFLIGHT_VERIFIED=1 \
+  CN_PAYMENT_PREFLIGHT_VERIFIED=1 \
+    PAYPAL_PREFLIGHT_VERIFIED=1 \
     ORCHESTRATOR_ROLLBACK_HEAD="$RELEASE_ROLLBACK_HEAD" \
     "$ROOT_DIR/scripts/deploy-orchestrator.sh" "$BRANCH"
+}
+
+deploy_cn_payment() {
+  echo "→ Deploying CN payment gateway"
+  "$ROOT_DIR/scripts/deploy-cn-payment.sh"
 }
 
 verify_paypal_preflight() {
@@ -128,7 +134,7 @@ deploy_akshare() {
 }
 
 deploy_services_atomically() {
-  local akshare_rc orchestrator_rc
+  local akshare_rc orchestrator_rc cn_payment_rc
 
   if deploy_akshare; then
     :
@@ -138,21 +144,28 @@ deploy_services_atomically() {
   fi
 
   if deploy_orchestrator; then
-    return 0
+    :
   else
     orchestrator_rc=$?
+    echo "⚠️  Orchestrator deploy failed (exit $orchestrator_rc); restoring AKShare to $RELEASE_ROLLBACK_HEAD" >&2
+    if AKSHARE_ROLLBACK_ONLY=1 \
+      AKSHARE_ROLLBACK_HEAD="$RELEASE_ROLLBACK_HEAD" \
+      "$ROOT_DIR/scripts/deploy-akshare-mcp.sh"; then
+      echo "✅ AKShare restored after Orchestrator deploy failure" >&2
+      return "$orchestrator_rc"
+    fi
+
+    echo "❌ Orchestrator deploy failed and the AKShare combined rollback is incomplete" >&2
+    return 2
   fi
 
-  echo "⚠️  Orchestrator deploy failed (exit $orchestrator_rc); restoring AKShare to $RELEASE_ROLLBACK_HEAD" >&2
-  if AKSHARE_ROLLBACK_ONLY=1 \
-    AKSHARE_ROLLBACK_HEAD="$RELEASE_ROLLBACK_HEAD" \
-    "$ROOT_DIR/scripts/deploy-akshare-mcp.sh"; then
-    echo "✅ AKShare restored after Orchestrator deploy failure" >&2
-    return "$orchestrator_rc"
+  if deploy_cn_payment; then
+    return 0
+  else
+    cn_payment_rc=$?
   fi
-
-  echo "❌ Orchestrator deploy failed and the AKShare combined rollback is incomplete" >&2
-  return 2
+  echo "❌ CN payment gateway deploy failed after Orchestrator activation (exit $cn_payment_rc)" >&2
+  return "$cn_payment_rc"
 }
 
 verify_healthz() {

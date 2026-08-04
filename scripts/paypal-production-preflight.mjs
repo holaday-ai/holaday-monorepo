@@ -30,7 +30,10 @@ function normalizeWebhookUrl(value) {
 function allowedWebhookUrls(env) {
   const configured = env.PAYPAL_ALLOWED_WEBHOOK_URLS;
   const candidates = nonEmpty(configured)
-    ? configured.split(',').map((value) => value.trim()).filter(Boolean)
+    ? configured
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean)
     : DEFAULT_ALLOWED_WEBHOOK_URLS;
   const normalized = candidates.map(normalizeWebhookUrl);
   if (normalized.some((value) => value === null) || normalized.length === 0) {
@@ -39,11 +42,11 @@ function allowedWebhookUrls(env) {
   return new Set(normalized);
 }
 
-export async function verifyPayPalProduction(
-  env = process.env,
-  fetchImpl = globalThis.fetch,
-) {
+export async function verifyPayPalProduction(env = process.env, fetchImpl = globalThis.fetch) {
   const paypalEnv = (env.PAYPAL_ENV || 'sandbox').trim().toLowerCase();
+  if ((env.PAYPAL_ENABLED || '').trim().toLowerCase() !== 'true') {
+    return { status: 'disabled', environment: paypalEnv };
+  }
   const clientId = env.PAYPAL_CLIENT_ID?.trim() || '';
   const clientSecret = env.PAYPAL_CLIENT_SECRET?.trim() || '';
   const webhookId = env.PAYPAL_WEBHOOK_ID?.trim() || '';

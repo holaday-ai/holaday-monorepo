@@ -116,6 +116,7 @@ run_failure_case() {
     TEST_FAIL_PHASE="$fail_phase" \
     TEST_ROLLBACK_RESTART_RC="$rollback_restart_rc" \
     VULTR_PASSWORD="unit-secret" \
+    CN_PAYMENT_PREFLIGHT_VERIFIED=1 \
     PAYPAL_PREFLIGHT_VERIFIED=1 \
     DEPLOY_REMOTE_RETRIES=1 \
     DEPLOY_REMOTE_RETRY_SLEEP=0 \

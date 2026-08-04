@@ -57,9 +57,37 @@ export interface VultrSmsLoginResult {
 }
 
 export class VultrSync {
-  constructor(private readonly env: Env, private readonly logger: Logger) {}
+  constructor(
+    private readonly env: Env,
+    private readonly logger: Logger,
+  ) {}
 
-  async confirm(payload: VultrConfirmPayload): Promise<{ ok: true } | { ok: false; reason: string }> {
+  async health(): Promise<{ ok: true } | { ok: false; reason: string }> {
+    const base = deriveBase(this.env.VULTR_INTERNAL_URL);
+    const url = `${base}/api/internal/payment/health`;
+    try {
+      const res = await fetch(url, {
+        headers: { 'x-internal-secret': this.env.INTERNAL_SHARED_SECRET },
+        signal: AbortSignal.timeout(this.env.VULTR_SYNC_TIMEOUT_MS),
+      });
+      if (!res.ok) {
+        return { ok: false, reason: `vultr ${res.status}` };
+      }
+      const body = (await res.json()) as { status?: unknown; paymentBridge?: unknown };
+      if (body.status !== 'ok' || body.paymentBridge !== 'ready') {
+        return { ok: false, reason: 'unexpected bridge health response' };
+      }
+      return { ok: true };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.error({ err: message }, 'sync: Vultr health check threw');
+      return { ok: false, reason: message };
+    }
+  }
+
+  async confirm(
+    payload: VultrConfirmPayload,
+  ): Promise<{ ok: true } | { ok: false; reason: string }> {
     const url = this.env.VULTR_INTERNAL_URL;
     try {
       const res = await fetch(url, {
@@ -69,6 +97,7 @@ export class VultrSync {
           'x-internal-secret': this.env.INTERNAL_SHARED_SECRET,
         },
         body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(this.env.VULTR_SYNC_TIMEOUT_MS),
       });
       if (!res.ok) {
         const body = await res.text();
@@ -100,6 +129,7 @@ export class VultrSync {
           'x-internal-secret': this.env.INTERNAL_SHARED_SECRET,
         },
         body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(this.env.VULTR_SYNC_TIMEOUT_MS),
       });
       if (!res.ok) {
         const body = await res.text();
@@ -131,10 +161,7 @@ export class VultrSync {
    */
   async smsLogin(
     phone: string,
-  ): Promise<
-    | { ok: true; result: VultrSmsLoginResult }
-    | { ok: false; reason: string }
-  > {
+  ): Promise<{ ok: true; result: VultrSmsLoginResult } | { ok: false; reason: string }> {
     const base = deriveBase(this.env.VULTR_INTERNAL_URL);
     const url = `${base}/api/internal/auth/sms-login`;
     try {
@@ -145,6 +172,7 @@ export class VultrSync {
           'x-internal-secret': this.env.INTERNAL_SHARED_SECRET,
         },
         body: JSON.stringify({ phone }),
+        signal: AbortSignal.timeout(this.env.VULTR_SYNC_TIMEOUT_MS),
       });
       const body = await res.text();
       if (!res.ok) {

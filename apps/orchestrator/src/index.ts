@@ -281,15 +281,22 @@ async function main() {
   // Constructs only when both client id + secret are present; null
   // otherwise so the payment router can return PRECONDITION_FAILED
   // and the SPA hides the upgrade button gracefully.
-  const paypalAdapter = createPayPalAdapter({
-    clientId: process.env.PAYPAL_CLIENT_ID ?? null,
-    clientSecret: process.env.PAYPAL_CLIENT_SECRET ?? null,
-    env: process.env.PAYPAL_ENV === 'live' ? 'live' : 'sandbox',
-  });
+  const paypalEnabled = process.env.PAYPAL_ENABLED?.trim().toLowerCase() === 'true';
+  const paypalAdapter = paypalEnabled
+    ? createPayPalAdapter({
+        clientId: process.env.PAYPAL_CLIENT_ID ?? null,
+        clientSecret: process.env.PAYPAL_CLIENT_SECRET ?? null,
+        env: process.env.PAYPAL_ENV === 'live' ? 'live' : 'sandbox',
+      })
+    : null;
   if (paypalAdapter) {
     logger.info({ env: paypalAdapter.env }, 'PayPal adapter ready');
   } else {
-    logger.info('PayPal adapter disabled — PAYPAL_CLIENT_ID/_SECRET not set');
+    logger.info(
+      paypalEnabled
+        ? 'PayPal adapter disabled — PAYPAL_CLIENT_ID/_SECRET not set'
+        : 'PayPal adapter disabled — PAYPAL_ENABLED=false',
+    );
   }
 
   // Phase 24 RC follow-up — Firecrawl adapter for the new 'scrape'

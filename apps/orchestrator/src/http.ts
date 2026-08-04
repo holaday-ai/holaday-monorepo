@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { createExpressMiddleware } from '@trpc/server/adapters/express';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import express from 'express';
 import multer from 'multer';
 import { pinoHttp } from 'pino-http';
@@ -54,7 +54,6 @@ import {
   getAddonPackPriceCents,
   getPlanPriceCents,
   isAddonPackId,
-  newExternalId,
   type AddonPackId,
   type BillingCycle,
 } from '@holaday/shared-types';
@@ -1170,6 +1169,19 @@ export function createHttpApp(deps: HttpAppDeps) {
     }
   });
 
+  app.get('/internal/payment/health', (req, res) => {
+    const expectedSecret = process.env.INTERNAL_SHARED_SECRET;
+    if (!expectedSecret) {
+      res.status(503).json({ error: 'internal_secret_not_configured' });
+      return;
+    }
+    if (req.headers['x-internal-secret'] !== expectedSecret) {
+      res.status(401).json({ error: 'unauthorized' });
+      return;
+    }
+    res.status(200).json({ status: 'ok', paymentBridge: 'ready' });
+  });
+
   app.post('/internal/payment/confirm', async (req, res) => {
     const expectedSecret = process.env.INTERNAL_SHARED_SECRET;
     if (!expectedSecret) {
@@ -1257,7 +1269,6 @@ export function createHttpApp(deps: HttpAppDeps) {
         return;
       }
 
-      const externalId = newExternalId('payment');
       const planId = body.planId as 'basic' | 'pro';
       const cycle = body.cycle as BillingCycle;
       const packId = body.addonPackId;
@@ -1343,43 +1354,9 @@ export function createHttpApp(deps: HttpAppDeps) {
               };
 
         if (!row) {
-          await tx
-            .insert(payments)
-            .values({
-              externalId,
-              userExternalId: user.externalId,
-              provider,
-              providerOrderId: outTradeNo,
-              providerCaptureId: transactionId,
-              plan: paymentPlan,
-              amountCents,
-              currency: 'CNY',
-              status: 'pending',
-              kind,
-              metadata: callbackMetadata,
-            })
-            .onDuplicateKeyUpdate({
-              set: { externalId: sql`external_id` },
-            });
-          const [inserted] = await tx
-            .select()
-            .from(payments)
-            .where(
-              and(
-                eq(payments.provider, provider),
-                eq(payments.providerCaptureId, transactionId),
-              ),
-            )
-            .limit(1)
-            .for('update');
-          if (!inserted) {
-            throw new Error('payments row vanished after upsert');
-          }
-          if (inserted.externalId !== externalId && inserted.status === 'completed') {
-            return { kind: 'deduped' as const, row: inserted };
-          }
-          row = inserted;
-        } else if (!row.providerCaptureId) {
+          throw new Error('cn payment callback has no pending Holaday order');
+        }
+        if (!row.providerCaptureId) {
           await tx
             .update(payments)
             .set({

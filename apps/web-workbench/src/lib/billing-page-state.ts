@@ -11,6 +11,14 @@ export interface BillingLoadErrorCopy {
   readonly body: string;
 }
 
+export type BillingPaymentReturnStatus = 'checking' | 'completed' | 'failed' | 'timeout';
+
+export interface BillingPaymentReturnCopy {
+  readonly tone: 'neutral' | 'success' | 'warning';
+  readonly title: string;
+  readonly body: string;
+}
+
 export function normalizeBillingSnapshot(value: unknown): BillingSnapshot {
   const raw = isRecord(value) ? value : {};
   return {
@@ -77,6 +85,42 @@ export function billingLoadErrorCopy(message: string | null | undefined): Billin
   return {
     title: '订阅信息暂时无法加载',
     body,
+  };
+}
+
+export function normalizePaymentReturnOrder(value: string | null | undefined): string | null {
+  const order = typeof value === 'string' ? value.trim() : '';
+  return /^[A-Za-z0-9_-]{1,64}$/.test(order) ? order : null;
+}
+
+export function billingPaymentReturnCopy(
+  status: BillingPaymentReturnStatus,
+): BillingPaymentReturnCopy {
+  if (status === 'completed') {
+    return {
+      tone: 'success',
+      title: '支付已到账',
+      body: '套餐与额度已更新，可以继续使用。',
+    };
+  }
+  if (status === 'failed') {
+    return {
+      tone: 'warning',
+      title: '支付未完成',
+      body: '订单已失败或取消，没有扣款时可重新发起支付。',
+    };
+  }
+  if (status === 'timeout') {
+    return {
+      tone: 'warning',
+      title: '支付结果仍在确认',
+      body: '订单可能仍在处理中，请稍后刷新；请勿重复支付同一订单。',
+    };
+  }
+  return {
+    tone: 'neutral',
+    title: '正在确认支付结果',
+    body: '支付宝回调可能稍有延迟，此页会自动更新。',
   };
 }
 

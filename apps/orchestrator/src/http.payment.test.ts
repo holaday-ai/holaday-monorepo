@@ -155,6 +155,18 @@ async function postInternalConfirm(body: Record<string, unknown>) {
   });
 }
 
+async function getInternalPaymentHealth(secret = 'test-payment-secret') {
+  const app = createHttpApp({ planner: {} as never });
+  const activeServer = createServer(app);
+  server = activeServer;
+  await new Promise<void>((resolve) => activeServer.listen(0, '127.0.0.1', resolve));
+  const address = activeServer.address();
+  if (!address || typeof address === 'string') throw new Error('server has no TCP address');
+  return fetch(`http://127.0.0.1:${address.port}/internal/payment/health`, {
+    headers: { 'x-internal-secret': secret },
+  });
+}
+
 async function postPaypalWebhook(
   body: Record<string, unknown>,
   paypalAdapter: {
@@ -188,6 +200,23 @@ const firstMonthConfirm = {
   kind: 'subscription',
   isFirstMonth: true,
 };
+
+function seedPendingCnPayment() {
+  paymentRows.push({
+    id: 1,
+    externalId: 'pay_cn_first',
+    userExternalId: 'usr_cn_test',
+    provider: 'wechat',
+    providerOrderId: 'pay_cn_first',
+    providerCaptureId: null,
+    status: 'pending',
+    kind: 'subscription',
+    plan: 'pro',
+    amountCents: 4900,
+    currency: 'CNY',
+    metadata: { cycle: 'monthly', firstMonth: true },
+  });
+}
 
 function seedPendingPaypalPayment() {
   paymentRows.push({
@@ -229,6 +258,7 @@ describe('internal payment confirmation', () => {
   });
 
   it('consumes a verified CN first-month flag and grants the promised bonus', async () => {
+    seedPendingCnPayment();
     const response = await postInternalConfirm(firstMonthConfirm);
 
     expect(response.status).toBe(200);
@@ -240,6 +270,7 @@ describe('internal payment confirmation', () => {
   });
 
   it('does not persist completed or upgrade the user when the CN bonus grant fails', async () => {
+    seedPendingCnPayment();
     grantFirstMonthBonusSpy.mockRejectedValueOnce(new Error('quota unavailable'));
 
     const response = await postInternalConfirm(firstMonthConfirm);
@@ -247,6 +278,44 @@ describe('internal payment confirmation', () => {
     expect(response.status).toBe(500);
     expect(paymentRows.some((row) => row.status === 'completed')).toBe(false);
     expect(userState.plan).toBe('free');
+  });
+
+  it('does not grant entitlement for a callback without a pending Holaday order', async () => {
+    const response = await postInternalConfirm(firstMonthConfirm);
+
+    expect(response.status).toBe(500);
+    expect(paymentRows).toHaveLength(0);
+    expect(userState.plan).toBe('free');
+    expect(grantFirstMonthBonusSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('internal payment bridge health', () => {
+  beforeEach(() => {
+    process.env.INTERNAL_SHARED_SECRET = 'test-payment-secret';
+  });
+
+  afterEach(async () => {
+    Reflect.deleteProperty(process.env, 'INTERNAL_SHARED_SECRET');
+    await new Promise<void>((resolve, reject) => {
+      if (!server) return resolve();
+      server.close((error) => (error ? reject(error) : resolve()));
+    });
+    server = null;
+  });
+
+  it('returns the authenticated readiness contract', async () => {
+    const response = await getInternalPaymentHealth();
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ status: 'ok', paymentBridge: 'ready' });
+  });
+
+  it('does not expose readiness without the shared secret', async () => {
+    const response = await getInternalPaymentHealth('wrong-secret');
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({ error: 'unauthorized' });
   });
 });
 
@@ -273,7 +342,7 @@ describe('PayPal webhook verification', () => {
   });
 
   it('fails closed in production when PAYPAL_WEBHOOK_ID is missing', async () => {
-    delete process.env.PAYPAL_WEBHOOK_ID;
+    Reflect.deleteProperty(process.env, 'PAYPAL_WEBHOOK_ID');
     const verifyWebhookSignature = vi.fn(async () => true);
 
     const response = await postPaypalWebhook(

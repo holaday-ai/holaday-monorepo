@@ -3,11 +3,13 @@ import {
   billingLoadErrorCopy,
   billingLoadErrorMessage,
   billingPageSummary,
+  billingPaymentReturnCopy,
   billingPlanActionLabel,
   billingPlanLabel,
   cancellationMailBody,
   isPaidBillingPlan,
   normalizeBillingSnapshot,
+  normalizePaymentReturnOrder,
   planValidUntilText,
   renewalMethodText,
 } from './billing-page-state';
@@ -66,10 +68,10 @@ describe('billing page state helpers', () => {
 
   it('summarizes loading, failed, and loaded subscription states', () => {
     expect(billingPageSummary({ loading: true, error: null, plan: null })).toBe('订阅加载中…');
-    expect(billingPageSummary({ loading: false, error: 'offline', plan: null })).toBe('订阅信息暂时无法加载');
-    expect(billingPageSummary({ loading: false, error: null, plan: 'pro' })).toBe(
-      'Pro · 当前订阅',
+    expect(billingPageSummary({ loading: false, error: 'offline', plan: null })).toBe(
+      '订阅信息暂时无法加载',
     );
+    expect(billingPageSummary({ loading: false, error: null, plan: 'pro' })).toBe('Pro · 当前订阅');
   });
 
   it('includes the current plan in cancellation support copy', () => {
@@ -93,5 +95,23 @@ describe('billing page state helpers', () => {
       title: '订阅信息暂时无法加载',
       body: '请稍后重试，或刷新页面后再打开账单。',
     });
+  });
+
+  it('accepts only a bounded payment order id from the return URL', () => {
+    expect(normalizePaymentReturnOrder('  pay_abc-123  ')).toBe('pay_abc-123');
+    expect(normalizePaymentReturnOrder('')).toBeNull();
+    expect(normalizePaymentReturnOrder('../pay_abc')).toBeNull();
+    expect(normalizePaymentReturnOrder('x'.repeat(65))).toBeNull();
+  });
+
+  it('uses honest settlement copy while an Alipay return is being confirmed', () => {
+    expect(billingPaymentReturnCopy('checking')).toEqual({
+      tone: 'neutral',
+      title: '正在确认支付结果',
+      body: '支付宝回调可能稍有延迟，此页会自动更新。',
+    });
+    expect(billingPaymentReturnCopy('completed').title).toBe('支付已到账');
+    expect(billingPaymentReturnCopy('failed').title).toBe('支付未完成');
+    expect(billingPaymentReturnCopy('timeout').title).toBe('支付结果仍在确认');
   });
 });

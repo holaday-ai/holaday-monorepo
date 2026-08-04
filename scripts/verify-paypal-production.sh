@@ -35,7 +35,7 @@ if ! PREFLIGHT_OUTPUT=$("${SSH_PASSWORD_PREFIX[@]}" ssh \
 fi
 
 printf '%s\n' "$PREFLIGHT_OUTPUT"
-if ! grep -Eq '^(PAYPAL_PREFLIGHT=ready environment=live|PAYPAL_PREFLIGHT=disabled environment=sandbox)$' <<< "$PREFLIGHT_OUTPUT"; then
+if ! grep -Eq '^(PAYPAL_PREFLIGHT=ready environment=live|PAYPAL_PREFLIGHT=disabled environment=(sandbox|live))$' <<< "$PREFLIGHT_OUTPUT"; then
   echo "PayPal production preflight failed: verifier returned no readiness marker" >&2
   exit 1
 fi
