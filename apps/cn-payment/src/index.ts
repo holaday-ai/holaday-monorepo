@@ -14,24 +14,24 @@
  * on the Aliyun box that already exists for that purpose.
  */
 
-import express from 'express';
-import { pinoHttp } from 'pino-http';
 import {
-  newExternalId,
-  getPlanPriceCents,
   ADDON_PACK_CATALOGUE,
-  getAddonPackPriceCents,
+  type BillingCycle,
   HOLA_CREDIT_CNY_CENTS,
   type PlanId,
-  type BillingCycle,
+  getAddonPackPriceCents,
+  getPlanPriceCents,
+  newExternalId,
 } from '@holaday/shared-types';
+import express from 'express';
+import { pinoHttp } from 'pino-http';
 import { z } from 'zod';
+import { AlipayAdapter } from './alipay.js';
 import { loadEnv } from './config/env.js';
 import { logger } from './config/logger.js';
-import { WechatPayAdapter } from './wechat-pay.js';
-import { AlipayAdapter } from './alipay.js';
 import { SmsAdapter } from './sms.js';
 import { VultrSync } from './sync-to-vultr.js';
+import { WechatPayAdapter } from './wechat-pay.js';
 
 const WholeCnyCents = z
   .number()
@@ -159,7 +159,10 @@ async function main(): Promise<void> {
         res.status(400).json({ error: 'unknown_pack' });
         return;
       }
-      amountCents = getAddonPackPriceCents(purchase.packId as keyof typeof ADDON_PACK_CATALOGUE, 'cny');
+      amountCents = getAddonPackPriceCents(
+        purchase.packId as keyof typeof ADDON_PACK_CATALOGUE,
+        'cny',
+      );
       description = `HOLA DAY ${pack.nameZh}`;
       attach = JSON.stringify({
         kind: 'addon' as const,
@@ -169,9 +172,7 @@ async function main(): Promise<void> {
     } else {
       amountCents = purchase.amountCnyCents;
       description =
-        purchase.kind === 'partner_membership'
-          ? 'HOLA DAY 合伙人年费'
-          : 'HOLA DAY 合伙人充值';
+        purchase.kind === 'partner_membership' ? 'HOLA DAY 合伙人年费' : 'HOLA DAY 合伙人充值';
       attach = JSON.stringify({
         kind: purchase.kind,
         userId,
@@ -254,16 +255,29 @@ async function main(): Promise<void> {
     const rawBody = (req.body as string) ?? '';
     try {
       const payload = await wx.verifyAndDecryptNotify(req.headers, rawBody);
-      logger.info({ outTradeNo: payload.outTradeNo, tradeState: payload.tradeState }, 'wx notify: verified');
+      logger.info(
+        { outTradeNo: payload.outTradeNo, tradeState: payload.tradeState },
+        'wx notify: verified',
+      );
       if (payload.tradeState !== 'SUCCESS') {
         res.json({ code: 'SUCCESS', message: 'ack non-success state' });
         return;
       }
-      await handleSuccessfulPayment(sync, 'wechat', payload.outTradeNo, payload.transactionId, payload.amountCents, payload.attach);
+      await handleSuccessfulPayment(
+        sync,
+        'wechat',
+        payload.outTradeNo,
+        payload.transactionId,
+        payload.amountCents,
+        payload.attach,
+      );
       res.json({ code: 'SUCCESS' });
     } catch (err) {
       logger.error(
-        { err: err instanceof Error ? err.message : String(err), bodyPreview: rawBody.slice(0, 200) },
+        {
+          err: err instanceof Error ? err.message : String(err),
+          bodyPreview: rawBody.slice(0, 200),
+        },
         'wx notify: verification or sync failed',
       );
       // Return non-success so WX retries with backoff. Truly malformed
@@ -296,7 +310,14 @@ async function main(): Promise<void> {
         res.send('success');
         return;
       }
-      await handleSuccessfulPayment(sync, 'alipay', payload.outTradeNo, payload.transactionId, payload.amountCents, payload.passback);
+      await handleSuccessfulPayment(
+        sync,
+        'alipay',
+        payload.outTradeNo,
+        payload.transactionId,
+        payload.amountCents,
+        payload.passback,
+      );
       res.send('success');
     } catch (err) {
       logger.error(
@@ -454,6 +475,9 @@ async function handleSuccessfulPayment(
 }
 
 main().catch((err) => {
-  logger.error({ err: err instanceof Error ? err.message : String(err) }, 'cn-payment: boot failed');
+  logger.error(
+    { err: err instanceof Error ? err.message : String(err) },
+    'cn-payment: boot failed',
+  );
   process.exit(1);
 });

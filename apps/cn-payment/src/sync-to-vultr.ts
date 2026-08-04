@@ -57,9 +57,14 @@ export interface VultrSmsLoginResult {
 }
 
 export class VultrSync {
-  constructor(private readonly env: Env, private readonly logger: Logger) {}
+  constructor(
+    private readonly env: Env,
+    private readonly logger: Logger,
+  ) {}
 
-  async confirm(payload: VultrConfirmPayload): Promise<{ ok: true } | { ok: false; reason: string }> {
+  async confirm(
+    payload: VultrConfirmPayload,
+  ): Promise<{ ok: true } | { ok: false; reason: string }> {
     const url = this.env.VULTR_INTERNAL_URL;
     try {
       const res = await fetch(url, {
@@ -131,10 +136,7 @@ export class VultrSync {
    */
   async smsLogin(
     phone: string,
-  ): Promise<
-    | { ok: true; result: VultrSmsLoginResult }
-    | { ok: false; reason: string }
-  > {
+  ): Promise<{ ok: true; result: VultrSmsLoginResult } | { ok: false; reason: string }> {
     const base = deriveBase(this.env.VULTR_INTERNAL_URL);
     const url = `${base}/api/internal/auth/sms-login`;
     try {

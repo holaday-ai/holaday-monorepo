@@ -1,7 +1,7 @@
 import type { Logger } from 'pino';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Env } from './config/env.js';
-import { deriveBase, VultrSync } from './sync-to-vultr.js';
+import { VultrSync, deriveBase } from './sync-to-vultr.js';
 
 function makeEnv(url: string): Env {
   return {
@@ -28,8 +28,12 @@ describe('VultrSync partner bridge', () => {
   });
 
   it('derives the Vultr base from the legacy confirm URL', () => {
-    expect(deriveBase('https://holaday.ai/api/internal/payment/confirm')).toBe('https://holaday.ai');
-    expect(deriveBase('https://holaday.ai/api/internal/payment/confirm?ignored=1')).toBe('https://holaday.ai');
+    expect(deriveBase('https://holaday.ai/api/internal/payment/confirm')).toBe(
+      'https://holaday.ai',
+    );
+    expect(deriveBase('https://holaday.ai/api/internal/payment/confirm?ignored=1')).toBe(
+      'https://holaday.ai',
+    );
     expect(deriveBase('https://holaday.ai')).toBe('https://holaday.ai');
     expect(deriveBase('https://holaday.ai/')).toBe('https://holaday.ai');
   });
@@ -37,7 +41,10 @@ describe('VultrSync partner bridge', () => {
   it('posts partner confirmations to the partner ledger endpoint', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
-    const sync = new VultrSync(makeEnv('https://holaday.ai/api/internal/payment/confirm'), makeLogger());
+    const sync = new VultrSync(
+      makeEnv('https://holaday.ai/api/internal/payment/confirm'),
+      makeLogger(),
+    );
 
     await expect(
       sync.confirmPartner({
