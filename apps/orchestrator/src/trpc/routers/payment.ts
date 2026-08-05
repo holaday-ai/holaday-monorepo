@@ -29,7 +29,7 @@ import {
   newExternalId,
 } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
-import { and, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import type { DB } from '../../db/client.js';
 import { readAffectedRows } from '../../db/mysql-result.js';
@@ -211,6 +211,39 @@ export async function completePaymentInTransaction(
 }
 
 export const paymentRouter = router({
+  history: protectedProcedure.query(async ({ ctx }) => {
+    const rows = await ctx.db
+      .select({
+        externalId: payments.externalId,
+        userExternalId: payments.userExternalId,
+        provider: payments.provider,
+        kind: payments.kind,
+        plan: payments.plan,
+        amountCents: payments.amountCents,
+        currency: payments.currency,
+        status: payments.status,
+        createdAt: payments.createdAt,
+        completedAt: payments.completedAt,
+      })
+      .from(payments)
+      .where(eq(payments.userExternalId, ctx.userId))
+      .orderBy(desc(payments.createdAt))
+      .limit(20);
+
+    return rows
+      .filter((row) => row.userExternalId === ctx.userId)
+      .map((row) => ({
+        orderId: row.externalId,
+        provider: row.provider,
+        kind: row.kind,
+        plan: row.plan,
+        amountCents: row.amountCents,
+        currency: row.currency,
+        status: row.status,
+        createdAt: row.createdAt.toISOString(),
+        completedAt: row.completedAt?.toISOString() ?? null,
+      }));
+  }),
   /**
    * Tells the SPA whether the PayPal lane is wired this deploy. The
    * frontend hides the PayPal button when the answer is false, the

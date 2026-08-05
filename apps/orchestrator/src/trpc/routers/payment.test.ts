@@ -724,6 +724,103 @@ describe('cnStatus — tenant isolation', () => {
   });
 });
 
+describe('history — safe customer payment records', () => {
+  it('returns only the current user records without gateway secrets', async () => {
+    let selectedFields: Record<string, unknown> | undefined;
+    let requestedLimit: number | undefined;
+    const db = {
+      select(fields: Record<string, unknown>) {
+        selectedFields = fields;
+        return {
+          from() {
+            const query = {
+              where() {
+                return query;
+              },
+              orderBy() {
+                return query;
+              },
+              limit(value: number) {
+                requestedLimit = value;
+                return Promise.resolve([
+                  {
+                    externalId: 'pay_own',
+                    userExternalId: 'usr_test',
+                    provider: 'wechat',
+                    kind: 'subscription',
+                    plan: 'basic',
+                    amountCents: 2900,
+                    currency: 'CNY',
+                    status: 'completed',
+                    createdAt: new Date('2026-08-04T15:14:34.852Z'),
+                    completedAt: new Date('2026-08-04T15:14:56.168Z'),
+                  },
+                  {
+                    externalId: 'pay_other',
+                    userExternalId: 'usr_other',
+                    provider: 'alipay',
+                    kind: 'addon',
+                    plan: 'pack-20',
+                    amountCents: 990,
+                    currency: 'CNY',
+                    status: 'completed',
+                    createdAt: new Date('2026-08-04T16:00:00.000Z'),
+                    completedAt: new Date('2026-08-04T16:00:10.000Z'),
+                  },
+                ]);
+              },
+            };
+            return query;
+          },
+        };
+      },
+    };
+    const ctx = {
+      db,
+      userId: 'usr_test',
+      logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn(),
+        child: vi.fn(),
+      },
+    } as unknown as Parameters<typeof paymentRouter.createCaller>[0];
+
+    await expect(paymentRouter.createCaller(ctx).history()).resolves.toEqual([
+      {
+        orderId: 'pay_own',
+        provider: 'wechat',
+        kind: 'subscription',
+        plan: 'basic',
+        amountCents: 2900,
+        currency: 'CNY',
+        status: 'completed',
+        createdAt: '2026-08-04T15:14:34.852Z',
+        completedAt: '2026-08-04T15:14:56.168Z',
+      },
+    ]);
+    expect(requestedLimit).toBe(20);
+    expect(Object.keys(selectedFields ?? {}).sort()).toEqual(
+      [
+        'amountCents',
+        'completedAt',
+        'createdAt',
+        'currency',
+        'externalId',
+        'kind',
+        'plan',
+        'provider',
+        'status',
+        'userExternalId',
+      ].sort(),
+    );
+    expect(selectedFields).not.toHaveProperty('metadata');
+    expect(selectedFields).not.toHaveProperty('providerCaptureId');
+    expect(selectedFields).not.toHaveProperty('providerOrderId');
+  });
+});
+
 describe('cnOptions — production provider readiness', () => {
   afterEach(() => {
     vi.unstubAllEnvs();

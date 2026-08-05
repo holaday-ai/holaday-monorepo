@@ -3,11 +3,17 @@ import {
   billingLoadErrorCopy,
   billingLoadErrorMessage,
   billingPageSummary,
+  billingPaymentAmount,
+  billingPaymentDate,
+  billingPaymentProduct,
+  billingPaymentProvider,
   billingPaymentReturnCopy,
+  billingPaymentStatusCopy,
   billingPlanActionLabel,
   billingPlanLabel,
   cancellationMailBody,
   isPaidBillingPlan,
+  normalizeBillingPaymentRecords,
   normalizeBillingSnapshot,
   normalizePaymentReturnOrder,
   planValidUntilText,
@@ -113,5 +119,71 @@ describe('billing page state helpers', () => {
     expect(billingPaymentReturnCopy('completed').title).toBe('支付已到账');
     expect(billingPaymentReturnCopy('failed').title).toBe('支付未完成');
     expect(billingPaymentReturnCopy('timeout').title).toBe('支付结果仍在确认');
+  });
+
+  it('normalizes only safe payment history fields', () => {
+    expect(
+      normalizeBillingPaymentRecords([
+        {
+          orderId: ' pay_abc ',
+          provider: ' wechat ',
+          kind: ' subscription ',
+          plan: ' basic ',
+          amountCents: 2900,
+          currency: ' CNY ',
+          status: ' completed ',
+          createdAt: ' 2026-08-04T15:14:34.852Z ',
+          completedAt: ' 2026-08-04T15:14:56.168Z ',
+          metadata: { shouldNotLeak: true },
+        },
+        null,
+      ]),
+    ).toEqual([
+      {
+        orderId: 'pay_abc',
+        provider: 'wechat',
+        kind: 'subscription',
+        plan: 'basic',
+        amountCents: 2900,
+        currency: 'CNY',
+        status: 'completed',
+        createdAt: '2026-08-04T15:14:34.852Z',
+        completedAt: '2026-08-04T15:14:56.168Z',
+      },
+    ]);
+  });
+
+  it('labels settlement state without treating abandoned orders as paid', () => {
+    const now = Date.parse('2026-08-06T12:00:00.000Z');
+    expect(billingPaymentStatusCopy('completed', '2026-08-04T15:14:34.852Z', now)).toEqual({
+      label: '已支付',
+      detail: '款项已确认到账',
+      tone: 'success',
+    });
+    expect(billingPaymentStatusCopy('pending', '2026-08-06T11:50:00.000Z', now).label).toBe(
+      '待确认',
+    );
+    expect(billingPaymentStatusCopy('pending', '2026-08-05T11:50:00.000Z', now)).toEqual({
+      label: '未完成',
+      detail: '没有确认扣款，可重新发起支付',
+      tone: 'muted',
+    });
+    expect(billingPaymentStatusCopy('failed', '2026-08-06T11:50:00.000Z', now).label).toBe(
+      '支付失败',
+    );
+    expect(billingPaymentStatusCopy('refunded', '2026-08-06T11:50:00.000Z', now).label).toBe(
+      '已退款',
+    );
+  });
+
+  it('formats payment product, provider, amount, and Beijing time', () => {
+    expect(billingPaymentProduct('subscription', 'basic')).toBe('Basic 套餐');
+    expect(billingPaymentProduct('addon', 'pack-20')).toBe('20 次加量包');
+    expect(billingPaymentProvider('wechat')).toBe('微信支付');
+    expect(billingPaymentProvider('alipay')).toBe('支付宝');
+    expect(billingPaymentProvider('paypal')).toBe('PayPal');
+    expect(billingPaymentAmount(2900, 'CNY')).toBe('RMB¥29.00');
+    expect(billingPaymentAmount(690, 'USD')).toBe('US$6.90');
+    expect(billingPaymentDate('2026-08-04T15:14:56.168Z')).toBe('2026-08-04 23:14');
   });
 });

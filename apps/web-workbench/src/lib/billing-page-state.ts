@@ -19,6 +19,26 @@ export interface BillingPaymentReturnCopy {
   readonly body: string;
 }
 
+export interface BillingPaymentRecord {
+  readonly orderId: string;
+  readonly provider: string;
+  readonly kind: string;
+  readonly plan: string;
+  readonly amountCents: number;
+  readonly currency: string;
+  readonly status: string;
+  readonly createdAt: string;
+  readonly completedAt: string | null;
+}
+
+export interface BillingPaymentStatusCopy {
+  readonly label: string;
+  readonly detail: string;
+  readonly tone: 'success' | 'warning' | 'muted';
+}
+
+const PENDING_PAYMENT_WINDOW_MS = 30 * 60 * 1_000;
+
 export function normalizeBillingSnapshot(value: unknown): BillingSnapshot {
   const raw = isRecord(value) ? value : {};
   return {
@@ -122,6 +142,116 @@ export function billingPaymentReturnCopy(
     title: '正在确认支付结果',
     body: '支付宝回调可能稍有延迟，此页会自动更新。',
   };
+}
+
+export function normalizeBillingPaymentRecords(value: unknown): BillingPaymentRecord[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!isRecord(item)) return [];
+    const orderId = safeBillingText(item.orderId);
+    const provider = safeBillingText(item.provider);
+    const kind = safeBillingText(item.kind);
+    const plan = safeBillingText(item.plan);
+    const currency = safeBillingText(item.currency).toUpperCase();
+    const status = safeBillingText(item.status);
+    const createdAt = safeBillingText(item.createdAt);
+    const completedAt = safeBillingNullableText(item.completedAt);
+    const amountCents =
+      typeof item.amountCents === 'number' && Number.isSafeInteger(item.amountCents)
+        ? item.amountCents
+        : -1;
+    if (
+      !orderId ||
+      !provider ||
+      !kind ||
+      !plan ||
+      !currency ||
+      !status ||
+      !createdAt ||
+      amountCents < 0
+    ) {
+      return [];
+    }
+    return [
+      {
+        orderId,
+        provider,
+        kind,
+        plan,
+        amountCents,
+        currency,
+        status,
+        createdAt,
+        completedAt,
+      },
+    ];
+  });
+}
+
+export function billingPaymentStatusCopy(
+  status: string,
+  createdAt: string,
+  now = Date.now(),
+): BillingPaymentStatusCopy {
+  if (status === 'completed') {
+    return { label: '已支付', detail: '款项已确认到账', tone: 'success' };
+  }
+  if (status === 'refunded') {
+    return { label: '已退款', detail: '款项已按退款流程处理', tone: 'muted' };
+  }
+  if (status === 'failed') {
+    return { label: '支付失败', detail: '没有确认扣款，可重新发起支付', tone: 'warning' };
+  }
+  const created = Date.parse(createdAt);
+  if (
+    status === 'pending' &&
+    Number.isFinite(created) &&
+    now - created < PENDING_PAYMENT_WINDOW_MS
+  ) {
+    return { label: '待确认', detail: '正在等待支付平台确认', tone: 'warning' };
+  }
+  return { label: '未完成', detail: '没有确认扣款，可重新发起支付', tone: 'muted' };
+}
+
+export function billingPaymentProduct(kind: string, plan: string): string {
+  if (kind === 'addon') {
+    const count = /^pack-(\d+)$/.exec(plan)?.[1];
+    return count ? `${count} 次加量包` : '任务加量包';
+  }
+  if (plan === 'pro') return 'Pro 套餐';
+  if (plan === 'basic') return 'Basic 套餐';
+  return '套餐订阅';
+}
+
+export function billingPaymentProvider(provider: string): string {
+  if (provider === 'wechat') return '微信支付';
+  if (provider === 'alipay') return '支付宝';
+  if (provider === 'paypal') return 'PayPal';
+  return '在线支付';
+}
+
+export function billingPaymentAmount(amountCents: number, currency: string): string {
+  const amount = (Math.max(0, amountCents) / 100).toFixed(2);
+  if (currency.toUpperCase() === 'CNY') return `RMB¥${amount}`;
+  if (currency.toUpperCase() === 'USD') return `US$${amount}`;
+  return `${currency.toUpperCase()} ${amount}`;
+}
+
+export function billingPaymentDate(value: string): string {
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return '时间待确认';
+  const parts = new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(timestamp);
+  const part = (type: Intl.DateTimeFormatPartTypes): string =>
+    parts.find((candidate) => candidate.type === type)?.value ?? '';
+  return `${part('year')}-${part('month')}-${part('day')} ${part('hour')}:${part('minute')}`;
 }
 
 function safeBillingNullableText(value: unknown): string | null {
