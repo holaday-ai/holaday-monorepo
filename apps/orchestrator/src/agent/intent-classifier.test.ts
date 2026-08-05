@@ -74,6 +74,23 @@ describe('classifyExecutionMode — default is generate', () => {
     });
     expect(out).toBe('generate');
   });
+
+  it.each([
+    '只回复：HOLA DAY 生产烟测通过。不要打开网页，不要使用工具。',
+    '不要打开 https://example.com，只总结下面这段文字。',
+    '不要搜索网络，只分析我提供的数据。',
+  ])('negated web action stays generate: %s', async (intent) => {
+    const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
+    expect(out).toBe('generate');
+  });
+
+  it('keeps a later explicit browser action after a negated clause', async () => {
+    const out = await classifyExecutionMode({
+      intent: '不要登录，但打开 https://example.com 并截图。',
+      logger: fakeLogger(),
+    });
+    expect(out).toBe('browser');
+  });
 });
 
 describe('classifyExecutionMode — pre-Firecrawl regression suite (site/URL without interaction now scrape)', () => {

@@ -103,6 +103,9 @@ export interface ClassifyOpts {
  */
 const INTERACTION_VERBS: readonly string[] = [];
 
+const TRAVEL_STOP_BEFORE_COMMIT_PATTERN =
+  /(?:机票|航班|酒店|民宿|房间|车票|火车票|路线|行程|导航).{0,40}(?:不要|别|勿|先别|暂时不|不需要).{0,8}(?:下单|预订|预定|购买|付款|支付|订购|导航|出发)/i;
+
 const INTERACTION_PATTERNS: readonly [RegExp, string][] = [
   [/(?:打开|访问|进入|前往|跳转到).{0,32}(?:https?:\/\/|www\.|[a-z0-9.-]+\.[a-z]{2,24}|网站|网页|页面|链接|后台|app|平台|京东|淘宝|天猫|拼多多|小红书|微博|知乎|抖音|b站|bilibili|github|linkedin|amazon|gmail)/i, '中文打开页面'],
   // Navigation verb (incl. 去) + a site-like token or an online calculator/
@@ -176,7 +179,7 @@ const INTERACTION_PATTERNS: readonly [RegExp, string][] = [
   // 导航"). A stop-before-commit instruction is unambiguous live
   // execution — scrape/generate can't honour "stop before booking".
   // Topic/analysis phrasing ("机票预订转化率分析") has no 不要/别 → safe.
-  [/(?:机票|航班|酒店|民宿|房间|车票|火车票|路线|行程|导航).{0,40}(?:不要|别|勿|先别|暂时不|不需要).{0,8}(?:下单|预订|预定|购买|付款|支付|订购|导航|出发)/i, '中文出行执行但不提交'],
+  [TRAVEL_STOP_BEFORE_COMMIT_PATTERN, '中文出行执行但不提交'],
   // China OTA execution — 携程/飞猪/去哪儿/同程/美团(酒店) are
   // interactive booking sites; querying flights/hotels/trains on them
   // is a live in-site task (Firecrawl/search can't reach real-time
@@ -524,6 +527,18 @@ function hasAny(haystack: string, needles: readonly string[]): string | null {
   return null;
 }
 
+const NEGATED_ROUTING_CLAUSE_CN =
+  /(?:不要|别|无需|无须|不用|不需要|不必|禁止|请勿|勿)\s*[^，。；、,;！？!?\n]*(?:[，。；、,;！？!?\n]|$)/gi;
+const NEGATED_ROUTING_CLAUSE_EN =
+  /\b(?:do\s+not|don't|never|without)\b[^,.!?;\n]*(?:[,.!?;\n]|$)/gi;
+
+function stripNegatedRoutingClauses(intent: string): string {
+  return intent
+    .replace(NEGATED_ROUTING_CLAUSE_CN, ' ')
+    .replace(NEGATED_ROUTING_CLAUSE_EN, ' ')
+    .trim();
+}
+
 function matchInteractionPattern(intent: string): string | null {
   for (const [pattern, label] of INTERACTION_PATTERNS) {
     if (pattern.test(intent)) return label;
@@ -597,11 +612,17 @@ function decide(
   intent: string,
   ctx: { hasFileAttachment: boolean },
 ): RouteDecision {
+  // Route only on affirmative instructions. Without this normalization,
+  // "不要打开网页" still contains the positive trigger "打开网页" and
+  // unnecessarily allocates a browser. Clause boundaries preserve a later
+  // explicit action such as "不要登录，但打开链接并截图".
+  const routingIntent = stripNegatedRoutingClauses(intent);
+
   // 0a. Template-fill (STRICT) — the user wants to fill THEIR uploaded Office
   // template. Checked first: the patterns require an explicit 模板/
   // template context, and this must win over the interaction form-fill
   // pattern ("填写模板里的信息" would otherwise route to browser).
-  const templateFill = matchTemplateFillPattern(intent);
+  const templateFill = matchTemplateFillPattern(routingIntent);
   if (templateFill) {
     return { mode: 'template_fill', source: 'kw:template_fill', match: templateFill };
   }
@@ -612,7 +633,7 @@ function decide(
   // Placed BEFORE interaction/ecommerce/image so a wedged "把…填入…模板…留空"
   // (which could otherwise match the browser form-fill pattern) lands here.
   if (ctx.hasFileAttachment) {
-    const soft = matchTemplateFillSoft(intent);
+    const soft = matchTemplateFillSoft(routingIntent);
     if (soft) {
       return { mode: 'template_fill', source: 'kw:template_fill_file', match: soft };
     }
@@ -622,26 +643,36 @@ function decide(
   // loop so it can use search_ecommerce and preserve source URLs.
   // Firecrawl/generate lanes repeatedly produced price rows with
   // empty URLs for "前5结果（名称/价格/链接）" style prompts.
-  if (isEcommerceListingIntent(intent)) {
+  if (isEcommerceListingIntent(routingIntent)) {
     return { mode: 'browser', source: 'kw:ecommerce-listing' };
+  }
+
+  // A negated commit is part of the execution contract for travel tasks:
+  // search/filter live inventory, then stop before booking or payment.
+  if (TRAVEL_STOP_BEFORE_COMMIT_PATTERN.test(intent)) {
+    return {
+      mode: 'browser',
+      source: 'kw:interaction',
+      match: '中文出行执行但不提交',
+    };
   }
 
   // 1. Interaction verb / pattern wins — agent must drive a live page.
   // Checked BEFORE image so "make a poster in canva.com" / "在 figma
   // 设计海报" drive the named site instead of generating a local
   // image. (A named site/app to act in beats local image generation.)
-  const interaction = hasAny(intent, INTERACTION_VERBS);
+  const interaction = hasAny(routingIntent, INTERACTION_VERBS);
   if (interaction) {
     return { mode: 'browser', source: 'kw:interaction', match: interaction };
   }
-  const interactionPattern = matchInteractionPattern(intent);
+  const interactionPattern = matchInteractionPattern(routingIntent);
   if (interactionPattern) {
     return { mode: 'browser', source: 'kw:interaction', match: interactionPattern };
   }
 
   // 1a. 视频创作强信号 — 专用 video_creation lane(两段式:报价确认→Veo 生成)。
   // 在 image 之前:"做个种草视频" 应进视频 lane 而非 image 单图。误判只到报价卡、不烧钱。
-  const video = matchVideoCreation(intent);
+  const video = matchVideoCreation(routingIntent);
   if (video) {
     return { mode: 'video_creation', source: 'kw:video_creation', match: video };
   }
@@ -650,36 +681,36 @@ function decide(
   // After interaction (a named site wins) but before the url/site
   // scrape checks so "画一张京东风格的插画" generates an image instead
   // of scraping 京东. Beats the generate default for "画一张..." asks.
-  const image = matchImagePattern(intent);
+  const image = matchImagePattern(routingIntent);
   if (image) {
     return { mode: 'image', source: 'kw:image', match: image };
   }
 
   // 2. URL / site / search-verb / info-verb → scrape.
-  const urlMatch = URL_REGEX.exec(intent);
+  const urlMatch = URL_REGEX.exec(routingIntent);
   if (urlMatch) {
     return { mode: 'scrape', source: 'kw:url', match: urlMatch[0].slice(0, 64) };
   }
-  const domainInfoMatch = matchDomainInfoIntent(intent);
+  const domainInfoMatch = matchDomainInfoIntent(routingIntent);
   if (domainInfoMatch) {
     return { mode: 'scrape', source: 'kw:domain-info', match: domainInfoMatch };
   }
-  const searchPattern = matchSearchPattern(intent);
+  const searchPattern = matchSearchPattern(routingIntent);
   if (searchPattern) {
     return { mode: 'scrape', source: 'kw:search-pattern', match: searchPattern };
   }
-  if (isNonExecutionPlatformTopic(intent)) {
+  if (isNonExecutionPlatformTopic(routingIntent)) {
     return { mode: 'generate', source: 'default' };
   }
-  const search = matchSearchVerb(intent);
+  const search = matchSearchVerb(routingIntent);
   if (search) {
     return { mode: 'scrape', source: 'kw:search-verb', match: search };
   }
-  const site = hasAny(intent, SITE_NAMES);
+  const site = hasAny(routingIntent, SITE_NAMES);
   if (site) {
     return { mode: 'scrape', source: 'kw:site', match: site };
   }
-  const info = hasAny(intent, INFO_VERBS);
+  const info = hasAny(routingIntent, INFO_VERBS);
   if (info) {
     // Info verbs without a URL/site are usually pure text-on-already-
     // provided-content (e.g. "分析这段商业模式"). Only route to scrape
