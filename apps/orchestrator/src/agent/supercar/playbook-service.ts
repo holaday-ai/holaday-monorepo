@@ -12,8 +12,49 @@
  * message 内），不进 system prompt — 不破坏 prompt cache。
  */
 
-import { PLAYBOOKS, type SitePlaybook, type PlaybookLane } from './site-playbooks.js';
+import { PLAYBOOKS, type PlaybookLane, type SitePlaybook } from './site-playbooks.js';
 import { extractDomain } from './stats-service.js';
+
+const CLAUSE_BOUNDARY = /[，。；、,;！？!？\n]/;
+const NEGATED_SITE_PREFIX_CN =
+  /(?:不要|别|无需|无须|不用|不需要|不必|禁止|请勿|勿)\s*(?:(?:打开|访问|进入|使用|搜索|查询|浏览|前往|去|用)\s*(?:在\s*)?)?$/i;
+const NEGATED_SITE_PREFIX_EN =
+  /\b(?:do\s+not|don't|never|without)\s*(?:(?:open|visit|use|search|browse|go\s+to)\s*)?(?:on\s+)?$/i;
+const NEGATED_SITE_SUFFIX_CN = /^(?:打开|访问|进入|使用|搜索|查询|浏览)/i;
+
+function isNegatedSiteMention(text: string, start: number, length: number): boolean {
+  const before = text.slice(0, start);
+  const after = text.slice(start + length);
+  const clauseStart = Math.max(
+    ...Array.from(before.matchAll(new RegExp(CLAUSE_BOUNDARY.source, 'g')), (match) =>
+      match.index === undefined ? -1 : match.index,
+    ),
+    -1,
+  );
+  const clauseEndOffset = after.search(CLAUSE_BOUNDARY);
+  const prefix = before.slice(clauseStart + 1).trim();
+  const suffix = (clauseEndOffset < 0 ? after : after.slice(0, clauseEndOffset)).trim();
+
+  if (NEGATED_SITE_PREFIX_CN.test(prefix) || NEGATED_SITE_PREFIX_EN.test(prefix)) return true;
+
+  return (
+    /(?:不要|别|无需|无须|不用|不需要|不必|禁止|请勿|勿)\s*(?:在|用)\s*$/i.test(prefix) &&
+    NEGATED_SITE_SUFFIX_CN.test(suffix)
+  );
+}
+
+function hasNonNegatedMention(text: string, alias: string): boolean {
+  const lowerText = text.toLowerCase();
+  const lowerAlias = alias.toLowerCase();
+  let start = lowerText.indexOf(lowerAlias);
+
+  while (start >= 0) {
+    if (!isNegatedSiteMention(lowerText, start, lowerAlias.length)) return true;
+    start = lowerText.indexOf(lowerAlias, start + lowerAlias.length);
+  }
+
+  return false;
+}
 
 /**
  * 直接按域名/URL 取手册。子域名会回退到根域名（search.jd.com → jd.com）。
@@ -22,7 +63,8 @@ export function getPlaybook(urlOrDomain: string | null | undefined): SitePlayboo
   if (!urlOrDomain) return null;
   const root = extractDomain(urlOrDomain);
   if (!root) return null;
-  if (PLAYBOOKS[root]) return PLAYBOOKS[root]!;
+  const exactPlaybook = PLAYBOOKS[root];
+  if (exactPlaybook) return exactPlaybook;
   // Sub-domain fallback: e.g. "list.tmall.com" → "tmall.com".
   for (const [key, pb] of Object.entries(PLAYBOOKS)) {
     if (root.endsWith(`.${key}`)) return pb;
@@ -39,22 +81,12 @@ export function getPlaybook(urlOrDomain: string | null | undefined): SitePlayboo
  */
 export function matchPlaybooks(taskDescription: string | null | undefined): SitePlaybook[] {
   if (!taskDescription) return [];
-  const lower = taskDescription.toLowerCase();
   const matched: SitePlaybook[] = [];
   const seen = new Set<string>();
   for (const pb of Object.values(PLAYBOOKS)) {
     if (seen.has(pb.domain)) continue;
-    let hit = false;
-    // Chinese name — substring on raw text.
-    if (pb.name && taskDescription.includes(pb.name)) {
-      hit = true;
-    } else if (lower.includes(pb.domain.toLowerCase())) {
-      // Domain — exact substring (covers "jd.com", "search.jd.com" naturally).
-      hit = true;
-    } else if (pb.nameEn && pb.nameEn.length >= 4 && lower.includes(pb.nameEn.toLowerCase())) {
-      // English name — only when ≥4 chars to limit collisions.
-      hit = true;
-    }
+    const aliases = [pb.name, pb.domain, pb.nameEn && pb.nameEn.length >= 4 ? pb.nameEn : null];
+    const hit = aliases.some((alias) => alias && hasNonNegatedMention(taskDescription, alias));
     if (hit) {
       matched.push(pb);
       seen.add(pb.domain);

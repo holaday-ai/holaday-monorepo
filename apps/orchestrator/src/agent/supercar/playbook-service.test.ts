@@ -69,12 +69,46 @@ describe('matchPlaybooks', () => {
     expect(domains).toEqual(['dianping.com', 'xiaohongshu.com']);
   });
 
+  it('does not inject a playbook for a site the user explicitly refuses to visit', () => {
+    expect(
+      matchPlaybooks('不要打开百度；请打开 https://example.com，读取页面标题。').map(
+        (p) => p.domain,
+      ),
+    ).toEqual([]);
+    expect(matchPlaybooks("Don't use Baidu; open example.com instead.")).toEqual([]);
+  });
+
+  it('keeps the positively requested site when another site is negated', () => {
+    expect(matchPlaybooks('不要使用淘宝，改用京东搜索耳机。').map((p) => p.domain)).toEqual([
+      'jd.com',
+    ]);
+  });
+
+  it('keeps a site when only a transactional action is negated', () => {
+    expect(matchPlaybooks('在京东查手机价格，不要下单。').map((p) => p.domain)).toEqual(['jd.com']);
+    expect(matchPlaybooks('不要在京东下单，只查手机价格。').map((p) => p.domain)).toEqual([
+      'jd.com',
+    ]);
+  });
+
   // China OTA — the verbatim QA prompts must inject the right playbook.
   it('OTA QA prompts inject the matching travel playbook', () => {
-    expect(matchPlaybooks('打开携程查北京到上海的机票，不要下单。筛选直飞，给最便宜的 3 个选项（航空公司/时间/价格）。').map((p) => p.domain)).toEqual(['ctrip.com']);
-    expect(matchPlaybooks('打开携程查上海 2026-08-01 到 2026-08-03 的酒店，不要预订。筛选 4 星以上，价格低于 800 元，给 5 个结果。').map((p) => p.domain)).toEqual(['ctrip.com']);
-    expect(matchPlaybooks('打开去哪儿查东京到上海机票，不要下单，给前 3 个结果。').map((p) => p.domain)).toEqual(['qunar.com']);
-    expect(matchPlaybooks('打开飞猪查大阪酒店，不要预订，给 5 个结果。').map((p) => p.domain)).toEqual(['fliggy.com']);
+    expect(
+      matchPlaybooks(
+        '打开携程查北京到上海的机票，不要下单。筛选直飞，给最便宜的 3 个选项（航空公司/时间/价格）。',
+      ).map((p) => p.domain),
+    ).toEqual(['ctrip.com']);
+    expect(
+      matchPlaybooks(
+        '打开携程查上海 2026-08-01 到 2026-08-03 的酒店，不要预订。筛选 4 星以上，价格低于 800 元，给 5 个结果。',
+      ).map((p) => p.domain),
+    ).toEqual(['ctrip.com']);
+    expect(
+      matchPlaybooks('打开去哪儿查东京到上海机票，不要下单，给前 3 个结果。').map((p) => p.domain),
+    ).toEqual(['qunar.com']);
+    expect(
+      matchPlaybooks('打开飞猪查大阪酒店，不要预订，给 5 个结果。').map((p) => p.domain),
+    ).toEqual(['fliggy.com']);
   });
 
   it('matches the new 同程 (ly.com) playbook', () => {
