@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { _resetAllBucketsForTesting } from '../../quota/rate-limiter.js';
-import { notificationChannelsRouter } from './notifications.js';
+import { notificationChannelsRouter, notificationsRouter } from './notifications.js';
 
 const fakeLogger = {
   info: vi.fn(),
@@ -253,6 +253,76 @@ describe('notificationChannelsRouter — webhook target safety', () => {
     }
     await expect(caller.test(input)).rejects.toMatchObject({
       code: 'TOO_MANY_REQUESTS',
+    });
+  });
+});
+
+describe('notificationsRouter — keyset pagination', () => {
+  it('returns limit items plus a cursor when an older page exists', async () => {
+    const rows = [
+      {
+        id: 103,
+        externalId: 'not_103',
+        type: 'task_complete',
+        title: 'three',
+        message: 'three',
+        isRead: false,
+        createdAt: new Date('2026-08-05T03:00:00Z'),
+        scheduledTaskId: null,
+      },
+      {
+        id: 102,
+        externalId: 'not_102',
+        type: 'task_complete',
+        title: 'two',
+        message: 'two',
+        isRead: false,
+        createdAt: new Date('2026-08-05T02:00:00Z'),
+        scheduledTaskId: null,
+      },
+      {
+        id: 101,
+        externalId: 'not_101',
+        type: 'task_complete',
+        title: 'one',
+        message: 'one',
+        isRead: false,
+        createdAt: new Date('2026-08-05T01:00:00Z'),
+        scheduledTaskId: null,
+      },
+    ];
+    const db = {
+      select() {
+        return {
+          from(table: unknown) {
+            const name = tableName(table);
+            return {
+              where() {
+                if (name === 'users') {
+                  return { limit: async () => [{ id: 42 }] };
+                }
+                return {
+                  orderBy() {
+                    return { limit: async (limit: number) => rows.slice(0, limit) };
+                  },
+                };
+              },
+            };
+          },
+        };
+      },
+    };
+
+    const page = await notificationsRouter
+      .createCaller({ db, userId: 'usr_test', logger: fakeLogger } as never)
+      .list({ limit: 2 });
+
+    expect(page).toEqual({
+      items: [
+        expect.objectContaining({ notificationId: 'not_103' }),
+        expect.objectContaining({ notificationId: 'not_102' }),
+      ],
+      nextCursor: { id: 102, createdAt: new Date('2026-08-05T02:00:00Z') },
     });
   });
 });

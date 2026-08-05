@@ -36,6 +36,7 @@ interface FakeApiKeyRow {
 interface FakeUserRow {
   id: number;
   externalId: string;
+  status?: string;
 }
 
 /**
@@ -71,7 +72,11 @@ function makeFakeDb(state: { keys: FakeApiKeyRow[]; users: FakeUserRow[] }) {
                 if (name === 'users') {
                   return state.users
                     .filter((u) => s.includes(`value: ${u.id}`))
-                    .map((u) => ({ externalId: u.externalId }));
+                    .map((u) => ({
+                      id: u.id,
+                      externalId: u.externalId,
+                      status: u.status ?? 'active',
+                    }));
                 }
                 return [];
               },
@@ -207,10 +212,25 @@ describe('resolveApiKey', () => {
     const { plaintext, hash } = generateApiKey();
     const { db } = makeFakeDb({
       keys: [{ id: 1, userId: 42, keyHash: hash, revokedAt: null, expiresAt: null }],
-      users: [{ id: 42, externalId: 'usr_test' }],
+      users: [{ id: 42, externalId: 'usr_test', status: 'active' }],
     });
     const r = await resolveApiKey(plaintext, db);
-    expect(r).toEqual({ ok: true, userExternalId: 'usr_test', apiKeyInternalId: 1 });
+    expect(r).toEqual({
+      ok: true,
+      userExternalId: 'usr_test',
+      userInternalId: 42,
+      apiKeyInternalId: 1,
+    });
+  });
+
+  it('active key owned by a suspended user is rejected', async () => {
+    const { plaintext, hash } = generateApiKey();
+    const { db } = makeFakeDb({
+      keys: [{ id: 4, userId: 42, keyHash: hash, revokedAt: null, expiresAt: null }],
+      users: [{ id: 42, externalId: 'usr_test', status: 'suspended' }],
+    });
+
+    expect(await resolveApiKey(plaintext, db)).toEqual({ ok: false, code: 'inactive_owner' });
   });
 
   it('revoked key → revoked', async () => {
@@ -225,7 +245,7 @@ describe('resolveApiKey', () => {
           expiresAt: null,
         },
       ],
-      users: [{ id: 42, externalId: 'usr_test' }],
+      users: [{ id: 42, externalId: 'usr_test', status: 'active' }],
     });
     expect((await resolveApiKey(plaintext, db)).ok).toBe(false);
     const r = await resolveApiKey(plaintext, db);
@@ -255,6 +275,7 @@ describe('createWebhookTasksHandler', () => {
   function setup(opts?: {
     revoked?: boolean;
     expired?: boolean;
+    userStatus?: string;
     dispatchThrow?: TRPCError | Error | null;
   }) {
     const { plaintext, hash } = generateApiKey();
@@ -268,7 +289,7 @@ describe('createWebhookTasksHandler', () => {
           expiresAt: opts?.expired ? new Date('2020-01-01') : null,
         },
       ],
-      users: [{ id: 42, externalId: 'usr_test' }],
+      users: [{ id: 42, externalId: 'usr_test', status: opts?.userStatus ?? 'active' }],
     });
     const dispatch = vi.fn(async () => ({ taskId: 'tsk_X', status: 'pending' }));
     if (opts?.dispatchThrow) {
@@ -285,6 +306,19 @@ describe('createWebhookTasksHandler', () => {
     });
     return { handler, plaintext, dispatch };
   }
+
+  it('returns the same generic 401 for a key owned by a suspended user', async () => {
+    const { handler, plaintext, dispatch } = setup({ userStatus: 'suspended' });
+    const { res, captured } = makeRes();
+
+    await handler(
+      makeReq({ auth: `Bearer ${plaintext}`, body: { prompt: 'run report' } }),
+      res,
+    );
+
+    expect(captured).toMatchObject({ status: 401, json: { error: 'invalid_api_key' } });
+    expect(dispatch).not.toHaveBeenCalled();
+  });
 
   it('200: valid key + valid prompt → dispatch called, returns taskId + status', async () => {
     const { handler, plaintext, dispatch } = setup();
@@ -474,7 +508,7 @@ describe('createWebhookTasksHandler — idempotency (Phase 5d follow-up)', () =>
           expiresAt: null as Date | null,
         },
       ],
-      users: [{ id: 42, externalId: 'usr_test' }],
+      users: [{ id: 42, externalId: 'usr_test', status: 'active' }],
       idempotency: [] as IdemRow[],
       // Track inserts so tests can assert on persistence.
       lastInsert: null as Record<string, unknown> | null,
@@ -518,7 +552,11 @@ describe('createWebhookTasksHandler — idempotency (Phase 5d follow-up)', () =>
                     if (name === 'users') {
                       return state.users
                         .filter((u) => s.includes(`value: ${u.id}`))
-                        .map((u) => ({ id: u.id, externalId: u.externalId }));
+                        .map((u) => ({
+                          id: u.id,
+                          externalId: u.externalId,
+                          status: u.status,
+                        }));
                     }
                     if (name === 'webhook_idempotency') {
                       return state.idempotency

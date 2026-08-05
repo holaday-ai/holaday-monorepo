@@ -22,11 +22,13 @@ import {
   batchDetailSummary,
   batchErrorMessage,
   batchListSummary,
+  mergeBatchRows,
+  normalizeBatchPage,
   batchPromptImportStateReset,
   normalizeBatchDetail,
-  normalizeBatchRows,
   type NormalizedBatchDetail,
   type NormalizedBatchRow,
+  type BatchListCursor,
   batchFinishedCount,
   batchProgressPercent,
   batchRemainingCount,
@@ -77,6 +79,8 @@ function BatchList(): JSX.Element {
   const { hash, pathname, search } = location;
   const [rows, setRows] = React.useState<NormalizedBatchRow[] | null>(null);
   const [loading, setLoading] = React.useState(true);
+  const [loadingMore, setLoadingMore] = React.useState(false);
+  const [nextCursor, setNextCursor] = React.useState<BatchListCursor | null>(null);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const reloadRequestRef = React.useRef(0);
   // Phase 5b — when InputArea routes here with `state.initialPrompts`
@@ -108,14 +112,31 @@ function BatchList(): JSX.Element {
     }
   }, [hash, incomingPrompts, navigate, pathname, search]);
 
-  const reload = React.useCallback(async () => {
+  const loadPage = React.useCallback(async (cursor: BatchListCursor | null = null) => {
     const requestId = reloadRequestRef.current + 1;
     reloadRequestRef.current = requestId;
-    setLoading(true);
+    const append = cursor !== null;
+    if (append) setLoadingMore(true);
+    else setLoading(true);
     try {
-      const list = await trpc.batchTasks.list.query();
+      const list = await trpc.batchTasks.list.query({
+        limit: 50,
+        cursor: cursor
+          ? {
+              id: cursor.id,
+              createdAt:
+                cursor.createdAt instanceof Date
+                  ? cursor.createdAt
+                  : new Date(cursor.createdAt),
+            }
+          : undefined,
+      });
       if (!mountedRef.current || reloadRequestRef.current !== requestId) return;
-      setRows(normalizeBatchRows(list));
+      const page = normalizeBatchPage(list);
+      setRows((current) =>
+        append ? mergeBatchRows(current ?? [], page.items) : page.items,
+      );
+      setNextCursor(page.nextCursor);
       setLoadError(null);
     } catch (err) {
       if (!mountedRef.current || reloadRequestRef.current !== requestId) return;
@@ -124,10 +145,13 @@ function BatchList(): JSX.Element {
       setLoadError(message);
     } finally {
       if (mountedRef.current && reloadRequestRef.current === requestId) {
-        setLoading(false);
+        if (append) setLoadingMore(false);
+        else setLoading(false);
       }
     }
   }, [toast]);
+
+  const reload = React.useCallback(() => loadPage(null), [loadPage]);
 
   React.useEffect(() => {
     void reload();
@@ -236,15 +260,34 @@ function BatchList(): JSX.Element {
           </div>
         )}
         {rows && rows.length > 0 && (
-          <ul className="divide-y divide-[#EFEFEF]">
-            {rows.map((r) => (
-              <BatchListRow
-                key={r.batchId}
-                row={r}
-                onOpen={() => navigate(`/batch/${encodeURIComponent(r.batchId)}`)}
-              />
-            ))}
-          </ul>
+          <>
+            <ul className="divide-y divide-[#EFEFEF]">
+              {rows.map((r) => (
+                <BatchListRow
+                  key={r.batchId}
+                  row={r}
+                  onOpen={() => navigate(`/batch/${encodeURIComponent(r.batchId)}`)}
+                />
+              ))}
+            </ul>
+            {nextCursor && (
+              <div className="flex justify-center border-t border-[#EFEFEF] px-4 py-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={loadingMore}
+                  onClick={() => void loadPage(nextCursor)}
+                  className="h-8 rounded-[6px] border-[#DCDDDD] bg-white px-3 text-xs text-[#595757] hover:border-[#EA1F59]/25 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59]"
+                >
+                  {loadingMore && (
+                    <Loader2 className="mr-1.5 h-3 w-3 animate-spin" aria-hidden />
+                  )}
+                  {loadingMore ? '加载中…' : '加载更多批量任务'}
+                </Button>
+              </div>
+            )}
+          </>
         )}
       </Section>
       <BatchTaskDialog

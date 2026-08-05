@@ -169,6 +169,39 @@ function fakeDbForExecute(affectedRows = 1) {
   return { db, captured };
 }
 
+function fakeDbForAtomicVideoConfirm(affectedRows = 1) {
+  const captured = {
+    statements: [] as unknown[],
+    inserts: [] as unknown[],
+    transactionRan: false,
+  };
+  const select = () => ({
+    from: () => ({
+      where: () => ({
+        limit: async () => [{ id: 11 }],
+      }),
+    }),
+  });
+  const execute = async (statement: unknown) => {
+    captured.statements.push(statement);
+    return [{ affectedRows }];
+  };
+  const insert = () => ({
+    values: async (payload: unknown) => {
+      captured.inserts.push(payload);
+      return [{ insertId: 22 }];
+    },
+  });
+  const transaction = async <T>(cb: (tx: unknown) => Promise<T>) => {
+    captured.transactionRan = true;
+    return cb({ execute, select, insert });
+  };
+  return {
+    db: { transaction } as unknown as DB,
+    captured,
+  };
+}
+
 function collectSqlText(input: unknown): string {
   if (Array.isArray(input)) {
     return input.map((item) => collectSqlText(item)).join('');
@@ -1485,6 +1518,55 @@ describe('TaskRepository task terminal state persistence', () => {
 
     expect(result).toBe(false);
     expect(captured.eventPayloads).toHaveLength(0);
+  });
+
+  it('atomically claims a video quote and inserts its generation task', async () => {
+    const { db, captured } = fakeDbForAtomicVideoConfirm(1);
+    const repo = new TaskRepository(db);
+
+    const result = await repo.consumeVideoConfirmAndInsertGeneration({
+      quoteTaskExternalId: 'tsk_quote',
+      generationTaskExternalId: 'tsk_video',
+      userId: 7,
+      planId: 'pro',
+      isBypass: true,
+      intent: '生成一段视频',
+      executionMetadata: { lane: 'video_creation' },
+    });
+
+    expect(result).toEqual({ kind: 'created', taskInternalId: 22 });
+    expect(captured.transactionRan).toBe(true);
+    expect(collectSqlText(captured.statements[0])).toContain('video_creation_consumed');
+    expect(captured.inserts).toHaveLength(2);
+    expect(captured.inserts[0]).toMatchObject({
+      externalId: 'tsk_video',
+      status: 'executing',
+      roleId: 'video-creator',
+    });
+    expect(captured.inserts[1]).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: 'task.completed' }),
+        expect.objectContaining({ type: 'task.created' }),
+      ]),
+    );
+  });
+
+  it('rolls back the atomic video path when another confirmation won', async () => {
+    const { db, captured } = fakeDbForAtomicVideoConfirm(0);
+    const repo = new TaskRepository(db);
+
+    await expect(
+      repo.consumeVideoConfirmAndInsertGeneration({
+        quoteTaskExternalId: 'tsk_quote',
+        generationTaskExternalId: 'tsk_video',
+        userId: 7,
+        planId: 'pro',
+        isBypass: true,
+        intent: '生成一段视频',
+        executionMetadata: { lane: 'video_creation' },
+      }),
+    ).resolves.toEqual({ kind: 'stale' });
+    expect(captured.inserts).toHaveLength(0);
   });
 
   it('cancelVideoConfirm atomically cancels only active video quote rows', async () => {

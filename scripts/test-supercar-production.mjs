@@ -4,8 +4,8 @@
  *
  * Runs serially against https://holaday.ai/api/trpc/. For each task:
  *   1. tasks.create
- *   2. poll tasks.detail every 5s until status transitions to terminal
- *      (completed / failed / cancelled) or 10-minute timeout elapses
+ *   2. poll tasks.detail every 5s until status transitions to terminal,
+ *      needs user action, or the 10-minute timeout elapses
  *   3. append one JSONL row to results/<ts>.jsonl with per-task stats
  *
  * Fires a 5s cooldown between tasks so concurrent runs never race.
@@ -13,7 +13,13 @@
  *
  * Final summary (table + stats) is printed to stdout and also written
  * to results/<ts>.md so the run is reproducible without scrollback.
+ * Set HOLADAY_SMOKE_TASK_IDS=T01,T05 to run a focused subset.
  */
+
+import {
+  classifySmokePollStatus,
+  selectSmokeTasks,
+} from './supercar-smoke-state.mjs';
 
 function requireEnv(name) {
   const value = process.env[name]?.trim();
@@ -52,6 +58,7 @@ const TASKS = [
   { id: 'T19', intent: '帮我查看雪球上贵州茅台的最新讨论，整理出机构和大V们的主要观点' },
   { id: 'T20', intent: '帮我订今天从上海到北京的高铁票，二等座，下午出发' },
 ];
+const SELECTED_TASKS = selectSmokeTasks(TASKS, process.env.HOLADAY_SMOKE_TASK_IDS);
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -144,11 +151,7 @@ async function runOne(token, task, index, total) {
       }
       continue;
     }
-    if (
-      detail.status === 'completed' ||
-      detail.status === 'failed' ||
-      detail.status === 'cancelled'
-    ) {
+    if (classifySmokePollStatus(detail.status) !== 'continue') {
       break;
     }
   }
@@ -199,7 +202,7 @@ function renderReport(rows) {
   lines.push('');
   lines.push(`Base: ${BASE}`);
   lines.push(`User: ${EMAIL}`);
-  lines.push(`Ran ${rows.length}/${TASKS.length} tasks`);
+  lines.push(`Ran ${rows.length}/${SELECTED_TASKS.length} tasks`);
   lines.push('');
   lines.push('| # | Task | Status | Iter | Duration | Tools | Summary (preview) |');
   lines.push('|---|------|--------|------|---------:|-------|-------------------|');
@@ -247,11 +250,11 @@ function renderReport(rows) {
   const token = await login();
   log(`Token acquired (${token.length} chars)`);
   const rows = [];
-  for (let i = 0; i < TASKS.length; i += 1) {
-    const t = TASKS[i];
-    const row = await runOne(token, t, i + 1, TASKS.length);
+  for (let i = 0; i < SELECTED_TASKS.length; i += 1) {
+    const t = SELECTED_TASKS[i];
+    const row = await runOne(token, t, i + 1, SELECTED_TASKS.length);
     rows.push(row);
-    if (i < TASKS.length - 1) {
+    if (i < SELECTED_TASKS.length - 1) {
       await sleep(GAP_MS);
     }
   }

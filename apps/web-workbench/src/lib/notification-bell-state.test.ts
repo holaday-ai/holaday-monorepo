@@ -5,6 +5,8 @@ import {
   notificationErrorMessage,
   notificationListStatusCopy,
   notificationListSummary,
+  mergeNotificationRows,
+  normalizeNotificationPage,
   safeNotificationCount,
   shouldRenderCompactNotificationDot,
 } from './notification-bell-state';
@@ -73,5 +75,50 @@ describe('notification bell state helpers', () => {
     expect(notificationButtonTitle(0, 'topbar')).toBeUndefined();
     expect(notificationButtonTitle(56, 'sidebar-footer')).toBe('通知，56 条未读');
     expect(notificationButtonTitle(0, 'sidebar-footer')).toBe('通知');
+  });
+
+  it('normalizes paginated notification responses and preserves legacy arrays', () => {
+    const item = {
+      notificationId: 'not_1',
+      type: 'task_complete',
+      title: '完成',
+      message: '任务已完成',
+      isRead: false,
+      createdAt: '2026-08-05T00:00:00.000Z',
+      scheduledTaskInternalId: null,
+    };
+    expect(
+      normalizeNotificationPage({
+        items: [item],
+        nextCursor: { id: 9, createdAt: '2026-08-05T00:00:00.000Z' },
+      }),
+    ).toEqual({
+      items: [item],
+      nextCursor: { id: 9, createdAt: '2026-08-05T00:00:00.000Z' },
+    });
+    expect(normalizeNotificationPage([item])).toEqual({ items: [item], nextCursor: null });
+  });
+
+  it('appends notification pages without duplicating realtime rows', () => {
+    const base = {
+      type: 'task_complete',
+      title: '完成',
+      message: '',
+      isRead: false,
+      createdAt: '2026-08-05T00:00:00.000Z',
+      scheduledTaskInternalId: null,
+    };
+    expect(
+      mergeNotificationRows(
+        [{ ...base, notificationId: 'not_1' }],
+        [
+          { ...base, notificationId: 'not_1', isRead: true },
+          { ...base, notificationId: 'not_2' },
+        ],
+      ).map((row) => [row.notificationId, row.isRead]),
+    ).toEqual([
+      ['not_1', true],
+      ['not_2', false],
+    ]);
   });
 });

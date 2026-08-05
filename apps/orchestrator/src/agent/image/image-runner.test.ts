@@ -218,6 +218,23 @@ describe('runImageTask', () => {
     expect(generate).not.toHaveBeenCalled();
   });
 
+  it('rejects locked-subject mode when identity verification is unavailable', async () => {
+    const generate = okGenerate();
+    const out = await runImageTask({
+      intent: '把背景换成雪山',
+      mode: 'lock_subject',
+      inputImages: [{ data: 'SUBJECT', mimeType: 'image/jpeg' }],
+      apiKey: 'k',
+      save,
+      logger: fakeLogger(),
+      generate,
+    });
+
+    expect(out.status).toBe('failed');
+    expect(out.reason).toContain('一致性复核');
+    expect(generate).not.toHaveBeenCalled();
+  });
+
   it('enforces first-image identity preservation for locked-subject generation', async () => {
     const generate = okGenerate();
     const out = await runImageTask({
@@ -231,6 +248,11 @@ describe('runImageTask', () => {
       save,
       logger: fakeLogger(),
       generate,
+      verifySubject: vi.fn().mockResolvedValue({
+        status: 'pass',
+        confidence: 0.96,
+        reason: '身份特征一致',
+      }),
     });
 
     const sentPrompt = generate.mock.calls[0]![0].prompt;
@@ -239,6 +261,73 @@ describe('runImageTask', () => {
     expect(sentPrompt).toContain('只改变用户明确要求的背景、风格、光线、场景、动作、姿态或构图');
     expect(out.status).toBe('completed');
     expect(out.summary).toContain('锁定主角');
+    expect(out.subjectConsistency).toMatchObject({ checked: 1, passed: 1, failed: 0 });
+  });
+
+  it('regenerates once when the first locked-subject candidate fails verification', async () => {
+    const generate = vi
+      .fn()
+      .mockResolvedValueOnce({
+        images: [{ buffer: Buffer.from('WRONG'), mimeType: 'image/png' }],
+        model: 'gemini-3.1-flash-image',
+      })
+      .mockResolvedValueOnce({
+        images: [{ buffer: Buffer.from('MATCH'), mimeType: 'image/png' }],
+        model: 'gemini-3.1-flash-image',
+      });
+    const verifySubject = vi
+      .fn()
+      .mockResolvedValueOnce({ status: 'fail', confidence: 0.95, reason: '脸部不一致' })
+      .mockResolvedValueOnce({ status: 'pass', confidence: 0.92, reason: '身份一致' });
+    const saveVerified = vi.fn(async (_img, index: number) => attachmentFor(index));
+
+    const out = await runImageTask({
+      intent: '换成电影夜景',
+      mode: 'lock_subject',
+      inputImages: [{ data: 'SUBJECT', mimeType: 'image/jpeg' }],
+      apiKey: 'k',
+      save: saveVerified,
+      logger: fakeLogger(),
+      generate,
+      verifySubject,
+    });
+
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(verifySubject).toHaveBeenCalledTimes(2);
+    expect(saveVerified).toHaveBeenCalledTimes(1);
+    expect(out.status).toBe('completed');
+    expect(out.subjectConsistency).toMatchObject({ checked: 2, passed: 1, failed: 1 });
+  });
+
+  it('does not deliver a locked-subject image that still fails after regeneration', async () => {
+    const generate = vi
+      .fn()
+      .mockResolvedValue({
+        images: [{ buffer: Buffer.from('WRONG'), mimeType: 'image/png' }],
+        model: 'gemini-3.1-flash-image',
+      });
+    const verifySubject = vi.fn().mockResolvedValue({
+      status: 'fail',
+      confidence: 0.9,
+      reason: '关键身份特征不一致',
+    });
+    const saveRejected = vi.fn(async (_img, index: number) => attachmentFor(index));
+
+    const out = await runImageTask({
+      intent: '换成电影夜景',
+      mode: 'lock_subject',
+      inputImages: [{ data: 'SUBJECT', mimeType: 'image/jpeg' }],
+      apiKey: 'k',
+      save: saveRejected,
+      logger: fakeLogger(),
+      generate,
+      verifySubject,
+    });
+
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(saveRejected).not.toHaveBeenCalled();
+    expect(out.status).toBe('failed');
+    expect(out.reason).toContain('主体一致性复核未通过');
   });
 
   it('routes a 4K poster to Pro without an unverified explicit resolution', async () => {

@@ -1,6 +1,7 @@
-import { newExternalId } from '@holaday/shared-types';
+import { newExternalId, type PlanId } from '@holaday/shared-types';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
+import { QuotaService, type ConsumeReason } from '../quota/quota-service.js';
 
 /**
  * mysql2 returns `[ResultSetHeader, ...]` from drizzle's `update().set()`
@@ -1051,6 +1052,103 @@ export class TaskRepository {
       });
     });
     return persisted;
+  }
+
+  async consumeVideoConfirmAndInsertGeneration(input: {
+    quoteTaskExternalId: string;
+    generationTaskExternalId: string;
+    userId: number;
+    planId: PlanId;
+    isBypass: boolean;
+    intent: string;
+    executionMetadata: Record<string, unknown>;
+  }): Promise<
+    | { kind: 'created'; taskInternalId: number }
+    | { kind: 'stale' }
+    | { kind: 'quota_denied'; reason: ConsumeReason }
+  > {
+    class StaleVideoQuoteError extends Error {}
+    try {
+      return await this.db.transaction(async (tx) => {
+        if (!input.isBypass) {
+          const quota = new QuotaService(tx as unknown as DB);
+          const consumed = await quota.tryConsume(input.userId, input.planId, false);
+          if (!consumed.ok) return { kind: 'quota_denied' as const, reason: consumed.reason };
+        }
+
+        const claim = await tx.execute(sql`
+          UPDATE tasks
+          SET
+            status = 'completed',
+            awaiting_kind = NULL,
+            awaiting_question = NULL,
+            pause_reason = NULL,
+            error_code = NULL,
+            error_message = NULL,
+            result = JSON_SET(
+              COALESCE(result, JSON_OBJECT()),
+              '$.summary',
+              '已确认，正在生成视频。',
+              '$.metadata.lane',
+              'video_creation_consumed'
+            ),
+            updated_at = ${new Date()},
+            completed_at = ${new Date()}
+          WHERE external_id = ${input.quoteTaskExternalId}
+            AND user_id = ${input.userId}
+            AND status = 'awaiting_user'
+            AND awaiting_kind = 'video_quote'
+            AND JSON_UNQUOTE(JSON_EXTRACT(result, '$.metadata.lane')) = 'video_creation_confirm'
+        `);
+        if (extractMysqlAffectedRows(claim) !== 1) {
+          throw new StaleVideoQuoteError();
+        }
+
+        const [quoteTask] = await tx
+          .select({ id: tasks.id })
+          .from(tasks)
+          .where(eq(tasks.externalId, input.quoteTaskExternalId))
+          .limit(1);
+        if (!quoteTask) throw new Error('video quote vanished after atomic claim');
+
+        const insert = await tx.insert(tasks).values({
+          externalId: input.generationTaskExternalId,
+          userId: input.userId,
+          status: 'executing',
+          intent: input.intent,
+          plan: [],
+          roleId: 'video-creator',
+          opusUsed: false,
+          result: { metadata: input.executionMetadata },
+        });
+        const taskInternalId = readInsertId(insert);
+        await tx.insert(taskEvents).values([
+          {
+            externalId: newExternalId('taskEvent'),
+            taskId: quoteTask.id,
+            type: 'task.completed',
+            actor: 'user',
+            payload: {
+              source: 'video_quote',
+              from: 'awaiting_user',
+              to: 'completed',
+              reason: 'user_confirmed',
+            },
+          },
+          {
+            externalId: newExternalId('taskEvent'),
+            taskId: taskInternalId,
+            type: 'task.created',
+            actor: 'system',
+            payload: { intent: input.intent, planSize: 0, source: 'video_quote' },
+          },
+        ]);
+        return { kind: 'created' as const, taskInternalId };
+      });
+    } catch (err) {
+      if (err instanceof StaleVideoQuoteError) return { kind: 'stale' };
+      throw err;
+    }
   }
 
   async cancelVideoConfirm(taskExternalId: string): Promise<{ persisted: boolean }> {

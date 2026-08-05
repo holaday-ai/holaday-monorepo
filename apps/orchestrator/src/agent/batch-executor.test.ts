@@ -16,10 +16,74 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import {
+  batchItemClientRequestId,
   executeBatch,
+  isResumableBatchStatus,
+  prepareBatchItemsForRecovery,
   runWithConcurrency,
   summarizeBatchItemStatuses,
 } from './batch-executor.js';
+
+describe('batch restart recovery', () => {
+  it('only re-awakens non-terminal batch states', () => {
+    expect(isResumableBatchStatus('pending')).toBe(true);
+    expect(isResumableBatchStatus('running')).toBe(true);
+    expect(isResumableBatchStatus('completed')).toBe(false);
+    expect(isResumableBatchStatus('partial')).toBe(false);
+    expect(isResumableBatchStatus('cancelled')).toBe(false);
+  });
+
+  it('uses the persisted batch item id as the task-create idempotency key', () => {
+    expect(batchItemClientRequestId('batchItem_123')).toBe('batch_item:batchItem_123');
+  });
+
+  it('resumes running items with a task and resets unstamped items for safe redispatch', async () => {
+    const runningItems = [
+      { id: 11, externalId: 'batchItem_resume', status: 'running', taskId: 201 },
+      { id: 12, externalId: 'batchItem_redispatch', status: 'running', taskId: null },
+    ];
+    const updates: Array<{ values: Record<string, unknown>; predicate: string }> = [];
+    const db = {
+      select() {
+        return {
+          from() {
+            return {
+              where() {
+                return Promise.resolve(runningItems);
+              },
+            };
+          },
+        };
+      },
+      update() {
+        return {
+          set(values: Record<string, unknown>) {
+            return {
+              async where(predicate: unknown) {
+                updates.push({
+                  values,
+                  predicate: require('node:util').inspect(predicate, {
+                    depth: 8,
+                    getters: true,
+                  }),
+                });
+                return { affectedRows: 1 };
+              },
+            };
+          },
+        };
+      },
+    };
+
+    const resumable = await prepareBatchItemsForRecovery(7, db as never);
+
+    expect(resumable).toEqual([runningItems[0]]);
+    expect(updates).toHaveLength(1);
+    expect(updates[0]?.values).toMatchObject({ status: 'pending' });
+    expect(updates[0]?.predicate).toContain('value: 12');
+    expect(updates[0]?.predicate).toContain("value: 'running'");
+  });
+});
 
 describe('summarizeBatchItemStatuses — split terminal counters', () => {
   it('keeps failed and cancelled separate for reporting', () => {

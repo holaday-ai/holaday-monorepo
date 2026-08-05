@@ -29,6 +29,36 @@ export interface NormalizedBatchDetail extends NormalizedBatchRow {
   readonly items: NormalizedBatchItem[];
 }
 
+export interface BatchListCursor {
+  readonly id: number;
+  readonly createdAt: string | Date;
+}
+
+export interface NormalizedBatchPage {
+  readonly items: NormalizedBatchRow[];
+  readonly nextCursor: BatchListCursor | null;
+}
+
+export function normalizeBatchPage(value: unknown): NormalizedBatchPage {
+  if (Array.isArray(value)) {
+    return { items: normalizeBatchRows(value), nextCursor: null };
+  }
+  if (!isRecord(value)) return { items: [], nextCursor: null };
+  return {
+    items: normalizeBatchRows(value.items),
+    nextCursor: normalizeBatchCursor(value.nextCursor),
+  };
+}
+
+export function mergeBatchRows(
+  current: readonly NormalizedBatchRow[],
+  incoming: readonly NormalizedBatchRow[],
+): NormalizedBatchRow[] {
+  const merged = new Map(current.map((row) => [row.batchId, row]));
+  for (const row of incoming) merged.set(row.batchId, row);
+  return [...merged.values()];
+}
+
 export function batchPromptImportStateReset(location: {
   readonly pathname: string;
   readonly search: string;
@@ -284,6 +314,15 @@ function normalizeBatchItem(value: unknown, fallbackSeq: number): NormalizedBatc
     createdAt: safeBatchDate(value.createdAt) ?? '',
     completedAt: safeNullableBatchDate(value.completedAt),
   };
+}
+
+function normalizeBatchCursor(value: unknown): BatchListCursor | null {
+  if (!isRecord(value)) return null;
+  const id = value.id;
+  const createdAt = safeBatchDate(value.createdAt);
+  return typeof id === 'number' && Number.isSafeInteger(id) && id > 0 && createdAt
+    ? { id, createdAt }
+    : null;
 }
 
 function normalizeBatchStatus(value: unknown): string {

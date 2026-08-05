@@ -86,6 +86,31 @@ export async function preflightIpVideoAssets(
   return { baseVideoUrl, issue: null };
 }
 
+export async function preflightCloneVideoAssets(
+  input: {
+    subjectFileId: string;
+    referenceVideoFileId: string;
+  },
+  retainAndSign: (fileId: string) => Promise<string | null>,
+): Promise<{
+  subjectUrl: string | null;
+  referenceVideoUrl: string | null;
+  issue: string | null;
+}> {
+  const [subjectUrl, referenceVideoUrl] = await Promise.all([
+    retainAndSign(input.subjectFileId),
+    retainAndSign(input.referenceVideoFileId),
+  ]);
+  if (!subjectUrl || !referenceVideoUrl) {
+    return {
+      subjectUrl: null,
+      referenceVideoUrl: null,
+      issue: '主角照片或参考视频当前不可用，请重新上传后再确认制作。',
+    };
+  }
+  return { subjectUrl, referenceVideoUrl, issue: null };
+}
+
 // 报价:硬编码的只有官方单价表 + 汇率;动态部分 = 本次真实段数 + 选定档/画质/时长。
 // TODO(pricing): 价表/汇率为硬编码快照，Google/阿里 可能调价 → 需手动同步
 //   https://ai.google.dev/gemini-api/docs/pricing (Veo 每秒价 + nano banana 图片价)。

@@ -2,6 +2,7 @@ import type { TRPCError } from '@trpc/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { VIDEO_CREATION_ALLOWLIST } from '../../agent/video/video-access.js';
 import { env as appEnv } from '../../config/env.js';
+import { FileService } from '../../files/file-service.js';
 import { QuotaService } from '../../quota/quota-service.js';
 import { __tasksInternals, tasksRouter } from './tasks.js';
 
@@ -172,6 +173,22 @@ afterEach(() => {
 });
 
 describe('tasks.create billing order', () => {
+  it('rejects an unavailable ordinary attachment before consuming task quota', async () => {
+    const consume = vi.spyOn(QuotaService.prototype, 'tryConsume').mockResolvedValue({ ok: true });
+    vi.spyOn(QuotaService.prototype, 'getActiveTaskCount').mockResolvedValue(0);
+    vi.spyOn(FileService.prototype, 'loadMany').mockResolvedValue([]);
+
+    await expect(
+      tasksRouter.createCaller(makeCreateContext()).create({
+        intent: '总结这份附件',
+        fileIds: ['fil_missing'],
+      }),
+    ).rejects.toMatchObject({
+      code: 'BAD_REQUEST',
+    });
+    expect(consume).not.toHaveBeenCalled();
+  });
+
   it('validates a locked-subject attachment before consuming task quota', async () => {
     const consume = vi.spyOn(QuotaService.prototype, 'tryConsume').mockResolvedValue({ ok: true });
     vi.spyOn(QuotaService.prototype, 'getActiveTaskCount').mockResolvedValue(0);

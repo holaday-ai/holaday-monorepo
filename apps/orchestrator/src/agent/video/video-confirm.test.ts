@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   decideVideoGate,
   parseVideoConfirm,
+  preflightCloneVideoAssets,
   preflightIpVideoAssets,
   quoteCloneVideo,
   quoteIpVideo,
@@ -90,6 +91,40 @@ describe('preflightIpVideoAssets — validate durable inputs before quote consum
       ),
     ).resolves.toEqual({
       baseVideoUrl: 'https://r2.example/base.mp4',
+      issue: null,
+    });
+  });
+});
+
+describe('preflightCloneVideoAssets — validate quoted files before quota consumption', () => {
+  it('blocks confirmation when either quoted file is no longer readable', async () => {
+    const retainAndSign = vi.fn(async (fileId: string) =>
+      fileId === 'fil_subject' ? 'https://r2.example/subject.png' : null,
+    );
+
+    await expect(
+      preflightCloneVideoAssets(
+        { subjectFileId: 'fil_subject', referenceVideoFileId: 'fil_stale' },
+        retainAndSign,
+      ),
+    ).resolves.toEqual({
+      subjectUrl: null,
+      referenceVideoUrl: null,
+      issue: '主角照片或参考视频当前不可用，请重新上传后再确认制作。',
+    });
+  });
+
+  it('returns both signed URLs when the quoted inputs are ready', async () => {
+    const retainAndSign = vi.fn(async (fileId: string) => `https://r2.example/${fileId}`);
+
+    await expect(
+      preflightCloneVideoAssets(
+        { subjectFileId: 'fil_subject', referenceVideoFileId: 'fil_reference' },
+        retainAndSign,
+      ),
+    ).resolves.toEqual({
+      subjectUrl: 'https://r2.example/fil_subject',
+      referenceVideoUrl: 'https://r2.example/fil_reference',
       issue: null,
     });
   });

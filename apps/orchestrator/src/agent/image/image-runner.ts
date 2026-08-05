@@ -17,6 +17,7 @@ import {
   GeminiImageError,
   type GeminiApiVersion,
   type GeminiImageInput,
+  type GeneratedImage,
 } from './gemini-image-client.js';
 import { pickImageModel, DEFAULT_FLASH_MODEL, type ImageModelTier } from './model-router.js';
 
@@ -49,7 +50,25 @@ export interface RunImageTaskResult {
   /** The model id actually used. */
   model?: string;
   tier?: ImageModelTier;
+  subjectConsistency?: {
+    checked: number;
+    passed: number;
+    failed: number;
+    reasons: string[];
+  };
 }
+
+export interface SubjectConsistencyVerdict {
+  status: 'pass' | 'fail' | 'unknown';
+  confidence: number | null;
+  reason: string;
+}
+
+export type VerifySubjectFn = (input: {
+  subject: GeminiImageInput;
+  candidate: GeneratedImage;
+  intent: string;
+}) => Promise<SubjectConsistencyVerdict>;
 
 /** Persist one generated image → an attachment row. Injected. */
 export type SaveImageFn = (
@@ -79,6 +98,8 @@ export interface RunImageTaskOpts {
   logger: Logger;
   /** Injectable adapter for tests; defaults to the real Gemini client. */
   generate?: typeof generateImages;
+  /** Required in lock_subject mode; generated candidates fail closed without it. */
+  verifySubject?: VerifySubjectFn;
 }
 
 export async function runImageTask(opts: RunImageTaskOpts): Promise<RunImageTaskResult> {
@@ -89,6 +110,14 @@ export async function runImageTask(opts: RunImageTaskOpts): Promise<RunImageTask
       status: 'failed',
       summary: '',
       reason: '锁定主角模式需要先上传一张清晰的主角图。',
+      attachments: [],
+    };
+  }
+  if (opts.mode === 'lock_subject' && !opts.verifySubject) {
+    return {
+      status: 'failed',
+      summary: '',
+      reason: '主体一致性复核服务暂不可用，未开始生成或扣费，请稍后重试。',
       attachments: [],
     };
   }
@@ -112,10 +141,11 @@ export async function runImageTask(opts: RunImageTaskOpts): Promise<RunImageTask
     model: string,
     apiVersion: GeminiApiVersion,
     resolution?: string,
+    prompt = promptText,
   ) =>
     generate({
       apiKey: opts.apiKey,
-      prompt: promptText,
+      prompt,
       model,
       apiVersion,
       ...(opts.baseUrl ? { baseUrl: opts.baseUrl } : {}),
@@ -217,15 +247,75 @@ export async function runImageTask(opts: RunImageTaskOpts): Promise<RunImageTask
   }
 
   const attachments: ImageAttachment[] = [];
+  const subjectConsistency =
+    opts.mode === 'lock_subject'
+      ? { checked: 0, passed: 0, failed: 0, reasons: [] as string[] }
+      : undefined;
+  const subjectAnchor = opts.mode === 'lock_subject' ? opts.inputImages?.[0] : undefined;
   for (let i = 0; i < generatedImages.length; i += 1) {
-    const image = generatedImages[i]!;
+    let image = generatedImages[i]!;
     const safeMime = normalizeGeneratedImageMime(image.mimeType);
     if (!safeMime) {
       opts.logger.warn({ mimeType: image.mimeType, index: i }, 'image: unsupported mime skipped');
       continue;
     }
+    if (subjectConsistency && subjectAnchor && opts.verifySubject) {
+      let verified = false;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        let verdict: SubjectConsistencyVerdict;
+        try {
+          verdict = await opts.verifySubject({
+            subject: subjectAnchor,
+            candidate: image,
+            intent,
+          });
+        } catch (err) {
+          verdict = {
+            status: 'unknown',
+            confidence: null,
+            reason: err instanceof Error ? err.message : '复核服务异常',
+          };
+        }
+        subjectConsistency.checked += 1;
+        if (verdict.status === 'pass') {
+          subjectConsistency.passed += 1;
+          verified = true;
+          break;
+        }
+        subjectConsistency.failed += 1;
+        subjectConsistency.reasons.push(verdict.reason || '主体身份无法确认');
+        if (attempt === 0) {
+          try {
+            const replacement = await runGenerate(
+              degraded ? flashModel : decision.model,
+              degraded ? 'v1' : apiVersionForTier(decision.tier),
+              degraded ? undefined : decision.resolution,
+              `${promptText}\n\n【重新生成】上一版未通过主体一致性复核。必须更严格保留第一张图中的身份、脸部/毛色/商品结构与关键标识，不得替换或重塑主角。`,
+            );
+            const nextImage = replacement.images[0];
+            if (!nextImage) break;
+            image = nextImage;
+          } catch (err) {
+            opts.logger.warn(
+              { err: err instanceof Error ? err.message : String(err), index: i },
+              'image: locked-subject regeneration failed',
+            );
+            break;
+          }
+        }
+      }
+      if (!verified) {
+        opts.logger.warn(
+          { index: i, reasons: subjectConsistency.reasons },
+          'image: locked-subject candidate rejected',
+        );
+        continue;
+      }
+    }
     try {
-      attachments.push(await opts.save({ ...image, mimeType: safeMime }, i));
+      const verifiedMime = normalizeGeneratedImageMime(image.mimeType);
+      if (!verifiedMime) continue;
+      attachments.push(await opts.save({ ...image, mimeType: verifiedMime }, i));
     } catch (err) {
       opts.logger.warn(
         { err: err instanceof Error ? err.message : String(err), index: i },
@@ -238,10 +328,14 @@ export async function runImageTask(opts: RunImageTaskOpts): Promise<RunImageTask
     return {
       status: 'failed',
       summary: '',
-      reason: '图片已生成但保存失败，请重试。',
+      reason:
+        subjectConsistency && subjectConsistency.failed > 0
+          ? '图片已生成，但主体一致性复核未通过，未交付可能换脸或换主体的结果。请换一张更清晰的主角图后重试。'
+          : '图片已生成但保存失败，请重试。',
       attachments: [],
       model: decision.model,
       tier: decision.tier,
+      ...(subjectConsistency ? { subjectConsistency } : {}),
     };
   }
 
@@ -259,6 +353,7 @@ export async function runImageTask(opts: RunImageTaskOpts): Promise<RunImageTask
     attachments,
     model: result.model ?? decision.model,
     tier: effectiveTier,
+    ...(subjectConsistency ? { subjectConsistency } : {}),
   };
 }
 

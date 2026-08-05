@@ -7,13 +7,10 @@
  * resulting task rows until each settles, then updates the batch
  * counters + broadcasts WS progress.
  *
- * The "executor" is just a coroutine kicked off fire-and-forget from
- * the batchTasks.create mutation — there's no daemon thread or queue;
- * each batch's promise lives inside the orchestrator process for the
- * duration of the run. A pm2 restart mid-batch leaves the batch row
- * in `running` status with some items still in `pending` — the next
- * boot doesn't auto-resume (no daemon to do it), and the user can
- * cancel + re-submit. Single-instance, low-volume v1 sizing.
+ * The "executor" is a coroutine kicked off fire-and-forget from the
+ * batchTasks create/list/detail paths. Pending and running batches are
+ * therefore recovered after a process restart when the client next
+ * reads them. Stable per-item idempotency keys make redispatch safe.
  *
  * Failure semantics:
  *   - tasks.create throws (quota / concurrency cap / DB blip) →
@@ -33,7 +30,7 @@
  * user, not silently re-dispatch.
  */
 
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import type { Logger } from 'pino';
 import type { ServerMessage } from '@holaday/shared-types';
 import {
@@ -75,8 +72,11 @@ export interface BatchExecutorDeps {
     userInternalId: number;
     userExternalId: string;
     prompt: string;
+    clientRequestId: string;
   }) => Promise<{ taskInternalId: number; taskExternalId: string }>;
 }
+
+const activeBatchExecutions = new Set<string>();
 
 /**
  * Kick off execution of one batch. Returns a promise that resolves
@@ -90,6 +90,19 @@ export interface BatchExecutorDeps {
  * against pm2 race or accidental double-kick.
  */
 export async function executeBatch(
+  batchExternalId: string,
+  deps: BatchExecutorDeps,
+): Promise<void> {
+  if (activeBatchExecutions.has(batchExternalId)) return;
+  activeBatchExecutions.add(batchExternalId);
+  try {
+    await executeBatchInternal(batchExternalId, deps);
+  } finally {
+    activeBatchExecutions.delete(batchExternalId);
+  }
+}
+
+async function executeBatchInternal(
   batchExternalId: string,
   deps: BatchExecutorDeps,
 ): Promise<void> {
@@ -132,6 +145,18 @@ export async function executeBatch(
   const concurrency = Math.max(1, batch.concurrency);
   const inFlight = new Map<number, Promise<void>>(); // item.id → promise
 
+  // Recover work owned by the previous process. Items with a stamped
+  // task resume polling that task. An item without a task stamp is put
+  // back into pending; its stable clientRequestId makes redispatch safe
+  // even if the prior process created the task just before it exited.
+  const resumable = await prepareBatchItemsForRecovery(batch.id, db);
+  for (const item of resumable) {
+    const promise = pollTaskForItem(batch, item, owner, deps, item.taskId!, null).finally(() => {
+      inFlight.delete(item.id);
+    });
+    inFlight.set(item.id, promise);
+  }
+
   while (true) {
     // Re-check batch status for cancellation. Live select so a
     // user-cancel mid-flight propagates immediately.
@@ -146,12 +171,7 @@ export async function executeBatch(
       await db
         .update(batchTaskItems)
         .set({ status: 'cancelled', completedAt: new Date() })
-        .where(
-          and(
-            eq(batchTaskItems.batchId, batch.id),
-            eq(batchTaskItems.status, 'pending'),
-          ),
-        );
+        .where(and(eq(batchTaskItems.batchId, batch.id), eq(batchTaskItems.status, 'pending')));
       // Wait for in-flight items to settle so we don't leak their
       // promises. They'll mark themselves completed/failed in the DB.
       await Promise.allSettled(inFlight.values());
@@ -167,12 +187,7 @@ export async function executeBatch(
       const pending = await db
         .select()
         .from(batchTaskItems)
-        .where(
-          and(
-            eq(batchTaskItems.batchId, batch.id),
-            eq(batchTaskItems.status, 'pending'),
-          ),
-        )
+        .where(and(eq(batchTaskItems.batchId, batch.id), eq(batchTaskItems.status, 'pending')))
         .orderBy(batchTaskItems.seq)
         .limit(slotsOpen);
       for (const item of pending) {
@@ -214,12 +229,7 @@ async function runItem(
     const claim = await db
       .update(batchTaskItems)
       .set({ status: 'running' })
-      .where(
-        and(
-          eq(batchTaskItems.id, item.id),
-          eq(batchTaskItems.status, 'pending'),
-        ),
-      );
+      .where(and(eq(batchTaskItems.id, item.id), eq(batchTaskItems.status, 'pending')));
     claimAffected = extractMysqlAffectedRows(claim);
   } catch (err) {
     logger.warn(
@@ -242,6 +252,7 @@ async function runItem(
       userInternalId: owner.id,
       userExternalId: owner.externalId,
       prompt: item.prompt,
+      clientRequestId: batchItemClientRequestId(item.externalId),
     });
     taskInternalId = res.taskInternalId;
     taskExternalId = res.taskExternalId;
@@ -269,7 +280,19 @@ async function runItem(
     return;
   }
 
-  // Poll the dispatched task until terminal.
+  await pollTaskForItem(batch, item, owner, deps, taskInternalId, taskExternalId);
+}
+
+async function pollTaskForItem(
+  batch: BatchTask,
+  item: BatchTaskItem,
+  owner: { externalId: string; id: number },
+  deps: BatchExecutorDeps,
+  taskInternalId: number,
+  initialTaskExternalId: string | null,
+): Promise<void> {
+  const { db, logger } = deps;
+  let taskExternalId = initialTaskExternalId;
   const startedAt = Date.now();
   while (true) {
     if (Date.now() - startedAt > MAX_WAIT_MS) {
@@ -297,10 +320,11 @@ async function runItem(
       return;
     }
     const [tRow] = await db
-      .select({ status: tasks.status })
+      .select({ status: tasks.status, externalId: tasks.externalId })
       .from(tasks)
       .where(eq(tasks.id, taskInternalId))
       .limit(1);
+    if (tRow?.externalId) taskExternalId = tRow.externalId;
     if (tRow && isTaskTerminalStatus(tRow.status)) {
       const itemStatus = taskTerminalStatusToBatchItemStatus(tRow.status);
       const ok = itemStatus === 'completed';
@@ -313,21 +337,50 @@ async function runItem(
           ...(errorMessage ? { errorMessage } : {}),
         })
         .where(eq(batchTaskItems.id, item.id));
-      await broadcastItemUpdate(
-        batch,
-        item.id,
-        itemStatus,
-        deps,
-        owner.externalId,
-        {
+      await broadcastItemUpdate(batch, item.id, itemStatus, deps, owner.externalId, {
           ...(taskExternalId ? { taskExternalId } : {}),
           ...(errorMessage ? { errorMessage } : {}),
-        },
-      );
+      });
       return;
     }
     await sleep(POLL_INTERVAL_MS);
   }
+}
+
+export function batchItemClientRequestId(batchItemExternalId: string): string {
+  return `batch_item:${batchItemExternalId}`;
+}
+
+export function isResumableBatchStatus(status: string): boolean {
+  return status === 'pending' || status === 'running';
+}
+
+export async function prepareBatchItemsForRecovery(
+  batchInternalId: number,
+  db: DB,
+): Promise<BatchTaskItem[]> {
+  const running = await db
+    .select()
+    .from(batchTaskItems)
+    .where(and(eq(batchTaskItems.batchId, batchInternalId), eq(batchTaskItems.status, 'running')));
+  const resumable: BatchTaskItem[] = [];
+  for (const item of running) {
+    if (item.taskId !== null) {
+      resumable.push(item);
+      continue;
+    }
+    await db
+      .update(batchTaskItems)
+      .set({ status: 'pending', errorMessage: null })
+      .where(
+        and(
+          eq(batchTaskItems.id, item.id),
+          eq(batchTaskItems.status, 'running'),
+          isNull(batchTaskItems.taskId),
+        ),
+      );
+  }
+  return resumable;
 }
 
 /**
@@ -398,13 +451,7 @@ async function finalizeBatch(batchInternalId: number, deps: BatchExecutorDeps): 
 async function broadcastItemUpdate(
   batch: BatchTask,
   itemInternalId: number,
-  itemStatus:
-    | 'pending'
-    | 'running'
-    | 'completed'
-    | 'partial_success'
-    | 'failed'
-    | 'cancelled',
+  itemStatus: 'pending' | 'running' | 'completed' | 'partial_success' | 'failed' | 'cancelled',
   deps: BatchExecutorDeps,
   userExternalId: string,
   extras?: { taskExternalId?: string; errorMessage?: string },
@@ -441,9 +488,7 @@ async function broadcastItemUpdate(
   });
 }
 
-export function summarizeBatchItemStatuses(
-  items: ReadonlyArray<{ status: string }>,
-): {
+export function summarizeBatchItemStatuses(items: ReadonlyArray<{ status: string }>): {
   total: number;
   done: number;
   review: number;
@@ -471,11 +516,9 @@ export function summarizeBatchItemStatuses(
   };
 }
 
-function taskTerminalStatusToBatchItemStatus(status: string):
-  | 'completed'
-  | 'partial_success'
-  | 'failed'
-  | 'cancelled' {
+function taskTerminalStatusToBatchItemStatus(
+  status: string,
+): 'completed' | 'partial_success' | 'failed' | 'cancelled' {
   if (status === 'completed') return 'completed';
   if (status === 'partial_success') return 'partial_success';
   if (status === 'cancelled') return 'cancelled';
@@ -600,8 +643,3 @@ export async function insertBatch(
 
 // Re-export for the test file's convenience.
 export { POLL_INTERVAL_MS, MAX_WAIT_MS };
-
-// Suppress unused-import noise for `inArray` (kept for future bulk
-// queries on cancel; not currently called but the test file imports
-// the module and lints all of it).
-void inArray;

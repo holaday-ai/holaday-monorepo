@@ -20,10 +20,11 @@
 
 import { newExternalId, type PlanId } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, lt, or } from 'drizzle-orm';
 import { z } from 'zod';
 import {
   executeBatch,
+  isResumableBatchStatus,
   insertBatch,
   summarizeBatchItemStatuses,
 } from '../../agent/batch-executor.js';
@@ -32,6 +33,7 @@ import { batchTaskItems, batchTasks } from '../../db/schema/batch-tasks.js';
 import { tasks } from '../../db/schema/tasks.js';
 import { users } from '../../db/schema/users.js';
 import { broadcastToUser } from '../../ws/server.js';
+import type { Context } from '../context.js';
 import { protectedProcedure, router } from '../trpc.js';
 
 const CONCURRENCY_BY_PLAN: Record<PlanId, number> = {
@@ -41,6 +43,38 @@ const CONCURRENCY_BY_PLAN: Record<PlanId, number> = {
 };
 
 const MAX_BATCH_ITEMS = 50; // hard ceiling; ~25 min × 50 = 20h worst-case
+
+type AuthenticatedContext = Context & { userId: string };
+
+function startBatchExecution(ctx: AuthenticatedContext, batchExternalId: string): void {
+  void (async () => {
+    const { tasksRouter } = await import('./tasks.js');
+    await executeBatch(batchExternalId, {
+      db: ctx.db,
+      logger: ctx.logger,
+      broadcastToUser,
+      dispatch: async ({ prompt, clientRequestId }) => {
+        const result = await tasksRouter
+          .createCaller(ctx)
+          .create({ intent: prompt, clientRequestId });
+        const [task] = await ctx.db
+          .select({ id: tasks.id })
+          .from(tasks)
+          .where(eq(tasks.externalId, result.taskId))
+          .limit(1);
+        if (!task) {
+          throw new Error(`dispatch returned taskId=${result.taskId} but row not found`);
+        }
+        return { taskInternalId: task.id, taskExternalId: result.taskId };
+      },
+    });
+  })().catch((err) => {
+    ctx.logger.error(
+      { err: err instanceof Error ? err.message : String(err), batchExternalId },
+      'batch-executor: top-level crash',
+    );
+  });
+}
 
 async function requireUser(
   ctx: { db: typeof import('../../db/client.js').db; userId: string },
@@ -61,8 +95,35 @@ async function requireUser(
 }
 
 export const batchTasksRouter = router({
-  list: protectedProcedure.query(async ({ ctx }) => {
+  list: protectedProcedure
+    .input(
+      z
+        .object({
+          limit: z.number().int().positive().max(100).default(50),
+          cursor: z
+            .object({
+              id: z.number().int().positive(),
+              createdAt: z.date(),
+            })
+            .optional(),
+        })
+        .optional(),
+    )
+    .query(async ({ ctx, input }) => {
     const user = await requireUser(ctx);
+    const limit = input?.limit ?? 50;
+    const whereParts = [eq(batchTasks.userId, user.id)];
+    if (input?.cursor) {
+      whereParts.push(
+        or(
+          lt(batchTasks.createdAt, input.cursor.createdAt),
+          and(
+            eq(batchTasks.createdAt, input.cursor.createdAt),
+            lt(batchTasks.id, input.cursor.id),
+          ),
+        )!,
+      );
+    }
     const rows = await ctx.db
       .select({
         id: batchTasks.id,
@@ -78,10 +139,17 @@ export const batchTasksRouter = router({
         completedAt: batchTasks.completedAt,
       })
       .from(batchTasks)
-      .where(eq(batchTasks.userId, user.id))
-      .orderBy(desc(batchTasks.createdAt))
-      .limit(50);
-    const batchIds = rows.map((r) => r.id);
+      .where(and(...whereParts))
+      .orderBy(desc(batchTasks.createdAt), desc(batchTasks.id))
+      .limit(limit + 1);
+    const hasMore = rows.length > limit;
+    const page = rows.slice(0, limit);
+    for (const batch of page) {
+      if (isResumableBatchStatus(batch.status)) {
+        startBatchExecution(ctx, batch.externalId);
+      }
+    }
+    const batchIds = page.map((r) => r.id);
     const countsByBatch = new Map<
       number,
       ReturnType<typeof summarizeBatchItemStatuses>
@@ -104,7 +172,7 @@ export const batchTasksRouter = router({
         countsByBatch.set(id, summarizeBatchItemStatuses(statuses));
       }
     }
-    return rows.map((r) => {
+    const items = page.map((r) => {
       const counts = countsByBatch.get(r.id) ?? {
         total: r.itemsTotal,
         done: r.itemsDone,
@@ -126,6 +194,11 @@ export const batchTasksRouter = router({
         completedAt: r.completedAt,
       };
     });
+    const last = page[page.length - 1];
+    return {
+      items,
+      nextCursor: hasMore && last ? { id: last.id, createdAt: last.createdAt } : null,
+    };
   }),
 
   detail: protectedProcedure
@@ -141,6 +214,9 @@ export const batchTasksRouter = router({
         .limit(1);
       if (!batch) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'batch not found' });
+      }
+      if (isResumableBatchStatus(batch.status)) {
+        startBatchExecution(ctx, batch.externalId);
       }
       // Items + their underlying task external_id (so SPA can deep-
       // link to the per-task view).
@@ -235,55 +311,7 @@ export const batchTasksRouter = router({
         itemExternalIdFactory: () => newExternalId('batchItem'),
       });
 
-      // Kick the executor off fire-and-forget. The dispatch callback
-      // wires back into tasksRouter.createCaller(ctx).create({intent})
-      // so each item is a real task with all the existing infrastructure
-      // (quota, planning, supercar/generate/scrape routing, broadcast).
-      //
-      // We REQUIRE the import here (and not at module load) to avoid
-      // a circular dep — tasks.ts imports from many places that may
-      // eventually re-import the batch-tasks router.
-      const { tasksRouter } = await import('./tasks.js');
-      // Build a context for the executor's dispatch closure. We reuse
-      // the request's ctx (it has all the adapter handles), but
-      // override `userId` per-item — which today is always the same
-      // since we already authed the request. Future: when the user
-      // creates a batch via webhook, the userId could be system; for
-      // now they're identical.
-      const dispatchCtx = ctx;
-      void executeBatch(batchExternalId, {
-        db: ctx.db,
-        logger: ctx.logger,
-        broadcastToUser,
-        dispatch: async ({ userInternalId, userExternalId, prompt }) => {
-          void userInternalId;
-          void userExternalId;
-          const result = await tasksRouter
-            .createCaller(dispatchCtx)
-            .create({ intent: prompt });
-          // Resolve external taskId back to internal so the executor
-          // can stamp batch_task_items.task_id (FK to tasks.id).
-          const [tRow] = await ctx.db
-            .select({ id: tasks.id })
-            .from(tasks)
-            .where(eq(tasks.externalId, result.taskId))
-            .limit(1);
-          if (!tRow) {
-            throw new Error(
-              `dispatch returned taskId=${result.taskId} but row not found`,
-            );
-          }
-          return {
-            taskInternalId: tRow.id,
-            taskExternalId: result.taskId,
-          };
-        },
-      }).catch((err) => {
-        ctx.logger.error(
-          { err: err instanceof Error ? err.message : String(err), batchExternalId },
-          'batch-executor: top-level crash',
-        );
-      });
+      startBatchExecution(ctx, batchExternalId);
 
       return { batchId: batchExternalId, itemsTotal: prompts.length, concurrency };
     }),

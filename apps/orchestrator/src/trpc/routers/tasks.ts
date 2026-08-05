@@ -29,6 +29,7 @@ import {
   runImageTask,
 } from '../../agent/image/image-runner.js';
 import { orderImageAttachmentIds } from '../../agent/image/image-input-order.js';
+import { createAnthropicSubjectConsistencyVerifier } from '../../agent/image/image-subject-verifier.js';
 import { classifyExecutionMode } from '../../agent/intent-classifier.js';
 import { DrizzleLlmCallRecorder } from '../../agent/llm-call-recorder.js';
 // Phase 24 RC follow-up — nav-failure safety net. Catches the
@@ -80,6 +81,7 @@ import {
 import type { PlannedStep, TaskState } from '../../agent/task-controller.js';
 import { TaskController } from '../../agent/task-controller.js';
 import { friendlyTaskFailureReason } from '../../agent/task-failure-copy.js';
+import { startTaskHeartbeat } from '../../agent/task-heartbeat.js';
 import { TaskRepository } from '../../agent/task-repository.js';
 import {
   type RunTemplateFillResult,
@@ -98,6 +100,7 @@ import { injectResolvedUrl, resolveIntentUrl } from '../../agent/url-resolver.js
 import type { VideoScript } from '../../agent/video/types.js';
 import { VIDEO_CREATION_ALLOWLIST } from '../../agent/video/video-access.js';
 import { probeCloneReferenceQuoteFacts } from '../../agent/video/video-clone-reference.js';
+import { mediaCapabilityIssue } from '../../agent/video/media-capability.js';
 import {
   claimVideoConfirmAfterVerifierPreflight,
   deriveVideoType,
@@ -112,6 +115,7 @@ import {
 import {
   decideVideoGate,
   parseVideoConfirm,
+  preflightCloneVideoAssets,
   preflightIpVideoAssets,
   quoteCloneVideo,
   quoteIpVideo,
@@ -147,6 +151,12 @@ import { users } from '../../db/schema/users.js';
 import { EvidenceArtifactRepository } from '../../evidence/evidence-artifact-repository.js';
 import { routeTaskEvidenceOnDelete } from '../../evidence/evidence-deletion-service.js';
 import { writeLedgerToDb } from '../../evidence/ledger-write-service.js';
+import {
+  finalizeClaim as finalizeTaskCreateClaim,
+  recordClaim as claimTaskCreate,
+  releaseClaim as releaseTaskCreateClaim,
+  type ClaimResult as TaskCreateClaimResult,
+} from '../../api-keys/webhook-idempotency-service.js';
 import type { VerificationResult } from '../../execution/answer-verifier.js';
 // Phase 1 Day 5 — execution-pipeline glue. All four entry points are
 // no-ops when the corresponding feature flag is off (default), so
@@ -452,6 +462,12 @@ const taskIdInput = z.object({ taskId: z.string().min(1) });
 
 const createInput = z.object({
   intent: z.string().min(1).max(4_000),
+  clientRequestId: z
+    .string()
+    .min(8)
+    .max(64)
+    .regex(/^[A-Za-z0-9._:-]+$/)
+    .optional(),
   occupation: z.string().optional(),
   /**
    * Phase 10 Tier 3 — external ids for files the user uploaded
@@ -987,6 +1003,62 @@ function isSafeUrl(raw: string): boolean {
 
 const browserSessionRestoreFlights = new BrowserSessionRestoreFlights();
 
+type TaskCreateReplay = { readonly taskId: string } & Record<string, unknown>;
+
+export async function runTaskCreateIdempotently<T extends TaskCreateReplay>(input: {
+  readonly clientRequestId?: string;
+  readonly claim: () => Promise<TaskCreateClaimResult>;
+  readonly finalize: (taskId: string, response: T) => Promise<boolean>;
+  readonly release: () => Promise<boolean>;
+  readonly run: () => Promise<T>;
+  readonly onFinalizeFailure?: () => void;
+}): Promise<T> {
+  if (!input.clientRequestId) return input.run();
+  const claim = await input.claim();
+  if (claim.kind === 'replay') {
+    if (claim.conflictsWith) {
+      throw new TRPCError({
+        code: 'CONFLICT',
+        message: '同一次提交的内容发生变化，请重新发起任务。',
+      });
+    }
+    if (!isTaskCreateReplay(claim.response)) {
+      throw new TRPCError({
+        code: 'INTERNAL_SERVER_ERROR',
+        message: '任务去重记录不完整，请联系支持。',
+      });
+    }
+    return claim.response as T;
+  }
+  if (claim.kind === 'in_flight') {
+    throw new TRPCError({
+      code: 'CONFLICT',
+      message: '任务正在创建，请稍候查看任务列表，不要重复提交。',
+    });
+  }
+  try {
+    const response = await input.run();
+    let finalized = false;
+    for (let attempt = 0; attempt < 3 && !finalized; attempt += 1) {
+      finalized = await input.finalize(response.taskId, response);
+    }
+    if (!finalized) input.onFinalizeFailure?.();
+    return response;
+  } catch (err) {
+    await input.release();
+    throw err;
+  }
+}
+
+function isTaskCreateReplay(value: unknown): value is TaskCreateReplay {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as { taskId?: unknown }).taskId === 'string' &&
+    (value as { taskId: string }).taskId.length > 0
+  );
+}
+
 export const tasksRouter = router({
   create: protectedProcedure.input(createInput).mutation(async ({ ctx, input }) => {
     // O15 — code-task refusal lands BEFORE user lookup so even an
@@ -1027,6 +1099,39 @@ export const tasksRouter = router({
     if (!userRow) {
       throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
     }
+    const taskCreateIdempotencyKey = input.clientRequestId
+      ? `spa_task:${input.clientRequestId}`
+      : null;
+    return runTaskCreateIdempotently({
+      clientRequestId: input.clientRequestId,
+      claim: () =>
+        claimTaskCreate(
+          { db: ctx.db, logger: ctx.logger },
+          userRow.id,
+          taskCreateIdempotencyKey!,
+          input,
+        ),
+      finalize: (taskId, response) =>
+        finalizeTaskCreateClaim(
+          { db: ctx.db, logger: ctx.logger },
+          userRow.id,
+          taskCreateIdempotencyKey!,
+          taskId,
+          response,
+        ),
+      release: () =>
+        releaseTaskCreateClaim(
+          { db: ctx.db, logger: ctx.logger },
+          userRow.id,
+          taskCreateIdempotencyKey!,
+        ),
+      onFinalizeFailure: () => {
+        ctx.logger.error(
+          { userId: ctx.userId, clientRequestId: input.clientRequestId },
+          'tasks.create: task created but idempotency claim did not finalize',
+        );
+      },
+      run: async () => {
     const taskSkillId = resolveTaskSkillContext(input, userRow.selectedSkills);
     const videoAllowed =
       VIDEO_CREATION_ALLOWLIST.size === 0 || VIDEO_CREATION_ALLOWLIST.has(ctx.userId);
@@ -1051,6 +1156,14 @@ export const tasksRouter = router({
     }
     if (orderedFileIds.length > 0) {
       const loaded = await fileService.loadMany(orderedFileIds, userRow.id);
+          const requestedFileIds = [...new Set(orderedFileIds)];
+          const loadedFileIds = new Set(loaded.map((file) => file.row.externalId));
+          if (requestedFileIds.some((fileId) => !loadedFileIds.has(fileId))) {
+            throw new TRPCError({
+              code: 'BAD_REQUEST',
+              message: '有附件已失效或无法读取，请重新上传后再提交',
+            });
+          }
       if (input.imageOptions?.mode === 'lock_subject' && input.imageOptions.subjectFileId) {
         const subject = loaded.find(
           (file) => file.row.externalId === input.imageOptions?.subjectFileId,
@@ -1085,6 +1198,10 @@ export const tasksRouter = router({
               message: '主角图读取失败，请重新上传一张清晰图片',
             });
           }
+              throw new TRPCError({
+                code: 'BAD_REQUEST',
+                message: '附件读取失败，请重新上传后再提交',
+              });
         }
       }
     }
@@ -1159,7 +1276,8 @@ export const tasksRouter = router({
         parentWorkflowId = candidateWfId;
       }
       parentHasBrowserContext = followUpParentHasBrowserContext({
-        executionMode: parentResult?.metadata?.executionMode ?? parentResult?.executionMode ?? null,
+            executionMode:
+              parentResult?.metadata?.executionMode ?? parentResult?.executionMode ?? null,
         finalUrl: parentResult?.finalUrl ?? null,
         hasFinalScreenshot: Boolean(parentResult?.finalScreenshot),
         intent: parent.intent,
@@ -1360,6 +1478,37 @@ export const tasksRouter = router({
       executionMode === 'video_creation' ||
       input.roleId === 'video-creator' ||
       input.videoOptions?.tab !== undefined;
+        const providerReadiness = {
+          hasDashscope: Boolean(appEnv.DASHSCOPE_API_KEY),
+          hasFal: Boolean(appEnv.FAL_KEY),
+          hasGemini: Boolean(appEnv.GEMINI_API_KEY),
+        };
+        const mediaIssue =
+          executionMode === 'image'
+            ? mediaCapabilityIssue({ kind: 'image' }, providerReadiness)
+            : videoIntent
+              ? mediaCapabilityIssue(
+                  {
+                    kind: 'video',
+                    tab: input.videoOptions?.tab ?? 'normal',
+                    model: input.videoOptions?.model ?? 'veo_fast',
+                  },
+                  providerReadiness,
+                )
+              : null;
+        if (mediaIssue) {
+          throw new TRPCError({ code: 'PRECONDITION_FAILED', message: mediaIssue });
+        }
+        if (
+          executionMode === 'image' &&
+          input.imageOptions?.mode === 'lock_subject' &&
+          !anthropicForResolver
+        ) {
+          throw new TRPCError({
+            code: 'PRECONDITION_FAILED',
+            message: '主体一致性复核服务尚未就绪，未创建任务或扣除额度。',
+          });
+        }
     if (videoIntent && (!appEnv.VIDEO_CREATION_ENABLED || !videoAllowed)) {
       throw new TRPCError({
         code: 'PRECONDITION_FAILED',
@@ -1388,7 +1537,9 @@ export const tasksRouter = router({
       });
     }
     const directOpenUrl =
-      executionMode === 'browser' ? extractRunnableDirectOpenUrl(input.intent, input.mode) : null;
+          executionMode === 'browser'
+            ? extractRunnableDirectOpenUrl(input.intent, input.mode)
+            : null;
     const directOpenSafetyError = directOpenUrl
       ? await verifyDirectOpenUrlSafety(directOpenUrl)
       : null;
@@ -1612,11 +1763,9 @@ export const tasksRouter = router({
     // result.metadata.attachments. No agent loop, no pool slot, no
     // verifier — a single outbound API call that produces a file.
     //
-    // Gated on GEMINI_API_KEY (mirrors FIRECRAWL_API_KEY gating scrape):
-    // when the key is unset the image intent falls through to the
-    // generate lane below, so deploying before the key is provisioned
-    // is a no-op for users instead of a "未配置" error on every 画图 ask.
-    if (executionMode === 'image' && appEnv.GEMINI_API_KEY) {
+        // Provider readiness is checked before quota consumption above. Explicit
+        // image work never falls through to a text-only lane.
+        if (executionMode === 'image') {
       const taskId = newExternalId('task');
       const repo = new TaskRepository(ctx.db);
 
@@ -1654,6 +1803,18 @@ export const tasksRouter = router({
       const imageStartedAt = Date.now();
       void (async () => {
         const taskInternalId = await taskInternalIdFor(ctx.db, taskId);
+            const imageHeartbeat =
+              taskInternalId == null
+                ? null
+                : startTaskHeartbeat(ctx.db, taskId, {
+                    onError: (error) => {
+                      ctx.logger.warn(
+                        { err: error.message, taskId },
+                        'image: task heartbeat failed',
+                      );
+                    },
+                  });
+            try {
         let result: RunImageTaskResult;
         if (taskInternalId == null) {
           result = {
@@ -1745,6 +1906,12 @@ export const tasksRouter = router({
               : {}),
             save,
             logger: ctx.logger,
+                  ...(input.imageOptions?.mode === 'lock_subject' && anthropicForResolver
+                    ? {
+                        verifySubject:
+                          createAnthropicSubjectConsistencyVerifier(anthropicForResolver),
+                      }
+                    : {}),
           });
         }
 
@@ -1755,6 +1922,9 @@ export const tasksRouter = router({
           imageTier: result.tier ?? null,
           ...(input.imageOptions ? { imageOptions: input.imageOptions } : {}),
           elapsedMs: Date.now() - imageStartedAt,
+                ...(result.subjectConsistency
+                  ? { subjectConsistency: result.subjectConsistency }
+                  : {}),
           ...(result.attachments.length > 0 ? { attachments: result.attachments } : {}),
         };
 
@@ -1819,6 +1989,9 @@ export const tasksRouter = router({
         } catch (err) {
           ctx.logger.warn({ err, taskId }, 'image: broadcast terminal failed');
         }
+            } finally {
+              imageHeartbeat?.stop();
+            }
       })().catch(async (err) => {
         const reason = '图片生成异常中断，请重试。';
         ctx.logger.error({ err, taskId }, 'image: detached runner rejected');
@@ -1872,9 +2045,8 @@ export const tasksRouter = router({
       // 三类 tab 提交都送进视频 fork(只有视频界面会设它,其它 createTask 路径绝不带)。
       if (willCreateVideoQuote && anthropicForResolver) {
         const anthropicClient = anthropicForResolver;
-        const { buildFallbackVideoScript, optimizeUserScript, segmentCapForText } = await import(
-          '../../agent/video/video-script.js'
-        );
+            const { buildFallbackVideoScript, optimizeUserScript, segmentCapForText } =
+              await import('../../agent/video/video-script.js');
         // Phase 2 第一期 — SPA「普通视频」面板把模型档/风格/画幅/画质/时长带上来。
         const vOpts = input.videoOptions ?? {};
 
@@ -1888,11 +2060,17 @@ export const tasksRouter = router({
               message: '复刻视频需要主角照片和参考视频。',
             });
           }
-          const [imageReachable, videoReachable] = await Promise.all([
-            fileService.signedReadUrl(vOpts.petImageFileId, userRow.id, 60),
-            fileService.signedReadUrl(vOpts.referenceVideoFileId, userRow.id, 300),
-          ]);
-          if (!imageReachable || !videoReachable) {
+              const quoteAssetPreflight = await preflightCloneVideoAssets(
+                {
+                  subjectFileId: vOpts.petImageFileId,
+                  referenceVideoFileId: vOpts.referenceVideoFileId,
+                },
+                async (fileId) => {
+                  const retained = await fileService.retainInputForUser(fileId, userRow.id);
+                  return retained ? fileService.signedReadUrl(fileId, userRow.id, 300) : null;
+                },
+              );
+              if (quoteAssetPreflight.issue || !quoteAssetPreflight.referenceVideoUrl) {
             throw new TRPCError({
               code: 'BAD_REQUEST',
               message: '主角照片或参考视频不可用，请重新上传。',
@@ -1900,7 +2078,9 @@ export const tasksRouter = router({
           }
           let quoteFacts: Awaited<ReturnType<typeof probeCloneReferenceQuoteFacts>>;
           try {
-            quoteFacts = await probeCloneReferenceQuoteFacts(videoReachable);
+                quoteFacts = await probeCloneReferenceQuoteFacts(
+                  quoteAssetPreflight.referenceVideoUrl,
+                );
           } catch {
             throw new TRPCError({
               code: 'BAD_REQUEST',
@@ -1916,7 +2096,12 @@ export const tasksRouter = router({
           const repo = new TaskRepository(ctx.db);
           await repo.insertTask(
             { taskId, status: 'awaiting_user', plan: [], cursor: 0, pendingConfirm: null },
-            { userId: userRow.id, intent: input.intent, roleId: 'video-creator', opusUsed: false },
+                {
+                  userId: userRow.id,
+                  intent: input.intent,
+                  roleId: 'video-creator',
+                  opusUsed: false,
+                },
           );
           const initialized = await repo.persistInitialAwaitingUser({
             taskExternalId: taskId,
@@ -1980,15 +2165,17 @@ export const tasksRouter = router({
               message: '请先在「视频任务 → IP 人物」完成素材准备(本人授权 + 声音 + 出镜底版)。',
             });
           }
-          const ipQuote = quoteIpVideo(
-            input.intent,
-            appEnv.FAL_LIPSYNC_MODEL,
-          );
+              const ipQuote = quoteIpVideo(input.intent, appEnv.FAL_LIPSYNC_MODEL);
           const taskId = newExternalId('task');
           const repo = new TaskRepository(ctx.db);
           await repo.insertTask(
             { taskId, status: 'awaiting_user', plan: [], cursor: 0, pendingConfirm: null },
-            { userId: userRow.id, intent: input.intent, roleId: 'video-creator', opusUsed: false },
+                {
+                  userId: userRow.id,
+                  intent: input.intent,
+                  roleId: 'video-creator',
+                  opusUsed: false,
+                },
           );
           const initialized = await repo.persistInitialAwaitingUser({
             taskExternalId: taskId,
@@ -2086,7 +2273,12 @@ export const tasksRouter = router({
           const repo = new TaskRepository(ctx.db);
           await repo.insertTask(
             { taskId, status: 'awaiting_user', plan: [], cursor: 0, pendingConfirm: null },
-            { userId: userRow.id, intent: input.intent, roleId: 'video-creator', opusUsed: false },
+                {
+                  userId: userRow.id,
+                  intent: input.intent,
+                  roleId: 'video-creator',
+                  opusUsed: false,
+                },
           );
           // Initial awaiting_user quote: stamp awaitingKind/result and
           // write the matching task.awaiting_user event in one repository call.
@@ -2161,7 +2353,8 @@ export const tasksRouter = router({
     // the matcher hijacks it (bug: "按这个周报模板填充…" → answered as stock 600415).
     // widen（BOSS 批准，④ 验收关闭）：ASHARE_QA_ALLOWLIST 为空 = 全量用户可用（flag on）；
     // 非空 = 仅名单内（灰度）。
-    const ashareQaAllowed = ASHARE_QA_ALLOWLIST.size === 0 || ASHARE_QA_ALLOWLIST.has(ctx.userId);
+        const ashareQaAllowed =
+          ASHARE_QA_ALLOWLIST.size === 0 || ASHARE_QA_ALLOWLIST.has(ctx.userId);
     if (
       appEnv.ASHARE_QA_ENABLED &&
       ashareQaHandlesMode(executionMode) &&
@@ -2512,7 +2705,11 @@ export const tasksRouter = router({
     // through to the generate lane below, where the model honestly says
     // it cannot fill the user's file — so shipping before the feature is
     // vetted is a no-op for users instead of a broken lane.
-    if (executionMode === 'template_fill' && appEnv.TEMPLATE_FILL_ENABLED && anthropicForResolver) {
+        if (
+          executionMode === 'template_fill' &&
+          appEnv.TEMPLATE_FILL_ENABLED &&
+          anthropicForResolver
+        ) {
       const taskId = newExternalId('task');
       const repo = new TaskRepository(ctx.db);
 
@@ -2579,7 +2776,11 @@ export const tasksRouter = router({
             for (const f of loaded) {
               if (tpl && f === tpl) continue;
               try {
-                const parsed = await parseFileForPrompt(f.buffer, f.row.filename, f.row.mimetype);
+                    const parsed = await parseFileForPrompt(
+                      f.buffer,
+                      f.row.filename,
+                      f.row.mimetype,
+                    );
                 for (const b of parsed.blocks) {
                   if (b.type === 'text') dataTexts.push(b.text);
                 }
@@ -2756,9 +2957,7 @@ export const tasksRouter = router({
     // state machine. Falls through to the existing supercar branch
     // below for executionMode === 'browser'.
     if (
-      (executionMode === 'generate' ||
-        executionMode === 'image' ||
-        executionMode === 'template_fill') &&
+          (executionMode === 'generate' || executionMode === 'template_fill') &&
       appEnv.ANTHROPIC_API_KEY &&
       anthropicForResolver
     ) {
@@ -2839,7 +3038,8 @@ export const tasksRouter = router({
             //     parent's outcome is load-bearing context for the
             //     model regardless of whether a workflow matched
             // Otherwise pass the bare user input.
-            intent: expertWorkflow || typedWorkflow || isFollowUp ? effectiveIntent : input.intent,
+                intent:
+                  expertWorkflow || typedWorkflow || isFollowUp ? effectiveIntent : input.intent,
             // Phase 2b — pass the resolved typed workflow so the
             // runner skips its inline matcher (which would re-match
             // against the parent-context-prefixed intent and could
@@ -2997,7 +3197,9 @@ export const tasksRouter = router({
           generatePostFormatDowngrade = recheckPostFormat(preFormatSummary, generateRl.summary);
           outcome = {
             ...outcome,
-            summary: generatePostFormatDowngrade.downgrade ? preFormatSummary : generateRl.summary,
+                summary: generatePostFormatDowngrade.downgrade
+                  ? preFormatSummary
+                  : generateRl.summary,
           };
         }
         let generateTerminalStatus = terminalStatus;
@@ -3086,7 +3288,10 @@ export const tasksRouter = router({
             });
             generateAwaitingPersisted = awaitingPersist.persisted;
             if (!awaitingPersist.persisted) {
-              ctx.logger.warn({ taskId }, 'generate: awaiting_user persist refused by state guard');
+                  ctx.logger.warn(
+                    { taskId },
+                    'generate: awaiting_user persist refused by state guard',
+                  );
             }
           }
         } catch (err) {
@@ -3132,7 +3337,9 @@ export const tasksRouter = router({
               taskId,
               status: 'partial_success',
               ...(outcome.summary ? { summary: outcome.summary } : {}),
-              ...(generateFailedChecks.length > 0 ? { failedChecks: generateFailedChecks } : {}),
+                  ...(generateFailedChecks.length > 0
+                    ? { failedChecks: generateFailedChecks }
+                    : {}),
             });
           } else if (generateTerminalPersisted && generateTerminalStatus === 'failed') {
             const reason =
@@ -3142,7 +3349,9 @@ export const tasksRouter = router({
               taskId,
               status: 'failed',
               ...(reason ? { reason } : {}),
-              ...(generateFailedChecks.length > 0 ? { failedChecks: generateFailedChecks } : {}),
+                  ...(generateFailedChecks.length > 0
+                    ? { failedChecks: generateFailedChecks }
+                    : {}),
             });
           } else if (outcome.status === 'awaiting_user' && generateAwaitingPersisted) {
             broadcastToUser(ctx.userId, {
@@ -3304,7 +3513,8 @@ export const tasksRouter = router({
             //     parent's outcome is load-bearing context for the
             //     model regardless of whether a workflow matched
             // Otherwise pass the bare user input.
-            intent: expertWorkflow || typedWorkflow || isFollowUp ? effectiveIntent : input.intent,
+                intent:
+                  expertWorkflow || typedWorkflow || isFollowUp ? effectiveIntent : input.intent,
             skillId: dispatchSkillId,
             client: anthropicClient,
             firecrawl,
@@ -3593,7 +3803,10 @@ export const tasksRouter = router({
               metadata,
             });
             scrapeTerminalPersisted = persisted.persisted;
-          } else if (scrapeTerminalStatus === 'partial_success' && outcome.status === 'completed') {
+              } else if (
+                scrapeTerminalStatus === 'partial_success' &&
+                outcome.status === 'completed'
+              ) {
             const persisted = await repo.persistVisionOutcome(taskId, {
               status: 'partial_success',
               summary: outcome.summary,
@@ -3604,7 +3817,9 @@ export const tasksRouter = router({
             scrapeTerminalPersisted = persisted.persisted;
           } else {
             const reason =
-              outcome.status === 'failed' ? outcome.reason : (failureSummary ?? '质量校验未通过');
+                  outcome.status === 'failed'
+                    ? outcome.reason
+                    : (failureSummary ?? '质量校验未通过');
             const persisted = await repo.persistVisionOutcome(taskId, {
               status: 'failed',
               reason,
@@ -3811,7 +4026,9 @@ export const tasksRouter = router({
               'direct-open-review',
             );
             if (!retained) {
-              await ctx.browserPool.release(taskId, `direct-open-${taskId}-done`).catch(() => {});
+                  await ctx.browserPool
+                    .release(taskId, `direct-open-${taskId}-done`)
+                    .catch(() => {});
             }
           }
           if (willQueueDirectOpen) ctx.taskQueue?.signalSlotFreed();
@@ -3829,10 +4046,14 @@ export const tasksRouter = router({
           onTimeout: async (): Promise<void> => {
             const reason = '排队等待时间过长，任务已自动停止。请稍后重新执行。';
             try {
-              const failed = await repo.markQueuedTaskFailed(taskId, `queue timeout: ${reason}`, {
+                  const failed = await repo.markQueuedTaskFailed(
+                    taskId,
+                    `queue timeout: ${reason}`,
+                    {
                 errorCode: 'QUEUE_TIMEOUT',
                 source: 'direct_open_queue_timeout',
-              });
+                    },
+                  );
               if (failed.persisted) {
                 broadcastToUser(ctx.userId, {
                   type: 'server.task.terminal',
@@ -4083,7 +4304,11 @@ export const tasksRouter = router({
       const dispatchToBrave = async (): Promise<void> => {
       let perUserExec = null;
       let adoptedBrowserSession = false;
-        if (ctx.browserPool && shouldUseBrowserPool(ctx.userId) && executionMode === 'browser') {
+            if (
+              ctx.browserPool &&
+              shouldUseBrowserPool(ctx.userId) &&
+              executionMode === 'browser'
+            ) {
         try {
           // Phase 24 — keyed by taskId, not userId. One task = one
           // Brave (no shared instance, no refcount). The runFn
@@ -4105,7 +4330,9 @@ export const tasksRouter = router({
             restoreUrl: parentBrowserRestoreUrl,
           });
           if (continuation === 'unavailable') {
-              await ctx.browserPool.release(taskId, 'follow-up-page-unavailable').catch(() => {});
+                  await ctx.browserPool
+                    .release(taskId, 'follow-up-page-unavailable')
+                    .catch(() => {});
               throw new Error('当前浏览器页面已过期，且没有可恢复地址。请重新打开目标页面。');
           }
           if (continuation === 'restore') {
@@ -4121,7 +4348,10 @@ export const tasksRouter = router({
             try {
               await instance.executor.resetPageForTask();
               const page = (await instance.executor.getPage()) as unknown as PageLike;
-                const navigation = await instance.executor.navigate(page, parentBrowserRestoreUrl);
+                    const navigation = await instance.executor.navigate(
+                      page,
+                      parentBrowserRestoreUrl,
+                    );
               if (!navigation.ok) {
                   throw new Error(navigation.message ?? '无法恢复前一个任务的页面');
               }
@@ -4163,7 +4393,11 @@ export const tasksRouter = router({
           // Capacity errors should be rare since the queue gates on
           // pool depth; treat them as alert-worthy when they hit.
           ctx.logger.error(
-            { err: err instanceof Error ? err.message : String(err), userId: ctx.userId, taskId },
+                  {
+                    err: err instanceof Error ? err.message : String(err),
+                    userId: ctx.userId,
+                    taskId,
+                  },
             'pool: allocate failed — refusing to fall back to singleton, failing task',
           );
           const reason =
@@ -4231,7 +4465,9 @@ export const tasksRouter = router({
       const intentSiteMatch = input.intent.match(
         /\b(?:https?:\/\/)?((?:[a-z0-9-]+\.)+(?:com|cn|net|org|tech|ai|io|co))\b/i,
       );
-        const intentTargetSite = intentSiteMatch ? extractDomain(intentSiteMatch[1] ?? null) : null;
+            const intentTargetSite = intentSiteMatch
+              ? extractDomain(intentSiteMatch[1] ?? null)
+              : null;
       // Phase 14 — playbook-driven cold-start lane recommendation.
       // The "router: cold-start lane from playbook" log fires when:
       //   (a) intent has a URL but stats < 3 samples, OR
@@ -5018,7 +5254,9 @@ export const tasksRouter = router({
       const otaExtensionOnline = hasConnectedExtension(ctx.userId);
       const otaMasterEnabled =
         getExecutionFeatureFlags().OTA_USER_BROWSER && Boolean(anthropicForResolver);
-      const otaAllowedDomains = parseOtaAllowlist(process.env.OTA_USER_BROWSER_ALLOWED_DOMAINS);
+            const otaAllowedDomains = parseOtaAllowlist(
+              process.env.OTA_USER_BROWSER_ALLOWED_DOMAINS,
+            );
       const otaCanary = resolveOtaCanaryLane({
         intent: input.intent,
         userId: ctx.userId,
@@ -5070,7 +5308,8 @@ export const tasksRouter = router({
             dispatchScreenshot: () =>
               sendExtensionToolCall(ctx.userId, { taskId, kind: 'screenshot' }),
             audit: (rec) => ctx.logger.info(rec, 'ota: user-browser audit'),
-              onProgress: (message) => broadcastSubStatus(ctx.userId, taskId, 'browsing', message),
+                  onProgress: (message) =>
+                    broadcastSubStatus(ctx.userId, taskId, 'browsing', message),
             logger: ctx.logger,
             allowedDomains: otaAllowedDomains,
           },
@@ -5152,7 +5391,8 @@ export const tasksRouter = router({
                 generateOutcome = {
                   status: 'failed' as const,
                   summary: '',
-                    reason: err instanceof Error ? err.message : 'handoff-generate: unknown error',
+                        reason:
+                          err instanceof Error ? err.message : 'handoff-generate: unknown error',
                   inputTokens: 0,
                   outputTokens: 0,
                   durationMs: 0,
@@ -5193,7 +5433,8 @@ export const tasksRouter = router({
               const handoffRl = await runResponseLayerForLane({
                 taskId,
                 status: generateOutcome.status,
-                  summary: generateOutcome.status === 'completed' ? generateOutcome.summary : '',
+                      summary:
+                        generateOutcome.status === 'completed' ? generateOutcome.summary : '',
                   expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
                 logger: ctx.logger,
               });
@@ -5230,7 +5471,9 @@ export const tasksRouter = router({
                       type: 'server.task.terminal',
                       taskId,
                       status: 'completed',
-                        ...(generateOutcome.summary ? { summary: generateOutcome.summary } : {}),
+                            ...(generateOutcome.summary
+                              ? { summary: generateOutcome.summary }
+                              : {}),
                     });
                   }
                 } else {
@@ -5251,7 +5494,10 @@ export const tasksRouter = router({
                   }
                 }
               } catch (err) {
-                  ctx.logger.error({ err, taskId }, 'handoff-generate: persist/broadcast failed');
+                      ctx.logger.error(
+                        { err, taskId },
+                        'handoff-generate: persist/broadcast failed',
+                      );
               }
               // Stamp metadata columns after persist. Safe to call
               // only when the terminal row actually landed. The
@@ -5316,7 +5562,9 @@ export const tasksRouter = router({
               modelFinalText:
                   outcome.status === 'completed' ? (outcome.summary ?? '').slice(0, 200) : null,
               ...(finalState.finalUrl ? { finalUrl: finalState.finalUrl } : {}),
-              ...(finalState.finalViewport ? { finalViewport: finalState.finalViewport } : {}),
+                    ...(finalState.finalViewport
+                      ? { finalViewport: finalState.finalViewport }
+                      : {}),
               hasFinalScreenshot: Boolean(finalState.finalScreenshot),
             };
             // Phase 3 R3 — L1 auto-save final screenshot as a
@@ -5493,7 +5741,8 @@ export const tasksRouter = router({
                 }));
                 if (outputDocs.length > 0) {
                   const fenced = fencedFileIds(outcome.summary ?? '');
-                  const existing = (metadata.attachments as Array<{ fileId?: unknown }>) ?? [];
+                        const existing =
+                          (metadata.attachments as Array<{ fileId?: unknown }>) ?? [];
                   const alreadyAttached = new Set(
                     existing.map((a) => (typeof a.fileId === 'string' ? a.fileId : '')),
                   );
@@ -5746,7 +5995,9 @@ export const tasksRouter = router({
                 await ctx.db
                   .update(taskSteps)
                   .set({ input: { summary: upd.actionSummary } })
-                    .where(and(eq(taskSteps.taskId, taskDbId), eq(taskSteps.seq, upd.tickIndex)));
+                        .where(
+                          and(eq(taskSteps.taskId, taskDbId), eq(taskSteps.seq, upd.tickIndex)),
+                        );
               } catch (err) {
                 ctx.logger.warn(
                   { err, taskId, tickIndex: upd.tickIndex },
@@ -5892,7 +6143,9 @@ export const tasksRouter = router({
                 status: 'failed',
                 reason: `runner threw: ${reason}`.slice(0, 500),
                 tickCount: 0,
-                  ...(failureFinalState.finalUrl ? { finalUrl: failureFinalState.finalUrl } : {}),
+                      ...(failureFinalState.finalUrl
+                        ? { finalUrl: failureFinalState.finalUrl }
+                        : {}),
                 ...(failureFinalState.finalScreenshot
                   ? { finalScreenshot: failureFinalState.finalScreenshot }
                   : {}),
@@ -5941,7 +6194,9 @@ export const tasksRouter = router({
                 'terminal-review',
               );
               if (!retained) {
-                  void ctx.browserPool.release(taskId, `task-${taskId}-done`).catch((relErr) => {
+                      void ctx.browserPool
+                        .release(taskId, `task-${taskId}-done`)
+                        .catch((relErr) => {
                     ctx.logger.warn(
                       { err: relErr, taskId, userId: ctx.userId },
                       'pool: post-task release failed',
@@ -6140,7 +6395,9 @@ export const tasksRouter = router({
       const resolved = await resolveIntentUrl(input.intent, {
         client: anthropicForResolver,
       });
-      const enrichedIntent = resolved ? injectResolvedUrl(input.intent, resolved) : input.intent;
+          const enrichedIntent = resolved
+            ? injectResolvedUrl(input.intent, resolved)
+            : input.intent;
       if (resolved && resolved.source === 'model') {
         ctx.logger.info(
           { taskId, token: resolved.token, url: resolved.url },
@@ -6546,6 +6803,8 @@ export const tasksRouter = router({
         requiresConfirm: s.requiresConfirm ?? false,
       })),
     };
+      },
+    });
   }),
 
   /**
@@ -6853,6 +7112,28 @@ export const tasksRouter = router({
       const tier: VideoSource = meta.videoTier ?? 'veo_fast';
       const vOpts = meta.videoOptions ?? {};
       assertVideoImageChoiceAllowed({ choice, isClone, isIp });
+      const providerReadiness = {
+        hasDashscope: Boolean(appEnv.DASHSCOPE_API_KEY),
+        hasFal: Boolean(appEnv.FAL_KEY),
+        hasGemini: Boolean(appEnv.GEMINI_API_KEY),
+      };
+      const confirmationMediaIssue =
+        choice === 'image'
+          ? mediaCapabilityIssue({ kind: 'video_confirmation', choice: 'image' }, providerReadiness)
+          : mediaCapabilityIssue(
+              {
+                kind: 'video',
+                tab: isClone ? 'pet' : isIp ? 'ip_person' : (vOpts.tab ?? 'normal'),
+                model: tier,
+              },
+              providerReadiness,
+            );
+      if (confirmationMediaIssue) {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: confirmationMediaIssue,
+        });
+      }
       if (
         choice === 'video' &&
         videoParameterIssue({
@@ -6870,6 +7151,24 @@ export const tasksRouter = router({
       if (!isPet && !isIp && !script)
         throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '报价脚本丢失' });
       const fileServiceForConfirm = new FileService(ctx.db, ctx.logger);
+      const clonePreflight = isClone
+        ? await preflightCloneVideoAssets(
+            {
+              subjectFileId: meta.petImageFileId!,
+              referenceVideoFileId: meta.referenceVideoFileId!,
+            },
+            async (fileId) => {
+              const retained = await fileServiceForConfirm.retainInputForUser(fileId, userRow.id);
+              return retained ? fileServiceForConfirm.signedReadUrl(fileId, userRow.id, 300) : null;
+            },
+          )
+        : { subjectUrl: null, referenceVideoUrl: null, issue: null };
+      if (clonePreflight.issue) {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: clonePreflight.issue,
+        });
+      }
       const ipPreflight = isIp
         ? await preflightIpVideoAssets(
             {
@@ -6878,13 +7177,8 @@ export const tasksRouter = router({
               authorized: !!userRow.videoSelfUseAuthorizedAt,
             },
             async (fileId) => {
-              const retained = await fileServiceForConfirm.retainInputForUser(
-                fileId,
-                userRow.id,
-              );
-              return retained
-                ? fileServiceForConfirm.signedReadUrl(fileId, userRow.id)
-                : null;
+              const retained = await fileServiceForConfirm.retainInputForUser(fileId, userRow.id);
+              return retained ? fileServiceForConfirm.signedReadUrl(fileId, userRow.id) : null;
             },
           )
         : { baseVideoUrl: null, issue: null };
@@ -6894,22 +7188,9 @@ export const tasksRouter = router({
           message: ipPreflight.issue,
         });
       }
-      const quotaService = new QuotaService(ctx.db);
       const preflight = await claimVideoConfirmAfterVerifierPreflight(
-        {
-          choice,
-          hasVerifier: Boolean(anthropicForResolver),
-        },
-        async () => {
-          const quotaClaim = await claimVideoConfirmWithQuota({
-            isBypass,
-            tryConsume: () => quotaService.tryConsume(userRow.id, planId, false),
-            refund: () => quotaService.refund(userRow.id, planId, false),
-            claim: () => repo.consumeVideoConfirm(input.taskId),
-          });
-          if (!quotaClaim.ok) throw quotaErrorFor(quotaClaim.reason);
-          return quotaClaim.claimed;
-        },
+        { choice, hasVerifier: Boolean(anthropicForResolver) },
+        async () => true,
       );
       if (preflight.issue) {
         throw new TRPCError({
@@ -6918,9 +7199,29 @@ export const tasksRouter = router({
         });
       }
 
-      // video|image — 原子抢占(防双击双扣)。只有抢到才生成。
-      const claimed = preflight.claimed;
-      const action = decideVideoGate(choice, claimed);
+      const visualMode = choice === 'image' ? ('image' as const) : ('video' as const);
+      const executionMetadata = buildVideoExecutionMetadata({
+        isPet,
+        isIp,
+        tab: vOpts.tab,
+        visualMode,
+      });
+      const newTaskId = newExternalId('task');
+      const atomicCreate = await repo.consumeVideoConfirmAndInsertGeneration({
+        quoteTaskExternalId: input.taskId,
+        generationTaskExternalId: newTaskId,
+        userId: userRow.id,
+        planId,
+        isBypass,
+        intent: row.intent,
+        executionMetadata,
+      });
+      if (atomicCreate.kind === 'quota_denied') {
+        throw quotaErrorFor(atomicCreate.reason);
+      }
+
+      // video|image — 报价消费、扣额度和生成任务写入同一事务。
+      const action = decideVideoGate(choice, atomicCreate.kind === 'created');
       if (action === 'already_consumed') {
         const [current] = await ctx.db
           .select({
@@ -6968,24 +7269,7 @@ export const tasksRouter = router({
         });
       }
 
-      // generate_video | generate_image — Veo 在此之后(已过原子抢占=确认后)。
-      const visualMode = action === 'generate_image' ? ('image' as const) : ('video' as const);
-      const executionMetadata = buildVideoExecutionMetadata({
-        isPet,
-        isIp,
-        tab: vOpts.tab,
-        visualMode,
-      });
-
-      const newTaskId = newExternalId('task');
-      await repo.insertTask(
-        { taskId: newTaskId, status: 'executing', plan: [], cursor: 0, pendingConfirm: null },
-        { userId: userRow.id, intent: row.intent, roleId: 'video-creator', opusUsed: false },
-      );
-      await ctx.db
-        .update(tasksTable)
-        .set({ result: { metadata: executionMetadata } })
-        .where(and(eq(tasksTable.externalId, newTaskId), eq(tasksTable.status, 'executing')));
+      // generate_video | generate_image — 外部供应商调用只在事务提交后启动。
       broadcastSubStatus(ctx.userId, newTaskId, 'generating');
 
       const anthropicClient = anthropicForResolver;
@@ -7000,6 +7284,15 @@ export const tasksRouter = router({
       void (async () => {
         const taskInternalId = await taskInternalIdFor(db, newTaskId);
         if (taskInternalId == null) return;
+        const taskHeartbeat = startTaskHeartbeat(db, newTaskId, {
+          onError: (error) => {
+            logger.warn(
+              { err: error.message, taskId: newTaskId },
+              'video_creation: task heartbeat failed',
+            );
+          },
+        });
+        try {
         const { runSimpleVideoCreation } = await import('../../agent/video/video-lane-simple.js');
         const { runFfmpeg } = await import('../../agent/video/ffmpeg-exec.js');
         const { createAnthropicVideoQualityAnalyzer, verifyFinalVideoQuality } = await import(
@@ -7145,8 +7438,7 @@ export const tasksRouter = router({
         try {
           let summary: string;
           let audioEngine: 'qwen' | 'gemini' | 'mixed' | undefined;
-          let audioCoverage: VideoAudioVerificationCoverage =
-            videoAudioVerificationCoverage();
+            let audioCoverage: VideoAudioVerificationCoverage = videoAudioVerificationCoverage();
           let audiovisualSyncReview: VideoAudioVisualSyncAudit | undefined;
           if (isClone) {
             const { runCloneVideoCreation } = await import('../../agent/video/video-clone.js');
@@ -7390,9 +7682,7 @@ export const tasksRouter = router({
             );
             audioEngine = result.audioEngine;
             const audioNote =
-              result.audioEngine === 'qwen'
-                ? ''
-                : '，主语音服务不可用，已自动切换备用音色';
+                result.audioEngine === 'qwen' ? '' : '，主语音服务不可用，已自动切换备用音色';
             summary = `视频已生成（${result.segments} 段 / ${Math.round(result.totalDurationMs / 1000)} 秒${audioNote}）。`;
           }
           const persisted = await repo.persistVisionOutcome(newTaskId, {
@@ -7454,6 +7744,9 @@ export const tasksRouter = router({
           }
         } finally {
           await fsp.rm(workdir, { recursive: true, force: true }).catch(() => {});
+        }
+        } finally {
+          taskHeartbeat.stop();
         }
       })();
       return { taskId: newTaskId, status: 'executing' as const };

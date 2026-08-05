@@ -1275,6 +1275,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     try {
       const res = await trpc.tasks.create.mutate({
         intent,
+        clientRequestId: localTaskId,
         ...(fileIds && fileIds.length > 0 ? { fileIds } : {}),
         ...(replyToTaskId ? { replyToTaskId } : {}),
         ...(mode === 'plan' ? { mode } : {}),

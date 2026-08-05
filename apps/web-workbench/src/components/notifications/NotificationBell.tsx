@@ -44,21 +44,17 @@ import {
   notificationErrorMessage,
   notificationListStatusCopy,
   notificationListSummary,
+  mergeNotificationRows,
+  normalizeNotificationPage,
   safeNotificationCount,
   shouldRenderCompactNotificationDot,
+  type NormalizedNotificationRow,
+  type NotificationListCursor,
 } from '@/lib/notification-bell-state';
 
 const POLL_INTERVAL_MS = 30_000;
 
-interface NotificationRow {
-  notificationId: string;
-  type: 'task_started' | 'task_complete' | 'task_failed' | 'task_reminder' | string;
-  title: string;
-  message: string;
-  isRead: boolean;
-  createdAt: string | Date;
-  scheduledTaskInternalId: number | null;
-}
+type NotificationRow = NormalizedNotificationRow;
 
 type NotificationBellPlacement = 'sidebar-footer' | 'mobile-header' | 'topbar';
 
@@ -74,6 +70,8 @@ export function NotificationBell({
   const [open, setOpen] = React.useState(false);
   const [items, setItems] = React.useState<NotificationRow[]>([]);
   const [loading, setLoading] = React.useState(false);
+  const [loadingMore, setLoadingMore] = React.useState(false);
+  const [nextCursor, setNextCursor] = React.useState<NotificationListCursor | null>(null);
   const [listError, setListError] = React.useState<string | null>(null);
   const [actionError, setActionError] = React.useState<string | null>(null);
   const [markingAll, setMarkingAll] = React.useState(false);
@@ -129,21 +127,39 @@ export function NotificationBell({
     };
   }, [open]);
 
-  const fetchList = React.useCallback(async () => {
+  const fetchList = React.useCallback(async (cursor: NotificationListCursor | null = null) => {
     const requestId = listRequestRef.current + 1;
     listRequestRef.current = requestId;
-    setLoading(true);
+    const append = cursor !== null;
+    if (append) setLoadingMore(true);
+    else setLoading(true);
     try {
-      const res = await trpc.notifications.list.query({ limit: 50 });
+      const res = await trpc.notifications.list.query({
+        limit: 50,
+        cursor: cursor
+          ? {
+              id: cursor.id,
+              createdAt:
+                cursor.createdAt instanceof Date
+                  ? cursor.createdAt
+                  : new Date(cursor.createdAt),
+            }
+          : undefined,
+      });
       if (!mountedRef.current || listRequestRef.current !== requestId) return;
-      setItems(normalizeNotificationRows(res));
+      const page = normalizeNotificationPage(res);
+      setItems((current) =>
+        append ? mergeNotificationRows(current, page.items) : page.items,
+      );
+      setNextCursor(page.nextCursor);
       setListError(null);
     } catch (err) {
       if (!mountedRef.current || listRequestRef.current !== requestId) return;
       setListError(notificationErrorMessage(err, '通知暂时无法加载，请稍后重试。'));
     } finally {
       if (mountedRef.current && listRequestRef.current === requestId) {
-        setLoading(false);
+        if (append) setLoadingMore(false);
+        else setLoading(false);
       }
     }
   }, []);
@@ -151,7 +167,7 @@ export function NotificationBell({
   const handleToggle = React.useCallback(() => {
     setOpen((prev) => {
       const next = !prev;
-      if (next) void fetchList();
+      if (next) void fetchList(null);
       return next;
     });
   }, [fetchList]);
@@ -300,7 +316,7 @@ export function NotificationBell({
               <NotificationStatusNotice
                 copy={statusCopy}
                 loading={loading}
-                onRetry={() => void fetchList()}
+                onRetry={() => void fetchList(null)}
               />
             )}
             {loading && items.length === 0 ? (
@@ -309,7 +325,7 @@ export function NotificationBell({
               listError ? (
                 <NotificationHardError
                   message={listError}
-                  onRetry={() => void fetchList()}
+                  onRetry={() => void fetchList(null)}
                 />
               ) : (
                 <div className="px-3 py-8 text-center text-xs text-muted-foreground">
@@ -317,13 +333,32 @@ export function NotificationBell({
                 </div>
               )
             ) : (
-              items.map((row) => (
-                <NotificationItem
-                  key={row.notificationId}
-                  row={row}
-                  onClick={() => void handleItemClick(row)}
-                />
-              ))
+              <>
+                {items.map((row) => (
+                  <NotificationItem
+                    key={row.notificationId}
+                    row={row}
+                    onClick={() => void handleItemClick(row)}
+                  />
+                ))}
+                {nextCursor && (
+                  <div className="flex justify-center border-t border-[#DCDDDD]/70 px-3 py-2.5 dark:border-white/10">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      disabled={loadingMore}
+                      onClick={() => void fetchList(nextCursor)}
+                      className="h-8 rounded-[6px] px-3 text-xs text-[#595757] hover:bg-[#EA1F59]/5 hover:text-[#EA1F59]"
+                    >
+                      {loadingMore && (
+                        <Loader2 className="mr-1.5 h-3 w-3 animate-spin" aria-hidden />
+                      )}
+                      {loadingMore ? '加载中…' : '加载更多'}
+                    </Button>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -340,42 +375,6 @@ export function NotificationBell({
       )}
     </div>
   );
-}
-
-function normalizeNotificationRows(value: unknown): NotificationRow[] {
-  if (!Array.isArray(value)) {
-    throw new Error('通知暂时无法读取，请刷新后重试。');
-  }
-  return value.flatMap((row, index): NotificationRow[] => {
-    if (typeof row !== 'object' || row === null) return [];
-    const raw = row as Record<string, unknown>;
-    const notificationId =
-      typeof raw.notificationId === 'string' && raw.notificationId.trim()
-        ? raw.notificationId
-        : null;
-    if (!notificationId) return [];
-    const scheduledTaskInternalId =
-      typeof raw.scheduledTaskInternalId === 'number' &&
-      Number.isSafeInteger(raw.scheduledTaskInternalId) &&
-      raw.scheduledTaskInternalId > 0
-        ? raw.scheduledTaskInternalId
-        : null;
-    const createdAt =
-      typeof raw.createdAt === 'string' || raw.createdAt instanceof Date
-        ? raw.createdAt
-        : '';
-    return [
-      {
-        notificationId,
-        type: typeof raw.type === 'string' ? raw.type : 'unknown',
-        title: typeof raw.title === 'string' && raw.title.trim() ? raw.title : `通知 ${index + 1}`,
-        message: typeof raw.message === 'string' ? raw.message : '',
-        isRead: raw.isRead === true,
-        createdAt,
-        scheduledTaskInternalId,
-      },
-    ];
-  });
 }
 
 function NotificationStatusNotice({

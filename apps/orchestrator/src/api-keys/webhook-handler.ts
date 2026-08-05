@@ -79,7 +79,7 @@ export interface WebhookDeps {
 /**
  * Validate + hash + look up the bearer key. Returns:
  *   - { ok: true, ...user, apiKeyInternalId }
- *   - { ok: false, code: 'missing' | 'malformed' | 'unknown' | 'revoked' | 'expired' }
+ *   - { ok: false, code: 'missing' | 'malformed' | 'unknown' | 'revoked' | 'expired' | 'inactive_owner' }
  */
 export async function resolveApiKey(
   bearer: string | null,
@@ -91,7 +91,10 @@ export async function resolveApiKey(
       userInternalId: number;
       apiKeyInternalId: number;
     }
-  | { ok: false; code: 'missing' | 'malformed' | 'unknown' | 'revoked' | 'expired' }
+  | {
+      ok: false;
+      code: 'missing' | 'malformed' | 'unknown' | 'revoked' | 'expired' | 'inactive_owner';
+    }
 > {
   if (!bearer) return { ok: false, code: 'missing' };
   if (!isValidApiKeyShape(bearer)) return { ok: false, code: 'malformed' };
@@ -113,11 +116,12 @@ export async function resolveApiKey(
   }
   // Resolve owner's external id for the tRPC context.
   const [user] = await db
-    .select({ id: users.id, externalId: users.externalId })
+    .select({ id: users.id, externalId: users.externalId, status: users.status })
     .from(users)
     .where(eq(users.id, row.userId))
     .limit(1);
   if (!user) return { ok: false, code: 'unknown' }; // user deleted mid-flight
+  if (user.status !== 'active') return { ok: false, code: 'inactive_owner' };
   return {
     ok: true,
     userExternalId: user.externalId,

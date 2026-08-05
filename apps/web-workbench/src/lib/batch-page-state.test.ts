@@ -11,6 +11,8 @@ import {
   batchStatusLabel,
   batchStatusCopy,
   batchPromptImportStateReset,
+  mergeBatchRows,
+  normalizeBatchPage,
   normalizeBatchDetail,
   normalizeBatchRows,
   safeBatchCount,
@@ -217,6 +219,33 @@ describe('batch page state helpers', () => {
         completedAt: null,
       },
     ]);
+  });
+
+  it('normalizes paginated batch responses and appends without duplicates', () => {
+    const row = {
+      batchId: 'batch_1',
+      name: 'Daily scan',
+      status: 'completed',
+      concurrency: 3,
+      itemsTotal: 2,
+      itemsDone: 2,
+      itemsReview: 0,
+      itemsFailed: 0,
+      itemsCancelled: 0,
+      createdAt: '2026-08-05T00:00:00.000Z',
+      completedAt: '2026-08-05T00:01:00.000Z',
+    };
+    const page = normalizeBatchPage({
+      items: [row],
+      nextCursor: { id: 7, createdAt: '2026-08-05T00:00:00.000Z' },
+    });
+    expect(page).toEqual({
+      items: [row],
+      nextCursor: { id: 7, createdAt: '2026-08-05T00:00:00.000Z' },
+    });
+    expect(
+      mergeBatchRows(page.items, [{ ...row, status: 'partial', itemsDone: 1 }]),
+    ).toEqual([{ ...row, status: 'partial', itemsDone: 1 }]);
   });
 
   it('preserves unknown string batch statuses so new backend states are visible', () => {

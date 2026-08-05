@@ -21,7 +21,7 @@
 
 import { newExternalId } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, lt, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import {
   notificationChannels,
@@ -139,18 +139,36 @@ export const notificationsRouter = router({
         .object({
           unreadOnly: z.boolean().optional(),
           limit: z.number().int().positive().max(100).default(50),
+          cursor: z
+            .object({
+              id: z.number().int().positive(),
+              createdAt: z.date(),
+            })
+            .optional(),
         })
         .optional(),
     )
     .query(async ({ ctx, input }) => {
       const userId = await requireUserId(ctx);
       const limit = input?.limit ?? 50;
-      const whereClause =
-        input?.unreadOnly === true
-          ? and(eq(notifications.userId, userId), eq(notifications.isRead, false))
-          : eq(notifications.userId, userId);
+      const whereParts = [eq(notifications.userId, userId)];
+      if (input?.unreadOnly === true) {
+        whereParts.push(eq(notifications.isRead, false));
+      }
+      if (input?.cursor) {
+        whereParts.push(
+          or(
+            lt(notifications.createdAt, input.cursor.createdAt),
+            and(
+              eq(notifications.createdAt, input.cursor.createdAt),
+              lt(notifications.id, input.cursor.id),
+            ),
+          )!,
+        );
+      }
       const rows = await ctx.db
         .select({
+          id: notifications.id,
           externalId: notifications.externalId,
           type: notifications.type,
           title: notifications.title,
@@ -160,10 +178,12 @@ export const notificationsRouter = router({
           scheduledTaskId: notifications.scheduledTaskId,
         })
         .from(notifications)
-        .where(whereClause)
-        .orderBy(desc(notifications.createdAt))
-        .limit(limit);
-      return rows.map((r) => ({
+        .where(and(...whereParts))
+        .orderBy(desc(notifications.createdAt), desc(notifications.id))
+        .limit(limit + 1);
+      const hasMore = rows.length > limit;
+      const page = rows.slice(0, limit);
+      const items = page.map((r) => ({
         notificationId: r.externalId,
         type: r.type,
         title: r.title,
@@ -172,6 +192,11 @@ export const notificationsRouter = router({
         createdAt: r.createdAt,
         scheduledTaskInternalId: r.scheduledTaskId,
       }));
+      const last = page[page.length - 1];
+      return {
+        items,
+        nextCursor: hasMore && last ? { id: last.id, createdAt: last.createdAt } : null,
+      };
     }),
 
   unreadCount: protectedProcedure.query(async ({ ctx }) => {

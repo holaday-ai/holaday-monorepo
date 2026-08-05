@@ -989,6 +989,7 @@ describe('selectTask detail hydration', () => {
 
     expect(createMutate).toHaveBeenCalledWith({
       intent: '打开 https://example.com',
+      clientRequestId: expect.stringMatching(/^local_pending_/),
       viewportProfile: 'desktop',
     });
   });
@@ -1006,6 +1007,7 @@ describe('selectTask detail hydration', () => {
 
     expect(createMutate).toHaveBeenCalledWith({
       intent: '打开 https://example.com',
+      clientRequestId: expect.stringMatching(/^local_pending_/),
       viewportProfile: 'mobile',
     });
   });
@@ -1024,6 +1026,7 @@ describe('selectTask detail hydration', () => {
 
     expect(createMutate).toHaveBeenCalledWith({
       intent: '打开 https://example.com',
+      clientRequestId: expect.stringMatching(/^local_pending_/),
       viewportProfile: 'sidepanel',
     });
   });
@@ -1054,6 +1057,7 @@ describe('selectTask detail hydration', () => {
 
     expect(createMutate).toHaveBeenCalledWith({
       intent: '生成图片：一张夏日海报',
+      clientRequestId: expect.stringMatching(/^local_pending_/),
       imageOptions: {
         model: 'nano_banana_pro',
         aspectRatio: '4:3',
@@ -1088,6 +1092,7 @@ describe('selectTask detail hydration', () => {
 
     expect(createMutate).toHaveBeenCalledWith({
       intent: '帮我做直播复盘',
+      clientRequestId: expect.stringMatching(/^local_pending_/),
       skillId: 'douyin-live-ops',
       skillSource: 'manual',
       viewportProfile: 'desktop',
