@@ -1446,6 +1446,24 @@ describe('verifyDeterministic — file-artifact consistency', () => {
 });
 
 describe('verifyDeterministic — lightweight Q&A passes with a concise answer', () => {
+  it('an explicit concise generate reply is not treated as empty', () => {
+    const contract = buildContract({
+      taskId: 'tsk_concise_generate',
+      intent:
+        '只回复：HOLA DAY 否定路由烟测通过。不要打开网页，不要访问任何网站，不要使用工具。',
+      executionMode: 'generate',
+    });
+    const result = verifyDeterministic({
+      contract,
+      ledger: new EvidenceLedger('tsk_concise_generate'),
+      answerText: 'HOLA DAY 否定路由烟测通过。',
+    });
+    expect(result.passed).toBe(true);
+    expect(
+      result.checks.find((c) => c.criterionId === 'generic.empty_result'),
+    ).toBeUndefined();
+  });
+
   it('"1 加 1 等于几？" + answer "2" => passed (no empty_result / word_count fail)', () => {
     const contract = buildContract({
       taskId: 'tsk_lw1',

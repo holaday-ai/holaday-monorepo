@@ -1272,7 +1272,10 @@ function checkTemplateFillConsistency(
 }
 
 function allowsConciseFactAnswer(contract: ExecutionContract): boolean {
-  if (contract.tier !== 'light') return false;
+  // Browser tasks use the light tier, while ordinary generate tasks use
+  // checklist. Both may explicitly request one exact short answer; the
+  // long-form guard below keeps reports and multi-item work strict.
+  if (contract.tier !== 'light' && contract.tier !== 'checklist') return false;
   const goal = contract.goal.toLowerCase();
   const asksForConciseAnswer =
     /只(回复|回答|输出)|仅(回复|回答|输出)|直接(回复|回答|输出)|only\s+(reply|answer|return|output)|just\s+(reply|answer|return|output)/i.test(
