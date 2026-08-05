@@ -142,7 +142,7 @@ export const notificationsRouter = router({
           cursor: z
             .object({
               id: z.number().int().positive(),
-              createdAt: z.date(),
+              createdAt: z.coerce.date(),
             })
             .optional(),
         })

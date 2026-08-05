@@ -325,4 +325,51 @@ describe('notificationsRouter — keyset pagination', () => {
       nextCursor: { id: 102, createdAt: new Date('2026-08-05T02:00:00Z') },
     });
   });
+
+  it('accepts an ISO cursor date from the JSON transport', async () => {
+    const rows = [
+      {
+        id: 101,
+        externalId: 'not_101',
+        type: 'task_complete',
+        title: 'one',
+        message: 'one',
+        isRead: false,
+        createdAt: new Date('2026-08-05T01:00:00Z'),
+        scheduledTaskId: null,
+      },
+    ];
+    const db = {
+      select() {
+        return {
+          from(table: unknown) {
+            const name = tableName(table);
+            return {
+              where() {
+                if (name === 'users') {
+                  return { limit: async () => [{ id: 42 }] };
+                }
+                return {
+                  orderBy() {
+                    return { limit: async () => rows };
+                  },
+                };
+              },
+            };
+          },
+        };
+      },
+    };
+
+    const page = await notificationsRouter
+      .createCaller({ db, userId: 'usr_test', logger: fakeLogger } as never)
+      .list({
+        limit: 1,
+        cursor: { id: 102, createdAt: '2026-08-05T02:00:00.000Z' },
+      } as never);
+
+    expect(page.items).toEqual([
+      expect.objectContaining({ notificationId: 'not_101' }),
+    ]);
+  });
 });
