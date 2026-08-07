@@ -110,6 +110,7 @@ describe('stocks dashboard snapshot', () => {
               发布时间: '2026-08-07 11:30:00',
               文章来源: '东方财富',
               新闻链接: 'https://finance.eastmoney.com/a/202607313828387959.html',
+              新闻图片: 'https://source.example/verified-cover.jpg',
             },
             {
               新闻标题: '重复链接不应计入第二条',
@@ -128,7 +129,7 @@ describe('stocks dashboard snapshot', () => {
         title: '多伦科技：多伦科技发布新产品',
         source: '东方财富',
         url: 'https://finance.eastmoney.com/a/202607313828387959.html',
-        imageUrl: 'https://np-metadata.eastmoney.com/api/metadata.jpg?event=1&source=3&mode=2&type=1&id=202607313828387959',
+        imageUrl: 'https://source.example/verified-cover.jpg',
         time: '08-07 11:30',
       }),
       expect.objectContaining({
@@ -141,14 +142,43 @@ describe('stocks dashboard snapshot', () => {
     ]);
   });
 
-  it('uses only a source-declared Eastmoney article cover for news previews', () => {
-    const articleCoverUrl = __stocksDashboardTest.articleCoverUrl as (url?: string) => string | undefined;
+  it('uses only a source-declared HTTP image for news previews', () => {
+    const sourceDeclaredImageUrl = __stocksDashboardTest.sourceDeclaredImageUrl as (value?: unknown) => string | undefined;
 
-    expect(articleCoverUrl('http://finance.eastmoney.com/a/202607313828387959.html')).toBe(
-      'https://np-metadata.eastmoney.com/api/metadata.jpg?event=1&source=3&mode=2&type=1&id=202607313828387959',
-    );
-    expect(articleCoverUrl('https://www.cninfo.com.cn/new/disclosure/detail?stockCode=603528')).toBeUndefined();
-    expect(articleCoverUrl('https://finance.eastmoney.com/a/not-an-article.html')).toBeUndefined();
+    expect(sourceDeclaredImageUrl('https://source.example/cover.jpg')).toBe('https://source.example/cover.jpg');
+    expect(sourceDeclaredImageUrl('data:image/png;base64,not-a-source-url')).toBeUndefined();
+    expect(sourceDeclaredImageUrl('javascript:alert(1)')).toBeUndefined();
+  });
+
+  it('keeps enough source-backed discovery rows for a multi-stock watchlist', () => {
+    const buildSourceDiscovery = __stocksDashboardTest.buildNews as unknown as (
+      announcements: Array<{ entry: { symbol: string; market: 'A'; displayName: string }; env: ReturnType<typeof envelope> }>,
+      stockNews: Array<{ entry: { symbol: string; market: 'A'; displayName: string }; env: ReturnType<typeof envelope> }>,
+    ) => Array<{ category: string; symbols: string[] }>;
+    const symbols = ['603528', '600497', '603738'];
+    const announcements = symbols.map((symbol) => ({
+      entry: { symbol, market: 'A' as const, displayName: symbol },
+      env: envelope(Array.from({ length: 6 }, (_, index) => ({
+        公告标题: `${symbol} 公告 ${index}`,
+        公告时间: `2026-08-07 ${String(index + 8).padStart(2, '0')}:00:00`,
+        公告链接: `https://www.cninfo.com.cn/${symbol}/notice-${index}`,
+      }))),
+    }));
+    const stockNews = symbols.map((symbol) => ({
+      entry: { symbol, market: 'A' as const, displayName: symbol },
+      env: envelope(Array.from({ length: 10 }, (_, index) => ({
+        新闻标题: `${symbol} 新闻 ${index}`,
+        发布时间: `2026-08-07 ${String(index + 8).padStart(2, '0')}:30:00`,
+        文章来源: '东方财富',
+        新闻链接: `https://finance.eastmoney.com/a/${symbol}${String(index).padStart(12, '0')}.html`,
+      }))),
+    }));
+
+    const discovery = buildSourceDiscovery(announcements, stockNews);
+
+    expect(discovery).toHaveLength(36);
+    expect(discovery.filter((item) => item.category === '新闻')).toHaveLength(24);
+    expect(discovery.filter((item) => item.category === '公告')).toHaveLength(12);
   });
 
   it('filters, sorts, and deduplicates persisted intraday points to A-share sessions', () => {

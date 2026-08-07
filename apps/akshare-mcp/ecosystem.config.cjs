@@ -21,6 +21,7 @@ module.exports = {
         AKSHARE_MCP_TTL_RANK: '60',
         AKSHARE_MCP_TTL_SPOT: '300',
         AKSHARE_MCP_SINA_RANK_TIMEOUT: '15',
+        AKSHARE_MCP_STOCK_NEWS_TIMEOUT: '8',
         AKSHARE_MCP_TTL_INDEX: '60',
         AKSHARE_MCP_MAX_ROWS: '50',
       },

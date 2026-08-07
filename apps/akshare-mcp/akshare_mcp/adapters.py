@@ -36,11 +36,13 @@ buy/sell signals, no price prediction.
 from __future__ import annotations
 
 import datetime
+import json
 import os
 import re
 import threading
 import time
 from typing import Any
+from urllib.parse import urlparse
 
 import requests
 
@@ -79,6 +81,7 @@ TTL_VAL = _ttl("VAL", 3600)  # 估值日级，缓存 1 小时
 TTL_RISK = _ttl("RISK", 21600)  # ④ 风险源(质押/商誉/预告)粗粒度变更，缓存 6h
 TTL_RANK = _ttl("RANK", 60)
 TTL_SPOT = _ttl("SPOT", 300)
+STOCK_NEWS_TIMEOUT_SECONDS = max(1.0, float(os.environ.get("AKSHARE_MCP_STOCK_NEWS_TIMEOUT", "8")))
 
 # Row caps so a single tool call can't dump thousands of rows into the
 # model's context.
@@ -611,22 +614,110 @@ def get_announcements(
 
 
 # --- 个股新闻 --------------------------------------------------------
+_STOCK_NEWS_SEARCH_URL = "https://search-api-web.eastmoney.com/search/jsonp"
+_STOCK_NEWS_CALLBACK = "jQuery35101792940631092459_1764599530165"
+
+
+def _stock_news_http_get(url: str, *, params: dict[str, str], headers: dict[str, str], timeout: float) -> Any:
+    """Use the same public Eastmoney endpoint as AkShare, but with a deadline."""
+    from curl_cffi import requests as curl_requests
+
+    return curl_requests.get(url, params=params, headers=headers, timeout=timeout)
+
+
+def _stock_news_params(symbol: str) -> dict[str, str]:
+    query = {
+        "uid": "",
+        "keyword": symbol,
+        "type": ["cmsArticleWebOld"],
+        "client": "web",
+        "clientType": "web",
+        "clientVersion": "curr",
+        "param": {
+            "cmsArticleWebOld": {
+                "searchScope": "default",
+                "sort": "default",
+                "pageIndex": 1,
+                "pageSize": 20,
+                "preTag": "<em>",
+                "postTag": "</em>",
+            }
+        },
+    }
+    return {
+        "cb": _STOCK_NEWS_CALLBACK,
+        "param": json.dumps(query, ensure_ascii=False),
+        "_": "1764599530176",
+    }
+
+
+def _stock_news_text(value: object) -> str:
+    return re.sub(r"</?em>", "", str(value or "")).replace("\u3000", "").strip()
+
+
+def _stock_news_image_url(value: object) -> str | None:
+    image_url = str(value or "").strip()
+    if not image_url:
+        return None
+    parsed = urlparse(image_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return None
+    return image_url
+
+
 def get_stock_news(symbol: str) -> tuple[list[dict[str, Any]], str]:
-    """个股新闻（东方财富）。只返回标题、发布时间、原文链接齐全的可核验文章。"""
-    a = _require_ak()
-    df = a.stock_news_em(symbol=symbol)
-    if df is None or len(df) == 0:
-        return [], "akshare:stock_news_em"
+    """Fetch source-backed stock news with a hard upstream timeout.
+
+    AkShare's wrapper does not set a network deadline and drops the search
+    response's declared image field. Calling the public endpoint directly keeps
+    the same source while preventing one stuck request from exhausting workers.
+    """
+    response = _stock_news_http_get(
+        _STOCK_NEWS_SEARCH_URL,
+        params=_stock_news_params(symbol),
+        headers={
+            "accept": "*/*",
+            "referer": f"https://so.eastmoney.com/news/s?keyword={symbol}",
+            "user-agent": "Mozilla/5.0",
+        },
+        timeout=STOCK_NEWS_TIMEOUT_SECONDS,
+    )
+    raise_for_status = getattr(response, "raise_for_status", None)
+    if callable(raise_for_status):
+        raise_for_status()
+    body = str(getattr(response, "text", ""))
+    start = body.find("(")
+    end = body.rfind(")")
+    if start < 0 or end <= start:
+        raise AkShareUnavailable("东方财富新闻返回格式异常")
+    payload = json.loads(body[start + 1:end])
+    result = payload.get("result") if isinstance(payload, dict) else None
+    source_rows = result.get("cmsArticleWebOld") if isinstance(result, dict) else []
+    if not isinstance(source_rows, list):
+        raise AkShareUnavailable("东方财富新闻结果格式异常")
 
     rows: list[dict[str, Any]] = []
-    for row in _records(df):
-        title = str(row.get("新闻标题") or "").strip()
-        published_at = str(row.get("发布时间") or "").strip()
-        url = str(row.get("新闻链接") or "").strip()
+    for source_row in source_rows[:MAX_ROWS]:
+        if not isinstance(source_row, dict):
+            continue
+        title = _stock_news_text(source_row.get("title"))
+        published_at = _stock_news_text(source_row.get("date"))
+        url = _stock_news_text(source_row.get("url"))
         if not title or not published_at or not url:
             continue
+        row = {
+            "关键词": symbol,
+            "新闻标题": title,
+            "新闻内容": _stock_news_text(source_row.get("content")),
+            "发布时间": published_at,
+            "文章来源": _stock_news_text(source_row.get("mediaName")) or "东方财富",
+            "新闻链接": url,
+        }
+        image_url = _stock_news_image_url(source_row.get("image"))
+        if image_url:
+            row["新闻图片"] = image_url
         rows.append(row)
-    return rows, "akshare:stock_news_em"
+    return rows, "eastmoney:stock-news-search"
 
 
 # --- 龙虎榜 ----------------------------------------------------------

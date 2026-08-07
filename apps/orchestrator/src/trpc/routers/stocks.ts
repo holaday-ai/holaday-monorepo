@@ -156,11 +156,11 @@ const DASHBOARD_FIRST_PAINT_BUDGET_MS = 5_500;
 const DASHBOARD_AKSHARE_TIMEOUT_MS = 8_000;
 const DASHBOARD_SLOW_SIGNAL_TIMEOUT_MS = 90_000;
 const DASHBOARD_RANKING_TIMEOUT_MS = 75_000;
-const NEWS_LIMIT = 24;
+const NEWS_LIMIT = 36;
 const NEWS_ANNOUNCEMENT_LIMIT = 18;
-const NEWS_ARTICLE_LIMIT = 18;
+const NEWS_ARTICLE_LIMIT = 24;
 const NEWS_PER_STOCK_ANNOUNCEMENTS = 5;
-const NEWS_PER_STOCK_ARTICLES = 5;
+const NEWS_PER_STOCK_ARTICLES = 8;
 const dashboardCache = new Map<string, DashboardCacheEntry>();
 
 function unavailableStock(entry: WatchlistEntry, note = '真实行情暂不可用，未展示走势线'): StockSnapshot {
@@ -851,14 +851,12 @@ function newsPublishedAt(value: unknown): string | undefined {
   return Number.isNaN(timestamp) ? undefined : new Date(timestamp).toISOString();
 }
 
-function articleCoverUrl(url?: string): string | undefined {
-  if (!url) return undefined;
+function sourceDeclaredImageUrl(value?: unknown): string | undefined {
+  if (typeof value !== 'string' || !value.trim()) return undefined;
   try {
-    const article = new URL(url);
-    if (!article.hostname.endsWith('.eastmoney.com')) return undefined;
-    const match = /^\/a\/(\d{12,})\.html$/.exec(article.pathname);
-    if (!match) return undefined;
-    return `https://np-metadata.eastmoney.com/api/metadata.jpg?event=1&source=3&mode=2&type=1&id=${match[1]}`;
+    const image = new URL(value);
+    if (image.protocol !== 'http:' && image.protocol !== 'https:') return undefined;
+    return image.toString();
   } catch {
     return undefined;
   }
@@ -935,7 +933,7 @@ function buildNews(
       if (!title || !publishedAt || !url) continue;
       const summary = String(pick(row, ['新闻内容']) ?? '').trim();
       const source = String(pick(row, ['文章来源']) ?? '').trim() || '东方财富';
-      const imageUrl = articleCoverUrl(url);
+      const imageUrl = sourceDeclaredImageUrl(pick(row, ['新闻图片']));
       rowsForStock.push({
         category: '新闻',
         time: formatAnnouncementTime(sourcePublishedAt),
@@ -1412,7 +1410,7 @@ export const stocksRouter = router({
 });
 
 export const __stocksDashboardTest = {
-  articleCoverUrl,
+  sourceDeclaredImageUrl,
   buildNews,
   buildDashboardSnapshot,
   dashboardCache,

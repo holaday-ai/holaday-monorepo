@@ -1,6 +1,7 @@
 """Stock quote and intraday integrity tests without live upstream calls."""
 
 import datetime
+import json
 
 import pytest
 
@@ -123,44 +124,55 @@ def test_intraday_rows_drop_provider_bar_ahead_of_current_market_minute():
 
 
 def test_stock_news_keeps_only_linked_articles_with_source_timestamps(monkeypatch):
-    pd = pytest.importorskip("pandas")
+    calls = []
 
-    class _NewsAk:
-        def stock_news_em(self, symbol):
-            assert symbol == "603528"
-            return pd.DataFrame(
-                [
-                    {
-                        "关键词": "多伦科技",
-                        "新闻标题": "多伦科技发布新产品",
-                        "新闻内容": "公司发布了面向市场的新产品。",
-                        "发布时间": "2026-08-07 11:30:00",
-                        "文章来源": "东方财富",
-                        "新闻链接": "https://finance.eastmoney.com/a/1.html",
-                    },
-                    {
-                        "关键词": "多伦科技",
-                        "新闻标题": "缺少原文链接的条目",
-                        "发布时间": "2026-08-07 11:20:00",
-                        "文章来源": "东方财富",
-                        "新闻链接": "",
-                    },
-                ]
-            )
+    class _Response:
+        text = "callback(" + json.dumps(
+            {
+                "result": {
+                    "cmsArticleWebOld": [
+                        {
+                            "title": "多伦科技<em>发布</em>新产品",
+                            "content": "公司发布了面向市场的新产品。",
+                            "date": "2026-08-07 11:30:00",
+                            "mediaName": "真实来源",
+                            "url": "https://finance.eastmoney.com/a/202608073834244063.html",
+                            "image": "https://source.example/cover.jpg",
+                        },
+                        {
+                            "title": "缺少原文链接的条目",
+                            "content": "不应进入结果。",
+                            "date": "2026-08-07 11:20:00",
+                            "mediaName": "真实来源",
+                            "url": "",
+                            "image": "https://source.example/ignored.jpg",
+                        },
+                    ]
+                }
+            },
+            ensure_ascii=False,
+        ) + ")"
 
-    monkeypatch.setattr(adp, "ak", _NewsAk())
+    def fetch(url, *, params, headers, timeout):
+        calls.append((url, params, headers, timeout))
+        return _Response()
+
+    monkeypatch.setattr(adp, "_stock_news_http_get", fetch)
 
     rows, source = adp.get_stock_news("603528")
 
-    assert source == "akshare:stock_news_em"
+    assert calls[0][3] == adp.STOCK_NEWS_TIMEOUT_SECONDS
+    assert calls[0][1]["param"]
+    assert source == "eastmoney:stock-news-search"
     assert rows == [
         {
-            "关键词": "多伦科技",
+            "关键词": "603528",
             "新闻标题": "多伦科技发布新产品",
             "新闻内容": "公司发布了面向市场的新产品。",
             "发布时间": "2026-08-07 11:30:00",
-            "文章来源": "东方财富",
-            "新闻链接": "https://finance.eastmoney.com/a/1.html",
+            "文章来源": "真实来源",
+            "新闻链接": "https://finance.eastmoney.com/a/202608073834244063.html",
+            "新闻图片": "https://source.example/cover.jpg",
         }
     ]
 

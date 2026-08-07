@@ -29,6 +29,7 @@ import {
 } from '@/components/ui/sheet';
 import { useToast } from '@/components/ui/toast';
 import { pageErrorMessage } from '@/lib/page-error-copy';
+import { diversifyDiscoveryItems, discoveryTimeLabel } from '@/lib/stock-discovery';
 import {
   formatStockDateTimeLabel,
   formatStockDateLabel,
@@ -712,7 +713,10 @@ function DiscoveryPanel({
     [news],
   );
   const filteredNews = React.useMemo(
-    () => indexedNews.filter(({ item }) => activeType === '全部' || newsDisplayType(item) === activeType),
+    () => diversifyDiscoveryItems(
+      indexedNews.filter(({ item }) => activeType === '全部' || newsDisplayType(item) === activeType),
+      (item) => item.symbols[0],
+    ),
     [activeType, indexedNews],
   );
   const pageCount = Math.max(1, Math.ceil(filteredNews.length / pageSize));
@@ -813,7 +817,7 @@ function DiscoveryPanel({
                       {newsDisplayType(item)}
                     </span>
                     <span className="rounded-full bg-white/88 px-2 py-1 text-[11px] tabular-nums text-[#667085] shadow-sm">
-                      {item.time}
+                      {newsTimeLabel(item)}
                     </span>
                   </div>
                 </div>
@@ -829,7 +833,7 @@ function DiscoveryPanel({
                       {newsDisplayType(item)}
                     </span>
                     <span className="rounded-full bg-white px-2 py-1 text-[11px] tabular-nums text-[#667085] ring-1 ring-[#E7EAF0]">
-                      {item.time}
+                      {newsTimeLabel(item)}
                     </span>
                   </div>
                   <p className="mt-3 line-clamp-3 text-[15px] font-semibold leading-relaxed text-[#344054] transition group-hover:text-[#EA1F59]">
@@ -3044,6 +3048,10 @@ function newsDisplayType(item: NewsRow): '新闻' | '公告' {
   return item.category === '公告' ? '公告' : '新闻';
 }
 
+function newsTimeLabel(item: NewsRow): string {
+  return discoveryTimeLabel(newsDisplayType(item), item.time);
+}
+
 function newsLead(item: NewsRow): string {
   const type = newsDisplayType(item);
   const source = item.source ?? '公开来源';
@@ -3061,14 +3069,14 @@ function newsDetailParagraphs(item: NewsRow): string[] {
   if (type === '公告') {
     return [
       `公告标题显示：${item.title}`,
-      `这类信息优先按事实来源处理，当前来源为 ${source}，发布时间标记为 ${item.time}，关联标的为 ${related}。如果涉及股东大会、持股计划、审计、解禁或重大合同，应打开原文核对公告全文和关键日期。`,
+      `这类信息优先按事实来源处理，当前来源为 ${source}，时间标记为 ${newsTimeLabel(item)}，关联标的为 ${related}。如果涉及股东大会、持股计划、审计、解禁或重大合同，应打开原文核对公告全文和关键日期。`,
       '公告本身不等于利好或利空。用于看盘时，建议结合股价位置、成交额变化和后续日报分析，再判断它对短线情绪或中期基本面的影响。',
     ];
   }
   const summary = item.summary?.trim();
   return [
     summary ? `来源摘要：${summary}` : `新闻标题显示：${item.title}`,
-    `当前来源为 ${source}，发布时间标记为 ${item.time}，关联标的为 ${related}。它可作为公开信息线索，但不应单独作为交易判断。`,
+    `当前来源为 ${source}，发布时间标记为 ${newsTimeLabel(item)}，关联标的为 ${related}。它可作为公开信息线索，但不应单独作为交易判断。`,
     '如需判断影响范围，应打开原文核对全文、发布时间和更多来源，再结合股价、成交和后续日报进行分析。',
   ];
 }
