@@ -66,6 +66,7 @@ import {
   matchPlaybooks,
 } from '../../agent/supercar/playbook-service.js';
 import { classifyRole, selectModelAndEffort } from '../../agent/supercar/prompt-layers.js';
+import { classifyRuntimeAction } from '../../agent/supercar/runtime-action-policy.js';
 import {
   StatsService,
   classifyTaskType,
@@ -164,7 +165,7 @@ import type { VerificationResult } from '../../execution/answer-verifier.js';
 import {
   type FinalTerminalStatus,
   type VerifyOutput,
-  assessResearchSourceTrust,
+  assessResultTrust,
   deriveFinalStatus,
   disposeExecution,
   extractFailedChecks,
@@ -175,7 +176,9 @@ import {
   summariseVerificationFailure,
   verifyAndFinalize,
 } from '../../execution/execution-pipeline.js';
+import { reviewGenerateOutcome } from '../../execution/generate-outcome-review.js';
 import { parseInputs } from '../../execution/expert-workflow-parser.js';
+import { assessGeneralTaskIntake } from '../../execution/general-task-intake.js';
 import {
   getExpertWorkflowById,
   matchExpertWorkflow as matchTypedExpertWorkflow,
@@ -1349,6 +1352,14 @@ export const tasksRouter = router({
       (expertWorkflowPreamble ? `${expertWorkflowPreamble}\n` : '') +
       (parentContextBlock ? parentContextBlock : '') +
       input.intent;
+
+    const generalTaskIntakeIssue = assessGeneralTaskIntake(input.intent);
+    if (generalTaskIntakeIssue) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: generalTaskIntakeIssue.question,
+      });
+    }
 
     // Phase 10 Tier 2 — quota + concurrency gate. Both block task
     // creation BEFORE the row is inserted, so the user gets a clean
@@ -2994,6 +3005,7 @@ export const tasksRouter = router({
         intent: input.intent,
         executionMode: 'generate',
         expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
+        expertMode: expertModeOverride,
         hasAttachments: attachmentBlocks.length > 0,
       });
       // Codex Pack B1 — planning chip: contract + ledger seeded, the
@@ -3048,6 +3060,7 @@ export const tasksRouter = router({
             // happened to contain douyin-review keywords like 诊断).
             workflowOverride: typedWorkflow,
             skillId: dispatchSkillId,
+            expertMode: expertModeOverride,
             client: anthropicClient,
             logger: ctx.logger,
             ...(attachmentBlocks.length > 0 ? { attachments: attachmentBlocks } : {}),
@@ -3079,65 +3092,18 @@ export const tasksRouter = router({
           };
         }
 
-        // Phase 1 follow-up — sanitise outcome.summary BEFORE the
-        // verifier sees it. Tool-XML / base64 / stop-reason fragments
-        // that occasionally leak into the model's visible output
-        // would otherwise pollute persisted result.summary and the
-        // verifier's grounding check (the URL regex inside a
-        // base64 blob is not a real URL the user can click).
-        if (outcome.status === 'completed' && outcome.summary) {
-          const cleaned = sanitizeFinalText(outcome.summary);
-          if (cleaned !== outcome.summary) {
-            outcome = { ...outcome, summary: cleaned };
-          }
-        }
-
-        // Phase 1 Day 5 — pipeline verification on the runner's
-        // final answer. No-op when EXECUTION_VERIFIER_ENABLED is
-        // off; in that case verifiedSummary === outcome.summary
-        // and executionVerification === null.
-        let executionVerification: VerificationResult | null = null;
-        if (outcome.status === 'completed') {
-          recordEvidence(taskId, {
-            fact: `response_length=${outcome.summary.length}`,
-            sourceType: 'tool_result',
-            sourceDetail: 'llm_generate_response',
-            confidence: 'observed',
-          });
-          // Codex Pack B1 — verifying chip: deterministic + optional
-          // LLM verifier about to run.
-          broadcastSubStatus(ctx.userId, taskId, 'verifying');
-          const verified: VerifyOutput = await verifyAndFinalize({
-            taskId,
-            answerText: outcome.summary,
-            client: anthropicClient,
-            logger: ctx.logger,
-          });
-          if (verified.finalText !== outcome.summary) {
-            outcome = { ...outcome, summary: verified.finalText };
-          }
-          executionVerification = verified.verification;
-        }
-
-        const generateResearchSourceTrust = assessResearchSourceTrust({
+        const generateReview = await reviewGenerateOutcome({
+          taskId,
           intent: input.intent,
-          resultText: outcome.status === 'completed' ? outcome.summary : '',
+          outcome,
+          client: anthropicClient,
+          logger: ctx.logger,
+          onVerifying: () => broadcastSubStatus(ctx.userId, taskId, 'verifying'),
         });
-
-        // Codex Pack A3 — derive the terminal status from the runner
-        // outcome + verifier verdict. Soft-fail (fixable) becomes
-        // partial_success (keeps summary, SPA shows yellow banner);
-        // hard-fail becomes failed (with synthesised reason);
-        // anything else stays as the runner reported.
-        const terminalStatus: FinalTerminalStatus = deriveFinalStatus(
-          outcome.status,
-          executionVerification,
-          generateResearchSourceTrust,
-        );
-        const failureSummary =
-          terminalStatus === 'failed' && executionVerification
-            ? summariseVerificationFailure(executionVerification)
-            : null;
+        outcome = generateReview.outcome;
+        const executionVerification = generateReview.verification;
+        const terminalStatus = generateReview.terminalStatus;
+        const failureSummary = generateReview.failureSummary;
 
         // B3 — structured task:completed log.
         const elapsedMs = Date.now() - generateStartedAt;
@@ -3218,12 +3184,7 @@ export const tasksRouter = router({
         // Compute before persistence so refresh/history/detail views
         // carry the same verifier bullets as the live terminal frame.
         const generateFailedChecks = [
-          ...(executionVerification && !executionVerification.passed
-            ? extractFailedChecks(executionVerification)
-            : []),
-          ...(executionVerification && !executionVerification.passed
-            ? []
-            : generateResearchSourceTrust.failedChecks),
+          ...generateReview.failedChecks,
           ...generateExtraFailedChecks,
         ];
         let generateTerminalPersisted = false;
@@ -3476,6 +3437,7 @@ export const tasksRouter = router({
         intent: input.intent,
         executionMode: 'scrape',
         expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
+        expertMode: expertModeOverride,
         hasAttachments: attachmentBlocks.length > 0,
       });
       // Codex Pack B1 — planning chip (scrape lane).
@@ -3516,6 +3478,7 @@ export const tasksRouter = router({
                 intent:
                   expertWorkflow || typedWorkflow || isFollowUp ? effectiveIntent : input.intent,
             skillId: dispatchSkillId,
+            expertMode: expertModeOverride,
             client: anthropicClient,
             firecrawl,
             logger: ctx.logger,
@@ -3612,6 +3575,7 @@ export const tasksRouter = router({
                 expertWorkflow || typedWorkflow || isFollowUp ? effectiveIntent : input.intent,
               workflowOverride: typedWorkflow,
               skillId: dispatchSkillId,
+              expertMode: expertModeOverride,
               client: anthropicClient,
               logger: ctx.logger,
               ...(attachmentBlocks.length > 0 ? { attachments: attachmentBlocks } : {}),
@@ -3702,7 +3666,7 @@ export const tasksRouter = router({
           executionVerification = verified.verification;
         }
 
-        const scrapeResearchSourceTrust = assessResearchSourceTrust({
+        const scrapeResearchSourceTrust = assessResultTrust({
           intent: input.intent,
           resultText: outcome.status === 'completed' ? outcome.summary : '',
         });
@@ -3714,8 +3678,10 @@ export const tasksRouter = router({
           scrapeResearchSourceTrust,
         );
         const failureSummary =
-          terminalStatus === 'failed' && executionVerification
-            ? summariseVerificationFailure(executionVerification)
+          terminalStatus === 'failed'
+            ? executionVerification
+              ? summariseVerificationFailure(executionVerification)
+              : (scrapeResearchSourceTrust.failedChecks[0]?.detail ?? null)
             : null;
 
         // B3 — structured task:completed log. Single record per task
@@ -4616,6 +4582,7 @@ export const tasksRouter = router({
           // `input.intent` (what the user typed); only the model sees
           // the prefixed version.
           intent: effectiveIntent,
+          expertMode: expertModeOverride,
           ...(memoryPreamble ? { memoryPreamble } : {}),
           ...(playbookContext ? { playbookContext } : {}),
           ...(planResult.planText ? { planText: planResult.planText } : {}),
@@ -4664,6 +4631,12 @@ export const tasksRouter = router({
               );
             }
           },
+          // Runtime safety boundary for ordinary user tasks. The
+          // supercar loop invokes this immediately before each live
+          // write action. Irreversible clicks park in awaiting_user
+          // and require a fresh confirmation; credentials remain
+          // takeover-only.
+          onBeforeAction: classifyRuntimeAction,
           ...(taskActionCaptureRepo
             ? {
                 onAction: (ev: SupercarActionCaptureEvent) => {
@@ -5144,6 +5117,7 @@ export const tasksRouter = router({
         intent: input.intent,
         executionMode: 'browser',
         expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
+        expertMode: expertModeOverride,
         hasAttachments: attachmentBlocks.length > 0,
       });
       // Codex Pack B1 — planning chip (supercar/browser lane). The
@@ -5368,6 +5342,7 @@ export const tasksRouter = router({
                   intent: combinedIntent,
                   workflowOverride: typedWorkflow,
                   skillId: dispatchSkillId,
+                  expertMode: expertModeOverride,
                   client: anthropicForResolver!,
                   logger: ctx.logger,
                     ...(attachmentBlocks.length > 0 ? { attachments: attachmentBlocks } : {}),
@@ -5815,7 +5790,7 @@ export const tasksRouter = router({
               }
               executionVerification = verified.verification;
             }
-            const supercarResearchSourceTrust = assessResearchSourceTrust({
+            const supercarResearchSourceTrust = assessResultTrust({
               intent: input.intent,
               resultText: outcome.status === 'completed' ? outcome.summary : '',
               currentUrl: finalState.finalUrl,
@@ -5831,8 +5806,10 @@ export const tasksRouter = router({
               supercarResearchSourceTrust,
             );
             const supercarFailureSummary =
-              supercarTerminalStatus === 'failed' && executionVerification
-                ? summariseVerificationFailure(executionVerification)
+              supercarTerminalStatus === 'failed'
+                ? executionVerification
+                  ? summariseVerificationFailure(executionVerification)
+                  : (supercarResearchSourceTrust.failedChecks[0]?.detail ?? null)
                 : null;
             const supercarFailedChecks = [
               ...(executionVerification && !executionVerification.passed
@@ -8396,7 +8373,13 @@ export const tasksRouter = router({
         .from(tasksTable)
         .where(eq(tasksTable.externalId, input.taskId))
         .limit(1);
-        const prevResult = (parkRow?.result ?? null) as Record<string, unknown> | null;
+      const prevResult = (parkRow?.result ?? null) as Record<string, unknown> | null;
+      const parkedExpertMode =
+        prevResult?.expertMode === 'normal' ||
+        prevResult?.expertMode === 'expert' ||
+        prevResult?.expertMode === 'auto'
+          ? prevResult.expertMode
+          : 'auto';
       const wasGenerateParked =
         Boolean(parkRow) &&
         parkRow!.status === 'awaiting_user' &&
@@ -8636,61 +8619,84 @@ export const tasksRouter = router({
         );
         return { ok: false, state: 'persistFailed' as const };
       }
+      initExecution({
+        taskId: input.taskId,
+        intent: combinedIntent,
+        executionMode: 'generate',
+        expertWorkflowId: newWorkflow?.id ?? null,
+        expertMode: parkedExpertMode,
+        hasAttachments: replyAttachmentBlocks.length > 0,
+      });
       const resumeStartedAt = Date.now();
       void (async () => {
-        let outcome;
+        let executionVerification: VerificationResult | null = null;
         try {
-          outcome = await runGenerateTask({
+          let outcome;
+          try {
+            outcome = await runGenerateTask({
+              taskId: input.taskId,
+              userId: ctx.userId,
+              intent: effectiveCombined,
+              ...(parkRow!.roleId ? { skillId: parkRow!.roleId } : {}),
+              expertMode: parkedExpertMode,
+              client: anthropicClient,
+              logger: ctx.logger,
+              // F2 — pass user-uploaded attachments through to the
+              // generate runner so a parked-from-generate task that
+              // resumes with a file (e.g. Excel of metrics) sees the
+              // attachment alongside the original intent.
+              ...(replyAttachmentBlocks.length > 0 ? { attachments: replyAttachmentBlocks } : {}),
+              onStreamDelta: (delta) => {
+                try {
+                  broadcastToUser(ctx.userId, {
+                    type: 'server.task.stream',
+                    taskId: input.taskId,
+                    delta,
+                  });
+                } catch (err) {
+                  ctx.logger.warn(
+                    { err, taskId: input.taskId },
+                    'reply: broadcast stream delta failed',
+                  );
+                }
+              },
+            });
+          } catch (err) {
+            ctx.logger.error({ err, taskId: input.taskId }, 'reply: runner threw');
+            outcome = {
+              status: 'failed' as const,
+              summary: '',
+              reason: err instanceof Error ? err.message : 'reply: unknown error',
+              inputTokens: 0,
+              outputTokens: 0,
+              durationMs: 0,
+            };
+          }
+
+          const reviewed = await reviewGenerateOutcome({
             taskId: input.taskId,
-            userId: ctx.userId,
-            intent: effectiveCombined,
-            ...(parkRow!.roleId ? { skillId: parkRow!.roleId } : {}),
+            intent: combinedIntent,
+            outcome,
             client: anthropicClient,
             logger: ctx.logger,
-            // F2 — pass user-uploaded attachments through to the
-            // generate runner so a parked-from-generate task that
-            // resumes with a file (e.g. Excel of metrics) sees the
-            // attachment alongside the original intent.
-              ...(replyAttachmentBlocks.length > 0 ? { attachments: replyAttachmentBlocks } : {}),
-            onStreamDelta: (delta) => {
-              try {
-                broadcastToUser(ctx.userId, {
-                  type: 'server.task.stream',
-                  taskId: input.taskId,
-                  delta,
-                });
-              } catch (err) {
-                ctx.logger.warn(
-                  { err, taskId: input.taskId },
-                  'reply: broadcast stream delta failed',
-                );
-              }
-            },
+            evidenceSourceDetail: 'llm_generate_resume_response',
+            onVerifying: () => broadcastSubStatus(ctx.userId, input.taskId, 'verifying'),
           });
-        } catch (err) {
-          ctx.logger.error({ err, taskId: input.taskId }, 'reply: runner threw');
-          outcome = {
-            status: 'failed' as const,
-            summary: '',
-              reason: err instanceof Error ? err.message : 'reply: unknown error',
-            inputTokens: 0,
-            outputTokens: 0,
-            durationMs: 0,
-          };
-        }
-        const elapsedMs = Date.now() - resumeStartedAt;
-        const metadata = {
-          executionMode: 'generate' as const,
-          finalExecutionMode: 'generate' as const,
-          expertWorkflowId: newWorkflow?.id ?? null,
-          selectedRole: parkRow!.roleId ?? null,
-          model: 'claude-sonnet-4-6',
-          fallbackChain: ['generate-resume'],
-          elapsedMs,
+          outcome = reviewed.outcome;
+          executionVerification = reviewed.verification;
+          const metadata = {
+            executionMode: 'generate' as const,
+            finalExecutionMode: 'generate' as const,
+            expertWorkflowId: newWorkflow?.id ?? null,
+            expertMode: parkedExpertMode,
+            selectedRole: parkRow!.roleId ?? null,
+            model: 'claude-sonnet-4-6',
+            fallbackChain: ['generate-resume'],
+            elapsedMs: Date.now() - resumeStartedAt,
             modelFinalText: outcome.status === 'completed' ? outcome.summary.slice(0, 200) : null,
-        };
-        try {
-          if (outcome.status === 'completed') {
+          };
+
+          if (reviewed.terminalStatus === 'completed' && outcome.status === 'completed') {
             const persisted = await repo.persistVisionOutcome(input.taskId, {
               status: 'completed',
               summary: outcome.summary,
@@ -8703,6 +8709,28 @@ export const tasksRouter = router({
                 taskId: input.taskId,
                 status: 'completed',
                 ...(outcome.summary ? { summary: outcome.summary } : {}),
+              });
+            }
+          } else if (
+            reviewed.terminalStatus === 'partial_success' &&
+            outcome.status === 'completed'
+          ) {
+            const persisted = await repo.persistVisionOutcome(input.taskId, {
+              status: 'partial_success',
+              summary: outcome.summary,
+              tickCount: 1,
+              metadata,
+              failedChecks: reviewed.failedChecks,
+            });
+            if (persisted.persisted) {
+              broadcastToUser(ctx.userId, {
+                type: 'server.task.terminal',
+                taskId: input.taskId,
+                status: 'partial_success',
+                ...(outcome.summary ? { summary: outcome.summary } : {}),
+                ...(reviewed.failedChecks.length > 0
+                  ? { failedChecks: reviewed.failedChecks }
+                  : {}),
               });
             }
           } else if (outcome.status === 'awaiting_user') {
@@ -8722,23 +8750,50 @@ export const tasksRouter = router({
               });
             }
           } else {
+            const reason =
+              outcome.status === 'failed'
+                ? (outcome.reason ?? 'generate-resume: api failed')
+                : (reviewed.failureSummary ?? '质量校验未通过');
             const persisted = await repo.persistVisionOutcome(input.taskId, {
               status: 'failed',
-              reason: outcome.reason ?? 'generate-resume: api failed',
+              reason,
               tickCount: 1,
               metadata,
+              failedChecks: reviewed.failedChecks,
             });
             if (persisted.persisted) {
               broadcastToUser(ctx.userId, {
                 type: 'server.task.terminal',
                 taskId: input.taskId,
                 status: 'failed',
-                ...(outcome.reason ? { reason: outcome.reason } : {}),
+                ...(reason ? { reason } : {}),
+                ...(reviewed.failedChecks.length > 0
+                  ? { failedChecks: reviewed.failedChecks }
+                  : {}),
               });
             }
           }
         } catch (err) {
-            ctx.logger.error({ err, taskId: input.taskId }, 'reply: persist resume outcome failed');
+          ctx.logger.error({ err, taskId: input.taskId }, 'reply: persist resume outcome failed');
+        } finally {
+          try {
+            const persisted = await persistExecution({
+              taskId: input.taskId,
+              verification: executionVerification,
+              db: ctx.db,
+              logger: ctx.logger,
+            });
+            if (persisted) {
+              await writeLedgerToDb({
+                taskExternalId: input.taskId,
+                verification: executionVerification,
+                db: ctx.db,
+                logger: ctx.logger,
+              });
+            }
+          } finally {
+            disposeExecution(input.taskId);
+          }
         }
       })();
       return { ok: true, state: 'resumed' as const };

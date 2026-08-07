@@ -25,7 +25,11 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import type { Logger } from 'pino';
 import { buildPromptSchemaSuffix } from '../execution/execution-contract.js';
-import { buildLayeredSystemPrompt, classifyRole } from './supercar/prompt-layers.js';
+import {
+  buildLayeredSystemPrompt,
+  classifyRole,
+  type ExpertMode,
+} from './supercar/prompt-layers.js';
 import { classifyLightweightTask } from '../execution/lightweight-task.js';
 import { tryDeterministicLightweightAnswer } from '../execution/deterministic-answer.js';
 // Phase 2 — typed expert workflow framework. When the
@@ -90,6 +94,9 @@ export interface RunGenerateOpts {
    * matching role's `name` field.
    */
   skillId?: string;
+  /** User-selected normal/expert/auto mode. Forced expert adds the
+   * decision-ready evidence contract even when no typed workflow matches. */
+  expertMode?: ExpertMode;
   client: Anthropic;
   logger: Logger;
   /** Cap on response tokens. Default 8192 — enough for a long PRD. */
@@ -311,7 +318,7 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
     ? workflowReportSystem
     : isLightweight
       ? DIRECT_ANSWER_SYSTEM
-      : buildLayeredSystemPrompt(roleId) + schemaSuffix;
+      : buildLayeredSystemPrompt(roleId, opts.expertMode) + schemaSuffix;
 
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 

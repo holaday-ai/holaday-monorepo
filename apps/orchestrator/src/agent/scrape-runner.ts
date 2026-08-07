@@ -17,7 +17,11 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import type { Logger } from 'pino';
 import { buildPromptSchemaSuffix } from '../execution/execution-contract.js';
-import { classifyRole, buildLayeredSystemPrompt } from './supercar/prompt-layers.js';
+import {
+  classifyRole,
+  buildLayeredSystemPrompt,
+  type ExpertMode,
+} from './supercar/prompt-layers.js';
 import type { FirecrawlLane } from '../firecrawl/firecrawl-lane.js';
 
 export interface ScrapeOutcome {
@@ -37,6 +41,7 @@ export interface RunScrapeOpts {
   userId: string;
   intent: string;
   skillId?: string;
+  expertMode?: ExpertMode;
   client: Anthropic;
   firecrawl: FirecrawlLane;
   logger: Logger;
@@ -214,7 +219,8 @@ export async function runScrapeTask(opts: RunScrapeOpts): Promise<ScrapeOutcome>
   // Codex Pack C3 — append JSON schema suffix when the intent kind
   // demands structured output. See execution-contract.ts for the
   // schemas + supported kinds.
-  const system = buildLayeredSystemPrompt(roleId) + buildPromptSchemaSuffix(opts.intent);
+  const system =
+    buildLayeredSystemPrompt(roleId, opts.expertMode) + buildPromptSchemaSuffix(opts.intent);
   const { context, usedSources } = formatScrapedContext(sources);
   const userPrompt =
     `用户的请求：${opts.intent}\n\n` +

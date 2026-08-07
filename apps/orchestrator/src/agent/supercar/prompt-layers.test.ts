@@ -79,6 +79,19 @@ describe('buildLayeredSystemPrompt', () => {
     expect(out).toContain('不要把它当成已验证事实');
   });
 
+  it('adds a decision-ready evidence contract only for forced expert mode', () => {
+    const expert = buildLayeredSystemPrompt('none', 'expert');
+    const normal = buildLayeredSystemPrompt('none', 'normal');
+
+    expect(expert).toContain('专家模式质量合同');
+    expect(expert).toContain('[用户提供]');
+    expect(expert).toContain('[外部来源]');
+    expect(expert).toContain('[模型假设]');
+    expect(expert).toContain('漏斗阶段');
+    expect(expert).toContain('验证指标');
+    expect(normal).not.toContain('专家模式质量合同');
+  });
+
   it('prevents repeated generic links from posing as per-candidate links', () => {
     const out = buildLayeredSystemPrompt('none');
     expect(out).toContain('多候选结果');

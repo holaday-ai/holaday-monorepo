@@ -12,7 +12,12 @@ import { buildDomainPrompt } from '../vision-loop/domain/enricher.js';
 import type { DomainName } from '../vision-loop/domain/classifier.js';
 import { matchRole } from './role-matcher.js';
 import type { AgentRole } from './roles/index.js';
-import { buildLayeredSystemPrompt, classifyRole } from './prompt-layers.js';
+import {
+  buildLayeredSystemPrompt,
+  classifyRole,
+  EXPERT_MODE_PROMPT,
+  type ExpertMode,
+} from './prompt-layers.js';
 
 /**
  * The immutable part of the supercar prompt. Do not interpolate
@@ -207,6 +212,7 @@ export function buildSupercarSystemPrompt(opts: {
    * rollback.
    */
   layered?: boolean;
+  expertMode?: ExpertMode;
   /**
    * Plan-aware file-format guidance (writers.buildFileFormatGuidance).
    * Appended verbatim so the model degrades honestly when the account
@@ -218,7 +224,7 @@ export function buildSupercarSystemPrompt(opts: {
   if (opts.layered) {
     const intent = opts.intent ?? '';
     const roleId = classifyRole(intent);
-    const layered = buildLayeredSystemPrompt(roleId);
+    const layered = buildLayeredSystemPrompt(roleId, opts.expertMode);
     return guidance ? `${layered}\n\n${guidance}` : layered;
   }
 
@@ -230,6 +236,7 @@ export function buildSupercarSystemPrompt(opts: {
   const parts = [SUPERCAR_CORE_PROMPT];
   if (domainFragment) parts.push(domainFragment);
   if (role) parts.push(role.systemAddon);
+  if (opts.expertMode === 'expert') parts.push(EXPERT_MODE_PROMPT);
   if (guidance) parts.push(guidance);
   return parts.join('\n\n');
 }

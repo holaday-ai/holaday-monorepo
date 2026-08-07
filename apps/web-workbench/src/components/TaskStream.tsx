@@ -38,7 +38,6 @@ import remarkGfm from 'remark-gfm';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { useToast } from '@/components/ui/toast';
 import { FileDownloadCard, parseHoladayFilePayload } from '@/components/FileDownloadCard';
-import { AstroTaskCompanion } from '@/components/astrology/AstroTaskCompanion';
 import { awaitingUserCopy, awaitingUserStreamMessage } from '@/lib/awaiting-user-copy';
 import {
   batchConfirmActionLabel,
@@ -142,7 +141,6 @@ interface Props {
    * follow-up auto-detection inherits parent context.
    */
   onPickSuggestion?: (intent: string) => void;
-  profileStorageScope?: string | null;
 }
 
 // Stable empty-array reference so the zustand selector below returns
@@ -186,7 +184,6 @@ function useMountedRef(): React.MutableRefObject<boolean> {
 export function TaskStream({
   task,
   onPickSuggestion,
-  profileStorageScope = null,
 }: Props): JSX.Element {
   const steps = useTaskStore((s) => s.stepsByTask[task.taskId]) ?? EMPTY_STEPS;
   const userReplies =
@@ -273,7 +270,6 @@ export function TaskStream({
         awaitingUser={awaitingUser}
         webSearch={webSearch}
         serverSuggestions={serverSuggestions}
-        profileStorageScope={profileStorageScope}
       />
 
       <div ref={scrollAnchorRef} />
@@ -326,7 +322,6 @@ function AgentBlock({
   awaitingUser,
   webSearch,
   serverSuggestions,
-  profileStorageScope,
 }: {
   task: UiTask;
   steps: UiStep[];
@@ -341,7 +336,6 @@ function AgentBlock({
   awaitingUser: UiAwaitingUser | undefined;
   webSearch: UiWebSearchEvent | undefined;
   serverSuggestions?: string[];
-  profileStorageScope?: string | null;
 }): JSX.Element {
   const [detailOpen, setDetailOpen] = React.useState(false);
   // Phase 24 RC follow-up — generate / scrape streaming output. The
@@ -407,22 +401,16 @@ function AgentBlock({
     streamingText,
     resultText: task.resultText,
   });
-  const hasExecutionActivity =
-    steps.length > 0 ||
-    Boolean(captchaWait) ||
-    Boolean(degrade) ||
-    Boolean(executorFallback) ||
-    Boolean(webSearch) ||
-    Boolean(screencastUrl);
-
   const showInlineProgress = !terminal;
   const hasTerminalArtifacts =
     Boolean(task.attachments?.length) ||
     Boolean(task.finalUrl && task.finalUrl !== 'about:blank');
   const trustSummaryUrl = task.finalUrl ?? screencastUrl;
-  const showTrustSummary =
-    Boolean(awaitingUser) ||
-    (terminal && shouldShowTrustSummaryCard(task, trustSummaryUrl));
+  const showTrustSummary = shouldRenderTaskTrustSummary({
+    terminal,
+    task,
+    currentUrl: trustSummaryUrl,
+  });
 
   // Product polish #5 — drop the "H" avatar circle. Assistant
   // output reads as a result card directly on the page (Codex /
@@ -490,16 +478,6 @@ function AgentBlock({
             taskTerminal={terminal}
             taskStatus={task.status}
             lastStepStatus={latestRunningStatus}
-          />
-        )}
-
-        {showInlineProgress && !awaitingUser && hasExecutionActivity && (
-          <AstroTaskCompanion
-            taskId={task.taskId}
-            intent={task.intent}
-            status={task.status}
-            surface="waiting"
-            profileStorageScope={profileStorageScope}
           />
         )}
 
@@ -604,15 +582,6 @@ function AgentBlock({
             // not render a second identical one (keeps one primary
             // re-run action; its 填入原描述 / copy stay as secondary).
             verificationBannerPresent={shouldShowVerificationBanner(task)}
-          />
-        )}
-        {terminal && (
-          <AstroTaskCompanion
-            taskId={task.taskId}
-            intent={task.intent}
-            status={task.status}
-            surface="complete"
-            profileStorageScope={profileStorageScope}
           />
         )}
         {/* Phase 11 QA #11 — terminal-but-empty fallback. Catches the
@@ -980,6 +949,39 @@ function shouldShowTrustSummaryCard(task: UiTask, currentUrl?: string | null): b
   });
 }
 
+export function shouldRenderTaskTrustSummary(input: {
+  terminal: boolean;
+  task: UiTask;
+  currentUrl?: string | null;
+}): boolean {
+  return input.terminal && shouldShowTrustSummaryCard(input.task, input.currentUrl);
+}
+
+export function AwaitingMarkdown({ text }: { text: string }): JSX.Element {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      components={{
+        p: ({ children }) => <p className="m-0">{children}</p>,
+        ul: ({ children }) => <ul className="my-1.5 list-disc space-y-1 pl-5">{children}</ul>,
+        ol: ({ children }) => <ol className="my-1.5 list-decimal space-y-1 pl-5">{children}</ol>,
+        a: ({ href, children }) => (
+          <a
+            href={href}
+            target="_blank"
+            rel="noreferrer"
+            className="break-all text-[#1687B8] underline underline-offset-2"
+          >
+            {children}
+          </a>
+        ),
+      }}
+    >
+      {sanitizeMarkdownTrailingPunctuation(sanitizeForRender(text))}
+    </ReactMarkdown>
+  );
+}
+
 /**
  * Codex Pack B3 — awaiting_user banner with typed cards.
  *
@@ -1120,9 +1122,9 @@ function AwaitingUserBanner({
           <div className="text-[11px] font-semibold uppercase tracking-wide text-[#57479C]">
             {copy.title}
           </div>
-          <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-foreground">
-            {message.body}
-          </p>
+          <div className="mt-1 break-words text-sm leading-relaxed text-foreground">
+            <AwaitingMarkdown text={message.body} />
+          </div>
           {message.followUp && (
             <p className="mt-2 text-[11px] text-muted-foreground">
               {message.followUp}

@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 
 import {
+  AwaitingMarkdown,
   liveSubStatusLongRunningHint,
   sanitizeMarkdownBrokenBoldUrls,
   sanitizeMarkdownTrailingPunctuation,
+  shouldRenderTaskTrustSummary,
   taskStreamHasAnyActivity,
   taskStreamLiveActivityKey,
   webSearchLinePrefix,
@@ -25,6 +29,36 @@ describe('TaskStream markdown sanitizer', () => {
     expect(
       sanitizeMarkdownTrailingPunctuation('页面链接：**https://example.com/path，继续说明'),
     ).toBe('页面链接：https://example.com/path ，继续说明');
+  });
+
+  it('renders clarification markdown instead of showing raw markers', () => {
+    const html = renderToStaticMarkup(
+      createElement(AwaitingMarkdown, {
+        text: '**商品型号**\n\n- iPhone 16 Pro\n- 上海当天送达',
+      }),
+    );
+
+    expect(html).toContain('<strong>商品型号</strong>');
+    expect(html).toContain('<li>iPhone 16 Pro</li>');
+    expect(html).not.toContain('**商品型号**');
+  });
+});
+
+describe('TaskStream trust surface', () => {
+  it('does not duplicate the awaiting-user card with a result-review card', () => {
+    expect(
+      shouldRenderTaskTrustSummary({
+        terminal: false,
+        task: {
+          taskId: 'tsk_wait',
+          intent: '帮我购买商品',
+          title: null,
+          status: 'awaiting_user',
+          tickCount: 1,
+          createdAt: new Date('2026-08-06T00:00:00.000Z'),
+        },
+      }),
+    ).toBe(false);
   });
 });
 

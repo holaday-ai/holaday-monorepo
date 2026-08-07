@@ -132,6 +132,22 @@ describe('runGenerateTask (phase 22a)', () => {
       expect(outcome.reason).toBeUndefined();
       expect(outcome.durationMs).toBeGreaterThanOrEqual(0);
     });
+
+    it('threads forced expert mode into the generated system prompt', async () => {
+      const client = makeClient({ textOut: '专家建议正文' });
+      await runGenerateTask({
+        taskId: 'tsk_expert_prompt',
+        userId: 'usr_test',
+        intent: '给我一份 SaaS landing page 优化建议，按转化漏斗分层',
+        expertMode: 'expert',
+        client,
+        logger: makeLogger(),
+      });
+
+      const req = (client.messages.stream as unknown as { mock: { calls: unknown[][] } })
+        .mock.calls[0]?.[0] as { system?: Array<{ text: string }> } | undefined;
+      expect(req?.system?.[0]?.text).toContain('专家模式质量合同');
+    });
   });
 
   describe('Timeout: AbortController fires when API hangs', () => {

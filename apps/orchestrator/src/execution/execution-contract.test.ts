@@ -16,6 +16,21 @@ describe('buildContract — tier selection', () => {
     expect(c.expectedOutputType).toBe('text');
   });
 
+  it('forced expert mode uses the full quality contract without a typed workflow', () => {
+    const c = buildContract({
+      taskId: 'tsk_generic_expert',
+      intent: '给我一份 SaaS landing page 优化建议，按转化漏斗分层',
+      executionMode: 'generate',
+      expertMode: 'expert',
+    });
+
+    expect(c.tier).toBe('full');
+    expect(c.expertMode).toBe('expert');
+    expect(c.successCriteria.some((criterion) => criterion.rule === 'expert_claim_provenance')).toBe(
+      true,
+    );
+  });
+
   it('browser without expert workflow → light tier', () => {
     const c = buildContract({
       taskId: 'tsk_b',

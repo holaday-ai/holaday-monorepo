@@ -20,6 +20,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { _resetLedgerRegistryForTest, getLedger } from './evidence-ledger.js';
 import {
   _resetExecutionPipelineForTest,
+  assessResultTrust,
   assessResearchSourceTrust,
   disposeExecution,
   deriveFinalStatus,
@@ -78,7 +79,7 @@ function makeStubClient(textOut: string): AnthropicLikeClient {
 // ---------------------------------------------------------------------------
 
 describe('flags off (default)', () => {
-  it('still downgrades an explicit research result with no source', () => {
+  it('fails an explicit research result with no source instead of displaying an unverified conclusion', () => {
     const review = assessResearchSourceTrust({
       intent: '研究 2026 年 AI 行业趋势',
       resultText: 'AI 行业仍在快速增长。',
@@ -93,17 +94,72 @@ describe('flags off (default)', () => {
         },
       ],
     });
-    expect(deriveFinalStatus('completed', null, review)).toBe('partial_success');
+    expect(deriveFinalStatus('completed', null, review)).toBe('failed');
   });
 
-  it('keeps stock results outside the generic research source guard', () => {
-    const review = assessResearchSourceTrust({
+  it('fails a stock quote with no source even when the execution verifier flag is off', () => {
+    const review = assessResultTrust({
       intent: '查今天特斯拉股价并给出来源',
-      resultText: '特斯拉当前股价为 123.45 美元。',
+      resultText: '特斯拉当前价格为 123.45 美元，时间为今天 10:30。',
+    });
+
+    expect(review.requiresReview).toBe(true);
+    expect(review.failedChecks).toEqual(
+      expect.arrayContaining([expect.objectContaining({ type: 'source_count' })]),
+    );
+    expect(deriveFinalStatus('completed', null, review)).toBe('failed');
+  });
+
+  it('fails a current stock quote that contradicts itself about market timing', () => {
+    const review = assessResultTrust({
+      intent: '查今天特斯拉股价并给出来源链接',
+      resultText:
+        '特斯拉当前价格为 123.45 美元，时间为 2026-08-06 10:30。市场已经收盘，但美股尚未开盘。来源：https://example.com/tsla',
+    });
+
+    expect(review.requiresReview).toBe(true);
+    expect(review.failedChecks).toEqual(
+      expect.arrayContaining([expect.objectContaining({ type: 'temporal_consistency' })]),
+    );
+    expect(deriveFinalStatus('completed', null, review)).toBe('failed');
+  });
+
+  it('accepts a structurally complete stock quote with price, timestamp, and source', () => {
+    const review = assessResultTrust({
+      intent: '查今天特斯拉股价并给出来源链接',
+      resultText:
+        '特斯拉当前价格为 123.45 美元，更新时间为 2026-08-06 10:30。来源：https://example.com/tsla',
     });
 
     expect(review.requiresReview).toBe(false);
-    expect(review.failedChecks).toEqual([]);
+    expect(deriveFinalStatus('completed', null, review)).toBe('completed');
+  });
+
+  it('fails an ecommerce ranking that claims a winner without verifiable product links', () => {
+    const review = assessResultTrust({
+      intent: '去电商站搜 iPhone 16，按价格排序，给前5结果（名称/价格/链接）',
+      resultText:
+        '唯一最佳选择是 iPhone 16 128GB，价格 4599 元。其余结果与链接暂时无法获取。',
+    });
+
+    expect(review.requiresReview).toBe(true);
+    expect(review.failedChecks).toEqual(
+      expect.arrayContaining([expect.objectContaining({ type: 'ecommerce_rows' })]),
+    );
+    expect(deriveFinalStatus('completed', null, review)).toBe('failed');
+  });
+
+  it('accepts complete ecommerce rows written as bullet items', () => {
+    const review = assessResultTrust({
+      intent: '去电商站搜 iPhone 16，按价格排序，给前3结果（名称/价格/链接）',
+      resultText: [
+        '- iPhone 16 128GB ¥4599 https://example.com/item-1',
+        '- iPhone 16 256GB ¥4999 https://example.com/item-2',
+        '- iPhone 16 Plus ¥5299 https://example.com/item-3',
+      ].join('\n'),
+    });
+
+    expect(review.requiresReview).toBe(false);
     expect(deriveFinalStatus('completed', null, review)).toBe('completed');
   });
 
@@ -226,7 +282,7 @@ describe('all flags on — generate happy path', () => {
     expect(out.finalText).toContain('Today the weather');
   });
 
-  it('downgrades research without a clickable source to partial success', async () => {
+  it('fails research without a clickable source', async () => {
     initExecution({
       taskId: 'tsk_g2',
       intent: '研究 2026 年 AI 行业趋势',
@@ -255,7 +311,7 @@ describe('all flags on — generate happy path', () => {
         }),
       ]),
     );
-    expect(deriveFinalStatus('completed', out.verification)).toBe('partial_success');
+    expect(deriveFinalStatus('completed', out.verification)).toBe('failed');
   });
 });
 
@@ -328,7 +384,7 @@ describe('all flags on — URL fabrication autoFix loop', () => {
     expect(out.verification!.passed).toBe(true);
   });
 
-  it('explicit source-link tasks stay partial when autoFix removes the only URL', async () => {
+  it('explicit source-link tasks fail closed when autoFix removes the only URL', async () => {
     initExecution({
       taskId: 'tsk_f3',
       intent: '帮我查今天特斯拉股价并给出来源链接',
@@ -359,7 +415,7 @@ describe('all flags on — URL fabrication autoFix loop', () => {
         }),
       ]),
     );
-    expect(deriveFinalStatus('completed', out.verification)).toBe('partial_success');
+    expect(deriveFinalStatus('completed', out.verification)).toBe('failed');
   });
 });
 
@@ -382,6 +438,11 @@ describe('fixable demotion when autoFix produces no ops', () => {
     });
     expect(out.verification!.passed).toBe(false);
     expect(out.verification!.failureLevel).toBe('needs_clarification');
+    expect(out.finalText).not.toBe('too short');
+    expect(out.finalText).toContain('未能给出可验证的结果');
+    expect(out.finalText).toContain('已保留的中间结果');
+    expect(out.finalText).toContain('too short');
+    expect(deriveFinalStatus('completed', out.verification)).toBe('failed');
   });
 });
 
@@ -457,7 +518,7 @@ describe('full tier triggers LLM verifier', () => {
 describe('constraint violation hard_fail', () => {
   beforeEach(() => flagsAllOn());
 
-  it('form_submit detected in browser_state → hard_fail, text untouched', async () => {
+  it('form_submit detected in browser_state → hard_fail, unverified text hidden', async () => {
     initExecution({
       taskId: 'tsk_hf',
       intent: '搜索',
@@ -484,7 +545,9 @@ describe('constraint violation hard_fail', () => {
     });
     expect(out.verification!.passed).toBe(false);
     expect(out.verification!.failureLevel).toBe('hard_fail');
-    expect(out.finalText).toBe('Did the search.');
+    expect(out.finalText).not.toContain('Did the search.');
+    expect(out.finalText).toContain('未能给出可验证的结果');
+    expect(out.finalText).toContain('原因：');
   });
 });
 

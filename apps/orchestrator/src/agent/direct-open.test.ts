@@ -21,6 +21,19 @@ describe('extractDirectOpenUrl', () => {
     expect(extractDirectOpenUrl('比较 https://a.example 和 https://b.example')).toBeNull();
   });
 
+  it('does not absorb Chinese instructions after the URL into a direct-open command', () => {
+    expect(
+      extractDirectOpenUrl(
+        '打开 https://www.zhihu.com/signin；如果需要登录就停下来，不要填写账号密码',
+      ),
+    ).toBeNull();
+    expect(
+      extractDirectOpenUrl(
+        '打开 https://httpbin.org/status/403，看看返回了什么。如果没有权限，请停下来',
+      ),
+    ).toBeNull();
+  });
+
   it('rejects non-http protocols', () => {
     expect(extractDirectOpenUrl('打开 javascript:alert(1)')).toBeNull();
     expect(extractDirectOpenUrl('打开 file:///etc/passwd')).toBeNull();
@@ -31,6 +44,9 @@ describe('extractDirectOpenUrl', () => {
       'https://example.com/release.',
     );
     expect(extractDirectOpenUrl('打开 https://example.com/path。')).toBe(
+      'https://example.com/path',
+    );
+    expect(extractDirectOpenUrl('打开 https://example.com/path！')).toBe(
       'https://example.com/path',
     );
   });

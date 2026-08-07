@@ -137,6 +137,9 @@ export interface ExecutionContract {
    * against the model's report. Null on non-workflow tiers.
    */
   expertWorkflowId?: string | null;
+  /** Explicit task-level mode. `expert` promotes even a generic task
+   * to the full quality contract so post-run verification is not skipped. */
+  expertMode?: 'normal' | 'expert' | 'auto';
   /**
    * Codex Pack A1 — intent classification + typed output requirement
    * stamped at build time. Null when the intent didn't carry a
@@ -154,6 +157,7 @@ export interface ContractInputs {
   executionMode: 'browser' | 'generate' | 'scrape';
   /** When non-null, an expert workflow ID was matched → tier='full'. */
   expertWorkflowId?: string | null;
+  expertMode?: 'normal' | 'expert' | 'auto';
   /**
    * For browser tasks the url-resolver figured out which domain
    * the agent will visit. The verifier uses this to ground the
@@ -518,7 +522,7 @@ function criteriaForRequirement(req: OutputRequirement): SuccessCriterion[] {
 }
 
 function pickTier(i: ContractInputs): ContractTier {
-  if (i.expertWorkflowId) return 'full';
+  if (i.expertWorkflowId || i.expertMode === 'expert') return 'full';
   if (i.executionMode === 'browser') return 'light';
   return 'checklist';
 }
@@ -529,7 +533,15 @@ function commonHeader(
   expectedOutputType: ExpectedOutputType,
 ): Pick<
   ExecutionContract,
-  'taskId' | 'tier' | 'goal' | 'expectedOutputType' | 'createdAt' | 'requiredInputs' | 'timeout' | 'maxSteps'
+  | 'taskId'
+  | 'tier'
+  | 'goal'
+  | 'expectedOutputType'
+  | 'createdAt'
+  | 'requiredInputs'
+  | 'timeout'
+  | 'maxSteps'
+  | 'expertMode'
 > {
   return {
     taskId: inputs.taskId,
@@ -540,6 +552,7 @@ function commonHeader(
     timeout: DEFAULT_TIMEOUTS[tier],
     maxSteps: DEFAULT_MAX_STEPS[tier],
     createdAt: new Date().toISOString(),
+    expertMode: inputs.expertMode ?? 'auto',
   };
 }
 
@@ -654,6 +667,7 @@ function buildFullTier(inputs: ContractInputs): ExecutionContract {
   return {
     ...commonHeader(inputs, 'full', 'text'),
     expertWorkflowId: inputs.expertWorkflowId ?? null,
+    expertMode: inputs.expertMode ?? 'auto',
     successCriteria: [
       {
         id: newCriterionId(),
@@ -678,6 +692,16 @@ function buildFullTier(inputs: ContractInputs): ExecutionContract {
         description: '回复中的 URL 必须存在于 ledger 的 observed/extracted 来源（防编造）',
         rule: 'no_ungrounded_urls',
       },
+      ...(inputs.expertMode === 'expert'
+        ? [
+            {
+              id: newCriterionId(),
+              type: 'custom' as const,
+              description: '专家回复中的 benchmark、百分比和倍数必须说明证据或假设边界',
+              rule: 'expert_claim_provenance',
+            },
+          ]
+        : []),
     ],
     constraints: inputs.constraints ?? [],
   };

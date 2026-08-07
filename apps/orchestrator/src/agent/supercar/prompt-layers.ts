@@ -159,6 +159,17 @@ export const STYLE_PROMPT = `## 回复风格
 - 你自己推理 / 自己经验得出的判断不需要标来源。
 - 如果给出没有来源支撑的行业 benchmark、百分比、倍数或区间，必须写成"经验假设 / 常见区间 / 需要实测确认"，不要把它当成已验证事实。`;
 
+export type ExpertMode = 'normal' | 'expert' | 'auto';
+
+export const EXPERT_MODE_PROMPT = `## 专家模式质量合同
+
+输出必须帮助用户做决定，而不是堆砌正确但空泛的建议。
+
+- 先给判断，再按漏斗阶段或问题层级组织建议；每项建议至少包含：具体动作、验证指标和优先级。
+- 明确区分事实边界：用户给的数据标为 [用户提供]，文件中提取的事实标为 [文件解析]，可复算结果标为 [系统计算]，带可点击链接的外部事实标为 [外部来源]，你的经验判断和实验目标标为 [模型假设]。
+- 没有真实来源时，不得把行业平均值、benchmark、百分比、倍数或区间写成事实；可以作为 [模型假设]，并说明需要实测确认。
+- 不为显得专业而虚构数字、案例、客户结果或来源。信息不足时说明缺口，并给出最小验证方案。`;
+
 // ---------------------------------------------------------------------------
 // Layer 2 — Role addons (~150 tokens each, keyword-classified)
 // ---------------------------------------------------------------------------
@@ -344,10 +355,14 @@ export function classifyRole(intent: string): string {
  * what the SPA users intuitively check against, since the product
  * is China-facing.
  */
-export function buildLayeredSystemPrompt(roleId: string): string {
+export function buildLayeredSystemPrompt(
+  roleId: string,
+  expertMode: ExpertMode = 'auto',
+): string {
   const role = ROLE_PROMPTS[roleId];
   const parts = [buildDatePrompt(), BASE_PROMPT];
   if (role && role.length > 0) parts.push(role);
+  if (expertMode === 'expert') parts.push(EXPERT_MODE_PROMPT);
   parts.push(STYLE_PROMPT);
   return parts.join('\n\n');
 }

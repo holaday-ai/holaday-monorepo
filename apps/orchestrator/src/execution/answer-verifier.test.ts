@@ -924,6 +924,70 @@ describe('verifyDeterministic — workflow section_presence + source_annotation 
   });
 });
 
+describe('verifyDeterministic — generic expert claim provenance', () => {
+  function genericExpertContract(taskId: string) {
+    return buildContract({
+      taskId,
+      intent: '给我一份 SaaS landing page 优化建议，按转化漏斗分层',
+      executionMode: 'generate',
+      expertMode: 'expert',
+    });
+  }
+
+  it('rejects unsupported benchmark numbers presented as facts', () => {
+    const taskId = 'tsk_generic_expert_unlabelled';
+    const ledger = new EvidenceLedger(taskId);
+    ledger.add({
+      fact: '用户需要 SaaS landing page 优化建议',
+      sourceType: 'user_input',
+      sourceDetail: 'msg',
+      confidence: 'observed',
+    });
+    const result = verifyDeterministic({
+      contract: genericExpertContract(taskId),
+      ledger,
+      answerText:
+        '建议按认知、考虑、转化三个阶段优化。行业平均注册转化率为 8%，首屏改版通常能提升 20%。' +
+        '每项建议都应设置负责人、验证指标和复盘周期。'.repeat(8),
+    });
+
+    expect(result.passed).toBe(false);
+    expect(result.checks).toContainEqual(
+      expect.objectContaining({
+        criterionId: 'generic.expert_claim_provenance',
+        passed: false,
+        severity: 'hard_fail',
+      }),
+    );
+  });
+
+  it('accepts expert numbers when their evidence boundary is explicit', () => {
+    const taskId = 'tsk_generic_expert_labelled';
+    const ledger = new EvidenceLedger(taskId);
+    ledger.add({
+      fact: '用户需要 SaaS landing page 优化建议',
+      sourceType: 'user_input',
+      sourceDetail: 'msg',
+      confidence: 'observed',
+    });
+    const result = verifyDeterministic({
+      contract: genericExpertContract(taskId),
+      ledger,
+      answerText:
+        '建议按认知、考虑、转化三个阶段优化。注册转化率 8% 仅作为首轮实验目标 [模型假设]，需要用真实流量校准。' +
+        '每项建议都包含漏斗阶段、具体动作、负责人、验证指标和复盘周期。'.repeat(8),
+    });
+
+    expect(result.checks).toContainEqual(
+      expect.objectContaining({
+        criterionId: 'generic.expert_claim_provenance',
+        passed: true,
+      }),
+    );
+    expect(result.passed).toBe(true);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Codex Round 2 P1-4 — extractStructuredItems
 // ---------------------------------------------------------------------------
@@ -1157,6 +1221,29 @@ describe('extractStructuredItems — bullet list (low fidelity)', () => {
     expect(items[0]!.source).toBe('bullet');
     expect(items[1]!.price).toBe(99);
     expect(items[2]!.url).toBe('https://example.com');
+  });
+
+  it('accepts complete ecommerce rows written as bullet items', () => {
+    const contract = buildContract({
+      taskId: 'tsk_ecom_bullet_rows',
+      intent: '去电商站搜 iPhone 16，按价格排序，给前3结果（名称/价格/链接）',
+      executionMode: 'generate',
+    });
+    const answer = [
+      '- iPhone 16 128GB ¥4599 https://example.com/item-1',
+      '- iPhone 16 256GB ¥4999 https://example.com/item-2',
+      '- iPhone 16 Plus ¥5299 https://example.com/item-3',
+    ].join('\n');
+
+    const result = verifyDeterministic({
+      contract,
+      ledger: new EvidenceLedger('tsk_ecom_bullet_rows'),
+      answerText: answer,
+    });
+
+    const rowCheck = result.checks.find((c) => c.criterionType === 'ecommerce_rows');
+    expect(rowCheck).toBeDefined();
+    expect(rowCheck!.passed).toBe(true);
   });
 
   it('returns [] when answer has no recognised structure', () => {

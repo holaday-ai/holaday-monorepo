@@ -33,4 +33,15 @@ describe('supercar system prompt safety boundaries', () => {
     const none = buildSupercarSystemPrompt({ intent: '生成一个 PDF', layered: true });
     expect(none).not.toContain('TEST-GUIDANCE-MARKER');
   });
+
+  it('keeps the forced expert quality contract in browser-mode prompts', () => {
+    const prompt = buildSupercarSystemPrompt({
+      intent: '研究竞品落地页并给出优化建议',
+      layered: true,
+      expertMode: 'expert',
+    });
+
+    expect(prompt).toContain('专家模式质量合同');
+    expect(prompt).toContain('[模型假设]');
+  });
 });

@@ -308,7 +308,6 @@ export function WorkbenchApp(): JSX.Element {
   const tasks = useTaskStore((s) => s.tasks);
   const selectedTaskId = useTaskStore((s) => s.selectedTaskId);
   const composerMode = useTaskStore((s) => s.composerMode);
-  const loading = useTaskStore((s) => s.loading);
   const enterNewTaskMode = useTaskStore((s) => s.enterNewTaskMode);
   const setDefaultViewportProfile = useTaskStore((s) => s.setDefaultViewportProfile);
   const createTaskRaw = useTaskStore((s) => s.createTask);
@@ -638,7 +637,6 @@ export function WorkbenchApp(): JSX.Element {
       {!panelFullscreen && (
         <MainPanel
           task={selectedTask}
-          busy={loading}
           greetingName={preferredDisplayName(me) || undefined}
           inputRef={inputRef}
           replyMode={isReplyMode}
@@ -646,7 +644,6 @@ export function WorkbenchApp(): JSX.Element {
           followUpTarget={followUpTarget}
           userPlan={me?.plan}
           userSelectedRoles={me?.selectedRoles ?? null}
-          profileStorageScope={me?.userId ?? null}
           quotaExhausted={quotaExhausted}
           attachmentsAllowed={planForRetention !== 'free'}
           attachmentByteCap={

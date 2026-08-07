@@ -876,9 +876,8 @@ function checkPriceSort(
  * markdown tables, and numbered/bullet lists all flow through the
  * single pipeline; row-level "第 N 行缺少..." copy survives.
  *
- * Skips bullet-source items when auditing (bullet lines rarely have
- * full {name, price, url} triples and were never the target shape
- * for ecommerce listings).
+ * Bullet rows are audited like every other row: complete triples pass;
+ * incomplete rows fail with the same missing-field detail.
  */
 function checkEcommerceRows(
   criterion: SuccessCriterion,
@@ -886,8 +885,7 @@ function checkEcommerceRows(
 ): CheckResult {
   const minItems = Number(criterion.data?.minItems ?? 0);
   const minUniqueUrls = Number(criterion.data?.minUniqueUrls ?? 0);
-  const allItems = extractStructuredItems(answerText);
-  const rows = allItems.filter((it) => it.source !== 'bullet');
+  const rows = extractStructuredItems(answerText);
   if (rows.length === 0) {
     return {
       criterionId: criterion.id,
@@ -975,11 +973,7 @@ function checkDuplicateCandidateUrls(
   contract: ExecutionContract,
 ): CheckResult | null {
   const rows = extractStructuredItems(answerText).filter(
-    (row) =>
-      row.source !== 'bullet' &&
-      row.name &&
-      row.url &&
-      row.name.trim().length > 0,
+    (row) => row.name && row.url && row.name.trim().length > 0,
   );
   if (rows.length < 2) return null;
 
@@ -1107,6 +1101,8 @@ function checkCustom(
         severity: passed ? undefined : 'fixable',
       };
     }
+    case 'expert_claim_provenance':
+      return checkExpertClaimProvenance(answerText);
     default:
       return {
         criterionId: criterion.id,
@@ -1115,6 +1111,45 @@ function checkCustom(
         detail: `unknown custom rule "${criterion.rule}" — deferred to LLM tier`,
       };
   }
+}
+
+const EXPERT_PROVENANCE_MARKERS = [
+  '[用户提供]',
+  '[文件解析]',
+  '[系统计算]',
+  '[外部来源]',
+  '[模型假设]',
+  '经验假设',
+  '常见区间',
+  '需要实测确认',
+] as const;
+
+function checkExpertClaimProvenance(answerText: string): CheckResult {
+  const claimSegments = answerText
+    .split(/[。！？!?\n]+/u)
+    .map((segment) => segment.trim())
+    .filter(Boolean)
+    .filter((segment) =>
+      /(?:行业|市场|平均|基准|benchmark|通常|普遍|常见)[^。！？\n]{0,36}\d|\d+(?:\.\d+)?\s*(?:%|％|倍|x\b)/iu.test(
+        segment,
+      ),
+    );
+  const unsupported = claimSegments.filter(
+    (segment) =>
+      !/https?:\/\//i.test(segment) &&
+      !EXPERT_PROVENANCE_MARKERS.some((marker) => segment.includes(marker)),
+  );
+  const passed = unsupported.length === 0;
+  return {
+    criterionId: 'generic.expert_claim_provenance',
+    criterionType: 'expert_claim_provenance',
+    passed,
+    checker: 'deterministic',
+    detail: passed
+      ? '专家数字结论均说明了来源或假设边界'
+      : `以下专家结论缺少来源或假设标记：${unsupported.slice(0, 3).join('；')}`,
+    severity: passed ? undefined : 'hard_fail',
+  };
 }
 
 // ---------------------------------------------------------------------------

@@ -51,6 +51,7 @@ import type {
 } from './execution-contract.js';
 import {
   buildContract,
+  classifyIntentForOutputRequirement,
   isResearchOrRetrievalIntent,
 } from './execution-contract.js';
 import {
@@ -227,7 +228,7 @@ export type FinalTerminalStatus =
 
 export interface ResearchSourceTrustReview {
   requiresReview: boolean;
-  failedChecks: Array<{ type: 'source_count'; detail: string }>;
+  failedChecks: Array<{ type: string; detail: string }>;
 }
 
 export function assessResearchSourceTrust(input: {
@@ -256,6 +257,117 @@ export function assessResearchSourceTrust(input: {
   };
 }
 
+/**
+ * Always-on minimum trust gate for result types where an unverified
+ * answer is worse than no answer. This deliberately does not depend on
+ * the staged execution-verifier flags: stock quotes and ecommerce
+ * rankings must never become "completed" merely because the rollout
+ * flag is off.
+ */
+export function assessResultTrust(input: {
+  intent?: string;
+  resultText?: string;
+  currentUrl?: string | null;
+}): ResearchSourceTrustReview {
+  const intent = input.intent?.trim() ?? '';
+  const resultText = input.resultText?.trim() ?? '';
+  if (!intent || !resultText) return { requiresReview: false, failedChecks: [] };
+
+  const { kind, requirement } = classifyIntentForOutputRequirement(intent);
+  const failedChecks: Array<{ type: string; detail: string }> = [];
+  const hasClickableSource = [resultText, input.currentUrl ?? ''].some((value) =>
+    /https?:\/\/[^\s,;'\")\]>]+/i.test(value),
+  );
+
+  if (kind === 'stock_quote') {
+    const hasPrice =
+      /(?:当前|最新|实时|收盘)?\s*(?:股价|价格|现价|最新价)[^\d\n]{0,16}(?:RMB\s*)?[¥$]?\s*\d+(?:\.\d+)?/iu.test(
+        resultText,
+      );
+    const hasTimestamp =
+      /(?:更新(?:时间)?|数据时间|时间|截至)[^\n。]{0,36}(?:\d{4}[-/.年]\d{1,2}[-/.月]\d{1,2}|\d{1,2}:\d{2}|今天|今日)/u.test(
+        resultText,
+      );
+    if (!hasClickableSource) {
+      failedChecks.push({
+        type: 'source_count',
+        detail: '实时股价缺少可点击行情来源，无法核对当前价格',
+      });
+    }
+    if (!hasPrice) {
+      failedChecks.push({
+        type: 'stock_price',
+        detail: '回复没有可识别的当前股价字段',
+      });
+    }
+    if (!hasTimestamp) {
+      failedChecks.push({
+        type: 'stock_timestamp',
+        detail: '回复没有明确的数据日期或更新时间，无法判断是否为最新行情',
+      });
+    }
+    const hasClosedState = /(?:已(?:经)?|今日|当前)?\s*(?:收盘|休市|闭市)/u.test(resultText);
+    const hasNotOpenedState = /(?:尚未|还未|未)\s*(?:开盘|开市)/u.test(resultText);
+    const weekdayMismatch = findDateWeekdayMismatch(resultText);
+    if (hasClosedState && hasNotOpenedState) {
+      failedChecks.push({
+        type: 'temporal_consistency',
+        detail: '同一条行情同时声称市场已收盘和尚未开盘，时间状态相互矛盾',
+      });
+    }
+    if (weekdayMismatch) {
+      failedChecks.push({
+        type: 'temporal_consistency',
+        detail: weekdayMismatch,
+      });
+    }
+  } else if (kind === 'ecommerce_listing' && requirement?.kind === 'ecommerce') {
+    const rows = extractStructuredItems(resultText);
+    const completeRows = rows.filter(
+      (row) => Boolean(row.name) && row.price != null && Boolean(row.url),
+    );
+    const uniqueUrls = new Set(completeRows.map((row) => row.url));
+    if (
+      completeRows.length < requirement.minItems ||
+      uniqueUrls.size < requirement.minItems
+    ) {
+      failedChecks.push({
+        type: 'ecommerce_rows',
+        detail: `可核验商品只有 ${completeRows.length} 条、独立链接 ${uniqueUrls.size} 个，要求至少 ${requirement.minItems} 条名称/价格/商品链接完整的结果`,
+      });
+    }
+  }
+
+  if (failedChecks.length > 0) {
+    return { requiresReview: true, failedChecks };
+  }
+  return assessResearchSourceTrust(input);
+}
+
+function findDateWeekdayMismatch(text: string): string | null {
+  const match = text.match(
+    /(\d{4})[-/.年](\d{1,2})[-/.月](\d{1,2})日?\s*(?:\(|（)?(?:星期|周)?([一二三四五六日天])/u,
+  );
+  if (!match) return null;
+  const [, yearRaw, monthRaw, dayRaw, weekdayRaw] = match;
+  const year = Number(yearRaw);
+  const month = Number(monthRaw);
+  const day = Number(dayRaw);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    !Number.isFinite(date.getTime()) ||
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    return '回复中的行情日期无效';
+  }
+  const expected = '日一二三四五六'[date.getUTCDay()];
+  const actual = weekdayRaw === '天' ? '日' : weekdayRaw;
+  if (expected === actual) return null;
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')} 的星期标注不一致`;
+}
+
 export function deriveFinalStatus(
   runnerStatus: string,
   verification: VerificationResult | null,
@@ -266,14 +378,23 @@ export function deriveFinalStatus(
   const original = runnerStatus as FinalTerminalStatus;
   if (runnerStatus !== 'completed') return original;
   if (verification && !verification.passed) {
-    if (verification.failureLevel === 'hard_fail') return 'failed';
+    const hasCriticalStructuralFailure = verification.checks.some(
+      (check) =>
+        !check.passed &&
+        ['url_count', 'ecommerce_rows', 'result_count'].includes(
+          check.criterionType ?? '',
+        ),
+    );
+    if (
+      verification.failureLevel === 'hard_fail' ||
+      verification.failureLevel === 'needs_clarification' ||
+      hasCriticalStructuralFailure
+    ) {
+      return 'failed';
+    }
     return 'partial_success';
   }
-  if (sourceTrust?.requiresReview) return 'partial_success';
-  // 'fixable' AND 'needs_clarification' both map to partial_success
-  // when the runner already produced a usable summary. The
-  // alternative ('awaiting_user' for needs_clarification) would
-  // re-open a task the user already closed; that's worse UX.
+  if (sourceTrust?.requiresReview) return 'failed';
   return original;
 }
 
@@ -528,7 +649,10 @@ function runFixLoop(
   workflowContract: import('./expert-workflow-contract.js').ExpertWorkflowContract | null,
 ): VerifyOutput {
   if (initialVerification.failureLevel !== 'fixable') {
-    return { verification: initialVerification, finalText: inputs.answerText };
+    return {
+      verification: initialVerification,
+      finalText: buildSafeVerificationBoundary(initialVerification, inputs.answerText),
+    };
   }
   const fix = autoFix({
     contract,
@@ -543,7 +667,10 @@ function runFixLoop(
       ...initialVerification,
       failureLevel: 'needs_clarification',
     };
-    return { verification: demoted, finalText: inputs.answerText };
+    return {
+      verification: demoted,
+      finalText: buildSafeVerificationBoundary(demoted, inputs.answerText),
+    };
   }
   // Re-run deterministic only — the LLM tier is expensive and
   // shouldn't be repeated (the autoFix changes the answer text
@@ -593,6 +720,35 @@ function runFixLoop(
     },
     finalText: fix.fixed,
   };
+}
+
+function buildSafeVerificationBoundary(
+  verification: VerificationResult,
+  answerText: string,
+): string {
+  const failed = verification.checks.find((check) => !check.passed);
+  const reason = failed?.detail ?? verification.suggestedFix ?? '关键条件尚未验证';
+  const failedChecks = verification.checks.filter((check) => !check.passed);
+  const canPreserveDraft =
+    verification.failureLevel === 'needs_clarification' &&
+    failedChecks.every(
+      (check) => !check.criterionType && check.severity !== 'hard_fail',
+    );
+  const parts = [
+    '未能给出可验证的结果，本次不会把未通过校验的内容作为结论。',
+    '',
+    `原因：${reason}`,
+    '',
+    '请补充必要信息、更换可访问来源，或调整条件后重试。',
+  ];
+  if (canPreserveDraft && answerText.trim()) {
+    parts.push(
+      '',
+      '已保留的中间结果（仅供继续处理，不应直接作为最终事实或决策依据）：',
+      answerText.trim(),
+    );
+  }
+  return parts.join('\n');
 }
 
 // ---------------------------------------------------------------------------

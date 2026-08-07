@@ -6,10 +6,10 @@ import {
 } from './browser-network-policy.js';
 
 const DIRECT_OPEN_INTENT =
-  /^(?:打开|访问|前往|进入|open|visit|go\s+to)\s+(https?:\/\/\S+)$/i;
+  /^(?:打开|访问|前往|进入|open|visit|go\s+to)\s+(https?:\/\/[^\s，；。！？]+)$/iu;
 
 export function extractDirectOpenUrl(intent: string): string | null {
-  const normalized = intent.trim().replace(/。+$/u, '');
+  const normalized = intent.trim().replace(/[，；。！？]+$/u, '');
   const match = normalized.match(DIRECT_OPEN_INTENT);
   const rawUrl = match?.[1];
   if (!rawUrl) return null;

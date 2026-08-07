@@ -75,6 +75,7 @@ import {
   getTaskBudget,
   selectModelAndEffort,
   type Effort,
+  type ExpertMode,
 } from './prompt-layers.js';
 import { buildSupercarSystemPrompt } from './system-prompt.js';
 import { classifyError as classifyToolError, extractDomain as extractDomainStat } from './stats-service.js';
@@ -831,7 +832,23 @@ export interface RunSupercarOptions {
     pageUrl?: string | null;
     pageTitle?: string | null;
     pageTxSignal?: string | null;
-  }) => { allowed: boolean; reason?: string } | Promise<{ allowed: boolean; reason?: string }>;
+  }) =>
+    | {
+        allowed: boolean;
+        reason?: string;
+        requiresConfirmation?: boolean;
+        requiresTakeover?: boolean;
+        awaitingKind?: 'login' | 'permission';
+        question?: string;
+      }
+    | Promise<{
+        allowed: boolean;
+        reason?: string;
+        requiresConfirmation?: boolean;
+        requiresTakeover?: boolean;
+        awaitingKind?: 'login' | 'permission';
+        question?: string;
+      }>;
   /**
    * Phase 1 Playbook B4 — when true, the loop attaches the post-action
    * screenshot (base64) to onAction events for SELECTED key steps (a
@@ -910,6 +927,12 @@ export interface RunSupercarOptions {
    * Tests that don't care about gating can leave it undefined.
    */
   roleIdOverride?: string;
+  /**
+   * User-selected quality mode. Forced expert mode must reach the
+   * browser prompt as well as the post-run verification contract; otherwise
+   * browser tasks silently execute with normal-mode guidance.
+   */
+  expertMode?: ExpertMode;
   /**
    * Phase 10 Tier 3 — pre-parsed user-uploaded file blocks. The
    * caller (tasks.create) reads each fileId, runs it through
@@ -1438,6 +1461,7 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
     domain: opts.domain ?? null,
     intent: opts.intent,
     layered: tier1,
+    expertMode: opts.expertMode,
     // Plan-aware file-format guidance: honest degrade when the account
     // can't produce a requested format (free → can't generate files;
     // basic → office formats fall back to md/csv). Covers the free
@@ -1447,6 +1471,15 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
 
   type MsgParam = Anthropic.Beta.BetaMessageParam;
   type ContentBlockParam = Anthropic.Beta.BetaContentBlockParam;
+  type AuthWallResume = {
+    kind: 'auth_wall_resumed';
+    content: ContentBlockParam[];
+  };
+  type SkipPendingAction = {
+    kind: 'skip_pending_action';
+    content: ContentBlockParam[];
+  };
+  type LiveVetoResult = SupercarOutcome | SkipPendingAction | null;
 
   // Phase 10 Tier 3: attachments slot in between the intent text and
   // the initial screenshot. Order matters — the model reads the
@@ -1508,12 +1541,13 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
   // action sequence). Bumped once per tool_use in the dispatch loop below.
   let actionIndex = 0;
   let cancelled = false;
+  let handle: RunHandle;
 
-  // Phase 1 Playbook ④ explorer — LIVE-VETO. When opts.onBeforeAction is wired
-  // (explorer only), every live WRITE action calls this BEFORE executing. A veto
-  // means the action is NOT executed and the task terminates with a failed outcome
-  // (the explorer's hook records the sensitive reason on its side). Default absent →
-  // returns null immediately = zero overhead, zero behaviour change for user tasks.
+  // Phase 1 Playbook ④ — LIVE-VETO. When opts.onBeforeAction is wired,
+  // every live WRITE action calls this BEFORE executing. The hook may reject,
+  // request explicit confirmation, or park for browser takeover. A completed
+  // takeover cancels the stale pending action and resumes from a fresh page
+  // observation. Default absent → returns null immediately with zero overhead.
   const vetoOutcome = async (action: {
     kind: 'click' | 'navigate' | 'type';
     label?: string | null;
@@ -1529,10 +1563,78 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
     // Layer C trigger signals (captured only when opts.captureLayerCSignals — LAYER_C on).
     pageTitle?: string | null;
     pageTxSignal?: string | null;
-  }): Promise<SupercarOutcome | null> => {
+  }): Promise<LiveVetoResult> => {
     if (!opts.onBeforeAction) return null;
     const verdict = await opts.onBeforeAction(action);
     if (verdict.allowed) return null;
+    if (verdict.requiresTakeover) {
+      const parked = await parkForAuthWall(
+        verdict.awaitingKind ?? 'login',
+        action.pageUrl ?? action.url ?? null,
+      );
+      if ('kind' in parked) {
+        return {
+          kind: 'skip_pending_action',
+          content: parked.content,
+        };
+      }
+      return parked;
+    }
+    if (verdict.requiresConfirmation) {
+      const question =
+        verdict.question ??
+        '即将执行可能产生外部影响的操作。请明确回复“确认执行”后继续。';
+      let waitTimer: NodeJS.Timeout | null = null;
+      const replyPromise = new Promise<string>((resolve) => {
+        handle.resolveReply = resolve;
+      });
+      await safeCall(opts.onAwaitingUser, {
+        question,
+        at: new Date(),
+        currentUrl: action.pageUrl ?? action.url ?? null,
+        awaitingKind: 'browser_action',
+      });
+      const timeoutPromise = new Promise<string>((resolve) => {
+        waitTimer = setTimeout(
+          () => resolve('__SUPERCAR_AWAITING_TIMEOUT__'),
+          AWAITING_USER_TIMEOUT_TAKEOVER_MS,
+        );
+      });
+      const reply = await Promise.race([replyPromise, timeoutPromise]);
+      if (waitTimer) clearTimeout(waitTimer);
+      handle.resolveReply = null;
+      if (reply === '__SUPERCAR_ABORT__' || cancelled) {
+        return {
+          status: 'cancelled',
+          iterations: iteration,
+          toolsUsed: Array.from(toolsUsed),
+        };
+      }
+      if (reply === '__SUPERCAR_AWAITING_TIMEOUT__') {
+        return {
+          status: 'awaiting_user',
+          question,
+          iterations: iteration,
+          toolsUsed: Array.from(toolsUsed),
+        };
+      }
+      const { isAffirmativeActionConfirmation } = await import(
+        './runtime-action-policy.js'
+      );
+      if (isAffirmativeActionConfirmation(reply)) {
+        logger.info(
+          { taskId: opts.taskId, iteration, actionKind: action.kind },
+          'supercar: user confirmed sensitive action — executing pending action',
+        );
+        return null;
+      }
+      return {
+        status: 'cancelled',
+        reason: '用户未确认不可逆操作，本次任务已停止，页面进度已保留。',
+        iterations: iteration,
+        toolsUsed: Array.from(toolsUsed),
+      };
+    }
     logger.warn(
       { taskId: opts.taskId, iteration, actionKind: action.kind, reason: verdict.reason },
       'supercar: live action VETOED by onBeforeAction — not executed, task halting',
@@ -1612,7 +1714,7 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
 
   // Install the per-task handle so `supercarReply` / `supercarAbort`
   // can find us later.
-  const handle: RunHandle = {
+  handle = {
     resolveReply: null,
     handoffMessage: null,
     originalIntent: opts.intent,
@@ -1630,21 +1732,28 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
   };
   handles.set(opts.taskId, handle);
 
-  const parkForAuthWall = async (
+  async function parkForAuthWall(
     kind: 'login' | 'captcha' | 'permission',
     url: string | null,
-  ): Promise<SupercarOutcome | null> => {
+  ): Promise<SupercarOutcome | AuthWallResume> {
     const question = buildAuthParkQuestion(kind, url);
+    let waitTimer: NodeJS.Timeout | null = null;
+    const replyPromise = new Promise<string>((resolve) => {
+      handle.resolveReply = resolve;
+    });
     await safeCall(opts.onAwaitingUser, {
       question,
       at: new Date(),
       currentUrl: url,
       awaitingKind: kind,
     });
-    let waitTimer: NodeJS.Timeout | null = null;
-    const replyPromise = new Promise<string>((resolve) => {
-      handle.resolveReply = resolve;
-    });
+    if (cancelled) {
+      return {
+        status: 'cancelled',
+        iterations: iteration,
+        toolsUsed: Array.from(toolsUsed),
+      };
+    }
     const timeoutPromise = new Promise<string>((resolve) => {
       waitTimer = setTimeout(
         () => resolve('__SUPERCAR_AWAITING_TIMEOUT__'),
@@ -1688,24 +1797,19 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
         toolsUsed: Array.from(toolsUsed),
       };
     }
-    if (
-      handle.pendingAttachmentBlocks &&
-      handle.pendingAttachmentBlocks.length > 0
-    ) {
+    let content: ContentBlockParam[];
+    if (handle.pendingAttachmentBlocks && handle.pendingAttachmentBlocks.length > 0) {
       const blocks = handle.pendingAttachmentBlocks;
       handle.pendingAttachmentBlocks = null;
-      messages.push({
-        role: 'user',
-        content: [
-          ...(blocks as unknown as ContentBlockParam[]),
-          { type: 'text', text: replyOrAbort },
-        ],
-      });
+      content = [
+        ...(blocks as unknown as ContentBlockParam[]),
+        { type: 'text', text: replyOrAbort },
+      ];
     } else {
-      messages.push({ role: 'user', content: replyOrAbort });
+      content = [{ type: 'text', text: replyOrAbort }];
     }
-    return null;
-  };
+    return { kind: 'auth_wall_resumed', content };
+  }
 
   try {
     while (iteration < maxIterations && Date.now() < deadline && !cancelled) {
@@ -2395,15 +2499,15 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
           // <1ms costs nothing but the value can't have changed in
           // between (no I/O between the two checks).
           const currentParkUrl: string | null = preParkUrl;
+          let waitTimer: NodeJS.Timeout | null = null;
+          const replyPromise = new Promise<string>((resolve) => {
+            handle.resolveReply = resolve;
+          });
           await safeCall(opts.onAwaitingUser, {
             question: visibleQuestion,
             at: new Date(),
             currentUrl: currentParkUrl,
             awaitingKind: parkAwaitingKind,
-          });
-          let waitTimer: NodeJS.Timeout | null = null;
-          const replyPromise = new Promise<string>((resolve) => {
-            handle.resolveReply = resolve;
           });
           const timeoutPromise = new Promise<string>((resolve) => {
             waitTimer = setTimeout(
@@ -2551,13 +2655,77 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
       // Execute every client-side tool call from this turn. web_search
       // is server-side so it never appears in `tool_use`.
       const toolResults: ContentBlockParam[] = [];
+      const deferredUserContent: ContentBlockParam[] = [];
+      let skipRemainingToolUses = false;
+      let resumedAfterTakeover = false;
       // Track whether ANY computer action in this turn produced a new
       // screenshot. We only update stuckCount once per turn (not once
       // per action), so Claude doesn't get penalised for emitting
       // multiple parallel tool_uses that all observe the same frame.
       let turnChangedScreenshot = false;
+      const appendTakeoverResumeResult = async (
+        toolUseId: string,
+      ): Promise<void> => {
+        const resumedPage = (await executor.getPage()) as unknown as PageLike;
+        const resumedShot = await executor.screenshot(resumedPage);
+        const guidance =
+          '用户已接管并完成凭证或验证操作；原先排队的 Agent 动作已取消。请基于当前页面重新观察，不要重放密码、验证码或同批次旧动作。';
+        if (resumedShot.error || !resumedShot.base64) {
+          toolResults.push({
+            type: 'tool_result',
+            tool_use_id: toolUseId,
+            content: [
+              {
+                type: 'text',
+                text: `${guidance}\n当前画面暂时无法读取，请先重新截图。`,
+              },
+            ],
+          });
+          return;
+        }
+        const resumedHash = createHash('md5').update(resumedShot.base64).digest('hex');
+        if (lastScreenshotHash !== resumedHash) {
+          turnChangedScreenshot = true;
+          lastScreenshotHash = resumedHash;
+        }
+        await safeCall(opts.onScreencast, {
+          iteration,
+          imageBase64: resumedShot.base64,
+          url: resumedPage.url(),
+          viewportWidth: resumedShot.viewportWidth ?? displayWidth,
+          viewportHeight: resumedShot.viewportHeight ?? displayHeight,
+        });
+        toolResults.push({
+          type: 'tool_result',
+          tool_use_id: toolUseId,
+          content: [
+            { type: 'text', text: guidance },
+            {
+              type: 'image',
+              source: {
+                type: 'base64',
+                media_type: 'image/jpeg',
+                data: resumedShot.base64,
+              },
+            },
+          ],
+        });
+      };
       for (const toolUse of toolUseBlocks) {
         actionIndex += 1;
+        if (skipRemainingToolUses) {
+          toolResults.push({
+            type: 'tool_result',
+            tool_use_id: toolUse.id,
+            content: [
+              {
+                type: 'text',
+                text: '用户接管后，已取消同一批次中基于旧页面状态生成的动作。请重新观察当前页面。',
+              },
+            ],
+          });
+          continue;
+        }
         // -------- Custom `navigate` tool --------
         if (toolUse.name === 'navigate') {
           const navInput = (toolUse.input as { url?: string } | null) ?? {};
@@ -2608,6 +2776,13 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
           // Call-site guarded so a hook-absent user task pays zero alloc/microtask.
           if (opts.onBeforeAction) {
             const navVeto = await vetoOutcome({ kind: 'navigate', url: targetUrl });
+            if (navVeto && 'kind' in navVeto) {
+              resumedAfterTakeover = true;
+              skipRemainingToolUses = true;
+              deferredUserContent.push(...navVeto.content);
+              await appendTakeoverResumeResult(toolUse.id);
+              continue;
+            }
             if (navVeto) return navVeto;
           }
           const navPage = (await executor.getPage()) as unknown as PageLike & {
@@ -2820,7 +2995,11 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
               'supercar: auth wall detected immediately after navigate — parking',
             );
             const parkedOutcome = await parkForAuthWall(authWall.kind, authWall.url);
-            if (parkedOutcome) return parkedOutcome;
+            if (!('kind' in parkedOutcome)) return parkedOutcome;
+            resumedAfterTakeover = true;
+            skipRemainingToolUses = true;
+            deferredUserContent.push(...parkedOutcome.content);
+            await appendTakeoverResumeResult(toolUse.id);
             continue;
           }
           // Phase 3 R4 — when goto errored or the page is blank,
@@ -3454,6 +3633,13 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
               pageTitle: pageTitleSig, // Layer C: 页面标题(给模型)
               pageTxSignal: pageTxSig, // Layer C: 页面可见交易字段名(给模型 + 触发判定)
             });
+            if (actVeto && 'kind' in actVeto) {
+              resumedAfterTakeover = true;
+              skipRemainingToolUses = true;
+              deferredUserContent.push(...actVeto.content);
+              await appendTakeoverResumeResult(toolUse.id);
+              continue;
+            }
             if (actVeto) return actVeto;
           }
         }
@@ -3465,6 +3651,13 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
         // LANDED url; if sensitive, halt (the action ran, but we go no further).
         if (opts.onBeforeAction) {
           const landedVeto = await vetoOutcome({ kind: 'navigate', url: freshPage.url() });
+          if (landedVeto && 'kind' in landedVeto) {
+            resumedAfterTakeover = true;
+            skipRemainingToolUses = true;
+            deferredUserContent.push(...landedVeto.content);
+            await appendTakeoverResumeResult(toolUse.id);
+            continue;
+          }
           if (landedVeto) return landedVeto;
         }
         const shot = await executor.screenshot(freshPage);
@@ -3568,7 +3761,9 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
       // Only increment if the turn had at least one computer tool_use
       // AND none of those actions moved the page.
       const hadComputerAction = toolUseBlocks.some((b) => b.name === 'computer');
-      if (hadComputerAction && !turnChangedScreenshot) {
+      if (resumedAfterTakeover) {
+        stuckCount = 0;
+      } else if (hadComputerAction && !turnChangedScreenshot) {
         stuckCount++;
       } else if (hadComputerAction && turnChangedScreenshot) {
         stuckCount = 0;
@@ -3827,8 +4022,8 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
       messages.push({
         role: 'user',
         content:
-          nudgeContent.length > 0 || plannerReminder.length > 0
-            ? [...toolResults, ...nudgeContent, ...plannerReminder]
+          deferredUserContent.length > 0 || nudgeContent.length > 0 || plannerReminder.length > 0
+            ? [...toolResults, ...deferredUserContent, ...nudgeContent, ...plannerReminder]
             : toolResults,
       });
     }

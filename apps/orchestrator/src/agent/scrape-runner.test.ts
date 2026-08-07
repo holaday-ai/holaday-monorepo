@@ -177,6 +177,30 @@ describe('runScrapeTask — happy paths', () => {
     // Query should NOT contain the leading verb 搜索
     expect(String(searchCall[0])).not.toMatch(/^搜索/);
   });
+
+  it('keeps forced expert quality instructions in the scrape synthesis prompt', async () => {
+    const firecrawl: FirecrawlLane = {
+      scrape: vi.fn(),
+      search: vi.fn(async () => ({
+        ok: true as const,
+        results: [{ url: 'https://example.com/a', markdown: '# Source' }],
+      })),
+    };
+    const { client, stream } = makeAnthropic('研究结果');
+    await runScrapeTask({
+      taskId: 'tsk_expert_scrape',
+      userId: 'u',
+      intent: '研究 SaaS landing page 转化趋势',
+      expertMode: 'expert',
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      client: client as any,
+      firecrawl,
+      logger: fakeLogger(),
+    });
+
+    const req = stream.mock.calls[0]?.[0] as { system?: Array<{ text: string }> } | undefined;
+    expect(req?.system?.[0]?.text).toContain('专家模式质量合同');
+  });
 });
 
 describe('runScrapeTask — failure surfacing', () => {
