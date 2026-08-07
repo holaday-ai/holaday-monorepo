@@ -274,7 +274,6 @@ export function StockTasksPage(): JSX.Element {
   const enabled = briefingStatus?.enabled === true;
   const sampleWatchlist = false;
   const dashboardFreshness = dashboard?.freshness;
-  const freshnessMessage = dashboardFreshness?.message;
   const dashboardTrust = React.useMemo(
     () =>
       stockDashboardTrustState({
@@ -528,16 +527,9 @@ export function StockTasksPage(): JSX.Element {
             部分股票数据暂时无法加载：{loadError}
           </div>
         ) : null}
-        {dashboardTrust.message || freshnessMessage ? (
-          <div
-            className={cn(
-              'rounded-[8px] border px-4 py-3 text-[13px]',
-              dashboardTrust.tone === 'fresh'
-                ? 'border-[#E1E3E8] bg-white text-[#4F5868]'
-                : 'border-[#F4D7A1] bg-[#FFF9EC] text-[#7A4B00]',
-            )}
-          >
-            {refreshingDashboard ? '刷新中：' : null}{dashboardTrust.message ?? freshnessMessage}
+        {dashboardTrust.tone !== 'fresh' && dashboardTrust.message ? (
+          <div className="rounded-[8px] border border-[#F4D7A1] bg-[#FFF9EC] px-4 py-3 text-[13px] text-[#7A4B00]">
+            {refreshingDashboard ? '刷新中：' : null}{dashboardTrust.message}
           </div>
         ) : refreshingDashboard && dashboard ? (
           <div className="rounded-[8px] border border-[#E1E3E8] bg-white px-4 py-3 text-[13px] text-[#4F5868]">

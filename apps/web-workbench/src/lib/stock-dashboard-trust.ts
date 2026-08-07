@@ -88,7 +88,7 @@ export function stockDashboardTrustState(input: StockDashboardTrustInput): Stock
     dayGap >= 0 &&
     dayGap <= 3 &&
     (!requiresCurrentTradeDate(now) || input.observedTradeDate === shanghaiCalendarDate(now));
-  if (input.freshnessStatus === 'fresh' && dateIsCurrentEnough) {
+  if ((input.freshnessStatus === 'fresh' || input.freshnessStatus === 'partial') && dateIsCurrentEnough) {
     return {
       tone: 'fresh',
       statusLabel: 'AkShare',

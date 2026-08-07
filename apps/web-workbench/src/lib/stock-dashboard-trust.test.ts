@@ -19,6 +19,22 @@ describe('stock dashboard trust state', () => {
     });
   });
 
+  it('keeps a current trading-date snapshot usable while slower sources are still loading', () => {
+    expect(
+      dashboardTrust.stockDashboardTrustState({
+        freshnessStatus: 'partial',
+        observedTradeDate: '2026-08-07',
+        refreshedAt: '2026-08-07T06:35:00.000Z',
+        now: new Date('2026-08-07T06:36:00.000Z'),
+      }),
+    ).toMatchObject({
+      tone: 'fresh',
+      canGenerateBriefing: true,
+      dataDateLabel: '数据日期 08/07',
+      message: null,
+    });
+  });
+
   it('labels preserved historical quotes as expired and blocks report generation', () => {
     expect(
       dashboardTrust.stockDashboardTrustState({
