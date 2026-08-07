@@ -86,8 +86,9 @@ interface NewsSnapshot {
   source: string;
   url?: string;
   summary?: string;
-  /** 仅使用文章来源页声明的封面；无可靠封面时保持为空。 */
+  /** 文章来源封面优先；无封面时新闻可使用明确标记的公开行情图。 */
   imageUrl?: string;
+  imageKind?: 'source-cover' | 'market-chart';
 }
 
 interface LeaderSnapshot {
@@ -862,6 +863,17 @@ function sourceDeclaredImageUrl(value?: unknown): string | undefined {
   }
 }
 
+/**
+ * Eastmoney's public K-line image is a market-data visual, not an article
+ * photo. It is used only when a source-backed news record has no published
+ * cover so discovery cards never manufacture a news image.
+ */
+function marketChartUrl(symbol?: string): string | undefined {
+  if (!symbol || !/^[036]\d{5}$/.test(symbol)) return undefined;
+  const market = symbol.startsWith('6') ? '1' : '0';
+  return `https://webquoteklinepic.eastmoney.com/GetPic.aspx?nid=${market}.${symbol}&imageType=k&token=28dfeb41d35cc81d84b4664d7c23c49f&at=1`;
+}
+
 function sortNewsNewestFirst(rows: NewsSnapshot[]): NewsSnapshot[] {
   return [...rows].sort((left, right) => {
     const leftTimestamp = left.publishedAt ? Date.parse(left.publishedAt) : Number.NEGATIVE_INFINITY;
@@ -933,7 +945,9 @@ function buildNews(
       if (!title || !publishedAt || !url) continue;
       const summary = String(pick(row, ['新闻内容']) ?? '').trim();
       const source = String(pick(row, ['文章来源']) ?? '').trim() || '东方财富';
-      const imageUrl = sourceDeclaredImageUrl(pick(row, ['新闻图片']));
+      const sourceImageUrl = sourceDeclaredImageUrl(pick(row, ['新闻图片']));
+      const marketImageUrl = marketChartUrl(item.entry.symbol);
+      const imageUrl = sourceImageUrl ?? marketImageUrl;
       rowsForStock.push({
         category: '新闻',
         time: formatAnnouncementTime(sourcePublishedAt),
@@ -943,7 +957,10 @@ function buildNews(
         source,
         url,
         ...(summary ? { summary } : {}),
-        ...(imageUrl ? { imageUrl } : {}),
+        ...(imageUrl ? {
+          imageUrl,
+          imageKind: sourceImageUrl ? 'source-cover' as const : 'market-chart' as const,
+        } : {}),
       });
     }
     articleRows.push(...sortNewsNewestFirst(dedupeNews(rowsForStock)).slice(0, NEWS_PER_STOCK_ARTICLES));
@@ -1411,6 +1428,7 @@ export const stocksRouter = router({
 
 export const __stocksDashboardTest = {
   sourceDeclaredImageUrl,
+  marketChartUrl,
   buildNews,
   buildDashboardSnapshot,
   dashboardCache,

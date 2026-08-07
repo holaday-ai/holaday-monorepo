@@ -98,6 +98,7 @@ interface NewsRow {
   url?: string;
   summary?: string;
   imageUrl?: string;
+  imageKind?: 'source-cover' | 'market-chart';
 }
 
 type GeneratedBriefing = Awaited<ReturnType<typeof trpc.stocks.generateBriefingNow.mutate>>;
@@ -820,6 +821,11 @@ function DiscoveryPanel({
                       {newsTimeLabel(item)}
                     </span>
                   </div>
+                  {item.imageKind === 'market-chart' ? (
+                    <span className="absolute bottom-3 right-3 rounded-full bg-[#101828]/72 px-2 py-1 text-[11px] font-medium text-white shadow-sm">
+                      行情图
+                    </span>
+                  ) : null}
                 </div>
               ) : (
                 <div className="flex min-h-[132px] shrink-0 flex-col border-b border-[#E7EAF0] bg-[#FAFBFC] p-3">

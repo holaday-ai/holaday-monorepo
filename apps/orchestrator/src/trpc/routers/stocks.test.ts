@@ -142,12 +142,34 @@ describe('stocks dashboard snapshot', () => {
     ]);
   });
 
-  it('uses only a source-declared HTTP image for news previews', () => {
+  it('uses a declared source cover first and an explicitly labelled market chart when no cover is published', () => {
     const sourceDeclaredImageUrl = __stocksDashboardTest.sourceDeclaredImageUrl as (value?: unknown) => string | undefined;
+    const marketChartUrl = __stocksDashboardTest.marketChartUrl as (symbol?: string) => string | undefined;
 
     expect(sourceDeclaredImageUrl('https://source.example/cover.jpg')).toBe('https://source.example/cover.jpg');
     expect(sourceDeclaredImageUrl('data:image/png;base64,not-a-source-url')).toBeUndefined();
     expect(sourceDeclaredImageUrl('javascript:alert(1)')).toBeUndefined();
+    expect(marketChartUrl('603738')).toBe('https://webquoteklinepic.eastmoney.com/GetPic.aspx?nid=1.603738&imageType=k&token=28dfeb41d35cc81d84b4664d7c23c49f&at=1');
+    expect(marketChartUrl('not-a-stock')).toBeUndefined();
+
+    const buildSourceDiscovery = __stocksDashboardTest.buildNews as unknown as (
+      announcements: Array<{ entry: { symbol: string; market: 'A'; displayName: string }; env: ReturnType<typeof envelope> }>,
+      stockNews: Array<{ entry: { symbol: string; market: 'A'; displayName: string }; env: ReturnType<typeof envelope> }>,
+    ) => Array<{ imageUrl?: string; imageKind?: string }>;
+    const [item] = buildSourceDiscovery([], [{
+      entry: { symbol: '603738', market: 'A', displayName: '泰晶科技' },
+      env: envelope([{
+        新闻标题: '没有公开封面的真实新闻',
+        发布时间: '2026-08-07 11:30:00',
+        文章来源: '真实来源',
+        新闻链接: 'https://finance.eastmoney.com/a/202608073834244063.html',
+      }]),
+    }]);
+
+    expect(item).toMatchObject({
+      imageKind: 'market-chart',
+      imageUrl: 'https://webquoteklinepic.eastmoney.com/GetPic.aspx?nid=1.603738&imageType=k&token=28dfeb41d35cc81d84b4664d7c23c49f&at=1',
+    });
   });
 
   it('keeps enough source-backed discovery rows for a multi-stock watchlist', () => {
