@@ -190,3 +190,35 @@ def test_rankings_use_one_sorted_sina_page(
     assert timeout > 0
     assert [row["代码"] for row in rows] == expected_codes
     assert source == f"akshare:sina-stock-rankings({metric})"
+
+
+def test_rankings_reject_all_zero_provider_placeholder(monkeypatch):
+    clear_cache()
+
+    class _Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return [
+                {
+                    "symbol": "bj920000",
+                    "code": "920000",
+                    "name": "占位股票",
+                    "trade": "0",
+                    "changepercent": "0",
+                    "amount": "0",
+                    "ticktime": "09:07:00",
+                },
+            ]
+
+    class _Requests:
+        def get(self, _url, *, params, timeout):
+            assert params["node"] == "hs_a"
+            assert timeout > 0
+            return _Response()
+
+    monkeypatch.setattr(adp, "requests", _Requests(), raising=False)
+
+    with pytest.raises(adp.AkShareUnavailable, match="可验证的真实行情"):
+        adp.get_stock_rankings("gainers", 1)

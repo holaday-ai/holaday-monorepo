@@ -307,15 +307,27 @@ def _sina_ranking_rows(metric: str, limit: int) -> list[dict[str, Any]]:
         if not isinstance(raw, dict):
             continue
         code = _strip_market_prefix(str(raw.get("code") or raw.get("symbol") or ""))
+        name = str(raw.get("name") or "").strip()
         price = _to_float(raw.get("trade"))
         change = _to_float(raw.get("changepercent"))
         amount = _to_float(raw.get("amount"))
-        if not re.fullmatch(r"\d{6}", code) or price is None or change is None or amount is None:
+        # Before the session Sina can return a syntactically valid page whose
+        # rows have a code/name but every market value is zero. Treat that as
+        # unavailable rather than letting it replace a verified ranking.
+        if (
+            not re.fullmatch(r"\d{6}", code)
+            or not name
+            or price is None
+            or price <= 0
+            or change is None
+            or amount is None
+            or amount <= 0
+        ):
             continue
         rows.append(
             {
                 "代码": code,
-                "名称": str(raw.get("name") or "").strip(),
+                "名称": name,
                 "最新价": price,
                 "涨跌额": _to_float(raw.get("pricechange")),
                 "涨跌幅": change,
@@ -330,6 +342,9 @@ def _sina_ranking_rows(metric: str, limit: int) -> list[dict[str, Any]]:
                 "时间戳": str(raw.get("ticktime") or "").strip(),
             }
         )
+
+    if not rows:
+        raise AkShareUnavailable("新浪排行未返回可验证的真实行情")
 
     if metric == "amount":
         rows.sort(key=lambda row: _to_float(row.get("成交额")) or 0, reverse=True)
