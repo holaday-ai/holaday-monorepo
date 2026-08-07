@@ -76,8 +76,13 @@ STUB
   cat > "$harness_dir/repo/scripts/deploy-orchestrator.sh" <<'STUB'
 #!/usr/bin/env bash
 echo "orchestrator" >> "$TEST_EVENT_LOG"
-[[ "${CN_PAYMENT_PREFLIGHT_VERIFIED:-0}" == "1" ]]
-[[ "${PAYPAL_PREFLIGHT_VERIFIED:-0}" == "1" ]]
+if [[ "${TEST_EXPECT_DIRECT_ORCHESTRATOR:-0}" == "1" ]]; then
+  [[ "${CN_PAYMENT_PREFLIGHT_VERIFIED:-0}" != "1" ]]
+  [[ "${PAYPAL_PREFLIGHT_VERIFIED:-0}" != "1" ]]
+else
+  [[ "${CN_PAYMENT_PREFLIGHT_VERIFIED:-0}" == "1" ]]
+  [[ "${PAYPAL_PREFLIGHT_VERIFIED:-0}" == "1" ]]
+fi
 exit "${TEST_ORCHESTRATOR_RC:-0}"
 STUB
   chmod +x "$harness_dir/repo/scripts/deploy-orchestrator.sh"
@@ -91,6 +96,12 @@ fi
 exit "${TEST_CN_PAYMENT_RC:-0}"
 STUB
   chmod +x "$harness_dir/repo/scripts/deploy-cn-payment.sh"
+
+  cat > "$harness_dir/repo/scripts/deploy-spa.sh" <<'STUB'
+#!/usr/bin/env bash
+echo "spa" >> "$TEST_EVENT_LOG"
+STUB
+  chmod +x "$harness_dir/repo/scripts/deploy-spa.sh"
 
   cat > "$harness_dir/bin/git" <<'STUB'
 #!/usr/bin/env bash
@@ -247,6 +258,36 @@ test_cn_payment_deploy_failure_stops_before_preflight() {
   rm -rf "$harness_dir"
 }
 
+test_application_deploy_skips_unrelated_service_restarts() {
+  local harness_dir event_log output
+  harness_dir="$(mktemp -d)"
+  event_log="$harness_dir/events"
+  output="$harness_dir/output"
+  : > "$event_log"
+  write_deploy_current_harness "$harness_dir"
+
+  if ! PATH="$harness_dir/bin:$PATH" \
+    TEST_EVENT_LOG="$event_log" \
+    TEST_EXPECT_DIRECT_ORCHESTRATOR=1 \
+    VULTR_PASSWORD="unit-secret" \
+    BRANCH="codex/release-candidate" \
+    "$harness_dir/repo/scripts/deploy-current.sh" application > "$output" 2>&1; then
+    cat "$output" >&2
+    fail "application deploy harness should complete"
+  fi
+
+  assert_event_order "$event_log" capture-head preflight orchestrator spa
+  ! grep -Fxq "paypal" "$event_log" \
+    || fail "application deploy must let the orchestrator run its own payment preflight"
+  ! grep -Fxq "akshare" "$event_log" \
+    || fail "application deploy must not restart AKShare"
+  ! grep -Fxq "cn-payment-deploy" "$event_log" \
+    || fail "application deploy must not restart CN payment"
+  ! grep -Fq "unit-secret" "$output" \
+    || fail "application deploy must not print credentials"
+  rm -rf "$harness_dir"
+}
+
 test_akshare_divergence_override() {
   local allow_divergence="$1"
   local harness_dir event_log output rc
@@ -391,6 +432,7 @@ test_deploy_current_preflights_before_akshare
 test_combined_orchestrator_failure_rolls_back_akshare 0 7
 test_combined_orchestrator_failure_rolls_back_akshare 29 2
 test_cn_payment_deploy_failure_stops_before_preflight
+test_application_deploy_skips_unrelated_service_restarts
 test_akshare_rollback_only_restores_without_deploying
 test_akshare_failure_restores_live_head install
 test_akshare_failure_restores_live_head smoke

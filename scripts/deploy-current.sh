@@ -3,6 +3,7 @@
 #
 # Usage:
 #   ./scripts/deploy-current.sh spa
+#   ./scripts/deploy-current.sh application
 #   ./scripts/deploy-current.sh orchestrator
 #   ./scripts/deploy-current.sh akshare
 #   ./scripts/deploy-current.sh both
@@ -118,6 +119,14 @@ deploy_orchestrator() {
     "$ROOT_DIR/scripts/deploy-orchestrator.sh" "$BRANCH"
 }
 
+deploy_application_orchestrator() {
+  echo "→ Deploying application Orchestrator"
+  # Let the Orchestrator deploy verify payment connectivity itself. This keeps
+  # an application-only rollout from restarting unrelated service processes.
+  ORCHESTRATOR_ROLLBACK_HEAD="$RELEASE_ROLLBACK_HEAD" \
+    "$ROOT_DIR/scripts/deploy-orchestrator.sh" "$BRANCH"
+}
+
 deploy_cn_payment() {
   echo "→ Deploying CN payment gateway"
   "$ROOT_DIR/scripts/deploy-cn-payment.sh"
@@ -201,6 +210,16 @@ case "$TARGET" in
     deploy_spa
     verify_healthz
     ;;
+  application|app)
+    fetch_current
+    preflight_release_branch
+    deploy_application_orchestrator
+    # Orchestrator deploy resets the shared Vultr checkout. Keep SPA last
+    # so tracked/stale dist files in the checkout cannot overwrite the
+    # freshly uploaded web bundle.
+    deploy_spa
+    verify_healthz
+    ;;
   orchestrator)
     fetch_current
     preflight_release_branch
@@ -225,7 +244,7 @@ case "$TARGET" in
     verify_healthz
     ;;
   *)
-    echo "Usage: $0 [spa|orchestrator|akshare|both]" >&2
+    echo "Usage: $0 [spa|application|orchestrator|akshare|both]" >&2
     exit 2
     ;;
 esac
