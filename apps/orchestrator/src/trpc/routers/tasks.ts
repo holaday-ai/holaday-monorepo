@@ -465,6 +465,12 @@ const taskIdInput = z.object({ taskId: z.string().min(1) });
 
 const createInput = z.object({
   intent: z.string().min(1).max(4_000),
+  /**
+   * Non-user-authored routing context from a dedicated product surface.
+   * It remains separate from `intent`, so persisted history and the model
+   * receive the user's exact wording.
+   */
+  taskSource: z.enum(['stock_dashboard']).optional(),
   clientRequestId: z
     .string()
     .min(8)
@@ -2357,7 +2363,8 @@ export const tasksRouter = router({
     const ashareContext =
       ashareSkillEnabled ||
       (taskSkillId ? ASHARE_SKILL_IDS.has(taskSkillId) : false) ||
-      ASHARE_SKILL_IDS.has(gatedRole);
+      ASHARE_SKILL_IDS.has(gatedRole) ||
+      input.taskSource === 'stock_dashboard';
     // Cross-session guard (#1 session, 2026-06-13, see SESSION_STATUS): only
     // enter the a-share QA lane for GENERIC info intents — a dedicated lane the
     // classifier already chose (template_fill / image / browser) must win, or

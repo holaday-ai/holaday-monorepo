@@ -125,6 +125,41 @@ describe('matchAshareQa', () => {
     expect(r).toEqual({ match: null, hasSignal: false, indexIntent: false });
   });
 
+  it('基金名称查询不被关注列表劫持，也不做 A 股名称搜索', async () => {
+    let searched = false;
+    const r = await resolveAshareInContext(
+      {
+        intent: 'leopold的基金最近发生了什么事？',
+        roleId: 'a-share-analyst',
+        watchlist: WL,
+        now: NOW,
+      },
+      async () => {
+        searched = true;
+        return [{ symbol: '600519', displayName: '贵州茅台' }];
+      },
+    );
+
+    expect(r).toEqual({ match: null, hasSignal: false, indexIntent: false });
+    expect(searched).toBe(false);
+  });
+
+  it('显式 A 股代码仍进入个股事实链路', async () => {
+    const r = await resolveAshareInContext(
+      {
+        intent: '603528 最近发生了什么事？',
+        roleId: 'a-share-analyst',
+        watchlist: WL,
+        now: NOW,
+      },
+      async () => [],
+    );
+
+    expect(r.match?.stocks.map((stock) => stock.symbol)).toEqual(['603528']);
+    expect(r.hasSignal).toBe(true);
+    expect(r.indexIntent).toBe(false);
+  });
+
   it('上下文内 A 股持仓语境仍保留引导兜底', async () => {
     const r = await resolveAshareInContext(
       { intent: '被套了怎么办', roleId: 'a-share-analyst', watchlist: WL, now: NOW },

@@ -89,12 +89,13 @@ interface SectorRow {
 }
 
 interface NewsRow {
-  category?: '公告' | '盘面' | '关注';
+  category?: '公告' | '新闻' | '盘面' | '关注';
   time: string;
   title: string;
   symbols: string[];
   source?: string;
   url?: string;
+  summary?: string;
 }
 
 type GeneratedBriefing = Awaited<ReturnType<typeof trpc.stocks.generateBriefingNow.mutate>>;
@@ -143,18 +144,10 @@ const MARKET_UP_STROKE = '#E11D48';
 const MARKET_DOWN_STROKE = '#0E9F6E';
 const MARKET_CHART_LEFT = 0;
 const MARKET_CHART_RIGHT = 100;
-const DISCOVERY_IMAGES = [
-  'https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?auto=format&fit=crop&w=900&q=80',
-  'https://images.unsplash.com/photo-1520607162513-77705c0f0d4a?auto=format&fit=crop&w=900&q=80',
-  'https://images.unsplash.com/photo-1526628953301-3e589a6a8b74?auto=format&fit=crop&w=900&q=80',
-  'https://images.unsplash.com/photo-1590283603385-17ffb3a7f29f?auto=format&fit=crop&w=900&q=80',
-  'https://images.unsplash.com/photo-1535320903710-d993d3d77d29?auto=format&fit=crop&w=900&q=80',
-  'https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&w=900&q=80',
-];
 export function StockTasksPage(): JSX.Element {
   const navigate = useNavigate();
   const toast = useToast();
-  const createTask = useTaskStore((s) => s.createTask);
+  const createStockTask = useTaskStore((s) => s.createStockTask);
   const [watchlist, setWatchlist] = React.useState<WatchlistRow[] | null>(null);
   const [briefingStatus, setBriefingStatus] = React.useState<BriefingStatus | null>(null);
   const [dashboard, setDashboard] = React.useState<DashboardSnapshot | null>(null);
@@ -432,13 +425,13 @@ export function StockTasksPage(): JSX.Element {
       const trimmed = value.trim();
       if (!trimmed || submitting) return;
       setSubmitting(true);
-      const result = await createTask(toStockIntent(trimmed, stocks));
+      const result = await createStockTask(trimmed);
       setSubmitting(false);
       if ('taskId' in result) {
         navigate(`/?task=${encodeURIComponent(result.taskId)}`);
       }
     },
-    [createTask, navigate, stocks, submitting],
+    [createStockTask, navigate, submitting],
   );
 
   const toggleBriefing = React.useCallback(async () => {
@@ -788,13 +781,13 @@ function DiscoveryPanel({
         </div>
       ) : null}
       {news.length === 0 ? (
-        <EmptyState title="暂无真实股市新闻" body="公告、市场脉冲和自选股行情暂未返回可展示内容。" />
+        <EmptyState title="暂无真实股市新闻" body="公开新闻和公司公告暂未返回带发布时间与原文链接的内容。" />
       ) : filteredNews.length === 0 ? (
         <EmptyState title={`暂无${activeType}`} body="当前分类没有可展示的真实内容，切换到全部可查看其他来源动态。" />
       ) : null}
       {items.length > 0 ? (
         <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
-          {items.map(({ item, index }, cardIndex) => (
+          {items.map(({ item, index }) => (
             <article
               key={`${index}-${item.time}-${item.title}`}
               role="button"
@@ -808,10 +801,7 @@ function DiscoveryPanel({
               }}
               className="group min-w-0 overflow-hidden rounded-[8px] border border-[#E7E7EB] bg-white text-left shadow-[0_10px_24px_rgba(18,24,38,0.04)] transition hover:-translate-y-0.5 hover:border-[#EA1F59]/25 hover:shadow-[0_16px_32px_rgba(18,24,38,0.08)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20 motion-reduce:hover:translate-y-0"
             >
-              <div
-                className="relative h-[150px] bg-[#EEF1F6] bg-cover bg-center"
-                style={{ backgroundImage: `linear-gradient(180deg, rgba(18,24,38,0.04), rgba(18,24,38,0.22)), url(${newsImage(item, index + cardIndex)})` }}
-              >
+              <div className="relative flex h-[132px] flex-col justify-between border-b border-[#E7EAF0] bg-[#F8FAFC] p-3">
                 <div className="absolute left-3 top-3 flex items-center gap-2">
                   <span className={cn(
                     'rounded-full px-2 py-1 text-[11px] font-semibold shadow-sm',
@@ -823,6 +813,20 @@ function DiscoveryPanel({
                   </span>
                   <span className="rounded-full bg-white/80 px-2 py-1 text-[11px] tabular-nums text-[#667085] shadow-sm">
                     {item.time}
+                  </span>
+                </div>
+                <div className="mt-auto flex items-end justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 text-[12px] font-semibold text-[#344054]">
+                      <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[7px] bg-white text-[#667085] shadow-sm ring-1 ring-[#E8ECF2]">
+                        <FileText className="h-4 w-4" aria-hidden />
+                      </span>
+                      <span>来源信息</span>
+                    </div>
+                    <p className="mt-2 truncate text-[12px] text-[#667085]">{item.source ?? '公开来源'}</p>
+                  </div>
+                  <span className="shrink-0 rounded-full border border-[#DDE3EA] bg-white px-2 py-1 text-[11px] text-[#667085]">
+                    原文已记录
                   </span>
                 </div>
               </div>
@@ -1024,12 +1028,17 @@ function NewsDetailModal({
               {newsLead(item)}
             </p>
 
-            <div className="mt-6 overflow-hidden rounded-[10px] border border-[#E4E1DC] bg-white shadow-[0_12px_30px_rgba(18,24,38,0.08)]">
-              <div
-                className="h-[240px] bg-[#EEF1F6] bg-cover bg-center sm:h-[320px]"
-                style={{ backgroundImage: `linear-gradient(180deg, rgba(18,24,38,0.02), rgba(18,24,38,0.16)), url(${newsImage(item, activeIndex)})` }}
-              />
-            </div>
+            <section className="mt-6 flex items-start gap-3 rounded-[10px] border border-[#E4E8EF] bg-[#F8FAFC] px-4 py-4">
+              <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] bg-white text-[#667085] shadow-sm ring-1 ring-[#E8ECF2]">
+                <FileText className="h-4 w-4" aria-hidden />
+              </span>
+              <div className="min-w-0">
+                <p className="text-[13px] font-semibold text-[#344054]">来源信息</p>
+                <p className="mt-1 text-[13px] leading-6 text-[#667085]">
+                  {item.source ?? '公开来源'} · {item.time} · 已记录原文链接。Holaday 不将装饰图片当作来源配图展示。
+                </p>
+              </div>
+            </section>
 
             <div className="mt-7 space-y-5">
               <section>
@@ -3023,14 +3032,6 @@ function newsDisplayType(item: NewsRow): '新闻' | '公告' {
   return item.category === '公告' ? '公告' : '新闻';
 }
 
-function newsImage(item: NewsRow, index: number): string {
-  const title = item.title.toLowerCase();
-  if (item.category === '公告') return DISCOVERY_IMAGES[(index + 1) % DISCOVERY_IMAGES.length];
-  if (/指数|市场|盘面|stock|market/.test(title)) return DISCOVERY_IMAGES[0] ?? DISCOVERY_IMAGES[index % DISCOVERY_IMAGES.length];
-  if (/科技|ai|芯片|半导体|软件/.test(title)) return DISCOVERY_IMAGES[2] ?? DISCOVERY_IMAGES[index % DISCOVERY_IMAGES.length];
-  return DISCOVERY_IMAGES[index % DISCOVERY_IMAGES.length] ?? DISCOVERY_IMAGES[0]!;
-}
-
 function newsLead(item: NewsRow): string {
   const type = newsDisplayType(item);
   const source = item.source ?? '公开来源';
@@ -3038,7 +3039,7 @@ function newsLead(item: NewsRow): string {
   if (type === '公告') {
     return `这是一条来自 ${source} 的公司公告${related}。Holaday 在这里保留来源、时间和关联标的，方便你先判断是否需要打开原文继续核对。`;
   }
-  return `这是一条来自 ${source} 的市场新闻${related}。当前详情基于已返回的标题、来源和盘面字段整理，适合快速判断是否值得进一步追问或生成日报。`;
+  return `这是一条来自 ${source} 的公开新闻${related}。Holaday 仅展示已返回的来源、发布时间、原文链接和摘要；原文内容以来源页面为准。`;
 }
 
 function newsDetailParagraphs(item: NewsRow): string[] {
@@ -3052,10 +3053,11 @@ function newsDetailParagraphs(item: NewsRow): string[] {
       '公告本身不等于利好或利空。用于看盘时，建议结合股价位置、成交额变化和后续日报分析，再判断它对短线情绪或中期基本面的影响。',
     ];
   }
+  const summary = item.summary?.trim();
   return [
-    `新闻标题显示：${item.title}`,
-    `当前来源为 ${source}，时间标记为 ${item.time}，关联标的为 ${related}。它可作为盘面线索，但不应单独作为交易判断。`,
-    '如果这条动态与自选股、行业板块或指数方向一致，可以继续生成日报或追问原因；如果只有标题信号，应先打开原文或补充更多来源再下结论。',
+    summary ? `来源摘要：${summary}` : `新闻标题显示：${item.title}`,
+    `当前来源为 ${source}，发布时间标记为 ${item.time}，关联标的为 ${related}。它可作为公开信息线索，但不应单独作为交易判断。`,
+    '如需判断影响范围，应打开原文核对全文、发布时间和更多来源，再结合股价、成交和后续日报进行分析。',
   ];
 }
 
@@ -3151,9 +3153,4 @@ function formatDelta(value: number | null | undefined): string {
 function deltaPositive(value: number | null | undefined): boolean | undefined {
   if (value == null || value === 0) return undefined;
   return value > 0;
-}
-
-function toStockIntent(prompt: string, stocks: StockSnapshot[]): string {
-  const symbols = stocks.slice(0, 8).map((stock) => stock.symbol).join('、');
-  return `【股市任务】${prompt}\n\n请优先结合我的关注列表（${symbols || '暂无'}）进行分析；需要行情或新闻时请走现有股票分析/搜索链路，引用来源并保留“不构成投资建议”的口径。`;
 }

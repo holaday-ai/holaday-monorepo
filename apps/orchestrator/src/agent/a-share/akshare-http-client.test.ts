@@ -49,6 +49,7 @@ describe('HttpAkshareClient', () => {
     const body = { data: [], count: 0, source: 's', fetched_at: 'x', disclaimer: 'y' };
     const { fetchImpl, calls } = mockFetch({
       '/announcements/600519': { body },
+      '/stock-news/600519': { body },
       '/unlock/600519': { body },
       '/kline/600519': { body },
       '/quote/600519': { body },
@@ -58,6 +59,7 @@ describe('HttpAkshareClient', () => {
     });
     const c = new HttpAkshareClient({ baseUrl: 'http://127.0.0.1:8848', fetchImpl });
     await c.getStockAnnouncements('600519');
+    await c.getStockNews('600519');
     await c.getShareUnlock('600519');
     await c.getStockKline('600519');
     await c.getStockRankings('gainers', 10);
@@ -66,6 +68,7 @@ describe('HttpAkshareClient', () => {
     await c.getStockRankings('gainers', 10);
     expect(calls).toEqual([
       'http://127.0.0.1:8848/announcements/600519',
+      'http://127.0.0.1:8848/stock-news/600519',
       'http://127.0.0.1:8848/unlock/600519',
       'http://127.0.0.1:8848/kline/600519',
       'http://127.0.0.1:8848/stock-rankings/gainers?limit=10',

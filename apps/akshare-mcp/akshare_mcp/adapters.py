@@ -67,6 +67,7 @@ TTL_QUOTE = _ttl("QUOTE", 15)
 TTL_INTRADAY = _ttl("INTRADAY", 15)
 TTL_KLINE = _ttl("KLINE", 600)
 TTL_ANNOUNCE = _ttl("ANNOUNCE", 1800)
+TTL_STOCK_NEWS = _ttl("STOCK_NEWS", 900)
 TTL_LHB = _ttl("LHB", 3600)
 TTL_NORTHBOUND = _ttl("NORTHBOUND", 600)
 TTL_INDEX = _ttl("INDEX", 60)
@@ -607,6 +608,25 @@ def get_announcements(
     if df is None or len(df) == 0:
         return [], "akshare:stock_zh_a_disclosure_report_cninfo"
     return _records(df), "akshare:stock_zh_a_disclosure_report_cninfo"
+
+
+# --- 个股新闻 --------------------------------------------------------
+def get_stock_news(symbol: str) -> tuple[list[dict[str, Any]], str]:
+    """个股新闻（东方财富）。只返回标题、发布时间、原文链接齐全的可核验文章。"""
+    a = _require_ak()
+    df = a.stock_news_em(symbol=symbol)
+    if df is None or len(df) == 0:
+        return [], "akshare:stock_news_em"
+
+    rows: list[dict[str, Any]] = []
+    for row in _records(df):
+        title = str(row.get("新闻标题") or "").strip()
+        published_at = str(row.get("发布时间") or "").strip()
+        url = str(row.get("新闻链接") or "").strip()
+        if not title or not published_at or not url:
+            continue
+        rows.append(row)
+    return rows, "akshare:stock_news_em"
 
 
 # --- 龙虎榜 ----------------------------------------------------------

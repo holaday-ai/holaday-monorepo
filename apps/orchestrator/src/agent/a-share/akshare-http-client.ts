@@ -24,6 +24,7 @@ import type {
   PledgeRow,
   StockQuoteRow,
   StockRankingRow,
+  StockNewsRow,
   UnlockRow,
   ValuationRow,
   ZtReviewRow,
@@ -121,6 +122,9 @@ export class HttpAkshareClient implements AkshareClient {
     if (endDate) qs.set('end_date', endDate);
     const suffix = qs.toString() ? `?${qs.toString()}` : '';
     return this.get<AnnouncementRow>(`/announcements/${encodeURIComponent(symbol)}${suffix}`);
+  }
+  getStockNews(symbol: string) {
+    return this.get<StockNewsRow>(`/stock-news/${encodeURIComponent(symbol)}`);
   }
   getShareUnlock(symbol: string) {
     return this.get<UnlockRow>(`/unlock/${encodeURIComponent(symbol)}`);

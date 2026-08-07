@@ -29,6 +29,7 @@ import type {
   PledgeRow,
   StockQuoteRow,
   StockRankingRow,
+  StockNewsRow,
   UnlockRow,
   ValuationRow,
   ZtReviewRow,
@@ -61,6 +62,8 @@ export interface AkshareClient {
     startDate?: string,
     endDate?: string,
   ): Promise<AkEnvelope<AnnouncementRow>>;
+  /** get_stock_news(symbol) — 东方财富个股新闻，带来源、发布时间与原文链接。 */
+  getStockNews?(symbol: string): Promise<AkEnvelope<StockNewsRow>>;
   /** get_share_unlock(symbol) — 个股限售解禁（G2）。 */
   getShareUnlock(symbol: string): Promise<AkEnvelope<UnlockRow>>;
   /**
@@ -135,6 +138,9 @@ export class StubAkshareClient implements AkshareClient {
     return Promise.resolve(
       this.err<AnnouncementRow>(`akshare:announcements(${symbol})`, this.now()),
     );
+  }
+  getStockNews(symbol: string) {
+    return Promise.resolve(this.err<StockNewsRow>(`akshare:stock_news(${symbol})`, this.now()));
   }
   getShareUnlock(symbol: string) {
     return Promise.resolve(this.err<UnlockRow>(`akshare:share_unlock(${symbol})`, this.now()));

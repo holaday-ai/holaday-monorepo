@@ -994,6 +994,24 @@ describe('selectTask detail hydration', () => {
     });
   });
 
+  it('submits a stock-dashboard task with the exact user wording', async () => {
+    createMutate.mockResolvedValueOnce({
+      taskId: 'tsk_stock',
+      status: 'executing',
+      executionMode: 'generate',
+    } as never);
+    listQuery.mockResolvedValueOnce({ tasks: [], nextCursor: null } as never);
+
+    await useTaskStore.getState().createStockTask('leopold的基金最近发生了什么事？');
+
+    expect(createMutate).toHaveBeenCalledWith({
+      intent: 'leopold的基金最近发生了什么事？',
+      taskSource: 'stock_dashboard',
+      clientRequestId: expect.stringMatching(/^local_pending_/),
+      viewportProfile: 'desktop',
+    });
+  });
+
   it('uses the current workbench viewport profile for direct retry entry points', async () => {
     createMutate.mockResolvedValueOnce({
       taskId: 'tsk_new',

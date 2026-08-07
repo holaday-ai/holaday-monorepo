@@ -70,6 +70,7 @@ _quote = cached(adp.TTL_QUOTE)(adp.get_quote)
 _intraday = cached(adp.TTL_INTRADAY)(adp.get_intraday)
 _kline = cached(adp.TTL_KLINE)(adp.get_kline)
 _announce = cached(adp.TTL_ANNOUNCE)(adp.get_announcements)
+_stock_news = cached(adp.TTL_STOCK_NEWS)(adp.get_stock_news)
 _lhb = cached(adp.TTL_LHB)(adp.get_dragon_tiger)
 _north = cached(adp.TTL_NORTHBOUND)(adp.get_northbound_flow)
 _index = cached(adp.TTL_INDEX)(adp.get_index_quote)
@@ -115,6 +116,12 @@ def get_stock_announcements(
 ) -> dict[str, Any]:
     """个股公告列表（巨潮）。symbol: 6 位代码。日期 'YYYYMMDD' 可省。"""
     return _safe(_announce, symbol, start_date=start_date, end_date=end_date)
+
+
+@mcp.tool()
+def get_stock_news(symbol: str) -> dict[str, Any]:
+    """个股真实新闻（东方财富）。只返回标题、发布时间、原文链接齐全的文章。"""
+    return _safe(_stock_news, symbol)
 
 
 @mcp.tool()

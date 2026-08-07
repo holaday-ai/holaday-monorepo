@@ -33,6 +33,17 @@ export interface AnnouncementRow {
   [k: string]: unknown;
 }
 
+/** 个股新闻行（东方财富，实测列：关键词/新闻标题/新闻内容/发布时间/文章来源/新闻链接）。 */
+export interface StockNewsRow {
+  关键词?: string;
+  新闻标题?: string;
+  新闻内容?: string;
+  发布时间?: string;
+  文章来源?: string;
+  新闻链接?: string;
+  [k: string]: unknown;
+}
+
 /** 历史 K 线行（stock_zh_a_hist，标准列：日期/开盘/收盘/最高/最低/成交量/成交额/涨跌幅）。 */
 export interface KlineRow {
   日期?: string;

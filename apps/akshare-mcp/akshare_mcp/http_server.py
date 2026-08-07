@@ -151,6 +151,7 @@ _quote = _cached_adapter(adp.TTL_QUOTE)(adp.get_quote)
 _intraday = _cached_adapter(adp.TTL_INTRADAY)(adp.get_intraday)
 _kline = _cached_adapter(adp.TTL_KLINE)(adp.get_kline)
 _announce = _cached_adapter(adp.TTL_ANNOUNCE)(adp.get_announcements)
+_stock_news = _cached_adapter(adp.TTL_STOCK_NEWS)(adp.get_stock_news)
 _lhb = _cached_adapter(adp.TTL_LHB)(adp.get_dragon_tiger)
 _north = _cached_adapter(adp.TTL_NORTHBOUND)(adp.get_northbound_flow)
 _index = _cached_adapter(adp.TTL_INDEX)(adp.get_index_quote)
@@ -191,6 +192,12 @@ def announcements(symbol: str, start_date: str = "", end_date: str = "") -> dict
     """start_date/end_date: 'YYYYMMDD'。不传日期时 cninfo 返历史默认页（多为旧公告）；
     简报按日期窗口取（盘前近 24h / 盘后当日），由 service 传范围。cache 按 args 分键。"""
     return _safe(_announce, symbol, start_date, end_date)
+
+
+@app.get("/stock-news/{symbol}")
+def stock_news(symbol: str) -> dict[str, Any]:
+    """个股真实新闻（东方财富），仅返回带发布时间与原文链接的文章。"""
+    return _safe(_stock_news, symbol)
 
 
 @app.get("/unlock/{symbol}")

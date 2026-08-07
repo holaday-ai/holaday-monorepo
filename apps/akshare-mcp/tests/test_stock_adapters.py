@@ -122,6 +122,49 @@ def test_intraday_rows_drop_provider_bar_ahead_of_current_market_minute():
     ]
 
 
+def test_stock_news_keeps_only_linked_articles_with_source_timestamps(monkeypatch):
+    pd = pytest.importorskip("pandas")
+
+    class _NewsAk:
+        def stock_news_em(self, symbol):
+            assert symbol == "603528"
+            return pd.DataFrame(
+                [
+                    {
+                        "关键词": "多伦科技",
+                        "新闻标题": "多伦科技发布新产品",
+                        "新闻内容": "公司发布了面向市场的新产品。",
+                        "发布时间": "2026-08-07 11:30:00",
+                        "文章来源": "东方财富",
+                        "新闻链接": "https://finance.eastmoney.com/a/1.html",
+                    },
+                    {
+                        "关键词": "多伦科技",
+                        "新闻标题": "缺少原文链接的条目",
+                        "发布时间": "2026-08-07 11:20:00",
+                        "文章来源": "东方财富",
+                        "新闻链接": "",
+                    },
+                ]
+            )
+
+    monkeypatch.setattr(adp, "ak", _NewsAk())
+
+    rows, source = adp.get_stock_news("603528")
+
+    assert source == "akshare:stock_news_em"
+    assert rows == [
+        {
+            "关键词": "多伦科技",
+            "新闻标题": "多伦科技发布新产品",
+            "新闻内容": "公司发布了面向市场的新产品。",
+            "发布时间": "2026-08-07 11:30:00",
+            "文章来源": "东方财富",
+            "新闻链接": "https://finance.eastmoney.com/a/1.html",
+        }
+    ]
+
+
 @pytest.mark.parametrize(
     ("metric", "expected_sort", "expected_asc", "expected_codes"),
     [

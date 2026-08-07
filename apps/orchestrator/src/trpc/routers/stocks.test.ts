@@ -20,6 +20,126 @@ describe('stocks dashboard snapshot', () => {
     __stocksDashboardTest.dashboardCache.clear();
   });
 
+  it('sorts discovery announcements by publication time and keeps all real items within the larger feed window', () => {
+    const announcement = (title: string, time: string) => ({
+      公告标题: title,
+      公告时间: time,
+      公告链接: `https://example.cninfo.com/${title}`,
+    });
+    const news = __stocksDashboardTest.buildNews(
+      [
+        {
+          entry: { symbol: '603528', market: 'A' as const, displayName: '多伦科技' },
+          env: envelope([
+            announcement('多伦-08-01', '2026-08-01'),
+            announcement('多伦-08-07', '2026-08-07'),
+            announcement('多伦-08-05', '2026-08-05'),
+            announcement('多伦-08-03', '2026-08-03'),
+            announcement('多伦-08-02', '2026-08-02'),
+          ]) as never,
+        },
+        {
+          entry: { symbol: '600497', market: 'A' as const, displayName: '驰宏锌锗' },
+          env: envelope([
+            announcement('驰宏-08-06', '2026-08-06'),
+            announcement('驰宏-08-04', '2026-08-04'),
+            announcement('驰宏-07-31', '2026-07-31'),
+            announcement('驰宏-07-30', '2026-07-30'),
+            announcement('驰宏-07-29', '2026-07-29'),
+          ]) as never,
+        },
+        {
+          entry: { symbol: '603738', market: 'A' as const, displayName: '泰晶科技' },
+          env: envelope([
+            announcement('泰晶-08-07', '2026-08-07 10:30:00'),
+            announcement('泰晶-08-06', '2026-08-06 10:30:00'),
+            announcement('泰晶-08-05', '2026-08-05 10:30:00'),
+            announcement('泰晶-08-04', '2026-08-04 10:30:00'),
+            announcement('泰晶-08-03', '2026-08-03 10:30:00'),
+          ]) as never,
+        },
+      ],
+      [],
+    );
+
+    expect(news).toHaveLength(15);
+    expect(news.map((item) => item.title)).toEqual([
+      '泰晶科技：泰晶-08-07',
+      '多伦科技：多伦-08-07',
+      '泰晶科技：泰晶-08-06',
+      '驰宏锌锗：驰宏-08-06',
+      '泰晶科技：泰晶-08-05',
+      '多伦科技：多伦-08-05',
+      '泰晶科技：泰晶-08-04',
+      '驰宏锌锗：驰宏-08-04',
+      '泰晶科技：泰晶-08-03',
+      '多伦科技：多伦-08-03',
+      '多伦科技：多伦-08-02',
+      '多伦科技：多伦-08-01',
+      '驰宏锌锗：驰宏-07-31',
+      '驰宏锌锗：驰宏-07-30',
+      '驰宏锌锗：驰宏-07-29',
+    ]);
+  });
+
+  it('builds discovery from source-backed news and announcements only', () => {
+    const buildSourceDiscovery = __stocksDashboardTest.buildNews as unknown as (
+      announcements: Array<{ entry: { symbol: string; market: 'A'; displayName: string }; env: ReturnType<typeof envelope> }>,
+      stockNews: Array<{ entry: { symbol: string; market: 'A'; displayName: string }; env: ReturnType<typeof envelope> }>,
+    ) => Array<{ category: string; title: string; source: string; url?: string; time: string }>;
+    const news = buildSourceDiscovery(
+      [
+        {
+          entry: { symbol: '603528', market: 'A', displayName: '多伦科技' },
+          env: envelope([
+            {
+              公告标题: '多伦科技关于董事会决议的公告',
+              公告时间: '2026-08-07 09:00:00',
+              公告链接: 'https://www.cninfo.com.cn/notice-603528',
+            },
+          ]),
+        },
+      ],
+      [
+        {
+          entry: { symbol: '603528', market: 'A', displayName: '多伦科技' },
+          env: envelope([
+            {
+              新闻标题: '多伦科技发布新产品',
+              新闻内容: '公司发布了面向市场的新产品。',
+              发布时间: '2026-08-07 11:30:00',
+              文章来源: '东方财富',
+              新闻链接: 'https://finance.eastmoney.com/news-603528',
+            },
+            {
+              新闻标题: '重复链接不应计入第二条',
+              发布时间: '2026-08-07 11:20:00',
+              文章来源: '东方财富',
+              新闻链接: 'https://finance.eastmoney.com/news-603528',
+            },
+          ]),
+        },
+      ],
+    );
+
+    expect(news).toEqual([
+      expect.objectContaining({
+        category: '新闻',
+        title: '多伦科技：多伦科技发布新产品',
+        source: '东方财富',
+        url: 'https://finance.eastmoney.com/news-603528',
+        time: '08-07 11:30',
+      }),
+      expect.objectContaining({
+        category: '公告',
+        title: '多伦科技：多伦科技关于董事会决议的公告',
+        source: '巨潮公告',
+        url: 'https://www.cninfo.com.cn/notice-603528',
+        time: '08-07 09:00',
+      }),
+    ]);
+  });
+
   it('filters, sorts, and deduplicates persisted intraday points to A-share sessions', () => {
     const points = __stocksDashboardTest.observedIntradayPointsForNow(
       [
@@ -442,11 +562,62 @@ describe('stocks dashboard snapshot', () => {
 
     expect(merged.sectors).toEqual(previous.sectors);
     expect(merged.temperature).toEqual(previous.temperature);
-    expect(merged.news).toEqual(previous.news);
+    expect(merged.news).toEqual([]);
     expect(merged.marketIndices).toEqual(next.marketIndices);
     expect(merged.leaderboards.gainers).toEqual(next.leaderboards.gainers);
     expect(merged.freshness.status).toBe('stale');
     expect(merged.freshness.message).toContain('保留最近一次真实数据');
+  });
+
+  it('preserves only prior source-backed discovery records when a refresh returns none', () => {
+    const previous = {
+      updatedAt: '2026-08-07T03:00:00.000Z',
+      source: 'akshare' as const,
+      isFallbackWatchlist: false,
+      watchlistStocks: [],
+      marketIndices: [],
+      sectors: [],
+      starStocks: [],
+      temperature: null,
+      news: [
+        {
+          category: '公告' as const,
+          time: '08-07 09:00',
+          publishedAt: '2026-08-07T01:00:00.000Z',
+          title: '多伦科技：董事会决议公告',
+          symbols: ['603528'],
+          source: '巨潮公告',
+          url: 'https://www.cninfo.com.cn/notice-603528',
+        },
+        {
+          category: '盘面' as const,
+          time: '盘中',
+          title: '半导体位居涨幅前列',
+          symbols: ['半导体'],
+          source: 'AkShare 市场脉冲',
+        },
+        {
+          category: '关注' as const,
+          time: '关注',
+          title: '多伦科技今日涨幅 2%',
+          symbols: ['603528'],
+          source: 'AkShare 行情',
+        },
+      ],
+      leaders: [],
+      leaderboards: { gainers: [], losers: [], amount: [] },
+      freshness: { status: 'fresh' as const, cachedAt: '2026-08-07T03:00:00.000Z' },
+    };
+    const next = {
+      ...previous,
+      updatedAt: '2026-08-07T03:01:00.000Z',
+      news: [],
+      freshness: { status: 'fresh' as const, cachedAt: '2026-08-07T03:01:00.000Z' },
+    };
+
+    const merged = __stocksDashboardTest.withPreservedSlowSignals(next, previous);
+
+    expect(merged.news).toEqual([previous.news[0]]);
   });
 
   it('preserves the last real watchlist quotes when a refresh returns only unavailable stocks', () => {
@@ -1081,8 +1252,10 @@ describe('stocks dashboard snapshot', () => {
   });
 
   it('marks a full refresh partial when market panels are still missing', async () => {
+    const requestedPaths: string[] = [];
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       const url = new URL(String(input));
+      requestedPaths.push(url.pathname);
       if (url.pathname === '/kline/603528') {
         return new Response(JSON.stringify(envelope([
           { 日期: '2026-06-26', 收盘: 7.11, 涨跌幅: 0.42 },
@@ -1103,6 +1276,7 @@ describe('stocks dashboard snapshot', () => {
     expect(snapshot.freshness.status).toBe('partial');
     expect(snapshot.freshness.message).toContain('指数、行业趋势、市场温度、榜单正在后台补齐');
     expect(snapshot.watchlistStocks[0]?.price).toBe('7.28');
+    expect(requestedPaths).toContain('/stock-news/603528');
   });
 
   it('preserves market indices and leaderboards when a later refresh loses them', () => {

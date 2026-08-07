@@ -25,6 +25,12 @@ import type { ImageCreationOptions } from '@/types/image';
 import type { VideoCreationOptions } from '@/types/video';
 
 /**
+ * The surface where a task began. This is routing context, not user-authored
+ * task text: it must never be prepended to or persisted as the user's intent.
+ */
+export type TaskCreationSource = 'stock_dashboard';
+
+/**
  * Single source of truth for the task list + selection. Data flows in
  * from two places:
  *   1. `refreshTasks()` — tRPC `tasks.list`, called on login and after
@@ -250,7 +256,10 @@ export interface TaskStore {
     videoOptions?: VideoCreationOptions,
     skillSelection?: UiSkillSelection,
     imageOptions?: ImageCreationOptions,
+    taskSource?: TaskCreationSource,
   ): Promise<{ taskId: string } | { error: string }>;
+  /** Submit from the stock dashboard without mutating the user's wording. */
+  createStockTask(intent: string): Promise<{ taskId: string } | { error: string }>;
   deleteTask(taskId: string): Promise<{ ok: true } | { error: string }>;
   renameTask(taskId: string, title: string): Promise<{ ok: true } | { error: string }>;
   replyToTask(
@@ -1239,6 +1248,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     videoOptions,
     skillSelection,
     imageOptions,
+    taskSource,
   ) {
     // Reject intents that are obviously control commands typed into
     // the wrong box (e.g. user typing "停止" into the composer
@@ -1288,6 +1298,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           : {}),
         ...(videoOptions ? { videoOptions } : {}),
         ...(imageOptions ? { imageOptions } : {}),
+        ...(taskSource ? { taskSource } : {}),
         viewportProfile: pickedViewportProfile,
       });
       // Optimistic insert at the top so the UI feels instant; the next
@@ -1348,6 +1359,21 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       }));
       return { error: msg };
     }
+  },
+
+  async createStockTask(intent) {
+    return get().createTask(
+      intent,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'stock_dashboard',
+    );
   },
 
   applyServerMessage(msg) {

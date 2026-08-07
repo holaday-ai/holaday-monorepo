@@ -85,6 +85,13 @@ const WATCHLIST_TERMS = ['自选股', '我的股', '我的自选', '我的持仓
  * 这类美股查询劫持到 A 股引导兜底；没有解析出 A 股个股/指数时应放回通用路径。
  */
 const NON_A_SHARE_SECURITY_TERMS = [
+  // Fund / wealth-management products are not individual A-share equities.
+  // Keep them in the general research lane unless the user explicitly names
+  // an A-share security (which resolveStocks handles before this guard).
+  '基金',
+  'ETF',
+  '债券',
+  '理财',
   '美股',
   '港股',
   '纳斯达克',
