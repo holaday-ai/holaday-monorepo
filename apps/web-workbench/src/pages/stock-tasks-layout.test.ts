@@ -9,11 +9,14 @@ describe('stock tasks layout', () => {
     expect(source).toContain('flex flex-wrap items-center justify-end gap-2');
   });
 
-  it('does not present stock discovery source records with decorative stock-photo thumbnails', () => {
+  it('uses verified source covers when available and never turns discovery cards into source placeholders', () => {
     const source = readFileSync(new URL('./StockTasksPage.tsx', import.meta.url), 'utf8');
 
     expect(source).not.toContain('images.unsplash.com');
-    expect(source).toContain('来源信息');
+    expect(source).toContain('{item.imageUrl ? (');
+    expect(source).toContain('src={item.imageUrl}');
+    expect(source).not.toContain('<span>来源信息</span>');
+    expect(source).not.toContain('原文已记录');
   });
 
   it('uses dedicated stock routing without rewriting the user prompt', () => {

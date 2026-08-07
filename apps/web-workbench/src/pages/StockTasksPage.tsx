@@ -96,6 +96,7 @@ interface NewsRow {
   source?: string;
   url?: string;
   summary?: string;
+  imageUrl?: string;
 }
 
 type GeneratedBriefing = Awaited<ReturnType<typeof trpc.stocks.generateBriefingNow.mutate>>;
@@ -791,43 +792,62 @@ function DiscoveryPanel({
                   onOpenNews(index);
                 }
               }}
-              className="group min-w-0 overflow-hidden rounded-[8px] border border-[#E7E7EB] bg-white text-left shadow-[0_10px_24px_rgba(18,24,38,0.04)] transition hover:-translate-y-0.5 hover:border-[#EA1F59]/25 hover:shadow-[0_16px_32px_rgba(18,24,38,0.08)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20 motion-reduce:hover:translate-y-0"
+              className="group flex min-h-[266px] min-w-0 flex-col overflow-hidden rounded-[8px] border border-[#E7E7EB] bg-white text-left shadow-[0_10px_24px_rgba(18,24,38,0.04)] transition hover:-translate-y-0.5 hover:border-[#EA1F59]/25 hover:shadow-[0_16px_32px_rgba(18,24,38,0.08)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20 motion-reduce:hover:translate-y-0"
             >
-              <div className="relative flex h-[132px] flex-col justify-between border-b border-[#E7EAF0] bg-[#F8FAFC] p-3">
-                <div className="absolute left-3 top-3 flex items-center gap-2">
-                  <span className={cn(
-                    'rounded-full px-2 py-1 text-[11px] font-semibold shadow-sm',
-                    newsDisplayType(item) === '公告'
-                      ? 'bg-white/92 text-[#344054]'
-                      : 'bg-[#EA1F59] text-white',
-                  )}>
-                    {newsDisplayType(item)}
-                  </span>
-                  <span className="rounded-full bg-white/80 px-2 py-1 text-[11px] tabular-nums text-[#667085] shadow-sm">
-                    {item.time}
-                  </span>
-                </div>
-                <div className="mt-auto flex items-end justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 text-[12px] font-semibold text-[#344054]">
-                      <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[7px] bg-white text-[#667085] shadow-sm ring-1 ring-[#E8ECF2]">
-                        <FileText className="h-4 w-4" aria-hidden />
-                      </span>
-                      <span>来源信息</span>
-                    </div>
-                    <p className="mt-2 truncate text-[12px] text-[#667085]">{item.source ?? '公开来源'}</p>
+              {item.imageUrl ? (
+                <div className="relative h-[132px] shrink-0 overflow-hidden bg-[#EEF1F5]">
+                  <img
+                    src={item.imageUrl}
+                    alt=""
+                    loading="lazy"
+                    className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03] motion-reduce:transition-none motion-reduce:group-hover:scale-100"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/35 via-transparent to-black/10" aria-hidden />
+                  <div className="absolute left-3 top-3 flex items-center gap-2">
+                    <span className={cn(
+                      'rounded-full px-2 py-1 text-[11px] font-semibold shadow-sm',
+                      newsDisplayType(item) === '公告'
+                        ? 'bg-white/92 text-[#344054]'
+                        : 'bg-[#EA1F59] text-white',
+                    )}>
+                      {newsDisplayType(item)}
+                    </span>
+                    <span className="rounded-full bg-white/88 px-2 py-1 text-[11px] tabular-nums text-[#667085] shadow-sm">
+                      {item.time}
+                    </span>
                   </div>
-                  <span className="shrink-0 rounded-full border border-[#DDE3EA] bg-white px-2 py-1 text-[11px] text-[#667085]">
-                    原文已记录
-                  </span>
                 </div>
-              </div>
-              <div className="p-3">
-                <p className="line-clamp-2 min-h-[48px] text-[15px] font-semibold leading-relaxed text-[#344054] transition group-hover:text-[#EA1F59]">
-                  {item.title}
-                  {item.url ? <ExternalLink className="ml-1 inline h-3 w-3 opacity-60 transition group-hover:opacity-100" aria-hidden /> : null}
-                </p>
-                <div className="mt-4 flex items-center justify-between gap-2">
+              ) : (
+                <div className="flex min-h-[132px] shrink-0 flex-col border-b border-[#E7EAF0] bg-[#FAFBFC] p-3">
+                  <div className="flex items-center gap-2">
+                    <span className={cn(
+                      'rounded-full px-2 py-1 text-[11px] font-semibold',
+                      newsDisplayType(item) === '公告'
+                        ? 'bg-white text-[#344054] ring-1 ring-[#E7EAF0]'
+                        : 'bg-[#EA1F59] text-white',
+                    )}>
+                      {newsDisplayType(item)}
+                    </span>
+                    <span className="rounded-full bg-white px-2 py-1 text-[11px] tabular-nums text-[#667085] ring-1 ring-[#E7EAF0]">
+                      {item.time}
+                    </span>
+                  </div>
+                  <p className="mt-3 line-clamp-3 text-[15px] font-semibold leading-relaxed text-[#344054] transition group-hover:text-[#EA1F59]">
+                    {item.title}
+                    {item.url ? <ExternalLink className="ml-1 inline h-3 w-3 opacity-60 transition group-hover:opacity-100" aria-hidden /> : null}
+                  </p>
+                </div>
+              )}
+              <div className="flex flex-1 flex-col p-3">
+                {item.imageUrl ? (
+                  <p className="line-clamp-2 min-h-[48px] text-[15px] font-semibold leading-relaxed text-[#344054] transition group-hover:text-[#EA1F59]">
+                    {item.title}
+                    {item.url ? <ExternalLink className="ml-1 inline h-3 w-3 opacity-60 transition group-hover:opacity-100" aria-hidden /> : null}
+                  </p>
+                ) : item.summary ? (
+                  <p className="line-clamp-2 text-[12px] leading-relaxed text-[#667085]">{item.summary}</p>
+                ) : null}
+                <div className={cn('mt-auto flex items-center justify-between gap-2', item.imageUrl || item.summary ? 'pt-3' : '')}>
                   <div className="flex min-w-0 items-center gap-2">
                     <NewsSourceDots count={item.symbols.length || 1} />
                     <span className="truncate text-[12px] text-[#667085]">

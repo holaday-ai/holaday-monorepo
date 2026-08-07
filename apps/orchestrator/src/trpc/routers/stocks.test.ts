@@ -86,7 +86,7 @@ describe('stocks dashboard snapshot', () => {
     const buildSourceDiscovery = __stocksDashboardTest.buildNews as unknown as (
       announcements: Array<{ entry: { symbol: string; market: 'A'; displayName: string }; env: ReturnType<typeof envelope> }>,
       stockNews: Array<{ entry: { symbol: string; market: 'A'; displayName: string }; env: ReturnType<typeof envelope> }>,
-    ) => Array<{ category: string; title: string; source: string; url?: string; time: string }>;
+    ) => Array<{ category: string; title: string; source: string; url?: string; time: string; imageUrl?: string }>;
     const news = buildSourceDiscovery(
       [
         {
@@ -109,13 +109,13 @@ describe('stocks dashboard snapshot', () => {
               新闻内容: '公司发布了面向市场的新产品。',
               发布时间: '2026-08-07 11:30:00',
               文章来源: '东方财富',
-              新闻链接: 'https://finance.eastmoney.com/news-603528',
+              新闻链接: 'https://finance.eastmoney.com/a/202607313828387959.html',
             },
             {
               新闻标题: '重复链接不应计入第二条',
               发布时间: '2026-08-07 11:20:00',
               文章来源: '东方财富',
-              新闻链接: 'https://finance.eastmoney.com/news-603528',
+              新闻链接: 'https://finance.eastmoney.com/a/202607313828387959.html',
             },
           ]),
         },
@@ -127,7 +127,8 @@ describe('stocks dashboard snapshot', () => {
         category: '新闻',
         title: '多伦科技：多伦科技发布新产品',
         source: '东方财富',
-        url: 'https://finance.eastmoney.com/news-603528',
+        url: 'https://finance.eastmoney.com/a/202607313828387959.html',
+        imageUrl: 'https://np-metadata.eastmoney.com/api/metadata.jpg?event=1&source=3&mode=2&type=1&id=202607313828387959',
         time: '08-07 11:30',
       }),
       expect.objectContaining({
@@ -138,6 +139,16 @@ describe('stocks dashboard snapshot', () => {
         time: '08-07 09:00',
       }),
     ]);
+  });
+
+  it('uses only a source-declared Eastmoney article cover for news previews', () => {
+    const articleCoverUrl = __stocksDashboardTest.articleCoverUrl as (url?: string) => string | undefined;
+
+    expect(articleCoverUrl('http://finance.eastmoney.com/a/202607313828387959.html')).toBe(
+      'https://np-metadata.eastmoney.com/api/metadata.jpg?event=1&source=3&mode=2&type=1&id=202607313828387959',
+    );
+    expect(articleCoverUrl('https://www.cninfo.com.cn/new/disclosure/detail?stockCode=603528')).toBeUndefined();
+    expect(articleCoverUrl('https://finance.eastmoney.com/a/not-an-article.html')).toBeUndefined();
   });
 
   it('filters, sorts, and deduplicates persisted intraday points to A-share sessions', () => {

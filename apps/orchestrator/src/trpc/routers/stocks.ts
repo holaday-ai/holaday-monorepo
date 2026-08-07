@@ -86,6 +86,8 @@ interface NewsSnapshot {
   source: string;
   url?: string;
   summary?: string;
+  /** 仅使用文章来源页声明的封面；无可靠封面时保持为空。 */
+  imageUrl?: string;
 }
 
 interface LeaderSnapshot {
@@ -849,6 +851,19 @@ function newsPublishedAt(value: unknown): string | undefined {
   return Number.isNaN(timestamp) ? undefined : new Date(timestamp).toISOString();
 }
 
+function articleCoverUrl(url?: string): string | undefined {
+  if (!url) return undefined;
+  try {
+    const article = new URL(url);
+    if (!article.hostname.endsWith('.eastmoney.com')) return undefined;
+    const match = /^\/a\/(\d{12,})\.html$/.exec(article.pathname);
+    if (!match) return undefined;
+    return `https://np-metadata.eastmoney.com/api/metadata.jpg?event=1&source=3&mode=2&type=1&id=${match[1]}`;
+  } catch {
+    return undefined;
+  }
+}
+
 function sortNewsNewestFirst(rows: NewsSnapshot[]): NewsSnapshot[] {
   return [...rows].sort((left, right) => {
     const leftTimestamp = left.publishedAt ? Date.parse(left.publishedAt) : Number.NEGATIVE_INFINITY;
@@ -920,6 +935,7 @@ function buildNews(
       if (!title || !publishedAt || !url) continue;
       const summary = String(pick(row, ['新闻内容']) ?? '').trim();
       const source = String(pick(row, ['文章来源']) ?? '').trim() || '东方财富';
+      const imageUrl = articleCoverUrl(url);
       rowsForStock.push({
         category: '新闻',
         time: formatAnnouncementTime(sourcePublishedAt),
@@ -929,6 +945,7 @@ function buildNews(
         source,
         url,
         ...(summary ? { summary } : {}),
+        ...(imageUrl ? { imageUrl } : {}),
       });
     }
     articleRows.push(...sortNewsNewestFirst(dedupeNews(rowsForStock)).slice(0, NEWS_PER_STOCK_ARTICLES));
@@ -1395,6 +1412,7 @@ export const stocksRouter = router({
 });
 
 export const __stocksDashboardTest = {
+  articleCoverUrl,
   buildNews,
   buildDashboardSnapshot,
   dashboardCache,
