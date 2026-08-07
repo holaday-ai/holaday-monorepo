@@ -533,4 +533,26 @@ describe('runGenerateTask — lightweight direct-answer path', () => {
       .mock.calls[0]?.[0] as { tools?: unknown[] } | undefined ?? {};
     expect((req.tools as unknown[]).length).toBeGreaterThan(0);
   });
+
+  it('requires a source-backed search for a recent fund-event question', async () => {
+    const client = makeClient({
+      textOut: '需要补充基金全称或代码，才能准确核验近期动态。',
+    });
+
+    await runGenerateTask({
+      taskId: 'tsk_recent_fund',
+      userId: 'usr_test',
+      intent: 'leopold的基金最近发生了什么事？',
+      client,
+      logger: makeLogger(),
+    });
+
+    const request = (client.messages.stream as unknown as { mock: { calls: unknown[][] } })
+      .mock.calls[0]?.[0] as
+      | { tool_choice?: unknown; system?: Array<{ text: string }> }
+      | undefined;
+    expect(request?.tool_choice).toEqual({ type: 'any' });
+    expect(request?.system?.[0]?.text).toContain('必须先调用 web_search');
+    expect(request?.system?.[0]?.text).toContain('基金全称或代码');
+  });
 });

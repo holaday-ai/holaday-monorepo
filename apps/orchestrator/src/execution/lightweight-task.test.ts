@@ -20,6 +20,7 @@ describe('classifyLightweightTask — lightweight intents', () => {
     expect(classifyLightweightTask('什么是 AI？')).toBe('lightweight_knowledge');
     expect(classifyLightweightTask('Python 里 for 循环怎么写？')).toBe('lightweight_knowledge');
     expect(classifyLightweightTask('解释一下递归的概念')).toBe('lightweight_knowledge');
+    expect(classifyLightweightTask('什么是动态规划？')).toBe('lightweight_knowledge');
   });
 
   // Coverage expansion (2026-06-09) — the exact prompts the QA pass
@@ -54,6 +55,7 @@ describe('classifyLightweightTask — must-execute intents stay null', () => {
     expect(classifyLightweightTask('查今天特斯拉股价')).toBeNull();
     expect(classifyLightweightTask('搜索关于 AI 的最新新闻')).toBeNull();
     expect(classifyLightweightTask('现在北京天气怎么样？')).toBeNull();
+    expect(classifyLightweightTask('leopold的基金最近发生了什么事？')).toBeNull();
   });
 
   it('does NOT intercept file-production tasks', () => {

@@ -165,6 +165,23 @@ const DIRECT_ANSWER_SYSTEM =
   '这是一个简单的问答，不需要联网搜索、不需要生成文件、不需要操作浏览器——直接给出答案即可。' +
   '简单计算请直接给出最终结果（可附一行算式）；简短问候请友好回应；概念问题请用一两句话解释清楚。' +
   '不要回复“没有答案”或空内容——务必给出有用的回答。';
+
+// Freshness requests need a different contract from ordinary research. A
+// search tool being available is not enough: models can otherwise answer from
+// stale priors, especially when a fund/company name is ambiguous. Keep this
+// intentionally narrow so static writing and knowledge tasks remain fast.
+const FRESH_RESEARCH_RE =
+  /最近|最新|今日|今天|昨日|昨天|本周|本月|近期|近况|新闻|头条|热搜|榜单|行情|股价|现价|报价|\b(?:recent|latest|today|yesterday|news|stock\s*price)\b/i;
+
+const FRESH_RESEARCH_SYSTEM =
+  '这是一个依赖近期真实信息的研究请求。必须先调用 web_search，再作答。' +
+  '只陈述可由检索结果支持的事实，并在答案中给出可点击的来源链接和发布时间；' +
+  '推断要明确标注为推断。若主体名称、基金/证券代码或时间范围有歧义，先检索可确认部分，' +
+  '并清楚说明仍需用户补充的基金全称或代码。不要用“数据暂不可用”代替检索、来源或澄清问题。';
+
+function requiresFreshResearch(intent: string): boolean {
+  return FRESH_RESEARCH_RE.test(intent);
+}
 // Phase 24 RC follow-up — bumped 120s → 300s after RC's V2 SOP-write
 // task hit the wall on a long-form output. SOPs / contracts / detailed
 // proposals routinely run 90-150s of streaming; the old 120s margin
@@ -314,11 +331,15 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
 
   const schemaSuffix =
     workflowReportSystem || isLightweight ? '' : buildPromptSchemaSuffix(opts.intent);
-  const system = workflowReportSystem
+  const baseSystem = workflowReportSystem
     ? workflowReportSystem
     : isLightweight
       ? DIRECT_ANSWER_SYSTEM
       : buildLayeredSystemPrompt(roleId, opts.expertMode) + schemaSuffix;
+  const forceFreshResearch = !isLightweight && requiresFreshResearch(opts.intent);
+  const system = forceFreshResearch
+    ? `${baseSystem}\n\n${FRESH_RESEARCH_SYSTEM}`
+    : baseSystem;
 
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
@@ -327,6 +348,7 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
       roleId,
       model: opts.model ?? DEFAULT_MODEL,
       timeoutMs,
+      forceFreshResearch,
       intentPreview: opts.intent.slice(0, 80),
     },
     'generate: starting',
@@ -365,9 +387,11 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
             : opts.intent,
       },
     ],
-    // Allow but don't force web_search. Up to 5 server-side queries
-    // per turn. The model uses zero for "translate this" and a few
-    // for "give me a 2026 industry brief" — pay-per-use, not blocked.
+    // Ordinary research can choose whether it needs web_search. Freshness
+    // requests force one search first, so we never answer a current-event
+    // question from stale model priors or hide an unresolved entity behind a
+    // generic "data unavailable" line.
+    // Up to 5 server-side queries per turn.
     // Lightweight Q&A drops the tool entirely: searching "1+1" returns
     // nothing and pushes the model into a "没有答案" hedge.
     tools: isLightweight
@@ -379,6 +403,7 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
             max_uses: 5,
           } as unknown as never,
         ],
+    ...(forceFreshResearch ? { tool_choice: { type: 'any' as const } } : {}),
   };
 
   let totalInputTokens = 0;

@@ -30,7 +30,7 @@ const INTERACTION_RE =
 
 // Search / current-data cues — need Firecrawl / live web.
 const WEB_CURRENT_RE =
-  /搜索|查找|查询|检索|查一下|查查|最新|今天|今日|现在|当前|实时|此刻|股价|股票|汇率|天气|气温|比分|赔率|新闻|头条|热搜|榜单|行情|现价|报价|latest|current|today|now|news|stock\s*price|weather/i;
+  /搜索|查找|查询|检索|查一下|查查|最近|近期|近况|最新|今天|今日|昨日|昨天|本周|本月|现在|当前|实时|此刻|股价|股票|汇率|天气|气温|比分|赔率|新闻|头条|热搜|榜单|行情|现价|报价|recent|latest|current|today|yesterday|now|news|stock\s*price|weather/i;
 
 // File-production cues — needs the create_file path, answer not trivial.
 const FILE_RE =
