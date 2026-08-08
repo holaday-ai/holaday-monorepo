@@ -35,6 +35,7 @@ import {
   formatStockDateLabel,
   formatStockTradeDateLabel,
   intradayRatioFromLabel,
+  stockChartHoverTooltipKind,
   stockLabelDatePart,
   stockChartAxisTicks,
 } from '@/lib/stock-chart-state';
@@ -98,7 +99,7 @@ interface NewsRow {
   url?: string;
   summary?: string;
   imageUrl?: string;
-  imageKind?: 'source-cover' | 'market-chart';
+  imageKind?: 'source-cover' | 'editorial-art';
 }
 
 type GeneratedBriefing = Awaited<ReturnType<typeof trpc.stocks.generateBriefingNow.mutate>>;
@@ -147,6 +148,7 @@ const MARKET_UP_STROKE = '#E11D48';
 const MARKET_DOWN_STROKE = '#0E9F6E';
 const MARKET_CHART_LEFT = 0;
 const MARKET_CHART_RIGHT = 100;
+type StockChartHover = { ratio: number; y: number };
 export function StockTasksPage(): JSX.Element {
   const navigate = useNavigate();
   const toast = useToast();
@@ -601,6 +603,7 @@ export function StockTasksPage(): JSX.Element {
               <MarketHighlights
                 stocks={stocks}
                 marketIndices={marketIndices}
+                updatedAt={dashboard?.updatedAt}
                 loading={(loadingDashboard && dashboard === null) || refreshingDashboard || dashboardFreshness?.status === 'partial'}
                 sample={sampleWatchlist}
                 onEdit={() => setWatchlistSheetOpen(true)}
@@ -821,11 +824,6 @@ function DiscoveryPanel({
                       {newsTimeLabel(item)}
                     </span>
                   </div>
-                  {item.imageKind === 'market-chart' ? (
-                    <span className="absolute bottom-3 right-3 rounded-full bg-[#101828]/72 px-2 py-1 text-[11px] font-medium text-white shadow-sm">
-                      行情图
-                    </span>
-                  ) : null}
                 </div>
               ) : (
                 <div className="flex min-h-[132px] shrink-0 flex-col border-b border-[#E7EAF0] bg-[#FAFBFC] p-3">
@@ -1127,6 +1125,7 @@ function NewsDetailMetric({ label, value }: { label: string; value: string }): J
 function MarketHighlights({
   stocks,
   marketIndices,
+  updatedAt,
   loading,
   sample,
   canGenerateBriefing,
@@ -1136,6 +1135,7 @@ function MarketHighlights({
 }: {
   stocks: StockSnapshot[];
   marketIndices: IndexRow[];
+  updatedAt?: string;
   loading: boolean;
   sample: boolean;
   canGenerateBriefing: boolean;
@@ -1188,6 +1188,7 @@ function MarketHighlights({
               key={stock.symbol}
               stock={stock}
               marketIndex={primaryIndex}
+              updatedAt={updatedAt}
               canGenerateBriefing={canGenerateBriefing}
               briefingGenerating={briefingGenerating}
               onGenerateBriefing={onGenerateBriefing}
@@ -1202,17 +1203,19 @@ function MarketHighlights({
 function StockHighlightCard({
   stock,
   marketIndex,
+  updatedAt,
   canGenerateBriefing,
   briefingGenerating,
   onGenerateBriefing,
 }: {
   stock: StockSnapshot;
   marketIndex: IndexRow | null;
+  updatedAt?: string;
   canGenerateBriefing: boolean;
   briefingGenerating: boolean;
   onGenerateBriefing: () => void;
 }): JSX.Element {
-  const [hoverRatio, setHoverRatio] = React.useState<number | null>(null);
+  const [hover, setHover] = React.useState<StockChartHover | null>(null);
   const chartKind = stock.sparkKind ?? 'daily_close';
   return (
     <article className="group overflow-hidden rounded-[10px] border border-[#E7E7EB] bg-[#FEFEFF] px-4 pb-4 pt-4 transition-[border-color,box-shadow] hover:border-[#DADDE5] hover:shadow-[0_14px_28px_rgba(18,24,38,0.06)]">
@@ -1245,8 +1248,8 @@ function StockHighlightCard({
               baselineValue={stock.sparkBaseline ?? null}
               latestChangePct={stock.changePct}
               className="mt-4 h-[218px] w-full"
-              hoverRatio={hoverRatio}
-              onHoverRatioChange={setHoverRatio}
+              hover={hover}
+              onHoverChange={setHover}
               showTimeline
             />
           ) : (
@@ -1267,6 +1270,7 @@ function StockHighlightCard({
           <StockRailMetric label="成交额" value={stockTurnoverText(stock)} />
           <StockRailMetric label="成交活跃度" value={stockVolumeSignalText(stock)} meta={stockVolumeMeta(stock)} tone={stockVolumeTone(stock)} />
           <StockRailMetric label="市场" value={marketContextText(marketIndex)} meta={marketContextMeta(marketIndex)} tone={marketContextTone(marketIndex)} />
+          <StockRailMetric label="数据更新" value={stockDataUpdatedAt(updatedAt)} meta={stockIntradayUpdatedMeta(stock)} />
           <div className="min-w-0 lg:mb-3.5">
             <StockRailMetric label="日报状态" value={stock.report} />
             {stock.report !== '已生成' ? (
@@ -2292,8 +2296,8 @@ function MarketMiniChart({
   baselineValue,
   latestChangePct,
   className,
-  hoverRatio,
-  onHoverRatioChange,
+  hover,
+  onHoverChange,
   showTimeline = false,
 }: {
   values: number[];
@@ -2302,8 +2306,8 @@ function MarketMiniChart({
   baselineValue?: number | null;
   latestChangePct: number;
   className?: string;
-  hoverRatio?: number | null;
-  onHoverRatioChange?: (ratio: number | null) => void;
+  hover?: StockChartHover | null;
+  onHoverChange?: (hover: StockChartHover | null) => void;
   showTimeline?: boolean;
 }): JSX.Element {
   const gradientId = React.useId();
@@ -2317,44 +2321,66 @@ function MarketMiniChart({
   const areaPath = linePath && firstPoint && lastPoint
     ? `${linePath} L ${lastPoint.x.toFixed(2)} 38 L ${firstPoint.x.toFixed(2)} 38 Z`
     : '';
-  const activeRatio = hoverRatio ?? 1;
-  const activePoint = kind === 'intraday'
-    ? interpolatedChartPoint(values, chart, activeRatio, latestChangePct, baseline)
-    : sampledChartPoint(values, chart, activeRatio, latestChangePct, baseline);
+  const activeRatio = hover?.ratio ?? 1;
+  const activePoint = sampledChartPoint(values, chart, activeRatio, latestChangePct, baseline);
   const activeValue = activePoint.value;
   const activeChangePct = activePoint.changePct;
   const positive = activeChangePct >= 0;
   const strokeFallback = latestChangePct >= 0 ? MARKET_UP_STROKE : MARKET_DOWN_STROKE;
   const baselineY = chart.yForValue(baseline);
   const baselinePct = Math.max(0, Math.min(100, (baselineY / 48) * 100));
-  const showHover = hoverRatio !== null;
+  const showHover = hover !== null;
+  const hoverTooltipKind = showHover && hover
+    ? stockChartHoverTooltipKind({
+      pointerY: hover.y,
+      baselineY,
+    })
+    : 'point';
+  const showsBaselineTooltip = showHover && hoverTooltipKind === 'baseline';
+  const cursorX = showHover
+    ? chart.left + activeRatio * (chart.right - chart.left)
+    : activePoint.x;
   const axisTicks = stockChartAxisTicks(labels, kind, MARKET_CHART_LEFT, MARKET_CHART_RIGHT);
-  const tooltipMeta = kind === 'intraday'
-    ? formatStockDateTimeLabel(labels[activePoint.index] ?? '')
-    : `${formatStockDateLabel(labels[activePoint.index] ?? '')} 收盘`;
-  const updateHoverFromClientX = (svg: SVGSVGElement, clientX: number): void => {
-    if (!onHoverRatioChange) return;
+  const tooltipValue = showsBaselineTooltip ? baseline : activeValue;
+  const tooltipY = showsBaselineTooltip ? baselineY : activePoint.y;
+  const tooltipMeta = showsBaselineTooltip
+    ? kind === 'intraday' ? '昨日收盘价' : '首日收盘价'
+    : kind === 'intraday'
+      ? formatStockDateTimeLabel(labels[activePoint.index] ?? '')
+      : `${formatStockDateLabel(labels[activePoint.index] ?? '')} 收盘`;
+  const updateHoverFromClientPoint = (svg: SVGSVGElement, clientX: number, clientY: number): void => {
+    if (!onHoverChange) return;
     const matrix = svg.getScreenCTM();
     let svgX: number;
+    let svgY: number;
     if (matrix) {
       const point = svg.createSVGPoint();
       point.x = clientX;
-      point.y = 0;
-      svgX = point.matrixTransform(matrix.inverse()).x;
+      point.y = clientY;
+      const svgPoint = point.matrixTransform(matrix.inverse());
+      svgX = svgPoint.x;
+      svgY = svgPoint.y;
     } else {
       const rect = svg.getBoundingClientRect();
       svgX = ((clientX - rect.left) / Math.max(1, rect.width)) * 100;
+      svgY = ((clientY - rect.top) / Math.max(1, rect.height)) * 48;
     }
     const ratio = (svgX - chart.left) / Math.max(1, chart.right - chart.left);
-    onHoverRatioChange(Math.max(0, Math.min(1, ratio)));
+    onHoverChange({ ratio: Math.max(0, Math.min(1, ratio)), y: svgY });
   };
   const handlePointerMove = (event: React.PointerEvent<SVGSVGElement>): void => {
-    updateHoverFromClientX(event.currentTarget, event.clientX);
+    updateHoverFromClientPoint(event.currentTarget, event.clientX, event.clientY);
   };
   const handleMouseMove = (event: React.MouseEvent<SVGSVGElement>): void => {
-    updateHoverFromClientX(event.currentTarget, event.clientX);
+    updateHoverFromClientPoint(event.currentTarget, event.clientX, event.clientY);
   };
-  const handlePointerLeave = (): void => onHoverRatioChange?.(null);
+  const handlePointerEnter = (event: React.PointerEvent<SVGSVGElement>): void => {
+    updateHoverFromClientPoint(event.currentTarget, event.clientX, event.clientY);
+  };
+  const handleMouseEnter = (event: React.MouseEvent<SVGSVGElement>): void => {
+    updateHoverFromClientPoint(event.currentTarget, event.clientX, event.clientY);
+  };
+  const handlePointerLeave = (): void => onHoverChange?.(null);
   return (
     <div className={cn('relative select-none', className)}>
       <svg
@@ -2363,8 +2389,10 @@ function MarketMiniChart({
         preserveAspectRatio="none"
         role="img"
         aria-label="真实走势"
+        onPointerEnter={handlePointerEnter}
         onPointerMove={handlePointerMove}
         onPointerLeave={handlePointerLeave}
+        onMouseEnter={handleMouseEnter}
         onMouseMove={handleMouseMove}
         onMouseLeave={handlePointerLeave}
       >
@@ -2427,8 +2455,10 @@ function MarketMiniChart({
         )}
         {showHover ? (
           <>
-            <line x1={activePoint.x} x2={activePoint.x} y1="4" y2="38" stroke="#9FA6B3" strokeWidth="0.48" />
-            <circle cx={activePoint.x} cy={activePoint.y} r="0.95" fill={positive ? MARKET_UP_STROKE : MARKET_DOWN_STROKE} stroke="white" strokeWidth="0.5" />
+            <line x1={cursorX} x2={cursorX} y1="4" y2="38" stroke="#9FA6B3" strokeWidth="0.48" />
+            {!showsBaselineTooltip ? (
+              <circle cx={activePoint.x} cy={activePoint.y} r="0.95" fill={positive ? MARKET_UP_STROKE : MARKET_DOWN_STROKE} stroke="white" strokeWidth="0.5" />
+            ) : null}
           </>
         ) : null}
       </svg>
@@ -2464,12 +2494,12 @@ function MarketMiniChart({
         <div
           className="pointer-events-none absolute z-10 rounded-[7px] border border-[#DADDE5] bg-white px-2.5 py-1.5 text-left shadow-[0_8px_18px_rgba(18,24,38,0.11)]"
           style={{
-            left: `${activePoint.x}%`,
-            top: `${Math.max(9, Math.min(70, (activePoint.y / 48) * 100 - 12))}%`,
-            transform: activePoint.x > 76 ? 'translate(-100%, -50%)' : 'translate(10px, -50%)',
+            left: `${cursorX}%`,
+            top: `${Math.max(9, Math.min(70, (tooltipY / 48) * 100 - 12))}%`,
+            transform: cursorX > 76 ? 'translate(-100%, -50%)' : 'translate(10px, -50%)',
           }}
         >
-          <div className="whitespace-nowrap text-[12px] font-semibold tabular-nums text-[#344054]">{activeValue.toFixed(2)}</div>
+          <div className="whitespace-nowrap text-[12px] font-semibold tabular-nums text-[#344054]">{tooltipValue.toFixed(2)}</div>
           <div className="mt-0.5 whitespace-nowrap text-[11px] font-medium tabular-nums text-[#8B92A1]">
             {tooltipMeta}
           </div>
@@ -2549,75 +2579,6 @@ function smoothPathFromPoints(points: Array<{ x: number; y: number }>): string {
   return commands.join(' ');
 }
 
-function interpolatedChartPoint(
-  values: number[],
-  chart: ReturnType<typeof chartGeometry>,
-  ratio: number,
-  latestChangePct: number,
-  baseline: number,
-): { x: number; y: number; value: number; changePct: number; index: number } {
-  const clamped = Math.max(0, Math.min(1, ratio));
-  const targetX = chart.left + clamped * (chart.right - chart.left);
-  const latest = values[values.length - 1] ?? 0;
-  const firstPoint = chart.points[0];
-  const lastPoint = chart.points[chart.points.length - 1];
-  if (values.length <= 1 || !firstPoint || !lastPoint) {
-    return {
-      x: chart.left,
-      y: chart.yForValue(latest),
-      value: latest,
-      changePct: latestChangePct,
-      index: 0,
-    };
-  }
-  if (targetX <= firstPoint.x) {
-    const value = values[0] ?? latest;
-    return {
-      x: firstPoint.x,
-      y: firstPoint.y,
-      value,
-      changePct: baseline ? ((value - baseline) / baseline) * 100 : 0,
-      index: 0,
-    };
-  }
-  if (targetX >= lastPoint.x) {
-    return {
-      x: lastPoint.x,
-      y: lastPoint.y,
-      value: latest,
-      changePct: Number.isFinite(latestChangePct)
-        ? latestChangePct
-        : baseline
-          ? ((latest - baseline) / baseline) * 100
-          : 0,
-      index: values.length - 1,
-    };
-  }
-  let leftIndex = 0;
-  for (let index = 0; index < chart.points.length - 1; index += 1) {
-    const leftPoint = chart.points[index];
-    const rightPoint = chart.points[index + 1];
-    if (leftPoint && rightPoint && targetX >= leftPoint.x && targetX <= rightPoint.x) {
-      leftIndex = index;
-      break;
-    }
-  }
-  const leftPoint = chart.points[leftIndex] ?? firstPoint;
-  const rightIndex = Math.min(values.length - 1, leftIndex + 1);
-  const rightPoint = chart.points[rightIndex] ?? lastPoint;
-  const localRatio = rightPoint.x === leftPoint.x ? 0 : (targetX - leftPoint.x) / (rightPoint.x - leftPoint.x);
-  const leftValue = values[leftIndex] ?? latest;
-  const rightValue = values[rightIndex] ?? leftValue;
-  const value = leftValue + (rightValue - leftValue) * localRatio;
-  return {
-    x: targetX,
-    y: chart.yForValue(value),
-    value,
-    changePct: baseline ? ((value - baseline) / baseline) * 100 : 0,
-    index: localRatio >= 0.5 ? rightIndex : leftIndex,
-  };
-}
-
 function sampledChartPoint(
   values: number[],
   chart: ReturnType<typeof chartGeometry>,
@@ -2672,6 +2633,28 @@ function stockRangeText(stock: StockSnapshot): string {
   const min = Math.min(...stock.spark);
   const max = Math.max(...stock.spark);
   return `${min.toFixed(2)} - ${max.toFixed(2)}`;
+}
+
+function stockDataUpdatedAt(updatedAt?: string): string {
+  if (!updatedAt) return '待核验';
+  const date = new Date(updatedAt);
+  if (Number.isNaN(date.getTime())) return '待核验';
+  return new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(date);
+}
+
+function stockIntradayUpdatedMeta(stock: StockSnapshot): string {
+  const latestLabel = stock.sparkLabels?.[stock.sparkLabels.length - 1];
+  if (stock.sparkKind === 'intraday' && latestLabel) {
+    return `分时截至 ${formatStockDateTimeLabel(latestLabel)}`;
+  }
+  return stock.sparkKind === 'daily_close' ? '分钟线待补齐' : '行情时间待核验';
 }
 
 function stockTurnoverText(stock: StockSnapshot): string {

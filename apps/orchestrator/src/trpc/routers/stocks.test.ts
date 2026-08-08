@@ -142,15 +142,35 @@ describe('stocks dashboard snapshot', () => {
     ]);
   });
 
-  it('uses a declared source cover first and an explicitly labelled market chart when no cover is published', () => {
+  it('uses a declared source cover first and stable editorial art when no cover is published', () => {
     const sourceDeclaredImageUrl = __stocksDashboardTest.sourceDeclaredImageUrl as (value?: unknown) => string | undefined;
-    const marketChartUrl = __stocksDashboardTest.marketChartUrl as (symbol?: string) => string | undefined;
+    const selectEditorialArtUrl = __stocksDashboardTest.selectEditorialArtUrl as (input: {
+      category: '公告' | '新闻';
+      title: string;
+      symbol: string;
+      url?: string;
+    }) => string;
 
     expect(sourceDeclaredImageUrl('https://source.example/cover.jpg')).toBe('https://source.example/cover.jpg');
     expect(sourceDeclaredImageUrl('data:image/png;base64,not-a-source-url')).toBeUndefined();
     expect(sourceDeclaredImageUrl('javascript:alert(1)')).toBeUndefined();
-    expect(marketChartUrl('603738')).toBe('https://webquoteklinepic.eastmoney.com/GetPic.aspx?nid=1.603738&imageType=k&token=28dfeb41d35cc81d84b4664d7c23c49f&at=1');
-    expect(marketChartUrl('not-a-stock')).toBeUndefined();
+    expect(selectEditorialArtUrl({
+      category: '新闻',
+      title: '泰晶科技：没有公开封面的真实新闻',
+      symbol: '603738',
+      url: 'https://finance.eastmoney.com/a/202608073834244063.html',
+    })).toMatch(/^\/stock-editorial-art\/[a-z-]+-\d+\.jpg$/);
+    expect(selectEditorialArtUrl({
+      category: '新闻',
+      title: '泰晶科技：没有公开封面的真实新闻',
+      symbol: '603738',
+      url: 'https://finance.eastmoney.com/a/202608073834244063.html',
+    })).toBe(selectEditorialArtUrl({
+      category: '新闻',
+      title: '泰晶科技：没有公开封面的真实新闻',
+      symbol: '603738',
+      url: 'https://finance.eastmoney.com/a/202608073834244063.html',
+    }));
 
     const buildSourceDiscovery = __stocksDashboardTest.buildNews as unknown as (
       announcements: Array<{ entry: { symbol: string; market: 'A'; displayName: string }; env: ReturnType<typeof envelope> }>,
@@ -167,8 +187,72 @@ describe('stocks dashboard snapshot', () => {
     }]);
 
     expect(item).toMatchObject({
+      imageKind: 'editorial-art',
+      imageUrl: expect.stringMatching(/^\/stock-editorial-art\/[a-z-]+-\d+\.jpg$/),
+    });
+  });
+
+  it('keeps source covers and rotates coverless adjacent discovery items across editorial art', () => {
+    const buildSourceDiscovery = __stocksDashboardTest.buildNews as unknown as (
+      announcements: Array<{ entry: { symbol: string; market: 'A'; displayName: string }; env: ReturnType<typeof envelope> }>,
+      stockNews: Array<{ entry: { symbol: string; market: 'A'; displayName: string }; env: ReturnType<typeof envelope> }>,
+    ) => Array<{ imageUrl?: string; imageKind?: string }>;
+    const rows = buildSourceDiscovery([], [{
+      entry: { symbol: '603738', market: 'A', displayName: '泰晶科技' },
+      env: envelope([
+        {
+          新闻标题: '公司公布业绩数据',
+          发布时间: '2026-08-07 12:30:00',
+          文章来源: '真实来源',
+          新闻链接: 'https://finance.eastmoney.com/a/202608073834244001.html',
+          新闻图片: 'https://source.example/verified-cover.jpg',
+        },
+        {
+          新闻标题: '公司发布季度经营公告',
+          发布时间: '2026-08-07 12:20:00',
+          文章来源: '真实来源',
+          新闻链接: 'https://finance.eastmoney.com/a/202608073834244002.html',
+        },
+        {
+          新闻标题: '公司发布投资者关系活动记录',
+          发布时间: '2026-08-07 12:10:00',
+          文章来源: '真实来源',
+          新闻链接: 'https://finance.eastmoney.com/a/202608073834244003.html',
+        },
+      ]),
+    }]);
+
+    expect(rows[0]).toMatchObject({ imageKind: 'source-cover', imageUrl: 'https://source.example/verified-cover.jpg' });
+    expect(rows.slice(1).every((row) => row.imageKind === 'editorial-art')).toBe(true);
+    expect(rows[1]?.imageUrl).not.toBe(rows[2]?.imageUrl);
+  });
+
+  it('replaces a persisted legacy market chart with stable editorial art before rendering discovery', () => {
+    const normalizeDiscoveryEditorialArt = __stocksDashboardTest.normalizeDiscoveryEditorialArt as (rows: Array<{
+      category: '公告' | '新闻';
+      title: string;
+      symbols: string[];
+      source: string;
+      url?: string;
+      time: string;
+      imageUrl?: string;
+      imageKind?: string;
+    }>) => Array<{ imageUrl?: string; imageKind?: string }>;
+
+    const [row] = normalizeDiscoveryEditorialArt([{
+      category: '新闻',
+      title: '泰晶科技：历史快照中的无封面新闻',
+      symbols: ['603738'],
+      source: '真实来源',
+      url: 'https://finance.eastmoney.com/a/202608073834244099.html',
+      time: '08-07 10:00',
+      imageUrl: 'https://webquoteklinepic.eastmoney.com/GetPic.aspx?nid=1.603738',
       imageKind: 'market-chart',
-      imageUrl: 'https://webquoteklinepic.eastmoney.com/GetPic.aspx?nid=1.603738&imageType=k&token=28dfeb41d35cc81d84b4664d7c23c49f&at=1',
+    }]);
+
+    expect(row).toMatchObject({
+      imageKind: 'editorial-art',
+      imageUrl: expect.stringMatching(/^\/stock-editorial-art\/[a-z-]+-\d+\.jpg$/),
     });
   });
 
@@ -680,7 +764,13 @@ describe('stocks dashboard snapshot', () => {
 
     const merged = __stocksDashboardTest.withPreservedSlowSignals(next, previous);
 
-    expect(merged.news).toEqual([previous.news[0]]);
+    expect(merged.news).toEqual([
+      expect.objectContaining({
+        ...previous.news[0],
+        imageKind: 'editorial-art',
+        imageUrl: expect.stringMatching(/^\/stock-editorial-art\/[a-z-]+-\d+\.jpg$/),
+      }),
+    ]);
   });
 
   it('preserves the last real watchlist quotes when a refresh returns only unavailable stocks', () => {

@@ -1,5 +1,13 @@
 export type StockChartKind = 'daily_close' | 'intraday';
 
+export function stockChartHoverTooltipKind(input: {
+  pointerY: number;
+  baselineY: number;
+}): 'baseline' | 'point' {
+  const baselineDistance = Math.abs(input.pointerY - input.baselineY);
+  return baselineDistance <= 1.2 ? 'baseline' : 'point';
+}
+
 export function stockChartAxisTicks(
   labels: string[],
   kind: StockChartKind,

@@ -19,11 +19,22 @@ describe('stock tasks layout', () => {
     expect(source).not.toContain('原文已记录');
   });
 
-  it('labels the real market-chart fallback instead of presenting it as an article photo', () => {
+  it('renders reusable editorial art as the normal card media without a source-image claim', () => {
     const source = readFileSync(new URL('./StockTasksPage.tsx', import.meta.url), 'utf8');
 
-    expect(source).toContain("item.imageKind === 'market-chart'");
-    expect(source).toContain('行情图');
+    expect(source).toContain("imageKind?: 'source-cover' | 'editorial-art'");
+    expect(source).not.toContain('行情图');
+    expect(source).not.toContain('AI 配图');
+  });
+
+  it('shows a real chart point on pointer entry and labels both snapshot and minute coverage time', () => {
+    const source = readFileSync(new URL('./StockTasksPage.tsx', import.meta.url), 'utf8');
+
+    expect(source).toContain('onPointerEnter={handlePointerEnter}');
+    expect(source).toContain('onMouseEnter={handleMouseEnter}');
+    expect(source).toContain('StockRailMetric label="数据更新"');
+    expect(source).toContain('分时截至');
+    expect(source).not.toContain('interpolatedChartPoint');
   });
 
   it('uses dedicated stock routing without rewriting the user prompt', () => {
