@@ -199,6 +199,78 @@ const DEFAULT_TIMEOUT_MS = 300_000;
 const HEARTBEAT_TIMEOUT_MS = 45_000;
 const HEARTBEAT_TICK_MS = 5_000;
 
+type VerifiedCitationSource = {
+  title: string;
+  url: string;
+};
+
+/**
+ * Extract only citations emitted by the provider's web-search tool. A model
+ * mentioning a publisher name in prose is not sufficient evidence: without a
+ * provider-returned http(s) URL, we deliberately add no source link.
+ */
+function extractVerifiedCitationSources(
+  content: ReadonlyArray<unknown>,
+): VerifiedCitationSource[] {
+  const seen = new Set<string>();
+  const sources: VerifiedCitationSource[] = [];
+
+  for (const block of content) {
+    if (!block || typeof block !== 'object') continue;
+    const citations = (block as { citations?: unknown }).citations;
+    if (!Array.isArray(citations)) continue;
+
+    for (const citation of citations) {
+      if (!citation || typeof citation !== 'object') continue;
+      const source = citation as { type?: unknown; title?: unknown; url?: unknown };
+      if (source.type !== 'web_search_result_location' || typeof source.url !== 'string') {
+        continue;
+      }
+
+      const url = source.url.trim();
+      let parsed: URL;
+      try {
+        parsed = new URL(url);
+      } catch {
+        continue;
+      }
+      if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') continue;
+
+      const key = parsed.href;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      const rawTitle = typeof source.title === 'string' ? source.title : '';
+      const title = rawTitle
+        .replace(/[\r\n]+/g, ' ')
+        .replace(/[\[\]]/g, '')
+        .trim()
+        .slice(0, 160) || parsed.hostname;
+      sources.push({ title, url });
+    }
+  }
+
+  return sources;
+}
+
+function appendVerifiedCitationSources(
+  summary: string,
+  sources: ReadonlyArray<VerifiedCitationSource>,
+): string {
+  if (!summary || sources.length === 0) return summary;
+  const seen = new Set<string>();
+  const links = sources
+    .filter((source) => {
+      if (seen.has(source.url)) return false;
+      seen.add(source.url);
+      return true;
+    })
+    .slice(0, 5)
+    .map((source) => `- [${source.title}](<${source.url}>)`)
+    .join('\n');
+  return `${summary}\n\n### 核验来源\n${links}`;
+}
+
 /**
  * Run the task. Resolves with the outcome regardless of success — the
  * caller decides how to persist. Throws ONLY for programmer errors
@@ -421,6 +493,7 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
   const baseMessages = requestArgs.messages;
   let accumulatedSummary = '';
   let truncatedAtCap = false;
+  const verifiedCitationSources: VerifiedCitationSource[] = [];
 
   try {
     continuationLoop: for (
@@ -528,6 +601,9 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
             .map((b) => (b.type === 'text' ? b.text : ''))
             .join('')
             .trim();
+          verifiedCitationSources.push(
+            ...extractVerifiedCitationSources(finalMessage.content),
+          );
           stopReason = finalMessage.stop_reason;
           lastInputTokens = finalMessage.usage?.input_tokens ?? 0;
           lastOutputTokens = finalMessage.usage?.output_tokens ?? 0;
@@ -687,9 +763,13 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
       );
     }
 
-    const baseSummary = truncatedAtCap
+    const visibleSummary = truncatedAtCap
       ? accumulatedSummary + TRUNCATION_NOTICE
       : accumulatedSummary;
+    const baseSummary = appendVerifiedCitationSources(
+      visibleSummary,
+      verifiedCitationSources,
+    );
     // Phase 2 — append the workflow's follow-up actions footer.
     // Empty string when no workflow matched (legacy generate path)
     // or when the workflow has no follow-ups configured. SPA renders
@@ -734,9 +814,10 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
     if (accumulatedSummary.length > 0) {
       // Phase 2 — same footer-append discipline as the happy path
       // so a partially-streamed report still ships with chips.
-      const partialSummary =
-        accumulatedSummary +
-        '\n\n---\n【提示】内容因网络/超时被截断，如需完整版请追问。';
+      const partialSummary = appendVerifiedCitationSources(
+        `${accumulatedSummary}\n\n---\n【提示】内容因网络/超时被截断，如需完整版请追问。`,
+        verifiedCitationSources,
+      );
       return {
         status: 'completed',
         summary: workflow ? partialSummary + buildFollowUpFooter(workflow) : partialSummary,

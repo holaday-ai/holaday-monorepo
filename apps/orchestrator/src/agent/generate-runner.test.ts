@@ -35,6 +35,13 @@ function makeLogger() {
  */
 function makeClient(opts: {
   textOut?: string;
+  citations?: Array<{
+    type: 'web_search_result_location';
+    title: string | null;
+    url: string;
+    cited_text: string;
+    encrypted_index: string;
+  }>;
   rejectWith?: Error;
   /** When true, the stream never resolves (simulates a hang). The
    *  test must rely on the runner's AbortController to break the wait. */
@@ -83,7 +90,7 @@ function makeClient(opts: {
             stop_reason: opts.stopReason ?? 'end_turn',
             stop_sequence: null,
             content: opts.textOut
-              ? [{ type: 'text', text: opts.textOut, citations: null }]
+              ? [{ type: 'text', text: opts.textOut, citations: opts.citations ?? null }]
               : [],
             usage: {
               input_tokens: opts.inputTokens ?? 100,
@@ -554,5 +561,34 @@ describe('runGenerateTask — lightweight direct-answer path', () => {
     expect(request?.tool_choice).toEqual({ type: 'any' });
     expect(request?.system?.[0]?.text).toContain('必须先调用 web_search');
     expect(request?.system?.[0]?.text).toContain('基金全称或代码');
+  });
+
+  it('keeps web-search citations as clickable verification links', async () => {
+    const client = makeClient({
+      textOut: 'Leopold 的基金近期出现较大波动，以下结论仅基于检索结果。',
+      citations: [
+        {
+          type: 'web_search_result_location',
+          title: 'Reuters: fund update',
+          url: 'https://www.reuters.com/example/fund-update',
+          cited_text: 'fund update',
+          encrypted_index: 'citation_1',
+        },
+      ],
+    });
+
+    const outcome = await runGenerateTask({
+      taskId: 'tsk_fund_citations',
+      userId: 'usr_test',
+      intent: 'Leopold 的基金最近发生了什么事？',
+      client,
+      logger: makeLogger(),
+    });
+
+    expect(outcome.status).toBe('completed');
+    expect(outcome.summary).toContain('### 核验来源');
+    expect(outcome.summary).toContain(
+      '[Reuters: fund update](<https://www.reuters.com/example/fund-update>)',
+    );
   });
 });
