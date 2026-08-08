@@ -1,0 +1,122 @@
+import { ExternalLink, Heart, MoreHorizontal } from 'lucide-react';
+import type { KeyboardEvent } from 'react';
+import { newsDisplayType, newsTimeLabel, type StockNewsRow } from '@/lib/stock-news';
+import { cn } from '@/lib/utils';
+
+export function DiscoveryNewsCard({
+  item,
+  onOpen,
+}: {
+  item: StockNewsRow;
+  onOpen: () => void;
+}): JSX.Element {
+  const type = newsDisplayType(item);
+  const sourceMedia = item.imageKind === 'source-cover';
+  const onKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      onOpen();
+    }
+  };
+
+  return (
+    <article
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={onKeyDown}
+      className="group flex min-h-[266px] min-w-0 flex-col overflow-hidden rounded-[8px] border border-[#E7E7EB] bg-white text-left shadow-[0_10px_24px_rgba(18,24,38,0.04)] transition hover:-translate-y-0.5 hover:border-[#EA1F59]/25 hover:shadow-[0_16px_32px_rgba(18,24,38,0.08)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20 motion-reduce:hover:translate-y-0"
+    >
+      {item.imageUrl ? (
+        <div className="relative h-[132px] shrink-0 overflow-hidden bg-[#EEF1F5]">
+          <img
+            src={item.imageUrl}
+            alt=""
+            loading="lazy"
+            className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03] motion-reduce:transition-none motion-reduce:group-hover:scale-100"
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/35 via-transparent to-black/10" aria-hidden />
+          <div className="absolute left-3 top-3 flex items-center gap-2">
+            <span className={cn(
+              'rounded-full px-2 py-1 text-[11px] font-semibold shadow-sm',
+              type === '公告' ? 'bg-white/92 text-[#344054]' : 'bg-[#EA1F59] text-white',
+            )}>
+              {type}
+            </span>
+            <span className="rounded-full bg-white/88 px-2 py-1 text-[11px] tabular-nums text-[#667085] shadow-sm">
+              {newsTimeLabel(item)}
+            </span>
+          </div>
+          {!sourceMedia ? (
+            <span className="absolute bottom-2 right-2 rounded-full bg-black/45 px-2 py-1 text-[10px] font-medium text-white/90">
+              主题配图
+            </span>
+          ) : null}
+        </div>
+      ) : (
+        <div className="flex min-h-[132px] shrink-0 flex-col border-b border-[#E7EAF0] bg-[#FAFBFC] p-3">
+          <div className="flex items-center gap-2">
+            <span className={cn(
+              'rounded-full px-2 py-1 text-[11px] font-semibold',
+              type === '公告' ? 'bg-white text-[#344054] ring-1 ring-[#E7EAF0]' : 'bg-[#EA1F59] text-white',
+            )}>
+              {type}
+            </span>
+            <span className="rounded-full bg-white px-2 py-1 text-[11px] tabular-nums text-[#667085] ring-1 ring-[#E7EAF0]">
+              {newsTimeLabel(item)}
+            </span>
+          </div>
+          <p className="mt-3 line-clamp-3 text-[15px] font-semibold leading-relaxed text-[#344054] transition group-hover:text-[#EA1F59]">
+            {item.title}
+            {item.url ? <ExternalLink className="ml-1 inline h-3 w-3 opacity-60 transition group-hover:opacity-100" aria-hidden /> : null}
+          </p>
+        </div>
+      )}
+      <div className="flex flex-1 flex-col p-3">
+        {item.imageUrl ? (
+          <p className="line-clamp-2 min-h-[48px] text-[15px] font-semibold leading-relaxed text-[#344054] transition group-hover:text-[#EA1F59]">
+            {item.title}
+            {item.url ? <ExternalLink className="ml-1 inline h-3 w-3 opacity-60 transition group-hover:opacity-100" aria-hidden /> : null}
+          </p>
+        ) : item.summary ? (
+          <p className="line-clamp-2 text-[12px] leading-relaxed text-[#667085]">{item.summary}</p>
+        ) : null}
+        <div className={cn('mt-auto flex items-center justify-between gap-2', item.imageUrl || item.summary ? 'pt-3' : '')}>
+          <div className="flex min-w-0 items-center gap-2">
+            <NewsSourceDots />
+            <span className="truncate text-[12px] text-[#667085]">
+              {item.source ?? '公开来源'}
+              {item.symbols.length > 0 ? ` · ${item.symbols.length} 个关联` : ''}
+            </span>
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            <button
+              type="button"
+              onClick={(event) => event.stopPropagation()}
+              className="rounded-full p-1.5 text-[#8B92A1] transition hover:bg-[#F7F8FA] hover:text-[#EA1F59]"
+              aria-label="收藏动态"
+              title="收藏动态"
+            >
+              <Heart className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={(event) => event.stopPropagation()}
+              className="rounded-full p-1.5 text-[#8B92A1] transition hover:bg-[#F7F8FA] hover:text-[#344054]"
+              aria-label="更多动态操作"
+              title="更多动态操作"
+            >
+              <MoreHorizontal className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function NewsSourceDots(): JSX.Element {
+  return (
+    <span className="h-3 w-3 shrink-0 rounded-full bg-[#EA1F59]" aria-hidden />
+  );
+}

@@ -4,21 +4,19 @@ import {
   CalendarClock,
   ChevronLeft,
   ChevronRight,
-  ExternalLink,
   FileText,
-  Heart,
   Loader2,
-  MoreHorizontal,
   Plus,
   RefreshCw,
   Send,
   Trash2,
   TrendingDown,
   TrendingUp,
-  X,
 } from 'lucide-react';
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
+import { DiscoveryNewsCard } from '@/components/DiscoveryNewsCard';
+import { NewsDetailModal as StockNewsDetailModal } from '@/components/NewsDetailModal';
 import { Input } from '@/components/ui/input';
 import {
   Sheet,
@@ -33,7 +31,6 @@ import {
   diversifyDiscoveryEditorialArt,
   diversifyDiscoveryItems,
   discoveryPageIndexes,
-  discoveryTimeLabel,
   shouldPrefetchDiscoveryPage,
 } from '@/lib/stock-discovery';
 import {
@@ -100,6 +97,7 @@ interface NewsRow {
   category?: '公告' | '新闻' | '盘面' | '关注';
   feed?: '自选股新闻' | '重要公告' | 'A股要闻' | '美股要闻' | '港股要闻';
   time: string;
+  publishedAt?: string;
   title: string;
   symbols: string[];
   source?: string;
@@ -692,6 +690,10 @@ export function StockTasksPage(): JSX.Element {
               <DiscoveryPanel
                 news={news}
                 onOpenNews={(index) => setActiveNewsIndex(index)}
+                onViewAll={(feed) => {
+                  const query = feed === '全部' ? '' : `?feed=${encodeURIComponent(feed)}`;
+                  navigate(`/stocks/discovery${query}`);
+                }}
                 onLoadMore={loadMoreDiscovery}
                 canLoadMore={(feed) => feed === '全部'
                   ? MARKET_DISCOVERY_FEEDS.some(canLoadMoreDiscovery)
@@ -789,7 +791,7 @@ export function StockTasksPage(): JSX.Element {
           if (!open) setInsightSheet(null);
         }}
       />
-      <NewsDetailModal
+      <StockNewsDetailModal
         news={news}
         activeIndex={activeNewsIndex}
         onClose={() => setActiveNewsIndex(null)}
@@ -802,11 +804,13 @@ export function StockTasksPage(): JSX.Element {
 function DiscoveryPanel({
   news,
   onOpenNews,
+  onViewAll,
   onLoadMore,
   canLoadMore,
 }: {
   news: NewsRow[];
   onOpenNews: (index: number) => void;
+  onViewAll: (feed: DiscoveryFeed | '全部') => void;
   onLoadMore: (feed: MarketDiscoveryFeed | '全部') => Promise<boolean>;
   canLoadMore: (feed: DiscoveryFeed | '全部') => boolean;
 }): JSX.Element {
@@ -901,8 +905,8 @@ function DiscoveryPanel({
       <SectionHeader
         title="发现"
         meta={news.length > 0 ? `${marketNewsCount} 条新闻 · ${announcementCount} 条公告` : '等待真实来源'}
-        action={news.length > 0 ? '查看详情' : undefined}
-        onAction={filteredNews.length > 0 ? () => onOpenNews(filteredNews[0]!.index) : undefined}
+        action={news.length > 0 ? '查看更多新闻' : undefined}
+        onAction={news.length > 0 ? () => onViewAll(activeFeed) : undefined}
       />
       {news.length > 0 ? (
         <div className="mt-3 flex flex-wrap items-center gap-2 border-b border-[#F1F2F5] pb-3">
@@ -939,102 +943,11 @@ function DiscoveryPanel({
       {items.length > 0 ? (
         <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
           {items.map(({ item, index }) => (
-            <article
+            <DiscoveryNewsCard
               key={`${index}-${item.time}-${item.title}`}
-              role="button"
-              tabIndex={0}
-              onClick={() => onOpenNews(index)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  onOpenNews(index);
-                }
-              }}
-              className="group flex min-h-[266px] min-w-0 flex-col overflow-hidden rounded-[8px] border border-[#E7E7EB] bg-white text-left shadow-[0_10px_24px_rgba(18,24,38,0.04)] transition hover:-translate-y-0.5 hover:border-[#EA1F59]/25 hover:shadow-[0_16px_32px_rgba(18,24,38,0.08)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20 motion-reduce:hover:translate-y-0"
-            >
-              {item.imageUrl ? (
-                <div className="relative h-[132px] shrink-0 overflow-hidden bg-[#EEF1F5]">
-                  <img
-                    src={item.imageUrl}
-                    alt=""
-                    loading="lazy"
-                    className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03] motion-reduce:transition-none motion-reduce:group-hover:scale-100"
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/35 via-transparent to-black/10" aria-hidden />
-                  <div className="absolute left-3 top-3 flex items-center gap-2">
-                    <span className={cn(
-                      'rounded-full px-2 py-1 text-[11px] font-semibold shadow-sm',
-                      newsDisplayType(item) === '公告'
-                        ? 'bg-white/92 text-[#344054]'
-                        : 'bg-[#EA1F59] text-white',
-                    )}>
-                      {newsDisplayType(item)}
-                    </span>
-                    <span className="rounded-full bg-white/88 px-2 py-1 text-[11px] tabular-nums text-[#667085] shadow-sm">
-                      {newsTimeLabel(item)}
-                    </span>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex min-h-[132px] shrink-0 flex-col border-b border-[#E7EAF0] bg-[#FAFBFC] p-3">
-                  <div className="flex items-center gap-2">
-                    <span className={cn(
-                      'rounded-full px-2 py-1 text-[11px] font-semibold',
-                      newsDisplayType(item) === '公告'
-                        ? 'bg-white text-[#344054] ring-1 ring-[#E7EAF0]'
-                        : 'bg-[#EA1F59] text-white',
-                    )}>
-                      {newsDisplayType(item)}
-                    </span>
-                    <span className="rounded-full bg-white px-2 py-1 text-[11px] tabular-nums text-[#667085] ring-1 ring-[#E7EAF0]">
-                      {newsTimeLabel(item)}
-                    </span>
-                  </div>
-                  <p className="mt-3 line-clamp-3 text-[15px] font-semibold leading-relaxed text-[#344054] transition group-hover:text-[#EA1F59]">
-                    {item.title}
-                    {item.url ? <ExternalLink className="ml-1 inline h-3 w-3 opacity-60 transition group-hover:opacity-100" aria-hidden /> : null}
-                  </p>
-                </div>
-              )}
-              <div className="flex flex-1 flex-col p-3">
-                {item.imageUrl ? (
-                  <p className="line-clamp-2 min-h-[48px] text-[15px] font-semibold leading-relaxed text-[#344054] transition group-hover:text-[#EA1F59]">
-                    {item.title}
-                    {item.url ? <ExternalLink className="ml-1 inline h-3 w-3 opacity-60 transition group-hover:opacity-100" aria-hidden /> : null}
-                  </p>
-                ) : item.summary ? (
-                  <p className="line-clamp-2 text-[12px] leading-relaxed text-[#667085]">{item.summary}</p>
-                ) : null}
-                <div className={cn('mt-auto flex items-center justify-between gap-2', item.imageUrl || item.summary ? 'pt-3' : '')}>
-                  <div className="flex min-w-0 items-center gap-2">
-                    <NewsSourceDots count={item.symbols.length || 1} />
-                    <span className="truncate text-[12px] text-[#667085]">
-                      {item.source ?? '公开来源'} · {Math.max(1, item.symbols.length)} 个关联
-                    </span>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={(event) => event.stopPropagation()}
-                      className="rounded-full p-1.5 text-[#8B92A1] transition hover:bg-[#F7F8FA] hover:text-[#EA1F59]"
-                      aria-label="收藏动态"
-                      title="收藏动态"
-                    >
-                      <Heart className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={(event) => event.stopPropagation()}
-                      className="rounded-full p-1.5 text-[#8B92A1] transition hover:bg-[#F7F8FA] hover:text-[#344054]"
-                      aria-label="更多动态操作"
-                      title="更多动态操作"
-                    >
-                      <MoreHorizontal className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </article>
+              item={item}
+              onOpen={() => onOpenNews(index)}
+            />
           ))}
         </div>
       ) : null}
@@ -1093,197 +1006,6 @@ function DiscoveryPanel({
         </div>
       ) : null}
     </section>
-  );
-}
-
-function NewsDetailModal({
-  news,
-  activeIndex,
-  onClose,
-  onChangeIndex,
-}: {
-  news: NewsRow[];
-  activeIndex: number | null;
-  onClose: () => void;
-  onChangeIndex: (index: number | null) => void;
-}): JSX.Element | null {
-  const closeRef = React.useRef<HTMLButtonElement>(null);
-  const item = activeIndex === null ? null : news[activeIndex] ?? null;
-  const hasPrevious = activeIndex !== null && activeIndex > 0;
-  const hasNext = activeIndex !== null && activeIndex < news.length - 1;
-
-  React.useEffect(() => {
-    if (!item) return;
-    closeRef.current?.focus();
-    const onKey = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        onClose();
-      }
-      if (event.key === 'ArrowLeft' && hasPrevious && activeIndex !== null) {
-        event.preventDefault();
-        onChangeIndex(activeIndex - 1);
-      }
-      if (event.key === 'ArrowRight' && hasNext && activeIndex !== null) {
-        event.preventDefault();
-        onChangeIndex(activeIndex + 1);
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [activeIndex, hasNext, hasPrevious, item, onChangeIndex, onClose]);
-
-  if (!item || activeIndex === null) return null;
-
-  const type = newsDisplayType(item);
-  const details = newsDetailParagraphs(item);
-
-  return (
-    <div
-      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/35 p-4 backdrop-blur-sm"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="stock-news-dialog-title"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <article className="flex h-[min(92vh,860px)] w-[min(94vw,980px)] flex-col overflow-hidden rounded-[12px] border border-[#DCDDDD] bg-[#FBFAF8] shadow-[0_24px_80px_rgba(17,24,39,0.24)]">
-        <header className="flex shrink-0 items-center justify-between gap-3 border-b border-[#E4E1DC] bg-[#FBFAF8] px-5 py-3">
-          <div className="flex min-w-0 items-center gap-2">
-            <span className={cn(
-              'rounded-full px-2.5 py-1 text-[12px] font-semibold',
-              type === '公告' ? 'bg-white text-[#344054] ring-1 ring-[#E1E3E8]' : 'bg-[#EA1F59] text-white',
-            )}>
-              {type}
-            </span>
-            <span className="truncate text-[12px] text-[#667085]">
-              {item.source ?? '公开来源'} · {item.time}
-            </span>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <button
-              type="button"
-              onClick={() => onChangeIndex(activeIndex - 1)}
-              disabled={!hasPrevious}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#E1E3E8] bg-white text-[#667085] transition hover:border-[#EA1F59]/25 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-40"
-              aria-label="上一条"
-              title="上一条"
-            >
-              <ChevronLeft className="h-4 w-4" aria-hidden />
-            </button>
-            <button
-              type="button"
-              onClick={() => onChangeIndex(activeIndex + 1)}
-              disabled={!hasNext}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#E1E3E8] bg-white text-[#667085] transition hover:border-[#EA1F59]/25 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-40"
-              aria-label="下一条"
-              title="下一条"
-            >
-              <ChevronRight className="h-4 w-4" aria-hidden />
-            </button>
-            <button
-              ref={closeRef}
-              type="button"
-              onClick={onClose}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[#667085] transition hover:bg-white hover:text-[#121826]"
-              aria-label="关闭"
-              title="关闭"
-            >
-              <X className="h-4 w-4" aria-hidden />
-            </button>
-          </div>
-        </header>
-
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6 sm:px-8 lg:px-10">
-          <div className="mx-auto max-w-[760px]">
-            <div className="mb-4 flex flex-wrap items-center gap-2 text-[12px] text-[#667085]">
-              <span>{activeIndex + 1} / {news.length}</span>
-              {item.symbols.length > 0 ? (
-                <>
-                  <span className="h-1 w-1 rounded-full bg-[#CBD0DA]" />
-                  <span className="truncate">关联：{item.symbols.join('、')}</span>
-                </>
-              ) : null}
-            </div>
-            <h2 id="stock-news-dialog-title" className="text-[28px] font-semibold leading-tight tracking-normal text-[#242424] sm:text-[34px]">
-              {item.title}
-            </h2>
-            <p className="mt-4 text-[15px] leading-7 text-[#4F5868]">
-              {newsLead(item)}
-            </p>
-
-            <section className="mt-6 flex items-start gap-3 rounded-[10px] border border-[#E4E8EF] bg-[#F8FAFC] px-4 py-4">
-              <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] bg-white text-[#667085] shadow-sm ring-1 ring-[#E8ECF2]">
-                <FileText className="h-4 w-4" aria-hidden />
-              </span>
-              <div className="min-w-0">
-                <p className="text-[13px] font-semibold text-[#344054]">来源信息</p>
-                <p className="mt-1 text-[13px] leading-6 text-[#667085]">
-                  {item.source ?? '公开来源'} · {item.time} · 已记录原文链接。Holaday 不将装饰图片当作来源配图展示。
-                </p>
-              </div>
-            </section>
-
-            <div className="mt-7 space-y-5">
-              <section>
-                <h3 className="text-[16px] font-semibold text-[#242424]">
-                  {type === '公告' ? '公告要点' : '新闻要点'}
-                </h3>
-                <div className="mt-3 space-y-3 text-[15px] leading-8 text-[#3F4652]">
-                  {details.map((paragraph) => (
-                    <p key={paragraph}>{paragraph}</p>
-                  ))}
-                </div>
-              </section>
-
-              <section className="rounded-[10px] border border-[#E4E1DC] bg-white px-4 py-3">
-                <div className="grid gap-3 text-[13px] text-[#4F5868] sm:grid-cols-3">
-                  <NewsDetailMetric label="类型" value={type} />
-                  <NewsDetailMetric label="来源" value={item.source ?? '公开来源'} />
-                  <NewsDetailMetric label="关联标的" value={item.symbols.length > 0 ? item.symbols.join('、') : '暂无'} />
-                </div>
-              </section>
-            </div>
-          </div>
-        </div>
-
-        <footer className="flex shrink-0 flex-col gap-3 border-t border-[#E4E1DC] bg-[#FBFAF8] px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="text-[12px] leading-relaxed text-[#667085]">
-            站内详情基于当前可用来源字段整理；原文内容以来源页面为准。
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            {item.url ? (
-              <a
-                href={item.url}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex h-9 items-center gap-2 rounded-[8px] border border-[#E1E3E8] bg-white px-3 text-[13px] font-medium text-[#344054] transition hover:border-[#EA1F59]/25 hover:text-[#EA1F59]"
-              >
-                打开原文
-                <ExternalLink className="h-3.5 w-3.5" aria-hidden />
-              </a>
-            ) : null}
-            <button
-              type="button"
-              onClick={onClose}
-              className="inline-flex h-9 items-center justify-center rounded-[8px] bg-[#121826] px-3 text-[13px] font-medium text-white transition hover:bg-[#242B3A]"
-            >
-              关闭
-            </button>
-          </div>
-        </footer>
-      </article>
-    </div>
-  );
-}
-
-function NewsDetailMetric({ label, value }: { label: string; value: string }): JSX.Element {
-  return (
-    <div className="min-w-0">
-      <div className="text-[11px] text-[#8B92A1]">{label}</div>
-      <div className="mt-1 truncate font-medium text-[#121826]" title={value}>{value}</div>
-    </div>
   );
 }
 
@@ -2674,17 +2396,6 @@ function MarketMiniChart({
   );
 }
 
-function NewsSourceDots({ count }: { count: number }): JSX.Element {
-  const palette = ['bg-[#EA1F59]', 'bg-[#111827]', 'bg-[#F59E0B]'];
-  return (
-    <span className="flex -space-x-1" aria-hidden>
-      {Array.from({ length: Math.min(3, Math.max(1, count)) }).map((_, index) => (
-        <span key={index} className={cn('h-4 w-4 rounded-full border-2 border-white', palette[index % palette.length])} />
-      ))}
-    </span>
-  );
-}
-
 function valuesToPoints(values: number[]): string {
   if (values.length === 0) return '';
   const min = Math.min(...values);
@@ -3215,39 +2926,6 @@ function newsDisplayType(item: NewsRow): '新闻' | '公告' {
 function newsFeed(item: NewsRow): NonNullable<NewsRow['feed']> {
   if (item.feed) return item.feed;
   return newsDisplayType(item) === '公告' ? '重要公告' : '自选股新闻';
-}
-
-function newsTimeLabel(item: NewsRow): string {
-  return discoveryTimeLabel(newsDisplayType(item), item.time);
-}
-
-function newsLead(item: NewsRow): string {
-  const type = newsDisplayType(item);
-  const source = item.source ?? '公开来源';
-  const related = item.symbols.length > 0 ? `，关联 ${item.symbols.join('、')}` : '';
-  if (type === '公告') {
-    return `这是一条来自 ${source} 的公司公告${related}。Holaday 在这里保留来源、时间和关联标的，方便你先判断是否需要打开原文继续核对。`;
-  }
-  return `这是一条来自 ${source} 的公开新闻${related}。Holaday 仅展示已返回的来源、发布时间、原文链接和摘要；原文内容以来源页面为准。`;
-}
-
-function newsDetailParagraphs(item: NewsRow): string[] {
-  const type = newsDisplayType(item);
-  const source = item.source ?? '公开来源';
-  const related = item.symbols.length > 0 ? item.symbols.join('、') : '暂无明确关联标的';
-  if (type === '公告') {
-    return [
-      `公告标题显示：${item.title}`,
-      `这类信息优先按事实来源处理，当前来源为 ${source}，时间标记为 ${newsTimeLabel(item)}，关联标的为 ${related}。如果涉及股东大会、持股计划、审计、解禁或重大合同，应打开原文核对公告全文和关键日期。`,
-      '公告本身不等于利好或利空。用于看盘时，建议结合股价位置、成交额变化和后续日报分析，再判断它对短线情绪或中期基本面的影响。',
-    ];
-  }
-  const summary = item.summary?.trim();
-  return [
-    summary ? `来源摘要：${summary}` : `新闻标题显示：${item.title}`,
-    `当前来源为 ${source}，发布时间标记为 ${newsTimeLabel(item)}，关联标的为 ${related}。它可作为公开信息线索，但不应单独作为交易判断。`,
-    '如需判断影响范围，应打开原文核对全文、发布时间和更多来源，再结合股价、成交和后续日报进行分析。',
-  ];
 }
 
 function temperatureInsight(temperature: DashboardSnapshot['temperature'] | null): InsightSheetState {

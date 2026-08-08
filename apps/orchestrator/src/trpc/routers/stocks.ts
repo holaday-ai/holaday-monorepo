@@ -25,6 +25,7 @@ import type { SymbolRow } from '../../agent/a-share/akshare-client.js';
 import { fmtNum, fmtYiYuan, pick, toNum } from '../../agent/a-share/ashare-format.js';
 import { stockDashboardSnapshots } from '../../db/schema/stock-dashboard-snapshots.js';
 import { users } from '../../db/schema/users.js';
+import { resolveNewsDetail } from '../../stock-news/article-detail.js';
 import { protectedProcedure, router } from '../trpc.js';
 
 type Db = typeof import('../../db/client.js').db;
@@ -1684,6 +1685,15 @@ export const stocksRouter = router({
       page: input.page,
       logger: ctx.logger,
     })),
+
+  newsDetail: protectedProcedure
+    .input(z.object({
+      url: z.string().url().max(2_048),
+      sourceName: z.string().trim().min(1).max(160),
+      publishedAt: z.string().trim().min(1).max(80),
+      summary: z.string().trim().max(10_000).optional(),
+    }))
+    .query(async ({ input }) => resolveNewsDetail(input)),
 
   searchSymbols: protectedProcedure
     .input(z.object({ query: z.string().trim().min(1).max(32) }))

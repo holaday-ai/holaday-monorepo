@@ -10,21 +10,33 @@ describe('stock tasks layout', () => {
   });
 
   it('uses verified source covers when available and never turns discovery cards into source placeholders', () => {
-    const source = readFileSync(new URL('./StockTasksPage.tsx', import.meta.url), 'utf8');
+    const pageSource = readFileSync(new URL('./StockTasksPage.tsx', import.meta.url), 'utf8');
+    const cardSource = readFileSync(new URL('../components/DiscoveryNewsCard.tsx', import.meta.url), 'utf8');
 
-    expect(source).not.toContain('images.unsplash.com');
-    expect(source).toContain('{item.imageUrl ? (');
-    expect(source).toContain('src={item.imageUrl}');
-    expect(source).not.toContain('<span>来源信息</span>');
-    expect(source).not.toContain('原文已记录');
+    expect(pageSource).toContain('<DiscoveryNewsCard');
+    expect(cardSource).not.toContain('images.unsplash.com');
+    expect(cardSource).toContain('{item.imageUrl ? (');
+    expect(cardSource).toContain('src={item.imageUrl}');
+    expect(cardSource).not.toContain('<span>来源信息</span>');
+    expect(cardSource).not.toContain('原文已记录');
   });
 
   it('renders reusable editorial art as the normal card media without a source-image claim', () => {
-    const source = readFileSync(new URL('./StockTasksPage.tsx', import.meta.url), 'utf8');
+    const pageSource = readFileSync(new URL('./StockTasksPage.tsx', import.meta.url), 'utf8');
+    const cardSource = readFileSync(new URL('../components/DiscoveryNewsCard.tsx', import.meta.url), 'utf8');
 
-    expect(source).toContain("imageKind?: 'source-cover' | 'editorial-art'");
-    expect(source).not.toContain('行情图');
-    expect(source).not.toContain('AI 配图');
+    expect(pageSource).toContain("imageKind?: 'source-cover' | 'editorial-art'");
+    expect(cardSource).toContain("item.imageKind === 'source-cover'");
+    expect(cardSource).toContain('主题配图');
+    expect(cardSource).not.toContain('行情图');
+    expect(cardSource).not.toContain('AI 配图');
+  });
+
+  it('does not invent a related-symbol count for a source that has none', () => {
+    const cardSource = readFileSync(new URL('../components/DiscoveryNewsCard.tsx', import.meta.url), 'utf8');
+
+    expect(cardSource).toContain("item.symbols.length > 0 ? ` · ${item.symbols.length} 个关联` : ''");
+    expect(cardSource).not.toContain('Math.max(1, item.symbols.length)');
   });
 
   it('shows a real chart point on pointer entry and labels both snapshot and minute coverage time', () => {
