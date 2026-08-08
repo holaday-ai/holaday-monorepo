@@ -29,7 +29,11 @@ import {
 } from '@/components/ui/sheet';
 import { useToast } from '@/components/ui/toast';
 import { pageErrorMessage } from '@/lib/page-error-copy';
-import { diversifyDiscoveryItems, discoveryTimeLabel } from '@/lib/stock-discovery';
+import {
+  diversifyDiscoveryEditorialArt,
+  diversifyDiscoveryItems,
+  discoveryTimeLabel,
+} from '@/lib/stock-discovery';
 import {
   formatStockDateTimeLabel,
   formatStockDateLabel,
@@ -717,9 +721,11 @@ function DiscoveryPanel({
     [news],
   );
   const filteredNews = React.useMemo(
-    () => diversifyDiscoveryItems(
-      indexedNews.filter(({ item }) => activeType === '全部' || newsDisplayType(item) === activeType),
-      (item) => item.symbols[0],
+    () => diversifyDiscoveryEditorialArt(
+      diversifyDiscoveryItems(
+        indexedNews.filter(({ item }) => activeType === '全部' || newsDisplayType(item) === activeType),
+        (item) => item.symbols[0],
+      ),
     ),
     [activeType, indexedNews],
   );
