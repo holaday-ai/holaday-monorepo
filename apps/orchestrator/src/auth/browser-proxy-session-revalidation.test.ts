@@ -14,6 +14,39 @@ const logger = pino({ level: 'silent' });
 const REVALIDATION_INTERVAL_MS = 25;
 
 describe('browser proxy established-session revocation', () => {
+  it('keeps an established screencast open when the short-lived handshake token expires but the user session remains valid', async () => {
+    const instance = fakeScreencastInstance();
+    const authenticateToken = vi
+      .fn<(token: string) => Promise<string | null>>()
+      .mockResolvedValue(instance.userId);
+    const revalidateSession = vi.fn(async () => true);
+    const proxy = createScreencastProxy({
+      pool: fakePool(instance),
+      logger,
+      authenticateToken,
+      revalidateSession,
+      sessionRevalidationIntervalMs: REVALIDATION_INTERVAL_MS,
+    });
+    const server = await serveProxy(proxy.handleUpgrade);
+    const client = new WebSocket(
+      `ws://127.0.0.1:${portOf(server)}/screencast-ws/${instance.taskId}?token=stream-token`,
+    );
+
+    try {
+      await waitForOpen(client);
+      await delay(REVALIDATION_INTERVAL_MS * 2);
+      expect(client.readyState).toBe(WebSocket.OPEN);
+      expect(authenticateToken).toHaveBeenCalledTimes(1);
+      expect(revalidateSession).toHaveBeenCalledWith({
+        userId: instance.userId,
+        authVersion: 0,
+      });
+    } finally {
+      await terminateClient(client);
+      await closeServer(server);
+    }
+  });
+
   it('closes an established VNC connection when its session is revoked', async () => {
     const upstream = new WebSocketServer({ port: 0 });
     await once(upstream, 'listening');

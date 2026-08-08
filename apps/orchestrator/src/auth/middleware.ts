@@ -7,22 +7,16 @@ import { verifyAccessToken, verifyStreamToken } from './jwt.js';
 
 const BEARER_PREFIX = 'Bearer ';
 
-export async function authenticateBearerHeader(
-  database: DB,
-  header: string | undefined,
-): Promise<string | null> {
-  if (!header?.startsWith(BEARER_PREFIX)) return null;
-  const token = header.slice(BEARER_PREFIX.length).trim();
-  return authenticateAccessToken(database, token);
+export interface AuthenticatedSession {
+  userId: string;
+  authVersion: number;
 }
 
-export async function authenticateAccessToken(
+async function activeUserSession(
   database: DB,
-  token: string,
-): Promise<string | null> {
-  const claims = await verifyAccessToken(token);
-  if (!claims) return null;
-
+  userId: string,
+  authVersion: number,
+): Promise<AuthenticatedSession | null> {
   const [user] = await database
     .select({
       externalId: users.externalId,
@@ -30,32 +24,91 @@ export async function authenticateAccessToken(
       authVersion: users.authVersion,
     })
     .from(users)
-    .where(eq(users.externalId, claims.sub))
+    .where(eq(users.externalId, userId))
     .limit(1);
-  if (
-    !user ||
-    user.status !== 'active' ||
-    user.authVersion !== claims.authVersion
-  ) {
+  if (!user || user.status !== 'active' || user.authVersion !== authVersion) {
     return null;
   }
-  return user.externalId;
+  return { userId: user.externalId, authVersion: user.authVersion };
+}
+
+export async function authenticateAccessTokenSession(
+  database: DB,
+  token: string,
+): Promise<AuthenticatedSession | null> {
+  const claims = await verifyAccessToken(token);
+  if (!claims) return null;
+  return activeUserSession(database, claims.sub, claims.authVersion);
+}
+
+export async function authenticateBearerSession(
+  database: DB,
+  header: string | undefined,
+): Promise<AuthenticatedSession | null> {
+  if (!header?.startsWith(BEARER_PREFIX)) return null;
+  return authenticateAccessTokenSession(database, header.slice(BEARER_PREFIX.length).trim());
+}
+
+export async function authenticateBearerHeader(
+  database: DB,
+  header: string | undefined,
+): Promise<string | null> {
+  return (await authenticateBearerSession(database, header))?.userId ?? null;
+}
+
+export async function authenticateAccessToken(
+  database: DB,
+  token: string,
+): Promise<string | null> {
+  return (await authenticateAccessTokenSession(database, token))?.userId ?? null;
+}
+
+/**
+ * Authenticate a token at WebSocket upgrade time and retain the versioned
+ * account session for later revalidation. A stream JWT is intentionally only
+ * valid for the handshake; using it again after its 60-second TTL would tear
+ * down an otherwise healthy browser takeover session.
+ */
+export async function authenticateStreamOrAccessSession(
+  database: DB,
+  token: string,
+): Promise<AuthenticatedSession | null> {
+  const streamClaims = await verifyStreamToken(token);
+  if (streamClaims) {
+    return activeUserSession(database, streamClaims.sub, streamClaims.authVersion);
+  }
+  return authenticateAccessTokenSession(database, token);
+}
+
+/**
+ * Revalidate an already established browser session without reusing its
+ * short-lived connection token. Account suspension and auth-version changes
+ * still close the socket immediately.
+ */
+export async function revalidateAuthenticatedSession(
+  database: DB,
+  session: AuthenticatedSession,
+): Promise<boolean> {
+  return (await activeUserSession(database, session.userId, session.authVersion)) !== null;
 }
 
 export async function authenticateStreamOrAccessToken(
   database: DB,
   token: string,
 ): Promise<string | null> {
-  const streamClaims = await verifyStreamToken(token);
-  if (streamClaims) return streamClaims.sub;
-  return authenticateAccessToken(database, token);
+  return (await authenticateStreamOrAccessSession(database, token))?.userId ?? null;
 }
 
 export async function bearerAuth(req: Request, _res: Response, next: NextFunction): Promise<void> {
   try {
-    const userId = await authenticateBearerHeader(db, req.header('authorization'));
-    if (userId) {
-      (req as Request & { userId?: string }).userId = userId;
+    const session = await authenticateBearerSession(db, req.header('authorization'));
+    if (session) {
+      const authenticatedRequest = req as Request & {
+        userId?: string;
+        userAuthVersion?: number;
+      };
+      authenticatedRequest.userId = session.userId;
+      authenticatedRequest.userAuthVersion = session.authVersion;
     }
   } catch {
     // Authentication must fail closed if the account lookup is

@@ -24,6 +24,11 @@ export interface AccessTokenClaims {
   authVersion: number;
 }
 
+export interface StreamTokenClaims {
+  sub: string;
+  authVersion: number;
+}
+
 export async function signAccessToken(
   claims: Omit<AccessTokenClaims, 'authVersion'> & { authVersion?: number },
 ): Promise<string> {
@@ -65,8 +70,11 @@ export async function verifyAccessToken(token: string): Promise<AccessTokenClaim
  * VNC). Different audience so a leak can't be replayed against the
  * tRPC API or the workbench WS.
  */
-export async function signStreamToken(sub: string): Promise<{ token: string; expiresIn: number }> {
-  const token = await new SignJWT({ purpose: 'stream' })
+export async function signStreamToken(
+  sub: string,
+  authVersion = 0,
+): Promise<{ token: string; expiresIn: number }> {
+  const token = await new SignJWT({ purpose: 'stream', authVersion })
     .setProtectedHeader({ alg: ALGORITHM })
     .setSubject(sub)
     .setIssuer(ISSUER)
@@ -82,15 +90,22 @@ export async function signStreamToken(sub: string): Promise<{ token: string; exp
  * token fallback requires a database-backed account/session check
  * and therefore lives in auth/middleware.ts.
  */
-export async function verifyStreamToken(token: string): Promise<{ sub: string } | null> {
+export async function verifyStreamToken(token: string): Promise<StreamTokenClaims | null> {
   try {
     const { payload } = await jwtVerify(token, key, {
       algorithms: [ALGORITHM],
       issuer: ISSUER,
       audience: STREAM_AUDIENCE,
     });
-    if (typeof payload.sub !== 'string') return null;
-    return { sub: payload.sub };
+    if (
+      typeof payload.sub !== 'string' ||
+      typeof payload.authVersion !== 'number' ||
+      !Number.isInteger(payload.authVersion) ||
+      payload.authVersion < 0
+    ) {
+      return null;
+    }
+    return { sub: payload.sub, authVersion: payload.authVersion };
   } catch {
     return null;
   }

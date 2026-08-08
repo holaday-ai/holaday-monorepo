@@ -4,9 +4,8 @@ import { WebSocket } from 'ws';
 
 interface WebSocketSessionRevalidationOptions {
   socket: WebSocket;
-  token: string;
   expectedUserId: string;
-  authenticateToken: (token: string) => Promise<string | null>;
+  revalidateSession: () => Promise<boolean>;
   logger: Logger;
   intervalMs?: number;
 }
@@ -34,9 +33,9 @@ export function startWebSocketSessionRevalidation(
   opts.socket.once('close', onClose);
 
   async function revalidate(): Promise<void> {
-    let userId: string | null = null;
+    let sessionIsValid = false;
     try {
-      userId = await opts.authenticateToken(opts.token);
+      sessionIsValid = await opts.revalidateSession();
     } catch (err) {
       opts.logger.warn(
         {
@@ -47,7 +46,7 @@ export function startWebSocketSessionRevalidation(
       );
     }
 
-    if (stopped || opts.socket.readyState !== WebSocket.OPEN || userId === opts.expectedUserId) {
+    if (stopped || opts.socket.readyState !== WebSocket.OPEN || sessionIsValid) {
       return;
     }
     opts.logger.warn({ userId: opts.expectedUserId }, 'websocket session revoked');

@@ -27,7 +27,11 @@ import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import type { Logger } from 'pino';
 import { WebSocket, WebSocketServer } from 'ws';
-import { authenticateStreamOrAccessToken } from '../auth/middleware.js';
+import {
+  type AuthenticatedSession,
+  authenticateStreamOrAccessSession,
+  revalidateAuthenticatedSession,
+} from '../auth/middleware.js';
 import { startWebSocketSessionRevalidation } from '../auth/websocket-session-revalidation.js';
 import type { BrowserPool } from '../browser-pool/index.js';
 import { db } from '../db/client.js';
@@ -88,6 +92,8 @@ export interface ScreencastProxyOptions {
   /** Override route. Default: `/screencast-ws/:userId`. */
   pathPattern?: RegExp;
   authenticateToken?: (token: string) => Promise<string | null>;
+  /** Test override for the established-account revalidation check. */
+  revalidateSession?: (session: AuthenticatedSession) => Promise<boolean>;
   /** Defaults to the task-WebSocket heartbeat period. */
   sessionRevalidationIntervalMs?: number;
 }
@@ -105,8 +111,7 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
   const pathPattern = opts.pathPattern ?? /^\/screencast-ws\/([^/?#]+)/;
   const wss = new WebSocketServer({ noServer: true });
   const log = opts.logger.child({ module: 'screencast-proxy' });
-  const authenticateToken =
-    opts.authenticateToken ?? ((token: string) => authenticateStreamOrAccessToken(db, token));
+  const customAuthenticateToken = opts.authenticateToken;
 
   function handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
     const url = req.url ?? '';
@@ -133,12 +138,20 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
       return reject(socket, 401, 'missing bearer token');
     }
 
-    authenticateToken(token).then(
-      (callerUserId) => {
-        if (!callerUserId) {
+    const authenticateConnection = customAuthenticateToken
+      ? async (candidate: string): Promise<AuthenticatedSession | null> => {
+          const userId = await customAuthenticateToken(candidate);
+          return userId ? { userId, authVersion: 0 } : null;
+        }
+      : (candidate: string) => authenticateStreamOrAccessSession(db, candidate);
+
+    authenticateConnection(token).then(
+      (session) => {
+        if (!session) {
           log.warn({}, 'jwt verify returned null');
           return reject(socket, 401, 'invalid token');
         }
+        const callerUserId = session.userId;
 
         // Phase 24 fix #2 — dispatch by ID prefix. tsk_… targets a
         // specific in-flight task; everything else falls through to
@@ -169,9 +182,14 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
         wss.handleUpgrade(req, socket, head, (ws) => {
           startWebSocketSessionRevalidation({
             socket: ws,
-            token,
             expectedUserId: callerUserId,
-            authenticateToken,
+            revalidateSession: () => {
+              if (opts.revalidateSession) return opts.revalidateSession(session);
+              if (customAuthenticateToken) {
+                return customAuthenticateToken(token).then((userId) => userId === session.userId);
+              }
+              return revalidateAuthenticatedSession(db, session);
+            },
             logger: log,
             intervalMs: opts.sessionRevalidationIntervalMs,
           });

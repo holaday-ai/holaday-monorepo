@@ -580,13 +580,18 @@ export function createHttpApp(deps: HttpAppDeps) {
   // returned stream token is scoped to the streaming audience
   // and can't be replayed against tRPC.
   app.post('/stream-token', async (req, res) => {
-    const userExternalId = (req as express.Request & { userId?: string }).userId;
-    if (!userExternalId) {
+    const authenticatedRequest = req as express.Request & {
+      userId?: string;
+      userAuthVersion?: number;
+    };
+    const userExternalId = authenticatedRequest.userId;
+    const authVersion = authenticatedRequest.userAuthVersion;
+    if (!userExternalId || !Number.isInteger(authVersion) || (authVersion ?? -1) < 0) {
       res.status(401).json({ error: 'unauthorized' });
       return;
     }
     try {
-      const { token, expiresIn } = await signStreamToken(userExternalId);
+      const { token, expiresIn } = await signStreamToken(userExternalId, authVersion);
       res.json({ token, expiresIn });
     } catch (err) {
       logger.error(

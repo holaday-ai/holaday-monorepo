@@ -89,22 +89,43 @@ describe('authenticateBearerHeader', () => {
 });
 
 describe('realtime token authentication', () => {
-  it('accepts a short-lived stream token without querying the user table', async () => {
+  it('accepts a short-lived stream token only while its user session remains active', async () => {
     const { signStreamToken } = await import('./jwt.js');
     const { authenticateStreamOrAccessToken } = await import('./middleware.js');
-    const { token } = await signStreamToken('usr_stream_active');
+    const { token } = await signStreamToken('usr_stream_active', 4);
     let selectCalls = 0;
     const database = {
       select() {
         selectCalls += 1;
-        throw new Error('stream tokens must not query the database');
+        return fakeDbFor({
+          externalId: 'usr_stream_active',
+          status: 'active',
+          authVersion: 4,
+        }).select();
       },
     };
 
     await expect(
       authenticateStreamOrAccessToken(database as never, token),
     ).resolves.toBe('usr_stream_active');
-    expect(selectCalls).toBe(0);
+    expect(selectCalls).toBe(1);
+  });
+
+  it('rejects a short-lived stream token after the user auth version changes', async () => {
+    const { signStreamToken } = await import('./jwt.js');
+    const { authenticateStreamOrAccessToken } = await import('./middleware.js');
+    const { token } = await signStreamToken('usr_stream_reset', 6);
+
+    await expect(
+      authenticateStreamOrAccessToken(
+        fakeDbFor({
+          externalId: 'usr_stream_reset',
+          status: 'active',
+          authVersion: 7,
+        }) as never,
+        token,
+      ),
+    ).resolves.toBeNull();
   });
 
   it('rejects an inactive user using a valid long-lived access token', async () => {
