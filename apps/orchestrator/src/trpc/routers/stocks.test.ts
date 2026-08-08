@@ -274,57 +274,12 @@ describe('stocks dashboard snapshot', () => {
     expect(requestedAnnouncementSymbols.sort()).toEqual(symbols);
   });
 
-  it('uses a declared source cover first and stable editorial art when no cover is published', () => {
+  it('uses a declared source cover first and keeps unillustrated stories title-first', () => {
     const sourceDeclaredImageUrl = __stocksDashboardTest.sourceDeclaredImageUrl as (value?: unknown) => string | undefined;
-    const editorialArtTheme = __stocksDashboardTest.editorialArtTheme as (
-      category: '公告' | '新闻',
-      title: string,
-    ) => string;
-    const editorialArtOptions = __stocksDashboardTest.editorialArtOptions as (
-      category: '公告' | '新闻',
-      title: string,
-    ) => string[];
-    const selectEditorialArtUrl = __stocksDashboardTest.selectEditorialArtUrl as (input: {
-      category: '公告' | '新闻';
-      title: string;
-      symbol: string;
-      url?: string;
-    }) => string;
 
     expect(sourceDeclaredImageUrl('https://source.example/cover.jpg')).toBe('https://source.example/cover.jpg');
     expect(sourceDeclaredImageUrl('data:image/png;base64,not-a-source-url')).toBeUndefined();
     expect(sourceDeclaredImageUrl('javascript:alert(1)')).toBeUndefined();
-    expect(editorialArtTheme('新闻', '驰宏锌锗：光纤概念涨幅居前')).toBe('technology');
-    expect(editorialArtTheme('新闻', '迪生力：存储芯片概念活跃')).toBe('technology');
-    expect(editorialArtTheme('新闻', '上半年高端装备制造业新设企业2.8万户')).toBe('technology');
-    expect(editorialArtTheme('新闻', '共享制造成为制造业协同新模式')).toBe('technology');
-    expect(editorialArtTheme('新闻', '创新药研发进展披露')).toBe('healthcare');
-    expect(editorialArtTheme('新闻', '铜价上涨带动有色金属板块')).toBe('materials');
-    expect(editorialArtOptions('新闻', '泰晶科技：存储芯片概念活跃')).toHaveLength(12);
-    expect(editorialArtOptions('新闻', '立秋节气新茶饮销量大幅上升')).toEqual(expect.arrayContaining([
-      '/stock-editorial-art/consumer-3.jpg',
-      '/stock-editorial-art/consumer-4.jpg',
-      '/stock-editorial-art/logistics-1.jpg',
-    ]));
-    expect(editorialArtOptions('新闻', '立秋节气新茶饮销量大幅上升')).not.toContain('/stock-editorial-art/consumer-2.jpg');
-    expect(editorialArtOptions('新闻', '立秋节气新茶饮销量大幅上升')).not.toContain('/stock-editorial-art/market-3.jpg');
-    expect(selectEditorialArtUrl({
-      category: '新闻',
-      title: '泰晶科技：没有公开封面的真实新闻',
-      symbol: '603738',
-      url: 'https://finance.eastmoney.com/a/202608073834244063.html',
-    })).toMatch(/^\/stock-editorial-art\/[a-z-]+-\d+\.jpg$/);
-    expect(selectEditorialArtUrl({
-      category: '新闻',
-      title: '泰晶科技：没有公开封面的真实新闻',
-      symbol: '603738',
-      url: 'https://finance.eastmoney.com/a/202608073834244063.html',
-    })).toBe(selectEditorialArtUrl({
-      category: '新闻',
-      title: '泰晶科技：没有公开封面的真实新闻',
-      symbol: '603738',
-      url: 'https://finance.eastmoney.com/a/202608073834244063.html',
-    }));
 
     const buildSourceDiscovery = __stocksDashboardTest.buildNews as unknown as (
       announcements: Array<{ entry: { symbol: string; market: 'A'; displayName: string }; env: ReturnType<typeof envelope> }>,
@@ -340,17 +295,15 @@ describe('stocks dashboard snapshot', () => {
       }]),
     }]);
 
-    expect(item).toMatchObject({
-      imageKind: 'editorial-art',
-      imageUrl: expect.stringMatching(/^\/stock-editorial-art\/[a-z-]+-\d+\.jpg$/),
-    });
+    expect(item?.imageUrl).toBeUndefined();
+    expect(item?.imageKind).toBeUndefined();
   });
 
-  it('keeps source covers and supplies a semantic fallback when a generic cover repeats', () => {
+  it('keeps source covers and leaves other rows title-first', () => {
     const buildSourceDiscovery = __stocksDashboardTest.buildNews as unknown as (
       announcements: Array<{ entry: { symbol: string; market: 'A'; displayName: string }; env: ReturnType<typeof envelope> }>,
       stockNews: Array<{ entry: { symbol: string; market: 'A'; displayName: string }; env: ReturnType<typeof envelope> }>,
-    ) => Array<{ imageUrl?: string; imageKind?: string; editorialArtOptions?: string[] }>;
+    ) => Array<{ imageUrl?: string; imageKind?: string }>;
     const rows = buildSourceDiscovery([], [{
       entry: { symbol: '603738', market: 'A', displayName: '泰晶科技' },
       env: envelope([
@@ -379,13 +332,12 @@ describe('stocks dashboard snapshot', () => {
     expect(rows[0]).toMatchObject({
       imageKind: 'source-cover',
       imageUrl: 'https://source.example/verified-cover.jpg',
-      editorialArtOptions: expect.arrayContaining(['/stock-editorial-art/earnings-1.jpg']),
     });
-    expect(rows.slice(1).every((row) => row.imageKind === 'editorial-art')).toBe(true);
-    expect(rows[1]?.imageUrl).not.toBe(rows[2]?.imageUrl);
+    expect(rows.slice(1).map((row) => row.imageUrl)).toEqual([undefined, undefined]);
+    expect(rows.slice(1).map((row) => row.imageKind)).toEqual([undefined, undefined]);
   });
 
-  it('replaces a persisted legacy market chart with stable editorial art before rendering discovery', () => {
+  it('removes a persisted legacy market chart before rendering discovery', () => {
     const normalizeDiscoveryEditorialArt = __stocksDashboardTest.normalizeDiscoveryEditorialArt as (rows: Array<{
       category: '公告' | '新闻';
       title: string;
@@ -408,13 +360,11 @@ describe('stocks dashboard snapshot', () => {
       imageKind: 'market-chart',
     }]);
 
-    expect(row).toMatchObject({
-      imageKind: 'editorial-art',
-      imageUrl: expect.stringMatching(/^\/stock-editorial-art\/[a-z-]+-\d+\.jpg$/),
-    });
+    expect(row?.imageUrl).toBeUndefined();
+    expect(row?.imageKind).toBeUndefined();
   });
 
-  it('repairs a stale local illustration incorrectly marked as a source cover before diversifying cards', () => {
+  it('removes a stale local illustration incorrectly marked as a source cover', () => {
     const normalizeDiscoveryEditorialArt = __stocksDashboardTest.normalizeDiscoveryEditorialArt as (rows: Array<{
       category: '公告' | '新闻';
       title: string;
@@ -449,8 +399,8 @@ describe('stocks dashboard snapshot', () => {
       },
     ]);
 
-    expect(rows.every((row) => row.imageKind === 'editorial-art')).toBe(true);
-    expect(rows[0]?.imageUrl).not.toBe(rows[1]?.imageUrl);
+    expect(rows.map((row) => row.imageUrl)).toEqual([undefined, undefined]);
+    expect(rows.map((row) => row.imageKind)).toEqual([undefined, undefined]);
   });
 
   it('keeps every fetched source-backed row for a multi-stock watchlist', () => {
@@ -963,11 +913,17 @@ describe('stocks dashboard snapshot', () => {
 
     expect(merged.news).toEqual([
       expect.objectContaining({
-        ...previous.news[0],
-        imageKind: 'editorial-art',
-        imageUrl: expect.stringMatching(/^\/stock-editorial-art\/[a-z-]+-\d+\.jpg$/),
+        category: '公告',
+        time: '08-07 09:00',
+        publishedAt: '2026-08-07T01:00:00.000Z',
+        title: '多伦科技：董事会决议公告',
+        symbols: ['603528'],
+        source: '巨潮公告',
+        url: 'https://www.cninfo.com.cn/notice-603528',
       }),
     ]);
+    expect(merged.news[0]?.imageUrl).toBeUndefined();
+    expect(merged.news[0]?.imageKind).toBeUndefined();
   });
 
   it('keeps prior market discovery feeds when only those source refreshes fail', () => {

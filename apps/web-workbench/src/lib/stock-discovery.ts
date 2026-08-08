@@ -59,34 +59,13 @@ export function diversifyDiscoveryEditorialArt<T extends DiscoveryMedia>(
     });
 
     // Publishers occasionally return one generic image for otherwise distinct
-    // stories. In that case every affected card uses its own topical fallback
-    // so the generic image cannot imply an unrelated subject. The same fallback
-    // also keeps an inaccessible external source image from leaving a blank
-    // media panel in the reading view.
+    // stories. Do not replace it with a decorative image: a title-first card is
+    // more honest than media that might imply an unrelated subject.
     if (item.imageKind === 'source-cover') {
       const needsFallback = (sourceCoverCounts.get(imageUrl) ?? 0) >= 2
         || failedSourceCoverUrls.has(imageUrl);
       if (!needsFallback) return entry;
-      const poolKey = candidates.join('|');
-      const usedEditorialUrls = usedEditorialUrlsByPool.get(poolKey) ?? new Set<string>();
-      if (usedEditorialUrls.size >= candidates.length) usedEditorialUrls.clear();
-      usedEditorialUrlsByPool.set(poolKey, usedEditorialUrls);
-      const replacement = candidates.find((candidate) =>
-        !usedEditorialUrls.has(candidate) && !usedAcrossFeed.has(candidate) && !recentEditorialUrls.includes(candidate),
-      ) ?? candidates.find((candidate) =>
-        !usedEditorialUrls.has(candidate) && !recentEditorialUrls.includes(candidate),
-      ) ?? candidates.find((candidate) => !usedEditorialUrls.has(candidate)) ?? candidates[0];
-      if (!replacement || (requiresUniqueArtwork && usedAcrossFeed.has(replacement))) {
-        return titleFirstFallback();
-      }
-      usedEditorialUrls.add(replacement);
-      usedAcrossFeed.add(replacement);
-      recentEditorialUrls.push(replacement);
-      if (recentEditorialUrls.length > 3) recentEditorialUrls.shift();
-      return {
-        ...entry,
-        item: { ...item, imageUrl: replacement, imageKind: 'editorial-art' },
-      };
+      return titleFirstFallback();
     }
 
     if (!isLocalEditorialArt(item)) {

@@ -75,16 +75,12 @@ describe('stock discovery presentation', () => {
     ]);
   });
 
-  it('replaces every repeated generic source cover with each article\'s own editorial fallback', () => {
+  it('uses title-first cards for repeated generic source covers', () => {
     const items = [
       {
         item: {
           imageUrl: 'https://publisher.example/generic-market-photo.jpg',
           imageKind: 'source-cover' as const,
-          editorialArtOptions: [
-            '/stock-editorial-art/technology-1.jpg',
-            '/stock-editorial-art/technology-2.jpg',
-          ],
         },
         index: 0,
       },
@@ -92,10 +88,6 @@ describe('stock discovery presentation', () => {
         item: {
           imageUrl: 'https://publisher.example/generic-market-photo.jpg',
           imageKind: 'source-cover' as const,
-          editorialArtOptions: [
-            '/stock-editorial-art/technology-1.jpg',
-            '/stock-editorial-art/technology-2.jpg',
-          ],
         },
         index: 1,
       },
@@ -103,36 +95,25 @@ describe('stock discovery presentation', () => {
 
     const diversified = diversifyDiscoveryEditorialArt(items);
 
-    expect(diversified[0]?.item).toMatchObject({
-      imageKind: 'editorial-art',
-      imageUrl: '/stock-editorial-art/technology-1.jpg',
-    });
-    expect(diversified[1]?.item).toMatchObject({
-      imageKind: 'editorial-art',
-      imageUrl: '/stock-editorial-art/technology-2.jpg',
-    });
+    expect(diversified.map(({ item }) => item.imageUrl)).toEqual([undefined, undefined]);
   });
 
-  it('replaces a failed unique source cover with its topical fallback', () => {
+  it('uses a title-first card when a source cover cannot load', () => {
     const items = [{
       item: {
         imageUrl: 'https://publisher.example/blocked-source-photo.jpg',
         imageKind: 'source-cover' as const,
-        editorialArtOptions: [
-          '/stock-editorial-art/technology-1.jpg',
-          '/stock-editorial-art/technology-2.jpg',
-        ],
       },
       index: 0,
     }];
 
-    expect(diversifyDiscoveryEditorialArt(
+    const [fallback] = diversifyDiscoveryEditorialArt(
       items,
       new Set(['https://publisher.example/blocked-source-photo.jpg']),
-    )[0]?.item).toMatchObject({
-      imageKind: 'editorial-art',
-      imageUrl: '/stock-editorial-art/technology-1.jpg',
-    });
+    );
+
+    expect(fallback?.item.imageUrl).toBeUndefined();
+    expect(fallback?.item.imageKind).toBeUndefined();
   });
 
   it('does not alter a cover merely because the same artwork appeared on an earlier page', () => {
