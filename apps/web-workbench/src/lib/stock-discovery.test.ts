@@ -50,6 +50,20 @@ describe('stock discovery presentation', () => {
     ]);
   });
 
+  it('uses each reusable editorial cover once before repeating one later in the carousel', () => {
+    const items = Array.from({ length: 12 }, (_, index) => ({
+      item: {
+        imageUrl: '/stock-editorial-art/macro-1.jpg',
+        imageKind: 'editorial-art' as const,
+      },
+      index,
+    }));
+
+    const diversified = diversifyDiscoveryEditorialArt(items);
+
+    expect(new Set(diversified.map(({ item }) => item.imageUrl)).size).toBe(12);
+  });
+
   it('labels a date-only announcement as a disclosure date without inventing a time', () => {
     expect(discoveryTimeLabel('公告', '08-07')).toBe('08-07 · 披露日');
     expect(discoveryTimeLabel('公告', '08-07 09:30')).toBe('08-07 09:30');

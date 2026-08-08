@@ -75,9 +75,13 @@ interface SectorSnapshot {
   spark: number[];
 }
 
+type DiscoveryFeed = '自选股新闻' | '重要公告' | 'A股要闻' | '美股要闻' | '港股要闻';
+
 interface NewsSnapshot {
   /** `盘面` / `关注` 仅兼容已缓存的旧快照；新发现流只写入新闻或公告。 */
   category: '公告' | '新闻' | '盘面' | '关注';
+  /** 展示层栏目；旧快照未写入时由前端按类别兼容。 */
+  feed?: DiscoveryFeed;
   time: string;
   /** 原始来源的发布时间，仅用于稳定排序。 */
   publishedAt?: string;
@@ -157,11 +161,16 @@ const DASHBOARD_FIRST_PAINT_BUDGET_MS = 5_500;
 const DASHBOARD_AKSHARE_TIMEOUT_MS = 8_000;
 const DASHBOARD_SLOW_SIGNAL_TIMEOUT_MS = 90_000;
 const DASHBOARD_RANKING_TIMEOUT_MS = 75_000;
-const NEWS_LIMIT = 36;
+const DASHBOARD_DISCOVERY_TIMEOUT_MS = 12_000;
+const NEWS_LIMIT = 60;
 const NEWS_ANNOUNCEMENT_LIMIT = 18;
 const NEWS_ARTICLE_LIMIT = 24;
+const NEWS_MARKET_ARTICLE_LIMIT = 30;
 const NEWS_PER_STOCK_ANNOUNCEMENTS = 5;
 const NEWS_PER_STOCK_ARTICLES = 8;
+const NEWS_PER_MARKET_STOCK_ARTICLES = 2;
+const NEWS_PER_MARKET_FEED_ARTICLES = 8;
+const MARKET_DISCOVERY_SYMBOL_LIMIT = 6;
 const dashboardCache = new Map<string, DashboardCacheEntry>();
 
 function unavailableStock(entry: WatchlistEntry, note = '真实行情暂不可用，未展示走势线'): StockSnapshot {
@@ -806,6 +815,40 @@ function mapRankingLeaders(
   return rows.length > 0 ? rows : [];
 }
 
+/**
+ * The discovery feed should extend beyond a user's own holdings without
+ * pretending every ranking row is a recommendation. We use the verified
+ * gainers, turnover, and losers tables only to choose search terms for
+ * source-linked news, excluding stocks the user already follows.
+ */
+function marketDiscoveryEntries(
+  rankingEnvs: readonly AkEnvelope<StockRankingRow>[],
+  watchlist: readonly WatchlistEntry[],
+): WatchlistEntry[] {
+  const seen = new Set(
+    watchlist
+      .filter((entry) => entry.market === 'A')
+      .map((entry) => entry.symbol.trim()),
+  );
+  const entries: WatchlistEntry[] = [];
+  const longest = Math.max(0, ...rankingEnvs.map((env) => env.error ? 0 : env.data.length));
+
+  for (let index = 0; index < longest && entries.length < MARKET_DISCOVERY_SYMBOL_LIMIT; index += 1) {
+    for (const env of rankingEnvs) {
+      if (entries.length >= MARKET_DISCOVERY_SYMBOL_LIMIT || env.error) break;
+      const row = env.data[index];
+      if (!row) continue;
+      const symbol = String(pick(row, ['代码', 'code']) ?? '').trim();
+      const displayName = String(pick(row, ['名称', 'name']) ?? '').trim();
+      if (!/^\d{6}$/.test(symbol) || !displayName || seen.has(symbol)) continue;
+      seen.add(symbol);
+      entries.push({ symbol, market: 'A', displayName });
+    }
+  }
+
+  return entries;
+}
+
 function mapSymbolSearch(env: AkEnvelope<SymbolRow>, query: string) {
   const normalized = query.trim().toUpperCase();
   const rows = env.error ? [] : env.data;
@@ -1021,12 +1064,105 @@ function sourceBackedDiscovery(rows: NewsSnapshot[]): NewsSnapshot[] {
   }))));
 }
 
+function discoveryFeed(row: NewsSnapshot): DiscoveryFeed {
+  if (row.feed) return row.feed;
+  return row.category === '公告' ? '重要公告' : '自选股新闻';
+}
+
+function preserveMissingDiscoveryFeeds(current: NewsSnapshot[], previous: NewsSnapshot[]): NewsSnapshot[] {
+  const currentFeeds = new Set(current.map(discoveryFeed));
+  const missingPriorRows = previous.filter((row) => !currentFeeds.has(discoveryFeed(row)));
+  return sourceBackedDiscovery([...current, ...missingPriorRows]);
+}
+
+type StockNewsInput = { entry: WatchlistEntry; env: AkEnvelope<StockNewsRow> };
+type MarketNewsInput = { feed: Extract<DiscoveryFeed, 'A股要闻' | '美股要闻' | '港股要闻'>; env: AkEnvelope<StockNewsRow> };
+
+function stockNewsRows(
+  item: StockNewsInput,
+  feed: Extract<DiscoveryFeed, '自选股新闻' | 'A股要闻'>,
+  perStockLimit: number,
+): NewsSnapshot[] {
+  if (item.env.error) return [];
+  const rowsForStock: NewsSnapshot[] = [];
+  for (const row of item.env.data) {
+    const title = String(pick(row, ['新闻标题']) ?? '').trim();
+    const sourcePublishedAt = pick(row, ['发布时间']);
+    const url = String(pick(row, ['新闻链接']) ?? '').trim();
+    const publishedAt = newsPublishedAt(sourcePublishedAt);
+    if (!title || !publishedAt || !url) continue;
+    const summary = String(pick(row, ['新闻内容']) ?? '').trim();
+    const source = String(pick(row, ['文章来源']) ?? '').trim() || '东方财富';
+    const sourceImageUrl = sourceDeclaredImageUrl(pick(row, ['新闻图片']));
+    const displayTitle = `${item.entry.displayName ?? item.entry.symbol}：${title}`;
+    const imageUrl = sourceImageUrl ?? selectEditorialArtUrl({
+      category: '新闻',
+      title: displayTitle,
+      symbol: item.entry.symbol,
+      url,
+    });
+    rowsForStock.push({
+      category: '新闻',
+      feed,
+      time: formatAnnouncementTime(sourcePublishedAt),
+      publishedAt,
+      title: displayTitle,
+      symbols: [item.entry.symbol],
+      source,
+      url,
+      ...(summary ? { summary } : {}),
+      imageUrl,
+      imageKind: sourceImageUrl ? 'source-cover' : 'editorial-art',
+    });
+  }
+  return sortNewsNewestFirst(dedupeNews(rowsForStock)).slice(0, perStockLimit);
+}
+
+function marketNewsRows(item: MarketNewsInput): NewsSnapshot[] {
+  if (item.env.error) return [];
+  const rows: NewsSnapshot[] = [];
+  for (const row of item.env.data) {
+    const title = String(pick(row, ['新闻标题']) ?? '').trim();
+    const sourcePublishedAt = pick(row, ['发布时间']);
+    const url = String(pick(row, ['新闻链接']) ?? '').trim();
+    const publishedAt = newsPublishedAt(sourcePublishedAt);
+    if (!title || !publishedAt || !url) continue;
+    const summary = String(pick(row, ['新闻内容']) ?? '').trim();
+    const source = String(pick(row, ['文章来源']) ?? '').trim() || '东方财富';
+    const sourceImageUrl = sourceDeclaredImageUrl(pick(row, ['新闻图片']));
+    const imageUrl = sourceImageUrl ?? selectEditorialArtUrl({
+      category: '新闻',
+      title,
+      symbol: item.feed,
+      url,
+    });
+    rows.push({
+      category: '新闻',
+      feed: item.feed,
+      time: formatAnnouncementTime(sourcePublishedAt),
+      publishedAt,
+      title,
+      symbols: [],
+      source,
+      url,
+      ...(summary ? { summary } : {}),
+      imageUrl,
+      imageKind: sourceImageUrl ? 'source-cover' : 'editorial-art',
+    });
+  }
+  return sortNewsNewestFirst(dedupeNews(rows)).slice(0, NEWS_PER_MARKET_FEED_ARTICLES);
+}
+
 function buildNews(
   announcements: Array<{ entry: WatchlistEntry; env: AkEnvelope<AnnouncementRow> }>,
-  stockNews: Array<{ entry: WatchlistEntry; env: AkEnvelope<StockNewsRow> }>,
+  stockNews: StockNewsInput[],
+  marketStockNews: StockNewsInput[] = [],
+  marketNews: MarketNewsInput[] = [],
 ): NewsSnapshot[] {
   const announcementRows: NewsSnapshot[] = [];
-  const articleRows: NewsSnapshot[] = [];
+  const watchlistArticleRows: NewsSnapshot[] = [];
+  const marketArticleRows: NewsSnapshot[] = [];
+  const marketSearchRows: NewsSnapshot[] = [];
   for (const item of announcements) {
     if (item.env.error) continue;
     const rowsForStock: NewsSnapshot[] = [];
@@ -1039,6 +1175,7 @@ function buildNews(
       const displayTitle = `${item.entry.displayName ?? item.entry.symbol}：${title}`;
       rowsForStock.push({
         category: '公告',
+        feed: '重要公告',
         time: formatAnnouncementTime(sourcePublishedAt),
         publishedAt,
         title: displayTitle,
@@ -1057,42 +1194,19 @@ function buildNews(
     announcementRows.push(...sortNewsNewestFirst(dedupeNews(rowsForStock)).slice(0, NEWS_PER_STOCK_ANNOUNCEMENTS));
   }
   for (const item of stockNews) {
-    if (item.env.error) continue;
-    const rowsForStock: NewsSnapshot[] = [];
-    for (const row of item.env.data) {
-      const title = String(pick(row, ['新闻标题']) ?? '').trim();
-      const sourcePublishedAt = pick(row, ['发布时间']);
-      const url = String(pick(row, ['新闻链接']) ?? '').trim();
-      const publishedAt = newsPublishedAt(sourcePublishedAt);
-      if (!title || !publishedAt || !url) continue;
-      const summary = String(pick(row, ['新闻内容']) ?? '').trim();
-      const source = String(pick(row, ['文章来源']) ?? '').trim() || '东方财富';
-      const sourceImageUrl = sourceDeclaredImageUrl(pick(row, ['新闻图片']));
-      const displayTitle = `${item.entry.displayName ?? item.entry.symbol}：${title}`;
-      const imageUrl = sourceImageUrl ?? selectEditorialArtUrl({
-        category: '新闻',
-        title: displayTitle,
-        symbol: item.entry.symbol,
-        url,
-      });
-      rowsForStock.push({
-        category: '新闻',
-        time: formatAnnouncementTime(sourcePublishedAt),
-        publishedAt,
-        title: displayTitle,
-        symbols: [item.entry.symbol],
-        source,
-        url,
-        ...(summary ? { summary } : {}),
-        imageUrl,
-        imageKind: sourceImageUrl ? 'source-cover' : 'editorial-art',
-      });
-    }
-    articleRows.push(...sortNewsNewestFirst(dedupeNews(rowsForStock)).slice(0, NEWS_PER_STOCK_ARTICLES));
+    watchlistArticleRows.push(...stockNewsRows(item, '自选股新闻', NEWS_PER_STOCK_ARTICLES));
+  }
+  for (const item of marketStockNews) {
+    marketArticleRows.push(...stockNewsRows(item, 'A股要闻', NEWS_PER_MARKET_STOCK_ARTICLES));
+  }
+  for (const item of marketNews) {
+    marketSearchRows.push(...marketNewsRows(item));
   }
   return normalizeDiscoveryEditorialArt(sortNewsNewestFirst(dedupeNews([
     ...sortNewsNewestFirst(announcementRows).slice(0, NEWS_ANNOUNCEMENT_LIMIT),
-    ...sortNewsNewestFirst(articleRows).slice(0, NEWS_ARTICLE_LIMIT),
+    ...sortNewsNewestFirst(watchlistArticleRows).slice(0, NEWS_ARTICLE_LIMIT),
+    ...sortNewsNewestFirst(marketArticleRows).slice(0, NEWS_MARKET_ARTICLE_LIMIT),
+    ...sortNewsNewestFirst(marketSearchRows).slice(0, NEWS_MARKET_ARTICLE_LIMIT),
   ])).slice(0, NEWS_LIMIT));
 }
 
@@ -1113,6 +1227,14 @@ async function buildDashboardSnapshot(args: {
   const slowSignalClient = new HttpAkshareClient({
     baseUrl,
     timeoutMs: DASHBOARD_SLOW_SIGNAL_TIMEOUT_MS,
+    logger,
+  });
+  const discoveryClient = new HttpAkshareClient({
+    baseUrl,
+    // The upstream search itself has an eight second deadline. Keep this
+    // layer bounded too, so a cold market-news cache cannot hold the entire
+    // dashboard refresh for the old 90 second slow-signal budget.
+    timeoutMs: DASHBOARD_DISCOVERY_TIMEOUT_MS,
     logger,
   });
   const rankingClient = new HttpAkshareClient({
@@ -1138,7 +1260,12 @@ async function buildDashboardSnapshot(args: {
     })),
   );
   const deferredRankings = Promise.resolve(emptyEnvelope<StockRankingRow>('akshare:rankings:deferred'));
-  const [indexCn, pulseEnv, stocks, announcements, stockNews, rankingGainers, rankingLosers, rankingAmount] = await Promise.all([
+  const deferredMarketNews = Promise.resolve([
+    { feed: 'A股要闻' as const, env: emptyEnvelope<StockNewsRow>('akshare:market-news:cn:deferred') },
+    { feed: '美股要闻' as const, env: emptyEnvelope<StockNewsRow>('akshare:market-news:us:deferred') },
+    { feed: '港股要闻' as const, env: emptyEnvelope<StockNewsRow>('akshare:market-news:hk:deferred') },
+  ]);
+  const [indexCn, pulseEnv, stocks, announcements, stockNews, rankingGainers, rankingLosers, rankingAmount, marketNews] = await Promise.all([
     client.getIndexQuote('cn'),
     includeSlowSignals
       ? slowSignalClient.getMarketPulse(compact)
@@ -1156,13 +1283,20 @@ async function buildDashboardSnapshot(args: {
       ? Promise.all(
         announcementWatchlist.map(async (entry) => ({
           entry,
-          env: await slowSignalClient.getStockNews(entry.symbol),
+          env: await discoveryClient.getStockNews(entry.symbol),
         })),
       )
       : deferredStockNews,
     includeSlowSignals ? rankingClient.getStockRankings('gainers', 8) : deferredRankings,
     includeSlowSignals ? rankingClient.getStockRankings('losers', 8) : deferredRankings,
     includeSlowSignals ? rankingClient.getStockRankings('amount', 8) : deferredRankings,
+    includeSlowSignals
+      ? Promise.all([
+        discoveryClient.getMarketNews('cn').then((env) => ({ feed: 'A股要闻' as const, env })),
+        discoveryClient.getMarketNews('us').then((env) => ({ feed: '美股要闻' as const, env })),
+        discoveryClient.getMarketNews('hk').then((env) => ({ feed: '港股要闻' as const, env })),
+      ])
+      : deferredMarketNews,
   ]);
   const sectors = mapSectors(pulseEnv);
   const leaderboards: LeaderboardsSnapshot = {
@@ -1172,7 +1306,16 @@ async function buildDashboardSnapshot(args: {
   };
   const marketIndices = mapIndices(indexCn);
   const temperature = marketTemperature(pulseEnv);
-  const news = buildNews(announcements, stockNews);
+  const marketEntries = includeSlowSignals
+    ? marketDiscoveryEntries([rankingGainers, rankingAmount, rankingLosers], effectiveWatchlist)
+    : [];
+  const marketStockNews = includeSlowSignals
+    ? await Promise.all(marketEntries.map(async (entry) => ({
+      entry,
+      env: await discoveryClient.getStockNews(entry.symbol),
+    })))
+    : [];
+  const news = buildNews(announcements, stockNews, marketStockNews, marketNews);
   const missingMarketPanels = [
     marketIndices.length === 0 ? '指数' : null,
     sectors.length === 0 ? '行业趋势' : null,
@@ -1256,7 +1399,8 @@ function withPreservedSlowSignals(snapshot: DashboardSnapshot, previous?: Dashbo
   const shouldPreserveTemperature = snapshot.temperature === null && previous.temperature !== null;
   const sourceNews = sourceBackedDiscovery(snapshot.news);
   const priorSourceNews = sourceBackedDiscovery(previous.news);
-  const shouldPreserveNews = sourceNews.length === 0 && priorSourceNews.length > 0;
+  const news = preserveMissingDiscoveryFeeds(sourceNews, priorSourceNews);
+  const shouldPreserveNews = news.length > sourceNews.length;
   const shouldPreserveLeaderboards =
     snapshot.leaderboards.gainers.length === 0 &&
     snapshot.leaderboards.losers.length === 0 &&
@@ -1297,7 +1441,7 @@ function withPreservedSlowSignals(snapshot: DashboardSnapshot, previous?: Dashbo
     marketIndices: shouldPreserveMarketIndices ? previous.marketIndices : snapshot.marketIndices,
     sectors: shouldPreserveSectors ? previous.sectors : snapshot.sectors,
     temperature: shouldPreserveTemperature ? previous.temperature : snapshot.temperature,
-    news: shouldPreserveNews ? priorSourceNews : sourceNews,
+    news,
     leaders: shouldPreserveLeaderboards ? leaderboards.gainers : snapshot.leaders,
     leaderboards,
     freshness: {

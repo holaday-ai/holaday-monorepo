@@ -96,6 +96,7 @@ interface SectorRow {
 
 interface NewsRow {
   category?: '公告' | '新闻' | '盘面' | '关注';
+  feed?: '自选股新闻' | '重要公告' | 'A股要闻' | '美股要闻' | '港股要闻';
   time: string;
   title: string;
   symbols: string[];
@@ -714,7 +715,7 @@ function DiscoveryPanel({
   onOpenNews: (index: number) => void;
 }): JSX.Element {
   const pageSize = 3;
-  const [activeType, setActiveType] = React.useState<'全部' | '新闻' | '公告'>('全部');
+  const [activeFeed, setActiveFeed] = React.useState<'全部' | '自选股新闻' | '重要公告' | 'A股要闻' | '美股要闻' | '港股要闻'>('全部');
   const [page, setPage] = React.useState(0);
   const indexedNews = React.useMemo(
     () => news.map((item, index) => ({ item, index })),
@@ -723,11 +724,11 @@ function DiscoveryPanel({
   const filteredNews = React.useMemo(
     () => diversifyDiscoveryEditorialArt(
       diversifyDiscoveryItems(
-        indexedNews.filter(({ item }) => activeType === '全部' || newsDisplayType(item) === activeType),
+        indexedNews.filter(({ item }) => activeFeed === '全部' || newsFeed(item) === activeFeed),
         (item) => item.symbols[0],
       ),
     ),
-    [activeType, indexedNews],
+    [activeFeed, indexedNews],
   );
   const pageCount = Math.max(1, Math.ceil(filteredNews.length / pageSize));
   const safePage = Math.min(page, pageCount - 1);
@@ -735,6 +736,12 @@ function DiscoveryPanel({
   const items = filteredNews.slice(start, start + pageSize);
   const announcementCount = news.filter((item) => newsDisplayType(item) === '公告').length;
   const marketNewsCount = news.length - announcementCount;
+  const feedCounts = React.useMemo(() => new Map(
+    ['自选股新闻', '重要公告', 'A股要闻', '美股要闻', '港股要闻'].map((feed) => [
+      feed,
+      news.filter((item) => newsFeed(item) === feed).length,
+    ]),
+  ), [news]);
 
   React.useEffect(() => {
     if (safePage !== page) setPage(safePage);
@@ -742,14 +749,17 @@ function DiscoveryPanel({
 
   React.useEffect(() => {
     setPage(0);
-  }, [activeType]);
+  }, [activeFeed]);
 
   const goPrevious = (): void => setPage((current) => Math.max(0, current - 1));
   const goNext = (): void => setPage((current) => Math.min(pageCount - 1, current + 1));
   const tabItems = [
     { label: '全部' as const, count: news.length },
-    { label: '新闻' as const, count: marketNewsCount },
-    { label: '公告' as const, count: announcementCount },
+    { label: '自选股新闻' as const, count: feedCounts.get('自选股新闻') ?? 0 },
+    { label: '重要公告' as const, count: feedCounts.get('重要公告') ?? 0 },
+    { label: 'A股要闻' as const, count: feedCounts.get('A股要闻') ?? 0 },
+    { label: '美股要闻' as const, count: feedCounts.get('美股要闻') ?? 0 },
+    { label: '港股要闻' as const, count: feedCounts.get('港股要闻') ?? 0 },
   ];
 
   return (
@@ -767,10 +777,10 @@ function DiscoveryPanel({
               key={tab.label}
               type="button"
               disabled={tab.count === 0}
-              onClick={() => setActiveType(tab.label)}
+              onClick={() => setActiveFeed(tab.label)}
               className={cn(
                 'inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-[12px] font-medium transition',
-                activeType === tab.label
+                activeFeed === tab.label
                   ? 'border-[#EA1F59]/30 bg-[#EA1F59]/10 text-[#EA1F59]'
                   : 'border-[#E1E3E8] bg-white text-[#667085] hover:border-[#C9CDD6] hover:text-[#121826]',
                 tab.count === 0 && 'cursor-not-allowed opacity-45',
@@ -779,7 +789,7 @@ function DiscoveryPanel({
               {tab.label}
               <span className={cn(
                 'tabular-nums',
-                activeType === tab.label ? 'text-[#EA1F59]/80' : 'text-[#8B92A1]',
+                activeFeed === tab.label ? 'text-[#EA1F59]/80' : 'text-[#8B92A1]',
               )}>
                 {tab.count}
               </span>
@@ -790,7 +800,7 @@ function DiscoveryPanel({
       {news.length === 0 ? (
         <EmptyState title="暂无真实股市新闻" body="公开新闻和公司公告暂未返回带发布时间与原文链接的内容。" />
       ) : filteredNews.length === 0 ? (
-        <EmptyState title={`暂无${activeType}`} body="当前分类没有可展示的真实内容，切换到全部可查看其他来源动态。" />
+        <EmptyState title={`暂无${activeFeed}`} body="当前栏目没有可展示的真实内容，切换到全部可查看其他来源动态。" />
       ) : null}
       {items.length > 0 ? (
         <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
@@ -3041,6 +3051,11 @@ function starStockInsight(stocks: StockSnapshot[]): InsightSheetState {
 
 function newsDisplayType(item: NewsRow): '新闻' | '公告' {
   return item.category === '公告' ? '公告' : '新闻';
+}
+
+function newsFeed(item: NewsRow): NonNullable<NewsRow['feed']> {
+  if (item.feed) return item.feed;
+  return newsDisplayType(item) === '公告' ? '重要公告' : '自选股新闻';
 }
 
 function newsTimeLabel(item: NewsRow): string {

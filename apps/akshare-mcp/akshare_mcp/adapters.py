@@ -42,7 +42,7 @@ import re
 import threading
 import time
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import requests
 
@@ -665,8 +665,8 @@ def _stock_news_image_url(value: object) -> str | None:
     return image_url
 
 
-def get_stock_news(symbol: str) -> tuple[list[dict[str, Any]], str]:
-    """Fetch source-backed stock news with a hard upstream timeout.
+def _get_eastmoney_news(keyword: str) -> list[dict[str, Any]]:
+    """Fetch source-backed Eastmoney news for one stock or market keyword.
 
     AkShare's wrapper does not set a network deadline and drops the search
     response's declared image field. Calling the public endpoint directly keeps
@@ -674,10 +674,12 @@ def get_stock_news(symbol: str) -> tuple[list[dict[str, Any]], str]:
     """
     response = _stock_news_http_get(
         _STOCK_NEWS_SEARCH_URL,
-        params=_stock_news_params(symbol),
+        params=_stock_news_params(keyword),
         headers={
             "accept": "*/*",
-            "referer": f"https://so.eastmoney.com/news/s?keyword={symbol}",
+            # curl_cffi requires header values to be Latin-1. Query params are
+            # UTF-8 encoded separately, but the referer must be ASCII too.
+            "referer": f"https://so.eastmoney.com/news/s?keyword={quote(keyword)}",
             "user-agent": "Mozilla/5.0",
         },
         timeout=STOCK_NEWS_TIMEOUT_SECONDS,
@@ -706,7 +708,7 @@ def get_stock_news(symbol: str) -> tuple[list[dict[str, Any]], str]:
         if not title or not published_at or not url:
             continue
         row = {
-            "关键词": symbol,
+            "关键词": keyword,
             "新闻标题": title,
             "新闻内容": _stock_news_text(source_row.get("content")),
             "发布时间": published_at,
@@ -717,7 +719,31 @@ def get_stock_news(symbol: str) -> tuple[list[dict[str, Any]], str]:
         if image_url:
             row["新闻图片"] = image_url
         rows.append(row)
-    return rows, "eastmoney:stock-news-search"
+    return rows
+
+
+def get_stock_news(symbol: str) -> tuple[list[dict[str, Any]], str]:
+    """Fetch source-backed Eastmoney news for an A-share stock code."""
+    return _get_eastmoney_news(symbol), "eastmoney:stock-news-search"
+
+
+_MARKET_NEWS_KEYWORDS = {
+    "cn": "A股",
+    "us": "美股",
+    "hk": "港股",
+}
+
+
+def get_market_news(market: str) -> tuple[list[dict[str, Any]], str]:
+    """Fetch source-backed news for the requested A-share, US, or HK market."""
+    normalized = str(market or "").strip().lower()
+    keyword = _MARKET_NEWS_KEYWORDS.get(normalized)
+    if not keyword:
+        raise AkShareUnavailable("不支持的市场新闻类型，仅支持 cn、us、hk")
+    rows = _get_eastmoney_news(keyword)
+    for row in rows:
+        row["市场"] = normalized
+    return rows, f"eastmoney:market-news-search({normalized})"
 
 
 # --- 龙虎榜 ----------------------------------------------------------

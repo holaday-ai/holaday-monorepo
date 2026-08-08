@@ -126,6 +126,9 @@ export class HttpAkshareClient implements AkshareClient {
   getStockNews(symbol: string) {
     return this.get<StockNewsRow>(`/stock-news/${encodeURIComponent(symbol)}`);
   }
+  getMarketNews(market: 'cn' | 'us' | 'hk') {
+    return this.get<StockNewsRow>(`/market-news/${encodeURIComponent(market)}`);
+  }
   getShareUnlock(symbol: string) {
     return this.get<UnlockRow>(`/unlock/${encodeURIComponent(symbol)}`);
   }

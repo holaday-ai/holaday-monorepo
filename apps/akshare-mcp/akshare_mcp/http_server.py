@@ -152,6 +152,7 @@ _intraday = _cached_adapter(adp.TTL_INTRADAY)(adp.get_intraday)
 _kline = _cached_adapter(adp.TTL_KLINE)(adp.get_kline)
 _announce = _cached_adapter(adp.TTL_ANNOUNCE)(adp.get_announcements)
 _stock_news = _cached_adapter(adp.TTL_STOCK_NEWS)(adp.get_stock_news)
+_market_news = _cached_adapter(adp.TTL_STOCK_NEWS)(adp.get_market_news)
 _lhb = _cached_adapter(adp.TTL_LHB)(adp.get_dragon_tiger)
 _north = _cached_adapter(adp.TTL_NORTHBOUND)(adp.get_northbound_flow)
 _index = _cached_adapter(adp.TTL_INDEX)(adp.get_index_quote)
@@ -198,6 +199,12 @@ def announcements(symbol: str, start_date: str = "", end_date: str = "") -> dict
 def stock_news(symbol: str) -> dict[str, Any]:
     """个股真实新闻（东方财富），仅返回带发布时间与原文链接的文章。"""
     return _safe(_stock_news, symbol)
+
+
+@app.get("/market-news/{market}")
+def market_news(market: str) -> dict[str, Any]:
+    """市场真实新闻。market: cn（A股）| us（美股）| hk（港股）。"""
+    return _safe(_market_news, market)
 
 
 @app.get("/unlock/{symbol}")

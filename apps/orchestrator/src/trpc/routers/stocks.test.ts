@@ -321,9 +321,9 @@ describe('stocks dashboard snapshot', () => {
 
     const discovery = buildSourceDiscovery(announcements, stockNews);
 
-    expect(discovery).toHaveLength(36);
+    expect(discovery).toHaveLength(39);
     expect(discovery.filter((item) => item.category === '新闻')).toHaveLength(24);
-    expect(discovery.filter((item) => item.category === '公告')).toHaveLength(12);
+    expect(discovery.filter((item) => item.category === '公告')).toHaveLength(15);
   });
 
   it('filters, sorts, and deduplicates persisted intraday points to A-share sessions', () => {
@@ -810,6 +810,93 @@ describe('stocks dashboard snapshot', () => {
         imageUrl: expect.stringMatching(/^\/stock-editorial-art\/[a-z-]+-\d+\.jpg$/),
       }),
     ]);
+  });
+
+  it('keeps prior market discovery feeds when only those source refreshes fail', () => {
+    const previous = {
+      updatedAt: '2026-08-08T03:00:00.000Z',
+      source: 'akshare' as const,
+      isFallbackWatchlist: false,
+      watchlistStocks: [],
+      marketIndices: [],
+      sectors: [],
+      starStocks: [],
+      temperature: null,
+      news: [
+        {
+          category: '新闻' as const,
+          feed: '自选股新闻' as const,
+          time: '08-08 10:00',
+          publishedAt: '2026-08-08T02:00:00.000Z',
+          title: '多伦科技：最新自选股新闻',
+          symbols: ['603528'],
+          source: '东方财富',
+          url: 'https://finance.eastmoney.com/a/202608083000000001.html',
+        },
+        {
+          category: '新闻' as const,
+          feed: '美股要闻' as const,
+          time: '08-08 09:00',
+          publishedAt: '2026-08-08T01:00:00.000Z',
+          title: '美股要闻：科技股盘前交易活跃',
+          symbols: [],
+          source: '东方财富',
+          url: 'https://finance.eastmoney.com/a/202608083000000002.html',
+        },
+        {
+          category: '新闻' as const,
+          feed: '港股要闻' as const,
+          time: '08-08 08:00',
+          publishedAt: '2026-08-08T00:00:00.000Z',
+          title: '港股要闻：恒生科技指数早盘走强',
+          symbols: [],
+          source: '东方财富',
+          url: 'https://finance.eastmoney.com/a/202608083000000003.html',
+        },
+      ],
+      leaders: [],
+      leaderboards: { gainers: [], losers: [], amount: [] },
+      freshness: { status: 'fresh' as const, cachedAt: '2026-08-08T03:00:00.000Z' },
+    };
+    const next = {
+      ...previous,
+      updatedAt: '2026-08-08T03:01:00.000Z',
+      news: [
+        {
+          category: '新闻' as const,
+          feed: '自选股新闻' as const,
+          time: '08-08 10:30',
+          publishedAt: '2026-08-08T02:30:00.000Z',
+          title: '多伦科技：刷新后的自选股新闻',
+          symbols: ['603528'],
+          source: '东方财富',
+          url: 'https://finance.eastmoney.com/a/202608083000000004.html',
+        },
+        {
+          category: '新闻' as const,
+          feed: 'A股要闻' as const,
+          time: '08-08 10:20',
+          publishedAt: '2026-08-08T02:20:00.000Z',
+          title: 'A股要闻：市场成交额温和放大',
+          symbols: [],
+          source: '东方财富',
+          url: 'https://finance.eastmoney.com/a/202608083000000005.html',
+        },
+      ],
+      freshness: { status: 'fresh' as const, cachedAt: '2026-08-08T03:01:00.000Z' },
+    };
+
+    const merged = __stocksDashboardTest.withPreservedSlowSignals(next, previous);
+
+    expect(merged.news.map((item) => item.feed)).toEqual([
+      '自选股新闻',
+      'A股要闻',
+      '美股要闻',
+      '港股要闻',
+    ]);
+    expect(merged.news.some((item) => item.title === '多伦科技：最新自选股新闻')).toBe(false);
+    expect(merged.freshness.status).toBe('stale');
+    expect(merged.freshness.message).toContain('股市新闻');
   });
 
   it('preserves the last real watchlist quotes when a refresh returns only unavailable stocks', () => {
@@ -1469,6 +1556,81 @@ describe('stocks dashboard snapshot', () => {
     expect(snapshot.freshness.message).toContain('指数、行业趋势、市场温度、榜单正在后台补齐');
     expect(snapshot.watchlistStocks[0]?.price).toBe('7.28');
     expect(requestedPaths).toContain('/stock-news/603528');
+  });
+
+  it('mixes ranking-selected market news into discovery without replacing watchlist news', async () => {
+    const requestedNewsSymbols: string[] = [];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/stock-rankings/gainers') {
+        return new Response(JSON.stringify(envelope([{ 代码: '600010', 名称: '包钢股份' }])));
+      }
+      if (url.pathname === '/stock-rankings/losers') {
+        return new Response(JSON.stringify(envelope([{ 代码: '600011', 名称: '华能国际' }])));
+      }
+      if (url.pathname === '/stock-rankings/amount') {
+        return new Response(JSON.stringify(envelope([{ 代码: '600012', 名称: '皖通高速' }])));
+      }
+      if (url.pathname.startsWith('/stock-news/')) {
+        const symbol = url.pathname.split('/').at(-1)!;
+        requestedNewsSymbols.push(symbol);
+        return new Response(JSON.stringify(envelope([{
+          新闻标题: `${symbol} 的真实市场动态`,
+          发布时间: '2026-08-08 10:00:00',
+          文章来源: '东方财富',
+          新闻链接: `https://finance.eastmoney.com/a/${symbol}3838244063.html`,
+        }])));
+      }
+      if (url.pathname === '/market-news/cn') {
+        return new Response(JSON.stringify(envelope([{
+          新闻标题: 'A股市场的真实要闻',
+          发布时间: '2026-08-08 10:05:00',
+          文章来源: '东方财富',
+          新闻链接: 'https://finance.eastmoney.com/a/202608083838244001.html',
+        }])));
+      }
+      if (url.pathname === '/market-news/us') {
+        return new Response(JSON.stringify(envelope([{
+          新闻标题: '美股市场的真实要闻',
+          发布时间: '2026-08-08 10:04:00',
+          文章来源: '东方财富',
+          新闻链接: 'https://finance.eastmoney.com/a/202608083838244002.html',
+        }])));
+      }
+      if (url.pathname === '/market-news/hk') {
+        return new Response(JSON.stringify(envelope([{
+          新闻标题: '港股市场的真实要闻',
+          发布时间: '2026-08-08 10:03:00',
+          文章来源: '东方财富',
+          新闻链接: 'https://finance.eastmoney.com/a/202608083838244003.html',
+        }])));
+      }
+      return new Response(JSON.stringify(envelope([])));
+    });
+
+    const snapshot = await __stocksDashboardTest.buildDashboardSnapshot({
+      logger: { warn: vi.fn() },
+      watchlistRows: [{ symbol: '603528', market: 'A', displayName: '多伦科技' }],
+      effectiveWatchlist: [{ symbol: '603528', market: 'A', displayName: '多伦科技' }],
+      now: new Date('2026-08-08T04:00:00.000Z'),
+      includeSlowSignals: true,
+    });
+
+    expect(requestedNewsSymbols).toEqual(expect.arrayContaining(['603528', '600010', '600011', '600012']));
+    expect(snapshot.news.map((item) => item.url)).toEqual(expect.arrayContaining([
+      'https://finance.eastmoney.com/a/202608083838244001.html',
+      'https://finance.eastmoney.com/a/202608083838244002.html',
+      'https://finance.eastmoney.com/a/202608083838244003.html',
+    ]));
+    expect(snapshot.news).toEqual(expect.arrayContaining([
+      expect.objectContaining({ symbols: ['603528'], feed: '自选股新闻' }),
+      expect.objectContaining({ symbols: ['600010'], feed: 'A股要闻' }),
+      expect.objectContaining({ symbols: ['600011'], feed: 'A股要闻' }),
+      expect.objectContaining({ symbols: ['600012'], feed: 'A股要闻' }),
+      expect.objectContaining({ feed: 'A股要闻', title: 'A股市场的真实要闻' }),
+      expect.objectContaining({ feed: '美股要闻', title: '美股市场的真实要闻' }),
+      expect.objectContaining({ feed: '港股要闻', title: '港股市场的真实要闻' }),
+    ]));
   });
 
   it('preserves market indices and leaderboards when a later refresh loses them', () => {

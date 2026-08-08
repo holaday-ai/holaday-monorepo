@@ -37,6 +37,14 @@ function alternateEditorialArtUrl(currentUrl: string, index: number): string {
   return currentUrl;
 }
 
+function unusedEditorialArtUrl(usedUrls: ReadonlySet<string>, index: number): string | undefined {
+  for (let offset = 0; offset < EDITORIAL_ART_URLS.length; offset += 1) {
+    const candidate = EDITORIAL_ART_URLS[(index + offset) % EDITORIAL_ART_URLS.length]!;
+    if (!usedUrls.has(candidate)) return candidate;
+  }
+  return undefined;
+}
+
 /**
  * The carousel intentionally reorders rows so a multi-stock watchlist is not
  * dominated by one symbol. Run this after that ordering to keep consecutive
@@ -46,16 +54,20 @@ function alternateEditorialArtUrl(currentUrl: string, index: number): string {
 export function diversifyDiscoveryEditorialArt<T extends DiscoveryMedia>(
   items: IndexedDiscoveryItem<T>[],
 ): IndexedDiscoveryItem<T>[] {
-  let previousImageUrl: string | undefined;
+  const usedEditorialUrls = new Set<string>();
   return items.map((entry) => {
     const { item } = entry;
     const imageUrl = item.imageUrl;
-    if (!imageUrl || previousImageUrl !== imageUrl || !isLocalEditorialArt(item)) {
-      previousImageUrl = imageUrl;
+    if (!imageUrl || !isLocalEditorialArt(item)) {
       return entry;
     }
-    const replacement = alternateEditorialArtUrl(imageUrl, entry.index);
-    previousImageUrl = replacement;
+    if (!usedEditorialUrls.has(imageUrl)) {
+      usedEditorialUrls.add(imageUrl);
+      return entry;
+    }
+    const replacement = unusedEditorialArtUrl(usedEditorialUrls, entry.index)
+      ?? alternateEditorialArtUrl(imageUrl, entry.index);
+    usedEditorialUrls.add(replacement);
     return {
       ...entry,
       item: { ...item, imageUrl: replacement },

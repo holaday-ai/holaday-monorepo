@@ -71,6 +71,7 @@ _intraday = cached(adp.TTL_INTRADAY)(adp.get_intraday)
 _kline = cached(adp.TTL_KLINE)(adp.get_kline)
 _announce = cached(adp.TTL_ANNOUNCE)(adp.get_announcements)
 _stock_news = cached(adp.TTL_STOCK_NEWS)(adp.get_stock_news)
+_market_news = cached(adp.TTL_STOCK_NEWS)(adp.get_market_news)
 _lhb = cached(adp.TTL_LHB)(adp.get_dragon_tiger)
 _north = cached(adp.TTL_NORTHBOUND)(adp.get_northbound_flow)
 _index = cached(adp.TTL_INDEX)(adp.get_index_quote)
@@ -122,6 +123,12 @@ def get_stock_announcements(
 def get_stock_news(symbol: str) -> dict[str, Any]:
     """个股真实新闻（东方财富）。只返回标题、发布时间、原文链接齐全的文章。"""
     return _safe(_stock_news, symbol)
+
+
+@mcp.tool()
+def get_market_news(market: str) -> dict[str, Any]:
+    """市场真实新闻。market: cn（A股）| us（美股）| hk（港股）。"""
+    return _safe(_market_news, market)
 
 
 @mcp.tool()

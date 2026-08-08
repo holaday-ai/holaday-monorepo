@@ -64,6 +64,8 @@ export interface AkshareClient {
   ): Promise<AkEnvelope<AnnouncementRow>>;
   /** get_stock_news(symbol) — 东方财富个股新闻，带来源、发布时间与原文链接。 */
   getStockNews?(symbol: string): Promise<AkEnvelope<StockNewsRow>>;
+  /** get_market_news(market) — 东方财富市场新闻，market: cn | us | hk。 */
+  getMarketNews?(market: 'cn' | 'us' | 'hk'): Promise<AkEnvelope<StockNewsRow>>;
   /** get_share_unlock(symbol) — 个股限售解禁（G2）。 */
   getShareUnlock(symbol: string): Promise<AkEnvelope<UnlockRow>>;
   /**

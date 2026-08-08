@@ -2,6 +2,7 @@
 
 import datetime
 import json
+from urllib.parse import quote
 
 import pytest
 
@@ -175,6 +176,78 @@ def test_stock_news_keeps_only_linked_articles_with_source_timestamps(monkeypatc
             "新闻图片": "https://source.example/cover.jpg",
         }
     ]
+
+
+def test_market_news_uses_a_market_specific_keyword_and_keeps_source_rows(monkeypatch):
+    seen = []
+
+    def fetch(keyword):
+        seen.append(keyword)
+        return [
+            {
+                "关键词": keyword,
+                "新闻标题": f"{keyword} 的真实动态",
+                "发布时间": "2026-08-08 10:00:00",
+                "文章来源": "真实来源",
+                "新闻链接": "https://finance.eastmoney.com/a/202608083838244001.html",
+            }
+        ]
+
+    monkeypatch.setattr(adp, "_get_eastmoney_news", fetch)
+
+    rows, source = adp.get_market_news("us")
+
+    assert seen == ["美股"]
+    assert source == "eastmoney:market-news-search(us)"
+    assert rows == [
+        {
+            "关键词": "美股",
+            "新闻标题": "美股 的真实动态",
+            "发布时间": "2026-08-08 10:00:00",
+            "文章来源": "真实来源",
+            "新闻链接": "https://finance.eastmoney.com/a/202608083838244001.html",
+            "市场": "us",
+        }
+    ]
+
+
+def test_market_news_uses_an_ascii_encoded_referer_for_chinese_keywords(monkeypatch):
+    seen_headers = []
+
+    class _Response:
+        text = "callback(" + json.dumps(
+            {
+                "result": {
+                    "cmsArticleWebOld": [
+                        {
+                            "title": "美股市场动态",
+                            "date": "2026-08-08 10:00:00",
+                            "mediaName": "真实来源",
+                            "url": "https://finance.eastmoney.com/a/202608083838244002.html",
+                        }
+                    ]
+                }
+            },
+            ensure_ascii=False,
+        ) + ")"
+
+    def fetch(url, *, params, headers, timeout):
+        seen_headers.append(headers)
+        return _Response()
+
+    monkeypatch.setattr(adp, "_stock_news_http_get", fetch)
+
+    rows, source = adp.get_market_news("us")
+
+    assert source == "eastmoney:market-news-search(us)"
+    assert rows[0]["关键词"] == "美股"
+    assert seen_headers[0]["referer"].isascii()
+    assert seen_headers[0]["referer"].endswith(f"keyword={quote('美股')}")
+
+
+def test_market_news_rejects_unknown_market():
+    with pytest.raises(adp.AkShareUnavailable, match="cn、us、hk"):
+        adp.get_market_news("jp")
 
 
 @pytest.mark.parametrize(
