@@ -561,6 +561,7 @@ describe('runGenerateTask — lightweight direct-answer path', () => {
     expect(request?.tool_choice).toEqual({ type: 'any' });
     expect(request?.system?.[0]?.text).toContain('必须先调用 web_search');
     expect(request?.system?.[0]?.text).toContain('基金全称或代码');
+    expect(request?.system?.[0]?.text).toContain('不得把泛市场新闻、相似名称或相关机构动态写成目标对象的近况');
   });
 
   it('keeps web-search citations as clickable verification links', async () => {
