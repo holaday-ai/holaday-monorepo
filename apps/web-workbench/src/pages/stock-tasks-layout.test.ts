@@ -89,4 +89,11 @@ describe('stock tasks layout', () => {
     expect(source).toContain('createStockTask(trimmed)');
     expect(source).not.toContain('function toStockIntent');
   });
+
+  it('keeps the stale-data boundary in compact header metadata instead of a duplicate page-wide alert', () => {
+    const source = readFileSync(new URL('./StockTasksPage.tsx', import.meta.url), 'utf8');
+
+    expect(source).toContain('title={dashboardTrust.message ?? undefined}');
+    expect(source).not.toContain("dashboardTrust.tone !== 'fresh' && dashboardTrust.message");
+  });
 });

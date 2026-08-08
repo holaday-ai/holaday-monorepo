@@ -554,6 +554,7 @@ export function StockTasksPage(): JSX.Element {
               股市任务
             </h1>
             <span
+              title={dashboardTrust.message ?? undefined}
               className={cn(
                 'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] font-medium',
                 dashboardTrust.tone === 'fresh'
@@ -623,11 +624,7 @@ export function StockTasksPage(): JSX.Element {
             部分股票数据暂时无法加载：{loadError}
           </div>
         ) : null}
-        {dashboardTrust.tone !== 'fresh' && dashboardTrust.message ? (
-          <div className="rounded-[8px] border border-[#F4D7A1] bg-[#FFF9EC] px-4 py-3 text-[13px] text-[#7A4B00]">
-            {refreshingDashboard ? '刷新中：' : null}{dashboardTrust.message}
-          </div>
-        ) : refreshingDashboard && dashboard ? (
+        {refreshingDashboard && dashboard ? (
           <div className="rounded-[8px] border border-[#E1E3E8] bg-white px-4 py-3 text-[13px] text-[#4F5868]">
             正在后台刷新行情，当前看板保持最近一次真实数据。
           </div>
