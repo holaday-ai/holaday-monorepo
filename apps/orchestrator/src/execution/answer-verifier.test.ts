@@ -5,6 +5,10 @@ import { DOUYIN_REVIEW_WORKFLOW } from './expert-workflow-douyin.js';
 import type { ExecutionContract } from './execution-contract.js';
 import { buildContract } from './execution-contract.js';
 import { EvidenceLedger } from './evidence-ledger.js';
+import {
+  appendSearchSourceReferences,
+  collectSearchSourceReferences,
+} from './search-source-references.js';
 
 function ledgerWith(
   taskId: string,
@@ -516,6 +520,42 @@ describe('verifyDeterministic — criterion: url_match', () => {
 });
 
 describe('verifyDeterministic — criterion: url_count', () => {
+  it('accepts provider-returned search links after they are recorded as observed evidence', () => {
+    const taskId = 'tsk_provider_search_sources';
+    const contract = buildContract({
+      taskId,
+      intent: 'Leopold 的基金最近发生了什么事？请提供每条事实对应的可点击来源链接。',
+      executionMode: 'browser',
+    });
+    const sources = collectSearchSourceReferences([
+      { title: 'CNBC fund update', url: 'https://www.cnbc.com/fund-update' },
+      { title: 'Yahoo Finance', url: 'https://finance.yahoo.com/fund' },
+    ]);
+    const ledger = ledgerWith(
+      taskId,
+      ...sources.map((source) => ({
+        fact: `web_search_url=${source.url}`,
+        sourceType: 'tool_result' as const,
+        sourceDetail: 'supercar web_search provider result',
+        confidence: 'observed' as const,
+      })),
+    );
+    const answerText = appendSearchSourceReferences(
+      '以下是已整理的公开动态；请以各来源正文为准。',
+      sources,
+    );
+
+    const result = verifyDeterministic({ contract, ledger, answerText });
+
+    expect(result.passed).toBe(true);
+    expect(result.checks.find((check) => check.criterionType === 'url_count')?.passed).toBe(
+      true,
+    );
+    expect(
+      result.checks.find((check) => check.criterionId === 'generic.url_grounding')?.passed,
+    ).toBe(true);
+  });
+
   it('accepts answer-level grounded URLs when parsed table items have no URL column', () => {
     const contract = buildContract({
       taskId: 'tsk_url_count_prose_link',

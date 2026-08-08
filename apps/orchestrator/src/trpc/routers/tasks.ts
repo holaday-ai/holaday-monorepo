@@ -185,7 +185,10 @@ import {
 } from '../../execution/expert-workflow-registry.js';
 import { getFeatureFlags as getExecutionFeatureFlags } from '../../execution/feature-flags.js';
 import { fencedFileIds, isDocumentOutput } from '../../execution/file-artifact-consistency.js';
-import { appendSearchSourceReferences } from '../../execution/search-source-references.js';
+import {
+  appendSearchSourceReferences,
+  collectSearchSourceReferences,
+} from '../../execution/search-source-references.js';
 import { MAX_DOWNLOAD_BYTES } from '../../files/download-manager.js';
 import { FileService, taskInternalIdFor } from '../../files/file-service.js';
 import { parseFileForPrompt } from '../../files/parsers.js';
@@ -5773,9 +5776,23 @@ export const tasksRouter = router({
             // persistSupercarOutcome writes the row, so the user
             // sees the corrected text on first render.
             if (outcome.status === 'completed' && outcome.summary) {
+              const terminalSearchSources = collectSearchSourceReferences(
+                observedWebSearchSources,
+              );
+              // The final answer cites provider-returned links, so record the
+              // same observed URLs before verification. Otherwise autoFix
+              // correctly treats the links as ungrounded and removes them.
+              for (const source of terminalSearchSources) {
+                recordEvidence(taskId, {
+                  fact: `web_search_url=${source.url}`,
+                  sourceType: 'tool_result',
+                  sourceDetail: 'supercar web_search provider result',
+                  confidence: 'observed',
+                });
+              }
               const answerSummary = appendSearchSourceReferences(
                 outcome.summary,
-                observedWebSearchSources,
+                terminalSearchSources,
               );
               outcome = {
                 ...outcome,

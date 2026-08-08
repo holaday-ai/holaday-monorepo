@@ -33,6 +33,27 @@ function urlsAlreadyIn(text: string): Set<string> {
 }
 
 /**
+ * Canonicalise the small source set that can be displayed and written to the
+ * evidence ledger. These are provider-returned observations, never model
+ * guesses, so the exact same list must feed both paths.
+ */
+export function collectSearchSourceReferences(
+  sources: ReadonlyArray<SearchSourceReference>,
+): SearchSourceReference[] {
+  const references: SearchSourceReference[] = [];
+  const seen = new Set<string>();
+  for (const source of sources) {
+    const url = normaliseHttpUrl(source.url);
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    references.push({ title: sourceTitle(source.title, url), url });
+    if (references.length === MAX_SOURCE_REFERENCES) break;
+  }
+
+  return references;
+}
+
+/**
  * Append a compact source list from the web-search tool. The caller must only
  * pass sources received from that tool, never URLs inferred from model prose.
  */
@@ -43,14 +64,7 @@ export function appendSearchSourceReferences(
   if (!summary || sources.length === 0) return summary;
 
   const seen = urlsAlreadyIn(summary);
-  const references: SearchSourceReference[] = [];
-  for (const source of sources) {
-    const url = normaliseHttpUrl(source.url);
-    if (!url || seen.has(url)) continue;
-    seen.add(url);
-    references.push({ title: sourceTitle(source.title, url), url });
-    if (references.length === MAX_SOURCE_REFERENCES) break;
-  }
+  const references = collectSearchSourceReferences(sources).filter((source) => !seen.has(source.url));
 
   if (references.length === 0) return summary;
   return [
@@ -58,6 +72,6 @@ export function appendSearchSourceReferences(
     '',
     '### 检索来源',
     '以下链接由联网检索返回，供核验；结论请以来源正文为准。',
-    ...references.map((source) => `- [${source.title}](<${source.url}>)`),
+    ...references.map((source) => `- [${source.title}](${source.url})`),
   ].join('\n');
 }
