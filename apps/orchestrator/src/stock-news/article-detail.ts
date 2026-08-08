@@ -90,11 +90,19 @@ export function validateArticleSourceUrl(rawUrl: string): URL {
   } catch {
     throw new Error('新闻原文链接格式无效。');
   }
-  if (url.protocol !== 'https:') {
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     throw new Error('新闻正文仅允许通过 https 读取。');
   }
   if (url.username || url.password) {
     throw new Error('新闻原文链接不能包含账号信息。');
+  }
+  // Some trusted feeds still publish a legacy HTTP canonical URL. Normalize it
+  // before requesting anything, so this reader never makes an HTTP request.
+  if (url.protocol === 'http:') {
+    if (!isAllowedSourceHost(url.hostname)) {
+      throw new Error('新闻正文仅允许通过 https 读取。');
+    }
+    url.protocol = 'https:';
   }
   if (!isAllowedSourceHost(url.hostname)) {
     throw new Error('当前仅支持已验证公开来源的正文读取。');

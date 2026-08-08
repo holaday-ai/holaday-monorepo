@@ -17,6 +17,13 @@ describe('stock news article detail', () => {
     expect(() => validateArticleSourceUrl('https://attacker.example/article')).toThrow(/已验证公开来源/);
   });
 
+  it('upgrades a legacy HTTP URL from an allowed source before it is fetched', () => {
+    expect(validateArticleSourceUrl('http://finance.eastmoney.com/a/202608083835838437.html')).toMatchObject({
+      protocol: 'https:',
+      hostname: 'finance.eastmoney.com',
+    });
+  });
+
   it('uses structured article bodies when a source does not expose paragraph tags', () => {
     expect(htmlArticleParagraphs(`
       <html><head><script type="application/ld+json">
