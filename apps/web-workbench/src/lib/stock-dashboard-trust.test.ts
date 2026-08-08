@@ -35,6 +35,24 @@ describe('stock dashboard trust state', () => {
     });
   });
 
+  it('labels a latest valid snapshot as refreshing instead of expired while AkShare refreshes it', () => {
+    expect(
+      dashboardTrust.stockDashboardTrustState({
+        freshnessStatus: 'stale',
+        freshnessMessage: '正在后台刷新行情，当前展示最近一次真实数据。',
+        observedTradeDate: '2026-08-07',
+        refreshedAt: '2026-08-08T17:11:00.000Z',
+        now: new Date('2026-08-08T17:12:00.000Z'),
+      }),
+    ).toMatchObject({
+      tone: 'refreshing',
+      statusLabel: '行情刷新中',
+      canGenerateBriefing: false,
+      dataDateLabel: '数据日期 08/07',
+      message: '正在后台刷新行情，当前展示最近一次真实数据。',
+    });
+  });
+
   it('labels preserved historical quotes as expired and blocks report generation', () => {
     expect(
       dashboardTrust.stockDashboardTrustState({

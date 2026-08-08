@@ -2,13 +2,14 @@ export type StockDashboardFreshnessStatus = 'fresh' | 'partial' | 'stale';
 
 export interface StockDashboardTrustInput {
   freshnessStatus?: StockDashboardFreshnessStatus;
+  freshnessMessage?: string | null;
   observedTradeDate?: string | null;
   refreshedAt?: string | null;
   now?: Date;
 }
 
 export interface StockDashboardTrustState {
-  tone: 'fresh' | 'stale' | 'unverified';
+  tone: 'fresh' | 'refreshing' | 'stale' | 'unverified';
   statusLabel: string;
   canGenerateBriefing: boolean;
   dataDateLabel: string;
@@ -68,6 +69,10 @@ function requiresCurrentTradeDate(now: Date): boolean {
   return weekday !== 'Sat' && weekday !== 'Sun' && minuteOfDay >= 9 * 60 + 32;
 }
 
+function isBackgroundRefresh(message?: string | null): boolean {
+  return /(?:正在后台刷新行情|行情接口正在刷新|行情接口暂未返回)/.test(message ?? '');
+}
+
 export function stockDashboardTrustState(input: StockDashboardTrustInput): StockDashboardTrustState {
   const observedLabel = formatObservedDate(input.observedTradeDate);
   const refreshLabel = formatRefreshTime(input.refreshedAt);
@@ -96,6 +101,17 @@ export function stockDashboardTrustState(input: StockDashboardTrustInput): Stock
       dataDateLabel: `数据日期 ${observedLabel}`,
       refreshLabel,
       message: null,
+    };
+  }
+
+  if (input.freshnessStatus === 'stale' && dateIsCurrentEnough && isBackgroundRefresh(input.freshnessMessage)) {
+    return {
+      tone: 'refreshing',
+      statusLabel: '行情刷新中',
+      canGenerateBriefing: false,
+      dataDateLabel: `数据日期 ${observedLabel}`,
+      refreshLabel,
+      message: input.freshnessMessage ?? '正在后台刷新行情，当前展示最近一次真实数据。',
     };
   }
 

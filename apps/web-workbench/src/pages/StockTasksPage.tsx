@@ -310,10 +310,11 @@ export function StockTasksPage(): JSX.Element {
     () =>
       stockDashboardTrustState({
         freshnessStatus: dashboardFreshness?.status,
+        freshnessMessage: dashboardFreshness?.message,
         observedTradeDate: dashboard?.observedTradeDate,
         refreshedAt: dashboard?.updatedAt,
       }),
-    [dashboard?.observedTradeDate, dashboard?.updatedAt, dashboardFreshness?.status],
+    [dashboard?.observedTradeDate, dashboard?.updatedAt, dashboardFreshness?.message, dashboardFreshness?.status],
   );
   const briefingUnavailable = sampleWatchlist || !dashboardTrust.canGenerateBriefing;
   const briefingUnavailableTitle = sampleWatchlist
@@ -559,6 +560,8 @@ export function StockTasksPage(): JSX.Element {
                 'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] font-medium',
                 dashboardTrust.tone === 'fresh'
                   ? 'border-[#D9F2E7] bg-[#F2FCF8] text-[#08764A]'
+                  : dashboardTrust.tone === 'refreshing'
+                    ? 'border-[#D8EAFE] bg-[#F5FAFF] text-[#1769AA]'
                   : dashboardTrust.tone === 'stale'
                     ? 'border-[#F4D7A1] bg-[#FFF9EC] text-[#9A5B00]'
                     : 'border-[#E1E3E8] bg-[#F7F8FA] text-[#667085]',
@@ -569,6 +572,8 @@ export function StockTasksPage(): JSX.Element {
                   'h-1.5 w-1.5 rounded-full',
                   dashboardTrust.tone === 'fresh'
                     ? 'bg-[#10A66E]'
+                    : dashboardTrust.tone === 'refreshing'
+                      ? 'bg-[#3297E8]'
                     : dashboardTrust.tone === 'stale'
                       ? 'bg-[#D98E04]'
                       : 'bg-[#98A2B3]',
