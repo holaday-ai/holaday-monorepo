@@ -8,6 +8,12 @@ describe('stock discovery layout', () => {
     expect(source).toContain("{loading ? '—' : count}");
   });
 
+  it('waits for the initial source snapshot before prefetching another discovery page', () => {
+    const source = readFileSync(new URL('./StockDiscoveryPage.tsx', import.meta.url), 'utf8');
+
+    expect(source).toContain('!loading && prioritizedNews.length > 0 && displayedNews.length >= prioritizedNews.length');
+  });
+
   it('uses the active feed collection for modal previous and next navigation', () => {
     const source = readFileSync(new URL('./StockDiscoveryPage.tsx', import.meta.url), 'utf8');
 
