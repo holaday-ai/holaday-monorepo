@@ -212,6 +212,7 @@ export function StockDiscoveryPage(): JSX.Element {
       pageCount: Math.max(1, Math.ceil(prioritizedNews.length / INITIAL_VISIBLE_COUNT)),
       hasMore: hasMoreForActiveFeed,
       isLoading: loadingMore,
+      hasExhaustedLoadedItems: displayedNews.length >= prioritizedNews.length,
     })) return;
     void loadMoreSourceRows();
   }, [displayedNews.length, hasMoreForActiveFeed, loadMoreSourceRows, loadingMore, prioritizedNews.length]);

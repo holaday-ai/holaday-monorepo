@@ -172,8 +172,10 @@ export function shouldPrefetchDiscoveryPage(input: {
   pageCount: number;
   hasMore: boolean;
   isLoading: boolean;
+  /** Keep the initial source cap intact until the reader has reached it. */
+  hasExhaustedLoadedItems?: boolean;
 }): boolean {
-  if (!input.hasMore || input.isLoading) return false;
+  if (!input.hasMore || input.isLoading || input.hasExhaustedLoadedItems === false) return false;
   return input.currentPage >= Math.max(0, input.pageCount - 3);
 }
 

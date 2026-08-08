@@ -373,6 +373,16 @@ describe('stock discovery presentation', () => {
     expect(shouldPrefetchDiscoveryPage({ currentPage: 4, pageCount: 7, hasMore: true, isLoading: true })).toBe(false);
   });
 
+  it('does not prefetch a source page before the reader reaches the end of the loaded items', () => {
+    expect(shouldPrefetchDiscoveryPage({
+      currentPage: 0,
+      pageCount: 3,
+      hasMore: true,
+      isLoading: false,
+      hasExhaustedLoadedItems: false,
+    })).toBe(false);
+  });
+
   it('keeps long discovery pagination compact around the current page', () => {
     expect(discoveryPageIndexes(5, 2)).toEqual([0, 1, 2, 3, 4]);
     expect(discoveryPageIndexes(16, 8)).toEqual([0, 7, 8, 9, 15]);
