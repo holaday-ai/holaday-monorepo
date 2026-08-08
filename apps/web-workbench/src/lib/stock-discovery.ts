@@ -9,6 +9,15 @@ type DiscoveryMedia = {
   editorialArtOptions?: readonly string[];
 };
 
+type EditorialArtDiversificationOptions = {
+  /**
+   * Visible cards should never repeat a static artwork merely to fill a media
+   * slot. When a topical pool is exhausted, the card falls back to its
+   * title-first treatment instead. Older, off-screen items may reuse artwork.
+   */
+  uniqueItemLimit?: number;
+};
+
 function isLocalEditorialArt(item: DiscoveryMedia): item is DiscoveryMedia & { imageUrl: string } {
   return item.imageKind === 'editorial-art' && Boolean(item.imageUrl?.startsWith('/stock-editorial-art/'));
 }
@@ -24,6 +33,7 @@ function isLocalEditorialArt(item: DiscoveryMedia): item is DiscoveryMedia & { i
 export function diversifyDiscoveryEditorialArt<T extends DiscoveryMedia>(
   items: IndexedDiscoveryItem<T>[],
   failedSourceCoverUrls: ReadonlySet<string> = new Set(),
+  options: EditorialArtDiversificationOptions = {},
 ): IndexedDiscoveryItem<T>[] {
   const usedEditorialUrlsByPool = new Map<string, Set<string>>();
   const usedAcrossFeed = new Set<string>();
@@ -33,7 +43,7 @@ export function diversifyDiscoveryEditorialArt<T extends DiscoveryMedia>(
     if (item.imageKind !== 'source-cover' || !item.imageUrl) continue;
     sourceCoverCounts.set(item.imageUrl, (sourceCoverCounts.get(item.imageUrl) ?? 0) + 1);
   }
-  return items.map((entry) => {
+  return items.map((entry, position) => {
     const { item } = entry;
     const imageUrl = item.imageUrl;
     if (!imageUrl) {
@@ -42,6 +52,11 @@ export function diversifyDiscoveryEditorialArt<T extends DiscoveryMedia>(
     const candidates = item.editorialArtOptions?.filter((candidate, index, all) => all.indexOf(candidate) === index)
       .filter((candidate) => candidate.startsWith('/stock-editorial-art/'))
       ?? [];
+    const requiresUniqueArtwork = position < (options.uniqueItemLimit ?? 0);
+    const titleFirstFallback = (): IndexedDiscoveryItem<T> => ({
+      ...entry,
+      item: { ...item, imageUrl: undefined, imageKind: undefined },
+    });
 
     // Publishers occasionally return one generic image for otherwise distinct
     // stories. In that case every affected card uses its own topical fallback
@@ -61,7 +76,9 @@ export function diversifyDiscoveryEditorialArt<T extends DiscoveryMedia>(
       ) ?? candidates.find((candidate) =>
         !usedEditorialUrls.has(candidate) && !recentEditorialUrls.includes(candidate),
       ) ?? candidates.find((candidate) => !usedEditorialUrls.has(candidate)) ?? candidates[0];
-      if (!replacement) return entry;
+      if (!replacement || (requiresUniqueArtwork && usedAcrossFeed.has(replacement))) {
+        return titleFirstFallback();
+      }
       usedEditorialUrls.add(replacement);
       usedAcrossFeed.add(replacement);
       recentEditorialUrls.push(replacement);
@@ -86,6 +103,10 @@ export function diversifyDiscoveryEditorialArt<T extends DiscoveryMedia>(
     ) ?? [imageUrl, ...effectiveCandidates].find((candidate) =>
       !usedEditorialUrls.has(candidate) && !recentEditorialUrls.includes(candidate),
     ) ?? [imageUrl, ...effectiveCandidates].find((candidate) => !usedEditorialUrls.has(candidate)) ?? imageUrl;
+
+    if (requiresUniqueArtwork && usedAcrossFeed.has(replacement)) {
+      return titleFirstFallback();
+    }
 
     usedEditorialUrls.add(replacement);
     usedAcrossFeed.add(replacement);

@@ -101,22 +101,27 @@ export function StockDiscoveryPage(): JSX.Element {
     () => news.map((item, index) => ({ item, index })),
     [news],
   );
-  const filteredNews = React.useMemo(
-    () => diversifyDiscoveryEditorialArt(
-      diversifyDiscoveryItems(
-        indexedNews.filter(({ item }) => activeFeed === '全部' || newsFeed(item) === activeFeed),
-        (item) => item.symbols[0],
-      ),
-      failedSourceCoverUrls,
+  const stockDiversifiedNews = React.useMemo(
+    () => diversifyDiscoveryItems(
+      indexedNews.filter(({ item }) => activeFeed === '全部' || newsFeed(item) === activeFeed),
+      (item) => item.symbols[0],
     ),
-    [activeFeed, failedSourceCoverUrls, indexedNews],
+    [activeFeed, indexedNews],
   );
-  const prioritizedNews = React.useMemo(
-    () => [...filteredNews].sort((left, right) => {
+  const readingPrioritizedNews = React.useMemo(
+    () => [...stockDiversifiedNews].sort((left, right) => {
       const priorityDifference = discoveryReadingPriority(right.item) - discoveryReadingPriority(left.item);
       return priorityDifference || left.index - right.index;
     }),
-    [filteredNews],
+    [stockDiversifiedNews],
+  );
+  const prioritizedNews = React.useMemo(
+    () => diversifyDiscoveryEditorialArt(
+      readingPrioritizedNews,
+      failedSourceCoverUrls,
+      { uniqueItemLimit: visibleCount },
+    ),
+    [failedSourceCoverUrls, readingPrioritizedNews, visibleCount],
   );
   const filteredRows = React.useMemo(
     () => prioritizedNews.map(({ item }) => item),

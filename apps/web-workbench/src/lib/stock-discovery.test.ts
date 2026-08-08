@@ -325,6 +325,41 @@ describe('stock discovery presentation', () => {
     expect(diversifyDiscoveryEditorialArt(items).map(({ item }) => item.imageUrl)).toEqual(options);
   });
 
+  it('uses a title-first card instead of repeating editorial art in the visible grid', () => {
+    const items = [
+      {
+        item: {
+          imageUrl: '/stock-editorial-art/technology-1.jpg',
+          imageKind: 'editorial-art' as const,
+          editorialArtOptions: ['/stock-editorial-art/technology-1.jpg'],
+        },
+        index: 0,
+      },
+      {
+        item: {
+          imageUrl: '/stock-editorial-art/energy-1.jpg',
+          imageKind: 'editorial-art' as const,
+          editorialArtOptions: ['/stock-editorial-art/energy-1.jpg'],
+        },
+        index: 1,
+      },
+      {
+        item: {
+          imageUrl: '/stock-editorial-art/technology-1.jpg',
+          imageKind: 'editorial-art' as const,
+          editorialArtOptions: ['/stock-editorial-art/technology-1.jpg'],
+        },
+        index: 2,
+      },
+    ];
+
+    expect(diversifyDiscoveryEditorialArt(items, new Set(), { uniqueItemLimit: 3 }).map(({ item }) => item.imageUrl)).toEqual([
+      '/stock-editorial-art/technology-1.jpg',
+      '/stock-editorial-art/energy-1.jpg',
+      undefined,
+    ]);
+  });
+
   it('labels a date-only announcement as a disclosure date without inventing a time', () => {
     expect(discoveryTimeLabel('公告', '08-07')).toBe('08-07 · 披露日');
     expect(discoveryTimeLabel('公告', '08-07 09:30')).toBe('08-07 09:30');
