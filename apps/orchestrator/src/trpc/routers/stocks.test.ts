@@ -1375,7 +1375,7 @@ describe('stocks dashboard snapshot', () => {
       sparkLabels: previousStock.sparkLabels,
       sparkKind: 'intraday',
     });
-    expect(snapshot.freshness.status).toBe('stale');
+    expect(snapshot.freshness.status).toBe('refreshing');
     expect(snapshot.freshness.message).toContain('最近一次真实数据');
   });
 

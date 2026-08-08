@@ -38,7 +38,7 @@ describe('stock dashboard trust state', () => {
   it('labels a latest valid snapshot as refreshing instead of expired while AkShare refreshes it', () => {
     expect(
       dashboardTrust.stockDashboardTrustState({
-        freshnessStatus: 'stale',
+        freshnessStatus: 'refreshing',
         freshnessMessage: '正在后台刷新行情，当前展示最近一次真实数据。',
         observedTradeDate: '2026-08-07',
         refreshedAt: '2026-08-08T17:11:00.000Z',

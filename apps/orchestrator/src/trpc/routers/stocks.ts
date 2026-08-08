@@ -112,7 +112,7 @@ interface LeaderboardsSnapshot {
 }
 
 interface DashboardFreshness {
-  status: 'fresh' | 'stale' | 'partial';
+  status: 'fresh' | 'refreshing' | 'stale' | 'partial';
   cachedAt: string;
   message?: string;
 }
@@ -279,7 +279,7 @@ async function loadPersistedDashboardSnapshot(args: {
       ))
       .limit(1);
     if (!row || !isDashboardSnapshot(row.snapshotJson)) return undefined;
-    return markStale(
+    return markRefreshing(
       dashboardWithObservedIntraday(row.snapshotJson, new Date()),
       '行情接口正在刷新，当前展示最近一次真实数据。',
     );
@@ -329,12 +329,12 @@ function withFreshness(
   return { ...snapshot, freshness };
 }
 
-function markStale(snapshot: DashboardSnapshot, message: string): DashboardSnapshot {
+function markRefreshing(snapshot: DashboardSnapshot, message: string): DashboardSnapshot {
   return {
     ...snapshot,
     freshness: {
       ...snapshot.freshness,
-      status: 'stale',
+      status: 'refreshing',
       message,
     },
   };
@@ -1477,14 +1477,14 @@ async function resolveDashboardSnapshot(args: {
     !shouldRefreshMissingIntraday
   ) {
     refreshPromise.catch(() => undefined);
-    return markStale(observedCached, '正在后台刷新行情，当前展示最近一次真实数据。');
+    return markRefreshing(observedCached, '正在后台刷新行情，当前展示最近一次真实数据。');
   }
 
   try {
     return await withTimeout(refreshPromise, DASHBOARD_FIRST_PAINT_BUDGET_MS);
   } catch {
     if (observedCached && cachedHasDisplayableData) {
-      return markStale(observedCached, '行情接口暂未返回，当前展示最近一次真实数据。');
+      return markRefreshing(observedCached, '行情接口暂未返回，当前展示最近一次真实数据。');
     }
     return buildPartialDashboardSnapshot(args.watchlistRows, args.effectiveWatchlist);
   }

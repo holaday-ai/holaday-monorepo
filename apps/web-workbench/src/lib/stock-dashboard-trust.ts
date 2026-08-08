@@ -1,4 +1,4 @@
-export type StockDashboardFreshnessStatus = 'fresh' | 'partial' | 'stale';
+export type StockDashboardFreshnessStatus = 'fresh' | 'partial' | 'refreshing' | 'stale';
 
 export interface StockDashboardTrustInput {
   freshnessStatus?: StockDashboardFreshnessStatus;
@@ -104,7 +104,12 @@ export function stockDashboardTrustState(input: StockDashboardTrustInput): Stock
     };
   }
 
-  if (input.freshnessStatus === 'stale' && dateIsCurrentEnough && isBackgroundRefresh(input.freshnessMessage)) {
+  if (
+    dateIsCurrentEnough &&
+    (input.freshnessStatus === 'refreshing' || (
+      input.freshnessStatus === 'stale' && isBackgroundRefresh(input.freshnessMessage)
+    ))
+  ) {
     return {
       tone: 'refreshing',
       statusLabel: '行情刷新中',
