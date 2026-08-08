@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  htmlArticleParagraphs,
   resolveNewsDetail,
   validateArticleSourceUrl,
 } from './article-detail.js';
@@ -9,6 +10,22 @@ describe('stock news article detail', () => {
     expect(() => validateArticleSourceUrl('http://127.0.0.1/private')).toThrow(/https/i);
     expect(() => validateArticleSourceUrl('https://example.com/article')).toThrow(/已验证公开来源/);
     expect(() => validateArticleSourceUrl('file:///tmp/article')).toThrow(/https/i);
+  });
+
+  it('accepts trusted feed sources without allowing arbitrary public URLs', () => {
+    expect(validateArticleSourceUrl('https://www.cls.cn/detail/123')).toMatchObject({ hostname: 'www.cls.cn' });
+    expect(() => validateArticleSourceUrl('https://attacker.example/article')).toThrow(/已验证公开来源/);
+  });
+
+  it('uses structured article bodies when a source does not expose paragraph tags', () => {
+    expect(htmlArticleParagraphs(`
+      <html><head><script type="application/ld+json">
+        {"@context":"https://schema.org","@type":"NewsArticle","articleBody":"第一段来自公开来源的结构化正文，足以作为站内阅读内容，而不是模型补写。\\n\\n第二段继续说明事件的背景和公开事实，用户可以在当前弹窗内阅读。"}
+      </script></head><body><div>页面壳</div></body></html>
+    `)).toEqual([
+      '第一段来自公开来源的结构化正文，足以作为站内阅读内容，而不是模型补写。',
+      '第二段继续说明事件的背景和公开事实，用户可以在当前弹窗内阅读。',
+    ]);
   });
 
   it('uses the upstream source summary when a supported source body cannot be read', async () => {

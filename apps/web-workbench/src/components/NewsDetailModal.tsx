@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, ExternalLink, FileText, Loader2, X } from 'lucide-react';
+import { Check, ChevronLeft, ChevronRight, Copy, FileText, Loader2, X } from 'lucide-react';
 import * as React from 'react';
 import { newsDisplayType, newsTimeLabel, type StockNewsRow } from '@/lib/stock-news';
 import { trpc } from '@/lib/trpc';
@@ -22,6 +22,8 @@ export function NewsDetailModal({
   const [detail, setDetail] = React.useState<SourceDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = React.useState(false);
   const [detailUnavailable, setDetailUnavailable] = React.useState(false);
+  const [showSourceUrl, setShowSourceUrl] = React.useState(false);
+  const [sourceUrlCopied, setSourceUrlCopied] = React.useState(false);
   const hasPrevious = activeIndex !== null && activeIndex > 0;
   const hasNext = activeIndex !== null && activeIndex < news.length - 1;
 
@@ -36,6 +38,8 @@ export function NewsDetailModal({
     setDetail(null);
     setLoadingDetail(true);
     setDetailUnavailable(false);
+    setShowSourceUrl(false);
+    setSourceUrlCopied(false);
     void trpc.stocks.newsDetail.query({
       url: item.url,
       sourceName: item.source ?? '公开来源',
@@ -86,6 +90,16 @@ export function NewsDetailModal({
       ? '来源摘要'
       : '仅保留来源记录';
   const sourceMedia = item.imageKind === 'source-cover';
+  const readerItemKey = item.url ?? `${item.publishedAt ?? item.time}:${item.title}`;
+  const copySourceUrl = async (): Promise<void> => {
+    if (!item.url) return;
+    try {
+      await navigator.clipboard.writeText(item.url);
+      setSourceUrlCopied(true);
+    } catch {
+      setSourceUrlCopied(false);
+    }
+  };
 
   return (
     <div
@@ -160,8 +174,8 @@ export function NewsDetailModal({
             </h2>
 
             {item.imageUrl ? (
-              <figure className="mt-6 overflow-hidden rounded-[10px] border border-[#E4E8EF] bg-[#F1F3F6]">
-                <img src={item.imageUrl} alt="" className="max-h-[340px] w-full object-cover" />
+              <figure key={readerItemKey} className="mt-6 overflow-hidden rounded-[10px] border border-[#E4E8EF] bg-[#F1F3F6]">
+                <img key={`${readerItemKey}:${item.imageUrl}`} src={item.imageUrl} alt="" className="max-h-[340px] w-full object-cover" />
                 <figcaption className="border-t border-[#E4E8EF] bg-white px-3 py-2 text-[11px] text-[#667085]">
                   {sourceMedia ? '来源配图' : '与当前内容关联的主题配图'}
                 </figcaption>
@@ -175,7 +189,7 @@ export function NewsDetailModal({
               <div className="min-w-0">
                 <p className="text-[13px] font-semibold text-[#344054]">来源与阅读边界</p>
                 <p className="mt-1 text-[13px] leading-6 text-[#667085]">
-                  {item.source ?? '公开来源'} · {newsTimeLabel(item)} · {contentLabel}。站内内容仅保留来源返回字段或从已验证公开来源提取的文本，原文页面仍为最终依据。
+                  {item.source ?? '公开来源'} · {newsTimeLabel(item)} · {contentLabel}。正文在当前弹窗内阅读；站内只展示来源返回字段或从已验证来源提取的文本。
                 </p>
               </div>
             </section>
@@ -194,7 +208,7 @@ export function NewsDetailModal({
                   ) : body.length > 0 ? body.map((paragraph) => <p key={paragraph}>{paragraph}</p>) : summary ? (
                     <p>{summary}</p>
                   ) : (
-                    <p>当前未收到可展示的来源摘要或正文。请打开原文，核对完整内容和发布时间。</p>
+                    <p>当前未收到可展示的来源摘要或正文。来源链接仍可在本页展开核对。</p>
                   )}
                 </div>
                 {!loadingDetail && detail?.contentStatus !== 'source-body' ? (
@@ -205,6 +219,33 @@ export function NewsDetailModal({
                   </p>
                 ) : null}
               </section>
+
+              {item.url ? (
+                <section className="rounded-[10px] border border-[#E4E8EF] bg-white px-4 py-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowSourceUrl((visible) => !visible)}
+                    className="inline-flex h-8 items-center gap-2 text-[13px] font-medium text-[#4F5868] transition hover:text-[#EA1F59]"
+                    aria-expanded={showSourceUrl}
+                  >
+                    <FileText className="h-3.5 w-3.5" aria-hidden />
+                    {showSourceUrl ? '收起来源链接' : '查看来源链接'}
+                  </button>
+                  {showSourceUrl ? (
+                    <div className="mt-3 flex flex-col gap-2 border-t border-[#EEF0F3] pt-3 sm:flex-row sm:items-center">
+                      <code className="min-w-0 flex-1 break-all text-[12px] leading-5 text-[#667085]">{item.url}</code>
+                      <button
+                        type="button"
+                        onClick={() => void copySourceUrl()}
+                        className="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-[7px] border border-[#E1E3E8] bg-white px-2.5 text-[12px] font-medium text-[#4F5868] transition hover:border-[#EA1F59]/25 hover:text-[#EA1F59]"
+                      >
+                        {sourceUrlCopied ? <Check className="h-3.5 w-3.5" aria-hidden /> : <Copy className="h-3.5 w-3.5" aria-hidden />}
+                        {sourceUrlCopied ? '已复制' : '复制链接'}
+                      </button>
+                    </div>
+                  ) : null}
+                </section>
+              ) : null}
 
               <section className="rounded-[10px] border border-[#E4E1DC] bg-white px-4 py-3">
                 <div className="grid gap-3 text-[13px] text-[#4F5868] sm:grid-cols-3">
@@ -218,21 +259,8 @@ export function NewsDetailModal({
         </div>
 
         <footer className="flex shrink-0 flex-col gap-3 border-t border-[#E4E1DC] bg-[#FBFAF8] px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="text-[12px] leading-relaxed text-[#667085]">
-            原文的完整内容、时效与语境以来源页面为准。
-          </div>
+          <div className="text-[12px] leading-relaxed text-[#667085]">站内阅读保留来源边界；发布时间与完整语境以公开来源为准。</div>
           <div className="flex shrink-0 items-center gap-2">
-            {item.url ? (
-              <a
-                href={item.url}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex h-9 items-center gap-2 rounded-[8px] border border-[#E1E3E8] bg-white px-3 text-[13px] font-medium text-[#344054] transition hover:border-[#EA1F59]/25 hover:text-[#EA1F59]"
-              >
-                打开原文
-                <ExternalLink className="h-3.5 w-3.5" aria-hidden />
-              </a>
-            ) : null}
             <button
               type="button"
               onClick={onClose}

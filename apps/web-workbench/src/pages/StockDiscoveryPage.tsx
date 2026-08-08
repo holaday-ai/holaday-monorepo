@@ -26,6 +26,15 @@ const MARKET_DISCOVERY_FEEDS: MarketDiscoveryFeed[] = ['A股要闻', '美股要�
 const FEEDS: Array<DiscoveryFeed | '全部'> = ['全部', '自选股新闻', '重要公告', 'A股要闻', '美股要闻', '港股要闻'];
 const INITIAL_VISIBLE_COUNT = 12;
 
+function discoveryReadingPriority(item: StockNewsRow): number {
+  let score = 0;
+  if (item.symbols.length > 0) score += 3;
+  if (newsFeed(item) === '重要公告') score += 2;
+  if (item.summary?.trim().length && item.summary.trim().length >= 80) score += 1;
+  if (item.imageKind === 'source-cover') score += 1;
+  return score;
+}
+
 export function StockDiscoveryPage(): JSX.Element {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -100,11 +109,21 @@ export function StockDiscoveryPage(): JSX.Element {
     ),
     [activeFeed, indexedNews],
   );
-  const filteredRows = React.useMemo(
-    () => filteredNews.map(({ item }) => item),
+  const prioritizedNews = React.useMemo(
+    () => [...filteredNews].sort((left, right) => {
+      const priorityDifference = discoveryReadingPriority(right.item) - discoveryReadingPriority(left.item);
+      return priorityDifference || left.index - right.index;
+    }),
     [filteredNews],
   );
-  const displayedNews = filteredNews.slice(0, visibleCount);
+  const filteredRows = React.useMemo(
+    () => prioritizedNews.map(({ item }) => item),
+    [prioritizedNews],
+  );
+  const displayedNews = prioritizedNews.slice(0, visibleCount);
+  const leadNews = displayedNews[0] ?? null;
+  const supportingNews = displayedNews.slice(1, 4);
+  const remainingNews = displayedNews.slice(4);
   const feedCounts = React.useMemo(() => new Map(
     FEEDS.map((feed) => [
       feed,
@@ -114,7 +133,7 @@ export function StockDiscoveryPage(): JSX.Element {
   const hasMoreForActiveFeed = activeFeed === '全部'
     ? MARKET_DISCOVERY_FEEDS.some((feed) => moreAvailable[feed])
     : MARKET_DISCOVERY_FEEDS.includes(activeFeed as MarketDiscoveryFeed) && moreAvailable[activeFeed as MarketDiscoveryFeed];
-  const canRevealLoadedNews = displayedNews.length < filteredNews.length;
+  const canRevealLoadedNews = displayedNews.length < prioritizedNews.length;
 
   React.useEffect(() => {
     setVisibleCount(INITIAL_VISIBLE_COUNT);
@@ -174,12 +193,12 @@ export function StockDiscoveryPage(): JSX.Element {
   React.useEffect(() => {
     if (!shouldPrefetchDiscoveryPage({
       currentPage: Math.max(0, Math.ceil(displayedNews.length / INITIAL_VISIBLE_COUNT) - 1),
-      pageCount: Math.max(1, Math.ceil(filteredNews.length / INITIAL_VISIBLE_COUNT)),
+      pageCount: Math.max(1, Math.ceil(prioritizedNews.length / INITIAL_VISIBLE_COUNT)),
       hasMore: hasMoreForActiveFeed,
       isLoading: loadingMore,
     })) return;
     void loadMoreSourceRows();
-  }, [displayedNews.length, filteredNews.length, hasMoreForActiveFeed, loadMoreSourceRows, loadingMore]);
+  }, [displayedNews.length, hasMoreForActiveFeed, loadMoreSourceRows, loadingMore, prioritizedNews.length]);
 
   return (
     <main className="mx-auto w-full max-w-[1480px] px-4 py-6 sm:px-6 lg:px-8">
@@ -198,7 +217,7 @@ export function StockDiscoveryPage(): JSX.Element {
             <p className="text-[12px] font-medium text-[#EA1F59]">市场发现</p>
             <h1 className="mt-1 text-[24px] font-semibold text-[#121826] sm:text-[28px]">新闻与公告</h1>
             <p className="mt-1 max-w-2xl text-[13px] leading-6 text-[#667085]">
-              按公开来源的发布时间展示。详情仅显示来源返回摘要或从已验证来源提取的正文，不使用补写内容代替原文。
+              先看按关联标的、来源可读性与发布时间排序的优先阅读，再浏览完整来源流。详情在站内阅读，只展示来源返回或已验证提取的内容。
             </p>
           </div>
         </div>
@@ -249,15 +268,55 @@ export function StockDiscoveryPage(): JSX.Element {
         </div>
       ) : displayedNews.length > 0 ? (
         <>
-          <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {displayedNews.map(({ item }, index) => (
-              <DiscoveryNewsCard
-                key={item.url ?? `${item.time}-${item.title}`}
-                item={item}
-                onOpen={() => setActiveIndex(index)}
-              />
-            ))}
-          </div>
+          {leadNews ? (
+            <section className="mt-6" aria-label="优先阅读">
+              <div className="mb-3 flex items-center gap-2">
+                <span className="h-2 w-2 rounded-full bg-[#EA1F59]" aria-hidden />
+                <h2 className="text-[15px] font-semibold text-[#242424]">优先阅读</h2>
+                <span className="text-[12px] text-[#8B92A1]">按关联标的、来源可读性与发布时间排序</span>
+              </div>
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.6fr)_minmax(320px,0.8fr)]">
+                <DiscoveryNewsCard
+                  key={leadNews.item.url ?? `${leadNews.item.time}-${leadNews.item.title}`}
+                  item={leadNews.item}
+                  variant="lead"
+                  onOpen={() => setActiveIndex(0)}
+                />
+                {supportingNews.length > 0 ? (
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 xl:grid-cols-1">
+                    {supportingNews.map(({ item }, offset) => (
+                      <DiscoveryNewsCard
+                        key={item.url ?? `${item.time}-${item.title}`}
+                        item={item}
+                        variant="compact"
+                        onOpen={() => setActiveIndex(offset + 1)}
+                      />
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            </section>
+          ) : null}
+          {remainingNews.length > 0 ? (
+            <section className="mt-8" aria-label="更多来源">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-[#CBD0DA]" aria-hidden />
+                  <h2 className="text-[15px] font-semibold text-[#242424]">更多来源</h2>
+                </div>
+                <span className="text-[12px] text-[#8B92A1]">按发布时间排列</span>
+              </div>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                {remainingNews.map(({ item }, offset) => (
+                  <DiscoveryNewsCard
+                    key={item.url ?? `${item.time}-${item.title}`}
+                    item={item}
+                    onOpen={() => setActiveIndex(offset + 4)}
+                  />
+                ))}
+              </div>
+            </section>
+          ) : null}
           {canRevealLoadedNews || hasMoreForActiveFeed ? (
             <div className="mt-7 flex justify-center">
               <button

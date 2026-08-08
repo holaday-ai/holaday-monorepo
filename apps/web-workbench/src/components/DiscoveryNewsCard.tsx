@@ -6,14 +6,18 @@ import { cn } from '@/lib/utils';
 export function DiscoveryNewsCard({
   item,
   onOpen,
+  variant = 'standard',
 }: {
   item: StockNewsRow;
   onOpen: () => void;
+  variant?: 'standard' | 'lead' | 'compact';
 }): JSX.Element {
   const type = newsDisplayType(item);
   const sourceMedia = item.imageKind === 'source-cover';
   const [imageFailed, setImageFailed] = useState(false);
   const showImage = Boolean(item.imageUrl && !imageFailed);
+  const isLead = variant === 'lead';
+  const isCompact = variant === 'compact';
   const onKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
@@ -27,10 +31,17 @@ export function DiscoveryNewsCard({
       tabIndex={0}
       onClick={onOpen}
       onKeyDown={onKeyDown}
-      className="group flex min-h-[266px] min-w-0 flex-col overflow-hidden rounded-[8px] border border-[#E7E7EB] bg-white text-left shadow-[0_10px_24px_rgba(18,24,38,0.04)] transition hover:-translate-y-0.5 hover:border-[#EA1F59]/25 hover:shadow-[0_16px_32px_rgba(18,24,38,0.08)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20 motion-reduce:hover:translate-y-0"
+      className={cn(
+        'group min-w-0 overflow-hidden rounded-[8px] border border-[#E7E7EB] bg-white text-left shadow-[0_10px_24px_rgba(18,24,38,0.04)] transition hover:-translate-y-0.5 hover:border-[#EA1F59]/25 hover:shadow-[0_16px_32px_rgba(18,24,38,0.08)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20 motion-reduce:hover:translate-y-0',
+        isLead ? 'flex min-h-[330px] flex-col sm:grid sm:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]' : 'flex flex-col',
+        isCompact ? 'min-h-[154px]' : isLead ? '' : 'min-h-[266px]',
+      )}
     >
       {showImage ? (
-        <div className="relative h-[132px] shrink-0 overflow-hidden bg-[#EEF1F5]">
+        <div className={cn(
+          'relative shrink-0 overflow-hidden bg-[#EEF1F5]',
+          isLead ? 'h-[210px] sm:h-full sm:min-h-[330px]' : isCompact ? 'h-[104px]' : 'h-[132px]',
+        )}>
           <img
             src={item.imageUrl}
             alt=""
@@ -57,7 +68,10 @@ export function DiscoveryNewsCard({
           ) : null}
         </div>
       ) : (
-        <div className="flex min-h-[132px] shrink-0 flex-col border-b border-[#E7EAF0] bg-[#FAFBFC] p-3">
+        <div className={cn(
+          'flex shrink-0 flex-col border-b border-[#E7EAF0] bg-[#FAFBFC] p-3',
+          isLead ? 'min-h-[210px] sm:min-h-[330px]' : isCompact ? 'min-h-[104px]' : 'min-h-[132px]',
+        )}>
           <div className="flex items-center gap-2">
             <span className={cn(
               'rounded-full px-2 py-1 text-[11px] font-semibold',
@@ -69,20 +83,29 @@ export function DiscoveryNewsCard({
               {newsTimeLabel(item)}
             </span>
           </div>
-          <p className="mt-3 line-clamp-3 text-[15px] font-semibold leading-relaxed text-[#344054] transition group-hover:text-[#EA1F59]">
+          <p className={cn(
+            'mt-3 font-semibold leading-relaxed text-[#344054] transition group-hover:text-[#EA1F59]',
+            isLead ? 'line-clamp-4 text-[20px]' : isCompact ? 'line-clamp-2 text-[14px]' : 'line-clamp-3 text-[15px]',
+          )}>
             {item.title}
             {item.url ? <ExternalLink className="ml-1 inline h-3 w-3 opacity-60 transition group-hover:opacity-100" aria-hidden /> : null}
           </p>
         </div>
       )}
-      <div className="flex flex-1 flex-col p-3">
+      <div className={cn('flex flex-1 flex-col', isLead ? 'p-5 sm:p-6' : 'p-3')}>
         {showImage ? (
-          <p className="line-clamp-2 min-h-[48px] text-[15px] font-semibold leading-relaxed text-[#344054] transition group-hover:text-[#EA1F59]">
+          <p className={cn(
+            'font-semibold leading-relaxed text-[#344054] transition group-hover:text-[#EA1F59]',
+            isLead ? 'line-clamp-3 text-[21px]' : isCompact ? 'line-clamp-2 text-[14px]' : 'line-clamp-2 min-h-[48px] text-[15px]',
+          )}>
             {item.title}
             {item.url ? <ExternalLink className="ml-1 inline h-3 w-3 opacity-60 transition group-hover:opacity-100" aria-hidden /> : null}
           </p>
         ) : item.summary ? (
-          <p className="line-clamp-2 text-[12px] leading-relaxed text-[#667085]">{item.summary}</p>
+          <p className={cn('leading-relaxed text-[#667085]', isLead ? 'line-clamp-5 text-[14px]' : 'line-clamp-2 text-[12px]')}>{item.summary}</p>
+        ) : null}
+        {showImage && item.summary && (isLead || isCompact) ? (
+          <p className={cn('mt-3 leading-relaxed text-[#667085]', isLead ? 'line-clamp-4 text-[14px]' : 'line-clamp-2 text-[12px]')}>{item.summary}</p>
         ) : null}
         <div className={cn('mt-auto flex items-center justify-between gap-2', showImage || item.summary ? 'pt-3' : '')}>
           <div className="flex min-w-0 items-center gap-2">

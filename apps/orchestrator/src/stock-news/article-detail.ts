@@ -34,7 +34,32 @@ const MAX_BODY_BYTES = 1_200_000;
 const FETCH_TIMEOUT_MS = 8_000;
 const CACHE_TTL_MS = 10 * 60_000;
 const MAX_PARAGRAPHS = 14;
-const ALLOWED_SOURCE_HOSTS = ['eastmoney.com', 'cninfo.com.cn'] as const;
+// The feed can only retrieve articles from this fixed, public-source registry.
+// Keeping the registry explicit prevents this reader from becoming an arbitrary
+// request proxy while allowing the trusted sources that actually appear in the
+// market feed to render inside Holaday.
+const ALLOWED_SOURCE_HOSTS = [
+  'eastmoney.com',
+  'cninfo.com.cn',
+  'cls.cn',
+  'stcn.com',
+  'cnstock.com',
+  'caixin.com',
+  '21jingji.com',
+  'cctv.com',
+  'xinhuanet.com',
+  'news.cn',
+  'chinanews.com.cn',
+  'people.com.cn',
+  'thepaper.cn',
+  'nbd.com.cn',
+  'jiemian.com',
+  'yicai.com',
+  'sina.com.cn',
+  'ifeng.com',
+  '163.com',
+  'qq.com',
+] as const;
 const detailCache = new Map<string, CachedDetail>();
 
 function fallbackDetail(input: NewsDetailInput): NewsDetail {
@@ -131,6 +156,50 @@ function isReadableParagraph(value: string): boolean {
   return !/^(责任编辑|免责声明|版权声明|点击查看|更多精彩内容)/.test(value);
 }
 
+function uniqueReadableParagraphs(paragraphs: string[]): string[] {
+  return Array.from(new Set(paragraphs)).slice(0, MAX_PARAGRAPHS);
+}
+
+function articleBodyParagraphs(value: string): string[] {
+  const sourceText = decodeHtml(value
+    .replace(/<br\s*\/?>/gi, '\n\n')
+    .replace(/<\/p\s*>/gi, '\n\n')
+    .replace(/<[^>]+>/g, ' '));
+  const explicitParagraphs = sourceText
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.replace(/\s+/g, ' ').trim())
+    .filter(isReadableParagraph);
+  if (explicitParagraphs.length > 0) return uniqueReadableParagraphs(explicitParagraphs);
+  const text = sourceText.replace(/\s+/g, ' ').trim();
+  if (isReadableParagraph(text)) return [text];
+  return [];
+}
+
+function jsonLdArticleParagraphs(html: string): string[] {
+  const paragraphs: string[] = [];
+  const scripts = Array.from(html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi));
+  for (const script of scripts) {
+    if (!/type\s*=\s*["']application\/ld\+json["']/i.test(script[1] ?? '')) continue;
+    try {
+      const parsed: unknown = JSON.parse(script[2] ?? '');
+      const queue: unknown[] = Array.isArray(parsed) ? [...parsed] : [parsed];
+      const seen = new Set<unknown>();
+      while (queue.length > 0) {
+        const current = queue.shift();
+        if (!current || typeof current !== 'object' || seen.has(current)) continue;
+        seen.add(current);
+        const record = current as Record<string, unknown>;
+        if (typeof record.articleBody === 'string') paragraphs.push(...articleBodyParagraphs(record.articleBody));
+        if (Array.isArray(record['@graph'])) queue.push(...record['@graph']);
+        if (Array.isArray(record.mainEntity)) queue.push(...record.mainEntity);
+      }
+    } catch {
+      // A malformed structured-data payload must not block normal paragraph extraction.
+    }
+  }
+  return uniqueReadableParagraphs(paragraphs);
+}
+
 export function htmlArticleParagraphs(html: string): string[] {
   const sanitized = html
     .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
@@ -139,7 +208,7 @@ export function htmlArticleParagraphs(html: string): string[] {
   const paragraphs = Array.from(sanitized.matchAll(/<p\b[^>]*>([\s\S]*?)<\/p>/gi))
     .map((match) => plainText(match[1] ?? ''))
     .filter(isReadableParagraph);
-  return Array.from(new Set(paragraphs)).slice(0, MAX_PARAGRAPHS);
+  return paragraphs.length > 0 ? uniqueReadableParagraphs(paragraphs) : jsonLdArticleParagraphs(html);
 }
 
 async function pdfArticleParagraphs(bytes: Uint8Array): Promise<string[]> {

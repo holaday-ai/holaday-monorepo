@@ -30,6 +30,30 @@ describe('stock tasks layout', () => {
     expect(cardSource).toContain('{showImage ? (');
   });
 
+  it('remounts the detail cover for each article and keeps source reading inside the modal', () => {
+    const modalSource = readFileSync(new URL('../components/NewsDetailModal.tsx', import.meta.url), 'utf8');
+
+    expect(modalSource).toContain('const readerItemKey = item.url');
+    expect(modalSource).toContain('key={readerItemKey}');
+    expect(modalSource).toContain('查看来源链接');
+    expect(modalSource).toContain('正文在当前弹窗内阅读');
+    expect(modalSource).not.toContain('target="_blank"');
+    expect(modalSource).not.toContain('打开原文');
+  });
+
+  it('gives discovery a clear priority story and a chronological source stream', () => {
+    const pageSource = readFileSync(new URL('./StockDiscoveryPage.tsx', import.meta.url), 'utf8');
+    const cardSource = readFileSync(new URL('../components/DiscoveryNewsCard.tsx', import.meta.url), 'utf8');
+
+    expect(pageSource).toContain('优先阅读');
+    expect(pageSource).toContain('更多来源');
+    expect(pageSource).toContain('variant="lead"');
+    expect(pageSource).toContain('variant="compact"');
+    expect(pageSource).toContain('function discoveryReadingPriority');
+    expect(pageSource).toContain('const prioritizedNews');
+    expect(cardSource).toContain("variant?: 'standard' | 'lead' | 'compact'");
+  });
+
   it('renders reusable editorial art as the normal card media without a source-image claim', () => {
     const pageSource = readFileSync(new URL('./StockTasksPage.tsx', import.meta.url), 'utf8');
     const cardSource = readFileSync(new URL('../components/DiscoveryNewsCard.tsx', import.meta.url), 'utf8');
