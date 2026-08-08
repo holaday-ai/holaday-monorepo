@@ -53,6 +53,7 @@ export function StockDiscoveryPage(): JSX.Element {
   const [error, setError] = React.useState<string | null>(null);
   const [visibleCount, setVisibleCount] = React.useState(INITIAL_VISIBLE_COUNT);
   const [activeIndex, setActiveIndex] = React.useState<number | null>(null);
+  const [failedSourceCoverUrls, setFailedSourceCoverUrls] = React.useState<ReadonlySet<string>>(() => new Set());
   const alive = React.useRef(true);
   const nextPage = React.useRef<Record<MarketDiscoveryFeed, number>>({
     'A股要闻': 2,
@@ -106,8 +107,9 @@ export function StockDiscoveryPage(): JSX.Element {
         indexedNews.filter(({ item }) => activeFeed === '全部' || newsFeed(item) === activeFeed),
         (item) => item.symbols[0],
       ),
+      failedSourceCoverUrls,
     ),
-    [activeFeed, indexedNews],
+    [activeFeed, failedSourceCoverUrls, indexedNews],
   );
   const prioritizedNews = React.useMemo(
     () => [...filteredNews].sort((left, right) => {
@@ -147,6 +149,15 @@ export function StockDiscoveryPage(): JSX.Element {
     else next.set('feed', feed);
     setSearchParams(next, { replace: true });
   };
+
+  const handleSourceCoverError = React.useCallback((imageUrl: string): void => {
+    setFailedSourceCoverUrls((previous) => {
+      if (previous.has(imageUrl)) return previous;
+      const next = new Set(previous);
+      next.add(imageUrl);
+      return next;
+    });
+  }, []);
 
   const loadMoreSourceRows = React.useCallback(async (): Promise<boolean> => {
     if (loadingMore || !hasMoreForActiveFeed) return false;
@@ -281,6 +292,7 @@ export function StockDiscoveryPage(): JSX.Element {
                   item={leadNews.item}
                   variant="lead"
                   onOpen={() => setActiveIndex(0)}
+                  onImageError={handleSourceCoverError}
                 />
                 {supportingNews.length > 0 ? (
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 xl:grid-cols-1">
@@ -290,6 +302,7 @@ export function StockDiscoveryPage(): JSX.Element {
                         item={item}
                         variant="compact"
                         onOpen={() => setActiveIndex(offset + 1)}
+                        onImageError={handleSourceCoverError}
                       />
                     ))}
                   </div>
@@ -312,6 +325,7 @@ export function StockDiscoveryPage(): JSX.Element {
                     key={item.url ?? `${item.time}-${item.title}`}
                     item={item}
                     onOpen={() => setActiveIndex(offset + 4)}
+                    onImageError={handleSourceCoverError}
                   />
                 ))}
               </div>

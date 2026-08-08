@@ -23,6 +23,7 @@ function isLocalEditorialArt(item: DiscoveryMedia): item is DiscoveryMedia & { i
  */
 export function diversifyDiscoveryEditorialArt<T extends DiscoveryMedia>(
   items: IndexedDiscoveryItem<T>[],
+  failedSourceCoverUrls: ReadonlySet<string> = new Set(),
 ): IndexedDiscoveryItem<T>[] {
   const usedEditorialUrlsByPool = new Map<string, Set<string>>();
   const recentEditorialUrls: string[] = [];
@@ -43,9 +44,13 @@ export function diversifyDiscoveryEditorialArt<T extends DiscoveryMedia>(
 
     // Publishers occasionally return one generic image for otherwise distinct
     // stories. In that case every affected card uses its own topical fallback
-    // so the generic image cannot imply an unrelated subject.
+    // so the generic image cannot imply an unrelated subject. The same fallback
+    // also keeps an inaccessible external source image from leaving a blank
+    // media panel in the reading view.
     if (item.imageKind === 'source-cover') {
-      if ((sourceCoverCounts.get(imageUrl) ?? 0) < 2) return entry;
+      const needsFallback = (sourceCoverCounts.get(imageUrl) ?? 0) >= 2
+        || failedSourceCoverUrls.has(imageUrl);
+      if (!needsFallback) return entry;
       const poolKey = candidates.join('|');
       const usedEditorialUrls = usedEditorialUrlsByPool.get(poolKey) ?? new Set<string>();
       if (usedEditorialUrls.size >= candidates.length) usedEditorialUrls.clear();

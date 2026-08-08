@@ -113,6 +113,28 @@ describe('stock discovery presentation', () => {
     });
   });
 
+  it('replaces a failed unique source cover with its topical fallback', () => {
+    const items = [{
+      item: {
+        imageUrl: 'https://publisher.example/blocked-source-photo.jpg',
+        imageKind: 'source-cover' as const,
+        editorialArtOptions: [
+          '/stock-editorial-art/technology-1.jpg',
+          '/stock-editorial-art/technology-2.jpg',
+        ],
+      },
+      index: 0,
+    }];
+
+    expect(diversifyDiscoveryEditorialArt(
+      items,
+      new Set(['https://publisher.example/blocked-source-photo.jpg']),
+    )[0]?.item).toMatchObject({
+      imageKind: 'editorial-art',
+      imageUrl: '/stock-editorial-art/technology-1.jpg',
+    });
+  });
+
   it('does not alter a cover merely because the same artwork appeared on an earlier page', () => {
     const items = Array.from({ length: 12 }, (_, index) => ({
       item: {

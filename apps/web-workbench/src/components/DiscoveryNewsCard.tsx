@@ -6,10 +6,12 @@ import { cn } from '@/lib/utils';
 export function DiscoveryNewsCard({
   item,
   onOpen,
+  onImageError,
   variant = 'standard',
 }: {
   item: StockNewsRow;
   onOpen: () => void;
+  onImageError?: (imageUrl: string) => void;
   variant?: 'standard' | 'lead' | 'compact';
 }): JSX.Element {
   const type = newsDisplayType(item);
@@ -46,7 +48,13 @@ export function DiscoveryNewsCard({
             src={item.imageUrl}
             alt=""
             loading="lazy"
-            onError={() => setImageFailed(true)}
+            onError={() => {
+              if (sourceMedia && item.imageUrl && onImageError) {
+                onImageError(item.imageUrl);
+                return;
+              }
+              setImageFailed(true);
+            }}
             className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03] motion-reduce:transition-none motion-reduce:group-hover:scale-100"
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black/35 via-transparent to-black/10" aria-hidden />
