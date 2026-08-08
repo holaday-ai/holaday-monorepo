@@ -969,7 +969,10 @@ function diversifyEditorialArt(rows: NewsSnapshot[]): NewsSnapshot[] {
 
 function normalizeDiscoveryEditorialArt(rows: NewsSnapshot[]): NewsSnapshot[] {
   return diversifyEditorialArt(rows.map((row) => {
-    if ((row.category !== '公告' && row.category !== '新闻') || row.imageKind === 'source-cover') {
+    const hasExternalSourceCover =
+      row.imageKind === 'source-cover' &&
+      sourceDeclaredImageUrl(row.imageUrl) !== undefined;
+    if ((row.category !== '公告' && row.category !== '新闻') || hasExternalSourceCover) {
       return row;
     }
     return {

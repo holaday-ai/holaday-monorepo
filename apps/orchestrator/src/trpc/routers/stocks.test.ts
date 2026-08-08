@@ -256,6 +256,45 @@ describe('stocks dashboard snapshot', () => {
     });
   });
 
+  it('repairs a stale local illustration incorrectly marked as a source cover before diversifying cards', () => {
+    const normalizeDiscoveryEditorialArt = __stocksDashboardTest.normalizeDiscoveryEditorialArt as (rows: Array<{
+      category: '公告' | '新闻';
+      title: string;
+      symbols: string[];
+      source: string;
+      url?: string;
+      time: string;
+      imageUrl?: string;
+      imageKind?: string;
+    }>) => Array<{ imageUrl?: string; imageKind?: string }>;
+
+    const rows = normalizeDiscoveryEditorialArt([
+      {
+        category: '新闻',
+        title: '泰晶科技：无发布方封面的动态',
+        symbols: ['603738'],
+        source: '真实来源',
+        url: 'https://finance.eastmoney.com/a/202608073834244100.html',
+        time: '08-07 20:08',
+        imageUrl: '/stock-editorial-art/macro-1.jpg',
+        imageKind: 'source-cover',
+      },
+      {
+        category: '新闻',
+        title: '驰宏锌锗：另一条无发布方封面的动态',
+        symbols: ['600497'],
+        source: '真实来源',
+        url: 'https://finance.eastmoney.com/a/202608073834244101.html',
+        time: '08-07 17:02',
+        imageUrl: '/stock-editorial-art/macro-1.jpg',
+        imageKind: 'source-cover',
+      },
+    ]);
+
+    expect(rows.every((row) => row.imageKind === 'editorial-art')).toBe(true);
+    expect(rows[0]?.imageUrl).not.toBe(rows[1]?.imageUrl);
+  });
+
   it('keeps enough source-backed discovery rows for a multi-stock watchlist', () => {
     const buildSourceDiscovery = __stocksDashboardTest.buildNews as unknown as (
       announcements: Array<{ entry: { symbol: string; market: 'A'; displayName: string }; env: ReturnType<typeof envelope> }>,
