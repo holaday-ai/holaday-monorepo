@@ -6,67 +6,43 @@ export interface IndexedDiscoveryItem<T> {
 type DiscoveryMedia = {
   imageUrl?: string;
   imageKind?: 'source-cover' | 'editorial-art';
+  editorialArtOptions?: readonly string[];
 };
 
-const EDITORIAL_ART_URLS = [
-  '/stock-editorial-art/advanced-manufacturing-1.jpg',
-  '/stock-editorial-art/consumer-1.jpg',
-  '/stock-editorial-art/disclosure-1.jpg',
-  '/stock-editorial-art/earnings-1.jpg',
-  '/stock-editorial-art/energy-1.jpg',
-  '/stock-editorial-art/governance-1.jpg',
-  '/stock-editorial-art/industrial-1.jpg',
-  '/stock-editorial-art/investor-relations-1.jpg',
-  '/stock-editorial-art/logistics-1.jpg',
-  '/stock-editorial-art/macro-1.jpg',
-  '/stock-editorial-art/mobility-1.jpg',
-  '/stock-editorial-art/technology-1.jpg',
-] as const;
-
 function isLocalEditorialArt(item: DiscoveryMedia): item is DiscoveryMedia & { imageUrl: string } {
-  return Boolean(item.imageUrl?.startsWith('/stock-editorial-art/'));
-}
-
-function alternateEditorialArtUrl(currentUrl: string, index: number): string {
-  const currentIndex = EDITORIAL_ART_URLS.indexOf(currentUrl as (typeof EDITORIAL_ART_URLS)[number]);
-  const start = currentIndex >= 0 ? currentIndex + 1 + index : index;
-  for (let offset = 0; offset < EDITORIAL_ART_URLS.length; offset += 1) {
-    const candidate = EDITORIAL_ART_URLS[(start + offset) % EDITORIAL_ART_URLS.length]!;
-    if (candidate !== currentUrl) return candidate;
-  }
-  return currentUrl;
-}
-
-function unusedEditorialArtUrl(usedUrls: ReadonlySet<string>, index: number): string | undefined {
-  for (let offset = 0; offset < EDITORIAL_ART_URLS.length; offset += 1) {
-    const candidate = EDITORIAL_ART_URLS[(index + offset) % EDITORIAL_ART_URLS.length]!;
-    if (!usedUrls.has(candidate)) return candidate;
-  }
-  return undefined;
+  return item.imageKind === 'editorial-art' && Boolean(item.imageUrl?.startsWith('/stock-editorial-art/'));
 }
 
 /**
  * The carousel intentionally reorders rows so a multi-stock watchlist is not
  * dominated by one symbol. Run this after that ordering to keep consecutive
- * reusable editorial covers visually distinct. External source covers remain
- * untouched.
+ * reusable editorial covers visually distinct without allowing a cover from
+ * another industry to replace the article's own semantic artwork. External
+ * source covers remain untouched.
  */
 export function diversifyDiscoveryEditorialArt<T extends DiscoveryMedia>(
   items: IndexedDiscoveryItem<T>[],
 ): IndexedDiscoveryItem<T>[] {
-  const usedEditorialUrls = new Set<string>();
-  return items.map((entry) => {
+  const pageSize = 3;
+  const usedEditorialUrlsByPage = new Map<number, Set<string>>();
+  return items.map((entry, position) => {
     const { item } = entry;
     const imageUrl = item.imageUrl;
     if (!imageUrl || !isLocalEditorialArt(item)) {
       return entry;
     }
+    const currentPageStart = Math.floor(position / pageSize) * pageSize;
+    const usedEditorialUrls = usedEditorialUrlsByPage.get(currentPageStart) ?? new Set<string>();
+    usedEditorialUrlsByPage.set(currentPageStart, usedEditorialUrls);
     if (!usedEditorialUrls.has(imageUrl)) {
       usedEditorialUrls.add(imageUrl);
       return entry;
     }
-    const replacement = unusedEditorialArtUrl(usedEditorialUrls, entry.index)
-      ?? alternateEditorialArtUrl(imageUrl, entry.index);
+    const replacement = item.editorialArtOptions?.find((candidate) => !usedEditorialUrls.has(candidate));
+    if (!replacement) {
+      usedEditorialUrls.add(imageUrl);
+      return entry;
+    }
     usedEditorialUrls.add(replacement);
     return {
       ...entry,

@@ -94,6 +94,8 @@ interface NewsSnapshot {
   /** 文章来源封面优先；无封面时使用本地静态编辑配图。 */
   imageUrl?: string;
   imageKind?: 'source-cover' | 'editorial-art';
+  /** 仅无文章来源封面时下发；客户端只能在同主题集合内避免同页重复。 */
+  editorialArtOptions?: string[];
 }
 
 interface LeaderSnapshot {
@@ -921,7 +923,7 @@ function editorialArtTheme(category: '公告' | '新闻', title: string): Editor
     return 'governance';
   }
   if (/业绩|营收|利润|财报|预增|预亏|分红|经营/.test(text)) return 'earnings';
-  if (/芯片|半导体|软件|算力|人工智能|ai|电子|通信/.test(text)) return 'technology';
+  if (/芯片|半导体|软件|算力|人工智能|ai|电子|通信|光纤|光模块|光通信|cpo|数据中心|服务器|存储/.test(text)) return 'technology';
   if (/汽车|新能源车|充电|电池|整车/.test(text)) return 'mobility';
   if (/物流|仓储|快递|港口|运输/.test(text)) return 'logistics';
   if (/光伏|风电|储能|电力|煤炭|石油|天然气|能源/.test(text)) return 'energy';
@@ -931,6 +933,10 @@ function editorialArtTheme(category: '公告' | '新闻', title: string): Editor
 
 function editorialArtCandidates(category: '公告' | '新闻', title: string): readonly string[] {
   return EDITORIAL_ART[editorialArtTheme(category, title)];
+}
+
+function editorialArtOptions(category: '公告' | '新闻', title: string): string[] {
+  return [...editorialArtCandidates(category, title)];
 }
 
 function selectEditorialArtUrl(input: {
@@ -990,6 +996,7 @@ function normalizeDiscoveryEditorialArt(rows: NewsSnapshot[]): NewsSnapshot[] {
         url: row.url,
       }),
       imageKind: 'editorial-art',
+      editorialArtOptions: editorialArtOptions(row.category, row.title),
     };
   }));
 }
@@ -1075,6 +1082,7 @@ function stockNewsRows(
       ...(summary ? { summary } : {}),
       imageUrl,
       imageKind: sourceImageUrl ? 'source-cover' : 'editorial-art',
+      ...(!sourceImageUrl ? { editorialArtOptions: editorialArtOptions('新闻', displayTitle) } : {}),
     });
   }
   return sortNewsNewestFirst(dedupeNews(rowsForStock));
@@ -1110,6 +1118,7 @@ function marketNewsRows(item: MarketNewsInput, limit = MARKET_DISCOVERY_PAGE_SIZ
       ...(summary ? { summary } : {}),
       imageUrl,
       imageKind: sourceImageUrl ? 'source-cover' : 'editorial-art',
+      ...(!sourceImageUrl ? { editorialArtOptions: editorialArtOptions('新闻', title) } : {}),
     });
   }
   return sortNewsNewestFirst(dedupeNews(rows)).slice(0, limit);
@@ -1149,6 +1158,7 @@ function buildNews(
           url,
         }),
         imageKind: 'editorial-art',
+        editorialArtOptions: editorialArtOptions('公告', displayTitle),
       });
     }
     announcementRows.push(...sortNewsNewestFirst(dedupeNews(rowsForStock)));
@@ -1682,6 +1692,7 @@ export const stocksRouter = router({
 
 export const __stocksDashboardTest = {
   sourceDeclaredImageUrl,
+  editorialArtTheme,
   selectEditorialArtUrl,
   normalizeDiscoveryEditorialArt,
   buildNews,

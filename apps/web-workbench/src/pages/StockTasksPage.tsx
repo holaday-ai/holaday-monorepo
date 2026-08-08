@@ -107,6 +107,7 @@ interface NewsRow {
   summary?: string;
   imageUrl?: string;
   imageKind?: 'source-cover' | 'editorial-art';
+  editorialArtOptions?: string[];
 }
 
 type GeneratedBriefing = Awaited<ReturnType<typeof trpc.stocks.generateBriefingNow.mutate>>;

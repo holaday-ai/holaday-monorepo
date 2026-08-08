@@ -276,6 +276,10 @@ describe('stocks dashboard snapshot', () => {
 
   it('uses a declared source cover first and stable editorial art when no cover is published', () => {
     const sourceDeclaredImageUrl = __stocksDashboardTest.sourceDeclaredImageUrl as (value?: unknown) => string | undefined;
+    const editorialArtTheme = __stocksDashboardTest.editorialArtTheme as (
+      category: '公告' | '新闻',
+      title: string,
+    ) => string;
     const selectEditorialArtUrl = __stocksDashboardTest.selectEditorialArtUrl as (input: {
       category: '公告' | '新闻';
       title: string;
@@ -286,6 +290,8 @@ describe('stocks dashboard snapshot', () => {
     expect(sourceDeclaredImageUrl('https://source.example/cover.jpg')).toBe('https://source.example/cover.jpg');
     expect(sourceDeclaredImageUrl('data:image/png;base64,not-a-source-url')).toBeUndefined();
     expect(sourceDeclaredImageUrl('javascript:alert(1)')).toBeUndefined();
+    expect(editorialArtTheme('新闻', '驰宏锌锗：光纤概念涨幅居前')).toBe('technology');
+    expect(editorialArtTheme('新闻', '迪生力：存储芯片概念活跃')).toBe('technology');
     expect(selectEditorialArtUrl({
       category: '新闻',
       title: '泰晶科技：没有公开封面的真实新闻',

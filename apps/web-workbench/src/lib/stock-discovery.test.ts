@@ -26,12 +26,35 @@ describe('stock discovery presentation', () => {
         symbol: string;
         imageUrl: string;
         imageKind: 'source-cover' | 'editorial-art';
+        editorialArtOptions?: string[];
       };
       index: number;
     }> = [
-      { item: { symbol: '603738', imageUrl: '/stock-editorial-art/macro-1.jpg', imageKind: 'editorial-art' as const }, index: 0 },
+      {
+        item: {
+          symbol: '603738',
+          imageUrl: '/stock-editorial-art/macro-1.jpg',
+          imageKind: 'editorial-art' as const,
+          editorialArtOptions: [
+            '/stock-editorial-art/macro-1.jpg',
+            '/stock-editorial-art/governance-1.jpg',
+          ],
+        },
+        index: 0,
+      },
       { item: { symbol: '603738', imageUrl: '/stock-editorial-art/industrial-1.jpg', imageKind: 'editorial-art' as const }, index: 1 },
-      { item: { symbol: '603528', imageUrl: '/stock-editorial-art/macro-1.jpg', imageKind: 'source-cover' as const }, index: 2 },
+      {
+        item: {
+          symbol: '603528',
+          imageUrl: '/stock-editorial-art/macro-1.jpg',
+          imageKind: 'editorial-art' as const,
+          editorialArtOptions: [
+            '/stock-editorial-art/macro-1.jpg',
+            '/stock-editorial-art/governance-1.jpg',
+          ],
+        },
+        index: 2,
+      },
       { item: { symbol: '600497', imageUrl: 'https://publisher.example/cover.jpg', imageKind: 'source-cover' as const }, index: 3 },
     ];
 
@@ -52,7 +75,7 @@ describe('stock discovery presentation', () => {
     ]);
   });
 
-  it('uses each reusable editorial cover once before repeating one later in the carousel', () => {
+  it('does not alter a cover merely because the same artwork appeared on an earlier page', () => {
     const items = Array.from({ length: 12 }, (_, index) => ({
       item: {
         imageUrl: '/stock-editorial-art/macro-1.jpg',
@@ -63,7 +86,78 @@ describe('stock discovery presentation', () => {
 
     const diversified = diversifyDiscoveryEditorialArt(items);
 
-    expect(new Set(diversified.map(({ item }) => item.imageUrl)).size).toBe(12);
+    expect(diversified[11]?.item.imageUrl).toBe('/stock-editorial-art/macro-1.jpg');
+  });
+
+  it('keeps a technology cover in its own candidate set after earlier carousel pages', () => {
+    const items = Array.from({ length: 12 }, (_, index) => ({
+      item: {
+        imageUrl: `/stock-editorial-art/page-${index}.jpg`,
+        imageKind: 'editorial-art' as const,
+        editorialArtOptions: [`/stock-editorial-art/page-${index}.jpg`],
+      },
+      index,
+    })).concat({
+      item: {
+        imageUrl: '/stock-editorial-art/technology-1.jpg',
+        imageKind: 'editorial-art' as const,
+        editorialArtOptions: [
+          '/stock-editorial-art/technology-1.jpg',
+          '/stock-editorial-art/advanced-manufacturing-1.jpg',
+          '/stock-editorial-art/industrial-1.jpg',
+        ],
+      },
+      index: 12,
+    });
+
+    expect(diversifyDiscoveryEditorialArt(items)[12]?.item.imageUrl).toBe('/stock-editorial-art/technology-1.jpg');
+  });
+
+  it('does not repeat an actual replacement in the same carousel page', () => {
+    const items = [
+      {
+        item: {
+          imageUrl: '/stock-editorial-art/technology-1.jpg',
+          imageKind: 'editorial-art' as const,
+          editorialArtOptions: [
+            '/stock-editorial-art/technology-1.jpg',
+            '/stock-editorial-art/advanced-manufacturing-1.jpg',
+            '/stock-editorial-art/industrial-1.jpg',
+          ],
+        },
+        index: 0,
+      },
+      {
+        item: {
+          imageUrl: '/stock-editorial-art/technology-1.jpg',
+          imageKind: 'editorial-art' as const,
+          editorialArtOptions: [
+            '/stock-editorial-art/technology-1.jpg',
+            '/stock-editorial-art/advanced-manufacturing-1.jpg',
+            '/stock-editorial-art/industrial-1.jpg',
+          ],
+        },
+        index: 1,
+      },
+      {
+        item: {
+          imageUrl: '/stock-editorial-art/technology-1.jpg',
+          imageKind: 'editorial-art' as const,
+          editorialArtOptions: [
+            '/stock-editorial-art/technology-1.jpg',
+            '/stock-editorial-art/advanced-manufacturing-1.jpg',
+            '/stock-editorial-art/industrial-1.jpg',
+          ],
+        },
+        index: 2,
+      },
+    ];
+
+    expect(diversifyDiscoveryEditorialArt(items).map(({ item }) => item.imageUrl)).toEqual([
+      '/stock-editorial-art/technology-1.jpg',
+      '/stock-editorial-art/advanced-manufacturing-1.jpg',
+      '/stock-editorial-art/industrial-1.jpg',
+    ]);
   });
 
   it('labels a date-only announcement as a disclosure date without inventing a time', () => {
