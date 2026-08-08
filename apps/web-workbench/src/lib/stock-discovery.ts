@@ -17,33 +17,38 @@ function isLocalEditorialArt(item: DiscoveryMedia): item is DiscoveryMedia & { i
  * The carousel intentionally reorders rows so a multi-stock watchlist is not
  * dominated by one symbol. Run this after that ordering to keep consecutive
  * reusable editorial covers visually distinct without allowing a cover from
- * another industry to replace the article's own semantic artwork. External
- * source covers remain untouched.
+ * another industry to replace the article's own semantic artwork. Each
+ * semantic pool is rotated across the loaded feed before it is reused, while
+ * external source covers remain untouched.
  */
 export function diversifyDiscoveryEditorialArt<T extends DiscoveryMedia>(
   items: IndexedDiscoveryItem<T>[],
 ): IndexedDiscoveryItem<T>[] {
-  const pageSize = 3;
-  const usedEditorialUrlsByPage = new Map<number, Set<string>>();
-  return items.map((entry, position) => {
+  const usedEditorialUrlsByPool = new Map<string, Set<string>>();
+  const recentEditorialUrls: string[] = [];
+  return items.map((entry) => {
     const { item } = entry;
     const imageUrl = item.imageUrl;
     if (!imageUrl || !isLocalEditorialArt(item)) {
       return entry;
     }
-    const currentPageStart = Math.floor(position / pageSize) * pageSize;
-    const usedEditorialUrls = usedEditorialUrlsByPage.get(currentPageStart) ?? new Set<string>();
-    usedEditorialUrlsByPage.set(currentPageStart, usedEditorialUrls);
-    if (!usedEditorialUrls.has(imageUrl)) {
-      usedEditorialUrls.add(imageUrl);
-      return entry;
-    }
-    const replacement = item.editorialArtOptions?.find((candidate) => !usedEditorialUrls.has(candidate));
-    if (!replacement) {
-      usedEditorialUrls.add(imageUrl);
-      return entry;
-    }
+    const candidates = item.editorialArtOptions?.filter((candidate, index, all) => all.indexOf(candidate) === index)
+      ?? [imageUrl];
+    const poolKey = candidates.join('|');
+    const usedEditorialUrls = usedEditorialUrlsByPool.get(poolKey) ?? new Set<string>();
+    if (usedEditorialUrls.size >= candidates.length) usedEditorialUrls.clear();
+    usedEditorialUrlsByPool.set(poolKey, usedEditorialUrls);
+
+    const replacement = [imageUrl, ...candidates].find((candidate) =>
+      !usedEditorialUrls.has(candidate) && !recentEditorialUrls.includes(candidate),
+    ) ?? [imageUrl, ...candidates].find((candidate) => !usedEditorialUrls.has(candidate)) ?? imageUrl;
+
     usedEditorialUrls.add(replacement);
+    recentEditorialUrls.push(replacement);
+    if (recentEditorialUrls.length > 3) recentEditorialUrls.shift();
+    if (replacement === imageUrl) {
+      return entry;
+    }
     return {
       ...entry,
       item: { ...item, imageUrl: replacement },

@@ -94,7 +94,7 @@ interface NewsSnapshot {
   /** 文章来源封面优先；无封面时使用本地静态编辑配图。 */
   imageUrl?: string;
   imageKind?: 'source-cover' | 'editorial-art';
-  /** 仅无文章来源封面时下发；客户端只能在同主题集合内避免同页重复。 */
+  /** 仅无文章来源封面时下发；客户端只能在同主题集合内轮换编辑配图。 */
   editorialArtOptions?: string[];
 }
 
@@ -877,41 +877,76 @@ const EDITORIAL_ART = {
     '/stock-editorial-art/governance-1.jpg',
     '/stock-editorial-art/disclosure-1.jpg',
     '/stock-editorial-art/investor-relations-1.jpg',
+    '/stock-editorial-art/governance-2.jpg',
+    '/stock-editorial-art/governance-3.jpg',
+    '/stock-editorial-art/governance-4.jpg',
+    '/stock-editorial-art/governance-5.jpg',
+    '/stock-editorial-art/governance-6.jpg',
   ],
   earnings: [
     '/stock-editorial-art/earnings-1.jpg',
-    '/stock-editorial-art/disclosure-1.jpg',
+    '/stock-editorial-art/earnings-2.jpg',
+    '/stock-editorial-art/market-3.jpg',
+    '/stock-editorial-art/governance-4.jpg',
     '/stock-editorial-art/investor-relations-1.jpg',
   ],
   technology: [
     '/stock-editorial-art/technology-1.jpg',
+    '/stock-editorial-art/technology-2.jpg',
+    '/stock-editorial-art/technology-3.jpg',
+    '/stock-editorial-art/technology-4.jpg',
+    '/stock-editorial-art/technology-5.jpg',
+    '/stock-editorial-art/technology-6.jpg',
+    '/stock-editorial-art/technology-7.jpg',
+    '/stock-editorial-art/technology-8.jpg',
+    '/stock-editorial-art/technology-9.jpg',
+    '/stock-editorial-art/technology-10.jpg',
     '/stock-editorial-art/advanced-manufacturing-1.jpg',
     '/stock-editorial-art/industrial-1.jpg',
   ],
   mobility: [
     '/stock-editorial-art/mobility-1.jpg',
-    '/stock-editorial-art/logistics-1.jpg',
+    '/stock-editorial-art/mobility-2.jpg',
+    '/stock-editorial-art/mobility-3.jpg',
+    '/stock-editorial-art/technology-8.jpg',
     '/stock-editorial-art/industrial-1.jpg',
   ],
   consumer: [
     '/stock-editorial-art/consumer-1.jpg',
-    '/stock-editorial-art/logistics-1.jpg',
-    '/stock-editorial-art/macro-1.jpg',
+    '/stock-editorial-art/consumer-2.jpg',
+    '/stock-editorial-art/consumer-3.jpg',
+    '/stock-editorial-art/consumer-4.jpg',
+  ],
+  healthcare: [
+    '/stock-editorial-art/healthcare-1.jpg',
+    '/stock-editorial-art/healthcare-2.jpg',
+    '/stock-editorial-art/healthcare-3.jpg',
+  ],
+  materials: [
+    '/stock-editorial-art/materials-1.jpg',
+    '/stock-editorial-art/materials-2.jpg',
+    '/stock-editorial-art/materials-3.jpg',
   ],
   logistics: [
     '/stock-editorial-art/logistics-1.jpg',
-    '/stock-editorial-art/industrial-1.jpg',
-    '/stock-editorial-art/macro-1.jpg',
+    '/stock-editorial-art/logistics-2.jpg',
+    '/stock-editorial-art/logistics-3.jpg',
+    '/stock-editorial-art/logistics-4.jpg',
   ],
   energy: [
     '/stock-editorial-art/energy-1.jpg',
-    '/stock-editorial-art/industrial-1.jpg',
-    '/stock-editorial-art/macro-1.jpg',
+    '/stock-editorial-art/energy-2.jpg',
+    '/stock-editorial-art/energy-3.jpg',
+    '/stock-editorial-art/energy-4.jpg',
+    '/stock-editorial-art/energy-5.jpg',
   ],
   market: [
     '/stock-editorial-art/macro-1.jpg',
-    '/stock-editorial-art/governance-1.jpg',
-    '/stock-editorial-art/technology-1.jpg',
+    '/stock-editorial-art/market-2.jpg',
+    '/stock-editorial-art/market-3.jpg',
+    '/stock-editorial-art/earnings-1.jpg',
+    '/stock-editorial-art/earnings-2.jpg',
+    '/stock-editorial-art/disclosure-1.jpg',
   ],
 } as const;
 
@@ -927,7 +962,9 @@ function editorialArtTheme(category: '公告' | '新闻', title: string): Editor
   if (/汽车|新能源车|充电|电池|整车/.test(text)) return 'mobility';
   if (/物流|仓储|快递|港口|运输/.test(text)) return 'logistics';
   if (/光伏|风电|储能|电力|煤炭|石油|天然气|能源/.test(text)) return 'energy';
-  if (/消费|零售|食品|服装|旅游|医药/.test(text)) return 'consumer';
+  if (/医药|医疗|医院|药品|创新药|生物医药|医疗器械|疫苗/.test(text)) return 'healthcare';
+  if (/钢铁|有色|铜|铝|锌|黄金|稀土|化工|玻璃|水泥|建材|材料|矿业|矿产/.test(text)) return 'materials';
+  if (/消费|零售|食品|服装|旅游|酒店|餐饮|农业|农产品/.test(text)) return 'consumer';
   return 'market';
 }
 
@@ -1693,6 +1730,7 @@ export const stocksRouter = router({
 export const __stocksDashboardTest = {
   sourceDeclaredImageUrl,
   editorialArtTheme,
+  editorialArtOptions,
   selectEditorialArtUrl,
   normalizeDiscoveryEditorialArt,
   buildNews,

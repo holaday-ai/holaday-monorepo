@@ -280,6 +280,10 @@ describe('stocks dashboard snapshot', () => {
       category: '公告' | '新闻',
       title: string,
     ) => string;
+    const editorialArtOptions = __stocksDashboardTest.editorialArtOptions as (
+      category: '公告' | '新闻',
+      title: string,
+    ) => string[];
     const selectEditorialArtUrl = __stocksDashboardTest.selectEditorialArtUrl as (input: {
       category: '公告' | '新闻';
       title: string;
@@ -292,6 +296,9 @@ describe('stocks dashboard snapshot', () => {
     expect(sourceDeclaredImageUrl('javascript:alert(1)')).toBeUndefined();
     expect(editorialArtTheme('新闻', '驰宏锌锗：光纤概念涨幅居前')).toBe('technology');
     expect(editorialArtTheme('新闻', '迪生力：存储芯片概念活跃')).toBe('technology');
+    expect(editorialArtTheme('新闻', '创新药研发进展披露')).toBe('healthcare');
+    expect(editorialArtTheme('新闻', '铜价上涨带动有色金属板块')).toBe('materials');
+    expect(editorialArtOptions('新闻', '泰晶科技：存储芯片概念活跃')).toHaveLength(12);
     expect(selectEditorialArtUrl({
       category: '新闻',
       title: '泰晶科技：没有公开封面的真实新闻',

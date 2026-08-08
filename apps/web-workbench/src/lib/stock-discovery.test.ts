@@ -160,6 +160,25 @@ describe('stock discovery presentation', () => {
     ]);
   });
 
+  it('rotates a semantic artwork pool across carousel pages before reusing a cover', () => {
+    const options = [
+      '/stock-editorial-art/technology-1.jpg',
+      '/stock-editorial-art/technology-2.jpg',
+      '/stock-editorial-art/technology-3.jpg',
+      '/stock-editorial-art/technology-4.jpg',
+    ];
+    const items = Array.from({ length: 4 }, (_, index) => ({
+      item: {
+        imageUrl: '/stock-editorial-art/technology-1.jpg',
+        imageKind: 'editorial-art' as const,
+        editorialArtOptions: options,
+      },
+      index,
+    }));
+
+    expect(diversifyDiscoveryEditorialArt(items).map(({ item }) => item.imageUrl)).toEqual(options);
+  });
+
   it('labels a date-only announcement as a disclosure date without inventing a time', () => {
     expect(discoveryTimeLabel('公告', '08-07')).toBe('08-07 · 披露日');
     expect(discoveryTimeLabel('公告', '08-07 09:30')).toBe('08-07 09:30');
