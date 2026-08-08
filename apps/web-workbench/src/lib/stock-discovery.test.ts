@@ -220,6 +220,92 @@ describe('stock discovery presentation', () => {
     ]);
   });
 
+  it('avoids a shared editorial image when another topical option is still unused', () => {
+    const items = [
+      {
+        item: {
+          imageUrl: '/stock-editorial-art/technology-1.jpg',
+          imageKind: 'editorial-art' as const,
+          editorialArtOptions: ['/stock-editorial-art/technology-1.jpg'],
+        },
+        index: 0,
+      },
+      {
+        item: {
+          imageUrl: '/stock-editorial-art/energy-1.jpg',
+          imageKind: 'editorial-art' as const,
+          editorialArtOptions: ['/stock-editorial-art/energy-1.jpg'],
+        },
+        index: 1,
+      },
+      {
+        item: {
+          imageUrl: '/stock-editorial-art/consumer-1.jpg',
+          imageKind: 'editorial-art' as const,
+          editorialArtOptions: ['/stock-editorial-art/consumer-1.jpg'],
+        },
+        index: 2,
+      },
+      {
+        item: {
+          imageUrl: '/stock-editorial-art/market-2.jpg',
+          imageKind: 'editorial-art' as const,
+          editorialArtOptions: [
+            '/stock-editorial-art/market-2.jpg',
+            '/stock-editorial-art/macro-1.jpg',
+          ],
+        },
+        index: 3,
+      },
+      {
+        item: {
+          imageUrl: '/stock-editorial-art/technology-2.jpg',
+          imageKind: 'editorial-art' as const,
+          editorialArtOptions: ['/stock-editorial-art/technology-2.jpg'],
+        },
+        index: 4,
+      },
+      {
+        item: {
+          imageUrl: '/stock-editorial-art/energy-2.jpg',
+          imageKind: 'editorial-art' as const,
+          editorialArtOptions: ['/stock-editorial-art/energy-2.jpg'],
+        },
+        index: 5,
+      },
+      {
+        item: {
+          imageUrl: '/stock-editorial-art/consumer-3.jpg',
+          imageKind: 'editorial-art' as const,
+          editorialArtOptions: ['/stock-editorial-art/consumer-3.jpg'],
+        },
+        index: 6,
+      },
+      {
+        item: {
+          imageUrl: '/stock-editorial-art/market-2.jpg',
+          imageKind: 'editorial-art' as const,
+          editorialArtOptions: [
+            '/stock-editorial-art/market-2.jpg',
+            '/stock-editorial-art/earnings-1.jpg',
+          ],
+        },
+        index: 7,
+      },
+    ];
+
+    expect(diversifyDiscoveryEditorialArt(items).map(({ item }) => item.imageUrl)).toEqual([
+      '/stock-editorial-art/technology-1.jpg',
+      '/stock-editorial-art/energy-1.jpg',
+      '/stock-editorial-art/consumer-1.jpg',
+      '/stock-editorial-art/market-2.jpg',
+      '/stock-editorial-art/technology-2.jpg',
+      '/stock-editorial-art/energy-2.jpg',
+      '/stock-editorial-art/consumer-3.jpg',
+      '/stock-editorial-art/earnings-1.jpg',
+    ]);
+  });
+
   it('rotates a semantic artwork pool across carousel pages before reusing a cover', () => {
     const options = [
       '/stock-editorial-art/technology-1.jpg',

@@ -299,6 +299,13 @@ describe('stocks dashboard snapshot', () => {
     expect(editorialArtTheme('新闻', '创新药研发进展披露')).toBe('healthcare');
     expect(editorialArtTheme('新闻', '铜价上涨带动有色金属板块')).toBe('materials');
     expect(editorialArtOptions('新闻', '泰晶科技：存储芯片概念活跃')).toHaveLength(12);
+    expect(editorialArtOptions('新闻', '立秋节气新茶饮销量大幅上升')).toEqual(expect.arrayContaining([
+      '/stock-editorial-art/consumer-3.jpg',
+      '/stock-editorial-art/consumer-4.jpg',
+      '/stock-editorial-art/logistics-1.jpg',
+    ]));
+    expect(editorialArtOptions('新闻', '立秋节气新茶饮销量大幅上升')).not.toContain('/stock-editorial-art/consumer-2.jpg');
+    expect(editorialArtOptions('新闻', '立秋节气新茶饮销量大幅上升')).not.toContain('/stock-editorial-art/market-3.jpg');
     expect(selectEditorialArtUrl({
       category: '新闻',
       title: '泰晶科技：没有公开封面的真实新闻',

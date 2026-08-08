@@ -887,7 +887,6 @@ const EDITORIAL_ART = {
   earnings: [
     '/stock-editorial-art/earnings-1.jpg',
     '/stock-editorial-art/earnings-2.jpg',
-    '/stock-editorial-art/market-3.jpg',
     '/stock-editorial-art/governance-4.jpg',
     '/stock-editorial-art/investor-relations-1.jpg',
   ],
@@ -914,9 +913,9 @@ const EDITORIAL_ART = {
   ],
   consumer: [
     '/stock-editorial-art/consumer-1.jpg',
-    '/stock-editorial-art/consumer-2.jpg',
     '/stock-editorial-art/consumer-3.jpg',
     '/stock-editorial-art/consumer-4.jpg',
+    '/stock-editorial-art/logistics-1.jpg',
   ],
   healthcare: [
     '/stock-editorial-art/healthcare-1.jpg',
@@ -944,7 +943,6 @@ const EDITORIAL_ART = {
   market: [
     '/stock-editorial-art/macro-1.jpg',
     '/stock-editorial-art/market-2.jpg',
-    '/stock-editorial-art/market-3.jpg',
     '/stock-editorial-art/earnings-1.jpg',
     '/stock-editorial-art/earnings-2.jpg',
     '/stock-editorial-art/disclosure-1.jpg',
@@ -965,7 +963,9 @@ function editorialArtTheme(category: '公告' | '新闻', title: string): Editor
   if (/光伏|风电|储能|电力|煤炭|石油|天然气|能源/.test(text)) return 'energy';
   if (/医药|医疗|医院|药品|创新药|生物医药|医疗器械|疫苗/.test(text)) return 'healthcare';
   if (/钢铁|有色|铜|铝|锌|黄金|稀土|化工|玻璃|水泥|建材|材料|矿业|矿产/.test(text)) return 'materials';
-  if (/消费|零售|食品|服装|旅游|酒店|餐饮|农业|农产品/.test(text)) return 'consumer';
+  if (/消费|零售|食品|服装|旅游|酒店|餐饮|农业|农产品|茶饮|奶茶|咖啡|商超|美妆|家电|家居|白酒|啤酒|乳制品|文旅|游戏/.test(text)) {
+    return 'consumer';
+  }
   return 'market';
 }
 

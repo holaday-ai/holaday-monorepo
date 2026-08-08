@@ -26,6 +26,7 @@ export function diversifyDiscoveryEditorialArt<T extends DiscoveryMedia>(
   failedSourceCoverUrls: ReadonlySet<string> = new Set(),
 ): IndexedDiscoveryItem<T>[] {
   const usedEditorialUrlsByPool = new Map<string, Set<string>>();
+  const usedAcrossFeed = new Set<string>();
   const recentEditorialUrls: string[] = [];
   const sourceCoverCounts = new Map<string, number>();
   for (const { item } of items) {
@@ -56,10 +57,13 @@ export function diversifyDiscoveryEditorialArt<T extends DiscoveryMedia>(
       if (usedEditorialUrls.size >= candidates.length) usedEditorialUrls.clear();
       usedEditorialUrlsByPool.set(poolKey, usedEditorialUrls);
       const replacement = candidates.find((candidate) =>
+        !usedEditorialUrls.has(candidate) && !usedAcrossFeed.has(candidate) && !recentEditorialUrls.includes(candidate),
+      ) ?? candidates.find((candidate) =>
         !usedEditorialUrls.has(candidate) && !recentEditorialUrls.includes(candidate),
       ) ?? candidates.find((candidate) => !usedEditorialUrls.has(candidate)) ?? candidates[0];
       if (!replacement) return entry;
       usedEditorialUrls.add(replacement);
+      usedAcrossFeed.add(replacement);
       recentEditorialUrls.push(replacement);
       if (recentEditorialUrls.length > 3) recentEditorialUrls.shift();
       return {
@@ -78,10 +82,13 @@ export function diversifyDiscoveryEditorialArt<T extends DiscoveryMedia>(
     usedEditorialUrlsByPool.set(poolKey, usedEditorialUrls);
 
     const replacement = [imageUrl, ...effectiveCandidates].find((candidate) =>
+      !usedEditorialUrls.has(candidate) && !usedAcrossFeed.has(candidate) && !recentEditorialUrls.includes(candidate),
+    ) ?? [imageUrl, ...effectiveCandidates].find((candidate) =>
       !usedEditorialUrls.has(candidate) && !recentEditorialUrls.includes(candidate),
     ) ?? [imageUrl, ...effectiveCandidates].find((candidate) => !usedEditorialUrls.has(candidate)) ?? imageUrl;
 
     usedEditorialUrls.add(replacement);
+    usedAcrossFeed.add(replacement);
     recentEditorialUrls.push(replacement);
     if (recentEditorialUrls.length > 3) recentEditorialUrls.shift();
     if (replacement === imageUrl) {
