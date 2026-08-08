@@ -78,7 +78,8 @@ test('serves both web surfaces through the atomic current-release link', () => {
 
 test('packages and installs the landing site with the edge deployment', () => {
   assert.match(deployScript, /LANDING_DIR="apps\/holaday-landing"/);
-  assert.match(deployScript, /tar czf "\$BUNDLE" "\$SPA_DIR" "\$NGINX_CONF" "\$LANDING_DIR"/);
+  assert.match(deployScript, /COPYFILE_DISABLE=1 tar czf "\$BUNDLE" --exclude='\._\*'/);
+  assert.match(deployScript, /"\$SPA_DIR" "\$NGINX_CONF" "\$LANDING_DIR"/);
   assert.match(deployScript, /REMOTE_INSTALL_SCRIPT="ops\/aliyun-edge\/install-remote\.sh"/);
   assert.match(deployScript, /REMOTE_ROLLBACK_SCRIPT="ops\/aliyun-edge\/rollback-remote\.sh"/);
   assert.match(deployScript, /"\$REMOTE_ROLLBACK_SCRIPT"/);

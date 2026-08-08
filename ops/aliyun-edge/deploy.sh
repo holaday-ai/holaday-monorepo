@@ -175,7 +175,8 @@ echo "==> running edge release gate"
 pnpm test:ops
 
 echo "==> packing SPA, landing site, and nginx config"
-tar czf "$BUNDLE" "$SPA_DIR" "$NGINX_CONF" "$LANDING_DIR" "$REMOTE_ROLLBACK_SCRIPT"
+COPYFILE_DISABLE=1 tar czf "$BUNDLE" --exclude='._*' \
+  "$SPA_DIR" "$NGINX_CONF" "$LANDING_DIR" "$REMOTE_ROLLBACK_SCRIPT"
 cp "$REMOTE_INSTALL_SCRIPT" "$INSTALL_UPLOAD"
 ls -lh "$BUNDLE"
 
