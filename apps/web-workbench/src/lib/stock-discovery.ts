@@ -115,3 +115,27 @@ export function discoveryTimeLabel(kind: '新闻' | '公告', time: string): str
   if (kind === '公告' && /^\d{2}-\d{2}$/.test(time)) return `${time} · 披露日`;
   return time;
 }
+
+/**
+ * Start fetching before the reader runs into the final two carousel pages.
+ * This keeps source pagination responsive without eagerly loading every page.
+ */
+export function shouldPrefetchDiscoveryPage(input: {
+  currentPage: number;
+  pageCount: number;
+  hasMore: boolean;
+  isLoading: boolean;
+}): boolean {
+  if (!input.hasMore || input.isLoading) return false;
+  return input.currentPage >= Math.max(0, input.pageCount - 3);
+}
+
+/** Keep a growing source-backed feed navigable without rendering an endless row of dots. */
+export function discoveryPageIndexes(pageCount: number, currentPage: number): number[] {
+  const safeCount = Math.max(0, Math.floor(pageCount));
+  if (safeCount <= 7) return Array.from({ length: safeCount }, (_, index) => index);
+  const safeCurrent = Math.min(Math.max(0, Math.floor(currentPage)), safeCount - 1);
+  return [...new Set([0, safeCurrent - 1, safeCurrent, safeCurrent + 1, safeCount - 1])]
+    .filter((index) => index >= 0 && index < safeCount)
+    .sort((left, right) => left - right);
+}

@@ -50,7 +50,7 @@ describe('HttpAkshareClient', () => {
     const { fetchImpl, calls } = mockFetch({
       '/announcements/600519': { body },
       '/stock-news/600519': { body },
-      '/market-news/us': { body },
+      '/market-news/us?page=1&page_size=20': { body },
       '/unlock/600519': { body },
       '/kline/600519': { body },
       '/quote/600519': { body },
@@ -71,7 +71,7 @@ describe('HttpAkshareClient', () => {
     expect(calls).toEqual([
       'http://127.0.0.1:8848/announcements/600519',
       'http://127.0.0.1:8848/stock-news/600519',
-      'http://127.0.0.1:8848/market-news/us',
+      'http://127.0.0.1:8848/market-news/us?page=1&page_size=20',
       'http://127.0.0.1:8848/unlock/600519',
       'http://127.0.0.1:8848/kline/600519',
       'http://127.0.0.1:8848/stock-rankings/gainers?limit=10',

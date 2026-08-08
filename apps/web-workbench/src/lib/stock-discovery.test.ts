@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   diversifyDiscoveryEditorialArt,
   diversifyDiscoveryItems,
+  discoveryPageIndexes,
   discoveryTimeLabel,
+  shouldPrefetchDiscoveryPage,
 } from './stock-discovery';
 
 describe('stock discovery presentation', () => {
@@ -68,5 +70,18 @@ describe('stock discovery presentation', () => {
     expect(discoveryTimeLabel('公告', '08-07')).toBe('08-07 · 披露日');
     expect(discoveryTimeLabel('公告', '08-07 09:30')).toBe('08-07 09:30');
     expect(discoveryTimeLabel('新闻', '08-07')).toBe('08-07');
+  });
+
+  it('prefetches the next discovery page once readers reach the third page from the end', () => {
+    expect(shouldPrefetchDiscoveryPage({ currentPage: 3, pageCount: 7, hasMore: true, isLoading: false })).toBe(false);
+    expect(shouldPrefetchDiscoveryPage({ currentPage: 4, pageCount: 7, hasMore: true, isLoading: false })).toBe(true);
+    expect(shouldPrefetchDiscoveryPage({ currentPage: 4, pageCount: 7, hasMore: false, isLoading: false })).toBe(false);
+    expect(shouldPrefetchDiscoveryPage({ currentPage: 4, pageCount: 7, hasMore: true, isLoading: true })).toBe(false);
+  });
+
+  it('keeps long discovery pagination compact around the current page', () => {
+    expect(discoveryPageIndexes(5, 2)).toEqual([0, 1, 2, 3, 4]);
+    expect(discoveryPageIndexes(16, 8)).toEqual([0, 7, 8, 9, 15]);
+    expect(discoveryPageIndexes(16, 1)).toEqual([0, 1, 2, 15]);
   });
 });

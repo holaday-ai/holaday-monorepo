@@ -76,6 +76,7 @@ interface SectorSnapshot {
 }
 
 type DiscoveryFeed = '自选股新闻' | '重要公告' | 'A股要闻' | '美股要闻' | '港股要闻';
+type MarketDiscoveryFeed = Extract<DiscoveryFeed, 'A股要闻' | '美股要闻' | '港股要闻'>;
 
 interface NewsSnapshot {
   /** `盘面` / `关注` 仅兼容已缓存的旧快照；新发现流只写入新闻或公告。 */
@@ -162,15 +163,11 @@ const DASHBOARD_AKSHARE_TIMEOUT_MS = 8_000;
 const DASHBOARD_SLOW_SIGNAL_TIMEOUT_MS = 90_000;
 const DASHBOARD_RANKING_TIMEOUT_MS = 75_000;
 const DASHBOARD_DISCOVERY_TIMEOUT_MS = 12_000;
-const NEWS_LIMIT = 60;
-const NEWS_ANNOUNCEMENT_LIMIT = 18;
-const NEWS_ARTICLE_LIMIT = 24;
-const NEWS_MARKET_ARTICLE_LIMIT = 30;
-const NEWS_PER_STOCK_ANNOUNCEMENTS = 5;
-const NEWS_PER_STOCK_ARTICLES = 8;
-const NEWS_PER_MARKET_STOCK_ARTICLES = 2;
-const NEWS_PER_MARKET_FEED_ARTICLES = 8;
-const MARKET_DISCOVERY_SYMBOL_LIMIT = 6;
+const MARKET_DISCOVERY_PAGE_SIZES: Record<MarketDiscoveryFeed, number> = {
+  'A股要闻': 30,
+  '美股要闻': 12,
+  '港股要闻': 12,
+};
 const dashboardCache = new Map<string, DashboardCacheEntry>();
 
 function unavailableStock(entry: WatchlistEntry, note = '真实行情暂不可用，未展示走势线'): StockSnapshot {
@@ -815,40 +812,6 @@ function mapRankingLeaders(
   return rows.length > 0 ? rows : [];
 }
 
-/**
- * The discovery feed should extend beyond a user's own holdings without
- * pretending every ranking row is a recommendation. We use the verified
- * gainers, turnover, and losers tables only to choose search terms for
- * source-linked news, excluding stocks the user already follows.
- */
-function marketDiscoveryEntries(
-  rankingEnvs: readonly AkEnvelope<StockRankingRow>[],
-  watchlist: readonly WatchlistEntry[],
-): WatchlistEntry[] {
-  const seen = new Set(
-    watchlist
-      .filter((entry) => entry.market === 'A')
-      .map((entry) => entry.symbol.trim()),
-  );
-  const entries: WatchlistEntry[] = [];
-  const longest = Math.max(0, ...rankingEnvs.map((env) => env.error ? 0 : env.data.length));
-
-  for (let index = 0; index < longest && entries.length < MARKET_DISCOVERY_SYMBOL_LIMIT; index += 1) {
-    for (const env of rankingEnvs) {
-      if (entries.length >= MARKET_DISCOVERY_SYMBOL_LIMIT || env.error) break;
-      const row = env.data[index];
-      if (!row) continue;
-      const symbol = String(pick(row, ['代码', 'code']) ?? '').trim();
-      const displayName = String(pick(row, ['名称', 'name']) ?? '').trim();
-      if (!/^\d{6}$/.test(symbol) || !displayName || seen.has(symbol)) continue;
-      seen.add(symbol);
-      entries.push({ symbol, market: 'A', displayName });
-    }
-  }
-
-  return entries;
-}
-
 function mapSymbolSearch(env: AkEnvelope<SymbolRow>, query: string) {
   const normalized = query.trim().toUpperCase();
   const rows = env.error ? [] : env.data;
@@ -1076,12 +1039,11 @@ function preserveMissingDiscoveryFeeds(current: NewsSnapshot[], previous: NewsSn
 }
 
 type StockNewsInput = { entry: WatchlistEntry; env: AkEnvelope<StockNewsRow> };
-type MarketNewsInput = { feed: Extract<DiscoveryFeed, 'A股要闻' | '美股要闻' | '港股要闻'>; env: AkEnvelope<StockNewsRow> };
+type MarketNewsInput = { feed: MarketDiscoveryFeed; env: AkEnvelope<StockNewsRow> };
 
 function stockNewsRows(
   item: StockNewsInput,
   feed: Extract<DiscoveryFeed, '自选股新闻' | 'A股要闻'>,
-  perStockLimit: number,
 ): NewsSnapshot[] {
   if (item.env.error) return [];
   const rowsForStock: NewsSnapshot[] = [];
@@ -1115,10 +1077,10 @@ function stockNewsRows(
       imageKind: sourceImageUrl ? 'source-cover' : 'editorial-art',
     });
   }
-  return sortNewsNewestFirst(dedupeNews(rowsForStock)).slice(0, perStockLimit);
+  return sortNewsNewestFirst(dedupeNews(rowsForStock));
 }
 
-function marketNewsRows(item: MarketNewsInput): NewsSnapshot[] {
+function marketNewsRows(item: MarketNewsInput, limit = MARKET_DISCOVERY_PAGE_SIZES[item.feed]): NewsSnapshot[] {
   if (item.env.error) return [];
   const rows: NewsSnapshot[] = [];
   for (const row of item.env.data) {
@@ -1150,18 +1112,16 @@ function marketNewsRows(item: MarketNewsInput): NewsSnapshot[] {
       imageKind: sourceImageUrl ? 'source-cover' : 'editorial-art',
     });
   }
-  return sortNewsNewestFirst(dedupeNews(rows)).slice(0, NEWS_PER_MARKET_FEED_ARTICLES);
+  return sortNewsNewestFirst(dedupeNews(rows)).slice(0, limit);
 }
 
 function buildNews(
   announcements: Array<{ entry: WatchlistEntry; env: AkEnvelope<AnnouncementRow> }>,
   stockNews: StockNewsInput[],
-  marketStockNews: StockNewsInput[] = [],
   marketNews: MarketNewsInput[] = [],
 ): NewsSnapshot[] {
   const announcementRows: NewsSnapshot[] = [];
   const watchlistArticleRows: NewsSnapshot[] = [];
-  const marketArticleRows: NewsSnapshot[] = [];
   const marketSearchRows: NewsSnapshot[] = [];
   for (const item of announcements) {
     if (item.env.error) continue;
@@ -1191,23 +1151,47 @@ function buildNews(
         imageKind: 'editorial-art',
       });
     }
-    announcementRows.push(...sortNewsNewestFirst(dedupeNews(rowsForStock)).slice(0, NEWS_PER_STOCK_ANNOUNCEMENTS));
+    announcementRows.push(...sortNewsNewestFirst(dedupeNews(rowsForStock)));
   }
   for (const item of stockNews) {
-    watchlistArticleRows.push(...stockNewsRows(item, '自选股新闻', NEWS_PER_STOCK_ARTICLES));
-  }
-  for (const item of marketStockNews) {
-    marketArticleRows.push(...stockNewsRows(item, 'A股要闻', NEWS_PER_MARKET_STOCK_ARTICLES));
+    watchlistArticleRows.push(...stockNewsRows(item, '自选股新闻'));
   }
   for (const item of marketNews) {
     marketSearchRows.push(...marketNewsRows(item));
   }
   return normalizeDiscoveryEditorialArt(sortNewsNewestFirst(dedupeNews([
-    ...sortNewsNewestFirst(announcementRows).slice(0, NEWS_ANNOUNCEMENT_LIMIT),
-    ...sortNewsNewestFirst(watchlistArticleRows).slice(0, NEWS_ARTICLE_LIMIT),
-    ...sortNewsNewestFirst(marketArticleRows).slice(0, NEWS_MARKET_ARTICLE_LIMIT),
-    ...sortNewsNewestFirst(marketSearchRows).slice(0, NEWS_MARKET_ARTICLE_LIMIT),
-  ])).slice(0, NEWS_LIMIT));
+    ...sortNewsNewestFirst(announcementRows),
+    ...sortNewsNewestFirst(watchlistArticleRows),
+    ...sortNewsNewestFirst(marketSearchRows),
+  ])));
+}
+
+function marketForDiscoveryFeed(feed: MarketDiscoveryFeed): 'cn' | 'us' | 'hk' {
+  if (feed === 'A股要闻') return 'cn';
+  return feed === '美股要闻' ? 'us' : 'hk';
+}
+
+async function loadMarketDiscoveryFeed(args: {
+  feed: MarketDiscoveryFeed;
+  page: number;
+  logger: MinimalLogger;
+}): Promise<{ feed: MarketDiscoveryFeed; page: number; items: NewsSnapshot[]; hasMore: boolean }> {
+  const pageSize = MARKET_DISCOVERY_PAGE_SIZES[args.feed];
+  const client = new HttpAkshareClient({
+    baseUrl: process.env.AKSHARE_HTTP_URL ?? 'http://127.0.0.1:8848',
+    timeoutMs: DASHBOARD_DISCOVERY_TIMEOUT_MS,
+    logger: args.logger,
+  });
+  const env = await client.getMarketNews(marketForDiscoveryFeed(args.feed), args.page, pageSize);
+  const items = marketNewsRows({ feed: args.feed, env }, pageSize);
+  return {
+    feed: args.feed,
+    page: args.page,
+    items,
+    // Search sources can return a partial page after cross-topic de-duplication.
+    // Keep the next source page reachable until the source returns no usable rows.
+    hasMore: items.length > 0,
+  };
 }
 
 async function buildDashboardSnapshot(args: {
@@ -1244,8 +1228,7 @@ async function buildDashboardSnapshot(args: {
   });
   const { compact } = cnDateParts(now);
   const announcementWatchlist = effectiveWatchlist
-    .filter((entry) => entry.market === 'A')
-    .slice(0, 5);
+    .filter((entry) => entry.market === 'A');
   const deferredPulse = Promise.resolve(emptyEnvelope<MarketPulseRow>('akshare:market-pulse:deferred'));
   const deferredAnnouncements = Promise.resolve(
     announcementWatchlist.map((entry) => ({
@@ -1292,9 +1275,9 @@ async function buildDashboardSnapshot(args: {
     includeSlowSignals ? rankingClient.getStockRankings('amount', 8) : deferredRankings,
     includeSlowSignals
       ? Promise.all([
-        discoveryClient.getMarketNews('cn').then((env) => ({ feed: 'A股要闻' as const, env })),
-        discoveryClient.getMarketNews('us').then((env) => ({ feed: '美股要闻' as const, env })),
-        discoveryClient.getMarketNews('hk').then((env) => ({ feed: '港股要闻' as const, env })),
+        discoveryClient.getMarketNews('cn', 1, MARKET_DISCOVERY_PAGE_SIZES['A股要闻']).then((env) => ({ feed: 'A股要闻' as const, env })),
+        discoveryClient.getMarketNews('us', 1, MARKET_DISCOVERY_PAGE_SIZES['美股要闻']).then((env) => ({ feed: '美股要闻' as const, env })),
+        discoveryClient.getMarketNews('hk', 1, MARKET_DISCOVERY_PAGE_SIZES['港股要闻']).then((env) => ({ feed: '港股要闻' as const, env })),
       ])
       : deferredMarketNews,
   ]);
@@ -1306,16 +1289,7 @@ async function buildDashboardSnapshot(args: {
   };
   const marketIndices = mapIndices(indexCn);
   const temperature = marketTemperature(pulseEnv);
-  const marketEntries = includeSlowSignals
-    ? marketDiscoveryEntries([rankingGainers, rankingAmount, rankingLosers], effectiveWatchlist)
-    : [];
-  const marketStockNews = includeSlowSignals
-    ? await Promise.all(marketEntries.map(async (entry) => ({
-      entry,
-      env: await discoveryClient.getStockNews(entry.symbol),
-    })))
-    : [];
-  const news = buildNews(announcements, stockNews, marketStockNews, marketNews);
+  const news = buildNews(announcements, stockNews, marketNews);
   const missingMarketPanels = [
     marketIndices.length === 0 ? '指数' : null,
     sectors.length === 0 ? '行业趋势' : null,
@@ -1653,6 +1627,17 @@ export const stocksRouter = router({
     });
   }),
 
+  discoveryFeed: protectedProcedure
+    .input(z.object({
+      feed: z.enum(['A股要闻', '美股要闻', '港股要闻']),
+      page: z.number().int().min(2).max(100),
+    }))
+    .query(async ({ ctx, input }) => loadMarketDiscoveryFeed({
+      feed: input.feed,
+      page: input.page,
+      logger: ctx.logger,
+    })),
+
   searchSymbols: protectedProcedure
     .input(z.object({ query: z.string().trim().min(1).max(32) }))
     .query(async ({ ctx, input }) => {
@@ -1700,6 +1685,7 @@ export const __stocksDashboardTest = {
   selectEditorialArtUrl,
   normalizeDiscoveryEditorialArt,
   buildNews,
+  loadMarketDiscoveryFeed,
   buildDashboardSnapshot,
   dashboardCache,
   hasDisplayableRealDashboardData,

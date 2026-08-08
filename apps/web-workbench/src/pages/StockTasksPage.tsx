@@ -32,7 +32,9 @@ import { pageErrorMessage } from '@/lib/page-error-copy';
 import {
   diversifyDiscoveryEditorialArt,
   diversifyDiscoveryItems,
+  discoveryPageIndexes,
   discoveryTimeLabel,
+  shouldPrefetchDiscoveryPage,
 } from '@/lib/stock-discovery';
 import {
   formatStockDateTimeLabel,
@@ -108,6 +110,8 @@ interface NewsRow {
 }
 
 type GeneratedBriefing = Awaited<ReturnType<typeof trpc.stocks.generateBriefingNow.mutate>>;
+type DiscoveryFeed = '自选股新闻' | '重要公告' | 'A股要闻' | '美股要闻' | '港股要闻';
+type MarketDiscoveryFeed = Extract<DiscoveryFeed, 'A股要闻' | '美股要闻' | '港股要闻'>;
 
 interface LeaderRow {
   rank: number;
@@ -136,6 +140,8 @@ const EMPTY_LEADERBOARDS: NonNullable<DashboardSnapshot['leaderboards']> = {
   amount: [],
 };
 
+const MARKET_DISCOVERY_FEEDS: MarketDiscoveryFeed[] = ['A股要闻', '美股要闻', '港股要闻'];
+
 function quickCommands(stocks: StockSnapshot[]): string[] {
   const first = stocks[0]?.symbol;
   const second = stocks[1]?.symbol;
@@ -161,6 +167,12 @@ export function StockTasksPage(): JSX.Element {
   const [watchlist, setWatchlist] = React.useState<WatchlistRow[] | null>(null);
   const [briefingStatus, setBriefingStatus] = React.useState<BriefingStatus | null>(null);
   const [dashboard, setDashboard] = React.useState<DashboardSnapshot | null>(null);
+  const [discoveryExtensions, setDiscoveryExtensions] = React.useState<NewsRow[]>([]);
+  const [discoveryMoreAvailable, setDiscoveryMoreAvailable] = React.useState<Record<MarketDiscoveryFeed, boolean>>({
+    'A股要闻': true,
+    '美股要闻': true,
+    '港股要闻': true,
+  });
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [prompt, setPrompt] = React.useState('');
   const [loadingDashboard, setLoadingDashboard] = React.useState(true);
@@ -184,6 +196,13 @@ export function StockTasksPage(): JSX.Element {
   const [activeLeaderboard, setActiveLeaderboard] = React.useState<'涨幅榜' | '跌幅榜' | '成交额榜' | '换手率榜'>('涨幅榜');
   const pageAlive = React.useRef(true);
   const dashboardCompletionRetries = React.useRef(0);
+  const discoveryNextPage = React.useRef<Record<MarketDiscoveryFeed, number>>({
+    'A股要闻': 2,
+    '美股要闻': 2,
+    '港股要闻': 2,
+  });
+  const discoveryLoadCursor = React.useRef(0);
+  const loadingDiscoveryFeeds = React.useRef(new Set<MarketDiscoveryFeed>());
 
   React.useEffect(() => {
     pageAlive.current = true;
@@ -276,7 +295,11 @@ export function StockTasksPage(): JSX.Element {
   );
   const marketIndices = dashboard?.marketIndices ?? [];
   const sectors = dashboard?.sectors ?? [];
-  const news = dashboard?.news ?? [];
+  const dashboardNews = React.useMemo(() => dashboard?.news ?? [], [dashboard?.news]);
+  const news = React.useMemo(
+    () => mergeDiscoveryNews(dashboardNews, discoveryExtensions),
+    [dashboardNews, discoveryExtensions],
+  );
   const leaderboards = dashboard?.leaderboards ?? EMPTY_LEADERBOARDS;
   const leaders = pickActiveLeaders(activeLeaderboard, leaderboards);
   const starStocks = dashboard?.starStocks ?? stocks.filter((stock) => stock.price !== '—').slice(0, 6);
@@ -301,6 +324,67 @@ export function StockTasksPage(): JSX.Element {
       : undefined;
   const realWatchlist = watchlist ?? [];
   const commands = React.useMemo(() => quickCommands(stocks), [stocks]);
+  const resetDiscoveryExtensions = React.useCallback(() => {
+    setDiscoveryExtensions([]);
+    setDiscoveryMoreAvailable({
+      'A股要闻': true,
+      '美股要闻': true,
+      '港股要闻': true,
+    });
+    discoveryNextPage.current = {
+      'A股要闻': 2,
+      '美股要闻': 2,
+      '港股要闻': 2,
+    };
+    discoveryLoadCursor.current = 0;
+    loadingDiscoveryFeeds.current.clear();
+  }, []);
+  const canLoadMoreDiscovery = React.useCallback(
+    (feed: MarketDiscoveryFeed) => discoveryMoreAvailable[feed],
+    [discoveryMoreAvailable],
+  );
+  const loadMoreDiscovery = React.useCallback(async (requestedFeed: MarketDiscoveryFeed | '全部'): Promise<boolean> => {
+    const availableFeeds = MARKET_DISCOVERY_FEEDS.filter(
+      (feed) => discoveryMoreAvailable[feed] && !loadingDiscoveryFeeds.current.has(feed),
+    );
+    const feeds = requestedFeed === '全部'
+      ? (() => {
+        for (let offset = 0; offset < MARKET_DISCOVERY_FEEDS.length; offset += 1) {
+          const index = (discoveryLoadCursor.current + offset) % MARKET_DISCOVERY_FEEDS.length;
+          const candidate = MARKET_DISCOVERY_FEEDS[index]!;
+          if (!availableFeeds.includes(candidate)) continue;
+          discoveryLoadCursor.current = (index + 1) % MARKET_DISCOVERY_FEEDS.length;
+          return [candidate];
+        }
+        return [] as MarketDiscoveryFeed[];
+      })()
+      : availableFeeds.includes(requestedFeed) ? [requestedFeed] : [];
+    if (feeds.length === 0) return false;
+
+    feeds.forEach((feed) => loadingDiscoveryFeeds.current.add(feed));
+    try {
+      const results = await Promise.all(feeds.map(async (feed) => {
+        const page = discoveryNextPage.current[feed];
+        const result = await trpc.stocks.discoveryFeed.query({ feed, page });
+        return { ...result, requestedPage: page };
+      }));
+      if (!pageAlive.current) return false;
+      results.forEach((result) => {
+        discoveryNextPage.current[result.feed] = result.requestedPage + 1;
+      });
+      setDiscoveryMoreAvailable((previous) => ({
+        ...previous,
+        ...Object.fromEntries(results.map((result) => [result.feed, result.hasMore])),
+      }) as Record<MarketDiscoveryFeed, boolean>);
+      setDiscoveryExtensions((previous) => mergeDiscoveryNews(previous, results.flatMap((result) => result.items)));
+      return results.some((result) => result.items.length > 0);
+    } catch {
+      return false;
+    } finally {
+      feeds.forEach((feed) => loadingDiscoveryFeeds.current.delete(feed));
+    }
+  }, [discoveryMoreAvailable]);
+
   const hasMarketSignals = Boolean(
     temperature ||
       marketIndices.length > 0 ||
@@ -379,6 +463,7 @@ export function StockTasksPage(): JSX.Element {
       toast.show(result.already ? '这只股票已在关注列表' : `已添加 ${symbol}`);
       setStockForm({ symbol: '', market: 'A', displayName: '', note: '' });
       setBriefingResult(null);
+      resetDiscoveryExtensions();
       await loadPageData('refresh');
     } catch (err) {
       const message = pageErrorMessage(err);
@@ -387,7 +472,7 @@ export function StockTasksPage(): JSX.Element {
     } finally {
       setWatchlistSaving(false);
     }
-  }, [loadPageData, stockForm, toast, watchlistSaving]);
+  }, [loadPageData, resetDiscoveryExtensions, stockForm, toast, watchlistSaving]);
 
   const removeWatchlistStock = React.useCallback(async (symbol: string) => {
     if (watchlistSaving) return;
@@ -397,6 +482,7 @@ export function StockTasksPage(): JSX.Element {
       await trpc.watchlists.remove.mutate({ symbol });
       toast.show(`已移除 ${symbol}`);
       setBriefingResult(null);
+      resetDiscoveryExtensions();
       await loadPageData('refresh');
     } catch (err) {
       const message = pageErrorMessage(err);
@@ -405,7 +491,7 @@ export function StockTasksPage(): JSX.Element {
     } finally {
       setWatchlistSaving(false);
     }
-  }, [loadPageData, toast, watchlistSaving]);
+  }, [loadPageData, resetDiscoveryExtensions, toast, watchlistSaving]);
 
   const updateWatchlistStock = React.useCallback(async (symbol: string, displayName: string, note: string) => {
     if (watchlistSaving) return;
@@ -419,6 +505,7 @@ export function StockTasksPage(): JSX.Element {
       });
       toast.show(`已更新 ${symbol}`);
       setBriefingResult(null);
+      resetDiscoveryExtensions();
       await loadPageData('refresh');
     } catch (err) {
       const message = pageErrorMessage(err);
@@ -427,7 +514,7 @@ export function StockTasksPage(): JSX.Element {
     } finally {
       setWatchlistSaving(false);
     }
-  }, [loadPageData, toast, watchlistSaving]);
+  }, [loadPageData, resetDiscoveryExtensions, toast, watchlistSaving]);
 
   const submitPrompt = React.useCallback(
     async (value: string) => {
@@ -604,6 +691,10 @@ export function StockTasksPage(): JSX.Element {
               <DiscoveryPanel
                 news={news}
                 onOpenNews={(index) => setActiveNewsIndex(index)}
+                onLoadMore={loadMoreDiscovery}
+                canLoadMore={(feed) => feed === '全部'
+                  ? MARKET_DISCOVERY_FEEDS.some(canLoadMoreDiscovery)
+                  : MARKET_DISCOVERY_FEEDS.includes(feed as MarketDiscoveryFeed) && canLoadMoreDiscovery(feed as MarketDiscoveryFeed)}
               />
               <MarketHighlights
                 stocks={stocks}
@@ -710,13 +801,18 @@ export function StockTasksPage(): JSX.Element {
 function DiscoveryPanel({
   news,
   onOpenNews,
+  onLoadMore,
+  canLoadMore,
 }: {
   news: NewsRow[];
   onOpenNews: (index: number) => void;
+  onLoadMore: (feed: MarketDiscoveryFeed | '全部') => Promise<boolean>;
+  canLoadMore: (feed: DiscoveryFeed | '全部') => boolean;
 }): JSX.Element {
   const pageSize = 3;
-  const [activeFeed, setActiveFeed] = React.useState<'全部' | '自选股新闻' | '重要公告' | 'A股要闻' | '美股要闻' | '港股要闻'>('全部');
+  const [activeFeed, setActiveFeed] = React.useState<DiscoveryFeed | '全部'>('全部');
   const [page, setPage] = React.useState(0);
+  const [loadingMore, setLoadingMore] = React.useState(false);
   const indexedNews = React.useMemo(
     () => news.map((item, index) => ({ item, index })),
     [news],
@@ -734,6 +830,8 @@ function DiscoveryPanel({
   const safePage = Math.min(page, pageCount - 1);
   const start = safePage * pageSize;
   const items = filteredNews.slice(start, start + pageSize);
+  const hasMore = canLoadMore(activeFeed);
+  const pageIndexes = discoveryPageIndexes(pageCount, safePage);
   const announcementCount = news.filter((item) => newsDisplayType(item) === '公告').length;
   const marketNewsCount = news.length - announcementCount;
   const feedCounts = React.useMemo(() => new Map(
@@ -751,8 +849,43 @@ function DiscoveryPanel({
     setPage(0);
   }, [activeFeed]);
 
+  const requestMore = React.useCallback(async (): Promise<boolean> => {
+    if (loadingMore || !hasMore) return false;
+    const loadTarget = activeFeed === '全部'
+      ? activeFeed
+      : MARKET_DISCOVERY_FEEDS.includes(activeFeed as MarketDiscoveryFeed)
+        ? activeFeed as MarketDiscoveryFeed
+        : null;
+    if (!loadTarget) return false;
+    setLoadingMore(true);
+    try {
+      return await onLoadMore(loadTarget);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [activeFeed, hasMore, loadingMore, onLoadMore]);
+
+  React.useEffect(() => {
+    if (!shouldPrefetchDiscoveryPage({
+      currentPage: safePage,
+      pageCount,
+      hasMore,
+      isLoading: loadingMore,
+    })) return;
+    void requestMore();
+  }, [hasMore, loadingMore, pageCount, requestMore, safePage]);
+
   const goPrevious = (): void => setPage((current) => Math.max(0, current - 1));
-  const goNext = (): void => setPage((current) => Math.min(pageCount - 1, current + 1));
+  const goNext = (): void => {
+    if (safePage < pageCount - 1) {
+      setPage((current) => current + 1);
+      return;
+    }
+    void requestMore().then((didAppend) => {
+      if (!didAppend) return;
+      window.setTimeout(() => setPage((current) => current + 1), 0);
+    });
+  };
   const tabItems = [
     { label: '全部' as const, count: news.length },
     { label: '自选股新闻' as const, count: feedCounts.get('自选股新闻') ?? 0 },
@@ -904,7 +1037,7 @@ function DiscoveryPanel({
           ))}
         </div>
       ) : null}
-      {filteredNews.length > pageSize ? (
+      {filteredNews.length > pageSize || hasMore ? (
         <div className="mt-4 flex items-center justify-between gap-3">
           <button
             type="button"
@@ -916,25 +1049,40 @@ function DiscoveryPanel({
           >
             <ChevronLeft className="h-4 w-4" aria-hidden />
           </button>
+          {hasMore ? (
+            <button
+              type="button"
+              onClick={() => void requestMore()}
+              disabled={loadingMore}
+              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-[#E7E7EB] bg-white px-3 text-[12px] font-medium text-[#667085] transition hover:border-[#EA1F59]/25 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {loadingMore ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
+              {loadingMore ? '正在加载' : '加载更多'}
+            </button>
+          ) : null}
           <div className="flex min-w-0 flex-1 items-center justify-center gap-1.5">
-            {Array.from({ length: pageCount }).map((_, index) => (
-              <button
-                key={index}
-                type="button"
-                onClick={() => setPage(index)}
-                className={cn(
-                  'h-1.5 rounded-full transition-all',
-                  index === safePage ? 'w-4 bg-[#121826]' : 'w-1.5 bg-[#D2D6DE] hover:bg-[#AEB5C2]',
-                )}
-                aria-label={`查看第 ${index + 1} 页动态`}
-                title={`第 ${index + 1} 页`}
-              />
+            {pageIndexes.map((index, position) => (
+              <React.Fragment key={index}>
+                {position > 0 && index > pageIndexes[position - 1]! + 1 ? (
+                  <span className="px-0.5 text-[11px] leading-none text-[#98A2B3]" aria-hidden>...</span>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => setPage(index)}
+                  className={cn(
+                    'h-1.5 rounded-full transition-all',
+                    index === safePage ? 'w-4 bg-[#121826]' : 'w-1.5 bg-[#D2D6DE] hover:bg-[#AEB5C2]',
+                  )}
+                  aria-label={`查看第 ${index + 1} 页动态`}
+                  title={`第 ${index + 1} 页`}
+                />
+              </React.Fragment>
             ))}
           </div>
           <button
             type="button"
             onClick={goNext}
-            disabled={safePage >= pageCount - 1}
+            disabled={(safePage >= pageCount - 1 && !hasMore) || loadingMore}
             className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#E7E7EB] bg-white text-[#667085] transition hover:border-[#EA1F59]/25 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-40"
             aria-label="下一页动态"
             title="下一页"
@@ -2817,6 +2965,16 @@ function preserveDisplayableDashboard(next: DashboardSnapshot, previous: Dashboa
       message: '行情源本次返回为空，当前继续展示上一次真实数据，后台会继续刷新。',
     },
   };
+}
+
+function mergeDiscoveryNews(base: NewsRow[], additions: NewsRow[]): NewsRow[] {
+  const seen = new Set<string>();
+  return [...base, ...additions].filter((item) => {
+    const key = item.url?.trim() || `${newsFeed(item)}:${item.time}:${item.title.trim()}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function buildStockRows(watchlist: WatchlistRow[] | null): StockSnapshot[] {

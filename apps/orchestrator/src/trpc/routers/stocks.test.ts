@@ -142,6 +142,138 @@ describe('stocks dashboard snapshot', () => {
     ]);
   });
 
+  it('keeps all fetched self-news and important announcements while capping each market feed deliberately', () => {
+    const makeAnnouncements = (symbol: string, name: string) => ({
+      entry: { symbol, market: 'A' as const, displayName: name },
+      env: envelope(Array.from({ length: 20 }, (_, index) => ({
+        公告标题: `${name} 公告 ${index}`,
+        公告时间: `2026-08-${String(20 - index).padStart(2, '0')} 09:00:00`,
+        公告链接: `https://www.cninfo.com.cn/${symbol}/notice-${index}`,
+      }))) as never,
+    });
+    const makeNews = (symbol: string, name: string) => ({
+      entry: { symbol, market: 'A' as const, displayName: name },
+      env: envelope(Array.from({ length: 20 }, (_, index) => ({
+        新闻标题: `${name} 新闻 ${index}`,
+        发布时间: `2026-08-${String(20 - index).padStart(2, '0')} 10:00:00`,
+        文章来源: '真实来源',
+        新闻链接: `https://finance.eastmoney.com/a/20260808${symbol}${String(index).padStart(4, '0')}.html`,
+      }))) as never,
+    });
+    const makeMarketRows = (prefix: string, count: number) => Array.from({ length: count }, (_, index) => ({
+      新闻标题: `${prefix} 要闻 ${index}`,
+      发布时间: `2026-08-${String((index % 28) + 1).padStart(2, '0')} 10:00:00`,
+      文章来源: '真实来源',
+      新闻链接: `https://finance.eastmoney.com/a/20260808${prefix}${String(index).padStart(4, '0')}.html`,
+    }));
+
+    const news = __stocksDashboardTest.buildNews(
+      [makeAnnouncements('603528', '多伦科技'), makeAnnouncements('600497', '驰宏锌锗')],
+      [makeNews('603528', '多伦科技'), makeNews('600497', '驰宏锌锗')],
+      [
+        { feed: 'A股要闻', env: envelope(makeMarketRows('cn', 36)) as never },
+        { feed: '美股要闻', env: envelope(makeMarketRows('us', 15)) as never },
+        { feed: '港股要闻', env: envelope(makeMarketRows('hk', 15)) as never },
+      ],
+    );
+
+    expect(news.filter((item) => item.feed === '重要公告')).toHaveLength(40);
+    expect(news.filter((item) => item.feed === '自选股新闻')).toHaveLength(40);
+    expect(news.filter((item) => item.feed === 'A股要闻')).toHaveLength(30);
+    expect(news.filter((item) => item.feed === '美股要闻')).toHaveLength(12);
+    expect(news.filter((item) => item.feed === '港股要闻')).toHaveLength(12);
+  });
+
+  it('loads the next market-news page with the feed-specific real-source quota', async () => {
+    const requested: string[] = [];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = new URL(String(input));
+      requested.push(`${url.pathname}${url.search}`);
+      const pageRows = Array.from({ length: 12 }, (_, index) => ({
+        新闻标题: `美股第 2 页要闻 ${index}`,
+        发布时间: `2026-08-08 10:${String(index).padStart(2, '0')}:00`,
+        文章来源: '真实来源',
+        新闻链接: `https://finance.eastmoney.com/a/2026080838382441${String(index).padStart(2, '0')}.html`,
+      }));
+      return new Response(JSON.stringify(envelope(pageRows)));
+    });
+
+    const result = await __stocksDashboardTest.loadMarketDiscoveryFeed({
+      feed: '美股要闻',
+      page: 2,
+      logger: { warn: vi.fn() },
+    });
+
+    expect(requested).toEqual(['/market-news/us?page=2&page_size=12']);
+    expect(result).toMatchObject({ feed: '美股要闻', page: 2, hasMore: true });
+    expect(result.items).toHaveLength(12);
+    expect(result.items.every((item) => item.feed === '美股要闻')).toBe(true);
+  });
+
+  it('keeps discovery pagination available when a real source page is partial', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(envelope([
+      {
+        新闻标题: '港股下一页仍有来源内容',
+        发布时间: '2026-08-08 11:00:00',
+        文章来源: '真实来源',
+        新闻链接: 'https://finance.eastmoney.com/a/202608083838244199.html',
+      },
+    ]))));
+
+    const result = await __stocksDashboardTest.loadMarketDiscoveryFeed({
+      feed: '港股要闻',
+      page: 2,
+      logger: { warn: vi.fn() },
+    });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.hasMore).toBe(true);
+  });
+
+  it('requests news and announcements for every A-share in the watchlist', async () => {
+    const symbols = ['600001', '600002', '600003', '600004', '600005', '600006'];
+    const requestedNewsSymbols: string[] = [];
+    const requestedAnnouncementSymbols: string[] = [];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = new URL(String(input));
+      const stockNews = url.pathname.match(/^\/stock-news\/(\d{6})$/)?.[1];
+      const announcements = url.pathname.match(/^\/announcements\/(\d{6})$/)?.[1];
+      if (stockNews) {
+        requestedNewsSymbols.push(stockNews);
+        return new Response(JSON.stringify(envelope([
+          {
+            新闻标题: `${stockNews} 真实新闻`,
+            发布时间: '2026-08-08 11:00:00',
+            文章来源: '真实来源',
+            新闻链接: `https://finance.eastmoney.com/a/202608083838244${stockNews}.html`,
+          },
+        ])));
+      }
+      if (announcements) {
+        requestedAnnouncementSymbols.push(announcements);
+        return new Response(JSON.stringify(envelope([
+          {
+            公告标题: `${announcements} 重要公告`,
+            公告时间: '2026-08-08 10:00:00',
+            公告链接: `https://www.cninfo.com.cn/${announcements}/notice.html`,
+          },
+        ])));
+      }
+      return new Response(JSON.stringify(envelope([])));
+    });
+
+    await __stocksDashboardTest.buildDashboardSnapshot({
+      logger: { warn: vi.fn() },
+      watchlistRows: symbols.map((symbol) => ({ symbol, market: 'A' as const, displayName: symbol })),
+      effectiveWatchlist: symbols.map((symbol) => ({ symbol, market: 'A' as const, displayName: symbol })),
+      now: new Date('2026-08-08T04:00:00.000Z'),
+      includeSlowSignals: true,
+    });
+
+    expect(requestedNewsSymbols.sort()).toEqual(symbols);
+    expect(requestedAnnouncementSymbols.sort()).toEqual(symbols);
+  });
+
   it('uses a declared source cover first and stable editorial art when no cover is published', () => {
     const sourceDeclaredImageUrl = __stocksDashboardTest.sourceDeclaredImageUrl as (value?: unknown) => string | undefined;
     const selectEditorialArtUrl = __stocksDashboardTest.selectEditorialArtUrl as (input: {
@@ -295,7 +427,7 @@ describe('stocks dashboard snapshot', () => {
     expect(rows[0]?.imageUrl).not.toBe(rows[1]?.imageUrl);
   });
 
-  it('keeps enough source-backed discovery rows for a multi-stock watchlist', () => {
+  it('keeps every fetched source-backed row for a multi-stock watchlist', () => {
     const buildSourceDiscovery = __stocksDashboardTest.buildNews as unknown as (
       announcements: Array<{ entry: { symbol: string; market: 'A'; displayName: string }; env: ReturnType<typeof envelope> }>,
       stockNews: Array<{ entry: { symbol: string; market: 'A'; displayName: string }; env: ReturnType<typeof envelope> }>,
@@ -321,9 +453,9 @@ describe('stocks dashboard snapshot', () => {
 
     const discovery = buildSourceDiscovery(announcements, stockNews);
 
-    expect(discovery).toHaveLength(39);
-    expect(discovery.filter((item) => item.category === '新闻')).toHaveLength(24);
-    expect(discovery.filter((item) => item.category === '公告')).toHaveLength(15);
+    expect(discovery).toHaveLength(48);
+    expect(discovery.filter((item) => item.category === '新闻')).toHaveLength(30);
+    expect(discovery.filter((item) => item.category === '公告')).toHaveLength(18);
   });
 
   it('filters, sorts, and deduplicates persisted intraday points to A-share sessions', () => {
@@ -1558,7 +1690,7 @@ describe('stocks dashboard snapshot', () => {
     expect(requestedPaths).toContain('/stock-news/603528');
   });
 
-  it('mixes ranking-selected market news into discovery without replacing watchlist news', async () => {
+  it('keeps broad market news separate from ranking-selected individual stock news', async () => {
     const requestedNewsSymbols: string[] = [];
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       const url = new URL(String(input));
@@ -1616,7 +1748,7 @@ describe('stocks dashboard snapshot', () => {
       includeSlowSignals: true,
     });
 
-    expect(requestedNewsSymbols).toEqual(expect.arrayContaining(['603528', '600010', '600011', '600012']));
+    expect(requestedNewsSymbols).toEqual(['603528']);
     expect(snapshot.news.map((item) => item.url)).toEqual(expect.arrayContaining([
       'https://finance.eastmoney.com/a/202608083838244001.html',
       'https://finance.eastmoney.com/a/202608083838244002.html',
@@ -1624,9 +1756,6 @@ describe('stocks dashboard snapshot', () => {
     ]));
     expect(snapshot.news).toEqual(expect.arrayContaining([
       expect.objectContaining({ symbols: ['603528'], feed: '自选股新闻' }),
-      expect.objectContaining({ symbols: ['600010'], feed: 'A股要闻' }),
-      expect.objectContaining({ symbols: ['600011'], feed: 'A股要闻' }),
-      expect.objectContaining({ symbols: ['600012'], feed: 'A股要闻' }),
       expect.objectContaining({ feed: 'A股要闻', title: 'A股市场的真实要闻' }),
       expect.objectContaining({ feed: '美股要闻', title: '美股市场的真实要闻' }),
       expect.objectContaining({ feed: '港股要闻', title: '港股市场的真实要闻' }),

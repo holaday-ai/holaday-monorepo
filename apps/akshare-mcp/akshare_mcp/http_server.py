@@ -202,9 +202,9 @@ def stock_news(symbol: str) -> dict[str, Any]:
 
 
 @app.get("/market-news/{market}")
-def market_news(market: str) -> dict[str, Any]:
+def market_news(market: str, page: int = 1, page_size: int = 20) -> dict[str, Any]:
     """市场真实新闻。market: cn（A股）| us（美股）| hk（港股）。"""
-    return _safe(_market_news, market)
+    return _safe(_market_news, market, page=page, page_size=page_size)
 
 
 @app.get("/unlock/{symbol}")

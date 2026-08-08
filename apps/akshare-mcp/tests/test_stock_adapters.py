@@ -181,7 +181,7 @@ def test_stock_news_keeps_only_linked_articles_with_source_timestamps(monkeypatc
 def test_market_news_uses_a_market_specific_keyword_and_keeps_source_rows(monkeypatch):
     seen = []
 
-    def fetch(keyword):
+    def fetch(keyword, *, page=1, page_size=20):
         seen.append(keyword)
         return [
             {
@@ -209,6 +209,56 @@ def test_market_news_uses_a_market_specific_keyword_and_keeps_source_rows(monkey
             "市场": "us",
         }
     ]
+
+
+def test_cn_market_news_uses_the_requested_source_page_for_every_broad_topic(monkeypatch):
+    seen = []
+
+    def fetch(keyword, *, page=1, page_size=20):
+        seen.append((keyword, page, page_size))
+        return [
+            {
+                "关键词": keyword,
+                "新闻标题": f"{keyword} 的真实动态",
+                "发布时间": "2026-08-08 10:00:00",
+                "文章来源": "真实来源",
+                "新闻链接": f"https://finance.eastmoney.com/a/{keyword}{page}{page_size}3838244001.html",
+            }
+        ]
+
+    monkeypatch.setattr(adp, "_get_eastmoney_news", fetch)
+
+    rows, source = adp.get_market_news("cn", page=2, page_size=3)
+
+    assert [keyword for keyword, _page, _page_size in seen] == list(adp._CN_MARKET_NEWS_KEYWORDS)
+    assert all(page == 2 and page_size == 20 for _keyword, page, page_size in seen)
+    assert source == "eastmoney:market-news-search(cn)"
+    assert len(rows) == 3
+    assert {row["关键词"] for row in rows}.issubset(set(adp._CN_MARKET_NEWS_KEYWORDS))
+    assert all(row["市场"] == "cn" for row in rows)
+
+
+def test_cn_market_news_keeps_other_topics_when_one_upstream_search_fails(monkeypatch):
+    def fetch(keyword, *, page=1, page_size=20):
+        if keyword == "新能源":
+            raise RuntimeError("temporary upstream failure")
+        return [
+            {
+                "关键词": keyword,
+                "新闻标题": f"{keyword} 的真实动态",
+                "发布时间": "2026-08-08 10:00:00",
+                "文章来源": "真实来源",
+                "新闻链接": f"https://finance.eastmoney.com/a/{keyword}3838244001.html",
+            }
+        ]
+
+    monkeypatch.setattr(adp, "_get_eastmoney_news", fetch)
+
+    rows, _source = adp.get_market_news("cn", page=1, page_size=30)
+
+    assert len(rows) == len(adp._CN_MARKET_NEWS_KEYWORDS) - 1
+    assert "新能源" not in {row["关键词"] for row in rows}
+    assert all(row["市场"] == "cn" for row in rows)
 
 
 def test_market_news_uses_an_ascii_encoded_referer_for_chinese_keywords(monkeypatch):

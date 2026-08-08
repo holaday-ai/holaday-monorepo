@@ -41,6 +41,7 @@ import os
 import re
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 from urllib.parse import quote, urlparse
 
@@ -625,7 +626,7 @@ def _stock_news_http_get(url: str, *, params: dict[str, str], headers: dict[str,
     return curl_requests.get(url, params=params, headers=headers, timeout=timeout)
 
 
-def _stock_news_params(symbol: str) -> dict[str, str]:
+def _stock_news_params(symbol: str, *, page: int = 1, page_size: int = 20) -> dict[str, str]:
     query = {
         "uid": "",
         "keyword": symbol,
@@ -637,8 +638,8 @@ def _stock_news_params(symbol: str) -> dict[str, str]:
             "cmsArticleWebOld": {
                 "searchScope": "default",
                 "sort": "default",
-                "pageIndex": 1,
-                "pageSize": 20,
+                "pageIndex": max(1, int(page)),
+                "pageSize": min(MAX_ROWS, max(1, int(page_size))),
                 "preTag": "<em>",
                 "postTag": "</em>",
             }
@@ -665,7 +666,7 @@ def _stock_news_image_url(value: object) -> str | None:
     return image_url
 
 
-def _get_eastmoney_news(keyword: str) -> list[dict[str, Any]]:
+def _get_eastmoney_news(keyword: str, *, page: int = 1, page_size: int = 20) -> list[dict[str, Any]]:
     """Fetch source-backed Eastmoney news for one stock or market keyword.
 
     AkShare's wrapper does not set a network deadline and drops the search
@@ -674,7 +675,7 @@ def _get_eastmoney_news(keyword: str) -> list[dict[str, Any]]:
     """
     response = _stock_news_http_get(
         _STOCK_NEWS_SEARCH_URL,
-        params=_stock_news_params(keyword),
+        params=_stock_news_params(keyword, page=page, page_size=page_size),
         headers={
             "accept": "*/*",
             # curl_cffi requires header values to be Latin-1. Query params are
@@ -699,7 +700,7 @@ def _get_eastmoney_news(keyword: str) -> list[dict[str, Any]]:
         raise AkShareUnavailable("东方财富新闻结果格式异常")
 
     rows: list[dict[str, Any]] = []
-    for source_row in source_rows[:MAX_ROWS]:
+    for source_row in source_rows[:min(MAX_ROWS, max(1, int(page_size)))]:
         if not isinstance(source_row, dict):
             continue
         title = _stock_news_text(source_row.get("title"))
@@ -733,14 +734,63 @@ _MARKET_NEWS_KEYWORDS = {
     "hk": "港股",
 }
 
+# A single ranking-driven query tends to over-index on whichever industry is
+# leading today. These public Eastmoney searches keep the A-share feed broad
+# without inventing an editorial category or synthesizing source content.
+_CN_MARKET_NEWS_KEYWORDS = (
+    "A股",
+    "宏观经济",
+    "金融",
+    "消费",
+    "医药",
+    "新能源",
+    "制造业",
+)
 
-def get_market_news(market: str) -> tuple[list[dict[str, Any]], str]:
+
+def _market_news_sort_key(row: dict[str, Any]) -> tuple[str, str]:
+    return (str(row.get("发布时间") or ""), str(row.get("新闻标题") or ""))
+
+
+def _dedupe_market_news(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[str] = set()
+    unique: list[dict[str, Any]] = []
+    for row in rows:
+        key = str(row.get("新闻链接") or "").strip() or str(row.get("新闻标题") or "").strip()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        unique.append(row)
+    return sorted(unique, key=_market_news_sort_key, reverse=True)
+
+
+def _market_topic_news(topic: str, *, page: int, page_size: int) -> list[dict[str, Any]]:
+    """One broad-market source must not empty the whole A-share discovery feed."""
+    try:
+        return _get_eastmoney_news(topic, page=page, page_size=page_size)
+    except Exception:
+        return []
+
+
+def get_market_news(market: str, page: int = 1, page_size: int = 20) -> tuple[list[dict[str, Any]], str]:
     """Fetch source-backed news for the requested A-share, US, or HK market."""
     normalized = str(market or "").strip().lower()
     keyword = _MARKET_NEWS_KEYWORDS.get(normalized)
     if not keyword:
         raise AkShareUnavailable("不支持的市场新闻类型，仅支持 cn、us、hk")
-    rows = _get_eastmoney_news(keyword)
+    safe_page = max(1, int(page))
+    safe_page_size = min(MAX_ROWS, max(1, int(page_size)))
+    if normalized == "cn":
+        with ThreadPoolExecutor(max_workers=len(_CN_MARKET_NEWS_KEYWORDS)) as executor:
+            futures = [
+                executor.submit(_market_topic_news, topic, page=safe_page, page_size=20)
+                for topic in _CN_MARKET_NEWS_KEYWORDS
+            ]
+            topic_rows = [future.result() for future in futures]
+        combined_rows = _dedupe_market_news([row for rows in topic_rows for row in rows])
+        rows = combined_rows[:safe_page_size]
+    else:
+        rows = _get_eastmoney_news(keyword, page=safe_page, page_size=safe_page_size)
     for row in rows:
         row["市场"] = normalized
     return rows, f"eastmoney:market-news-search({normalized})"
