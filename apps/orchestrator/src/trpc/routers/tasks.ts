@@ -185,6 +185,7 @@ import {
 } from '../../execution/expert-workflow-registry.js';
 import { getFeatureFlags as getExecutionFeatureFlags } from '../../execution/feature-flags.js';
 import { fencedFileIds, isDocumentOutput } from '../../execution/file-artifact-consistency.js';
+import { appendSearchSourceReferences } from '../../execution/search-source-references.js';
 import { MAX_DOWNLOAD_BYTES } from '../../files/download-manager.js';
 import { FileService, taskInternalIdFor } from '../../files/file-service.js';
 import { parseFileForPrompt } from '../../files/parsers.js';
@@ -4525,6 +4526,10 @@ export const tasksRouter = router({
         readonly query: string;
         readonly sources: ReadonlyArray<{ title: string; url: string; snippet?: string }>;
       }> = [];
+      // Terminal source references are independent from the per-tick buffer:
+      // onTick clears the latter after persistence, while the final answer
+      // still needs the observed search URLs for its evidence boundary.
+      const observedWebSearchSources: Array<{ title: string; url: string }> = [];
       // Codex P3 follow-up — per-task buffer of save_page_as_pdf
       // results. Each successful call appends one entry here; the
       // terminal-state merge below folds the list into
@@ -4959,6 +4964,9 @@ export const tasksRouter = router({
               query: ev.query,
               sources: ev.sources ?? [],
             });
+            if (ev.sources?.length) {
+              observedWebSearchSources.push(...ev.sources);
+            }
             try {
               broadcastToUser(userId, {
                 type: 'server.supercar.web_search',
@@ -5765,6 +5773,14 @@ export const tasksRouter = router({
             // persistSupercarOutcome writes the row, so the user
             // sees the corrected text on first render.
             if (outcome.status === 'completed' && outcome.summary) {
+              const answerSummary = appendSearchSourceReferences(
+                outcome.summary,
+                observedWebSearchSources,
+              );
+              outcome = {
+                ...outcome,
+                summary: answerSummary,
+              };
               if (finalState.finalUrl) {
                 recordEvidence(taskId, {
                   fact: `final_url=${finalState.finalUrl}`,
@@ -5774,7 +5790,7 @@ export const tasksRouter = router({
                 });
               }
               recordEvidence(taskId, {
-                fact: `response_length=${outcome.summary.length}`,
+                fact: `response_length=${answerSummary.length}`,
                 sourceType: 'tool_result',
                 sourceDetail: 'supercar agent response',
                 confidence: 'observed',
@@ -5783,7 +5799,7 @@ export const tasksRouter = router({
               broadcastSubStatus(ctx.userId, taskId, 'verifying');
               const verified: VerifyOutput = await verifyAndFinalize({
                 taskId,
-                answerText: outcome.summary,
+                answerText: answerSummary,
                 ...(finalState.finalUrl ? { finalUrl: finalState.finalUrl } : {}),
                 client: anthropicForResolver,
                 logger: ctx.logger,
@@ -5890,6 +5906,17 @@ export const tasksRouter = router({
                   'openai-response-layer: unexpected throw — keeping original',
                 );
               }
+            }
+            // The optional response layer may rewrite prose, so enforce the
+            // observed-source boundary once more immediately before persistence.
+            if (outcome.status === 'completed' && outcome.summary) {
+              outcome = {
+                ...outcome,
+                summary: appendSearchSourceReferences(
+                  outcome.summary,
+                  observedWebSearchSources,
+                ),
+              };
             }
             let terminalPersisted = false;
             if (supercarStateTransition.kind === 'waiting_user') {
