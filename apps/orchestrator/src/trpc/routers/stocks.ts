@@ -957,7 +957,9 @@ function editorialArtTheme(category: '公告' | '新闻', title: string): Editor
     return 'governance';
   }
   if (/业绩|营收|利润|财报|预增|预亏|分红|经营/.test(text)) return 'earnings';
-  if (/芯片|半导体|软件|算力|人工智能|ai|电子|通信|光纤|光模块|光通信|cpo|数据中心|服务器|存储/.test(text)) return 'technology';
+  if (/芯片|半导体|软件|算力|人工智能|ai|电子|通信|光纤|光模块|光通信|cpo|数据中心|服务器|存储|制造业|装备制造|高端装备|智能装备|智能制造|工业机器人|机床|机械设备|新型工业化/.test(text)) {
+    return 'technology';
+  }
   if (/汽车|新能源车|充电|电池|整车/.test(text)) return 'mobility';
   if (/物流|仓储|快递|港口|运输/.test(text)) return 'logistics';
   if (/光伏|风电|储能|电力|煤炭|石油|天然气|能源/.test(text)) return 'energy';

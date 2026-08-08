@@ -296,6 +296,8 @@ describe('stocks dashboard snapshot', () => {
     expect(sourceDeclaredImageUrl('javascript:alert(1)')).toBeUndefined();
     expect(editorialArtTheme('新闻', '驰宏锌锗：光纤概念涨幅居前')).toBe('technology');
     expect(editorialArtTheme('新闻', '迪生力：存储芯片概念活跃')).toBe('technology');
+    expect(editorialArtTheme('新闻', '上半年高端装备制造业新设企业2.8万户')).toBe('technology');
+    expect(editorialArtTheme('新闻', '共享制造成为制造业协同新模式')).toBe('technology');
     expect(editorialArtTheme('新闻', '创新药研发进展披露')).toBe('healthcare');
     expect(editorialArtTheme('新闻', '铜价上涨带动有色金属板块')).toBe('materials');
     expect(editorialArtOptions('新闻', '泰晶科技：存储芯片概念活跃')).toHaveLength(12);
