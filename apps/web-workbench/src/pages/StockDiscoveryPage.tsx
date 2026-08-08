@@ -264,7 +264,7 @@ export function StockDiscoveryPage(): JSX.Element {
               )}
             >
               {feed}
-              <span className="tabular-nums text-[12px] opacity-80">{count}</span>
+              <span className="tabular-nums text-[12px] opacity-80">{loading ? '—' : count}</span>
             </button>
           );
         })}
