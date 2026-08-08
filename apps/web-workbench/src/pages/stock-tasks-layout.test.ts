@@ -15,10 +15,19 @@ describe('stock tasks layout', () => {
 
     expect(pageSource).toContain('<DiscoveryNewsCard');
     expect(cardSource).not.toContain('images.unsplash.com');
-    expect(cardSource).toContain('{item.imageUrl ? (');
+    expect(cardSource).toContain('{showImage ? (');
     expect(cardSource).toContain('src={item.imageUrl}');
     expect(cardSource).not.toContain('<span>来源信息</span>');
     expect(cardSource).not.toContain('原文已记录');
+  });
+
+  it('falls back to a title-first card when a declared cover cannot load', () => {
+    const cardSource = readFileSync(new URL('../components/DiscoveryNewsCard.tsx', import.meta.url), 'utf8');
+
+    expect(cardSource).toContain('const [imageFailed, setImageFailed] = useState(false);');
+    expect(cardSource).toContain('const showImage = Boolean(item.imageUrl && !imageFailed);');
+    expect(cardSource).toContain('onError={() => setImageFailed(true)}');
+    expect(cardSource).toContain('{showImage ? (');
   });
 
   it('renders reusable editorial art as the normal card media without a source-image claim', () => {
