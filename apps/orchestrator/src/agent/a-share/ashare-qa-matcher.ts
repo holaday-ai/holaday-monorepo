@@ -314,6 +314,12 @@ export async function resolveAshareInContext(
     return { kind, stocks: stocks.slice(0, 5), dateIso: iso, dateCompact: compact, deep };
   };
 
+  // 基金、ETF 等非 A 股证券请求应先回到通用研究。旧版股票面板曾把关注
+  // 代码附在用户原话后面；若先解析代码，会把这类请求错误改写成个股速览。
+  if (isNonAshareSecurityQuery(text)) {
+    return { match: null, hasSignal: false, indexIntent: false };
+  }
+
   // 显式个股优先（代码 / 自选股名 / 自选股整体问），零网络。
   let stocks = resolveStocks(text, opts.watchlist);
   if (stocks.length === 0 && wantsWatchlist && opts.watchlist.length > 0) {
@@ -321,10 +327,6 @@ export async function resolveAshareInContext(
   }
   if (stocks.length > 0) {
     return { match: toMatch(stocks), hasSignal: true, indexIntent: false };
-  }
-
-  if (isNonAshareSecurityQuery(text)) {
-    return { match: null, hasSignal: false, indexIntent: false };
   }
 
   // 无显式个股：指数/大盘问句 → 指数 lane（E16：不 name-search，不进个股 lane）。

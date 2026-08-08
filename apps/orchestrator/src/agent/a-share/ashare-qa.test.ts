@@ -144,6 +144,20 @@ describe('matchAshareQa', () => {
     expect(searched).toBe(false);
   });
 
+  it('基金查询即使携带旧版自动附加的关注代码，也不进入 A 股个股速览', async () => {
+    const r = await resolveAshareInContext(
+      {
+        intent: 'leopold的基金最近发生了什么事？请优先结合我的关注列表（600519、300750）进行分析。',
+        roleId: 'a-share-analyst',
+        watchlist: WL,
+        now: NOW,
+      },
+      async () => [],
+    );
+
+    expect(r).toEqual({ match: null, hasSignal: false, indexIntent: false });
+  });
+
   it('显式 A 股代码仍进入个股事实链路', async () => {
     const r = await resolveAshareInContext(
       {
