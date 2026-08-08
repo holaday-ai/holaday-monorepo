@@ -26,22 +26,55 @@ export function diversifyDiscoveryEditorialArt<T extends DiscoveryMedia>(
 ): IndexedDiscoveryItem<T>[] {
   const usedEditorialUrlsByPool = new Map<string, Set<string>>();
   const recentEditorialUrls: string[] = [];
+  const sourceCoverCounts = new Map<string, number>();
+  for (const { item } of items) {
+    if (item.imageKind !== 'source-cover' || !item.imageUrl) continue;
+    sourceCoverCounts.set(item.imageUrl, (sourceCoverCounts.get(item.imageUrl) ?? 0) + 1);
+  }
   return items.map((entry) => {
     const { item } = entry;
     const imageUrl = item.imageUrl;
-    if (!imageUrl || !isLocalEditorialArt(item)) {
+    if (!imageUrl) {
       return entry;
     }
     const candidates = item.editorialArtOptions?.filter((candidate, index, all) => all.indexOf(candidate) === index)
-      ?? [imageUrl];
-    const poolKey = candidates.join('|');
+      .filter((candidate) => candidate.startsWith('/stock-editorial-art/'))
+      ?? [];
+
+    // Publishers occasionally return one generic image for otherwise distinct
+    // stories. In that case every affected card uses its own topical fallback
+    // so the generic image cannot imply an unrelated subject.
+    if (item.imageKind === 'source-cover') {
+      if ((sourceCoverCounts.get(imageUrl) ?? 0) < 2) return entry;
+      const poolKey = candidates.join('|');
+      const usedEditorialUrls = usedEditorialUrlsByPool.get(poolKey) ?? new Set<string>();
+      if (usedEditorialUrls.size >= candidates.length) usedEditorialUrls.clear();
+      usedEditorialUrlsByPool.set(poolKey, usedEditorialUrls);
+      const replacement = candidates.find((candidate) =>
+        !usedEditorialUrls.has(candidate) && !recentEditorialUrls.includes(candidate),
+      ) ?? candidates.find((candidate) => !usedEditorialUrls.has(candidate)) ?? candidates[0];
+      if (!replacement) return entry;
+      usedEditorialUrls.add(replacement);
+      recentEditorialUrls.push(replacement);
+      if (recentEditorialUrls.length > 3) recentEditorialUrls.shift();
+      return {
+        ...entry,
+        item: { ...item, imageUrl: replacement, imageKind: 'editorial-art' },
+      };
+    }
+
+    if (!isLocalEditorialArt(item)) {
+      return entry;
+    }
+    const effectiveCandidates = candidates.length > 0 ? candidates : [imageUrl];
+    const poolKey = effectiveCandidates.join('|');
     const usedEditorialUrls = usedEditorialUrlsByPool.get(poolKey) ?? new Set<string>();
-    if (usedEditorialUrls.size >= candidates.length) usedEditorialUrls.clear();
+    if (usedEditorialUrls.size >= effectiveCandidates.length) usedEditorialUrls.clear();
     usedEditorialUrlsByPool.set(poolKey, usedEditorialUrls);
 
-    const replacement = [imageUrl, ...candidates].find((candidate) =>
+    const replacement = [imageUrl, ...effectiveCandidates].find((candidate) =>
       !usedEditorialUrls.has(candidate) && !recentEditorialUrls.includes(candidate),
-    ) ?? [imageUrl, ...candidates].find((candidate) => !usedEditorialUrls.has(candidate)) ?? imageUrl;
+    ) ?? [imageUrl, ...effectiveCandidates].find((candidate) => !usedEditorialUrls.has(candidate)) ?? imageUrl;
 
     usedEditorialUrls.add(replacement);
     recentEditorialUrls.push(replacement);

@@ -337,11 +337,11 @@ describe('stocks dashboard snapshot', () => {
     });
   });
 
-  it('keeps source covers and rotates coverless adjacent discovery items across editorial art', () => {
+  it('keeps source covers and supplies a semantic fallback when a generic cover repeats', () => {
     const buildSourceDiscovery = __stocksDashboardTest.buildNews as unknown as (
       announcements: Array<{ entry: { symbol: string; market: 'A'; displayName: string }; env: ReturnType<typeof envelope> }>,
       stockNews: Array<{ entry: { symbol: string; market: 'A'; displayName: string }; env: ReturnType<typeof envelope> }>,
-    ) => Array<{ imageUrl?: string; imageKind?: string }>;
+    ) => Array<{ imageUrl?: string; imageKind?: string; editorialArtOptions?: string[] }>;
     const rows = buildSourceDiscovery([], [{
       entry: { symbol: '603738', market: 'A', displayName: '泰晶科技' },
       env: envelope([
@@ -367,7 +367,11 @@ describe('stocks dashboard snapshot', () => {
       ]),
     }]);
 
-    expect(rows[0]).toMatchObject({ imageKind: 'source-cover', imageUrl: 'https://source.example/verified-cover.jpg' });
+    expect(rows[0]).toMatchObject({
+      imageKind: 'source-cover',
+      imageUrl: 'https://source.example/verified-cover.jpg',
+      editorialArtOptions: expect.arrayContaining(['/stock-editorial-art/earnings-1.jpg']),
+    });
     expect(rows.slice(1).every((row) => row.imageKind === 'editorial-art')).toBe(true);
     expect(rows[1]?.imageUrl).not.toBe(rows[2]?.imageUrl);
   });

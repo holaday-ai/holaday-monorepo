@@ -75,6 +75,44 @@ describe('stock discovery presentation', () => {
     ]);
   });
 
+  it('replaces every repeated generic source cover with each article\'s own editorial fallback', () => {
+    const items = [
+      {
+        item: {
+          imageUrl: 'https://publisher.example/generic-market-photo.jpg',
+          imageKind: 'source-cover' as const,
+          editorialArtOptions: [
+            '/stock-editorial-art/technology-1.jpg',
+            '/stock-editorial-art/technology-2.jpg',
+          ],
+        },
+        index: 0,
+      },
+      {
+        item: {
+          imageUrl: 'https://publisher.example/generic-market-photo.jpg',
+          imageKind: 'source-cover' as const,
+          editorialArtOptions: [
+            '/stock-editorial-art/technology-1.jpg',
+            '/stock-editorial-art/technology-2.jpg',
+          ],
+        },
+        index: 1,
+      },
+    ];
+
+    const diversified = diversifyDiscoveryEditorialArt(items);
+
+    expect(diversified[0]?.item).toMatchObject({
+      imageKind: 'editorial-art',
+      imageUrl: '/stock-editorial-art/technology-1.jpg',
+    });
+    expect(diversified[1]?.item).toMatchObject({
+      imageKind: 'editorial-art',
+      imageUrl: '/stock-editorial-art/technology-2.jpg',
+    });
+  });
+
   it('does not alter a cover merely because the same artwork appeared on an earlier page', () => {
     const items = Array.from({ length: 12 }, (_, index) => ({
       item: {

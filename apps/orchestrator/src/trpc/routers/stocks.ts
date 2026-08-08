@@ -1022,8 +1022,15 @@ function normalizeDiscoveryEditorialArt(rows: NewsSnapshot[]): NewsSnapshot[] {
     const hasExternalSourceCover =
       row.imageKind === 'source-cover' &&
       sourceDeclaredImageUrl(row.imageUrl) !== undefined;
-    if ((row.category !== '公告' && row.category !== '新闻') || hasExternalSourceCover) {
+    if (row.category !== '公告' && row.category !== '新闻') {
       return row;
+    }
+    const options = editorialArtOptions(row.category, row.title);
+    if (hasExternalSourceCover) {
+      return {
+        ...row,
+        editorialArtOptions: options,
+      };
     }
     return {
       ...row,
@@ -1034,7 +1041,7 @@ function normalizeDiscoveryEditorialArt(rows: NewsSnapshot[]): NewsSnapshot[] {
         url: row.url,
       }),
       imageKind: 'editorial-art',
-      editorialArtOptions: editorialArtOptions(row.category, row.title),
+      editorialArtOptions: options,
     };
   }));
 }
@@ -1120,7 +1127,7 @@ function stockNewsRows(
       ...(summary ? { summary } : {}),
       imageUrl,
       imageKind: sourceImageUrl ? 'source-cover' : 'editorial-art',
-      ...(!sourceImageUrl ? { editorialArtOptions: editorialArtOptions('新闻', displayTitle) } : {}),
+      editorialArtOptions: editorialArtOptions('新闻', displayTitle),
     });
   }
   return sortNewsNewestFirst(dedupeNews(rowsForStock));
@@ -1156,7 +1163,7 @@ function marketNewsRows(item: MarketNewsInput, limit = MARKET_DISCOVERY_PAGE_SIZ
       ...(summary ? { summary } : {}),
       imageUrl,
       imageKind: sourceImageUrl ? 'source-cover' : 'editorial-art',
-      ...(!sourceImageUrl ? { editorialArtOptions: editorialArtOptions('新闻', title) } : {}),
+      editorialArtOptions: editorialArtOptions('新闻', title),
     });
   }
   return sortNewsNewestFirst(dedupeNews(rows)).slice(0, limit);
