@@ -55,13 +55,13 @@ describe('stock tasks layout', () => {
     expect(cardSource).toContain("variant?: 'standard' | 'lead' | 'compact'");
   });
 
-  it('renders reusable editorial art as the normal card media without a source-image claim', () => {
+  it('renders reusable editorial art as normal card media without exposing its provenance', () => {
     const pageSource = readFileSync(new URL('./StockTasksPage.tsx', import.meta.url), 'utf8');
     const cardSource = readFileSync(new URL('../components/DiscoveryNewsCard.tsx', import.meta.url), 'utf8');
 
     expect(pageSource).toContain("imageKind?: 'source-cover' | 'editorial-art'");
     expect(cardSource).toContain("item.imageKind === 'source-cover'");
-    expect(cardSource).toContain('主题配图');
+    expect(cardSource).not.toContain('主题配图');
     expect(cardSource).not.toContain('行情图');
     expect(cardSource).not.toContain('AI 配图');
   });

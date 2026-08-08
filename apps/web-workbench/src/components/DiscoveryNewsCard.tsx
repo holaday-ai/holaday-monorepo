@@ -69,11 +69,6 @@ export function DiscoveryNewsCard({
               {newsTimeLabel(item)}
             </span>
           </div>
-          {!sourceMedia ? (
-            <span className="absolute bottom-2 right-2 rounded-full bg-black/45 px-2 py-1 text-[10px] font-medium text-white/90">
-              主题配图
-            </span>
-          ) : null}
         </div>
       ) : (
         <div className={cn(
