@@ -35,7 +35,7 @@ export function DiscoveryNewsCard({
       onKeyDown={onKeyDown}
       className={cn(
         'group min-w-0 overflow-hidden rounded-[8px] border border-[#E7E7EB] bg-white text-left shadow-[0_10px_24px_rgba(18,24,38,0.04)] transition hover:-translate-y-0.5 hover:border-[#EA1F59]/25 hover:shadow-[0_16px_32px_rgba(18,24,38,0.08)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20 motion-reduce:hover:translate-y-0',
-        isLead ? 'flex min-h-[330px] flex-col sm:grid sm:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]' : 'flex flex-col',
+        isLead ? (showImage ? 'flex min-h-[330px] flex-col sm:grid sm:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]' : 'flex flex-col') : 'flex flex-col',
         isCompact ? 'min-h-[154px]' : isLead ? '' : 'min-h-[266px]',
       )}
     >
@@ -73,7 +73,7 @@ export function DiscoveryNewsCard({
       ) : (
         <div className={cn(
           'flex shrink-0 flex-col border-b border-[#E7EAF0] bg-[#FAFBFC] p-3',
-          isLead ? 'min-h-[210px] sm:min-h-[330px]' : isCompact ? 'min-h-[104px]' : 'min-h-[132px]',
+          isLead ? (showImage ? 'h-[210px] sm:h-full sm:min-h-[330px]' : 'p-5') : isCompact ? 'min-h-[104px]' : 'min-h-[132px]',
         )}>
           <div className="flex items-center gap-2">
             <span className={cn(
@@ -95,7 +95,7 @@ export function DiscoveryNewsCard({
           </p>
         </div>
       )}
-      <div className={cn('flex flex-1 flex-col', isLead ? 'p-5 sm:p-6' : 'p-3')}>
+      <div className={cn('flex flex-1 flex-col', isLead ? (showImage ? 'p-5 sm:p-6' : 'px-5 pb-5 pt-0') : 'p-3')}>
         {showImage ? (
           <p className={cn(
             'font-semibold leading-relaxed text-[#344054] transition group-hover:text-[#EA1F59]',

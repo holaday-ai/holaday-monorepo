@@ -901,6 +901,17 @@ function sortNewsNewestFirst(rows: NewsSnapshot[]): NewsSnapshot[] {
   });
 }
 
+function marketHeadlineFingerprint(row: NewsSnapshot): string | undefined {
+  if (row.feed !== 'A股要闻' && row.feed !== '美股要闻' && row.feed !== '港股要闻') return undefined;
+  const title = row.title
+    .replace(/^\s*(?:国家统计局|国家发改委|中国人民银行|中国证监会|财政部|海关总署|商务部|工信部|新华社|央视财经|人民日报|经济日报)\s*[：:]/, '')
+    .replace(/(?:19|20)\d{2}年/g, '')
+    .replace(/\s+/g, '')
+    .replace(/[：:，,。.!！?？、【】\[\]（）()「」『』]/g, '')
+    .toLocaleLowerCase('zh-CN');
+  return title ? `${row.category}:${row.feed}:${title}` : undefined;
+}
+
 function dedupeNews(rows: NewsSnapshot[]): NewsSnapshot[] {
   const seen = new Set<string>();
   return rows.filter((row) => {
@@ -910,9 +921,11 @@ function dedupeNews(rows: NewsSnapshot[]): NewsSnapshot[] {
       .toLocaleLowerCase('zh-CN');
     const contentKey = `${row.category}:${row.symbols.join(',')}:${normalizedTitle}:${row.publishedAt ?? row.time}`;
     const urlKey = row.url?.trim() ? `url:${row.url.trim()}` : undefined;
-    if (seen.has(contentKey) || (urlKey && seen.has(urlKey))) return false;
+    const marketHeadlineKey = marketHeadlineFingerprint(row);
+    if (seen.has(contentKey) || (urlKey && seen.has(urlKey)) || (marketHeadlineKey && seen.has(marketHeadlineKey))) return false;
     seen.add(contentKey);
     if (urlKey) seen.add(urlKey);
+    if (marketHeadlineKey) seen.add(marketHeadlineKey);
     return true;
   });
 }

@@ -184,6 +184,47 @@ describe('stocks dashboard snapshot', () => {
     expect(news.filter((item) => item.feed === '港股要闻')).toHaveLength(12);
   });
 
+  it('collapses syndicated macro headlines within one market feed without dropping a distinct story', () => {
+    const news = __stocksDashboardTest.buildNews(
+      [],
+      [],
+      [{
+        feed: 'A股要闻',
+        env: envelope([
+          {
+            新闻标题: '7月份居民消费价格同比上涨0.5%',
+            发布时间: '2026-08-09 10:00:00',
+            文章来源: '上海证券报',
+            新闻链接: 'https://finance.eastmoney.com/a/202608090000001.html',
+          },
+          {
+            新闻标题: '2026年7月份居民消费价格同比上涨0.5%',
+            发布时间: '2026-08-09 09:36:00',
+            文章来源: '每日经济新闻',
+            新闻链接: 'https://finance.eastmoney.com/a/202608090000002.html',
+          },
+          {
+            新闻标题: '国家统计局：7月份居民消费价格同比上涨0.5%',
+            发布时间: '2026-08-09 09:32:00',
+            文章来源: '界面新闻',
+            新闻链接: 'https://finance.eastmoney.com/a/202608090000003.html',
+          },
+          {
+            新闻标题: '7月份工业生产者出厂价格同比下降3.6%',
+            发布时间: '2026-08-09 09:20:00',
+            文章来源: '证券时报',
+            新闻链接: 'https://finance.eastmoney.com/a/202608090000004.html',
+          },
+        ]) as never,
+      }],
+    );
+
+    expect(news.filter((item) => item.feed === 'A股要闻').map((item) => item.title)).toEqual([
+      '7月份居民消费价格同比上涨0.5%',
+      '7月份工业生产者出厂价格同比下降3.6%',
+    ]);
+  });
+
   it('loads the next market-news page with the feed-specific real-source quota', async () => {
     const requested: string[] = [];
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
