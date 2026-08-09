@@ -31,11 +31,16 @@ describe('stock tasks layout', () => {
     expect(cardSource).toContain('{showImage ? (');
   });
 
-  it('does not insert a layout-shifting refresh banner above the stock dashboard', () => {
+  it('keeps automatic quote refreshes visually silent', () => {
     const source = readFileSync(new URL('./StockTasksPage.tsx', import.meta.url), 'utf8');
 
     expect(source).not.toContain('正在后台刷新行情');
     expect(source).not.toContain('refreshingDashboard && dashboard');
+    expect(source).toContain("void loadPageData('background')");
+    expect(source).not.toContain("else setRefreshingDashboard(true);");
+    expect(source).not.toContain('trustMessage={dashboardTrust.message}');
+    expect(source).not.toContain('title={dashboardTrust.message ?? undefined}');
+    expect(source).not.toContain("|| refreshingDashboard || dashboardFreshness?.status === 'partial'");
   });
 
   it('remounts the detail cover for each article and keeps source reading inside the modal', () => {
@@ -97,10 +102,11 @@ describe('stock tasks layout', () => {
     expect(source).not.toContain('function toStockIntent');
   });
 
-  it('keeps the stale-data boundary in compact header metadata instead of a duplicate page-wide alert', () => {
+  it('keeps the stale-data boundary in stable header metadata instead of a duplicate alert', () => {
     const source = readFileSync(new URL('./StockTasksPage.tsx', import.meta.url), 'utf8');
 
-    expect(source).toContain('title={dashboardTrust.message ?? undefined}');
-    expect(source).not.toContain("dashboardTrust.tone !== 'fresh' && dashboardTrust.message");
+    expect(source).toContain('dashboardTrust.dataDateLabel');
+    expect(source).toContain('dashboardTrust.refreshLabel');
+    expect(source).not.toContain('trustMessage: string | null');
   });
 });

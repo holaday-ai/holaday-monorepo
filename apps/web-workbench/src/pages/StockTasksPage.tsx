@@ -194,6 +194,7 @@ export function StockTasksPage(): JSX.Element {
   const [searchingSymbols, setSearchingSymbols] = React.useState(false);
   const [activeLeaderboard, setActiveLeaderboard] = React.useState<'涨幅榜' | '跌幅榜' | '成交额榜' | '换手率榜'>('涨幅榜');
   const pageAlive = React.useRef(true);
+  const dashboardRefreshInFlight = React.useRef(false);
   const dashboardCompletionRetries = React.useRef(0);
   const discoveryNextPage = React.useRef<Record<MarketDiscoveryFeed, number>>({
     'A股要闻': 2,
@@ -210,10 +211,14 @@ export function StockTasksPage(): JSX.Element {
     };
   }, []);
 
-  const loadPageData = React.useCallback(async (mode: 'initial' | 'refresh' = 'refresh') => {
+  const loadPageData = React.useCallback(async (mode: 'initial' | 'manual' | 'background' = 'background') => {
+    const isRefresh = mode !== 'initial';
+    if (isRefresh && dashboardRefreshInFlight.current) return;
+    if (isRefresh) dashboardRefreshInFlight.current = true;
+
     let dashboardError: string | null = null;
     if (mode === 'initial') setLoadingDashboard(true);
-    else setRefreshingDashboard(true);
+    else if (mode === 'manual') setRefreshingDashboard(true);
     setLoadError(null);
     try {
       const watchlistPromise = trpc.watchlists.list.query().then((rows) => {
@@ -249,9 +254,10 @@ export function StockTasksPage(): JSX.Element {
     } catch (err) {
       if (pageAlive.current) setLoadError(pageErrorMessage(err));
     } finally {
+      if (isRefresh) dashboardRefreshInFlight.current = false;
       if (!pageAlive.current) return;
-      setLoadingDashboard(false);
-      setRefreshingDashboard(false);
+      if (mode === 'initial') setLoadingDashboard(false);
+      if (mode === 'manual') setRefreshingDashboard(false);
     }
   }, []);
 
@@ -262,7 +268,7 @@ export function StockTasksPage(): JSX.Element {
   React.useEffect(() => {
     const timer = window.setInterval(() => {
       if (document.hidden || loadingDashboard || refreshingDashboard) return;
-      void loadPageData('refresh');
+      void loadPageData('background');
     }, 20_000);
     return () => window.clearInterval(timer);
   }, [loadPageData, loadingDashboard, refreshingDashboard]);
@@ -278,7 +284,7 @@ export function StockTasksPage(): JSX.Element {
     dashboardCompletionRetries.current += 1;
     const retryDelay = dashboardCompletionRetries.current <= 2 ? 4_000 : 8_000;
     const timer = window.setTimeout(() => {
-      if (pageAlive.current) void loadPageData('refresh');
+      if (pageAlive.current) void loadPageData('background');
     }, retryDelay);
     return () => window.clearTimeout(timer);
   }, [dashboard, loadPageData, loadingDashboard, refreshingDashboard]);
@@ -464,7 +470,7 @@ export function StockTasksPage(): JSX.Element {
       setStockForm({ symbol: '', market: 'A', displayName: '', note: '' });
       setBriefingResult(null);
       resetDiscoveryExtensions();
-      await loadPageData('refresh');
+      await loadPageData('background');
     } catch (err) {
       const message = pageErrorMessage(err);
       setLoadError(message);
@@ -483,7 +489,7 @@ export function StockTasksPage(): JSX.Element {
       toast.show(`已移除 ${symbol}`);
       setBriefingResult(null);
       resetDiscoveryExtensions();
-      await loadPageData('refresh');
+      await loadPageData('background');
     } catch (err) {
       const message = pageErrorMessage(err);
       setLoadError(message);
@@ -506,7 +512,7 @@ export function StockTasksPage(): JSX.Element {
       toast.show(`已更新 ${symbol}`);
       setBriefingResult(null);
       resetDiscoveryExtensions();
-      await loadPageData('refresh');
+      await loadPageData('background');
     } catch (err) {
       const message = pageErrorMessage(err);
       setLoadError(message);
@@ -554,33 +560,6 @@ export function StockTasksPage(): JSX.Element {
             <h1 className="text-[22px] font-semibold tracking-tight text-[#121826]">
               股市任务
             </h1>
-            <span
-              title={dashboardTrust.message ?? undefined}
-              className={cn(
-                'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] font-medium',
-                dashboardTrust.tone === 'fresh'
-                  ? 'border-[#D9F2E7] bg-[#F2FCF8] text-[#08764A]'
-                  : dashboardTrust.tone === 'refreshing'
-                    ? 'border-[#D8EAFE] bg-[#F5FAFF] text-[#1769AA]'
-                  : dashboardTrust.tone === 'stale'
-                    ? 'border-[#F4D7A1] bg-[#FFF9EC] text-[#9A5B00]'
-                    : 'border-[#E1E3E8] bg-[#F7F8FA] text-[#667085]',
-              )}
-            >
-              <span
-                className={cn(
-                  'h-1.5 w-1.5 rounded-full',
-                  dashboardTrust.tone === 'fresh'
-                    ? 'bg-[#10A66E]'
-                    : dashboardTrust.tone === 'refreshing'
-                      ? 'bg-[#3297E8]'
-                    : dashboardTrust.tone === 'stale'
-                      ? 'bg-[#D98E04]'
-                      : 'bg-[#98A2B3]',
-                )}
-              />
-              {loadingDashboard && !dashboard ? '同步中' : dashboardTrust.statusLabel}
-            </span>
             <span className="text-[12px] text-[#7D8493]">
               {dashboardTrust.dataDateLabel} · {dashboardTrust.refreshLabel}
             </span>
@@ -588,7 +567,7 @@ export function StockTasksPage(): JSX.Element {
           <div className="flex flex-wrap items-center justify-end gap-2 text-[13px] text-[#4F5868]">
             <button
               type="button"
-              onClick={() => void loadPageData('refresh')}
+              onClick={() => void loadPageData('manual')}
               disabled={refreshingDashboard || loadingDashboard}
               className="inline-flex h-8 items-center gap-2 rounded-[8px] border border-[#DCDDDD] bg-white px-3 transition-colors hover:border-[#EA1F59]/30 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-60"
             >
@@ -700,7 +679,7 @@ export function StockTasksPage(): JSX.Element {
                 stocks={stocks}
                 marketIndices={marketIndices}
                 updatedAt={dashboard?.updatedAt}
-                loading={(loadingDashboard && dashboard === null) || refreshingDashboard || dashboardFreshness?.status === 'partial'}
+                loading={loadingDashboard && dashboard === null}
                 sample={sampleWatchlist}
                 onEdit={() => setWatchlistSheetOpen(true)}
                 onGenerateBriefing={generateBriefing}
@@ -721,7 +700,6 @@ export function StockTasksPage(): JSX.Element {
                 sampleWatchlist={sampleWatchlist}
                 hasMarketSignals={hasMarketSignals}
                 canGenerateBriefing={!briefingUnavailable}
-                trustMessage={dashboardTrust.message}
               />
               <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
                 <MarketTable
@@ -1542,7 +1520,6 @@ function DailyBriefing({
   sampleWatchlist,
   hasMarketSignals,
   canGenerateBriefing,
-  trustMessage,
 }: {
   stocks: StockSnapshot[];
   marketIndices: IndexRow[];
@@ -1557,7 +1534,6 @@ function DailyBriefing({
   sampleWatchlist: boolean;
   hasMarketSignals: boolean;
   canGenerateBriefing: boolean;
-  trustMessage: string | null;
 }): JSX.Element {
   const quoteStocks = stocks.filter((stock) => stock.price !== '—');
   const riskStock = quoteStocks.find((s) => s.signal === '偏弱' || s.signal === '风险升高');
@@ -1575,7 +1551,7 @@ function DailyBriefing({
         actionBusy={generating}
         actionDisabled={sampleWatchlist || !canGenerateBriefing}
       />
-      <div className="mt-4 rounded-[8px] border border-[#ECEEF3] bg-gradient-to-r from-[#FFFFFF] to-[#FFF9FB] px-4 py-3">
+      <div className="mt-4 min-h-[90px] rounded-[8px] border border-[#ECEEF3] bg-gradient-to-r from-[#FFFFFF] to-[#FFF9FB] px-4 py-3">
         <div className="text-[15px] font-semibold text-[#121826]">
           {briefing
             ? `${briefing.title} 已生成`
@@ -1586,8 +1562,8 @@ function DailyBriefing({
         <div className="mt-1 text-[12px] leading-relaxed text-[#667085]">
           {briefing
             ? '已复用当前自选股和 AkShare 数据生成日报，可继续用上方输入框追问。'
-            : trustMessage
-              ? trustMessage
+            : !canGenerateBriefing && observedTradeDate
+              ? `当前展示 ${formatObservedTradeDate(observedTradeDate)} 的已收盘数据；新交易日行情到达后可生成日报。`
               : hasMarketSignals
               ? dailyBriefingSourceLine(quoteStocks, marketIndices, sectors, news, leaderboards)
               : '当前真实市场数据不足。添加关注股票或稍后刷新后，可生成更完整的关注日报。'}
