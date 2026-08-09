@@ -673,16 +673,6 @@ def _stock_news_text(value: object) -> str:
     return re.sub(r"</?em>", "", str(value or "")).replace("\u3000", "").strip()
 
 
-def _stock_news_image_url(value: object) -> str | None:
-    image_url = str(value or "").strip()
-    if not image_url:
-        return None
-    parsed = urlparse(image_url)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        return None
-    return image_url
-
-
 def _trusted_eastmoney_image_url(value: object) -> str | None:
     image_url = str(value or "").strip()
     if image_url.startswith("//"):
@@ -696,6 +686,24 @@ def _trusted_eastmoney_image_url(value: object) -> str | None:
     if not re.fullmatch(r"/download/[A-Za-z0-9._-]+\.(?:jpe?g|png|webp|avif)", parsed.path, re.IGNORECASE):
         return None
     return parsed._replace(scheme="https", query="", fragment="").geturl()
+
+
+def _source_cover_image_url(value: object) -> str | None:
+    image_url = _trusted_eastmoney_image_url(value)
+    if not image_url:
+        return None
+    dimensions = re.search(
+        r"_w(\d+)h(\d+)\.(?:jpe?g|png|webp|avif)$",
+        urlparse(image_url).path,
+        re.IGNORECASE,
+    )
+    if not dimensions:
+        return None
+    width, height = (int(dimensions.group(1)), int(dimensions.group(2)))
+    ratio = width / max(1, height)
+    if width < 900 or height < 450 or ratio < 1.35 or ratio > 2.05:
+        return None
+    return image_url
 
 
 class _ArticleBodyImageParser(HTMLParser):
@@ -716,7 +724,7 @@ class _ArticleBodyImageParser(HTMLParser):
         if tag != "img" or self.image_url:
             return
         for key in ("data-original", "data-src", "src"):
-            trusted = _trusted_eastmoney_image_url(attributes.get(key))
+            trusted = _source_cover_image_url(attributes.get(key))
             if trusted:
                 self.image_url = trusted
                 return
@@ -786,8 +794,9 @@ def _enrich_news_images(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     missing: list[tuple[int, list[str]]] = []
     for index, row in enumerate(enriched):
         candidate_values = row.pop(_ARTICLE_IMAGE_CANDIDATES_KEY, [])
-        if _stock_news_image_url(row.get("新闻图片")):
+        if _source_cover_image_url(row.get("新闻图片")):
             continue
+        row.pop("新闻图片", None)
         article_urls: list[str] = []
         for value in [row.get("新闻链接"), *candidate_values]:
             article_url = _eastmoney_article_url(value)
@@ -863,7 +872,7 @@ def _get_eastmoney_news(keyword: str, *, page: int = 1, page_size: int = 20) -> 
             "文章来源": _stock_news_text(source_row.get("mediaName")) or "东方财富",
             "新闻链接": url,
         }
-        image_url = _stock_news_image_url(source_row.get("image"))
+        image_url = _source_cover_image_url(source_row.get("image"))
         if image_url:
             row["新闻图片"] = image_url
         rows.append(row)
@@ -949,7 +958,7 @@ def _likely_same_market_story(left: dict[str, Any], right: dict[str, Any]) -> bo
 
 def _market_news_quality(row: dict[str, Any]) -> tuple[int, int, int]:
     return (
-        1 if _trusted_eastmoney_image_url(row.get("新闻图片")) else 0,
+        1 if _source_cover_image_url(row.get("新闻图片")) else 0,
         len(str(row.get("新闻内容") or "").strip()),
         len(str(row.get("新闻标题") or "").strip()),
     )

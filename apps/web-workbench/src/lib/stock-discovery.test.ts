@@ -55,7 +55,7 @@ describe('stock discovery presentation', () => {
     const items = [
       {
         item: {
-          imageUrl: 'https://publisher.example/generic-market-photo.jpg',
+          imageUrl: 'https://np-newspic.dfcfw.com/download/D25714350878447082823_w1200h675.jpg',
           imageKind: 'source-cover' as const,
           editorialArtOptions: ['/stock-editorial-art/market-2.jpg'],
         },
@@ -63,7 +63,7 @@ describe('stock discovery presentation', () => {
       },
       {
         item: {
-          imageUrl: 'https://publisher.example/generic-market-photo.jpg',
+          imageUrl: 'https://np-newspic.dfcfw.com/download/D25714350878447082823_w1200h675.jpg',
           imageKind: 'source-cover' as const,
           editorialArtOptions: ['/stock-editorial-art/market-3.jpg'],
         },
@@ -74,10 +74,35 @@ describe('stock discovery presentation', () => {
     const diversified = diversifyDiscoveryEditorialArt(items);
 
     expect(diversified.map(({ item }) => item.imageUrl)).toEqual([
-      'https://publisher.example/generic-market-photo.jpg',
+      'https://np-newspic.dfcfw.com/download/D25714350878447082823_w1200h675.jpg',
       undefined,
     ]);
     expect(diversified[1]?.item.imageKind).toBeUndefined();
+  });
+
+  it('rejects stale local editorial art even when an old snapshot labels it as a source cover', () => {
+    const [result] = diversifyDiscoveryEditorialArt([{
+      item: {
+        imageUrl: '/stock-editorial-art/consumer-1.jpg',
+        imageKind: 'source-cover' as const,
+      },
+      index: 0,
+    }]);
+
+    expect(result?.item.imageUrl).toBeUndefined();
+    expect(result?.item.imageKind).toBeUndefined();
+  });
+
+  it('keeps a verified source-cover proxy returned by the orchestrator', () => {
+    const source = 'https://np-newspic.dfcfw.com/download/D25714350878447082823_w1200h675.jpg';
+    const proxied = `/api/stock-news/source-cover?url=${encodeURIComponent(source)}`;
+    const [result] = diversifyDiscoveryEditorialArt([{
+      item: { imageUrl: proxied, imageKind: 'source-cover' as const },
+      index: 0,
+    }]);
+
+    expect(result?.item.imageUrl).toBe(proxied);
+    expect(result?.item.imageKind).toBe('source-cover');
   });
 
   it('falls back to a title-first card when a verified source cover cannot load', () => {

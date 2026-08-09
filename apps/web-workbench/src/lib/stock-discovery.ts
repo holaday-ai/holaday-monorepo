@@ -9,6 +9,33 @@ type DiscoveryMedia = {
   editorialArtOptions?: readonly string[];
 };
 
+function isReadableEastmoneyCover(value: string): boolean {
+  try {
+    const image = new URL(value);
+    if (image.protocol !== 'https:' || image.hostname !== 'np-newspic.dfcfw.com') return false;
+    const dimensions = /_w(\d+)h(\d+)\.(?:jpe?g|png|webp|avif)$/i.exec(image.pathname);
+    if (!dimensions) return false;
+    const width = Number(dimensions[1]);
+    const height = Number(dimensions[2]);
+    const ratio = width / height;
+    return width >= 900 && height >= 450 && ratio >= 1.35 && ratio <= 2.05;
+  } catch {
+    return false;
+  }
+}
+
+function isVerifiedSourceCoverUrl(value: string): boolean {
+  if (isReadableEastmoneyCover(value)) return true;
+  try {
+    const proxy = new URL(value, 'https://holaday.invalid');
+    if (proxy.origin !== 'https://holaday.invalid' || proxy.pathname !== '/api/stock-news/source-cover') return false;
+    const source = proxy.searchParams.get('url');
+    return source ? isReadableEastmoneyCover(source) : false;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Only publisher-backed media is allowed in discovery. Legacy editorial art,
  * repeated covers, and failed source images become title-first cards instead
@@ -32,7 +59,7 @@ export function diversifyDiscoveryEditorialArt<T extends DiscoveryMedia>(
       },
     });
     if (!imageUrl) return item.imageKind === 'editorial-art' ? titleFirst() : entry;
-    if (item.imageKind !== 'source-cover') return titleFirst();
+    if (item.imageKind !== 'source-cover' || !isVerifiedSourceCoverUrl(imageUrl)) return titleFirst();
     if (failedSourceCoverUrls.has(imageUrl) || usedSourceCoverUrls.has(imageUrl)) return titleFirst();
     usedSourceCoverUrls.add(imageUrl);
     return entry;

@@ -10,6 +10,7 @@ import {
   shouldPrefetchDiscoveryPage,
 } from '@/lib/stock-discovery';
 import {
+  discoveryStoryAliases,
   discoveryStoryClusterKey,
   mergeDiscoveryNews,
   newsFeed,
@@ -102,13 +103,14 @@ export function StockDiscoveryPage(): JSX.Element {
     () => news.map((item, index) => ({ item, index })),
     [news],
   );
+  const storyAliases = React.useMemo(() => discoveryStoryAliases(news), [news]);
   const readingPrioritizedNews = React.useMemo(
     () => prioritizeAndDiversifyDiscoveryItems(
       indexedNews.filter(({ item }) => activeFeed === '全部' || newsFeed(item) === activeFeed),
       discoveryReadingPriority,
-      discoveryStoryClusterKey,
+      (item) => discoveryStoryClusterKey(item, storyAliases),
     ),
-    [activeFeed, indexedNews],
+    [activeFeed, indexedNews, storyAliases],
   );
   const prioritizedNews = React.useMemo(
     () => diversifyDiscoveryEditorialArt(
