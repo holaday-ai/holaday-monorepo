@@ -285,7 +285,7 @@ export function StockDiscoveryPage(): JSX.Element {
                 <h2 className="text-[15px] font-semibold text-[#242424]">优先阅读</h2>
                 <span className="text-[12px] text-[#8B92A1]">按关联标的、来源可读性与发布时间排序</span>
               </div>
-              <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.6fr)_minmax(320px,0.8fr)]">
+              <div className="space-y-4">
                 <DiscoveryNewsCard
                   key={leadNews.item.url ?? `${leadNews.item.time}-${leadNews.item.title}`}
                   item={leadNews.item}
@@ -294,12 +294,12 @@ export function StockDiscoveryPage(): JSX.Element {
                   onImageError={handleSourceCoverError}
                 />
                 {supportingNews.length > 0 ? (
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 xl:grid-cols-1">
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                     {supportingNews.map(({ item }, offset) => (
                       <DiscoveryNewsCard
                         key={item.url ?? `${item.time}-${item.title}`}
                         item={item}
-                        variant="compact"
+                        variant="standard"
                         onOpen={() => setActiveIndex(offset + 1)}
                         onImageError={handleSourceCoverError}
                       />

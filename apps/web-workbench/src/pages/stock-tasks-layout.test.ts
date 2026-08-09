@@ -61,7 +61,8 @@ describe('stock tasks layout', () => {
     expect(pageSource).toContain('优先阅读');
     expect(pageSource).toContain('更多来源');
     expect(pageSource).toContain('variant="lead"');
-    expect(pageSource).toContain('variant="compact"');
+    expect(pageSource).toContain('variant="standard"');
+    expect(pageSource).toContain('md:grid-cols-3');
     expect(pageSource).toContain('function discoveryReadingPriority');
     expect(pageSource).toContain('const prioritizedNews');
     expect(cardSource).toContain("variant?: 'standard' | 'lead' | 'compact'");

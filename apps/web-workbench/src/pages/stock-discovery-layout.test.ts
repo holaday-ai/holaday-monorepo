@@ -22,13 +22,17 @@ describe('stock discovery layout', () => {
     expect(source).toContain('setActiveIndex(null);');
   });
 
-  it('keeps the priority grid compact and uses a stable cover ratio for source cards', () => {
+  it('uses an editorial lead row without stretching it to supporting cards', () => {
     const pageSource = readFileSync(new URL('./StockDiscoveryPage.tsx', import.meta.url), 'utf8');
     const source = readFileSync(new URL('../components/DiscoveryNewsCard.tsx', import.meta.url), 'utf8');
 
-    expect(pageSource).not.toContain('xl:items-start');
-    expect(pageSource).toContain('xl:grid-cols-[minmax(0,1.6fr)_minmax(320px,0.8fr)]');
-    expect(source).toContain("isLead ? (showImage ? 'flex min-h-[468px] flex-col sm:grid sm:grid-cols");
-    expect(source).toContain("isCompact ? 'h-[104px]' : 'aspect-video w-full'");
+    expect(pageSource).not.toContain('xl:grid-cols-[minmax(0,1.6fr)_minmax(320px,0.8fr)]');
+    expect(pageSource).toContain('<div className="space-y-4">');
+    expect(pageSource).toContain('<div className="grid grid-cols-1 gap-4 md:grid-cols-3">');
+    expect(pageSource).toContain('variant="standard"');
+    expect(source).not.toContain('min-h-[468px]');
+    expect(source).toContain('lg:min-h-[280px] lg:grid-cols-[minmax(0,1.12fr)_minmax(320px,0.88fr)]');
+    expect(source).toContain("isLead ? 'aspect-[3/2] w-full lg:order-2 lg:h-full lg:aspect-auto'");
+    expect(source).toContain("isCompact ? 'h-[104px]' : 'aspect-[3/2] w-full'");
   });
 });
