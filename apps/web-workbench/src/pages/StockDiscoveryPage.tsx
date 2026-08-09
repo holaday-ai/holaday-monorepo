@@ -10,6 +10,7 @@ import {
   shouldPrefetchDiscoveryPage,
 } from '@/lib/stock-discovery';
 import {
+  discoveryStoryClusterKey,
   mergeDiscoveryNews,
   newsFeed,
   type DiscoveryFeed,
@@ -105,7 +106,7 @@ export function StockDiscoveryPage(): JSX.Element {
     () => prioritizeAndDiversifyDiscoveryItems(
       indexedNews.filter(({ item }) => activeFeed === '全部' || newsFeed(item) === activeFeed),
       discoveryReadingPriority,
-      (item) => item.symbols[0],
+      discoveryStoryClusterKey,
     ),
     [activeFeed, indexedNews],
   );

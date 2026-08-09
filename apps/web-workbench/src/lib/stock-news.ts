@@ -34,7 +34,7 @@ function normalizedHeadline(item: StockNewsRow): string | undefined {
   const feed = newsFeed(item);
   if (feed !== 'A股要闻' && feed !== '美股要闻' && feed !== '港股要闻') return undefined;
   const title = item.title
-    .replace(/^\s*[^：:]{2,16}\s*[：:]/, '')
+    .replace(/^\s*(?:业绩快报|快讯|公告|机构观点|券商观点)\s*[：:]/, '')
     .replace(/(?:19|20)\d{2}年/g, '')
     .replace(/\s+/g, '')
     .replace(/[：:，,。.!！?？、【】\[\]（）()「」『』“”‘’]/g, '')
@@ -58,17 +58,53 @@ function likelySameMarketStory(left: StockNewsRow, right: StockNewsRow): boolean
   const leftHeadline = normalizedHeadline(left);
   const rightHeadline = normalizedHeadline(right);
   if (!leftHeadline || !rightHeadline) return false;
-  const numbers = (value: string) => value.match(/\d+(?:\.\d+)?%?/g)?.join('|') ?? '';
-  if (numbers(leftHeadline) !== numbers(rightHeadline)) return false;
   if (leftHeadline === rightHeadline) return true;
+  const numbers = (value: string) => new Set(value.match(/\d+(?:\.\d+)?%?/g) ?? []);
+  const leftNumbers = numbers(leftHeadline);
+  const rightNumbers = numbers(rightHeadline);
+  if (leftNumbers.size > 0 && rightNumbers.size > 0 && (
+    leftNumbers.size !== rightNumbers.size || [...leftNumbers].some((token) => !rightNumbers.has(token))
+  )) {
+    return false;
+  }
   const shorter = leftHeadline.length <= rightHeadline.length ? leftHeadline : rightHeadline;
   const longer = shorter === leftHeadline ? rightHeadline : leftHeadline;
-  if (shorter.length >= 8 && longer.includes(shorter) && shorter.length / longer.length >= 0.72) return true;
+  if (shorter.length >= 8 && longer.includes(shorter) && shorter.length / longer.length >= 0.65) return true;
+  const anchors = (value: string) => new Set([
+    ...(value.match(/[a-z]+\d*|\d+(?:\.\d+)?%/g) ?? []).filter((token) => token.length >= 2),
+  ]);
+  const leftAnchors = anchors(leftHeadline);
+  const rightAnchors = anchors(rightHeadline);
+  const hasSharedAnchor = [...leftAnchors].some((token) => rightAnchors.has(token));
   const leftBigrams = bigrams(leftHeadline);
   const rightBigrams = bigrams(rightHeadline);
   let shared = 0;
   for (const token of leftBigrams) if (rightBigrams.has(token)) shared += 1;
-  return shared * 2 / (leftBigrams.size + rightBigrams.size) >= 0.82;
+  const similarity = shared * 2 / (leftBigrams.size + rightBigrams.size);
+  return similarity >= 0.72 || (hasSharedAnchor && similarity >= 0.54);
+}
+
+const MARKET_TOPIC_TOKENS = [
+  'cpo', 'ipo', 'ai', '半导体', '芯片', '算力', '机器人', '医药', '医疗', '创新药',
+  '新能源', '光伏', '储能', '电力', '汽车', '有色', '黄金', '消费', '物价', '房地产',
+  '银行', '证券', '保险', '港股', '美股', '人民币', '关税', '外贸',
+] as const;
+
+/** A visual-order key, not a fact label: it keeps adjacent cards from repeating one company or topic. */
+export function discoveryStoryClusterKey(item: StockNewsRow): string | undefined {
+  const symbol = item.symbols[0]?.trim();
+  if (symbol) return symbol;
+  const title = item.title.trim();
+  const prefix = /^([^：:]{2,16})[：:]/.exec(title)?.[1]?.trim();
+  if (prefix && !/^(?:业绩快报|快讯|公告|机构观点|券商观点)$/.test(prefix)) return prefix;
+  const lower = title.toLocaleLowerCase('zh-CN');
+  const topic = MARKET_TOPIC_TOKENS.find((token) => lower.includes(token));
+  if (topic) return topic;
+  const leading = lower
+    .replace(/^[“”'‘’"《【\[]+/, '')
+    .replace(/^(?:这家|一则|突发|重磅|最新)/, '')
+    .match(/[\u4e00-\u9fff]{2,8}/)?.[0];
+  return leading ?? newsFeed(item);
 }
 
 export function mergeDiscoveryNews(base: StockNewsRow[], additions: StockNewsRow[]): StockNewsRow[] {

@@ -43,6 +43,7 @@ import {
   stockChartAxisTicks,
 } from '@/lib/stock-chart-state';
 import { stockDashboardTrustState } from '@/lib/stock-dashboard-trust';
+import { discoveryStoryClusterKey } from '@/lib/stock-news';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import { useTaskStore } from '@/stores/task-store';
@@ -801,7 +802,7 @@ function DiscoveryPanel({
     () => diversifyDiscoveryEditorialArt(
       diversifyDiscoveryItems(
         indexedNews.filter(({ item }) => activeFeed === '全部' || newsFeed(item) === activeFeed),
-        (item) => item.symbols[0],
+        discoveryStoryClusterKey,
       ),
     ),
     [activeFeed, indexedNews],
