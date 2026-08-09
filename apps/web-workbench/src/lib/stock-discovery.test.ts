@@ -37,9 +37,10 @@ describe('stock discovery presentation', () => {
     ).map(({ index }) => index)).toEqual([0, 2, 3, 1, 4]);
   });
 
-  it('suppresses unverified editorial art instead of presenting it as news media', () => {
+  it('suppresses unverified editorial art when the title has no precise visual topic', () => {
     const [result] = diversifyDiscoveryEditorialArt([{
       item: {
+        title: '文化消费新观察',
         imageUrl: '/stock-editorial-art/market-2.jpg',
         imageKind: 'editorial-art' as const,
         editorialArtOptions: ['/stock-editorial-art/market-3.jpg'],
@@ -49,6 +50,44 @@ describe('stock discovery presentation', () => {
 
     expect(result?.item.imageUrl).toBeUndefined();
     expect(result?.item.imageKind).toBeUndefined();
+  });
+
+  it('uses a topic-matched fallback without repeating an image in the rendered feed', () => {
+    const items = Array.from({ length: 4 }, (_, index) => ({
+      item: {
+        title: `CPO 光模块产业进展 ${index + 1}`,
+        imageUrl: undefined as string | undefined,
+        imageKind: undefined as 'source-cover' | 'editorial-art' | undefined,
+      },
+      index,
+    }));
+
+    const diversified = diversifyDiscoveryEditorialArt(items);
+    const imageUrls = diversified.map(({ item }) => item.imageUrl).filter(Boolean);
+
+    expect(imageUrls).toHaveLength(3);
+    expect(new Set(imageUrls).size).toBe(3);
+    expect(imageUrls.every((url) => [
+      '/stock-editorial-art/technology-4.jpg',
+      '/stock-editorial-art/technology-5.jpg',
+      '/stock-editorial-art/technology-10.jpg',
+    ].includes(url as string))).toBe(true);
+    expect(diversified[3]?.item.imageUrl).toBeUndefined();
+  });
+
+  it('uses disclosure artwork for an announcement without a publisher cover', () => {
+    const [result] = diversifyDiscoveryEditorialArt([{
+      item: {
+        category: '公告',
+        title: '某公司股票交易异常波动公告',
+        imageUrl: undefined as string | undefined,
+        imageKind: undefined as 'source-cover' | 'editorial-art' | undefined,
+      },
+      index: 0,
+    }]);
+
+    expect(result?.item.imageKind).toBe('editorial-art');
+    expect(result?.item.imageUrl).toMatch(/^\/stock-editorial-art\/(?:disclosure-1|governance-6)\.jpg$/);
   });
 
   it('keeps the first verified source cover and falls back to text for repeats', () => {
@@ -105,10 +144,11 @@ describe('stock discovery presentation', () => {
     expect(result?.item.imageKind).toBe('source-cover');
   });
 
-  it('falls back to a title-first card when a verified source cover cannot load', () => {
+  it('falls back to matched local art when a verified source cover cannot load', () => {
     const items = [{
       item: {
-        imageUrl: 'https://publisher.example/blocked-source-photo.jpg',
+        title: 'CPO 光模块产业链更新',
+        imageUrl: 'https://np-newspic.dfcfw.com/download/D25714350878447082823_w1200h675.jpg',
         imageKind: 'source-cover' as const,
         editorialArtOptions: ['/stock-editorial-art/technology-4.jpg'],
       },
@@ -117,11 +157,11 @@ describe('stock discovery presentation', () => {
 
     const [fallback] = diversifyDiscoveryEditorialArt(
       items,
-      new Set(['https://publisher.example/blocked-source-photo.jpg']),
+      new Set(['https://np-newspic.dfcfw.com/download/D25714350878447082823_w1200h675.jpg']),
     );
 
-    expect(fallback?.item.imageUrl).toBeUndefined();
-    expect(fallback?.item.imageKind).toBeUndefined();
+    expect(fallback?.item.imageUrl).toMatch(/^\/stock-editorial-art\/technology-(?:4|5|10)\.jpg$/);
+    expect(fallback?.item.imageKind).toBe('editorial-art');
   });
 
   it('labels a date-only announcement as a disclosure date without inventing a time', () => {
