@@ -44,6 +44,28 @@ export function trustedSourceCoverUrl(value: unknown): URL | undefined {
 }
 
 export function sourceCoverProxyUrl(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+
+  if (value.startsWith('/')) {
+    try {
+      const proxy = new URL(value, 'https://holaday.invalid');
+      const parameters = [...proxy.searchParams.keys()];
+      if (
+        proxy.origin !== 'https://holaday.invalid' ||
+        proxy.pathname !== '/api/stock-news/source-cover' ||
+        proxy.hash ||
+        parameters.length !== 1 ||
+        parameters[0] !== 'url'
+      ) return undefined;
+      const source = trustedSourceCoverUrl(proxy.searchParams.get('url'));
+      return source
+        ? `/api/stock-news/source-cover?url=${encodeURIComponent(source.toString())}`
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   const source = trustedSourceCoverUrl(value);
   return source
     ? `/api/stock-news/source-cover?url=${encodeURIComponent(source.toString())}`

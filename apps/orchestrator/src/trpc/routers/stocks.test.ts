@@ -411,6 +411,34 @@ describe('stocks dashboard snapshot', () => {
     expect(rows.slice(1).map((row) => row.imageKind)).toEqual([undefined, undefined]);
   });
 
+  it('keeps an already-proxied verified cover when a cached dashboard is normalized again', () => {
+    const normalizeDiscoveryEditorialArt = __stocksDashboardTest.normalizeDiscoveryEditorialArt as (rows: Array<{
+      category: '公告' | '新闻';
+      title: string;
+      symbols: string[];
+      source: string;
+      url?: string;
+      time: string;
+      imageUrl?: string;
+      imageKind?: string;
+    }>) => Array<{ imageUrl?: string; imageKind?: string }>;
+    const proxied =
+      '/api/stock-news/source-cover?url=https%3A%2F%2Fnp-newspic.dfcfw.com%2Fdownload%2FD25550525489083947595_w210h154.jpg';
+
+    const [row] = normalizeDiscoveryEditorialArt([{
+      category: '新闻',
+      title: '中国银河策略：A股市场的三个验证窗口',
+      symbols: [],
+      source: '银河证券',
+      url: 'http://finance.eastmoney.com/a/202608093835916746.html',
+      time: '08-09 15:00',
+      imageUrl: proxied,
+      imageKind: 'source-cover',
+    }]);
+
+    expect(row).toMatchObject({ imageUrl: proxied, imageKind: 'source-cover' });
+  });
+
   it('removes a persisted legacy market chart before rendering discovery', () => {
     const normalizeDiscoveryEditorialArt = __stocksDashboardTest.normalizeDiscoveryEditorialArt as (rows: Array<{
       category: '公告' | '新闻';
