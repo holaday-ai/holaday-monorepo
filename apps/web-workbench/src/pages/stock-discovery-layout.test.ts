@@ -22,12 +22,13 @@ describe('stock discovery layout', () => {
     expect(source).toContain('setActiveIndex(null);');
   });
 
-  it('keeps a coverless priority item title-first instead of reserving a hero-media column', () => {
+  it('keeps the priority grid compact and uses a stable cover ratio for source cards', () => {
     const pageSource = readFileSync(new URL('./StockDiscoveryPage.tsx', import.meta.url), 'utf8');
     const source = readFileSync(new URL('../components/DiscoveryNewsCard.tsx', import.meta.url), 'utf8');
 
-    expect(pageSource).toContain('xl:items-start');
-    expect(source).toContain("isLead ? (showImage ? 'flex min-h-[330px] flex-col sm:grid sm:grid-cols");
-    expect(source).toContain("isLead ? (showImage ? 'h-[210px] sm:h-full sm:min-h-[330px]' : 'p-5')");
+    expect(pageSource).not.toContain('xl:items-start');
+    expect(pageSource).toContain('xl:grid-cols-[minmax(0,1.6fr)_minmax(320px,0.8fr)]');
+    expect(source).toContain("isLead ? (showImage ? 'flex min-h-[468px] flex-col sm:grid sm:grid-cols");
+    expect(source).toContain("isCompact ? 'h-[104px]' : 'aspect-video w-full'");
   });
 });

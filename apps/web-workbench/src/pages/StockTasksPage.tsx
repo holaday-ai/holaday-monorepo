@@ -629,11 +629,6 @@ export function StockTasksPage(): JSX.Element {
             部分股票数据暂时无法加载：{loadError}
           </div>
         ) : null}
-        {refreshingDashboard && dashboard ? (
-          <div className="rounded-[8px] border border-[#E1E3E8] bg-white px-4 py-3 text-[13px] text-[#4F5868]">
-            正在后台刷新行情，当前看板保持最近一次真实数据。
-          </div>
-        ) : null}
         {sampleWatchlist && !loadingDashboard ? (
           <div className="rounded-[8px] border border-[#E1E3E8] bg-white px-4 py-3 text-[13px] text-[#4F5868]">
             当前显示示例关注列表；添加自己的关注股票后，可生成专属日报并接收每日提醒。

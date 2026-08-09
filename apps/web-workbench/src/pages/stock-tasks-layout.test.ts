@@ -24,11 +24,18 @@ describe('stock tasks layout', () => {
   it('notifies the discovery reader when a declared cover cannot load', () => {
     const cardSource = readFileSync(new URL('../components/DiscoveryNewsCard.tsx', import.meta.url), 'utf8');
 
-    expect(cardSource).toContain('const [imageFailed, setImageFailed] = useState(false);');
-    expect(cardSource).toContain('const showImage = Boolean(item.imageUrl && !imageFailed);');
+    expect(cardSource).toContain('const [failedImageUrl, setFailedImageUrl] = useState<string | null>(null);');
+    expect(cardSource).toContain('const showImage = Boolean(item.imageUrl && failedImageUrl !== item.imageUrl);');
     expect(cardSource).toContain('onImageError?: (imageUrl: string) => void;');
     expect(cardSource).toContain('onImageError(item.imageUrl);');
     expect(cardSource).toContain('{showImage ? (');
+  });
+
+  it('does not insert a layout-shifting refresh banner above the stock dashboard', () => {
+    const source = readFileSync(new URL('./StockTasksPage.tsx', import.meta.url), 'utf8');
+
+    expect(source).not.toContain('正在后台刷新行情');
+    expect(source).not.toContain('refreshingDashboard && dashboard');
   });
 
   it('remounts the detail cover for each article and keeps source reading inside the modal', () => {
