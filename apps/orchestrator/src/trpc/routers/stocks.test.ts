@@ -225,6 +225,37 @@ describe('stocks dashboard snapshot', () => {
     ]);
   });
 
+  it('collapses publisher-prefixed variants of one market event without hiding another story', () => {
+    const news = __stocksDashboardTest.buildNews([], [], [{
+      feed: 'A股要闻',
+      env: envelope([
+        {
+          新闻标题: '中国银河策略：A股市场的三个验证窗口',
+          发布时间: '2026-08-09 10:00:00',
+          文章来源: '中国银河证券',
+          新闻链接: 'https://publisher.example/strategy-window-1',
+        },
+        {
+          新闻标题: '中国银河：A股市场“三个验证窗口”',
+          发布时间: '2026-08-09 09:55:00',
+          文章来源: '证券时报',
+          新闻链接: 'https://publisher.example/strategy-window-2',
+        },
+        {
+          新闻标题: '中国银河策略：消费板块盈利预期改善',
+          发布时间: '2026-08-09 09:40:00',
+          文章来源: '中国银河证券',
+          新闻链接: 'https://publisher.example/consumer-outlook',
+        },
+      ]) as never,
+    }]);
+
+    expect(news.filter((item) => item.feed === 'A股要闻').map((item) => item.title)).toEqual([
+      '中国银河策略：A股市场的三个验证窗口',
+      '中国银河策略：消费板块盈利预期改善',
+    ]);
+  });
+
   it('loads the next market-news page with the feed-specific real-source quota', async () => {
     const requested: string[] = [];
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
@@ -315,12 +346,19 @@ describe('stocks dashboard snapshot', () => {
     expect(requestedAnnouncementSymbols.sort()).toEqual(symbols);
   });
 
-  it('uses a declared source cover first and assigns topical reusable art when the source has none', () => {
+  it('uses declared or source-derived covers without inventing editorial art', () => {
     const sourceDeclaredImageUrl = __stocksDashboardTest.sourceDeclaredImageUrl as (value?: unknown) => string | undefined;
+    const articleCoverUrl = (__stocksDashboardTest as unknown as {
+      articleCoverUrl: (value?: unknown) => string | undefined;
+    }).articleCoverUrl;
 
     expect(sourceDeclaredImageUrl('https://source.example/cover.jpg')).toBe('https://source.example/cover.jpg');
     expect(sourceDeclaredImageUrl('data:image/png;base64,not-a-source-url')).toBeUndefined();
     expect(sourceDeclaredImageUrl('javascript:alert(1)')).toBeUndefined();
+    expect(articleCoverUrl('https://finance.eastmoney.com/a/202607313828387959.html')).toBe(
+      'https://np-metadata.eastmoney.com/api/metadata.jpg?event=1&source=3&mode=2&type=1&id=202607313828387959',
+    );
+    expect(articleCoverUrl('https://publisher.example/a/202607313828387959.html')).toBeUndefined();
 
     const buildSourceDiscovery = __stocksDashboardTest.buildNews as unknown as (
       announcements: Array<{ entry: { symbol: string; market: 'A'; displayName: string }; env: ReturnType<typeof envelope> }>,
@@ -336,11 +374,13 @@ describe('stocks dashboard snapshot', () => {
       }]),
     }]);
 
-    expect(item?.imageUrl).toMatch(/^\/stock-editorial-art\//);
-    expect(item?.imageKind).toBe('editorial-art');
+    expect(item?.imageUrl).toBe(
+      'https://np-metadata.eastmoney.com/api/metadata.jpg?event=1&source=3&mode=2&type=1&id=202608073834244063',
+    );
+    expect(item?.imageKind).toBe('source-cover');
   });
 
-  it('keeps source covers and assigns topical art to other source-backed rows', () => {
+  it('keeps a declared cover and leaves non-Eastmoney coverless rows title-first', () => {
     const buildSourceDiscovery = __stocksDashboardTest.buildNews as unknown as (
       announcements: Array<{ entry: { symbol: string; market: 'A'; displayName: string }; env: ReturnType<typeof envelope> }>,
       stockNews: Array<{ entry: { symbol: string; market: 'A'; displayName: string }; env: ReturnType<typeof envelope> }>,
@@ -359,13 +399,13 @@ describe('stocks dashboard snapshot', () => {
           新闻标题: '公司发布季度经营公告',
           发布时间: '2026-08-07 12:20:00',
           文章来源: '真实来源',
-          新闻链接: 'https://finance.eastmoney.com/a/202608073834244002.html',
+          新闻链接: 'https://publisher.example/articles/quarterly-operations',
         },
         {
           新闻标题: '公司发布投资者关系活动记录',
           发布时间: '2026-08-07 12:10:00',
           文章来源: '真实来源',
-          新闻链接: 'https://finance.eastmoney.com/a/202608073834244003.html',
+          新闻链接: 'https://publisher.example/articles/investor-relations',
         },
       ]),
     }]);
@@ -374,11 +414,8 @@ describe('stocks dashboard snapshot', () => {
       imageKind: 'source-cover',
       imageUrl: 'https://source.example/verified-cover.jpg',
     });
-    expect(rows.slice(1).map((row) => row.imageUrl)).toEqual([
-      expect.stringMatching(/^\/stock-editorial-art\//),
-      expect.stringMatching(/^\/stock-editorial-art\//),
-    ]);
-    expect(rows.slice(1).map((row) => row.imageKind)).toEqual(['editorial-art', 'editorial-art']);
+    expect(rows.slice(1).map((row) => row.imageUrl)).toEqual([undefined, undefined]);
+    expect(rows.slice(1).map((row) => row.imageKind)).toEqual([undefined, undefined]);
   });
 
   it('removes a persisted legacy market chart before rendering discovery', () => {
@@ -404,8 +441,8 @@ describe('stocks dashboard snapshot', () => {
       imageKind: 'market-chart',
     }]);
 
-    expect(row?.imageUrl).toMatch(/^\/stock-editorial-art\//);
-    expect(row?.imageKind).toBe('editorial-art');
+    expect(row?.imageUrl).toBeUndefined();
+    expect(row?.imageKind).toBeUndefined();
   });
 
   it('removes a stale local illustration incorrectly marked as a source cover', () => {
@@ -443,11 +480,8 @@ describe('stocks dashboard snapshot', () => {
       },
     ]);
 
-    expect(rows.map((row) => row.imageUrl)).toEqual([
-      expect.stringMatching(/^\/stock-editorial-art\//),
-      expect.stringMatching(/^\/stock-editorial-art\//),
-    ]);
-    expect(rows.map((row) => row.imageKind)).toEqual(['editorial-art', 'editorial-art']);
+    expect(rows.map((row) => row.imageUrl)).toEqual([undefined, undefined]);
+    expect(rows.map((row) => row.imageKind)).toEqual([undefined, undefined]);
   });
 
   it('keeps every fetched source-backed row for a multi-stock watchlist', () => {
@@ -969,8 +1003,8 @@ describe('stocks dashboard snapshot', () => {
         url: 'https://www.cninfo.com.cn/notice-603528',
       }),
     ]);
-    expect(merged.news[0]?.imageUrl).toMatch(/^\/stock-editorial-art\//);
-    expect(merged.news[0]?.imageKind).toBe('editorial-art');
+    expect(merged.news[0]?.imageUrl).toBeUndefined();
+    expect(merged.news[0]?.imageKind).toBeUndefined();
   });
 
   it('keeps prior market discovery feeds when only those source refreshes fail', () => {

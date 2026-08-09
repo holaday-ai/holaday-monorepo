@@ -873,170 +873,28 @@ function sourceDeclaredImageUrl(value?: unknown): string | undefined {
   }
 }
 
-/** Curated static artwork for source records that do not publish a cover. */
-const EDITORIAL_ART = {
-  governance: [
-    '/stock-editorial-art/governance-1.jpg',
-    '/stock-editorial-art/governance-2.jpg',
-    '/stock-editorial-art/governance-3.jpg',
-    '/stock-editorial-art/governance-4.jpg',
-    '/stock-editorial-art/governance-5.jpg',
-    '/stock-editorial-art/governance-6.jpg',
-    '/stock-editorial-art/disclosure-1.jpg',
-    '/stock-editorial-art/investor-relations-1.jpg',
-  ],
-  earnings: [
-    '/stock-editorial-art/earnings-1.jpg',
-    '/stock-editorial-art/earnings-2.jpg',
-  ],
-  technology: [
-    '/stock-editorial-art/technology-1.jpg',
-    '/stock-editorial-art/technology-2.jpg',
-    '/stock-editorial-art/technology-3.jpg',
-    '/stock-editorial-art/technology-4.jpg',
-    '/stock-editorial-art/technology-5.jpg',
-    '/stock-editorial-art/technology-6.jpg',
-    '/stock-editorial-art/technology-7.jpg',
-    '/stock-editorial-art/technology-8.jpg',
-    '/stock-editorial-art/technology-9.jpg',
-    '/stock-editorial-art/technology-10.jpg',
-    '/stock-editorial-art/advanced-manufacturing-1.jpg',
-    '/stock-editorial-art/industrial-1.jpg',
-  ],
-  mobility: [
-    '/stock-editorial-art/mobility-1.jpg',
-    '/stock-editorial-art/mobility-2.jpg',
-    '/stock-editorial-art/mobility-3.jpg',
-  ],
-  consumer: [
-    '/stock-editorial-art/consumer-1.jpg',
-    '/stock-editorial-art/consumer-2.jpg',
-    '/stock-editorial-art/consumer-3.jpg',
-    '/stock-editorial-art/consumer-4.jpg',
-  ],
-  healthcare: [
-    '/stock-editorial-art/healthcare-1.jpg',
-    '/stock-editorial-art/healthcare-2.jpg',
-    '/stock-editorial-art/healthcare-3.jpg',
-  ],
-  materials: [
-    '/stock-editorial-art/materials-1.jpg',
-    '/stock-editorial-art/materials-2.jpg',
-    '/stock-editorial-art/materials-3.jpg',
-  ],
-  logistics: [
-    '/stock-editorial-art/logistics-1.jpg',
-    '/stock-editorial-art/logistics-2.jpg',
-    '/stock-editorial-art/logistics-3.jpg',
-    '/stock-editorial-art/logistics-4.jpg',
-  ],
-  energy: [
-    '/stock-editorial-art/energy-1.jpg',
-    '/stock-editorial-art/energy-2.jpg',
-    '/stock-editorial-art/energy-3.jpg',
-    '/stock-editorial-art/energy-4.jpg',
-    '/stock-editorial-art/energy-5.jpg',
-  ],
-  market: [
-    '/stock-editorial-art/macro-1.jpg',
-    '/stock-editorial-art/market-2.jpg',
-    '/stock-editorial-art/market-3.jpg',
-    '/stock-editorial-art/market-4.jpg',
-  ],
-} as const;
-
-type EditorialArtTheme = keyof typeof EDITORIAL_ART;
-
-function editorialArtTheme(category: '公告' | '新闻', title: string): EditorialArtTheme {
-  const text = title.toLocaleLowerCase('zh-CN');
-  if (category === '公告' || /董事会|股东大会|股权|回购|增持|减持|停复牌|交易异常|风险提示|投资者关系/.test(text)) {
-    return 'governance';
+function articleCoverUrl(value?: unknown): string | undefined {
+  if (typeof value !== 'string' || !value.trim()) return undefined;
+  try {
+    const article = new URL(value);
+    if (article.protocol !== 'http:' && article.protocol !== 'https:') return undefined;
+    if (article.hostname !== 'eastmoney.com' && !article.hostname.endsWith('.eastmoney.com')) return undefined;
+    const articleId = /^\/a\/(\d{12,})\.html$/.exec(article.pathname)?.[1];
+    if (!articleId) return undefined;
+    return `https://np-metadata.eastmoney.com/api/metadata.jpg?event=1&source=3&mode=2&type=1&id=${articleId}`;
+  } catch {
+    return undefined;
   }
-  if (/业绩|营收|利润|财报|预增|预亏|分红|经营/.test(text)) return 'earnings';
-  if (/芯片|半导体|软件|算力|人工智能|ai|电子|通信|光纤|光模块|光通信|cpo|数据中心|服务器|存储|制造业|装备制造|高端装备|智能装备|智能制造|工业机器人|机床|机械设备|新型工业化/.test(text)) {
-    return 'technology';
-  }
-  if (/汽车|新能源车|充电|电池|整车/.test(text)) return 'mobility';
-  if (/物流|仓储|快递|港口|运输/.test(text)) return 'logistics';
-  if (/光伏|风电|储能|电力|煤炭|石油|天然气|能源/.test(text)) return 'energy';
-  if (/医药|医疗|医院|药品|创新药|生物医药|医疗器械|疫苗/.test(text)) return 'healthcare';
-  if (/钢铁|有色|铜|铝|锌|黄金|稀土|化工|玻璃|水泥|建材|材料|矿业|矿产/.test(text)) return 'materials';
-  if (/消费|零售|食品|服装|旅游|酒店|餐饮|农业|农产品|茶饮|奶茶|咖啡|商超|美妆|家电|家居|白酒|啤酒|乳制品|文旅|游戏/.test(text)) {
-    return 'consumer';
-  }
-  return 'market';
-}
-
-function editorialArtOptions(category: '公告' | '新闻', title: string): string[] {
-  return [...EDITORIAL_ART[editorialArtTheme(category, title)]];
-}
-
-function selectEditorialArtUrl(input: {
-  category: '公告' | '新闻';
-  title: string;
-  symbol: string;
-  url?: string;
-}, variant = 0): string {
-  const candidates = editorialArtOptions(input.category, input.title);
-  const key = `${input.category}:${input.symbol}:${input.url ?? input.title}:${variant}`;
-  const hash = createHash('sha256').update(key).digest();
-  return candidates[hash.readUInt32BE(0) % candidates.length]!;
-}
-
-function diversifyEditorialArt(rows: NewsSnapshot[]): NewsSnapshot[] {
-  let previousEditorialUrl: string | undefined;
-  return rows.map((row) => {
-    if (row.imageKind !== 'editorial-art' || !row.imageUrl || row.category === '盘面' || row.category === '关注') {
-      return row;
-    }
-    let imageUrl = row.imageUrl;
-    if (imageUrl === previousEditorialUrl) {
-      const candidates = editorialArtOptions(row.category, row.title);
-      for (let variant = 1; variant <= candidates.length; variant += 1) {
-        const alternative = selectEditorialArtUrl({
-          category: row.category,
-          title: row.title,
-          symbol: row.symbols[0] ?? '',
-          url: row.url,
-        }, variant);
-        if (alternative !== previousEditorialUrl) {
-          imageUrl = alternative;
-          break;
-        }
-      }
-    }
-    previousEditorialUrl = imageUrl;
-    return imageUrl === row.imageUrl ? row : { ...row, imageUrl };
-  });
 }
 
 function normalizeDiscoveryEditorialArt(rows: NewsSnapshot[]): NewsSnapshot[] {
-  return diversifyEditorialArt(rows.map((row) => {
-    const hasExternalSourceCover =
-      row.imageKind === 'source-cover' &&
-      sourceDeclaredImageUrl(row.imageUrl) !== undefined;
-    if (row.category !== '公告' && row.category !== '新闻') {
-      return row;
-    }
-    const options = editorialArtOptions(row.category, row.title);
-    if (hasExternalSourceCover) {
-      return {
-        ...row,
-        editorialArtOptions: options,
-      };
-    }
-    return {
-      ...row,
-      imageUrl: selectEditorialArtUrl({
-        category: row.category,
-        title: row.title,
-        symbol: row.symbols[0] ?? '',
-        url: row.url,
-      }),
-      imageKind: 'editorial-art' as const,
-      editorialArtOptions: options,
-    };
-  }));
+  return rows.map((row) => {
+    if (row.category !== '公告' && row.category !== '新闻') return row;
+    const sourceCover = row.imageKind === 'source-cover' ? sourceDeclaredImageUrl(row.imageUrl) : undefined;
+    const { imageUrl: _imageUrl, imageKind: _imageKind, editorialArtOptions: _options, ...titleFirst } = row;
+    if (!sourceCover) return titleFirst;
+    return { ...titleFirst, imageUrl: sourceCover, imageKind: 'source-cover' as const };
+  });
 }
 
 function sortNewsNewestFirst(rows: NewsSnapshot[]): NewsSnapshot[] {
@@ -1048,33 +906,65 @@ function sortNewsNewestFirst(rows: NewsSnapshot[]): NewsSnapshot[] {
   });
 }
 
-function marketHeadlineFingerprint(row: NewsSnapshot): string | undefined {
+function normalizedMarketHeadline(row: NewsSnapshot): string | undefined {
   if (row.feed !== 'A股要闻' && row.feed !== '美股要闻' && row.feed !== '港股要闻') return undefined;
   const title = row.title
-    .replace(/^\s*(?:国家统计局|国家发改委|中国人民银行|中国证监会|财政部|海关总署|商务部|工信部|新华社|央视财经|人民日报|经济日报)\s*[：:]/, '')
+    .replace(/^\s*[^：:]{2,16}\s*[：:]/, '')
     .replace(/(?:19|20)\d{2}年/g, '')
     .replace(/\s+/g, '')
-    .replace(/[：:，,。.!！?？、【】\[\]（）()「」『』]/g, '')
+    .replace(/[：:，,。.!！?？、【】\[\]（）()「」『』“”‘’]/g, '')
+    .replace(/的/g, '')
     .toLocaleLowerCase('zh-CN');
-  return title ? `${row.category}:${row.feed}:${title}` : undefined;
+  return title || undefined;
+}
+
+function newsPublicationDay(row: NewsSnapshot): string {
+  return row.publishedAt?.slice(0, 10) ?? row.time.slice(0, 5);
+}
+
+function headlineBigrams(value: string): Set<string> {
+  if (value.length < 2) return new Set([value]);
+  return new Set(Array.from({ length: value.length - 1 }, (_, index) => value.slice(index, index + 2)));
+}
+
+function likelySameMarketStory(left: NewsSnapshot, right: NewsSnapshot): boolean {
+  if (left.feed !== right.feed || newsPublicationDay(left) !== newsPublicationDay(right)) return false;
+  const leftHeadline = normalizedMarketHeadline(left);
+  const rightHeadline = normalizedMarketHeadline(right);
+  if (!leftHeadline || !rightHeadline) return false;
+  const numbers = (value: string) => value.match(/\d+(?:\.\d+)?%?/g)?.join('|') ?? '';
+  if (numbers(leftHeadline) !== numbers(rightHeadline)) return false;
+  if (leftHeadline === rightHeadline) return true;
+  const shorter = leftHeadline.length <= rightHeadline.length ? leftHeadline : rightHeadline;
+  const longer = shorter === leftHeadline ? rightHeadline : leftHeadline;
+  if (shorter.length >= 8 && longer.includes(shorter) && shorter.length / longer.length >= 0.72) return true;
+  const leftTokens = headlineBigrams(leftHeadline);
+  const rightTokens = headlineBigrams(rightHeadline);
+  let shared = 0;
+  for (const token of leftTokens) if (rightTokens.has(token)) shared += 1;
+  return shared * 2 / (leftTokens.size + rightTokens.size) >= 0.82;
 }
 
 function dedupeNews(rows: NewsSnapshot[]): NewsSnapshot[] {
-  const seen = new Set<string>();
-  return rows.filter((row) => {
+  const seenKeys = new Set<string>();
+  const deduped: NewsSnapshot[] = [];
+  for (const row of rows) {
     const normalizedTitle = row.title
       .replace(/\s+/g, '')
       .replace(/[：:，,。.!！?？、]/g, '')
       .toLocaleLowerCase('zh-CN');
     const contentKey = `${row.category}:${row.symbols.join(',')}:${normalizedTitle}:${row.publishedAt ?? row.time}`;
     const urlKey = row.url?.trim() ? `url:${row.url.trim()}` : undefined;
-    const marketHeadlineKey = marketHeadlineFingerprint(row);
-    if (seen.has(contentKey) || (urlKey && seen.has(urlKey)) || (marketHeadlineKey && seen.has(marketHeadlineKey))) return false;
-    seen.add(contentKey);
-    if (urlKey) seen.add(urlKey);
-    if (marketHeadlineKey) seen.add(marketHeadlineKey);
-    return true;
-  });
+    if (
+      seenKeys.has(contentKey) ||
+      (urlKey && seenKeys.has(urlKey)) ||
+      deduped.some((candidate) => likelySameMarketStory(candidate, row))
+    ) continue;
+    seenKeys.add(contentKey);
+    if (urlKey) seenKeys.add(urlKey);
+    deduped.push(row);
+  }
+  return deduped;
 }
 
 function sourceBackedDiscovery(rows: NewsSnapshot[]): NewsSnapshot[] {
@@ -1113,7 +1003,7 @@ function stockNewsRows(
     if (!title || !publishedAt || !url) continue;
     const summary = String(pick(row, ['新闻内容']) ?? '').trim();
     const source = String(pick(row, ['文章来源']) ?? '').trim() || '东方财富';
-    const sourceImageUrl = sourceDeclaredImageUrl(pick(row, ['新闻图片']));
+    const sourceImageUrl = sourceDeclaredImageUrl(pick(row, ['新闻图片'])) ?? articleCoverUrl(url);
     const displayTitle = `${item.entry.displayName ?? item.entry.symbol}：${title}`;
     rowsForStock.push({
       category: '新闻',
@@ -1142,7 +1032,7 @@ function marketNewsRows(item: MarketNewsInput, limit = MARKET_DISCOVERY_PAGE_SIZ
     if (!title || !publishedAt || !url) continue;
     const summary = String(pick(row, ['新闻内容']) ?? '').trim();
     const source = String(pick(row, ['文章来源']) ?? '').trim() || '东方财富';
-    const sourceImageUrl = sourceDeclaredImageUrl(pick(row, ['新闻图片']));
+    const sourceImageUrl = sourceDeclaredImageUrl(pick(row, ['新闻图片'])) ?? articleCoverUrl(url);
     rows.push({
       category: '新闻',
       feed: item.feed,
@@ -1729,6 +1619,7 @@ export const stocksRouter = router({
 
 export const __stocksDashboardTest = {
   sourceDeclaredImageUrl,
+  articleCoverUrl,
   normalizeDiscoveryEditorialArt,
   buildNews,
   loadMarketDiscoveryFeed,

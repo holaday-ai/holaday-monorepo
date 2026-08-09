@@ -37,62 +37,21 @@ describe('stock discovery presentation', () => {
     ).map(({ index }) => index)).toEqual([0, 2, 3, 1, 4]);
   });
 
-  it('avoids adjacent duplicate local editorial art after stock diversification', () => {
-    const items: Array<{
+  it('suppresses unverified editorial art instead of presenting it as news media', () => {
+    const [result] = diversifyDiscoveryEditorialArt([{
       item: {
-        symbol: string;
-        imageUrl: string;
-        imageKind: 'source-cover' | 'editorial-art';
-        editorialArtOptions?: string[];
-      };
-      index: number;
-    }> = [
-      {
-        item: {
-          symbol: '603738',
-          imageUrl: '/stock-editorial-art/macro-1.jpg',
-          imageKind: 'editorial-art' as const,
-          editorialArtOptions: [
-            '/stock-editorial-art/macro-1.jpg',
-            '/stock-editorial-art/governance-1.jpg',
-          ],
-        },
-        index: 0,
+        imageUrl: '/stock-editorial-art/market-2.jpg',
+        imageKind: 'editorial-art' as const,
+        editorialArtOptions: ['/stock-editorial-art/market-3.jpg'],
       },
-      { item: { symbol: '603738', imageUrl: '/stock-editorial-art/industrial-1.jpg', imageKind: 'editorial-art' as const }, index: 1 },
-      {
-        item: {
-          symbol: '603528',
-          imageUrl: '/stock-editorial-art/macro-1.jpg',
-          imageKind: 'editorial-art' as const,
-          editorialArtOptions: [
-            '/stock-editorial-art/macro-1.jpg',
-            '/stock-editorial-art/governance-1.jpg',
-          ],
-        },
-        index: 2,
-      },
-      { item: { symbol: '600497', imageUrl: 'https://publisher.example/cover.jpg', imageKind: 'source-cover' as const }, index: 3 },
-    ];
+      index: 0,
+    }]);
 
-    const stockFirst = diversifyDiscoveryItems(items, ({ symbol }) => symbol);
-    const diversified = diversifyDiscoveryEditorialArt(stockFirst);
-
-    expect(stockFirst.map(({ item }) => item.imageUrl)).toEqual([
-      '/stock-editorial-art/macro-1.jpg',
-      '/stock-editorial-art/macro-1.jpg',
-      'https://publisher.example/cover.jpg',
-      '/stock-editorial-art/industrial-1.jpg',
-    ]);
-    expect(diversified.map(({ item }) => item.imageUrl)).toEqual([
-      '/stock-editorial-art/macro-1.jpg',
-      expect.not.stringMatching(/macro-1\.jpg$/),
-      'https://publisher.example/cover.jpg',
-      '/stock-editorial-art/industrial-1.jpg',
-    ]);
+    expect(result?.item.imageUrl).toBeUndefined();
+    expect(result?.item.imageKind).toBeUndefined();
   });
 
-  it('keeps the first source cover and uses topical artwork for repeated generic source covers', () => {
+  it('keeps the first verified source cover and falls back to text for repeats', () => {
     const items = [
       {
         item: {
@@ -116,12 +75,12 @@ describe('stock discovery presentation', () => {
 
     expect(diversified.map(({ item }) => item.imageUrl)).toEqual([
       'https://publisher.example/generic-market-photo.jpg',
-      '/stock-editorial-art/market-3.jpg',
+      undefined,
     ]);
-    expect(diversified[1]?.item.imageKind).toBe('editorial-art');
+    expect(diversified[1]?.item.imageKind).toBeUndefined();
   });
 
-  it('uses topical artwork when a source cover cannot load', () => {
+  it('falls back to a title-first card when a verified source cover cannot load', () => {
     const items = [{
       item: {
         imageUrl: 'https://publisher.example/blocked-source-photo.jpg',
@@ -136,233 +95,8 @@ describe('stock discovery presentation', () => {
       new Set(['https://publisher.example/blocked-source-photo.jpg']),
     );
 
-    expect(fallback?.item.imageUrl).toBe('/stock-editorial-art/technology-4.jpg');
-    expect(fallback?.item.imageKind).toBe('editorial-art');
-  });
-
-  it('does not alter a cover merely because the same artwork appeared on an earlier page', () => {
-    const items = Array.from({ length: 12 }, (_, index) => ({
-      item: {
-        imageUrl: '/stock-editorial-art/macro-1.jpg',
-        imageKind: 'editorial-art' as const,
-      },
-      index,
-    }));
-
-    const diversified = diversifyDiscoveryEditorialArt(items);
-
-    expect(diversified[11]?.item.imageUrl).toBe('/stock-editorial-art/macro-1.jpg');
-  });
-
-  it('keeps a technology cover in its own candidate set after earlier carousel pages', () => {
-    const items = Array.from({ length: 12 }, (_, index) => ({
-      item: {
-        imageUrl: `/stock-editorial-art/page-${index}.jpg`,
-        imageKind: 'editorial-art' as const,
-        editorialArtOptions: [`/stock-editorial-art/page-${index}.jpg`],
-      },
-      index,
-    })).concat({
-      item: {
-        imageUrl: '/stock-editorial-art/technology-1.jpg',
-        imageKind: 'editorial-art' as const,
-        editorialArtOptions: [
-          '/stock-editorial-art/technology-1.jpg',
-          '/stock-editorial-art/advanced-manufacturing-1.jpg',
-          '/stock-editorial-art/industrial-1.jpg',
-        ],
-      },
-      index: 12,
-    });
-
-    expect(diversifyDiscoveryEditorialArt(items)[12]?.item.imageUrl).toBe('/stock-editorial-art/technology-1.jpg');
-  });
-
-  it('does not repeat an actual replacement in the same carousel page', () => {
-    const items = [
-      {
-        item: {
-          imageUrl: '/stock-editorial-art/technology-1.jpg',
-          imageKind: 'editorial-art' as const,
-          editorialArtOptions: [
-            '/stock-editorial-art/technology-1.jpg',
-            '/stock-editorial-art/advanced-manufacturing-1.jpg',
-            '/stock-editorial-art/industrial-1.jpg',
-          ],
-        },
-        index: 0,
-      },
-      {
-        item: {
-          imageUrl: '/stock-editorial-art/technology-1.jpg',
-          imageKind: 'editorial-art' as const,
-          editorialArtOptions: [
-            '/stock-editorial-art/technology-1.jpg',
-            '/stock-editorial-art/advanced-manufacturing-1.jpg',
-            '/stock-editorial-art/industrial-1.jpg',
-          ],
-        },
-        index: 1,
-      },
-      {
-        item: {
-          imageUrl: '/stock-editorial-art/technology-1.jpg',
-          imageKind: 'editorial-art' as const,
-          editorialArtOptions: [
-            '/stock-editorial-art/technology-1.jpg',
-            '/stock-editorial-art/advanced-manufacturing-1.jpg',
-            '/stock-editorial-art/industrial-1.jpg',
-          ],
-        },
-        index: 2,
-      },
-    ];
-
-    expect(diversifyDiscoveryEditorialArt(items).map(({ item }) => item.imageUrl)).toEqual([
-      '/stock-editorial-art/technology-1.jpg',
-      '/stock-editorial-art/advanced-manufacturing-1.jpg',
-      '/stock-editorial-art/industrial-1.jpg',
-    ]);
-  });
-
-  it('avoids a shared editorial image when another topical option is still unused', () => {
-    const items = [
-      {
-        item: {
-          imageUrl: '/stock-editorial-art/technology-1.jpg',
-          imageKind: 'editorial-art' as const,
-          editorialArtOptions: ['/stock-editorial-art/technology-1.jpg'],
-        },
-        index: 0,
-      },
-      {
-        item: {
-          imageUrl: '/stock-editorial-art/energy-1.jpg',
-          imageKind: 'editorial-art' as const,
-          editorialArtOptions: ['/stock-editorial-art/energy-1.jpg'],
-        },
-        index: 1,
-      },
-      {
-        item: {
-          imageUrl: '/stock-editorial-art/consumer-1.jpg',
-          imageKind: 'editorial-art' as const,
-          editorialArtOptions: ['/stock-editorial-art/consumer-1.jpg'],
-        },
-        index: 2,
-      },
-      {
-        item: {
-          imageUrl: '/stock-editorial-art/market-2.jpg',
-          imageKind: 'editorial-art' as const,
-          editorialArtOptions: [
-            '/stock-editorial-art/market-2.jpg',
-            '/stock-editorial-art/macro-1.jpg',
-          ],
-        },
-        index: 3,
-      },
-      {
-        item: {
-          imageUrl: '/stock-editorial-art/technology-2.jpg',
-          imageKind: 'editorial-art' as const,
-          editorialArtOptions: ['/stock-editorial-art/technology-2.jpg'],
-        },
-        index: 4,
-      },
-      {
-        item: {
-          imageUrl: '/stock-editorial-art/energy-2.jpg',
-          imageKind: 'editorial-art' as const,
-          editorialArtOptions: ['/stock-editorial-art/energy-2.jpg'],
-        },
-        index: 5,
-      },
-      {
-        item: {
-          imageUrl: '/stock-editorial-art/consumer-3.jpg',
-          imageKind: 'editorial-art' as const,
-          editorialArtOptions: ['/stock-editorial-art/consumer-3.jpg'],
-        },
-        index: 6,
-      },
-      {
-        item: {
-          imageUrl: '/stock-editorial-art/market-2.jpg',
-          imageKind: 'editorial-art' as const,
-          editorialArtOptions: [
-            '/stock-editorial-art/market-2.jpg',
-            '/stock-editorial-art/earnings-1.jpg',
-          ],
-        },
-        index: 7,
-      },
-    ];
-
-    expect(diversifyDiscoveryEditorialArt(items).map(({ item }) => item.imageUrl)).toEqual([
-      '/stock-editorial-art/technology-1.jpg',
-      '/stock-editorial-art/energy-1.jpg',
-      '/stock-editorial-art/consumer-1.jpg',
-      '/stock-editorial-art/market-2.jpg',
-      '/stock-editorial-art/technology-2.jpg',
-      '/stock-editorial-art/energy-2.jpg',
-      '/stock-editorial-art/consumer-3.jpg',
-      '/stock-editorial-art/earnings-1.jpg',
-    ]);
-  });
-
-  it('rotates a semantic artwork pool across carousel pages before reusing a cover', () => {
-    const options = [
-      '/stock-editorial-art/technology-1.jpg',
-      '/stock-editorial-art/technology-2.jpg',
-      '/stock-editorial-art/technology-3.jpg',
-      '/stock-editorial-art/technology-4.jpg',
-    ];
-    const items = Array.from({ length: 4 }, (_, index) => ({
-      item: {
-        imageUrl: '/stock-editorial-art/technology-1.jpg',
-        imageKind: 'editorial-art' as const,
-        editorialArtOptions: options,
-      },
-      index,
-    }));
-
-    expect(diversifyDiscoveryEditorialArt(items).map(({ item }) => item.imageUrl)).toEqual(options);
-  });
-
-  it('keeps a semantic cover when a small topical pool is exhausted in the visible grid', () => {
-    const items = [
-      {
-        item: {
-          imageUrl: '/stock-editorial-art/technology-1.jpg',
-          imageKind: 'editorial-art' as const,
-          editorialArtOptions: ['/stock-editorial-art/technology-1.jpg'],
-        },
-        index: 0,
-      },
-      {
-        item: {
-          imageUrl: '/stock-editorial-art/energy-1.jpg',
-          imageKind: 'editorial-art' as const,
-          editorialArtOptions: ['/stock-editorial-art/energy-1.jpg'],
-        },
-        index: 1,
-      },
-      {
-        item: {
-          imageUrl: '/stock-editorial-art/technology-1.jpg',
-          imageKind: 'editorial-art' as const,
-          editorialArtOptions: ['/stock-editorial-art/technology-1.jpg'],
-        },
-        index: 2,
-      },
-    ];
-
-    expect(diversifyDiscoveryEditorialArt(items).map(({ item }) => item.imageUrl)).toEqual([
-      '/stock-editorial-art/technology-1.jpg',
-      '/stock-editorial-art/energy-1.jpg',
-      '/stock-editorial-art/technology-1.jpg',
-    ]);
+    expect(fallback?.item.imageUrl).toBeUndefined();
+    expect(fallback?.item.imageKind).toBeUndefined();
   });
 
   it('labels a date-only announcement as a disclosure date without inventing a time', () => {

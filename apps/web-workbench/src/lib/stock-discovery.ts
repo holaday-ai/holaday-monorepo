@@ -9,95 +9,33 @@ type DiscoveryMedia = {
   editorialArtOptions?: readonly string[];
 };
 
-function isLocalEditorialArt(item: DiscoveryMedia): item is DiscoveryMedia & { imageUrl: string } {
-  return item.imageKind === 'editorial-art' && Boolean(item.imageUrl?.startsWith('/stock-editorial-art/'));
-}
-
 /**
- * The carousel intentionally reorders rows so a multi-stock watchlist is not
- * dominated by one symbol. Run this after that ordering to keep consecutive
- * reusable editorial covers visually distinct without allowing a cover from
- * another industry to replace the article's own semantic artwork. Each
- * semantic pool is rotated across the loaded feed before it is reused, while
- * external source covers remain untouched.
+ * Only publisher-backed media is allowed in discovery. Legacy editorial art,
+ * repeated covers, and failed source images become title-first cards instead
+ * of being replaced with an unrelated decorative image.
  */
 export function diversifyDiscoveryEditorialArt<T extends DiscoveryMedia>(
   items: IndexedDiscoveryItem<T>[],
   failedSourceCoverUrls: ReadonlySet<string> = new Set(),
 ): IndexedDiscoveryItem<T>[] {
-  const usedEditorialUrlsByPool = new Map<string, Set<string>>();
-  const usedAcrossFeed = new Set<string>();
-  const recentEditorialUrls: string[] = [];
-  const sourceCoverCounts = new Map<string, number>();
   const usedSourceCoverUrls = new Set<string>();
-  for (const { item } of items) {
-    if (item.imageKind !== 'source-cover' || !item.imageUrl) continue;
-    sourceCoverCounts.set(item.imageUrl, (sourceCoverCounts.get(item.imageUrl) ?? 0) + 1);
-  }
   return items.map((entry) => {
     const { item } = entry;
     const imageUrl = item.imageUrl;
-    if (!imageUrl) {
-      return entry;
-    }
-    const candidates = item.editorialArtOptions?.filter((candidate, index, all) => all.indexOf(candidate) === index)
-      .filter((candidate) => candidate.startsWith('/stock-editorial-art/'))
-      ?? [];
-    const titleFirstFallback = (): IndexedDiscoveryItem<T> => ({
+    const titleFirst = (): IndexedDiscoveryItem<T> => ({
       ...entry,
-      item: { ...item, imageUrl: undefined, imageKind: undefined },
+      item: {
+        ...item,
+        imageUrl: undefined,
+        imageKind: undefined,
+        editorialArtOptions: undefined,
+      },
     });
-    const topicalArtworkFallback = (): IndexedDiscoveryItem<T> | null => {
-      if (candidates.length === 0) return null;
-      const replacement = candidates.find((candidate) =>
-        !usedAcrossFeed.has(candidate) && !recentEditorialUrls.includes(candidate),
-      ) ?? candidates.find((candidate) => !recentEditorialUrls.includes(candidate)) ?? candidates[0];
-      if (!replacement) return null;
-      usedAcrossFeed.add(replacement);
-      recentEditorialUrls.push(replacement);
-      if (recentEditorialUrls.length > 3) recentEditorialUrls.shift();
-      return {
-        ...entry,
-        item: { ...item, imageUrl: replacement, imageKind: 'editorial-art' },
-      };
-    };
-
-    if (item.imageKind === 'source-cover') {
-      const sourceCoverFailed = failedSourceCoverUrls.has(imageUrl);
-      const isRepeatedSourceCover = (sourceCoverCounts.get(imageUrl) ?? 0) >= 2 && usedSourceCoverUrls.has(imageUrl);
-      if (sourceCoverFailed || isRepeatedSourceCover) {
-        return topicalArtworkFallback() ?? titleFirstFallback();
-      }
-      usedSourceCoverUrls.add(imageUrl);
-      return entry;
-    }
-
-    if (!isLocalEditorialArt(item)) {
-      return entry;
-    }
-    const effectiveCandidates = candidates.length > 0 ? candidates : [imageUrl];
-    const poolKey = effectiveCandidates.join('|');
-    const usedEditorialUrls = usedEditorialUrlsByPool.get(poolKey) ?? new Set<string>();
-    if (usedEditorialUrls.size >= effectiveCandidates.length) usedEditorialUrls.clear();
-    usedEditorialUrlsByPool.set(poolKey, usedEditorialUrls);
-
-    const replacement = [imageUrl, ...effectiveCandidates].find((candidate) =>
-      !usedEditorialUrls.has(candidate) && !usedAcrossFeed.has(candidate) && !recentEditorialUrls.includes(candidate),
-    ) ?? [imageUrl, ...effectiveCandidates].find((candidate) =>
-      !usedEditorialUrls.has(candidate) && !recentEditorialUrls.includes(candidate),
-    ) ?? [imageUrl, ...effectiveCandidates].find((candidate) => !usedEditorialUrls.has(candidate)) ?? imageUrl;
-
-    usedEditorialUrls.add(replacement);
-    usedAcrossFeed.add(replacement);
-    recentEditorialUrls.push(replacement);
-    if (recentEditorialUrls.length > 3) recentEditorialUrls.shift();
-    if (replacement === imageUrl) {
-      return entry;
-    }
-    return {
-      ...entry,
-      item: { ...item, imageUrl: replacement },
-    };
+    if (!imageUrl) return item.imageKind === 'editorial-art' ? titleFirst() : entry;
+    if (item.imageKind !== 'source-cover') return titleFirst();
+    if (failedSourceCoverUrls.has(imageUrl) || usedSourceCoverUrls.has(imageUrl)) return titleFirst();
+    usedSourceCoverUrls.add(imageUrl);
+    return entry;
   });
 }
 
