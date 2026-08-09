@@ -26,6 +26,7 @@ import { fmtNum, fmtYiYuan, pick, toNum } from '../../agent/a-share/ashare-forma
 import { stockDashboardSnapshots } from '../../db/schema/stock-dashboard-snapshots.js';
 import { users } from '../../db/schema/users.js';
 import { resolveNewsDetail } from '../../stock-news/article-detail.js';
+import { sourceCoverProxyUrl } from '../../stock-news/source-cover.js';
 import { protectedProcedure, router } from '../trpc.js';
 
 type Db = typeof import('../../db/client.js').db;
@@ -873,24 +874,10 @@ function sourceDeclaredImageUrl(value?: unknown): string | undefined {
   }
 }
 
-function articleCoverUrl(value?: unknown): string | undefined {
-  if (typeof value !== 'string' || !value.trim()) return undefined;
-  try {
-    const article = new URL(value);
-    if (article.protocol !== 'http:' && article.protocol !== 'https:') return undefined;
-    if (article.hostname !== 'eastmoney.com' && !article.hostname.endsWith('.eastmoney.com')) return undefined;
-    const articleId = /^\/a\/(\d{12,})\.html$/.exec(article.pathname)?.[1];
-    if (!articleId) return undefined;
-    return `https://np-metadata.eastmoney.com/api/metadata.jpg?event=1&source=3&mode=2&type=1&id=${articleId}`;
-  } catch {
-    return undefined;
-  }
-}
-
 function normalizeDiscoveryEditorialArt(rows: NewsSnapshot[]): NewsSnapshot[] {
   return rows.map((row) => {
     if (row.category !== '公告' && row.category !== '新闻') return row;
-    const sourceCover = row.imageKind === 'source-cover' ? sourceDeclaredImageUrl(row.imageUrl) : undefined;
+    const sourceCover = row.imageKind === 'source-cover' ? sourceCoverProxyUrl(row.imageUrl) : undefined;
     const { imageUrl: _imageUrl, imageKind: _imageKind, editorialArtOptions: _options, ...titleFirst } = row;
     if (!sourceCover) return titleFirst;
     return { ...titleFirst, imageUrl: sourceCover, imageKind: 'source-cover' as const };
@@ -1003,7 +990,7 @@ function stockNewsRows(
     if (!title || !publishedAt || !url) continue;
     const summary = String(pick(row, ['新闻内容']) ?? '').trim();
     const source = String(pick(row, ['文章来源']) ?? '').trim() || '东方财富';
-    const sourceImageUrl = sourceDeclaredImageUrl(pick(row, ['新闻图片'])) ?? articleCoverUrl(url);
+    const sourceImageUrl = sourceDeclaredImageUrl(pick(row, ['新闻图片']));
     const displayTitle = `${item.entry.displayName ?? item.entry.symbol}：${title}`;
     rowsForStock.push({
       category: '新闻',
@@ -1032,7 +1019,7 @@ function marketNewsRows(item: MarketNewsInput, limit = MARKET_DISCOVERY_PAGE_SIZ
     if (!title || !publishedAt || !url) continue;
     const summary = String(pick(row, ['新闻内容']) ?? '').trim();
     const source = String(pick(row, ['文章来源']) ?? '').trim() || '东方财富';
-    const sourceImageUrl = sourceDeclaredImageUrl(pick(row, ['新闻图片'])) ?? articleCoverUrl(url);
+    const sourceImageUrl = sourceDeclaredImageUrl(pick(row, ['新闻图片']));
     rows.push({
       category: '新闻',
       feed: item.feed,
@@ -1619,7 +1606,6 @@ export const stocksRouter = router({
 
 export const __stocksDashboardTest = {
   sourceDeclaredImageUrl,
-  articleCoverUrl,
   normalizeDiscoveryEditorialArt,
   buildNews,
   loadMarketDiscoveryFeed,

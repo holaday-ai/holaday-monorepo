@@ -110,7 +110,7 @@ describe('stocks dashboard snapshot', () => {
               发布时间: '2026-08-07 11:30:00',
               文章来源: '东方财富',
               新闻链接: 'https://finance.eastmoney.com/a/202607313828387959.html',
-              新闻图片: 'https://source.example/verified-cover.jpg',
+              新闻图片: 'https://np-newspic.dfcfw.com/download/D25550525489083947595_w210h154.jpg',
             },
             {
               新闻标题: '重复链接不应计入第二条',
@@ -129,7 +129,8 @@ describe('stocks dashboard snapshot', () => {
         title: '多伦科技：多伦科技发布新产品',
         source: '东方财富',
         url: 'https://finance.eastmoney.com/a/202607313828387959.html',
-        imageUrl: 'https://source.example/verified-cover.jpg',
+        imageUrl:
+          '/api/stock-news/source-cover?url=https%3A%2F%2Fnp-newspic.dfcfw.com%2Fdownload%2FD25550525489083947595_w210h154.jpg',
         time: '08-07 11:30',
       }),
       expect.objectContaining({
@@ -346,19 +347,12 @@ describe('stocks dashboard snapshot', () => {
     expect(requestedAnnouncementSymbols.sort()).toEqual(symbols);
   });
 
-  it('uses declared or source-derived covers without inventing editorial art', () => {
+  it('uses only declared source covers without deriving an unverified article image', () => {
     const sourceDeclaredImageUrl = __stocksDashboardTest.sourceDeclaredImageUrl as (value?: unknown) => string | undefined;
-    const articleCoverUrl = (__stocksDashboardTest as unknown as {
-      articleCoverUrl: (value?: unknown) => string | undefined;
-    }).articleCoverUrl;
 
     expect(sourceDeclaredImageUrl('https://source.example/cover.jpg')).toBe('https://source.example/cover.jpg');
     expect(sourceDeclaredImageUrl('data:image/png;base64,not-a-source-url')).toBeUndefined();
     expect(sourceDeclaredImageUrl('javascript:alert(1)')).toBeUndefined();
-    expect(articleCoverUrl('https://finance.eastmoney.com/a/202607313828387959.html')).toBe(
-      'https://np-metadata.eastmoney.com/api/metadata.jpg?event=1&source=3&mode=2&type=1&id=202607313828387959',
-    );
-    expect(articleCoverUrl('https://publisher.example/a/202607313828387959.html')).toBeUndefined();
 
     const buildSourceDiscovery = __stocksDashboardTest.buildNews as unknown as (
       announcements: Array<{ entry: { symbol: string; market: 'A'; displayName: string }; env: ReturnType<typeof envelope> }>,
@@ -374,10 +368,8 @@ describe('stocks dashboard snapshot', () => {
       }]),
     }]);
 
-    expect(item?.imageUrl).toBe(
-      'https://np-metadata.eastmoney.com/api/metadata.jpg?event=1&source=3&mode=2&type=1&id=202608073834244063',
-    );
-    expect(item?.imageKind).toBe('source-cover');
+    expect(item?.imageUrl).toBeUndefined();
+    expect(item?.imageKind).toBeUndefined();
   });
 
   it('keeps a declared cover and leaves non-Eastmoney coverless rows title-first', () => {
@@ -393,7 +385,7 @@ describe('stocks dashboard snapshot', () => {
           发布时间: '2026-08-07 12:30:00',
           文章来源: '真实来源',
           新闻链接: 'https://finance.eastmoney.com/a/202608073834244001.html',
-          新闻图片: 'https://source.example/verified-cover.jpg',
+          新闻图片: 'https://np-newspic.dfcfw.com/download/D25550525489083947595_w210h154.jpg',
         },
         {
           新闻标题: '公司发布季度经营公告',
@@ -412,7 +404,8 @@ describe('stocks dashboard snapshot', () => {
 
     expect(rows[0]).toMatchObject({
       imageKind: 'source-cover',
-      imageUrl: 'https://source.example/verified-cover.jpg',
+      imageUrl:
+        '/api/stock-news/source-cover?url=https%3A%2F%2Fnp-newspic.dfcfw.com%2Fdownload%2FD25550525489083947595_w210h154.jpg',
     });
     expect(rows.slice(1).map((row) => row.imageUrl)).toEqual([undefined, undefined]);
     expect(rows.slice(1).map((row) => row.imageKind)).toEqual([undefined, undefined]);

@@ -58,6 +58,7 @@ import {
   type BillingCycle,
 } from '@holaday/shared-types';
 import { createWebhookTasksHandler } from './api-keys/webhook-handler.js';
+import { fetchSourceCover } from './stock-news/source-cover.js';
 import { makeCreateContext } from './trpc/context.js';
 import { appRouter } from './trpc/router.js';
 import {
@@ -104,6 +105,21 @@ export function createHttpApp(deps: HttpAppDeps) {
       time: new Date().toISOString(),
       executor: deps.playwrightExecutor ? 'playwright' : 'legacy',
     });
+  });
+
+  app.get('/stock-news/source-cover', async (req, res) => {
+    const result = await fetchSourceCover(req.query.url);
+    if (!result.ok) {
+      res.status(result.status).json({ error: result.error });
+      return;
+    }
+    res.setHeader('Content-Type', result.contentType);
+    res.setHeader('Content-Length', String(result.body.byteLength));
+    res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    if (result.etag) res.setHeader('ETag', result.etag);
+    if (result.lastModified) res.setHeader('Last-Modified', result.lastModified);
+    res.status(200).send(result.body);
   });
 
   // ─────────────────────────────────────────────────────────────────────
