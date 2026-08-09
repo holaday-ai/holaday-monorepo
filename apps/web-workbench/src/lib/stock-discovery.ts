@@ -103,6 +103,9 @@ function preciseEditorialArtOptions(item: DiscoveryMedia): readonly string[] {
   if (!text.trim()) return [];
 
   if (/董事会|股东大会|董事会议|监事会|会议决议|董事长/.test(text)) return EDITORIAL_ART_BY_TOPIC.board;
+  if (item.category !== '公告' && /清仓|持仓曝光|机构持仓|私募巨头|基金持仓/.test(text)) {
+    return EDITORIAL_ART_BY_TOPIC.market;
+  }
   if (/投资者关系|机构调研|业绩说明会|路演|接待调研/.test(text)) return EDITORIAL_ART_BY_TOPIC.investorRelations;
   if (/财务总监|总经理变更|高管变更|任职|离任|辞职|增持|减持|回购|股权激励/.test(text)) {
     return EDITORIAL_ART_BY_TOPIC.investorRelations;
@@ -129,7 +132,7 @@ function preciseEditorialArtOptions(item: DiscoveryMedia): readonly string[] {
   if (/医药|医疗|医院|药品|创新药|生物医药|医疗器械|疫苗/.test(text)) {
     return EDITORIAL_ART_BY_TOPIC.healthcare;
   }
-  if (/钢铁|有色|金属|稀土|黄金|铜|铝|锌|矿业|矿产|水泥|建材/.test(text)) {
+  if (/钢铁|有色|金属|稀土|黄金|铜|铝|锌|矿业|矿产|矿山|矿主|资源股|水泥|建材/.test(text)) {
     return EDITORIAL_ART_BY_TOPIC.materials;
   }
   if (/物流|仓储|快递|铁路运输|货运|供应链/.test(text)) return EDITORIAL_ART_BY_TOPIC.logistics;

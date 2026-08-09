@@ -90,6 +90,32 @@ describe('stock discovery presentation', () => {
     expect(result?.item.imageUrl).toMatch(/^\/stock-editorial-art\/(?:disclosure-1|governance-6)\.jpg$/);
   });
 
+  it('prefers the story event over a company name when choosing fallback art', () => {
+    const [positionStory, resourceStory] = diversifyDiscoveryEditorialArt([
+      {
+        item: {
+          category: '新闻',
+          title: '私募巨头清仓英伟达、Meta，美股持仓曝光',
+          imageUrl: undefined as string | undefined,
+          imageKind: undefined as 'source-cover' | 'editorial-art' | undefined,
+        },
+        index: 0,
+      },
+      {
+        item: {
+          category: '新闻',
+          title: '全球资源博弈升温，深挖 A 股自主可控大矿主',
+          imageUrl: undefined as string | undefined,
+          imageKind: undefined as 'source-cover' | 'editorial-art' | undefined,
+        },
+        index: 1,
+      },
+    ]);
+
+    expect(positionStory?.item.imageUrl).toMatch(/^\/stock-editorial-art\/market-[23]\.jpg$/);
+    expect(resourceStory?.item.imageUrl).toMatch(/^\/stock-editorial-art\/materials-[123]\.jpg$/);
+  });
+
   it('keeps the first verified source cover and falls back to text for repeats', () => {
     const items = [
       {
