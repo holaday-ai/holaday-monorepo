@@ -4,6 +4,7 @@ import {
   diversifyDiscoveryItems,
   discoveryPageIndexes,
   discoveryTimeLabel,
+  prioritizeAndDiversifyDiscoveryItems,
   shouldPrefetchDiscoveryPage,
 } from './stock-discovery';
 
@@ -18,6 +19,22 @@ describe('stock discovery presentation', () => {
     ];
 
     expect(diversifyDiscoveryItems(items, ({ symbol }) => symbol).map(({ index }) => index)).toEqual([0, 2, 3, 1, 4]);
+  });
+
+  it('keeps priority ordering without letting one followed stock take over the first page', () => {
+    const items = [
+      { item: { symbol: '603738', priority: 5 }, index: 0 },
+      { item: { symbol: '603738', priority: 5 }, index: 1 },
+      { item: { symbol: '603528', priority: 4 }, index: 2 },
+      { item: { symbol: '600497', priority: 4 }, index: 3 },
+      { item: { symbol: '603738', priority: 3 }, index: 4 },
+    ];
+
+    expect(prioritizeAndDiversifyDiscoveryItems(
+      items,
+      ({ priority }) => priority,
+      ({ symbol }) => symbol,
+    ).map(({ index }) => index)).toEqual([0, 2, 3, 1, 4]);
   });
 
   it('avoids adjacent duplicate local editorial art after stock diversification', () => {
@@ -75,12 +92,13 @@ describe('stock discovery presentation', () => {
     ]);
   });
 
-  it('uses title-first cards for repeated generic source covers', () => {
+  it('keeps the first source cover and uses topical artwork for repeated generic source covers', () => {
     const items = [
       {
         item: {
           imageUrl: 'https://publisher.example/generic-market-photo.jpg',
           imageKind: 'source-cover' as const,
+          editorialArtOptions: ['/stock-editorial-art/market-2.jpg'],
         },
         index: 0,
       },
@@ -88,6 +106,7 @@ describe('stock discovery presentation', () => {
         item: {
           imageUrl: 'https://publisher.example/generic-market-photo.jpg',
           imageKind: 'source-cover' as const,
+          editorialArtOptions: ['/stock-editorial-art/market-3.jpg'],
         },
         index: 1,
       },
@@ -95,14 +114,19 @@ describe('stock discovery presentation', () => {
 
     const diversified = diversifyDiscoveryEditorialArt(items);
 
-    expect(diversified.map(({ item }) => item.imageUrl)).toEqual([undefined, undefined]);
+    expect(diversified.map(({ item }) => item.imageUrl)).toEqual([
+      'https://publisher.example/generic-market-photo.jpg',
+      '/stock-editorial-art/market-3.jpg',
+    ]);
+    expect(diversified[1]?.item.imageKind).toBe('editorial-art');
   });
 
-  it('uses a title-first card when a source cover cannot load', () => {
+  it('uses topical artwork when a source cover cannot load', () => {
     const items = [{
       item: {
         imageUrl: 'https://publisher.example/blocked-source-photo.jpg',
         imageKind: 'source-cover' as const,
+        editorialArtOptions: ['/stock-editorial-art/technology-4.jpg'],
       },
       index: 0,
     }];
@@ -112,8 +136,8 @@ describe('stock discovery presentation', () => {
       new Set(['https://publisher.example/blocked-source-photo.jpg']),
     );
 
-    expect(fallback?.item.imageUrl).toBeUndefined();
-    expect(fallback?.item.imageKind).toBeUndefined();
+    expect(fallback?.item.imageUrl).toBe('/stock-editorial-art/technology-4.jpg');
+    expect(fallback?.item.imageKind).toBe('editorial-art');
   });
 
   it('does not alter a cover merely because the same artwork appeared on an earlier page', () => {
@@ -306,7 +330,7 @@ describe('stock discovery presentation', () => {
     expect(diversifyDiscoveryEditorialArt(items).map(({ item }) => item.imageUrl)).toEqual(options);
   });
 
-  it('uses a title-first card instead of repeating editorial art in the visible grid', () => {
+  it('keeps a semantic cover when a small topical pool is exhausted in the visible grid', () => {
     const items = [
       {
         item: {
@@ -334,10 +358,10 @@ describe('stock discovery presentation', () => {
       },
     ];
 
-    expect(diversifyDiscoveryEditorialArt(items, new Set(), { uniqueItemLimit: 3 }).map(({ item }) => item.imageUrl)).toEqual([
+    expect(diversifyDiscoveryEditorialArt(items).map(({ item }) => item.imageUrl)).toEqual([
       '/stock-editorial-art/technology-1.jpg',
       '/stock-editorial-art/energy-1.jpg',
-      undefined,
+      '/stock-editorial-art/technology-1.jpg',
     ]);
   });
 

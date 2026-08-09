@@ -92,9 +92,11 @@ interface NewsSnapshot {
   source: string;
   url?: string;
   summary?: string;
-  /** 只使用文章来源声明的封面；无封面时由前端以标题优先的卡片呈现。 */
+  /** 发布方封面优先；未提供封面时使用按主题匹配的本地素材。 */
   imageUrl?: string;
-  imageKind?: 'source-cover';
+  imageKind?: 'source-cover' | 'editorial-art';
+  /** 当前主题可安全轮换的本地素材，供前端处理重复或加载失败的封面。 */
+  editorialArtOptions?: string[];
 }
 
 interface LeaderSnapshot {
@@ -871,25 +873,170 @@ function sourceDeclaredImageUrl(value?: unknown): string | undefined {
   }
 }
 
-function normalizeDiscoveryEditorialArt(rows: NewsSnapshot[]): NewsSnapshot[] {
+/** Curated static artwork for source records that do not publish a cover. */
+const EDITORIAL_ART = {
+  governance: [
+    '/stock-editorial-art/governance-1.jpg',
+    '/stock-editorial-art/governance-2.jpg',
+    '/stock-editorial-art/governance-3.jpg',
+    '/stock-editorial-art/governance-4.jpg',
+    '/stock-editorial-art/governance-5.jpg',
+    '/stock-editorial-art/governance-6.jpg',
+    '/stock-editorial-art/disclosure-1.jpg',
+    '/stock-editorial-art/investor-relations-1.jpg',
+  ],
+  earnings: [
+    '/stock-editorial-art/earnings-1.jpg',
+    '/stock-editorial-art/earnings-2.jpg',
+  ],
+  technology: [
+    '/stock-editorial-art/technology-1.jpg',
+    '/stock-editorial-art/technology-2.jpg',
+    '/stock-editorial-art/technology-3.jpg',
+    '/stock-editorial-art/technology-4.jpg',
+    '/stock-editorial-art/technology-5.jpg',
+    '/stock-editorial-art/technology-6.jpg',
+    '/stock-editorial-art/technology-7.jpg',
+    '/stock-editorial-art/technology-8.jpg',
+    '/stock-editorial-art/technology-9.jpg',
+    '/stock-editorial-art/technology-10.jpg',
+    '/stock-editorial-art/advanced-manufacturing-1.jpg',
+    '/stock-editorial-art/industrial-1.jpg',
+  ],
+  mobility: [
+    '/stock-editorial-art/mobility-1.jpg',
+    '/stock-editorial-art/mobility-2.jpg',
+    '/stock-editorial-art/mobility-3.jpg',
+  ],
+  consumer: [
+    '/stock-editorial-art/consumer-1.jpg',
+    '/stock-editorial-art/consumer-2.jpg',
+    '/stock-editorial-art/consumer-3.jpg',
+    '/stock-editorial-art/consumer-4.jpg',
+  ],
+  healthcare: [
+    '/stock-editorial-art/healthcare-1.jpg',
+    '/stock-editorial-art/healthcare-2.jpg',
+    '/stock-editorial-art/healthcare-3.jpg',
+  ],
+  materials: [
+    '/stock-editorial-art/materials-1.jpg',
+    '/stock-editorial-art/materials-2.jpg',
+    '/stock-editorial-art/materials-3.jpg',
+  ],
+  logistics: [
+    '/stock-editorial-art/logistics-1.jpg',
+    '/stock-editorial-art/logistics-2.jpg',
+    '/stock-editorial-art/logistics-3.jpg',
+    '/stock-editorial-art/logistics-4.jpg',
+  ],
+  energy: [
+    '/stock-editorial-art/energy-1.jpg',
+    '/stock-editorial-art/energy-2.jpg',
+    '/stock-editorial-art/energy-3.jpg',
+    '/stock-editorial-art/energy-4.jpg',
+    '/stock-editorial-art/energy-5.jpg',
+  ],
+  market: [
+    '/stock-editorial-art/macro-1.jpg',
+    '/stock-editorial-art/market-2.jpg',
+    '/stock-editorial-art/market-3.jpg',
+    '/stock-editorial-art/market-4.jpg',
+  ],
+} as const;
+
+type EditorialArtTheme = keyof typeof EDITORIAL_ART;
+
+function editorialArtTheme(category: '公告' | '新闻', title: string): EditorialArtTheme {
+  const text = title.toLocaleLowerCase('zh-CN');
+  if (category === '公告' || /董事会|股东大会|股权|回购|增持|减持|停复牌|交易异常|风险提示|投资者关系/.test(text)) {
+    return 'governance';
+  }
+  if (/业绩|营收|利润|财报|预增|预亏|分红|经营/.test(text)) return 'earnings';
+  if (/芯片|半导体|软件|算力|人工智能|ai|电子|通信|光纤|光模块|光通信|cpo|数据中心|服务器|存储|制造业|装备制造|高端装备|智能装备|智能制造|工业机器人|机床|机械设备|新型工业化/.test(text)) {
+    return 'technology';
+  }
+  if (/汽车|新能源车|充电|电池|整车/.test(text)) return 'mobility';
+  if (/物流|仓储|快递|港口|运输/.test(text)) return 'logistics';
+  if (/光伏|风电|储能|电力|煤炭|石油|天然气|能源/.test(text)) return 'energy';
+  if (/医药|医疗|医院|药品|创新药|生物医药|医疗器械|疫苗/.test(text)) return 'healthcare';
+  if (/钢铁|有色|铜|铝|锌|黄金|稀土|化工|玻璃|水泥|建材|材料|矿业|矿产/.test(text)) return 'materials';
+  if (/消费|零售|食品|服装|旅游|酒店|餐饮|农业|农产品|茶饮|奶茶|咖啡|商超|美妆|家电|家居|白酒|啤酒|乳制品|文旅|游戏/.test(text)) {
+    return 'consumer';
+  }
+  return 'market';
+}
+
+function editorialArtOptions(category: '公告' | '新闻', title: string): string[] {
+  return [...EDITORIAL_ART[editorialArtTheme(category, title)]];
+}
+
+function selectEditorialArtUrl(input: {
+  category: '公告' | '新闻';
+  title: string;
+  symbol: string;
+  url?: string;
+}, variant = 0): string {
+  const candidates = editorialArtOptions(input.category, input.title);
+  const key = `${input.category}:${input.symbol}:${input.url ?? input.title}:${variant}`;
+  const hash = createHash('sha256').update(key).digest();
+  return candidates[hash.readUInt32BE(0) % candidates.length]!;
+}
+
+function diversifyEditorialArt(rows: NewsSnapshot[]): NewsSnapshot[] {
+  let previousEditorialUrl: string | undefined;
   return rows.map((row) => {
+    if (row.imageKind !== 'editorial-art' || !row.imageUrl || row.category === '盘面' || row.category === '关注') {
+      return row;
+    }
+    let imageUrl = row.imageUrl;
+    if (imageUrl === previousEditorialUrl) {
+      const candidates = editorialArtOptions(row.category, row.title);
+      for (let variant = 1; variant <= candidates.length; variant += 1) {
+        const alternative = selectEditorialArtUrl({
+          category: row.category,
+          title: row.title,
+          symbol: row.symbols[0] ?? '',
+          url: row.url,
+        }, variant);
+        if (alternative !== previousEditorialUrl) {
+          imageUrl = alternative;
+          break;
+        }
+      }
+    }
+    previousEditorialUrl = imageUrl;
+    return imageUrl === row.imageUrl ? row : { ...row, imageUrl };
+  });
+}
+
+function normalizeDiscoveryEditorialArt(rows: NewsSnapshot[]): NewsSnapshot[] {
+  return diversifyEditorialArt(rows.map((row) => {
     const hasExternalSourceCover =
       row.imageKind === 'source-cover' &&
       sourceDeclaredImageUrl(row.imageUrl) !== undefined;
     if (row.category !== '公告' && row.category !== '新闻') {
       return row;
     }
+    const options = editorialArtOptions(row.category, row.title);
     if (hasExternalSourceCover) {
       return {
         ...row,
+        editorialArtOptions: options,
       };
     }
-    const titleFirstRow: NewsSnapshot & Record<string, unknown> = { ...row };
-    delete titleFirstRow.imageUrl;
-    delete titleFirstRow.imageKind;
-    delete titleFirstRow.editorialArtOptions;
-    return titleFirstRow;
-  });
+    return {
+      ...row,
+      imageUrl: selectEditorialArtUrl({
+        category: row.category,
+        title: row.title,
+        symbol: row.symbols[0] ?? '',
+        url: row.url,
+      }),
+      imageKind: 'editorial-art' as const,
+      editorialArtOptions: options,
+    };
+  }));
 }
 
 function sortNewsNewestFirst(rows: NewsSnapshot[]): NewsSnapshot[] {
@@ -1384,16 +1531,18 @@ function startDashboardRefresh(args: {
     includeSlowSignals: !quickFirst,
   }).then(async (snapshot) => {
     if (quickFirst) {
+      const merged = withPreservedSlowSignals(snapshot, existing?.snapshot);
       const fullRefreshPromise = startFullDashboardRefresh(args);
-      cacheDashboardSnapshot(args.cacheKey, snapshot, fullRefreshPromise);
+      cacheDashboardSnapshot(args.cacheKey, merged, fullRefreshPromise);
       persistDashboardSnapshot({
         db: args.db,
         logger: args.logger,
         userInternalId: args.userInternalId,
         cacheKey: args.cacheKey,
-        snapshot,
+        snapshot: merged,
       }).catch(() => undefined);
       fullRefreshPromise.catch(() => undefined);
+      return merged;
     } else {
       const merged = withPreservedSlowSignals(snapshot, existing?.snapshot);
       cacheDashboardSnapshot(args.cacheKey, merged);
@@ -1406,7 +1555,6 @@ function startDashboardRefresh(args: {
       });
       return merged;
     }
-    return snapshot;
   }).catch((error) => {
     args.logger.warn(
       { error: error instanceof Error ? error.message : String(error) },

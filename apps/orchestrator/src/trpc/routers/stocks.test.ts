@@ -315,7 +315,7 @@ describe('stocks dashboard snapshot', () => {
     expect(requestedAnnouncementSymbols.sort()).toEqual(symbols);
   });
 
-  it('uses a declared source cover first and keeps unillustrated stories title-first', () => {
+  it('uses a declared source cover first and assigns topical reusable art when the source has none', () => {
     const sourceDeclaredImageUrl = __stocksDashboardTest.sourceDeclaredImageUrl as (value?: unknown) => string | undefined;
 
     expect(sourceDeclaredImageUrl('https://source.example/cover.jpg')).toBe('https://source.example/cover.jpg');
@@ -336,11 +336,11 @@ describe('stocks dashboard snapshot', () => {
       }]),
     }]);
 
-    expect(item?.imageUrl).toBeUndefined();
-    expect(item?.imageKind).toBeUndefined();
+    expect(item?.imageUrl).toMatch(/^\/stock-editorial-art\//);
+    expect(item?.imageKind).toBe('editorial-art');
   });
 
-  it('keeps source covers and leaves other rows title-first', () => {
+  it('keeps source covers and assigns topical art to other source-backed rows', () => {
     const buildSourceDiscovery = __stocksDashboardTest.buildNews as unknown as (
       announcements: Array<{ entry: { symbol: string; market: 'A'; displayName: string }; env: ReturnType<typeof envelope> }>,
       stockNews: Array<{ entry: { symbol: string; market: 'A'; displayName: string }; env: ReturnType<typeof envelope> }>,
@@ -374,8 +374,11 @@ describe('stocks dashboard snapshot', () => {
       imageKind: 'source-cover',
       imageUrl: 'https://source.example/verified-cover.jpg',
     });
-    expect(rows.slice(1).map((row) => row.imageUrl)).toEqual([undefined, undefined]);
-    expect(rows.slice(1).map((row) => row.imageKind)).toEqual([undefined, undefined]);
+    expect(rows.slice(1).map((row) => row.imageUrl)).toEqual([
+      expect.stringMatching(/^\/stock-editorial-art\//),
+      expect.stringMatching(/^\/stock-editorial-art\//),
+    ]);
+    expect(rows.slice(1).map((row) => row.imageKind)).toEqual(['editorial-art', 'editorial-art']);
   });
 
   it('removes a persisted legacy market chart before rendering discovery', () => {
@@ -401,8 +404,8 @@ describe('stocks dashboard snapshot', () => {
       imageKind: 'market-chart',
     }]);
 
-    expect(row?.imageUrl).toBeUndefined();
-    expect(row?.imageKind).toBeUndefined();
+    expect(row?.imageUrl).toMatch(/^\/stock-editorial-art\//);
+    expect(row?.imageKind).toBe('editorial-art');
   });
 
   it('removes a stale local illustration incorrectly marked as a source cover', () => {
@@ -440,8 +443,11 @@ describe('stocks dashboard snapshot', () => {
       },
     ]);
 
-    expect(rows.map((row) => row.imageUrl)).toEqual([undefined, undefined]);
-    expect(rows.map((row) => row.imageKind)).toEqual([undefined, undefined]);
+    expect(rows.map((row) => row.imageUrl)).toEqual([
+      expect.stringMatching(/^\/stock-editorial-art\//),
+      expect.stringMatching(/^\/stock-editorial-art\//),
+    ]);
+    expect(rows.map((row) => row.imageKind)).toEqual(['editorial-art', 'editorial-art']);
   });
 
   it('keeps every fetched source-backed row for a multi-stock watchlist', () => {
@@ -963,8 +969,8 @@ describe('stocks dashboard snapshot', () => {
         url: 'https://www.cninfo.com.cn/notice-603528',
       }),
     ]);
-    expect(merged.news[0]?.imageUrl).toBeUndefined();
-    expect(merged.news[0]?.imageKind).toBeUndefined();
+    expect(merged.news[0]?.imageUrl).toMatch(/^\/stock-editorial-art\//);
+    expect(merged.news[0]?.imageKind).toBe('editorial-art');
   });
 
   it('keeps prior market discovery feeds when only those source refreshes fail', () => {

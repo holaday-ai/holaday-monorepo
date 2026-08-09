@@ -9,15 +9,6 @@ type DiscoveryMedia = {
   editorialArtOptions?: readonly string[];
 };
 
-type EditorialArtDiversificationOptions = {
-  /**
-   * Visible cards should never repeat a static artwork merely to fill a media
-   * slot. When a topical pool is exhausted, the card falls back to its
-   * title-first treatment instead. Older, off-screen items may reuse artwork.
-   */
-  uniqueItemLimit?: number;
-};
-
 function isLocalEditorialArt(item: DiscoveryMedia): item is DiscoveryMedia & { imageUrl: string } {
   return item.imageKind === 'editorial-art' && Boolean(item.imageUrl?.startsWith('/stock-editorial-art/'));
 }
@@ -33,17 +24,17 @@ function isLocalEditorialArt(item: DiscoveryMedia): item is DiscoveryMedia & { i
 export function diversifyDiscoveryEditorialArt<T extends DiscoveryMedia>(
   items: IndexedDiscoveryItem<T>[],
   failedSourceCoverUrls: ReadonlySet<string> = new Set(),
-  options: EditorialArtDiversificationOptions = {},
 ): IndexedDiscoveryItem<T>[] {
   const usedEditorialUrlsByPool = new Map<string, Set<string>>();
   const usedAcrossFeed = new Set<string>();
   const recentEditorialUrls: string[] = [];
   const sourceCoverCounts = new Map<string, number>();
+  const usedSourceCoverUrls = new Set<string>();
   for (const { item } of items) {
     if (item.imageKind !== 'source-cover' || !item.imageUrl) continue;
     sourceCoverCounts.set(item.imageUrl, (sourceCoverCounts.get(item.imageUrl) ?? 0) + 1);
   }
-  return items.map((entry, position) => {
+  return items.map((entry) => {
     const { item } = entry;
     const imageUrl = item.imageUrl;
     if (!imageUrl) {
@@ -52,20 +43,33 @@ export function diversifyDiscoveryEditorialArt<T extends DiscoveryMedia>(
     const candidates = item.editorialArtOptions?.filter((candidate, index, all) => all.indexOf(candidate) === index)
       .filter((candidate) => candidate.startsWith('/stock-editorial-art/'))
       ?? [];
-    const requiresUniqueArtwork = position < (options.uniqueItemLimit ?? 0);
     const titleFirstFallback = (): IndexedDiscoveryItem<T> => ({
       ...entry,
       item: { ...item, imageUrl: undefined, imageKind: undefined },
     });
+    const topicalArtworkFallback = (): IndexedDiscoveryItem<T> | null => {
+      if (candidates.length === 0) return null;
+      const replacement = candidates.find((candidate) =>
+        !usedAcrossFeed.has(candidate) && !recentEditorialUrls.includes(candidate),
+      ) ?? candidates.find((candidate) => !recentEditorialUrls.includes(candidate)) ?? candidates[0];
+      if (!replacement) return null;
+      usedAcrossFeed.add(replacement);
+      recentEditorialUrls.push(replacement);
+      if (recentEditorialUrls.length > 3) recentEditorialUrls.shift();
+      return {
+        ...entry,
+        item: { ...item, imageUrl: replacement, imageKind: 'editorial-art' },
+      };
+    };
 
-    // Publishers occasionally return one generic image for otherwise distinct
-    // stories. Do not replace it with a decorative image: a title-first card is
-    // more honest than media that might imply an unrelated subject.
     if (item.imageKind === 'source-cover') {
-      const needsFallback = (sourceCoverCounts.get(imageUrl) ?? 0) >= 2
-        || failedSourceCoverUrls.has(imageUrl);
-      if (!needsFallback) return entry;
-      return titleFirstFallback();
+      const sourceCoverFailed = failedSourceCoverUrls.has(imageUrl);
+      const isRepeatedSourceCover = (sourceCoverCounts.get(imageUrl) ?? 0) >= 2 && usedSourceCoverUrls.has(imageUrl);
+      if (sourceCoverFailed || isRepeatedSourceCover) {
+        return topicalArtworkFallback() ?? titleFirstFallback();
+      }
+      usedSourceCoverUrls.add(imageUrl);
+      return entry;
     }
 
     if (!isLocalEditorialArt(item)) {
@@ -82,10 +86,6 @@ export function diversifyDiscoveryEditorialArt<T extends DiscoveryMedia>(
     ) ?? [imageUrl, ...effectiveCandidates].find((candidate) =>
       !usedEditorialUrls.has(candidate) && !recentEditorialUrls.includes(candidate),
     ) ?? [imageUrl, ...effectiveCandidates].find((candidate) => !usedEditorialUrls.has(candidate)) ?? imageUrl;
-
-    if (requiresUniqueArtwork && usedAcrossFeed.has(replacement)) {
-      return titleFirstFallback();
-    }
 
     usedEditorialUrls.add(replacement);
     usedAcrossFeed.add(replacement);
@@ -134,6 +134,22 @@ export function diversifyDiscoveryItems<T>(
   }
 
   return diversified;
+}
+
+/**
+ * Keep editorial importance while reserving the first discovery page for
+ * distinct followed stocks whenever alternatives are available.
+ */
+export function prioritizeAndDiversifyDiscoveryItems<T>(
+  items: IndexedDiscoveryItem<T>[],
+  priorityFor: (item: T) => number,
+  symbolFor: (item: T) => string | undefined,
+): IndexedDiscoveryItem<T>[] {
+  const prioritized = [...items].sort((left, right) => {
+    const priorityDifference = priorityFor(right.item) - priorityFor(left.item);
+    return priorityDifference || left.index - right.index;
+  });
+  return diversifyDiscoveryItems(prioritized, symbolFor);
 }
 
 /** Keep the source boundary visible: a disclosure date is not a timestamp. */

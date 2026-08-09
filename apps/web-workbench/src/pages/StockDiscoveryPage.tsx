@@ -6,7 +6,7 @@ import { NewsDetailModal } from '@/components/NewsDetailModal';
 import { pageErrorMessage } from '@/lib/page-error-copy';
 import {
   diversifyDiscoveryEditorialArt,
-  diversifyDiscoveryItems,
+  prioritizeAndDiversifyDiscoveryItems,
   shouldPrefetchDiscoveryPage,
 } from '@/lib/stock-discovery';
 import {
@@ -101,27 +101,20 @@ export function StockDiscoveryPage(): JSX.Element {
     () => news.map((item, index) => ({ item, index })),
     [news],
   );
-  const stockDiversifiedNews = React.useMemo(
-    () => diversifyDiscoveryItems(
+  const readingPrioritizedNews = React.useMemo(
+    () => prioritizeAndDiversifyDiscoveryItems(
       indexedNews.filter(({ item }) => activeFeed === '全部' || newsFeed(item) === activeFeed),
+      discoveryReadingPriority,
       (item) => item.symbols[0],
     ),
     [activeFeed, indexedNews],
-  );
-  const readingPrioritizedNews = React.useMemo(
-    () => [...stockDiversifiedNews].sort((left, right) => {
-      const priorityDifference = discoveryReadingPriority(right.item) - discoveryReadingPriority(left.item);
-      return priorityDifference || left.index - right.index;
-    }),
-    [stockDiversifiedNews],
   );
   const prioritizedNews = React.useMemo(
     () => diversifyDiscoveryEditorialArt(
       readingPrioritizedNews,
       failedSourceCoverUrls,
-      { uniqueItemLimit: visibleCount },
     ),
-    [failedSourceCoverUrls, readingPrioritizedNews, visibleCount],
+    [failedSourceCoverUrls, readingPrioritizedNews],
   );
   const filteredRows = React.useMemo(
     () => prioritizedNews.map(({ item }) => item),
