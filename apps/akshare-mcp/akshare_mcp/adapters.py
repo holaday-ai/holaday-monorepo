@@ -915,6 +915,10 @@ def _market_story_anchors(value: str) -> set[str]:
     return ascii_tokens
 
 
+def _market_headline_bigrams(value: str) -> set[str]:
+    return {value[index:index + 2] for index in range(max(0, len(value) - 1))}
+
+
 def _likely_same_market_story(left: dict[str, Any], right: dict[str, Any]) -> bool:
     if _market_story_day(left) != _market_story_day(right):
         return False
@@ -933,9 +937,14 @@ def _likely_same_market_story(left: dict[str, Any], right: dict[str, Any]) -> bo
         return True
     shared_anchors = _market_story_anchors(left_title) & _market_story_anchors(right_title)
     has_anchor = bool(shared_anchors or left_numbers & right_numbers)
-    if not has_anchor:
-        return False
-    return SequenceMatcher(None, left_title, right_title).ratio() >= 0.64
+    sequence_similarity = SequenceMatcher(None, left_title, right_title).ratio()
+    if has_anchor and sequence_similarity >= 0.64:
+        return True
+    left_bigrams = _market_headline_bigrams(left_title)
+    right_bigrams = _market_headline_bigrams(right_title)
+    shared_bigrams = len(left_bigrams & right_bigrams)
+    bigram_similarity = 2 * shared_bigrams / max(1, len(left_bigrams) + len(right_bigrams))
+    return shared_bigrams >= 8 and bigram_similarity >= 0.5
 
 
 def _market_news_quality(row: dict[str, Any]) -> tuple[int, int, int]:

@@ -110,6 +110,40 @@ describe('mergeDiscoveryNews', () => {
     ]);
   });
 
+  it('collapses a same-day event with no English anchor without hiding another company event', () => {
+    const merged = mergeDiscoveryNews([
+      {
+        category: '新闻',
+        feed: 'A股要闻',
+        time: '08-09 20:30',
+        title: '明天“打新”宇树科技！A股“朋友圈”浮出水面',
+        symbols: [],
+        url: 'https://publisher.example/unitree-1',
+      },
+      {
+        category: '新闻',
+        feed: 'A股要闻',
+        time: '08-09 19:57',
+        title: '宇树科技即将开启申购，A股“朋友圈”浮出水面',
+        symbols: [],
+        url: 'https://publisher.example/unitree-2',
+      },
+      {
+        category: '新闻',
+        feed: 'A股要闻',
+        time: '08-09 19:40',
+        title: '宇树科技发布新一代机器人控制系统',
+        symbols: [],
+        url: 'https://publisher.example/unitree-product',
+      },
+    ], []);
+
+    expect(merged.map((item) => item.title)).toEqual([
+      '明天“打新”宇树科技！A股“朋友圈”浮出水面',
+      '宇树科技发布新一代机器人控制系统',
+    ]);
+  });
+
   it('returns a stable topic cluster for adjacent market-story diversification', () => {
     expect(discoveryStoryClusterKey({
       category: '新闻',

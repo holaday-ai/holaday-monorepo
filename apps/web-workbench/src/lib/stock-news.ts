@@ -81,7 +81,7 @@ function likelySameMarketStory(left: StockNewsRow, right: StockNewsRow): boolean
   let shared = 0;
   for (const token of leftBigrams) if (rightBigrams.has(token)) shared += 1;
   const similarity = shared * 2 / (leftBigrams.size + rightBigrams.size);
-  return similarity >= 0.72 || (hasSharedAnchor && similarity >= 0.54);
+  return similarity >= 0.72 || (shared >= 8 && similarity >= 0.5) || (hasSharedAnchor && similarity >= 0.54);
 }
 
 const MARKET_TOPIC_TOKENS = [

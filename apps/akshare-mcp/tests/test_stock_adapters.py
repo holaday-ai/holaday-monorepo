@@ -325,6 +325,33 @@ def test_market_news_collapses_percentage_event_without_merging_distinct_company
     ]
 
 
+def test_market_news_collapses_same_event_without_ascii_anchor():
+    rows = [
+        {
+            "新闻标题": "明天“打新”宇树科技！A股“朋友圈”浮出水面",
+            "发布时间": "2026-08-09 20:30:00",
+            "新闻链接": "https://finance.eastmoney.com/a/202608090000014.html",
+        },
+        {
+            "新闻标题": "宇树科技即将开启申购，A股“朋友圈”浮出水面",
+            "发布时间": "2026-08-09 19:57:00",
+            "新闻链接": "https://finance.eastmoney.com/a/202608090000015.html",
+        },
+        {
+            "新闻标题": "宇树科技发布新一代机器人控制系统",
+            "发布时间": "2026-08-09 19:40:00",
+            "新闻链接": "https://finance.eastmoney.com/a/202608090000016.html",
+        },
+    ]
+
+    result = adp._dedupe_market_news(rows)
+
+    assert [row["新闻标题"] for row in result] == [
+        "明天“打新”宇树科技！A股“朋友圈”浮出水面",
+        "宇树科技发布新一代机器人控制系统",
+    ]
+
+
 def test_article_image_extractor_accepts_only_trusted_images_inside_article_body():
     html = """
       <img src="https://np-newspic.dfcfw.com/download/D20000000000000000000_w145h95.jpg">

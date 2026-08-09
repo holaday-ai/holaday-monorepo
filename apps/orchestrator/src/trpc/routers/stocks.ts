@@ -942,7 +942,7 @@ function likelySameMarketStory(left: NewsSnapshot, right: NewsSnapshot): boolean
   let shared = 0;
   for (const token of leftTokens) if (rightTokens.has(token)) shared += 1;
   const similarity = shared * 2 / (leftTokens.size + rightTokens.size);
-  return similarity >= 0.72 || (hasSharedAnchor && similarity >= 0.54);
+  return similarity >= 0.72 || (shared >= 8 && similarity >= 0.5) || (hasSharedAnchor && similarity >= 0.54);
 }
 
 function dedupeNews(rows: NewsSnapshot[]): NewsSnapshot[] {
