@@ -308,6 +308,22 @@
   font-size: 12px;
 }
 
+.planned-field [aria-invalid="true"] {
+  border-color: rgba(180, 35, 24, 0.72);
+  box-shadow: 0 0 0 1px rgba(180, 35, 24, 0.08);
+}
+
+.planned-field-error {
+  margin: 0;
+  color: #b42318;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.planned-form-grid-error {
+  margin: -8px 0 14px;
+}
+
 .planned-mode,
 .planned-repeat {
   display: grid;

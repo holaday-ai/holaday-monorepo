@@ -1,3 +1,4 @@
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -41,7 +42,14 @@ import {
 } from 'lucide-react';
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { plannedSaveFeedback } from './planned-editor-state';
+import {
+  firstPlannedEditorError,
+  plannedEditorFingerprint,
+  plannedSaveFeedback,
+  type PlannedEditorErrorKey,
+  type PlannedEditorErrors,
+  validatePlannedEditor,
+} from './planned-editor-state';
 import {
   type PlannedCalendarOccurrence,
   type PlannedCalendarView,
@@ -144,6 +152,10 @@ interface PendingScopeAction {
   scheduledFor?: Date;
 }
 
+interface PendingEditorTransition {
+  apply(): void;
+}
+
 function emptyEditor(date = nextWholeHour()): EditorState {
   return {
     plannedTaskId: null,
@@ -167,6 +179,10 @@ export function PlannedTasksPage(): JSX.Element {
   const navigate = useNavigate();
   const calendarRef = React.useRef<FullCalendar | null>(null);
   const mountedRef = React.useRef(true);
+  const instructionRef = React.useRef<HTMLTextAreaElement | null>(null);
+  const firstItemRef = React.useRef<HTMLInputElement | null>(null);
+  const scheduledAtRef = React.useRef<HTMLInputElement | null>(null);
+  const customDaysRef = React.useRef<HTMLDivElement | null>(null);
   const [view, setView] = React.useState<PlannedCalendarView>(() =>
     defaultPlannedCalendarView(matchMobile(), readSavedView()),
   );
@@ -179,7 +195,14 @@ export function PlannedTasksPage(): JSX.Element {
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
   const [editor, setEditor] = React.useState<EditorState | null>(null);
+  const [editorBaseline, setEditorBaseline] = React.useState<string | null>(null);
+  const [editorErrors, setEditorErrors] = React.useState<PlannedEditorErrors>({});
+  const [pendingEditorTransition, setPendingEditorTransition] =
+    React.useState<PendingEditorTransition | null>(null);
   const [pendingScope, setPendingScope] = React.useState<PendingScopeAction | null>(null);
+  const editorDirty = Boolean(
+    editor && editorBaseline && plannedEditorFingerprint(editor) !== editorBaseline,
+  );
 
   React.useEffect(() => {
     mountedRef.current = true;
@@ -195,6 +218,16 @@ export function PlannedTasksPage(): JSX.Element {
     // changeView is intentionally read from the current render only for viewport changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  React.useEffect(() => {
+    if (!editorDirty) return;
+    const preventUnload = (event: BeforeUnloadEvent): void => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', preventUnload);
+    return () => window.removeEventListener('beforeunload', preventUnload);
+  }, [editorDirty]);
 
   const refreshPlans = React.useCallback(async () => {
     const rows = (await trpc.plannedTasks.list.query({ limit: 200 })) as PlannedTaskRow[];
@@ -269,12 +302,57 @@ export function PlannedTasksPage(): JSX.Element {
     calendarRef.current?.getApi().changeView(nextView);
   }
 
-  function openCreate(date = nextWholeHour()): void {
-    setEditor(emptyEditor(date));
-    setRuns([]);
+  function applyEditor(next: EditorState | null): void {
+    setEditor(next);
+    setEditorBaseline(next ? plannedEditorFingerprint(next) : null);
+    setEditorErrors({});
   }
 
-  async function openPlan(
+  function requestEditorTransition(apply: () => void): void {
+    if (editorDirty) {
+      setPendingEditorTransition({ apply });
+      return;
+    }
+    apply();
+  }
+
+  function clearEditorError(key: PlannedEditorErrorKey): void {
+    setEditorErrors((current) => {
+      if (!current[key]) return current;
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+  }
+
+  function focusEditorError(key: PlannedEditorErrorKey): void {
+    const target =
+      key === 'instruction'
+        ? instructionRef.current
+        : key === 'items'
+          ? firstItemRef.current
+          : key === 'scheduledAt'
+            ? scheduledAtRef.current
+            : customDaysRef.current;
+    window.requestAnimationFrame(() => target?.focus());
+  }
+
+  function openCreate(date = nextWholeHour()): void {
+    const next = emptyEditor(date);
+    requestEditorTransition(() => {
+      applyEditor(next);
+      setRuns([]);
+    });
+  }
+
+  function openPlan(
+    plannedTaskId: string,
+    occurrence: PlannedCalendarOccurrence | null,
+  ): void {
+    requestEditorTransition(() => void loadPlan(plannedTaskId, occurrence));
+  }
+
+  async function loadPlan(
     plannedTaskId: string,
     occurrence: PlannedCalendarOccurrence | null,
   ): Promise<void> {
@@ -288,7 +366,7 @@ export function PlannedTasksPage(): JSX.Element {
       const scheduledAt = occurrence
         ? new Date(occurrence.scheduledFor)
         : new Date(plan.nextRunAt ?? plan.firstRunAt);
-      setEditor({
+      applyEditor({
         plannedTaskId,
         occurrence,
         title: plan.title,
@@ -317,15 +395,17 @@ export function PlannedTasksPage(): JSX.Element {
   function handleEventClick(arg: EventClickArg): void {
     if (arg.event.extendedProps.legacy) {
       const focus = arg.event.extendedProps.scheduledTaskInternalId;
-      navigate(
-        focus
-          ? `/planned/legacy-scheduled?focusScheduledTaskInternalId=${encodeURIComponent(String(focus))}`
-          : '/planned/legacy-scheduled',
+      requestEditorTransition(() =>
+        navigate(
+          focus
+            ? `/planned/legacy-scheduled?focusScheduledTaskInternalId=${encodeURIComponent(String(focus))}`
+            : '/planned/legacy-scheduled',
+        ),
       );
       return;
     }
     const occurrence = occurrenceFromEvent(arg);
-    void openPlan(occurrence.plannedTaskId, occurrence);
+    openPlan(occurrence.plannedTaskId, occurrence);
   }
 
   function handleEventDrop(arg: EventDropArg): void {
@@ -374,7 +454,7 @@ export function PlannedTasksPage(): JSX.Element {
         originalScheduledFor: new Date(occurrence.originalScheduledFor).toISOString(),
         scope,
       });
-      setEditor(null);
+      applyEditor(null);
       toast.show(scope === 'series' ? '规划已删除' : '日程已更新', 'info');
       await refresh();
     } catch (error) {
@@ -393,21 +473,20 @@ export function PlannedTasksPage(): JSX.Element {
       setPendingScope({ kind: 'update', occurrence: editor.occurrence });
       return;
     }
+    const errors = validatePlannedEditor(editor);
+    const firstError = firstPlannedEditorError(errors);
+    if (firstError) {
+      setEditorErrors(errors);
+      focusEditorError(firstError);
+      return;
+    }
     const scheduledAt = localDateTime(editor.date, editor.time);
     const items = editor.multiple ? editor.items.map((item) => item.trim()).filter(Boolean) : [];
     const instruction = editor.instruction.trim();
-    if ((!editor.multiple && !instruction) || (editor.multiple && items.length === 0)) {
-      toast.show('请填写至少一个任务', 'error');
-      return;
-    }
     const rrule =
       editor.repeatType === 'custom'
         ? buildCustomWeeklyRRule(editor.customDays, scheduledAt)
         : null;
-    if (editor.repeatType === 'custom' && !rrule) {
-      toast.show('请选择至少一个执行日', 'error');
-      return;
-    }
     setSaving(true);
     try {
       if (editor.plannedTaskId) {
@@ -462,7 +541,7 @@ export function PlannedTasksPage(): JSX.Element {
           'info',
         );
       }
-      setEditor(null);
+      applyEditor(null);
       await refresh();
     } catch (error) {
       toast.show(errorMessage(error, '保存失败'), 'error');
@@ -646,14 +725,14 @@ export function PlannedTasksPage(): JSX.Element {
                 size="icon"
                 title="关闭"
                 aria-label="关闭"
-                onClick={() => setEditor(null)}
+                onClick={() => requestEditorTransition(() => applyEditor(null))}
               >
                 <X aria-hidden />
               </Button>
             </div>
 
             <div className="planned-inspector__body">
-              <Field label="名称">
+              <Field label="名称（选填）">
                 <Input
                   aria-label="名称"
                   value={editor.title}
@@ -667,14 +746,20 @@ export function PlannedTasksPage(): JSX.Element {
                 <button
                   type="button"
                   className={!editor.multiple ? 'is-active' : ''}
-                  onClick={() => setEditor({ ...editor, multiple: false })}
+                  onClick={() => {
+                    setEditor({ ...editor, multiple: false });
+                    clearEditorError('items');
+                  }}
                 >
                   单个任务
                 </button>
                 <button
                   type="button"
                   className={editor.multiple ? 'is-active' : ''}
-                  onClick={() => setEditor({ ...editor, multiple: true })}
+                  onClick={() => {
+                    setEditor({ ...editor, multiple: true });
+                    clearEditorError('instruction');
+                  }}
                 >
                   多个任务
                 </button>
@@ -687,13 +772,19 @@ export function PlannedTasksPage(): JSX.Element {
                       <div className="planned-item" key={`${index}-${editor.items.length}`}>
                         <span>{index + 1}</span>
                         <Input
+                          ref={index === 0 ? firstItemRef : undefined}
                           aria-label={`任务 ${index + 1}`}
+                          aria-invalid={index === 0 && Boolean(editorErrors.items)}
+                          aria-describedby={
+                            index === 0 && editorErrors.items ? 'planned-error-items' : undefined
+                          }
                           value={item}
                           placeholder="描述这个任务"
                           onChange={(event) => {
                             const items = [...editor.items];
                             items[index] = event.target.value;
                             setEditor({ ...editor, items });
+                            clearEditorError('items');
                           }}
                         />
                         <Button
@@ -722,17 +813,39 @@ export function PlannedTasksPage(): JSX.Element {
                       <Plus aria-hidden />
                       添加任务
                     </Button>
+                    {editorErrors.items && (
+                      <p id="planned-error-items" className="planned-field-error" role="alert">
+                        {editorErrors.items}
+                      </p>
+                    )}
                   </div>
                 </Field>
               ) : (
                 <Field label="任务说明">
                   <Textarea
+                    ref={instructionRef}
                     aria-label="任务说明"
+                    aria-invalid={Boolean(editorErrors.instruction)}
+                    aria-describedby={
+                      editorErrors.instruction ? 'planned-error-instruction' : undefined
+                    }
                     value={editor.instruction}
                     rows={5}
                     placeholder="说清目标、范围和交付结果"
-                    onChange={(event) => setEditor({ ...editor, instruction: event.target.value })}
+                    onChange={(event) => {
+                      setEditor({ ...editor, instruction: event.target.value });
+                      clearEditorError('instruction');
+                    }}
                   />
+                  {editorErrors.instruction && (
+                    <p
+                      id="planned-error-instruction"
+                      className="planned-field-error"
+                      role="alert"
+                    >
+                      {editorErrors.instruction}
+                    </p>
+                  )}
                 </Field>
               )}
 
@@ -751,21 +864,45 @@ export function PlannedTasksPage(): JSX.Element {
               <div className="planned-form-grid">
                 <Field label="日期">
                   <Input
+                    ref={scheduledAtRef}
                     aria-label="日期"
+                    aria-invalid={Boolean(editorErrors.scheduledAt)}
+                    aria-describedby={
+                      editorErrors.scheduledAt ? 'planned-error-scheduled-at' : undefined
+                    }
                     type="date"
                     value={editor.date}
-                    onChange={(event) => setEditor({ ...editor, date: event.target.value })}
+                    onChange={(event) => {
+                      setEditor({ ...editor, date: event.target.value });
+                      clearEditorError('scheduledAt');
+                    }}
                   />
                 </Field>
                 <Field label="时间">
                   <Input
                     aria-label="时间"
+                    aria-invalid={Boolean(editorErrors.scheduledAt)}
+                    aria-describedby={
+                      editorErrors.scheduledAt ? 'planned-error-scheduled-at' : undefined
+                    }
                     type="time"
                     value={editor.time}
-                    onChange={(event) => setEditor({ ...editor, time: event.target.value })}
+                    onChange={(event) => {
+                      setEditor({ ...editor, time: event.target.value });
+                      clearEditorError('scheduledAt');
+                    }}
                   />
                 </Field>
               </div>
+              {editorErrors.scheduledAt && (
+                <p
+                  id="planned-error-scheduled-at"
+                  className="planned-field-error planned-form-grid-error"
+                  role="alert"
+                >
+                  {editorErrors.scheduledAt}
+                </p>
+              )}
 
               <Field label="重复">
                 <div className="planned-repeat">
@@ -774,13 +911,14 @@ export function PlannedTasksPage(): JSX.Element {
                       type="button"
                       key={repeatType}
                       className={editor.repeatType === repeatType ? 'is-active' : ''}
-                      onClick={() =>
+                      onClick={() => {
                         setEditor({
                           ...editor,
                           repeatType,
                           endsOn: nextPlannedEndState(repeatType, editor.endsOn),
-                        })
-                      }
+                        });
+                        if (repeatType !== 'custom') clearEditorError('customDays');
+                      }}
                     >
                       {plannedRepeatLabel(repeatType)}
                     </button>
@@ -789,25 +927,44 @@ export function PlannedTasksPage(): JSX.Element {
               </Field>
               {editor.repeatType === 'custom' && (
                 <Field label="每周执行日">
-                  <div className="planned-weekdays">
+                  <div
+                    ref={customDaysRef}
+                    className="planned-weekdays"
+                    role="group"
+                    tabIndex={-1}
+                    aria-invalid={Boolean(editorErrors.customDays)}
+                    aria-describedby={
+                      editorErrors.customDays ? 'planned-error-custom-days' : undefined
+                    }
+                  >
                     {WEEKDAYS.map(([value, label]) => (
                       <button
                         type="button"
                         key={value}
                         className={editor.customDays.includes(value) ? 'is-active' : ''}
-                        onClick={() =>
+                        onClick={() => {
                           setEditor({
                             ...editor,
                             customDays: editor.customDays.includes(value)
                               ? editor.customDays.filter((day) => day !== value)
                               : [...editor.customDays, value],
-                          })
-                        }
+                          });
+                          clearEditorError('customDays');
+                        }}
                       >
                         {label}
                       </button>
                     ))}
                   </div>
+                  {editorErrors.customDays && (
+                    <p
+                      id="planned-error-custom-days"
+                      className="planned-field-error"
+                      role="alert"
+                    >
+                      {editorErrors.customDays}
+                    </p>
+                  )}
                 </Field>
               )}
 
@@ -939,7 +1096,10 @@ export function PlannedTasksPage(): JSX.Element {
             </div>
 
             <div className="planned-inspector__footer">
-              <Button variant="outline" onClick={() => setEditor(null)}>
+              <Button
+                variant="outline"
+                onClick={() => requestEditorTransition(() => applyEditor(null))}
+              >
                 取消
               </Button>
               <Button onClick={() => void saveEditor()} disabled={saving}>
@@ -950,6 +1110,21 @@ export function PlannedTasksPage(): JSX.Element {
           </aside>
         )}
       </div>
+
+      <ConfirmDialog
+        open={pendingEditorTransition !== null}
+        title="放弃未保存的更改？"
+        description="当前修改尚未保存，关闭后将无法恢复。"
+        confirmLabel="放弃更改"
+        cancelLabel="继续编辑"
+        destructive
+        onClose={() => setPendingEditorTransition(null)}
+        onConfirm={() => {
+          const transition = pendingEditorTransition;
+          setPendingEditorTransition(null);
+          transition?.apply();
+        }}
+      />
 
       {pendingScope && (
         <dialog
