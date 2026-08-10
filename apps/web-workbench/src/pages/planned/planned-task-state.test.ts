@@ -8,6 +8,7 @@ import {
   plannedEndsOnPayload,
   plannedRepeatLabel,
   plannedStatusGroup,
+  stablePlannedCalendarRange,
   workloadHint,
 } from './planned-task-state';
 
@@ -95,5 +96,21 @@ describe('planned task presentation state', () => {
     expect(plannedEndsOnPayload('series', '2026-08-31')).toEqual({
       endsOn: '2026-08-31',
     });
+  });
+
+  it('preserves the visible calendar range when FullCalendar reports the same dates again', () => {
+    const current = {
+      start: new Date('2026-08-01T00:00:00.000Z'),
+      end: new Date('2026-09-01T00:00:00.000Z'),
+    };
+    const repeated = {
+      start: new Date('2026-08-01T00:00:00.000Z'),
+      end: new Date('2026-09-01T00:00:00.000Z'),
+    };
+
+    expect(stablePlannedCalendarRange(current, repeated)).toBe(current);
+
+    const changed = { ...repeated, end: new Date('2026-10-01T00:00:00.000Z') };
+    expect(stablePlannedCalendarRange(current, changed)).toBe(changed);
   });
 });

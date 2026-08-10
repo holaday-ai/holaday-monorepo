@@ -50,6 +50,7 @@ import {
   plannedEndsOnPayload,
   plannedRepeatLabel,
   plannedStatusGroup,
+  stablePlannedCalendarRange,
   workloadHint,
   type PlannedCalendarOccurrence,
   type PlannedCalendarView,
@@ -592,7 +593,9 @@ export function PlannedTasksPage(): JSX.Element {
               nowIndicator
               datesSet={(arg: DatesSetArg) => {
                 setTitle(arg.view.title);
-                setRange({ start: arg.start, end: arg.end });
+                setRange((current) =>
+                  stablePlannedCalendarRange(current, { start: arg.start, end: arg.end }),
+                );
                 setView(arg.view.type as PlannedCalendarView);
               }}
               dateClick={handleDateClick}

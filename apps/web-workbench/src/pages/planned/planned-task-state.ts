@@ -28,6 +28,11 @@ export interface LegacyScheduledTaskOccurrence {
   lastRunStatus: string | null;
 }
 
+export interface PlannedCalendarRange {
+  start: Date;
+  end: Date;
+}
+
 const VALID_VIEWS = new Set<PlannedCalendarView>(['dayGridMonth', 'listMonth']);
 
 export function defaultPlannedCalendarView(
@@ -38,6 +43,19 @@ export function defaultPlannedCalendarView(
     return saved as PlannedCalendarView;
   }
   return isMobile ? 'listMonth' : 'dayGridMonth';
+}
+
+export function stablePlannedCalendarRange(
+  current: PlannedCalendarRange | null,
+  next: PlannedCalendarRange,
+): PlannedCalendarRange {
+  if (
+    current?.start.getTime() === next.start.getTime() &&
+    current.end.getTime() === next.end.getTime()
+  ) {
+    return current;
+  }
+  return next;
 }
 
 export function plannedStatusGroup(input: {
