@@ -207,6 +207,57 @@ export function plannedCalendarEmptyState(input: {
   };
 }
 
+export interface PlannedLoadMetric {
+  view: PlannedCalendarView;
+  plansMs: number;
+  calendarMs: number;
+  totalMs: number;
+  plannedCount: number;
+  legacyCount: number;
+  slow: boolean;
+}
+
+export function buildPlannedLoadMetric(input: {
+  view: PlannedCalendarView;
+  plansMs: number;
+  calendarMs: number;
+  totalMs: number;
+  plannedCount: number;
+  legacyCount: number;
+}): PlannedLoadMetric {
+  const timings = [input.plansMs, input.calendarMs, input.totalMs];
+  if (timings.some((value) => !Number.isFinite(value))) {
+    throw new Error('加载耗时无效');
+  }
+  const plansMs = Math.round(Math.min(60_000, Math.max(0, input.plansMs)));
+  const calendarMs = Math.round(Math.min(60_000, Math.max(0, input.calendarMs)));
+  const totalMs = Math.round(Math.min(60_000, Math.max(0, input.totalMs)));
+  return {
+    view: input.view,
+    plansMs,
+    calendarMs,
+    totalMs,
+    plannedCount: normalizeMetricCount(input.plannedCount),
+    legacyCount: normalizeMetricCount(input.legacyCount),
+    slow: totalMs > 2_500,
+  };
+}
+
+export function plannedRefreshTargets(reason: 'mount' | 'range' | 'mutation'): {
+  plans: boolean;
+  calendar: boolean;
+} {
+  return {
+    plans: reason !== 'range',
+    calendar: reason !== 'mount',
+  };
+}
+
+function normalizeMetricCount(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.min(10_000, Math.max(0, Math.floor(value)));
+}
+
 export function workloadHint(itemCount: number): string {
   if (itemCount <= 1) return '本次将启动 1 个任务。';
   if (itemCount <= 8) return `本次将并行启动 ${itemCount} 个任务，实际速度取决于当前套餐。`;

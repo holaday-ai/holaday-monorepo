@@ -111,6 +111,20 @@
   font-weight: 600;
 }
 
+.planned-toolbar__loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  color: var(--planned-muted);
+  font-size: 10px;
+}
+
+.planned-toolbar__loading svg {
+  width: 13px;
+  height: 13px;
+}
+
 .planned-toolbar__views {
   padding: 3px;
   border-radius: 7px;

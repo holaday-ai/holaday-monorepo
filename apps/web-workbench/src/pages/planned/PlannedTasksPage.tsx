@@ -53,8 +53,10 @@ import {
 import { PlannedScopeDialog } from './PlannedScopeDialog';
 import {
   type PlannedCalendarOccurrence,
+  type PlannedCalendarRange,
   type PlannedCalendarView,
   type PlannedRepeatType,
+  buildPlannedLoadMetric,
   buildCustomWeeklyRRule,
   calendarEventFromOccurrence,
   defaultPlannedCalendarView,
@@ -63,6 +65,7 @@ import {
   plannedCalendarEmptyState,
   plannedEndsOnPayload,
   plannedRepeatLabel,
+  plannedRefreshTargets,
   plannedStatusGroup,
   stablePlannedCalendarRange,
   workloadHint,
@@ -186,6 +189,13 @@ export function PlannedTasksPage(): JSX.Element {
   const scheduledAtRef = React.useRef<HTMLInputElement | null>(null);
   const customDaysRef = React.useRef<HTMLDivElement | null>(null);
   const scopeReturnFocusRef = React.useRef<HTMLElement | null>(null);
+  const calendarRequestRef = React.useRef(0);
+  const firstPlansRecordedRef = React.useRef(false);
+  const firstCalendarRecordedRef = React.useRef(false);
+  const telemetryReportedRef = React.useRef(false);
+  const mountRefreshStartedRef = React.useRef(false);
+  const lastRangeRefreshKeyRef = React.useRef<string | null>(null);
+  const initialLoadStartedRef = React.useRef(performance.now());
   const [view, setView] = React.useState<PlannedCalendarView>(() =>
     defaultPlannedCalendarView(matchMobile(), readSavedView()),
   );
@@ -195,7 +205,10 @@ export function PlannedTasksPage(): JSX.Element {
   const [legacyEvents, setLegacyEvents] = React.useState<EventInput[]>([]);
   const [plans, setPlans] = React.useState<PlannedTaskRow[]>([]);
   const [runs, setRuns] = React.useState<PlannedRunRow[]>([]);
-  const [loading, setLoading] = React.useState(true);
+  const [plansLoading, setPlansLoading] = React.useState(true);
+  const [calendarLoading, setCalendarLoading] = React.useState(true);
+  const [firstPlansMs, setFirstPlansMs] = React.useState<number | null>(null);
+  const [firstCalendarMs, setFirstCalendarMs] = React.useState<number | null>(null);
   const [saving, setSaving] = React.useState(false);
   const [editor, setEditor] = React.useState<EditorState | null>(null);
   const [editorBaseline, setEditorBaseline] = React.useState<string | null>(null);
@@ -233,40 +246,90 @@ export function PlannedTasksPage(): JSX.Element {
   }, [editorDirty]);
 
   const refreshPlans = React.useCallback(async () => {
-    const rows = (await trpc.plannedTasks.list.query({ limit: 200 })) as PlannedTaskRow[];
-    if (mountedRef.current) setPlans(rows);
+    const startedAt = performance.now();
+    setPlansLoading(true);
+    try {
+      const rows = (await trpc.plannedTasks.list.query({ limit: 200 })) as PlannedTaskRow[];
+      if (mountedRef.current) {
+        setPlans(rows);
+        if (!firstPlansRecordedRef.current) {
+          firstPlansRecordedRef.current = true;
+          setFirstPlansMs(performance.now() - startedAt);
+        }
+      }
+    } finally {
+      if (mountedRef.current) setPlansLoading(false);
+    }
   }, []);
 
-  const refreshCalendar = React.useCallback(async () => {
-    if (!range) return;
+  const refreshCalendar = React.useCallback(async (targetRange: PlannedCalendarRange) => {
+    const requestId = ++calendarRequestRef.current;
+    const startedAt = performance.now();
+    setCalendarLoading(true);
     const input = {
-      rangeStart: range.start.toISOString(),
-      rangeEnd: range.end.toISOString(),
+      rangeStart: targetRange.start.toISOString(),
+      rangeEnd: targetRange.end.toISOString(),
     };
-    const [rows, oldRows] = await Promise.all([
-      trpc.plannedTasks.calendar.query(input) as Promise<PlannedCalendarOccurrence[]>,
-      trpc.scheduledTasks.list.query(input) as Promise<LegacyScheduledTaskRow[]>,
-    ]);
-    if (mountedRef.current) {
-      setOccurrences(rows);
-      setLegacyEvents(oldRows.map(legacyScheduledEvent));
+    try {
+      const [rows, oldRows] = await Promise.all([
+        trpc.plannedTasks.calendar.query(input) as Promise<PlannedCalendarOccurrence[]>,
+        trpc.scheduledTasks.list.query(input) as Promise<LegacyScheduledTaskRow[]>,
+      ]);
+      if (mountedRef.current && requestId === calendarRequestRef.current) {
+        setOccurrences(rows);
+        setLegacyEvents(oldRows.map(legacyScheduledEvent));
+        if (!firstCalendarRecordedRef.current) {
+          firstCalendarRecordedRef.current = true;
+          setFirstCalendarMs(performance.now() - startedAt);
+        }
+      }
+    } finally {
+      if (mountedRef.current && requestId === calendarRequestRef.current) {
+        setCalendarLoading(false);
+      }
     }
-  }, [range]);
+  }, []);
+
+  const runRefresh = React.useCallback(
+    async (
+      reason: 'mount' | 'range' | 'mutation',
+      targetRange: PlannedCalendarRange | null,
+    ) => {
+      const targets = plannedRefreshTargets(reason);
+      const requests: Promise<void>[] = [];
+      if (targets.plans) requests.push(refreshPlans());
+      if (targets.calendar && targetRange) requests.push(refreshCalendar(targetRange));
+      if (requests.length === 0) return;
+      try {
+        await Promise.all(requests);
+      } catch (error) {
+        toast.show(errorMessage(error, '规划任务暂时无法加载'), 'error');
+      }
+    },
+    [refreshCalendar, refreshPlans, toast],
+  );
 
   const refresh = React.useCallback(async () => {
-    setLoading(true);
     try {
-      await Promise.all([refreshPlans(), refreshCalendar()]);
-    } catch (error) {
-      toast.show(errorMessage(error, '规划任务暂时无法加载'), 'error');
-    } finally {
-      if (mountedRef.current) setLoading(false);
+      await runRefresh('mutation', range);
+    } catch {
+      // runRefresh owns user-facing load errors.
     }
-  }, [refreshCalendar, refreshPlans, toast]);
+  }, [range, runRefresh]);
 
   React.useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    if (mountRefreshStartedRef.current) return;
+    mountRefreshStartedRef.current = true;
+    void runRefresh('mount', null);
+  }, [runRefresh]);
+
+  React.useEffect(() => {
+    if (!range) return;
+    const key = `${range.start.toISOString()}:${range.end.toISOString()}`;
+    if (lastRangeRefreshKeyRef.current === key) return;
+    lastRangeRefreshKeyRef.current = key;
+    void runRefresh('range', range);
+  }, [range, runRefresh]);
 
   React.useEffect(() => {
     if (!editor?.plannedTaskId) {
@@ -287,6 +350,30 @@ export function PlannedTasksPage(): JSX.Element {
     };
   }, [editor?.plannedTaskId]);
 
+  React.useEffect(() => {
+    if (
+      firstPlansMs === null ||
+      firstCalendarMs === null ||
+      telemetryReportedRef.current
+    ) {
+      return;
+    }
+    telemetryReportedRef.current = true;
+    const metric = buildPlannedLoadMetric({
+      view,
+      plansMs: firstPlansMs,
+      calendarMs: firstCalendarMs,
+      totalMs: performance.now() - initialLoadStartedRef.current,
+      plannedCount: plans.length,
+      legacyCount: legacyEvents.length,
+    });
+    void trpc.plannedTasks.reportLoadMetric.mutate(metric).catch((error: unknown) => {
+      if (import.meta.env.DEV) {
+        console.debug('planned load telemetry unavailable', error);
+      }
+    });
+  }, [firstCalendarMs, firstPlansMs, legacyEvents.length, plans.length, view]);
+
   const events = React.useMemo(
     () => [
       ...occurrences.map((occurrence) => calendarEventFromOccurrence(occurrence)),
@@ -299,7 +386,7 @@ export function PlannedTasksPage(): JSX.Element {
   ).length;
   const activeCount = plans.filter((plan) => plan.status === 'active').length;
   const emptyCalendarState = plannedCalendarEmptyState({
-    loading,
+    loading: calendarLoading,
     plannedCount: occurrences.length,
     legacyCount: legacyEvents.length,
   });
@@ -625,7 +712,11 @@ export function PlannedTasksPage(): JSX.Element {
         }
       />
 
-      <div className="planned-summary" aria-label="规划任务概览">
+      <div
+        className="planned-summary"
+        aria-label="规划任务概览"
+        aria-busy={plansLoading}
+      >
         <span>
           <CalendarClock aria-hidden />
           {activeCount} 个已启用
@@ -691,41 +782,40 @@ export function PlannedTasksPage(): JSX.Element {
                 日程
               </button>
             </div>
+            {calendarLoading && (
+              <span className="planned-toolbar__loading" role="status">
+                <Loader2 className="animate-spin" aria-hidden />
+                更新中
+              </span>
+            )}
           </div>
-          {loading && occurrences.length === 0 ? (
-            <div className="planned-loading">
-              <Loader2 className="animate-spin" aria-hidden />
-              正在载入规划
-            </div>
-          ) : (
-            <FullCalendar
-              ref={calendarRef}
-              plugins={[dayGridPlugin, listPlugin, interactionPlugin]}
-              locale={zhCnLocale}
-              initialView={view}
-              headerToolbar={false}
-              height="auto"
-              dayMaxEvents={3}
-              moreLinkText={(count) => `还有 ${count} 项`}
-              events={events}
-              editable
-              eventStartEditable
-              eventDurationEditable={false}
-              nowIndicator
-              datesSet={(arg: DatesSetArg) => {
-                setTitle(arg.view.title);
-                setRange((current) =>
-                  stablePlannedCalendarRange(current, { start: arg.start, end: arg.end }),
-                );
-                setView(arg.view.type as PlannedCalendarView);
-              }}
-              dateClick={handleDateClick}
-              eventClick={handleEventClick}
-              eventDrop={handleEventDrop}
-              eventContent={renderEventContent}
-              noEventsContent=""
-            />
-          )}
+          <FullCalendar
+            ref={calendarRef}
+            plugins={[dayGridPlugin, listPlugin, interactionPlugin]}
+            locale={zhCnLocale}
+            initialView={view}
+            headerToolbar={false}
+            height="auto"
+            dayMaxEvents={3}
+            moreLinkText={(count) => `还有 ${count} 项`}
+            events={events}
+            editable
+            eventStartEditable
+            eventDurationEditable={false}
+            nowIndicator
+            datesSet={(arg: DatesSetArg) => {
+              setTitle(arg.view.title);
+              setRange((current) =>
+                stablePlannedCalendarRange(current, { start: arg.start, end: arg.end }),
+              );
+              setView(arg.view.type as PlannedCalendarView);
+            }}
+            dateClick={handleDateClick}
+            eventClick={handleEventClick}
+            eventDrop={handleEventDrop}
+            eventContent={renderEventContent}
+            noEventsContent=""
+          />
           {emptyCalendarState && (
             <div className="planned-calendar-empty" role="status">
               <div>

@@ -40,6 +40,18 @@ import { protectedProcedure, router } from '../trpc.js';
 const planIdInput = z.object({ plannedTaskId: z.string().min(1) });
 type DBTransaction = Parameters<Parameters<DB['transaction']>[0]>[0];
 
+const plannedLoadMetricInput = z
+  .object({
+    view: z.enum(['dayGridMonth', 'listMonth']),
+    plansMs: z.number().finite().nonnegative().max(60_000),
+    calendarMs: z.number().finite().nonnegative().max(60_000),
+    totalMs: z.number().finite().nonnegative().max(60_000),
+    plannedCount: z.number().int().nonnegative().max(10_000),
+    legacyCount: z.number().int().nonnegative().max(10_000),
+    slow: z.boolean(),
+  })
+  .strict();
+
 async function requireUserId(ctx: {
   db: DB;
   userId: string;
@@ -128,6 +140,17 @@ async function loadItemsByPlan(db: DB, planIds: readonly number[]) {
 }
 
 export const plannedTasksRouter = router({
+  reportLoadMetric: protectedProcedure.input(plannedLoadMetricInput).mutation(({ ctx, input }) => {
+    ctx.logger.info(
+      {
+        event: 'planned_tasks_initial_load',
+        ...input,
+      },
+      'planned tasks initial load',
+    );
+    return { ok: true as const };
+  }),
+
   list: protectedProcedure
     .input(
       z

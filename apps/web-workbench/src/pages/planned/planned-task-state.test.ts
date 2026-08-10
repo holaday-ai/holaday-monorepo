@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildCustomWeeklyRRule,
+  buildPlannedLoadMetric,
   calendarEventFromOccurrence,
   defaultPlannedCalendarView,
   friendlyLegacyTaskTitle,
@@ -9,6 +10,7 @@ import {
   plannedCalendarEmptyState,
   plannedEndsOnPayload,
   plannedRepeatLabel,
+  plannedRefreshTargets,
   plannedStatusGroup,
   stablePlannedCalendarRange,
   workloadHint,
@@ -185,5 +187,56 @@ describe('planned task presentation state', () => {
 
     const changed = { ...repeated, end: new Date('2026-10-01T00:00:00.000Z') };
     expect(stablePlannedCalendarRange(current, changed)).toBe(changed);
+  });
+});
+
+describe('planned task initial-load metric', () => {
+  it('rounds bounded timings and marks loads above the budget as slow', () => {
+    expect(
+      buildPlannedLoadMetric({
+        view: 'dayGridMonth',
+        plansMs: 410.4,
+        calendarMs: 2510.6,
+        totalMs: 2700.2,
+        plannedCount: 3.8,
+        legacyCount: -2,
+      }),
+    ).toEqual({
+      view: 'dayGridMonth',
+      plansMs: 410,
+      calendarMs: 2511,
+      totalMs: 2700,
+      plannedCount: 3,
+      legacyCount: 0,
+      slow: true,
+    });
+  });
+
+  it('rejects non-finite timings before telemetry is sent', () => {
+    expect(() =>
+      buildPlannedLoadMetric({
+        view: 'listMonth',
+        plansMs: Number.NaN,
+        calendarMs: 100,
+        totalMs: 120,
+        plannedCount: 0,
+        legacyCount: 0,
+      }),
+    ).toThrow('加载耗时无效');
+  });
+
+  it('does not refetch the plan list when only the visible range changes', () => {
+    expect(plannedRefreshTargets('mount')).toEqual({
+      plans: true,
+      calendar: false,
+    });
+    expect(plannedRefreshTargets('range')).toEqual({
+      plans: false,
+      calendar: true,
+    });
+    expect(plannedRefreshTargets('mutation')).toEqual({
+      plans: true,
+      calendar: true,
+    });
   });
 });

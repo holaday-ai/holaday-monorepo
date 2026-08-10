@@ -216,3 +216,78 @@ describe('plannedTasks mutation schedule feedback', () => {
     });
   });
 });
+
+describe('plannedTasks load telemetry', () => {
+  it('logs one bounded content-free initial-load metric', async () => {
+    const info = vi.fn();
+    const caller = plannedTasksRouter.createCaller({
+      db: {},
+      userId: 'usr_test',
+      logger: {
+        info,
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn(),
+        child: vi.fn(),
+      },
+    } as never);
+    await expect(
+      caller.reportLoadMetric({
+        view: 'dayGridMonth',
+        plansMs: 410,
+        calendarMs: 900,
+        totalMs: 1050,
+        plannedCount: 2,
+        legacyCount: 1,
+        slow: false,
+      }),
+    ).resolves.toEqual({ ok: true });
+    expect(info).toHaveBeenCalledOnce();
+    expect(info).toHaveBeenCalledWith(
+      {
+        event: 'planned_tasks_initial_load',
+        view: 'dayGridMonth',
+        plansMs: 410,
+        calendarMs: 900,
+        totalMs: 1050,
+        plannedCount: 2,
+        legacyCount: 1,
+        slow: false,
+      },
+      'planned tasks initial load',
+    );
+    expect(JSON.stringify(info.mock.calls[0]?.[0])).not.toMatch(
+      /usr_test|title|instruction|email|url/i,
+    );
+  });
+
+  it('rejects out-of-range timing and unexpected content fields', async () => {
+    const caller = plannedTasksRouter.createCaller({
+      db: {},
+      userId: 'usr_test',
+      logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn(),
+        child: vi.fn(),
+      },
+    } as never);
+    const valid = {
+      view: 'dayGridMonth' as const,
+      plansMs: 410,
+      calendarMs: 900,
+      totalMs: 1050,
+      plannedCount: 2,
+      legacyCount: 1,
+      slow: false,
+    };
+
+    await expect(
+      caller.reportLoadMetric({ ...valid, totalMs: 60_001 }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(
+      caller.reportLoadMetric({ ...valid, instruction: '不应进入日志' } as never),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  });
+});
