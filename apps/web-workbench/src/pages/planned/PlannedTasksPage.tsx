@@ -50,6 +50,7 @@ import {
   type PlannedEditorErrors,
   validatePlannedEditor,
 } from './planned-editor-state';
+import { PlannedScopeDialog } from './PlannedScopeDialog';
 import {
   type PlannedCalendarOccurrence,
   type PlannedCalendarView,
@@ -183,6 +184,7 @@ export function PlannedTasksPage(): JSX.Element {
   const firstItemRef = React.useRef<HTMLInputElement | null>(null);
   const scheduledAtRef = React.useRef<HTMLInputElement | null>(null);
   const customDaysRef = React.useRef<HTMLDivElement | null>(null);
+  const scopeReturnFocusRef = React.useRef<HTMLElement | null>(null);
   const [view, setView] = React.useState<PlannedCalendarView>(() =>
     defaultPlannedCalendarView(matchMobile(), readSavedView()),
   );
@@ -337,6 +339,12 @@ export function PlannedTasksPage(): JSX.Element {
     window.requestAnimationFrame(() => target?.focus());
   }
 
+  function openScopeDialog(action: PendingScopeAction): void {
+    scopeReturnFocusRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setPendingScope(action);
+  }
+
   function openCreate(date = nextWholeHour()): void {
     const next = emptyEditor(date);
     requestEditorTransition(() => {
@@ -420,7 +428,7 @@ export function PlannedTasksPage(): JSX.Element {
       return;
     }
     arg.revert();
-    setPendingScope({ kind: 'reschedule', occurrence, scheduledFor });
+    openScopeDialog({ kind: 'reschedule', occurrence, scheduledFor });
   }
 
   async function rescheduleOccurrence(
@@ -470,7 +478,7 @@ export function PlannedTasksPage(): JSX.Element {
       editor.occurrence.repeatType !== 'once' &&
       !editScope
     ) {
-      setPendingScope({ kind: 'update', occurrence: editor.occurrence });
+      openScopeDialog({ kind: 'update', occurrence: editor.occurrence });
       return;
     }
     const errors = validatePlannedEditor(editor);
@@ -1055,7 +1063,7 @@ export function PlannedTasksPage(): JSX.Element {
                     className="text-destructive"
                     onClick={() => {
                       if (editor.occurrence && editor.occurrence.repeatType !== 'once') {
-                        setPendingScope({ kind: 'remove', occurrence: editor.occurrence });
+                        openScopeDialog({ kind: 'remove', occurrence: editor.occurrence });
                       } else if (editor.occurrence) {
                         void removeOccurrence(editor.occurrence, 'series');
                       }
@@ -1126,37 +1134,13 @@ export function PlannedTasksPage(): JSX.Element {
         }}
       />
 
-      {pendingScope && (
-        <dialog
-          open
-          className="planned-scope-dialog"
-          aria-modal="true"
-          aria-labelledby="planned-scope-title"
-        >
-          <div className="planned-scope-dialog__panel">
-            <h2 id="planned-scope-title">
-              {pendingScope.kind === 'remove'
-                ? '删除哪些日程？'
-                : pendingScope.kind === 'update'
-                  ? '保存到哪些日程？'
-                  : '更改哪些日程？'}
-            </h2>
-            <p>这是重复规划。已完成的运行记录不会被修改。</p>
-            <button type="button" onClick={() => void applyScope('occurrence')}>
-              仅这一次<span>只调整当前日程</span>
-            </button>
-            <button type="button" onClick={() => void applyScope('future')}>
-              这次及以后<span>保留此前记录，拆分后续系列</span>
-            </button>
-            <button type="button" onClick={() => void applyScope('series')}>
-              整个系列<span>应用到全部未完成日程</span>
-            </button>
-            <Button variant="ghost" onClick={() => setPendingScope(null)}>
-              取消
-            </Button>
-          </div>
-        </dialog>
-      )}
+      <PlannedScopeDialog
+        open={pendingScope !== null}
+        kind={pendingScope?.kind ?? 'update'}
+        returnFocusRef={scopeReturnFocusRef}
+        onSelect={(scope) => void applyScope(scope)}
+        onClose={() => setPendingScope(null)}
+      />
     </PageContainer>
   );
 

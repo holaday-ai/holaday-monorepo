@@ -489,12 +489,10 @@
   position: fixed;
   inset: 0;
   z-index: 70;
-  display: grid;
   width: 100%;
   max-width: none;
   height: 100%;
   max-height: none;
-  place-items: center;
   box-sizing: border-box;
   margin: 0;
   padding: 20px;
@@ -503,20 +501,26 @@
 }
 
 .planned-scope-dialog__panel {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 71;
   width: min(420px, 100%);
+  max-width: calc(100vw - 40px);
   padding: 18px;
   border: 1px solid #dcdcdc;
   border-radius: 8px;
   background: #fff;
   box-shadow: 0 18px 50px rgba(15, 23, 42, 0.16);
+  transform: translate(-50%, -50%);
 }
-.planned-scope-dialog h2 {
+.planned-scope-dialog__panel h2 {
   margin: 0;
   color: #292727;
   font-size: 16px;
   font-weight: 600;
 }
-.planned-scope-dialog p {
+.planned-scope-dialog__panel p {
   margin: 5px 0 13px;
   color: #77757a;
   font-size: 11px;
