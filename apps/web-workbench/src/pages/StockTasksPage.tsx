@@ -43,6 +43,7 @@ import {
   stockChartAxisTicks,
 } from '@/lib/stock-chart-state';
 import { stockDashboardTrustState } from '@/lib/stock-dashboard-trust';
+import { discoveryStoryAliases, discoveryStoryClusterKey, mergeDiscoveryNews } from '@/lib/stock-news';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import { useTaskStore } from '@/stores/task-store';
@@ -797,14 +798,15 @@ function DiscoveryPanel({
     () => news.map((item, index) => ({ item, index })),
     [news],
   );
+  const storyAliases = React.useMemo(() => discoveryStoryAliases(news), [news]);
   const filteredNews = React.useMemo(
     () => diversifyDiscoveryEditorialArt(
       diversifyDiscoveryItems(
         indexedNews.filter(({ item }) => activeFeed === '全部' || newsFeed(item) === activeFeed),
-        (item) => item.symbols[0],
+        (item) => discoveryStoryClusterKey(item, storyAliases),
       ),
     ),
-    [activeFeed, indexedNews],
+    [activeFeed, indexedNews, storyAliases],
   );
   const pageCount = Math.max(1, Math.ceil(filteredNews.length / pageSize));
   const safePage = Math.min(page, pageCount - 1);
@@ -2650,16 +2652,6 @@ function preserveDisplayableDashboard(next: DashboardSnapshot, previous: Dashboa
       message: '行情源本次返回为空，当前继续展示上一次真实数据，后台会继续刷新。',
     },
   };
-}
-
-function mergeDiscoveryNews(base: NewsRow[], additions: NewsRow[]): NewsRow[] {
-  const seen = new Set<string>();
-  return [...base, ...additions].filter((item) => {
-    const key = item.url?.trim() || `${newsFeed(item)}:${item.time}:${item.title.trim()}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
 }
 
 function buildStockRows(watchlist: WatchlistRow[] | null): StockSnapshot[] {

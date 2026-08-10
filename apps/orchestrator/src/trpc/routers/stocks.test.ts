@@ -257,6 +257,69 @@ describe('stocks dashboard snapshot', () => {
     ]);
   });
 
+  it('collapses syndicated watchlist-news variants without hiding a distinct company event', () => {
+    const entry = { symbol: '000963', market: 'A' as const, displayName: '华东医药' };
+    const news = __stocksDashboardTest.buildNews([], [{
+      entry,
+      env: envelope([
+        {
+          新闻标题: 'KIO015获欧盟MDR CE认证',
+          发布时间: '2026-08-09 10:30:00',
+          文章来源: '来源甲',
+          新闻链接: 'https://publisher.example/kio015-1',
+        },
+        {
+          新闻标题: '产品KIO015通过MDR认证并获CE标志',
+          发布时间: '2026-08-09 10:20:00',
+          文章来源: '来源乙',
+          新闻链接: 'https://publisher.example/kio015-2',
+        },
+        {
+          新闻标题: '上半年营收同比增长',
+          发布时间: '2026-08-09 10:10:00',
+          文章来源: '来源丙',
+          新闻链接: 'https://publisher.example/earnings',
+        },
+      ]) as never,
+    }]);
+
+    expect(news.filter((item) => item.feed === '自选股新闻').map((item) => item.title)).toEqual([
+      '华东医药：KIO015获欧盟MDR CE认证',
+      '华东医药：上半年营收同比增长',
+    ]);
+  });
+
+  it('collapses a same-day market event with no English anchor while preserving another company event', () => {
+    const news = __stocksDashboardTest.buildNews([], [], [{
+      feed: 'A股要闻',
+      env: envelope([
+        {
+          新闻标题: '明天“打新”宇树科技！A股“朋友圈”浮出水面',
+          发布时间: '2026-08-09 20:30:00',
+          新闻来源: '来源甲',
+          新闻链接: 'https://publisher.example/unitree-1',
+        },
+        {
+          新闻标题: '宇树科技即将开启申购，A股“朋友圈”浮出水面',
+          发布时间: '2026-08-09 19:57:00',
+          新闻来源: '来源乙',
+          新闻链接: 'https://publisher.example/unitree-2',
+        },
+        {
+          新闻标题: '宇树科技发布新一代机器人控制系统',
+          发布时间: '2026-08-09 19:40:00',
+          新闻来源: '来源丙',
+          新闻链接: 'https://publisher.example/unitree-product',
+        },
+      ]) as never,
+    }]);
+
+    expect(news.filter((item) => item.feed === 'A股要闻').map((item) => item.title)).toEqual([
+      '明天“打新”宇树科技！A股“朋友圈”浮出水面',
+      '宇树科技发布新一代机器人控制系统',
+    ]);
+  });
+
   it('loads the next market-news page with the feed-specific real-source quota', async () => {
     const requested: string[] = [];
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {

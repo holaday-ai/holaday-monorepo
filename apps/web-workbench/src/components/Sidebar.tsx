@@ -1,5 +1,6 @@
 import {
   Check,
+  CalendarClock,
   Clapperboard,
   Clipboard,
   Clock,
@@ -983,8 +984,7 @@ const FEATURES: readonly FeatureItem[] = [
   { icon: MoonStar, label: '今日能量', href: '/cosmic' },
   { icon: Clapperboard, label: '视频任务', href: '/video' },
   { icon: ImagePlus, label: '图片任务', href: '/image' },
-  { icon: Clock, label: '定时任务', href: '/scheduled' },
-  { icon: ListPlus, label: '批量任务', href: '/batch' },
+  { icon: CalendarClock, label: '规划任务', href: '/planned' },
   { icon: FolderOpen, label: '文件库', href: '/files' },
   { icon: Layers, label: '项目', href: '/projects' },
   // 收藏 was a top-level nav row but it duplicated what the sidebar

@@ -42,6 +42,8 @@ import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from difflib import SequenceMatcher
+from html.parser import HTMLParser
 from typing import Any
 from urllib.parse import quote, urlparse
 
@@ -83,6 +85,14 @@ TTL_RISK = _ttl("RISK", 21600)  # ④ 风险源(质押/商誉/预告)粗粒度�
 TTL_RANK = _ttl("RANK", 60)
 TTL_SPOT = _ttl("SPOT", 300)
 STOCK_NEWS_TIMEOUT_SECONDS = max(1.0, float(os.environ.get("AKSHARE_MCP_STOCK_NEWS_TIMEOUT", "8")))
+STOCK_NEWS_ARTICLE_TIMEOUT_SECONDS = max(
+    1.0,
+    float(os.environ.get("AKSHARE_MCP_STOCK_NEWS_ARTICLE_TIMEOUT", "4")),
+)
+STOCK_NEWS_ARTICLE_WORKERS = min(
+    8,
+    max(1, int(os.environ.get("AKSHARE_MCP_STOCK_NEWS_ARTICLE_WORKERS", "6"))),
+)
 
 # Row caps so a single tool call can't dump thousands of rows into the
 # model's context.
@@ -626,6 +636,13 @@ def _stock_news_http_get(url: str, *, params: dict[str, str], headers: dict[str,
     return curl_requests.get(url, params=params, headers=headers, timeout=timeout)
 
 
+def _stock_news_article_http_get(url: str, *, headers: dict[str, str], timeout: float) -> Any:
+    """Fetch one public publisher article with a strict deadline."""
+    from curl_cffi import requests as curl_requests
+
+    return curl_requests.get(url, headers=headers, timeout=timeout, allow_redirects=False)
+
+
 def _stock_news_params(symbol: str, *, page: int = 1, page_size: int = 20) -> dict[str, str]:
     query = {
         "uid": "",
@@ -656,14 +673,153 @@ def _stock_news_text(value: object) -> str:
     return re.sub(r"</?em>", "", str(value or "")).replace("\u3000", "").strip()
 
 
-def _stock_news_image_url(value: object) -> str | None:
+def _trusted_eastmoney_image_url(value: object) -> str | None:
     image_url = str(value or "").strip()
+    if image_url.startswith("//"):
+        image_url = f"https:{image_url}"
+    try:
+        parsed = urlparse(image_url)
+    except ValueError:
+        return None
+    if parsed.scheme not in {"http", "https"} or parsed.hostname != "np-newspic.dfcfw.com":
+        return None
+    if not re.fullmatch(r"/download/[A-Za-z0-9._-]+\.(?:jpe?g|png|webp|avif)", parsed.path, re.IGNORECASE):
+        return None
+    return parsed._replace(scheme="https", query="", fragment="").geturl()
+
+
+def _source_cover_image_url(value: object) -> str | None:
+    image_url = _trusted_eastmoney_image_url(value)
     if not image_url:
         return None
-    parsed = urlparse(image_url)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+    dimensions = re.search(
+        r"_w(\d+)h(\d+)\.(?:jpe?g|png|webp|avif)$",
+        urlparse(image_url).path,
+        re.IGNORECASE,
+    )
+    if not dimensions:
+        return None
+    width, height = (int(dimensions.group(1)), int(dimensions.group(2)))
+    ratio = width / max(1, height)
+    if width < 900 or height < 450 or ratio < 1.35 or ratio > 2.05:
         return None
     return image_url
+
+
+class _ArticleBodyImageParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._content_depth = 0
+        self.image_url: str | None = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attributes = dict(attrs)
+        if self._content_depth == 0 and attributes.get("id") == "ContentBody":
+            self._content_depth = 1
+            return
+        if self._content_depth == 0:
+            return
+        if tag not in {"img", "meta", "link", "br", "hr", "input"}:
+            self._content_depth += 1
+        if tag != "img" or self.image_url:
+            return
+        for key in ("data-original", "data-src", "src"):
+            trusted = _source_cover_image_url(attributes.get(key))
+            if trusted:
+                self.image_url = trusted
+                return
+
+    def handle_endtag(self, tag: str) -> None:
+        if self._content_depth == 0 or tag in {"img", "meta", "link", "br", "hr", "input"}:
+            return
+        self._content_depth -= 1
+
+
+def _extract_article_source_image(article_html: str) -> str | None:
+    parser = _ArticleBodyImageParser()
+    try:
+        parser.feed(article_html)
+    except Exception:
+        return None
+    return parser.image_url
+
+
+_ARTICLE_IMAGE_CACHE: dict[str, tuple[float, str | None]] = {}
+_ARTICLE_IMAGE_CACHE_LOCK = threading.Lock()
+_ARTICLE_IMAGE_CANDIDATES_KEY = "_article_image_candidates"
+
+
+def _eastmoney_article_url(value: object) -> str | None:
+    raw = str(value or "").strip()
+    try:
+        parsed = urlparse(raw)
+    except ValueError:
+        return None
+    if parsed.scheme not in {"http", "https"} or parsed.hostname != "finance.eastmoney.com":
+        return None
+    if not re.fullmatch(r"/a/\d{12,}\.html", parsed.path):
+        return None
+    return parsed._replace(scheme="https", query="", fragment="").geturl()
+
+
+def _article_source_image(article_url: str) -> str | None:
+    now = time.monotonic()
+    with _ARTICLE_IMAGE_CACHE_LOCK:
+        cached = _ARTICLE_IMAGE_CACHE.get(article_url)
+        if cached and now - cached[0] < TTL_STOCK_NEWS:
+            return cached[1]
+    image_url: str | None = None
+    try:
+        response = _stock_news_article_http_get(
+            article_url,
+            headers={"accept": "text/html", "user-agent": "Mozilla/5.0"},
+            timeout=STOCK_NEWS_ARTICLE_TIMEOUT_SECONDS,
+        )
+        raise_for_status = getattr(response, "raise_for_status", None)
+        if callable(raise_for_status):
+            raise_for_status()
+        image_url = _extract_article_source_image(str(getattr(response, "text", "")))
+    except Exception:
+        image_url = None
+    with _ARTICLE_IMAGE_CACHE_LOCK:
+        if len(_ARTICLE_IMAGE_CACHE) >= 512:
+            oldest = min(_ARTICLE_IMAGE_CACHE, key=lambda key: _ARTICLE_IMAGE_CACHE[key][0])
+            _ARTICLE_IMAGE_CACHE.pop(oldest, None)
+        _ARTICLE_IMAGE_CACHE[article_url] = (now, image_url)
+    return image_url
+
+
+def _enrich_news_images(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    enriched = [dict(row) for row in rows]
+    missing: list[tuple[int, list[str]]] = []
+    for index, row in enumerate(enriched):
+        candidate_values = row.pop(_ARTICLE_IMAGE_CANDIDATES_KEY, [])
+        if _source_cover_image_url(row.get("新闻图片")):
+            continue
+        row.pop("新闻图片", None)
+        article_urls: list[str] = []
+        for value in [row.get("新闻链接"), *candidate_values]:
+            article_url = _eastmoney_article_url(value)
+            if article_url and article_url not in article_urls:
+                article_urls.append(article_url)
+        if article_urls:
+            missing.append((index, article_urls))
+    if not missing:
+        return enriched
+
+    def first_source_image(item: tuple[int, list[str]]) -> str | None:
+        for article_url in item[1]:
+            image_url = _article_source_image(article_url)
+            if image_url:
+                return image_url
+        return None
+
+    with ThreadPoolExecutor(max_workers=min(STOCK_NEWS_ARTICLE_WORKERS, len(missing))) as executor:
+        images = list(executor.map(first_source_image, missing))
+    for (index, _article_urls), image_url in zip(missing, images):
+        if image_url:
+            enriched[index]["新闻图片"] = image_url
+    return enriched
 
 
 def _get_eastmoney_news(keyword: str, *, page: int = 1, page_size: int = 20) -> list[dict[str, Any]]:
@@ -716,7 +872,7 @@ def _get_eastmoney_news(keyword: str, *, page: int = 1, page_size: int = 20) -> 
             "文章来源": _stock_news_text(source_row.get("mediaName")) or "东方财富",
             "新闻链接": url,
         }
-        image_url = _stock_news_image_url(source_row.get("image"))
+        image_url = _source_cover_image_url(source_row.get("image"))
         if image_url:
             row["新闻图片"] = image_url
         rows.append(row)
@@ -725,7 +881,7 @@ def _get_eastmoney_news(keyword: str, *, page: int = 1, page_size: int = 20) -> 
 
 def get_stock_news(symbol: str) -> tuple[list[dict[str, Any]], str]:
     """Fetch source-backed Eastmoney news for an A-share stock code."""
-    return _get_eastmoney_news(symbol), "eastmoney:stock-news-search"
+    return _enrich_news_images(_dedupe_market_news(_get_eastmoney_news(symbol))), "eastmoney:stock-news-search"
 
 
 _MARKET_NEWS_KEYWORDS = {
@@ -752,12 +908,88 @@ def _market_news_sort_key(row: dict[str, Any]) -> tuple[str, str]:
     return (str(row.get("发布时间") or ""), str(row.get("新闻标题") or ""))
 
 
+def _normalized_market_headline(row: dict[str, Any]) -> str:
+    title = str(row.get("新闻标题") or "").strip().lower()
+    title = re.sub(r"^(?:业绩快报|快讯|公告|机构观点|券商观点)\s*[：:]", "", title)
+    title = re.sub(r"(?:19|20)\d{2}年", "", title)
+    return re.sub(r"[^\w\u4e00-\u9fff%]+", "", title)
+
+
+def _market_story_day(row: dict[str, Any]) -> str:
+    return str(row.get("发布时间") or "")[:10]
+
+
+def _market_story_anchors(value: str) -> set[str]:
+    ascii_tokens = {token for token in re.findall(r"[a-z]+\d*|\d+(?:\.\d+)?%", value) if len(token) >= 2}
+    return ascii_tokens
+
+
+def _market_headline_bigrams(value: str) -> set[str]:
+    return {value[index:index + 2] for index in range(max(0, len(value) - 1))}
+
+
+def _likely_same_market_story(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    if _market_story_day(left) != _market_story_day(right):
+        return False
+    left_title = _normalized_market_headline(left)
+    right_title = _normalized_market_headline(right)
+    if not left_title or not right_title:
+        return False
+    if left_title == right_title:
+        return True
+    left_numbers = set(re.findall(r"\d+(?:\.\d+)?%?", left_title))
+    right_numbers = set(re.findall(r"\d+(?:\.\d+)?%?", right_title))
+    if left_numbers and right_numbers and left_numbers != right_numbers:
+        return False
+    shorter, longer = sorted((left_title, right_title), key=len)
+    if len(shorter) >= 8 and shorter in longer and len(shorter) / len(longer) >= 0.65:
+        return True
+    shared_anchors = _market_story_anchors(left_title) & _market_story_anchors(right_title)
+    has_anchor = bool(shared_anchors or left_numbers & right_numbers)
+    sequence_similarity = SequenceMatcher(None, left_title, right_title).ratio()
+    if has_anchor and sequence_similarity >= 0.64:
+        return True
+    left_bigrams = _market_headline_bigrams(left_title)
+    right_bigrams = _market_headline_bigrams(right_title)
+    shared_bigrams = len(left_bigrams & right_bigrams)
+    bigram_similarity = 2 * shared_bigrams / max(1, len(left_bigrams) + len(right_bigrams))
+    return shared_bigrams >= 8 and bigram_similarity >= 0.5
+
+
+def _market_news_quality(row: dict[str, Any]) -> tuple[int, int, int]:
+    return (
+        1 if _source_cover_image_url(row.get("新闻图片")) else 0,
+        len(str(row.get("新闻内容") or "").strip()),
+        len(str(row.get("新闻标题") or "").strip()),
+    )
+
+
 def _dedupe_market_news(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     seen: set[str] = set()
     unique: list[dict[str, Any]] = []
     for row in rows:
         key = str(row.get("新闻链接") or "").strip() or str(row.get("新闻标题") or "").strip()
         if not key or key in seen:
+            continue
+        duplicate_index = next(
+            (index for index, candidate in enumerate(unique) if _likely_same_market_story(candidate, row)),
+            None,
+        )
+        if duplicate_index is not None:
+            previous = unique[duplicate_index]
+            preferred = row if _market_news_quality(row) > _market_news_quality(previous) else previous
+            candidates = [
+                preferred.get("新闻链接"),
+                *(preferred.get(_ARTICLE_IMAGE_CANDIDATES_KEY) or []),
+                previous.get("新闻链接"),
+                *(previous.get(_ARTICLE_IMAGE_CANDIDATES_KEY) or []),
+                row.get("新闻链接"),
+            ]
+            unique[duplicate_index] = {
+                **preferred,
+                _ARTICLE_IMAGE_CANDIDATES_KEY: list(dict.fromkeys(filter(None, candidates))),
+            }
+            seen.add(key)
             continue
         seen.add(key)
         unique.append(row)
@@ -788,9 +1020,9 @@ def get_market_news(market: str, page: int = 1, page_size: int = 20) -> tuple[li
             ]
             topic_rows = [future.result() for future in futures]
         combined_rows = _dedupe_market_news([row for rows in topic_rows for row in rows])
-        rows = combined_rows[:safe_page_size]
+        rows = _enrich_news_images(combined_rows[:safe_page_size])
     else:
-        rows = _get_eastmoney_news(keyword, page=safe_page, page_size=safe_page_size)
+        rows = _enrich_news_images(_get_eastmoney_news(keyword, page=safe_page, page_size=safe_page_size))
     for row in rows:
         row["市场"] = normalized
     return rows, f"eastmoney:market-news-search({normalized})"

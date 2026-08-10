@@ -138,7 +138,7 @@ def test_stock_news_keeps_only_linked_articles_with_source_timestamps(monkeypatc
                             "date": "2026-08-07 11:30:00",
                             "mediaName": "真实来源",
                             "url": "https://finance.eastmoney.com/a/202608073834244063.html",
-                            "image": "https://source.example/cover.jpg",
+                            "image": "https://np-newspic.dfcfw.com/download/D25000000000000000051_w1200h675.jpg",
                         },
                         {
                             "title": "缺少原文链接的条目",
@@ -173,7 +173,7 @@ def test_stock_news_keeps_only_linked_articles_with_source_timestamps(monkeypatc
             "发布时间": "2026-08-07 11:30:00",
             "文章来源": "真实来源",
             "新闻链接": "https://finance.eastmoney.com/a/202608073834244063.html",
-            "新闻图片": "https://source.example/cover.jpg",
+            "新闻图片": "https://np-newspic.dfcfw.com/download/D25000000000000000051_w1200h675.jpg",
         }
     ]
 
@@ -259,6 +259,238 @@ def test_cn_market_news_keeps_other_topics_when_one_upstream_search_fails(monkey
     assert len(rows) == len(adp._CN_MARKET_NEWS_KEYWORDS) - 1
     assert "新能源" not in {row["关键词"] for row in rows}
     assert all(row["市场"] == "cn" for row in rows)
+
+
+def test_market_news_collapses_syndicated_versions_of_the_same_event():
+    rows = [
+        {
+            "新闻标题": "华东医药：KIO015获欧盟MDR CE认证",
+            "新闻内容": "公司产品取得欧盟认证。",
+            "发布时间": "2026-08-09 10:30:00",
+            "文章来源": "来源甲",
+            "新闻链接": "https://finance.eastmoney.com/a/202608090000001.html",
+        },
+        {
+            "新闻标题": "华东医药产品KIO015通过MDR认证并获CE标志",
+            "新闻内容": "KIO015医疗器械通过认证。",
+            "发布时间": "2026-08-09 10:20:00",
+            "文章来源": "来源乙",
+            "新闻链接": "https://finance.eastmoney.com/a/202608090000002.html",
+            "新闻图片": "https://np-newspic.dfcfw.com/download/D25000000000000000001_w210h154.jpg",
+        },
+        {
+            "新闻标题": "华东医药上半年营收同比增长",
+            "新闻内容": "这是另一项公司事件。",
+            "发布时间": "2026-08-09 10:10:00",
+            "文章来源": "来源丙",
+            "新闻链接": "https://finance.eastmoney.com/a/202608090000003.html",
+        },
+    ]
+
+    result = adp._dedupe_market_news(rows)
+
+    assert [row["新闻标题"] for row in result] == [
+        "华东医药产品KIO015通过MDR认证并获CE标志",
+        "华东医药上半年营收同比增长",
+    ]
+
+
+def test_market_news_collapses_percentage_event_without_merging_distinct_company_news():
+    rows = [
+        {
+            "新闻标题": "立新能源上半年净利润同比增长715.75%",
+            "发布时间": "2026-08-09 09:30:00",
+            "文章来源": "来源甲",
+            "新闻链接": "https://finance.eastmoney.com/a/202608090000011.html",
+        },
+        {
+            "新闻标题": "业绩快报：立新能源净利增715.75%",
+            "发布时间": "2026-08-09 09:20:00",
+            "文章来源": "来源乙",
+            "新闻链接": "https://finance.eastmoney.com/a/202608090000012.html",
+        },
+        {
+            "新闻标题": "立新能源拟建设新能源项目",
+            "发布时间": "2026-08-09 09:10:00",
+            "文章来源": "来源丙",
+            "新闻链接": "https://finance.eastmoney.com/a/202608090000013.html",
+        },
+    ]
+
+    result = adp._dedupe_market_news(rows)
+
+    assert [row["新闻标题"] for row in result] == [
+        "立新能源上半年净利润同比增长715.75%",
+        "立新能源拟建设新能源项目",
+    ]
+
+
+def test_market_news_collapses_same_event_without_ascii_anchor():
+    rows = [
+        {
+            "新闻标题": "明天“打新”宇树科技！A股“朋友圈”浮出水面",
+            "发布时间": "2026-08-09 20:30:00",
+            "新闻链接": "https://finance.eastmoney.com/a/202608090000014.html",
+        },
+        {
+            "新闻标题": "宇树科技即将开启申购，A股“朋友圈”浮出水面",
+            "发布时间": "2026-08-09 19:57:00",
+            "新闻链接": "https://finance.eastmoney.com/a/202608090000015.html",
+        },
+        {
+            "新闻标题": "宇树科技发布新一代机器人控制系统",
+            "发布时间": "2026-08-09 19:40:00",
+            "新闻链接": "https://finance.eastmoney.com/a/202608090000016.html",
+        },
+    ]
+
+    result = adp._dedupe_market_news(rows)
+
+    assert [row["新闻标题"] for row in result] == [
+        "明天“打新”宇树科技！A股“朋友圈”浮出水面",
+        "宇树科技发布新一代机器人控制系统",
+    ]
+
+
+def test_article_image_extractor_accepts_only_trusted_images_inside_article_body():
+    html = """
+      <img src="https://np-newspic.dfcfw.com/download/D20000000000000000000_w145h95.jpg">
+      <div id="ContentBody">
+        <p>正文</p>
+        <img src="https://webquoteklinepic.eastmoney.com/GetPic.aspx?nid=0.000001">
+        <img data-original="//np-newspic.dfcfw.com/download/D25000000000000000001_w1200h675.jpg">
+      </div>
+      <img src="https://np-newspic.dfcfw.com/download/D20000000000000000002_w145h95.jpg">
+    """
+
+    assert adp._extract_article_source_image(html) == (
+        "https://np-newspic.dfcfw.com/download/D25000000000000000001_w1200h675.jpg"
+    )
+
+
+def test_article_image_extractor_skips_low_resolution_and_document_shaped_images():
+    html = """
+      <div id="ContentBody">
+        <img src="https://np-newspic.dfcfw.com/download/D25000000000000000011_w210h154.jpg">
+        <img src="https://np-newspic.dfcfw.com/download/D25000000000000000012_w1080h1119.jpg">
+        <img src="https://np-newspic.dfcfw.com/download/D25000000000000000013_w1080h495.jpg">
+        <img src="https://np-newspic.dfcfw.com/download/D25000000000000000014_w1920h1080.jpg">
+      </div>
+    """
+
+    assert adp._extract_article_source_image(html) == (
+        "https://np-newspic.dfcfw.com/download/D25000000000000000014_w1920h1080.jpg"
+    )
+
+
+def test_source_cover_rejects_small_thumbnails_and_keeps_readable_landscape_media():
+    assert adp._source_cover_image_url(
+        "https://np-newspic.dfcfw.com/download/D25000000000000000021_w210h154.jpg"
+    ) is None
+    assert adp._source_cover_image_url(
+        "https://np-newspic.dfcfw.com/download/D25000000000000000022_w926h585.jpg"
+    ) == "https://np-newspic.dfcfw.com/download/D25000000000000000022_w926h585.jpg"
+
+
+def test_news_image_enrichment_uses_article_body_and_does_not_refetch_declared_covers(monkeypatch):
+    fetched = []
+
+    class _Response:
+        text = """
+          <div id="ContentBody">
+            <p>正文</p>
+            <img src="https://np-newspic.dfcfw.com/download/D25000000000000000002_w1200h675.jpg">
+          </div>
+        """
+
+        def raise_for_status(self):
+            return None
+
+    def fetch(url, *, headers, timeout):
+        fetched.append((url, timeout))
+        return _Response()
+
+    monkeypatch.setattr(adp, "_stock_news_article_http_get", fetch)
+    rows = [
+        {
+            "新闻标题": "已有来源封面",
+            "新闻链接": "https://finance.eastmoney.com/a/202608090000021.html",
+            "新闻图片": "https://np-newspic.dfcfw.com/download/D25000000000000000003_w1200h675.jpg",
+        },
+        {
+            "新闻标题": "正文包含来源图片",
+            "新闻链接": "https://finance.eastmoney.com/a/202608090000022.html",
+        },
+    ]
+
+    result = adp._enrich_news_images(rows)
+
+    assert fetched == [("https://finance.eastmoney.com/a/202608090000022.html", adp.STOCK_NEWS_ARTICLE_TIMEOUT_SECONDS)]
+    assert result[0]["新闻图片"].endswith("D25000000000000000003_w1200h675.jpg")
+    assert result[1]["新闻图片"].endswith("D25000000000000000002_w1200h675.jpg")
+
+
+def test_news_image_enrichment_checks_syndicated_article_candidates(monkeypatch):
+    fetched = []
+    image_url = "https://np-newspic.dfcfw.com/download/D25000000000000000004_w1200h675.jpg"
+
+    class _Response:
+        def __init__(self, text):
+            self.text = text
+
+        def raise_for_status(self):
+            return None
+
+    def fetch(url, *, headers, timeout):
+        fetched.append(url)
+        if url.endswith("000032.html"):
+            return _Response(f'<div id="ContentBody"><img src="{image_url}"></div>')
+        return _Response('<div id="ContentBody"><p>无图正文</p></div>')
+
+    monkeypatch.setattr(adp, "_stock_news_article_http_get", fetch)
+    rows = adp._dedupe_market_news([
+        {
+            "新闻标题": "华东医药KIO015通过MDR认证并获CE标志",
+            "新闻内容": "更完整但无图的摘要内容",
+            "发布时间": "2026-08-09 10:30:00",
+            "新闻链接": "https://finance.eastmoney.com/a/202608090000031.html",
+        },
+        {
+            "新闻标题": "华东医药产品KIO015获欧盟MDR CE认证",
+            "新闻内容": "短摘要",
+            "发布时间": "2026-08-09 10:20:00",
+            "新闻链接": "https://finance.eastmoney.com/a/202608090000032.html",
+        },
+    ])
+
+    result = adp._enrich_news_images(rows)
+
+    assert len(result) == 1
+    assert result[0]["新闻图片"] == image_url
+    assert adp._ARTICLE_IMAGE_CANDIDATES_KEY not in result[0]
+    assert fetched == [
+        "https://finance.eastmoney.com/a/202608090000031.html",
+        "https://finance.eastmoney.com/a/202608090000032.html",
+    ]
+
+
+def test_news_image_enrichment_replaces_an_unreadable_declared_thumbnail(monkeypatch):
+    cover = "https://np-newspic.dfcfw.com/download/D25000000000000000044_w1200h675.jpg"
+
+    class _Response:
+        text = f'<div id="ContentBody"><img src="{cover}"></div>'
+
+        def raise_for_status(self):
+            return None
+
+    monkeypatch.setattr(adp, "_stock_news_article_http_get", lambda *_args, **_kwargs: _Response())
+    result = adp._enrich_news_images([{
+        "新闻标题": "低清缩略图不应阻止寻找正文封面",
+        "新闻链接": "https://finance.eastmoney.com/a/202608090000043.html",
+        "新闻图片": "https://np-newspic.dfcfw.com/download/D25000000000000000043_w210h154.jpg",
+    }])
+
+    assert result[0]["新闻图片"] == cover
 
 
 def test_market_news_uses_an_ascii_encoded_referer_for_chinese_keywords(monkeypatch):

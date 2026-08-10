@@ -894,9 +894,9 @@ function sortNewsNewestFirst(rows: NewsSnapshot[]): NewsSnapshot[] {
 }
 
 function normalizedMarketHeadline(row: NewsSnapshot): string | undefined {
-  if (row.feed !== 'A股要闻' && row.feed !== '美股要闻' && row.feed !== '港股要闻') return undefined;
+  if (row.feed === '重要公告') return undefined;
   const title = row.title
-    .replace(/^\s*[^：:]{2,16}\s*[：:]/, '')
+    .replace(/^\s*(?:业绩快报|快讯|公告|机构观点|券商观点)\s*[：:]/, '')
     .replace(/(?:19|20)\d{2}年/g, '')
     .replace(/\s+/g, '')
     .replace(/[：:，,。.!！?？、【】\[\]（）()「」『』“”‘’]/g, '')
@@ -919,17 +919,30 @@ function likelySameMarketStory(left: NewsSnapshot, right: NewsSnapshot): boolean
   const leftHeadline = normalizedMarketHeadline(left);
   const rightHeadline = normalizedMarketHeadline(right);
   if (!leftHeadline || !rightHeadline) return false;
-  const numbers = (value: string) => value.match(/\d+(?:\.\d+)?%?/g)?.join('|') ?? '';
-  if (numbers(leftHeadline) !== numbers(rightHeadline)) return false;
   if (leftHeadline === rightHeadline) return true;
+  const numbers = (value: string) => new Set(value.match(/\d+(?:\.\d+)?%?/g) ?? []);
+  const leftNumbers = numbers(leftHeadline);
+  const rightNumbers = numbers(rightHeadline);
+  if (leftNumbers.size > 0 && rightNumbers.size > 0 && (
+    leftNumbers.size !== rightNumbers.size || [...leftNumbers].some((token) => !rightNumbers.has(token))
+  )) {
+    return false;
+  }
   const shorter = leftHeadline.length <= rightHeadline.length ? leftHeadline : rightHeadline;
   const longer = shorter === leftHeadline ? rightHeadline : leftHeadline;
-  if (shorter.length >= 8 && longer.includes(shorter) && shorter.length / longer.length >= 0.72) return true;
+  if (shorter.length >= 8 && longer.includes(shorter) && shorter.length / longer.length >= 0.65) return true;
+  const anchors = (value: string) => new Set(
+    (value.match(/[a-z]+\d*|\d+(?:\.\d+)?%/g) ?? []).filter((token) => token.length >= 2),
+  );
+  const leftAnchors = anchors(leftHeadline);
+  const rightAnchors = anchors(rightHeadline);
+  const hasSharedAnchor = [...leftAnchors].some((token) => rightAnchors.has(token));
   const leftTokens = headlineBigrams(leftHeadline);
   const rightTokens = headlineBigrams(rightHeadline);
   let shared = 0;
   for (const token of leftTokens) if (rightTokens.has(token)) shared += 1;
-  return shared * 2 / (leftTokens.size + rightTokens.size) >= 0.82;
+  const similarity = shared * 2 / (leftTokens.size + rightTokens.size);
+  return similarity >= 0.72 || (shared >= 8 && similarity >= 0.5) || (hasSharedAnchor && similarity >= 0.54);
 }
 
 function dedupeNews(rows: NewsSnapshot[]): NewsSnapshot[] {
