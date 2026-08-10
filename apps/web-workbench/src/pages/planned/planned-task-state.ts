@@ -97,10 +97,7 @@ export function plannedEndsOnPayload(
   return editScope === 'occurrence' ? {} : { endsOn };
 }
 
-export function buildCustomWeeklyRRule(
-  days: readonly string[],
-  startsAt?: Date,
-): string | null {
+export function buildCustomWeeklyRRule(days: readonly string[], startsAt?: Date): string | null {
   const orderedDays = ['MO', 'TU', 'WE', 'TH', 'FR', 'SA', 'SU'].filter((day) =>
     days.includes(day),
   );
@@ -114,9 +111,7 @@ export function buildCustomWeeklyRRule(
   return `DTSTART:${stamp}\n${rule}`;
 }
 
-export function calendarEventFromOccurrence(
-  occurrence: PlannedCalendarOccurrence,
-): EventInput {
+export function calendarEventFromOccurrence(occurrence: PlannedCalendarOccurrence): EventInput {
   const accent =
     occurrence.status === 'failed'
       ? '#DC2626'
