@@ -118,6 +118,28 @@ describe('autoFix — URL fabrication', () => {
     expect(out.fixed).toContain('See  for context.');
   });
 
+  it('keeps an all-URL answer meaningful after dropping every ungrounded URL', () => {
+    const answer = [
+      '1. https://react.dev',
+      '2. https://developer.mozilla.org/react',
+      '3. https://react.example.com/tutorial',
+      '4. https://learn-react.example.org',
+      '5. https://react-training.example.net',
+    ].join('\n');
+    const { contract, ledger, verification } = setup(answer, []);
+
+    const out = autoFix({ contract, ledger, verification, answerText: answer });
+    const recheck = verifyDeterministic({
+      contract,
+      ledger,
+      answerText: out.fixed,
+    });
+
+    expect(out.fixed).not.toMatch(/https?:\/\//);
+    expect(out.fixed).toContain('缺少可验证来源');
+    expect(recheck.passed).toBe(true);
+  });
+
   it('markdown link with ungrounded URL collapses to plain text (no empty href)', () => {
     // BOSS Phase 1 follow-up — the SPA's markdown renderer turns
     // an empty `href=""` into a self-link. autoFix must drop the

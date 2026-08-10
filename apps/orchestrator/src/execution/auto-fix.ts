@@ -33,6 +33,8 @@ const URL_RE = /https?:\/\/[^\s,;'")\]>]+/g;
  * shape and keep just the bare text.
  */
 const MARKDOWN_LINK_RE = /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g;
+const URL_DROP_EMPTY_FALLBACK =
+  '这些网址缺少可验证来源，已从结果中移除。请允许联网检索后再获取可靠链接。';
 
 export type AutoFixKind =
   | 'url_substitute'
@@ -189,7 +191,23 @@ function fixFabricatedUrls(
     return raw.slice(url.length);
   });
 
+  if (ops.some((op) => op.kind === 'url_drop') && !hasMeaningfulText(working)) {
+    working = URL_DROP_EMPTY_FALLBACK;
+    ops.push({
+      kind: 'url_drop',
+      detail: 'all answer content was ungrounded URLs; added safe verification guidance',
+    });
+  }
+
   return { text: working, ops };
+}
+
+function hasMeaningfulText(text: string): boolean {
+  const withoutListMarkers = text.replace(
+    /^\s*(?:[-*+]|\d+[.)])\s*/gm,
+    '',
+  );
+  return withoutListMarkers.replace(/[\s\p{P}\p{S}]/gu, '').length > 0;
 }
 
 /**
