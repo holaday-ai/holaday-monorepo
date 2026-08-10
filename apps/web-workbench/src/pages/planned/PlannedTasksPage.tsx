@@ -41,6 +41,7 @@ import {
 } from 'lucide-react';
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
+import { plannedSaveFeedback } from './planned-editor-state';
 import {
   type PlannedCalendarOccurrence,
   type PlannedCalendarView,
@@ -410,7 +411,7 @@ export function PlannedTasksPage(): JSX.Element {
     setSaving(true);
     try {
       if (editor.plannedTaskId) {
-        await trpc.plannedTasks.update.mutate({
+        const result = await trpc.plannedTasks.update.mutate({
           plannedTaskId: editor.plannedTaskId,
           title: editor.title.trim() || undefined,
           instruction,
@@ -431,15 +432,16 @@ export function PlannedTasksPage(): JSX.Element {
             : {}),
         });
         toast.show(
-          editScope === 'occurrence'
-            ? '本次日程已保存'
-            : editScope === 'future'
-              ? '这次及以后的规划已保存'
-              : '整个规划已保存',
+          plannedSaveFeedback({
+            action: editScope ?? 'series',
+            adjusted: result.adjusted,
+            nextRunAt: result.nextRunAt,
+            timezone: editor.timezone,
+          }),
           'info',
         );
       } else {
-        await trpc.plannedTasks.create.mutate({
+        const result = await trpc.plannedTasks.create.mutate({
           title: editor.title.trim(),
           instruction,
           items,
@@ -450,7 +452,15 @@ export function PlannedTasksPage(): JSX.Element {
           endsOn: editor.endsOn,
           reminderMinutes: editor.reminderMinutes ? Number(editor.reminderMinutes) : null,
         });
-        toast.show('规划已创建', 'info');
+        toast.show(
+          plannedSaveFeedback({
+            action: 'create',
+            adjusted: result.adjusted,
+            nextRunAt: result.nextRunAt,
+            timezone: editor.timezone,
+          }),
+          'info',
+        );
       }
       setEditor(null);
       await refresh();

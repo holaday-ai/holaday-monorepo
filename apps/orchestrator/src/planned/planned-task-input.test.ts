@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   plannedCalendarInputSchema,
+  plannedMutationResult,
   plannedTaskCreateInputSchema,
   resolveRequestedSchedule,
   validatePlannedRepeatRule,
@@ -90,6 +91,26 @@ describe('resolveRequestedSchedule', () => {
       firstRunAt: new Date('2026-08-09T09:00:00.000Z'),
       nextRunAt: new Date('2026-08-11T09:00:00.000Z'),
       adjusted: true,
+    });
+  });
+
+  it('normalizes mutation feedback around the effective next run', () => {
+    expect(
+      plannedMutationResult('pln_adjusted', {
+        nextRunAt: new Date('2026-08-11T09:00:00.000Z'),
+        adjusted: true,
+      }),
+    ).toEqual({
+      ok: true,
+      plannedTaskId: 'pln_adjusted',
+      nextRunAt: new Date('2026-08-11T09:00:00.000Z'),
+      adjusted: true,
+    });
+    expect(plannedMutationResult('pln_unchanged', null)).toEqual({
+      ok: true,
+      plannedTaskId: 'pln_unchanged',
+      nextRunAt: null,
+      adjusted: false,
     });
   });
 });

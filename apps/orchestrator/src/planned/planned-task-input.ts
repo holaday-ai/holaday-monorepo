@@ -141,3 +141,22 @@ export function resolveRequestedSchedule(input: {
   if (safety === 0) throw new Error('重复规则跨度过大，请重新选择开始时间');
   return { firstRunAt, nextRunAt, adjusted: true };
 }
+
+export interface PlannedMutationResult {
+  ok: true;
+  plannedTaskId: string;
+  nextRunAt: Date | null;
+  adjusted: boolean;
+}
+
+export function plannedMutationResult(
+  plannedTaskId: string,
+  schedule?: { nextRunAt: Date | null; adjusted: boolean } | null,
+): PlannedMutationResult {
+  return {
+    ok: true,
+    plannedTaskId,
+    nextRunAt: schedule?.nextRunAt ?? null,
+    adjusted: schedule?.adjusted ?? false,
+  };
+}

@@ -13,6 +13,7 @@ import { users } from '../../db/schema/users.js';
 import {
   plannedCalendarInputSchema,
   plannedEndsOnInputSchema,
+  plannedMutationResult,
   plannedTaskCreateInputSchema,
   resolveRequestedSchedule,
   validatePlannedRepeatRule,
@@ -304,11 +305,7 @@ export const plannedTasksRouter = router({
       });
       await replacePlanItems(tx, readInsertId(insert), prepared.items);
     });
-    return {
-      plannedTaskId: externalId,
-      nextRunAt: schedule.nextRunAt,
-      adjusted: schedule.adjusted,
-    };
+    return plannedMutationResult(externalId, schedule);
   }),
 
   update: protectedProcedure
@@ -373,8 +370,16 @@ export const plannedTasksRouter = router({
           });
           schedule = resolveRequestedSchedule({
             scheduledAt: input.scheduledAt ?? input.originalScheduledFor!,
-            repeatType: (input.repeatType ?? plan.repeatType) as PlannedRepeatType,
-            rrule: input.rrule !== undefined ? input.rrule : plan.rrule,
+            repeatType:
+              editScope === 'occurrence'
+                ? 'once'
+                : ((input.repeatType ?? plan.repeatType) as PlannedRepeatType),
+            rrule:
+              editScope === 'occurrence'
+                ? null
+                : input.rrule !== undefined
+                  ? input.rrule
+                  : plan.rrule,
           });
         } catch (error) {
           throw new TRPCError({
@@ -407,7 +412,10 @@ export const plannedTasksRouter = router({
               .set({ nextRunAt: schedule.firstRunAt, lastReminderRun: null })
               .where(eq(plannedTasks.id, plan.id));
           }
-          return { ok: true as const, plannedTaskId: plan.externalId };
+          return plannedMutationResult(plan.externalId, {
+            nextRunAt: schedule.firstRunAt,
+            adjusted: false,
+          });
         }
         const nextRepeatType = (input.repeatType ?? plan.repeatType) as PlannedRepeatType;
         const nextTimezone = input.timezone ?? plan.timezone;
@@ -461,7 +469,7 @@ export const plannedTasksRouter = router({
           });
           await replacePlanItems(tx, readInsertId(insert), prepared.items);
         });
-        return { ok: true as const, plannedTaskId: newPlanExternalId };
+        return plannedMutationResult(newPlanExternalId, schedule);
       }
       const updates: Partial<typeof plannedTasks.$inferInsert> = {};
       let requestedSchedule: ReturnType<typeof resolveRequestedSchedule> | null = null;
@@ -545,7 +553,13 @@ export const plannedTasksRouter = router({
           await replacePlanItems(tx, plan.id, prepared.items);
         }
       });
-      return { ok: true as const };
+      return plannedMutationResult(
+        plan.externalId,
+        requestedSchedule ?? {
+          nextRunAt: plan.nextRunAt,
+          adjusted: false,
+        },
+      );
     }),
 
   rescheduleOccurrence: protectedProcedure
