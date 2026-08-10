@@ -3,8 +3,10 @@ import {
   buildCustomWeeklyRRule,
   calendarEventFromOccurrence,
   defaultPlannedCalendarView,
+  friendlyLegacyTaskTitle,
   legacyScheduledEvent,
   nextPlannedEndState,
+  plannedCalendarEmptyState,
   plannedEndsOnPayload,
   plannedRepeatLabel,
   plannedStatusGroup,
@@ -69,9 +71,80 @@ describe('planned task presentation state', () => {
     expect(event.editable).toBe(false);
     expect(event.extendedProps).toMatchObject({
       legacy: true,
+      legacyLabel: '旧任务',
       scheduledTaskInternalId: 42,
       repeatType: 'daily',
     });
+  });
+
+  it('replaces legacy system markers with user-facing titles', () => {
+    expect(
+      friendlyLegacyTaskTitle(
+        '__ashare_premarket_briefing__',
+        '__ashare_premarket_briefing__',
+      ),
+    ).toBe('A股盘前简报');
+    expect(
+      friendlyLegacyTaskTitle(
+        '__ashare_postmarket_briefing__',
+        '__ashare_postmarket_briefing__',
+      ),
+    ).toBe('A股盘后复盘');
+    expect(friendlyLegacyTaskTitle('__internal_job__', 'sch_1')).toBe('旧定时任务');
+    expect(friendlyLegacyTaskTitle('生成每日销售摘要', 'sch_2')).toBe(
+      '生成每日销售摘要',
+    );
+  });
+
+  it('uses friendly titles when mapping legacy calendar events', () => {
+    const event = legacyScheduledEvent({
+      scheduledTaskId: '__ashare_premarket_briefing__',
+      intent: '__ashare_premarket_briefing__',
+      repeatType: 'daily',
+      timezone: 'Asia/Shanghai',
+      nextRunAt: '2026-08-11T01:00:00.000Z',
+      status: 'active',
+      lastRunStatus: null,
+    });
+
+    expect(event.title).toBe('A股盘前简报');
+  });
+
+  it('distinguishes a fully empty month from a legacy-only month', () => {
+    expect(
+      plannedCalendarEmptyState({
+        loading: false,
+        plannedCount: 0,
+        legacyCount: 0,
+      }),
+    ).toEqual({
+      title: '这个月还没有规划',
+      description: '点击日期或新建规划，安排未来要做的任务。',
+    });
+    expect(
+      plannedCalendarEmptyState({
+        loading: false,
+        plannedCount: 0,
+        legacyCount: 2,
+      }),
+    ).toEqual({
+      title: '这个月还没有规划任务',
+      description: '日历中的灰色项目是旧任务，可前往旧任务记录管理。',
+    });
+    expect(
+      plannedCalendarEmptyState({
+        loading: true,
+        plannedCount: 0,
+        legacyCount: 0,
+      }),
+    ).toBeNull();
+    expect(
+      plannedCalendarEmptyState({
+        loading: false,
+        plannedCount: 1,
+        legacyCount: 0,
+      }),
+    ).toBeNull();
   });
 
   it('builds a readable weekly rule without exposing raw RRULE input', () => {

@@ -153,7 +153,7 @@ export function legacyScheduledEvent(row: LegacyScheduledTaskOccurrence): EventI
   const attention = row.status === 'failed' || row.lastRunStatus === 'failed';
   return {
     id: `legacy:${row.scheduledTaskId}`,
-    title: row.intent.trim() || '未命名旧定时任务',
+    title: friendlyLegacyTaskTitle(row.intent, row.scheduledTaskId),
     start: row.nextRunAt instanceof Date ? row.nextRunAt.toISOString() : row.nextRunAt,
     backgroundColor: 'transparent',
     borderColor: 'transparent',
@@ -161,6 +161,7 @@ export function legacyScheduledEvent(row: LegacyScheduledTaskOccurrence): EventI
     editable: false,
     extendedProps: {
       legacy: true,
+      legacyLabel: '旧任务',
       scheduledTaskInternalId: row.scheduledTaskInternalId,
       scheduledTaskId: row.scheduledTaskId,
       status: row.status,
@@ -169,6 +170,40 @@ export function legacyScheduledEvent(row: LegacyScheduledTaskOccurrence): EventI
       itemCount: 1,
       accent: attention ? '#DC2626' : '#9B8F98',
     },
+  };
+}
+
+const FRIENDLY_LEGACY_TITLES: Record<string, string> = {
+  __ashare_premarket_briefing__: 'A股盘前简报',
+  __ashare_postmarket_briefing__: 'A股盘后复盘',
+};
+
+export function friendlyLegacyTaskTitle(intent: string, scheduledTaskId: string): string {
+  const normalizedIntent = intent.trim();
+  const known =
+    FRIENDLY_LEGACY_TITLES[normalizedIntent] ?? FRIENDLY_LEGACY_TITLES[scheduledTaskId.trim()];
+  if (known) return known;
+  if (/^__.+__$/.test(normalizedIntent) || /^__.+__$/.test(scheduledTaskId.trim())) {
+    return '旧定时任务';
+  }
+  return normalizedIntent || '未命名旧定时任务';
+}
+
+export function plannedCalendarEmptyState(input: {
+  loading: boolean;
+  plannedCount: number;
+  legacyCount: number;
+}): { title: string; description: string } | null {
+  if (input.loading || input.plannedCount > 0) return null;
+  if (input.legacyCount > 0) {
+    return {
+      title: '这个月还没有规划任务',
+      description: '日历中的灰色项目是旧任务，可前往旧任务记录管理。',
+    };
+  }
+  return {
+    title: '这个月还没有规划',
+    description: '点击日期或新建规划，安排未来要做的任务。',
   };
 }
 

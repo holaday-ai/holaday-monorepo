@@ -41,7 +41,7 @@ import {
   X,
 } from 'lucide-react';
 import * as React from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   firstPlannedEditorError,
   plannedEditorFingerprint,
@@ -60,6 +60,7 @@ import {
   defaultPlannedCalendarView,
   legacyScheduledEvent,
   nextPlannedEndState,
+  plannedCalendarEmptyState,
   plannedEndsOnPayload,
   plannedRepeatLabel,
   plannedStatusGroup,
@@ -297,6 +298,11 @@ export function PlannedTasksPage(): JSX.Element {
     (plan) => plannedStatusGroup(plan).group === 'attention',
   ).length;
   const activeCount = plans.filter((plan) => plan.status === 'active').length;
+  const emptyCalendarState = plannedCalendarEmptyState({
+    loading,
+    plannedCount: occurrences.length,
+    legacyCount: legacyEvents.length,
+  });
 
   function changeView(nextView: PlannedCalendarView): void {
     setView(nextView);
@@ -628,6 +634,12 @@ export function PlannedTasksPage(): JSX.Element {
           <ListChecks aria-hidden />
           {plans.reduce((sum, plan) => sum + plan.itemCount, 0)} 个任务项
         </span>
+        {legacyEvents.length > 0 && (
+          <span>
+            <History aria-hidden />
+            另有 {legacyEvents.length} 个旧任务
+          </span>
+        )}
         {attentionCount > 0 && (
           <span className="planned-summary__attention">
             <CircleAlert aria-hidden />
@@ -711,8 +723,30 @@ export function PlannedTasksPage(): JSX.Element {
               eventClick={handleEventClick}
               eventDrop={handleEventDrop}
               eventContent={renderEventContent}
-              noEventsContent="这个月还没有规划，点击日期即可创建。"
+              noEventsContent=""
             />
+          )}
+          {emptyCalendarState && (
+            <div className="planned-calendar-empty" role="status">
+              <div>
+                <strong>{emptyCalendarState.title}</strong>
+                <p>{emptyCalendarState.description}</p>
+                {legacyEvents.length > 0 ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => navigate('/planned/legacy-scheduled')}
+                  >
+                    查看旧任务记录
+                  </Button>
+                ) : (
+                  <Button size="sm" onClick={() => openCreate()}>
+                    <Plus aria-hidden />
+                    新建规划
+                  </Button>
+                )}
+              </div>
+            </div>
           )}
         </section>
 
@@ -1033,6 +1067,9 @@ export function PlannedTasksPage(): JSX.Element {
                     <option value="60">1 小时</option>
                     <option value="1440">1 天</option>
                   </select>
+                  <p className="planned-field-hint">
+                    通过站内通知提醒 · <Link to="/settings#notifications">通知设置</Link>
+                  </p>
                 </Field>
               </div>
 
@@ -1169,6 +1206,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function renderEventContent(arg: EventContentArg): JSX.Element {
   const itemCount = Number(arg.event.extendedProps.itemCount ?? 1);
+  const legacy = Boolean(arg.event.extendedProps.legacy);
   return (
     <div
       className="planned-event"
@@ -1176,6 +1214,7 @@ function renderEventContent(arg: EventContentArg): JSX.Element {
     >
       <time>{arg.timeText}</time>
       <span>{arg.event.title}</span>
+      {legacy && <em className="planned-event__legacy">旧任务</em>}
       {itemCount > 1 && <b>{itemCount}</b>}
     </div>
   );
