@@ -35,6 +35,11 @@ import { runRetentionReaper } from './evidence/retention-reaper.js';
 import { createHttpApp } from './http.js';
 import { buildScheduledDispatchNotification } from './notifications/scheduled-copy.js';
 import { createPayPalAdapter } from './payment/index.js';
+import {
+  queuePlannedRun,
+  recoverStuckRunningPlannedTasks,
+  startPlannedRunner,
+} from './planned/planned-runner.js';
 import { type TaskQueue, createTaskQueue } from './queue/task-queue.js';
 import { createScreencastProxy } from './streaming/screencast-proxy.js';
 import { createWsServer, loadRehydratedTasks } from './ws/server.js';
@@ -599,6 +604,86 @@ async function main() {
       });
       logger.info({ times: ['08:25', '15:25'] }, 'prewarm: A股简报缓存预热调度已启动');
     }
+  }
+
+  await recoverStuckRunningPlannedTasks(db);
+  {
+    const { plannedTasks: plannedTasksTable } = await import(
+      './db/schema/planned-tasks.js'
+    );
+    const { users: usersTable } = await import('./db/schema/users.js');
+    const { eq } = await import('drizzle-orm');
+    startPlannedRunner({
+      db,
+      queue: async ({ plannedTaskId, scheduledFor, seriesScheduledFor }) => {
+        const [owner] = await db
+          .select({ externalId: usersTable.externalId })
+          .from(plannedTasksTable)
+          .innerJoin(usersTable, eq(usersTable.id, plannedTasksTable.userId))
+          .where(eq(plannedTasksTable.externalId, plannedTaskId))
+          .limit(1);
+        if (!owner) throw new Error(`规划任务 ${plannedTaskId} 的用户不存在`);
+        const ctx = {
+          db,
+          logger,
+          req: {} as unknown as import('express').Request,
+          res: {} as unknown as import('express').Response,
+          planner,
+          visionCommander: visionCommander ?? undefined,
+          playwrightExecutor: playwrightExecutor ?? null,
+          executionRouter,
+          browserPool: browserPool ?? null,
+          taskQueue: taskQueue ?? null,
+          firecrawl: firecrawlLane ?? null,
+          paypalAdapter: paypalAdapter ?? null,
+          downloadManager,
+          userId: owner.externalId,
+        };
+        await queuePlannedRun(ctx, {
+          plannedTaskId,
+          scheduledFor,
+          seriesScheduledFor,
+          trigger: 'scheduled',
+          claimed: true,
+        });
+      },
+      notifyReminder: async ({
+        userInternalId,
+        title,
+        nextRunAt,
+        reminderMinutes,
+      }) => {
+        const { notify } = await import('./notifications/notification-service.js');
+        const taskName = title.length > 60 ? `${title.slice(0, 60)}…` : title;
+        const fireLocal = nextRunAt.toLocaleString('zh-CN', {
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          timeZone: 'Asia/Shanghai',
+        });
+        const leadCopy =
+          reminderMinutes === 0
+            ? '即将开始'
+            : reminderMinutes < 60
+              ? `${reminderMinutes} 分钟后开始`
+              : reminderMinutes < 1_440
+                ? `${Math.round(reminderMinutes / 60)} 小时后开始`
+                : `${Math.round(reminderMinutes / 1_440)} 天后开始`;
+        await notify(
+          { db, logger },
+          {
+            userInternalId,
+            scheduledTaskInternalId: null,
+            type: 'task_reminder',
+            title: '规划任务提醒',
+            message: `「${taskName}」${leadCopy}（${fireLocal}）。`,
+            taskName,
+          },
+        );
+      },
+    });
+    logger.info('planned-runner: started');
   }
 
   // Browser streaming is mounted only with the per-user pool. CDP is

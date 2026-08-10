@@ -14,6 +14,7 @@ import {
 } from './routers/notifications.js';
 import { partnerRouter } from './routers/partner.js';
 import { paymentRouter } from './routers/payment.js';
+import { plannedTasksRouter } from './routers/planned-tasks.js';
 import { projectsRouter } from './routers/projects.js';
 import { quotaRouter } from './routers/quota.js';
 import { rolesRouter } from './routers/roles.js';
@@ -46,6 +47,7 @@ export const appRouter = router({
   files: filesRouter,
   scheduledTasks: scheduledTasksRouter,
   batchTasks: batchTasksRouter,
+  plannedTasks: plannedTasksRouter,
   apiKeys: apiKeysRouter,
   connections: connectionsRouter,
   usage: usageRouter,

@@ -24,6 +24,11 @@ export const ID_PREFIXES = {
   // Phase 5b — batch tasks (a list of prompts run together) + per-item rows.
   batch: 'btc',
   batchItem: 'bti',
+  plannedTask: 'pln',
+  plannedTaskItem: 'pli',
+  plannedTaskOverride: 'plo',
+  plannedTaskRun: 'plr',
+  plannedTaskRunItem: 'pri',
   // Phase 5d — user-scoped API keys (webhook / external-trigger bearer).
   apiKey: 'ak',
   // Phase 26B — per-user inbox row + external webhook channel.

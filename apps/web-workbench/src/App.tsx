@@ -32,13 +32,14 @@ const HistoryPage = lazyRoute(() => import('@/pages/HistoryPage'), 'HistoryPage'
 const NotFoundPage = lazyRoute(() => import('@/pages/NotFoundPage'), 'NotFoundPage');
 const PartnerPage = lazyRoute(() => import('@/pages/PartnerPage'), 'PartnerPage');
 const PlanPage = lazyRoute(() => import('@/pages/PlanPage'), 'PlanPage');
+const PlannedTasksPage = lazyRoute(
+  () => import('@/pages/planned/PlannedTasksPage'),
+  'PlannedTasksPage',
+);
 const PrivacyPage = lazyRoute(() => import('@/pages/PrivacyPage'), 'PrivacyPage');
 const ProfilePage = lazyRoute(() => import('@/pages/ProfilePage'), 'ProfilePage');
 const ProjectsPage = lazyRoute(() => import('@/pages/ProjectsPage'), 'ProjectsPage');
 const RolesPage = lazyRoute(() => import('@/pages/RolesPage'), 'RolesPage');
-// Phase 26A — /scheduled renders the FullCalendar-based view. Keep
-// the route variable name stable while loading the heavy calendar page
-// only when the user actually opens scheduled tasks.
 const ScheduledPage = lazyRoute(
   () => import('@/pages/scheduled-calendar/ScheduledCalendarPage'),
   'ScheduledCalendarPage',
@@ -154,8 +155,14 @@ export function App(): JSX.Element {
           <Route path="/files" element={lazyElement(<FilesPage />)} />
           <Route path="/video" element={<VideoGate />} />
           <Route path="/image" element={<VideoGate mode="image" />} />
-          <Route path="/scheduled" element={lazyElement(<ScheduledPage />)} />
-          <Route path="/batch" element={lazyElement(<BatchPage />)} />
+          <Route path="/planned" element={lazyElement(<PlannedTasksPage />)} />
+          <Route path="/planned/legacy-scheduled" element={lazyElement(<ScheduledPage />)} />
+          <Route path="/planned/legacy-batch" element={lazyElement(<BatchPage />)} />
+          <Route
+            path="/scheduled"
+            element={<LegacyPathRedirect pathname="/planned/legacy-scheduled" />}
+          />
+          <Route path="/batch" element={<LegacyPathRedirect pathname="/planned" />} />
           <Route path="/batch/:batchId" element={lazyElement(<BatchPage />)} />
           <Route path="/connections" element={lazyElement(<ConnectionsPage />)} />
           <Route path="*" element={lazyElement(<NotFoundPage />)} />
