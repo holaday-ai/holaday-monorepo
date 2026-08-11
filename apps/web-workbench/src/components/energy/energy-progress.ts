@@ -4,11 +4,14 @@ export interface EnergyProgress {
   completedDates: string[];
   collectedKinds: EnergyCompletionKind[];
   savedCardIds: string[];
+  completedTestIds: string[];
+  savedTestActionIds: string[];
 }
 
 const STORAGE_PREFIX = 'holaday.energy.progress.v2';
 const LEGACY_STORAGE_PREFIX = 'holaday.energy.progress.v1';
 const MAX_SAVED_CARD_IDS = 100;
+const MAX_TEST_IDS = 100;
 const COMPLETION_KINDS: readonly EnergyCompletionKind[] = [
   'recharge',
   'tarot',
@@ -18,7 +21,13 @@ const COMPLETION_KINDS: readonly EnergyCompletionKind[] = [
 ];
 
 function emptyProgress(): EnergyProgress {
-  return { completedDates: [], collectedKinds: [], savedCardIds: [] };
+  return {
+    completedDates: [],
+    collectedKinds: [],
+    savedCardIds: [],
+    completedTestIds: [],
+    savedTestActionIds: [],
+  };
 }
 
 function storageKey(scope: string | null, prefix = STORAGE_PREFIX): string {
@@ -40,11 +49,27 @@ function isCardId(value: unknown): value is string {
   return typeof value === 'string' && /^[a-z-]+-\d{2}$/.test(value);
 }
 
+function isTestId(value: unknown): value is string {
+  return typeof value === 'string' && /^[a-z]+(?:-[a-z]+)+$/.test(value);
+}
+
+function isTestOutcomeId(value: unknown): value is string {
+  return value === 'recover' || value === 'steady' || value === 'build' || value === 'charge';
+}
+
+function isTestActionId(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  const [testId, outcomeId, extra] = value.split(':');
+  return extra === undefined && isTestId(testId) && isTestOutcomeId(outcomeId);
+}
+
 function parseProgress(raw: string): EnergyProgress {
   const parsed = JSON.parse(raw) as {
     completedDates?: unknown;
     collectedKinds?: unknown;
     savedCardIds?: unknown;
+    completedTestIds?: unknown;
+    savedTestActionIds?: unknown;
   };
   if (!Array.isArray(parsed.completedDates) || !Array.isArray(parsed.collectedKinds)) {
     return emptyProgress();
@@ -56,14 +81,23 @@ function parseProgress(raw: string): EnergyProgress {
   const savedCardIds = Array.isArray(parsed.savedCardIds)
     ? parsed.savedCardIds.filter(isCardId).slice(-MAX_SAVED_CARD_IDS)
     : [];
+  const completedTestIds = Array.isArray(parsed.completedTestIds)
+    ? parsed.completedTestIds.filter(isTestId).slice(-MAX_TEST_IDS)
+    : [];
+  const savedTestActionIds = Array.isArray(parsed.savedTestActionIds)
+    ? parsed.savedTestActionIds.filter(isTestActionId).slice(-MAX_TEST_IDS)
+    : [];
   return {
     completedDates: [...new Set(completedDates)].sort(),
     collectedKinds: [...new Set(collectedKinds)],
     savedCardIds: [...new Set(savedCardIds)],
+    completedTestIds: [...new Set(completedTestIds)],
+    savedTestActionIds: [...new Set(savedTestActionIds)],
   };
 }
 
 function writeProgress(scope: string | null, progress: EnergyProgress): void {
+  if (scope === null) return;
   try {
     window.localStorage.setItem(storageKey(scope), JSON.stringify(progress));
   } catch {
@@ -72,6 +106,7 @@ function writeProgress(scope: string | null, progress: EnergyProgress): void {
 }
 
 export function readEnergyProgress(scope: string | null): EnergyProgress {
+  if (scope === null) return emptyProgress();
   try {
     const current = window.localStorage.getItem(storageKey(scope));
     if (current) return parseProgress(current);
@@ -107,6 +142,31 @@ export function saveEnergyCardIds(scope: string | null, cardIds: string[]): Ener
     -MAX_SAVED_CARD_IDS,
   );
   const next = { ...current, savedCardIds };
+  writeProgress(scope, next);
+  return next;
+}
+
+export function recordLightTestCompletion(scope: string | null, testId: string): EnergyProgress {
+  const current = readEnergyProgress(scope);
+  if (!isTestId(testId)) return current;
+  const completedTestIds = [...new Set([...current.completedTestIds, testId])].slice(-MAX_TEST_IDS);
+  const next = { ...current, completedTestIds };
+  writeProgress(scope, next);
+  return next;
+}
+
+export function saveLightTestAction(
+  scope: string | null,
+  testId: string,
+  outcomeId: string,
+): EnergyProgress {
+  const current = readEnergyProgress(scope);
+  if (!isTestId(testId) || !isTestOutcomeId(outcomeId)) return current;
+  const actionId = `${testId}:${outcomeId}`;
+  const savedTestActionIds = [...new Set([...current.savedTestActionIds, actionId])].slice(
+    -MAX_TEST_IDS,
+  );
+  const next = { ...current, savedTestActionIds };
   writeProgress(scope, next);
   return next;
 }

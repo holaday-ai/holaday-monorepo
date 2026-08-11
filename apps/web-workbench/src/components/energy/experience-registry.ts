@@ -61,8 +61,7 @@ export const ENERGY_EXPERIENCES: EnergyExperienceRegistration[] = [
       import('./experiences/TestExperience').then((module) => ({
         default: (props: EnergyExperienceProps) =>
           createElement(module.TestExperience, {
-            profile: props.profile,
-            reading: props.astrology.reading,
+            profileStorageScope: props.profileStorageScope,
             phase: props.phase,
             onPhaseChange: props.onPhaseChange,
             onComplete: () => props.onExperienceComplete('test'),

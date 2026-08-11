@@ -5,7 +5,9 @@ import {
   energyStreak,
   readEnergyProgress,
   recordEnergyCompletion,
+  recordLightTestCompletion,
   saveEnergyCardIds,
+  saveLightTestAction,
 } from './energy-progress';
 
 const storage = new Map<string, string>();
@@ -40,6 +42,8 @@ describe('energy progress', () => {
       completedDates: [],
       collectedKinds: [],
       savedCardIds: [],
+      completedTestIds: [],
+      savedTestActionIds: [],
     });
     expect(readEnergyProgress('usr_a').collectedKinds).toEqual(['game']);
   });
@@ -61,6 +65,8 @@ describe('energy progress', () => {
       completedDates: [],
       collectedKinds: [],
       savedCardIds: [],
+      completedTestIds: [],
+      savedTestActionIds: [],
     });
   });
 
@@ -74,11 +80,25 @@ describe('energy progress', () => {
       completedDates: ['2026-08-10'],
       collectedKinds: ['tarot'],
       savedCardIds: [],
+      completedTestIds: [],
+      savedTestActionIds: [],
     });
 
     const progress = saveEnergyCardIds('usr_a', ['work-01', 'work-01', 'bad id', 'emotion-03']);
     expect(progress.savedCardIds).toEqual(['work-01', 'emotion-03']);
     expect(readEnergyProgress('usr_b').savedCardIds).toEqual([]);
     expect(storage.get('holaday.energy.progress.v2:usr_a')).toBe(JSON.stringify(progress));
+  });
+
+  it('persists only stable light-test ids and skips guest writes', () => {
+    recordLightTestCompletion('usr_a', 'emotion-battery');
+    const progress = saveLightTestAction('usr_a', 'emotion-battery', 'recover');
+
+    expect(progress.completedTestIds).toEqual(['emotion-battery']);
+    expect(progress.savedTestActionIds).toEqual(['emotion-battery:recover']);
+    expect(storage.get('holaday.energy.progress.v2:usr_a')).not.toContain('answers');
+
+    recordLightTestCompletion(null, 'emotion-weather');
+    expect(storage.has('holaday.energy.progress.v2:guest')).toBe(false);
   });
 });
