@@ -1,7 +1,7 @@
-export type EnergyExperienceKind = 'card' | 'test' | 'horoscope' | 'game';
+export type EnergyExperienceKind = 'ritual' | 'card' | 'test' | 'horoscope' | 'game';
 export type EnergyExperienceStatus = 'active' | 'coming-soon' | 'hidden';
-export type EnergyMood = 'good' | 'tired' | 'stressed' | 'unwind';
-export type EnergyExperienceId = 'tarot' | 'light-test' | 'horoscope' | 'games';
+export type EnergyNeed = 'focus' | 'relax' | 'confidence' | 'uplift';
+export type EnergyExperienceId = 'recharge' | 'tarot' | 'light-test' | 'horoscope' | 'games';
 
 export interface EnergyExperienceCatalogItem {
   id: EnergyExperienceId;
@@ -14,6 +14,15 @@ export interface EnergyExperienceCatalogItem {
 }
 
 const EXPERIENCES: readonly EnergyExperienceCatalogItem[] = [
+  {
+    id: 'recharge',
+    kind: 'ritual',
+    title: '30 秒补给',
+    description: '跟着三段光点找回一点能量',
+    estimatedSeconds: 30,
+    status: 'active',
+    actionable: true,
+  },
   {
     id: 'tarot',
     kind: 'card',

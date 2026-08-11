@@ -7,6 +7,26 @@ export interface EnergyExperienceRegistration extends EnergyExperienceDefinition
 
 export const ENERGY_EXPERIENCES: EnergyExperienceRegistration[] = [
   {
+    id: 'recharge',
+    kind: 'ritual',
+    title: '30 秒补给',
+    description: '跟着三段光点找回一点能量',
+    estimatedSeconds: 30,
+    status: 'active',
+    actionable: true,
+    requiredProfileFields: [],
+    load: () =>
+      import('./experiences/RechargeExperience').then((module) => ({
+        default: (props: EnergyExperienceProps) =>
+          createElement(module.RechargeExperience, {
+            need: props.energyNeed,
+            phase: props.phase,
+            onPhaseChange: props.onPhaseChange,
+            onComplete: () => props.onExperienceComplete('recharge'),
+          }),
+      })),
+  },
+  {
     id: 'tarot',
     kind: 'card',
     title: '抽张卡',

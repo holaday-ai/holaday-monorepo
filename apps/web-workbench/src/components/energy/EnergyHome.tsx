@@ -1,13 +1,15 @@
 import { Button } from '@/components/ui/button';
 import { type AstroProfile, defaultAstroProfile, readAstroProfile } from '@/lib/astrology';
 import { trpc } from '@/lib/trpc';
-import { Clock3, FlaskConical, Gamepad2, MoonStar, Star, UserRound } from 'lucide-react';
+import { Clock3, FlaskConical, Gamepad2, MoonStar, Star, UserRound, Zap } from 'lucide-react';
 import * as React from 'react';
+import { EnergyHero } from './EnergyHero';
 import { EnergyProfileDrawer } from './EnergyProfileDrawer';
 import { ExperiencePlayer } from './ExperiencePlayer';
 import { MoodCheckIn } from './MoodCheckIn';
+import { readEnergyProgress, recordEnergyCompletion } from './energy-progress';
 import { energyResponseForMood, recommendExperience } from './energy-recommendation';
-import type { EnergyExperienceId, EnergyMood, ExperiencePhase } from './energy-types';
+import type { EnergyExperienceId, EnergyMood, EnergyNeed, ExperiencePhase } from './energy-types';
 import { ENERGY_EXPERIENCES, type EnergyExperienceRegistration } from './experience-registry';
 import { useEnergyAstrology } from './useEnergyAstrology';
 import './energy.css';
@@ -22,11 +24,19 @@ type EnergyEventOutcome = 'success' | 'abandoned' | 'error' | null;
 type EnergyDurationBucket = 'under-60s' | 'one-to-three-minutes' | 'over-three-minutes' | null;
 
 const MODE_ICONS = {
+  recharge: Zap,
   tarot: MoonStar,
   'light-test': FlaskConical,
   horoscope: Star,
   games: Gamepad2,
 } satisfies Record<EnergyExperienceId, React.ComponentType<{ className?: string }>>;
+
+function energyNeedForMood(mood: EnergyMood | null): EnergyNeed {
+  if (mood === 'tired' || mood === 'stressed') return 'relax';
+  if (mood === 'good') return 'uplift';
+  if (mood === 'unwind') return 'confidence';
+  return 'focus';
+}
 
 function localExperiences(): EnergyExperienceRegistration[] {
   return ENERGY_EXPERIENCES.map((experience) => ({
@@ -49,6 +59,8 @@ export function EnergyHome({
   const storageScope = profileStorageScope?.trim() || null;
   const canUseProfileStorage = !liveProvider || Boolean(storageScope);
   const [mood, setMood] = React.useState<EnergyMood | null>(null);
+  const [energyNeed, setEnergyNeed] = React.useState<EnergyNeed>('focus');
+  const [, setProgress] = React.useState(() => readEnergyProgress(storageScope));
   const [experiences, setExperiences] = React.useState(localExperiences);
   const [selectedExperience, setSelectedExperience] =
     React.useState<EnergyExperienceRegistration | null>(null);
@@ -74,6 +86,10 @@ export function EnergyHome({
         : defaultAstroProfile(),
     );
   }, [canUseProfileStorage, storageScope]);
+
+  React.useEffect(() => {
+    setProgress(readEnergyProgress(storageScope));
+  }, [storageScope]);
 
   React.useEffect(() => {
     let active = true;
@@ -107,13 +123,13 @@ export function EnergyHome({
         .mutate({
           type,
           experienceId,
-          mood,
+          energyNeed,
           durationBucket: eventDurationBucket,
           outcome,
         })
         .catch(() => console.warn('energy event report failed'));
     },
-    [mood],
+    [energyNeed],
   );
 
   const preferredRecommendation = recommendExperience(mood ?? 'tired');
@@ -160,13 +176,36 @@ export function EnergyHome({
 
   return (
     <div className="energy-page" data-profile-scope={profileStorageScope ? 'user' : 'guest'}>
+      <EnergyHero
+        value={energyNeed}
+        onChange={setEnergyNeed}
+        onStart={(need, trigger) => {
+          const recharge = experiences.find(
+            (experience) =>
+              experience.id === 'recharge' &&
+              experience.status === 'active' &&
+              experience.actionable &&
+              Boolean(experience.load),
+          );
+          if (!recharge) return;
+          setEnergyNeed(need);
+          openExperience(recharge, trigger);
+        }}
+      />
+
       <section className="energy-check-in" aria-labelledby="energy-check-in-title">
         <div className="energy-section-heading">
           <p>先停半分钟</p>
           <h2 id="energy-check-in-title">你现在感觉怎么样？</h2>
           <span>不用解释，选最接近此刻的一项。</span>
         </div>
-        <MoodCheckIn value={mood} onChange={setMood} />
+        <MoodCheckIn
+          value={mood}
+          onChange={(nextMood) => {
+            setMood(nextMood);
+            setEnergyNeed(energyNeedForMood(nextMood));
+          }}
+        />
       </section>
 
       <section className="energy-recommendation" aria-labelledby="energy-recommendation-title">
@@ -198,7 +237,7 @@ export function EnergyHome({
           <span>所有体验都可以随时退出。</span>
         </div>
         <div className="energy-mode-grid">
-          {experiences.map((experience) => {
+          {experiences.filter((experience) => experience.id !== 'recharge').map((experience) => {
             const Icon = MODE_ICONS[experience.id];
             const available =
               experience.status === 'active' &&
@@ -279,11 +318,15 @@ export function EnergyHome({
           >
             <LoadedExperience
               mood={mood}
+              energyNeed={energyNeed}
               profileStorageScope={storageScope}
               profile={profile}
               astrology={astrology}
               phase={phase}
               onPhaseChange={handlePhaseChange}
+              onExperienceComplete={(kind) =>
+                setProgress(recordEnergyCompletion(storageScope, kind))
+              }
             />
           </React.Suspense>
         ) : null}

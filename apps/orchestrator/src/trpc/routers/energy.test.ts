@@ -8,7 +8,7 @@ describe('energyRouter', () => {
 
     const home = await caller.home();
 
-    expect(home.experiences[0]).toMatchObject({ id: 'tarot' });
+    expect(home.experiences[0]).toMatchObject({ id: 'recharge' });
   });
 
   it('requires an authenticated caller', async () => {
@@ -24,8 +24,8 @@ describe('energyRouter', () => {
     await expect(
       caller.reportEvent({
         type: 'completed',
-        experienceId: 'tarot',
-        mood: 'tired',
+        experienceId: 'recharge',
+        energyNeed: 'relax',
         durationBucket: 'under-60s',
         outcome: 'success',
       }),
@@ -35,8 +35,8 @@ describe('energyRouter', () => {
       {
         event: 'energy_experience_event',
         type: 'completed',
-        experienceId: 'tarot',
-        mood: 'tired',
+        experienceId: 'recharge',
+        energyNeed: 'relax',
         durationBucket: 'under-60s',
         outcome: 'success',
       },
@@ -52,7 +52,7 @@ describe('energyRouter', () => {
       caller.reportEvent({
         type: 'completed',
         experienceId: 'tarot',
-        mood: 'tired',
+        energyNeed: 'relax',
         durationBucket: 'under-60s',
         outcome: 'success',
         answerText: 'private free-form detail',

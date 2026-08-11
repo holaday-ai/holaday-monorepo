@@ -2,10 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { buildEnergyHome } from './catalog.js';
 
 describe('buildEnergyHome', () => {
-  it('returns three active modes and one non-interactive coming-soon game', () => {
+  it('returns the active recharge modes and one non-interactive coming-soon game', () => {
     const home = buildEnergyHome();
 
     expect(home.experiences.map((item) => [item.id, item.status])).toEqual([
+      ['recharge', 'active'],
       ['tarot', 'active'],
       ['light-test', 'active'],
       ['horoscope', 'active'],
@@ -25,6 +26,6 @@ describe('buildEnergyHome', () => {
     if (!firstItem) throw new Error('expected an energy experience');
     firstItem.title = 'mutated';
 
-    expect(buildEnergyHome().experiences[0]?.title).toBe('抽张卡');
+    expect(buildEnergyHome().experiences[0]?.title).toBe('30 秒补给');
   });
 });

@@ -3,12 +3,14 @@
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readEnergyProgress } from './energy-progress';
 import { EnergyHome } from './EnergyHome';
 
 const trpcMocks = vi.hoisted(() => ({
   homeQuery: vi.fn(),
   reportEvent: vi.fn(),
 }));
+const progressStorage = new Map<string, string>();
 
 vi.mock('@/lib/trpc', () => ({
   trpc: {
@@ -20,8 +22,25 @@ vi.mock('@/lib/trpc', () => ({
 }));
 
 beforeEach(() => {
+  progressStorage.clear();
+  Object.defineProperty(window, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem: (key: string) => progressStorage.get(key) ?? null,
+      setItem: (key: string, value: string) => progressStorage.set(key, value),
+    },
+  });
   trpcMocks.homeQuery.mockResolvedValue({
     experiences: [
+      {
+        id: 'recharge',
+        kind: 'ritual',
+        title: '30 秒补给',
+        description: '跟着三段光点找回一点能量',
+        estimatedSeconds: 30,
+        status: 'active',
+        actionable: true,
+      },
       {
         id: 'tarot',
         kind: 'card',
@@ -69,13 +88,35 @@ afterEach(() => {
 });
 
 describe('EnergyHome', () => {
+  it('opens the recharge ritual with the selected need and records completion', async () => {
+    const user = userEvent.setup();
+    render(<EnergyHome profileStorageScope="usr_energy" />);
+
+    await user.click(screen.getByRole('button', { name: '放松' }));
+    await user.click(screen.getByRole('button', { name: '开始 30 秒补给' }));
+    expect(screen.getByRole('dialog', { name: '30 秒补给' })).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: '开始体验' }));
+    await user.click(await screen.findByRole('button', { name: '立即完成' }));
+
+    expect(screen.getByRole('heading', { name: '放松能量已点亮' })).toBeTruthy();
+    expect(readEnergyProgress('usr_energy').collectedKinds).toEqual(['recharge']);
+    expect(trpcMocks.reportEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'completed',
+        experienceId: 'recharge',
+        energyNeed: 'relax',
+      }),
+    );
+  });
+
   it('keeps one primary recommendation and makes the future game non-interactive', async () => {
     render(<EnergyHome profileStorageScope="usr_energy" />);
 
     expect(screen.getByRole('heading', { name: '你现在感觉怎么样？' })).toBeTruthy();
     const moodGroup = screen.getByRole('group', { name: '当前状态' });
     expect(within(moodGroup).getAllByRole('button', { pressed: false })).toHaveLength(4);
-    const primaryAction = screen.getByRole('button', { name: /开始|抽一张|看看/ });
+    const primaryAction = screen.getByRole('button', { name: '开始 30 秒补给' });
     expect(primaryAction.className).toContain('min-h-11');
     const modeActions = screen.getAllByRole('button', {
       name: /打开(抽张卡|轻测试|今日星座)/,
@@ -105,7 +146,7 @@ describe('EnergyHome', () => {
       expect.objectContaining({
         type: 'started',
         experienceId: 'tarot',
-        mood: 'tired',
+        energyNeed: 'relax',
       }),
     );
 
@@ -117,22 +158,22 @@ describe('EnergyHome', () => {
     const user = userEvent.setup();
     render(<EnergyHome profileStorageScope="usr_energy" />);
 
-    const good = screen.getByRole('button', { name: '状态很好' });
-    const tired = screen.getByRole('button', { name: '有点累' });
+    const focus = screen.getByRole('button', { name: '专注' });
+    const relax = screen.getByRole('button', { name: '放松' });
     await user.tab();
-    expect(document.activeElement).toBe(good);
+    expect(document.activeElement).toBe(focus);
     await user.tab();
-    expect(document.activeElement).toBe(tired);
+    expect(document.activeElement).toBe(relax);
     await user.tab({ shift: true });
-    expect(document.activeElement).toBe(good);
+    expect(document.activeElement).toBe(focus);
     await user.tab();
     await user.keyboard('{Enter}');
-    expect(tired.getAttribute('aria-pressed')).toBe('true');
+    expect(relax.getAttribute('aria-pressed')).toBe('true');
 
     await user.tab();
     await user.tab();
     await user.tab();
-    const primary = screen.getByRole('button', { name: '抽一张轻提示卡' });
+    const primary = screen.getByRole('button', { name: '开始 30 秒补给' });
     expect(document.activeElement).toBe(primary);
     await user.keyboard('{Enter}');
     expect(document.activeElement).toBe(screen.getByRole('button', { name: '开始体验' }));

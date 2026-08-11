@@ -5,8 +5,8 @@ import { protectedProcedure, router } from '../trpc.js';
 const energyEventInput = z
   .object({
     type: z.enum(['started', 'completed', 'replayed', 'failed']),
-    experienceId: z.enum(['tarot', 'light-test', 'horoscope', 'games']),
-    mood: z.enum(['good', 'tired', 'stressed', 'unwind']).nullable(),
+    experienceId: z.enum(['recharge', 'tarot', 'light-test', 'horoscope', 'games']),
+    energyNeed: z.enum(['focus', 'relax', 'confidence', 'uplift']).nullable(),
     durationBucket: z.enum(['under-60s', 'one-to-three-minutes', 'over-three-minutes']).nullable(),
     outcome: z.enum(['success', 'abandoned', 'error']).nullable(),
   })
@@ -20,7 +20,7 @@ export const energyRouter = router({
         event: 'energy_experience_event',
         type: input.type,
         experienceId: input.experienceId,
-        mood: input.mood,
+        energyNeed: input.energyNeed,
         durationBucket: input.durationBucket,
         outcome: input.outcome,
       },
