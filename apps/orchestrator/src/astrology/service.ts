@@ -1,3 +1,12 @@
+import {
+  type AstrologyCapability,
+  DivineApiContractError,
+  type ProviderCapabilityState,
+  allAstrologyCapabilities,
+  assertDivineApiSuccess,
+  readConfiguredCapabilities,
+} from './divine-api-contract.js';
+
 export type ZodiacSign =
   | 'aries'
   | 'taurus'
@@ -12,16 +21,70 @@ export type ZodiacSign =
   | 'aquarius'
   | 'pisces';
 
+export type AstrologyPeriod = 'daily' | 'weekly' | 'monthly' | 'yearly';
+
+export type AstrologyDimensionKey =
+  | 'personal'
+  | 'health'
+  | 'profession'
+  | 'emotions'
+  | 'travel'
+  | 'luck';
+
+export interface AstrologyDimension {
+  key: AstrologyDimensionKey;
+  label: string;
+  body: string;
+  score: number | null;
+}
+
+export interface AstrologyPeriodReading {
+  period: AstrologyPeriod;
+  provider: 'mock' | 'divineapi';
+  source: 'local-fallback' | 'divineapi';
+  freshness: 'local' | 'fresh' | 'stale';
+  zodiacSign: ZodiacSign;
+  zodiacLabel: string;
+  rangeLabel: string;
+  rangeKey: 'today' | 'current' | 'next';
+  summary: string;
+  dimensions: AstrologyDimension[];
+  luckyColors: string[];
+  luckyNumbers: string[];
+  luckyLetters: string[];
+  suitableTimes: string[];
+  sevenDayTrend: {
+    source: 'divineapi';
+    items: Array<{ dateLabel: string; score: number }>;
+  } | null;
+  cosmicTip: string | null;
+  singlesTip: string | null;
+  couplesTip: string | null;
+}
+
+export interface AstrologyRankingItem {
+  zodiacSign: ZodiacSign;
+  zodiacLabel: string;
+  score: number;
+  dateLabel: string;
+}
+
+export interface AstrologyRankingResult {
+  complete: boolean;
+  items: AstrologyRankingItem[];
+}
+
 export interface AstrologyProfileInput {
   name?: string;
   birthday: string;
   birthTime?: string;
   birthPlace?: string;
   zodiacSign?: ZodiacSign;
+  zodiacSignOverride?: ZodiacSign;
   locale?: string;
 }
 
-export interface AstrologyReading {
+export interface AstrologyReading extends AstrologyPeriodReading {
   provider: 'mock' | 'divineapi';
   apiConfigured: boolean;
   zodiacSign: ZodiacSign;
@@ -50,7 +113,7 @@ export interface TarotReading {
   body: string;
 }
 
-export interface WeeklyAstrologyReading {
+export interface WeeklyAstrologyReading extends AstrologyPeriodReading {
   provider: 'mock' | 'divineapi';
   apiConfigured: boolean;
   zodiacSign: ZodiacSign;
@@ -79,7 +142,11 @@ interface DivineApiConfig {
   apiKey: string;
   accessToken: string;
   baseUrl: string;
+  translatorBaseUrl: string;
   cacheTtlMs: number;
+  staleIfErrorMs: number;
+  capabilityRefreshTtlMs: number;
+  capabilities: Set<AstrologyCapability>;
 }
 
 interface RequestOptions {
@@ -89,8 +156,15 @@ interface RequestOptions {
 }
 
 const DIVINE_DEFAULT_BASE_URL = 'https://astroapi-5.divineapi.com';
+const DIVINE_DEFAULT_TRANSLATOR_BASE_URL = 'https://astroapi-5-translator.divineapi.com';
 const DIVINE_DEFAULT_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
-const divineApiCache = new Map<string, { expiresAt: number; value: unknown }>();
+const DIVINE_DEFAULT_STALE_IF_ERROR_MS = 24 * 60 * 60 * 1000;
+const DIVINE_DEFAULT_CAPABILITY_REFRESH_TTL_MS = 15 * 60 * 1000;
+const divineApiCache = new Map<string, { expiresAt: number; staleUntil: number; value: unknown }>();
+const observedCapabilityFailures = new Map<
+  AstrologyCapability,
+  { reason: 'not-authorized' | 'invalid-response'; expiresAt: number }
+>();
 
 const ZODIAC_META: Record<
   ZodiacSign,
@@ -214,6 +288,7 @@ export function divineApiStatus(env: NodeJS.ProcessEnv = process.env): {
   apiConfigured: boolean;
   cacheTtlMs: number;
   cacheEntries: number;
+  capabilities: ProviderCapabilityState[];
   endpoints: {
     dailyHoroscope: string;
     dailyTarot: string;
@@ -222,11 +297,24 @@ export function divineApiStatus(env: NodeJS.ProcessEnv = process.env): {
   };
 } {
   const config = divineApiConfig(env);
+  const checkedAt = env.DIVINE_API_CAPABILITIES_CHECKED_AT?.trim() || new Date().toISOString();
   return {
     provider: config ? 'divineapi' : 'mock',
     apiConfigured: Boolean(config),
     cacheTtlMs: config?.cacheTtlMs ?? readCacheTtlMs(env),
     cacheEntries: divineApiCache.size,
+    capabilities: allAstrologyCapabilities().map((capability) => {
+      const observedFailure = activeCapabilityFailure(capability);
+      const available = Boolean(config?.capabilities.has(capability)) && !observedFailure;
+      return available
+        ? { capability, available, checkedAt }
+        : {
+            capability,
+            available,
+            checkedAt,
+            reason: observedFailure?.reason ?? ('not-configured' as const),
+          };
+    }),
     endpoints: {
       dailyHoroscope: '/api/v5/daily-horoscope',
       dailyTarot: '/api/v2/daily-tarot',
@@ -238,6 +326,7 @@ export function divineApiStatus(env: NodeJS.ProcessEnv = process.env): {
 
 export function clearDivineApiCacheForTest(): void {
   divineApiCache.clear();
+  observedCapabilityFailures.clear();
 }
 
 export function zodiacFromBirthday(birthday: string): ZodiacSign {
@@ -260,33 +349,63 @@ export function zodiacFromBirthday(birthday: string): ZodiacSign {
   return 'pisces';
 }
 
+function resolveZodiacSign(input: AstrologyProfileInput): ZodiacSign {
+  return input.zodiacSignOverride ?? input.zodiacSign ?? zodiacFromBirthday(input.birthday);
+}
+
 export function buildDailyAstrologyReading(
   input: AstrologyProfileInput,
   options: RequestOptions = {},
 ): AstrologyReading {
   const now = options.now ?? new Date();
-  const zodiacSign = input.zodiacSign ?? zodiacFromBirthday(input.birthday);
+  const zodiacSign = resolveZodiacSign(input);
   const meta = ZODIAC_META[zodiacSign];
   const seed = seededNumber(`${zodiacSign}-${input.birthday}-${dateKey(now)}`);
   const apiConfigured = hasDivineApiCredentials(options.env);
+  const dateLabel = formatDateLabel(now);
+  const luckyWindow = pick(seed, [
+    '09:30 - 10:20',
+    '11:10 - 12:00',
+    '14:00 - 14:45',
+    '16:20 - 17:10',
+    '20:30 - 21:15',
+  ]);
+  const weekly = buildWeek(seed);
+  const dimensions = localDimensions({
+    personal: meta.headline,
+    health: '把休息放进日程，优先选择能让身体慢下来的小习惯。',
+    profession: meta.workNote,
+    emotions: '先识别感受，再决定回应方式；不必立刻解决所有问题。',
+    travel: '行程和外出安排保留一点弹性，会比排得太满更舒服。',
+    luck: '小范围尝试会比一次押注更容易带来好结果。',
+  });
   return {
+    period: 'daily',
     provider: 'mock',
+    source: 'local-fallback',
+    freshness: 'local',
     apiConfigured,
     zodiacSign,
     zodiacLabel: meta.label,
-    dateLabel: formatDateLabel(now),
+    rangeLabel: dateLabel,
+    rangeKey: 'today',
+    summary: meta.headline,
+    dimensions,
+    luckyColors: [meta.luckyColor],
+    luckyNumbers: [],
+    luckyLetters: [],
+    suitableTimes: [luckyWindow],
+    sevenDayTrend: null,
+    cosmicTip: null,
+    singlesTip: null,
+    couplesTip: null,
+    dateLabel,
     headline: meta.headline,
     workNote: meta.workNote,
     energyScore: 56 + (seed % 39),
     luckyColor: meta.luckyColor,
-    luckyWindow: pick(seed, [
-      '09:30 - 10:20',
-      '11:10 - 12:00',
-      '14:00 - 14:45',
-      '16:20 - 17:10',
-      '20:30 - 21:15',
-    ]),
-    weekly: buildWeek(seed),
+    luckyWindow,
+    weekly,
   };
 }
 
@@ -296,22 +415,27 @@ export async function getDailyAstrologyReading(
 ): Promise<AstrologyReading> {
   const mock = buildDailyAstrologyReading(input, options);
   const config = divineApiConfig(options.env);
-  if (!config) return mock;
+  if (!isCapabilityAvailable(config, 'daily-horoscope')) return mock;
+  const target = requestTarget(config, input.locale);
+  if (!target) return mock;
 
   try {
-    const json = await postDivineApiJson(
+    const response = await postDivineApiJson(
       '/api/v5/daily-horoscope',
       {
         api_key: config.apiKey,
         sign: mock.zodiacSign,
         h_day: 'today',
         tzone: timezoneOffsetHours(options.now ?? new Date()),
-        lan: languageCode(input.locale),
+        lan: target.lan,
       },
-      config,
+      { ...config, baseUrl: target.baseUrl },
+      'daily-horoscope',
       options.fetchImpl,
+      horoscopeRequiredPaths('prediction'),
+      (json) => assertHoroscopeDimensionTypes(json, 'prediction'),
     );
-    return mergeDivineDaily(mock, json);
+    return mergeDivineDaily(mock, response.json, response.freshness);
   } catch {
     return mock;
   }
@@ -361,21 +485,25 @@ export async function getDailyTarotReading(
 ): Promise<TarotReading> {
   const mock = buildMockTarotReading(input, options);
   const config = divineApiConfig(options.env);
-  if (!config) return mock;
+  if (!isCapabilityAvailable(config, 'daily-tarot')) return mock;
+  const target = requestTarget(config, input.locale);
+  if (!target) return mock;
 
   try {
-    const json = await postDivineApiJson(
+    const response = await postDivineApiJson(
       '/api/v2/daily-tarot',
       {
         api_key: config.apiKey,
         sign: input.zodiacSign ?? 'aries',
         h_day: 'today',
-        lan: languageCode(input.locale),
+        lan: target.lan,
       },
-      config,
+      { ...config, baseUrl: target.baseUrl },
+      'daily-tarot',
       options.fetchImpl,
+      [['data', 'card_name']],
     );
-    return mergeDivineTarot(mock, json);
+    return mergeDivineTarot(mock, response.json);
   } catch {
     return mock;
   }
@@ -386,26 +514,47 @@ export function buildMockWeeklyAstrologyReading(
   options: RequestOptions = {},
 ): WeeklyAstrologyReading {
   const now = options.now ?? new Date();
-  const zodiacSign = input.zodiacSign ?? zodiacFromBirthday(input.birthday);
+  const zodiacSign = resolveZodiacSign(input);
   const meta = ZODIAC_META[zodiacSign];
   const seed = seededNumber(`${zodiacSign}-weekly-${dateKey(now)}`);
+  const weekLabel = formatWeekLabel(now);
+  const personal = `${meta.label}本周适合把关系里的期待说得更具体，也给彼此留一点缓冲。`;
+  const health = '把休息放进日程，优先选择能让身体慢下来的小习惯。';
+  const profession = meta.workNote;
+  const emotions = '先识别感受，再决定回应方式；不必立刻解决所有问题。';
+  const travel = '行程和外出安排保留一点弹性，会比排得太满更舒服。';
+  const luck = pick(seed, [
+    '小范围尝试会比一次押注更容易带来好结果。',
+    '主动发出一次清楚的邀请，会打开新的回应。',
+    '整理一个拖延已久的角落，可能顺带清除心里的噪音。',
+  ]);
   return {
+    period: 'weekly',
     provider: 'mock',
+    source: 'local-fallback',
+    freshness: 'local',
     apiConfigured: hasDivineApiCredentials(options.env),
     zodiacSign,
     zodiacLabel: meta.label,
-    weekLabel: formatWeekLabel(now),
-    personal: `${meta.label}本周适合把关系里的期待说得更具体，也给彼此留一点缓冲。`,
-    health: '把休息放进日程，优先选择能让身体慢下来的小习惯。',
-    profession: meta.workNote,
-    emotions: '先识别感受，再决定回应方式；不必立刻解决所有问题。',
-    travel: '行程和外出安排保留一点弹性，会比排得太满更舒服。',
-    luck: pick(seed, [
-      '小范围尝试会比一次押注更容易带来好结果。',
-      '主动发出一次清楚的邀请，会打开新的回应。',
-      '整理一个拖延已久的角落，可能顺带清除心里的噪音。',
-    ]),
+    rangeLabel: weekLabel,
+    rangeKey: 'current',
+    summary: personal,
+    dimensions: localDimensions({ personal, health, profession, emotions, travel, luck }),
     luckyColors: [meta.luckyColor],
+    luckyNumbers: [],
+    luckyLetters: [],
+    suitableTimes: [],
+    sevenDayTrend: null,
+    cosmicTip: null,
+    singlesTip: null,
+    couplesTip: null,
+    weekLabel,
+    personal,
+    health,
+    profession,
+    emotions,
+    travel,
+    luck,
   };
 }
 
@@ -415,25 +564,177 @@ export async function getWeeklyAstrologyReading(
 ): Promise<WeeklyAstrologyReading> {
   const mock = buildMockWeeklyAstrologyReading(input, options);
   const config = divineApiConfig(options.env);
-  if (!config) return mock;
+  if (!isCapabilityAvailable(config, 'weekly-horoscope')) return mock;
+  const target = requestTarget(config, input.locale);
+  if (!target) return mock;
 
   try {
-    const json = await postDivineApiJson(
+    const response = await postDivineApiJson(
       '/api/v5/weekly-horoscope',
       {
         api_key: config.apiKey,
         sign: mock.zodiacSign,
-        h_week: 'current',
+        week: 'current',
         tzone: timezoneOffsetHours(options.now ?? new Date()),
-        lan: languageCode(input.locale),
+        lan: target.lan,
       },
-      config,
+      { ...config, baseUrl: target.baseUrl },
+      'weekly-horoscope',
       options.fetchImpl,
+      horoscopeRequiredPaths('weekly_horoscope'),
+      (json) => assertHoroscopeDimensionTypes(json, 'weekly_horoscope'),
     );
-    return mergeDivineWeekly(mock, json);
+    return mergeDivineWeekly(mock, response.json, response.freshness);
   } catch {
     return mock;
   }
+}
+
+export async function getMonthlyAstrologyReading(
+  input: AstrologyProfileInput,
+  rangeKey: 'current' | 'next' = 'current',
+  options: RequestOptions = {},
+): Promise<AstrologyPeriodReading> {
+  return getLongPeriodReading(input, 'monthly', rangeKey, options);
+}
+
+export async function getYearlyAstrologyReading(
+  input: AstrologyProfileInput,
+  options: RequestOptions = {},
+): Promise<AstrologyPeriodReading> {
+  return getLongPeriodReading(input, 'yearly', 'current', options);
+}
+
+export async function getAstrologyRanking(
+  locale = 'en',
+  options: RequestOptions = {},
+): Promise<AstrologyRankingResult> {
+  const signs = Object.keys(ZODIAC_META) as ZodiacSign[];
+  const readings = await Promise.all(
+    signs.map((zodiacSignOverride) =>
+      getDailyAstrologyReading(
+        {
+          birthday: '2000-01-01',
+          zodiacSignOverride,
+          locale,
+        },
+        options,
+      ),
+    ),
+  );
+  const dateLabels = new Set(readings.map((reading) => reading.rangeLabel));
+  if (
+    readings.length !== signs.length ||
+    dateLabels.size !== 1 ||
+    readings.some((reading) => reading.source !== 'divineapi')
+  ) {
+    return { complete: false, items: [] };
+  }
+
+  const items: AstrologyRankingItem[] = [];
+  for (const reading of readings) {
+    const scores = reading.dimensions.map((dimension) => dimension.score);
+    if (scores.some((score) => score === null)) return { complete: false, items: [] };
+    const numericScores = scores as number[];
+    items.push({
+      zodiacSign: reading.zodiacSign,
+      zodiacLabel: reading.zodiacLabel,
+      score: Math.round(
+        numericScores.reduce((total, score) => total + score, 0) / numericScores.length,
+      ),
+      dateLabel: reading.rangeLabel,
+    });
+  }
+
+  return {
+    complete: true,
+    items: items.sort((left, right) => right.score - left.score),
+  };
+}
+
+async function getLongPeriodReading(
+  input: AstrologyProfileInput,
+  period: 'monthly' | 'yearly',
+  rangeKey: 'current' | 'next',
+  options: RequestOptions,
+): Promise<AstrologyPeriodReading> {
+  const local = buildLocalLongPeriodReading(input, period, rangeKey, options);
+  const config = divineApiConfig(options.env);
+  const capability: AstrologyCapability = `${period}-horoscope`;
+  if (!isCapabilityAvailable(config, capability)) return local;
+  const target = requestTarget(config, input.locale);
+  if (!target) return local;
+  const selector = `${period}_horoscope`;
+  try {
+    const response = await postDivineApiJson(
+      `/api/v5/${period}-horoscope`,
+      {
+        api_key: config.apiKey,
+        sign: local.zodiacSign,
+        [period === 'monthly' ? 'month' : 'year']: rangeKey,
+        tzone: timezoneOffsetHours(options.now ?? new Date()),
+        lan: target.lan,
+      },
+      { ...config, baseUrl: target.baseUrl },
+      capability,
+      options.fetchImpl,
+      horoscopeRequiredPaths(selector),
+      (json) => assertHoroscopeDimensionTypes(json, selector),
+    );
+    return mergeDivinePeriod(
+      local,
+      response.json,
+      selector,
+      period === 'monthly' ? 'month' : 'year',
+      response.freshness,
+    );
+  } catch {
+    return local;
+  }
+}
+
+function buildLocalLongPeriodReading(
+  input: AstrologyProfileInput,
+  period: 'monthly' | 'yearly',
+  rangeKey: 'current' | 'next',
+  options: RequestOptions,
+): AstrologyPeriodReading {
+  const now = new Date(options.now ?? new Date());
+  if (period === 'monthly' && rangeKey === 'next') now.setMonth(now.getMonth() + 1);
+  const zodiacSign = resolveZodiacSign(input);
+  const meta = ZODIAC_META[zodiacSign];
+  const rangeLabel =
+    period === 'monthly'
+      ? new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: 'long' }).format(now)
+      : String(now.getFullYear());
+  const bodies: Record<AstrologyDimensionKey, string> = {
+    personal: `${meta.label}${rangeKey === 'next' ? '下个月' : period === 'monthly' ? '本月' : '本年'}适合把期待说具体，也给关系留一点缓冲。`,
+    health: '把休息和规律放进计划，用可持续的节奏代替一次用力过猛。',
+    profession: meta.workNote,
+    emotions: '先识别感受，再决定回应方式；不必一次解决所有问题。',
+    travel: '行程安排保留一点弹性，新环境会带来有用的观察。',
+    luck: '从小范围尝试开始，真实反馈会带来下一步线索。',
+  };
+  return {
+    period,
+    provider: 'mock',
+    source: 'local-fallback',
+    freshness: 'local',
+    zodiacSign,
+    zodiacLabel: meta.label,
+    rangeLabel,
+    rangeKey,
+    summary: bodies.personal,
+    dimensions: localDimensions(bodies),
+    luckyColors: [meta.luckyColor],
+    luckyNumbers: [],
+    luckyLetters: [],
+    suitableTimes: [],
+    sevenDayTrend: null,
+    cosmicTip: null,
+    singlesTip: null,
+    couplesTip: null,
+  };
 }
 
 export function buildMockYesNoTarotReading(
@@ -481,19 +782,23 @@ export async function getYesNoTarotReading(
 ): Promise<YesNoTarotReading> {
   const mock = buildMockYesNoTarotReading(input, options);
   const config = divineApiConfig(options.env);
-  if (!config) return mock;
+  if (!isCapabilityAvailable(config, 'yes-no-tarot')) return mock;
+  const target = requestTarget(config, input.locale);
+  if (!target) return mock;
 
   try {
-    const json = await postDivineApiJson(
+    const response = await postDivineApiJson(
       '/api/v2/yes-or-no-tarot',
       {
         api_key: config.apiKey,
-        lan: languageCode(input.locale),
+        lan: target.lan,
       },
-      config,
+      { ...config, baseUrl: target.baseUrl },
+      'yes-no-tarot',
       options.fetchImpl,
+      [['data', 'prediction']],
     );
-    return mergeDivineYesNoTarot(mock, json);
+    return mergeDivineYesNoTarot(mock, response.json);
   } catch {
     return mock;
   }
@@ -540,7 +845,19 @@ function divineApiConfig(env: NodeJS.ProcessEnv = process.env): DivineApiConfig 
     apiKey,
     accessToken,
     baseUrl: (env.DIVINE_API_BASE_URL ?? DIVINE_DEFAULT_BASE_URL).replace(/\/+$/, ''),
+    translatorBaseUrl: (
+      env.DIVINE_API_TRANSLATOR_BASE_URL ?? DIVINE_DEFAULT_TRANSLATOR_BASE_URL
+    ).replace(/\/+$/, ''),
     cacheTtlMs: readCacheTtlMs(env),
+    staleIfErrorMs: readNonNegativeMs(
+      env.DIVINE_API_STALE_IF_ERROR_MS,
+      DIVINE_DEFAULT_STALE_IF_ERROR_MS,
+    ),
+    capabilityRefreshTtlMs: readNonNegativeMs(
+      env.DIVINE_API_CAPABILITY_REFRESH_TTL_MS,
+      DIVINE_DEFAULT_CAPABILITY_REFRESH_TTL_MS,
+    ),
+    capabilities: readConfiguredCapabilities(env),
   };
 }
 
@@ -548,65 +865,128 @@ async function postDivineApiJson(
   path: string,
   body: Record<string, string>,
   config: DivineApiConfig,
-  fetchImpl: typeof fetch = fetch,
-): Promise<unknown> {
+  capability: AstrologyCapability,
+  fetchImpl: typeof fetch | undefined,
+  requiredPaths: ReadonlyArray<ReadonlyArray<string>>,
+  validate?: (json: unknown) => void,
+): Promise<{ json: unknown; freshness: 'fresh' | 'stale' }> {
   const bodyString = new URLSearchParams(body).toString();
-  const cacheKey = `${config.baseUrl}${path}?${bodyString}`;
+  const cacheParams = new URLSearchParams(
+    Object.entries(body).filter(([key]) => key !== 'api_key'),
+  ).toString();
+  const cacheKey = `${config.baseUrl}${path}?${cacheParams}`;
+  let staleValue: unknown;
   if (config.cacheTtlMs > 0) {
     const cached = divineApiCache.get(cacheKey);
-    if (cached && cached.expiresAt > Date.now()) return cached.value;
-    if (cached) divineApiCache.delete(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return { json: cached.value, freshness: 'fresh' };
+    }
+    if (cached && cached.staleUntil > Date.now()) staleValue = cached.value;
+    if (cached && cached.staleUntil <= Date.now()) divineApiCache.delete(cacheKey);
   }
-  const res = await fetchImpl(`${config.baseUrl}${path}`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${config.accessToken}`,
-      'Content-Type': 'application/x-www-form-urlencoded',
-      Accept: 'application/json',
-    },
-    body: bodyString,
-  });
-  if (!res.ok) {
-    throw new Error(`DivineAPI request failed: ${res.status}`);
-  }
-  const json = await res.json();
-  if (config.cacheTtlMs > 0) {
-    divineApiCache.set(cacheKey, {
-      expiresAt: Date.now() + config.cacheTtlMs,
-      value: json,
+  try {
+    const res = await (fetchImpl ?? fetch)(`${config.baseUrl}${path}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${config.accessToken}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Accept: 'application/json',
+      },
+      body: bodyString,
     });
+    if (!res.ok) {
+      throw new Error(`DivineAPI request failed: ${res.status}`);
+    }
+    const json = await res.json();
+    assertDivineApiSuccess(json, requiredPaths);
+    validate?.(json);
+    if (config.cacheTtlMs > 0) {
+      const expiresAt = Date.now() + config.cacheTtlMs;
+      divineApiCache.set(cacheKey, {
+        expiresAt,
+        staleUntil: expiresAt + config.staleIfErrorMs,
+        value: json,
+      });
+    }
+    return { json, freshness: 'fresh' };
+  } catch (error) {
+    if (error instanceof DivineApiContractError) {
+      observedCapabilityFailures.set(capability, {
+        reason: error.reason === 'not-authorized' ? 'not-authorized' : 'invalid-response',
+        expiresAt: Date.now() + config.capabilityRefreshTtlMs,
+      });
+    }
+    if (staleValue !== undefined) return { json: staleValue, freshness: 'stale' };
+    throw error;
   }
-  return json;
 }
 
-function mergeDivineDaily(mock: AstrologyReading, json: unknown): AstrologyReading {
+function activeCapabilityFailure(
+  capability: AstrologyCapability,
+): { reason: 'not-authorized' | 'invalid-response'; expiresAt: number } | null {
+  const failure = observedCapabilityFailures.get(capability);
+  if (!failure) return null;
+  if (failure.expiresAt > Date.now()) return failure;
+  observedCapabilityFailures.delete(capability);
+  return null;
+}
+
+function isCapabilityAvailable(
+  config: DivineApiConfig | null,
+  capability: AstrologyCapability,
+): config is DivineApiConfig {
+  return Boolean(config?.capabilities.has(capability) && !activeCapabilityFailure(capability));
+}
+
+function mergeDivineDaily(
+  mock: AstrologyReading,
+  json: unknown,
+  freshness: 'fresh' | 'stale',
+): AstrologyReading {
+  const predictionPath = ['data', 'prediction'];
+  const dimensions = parseProviderDimensions(json, predictionPath);
+  const insights = parseLuckyInsights(json, predictionPath);
+  const headline =
+    dimensionBody(dimensions, 'personal', '') ||
+    firstString(json, [['data', 'prediction', 'personal_life']]) ||
+    mock.headline;
+  const workNote = dimensionBody(dimensions, 'profession', mock.workNote);
+  const rangeLabel = firstString(json, [['data', 'date']]) ?? mock.rangeLabel;
+  const scoreValues = dimensions
+    .map((dimension) => dimension.score)
+    .filter((score): score is number => score !== null);
+  const luckyColor =
+    insights.luckyColors[0] ??
+    firstString(json, [
+      ['data', 'lucky_color'],
+      ['data', 'luckyColor'],
+      ['data', 'lucky', 'color'],
+    ]) ??
+    mock.luckyColor;
   return {
     ...mock,
     provider: 'divineapi',
-    headline:
-      firstString(json, [
-        ['data', 'prediction', 'personal_life'],
-        ['data', 'prediction', 'emotions'],
-        ['data', 'prediction', 'profession'],
-        ['data', 'prediction'],
-        ['data', 'horoscope'],
-        ['data', 'summary'],
-        ['prediction'],
-      ]) ?? mock.headline,
-    workNote:
-      firstString(json, [
-        ['data', 'prediction', 'profession'],
-        ['data', 'prediction', 'luck'],
-        ['data', 'prediction', 'health'],
-        ['data', 'description'],
-        ['data', 'bot_response'],
-      ]) ?? mock.workNote,
-    luckyColor:
-      firstString(json, [
-        ['data', 'lucky_color'],
-        ['data', 'luckyColor'],
-        ['data', 'lucky', 'color'],
-      ]) ?? mock.luckyColor,
+    source: 'divineapi',
+    freshness,
+    rangeLabel,
+    summary: headline,
+    dimensions,
+    luckyColors: insights.luckyColors.length > 0 ? insights.luckyColors : [luckyColor],
+    luckyNumbers: insights.luckyNumbers,
+    luckyLetters: insights.luckyLetters,
+    suitableTimes: parseSuitableTimes(json),
+    sevenDayTrend: parseSevenDayTrend(json),
+    cosmicTip: insights.cosmicTip,
+    singlesTip: insights.singlesTip,
+    couplesTip: insights.couplesTip,
+    dateLabel: rangeLabel,
+    headline,
+    workNote,
+    energyScore:
+      scoreValues.length > 0
+        ? Math.round(scoreValues.reduce((sum, score) => sum + score, 0) / scoreValues.length)
+        : mock.energyScore,
+    luckyColor,
   };
 }
 
@@ -638,21 +1018,201 @@ function mergeDivineTarot(mock: TarotReading, json: unknown): TarotReading {
   };
 }
 
-function mergeDivineWeekly(mock: WeeklyAstrologyReading, json: unknown): WeeklyAstrologyReading {
+function mergeDivineWeekly(
+  mock: WeeklyAstrologyReading,
+  json: unknown,
+  freshness: 'fresh' | 'stale',
+): WeeklyAstrologyReading {
   const horoscopePath = ['data', 'weekly_horoscope'];
+  const dimensions = parseProviderDimensions(json, horoscopePath);
+  const insights = parseLuckyInsights(json, horoscopePath);
+  const personal = dimensionBody(dimensions, 'personal', mock.personal);
+  const health = dimensionBody(dimensions, 'health', mock.health);
+  const profession = dimensionBody(dimensions, 'profession', mock.profession);
+  const emotions = dimensionBody(dimensions, 'emotions', mock.emotions);
+  const travel = dimensionBody(dimensions, 'travel', mock.travel);
+  const luck = dimensionBody(dimensions, 'luck', mock.luck);
+  const weekLabel = firstString(json, [['data', 'week']]) ?? mock.weekLabel;
   return {
     ...mock,
     provider: 'divineapi',
-    weekLabel: firstString(json, [['data', 'week']]) ?? mock.weekLabel,
-    personal: firstString(json, [[...horoscopePath, 'personal']]) ?? mock.personal,
-    health: firstString(json, [[...horoscopePath, 'health']]) ?? mock.health,
-    profession: firstString(json, [[...horoscopePath, 'profession']]) ?? mock.profession,
-    emotions: firstString(json, [[...horoscopePath, 'emotions']]) ?? mock.emotions,
-    travel: firstString(json, [[...horoscopePath, 'travel']]) ?? mock.travel,
-    luck: firstString(json, [[...horoscopePath, 'luck']]) ?? mock.luck,
-    luckyColors:
-      firstStringArray(json, [['data', 'special', 'lucky_color_codes']]) ?? mock.luckyColors,
+    source: 'divineapi',
+    freshness,
+    rangeLabel: weekLabel,
+    summary: personal,
+    dimensions,
+    luckyColors: insights.luckyColors.length > 0 ? insights.luckyColors : mock.luckyColors,
+    luckyNumbers: insights.luckyNumbers,
+    luckyLetters: insights.luckyLetters,
+    cosmicTip: insights.cosmicTip,
+    singlesTip: insights.singlesTip,
+    couplesTip: insights.couplesTip,
+    weekLabel,
+    personal,
+    health,
+    profession,
+    emotions,
+    travel,
+    luck,
   };
+}
+
+function mergeDivinePeriod(
+  local: AstrologyPeriodReading,
+  json: unknown,
+  selector: string,
+  rangeField: 'month' | 'year',
+  freshness: 'fresh' | 'stale',
+): AstrologyPeriodReading {
+  const horoscopePath = ['data', selector];
+  const dimensions = parseProviderDimensions(json, horoscopePath);
+  const insights = parseLuckyInsights(json, horoscopePath);
+  const summary = dimensionBody(dimensions, 'personal', local.summary);
+  return {
+    ...local,
+    provider: 'divineapi',
+    source: 'divineapi',
+    freshness,
+    rangeLabel: firstString(json, [['data', rangeField]]) ?? local.rangeLabel,
+    summary,
+    dimensions,
+    luckyColors: insights.luckyColors.length > 0 ? insights.luckyColors : local.luckyColors,
+    luckyNumbers: insights.luckyNumbers,
+    luckyLetters: insights.luckyLetters,
+    cosmicTip: insights.cosmicTip,
+    singlesTip: insights.singlesTip,
+    couplesTip: insights.couplesTip,
+  };
+}
+
+const DIMENSION_LABELS: Record<AstrologyDimensionKey, string> = {
+  personal: '个人',
+  health: '健康',
+  profession: '工作',
+  emotions: '情绪',
+  travel: '出行',
+  luck: '好运',
+};
+
+const DIMENSION_KEYS = Object.keys(DIMENSION_LABELS) as AstrologyDimensionKey[];
+
+function horoscopeRequiredPaths(selector: string): ReadonlyArray<ReadonlyArray<string>> {
+  return DIMENSION_KEYS.map((key) => ['data', selector, key]);
+}
+
+function assertHoroscopeDimensionTypes(json: unknown, selector: string): void {
+  for (const key of DIMENSION_KEYS) {
+    const value = getPath(json, ['data', selector, key]);
+    const valid =
+      key === 'luck'
+        ? Array.isArray(value) &&
+          value.length > 0 &&
+          value.every((entry) => typeof entry === 'string' && Boolean(entry.trim()))
+        : typeof value === 'string' && Boolean(value.trim());
+    if (!valid) throw new DivineApiContractError('invalid-response');
+  }
+}
+
+function localDimensions(bodies: Record<AstrologyDimensionKey, string>): AstrologyDimension[] {
+  return DIMENSION_KEYS.map((key) => ({
+    key,
+    label: DIMENSION_LABELS[key],
+    body: bodies[key],
+    score: null,
+  }));
+}
+
+function parseProviderDimensions(json: unknown, horoscopePath: string[]): AstrologyDimension[] {
+  return DIMENSION_KEYS.map((key) => ({
+    key,
+    label: DIMENSION_LABELS[key],
+    body:
+      key === 'luck'
+        ? (firstStringArray(json, [[...horoscopePath, key]])?.join(' ') ?? '')
+        : (firstString(json, [[...horoscopePath, key]]) ?? ''),
+    score: boundedScore(getPath(json, ['data', 'special', 'horoscope_percentage', key])),
+  }));
+}
+
+function dimensionBody(
+  dimensions: AstrologyDimension[],
+  key: AstrologyDimensionKey,
+  fallback: string,
+): string {
+  return dimensions.find((dimension) => dimension.key === key)?.body || fallback;
+}
+
+function boundedScore(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  if (value < 0 || value > 100) return null;
+  return Math.round(value);
+}
+
+function parseLuckyInsights(
+  json: unknown,
+  horoscopePath: string[],
+): Pick<
+  AstrologyPeriodReading,
+  'luckyColors' | 'luckyNumbers' | 'luckyLetters' | 'cosmicTip' | 'singlesTip' | 'couplesTip'
+> {
+  const lines = firstStringArray(json, [[...horoscopePath, 'luck']]) ?? [];
+  return {
+    luckyColors:
+      firstStringArray(json, [['data', 'special', 'lucky_color_codes']]) ??
+      splitInsightList(findInsight(lines, [/^colors?\b/i, /^幸运色/])),
+    luckyNumbers: splitInsightList(findInsight(lines, [/^lucky numbers?\b/i, /^幸运数字/])),
+    luckyLetters: splitInsightList(
+      findInsight(lines, [/^lucky alphabets?\b/i, /^lucky letters?\b/i, /^幸运字母/]),
+    ),
+    cosmicTip: findInsight(lines, [/^cosmic tip\b/i, /^宇宙提示/]),
+    singlesTip: findInsight(lines, [/^tips? for singles\b/i, /^单身/]),
+    couplesTip: findInsight(lines, [/^tips? for couples\b/i, /^伴侣/, /^情侣/]),
+  };
+}
+
+function findInsight(lines: string[], prefixes: RegExp[]): string | null {
+  for (const line of lines) {
+    if (!prefixes.some((prefix) => prefix.test(line))) continue;
+    const separator = line.indexOf(':');
+    return (separator >= 0 ? line.slice(separator + 1) : line).trim() || null;
+  }
+  return null;
+}
+
+function splitInsightList(value: string | null): string[] {
+  if (!value) return [];
+  return value
+    .split(/[,，]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function parseSuitableTimes(json: unknown): string[] {
+  const array = firstStringArray(json, [
+    ['data', 'suitable_times'],
+    ['data', 'lucky_times'],
+  ]);
+  if (array) return array;
+  const single = firstString(json, [
+    ['data', 'suitable_time'],
+    ['data', 'lucky_time'],
+  ]);
+  return single ? [single] : [];
+}
+
+function parseSevenDayTrend(json: unknown): AstrologyPeriodReading['sevenDayTrend'] {
+  const value = getPath(json, ['data', 'seven_day_trend']);
+  if (!Array.isArray(value) || value.length !== 7) return null;
+  const items: Array<{ dateLabel: string; score: number }> = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object') return null;
+    const record = entry as Record<string, unknown>;
+    const dateLabel = typeof record.date === 'string' ? record.date.trim() : '';
+    const score = boundedScore(record.score);
+    if (!dateLabel || score === null) return null;
+    items.push({ dateLabel, score });
+  }
+  return { source: 'divineapi', items };
 }
 
 function mergeDivineYesNoTarot(mock: YesNoTarotReading, json: unknown): YesNoTarotReading {
@@ -719,9 +1279,16 @@ function getPath(value: unknown, path: Array<string>): unknown {
   return current;
 }
 
-function languageCode(locale?: string): string {
-  if (!locale) return 'en';
-  return locale.toLowerCase().startsWith('zh') ? 'zh' : 'en';
+function requestTarget(
+  config: DivineApiConfig,
+  locale?: string,
+): { baseUrl: string; lan: 'en' | 'zh' } | null {
+  if (locale?.toLowerCase().startsWith('zh')) {
+    return config.capabilities.has('translator')
+      ? { baseUrl: config.translatorBaseUrl, lan: 'zh' }
+      : null;
+  }
+  return { baseUrl: config.baseUrl, lan: 'en' };
 }
 
 function timezoneOffsetHours(date: Date): string {
@@ -729,10 +1296,13 @@ function timezoneOffsetHours(date: Date): string {
 }
 
 function readCacheTtlMs(env: NodeJS.ProcessEnv = process.env): number {
-  const raw = env.DIVINE_API_CACHE_TTL_MS;
-  if (!raw) return DIVINE_DEFAULT_CACHE_TTL_MS;
+  return readNonNegativeMs(env.DIVINE_API_CACHE_TTL_MS, DIVINE_DEFAULT_CACHE_TTL_MS);
+}
+
+function readNonNegativeMs(raw: string | undefined, fallback: number): number {
+  if (!raw) return fallback;
   const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed < 0) return DIVINE_DEFAULT_CACHE_TTL_MS;
+  if (!Number.isFinite(parsed) || parsed < 0) return fallback;
   return parsed;
 }
 

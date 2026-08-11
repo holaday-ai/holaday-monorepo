@@ -1326,6 +1326,1115 @@
   line-height: 1.65;
 }
 
+.energy-card-lab {
+  max-width: 860px;
+  margin: 0 auto;
+  color: #43364d;
+}
+
+.energy-card-lab > header {
+  text-align: center;
+}
+
+.energy-card-lab > header .energy-kicker {
+  justify-content: center;
+}
+
+.energy-card-lab > header h3 {
+  margin: 7px 0 0;
+  color: #443451;
+  font-size: 25px;
+  font-weight: 780;
+}
+
+.energy-card-lab > header > p:not(.energy-kicker),
+.energy-card-lab > header > small {
+  display: block;
+  max-width: 39rem;
+  margin: 8px auto 0;
+  color: #786d7d;
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.energy-card-lab > header > small {
+  color: #967b88;
+  font-size: 10px;
+}
+
+.energy-card-lab__mode-grid,
+.energy-card-lab__theme-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 22px;
+}
+
+.energy-card-lab__mode-grid button,
+.energy-card-lab__theme-grid button {
+  display: flex;
+  min-width: 0;
+  cursor: pointer;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 7px;
+  border: 1px solid #e6dbe9;
+  border-radius: 20px;
+  background: #fffaf3;
+  padding: 18px;
+  color: #493b53;
+  text-align: left;
+  box-shadow: 0 10px 24px rgb(91 67 120 / 7%);
+  transition: transform 220ms ease, border-color 220ms ease, box-shadow 220ms ease;
+}
+
+.energy-card-lab__mode-grid button:nth-child(2),
+.energy-card-lab__theme-grid button:nth-child(3n + 2) {
+  background: #f2fbff;
+}
+
+.energy-card-lab__mode-grid button:nth-child(3),
+.energy-card-lab__theme-grid button:nth-child(3n) {
+  background: #f4fff5;
+}
+
+.energy-card-lab__mode-grid button:hover,
+.energy-card-lab__theme-grid button:hover,
+.energy-card-lab__theme-grid button[aria-pressed="true"] {
+  border-color: #bd9fd5;
+  box-shadow: 0 16px 34px rgb(91 67 120 / 14%);
+  transform: translateY(-3px);
+}
+
+.energy-card-lab__theme-grid button[aria-pressed="true"] {
+  outline: 2px solid rgb(126 99 186 / 18%);
+  outline-offset: 2px;
+}
+
+.energy-card-lab__mode-grid svg,
+.energy-card-lab__theme-grid svg {
+  width: 24px;
+  height: 24px;
+  color: #7754a8;
+}
+
+.energy-card-lab__mode-grid strong,
+.energy-card-lab__theme-grid strong {
+  font-size: 15px;
+}
+
+.energy-card-lab__mode-grid span,
+.energy-card-lab__theme-grid span {
+  color: #7b6f80;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.energy-card-lab--theme fieldset {
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.energy-card-lab--theme legend {
+  width: 100%;
+  margin-top: 18px;
+  color: #795fa3;
+  font-size: 11px;
+  font-weight: 780;
+  text-align: center;
+}
+
+.energy-card-lab--theme > button {
+  display: flex;
+  min-width: 180px;
+  margin: 20px auto 0;
+}
+
+.energy-card-lab--ready {
+  display: flex;
+  min-height: 380px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  text-align: center;
+}
+
+.energy-card-lab--ready img {
+  width: min(100%, 460px);
+  max-height: 270px;
+  border: 1px solid #ebdeea;
+  border-radius: 24px;
+  background: #fffaf3;
+  object-fit: contain;
+  box-shadow: 0 20px 46px rgb(91 67 120 / 15%);
+}
+
+.energy-card-lab--ready p {
+  max-width: 34rem;
+  margin: 18px 0 0;
+  color: #766a7c;
+  line-height: 1.65;
+}
+
+.energy-card-lab--ready button {
+  margin-top: 18px;
+}
+
+.energy-card-lab--revealed > header {
+  margin-bottom: 18px;
+}
+
+.energy-card-lab__results {
+  display: grid;
+  gap: 14px;
+}
+
+.energy-card-lab__results--three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.energy-card-lab__results article {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid #e2d4e5;
+  border-radius: 22px;
+  background: linear-gradient(145deg, #fffaf3 0%, #f9f1ff 100%);
+  padding: 20px;
+  box-shadow: 0 15px 38px rgb(91 67 120 / 11%);
+  animation: energy-card-reveal 300ms cubic-bezier(0.2, 0.85, 0.2, 1) both;
+}
+
+.energy-card-lab__results article:nth-child(2) {
+  animation-delay: 70ms;
+}
+
+.energy-card-lab__results article:nth-child(3) {
+  animation-delay: 140ms;
+}
+
+.energy-card-lab__results article > span,
+.energy-card-lab__answer {
+  display: inline-flex;
+  border-radius: 999px;
+  background: #eadfff;
+  padding: 5px 9px;
+  color: #6a4a98;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.energy-card-lab__answer {
+  background: #ffe1cc;
+  color: #9c5a36;
+  font-size: 14px;
+}
+
+.energy-card-lab__results h4 {
+  margin: 12px 0 0;
+  color: #45344f;
+  font-size: 20px;
+}
+
+.energy-card-lab__results p {
+  margin: 7px 0 0;
+  color: #746878;
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.energy-card-lab__results article > div {
+  margin-top: 14px;
+  border-radius: 14px;
+  background: rgb(255 255 255 / 78%);
+  padding: 12px;
+}
+
+.energy-card-lab__results article > div > strong {
+  color: #815675;
+  font-size: 11px;
+}
+
+.energy-card-lab__result-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 9px;
+  margin-top: 18px;
+}
+
+.energy-card-lab--history > header > svg {
+  width: 32px;
+  height: 32px;
+  color: #7754a8;
+}
+
+.energy-card-lab--history ol {
+  display: grid;
+  gap: 9px;
+  margin: 18px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.energy-card-lab--history li {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  gap: 10px;
+  border: 1px solid #eadfea;
+  border-radius: 14px;
+  background: #fffdf9;
+  padding: 11px 13px;
+  font-size: 12px;
+}
+
+.energy-card-lab--history li p {
+  margin: 0;
+  color: #756979;
+  text-align: right;
+}
+
+.energy-astrology-world,
+.energy-explore-feed {
+  min-width: 0;
+  border: 1px solid #e7dced;
+  border-radius: 28px;
+  background: #fffdf9;
+  padding: 24px;
+  box-shadow: 0 18px 48px rgb(91 70 118 / 9%);
+}
+
+.energy-astrology-world {
+  scroll-margin-top: 20px;
+  background: radial-gradient(circle at 92% 3%, rgb(255 225 204 / 58%), transparent 28%),
+    linear-gradient(145deg, #fffdf9 0%, #f9f4ff 54%, #f1fbff 100%);
+  animation: energy-section-arrive 320ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.energy-astrology-world__header,
+.energy-explore-feed__header,
+.energy-astrology-world__period-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.energy-astrology-world__header h2,
+.energy-explore-feed__header h2 {
+  margin: 7px 0 0;
+  color: #433451;
+  font-size: 25px;
+  font-weight: 780;
+  letter-spacing: -0.035em;
+}
+
+.energy-astrology-world__header > div > p:last-child,
+.energy-explore-feed__header > div > p:last-child {
+  max-width: 46rem;
+  margin: 7px 0 0;
+  color: #786c7d;
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.energy-astrology-world__source {
+  display: inline-flex;
+  flex: 0 0 auto;
+  border: 1px solid #d9c9e5;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 76%);
+  padding: 7px 10px;
+  color: #6d4c99;
+  font-size: 10px;
+  font-weight: 760;
+}
+
+.energy-astrology-world__tabs {
+  display: flex;
+  gap: 6px;
+  margin-top: 20px;
+  overflow-x: auto;
+  border-radius: 16px;
+  background: rgb(237 229 244 / 72%);
+  padding: 5px;
+  scrollbar-width: thin;
+}
+
+.energy-astrology-world__tabs button {
+  min-width: 88px;
+  cursor: pointer;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  padding: 10px 16px;
+  color: #776a7c;
+  font-size: 13px;
+  font-weight: 740;
+  transition: background 200ms ease, color 200ms ease, transform 200ms ease;
+}
+
+.energy-astrology-world__tabs button:hover {
+  color: #5f438b;
+  transform: translateY(-1px);
+}
+
+.energy-astrology-world__tabs button[aria-selected="true"] {
+  background: #fff;
+  color: #6b489d;
+  box-shadow: 0 6px 16px rgb(96 72 128 / 11%);
+}
+
+.energy-astrology-world__month-range {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 12px 0 0;
+  border: 0;
+  padding: 0;
+}
+
+.energy-astrology-world__month-range legend {
+  margin-right: 4px;
+  color: #84768a;
+  font-size: 11px;
+}
+
+.energy-astrology-world__month-range button {
+  cursor: pointer;
+  border: 1px solid #ded1e6;
+  border-radius: 999px;
+  background: #fff;
+  padding: 6px 11px;
+  color: #735392;
+  font-size: 11px;
+}
+
+.energy-astrology-world__month-range button[aria-pressed="true"] {
+  border-color: #ff315f;
+  background: #fff0f4;
+  color: #d72455;
+}
+
+.energy-astrology-world__panel {
+  margin-top: 14px;
+  border: 1px solid rgb(218 205 229 / 76%);
+  border-radius: 22px;
+  background: rgb(255 255 255 / 72%);
+  padding: 20px;
+}
+
+.energy-astrology-world__period-header > div > p {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  color: #785b98;
+  font-size: 11px;
+  font-weight: 760;
+}
+
+.energy-astrology-world__period-header svg {
+  width: 15px;
+  height: 15px;
+}
+
+.energy-astrology-world__period-header h3 {
+  max-width: 54rem;
+  margin: 7px 0 0;
+  color: #40324b;
+  font-size: 20px;
+  line-height: 1.45;
+}
+
+.energy-astrology-world__period-header > button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #ddcfe6;
+  border-radius: 12px;
+  background: #fff;
+  color: #714e9c;
+  transition: transform 200ms ease, background 200ms ease;
+}
+
+.energy-astrology-world__period-header > button:hover:not(:disabled) {
+  background: #faf4ff;
+  transform: rotate(14deg);
+}
+
+.energy-astrology-world__period-header > button:disabled {
+  cursor: wait;
+  opacity: 0.48;
+}
+
+.energy-astrology-world__notice {
+  margin: 12px 0 0;
+  border-radius: 12px;
+  background: #fff2da;
+  padding: 9px 11px;
+  color: #8a6734;
+  font-size: 11px;
+}
+
+.energy-astrology-dimensions {
+  margin-top: 16px;
+}
+
+.energy-astrology-dimensions__grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.energy-astrology-dimensions__grid article {
+  min-width: 0;
+  border: 1px solid #ece3ef;
+  border-radius: 17px;
+  background: #fffaf3;
+  padding: 14px;
+  animation: energy-feed-replace 260ms ease both;
+}
+
+.energy-astrology-dimensions__grid article:nth-child(3n + 2) {
+  background: #f1fbff;
+}
+
+.energy-astrology-dimensions__grid article:nth-child(3n) {
+  background: #f3fff4;
+}
+
+.energy-astrology-dimensions__grid article header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.energy-astrology-dimensions__grid h4 {
+  margin: 0;
+  color: #4b3a56;
+  font-size: 13px;
+}
+
+.energy-astrology-dimensions__grid header span {
+  border-radius: 999px;
+  background: #eadfff;
+  padding: 4px 7px;
+  color: #6a4999;
+  font-size: 10px;
+  font-weight: 780;
+}
+
+.energy-astrology-dimensions__grid p {
+  margin: 8px 0 0;
+  color: #776b7c;
+  font-size: 11px;
+  line-height: 1.65;
+}
+
+.energy-astrology-dimensions > button {
+  display: block;
+  margin: 12px auto 0;
+  cursor: pointer;
+  border: 0;
+  background: transparent;
+  color: #6e4b9d;
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.energy-lucky-insights {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.energy-lucky-insights__groups {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.energy-lucky-insights__groups article,
+.energy-lucky-insights__tips article {
+  min-width: 0;
+  border: 1px solid #ebe1ee;
+  border-radius: 15px;
+  background: rgb(255 255 255 / 84%);
+  padding: 12px;
+}
+
+.energy-lucky-insights__groups header,
+.energy-lucky-insights__tips article {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.energy-lucky-insights__groups h4,
+.energy-lucky-insights__tips h4 {
+  margin: 0;
+  color: #523f5d;
+  font-size: 11px;
+}
+
+.energy-lucky-insights__groups svg,
+.energy-lucky-insights__tips svg {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  color: #7a55a9;
+}
+
+.energy-lucky-insights__groups article > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 9px;
+}
+
+.energy-lucky-insights__groups article > div span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 999px;
+  background: #f7f1fa;
+  padding: 4px 7px;
+  color: #725c7b;
+  font-size: 9px;
+}
+
+.energy-lucky-insights__groups i {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border: 1px solid rgb(65 50 74 / 12%);
+  border-radius: 50%;
+}
+
+.energy-lucky-insights__tips {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.energy-lucky-insights__tips p {
+  margin: 5px 0 0;
+  color: #776b7c;
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.energy-lucky-insights figure {
+  margin: 0;
+  border-radius: 16px;
+  background: rgb(244 238 250 / 76%);
+  padding: 13px;
+}
+
+.energy-lucky-insights figcaption {
+  color: #5f456f;
+  font-size: 11px;
+  font-weight: 760;
+}
+
+.energy-lucky-insights figure > div {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 9px;
+}
+
+.energy-lucky-insights figure label {
+  display: grid;
+  gap: 4px;
+  color: #786c7e;
+  font-size: 8px;
+  text-align: center;
+}
+
+.energy-lucky-insights meter {
+  width: 100%;
+  height: 6px;
+  accent-color: #8a62bc;
+}
+
+.energy-lucky-insights figure strong {
+  color: #64488d;
+  font-size: 9px;
+}
+
+.energy-lucky-insights__empty-trend {
+  margin: 0;
+  color: #958799;
+  font-size: 10px;
+}
+
+.energy-astrology-world__continue {
+  margin-top: 14px;
+  border: 1px solid #e8daea;
+  border-radius: 21px;
+  background: linear-gradient(135deg, #fff5f8 0%, #f2fbff 50%, #f3fff4 100%);
+  padding: 18px;
+}
+
+.energy-astrology-world__continue > header {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.energy-astrology-world__continue > header > svg {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  color: #e5255b;
+}
+
+.energy-astrology-world__continue h3 {
+  margin: 0;
+  color: #493952;
+  font-size: 17px;
+}
+
+.energy-astrology-world__continue header p {
+  margin: 4px 0 0;
+  color: #796d7d;
+  font-size: 11px;
+}
+
+.energy-astrology-world__continue-actions {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.energy-astrology-world__continue-actions button {
+  display: flex;
+  min-height: 45px;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid #dfd2e7;
+  border-radius: 13px;
+  background: rgb(255 255 255 / 82%);
+  padding: 9px;
+  color: #67498d;
+  font-size: 11px;
+  font-weight: 730;
+  transition: transform 200ms ease, border-color 200ms ease, background 200ms ease;
+}
+
+.energy-astrology-world__continue-actions button:hover:not(:disabled) {
+  border-color: #bd9fd5;
+  background: #fff;
+  transform: translateY(-2px);
+}
+
+.energy-astrology-world__continue-actions svg {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+}
+
+.energy-astrology-world__ranking,
+.energy-astrology-world__sign-picker {
+  margin-top: 14px;
+  border-top: 1px solid #e1d5e7;
+  padding-top: 14px;
+}
+
+.energy-astrology-world__ranking ol {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.energy-astrology-world__ranking li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 3px 8px;
+  border-radius: 12px;
+  background: rgb(255 255 255 / 82%);
+  padding: 9px 10px;
+  font-size: 11px;
+}
+
+.energy-astrology-world__ranking li small {
+  grid-column: 1 / -1;
+  color: #908493;
+  font-size: 8px;
+}
+
+.energy-astrology-world__sign-picker > p {
+  color: #857889;
+  font-size: 10px;
+}
+
+.energy-astrology-world__sign-picker fieldset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0 0;
+  border: 0;
+  padding: 0;
+}
+
+.energy-astrology-world__sign-picker legend {
+  width: 100%;
+  margin-bottom: 7px;
+  color: #5f476d;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.energy-astrology-world__sign-picker fieldset button {
+  cursor: pointer;
+  border: 1px solid #dfd2e6;
+  border-radius: 999px;
+  background: #fff;
+  padding: 6px 9px;
+  color: #725288;
+  font-size: 10px;
+}
+
+.energy-astrology-world__sign-picker article {
+  margin-top: 12px;
+  border-radius: 15px;
+  background: #fff;
+  padding: 13px;
+}
+
+.energy-astrology-world__sign-picker article h4,
+.energy-astrology-world__sign-picker article p {
+  margin: 6px 0 0;
+}
+
+.energy-astrology-world__sign-picker article p {
+  color: #796c7d;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.energy-astrology-world__top-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 14px;
+  color: #73529a;
+  font-size: 11px;
+  font-weight: 730;
+  text-decoration: none;
+}
+
+.energy-astrology-world__top-link svg {
+  width: 14px;
+  height: 14px;
+  transform: rotate(-90deg);
+}
+
+.energy-explore-feed {
+  background: radial-gradient(circle at 5% 0%, rgb(255 225 204 / 46%), transparent 26%),
+    linear-gradient(145deg, #fffdf9 0%, #fff8fb 52%, #f4fbff 100%);
+}
+
+.energy-explore-feed__header {
+  align-items: center;
+}
+
+.energy-explore-feed__header > button {
+  flex: 0 0 auto;
+  border-color: #d6c6df;
+  border-radius: 13px;
+  background: #fff;
+  color: #6f4e9d;
+}
+
+.energy-explore-feed__grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 11px;
+  margin-top: 17px;
+}
+
+.energy-explore-feed__grid article {
+  display: flex;
+  min-width: 0;
+  min-height: 196px;
+  flex-direction: column;
+  border: 1px solid #eadfea;
+  border-radius: 19px;
+  background: #fffaf3;
+  padding: 15px;
+  box-shadow: 0 10px 26px rgb(91 67 120 / 7%);
+  animation: energy-feed-replace 280ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.energy-explore-feed__grid article[data-category="fortune"],
+.energy-explore-feed__grid article[data-category="card-recommendation"] {
+  background: #fff5f8;
+}
+
+.energy-explore-feed__grid article[data-category="zodiac-knowledge"],
+.energy-explore-feed__grid article[data-category="game-recommendation"] {
+  background: #f1fbff;
+}
+
+.energy-explore-feed__grid article[data-category="relationship-quiz"],
+.energy-explore-feed__grid article[data-category="test-recommendation"] {
+  background: #f3fff4;
+}
+
+.energy-explore-feed__grid article[data-category="poll"] {
+  background: #faf4ff;
+}
+
+.energy-explore-feed__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.energy-explore-feed__meta > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #755192;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.energy-explore-feed__meta svg {
+  width: 14px;
+  height: 14px;
+}
+
+.energy-explore-feed__meta small {
+  color: #998d9c;
+  font-size: 8px;
+}
+
+.energy-explore-feed__grid h3 {
+  margin: 13px 0 0;
+  color: #49384f;
+  font-size: 16px;
+}
+
+.energy-explore-feed__grid article > p {
+  margin: 7px 0 0;
+  color: #776b7b;
+  font-size: 11px;
+  line-height: 1.65;
+}
+
+.energy-explore-feed__grid article > button {
+  display: inline-flex;
+  min-height: 32px;
+  cursor: pointer;
+  align-items: center;
+  align-self: flex-start;
+  margin-top: auto;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  padding: 7px 0 0;
+  color: #6d4b9b;
+  font-size: 11px;
+  font-weight: 780;
+}
+
+.energy-explore-feed__grid article > button:hover {
+  color: #e5255b;
+}
+
+.energy-explore-feed__empty {
+  display: flex;
+  min-height: 180px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  margin-top: 16px;
+  border-radius: 20px;
+  background: rgb(255 255 255 / 72%);
+  color: #6c4e8f;
+  text-align: center;
+}
+
+.energy-explore-feed__empty svg {
+  width: 28px;
+  height: 28px;
+}
+
+.energy-explore-feed__empty h3 {
+  margin: 9px 0 0;
+}
+
+.energy-explore-feed__empty p {
+  max-width: 34rem;
+  margin: 6px 0 0;
+  color: #7d7180;
+  font-size: 11px;
+}
+
+.energy-running-task-dock {
+  position: sticky;
+  z-index: 20;
+  bottom: 14px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid rgb(205 186 218 / 88%);
+  border-radius: 18px;
+  background: rgb(255 253 249 / 94%);
+  padding: 11px 12px;
+  box-shadow: 0 18px 44px rgb(65 49 81 / 18%);
+  backdrop-filter: blur(18px);
+  animation: energy-dock-arrive 260ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.energy-running-task-dock__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 13px;
+  background: #eadfff;
+  color: #6c4c9b;
+}
+
+.energy-running-task-dock[data-status="awaiting_user"] .energy-running-task-dock__icon,
+.energy-running-task-dock[data-status="paused"] .energy-running-task-dock__icon {
+  background: #fff1be;
+  color: #96731f;
+}
+
+.energy-running-task-dock[data-status="completed"] .energy-running-task-dock__icon,
+.energy-running-task-dock[data-status="partial_success"] .energy-running-task-dock__icon {
+  background: #daf5df;
+  color: #3f8054;
+}
+
+.energy-running-task-dock[data-status="failed"] .energy-running-task-dock__icon,
+.energy-running-task-dock[data-status="cancelled"] .energy-running-task-dock__icon {
+  background: #ffe0e5;
+  color: #b52f4b;
+}
+
+.energy-running-task-dock__icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.energy-running-task-dock__copy {
+  min-width: 0;
+}
+
+.energy-running-task-dock__copy > div {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.energy-running-task-dock__copy strong {
+  overflow: hidden;
+  color: #45374d;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.energy-running-task-dock__copy span {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #f0e8f7;
+  padding: 3px 7px;
+  color: #6b4b92;
+  font-size: 9px;
+  font-weight: 780;
+}
+
+.energy-running-task-dock__copy small {
+  display: block;
+  margin-top: 3px;
+  color: #887c8b;
+  font-size: 9px;
+}
+
+.energy-running-task-dock > button {
+  display: inline-flex;
+  min-height: 36px;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 0;
+  border-radius: 11px;
+  background: #ff315f;
+  padding: 8px 12px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 760;
+  box-shadow: 0 8px 18px rgb(255 49 95 / 22%);
+}
+
+.energy-running-task-dock > button:hover {
+  background: #e92555;
+  transform: translateY(-1px);
+}
+
+.energy-running-task-dock > button svg {
+  width: 14px;
+  height: 14px;
+}
+
+@keyframes energy-card-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(8px) rotateX(5deg);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) rotateX(0);
+  }
+}
+
+@keyframes energy-feed-replace {
+  from {
+    opacity: 0;
+    transform: translateY(7px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes energy-dock-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 @keyframes energy-section-arrive {
   from {
     opacity: 0;
@@ -1447,6 +2556,24 @@
   }
 }
 
+@media (max-width: 900px) {
+  .energy-astrology-dimensions__grid,
+  .energy-explore-feed__grid,
+  .energy-astrology-world__ranking ol {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .energy-lucky-insights__groups,
+  .energy-lucky-insights__tips,
+  .energy-astrology-world__continue-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .energy-card-lab__results--three {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 760px) {
   .energy-page {
     gap: 20px;
@@ -1500,6 +2627,102 @@
 
   .energy-astrology-panel__badge {
     min-height: 110px;
+  }
+}
+
+@media (max-width: 640px) {
+  .energy-page {
+    padding-bottom: 124px;
+  }
+
+  .energy-astrology-world,
+  .energy-explore-feed {
+    border-radius: 22px;
+    padding: 16px;
+  }
+
+  .energy-astrology-world__header,
+  .energy-explore-feed__header,
+  .energy-astrology-world__period-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .energy-astrology-world__source {
+    align-self: flex-start;
+  }
+
+  .energy-astrology-world__tabs {
+    margin-inline: -3px;
+  }
+
+  .energy-astrology-world__tabs button {
+    min-width: 82px;
+  }
+
+  .energy-astrology-world__panel,
+  .energy-astrology-world__continue {
+    border-radius: 18px;
+    padding: 14px;
+  }
+
+  .energy-astrology-world__period-header > button {
+    align-self: flex-start;
+  }
+
+  .energy-astrology-dimensions__grid,
+  .energy-explore-feed__grid,
+  .energy-astrology-world__ranking ol,
+  .energy-astrology-world__continue-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .energy-lucky-insights__groups,
+  .energy-lucky-insights__tips {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .energy-lucky-insights figure > div {
+    overflow-x: auto;
+    grid-template-columns: repeat(7, minmax(56px, 1fr));
+    padding-bottom: 4px;
+  }
+
+  .energy-explore-feed__header > button {
+    align-self: flex-start;
+  }
+
+  .energy-explore-feed__grid article {
+    min-height: 172px;
+  }
+
+  .energy-card-lab__mode-grid,
+  .energy-card-lab__theme-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .energy-card-lab--history li {
+    grid-template-columns: 1fr auto;
+  }
+
+  .energy-card-lab--history li p {
+    grid-column: 1 / -1;
+    text-align: left;
+  }
+
+  .energy-running-task-dock {
+    position: fixed;
+    right: 12px;
+    bottom: calc(12px + env(safe-area-inset-bottom));
+    left: 12px;
+    grid-template-columns: auto minmax(0, 1fr);
+    border-radius: 17px;
+    padding: 10px;
+  }
+
+  .energy-running-task-dock > button {
+    grid-column: 1 / -1;
+    width: 100%;
   }
 }
 
@@ -1576,6 +2799,16 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .energy-astrology-world *,
+  .energy-explore-feed *,
+  .energy-running-task-dock *,
+  .energy-card-lab * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+
   .energy-hero,
   .energy-experience-deck,
   .energy-insight-grid,
@@ -1592,6 +2825,9 @@
   .energy-game-target,
   .energy-game-dots span,
   .energy-tarot-mode__grid button,
+  .energy-card-lab__results article,
+  .energy-explore-feed__grid article,
+  .energy-running-task-dock,
   .energy-yes-no-result > span,
   .energy-horoscope-result > svg {
     animation: none !important;
@@ -1605,7 +2841,12 @@
   .energy-experience-card__image img,
   .energy-astrology-panel__badge,
   .energy-game-target,
-  .energy-tarot-mode__grid button {
+  .energy-tarot-mode__grid button,
+  .energy-card-lab__mode-grid button,
+  .energy-card-lab__theme-grid button,
+  .energy-card-lab__results article,
+  .energy-explore-feed__grid article,
+  .energy-running-task-dock {
     transform: none !important;
   }
 }

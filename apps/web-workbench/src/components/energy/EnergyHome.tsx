@@ -1,12 +1,16 @@
 import { type AstroProfile, defaultAstroProfile, readAstroProfile } from '@/lib/astrology';
 import { trpc } from '@/lib/trpc';
+import type { UiTask } from '@/types/task';
 import * as React from 'react';
+import { AstrologyWorld } from './AstrologyWorld';
 import { EnergyAstrologyPanel } from './EnergyAstrologyPanel';
 import { EnergyExperienceDeck } from './EnergyExperienceDeck';
+import { type EnergyExploreEvent, EnergyExploreFeed } from './EnergyExploreFeed';
 import { EnergyGrowthPanel } from './EnergyGrowthPanel';
 import { EnergyHero } from './EnergyHero';
 import { EnergyProfileDrawer } from './EnergyProfileDrawer';
 import { ExperiencePlayer } from './ExperiencePlayer';
+import { RunningTaskDock, type RunningTaskDockEvent } from './RunningTaskDock';
 import { readEnergyProgress, recordEnergyCompletion } from './energy-progress';
 import type { EnergyExperienceId, EnergyNeed, ExperiencePhase } from './energy-types';
 import { ENERGY_EXPERIENCES, type EnergyExperienceRegistration } from './experience-registry';
@@ -16,6 +20,7 @@ import './energy.css';
 interface EnergyHomeProps {
   profileStorageScope: string | null;
   liveProvider?: boolean;
+  tasks?: readonly UiTask[];
 }
 
 type EnergyEventType = 'started' | 'completed' | 'replayed' | 'failed';
@@ -39,6 +44,7 @@ function durationBucket(startedAt: number): Exclude<EnergyDurationBucket, null> 
 export function EnergyHome({
   profileStorageScope,
   liveProvider = false,
+  tasks = [],
 }: EnergyHomeProps): JSX.Element {
   const storageScope = profileStorageScope?.trim() || null;
   const canUseProfileStorage = !liveProvider || Boolean(storageScope);
@@ -56,6 +62,7 @@ export function EnergyHome({
   const [profileOpen, setProfileOpen] = React.useState(false);
   const returnFocusRef = React.useRef<HTMLButtonElement | null>(null);
   const profileTriggerRef = React.useRef<HTMLButtonElement | null>(null);
+  const astrologyWorldRef = React.useRef<HTMLElement | null>(null);
   const startedAtRef = React.useRef(Date.now());
   const astrology = useEnergyAstrology(profile, liveProvider);
   const LoadedExperience = React.useMemo(
@@ -113,6 +120,12 @@ export function EnergyHome({
     [energyNeed],
   );
 
+  const reportHubEvent = React.useCallback((event: EnergyExploreEvent | RunningTaskDockEvent) => {
+    void trpc.energy.reportEvent
+      .mutate(event)
+      .catch(() => console.warn('energy event report failed'));
+  }, []);
+
   const openExperience = (
     experience: EnergyExperienceRegistration,
     trigger: HTMLButtonElement,
@@ -141,7 +154,8 @@ export function EnergyHome({
   };
 
   const recharge = experiences.find((experience) => experience.id === 'recharge') ?? null;
-  const horoscope = experiences.find((experience) => experience.id === 'horoscope') ?? null;
+  const tarot = experiences.find((experience) => experience.id === 'tarot') ?? null;
+  const lightTest = experiences.find((experience) => experience.id === 'light-test') ?? null;
 
   return (
     <div className="energy-page" data-profile-scope={profileStorageScope ? 'user' : 'guest'}>
@@ -163,9 +177,11 @@ export function EnergyHome({
           profile={profile}
           astrology={astrology}
           canEditProfile={canUseProfileStorage}
-          onOpen={(trigger) => {
-            if (!horoscope || horoscope.status !== 'active' || !horoscope.actionable) return;
-            openExperience(horoscope, trigger);
+          onOpen={() => {
+            astrologyWorldRef.current?.scrollIntoView?.({
+              behavior: prefersReducedMotion() ? 'auto' : 'smooth',
+              block: 'start',
+            });
           }}
           onEditProfile={(trigger) => {
             profileTriggerRef.current = trigger;
@@ -173,6 +189,42 @@ export function EnergyHome({
           }}
         />
       </div>
+
+      <AstrologyWorld
+        ref={astrologyWorldRef}
+        astrology={astrology}
+        onOpenEnergyCard={(trigger) => {
+          if (!tarot || tarot.status !== 'active' || !tarot.actionable) return;
+          openExperience(tarot, trigger);
+        }}
+        onOpenLightTest={(trigger) => {
+          if (!lightTest || lightTest.status !== 'active' || !lightTest.actionable) return;
+          openExperience(lightTest, trigger);
+        }}
+      />
+
+      <EnergyExploreFeed
+        storageScope={storageScope}
+        mood={null}
+        energyNeed={energyNeed}
+        onEvent={reportHubEvent}
+        onActionTarget={(target, trigger) => {
+          if (target.startsWith('astrology:')) {
+            astrologyWorldRef.current?.scrollIntoView?.({
+              behavior: prefersReducedMotion() ? 'auto' : 'smooth',
+              block: 'start',
+            });
+            return;
+          }
+          if (!target.startsWith('experience:')) return;
+          const experienceId = target.slice('experience:'.length);
+          const experience = experiences.find((item) => item.id === experienceId);
+          if (!experience || experience.status !== 'active' || !experience.actionable) return;
+          openExperience(experience, trigger);
+        }}
+      />
+
+      {tasks.length > 0 ? <RunningTaskDock tasks={tasks} onEvent={reportHubEvent} /> : null}
 
       <ExperiencePlayer
         open={selectedExperience !== null}
@@ -187,6 +239,7 @@ export function EnergyHome({
           handlePhaseChange('active');
         }}
         onChooseAnother={() => setSelectedExperience(null)}
+        replayLabel={selectedExperience?.replayLabel}
       >
         {LoadedExperience ? (
           <React.Suspense
@@ -216,5 +269,13 @@ export function EnergyHome({
         onProfileChange={(nextProfile) => setProfile(nextProfile ?? defaultAstroProfile())}
       />
     </div>
+  );
+}
+
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches
   );
 }

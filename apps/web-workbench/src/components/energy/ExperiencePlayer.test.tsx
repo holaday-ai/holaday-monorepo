@@ -25,6 +25,7 @@ interface HarnessProps {
   onClose?: () => void;
   onReplay?: () => void;
   onChooseAnother?: () => void;
+  replayLabel?: string;
 }
 
 function Harness({
@@ -32,6 +33,7 @@ function Harness({
   onClose = vi.fn(),
   onReplay = vi.fn(),
   onChooseAnother = vi.fn(),
+  replayLabel,
 }: HarnessProps): JSX.Element {
   const [open, setOpen] = React.useState(false);
   const [phase, setPhase] = React.useState<ExperiencePhase>(initialPhase);
@@ -60,6 +62,7 @@ function Harness({
           onChooseAnother();
           setOpen(false);
         }}
+        replayLabel={replayLabel}
       >
         <p>结果内容</p>
       </ExperiencePlayer>
@@ -131,5 +134,14 @@ describe('ExperiencePlayer', () => {
     const close = screen.getByRole('button', { name: '关闭体验' });
 
     expect(close.getAttribute('title')).toBe('关闭体验');
+  });
+
+  it('supports a distinct player-level replay label', async () => {
+    const user = userEvent.setup();
+    render(<Harness initialPhase="result" replayLabel="重新开始抽卡" />);
+
+    await user.click(screen.getByRole('button', { name: '打开抽卡' }));
+    expect(screen.getByRole('button', { name: '重新开始抽卡' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '再来一次' })).toBeNull();
   });
 });

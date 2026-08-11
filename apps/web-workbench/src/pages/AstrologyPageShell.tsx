@@ -1,12 +1,15 @@
 import { EnergyHome } from '@/components/energy/EnergyHome';
 import { PageContainer, PageHeader } from '@/pages/PageShell';
+import type { UiTask } from '@/types/task';
 
 export function AstrologyPageShell({
   liveProvider,
   profileStorageScope,
+  tasks = [],
 }: {
   liveProvider: boolean;
   profileStorageScope: string | null;
+  tasks?: readonly UiTask[];
 }): JSX.Element {
   const now = new Date();
   const weekday = ['日', '一', '二', '三', '四', '五', '六'][now.getDay()] ?? '日';
@@ -22,7 +25,11 @@ export function AstrologyPageShell({
           </time>
         }
       />
-      <EnergyHome liveProvider={liveProvider} profileStorageScope={profileStorageScope} />
+      <EnergyHome
+        liveProvider={liveProvider}
+        profileStorageScope={profileStorageScope}
+        tasks={tasks}
+      />
     </PageContainer>
   );
 }

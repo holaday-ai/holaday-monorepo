@@ -35,14 +35,13 @@ export const ENERGY_EXPERIENCES: EnergyExperienceRegistration[] = [
     status: 'active',
     actionable: true,
     requiredProfileFields: [],
+    replayLabel: '重新开始抽卡',
     load: () =>
       import('./experiences/TarotExperience').then((module) => ({
         default: (props: EnergyExperienceProps) =>
           createElement(module.TarotExperience, {
-            tarot: props.astrology.tarot,
-            yesNoTarot: props.astrology.yesNoTarot,
-            yesNoLoading: props.astrology.yesNoLoading,
-            onDrawYesNo: props.astrology.drawYesNoTarot,
+            profileStorageScope: props.profileStorageScope,
+            capabilities: props.astrology.capabilities,
             phase: props.phase,
             onPhaseChange: props.onPhaseChange,
             onComplete: () => props.onExperienceComplete('tarot'),
@@ -62,8 +61,7 @@ export const ENERGY_EXPERIENCES: EnergyExperienceRegistration[] = [
       import('./experiences/TestExperience').then((module) => ({
         default: (props: EnergyExperienceProps) =>
           createElement(module.TestExperience, {
-            profile: props.profile,
-            reading: props.astrology.reading,
+            profileStorageScope: props.profileStorageScope,
             phase: props.phase,
             onPhaseChange: props.onPhaseChange,
             onComplete: () => props.onExperienceComplete('test'),

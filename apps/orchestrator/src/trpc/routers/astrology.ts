@@ -1,9 +1,12 @@
 import { z } from 'zod';
 import {
   divineApiStatus,
+  getAstrologyRanking,
   getDailyAstrologyReading,
   getDailyTarotReading,
+  getMonthlyAstrologyReading,
   getWeeklyAstrologyReading,
+  getYearlyAstrologyReading,
   getYesNoTarotReading,
 } from '../../astrology/service.js';
 import { getFeatureFlags } from '../../execution/feature-flags.js';
@@ -30,6 +33,7 @@ const profileInputSchema = z.object({
   birthTime: z.string().trim().max(16).optional(),
   birthPlace: z.string().trim().max(128).optional(),
   zodiacSign: zodiacSignSchema.optional(),
+  zodiacSignOverride: zodiacSignSchema.optional(),
   locale: z.string().trim().max(16).optional(),
 });
 
@@ -48,6 +52,15 @@ export const astrologyRouter = router({
   weekly: protectedProcedure
     .input(profileInputSchema)
     .query(({ input }) => getWeeklyAstrologyReading(input)),
+  monthly: protectedProcedure
+    .input(profileInputSchema.extend({ month: z.enum(['current', 'next']).default('current') }))
+    .query(({ input }) => getMonthlyAstrologyReading(input, input.month)),
+  yearly: protectedProcedure
+    .input(profileInputSchema)
+    .query(({ input }) => getYearlyAstrologyReading(input)),
+  ranking: protectedProcedure
+    .input(z.object({ locale: z.string().trim().max(16).optional() }))
+    .query(({ input }) => getAstrologyRanking(input.locale)),
   tarot: protectedProcedure
     .input(
       z.object({

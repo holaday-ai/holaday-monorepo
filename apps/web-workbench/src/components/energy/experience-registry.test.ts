@@ -15,6 +15,9 @@ describe('energy registry', () => {
       status: 'active',
       actionable: true,
     });
+    expect(ENERGY_EXPERIENCES.find((item) => item.id === 'tarot')).toMatchObject({
+      replayLabel: '重新开始抽卡',
+    });
   });
 
   it('returns a fresh list of active experiences', () => {
