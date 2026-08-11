@@ -19,5 +19,7 @@ describe('energy motion system', () => {
     expect(css).toMatch(/#dff4ff/i);
     expect(css).toMatch(/#ffe1cc/i);
     expect(css).toMatch(/#daf5df/i);
+    expect(css).toMatch(/#ff315f/i);
+    expect(css).toMatch(/\.energy-insight-grid\s*\{/);
   });
 });

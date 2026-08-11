@@ -89,7 +89,7 @@ afterEach(() => {
 
 describe('EnergyHome', () => {
   it('renders the selected recharge hierarchy with three active playful choices', async () => {
-    render(<EnergyHome profileStorageScope="usr_energy" />);
+    const { container } = render(<EnergyHome profileStorageScope="usr_energy" />);
 
     expect(screen.getByRole('heading', { name: '今天想补哪一种能量？' })).toBeTruthy();
     const deck = screen.getByRole('region', { name: '选一个轻松玩法' });
@@ -97,8 +97,14 @@ describe('EnergyHome', () => {
     expect(within(deck).getByRole('button', { name: '玩接住能量' })).toBeTruthy();
     expect(within(deck).getByRole('button', { name: '做一个轻测试' })).toBeTruthy();
     expect(within(deck).getAllByRole('button')).toHaveLength(3);
-    expect(screen.getByRole('region', { name: '今日能量成长' })).toBeTruthy();
-    expect(screen.getByRole('region', { name: '你的星座能量' })).toBeTruthy();
+    const insightGrid = container.querySelector('.energy-insight-grid');
+    expect(insightGrid).toBeTruthy();
+    expect(
+      within(insightGrid as HTMLElement).getByRole('region', { name: '今日能量成长' }),
+    ).toBeTruthy();
+    expect(
+      within(insightGrid as HTMLElement).getByRole('region', { name: '你的星座能量' }),
+    ).toBeTruthy();
     expect(screen.queryByText('你现在感觉怎么样？')).toBeNull();
     expect(screen.queryByText('轻松一点的几分钟')).toBeNull();
 

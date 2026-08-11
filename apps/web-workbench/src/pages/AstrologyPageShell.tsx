@@ -13,10 +13,9 @@ export function AstrologyPageShell({
   const dateLabel = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日 星期${weekday}`;
 
   return (
-    <PageContainer width="wide" className="max-w-[1180px]">
+    <PageContainer width="wide" className="max-w-[1180px] !pt-4 md:!pt-5">
       <PageHeader
         title="今日能量"
-        description="先补给 30 秒，再用抽卡、小游戏、轻测试或星座提示换回一点轻盈。"
         action={
           <time className="text-sm text-muted-foreground" aria-label="今日日期">
             {dateLabel}

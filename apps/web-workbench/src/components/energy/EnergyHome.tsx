@@ -155,24 +155,24 @@ export function EnergyHome({
         }}
       />
 
-      <div className="energy-hub-grid">
-        <EnergyExperienceDeck experiences={experiences} onOpen={openExperience} />
-        <EnergyGrowthPanel progress={progress} />
-      </div>
+      <EnergyExperienceDeck experiences={experiences} onOpen={openExperience} />
 
-      <EnergyAstrologyPanel
-        profile={profile}
-        astrology={astrology}
-        canEditProfile={canUseProfileStorage}
-        onOpen={(trigger) => {
-          if (!horoscope || horoscope.status !== 'active' || !horoscope.actionable) return;
-          openExperience(horoscope, trigger);
-        }}
-        onEditProfile={(trigger) => {
-          profileTriggerRef.current = trigger;
-          setProfileOpen(true);
-        }}
-      />
+      <div className="energy-insight-grid">
+        <EnergyGrowthPanel progress={progress} />
+        <EnergyAstrologyPanel
+          profile={profile}
+          astrology={astrology}
+          canEditProfile={canUseProfileStorage}
+          onOpen={(trigger) => {
+            if (!horoscope || horoscope.status !== 'active' || !horoscope.actionable) return;
+            openExperience(horoscope, trigger);
+          }}
+          onEditProfile={(trigger) => {
+            profileTriggerRef.current = trigger;
+            setProfileOpen(true);
+          }}
+        />
+      </div>
 
       <ExperiencePlayer
         open={selectedExperience !== null}
