@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildDailyAstrologyReading,
   clearDivineApiCacheForTest,
@@ -15,6 +15,7 @@ import {
 describe('astrology service', () => {
   afterEach(() => {
     clearDivineApiCacheForTest();
+    vi.useRealTimers();
   });
 
   it('derives zodiac signs from birthday boundaries', () => {
@@ -73,8 +74,9 @@ describe('astrology service', () => {
         DIVINE_API_KEY: 'key',
         DIVINE_ACCESS_TOKEN: 'token',
         DIVINE_API_CACHE_TTL_MS: '60000',
+        DIVINE_API_CAPABILITIES_CHECKED_AT: '2026-08-12T00:00:00.000Z',
       }),
-    ).toEqual({
+    ).toMatchObject({
       provider: 'divineapi',
       apiConfigured: true,
       cacheTtlMs: 60000,
@@ -88,6 +90,130 @@ describe('astrology service', () => {
     });
   });
 
+  it('does not call a provider endpoint that is absent from the capability allowlist', async () => {
+    let called = false;
+    const reading = await getDailyTarotReading(
+      { zodiacSign: 'leo' },
+      {
+        env: {
+          DIVINE_API_KEY: 'key',
+          DIVINE_ACCESS_TOKEN: 'token',
+          DIVINE_API_CAPABILITIES: 'daily-horoscope',
+        },
+        fetchImpl: (async () => {
+          called = true;
+          throw new Error('disabled endpoint must not be called');
+        }) as typeof fetch,
+      },
+    );
+
+    expect(called).toBe(false);
+    expect(reading.provider).toBe('mock');
+  });
+
+  it('treats an HTTP-200 business denial as a local fallback', async () => {
+    const env = {
+      DIVINE_API_KEY: 'key',
+      DIVINE_ACCESS_TOKEN: 'token',
+      DIVINE_API_BASE_URL: 'https://example.test',
+      DIVINE_API_CAPABILITIES: 'daily-horoscope',
+      DIVINE_API_CAPABILITIES_CHECKED_AT: '2026-08-12T00:00:00.000Z',
+    };
+    const reading = await getDailyAstrologyReading(
+      { birthday: '1996-03-21', zodiacSign: 'aries' },
+      {
+        env,
+        fetchImpl: (async () =>
+          ({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              success: 2,
+              msg: 'You are not authorized to access this API',
+            }),
+          }) as Response) as typeof fetch,
+      },
+    );
+
+    expect(reading.provider).toBe('mock');
+    expect(divineApiStatus(env).capabilities).toContainEqual({
+      capability: 'daily-horoscope',
+      available: false,
+      checkedAt: '2026-08-12T00:00:00.000Z',
+      reason: 'not-authorized',
+    });
+  });
+
+  it('uses a recently expired validated response after a transient provider failure', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-12T00:00:00.000Z'));
+    let callCount = 0;
+    const env = {
+      DIVINE_API_KEY: 'key',
+      DIVINE_ACCESS_TOKEN: 'token',
+      DIVINE_API_BASE_URL: 'https://example.test',
+      DIVINE_API_CAPABILITIES: 'daily-horoscope',
+      DIVINE_API_CACHE_TTL_MS: '1000',
+      DIVINE_API_STALE_IF_ERROR_MS: '5000',
+    };
+    const fetchImpl = (async () => {
+      callCount += 1;
+      if (callCount > 1) throw new Error('provider unavailable');
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          success: 1,
+          data: { prediction: { personal_life: 'Last verified provider result.' } },
+        }),
+      } as Response;
+    }) as typeof fetch;
+
+    const first = await getDailyAstrologyReading(
+      { birthday: '1996-03-21', zodiacSign: 'aries' },
+      { env, fetchImpl },
+    );
+    vi.advanceTimersByTime(2000);
+    const stale = await getDailyAstrologyReading(
+      { birthday: '1996-03-21', zodiacSign: 'aries' },
+      { env, fetchImpl },
+    );
+    vi.advanceTimersByTime(5000);
+    const expired = await getDailyAstrologyReading(
+      { birthday: '1996-03-21', zodiacSign: 'aries' },
+      { env, fetchImpl },
+    );
+
+    expect(first.headline).toBe('Last verified provider result.');
+    expect(stale.provider).toBe('divineapi');
+    expect(stale.headline).toBe('Last verified provider result.');
+    expect(expired.provider).toBe('mock');
+  });
+
+  it('reports every known capability without exposing provider secrets', () => {
+    const status = divineApiStatus({
+      DIVINE_API_KEY: 'secret-key',
+      DIVINE_ACCESS_TOKEN: 'secret-token',
+      DIVINE_API_CAPABILITIES: 'daily-horoscope,weekly-horoscope',
+      DIVINE_API_CAPABILITIES_CHECKED_AT: '2026-08-12T00:00:00.000Z',
+    });
+
+    expect(status.capabilities).toHaveLength(10);
+    expect(status.capabilities).toContainEqual({
+      capability: 'daily-horoscope',
+      available: true,
+      checkedAt: '2026-08-12T00:00:00.000Z',
+    });
+    expect(status.capabilities).toContainEqual({
+      capability: 'daily-tarot',
+      available: false,
+      checkedAt: '2026-08-12T00:00:00.000Z',
+      reason: 'not-configured',
+    });
+    expect(JSON.stringify(status)).not.toContain('secret-key');
+    expect(JSON.stringify(status)).not.toContain('secret-token');
+  });
+
   it('maps the official weekly horoscope response and reuses its cache', async () => {
     const calls: string[] = [];
     const fetchImpl = (async (url: Parameters<typeof fetch>[0]) => {
@@ -96,6 +222,7 @@ describe('astrology service', () => {
         ok: true,
         status: 200,
         json: async () => ({
+          success: 1,
           data: {
             week: 'August 10 - August 16',
             weekly_horoscope: {
@@ -117,6 +244,7 @@ describe('astrology service', () => {
         DIVINE_ACCESS_TOKEN: 'token',
         DIVINE_API_BASE_URL: 'https://example.test',
         DIVINE_API_CACHE_TTL_MS: '60000',
+        DIVINE_API_CAPABILITIES: 'weekly-horoscope',
       },
       fetchImpl,
       now: new Date('2026-08-11T00:00:00.000Z'),
@@ -147,6 +275,7 @@ describe('astrology service', () => {
         ok: true,
         status: 200,
         json: async () => ({
+          success: 1,
           data: {
             prediction: {
               card: 'The Sun',
@@ -167,6 +296,7 @@ describe('astrology service', () => {
           DIVINE_API_KEY: 'key',
           DIVINE_ACCESS_TOKEN: 'token',
           DIVINE_API_BASE_URL: 'https://example.test',
+          DIVINE_API_CAPABILITIES: 'yes-no-tarot',
         },
         fetchImpl,
         now: new Date('2026-08-11T00:00:00.000Z'),
@@ -189,6 +319,7 @@ describe('astrology service', () => {
           DIVINE_API_KEY: 'key',
           DIVINE_ACCESS_TOKEN: 'token',
           DIVINE_API_BASE_URL: 'https://example.test',
+          DIVINE_API_CAPABILITIES: 'yes-no-tarot',
         },
         fetchImpl: (async () => {
           throw new Error('provider unavailable');
@@ -209,6 +340,7 @@ describe('astrology service', () => {
         ok: true,
         status: 200,
         json: async () => ({
+          success: 1,
           data: {
             prediction: {
               personal_life: 'A clear daily summary from DivineAPI.',
@@ -227,6 +359,7 @@ describe('astrology service', () => {
           DIVINE_API_KEY: 'key',
           DIVINE_ACCESS_TOKEN: 'token',
           DIVINE_API_BASE_URL: 'https://example.test',
+          DIVINE_API_CAPABILITIES: 'daily-horoscope',
         },
         fetchImpl,
         now: new Date('2026-06-25T00:00:00.000Z'),
@@ -250,6 +383,7 @@ describe('astrology service', () => {
         ok: true,
         status: 200,
         json: async () => ({
+          success: 1,
           data: {
             card_name: 'The Sun',
             card_type: 'Major Arcana',
@@ -265,6 +399,7 @@ describe('astrology service', () => {
           DIVINE_API_KEY: 'key',
           DIVINE_ACCESS_TOKEN: 'token',
           DIVINE_API_BASE_URL: 'https://example.test',
+          DIVINE_API_CAPABILITIES: 'daily-tarot',
         },
         fetchImpl,
         now: new Date('2026-06-25T00:00:00.000Z'),
@@ -285,6 +420,7 @@ describe('astrology service', () => {
         ok: true,
         status: 200,
         json: async () => ({
+          success: 1,
           data: {
             prediction: {
               personal_life: `Cached daily summary ${callCount}.`,
@@ -300,6 +436,7 @@ describe('astrology service', () => {
         DIVINE_ACCESS_TOKEN: 'token',
         DIVINE_API_BASE_URL: 'https://example.test',
         DIVINE_API_CACHE_TTL_MS: '60000',
+        DIVINE_API_CAPABILITIES: 'daily-horoscope',
       },
       fetchImpl,
       now: new Date('2026-06-25T00:00:00.000Z'),
@@ -328,6 +465,7 @@ describe('astrology service', () => {
         ok: true,
         status: 200,
         json: async () => ({
+          success: 1,
           data: {
             prediction: {
               personal_life: `Uncached daily summary ${callCount}.`,
@@ -343,6 +481,7 @@ describe('astrology service', () => {
         DIVINE_ACCESS_TOKEN: 'token',
         DIVINE_API_BASE_URL: 'https://example.test',
         DIVINE_API_CACHE_TTL_MS: '0',
+        DIVINE_API_CAPABILITIES: 'daily-horoscope',
       },
       fetchImpl,
       now: new Date('2026-06-25T00:00:00.000Z'),

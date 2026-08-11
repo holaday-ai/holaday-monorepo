@@ -1,3 +1,12 @@
+import {
+  type AstrologyCapability,
+  DivineApiContractError,
+  type ProviderCapabilityState,
+  allAstrologyCapabilities,
+  assertDivineApiSuccess,
+  readConfiguredCapabilities,
+} from './divine-api-contract.js';
+
 export type ZodiacSign =
   | 'aries'
   | 'taurus'
@@ -80,6 +89,9 @@ interface DivineApiConfig {
   accessToken: string;
   baseUrl: string;
   cacheTtlMs: number;
+  staleIfErrorMs: number;
+  capabilityRefreshTtlMs: number;
+  capabilities: Set<AstrologyCapability>;
 }
 
 interface RequestOptions {
@@ -90,7 +102,16 @@ interface RequestOptions {
 
 const DIVINE_DEFAULT_BASE_URL = 'https://astroapi-5.divineapi.com';
 const DIVINE_DEFAULT_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
-const divineApiCache = new Map<string, { expiresAt: number; value: unknown }>();
+const DIVINE_DEFAULT_STALE_IF_ERROR_MS = 24 * 60 * 60 * 1000;
+const DIVINE_DEFAULT_CAPABILITY_REFRESH_TTL_MS = 15 * 60 * 1000;
+const divineApiCache = new Map<
+  string,
+  { expiresAt: number; staleUntil: number; value: unknown }
+>();
+const observedCapabilityFailures = new Map<
+  AstrologyCapability,
+  { reason: 'not-authorized' | 'invalid-response'; expiresAt: number }
+>();
 
 const ZODIAC_META: Record<
   ZodiacSign,
@@ -214,6 +235,7 @@ export function divineApiStatus(env: NodeJS.ProcessEnv = process.env): {
   apiConfigured: boolean;
   cacheTtlMs: number;
   cacheEntries: number;
+  capabilities: ProviderCapabilityState[];
   endpoints: {
     dailyHoroscope: string;
     dailyTarot: string;
@@ -222,11 +244,24 @@ export function divineApiStatus(env: NodeJS.ProcessEnv = process.env): {
   };
 } {
   const config = divineApiConfig(env);
+  const checkedAt = env.DIVINE_API_CAPABILITIES_CHECKED_AT?.trim() || new Date().toISOString();
   return {
     provider: config ? 'divineapi' : 'mock',
     apiConfigured: Boolean(config),
     cacheTtlMs: config?.cacheTtlMs ?? readCacheTtlMs(env),
     cacheEntries: divineApiCache.size,
+    capabilities: allAstrologyCapabilities().map((capability) => {
+      const observedFailure = activeCapabilityFailure(capability);
+      const available = Boolean(config?.capabilities.has(capability)) && !observedFailure;
+      return available
+        ? { capability, available, checkedAt }
+        : {
+            capability,
+            available,
+            checkedAt,
+            reason: observedFailure?.reason ?? ('not-configured' as const),
+          };
+    }),
     endpoints: {
       dailyHoroscope: '/api/v5/daily-horoscope',
       dailyTarot: '/api/v2/daily-tarot',
@@ -238,6 +273,7 @@ export function divineApiStatus(env: NodeJS.ProcessEnv = process.env): {
 
 export function clearDivineApiCacheForTest(): void {
   divineApiCache.clear();
+  observedCapabilityFailures.clear();
 }
 
 export function zodiacFromBirthday(birthday: string): ZodiacSign {
@@ -296,7 +332,7 @@ export async function getDailyAstrologyReading(
 ): Promise<AstrologyReading> {
   const mock = buildDailyAstrologyReading(input, options);
   const config = divineApiConfig(options.env);
-  if (!config) return mock;
+  if (!isCapabilityAvailable(config, 'daily-horoscope')) return mock;
 
   try {
     const json = await postDivineApiJson(
@@ -309,7 +345,9 @@ export async function getDailyAstrologyReading(
         lan: languageCode(input.locale),
       },
       config,
+      'daily-horoscope',
       options.fetchImpl,
+      [['data', 'prediction']],
     );
     return mergeDivineDaily(mock, json);
   } catch {
@@ -361,7 +399,7 @@ export async function getDailyTarotReading(
 ): Promise<TarotReading> {
   const mock = buildMockTarotReading(input, options);
   const config = divineApiConfig(options.env);
-  if (!config) return mock;
+  if (!isCapabilityAvailable(config, 'daily-tarot')) return mock;
 
   try {
     const json = await postDivineApiJson(
@@ -373,7 +411,9 @@ export async function getDailyTarotReading(
         lan: languageCode(input.locale),
       },
       config,
+      'daily-tarot',
       options.fetchImpl,
+      [['data', 'card_name']],
     );
     return mergeDivineTarot(mock, json);
   } catch {
@@ -415,7 +455,7 @@ export async function getWeeklyAstrologyReading(
 ): Promise<WeeklyAstrologyReading> {
   const mock = buildMockWeeklyAstrologyReading(input, options);
   const config = divineApiConfig(options.env);
-  if (!config) return mock;
+  if (!isCapabilityAvailable(config, 'weekly-horoscope')) return mock;
 
   try {
     const json = await postDivineApiJson(
@@ -428,7 +468,9 @@ export async function getWeeklyAstrologyReading(
         lan: languageCode(input.locale),
       },
       config,
+      'weekly-horoscope',
       options.fetchImpl,
+      [['data', 'weekly_horoscope']],
     );
     return mergeDivineWeekly(mock, json);
   } catch {
@@ -481,7 +523,7 @@ export async function getYesNoTarotReading(
 ): Promise<YesNoTarotReading> {
   const mock = buildMockYesNoTarotReading(input, options);
   const config = divineApiConfig(options.env);
-  if (!config) return mock;
+  if (!isCapabilityAvailable(config, 'yes-no-tarot')) return mock;
 
   try {
     const json = await postDivineApiJson(
@@ -491,7 +533,9 @@ export async function getYesNoTarotReading(
         lan: languageCode(input.locale),
       },
       config,
+      'yes-no-tarot',
       options.fetchImpl,
+      [['data', 'prediction']],
     );
     return mergeDivineYesNoTarot(mock, json);
   } catch {
@@ -541,6 +585,15 @@ function divineApiConfig(env: NodeJS.ProcessEnv = process.env): DivineApiConfig 
     accessToken,
     baseUrl: (env.DIVINE_API_BASE_URL ?? DIVINE_DEFAULT_BASE_URL).replace(/\/+$/, ''),
     cacheTtlMs: readCacheTtlMs(env),
+    staleIfErrorMs: readNonNegativeMs(
+      env.DIVINE_API_STALE_IF_ERROR_MS,
+      DIVINE_DEFAULT_STALE_IF_ERROR_MS,
+    ),
+    capabilityRefreshTtlMs: readNonNegativeMs(
+      env.DIVINE_API_CAPABILITY_REFRESH_TTL_MS,
+      DIVINE_DEFAULT_CAPABILITY_REFRESH_TTL_MS,
+    ),
+    capabilities: readConfiguredCapabilities(env),
   };
 }
 
@@ -548,35 +601,73 @@ async function postDivineApiJson(
   path: string,
   body: Record<string, string>,
   config: DivineApiConfig,
-  fetchImpl: typeof fetch = fetch,
+  capability: AstrologyCapability,
+  fetchImpl: typeof fetch | undefined,
+  requiredPaths: ReadonlyArray<ReadonlyArray<string>>,
 ): Promise<unknown> {
   const bodyString = new URLSearchParams(body).toString();
-  const cacheKey = `${config.baseUrl}${path}?${bodyString}`;
+  const cacheParams = new URLSearchParams(
+    Object.entries(body).filter(([key]) => key !== 'api_key'),
+  ).toString();
+  const cacheKey = `${config.baseUrl}${path}?${cacheParams}`;
+  let staleValue: unknown;
   if (config.cacheTtlMs > 0) {
     const cached = divineApiCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) return cached.value;
-    if (cached) divineApiCache.delete(cacheKey);
+    if (cached && cached.staleUntil > Date.now()) staleValue = cached.value;
+    if (cached && cached.staleUntil <= Date.now()) divineApiCache.delete(cacheKey);
   }
-  const res = await fetchImpl(`${config.baseUrl}${path}`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${config.accessToken}`,
-      'Content-Type': 'application/x-www-form-urlencoded',
-      Accept: 'application/json',
-    },
-    body: bodyString,
-  });
-  if (!res.ok) {
-    throw new Error(`DivineAPI request failed: ${res.status}`);
-  }
-  const json = await res.json();
-  if (config.cacheTtlMs > 0) {
-    divineApiCache.set(cacheKey, {
-      expiresAt: Date.now() + config.cacheTtlMs,
-      value: json,
+  try {
+    const res = await (fetchImpl ?? fetch)(`${config.baseUrl}${path}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${config.accessToken}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Accept: 'application/json',
+      },
+      body: bodyString,
     });
+    if (!res.ok) {
+      throw new Error(`DivineAPI request failed: ${res.status}`);
+    }
+    const json = await res.json();
+    assertDivineApiSuccess(json, requiredPaths);
+    if (config.cacheTtlMs > 0) {
+      const expiresAt = Date.now() + config.cacheTtlMs;
+      divineApiCache.set(cacheKey, {
+        expiresAt,
+        staleUntil: expiresAt + config.staleIfErrorMs,
+        value: json,
+      });
+    }
+    return json;
+  } catch (error) {
+    if (error instanceof DivineApiContractError) {
+      observedCapabilityFailures.set(capability, {
+        reason: error.reason === 'not-authorized' ? 'not-authorized' : 'invalid-response',
+        expiresAt: Date.now() + config.capabilityRefreshTtlMs,
+      });
+    }
+    if (staleValue !== undefined) return staleValue;
+    throw error;
   }
-  return json;
+}
+
+function activeCapabilityFailure(
+  capability: AstrologyCapability,
+): { reason: 'not-authorized' | 'invalid-response'; expiresAt: number } | null {
+  const failure = observedCapabilityFailures.get(capability);
+  if (!failure) return null;
+  if (failure.expiresAt > Date.now()) return failure;
+  observedCapabilityFailures.delete(capability);
+  return null;
+}
+
+function isCapabilityAvailable(
+  config: DivineApiConfig | null,
+  capability: AstrologyCapability,
+): config is DivineApiConfig {
+  return Boolean(config?.capabilities.has(capability) && !activeCapabilityFailure(capability));
 }
 
 function mergeDivineDaily(mock: AstrologyReading, json: unknown): AstrologyReading {
@@ -729,10 +820,13 @@ function timezoneOffsetHours(date: Date): string {
 }
 
 function readCacheTtlMs(env: NodeJS.ProcessEnv = process.env): number {
-  const raw = env.DIVINE_API_CACHE_TTL_MS;
-  if (!raw) return DIVINE_DEFAULT_CACHE_TTL_MS;
+  return readNonNegativeMs(env.DIVINE_API_CACHE_TTL_MS, DIVINE_DEFAULT_CACHE_TTL_MS);
+}
+
+function readNonNegativeMs(raw: string | undefined, fallback: number): number {
+  if (!raw) return fallback;
   const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed < 0) return DIVINE_DEFAULT_CACHE_TTL_MS;
+  if (!Number.isFinite(parsed) || parsed < 0) return fallback;
   return parsed;
 }
 
