@@ -3,9 +3,12 @@ import {
   buildDailyAstrologyReading,
   clearDivineApiCacheForTest,
   divineApiStatus,
+  getAstrologyRanking,
   getDailyAstrologyReading,
   getDailyTarotReading,
+  getMonthlyAstrologyReading,
   getWeeklyAstrologyReading,
+  getYearlyAstrologyReading,
   getYesNoTarotReading,
   hasAstrologyApiCredentials,
   hasDivineApiCredentials,
@@ -164,7 +167,27 @@ describe('astrology service', () => {
         status: 200,
         json: async () => ({
           success: 1,
-          data: { prediction: { personal_life: 'Last verified provider result.' } },
+          data: {
+            date: '2026-08-12',
+            prediction: {
+              personal: 'Last verified provider result.',
+              health: 'Protect a calm pace.',
+              profession: 'Finish the most useful task first.',
+              emotions: 'Name the feeling before reacting.',
+              travel: 'Leave a little extra time.',
+              luck: ['Lucky Numbers : 1, 8'],
+            },
+            special: {
+              horoscope_percentage: {
+                personal: 80,
+                health: 80,
+                profession: 80,
+                emotions: 80,
+                travel: 80,
+                luck: 80,
+              },
+            },
+          },
         }),
       } as Response;
     }) as typeof fetch;
@@ -186,8 +209,34 @@ describe('astrology service', () => {
 
     expect(first.headline).toBe('Last verified provider result.');
     expect(stale.provider).toBe('divineapi');
+    expect(stale.freshness).toBe('stale');
     expect(stale.headline).toBe('Last verified provider result.');
     expect(expired.provider).toBe('mock');
+  });
+
+  it('rejects a success envelope that omits required horoscope dimensions', async () => {
+    const reading = await getDailyAstrologyReading(
+      { birthday: '1996-03-21', zodiacSign: 'aries', locale: 'en' },
+      {
+        env: {
+          DIVINE_API_KEY: 'key',
+          DIVINE_ACCESS_TOKEN: 'token',
+          DIVINE_API_BASE_URL: 'https://example.test',
+          DIVINE_API_CAPABILITIES: 'daily-horoscope',
+        },
+        fetchImpl: (async () =>
+          ({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              success: 1,
+              data: { prediction: { personal: 'Only one field is present.' } },
+            }),
+          }) as Response) as typeof fetch,
+      },
+    );
+
+    expect(reading.source).toBe('local-fallback');
   });
 
   it('reports every known capability without exposing provider secrets', () => {
@@ -215,9 +264,9 @@ describe('astrology service', () => {
   });
 
   it('maps the official weekly horoscope response and reuses its cache', async () => {
-    const calls: string[] = [];
-    const fetchImpl = (async (url: Parameters<typeof fetch>[0]) => {
-      calls.push(String(url));
+    const calls: Array<{ url: string; body: string }> = [];
+    const fetchImpl = (async (url: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      calls.push({ url: String(url), body: String(init?.body) });
       return {
         ok: true,
         status: 200,
@@ -231,9 +280,26 @@ describe('astrology service', () => {
               profession: 'Finish the important draft first.',
               emotions: 'Name the feeling before reacting.',
               travel: 'Keep the plan flexible.',
-              luck: 'Small experiments are favored.',
+              luck: [
+                'Colors of the week : Gold, Purple',
+                'Lucky Numbers of the week : 3, 7, 9',
+                'Lucky Alphabets you will be in sync with : L, M',
+                'Cosmic Tip : Small experiments are favored.',
+                'Tips for Singles : Leave room for one honest invitation.',
+                'Tips for Couples : Share one useful reflection.',
+              ],
             },
-            special: { lucky_color_codes: ['#FFB86B', '#9ED8FF'] },
+            special: {
+              lucky_color_codes: ['#FFB86B', '#9ED8FF'],
+              horoscope_percentage: {
+                personal: 80,
+                health: 70,
+                profession: 90,
+                emotions: 75,
+                travel: 60,
+                luck: 85,
+              },
+            },
           },
         }),
       } as Response;
@@ -251,20 +317,253 @@ describe('astrology service', () => {
     };
 
     const first = await getWeeklyAstrologyReading(
-      { birthday: '1996-03-21', zodiacSign: 'aries', locale: 'zh-CN' },
+      { birthday: '1996-03-21', zodiacSign: 'aries', locale: 'en' },
       options,
     );
     const second = await getWeeklyAstrologyReading(
-      { birthday: '1996-03-21', zodiacSign: 'aries', locale: 'zh-CN' },
+      { birthday: '1996-03-21', zodiacSign: 'aries', locale: 'en' },
       options,
     );
 
-    expect(calls).toEqual(['https://example.test/api/v5/weekly-horoscope']);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe('https://example.test/api/v5/weekly-horoscope');
+    expect(calls[0]?.body).toContain('week=current');
+    expect(calls[0]?.body).not.toContain('h_week=');
     expect(first).toEqual(second);
     expect(first.provider).toBe('divineapi');
     expect(first.weekLabel).toBe('August 10 - August 16');
     expect(first.profession).toBe('Finish the important draft first.');
     expect(first.luckyColors).toEqual(['#FFB86B', '#9ED8FF']);
+    expect(first.dimensions).toHaveLength(6);
+    expect(first.dimensions.find((item) => item.key === 'profession')?.score).toBe(90);
+  });
+
+  it('maps monthly and yearly responses into the shared period contract', async () => {
+    const fetchImpl = (async (url: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const isMonthly = String(url).endsWith('/monthly-horoscope');
+      const body = String(init?.body);
+      expect(body).toContain(isMonthly ? 'month=next' : 'year=current');
+      expect(body).toContain('sign=taurus');
+      const selector = isMonthly ? 'monthly_horoscope' : 'yearly_horoscope';
+      const rangeField = isMonthly ? { month: 'September 2026' } : { year: '2026' };
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          success: 1,
+          data: {
+            sign: 'Taurus',
+            ...rangeField,
+            [selector]: {
+              personal: 'Build one stable personal rhythm.',
+              health: 'Protect recovery time.',
+              profession: 'Finish the durable foundation first.',
+              emotions: 'Name the feeling before responding.',
+              travel: 'Keep plans flexible.',
+              luck: [
+                'Colors of the period : Green, Blue',
+                'Lucky Numbers of the period : 2, 6',
+                'Lucky Alphabets you will be in sync with : T, V',
+                'Cosmic Tip : Consistency creates room for good timing.',
+                'Tips for Singles : Keep one invitation simple.',
+                'Tips for Couples : Share one practical plan.',
+              ],
+            },
+            special: {
+              lucky_color_codes: ['#55AA77', '#5588CC'],
+              horoscope_percentage: {
+                personal: 72,
+                health: 74,
+                profession: 88,
+                emotions: 69,
+                travel: 65,
+                luck: 81,
+              },
+            },
+          },
+        }),
+      } as Response;
+    }) as typeof fetch;
+    const options = {
+      env: {
+        DIVINE_API_KEY: 'key',
+        DIVINE_ACCESS_TOKEN: 'token',
+        DIVINE_API_BASE_URL: 'https://example.test',
+        DIVINE_API_CAPABILITIES: 'monthly-horoscope,yearly-horoscope',
+      },
+      fetchImpl,
+      now: new Date('2026-08-12T00:00:00.000Z'),
+    };
+    const profile = {
+      birthday: '1996-03-21',
+      zodiacSign: 'aries' as const,
+      zodiacSignOverride: 'taurus' as const,
+      locale: 'en',
+    };
+
+    const monthly = await getMonthlyAstrologyReading(profile, 'next', options);
+    const yearly = await getYearlyAstrologyReading(profile, options);
+
+    expect(monthly).toMatchObject({
+      period: 'monthly',
+      source: 'divineapi',
+      freshness: 'fresh',
+      rangeKey: 'next',
+      rangeLabel: 'September 2026',
+      zodiacSign: 'taurus',
+      luckyNumbers: ['2', '6'],
+      luckyLetters: ['T', 'V'],
+    });
+    expect(yearly).toMatchObject({
+      period: 'yearly',
+      source: 'divineapi',
+      rangeKey: 'current',
+      rangeLabel: '2026',
+      zodiacSign: 'taurus',
+    });
+    expect(monthly.dimensions.find((item) => item.key === 'profession')?.score).toBe(88);
+    expect(yearly.cosmicTip).toBe('Consistency creates room for good timing.');
+  });
+
+  it('returns local Chinese content without calling the English host when Translator is unavailable', async () => {
+    let called = false;
+    const reading = await getDailyAstrologyReading(
+      { birthday: '1996-03-21', zodiacSign: 'aries', locale: 'zh-CN' },
+      {
+        env: {
+          DIVINE_API_KEY: 'key',
+          DIVINE_ACCESS_TOKEN: 'token',
+          DIVINE_API_BASE_URL: 'https://english.example.test',
+          DIVINE_API_CAPABILITIES: 'daily-horoscope',
+        },
+        fetchImpl: (async () => {
+          called = true;
+          throw new Error('English endpoint must not receive lan=zh');
+        }) as typeof fetch,
+      },
+    );
+
+    expect(called).toBe(false);
+    expect(reading.source).toBe('local-fallback');
+    expect(reading.summary).toContain('今天');
+  });
+
+  it('routes Chinese horoscope requests through the configured Translator host', async () => {
+    const calls: Array<{ url: string; body: string }> = [];
+    const reading = await getDailyAstrologyReading(
+      { birthday: '1996-03-21', zodiacSign: 'aries', locale: 'zh-CN' },
+      {
+        env: {
+          DIVINE_API_KEY: 'key',
+          DIVINE_ACCESS_TOKEN: 'token',
+          DIVINE_API_BASE_URL: 'https://english.example.test',
+          DIVINE_API_TRANSLATOR_BASE_URL: 'https://translator.example.test',
+          DIVINE_API_CAPABILITIES: 'daily-horoscope,translator',
+        },
+        fetchImpl: (async (url, init) => {
+          calls.push({ url: String(url), body: String(init?.body) });
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              success: 1,
+              data: {
+                sign: 'Aries',
+                date: '2026-08-12',
+                prediction: {
+                  personal: '今天把最重要的一步说清楚。',
+                  health: '给身体留出恢复时间。',
+                  profession: '先完成关键草稿。',
+                  emotions: '感受清楚后再回应。',
+                  travel: '给行程留一点弹性。',
+                  luck: ['Lucky Numbers : 1, 8'],
+                },
+                special: { horoscope_percentage: { personal: 82 } },
+              },
+            }),
+          } as Response;
+        }) as typeof fetch,
+      },
+    );
+
+    expect(calls).toEqual([
+      {
+        url: 'https://translator.example.test/api/v5/daily-horoscope',
+        body: expect.stringContaining('lan=zh'),
+      },
+    ]);
+    expect(reading.source).toBe('divineapi');
+  });
+
+  it('returns a complete same-date ranking only from twelve provider-backed scores', async () => {
+    const signs = [
+      'aries',
+      'taurus',
+      'gemini',
+      'cancer',
+      'leo',
+      'virgo',
+      'libra',
+      'scorpio',
+      'sagittarius',
+      'capricorn',
+      'aquarius',
+      'pisces',
+    ] as const;
+    const fetchImpl = (async (_url: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const body = new URLSearchParams(String(init?.body));
+      const sign = body.get('sign') as (typeof signs)[number];
+      const score = 60 + signs.indexOf(sign);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          success: 1,
+          data: {
+            sign,
+            date: '2026-08-12',
+            prediction: {
+              personal: `${sign} personal`,
+              health: `${sign} health`,
+              profession: `${sign} profession`,
+              emotions: `${sign} emotions`,
+              travel: `${sign} travel`,
+              luck: [`Lucky Numbers : ${score}`],
+            },
+            special: {
+              horoscope_percentage: {
+                personal: score,
+                health: score,
+                profession: score,
+                emotions: score,
+                travel: score,
+                luck: score,
+              },
+            },
+          },
+        }),
+      } as Response;
+    }) as typeof fetch;
+
+    const result = await getAstrologyRanking('en', {
+      env: {
+        DIVINE_API_KEY: 'key',
+        DIVINE_ACCESS_TOKEN: 'token',
+        DIVINE_API_BASE_URL: 'https://example.test',
+        DIVINE_API_CAPABILITIES: 'daily-horoscope',
+      },
+      fetchImpl,
+      now: new Date('2026-08-12T00:00:00.000Z'),
+    });
+
+    expect(result.complete).toBe(true);
+    expect(result.items).toHaveLength(12);
+    expect(result.items[0]).toMatchObject({
+      zodiacSign: 'pisces',
+      score: 71,
+      dateLabel: '2026-08-12',
+    });
+    expect(result.items[11]).toMatchObject({ zodiacSign: 'aries', score: 60 });
   });
 
   it('maps yes/no tarot without sending a user question and falls back safely', async () => {
@@ -290,13 +589,14 @@ describe('astrology service', () => {
     }) as typeof fetch;
 
     const reading = await getYesNoTarotReading(
-      { zodiacSign: 'leo', locale: 'zh-CN' },
+      { zodiacSign: 'leo', locale: 'en' },
       {
         env: {
           DIVINE_API_KEY: 'key',
           DIVINE_ACCESS_TOKEN: 'token',
           DIVINE_API_BASE_URL: 'https://example.test',
           DIVINE_API_CAPABILITIES: 'yes-no-tarot',
+          DIVINE_API_CACHE_TTL_MS: '0',
         },
         fetchImpl,
         now: new Date('2026-08-11T00:00:00.000Z'),
@@ -343,8 +643,12 @@ describe('astrology service', () => {
           success: 1,
           data: {
             prediction: {
-              personal_life: 'A clear daily summary from DivineAPI.',
+              personal: 'A clear daily summary from DivineAPI.',
+              health: 'Protect a steady rhythm.',
               profession: 'Prioritize one important work task.',
+              emotions: 'Give yourself room to respond.',
+              travel: 'Keep the route simple.',
+              luck: ['Lucky Numbers : 2, 7'],
             },
             lucky_color: 'Blue',
           },
@@ -353,7 +657,7 @@ describe('astrology service', () => {
     }) as typeof fetch;
 
     const reading = await getDailyAstrologyReading(
-      { birthday: '1996-03-21', zodiacSign: 'aries', locale: 'zh-CN' },
+      { birthday: '1996-03-21', zodiacSign: 'aries', locale: 'en' },
       {
         env: {
           DIVINE_API_KEY: 'key',
@@ -423,7 +727,12 @@ describe('astrology service', () => {
           success: 1,
           data: {
             prediction: {
-              personal_life: `Cached daily summary ${callCount}.`,
+              personal: `Cached daily summary ${callCount}.`,
+              health: 'Protect a steady rhythm.',
+              profession: 'Prioritize one important work task.',
+              emotions: 'Give yourself room to respond.',
+              travel: 'Keep the route simple.',
+              luck: ['Lucky Numbers : 2, 7'],
             },
           },
         }),
@@ -443,11 +752,11 @@ describe('astrology service', () => {
     };
 
     const first = await getDailyAstrologyReading(
-      { birthday: '1996-03-21', zodiacSign: 'aries', locale: 'zh-CN' },
+      { birthday: '1996-03-21', zodiacSign: 'aries', locale: 'en' },
       options,
     );
     const second = await getDailyAstrologyReading(
-      { birthday: '1996-03-21', zodiacSign: 'aries', locale: 'zh-CN' },
+      { birthday: '1996-03-21', zodiacSign: 'aries', locale: 'en' },
       options,
     );
 
@@ -468,7 +777,12 @@ describe('astrology service', () => {
           success: 1,
           data: {
             prediction: {
-              personal_life: `Uncached daily summary ${callCount}.`,
+              personal: `Uncached daily summary ${callCount}.`,
+              health: 'Protect a steady rhythm.',
+              profession: 'Prioritize one important work task.',
+              emotions: 'Give yourself room to respond.',
+              travel: 'Keep the route simple.',
+              luck: ['Lucky Numbers : 2, 7'],
             },
           },
         }),
