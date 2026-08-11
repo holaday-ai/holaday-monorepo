@@ -5,6 +5,8 @@ import {
   divineApiStatus,
   getDailyAstrologyReading,
   getDailyTarotReading,
+  getWeeklyAstrologyReading,
+  getYesNoTarotReading,
   hasAstrologyApiCredentials,
   hasDivineApiCredentials,
   zodiacFromBirthday,
@@ -80,8 +82,123 @@ describe('astrology service', () => {
       endpoints: {
         dailyHoroscope: '/api/v5/daily-horoscope',
         dailyTarot: '/api/v2/daily-tarot',
+        weeklyHoroscope: '/api/v5/weekly-horoscope',
+        yesNoTarot: '/api/v2/yes-or-no-tarot',
       },
     });
+  });
+
+  it('maps the official weekly horoscope response and reuses its cache', async () => {
+    const calls: string[] = [];
+    const fetchImpl = (async (url: Parameters<typeof fetch>[0]) => {
+      calls.push(String(url));
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: {
+            week: 'August 10 - August 16',
+            weekly_horoscope: {
+              personal: 'Make room for one honest conversation.',
+              health: 'Choose a calmer pace.',
+              profession: 'Finish the important draft first.',
+              emotions: 'Name the feeling before reacting.',
+              travel: 'Keep the plan flexible.',
+              luck: 'Small experiments are favored.',
+            },
+            special: { lucky_color_codes: ['#FFB86B', '#9ED8FF'] },
+          },
+        }),
+      } as Response;
+    }) as typeof fetch;
+    const options = {
+      env: {
+        DIVINE_API_KEY: 'key',
+        DIVINE_ACCESS_TOKEN: 'token',
+        DIVINE_API_BASE_URL: 'https://example.test',
+        DIVINE_API_CACHE_TTL_MS: '60000',
+      },
+      fetchImpl,
+      now: new Date('2026-08-11T00:00:00.000Z'),
+    };
+
+    const first = await getWeeklyAstrologyReading(
+      { birthday: '1996-03-21', zodiacSign: 'aries', locale: 'zh-CN' },
+      options,
+    );
+    const second = await getWeeklyAstrologyReading(
+      { birthday: '1996-03-21', zodiacSign: 'aries', locale: 'zh-CN' },
+      options,
+    );
+
+    expect(calls).toEqual(['https://example.test/api/v5/weekly-horoscope']);
+    expect(first).toEqual(second);
+    expect(first.provider).toBe('divineapi');
+    expect(first.weekLabel).toBe('August 10 - August 16');
+    expect(first.profession).toBe('Finish the important draft first.');
+    expect(first.luckyColors).toEqual(['#FFB86B', '#9ED8FF']);
+  });
+
+  it('maps yes/no tarot without sending a user question and falls back safely', async () => {
+    const bodies: string[] = [];
+    const fetchImpl = (async (_url: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      bodies.push(String(init?.body));
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: {
+            prediction: {
+              card: 'The Sun',
+              category: 'Major Arcana',
+              yes_no: 'YES',
+              result: 'Move forward with a clear and simple first step.',
+              image: 'https://example.test/the-sun.jpg',
+            },
+          },
+        }),
+      } as Response;
+    }) as typeof fetch;
+
+    const reading = await getYesNoTarotReading(
+      { zodiacSign: 'leo', locale: 'zh-CN' },
+      {
+        env: {
+          DIVINE_API_KEY: 'key',
+          DIVINE_ACCESS_TOKEN: 'token',
+          DIVINE_API_BASE_URL: 'https://example.test',
+        },
+        fetchImpl,
+        now: new Date('2026-08-11T00:00:00.000Z'),
+      },
+    );
+
+    expect(reading).toMatchObject({
+      provider: 'divineapi',
+      answer: 'yes',
+      card: 'The Sun',
+      category: 'Major Arcana',
+      result: 'Move forward with a clear and simple first step.',
+    });
+    expect(bodies[0]).not.toMatch(/question|Move forward/);
+
+    const fallback = await getYesNoTarotReading(
+      { zodiacSign: 'leo' },
+      {
+        env: {
+          DIVINE_API_KEY: 'key',
+          DIVINE_ACCESS_TOKEN: 'token',
+          DIVINE_API_BASE_URL: 'https://example.test',
+        },
+        fetchImpl: (async () => {
+          throw new Error('provider unavailable');
+        }) as typeof fetch,
+        now: new Date('2026-08-12T00:00:00.000Z'),
+      },
+    );
+    expect(fallback.provider).toBe('mock');
+    expect(['yes', 'no', 'maybe']).toContain(fallback.answer);
+    expect(fallback.result.length).toBeGreaterThan(10);
   });
 
   it('maps DivineAPI daily horoscope responses onto the reading shape', async () => {

@@ -2,12 +2,13 @@ import type { AstroProfile } from '@/lib/astrology';
 import type { EnergyAstrologyState } from './useEnergyAstrology';
 
 export type EnergyMood = 'good' | 'tired' | 'stressed' | 'unwind';
-export type EnergyExperienceId = 'tarot' | 'light-test' | 'horoscope' | 'games';
+export type EnergyNeed = 'focus' | 'relax' | 'confidence' | 'uplift';
+export type EnergyExperienceId = 'recharge' | 'tarot' | 'light-test' | 'horoscope' | 'games';
 export type ExperiencePhase = 'intro' | 'active' | 'result' | 'error';
 
 export interface EnergyExperienceDefinition {
   id: EnergyExperienceId;
-  kind: 'card' | 'test' | 'horoscope' | 'game';
+  kind: 'ritual' | 'card' | 'test' | 'horoscope' | 'game';
   title: string;
   description: string;
   estimatedSeconds: number;
@@ -18,9 +19,11 @@ export interface EnergyExperienceDefinition {
 
 export interface EnergyExperienceProps {
   mood: EnergyMood | null;
+  energyNeed: EnergyNeed;
   profileStorageScope: string | null;
   profile: AstroProfile;
   astrology: EnergyAstrologyState;
   phase: ExperiencePhase;
   onPhaseChange: (phase: ExperiencePhase) => void;
+  onExperienceComplete: (kind: 'recharge' | 'tarot' | 'game' | 'test' | 'horoscope') => void;
 }

@@ -2,16 +2,18 @@ import { describe, expect, it, vi } from 'vitest';
 import { ENERGY_EXPERIENCES, activeEnergyExperiences } from './experience-registry';
 
 describe('energy registry', () => {
-  it('has stable unique ids and excludes games from actionable entries', () => {
-    expect(new Set(ENERGY_EXPERIENCES.map((item) => item.id)).size).toBe(4);
+  it('has stable unique ids and includes the recharge ritual', () => {
+    expect(new Set(ENERGY_EXPERIENCES.map((item) => item.id)).size).toBe(5);
     expect(activeEnergyExperiences().map((item) => item.id)).toEqual([
+      'recharge',
       'tarot',
       'light-test',
       'horoscope',
+      'games',
     ]);
     expect(ENERGY_EXPERIENCES.find((item) => item.id === 'games')).toMatchObject({
-      status: 'coming-soon',
-      actionable: false,
+      status: 'active',
+      actionable: true,
     });
   });
 

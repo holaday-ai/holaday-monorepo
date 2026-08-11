@@ -7,6 +7,26 @@ export interface EnergyExperienceRegistration extends EnergyExperienceDefinition
 
 export const ENERGY_EXPERIENCES: EnergyExperienceRegistration[] = [
   {
+    id: 'recharge',
+    kind: 'ritual',
+    title: '30 秒补给',
+    description: '跟着三段光点找回一点能量',
+    estimatedSeconds: 30,
+    status: 'active',
+    actionable: true,
+    requiredProfileFields: [],
+    load: () =>
+      import('./experiences/RechargeExperience').then((module) => ({
+        default: (props: EnergyExperienceProps) =>
+          createElement(module.RechargeExperience, {
+            need: props.energyNeed,
+            phase: props.phase,
+            onPhaseChange: props.onPhaseChange,
+            onComplete: () => props.onExperienceComplete('recharge'),
+          }),
+      })),
+  },
+  {
     id: 'tarot',
     kind: 'card',
     title: '抽张卡',
@@ -20,8 +40,12 @@ export const ENERGY_EXPERIENCES: EnergyExperienceRegistration[] = [
         default: (props: EnergyExperienceProps) =>
           createElement(module.TarotExperience, {
             tarot: props.astrology.tarot,
+            yesNoTarot: props.astrology.yesNoTarot,
+            yesNoLoading: props.astrology.yesNoLoading,
+            onDrawYesNo: props.astrology.drawYesNoTarot,
             phase: props.phase,
             onPhaseChange: props.onPhaseChange,
+            onComplete: () => props.onExperienceComplete('tarot'),
           }),
       })),
   },
@@ -42,6 +66,7 @@ export const ENERGY_EXPERIENCES: EnergyExperienceRegistration[] = [
             reading: props.astrology.reading,
             phase: props.phase,
             onPhaseChange: props.onPhaseChange,
+            onComplete: () => props.onExperienceComplete('test'),
           }),
       })),
   },
@@ -60,6 +85,9 @@ export const ENERGY_EXPERIENCES: EnergyExperienceRegistration[] = [
           createElement(module.HoroscopeExperience, {
             profile: props.profile,
             astrology: props.astrology,
+            phase: props.phase,
+            onPhaseChange: props.onPhaseChange,
+            onComplete: () => props.onExperienceComplete('horoscope'),
           }),
       })),
   },
@@ -67,11 +95,20 @@ export const ENERGY_EXPERIENCES: EnergyExperienceRegistration[] = [
     id: 'games',
     kind: 'game',
     title: '小游戏',
-    description: '轻量小游戏正在准备中',
-    estimatedSeconds: 180,
-    status: 'coming-soon',
-    actionable: false,
+    description: '接住十二颗轻盈的能量光点',
+    estimatedSeconds: 45,
+    status: 'active',
+    actionable: true,
     requiredProfileFields: [],
+    load: () =>
+      import('./experiences/MiniGameExperience').then((module) => ({
+        default: (props: EnergyExperienceProps) =>
+          createElement(module.MiniGameExperience, {
+            phase: props.phase,
+            onPhaseChange: props.onPhaseChange,
+            onComplete: () => props.onExperienceComplete('game'),
+          }),
+      })),
   },
 ];
 

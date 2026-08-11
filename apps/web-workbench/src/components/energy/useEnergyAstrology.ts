@@ -3,7 +3,9 @@ import { trpc } from '@/lib/trpc';
 import * as React from 'react';
 
 type ProviderReading = Awaited<ReturnType<typeof trpc.astrology.daily.query>>;
+type ProviderWeekly = Awaited<ReturnType<typeof trpc.astrology.weekly.query>>;
 type ProviderTarot = Awaited<ReturnType<typeof trpc.astrology.tarot.query>>;
+type ProviderYesNoTarot = Awaited<ReturnType<typeof trpc.astrology.yesNoTarot.query>>;
 
 export interface EnergyTarotReading {
   title: string;
@@ -11,16 +13,41 @@ export interface EnergyTarotReading {
   body: string;
 }
 
+export interface EnergyWeeklyReading {
+  weekLabel: string;
+  personal: string;
+  health: string;
+  profession: string;
+  emotions: string;
+  travel: string;
+  luck: string;
+  luckyColors: string[];
+}
+
+export interface EnergyYesNoTarotReading {
+  answer: 'yes' | 'no' | 'maybe';
+  card: string;
+  category: string;
+  result: string;
+}
+
 export interface EnergyAstrologyState {
   reading: AstroReading;
   tarot: EnergyTarotReading;
+  weekly: EnergyWeeklyReading;
+  yesNoTarot: EnergyYesNoTarotReading | null;
+  yesNoLoading: boolean;
   source: 'provider' | 'local-fallback';
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
+  drawYesNoTarot: () => Promise<void>;
 }
 
-type EnergyAstrologySnapshot = Omit<EnergyAstrologyState, 'refresh'>;
+type EnergyAstrologySnapshot = Pick<
+  EnergyAstrologyState,
+  'reading' | 'tarot' | 'weekly' | 'source' | 'loading' | 'error'
+>;
 
 export function useEnergyAstrology(
   profile: AstroProfile,
@@ -28,14 +55,20 @@ export function useEnergyAstrology(
 ): EnergyAstrologyState {
   const localReading = React.useMemo(() => buildAstroReading(profile), [profile]);
   const localTarot = React.useMemo(() => buildLocalTarot(localReading), [localReading]);
+  const localWeekly = React.useMemo(() => buildLocalWeekly(localReading), [localReading]);
+  const localYesNoTarot = React.useMemo(() => buildLocalYesNoTarot(localReading), [localReading]);
   const requestIdRef = React.useRef(0);
+  const yesNoRequestIdRef = React.useRef(0);
   const [state, setState] = React.useState<EnergyAstrologySnapshot>(() => ({
     reading: localReading,
     tarot: localTarot,
+    weekly: localWeekly,
     source: 'local-fallback',
     loading: false,
     error: null,
   }));
+  const [yesNoTarot, setYesNoTarot] = React.useState<EnergyYesNoTarotReading | null>(null);
+  const [yesNoLoading, setYesNoLoading] = React.useState(false);
 
   const refresh = React.useCallback(async (): Promise<void> => {
     const requestId = ++requestIdRef.current;
@@ -43,6 +76,7 @@ export function useEnergyAstrology(
       setState({
         reading: localReading,
         tarot: localTarot,
+        weekly: localWeekly,
         source: 'local-fallback',
         loading: false,
         error: null,
@@ -53,14 +87,23 @@ export function useEnergyAstrology(
     setState({
       reading: localReading,
       tarot: localTarot,
+      weekly: localWeekly,
       source: 'local-fallback',
       loading: true,
       error: null,
     });
 
     try {
-      const [remoteReading, remoteTarot] = await Promise.all([
+      const [remoteReading, remoteWeekly, remoteTarot] = await Promise.all([
         trpc.astrology.daily.query({
+          name: profile.name,
+          birthday: profile.birthday,
+          birthTime: profile.birthTime,
+          birthPlace: profile.birthPlace,
+          zodiacSign: profile.zodiacSign,
+          locale: 'zh-CN',
+        }),
+        trpc.astrology.weekly.query({
           name: profile.name,
           birthday: profile.birthday,
           birthTime: profile.birthTime,
@@ -77,6 +120,7 @@ export function useEnergyAstrology(
       setState({
         reading: mergeProviderReading(localReading, remoteReading),
         tarot: providerTarot(remoteTarot),
+        weekly: providerWeekly(remoteWeekly),
         source: 'provider',
         loading: false,
         error: null,
@@ -86,12 +130,44 @@ export function useEnergyAstrology(
       setState({
         reading: localReading,
         tarot: localTarot,
+        weekly: localWeekly,
         source: 'local-fallback',
         loading: false,
         error: '暂时使用本地提示',
       });
     }
-  }, [liveProvider, localReading, localTarot, profile]);
+  }, [liveProvider, localReading, localTarot, localWeekly, profile]);
+
+  const drawYesNoTarot = React.useCallback(async (): Promise<void> => {
+    const requestId = ++yesNoRequestIdRef.current;
+    if (!liveProvider) {
+      setYesNoTarot(localYesNoTarot);
+      setYesNoLoading(false);
+      return;
+    }
+
+    setYesNoLoading(true);
+    try {
+      const remote = await trpc.astrology.yesNoTarot.query({
+        zodiacSign: profile.zodiacSign,
+        locale: 'zh-CN',
+      });
+      if (requestId !== yesNoRequestIdRef.current) return;
+      setYesNoTarot(providerYesNoTarot(remote));
+    } catch {
+      if (requestId !== yesNoRequestIdRef.current) return;
+      setYesNoTarot(localYesNoTarot);
+    } finally {
+      if (requestId === yesNoRequestIdRef.current) setYesNoLoading(false);
+    }
+  }, [liveProvider, localYesNoTarot, profile.zodiacSign]);
+
+  React.useEffect(() => {
+    if (!profile.zodiacSign) return;
+    yesNoRequestIdRef.current += 1;
+    setYesNoTarot(null);
+    setYesNoLoading(false);
+  }, [profile.zodiacSign]);
 
   React.useEffect(() => {
     void refresh();
@@ -100,7 +176,10 @@ export function useEnergyAstrology(
     };
   }, [refresh]);
 
-  return React.useMemo(() => ({ ...state, refresh }), [refresh, state]);
+  return React.useMemo(
+    () => ({ ...state, refresh, yesNoTarot, yesNoLoading, drawYesNoTarot }),
+    [drawYesNoTarot, refresh, state, yesNoLoading, yesNoTarot],
+  );
 }
 
 function buildLocalTarot(reading: AstroReading): EnergyTarotReading {
@@ -116,6 +195,50 @@ function providerTarot(tarot: ProviderTarot): EnergyTarotReading {
     title: tarot.title,
     subtitle: tarot.subtitle,
     body: tarot.body,
+  };
+}
+
+function buildLocalWeekly(reading: AstroReading): EnergyWeeklyReading {
+  return {
+    weekLabel: '本周能量',
+    personal: reading.headline,
+    health: '把休息也当成计划的一部分，给身体留一点恢复时间。',
+    profession: reading.workNote,
+    emotions: '先看见感受，再决定今天要回应到什么程度。',
+    travel: '安排保留一点弹性，临时变化也不会打乱整体节奏。',
+    luck: '从一个小实验开始，真实反馈会带来下一步线索。',
+    luckyColors: [reading.luckyColor],
+  };
+}
+
+function buildLocalYesNoTarot(reading: AstroReading): EnergyYesNoTarotReading {
+  return {
+    answer: 'maybe',
+    card: 'Temperance',
+    category: 'Major Arcana',
+    result: `${reading.zodiacLabel}今天更适合先补足一个关键信息，再做决定。`,
+  };
+}
+
+function providerWeekly(weekly: ProviderWeekly): EnergyWeeklyReading {
+  return {
+    weekLabel: weekly.weekLabel,
+    personal: weekly.personal,
+    health: weekly.health,
+    profession: weekly.profession,
+    emotions: weekly.emotions,
+    travel: weekly.travel,
+    luck: weekly.luck,
+    luckyColors: weekly.luckyColors,
+  };
+}
+
+function providerYesNoTarot(tarot: ProviderYesNoTarot): EnergyYesNoTarotReading {
+  return {
+    answer: tarot.answer,
+    card: tarot.card,
+    category: tarot.category,
+    result: tarot.result,
   };
 }
 

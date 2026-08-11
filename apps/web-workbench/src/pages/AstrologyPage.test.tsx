@@ -25,13 +25,29 @@ vi.mock('@/lib/trpc', () => ({
 afterEach(cleanup);
 
 describe('AstrologyPageShell', () => {
+  it('shows the local date in the wide recharge-hub shell', () => {
+    const { container } = render(
+      <AstrologyPageShell liveProvider={false} profileStorageScope={null} />,
+    );
+
+    expect(screen.getByLabelText('今日日期').textContent).toMatch(
+      /^\d{4}年\d{1,2}月\d{1,2}日\s+星期[一二三四五六日]$/,
+    );
+    expect(container.firstElementChild?.className).toContain('max-w-[1180px]');
+  });
+
   it('renders the real focused energy home', () => {
     render(<AstrologyPageShell liveProvider={false} profileStorageScope={null} />);
 
     expect(screen.getByRole('heading', { name: '今日能量', level: 1 })).toBeTruthy();
-    const moodGroup = screen.getByRole('group', { name: '当前状态' });
-    expect(within(moodGroup).getAllByRole('button')).toHaveLength(4);
-    expect(screen.getAllByRole('button', { name: /开始|抽一张|看看/ })).toHaveLength(1);
+    const needGroup = screen.getByRole('group', { name: '补给能量' });
+    expect(within(needGroup).getAllByRole('button')).toHaveLength(4);
+    expect(screen.getByRole('button', { name: '开始 30 秒补给' })).toBeTruthy();
+    expect(
+      within(screen.getByRole('region', { name: '选一个轻松玩法' })).getAllByRole('button'),
+    ).toHaveLength(3);
+    expect(screen.getByRole('region', { name: '今日能量成长' })).toBeTruthy();
+    expect(screen.getByRole('region', { name: '你的星座能量' })).toBeTruthy();
     expect(screen.queryByText('多元化命理')).toBeNull();
     expect(screen.queryByText('任务等待模式')).toBeNull();
   });
