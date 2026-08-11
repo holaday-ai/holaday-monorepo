@@ -1,9 +1,10 @@
 import type { AstroProfile, AstroReading } from '@/lib/astrology';
-import { Brain, HandHeart, Hash } from 'lucide-react';
+import { Activity, BriefcaseBusiness, HandHeart, Hash, HeartPulse, Users } from 'lucide-react';
 import * as React from 'react';
 import type { ExperiencePhase } from '../energy-types';
 import {
   LIGHT_TESTS,
+  type LightTestCategory,
   type LightTestContext,
   type LightTestDefinition,
   type LightTestId,
@@ -19,16 +20,22 @@ interface TestExperienceProps {
 }
 
 const TEST_ICONS = {
-  psychology: Brain,
-  compatibility: HandHeart,
+  emotion: HeartPulse,
+  stress: Activity,
+  work: BriefcaseBusiness,
+  relationship: HandHeart,
+  social: Users,
   'daily-number': Hash,
-} satisfies Record<LightTestId, React.ComponentType<{ className?: string }>>;
+} satisfies Record<LightTestCategory, React.ComponentType<{ className?: string }>>;
 
 const RESULT_LABELS = {
-  psychology: '今日心理画像',
-  compatibility: '今日关系提示',
+  emotion: '今日心理画像',
+  stress: '今日压力提示',
+  work: '今日工作提示',
+  relationship: '今日关系提示',
+  social: '今日社交提示',
   'daily-number': '今日数字提示',
-} satisfies Record<LightTestId, string>;
+} satisfies Record<LightTestCategory, string>;
 
 export function TestExperience({
   profile,
@@ -88,7 +95,7 @@ export function TestExperience({
         </div>
         <div className="mt-6 grid gap-3 sm:grid-cols-3">
           {LIGHT_TESTS.map((test) => {
-            const Icon = TEST_ICONS[test.id];
+            const Icon = TEST_ICONS[test.category];
             return (
               <button
                 key={test.id}
@@ -174,7 +181,7 @@ export function TestExperience({
           aria-live="polite"
         >
           <p className="text-xs font-semibold tracking-[0.08em] text-[#9b5f78]">
-            {RESULT_LABELS[activeTest.id]}
+            {RESULT_LABELS[activeTest.category]}
           </p>
           <h3 className="mt-2 text-xl font-semibold text-[#322c36]">{result.title}</h3>
           <p className="mt-2 text-sm leading-6 text-[#655b67]">{result.body}</p>
