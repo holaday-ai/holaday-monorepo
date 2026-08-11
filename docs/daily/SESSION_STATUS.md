@@ -30,7 +30,7 @@
 <!-- 2026-07-09 Codex 补充：技能 planner 闭环：planner catalogue 现在合并 DB SKILL.md rows + shared 13 用户可见技能；手动 @ 技能会注入 planner hint，避免前端选择了技能但通用 planner 不知道。 -->
 ## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05@4de45411`（2026-08-11 JST）
 
-SPA 与 Orchestrator 已部署 `4de45411`（PR #31）。本轮上线“今日能量 B”：聚焦情绪选择、动态轻提示、抽卡/轻测试/今日星座体验播放器与本地能量资料抽屉，并将小游戏明确为未来入口；390px 移动端触控与布局已收口。生产 Orchestrator 构建、13 条编号 migration、`db:verify`、非 root PM2 重启与 healthz 均通过，进程 `online`、restart count 0；Aliyun 与 Vultr SPA 原子发布均命中 `index-DVlxSSYu.js`，三份 bundle SHA-256 一致。AKShare 与 CN Payment 未部署或重启，仅发布前只读校验为 `wechat=ready`、`alipay=ready`、PayPal disabled。验证：web 147 files / 1187 tests、orchestrator 251 files / 4146 tests、ops 30/30 全绿，前后端 typecheck、SPA lint/build、`git diff --check` 通过；生产登录态实测完成情绪选择→推荐更新→抽卡翻牌结果，桌面与 390×844 移动端无横向溢出，控制台错误/警告 0。
+SPA 与 Orchestrator 已部署 `4de45411`（PR #31）。本轮上线“今日能量 B”：聚焦情绪选择、动态轻提示、抽卡/轻测试/今日星座体验播放器与本地能量资料抽屉，并将小游戏明确为未来入口；390px 移动端触控与布局已收口。生产 Orchestrator 构建、13 条编号 migration、`db:verify`、非 root PM2 重启与 healthz 均通过，进程 `online`、restart count 0；Aliyun 与 Vultr SPA 原子发布均命中 `index-DVlxSSYu.js`，三份 bundle SHA-256 一致。AKShare 与 CN Payment 未部署或重启；发布前订单链路校验为 `wechat=ready`、`alipay=ready`、PayPal disabled，可能产生未支付测试订单，未发生扣款。验证：web 147 files / 1187 tests、orchestrator 251 files / 4146 tests、ops 30/30 全绿，前后端 typecheck、SPA lint/build、`git diff --check` 通过；生产登录态实测完成情绪选择→推荐更新→抽卡翻牌结果，桌面与 390×844 移动端无横向溢出，控制台错误/警告 0。
 
 <!-- 2026-06-26 里程碑 — 🏁🏁 登录自学从机制到交易站真出货 + 四层 veto 防线 -->
 **🏁🏁 里程碑（2026-06-26）— 登录自学从机制到交易站真出货 + 四层 veto 防线全证通**
