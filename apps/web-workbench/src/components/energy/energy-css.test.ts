@@ -22,4 +22,15 @@ describe('energy motion system', () => {
     expect(css).toMatch(/#ff315f/i);
     expect(css).toMatch(/\.energy-insight-grid\s*\{/);
   });
+
+  it('keeps the experience illustrations complete and the zodiac badge circular', () => {
+    const experienceImageFrame = css.match(/\.energy-experience-card__image\s*\{[^}]+\}/)?.[0];
+    const experienceImage = css.match(/\.energy-experience-card__image img\s*\{[^}]+\}/)?.[0];
+    const zodiacBadge = css.match(/\.energy-astrology-panel__badge\s*\{[^}]+\}/)?.[0];
+
+    expect(experienceImageFrame).toMatch(/aspect-ratio:\s*4\s*\/\s*3/);
+    expect(experienceImage).toMatch(/object-fit:\s*contain/);
+    expect(zodiacBadge).toMatch(/aspect-ratio:\s*1/);
+    expect(zodiacBadge).toMatch(/align-self:\s*start/);
+  });
 });

@@ -342,15 +342,24 @@
 .energy-experience-card__image {
   display: block;
   width: 100%;
-  height: 92px;
+  height: auto;
+  aspect-ratio: 4 / 3;
   overflow: hidden;
-  background: #eadfff;
+  background: #fff7f3;
+}
+
+.energy-experience-card[data-kind="games"] .energy-experience-card__image {
+  background: #f2faff;
+}
+
+.energy-experience-card[data-kind="light-test"] .energy-experience-card__image {
+  background: #f4fff5;
 }
 
 .energy-experience-card__image img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   transition: transform 400ms ease;
 }
 
@@ -568,9 +577,12 @@
 
 .energy-astrology-panel__badge {
   display: flex;
+  align-self: start;
   align-items: center;
   justify-content: center;
+  width: 100%;
   min-height: 118px;
+  aspect-ratio: 1;
   overflow: hidden;
   border: 1px solid rgb(255 255 255 / 90%);
   border-radius: 50%;
@@ -1467,12 +1479,13 @@
 
   .energy-experience-card {
     display: grid;
-    grid-template-columns: 132px minmax(0, 1fr);
+    grid-template-columns: minmax(180px, 0.7fr) minmax(0, 1fr);
   }
 
   .energy-experience-card__image {
     height: 100%;
     min-height: 190px;
+    aspect-ratio: auto;
   }
 
   .energy-experience-card__content {
@@ -1526,8 +1539,9 @@
   }
 
   .energy-experience-card__image {
-    height: 142px;
+    height: auto;
     min-height: 0;
+    aspect-ratio: 4 / 3;
   }
 
   .energy-growth-panel {

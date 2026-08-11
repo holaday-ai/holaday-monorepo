@@ -1,6 +1,7 @@
 import type { AstroProfile } from '@/lib/astrology';
-import { ArrowRight, RefreshCw, Settings2, Sparkles } from 'lucide-react';
+import { ArrowRight, RefreshCw, Settings2 } from 'lucide-react';
 import type { EnergyAstrologyState } from './useEnergyAstrology';
+import { zodiacBadgeImage } from './zodiac-art';
 
 interface EnergyAstrologyPanelProps {
   profile: AstroProfile;
@@ -17,11 +18,11 @@ export function EnergyAstrologyPanel({
   onOpen,
   onEditProfile,
 }: EnergyAstrologyPanelProps): JSX.Element {
-  const badgeImage = profile.zodiacSign === 'aries' ? '/energy/aries-badge.jpg' : null;
+  const badgeImage = zodiacBadgeImage(profile.zodiacSign);
   return (
     <section className="energy-astrology-panel" aria-label="你的星座能量">
       <div className="energy-astrology-panel__badge" aria-hidden="true">
-        {badgeImage ? <img src={badgeImage} alt="" /> : <Sparkles />}
+        <img src={badgeImage} alt="" />
       </div>
       <div className="energy-astrology-panel__main">
         <p className="energy-kicker">今日 + 本周真实星座提示</p>

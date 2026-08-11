@@ -82,3 +82,51 @@
 - Targeted Biome formatting and `git diff --check` passed.
 
 final result: passed
+
+---
+
+# 今日能量星座插画与功能卡裁切 Design QA（2026-08-11）
+
+## 对照目标
+
+- 用户截图 1：`/var/folders/mg/xmy8dhk57jdfc5xc_cfm063r0000gn/T/TemporaryItems/NSIRD_screencaptureui_ypeFDW/截屏2026-08-11 22.27.13.png`
+- 用户截图 2：`/var/folders/mg/xmy8dhk57jdfc5xc_cfm063r0000gn/T/TemporaryItems/NSIRD_screencaptureui_8ZGvMO/截屏2026-08-11 22.27.52.png`
+- Browser-rendered implementation: `http://127.0.0.1:5181/cosmic`
+- Desktop viewport: 1280 × 720.
+- Mobile viewport: 390 × 844.
+- State: authenticated test account with production API data proxied through the local Vite preview.
+
+## Mismatch ledger
+
+| Reference evidence | Rendered evidence | Resolution |
+| --- | --- | --- |
+| Only Aries had a raster illustration; other signs fell back to a generic sparkle icon. | The typed registry resolves all twelve `ZodiacSign` values to independent `/energy/<sign>-badge.jpg` files. The component regression test renders all twelve states. | Fixed. Eleven matching soft-3D zodiac assets were generated and saved as 420 × 420 JPEGs. |
+| The astrology image stretched into a tall oval because the grid item filled the panel height. | Desktop badge measured 120.01 × 120.01 px; mobile measured 97.57 × 97.57 px. | Fixed with a 1:1 aspect ratio and start alignment. |
+| The three 640 × 442 illustrations were cropped into a 92 px `cover` strip. | Desktop frames measured about 282.66 × 212 px and mobile 322 × 241.5 px, all with computed `object-fit: contain`. | Fixed with a responsive 4:3 image window. |
+
+## Browser QA
+
+- Page identity: `/cosmic`, title `HOLA DAY`.
+- Meaningful content rendered after authentication; no blank shell or framework overlay appeared.
+- Desktop horizontal overflow: viewport width 1280, document width 1280.
+- Mobile horizontal overflow: viewport width 390, document width 390.
+- Broken images: 0 at desktop and mobile widths.
+- Console warnings/errors: 0 after the page and assets stabilized.
+- Interaction proof: selecting `放松` set `aria-pressed="true"` and changed the live hero copy to `先把肩膀放松，再给大脑留一点空白。`.
+- The automated profile test verifies every zodiac-to-image UI mapping. The Browser automation could not drive the native date field reliably enough to switch the live profile without bypassing normal component input behavior, so no hidden-state shortcut was used.
+
+## Automated gates
+
+- Full Web suite: 153 files, 1215 tests passed.
+- Web typecheck passed.
+- Web ESLint passed.
+- Production Vite build passed.
+- Targeted Biome check passed.
+- `git diff --check` passed after the QA report update.
+
+## Remaining findings
+
+- No P0, P1, or P2 finding remains in the changed surface.
+- P3 existing shell behavior: the fixed mobile menu button can temporarily cover section eyebrow text while the page is scrolled. It does not cover the main page title at the top and is outside the requested image work.
+
+final result: passed
