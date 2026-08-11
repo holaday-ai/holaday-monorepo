@@ -49,7 +49,6 @@
 - `apps/web-workbench/src/components/energy/EnergyHome.tsx`：页面编排、推荐和体验启动。
 - `apps/web-workbench/src/components/energy/EnergyHome.test.tsx`：首屏层级、状态回应、单一 CTA 和小游戏不可交互测试。
 - `apps/web-workbench/src/components/energy/energy.css`：页面宽度、卡片、窄屏与缩放布局。
-- `apps/web-workbench/src/components/energy/energy-layout.test.ts`：禁止窄列长文和移动端头部覆盖回归。
 
 ### Experiences
 
@@ -74,7 +73,7 @@
 - `apps/web-workbench/src/components/astrology/AstroDashboard.tsx`：能力全部迁移后删除。
 - `apps/web-workbench/src/lib/astrology.ts`：只保留星座资料、reading、task companion 所需纯函数；删除页面专用存储和编排数据。
 - `apps/web-workbench/src/lib/astrology.test.ts`：保留生日边界、用户隔离和确定性 reading 回归。
-- `apps/web-workbench/src/pages/energy-route.test.ts`：路由入口和旧组件移除静态门槛。
+- `apps/web-workbench/src/pages/AstrologyPage.test.tsx`：渲染真实页面壳并验证 EnergyHome 首屏。
 
 ---
 
@@ -394,7 +393,6 @@ git commit -m "feat(energy): add accessible experience player"
 - Create: `apps/web-workbench/src/components/energy/EnergyHome.tsx`
 - Create: `apps/web-workbench/src/components/energy/EnergyHome.test.tsx`
 - Create: `apps/web-workbench/src/components/energy/energy.css`
-- Create: `apps/web-workbench/src/components/energy/energy-layout.test.ts`
 
 **Interfaces:**
 - Consumes: `ENERGY_EXPERIENCES`, `energyResponseForMood`, `recommendExperience`, `ExperiencePlayer`, `trpc.energy.home`, `trpc.energy.reportEvent`。
@@ -406,7 +404,8 @@ git commit -m "feat(energy): add accessible experience player"
 
 ```tsx
 expect(screen.getByRole('heading', { name: '你现在感觉怎么样？' })).toBeTruthy();
-expect(screen.getAllByRole('button', { pressed: false })).toHaveLength(4);
+const moodGroup = screen.getByRole('group', { name: '当前状态' });
+expect(within(moodGroup).getAllByRole('button', { pressed: false })).toHaveLength(4);
 expect(screen.getAllByRole('button', { name: /开始|抽一张|看看/ })).toHaveLength(1);
 expect(screen.getByText('小游戏正在准备中')).toBeTruthy();
 expect(screen.queryByRole('button', { name: /小游戏/ })).toBeNull();
@@ -430,7 +429,7 @@ Expected: FAIL，组件不存在。
 
 状态仅保留在当前 React state。启动、完成、重玩和失败通过 fire-and-forget `reportEvent` 上报；catch 只记录 `console.warn('energy event report failed')`，不得阻断体验。
 
-- [ ] **Step 5: 实现 CSS 与静态布局测试**
+- [ ] **Step 5: 实现响应式 CSS**
 
 `energy.css` 必须包含：
 
@@ -442,11 +441,11 @@ Expected: FAIL，组件不存在。
 @media (max-width: 640px) { .energy-mode-grid { grid-template-columns: 1fr; } }
 ```
 
-静态测试解析 CSS，禁止在 `max-width: 640px` 下出现多列玩法或给页面重设会覆盖 PageShell 的顶部 padding。
+不得在 `energy.css` 给 PageShell 根容器重设顶部 padding。真实桌面、窄屏、200% 缩放和水平滚动由 Task 9 的浏览器验收负责，不用读取 CSS 源码制造 change-detector 测试。
 
 - [ ] **Step 6: 运行目标测试和类型检查**
 
-Run: `pnpm --filter @holaday/web-workbench exec vitest run src/components/energy/EnergyHome.test.tsx src/components/energy/energy-layout.test.ts`
+Run: `pnpm --filter @holaday/web-workbench exec vitest run src/components/energy/EnergyHome.test.tsx`
 
 Expected: PASS。
 
@@ -457,7 +456,7 @@ Expected: PASS。
 - [ ] **Step 7: 提交**
 
 ```bash
-git add apps/web-workbench/src/components/energy/MoodCheckIn.tsx apps/web-workbench/src/components/energy/EnergyHome.tsx apps/web-workbench/src/components/energy/EnergyHome.test.tsx apps/web-workbench/src/components/energy/energy.css apps/web-workbench/src/components/energy/energy-layout.test.ts
+git add apps/web-workbench/src/components/energy/MoodCheckIn.tsx apps/web-workbench/src/components/energy/EnergyHome.tsx apps/web-workbench/src/components/energy/EnergyHome.test.tsx apps/web-workbench/src/components/energy/energy.css
 git commit -m "feat(energy): build focused energy home"
 ```
 
@@ -658,19 +657,19 @@ git commit -m "feat(energy): add segmented horoscope and profile drawer"
 - Delete: `apps/web-workbench/src/components/astrology/AstroDashboard.tsx`
 - Modify: `apps/web-workbench/src/lib/astrology.ts`
 - Modify: `apps/web-workbench/src/lib/astrology.test.ts`
-- Create: `apps/web-workbench/src/pages/energy-route.test.ts`
+- Create: `apps/web-workbench/src/pages/AstrologyPage.test.tsx`
 
 **Interfaces:**
 - Consumes: Tasks 2-7 全部组件和现有 AppShell `me.userId`。
 - Produces: `/cosmic` 完整 B 阶段页面，不再引用 `AstroDashboard`。
 
-- [ ] **Step 1: 写路由静态失败测试**
+- [ ] **Step 1: 写页面渲染失败测试**
 
-读取 `AstrologyPage.tsx` 和源文件目录，断言页面 import `EnergyHome`、仍传入 `me.userId` 作为 storage scope，并且不存在 `AstroDashboard.tsx`。
+将 `AstrologyPageShell` 导出用于真实组件测试，使用 `liveProvider={false}` 和 `profileStorageScope={null}` 渲染。断言页面包含“今日能量”、`当前状态` group、四个状态按钮和一个主推荐 CTA；不得 mock `EnergyHome`。
 
 - [ ] **Step 2: 运行测试并确认失败**
 
-Run: `pnpm --filter @holaday/web-workbench exec vitest run src/pages/energy-route.test.ts`
+Run: `pnpm --filter @holaday/web-workbench exec vitest run src/pages/AstrologyPage.test.tsx`
 
 Expected: FAIL，页面仍引用旧组件。
 
@@ -713,14 +712,14 @@ Run: `rg -n "AstroDashboard|多元化命理|任务等待模式" apps/web-workben
 
 Expected: 无生产代码命中；测试可以出现禁止项断言。
 
-Run: `pnpm --filter @holaday/web-workbench exec vitest run src/pages/energy-route.test.ts src/components/energy src/lib/astrology.test.ts`
+Run: `pnpm --filter @holaday/web-workbench exec vitest run src/pages/AstrologyPage.test.tsx src/components/energy src/lib/astrology.test.ts`
 
 Expected: PASS。
 
 - [ ] **Step 8: 提交**
 
 ```bash
-git add apps/web-workbench/src/pages/AstrologyPage.tsx apps/web-workbench/src/pages/energy-route.test.ts apps/web-workbench/src/components/energy apps/web-workbench/src/lib/astrology.ts apps/web-workbench/src/lib/astrology.test.ts
+git add apps/web-workbench/src/pages/AstrologyPage.tsx apps/web-workbench/src/pages/AstrologyPage.test.tsx apps/web-workbench/src/components/energy apps/web-workbench/src/lib/astrology.ts apps/web-workbench/src/lib/astrology.test.ts
 git rm apps/web-workbench/src/components/astrology/AstroDashboard.tsx
 git commit -m "refactor(energy): replace the cosmic dashboard"
 ```
@@ -743,7 +742,7 @@ Expected: PASS。
 
 - [ ] **Step 2: 运行前端目标测试**
 
-Run: `pnpm --filter @holaday/web-workbench exec vitest run src/components/energy src/pages/energy-route.test.ts src/lib/astrology.test.ts src/lib/sidebar-feature-nav.test.ts src/components/control-tooltip.test.ts`
+Run: `pnpm --filter @holaday/web-workbench exec vitest run src/components/energy src/pages/AstrologyPage.test.tsx src/lib/astrology.test.ts src/lib/sidebar-feature-nav.test.ts src/components/control-tooltip.test.ts`
 
 Expected: PASS。
 
