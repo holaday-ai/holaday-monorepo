@@ -25,7 +25,7 @@ vi.mock('@/lib/trpc', () => ({
 afterEach(cleanup);
 
 describe('AstrologyPageShell', () => {
-  it('shows the local date in the wide recharge-hub shell', () => {
+  it('keeps the mobile title below the fixed shell controls', () => {
     const { container } = render(
       <AstrologyPageShell liveProvider={false} profileStorageScope={null} />,
     );
@@ -33,7 +33,11 @@ describe('AstrologyPageShell', () => {
     expect(screen.getByLabelText('今日日期').textContent).toMatch(
       /^\d{4}年\d{1,2}月\d{1,2}日\s+星期[一二三四五六日]$/,
     );
-    expect(container.firstElementChild?.className).toContain('max-w-[1180px]');
+    const shellClassName = container.firstElementChild?.className ?? '';
+    expect(shellClassName).toContain('max-w-[1180px]');
+    expect(shellClassName).toContain('!pt-14');
+    expect(shellClassName).toContain('min-[769px]:!pt-5');
+    expect(shellClassName).not.toContain('!pt-4');
   });
 
   it('renders the real focused energy home', () => {
