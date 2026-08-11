@@ -297,7 +297,8 @@ export function useEnergyAstrology(
 
   React.useEffect(() => {
     const statusRequestId = ++statusRequestIdRef.current;
-    for (const period of PERIODS) periodRequestIds.current[period] += 1;
+    const requestIds = periodRequestIds.current;
+    for (const period of PERIODS) requestIds[period] += 1;
     rankingRequestIdRef.current += 1;
     signPreviewRequestIdRef.current += 1;
     yesNoRequestIdRef.current += 1;
@@ -325,7 +326,7 @@ export function useEnergyAstrology(
 
     return () => {
       statusRequestIdRef.current += 1;
-      for (const period of PERIODS) periodRequestIds.current[period] += 1;
+      for (const period of PERIODS) requestIds[period] += 1;
       rankingRequestIdRef.current += 1;
       signPreviewRequestIdRef.current += 1;
       yesNoRequestIdRef.current += 1;
