@@ -1,7 +1,9 @@
 # 今日能量内容补给站发布检查
 
-日期：2026-08-12 02:17 JST  
-分支：`codex/today-energy-content-hub`  
+日期：2026-08-12 02:17 JST
+
+分支：`codex/today-energy-content-hub`
+
 已验证代码 HEAD：`64e59023d433382a90bbc21bca07da2c62f6bf67`
 
 ## 结论
