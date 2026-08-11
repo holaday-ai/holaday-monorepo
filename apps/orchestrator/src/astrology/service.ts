@@ -50,6 +50,31 @@ export interface TarotReading {
   body: string;
 }
 
+export interface WeeklyAstrologyReading {
+  provider: 'mock' | 'divineapi';
+  apiConfigured: boolean;
+  zodiacSign: ZodiacSign;
+  zodiacLabel: string;
+  weekLabel: string;
+  personal: string;
+  health: string;
+  profession: string;
+  emotions: string;
+  travel: string;
+  luck: string;
+  luckyColors: string[];
+}
+
+export interface YesNoTarotReading {
+  provider: 'mock' | 'divineapi';
+  apiConfigured: boolean;
+  answer: 'yes' | 'no' | 'maybe';
+  card: string;
+  category: string;
+  result: string;
+  imageUrl: string | null;
+}
+
 interface DivineApiConfig {
   apiKey: string;
   accessToken: string;
@@ -63,7 +88,7 @@ interface RequestOptions {
   fetchImpl?: typeof fetch;
 }
 
-const DIVINE_DEFAULT_BASE_URL = 'https://astroapi-3.divineapi.com';
+const DIVINE_DEFAULT_BASE_URL = 'https://astroapi-5.divineapi.com';
 const DIVINE_DEFAULT_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const divineApiCache = new Map<string, { expiresAt: number; value: unknown }>();
 
@@ -192,6 +217,8 @@ export function divineApiStatus(env: NodeJS.ProcessEnv = process.env): {
   endpoints: {
     dailyHoroscope: string;
     dailyTarot: string;
+    weeklyHoroscope: string;
+    yesNoTarot: string;
   };
 } {
   const config = divineApiConfig(env);
@@ -203,6 +230,8 @@ export function divineApiStatus(env: NodeJS.ProcessEnv = process.env): {
     endpoints: {
       dailyHoroscope: '/api/v5/daily-horoscope',
       dailyTarot: '/api/v2/daily-tarot',
+      weeklyHoroscope: '/api/v5/weekly-horoscope',
+      yesNoTarot: '/api/v2/yes-or-no-tarot',
     },
   };
 }
@@ -352,6 +381,124 @@ export async function getDailyTarotReading(
   }
 }
 
+export function buildMockWeeklyAstrologyReading(
+  input: AstrologyProfileInput,
+  options: RequestOptions = {},
+): WeeklyAstrologyReading {
+  const now = options.now ?? new Date();
+  const zodiacSign = input.zodiacSign ?? zodiacFromBirthday(input.birthday);
+  const meta = ZODIAC_META[zodiacSign];
+  const seed = seededNumber(`${zodiacSign}-weekly-${dateKey(now)}`);
+  return {
+    provider: 'mock',
+    apiConfigured: hasDivineApiCredentials(options.env),
+    zodiacSign,
+    zodiacLabel: meta.label,
+    weekLabel: formatWeekLabel(now),
+    personal: `${meta.label}本周适合把关系里的期待说得更具体，也给彼此留一点缓冲。`,
+    health: '把休息放进日程，优先选择能让身体慢下来的小习惯。',
+    profession: meta.workNote,
+    emotions: '先识别感受，再决定回应方式；不必立刻解决所有问题。',
+    travel: '行程和外出安排保留一点弹性，会比排得太满更舒服。',
+    luck: pick(seed, [
+      '小范围尝试会比一次押注更容易带来好结果。',
+      '主动发出一次清楚的邀请，会打开新的回应。',
+      '整理一个拖延已久的角落，可能顺带清除心里的噪音。',
+    ]),
+    luckyColors: [meta.luckyColor],
+  };
+}
+
+export async function getWeeklyAstrologyReading(
+  input: AstrologyProfileInput,
+  options: RequestOptions = {},
+): Promise<WeeklyAstrologyReading> {
+  const mock = buildMockWeeklyAstrologyReading(input, options);
+  const config = divineApiConfig(options.env);
+  if (!config) return mock;
+
+  try {
+    const json = await postDivineApiJson(
+      '/api/v5/weekly-horoscope',
+      {
+        api_key: config.apiKey,
+        sign: mock.zodiacSign,
+        h_week: 'current',
+        tzone: timezoneOffsetHours(options.now ?? new Date()),
+        lan: languageCode(input.locale),
+      },
+      config,
+      options.fetchImpl,
+    );
+    return mergeDivineWeekly(mock, json);
+  } catch {
+    return mock;
+  }
+}
+
+export function buildMockYesNoTarotReading(
+  input: { zodiacSign?: ZodiacSign; locale?: string } = {},
+  options: RequestOptions = {},
+): YesNoTarotReading {
+  const now = options.now ?? new Date();
+  const sign = input.zodiacSign ?? 'aries';
+  const seed = seededNumber(`${sign}-yes-no-${dateKey(now)}`);
+  const optionsList: [
+    Pick<YesNoTarotReading, 'answer' | 'card' | 'category' | 'result'>,
+    ...Array<Pick<YesNoTarotReading, 'answer' | 'card' | 'category' | 'result'>>,
+  ] = [
+    {
+      answer: 'yes',
+      card: 'The Sun',
+      category: 'Major Arcana',
+      result: '可以，从一个清楚、轻量的小步骤开始，先观察真实反馈。',
+    },
+    {
+      answer: 'maybe',
+      card: 'Temperance',
+      category: 'Major Arcana',
+      result: '先别急着定论。补足一个关键信息，再给自己一点时间校准节奏。',
+    },
+    {
+      answer: 'no',
+      card: 'Four of Swords',
+      category: 'Minor Arcana',
+      result: '现在更适合暂停和整理。拒绝这一次，不等于永远没有机会。',
+    },
+  ];
+  const selected = optionsList[seed % optionsList.length] ?? optionsList[0];
+  return {
+    provider: 'mock',
+    apiConfigured: hasDivineApiCredentials(options.env),
+    ...selected,
+    imageUrl: null,
+  };
+}
+
+export async function getYesNoTarotReading(
+  input: { zodiacSign?: ZodiacSign; locale?: string } = {},
+  options: RequestOptions = {},
+): Promise<YesNoTarotReading> {
+  const mock = buildMockYesNoTarotReading(input, options);
+  const config = divineApiConfig(options.env);
+  if (!config) return mock;
+
+  try {
+    const json = await postDivineApiJson(
+      '/api/v2/yes-or-no-tarot',
+      {
+        api_key: config.apiKey,
+        lan: languageCode(input.locale),
+      },
+      config,
+      options.fetchImpl,
+    );
+    return mergeDivineYesNoTarot(mock, json);
+  } catch {
+    return mock;
+  }
+}
+
 function buildWeek(seed: number): AstrologyReading['weekly'] {
   const labels = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
   const tones: AstrologyReading['weekly'][number]['tone'][] = [
@@ -491,6 +638,50 @@ function mergeDivineTarot(mock: TarotReading, json: unknown): TarotReading {
   };
 }
 
+function mergeDivineWeekly(mock: WeeklyAstrologyReading, json: unknown): WeeklyAstrologyReading {
+  const horoscopePath = ['data', 'weekly_horoscope'];
+  return {
+    ...mock,
+    provider: 'divineapi',
+    weekLabel: firstString(json, [['data', 'week']]) ?? mock.weekLabel,
+    personal: firstString(json, [[...horoscopePath, 'personal']]) ?? mock.personal,
+    health: firstString(json, [[...horoscopePath, 'health']]) ?? mock.health,
+    profession: firstString(json, [[...horoscopePath, 'profession']]) ?? mock.profession,
+    emotions: firstString(json, [[...horoscopePath, 'emotions']]) ?? mock.emotions,
+    travel: firstString(json, [[...horoscopePath, 'travel']]) ?? mock.travel,
+    luck: firstString(json, [[...horoscopePath, 'luck']]) ?? mock.luck,
+    luckyColors:
+      firstStringArray(json, [['data', 'special', 'lucky_color_codes']]) ?? mock.luckyColors,
+  };
+}
+
+function mergeDivineYesNoTarot(mock: YesNoTarotReading, json: unknown): YesNoTarotReading {
+  const answerText = firstString(json, [
+    ['data', 'prediction', 'yes_no'],
+    ['data', 'prediction', 'answer'],
+  ]);
+  return {
+    ...mock,
+    provider: 'divineapi',
+    answer: normalizeYesNo(answerText),
+    card: firstString(json, [['data', 'prediction', 'card']]) ?? mock.card,
+    category: firstString(json, [['data', 'prediction', 'category']]) ?? mock.category,
+    result: firstString(json, [['data', 'prediction', 'result']]) ?? mock.result,
+    imageUrl:
+      firstString(json, [
+        ['data', 'prediction', 'image'],
+        ['data', 'prediction', 'image2'],
+      ]) ?? mock.imageUrl,
+  };
+}
+
+function normalizeYesNo(value: string | null): YesNoTarotReading['answer'] {
+  const normalized = value?.trim().toLowerCase() ?? '';
+  if (normalized === 'yes' || normalized === '是') return 'yes';
+  if (normalized === 'no' || normalized === '否') return 'no';
+  return 'maybe';
+}
+
 function firstString(json: unknown, paths: Array<Array<string>>): string | null {
   for (const path of paths) {
     const value = getPath(json, path);
@@ -503,6 +694,18 @@ function firstString(json: unknown, paths: Array<Array<string>>): string | null 
         .join(' ');
       if (flattened) return flattened;
     }
+  }
+  return null;
+}
+
+function firstStringArray(json: unknown, paths: Array<Array<string>>): string[] | null {
+  for (const path of paths) {
+    const value = getPath(json, path);
+    if (!Array.isArray(value)) continue;
+    const strings = value.filter(
+      (entry): entry is string => typeof entry === 'string' && Boolean(entry.trim()),
+    );
+    if (strings.length > 0) return strings.map((entry) => entry.trim());
   }
   return null;
 }
@@ -555,4 +758,13 @@ function formatDateLabel(date: Date): string {
     day: 'numeric',
     weekday: 'long',
   }).format(date);
+}
+
+function formatWeekLabel(date: Date): string {
+  const start = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
+  const end = new Date(start);
+  end.setDate(start.getDate() + 6);
+  const formatter = new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric' });
+  return `${formatter.format(start)} - ${formatter.format(end)}`;
 }

@@ -20,10 +20,23 @@ function astrologyState(source: EnergyAstrologyState['source'] = 'provider'): En
   return {
     reading,
     tarot: { title: 'The Star', subtitle: '提示', body: '卡片内容' },
+    weekly: {
+      weekLabel: '8月10日 - 8月16日',
+      personal: '关系提示',
+      health: '健康提示',
+      profession: '工作提示',
+      emotions: '情绪提示',
+      travel: '出行提示',
+      luck: '好运提示',
+      luckyColors: ['#FFB86B'],
+    },
+    yesNoTarot: null,
+    yesNoLoading: false,
     source,
     loading: false,
     error: source === 'local-fallback' ? '暂时使用本地提示' : null,
     refresh: vi.fn(),
+    drawYesNoTarot: vi.fn(),
   };
 }
 

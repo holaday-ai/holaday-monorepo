@@ -3,6 +3,8 @@ import {
   divineApiStatus,
   getDailyAstrologyReading,
   getDailyTarotReading,
+  getWeeklyAstrologyReading,
+  getYesNoTarotReading,
 } from '../../astrology/service.js';
 import { getFeatureFlags } from '../../execution/feature-flags.js';
 import { protectedProcedure, publicProcedure, router } from '../trpc.js';
@@ -40,9 +42,12 @@ export const astrologyRouter = router({
       ...providerStatus,
     };
   }),
-  daily: protectedProcedure.input(profileInputSchema).query(({ input }) =>
-    getDailyAstrologyReading(input),
-  ),
+  daily: protectedProcedure
+    .input(profileInputSchema)
+    .query(({ input }) => getDailyAstrologyReading(input)),
+  weekly: protectedProcedure
+    .input(profileInputSchema)
+    .query(({ input }) => getWeeklyAstrologyReading(input)),
   tarot: protectedProcedure
     .input(
       z.object({
@@ -51,4 +56,12 @@ export const astrologyRouter = router({
       }),
     )
     .query(({ input }) => getDailyTarotReading(input)),
+  yesNoTarot: protectedProcedure
+    .input(
+      z.object({
+        zodiacSign: zodiacSignSchema.optional(),
+        locale: z.string().trim().max(16).optional(),
+      }),
+    )
+    .query(({ input }) => getYesNoTarotReading(input)),
 });

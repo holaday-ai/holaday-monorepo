@@ -40,8 +40,12 @@ export const ENERGY_EXPERIENCES: EnergyExperienceRegistration[] = [
         default: (props: EnergyExperienceProps) =>
           createElement(module.TarotExperience, {
             tarot: props.astrology.tarot,
+            yesNoTarot: props.astrology.yesNoTarot,
+            yesNoLoading: props.astrology.yesNoLoading,
+            onDrawYesNo: props.astrology.drawYesNoTarot,
             phase: props.phase,
             onPhaseChange: props.onPhaseChange,
+            onComplete: () => props.onExperienceComplete('tarot'),
           }),
       })),
   },

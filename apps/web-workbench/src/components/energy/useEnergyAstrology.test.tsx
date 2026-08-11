@@ -7,14 +7,18 @@ import { useEnergyAstrology } from './useEnergyAstrology';
 
 const trpcMocks = vi.hoisted(() => ({
   daily: vi.fn(),
+  weekly: vi.fn(),
   tarot: vi.fn(),
+  yesNoTarot: vi.fn(),
 }));
 
 vi.mock('@/lib/trpc', () => ({
   trpc: {
     astrology: {
       daily: { query: trpcMocks.daily },
+      weekly: { query: trpcMocks.weekly },
       tarot: { query: trpcMocks.tarot },
+      yesNoTarot: { query: trpcMocks.yesNoTarot },
     },
   },
 }));
@@ -47,7 +51,23 @@ function deferred<T>() {
 
 beforeEach(() => {
   trpcMocks.daily.mockReset();
+  trpcMocks.weekly.mockReset();
   trpcMocks.tarot.mockReset();
+  trpcMocks.yesNoTarot.mockReset();
+  trpcMocks.weekly.mockResolvedValue({
+    provider: 'divineapi',
+    apiConfigured: true,
+    zodiacSign: 'aries',
+    zodiacLabel: '白羊座',
+    weekLabel: '8月10日 - 8月16日',
+    personal: '给关系留一点空间。',
+    health: '保持轻缓节奏。',
+    profession: '先完成最重要的草稿。',
+    emotions: '先看见自己的感受。',
+    travel: '给安排保留弹性。',
+    luck: '小实验会带来好运。',
+    luckyColors: ['#FFB86B'],
+  });
 });
 
 afterEach(cleanup);
@@ -74,6 +94,8 @@ describe('useEnergyAstrology', () => {
       '远端今日提示的工作提示',
     );
     expect(result.current.tarot.title).toBe('The Sun');
+    expect(result.current.weekly.profession).toBe('先完成最重要的草稿。');
+    expect(trpcMocks.yesNoTarot).not.toHaveBeenCalled();
   });
 
   it('keeps deterministic local content when the provider rejects', async () => {
@@ -88,6 +110,42 @@ describe('useEnergyAstrology', () => {
     expect(result.current.error).toBe('暂时使用本地提示');
     expect(result.current.reading.zodiacLabel).toBe('白羊座');
     expect(result.current.tarot.title).toBe('The Star');
+  });
+
+  it('loads yes/no tarot only when the user requests it and never accepts question text', async () => {
+    trpcMocks.daily.mockResolvedValue(remoteReading('aries', '远端今日提示'));
+    trpcMocks.tarot.mockResolvedValue({
+      provider: 'divineapi',
+      apiConfigured: true,
+      title: 'The Sun',
+      subtitle: '把光带回来',
+      body: '先完成一件让自己有力量的小事。',
+    });
+    trpcMocks.yesNoTarot.mockResolvedValue({
+      provider: 'divineapi',
+      apiConfigured: true,
+      answer: 'yes',
+      card: 'The Sun',
+      category: 'Major Arcana',
+      result: '可以，从一个清楚的小步骤开始。',
+      imageUrl: null,
+    });
+    const profile = createProfileFromBirthday({ birthday: '1996-03-21' });
+    const { result } = renderHook(() => useEnergyAstrology(profile, true));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(trpcMocks.yesNoTarot).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await result.current.drawYesNoTarot();
+    });
+
+    expect(trpcMocks.yesNoTarot).toHaveBeenCalledWith({
+      zodiacSign: 'aries',
+      locale: 'zh-CN',
+    });
+    expect(result.current.yesNoTarot?.answer).toBe('yes');
+    expect(result.current.yesNoLoading).toBe(false);
   });
 
   it('does not let an older profile request overwrite the latest profile', async () => {
