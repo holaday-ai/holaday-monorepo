@@ -6,8 +6,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useEnergyAstrology } from './useEnergyAstrology';
 
 const trpcMocks = vi.hoisted(() => ({
+  status: vi.fn(),
   daily: vi.fn(),
   weekly: vi.fn(),
+  monthly: vi.fn(),
+  yearly: vi.fn(),
+  ranking: vi.fn(),
   tarot: vi.fn(),
   yesNoTarot: vi.fn(),
 }));
@@ -15,27 +19,94 @@ const trpcMocks = vi.hoisted(() => ({
 vi.mock('@/lib/trpc', () => ({
   trpc: {
     astrology: {
+      status: { query: trpcMocks.status },
       daily: { query: trpcMocks.daily },
       weekly: { query: trpcMocks.weekly },
+      monthly: { query: trpcMocks.monthly },
+      yearly: { query: trpcMocks.yearly },
+      ranking: { query: trpcMocks.ranking },
       tarot: { query: trpcMocks.tarot },
       yesNoTarot: { query: trpcMocks.yesNoTarot },
     },
   },
 }));
 
-function remoteReading(zodiacSign: 'aries' | 'taurus', headline: string) {
+const dimensions = [
+  { key: 'personal', label: '个人', body: '个人提示', score: 81 },
+  { key: 'health', label: '健康', body: '保持轻缓节奏。', score: 72 },
+  { key: 'profession', label: '工作', body: '先完成最重要的草稿。', score: 88 },
+  { key: 'emotions', label: '情绪', body: '先看见自己的感受。', score: 76 },
+  { key: 'travel', label: '出行', body: '给安排保留弹性。', score: 68 },
+  { key: 'luck', label: '好运', body: '小实验会带来好运。', score: 84 },
+] as const;
+
+function normalizedPeriod(
+  period: 'daily' | 'weekly' | 'monthly' | 'yearly',
+  zodiacSign: 'aries' | 'taurus' = 'aries',
+) {
   return {
+    period,
     provider: 'divineapi' as const,
-    apiConfigured: true,
+    source: 'divineapi' as const,
+    freshness: 'fresh' as const,
     zodiacSign,
     zodiacLabel: zodiacSign === 'aries' ? '白羊座' : '金牛座',
-    dateLabel: '8月11日星期二',
+    rangeLabel: period === 'daily' ? '2026-08-12' : `2026 ${period}`,
+    rangeKey: period === 'daily' ? ('today' as const) : ('current' as const),
+    summary: '远端周期提示',
+    dimensions: [...dimensions],
+    luckyColors: ['#FFB86B'],
+    luckyNumbers: ['3', '7'],
+    luckyLetters: ['A'],
+    suitableTimes: [],
+    sevenDayTrend: null,
+    cosmicTip: null,
+    singlesTip: null,
+    couplesTip: null,
+  };
+}
+
+function remoteReading(zodiacSign: 'aries' | 'taurus', headline: string) {
+  return {
+    ...normalizedPeriod('daily', zodiacSign),
+    apiConfigured: true,
+    dateLabel: '8月12日星期三',
     headline,
     workNote: `${headline}的工作提示`,
     energyScore: zodiacSign === 'aries' ? 81 : 73,
     luckyColor: zodiacSign === 'aries' ? '远端红' : '远端绿',
     luckyWindow: '10:00 - 11:00',
     weekly: [],
+  };
+}
+
+function remoteWeekly(zodiacSign: 'aries' | 'taurus' = 'aries') {
+  return {
+    ...normalizedPeriod('weekly', zodiacSign),
+    apiConfigured: true,
+    weekLabel: '8月10日 - 8月16日',
+    personal: '给关系留一点空间。',
+    health: '保持轻缓节奏。',
+    profession: '先完成最重要的草稿。',
+    emotions: '先看见自己的感受。',
+    travel: '给安排保留弹性。',
+    luck: '小实验会带来好运。',
+  };
+}
+
+function capabilityStatus(enabled: string[] = ['daily-horoscope', 'weekly-horoscope']) {
+  return {
+    enabled: true,
+    provider: 'divineapi' as const,
+    apiConfigured: true,
+    cacheTtlMs: 60_000,
+    cacheEntries: 0,
+    capabilities: enabled.map((capability) => ({
+      capability,
+      available: true,
+      checkedAt: '2026-08-12T00:00:00.000Z',
+    })),
+    endpoints: {},
   };
 }
 
@@ -50,77 +121,75 @@ function deferred<T>() {
 }
 
 beforeEach(() => {
-  trpcMocks.daily.mockReset();
-  trpcMocks.weekly.mockReset();
-  trpcMocks.tarot.mockReset();
-  trpcMocks.yesNoTarot.mockReset();
-  trpcMocks.weekly.mockResolvedValue({
-    provider: 'divineapi',
-    apiConfigured: true,
-    zodiacSign: 'aries',
-    zodiacLabel: '白羊座',
-    weekLabel: '8月10日 - 8月16日',
-    personal: '给关系留一点空间。',
-    health: '保持轻缓节奏。',
-    profession: '先完成最重要的草稿。',
-    emotions: '先看见自己的感受。',
-    travel: '给安排保留弹性。',
-    luck: '小实验会带来好运。',
-    luckyColors: ['#FFB86B'],
-  });
+  for (const mock of Object.values(trpcMocks)) mock.mockReset();
+  trpcMocks.status.mockResolvedValue(capabilityStatus());
+  trpcMocks.weekly.mockResolvedValue(remoteWeekly());
+  trpcMocks.ranking.mockResolvedValue({ complete: false, items: [] });
 });
 
 afterEach(cleanup);
 
 describe('useEnergyAstrology', () => {
-  it('merges successful provider reading and tarot responses', async () => {
+  it('loads daily and weekly independently without eager tarot calls', async () => {
     trpcMocks.daily.mockResolvedValue(remoteReading('aries', '远端今日提示'));
-    trpcMocks.tarot.mockResolvedValue({
-      provider: 'divineapi',
-      apiConfigured: true,
-      title: 'The Sun',
-      subtitle: '把光带回来',
-      body: '先完成一件让自己有力量的小事。',
-    });
     const profile = createProfileFromBirthday({ birthday: '1996-03-21' });
 
     const { result } = renderHook(() => useEnergyAstrology(profile, true));
 
-    await waitFor(() => expect(result.current.loading).toBe(false));
-    expect(result.current.source).toBe('provider');
-    expect(result.current.error).toBeNull();
+    await waitFor(() => expect(result.current.periods.daily.loading).toBe(false));
+    await waitFor(() => expect(result.current.periods.weekly.loading).toBe(false));
+    expect(result.current.periods.daily.source).toBe('divineapi');
+    expect(result.current.periods.weekly.source).toBe('divineapi');
     expect(result.current.reading.headline).toBe('远端今日提示');
-    expect(result.current.reading.fortune.find((item) => item.key === 'career')?.body).toBe(
-      '远端今日提示的工作提示',
-    );
-    expect(result.current.tarot.title).toBe('The Sun');
     expect(result.current.weekly.profession).toBe('先完成最重要的草稿。');
+    expect(result.current.tarot.title).toBe('The Star');
+    expect(trpcMocks.tarot).not.toHaveBeenCalled();
     expect(trpcMocks.yesNoTarot).not.toHaveBeenCalled();
   });
 
-  it('keeps deterministic local content when the provider rejects', async () => {
-    trpcMocks.daily.mockRejectedValue(new Error('provider unavailable'));
-    trpcMocks.tarot.mockRejectedValue(new Error('provider unavailable'));
+  it('keeps daily provider data when weekly fails', async () => {
+    trpcMocks.daily.mockResolvedValue(remoteReading('aries', '远端今日提示'));
+    trpcMocks.weekly.mockRejectedValue(new Error('weekly unavailable'));
     const profile = createProfileFromBirthday({ birthday: '1996-03-21' });
 
     const { result } = renderHook(() => useEnergyAstrology(profile, true));
 
-    await waitFor(() => expect(result.current.loading).toBe(false));
-    expect(result.current.source).toBe('local-fallback');
-    expect(result.current.error).toBe('暂时使用本地提示');
-    expect(result.current.reading.zodiacLabel).toBe('白羊座');
-    expect(result.current.tarot.title).toBe('The Star');
+    await waitFor(() => expect(result.current.periods.daily.loading).toBe(false));
+    await waitFor(() => expect(result.current.periods.weekly.loading).toBe(false));
+    expect(result.current.periods.daily.source).toBe('divineapi');
+    expect(result.current.periods.weekly.source).toBe('local-fallback');
+    expect(result.current.periods.weekly.error).toBe('暂时使用本地提示');
+    expect(result.current.reading.headline).toBe('远端今日提示');
   });
 
-  it('loads yes/no tarot only when the user requests it and never accepts question text', async () => {
+  it('does not fetch monthly until requested', async () => {
     trpcMocks.daily.mockResolvedValue(remoteReading('aries', '远端今日提示'));
-    trpcMocks.tarot.mockResolvedValue({
-      provider: 'divineapi',
-      apiConfigured: true,
-      title: 'The Sun',
-      subtitle: '把光带回来',
-      body: '先完成一件让自己有力量的小事。',
+    trpcMocks.monthly.mockResolvedValue(normalizedPeriod('monthly'));
+    const profile = createProfileFromBirthday({ birthday: '1996-03-21' });
+    const { result } = renderHook(() => useEnergyAstrology(profile, true));
+
+    await waitFor(() => expect(result.current.periods.daily.loading).toBe(false));
+    expect(trpcMocks.monthly).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await result.current.loadPeriod('monthly', 'current');
     });
+
+    expect(trpcMocks.monthly).toHaveBeenCalledWith(
+      expect.objectContaining({ month: 'current', zodiacSign: 'aries' }),
+    );
+    expect(result.current.periods.monthly).toMatchObject({
+      loaded: true,
+      source: 'divineapi',
+      error: null,
+    });
+  });
+
+  it('loads yes/no tarot only when the capability is enabled and the user requests it', async () => {
+    trpcMocks.status.mockResolvedValue(
+      capabilityStatus(['daily-horoscope', 'weekly-horoscope', 'yes-no-tarot']),
+    );
+    trpcMocks.daily.mockResolvedValue(remoteReading('aries', '远端今日提示'));
     trpcMocks.yesNoTarot.mockResolvedValue({
       provider: 'divineapi',
       apiConfigured: true,
@@ -133,7 +202,7 @@ describe('useEnergyAstrology', () => {
     const profile = createProfileFromBirthday({ birthday: '1996-03-21' });
     const { result } = renderHook(() => useEnergyAstrology(profile, true));
 
-    await waitFor(() => expect(result.current.loading).toBe(false));
+    await waitFor(() => expect(result.current.periods.daily.loading).toBe(false));
     expect(trpcMocks.yesNoTarot).not.toHaveBeenCalled();
 
     await act(async () => {
@@ -151,13 +220,11 @@ describe('useEnergyAstrology', () => {
   it('does not let an older profile request overwrite the latest profile', async () => {
     const ariesDaily = deferred<ReturnType<typeof remoteReading>>();
     const taurusDaily = deferred<ReturnType<typeof remoteReading>>();
-    const ariesTarot = deferred<{ title: string; subtitle: string; body: string }>();
-    const taurusTarot = deferred<{ title: string; subtitle: string; body: string }>();
     trpcMocks.daily.mockImplementation(({ zodiacSign }: { zodiacSign: string }) =>
       zodiacSign === 'aries' ? ariesDaily.promise : taurusDaily.promise,
     );
-    trpcMocks.tarot.mockImplementation(({ zodiacSign }: { zodiacSign: string }) =>
-      zodiacSign === 'aries' ? ariesTarot.promise : taurusTarot.promise,
+    trpcMocks.weekly.mockImplementation(({ zodiacSign }: { zodiacSign: string }) =>
+      Promise.resolve(remoteWeekly(zodiacSign as 'aries' | 'taurus')),
     );
     const aries = createProfileFromBirthday({ birthday: '1996-03-21' });
     const taurus = createProfileFromBirthday({ birthday: '1996-04-21' });
@@ -169,18 +236,15 @@ describe('useEnergyAstrology', () => {
 
     await act(async () => {
       taurusDaily.resolve(remoteReading('taurus', '最新金牛提示'));
-      taurusTarot.resolve({ title: 'The World', subtitle: '新的节奏', body: '保留最新结果。' });
-      await Promise.all([taurusDaily.promise, taurusTarot.promise]);
+      await taurusDaily.promise;
     });
     await waitFor(() => expect(result.current.reading.headline).toBe('最新金牛提示'));
 
     await act(async () => {
       ariesDaily.resolve(remoteReading('aries', '过期白羊提示'));
-      ariesTarot.resolve({ title: 'The Tower', subtitle: '过期结果', body: '不应覆盖。' });
-      await Promise.all([ariesDaily.promise, ariesTarot.promise]);
+      await ariesDaily.promise;
     });
 
     expect(result.current.reading.headline).toBe('最新金牛提示');
-    expect(result.current.tarot.title).toBe('The World');
   });
 });

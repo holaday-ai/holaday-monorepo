@@ -3,6 +3,8 @@ import type { EnergyAstrologyState } from './useEnergyAstrology';
 
 export type EnergyMood = 'good' | 'tired' | 'stressed' | 'unwind';
 export type EnergyNeed = 'focus' | 'relax' | 'confidence' | 'uplift';
+export type EnergyAstrologyPeriod = 'daily' | 'weekly' | 'monthly' | 'yearly';
+export type EnergyAstrologyRangeKey = 'today' | 'current' | 'next';
 export type EnergyExperienceId = 'recharge' | 'tarot' | 'light-test' | 'horoscope' | 'games';
 export type ExperiencePhase = 'intro' | 'active' | 'result' | 'error';
 

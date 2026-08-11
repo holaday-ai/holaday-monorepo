@@ -1,11 +1,51 @@
-import { type AstroProfile, type AstroReading, buildAstroReading } from '@/lib/astrology';
-import { trpc } from '@/lib/trpc';
+import {
+  type AstroProfile,
+  type AstroReading,
+  type ZodiacSign,
+  buildAstroReading,
+} from '@/lib/astrology';
+import { type AppRouter, trpc } from '@/lib/trpc';
+import type { inferRouterOutputs } from '@trpc/server';
 import * as React from 'react';
+import type { EnergyAstrologyPeriod, EnergyAstrologyRangeKey } from './energy-types';
 
-type ProviderReading = Awaited<ReturnType<typeof trpc.astrology.daily.query>>;
-type ProviderWeekly = Awaited<ReturnType<typeof trpc.astrology.weekly.query>>;
-type ProviderTarot = Awaited<ReturnType<typeof trpc.astrology.tarot.query>>;
-type ProviderYesNoTarot = Awaited<ReturnType<typeof trpc.astrology.yesNoTarot.query>>;
+type AstrologyRouterOutput = inferRouterOutputs<AppRouter>['astrology'];
+type ProviderDaily = AstrologyRouterOutput['daily'];
+type ProviderWeekly = AstrologyRouterOutput['weekly'];
+type ProviderYesNoTarot = AstrologyRouterOutput['yesNoTarot'];
+type ProviderStatus = AstrologyRouterOutput['status'];
+
+export type EnergyPeriodReading = Pick<
+  ProviderDaily,
+  | 'period'
+  | 'provider'
+  | 'source'
+  | 'freshness'
+  | 'zodiacSign'
+  | 'zodiacLabel'
+  | 'rangeLabel'
+  | 'rangeKey'
+  | 'summary'
+  | 'dimensions'
+  | 'luckyColors'
+  | 'luckyNumbers'
+  | 'luckyLetters'
+  | 'suitableTimes'
+  | 'sevenDayTrend'
+  | 'cosmicTip'
+  | 'singlesTip'
+  | 'couplesTip'
+>;
+
+export type EnergyRankingItem = AstrologyRouterOutput['ranking']['items'][number];
+
+export interface EnergyPeriodState {
+  reading: EnergyPeriodReading;
+  source: 'divineapi' | 'local-fallback';
+  loading: boolean;
+  loaded: boolean;
+  error: string | null;
+}
 
 export interface EnergyTarotReading {
   title: string;
@@ -40,14 +80,26 @@ export interface EnergyAstrologyState {
   source: 'provider' | 'local-fallback';
   loading: boolean;
   error: string | null;
+  periods: Record<EnergyAstrologyPeriod, EnergyPeriodState>;
+  capabilities: Record<string, boolean>;
+  ranking: {
+    complete: boolean;
+    items: EnergyRankingItem[];
+    loaded: boolean;
+    loading: boolean;
+    error: string | null;
+  };
+  signPreview: EnergyPeriodState | null;
+  loadPeriod: (period: EnergyAstrologyPeriod, rangeKey?: 'current' | 'next') => Promise<void>;
+  refreshPeriod: (period: EnergyAstrologyPeriod) => Promise<void>;
+  loadRanking: () => Promise<void>;
+  loadSignPreview: (sign: ZodiacSign) => Promise<void>;
   refresh: () => Promise<void>;
   drawYesNoTarot: () => Promise<void>;
 }
 
-type EnergyAstrologySnapshot = Pick<
-  EnergyAstrologyState,
-  'reading' | 'tarot' | 'weekly' | 'source' | 'loading' | 'error'
->;
+const PERIODS: EnergyAstrologyPeriod[] = ['daily', 'weekly', 'monthly', 'yearly'];
+const LOCAL_ERROR = '暂时使用本地提示';
 
 export function useEnergyAstrology(
   profile: AstroProfile,
@@ -57,90 +109,171 @@ export function useEnergyAstrology(
   const localTarot = React.useMemo(() => buildLocalTarot(localReading), [localReading]);
   const localWeekly = React.useMemo(() => buildLocalWeekly(localReading), [localReading]);
   const localYesNoTarot = React.useMemo(() => buildLocalYesNoTarot(localReading), [localReading]);
-  const requestIdRef = React.useRef(0);
+  const localPeriods = React.useMemo(
+    () => buildLocalPeriodStates(profile, localReading),
+    [localReading, profile],
+  );
+  const periodRequestIds = React.useRef<Record<EnergyAstrologyPeriod, number>>({
+    daily: 0,
+    weekly: 0,
+    monthly: 0,
+    yearly: 0,
+  });
+  const periodRangeKeys = React.useRef<
+    Record<EnergyAstrologyPeriod, 'current' | 'next' | undefined>
+  >({
+    daily: undefined,
+    weekly: undefined,
+    monthly: 'current',
+    yearly: 'current',
+  });
+  const statusRequestIdRef = React.useRef(0);
+  const rankingRequestIdRef = React.useRef(0);
+  const signPreviewRequestIdRef = React.useRef(0);
   const yesNoRequestIdRef = React.useRef(0);
-  const [state, setState] = React.useState<EnergyAstrologySnapshot>(() => ({
-    reading: localReading,
-    tarot: localTarot,
-    weekly: localWeekly,
-    source: 'local-fallback',
+  const capabilitiesRef = React.useRef<Record<string, boolean>>({});
+  const [periods, setPeriods] = React.useState<Record<EnergyAstrologyPeriod, EnergyPeriodState>>(
+    () => localPeriods,
+  );
+  const [compatibilityReading, setCompatibilityReading] = React.useState(localReading);
+  const [compatibilityWeekly, setCompatibilityWeekly] = React.useState(localWeekly);
+  const [capabilities, setCapabilities] = React.useState<Record<string, boolean>>({});
+  const [ranking, setRanking] = React.useState<EnergyAstrologyState['ranking']>({
+    complete: false,
+    items: [],
+    loaded: false,
     loading: false,
     error: null,
-  }));
+  });
+  const [signPreview, setSignPreview] = React.useState<EnergyPeriodState | null>(null);
   const [yesNoTarot, setYesNoTarot] = React.useState<EnergyYesNoTarotReading | null>(null);
   const [yesNoLoading, setYesNoLoading] = React.useState(false);
 
+  const loadPeriod = React.useCallback(
+    async (
+      period: EnergyAstrologyPeriod,
+      rangeKey: 'current' | 'next' = 'current',
+    ): Promise<void> => {
+      periodRangeKeys.current[period] = rangeKey;
+      const requestId = ++periodRequestIds.current[period];
+      const localState = localStateForRange(localPeriods[period], period, rangeKey);
+      if (!liveProvider) {
+        setPeriods((current) => ({
+          ...current,
+          [period]: { ...localState, loaded: true },
+        }));
+        if (period === 'daily') setCompatibilityReading(localReading);
+        if (period === 'weekly') setCompatibilityWeekly(localWeekly);
+        return;
+      }
+
+      setPeriods((current) => ({
+        ...current,
+        [period]: { ...current[period], loading: true, error: null },
+      }));
+
+      try {
+        const remote = await queryPeriod(period, profile, rangeKey);
+        if (requestId !== periodRequestIds.current[period]) return;
+        const reading = toPeriodReading(remote);
+        const error = reading.source === 'local-fallback' ? LOCAL_ERROR : null;
+        setPeriods((current) => ({
+          ...current,
+          [period]: {
+            reading,
+            source: reading.source,
+            loading: false,
+            loaded: true,
+            error,
+          },
+        }));
+        if (period === 'daily') {
+          setCompatibilityReading(mergeProviderReading(localReading, remote as ProviderDaily));
+        }
+        if (period === 'weekly') {
+          setCompatibilityWeekly(providerWeekly(remote as ProviderWeekly));
+        }
+      } catch {
+        if (requestId !== periodRequestIds.current[period]) return;
+        setPeriods((current) => ({
+          ...current,
+          [period]: {
+            ...localState,
+            loading: false,
+            loaded: true,
+            error: LOCAL_ERROR,
+          },
+        }));
+        if (period === 'daily') setCompatibilityReading(localReading);
+        if (period === 'weekly') setCompatibilityWeekly(localWeekly);
+      }
+    },
+    [liveProvider, localPeriods, localReading, localWeekly, profile],
+  );
+
+  const refreshPeriod = React.useCallback(
+    (period: EnergyAstrologyPeriod): Promise<void> =>
+      loadPeriod(period, periodRangeKeys.current[period]),
+    [loadPeriod],
+  );
+
   const refresh = React.useCallback(async (): Promise<void> => {
-    const requestId = ++requestIdRef.current;
+    await Promise.allSettled([loadPeriod('daily'), loadPeriod('weekly')]);
+  }, [loadPeriod]);
+
+  const loadRanking = React.useCallback(async (): Promise<void> => {
+    const requestId = ++rankingRequestIdRef.current;
     if (!liveProvider) {
-      setState({
-        reading: localReading,
-        tarot: localTarot,
-        weekly: localWeekly,
-        source: 'local-fallback',
-        loading: false,
-        error: null,
-      });
+      setRanking({ complete: false, items: [], loaded: true, loading: false, error: null });
       return;
     }
-
-    setState({
-      reading: localReading,
-      tarot: localTarot,
-      weekly: localWeekly,
-      source: 'local-fallback',
-      loading: true,
-      error: null,
-    });
-
+    setRanking((current) => ({ ...current, loading: true, error: null }));
     try {
-      const [remoteReading, remoteWeekly, remoteTarot] = await Promise.all([
-        trpc.astrology.daily.query({
-          name: profile.name,
-          birthday: profile.birthday,
-          birthTime: profile.birthTime,
-          birthPlace: profile.birthPlace,
-          zodiacSign: profile.zodiacSign,
-          locale: 'zh-CN',
-        }),
-        trpc.astrology.weekly.query({
-          name: profile.name,
-          birthday: profile.birthday,
-          birthTime: profile.birthTime,
-          birthPlace: profile.birthPlace,
-          zodiacSign: profile.zodiacSign,
-          locale: 'zh-CN',
-        }),
-        trpc.astrology.tarot.query({
-          zodiacSign: profile.zodiacSign,
-          locale: 'zh-CN',
-        }),
-      ]);
-      if (requestId !== requestIdRef.current) return;
-      setState({
-        reading: mergeProviderReading(localReading, remoteReading),
-        tarot: providerTarot(remoteTarot),
-        weekly: providerWeekly(remoteWeekly),
-        source: 'provider',
-        loading: false,
-        error: null,
-      });
+      const remote = await trpc.astrology.ranking.query({ locale: 'zh-CN' });
+      if (requestId !== rankingRequestIdRef.current) return;
+      setRanking({ ...remote, loaded: true, loading: false, error: null });
     } catch {
-      if (requestId !== requestIdRef.current) return;
-      setState({
-        reading: localReading,
-        tarot: localTarot,
-        weekly: localWeekly,
-        source: 'local-fallback',
-        loading: false,
-        error: '暂时使用本地提示',
-      });
+      if (requestId !== rankingRequestIdRef.current) return;
+      setRanking({ complete: false, items: [], loaded: true, loading: false, error: LOCAL_ERROR });
     }
-  }, [liveProvider, localReading, localTarot, localWeekly, profile]);
+  }, [liveProvider]);
+
+  const loadSignPreview = React.useCallback(
+    async (sign: ZodiacSign): Promise<void> => {
+      const requestId = ++signPreviewRequestIdRef.current;
+      const previewProfile = { ...profile, zodiacSign: sign };
+      const localPreview = buildLocalPeriodStates(
+        previewProfile,
+        buildAstroReading(previewProfile),
+      ).daily;
+      setSignPreview({ ...localPreview, loading: liveProvider, loaded: !liveProvider });
+      if (!liveProvider) return;
+      try {
+        const remote = await trpc.astrology.daily.query({
+          ...profileInput(profile),
+          zodiacSignOverride: sign,
+          locale: 'zh-CN',
+        });
+        if (requestId !== signPreviewRequestIdRef.current) return;
+        const reading = toPeriodReading(remote);
+        setSignPreview({
+          reading,
+          source: reading.source,
+          loading: false,
+          loaded: true,
+          error: reading.source === 'local-fallback' ? LOCAL_ERROR : null,
+        });
+      } catch {
+        if (requestId !== signPreviewRequestIdRef.current) return;
+        setSignPreview({ ...localPreview, loading: false, loaded: true, error: LOCAL_ERROR });
+      }
+    },
+    [liveProvider, profile],
+  );
 
   const drawYesNoTarot = React.useCallback(async (): Promise<void> => {
     const requestId = ++yesNoRequestIdRef.current;
-    if (!liveProvider) {
+    if (!liveProvider || !capabilitiesRef.current['yes-no-tarot']) {
       setYesNoTarot(localYesNoTarot);
       setYesNoLoading(false);
       return;
@@ -163,23 +296,234 @@ export function useEnergyAstrology(
   }, [liveProvider, localYesNoTarot, profile.zodiacSign]);
 
   React.useEffect(() => {
-    if (!profile.zodiacSign) return;
+    const statusRequestId = ++statusRequestIdRef.current;
+    for (const period of PERIODS) periodRequestIds.current[period] += 1;
+    rankingRequestIdRef.current += 1;
+    signPreviewRequestIdRef.current += 1;
     yesNoRequestIdRef.current += 1;
+    capabilitiesRef.current = {};
+    setCapabilities({});
+    setPeriods(localPeriods);
+    setCompatibilityReading(localReading);
+    setCompatibilityWeekly(localWeekly);
+    setRanking({ complete: false, items: [], loaded: false, loading: false, error: null });
+    setSignPreview(null);
     setYesNoTarot(null);
     setYesNoLoading(false);
-  }, [profile.zodiacSign]);
 
-  React.useEffect(() => {
-    void refresh();
+    if (!liveProvider) return;
+    void Promise.allSettled([
+      trpc.astrology.status.query().then((status) => {
+        if (statusRequestId !== statusRequestIdRef.current) return;
+        const next = capabilityMap(status);
+        capabilitiesRef.current = next;
+        setCapabilities(next);
+      }),
+      loadPeriod('daily'),
+      loadPeriod('weekly'),
+    ]);
+
     return () => {
-      requestIdRef.current += 1;
+      statusRequestIdRef.current += 1;
+      for (const period of PERIODS) periodRequestIds.current[period] += 1;
+      rankingRequestIdRef.current += 1;
+      signPreviewRequestIdRef.current += 1;
+      yesNoRequestIdRef.current += 1;
     };
-  }, [refresh]);
+  }, [liveProvider, loadPeriod, localPeriods, localReading, localWeekly]);
+
+  const source = periods.daily.source === 'divineapi' ? 'provider' : 'local-fallback';
+  const loading = periods.daily.loading || periods.weekly.loading;
+  const error = periods.daily.error ?? periods.weekly.error;
 
   return React.useMemo(
-    () => ({ ...state, refresh, yesNoTarot, yesNoLoading, drawYesNoTarot }),
-    [drawYesNoTarot, refresh, state, yesNoLoading, yesNoTarot],
+    () => ({
+      reading: compatibilityReading,
+      tarot: localTarot,
+      weekly: compatibilityWeekly,
+      yesNoTarot,
+      yesNoLoading,
+      source,
+      loading,
+      error,
+      periods,
+      capabilities,
+      ranking,
+      signPreview,
+      loadPeriod,
+      refreshPeriod,
+      loadRanking,
+      loadSignPreview,
+      refresh,
+      drawYesNoTarot,
+    }),
+    [
+      capabilities,
+      compatibilityReading,
+      compatibilityWeekly,
+      drawYesNoTarot,
+      error,
+      loadPeriod,
+      loadRanking,
+      loadSignPreview,
+      loading,
+      localTarot,
+      periods,
+      ranking,
+      refresh,
+      refreshPeriod,
+      signPreview,
+      source,
+      yesNoLoading,
+      yesNoTarot,
+    ],
   );
+}
+
+function profileInput(profile: AstroProfile) {
+  return {
+    name: profile.name,
+    birthday: profile.birthday,
+    birthTime: profile.birthTime,
+    birthPlace: profile.birthPlace,
+    zodiacSign: profile.zodiacSign,
+  };
+}
+
+function queryPeriod(
+  period: EnergyAstrologyPeriod,
+  profile: AstroProfile,
+  rangeKey: 'current' | 'next',
+): Promise<
+  | ProviderDaily
+  | ProviderWeekly
+  | AstrologyRouterOutput['monthly']
+  | AstrologyRouterOutput['yearly']
+> {
+  const input = { ...profileInput(profile), locale: 'zh-CN' };
+  if (period === 'daily') return trpc.astrology.daily.query(input);
+  if (period === 'weekly') return trpc.astrology.weekly.query(input);
+  if (period === 'monthly') return trpc.astrology.monthly.query({ ...input, month: rangeKey });
+  return trpc.astrology.yearly.query(input);
+}
+
+function toPeriodReading(
+  reading:
+    | ProviderDaily
+    | ProviderWeekly
+    | AstrologyRouterOutput['monthly']
+    | AstrologyRouterOutput['yearly'],
+): EnergyPeriodReading {
+  return {
+    period: reading.period,
+    provider: reading.provider,
+    source: reading.source,
+    freshness: reading.freshness,
+    zodiacSign: reading.zodiacSign,
+    zodiacLabel: reading.zodiacLabel,
+    rangeLabel: reading.rangeLabel,
+    rangeKey: reading.rangeKey,
+    summary: reading.summary,
+    dimensions: reading.dimensions,
+    luckyColors: reading.luckyColors,
+    luckyNumbers: reading.luckyNumbers,
+    luckyLetters: reading.luckyLetters,
+    suitableTimes: reading.suitableTimes,
+    sevenDayTrend: reading.sevenDayTrend,
+    cosmicTip: reading.cosmicTip,
+    singlesTip: reading.singlesTip,
+    couplesTip: reading.couplesTip,
+  };
+}
+
+function buildLocalPeriodStates(
+  profile: AstroProfile,
+  reading: AstroReading,
+): Record<EnergyAstrologyPeriod, EnergyPeriodState> {
+  return {
+    daily: localPeriodState(profile, reading, 'daily', 'today', reading.dateLabel, true),
+    weekly: localPeriodState(profile, reading, 'weekly', 'current', '本周能量', true),
+    monthly: localPeriodState(profile, reading, 'monthly', 'current', '本月能量', false),
+    yearly: localPeriodState(profile, reading, 'yearly', 'current', '本年能量', false),
+  };
+}
+
+function localPeriodState(
+  profile: AstroProfile,
+  reading: AstroReading,
+  period: EnergyAstrologyPeriod,
+  rangeKey: EnergyAstrologyRangeKey,
+  rangeLabel: string,
+  loaded: boolean,
+): EnergyPeriodState {
+  const fortune = new Map(reading.fortune.map((item) => [item.key, item]));
+  return {
+    source: 'local-fallback',
+    loading: false,
+    loaded,
+    error: null,
+    reading: {
+      period,
+      provider: 'mock',
+      source: 'local-fallback',
+      freshness: 'local',
+      zodiacSign: profile.zodiacSign,
+      zodiacLabel: reading.zodiacLabel,
+      rangeLabel,
+      rangeKey,
+      summary: reading.headline,
+      dimensions: [
+        periodDimension('personal', '个人', reading.headline, fortune.get('overall')?.score),
+        periodDimension(
+          'health',
+          '健康',
+          fortune.get('health')?.body,
+          fortune.get('health')?.score,
+        ),
+        periodDimension('profession', '工作', reading.workNote, fortune.get('career')?.score),
+        periodDimension('emotions', '情绪', fortune.get('love')?.body, fortune.get('love')?.score),
+        periodDimension('travel', '出行', '行程保留一点弹性，会更从容。', null),
+        periodDimension('luck', '好运', fortune.get('wealth')?.body, fortune.get('wealth')?.score),
+      ],
+      luckyColors: [reading.luckyColor],
+      luckyNumbers: [],
+      luckyLetters: [],
+      suitableTimes: [reading.luckyWindow],
+      sevenDayTrend: null,
+      cosmicTip: null,
+      singlesTip: null,
+      couplesTip: null,
+    },
+  };
+}
+
+function localStateForRange(
+  state: EnergyPeriodState,
+  period: EnergyAstrologyPeriod,
+  rangeKey: 'current' | 'next',
+): EnergyPeriodState {
+  if (period !== 'monthly' || rangeKey !== 'next') return state;
+  return {
+    ...state,
+    reading: {
+      ...state.reading,
+      rangeKey: 'next',
+      rangeLabel: '下月能量',
+    },
+  };
+}
+
+function periodDimension(
+  key: EnergyPeriodReading['dimensions'][number]['key'],
+  label: string,
+  body: string | undefined,
+  score: number | null | undefined,
+): EnergyPeriodReading['dimensions'][number] {
+  return { key, label, body: body ?? '', score: score ?? null };
+}
+
+function capabilityMap(status: ProviderStatus): Record<string, boolean> {
+  return Object.fromEntries(status.capabilities.map((item) => [item.capability, item.available]));
 }
 
 function buildLocalTarot(reading: AstroReading): EnergyTarotReading {
@@ -187,14 +531,6 @@ function buildLocalTarot(reading: AstroReading): EnergyTarotReading {
     title: 'The Star',
     subtitle: '先把希望放回桌面',
     body: `${reading.zodiacLabel} 今天适合抽一张轻提示卡。先把问题放轻一点，选一个能马上行动的小方向。`,
-  };
-}
-
-function providerTarot(tarot: ProviderTarot): EnergyTarotReading {
-  return {
-    title: tarot.title,
-    subtitle: tarot.subtitle,
-    body: tarot.body,
   };
 }
 
@@ -242,7 +578,7 @@ function providerYesNoTarot(tarot: ProviderYesNoTarot): EnergyYesNoTarotReading 
   };
 }
 
-function mergeProviderReading(local: AstroReading, provider: ProviderReading): AstroReading {
+function mergeProviderReading(local: AstroReading, provider: ProviderDaily): AstroReading {
   const headline = provider.headline || local.headline;
   const workNote = provider.workNote || local.workNote;
   const luckyColor = provider.luckyColor || local.luckyColor;
