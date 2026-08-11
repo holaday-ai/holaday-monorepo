@@ -1,104 +1,112 @@
 // @vitest-environment happy-dom
 
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import * as React from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { ExperiencePhase } from '../energy-types';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readEnergyProgress } from '../energy-progress';
 import { TarotExperience } from './TarotExperience';
+
+const storage = new Map<string, string>();
+
+beforeEach(() => {
+  storage.clear();
+  Object.defineProperty(window, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => storage.set(key, value),
+    },
+  });
+});
 
 afterEach(cleanup);
 
-const tarot = {
-  title: 'The Sun',
-  subtitle: '把光带回来',
-  body: '先完成一件让自己有力量的小事。',
-};
-
-function Harness({ onDrawYesNo = vi.fn() }: { onDrawYesNo?: () => Promise<void> }): JSX.Element {
-  const [phase, setPhase] = React.useState<ExperiencePhase>('active');
-  return (
-    <>
-      {phase === 'result' ? (
-        <button type="button" onClick={() => setPhase('active')}>
-          再来一次
-        </button>
-      ) : null}
-      <TarotExperience
-        tarot={tarot}
-        yesNoTarot={{
-          answer: 'yes',
-          card: 'The Sun',
-          category: 'Major Arcana',
-          result: '可以，从一个清楚的小步骤开始。',
-        }}
-        yesNoLoading={false}
-        onDrawYesNo={onDrawYesNo}
-        phase={phase}
-        onPhaseChange={setPhase}
-      />
-    </>
+function renderTarot(
+  options: {
+    profileStorageScope?: string | null;
+    onPhaseChange?: (phase: 'intro' | 'active' | 'result' | 'error') => void;
+    onComplete?: () => void;
+  } = {},
+) {
+  const onPhaseChange = options.onPhaseChange ?? vi.fn();
+  const onComplete = options.onComplete ?? vi.fn();
+  render(
+    <TarotExperience
+      profileStorageScope={options.profileStorageScope ?? 'usr_a'}
+      capabilities={{}}
+      phase="active"
+      onPhaseChange={onPhaseChange}
+      onComplete={onComplete}
+    />,
   );
+  return { onPhaseChange, onComplete };
+}
+
+async function revealSingleCard() {
+  const user = userEvent.setup();
+  await user.click(screen.getByRole('button', { name: '单张能量牌' }));
+  await user.click(screen.getByRole('button', { name: '工作推进' }));
+  await user.click(screen.getByRole('button', { name: '开始抽卡' }));
+  await user.click(screen.getByRole('button', { name: '翻开这张牌' }));
+  return user;
 }
 
 describe('TarotExperience', () => {
-  it('keeps the card hidden until the user deliberately reveals it', async () => {
-    const user = userEvent.setup();
-    render(<Harness />);
+  it('continues from a single-card result into a three-card spread', async () => {
+    renderTarot();
+    const user = await revealSingleCard();
 
-    await user.click(screen.getByRole('button', { name: '今日卡' }));
+    expect(screen.getByRole('heading', { name: 'Holaday 能量牌' })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '进入三张牌' }));
 
-    const themeGroup = screen.getByRole('group', { name: '抽卡主题' });
-    expect(within(themeGroup).getAllByRole('button', { pressed: false })).toHaveLength(3);
-    const work = within(themeGroup).getByRole('button', { name: /工作推进/ });
-    await user.click(work);
-    expect(work.getAttribute('aria-pressed')).toBe('true');
-
-    await user.click(screen.getByRole('button', { name: '开始抽卡' }));
-    expect(screen.queryByText('The Sun')).toBeNull();
-    expect(screen.getByRole('button', { name: '翻开这张卡' })).toBeTruthy();
-
-    await user.click(screen.getByRole('button', { name: '翻开这张卡' }));
-    expect(screen.getByRole('heading', { name: 'The Sun' })).toBeTruthy();
-    expect(screen.getByText('先完成一件让自己有力量的小事。')).toBeTruthy();
-    expect(screen.getByText(/只推进一件最重要的小事/)).toBeTruthy();
+    expect(screen.getAllByTestId('energy-card-result')).toHaveLength(3);
+    expect(screen.getByText('回顾')).toBeTruthy();
+    expect(screen.getByText('当下')).toBeTruthy();
+    expect(screen.getByText('下一步')).toBeTruthy();
   });
 
-  it('returns to a clean theme choice on replay', async () => {
-    const user = userEvent.setup();
-    render(<Harness />);
+  it('redraws without closing the result phase and completes only once', async () => {
+    const onPhaseChange = vi.fn();
+    const onComplete = vi.fn();
+    renderTarot({ onPhaseChange, onComplete });
+    const user = await revealSingleCard();
 
-    await user.click(screen.getByRole('button', { name: '今日卡' }));
+    expect(onComplete).toHaveBeenCalledOnce();
+    onPhaseChange.mockClear();
+    await user.click(screen.getByRole('button', { name: '再抽一次' }));
 
-    await user.click(screen.getByRole('button', { name: /关系回应/ }));
-    await user.click(screen.getByRole('button', { name: '开始抽卡' }));
-    await user.click(screen.getByRole('button', { name: '翻开这张卡' }));
-    await user.click(screen.getByRole('button', { name: '再来一次' }));
-
-    expect(screen.queryByText('The Sun')).toBeNull();
-    expect(screen.getByRole('heading', { name: '今天想听哪一种回应？' })).toBeTruthy();
-    await user.click(screen.getByRole('button', { name: '今日卡' }));
-    expect(screen.getByRole('heading', { name: '这张卡想回应什么？' })).toBeTruthy();
-    expect(
-      within(screen.getByRole('group', { name: '抽卡主题' })).getAllByRole('button', {
-        pressed: false,
-      }),
-    ).toHaveLength(3);
+    expect(screen.getByRole('button', { name: '翻开这张牌' })).toBeTruthy();
+    expect(onPhaseChange).toHaveBeenLastCalledWith('active');
+    expect(onPhaseChange).not.toHaveBeenLastCalledWith('intro');
+    await user.click(screen.getByRole('button', { name: '翻开这张牌' }));
+    expect(onComplete).toHaveBeenCalledOnce();
   });
 
-  it('draws a yes/no card on demand without collecting the question', async () => {
-    const user = userEvent.setup();
-    const onDrawYesNo = vi.fn().mockResolvedValue(undefined);
-    render(<Harness onDrawYesNo={onDrawYesNo} />);
+  it('saves only the revealed card id for the current storage scope', async () => {
+    const scope = 'usr_a';
+    renderTarot({ profileStorageScope: scope });
+    const user = await revealSingleCard();
+    await user.click(screen.getByRole('button', { name: '收藏本次提示' }));
 
-    await user.click(screen.getByRole('button', { name: '是 / 否卡' }));
-    expect(screen.getByText(/只需要在心里默念/)).toBeTruthy();
+    expect(readEnergyProgress(scope).savedCardIds).toEqual([
+      expect.stringMatching(/^[a-z-]+-\d{2}$/),
+    ]);
+    const raw = storage.get(`holaday.energy.progress.v2:${scope}`) ?? '';
+    expect(raw).not.toContain('body');
+    expect(raw).not.toContain('action');
+  });
+
+  it('answers a private yes-or-no prompt without collecting question text', async () => {
+    const user = userEvent.setup();
+    renderTarot();
+
+    await user.click(screen.getByRole('button', { name: '是 / 否能量牌' }));
+    await user.click(screen.getByRole('button', { name: '情绪整理' }));
+    await user.click(screen.getByRole('button', { name: '开始抽卡' }));
     expect(screen.queryByRole('textbox')).toBeNull();
-    await user.click(screen.getByRole('button', { name: '抽取回答卡' }));
+    expect(screen.getByText(/问题只留在心里/)).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '翻开回答牌' }));
 
-    expect(onDrawYesNo).toHaveBeenCalledOnce();
-    expect(screen.getByText('YES')).toBeTruthy();
-    expect(screen.getByRole('heading', { name: 'The Sun' })).toBeTruthy();
-    expect(screen.getByText('可以，从一个清楚的小步骤开始。')).toBeTruthy();
+    expect(screen.getByText(/^(YES|NO|WAIT)$/)).toBeTruthy();
   });
 });

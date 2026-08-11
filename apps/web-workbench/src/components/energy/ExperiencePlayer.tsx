@@ -13,6 +13,7 @@ interface ExperiencePlayerProps {
   onStart: () => void;
   onReplay: () => void;
   onChooseAnother: () => void;
+  replayLabel?: string;
   children: React.ReactNode;
 }
 
@@ -33,6 +34,7 @@ export function ExperiencePlayer({
   onStart,
   onReplay,
   onChooseAnother,
+  replayLabel = '再来一次',
   children,
 }: ExperiencePlayerProps): JSX.Element | null {
   const startRef = React.useRef<HTMLButtonElement>(null);
@@ -122,7 +124,7 @@ export function ExperiencePlayer({
             {phase === 'result' ? (
               <div className="mt-7 flex flex-wrap justify-center gap-3 border-t border-[#eee9e5] pt-5">
                 <Button type="button" className={energyPrimaryActionClass} onClick={onReplay}>
-                  再来一次
+                  {replayLabel}
                 </Button>
                 <Button type="button" variant="outline" onClick={onChooseAnother}>
                   换个玩法

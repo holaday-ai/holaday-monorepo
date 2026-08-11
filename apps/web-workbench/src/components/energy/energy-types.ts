@@ -17,6 +17,7 @@ export interface EnergyExperienceDefinition {
   status: 'active' | 'coming-soon' | 'hidden';
   actionable: boolean;
   requiredProfileFields: Array<'birthday' | 'birthTime' | 'birthPlace'>;
+  replayLabel?: string;
 }
 
 export interface EnergyExperienceProps {

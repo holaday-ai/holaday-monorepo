@@ -205,6 +205,7 @@ export function EnergyHome({
           handlePhaseChange('active');
         }}
         onChooseAnother={() => setSelectedExperience(null)}
+        replayLabel={selectedExperience?.replayLabel}
       >
         {LoadedExperience ? (
           <React.Suspense

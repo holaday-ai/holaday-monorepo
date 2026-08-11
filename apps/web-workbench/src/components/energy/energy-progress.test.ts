@@ -5,6 +5,7 @@ import {
   energyStreak,
   readEnergyProgress,
   recordEnergyCompletion,
+  saveEnergyCardIds,
 } from './energy-progress';
 
 const storage = new Map<string, string>();
@@ -38,6 +39,7 @@ describe('energy progress', () => {
     expect(readEnergyProgress('usr_b')).toEqual({
       completedDates: [],
       collectedKinds: [],
+      savedCardIds: [],
     });
     expect(readEnergyProgress('usr_a').collectedKinds).toEqual(['game']);
   });
@@ -58,6 +60,25 @@ describe('energy progress', () => {
     expect(readEnergyProgress('usr_a')).toEqual({
       completedDates: [],
       collectedKinds: [],
+      savedCardIds: [],
     });
+  });
+
+  it('migrates v1 completion data and stores only bounded stable card ids in v2', () => {
+    window.localStorage.setItem(
+      'holaday.energy.progress.v1:usr_a',
+      JSON.stringify({ completedDates: ['2026-08-10'], collectedKinds: ['tarot'] }),
+    );
+
+    expect(readEnergyProgress('usr_a')).toEqual({
+      completedDates: ['2026-08-10'],
+      collectedKinds: ['tarot'],
+      savedCardIds: [],
+    });
+
+    const progress = saveEnergyCardIds('usr_a', ['work-01', 'work-01', 'bad id', 'emotion-03']);
+    expect(progress.savedCardIds).toEqual(['work-01', 'emotion-03']);
+    expect(readEnergyProgress('usr_b').savedCardIds).toEqual([]);
+    expect(storage.get('holaday.energy.progress.v2:usr_a')).toBe(JSON.stringify(progress));
   });
 });

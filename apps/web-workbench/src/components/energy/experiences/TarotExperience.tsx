@@ -1,101 +1,188 @@
 import { Button } from '@/components/ui/button';
-import { BriefcaseBusiness, CircleHelp, Heart, Sparkles, SunMedium, Wind } from 'lucide-react';
+import {
+  BookOpenText,
+  BriefcaseBusiness,
+  CircleHelp,
+  Heart,
+  HeartPulse,
+  Layers3,
+  Save,
+  ShieldCheck,
+  Sparkles,
+  SunMedium,
+  Wind,
+} from 'lucide-react';
 import * as React from 'react';
+import { saveEnergyCardIds } from '../energy-progress';
 import type { ExperiencePhase } from '../energy-types';
-import type { EnergyTarotReading, EnergyYesNoTarotReading } from '../useEnergyAstrology';
+import {
+  HOLADAY_ENERGY_CARDS,
+  type HoladayCardTheme,
+  type HoladayEnergyCard,
+} from './energy-card-content';
+import { drawEnergyCards } from './energy-card-selection';
 
-type TarotTheme = 'work' | 'relationship' | 'space';
-type TarotMode = 'daily' | 'yes-no';
-type TarotStage = 'mode' | 'theme' | 'drawn' | 'revealed' | 'yes-no-ready';
+type CardLabMode = 'single' | 'yes-no' | 'three';
+type CardLabStage = 'directory' | 'theme' | 'ready' | 'revealed' | 'history';
+
+interface CardLabHistoryEntry {
+  mode: CardLabMode;
+  cardIds: string[];
+  createdAt: number;
+}
 
 interface TarotExperienceProps {
-  tarot: EnergyTarotReading;
-  yesNoTarot: EnergyYesNoTarotReading | null;
-  yesNoLoading: boolean;
-  onDrawYesNo: () => Promise<void>;
+  profileStorageScope: string | null;
+  capabilities: Record<string, boolean>;
   phase: ExperiencePhase;
   onPhaseChange: (phase: ExperiencePhase) => void;
   onComplete?: () => void;
 }
 
 const THEMES: Array<{
-  id: TarotTheme;
+  id: HoladayCardTheme;
   label: string;
   body: string;
   icon: React.ComponentType<{ className?: string }>;
 }> = [
   { id: 'work', label: '工作推进', body: '给卡住的一步一点提示', icon: BriefcaseBusiness },
-  { id: 'relationship', label: '关系回应', body: '看看今天适合怎样表达', icon: Heart },
-  { id: 'space', label: '给自己空间', body: '把注意力轻轻放回自己', icon: Wind },
+  { id: 'relationship', label: '关系回应', body: '看看怎样表达更轻松', icon: Heart },
+  { id: 'emotion', label: '情绪整理', body: '先看见当下的感受', icon: HeartPulse },
+  { id: 'space', label: '给自己空间', body: '把注意力放回自己', icon: Wind },
+  { id: 'confidence', label: '找回自信', body: '用真实证据支持自己', icon: ShieldCheck },
+  { id: 'uplift', label: '轻轻提振', body: '补一点明亮的能量', icon: SunMedium },
 ];
 
-const ACTIONS: Record<TarotTheme, string> = {
-  work: '今天只推进一件最重要的小事，做到能看见变化就停一下。',
-  relationship: '把想说的话缩成一句具体、柔和、容易回应的表达。',
-  space: '留十分钟不接收新信息，让身体和注意力都慢下来。',
-};
+const MODE_OPTIONS: Array<{
+  id: CardLabMode;
+  label: string;
+  body: string;
+  icon: React.ComponentType<{ className?: string }>;
+}> = [
+  { id: 'single', label: '单张能量牌', body: '带走一条能马上使用的提示', icon: Sparkles },
+  { id: 'yes-no', label: '是 / 否能量牌', body: '问题留在心里，只看行动方向', icon: CircleHelp },
+  { id: 'three', label: '三张能量牌', body: '从回顾、当下到下一步慢慢看', icon: Layers3 },
+];
 
-const ANSWER_LABELS: Record<EnergyYesNoTarotReading['answer'], string> = {
+const ANSWER_LABELS: Record<HoladayEnergyCard['answer'], string> = {
   yes: 'YES',
   no: 'NO',
-  maybe: 'WAIT',
+  wait: 'WAIT',
 };
 
+const THREE_CARD_LABELS = ['回顾', '当下', '下一步'] as const;
+
 export function TarotExperience({
-  tarot,
-  yesNoTarot,
-  yesNoLoading,
-  onDrawYesNo,
+  profileStorageScope,
+  capabilities,
   phase,
   onPhaseChange,
   onComplete = () => undefined,
 }: TarotExperienceProps): JSX.Element {
-  const [mode, setMode] = React.useState<TarotMode | null>(null);
-  const [theme, setTheme] = React.useState<TarotTheme | null>(null);
-  const [stage, setStage] = React.useState<TarotStage>('mode');
-  const previousPhase = React.useRef(phase);
+  const [mode, setMode] = React.useState<CardLabMode | null>(null);
+  const [stage, setStage] = React.useState<CardLabStage>('directory');
+  const [theme, setTheme] = React.useState<HoladayCardTheme>('work');
+  const [cards, setCards] = React.useState<HoladayEnergyCard[]>([]);
+  const [seenIds, setSeenIds] = React.useState<string[]>([]);
+  const [history, setHistory] = React.useState<CardLabHistoryEntry[]>([]);
+  const [saved, setSaved] = React.useState(false);
+  const sessionSeedRef = React.useRef(`${profileStorageScope ?? 'guest'}:${Date.now()}`);
+  const drawIndexRef = React.useRef(0);
+  const completionReportedRef = React.useRef(false);
+  const internalResumeRef = React.useRef(false);
+  const previousPhaseRef = React.useRef(phase);
 
   React.useEffect(() => {
-    if (previousPhase.current === 'result' && phase === 'active') {
-      setMode(null);
-      setTheme(null);
-      setStage('mode');
+    if (previousPhaseRef.current === 'result' && phase === 'active') {
+      if (internalResumeRef.current) {
+        internalResumeRef.current = false;
+      } else {
+        setMode(null);
+        setStage('directory');
+        setTheme('work');
+        setCards([]);
+        setSeenIds([]);
+        setHistory([]);
+        setSaved(false);
+        drawIndexRef.current = 0;
+        completionReportedRef.current = false;
+      }
     }
-    previousPhase.current = phase;
+    previousPhaseRef.current = phase;
   }, [phase]);
 
-  if (stage === 'mode') {
+  const draw = React.useCallback(
+    (nextMode: CardLabMode): HoladayEnergyCard[] => {
+      const count = nextMode === 'three' ? 3 : 1;
+      const nextCards = drawEnergyCards({
+        mode: nextMode,
+        theme,
+        count,
+        seed: `${sessionSeedRef.current}:${drawIndexRef.current}`,
+        seenIds,
+      });
+      drawIndexRef.current += 1;
+      setMode(nextMode);
+      setCards(nextCards);
+      setSeenIds((current) => [...new Set([...current, ...nextCards.map((card) => card.id)])]);
+      setSaved(false);
+      return nextCards;
+    },
+    [seenIds, theme],
+  );
+
+  const reveal = React.useCallback(
+    (revealedCards: HoladayEnergyCard[], revealedMode: CardLabMode): void => {
+      setStage('revealed');
+      setHistory((current) => [
+        ...current,
+        {
+          mode: revealedMode,
+          cardIds: revealedCards.map((card) => card.id),
+          createdAt: Date.now(),
+        },
+      ]);
+      if (!completionReportedRef.current) {
+        completionReportedRef.current = true;
+        onComplete();
+      }
+      onPhaseChange('result');
+    },
+    [onComplete, onPhaseChange],
+  );
+
+  if (stage === 'directory') {
     return (
-      <div className="energy-tarot-mode">
-        <p className="energy-kicker">选择抽卡方式</p>
-        <h3>今天想听哪一种回应？</h3>
-        <div className="energy-tarot-mode__grid">
-          <button
-            type="button"
-            aria-label="今日卡"
-            title="今日卡"
-            onClick={() => {
-              setMode('daily');
-              setStage('theme');
-            }}
-          >
-            <SunMedium aria-hidden="true" />
-            <strong>今日卡</strong>
-            <span>围绕工作、关系或自己，得到一条轻提示</span>
-          </button>
-          <button
-            type="button"
-            aria-label="是 / 否卡"
-            title="是 / 否卡"
-            onClick={() => {
-              setMode('yes-no');
-              setStage('yes-no-ready');
-            }}
-          >
-            <CircleHelp aria-hidden="true" />
-            <strong>是 / 否卡</strong>
-            <span>心里默念问题，抽一张回答卡</span>
-          </button>
+      <div className="energy-card-lab energy-card-lab--directory">
+        <header>
+          <p className="energy-kicker">Holaday 编辑内容</p>
+          <h3>Holaday 能量牌</h3>
+          <p>不是占卜结论，只是一组帮你停一下、换个角度的轻提示。</p>
+          <small>
+            {capabilities['daily-tarot']
+              ? 'Provider 能力已检测，本轮仍使用 Holaday 能量牌。'
+              : '当前不调用 Provider 塔罗接口。'}
+          </small>
+        </header>
+        <div className="energy-card-lab__mode-grid">
+          {MODE_OPTIONS.map((option) => {
+            const Icon = option.icon;
+            return (
+              <button
+                key={option.id}
+                type="button"
+                aria-label={option.label}
+                onClick={() => {
+                  setMode(option.id);
+                  setStage('theme');
+                }}
+              >
+                <Icon aria-hidden="true" />
+                <strong>{option.label}</strong>
+                <span>{option.body}</span>
+              </button>
+            );
+          })}
         </div>
       </div>
     );
@@ -103,38 +190,39 @@ export function TarotExperience({
 
   if (stage === 'theme') {
     return (
-      <div className="mx-auto max-w-xl text-center">
-        <span className="mx-auto inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-[#f4e9f4] text-[#825c91]">
-          <Sparkles className="h-5 w-5" aria-hidden="true" />
-        </span>
-        <h3 className="mt-4 text-xl font-semibold text-[#332c38]">这张卡想回应什么？</h3>
-        <p className="mt-2 text-sm leading-6 text-[#756b78]">选一个最接近此刻的方向就好。</p>
-        <fieldset className="mt-6 grid gap-3 border-0 p-0 sm:grid-cols-3" aria-label="抽卡主题">
-          {THEMES.map((item) => {
-            const Icon = item.icon;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                className="rounded-2xl border border-[#e4dce5] bg-white p-4 text-left transition hover:-translate-y-0.5 hover:border-[#bea8c7] hover:bg-[#fefbff] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8f6a9d] aria-pressed:border-[#8e679e] aria-pressed:bg-[#f8effb]"
-                aria-pressed={theme === item.id}
-                onClick={() => setTheme(item.id)}
-              >
-                <Icon className="h-5 w-5 text-[#825c91]" aria-hidden="true" />
-                <strong className="mt-3 block text-sm text-[#3e3542]">{item.label}</strong>
-                <span className="mt-1 block text-xs leading-5 text-[#7c7180]">{item.body}</span>
-              </button>
-            );
-          })}
+      <div className="energy-card-lab energy-card-lab--theme">
+        <header>
+          <p className="energy-kicker">Holaday 能量牌</p>
+          <h3>这一次想看哪个方向？</h3>
+          <p>{mode === 'yes-no' ? '问题只留在心里，不输入、不上传。' : '选择最接近此刻的一项。'}</p>
+        </header>
+        <fieldset>
+          <legend>抽卡主题</legend>
+          <div className="energy-card-lab__theme-grid">
+            {THEMES.map((item) => {
+              const Icon = item.icon;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  aria-label={item.label}
+                  aria-pressed={theme === item.id}
+                  onClick={() => setTheme(item.id)}
+                >
+                  <Icon aria-hidden="true" />
+                  <strong>{item.label}</strong>
+                  <span>{item.body}</span>
+                </button>
+              );
+            })}
+          </div>
         </fieldset>
         <Button
           type="button"
-          size="lg"
-          className="mt-6 min-w-36 rounded-xl bg-[#765184] hover:bg-[#664574]"
-          disabled={!theme}
           onClick={() => {
-            if (!theme) return;
-            setStage('drawn');
+            if (!mode) return;
+            draw(mode);
+            setStage('ready');
           }}
         >
           开始抽卡
@@ -143,78 +231,145 @@ export function TarotExperience({
     );
   }
 
-  if (stage === 'yes-no-ready') {
+  if (stage === 'ready') {
     return (
-      <div className="energy-yes-no-ready">
-        <img src="/energy/tarot-cards.jpg" alt="色彩明亮的三张塔罗牌" />
-        <p className="energy-kicker">是 / 否回答卡</p>
-        <h3>把问题留在心里</h3>
-        <p>只需要在心里默念一个可以用“是”或“否”回应的问题。问题不会被输入或上传。</p>
-        <Button
-          type="button"
-          disabled={yesNoLoading}
-          onClick={async () => {
-            await onDrawYesNo();
-            setStage('revealed');
-            onComplete();
-            onPhaseChange('result');
-          }}
-        >
-          {yesNoLoading ? '正在抽取…' : '抽取回答卡'}
-        </Button>
-      </div>
-    );
-  }
-
-  if (stage === 'drawn') {
-    return (
-      <div className="energy-tarot-drawn">
-        <img src="/energy/tarot-cards.jpg" alt="等待翻开的塔罗牌" />
-        <p>卡已经来到你面前，准备好再翻开。</p>
+      <div className="energy-card-lab energy-card-lab--ready">
+        <img
+          src="/energy/tarot-cards.jpg"
+          alt={mode === 'three' ? '等待翻开的三张 Holaday 能量牌' : '等待翻开的 Holaday 能量牌'}
+        />
+        <p>
+          {mode === 'yes-no'
+            ? '问题只留在心里，准备好再看回答。'
+            : '牌已经来到你面前，准备好再翻开。'}
+        </p>
         <Button
           type="button"
           onClick={() => {
-            setStage('revealed');
-            onComplete();
-            onPhaseChange('result');
+            if (!mode) return;
+            reveal(cards, mode);
           }}
         >
-          翻开这张卡
+          {mode === 'three' ? '翻开三张牌' : mode === 'yes-no' ? '翻开回答牌' : '翻开这张牌'}
         </Button>
       </div>
     );
   }
 
-  if (mode === 'yes-no') {
-    const result = yesNoTarot ?? {
-      answer: 'maybe' as const,
-      card: 'Temperance',
-      category: 'Major Arcana',
-      result: '先给自己一点时间，补足关键信息后再决定。',
-    };
+  if (stage === 'history') {
     return (
-      <div className="energy-yes-no-result" aria-live="polite">
-        <span>{ANSWER_LABELS[result.answer]}</span>
-        <p>{result.category}</p>
-        <h3>{result.card}</h3>
-        <p>{result.result}</p>
+      <div className="energy-card-lab energy-card-lab--history">
+        <header>
+          <BookOpenText aria-hidden="true" />
+          <h3>本次记录</h3>
+          <p>只保留当前打开期间的牌面记录，问题内容从未被收集。</p>
+        </header>
+        <ol>
+          {history.map((entry, index) => (
+            <li key={`${entry.createdAt}-${index}`}>
+              <strong>第 {index + 1} 次</strong>
+              <span>{modeLabel(entry.mode)}</span>
+              <p>{entry.cardIds.map(cardTitle).join(' · ')}</p>
+            </li>
+          ))}
+        </ol>
+        <Button type="button" variant="outline" onClick={() => setStage('revealed')}>
+          返回当前提示
+        </Button>
       </div>
     );
   }
 
-  const selectedTheme = theme ?? 'space';
+  const currentMode = mode ?? 'single';
   return (
-    <div className="mx-auto max-w-xl rounded-3xl border border-[#dfd0e4] bg-[linear-gradient(145deg,#fbf5fd,#fff)] p-6 text-center shadow-[0_16px_44px_rgba(75,52,86,0.12)]">
-      <span className="text-xs font-semibold tracking-[0.12em] text-[#846092]">今日轻提示</span>
-      <h3 className="mt-3 text-2xl font-semibold tracking-[-0.02em] text-[#352d39]">
-        {tarot.title}
-      </h3>
-      <p className="mt-1 text-sm font-medium text-[#805c8e]">{tarot.subtitle}</p>
-      <p className="mx-auto mt-4 max-w-md text-sm leading-7 text-[#655b69]">{tarot.body}</p>
-      <div className="mt-5 rounded-2xl bg-white/80 p-4 text-left">
-        <strong className="text-xs text-[#805c8e]">带回今天的行动</strong>
-        <p className="mt-1 text-sm leading-6 text-[#5f5563]">{ACTIONS[selectedTheme]}</p>
+    <div className="energy-card-lab energy-card-lab--revealed" aria-live="polite">
+      <header>
+        <p className="energy-kicker">Holaday 编辑内容</p>
+        <h3>Holaday 能量牌</h3>
+      </header>
+      <div className={`energy-card-lab__results energy-card-lab__results--${currentMode}`}>
+        {cards.map((card, index) => (
+          <article key={card.id} data-testid="energy-card-result">
+            {currentMode === 'three' ? <span>{THREE_CARD_LABELS[index]}</span> : null}
+            {currentMode === 'yes-no' ? (
+              <strong className="energy-card-lab__answer">{ANSWER_LABELS[card.answer]}</strong>
+            ) : null}
+            <h4>{card.title}</h4>
+            <p>{card.subtitle}</p>
+            <p>{card.body}</p>
+            <div>
+              <strong>15 分钟内可以做</strong>
+              <p>{card.action}</p>
+            </div>
+          </article>
+        ))}
+      </div>
+
+      <div className="energy-card-lab__result-actions">
+        <Button
+          type="button"
+          onClick={() => {
+            internalResumeRef.current = true;
+            onPhaseChange('active');
+            draw(currentMode);
+            setStage('ready');
+          }}
+        >
+          再抽一次
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => {
+            internalResumeRef.current = true;
+            onPhaseChange('active');
+            setStage('theme');
+          }}
+        >
+          换个主题
+        </Button>
+        {currentMode !== 'three' ? (
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => {
+              const nextCards = draw('three');
+              reveal(nextCards, 'three');
+            }}
+          >
+            进入三张牌
+          </Button>
+        ) : null}
+        <Button
+          type="button"
+          variant="outline"
+          disabled={saved}
+          onClick={() => {
+            saveEnergyCardIds(
+              profileStorageScope,
+              cards.map((card) => card.id),
+            );
+            setSaved(true);
+          }}
+        >
+          <Save aria-hidden="true" />
+          {saved ? '已收藏本次提示' : '收藏本次提示'}
+        </Button>
+        <Button type="button" variant="outline" onClick={() => setStage('history')}>
+          <BookOpenText aria-hidden="true" />
+          本次记录
+        </Button>
       </div>
     </div>
   );
+}
+
+function modeLabel(mode: CardLabMode): string {
+  if (mode === 'single') return '单张能量牌';
+  if (mode === 'yes-no') return '是 / 否能量牌';
+  return '三张能量牌';
+}
+
+function cardTitle(cardId: string): string {
+  return HOLADAY_ENERGY_CARDS.find((card) => card.id === cardId)?.title ?? cardId;
 }
