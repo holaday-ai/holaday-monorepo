@@ -1,8 +1,11 @@
 // @vitest-environment happy-dom
 
+import type { UiTask } from '@/types/task';
 import { cleanup, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AstrologyPageShell } from './AstrologyPageShell';
+
+vi.mock('react-router-dom', () => ({ useNavigate: () => vi.fn() }));
 
 const trpcMocks = vi.hoisted(() => ({
   energyHome: vi.fn().mockResolvedValue({ experiences: [] }),
@@ -54,5 +57,31 @@ describe('AstrologyPageShell', () => {
     expect(screen.getByRole('region', { name: '你的星座能量' })).toBeTruthy();
     expect(screen.queryByText('多元化命理')).toBeNull();
     expect(screen.queryByText('任务等待模式')).toBeNull();
+    expect(screen.queryByRole('region', { name: '运行中任务' })).toBeNull();
+  });
+
+  it('shows authenticated running tasks but keeps preview free of the dock', () => {
+    const runningTask: UiTask = {
+      taskId: 'task-live',
+      intent: '整理本周内容并生成报告',
+      title: '本周内容报告',
+      status: 'executing',
+      tickCount: 3,
+      createdAt: new Date('2026-08-12T10:00:00Z'),
+    };
+    const { rerender } = render(
+      <AstrologyPageShell liveProvider={false} profileStorageScope={null} tasks={[]} />,
+    );
+    expect(screen.queryByRole('region', { name: '运行中任务' })).toBeNull();
+
+    rerender(
+      <AstrologyPageShell
+        liveProvider={false}
+        profileStorageScope="usr_energy"
+        tasks={[runningTask]}
+      />,
+    );
+    expect(screen.getByRole('region', { name: '运行中任务' })).toBeTruthy();
+    expect(screen.getByText('本周内容报告')).toBeTruthy();
   });
 });

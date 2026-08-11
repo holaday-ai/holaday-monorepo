@@ -1,5 +1,6 @@
 import { type AstroProfile, defaultAstroProfile, readAstroProfile } from '@/lib/astrology';
 import { trpc } from '@/lib/trpc';
+import type { UiTask } from '@/types/task';
 import * as React from 'react';
 import { AstrologyWorld } from './AstrologyWorld';
 import { EnergyAstrologyPanel } from './EnergyAstrologyPanel';
@@ -9,6 +10,7 @@ import { EnergyGrowthPanel } from './EnergyGrowthPanel';
 import { EnergyHero } from './EnergyHero';
 import { EnergyProfileDrawer } from './EnergyProfileDrawer';
 import { ExperiencePlayer } from './ExperiencePlayer';
+import { RunningTaskDock, type RunningTaskDockEvent } from './RunningTaskDock';
 import { readEnergyProgress, recordEnergyCompletion } from './energy-progress';
 import type { EnergyExperienceId, EnergyNeed, ExperiencePhase } from './energy-types';
 import { ENERGY_EXPERIENCES, type EnergyExperienceRegistration } from './experience-registry';
@@ -18,6 +20,7 @@ import './energy.css';
 interface EnergyHomeProps {
   profileStorageScope: string | null;
   liveProvider?: boolean;
+  tasks?: readonly UiTask[];
 }
 
 type EnergyEventType = 'started' | 'completed' | 'replayed' | 'failed';
@@ -41,6 +44,7 @@ function durationBucket(startedAt: number): Exclude<EnergyDurationBucket, null> 
 export function EnergyHome({
   profileStorageScope,
   liveProvider = false,
+  tasks = [],
 }: EnergyHomeProps): JSX.Element {
   const storageScope = profileStorageScope?.trim() || null;
   const canUseProfileStorage = !liveProvider || Boolean(storageScope);
@@ -116,7 +120,7 @@ export function EnergyHome({
     [energyNeed],
   );
 
-  const reportExploreEvent = React.useCallback((event: EnergyExploreEvent) => {
+  const reportHubEvent = React.useCallback((event: EnergyExploreEvent | RunningTaskDockEvent) => {
     void trpc.energy.reportEvent
       .mutate(event)
       .catch(() => console.warn('energy event report failed'));
@@ -203,7 +207,7 @@ export function EnergyHome({
         storageScope={storageScope}
         mood={null}
         energyNeed={energyNeed}
-        onEvent={reportExploreEvent}
+        onEvent={reportHubEvent}
         onActionTarget={(target, trigger) => {
           if (target.startsWith('astrology:')) {
             astrologyWorldRef.current?.scrollIntoView?.({
@@ -219,6 +223,8 @@ export function EnergyHome({
           openExperience(experience, trigger);
         }}
       />
+
+      {tasks.length > 0 ? <RunningTaskDock tasks={tasks} onEvent={reportHubEvent} /> : null}
 
       <ExperiencePlayer
         open={selectedExperience !== null}

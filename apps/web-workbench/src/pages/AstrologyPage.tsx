@@ -1,4 +1,5 @@
 import { useAppShellContext } from '@/components/AppShell';
+import { useTaskStore } from '@/stores/task-store';
 import { useLocation } from 'react-router-dom';
 import { AstrologyPageShell } from './AstrologyPageShell';
 
@@ -11,5 +12,6 @@ export function AstrologyPage(): JSX.Element {
 
 function AuthedAstrologyPage(): JSX.Element {
   const { me } = useAppShellContext();
-  return <AstrologyPageShell liveProvider profileStorageScope={me?.userId ?? null} />;
+  const tasks = useTaskStore((state) => state.tasks);
+  return <AstrologyPageShell liveProvider profileStorageScope={me?.userId ?? null} tasks={tasks} />;
 }
