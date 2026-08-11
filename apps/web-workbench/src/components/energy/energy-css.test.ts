@@ -33,4 +33,15 @@ describe('energy motion system', () => {
     expect(zodiacBadge).toMatch(/aspect-ratio:\s*1/);
     expect(zodiacBadge).toMatch(/align-self:\s*start/);
   });
+
+  it('contains content-hub layout and reduced-motion overrides', () => {
+    expect(css).toContain('.energy-astrology-world');
+    expect(css).toContain('.energy-astrology-dimensions__grid');
+    expect(css).toContain('.energy-explore-feed');
+    expect(css).toContain('.energy-running-task-dock');
+    expect(css).toMatch(/@media\s*\(max-width:\s*900px\)/);
+    expect(css).toMatch(/@media\s*\(max-width:\s*640px\)/);
+    expect(css).toMatch(/prefers-reduced-motion:[\s\S]*\.energy-explore-feed/);
+    expect(css).toMatch(/prefers-reduced-motion:[\s\S]*animation-duration:\s*0\.01ms\s*!important/);
+  });
 });

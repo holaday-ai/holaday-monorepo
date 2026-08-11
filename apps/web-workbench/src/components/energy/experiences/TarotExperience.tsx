@@ -172,6 +172,7 @@ export function TarotExperience({
                 key={option.id}
                 type="button"
                 aria-label={option.label}
+                title={option.label}
                 onClick={() => {
                   setMode(option.id);
                   setStage('theme');
@@ -206,6 +207,7 @@ export function TarotExperience({
                   key={item.id}
                   type="button"
                   aria-label={item.label}
+                  title={item.label}
                   aria-pressed={theme === item.id}
                   onClick={() => setTheme(item.id)}
                 >

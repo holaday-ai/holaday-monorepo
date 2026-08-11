@@ -139,6 +139,7 @@ export function TestExperience({
                         key={test.id}
                         type="button"
                         aria-label={test.title}
+                        title={test.title}
                         className="rounded-xl border border-[#eee4e9] bg-[#fffafd] p-3 text-left transition hover:-translate-y-0.5 hover:border-[#cdaebe] hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#a86684]"
                         onClick={() => chooseTest(test)}
                       >

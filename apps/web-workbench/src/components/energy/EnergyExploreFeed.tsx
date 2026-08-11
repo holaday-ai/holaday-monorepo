@@ -139,6 +139,7 @@ export function EnergyExploreFeed({
                 <button
                   type="button"
                   aria-label={`打开${item.title}`}
+                  title={`打开${item.title}`}
                   onClick={(event) => {
                     setOpenedId(item.id);
                     onEvent({ type: 'energy_content_opened', contentId: item.id });
