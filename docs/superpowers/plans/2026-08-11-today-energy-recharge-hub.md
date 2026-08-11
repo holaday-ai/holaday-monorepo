@@ -24,12 +24,12 @@
 ### Task 1: 锁定资产、布局与页面契约
 
 **Files:**
-- Create: `apps/web-workbench/public/energy/recharge-island.webp`
-- Create: `apps/web-workbench/public/energy/tarot-cards.webp`
-- Create: `apps/web-workbench/public/energy/mini-game.webp`
-- Create: `apps/web-workbench/public/energy/quick-test.webp`
-- Create: `apps/web-workbench/public/energy/aries-badge.webp`
-- Create: `apps/web-workbench/public/energy/energy-capsules.webp`
+- Create: `apps/web-workbench/public/energy/recharge-island.jpg`
+- Create: `apps/web-workbench/public/energy/tarot-cards.jpg`
+- Create: `apps/web-workbench/public/energy/mini-game.jpg`
+- Create: `apps/web-workbench/public/energy/quick-test.jpg`
+- Create: `apps/web-workbench/public/energy/aries-badge.jpg`
+- Create: `apps/web-workbench/public/energy/energy-capsules.jpg`
 - Modify: `apps/web-workbench/src/pages/AstrologyPageShell.tsx`
 - Modify: `apps/web-workbench/src/pages/AstrologyPage.test.tsx`
 
@@ -173,4 +173,3 @@
 - [ ] Start the existing local app, capture the selected production states in the in-app browser and verify primary interactions plus console errors.
 - [ ] Open the selected reference and latest implementation screenshot together, write `design-qa.md`, fix every P0/P1/P2 and repeat until `final result: passed`.
 - [ ] Commit with `test(energy): verify recharge hub experience`.
-
