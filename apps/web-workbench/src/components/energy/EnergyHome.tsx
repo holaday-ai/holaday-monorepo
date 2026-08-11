@@ -181,7 +181,7 @@ export function EnergyHome({
           <Button
             type="button"
             size="lg"
-            className="energy-recommendation__action"
+            className="energy-recommendation__action min-h-11"
             onClick={(event) => openExperience(recommendation, event.currentTarget)}
           >
             {response?.action ?? '抽一张卡'}
@@ -221,6 +221,7 @@ export function EnergyHome({
                 {available ? (
                   <button
                     type="button"
+                    className="min-h-11"
                     onClick={(event) => openExperience(experience, event.currentTarget)}
                   >
                     打开{experience.title}

@@ -75,7 +75,13 @@ describe('EnergyHome', () => {
     expect(screen.getByRole('heading', { name: '你现在感觉怎么样？' })).toBeTruthy();
     const moodGroup = screen.getByRole('group', { name: '当前状态' });
     expect(within(moodGroup).getAllByRole('button', { pressed: false })).toHaveLength(4);
-    expect(screen.getAllByRole('button', { name: /开始|抽一张|看看/ })).toHaveLength(1);
+    const primaryAction = screen.getByRole('button', { name: /开始|抽一张|看看/ });
+    expect(primaryAction.className).toContain('min-h-11');
+    const modeActions = screen.getAllByRole('button', {
+      name: /打开(抽张卡|轻测试|今日星座)/,
+    });
+    expect(modeActions).toHaveLength(3);
+    expect(modeActions.every((action) => action.className.includes('min-h-11'))).toBe(true);
     expect(screen.getByText('小游戏正在准备中')).toBeTruthy();
     expect(screen.queryByRole('button', { name: /小游戏/ })).toBeNull();
 
@@ -105,5 +111,33 @@ describe('EnergyHome', () => {
 
     await user.click(screen.getByRole('button', { name: '开始体验' }));
     expect(await screen.findByRole('heading', { name: '这张卡想回应什么？' })).toBeTruthy();
+  });
+
+  it('supports Tab, Shift+Tab, Enter, and Escape through the primary flow', async () => {
+    const user = userEvent.setup();
+    render(<EnergyHome profileStorageScope="usr_energy" />);
+
+    const good = screen.getByRole('button', { name: '状态很好' });
+    const tired = screen.getByRole('button', { name: '有点累' });
+    await user.tab();
+    expect(document.activeElement).toBe(good);
+    await user.tab();
+    expect(document.activeElement).toBe(tired);
+    await user.tab({ shift: true });
+    expect(document.activeElement).toBe(good);
+    await user.tab();
+    await user.keyboard('{Enter}');
+    expect(tired.getAttribute('aria-pressed')).toBe('true');
+
+    await user.tab();
+    await user.tab();
+    await user.tab();
+    const primary = screen.getByRole('button', { name: '抽一张轻提示卡' });
+    expect(document.activeElement).toBe(primary);
+    await user.keyboard('{Enter}');
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: '开始体验' }));
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.activeElement).toBe(primary);
   });
 });
