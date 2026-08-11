@@ -9,10 +9,11 @@ describe('energy registry', () => {
       'tarot',
       'light-test',
       'horoscope',
+      'games',
     ]);
     expect(ENERGY_EXPERIENCES.find((item) => item.id === 'games')).toMatchObject({
-      status: 'coming-soon',
-      actionable: false,
+      status: 'active',
+      actionable: true,
     });
   });
 

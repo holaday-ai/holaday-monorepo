@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { buildEnergyHome } from './catalog.js';
 
 describe('buildEnergyHome', () => {
-  it('returns the active recharge modes and one non-interactive coming-soon game', () => {
+  it('returns five active and actionable recharge modes', () => {
     const home = buildEnergyHome();
 
     expect(home.experiences.map((item) => [item.id, item.status])).toEqual([
@@ -10,9 +10,9 @@ describe('buildEnergyHome', () => {
       ['tarot', 'active'],
       ['light-test', 'active'],
       ['horoscope', 'active'],
-      ['games', 'coming-soon'],
+      ['games', 'active'],
     ]);
-    expect(home.experiences.find((item) => item.id === 'games')?.actionable).toBe(false);
+    expect(home.experiences.find((item) => item.id === 'games')?.actionable).toBe(true);
   });
 
   it('does not expose profile values or free-form payload fields', () => {

@@ -151,7 +151,7 @@ export function EnergyHome({
     experience: EnergyExperienceRegistration,
     trigger: HTMLButtonElement,
   ): void => {
-    if (!experience.load || experience.id === 'games') return;
+    if (!experience.load) return;
     returnFocusRef.current = trigger;
     startedAtRef.current = Date.now();
     setSelectedExperience(experience);
@@ -237,43 +237,42 @@ export function EnergyHome({
           <span>所有体验都可以随时退出。</span>
         </div>
         <div className="energy-mode-grid">
-          {experiences.filter((experience) => experience.id !== 'recharge').map((experience) => {
-            const Icon = MODE_ICONS[experience.id];
-            const available =
-              experience.status === 'active' &&
-              experience.actionable &&
-              experience.id !== 'games' &&
-              Boolean(experience.load);
-            return (
-              <article
-                key={experience.id}
-                className="energy-mode-card"
-                data-status={experience.status}
-              >
-                <span className="energy-mode-card__icon" aria-hidden="true">
-                  <Icon className="h-5 w-5" />
-                </span>
-                <div>
-                  <h3>{experience.title}</h3>
-                  <p>{experience.description}</p>
-                </div>
-                {available ? (
-                  <button
-                    type="button"
-                    className="min-h-11"
-                    onClick={(event) => openExperience(experience, event.currentTarget)}
-                  >
-                    打开{experience.title}
-                    <span>
-                      <Clock3 aria-hidden="true" /> {experience.estimatedSeconds} 秒
-                    </span>
-                  </button>
-                ) : (
-                  <p className="energy-mode-card__coming">小游戏正在准备中</p>
-                )}
-              </article>
-            );
-          })}
+          {experiences
+            .filter((experience) => experience.id !== 'recharge')
+            .map((experience) => {
+              const Icon = MODE_ICONS[experience.id];
+              const available =
+                experience.status === 'active' && experience.actionable && Boolean(experience.load);
+              return (
+                <article
+                  key={experience.id}
+                  className="energy-mode-card"
+                  data-status={experience.status}
+                >
+                  <span className="energy-mode-card__icon" aria-hidden="true">
+                    <Icon className="h-5 w-5" />
+                  </span>
+                  <div>
+                    <h3>{experience.title}</h3>
+                    <p>{experience.description}</p>
+                  </div>
+                  {available ? (
+                    <button
+                      type="button"
+                      className="min-h-11"
+                      onClick={(event) => openExperience(experience, event.currentTarget)}
+                    >
+                      打开{experience.title}
+                      <span>
+                        <Clock3 aria-hidden="true" /> {experience.estimatedSeconds} 秒
+                      </span>
+                    </button>
+                  ) : (
+                    <p className="energy-mode-card__coming">这个体验暂时不可用</p>
+                  )}
+                </article>
+              );
+            })}
         </div>
       </section>
 

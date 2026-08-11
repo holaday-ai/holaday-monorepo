@@ -54,10 +54,10 @@ const EXPERIENCES: readonly EnergyExperienceCatalogItem[] = [
     id: 'games',
     kind: 'game',
     title: '小游戏',
-    description: '轻量小游戏正在准备中',
-    estimatedSeconds: 180,
-    status: 'coming-soon',
-    actionable: false,
+    description: '接住十二颗轻盈的能量光点',
+    estimatedSeconds: 45,
+    status: 'active',
+    actionable: true,
   },
 ];
 

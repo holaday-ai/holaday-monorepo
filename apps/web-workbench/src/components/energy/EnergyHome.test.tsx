@@ -3,8 +3,8 @@
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { readEnergyProgress } from './energy-progress';
 import { EnergyHome } from './EnergyHome';
+import { readEnergyProgress } from './energy-progress';
 
 const trpcMocks = vi.hoisted(() => ({
   homeQuery: vi.fn(),
@@ -72,10 +72,10 @@ beforeEach(() => {
         id: 'games',
         kind: 'game',
         title: '小游戏',
-        description: '轻量小游戏正在准备中',
-        estimatedSeconds: 180,
-        status: 'coming-soon',
-        actionable: false,
+        description: '接住十二颗轻盈的能量光点',
+        estimatedSeconds: 45,
+        status: 'active',
+        actionable: true,
       },
     ],
   });
@@ -110,7 +110,7 @@ describe('EnergyHome', () => {
     );
   });
 
-  it('keeps one primary recommendation and makes the future game non-interactive', async () => {
+  it('keeps one primary recharge and exposes every active secondary experience', async () => {
     render(<EnergyHome profileStorageScope="usr_energy" />);
 
     expect(screen.getByRole('heading', { name: '你现在感觉怎么样？' })).toBeTruthy();
@@ -119,12 +119,13 @@ describe('EnergyHome', () => {
     const primaryAction = screen.getByRole('button', { name: '开始 30 秒补给' });
     expect(primaryAction.className).toContain('min-h-11');
     const modeActions = screen.getAllByRole('button', {
-      name: /打开(抽张卡|轻测试|今日星座)/,
+      name: /打开(抽张卡|轻测试|今日星座|小游戏)/,
     });
-    expect(modeActions).toHaveLength(3);
+    expect(modeActions).toHaveLength(4);
     expect(modeActions.every((action) => action.className.includes('min-h-11'))).toBe(true);
-    expect(screen.getByText('小游戏正在准备中')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: /小游戏/ })).toBeNull();
+
+    await userEvent.setup().click(screen.getByRole('button', { name: '打开小游戏 45 秒' }));
+    expect(screen.getByRole('dialog', { name: '小游戏' })).toBeTruthy();
 
     await waitFor(() => expect(trpcMocks.homeQuery).toHaveBeenCalledOnce());
   });
