@@ -66,6 +66,7 @@ export const ENERGY_EXPERIENCES: EnergyExperienceRegistration[] = [
             reading: props.astrology.reading,
             phase: props.phase,
             onPhaseChange: props.onPhaseChange,
+            onComplete: () => props.onExperienceComplete('test'),
           }),
       })),
   },
@@ -84,6 +85,9 @@ export const ENERGY_EXPERIENCES: EnergyExperienceRegistration[] = [
           createElement(module.HoroscopeExperience, {
             profile: props.profile,
             astrology: props.astrology,
+            phase: props.phase,
+            onPhaseChange: props.onPhaseChange,
+            onComplete: () => props.onExperienceComplete('horoscope'),
           }),
       })),
   },

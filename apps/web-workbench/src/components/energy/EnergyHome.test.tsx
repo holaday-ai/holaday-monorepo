@@ -88,14 +88,29 @@ afterEach(() => {
 });
 
 describe('EnergyHome', () => {
-  it('opens the recharge ritual with the selected need and records completion', async () => {
+  it('renders the selected recharge hierarchy with three active playful choices', async () => {
+    render(<EnergyHome profileStorageScope="usr_energy" />);
+
+    expect(screen.getByRole('heading', { name: '今天想补哪一种能量？' })).toBeTruthy();
+    const deck = screen.getByRole('region', { name: '选一个轻松玩法' });
+    expect(within(deck).getByRole('button', { name: '抽一张能量卡' })).toBeTruthy();
+    expect(within(deck).getByRole('button', { name: '玩接住能量' })).toBeTruthy();
+    expect(within(deck).getByRole('button', { name: '做一个轻测试' })).toBeTruthy();
+    expect(within(deck).getAllByRole('button')).toHaveLength(3);
+    expect(screen.getByRole('region', { name: '今日能量成长' })).toBeTruthy();
+    expect(screen.getByRole('region', { name: '你的星座能量' })).toBeTruthy();
+    expect(screen.queryByText('你现在感觉怎么样？')).toBeNull();
+    expect(screen.queryByText('轻松一点的几分钟')).toBeNull();
+
+    await waitFor(() => expect(trpcMocks.homeQuery).toHaveBeenCalledOnce());
+  });
+
+  it('completes a selected 30-second recharge and lights the growth record', async () => {
     const user = userEvent.setup();
     render(<EnergyHome profileStorageScope="usr_energy" />);
 
     await user.click(screen.getByRole('button', { name: '放松' }));
     await user.click(screen.getByRole('button', { name: '开始 30 秒补给' }));
-    expect(screen.getByRole('dialog', { name: '30 秒补给' })).toBeTruthy();
-
     await user.click(screen.getByRole('button', { name: '开始体验' }));
     await user.click(await screen.findByRole('button', { name: '立即完成' }));
 
@@ -110,76 +125,26 @@ describe('EnergyHome', () => {
     );
   });
 
-  it('keeps one primary recharge and exposes every active secondary experience', async () => {
+  it('opens the playable mini game from the three-choice deck', async () => {
+    const user = userEvent.setup();
     render(<EnergyHome profileStorageScope="usr_energy" />);
 
-    expect(screen.getByRole('heading', { name: '你现在感觉怎么样？' })).toBeTruthy();
-    const moodGroup = screen.getByRole('group', { name: '当前状态' });
-    expect(within(moodGroup).getAllByRole('button', { pressed: false })).toHaveLength(4);
-    const primaryAction = screen.getByRole('button', { name: '开始 30 秒补给' });
-    expect(primaryAction.className).toContain('min-h-11');
-    const modeActions = screen.getAllByRole('button', {
-      name: /打开(抽张卡|轻测试|今日星座|小游戏)/,
-    });
-    expect(modeActions).toHaveLength(4);
-    expect(modeActions.every((action) => action.className.includes('min-h-11'))).toBe(true);
-
-    await userEvent.setup().click(screen.getByRole('button', { name: '打开小游戏 45 秒' }));
+    await user.click(screen.getByRole('button', { name: '玩接住能量' }));
     expect(screen.getByRole('dialog', { name: '小游戏' })).toBeTruthy();
-
-    await waitFor(() => expect(trpcMocks.homeQuery).toHaveBeenCalledOnce());
-  });
-
-  it('updates the response in place and recommends only tarot when tired', async () => {
-    const user = userEvent.setup();
-    render(<EnergyHome profileStorageScope="usr_energy" />);
-
-    const tired = screen.getByRole('button', { name: '有点累' });
-    await user.click(tired);
-
-    expect(tired.getAttribute('aria-pressed')).toBe('true');
-    expect(screen.getByRole('heading', { name: '先让自己松一点' })).toBeTruthy();
-    expect(screen.getAllByRole('button', { name: /抽一张/ })).toHaveLength(1);
-
-    await user.click(screen.getByRole('button', { name: '抽一张轻提示卡' }));
-    expect(screen.getByRole('dialog', { name: '抽张卡' })).toBeTruthy();
-    expect(trpcMocks.reportEvent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: 'started',
-        experienceId: 'tarot',
-        energyNeed: 'relax',
-      }),
-    );
-
     await user.click(screen.getByRole('button', { name: '开始体验' }));
-    expect(await screen.findByRole('heading', { name: '这张卡想回应什么？' })).toBeTruthy();
+    expect(await screen.findByRole('button', { name: '接住第 1 个能量光点' })).toBeTruthy();
   });
 
-  it('supports Tab, Shift+Tab, Enter, and Escape through the primary flow', async () => {
+  it('shows honest astrology entry without synthetic natal or transit claims', async () => {
     const user = userEvent.setup();
     render(<EnergyHome profileStorageScope="usr_energy" />);
 
-    const focus = screen.getByRole('button', { name: '专注' });
-    const relax = screen.getByRole('button', { name: '放松' });
-    await user.tab();
-    expect(document.activeElement).toBe(focus);
-    await user.tab();
-    expect(document.activeElement).toBe(relax);
-    await user.tab({ shift: true });
-    expect(document.activeElement).toBe(focus);
-    await user.tab();
-    await user.keyboard('{Enter}');
-    expect(relax.getAttribute('aria-pressed')).toBe('true');
+    expect(screen.queryByText(/月亮倾向|上升倾向|流年提醒/)).toBeNull();
+    await user.click(screen.getByRole('button', { name: '查看今日与本周星座' }));
+    await user.click(screen.getByRole('button', { name: '开始体验' }));
 
-    await user.tab();
-    await user.tab();
-    await user.tab();
-    const primary = screen.getByRole('button', { name: '开始 30 秒补给' });
-    expect(document.activeElement).toBe(primary);
-    await user.keyboard('{Enter}');
-    expect(document.activeElement).toBe(screen.getByRole('button', { name: '开始体验' }));
-    await user.keyboard('{Escape}');
-    expect(screen.queryByRole('dialog')).toBeNull();
-    expect(document.activeElement).toBe(primary);
+    expect(await screen.findByRole('button', { name: '今日提示' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '本周运势' })).toBeTruthy();
+    expect(screen.queryByText(/月亮倾向|上升倾向|流年提醒/)).toBeNull();
   });
 });

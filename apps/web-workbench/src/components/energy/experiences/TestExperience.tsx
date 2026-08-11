@@ -15,6 +15,7 @@ interface TestExperienceProps {
   reading: AstroReading;
   phase: ExperiencePhase;
   onPhaseChange: (phase: ExperiencePhase) => void;
+  onComplete?: () => void;
 }
 
 const TEST_ICONS = {
@@ -34,6 +35,7 @@ export function TestExperience({
   reading,
   phase,
   onPhaseChange,
+  onComplete = () => undefined,
 }: TestExperienceProps): JSX.Element {
   const [activeTestId, setActiveTestId] = React.useState<LightTestId | null>(null);
   const [questionIndex, setQuestionIndex] = React.useState(0);
@@ -126,6 +128,7 @@ export function TestExperience({
     }
 
     setResult(activeTest.resultFor(nextAnswers, context));
+    onComplete();
     onPhaseChange('result');
   };
 

@@ -16,7 +16,7 @@ export function AstrologyPageShell({
     <PageContainer width="wide" className="max-w-[1180px]">
       <PageHeader
         title="今日能量"
-        description="工作间隙，给自己一点轻松、鼓励和重新出发的空间。"
+        description="先补给 30 秒，再用抽卡、小游戏、轻测试或星座提示换回一点轻盈。"
         action={
           <time className="text-sm text-muted-foreground" aria-label="今日日期">
             {dateLabel}
