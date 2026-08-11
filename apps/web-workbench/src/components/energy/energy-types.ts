@@ -1,3 +1,6 @@
+import type { AstroProfile } from '@/lib/astrology';
+import type { EnergyAstrologyState } from './useEnergyAstrology';
+
 export type EnergyMood = 'good' | 'tired' | 'stressed' | 'unwind';
 export type EnergyExperienceId = 'tarot' | 'light-test' | 'horoscope' | 'games';
 export type ExperiencePhase = 'intro' | 'active' | 'result' | 'error';
@@ -16,6 +19,8 @@ export interface EnergyExperienceDefinition {
 export interface EnergyExperienceProps {
   mood: EnergyMood | null;
   profileStorageScope: string | null;
+  profile: AstroProfile;
+  astrology: EnergyAstrologyState;
   phase: ExperiencePhase;
   onPhaseChange: (phase: ExperiencePhase) => void;
 }

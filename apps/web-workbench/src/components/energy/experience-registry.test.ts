@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { activeEnergyExperiences, ENERGY_EXPERIENCES } from './experience-registry';
+import { describe, expect, it, vi } from 'vitest';
+import { ENERGY_EXPERIENCES, activeEnergyExperiences } from './experience-registry';
 
 describe('energy registry', () => {
   it('has stable unique ids and excludes games from actionable entries', () => {
@@ -21,5 +21,19 @@ describe('energy registry', () => {
 
     expect(first).not.toBe(second);
     expect(first).toEqual(second);
+  });
+
+  it('does not load an experience module until its loader is called', async () => {
+    const tarot = ENERGY_EXPERIENCES.find((experience) => experience.id === 'tarot');
+    expect(tarot?.load).toBeTypeOf('function');
+    if (!tarot?.load) throw new Error('expected tarot loader');
+    const load = vi.fn(tarot.load);
+
+    activeEnergyExperiences();
+    expect(load).not.toHaveBeenCalled();
+
+    const module = await load();
+    expect(load).toHaveBeenCalledOnce();
+    expect(module.default).toBeTypeOf('function');
   });
 });

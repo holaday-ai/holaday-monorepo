@@ -102,5 +102,8 @@ describe('EnergyHome', () => {
         mood: 'tired',
       }),
     );
+
+    await user.click(screen.getByRole('button', { name: '开始体验' }));
+    expect(await screen.findByRole('heading', { name: '这张卡想回应什么？' })).toBeTruthy();
   });
 });

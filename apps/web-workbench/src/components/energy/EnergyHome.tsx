@@ -1,25 +1,25 @@
 import { Button } from '@/components/ui/button';
+import { type AstroProfile, defaultAstroProfile, readAstroProfile } from '@/lib/astrology';
 import { trpc } from '@/lib/trpc';
 import { Clock3, FlaskConical, Gamepad2, MoonStar, Star, UserRound } from 'lucide-react';
 import * as React from 'react';
+import { EnergyProfileDrawer } from './EnergyProfileDrawer';
 import { ExperiencePlayer } from './ExperiencePlayer';
 import { MoodCheckIn } from './MoodCheckIn';
 import { energyResponseForMood, recommendExperience } from './energy-recommendation';
-import type {
-  EnergyExperienceDefinition,
-  EnergyExperienceId,
-  EnergyMood,
-  ExperiencePhase,
-} from './energy-types';
-import { ENERGY_EXPERIENCES } from './experience-registry';
+import type { EnergyExperienceId, EnergyMood, ExperiencePhase } from './energy-types';
+import { ENERGY_EXPERIENCES, type EnergyExperienceRegistration } from './experience-registry';
+import { useEnergyAstrology } from './useEnergyAstrology';
 import './energy.css';
 
 interface EnergyHomeProps {
   profileStorageScope: string | null;
+  liveProvider?: boolean;
 }
 
 type EnergyEventType = 'started' | 'completed' | 'replayed' | 'failed';
 type EnergyEventOutcome = 'success' | 'abandoned' | 'error' | null;
+type EnergyDurationBucket = 'under-60s' | 'one-to-three-minutes' | 'over-three-minutes' | null;
 
 const MODE_ICONS = {
   tarot: MoonStar,
@@ -28,20 +28,52 @@ const MODE_ICONS = {
   games: Gamepad2,
 } satisfies Record<EnergyExperienceId, React.ComponentType<{ className?: string }>>;
 
-function localExperiences(): EnergyExperienceDefinition[] {
+function localExperiences(): EnergyExperienceRegistration[] {
   return ENERGY_EXPERIENCES.map((experience) => ({
     ...experience,
     requiredProfileFields: [...experience.requiredProfileFields],
   }));
 }
 
-export function EnergyHome({ profileStorageScope }: EnergyHomeProps): JSX.Element {
+function durationBucket(startedAt: number): Exclude<EnergyDurationBucket, null> {
+  const seconds = Math.max(0, (Date.now() - startedAt) / 1000);
+  if (seconds < 60) return 'under-60s';
+  if (seconds <= 180) return 'one-to-three-minutes';
+  return 'over-three-minutes';
+}
+
+export function EnergyHome({
+  profileStorageScope,
+  liveProvider = false,
+}: EnergyHomeProps): JSX.Element {
+  const storageScope = profileStorageScope?.trim() || null;
+  const canUseProfileStorage = !liveProvider || Boolean(storageScope);
   const [mood, setMood] = React.useState<EnergyMood | null>(null);
   const [experiences, setExperiences] = React.useState(localExperiences);
   const [selectedExperience, setSelectedExperience] =
-    React.useState<EnergyExperienceDefinition | null>(null);
+    React.useState<EnergyExperienceRegistration | null>(null);
   const [phase, setPhase] = React.useState<ExperiencePhase>('intro');
+  const [profile, setProfile] = React.useState<AstroProfile>(() =>
+    canUseProfileStorage
+      ? (readAstroProfile(storageScope) ?? defaultAstroProfile())
+      : defaultAstroProfile(),
+  );
+  const [profileOpen, setProfileOpen] = React.useState(false);
   const returnFocusRef = React.useRef<HTMLButtonElement | null>(null);
+  const profileTriggerRef = React.useRef<HTMLButtonElement>(null);
+  const startedAtRef = React.useRef(Date.now());
+  const astrology = useEnergyAstrology(profile, liveProvider);
+  const LoadedExperience = React.useMemo(() => {
+    return selectedExperience?.load ? React.lazy(selectedExperience.load) : null;
+  }, [selectedExperience?.load]);
+
+  React.useEffect(() => {
+    setProfile(
+      canUseProfileStorage
+        ? (readAstroProfile(storageScope) ?? defaultAstroProfile())
+        : defaultAstroProfile(),
+    );
+  }, [canUseProfileStorage, storageScope]);
 
   React.useEffect(() => {
     let active = true;
@@ -69,13 +101,14 @@ export function EnergyHome({ profileStorageScope }: EnergyHomeProps): JSX.Elemen
       type: EnergyEventType,
       experienceId: EnergyExperienceId,
       outcome: EnergyEventOutcome = null,
+      eventDurationBucket: EnergyDurationBucket = null,
     ) => {
       void trpc.energy.reportEvent
         .mutate({
           type,
           experienceId,
           mood,
-          durationBucket: null,
+          durationBucket: eventDurationBucket,
           outcome,
         })
         .catch(() => console.warn('energy event report failed'));
@@ -89,18 +122,40 @@ export function EnergyHome({ profileStorageScope }: EnergyHomeProps): JSX.Elemen
       (experience) =>
         experience.id === preferredRecommendation.id &&
         experience.status === 'active' &&
-        experience.actionable,
-    ) ?? experiences.find((experience) => experience.status === 'active' && experience.actionable);
+        experience.actionable &&
+        Boolean(experience.load),
+    ) ??
+    experiences.find(
+      (experience) =>
+        experience.status === 'active' && experience.actionable && Boolean(experience.load),
+    );
   const response = mood ? energyResponseForMood(mood) : null;
 
   const openExperience = (
-    experience: EnergyExperienceDefinition,
+    experience: EnergyExperienceRegistration,
     trigger: HTMLButtonElement,
   ): void => {
+    if (!experience.load || experience.id === 'games') return;
     returnFocusRef.current = trigger;
+    startedAtRef.current = Date.now();
     setSelectedExperience(experience);
     setPhase('intro');
     reportEvent('started', experience.id);
+  };
+
+  const handlePhaseChange = (nextPhase: ExperiencePhase): void => {
+    if (selectedExperience && nextPhase === 'result' && phase !== 'result') {
+      reportEvent(
+        'completed',
+        selectedExperience.id,
+        'success',
+        durationBucket(startedAtRef.current),
+      );
+    }
+    if (selectedExperience && nextPhase === 'error' && phase !== 'error') {
+      reportEvent('failed', selectedExperience.id, 'error', durationBucket(startedAtRef.current));
+    }
+    setPhase(nextPhase);
   };
 
   return (
@@ -145,7 +200,11 @@ export function EnergyHome({ profileStorageScope }: EnergyHomeProps): JSX.Elemen
         <div className="energy-mode-grid">
           {experiences.map((experience) => {
             const Icon = MODE_ICONS[experience.id];
-            const available = experience.status === 'active' && experience.actionable;
+            const available =
+              experience.status === 'active' &&
+              experience.actionable &&
+              experience.id !== 'games' &&
+              Boolean(experience.load);
             return (
               <article
                 key={experience.id}
@@ -178,8 +237,14 @@ export function EnergyHome({ profileStorageScope }: EnergyHomeProps): JSX.Elemen
         </div>
       </section>
 
-      <details className="energy-profile-entry">
-        <summary>
+      <section className="energy-profile-entry">
+        <button
+          ref={profileTriggerRef}
+          type="button"
+          className="energy-profile-entry__button"
+          disabled={!canUseProfileStorage}
+          onClick={() => setProfileOpen(true)}
+        >
           <span className="energy-profile-entry__icon" aria-hidden="true">
             <UserRound />
           </span>
@@ -187,11 +252,11 @@ export function EnergyHome({ profileStorageScope }: EnergyHomeProps): JSX.Elemen
             <strong>我的能量</strong>
             <small>星座体验需要时，再补充你的资料</small>
           </span>
-        </summary>
+        </button>
         <p className="energy-detail-copy">
           资料只保存在当前账号的本地空间，用于生成星座节奏；你可以随时查看或清除。
         </p>
-      </details>
+      </section>
 
       <ExperiencePlayer
         open={selectedExperience !== null}
@@ -199,18 +264,37 @@ export function EnergyHome({ profileStorageScope }: EnergyHomeProps): JSX.Elemen
         phase={phase}
         returnFocusRef={returnFocusRef}
         onClose={() => setSelectedExperience(null)}
-        onStart={() => setPhase('active')}
+        onStart={() => handlePhaseChange('active')}
         onReplay={() => {
           if (selectedExperience) reportEvent('replayed', selectedExperience.id);
-          setPhase('active');
+          startedAtRef.current = Date.now();
+          handlePhaseChange('active');
         }}
         onChooseAnother={() => setSelectedExperience(null)}
       >
-        <div className="energy-experience-placeholder">
-          <h3>慢慢来，玩法马上开始</h3>
-          <p>这里会承载抽卡、轻测试和今日星座的完整互动。</p>
-        </div>
+        {LoadedExperience ? (
+          <React.Suspense
+            fallback={<div className="energy-experience-placeholder">正在打开体验…</div>}
+          >
+            <LoadedExperience
+              mood={mood}
+              profileStorageScope={storageScope}
+              profile={profile}
+              astrology={astrology}
+              phase={phase}
+              onPhaseChange={handlePhaseChange}
+            />
+          </React.Suspense>
+        ) : null}
       </ExperiencePlayer>
+
+      <EnergyProfileDrawer
+        open={profileOpen}
+        storageScope={storageScope}
+        returnFocusRef={profileTriggerRef}
+        onOpenChange={setProfileOpen}
+        onProfileChange={(nextProfile) => setProfile(nextProfile ?? defaultAstroProfile())}
+      />
     </div>
   );
 }

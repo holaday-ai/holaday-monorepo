@@ -1,6 +1,11 @@
-import type { EnergyExperienceDefinition } from './energy-types';
+import { type ComponentType, createElement } from 'react';
+import type { EnergyExperienceDefinition, EnergyExperienceProps } from './energy-types';
 
-export const ENERGY_EXPERIENCES: EnergyExperienceDefinition[] = [
+export interface EnergyExperienceRegistration extends EnergyExperienceDefinition {
+  load?: () => Promise<{ default: ComponentType<EnergyExperienceProps> }>;
+}
+
+export const ENERGY_EXPERIENCES: EnergyExperienceRegistration[] = [
   {
     id: 'tarot',
     kind: 'card',
@@ -10,6 +15,15 @@ export const ENERGY_EXPERIENCES: EnergyExperienceDefinition[] = [
     status: 'active',
     actionable: true,
     requiredProfileFields: [],
+    load: () =>
+      import('./experiences/TarotExperience').then((module) => ({
+        default: (props: EnergyExperienceProps) =>
+          createElement(module.TarotExperience, {
+            tarot: props.astrology.tarot,
+            phase: props.phase,
+            onPhaseChange: props.onPhaseChange,
+          }),
+      })),
   },
   {
     id: 'light-test',
@@ -20,6 +34,16 @@ export const ENERGY_EXPERIENCES: EnergyExperienceDefinition[] = [
     status: 'active',
     actionable: true,
     requiredProfileFields: [],
+    load: () =>
+      import('./experiences/TestExperience').then((module) => ({
+        default: (props: EnergyExperienceProps) =>
+          createElement(module.TestExperience, {
+            profile: props.profile,
+            reading: props.astrology.reading,
+            phase: props.phase,
+            onPhaseChange: props.onPhaseChange,
+          }),
+      })),
   },
   {
     id: 'horoscope',
@@ -30,6 +54,14 @@ export const ENERGY_EXPERIENCES: EnergyExperienceDefinition[] = [
     status: 'active',
     actionable: true,
     requiredProfileFields: ['birthday'],
+    load: () =>
+      import('./experiences/HoroscopeExperience').then((module) => ({
+        default: (props: EnergyExperienceProps) =>
+          createElement(module.HoroscopeExperience, {
+            profile: props.profile,
+            astrology: props.astrology,
+          }),
+      })),
   },
   {
     id: 'games',
@@ -43,7 +75,7 @@ export const ENERGY_EXPERIENCES: EnergyExperienceDefinition[] = [
   },
 ];
 
-export function activeEnergyExperiences(): EnergyExperienceDefinition[] {
+export function activeEnergyExperiences(): EnergyExperienceRegistration[] {
   return ENERGY_EXPERIENCES.filter((experience) => {
     return experience.status === 'active' && experience.actionable;
   });

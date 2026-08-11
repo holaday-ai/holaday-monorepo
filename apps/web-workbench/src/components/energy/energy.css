@@ -245,21 +245,24 @@
   padding-top: 16px;
 }
 
-.energy-profile-entry summary {
+.energy-profile-entry__button {
   display: inline-flex;
   cursor: pointer;
-  list-style: none;
   align-items: center;
   gap: 12px;
+  border: 0;
   border-radius: 12px;
+  background: transparent;
   padding: 6px;
+  text-align: left;
 }
 
-.energy-profile-entry summary::-webkit-details-marker {
-  display: none;
+.energy-profile-entry__button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
-.energy-profile-entry summary:focus-visible {
+.energy-profile-entry__button:focus-visible {
   outline: 2px solid #a86684;
   outline-offset: 2px;
 }
