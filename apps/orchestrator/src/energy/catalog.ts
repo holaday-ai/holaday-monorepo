@@ -1,0 +1,57 @@
+export type EnergyExperienceKind = 'card' | 'test' | 'horoscope' | 'game';
+export type EnergyExperienceStatus = 'active' | 'coming-soon' | 'hidden';
+export type EnergyMood = 'good' | 'tired' | 'stressed' | 'unwind';
+export type EnergyExperienceId = 'tarot' | 'light-test' | 'horoscope' | 'games';
+
+export interface EnergyExperienceCatalogItem {
+  id: EnergyExperienceId;
+  kind: EnergyExperienceKind;
+  title: string;
+  description: string;
+  estimatedSeconds: number;
+  status: EnergyExperienceStatus;
+  actionable: boolean;
+}
+
+const EXPERIENCES: readonly EnergyExperienceCatalogItem[] = [
+  {
+    id: 'tarot',
+    kind: 'card',
+    title: '抽张卡',
+    description: '给当下一个轻提示',
+    estimatedSeconds: 30,
+    status: 'active',
+    actionable: true,
+  },
+  {
+    id: 'light-test',
+    kind: 'test',
+    title: '轻测试',
+    description: '用一分钟看见现在的状态',
+    estimatedSeconds: 60,
+    status: 'active',
+    actionable: true,
+  },
+  {
+    id: 'horoscope',
+    kind: 'horoscope',
+    title: '今日星座',
+    description: '看看今天适合怎样安排节奏',
+    estimatedSeconds: 60,
+    status: 'active',
+    actionable: true,
+  },
+  {
+    id: 'games',
+    kind: 'game',
+    title: '小游戏',
+    description: '轻量小游戏正在准备中',
+    estimatedSeconds: 180,
+    status: 'coming-soon',
+    actionable: false,
+  },
+];
+
+export function buildEnergyHome(): { experiences: EnergyExperienceCatalogItem[] } {
+  return { experiences: EXPERIENCES.map((item) => ({ ...item })) };
+}

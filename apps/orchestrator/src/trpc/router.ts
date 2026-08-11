@@ -4,14 +4,12 @@ import { astrologyRouter } from './routers/astrology.js';
 import { authRouter } from './routers/auth.js';
 import { batchTasksRouter } from './routers/batch-tasks.js';
 import { connectionsRouter } from './routers/connections.js';
+import { energyRouter } from './routers/energy.js';
 import { feedbackRouter } from './routers/feedback.js';
 import { filesRouter } from './routers/files.js';
 import { llmCallsRouter } from './routers/llm-calls.js';
 import { memoryRouter } from './routers/memory.js';
-import {
-  notificationChannelsRouter,
-  notificationsRouter,
-} from './routers/notifications.js';
+import { notificationChannelsRouter, notificationsRouter } from './routers/notifications.js';
 import { partnerRouter } from './routers/partner.js';
 import { paymentRouter } from './routers/payment.js';
 import { plannedTasksRouter } from './routers/planned-tasks.js';
@@ -33,6 +31,7 @@ export const appRouter = router({
     time: new Date().toISOString(),
   })),
   astrology: astrologyRouter,
+  energy: energyRouter,
   auth: authRouter,
   tasks: tasksRouter,
   llmCalls: llmCallsRouter,

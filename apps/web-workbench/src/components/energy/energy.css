@@ -1,0 +1,343 @@
+.energy-page {
+  width: 100%;
+  max-width: 1180px;
+  margin: 0 auto;
+  color: #312b35;
+}
+
+.energy-check-in,
+.energy-modes {
+  margin-top: 8px;
+}
+
+.energy-section-heading > p,
+.energy-recommendation__copy > p {
+  margin: 0 0 6px;
+  color: #9b5f78;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.energy-section-heading h2,
+.energy-recommendation h2 {
+  margin: 0;
+  color: #302a34;
+  font-size: clamp(22px, 2.3vw, 30px);
+  font-weight: 650;
+  letter-spacing: -0.035em;
+}
+
+.energy-section-heading > span,
+.energy-section-heading--row span,
+.energy-recommendation__copy > span {
+  display: block;
+  margin-top: 8px;
+  color: #776d79;
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.energy-mood-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  min-width: 0;
+  margin-top: 20px;
+  border: 0;
+  padding: 0;
+}
+
+.energy-mood-option {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid #e7dfe4;
+  border-radius: 16px;
+  background: rgb(255 255 255 / 82%);
+  padding: 14px;
+  color: #3b333e;
+  text-align: left;
+  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+.energy-mood-option:hover {
+  border-color: #cdaebe;
+  background: #fffafd;
+  transform: translateY(-1px);
+}
+
+.energy-mood-option:focus-visible {
+  outline: 2px solid #a86684;
+  outline-offset: 2px;
+}
+
+.energy-mood-option[data-selected="true"] {
+  border-color: #ad6d8b;
+  background: #fff4f8;
+  box-shadow: 0 8px 24px rgb(117 65 89 / 10%);
+}
+
+.energy-mood-option__icon,
+.energy-mode-card__icon,
+.energy-profile-entry__icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: #f7ebf0;
+  color: #9d607b;
+}
+
+.energy-mood-option__icon svg,
+.energy-profile-entry__icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.energy-mood-option strong,
+.energy-mood-option small,
+.energy-profile-entry strong,
+.energy-profile-entry small {
+  display: block;
+}
+
+.energy-mood-option strong {
+  font-size: 14px;
+}
+
+.energy-mood-option small {
+  margin-top: 3px;
+  overflow: hidden;
+  color: #8a7e8c;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.energy-recommendation {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 28px;
+  margin: 28px 0;
+  border: 1px solid #eadfe5;
+  border-radius: 22px;
+  background: linear-gradient(120deg, #fff7fa 0%, #fbf8ff 58%, #f4f1fa 100%);
+  padding: 24px 26px;
+  box-shadow: 0 16px 45px rgb(76 54 72 / 8%);
+}
+
+.energy-recommendation__copy {
+  min-width: 0;
+}
+
+.energy-recommendation__action {
+  flex: 0 0 auto;
+  min-width: 154px;
+  border-radius: 12px;
+  background: #884f6b;
+}
+
+.energy-section-heading--row {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.energy-section-heading--row span {
+  margin-bottom: 2px;
+}
+
+.energy-mode-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.energy-mode-card {
+  display: flex;
+  min-height: 190px;
+  flex-direction: column;
+  border: 1px solid #e8e2e7;
+  border-radius: 18px;
+  background: #fff;
+  padding: 18px;
+  box-shadow: 0 10px 30px rgb(65 48 63 / 5%);
+}
+
+.energy-mode-card[data-status="coming-soon"] {
+  background: #faf8fa;
+  box-shadow: none;
+}
+
+.energy-mode-card h3 {
+  margin: 16px 0 5px;
+  font-size: 16px;
+  font-weight: 650;
+}
+
+.energy-mode-card p {
+  margin: 0;
+  color: #7a707c;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.energy-mode-card button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  margin-top: auto;
+  border-radius: 10px;
+  background: #f6edf2;
+  padding: 9px 10px;
+  color: #71435a;
+  font-size: 13px;
+  font-weight: 650;
+  text-align: left;
+}
+
+.energy-mode-card button:hover {
+  background: #f1e2e9;
+}
+
+.energy-mode-card button:focus-visible {
+  outline: 2px solid #a86684;
+  outline-offset: 2px;
+}
+
+.energy-mode-card button span {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 3px;
+  color: #917c87;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.energy-mode-card button svg {
+  width: 12px;
+  height: 12px;
+}
+
+.energy-mode-card__coming {
+  margin-top: auto !important;
+  border-radius: 10px;
+  background: #f1edf0;
+  padding: 10px;
+  color: #8b808a !important;
+  text-align: center;
+}
+
+.energy-profile-entry {
+  margin-top: 18px;
+  border-top: 1px solid #ece7eb;
+  padding-top: 16px;
+}
+
+.energy-profile-entry__button {
+  display: inline-flex;
+  cursor: pointer;
+  align-items: center;
+  gap: 12px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  padding: 6px;
+  text-align: left;
+}
+
+.energy-profile-entry__button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.energy-profile-entry__button:focus-visible {
+  outline: 2px solid #a86684;
+  outline-offset: 2px;
+}
+
+.energy-profile-entry strong {
+  font-size: 14px;
+}
+
+.energy-profile-entry small {
+  margin-top: 2px;
+  color: #877c88;
+  font-size: 12px;
+}
+
+.energy-profile-entry > p {
+  margin: 12px 0 0 56px;
+  color: #776d79;
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.energy-detail-copy {
+  max-width: 68ch;
+}
+
+.energy-experience-placeholder {
+  display: flex;
+  min-height: 260px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.energy-experience-placeholder h3 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.energy-experience-placeholder p {
+  margin: 8px 0 0;
+  color: #776d79;
+  font-size: 14px;
+}
+
+@media (max-width: 900px) {
+  .energy-mood-grid,
+  .energy-mode-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .energy-mood-grid,
+  .energy-mode-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .energy-recommendation,
+  .energy-section-heading--row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .energy-recommendation__action {
+    width: 100%;
+  }
+
+  .energy-mode-card {
+    min-height: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .energy-mood-option {
+    transition: none;
+  }
+}
