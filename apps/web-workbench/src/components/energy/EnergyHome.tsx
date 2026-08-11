@@ -4,6 +4,7 @@ import * as React from 'react';
 import { AstrologyWorld } from './AstrologyWorld';
 import { EnergyAstrologyPanel } from './EnergyAstrologyPanel';
 import { EnergyExperienceDeck } from './EnergyExperienceDeck';
+import { type EnergyExploreEvent, EnergyExploreFeed } from './EnergyExploreFeed';
 import { EnergyGrowthPanel } from './EnergyGrowthPanel';
 import { EnergyHero } from './EnergyHero';
 import { EnergyProfileDrawer } from './EnergyProfileDrawer';
@@ -115,6 +116,12 @@ export function EnergyHome({
     [energyNeed],
   );
 
+  const reportExploreEvent = React.useCallback((event: EnergyExploreEvent) => {
+    void trpc.energy.reportEvent
+      .mutate(event)
+      .catch(() => console.warn('energy event report failed'));
+  }, []);
+
   const openExperience = (
     experience: EnergyExperienceRegistration,
     trigger: HTMLButtonElement,
@@ -189,6 +196,27 @@ export function EnergyHome({
         onOpenLightTest={(trigger) => {
           if (!lightTest || lightTest.status !== 'active' || !lightTest.actionable) return;
           openExperience(lightTest, trigger);
+        }}
+      />
+
+      <EnergyExploreFeed
+        storageScope={storageScope}
+        mood={null}
+        energyNeed={energyNeed}
+        onEvent={reportExploreEvent}
+        onActionTarget={(target, trigger) => {
+          if (target.startsWith('astrology:')) {
+            astrologyWorldRef.current?.scrollIntoView?.({
+              behavior: prefersReducedMotion() ? 'auto' : 'smooth',
+              block: 'start',
+            });
+            return;
+          }
+          if (!target.startsWith('experience:')) return;
+          const experienceId = target.slice('experience:'.length);
+          const experience = experiences.find((item) => item.id === experienceId);
+          if (!experience || experience.status !== 'active' || !experience.actionable) return;
+          openExperience(experience, trigger);
         }}
       />
 

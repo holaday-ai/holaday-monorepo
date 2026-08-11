@@ -60,4 +60,43 @@ describe('energyRouter', () => {
     ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
     expect(logger.info).not.toHaveBeenCalled();
   });
+
+  it('accepts all bounded content-hub events', async () => {
+    const logger = { info: vi.fn() };
+    const caller = energyRouter.createCaller({ userId: 'usr_energy', logger } as never);
+    const events = [
+      { type: 'energy_section_viewed', section: 'feed' },
+      { type: 'astrology_range_opened', range: 'monthly' },
+      { type: 'tarot_mode_started', mode: 'three' },
+      { type: 'tarot_redrawn', mode: 'single' },
+      { type: 'light_test_started', testId: 'emotion-battery' },
+      { type: 'light_test_completed', testId: 'emotion-battery' },
+      { type: 'energy_feed_refreshed' },
+      { type: 'energy_content_opened', contentId: 'relax-breath-01' },
+      { type: 'running_task_returned', taskStatus: 'running' },
+    ] as const;
+
+    for (const event of events) {
+      await expect(caller.reportEvent(event as never)).resolves.toEqual({ ok: true });
+    }
+    expect(logger.info).toHaveBeenCalledTimes(events.length);
+  });
+
+  it('rejects private text, provider bodies, unknown keys and invalid ids', async () => {
+    const logger = { info: vi.fn() };
+    const caller = energyRouter.createCaller({ userId: 'usr_energy', logger } as never);
+    const invalid = [
+      { type: 'light_test_completed', testId: 'emotion-battery', answerText: 'secret' },
+      { type: 'tarot_redrawn', mode: 'single', questionText: 'private question' },
+      { type: 'astrology_range_opened', range: 'daily', providerBody: 'full response' },
+      { type: 'energy_content_opened', contentId: 'contains private spaces' },
+    ];
+
+    for (const event of invalid) {
+      await expect(caller.reportEvent(event as never)).rejects.toMatchObject({
+        code: 'BAD_REQUEST',
+      });
+    }
+    expect(logger.info).not.toHaveBeenCalled();
+  });
 });

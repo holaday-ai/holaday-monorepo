@@ -8,6 +8,7 @@ import {
   recordLightTestCompletion,
   saveEnergyCardIds,
   saveLightTestAction,
+  saveSeenEnergyContentIds,
 } from './energy-progress';
 
 const storage = new Map<string, string>();
@@ -44,6 +45,7 @@ describe('energy progress', () => {
       savedCardIds: [],
       completedTestIds: [],
       savedTestActionIds: [],
+      seenContentIds: [],
     });
     expect(readEnergyProgress('usr_a').collectedKinds).toEqual(['game']);
   });
@@ -67,6 +69,7 @@ describe('energy progress', () => {
       savedCardIds: [],
       completedTestIds: [],
       savedTestActionIds: [],
+      seenContentIds: [],
     });
   });
 
@@ -82,6 +85,7 @@ describe('energy progress', () => {
       savedCardIds: [],
       completedTestIds: [],
       savedTestActionIds: [],
+      seenContentIds: [],
     });
 
     const progress = saveEnergyCardIds('usr_a', ['work-01', 'work-01', 'bad id', 'emotion-03']);
@@ -99,6 +103,19 @@ describe('energy progress', () => {
     expect(storage.get('holaday.energy.progress.v2:usr_a')).not.toContain('answers');
 
     recordLightTestCompletion(null, 'emotion-weather');
+    expect(storage.has('holaday.energy.progress.v2:guest')).toBe(false);
+  });
+
+  it('stores only bounded stable content ids without preview guest writes', () => {
+    const ids = Array.from(
+      { length: 120 },
+      (_, index) => `relax-${String(index).padStart(3, '0')}`,
+    );
+    const progress = saveSeenEnergyContentIds('usr_a', [...ids, 'private text!', 'relax-119']);
+
+    expect(progress.seenContentIds).toHaveLength(100);
+    expect(progress.seenContentIds.at(-1)).toBe('relax-119');
+    saveSeenEnergyContentIds(null, ['fortune-001']);
     expect(storage.has('holaday.energy.progress.v2:guest')).toBe(false);
   });
 });

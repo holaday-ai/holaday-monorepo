@@ -6,12 +6,14 @@ export interface EnergyProgress {
   savedCardIds: string[];
   completedTestIds: string[];
   savedTestActionIds: string[];
+  seenContentIds: string[];
 }
 
 const STORAGE_PREFIX = 'holaday.energy.progress.v2';
 const LEGACY_STORAGE_PREFIX = 'holaday.energy.progress.v1';
 const MAX_SAVED_CARD_IDS = 100;
 const MAX_TEST_IDS = 100;
+const MAX_CONTENT_IDS = 100;
 const COMPLETION_KINDS: readonly EnergyCompletionKind[] = [
   'recharge',
   'tarot',
@@ -27,6 +29,7 @@ function emptyProgress(): EnergyProgress {
     savedCardIds: [],
     completedTestIds: [],
     savedTestActionIds: [],
+    seenContentIds: [],
   };
 }
 
@@ -63,6 +66,12 @@ function isTestActionId(value: unknown): value is string {
   return extra === undefined && isTestId(testId) && isTestOutcomeId(outcomeId);
 }
 
+function isContentId(value: unknown): value is string {
+  return (
+    typeof value === 'string' && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value) && value.length <= 64
+  );
+}
+
 function parseProgress(raw: string): EnergyProgress {
   const parsed = JSON.parse(raw) as {
     completedDates?: unknown;
@@ -70,6 +79,7 @@ function parseProgress(raw: string): EnergyProgress {
     savedCardIds?: unknown;
     completedTestIds?: unknown;
     savedTestActionIds?: unknown;
+    seenContentIds?: unknown;
   };
   if (!Array.isArray(parsed.completedDates) || !Array.isArray(parsed.collectedKinds)) {
     return emptyProgress();
@@ -87,12 +97,16 @@ function parseProgress(raw: string): EnergyProgress {
   const savedTestActionIds = Array.isArray(parsed.savedTestActionIds)
     ? parsed.savedTestActionIds.filter(isTestActionId).slice(-MAX_TEST_IDS)
     : [];
+  const seenContentIds = Array.isArray(parsed.seenContentIds)
+    ? parsed.seenContentIds.filter(isContentId).slice(-MAX_CONTENT_IDS)
+    : [];
   return {
     completedDates: [...new Set(completedDates)].sort(),
     collectedKinds: [...new Set(collectedKinds)],
     savedCardIds: [...new Set(savedCardIds)],
     completedTestIds: [...new Set(completedTestIds)],
     savedTestActionIds: [...new Set(savedTestActionIds)],
+    seenContentIds: [...new Set(seenContentIds)],
   };
 }
 
@@ -167,6 +181,20 @@ export function saveLightTestAction(
     -MAX_TEST_IDS,
   );
   const next = { ...current, savedTestActionIds };
+  writeProgress(scope, next);
+  return next;
+}
+
+export function saveSeenEnergyContentIds(
+  scope: string | null,
+  contentIds: string[],
+): EnergyProgress {
+  const current = readEnergyProgress(scope);
+  const validIds = contentIds.filter(isContentId);
+  const seenContentIds = [...new Set([...current.seenContentIds, ...validIds])].slice(
+    -MAX_CONTENT_IDS,
+  );
+  const next = { ...current, seenContentIds };
   writeProgress(scope, next);
   return next;
 }

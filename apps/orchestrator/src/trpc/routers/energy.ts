@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { buildEnergyHome } from '../../energy/catalog.js';
 import { protectedProcedure, router } from '../trpc.js';
 
-const energyEventInput = z
+const energyExperienceEventInput = z
   .object({
     type: z.enum(['started', 'completed', 'replayed', 'failed']),
     experienceId: z.enum(['recharge', 'tarot', 'light-test', 'horoscope', 'games']),
@@ -12,9 +12,47 @@ const energyEventInput = z
   })
   .strict();
 
+const stableId = z.string().regex(/^[a-z0-9-]{1,64}$/);
+const energyContentHubEventInput = z.discriminatedUnion('type', [
+  z
+    .object({
+      type: z.literal('energy_section_viewed'),
+      section: z.enum(['hero', 'experiences', 'astrology', 'feed']),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('astrology_range_opened'),
+      range: z.enum(['daily', 'weekly', 'monthly', 'yearly']),
+    })
+    .strict(),
+  z
+    .object({ type: z.literal('tarot_mode_started'), mode: z.enum(['single', 'yes-no', 'three']) })
+    .strict(),
+  z
+    .object({ type: z.literal('tarot_redrawn'), mode: z.enum(['single', 'yes-no', 'three']) })
+    .strict(),
+  z.object({ type: z.literal('light_test_started'), testId: stableId }).strict(),
+  z.object({ type: z.literal('light_test_completed'), testId: stableId }).strict(),
+  z.object({ type: z.literal('energy_feed_refreshed') }).strict(),
+  z.object({ type: z.literal('energy_content_opened'), contentId: stableId }).strict(),
+  z
+    .object({
+      type: z.literal('running_task_returned'),
+      taskStatus: z.enum(['running', 'waiting', 'completed', 'failed', 'multiple']),
+    })
+    .strict(),
+]);
+
+const energyEventInput = z.union([energyExperienceEventInput, energyContentHubEventInput]);
+
 export const energyRouter = router({
   home: protectedProcedure.query(() => buildEnergyHome()),
   reportEvent: protectedProcedure.input(energyEventInput).mutation(({ ctx, input }) => {
+    if (!('experienceId' in input)) {
+      ctx.logger.info({ event: 'energy_content_hub_event', ...input }, 'energy content hub event');
+      return { ok: true as const };
+    }
     ctx.logger.info(
       {
         event: 'energy_experience_event',
