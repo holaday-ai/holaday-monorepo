@@ -1,6 +1,7 @@
 import { type AstroProfile, defaultAstroProfile, readAstroProfile } from '@/lib/astrology';
 import { trpc } from '@/lib/trpc';
 import * as React from 'react';
+import { AstrologyWorld } from './AstrologyWorld';
 import { EnergyAstrologyPanel } from './EnergyAstrologyPanel';
 import { EnergyExperienceDeck } from './EnergyExperienceDeck';
 import { EnergyGrowthPanel } from './EnergyGrowthPanel';
@@ -56,6 +57,7 @@ export function EnergyHome({
   const [profileOpen, setProfileOpen] = React.useState(false);
   const returnFocusRef = React.useRef<HTMLButtonElement | null>(null);
   const profileTriggerRef = React.useRef<HTMLButtonElement | null>(null);
+  const astrologyWorldRef = React.useRef<HTMLElement | null>(null);
   const startedAtRef = React.useRef(Date.now());
   const astrology = useEnergyAstrology(profile, liveProvider);
   const LoadedExperience = React.useMemo(
@@ -141,7 +143,8 @@ export function EnergyHome({
   };
 
   const recharge = experiences.find((experience) => experience.id === 'recharge') ?? null;
-  const horoscope = experiences.find((experience) => experience.id === 'horoscope') ?? null;
+  const tarot = experiences.find((experience) => experience.id === 'tarot') ?? null;
+  const lightTest = experiences.find((experience) => experience.id === 'light-test') ?? null;
 
   return (
     <div className="energy-page" data-profile-scope={profileStorageScope ? 'user' : 'guest'}>
@@ -163,9 +166,11 @@ export function EnergyHome({
           profile={profile}
           astrology={astrology}
           canEditProfile={canUseProfileStorage}
-          onOpen={(trigger) => {
-            if (!horoscope || horoscope.status !== 'active' || !horoscope.actionable) return;
-            openExperience(horoscope, trigger);
+          onOpen={() => {
+            astrologyWorldRef.current?.scrollIntoView?.({
+              behavior: prefersReducedMotion() ? 'auto' : 'smooth',
+              block: 'start',
+            });
           }}
           onEditProfile={(trigger) => {
             profileTriggerRef.current = trigger;
@@ -173,6 +178,19 @@ export function EnergyHome({
           }}
         />
       </div>
+
+      <AstrologyWorld
+        ref={astrologyWorldRef}
+        astrology={astrology}
+        onOpenEnergyCard={(trigger) => {
+          if (!tarot || tarot.status !== 'active' || !tarot.actionable) return;
+          openExperience(tarot, trigger);
+        }}
+        onOpenLightTest={(trigger) => {
+          if (!lightTest || lightTest.status !== 'active' || !lightTest.actionable) return;
+          openExperience(lightTest, trigger);
+        }}
+      />
 
       <ExperiencePlayer
         open={selectedExperience !== null}
@@ -216,5 +234,13 @@ export function EnergyHome({
         onProfileChange={(nextProfile) => setProfile(nextProfile ?? defaultAstroProfile())}
       />
     </div>
+  );
+}
+
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches
   );
 }

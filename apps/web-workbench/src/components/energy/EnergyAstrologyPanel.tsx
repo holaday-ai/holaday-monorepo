@@ -46,7 +46,7 @@ export function EnergyAstrologyPanel({
         </div>
         <div className="energy-astrology-panel__actions">
           <button type="button" onClick={(event) => onOpen(event.currentTarget)}>
-            查看今日与本周星座
+            进入星座深度补给
             <ArrowRight aria-hidden="true" />
           </button>
           <button

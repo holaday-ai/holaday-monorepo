@@ -141,16 +141,22 @@ describe('EnergyHome', () => {
     expect(await screen.findByRole('button', { name: '接住第 1 个能量光点' })).toBeTruthy();
   });
 
-  it('shows honest astrology entry without synthetic natal or transit claims', async () => {
+  it('scrolls to the honest astrology world and keeps continuation experiences playable', async () => {
     const user = userEvent.setup();
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: scrollIntoView,
+    });
     render(<EnergyHome profileStorageScope="usr_energy" />);
 
     expect(screen.queryByText(/月亮倾向|上升倾向|流年提醒/)).toBeNull();
-    await user.click(screen.getByRole('button', { name: '查看今日与本周星座' }));
-    await user.click(screen.getByRole('button', { name: '开始体验' }));
+    expect(screen.getByRole('region', { name: '星座深度补给站' })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '进入星座深度补给' }));
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' });
 
-    expect(await screen.findByRole('button', { name: '今日提示' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: '本周运势' })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '抽一张相关能量牌' }));
+    expect(screen.getByRole('dialog', { name: '抽张卡' })).toBeTruthy();
     expect(screen.queryByText(/月亮倾向|上升倾向|流年提醒/)).toBeNull();
   });
 });
