@@ -104,28 +104,18 @@ describe('ExperiencePlayer', () => {
     const onReplay = vi.fn();
     const onChooseAnother = vi.fn();
     const user = userEvent.setup();
-    render(
-      <Harness
-        initialPhase="result"
-        onReplay={onReplay}
-        onChooseAnother={onChooseAnother}
-      />,
-    );
+    render(<Harness initialPhase="result" onReplay={onReplay} onChooseAnother={onChooseAnother} />);
 
     await user.click(screen.getByRole('button', { name: '打开抽卡' }));
 
     expect(screen.getByText('结果内容')).toBeTruthy();
-    await user.click(screen.getByRole('button', { name: '再来一次' }));
+    const replay = screen.getByRole('button', { name: '再来一次' });
+    expect(replay.className).toContain('bg-[#765184]');
+    await user.click(replay);
     expect(onReplay).toHaveBeenCalledOnce();
 
     cleanup();
-    render(
-      <Harness
-        initialPhase="result"
-        onReplay={onReplay}
-        onChooseAnother={onChooseAnother}
-      />,
-    );
+    render(<Harness initialPhase="result" onReplay={onReplay} onChooseAnother={onChooseAnother} />);
     await user.click(screen.getByRole('button', { name: '打开抽卡' }));
     await user.click(screen.getByRole('button', { name: '换个玩法' }));
 

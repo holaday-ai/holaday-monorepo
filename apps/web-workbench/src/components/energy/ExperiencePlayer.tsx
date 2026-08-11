@@ -1,7 +1,7 @@
+import { Button } from '@/components/ui/button';
 import * as Dialog from '@radix-ui/react-dialog';
 import { X } from 'lucide-react';
 import * as React from 'react';
-import { Button } from '@/components/ui/button';
 import type { EnergyExperienceDefinition, ExperiencePhase } from './energy-types';
 
 interface ExperiencePlayerProps {
@@ -20,6 +20,9 @@ function durationLabel(seconds: number): string {
   if (seconds < 60) return `约 ${seconds} 秒`;
   return `约 ${Math.ceil(seconds / 60)} 分钟`;
 }
+
+const energyPrimaryActionClass =
+  'rounded-xl bg-[#765184] text-white hover:bg-[#664574] focus-visible:ring-[#8f6a9d]';
 
 export function ExperiencePlayer({
   open,
@@ -86,7 +89,12 @@ export function ExperiencePlayer({
                 <p className="max-w-md text-[15px] leading-7 text-[#5f5663]">
                   给自己留一点空白。准备好时再开始，没有标准答案。
                 </p>
-                <Button ref={startRef} type="button" className="mt-7 min-w-32" onClick={onStart}>
+                <Button
+                  ref={startRef}
+                  type="button"
+                  className={`mt-7 min-w-32 ${energyPrimaryActionClass}`}
+                  onClick={onStart}
+                >
                   开始体验
                 </Button>
               </div>
@@ -101,7 +109,7 @@ export function ExperiencePlayer({
                   没关系，可以重新试一次，也可以先换个轻松的玩法。
                 </p>
                 <div className="mt-6 flex flex-wrap justify-center gap-3">
-                  <Button type="button" onClick={onReplay}>
+                  <Button type="button" className={energyPrimaryActionClass} onClick={onReplay}>
                     重新试试
                   </Button>
                   <Button type="button" variant="outline" onClick={onChooseAnother}>
@@ -113,7 +121,7 @@ export function ExperiencePlayer({
 
             {phase === 'result' ? (
               <div className="mt-7 flex flex-wrap justify-center gap-3 border-t border-[#eee9e5] pt-5">
-                <Button type="button" onClick={onReplay}>
+                <Button type="button" className={energyPrimaryActionClass} onClick={onReplay}>
                   再来一次
                 </Button>
                 <Button type="button" variant="outline" onClick={onChooseAnother}>
