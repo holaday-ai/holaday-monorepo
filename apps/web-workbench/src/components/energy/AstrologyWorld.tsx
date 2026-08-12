@@ -2,9 +2,11 @@ import type { ZodiacSign } from '@/lib/astrology';
 import {
   ArrowRight,
   CalendarDays,
+  Clock3,
   FlaskConical,
   Layers3,
   ListOrdered,
+  Palette,
   RefreshCw,
   Shuffle,
   Sparkles,
@@ -15,6 +17,7 @@ import { LuckyInsights } from './LuckyInsights';
 import { hasCompleteRanking } from './astrology-content';
 import type { EnergyAstrologyPeriod } from './energy-types';
 import type { EnergyAstrologyState } from './useEnergyAstrology';
+import { zodiacBadgeImage } from './zodiac-art';
 
 interface AstrologyWorldProps {
   astrology: EnergyAstrologyState;
@@ -52,6 +55,12 @@ export const AstrologyWorld = React.forwardRef<HTMLElement, AstrologyWorldProps>
     const [signPickerOpen, setSignPickerOpen] = React.useState(false);
     const selectedState = astrology.periods[selectedPeriod];
     const completeRanking = hasCompleteRanking(astrology.ranking);
+    const sourceLabel =
+      selectedState.source === 'local-fallback'
+        ? 'Holaday 本地提示'
+        : selectedState.reading.freshness === 'stale'
+          ? 'DivineAPI 最近成功数据'
+          : 'DivineAPI 内容';
 
     const selectPeriod = (period: EnergyAstrologyPeriod): void => {
       setSelectedPeriod(period);
@@ -82,23 +91,39 @@ export const AstrologyWorld = React.forwardRef<HTMLElement, AstrologyWorldProps>
         className="energy-astrology-world"
         aria-labelledby="energy-astrology-world-title"
       >
-        <header className="energy-astrology-world__header">
-          <div>
-            <p className="energy-kicker">
-              <Sparkles aria-hidden="true" />
-              不止两分钟的星座补给
-            </p>
-            <h2 id="energy-astrology-world-title">星座深度补给站</h2>
-            <p>按今天、本周、本月和本年慢慢看，只展示能确认来源的内容。</p>
+        <div className="energy-astrology-world__stage">
+          <header className="energy-astrology-world__header">
+            <div>
+              <p className="energy-kicker">
+                <Sparkles aria-hidden="true" />
+                不止两分钟的星座补给
+              </p>
+              <h2 id="energy-astrology-world-title">星座深度补给站</h2>
+              <p>按今天、本周、本月和本年慢慢看，只展示能确认来源的内容。</p>
+            </div>
+            <span className="energy-astrology-world__source">{sourceLabel}</span>
+          </header>
+          <div className="energy-astrology-world__art">
+            <Sparkles className="energy-astrology-world__sparkle" aria-hidden="true" />
+            <img
+              src={zodiacBadgeImage(selectedState.reading.zodiacSign)}
+              alt={`${selectedState.reading.zodiacLabel}马卡龙插画`}
+              onError={(event) => {
+                event.currentTarget.hidden = true;
+              }}
+            />
+            <span className="energy-astrology-world__orbit-note" data-note="color">
+              <Palette aria-hidden="true" />
+              <small>幸运色</small>
+              <strong>{selectedState.reading.luckyColors[0] ?? '等待提示'}</strong>
+            </span>
+            <span className="energy-astrology-world__orbit-note" data-note="time">
+              <Clock3 aria-hidden="true" />
+              <small>顺手时段</small>
+              <strong>{selectedState.reading.suitableTimes[0] ?? '等待提示'}</strong>
+            </span>
           </div>
-          <span className="energy-astrology-world__source">
-            {selectedState.source === 'local-fallback'
-              ? 'Holaday 本地提示'
-              : selectedState.reading.freshness === 'stale'
-                ? 'DivineAPI 最近成功数据'
-                : 'DivineAPI 内容'}
-          </span>
-        </header>
+        </div>
 
         <div className="energy-astrology-world__tabs" role="tablist" aria-label="星座范围">
           {TABS.map((tab) => (
