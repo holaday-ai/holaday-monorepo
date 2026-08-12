@@ -1,4 +1,22 @@
+import {
+  ENERGY_POLL_IDS,
+  ENERGY_PRACTICE_IDS,
+  type EnergyContentTarget,
+  type EnergyPollId,
+  type EnergyPracticeId,
+  isEnergyContentTarget,
+} from './energy-content-target';
+
 export type EnergyCompletionKind = 'recharge' | 'tarot' | 'game' | 'test' | 'horoscope';
+
+export interface EnergyContinuationState {
+  dateKey: string;
+  lastTarget: EnergyContentTarget | null;
+  lastCompletedKind: EnergyCompletionKind | null;
+  completedPracticeIds: string[];
+  pollSelections: Record<string, string>;
+  favoriteContentIds: string[];
+}
 
 export interface EnergyProgress {
   completedDates: string[];
@@ -7,13 +25,18 @@ export interface EnergyProgress {
   completedTestIds: string[];
   savedTestActionIds: string[];
   seenContentIds: string[];
+  completedKindsByDate: Record<string, EnergyCompletionKind[]>;
+  seenContentDateKey: string | null;
+  continuation: EnergyContinuationState;
 }
 
-const STORAGE_PREFIX = 'holaday.energy.progress.v2';
+const STORAGE_PREFIX = 'holaday.energy.progress.v3';
+const V2_STORAGE_PREFIX = 'holaday.energy.progress.v2';
 const LEGACY_STORAGE_PREFIX = 'holaday.energy.progress.v1';
 const MAX_SAVED_CARD_IDS = 100;
 const MAX_TEST_IDS = 100;
 const MAX_CONTENT_IDS = 100;
+const MAX_DATED_COMPLETION_KEYS = 45;
 const COMPLETION_KINDS: readonly EnergyCompletionKind[] = [
   'recharge',
   'tarot',
@@ -22,7 +45,7 @@ const COMPLETION_KINDS: readonly EnergyCompletionKind[] = [
   'horoscope',
 ];
 
-function emptyProgress(): EnergyProgress {
+function emptyProgress(now = new Date()): EnergyProgress {
   return {
     completedDates: [],
     collectedKinds: [],
@@ -30,6 +53,16 @@ function emptyProgress(): EnergyProgress {
     completedTestIds: [],
     savedTestActionIds: [],
     seenContentIds: [],
+    completedKindsByDate: {},
+    seenContentDateKey: null,
+    continuation: {
+      dateKey: localDateKey(now),
+      lastTarget: null,
+      lastCompletedKind: null,
+      completedPracticeIds: [],
+      pollSelections: {},
+      favoriteContentIds: [],
+    },
   };
 }
 
@@ -42,6 +75,10 @@ function localDateKey(date: Date): string {
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+}
+
+function isDateKey(value: unknown): value is string {
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
 
 function isCompletionKind(value: unknown): value is EnergyCompletionKind {
@@ -72,21 +109,42 @@ function isContentId(value: unknown): value is string {
   );
 }
 
-function parseProgress(raw: string): EnergyProgress {
-  const parsed = JSON.parse(raw) as {
-    completedDates?: unknown;
-    collectedKinds?: unknown;
-    savedCardIds?: unknown;
-    completedTestIds?: unknown;
-    savedTestActionIds?: unknown;
-    seenContentIds?: unknown;
-  };
-  if (!Array.isArray(parsed.completedDates) || !Array.isArray(parsed.collectedKinds)) {
-    return emptyProgress();
-  }
-  const completedDates = parsed.completedDates.filter(
-    (value): value is string => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value),
+function isOptionId(value: unknown): value is string {
+  return isContentId(value);
+}
+
+function parseCompletedKindsByDate(value: unknown): Record<string, EnergyCompletionKind[]> {
+  if (!isRecord(value)) return {};
+  const entries = Object.entries(value)
+    .filter(([dateKey, kinds]) => isDateKey(dateKey) && Array.isArray(kinds))
+    .sort(([left], [right]) => left.localeCompare(right))
+    .slice(-MAX_DATED_COMPLETION_KEYS)
+    .map(
+      ([dateKey, kinds]): [string, EnergyCompletionKind[]] => [
+        dateKey,
+        [...new Set((kinds as unknown[]).filter(isCompletionKind))],
+      ],
+    );
+  return Object.fromEntries(entries);
+}
+
+function parsePollSelections(value: unknown): Record<string, string> {
+  if (!isRecord(value)) return {};
+  return Object.fromEntries(
+    ENERGY_POLL_IDS.flatMap((pollId) => {
+      const optionId = value[pollId];
+      return isOptionId(optionId) ? [[pollId, optionId] as const] : [];
+    }),
   );
+}
+
+function parseProgress(raw: string, now = new Date()): EnergyProgress {
+  const parsed = JSON.parse(raw) as Record<string, unknown>;
+  if (!Array.isArray(parsed.completedDates) || !Array.isArray(parsed.collectedKinds)) {
+    return emptyProgress(now);
+  }
+
+  const completedDates = parsed.completedDates.filter(isDateKey);
   const collectedKinds = parsed.collectedKinds.filter(isCompletionKind);
   const savedCardIds = Array.isArray(parsed.savedCardIds)
     ? parsed.savedCardIds.filter(isCardId).slice(-MAX_SAVED_CARD_IDS)
@@ -100,6 +158,18 @@ function parseProgress(raw: string): EnergyProgress {
   const seenContentIds = Array.isArray(parsed.seenContentIds)
     ? parsed.seenContentIds.filter(isContentId).slice(-MAX_CONTENT_IDS)
     : [];
+  const continuation = isRecord(parsed.continuation) ? parsed.continuation : {};
+  const completedPracticeIds = Array.isArray(continuation.completedPracticeIds)
+    ? continuation.completedPracticeIds
+        .filter((value): value is EnergyPracticeId =>
+          typeof value === 'string' && ENERGY_PRACTICE_IDS.includes(value as EnergyPracticeId),
+        )
+        .slice(-MAX_CONTENT_IDS)
+    : [];
+  const favoriteContentIds = Array.isArray(continuation.favoriteContentIds)
+    ? continuation.favoriteContentIds.filter(isContentId).slice(-MAX_CONTENT_IDS)
+    : [];
+
   return {
     completedDates: [...new Set(completedDates)].sort(),
     collectedKinds: [...new Set(collectedKinds)],
@@ -107,7 +177,23 @@ function parseProgress(raw: string): EnergyProgress {
     completedTestIds: [...new Set(completedTestIds)],
     savedTestActionIds: [...new Set(savedTestActionIds)],
     seenContentIds: [...new Set(seenContentIds)],
+    completedKindsByDate: parseCompletedKindsByDate(parsed.completedKindsByDate),
+    seenContentDateKey: isDateKey(parsed.seenContentDateKey) ? parsed.seenContentDateKey : null,
+    continuation: {
+      dateKey: isDateKey(continuation.dateKey) ? continuation.dateKey : localDateKey(now),
+      lastTarget: isEnergyContentTarget(continuation.lastTarget) ? continuation.lastTarget : null,
+      lastCompletedKind: isCompletionKind(continuation.lastCompletedKind)
+        ? continuation.lastCompletedKind
+        : null,
+      completedPracticeIds: [...new Set(completedPracticeIds)],
+      pollSelections: parsePollSelections(continuation.pollSelections),
+      favoriteContentIds: [...new Set(favoriteContentIds)],
+    },
   };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function writeProgress(scope: string | null, progress: EnergyProgress): void {
@@ -119,11 +205,36 @@ function writeProgress(scope: string | null, progress: EnergyProgress): void {
   }
 }
 
+function normalizeDailyState(progress: EnergyProgress, date: Date): EnergyProgress {
+  const dateKey = localDateKey(date);
+  const sameContinuationDay = progress.continuation.dateKey === dateKey;
+  return {
+    ...progress,
+    seenContentIds: progress.seenContentDateKey === dateKey ? progress.seenContentIds : [],
+    seenContentDateKey: dateKey,
+    continuation: {
+      ...progress.continuation,
+      dateKey,
+      lastTarget: sameContinuationDay ? progress.continuation.lastTarget : null,
+      lastCompletedKind: sameContinuationDay ? progress.continuation.lastCompletedKind : null,
+      pollSelections: sameContinuationDay ? progress.continuation.pollSelections : {},
+    },
+  };
+}
+
 export function readEnergyProgress(scope: string | null): EnergyProgress {
   if (scope === null) return emptyProgress();
   try {
     const current = window.localStorage.getItem(storageKey(scope));
     if (current) return parseProgress(current);
+
+    const v2 = window.localStorage.getItem(storageKey(scope, V2_STORAGE_PREFIX));
+    if (v2) {
+      const migrated = parseProgress(v2);
+      writeProgress(scope, migrated);
+      return migrated;
+    }
+
     const legacy = window.localStorage.getItem(storageKey(scope, LEGACY_STORAGE_PREFIX));
     if (!legacy) return emptyProgress();
     const migrated = parseProgress(legacy);
@@ -139,11 +250,115 @@ export function recordEnergyCompletion(
   kind: EnergyCompletionKind,
   completedAt: Date = new Date(),
 ): EnergyProgress {
-  const current = readEnergyProgress(scope);
+  const current = normalizeDailyState(readEnergyProgress(scope), completedAt);
+  const dateKey = localDateKey(completedAt);
   const next: EnergyProgress = {
     ...current,
-    completedDates: [...new Set([...current.completedDates, localDateKey(completedAt)])].sort(),
+    completedDates: [...new Set([...current.completedDates, dateKey])].sort(),
     collectedKinds: [...new Set([...current.collectedKinds, kind])],
+    completedKindsByDate: {
+      ...current.completedKindsByDate,
+      [dateKey]: [...new Set([...(current.completedKindsByDate[dateKey] ?? []), kind])],
+    },
+  };
+  writeProgress(scope, next);
+  return next;
+}
+
+export function completedKindsForDate(
+  progress: Pick<EnergyProgress, 'completedKindsByDate'>,
+  date = new Date(),
+): EnergyCompletionKind[] {
+  return [...(progress.completedKindsByDate[localDateKey(date)] ?? [])];
+}
+
+export function saveLastEnergyTarget(
+  scope: string | null,
+  target: EnergyContentTarget,
+  kind: EnergyCompletionKind | null,
+  completedAt = new Date(),
+): EnergyProgress {
+  const current = normalizeDailyState(readEnergyProgress(scope), completedAt);
+  const next: EnergyProgress = {
+    ...current,
+    continuation: {
+      ...current.continuation,
+      lastTarget: target,
+      lastCompletedKind: kind,
+    },
+  };
+  writeProgress(scope, next);
+  return next;
+}
+
+export function recordPracticeCompletion(
+  scope: string | null,
+  practiceId: EnergyPracticeId,
+  completedAt = new Date(),
+): EnergyProgress {
+  const completed = recordEnergyCompletion(scope, 'recharge', completedAt);
+  const next: EnergyProgress = {
+    ...completed,
+    continuation: {
+      ...completed.continuation,
+      completedPracticeIds: [
+        ...new Set([...completed.continuation.completedPracticeIds, practiceId]),
+      ].slice(-MAX_CONTENT_IDS),
+    },
+  };
+  writeProgress(scope, next);
+  return next;
+}
+
+export function savePollSelection(
+  scope: string | null,
+  pollId: EnergyPollId,
+  optionId: string,
+  selectedAt = new Date(),
+): EnergyProgress {
+  const current = normalizeDailyState(readEnergyProgress(scope), selectedAt);
+  if (!isOptionId(optionId)) return current;
+  const next: EnergyProgress = {
+    ...current,
+    continuation: {
+      ...current.continuation,
+      pollSelections: { ...current.continuation.pollSelections, [pollId]: optionId },
+    },
+  };
+  writeProgress(scope, next);
+  return next;
+}
+
+export function recordOpenedEnergyContent(
+  scope: string | null,
+  contentId: string,
+  openedAt = new Date(),
+): EnergyProgress {
+  const current = normalizeDailyState(readEnergyProgress(scope), openedAt);
+  if (!isContentId(contentId)) return current;
+  const next: EnergyProgress = {
+    ...current,
+    seenContentIds: [...new Set([...current.seenContentIds, contentId])].slice(-MAX_CONTENT_IDS),
+  };
+  writeProgress(scope, next);
+  return next;
+}
+
+export function toggleFavoriteEnergyContent(
+  scope: string | null,
+  contentId: string,
+): EnergyProgress {
+  const current = readEnergyProgress(scope);
+  if (!isContentId(contentId)) return current;
+  const favorites = new Set(current.continuation.favoriteContentIds);
+  if (favorites.has(contentId)) favorites.delete(contentId);
+  else favorites.add(contentId);
+  const next: EnergyProgress = {
+    ...current,
+    continuation: {
+      ...current.continuation,
+      favoriteContentIds: [...favorites].slice(-MAX_CONTENT_IDS),
+    },
   };
   writeProgress(scope, next);
   return next;
@@ -189,13 +404,11 @@ export function saveSeenEnergyContentIds(
   scope: string | null,
   contentIds: string[],
 ): EnergyProgress {
-  const current = readEnergyProgress(scope);
-  const validIds = contentIds.filter(isContentId);
-  const seenContentIds = [...new Set([...current.seenContentIds, ...validIds])].slice(
-    -MAX_CONTENT_IDS,
-  );
-  const next = { ...current, seenContentIds };
-  writeProgress(scope, next);
+  let next = readEnergyProgress(scope);
+  for (const contentId of contentIds) {
+    if (!isContentId(contentId)) continue;
+    next = recordOpenedEnergyContent(scope, contentId);
+  }
   return next;
 }
 
