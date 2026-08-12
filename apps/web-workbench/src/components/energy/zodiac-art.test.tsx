@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 
 import { type AstroProfile, type ZodiacSign, buildAstroReading } from '@/lib/astrology';
-import { cleanup, render } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EnergyAstrologyPanel } from './EnergyAstrologyPanel';
 import type { EnergyAstrologyState } from './useEnergyAstrology';
@@ -81,5 +81,22 @@ describe('EnergyAstrologyPanel zodiac art', () => {
 
     const image = container.querySelector<HTMLImageElement>('.energy-astrology-panel__badge img');
     expect(image?.getAttribute('src')).toBe(expectedSrc);
+  });
+
+  it('does not describe local fallback content as a real provider reading', () => {
+    const profile = profileFor('aries');
+    render(
+      <EnergyAstrologyPanel
+        profile={profile}
+        astrology={astrologyFor(profile)}
+        canEditProfile
+        onOpen={vi.fn()}
+        onEditProfile={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('本地备用提示')).toBeTruthy();
+    expect(screen.getByText('今日 + 本周星座提示')).toBeTruthy();
+    expect(screen.queryByText(/真实星座提示/)).toBeNull();
   });
 });
