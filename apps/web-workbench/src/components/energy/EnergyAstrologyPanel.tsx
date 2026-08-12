@@ -25,7 +25,7 @@ export function EnergyAstrologyPanel({
         <img src={badgeImage} alt="" />
       </div>
       <div className="energy-astrology-panel__main">
-        <p className="energy-kicker">今日 + 本周真实星座提示</p>
+        <p className="energy-kicker">今日 + 本周星座提示</p>
         <h2>你的星座能量</h2>
         <div className="energy-astrology-panel__identity">
           <strong>{astrology.reading.zodiacLabel}</strong>
