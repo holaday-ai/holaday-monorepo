@@ -93,6 +93,9 @@ export const ENERGY_EXPERIENCES: EnergyExperienceRegistration[] = [
           createElement(module.TarotExperience, {
             profileStorageScope: props.profileStorageScope,
             capabilities: props.astrology.capabilities,
+            initialMode: props.launchTarget?.type === 'tarot' ? props.launchTarget.mode : undefined,
+            initialTheme:
+              props.launchTarget?.type === 'tarot' ? props.launchTarget.theme : undefined,
             phase: props.phase,
             onPhaseChange: props.onPhaseChange,
             onComplete: () => props.onExperienceComplete('tarot'),
@@ -113,6 +116,8 @@ export const ENERGY_EXPERIENCES: EnergyExperienceRegistration[] = [
         default: (props: EnergyExperienceProps) =>
           createElement(module.TestExperience, {
             profileStorageScope: props.profileStorageScope,
+            initialTestId:
+              props.launchTarget?.type === 'test' ? props.launchTarget.testId : undefined,
             phase: props.phase,
             onPhaseChange: props.onPhaseChange,
             onComplete: () => props.onExperienceComplete('test'),

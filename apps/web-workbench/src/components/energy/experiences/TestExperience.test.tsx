@@ -4,6 +4,7 @@ import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readEnergyProgress } from '../energy-progress';
+import type { LightTestId } from './test-content';
 import { TestExperience } from './TestExperience';
 
 const storage = new Map<string, string>();
@@ -21,12 +22,16 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
-function renderTestExperience(profileStorageScope: string | null = 'usr_a') {
+function renderTestExperience(
+  profileStorageScope: string | null = 'usr_a',
+  initialTestId?: LightTestId,
+) {
   const onPhaseChange = vi.fn();
   const onComplete = vi.fn();
   render(
     <TestExperience
       profileStorageScope={profileStorageScope}
+      initialTestId={initialTestId}
       phase="active"
       onPhaseChange={onPhaseChange}
       onComplete={onComplete}
@@ -47,6 +52,18 @@ async function completeEmotionBattery() {
 }
 
 describe('TestExperience', () => {
+  it('opens a recommended test on its first question and returns to the directory', async () => {
+    const user = userEvent.setup();
+    renderTestExperience('usr_a', 'work-focus');
+
+    expect(screen.getByText(/专注入口 · 1\/5/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '情绪电量' })).toBeNull();
+    await user.click(screen.getByRole('button', { name: '返回测试目录' }));
+
+    expect(screen.getByRole('button', { name: '情绪电量' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '专注入口' })).toBeTruthy();
+  });
+
   it('completes five questions and opens a related test without closing', async () => {
     const { onComplete } = renderTestExperience();
     const user = await completeEmotionBattery();
@@ -76,7 +93,7 @@ describe('TestExperience', () => {
     const progress = readEnergyProgress(scope);
     expect(progress.completedTestIds).toContain('emotion-battery');
     expect(progress.savedTestActionIds).toContain('emotion-battery:recover');
-    const raw = storage.get(`holaday.energy.progress.v2:${scope}`) ?? '';
+    const raw = storage.get(`holaday.energy.progress.v3:${scope}`) ?? '';
     expect(raw).not.toContain('answers');
     expect(raw).not.toContain('先补回基本余量');
   });
@@ -87,6 +104,6 @@ describe('TestExperience', () => {
     await user.click(screen.getByRole('button', { name: '返回测试目录' }));
 
     expect(screen.getByRole('button', { name: '情绪电量' }).textContent).toContain('已完成');
-    expect(storage.has('holaday.energy.progress.v2:guest')).toBe(false);
+    expect(storage.has('holaday.energy.progress.v3:guest')).toBe(false);
   });
 });

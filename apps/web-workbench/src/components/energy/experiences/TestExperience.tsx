@@ -18,6 +18,7 @@ import {
 
 interface TestExperienceProps {
   profileStorageScope: string | null;
+  initialTestId?: LightTestId;
   phase: ExperiencePhase;
   onPhaseChange: (phase: ExperiencePhase) => void;
   onComplete?: () => void;
@@ -54,12 +55,17 @@ const CATEGORY_ORDER = Object.keys(CATEGORY_LABELS) as LightTestCategory[];
 
 export function TestExperience({
   profileStorageScope,
+  initialTestId,
   phase,
   onPhaseChange,
   onComplete = () => undefined,
 }: TestExperienceProps): JSX.Element {
-  const [stage, setStage] = React.useState<'directory' | 'questions' | 'result'>('directory');
-  const [activeTestId, setActiveTestId] = React.useState<LightTestId | null>(null);
+  const [stage, setStage] = React.useState<'directory' | 'questions' | 'result'>(() =>
+    initialTestId ? 'questions' : 'directory',
+  );
+  const [activeTestId, setActiveTestId] = React.useState<LightTestId | null>(
+    initialTestId ?? null,
+  );
   const [questionIndex, setQuestionIndex] = React.useState(0);
   const [answers, setAnswers] = React.useState<string[]>([]);
   const [result, setResult] = React.useState<LightTestOutcome | null>(null);
@@ -69,6 +75,18 @@ export function TestExperience({
   const [savedAction, setSavedAction] = React.useState(false);
   const previousPhaseRef = React.useRef(phase);
   const internalResumeRef = React.useRef(false);
+  const initialTestRef = React.useRef(initialTestId);
+
+  React.useEffect(() => {
+    if (!initialTestId || initialTestRef.current === initialTestId) return;
+    initialTestRef.current = initialTestId;
+    setActiveTestId(initialTestId);
+    setStage('questions');
+    setQuestionIndex(0);
+    setAnswers([]);
+    setResult(null);
+    setSavedAction(false);
+  }, [initialTestId]);
 
   React.useEffect(() => {
     if (previousPhaseRef.current === 'result' && phase === 'active') {

@@ -130,6 +130,18 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('useEnergyAstrology', () => {
+  it('uses distinct local copy for daily weekly monthly and yearly ranges', () => {
+    const profile = createProfileFromBirthday({ birthday: '1996-03-21' });
+    const { result } = renderHook(() => useEnergyAstrology(profile, false));
+    const summaries = Object.values(result.current.periods).map((period) => period.reading.summary);
+    const workBodies = Object.values(result.current.periods).map(
+      (period) => period.reading.dimensions.find((item) => item.key === 'profession')?.body,
+    );
+
+    expect(new Set(summaries).size).toBe(4);
+    expect(new Set(workBodies).size).toBe(4);
+  });
+
   it('loads daily and weekly independently without eager tarot calls', async () => {
     trpcMocks.daily.mockResolvedValue(remoteReading('aries', '远端今日提示'));
     const profile = createProfileFromBirthday({ birthday: '1996-03-21' });

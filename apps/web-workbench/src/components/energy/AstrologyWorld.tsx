@@ -15,6 +15,12 @@ interface AstrologyWorldProps {
   onOpenLightTest: (trigger: HTMLButtonElement) => void;
 }
 
+export interface AstrologyWorldHandle {
+  openPeriod: (period: EnergyAstrologyPeriod) => void;
+  openSigns: () => void;
+  scrollIntoView: (options?: ScrollIntoViewOptions) => void;
+}
+
 const TABS: Array<{ period: EnergyAstrologyPeriod; label: string }> = [
   { period: 'daily', label: '今日' },
   { period: 'weekly', label: '本周' },
@@ -37,8 +43,9 @@ const ZODIAC_OPTIONS: Array<{ sign: ZodiacSign; label: string }> = [
   { sign: 'pisces', label: '双鱼座' },
 ];
 
-export const AstrologyWorld = React.forwardRef<HTMLElement, AstrologyWorldProps>(
+export const AstrologyWorld = React.forwardRef<AstrologyWorldHandle, AstrologyWorldProps>(
   function AstrologyWorld({ astrology, onOpenEnergyCard, onOpenLightTest }, ref): JSX.Element {
+    const sectionRef = React.useRef<HTMLElement>(null);
     const [selectedPeriod, setSelectedPeriod] = React.useState<EnergyAstrologyPeriod>('daily');
     const [monthRange, setMonthRange] = React.useState<'current' | 'next'>('current');
     const [rankingRequested, setRankingRequested] = React.useState(false);
@@ -74,9 +81,19 @@ export const AstrologyWorld = React.forwardRef<HTMLElement, AstrologyWorldProps>
       }
     };
 
+    React.useImperativeHandle(
+      ref,
+      () => ({
+        openPeriod: selectPeriod,
+        openSigns: () => setSignPickerOpen(true),
+        scrollIntoView: (options) => sectionRef.current?.scrollIntoView(options),
+      }),
+      [selectPeriod],
+    );
+
     return (
       <section
-        ref={ref}
+        ref={sectionRef}
         id="energy-astrology-world"
         className="energy-astrology-world"
         aria-labelledby="energy-astrology-world-title"
@@ -195,6 +212,7 @@ export const AstrologyWorld = React.forwardRef<HTMLElement, AstrologyWorldProps>
 
           {signPickerOpen ? (
             <div className="energy-astrology-world__sign-picker">
+              <strong>临时查看</strong>
               <p>只预览，不会修改已保存的生日资料。</p>
               <fieldset>
                 <legend>选择预览星座</legend>

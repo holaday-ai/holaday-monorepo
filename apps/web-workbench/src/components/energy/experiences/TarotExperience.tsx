@@ -34,6 +34,8 @@ interface CardLabHistoryEntry {
 interface TarotExperienceProps {
   profileStorageScope: string | null;
   capabilities: Record<string, boolean>;
+  initialMode?: CardLabMode;
+  initialTheme?: HoladayCardTheme;
   phase: ExperiencePhase;
   onPhaseChange: (phase: ExperiencePhase) => void;
   onComplete?: () => void;
@@ -75,13 +77,17 @@ const THREE_CARD_LABELS = ['回顾', '当下', '下一步'] as const;
 export function TarotExperience({
   profileStorageScope,
   capabilities,
+  initialMode,
+  initialTheme,
   phase,
   onPhaseChange,
   onComplete = () => undefined,
 }: TarotExperienceProps): JSX.Element {
-  const [mode, setMode] = React.useState<CardLabMode | null>(null);
-  const [stage, setStage] = React.useState<CardLabStage>('directory');
-  const [theme, setTheme] = React.useState<HoladayCardTheme>('work');
+  const [mode, setMode] = React.useState<CardLabMode | null>(initialMode ?? null);
+  const [stage, setStage] = React.useState<CardLabStage>(() =>
+    initialMode ? 'theme' : 'directory',
+  );
+  const [theme, setTheme] = React.useState<HoladayCardTheme>(initialTheme ?? 'work');
   const [cards, setCards] = React.useState<HoladayEnergyCard[]>([]);
   const [seenIds, setSeenIds] = React.useState<string[]>([]);
   const [history, setHistory] = React.useState<CardLabHistoryEntry[]>([]);
@@ -91,15 +97,27 @@ export function TarotExperience({
   const completionReportedRef = React.useRef(false);
   const internalResumeRef = React.useRef(false);
   const previousPhaseRef = React.useRef(phase);
+  const launchRef = React.useRef(`${initialMode ?? ''}:${initialTheme ?? ''}`);
+
+  React.useEffect(() => {
+    const launchKey = `${initialMode ?? ''}:${initialTheme ?? ''}`;
+    if (!initialMode || launchRef.current === launchKey) return;
+    launchRef.current = launchKey;
+    setMode(initialMode);
+    setTheme(initialTheme ?? 'work');
+    setStage('theme');
+    setCards([]);
+    setSaved(false);
+  }, [initialMode, initialTheme]);
 
   React.useEffect(() => {
     if (previousPhaseRef.current === 'result' && phase === 'active') {
       if (internalResumeRef.current) {
         internalResumeRef.current = false;
       } else {
-        setMode(null);
-        setStage('directory');
-        setTheme('work');
+        setMode(initialMode ?? null);
+        setStage(initialMode ? 'theme' : 'directory');
+        setTheme(initialTheme ?? 'work');
         setCards([]);
         setSeenIds([]);
         setHistory([]);
@@ -109,7 +127,7 @@ export function TarotExperience({
       }
     }
     previousPhaseRef.current = phase;
-  }, [phase]);
+  }, [initialMode, initialTheme, phase]);
 
   const draw = React.useCallback(
     (nextMode: CardLabMode): HoladayEnergyCard[] => {

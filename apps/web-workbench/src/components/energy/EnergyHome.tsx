@@ -2,7 +2,7 @@ import { type AstroProfile, defaultAstroProfile, readAstroProfile } from '@/lib/
 import { trpc } from '@/lib/trpc';
 import type { UiTask } from '@/types/task';
 import * as React from 'react';
-import { AstrologyWorld } from './AstrologyWorld';
+import { AstrologyWorld, type AstrologyWorldHandle } from './AstrologyWorld';
 import { EnergyAstrologyPanel } from './EnergyAstrologyPanel';
 import { EnergyExperienceDeck } from './EnergyExperienceDeck';
 import { type EnergyExploreEvent, EnergyExploreFeed } from './EnergyExploreFeed';
@@ -64,7 +64,7 @@ export function EnergyHome({
   const [profileOpen, setProfileOpen] = React.useState(false);
   const returnFocusRef = React.useRef<HTMLButtonElement | null>(null);
   const profileTriggerRef = React.useRef<HTMLButtonElement | null>(null);
-  const astrologyWorldRef = React.useRef<HTMLElement | null>(null);
+  const astrologyWorldRef = React.useRef<AstrologyWorldHandle | null>(null);
   const startedAtRef = React.useRef(Date.now());
   const astrology = useEnergyAstrology(profile, liveProvider);
   const LoadedExperience = React.useMemo(
