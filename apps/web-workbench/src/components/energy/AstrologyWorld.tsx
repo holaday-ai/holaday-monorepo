@@ -59,17 +59,20 @@ export const AstrologyWorld = React.forwardRef<AstrologyWorldHandle, AstrologyWo
           ? 'DivineAPI 最近成功数据'
           : 'DivineAPI 内容';
 
-    const selectPeriod = (period: EnergyAstrologyPeriod): void => {
-      setSelectedPeriod(period);
-      const state = astrology.periods[period];
-      if (period === 'monthly') {
-        if (!state.loaded || state.reading.rangeKey !== monthRange) {
-          void astrology.loadPeriod('monthly', monthRange);
+    const selectPeriod = React.useCallback(
+      (period: EnergyAstrologyPeriod): void => {
+        setSelectedPeriod(period);
+        const state = astrology.periods[period];
+        if (period === 'monthly') {
+          if (!state.loaded || state.reading.rangeKey !== monthRange) {
+            void astrology.loadPeriod('monthly', monthRange);
+          }
+          return;
         }
-        return;
-      }
-      if (!state.loaded) void astrology.loadPeriod(period, 'current');
-    };
+        if (!state.loaded) void astrology.loadPeriod(period, 'current');
+      },
+      [astrology, monthRange],
+    );
 
     const selectMonth = (rangeKey: 'current' | 'next'): void => {
       setMonthRange(rangeKey);
@@ -95,13 +98,10 @@ export const AstrologyWorld = React.forwardRef<AstrologyWorldHandle, AstrologyWo
       <section
         ref={sectionRef}
         id="energy-astrology-world"
-        className="energy-astrology-world"
+        className="energy-astrology-world energy-section-anchor"
         aria-labelledby="energy-astrology-world-title"
       >
-        <AstrologyMagazineCover
-          reading={selectedState.reading}
-          sourceLabel={sourceLabel}
-        />
+        <AstrologyMagazineCover reading={selectedState.reading} sourceLabel={sourceLabel} />
 
         <div className="energy-astrology-world__tabs" role="tablist" aria-label="星座范围">
           {TABS.map((tab) => (

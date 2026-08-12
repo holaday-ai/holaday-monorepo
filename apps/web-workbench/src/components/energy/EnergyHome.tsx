@@ -9,6 +9,7 @@ import { type EnergyExploreEvent, EnergyExploreFeed } from './EnergyExploreFeed'
 import { EnergyGrowthPanel } from './EnergyGrowthPanel';
 import { EnergyHero } from './EnergyHero';
 import { EnergyProfileDrawer } from './EnergyProfileDrawer';
+import { ENERGY_SECTION_LINKS, type EnergySectionId, EnergySectionNav } from './EnergySectionNav';
 import { ExperiencePlayer } from './ExperiencePlayer';
 import { RunningTaskDock, type RunningTaskDockEvent } from './RunningTaskDock';
 import { resolveEnergyContentTarget } from './content-target-controller';
@@ -183,14 +184,15 @@ export function EnergyHome({
   const recharge = experiences.find((experience) => experience.id === 'recharge') ?? null;
   const tarot = experiences.find((experience) => experience.id === 'tarot') ?? null;
   const lightTest = experiences.find((experience) => experience.id === 'light-test') ?? null;
+  const completedToday = completedKindsForDate(progress);
   const continuation = React.useMemo(
     () =>
       recommendNextEnergyTarget({
         energyNeed,
-        completedKinds: completedKindsForDate(progress),
+        completedKinds: completedToday,
         lastCompletedKind: progress.continuation.lastCompletedKind,
       }),
-    [energyNeed, progress],
+    [completedToday, energyNeed, progress.continuation.lastCompletedKind],
   );
 
   const executeTarget = (target: EnergyContentTarget, trigger: HTMLButtonElement): boolean => {
@@ -225,20 +227,54 @@ export function EnergyHome({
     openExperience(experience, trigger, command.launchTarget);
     return true;
   };
+  const canOpenLastTarget = progress.continuation.lastTarget
+    ? targetIsAvailable(progress.continuation.lastTarget, experiences)
+    : false;
 
   return (
     <div className="energy-page" data-profile-scope={profileStorageScope ? 'user' : 'guest'}>
-      <EnergyHero
-        value={energyNeed}
-        onChange={setEnergyNeed}
-        onStart={(need, trigger) => {
-          if (!recharge || recharge.status !== 'active' || !recharge.actionable) return;
-          setEnergyNeed(need);
-          openExperience(recharge, trigger);
+      <div id="energy-recharge" className="energy-section-anchor">
+        <EnergyHero
+          mode={completedToday.length > 0 ? 'compact' : 'full'}
+          value={energyNeed}
+          completedCount={completedToday.length}
+          totalCount={5}
+          continueLabel={canOpenLastTarget ? '继续上次' : '继续今日内容'}
+          onChange={setEnergyNeed}
+          onContinue={(trigger) => {
+            if (
+              canOpenLastTarget &&
+              progress.continuation.lastTarget &&
+              executeTarget(progress.continuation.lastTarget, trigger)
+            ) {
+              return;
+            }
+            todayContentRef.current?.scrollIntoView?.({
+              behavior: prefersReducedMotion() ? 'auto' : 'smooth',
+              block: 'start',
+            });
+          }}
+          onStart={(need, trigger) => {
+            if (!recharge || recharge.status !== 'active' || !recharge.actionable) return;
+            setEnergyNeed(need);
+            openExperience(recharge, trigger);
+          }}
+        />
+      </div>
+
+      <EnergySectionNav
+        sections={ENERGY_SECTION_LINKS}
+        onNavigate={(sectionId) => {
+          void eventReporter.report({
+            type: 'energy_section_navigated',
+            section: analyticsSection(sectionId),
+          });
         }}
       />
 
-      <EnergyExperienceDeck experiences={experiences} onOpen={openExperience} />
+      <div id="energy-play" className="energy-section-anchor">
+        <EnergyExperienceDeck experiences={experiences} onOpen={openExperience} />
+      </div>
 
       <div id="energy-growth" ref={growthRef} className="energy-insight-grid">
         <EnergyGrowthPanel progress={progress} />
@@ -272,7 +308,7 @@ export function EnergyHome({
         }}
       />
 
-      <div id="energy-today-content" ref={todayContentRef}>
+      <div id="energy-today-content" ref={todayContentRef} className="energy-section-anchor">
         <EnergyExploreFeed
           storageScope={storageScope}
           mood={null}
@@ -380,4 +416,23 @@ function prefersReducedMotion(): boolean {
     typeof window.matchMedia === 'function' &&
     window.matchMedia('(prefers-reduced-motion: reduce)').matches
   );
+}
+
+function analyticsSection(
+  sectionId: EnergySectionId,
+): 'recharge' | 'play' | 'astrology' | 'today-content' {
+  if (sectionId === 'energy-recharge') return 'recharge';
+  if (sectionId === 'energy-play') return 'play';
+  if (sectionId === 'energy-astrology-world') return 'astrology';
+  return 'today-content';
+}
+
+function targetIsAvailable(
+  target: EnergyContentTarget,
+  experiences: readonly EnergyExperienceRegistration[],
+): boolean {
+  const command = resolveEnergyContentTarget(target);
+  if (command.type !== 'experience') return true;
+  const experience = experiences.find((item) => item.id === command.experienceId);
+  return Boolean(experience?.status === 'active' && experience.actionable && experience.load);
 }

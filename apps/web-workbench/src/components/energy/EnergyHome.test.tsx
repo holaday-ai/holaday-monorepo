@@ -4,7 +4,7 @@ import { cleanup, render, screen, waitFor, within } from '@testing-library/react
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EnergyHome } from './EnergyHome';
-import { readEnergyProgress } from './energy-progress';
+import { readEnergyProgress, recordEnergyCompletion } from './energy-progress';
 
 const trpcMocks = vi.hoisted(() => ({
   homeQuery: vi.fn(),
@@ -184,5 +184,14 @@ describe('EnergyHome', () => {
     await user.click(screen.getByRole('button', { name: '抽一张相关能量牌' }));
     expect(screen.getByRole('dialog', { name: '抽张卡' })).toBeTruthy();
     expect(screen.queryByText(/月亮倾向|上升倾向|流年提醒/)).toBeNull();
+  });
+
+  it('uses a compact same-day return hero after a completed experience', () => {
+    recordEnergyCompletion('usr_energy', 'test');
+    render(<EnergyHome profileStorageScope="usr_energy" />);
+
+    expect(screen.getByText('今日完成 1/5')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '继续今日内容' })).toBeTruthy();
+    expect(screen.getByRole('navigation', { name: '今日能量章节' })).toBeTruthy();
   });
 });
