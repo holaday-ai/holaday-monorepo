@@ -30,6 +30,7 @@ describe('EnergyExploreFeed', () => {
         storageScope="usr_a"
         mood="stressed"
         energyNeed="relax"
+        zodiacSign="aries"
         onEvent={onEvent}
       />,
     );
@@ -52,6 +53,7 @@ describe('EnergyExploreFeed', () => {
         storageScope="usr_a"
         mood={null}
         energyNeed="focus"
+        zodiacSign="aries"
         onEvent={onEvent}
         onActionTarget={onActionTarget}
       />,
@@ -66,15 +68,39 @@ describe('EnergyExploreFeed', () => {
       contentId: expect.stringMatching(/^[a-z0-9-]+$/),
     });
     expect(onActionTarget).toHaveBeenCalledWith(expect.any(String), firstAction);
+    expect(firstAction.closest('article')?.getAttribute('data-opened')).toBe('true');
   });
 
   it('keeps preview history in memory without creating a guest record', async () => {
     const user = userEvent.setup();
     render(
-      <EnergyExploreFeed storageScope={null} mood={null} energyNeed="uplift" onEvent={vi.fn()} />,
+      <EnergyExploreFeed
+        storageScope={null}
+        mood={null}
+        energyNeed="uplift"
+        zodiacSign="aries"
+        onEvent={vi.fn()}
+      />,
     );
 
     await user.click(screen.getByRole('button', { name: '再来一组' }));
     expect(storage.has('holaday.energy.progress.v2:guest')).toBe(false);
+  });
+
+  it('renders two illustrated feature cards and four icon-led compact cards', () => {
+    const { container } = render(
+      <EnergyExploreFeed
+        storageScope="usr_a"
+        mood={null}
+        energyNeed="focus"
+        zodiacSign="aries"
+        onEvent={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelectorAll('article[data-layout="feature"]')).toHaveLength(2);
+    expect(container.querySelectorAll('article[data-layout="compact"]')).toHaveLength(4);
+    expect(container.querySelectorAll('article[data-layout="feature"] img')).toHaveLength(2);
+    expect(screen.getAllByRole('article')).toHaveLength(6);
   });
 });

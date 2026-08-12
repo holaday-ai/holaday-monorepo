@@ -1,18 +1,26 @@
 import { Button } from '@/components/ui/button';
+import type { ZodiacSign } from '@/lib/astrology';
 import {
+  ArrowRight,
   BookOpenText,
   Brain,
+  BriefcaseBusiness,
+  Clock3,
   Gamepad2,
   HeartHandshake,
   type LucideIcon,
+  Palette,
   RefreshCw,
+  Shuffle,
   Sparkles,
+  UserRound,
   Vote,
   Wind,
 } from 'lucide-react';
 import * as React from 'react';
 import { readEnergyProgress, saveSeenEnergyContentIds } from './energy-progress';
 import type { EnergyMood, EnergyNeed } from './energy-types';
+import { type EnergyVisualIcon, exploreVisualFor } from './energy-visuals';
 import {
   ENERGY_EXPLORE_CONTENT,
   type EnergyContentCategory,
@@ -28,6 +36,7 @@ interface EnergyExploreFeedProps {
   storageScope: string | null;
   mood: EnergyMood | null;
   energyNeed: EnergyNeed;
+  zodiacSign: ZodiacSign;
   onEvent: (event: EnergyExploreEvent) => void;
   onActionTarget?: (target: string, trigger: HTMLButtonElement) => void;
 }
@@ -54,10 +63,25 @@ const CATEGORY_ICONS = {
   'game-recommendation': Gamepad2,
 } satisfies Record<EnergyContentCategory, LucideIcon>;
 
+const VISUAL_ICONS: Record<EnergyVisualIcon, LucideIcon> = {
+  book: BookOpenText,
+  brain: Brain,
+  briefcase: BriefcaseBusiness,
+  clock: Clock3,
+  gamepad: Gamepad2,
+  heart: HeartHandshake,
+  palette: Palette,
+  shuffle: Shuffle,
+  sparkles: Sparkles,
+  user: UserRound,
+  wind: Wind,
+};
+
 export function EnergyExploreFeed({
   storageScope,
   mood,
   energyNeed,
+  zodiacSign,
   onEvent,
   onActionTarget = () => undefined,
 }: EnergyExploreFeedProps): JSX.Element {
@@ -123,13 +147,40 @@ export function EnergyExploreFeed({
 
       {items.length > 0 ? (
         <div className="energy-explore-feed__grid" aria-live="polite">
-          {items.map((item) => {
-            const Icon = CATEGORY_ICONS[item.category];
+          {items.map((item, index) => {
+            const MetaIcon = CATEGORY_ICONS[item.category];
+            const visual = exploreVisualFor(item.category, zodiacSign);
+            const VisualIcon = VISUAL_ICONS[visual.icon];
+            const layout = index < 2 ? 'feature' : 'compact';
             return (
-              <article key={item.id} data-category={item.category}>
+              <article
+                key={item.id}
+                data-category={item.category}
+                data-layout={layout}
+                data-tone={visual.tone}
+                data-opened={openedId === item.id ? 'true' : 'false'}
+              >
+                {layout === 'feature' ? (
+                  <div className="energy-explore-feed__art" aria-hidden="true">
+                    <span>
+                      <VisualIcon />
+                    </span>
+                    <img
+                      src={visual.imageSrc}
+                      alt=""
+                      onError={(event) => {
+                        event.currentTarget.hidden = true;
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <span className="energy-explore-feed__compact-icon" aria-hidden="true">
+                    <VisualIcon />
+                  </span>
+                )}
                 <div className="energy-explore-feed__meta">
                   <span>
-                    <Icon aria-hidden={true} />
+                    <MetaIcon aria-hidden={true} />
                     {CATEGORY_LABELS[item.category]}
                   </span>
                   <small>约 {item.estimatedSeconds} 秒</small>
@@ -147,6 +198,7 @@ export function EnergyExploreFeed({
                   }}
                 >
                   {openedId === item.id ? '已打开，可以继续逛' : '打开这个内容'}
+                  <ArrowRight aria-hidden="true" />
                 </button>
               </article>
             );

@@ -207,6 +207,7 @@ export function EnergyHome({
         storageScope={storageScope}
         mood={null}
         energyNeed={energyNeed}
+        zodiacSign={profile.zodiacSign}
         onEvent={reportHubEvent}
         onActionTarget={(target, trigger) => {
           if (target.startsWith('astrology:')) {
