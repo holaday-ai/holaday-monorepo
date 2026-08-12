@@ -12,9 +12,15 @@ import { EnergyProfileDrawer } from './EnergyProfileDrawer';
 import { ExperiencePlayer } from './ExperiencePlayer';
 import { RunningTaskDock, type RunningTaskDockEvent } from './RunningTaskDock';
 import { resolveEnergyContentTarget } from './content-target-controller';
-import type { EnergyExperienceLaunchTarget } from './energy-content-target';
+import type { EnergyContentTarget, EnergyExperienceLaunchTarget } from './energy-content-target';
+import { recommendNextEnergyTarget } from './energy-continuation';
 import { createEnergyEventReporter } from './energy-event-reporter';
-import { readEnergyProgress, recordEnergyCompletion } from './energy-progress';
+import {
+  completedKindsForDate,
+  readEnergyProgress,
+  recordEnergyCompletion,
+  saveLastEnergyTarget,
+} from './energy-progress';
 import type { EnergyExperienceId, EnergyNeed, ExperiencePhase } from './energy-types';
 import { ENERGY_EXPERIENCES, type EnergyExperienceRegistration } from './experience-registry';
 import { useEnergyAstrology } from './useEnergyAstrology';
@@ -69,6 +75,7 @@ export function EnergyHome({
   const returnFocusRef = React.useRef<HTMLButtonElement | null>(null);
   const profileTriggerRef = React.useRef<HTMLButtonElement | null>(null);
   const astrologyWorldRef = React.useRef<AstrologyWorldHandle | null>(null);
+  const todayContentRef = React.useRef<HTMLDivElement | null>(null);
   const startedAtRef = React.useRef(Date.now());
   const astrology = useEnergyAstrology(profile, liveProvider);
   const LoadedExperience = React.useMemo(
@@ -126,19 +133,22 @@ export function EnergyHome({
       if (experienceId === 'practice' || experienceId === 'poll') return;
       const reportableExperienceId: ReportableExperienceId = experienceId;
       void eventReporter.report({
-          type,
-          experienceId: reportableExperienceId,
-          energyNeed,
-          durationBucket: eventDurationBucket,
-          outcome,
-        });
+        type,
+        experienceId: reportableExperienceId,
+        energyNeed,
+        durationBucket: eventDurationBucket,
+        outcome,
+      });
     },
     [energyNeed, eventReporter],
   );
 
-  const reportHubEvent = React.useCallback((event: EnergyExploreEvent | RunningTaskDockEvent) => {
-    void eventReporter.report(event);
-  }, [eventReporter]);
+  const reportHubEvent = React.useCallback(
+    (event: EnergyExploreEvent | RunningTaskDockEvent) => {
+      void eventReporter.report(event);
+    },
+    [eventReporter],
+  );
 
   const openExperience = (
     experience: EnergyExperienceRegistration,
@@ -172,6 +182,48 @@ export function EnergyHome({
   const recharge = experiences.find((experience) => experience.id === 'recharge') ?? null;
   const tarot = experiences.find((experience) => experience.id === 'tarot') ?? null;
   const lightTest = experiences.find((experience) => experience.id === 'light-test') ?? null;
+  const continuation = React.useMemo(
+    () =>
+      recommendNextEnergyTarget({
+        energyNeed,
+        completedKinds: completedKindsForDate(progress),
+        lastCompletedKind: progress.continuation.lastCompletedKind,
+      }),
+    [energyNeed, progress],
+  );
+
+  const executeTarget = (target: EnergyContentTarget, trigger: HTMLButtonElement): boolean => {
+    const command = resolveEnergyContentTarget(target);
+    if (command.type === 'astrology') {
+      setSelectedExperience(null);
+      astrologyWorldRef.current?.openPeriod(command.period);
+      astrologyWorldRef.current?.scrollIntoView?.({
+        behavior: prefersReducedMotion() ? 'auto' : 'smooth',
+        block: 'start',
+      });
+      return Boolean(astrologyWorldRef.current);
+    }
+    if (command.type === 'astrology-signs') {
+      setSelectedExperience(null);
+      astrologyWorldRef.current?.openSigns();
+      astrologyWorldRef.current?.scrollIntoView?.({
+        behavior: prefersReducedMotion() ? 'auto' : 'smooth',
+        block: 'start',
+      });
+      return Boolean(astrologyWorldRef.current);
+    }
+    const experience = experiences.find((item) => item.id === command.experienceId);
+    if (
+      !experience ||
+      experience.status !== 'active' ||
+      !experience.actionable ||
+      !experience.load
+    ) {
+      return false;
+    }
+    openExperience(experience, trigger, command.launchTarget);
+    return true;
+  };
 
   return (
     <div className="energy-page" data-profile-scope={profileStorageScope ? 'user' : 'guest'}>
@@ -219,43 +271,16 @@ export function EnergyHome({
         }}
       />
 
-      <EnergyExploreFeed
-        storageScope={storageScope}
-        mood={null}
-        energyNeed={energyNeed}
-        zodiacSign={profile.zodiacSign}
-        onEvent={reportHubEvent}
-        onActionTarget={(target, trigger) => {
-          const command = resolveEnergyContentTarget(target);
-          if (command.type === 'astrology') {
-            astrologyWorldRef.current?.openPeriod(command.period);
-            astrologyWorldRef.current?.scrollIntoView?.({
-              behavior: prefersReducedMotion() ? 'auto' : 'smooth',
-              block: 'start',
-            });
-            return Boolean(astrologyWorldRef.current);
-          }
-          if (command.type === 'astrology-signs') {
-            astrologyWorldRef.current?.openSigns();
-            astrologyWorldRef.current?.scrollIntoView?.({
-              behavior: prefersReducedMotion() ? 'auto' : 'smooth',
-              block: 'start',
-            });
-            return Boolean(astrologyWorldRef.current);
-          }
-          const experience = experiences.find((item) => item.id === command.experienceId);
-          if (
-            !experience ||
-            experience.status !== 'active' ||
-            !experience.actionable ||
-            !experience.load
-          ) {
-            return false;
-          }
-          openExperience(experience, trigger, command.launchTarget);
-          return true;
-        }}
-      />
+      <div id="energy-today-content" ref={todayContentRef}>
+        <EnergyExploreFeed
+          storageScope={storageScope}
+          mood={null}
+          energyNeed={energyNeed}
+          zodiacSign={profile.zodiacSign}
+          onEvent={reportHubEvent}
+          onActionTarget={executeTarget}
+        />
+      </div>
 
       {tasks.length > 0 ? <RunningTaskDock tasks={tasks} onEvent={reportHubEvent} /> : null}
 
@@ -273,6 +298,25 @@ export function EnergyHome({
         }}
         onChooseAnother={() => setSelectedExperience(null)}
         replayLabel={selectedExperience?.replayLabel}
+        continuation={continuation}
+        onContinue={(trigger) => {
+          if (!continuation) return;
+          void eventReporter.report({
+            type: 'energy_continuation_opened',
+            fromKind: progress.continuation.lastCompletedKind,
+            targetType: continuation.target.type,
+          });
+          executeTarget(continuation.target, trigger);
+        }}
+        onReturnToContent={() => {
+          setSelectedExperience(null);
+          window.requestAnimationFrame(() => {
+            todayContentRef.current?.scrollIntoView?.({
+              behavior: prefersReducedMotion() ? 'auto' : 'smooth',
+              block: 'start',
+            });
+          });
+        }}
       >
         {LoadedExperience ? (
           <React.Suspense
@@ -287,9 +331,26 @@ export function EnergyHome({
               launchTarget={selectedLaunchTarget}
               phase={phase}
               onPhaseChange={handlePhaseChange}
-              onExperienceComplete={(kind) =>
-                setProgress(recordEnergyCompletion(storageScope, kind))
-              }
+              onExperienceComplete={(kind) => {
+                const completed = recordEnergyCompletion(storageScope, kind);
+                if (!selectedLaunchTarget) {
+                  setProgress(completed);
+                  return;
+                }
+                const saved = saveLastEnergyTarget(storageScope, selectedLaunchTarget, kind);
+                setProgress(
+                  storageScope === null
+                    ? {
+                        ...completed,
+                        continuation: {
+                          ...completed.continuation,
+                          lastTarget: selectedLaunchTarget,
+                          lastCompletedKind: kind,
+                        },
+                      }
+                    : saved,
+                );
+              }}
             />
           </React.Suspense>
         ) : null}

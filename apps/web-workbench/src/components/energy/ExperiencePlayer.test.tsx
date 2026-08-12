@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event';
 import * as React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ExperiencePlayer } from './ExperiencePlayer';
+import type { EnergyContinuationRecommendation } from './energy-continuation';
 import type { EnergyExperienceDefinition, ExperiencePhase } from './energy-types';
 
 afterEach(cleanup);
@@ -26,6 +27,9 @@ interface HarnessProps {
   onReplay?: () => void;
   onChooseAnother?: () => void;
   replayLabel?: string;
+  continuation?: EnergyContinuationRecommendation | null;
+  onContinue?: () => void;
+  onReturnToContent?: () => void;
 }
 
 function Harness({
@@ -34,6 +38,13 @@ function Harness({
   onReplay = vi.fn(),
   onChooseAnother = vi.fn(),
   replayLabel,
+  continuation = {
+    target: { type: 'game', gameId: 'color-memory' },
+    label: '颜色记忆',
+    reason: '因为你选择了好心情，下一步换一种轻互动。',
+  },
+  onContinue = vi.fn(),
+  onReturnToContent = vi.fn(),
 }: HarnessProps): JSX.Element {
   const [open, setOpen] = React.useState(false);
   const [phase, setPhase] = React.useState<ExperiencePhase>(initialPhase);
@@ -63,6 +74,9 @@ function Harness({
           setOpen(false);
         }}
         replayLabel={replayLabel}
+        continuation={continuation}
+        onContinue={onContinue}
+        onReturnToContent={onReturnToContent}
       >
         <p>结果内容</p>
       </ExperiencePlayer>
@@ -103,27 +117,25 @@ describe('ExperiencePlayer', () => {
     expect(screen.queryByRole('button', { name: '开始体验' })).toBeNull();
   });
 
-  it('offers replay and another mode in the result phase', async () => {
-    const onReplay = vi.fn();
-    const onChooseAnother = vi.fn();
+  it('offers continuation and return actions in the result phase', async () => {
+    const onContinue = vi.fn();
+    const onReturnToContent = vi.fn();
     const user = userEvent.setup();
-    render(<Harness initialPhase="result" onReplay={onReplay} onChooseAnother={onChooseAnother} />);
+    render(
+      <Harness
+        initialPhase="result"
+        onContinue={onContinue}
+        onReturnToContent={onReturnToContent}
+      />,
+    );
 
     await user.click(screen.getByRole('button', { name: '打开抽卡' }));
 
     expect(screen.getByText('结果内容')).toBeTruthy();
-    const replay = screen.getByRole('button', { name: '再来一次' });
-    expect(replay.className).toContain('bg-[#765184]');
-    await user.click(replay);
-    expect(onReplay).toHaveBeenCalledOnce();
-
-    cleanup();
-    render(<Harness initialPhase="result" onReplay={onReplay} onChooseAnother={onChooseAnother} />);
-    await user.click(screen.getByRole('button', { name: '打开抽卡' }));
-    await user.click(screen.getByRole('button', { name: '换个玩法' }));
-
-    expect(onChooseAnother).toHaveBeenCalledOnce();
-    expect(screen.queryByRole('dialog')).toBeNull();
+    await user.click(screen.getByRole('button', { name: '继续：颜色记忆' }));
+    await user.click(screen.getByRole('button', { name: '返回今日内容' }));
+    expect(onContinue).toHaveBeenCalledOnce();
+    expect(onReturnToContent).toHaveBeenCalledOnce();
   });
 
   it('gives the icon close control both an accessible name and a native tooltip', async () => {
@@ -136,12 +148,13 @@ describe('ExperiencePlayer', () => {
     expect(close.getAttribute('title')).toBe('关闭体验');
   });
 
-  it('supports a distinct player-level replay label', async () => {
+  it('does not replace the continuation CTA with a player-level replay label', async () => {
     const user = userEvent.setup();
     render(<Harness initialPhase="result" replayLabel="重新开始抽卡" />);
 
     await user.click(screen.getByRole('button', { name: '打开抽卡' }));
-    expect(screen.getByRole('button', { name: '重新开始抽卡' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '重新开始抽卡' })).toBeNull();
+    expect(screen.getByRole('button', { name: '继续：颜色记忆' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: '再来一次' })).toBeNull();
   });
 });

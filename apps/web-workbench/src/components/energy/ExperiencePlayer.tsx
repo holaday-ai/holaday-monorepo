@@ -2,6 +2,8 @@ import { Button } from '@/components/ui/button';
 import * as Dialog from '@radix-ui/react-dialog';
 import { X } from 'lucide-react';
 import * as React from 'react';
+import { EnergyContinueCard } from './EnergyContinueCard';
+import type { EnergyContinuationRecommendation } from './energy-continuation';
 import type { EnergyExperienceDefinition, ExperiencePhase } from './energy-types';
 
 interface ExperiencePlayerProps {
@@ -13,6 +15,9 @@ interface ExperiencePlayerProps {
   onStart: () => void;
   onReplay: () => void;
   onChooseAnother: () => void;
+  continuation?: EnergyContinuationRecommendation | null;
+  onContinue?: (trigger: HTMLButtonElement) => void;
+  onReturnToContent?: (trigger: HTMLButtonElement) => void;
   replayLabel?: string;
   children: React.ReactNode;
 }
@@ -34,7 +39,9 @@ export function ExperiencePlayer({
   onStart,
   onReplay,
   onChooseAnother,
-  replayLabel = '再来一次',
+  continuation = null,
+  onContinue = () => undefined,
+  onReturnToContent = onChooseAnother,
   children,
 }: ExperiencePlayerProps): JSX.Element | null {
   const startRef = React.useRef<HTMLButtonElement>(null);
@@ -122,14 +129,11 @@ export function ExperiencePlayer({
             ) : null}
 
             {phase === 'result' ? (
-              <div className="mt-7 flex flex-wrap justify-center gap-3 border-t border-[#eee9e5] pt-5">
-                <Button type="button" className={energyPrimaryActionClass} onClick={onReplay}>
-                  {replayLabel}
-                </Button>
-                <Button type="button" variant="outline" onClick={onChooseAnother}>
-                  换个玩法
-                </Button>
-              </div>
+              <EnergyContinueCard
+                recommendation={continuation}
+                onContinue={onContinue}
+                onReturn={onReturnToContent}
+              />
             ) : null}
           </div>
         </Dialog.Content>

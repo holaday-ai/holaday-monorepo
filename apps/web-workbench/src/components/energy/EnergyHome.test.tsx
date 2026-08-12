@@ -134,6 +134,27 @@ describe('EnergyHome', () => {
         energyNeed: 'relax',
       }),
     );
+    expect(screen.getByRole('button', { name: '继续：呼吸节奏' })).toBeTruthy();
+  });
+
+  it('continues from a completed recharge into the exact recommended game', async () => {
+    const user = userEvent.setup();
+    render(<EnergyHome profileStorageScope="usr_energy" />);
+
+    await user.click(screen.getByRole('button', { name: '放松' }));
+    await user.click(screen.getByRole('button', { name: '开始 30 秒补给' }));
+    await user.click(screen.getByRole('button', { name: '开始体验' }));
+    await user.click(await screen.findByRole('button', { name: '立即完成' }));
+    await user.click(screen.getByRole('button', { name: '继续：呼吸节奏' }));
+
+    expect(screen.getByRole('dialog', { name: '小游戏' })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '开始体验' }));
+    expect(await screen.findByRole('heading', { name: '舒服地吸气' })).toBeTruthy();
+    expect(trpcMocks.reportEvent).toHaveBeenCalledWith({
+      type: 'energy_continuation_opened',
+      fromKind: 'recharge',
+      targetType: 'game',
+    });
   });
 
   it('opens the playable mini game from the three-choice deck', async () => {

@@ -119,12 +119,10 @@ function parseCompletedKindsByDate(value: unknown): Record<string, EnergyComplet
     .filter(([dateKey, kinds]) => isDateKey(dateKey) && Array.isArray(kinds))
     .sort(([left], [right]) => left.localeCompare(right))
     .slice(-MAX_DATED_COMPLETION_KEYS)
-    .map(
-      ([dateKey, kinds]): [string, EnergyCompletionKind[]] => [
-        dateKey,
-        [...new Set((kinds as unknown[]).filter(isCompletionKind))],
-      ],
-    );
+    .map(([dateKey, kinds]): [string, EnergyCompletionKind[]] => [
+      dateKey,
+      [...new Set((kinds as unknown[]).filter(isCompletionKind))],
+    ]);
   return Object.fromEntries(entries);
 }
 
@@ -161,8 +159,9 @@ function parseProgress(raw: string, now = new Date()): EnergyProgress {
   const continuation = isRecord(parsed.continuation) ? parsed.continuation : {};
   const completedPracticeIds = Array.isArray(continuation.completedPracticeIds)
     ? continuation.completedPracticeIds
-        .filter((value): value is EnergyPracticeId =>
-          typeof value === 'string' && ENERGY_PRACTICE_IDS.includes(value as EnergyPracticeId),
+        .filter(
+          (value): value is EnergyPracticeId =>
+            typeof value === 'string' && ENERGY_PRACTICE_IDS.includes(value as EnergyPracticeId),
         )
         .slice(-MAX_CONTENT_IDS)
     : [];
@@ -259,6 +258,10 @@ export function recordEnergyCompletion(
     completedKindsByDate: {
       ...current.completedKindsByDate,
       [dateKey]: [...new Set([...(current.completedKindsByDate[dateKey] ?? []), kind])],
+    },
+    continuation: {
+      ...current.continuation,
+      lastCompletedKind: kind,
     },
   };
   writeProgress(scope, next);
