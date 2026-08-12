@@ -83,6 +83,7 @@ export function AstrologyDimensionGrid({ reading }: AstrologyDimensionGridProps)
               <button
                 type="button"
                 aria-label={`${openDimensionKey === dimension.key ? '收起' : '展开'}${dimension.label}完整提示`}
+                title={`${openDimensionKey === dimension.key ? '收起' : '展开'}${dimension.label}完整提示`}
                 onClick={() =>
                   setOpenDimensionKey((current) =>
                     current === dimension.key ? null : dimension.key,
