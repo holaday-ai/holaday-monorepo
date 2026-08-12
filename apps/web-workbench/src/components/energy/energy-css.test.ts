@@ -84,7 +84,7 @@ describe('energy motion system', () => {
     expect(categoryMeta).toMatch(/font-size:\s*10px/);
     expect(durationMeta).toMatch(/font-size:\s*10px/);
     expect(css).toMatch(
-      /@media\s*\(max-width:\s*640px\)[\s\S]*\.energy-magazine-card\s+button\s*\{[^}]*min-height:\s*44px/,
+      /@media\s*\(max-width:\s*640px\)[\s\S]*\.energy-explore-feed__grid\s+\.energy-magazine-card\s+button\s*\{[^}]*min-height:\s*44px/,
     );
   });
 
@@ -93,7 +93,7 @@ describe('energy motion system', () => {
       /@media\s*\(max-width:\s*640px\)[\s\S]*\.energy-astrology-portals\s*\{[^}]*overflow-x:\s*auto/,
     );
     expect(css).toMatch(
-      /@media\s*\(max-width:\s*640px\)[\s\S]*\.energy-magazine-card\s+button\s*\{[^}]*min-height:\s*44px/,
+      /@media\s*\(max-width:\s*640px\)[\s\S]*\.energy-explore-feed__grid\s+\.energy-magazine-card\s+button\s*\{[^}]*min-height:\s*44px/,
     );
   });
 });
