@@ -27,6 +27,32 @@ export const ENERGY_EXPERIENCES: EnergyExperienceRegistration[] = [
       })),
   },
   {
+    id: 'practice',
+    kind: 'ritual',
+    title: '轻松练习',
+    description: '跟着几步小动作松开一点',
+    estimatedSeconds: 60,
+    status: 'active',
+    actionable: true,
+    requiredProfileFields: [],
+    surface: 'target-only',
+    load: () =>
+      import('./experiences/PracticeExperience').then((module) => ({
+        default: (props: EnergyExperienceProps) => {
+          if (props.launchTarget?.type !== 'practice') {
+            return createElement('p', { role: 'status' }, '这个练习暂时不可用');
+          }
+          return createElement(module.PracticeExperience, {
+            initialPracticeId: props.launchTarget.practiceId,
+            profileStorageScope: props.profileStorageScope,
+            phase: props.phase,
+            onPhaseChange: props.onPhaseChange,
+            onComplete: () => props.onExperienceComplete('recharge'),
+          });
+        },
+      })),
+  },
+  {
     id: 'tarot',
     kind: 'card',
     title: '抽张卡',
@@ -112,6 +138,10 @@ export const ENERGY_EXPERIENCES: EnergyExperienceRegistration[] = [
 
 export function activeEnergyExperiences(): EnergyExperienceRegistration[] {
   return ENERGY_EXPERIENCES.filter((experience) => {
-    return experience.status === 'active' && experience.actionable;
+    return (
+      experience.status === 'active' &&
+      experience.actionable &&
+      experience.surface !== 'target-only'
+    );
   });
 }

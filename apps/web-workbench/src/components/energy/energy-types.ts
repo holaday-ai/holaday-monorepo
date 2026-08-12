@@ -1,5 +1,6 @@
 import type { AstroProfile } from '@/lib/astrology';
 import type { EnergyAstrologyState } from './useEnergyAstrology';
+import type { EnergyExperienceLaunchTarget } from './energy-content-target';
 
 export type EnergyMood = 'good' | 'tired' | 'stressed' | 'unwind';
 export type EnergyNeed = 'focus' | 'relax' | 'confidence' | 'uplift';
@@ -17,7 +18,7 @@ export type ExperiencePhase = 'intro' | 'active' | 'result' | 'error';
 
 export interface EnergyExperienceDefinition {
   id: EnergyExperienceId;
-  kind: 'ritual' | 'card' | 'test' | 'horoscope' | 'game';
+  kind: 'ritual' | 'card' | 'test' | 'horoscope' | 'game' | 'poll';
   title: string;
   description: string;
   estimatedSeconds: number;
@@ -25,6 +26,7 @@ export interface EnergyExperienceDefinition {
   actionable: boolean;
   requiredProfileFields: Array<'birthday' | 'birthTime' | 'birthPlace'>;
   replayLabel?: string;
+  surface?: 'deck' | 'target-only';
 }
 
 export interface EnergyExperienceProps {
@@ -33,6 +35,7 @@ export interface EnergyExperienceProps {
   profileStorageScope: string | null;
   profile: AstroProfile;
   astrology: EnergyAstrologyState;
+  launchTarget?: EnergyExperienceLaunchTarget | null;
   phase: ExperiencePhase;
   onPhaseChange: (phase: ExperiencePhase) => void;
   onExperienceComplete: (kind: 'recharge' | 'tarot' | 'game' | 'test' | 'horoscope') => void;
