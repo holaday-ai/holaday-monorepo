@@ -1,29 +1,13 @@
 import { Button } from '@/components/ui/button';
 import type { ZodiacSign } from '@/lib/astrology';
-import {
-  ArrowRight,
-  BookOpenText,
-  Brain,
-  BriefcaseBusiness,
-  Clock3,
-  Gamepad2,
-  HeartHandshake,
-  type LucideIcon,
-  Palette,
-  RefreshCw,
-  Shuffle,
-  Sparkles,
-  UserRound,
-  Vote,
-  Wind,
-} from 'lucide-react';
+import { RefreshCw, Sparkles } from 'lucide-react';
 import * as React from 'react';
+import { EnergyMagazineCard } from './EnergyMagazineCard';
 import { readEnergyProgress, saveSeenEnergyContentIds } from './energy-progress';
+import { allocateMagazineVisuals } from './energy-magazine-visuals';
 import type { EnergyMood, EnergyNeed } from './energy-types';
-import { type EnergyVisualIcon, exploreVisualFor } from './energy-visuals';
 import {
   ENERGY_EXPLORE_CONTENT,
-  type EnergyContentCategory,
   type EnergyContentItem,
   nextEnergyContentBatch,
 } from './explore-content';
@@ -40,42 +24,6 @@ interface EnergyExploreFeedProps {
   onEvent: (event: EnergyExploreEvent) => void;
   onActionTarget?: (target: string, trigger: HTMLButtonElement) => void;
 }
-
-const CATEGORY_LABELS = {
-  relaxation: '一分钟放松',
-  fortune: '今日幸运签',
-  'zodiac-knowledge': '星座趣味知识',
-  'relationship-quiz': '关系小问答',
-  poll: '今日投票',
-  'test-recommendation': '推荐轻测试',
-  'card-recommendation': '推荐抽卡',
-  'game-recommendation': '推荐小游戏',
-} satisfies Record<EnergyContentCategory, string>;
-
-const CATEGORY_ICONS = {
-  relaxation: Wind,
-  fortune: Sparkles,
-  'zodiac-knowledge': BookOpenText,
-  'relationship-quiz': HeartHandshake,
-  poll: Vote,
-  'test-recommendation': Brain,
-  'card-recommendation': Sparkles,
-  'game-recommendation': Gamepad2,
-} satisfies Record<EnergyContentCategory, LucideIcon>;
-
-const VISUAL_ICONS: Record<EnergyVisualIcon, LucideIcon> = {
-  book: BookOpenText,
-  brain: Brain,
-  briefcase: BriefcaseBusiness,
-  clock: Clock3,
-  gamepad: Gamepad2,
-  heart: HeartHandshake,
-  palette: Palette,
-  shuffle: Shuffle,
-  sparkles: Sparkles,
-  user: UserRound,
-  wind: Wind,
-};
 
 export function EnergyExploreFeed({
   storageScope,
@@ -104,6 +52,10 @@ export function EnergyExploreFeed({
       mood,
       energyNeed,
     }),
+  );
+  const entries = React.useMemo(
+    () => allocateMagazineVisuals(items, zodiacSign),
+    [items, zodiacSign],
   );
 
   React.useEffect(() => {
@@ -147,62 +99,18 @@ export function EnergyExploreFeed({
 
       {items.length > 0 ? (
         <div className="energy-explore-feed__grid" aria-live="polite">
-          {items.map((item, index) => {
-            const MetaIcon = CATEGORY_ICONS[item.category];
-            const visual = exploreVisualFor(item.category, zodiacSign);
-            const VisualIcon = VISUAL_ICONS[visual.icon];
-            const layout = index < 2 ? 'feature' : 'compact';
-            return (
-              <article
-                key={item.id}
-                data-category={item.category}
-                data-layout={layout}
-                data-tone={visual.tone}
-                data-opened={openedId === item.id ? 'true' : 'false'}
-              >
-                {layout === 'feature' ? (
-                  <div className="energy-explore-feed__art" aria-hidden="true">
-                    <span>
-                      <VisualIcon />
-                    </span>
-                    <img
-                      src={visual.imageSrc}
-                      alt=""
-                      onError={(event) => {
-                        event.currentTarget.hidden = true;
-                      }}
-                    />
-                  </div>
-                ) : (
-                  <span className="energy-explore-feed__compact-icon" aria-hidden="true">
-                    <VisualIcon />
-                  </span>
-                )}
-                <div className="energy-explore-feed__meta">
-                  <span>
-                    <MetaIcon aria-hidden={true} />
-                    {CATEGORY_LABELS[item.category]}
-                  </span>
-                  <small>约 {item.estimatedSeconds} 秒</small>
-                </div>
-                <h3>{item.title}</h3>
-                <p>{item.summary}</p>
-                <button
-                  type="button"
-                  aria-label={`打开${item.title}`}
-                  title={`打开${item.title}`}
-                  onClick={(event) => {
-                    setOpenedId(item.id);
-                    onEvent({ type: 'energy_content_opened', contentId: item.id });
-                    onActionTarget(item.actionTarget, event.currentTarget);
-                  }}
-                >
-                  {openedId === item.id ? '已打开，可以继续逛' : '打开这个内容'}
-                  <ArrowRight aria-hidden="true" />
-                </button>
-              </article>
-            );
-          })}
+          {entries.map((entry) => (
+            <EnergyMagazineCard
+              key={entry.item.id}
+              entry={entry}
+              opened={openedId === entry.item.id}
+              onOpen={(item, trigger) => {
+                setOpenedId(item.id);
+                onEvent({ type: 'energy_content_opened', contentId: item.id });
+                onActionTarget(item.actionTarget, trigger);
+              }}
+            />
+          ))}
         </div>
       ) : (
         <output className="energy-explore-feed__empty">

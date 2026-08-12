@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import * as React from 'react';
 import { periodSections } from './astrology-content';
+import { DIMENSION_MAGAZINE_ART } from './energy-magazine-visuals';
 import { type EnergyVisualIcon, dimensionVisualFor } from './energy-visuals';
 import type { EnergyPeriodReading } from './useEnergyAstrology';
 
@@ -37,6 +38,7 @@ const ICON_COMPONENTS: Record<EnergyVisualIcon, LucideIcon> = {
 
 export function AstrologyDimensionGrid({ reading }: AstrologyDimensionGridProps): JSX.Element {
   const [expanded, setExpanded] = React.useState(false);
+  const [openDimensionKey, setOpenDimensionKey] = React.useState<string | null>(null);
   const sections = periodSections(reading);
   const visibleSections = expanded ? sections : sections.slice(0, 3);
 
@@ -48,6 +50,17 @@ export function AstrologyDimensionGrid({ reading }: AstrologyDimensionGridProps)
           const Icon = ICON_COMPONENTS[visual.icon];
           return (
             <article key={dimension.key} data-dimension={dimension.key} data-tone={visual.tone}>
+              <div className="energy-astrology-dimension__art">
+                <img
+                  data-dimension-art
+                  src={DIMENSION_MAGAZINE_ART[dimension.key]}
+                  alt=""
+                  loading="lazy"
+                  onError={(event) => {
+                    event.currentTarget.hidden = true;
+                  }}
+                />
+              </div>
               <header>
                 <span
                   className="energy-astrology-dimension__icon"
@@ -59,7 +72,26 @@ export function AstrologyDimensionGrid({ reading }: AstrologyDimensionGridProps)
                 <h4>{dimension.label}</h4>
                 {dimension.score === null ? null : <span>{dimension.score}%</span>}
               </header>
-              <p>{dimension.body}</p>
+              <p className="energy-astrology-dimension__preview">
+                {dimension.body.length > 22
+                  ? `${dimension.body.slice(0, 22)}…`
+                  : dimension.body}
+              </p>
+              {openDimensionKey === dimension.key ? (
+                <p data-dimension-body>{dimension.body}</p>
+              ) : null}
+              <button
+                type="button"
+                aria-label={`${openDimensionKey === dimension.key ? '收起' : '展开'}${dimension.label}完整提示`}
+                title={`${openDimensionKey === dimension.key ? '收起' : '展开'}${dimension.label}完整提示`}
+                onClick={() =>
+                  setOpenDimensionKey((current) =>
+                    current === dimension.key ? null : dimension.key,
+                  )
+                }
+              >
+                {openDimensionKey === dimension.key ? '收起完整提示' : '展开完整提示'}
+              </button>
             </article>
           );
         })}

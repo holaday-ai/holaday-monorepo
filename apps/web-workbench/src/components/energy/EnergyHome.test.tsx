@@ -109,8 +109,9 @@ describe('EnergyHome', () => {
     expect(screen.queryByText('轻松一点的几分钟')).toBeNull();
     const exploreFeed = screen.getByRole('region', { name: '再逛一会' });
     expect(within(exploreFeed).getAllByRole('article')).toHaveLength(6);
-    expect(exploreFeed.querySelectorAll('article[data-layout="feature"]')).toHaveLength(2);
-    expect(exploreFeed.querySelectorAll('article[data-layout="compact"]')).toHaveLength(4);
+    expect(exploreFeed.querySelectorAll('article[data-layout="hero"]')).toHaveLength(1);
+    expect(exploreFeed.querySelectorAll('article[data-layout="portrait"]')).toHaveLength(2);
+    expect(exploreFeed.querySelectorAll('article[data-layout="landscape"]')).toHaveLength(3);
 
     await waitFor(() => expect(trpcMocks.homeQuery).toHaveBeenCalledOnce());
   });
@@ -155,7 +156,7 @@ describe('EnergyHome', () => {
     render(<EnergyHome profileStorageScope="usr_energy" />);
 
     expect(screen.queryByText(/月亮倾向|上升倾向|流年提醒/)).toBeNull();
-    expect(screen.getByRole('region', { name: '星座深度补给站' })).toBeTruthy();
+    expect(screen.getByRole('region', { name: '白羊座能量专刊' })).toBeTruthy();
     await user.click(screen.getByRole('button', { name: '进入星座深度补给' }));
     expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' });
 

@@ -1,4 +1,4 @@
-import { Clock3, Hash, HeartHandshake, Palette, Sparkles, Type } from 'lucide-react';
+import { Hash, HeartHandshake, Sparkles, Type } from 'lucide-react';
 import { luckyInsightGroups } from './astrology-content';
 import type { EnergyPeriodReading } from './useEnergyAstrology';
 
@@ -7,14 +7,15 @@ interface LuckyInsightsProps {
 }
 
 const GROUP_ICONS = {
-  colors: Palette,
   numbers: Hash,
   letters: Type,
-  times: Clock3,
 } as const;
 
 export function LuckyInsights({ reading }: LuckyInsightsProps): JSX.Element {
-  const groups = luckyInsightGroups(reading);
+  const groups = luckyInsightGroups(reading).filter(
+    (group): group is typeof group & { key: 'numbers' | 'letters' } =>
+      group.key === 'numbers' || group.key === 'letters',
+  );
   const tips = [
     { key: 'cosmic', label: '宇宙提示', body: reading.cosmicTip },
     { key: 'singles', label: '单身提示', body: reading.singlesTip },
@@ -33,12 +34,9 @@ export function LuckyInsights({ reading }: LuckyInsightsProps): JSX.Element {
                   <Icon aria-hidden="true" />
                   <h4>{group.label}</h4>
                 </header>
-                <div className={group.key === 'times' ? 'energy-lucky-insights__time-track' : undefined}>
+                <div>
                   {group.values.map((value) => (
                     <span key={value}>
-                      {group.key === 'colors' && isColorCode(value) ? (
-                        <i aria-label={`色值 ${value}`} style={{ backgroundColor: value }} />
-                      ) : null}
                       {value}
                     </span>
                   ))}
@@ -87,8 +85,4 @@ export function LuckyInsights({ reading }: LuckyInsightsProps): JSX.Element {
       )}
     </section>
   );
-}
-
-function isColorCode(value: string): boolean {
-  return /^(#[\da-f]{3,8}|rgba?\(|hsla?\()/i.test(value.trim());
 }

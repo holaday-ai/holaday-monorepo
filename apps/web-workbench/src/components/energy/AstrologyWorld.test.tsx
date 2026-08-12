@@ -114,11 +114,11 @@ describe('AstrologyWorld', () => {
     );
 
     expect(
-      screen.getByRole('img', { name: '白羊座马卡龙插画' }).getAttribute('src'),
+      screen.getByRole('img', { name: '白羊座马卡龙专刊封面' }).getAttribute('src'),
     ).toBe('/energy/aries-badge.jpg');
-    expect(screen.getAllByText('幸运色').length).toBeGreaterThan(1);
+    expect(screen.getAllByText('幸运色')).toHaveLength(1);
     expect(screen.getAllByText('#ff7d8d').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('顺手时段').length).toBeGreaterThan(1);
+    expect(screen.getAllByText('顺手时段')).toHaveLength(1);
     expect(screen.getAllByText('10:00 - 11:00').length).toBeGreaterThan(0);
   });
 
@@ -130,12 +130,12 @@ describe('AstrologyWorld', () => {
         onOpenLightTest={vi.fn()}
       />,
     );
-    const image = screen.getByRole('img', { name: '白羊座马卡龙插画' });
+    const image = screen.getByRole('img', { name: '白羊座马卡龙专刊封面' });
 
     fireEvent.error(image);
 
-    expect(screen.queryByRole('img', { name: '白羊座马卡龙插画' })).toBeNull();
-    expect(screen.getByTestId('zodiac-art-fallback')).toBeTruthy();
+    expect(screen.queryByRole('img', { name: '白羊座马卡龙专刊封面' })).toBeNull();
+    expect(screen.getByTestId('zodiac-cover-fallback')).toBeTruthy();
   });
 
   it('loads month only when the month tab is opened', async () => {

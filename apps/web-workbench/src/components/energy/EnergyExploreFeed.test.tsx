@@ -87,7 +87,7 @@ describe('EnergyExploreFeed', () => {
     expect(storage.has('holaday.energy.progress.v2:guest')).toBe(false);
   });
 
-  it('renders two illustrated feature cards and four icon-led compact cards', () => {
+  it('renders one hero, two portraits and three landscapes with unique artwork', () => {
     const { container } = render(
       <EnergyExploreFeed
         storageScope="usr_a"
@@ -98,13 +98,18 @@ describe('EnergyExploreFeed', () => {
       />,
     );
 
-    expect(container.querySelectorAll('article[data-layout="feature"]')).toHaveLength(2);
-    expect(container.querySelectorAll('article[data-layout="compact"]')).toHaveLength(4);
-    expect(container.querySelectorAll('article[data-layout="feature"] img')).toHaveLength(2);
-    expect(screen.getAllByRole('article')).toHaveLength(6);
+    expect(container.querySelectorAll('article[data-layout="hero"]')).toHaveLength(1);
+    expect(container.querySelectorAll('article[data-layout="portrait"]')).toHaveLength(2);
+    expect(container.querySelectorAll('article[data-layout="landscape"]')).toHaveLength(3);
+    const artwork = [
+      ...container.querySelectorAll<HTMLImageElement>('img[data-artwork]'),
+    ];
+    expect(artwork).toHaveLength(6);
+    expect(new Set(artwork.map((image) => image.src)).size).toBe(6);
+    expect(container.querySelector('[data-layout="compact"]')).toBeNull();
   });
 
-  it('hides failed feature artwork and keeps the icon fallback available', () => {
+  it('hides failed artwork and keeps the icon fallback available', () => {
     const { container } = render(
       <EnergyExploreFeed
         storageScope="usr_a"
@@ -114,12 +119,12 @@ describe('EnergyExploreFeed', () => {
         onEvent={vi.fn()}
       />,
     );
-    const image = container.querySelector<HTMLImageElement>('article[data-layout="feature"] img');
-    if (!image) throw new Error('expected feature artwork');
+    const image = container.querySelector<HTMLImageElement>('img[data-artwork]');
+    if (!image) throw new Error('expected magazine artwork');
 
     fireEvent.error(image);
 
     expect(image.hidden).toBe(true);
-    expect(image.parentElement?.querySelector('span svg')).toBeTruthy();
+    expect(image.parentElement?.querySelector('[data-artwork-fallback] svg')).toBeTruthy();
   });
 });
