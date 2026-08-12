@@ -37,16 +37,24 @@ const reading: EnergyPeriodReading = {
 afterEach(cleanup);
 
 describe('AstrologyDimensionGrid', () => {
-  it('uses stable dimension tones and expands from three to six items', async () => {
+  it('shows three image previews, expands one body, then reveals six unique scenes', async () => {
     const user = userEvent.setup();
     const { container } = render(<AstrologyDimensionGrid reading={reading} />);
 
     expect(container.querySelector('[data-dimension="profession"][data-tone="peach"]')).toBeTruthy();
     expect(container.querySelector('[data-dimension="health"][data-tone="mint"]')).toBeTruthy();
-    expect(screen.getAllByRole('article')).toHaveLength(3);
+    expect(container.querySelectorAll('img[data-dimension-art]')).toHaveLength(3);
+    expect(container.querySelector('[data-dimension-body]')).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: '展开个人完整提示' }));
+    expect(container.querySelector('[data-dimension-body]')?.textContent).toContain('个人提示');
 
     await user.click(screen.getByRole('button', { name: '展开全部六项' }));
 
-    expect(screen.getAllByRole('article')).toHaveLength(6);
+    const images = [
+      ...container.querySelectorAll<HTMLImageElement>('img[data-dimension-art]'),
+    ];
+    expect(images).toHaveLength(6);
+    expect(new Set(images.map((image) => image.src)).size).toBe(6);
   });
 });
