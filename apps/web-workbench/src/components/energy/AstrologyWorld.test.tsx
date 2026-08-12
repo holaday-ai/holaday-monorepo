@@ -173,11 +173,24 @@ describe('AstrologyWorld', () => {
       />,
     );
 
-    await user.click(screen.getByRole('button', { name: '换个星座看看' }));
+    const ranking = screen.getByRole('button', { name: '查看十二星座排行' });
+    const sign = screen.getByRole('button', { name: '换个星座看看' });
+    const card = screen.getByRole('button', { name: '抽一张相关能量牌' });
+    const test = screen.getByRole('button', { name: '测个相关主题' });
+    expect(ranking.getAttribute('data-tone')).toBe('lavender');
+    expect(sign.getAttribute('data-tone')).toBe('sky');
+    expect(card.getAttribute('data-tone')).toBe('peach');
+    expect(test.getAttribute('data-tone')).toBe('mint');
+    expect(screen.getByText('看看谁更有行动力')).toBeTruthy();
+    expect(screen.getByText('切换视角，不改资料')).toBeTruthy();
+    expect(screen.getByText('给当下一个轻提示')).toBeTruthy();
+    expect(screen.getByText('一分钟看见状态')).toBeTruthy();
+
+    await user.click(sign);
     await user.click(screen.getByRole('button', { name: '金牛座' }));
     expect(loadSignPreview).toHaveBeenCalledWith('taurus');
-    await user.click(screen.getByRole('button', { name: '抽一张相关能量牌' }));
-    await user.click(screen.getByRole('button', { name: '测个相关主题' }));
+    await user.click(card);
+    await user.click(test);
     expect(onOpenEnergyCard).toHaveBeenCalledOnce();
     expect(onOpenLightTest).toHaveBeenCalledOnce();
   });
