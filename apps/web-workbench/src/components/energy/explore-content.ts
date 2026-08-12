@@ -1,4 +1,5 @@
 import type { EnergyMood, EnergyNeed } from './energy-types';
+import type { EnergyContentTarget } from './energy-content-target';
 
 export type EnergyContentKind =
   | 'astrology'
@@ -28,7 +29,7 @@ export interface EnergyContentItem {
   estimatedSeconds: number;
   tags: string[];
   source: 'divineapi' | 'holaday-editorial' | 'partner';
-  actionTarget: string;
+  target: EnergyContentTarget;
   publishedAt?: string;
   expiresAt?: string;
 }
@@ -58,7 +59,7 @@ export const ENERGY_EXPLORE_CONTENT: EnergyContentItem[] = [
     summary: '把视线放到远处一个固定物体，慢慢吸气和呼气八次，让肩膀在每次呼气时放低一点。',
     estimatedSeconds: 60,
     tags: ['relax', 'focus', 'stressed'],
-    actionTarget: 'practice:breath-window',
+    target: { type: 'practice', practiceId: 'breath-window' },
   }),
   editorial({
     id: 'relax-shoulder-release',
@@ -68,7 +69,7 @@ export const ENERGY_EXPLORE_CONTENT: EnergyContentItem[] = [
     summary: '双脚踩稳地面，肩膀向后绕三圈，再轻轻转动头部，用一分钟把久坐的紧绷还给椅背。',
     estimatedSeconds: 60,
     tags: ['relax', 'tired', 'uplift'],
-    actionTarget: 'practice:shoulder-release',
+    target: { type: 'practice', practiceId: 'shoulder-release' },
   }),
   editorial({
     id: 'relax-five-senses',
@@ -78,7 +79,7 @@ export const ENERGY_EXPLORE_CONTENT: EnergyContentItem[] = [
     summary: '依次找出眼前五种颜色、四种触感和三种声音，让注意力从纷乱想法回到真实环境。',
     estimatedSeconds: 90,
     tags: ['relax', 'focus', 'stressed'],
-    actionTarget: 'practice:five-senses',
+    target: { type: 'practice', practiceId: 'five-senses' },
   }),
   editorial({
     id: 'relax-water-pause',
@@ -88,7 +89,7 @@ export const ENERGY_EXPLORE_CONTENT: EnergyContentItem[] = [
     summary: '离开屏幕倒一杯水，前三口只感受温度和吞咽，不处理消息，也不顺便增加新的待办。',
     estimatedSeconds: 75,
     tags: ['relax', 'tired', 'confidence'],
-    actionTarget: 'practice:water-pause',
+    target: { type: 'practice', practiceId: 'water-pause' },
   }),
   editorial({
     id: 'relax-desk-reset',
@@ -98,7 +99,7 @@ export const ENERGY_EXPLORE_CONTENT: EnergyContentItem[] = [
     summary: '只收好桌面上三件最碍眼的东西，完成后立刻停下，用小范围秩序换回一点呼吸空间。',
     estimatedSeconds: 90,
     tags: ['relax', 'focus', 'uplift'],
-    actionTarget: 'practice:desk-reset',
+    target: { type: 'practice', practiceId: 'desk-reset' },
   }),
   editorial({
     id: 'relax-distance-gaze',
@@ -108,7 +109,7 @@ export const ENERGY_EXPLORE_CONTENT: EnergyContentItem[] = [
     summary: '连续三轮看向六米外的物体二十秒，再闭眼感受光线变化，让眼睛和大脑一起短暂休息。',
     estimatedSeconds: 80,
     tags: ['relax', 'tired', 'confidence'],
-    actionTarget: 'practice:distance-gaze',
+    target: { type: 'practice', practiceId: 'distance-gaze' },
   }),
   editorial({
     id: 'fortune-small-luck',
@@ -118,7 +119,7 @@ export const ENERGY_EXPLORE_CONTENT: EnergyContentItem[] = [
     summary: '今天的好运更像一个容易完成的小步骤，先让一件事情顺利结束，再带着这股轻盈继续。',
     estimatedSeconds: 45,
     tags: ['uplift', 'focus', 'confidence'],
-    actionTarget: 'astrology:daily',
+    target: { type: 'astrology', period: 'daily' },
   }),
   editorial({
     id: 'fortune-kind-reply',
@@ -128,7 +129,7 @@ export const ENERGY_EXPLORE_CONTENT: EnergyContentItem[] = [
     summary: '一条真诚而简短的回应可能带来好心情，不必组织完美语言，清楚表达善意已经足够。',
     estimatedSeconds: 45,
     tags: ['uplift', 'confidence', 'social'],
-    actionTarget: 'astrology:daily',
+    target: { type: 'astrology', period: 'daily' },
   }),
   editorial({
     id: 'fortune-open-window',
@@ -138,7 +139,7 @@ export const ENERGY_EXPLORE_CONTENT: EnergyContentItem[] = [
     summary: '换一点空气、光线或座位方向，会比继续硬撑更容易带来新思路，允许环境帮你转场。',
     estimatedSeconds: 45,
     tags: ['uplift', 'relax', 'tired'],
-    actionTarget: 'astrology:daily',
+    target: { type: 'astrology', period: 'daily' },
   }),
   editorial({
     id: 'fortune-clear-choice',
@@ -148,7 +149,7 @@ export const ENERGY_EXPLORE_CONTENT: EnergyContentItem[] = [
     summary: '在两个选项之间犹豫时，先选更容易验证的一个，今天的幸运来自真实反馈而非反复猜测。',
     estimatedSeconds: 50,
     tags: ['confidence', 'focus'],
-    actionTarget: 'astrology:weekly',
+    target: { type: 'astrology', period: 'weekly' },
   }),
   editorial({
     id: 'fortune-slow-answer',
@@ -158,7 +159,7 @@ export const ENERGY_EXPLORE_CONTENT: EnergyContentItem[] = [
     summary: '重要回应不必抢在第一秒完成，留一点确认空间，反而更容易说出真正符合你需要的话。',
     estimatedSeconds: 50,
     tags: ['confidence', 'relax', 'relationship'],
-    actionTarget: 'astrology:weekly',
+    target: { type: 'astrology', period: 'weekly' },
   }),
   editorial({
     id: 'fortune-finish-line',
@@ -168,7 +169,7 @@ export const ENERGY_EXPLORE_CONTENT: EnergyContentItem[] = [
     summary: '开始前先写清怎样算完成，明确的终点会减少无谓打磨，也让今天更容易获得成就感。',
     estimatedSeconds: 50,
     tags: ['focus', 'confidence', 'uplift'],
-    actionTarget: 'astrology:monthly',
+    target: { type: 'astrology', period: 'monthly' },
   }),
   editorial({
     id: 'zodiac-fire-recharge',
@@ -178,7 +179,7 @@ export const ENERGY_EXPLORE_CONTENT: EnergyContentItem[] = [
     summary: '白羊、狮子和射手常从行动感中恢复，目标不需要大，快速看见一步进展就能重新点亮热情。',
     estimatedSeconds: 70,
     tags: ['confidence', 'uplift', 'focus'],
-    actionTarget: 'astrology:signs',
+    target: { type: 'astrology-signs' },
   }),
   editorial({
     id: 'zodiac-earth-rhythm',
@@ -189,7 +190,7 @@ export const ENERGY_EXPLORE_CONTENT: EnergyContentItem[] = [
       '金牛、处女和摩羯通常喜欢可预期的推进方式，把计划拆清楚，比突然提高强度更能建立安全感。',
     estimatedSeconds: 70,
     tags: ['focus', 'confidence', 'relax'],
-    actionTarget: 'astrology:signs',
+    target: { type: 'astrology-signs' },
   }),
   editorial({
     id: 'zodiac-air-connection',
@@ -199,7 +200,7 @@ export const ENERGY_EXPLORE_CONTENT: EnergyContentItem[] = [
     summary: '双子、天秤和水瓶常在交换想法时获得活力，一次轻松对话可能比独自反刍更快打开新角度。',
     estimatedSeconds: 70,
     tags: ['uplift', 'social', 'confidence'],
-    actionTarget: 'astrology:signs',
+    target: { type: 'astrology-signs' },
   }),
   editorial({
     id: 'zodiac-water-boundary',
@@ -209,7 +210,7 @@ export const ENERGY_EXPLORE_CONTENT: EnergyContentItem[] = [
     summary: '巨蟹、天蝎和双鱼容易接收环境情绪，温柔并不等于全部承担，适时离开也是一种照顾。',
     estimatedSeconds: 70,
     tags: ['relax', 'confidence', 'relationship'],
-    actionTarget: 'astrology:signs',
+    target: { type: 'astrology-signs' },
   }),
   editorial({
     id: 'zodiac-sun-sign',
@@ -219,7 +220,7 @@ export const ENERGY_EXPLORE_CONTENT: EnergyContentItem[] = [
     summary: '太阳星座更接近你主动发展和表达自我的方向，它是认识自己的入口，而不是限制性格的标签。',
     estimatedSeconds: 65,
     tags: ['confidence', 'focus'],
-    actionTarget: 'astrology:daily',
+    target: { type: 'astrology', period: 'daily' },
   }),
   editorial({
     id: 'zodiac-periods',
@@ -230,7 +231,7 @@ export const ENERGY_EXPLORE_CONTENT: EnergyContentItem[] = [
       '日运适合看当下节奏，周运看近期主题，月运和年运更适合观察趋势，不必把提示当成确定预言。',
     estimatedSeconds: 75,
     tags: ['focus', 'relax', 'confidence'],
-    actionTarget: 'astrology:monthly',
+    target: { type: 'astrology', period: 'monthly' },
   }),
   editorial({
     id: 'relationship-reply-speed',
@@ -240,7 +241,7 @@ export const ENERGY_EXPLORE_CONTENT: EnergyContentItem[] = [
     summary: '对方没有立即回复时，你更需要确认、等待还是转回自己的安排？用一分钟看看当前的安全感。',
     estimatedSeconds: 75,
     tags: ['relationship', 'confidence', 'relax'],
-    actionTarget: 'experience:light-test',
+    target: { type: 'test', testId: 'relationship-distance' },
   }),
   editorial({
     id: 'relationship-listen-or-solve',
@@ -250,7 +251,7 @@ export const ENERGY_EXPLORE_CONTENT: EnergyContentItem[] = [
     summary: '面对朋友的烦恼，你会马上提供方案还是先确认对方需要什么？试着发现自己的回应频道。',
     estimatedSeconds: 75,
     tags: ['relationship', 'uplift', 'social'],
-    actionTarget: 'experience:light-test',
+    target: { type: 'test', testId: 'relationship-listening' },
   }),
   editorial({
     id: 'relationship-space-signal',
@@ -260,7 +261,7 @@ export const ENERGY_EXPLORE_CONTENT: EnergyContentItem[] = [
     summary: '想独处时能否清楚留下回应时间，比突然消失更让彼此安心，也能保护你真实的恢复需要。',
     estimatedSeconds: 75,
     tags: ['relationship', 'confidence', 'relax'],
-    actionTarget: 'experience:light-test',
+    target: { type: 'test', testId: 'relationship-expression' },
   }),
   editorial({
     id: 'relationship-small-invite',
@@ -270,7 +271,7 @@ export const ENERGY_EXPLORE_CONTENT: EnergyContentItem[] = [
     summary: '一次不带压力的问候、散步或咖啡邀请，是否比等待完美时机更适合你今天的社交电量？',
     estimatedSeconds: 75,
     tags: ['relationship', 'uplift', 'social'],
-    actionTarget: 'experience:light-test',
+    target: { type: 'test', testId: 'social-energy' },
   }),
   editorial({
     id: 'poll-break-style',
@@ -280,7 +281,7 @@ export const ENERGY_EXPLORE_CONTENT: EnergyContentItem[] = [
     summary: '闭眼安静、走动伸展、听一首歌或找人聊聊，今天哪一种最能让你真正从工作里切换出来？',
     estimatedSeconds: 40,
     tags: ['relax', 'uplift'],
-    actionTarget: 'poll:break-style',
+    target: { type: 'poll', pollId: 'break-style' },
   }),
   editorial({
     id: 'poll-focus-sound',
@@ -290,7 +291,7 @@ export const ENERGY_EXPLORE_CONTENT: EnergyContentItem[] = [
     summary: '完全安静、白噪声、纯音乐还是咖啡馆环境音，你今天更愿意把哪一种放进工作背景？',
     estimatedSeconds: 40,
     tags: ['focus', 'uplift'],
-    actionTarget: 'poll:focus-sound',
+    target: { type: 'poll', pollId: 'focus-sound' },
   }),
   editorial({
     id: 'poll-small-reward',
@@ -300,7 +301,7 @@ export const ENERGY_EXPLORE_CONTENT: EnergyContentItem[] = [
     summary: '结束一件任务后，你更想喝点喜欢的、离开座位、看段轻松内容，还是把待办彻底划掉？',
     estimatedSeconds: 40,
     tags: ['uplift', 'confidence', 'focus'],
-    actionTarget: 'poll:small-reward',
+    target: { type: 'poll', pollId: 'small-reward' },
   }),
   editorial({
     id: 'poll-social-battery',
@@ -310,7 +311,7 @@ export const ENERGY_EXPLORE_CONTENT: EnergyContentItem[] = [
     summary: '现在更适合热闹聊天、一对一交流、只回必要消息，还是安静独处？选择不需要向任何人解释。',
     estimatedSeconds: 40,
     tags: ['relax', 'social', 'confidence'],
-    actionTarget: 'poll:social-battery',
+    target: { type: 'poll', pollId: 'social-battery' },
   }),
   editorial({
     id: 'test-recommend-emotion',
@@ -320,7 +321,7 @@ export const ENERGY_EXPLORE_CONTENT: EnergyContentItem[] = [
     summary: '五个轻问题帮你看看此刻还有多少内在余量，结果会给出十五分钟内可以完成的恢复动作。',
     estimatedSeconds: 75,
     tags: ['relax', 'tired', 'stressed'],
-    actionTarget: 'experience:light-test',
+    target: { type: 'test', testId: 'emotion-battery' },
   }),
   editorial({
     id: 'test-recommend-focus',
@@ -330,7 +331,7 @@ export const ENERGY_EXPLORE_CONTENT: EnergyContentItem[] = [
     summary: '如果任务很多却很难开始，用五个问题找出注意力最容易安定的位置，再带走一个小动作。',
     estimatedSeconds: 75,
     tags: ['focus', 'work'],
-    actionTarget: 'experience:light-test',
+    target: { type: 'test', testId: 'work-focus' },
   }),
   editorial({
     id: 'test-recommend-boundary',
@@ -340,7 +341,7 @@ export const ENERGY_EXPLORE_CONTENT: EnergyContentItem[] = [
     summary: '分辨哪些责任真正属于自己，哪些期待可以协商，帮助今天的忙碌不再无限向外扩张。',
     estimatedSeconds: 75,
     tags: ['confidence', 'stressed'],
-    actionTarget: 'experience:light-test',
+    target: { type: 'test', testId: 'stress-boundary' },
   }),
   editorial({
     id: 'test-recommend-social',
@@ -350,7 +351,7 @@ export const ENERGY_EXPLORE_CONTENT: EnergyContentItem[] = [
     summary: '看看今天更适合独处还是低压力陪伴，找到一种不需要持续表现也能获得能量的连接方式。',
     estimatedSeconds: 75,
     tags: ['uplift', 'social', 'relax'],
-    actionTarget: 'experience:light-test',
+    target: { type: 'test', testId: 'social-recharge' },
   }),
   editorial({
     id: 'card-recommend-single',
@@ -360,7 +361,7 @@ export const ENERGY_EXPLORE_CONTENT: EnergyContentItem[] = [
     summary: '从六个生活主题里选择最接近当下的一项，抽一张 Holaday 能量牌，把注意力放回下一步。',
     estimatedSeconds: 45,
     tags: ['uplift', 'focus', 'confidence'],
-    actionTarget: 'experience:tarot',
+    target: { type: 'tarot', mode: 'single' },
   }),
   editorial({
     id: 'card-recommend-yes-no',
@@ -370,7 +371,7 @@ export const ENERGY_EXPLORE_CONTENT: EnergyContentItem[] = [
     summary: '问题只留在心里，不输入也不上传，用一张能量牌看看此刻更适合行动、等待还是重新确认。',
     estimatedSeconds: 50,
     tags: ['confidence', 'relax'],
-    actionTarget: 'experience:tarot',
+    target: { type: 'tarot', mode: 'yes-no' },
   }),
   editorial({
     id: 'card-recommend-three',
@@ -380,7 +381,7 @@ export const ENERGY_EXPLORE_CONTENT: EnergyContentItem[] = [
     summary: '用回顾、当下和下一步三个位置重新排列视角，牌面提供的是轻提示，不是确定性结论。',
     estimatedSeconds: 70,
     tags: ['relax', 'uplift', 'focus'],
-    actionTarget: 'experience:tarot',
+    target: { type: 'tarot', mode: 'three' },
   }),
   editorial({
     id: 'game-recommend-catch',
@@ -390,7 +391,7 @@ export const ENERGY_EXPLORE_CONTENT: EnergyContentItem[] = [
     summary: '用不到一分钟接住十二颗能量光点，让注意力从等待和焦虑里暂时转向简单、即时的反馈。',
     estimatedSeconds: 45,
     tags: ['uplift', 'focus', 'stressed'],
-    actionTarget: 'experience:games',
+    target: { type: 'game', gameId: 'catch-energy' },
   }),
   editorial({
     id: 'game-recommend-slow-round',
@@ -400,7 +401,7 @@ export const ENERGY_EXPLORE_CONTENT: EnergyContentItem[] = [
     summary: '不追求更高分，只完成一轮轻量互动，在短促节奏里给大脑一个清楚、可结束的休息段落。',
     estimatedSeconds: 50,
     tags: ['relax', 'tired', 'uplift'],
-    actionTarget: 'experience:games',
+    target: { type: 'game', gameId: 'breath-rhythm' },
   }),
   editorial({
     id: 'game-recommend-focus-round',
@@ -410,7 +411,7 @@ export const ENERGY_EXPLORE_CONTENT: EnergyContentItem[] = [
     summary: '把这一轮当成专注热身，完成后立刻回到最重要的一件事，不让轻松体验变成新的待办。',
     estimatedSeconds: 50,
     tags: ['focus', 'confidence', 'uplift'],
-    actionTarget: 'experience:games',
+    target: { type: 'game', gameId: 'color-memory' },
   }),
 ];
 

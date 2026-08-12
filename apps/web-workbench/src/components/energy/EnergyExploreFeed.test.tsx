@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EnergyExploreFeed } from './EnergyExploreFeed';
 import { readEnergyProgress } from './energy-progress';
+import { isEnergyContentTarget } from './energy-content-target';
 
 const storage = new Map<string, string>();
 
@@ -67,7 +68,9 @@ describe('EnergyExploreFeed', () => {
       type: 'energy_content_opened',
       contentId: expect.stringMatching(/^[a-z0-9-]+$/),
     });
-    expect(onActionTarget).toHaveBeenCalledWith(expect.any(String), firstAction);
+    const target = onActionTarget.mock.calls[0]?.[0];
+    expect(isEnergyContentTarget(target)).toBe(true);
+    expect(onActionTarget).toHaveBeenCalledWith(target, firstAction);
     expect(firstAction.closest('article')?.getAttribute('data-opened')).toBe('true');
   });
 

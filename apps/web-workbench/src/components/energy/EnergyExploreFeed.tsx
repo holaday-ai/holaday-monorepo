@@ -6,6 +6,7 @@ import { EnergyMagazineCard } from './EnergyMagazineCard';
 import { readEnergyProgress, saveSeenEnergyContentIds } from './energy-progress';
 import { allocateMagazineVisuals } from './energy-magazine-visuals';
 import type { EnergyMood, EnergyNeed } from './energy-types';
+import type { EnergyContentTarget } from './energy-content-target';
 import {
   ENERGY_EXPLORE_CONTENT,
   type EnergyContentItem,
@@ -22,7 +23,7 @@ interface EnergyExploreFeedProps {
   energyNeed: EnergyNeed;
   zodiacSign: ZodiacSign;
   onEvent: (event: EnergyExploreEvent) => void;
-  onActionTarget?: (target: string, trigger: HTMLButtonElement) => void;
+  onActionTarget?: (target: EnergyContentTarget, trigger: HTMLButtonElement) => void;
 }
 
 export function EnergyExploreFeed({
@@ -107,7 +108,7 @@ export function EnergyExploreFeed({
               onOpen={(item, trigger) => {
                 setOpenedId(item.id);
                 onEvent({ type: 'energy_content_opened', contentId: item.id });
-                onActionTarget(item.actionTarget, trigger);
+                onActionTarget(item.target, trigger);
               }}
             />
           ))}

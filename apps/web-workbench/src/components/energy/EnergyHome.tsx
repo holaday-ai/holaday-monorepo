@@ -11,6 +11,7 @@ import { EnergyHero } from './EnergyHero';
 import { EnergyProfileDrawer } from './EnergyProfileDrawer';
 import { ExperiencePlayer } from './ExperiencePlayer';
 import { RunningTaskDock, type RunningTaskDockEvent } from './RunningTaskDock';
+import { resolveEnergyContentTarget } from './content-target-controller';
 import { readEnergyProgress, recordEnergyCompletion } from './energy-progress';
 import type { EnergyExperienceId, EnergyNeed, ExperiencePhase } from './energy-types';
 import { ENERGY_EXPERIENCES, type EnergyExperienceRegistration } from './experience-registry';
@@ -26,6 +27,7 @@ interface EnergyHomeProps {
 type EnergyEventType = 'started' | 'completed' | 'replayed' | 'failed';
 type EnergyEventOutcome = 'success' | 'abandoned' | 'error' | null;
 type EnergyDurationBucket = 'under-60s' | 'one-to-three-minutes' | 'over-three-minutes' | null;
+type ReportableExperienceId = Exclude<EnergyExperienceId, 'practice' | 'poll'>;
 
 function localExperiences(): EnergyExperienceRegistration[] {
   return ENERGY_EXPERIENCES.map((experience) => ({
@@ -107,10 +109,12 @@ export function EnergyHome({
       outcome: EnergyEventOutcome = null,
       eventDurationBucket: EnergyDurationBucket = null,
     ) => {
+      if (experienceId === 'practice' || experienceId === 'poll') return;
+      const reportableExperienceId: ReportableExperienceId = experienceId;
       void trpc.energy.reportEvent
         .mutate({
           type,
-          experienceId,
+          experienceId: reportableExperienceId,
           energyNeed,
           durationBucket: eventDurationBucket,
           outcome,
@@ -210,16 +214,15 @@ export function EnergyHome({
         zodiacSign={profile.zodiacSign}
         onEvent={reportHubEvent}
         onActionTarget={(target, trigger) => {
-          if (target.startsWith('astrology:')) {
+          const command = resolveEnergyContentTarget(target);
+          if (command.type === 'astrology' || command.type === 'astrology-signs') {
             astrologyWorldRef.current?.scrollIntoView?.({
               behavior: prefersReducedMotion() ? 'auto' : 'smooth',
               block: 'start',
             });
             return;
           }
-          if (!target.startsWith('experience:')) return;
-          const experienceId = target.slice('experience:'.length);
-          const experience = experiences.find((item) => item.id === experienceId);
+          const experience = experiences.find((item) => item.id === command.experienceId);
           if (!experience || experience.status !== 'active' || !experience.actionable) return;
           openExperience(experience, trigger);
         }}
