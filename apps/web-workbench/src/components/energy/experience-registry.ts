@@ -53,6 +53,31 @@ export const ENERGY_EXPERIENCES: EnergyExperienceRegistration[] = [
       })),
   },
   {
+    id: 'poll',
+    kind: 'poll',
+    title: '今日轻投票',
+    description: '选一种更适合现在的补给方式',
+    estimatedSeconds: 40,
+    status: 'active',
+    actionable: true,
+    requiredProfileFields: [],
+    surface: 'target-only',
+    load: () =>
+      import('./experiences/PollExperience').then((module) => ({
+        default: (props: EnergyExperienceProps) => {
+          if (props.launchTarget?.type !== 'poll') {
+            return createElement('p', { role: 'status' }, '这个投票暂时不可用');
+          }
+          return createElement(module.PollExperience, {
+            initialPollId: props.launchTarget.pollId,
+            profileStorageScope: props.profileStorageScope,
+            phase: props.phase,
+            onPhaseChange: props.onPhaseChange,
+          });
+        },
+      })),
+  },
+  {
     id: 'tarot',
     kind: 'card',
     title: '抽张卡',

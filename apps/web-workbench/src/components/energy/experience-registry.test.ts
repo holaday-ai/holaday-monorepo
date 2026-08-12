@@ -3,7 +3,7 @@ import { ENERGY_EXPERIENCES, activeEnergyExperiences } from './experience-regist
 
 describe('energy registry', () => {
   it('has stable unique ids and includes the recharge ritual', () => {
-    expect(new Set(ENERGY_EXPERIENCES.map((item) => item.id)).size).toBe(6);
+    expect(new Set(ENERGY_EXPERIENCES.map((item) => item.id)).size).toBe(7);
     expect(activeEnergyExperiences().map((item) => item.id)).toEqual([
       'recharge',
       'tarot',
@@ -12,6 +12,11 @@ describe('energy registry', () => {
       'games',
     ]);
     expect(ENERGY_EXPERIENCES.find((item) => item.id === 'practice')).toMatchObject({
+      status: 'active',
+      actionable: true,
+      surface: 'target-only',
+    });
+    expect(ENERGY_EXPERIENCES.find((item) => item.id === 'poll')).toMatchObject({
       status: 'active',
       actionable: true,
       surface: 'target-only',
