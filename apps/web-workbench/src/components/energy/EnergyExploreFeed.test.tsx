@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EnergyExploreFeed } from './EnergyExploreFeed';
@@ -102,5 +102,24 @@ describe('EnergyExploreFeed', () => {
     expect(container.querySelectorAll('article[data-layout="compact"]')).toHaveLength(4);
     expect(container.querySelectorAll('article[data-layout="feature"] img')).toHaveLength(2);
     expect(screen.getAllByRole('article')).toHaveLength(6);
+  });
+
+  it('hides failed feature artwork and keeps the icon fallback available', () => {
+    const { container } = render(
+      <EnergyExploreFeed
+        storageScope="usr_a"
+        mood={null}
+        energyNeed="focus"
+        zodiacSign="aries"
+        onEvent={vi.fn()}
+      />,
+    );
+    const image = container.querySelector<HTMLImageElement>('article[data-layout="feature"] img');
+    if (!image) throw new Error('expected feature artwork');
+
+    fireEvent.error(image);
+
+    expect(image.hidden).toBe(true);
+    expect(image.parentElement?.querySelector('span svg')).toBeTruthy();
   });
 });

@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 
 import { buildAstroReading, createProfileFromBirthday } from '@/lib/astrology';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AstrologyWorld } from './AstrologyWorld';
@@ -120,6 +120,21 @@ describe('AstrologyWorld', () => {
     expect(screen.getAllByText('#ff7d8d').length).toBeGreaterThan(0);
     expect(screen.getAllByText('顺手时段').length).toBeGreaterThan(1);
     expect(screen.getAllByText('10:00 - 11:00').length).toBeGreaterThan(0);
+  });
+
+  it('hides broken zodiac artwork so the visual stage can fall back cleanly', () => {
+    render(
+      <AstrologyWorld
+        astrology={state()}
+        onOpenEnergyCard={vi.fn()}
+        onOpenLightTest={vi.fn()}
+      />,
+    );
+    const image = screen.getByRole('img', { name: '白羊座马卡龙插画' });
+
+    fireEvent.error(image);
+
+    expect((image as HTMLImageElement).hidden).toBe(true);
   });
 
   it('loads month only when the month tab is opened', async () => {
