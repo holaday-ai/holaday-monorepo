@@ -121,6 +121,26 @@ describe('EnergyExploreFeed', () => {
     expect(storage.has('holaday.energy.progress.v2:guest')).toBe(false);
   });
 
+  it('keeps preview favorites in memory without creating a guest record', async () => {
+    const user = userEvent.setup();
+    render(
+      <EnergyExploreFeed
+        storageScope={null}
+        mood={null}
+        energyNeed="uplift"
+        zodiacSign="aries"
+        onEvent={vi.fn()}
+      />,
+    );
+    const favorite = screen.getAllByRole('button', { name: /^收藏/ })[0];
+    if (!favorite) throw new Error('expected favorite control');
+
+    await user.click(favorite);
+
+    expect(screen.getAllByRole('button', { name: /^取消收藏/ })).toHaveLength(1);
+    expect(storage.has('holaday.energy.progress.v3:guest')).toBe(false);
+  });
+
   it('renders one hero, two portraits and three landscapes with unique artwork', () => {
     const { container } = render(
       <EnergyExploreFeed

@@ -54,10 +54,14 @@ export function EnergyExploreFeed({
   onActionTarget = () => false,
   onCompleteToday = () => undefined,
 }: EnergyExploreFeedProps): JSX.Element {
-  const initialProgressRef = React.useRef(readEnergyProgress(storageScope));
+  const initialProgressRef = React.useRef<ReturnType<typeof readEnergyProgress> | null>(null);
+  if (initialProgressRef.current === null) {
+    initialProgressRef.current = readEnergyProgress(storageScope);
+  }
+  const initialProgress = initialProgressRef.current;
   const initialSeenRef = React.useRef<string[] | null>(null);
   if (initialSeenRef.current === null) {
-    const persisted = initialProgressRef.current.seenContentIds;
+    const persisted = initialProgress.seenContentIds;
     initialSeenRef.current = persisted.length >= ENERGY_EXPLORE_CONTENT.length ? [] : persisted;
   }
   const sessionSeedRef = React.useRef(`${storageScope ?? 'preview'}:${Date.now()}`);
@@ -70,7 +74,7 @@ export function EnergyExploreFeed({
   const [revisitNeed, setRevisitNeed] = React.useState<EnergyNeed>(energyNeed);
   const [choosingTheme, setChoosingTheme] = React.useState(false);
   const [favoriteIds, setFavoriteIds] = React.useState<string[]>(
-    initialProgressRef.current.continuation.favoriteContentIds,
+    initialProgress.continuation.favoriteContentIds,
   );
   const [items, setItems] = React.useState<EnergyContentItem[]>(() =>
     nextEnergyContentBatch({
@@ -200,6 +204,14 @@ export function EnergyExploreFeed({
                 });
               }}
               onToggleFavorite={(contentId) => {
+                if (storageScope === null) {
+                  setFavoriteIds((current) =>
+                    current.includes(contentId)
+                      ? current.filter((id) => id !== contentId)
+                      : [...current, contentId],
+                  );
+                  return;
+                }
                 const next = toggleFavoriteEnergyContent(storageScope, contentId);
                 setFavoriteIds(next.continuation.favoriteContentIds);
                 if (mode === 'favorites') {

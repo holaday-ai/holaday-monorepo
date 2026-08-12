@@ -185,15 +185,11 @@ export function EnergyHome({
   const tarot = experiences.find((experience) => experience.id === 'tarot') ?? null;
   const lightTest = experiences.find((experience) => experience.id === 'light-test') ?? null;
   const completedToday = completedKindsForDate(progress);
-  const continuation = React.useMemo(
-    () =>
-      recommendNextEnergyTarget({
-        energyNeed,
-        completedKinds: completedToday,
-        lastCompletedKind: progress.continuation.lastCompletedKind,
-      }),
-    [completedToday, energyNeed, progress.continuation.lastCompletedKind],
-  );
+  const continuation = recommendNextEnergyTarget({
+    energyNeed,
+    completedKinds: completedToday,
+    lastCompletedKind: progress.continuation.lastCompletedKind,
+  });
 
   const executeTarget = (target: EnergyContentTarget, trigger: HTMLButtonElement): boolean => {
     const command = resolveEnergyContentTarget(target);
