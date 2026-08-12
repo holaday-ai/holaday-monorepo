@@ -1633,6 +1633,30 @@
   animation: energy-zodiac-float 7s ease-in-out infinite;
 }
 
+.energy-astrology-world__art-fallback {
+  display: grid;
+  width: 168px;
+  height: 168px;
+  margin: 31px auto;
+  place-content: center;
+  place-items: center;
+  gap: 8px;
+  border: 1px solid rgb(255 255 255 / 90%);
+  border-radius: 50%;
+  background: linear-gradient(145deg, #eadfff, #eefaff);
+  color: #7352a7;
+  box-shadow: 0 20px 46px rgb(103 76 150 / 18%);
+}
+
+.energy-astrology-world__art-fallback svg {
+  width: 42px;
+  height: 42px;
+}
+
+.energy-astrology-world__art-fallback strong {
+  font-size: 12px;
+}
+
 .energy-astrology-world__sparkle {
   position: absolute;
   z-index: 2;
@@ -2243,7 +2267,7 @@
 
 .energy-astrology-world__continue-actions strong {
   color: #59416f;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 780;
   line-height: 1.35;
 }
@@ -2251,7 +2275,7 @@
 .energy-astrology-world__continue-actions small {
   margin-top: 3px;
   color: #887991;
-  font-size: 8px;
+  font-size: 10px;
   line-height: 1.4;
 }
 
@@ -2564,7 +2588,7 @@
   align-items: center;
   gap: 5px;
   color: #755192;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.04em;
 }
@@ -2576,7 +2600,7 @@
 
 .energy-explore-feed__meta small {
   color: #998d9c;
-  font-size: 8px;
+  font-size: 10px;
 }
 
 .energy-explore-feed__grid h3 {
@@ -3052,7 +3076,8 @@
     min-height: 214px;
   }
 
-  .energy-astrology-world__art > img {
+  .energy-astrology-world__art > img,
+  .energy-astrology-world__art-fallback {
     width: 150px;
     height: 150px;
     margin-block: 28px;
@@ -3120,6 +3145,10 @@
 
   .energy-explore-feed__grid article[data-layout="feature"] {
     min-height: 270px;
+  }
+
+  .energy-explore-feed__grid article > button {
+    min-height: 44px;
   }
 
   .energy-explore-feed__art {

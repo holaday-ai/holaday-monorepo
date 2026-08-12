@@ -60,4 +60,23 @@ describe('energy motion system', () => {
     expect(css).toMatch(/prefers-reduced-motion:[\s\S]*\.energy-astrology-world__art img/);
     expect(css).toMatch(/prefers-reduced-motion:[\s\S]*\.energy-explore-feed__grid article/);
   });
+
+  it('keeps supporting copy readable and mobile content actions touch friendly', () => {
+    const portalTitle = css.match(
+      /\.energy-astrology-world__continue-actions strong\s*\{[^}]+\}/,
+    )?.[0];
+    const portalHint = css.match(
+      /\.energy-astrology-world__continue-actions small\s*\{[^}]*font-size:\s*10px[^}]*\}/,
+    )?.[0];
+    const categoryMeta = css.match(/\.energy-explore-feed__meta > span\s*\{[^}]+\}/)?.[0];
+    const durationMeta = css.match(/\.energy-explore-feed__meta small\s*\{[^}]+\}/)?.[0];
+
+    expect(portalTitle).toMatch(/font-size:\s*12px/);
+    expect(portalHint).toBeTruthy();
+    expect(categoryMeta).toMatch(/font-size:\s*10px/);
+    expect(durationMeta).toMatch(/font-size:\s*10px/);
+    expect(css).toMatch(
+      /@media\s*\(max-width:\s*640px\)[\s\S]*\.energy-explore-feed__grid article > button\s*\{[^}]*min-height:\s*44px/,
+    );
+  });
 });

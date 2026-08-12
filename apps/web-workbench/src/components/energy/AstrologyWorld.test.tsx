@@ -122,7 +122,7 @@ describe('AstrologyWorld', () => {
     expect(screen.getAllByText('10:00 - 11:00').length).toBeGreaterThan(0);
   });
 
-  it('hides broken zodiac artwork so the visual stage can fall back cleanly', () => {
+  it('replaces broken zodiac artwork with a visible icon fallback', () => {
     render(
       <AstrologyWorld
         astrology={state()}
@@ -134,7 +134,8 @@ describe('AstrologyWorld', () => {
 
     fireEvent.error(image);
 
-    expect((image as HTMLImageElement).hidden).toBe(true);
+    expect(screen.queryByRole('img', { name: '白羊座马卡龙插画' })).toBeNull();
+    expect(screen.getByTestId('zodiac-art-fallback')).toBeTruthy();
   });
 
   it('loads month only when the month tab is opened', async () => {

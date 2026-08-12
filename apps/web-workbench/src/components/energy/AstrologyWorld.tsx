@@ -53,8 +53,11 @@ export const AstrologyWorld = React.forwardRef<HTMLElement, AstrologyWorldProps>
     const [monthRange, setMonthRange] = React.useState<'current' | 'next'>('current');
     const [rankingRequested, setRankingRequested] = React.useState(false);
     const [signPickerOpen, setSignPickerOpen] = React.useState(false);
+    const [failedZodiacArtSrc, setFailedZodiacArtSrc] = React.useState<string | null>(null);
     const selectedState = astrology.periods[selectedPeriod];
     const completeRanking = hasCompleteRanking(astrology.ranking);
+    const zodiacArtSrc = zodiacBadgeImage(selectedState.reading.zodiacSign);
+    const zodiacArtFailed = failedZodiacArtSrc === zodiacArtSrc;
     const sourceLabel =
       selectedState.source === 'local-fallback'
         ? 'Holaday 本地提示'
@@ -105,13 +108,22 @@ export const AstrologyWorld = React.forwardRef<HTMLElement, AstrologyWorldProps>
           </header>
           <div className="energy-astrology-world__art">
             <Sparkles className="energy-astrology-world__sparkle" aria-hidden="true" />
-            <img
-              src={zodiacBadgeImage(selectedState.reading.zodiacSign)}
-              alt={`${selectedState.reading.zodiacLabel}马卡龙插画`}
-              onError={(event) => {
-                event.currentTarget.hidden = true;
-              }}
-            />
+            {zodiacArtFailed ? (
+              <span
+                className="energy-astrology-world__art-fallback"
+                data-testid="zodiac-art-fallback"
+                aria-hidden="true"
+              >
+                <Sparkles />
+                <strong>{selectedState.reading.zodiacLabel}</strong>
+              </span>
+            ) : (
+              <img
+                src={zodiacArtSrc}
+                alt={`${selectedState.reading.zodiacLabel}马卡龙插画`}
+                onError={() => setFailedZodiacArtSrc(zodiacArtSrc)}
+              />
+            )}
             <span className="energy-astrology-world__orbit-note" data-note="color">
               <Palette aria-hidden="true" />
               <small>幸运色</small>
