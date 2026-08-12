@@ -155,9 +155,13 @@ export const ENERGY_EXPERIENCES: EnergyExperienceRegistration[] = [
     actionable: true,
     requiredProfileFields: [],
     load: () =>
-      import('./experiences/MiniGameExperience').then((module) => ({
+      import('./experiences/GameExperience').then((module) => ({
         default: (props: EnergyExperienceProps) =>
-          createElement(module.MiniGameExperience, {
+          createElement(module.GameExperience, {
+            initialGameId:
+              props.launchTarget?.type === 'game'
+                ? props.launchTarget.gameId
+                : 'catch-energy',
             phase: props.phase,
             onPhaseChange: props.onPhaseChange,
             onComplete: () => props.onExperienceComplete('game'),
