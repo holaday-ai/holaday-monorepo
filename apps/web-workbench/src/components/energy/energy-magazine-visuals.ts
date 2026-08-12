@@ -1,4 +1,7 @@
+import type { ZodiacSign } from '@/lib/astrology';
 import type { EnergyContentCategory } from './explore-content';
+import type { EnergyContentItem } from './explore-content';
+import { zodiacBadgeImage } from './zodiac-art';
 
 export type EnergyMagazineSlot = 'hero' | 'portrait' | 'landscape';
 
@@ -8,6 +11,13 @@ export interface MagazineArtAsset {
   categories: readonly EnergyContentCategory[];
   objectPosition: string;
   maxBytes: 180_000 | 260_000;
+}
+
+export interface AllocatedMagazineItem {
+  item: EnergyContentItem;
+  slot: EnergyMagazineSlot;
+  visual: MagazineArtAsset;
+  zodiacBadgeSrc: string | null;
 }
 
 export const MAGAZINE_ART: readonly MagazineArtAsset[] = [
@@ -142,3 +152,66 @@ export const ASTROLOGY_PORTAL_ART = {
   tarot: '/energy/magazine/tarot-spread.webp',
   test: '/energy/magazine/test-relationship.webp',
 } as const;
+
+const SLOT_BY_INDEX: readonly EnergyMagazineSlot[] = [
+  'hero',
+  'portrait',
+  'portrait',
+  'landscape',
+  'landscape',
+  'landscape',
+];
+
+function stableHash(value: string): number {
+  let hash = 2166136261;
+  for (const char of value) {
+    hash ^= char.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function rotate<T>(values: readonly T[], offset: number): T[] {
+  if (values.length === 0) return [];
+  const normalizedOffset = offset % values.length;
+  return [
+    ...values.slice(normalizedOffset),
+    ...values.slice(0, normalizedOffset),
+  ];
+}
+
+function orderedCandidates(item: EnergyContentItem): MagazineArtAsset[] {
+  const preferred = MAGAZINE_ART.filter((asset) =>
+    asset.categories.includes(item.category),
+  );
+  const fallback = MAGAZINE_ART.filter(
+    (asset) => !asset.categories.includes(item.category),
+  );
+  return [
+    ...rotate(preferred, stableHash(item.id)),
+    ...rotate(fallback, stableHash(`${item.id}:fallback`)),
+  ];
+}
+
+export function allocateMagazineVisuals(
+  items: readonly EnergyContentItem[],
+  zodiacSign: ZodiacSign,
+): AllocatedMagazineItem[] {
+  const used = new Set<string>();
+  return items.slice(0, 6).map((item, index) => {
+    const visual = orderedCandidates(item).find(
+      (candidate) => !used.has(candidate.imageSrc),
+    );
+    if (!visual) {
+      throw new Error('magazine artwork catalog cannot allocate a unique batch');
+    }
+    used.add(visual.imageSrc);
+    return {
+      item,
+      slot: SLOT_BY_INDEX[index] ?? 'landscape',
+      visual,
+      zodiacBadgeSrc:
+        item.category === 'zodiac-knowledge' ? zodiacBadgeImage(zodiacSign) : null,
+    };
+  });
+}
