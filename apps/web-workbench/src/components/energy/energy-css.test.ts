@@ -45,28 +45,36 @@ describe('energy motion system', () => {
     expect(css).toMatch(/prefers-reduced-motion:[\s\S]*animation-duration:\s*0\.01ms\s*!important/);
   });
 
-  it('keeps new illustrations complete and builds the 2 plus 4 explore rhythm', () => {
-    const artImage = css.match(/\.energy-explore-feed__art img\s*\{[^}]+\}/)?.[0];
-
-    expect(artImage).toMatch(/object-fit:\s*contain/);
-    expect(css).toMatch(/article\[data-layout="feature"\]/);
-    expect(css).toMatch(/grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/);
+  it('builds the one plus two plus three magazine rhythm with all-image cards', () => {
+    expect(css).toMatch(
+      /\.energy-explore-feed__grid\s*\{[^}]*grid-template-columns:\s*repeat\(12,/s,
+    );
+    expect(css).toMatch(
+      /article\[data-layout="hero"\]\s*\{[^}]*grid-column:\s*span\s*6/s,
+    );
+    expect(css).toMatch(
+      /article\[data-layout="portrait"\]\s*\{[^}]*grid-column:\s*span\s*3/s,
+    );
+    expect(css).toMatch(
+      /article\[data-layout="landscape"\]\s*\{[^}]*grid-column:\s*span\s*4/s,
+    );
+    expect(css).not.toContain('.energy-explore-feed__compact-icon');
   });
 
   it('defines lower-page motion and shuts it down for reduced motion', () => {
     expect(css).toContain('@keyframes energy-zodiac-float');
     expect(css).toContain('@keyframes energy-orbit-twinkle');
     expect(css).toContain('@keyframes energy-content-stagger');
-    expect(css).toMatch(/prefers-reduced-motion:[\s\S]*\.energy-astrology-world__art img/);
+    expect(css).toMatch(
+      /prefers-reduced-motion:[\s\S]*\.energy-astrology-magazine-cover__art img/,
+    );
     expect(css).toMatch(/prefers-reduced-motion:[\s\S]*\.energy-explore-feed__grid article/);
   });
 
   it('keeps supporting copy readable and mobile content actions touch friendly', () => {
-    const portalTitle = css.match(
-      /\.energy-astrology-world__continue-actions strong\s*\{[^}]+\}/,
-    )?.[0];
+    const portalTitle = css.match(/\.energy-astrology-portals strong\s*\{[^}]+\}/)?.[0];
     const portalHint = css.match(
-      /\.energy-astrology-world__continue-actions small\s*\{[^}]*font-size:\s*10px[^}]*\}/,
+      /\.energy-astrology-portals small\s*\{[^}]*font-size:\s*10px[^}]*\}/,
     )?.[0];
     const categoryMeta = css.match(/\.energy-explore-feed__meta > span\s*\{[^}]+\}/)?.[0];
     const durationMeta = css.match(/\.energy-explore-feed__meta small\s*\{[^}]+\}/)?.[0];
@@ -76,7 +84,16 @@ describe('energy motion system', () => {
     expect(categoryMeta).toMatch(/font-size:\s*10px/);
     expect(durationMeta).toMatch(/font-size:\s*10px/);
     expect(css).toMatch(
-      /@media\s*\(max-width:\s*640px\)[\s\S]*\.energy-explore-feed__grid article > button\s*\{[^}]*min-height:\s*44px/,
+      /@media\s*\(max-width:\s*640px\)[\s\S]*\.energy-magazine-card\s+button\s*\{[^}]*min-height:\s*44px/,
+    );
+  });
+
+  it('keeps mobile portals horizontal and all actions touch friendly', () => {
+    expect(css).toMatch(
+      /@media\s*\(max-width:\s*640px\)[\s\S]*\.energy-astrology-portals\s*\{[^}]*overflow-x:\s*auto/,
+    );
+    expect(css).toMatch(
+      /@media\s*\(max-width:\s*640px\)[\s\S]*\.energy-magazine-card\s+button\s*\{[^}]*min-height:\s*44px/,
     );
   });
 });
