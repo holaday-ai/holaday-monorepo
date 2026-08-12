@@ -76,6 +76,7 @@ export function EnergyHome({
   const profileTriggerRef = React.useRef<HTMLButtonElement | null>(null);
   const astrologyWorldRef = React.useRef<AstrologyWorldHandle | null>(null);
   const todayContentRef = React.useRef<HTMLDivElement | null>(null);
+  const growthRef = React.useRef<HTMLDivElement | null>(null);
   const startedAtRef = React.useRef(Date.now());
   const astrology = useEnergyAstrology(profile, liveProvider);
   const LoadedExperience = React.useMemo(
@@ -239,7 +240,7 @@ export function EnergyHome({
 
       <EnergyExperienceDeck experiences={experiences} onOpen={openExperience} />
 
-      <div className="energy-insight-grid">
+      <div id="energy-growth" ref={growthRef} className="energy-insight-grid">
         <EnergyGrowthPanel progress={progress} />
         <EnergyAstrologyPanel
           profile={profile}
@@ -279,6 +280,12 @@ export function EnergyHome({
           zodiacSign={profile.zodiacSign}
           onEvent={reportHubEvent}
           onActionTarget={executeTarget}
+          onCompleteToday={() => {
+            growthRef.current?.scrollIntoView?.({
+              behavior: prefersReducedMotion() ? 'auto' : 'smooth',
+              block: 'start',
+            });
+          }}
         />
       </div>
 

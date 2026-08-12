@@ -4,8 +4,8 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EnergyExploreFeed } from './EnergyExploreFeed';
-import { readEnergyProgress } from './energy-progress';
 import { isEnergyContentTarget } from './energy-content-target';
+import { readEnergyProgress } from './energy-progress';
 
 const storage = new Map<string, string>();
 
@@ -70,7 +70,9 @@ describe('EnergyExploreFeed', () => {
     expect(onEvent).toHaveBeenCalledWith({
       type: 'energy_content_opened',
       contentId: expect.stringMatching(/^[a-z0-9-]+$/),
-      targetType: expect.stringMatching(/^(practice|poll|test|tarot|game|astrology|astrology-signs)$/),
+      targetType: expect.stringMatching(
+        /^(practice|poll|test|tarot|game|astrology|astrology-signs)$/,
+      ),
     });
     const target = onActionTarget.mock.calls[0]?.[0];
     expect(isEnergyContentTarget(target)).toBe(true);
@@ -92,7 +94,8 @@ describe('EnergyExploreFeed', () => {
       />,
     );
 
-    const action = screen.getAllByRole('button', { name: /打开/ })[0]!;
+    const action = screen.getAllByRole('button', { name: /打开/ })[0];
+    if (!action) throw new Error('expected content action');
     await user.click(action);
 
     expect(action.closest('article')?.getAttribute('data-opened')).toBe('false');
@@ -132,9 +135,7 @@ describe('EnergyExploreFeed', () => {
     expect(container.querySelectorAll('article[data-layout="hero"]')).toHaveLength(1);
     expect(container.querySelectorAll('article[data-layout="portrait"]')).toHaveLength(2);
     expect(container.querySelectorAll('article[data-layout="landscape"]')).toHaveLength(3);
-    const artwork = [
-      ...container.querySelectorAll<HTMLImageElement>('img[data-artwork]'),
-    ];
+    const artwork = [...container.querySelectorAll<HTMLImageElement>('img[data-artwork]')];
     expect(artwork).toHaveLength(6);
     expect(new Set(artwork.map((image) => image.src)).size).toBe(6);
     expect(container.querySelector('[data-layout="compact"]')).toBeNull();
@@ -157,5 +158,85 @@ describe('EnergyExploreFeed', () => {
 
     expect(image.hidden).toBe(true);
     expect(image.parentElement?.querySelector('[data-artwork-fallback] svg')).toBeTruthy();
+  });
+
+  it('offers three recovery routes and reports exhaustion only once', async () => {
+    const user = userEvent.setup();
+    const onEvent = vi.fn();
+    const onCompleteToday = vi.fn();
+    render(
+      <EnergyExploreFeed
+        storageScope="usr_a"
+        mood={null}
+        energyNeed="focus"
+        zodiacSign="aries"
+        onEvent={onEvent}
+        onCompleteToday={onCompleteToday}
+      />,
+    );
+
+    for (let batch = 0; batch < 6; batch += 1) {
+      await user.click(screen.getByRole('button', { name: '再来一组' }));
+    }
+
+    expect(screen.getByRole('button', { name: '换个能量主题' })).toBeTruthy();
+    expect((screen.getByRole('button', { name: '继续收藏' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    await user.click(screen.getByRole('button', { name: '完成今日能量' }));
+    expect(onCompleteToday).toHaveBeenCalledOnce();
+    expect(onEvent.mock.calls.filter(([event]) => event.type === 'energy_feed_exhausted')).toEqual([
+      [{ type: 'energy_feed_exhausted', energyNeed: 'focus', batchCount: 6 }],
+    ]);
+  });
+
+  it('keeps a favorite available after fresh batches are exhausted', async () => {
+    const user = userEvent.setup();
+    render(
+      <EnergyExploreFeed
+        storageScope="usr_a"
+        mood={null}
+        energyNeed="focus"
+        zodiacSign="aries"
+        onEvent={vi.fn()}
+      />,
+    );
+
+    const firstArticle = screen.getAllByRole('article')[0];
+    if (!firstArticle) throw new Error('expected first content card');
+    const firstTitle = firstArticle.querySelector('h3')?.textContent;
+    if (!firstTitle) throw new Error('expected first content title');
+    await user.click(screen.getByRole('button', { name: `收藏${firstTitle}` }));
+    expect(readEnergyProgress('usr_a').continuation.favoriteContentIds).toHaveLength(1);
+    for (let batch = 0; batch < 6; batch += 1) {
+      await user.click(screen.getByRole('button', { name: '再来一组' }));
+    }
+
+    await user.click(screen.getByRole('button', { name: '继续收藏' }));
+    expect(screen.getByRole('heading', { name: '我的能量收藏' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: firstTitle })).toBeTruthy();
+  });
+
+  it('starts a need-aware revisit without claiming the content is unseen', async () => {
+    const user = userEvent.setup();
+    render(
+      <EnergyExploreFeed
+        storageScope="usr_a"
+        mood={null}
+        energyNeed="focus"
+        zodiacSign="aries"
+        onEvent={vi.fn()}
+      />,
+    );
+
+    for (let batch = 0; batch < 6; batch += 1) {
+      await user.click(screen.getByRole('button', { name: '再来一组' }));
+    }
+    await user.click(screen.getByRole('button', { name: '换个能量主题' }));
+    await user.click(screen.getByRole('button', { name: '放松' }));
+
+    expect(screen.getByRole('heading', { name: '今日精选重逛' })).toBeTruthy();
+    expect(screen.getAllByRole('article')).toHaveLength(6);
+    expect(screen.queryByText(/没有看过|未看过/)).toBeNull();
   });
 });

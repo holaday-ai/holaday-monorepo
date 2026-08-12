@@ -1616,7 +1616,12 @@
   z-index: -1;
   inset: 18px 34px;
   border-radius: 50%;
-  background: radial-gradient(circle, rgb(234 223 255 / 92%) 0 38%, rgb(223 244 255 / 56%) 64%, transparent 72%);
+  background: radial-gradient(
+    circle,
+    rgb(234 223 255 / 92%) 0 38%,
+    rgb(223 244 255 / 56%) 64%,
+    transparent 72%
+  );
   content: "";
   filter: blur(2px);
 }
@@ -2734,6 +2739,35 @@
   box-shadow: 0 7px 18px rgb(91 70 118 / 18%);
 }
 
+.energy-magazine-card__favorite {
+  position: absolute;
+  z-index: 2;
+  top: 9px;
+  right: 9px;
+  display: inline-flex;
+  width: 44px;
+  height: 44px;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgb(255 255 255 / 84%);
+  border-radius: 50%;
+  background: rgb(255 255 255 / 88%);
+  color: #7652a2;
+  box-shadow: 0 7px 18px rgb(91 70 118 / 16%);
+  backdrop-filter: blur(10px);
+}
+
+.energy-magazine-card__favorite[aria-pressed="true"] {
+  background: #fff0f5;
+  color: #e5255b;
+}
+
+.energy-magazine-card__favorite svg {
+  width: 19px;
+  height: 19px;
+}
+
 .energy-explore-feed__grid article[data-category="fortune"],
 .energy-explore-feed__grid article[data-category="card-recommendation"] {
   background: #fff5f8;
@@ -2896,6 +2930,41 @@
   margin: 6px 0 0;
   color: #7d7180;
   font-size: 11px;
+}
+
+.energy-explore-feed__empty > small {
+  margin-top: 8px;
+  color: #948798;
+  font-size: 11px;
+}
+
+.energy-explore-feed__recovery-actions,
+.energy-explore-feed__theme-picker {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 9px;
+  margin-top: 17px;
+}
+
+.energy-explore-feed__recovery-actions button,
+.energy-explore-feed__theme-picker button {
+  min-height: 44px;
+  border-radius: 13px;
+}
+
+.energy-explore-feed__theme-picker {
+  max-width: 32rem;
+  border: 0;
+  padding: 13px 0 0;
+}
+
+.energy-explore-feed__theme-picker legend {
+  width: 100%;
+  margin-bottom: 8px;
+  color: #5d496a;
+  font-size: 12px;
+  font-weight: 750;
 }
 
 .energy-running-task-dock {
