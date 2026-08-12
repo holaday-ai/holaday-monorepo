@@ -12,6 +12,8 @@ import { EnergyProfileDrawer } from './EnergyProfileDrawer';
 import { ExperiencePlayer } from './ExperiencePlayer';
 import { RunningTaskDock, type RunningTaskDockEvent } from './RunningTaskDock';
 import { resolveEnergyContentTarget } from './content-target-controller';
+import type { EnergyExperienceLaunchTarget } from './energy-content-target';
+import { createEnergyEventReporter } from './energy-event-reporter';
 import { readEnergyProgress, recordEnergyCompletion } from './energy-progress';
 import type { EnergyExperienceId, EnergyNeed, ExperiencePhase } from './energy-types';
 import { ENERGY_EXPERIENCES, type EnergyExperienceRegistration } from './experience-registry';
@@ -55,6 +57,8 @@ export function EnergyHome({
   const [experiences, setExperiences] = React.useState(localExperiences);
   const [selectedExperience, setSelectedExperience] =
     React.useState<EnergyExperienceRegistration | null>(null);
+  const [selectedLaunchTarget, setSelectedLaunchTarget] =
+    React.useState<EnergyExperienceLaunchTarget | null>(null);
   const [phase, setPhase] = React.useState<ExperiencePhase>('intro');
   const [profile, setProfile] = React.useState<AstroProfile>(() =>
     canUseProfileStorage
@@ -71,6 +75,16 @@ export function EnergyHome({
     () => (selectedExperience?.load ? React.lazy(selectedExperience.load) : null),
     [selectedExperience?.load],
   );
+  const eventReporter = React.useMemo(
+    () =>
+      createEnergyEventReporter({
+        send: (event: Parameters<typeof trpc.energy.reportEvent.mutate>[0]) =>
+          trpc.energy.reportEvent.mutate(event),
+      }),
+    [],
+  );
+
+  React.useEffect(() => () => eventReporter.dispose(), [eventReporter]);
 
   React.useEffect(() => {
     setProfile(
@@ -111,33 +125,31 @@ export function EnergyHome({
     ) => {
       if (experienceId === 'practice' || experienceId === 'poll') return;
       const reportableExperienceId: ReportableExperienceId = experienceId;
-      void trpc.energy.reportEvent
-        .mutate({
+      void eventReporter.report({
           type,
           experienceId: reportableExperienceId,
           energyNeed,
           durationBucket: eventDurationBucket,
           outcome,
-        })
-        .catch(() => console.warn('energy event report failed'));
+        });
     },
-    [energyNeed],
+    [energyNeed, eventReporter],
   );
 
   const reportHubEvent = React.useCallback((event: EnergyExploreEvent | RunningTaskDockEvent) => {
-    void trpc.energy.reportEvent
-      .mutate(event)
-      .catch(() => console.warn('energy event report failed'));
-  }, []);
+    void eventReporter.report(event);
+  }, [eventReporter]);
 
   const openExperience = (
     experience: EnergyExperienceRegistration,
     trigger: HTMLButtonElement,
+    launchTarget: EnergyExperienceLaunchTarget | null = null,
   ): void => {
     if (!experience.load) return;
     returnFocusRef.current = trigger;
     startedAtRef.current = Date.now();
     setSelectedExperience(experience);
+    setSelectedLaunchTarget(launchTarget);
     setPhase('intro');
     reportEvent('started', experience.id);
   };
@@ -215,16 +227,33 @@ export function EnergyHome({
         onEvent={reportHubEvent}
         onActionTarget={(target, trigger) => {
           const command = resolveEnergyContentTarget(target);
-          if (command.type === 'astrology' || command.type === 'astrology-signs') {
+          if (command.type === 'astrology') {
+            astrologyWorldRef.current?.openPeriod(command.period);
             astrologyWorldRef.current?.scrollIntoView?.({
               behavior: prefersReducedMotion() ? 'auto' : 'smooth',
               block: 'start',
             });
-            return;
+            return Boolean(astrologyWorldRef.current);
+          }
+          if (command.type === 'astrology-signs') {
+            astrologyWorldRef.current?.openSigns();
+            astrologyWorldRef.current?.scrollIntoView?.({
+              behavior: prefersReducedMotion() ? 'auto' : 'smooth',
+              block: 'start',
+            });
+            return Boolean(astrologyWorldRef.current);
           }
           const experience = experiences.find((item) => item.id === command.experienceId);
-          if (!experience || experience.status !== 'active' || !experience.actionable) return;
-          openExperience(experience, trigger);
+          if (
+            !experience ||
+            experience.status !== 'active' ||
+            !experience.actionable ||
+            !experience.load
+          ) {
+            return false;
+          }
+          openExperience(experience, trigger, command.launchTarget);
+          return true;
         }}
       />
 
@@ -255,6 +284,7 @@ export function EnergyHome({
               profileStorageScope={storageScope}
               profile={profile}
               astrology={astrology}
+              launchTarget={selectedLaunchTarget}
               phase={phase}
               onPhaseChange={handlePhaseChange}
               onExperienceComplete={(kind) =>

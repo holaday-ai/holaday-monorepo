@@ -13,6 +13,16 @@ const energyExperienceEventInput = z
   .strict();
 
 const stableId = z.string().regex(/^[a-z0-9-]{1,64}$/);
+const targetType = z.enum([
+  'practice',
+  'poll',
+  'test',
+  'tarot',
+  'game',
+  'astrology',
+  'astrology-signs',
+]);
+const completionKind = z.enum(['recharge', 'tarot', 'game', 'test', 'horoscope']);
 const energyContentHubEventInput = z.discriminatedUnion('type', [
   z
     .object({
@@ -35,7 +45,55 @@ const energyContentHubEventInput = z.discriminatedUnion('type', [
   z.object({ type: z.literal('light_test_started'), testId: stableId }).strict(),
   z.object({ type: z.literal('light_test_completed'), testId: stableId }).strict(),
   z.object({ type: z.literal('energy_feed_refreshed') }).strict(),
-  z.object({ type: z.literal('energy_content_opened'), contentId: stableId }).strict(),
+  z
+    .object({
+      type: z.literal('energy_content_opened'),
+      contentId: stableId,
+      targetType: targetType.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.enum([
+        'energy_experience_started',
+        'energy_experience_completed',
+        'energy_experience_failed',
+      ]),
+      experienceId: z.enum([
+        'recharge',
+        'practice',
+        'poll',
+        'tarot',
+        'light-test',
+        'horoscope',
+        'games',
+      ]),
+      modeId: stableId.nullable(),
+      energyNeed: z.enum(['focus', 'relax', 'confidence', 'uplift']).nullable(),
+      durationBucket: z.enum(['under-60s', 'one-to-three-minutes', 'over-three-minutes']).nullable(),
+      outcome: z.enum(['success', 'abandoned', 'error']).nullable(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('energy_continuation_opened'),
+      fromKind: completionKind.nullable(),
+      targetType,
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('energy_feed_exhausted'),
+      energyNeed: z.enum(['focus', 'relax', 'confidence', 'uplift']),
+      batchCount: z.number().int().min(1).max(100),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('energy_section_navigated'),
+      section: z.enum(['recharge', 'play', 'astrology', 'today-content']),
+    })
+    .strict(),
   z
     .object({
       type: z.literal('running_task_returned'),

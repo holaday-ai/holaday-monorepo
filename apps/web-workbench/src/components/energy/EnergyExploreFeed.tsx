@@ -3,7 +3,7 @@ import type { ZodiacSign } from '@/lib/astrology';
 import { RefreshCw, Sparkles } from 'lucide-react';
 import * as React from 'react';
 import { EnergyMagazineCard } from './EnergyMagazineCard';
-import { readEnergyProgress, saveSeenEnergyContentIds } from './energy-progress';
+import { readEnergyProgress, recordOpenedEnergyContent } from './energy-progress';
 import { allocateMagazineVisuals } from './energy-magazine-visuals';
 import type { EnergyMood, EnergyNeed } from './energy-types';
 import type { EnergyContentTarget } from './energy-content-target';
@@ -15,7 +15,11 @@ import {
 
 export type EnergyExploreEvent =
   | { type: 'energy_feed_refreshed' }
-  | { type: 'energy_content_opened'; contentId: string };
+  | {
+      type: 'energy_content_opened';
+      contentId: string;
+      targetType: EnergyContentTarget['type'];
+    };
 
 interface EnergyExploreFeedProps {
   storageScope: string | null;
@@ -23,7 +27,7 @@ interface EnergyExploreFeedProps {
   energyNeed: EnergyNeed;
   zodiacSign: ZodiacSign;
   onEvent: (event: EnergyExploreEvent) => void;
-  onActionTarget?: (target: EnergyContentTarget, trigger: HTMLButtonElement) => void;
+  onActionTarget?: (target: EnergyContentTarget, trigger: HTMLButtonElement) => boolean;
 }
 
 export function EnergyExploreFeed({
@@ -32,7 +36,7 @@ export function EnergyExploreFeed({
   energyNeed,
   zodiacSign,
   onEvent,
-  onActionTarget = () => undefined,
+  onActionTarget = () => false,
 }: EnergyExploreFeedProps): JSX.Element {
   const initialSeenRef = React.useRef<string[] | null>(null);
   if (initialSeenRef.current === null) {
@@ -43,6 +47,7 @@ export function EnergyExploreFeed({
   const batchIndexRef = React.useRef(0);
   const [sessionSeenIds, setSessionSeenIds] = React.useState<string[]>([]);
   const [openedId, setOpenedId] = React.useState<string | null>(null);
+  const [unavailableId, setUnavailableId] = React.useState<string | null>(null);
   const [items, setItems] = React.useState<EnergyContentItem[]>(() =>
     nextEnergyContentBatch({
       items: ENERGY_EXPLORE_CONTENT,
@@ -63,8 +68,7 @@ export function EnergyExploreFeed({
     const ids = items.map((item) => item.id);
     if (ids.length === 0) return;
     setSessionSeenIds((current) => [...new Set([...current, ...ids])]);
-    saveSeenEnergyContentIds(storageScope, ids);
-  }, [items, storageScope]);
+  }, [items]);
 
   const showNextBatch = (): void => {
     batchIndexRef.current += 1;
@@ -78,6 +82,7 @@ export function EnergyExploreFeed({
       energyNeed,
     });
     setOpenedId(null);
+    setUnavailableId(null);
     setItems(next);
     onEvent({ type: 'energy_feed_refreshed' });
   };
@@ -106,9 +111,19 @@ export function EnergyExploreFeed({
               entry={entry}
               opened={openedId === entry.item.id}
               onOpen={(item, trigger) => {
+                const opened = onActionTarget(item.target, trigger);
+                if (!opened) {
+                  setUnavailableId(item.id);
+                  return;
+                }
+                setUnavailableId(null);
                 setOpenedId(item.id);
-                onEvent({ type: 'energy_content_opened', contentId: item.id });
-                onActionTarget(item.target, trigger);
+                recordOpenedEnergyContent(storageScope, item.id);
+                onEvent({
+                  type: 'energy_content_opened',
+                  contentId: item.id,
+                  targetType: item.target.type,
+                });
               }}
             />
           ))}
@@ -120,6 +135,11 @@ export function EnergyExploreFeed({
           <p>本次会话的 36 条内容已经看完，可以去抽卡、做测试或玩一轮小游戏。</p>
         </output>
       )}
+      {unavailableId ? (
+        <p className="energy-explore-feed__notice" role="status">
+          这个体验暂时不可用，已为你保留当前位置。
+        </p>
+      ) : null}
     </section>
   );
 }

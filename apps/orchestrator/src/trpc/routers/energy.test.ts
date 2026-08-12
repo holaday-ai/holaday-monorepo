@@ -73,6 +73,18 @@ describe('energyRouter', () => {
       { type: 'light_test_completed', testId: 'emotion-battery' },
       { type: 'energy_feed_refreshed' },
       { type: 'energy_content_opened', contentId: 'relax-breath-01' },
+      { type: 'energy_content_opened', contentId: 'relax-breath-01', targetType: 'practice' },
+      {
+        type: 'energy_experience_completed',
+        experienceId: 'practice',
+        modeId: 'breath-window',
+        energyNeed: 'relax',
+        durationBucket: 'under-60s',
+        outcome: 'success',
+      },
+      { type: 'energy_continuation_opened', fromKind: 'recharge', targetType: 'test' },
+      { type: 'energy_feed_exhausted', energyNeed: 'focus', batchCount: 6 },
+      { type: 'energy_section_navigated', section: 'astrology' },
       { type: 'running_task_returned', taskStatus: 'running' },
     ] as const;
 

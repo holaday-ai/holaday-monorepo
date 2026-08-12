@@ -42,7 +42,7 @@ describe('EnergyExploreFeed', () => {
     const after = screen.getAllByRole('article').map((item) => item.textContent);
     expect(after).not.toEqual(before);
     expect(onEvent).toHaveBeenCalledWith({ type: 'energy_feed_refreshed' });
-    expect(readEnergyProgress('usr_a').seenContentIds).toHaveLength(12);
+    expect(readEnergyProgress('usr_a').seenContentIds).toEqual([]);
   });
 
   it('reports only the stable content id when a card is opened', async () => {
@@ -56,7 +56,10 @@ describe('EnergyExploreFeed', () => {
         energyNeed="focus"
         zodiacSign="aries"
         onEvent={onEvent}
-        onActionTarget={onActionTarget}
+        onActionTarget={(target, trigger) => {
+          onActionTarget(target, trigger);
+          return true;
+        }}
       />,
     );
 
@@ -67,11 +70,36 @@ describe('EnergyExploreFeed', () => {
     expect(onEvent).toHaveBeenCalledWith({
       type: 'energy_content_opened',
       contentId: expect.stringMatching(/^[a-z0-9-]+$/),
+      targetType: expect.stringMatching(/^(practice|poll|test|tarot|game|astrology|astrology-signs)$/),
     });
     const target = onActionTarget.mock.calls[0]?.[0];
     expect(isEnergyContentTarget(target)).toBe(true);
     expect(onActionTarget).toHaveBeenCalledWith(target, firstAction);
     expect(firstAction.closest('article')?.getAttribute('data-opened')).toBe('true');
+    expect(readEnergyProgress('usr_a').seenContentIds).toHaveLength(1);
+  });
+
+  it('keeps a card unopened and recoverable when its target is unavailable', async () => {
+    const user = userEvent.setup();
+    render(
+      <EnergyExploreFeed
+        storageScope="usr_a"
+        mood={null}
+        energyNeed="focus"
+        zodiacSign="aries"
+        onEvent={vi.fn()}
+        onActionTarget={() => false}
+      />,
+    );
+
+    const action = screen.getAllByRole('button', { name: /打开/ })[0]!;
+    await user.click(action);
+
+    expect(action.closest('article')?.getAttribute('data-opened')).toBe('false');
+    expect(screen.getByRole('status').textContent).toContain(
+      '这个体验暂时不可用，已为你保留当前位置',
+    );
+    expect(readEnergyProgress('usr_a').seenContentIds).toEqual([]);
   });
 
   it('keeps preview history in memory without creating a guest record', async () => {
