@@ -2,9 +2,11 @@ import type { ZodiacSign } from '@/lib/astrology';
 import {
   ArrowRight,
   CalendarDays,
+  Clock3,
   FlaskConical,
   Layers3,
   ListOrdered,
+  Palette,
   RefreshCw,
   Shuffle,
   Sparkles,
@@ -15,6 +17,7 @@ import { LuckyInsights } from './LuckyInsights';
 import { hasCompleteRanking } from './astrology-content';
 import type { EnergyAstrologyPeriod } from './energy-types';
 import type { EnergyAstrologyState } from './useEnergyAstrology';
+import { zodiacBadgeImage } from './zodiac-art';
 
 interface AstrologyWorldProps {
   astrology: EnergyAstrologyState;
@@ -50,8 +53,17 @@ export const AstrologyWorld = React.forwardRef<HTMLElement, AstrologyWorldProps>
     const [monthRange, setMonthRange] = React.useState<'current' | 'next'>('current');
     const [rankingRequested, setRankingRequested] = React.useState(false);
     const [signPickerOpen, setSignPickerOpen] = React.useState(false);
+    const [failedZodiacArtSrc, setFailedZodiacArtSrc] = React.useState<string | null>(null);
     const selectedState = astrology.periods[selectedPeriod];
     const completeRanking = hasCompleteRanking(astrology.ranking);
+    const zodiacArtSrc = zodiacBadgeImage(selectedState.reading.zodiacSign);
+    const zodiacArtFailed = failedZodiacArtSrc === zodiacArtSrc;
+    const sourceLabel =
+      selectedState.source === 'local-fallback'
+        ? 'Holaday 本地提示'
+        : selectedState.reading.freshness === 'stale'
+          ? 'DivineAPI 最近成功数据'
+          : 'DivineAPI 内容';
 
     const selectPeriod = (period: EnergyAstrologyPeriod): void => {
       setSelectedPeriod(period);
@@ -82,23 +94,48 @@ export const AstrologyWorld = React.forwardRef<HTMLElement, AstrologyWorldProps>
         className="energy-astrology-world"
         aria-labelledby="energy-astrology-world-title"
       >
-        <header className="energy-astrology-world__header">
-          <div>
-            <p className="energy-kicker">
-              <Sparkles aria-hidden="true" />
-              不止两分钟的星座补给
-            </p>
-            <h2 id="energy-astrology-world-title">星座深度补给站</h2>
-            <p>按今天、本周、本月和本年慢慢看，只展示能确认来源的内容。</p>
+        <div className="energy-astrology-world__stage">
+          <header className="energy-astrology-world__header">
+            <div>
+              <p className="energy-kicker">
+                <Sparkles aria-hidden="true" />
+                不止两分钟的星座补给
+              </p>
+              <h2 id="energy-astrology-world-title">星座深度补给站</h2>
+              <p>按今天、本周、本月和本年慢慢看，只展示能确认来源的内容。</p>
+            </div>
+            <span className="energy-astrology-world__source">{sourceLabel}</span>
+          </header>
+          <div className="energy-astrology-world__art">
+            <Sparkles className="energy-astrology-world__sparkle" aria-hidden="true" />
+            {zodiacArtFailed ? (
+              <span
+                className="energy-astrology-world__art-fallback"
+                data-testid="zodiac-art-fallback"
+                aria-hidden="true"
+              >
+                <Sparkles />
+                <strong>{selectedState.reading.zodiacLabel}</strong>
+              </span>
+            ) : (
+              <img
+                src={zodiacArtSrc}
+                alt={`${selectedState.reading.zodiacLabel}马卡龙插画`}
+                onError={() => setFailedZodiacArtSrc(zodiacArtSrc)}
+              />
+            )}
+            <span className="energy-astrology-world__orbit-note" data-note="color">
+              <Palette aria-hidden="true" />
+              <small>幸运色</small>
+              <strong>{selectedState.reading.luckyColors[0] ?? '等待提示'}</strong>
+            </span>
+            <span className="energy-astrology-world__orbit-note" data-note="time">
+              <Clock3 aria-hidden="true" />
+              <small>顺手时段</small>
+              <strong>{selectedState.reading.suitableTimes[0] ?? '等待提示'}</strong>
+            </span>
           </div>
-          <span className="energy-astrology-world__source">
-            {selectedState.source === 'local-fallback'
-              ? 'Holaday 本地提示'
-              : selectedState.reading.freshness === 'stale'
-                ? 'DivineAPI 最近成功数据'
-                : 'DivineAPI 内容'}
-          </span>
-        </header>
+        </div>
 
         <div className="energy-astrology-world__tabs" role="tablist" aria-label="星座范围">
           {TABS.map((tab) => (
@@ -181,26 +218,71 @@ export const AstrologyWorld = React.forwardRef<HTMLElement, AstrologyWorldProps>
           <div className="energy-astrology-world__continue-actions">
             <button
               type="button"
+              aria-label="查看十二星座排行"
+              title="查看十二星座排行"
+              data-tone="lavender"
               disabled={astrology.ranking.loading}
               onClick={() => {
                 setRankingRequested(true);
                 void astrology.loadRanking();
               }}
             >
-              <ListOrdered aria-hidden="true" />
-              查看十二星座排行
+              <span className="energy-astrology-world__portal-icon" aria-hidden="true">
+                <ListOrdered />
+              </span>
+              <span>
+                <strong>查看十二星座排行</strong>
+                <small>看看谁更有行动力</small>
+              </span>
+              <ArrowRight aria-hidden="true" />
             </button>
-            <button type="button" onClick={() => setSignPickerOpen((value) => !value)}>
-              <Shuffle aria-hidden="true" />
-              换个星座看看
+            <button
+              type="button"
+              aria-label="换个星座看看"
+              title="换个星座看看"
+              data-tone="sky"
+              onClick={() => setSignPickerOpen((value) => !value)}
+            >
+              <span className="energy-astrology-world__portal-icon" aria-hidden="true">
+                <Shuffle />
+              </span>
+              <span>
+                <strong>换个星座看看</strong>
+                <small>切换视角，不改资料</small>
+              </span>
+              <ArrowRight aria-hidden="true" />
             </button>
-            <button type="button" onClick={(event) => onOpenEnergyCard(event.currentTarget)}>
-              <Sparkles aria-hidden="true" />
-              抽一张相关能量牌
+            <button
+              type="button"
+              aria-label="抽一张相关能量牌"
+              title="抽一张相关能量牌"
+              data-tone="peach"
+              onClick={(event) => onOpenEnergyCard(event.currentTarget)}
+            >
+              <span className="energy-astrology-world__portal-icon" aria-hidden="true">
+                <Sparkles />
+              </span>
+              <span>
+                <strong>抽一张相关能量牌</strong>
+                <small>给当下一个轻提示</small>
+              </span>
+              <ArrowRight aria-hidden="true" />
             </button>
-            <button type="button" onClick={(event) => onOpenLightTest(event.currentTarget)}>
-              <FlaskConical aria-hidden="true" />
-              测个相关主题
+            <button
+              type="button"
+              aria-label="测个相关主题"
+              title="测个相关主题"
+              data-tone="mint"
+              onClick={(event) => onOpenLightTest(event.currentTarget)}
+            >
+              <span className="energy-astrology-world__portal-icon" aria-hidden="true">
+                <FlaskConical />
+              </span>
+              <span>
+                <strong>测个相关主题</strong>
+                <small>一分钟看见状态</small>
+              </span>
+              <ArrowRight aria-hidden="true" />
             </button>
           </div>
 

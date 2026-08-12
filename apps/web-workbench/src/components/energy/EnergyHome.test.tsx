@@ -109,6 +109,8 @@ describe('EnergyHome', () => {
     expect(screen.queryByText('轻松一点的几分钟')).toBeNull();
     const exploreFeed = screen.getByRole('region', { name: '再逛一会' });
     expect(within(exploreFeed).getAllByRole('article')).toHaveLength(6);
+    expect(exploreFeed.querySelectorAll('article[data-layout="feature"]')).toHaveLength(2);
+    expect(exploreFeed.querySelectorAll('article[data-layout="compact"]')).toHaveLength(4);
 
     await waitFor(() => expect(trpcMocks.homeQuery).toHaveBeenCalledOnce());
   });

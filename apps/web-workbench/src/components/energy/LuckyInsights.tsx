@@ -28,12 +28,12 @@ export function LuckyInsights({ reading }: LuckyInsightsProps): JSX.Element {
           {groups.map((group) => {
             const Icon = GROUP_ICONS[group.key];
             return (
-              <article key={group.key}>
+              <article key={group.key} data-group={group.key}>
                 <header>
                   <Icon aria-hidden="true" />
                   <h4>{group.label}</h4>
                 </header>
-                <div>
+                <div className={group.key === 'times' ? 'energy-lucky-insights__time-track' : undefined}>
                   {group.values.map((value) => (
                     <span key={value}>
                       {group.key === 'colors' && isColorCode(value) ? (

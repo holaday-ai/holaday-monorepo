@@ -44,4 +44,39 @@ describe('energy motion system', () => {
     expect(css).toMatch(/prefers-reduced-motion:[\s\S]*\.energy-explore-feed/);
     expect(css).toMatch(/prefers-reduced-motion:[\s\S]*animation-duration:\s*0\.01ms\s*!important/);
   });
+
+  it('keeps new illustrations complete and builds the 2 plus 4 explore rhythm', () => {
+    const artImage = css.match(/\.energy-explore-feed__art img\s*\{[^}]+\}/)?.[0];
+
+    expect(artImage).toMatch(/object-fit:\s*contain/);
+    expect(css).toMatch(/article\[data-layout="feature"\]/);
+    expect(css).toMatch(/grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/);
+  });
+
+  it('defines lower-page motion and shuts it down for reduced motion', () => {
+    expect(css).toContain('@keyframes energy-zodiac-float');
+    expect(css).toContain('@keyframes energy-orbit-twinkle');
+    expect(css).toContain('@keyframes energy-content-stagger');
+    expect(css).toMatch(/prefers-reduced-motion:[\s\S]*\.energy-astrology-world__art img/);
+    expect(css).toMatch(/prefers-reduced-motion:[\s\S]*\.energy-explore-feed__grid article/);
+  });
+
+  it('keeps supporting copy readable and mobile content actions touch friendly', () => {
+    const portalTitle = css.match(
+      /\.energy-astrology-world__continue-actions strong\s*\{[^}]+\}/,
+    )?.[0];
+    const portalHint = css.match(
+      /\.energy-astrology-world__continue-actions small\s*\{[^}]*font-size:\s*10px[^}]*\}/,
+    )?.[0];
+    const categoryMeta = css.match(/\.energy-explore-feed__meta > span\s*\{[^}]+\}/)?.[0];
+    const durationMeta = css.match(/\.energy-explore-feed__meta small\s*\{[^}]+\}/)?.[0];
+
+    expect(portalTitle).toMatch(/font-size:\s*12px/);
+    expect(portalHint).toBeTruthy();
+    expect(categoryMeta).toMatch(/font-size:\s*10px/);
+    expect(durationMeta).toMatch(/font-size:\s*10px/);
+    expect(css).toMatch(
+      /@media\s*\(max-width:\s*640px\)[\s\S]*\.energy-explore-feed__grid article > button\s*\{[^}]*min-height:\s*44px/,
+    );
+  });
 });
