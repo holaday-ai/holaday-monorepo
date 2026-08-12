@@ -207,6 +207,7 @@ export const AstrologyWorld = React.forwardRef<HTMLElement, AstrologyWorldProps>
             <button
               type="button"
               aria-label="查看十二星座排行"
+              title="查看十二星座排行"
               data-tone="lavender"
               disabled={astrology.ranking.loading}
               onClick={() => {
@@ -226,6 +227,7 @@ export const AstrologyWorld = React.forwardRef<HTMLElement, AstrologyWorldProps>
             <button
               type="button"
               aria-label="换个星座看看"
+              title="换个星座看看"
               data-tone="sky"
               onClick={() => setSignPickerOpen((value) => !value)}
             >
@@ -241,6 +243,7 @@ export const AstrologyWorld = React.forwardRef<HTMLElement, AstrologyWorldProps>
             <button
               type="button"
               aria-label="抽一张相关能量牌"
+              title="抽一张相关能量牌"
               data-tone="peach"
               onClick={(event) => onOpenEnergyCard(event.currentTarget)}
             >
@@ -256,6 +259,7 @@ export const AstrologyWorld = React.forwardRef<HTMLElement, AstrologyWorldProps>
             <button
               type="button"
               aria-label="测个相关主题"
+              title="测个相关主题"
               data-tone="mint"
               onClick={(event) => onOpenLightTest(event.currentTarget)}
             >
