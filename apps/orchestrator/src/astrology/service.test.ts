@@ -495,6 +495,75 @@ describe('astrology service', () => {
     expect(reading.source).toBe('divineapi');
   });
 
+  it('bounds a hanging provider request and returns local content', async () => {
+    vi.useFakeTimers();
+    const providerSignals: AbortSignal[] = [];
+    const readingPromise = getDailyAstrologyReading(
+      { birthday: '1996-03-21', zodiacSign: 'aries', locale: 'zh-CN' },
+      {
+        env: {
+          DIVINE_API_KEY: 'key',
+          DIVINE_ACCESS_TOKEN: 'token',
+          DIVINE_API_TRANSLATOR_BASE_URL: 'https://translator.example.test',
+          DIVINE_API_CAPABILITIES: 'daily-horoscope,translator',
+          DIVINE_API_REQUEST_TIMEOUT_MS: '50',
+        },
+        fetchImpl: (async (_url, init) => {
+          if (init?.signal) providerSignals.push(init.signal);
+          return await new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener(
+              'abort',
+              () => reject(new DOMException('Provider request aborted', 'AbortError')),
+              { once: true },
+            );
+          });
+        }) as typeof fetch,
+      },
+    );
+
+    await vi.advanceTimersByTimeAsync(50);
+    const reading = await readingPromise;
+
+    expect(providerSignals[0]?.aborted).toBe(true);
+    expect(reading.source).toBe('local-fallback');
+    expect(reading.summary).toContain('今天');
+  });
+
+  it('uses the safe default when the provider timeout override exceeds Node timer limits', async () => {
+    vi.useFakeTimers();
+    const providerSignals: AbortSignal[] = [];
+    const readingPromise = getDailyAstrologyReading(
+      { birthday: '1996-03-21', zodiacSign: 'aries', locale: 'zh-CN' },
+      {
+        env: {
+          DIVINE_API_KEY: 'key',
+          DIVINE_ACCESS_TOKEN: 'token',
+          DIVINE_API_TRANSLATOR_BASE_URL: 'https://translator.example.test',
+          DIVINE_API_CAPABILITIES: 'daily-horoscope,translator',
+          DIVINE_API_REQUEST_TIMEOUT_MS: '2147483648',
+        },
+        fetchImpl: (async (_url, init) => {
+          if (init?.signal) providerSignals.push(init.signal);
+          return await new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener(
+              'abort',
+              () => reject(new DOMException('Provider request aborted', 'AbortError')),
+              { once: true },
+            );
+          });
+        }) as typeof fetch,
+      },
+    );
+
+    await vi.advanceTimersByTimeAsync(7_999);
+    expect(providerSignals[0]?.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    const reading = await readingPromise;
+
+    expect(providerSignals[0]?.aborted).toBe(true);
+    expect(reading.source).toBe('local-fallback');
+  });
+
   it('returns a complete same-date ranking only from twelve provider-backed scores', async () => {
     const signs = [
       'aries',

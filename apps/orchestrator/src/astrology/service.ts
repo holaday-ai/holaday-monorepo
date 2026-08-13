@@ -143,6 +143,7 @@ interface DivineApiConfig {
   accessToken: string;
   baseUrl: string;
   translatorBaseUrl: string;
+  requestTimeoutMs: number;
   cacheTtlMs: number;
   staleIfErrorMs: number;
   capabilityRefreshTtlMs: number;
@@ -157,6 +158,7 @@ interface RequestOptions {
 
 const DIVINE_DEFAULT_BASE_URL = 'https://astroapi-5.divineapi.com';
 const DIVINE_DEFAULT_TRANSLATOR_BASE_URL = 'https://astroapi-5-translator.divineapi.com';
+const DIVINE_DEFAULT_REQUEST_TIMEOUT_MS = 8_000;
 const DIVINE_DEFAULT_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const DIVINE_DEFAULT_STALE_IF_ERROR_MS = 24 * 60 * 60 * 1000;
 const DIVINE_DEFAULT_CAPABILITY_REFRESH_TTL_MS = 15 * 60 * 1000;
@@ -848,6 +850,10 @@ function divineApiConfig(env: NodeJS.ProcessEnv = process.env): DivineApiConfig 
     translatorBaseUrl: (
       env.DIVINE_API_TRANSLATOR_BASE_URL ?? DIVINE_DEFAULT_TRANSLATOR_BASE_URL
     ).replace(/\/+$/, ''),
+    requestTimeoutMs: readPositiveMs(
+      env.DIVINE_API_REQUEST_TIMEOUT_MS,
+      DIVINE_DEFAULT_REQUEST_TIMEOUT_MS,
+    ),
     cacheTtlMs: readCacheTtlMs(env),
     staleIfErrorMs: readNonNegativeMs(
       env.DIVINE_API_STALE_IF_ERROR_MS,
@@ -884,6 +890,8 @@ async function postDivineApiJson(
     if (cached && cached.staleUntil > Date.now()) staleValue = cached.value;
     if (cached && cached.staleUntil <= Date.now()) divineApiCache.delete(cacheKey);
   }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), config.requestTimeoutMs);
   try {
     const res = await (fetchImpl ?? fetch)(`${config.baseUrl}${path}`, {
       method: 'POST',
@@ -893,6 +901,7 @@ async function postDivineApiJson(
         Accept: 'application/json',
       },
       body: bodyString,
+      signal: controller.signal,
     });
     if (!res.ok) {
       throw new Error(`DivineAPI request failed: ${res.status}`);
@@ -918,6 +927,8 @@ async function postDivineApiJson(
     }
     if (staleValue !== undefined) return { json: staleValue, freshness: 'stale' };
     throw error;
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -1303,6 +1314,13 @@ function readNonNegativeMs(raw: string | undefined, fallback: number): number {
   if (!raw) return fallback;
   const parsed = Number(raw);
   if (!Number.isFinite(parsed) || parsed < 0) return fallback;
+  return parsed;
+}
+
+function readPositiveMs(raw: string | undefined, fallback: number): number {
+  if (!raw) return fallback;
+  const parsed = Number(raw);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0 || parsed > 2_147_483_647) return fallback;
   return parsed;
 }
 
