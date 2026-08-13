@@ -28,7 +28,7 @@
 <!-- 2026-07-09 Codex 补充：状态机 pre-execution guard：start(existing) 不再把 pending/queued 直接派发成 executing；pause 只允许 executing source；repository control transition 同步拒绝非 executing→paused 与非 paused→executing，防 queued/pending 绕过队列恢复。 -->
 <!-- 2026-07-09 Codex 补充：状态机 planning bootstrap 收口：新任务 seed 显式走 state:null + taskId + plan；start(existing planning) 改为 noop，避免历史/重连 planning 被误派发；tasks.create/smoke 与集成 fixture 已统一。 -->
 <!-- 2026-07-09 Codex 补充：技能 planner 闭环：planner catalogue 现在合并 DB SKILL.md rows + shared 13 用户可见技能；手动 @ 技能会注入 planner hint，避免前端选择了技能但通用 planner 不知道。 -->
-## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05@109be03f`（2026-08-14 JST）
+## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05@b2d108ed`（2026-08-14 JST）
 
 SPA 与 Orchestrator 已部署 `109be03f`（PR #43 + 超时热修复 PR #44）。今日能量星座内容切换现在先展示真实加载态；DivineAPI 请求最长等待 8 秒，超时后自动回退本地提示，避免无限加载。生产实测从“本月”加载态在约 8–9 秒内落到“暂时使用本地提示”，刷新按钮恢复可用且页面日志为空。Orchestrator 构建、编号 migration、`db:verify`、非 root PM2 重启、必需密钥加载与 healthz 均通过；进程 `online`、restart count 0。Aliyun 与 Vultr SPA 均命中 `index-Uoin6wia.js`，两侧 healthz 200；P0 smoke 11/11 通过。Canary 浏览器配置保持原值。
 
