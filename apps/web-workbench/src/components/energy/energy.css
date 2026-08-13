@@ -3488,6 +3488,16 @@
 
   .energy-astrology-world__period-header > button {
     align-self: flex-start;
+    width: 44px;
+    height: 44px;
+  }
+
+  .energy-astrology-panel__actions button,
+  .energy-astrology-world__tabs button,
+  .energy-astrology-world__month-range button,
+  .energy-astrology-dimensions__grid article > button,
+  .energy-astrology-dimensions > button {
+    min-height: 44px;
   }
 
   .energy-astrology-dimensions__grid,

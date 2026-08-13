@@ -62,7 +62,6 @@ export function EnergySectionNav({
               behavior: prefersReducedMotion() ? 'auto' : 'smooth',
               block: 'start',
             });
-            setActiveId(section.id);
             onNavigate(section.id);
           }}
         >

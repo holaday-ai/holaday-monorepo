@@ -1,5 +1,5 @@
-import type { EnergyMood, EnergyNeed } from './energy-types';
 import type { EnergyContentTarget } from './energy-content-target';
+import type { EnergyMood, EnergyNeed } from './energy-types';
 
 export type EnergyContentKind =
   | 'astrology'
@@ -45,12 +45,14 @@ export const REQUIRED_CONTENT_COUNTS = {
   'game-recommendation': 3,
 } as const satisfies Record<EnergyContentCategory, number>;
 
-const editorial = (item: Omit<EnergyContentItem, 'source'>): EnergyContentItem => ({
+const editorial = <const TItem extends Omit<EnergyContentItem, 'source'>>(
+  item: TItem,
+): TItem & Pick<EnergyContentItem, 'source'> => ({
   ...item,
   source: 'holaday-editorial',
 });
 
-export const ENERGY_EXPLORE_CONTENT: EnergyContentItem[] = [
+export const ENERGY_EXPLORE_CONTENT = [
   editorial({
     id: 'relax-breath-window',
     kind: 'micro-content',
@@ -413,7 +415,13 @@ export const ENERGY_EXPLORE_CONTENT: EnergyContentItem[] = [
     tags: ['focus', 'confidence', 'uplift'],
     target: { type: 'game', gameId: 'color-memory' },
   }),
-];
+] satisfies EnergyContentItem[];
+
+export type EnergyExploreContentId = (typeof ENERGY_EXPLORE_CONTENT)[number]['id'];
+
+export function isEnergyExploreContentId(value: string): value is EnergyExploreContentId {
+  return ENERGY_EXPLORE_CONTENT.some((item) => item.id === value);
+}
 
 export function nextEnergyContentBatch(input: {
   items: EnergyContentItem[];

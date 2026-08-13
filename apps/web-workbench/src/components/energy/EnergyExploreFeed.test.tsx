@@ -235,6 +235,11 @@ describe('EnergyExploreFeed', () => {
     await user.click(screen.getByRole('button', { name: '继续收藏' }));
     expect(screen.getByRole('heading', { name: '我的能量收藏' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: firstTitle })).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: `取消收藏${firstTitle}` }));
+    expect(screen.getByRole('heading', { name: '还没有可用的收藏' })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '返回今日精选' }));
+    expect(screen.getByRole('heading', { name: '今日精选重逛' })).toBeTruthy();
   });
 
   it('starts a need-aware revisit without claiming the content is unseen', async () => {

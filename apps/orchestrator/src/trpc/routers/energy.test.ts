@@ -72,8 +72,12 @@ describe('energyRouter', () => {
       { type: 'light_test_started', testId: 'emotion-battery' },
       { type: 'light_test_completed', testId: 'emotion-battery' },
       { type: 'energy_feed_refreshed' },
-      { type: 'energy_content_opened', contentId: 'relax-breath-01' },
-      { type: 'energy_content_opened', contentId: 'relax-breath-01', targetType: 'practice' },
+      { type: 'energy_content_opened', contentId: 'relax-breath-window' },
+      {
+        type: 'energy_content_opened',
+        contentId: 'relax-breath-window',
+        targetType: 'practice',
+      },
       {
         type: 'energy_experience_completed',
         experienceId: 'practice',
@@ -92,6 +96,15 @@ describe('energyRouter', () => {
       await expect(caller.reportEvent(event as never)).resolves.toEqual({ ok: true });
     }
     expect(logger.info).toHaveBeenCalledTimes(events.length);
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'energy_experience_event',
+        type: 'energy_experience_completed',
+        experienceId: 'practice',
+        modeId: 'breath-window',
+      }),
+      'energy experience event',
+    );
   });
 
   it('rejects private text, provider bodies, unknown keys and invalid ids', async () => {
@@ -102,6 +115,15 @@ describe('energyRouter', () => {
       { type: 'tarot_redrawn', mode: 'single', questionText: 'private question' },
       { type: 'astrology_range_opened', range: 'daily', providerBody: 'full response' },
       { type: 'energy_content_opened', contentId: 'contains private spaces' },
+      { type: 'energy_content_opened', contentId: 'made-up-slug' },
+      {
+        type: 'energy_experience_started',
+        experienceId: 'poll',
+        modeId: 'made-up-slug',
+        energyNeed: 'relax',
+        durationBucket: null,
+        outcome: null,
+      },
     ];
 
     for (const event of invalid) {

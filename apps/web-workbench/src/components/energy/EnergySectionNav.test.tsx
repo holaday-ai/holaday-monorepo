@@ -30,6 +30,7 @@ describe('EnergySectionNav', () => {
     await user.click(screen.getByRole('button', { name: '星座' }));
     expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' });
     expect(onNavigate).toHaveBeenCalledWith('energy-astrology-world');
+    expect(screen.getByRole('button', { name: '星座' }).getAttribute('aria-current')).toBeNull();
   });
 
   it('uses instant positioning when reduced motion is enabled', async () => {

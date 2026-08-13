@@ -30,6 +30,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -113,7 +114,7 @@ describe('energy progress', () => {
       savedTestActionIds: [],
       seenContentIds: [],
       completedKindsByDate: {},
-      seenContentDateKey: null,
+      seenContentDateKey: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
       continuation: {
         dateKey: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
         lastTarget: null,
@@ -174,7 +175,7 @@ describe('energy progress', () => {
       savedCardIds: ['work-01'],
       seenContentIds: ['fortune-small-luck'],
       completedKindsByDate: {},
-      seenContentDateKey: null,
+      seenContentDateKey: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
       continuation: {
         lastTarget: null,
         lastCompletedKind: null,
@@ -222,7 +223,7 @@ describe('energy progress', () => {
     const nextDay = new Date(2026, 7, 14, 12);
     recordOpenedEnergyContent('usr_a', 'relax-breath-window', firstDay);
     recordPracticeCompletion('usr_a', 'breath-window', firstDay);
-    savePollSelection('usr_a', 'break-style', 'quiet', firstDay);
+    savePollSelection('usr_a', 'break-style', 'quiet-eyes', firstDay);
     toggleFavoriteEnergyContent('usr_a', 'relax-breath-window');
 
     const progress = recordOpenedEnergyContent('usr_a', 'fortune-small-luck', nextDay);
@@ -235,6 +236,37 @@ describe('energy progress', () => {
     expect(completedKindsForDate(progress, firstDay)).toEqual(['recharge']);
   });
 
+  it('normalizes yesterday-only continuation state on the first read of a new day', () => {
+    vi.useFakeTimers();
+    const firstDay = new Date(2026, 7, 13, 12);
+    const nextDay = new Date(2026, 7, 14, 8);
+    vi.setSystemTime(firstDay);
+    recordOpenedEnergyContent('usr_a', 'relax-breath-window', firstDay);
+    recordPracticeCompletion('usr_a', 'breath-window', firstDay);
+    savePollSelection('usr_a', 'break-style', 'quiet', firstDay);
+    saveLastEnergyTarget(
+      'usr_a',
+      { type: 'practice', practiceId: 'breath-window' },
+      'recharge',
+      firstDay,
+    );
+    toggleFavoriteEnergyContent('usr_a', 'relax-breath-window');
+
+    vi.setSystemTime(nextDay);
+    const progress = readEnergyProgress('usr_a');
+
+    expect(progress.seenContentIds).toEqual([]);
+    expect(progress.seenContentDateKey).toBe('2026-08-14');
+    expect(progress.continuation).toMatchObject({
+      dateKey: '2026-08-14',
+      lastTarget: null,
+      lastCompletedKind: null,
+      completedPracticeIds: ['breath-window'],
+      pollSelections: {},
+      favoriteContentIds: ['relax-breath-window'],
+    });
+  });
+
   it('stores only stable poll option ids and never writes preview state', () => {
     const valid = savePollSelection('usr_a', 'social-battery', 'quiet-alone');
     const invalid = savePollSelection('usr_a', 'social-battery', 'private answer with spaces');
@@ -242,6 +274,40 @@ describe('energy progress', () => {
 
     expect(valid.continuation.pollSelections).toEqual({ 'social-battery': 'quiet-alone' });
     expect(invalid.continuation.pollSelections).toEqual({ 'social-battery': 'quiet-alone' });
+    expect(storage.has('holaday.energy.progress.v3:guest')).toBe(false);
+  });
+
+  it('drops unknown poll option slugs from stored continuation data', () => {
+    const progress = savePollSelection('usr_a', 'break-style', 'quiet-eyes');
+    window.localStorage.setItem(
+      'holaday.energy.progress.v3:usr_a',
+      JSON.stringify({
+        ...progress,
+        continuation: {
+          ...progress.continuation,
+          pollSelections: { 'break-style': 'made-up-option', 'social-battery': 'quiet-alone' },
+        },
+      }),
+    );
+
+    expect(readEnergyProgress('usr_a').continuation.pollSelections).toEqual({
+      'social-battery': 'quiet-alone',
+    });
+  });
+
+  it('keeps preview progress in memory without writing a guest storage record', () => {
+    const completedAt = new Date(2026, 7, 14, 10);
+    vi.useFakeTimers();
+    vi.setSystemTime(completedAt);
+    recordOpenedEnergyContent(null, 'fortune-small-luck', completedAt);
+    savePollSelection(null, 'break-style', 'walk-stretch', completedAt);
+    toggleFavoriteEnergyContent(null, 'fortune-small-luck');
+
+    const progress = readEnergyProgress(null);
+
+    expect(progress.seenContentIds).toEqual(['fortune-small-luck']);
+    expect(progress.continuation.pollSelections).toEqual({ 'break-style': 'walk-stretch' });
+    expect(progress.continuation.favoriteContentIds).toEqual(['fortune-small-luck']);
     expect(storage.has('holaday.energy.progress.v3:guest')).toBe(false);
   });
 });

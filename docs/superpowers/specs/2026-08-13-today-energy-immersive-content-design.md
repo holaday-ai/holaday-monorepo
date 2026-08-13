@@ -346,4 +346,3 @@ interface EnergyContinuationState {
 - 发布后核对 `/cosmic`、`/api/healthz`、PM2 状态、静态资源和事件错误日志；
 - 回滚单位为应用发布提交，不引入不可逆数据库迁移；
 - 新本地存储字段全部向后兼容，旧客户端读取时可忽略。
-

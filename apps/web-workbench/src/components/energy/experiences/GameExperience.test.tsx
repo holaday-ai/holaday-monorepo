@@ -13,7 +13,10 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function Harness({ gameId, onComplete = vi.fn() }: { gameId: EnergyGameId; onComplete?: () => void }) {
+function Harness({
+  gameId,
+  onComplete = vi.fn(),
+}: { gameId: EnergyGameId; onComplete?: () => void }) {
   const [phase, setPhase] = React.useState<ExperiencePhase>('active');
   return (
     <GameExperience
@@ -60,18 +63,24 @@ describe('GameExperience', () => {
     render(<Harness gameId="color-memory" onComplete={onComplete} />);
 
     await user.click(screen.getByRole('button', { name: '开始回答' }));
+    await user.click(screen.getByRole('button', { name: '圆形' }));
+    expect(screen.getByRole('status').textContent).toContain('已选对第 1 个');
+    expect(screen.getByText('请选择第 2 个形状')).toBeTruthy();
     await user.click(screen.getByRole('button', { name: '菱形' }));
     expect(screen.getByRole('status').textContent).toContain('再看一次，这一轮会更短');
     expect(screen.queryByText(/失败|扣分|连胜中断/)).toBeNull();
 
     for (let round = 1; round <= 3; round += 1) {
-      await user.click(screen.getByRole('button', { name: round === 1 ? '重新观察' : '观察下一轮' }));
+      await user.click(
+        screen.getByRole('button', { name: round === 1 ? '重新观察' : '观察下一轮' }),
+      );
       await user.click(screen.getByRole('button', { name: '开始回答' }));
-      const sequence = round === 1
-        ? ['圆形', '方形', '星形']
-        : round === 2
-          ? ['方形', '星形', '菱形', '圆形']
-          : ['星形', '圆形', '菱形', '方形', '星形'];
+      const sequence =
+        round === 1
+          ? ['圆形', '方形', '星形']
+          : round === 2
+            ? ['方形', '星形', '菱形', '圆形']
+            : ['星形', '圆形', '菱形', '方形', '星形'];
       for (const label of sequence) await user.click(screen.getByRole('button', { name: label }));
     }
 

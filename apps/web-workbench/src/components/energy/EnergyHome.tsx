@@ -33,10 +33,18 @@ interface EnergyHomeProps {
   tasks?: readonly UiTask[];
 }
 
-type EnergyEventType = 'started' | 'completed' | 'replayed' | 'failed';
+type EnergyEventType =
+  | 'energy_experience_started'
+  | 'energy_experience_completed'
+  | 'energy_experience_failed';
 type EnergyEventOutcome = 'success' | 'abandoned' | 'error' | null;
 type EnergyDurationBucket = 'under-60s' | 'one-to-three-minutes' | 'over-three-minutes' | null;
-type ReportableExperienceId = Exclude<EnergyExperienceId, 'practice' | 'poll'>;
+type EnergyModeId =
+  | Extract<EnergyExperienceLaunchTarget, { type: 'practice' }>['practiceId']
+  | Extract<EnergyExperienceLaunchTarget, { type: 'poll' }>['pollId']
+  | Extract<EnergyExperienceLaunchTarget, { type: 'test' }>['testId']
+  | Extract<EnergyExperienceLaunchTarget, { type: 'tarot' }>['mode']
+  | Extract<EnergyExperienceLaunchTarget, { type: 'game' }>['gameId'];
 
 function localExperiences(): EnergyExperienceRegistration[] {
   return ENERGY_EXPERIENCES.map((experience) => ({
@@ -129,14 +137,14 @@ export function EnergyHome({
     (
       type: EnergyEventType,
       experienceId: EnergyExperienceId,
+      launchTarget: EnergyExperienceLaunchTarget | null,
       outcome: EnergyEventOutcome = null,
       eventDurationBucket: EnergyDurationBucket = null,
     ) => {
-      if (experienceId === 'practice' || experienceId === 'poll') return;
-      const reportableExperienceId: ReportableExperienceId = experienceId;
       void eventReporter.report({
         type,
-        experienceId: reportableExperienceId,
+        experienceId,
+        modeId: modeIdForExperience(experienceId, launchTarget),
         energyNeed,
         durationBucket: eventDurationBucket,
         outcome,
@@ -156,27 +164,34 @@ export function EnergyHome({
     experience: EnergyExperienceRegistration,
     trigger: HTMLButtonElement,
     launchTarget: EnergyExperienceLaunchTarget | null = null,
-  ): void => {
-    if (!experience.load) return;
-    returnFocusRef.current = trigger;
-    startedAtRef.current = Date.now();
+    preserveReturnFocus = false,
+  ): boolean => {
+    if (experience.status !== 'active' || !experience.actionable || !experience.load) return false;
+    if (!preserveReturnFocus) returnFocusRef.current = trigger;
     setSelectedExperience(experience);
     setSelectedLaunchTarget(launchTarget);
     setPhase('intro');
-    reportEvent('started', experience.id);
+    return true;
   };
 
   const handlePhaseChange = (nextPhase: ExperiencePhase): void => {
     if (selectedExperience && nextPhase === 'result' && phase !== 'result') {
       reportEvent(
-        'completed',
+        'energy_experience_completed',
         selectedExperience.id,
+        selectedLaunchTarget,
         'success',
         durationBucket(startedAtRef.current),
       );
     }
     if (selectedExperience && nextPhase === 'error' && phase !== 'error') {
-      reportEvent('failed', selectedExperience.id, 'error', durationBucket(startedAtRef.current));
+      reportEvent(
+        'energy_experience_failed',
+        selectedExperience.id,
+        selectedLaunchTarget,
+        'error',
+        durationBucket(startedAtRef.current),
+      );
     }
     setPhase(nextPhase);
   };
@@ -189,6 +204,7 @@ export function EnergyHome({
     energyNeed,
     completedKinds: completedToday,
     lastCompletedKind: progress.continuation.lastCompletedKind,
+    unavailableTypes: unavailableContinuationTypes(experiences),
   });
 
   const executeTarget = (target: EnergyContentTarget, trigger: HTMLButtonElement): boolean => {
@@ -304,8 +320,14 @@ export function EnergyHome({
         }}
       />
 
-      <div id="energy-today-content" ref={todayContentRef} className="energy-section-anchor">
+      <div
+        id="energy-today-content"
+        ref={todayContentRef}
+        className="energy-section-anchor"
+        tabIndex={-1}
+      >
         <EnergyExploreFeed
+          key={storageScope ?? 'preview'}
           storageScope={storageScope}
           mood={null}
           energyNeed={energyNeed}
@@ -329,9 +351,16 @@ export function EnergyHome({
         phase={phase}
         returnFocusRef={returnFocusRef}
         onClose={() => setSelectedExperience(null)}
-        onStart={() => handlePhaseChange('active')}
+        onStart={() => {
+          if (!selectedExperience) return;
+          startedAtRef.current = Date.now();
+          reportEvent('energy_experience_started', selectedExperience.id, selectedLaunchTarget);
+          handlePhaseChange('active');
+        }}
         onReplay={() => {
-          if (selectedExperience) reportEvent('replayed', selectedExperience.id);
+          if (selectedExperience) {
+            reportEvent('energy_experience_started', selectedExperience.id, selectedLaunchTarget);
+          }
           startedAtRef.current = Date.now();
           handlePhaseChange('active');
         }}
@@ -340,20 +369,32 @@ export function EnergyHome({
         continuation={continuation}
         onContinue={(trigger) => {
           if (!continuation) return;
-          void eventReporter.report({
-            type: 'energy_continuation_opened',
-            fromKind: progress.continuation.lastCompletedKind,
-            targetType: continuation.target.type,
-          });
-          executeTarget(continuation.target, trigger);
+          const command = resolveEnergyContentTarget(continuation.target);
+          const experience =
+            command.type === 'experience'
+              ? experiences.find((item) => item.id === command.experienceId)
+              : null;
+          const opened =
+            command.type === 'experience' && experience
+              ? openExperience(experience, trigger, command.launchTarget, true)
+              : executeTarget(continuation.target, trigger);
+          if (opened) {
+            void eventReporter.report({
+              type: 'energy_continuation_opened',
+              fromKind: progress.continuation.lastCompletedKind,
+              targetType: continuation.target.type,
+            });
+          }
         }}
         onReturnToContent={() => {
+          returnFocusRef.current = null;
           setSelectedExperience(null);
           window.requestAnimationFrame(() => {
             todayContentRef.current?.scrollIntoView?.({
               behavior: prefersReducedMotion() ? 'auto' : 'smooth',
               block: 'start',
             });
+            todayContentRef.current?.focus();
           });
         }}
       >
@@ -431,4 +472,36 @@ function targetIsAvailable(
   if (command.type !== 'experience') return true;
   const experience = experiences.find((item) => item.id === command.experienceId);
   return Boolean(experience?.status === 'active' && experience.actionable && experience.load);
+}
+
+function unavailableContinuationTypes(
+  experiences: readonly EnergyExperienceRegistration[],
+): EnergyContentTarget['type'][] {
+  const types: EnergyContentTarget['type'][] = [];
+  if (!experienceIsAvailable('practice', experiences)) types.push('practice');
+  if (!experienceIsAvailable('light-test', experiences)) types.push('test');
+  if (!experienceIsAvailable('games', experiences)) types.push('game');
+  if (!experienceIsAvailable('tarot', experiences)) types.push('tarot');
+  if (!experienceIsAvailable('horoscope', experiences)) types.push('astrology');
+  return types;
+}
+
+function experienceIsAvailable(
+  id: EnergyExperienceId,
+  experiences: readonly EnergyExperienceRegistration[],
+): boolean {
+  const experience = experiences.find((item) => item.id === id);
+  return Boolean(experience?.status === 'active' && experience.actionable && experience.load);
+}
+
+function modeIdForExperience(
+  experienceId: EnergyExperienceId,
+  launchTarget: EnergyExperienceLaunchTarget | null,
+): EnergyModeId | null {
+  if (launchTarget?.type === 'practice') return launchTarget.practiceId;
+  if (launchTarget?.type === 'poll') return launchTarget.pollId;
+  if (launchTarget?.type === 'test') return launchTarget.testId;
+  if (launchTarget?.type === 'tarot') return launchTarget.mode;
+  if (launchTarget?.type === 'game') return launchTarget.gameId;
+  return experienceId === 'games' ? 'catch-energy' : null;
 }

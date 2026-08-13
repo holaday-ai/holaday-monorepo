@@ -87,6 +87,12 @@ describe('energy motion system', () => {
     expect(css).toMatch(
       /@media\s*\(max-width:\s*640px\)[\s\S]*\.energy-explore-feed__grid\s+\.energy-magazine-card\s+button\s*\{[^}]*min-height:\s*44px/,
     );
+    expect(css).toMatch(
+      /@media\s*\(max-width:\s*640px\)[\s\S]*\.energy-astrology-panel__actions\s+button,[\s\S]*\.energy-astrology-dimensions\s*>\s*button\s*\{[^}]*min-height:\s*44px/,
+    );
+    expect(css).toMatch(
+      /@media\s*\(max-width:\s*640px\)[\s\S]*\.energy-astrology-world__period-header\s*>\s*button\s*\{[^}]*width:\s*44px[^}]*height:\s*44px/,
+    );
   });
 
   it('defines a mobile-only sticky section navigation and stable scroll targets', () => {

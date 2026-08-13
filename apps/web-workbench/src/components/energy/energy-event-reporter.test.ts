@@ -5,9 +5,16 @@ const EVENT = { type: 'energy_feed_refreshed' } as const;
 
 describe('energy event reporter', () => {
   it('retries one network failure and then succeeds without warning', async () => {
-    const send = vi.fn().mockRejectedValueOnce(new TypeError('network')).mockResolvedValue({ ok: true });
+    const send = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError('network'))
+      .mockResolvedValue({ ok: true });
     const warn = vi.fn();
-    const reporter = createEnergyEventReporter({ send, warn, waitBeforeRetry: () => Promise.resolve() });
+    const reporter = createEnergyEventReporter({
+      send,
+      warn,
+      waitBeforeRetry: () => Promise.resolve(),
+    });
 
     await reporter.report(EVENT);
 
@@ -18,7 +25,11 @@ describe('energy event reporter', () => {
   it('warns once after a retryable error fails twice', async () => {
     const send = vi.fn().mockRejectedValue(new Error('offline'));
     const warn = vi.fn();
-    const reporter = createEnergyEventReporter({ send, warn, waitBeforeRetry: () => Promise.resolve() });
+    const reporter = createEnergyEventReporter({
+      send,
+      warn,
+      waitBeforeRetry: () => Promise.resolve(),
+    });
 
     await reporter.report(EVENT);
     await reporter.report(EVENT);
@@ -35,7 +46,11 @@ describe('energy event reporter', () => {
   it('does not retry a 4xx error and never logs the event payload', async () => {
     const send = vi.fn().mockRejectedValue({ data: { httpStatus: 400 } });
     const warn = vi.fn();
-    const reporter = createEnergyEventReporter({ send, warn, waitBeforeRetry: () => Promise.resolve() });
+    const reporter = createEnergyEventReporter({
+      send,
+      warn,
+      waitBeforeRetry: () => Promise.resolve(),
+    });
 
     await reporter.report({ type: 'light_test_completed', testId: 'emotion-battery' });
 
@@ -54,7 +69,10 @@ describe('energy event reporter', () => {
     const reporter = createEnergyEventReporter({
       send,
       warn: vi.fn(),
-      waitBeforeRetry: () => new Promise<void>((resolve) => { releaseRetry = resolve; }),
+      waitBeforeRetry: () =>
+        new Promise<void>((resolve) => {
+          releaseRetry = resolve;
+        }),
     });
 
     const pending = reporter.report(EVENT);
@@ -63,5 +81,30 @@ describe('energy event reporter', () => {
     await pending;
 
     expect(send).toHaveBeenCalledOnce();
+  });
+
+  it('bounds simultaneous event delivery during an outage burst', async () => {
+    const releases: Array<() => void> = [];
+    const send = vi.fn(
+      () =>
+        new Promise<never>((_resolve, reject) => {
+          releases.push(() => reject(new Error('offline')));
+        }),
+    );
+    const reporter = createEnergyEventReporter({
+      send,
+      warn: vi.fn(),
+      maxPending: 3,
+      waitBeforeRetry: () => Promise.resolve(),
+    });
+
+    const pending = Array.from({ length: 20 }, (_, index) =>
+      reporter.report({ type: `event-${index}` }),
+    );
+
+    expect(send).toHaveBeenCalledTimes(3);
+    for (const release of releases) release();
+    reporter.dispose();
+    await Promise.all(pending);
   });
 });

@@ -61,7 +61,13 @@ export function ExperiencePlayer({
           }}
           onCloseAutoFocus={(event) => {
             event.preventDefault();
-            returnFocusRef.current?.focus();
+            if (returnFocusRef.current?.isConnected) {
+              returnFocusRef.current.focus();
+              return;
+            }
+            document
+              .querySelector<HTMLButtonElement>('[data-energy-focus-fallback="true"]')
+              ?.focus();
           }}
           onEscapeKeyDown={(event) => {
             event.preventDefault();

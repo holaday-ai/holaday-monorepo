@@ -14,6 +14,8 @@ import type { EnergyMood, EnergyNeed } from './energy-types';
 import {
   ENERGY_EXPLORE_CONTENT,
   type EnergyContentItem,
+  type EnergyExploreContentId,
+  isEnergyExploreContentId,
   nextEnergyContentBatch,
 } from './explore-content';
 
@@ -22,7 +24,7 @@ export type EnergyExploreEvent =
   | { type: 'energy_feed_exhausted'; energyNeed: EnergyNeed; batchCount: number }
   | {
       type: 'energy_content_opened';
-      contentId: string;
+      contentId: EnergyExploreContentId;
       targetType: EnergyContentTarget['type'];
     };
 
@@ -189,6 +191,10 @@ export function EnergyExploreFeed({
               opened={openedId === entry.item.id}
               favorite={favoriteIds.includes(entry.item.id)}
               onOpen={(item, trigger) => {
+                if (!isEnergyExploreContentId(item.id)) {
+                  setUnavailableId(item.id);
+                  return;
+                }
                 const opened = onActionTarget(item.target, trigger);
                 if (!opened) {
                   setUnavailableId(item.id);
@@ -226,7 +232,13 @@ export function EnergyExploreFeed({
           <Sparkles aria-hidden="true" />
           <h3>{mode === 'favorites' ? '还没有可用的收藏' : '今天的 36 条已经逛完'}</h3>
           {mode === 'favorites' ? (
-            <p>回到今日精选，遇到喜欢的内容时点一下心形，就会留在这里。</p>
+            <>
+              <p>回到今日精选，遇到喜欢的内容时点一下心形，就会留在这里。</p>
+              <Button type="button" variant="outline" onClick={() => beginRevisit(energyNeed)}>
+                <WandSparkles aria-hidden="true" />
+                返回今日精选
+              </Button>
+            </>
           ) : (
             <>
               <p>你可以换一个能量方向重新编排，也可以回到收藏，或带着今天的补给收尾。</p>

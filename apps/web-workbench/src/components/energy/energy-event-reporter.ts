@@ -6,6 +6,7 @@ interface EnergyEventReporterOptions<TEvent extends EnergyEventLike> {
   send: (event: TEvent) => Promise<unknown>;
   warn?: (message: string, metadata: EnergyEventWarning) => void;
   waitBeforeRetry?: () => Promise<void>;
+  maxPending?: number;
 }
 
 interface EnergyEventWarning {
@@ -23,11 +24,15 @@ export function createEnergyEventReporter<TEvent extends EnergyEventLike>({
   send,
   warn = (message, metadata) => console.warn(message, metadata),
   waitBeforeRetry = () => new Promise((resolve) => window.setTimeout(resolve, 250)),
+  maxPending = 8,
 }: EnergyEventReporterOptions<TEvent>): EnergyEventReporter<TEvent> {
   let disposed = false;
   let warned = false;
+  const pending = new Set<Promise<void>>();
+  const configuredLimit = Number.isFinite(maxPending) ? Math.floor(maxPending) : 8;
+  const pendingLimit = Math.max(1, Math.min(20, configuredLimit));
 
-  const report = async (event: TEvent): Promise<void> => {
+  const deliver = async (event: TEvent): Promise<void> => {
     if (disposed) return;
     let attempts: 1 | 2 = 1;
     try {
@@ -56,6 +61,17 @@ export function createEnergyEventReporter<TEvent extends EnergyEventLike>({
         });
       }
     }
+  };
+
+  const report = (event: TEvent): Promise<void> => {
+    if (disposed || pending.size >= pendingLimit) return Promise.resolve();
+    const delivery = deliver(event);
+    pending.add(delivery);
+    void delivery.then(
+      () => pending.delete(delivery),
+      () => pending.delete(delivery),
+    );
+    return delivery;
   };
 
   return {

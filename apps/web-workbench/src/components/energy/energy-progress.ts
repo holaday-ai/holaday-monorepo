@@ -6,6 +6,7 @@ import {
   type EnergyPracticeId,
   isEnergyContentTarget,
 } from './energy-content-target';
+import { isEnergyPollOptionId } from './experiences/poll-content';
 
 export type EnergyCompletionKind = 'recharge' | 'tarot' | 'game' | 'test' | 'horoscope';
 
@@ -37,6 +38,7 @@ const MAX_SAVED_CARD_IDS = 100;
 const MAX_TEST_IDS = 100;
 const MAX_CONTENT_IDS = 100;
 const MAX_DATED_COMPLETION_KEYS = 45;
+const previewProgressByWindow = new WeakMap<object, EnergyProgress>();
 const COMPLETION_KINDS: readonly EnergyCompletionKind[] = [
   'recharge',
   'tarot',
@@ -109,10 +111,6 @@ function isContentId(value: unknown): value is string {
   );
 }
 
-function isOptionId(value: unknown): value is string {
-  return isContentId(value);
-}
-
 function parseCompletedKindsByDate(value: unknown): Record<string, EnergyCompletionKind[]> {
   if (!isRecord(value)) return {};
   const entries = Object.entries(value)
@@ -131,7 +129,7 @@ function parsePollSelections(value: unknown): Record<string, string> {
   return Object.fromEntries(
     ENERGY_POLL_IDS.flatMap((pollId) => {
       const optionId = value[pollId];
-      return isOptionId(optionId) ? [[pollId, optionId] as const] : [];
+      return isEnergyPollOptionId(pollId, optionId) ? [[pollId, optionId] as const] : [];
     }),
   );
 }
@@ -196,7 +194,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function writeProgress(scope: string | null, progress: EnergyProgress): void {
-  if (scope === null) return;
+  if (scope === null) {
+    if (typeof window !== 'undefined') previewProgressByWindow.set(window, progress);
+    return;
+  }
   try {
     window.localStorage.setItem(storageKey(scope), JSON.stringify(progress));
   } catch {
@@ -221,26 +222,52 @@ function normalizeDailyState(progress: EnergyProgress, date: Date): EnergyProgre
   };
 }
 
-export function readEnergyProgress(scope: string | null): EnergyProgress {
-  if (scope === null) return emptyProgress();
+export function readEnergyProgress(scope: string | null, now = new Date()): EnergyProgress {
+  if (scope === null) {
+    const current =
+      typeof window === 'undefined'
+        ? emptyProgress(now)
+        : (previewProgressByWindow.get(window) ?? emptyProgress(now));
+    const normalized = normalizeDailyState(current, now);
+    writeProgress(null, normalized);
+    return normalized;
+  }
   try {
     const current = window.localStorage.getItem(storageKey(scope));
-    if (current) return parseProgress(current);
+    if (current) {
+      const parsed = parseProgress(current, now);
+      const normalized = normalizeDailyState(parsed, now);
+      if (
+        normalized.seenContentDateKey !== parsed.seenContentDateKey ||
+        normalized.continuation.dateKey !== parsed.continuation.dateKey
+      ) {
+        writeProgress(scope, normalized);
+      }
+      return normalized;
+    }
 
     const v2 = window.localStorage.getItem(storageKey(scope, V2_STORAGE_PREFIX));
     if (v2) {
-      const migrated = parseProgress(v2);
+      const parsed = parseProgress(v2, now);
+      const migrated = normalizeDailyState(
+        { ...parsed, seenContentDateKey: parsed.seenContentDateKey ?? localDateKey(now) },
+        now,
+      );
       writeProgress(scope, migrated);
       return migrated;
     }
 
     const legacy = window.localStorage.getItem(storageKey(scope, LEGACY_STORAGE_PREFIX));
-    if (!legacy) return emptyProgress();
-    const migrated = parseProgress(legacy);
+    if (!legacy) return emptyProgress(now);
+    const parsed = parseProgress(legacy, now);
+    const migrated = normalizeDailyState(
+      { ...parsed, seenContentDateKey: parsed.seenContentDateKey ?? localDateKey(now) },
+      now,
+    );
     writeProgress(scope, migrated);
     return migrated;
   } catch {
-    return emptyProgress();
+    return emptyProgress(now);
   }
 }
 
@@ -249,7 +276,7 @@ export function recordEnergyCompletion(
   kind: EnergyCompletionKind,
   completedAt: Date = new Date(),
 ): EnergyProgress {
-  const current = normalizeDailyState(readEnergyProgress(scope), completedAt);
+  const current = normalizeDailyState(readEnergyProgress(scope, completedAt), completedAt);
   const dateKey = localDateKey(completedAt);
   const next: EnergyProgress = {
     ...current,
@@ -281,7 +308,7 @@ export function saveLastEnergyTarget(
   kind: EnergyCompletionKind | null,
   completedAt = new Date(),
 ): EnergyProgress {
-  const current = normalizeDailyState(readEnergyProgress(scope), completedAt);
+  const current = normalizeDailyState(readEnergyProgress(scope, completedAt), completedAt);
   const next: EnergyProgress = {
     ...current,
     continuation: {
@@ -319,8 +346,8 @@ export function savePollSelection(
   optionId: string,
   selectedAt = new Date(),
 ): EnergyProgress {
-  const current = normalizeDailyState(readEnergyProgress(scope), selectedAt);
-  if (!isOptionId(optionId)) return current;
+  const current = normalizeDailyState(readEnergyProgress(scope, selectedAt), selectedAt);
+  if (!isEnergyPollOptionId(pollId, optionId)) return current;
   const next: EnergyProgress = {
     ...current,
     continuation: {
@@ -337,7 +364,7 @@ export function recordOpenedEnergyContent(
   contentId: string,
   openedAt = new Date(),
 ): EnergyProgress {
-  const current = normalizeDailyState(readEnergyProgress(scope), openedAt);
+  const current = normalizeDailyState(readEnergyProgress(scope, openedAt), openedAt);
   if (!isContentId(contentId)) return current;
   const next: EnergyProgress = {
     ...current,

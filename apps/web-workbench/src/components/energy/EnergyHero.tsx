@@ -89,6 +89,7 @@ export function EnergyHero({
         <div className="energy-hero__compact-actions">
           <Button
             type="button"
+            data-energy-focus-fallback="true"
             className="energy-hero__continue min-h-11"
             onClick={(event) => onContinue(event.currentTarget)}
           >
@@ -148,6 +149,7 @@ export function EnergyHero({
 
       <Button
         type="button"
+        data-energy-focus-fallback="true"
         size="lg"
         className="energy-hero__action min-h-11"
         onClick={(event) => onStart(value, event.currentTarget)}
