@@ -40,7 +40,10 @@ export function EnergyExperienceDeck({
     .filter((experience): experience is EnergyExperienceRegistration => Boolean(experience))
     .filter(
       (experience) =>
-        experience.status === 'active' && experience.actionable && Boolean(experience.load),
+        experience.status === 'active' &&
+        experience.actionable &&
+        experience.surface !== 'target-only' &&
+        Boolean(experience.load),
     );
 
   return (

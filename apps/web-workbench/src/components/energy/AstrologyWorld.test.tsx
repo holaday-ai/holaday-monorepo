@@ -1,10 +1,11 @@
 // @vitest-environment happy-dom
 
 import { buildAstroReading, createProfileFromBirthday } from '@/lib/astrology';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import * as React from 'react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { AstrologyWorld } from './AstrologyWorld';
+import { AstrologyWorld, type AstrologyWorldHandle } from './AstrologyWorld';
 import type {
   EnergyAstrologyState,
   EnergyPeriodReading,
@@ -104,6 +105,41 @@ function state(overrides: Partial<EnergyAstrologyState> = {}): EnergyAstrologySt
 afterEach(cleanup);
 
 describe('AstrologyWorld', () => {
+  it('opens an exact period through its public navigation handle', async () => {
+    const loadPeriod = vi.fn().mockResolvedValue(undefined);
+    const ref = React.createRef<AstrologyWorldHandle>();
+    render(
+      <AstrologyWorld
+        ref={ref}
+        astrology={state({ loadPeriod })}
+        onOpenEnergyCard={vi.fn()}
+        onOpenLightTest={vi.fn()}
+      />,
+    );
+
+    act(() => ref.current?.openPeriod('yearly'));
+
+    expect(screen.getByRole('tab', { name: '本年' }).getAttribute('aria-selected')).toBe('true');
+    expect(loadPeriod).toHaveBeenCalledWith('yearly', 'current');
+  });
+
+  it('opens temporary sign browsing without modifying a saved profile', () => {
+    const ref = React.createRef<AstrologyWorldHandle>();
+    render(
+      <AstrologyWorld
+        ref={ref}
+        astrology={state()}
+        onOpenEnergyCard={vi.fn()}
+        onOpenLightTest={vi.fn()}
+      />,
+    );
+
+    act(() => ref.current?.openSigns());
+
+    expect(screen.getByText('临时查看')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '金牛座' })).toBeTruthy();
+  });
+
   it('shows the active zodiac artwork and real lucky bubbles', () => {
     render(
       <AstrologyWorld

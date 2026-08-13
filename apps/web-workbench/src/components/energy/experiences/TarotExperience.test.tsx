@@ -4,6 +4,7 @@ import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readEnergyProgress } from '../energy-progress';
+import type { HoladayCardTheme } from './energy-card-content';
 import { TarotExperience } from './TarotExperience';
 
 const storage = new Map<string, string>();
@@ -26,6 +27,8 @@ function renderTarot(
     profileStorageScope?: string | null;
     onPhaseChange?: (phase: 'intro' | 'active' | 'result' | 'error') => void;
     onComplete?: () => void;
+    initialMode?: 'single' | 'yes-no' | 'three';
+    initialTheme?: HoladayCardTheme;
   } = {},
 ) {
   const onPhaseChange = options.onPhaseChange ?? vi.fn();
@@ -34,6 +37,8 @@ function renderTarot(
     <TarotExperience
       profileStorageScope={options.profileStorageScope ?? 'usr_a'}
       capabilities={{}}
+      initialMode={options.initialMode}
+      initialTheme={options.initialTheme}
       phase="active"
       onPhaseChange={onPhaseChange}
       onComplete={onComplete}
@@ -52,6 +57,23 @@ async function revealSingleCard() {
 }
 
 describe('TarotExperience', () => {
+  it.each([
+    ['single', '工作推进'],
+    ['yes-no', '情绪整理'],
+    ['three', '轻轻提振'],
+  ] as const)('opens %s at theme confirmation without skipping consent', (initialMode, themeLabel) => {
+    const initialTheme =
+      initialMode === 'single' ? 'work' : initialMode === 'yes-no' ? 'emotion' : 'uplift';
+    renderTarot({ initialMode, initialTheme });
+
+    expect(screen.getByRole('heading', { name: '这一次想看哪个方向？' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: themeLabel }).getAttribute('aria-pressed')).toBe(
+      'true',
+    );
+    expect(screen.getByRole('button', { name: '开始抽卡' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /翻开/ })).toBeNull();
+  });
+
   it('continues from a single-card result into a three-card spread', async () => {
     renderTarot();
     const user = await revealSingleCard();
@@ -91,7 +113,7 @@ describe('TarotExperience', () => {
     expect(readEnergyProgress(scope).savedCardIds).toEqual([
       expect.stringMatching(/^[a-z-]+-\d{2}$/),
     ]);
-    const raw = storage.get(`holaday.energy.progress.v2:${scope}`) ?? '';
+    const raw = storage.get(`holaday.energy.progress.v3:${scope}`) ?? '';
     expect(raw).not.toContain('body');
     expect(raw).not.toContain('action');
   });

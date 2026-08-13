@@ -49,15 +49,9 @@ describe('energy motion system', () => {
     expect(css).toMatch(
       /\.energy-explore-feed__grid\s*\{[^}]*grid-template-columns:\s*repeat\(12,/s,
     );
-    expect(css).toMatch(
-      /article\[data-layout="hero"\]\s*\{[^}]*grid-column:\s*span\s*6/s,
-    );
-    expect(css).toMatch(
-      /article\[data-layout="portrait"\]\s*\{[^}]*grid-column:\s*span\s*3/s,
-    );
-    expect(css).toMatch(
-      /article\[data-layout="landscape"\]\s*\{[^}]*grid-column:\s*span\s*4/s,
-    );
+    expect(css).toMatch(/article\[data-layout="hero"\]\s*\{[^}]*grid-column:\s*span\s*6/s);
+    expect(css).toMatch(/article\[data-layout="portrait"\]\s*\{[^}]*grid-column:\s*span\s*3/s);
+    expect(css).toMatch(/article\[data-layout="landscape"\]\s*\{[^}]*grid-column:\s*span\s*4/s);
     expect(css).not.toContain('.energy-explore-feed__compact-icon');
   });
 
@@ -65,9 +59,7 @@ describe('energy motion system', () => {
     expect(css).toContain('@keyframes energy-zodiac-float');
     expect(css).toContain('@keyframes energy-orbit-twinkle');
     expect(css).toContain('@keyframes energy-content-stagger');
-    expect(css).toMatch(
-      /prefers-reduced-motion:[\s\S]*\.energy-astrology-magazine-cover__art img/,
-    );
+    expect(css).toMatch(/prefers-reduced-motion:[\s\S]*\.energy-astrology-magazine-cover__art img/);
     expect(css).toMatch(/prefers-reduced-motion:[\s\S]*\.energy-explore-feed__grid article/);
   });
 
@@ -95,5 +87,20 @@ describe('energy motion system', () => {
     expect(css).toMatch(
       /@media\s*\(max-width:\s*640px\)[\s\S]*\.energy-explore-feed__grid\s+\.energy-magazine-card\s+button\s*\{[^}]*min-height:\s*44px/,
     );
+    expect(css).toMatch(
+      /@media\s*\(max-width:\s*640px\)[\s\S]*\.energy-astrology-panel__actions\s+button,[\s\S]*\.energy-astrology-dimensions\s*>\s*button\s*\{[^}]*min-height:\s*44px/,
+    );
+    expect(css).toMatch(
+      /@media\s*\(max-width:\s*640px\)[\s\S]*\.energy-astrology-world__period-header\s*>\s*button\s*\{[^}]*width:\s*44px[^}]*height:\s*44px/,
+    );
+  });
+
+  it('defines a mobile-only sticky section navigation and stable scroll targets', () => {
+    expect(css).toMatch(/\.energy-section-nav\s*\{[^}]*display:\s*none/s);
+    expect(css).toMatch(
+      /@media\s*\(max-width:\s*640px\)[\s\S]*\.energy-section-nav\s*\{[^}]*position:\s*sticky[^}]*display:\s*grid/s,
+    );
+    expect(css).toMatch(/\.energy-section-nav button\s*\{[^}]*min-height:\s*44px/s);
+    expect(css).toMatch(/\.energy-section-anchor\s*\{[^}]*scroll-margin-top:/s);
   });
 });

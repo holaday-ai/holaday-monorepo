@@ -3,7 +3,7 @@ import { ENERGY_EXPERIENCES, activeEnergyExperiences } from './experience-regist
 
 describe('energy registry', () => {
   it('has stable unique ids and includes the recharge ritual', () => {
-    expect(new Set(ENERGY_EXPERIENCES.map((item) => item.id)).size).toBe(5);
+    expect(new Set(ENERGY_EXPERIENCES.map((item) => item.id)).size).toBe(7);
     expect(activeEnergyExperiences().map((item) => item.id)).toEqual([
       'recharge',
       'tarot',
@@ -11,6 +11,16 @@ describe('energy registry', () => {
       'horoscope',
       'games',
     ]);
+    expect(ENERGY_EXPERIENCES.find((item) => item.id === 'practice')).toMatchObject({
+      status: 'active',
+      actionable: true,
+      surface: 'target-only',
+    });
+    expect(ENERGY_EXPERIENCES.find((item) => item.id === 'poll')).toMatchObject({
+      status: 'active',
+      actionable: true,
+      surface: 'target-only',
+    });
     expect(ENERGY_EXPERIENCES.find((item) => item.id === 'games')).toMatchObject({
       status: 'active',
       actionable: true,
@@ -18,6 +28,13 @@ describe('energy registry', () => {
     expect(ENERGY_EXPERIENCES.find((item) => item.id === 'tarot')).toMatchObject({
       replayLabel: '重新开始抽卡',
     });
+  });
+
+  it('loads the practice player only with an exact practice target', async () => {
+    const practice = ENERGY_EXPERIENCES.find((experience) => experience.id === 'practice');
+    if (!practice?.load) throw new Error('expected practice loader');
+    const module = await practice.load();
+    expect(module.default).toBeTypeOf('function');
   });
 
   it('returns a fresh list of active experiences', () => {

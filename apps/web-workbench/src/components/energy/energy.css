@@ -22,6 +22,16 @@
   font: inherit;
 }
 
+.energy-section-anchor {
+  min-width: 0;
+  max-width: 100%;
+  scroll-margin-top: 76px;
+}
+
+.energy-section-nav {
+  display: none;
+}
+
 .energy-page button:focus-visible,
 .energy-tarot-mode button:focus-visible,
 .energy-game-target:focus-visible,
@@ -244,6 +254,63 @@
 .energy-hero .energy-hero__action:hover {
   background: linear-gradient(135deg, #ff3e6b, #f42155);
   transform: translateY(-2px);
+}
+
+.energy-hero.energy-hero--compact {
+  min-height: 0;
+  grid-template-areas: "copy art actions";
+  grid-template-columns: minmax(0, 1fr) 180px auto;
+  grid-template-rows: auto;
+  align-items: center;
+  padding: 20px 22px;
+}
+
+.energy-hero__compact-copy {
+  grid-area: copy;
+  min-width: 0;
+}
+
+.energy-hero__compact-copy h2 {
+  margin: 6px 0 0;
+  color: #7f3157;
+  font-size: clamp(23px, 2.5vw, 31px);
+  letter-spacing: -0.035em;
+}
+
+.energy-hero__compact-copy > p:last-child {
+  margin: 7px 0 0;
+  color: #756779;
+  font-size: 12px;
+}
+
+.energy-hero__compact-art {
+  grid-area: art;
+  height: 96px;
+  overflow: hidden;
+  border-radius: 20px;
+}
+
+.energy-hero__compact-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.energy-hero__compact-actions {
+  display: flex;
+  grid-area: actions;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.energy-hero__compact-actions button {
+  min-height: 44px;
+  border-radius: 13px;
+}
+
+.energy-hero__compact-actions .energy-hero__continue {
+  background: linear-gradient(135deg, #ff4c76, #ff315f);
+  color: #fff;
 }
 
 .energy-insight-grid {
@@ -1616,7 +1683,12 @@
   z-index: -1;
   inset: 18px 34px;
   border-radius: 50%;
-  background: radial-gradient(circle, rgb(234 223 255 / 92%) 0 38%, rgb(223 244 255 / 56%) 64%, transparent 72%);
+  background: radial-gradient(
+    circle,
+    rgb(234 223 255 / 92%) 0 38%,
+    rgb(223 244 255 / 56%) 64%,
+    transparent 72%
+  );
   content: "";
   filter: blur(2px);
 }
@@ -2734,6 +2806,35 @@
   box-shadow: 0 7px 18px rgb(91 70 118 / 18%);
 }
 
+.energy-magazine-card__favorite {
+  position: absolute;
+  z-index: 2;
+  top: 9px;
+  right: 9px;
+  display: inline-flex;
+  width: 44px;
+  height: 44px;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgb(255 255 255 / 84%);
+  border-radius: 50%;
+  background: rgb(255 255 255 / 88%);
+  color: #7652a2;
+  box-shadow: 0 7px 18px rgb(91 70 118 / 16%);
+  backdrop-filter: blur(10px);
+}
+
+.energy-magazine-card__favorite[aria-pressed="true"] {
+  background: #fff0f5;
+  color: #e5255b;
+}
+
+.energy-magazine-card__favorite svg {
+  width: 19px;
+  height: 19px;
+}
+
 .energy-explore-feed__grid article[data-category="fortune"],
 .energy-explore-feed__grid article[data-category="card-recommendation"] {
   background: #fff5f8;
@@ -2896,6 +2997,41 @@
   margin: 6px 0 0;
   color: #7d7180;
   font-size: 11px;
+}
+
+.energy-explore-feed__empty > small {
+  margin-top: 8px;
+  color: #948798;
+  font-size: 11px;
+}
+
+.energy-explore-feed__recovery-actions,
+.energy-explore-feed__theme-picker {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 9px;
+  margin-top: 17px;
+}
+
+.energy-explore-feed__recovery-actions button,
+.energy-explore-feed__theme-picker button {
+  min-height: 44px;
+  border-radius: 13px;
+}
+
+.energy-explore-feed__theme-picker {
+  max-width: 32rem;
+  border: 0;
+  padding: 13px 0 0;
+}
+
+.energy-explore-feed__theme-picker legend {
+  width: 100%;
+  margin-bottom: 8px;
+  color: #5d496a;
+  font-size: 12px;
+  font-weight: 750;
 }
 
 .energy-running-task-dock {
@@ -3217,6 +3353,17 @@
     padding: 21px;
   }
 
+  .energy-hero--compact {
+    grid-template-areas:
+      "copy art"
+      "actions actions";
+    grid-template-columns: minmax(0, 1fr) 120px;
+  }
+
+  .energy-hero__compact-actions {
+    flex-direction: row;
+  }
+
   .energy-hero__copy h2 {
     max-width: none;
     font-size: clamp(29px, 9vw, 39px);
@@ -3259,6 +3406,42 @@
 @media (max-width: 640px) {
   .energy-page {
     padding-bottom: 124px;
+  }
+
+  .energy-section-nav {
+    position: sticky;
+    z-index: 35;
+    top: 8px;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 4px;
+    border: 1px solid rgb(222 208 229 / 86%);
+    border-radius: 16px;
+    background: rgb(255 253 249 / 90%);
+    padding: 4px;
+    box-shadow: 0 10px 30px rgb(64 48 80 / 12%);
+    backdrop-filter: blur(16px);
+  }
+
+  .energy-section-nav button {
+    min-width: 0;
+    min-height: 44px;
+    cursor: pointer;
+    border: 0;
+    border-radius: 12px;
+    background: transparent;
+    color: #755e7e;
+    font-size: 11px;
+    font-weight: 760;
+  }
+
+  .energy-section-nav button[aria-current="location"] {
+    background: #f3eaff;
+    color: #71499a;
+  }
+
+  .energy-section-anchor {
+    scroll-margin-top: 72px;
   }
 
   .energy-astrology-world,
@@ -3305,6 +3488,16 @@
 
   .energy-astrology-world__period-header > button {
     align-self: flex-start;
+    width: 44px;
+    height: 44px;
+  }
+
+  .energy-astrology-panel__actions button,
+  .energy-astrology-world__tabs button,
+  .energy-astrology-world__month-range button,
+  .energy-astrology-dimensions__grid article > button,
+  .energy-astrology-dimensions > button {
+    min-height: 44px;
   }
 
   .energy-astrology-dimensions__grid,
@@ -3409,6 +3602,25 @@
   }
 
   .energy-hero .energy-hero__action {
+    width: 100%;
+  }
+
+  .energy-hero--compact {
+    grid-template-areas:
+      "copy"
+      "actions";
+    grid-template-columns: 1fr;
+  }
+
+  .energy-hero__compact-art {
+    display: none;
+  }
+
+  .energy-hero__compact-actions {
+    flex-direction: column;
+  }
+
+  .energy-hero__compact-actions button {
     width: 100%;
   }
 

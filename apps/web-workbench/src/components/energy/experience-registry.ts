@@ -27,6 +27,57 @@ export const ENERGY_EXPERIENCES: EnergyExperienceRegistration[] = [
       })),
   },
   {
+    id: 'practice',
+    kind: 'ritual',
+    title: '轻松练习',
+    description: '跟着几步小动作松开一点',
+    estimatedSeconds: 60,
+    status: 'active',
+    actionable: true,
+    requiredProfileFields: [],
+    surface: 'target-only',
+    load: () =>
+      import('./experiences/PracticeExperience').then((module) => ({
+        default: (props: EnergyExperienceProps) => {
+          if (props.launchTarget?.type !== 'practice') {
+            return createElement('p', { role: 'status' }, '这个练习暂时不可用');
+          }
+          return createElement(module.PracticeExperience, {
+            initialPracticeId: props.launchTarget.practiceId,
+            profileStorageScope: props.profileStorageScope,
+            phase: props.phase,
+            onPhaseChange: props.onPhaseChange,
+            onComplete: () => props.onExperienceComplete('recharge'),
+          });
+        },
+      })),
+  },
+  {
+    id: 'poll',
+    kind: 'poll',
+    title: '今日轻投票',
+    description: '选一种更适合现在的补给方式',
+    estimatedSeconds: 40,
+    status: 'active',
+    actionable: true,
+    requiredProfileFields: [],
+    surface: 'target-only',
+    load: () =>
+      import('./experiences/PollExperience').then((module) => ({
+        default: (props: EnergyExperienceProps) => {
+          if (props.launchTarget?.type !== 'poll') {
+            return createElement('p', { role: 'status' }, '这个投票暂时不可用');
+          }
+          return createElement(module.PollExperience, {
+            initialPollId: props.launchTarget.pollId,
+            profileStorageScope: props.profileStorageScope,
+            phase: props.phase,
+            onPhaseChange: props.onPhaseChange,
+          });
+        },
+      })),
+  },
+  {
     id: 'tarot',
     kind: 'card',
     title: '抽张卡',
@@ -42,6 +93,9 @@ export const ENERGY_EXPERIENCES: EnergyExperienceRegistration[] = [
           createElement(module.TarotExperience, {
             profileStorageScope: props.profileStorageScope,
             capabilities: props.astrology.capabilities,
+            initialMode: props.launchTarget?.type === 'tarot' ? props.launchTarget.mode : undefined,
+            initialTheme:
+              props.launchTarget?.type === 'tarot' ? props.launchTarget.theme : undefined,
             phase: props.phase,
             onPhaseChange: props.onPhaseChange,
             onComplete: () => props.onExperienceComplete('tarot'),
@@ -62,6 +116,8 @@ export const ENERGY_EXPERIENCES: EnergyExperienceRegistration[] = [
         default: (props: EnergyExperienceProps) =>
           createElement(module.TestExperience, {
             profileStorageScope: props.profileStorageScope,
+            initialTestId:
+              props.launchTarget?.type === 'test' ? props.launchTarget.testId : undefined,
             phase: props.phase,
             onPhaseChange: props.onPhaseChange,
             onComplete: () => props.onExperienceComplete('test'),
@@ -99,9 +155,13 @@ export const ENERGY_EXPERIENCES: EnergyExperienceRegistration[] = [
     actionable: true,
     requiredProfileFields: [],
     load: () =>
-      import('./experiences/MiniGameExperience').then((module) => ({
+      import('./experiences/GameExperience').then((module) => ({
         default: (props: EnergyExperienceProps) =>
-          createElement(module.MiniGameExperience, {
+          createElement(module.GameExperience, {
+            initialGameId:
+              props.launchTarget?.type === 'game'
+                ? props.launchTarget.gameId
+                : 'catch-energy',
             phase: props.phase,
             onPhaseChange: props.onPhaseChange,
             onComplete: () => props.onExperienceComplete('game'),
@@ -112,6 +172,10 @@ export const ENERGY_EXPERIENCES: EnergyExperienceRegistration[] = [
 
 export function activeEnergyExperiences(): EnergyExperienceRegistration[] {
   return ENERGY_EXPERIENCES.filter((experience) => {
-    return experience.status === 'active' && experience.actionable;
+    return (
+      experience.status === 'active' &&
+      experience.actionable &&
+      experience.surface !== 'target-only'
+    );
   });
 }

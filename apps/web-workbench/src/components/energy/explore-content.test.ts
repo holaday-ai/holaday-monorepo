@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { isEnergyContentTarget } from './energy-content-target';
 import {
   ENERGY_EXPLORE_CONTENT,
   REQUIRED_CONTENT_COUNTS,
@@ -9,8 +10,10 @@ const now = new Date('2026-08-12T12:00:00Z');
 
 describe('energy explore content', () => {
   it('contains 36 complete, non-sponsored launch items across all categories', () => {
+    const content: readonly import('./explore-content').EnergyContentItem[] =
+      ENERGY_EXPLORE_CONTENT;
     expect(ENERGY_EXPLORE_CONTENT).toHaveLength(36);
-    expect(ENERGY_EXPLORE_CONTENT.some((item) => item.kind === 'sponsored')).toBe(false);
+    expect(content.some((item) => item.kind === 'sponsored')).toBe(false);
     expect(new Set(ENERGY_EXPLORE_CONTENT.map((item) => item.id)).size).toBe(36);
 
     for (const [category, expected] of Object.entries(REQUIRED_CONTENT_COUNTS)) {
@@ -20,9 +23,32 @@ describe('energy explore content', () => {
     }
     expect(
       ENERGY_EXPLORE_CONTENT.every(
-        (item) => item.title && item.summary.length >= 25 && item.actionTarget,
+        (item) => item.title && item.summary.length >= 25 && isEnergyContentTarget(item.target),
       ),
     ).toBe(true);
+  });
+
+  it('routes recommendations to distinct experiences instead of generic directories', () => {
+    const targets = ENERGY_EXPLORE_CONTENT.map((item) => item.target);
+    expect(
+      new Set(
+        targets.filter((target) => target.type === 'practice').map((target) => target.practiceId),
+      ).size,
+    ).toBe(6);
+    expect(
+      new Set(targets.filter((target) => target.type === 'poll').map((target) => target.pollId))
+        .size,
+    ).toBe(4);
+    expect(
+      new Set(targets.filter((target) => target.type === 'test').map((target) => target.testId))
+        .size,
+    ).toBe(8);
+    expect(
+      new Set(targets.filter((target) => target.type === 'tarot').map((target) => target.mode)),
+    ).toEqual(new Set(['single', 'yes-no', 'three']));
+    expect(
+      new Set(targets.filter((target) => target.type === 'game').map((target) => target.gameId)),
+    ).toEqual(new Set(['catch-energy', 'breath-rhythm', 'color-memory']));
   });
 
   it('returns unseen active items without repeating', () => {

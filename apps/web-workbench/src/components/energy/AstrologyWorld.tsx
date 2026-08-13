@@ -15,6 +15,12 @@ interface AstrologyWorldProps {
   onOpenLightTest: (trigger: HTMLButtonElement) => void;
 }
 
+export interface AstrologyWorldHandle {
+  openPeriod: (period: EnergyAstrologyPeriod) => void;
+  openSigns: () => void;
+  scrollIntoView: (options?: ScrollIntoViewOptions) => void;
+}
+
 const TABS: Array<{ period: EnergyAstrologyPeriod; label: string }> = [
   { period: 'daily', label: '今日' },
   { period: 'weekly', label: '本周' },
@@ -37,8 +43,9 @@ const ZODIAC_OPTIONS: Array<{ sign: ZodiacSign; label: string }> = [
   { sign: 'pisces', label: '双鱼座' },
 ];
 
-export const AstrologyWorld = React.forwardRef<HTMLElement, AstrologyWorldProps>(
+export const AstrologyWorld = React.forwardRef<AstrologyWorldHandle, AstrologyWorldProps>(
   function AstrologyWorld({ astrology, onOpenEnergyCard, onOpenLightTest }, ref): JSX.Element {
+    const sectionRef = React.useRef<HTMLElement>(null);
     const [selectedPeriod, setSelectedPeriod] = React.useState<EnergyAstrologyPeriod>('daily');
     const [monthRange, setMonthRange] = React.useState<'current' | 'next'>('current');
     const [rankingRequested, setRankingRequested] = React.useState(false);
@@ -52,17 +59,20 @@ export const AstrologyWorld = React.forwardRef<HTMLElement, AstrologyWorldProps>
           ? 'DivineAPI 最近成功数据'
           : 'DivineAPI 内容';
 
-    const selectPeriod = (period: EnergyAstrologyPeriod): void => {
-      setSelectedPeriod(period);
-      const state = astrology.periods[period];
-      if (period === 'monthly') {
-        if (!state.loaded || state.reading.rangeKey !== monthRange) {
-          void astrology.loadPeriod('monthly', monthRange);
+    const selectPeriod = React.useCallback(
+      (period: EnergyAstrologyPeriod): void => {
+        setSelectedPeriod(period);
+        const state = astrology.periods[period];
+        if (period === 'monthly') {
+          if (!state.loaded || state.reading.rangeKey !== monthRange) {
+            void astrology.loadPeriod('monthly', monthRange);
+          }
+          return;
         }
-        return;
-      }
-      if (!state.loaded) void astrology.loadPeriod(period, 'current');
-    };
+        if (!state.loaded) void astrology.loadPeriod(period, 'current');
+      },
+      [astrology, monthRange],
+    );
 
     const selectMonth = (rangeKey: 'current' | 'next'): void => {
       setMonthRange(rangeKey);
@@ -74,17 +84,24 @@ export const AstrologyWorld = React.forwardRef<HTMLElement, AstrologyWorldProps>
       }
     };
 
+    React.useImperativeHandle(
+      ref,
+      () => ({
+        openPeriod: selectPeriod,
+        openSigns: () => setSignPickerOpen(true),
+        scrollIntoView: (options) => sectionRef.current?.scrollIntoView(options),
+      }),
+      [selectPeriod],
+    );
+
     return (
       <section
-        ref={ref}
+        ref={sectionRef}
         id="energy-astrology-world"
-        className="energy-astrology-world"
+        className="energy-astrology-world energy-section-anchor"
         aria-labelledby="energy-astrology-world-title"
       >
-        <AstrologyMagazineCover
-          reading={selectedState.reading}
-          sourceLabel={sourceLabel}
-        />
+        <AstrologyMagazineCover reading={selectedState.reading} sourceLabel={sourceLabel} />
 
         <div className="energy-astrology-world__tabs" role="tablist" aria-label="星座范围">
           {TABS.map((tab) => (
@@ -195,6 +212,7 @@ export const AstrologyWorld = React.forwardRef<HTMLElement, AstrologyWorldProps>
 
           {signPickerOpen ? (
             <div className="energy-astrology-world__sign-picker">
+              <strong>临时查看</strong>
               <p>只预览，不会修改已保存的生日资料。</p>
               <fieldset>
                 <legend>选择预览星座</legend>

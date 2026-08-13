@@ -3,6 +3,7 @@ import {
   BookOpenText,
   Brain,
   Gamepad2,
+  Heart,
   HeartHandshake,
   type LucideIcon,
   Sparkles,
@@ -16,7 +17,9 @@ import type { EnergyContentCategory, EnergyContentItem } from './explore-content
 interface EnergyMagazineCardProps {
   entry: AllocatedMagazineItem;
   opened: boolean;
+  favorite: boolean;
   onOpen: (item: EnergyContentItem, trigger: HTMLButtonElement) => void;
+  onToggleFavorite: (contentId: string) => void;
 }
 
 const CATEGORY_LABELS = {
@@ -44,7 +47,9 @@ const CATEGORY_ICONS = {
 export function EnergyMagazineCard({
   entry,
   opened,
+  favorite,
   onOpen,
+  onToggleFavorite,
 }: EnergyMagazineCardProps): JSX.Element {
   const [artFailed, setArtFailed] = React.useState(false);
   const MetaIcon = CATEGORY_ICONS[entry.item.category];
@@ -55,6 +60,7 @@ export function EnergyMagazineCard({
       data-category={entry.item.category}
       data-layout={entry.slot}
       data-opened={opened ? 'true' : 'false'}
+      data-favorite={favorite ? 'true' : 'false'}
     >
       <div className="energy-magazine-card__art">
         <span data-artwork-fallback aria-hidden="true">
@@ -70,13 +76,18 @@ export function EnergyMagazineCard({
           onError={() => setArtFailed(true)}
         />
         {entry.zodiacBadgeSrc ? (
-          <img
-            data-zodiac-badge
-            src={entry.zodiacBadgeSrc}
-            alt=""
-            loading="lazy"
-          />
+          <img data-zodiac-badge src={entry.zodiacBadgeSrc} alt="" loading="lazy" />
         ) : null}
+        <button
+          type="button"
+          className="energy-magazine-card__favorite"
+          aria-label={`${favorite ? '取消收藏' : '收藏'}${entry.item.title}`}
+          title={`${favorite ? '取消收藏' : '收藏'}${entry.item.title}`}
+          aria-pressed={favorite}
+          onClick={() => onToggleFavorite(entry.item.id)}
+        >
+          <Heart aria-hidden="true" fill={favorite ? 'currentColor' : 'none'} />
+        </button>
       </div>
       <div className="energy-explore-feed__meta">
         <span>

@@ -4,7 +4,11 @@ import { cleanup, render, screen, waitFor, within } from '@testing-library/react
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EnergyHome } from './EnergyHome';
-import { readEnergyProgress } from './energy-progress';
+import {
+  readEnergyProgress,
+  recordEnergyCompletion,
+  saveLastEnergyTarget,
+} from './energy-progress';
 
 const trpcMocks = vi.hoisted(() => ({
   homeQuery: vi.fn(),
@@ -129,11 +133,90 @@ describe('EnergyHome', () => {
     expect(readEnergyProgress('usr_energy').collectedKinds).toEqual(['recharge']);
     expect(trpcMocks.reportEvent).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: 'completed',
+        type: 'energy_experience_completed',
         experienceId: 'recharge',
         energyNeed: 'relax',
       }),
     );
+    expect(screen.getByRole('button', { name: '继续：呼吸节奏' })).toBeTruthy();
+  });
+
+  it('reports target-only poll lifecycle with its stable mode id', async () => {
+    const user = userEvent.setup();
+    recordEnergyCompletion('usr_energy', 'recharge');
+    saveLastEnergyTarget('usr_energy', { type: 'poll', pollId: 'break-style' }, null);
+    render(<EnergyHome profileStorageScope="usr_energy" />);
+
+    await user.click(screen.getByRole('button', { name: '继续上次' }));
+    await user.click(screen.getByRole('button', { name: '开始体验' }));
+    const firstOption = (await screen.findAllByRole('radio'))[0];
+    if (!firstOption) throw new Error('expected poll option');
+    await user.click(firstOption);
+
+    expect(trpcMocks.reportEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'energy_experience_started',
+        experienceId: 'poll',
+        modeId: expect.stringMatching(/^(break-style|focus-sound|small-reward|social-battery)$/),
+      }),
+    );
+    expect(trpcMocks.reportEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'energy_experience_completed',
+        experienceId: 'poll',
+      }),
+    );
+  });
+
+  it('continues from a completed recharge into the exact recommended game', async () => {
+    const user = userEvent.setup();
+    render(<EnergyHome profileStorageScope="usr_energy" />);
+
+    await user.click(screen.getByRole('button', { name: '放松' }));
+    const originalTrigger = screen.getByRole('button', { name: '开始 30 秒补给' });
+    await user.click(originalTrigger);
+    await user.click(screen.getByRole('button', { name: '开始体验' }));
+    await user.click(await screen.findByRole('button', { name: '立即完成' }));
+    await user.click(screen.getByRole('button', { name: '继续：呼吸节奏' }));
+
+    expect(screen.getByRole('dialog', { name: '小游戏' })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '开始体验' }));
+    expect(await screen.findByRole('heading', { name: '舒服地吸气' })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '关闭体验' }));
+    expect(originalTrigger.isConnected).toBe(false);
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: '继续今日内容' }));
+    expect(trpcMocks.reportEvent).toHaveBeenCalledWith({
+      type: 'energy_continuation_opened',
+      fromKind: 'recharge',
+      targetType: 'game',
+    });
+  });
+
+  it('skips a remotely unavailable continuation type instead of rendering a dead action', async () => {
+    trpcMocks.homeQuery.mockResolvedValue({
+      experiences: [
+        {
+          id: 'games',
+          kind: 'game',
+          title: '小游戏',
+          description: '接住十二颗轻盈的能量光点',
+          estimatedSeconds: 45,
+          status: 'coming-soon',
+          actionable: false,
+        },
+      ],
+    });
+    const user = userEvent.setup();
+    render(<EnergyHome profileStorageScope="usr_energy" />);
+    await waitFor(() => expect(trpcMocks.homeQuery).toHaveBeenCalledOnce());
+
+    await user.click(screen.getByRole('button', { name: '放松' }));
+    await user.click(screen.getByRole('button', { name: '开始 30 秒补给' }));
+    await user.click(screen.getByRole('button', { name: '开始体验' }));
+    await user.click(await screen.findByRole('button', { name: '立即完成' }));
+
+    expect(screen.queryByRole('button', { name: '继续：呼吸节奏' })).toBeNull();
+    expect(screen.getByRole('button', { name: '继续：一分钟轻测试' })).toBeTruthy();
   });
 
   it('opens the playable mini game from the three-choice deck', async () => {
@@ -163,5 +246,14 @@ describe('EnergyHome', () => {
     await user.click(screen.getByRole('button', { name: '抽一张相关能量牌' }));
     expect(screen.getByRole('dialog', { name: '抽张卡' })).toBeTruthy();
     expect(screen.queryByText(/月亮倾向|上升倾向|流年提醒/)).toBeNull();
+  });
+
+  it('uses a compact same-day return hero after a completed experience', () => {
+    recordEnergyCompletion('usr_energy', 'test');
+    render(<EnergyHome profileStorageScope="usr_energy" />);
+
+    expect(screen.getByText('今日完成 1/5')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '继续今日内容' })).toBeTruthy();
+    expect(screen.getByRole('navigation', { name: '今日能量章节' })).toBeTruthy();
   });
 });

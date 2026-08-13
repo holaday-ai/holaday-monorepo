@@ -458,6 +458,7 @@ function localPeriodState(
   loaded: boolean,
 ): EnergyPeriodState {
   const fortune = new Map(reading.fortune.map((item) => [item.key, item]));
+  const copy = localPeriodCopy(period, reading);
   return {
     source: 'local-fallback',
     loading: false,
@@ -472,16 +473,16 @@ function localPeriodState(
       zodiacLabel: reading.zodiacLabel,
       rangeLabel,
       rangeKey,
-      summary: reading.headline,
+      summary: copy.summary,
       dimensions: [
-        periodDimension('personal', '个人', reading.headline, fortune.get('overall')?.score),
+        periodDimension('personal', '个人', copy.personal, fortune.get('overall')?.score),
         periodDimension(
           'health',
           '健康',
           fortune.get('health')?.body,
           fortune.get('health')?.score,
         ),
-        periodDimension('profession', '工作', reading.workNote, fortune.get('career')?.score),
+        periodDimension('profession', '工作', copy.profession, fortune.get('career')?.score),
         periodDimension('emotions', '情绪', fortune.get('love')?.body, fortune.get('love')?.score),
         periodDimension('travel', '出行', '行程保留一点弹性，会更从容。', null),
         periodDimension('luck', '好运', fortune.get('wealth')?.body, fortune.get('wealth')?.score),
@@ -495,6 +496,38 @@ function localPeriodState(
       singlesTip: null,
       couplesTip: null,
     },
+  };
+}
+
+function localPeriodCopy(
+  period: EnergyAstrologyPeriod,
+  reading: AstroReading,
+): { summary: string; personal: string; profession: string } {
+  if (period === 'daily') {
+    return {
+      summary: reading.headline,
+      personal: `今天先留意当下节奏：${reading.headline}`,
+      profession: reading.workNote,
+    };
+  }
+  if (period === 'weekly') {
+    return {
+      summary: `本周适合让${reading.zodiacLabel}把精力放在可持续推进上。`,
+      personal: '这一周先守住稳定节奏，再为临时变化留出余量。',
+      profession: '本周先完成一条清楚主线，避免每天重新选择优先级。',
+    };
+  }
+  if (period === 'monthly') {
+    return {
+      summary: `本月适合${reading.zodiacLabel}整理长期方向与日常安排的关系。`,
+      personal: '这个月用几次小复盘调整方向，不必在第一天确定全部答案。',
+      profession: '本月给重要目标设置阶段完成点，让进展可以被看见。',
+    };
+  }
+  return {
+    summary: `本年适合${reading.zodiacLabel}围绕真正重视的主题稳步积累。`,
+    personal: '这一年用持续的小选择建立想要的生活感，不追求一次改变全部。',
+    profession: '本年优先积累可复用的能力和关系，让每次投入都留下长期价值。',
   };
 }
 

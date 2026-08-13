@@ -1,11 +1,26 @@
 import { Button } from '@/components/ui/button';
-import { Focus, Smile, SunMedium, Waves, Zap, type LucideIcon } from 'lucide-react';
+import {
+  ArrowRight,
+  Focus,
+  type LucideIcon,
+  RotateCcw,
+  Smile,
+  SunMedium,
+  Waves,
+  Zap,
+} from 'lucide-react';
+import * as React from 'react';
 import type { EnergyNeed } from './energy-types';
 
 interface EnergyHeroProps {
+  mode?: 'full' | 'compact';
   value: EnergyNeed;
+  completedCount?: number;
+  totalCount?: number;
+  continueLabel?: '继续上次' | '继续今日内容';
   onChange: (need: EnergyNeed) => void;
   onStart: (need: EnergyNeed, trigger: HTMLButtonElement) => void;
+  onContinue?: (trigger: HTMLButtonElement) => void;
 }
 
 const NEEDS: Array<{
@@ -45,11 +60,53 @@ const NEEDS: Array<{
   },
 ];
 
-export function EnergyHero({ value, onChange, onStart }: EnergyHeroProps): JSX.Element {
+export function EnergyHero({
+  mode = 'full',
+  value,
+  completedCount = 0,
+  totalCount = 5,
+  continueLabel = '继续今日内容',
+  onChange,
+  onStart,
+  onContinue = () => undefined,
+}: EnergyHeroProps): JSX.Element {
   const selected = NEEDS.find((need) => need.id === value) ?? NEEDS[0];
+  const [expanded, setExpanded] = React.useState(false);
+
+  if (mode === 'compact' && !expanded) {
+    return (
+      <section className="energy-hero energy-hero--compact" aria-labelledby="energy-hero-title">
+        <div className="energy-hero__compact-copy">
+          <p className="energy-kicker">
+            今日完成 {completedCount}/{totalCount}
+          </p>
+          <h2 id="energy-hero-title">继续补一点{selected.label}能量</h2>
+          <p>{selected.response}</p>
+        </div>
+        <div className="energy-hero__compact-art" aria-hidden="true">
+          <img src="/energy/recharge-island.jpg" alt="" />
+        </div>
+        <div className="energy-hero__compact-actions">
+          <Button
+            type="button"
+            data-energy-focus-fallback="true"
+            className="energy-hero__continue min-h-11"
+            onClick={(event) => onContinue(event.currentTarget)}
+          >
+            {continueLabel}
+            <ArrowRight aria-hidden="true" />
+          </Button>
+          <Button type="button" variant="outline" onClick={() => setExpanded(true)}>
+            <RotateCcw aria-hidden="true" />
+            重新选择能量
+          </Button>
+        </div>
+      </section>
+    );
+  }
 
   return (
-    <section className="energy-hero" aria-labelledby="energy-hero-title">
+    <section className="energy-hero" data-mode="full" aria-labelledby="energy-hero-title">
       <div className="energy-hero__copy">
         <p className="energy-kicker">30 秒互动补给</p>
         <h2 id="energy-hero-title">今天想补哪一种能量？</h2>
@@ -92,6 +149,7 @@ export function EnergyHero({ value, onChange, onStart }: EnergyHeroProps): JSX.E
 
       <Button
         type="button"
+        data-energy-focus-fallback="true"
         size="lg"
         className="energy-hero__action min-h-11"
         onClick={(event) => onStart(value, event.currentTarget)}

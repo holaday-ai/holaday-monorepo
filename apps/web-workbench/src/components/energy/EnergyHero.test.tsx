@@ -4,8 +4,8 @@ import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import * as React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { EnergyNeed } from './energy-types';
 import { EnergyHero } from './EnergyHero';
+import type { EnergyNeed } from './energy-types';
 
 afterEach(cleanup);
 
@@ -35,5 +35,29 @@ describe('EnergyHero', () => {
     );
     await user.click(screen.getByRole('button', { name: '开始 30 秒补给' }));
     expect(onStart).toHaveBeenCalledWith('relax');
+  });
+
+  it('shows a compact same-day return state and expands for a new choice', async () => {
+    const user = userEvent.setup();
+    const onContinue = vi.fn();
+    render(
+      <EnergyHero
+        mode="compact"
+        value="relax"
+        completedCount={1}
+        totalCount={5}
+        continueLabel="继续上次"
+        onChange={vi.fn()}
+        onStart={vi.fn()}
+        onContinue={onContinue}
+      />,
+    );
+
+    expect(screen.getByText('今日完成 1/5')).toBeTruthy();
+    expect(screen.getByText('继续补一点放松能量')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '继续上次' }));
+    expect(onContinue).toHaveBeenCalledOnce();
+    await user.click(screen.getByRole('button', { name: '重新选择能量' }));
+    expect(screen.getByRole('heading', { name: '今天想补哪一种能量？' })).toBeTruthy();
   });
 });
