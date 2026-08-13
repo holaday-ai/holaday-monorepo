@@ -3353,11 +3353,12 @@
     padding: 21px;
   }
 
-  .energy-hero--compact {
+  .energy-hero.energy-hero--compact {
     grid-template-areas:
       "copy art"
       "actions actions";
     grid-template-columns: minmax(0, 1fr) 120px;
+    overflow: clip;
   }
 
   .energy-hero__compact-actions {
@@ -3605,11 +3606,12 @@
     width: 100%;
   }
 
-  .energy-hero--compact {
+  .energy-hero.energy-hero--compact {
     grid-template-areas:
       "copy"
       "actions";
     grid-template-columns: 1fr;
+    overflow: clip;
   }
 
   .energy-hero__compact-art {
