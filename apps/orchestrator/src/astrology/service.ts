@@ -43,6 +43,7 @@ export interface AstrologyPeriodReading {
   provider: 'mock' | 'divineapi';
   source: 'local-fallback' | 'divineapi';
   freshness: 'local' | 'fresh' | 'stale';
+  providerRefreshPending: boolean;
   zodiacSign: ZodiacSign;
   zodiacLabel: string;
   rangeLabel: string;
@@ -144,6 +145,7 @@ interface DivineApiConfig {
   baseUrl: string;
   translatorBaseUrl: string;
   requestTimeoutMs: number;
+  providerTimeoutMs: number;
   cacheTtlMs: number;
   staleIfErrorMs: number;
   capabilityRefreshTtlMs: number;
@@ -159,10 +161,12 @@ interface RequestOptions {
 const DIVINE_DEFAULT_BASE_URL = 'https://astroapi-5.divineapi.com';
 const DIVINE_DEFAULT_TRANSLATOR_BASE_URL = 'https://astroapi-5-translator.divineapi.com';
 const DIVINE_DEFAULT_REQUEST_TIMEOUT_MS = 8_000;
+const DIVINE_DEFAULT_PROVIDER_TIMEOUT_MS = 35_000;
 const DIVINE_DEFAULT_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const DIVINE_DEFAULT_STALE_IF_ERROR_MS = 24 * 60 * 60 * 1000;
 const DIVINE_DEFAULT_CAPABILITY_REFRESH_TTL_MS = 15 * 60 * 1000;
 const divineApiCache = new Map<string, { expiresAt: number; staleUntil: number; value: unknown }>();
+const divineApiInFlight = new Map<string, Promise<unknown>>();
 const observedCapabilityFailures = new Map<
   AstrologyCapability,
   { reason: 'not-authorized' | 'invalid-response'; expiresAt: number }
@@ -328,6 +332,7 @@ export function divineApiStatus(env: NodeJS.ProcessEnv = process.env): {
 
 export function clearDivineApiCacheForTest(): void {
   divineApiCache.clear();
+  divineApiInFlight.clear();
   observedCapabilityFailures.clear();
 }
 
@@ -386,6 +391,7 @@ export function buildDailyAstrologyReading(
     provider: 'mock',
     source: 'local-fallback',
     freshness: 'local',
+    providerRefreshPending: false,
     apiConfigured,
     zodiacSign,
     zodiacLabel: meta.label,
@@ -437,6 +443,7 @@ export async function getDailyAstrologyReading(
       horoscopeRequiredPaths('prediction'),
       (json) => assertHoroscopeDimensionTypes(json, 'prediction'),
     );
+    if (response.pending) return { ...mock, providerRefreshPending: true };
     return mergeDivineDaily(mock, response.json, response.freshness);
   } catch {
     return mock;
@@ -505,6 +512,7 @@ export async function getDailyTarotReading(
       options.fetchImpl,
       [['data', 'card_name']],
     );
+    if (response.pending) return mock;
     return mergeDivineTarot(mock, response.json);
   } catch {
     return mock;
@@ -535,6 +543,7 @@ export function buildMockWeeklyAstrologyReading(
     provider: 'mock',
     source: 'local-fallback',
     freshness: 'local',
+    providerRefreshPending: false,
     apiConfigured: hasDivineApiCredentials(options.env),
     zodiacSign,
     zodiacLabel: meta.label,
@@ -586,6 +595,7 @@ export async function getWeeklyAstrologyReading(
       horoscopeRequiredPaths('weekly_horoscope'),
       (json) => assertHoroscopeDimensionTypes(json, 'weekly_horoscope'),
     );
+    if (response.pending) return { ...mock, providerRefreshPending: true };
     return mergeDivineWeekly(mock, response.json, response.freshness);
   } catch {
     return mock;
@@ -683,6 +693,7 @@ async function getLongPeriodReading(
       horoscopeRequiredPaths(selector),
       (json) => assertHoroscopeDimensionTypes(json, selector),
     );
+    if (response.pending) return { ...local, providerRefreshPending: true };
     return mergeDivinePeriod(
       local,
       response.json,
@@ -722,6 +733,7 @@ function buildLocalLongPeriodReading(
     provider: 'mock',
     source: 'local-fallback',
     freshness: 'local',
+    providerRefreshPending: false,
     zodiacSign,
     zodiacLabel: meta.label,
     rangeLabel,
@@ -800,6 +812,7 @@ export async function getYesNoTarotReading(
       options.fetchImpl,
       [['data', 'prediction']],
     );
+    if (response.pending) return mock;
     return mergeDivineYesNoTarot(mock, response.json);
   } catch {
     return mock;
@@ -854,6 +867,10 @@ function divineApiConfig(env: NodeJS.ProcessEnv = process.env): DivineApiConfig 
       env.DIVINE_API_REQUEST_TIMEOUT_MS,
       DIVINE_DEFAULT_REQUEST_TIMEOUT_MS,
     ),
+    providerTimeoutMs: readPositiveMs(
+      env.DIVINE_API_PROVIDER_TIMEOUT_MS,
+      DIVINE_DEFAULT_PROVIDER_TIMEOUT_MS,
+    ),
     cacheTtlMs: readCacheTtlMs(env),
     staleIfErrorMs: readNonNegativeMs(
       env.DIVINE_API_STALE_IF_ERROR_MS,
@@ -875,7 +892,10 @@ async function postDivineApiJson(
   fetchImpl: typeof fetch | undefined,
   requiredPaths: ReadonlyArray<ReadonlyArray<string>>,
   validate?: (json: unknown) => void,
-): Promise<{ json: unknown; freshness: 'fresh' | 'stale' }> {
+): Promise<
+  | { pending: true }
+  | { pending: false; json: unknown; freshness: 'fresh' | 'stale' }
+> {
   const bodyString = new URLSearchParams(body).toString();
   const cacheParams = new URLSearchParams(
     Object.entries(body).filter(([key]) => key !== 'api_key'),
@@ -885,50 +905,82 @@ async function postDivineApiJson(
   if (config.cacheTtlMs > 0) {
     const cached = divineApiCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
-      return { json: cached.value, freshness: 'fresh' };
+      return { pending: false, json: cached.value, freshness: 'fresh' };
     }
     if (cached && cached.staleUntil > Date.now()) staleValue = cached.value;
     if (cached && cached.staleUntil <= Date.now()) divineApiCache.delete(cacheKey);
   }
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), config.requestTimeoutMs);
+  let providerPromise = divineApiInFlight.get(cacheKey);
+  if (!providerPromise) {
+    const controller = new AbortController();
+    const providerTimeout = setTimeout(() => controller.abort(), config.providerTimeoutMs);
+    providerPromise = (async () => {
+      const res = await (fetchImpl ?? fetch)(`${config.baseUrl}${path}`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${config.accessToken}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Accept: 'application/json',
+        },
+        body: bodyString,
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        throw new Error(`DivineAPI request failed: ${res.status}`);
+      }
+      const json = await res.json();
+      assertDivineApiSuccess(json, requiredPaths);
+      validate?.(json);
+      if (config.cacheTtlMs > 0) {
+        const expiresAt = Date.now() + config.cacheTtlMs;
+        divineApiCache.set(cacheKey, {
+          expiresAt,
+          staleUntil: expiresAt + config.staleIfErrorMs,
+          value: json,
+        });
+      }
+      return json;
+    })()
+      .catch((error) => {
+        if (error instanceof DivineApiContractError) {
+          observedCapabilityFailures.set(capability, {
+            reason: error.reason === 'not-authorized' ? 'not-authorized' : 'invalid-response',
+            expiresAt: Date.now() + config.capabilityRefreshTtlMs,
+          });
+        }
+        throw error;
+      })
+      .finally(() => {
+        clearTimeout(providerTimeout);
+        divineApiInFlight.delete(cacheKey);
+      });
+    divineApiInFlight.set(cacheKey, providerPromise);
+    void providerPromise.catch(() => undefined);
+  }
+
+  const foregroundTimeout = Symbol('divineapi-foreground-timeout');
+  let foregroundTimer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const res = await (fetchImpl ?? fetch)(`${config.baseUrl}${path}`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${config.accessToken}`,
-        'Content-Type': 'application/x-www-form-urlencoded',
-        Accept: 'application/json',
-      },
-      body: bodyString,
-      signal: controller.signal,
-    });
-    if (!res.ok) {
-      throw new Error(`DivineAPI request failed: ${res.status}`);
+    const result = await Promise.race([
+      providerPromise,
+      new Promise<typeof foregroundTimeout>((resolve) => {
+        foregroundTimer = setTimeout(() => resolve(foregroundTimeout), config.requestTimeoutMs);
+      }),
+    ]);
+    if (result === foregroundTimeout) {
+      if (staleValue !== undefined) {
+        return { pending: false, json: staleValue, freshness: 'stale' };
+      }
+      return { pending: true };
     }
-    const json = await res.json();
-    assertDivineApiSuccess(json, requiredPaths);
-    validate?.(json);
-    if (config.cacheTtlMs > 0) {
-      const expiresAt = Date.now() + config.cacheTtlMs;
-      divineApiCache.set(cacheKey, {
-        expiresAt,
-        staleUntil: expiresAt + config.staleIfErrorMs,
-        value: json,
-      });
-    }
-    return { json, freshness: 'fresh' };
+    return { pending: false, json: result, freshness: 'fresh' };
   } catch (error) {
-    if (error instanceof DivineApiContractError) {
-      observedCapabilityFailures.set(capability, {
-        reason: error.reason === 'not-authorized' ? 'not-authorized' : 'invalid-response',
-        expiresAt: Date.now() + config.capabilityRefreshTtlMs,
-      });
+    if (staleValue !== undefined) {
+      return { pending: false, json: staleValue, freshness: 'stale' };
     }
-    if (staleValue !== undefined) return { json: staleValue, freshness: 'stale' };
     throw error;
   } finally {
-    clearTimeout(timeout);
+    if (foregroundTimer) clearTimeout(foregroundTimer);
   }
 }
 
