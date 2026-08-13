@@ -28,9 +28,11 @@
 <!-- 2026-07-09 Codex 补充：状态机 pre-execution guard：start(existing) 不再把 pending/queued 直接派发成 executing；pause 只允许 executing source；repository control transition 同步拒绝非 executing→paused 与非 paused→executing，防 queued/pending 绕过队列恢复。 -->
 <!-- 2026-07-09 Codex 补充：状态机 planning bootstrap 收口：新任务 seed 显式走 state:null + taskId + plan；start(existing planning) 改为 noop，避免历史/重连 planning 被误派发；tasks.create/smoke 与集成 fixture 已统一。 -->
 <!-- 2026-07-09 Codex 补充：技能 planner 闭环：planner catalogue 现在合并 DB SKILL.md rows + shared 13 用户可见技能；手动 @ 技能会注入 planner hint，避免前端选择了技能但通用 planner 不知道。 -->
-## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05@f006ac09`（2026-08-13 JST）
+## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05@109be03f`（2026-08-14 JST）
 
-SPA 与 Orchestrator 已部署 `f006ac09`（PR #41）。本轮上线今日能量幸运色语义化展示：DivineAPI 十六进制色值在星座专刊、体验页和运势正文显示为中文色名，并保留真实色点；线上 DivineAPI 真实返回 `#FFBF00`，页面显示“琥珀金”且正文无可见十六进制色值。生产发布前确认旧 LIVE HEAD `c5564ded` 是目标分支祖先；Orchestrator 构建、编号 migration、`db:verify`、非 root PM2 重启、必需密钥加载检查与 healthz 均通过，进程 `online`、restart count 0、最近错误扫描为空。Aliyun 与 Vultr SPA 原子发布均命中 `index-BSyoxXkV.js`，两侧 smoke 和公网 healthz 均通过。验证：今日能量 43 files / 181 tests、SPA lint/typecheck/build、ops 30/30 与 `git diff --check` 通过。PayPal disabled；CN payment 预检 `wechat=ready`、`alipay=ready`，本次 application 发布未部署或重启 CN Payment 与 AKShare。
+SPA 与 Orchestrator 已部署 `109be03f`（PR #43 + 超时热修复 PR #44）。今日能量星座内容切换现在先展示真实加载态；DivineAPI 请求最长等待 8 秒，超时后自动回退本地提示，避免无限加载。生产实测从“本月”加载态在约 8–9 秒内落到“暂时使用本地提示”，刷新按钮恢复可用且页面日志为空。Orchestrator 构建、编号 migration、`db:verify`、非 root PM2 重启、必需密钥加载与 healthz 均通过；进程 `online`、restart count 0。Aliyun 与 Vultr SPA 均命中 `index-Uoin6wia.js`，两侧 healthz 200；P0 smoke 11/11 通过。Canary 浏览器配置保持原值。
+
+上一生产版本记录：SPA 与 Orchestrator 曾部署 `f006ac09`（PR #41）。该轮上线今日能量幸运色语义化展示：DivineAPI 十六进制色值在星座专刊、体验页和运势正文显示为中文色名，并保留真实色点；线上 DivineAPI 真实返回 `#FFBF00`，页面显示“琥珀金”且正文无可见十六进制色值。生产发布前确认旧 LIVE HEAD `c5564ded` 是目标分支祖先；Orchestrator 构建、编号 migration、`db:verify`、非 root PM2 重启、必需密钥加载检查与 healthz 均通过，进程 `online`、restart count 0、最近错误扫描为空。Aliyun 与 Vultr SPA 原子发布均命中 `index-BSyoxXkV.js`，两侧 smoke 和公网 healthz 均通过。验证：今日能量 43 files / 181 tests、SPA lint/typecheck/build、ops 30/30 与 `git diff --check` 通过。PayPal disabled；CN payment 预检 `wechat=ready`、`alipay=ready`，该次 application 发布未部署或重启 CN Payment 与 AKShare。
 
 <!-- 2026-06-26 里程碑 — 🏁🏁 登录自学从机制到交易站真出货 + 四层 veto 防线 -->
 **🏁🏁 里程碑（2026-06-26）— 登录自学从机制到交易站真出货 + 四层 veto 防线全证通**
