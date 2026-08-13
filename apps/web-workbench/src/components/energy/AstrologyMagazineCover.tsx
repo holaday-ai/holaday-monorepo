@@ -1,5 +1,6 @@
 import { Sparkles } from 'lucide-react';
 import * as React from 'react';
+import { LuckyColorValue } from './LuckyColorValue';
 import type { EnergyPeriodReading } from './useEnergyAstrology';
 import { zodiacBadgeImage } from './zodiac-art';
 
@@ -43,7 +44,9 @@ export function AstrologyMagazineCover({
         <dl>
           <div>
             <dt>幸运色</dt>
-            <dd>{reading.luckyColors[0] ?? '等待提示'}</dd>
+            <dd>
+              <LuckyColorValue value={reading.luckyColors[0]} />
+            </dd>
           </div>
           <div>
             <dt>顺手时段</dt>

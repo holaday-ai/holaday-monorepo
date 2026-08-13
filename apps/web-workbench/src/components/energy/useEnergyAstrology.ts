@@ -8,6 +8,7 @@ import { type AppRouter, trpc } from '@/lib/trpc';
 import type { inferRouterOutputs } from '@trpc/server';
 import * as React from 'react';
 import type { EnergyAstrologyPeriod, EnergyAstrologyRangeKey } from './energy-types';
+import { presentLuckyColor } from './lucky-color';
 
 type AstrologyRouterOutput = inferRouterOutputs<AppRouter>['astrology'];
 type ProviderDaily = AstrologyRouterOutput['daily'];
@@ -616,6 +617,7 @@ function mergeProviderReading(local: AstroReading, provider: ProviderDaily): Ast
   const headline = provider.headline || local.headline;
   const workNote = provider.workNote || local.workNote;
   const luckyColor = provider.luckyColor || local.luckyColor;
+  const luckyColorLabel = presentLuckyColor(luckyColor).label;
   const next: AstroReading = {
     ...local,
     headline,
@@ -639,7 +641,7 @@ function mergeProviderReading(local: AstroReading, provider: ProviderDaily): Ast
       if (item.key === 'wealth') {
         return {
           ...item,
-          body: `适合检查订阅、预算、报价和待确认支出。幸运色 ${luckyColor} 可以当作今天的决策提醒。`,
+          body: `适合检查订阅、预算、报价和待确认支出。幸运色 ${luckyColorLabel} 可以当作今天的决策提醒。`,
         };
       }
       return item;

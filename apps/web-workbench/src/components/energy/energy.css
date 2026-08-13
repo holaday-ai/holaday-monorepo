@@ -1304,6 +1304,30 @@
   font-size: 12px;
 }
 
+.energy-lucky-color-value {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+
+.energy-lucky-color-swatch {
+  display: block;
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  border: 1px solid rgb(255 255 255 / 90%);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgb(88 63 104 / 18%);
+}
+
+.energy-lucky-color-value > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .energy-horoscope-work-note {
   margin: 13px 0 0;
   border-left: 3px solid #b494d3;

@@ -45,6 +45,28 @@ function astrologyState(source: EnergyAstrologyState['source'] = 'provider'): En
 }
 
 describe('HoroscopeExperience', () => {
+  it('shows provider hex colors as a human label with the original color swatch', () => {
+    const astrology = astrologyState();
+    astrology.reading = { ...astrology.reading, luckyColor: '#FF7E00' };
+
+    render(
+      <HoroscopeExperience
+        profile={profile}
+        astrology={astrology}
+        phase="active"
+        onPhaseChange={vi.fn()}
+        onComplete={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('金橙')).toBeTruthy();
+    expect(screen.queryByText('#FF7E00')).toBeNull();
+    const swatch = screen.getByTitle('#FF7E00');
+    expect(swatch.getAttribute('style')).toContain(
+      'background-color: #FF7E00',
+    );
+  });
+
   it('switches between honest daily and provider weekly sections', async () => {
     const user = userEvent.setup();
     render(
