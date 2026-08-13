@@ -1320,7 +1320,7 @@ function readNonNegativeMs(raw: string | undefined, fallback: number): number {
 function readPositiveMs(raw: string | undefined, fallback: number): number {
   if (!raw) return fallback;
   const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  if (!Number.isSafeInteger(parsed) || parsed <= 0 || parsed > 2_147_483_647) return fallback;
   return parsed;
 }
 
