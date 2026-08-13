@@ -82,6 +82,7 @@ function state(overrides: Partial<EnergyAstrologyState> = {}): EnergyAstrologySt
     yesNoLoading: false,
     source: 'provider',
     loading: false,
+    initialLoading: false,
     error: null,
     periods: {
       daily: periodState('daily'),
@@ -190,6 +191,55 @@ describe('AstrologyWorld', () => {
     expect(loadPeriod).not.toHaveBeenCalled();
     await user.click(screen.getByRole('tab', { name: '本月' }));
     expect(loadPeriod).toHaveBeenCalledWith('monthly', 'current');
+  });
+
+  it('hides local period content and source while the first period request is pending', () => {
+    const astrology = state();
+    astrology.initialLoading = true;
+    astrology.loading = true;
+    astrology.periods.daily = periodState('daily', {
+      loading: true,
+      loaded: false,
+      source: 'local-fallback',
+      reading: periodReading('daily', {
+        provider: 'mock',
+        source: 'local-fallback',
+        freshness: 'local',
+        summary: '本地备用摘要',
+      }),
+    });
+
+    render(
+      <AstrologyWorld
+        astrology={astrology}
+        onOpenEnergyCard={vi.fn()}
+        onOpenLightTest={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('正在读取这一段星座内容…')).toBeTruthy();
+    expect(screen.getByTestId('astrology-period-skeleton')).toBeTruthy();
+    expect(screen.queryByText('Holaday 本地提示')).toBeNull();
+    expect(screen.queryByText('本地备用摘要')).toBeNull();
+    expect(screen.queryByText('工作提示')).toBeNull();
+  });
+
+  it('keeps loaded provider details visible without a first-load notice during refresh', () => {
+    const astrology = state();
+    astrology.loading = true;
+    astrology.periods.daily = periodState('daily', { loading: true, loaded: true });
+
+    render(
+      <AstrologyWorld
+        astrology={astrology}
+        onOpenEnergyCard={vi.fn()}
+        onOpenLightTest={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('工作提示')).toBeTruthy();
+    expect(screen.queryByText('正在读取这一段星座内容…')).toBeNull();
+    expect(screen.queryByTestId('astrology-period-skeleton')).toBeNull();
   });
 
   it('never renders an invented ranking or seven-day chart', async () => {

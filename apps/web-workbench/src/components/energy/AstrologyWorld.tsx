@@ -51,6 +51,7 @@ export const AstrologyWorld = React.forwardRef<AstrologyWorldHandle, AstrologyWo
     const [rankingRequested, setRankingRequested] = React.useState(false);
     const [signPickerOpen, setSignPickerOpen] = React.useState(false);
     const selectedState = astrology.periods[selectedPeriod];
+    const initialPeriodLoading = selectedState.loading && !selectedState.loaded;
     const completeRanking = hasCompleteRanking(astrology.ranking);
     const sourceLabel =
       selectedState.source === 'local-fallback'
@@ -101,7 +102,11 @@ export const AstrologyWorld = React.forwardRef<AstrologyWorldHandle, AstrologyWo
         className="energy-astrology-world energy-section-anchor"
         aria-labelledby="energy-astrology-world-title"
       >
-        <AstrologyMagazineCover reading={selectedState.reading} sourceLabel={sourceLabel} />
+        <AstrologyMagazineCover
+          reading={selectedState.reading}
+          sourceLabel={sourceLabel}
+          loading={initialPeriodLoading}
+        />
 
         <div className="energy-astrology-world__tabs" role="tablist" aria-label="星座范围">
           {TABS.map((tab) => (
@@ -145,29 +150,56 @@ export const AstrologyWorld = React.forwardRef<AstrologyWorldHandle, AstrologyWo
           role="tabpanel"
           aria-labelledby={`energy-astrology-tab-${selectedPeriod}`}
           className="energy-astrology-world__panel"
+          aria-busy={selectedState.loading}
         >
           <header className="energy-astrology-world__period-header">
             <p>
               <CalendarDays aria-hidden="true" />
-              {selectedState.reading.zodiacLabel} · {selectedState.reading.rangeLabel}
+              {initialPeriodLoading
+                ? `${selectedState.reading.zodiacLabel} · 正在准备阅读范围`
+                : `${selectedState.reading.zodiacLabel} · ${selectedState.reading.rangeLabel}`}
             </p>
             <button
               type="button"
               aria-label="刷新当前星座范围"
               title="刷新当前星座范围"
               disabled={selectedState.loading}
+              data-loading={selectedState.loading ? 'true' : undefined}
+              aria-busy={selectedState.loading}
               onClick={() => void astrology.refreshPeriod(selectedPeriod)}
             >
               <RefreshCw aria-hidden="true" />
             </button>
           </header>
 
-          {selectedState.loading ? <p aria-live="polite">正在读取这一段星座内容…</p> : null}
-          {selectedState.error ? (
-            <p className="energy-astrology-world__notice">{selectedState.error}</p>
-          ) : null}
-          <AstrologyDimensionGrid key={selectedPeriod} reading={selectedState.reading} />
-          <LuckyInsights reading={selectedState.reading} />
+          {initialPeriodLoading ? (
+            <div
+              className="energy-astrology-period-skeleton"
+              data-testid="astrology-period-skeleton"
+            >
+              <p aria-live="polite">正在读取这一段星座内容…</p>
+              <div aria-hidden="true">
+                {Array.from({ length: 6 }, (_, index) => (
+                  <span
+                    key={`dimension-${index + 1}`}
+                    className="energy-astrology-skeleton energy-astrology-skeleton--dimension"
+                  />
+                ))}
+              </div>
+              <span
+                className="energy-astrology-skeleton energy-astrology-skeleton--insights"
+                aria-hidden="true"
+              />
+            </div>
+          ) : (
+            <>
+              {selectedState.error ? (
+                <p className="energy-astrology-world__notice">{selectedState.error}</p>
+              ) : null}
+              <AstrologyDimensionGrid key={selectedPeriod} reading={selectedState.reading} />
+              <LuckyInsights reading={selectedState.reading} />
+            </>
+          )}
         </div>
 
         <section className="energy-astrology-world__continue" aria-label="继续探索星座内容">
