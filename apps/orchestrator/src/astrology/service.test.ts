@@ -753,6 +753,48 @@ describe('astrology service', () => {
     expect(sharedReplacement.headline).toBe('替代请求结果');
   });
 
+  it('does not let cleared work that ignores abort restore a capability failure', async () => {
+    vi.useFakeTimers();
+    let resolveProvider!: (response: Response) => void;
+    const providerSignals: AbortSignal[] = [];
+    const env = {
+      DIVINE_API_KEY: 'key',
+      DIVINE_ACCESS_TOKEN: 'token',
+      DIVINE_API_BASE_URL: 'https://example.test',
+      DIVINE_API_CAPABILITIES: 'daily-horoscope',
+      DIVINE_API_REQUEST_TIMEOUT_MS: '50',
+      DIVINE_API_PROVIDER_TIMEOUT_MS: '500',
+      DIVINE_API_CAPABILITIES_CHECKED_AT: '2026-08-12T00:00:00.000Z',
+    };
+    const fetchImpl = (async (_url, init) => {
+      if (init?.signal) providerSignals.push(init.signal);
+      return await new Promise<Response>((resolve) => {
+        resolveProvider = resolve;
+      });
+    }) as typeof fetch;
+    const pendingPromise = getDailyAstrologyReading(
+      { birthday: '1996-03-21', zodiacSign: 'aries' },
+      { env, fetchImpl },
+    );
+    await vi.advanceTimersByTimeAsync(50);
+    expect((await pendingPromise).providerRefreshPending).toBe(true);
+
+    clearDivineApiCacheForTest();
+    expect(providerSignals[0]?.aborted).toBe(true);
+    resolveProvider({
+      ok: true,
+      status: 200,
+      json: async () => ({ success: 2, msg: 'You are not authorized to access this API' }),
+    } as Response);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(divineApiStatus(env).capabilities).toContainEqual({
+      capability: 'daily-horoscope',
+      available: true,
+      checkedAt: '2026-08-12T00:00:00.000Z',
+    });
+  });
+
   it('uses the safe default when the provider timeout override exceeds Node timer limits', async () => {
     vi.useFakeTimers();
     const providerSignals: AbortSignal[] = [];

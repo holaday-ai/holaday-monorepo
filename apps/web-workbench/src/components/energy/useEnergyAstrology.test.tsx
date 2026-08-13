@@ -327,6 +327,34 @@ describe('useEnergyAstrology', () => {
     expect(result.current.reading.headline).toBe('手动刷新后的后台结果');
   });
 
+  it('clears visible loading when switching away during a manual refresh', async () => {
+    const refreshedDaily = deferred<ReturnType<typeof remoteReading>>();
+    trpcMocks.daily
+      .mockResolvedValueOnce(remoteReading('aries', '初始今日提示'))
+      .mockReturnValueOnce(refreshedDaily.promise);
+    const profile = createProfileFromBirthday({ birthday: '1996-03-21' });
+    const { result } = renderHook(() => useEnergyAstrology(profile, true));
+    await waitFor(() => expect(result.current.periods.daily.source).toBe('divineapi'));
+
+    act(() => {
+      void result.current.refreshPeriod('daily');
+    });
+    await waitFor(() => expect(result.current.periods.daily.loading).toBe(true));
+    act(() => {
+      result.current.activatePeriod('weekly');
+      result.current.activatePeriod('daily');
+    });
+
+    expect(result.current.periods.daily.loading).toBe(false);
+    expect(result.current.periods.daily.loaded).toBe(true);
+
+    await act(async () => {
+      refreshedDaily.resolve(remoteReading('aries', '已失效的手动刷新'));
+      await refreshedDaily.promise;
+    });
+    expect(result.current.reading.headline).toBe('初始今日提示');
+  });
+
   it('does not run an obsolete monthly range timer after the range changes', async () => {
     vi.useFakeTimers();
     trpcMocks.daily.mockResolvedValue(remoteReading('aries', '远端今日提示'));
@@ -354,6 +382,38 @@ describe('useEnergyAstrology', () => {
 
     expect(trpcMocks.monthly).toHaveBeenCalledTimes(2);
     expect(result.current.periods.monthly.reading.rangeKey).toBe('next');
+  });
+
+  it('reloads the visible monthly period after the astrology profile changes', async () => {
+    trpcMocks.daily.mockImplementation(({ zodiacSign }: { zodiacSign: string }) =>
+      Promise.resolve(remoteReading(zodiacSign as 'aries' | 'taurus', `${zodiacSign} daily`)),
+    );
+    trpcMocks.weekly.mockImplementation(({ zodiacSign }: { zodiacSign: string }) =>
+      Promise.resolve(remoteWeekly(zodiacSign as 'aries' | 'taurus')),
+    );
+    trpcMocks.monthly.mockImplementation(
+      ({ zodiacSign, month }: { zodiacSign: 'aries' | 'taurus'; month: 'current' | 'next' }) =>
+        Promise.resolve({ ...normalizedPeriod('monthly', zodiacSign), rangeKey: month }),
+    );
+    const aries = createProfileFromBirthday({ birthday: '1996-03-21' });
+    const taurus = createProfileFromBirthday({ birthday: '1996-04-21' });
+    const { result, rerender } = renderHook(({ profile }) => useEnergyAstrology(profile, true), {
+      initialProps: { profile: aries },
+    });
+    await waitFor(() => expect(result.current.periods.daily.source).toBe('divineapi'));
+    act(() => result.current.activatePeriod('monthly'));
+    await act(async () => {
+      await result.current.loadPeriod('monthly', 'current');
+    });
+    expect(trpcMocks.monthly).toHaveBeenCalledTimes(1);
+
+    rerender({ profile: taurus });
+
+    await waitFor(() => expect(trpcMocks.monthly).toHaveBeenCalledTimes(2));
+    expect(trpcMocks.monthly).toHaveBeenLastCalledWith(
+      expect.objectContaining({ zodiacSign: 'taurus', month: 'current' }),
+    );
+    await waitFor(() => expect(result.current.periods.monthly.reading.zodiacSign).toBe('taurus'));
   });
 
   it('clears pending silent refresh work when the hook unmounts', async () => {

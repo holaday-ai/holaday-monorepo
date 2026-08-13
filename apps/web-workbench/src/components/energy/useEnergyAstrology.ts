@@ -249,6 +249,10 @@ export function useEnergyAstrology(
       if (previousPeriod !== period) {
         clearSilentPeriodRefresh(previousPeriod);
         periodRequestIds.current[previousPeriod] += 1;
+        setPeriods((current) => ({
+          ...current,
+          [previousPeriod]: { ...current[previousPeriod], loading: false },
+        }));
         activePeriodRef.current = period;
       }
 
@@ -439,7 +443,8 @@ export function useEnergyAstrology(
     setYesNoLoading(false);
 
     if (!liveProvider) return;
-    void Promise.allSettled([
+    const activePeriod = activePeriodRef.current;
+    const initialRequests: Array<Promise<unknown>> = [
       trpc.astrology.status.query().then((status) => {
         if (statusRequestId !== statusRequestIdRef.current) return;
         const next = capabilityMap(status);
@@ -448,7 +453,13 @@ export function useEnergyAstrology(
       }),
       loadPeriod('daily'),
       loadPeriod('weekly'),
-    ]);
+    ];
+    if (activePeriod !== 'daily' && activePeriod !== 'weekly') {
+      initialRequests.push(
+        loadPeriod(activePeriod, periodRangeKeys.current[activePeriod] ?? 'current'),
+      );
+    }
+    void Promise.allSettled(initialRequests);
 
     return () => {
       statusRequestIdRef.current += 1;

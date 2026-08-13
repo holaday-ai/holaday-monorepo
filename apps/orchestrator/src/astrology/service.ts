@@ -943,7 +943,10 @@ async function postDivineApiJson(
       return json;
     })()
       .catch((error) => {
-        if (error instanceof DivineApiContractError) {
+        if (
+          error instanceof DivineApiContractError &&
+          divineApiInFlight.get(cacheKey)?.promise === providerPromise
+        ) {
           observedCapabilityFailures.set(capability, {
             reason: error.reason === 'not-authorized' ? 'not-authorized' : 'invalid-response',
             expiresAt: Date.now() + config.capabilityRefreshTtlMs,
