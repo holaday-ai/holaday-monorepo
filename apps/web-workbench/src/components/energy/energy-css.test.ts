@@ -103,4 +103,13 @@ describe('energy motion system', () => {
     expect(css).toMatch(/\.energy-section-nav button\s*\{[^}]*min-height:\s*44px/s);
     expect(css).toMatch(/\.energy-section-anchor\s*\{[^}]*scroll-margin-top:/s);
   });
+
+  it('keeps compact hero overrides at the base selector specificity on narrow screens', () => {
+    expect(css).toMatch(
+      /@media\s*\(max-width:\s*760px\)[\s\S]*\.energy-hero\.energy-hero--compact\s*\{[^}]*grid-template-areas:\s*"copy art"\s*"actions actions"[^}]*overflow:\s*clip/,
+    );
+    expect(css).toMatch(
+      /@media\s*\(max-width:\s*520px\)[\s\S]*\.energy-hero\.energy-hero--compact\s*\{[^}]*grid-template-areas:\s*"copy"\s*"actions"[^}]*grid-template-columns:\s*1fr[^}]*overflow:\s*clip/,
+    );
+  });
 });
