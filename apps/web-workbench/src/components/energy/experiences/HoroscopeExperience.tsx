@@ -36,6 +36,24 @@ export function HoroscopeExperience({
     );
   }
 
+  if (astrology.initialLoading) {
+    return (
+      <div className="energy-horoscope-loading" aria-busy="true" aria-live="polite">
+        <span className="energy-horoscope-loading__orb" aria-hidden="true">
+          <Sparkles />
+        </span>
+        <p className="energy-kicker">{astrology.reading.zodiacLabel} · 星座深度补给</p>
+        <h3>正在读取星座能量</h3>
+        <p>正在连接今日与本周星座内容，请稍等一下。</p>
+        <div aria-hidden="true">
+          <span className="energy-astrology-skeleton energy-astrology-skeleton--title" />
+          <span className="energy-astrology-skeleton energy-astrology-skeleton--line" />
+          <span className="energy-astrology-skeleton energy-astrology-skeleton--line-short" />
+        </div>
+      </div>
+    );
+  }
+
   const weeklySections = weeklyHoroscopeSections(astrology.weekly);
 
   return (
@@ -57,6 +75,8 @@ export function HoroscopeExperience({
           type="button"
           className="energy-horoscope-refresh"
           disabled={astrology.loading}
+          data-loading={astrology.loading ? 'true' : undefined}
+          aria-busy={astrology.loading}
           aria-label="更新星座提示"
           title="更新星座提示"
           onClick={() => void astrology.refresh()}

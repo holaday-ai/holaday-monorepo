@@ -130,6 +130,20 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('useEnergyAstrology', () => {
+  it('marks automatic provider periods as initial loading before either request resolves', () => {
+    const daily = deferred<ReturnType<typeof remoteReading>>();
+    const weekly = deferred<ReturnType<typeof remoteWeekly>>();
+    trpcMocks.daily.mockReturnValue(daily.promise);
+    trpcMocks.weekly.mockReturnValue(weekly.promise);
+    const profile = createProfileFromBirthday({ birthday: '1996-03-21' });
+
+    const { result } = renderHook(() => useEnergyAstrology(profile, true));
+
+    expect(result.current.initialLoading).toBe(true);
+    expect(result.current.periods.daily).toMatchObject({ loading: true, loaded: false });
+    expect(result.current.periods.weekly).toMatchObject({ loading: true, loaded: false });
+  });
+
   it('uses distinct local copy for daily weekly monthly and yearly ranges', () => {
     const profile = createProfileFromBirthday({ birthday: '1996-03-21' });
     const { result } = renderHook(() => useEnergyAstrology(profile, false));
@@ -212,6 +226,28 @@ describe('useEnergyAstrology', () => {
     });
   });
 
+  it('does not put the daily and weekly summary back into initial loading for a new period', async () => {
+    const monthly = deferred<ReturnType<typeof normalizedPeriod>>();
+    trpcMocks.daily.mockResolvedValue(remoteReading('aries', '远端今日提示'));
+    trpcMocks.monthly.mockReturnValue(monthly.promise);
+    const profile = createProfileFromBirthday({ birthday: '1996-03-21' });
+    const { result } = renderHook(() => useEnergyAstrology(profile, true));
+
+    await waitFor(() => expect(result.current.periods.daily.source).toBe('divineapi'));
+    act(() => {
+      void result.current.loadPeriod('monthly', 'current');
+    });
+    await waitFor(() => expect(result.current.periods.monthly.loading).toBe(true));
+
+    expect(result.current.periods.monthly.loaded).toBe(false);
+    expect(result.current.initialLoading).toBe(false);
+
+    await act(async () => {
+      monthly.resolve(normalizedPeriod('monthly'));
+      await monthly.promise;
+    });
+  });
+
   it('loads yes/no tarot only when the capability is enabled and the user requests it', async () => {
     trpcMocks.status.mockResolvedValue(
       capabilityStatus(['daily-horoscope', 'weekly-horoscope', 'yes-no-tarot']),
@@ -273,5 +309,35 @@ describe('useEnergyAstrology', () => {
     });
 
     expect(result.current.reading.headline).toBe('最新金牛提示');
+  });
+
+  it('keeps loaded provider content visible while a manual refresh is pending', async () => {
+    const refreshedDaily = deferred<ReturnType<typeof remoteReading>>();
+    const refreshedWeekly = deferred<ReturnType<typeof remoteWeekly>>();
+    trpcMocks.daily
+      .mockResolvedValueOnce(remoteReading('aries', '远端今日提示'))
+      .mockReturnValueOnce(refreshedDaily.promise);
+    trpcMocks.weekly
+      .mockResolvedValueOnce(remoteWeekly())
+      .mockReturnValueOnce(refreshedWeekly.promise);
+    const profile = createProfileFromBirthday({ birthday: '1996-03-21' });
+    const { result } = renderHook(() => useEnergyAstrology(profile, true));
+
+    await waitFor(() => expect(result.current.periods.daily.source).toBe('divineapi'));
+    act(() => {
+      void result.current.refresh();
+    });
+    await waitFor(() => expect(result.current.loading).toBe(true));
+
+    expect(result.current.initialLoading).toBe(false);
+    expect(result.current.periods.daily.loaded).toBe(true);
+    expect(result.current.periods.weekly.loaded).toBe(true);
+    expect(result.current.reading.headline).toBe('远端今日提示');
+
+    await act(async () => {
+      refreshedDaily.resolve(remoteReading('aries', '刷新后的今日提示'));
+      refreshedWeekly.resolve(remoteWeekly());
+      await Promise.all([refreshedDaily.promise, refreshedWeekly.promise]);
+    });
   });
 });

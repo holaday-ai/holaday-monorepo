@@ -50,6 +50,7 @@ function astrologyFor(profile: AstroProfile): EnergyAstrologyState {
     yesNoLoading: false,
     source: 'local-fallback',
     loading: false,
+    initialLoading: false,
     error: null,
     periods: {} as EnergyAstrologyState['periods'],
     capabilities: {},
@@ -98,5 +99,30 @@ describe('EnergyAstrologyPanel zodiac art', () => {
     expect(screen.getByText('本地备用提示')).toBeTruthy();
     expect(screen.getByText('今日 + 本周星座提示')).toBeTruthy();
     expect(screen.queryByText(/真实星座提示/)).toBeNull();
+  });
+
+  it('shows a trusted loading state without local fallback copy', () => {
+    const profile = profileFor('aries');
+    const astrology = astrologyFor(profile);
+    astrology.initialLoading = true;
+    astrology.loading = true;
+
+    const { container } = render(
+      <EnergyAstrologyPanel
+        profile={profile}
+        astrology={astrology}
+        canEditProfile
+        onOpen={vi.fn()}
+        onEditProfile={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('正在读取星座能量')).toBeTruthy();
+    expect(screen.queryByText('本地备用提示')).toBeNull();
+    expect(screen.queryByText(astrology.reading.headline)).toBeNull();
+    expect(screen.queryByText(astrology.reading.workNote)).toBeNull();
+    expect(container.querySelector('.energy-astrology-panel')?.getAttribute('aria-busy')).toBe(
+      'true',
+    );
   });
 });

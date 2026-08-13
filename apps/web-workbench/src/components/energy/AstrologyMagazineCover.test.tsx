@@ -30,7 +30,7 @@ afterEach(cleanup);
 
 describe('AstrologyMagazineCover', () => {
   it('renders provider hex colors as a human label with the original color swatch', () => {
-    render(<AstrologyMagazineCover reading={reading} sourceLabel="DivineAPI 内容" />);
+    render(<AstrologyMagazineCover reading={reading} sourceLabel="DivineAPI 内容" loading={false} />);
     expect(screen.getAllByRole('img', { name: '白羊座马卡龙专刊封面' })).toHaveLength(1);
     expect(screen.getByText('金橙')).toBeTruthy();
     expect(screen.queryByText('#FF7E00')).toBeNull();
@@ -48,6 +48,7 @@ describe('AstrologyMagazineCover', () => {
       <AstrologyMagazineCover
         reading={{ ...reading, luckyColors: ['#FFBF00'] }}
         sourceLabel="DivineAPI 内容"
+        loading={false}
       />,
     );
 
@@ -57,7 +58,7 @@ describe('AstrologyMagazineCover', () => {
   });
 
   it('uses a visible cover fallback after image failure', () => {
-    render(<AstrologyMagazineCover reading={reading} sourceLabel="DivineAPI 内容" />);
+    render(<AstrologyMagazineCover reading={reading} sourceLabel="DivineAPI 内容" loading={false} />);
     fireEvent.error(screen.getByRole('img', { name: '白羊座马卡龙专刊封面' }));
     expect(screen.getByTestId('zodiac-cover-fallback')).toBeTruthy();
   });
