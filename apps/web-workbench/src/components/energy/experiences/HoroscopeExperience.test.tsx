@@ -30,6 +30,7 @@ function astrologyState(source: EnergyAstrologyState['source'] = 'provider'): En
     yesNoLoading: false,
     source,
     loading: false,
+    initialLoading: false,
     error: source === 'local-fallback' ? '暂时使用本地提示' : null,
     periods: {} as EnergyAstrologyState['periods'],
     capabilities: {},
@@ -124,5 +125,29 @@ describe('HoroscopeExperience', () => {
 
     expect(screen.getByText('暂时使用本地提示')).toBeTruthy();
     expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('hides local fallback content while the first provider request is pending', () => {
+    const astrology = astrologyState('local-fallback');
+    astrology.initialLoading = true;
+    astrology.loading = true;
+
+    const { container } = render(
+      <HoroscopeExperience
+        profile={profile}
+        astrology={astrology}
+        phase="active"
+        onPhaseChange={vi.fn()}
+        onComplete={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('正在读取星座能量')).toBeTruthy();
+    expect(screen.queryByText('暂时使用本地提示')).toBeNull();
+    expect(screen.queryByText(astrology.reading.headline)).toBeNull();
+    expect(screen.queryByText(`${astrology.reading.energyScore}%`)).toBeNull();
+    expect(container.querySelector('.energy-horoscope-loading')?.getAttribute('aria-busy')).toBe(
+      'true',
+    );
   });
 });
