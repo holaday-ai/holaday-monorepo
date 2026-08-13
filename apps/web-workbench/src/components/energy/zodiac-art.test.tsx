@@ -56,6 +56,7 @@ function astrologyFor(profile: AstroProfile): EnergyAstrologyState {
     capabilities: {},
     ranking: { complete: false, items: [], loaded: false, loading: false, error: null },
     signPreview: null,
+    activatePeriod: vi.fn(),
     loadPeriod: vi.fn().mockResolvedValue(undefined),
     refreshPeriod: vi.fn().mockResolvedValue(undefined),
     loadRanking: vi.fn().mockResolvedValue(undefined),

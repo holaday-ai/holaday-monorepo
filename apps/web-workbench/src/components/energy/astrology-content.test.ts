@@ -9,6 +9,7 @@ function reading(scores: Array<number | null>): EnergyPeriodReading {
     provider: 'divineapi',
     source: 'divineapi',
     freshness: 'fresh',
+    providerRefreshPending: false,
     zodiacSign: 'aries',
     zodiacLabel: '白羊座',
     rangeLabel: '2026-08-12',

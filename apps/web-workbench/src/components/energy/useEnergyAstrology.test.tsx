@@ -49,6 +49,7 @@ function normalizedPeriod(
     provider: 'divineapi' as const,
     source: 'divineapi' as const,
     freshness: 'fresh' as const,
+    providerRefreshPending: false,
     zodiacSign,
     zodiacLabel: zodiacSign === 'aries' ? '白羊座' : '金牛座',
     rangeLabel: period === 'daily' ? '2026-08-12' : `2026 ${period}`,
@@ -94,6 +95,26 @@ function remoteWeekly(zodiacSign: 'aries' | 'taurus' = 'aries') {
   };
 }
 
+function pendingLocalDaily(zodiacSign: 'aries' | 'taurus' = 'aries') {
+  return {
+    ...remoteReading(zodiacSign, '本地备用提示'),
+    provider: 'mock' as const,
+    source: 'local-fallback' as const,
+    freshness: 'local' as const,
+    providerRefreshPending: true,
+  };
+}
+
+function pendingLocalWeekly(zodiacSign: 'aries' | 'taurus' = 'aries') {
+  return {
+    ...remoteWeekly(zodiacSign),
+    provider: 'mock' as const,
+    source: 'local-fallback' as const,
+    freshness: 'local' as const,
+    providerRefreshPending: true,
+  };
+}
+
 function capabilityStatus(enabled: string[] = ['daily-horoscope', 'weekly-horoscope']) {
   return {
     enabled: true,
@@ -127,7 +148,10 @@ beforeEach(() => {
   trpcMocks.ranking.mockResolvedValue({ complete: false, items: [] });
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 describe('useEnergyAstrology', () => {
   it('marks automatic provider periods as initial loading before either request resolves', () => {
@@ -201,6 +225,263 @@ describe('useEnergyAstrology', () => {
     expect(result.current.periods.weekly.source).toBe('local-fallback');
     expect(result.current.periods.weekly.error).toBe('暂时使用本地提示');
     expect(result.current.reading.headline).toBe('远端今日提示');
+  });
+
+  it('silently upgrades a pending local period without showing loading again', async () => {
+    vi.useFakeTimers();
+    trpcMocks.daily
+      .mockResolvedValueOnce(pendingLocalDaily())
+      .mockResolvedValueOnce(remoteReading('aries', '后台真实中文提示'));
+    const profile = createProfileFromBirthday({ birthday: '1996-03-21' });
+
+    const { result } = renderHook(() => useEnergyAstrology(profile, true));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    expect(result.current.periods.daily).toMatchObject({
+      source: 'local-fallback',
+      loading: false,
+      error: '暂时使用本地提示',
+    });
+    expect(trpcMocks.daily).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(18_000);
+    });
+
+    expect(trpcMocks.daily).toHaveBeenCalledTimes(2);
+    expect(result.current.periods.daily.loading).toBe(false);
+    expect(result.current.periods.daily.source).toBe('divineapi');
+    expect(result.current.periods.daily.error).toBeNull();
+    expect(result.current.reading.headline).toBe('后台真实中文提示');
+  });
+
+  it('stops silent refresh after two pending rechecks and does not preheat ranking', async () => {
+    vi.useFakeTimers();
+    trpcMocks.daily.mockResolvedValue(pendingLocalDaily());
+    const profile = createProfileFromBirthday({ birthday: '1996-03-21' });
+
+    renderHook(() => useEnergyAstrology(profile, true));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(18_000);
+      await vi.advanceTimersByTimeAsync(5_000);
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+
+    expect(trpcMocks.daily).toHaveBeenCalledTimes(3);
+    expect(trpcMocks.ranking).not.toHaveBeenCalled();
+  });
+
+  it('silently rechecks only the visible daily period by default', async () => {
+    vi.useFakeTimers();
+    trpcMocks.daily.mockResolvedValue(pendingLocalDaily());
+    trpcMocks.weekly.mockResolvedValue(pendingLocalWeekly());
+    const profile = createProfileFromBirthday({ birthday: '1996-03-21' });
+
+    renderHook(() => useEnergyAstrology(profile, true));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(18_000);
+    });
+
+    expect(trpcMocks.daily).toHaveBeenCalledTimes(2);
+    expect(trpcMocks.weekly).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancels the old visible period and rechecks a newly activated pending period', async () => {
+    vi.useFakeTimers();
+    trpcMocks.daily.mockResolvedValue(pendingLocalDaily());
+    trpcMocks.weekly.mockResolvedValue(pendingLocalWeekly());
+    const profile = createProfileFromBirthday({ birthday: '1996-03-21' });
+    const { result } = renderHook(() => useEnergyAstrology(profile, true));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    act(() => result.current.activatePeriod('weekly'));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(18_000);
+    });
+
+    expect(trpcMocks.daily).toHaveBeenCalledTimes(1);
+    expect(trpcMocks.weekly).toHaveBeenCalledTimes(2);
+  });
+
+  it('invalidates the old silent timer when the visible period is manually refreshed', async () => {
+    vi.useFakeTimers();
+    trpcMocks.daily
+      .mockResolvedValueOnce(pendingLocalDaily())
+      .mockResolvedValueOnce(pendingLocalDaily())
+      .mockResolvedValueOnce(remoteReading('aries', '手动刷新后的后台结果'));
+    const profile = createProfileFromBirthday({ birthday: '1996-03-21' });
+    const { result } = renderHook(() => useEnergyAstrology(profile, true));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+      await result.current.refreshPeriod('daily');
+      await vi.advanceTimersByTimeAsync(18_000);
+    });
+
+    expect(trpcMocks.daily).toHaveBeenCalledTimes(3);
+    expect(result.current.reading.headline).toBe('手动刷新后的后台结果');
+  });
+
+  it('clears visible loading when switching away during a manual refresh', async () => {
+    const refreshedDaily = deferred<ReturnType<typeof remoteReading>>();
+    trpcMocks.daily
+      .mockResolvedValueOnce(remoteReading('aries', '初始今日提示'))
+      .mockReturnValueOnce(refreshedDaily.promise);
+    const profile = createProfileFromBirthday({ birthday: '1996-03-21' });
+    const { result } = renderHook(() => useEnergyAstrology(profile, true));
+    await waitFor(() => expect(result.current.periods.daily.source).toBe('divineapi'));
+
+    act(() => {
+      void result.current.refreshPeriod('daily');
+    });
+    await waitFor(() => expect(result.current.periods.daily.loading).toBe(true));
+    act(() => {
+      result.current.activatePeriod('weekly');
+      result.current.activatePeriod('daily');
+    });
+
+    expect(result.current.periods.daily.loading).toBe(false);
+    expect(result.current.periods.daily.loaded).toBe(true);
+
+    await act(async () => {
+      refreshedDaily.resolve(remoteReading('aries', '已失效的手动刷新'));
+      await refreshedDaily.promise;
+    });
+    expect(result.current.reading.headline).toBe('初始今日提示');
+  });
+
+  it('does not run an obsolete monthly range timer after the range changes', async () => {
+    vi.useFakeTimers();
+    trpcMocks.daily.mockResolvedValue(remoteReading('aries', '远端今日提示'));
+    trpcMocks.monthly
+      .mockResolvedValueOnce({
+        ...normalizedPeriod('monthly'),
+        provider: 'mock' as const,
+        source: 'local-fallback' as const,
+        freshness: 'local' as const,
+        providerRefreshPending: true,
+      })
+      .mockResolvedValueOnce({
+        ...normalizedPeriod('monthly'),
+        rangeKey: 'next' as const,
+      });
+    const profile = createProfileFromBirthday({ birthday: '1996-03-21' });
+    const { result } = renderHook(() => useEnergyAstrology(profile, true));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+      result.current.activatePeriod('monthly');
+      await result.current.loadPeriod('monthly', 'current');
+      await result.current.loadPeriod('monthly', 'next');
+      await vi.advanceTimersByTimeAsync(18_000);
+    });
+
+    expect(trpcMocks.monthly).toHaveBeenCalledTimes(2);
+    expect(result.current.periods.monthly.reading.rangeKey).toBe('next');
+  });
+
+  it('reloads the visible monthly period after the astrology profile changes', async () => {
+    trpcMocks.daily.mockImplementation(({ zodiacSign }: { zodiacSign: string }) =>
+      Promise.resolve(remoteReading(zodiacSign as 'aries' | 'taurus', `${zodiacSign} daily`)),
+    );
+    trpcMocks.weekly.mockImplementation(({ zodiacSign }: { zodiacSign: string }) =>
+      Promise.resolve(remoteWeekly(zodiacSign as 'aries' | 'taurus')),
+    );
+    trpcMocks.monthly.mockImplementation(
+      ({ zodiacSign, month }: { zodiacSign: 'aries' | 'taurus'; month: 'current' | 'next' }) =>
+        Promise.resolve({ ...normalizedPeriod('monthly', zodiacSign), rangeKey: month }),
+    );
+    const aries = createProfileFromBirthday({ birthday: '1996-03-21' });
+    const taurus = createProfileFromBirthday({ birthday: '1996-04-21' });
+    const { result, rerender } = renderHook(({ profile }) => useEnergyAstrology(profile, true), {
+      initialProps: { profile: aries },
+    });
+    await waitFor(() => expect(result.current.periods.daily.source).toBe('divineapi'));
+    act(() => result.current.activatePeriod('monthly'));
+    await act(async () => {
+      await result.current.loadPeriod('monthly', 'current');
+    });
+    expect(trpcMocks.monthly).toHaveBeenCalledTimes(1);
+
+    rerender({ profile: taurus });
+
+    await waitFor(() => expect(trpcMocks.monthly).toHaveBeenCalledTimes(2));
+    expect(trpcMocks.monthly).toHaveBeenLastCalledWith(
+      expect.objectContaining({ zodiacSign: 'taurus', month: 'current' }),
+    );
+    await waitFor(() => expect(result.current.periods.monthly.reading.zodiacSign).toBe('taurus'));
+  });
+
+  it('clears pending silent refresh work when the hook unmounts', async () => {
+    vi.useFakeTimers();
+    trpcMocks.daily.mockResolvedValue(pendingLocalDaily());
+    const profile = createProfileFromBirthday({ birthday: '1996-03-21' });
+    const { unmount } = renderHook(() => useEnergyAstrology(profile, true));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    unmount();
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(trpcMocks.daily).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not silently retry an ordinary local fallback', async () => {
+    vi.useFakeTimers();
+    trpcMocks.daily.mockResolvedValue({
+      ...pendingLocalDaily(),
+      providerRefreshPending: false,
+    });
+    const profile = createProfileFromBirthday({ birthday: '1996-03-21' });
+
+    renderHook(() => useEnergyAstrology(profile, true));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+
+    expect(trpcMocks.daily).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not let a late silent refresh overwrite a new profile', async () => {
+    vi.useFakeTimers();
+    const lateAries = deferred<ReturnType<typeof remoteReading>>();
+    trpcMocks.daily.mockImplementation(({ zodiacSign }: { zodiacSign: string }) => {
+      if (zodiacSign === 'aries' && trpcMocks.daily.mock.calls.length === 1) {
+        return Promise.resolve(pendingLocalDaily('aries'));
+      }
+      if (zodiacSign === 'aries') return lateAries.promise;
+      return Promise.resolve(remoteReading('taurus', '最新金牛提示'));
+    });
+    trpcMocks.weekly.mockImplementation(({ zodiacSign }: { zodiacSign: string }) =>
+      Promise.resolve(remoteWeekly(zodiacSign as 'aries' | 'taurus')),
+    );
+    const aries = createProfileFromBirthday({ birthday: '1996-03-21' });
+    const taurus = createProfileFromBirthday({ birthday: '1996-04-21' });
+    const { result, rerender } = renderHook(({ profile }) => useEnergyAstrology(profile, true), {
+      initialProps: { profile: aries },
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(18_000);
+    });
+    rerender({ profile: taurus });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(result.current.reading.headline).toBe('最新金牛提示');
+
+    await act(async () => {
+      lateAries.resolve(remoteReading('aries', '过期白羊静默结果'));
+      await lateAries.promise;
+    });
+
+    expect(result.current.reading.headline).toBe('最新金牛提示');
   });
 
   it('does not fetch monthly until requested', async () => {

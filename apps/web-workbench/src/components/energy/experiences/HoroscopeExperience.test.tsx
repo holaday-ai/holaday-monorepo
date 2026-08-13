@@ -36,6 +36,7 @@ function astrologyState(source: EnergyAstrologyState['source'] = 'provider'): En
     capabilities: {},
     ranking: { complete: false, items: [], loaded: false, loading: false, error: null },
     signPreview: null,
+    activatePeriod: vi.fn(),
     loadPeriod: vi.fn(),
     refreshPeriod: vi.fn(),
     loadRanking: vi.fn(),
@@ -63,9 +64,7 @@ describe('HoroscopeExperience', () => {
     expect(screen.getByText('金橙')).toBeTruthy();
     expect(screen.queryByText('#FF7E00')).toBeNull();
     const swatch = screen.getByTitle('#FF7E00');
-    expect(swatch.getAttribute('style')).toContain(
-      'background-color: #FF7E00',
-    );
+    expect(swatch.getAttribute('style')).toContain('background-color: #FF7E00');
   });
 
   it('switches between honest daily and provider weekly sections', async () => {

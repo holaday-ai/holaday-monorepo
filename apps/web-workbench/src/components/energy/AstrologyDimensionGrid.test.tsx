@@ -11,6 +11,7 @@ const reading: EnergyPeriodReading = {
   provider: 'divineapi',
   source: 'divineapi',
   freshness: 'fresh',
+  providerRefreshPending: false,
   zodiacSign: 'aries',
   zodiacLabel: '白羊座',
   rangeLabel: '2026-08-12',
@@ -41,7 +42,9 @@ describe('AstrologyDimensionGrid', () => {
     const user = userEvent.setup();
     const { container } = render(<AstrologyDimensionGrid reading={reading} />);
 
-    expect(container.querySelector('[data-dimension="profession"][data-tone="peach"]')).toBeTruthy();
+    expect(
+      container.querySelector('[data-dimension="profession"][data-tone="peach"]'),
+    ).toBeTruthy();
     expect(container.querySelector('[data-dimension="health"][data-tone="mint"]')).toBeTruthy();
     expect(container.querySelectorAll('img[data-dimension-art]')).toHaveLength(3);
     expect(container.querySelector('[data-dimension-body]')).toBeNull();
@@ -51,9 +54,7 @@ describe('AstrologyDimensionGrid', () => {
 
     await user.click(screen.getByRole('button', { name: '展开全部六项' }));
 
-    const images = [
-      ...container.querySelectorAll<HTMLImageElement>('img[data-dimension-art]'),
-    ];
+    const images = [...container.querySelectorAll<HTMLImageElement>('img[data-dimension-art]')];
     expect(images).toHaveLength(6);
     expect(new Set(images.map((image) => image.src)).size).toBe(6);
   });
