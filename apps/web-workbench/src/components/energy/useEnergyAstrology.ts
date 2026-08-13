@@ -80,6 +80,7 @@ export interface EnergyAstrologyState {
   yesNoLoading: boolean;
   source: 'provider' | 'local-fallback';
   loading: boolean;
+  initialLoading: boolean;
   error: string | null;
   periods: Record<EnergyAstrologyPeriod, EnergyPeriodState>;
   capabilities: Record<string, boolean>;
@@ -134,7 +135,7 @@ export function useEnergyAstrology(
   const yesNoRequestIdRef = React.useRef(0);
   const capabilitiesRef = React.useRef<Record<string, boolean>>({});
   const [periods, setPeriods] = React.useState<Record<EnergyAstrologyPeriod, EnergyPeriodState>>(
-    () => localPeriods,
+    () => initialPeriodStates(localPeriods, liveProvider),
   );
   const [compatibilityReading, setCompatibilityReading] = React.useState(localReading);
   const [compatibilityWeekly, setCompatibilityWeekly] = React.useState(localWeekly);
@@ -305,7 +306,7 @@ export function useEnergyAstrology(
     yesNoRequestIdRef.current += 1;
     capabilitiesRef.current = {};
     setCapabilities({});
-    setPeriods(localPeriods);
+    setPeriods(initialPeriodStates(localPeriods, liveProvider));
     setCompatibilityReading(localReading);
     setCompatibilityWeekly(localWeekly);
     setRanking({ complete: false, items: [], loaded: false, loading: false, error: null });
@@ -336,6 +337,9 @@ export function useEnergyAstrology(
 
   const source = periods.daily.source === 'divineapi' ? 'provider' : 'local-fallback';
   const loading = periods.daily.loading || periods.weekly.loading;
+  const initialLoading = PERIODS.some(
+    (period) => periods[period].loading && !periods[period].loaded,
+  );
   const error = periods.daily.error ?? periods.weekly.error;
 
   return React.useMemo(
@@ -347,6 +351,7 @@ export function useEnergyAstrology(
       yesNoLoading,
       source,
       loading,
+      initialLoading,
       error,
       periods,
       capabilities,
@@ -369,6 +374,7 @@ export function useEnergyAstrology(
       loadRanking,
       loadSignPreview,
       loading,
+      initialLoading,
       localTarot,
       periods,
       ranking,
@@ -380,6 +386,18 @@ export function useEnergyAstrology(
       yesNoTarot,
     ],
   );
+}
+
+function initialPeriodStates(
+  localPeriods: Record<EnergyAstrologyPeriod, EnergyPeriodState>,
+  liveProvider: boolean,
+): Record<EnergyAstrologyPeriod, EnergyPeriodState> {
+  if (!liveProvider) return localPeriods;
+  return {
+    ...localPeriods,
+    daily: { ...localPeriods.daily, loading: true, loaded: false, error: null },
+    weekly: { ...localPeriods.weekly, loading: true, loaded: false, error: null },
+  };
 }
 
 function profileInput(profile: AstroProfile) {
