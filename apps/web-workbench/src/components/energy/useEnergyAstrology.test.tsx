@@ -226,6 +226,28 @@ describe('useEnergyAstrology', () => {
     });
   });
 
+  it('does not put the daily and weekly summary back into initial loading for a new period', async () => {
+    const monthly = deferred<ReturnType<typeof normalizedPeriod>>();
+    trpcMocks.daily.mockResolvedValue(remoteReading('aries', '远端今日提示'));
+    trpcMocks.monthly.mockReturnValue(monthly.promise);
+    const profile = createProfileFromBirthday({ birthday: '1996-03-21' });
+    const { result } = renderHook(() => useEnergyAstrology(profile, true));
+
+    await waitFor(() => expect(result.current.periods.daily.source).toBe('divineapi'));
+    act(() => {
+      void result.current.loadPeriod('monthly', 'current');
+    });
+    await waitFor(() => expect(result.current.periods.monthly.loading).toBe(true));
+
+    expect(result.current.periods.monthly.loaded).toBe(false);
+    expect(result.current.initialLoading).toBe(false);
+
+    await act(async () => {
+      monthly.resolve(normalizedPeriod('monthly'));
+      await monthly.promise;
+    });
+  });
+
   it('loads yes/no tarot only when the capability is enabled and the user requests it', async () => {
     trpcMocks.status.mockResolvedValue(
       capabilityStatus(['daily-horoscope', 'weekly-horoscope', 'yes-no-tarot']),

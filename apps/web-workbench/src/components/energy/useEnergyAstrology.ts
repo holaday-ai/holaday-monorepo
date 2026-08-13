@@ -337,7 +337,7 @@ export function useEnergyAstrology(
 
   const source = periods.daily.source === 'divineapi' ? 'provider' : 'local-fallback';
   const loading = periods.daily.loading || periods.weekly.loading;
-  const initialLoading = PERIODS.some(
+  const initialLoading = (['daily', 'weekly'] as const).some(
     (period) => periods[period].loading && !periods[period].loaded,
   );
   const error = periods.daily.error ?? periods.weekly.error;

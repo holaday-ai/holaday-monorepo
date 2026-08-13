@@ -63,6 +63,17 @@ describe('energy motion system', () => {
     expect(css).toMatch(/prefers-reduced-motion:[\s\S]*\.energy-explore-feed__grid article/);
   });
 
+  it('provides macaron astrology skeletons with a reduced-motion fallback', () => {
+    expect(css).toContain('@keyframes energy-astrology-shimmer');
+    expect(css).toMatch(/\.energy-astrology-skeleton\s*\{[^}]*linear-gradient/s);
+    expect(css).toMatch(
+      /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.energy-astrology-skeleton,[\s\S]*animation:\s*none\s*!important/,
+    );
+    expect(css).toMatch(
+      /@media\s*\(max-width:\s*640px\)[\s\S]*\.energy-astrology-period-skeleton\s*>\s*div\s*\{[^}]*grid-template-columns:\s*1fr/,
+    );
+  });
+
   it('keeps supporting copy readable and mobile content actions touch friendly', () => {
     const portalTitle = css.match(/\.energy-astrology-portals strong\s*\{[^}]+\}/)?.[0];
     const portalHint = css.match(
