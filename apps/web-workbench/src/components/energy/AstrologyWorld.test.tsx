@@ -2,8 +2,8 @@
 
 import { buildAstroReading, createProfileFromBirthday } from '@/lib/astrology';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import * as React from 'react';
 import userEvent from '@testing-library/user-event';
+import * as React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AstrologyWorld, type AstrologyWorldHandle } from './AstrologyWorld';
 import type {
@@ -24,6 +24,7 @@ function periodReading(
     provider: 'divineapi',
     source: 'divineapi',
     freshness: 'fresh',
+    providerRefreshPending: false,
     zodiacSign: 'aries',
     zodiacLabel: '白羊座',
     rangeLabel: period === 'daily' ? '2026-08-12' : `2026 ${period}`,
@@ -143,16 +144,12 @@ describe('AstrologyWorld', () => {
 
   it('shows the active zodiac artwork and real lucky bubbles', () => {
     render(
-      <AstrologyWorld
-        astrology={state()}
-        onOpenEnergyCard={vi.fn()}
-        onOpenLightTest={vi.fn()}
-      />,
+      <AstrologyWorld astrology={state()} onOpenEnergyCard={vi.fn()} onOpenLightTest={vi.fn()} />,
     );
 
-    expect(
-      screen.getByRole('img', { name: '白羊座马卡龙专刊封面' }).getAttribute('src'),
-    ).toBe('/energy/aries-badge.jpg');
+    expect(screen.getByRole('img', { name: '白羊座马卡龙专刊封面' }).getAttribute('src')).toBe(
+      '/energy/aries-badge.jpg',
+    );
     expect(screen.getAllByText('幸运色')).toHaveLength(1);
     expect(screen.getByText('珊瑚粉')).toBeTruthy();
     expect(screen.queryByText('#ff7d8d')).toBeNull();
@@ -163,11 +160,7 @@ describe('AstrologyWorld', () => {
 
   it('replaces broken zodiac artwork with a visible icon fallback', () => {
     render(
-      <AstrologyWorld
-        astrology={state()}
-        onOpenEnergyCard={vi.fn()}
-        onOpenLightTest={vi.fn()}
-      />,
+      <AstrologyWorld astrology={state()} onOpenEnergyCard={vi.fn()} onOpenLightTest={vi.fn()} />,
     );
     const image = screen.getByRole('img', { name: '白羊座马卡龙专刊封面' });
 
@@ -210,11 +203,7 @@ describe('AstrologyWorld', () => {
     });
 
     render(
-      <AstrologyWorld
-        astrology={astrology}
-        onOpenEnergyCard={vi.fn()}
-        onOpenLightTest={vi.fn()}
-      />,
+      <AstrologyWorld astrology={astrology} onOpenEnergyCard={vi.fn()} onOpenLightTest={vi.fn()} />,
     );
 
     expect(screen.getByText('正在读取这一段星座内容…')).toBeTruthy();
@@ -230,11 +219,7 @@ describe('AstrologyWorld', () => {
     astrology.periods.daily = periodState('daily', { loading: true, loaded: true });
 
     render(
-      <AstrologyWorld
-        astrology={astrology}
-        onOpenEnergyCard={vi.fn()}
-        onOpenLightTest={vi.fn()}
-      />,
+      <AstrologyWorld astrology={astrology} onOpenEnergyCard={vi.fn()} onOpenLightTest={vi.fn()} />,
     );
 
     expect(screen.getByText('工作提示')).toBeTruthy();

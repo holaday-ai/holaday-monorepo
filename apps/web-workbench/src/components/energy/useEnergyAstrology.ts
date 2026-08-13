@@ -22,6 +22,7 @@ export type EnergyPeriodReading = Pick<
   | 'provider'
   | 'source'
   | 'freshness'
+  | 'providerRefreshPending'
   | 'zodiacSign'
   | 'zodiacLabel'
   | 'rangeLabel'
@@ -102,6 +103,7 @@ export interface EnergyAstrologyState {
 
 const PERIODS: EnergyAstrologyPeriod[] = ['daily', 'weekly', 'monthly', 'yearly'];
 const LOCAL_ERROR = '暂时使用本地提示';
+const SILENT_REFRESH_DELAYS_MS = [18_000, 5_000] as const;
 
 export function useEnergyAstrology(
   profile: AstroProfile,
@@ -129,6 +131,23 @@ export function useEnergyAstrology(
     monthly: 'current',
     yearly: 'current',
   });
+  const silentRefreshTimers = React.useRef<
+    Record<EnergyAstrologyPeriod, ReturnType<typeof setTimeout> | null>
+  >({
+    daily: null,
+    weekly: null,
+    monthly: null,
+    yearly: null,
+  });
+  const silentRefreshAttempts = React.useRef<Record<EnergyAstrologyPeriod, number>>({
+    daily: 0,
+    weekly: 0,
+    monthly: 0,
+    yearly: 0,
+  });
+  const scheduleSilentPeriodRefreshRef = React.useRef<
+    (period: EnergyAstrologyPeriod, rangeKey: 'current' | 'next', requestId: number) => void
+  >(() => undefined);
   const statusRequestIdRef = React.useRef(0);
   const rankingRequestIdRef = React.useRef(0);
   const signPreviewRequestIdRef = React.useRef(0);
@@ -151,11 +170,74 @@ export function useEnergyAstrology(
   const [yesNoTarot, setYesNoTarot] = React.useState<EnergyYesNoTarotReading | null>(null);
   const [yesNoLoading, setYesNoLoading] = React.useState(false);
 
+  const clearSilentPeriodRefresh = React.useCallback(
+    (period: EnergyAstrologyPeriod, resetAttempts = true): void => {
+      const timer = silentRefreshTimers.current[period];
+      if (timer !== null) clearTimeout(timer);
+      silentRefreshTimers.current[period] = null;
+      if (resetAttempts) silentRefreshAttempts.current[period] = 0;
+    },
+    [],
+  );
+
+  const scheduleSilentPeriodRefresh = React.useCallback(
+    (period: EnergyAstrologyPeriod, rangeKey: 'current' | 'next', requestId: number): void => {
+      const attempt = silentRefreshAttempts.current[period];
+      const delay = SILENT_REFRESH_DELAYS_MS[attempt];
+      if (delay === undefined) return;
+
+      clearSilentPeriodRefresh(period, false);
+      silentRefreshAttempts.current[period] = attempt + 1;
+      silentRefreshTimers.current[period] = setTimeout(() => {
+        silentRefreshTimers.current[period] = null;
+        void queryPeriod(period, profile, rangeKey)
+          .then((remote) => {
+            if (
+              requestId !== periodRequestIds.current[period] ||
+              rangeKey !== periodRangeKeys.current[period]
+            ) {
+              return;
+            }
+            const reading = toPeriodReading(remote);
+            if (reading.source !== 'divineapi') {
+              if (reading.providerRefreshPending) {
+                scheduleSilentPeriodRefreshRef.current(period, rangeKey, requestId);
+              }
+              return;
+            }
+
+            silentRefreshAttempts.current[period] = 0;
+            setPeriods((current) => ({
+              ...current,
+              [period]: {
+                reading,
+                source: reading.source,
+                loading: false,
+                loaded: true,
+                error: null,
+              },
+            }));
+            if (period === 'daily') {
+              setCompatibilityReading(mergeProviderReading(localReading, remote as ProviderDaily));
+            }
+            if (period === 'weekly') {
+              setCompatibilityWeekly(providerWeekly(remote as ProviderWeekly));
+            }
+          })
+          .catch(() => undefined);
+      }, delay);
+    },
+    [clearSilentPeriodRefresh, localReading, profile],
+  );
+
+  scheduleSilentPeriodRefreshRef.current = scheduleSilentPeriodRefresh;
+
   const loadPeriod = React.useCallback(
     async (
       period: EnergyAstrologyPeriod,
       rangeKey: 'current' | 'next' = 'current',
     ): Promise<void> => {
+      clearSilentPeriodRefresh(period);
       periodRangeKeys.current[period] = rangeKey;
       const requestId = ++periodRequestIds.current[period];
       const localState = localStateForRange(localPeriods[period], period, rangeKey);
@@ -195,6 +277,9 @@ export function useEnergyAstrology(
         if (period === 'weekly') {
           setCompatibilityWeekly(providerWeekly(remote as ProviderWeekly));
         }
+        if (reading.providerRefreshPending) {
+          scheduleSilentPeriodRefreshRef.current(period, rangeKey, requestId);
+        }
       } catch {
         if (requestId !== periodRequestIds.current[period]) return;
         setPeriods((current) => ({
@@ -210,7 +295,7 @@ export function useEnergyAstrology(
         if (period === 'weekly') setCompatibilityWeekly(localWeekly);
       }
     },
-    [liveProvider, localPeriods, localReading, localWeekly, profile],
+    [clearSilentPeriodRefresh, liveProvider, localPeriods, localReading, localWeekly, profile],
   );
 
   const refreshPeriod = React.useCallback(
@@ -300,7 +385,10 @@ export function useEnergyAstrology(
   React.useEffect(() => {
     const statusRequestId = ++statusRequestIdRef.current;
     const requestIds = periodRequestIds.current;
-    for (const period of PERIODS) requestIds[period] += 1;
+    for (const period of PERIODS) {
+      clearSilentPeriodRefresh(period);
+      requestIds[period] += 1;
+    }
     rankingRequestIdRef.current += 1;
     signPreviewRequestIdRef.current += 1;
     yesNoRequestIdRef.current += 1;
@@ -328,12 +416,15 @@ export function useEnergyAstrology(
 
     return () => {
       statusRequestIdRef.current += 1;
-      for (const period of PERIODS) requestIds[period] += 1;
+      for (const period of PERIODS) {
+        clearSilentPeriodRefresh(period);
+        requestIds[period] += 1;
+      }
       rankingRequestIdRef.current += 1;
       signPreviewRequestIdRef.current += 1;
       yesNoRequestIdRef.current += 1;
     };
-  }, [liveProvider, loadPeriod, localPeriods, localReading, localWeekly]);
+  }, [clearSilentPeriodRefresh, liveProvider, loadPeriod, localPeriods, localReading, localWeekly]);
 
   const source = periods.daily.source === 'divineapi' ? 'provider' : 'local-fallback';
   const loading = periods.daily.loading || periods.weekly.loading;
@@ -439,6 +530,7 @@ function toPeriodReading(
     provider: reading.provider,
     source: reading.source,
     freshness: reading.freshness,
+    providerRefreshPending: reading.providerRefreshPending,
     zodiacSign: reading.zodiacSign,
     zodiacLabel: reading.zodiacLabel,
     rangeLabel: reading.rangeLabel,
@@ -488,6 +580,7 @@ function localPeriodState(
       provider: 'mock',
       source: 'local-fallback',
       freshness: 'local',
+      providerRefreshPending: false,
       zodiacSign: profile.zodiacSign,
       zodiacLabel: reading.zodiacLabel,
       rangeLabel,

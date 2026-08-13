@@ -10,6 +10,7 @@ const reading: EnergyPeriodReading = {
   provider: 'divineapi',
   source: 'divineapi',
   freshness: 'fresh',
+  providerRefreshPending: false,
   zodiacSign: 'aries',
   zodiacLabel: '白羊座',
   rangeLabel: '2026-08-12',
@@ -30,14 +31,14 @@ afterEach(cleanup);
 
 describe('AstrologyMagazineCover', () => {
   it('renders provider hex colors as a human label with the original color swatch', () => {
-    render(<AstrologyMagazineCover reading={reading} sourceLabel="DivineAPI 内容" loading={false} />);
+    render(
+      <AstrologyMagazineCover reading={reading} sourceLabel="DivineAPI 内容" loading={false} />,
+    );
     expect(screen.getAllByRole('img', { name: '白羊座马卡龙专刊封面' })).toHaveLength(1);
     expect(screen.getByText('金橙')).toBeTruthy();
     expect(screen.queryByText('#FF7E00')).toBeNull();
     const swatch = screen.getByTitle('#FF7E00');
-    expect(swatch.getAttribute('style')).toContain(
-      'background-color: #FF7E00',
-    );
+    expect(swatch.getAttribute('style')).toContain('background-color: #FF7E00');
     expect(screen.getByText('10:00 - 11:00')).toBeTruthy();
     expect(screen.getByText('2026-08-12')).toBeTruthy();
     expect(screen.getByText('DivineAPI 内容')).toBeTruthy();
@@ -58,7 +59,9 @@ describe('AstrologyMagazineCover', () => {
   });
 
   it('uses a visible cover fallback after image failure', () => {
-    render(<AstrologyMagazineCover reading={reading} sourceLabel="DivineAPI 内容" loading={false} />);
+    render(
+      <AstrologyMagazineCover reading={reading} sourceLabel="DivineAPI 内容" loading={false} />,
+    );
     fireEvent.error(screen.getByRole('img', { name: '白羊座马卡龙专刊封面' }));
     expect(screen.getByTestId('zodiac-cover-fallback')).toBeTruthy();
   });
