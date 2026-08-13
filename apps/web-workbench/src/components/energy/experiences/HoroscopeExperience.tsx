@@ -3,6 +3,7 @@ import type { AstroProfile } from '@/lib/astrology';
 import { Check, Palette, RefreshCw, Sparkles, Timer } from 'lucide-react';
 import * as React from 'react';
 import type { ExperiencePhase } from '../energy-types';
+import { LuckyColorValue } from '../LuckyColorValue';
 import type { EnergyAstrologyState } from '../useEnergyAstrology';
 import { weeklyHoroscopeSections } from './horoscope-content';
 
@@ -83,7 +84,9 @@ export function HoroscopeExperience({
             </span>
             <span>
               <Palette aria-hidden="true" />
-              <strong>{astrology.reading.luckyColor}</strong>
+              <strong>
+                <LuckyColorValue value={astrology.reading.luckyColor} />
+              </strong>
               幸运色
             </span>
             <span>

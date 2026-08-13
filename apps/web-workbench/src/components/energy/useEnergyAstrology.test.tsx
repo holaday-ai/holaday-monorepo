@@ -159,6 +159,21 @@ describe('useEnergyAstrology', () => {
     expect(trpcMocks.yesNoTarot).not.toHaveBeenCalled();
   });
 
+  it('uses a human color name in provider-backed fortune copy', async () => {
+    trpcMocks.daily.mockResolvedValue({
+      ...remoteReading('aries', '远端今日提示'),
+      luckyColor: '#FF7E00',
+    });
+    const profile = createProfileFromBirthday({ birthday: '1996-03-21' });
+
+    const { result } = renderHook(() => useEnergyAstrology(profile, true));
+
+    await waitFor(() => expect(result.current.periods.daily.loading).toBe(false));
+    const wealth = result.current.reading.fortune.find((item) => item.key === 'wealth');
+    expect(wealth?.body).toContain('幸运色 金橙');
+    expect(wealth?.body).not.toContain('#FF7E00');
+  });
+
   it('keeps daily provider data when weekly fails', async () => {
     trpcMocks.daily.mockResolvedValue(remoteReading('aries', '远端今日提示'));
     trpcMocks.weekly.mockRejectedValue(new Error('weekly unavailable'));
