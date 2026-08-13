@@ -105,6 +105,16 @@ function pendingLocalDaily(zodiacSign: 'aries' | 'taurus' = 'aries') {
   };
 }
 
+function pendingLocalWeekly(zodiacSign: 'aries' | 'taurus' = 'aries') {
+  return {
+    ...remoteWeekly(zodiacSign),
+    provider: 'mock' as const,
+    source: 'local-fallback' as const,
+    freshness: 'local' as const,
+    providerRefreshPending: true,
+  };
+}
+
 function capabilityStatus(enabled: string[] = ['daily-horoscope', 'weekly-horoscope']) {
   return {
     enabled: true,
@@ -262,6 +272,103 @@ describe('useEnergyAstrology', () => {
 
     expect(trpcMocks.daily).toHaveBeenCalledTimes(3);
     expect(trpcMocks.ranking).not.toHaveBeenCalled();
+  });
+
+  it('silently rechecks only the visible daily period by default', async () => {
+    vi.useFakeTimers();
+    trpcMocks.daily.mockResolvedValue(pendingLocalDaily());
+    trpcMocks.weekly.mockResolvedValue(pendingLocalWeekly());
+    const profile = createProfileFromBirthday({ birthday: '1996-03-21' });
+
+    renderHook(() => useEnergyAstrology(profile, true));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(18_000);
+    });
+
+    expect(trpcMocks.daily).toHaveBeenCalledTimes(2);
+    expect(trpcMocks.weekly).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancels the old visible period and rechecks a newly activated pending period', async () => {
+    vi.useFakeTimers();
+    trpcMocks.daily.mockResolvedValue(pendingLocalDaily());
+    trpcMocks.weekly.mockResolvedValue(pendingLocalWeekly());
+    const profile = createProfileFromBirthday({ birthday: '1996-03-21' });
+    const { result } = renderHook(() => useEnergyAstrology(profile, true));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    act(() => result.current.activatePeriod('weekly'));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(18_000);
+    });
+
+    expect(trpcMocks.daily).toHaveBeenCalledTimes(1);
+    expect(trpcMocks.weekly).toHaveBeenCalledTimes(2);
+  });
+
+  it('invalidates the old silent timer when the visible period is manually refreshed', async () => {
+    vi.useFakeTimers();
+    trpcMocks.daily
+      .mockResolvedValueOnce(pendingLocalDaily())
+      .mockResolvedValueOnce(pendingLocalDaily())
+      .mockResolvedValueOnce(remoteReading('aries', '手动刷新后的后台结果'));
+    const profile = createProfileFromBirthday({ birthday: '1996-03-21' });
+    const { result } = renderHook(() => useEnergyAstrology(profile, true));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+      await result.current.refreshPeriod('daily');
+      await vi.advanceTimersByTimeAsync(18_000);
+    });
+
+    expect(trpcMocks.daily).toHaveBeenCalledTimes(3);
+    expect(result.current.reading.headline).toBe('手动刷新后的后台结果');
+  });
+
+  it('does not run an obsolete monthly range timer after the range changes', async () => {
+    vi.useFakeTimers();
+    trpcMocks.daily.mockResolvedValue(remoteReading('aries', '远端今日提示'));
+    trpcMocks.monthly
+      .mockResolvedValueOnce({
+        ...normalizedPeriod('monthly'),
+        provider: 'mock' as const,
+        source: 'local-fallback' as const,
+        freshness: 'local' as const,
+        providerRefreshPending: true,
+      })
+      .mockResolvedValueOnce({
+        ...normalizedPeriod('monthly'),
+        rangeKey: 'next' as const,
+      });
+    const profile = createProfileFromBirthday({ birthday: '1996-03-21' });
+    const { result } = renderHook(() => useEnergyAstrology(profile, true));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+      result.current.activatePeriod('monthly');
+      await result.current.loadPeriod('monthly', 'current');
+      await result.current.loadPeriod('monthly', 'next');
+      await vi.advanceTimersByTimeAsync(18_000);
+    });
+
+    expect(trpcMocks.monthly).toHaveBeenCalledTimes(2);
+    expect(result.current.periods.monthly.reading.rangeKey).toBe('next');
+  });
+
+  it('clears pending silent refresh work when the hook unmounts', async () => {
+    vi.useFakeTimers();
+    trpcMocks.daily.mockResolvedValue(pendingLocalDaily());
+    const profile = createProfileFromBirthday({ birthday: '1996-03-21' });
+    const { unmount } = renderHook(() => useEnergyAstrology(profile, true));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    unmount();
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(trpcMocks.daily).toHaveBeenCalledTimes(1);
   });
 
   it('does not silently retry an ordinary local fallback', async () => {

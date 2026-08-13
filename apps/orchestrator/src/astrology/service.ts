@@ -166,7 +166,10 @@ const DIVINE_DEFAULT_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const DIVINE_DEFAULT_STALE_IF_ERROR_MS = 24 * 60 * 60 * 1000;
 const DIVINE_DEFAULT_CAPABILITY_REFRESH_TTL_MS = 15 * 60 * 1000;
 const divineApiCache = new Map<string, { expiresAt: number; staleUntil: number; value: unknown }>();
-const divineApiInFlight = new Map<string, Promise<unknown>>();
+const divineApiInFlight = new Map<
+  string,
+  { promise: Promise<unknown>; controller: AbortController }
+>();
 const observedCapabilityFailures = new Map<
   AstrologyCapability,
   { reason: 'not-authorized' | 'invalid-response'; expiresAt: number }
@@ -331,6 +334,7 @@ export function divineApiStatus(env: NodeJS.ProcessEnv = process.env): {
 }
 
 export function clearDivineApiCacheForTest(): void {
+  for (const request of divineApiInFlight.values()) request.controller.abort();
   divineApiCache.clear();
   divineApiInFlight.clear();
   observedCapabilityFailures.clear();
@@ -892,10 +896,7 @@ async function postDivineApiJson(
   fetchImpl: typeof fetch | undefined,
   requiredPaths: ReadonlyArray<ReadonlyArray<string>>,
   validate?: (json: unknown) => void,
-): Promise<
-  | { pending: true }
-  | { pending: false; json: unknown; freshness: 'fresh' | 'stale' }
-> {
+): Promise<{ pending: true } | { pending: false; json: unknown; freshness: 'fresh' | 'stale' }> {
   const bodyString = new URLSearchParams(body).toString();
   const cacheParams = new URLSearchParams(
     Object.entries(body).filter(([key]) => key !== 'api_key'),
@@ -910,7 +911,7 @@ async function postDivineApiJson(
     if (cached && cached.staleUntil > Date.now()) staleValue = cached.value;
     if (cached && cached.staleUntil <= Date.now()) divineApiCache.delete(cacheKey);
   }
-  let providerPromise = divineApiInFlight.get(cacheKey);
+  let providerPromise = divineApiInFlight.get(cacheKey)?.promise;
   if (!providerPromise) {
     const controller = new AbortController();
     const providerTimeout = setTimeout(() => controller.abort(), config.providerTimeoutMs);
@@ -931,7 +932,7 @@ async function postDivineApiJson(
       const json = await res.json();
       assertDivineApiSuccess(json, requiredPaths);
       validate?.(json);
-      if (config.cacheTtlMs > 0) {
+      if (config.cacheTtlMs > 0 && divineApiInFlight.get(cacheKey)?.promise === providerPromise) {
         const expiresAt = Date.now() + config.cacheTtlMs;
         divineApiCache.set(cacheKey, {
           expiresAt,
@@ -952,9 +953,11 @@ async function postDivineApiJson(
       })
       .finally(() => {
         clearTimeout(providerTimeout);
-        divineApiInFlight.delete(cacheKey);
+        if (divineApiInFlight.get(cacheKey)?.promise === providerPromise) {
+          divineApiInFlight.delete(cacheKey);
+        }
       });
-    divineApiInFlight.set(cacheKey, providerPromise);
+    divineApiInFlight.set(cacheKey, { promise: providerPromise, controller });
     void providerPromise.catch(() => undefined);
   }
 

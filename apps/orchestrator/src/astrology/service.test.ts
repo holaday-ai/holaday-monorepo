@@ -245,6 +245,61 @@ describe('astrology service', () => {
     expect(expired.provider).toBe('mock');
   });
 
+  it('returns stale data at the foreground budget while the provider keeps running', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-12T00:00:00.000Z'));
+    const providerSignals: AbortSignal[] = [];
+    let callCount = 0;
+    const env = {
+      DIVINE_API_KEY: 'key',
+      DIVINE_ACCESS_TOKEN: 'token',
+      DIVINE_API_BASE_URL: 'https://example.test',
+      DIVINE_API_CAPABILITIES: 'daily-horoscope',
+      DIVINE_API_CACHE_TTL_MS: '1000',
+      DIVINE_API_STALE_IF_ERROR_MS: '5000',
+      DIVINE_API_REQUEST_TIMEOUT_MS: '50',
+      DIVINE_API_PROVIDER_TIMEOUT_MS: '200',
+      DIVINE_API_CAPABILITIES_CHECKED_AT: '2026-08-12T00:00:00.000Z',
+    };
+    const fetchImpl = (async (_url, init) => {
+      callCount += 1;
+      if (callCount === 1) return dailyProviderResponse('Last verified provider result.');
+      if (init?.signal) providerSignals.push(init.signal);
+      return await new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener(
+          'abort',
+          () => reject(new DOMException('Provider request aborted', 'AbortError')),
+          { once: true },
+        );
+      });
+    }) as typeof fetch;
+    const input = { birthday: '1996-03-21', zodiacSign: 'aries' as const };
+
+    await getDailyAstrologyReading(input, { env, fetchImpl });
+    vi.advanceTimersByTime(1500);
+    const stalePromise = getDailyAstrologyReading(input, { env, fetchImpl });
+    await vi.advanceTimersByTimeAsync(50);
+    const stale = await stalePromise;
+
+    expect(stale.source).toBe('divineapi');
+    expect(stale.freshness).toBe('stale');
+    expect(stale.providerRefreshPending).toBe(false);
+    expect(providerSignals[0]?.aborted).toBe(false);
+    expect(divineApiStatus(env).capabilities).toContainEqual({
+      capability: 'daily-horoscope',
+      available: true,
+      checkedAt: '2026-08-12T00:00:00.000Z',
+    });
+
+    await vi.advanceTimersByTimeAsync(150);
+    expect(providerSignals[0]?.aborted).toBe(true);
+    expect(divineApiStatus(env).capabilities).toContainEqual({
+      capability: 'daily-horoscope',
+      available: true,
+      checkedAt: '2026-08-12T00:00:00.000Z',
+    });
+  });
+
   it('rejects a success envelope that omits required horoscope dimensions', async () => {
     const reading = await getDailyAstrologyReading(
       { birthday: '1996-03-21', zodiacSign: 'aries', locale: 'en' },
@@ -652,6 +707,50 @@ describe('astrology service', () => {
     await vi.advanceTimersByTimeAsync(50);
     expect((await retryPromise).providerRefreshPending).toBe(true);
     await vi.advanceTimersByTimeAsync(50);
+  });
+
+  it('aborts cleared in-flight work without letting its cleanup delete a replacement', async () => {
+    vi.useFakeTimers();
+    const providerSignals: AbortSignal[] = [];
+    const providerResolvers: Array<(response: Response) => void> = [];
+    let fetchCount = 0;
+    const fetchImpl = (async (_url, init) => {
+      fetchCount += 1;
+      if (init?.signal) providerSignals.push(init.signal);
+      return await new Promise<Response>((resolve) => providerResolvers.push(resolve));
+    }) as typeof fetch;
+    const env = {
+      DIVINE_API_KEY: 'key',
+      DIVINE_ACCESS_TOKEN: 'token',
+      DIVINE_API_TRANSLATOR_BASE_URL: 'https://translator.example.test',
+      DIVINE_API_CAPABILITIES: 'daily-horoscope,translator',
+      DIVINE_API_REQUEST_TIMEOUT_MS: '50',
+      DIVINE_API_PROVIDER_TIMEOUT_MS: '500',
+    };
+    const input = { birthday: '1996-03-21', zodiacSign: 'aries' as const, locale: 'zh-CN' };
+
+    const abandonedPromise = getDailyAstrologyReading(input, { env, fetchImpl });
+    await vi.advanceTimersByTimeAsync(50);
+    expect((await abandonedPromise).providerRefreshPending).toBe(true);
+
+    clearDivineApiCacheForTest();
+    expect(providerSignals[0]?.aborted).toBe(true);
+    const replacementPromise = getDailyAstrologyReading(input, { env, fetchImpl });
+    expect(fetchCount).toBe(2);
+
+    providerResolvers[0]?.(dailyProviderResponse('过期后台结果'));
+    await vi.advanceTimersByTimeAsync(0);
+    const sharedReplacementPromise = getDailyAstrologyReading(input, { env, fetchImpl });
+    expect(fetchCount).toBe(2);
+
+    providerResolvers[1]?.(dailyProviderResponse('替代请求结果'));
+    await vi.advanceTimersByTimeAsync(0);
+    const [replacement, sharedReplacement] = await Promise.all([
+      replacementPromise,
+      sharedReplacementPromise,
+    ]);
+    expect(replacement.headline).toBe('替代请求结果');
+    expect(sharedReplacement.headline).toBe('替代请求结果');
   });
 
   it('uses the safe default when the provider timeout override exceeds Node timer limits', async () => {

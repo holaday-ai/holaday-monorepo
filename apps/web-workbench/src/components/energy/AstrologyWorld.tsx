@@ -63,6 +63,7 @@ export const AstrologyWorld = React.forwardRef<AstrologyWorldHandle, AstrologyWo
     const selectPeriod = React.useCallback(
       (period: EnergyAstrologyPeriod): void => {
         setSelectedPeriod(period);
+        astrology.activatePeriod(period);
         const state = astrology.periods[period];
         if (period === 'monthly') {
           if (!state.loaded || state.reading.rangeKey !== monthRange) {

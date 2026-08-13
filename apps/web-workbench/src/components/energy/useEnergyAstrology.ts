@@ -94,6 +94,7 @@ export interface EnergyAstrologyState {
   };
   signPreview: EnergyPeriodState | null;
   loadPeriod: (period: EnergyAstrologyPeriod, rangeKey?: 'current' | 'next') => Promise<void>;
+  activatePeriod: (period: EnergyAstrologyPeriod) => void;
   refreshPeriod: (period: EnergyAstrologyPeriod) => Promise<void>;
   loadRanking: () => Promise<void>;
   loadSignPreview: (sign: ZodiacSign) => Promise<void>;
@@ -131,6 +132,7 @@ export function useEnergyAstrology(
     monthly: 'current',
     yearly: 'current',
   });
+  const activePeriodRef = React.useRef<EnergyAstrologyPeriod>('daily');
   const silentRefreshTimers = React.useRef<
     Record<EnergyAstrologyPeriod, ReturnType<typeof setTimeout> | null>
   >({
@@ -169,6 +171,8 @@ export function useEnergyAstrology(
   const [signPreview, setSignPreview] = React.useState<EnergyPeriodState | null>(null);
   const [yesNoTarot, setYesNoTarot] = React.useState<EnergyYesNoTarotReading | null>(null);
   const [yesNoLoading, setYesNoLoading] = React.useState(false);
+  const periodsRef = React.useRef(periods);
+  periodsRef.current = periods;
 
   const clearSilentPeriodRefresh = React.useCallback(
     (period: EnergyAstrologyPeriod, resetAttempts = true): void => {
@@ -190,6 +194,13 @@ export function useEnergyAstrology(
       silentRefreshAttempts.current[period] = attempt + 1;
       silentRefreshTimers.current[period] = setTimeout(() => {
         silentRefreshTimers.current[period] = null;
+        if (
+          period !== activePeriodRef.current ||
+          requestId !== periodRequestIds.current[period] ||
+          rangeKey !== periodRangeKeys.current[period]
+        ) {
+          return;
+        }
         void queryPeriod(period, profile, rangeKey)
           .then((remote) => {
             if (
@@ -231,6 +242,31 @@ export function useEnergyAstrology(
   );
 
   scheduleSilentPeriodRefreshRef.current = scheduleSilentPeriodRefresh;
+
+  const activatePeriod = React.useCallback(
+    (period: EnergyAstrologyPeriod): void => {
+      const previousPeriod = activePeriodRef.current;
+      if (previousPeriod !== period) {
+        clearSilentPeriodRefresh(previousPeriod);
+        periodRequestIds.current[previousPeriod] += 1;
+        activePeriodRef.current = period;
+      }
+
+      const activeState = periodsRef.current[period];
+      if (
+        !activeState.loading &&
+        activeState.reading.providerRefreshPending &&
+        silentRefreshTimers.current[period] === null
+      ) {
+        scheduleSilentPeriodRefreshRef.current(
+          period,
+          periodRangeKeys.current[period] ?? 'current',
+          periodRequestIds.current[period],
+        );
+      }
+    },
+    [clearSilentPeriodRefresh],
+  );
 
   const loadPeriod = React.useCallback(
     async (
@@ -277,7 +313,7 @@ export function useEnergyAstrology(
         if (period === 'weekly') {
           setCompatibilityWeekly(providerWeekly(remote as ProviderWeekly));
         }
-        if (reading.providerRefreshPending) {
+        if (reading.providerRefreshPending && period === activePeriodRef.current) {
           scheduleSilentPeriodRefreshRef.current(period, rangeKey, requestId);
         }
       } catch {
@@ -448,6 +484,7 @@ export function useEnergyAstrology(
       capabilities,
       ranking,
       signPreview,
+      activatePeriod,
       loadPeriod,
       refreshPeriod,
       loadRanking,
@@ -457,6 +494,7 @@ export function useEnergyAstrology(
     }),
     [
       capabilities,
+      activatePeriod,
       compatibilityReading,
       compatibilityWeekly,
       drawYesNoTarot,

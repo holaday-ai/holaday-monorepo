@@ -94,6 +94,7 @@ function state(overrides: Partial<EnergyAstrologyState> = {}): EnergyAstrologySt
     capabilities: {},
     ranking: { complete: false, items: [], loaded: false, loading: false, error: null },
     signPreview: null,
+    activatePeriod: vi.fn(),
     loadPeriod: vi.fn().mockResolvedValue(undefined),
     refreshPeriod: vi.fn().mockResolvedValue(undefined),
     loadRanking: vi.fn().mockResolvedValue(undefined),
@@ -109,11 +110,12 @@ afterEach(cleanup);
 describe('AstrologyWorld', () => {
   it('opens an exact period through its public navigation handle', async () => {
     const loadPeriod = vi.fn().mockResolvedValue(undefined);
+    const activatePeriod = vi.fn();
     const ref = React.createRef<AstrologyWorldHandle>();
     render(
       <AstrologyWorld
         ref={ref}
-        astrology={state({ loadPeriod })}
+        astrology={state({ activatePeriod, loadPeriod })}
         onOpenEnergyCard={vi.fn()}
         onOpenLightTest={vi.fn()}
       />,
@@ -122,6 +124,7 @@ describe('AstrologyWorld', () => {
     act(() => ref.current?.openPeriod('yearly'));
 
     expect(screen.getByRole('tab', { name: '本年' }).getAttribute('aria-selected')).toBe('true');
+    expect(activatePeriod).toHaveBeenCalledWith('yearly');
     expect(loadPeriod).toHaveBeenCalledWith('yearly', 'current');
   });
 
