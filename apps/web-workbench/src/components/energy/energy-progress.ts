@@ -445,9 +445,7 @@ export function recordCompletedEnergyExperience(
   const launchTarget =
     input.launchTarget === null
       ? null
-      : isEnergyContentTarget(input.launchTarget) &&
-          input.launchTarget.type !== 'astrology' &&
-          input.launchTarget.type !== 'astrology-signs'
+      : isEnergyContentTarget(input.launchTarget)
         ? input.launchTarget
         : undefined;
   if (

@@ -401,7 +401,7 @@ export function energyShelfDateLabel(completedAt: string, now = new Date()): str
 
 解析规则：
 
-- recent：有 launchTarget 时从 practice/test/game 数据或目标类型解析精确标题；无目标时从 `ENERGY_EXPERIENCES` 读取默认标题、描述和时长；
+- recent：有 launchTarget 时从 practice/test/game 数据或目标类型解析精确标题；无目标时通常从 `ENERGY_EXPERIENCES` 读取默认标题、描述和时长，但默认 `games` 必须按注册表的真实默认值解析为 `catch-energy` / “接住能量”；
 - recent 的 `id` 固定由 `recentExperienceKey()` 派生为 `recent:${key}`，仅作 React key 与测试定位，不反向解析；游戏、测试、抽卡、补给/练习分别使用 `/energy/mini-game.jpg`、`/energy/quick-test.jpg`、`/energy/tarot-cards.jpg`、`/energy/recharge-island.jpg`，星座使用 `zodiacBadgeImage(zodiacSign)`；默认图片位置为 `50% 50%`；
 - energy-card：用 card ID 找牌，目标固定为 `{ type: 'tarot', mode: 'single', theme: card.primaryTheme }`，并携带 `{ source: 'energy-card', cardId }`；
 - test-action：把 `testId:outcomeId` 拆开，从 `LIGHT_TESTS` 找测试与 outcome，目标为 `{ type: 'test', testId }`，并携带 `{ source: 'test-action', testId, outcomeId }`；
