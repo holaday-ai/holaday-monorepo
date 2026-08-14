@@ -28,9 +28,9 @@
 <!-- 2026-07-09 Codex 补充：状态机 pre-execution guard：start(existing) 不再把 pending/queued 直接派发成 executing；pause 只允许 executing source；repository control transition 同步拒绝非 executing→paused 与非 paused→executing，防 queued/pending 绕过队列恢复。 -->
 <!-- 2026-07-09 Codex 补充：状态机 planning bootstrap 收口：新任务 seed 显式走 state:null + taskId + plan；start(existing planning) 改为 noop，避免历史/重连 planning 被误派发；tasks.create/smoke 与集成 fixture 已统一。 -->
 <!-- 2026-07-09 Codex 补充：技能 planner 闭环：planner catalogue 现在合并 DB SKILL.md rows + shared 13 用户可见技能；手动 @ 技能会注入 planner hint，避免前端选择了技能但通用 planner 不知道。 -->
-## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05@d65e7f25`（2026-08-14 JST）
+## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05@278ae4cc`（2026-08-14 JST）
 
-SPA 与 Orchestrator 已部署 `d65e7f25`（PR #48）。今日能量日/周/月/年与星座排行现在统一传递浏览器时区，后端按用户本地周期构造 DivineAPI `tzone`、日期标签与缓存身份，避免服务器 UTC 和 6 小时缓存跨日/周/月/年复用旧内容；同时修复月末“下个月”溢出。发布回滚点 `b2d108ed`，祖先门禁通过；Orchestrator 构建、编号 migration（13 statements / 174 already applied）、`db:verify`、非 root PM2 重启与必需密钥加载均通过，运行用户 uid/gid 998、restart count 0。Aliyun 与 Vultr SPA 均命中 `index-Gr_m3vJE.js`，两侧 smoke 与 healthz 200；生产 P0 smoke 11/11 通过。真实用户态复验：页面日期 `2026年8月14日 星期五`，DivineAPI 阅读范围 `2026-08-14`，六维内容正常，幸运色显示“琥珀金”而非十六进制，控制台无 warning/error。未修改 DivineAPI/OpenAI 密钥、Translator 或模型配置，未部署 CN Payment 与 AKShare。
+SPA 与 Orchestrator 已部署 `278ae4cc`（PR #50）。今日能量在后端 8 秒预算后仍需本地回退时，会立即静默复查并最多再查两次，在真实 DivineAPI 内容可用后自动替换；页面同时提供低噪音、可访问且尊重 reduced-motion 的更新状态。发布回滚点 `d65e7f25`，两次祖先门禁均通过；Orchestrator 构建、编号 migration（13 statements / 174 already applied）、`db:verify`、非 root PM2 重启与必需密钥加载均通过，运行用户 uid/gid 998、restart count 0。Aliyun 与 Vultr SPA 均命中 `index-WNBW77fH.js`，两侧 smoke 与 healthz 200。真实用户态复验：今日内容来源为 DivineAPI，幸运色显示“琥珀金”而非十六进制；首次切换本月先显示读取状态，9 秒内自动出现真实中文内容，控制台无 warning/error。未修改 DivineAPI/OpenAI 密钥、Translator、模型或支付配置，未部署 CN Payment 与 AKShare。
 
 前序生产记录：SPA 与 Orchestrator 曾部署 `109be03f`（PR #43 + 超时热修复 PR #44）。今日能量星座内容切换先展示真实加载态；DivineAPI 请求最长等待 8 秒，超时后自动回退本地提示，避免无限加载。生产实测从“本月”加载态在约 8–9 秒内落到“暂时使用本地提示”，刷新按钮恢复可用且页面日志为空。Orchestrator 构建、编号 migration、`db:verify`、非 root PM2 重启、必需密钥加载与 healthz 均通过；进程 `online`、restart count 0。Aliyun 与 Vultr SPA 均命中 `index-Uoin6wia.js`，两侧 healthz 200；P0 smoke 11/11 通过。Canary 浏览器配置保持原值。
 
