@@ -151,6 +151,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 describe('useEnergyAstrology', () => {
@@ -195,6 +196,56 @@ describe('useEnergyAstrology', () => {
     expect(result.current.tarot.title).toBe('The Star');
     expect(trpcMocks.tarot).not.toHaveBeenCalled();
     expect(trpcMocks.yesNoTarot).not.toHaveBeenCalled();
+  });
+
+  it('sends the browser timezone with automatic and on-demand horoscope requests', async () => {
+    vi.spyOn(Date.prototype, 'getTimezoneOffset').mockReturnValue(-330);
+    trpcMocks.daily.mockResolvedValue(remoteReading('aries', '远端今日提示'));
+    trpcMocks.monthly.mockResolvedValue(normalizedPeriod('monthly'));
+    trpcMocks.yearly.mockResolvedValue(normalizedPeriod('yearly'));
+    const profile = createProfileFromBirthday({ birthday: '1996-03-21' });
+    const { result } = renderHook(() => useEnergyAstrology(profile, true));
+
+    await waitFor(() => expect(result.current.periods.daily.loading).toBe(false));
+    await waitFor(() => expect(result.current.periods.weekly.loading).toBe(false));
+    await act(async () => {
+      await result.current.loadPeriod('monthly', 'current');
+      await result.current.loadPeriod('yearly');
+    });
+
+    expect(trpcMocks.daily).toHaveBeenCalledWith(
+      expect.objectContaining({ timezoneOffsetMinutes: 330 }),
+    );
+    expect(trpcMocks.weekly).toHaveBeenCalledWith(
+      expect.objectContaining({ timezoneOffsetMinutes: 330 }),
+    );
+    expect(trpcMocks.monthly).toHaveBeenCalledWith(
+      expect.objectContaining({ timezoneOffsetMinutes: 330 }),
+    );
+    expect(trpcMocks.yearly).toHaveBeenCalledWith(
+      expect.objectContaining({ timezoneOffsetMinutes: 330 }),
+    );
+  });
+
+  it('sends the browser timezone with ranking and sign preview requests', async () => {
+    vi.spyOn(Date.prototype, 'getTimezoneOffset').mockReturnValue(-330);
+    trpcMocks.daily.mockResolvedValue(remoteReading('aries', '远端今日提示'));
+    const profile = createProfileFromBirthday({ birthday: '1996-03-21' });
+    const { result } = renderHook(() => useEnergyAstrology(profile, true));
+
+    await waitFor(() => expect(result.current.periods.daily.loading).toBe(false));
+    await act(async () => {
+      await result.current.loadRanking();
+      await result.current.loadSignPreview('taurus');
+    });
+
+    expect(trpcMocks.ranking).toHaveBeenCalledWith({
+      locale: 'zh-CN',
+      timezoneOffsetMinutes: 330,
+    });
+    expect(trpcMocks.daily).toHaveBeenLastCalledWith(
+      expect.objectContaining({ zodiacSignOverride: 'taurus', timezoneOffsetMinutes: 330 }),
+    );
   });
 
   it('uses a human color name in provider-backed fortune copy', async () => {

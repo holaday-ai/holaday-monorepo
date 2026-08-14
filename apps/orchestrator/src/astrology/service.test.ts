@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildDailyAstrologyReading,
+  buildMockWeeklyAstrologyReading,
   clearDivineApiCacheForTest,
   divineApiStatus,
   getAstrologyRanking,
@@ -29,6 +30,44 @@ function dailyProviderResponse(personal = '真实中文提示'): Response {
           profession: '先完成最重要的草稿。',
           emotions: '先看见自己的感受。',
           travel: '给安排保留弹性。',
+          luck: ['Lucky Numbers : 1, 8'],
+        },
+        special: {
+          horoscope_percentage: {
+            personal: 80,
+            health: 78,
+            profession: 82,
+            emotions: 76,
+            travel: 70,
+            luck: 81,
+          },
+        },
+      },
+    }),
+  } as Response;
+}
+
+function periodProviderResponse(period: 'weekly' | 'monthly' | 'yearly'): Response {
+  const selector = `${period}_horoscope`;
+  const rangeField =
+    period === 'weekly'
+      ? { week: 'Provider week' }
+      : period === 'monthly'
+        ? { month: 'Provider month' }
+        : { year: 'Provider year' };
+  return {
+    ok: true,
+    status: 200,
+    json: async () => ({
+      success: 1,
+      data: {
+        ...rangeField,
+        [selector]: {
+          personal: 'Provider personal guidance.',
+          health: 'Provider health guidance.',
+          profession: 'Provider work guidance.',
+          emotions: 'Provider emotional guidance.',
+          travel: 'Provider travel guidance.',
           luck: ['Lucky Numbers : 1, 8'],
         },
         special: {
@@ -403,11 +442,21 @@ describe('astrology service', () => {
     };
 
     const first = await getWeeklyAstrologyReading(
-      { birthday: '1996-03-21', zodiacSign: 'aries', locale: 'en' },
+      {
+        birthday: '1996-03-21',
+        zodiacSign: 'aries',
+        locale: 'en',
+        timezoneOffsetMinutes: 330,
+      },
       options,
     );
     const second = await getWeeklyAstrologyReading(
-      { birthday: '1996-03-21', zodiacSign: 'aries', locale: 'en' },
+      {
+        birthday: '1996-03-21',
+        zodiacSign: 'aries',
+        locale: 'en',
+        timezoneOffsetMinutes: 330,
+      },
       options,
     );
 
@@ -415,6 +464,7 @@ describe('astrology service', () => {
     expect(calls[0]?.url).toBe('https://example.test/api/v5/weekly-horoscope');
     expect(calls[0]?.body).toContain('week=current');
     expect(calls[0]?.body).not.toContain('h_week=');
+    expect(new URLSearchParams(calls[0]?.body).get('tzone')).toBe('5.5');
     expect(first).toEqual(second);
     expect(first.provider).toBe('divineapi');
     expect(first.weekLabel).toBe('August 10 - August 16');
@@ -430,6 +480,7 @@ describe('astrology service', () => {
       const body = String(init?.body);
       expect(body).toContain(isMonthly ? 'month=next' : 'year=current');
       expect(body).toContain('sign=taurus');
+      expect(new URLSearchParams(body).get('tzone')).toBe('5.5');
       const selector = isMonthly ? 'monthly_horoscope' : 'yearly_horoscope';
       const rangeField = isMonthly ? { month: 'September 2026' } : { year: '2026' };
       return {
@@ -485,6 +536,7 @@ describe('astrology service', () => {
       zodiacSign: 'aries' as const,
       zodiacSignOverride: 'taurus' as const,
       locale: 'en',
+      timezoneOffsetMinutes: 330,
     };
 
     const monthly = await getMonthlyAstrologyReading(profile, 'next', options);
@@ -509,6 +561,106 @@ describe('astrology service', () => {
     });
     expect(monthly.dimensions.find((item) => item.key === 'profession')?.score).toBe(88);
     expect(yearly.cosmicTip).toBe('Consistency creates room for good timing.');
+  });
+
+  it('uses the caller timezone for local week, month, and year range labels', async () => {
+    const weekly = buildMockWeeklyAstrologyReading(
+      { birthday: '1996-03-21', zodiacSign: 'aries', timezoneOffsetMinutes: -480 },
+      { env: {}, now: new Date('2026-08-17T05:00:00.000Z') },
+    );
+    const options = { env: {}, now: new Date('2027-01-01T05:00:00.000Z') };
+    const input = {
+      birthday: '1996-03-21',
+      zodiacSign: 'aries' as const,
+      timezoneOffsetMinutes: -480,
+    };
+
+    const monthly = await getMonthlyAstrologyReading(input, 'current', options);
+    const yearly = await getYearlyAstrologyReading(input, options);
+
+    expect(weekly.rangeLabel).toBe('8月10日 - 8月16日');
+    expect(monthly.rangeLabel).toBe('2026年12月');
+    expect(yearly.rangeLabel).toBe('2026');
+  });
+
+  it.each([
+    ['2026-01-31T12:00:00.000Z', '2026年2月'],
+    ['2026-12-31T12:00:00.000Z', '2027年1月'],
+  ])('keeps next-month fallback labels correct at month end (%s)', async (now, rangeLabel) => {
+    const reading = await getMonthlyAstrologyReading(
+      {
+        birthday: '1996-03-21',
+        zodiacSign: 'aries',
+        timezoneOffsetMinutes: 0,
+      },
+      'next',
+      { env: {}, now: new Date(now) },
+    );
+
+    expect(reading.rangeLabel).toBe(rangeLabel);
+  });
+
+  it('does not reuse provider caches after caller-local period boundaries', async () => {
+    const callCounts = new Map<string, number>();
+    const fetchImpl = (async (url: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const path = new URL(String(url)).pathname;
+      callCounts.set(path, (callCounts.get(path) ?? 0) + 1);
+      expect(String(init?.body)).not.toContain('__period');
+      if (path.endsWith('/daily-horoscope')) return dailyProviderResponse();
+      if (path.endsWith('/weekly-horoscope')) return periodProviderResponse('weekly');
+      if (path.endsWith('/monthly-horoscope')) return periodProviderResponse('monthly');
+      return periodProviderResponse('yearly');
+    }) as typeof fetch;
+    const input = {
+      birthday: '1996-03-21',
+      zodiacSign: 'aries' as const,
+      locale: 'en',
+      timezoneOffsetMinutes: 330,
+    };
+    const env = {
+      DIVINE_API_KEY: 'key',
+      DIVINE_ACCESS_TOKEN: 'token',
+      DIVINE_API_BASE_URL: 'https://example.test',
+      DIVINE_API_CACHE_TTL_MS: String(6 * 60 * 60 * 1000),
+      DIVINE_API_CAPABILITIES:
+        'daily-horoscope,weekly-horoscope,monthly-horoscope,yearly-horoscope',
+    };
+    const readAcrossBoundary = async (
+      read: (now: Date) => Promise<unknown>,
+      before: string,
+      after: string,
+    ) => {
+      await read(new Date(before));
+      await read(new Date(after));
+    };
+
+    await readAcrossBoundary(
+      (now) => getDailyAstrologyReading(input, { env, fetchImpl, now }),
+      '2026-08-13T18:29:00.000Z',
+      '2026-08-13T18:31:00.000Z',
+    );
+    await readAcrossBoundary(
+      (now) => getWeeklyAstrologyReading(input, { env, fetchImpl, now }),
+      '2026-08-16T18:29:00.000Z',
+      '2026-08-16T18:31:00.000Z',
+    );
+    await readAcrossBoundary(
+      (now) => getMonthlyAstrologyReading(input, 'current', { env, fetchImpl, now }),
+      '2026-08-31T18:29:00.000Z',
+      '2026-08-31T18:31:00.000Z',
+    );
+    await readAcrossBoundary(
+      (now) => getYearlyAstrologyReading(input, { env, fetchImpl, now }),
+      '2026-12-31T18:29:00.000Z',
+      '2026-12-31T18:31:00.000Z',
+    );
+
+    expect(Object.fromEntries(callCounts)).toEqual({
+      '/api/v5/daily-horoscope': 2,
+      '/api/v5/weekly-horoscope': 2,
+      '/api/v5/monthly-horoscope': 2,
+      '/api/v5/yearly-horoscope': 2,
+    });
   });
 
   it('returns local Chinese content without calling the English host when Translator is unavailable', async () => {
@@ -884,16 +1036,19 @@ describe('astrology service', () => {
       } as Response;
     }) as typeof fetch;
 
-    const result = await getAstrologyRanking('en', {
-      env: {
-        DIVINE_API_KEY: 'key',
-        DIVINE_ACCESS_TOKEN: 'token',
-        DIVINE_API_BASE_URL: 'https://example.test',
-        DIVINE_API_CAPABILITIES: 'daily-horoscope',
+    const result = await getAstrologyRanking(
+      { locale: 'en' },
+      {
+        env: {
+          DIVINE_API_KEY: 'key',
+          DIVINE_ACCESS_TOKEN: 'token',
+          DIVINE_API_BASE_URL: 'https://example.test',
+          DIVINE_API_CAPABILITIES: 'daily-horoscope',
+        },
+        fetchImpl,
+        now: new Date('2026-08-12T00:00:00.000Z'),
       },
-      fetchImpl,
-      now: new Date('2026-08-12T00:00:00.000Z'),
-    });
+    );
 
     expect(result.complete).toBe(true);
     expect(result.items).toHaveLength(12);
@@ -903,6 +1058,33 @@ describe('astrology service', () => {
       dateLabel: '2026-08-12',
     });
     expect(result.items[11]).toMatchObject({ zodiacSign: 'aries', score: 60 });
+  });
+
+  it('uses the caller timezone for every daily request in the ranking', async () => {
+    const bodies: string[] = [];
+    const result = await getAstrologyRanking(
+      { locale: 'en', timezoneOffsetMinutes: 330 },
+      {
+        env: {
+          DIVINE_API_KEY: 'key',
+          DIVINE_ACCESS_TOKEN: 'token',
+          DIVINE_API_BASE_URL: 'https://example.test',
+          DIVINE_API_CAPABILITIES: 'daily-horoscope',
+          DIVINE_API_CACHE_TTL_MS: '0',
+        },
+        fetchImpl: (async (_url, init) => {
+          bodies.push(String(init?.body));
+          return dailyProviderResponse();
+        }) as typeof fetch,
+        now: new Date('2026-08-13T20:00:00.000Z'),
+      },
+    );
+
+    expect(result.complete).toBe(true);
+    expect(bodies).toHaveLength(12);
+    expect(new Set(bodies.map((body) => new URLSearchParams(body).get('tzone')))).toEqual(
+      new Set(['5.5']),
+    );
   });
 
   it('maps yes/no tarot without sending a user question and falls back safely', async () => {
@@ -1018,6 +1200,36 @@ describe('astrology service', () => {
       Authorization: 'Bearer token',
     });
     expect(String(calls[0]?.init?.body)).toContain('sign=aries');
+  });
+
+  it('uses the caller timezone for the daily label and DivineAPI request', async () => {
+    const bodies: string[] = [];
+    const input = {
+      birthday: '1996-03-21',
+      zodiacSign: 'aries' as const,
+      locale: 'en',
+      timezoneOffsetMinutes: 330,
+    };
+    const options = {
+      env: {
+        DIVINE_API_KEY: 'key',
+        DIVINE_ACCESS_TOKEN: 'token',
+        DIVINE_API_BASE_URL: 'https://example.test',
+        DIVINE_API_CAPABILITIES: 'daily-horoscope',
+      },
+      fetchImpl: (async (_url, init) => {
+        bodies.push(String(init?.body));
+        return dailyProviderResponse();
+      }) as typeof fetch,
+      now: new Date('2026-08-13T20:00:00.000Z'),
+    };
+
+    const local = buildDailyAstrologyReading(input, options);
+    const reading = await getDailyAstrologyReading(input, options);
+
+    expect(local.dateLabel).toBe('8月14日星期五');
+    expect(reading.source).toBe('divineapi');
+    expect(new URLSearchParams(bodies[0]).get('tzone')).toBe('5.5');
   });
 
   it('maps DivineAPI daily tarot responses with mock fallback shape', async () => {

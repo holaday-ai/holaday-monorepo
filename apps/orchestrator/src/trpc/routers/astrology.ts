@@ -27,6 +27,8 @@ const zodiacSignSchema = z.enum([
   'pisces',
 ]);
 
+const timezoneOffsetMinutesSchema = z.number().int().min(-720).max(840).optional();
+
 const profileInputSchema = z.object({
   name: z.string().trim().max(128).optional(),
   birthday: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -35,6 +37,7 @@ const profileInputSchema = z.object({
   zodiacSign: zodiacSignSchema.optional(),
   zodiacSignOverride: zodiacSignSchema.optional(),
   locale: z.string().trim().max(16).optional(),
+  timezoneOffsetMinutes: timezoneOffsetMinutesSchema,
 });
 
 export const astrologyRouter = router({
@@ -59,8 +62,13 @@ export const astrologyRouter = router({
     .input(profileInputSchema)
     .query(({ input }) => getYearlyAstrologyReading(input)),
   ranking: protectedProcedure
-    .input(z.object({ locale: z.string().trim().max(16).optional() }))
-    .query(({ input }) => getAstrologyRanking(input.locale)),
+    .input(
+      z.object({
+        locale: z.string().trim().max(16).optional(),
+        timezoneOffsetMinutes: timezoneOffsetMinutesSchema,
+      }),
+    )
+    .query(({ input }) => getAstrologyRanking(input)),
   tarot: protectedProcedure
     .input(
       z.object({

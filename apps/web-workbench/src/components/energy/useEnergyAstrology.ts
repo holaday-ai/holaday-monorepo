@@ -356,7 +356,10 @@ export function useEnergyAstrology(
     }
     setRanking((current) => ({ ...current, loading: true, error: null }));
     try {
-      const remote = await trpc.astrology.ranking.query({ locale: 'zh-CN' });
+      const remote = await trpc.astrology.ranking.query({
+        locale: 'zh-CN',
+        timezoneOffsetMinutes: browserTimezoneOffsetMinutes(),
+      });
       if (requestId !== rankingRequestIdRef.current) return;
       setRanking({ ...remote, loaded: true, loading: false, error: null });
     } catch {
@@ -547,7 +550,12 @@ function profileInput(profile: AstroProfile) {
     birthTime: profile.birthTime,
     birthPlace: profile.birthPlace,
     zodiacSign: profile.zodiacSign,
+    timezoneOffsetMinutes: browserTimezoneOffsetMinutes(),
   };
+}
+
+function browserTimezoneOffsetMinutes(): number {
+  return -new Date().getTimezoneOffset();
 }
 
 function queryPeriod(

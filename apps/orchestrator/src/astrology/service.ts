@@ -83,6 +83,12 @@ export interface AstrologyProfileInput {
   zodiacSign?: ZodiacSign;
   zodiacSignOverride?: ZodiacSign;
   locale?: string;
+  timezoneOffsetMinutes?: number;
+}
+
+export interface AstrologyRankingInput {
+  locale?: string;
+  timezoneOffsetMinutes?: number;
 }
 
 export interface AstrologyReading extends AstrologyPeriodReading {
@@ -371,9 +377,11 @@ export function buildDailyAstrologyReading(
   const now = options.now ?? new Date();
   const zodiacSign = resolveZodiacSign(input);
   const meta = ZODIAC_META[zodiacSign];
-  const seed = seededNumber(`${zodiacSign}-${input.birthday}-${dateKey(now)}`);
+  const seed = seededNumber(
+    `${zodiacSign}-${input.birthday}-${dateKey(now, input.timezoneOffsetMinutes)}`,
+  );
   const apiConfigured = hasDivineApiCredentials(options.env);
-  const dateLabel = formatDateLabel(now);
+  const dateLabel = formatDateLabel(now, input.timezoneOffsetMinutes);
   const luckyWindow = pick(seed, [
     '09:30 - 10:20',
     '11:10 - 12:00',
@@ -438,7 +446,7 @@ export async function getDailyAstrologyReading(
         api_key: config.apiKey,
         sign: mock.zodiacSign,
         h_day: 'today',
-        tzone: timezoneOffsetHours(options.now ?? new Date()),
+        tzone: timezoneOffsetHours(input.timezoneOffsetMinutes, options.now ?? new Date()),
         lan: target.lan,
       },
       { ...config, baseUrl: target.baseUrl },
@@ -446,6 +454,12 @@ export async function getDailyAstrologyReading(
       options.fetchImpl,
       horoscopeRequiredPaths('prediction'),
       (json) => assertHoroscopeDimensionTypes(json, 'prediction'),
+      astrologyPeriodCacheIdentity(
+        'daily',
+        'today',
+        options.now ?? new Date(),
+        input.timezoneOffsetMinutes,
+      ),
     );
     if (response.pending) return { ...mock, providerRefreshPending: true };
     return mergeDivineDaily(mock, response.json, response.freshness);
@@ -530,8 +544,8 @@ export function buildMockWeeklyAstrologyReading(
   const now = options.now ?? new Date();
   const zodiacSign = resolveZodiacSign(input);
   const meta = ZODIAC_META[zodiacSign];
-  const seed = seededNumber(`${zodiacSign}-weekly-${dateKey(now)}`);
-  const weekLabel = formatWeekLabel(now);
+  const seed = seededNumber(`${zodiacSign}-weekly-${dateKey(now, input.timezoneOffsetMinutes)}`);
+  const weekLabel = formatWeekLabel(now, input.timezoneOffsetMinutes);
   const personal = `${meta.label}本周适合把关系里的期待说得更具体，也给彼此留一点缓冲。`;
   const health = '把休息放进日程，优先选择能让身体慢下来的小习惯。';
   const profession = meta.workNote;
@@ -590,7 +604,7 @@ export async function getWeeklyAstrologyReading(
         api_key: config.apiKey,
         sign: mock.zodiacSign,
         week: 'current',
-        tzone: timezoneOffsetHours(options.now ?? new Date()),
+        tzone: timezoneOffsetHours(input.timezoneOffsetMinutes, options.now ?? new Date()),
         lan: target.lan,
       },
       { ...config, baseUrl: target.baseUrl },
@@ -598,6 +612,12 @@ export async function getWeeklyAstrologyReading(
       options.fetchImpl,
       horoscopeRequiredPaths('weekly_horoscope'),
       (json) => assertHoroscopeDimensionTypes(json, 'weekly_horoscope'),
+      astrologyPeriodCacheIdentity(
+        'weekly',
+        'current',
+        options.now ?? new Date(),
+        input.timezoneOffsetMinutes,
+      ),
     );
     if (response.pending) return { ...mock, providerRefreshPending: true };
     return mergeDivineWeekly(mock, response.json, response.freshness);
@@ -622,7 +642,7 @@ export async function getYearlyAstrologyReading(
 }
 
 export async function getAstrologyRanking(
-  locale = 'en',
+  input: AstrologyRankingInput = {},
   options: RequestOptions = {},
 ): Promise<AstrologyRankingResult> {
   const signs = Object.keys(ZODIAC_META) as ZodiacSign[];
@@ -632,7 +652,8 @@ export async function getAstrologyRanking(
         {
           birthday: '2000-01-01',
           zodiacSignOverride,
-          locale,
+          locale: input.locale,
+          timezoneOffsetMinutes: input.timezoneOffsetMinutes,
         },
         options,
       ),
@@ -688,7 +709,7 @@ async function getLongPeriodReading(
         api_key: config.apiKey,
         sign: local.zodiacSign,
         [period === 'monthly' ? 'month' : 'year']: rangeKey,
-        tzone: timezoneOffsetHours(options.now ?? new Date()),
+        tzone: timezoneOffsetHours(input.timezoneOffsetMinutes, options.now ?? new Date()),
         lan: target.lan,
       },
       { ...config, baseUrl: target.baseUrl },
@@ -696,6 +717,12 @@ async function getLongPeriodReading(
       options.fetchImpl,
       horoscopeRequiredPaths(selector),
       (json) => assertHoroscopeDimensionTypes(json, selector),
+      astrologyPeriodCacheIdentity(
+        period,
+        rangeKey,
+        options.now ?? new Date(),
+        input.timezoneOffsetMinutes,
+      ),
     );
     if (response.pending) return { ...local, providerRefreshPending: true };
     return mergeDivinePeriod(
@@ -716,14 +743,22 @@ function buildLocalLongPeriodReading(
   rangeKey: 'current' | 'next',
   options: RequestOptions,
 ): AstrologyPeriodReading {
-  const now = new Date(options.now ?? new Date());
-  if (period === 'monthly' && rangeKey === 'next') now.setMonth(now.getMonth() + 1);
+  const now = localPeriodDate(
+    options.now ?? new Date(),
+    input.timezoneOffsetMinutes,
+    period,
+    rangeKey,
+  );
   const zodiacSign = resolveZodiacSign(input);
   const meta = ZODIAC_META[zodiacSign];
   const rangeLabel =
     period === 'monthly'
-      ? new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: 'long' }).format(now)
-      : String(now.getFullYear());
+      ? new Intl.DateTimeFormat('zh-CN', {
+          year: 'numeric',
+          month: 'long',
+          timeZone: 'UTC',
+        }).format(now)
+      : String(now.getUTCFullYear());
   const bodies: Record<AstrologyDimensionKey, string> = {
     personal: `${meta.label}${rangeKey === 'next' ? '下个月' : period === 'monthly' ? '本月' : '本年'}适合把期待说具体，也给关系留一点缓冲。`,
     health: '把休息和规律放进计划，用可持续的节奏代替一次用力过猛。',
@@ -896,12 +931,13 @@ async function postDivineApiJson(
   fetchImpl: typeof fetch | undefined,
   requiredPaths: ReadonlyArray<ReadonlyArray<string>>,
   validate?: (json: unknown) => void,
+  cacheIdentity?: string,
 ): Promise<{ pending: true } | { pending: false; json: unknown; freshness: 'fresh' | 'stale' }> {
   const bodyString = new URLSearchParams(body).toString();
   const cacheParams = new URLSearchParams(
     Object.entries(body).filter(([key]) => key !== 'api_key'),
   ).toString();
-  const cacheKey = `${config.baseUrl}${path}?${cacheParams}`;
+  const cacheKey = `${config.baseUrl}${path}?${cacheParams}${cacheIdentity ? `&__period=${encodeURIComponent(cacheIdentity)}` : ''}`;
   let staleValue: unknown;
   if (config.cacheTtlMs > 0) {
     const cached = divineApiCache.get(cacheKey);
@@ -1360,8 +1396,8 @@ function requestTarget(
   return { baseUrl: config.baseUrl, lan: 'en' };
 }
 
-function timezoneOffsetHours(date: Date): string {
-  return String(-date.getTimezoneOffset() / 60);
+function timezoneOffsetHours(timezoneOffsetMinutes: number | undefined, date: Date): string {
+  return String(resolveTimezoneOffsetMinutes(date, timezoneOffsetMinutes) / 60);
 }
 
 function readCacheTtlMs(env: NodeJS.ProcessEnv = process.env): number {
@@ -1394,23 +1430,83 @@ function pick<T>(seed: number, values: readonly [T, ...T[]]): T {
   return values[seed % values.length] ?? values[0];
 }
 
-function dateKey(date: Date): string {
-  return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
+function resolveTimezoneOffsetMinutes(date: Date, timezoneOffsetMinutes?: number): number {
+  if (
+    Number.isInteger(timezoneOffsetMinutes) &&
+    timezoneOffsetMinutes !== undefined &&
+    timezoneOffsetMinutes >= -720 &&
+    timezoneOffsetMinutes <= 840
+  ) {
+    return timezoneOffsetMinutes;
+  }
+  return -date.getTimezoneOffset();
 }
 
-function formatDateLabel(date: Date): string {
+function dateAtTimezoneOffset(date: Date, timezoneOffsetMinutes?: number): Date {
+  return new Date(
+    date.getTime() + resolveTimezoneOffsetMinutes(date, timezoneOffsetMinutes) * 60_000,
+  );
+}
+
+function localPeriodDate(
+  date: Date,
+  timezoneOffsetMinutes: number | undefined,
+  period: 'monthly' | 'yearly',
+  rangeKey: 'current' | 'next',
+): Date {
+  const localDate = dateAtTimezoneOffset(date, timezoneOffsetMinutes);
+  if (period !== 'monthly' || rangeKey !== 'next') return localDate;
+  return new Date(Date.UTC(localDate.getUTCFullYear(), localDate.getUTCMonth() + 1, 1));
+}
+
+function astrologyPeriodCacheIdentity(
+  period: AstrologyPeriod,
+  rangeKey: 'today' | 'current' | 'next',
+  date: Date,
+  timezoneOffsetMinutes?: number,
+): string {
+  const localDate =
+    period === 'monthly' || period === 'yearly'
+      ? localPeriodDate(
+          date,
+          timezoneOffsetMinutes,
+          period,
+          rangeKey === 'next' ? 'next' : 'current',
+        )
+      : dateAtTimezoneOffset(date, timezoneOffsetMinutes);
+  if (period === 'weekly') {
+    localDate.setUTCDate(localDate.getUTCDate() - ((localDate.getUTCDay() + 6) % 7));
+  }
+  if (period === 'yearly') return `yearly:${localDate.getUTCFullYear()}`;
+  if (period === 'monthly') {
+    return `monthly:${localDate.getUTCFullYear()}-${localDate.getUTCMonth() + 1}`;
+  }
+  return `${period}:${localDate.getUTCFullYear()}-${localDate.getUTCMonth() + 1}-${localDate.getUTCDate()}`;
+}
+
+function dateKey(date: Date, timezoneOffsetMinutes?: number): string {
+  const localDate = dateAtTimezoneOffset(date, timezoneOffsetMinutes);
+  return `${localDate.getUTCFullYear()}-${localDate.getUTCMonth() + 1}-${localDate.getUTCDate()}`;
+}
+
+function formatDateLabel(date: Date, timezoneOffsetMinutes?: number): string {
   return new Intl.DateTimeFormat('zh-CN', {
     month: 'long',
     day: 'numeric',
     weekday: 'long',
-  }).format(date);
+    timeZone: 'UTC',
+  }).format(dateAtTimezoneOffset(date, timezoneOffsetMinutes));
 }
 
-function formatWeekLabel(date: Date): string {
-  const start = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
+function formatWeekLabel(date: Date, timezoneOffsetMinutes?: number): string {
+  const start = dateAtTimezoneOffset(date, timezoneOffsetMinutes);
+  start.setUTCDate(start.getUTCDate() - ((start.getUTCDay() + 6) % 7));
   const end = new Date(start);
-  end.setDate(start.getDate() + 6);
-  const formatter = new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric' });
+  end.setUTCDate(start.getUTCDate() + 6);
+  const formatter = new Intl.DateTimeFormat('zh-CN', {
+    month: 'long',
+    day: 'numeric',
+    timeZone: 'UTC',
+  });
   return `${formatter.format(start)} - ${formatter.format(end)}`;
 }
