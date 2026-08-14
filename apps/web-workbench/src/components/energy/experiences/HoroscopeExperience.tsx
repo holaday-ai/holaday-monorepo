@@ -2,6 +2,7 @@ import { Button } from '@/components/ui/button';
 import type { AstroProfile } from '@/lib/astrology';
 import { Check, Palette, RefreshCw, Sparkles, Timer } from 'lucide-react';
 import * as React from 'react';
+import { PROVIDER_REFRESH_PENDING_COPY } from '../astrology-content';
 import type { ExperiencePhase } from '../energy-types';
 import { LuckyColorValue } from '../LuckyColorValue';
 import type { EnergyAstrologyState } from '../useEnergyAstrology';
@@ -69,7 +70,13 @@ export function HoroscopeExperience({
             {profile.birthday ? '根据已保存生日' : '根据默认资料'}
             对应的太阳星座生成；未使用本命盘推断。
           </p>
-          {astrology.source === 'local-fallback' ? <small>暂时使用本地提示</small> : null}
+          {astrology.source === 'local-fallback' ? (
+            <small>
+              {astrology.periods.daily?.reading.providerRefreshPending
+                ? PROVIDER_REFRESH_PENDING_COPY
+                : '暂时使用本地提示'}
+            </small>
+          ) : null}
         </div>
         <button
           type="button"

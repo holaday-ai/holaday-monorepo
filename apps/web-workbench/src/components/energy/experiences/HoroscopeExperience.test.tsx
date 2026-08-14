@@ -4,7 +4,11 @@ import { buildAstroReading, createProfileFromBirthday } from '@/lib/astrology';
 import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { EnergyAstrologyState } from '../useEnergyAstrology';
+import type {
+  EnergyAstrologyState,
+  EnergyPeriodReading,
+  EnergyPeriodState,
+} from '../useEnergyAstrology';
 import { HoroscopeExperience } from './HoroscopeExperience';
 
 afterEach(cleanup);
@@ -12,7 +16,50 @@ afterEach(cleanup);
 const profile = createProfileFromBirthday({ birthday: '1996-03-21' });
 const reading = buildAstroReading(profile, new Date('2026-08-11T12:00:00+09:00'));
 
+function periodReading(
+  period: EnergyPeriodReading['period'],
+  source: EnergyPeriodReading['source'],
+  providerRefreshPending = false,
+): EnergyPeriodReading {
+  return {
+    period,
+    provider: source === 'divineapi' ? 'divineapi' : 'mock',
+    source,
+    freshness: source === 'divineapi' ? 'fresh' : 'local',
+    providerRefreshPending,
+    zodiacSign: 'aries',
+    zodiacLabel: '白羊座',
+    rangeLabel: period === 'daily' ? '2026-08-11' : `2026 ${period}`,
+    rangeKey: period === 'daily' ? 'today' : 'current',
+    summary: `${period} summary`,
+    dimensions: [],
+    luckyColors: ['#FFB86B'],
+    luckyNumbers: ['3'],
+    luckyLetters: ['A'],
+    suitableTimes: ['10:00 - 11:00'],
+    sevenDayTrend: null,
+    cosmicTip: null,
+    singlesTip: null,
+    couplesTip: null,
+  };
+}
+
+function periodState(
+  period: EnergyPeriodReading['period'],
+  source: EnergyPeriodReading['source'],
+  providerRefreshPending = false,
+): EnergyPeriodState {
+  return {
+    reading: periodReading(period, source, providerRefreshPending),
+    source,
+    loading: false,
+    loaded: true,
+    error: source === 'local-fallback' ? '暂时使用本地提示' : null,
+  };
+}
+
 function astrologyState(source: EnergyAstrologyState['source'] = 'provider'): EnergyAstrologyState {
+  const periodSource = source === 'provider' ? 'divineapi' : 'local-fallback';
   return {
     reading,
     tarot: { title: 'The Star', subtitle: '提示', body: '卡片内容' },
@@ -32,7 +79,12 @@ function astrologyState(source: EnergyAstrologyState['source'] = 'provider'): En
     loading: false,
     initialLoading: false,
     error: source === 'local-fallback' ? '暂时使用本地提示' : null,
-    periods: {} as EnergyAstrologyState['periods'],
+    periods: {
+      daily: periodState('daily', periodSource),
+      weekly: periodState('weekly', periodSource),
+      monthly: periodState('monthly', periodSource),
+      yearly: periodState('yearly', periodSource),
+    },
     capabilities: {},
     ranking: { complete: false, items: [], loaded: false, loading: false, error: null },
     signPreview: null,
@@ -124,6 +176,24 @@ describe('HoroscopeExperience', () => {
 
     expect(screen.getByText('暂时使用本地提示')).toBeTruthy();
     expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('explains that a pending local reading will be replaced automatically', () => {
+    const astrology = astrologyState('local-fallback');
+    astrology.periods.daily = periodState('daily', 'local-fallback', true);
+
+    render(
+      <HoroscopeExperience
+        profile={profile}
+        astrology={astrology}
+        phase="active"
+        onPhaseChange={vi.fn()}
+        onComplete={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('真实星座内容更新中，将自动替换')).toBeTruthy();
+    expect(screen.queryByText('暂时使用本地提示')).toBeNull();
   });
 
   it('hides local fallback content while the first provider request is pending', () => {

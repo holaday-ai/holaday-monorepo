@@ -1993,6 +1993,34 @@
   font-weight: 760;
 }
 
+.energy-astrology-magazine-cover__source[data-refreshing="true"] {
+  align-items: center;
+  gap: 7px;
+  border-color: rgb(116 190 181 / 28%);
+  background: rgb(237 253 249 / 84%);
+  color: #417d78;
+}
+
+.energy-astrology-magazine-cover__source[data-refreshing="true"]::before {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #70cbbb;
+  content: "";
+  box-shadow: 0 0 0 0 rgb(112 203 187 / 28%);
+  animation: energy-provider-pending-pulse 1.6s ease-out infinite;
+}
+
+@keyframes energy-provider-pending-pulse {
+  70% {
+    box-shadow: 0 0 0 6px rgb(112 203 187 / 0%);
+  }
+
+  100% {
+    box-shadow: 0 0 0 0 rgb(112 203 187 / 0%);
+  }
+}
+
 .energy-astrology-magazine-cover__copy-skeleton {
   display: grid;
   gap: 9px;
@@ -3917,6 +3945,7 @@
     transition: none !important;
   }
 
+  .energy-astrology-magazine-cover__source[data-refreshing="true"]::before,
   .energy-astrology-skeleton,
   .energy-astrology-panel__refresh[data-loading="true"] svg,
   .energy-horoscope-refresh[data-loading="true"] svg,

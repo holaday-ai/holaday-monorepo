@@ -36,7 +36,14 @@ export function AstrologyMagazineCover({
         ) : (
           <>
             <p>{reading.summary}</p>
-            <span className="energy-astrology-magazine-cover__source">{sourceLabel}</span>
+            <span
+              className="energy-astrology-magazine-cover__source"
+              data-refreshing={reading.providerRefreshPending ? 'true' : undefined}
+              role={reading.providerRefreshPending ? 'status' : undefined}
+              aria-live={reading.providerRefreshPending ? 'polite' : undefined}
+            >
+              {sourceLabel}
+            </span>
           </>
         )}
       </div>

@@ -5,7 +5,11 @@ import { AstrologyDimensionGrid } from './AstrologyDimensionGrid';
 import { AstrologyMagazineCover } from './AstrologyMagazineCover';
 import { AstrologyPortalRow } from './AstrologyPortalRow';
 import { LuckyInsights } from './LuckyInsights';
-import { hasCompleteRanking } from './astrology-content';
+import {
+  PROVIDER_REFRESH_PENDING_COPY,
+  hasCompleteRanking,
+  periodSourceLabel,
+} from './astrology-content';
 import type { EnergyAstrologyPeriod } from './energy-types';
 import type { EnergyAstrologyState } from './useEnergyAstrology';
 
@@ -53,12 +57,7 @@ export const AstrologyWorld = React.forwardRef<AstrologyWorldHandle, AstrologyWo
     const selectedState = astrology.periods[selectedPeriod];
     const initialPeriodLoading = selectedState.loading && !selectedState.loaded;
     const completeRanking = hasCompleteRanking(astrology.ranking);
-    const sourceLabel =
-      selectedState.source === 'local-fallback'
-        ? 'Holaday 本地提示'
-        : selectedState.reading.freshness === 'stale'
-          ? 'DivineAPI 最近成功数据'
-          : 'DivineAPI 内容';
+    const sourceLabel = periodSourceLabel(selectedState);
 
     const selectPeriod = React.useCallback(
       (period: EnergyAstrologyPeriod): void => {
@@ -195,7 +194,11 @@ export const AstrologyWorld = React.forwardRef<AstrologyWorldHandle, AstrologyWo
           ) : (
             <>
               {selectedState.error ? (
-                <p className="energy-astrology-world__notice">{selectedState.error}</p>
+                <p className="energy-astrology-world__notice">
+                  {selectedState.reading.providerRefreshPending
+                    ? PROVIDER_REFRESH_PENDING_COPY
+                    : selectedState.error}
+                </p>
               ) : null}
               <AstrologyDimensionGrid key={selectedPeriod} reading={selectedState.reading} />
               <LuckyInsights reading={selectedState.reading} />

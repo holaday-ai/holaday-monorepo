@@ -58,6 +58,27 @@ describe('AstrologyMagazineCover', () => {
     expect(screen.getByTitle('#FFBF00')).toBeTruthy();
   });
 
+  it('announces pending provider content without hiding the local reading', () => {
+    render(
+      <AstrologyMagazineCover
+        reading={{
+          ...reading,
+          provider: 'mock',
+          source: 'local-fallback',
+          freshness: 'local',
+          providerRefreshPending: true,
+        }}
+        sourceLabel="真实星座内容更新中，将自动替换"
+        loading={false}
+      />,
+    );
+
+    expect(screen.getByText('今日提示')).toBeTruthy();
+    const status = screen.getByRole('status');
+    expect(status.getAttribute('data-refreshing')).toBe('true');
+    expect(status.getAttribute('aria-live')).toBe('polite');
+  });
+
   it('uses a visible cover fallback after image failure', () => {
     render(
       <AstrologyMagazineCover reading={reading} sourceLabel="DivineAPI 内容" loading={false} />,

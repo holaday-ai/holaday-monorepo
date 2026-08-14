@@ -74,6 +74,16 @@ describe('energy motion system', () => {
     );
   });
 
+  it('animates the pending provider dot and disables it for reduced motion', () => {
+    expect(css).toContain('@keyframes energy-provider-pending-pulse');
+    expect(css).toMatch(
+      /\.energy-astrology-magazine-cover__source\[data-refreshing="true"\]::before\s*\{[^}]*animation:/s,
+    );
+    expect(css).toMatch(
+      /prefers-reduced-motion:[\s\S]*\.energy-astrology-magazine-cover__source\[data-refreshing="true"\]::before[\s\S]*animation:\s*none\s*!important/,
+    );
+  });
+
   it('keeps supporting copy readable and mobile content actions touch friendly', () => {
     const portalTitle = css.match(/\.energy-astrology-portals strong\s*\{[^}]+\}/)?.[0];
     const portalHint = css.match(
