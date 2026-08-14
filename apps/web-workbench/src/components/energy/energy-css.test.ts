@@ -133,4 +133,17 @@ describe('energy motion system', () => {
       /@media\s*\(max-width:\s*520px\)[\s\S]*\.energy-hero\.energy-hero--compact\s*\{[^}]*grid-template-areas:\s*"copy"\s*"actions"[^}]*grid-template-columns:\s*1fr[^}]*overflow:\s*clip/,
     );
   });
+
+  it('defines the energy shelf grid, touch targets and reduced-motion fallback', () => {
+    expect(css).toMatch(/\.energy-shelf__grid\s*\{[^}]*grid-template-columns:/s);
+    expect(css).toMatch(/\.energy-shelf__image\s*\{[^}]*aspect-ratio:\s*16\s*\/\s*9/s);
+    expect(css).toMatch(/\.energy-shelf__remove\s*\{[^}]*width:\s*44px[^}]*height:\s*44px/s);
+    expect(css).toContain('@keyframes energy-shelf-card-arrive');
+    expect(css).toMatch(
+      /@media\s*\(max-width:\s*640px\)[\s\S]*\.energy-shelf__grid\s*\{[^}]*grid-template-columns:\s*1fr/,
+    );
+    expect(css).toMatch(
+      /prefers-reduced-motion:[\s\S]*\.energy-shelf__card[\s\S]*animation:\s*none\s*!important/,
+    );
+  });
 });
