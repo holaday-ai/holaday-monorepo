@@ -64,7 +64,9 @@ describe('EnergyShelf', () => {
     const image = container.querySelector<HTMLImageElement>('.energy-shelf__image img');
     expect(image?.getAttribute('alt')).toBe('');
     expect(image?.style.objectPosition).toBe('50% 42%');
-    await user.click(screen.getByRole('button', { name: '再体验颜色记忆' }));
+    const open = screen.getByRole('button', { name: '再体验颜色记忆' });
+    expect(open.title).toBe('再体验颜色记忆');
+    await user.click(open);
     expect(onOpen).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'recent:games:color-memory' }),
       expect.any(HTMLButtonElement),

@@ -173,6 +173,7 @@ function EnergyShelfCard({
           type="button"
           className="energy-shelf__open"
           aria-label={`再体验${item.title}`}
+          title={`再体验${item.title}`}
           onClick={(event) => onOpen(item, event.currentTarget)}
         >
           再体验
