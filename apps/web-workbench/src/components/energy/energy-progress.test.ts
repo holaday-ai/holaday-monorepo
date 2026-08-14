@@ -71,6 +71,46 @@ describe('energy progress', () => {
     expect(readEnergyProgress('usr_a').collectedKinds).toEqual(['game']);
   });
 
+  it('keeps scoped progress in memory when local storage is unavailable', () => {
+    const completedAt = new Date('2026-08-14T03:00:00.000Z');
+    vi.stubGlobal('window', {
+      localStorage: {
+        getItem: () => {
+          throw new Error('storage unavailable');
+        },
+        setItem: () => {
+          throw new Error('storage unavailable');
+        },
+      },
+    });
+
+    recordCompletedEnergyExperience(
+      'usr_a',
+      {
+        experienceId: 'games',
+        launchTarget: { type: 'game', gameId: 'catch-energy' },
+        kind: 'game',
+      },
+      completedAt,
+    );
+
+    expect(readEnergyProgress('usr_a', completedAt)).toMatchObject({
+      completedDates: ['2026-08-14'],
+      collectedKinds: ['game'],
+      shelf: {
+        recentExperiences: [
+          {
+            experienceId: 'games',
+            launchTarget: { type: 'game', gameId: 'catch-energy' },
+            kind: 'game',
+            completedAt: '2026-08-14T03:00:00.000Z',
+          },
+        ],
+      },
+    });
+    expect(readEnergyProgress('usr_b', completedAt).collectedKinds).toEqual([]);
+  });
+
   it('counts only consecutive local dates ending today', () => {
     const progress = {
       completedDates: ['2026-08-07', '2026-08-09', '2026-08-10', '2026-08-11'],

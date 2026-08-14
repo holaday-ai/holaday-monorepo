@@ -65,6 +65,7 @@ const MAX_RECENT_EXPERIENCES = 12;
 const RECENT_RETENTION_MS = 30 * 24 * 60 * 60 * 1_000;
 const MAX_FUTURE_SKEW_MS = 5 * 60 * 1_000;
 const previewProgressByWindow = new WeakMap<object, EnergyProgress>();
+const scopedProgressByWindow = new WeakMap<object, Map<string, EnergyProgress>>();
 const COMPLETION_KINDS: readonly EnergyCompletionKind[] = [
   'recharge',
   'tarot',
@@ -318,6 +319,27 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function rememberScopedProgress(scope: string, progress: EnergyProgress): void {
+  if (typeof window === 'undefined') return;
+  let progressByScope = scopedProgressByWindow.get(window);
+  if (!progressByScope) {
+    progressByScope = new Map();
+    scopedProgressByWindow.set(window, progressByScope);
+  }
+  progressByScope.set(storageKey(scope), progress);
+}
+
+function readRememberedScopedProgress(scope: string, now: Date): EnergyProgress | null {
+  if (typeof window === 'undefined') return null;
+  const progress = scopedProgressByWindow.get(window)?.get(storageKey(scope));
+  return progress ? normalizeDailyState(progress, now) : null;
+}
+
+function forgetRememberedScopedProgress(scope: string): void {
+  if (typeof window === 'undefined') return;
+  scopedProgressByWindow.get(window)?.delete(storageKey(scope));
+}
+
 function writeProgress(scope: string | null, progress: EnergyProgress): void {
   if (scope === null) {
     if (typeof window !== 'undefined') previewProgressByWindow.set(window, progress);
@@ -325,8 +347,9 @@ function writeProgress(scope: string | null, progress: EnergyProgress): void {
   }
   try {
     window.localStorage.setItem(storageKey(scope), JSON.stringify(progress));
+    forgetRememberedScopedProgress(scope);
   } catch {
-    // The in-memory result remains usable when storage is unavailable.
+    rememberScopedProgress(scope, progress);
   }
 }
 
@@ -362,9 +385,13 @@ export function readEnergyProgress(scope: string | null, now = new Date()): Ener
     if (current) {
       const parsed = parseProgress(current, now);
       const normalized = normalizeDailyState(parsed, now);
+      forgetRememberedScopedProgress(scope);
       if (JSON.stringify(normalized) !== current) writeProgress(scope, normalized);
       return normalized;
     }
+
+    const remembered = readRememberedScopedProgress(scope, now);
+    if (remembered) return remembered;
 
     const v3 = window.localStorage.getItem(storageKey(scope, V3_STORAGE_PREFIX));
     if (v3) {
@@ -395,7 +422,7 @@ export function readEnergyProgress(scope: string | null, now = new Date()): Ener
     writeProgress(scope, migrated);
     return migrated;
   } catch {
-    return emptyProgress(now);
+    return readRememberedScopedProgress(scope, now) ?? emptyProgress(now);
   }
 }
 
