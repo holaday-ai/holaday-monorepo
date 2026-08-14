@@ -95,6 +95,18 @@ afterEach(() => {
 });
 
 describe('EnergyHome', () => {
+  it('keeps public preview interactions local without querying protected energy services', async () => {
+    const user = userEvent.setup();
+    render(<EnergyHome liveProvider={false} profileStorageScope={null} />);
+
+    expect(trpcMocks.homeQuery).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: '玩接住能量' }));
+    await user.click(screen.getByRole('button', { name: '开始体验' }));
+
+    expect(await screen.findByRole('button', { name: '接住第 1 个能量光点' })).toBeTruthy();
+    expect(trpcMocks.reportEvent).not.toHaveBeenCalled();
+  });
+
   it('renders the selected recharge hierarchy with three active playful choices', async () => {
     const { container } = render(<EnergyHome profileStorageScope="usr_energy" />);
 

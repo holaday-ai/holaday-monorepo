@@ -100,9 +100,9 @@ export function EnergyHome({
     () =>
       createEnergyEventReporter({
         send: (event: Parameters<typeof trpc.energy.reportEvent.mutate>[0]) =>
-          trpc.energy.reportEvent.mutate(event),
+          storageScope ? trpc.energy.reportEvent.mutate(event) : Promise.resolve(),
       }),
-    [],
+    [storageScope],
   );
 
   React.useEffect(() => () => eventReporter.dispose(), [eventReporter]);
@@ -117,6 +117,8 @@ export function EnergyHome({
   }, [canUseProfileStorage, storageScope]);
 
   React.useEffect(() => {
+    if (!storageScope) return;
+
     let active = true;
     void trpc.energy.home
       .query()
@@ -135,7 +137,7 @@ export function EnergyHome({
     return () => {
       active = false;
     };
-  }, []);
+  }, [storageScope]);
 
   const reportEvent = React.useCallback(
     (
