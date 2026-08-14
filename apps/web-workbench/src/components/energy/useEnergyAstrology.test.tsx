@@ -278,11 +278,12 @@ describe('useEnergyAstrology', () => {
     expect(result.current.reading.headline).toBe('远端今日提示');
   });
 
-  it('silently upgrades a pending local period without showing loading again', async () => {
+  it('immediately starts a silent recheck without showing loading again', async () => {
     vi.useFakeTimers();
+    const silentDaily = deferred<ReturnType<typeof remoteReading>>();
     trpcMocks.daily
       .mockResolvedValueOnce(pendingLocalDaily())
-      .mockResolvedValueOnce(remoteReading('aries', '后台真实中文提示'));
+      .mockReturnValueOnce(silentDaily.promise);
     const profile = createProfileFromBirthday({ birthday: '1996-03-21' });
 
     const { result } = renderHook(() => useEnergyAstrology(profile, true));
@@ -295,20 +296,20 @@ describe('useEnergyAstrology', () => {
       loading: false,
       error: '暂时使用本地提示',
     });
-    expect(trpcMocks.daily).toHaveBeenCalledTimes(1);
+    expect(trpcMocks.daily).toHaveBeenCalledTimes(2);
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(18_000);
+      silentDaily.resolve(remoteReading('aries', '后台真实中文提示'));
+      await silentDaily.promise;
     });
 
-    expect(trpcMocks.daily).toHaveBeenCalledTimes(2);
     expect(result.current.periods.daily.loading).toBe(false);
     expect(result.current.periods.daily.source).toBe('divineapi');
     expect(result.current.periods.daily.error).toBeNull();
     expect(result.current.reading.headline).toBe('后台真实中文提示');
   });
 
-  it('stops silent refresh after two pending rechecks and does not preheat ranking', async () => {
+  it('stops after three pending silent rechecks and does not preheat ranking', async () => {
     vi.useFakeTimers();
     trpcMocks.daily.mockResolvedValue(pendingLocalDaily());
     const profile = createProfileFromBirthday({ birthday: '1996-03-21' });
@@ -316,12 +317,12 @@ describe('useEnergyAstrology', () => {
     renderHook(() => useEnergyAstrology(profile, true));
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
-      await vi.advanceTimersByTimeAsync(18_000);
-      await vi.advanceTimersByTimeAsync(5_000);
+      await vi.advanceTimersByTimeAsync(1_000);
+      await vi.advanceTimersByTimeAsync(1_000);
       await vi.advanceTimersByTimeAsync(60_000);
     });
 
-    expect(trpcMocks.daily).toHaveBeenCalledTimes(3);
+    expect(trpcMocks.daily).toHaveBeenCalledTimes(4);
     expect(trpcMocks.ranking).not.toHaveBeenCalled();
   });
 
@@ -334,7 +335,6 @@ describe('useEnergyAstrology', () => {
     renderHook(() => useEnergyAstrology(profile, true));
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
-      await vi.advanceTimersByTimeAsync(18_000);
     });
 
     expect(trpcMocks.daily).toHaveBeenCalledTimes(2);
@@ -353,10 +353,10 @@ describe('useEnergyAstrology', () => {
 
     act(() => result.current.activatePeriod('weekly'));
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(18_000);
+      await vi.advanceTimersByTimeAsync(0);
     });
 
-    expect(trpcMocks.daily).toHaveBeenCalledTimes(1);
+    expect(trpcMocks.daily).toHaveBeenCalledTimes(2);
     expect(trpcMocks.weekly).toHaveBeenCalledTimes(2);
   });
 
@@ -371,7 +371,7 @@ describe('useEnergyAstrology', () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
       await result.current.refreshPeriod('daily');
-      await vi.advanceTimersByTimeAsync(18_000);
+      await vi.advanceTimersByTimeAsync(0);
     });
 
     expect(trpcMocks.daily).toHaveBeenCalledTimes(3);
@@ -428,7 +428,7 @@ describe('useEnergyAstrology', () => {
       result.current.activatePeriod('monthly');
       await result.current.loadPeriod('monthly', 'current');
       await result.current.loadPeriod('monthly', 'next');
-      await vi.advanceTimersByTimeAsync(18_000);
+      await vi.advanceTimersByTimeAsync(0);
     });
 
     expect(trpcMocks.monthly).toHaveBeenCalledTimes(2);
@@ -479,7 +479,7 @@ describe('useEnergyAstrology', () => {
     unmount();
     await vi.advanceTimersByTimeAsync(60_000);
 
-    expect(trpcMocks.daily).toHaveBeenCalledTimes(1);
+    expect(trpcMocks.daily).toHaveBeenCalledTimes(2);
   });
 
   it('does not silently retry an ordinary local fallback', async () => {
@@ -519,7 +519,6 @@ describe('useEnergyAstrology', () => {
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
-      await vi.advanceTimersByTimeAsync(18_000);
     });
     rerender({ profile: taurus });
     await act(async () => {

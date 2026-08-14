@@ -104,7 +104,7 @@ export interface EnergyAstrologyState {
 
 const PERIODS: EnergyAstrologyPeriod[] = ['daily', 'weekly', 'monthly', 'yearly'];
 const LOCAL_ERROR = '暂时使用本地提示';
-const SILENT_REFRESH_DELAYS_MS = [18_000, 5_000] as const;
+const SILENT_REFRESH_DELAYS_MS = [0, 1_000, 1_000] as const;
 
 export function useEnergyAstrology(
   profile: AstroProfile,
