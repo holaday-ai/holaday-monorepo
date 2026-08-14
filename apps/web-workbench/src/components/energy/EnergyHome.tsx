@@ -10,6 +10,7 @@ import { EnergyGrowthPanel } from './EnergyGrowthPanel';
 import { EnergyHero } from './EnergyHero';
 import { EnergyProfileDrawer } from './EnergyProfileDrawer';
 import { ENERGY_SECTION_LINKS, type EnergySectionId, EnergySectionNav } from './EnergySectionNav';
+import { EnergyShelf } from './EnergyShelf';
 import { ExperiencePlayer } from './ExperiencePlayer';
 import { RunningTaskDock, type RunningTaskDockEvent } from './RunningTaskDock';
 import { resolveEnergyContentTarget } from './content-target-controller';
@@ -19,9 +20,12 @@ import { createEnergyEventReporter } from './energy-event-reporter';
 import {
   completedKindsForDate,
   readEnergyProgress,
-  recordEnergyCompletion,
-  saveLastEnergyTarget,
+  recordCompletedEnergyExperience,
+  removeSavedEnergyCard,
+  removeSavedLightTestAction,
+  toggleFavoriteEnergyContent,
 } from './energy-progress';
+import { type EnergyShelfItem, buildEnergyShelfModel } from './energy-shelf';
 import type { EnergyExperienceId, EnergyNeed, ExperiencePhase } from './energy-types';
 import { ENERGY_EXPERIENCES, type EnergyExperienceRegistration } from './experience-registry';
 import { useEnergyAstrology } from './useEnergyAstrology';
@@ -200,6 +204,10 @@ export function EnergyHome({
   const tarot = experiences.find((experience) => experience.id === 'tarot') ?? null;
   const lightTest = experiences.find((experience) => experience.id === 'light-test') ?? null;
   const completedToday = completedKindsForDate(progress);
+  const shelfModel = React.useMemo(
+    () => buildEnergyShelfModel(progress, profile.zodiacSign),
+    [progress, profile.zodiacSign],
+  );
   const continuation = recommendNextEnergyTarget({
     energyNeed,
     completedKinds: completedToday,
@@ -239,6 +247,31 @@ export function EnergyHome({
     openExperience(experience, trigger, command.launchTarget);
     return true;
   };
+
+  const openShelfItem = (item: EnergyShelfItem, trigger: HTMLButtonElement): boolean => {
+    if (item.recent) {
+      const experience = experiences.find(
+        (candidate) => candidate.id === item.recent?.experienceId,
+      );
+      return experience ? openExperience(experience, trigger, item.recent.launchTarget) : false;
+    }
+    return item.target ? executeTarget(item.target, trigger) : false;
+  };
+
+  const removeShelfFavorite = (item: EnergyShelfItem): void => {
+    const favorite = item.favoriteRef;
+    if (!favorite) return;
+    if (favorite.source === 'energy-card') {
+      setProgress(removeSavedEnergyCard(storageScope, favorite.cardId));
+      return;
+    }
+    if (favorite.source === 'test-action') {
+      setProgress(removeSavedLightTestAction(storageScope, favorite.testId, favorite.outcomeId));
+      return;
+    }
+    setProgress(toggleFavoriteEnergyContent(storageScope, favorite.contentId));
+  };
+
   const canOpenLastTarget = progress.continuation.lastTarget
     ? targetIsAvailable(progress.continuation.lastTarget, experiences)
     : false;
@@ -332,8 +365,10 @@ export function EnergyHome({
           mood={null}
           energyNeed={energyNeed}
           zodiacSign={profile.zodiacSign}
+          favoriteContentIds={progress.continuation.favoriteContentIds}
           onEvent={reportHubEvent}
           onActionTarget={executeTarget}
+          onProgressChange={setProgress}
           onCompleteToday={() => {
             growthRef.current?.scrollIntoView?.({
               behavior: prefersReducedMotion() ? 'auto' : 'smooth',
@@ -342,6 +377,12 @@ export function EnergyHome({
           }}
         />
       </div>
+
+      <EnergyShelf
+        model={shelfModel}
+        onOpen={openShelfItem}
+        onRemoveFavorite={removeShelfFavorite}
+      />
 
       {tasks.length > 0 ? <RunningTaskDock tasks={tasks} onEvent={reportHubEvent} /> : null}
 
@@ -412,23 +453,13 @@ export function EnergyHome({
               phase={phase}
               onPhaseChange={handlePhaseChange}
               onExperienceComplete={(kind) => {
-                const completed = recordEnergyCompletion(storageScope, kind);
-                if (!selectedLaunchTarget) {
-                  setProgress(completed);
-                  return;
-                }
-                const saved = saveLastEnergyTarget(storageScope, selectedLaunchTarget, kind);
+                if (!selectedExperience || selectedExperience.id === 'poll') return;
                 setProgress(
-                  storageScope === null
-                    ? {
-                        ...completed,
-                        continuation: {
-                          ...completed.continuation,
-                          lastTarget: selectedLaunchTarget,
-                          lastCompletedKind: kind,
-                        },
-                      }
-                    : saved,
+                  recordCompletedEnergyExperience(storageScope, {
+                    experienceId: selectedExperience.id,
+                    launchTarget: selectedLaunchTarget,
+                    kind,
+                  }),
                 );
               }}
             />
