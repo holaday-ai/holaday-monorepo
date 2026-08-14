@@ -2,6 +2,7 @@ import {
   ENERGY_POLL_IDS,
   ENERGY_PRACTICE_IDS,
   type EnergyContentTarget,
+  type EnergyExperienceLaunchTarget,
   type EnergyPollId,
   type EnergyPracticeId,
   isEnergyContentTarget,
@@ -19,6 +20,24 @@ export interface EnergyContinuationState {
   favoriteContentIds: string[];
 }
 
+const RECENT_EXPERIENCE_KIND = {
+  recharge: 'recharge',
+  practice: 'recharge',
+  tarot: 'tarot',
+  'light-test': 'test',
+  horoscope: 'horoscope',
+  games: 'game',
+} as const satisfies Record<string, EnergyCompletionKind>;
+
+export type EnergyRecentExperienceId = keyof typeof RECENT_EXPERIENCE_KIND;
+
+export interface EnergyRecentExperience {
+  experienceId: EnergyRecentExperienceId;
+  launchTarget: EnergyExperienceLaunchTarget | null;
+  kind: EnergyCompletionKind;
+  completedAt: string;
+}
+
 export interface EnergyProgress {
   completedDates: string[];
   collectedKinds: EnergyCompletionKind[];
@@ -29,15 +48,22 @@ export interface EnergyProgress {
   completedKindsByDate: Record<string, EnergyCompletionKind[]>;
   seenContentDateKey: string | null;
   continuation: EnergyContinuationState;
+  shelf: {
+    recentExperiences: EnergyRecentExperience[];
+  };
 }
 
-const STORAGE_PREFIX = 'holaday.energy.progress.v3';
+const STORAGE_PREFIX = 'holaday.energy.progress.v4';
+const V3_STORAGE_PREFIX = 'holaday.energy.progress.v3';
 const V2_STORAGE_PREFIX = 'holaday.energy.progress.v2';
 const LEGACY_STORAGE_PREFIX = 'holaday.energy.progress.v1';
 const MAX_SAVED_CARD_IDS = 100;
 const MAX_TEST_IDS = 100;
 const MAX_CONTENT_IDS = 100;
 const MAX_DATED_COMPLETION_KEYS = 45;
+const MAX_RECENT_EXPERIENCES = 12;
+const RECENT_RETENTION_MS = 30 * 24 * 60 * 60 * 1_000;
+const MAX_FUTURE_SKEW_MS = 5 * 60 * 1_000;
 const previewProgressByWindow = new WeakMap<object, EnergyProgress>();
 const COMPLETION_KINDS: readonly EnergyCompletionKind[] = [
   'recharge',
@@ -65,6 +91,7 @@ function emptyProgress(now = new Date()): EnergyProgress {
       pollSelections: {},
       favoriteContentIds: [],
     },
+    shelf: { recentExperiences: [] },
   };
 }
 
@@ -134,6 +161,102 @@ function parsePollSelections(value: unknown): Record<string, string> {
   );
 }
 
+function isRecentExperienceId(value: unknown): value is EnergyRecentExperienceId {
+  return typeof value === 'string' && value in RECENT_EXPERIENCE_KIND;
+}
+
+function targetMatchesExperience(
+  experienceId: EnergyRecentExperienceId,
+  launchTarget: EnergyExperienceLaunchTarget | null,
+): boolean {
+  if (launchTarget === null) return experienceId !== 'practice';
+  if (experienceId === 'practice') return launchTarget.type === 'practice';
+  if (experienceId === 'tarot') return launchTarget.type === 'tarot';
+  if (experienceId === 'light-test') return launchTarget.type === 'test';
+  if (experienceId === 'games') return launchTarget.type === 'game';
+  return false;
+}
+
+export function recentExperienceKey(
+  experience: Pick<EnergyRecentExperience, 'experienceId' | 'launchTarget'>,
+): string {
+  const { experienceId, launchTarget } = experience;
+  if (!launchTarget) return `${experienceId}:default`;
+  if (launchTarget.type === 'practice') return `${experienceId}:${launchTarget.practiceId}`;
+  if (launchTarget.type === 'test') return `${experienceId}:${launchTarget.testId}`;
+  if (launchTarget.type === 'game') return `${experienceId}:${launchTarget.gameId}`;
+  if (launchTarget.type === 'tarot') {
+    return `${experienceId}:${launchTarget.mode}:${launchTarget.theme ?? 'all'}`;
+  }
+  return `${experienceId}:default`;
+}
+
+function parseRecentExperiences(value: unknown, now: Date): EnergyRecentExperience[] {
+  if (!Array.isArray(value)) return [];
+  const nowMs = now.getTime();
+  const earliestMs = nowMs - RECENT_RETENTION_MS;
+  const latestMs = nowMs + MAX_FUTURE_SKEW_MS;
+  const parsed = value.flatMap((candidate): EnergyRecentExperience[] => {
+    if (!isRecord(candidate)) return [];
+    if (
+      !Object.keys(candidate).every((key) =>
+        ['experienceId', 'launchTarget', 'kind', 'completedAt'].includes(key),
+      ) ||
+      !isRecentExperienceId(candidate.experienceId) ||
+      !isCompletionKind(candidate.kind) ||
+      candidate.kind !== RECENT_EXPERIENCE_KIND[candidate.experienceId] ||
+      typeof candidate.completedAt !== 'string'
+    ) {
+      return [];
+    }
+
+    const completedMs = Date.parse(candidate.completedAt);
+    if (
+      !Number.isFinite(completedMs) ||
+      new Date(completedMs).toISOString() !== candidate.completedAt ||
+      completedMs < earliestMs ||
+      completedMs > latestMs
+    ) {
+      return [];
+    }
+
+    const launchTarget =
+      candidate.launchTarget === null
+        ? null
+        : isEnergyContentTarget(candidate.launchTarget) &&
+            candidate.launchTarget.type !== 'astrology' &&
+            candidate.launchTarget.type !== 'astrology-signs'
+          ? candidate.launchTarget
+          : undefined;
+    if (
+      launchTarget === undefined ||
+      !targetMatchesExperience(candidate.experienceId, launchTarget)
+    ) {
+      return [];
+    }
+
+    return [
+      {
+        experienceId: candidate.experienceId,
+        launchTarget,
+        kind: candidate.kind,
+        completedAt: candidate.completedAt,
+      },
+    ];
+  });
+
+  const seen = new Set<string>();
+  return parsed
+    .sort((left, right) => right.completedAt.localeCompare(left.completedAt))
+    .filter((experience) => {
+      const key = recentExperienceKey(experience);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, MAX_RECENT_EXPERIENCES);
+}
+
 function parseProgress(raw: string, now = new Date()): EnergyProgress {
   const parsed = JSON.parse(raw) as Record<string, unknown>;
   if (!Array.isArray(parsed.completedDates) || !Array.isArray(parsed.collectedKinds)) {
@@ -166,6 +289,7 @@ function parseProgress(raw: string, now = new Date()): EnergyProgress {
   const favoriteContentIds = Array.isArray(continuation.favoriteContentIds)
     ? continuation.favoriteContentIds.filter(isContentId).slice(-MAX_CONTENT_IDS)
     : [];
+  const shelf = isRecord(parsed.shelf) ? parsed.shelf : {};
 
   return {
     completedDates: [...new Set(completedDates)].sort(),
@@ -186,6 +310,7 @@ function parseProgress(raw: string, now = new Date()): EnergyProgress {
       pollSelections: parsePollSelections(continuation.pollSelections),
       favoriteContentIds: [...new Set(favoriteContentIds)],
     },
+    shelf: { recentExperiences: parseRecentExperiences(shelf.recentExperiences, now) },
   };
 }
 
@@ -237,13 +362,16 @@ export function readEnergyProgress(scope: string | null, now = new Date()): Ener
     if (current) {
       const parsed = parseProgress(current, now);
       const normalized = normalizeDailyState(parsed, now);
-      if (
-        normalized.seenContentDateKey !== parsed.seenContentDateKey ||
-        normalized.continuation.dateKey !== parsed.continuation.dateKey
-      ) {
-        writeProgress(scope, normalized);
-      }
+      if (JSON.stringify(normalized) !== current) writeProgress(scope, normalized);
       return normalized;
+    }
+
+    const v3 = window.localStorage.getItem(storageKey(scope, V3_STORAGE_PREFIX));
+    if (v3) {
+      const parsed = parseProgress(v3, now);
+      const migrated = normalizeDailyState(parsed, now);
+      writeProgress(scope, migrated);
+      return migrated;
     }
 
     const v2 = window.localStorage.getItem(storageKey(scope, V2_STORAGE_PREFIX));
@@ -289,6 +417,74 @@ export function recordEnergyCompletion(
     continuation: {
       ...current.continuation,
       lastCompletedKind: kind,
+    },
+  };
+  writeProgress(scope, next);
+  return next;
+}
+
+export interface CompletedEnergyExperienceInput {
+  experienceId: EnergyRecentExperienceId;
+  launchTarget: EnergyExperienceLaunchTarget | null;
+  kind: EnergyCompletionKind;
+}
+
+export function recordCompletedEnergyExperience(
+  scope: string | null,
+  input: CompletedEnergyExperienceInput,
+  completedAt = new Date(),
+): EnergyProgress {
+  const current = normalizeDailyState(readEnergyProgress(scope, completedAt), completedAt);
+  if (
+    !isRecentExperienceId(input.experienceId) ||
+    !isCompletionKind(input.kind) ||
+    input.kind !== RECENT_EXPERIENCE_KIND[input.experienceId]
+  ) {
+    return current;
+  }
+  const launchTarget =
+    input.launchTarget === null
+      ? null
+      : isEnergyContentTarget(input.launchTarget) &&
+          input.launchTarget.type !== 'astrology' &&
+          input.launchTarget.type !== 'astrology-signs'
+        ? input.launchTarget
+        : undefined;
+  if (
+    launchTarget === undefined ||
+    !targetMatchesExperience(input.experienceId, launchTarget) ||
+    !Number.isFinite(completedAt.getTime())
+  ) {
+    return current;
+  }
+
+  const dateKey = localDateKey(completedAt);
+  const next: EnergyProgress = {
+    ...current,
+    completedDates: [...new Set([...current.completedDates, dateKey])].sort(),
+    collectedKinds: [...new Set([...current.collectedKinds, input.kind])],
+    completedKindsByDate: {
+      ...current.completedKindsByDate,
+      [dateKey]: [...new Set([...(current.completedKindsByDate[dateKey] ?? []), input.kind])],
+    },
+    continuation: {
+      ...current.continuation,
+      lastTarget: launchTarget ?? current.continuation.lastTarget,
+      lastCompletedKind: input.kind,
+    },
+    shelf: {
+      recentExperiences: parseRecentExperiences(
+        [
+          {
+            experienceId: input.experienceId,
+            launchTarget,
+            kind: input.kind,
+            completedAt: completedAt.toISOString(),
+          },
+          ...current.shelf.recentExperiences,
+        ],
+        completedAt,
+      ),
     },
   };
   writeProgress(scope, next);
@@ -405,6 +601,17 @@ export function saveEnergyCardIds(scope: string | null, cardIds: string[]): Ener
   return next;
 }
 
+export function removeSavedEnergyCard(scope: string | null, cardId: string): EnergyProgress {
+  const current = readEnergyProgress(scope);
+  if (!isCardId(cardId) || !current.savedCardIds.includes(cardId)) return current;
+  const next = {
+    ...current,
+    savedCardIds: current.savedCardIds.filter((savedId) => savedId !== cardId),
+  };
+  writeProgress(scope, next);
+  return next;
+}
+
 export function recordLightTestCompletion(scope: string | null, testId: string): EnergyProgress {
   const current = readEnergyProgress(scope);
   if (!isTestId(testId)) return current;
@@ -426,6 +633,25 @@ export function saveLightTestAction(
     -MAX_TEST_IDS,
   );
   const next = { ...current, savedTestActionIds };
+  writeProgress(scope, next);
+  return next;
+}
+
+export function removeSavedLightTestAction(
+  scope: string | null,
+  testId: string,
+  outcomeId: string,
+): EnergyProgress {
+  const current = readEnergyProgress(scope);
+  if (!isTestId(testId) || !isTestOutcomeId(outcomeId)) return current;
+  const actionId = `${testId}:${outcomeId}`;
+  if (!current.savedTestActionIds.includes(actionId)) return current;
+  const next = {
+    ...current,
+    savedTestActionIds: current.savedTestActionIds.filter(
+      (savedActionId) => savedActionId !== actionId,
+    ),
+  };
   writeProgress(scope, next);
   return next;
 }
