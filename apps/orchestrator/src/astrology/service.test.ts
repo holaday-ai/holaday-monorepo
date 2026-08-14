@@ -602,9 +602,10 @@ describe('astrology service', () => {
 
   it('does not reuse provider caches after caller-local period boundaries', async () => {
     const callCounts = new Map<string, number>();
-    const fetchImpl = (async (url: Parameters<typeof fetch>[0]) => {
+    const fetchImpl = (async (url: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const path = new URL(String(url)).pathname;
       callCounts.set(path, (callCounts.get(path) ?? 0) + 1);
+      expect(String(init?.body)).not.toContain('__period');
       if (path.endsWith('/daily-horoscope')) return dailyProviderResponse();
       if (path.endsWith('/weekly-horoscope')) return periodProviderResponse('weekly');
       if (path.endsWith('/monthly-horoscope')) return periodProviderResponse('monthly');
