@@ -216,6 +216,48 @@ describe('AstrologyWorld', () => {
     expect(screen.queryByText('工作提示')).toBeNull();
   });
 
+  it('explains that pending provider content will replace the local fallback', () => {
+    const astrology = state();
+    astrology.periods.daily = periodState('daily', {
+      source: 'local-fallback',
+      error: '暂时使用本地提示',
+      reading: periodReading('daily', {
+        provider: 'mock',
+        source: 'local-fallback',
+        freshness: 'local',
+        providerRefreshPending: true,
+      }),
+    });
+
+    render(
+      <AstrologyWorld astrology={astrology} onOpenEnergyCard={vi.fn()} onOpenLightTest={vi.fn()} />,
+    );
+
+    expect(screen.getAllByText('真实星座内容更新中，将自动替换')).toHaveLength(2);
+    expect(screen.getByRole('status').getAttribute('aria-live')).toBe('polite');
+  });
+
+  it('does not promise an automatic upgrade for an ordinary local fallback', () => {
+    const astrology = state();
+    astrology.periods.daily = periodState('daily', {
+      source: 'local-fallback',
+      error: '暂时使用本地提示',
+      reading: periodReading('daily', {
+        provider: 'mock',
+        source: 'local-fallback',
+        freshness: 'local',
+        providerRefreshPending: false,
+      }),
+    });
+
+    render(
+      <AstrologyWorld astrology={astrology} onOpenEnergyCard={vi.fn()} onOpenLightTest={vi.fn()} />,
+    );
+
+    expect(screen.getByText('Holaday 本地提示')).toBeTruthy();
+    expect(screen.queryByText('真实星座内容更新中，将自动替换')).toBeNull();
+  });
+
   it('keeps loaded provider details visible without a first-load notice during refresh', () => {
     const astrology = state();
     astrology.loading = true;

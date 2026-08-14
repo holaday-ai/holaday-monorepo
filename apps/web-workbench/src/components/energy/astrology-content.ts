@@ -1,4 +1,6 @@
-import type { EnergyPeriodReading } from './useEnergyAstrology';
+import type { EnergyPeriodReading, EnergyPeriodState } from './useEnergyAstrology';
+
+export const PROVIDER_REFRESH_PENDING_COPY = '真实星座内容更新中，将自动替换';
 
 const DIMENSION_ORDER: EnergyPeriodReading['dimensions'][number]['key'][] = [
   'profession',
@@ -31,6 +33,19 @@ export function luckyInsightGroups(reading: EnergyPeriodReading): LuckyInsightGr
     { key: 'times', label: '顺手时段', values: reading.suitableTimes },
   ];
   return groups.filter((group) => group.values.length > 0);
+}
+
+export function periodSourceLabel(
+  state: Pick<EnergyPeriodState, 'source' | 'reading'>,
+): string {
+  if (state.source === 'local-fallback') {
+    return state.reading.providerRefreshPending
+      ? PROVIDER_REFRESH_PENDING_COPY
+      : 'Holaday 本地提示';
+  }
+  return state.reading.freshness === 'stale'
+    ? 'DivineAPI 最近成功数据'
+    : 'DivineAPI 内容';
 }
 
 export function hasCompleteRanking(ranking: EnergyAstrologyStateRanking): boolean {
