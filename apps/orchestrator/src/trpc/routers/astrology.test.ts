@@ -18,7 +18,10 @@ describe('astrology router', () => {
   });
 
   it('accepts timezone boundaries and omission while rejecting invalid offsets', () => {
-    const dailyInput = astrologyRouter._def.procedures.daily._def.inputs[0] as z.ZodType;
+    const dailyDefinition = astrologyRouter._def.procedures.daily._def as unknown as {
+      inputs: z.ZodType[];
+    };
+    const dailyInput = dailyDefinition.inputs[0] as z.ZodType;
     const baseProfile = { birthday: '1996-03-21' };
 
     expect(dailyInput.parse(baseProfile)).toEqual(baseProfile);
