@@ -117,6 +117,8 @@ export function EnergyHome({
   }, [canUseProfileStorage, storageScope]);
 
   React.useEffect(() => {
+    if (!storageScope) return;
+
     let active = true;
     void trpc.energy.home
       .query()
@@ -135,7 +137,7 @@ export function EnergyHome({
     return () => {
       active = false;
     };
-  }, []);
+  }, [storageScope]);
 
   const reportEvent = React.useCallback(
     (

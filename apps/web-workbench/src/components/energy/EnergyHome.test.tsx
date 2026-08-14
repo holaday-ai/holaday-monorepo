@@ -95,6 +95,12 @@ afterEach(() => {
 });
 
 describe('EnergyHome', () => {
+  it('keeps the public preview local without querying the protected experience catalog', () => {
+    render(<EnergyHome liveProvider={false} profileStorageScope={null} />);
+
+    expect(trpcMocks.homeQuery).not.toHaveBeenCalled();
+  });
+
   it('renders the selected recharge hierarchy with three active playful choices', async () => {
     const { container } = render(<EnergyHome profileStorageScope="usr_energy" />);
 
