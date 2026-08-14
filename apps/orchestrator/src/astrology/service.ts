@@ -454,6 +454,12 @@ export async function getDailyAstrologyReading(
       options.fetchImpl,
       horoscopeRequiredPaths('prediction'),
       (json) => assertHoroscopeDimensionTypes(json, 'prediction'),
+      astrologyPeriodCacheIdentity(
+        'daily',
+        'today',
+        options.now ?? new Date(),
+        input.timezoneOffsetMinutes,
+      ),
     );
     if (response.pending) return { ...mock, providerRefreshPending: true };
     return mergeDivineDaily(mock, response.json, response.freshness);
@@ -606,6 +612,12 @@ export async function getWeeklyAstrologyReading(
       options.fetchImpl,
       horoscopeRequiredPaths('weekly_horoscope'),
       (json) => assertHoroscopeDimensionTypes(json, 'weekly_horoscope'),
+      astrologyPeriodCacheIdentity(
+        'weekly',
+        'current',
+        options.now ?? new Date(),
+        input.timezoneOffsetMinutes,
+      ),
     );
     if (response.pending) return { ...mock, providerRefreshPending: true };
     return mergeDivineWeekly(mock, response.json, response.freshness);
@@ -705,6 +717,12 @@ async function getLongPeriodReading(
       options.fetchImpl,
       horoscopeRequiredPaths(selector),
       (json) => assertHoroscopeDimensionTypes(json, selector),
+      astrologyPeriodCacheIdentity(
+        period,
+        rangeKey,
+        options.now ?? new Date(),
+        input.timezoneOffsetMinutes,
+      ),
     );
     if (response.pending) return { ...local, providerRefreshPending: true };
     return mergeDivinePeriod(
@@ -725,8 +743,12 @@ function buildLocalLongPeriodReading(
   rangeKey: 'current' | 'next',
   options: RequestOptions,
 ): AstrologyPeriodReading {
-  const now = dateAtTimezoneOffset(options.now ?? new Date(), input.timezoneOffsetMinutes);
-  if (period === 'monthly' && rangeKey === 'next') now.setUTCMonth(now.getUTCMonth() + 1);
+  const now = localPeriodDate(
+    options.now ?? new Date(),
+    input.timezoneOffsetMinutes,
+    period,
+    rangeKey,
+  );
   const zodiacSign = resolveZodiacSign(input);
   const meta = ZODIAC_META[zodiacSign];
   const rangeLabel =
@@ -909,12 +931,13 @@ async function postDivineApiJson(
   fetchImpl: typeof fetch | undefined,
   requiredPaths: ReadonlyArray<ReadonlyArray<string>>,
   validate?: (json: unknown) => void,
+  cacheIdentity?: string,
 ): Promise<{ pending: true } | { pending: false; json: unknown; freshness: 'fresh' | 'stale' }> {
   const bodyString = new URLSearchParams(body).toString();
   const cacheParams = new URLSearchParams(
     Object.entries(body).filter(([key]) => key !== 'api_key'),
   ).toString();
-  const cacheKey = `${config.baseUrl}${path}?${cacheParams}`;
+  const cacheKey = `${config.baseUrl}${path}?${cacheParams}${cacheIdentity ? `&__period=${encodeURIComponent(cacheIdentity)}` : ''}`;
   let staleValue: unknown;
   if (config.cacheTtlMs > 0) {
     const cached = divineApiCache.get(cacheKey);
@@ -1423,6 +1446,42 @@ function dateAtTimezoneOffset(date: Date, timezoneOffsetMinutes?: number): Date 
   return new Date(
     date.getTime() + resolveTimezoneOffsetMinutes(date, timezoneOffsetMinutes) * 60_000,
   );
+}
+
+function localPeriodDate(
+  date: Date,
+  timezoneOffsetMinutes: number | undefined,
+  period: 'monthly' | 'yearly',
+  rangeKey: 'current' | 'next',
+): Date {
+  const localDate = dateAtTimezoneOffset(date, timezoneOffsetMinutes);
+  if (period !== 'monthly' || rangeKey !== 'next') return localDate;
+  return new Date(Date.UTC(localDate.getUTCFullYear(), localDate.getUTCMonth() + 1, 1));
+}
+
+function astrologyPeriodCacheIdentity(
+  period: AstrologyPeriod,
+  rangeKey: 'today' | 'current' | 'next',
+  date: Date,
+  timezoneOffsetMinutes?: number,
+): string {
+  const localDate =
+    period === 'monthly' || period === 'yearly'
+      ? localPeriodDate(
+          date,
+          timezoneOffsetMinutes,
+          period,
+          rangeKey === 'next' ? 'next' : 'current',
+        )
+      : dateAtTimezoneOffset(date, timezoneOffsetMinutes);
+  if (period === 'weekly') {
+    localDate.setUTCDate(localDate.getUTCDate() - ((localDate.getUTCDay() + 6) % 7));
+  }
+  if (period === 'yearly') return `yearly:${localDate.getUTCFullYear()}`;
+  if (period === 'monthly') {
+    return `monthly:${localDate.getUTCFullYear()}-${localDate.getUTCMonth() + 1}`;
+  }
+  return `${period}:${localDate.getUTCFullYear()}-${localDate.getUTCMonth() + 1}-${localDate.getUTCDate()}`;
 }
 
 function dateKey(date: Date, timezoneOffsetMinutes?: number): string {
