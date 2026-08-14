@@ -197,7 +197,7 @@ describe('energy progress', () => {
       completedAt,
     );
 
-    const progress = readEnergyProgress('usr_a');
+    const progress = readEnergyProgress('usr_a', completedAt);
     expect(completedKindsForDate(progress, completedAt)).toEqual(['tarot']);
     expect(progress.continuation).toMatchObject({
       dateKey: '2026-08-13',
