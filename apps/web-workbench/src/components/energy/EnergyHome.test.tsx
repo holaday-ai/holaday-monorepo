@@ -7,7 +7,10 @@ import { EnergyHome } from './EnergyHome';
 import {
   readEnergyProgress,
   recordEnergyCompletion,
+  saveEnergyCardIds,
   saveLastEnergyTarget,
+  saveLightTestAction,
+  toggleFavoriteEnergyContent,
 } from './energy-progress';
 
 const trpcMocks = vi.hoisted(() => ({
@@ -227,6 +230,78 @@ describe('EnergyHome', () => {
     expect(screen.getByRole('dialog', { name: '小游戏' })).toBeTruthy();
     await user.click(screen.getByRole('button', { name: '开始体验' }));
     expect(await screen.findByRole('button', { name: '接住第 1 个能量光点' })).toBeTruthy();
+  });
+
+  it('adds a completed experience to the shelf and reopens it from the recent card', async () => {
+    const user = userEvent.setup();
+    render(<EnergyHome profileStorageScope="usr_energy" />);
+
+    await user.click(screen.getByRole('button', { name: '玩接住能量' }));
+    await user.click(screen.getByRole('button', { name: '开始体验' }));
+    for (let round = 1; round <= 12; round += 1) {
+      await user.click(screen.getByRole('button', { name: `接住第 ${round} 个能量光点` }));
+    }
+    expect(screen.getByRole('heading', { name: '能量收集完成' })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '返回今日内容' }));
+
+    const shelf = screen.getByRole('region', { name: '我的能量架' });
+    expect(within(shelf).getByRole('heading', { name: '接住能量' })).toBeTruthy();
+    await user.click(within(shelf).getByRole('button', { name: '再体验接住能量' }));
+    expect(screen.getByRole('dialog', { name: '小游戏' })).toBeTruthy();
+  });
+
+  it('opens and removes all three local favorite sources without new service events', async () => {
+    saveEnergyCardIds('usr_energy', ['work-01']);
+    saveLightTestAction('usr_energy', 'work-focus', 'steady');
+    toggleFavoriteEnergyContent('usr_energy', 'relax-breath-window');
+    const user = userEvent.setup();
+    render(<EnergyHome profileStorageScope="usr_energy" />);
+
+    const shelf = screen.getByRole('region', { name: '我的能量架' });
+    await user.click(within(shelf).getByRole('tab', { name: '我的收藏' }));
+    expect(within(shelf).getAllByRole('article')).toHaveLength(3);
+
+    await user.click(within(shelf).getByRole('button', { name: '取消收藏先推一厘米' }));
+    expect(readEnergyProgress('usr_energy').savedCardIds).toEqual([]);
+    expect(within(shelf).queryByRole('heading', { name: '先推一厘米' })).toBeNull();
+
+    await user.click(within(shelf).getByRole('button', { name: '再体验先把节奏稳住' }));
+    expect(screen.getByRole('dialog', { name: '轻测试' })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '关闭体验' }));
+
+    await user.click(within(shelf).getByRole('button', { name: '取消收藏窗边八次慢呼吸' }));
+    const progress = readEnergyProgress('usr_energy');
+    expect(progress.savedTestActionIds).toEqual(['work-focus:steady']);
+    expect(progress.continuation.favoriteContentIds).toEqual([]);
+    expect(
+      trpcMocks.reportEvent.mock.calls.some(
+        ([event]) =>
+          String(event.type).includes('feedback') || String(event.type).includes('shelf'),
+      ),
+    ).toBe(false);
+  });
+
+  it('keeps magazine favorites and the shelf in sync during the same visit', async () => {
+    const user = userEvent.setup();
+    render(<EnergyHome profileStorageScope="usr_energy" />);
+
+    const exploreFeed = screen.getByRole('region', { name: '再逛一会' });
+    const favoriteButton = within(exploreFeed).getAllByRole('button', { name: /^收藏/ })[0];
+    if (!favoriteButton) throw new Error('expected a magazine favorite control');
+    const favoriteLabel = favoriteButton.getAttribute('aria-label');
+    if (!favoriteLabel?.startsWith('收藏')) throw new Error('expected a favorite label');
+    const title = favoriteLabel.slice(2);
+
+    await user.click(favoriteButton);
+
+    const shelf = screen.getByRole('region', { name: '我的能量架' });
+    await user.click(within(shelf).getByRole('tab', { name: '我的收藏' }));
+    expect(within(shelf).getByRole('heading', { name: title })).toBeTruthy();
+
+    await user.click(within(shelf).getByRole('button', { name: `取消收藏${title}` }));
+    expect(within(shelf).queryByRole('heading', { name: title })).toBeNull();
+    expect(favoriteButton.getAttribute('aria-pressed')).toBe('false');
+    expect(favoriteButton.getAttribute('aria-label')).toBe(`收藏${title}`);
   });
 
   it('scrolls to the honest astrology world and keeps continuation experiences playable', async () => {

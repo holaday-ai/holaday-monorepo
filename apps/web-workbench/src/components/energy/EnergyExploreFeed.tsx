@@ -6,6 +6,7 @@ import { EnergyMagazineCard } from './EnergyMagazineCard';
 import type { EnergyContentTarget } from './energy-content-target';
 import { allocateMagazineVisuals } from './energy-magazine-visuals';
 import {
+  type EnergyProgress,
   readEnergyProgress,
   recordOpenedEnergyContent,
   toggleFavoriteEnergyContent,
@@ -36,6 +37,8 @@ interface EnergyExploreFeedProps {
   onEvent: (event: EnergyExploreEvent) => void;
   onActionTarget?: (target: EnergyContentTarget, trigger: HTMLButtonElement) => boolean;
   onCompleteToday?: () => void;
+  favoriteContentIds?: readonly string[];
+  onProgressChange?: (progress: EnergyProgress) => void;
 }
 
 type EnergyFeedMode = 'fresh' | 'revisit' | 'favorites';
@@ -55,6 +58,8 @@ export function EnergyExploreFeed({
   onEvent,
   onActionTarget = () => false,
   onCompleteToday = () => undefined,
+  favoriteContentIds,
+  onProgressChange = () => undefined,
 }: EnergyExploreFeedProps): JSX.Element {
   const initialProgressRef = React.useRef<ReturnType<typeof readEnergyProgress> | null>(null);
   if (initialProgressRef.current === null) {
@@ -75,9 +80,10 @@ export function EnergyExploreFeed({
   const [mode, setMode] = React.useState<EnergyFeedMode>('fresh');
   const [revisitNeed, setRevisitNeed] = React.useState<EnergyNeed>(energyNeed);
   const [choosingTheme, setChoosingTheme] = React.useState(false);
-  const [favoriteIds, setFavoriteIds] = React.useState<string[]>(
+  const [localFavoriteIds, setLocalFavoriteIds] = React.useState<string[]>(
     initialProgress.continuation.favoriteContentIds,
   );
+  const favoriteIds = favoriteContentIds ?? localFavoriteIds;
   const [items, setItems] = React.useState<EnergyContentItem[]>(() =>
     nextEnergyContentBatch({
       items: ENERGY_EXPLORE_CONTENT,
@@ -210,16 +216,11 @@ export function EnergyExploreFeed({
                 });
               }}
               onToggleFavorite={(contentId) => {
-                if (storageScope === null) {
-                  setFavoriteIds((current) =>
-                    current.includes(contentId)
-                      ? current.filter((id) => id !== contentId)
-                      : [...current, contentId],
-                  );
-                  return;
-                }
                 const next = toggleFavoriteEnergyContent(storageScope, contentId);
-                setFavoriteIds(next.continuation.favoriteContentIds);
+                if (!favoriteContentIds) {
+                  setLocalFavoriteIds(next.continuation.favoriteContentIds);
+                }
+                onProgressChange(next);
                 if (mode === 'favorites') {
                   setItems((current) => current.filter((item) => item.id !== contentId));
                 }
