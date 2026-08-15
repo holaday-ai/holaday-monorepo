@@ -78,7 +78,8 @@ test('serves both web surfaces through the atomic current-release link', () => {
 
 test('packages and installs the landing site with the edge deployment', () => {
   assert.match(deployScript, /LANDING_DIR="apps\/holaday-landing"/);
-  assert.match(deployScript, /COPYFILE_DISABLE=1 tar czf "\$BUNDLE" --exclude='\._\*'/);
+  assert.match(deployScript, /PORTABLE_TAR_SCRIPT=.*scripts\/create-portable-tar\.sh/);
+  assert.match(deployScript, /"\$PORTABLE_TAR_SCRIPT" "\$BUNDLE" --exclude='\._\*'/);
   assert.match(deployScript, /"\$SPA_DIR" "\$NGINX_CONF" "\$LANDING_DIR"/);
   assert.match(deployScript, /REMOTE_INSTALL_SCRIPT="ops\/aliyun-edge\/install-remote\.sh"/);
   assert.match(deployScript, /REMOTE_ROLLBACK_SCRIPT="ops\/aliyun-edge\/rollback-remote\.sh"/);
@@ -98,11 +99,9 @@ test('runs the ops release gate before uploading', () => {
 
 test('publishes the Aliyun SPA through the atomic edge release path', () => {
   assert.match(spaDeployScript, /ALIYUN_EDGE_DEPLOY=.*ops\/aliyun-edge\/deploy\.sh/);
+  assert.match(spaDeployScript, /"\$PORTABLE_TAR_SCRIPT" "\$TARBALL" -C apps\/web-workbench dist/);
   assert.match(deployScript, /DEFAULT_RELEASE_ID="\$\(date -u \+%Y%m%d%H%M%S\)-\$\$"/);
-  assert.match(
-    deployScript,
-    /RELEASE_ID="\$\{HOLADAY_EDGE_RELEASE_ID:-\$DEFAULT_RELEASE_ID\}"/,
-  );
+  assert.match(deployScript, /RELEASE_ID="\$\{HOLADAY_EDGE_RELEASE_ID:-\$DEFAULT_RELEASE_ID\}"/);
   assert.match(spaDeployScript, /ALIYUN_RELEASE_ID="\$\(date -u \+%Y%m%d%H%M%S\)-\$\$"/);
   assert.match(
     spaDeployScript,

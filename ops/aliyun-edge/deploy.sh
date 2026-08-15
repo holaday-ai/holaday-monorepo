@@ -36,6 +36,7 @@ LANDING_DIR="apps/holaday-landing"
 NGINX_CONF="ops/aliyun-edge/nginx-hd-app.conf"
 REMOTE_INSTALL_SCRIPT="ops/aliyun-edge/install-remote.sh"
 REMOTE_ROLLBACK_SCRIPT="ops/aliyun-edge/rollback-remote.sh"
+PORTABLE_TAR_SCRIPT="$ROOT_DIR/scripts/create-portable-tar.sh"
 DOMAIN="hd-app.orangebench.tech"
 DEFAULT_RELEASE_ID="$(date -u +%Y%m%d%H%M%S)-$$"
 RELEASE_ID="${HOLADAY_EDGE_RELEASE_ID:-$DEFAULT_RELEASE_ID}"
@@ -170,12 +171,16 @@ if [[ ! -f "$REMOTE_ROLLBACK_SCRIPT" ]]; then
   echo "error: $REMOTE_ROLLBACK_SCRIPT not found" >&2
   exit 1
 fi
+if [[ ! -x "$PORTABLE_TAR_SCRIPT" ]]; then
+  echo "error: $PORTABLE_TAR_SCRIPT is not executable" >&2
+  exit 1
+fi
 
 echo "==> running edge release gate"
 pnpm test:ops
 
 echo "==> packing SPA, landing site, and nginx config"
-COPYFILE_DISABLE=1 tar czf "$BUNDLE" --exclude='._*' \
+"$PORTABLE_TAR_SCRIPT" "$BUNDLE" --exclude='._*' \
   "$SPA_DIR" "$NGINX_CONF" "$LANDING_DIR" "$REMOTE_ROLLBACK_SCRIPT"
 cp "$REMOTE_INSTALL_SCRIPT" "$INSTALL_UPLOAD"
 ls -lh "$BUNDLE"
