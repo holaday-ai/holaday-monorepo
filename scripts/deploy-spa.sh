@@ -46,6 +46,7 @@ DIST_DIR="apps/web-workbench/dist"
 SMOKE_URL="https://hd-app.orangebench.tech/app"
 SMOKE_MARKER="HOLA DAY"
 TARBALL="/tmp/holaday-spa-dist.tar.gz"
+PORTABLE_TAR_SCRIPT="$ROOT_DIR/scripts/create-portable-tar.sh"
 
 # Vultr SPA mirror — holaday.ai serves this directly until Phase 28
 # Cloudflare migration is done.
@@ -214,6 +215,10 @@ if [[ ! -d "$DIST_DIR" ]]; then
   echo "❌ $DIST_DIR not found. Run: pnpm --filter @holaday/web-workbench build" >&2
   exit 1
 fi
+if [[ ! -x "$PORTABLE_TAR_SCRIPT" ]]; then
+  echo "❌ $PORTABLE_TAR_SCRIPT is not executable" >&2
+  exit 1
+fi
 
 NEW_HASH=$(grep -o 'index-[^"]*\.js' "$DIST_DIR/index.html" | head -1 || echo unknown)
 echo "📦 Local bundle: $NEW_HASH"
@@ -224,7 +229,7 @@ ALIYUN_EDGE_RELEASE_SPA_PATH="$ALIYUN_EDGE_ROOT/releases/$ALIYUN_RELEASE_ID/apps
 
 echo "→ Packing $DIST_DIR for the Vultr mirror"
 rm -f "$TARBALL"
-COPYFILE_DISABLE=1 tar czf "$TARBALL" -C apps/web-workbench dist
+"$PORTABLE_TAR_SCRIPT" "$TARBALL" -C apps/web-workbench dist
 
 echo "→ Publishing Aliyun through the atomic edge release"
 HOLADAY_EDGE_RELEASE_ID="$ALIYUN_RELEASE_ID" SSHPASS="$ALIYUN_PASSWORD" "$ALIYUN_EDGE_DEPLOY"
