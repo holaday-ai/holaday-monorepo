@@ -199,6 +199,32 @@ test_deploy_current_preflights_before_akshare() {
   rm -rf "$harness_dir"
 }
 
+test_deploy_current_initializes_ssh_for_explicit_rollback_head() {
+  local harness_dir event_log output
+  harness_dir="$(mktemp -d)"
+  event_log="$harness_dir/events"
+  output="$harness_dir/output"
+  : > "$event_log"
+  write_deploy_current_harness "$harness_dir"
+
+  if ! PATH="$harness_dir/bin:$PATH" \
+    TEST_EVENT_LOG="$event_log" \
+    RELEASE_ROLLBACK_HEAD="1111111111111111111111111111111111111111" \
+    VULTR_PASSWORD="unit-secret" \
+    BRANCH="codex/release-candidate" \
+    "$harness_dir/repo/scripts/deploy-current.sh" akshare > "$output" 2>&1; then
+    cat "$output" >&2
+    fail "deploy-current must initialize SSH before preflighting an explicit rollback HEAD"
+  fi
+
+  assert_event_order "$event_log" preflight akshare
+  ! grep -Fxq "capture-head" "$event_log" \
+    || fail "an explicit rollback HEAD must not be captured again"
+  ! grep -Fq "unit-secret" "$output" \
+    || fail "explicit rollback handling must not print credentials"
+  rm -rf "$harness_dir"
+}
+
 test_combined_orchestrator_failure_rolls_back_akshare() {
   local rollback_rc="$1"
   local expected_rc="$2"
@@ -429,6 +455,7 @@ test_akshare_rollback_only_restores_without_deploying() {
 }
 
 test_deploy_current_preflights_before_akshare
+test_deploy_current_initializes_ssh_for_explicit_rollback_head
 test_combined_orchestrator_failure_rolls_back_akshare 0 7
 test_combined_orchestrator_failure_rolls_back_akshare 29 2
 test_cn_payment_deploy_failure_stops_before_preflight

@@ -28,15 +28,15 @@ VULTR_HOST="root@207.148.70.106"
 RELEASE_ROLLBACK_HEAD="${RELEASE_ROLLBACK_HEAD:-}"
 
 capture_release_rollback_head() {
-  if [[ -n "$RELEASE_ROLLBACK_HEAD" ]]; then
-    return 0
-  fi
   if [[ -z "${VULTR_PASSWORD:-}" ]]; then
     echo "❌ VULTR_PASSWORD unset — cannot capture the release rollback point" >&2
     exit 1
   fi
 
   build_ssh_password_prefix "$VULTR_PASSWORD"
+  if [[ -n "$RELEASE_ROLLBACK_HEAD" ]]; then
+    return 0
+  fi
   RELEASE_ROLLBACK_HEAD=$("${SSH_PASSWORD_PREFIX[@]}" ssh \
     -o StrictHostKeyChecking=yes \
     -o ConnectTimeout=20 \
