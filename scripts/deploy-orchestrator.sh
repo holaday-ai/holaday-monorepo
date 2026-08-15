@@ -92,25 +92,16 @@ if ! [[ "$REMOTE_RETRY_SLEEP" =~ ^[0-9]+$ ]]; then
   exit 1
 fi
 
-if [[ "${CN_PAYMENT_PREFLIGHT_VERIFIED:-0}" != "1" ]]; then
-  "$SCRIPT_DIR/verify-cn-payment-production.sh"
-fi
-if [[ "${PAYPAL_PREFLIGHT_VERIFIED:-0}" != "1" ]]; then
-  "$SCRIPT_DIR/verify-paypal-production.sh"
-fi
-
 run_with_retry() {
   local label="$1"
   shift
   local attempt rc
 
   for ((attempt = 1; attempt <= REMOTE_RETRIES; attempt++)); do
-    set +e
-    "$@"
-    rc=$?
-    set -e
-    if ((rc == 0)); then
+    if "$@"; then
       return 0
+    else
+      rc=$?
     fi
     if ((attempt == REMOTE_RETRIES)); then
       echo "❌ $label failed after $attempt attempt(s) (exit $rc)" >&2
@@ -120,6 +111,15 @@ run_with_retry() {
     sleep "$REMOTE_RETRY_SLEEP"
   done
 }
+
+if [[ "${CN_PAYMENT_PREFLIGHT_VERIFIED:-0}" != "1" ]]; then
+  run_with_retry "CN payment production preflight" \
+    "$SCRIPT_DIR/verify-cn-payment-production.sh"
+fi
+if [[ "${PAYPAL_PREFLIGHT_VERIFIED:-0}" != "1" ]]; then
+  run_with_retry "PayPal production preflight" \
+    "$SCRIPT_DIR/verify-paypal-production.sh"
+fi
 
 stage_runtime_helper() {
   echo "→ Staging non-root runtime helpers"
@@ -232,7 +232,8 @@ run_with_retry "Vultr gate-fetch" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}"
   "cd /opt/holaday-monorepo && git fetch origin '+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH' >/dev/null 2>&1"
 FETCH_RC=$?
 if (( FETCH_RC == 0 )); then
-  "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
+  run_with_retry "Vultr ancestor gate" \
+    "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
     cd /opt/holaday-monorepo && \
     if git cat-file -e 'origin/$BRANCH:scripts/deploy-preflight.sh' 2>/dev/null; then \
       git show 'origin/$BRANCH:scripts/deploy-preflight.sh' | bash -s -- '$BRANCH'; \
