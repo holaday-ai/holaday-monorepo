@@ -7,6 +7,7 @@ CURRENT_SCRIPT="$SCRIPT_DIR/deploy-current.sh"
 AKSHARE_SCRIPT="$SCRIPT_DIR/deploy-akshare-mcp.sh"
 ORCHESTRATOR_SCRIPT="$SCRIPT_DIR/deploy-orchestrator.sh"
 CN_PAYMENT_SCRIPT="$SCRIPT_DIR/deploy-cn-payment.sh"
+export DEPLOY_REMOTE_RETRY_SLEEP="${DEPLOY_REMOTE_RETRY_SLEEP:-0}"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -24,6 +25,17 @@ assert_event_order() {
     (( line > previous_line )) || fail "event '$event' ran out of order"
     previous_line="$line"
   done
+}
+
+assert_event_count() {
+  local event_log="$1"
+  local event="$2"
+  local expected_count="$3"
+  local actual_count
+
+  actual_count="$(grep -cFx "$event" "$event_log" || true)"
+  (( actual_count == expected_count )) \
+    || fail "event '$event' count: got $actual_count, want $expected_count"
 }
 
 write_common_deploy_stubs() {
@@ -44,10 +56,18 @@ STUB
   cat > "$harness_dir/repo/scripts/verify-paypal-production.sh" <<'STUB'
 #!/usr/bin/env bash
 echo "paypal" >> "$TEST_EVENT_LOG"
+paypal_attempts="$(grep -cFx "paypal" "$TEST_EVENT_LOG" || true)"
+if (( paypal_attempts <= ${TEST_PAYPAL_FAILURES:-0} )); then
+  exit 71
+fi
 STUB
   cat > "$harness_dir/repo/scripts/verify-cn-payment-production.sh" <<'STUB'
 #!/usr/bin/env bash
 echo "cn-payment-preflight" >> "$TEST_EVENT_LOG"
+cn_payment_attempts="$(grep -cFx "cn-payment-preflight" "$TEST_EVENT_LOG" || true)"
+if (( cn_payment_attempts <= ${TEST_CN_PAYMENT_PREFLIGHT_FAILURES:-0} )); then
+  exit 72
+fi
 STUB
   chmod +x "$harness_dir/repo/scripts/load-deploy-env.sh" \
     "$harness_dir/repo/scripts/ssh-password-auth.sh" \
@@ -124,10 +144,18 @@ STUB
 command_text="${!#}"
 if [[ "$command_text" == *"git rev-parse HEAD"* ]]; then
   echo "capture-head" >> "$TEST_EVENT_LOG"
+  capture_attempts="$(grep -cFx "capture-head" "$TEST_EVENT_LOG" || true)"
+  if (( capture_attempts <= ${TEST_CAPTURE_FAILURES:-0} )); then
+    exit 255
+  fi
   echo "1111111111111111111111111111111111111111"
 elif [[ "$command_text" == *"merge-base --is-ancestor"* ]]; then
   echo "preflight" >> "$TEST_EVENT_LOG"
   [[ "$command_text" == *"1111111111111111111111111111111111111111"* ]] || exit 9
+  preflight_attempts="$(grep -cFx "preflight" "$TEST_EVENT_LOG" || true)"
+  if (( preflight_attempts <= ${TEST_RELEASE_PREFLIGHT_FAILURES:-0} )); then
+    exit 255
+  fi
   exit "${TEST_PREFLIGHT_RC:-0}"
 fi
 STUB
@@ -148,6 +176,62 @@ printf '%s' '{"status":"ok"}' > "$output_file"
 printf '200'
 STUB
   chmod +x "$harness_dir/bin/curl"
+}
+
+test_deploy_current_retries_transient_release_ssh() {
+  local harness_dir event_log output
+  harness_dir="$(mktemp -d)"
+  event_log="$harness_dir/events"
+  output="$harness_dir/output"
+  : > "$event_log"
+  write_deploy_current_harness "$harness_dir"
+
+  if ! PATH="$harness_dir/bin:$PATH" \
+    TEST_EVENT_LOG="$event_log" \
+    TEST_CAPTURE_FAILURES=1 \
+    TEST_RELEASE_PREFLIGHT_FAILURES=1 \
+    DEPLOY_REMOTE_RETRIES=2 \
+    DEPLOY_REMOTE_RETRY_SLEEP=0 \
+    VULTR_PASSWORD="unit-secret" \
+    BRANCH="codex/release-candidate" \
+    "$harness_dir/repo/scripts/deploy-current.sh" akshare > "$output" 2>&1; then
+    cat "$output" >&2
+    fail "deploy-current must recover from one transient SSH failure per release gate"
+  fi
+
+  assert_event_count "$event_log" capture-head 2
+  assert_event_count "$event_log" preflight 2
+  assert_event_order "$event_log" capture-head preflight akshare
+  ! grep -Fq "unit-secret" "$output" \
+    || fail "release-gate retries must not print credentials"
+  rm -rf "$harness_dir"
+}
+
+test_deploy_current_retries_transient_paypal_preflight() {
+  local harness_dir event_log output
+  harness_dir="$(mktemp -d)"
+  event_log="$harness_dir/events"
+  output="$harness_dir/output"
+  : > "$event_log"
+  write_deploy_current_harness "$harness_dir"
+
+  if ! PATH="$harness_dir/bin:$PATH" \
+    TEST_EVENT_LOG="$event_log" \
+    TEST_PAYPAL_FAILURES=1 \
+    DEPLOY_REMOTE_RETRIES=2 \
+    DEPLOY_REMOTE_RETRY_SLEEP=0 \
+    VULTR_PASSWORD="unit-secret" \
+    BRANCH="codex/release-candidate" \
+    "$harness_dir/repo/scripts/deploy-current.sh" orchestrator > "$output" 2>&1; then
+    cat "$output" >&2
+    fail "deploy-current must recover from a transient PayPal production preflight failure"
+  fi
+
+  assert_event_count "$event_log" paypal 2
+  assert_event_order "$event_log" capture-head preflight paypal akshare orchestrator
+  ! grep -Fq "unit-secret" "$output" \
+    || fail "PayPal preflight retries must not print credentials"
+  rm -rf "$harness_dir"
 }
 
 test_deploy_current_preflights_before_akshare() {
@@ -314,6 +398,181 @@ test_application_deploy_skips_unrelated_service_restarts() {
   rm -rf "$harness_dir"
 }
 
+test_orchestrator_retries_transient_payment_preflights() {
+  local harness_dir event_log output rc
+  harness_dir="$(mktemp -d)"
+  event_log="$harness_dir/events"
+  output="$harness_dir/output"
+  : > "$event_log"
+  write_common_deploy_stubs "$harness_dir"
+  cp "$ORCHESTRATOR_SCRIPT" "$harness_dir/repo/scripts/deploy-orchestrator.sh"
+  : > "$harness_dir/repo/scripts/orchestrator-runtime.sh"
+  : > "$harness_dir/repo/scripts/start-orchestrator-production.sh"
+  chmod +x "$harness_dir/repo/scripts/deploy-orchestrator.sh" \
+    "$harness_dir/repo/scripts/orchestrator-runtime.sh" \
+    "$harness_dir/repo/scripts/start-orchestrator-production.sh"
+
+  cat > "$harness_dir/bin/ssh" <<'STUB'
+#!/usr/bin/env bash
+echo "remote-stage" >> "$TEST_EVENT_LOG"
+exit 88
+STUB
+  cat > "$harness_dir/bin/scp" <<'STUB'
+#!/usr/bin/env bash
+echo "remote-upload" >> "$TEST_EVENT_LOG"
+exit 89
+STUB
+  chmod +x "$harness_dir/bin/ssh" "$harness_dir/bin/scp"
+
+  set +e
+  PATH="$harness_dir/bin:$PATH" \
+    TEST_EVENT_LOG="$event_log" \
+    TEST_CN_PAYMENT_PREFLIGHT_FAILURES=1 \
+    TEST_PAYPAL_FAILURES=1 \
+    DEPLOY_REMOTE_RETRIES=2 \
+    DEPLOY_REMOTE_RETRY_SLEEP=0 \
+    VULTR_PASSWORD="unit-secret" \
+    "$harness_dir/repo/scripts/deploy-orchestrator.sh" \
+      "codex/release-candidate" > "$output" 2>&1
+  rc=$?
+  set -e
+
+  (( rc == 88 )) || fail "orchestrator should reach the first remote deploy step after recovered payment preflights"
+  assert_event_count "$event_log" cn-payment-preflight 2
+  assert_event_count "$event_log" paypal 2
+  assert_event_count "$event_log" remote-stage 2
+  assert_event_order "$event_log" cn-payment-preflight paypal remote-stage
+  ! grep -Fq "unit-secret" "$output" \
+    || fail "orchestrator preflight retries must not print credentials"
+  rm -rf "$harness_dir"
+}
+
+write_orchestrator_gate_retry_harness() {
+  local harness_dir="$1"
+
+  write_common_deploy_stubs "$harness_dir"
+  cp "$ORCHESTRATOR_SCRIPT" "$harness_dir/repo/scripts/deploy-orchestrator.sh"
+  : > "$harness_dir/repo/scripts/orchestrator-runtime.sh"
+  : > "$harness_dir/repo/scripts/start-orchestrator-production.sh"
+  chmod +x "$harness_dir/repo/scripts/deploy-orchestrator.sh" \
+    "$harness_dir/repo/scripts/orchestrator-runtime.sh" \
+    "$harness_dir/repo/scripts/start-orchestrator-production.sh"
+
+  cat > "$harness_dir/bin/scp" <<'STUB'
+#!/usr/bin/env bash
+echo "runtime-upload" >> "$TEST_EVENT_LOG"
+exit 0
+STUB
+  cat > "$harness_dir/bin/ssh" <<'STUB'
+#!/usr/bin/env bash
+command_text="${!#}"
+
+if [[ "$command_text" == *"git reset --hard '1111111111111111111111111111111111111111'"* ]]; then
+  echo "rollback-build" >> "$TEST_EVENT_LOG"
+  exit 0
+elif [[ "$command_text" == *"git reset --hard origin/codex/release-candidate"* ]]; then
+  echo "reset-new" >> "$TEST_EVENT_LOG"
+  exit "${TEST_RESET_RC:-87}"
+elif [[ "$command_text" == *"deploy-preflight.sh"* ]]; then
+  echo "gate-check" >> "$TEST_EVENT_LOG"
+  gate_check_attempts="$(grep -cFx "gate-check" "$TEST_EVENT_LOG" || true)"
+  if (( gate_check_attempts <= ${TEST_GATE_CHECK_FAILURES:-0} )); then
+    exit 255
+  fi
+  exit 0
+elif [[ "$command_text" == *"git fetch origin"* ]]; then
+  echo "gate-fetch" >> "$TEST_EVENT_LOG"
+  gate_fetch_attempts="$(grep -cFx "gate-fetch" "$TEST_EVENT_LOG" || true)"
+  if (( gate_fetch_attempts <= ${TEST_GATE_FETCH_FAILURES:-0} )); then
+    exit 255
+  fi
+  exit 0
+elif [[ "$command_text" == *"git cat-file -e"* ]]; then
+  echo "rollback-validate" >> "$TEST_EVENT_LOG"
+  exit 0
+elif [[ "$command_text" == *"orchestrator-runtime.sh' restart"* ]]; then
+  echo "runtime-restart" >> "$TEST_EVENT_LOG"
+  exit 0
+elif [[ "$command_text" == *"install -d"* ]]; then
+  echo "runtime-directory" >> "$TEST_EVENT_LOG"
+  exit 0
+elif [[ "$command_text" == *"chown root:root"* ]]; then
+  echo "runtime-permissions" >> "$TEST_EVENT_LOG"
+  exit 0
+fi
+
+echo "unexpected-remote-command" >> "$TEST_EVENT_LOG"
+exit 90
+STUB
+  chmod +x "$harness_dir/bin/ssh" "$harness_dir/bin/scp"
+}
+
+test_orchestrator_retries_transient_ancestor_gate() {
+  local harness_dir event_log output rc
+  harness_dir="$(mktemp -d)"
+  event_log="$harness_dir/events"
+  output="$harness_dir/output"
+  : > "$event_log"
+  write_orchestrator_gate_retry_harness "$harness_dir"
+
+  set +e
+  PATH="$harness_dir/bin:$PATH" \
+    TEST_EVENT_LOG="$event_log" \
+    TEST_GATE_CHECK_FAILURES=1 \
+    DEPLOY_REMOTE_RETRIES=2 \
+    DEPLOY_REMOTE_RETRY_SLEEP=0 \
+    CN_PAYMENT_PREFLIGHT_VERIFIED=1 \
+    PAYPAL_PREFLIGHT_VERIFIED=1 \
+    ORCHESTRATOR_ROLLBACK_HEAD="1111111111111111111111111111111111111111" \
+    VULTR_PASSWORD="unit-secret" \
+    "$harness_dir/repo/scripts/deploy-orchestrator.sh" \
+      "codex/release-candidate" > "$output" 2>&1
+  rc=$?
+  set -e
+
+  (( rc == 1 )) || fail "orchestrator should pass a recovered ancestor gate and reach rollback-safe deploy handling"
+  assert_event_count "$event_log" gate-check 2
+  assert_event_count "$event_log" reset-new 2
+  assert_event_order "$event_log" runtime-directory runtime-upload runtime-permissions rollback-validate gate-fetch gate-check reset-new rollback-build runtime-restart
+  ! grep -Fq "unit-secret" "$output" \
+    || fail "ancestor-gate retries must not print credentials"
+  rm -rf "$harness_dir"
+}
+
+test_orchestrator_classifies_exhausted_gate_fetch() {
+  local harness_dir event_log output rc
+  harness_dir="$(mktemp -d)"
+  event_log="$harness_dir/events"
+  output="$harness_dir/output"
+  : > "$event_log"
+  write_orchestrator_gate_retry_harness "$harness_dir"
+
+  set +e
+  PATH="$harness_dir/bin:$PATH" \
+    TEST_EVENT_LOG="$event_log" \
+    TEST_GATE_FETCH_FAILURES=2 \
+    DEPLOY_REMOTE_RETRIES=2 \
+    DEPLOY_REMOTE_RETRY_SLEEP=0 \
+    CN_PAYMENT_PREFLIGHT_VERIFIED=1 \
+    PAYPAL_PREFLIGHT_VERIFIED=1 \
+    ORCHESTRATOR_ROLLBACK_HEAD="1111111111111111111111111111111111111111" \
+    VULTR_PASSWORD="unit-secret" \
+    "$harness_dir/repo/scripts/deploy-orchestrator.sh" \
+      "codex/release-candidate" > "$output" 2>&1
+  rc=$?
+  set -e
+
+  (( rc == 4 )) || fail "exhausted gate fetch must preserve the fail-closed verification exit"
+  assert_event_count "$event_log" gate-fetch 2
+  assert_event_count "$event_log" gate-check 0
+  assert_event_count "$event_log" reset-new 0
+  grep -Fq "refusing to reset blind" "$output" \
+    || fail "exhausted gate fetch must explain the fail-closed refusal"
+  ! grep -Fq "unit-secret" "$output" \
+    || fail "exhausted gate retries must not print credentials"
+  rm -rf "$harness_dir"
+}
+
 test_akshare_divergence_override() {
   local allow_divergence="$1"
   local harness_dir event_log output rc
@@ -455,11 +714,16 @@ test_akshare_rollback_only_restores_without_deploying() {
 }
 
 test_deploy_current_preflights_before_akshare
+test_deploy_current_retries_transient_release_ssh
+test_deploy_current_retries_transient_paypal_preflight
 test_deploy_current_initializes_ssh_for_explicit_rollback_head
 test_combined_orchestrator_failure_rolls_back_akshare 0 7
 test_combined_orchestrator_failure_rolls_back_akshare 29 2
 test_cn_payment_deploy_failure_stops_before_preflight
 test_application_deploy_skips_unrelated_service_restarts
+test_orchestrator_retries_transient_payment_preflights
+test_orchestrator_retries_transient_ancestor_gate
+test_orchestrator_classifies_exhausted_gate_fetch
 test_akshare_rollback_only_restores_without_deploying
 test_akshare_failure_restores_live_head install
 test_akshare_failure_restores_live_head smoke

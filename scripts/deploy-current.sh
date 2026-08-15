@@ -26,8 +26,41 @@ source "$ROOT_DIR/scripts/ssh-password-auth.sh"
 
 VULTR_HOST="root@207.148.70.106"
 RELEASE_ROLLBACK_HEAD="${RELEASE_ROLLBACK_HEAD:-}"
+REMOTE_RETRIES="${DEPLOY_REMOTE_RETRIES:-3}"
+REMOTE_RETRY_SLEEP="${DEPLOY_REMOTE_RETRY_SLEEP:-5}"
+
+run_with_retry() {
+  local label="$1"
+  shift
+  local attempt rc
+
+  if ! [[ "$REMOTE_RETRIES" =~ ^[1-9][0-9]*$ ]]; then
+    echo "❌ DEPLOY_REMOTE_RETRIES must be a positive integer" >&2
+    return 1
+  fi
+  if ! [[ "$REMOTE_RETRY_SLEEP" =~ ^[0-9]+$ ]]; then
+    echo "❌ DEPLOY_REMOTE_RETRY_SLEEP must be a non-negative integer" >&2
+    return 1
+  fi
+
+  for ((attempt = 1; attempt <= REMOTE_RETRIES; attempt++)); do
+    if "$@"; then
+      return 0
+    else
+      rc=$?
+    fi
+    if ((attempt == REMOTE_RETRIES)); then
+      echo "❌ $label failed after $attempt attempt(s) (exit $rc)" >&2
+      return "$rc"
+    fi
+    echo "⚠️  $label failed (exit $rc); retrying in ${REMOTE_RETRY_SLEEP}s ($attempt/$REMOTE_RETRIES)" >&2
+    sleep "$REMOTE_RETRY_SLEEP"
+  done
+}
 
 capture_release_rollback_head() {
+  local capture_output
+
   if [[ -z "${VULTR_PASSWORD:-}" ]]; then
     echo "❌ VULTR_PASSWORD unset — cannot capture the release rollback point" >&2
     exit 1
@@ -37,15 +70,18 @@ capture_release_rollback_head() {
   if [[ -n "$RELEASE_ROLLBACK_HEAD" ]]; then
     return 0
   fi
-  RELEASE_ROLLBACK_HEAD=$("${SSH_PASSWORD_PREFIX[@]}" ssh \
+  if ! capture_output=$(run_with_retry "release rollback HEAD capture" \
+    "${SSH_PASSWORD_PREFIX[@]}" ssh \
     -o StrictHostKeyChecking=yes \
     -o ConnectTimeout=20 \
     -o ServerAliveInterval=10 \
     -o ServerAliveCountMax=3 \
     "$VULTR_HOST" \
-    "cd /opt/holaday-monorepo && git rev-parse HEAD" \
-    | tail -1 \
-    | tr -d '[:space:]')
+    "cd /opt/holaday-monorepo && git rev-parse HEAD"); then
+    echo "❌ Could not capture the production rollback HEAD" >&2
+    exit 1
+  fi
+  RELEASE_ROLLBACK_HEAD=$(printf '%s\n' "$capture_output" | tail -1 | tr -d '[:space:]')
   if ! [[ "$RELEASE_ROLLBACK_HEAD" =~ ^[0-9a-f]{40}$ ]]; then
     echo "❌ Could not capture a valid production rollback HEAD" >&2
     exit 1
@@ -59,7 +95,8 @@ preflight_release_branch() {
   capture_release_rollback_head
   echo "→ Pre-reset production gate: $RELEASE_ROLLBACK_HEAD must be an ancestor of origin/$BRANCH"
   set +e
-  "${SSH_PASSWORD_PREFIX[@]}" ssh \
+  run_with_retry "production branch preflight" \
+    "${SSH_PASSWORD_PREFIX[@]}" ssh \
     -o StrictHostKeyChecking=yes \
     -o ConnectTimeout=20 \
     -o ServerAliveInterval=10 \
@@ -133,7 +170,8 @@ deploy_cn_payment() {
 }
 
 verify_paypal_preflight() {
-  "$ROOT_DIR/scripts/verify-paypal-production.sh"
+  run_with_retry "PayPal production preflight" \
+    "$ROOT_DIR/scripts/verify-paypal-production.sh"
 }
 
 deploy_akshare() {
