@@ -503,11 +503,11 @@ git commit -m "fix(stocks): bound AkShare failures and concurrency"
 - Orchestrator logs `snapshotId`, expected date, data date, trust mode, snapshot age, source statuses, and task-context rejection code.
 - Runbook defines production probes, alert conditions, degraded-mode drill, and rollback.
 
-- [ ] **Step 1: Write failing health and structured-log tests**
+- [x] **Step 1: Write failing health and structured-log tests**
 
 Assert health counters increment for timeout/circuit-open paths and logger calls contain structured fields without upstream secrets. Test exact operational codes, not exact user-facing sentence text.
 
-- [ ] **Step 2: Run observability tests and verify RED**
+- [x] **Step 2: Run observability tests and verify RED**
 
 ```bash
 /Users/yaleiqi/holaday-monorepo/apps/akshare-mcp/.venv/bin/python -m pytest tests/test_http_server.py -q
@@ -516,7 +516,7 @@ pnpm --filter @holaday/orchestrator exec vitest run src/trpc/routers/stocks.test
 
 Expected: new counter/log assertions fail.
 
-- [ ] **Step 3: Implement counters/logs and write the runbook**
+- [x] **Step 3: Implement counters/logs and write the runbook**
 
 The runbook must include literal checks for:
 
@@ -527,7 +527,7 @@ The runbook must include literal checks for:
 - task `sourceContext.snapshotId` equals the originating dashboard snapshot;
 - rollback keeps the server trust gate active even if the new page copy is disabled.
 
-- [ ] **Step 4: Run targeted and full verification serially**
+- [x] **Step 4: Run targeted and full verification serially**
 
 ```bash
 /Users/yaleiqi/holaday-monorepo/apps/akshare-mcp/.venv/bin/python -m pytest tests -q
@@ -543,7 +543,7 @@ git diff --check
 
 Record exact counts, failures, warnings, and any repository-wide pre-existing lint limitation. Do not claim release readiness from targeted suites alone.
 
-- [ ] **Step 5: Review sensitive paths and commit**
+- [x] **Step 5: Review sensitive paths and commit**
 
 Verify the diff contains no unrelated TaskStream, payment, browser, extension, video, image, or evidence-ledger changes. Then:
 

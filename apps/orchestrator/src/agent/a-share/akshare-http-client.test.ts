@@ -3,10 +3,7 @@
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import {
-  HttpAkshareClient,
-  resetAkshareCircuitBreakersForTests,
-} from './akshare-http-client.js';
+import { HttpAkshareClient, resetAkshareCircuitBreakersForTests } from './akshare-http-client.js';
 
 interface Route {
   ok?: boolean;
@@ -95,7 +92,8 @@ describe('HttpAkshareClient', () => {
     const { fetchImpl } = mockFetch({ '/northbound': { ok: false, status: 503 } });
     const c = new HttpAkshareClient({ baseUrl: 'http://127.0.0.1:8848', fetchImpl });
     const r = await c.getNorthboundFlow();
-    expect(r.error).toContain('HTTP 503');
+    expect(r.error_code).toBe('UPSTREAM_HTTP');
+    expect(r.error).not.toContain('HTTP 503');
     expect(r.data).toEqual([]);
     expect(r.count).toBe(0);
   });
@@ -104,7 +102,8 @@ describe('HttpAkshareClient', () => {
     const { fetchImpl } = mockFetch({ '/kline/600519': { throws: true } });
     const c = new HttpAkshareClient({ baseUrl: 'http://127.0.0.1:8848', fetchImpl });
     const r = await c.getStockKline('600519');
-    expect(r.error).toContain('network down');
+    expect(r.error_code).toBe('UPSTREAM_UNAVAILABLE');
+    expect(r.error).not.toContain('network down');
     expect(r.data).toEqual([]);
   });
 
@@ -117,7 +116,7 @@ describe('HttpAkshareClient', () => {
 
     for (let attempt = 0; attempt < 3; attempt += 1) {
       await expect(c.getStockQuote('600519')).resolves.toMatchObject({
-        error: expect.stringContaining('HTTP 503'),
+        error_code: 'UPSTREAM_HTTP',
       });
     }
     await expect(c.getStockQuote('600519')).resolves.toMatchObject({
@@ -189,8 +188,28 @@ describe('HttpAkshareClient', () => {
     await vi.advanceTimersByTimeAsync(15_000); // 累计 25s → 风险才 abort
     expect([...aborted].some((u) => u.includes('/risk-pledge'))).toBe(true);
     const [rNB, rRisk] = await Promise.all([pNB, pRisk]); // 收尾：catch→error envelope
-    expect(rNB.error).toContain('aborted');
-    expect(rRisk.error).toContain('aborted');
+    expect(rNB).toMatchObject({ error_code: 'UPSTREAM_TIMEOUT' });
+    expect(rRisk).toMatchObject({ error_code: 'UPSTREAM_TIMEOUT' });
+    expect(rNB.error).not.toContain('aborted');
+    expect(rRisk.error).not.toContain('aborted');
     vi.useRealTimers();
+  });
+
+  it('日志和用户 envelope 都不包含上游错误原文', async () => {
+    const warn = vi.fn();
+    const fetchImpl = vi.fn(async () => {
+      throw new Error('network down token=secret-value');
+    });
+    const c = new HttpAkshareClient({
+      baseUrl: 'http://127.0.0.1:8848',
+      fetchImpl,
+      logger: { warn },
+    });
+
+    const result = await c.getStockQuote('600519');
+
+    expect(result).toMatchObject({ error_code: 'UPSTREAM_UNAVAILABLE' });
+    expect(JSON.stringify(result)).not.toContain('secret-value');
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('secret-value');
   });
 });

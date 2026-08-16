@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   type StockTaskContextInput,
   publicStockTaskContext,
@@ -127,6 +127,7 @@ describe('stock task context validation', () => {
   });
 
   it('rejects a snapshot that is not in the requesting user scope', async () => {
+    const warn = vi.fn();
     const db = {
       select: () => ({
         from: () => ({
@@ -142,7 +143,49 @@ describe('stock task context validation', () => {
         userId: 99,
         input: INPUT,
         intent: '解释多伦科技当日变化',
+        logger: { warn },
       }),
     ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(warn).toHaveBeenCalledWith(
+      {
+        userId: 99,
+        snapshotId: INPUT.snapshotId,
+        rejectionCode: 'SNAPSHOT_NOT_OWNED',
+      },
+      'stocks-task: context rejected',
+    );
+  });
+
+  it('logs a stable rejection code without the task intent or private payload', async () => {
+    const warn = vi.fn();
+    const db = {
+      select: () => ({
+        from: () => ({
+          where: () => ({
+            orderBy: () => ({ limit: async () => [{ snapshotJson: SNAPSHOT }] }),
+          }),
+        }),
+      }),
+    };
+
+    await expect(
+      validateStockTaskContext({
+        db: db as never,
+        userId: 99,
+        input: INPUT,
+        intent: '今天哪只最强，secret task text',
+        logger: { warn },
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(warn).toHaveBeenCalledWith(
+      {
+        userId: 99,
+        snapshotId: INPUT.snapshotId,
+        rejectionCode: 'HISTORICAL_PRESENT_TENSE',
+      },
+      'stocks-task: context rejected',
+    );
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('secret task text');
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('snapshotPayload');
   });
 });

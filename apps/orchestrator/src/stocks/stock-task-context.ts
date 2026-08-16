@@ -55,7 +55,26 @@ function dashboardSnapshotRecord(value: unknown): DashboardSnapshotRecord | null
   return value && typeof value === 'object' ? (value as DashboardSnapshotRecord) : null;
 }
 
-export class StockTaskContextError extends Error {}
+export type StockTaskContextRejectionCode =
+  | 'SNAPSHOT_INPUT_INVALID'
+  | 'SNAPSHOT_MISSING'
+  | 'SNAPSHOT_UNAVAILABLE'
+  | 'SNAPSHOT_ID_MISMATCH'
+  | 'DATA_AS_OF_MISMATCH'
+  | 'TRUST_MODE_MISMATCH'
+  | 'HISTORICAL_PRESENT_TENSE'
+  | 'EVIDENCE_NOT_TRUSTED'
+  | 'SYMBOL_NOT_IN_SNAPSHOT';
+
+export class StockTaskContextError extends Error {
+  constructor(
+    public readonly rejectionCode: StockTaskContextRejectionCode,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'StockTaskContextError';
+  }
+}
 
 function asRecords(value: unknown): Array<Record<string, unknown>> {
   return Array.isArray(value)
@@ -85,13 +104,22 @@ function newsEvidenceId(row: Record<string, unknown>): string | null {
 
 function assertContextInput(input: StockTaskContextInput): void {
   if (!/^stkshot_[a-f0-9]{24}$/.test(input.snapshotId)) {
-    throw new StockTaskContextError('股票快照 ID 无效，请刷新页面后重试。');
+    throw new StockTaskContextError(
+      'SNAPSHOT_INPUT_INVALID',
+      '股票快照 ID 无效，请刷新页面后重试。',
+    );
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input.dataAsOf)) {
-    throw new StockTaskContextError('股票快照数据日期无效，请刷新页面后重试。');
+    throw new StockTaskContextError(
+      'SNAPSHOT_INPUT_INVALID',
+      '股票快照数据日期无效，请刷新页面后重试。',
+    );
   }
   if (input.evidenceIds.length > 50 || input.evidenceIds.some((id) => !id || id.length > 160)) {
-    throw new StockTaskContextError('股票快照证据列表无效，请刷新页面后重试。');
+    throw new StockTaskContextError(
+      'SNAPSHOT_INPUT_INVALID',
+      '股票快照证据列表无效，请刷新页面后重试。',
+    );
   }
 }
 
@@ -103,23 +131,33 @@ export function validateStockTaskContextSnapshot(args: {
   assertContextInput(args.input);
   const snapshot = dashboardSnapshotRecord(args.snapshot);
   if (!snapshot) {
-    throw new StockTaskContextError('股票快照不存在，请刷新页面后重试。');
+    throw new StockTaskContextError('SNAPSHOT_MISSING', '股票快照不存在，请刷新页面后重试。');
   }
   const trust = snapshot.trust;
   if (!trust || trust.mode === 'unavailable') {
-    throw new StockTaskContextError('股票快照不可用，请刷新页面后重试。');
+    throw new StockTaskContextError('SNAPSHOT_UNAVAILABLE', '股票快照不可用，请刷新页面后重试。');
   }
   if (trust.snapshotId !== args.input.snapshotId) {
-    throw new StockTaskContextError('股票快照 ID 已变化，请刷新页面后重试。');
+    throw new StockTaskContextError(
+      'SNAPSHOT_ID_MISMATCH',
+      '股票快照 ID 已变化，请刷新页面后重试。',
+    );
   }
   if (trust.dataAsOf !== args.input.dataAsOf) {
-    throw new StockTaskContextError('股票快照数据日期已变化，请刷新页面后重试。');
+    throw new StockTaskContextError(
+      'DATA_AS_OF_MISMATCH',
+      '股票快照数据日期已变化，请刷新页面后重试。',
+    );
   }
   if (trust.mode !== args.input.trustMode) {
-    throw new StockTaskContextError('股票快照状态已变化，请刷新页面后重试。');
+    throw new StockTaskContextError(
+      'TRUST_MODE_MISMATCH',
+      '股票快照状态已变化，请刷新页面后重试。',
+    );
   }
   if (args.input.trustMode === 'historical' && historicalIntentUsesPresentTense(args.intent)) {
     throw new StockTaskContextError(
+      'HISTORICAL_PRESENT_TENSE',
       `历史快照不能回答当前行情问题。请改为“截至 ${compactDate(args.input.dataAsOf)}，当时有哪些关注点？”`,
     );
   }
@@ -129,7 +167,10 @@ export function validateStockTaskContextSnapshot(args: {
       : [],
   );
   if (args.input.evidenceIds.some((id) => !trustedEvidence.has(id))) {
-    throw new StockTaskContextError('股票快照包含未经验证的证据 ID，请刷新页面后重试。');
+    throw new StockTaskContextError(
+      'EVIDENCE_NOT_TRUSTED',
+      '股票快照包含未经验证的证据 ID，请刷新页面后重试。',
+    );
   }
 
   const watchlistStocks = asRecords(snapshot.watchlistStocks).filter(
@@ -139,7 +180,10 @@ export function validateStockTaskContextSnapshot(args: {
   const mentionedSymbols = explicitSymbols(args.intent);
   const missingSymbol = mentionedSymbols.find((symbol) => !availableSymbols.has(symbol));
   if (missingSymbol) {
-    throw new StockTaskContextError(`股票 ${missingSymbol} 不在快照中，请先加入关注列表并刷新。`);
+    throw new StockTaskContextError(
+      'SYMBOL_NOT_IN_SNAPSHOT',
+      `股票 ${missingSymbol} 不在快照中，请先加入关注列表并刷新。`,
+    );
   }
   const evidenceSymbols = args.input.evidenceIds.flatMap((id) => {
     const match = /^quote:(\d{6}):\d{4}-\d{2}-\d{2}$/.exec(id);
@@ -181,6 +225,7 @@ export async function validateStockTaskContext(args: {
   userId: number;
   input: StockTaskContextInput;
   intent: string;
+  logger?: { warn(obj: Record<string, unknown>, msg: string): void };
 }): Promise<ValidatedStockTaskContext> {
   const rows = await args.db
     .select({ snapshotJson: stockDashboardSnapshots.snapshotJson })
@@ -193,6 +238,14 @@ export async function validateStockTaskContext(args: {
     return snapshot?.trust?.snapshotId === args.input.snapshotId;
   });
   if (!row) {
+    args.logger?.warn(
+      {
+        userId: args.userId,
+        snapshotId: args.input.snapshotId,
+        rejectionCode: 'SNAPSHOT_NOT_OWNED',
+      },
+      'stocks-task: context rejected',
+    );
     throw new TRPCError({
       code: 'BAD_REQUEST',
       message: '找不到属于你的股票快照，请刷新页面后重试。',
@@ -205,6 +258,17 @@ export async function validateStockTaskContext(args: {
       intent: args.intent,
     });
   } catch (error) {
+    args.logger?.warn(
+      {
+        userId: args.userId,
+        snapshotId: args.input.snapshotId,
+        rejectionCode:
+          error instanceof StockTaskContextError
+            ? error.rejectionCode
+            : 'SNAPSHOT_VALIDATION_FAILED',
+      },
+      'stocks-task: context rejected',
+    );
     throw new TRPCError({
       code: 'BAD_REQUEST',
       message: error instanceof Error ? error.message : '股票快照校验失败，请刷新页面后重试。',

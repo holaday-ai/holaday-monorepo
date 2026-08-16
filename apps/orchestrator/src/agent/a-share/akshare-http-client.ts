@@ -21,15 +21,15 @@ import type {
   FundamentalsRow,
   GoodwillRow,
   IndexRow,
-  IntradayRow,
   InsiderChangeRow,
+  IntradayRow,
   KlineRow,
   MarketPulseRow,
   NorthboundRow,
   PledgeRow,
+  StockNewsRow,
   StockQuoteRow,
   StockRankingRow,
-  StockNewsRow,
   UnlockRow,
   ValuationRow,
   ZtReviewRow,
@@ -43,7 +43,7 @@ interface FetchResponseLike {
 }
 type FetchLike = (url: string, init?: { signal?: AbortSignal }) => Promise<FetchResponseLike>;
 
-/** 最小 logger 形状（pino 兼容）。注入后原始异常进日志、不泄漏给用户。 */
+/** 最小 logger 形状（pino 兼容）。只记录结构化状态，不记录原始上游错误。 */
 interface MinimalLogger {
   warn(obj: Record<string, unknown>, msg: string): void;
 }
@@ -133,7 +133,7 @@ export interface HttpAkshareClientOptions {
    * 宁可慢几秒真查出来、不假装「未检测到」。**仅作用于 4 个风险端点，不影响其他查询。**
    */
   riskTimeoutMs?: number;
-  /** 注入后：原始异常 / 后端 error envelope 进 logger.warn，**不泄漏给用户文案**。 */
+  /** 注入后只写路径、路由组、错误码等结构化状态，**不写原始上游错误**。 */
   logger?: MinimalLogger;
 }
 
@@ -160,7 +160,15 @@ export class HttpAkshareClient implements AkshareClient {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), timeoutMs);
         try {
-          const res = await this.fetchImpl(`${this.baseUrl}${path}`, { signal: controller.signal });
+          let res: FetchResponseLike;
+          try {
+            res = await this.fetchImpl(`${this.baseUrl}${path}`, { signal: controller.signal });
+          } catch (error) {
+            if (controller.signal.aborted) {
+              throw new AkshareUpstreamError('UPSTREAM_TIMEOUT', 'AkShare request timed out');
+            }
+            throw error;
+          }
           if (!res.ok) {
             throw new AkshareUpstreamError('UPSTREAM_HTTP', `HTTP ${res.status}`, {
               status: res.status,
@@ -171,10 +179,7 @@ export class HttpAkshareClient implements AkshareClient {
             throw new AkshareUpstreamError('UPSTREAM_INVALID', 'invalid AkShare envelope');
           }
           if (value.error) {
-            throw new AkshareUpstreamError(
-              value.error_code ?? 'UPSTREAM_ERROR',
-              value.error,
-            );
+            throw new AkshareUpstreamError(value.error_code ?? 'UPSTREAM_ERROR', value.error);
           }
           return value;
         } finally {
@@ -186,16 +191,14 @@ export class HttpAkshareClient implements AkshareClient {
         this.logger?.warn({ path, group, errorCode: e.code }, 'akshare-http: circuit open');
         return errEnvelope<T>(`http:${path}`, 'AkShare 服务暂时繁忙，请稍后重试。', e.code);
       }
-      const detail = e instanceof Error ? e.message : String(e);
-      const errorCode = e instanceof AkshareUpstreamError
-        ? e.errorCode
-        : 'UPSTREAM_UNAVAILABLE';
+      const errorCode = e instanceof AkshareUpstreamError ? e.errorCode : 'UPSTREAM_UNAVAILABLE';
       const context = e instanceof AkshareUpstreamError ? e.context : {};
-      this.logger?.warn(
-        { path, group, errorCode, ...context },
-        'akshare-http: 取数失败/超时',
-      );
-      return errEnvelope<T>(`http:${path}`, detail, errorCode);
+      this.logger?.warn({ path, group, errorCode, ...context }, 'akshare-http: 取数失败/超时');
+      const safeMessage =
+        errorCode === 'UPSTREAM_TIMEOUT'
+          ? 'AkShare 数据源响应超时，请稍后重试。'
+          : 'AkShare 数据源暂不可用，请稍后重试。';
+      return errEnvelope<T>(`http:${path}`, safeMessage, errorCode);
     }
   }
 
@@ -251,7 +254,9 @@ export class HttpAkshareClient implements AkshareClient {
   getStockRankings(metric: 'gainers' | 'losers' | 'amount', limit = 20) {
     const qs = new URLSearchParams();
     qs.set('limit', String(limit));
-    return this.get<StockRankingRow>(`/stock-rankings/${encodeURIComponent(metric)}?${qs.toString()}`);
+    return this.get<StockRankingRow>(
+      `/stock-rankings/${encodeURIComponent(metric)}?${qs.toString()}`,
+    );
   }
   getMarketPulse(date: string, prevDate?: string) {
     const qs = prevDate ? `?prev_date=${encodeURIComponent(prevDate)}` : '';

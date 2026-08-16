@@ -840,6 +840,7 @@ describe('stocks dashboard snapshot', () => {
   });
 
   it('marks an older quote date historical against the verified exchange calendar', async () => {
+    const info = vi.fn();
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       const url = new URL(String(input));
       if (url.pathname === '/trading-calendar/latest') {
@@ -874,7 +875,7 @@ describe('stocks dashboard snapshot', () => {
     });
 
     const snapshot = await __stocksDashboardTest.buildDashboardSnapshot({
-      logger: { warn: vi.fn() },
+      logger: { warn: vi.fn(), info },
       watchlistRows: [{ symbol: '603528', market: 'A', displayName: '多伦科技' }],
       effectiveWatchlist: [{ symbol: '603528', market: 'A', displayName: '多伦科技' }],
       now: new Date('2026-08-16T14:00:00.000Z'),
@@ -896,6 +897,19 @@ describe('stocks dashboard snapshot', () => {
       dataAsOf: '2026-08-11',
     }));
     expect(snapshot.trust?.evidenceIds).toContain('quote:603528:2026-08-11');
+    expect(info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        snapshotId: snapshot.trust?.snapshotId,
+        latestExpectedTradingDate: '2026-08-14',
+        dataAsOf: '2026-08-11',
+        trustMode: 'historical',
+        snapshotAgeMs: 0,
+        sourceStatuses: expect.arrayContaining([
+          expect.objectContaining({ key: 'quotes', status: 'healthy' }),
+        ]),
+      }),
+      'stocks-dashboard: trust snapshot',
+    );
   });
 
   it('preserves the snapshot id after the persisted JSON is reloaded and revalidated', async () => {

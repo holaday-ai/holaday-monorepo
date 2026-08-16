@@ -30,6 +30,8 @@ _OPS_LOCK = threading.Lock()
 _OPS: dict[str, Any] = {
     "requests_total": 0,
     "errors_total": 0,
+    "timeouts_total": 0,
+    "single_flight_timeouts_total": 0,
     "fallbacks_total": 0,
     "last_success_at": None,
     "last_error_at": None,
@@ -48,7 +50,13 @@ def _source_hint(fn: Callable[..., Any]) -> str:
     return f"akshare:{name}"
 
 
-def _record_operation(*, source: str, succeeded: bool, fallback: bool = False) -> None:
+def _record_operation(
+    *,
+    source: str,
+    succeeded: bool,
+    fallback: bool = False,
+    timeout_kind: str | None = None,
+) -> None:
     now = _utc_now()
     with _OPS_LOCK:
         _OPS["requests_total"] += 1
@@ -60,8 +68,61 @@ def _record_operation(*, source: str, succeeded: bool, fallback: bool = False) -
                 _OPS["last_fallback_source"] = source
         else:
             _OPS["errors_total"] += 1
+            if timeout_kind == "upstream":
+                _OPS["timeouts_total"] += 1
+            elif timeout_kind == "single_flight":
+                _OPS["single_flight_timeouts_total"] += 1
             _OPS["last_error_at"] = now
             _OPS["last_error_source"] = source
+
+
+def _timeout_kind(exc: BaseException) -> str | None:
+    """Classify wrapped transport timeouts without exposing their messages."""
+    current: BaseException | None = exc
+    saw_timeout = False
+    visited: set[int] = set()
+    while current is not None and id(current) not in visited:
+        visited.add(id(current))
+        message = str(current).lower()
+        if message.startswith("single-flight wait exceeded"):
+            return "single_flight"
+        type_name = type(current).__name__.lower()
+        if isinstance(current, TimeoutError) or "timeout" in type_name or "timed out" in message:
+            saw_timeout = True
+        current = current.__cause__ or current.__context__
+    return "upstream" if saw_timeout else None
+
+
+def _timeout_response(
+    *,
+    exc: BaseException,
+    source_hint: str,
+    started: float,
+) -> dict[str, Any] | None:
+    timeout_kind = _timeout_kind(exc)
+    if timeout_kind is None:
+        return None
+    error_code = "SINGLE_FLIGHT_TIMEOUT" if timeout_kind == "single_flight" else "UPSTREAM_TIMEOUT"
+    _record_operation(
+        source=source_hint,
+        succeeded=False,
+        timeout_kind=timeout_kind,
+    )
+    _LOGGER.warning(
+        "akshare adapter timeout source=%s elapsed_ms=%.1f timeout_kind=%s",
+        source_hint,
+        (time.monotonic() - started) * 1000,
+        timeout_kind,
+    )
+    return {
+        "error": "真实数据源响应超时",
+        "error_code": error_code,
+        "data": [],
+        "count": 0,
+        "source": source_hint,
+        "fetched_at": _utc_now(),
+        "disclaimer": DISCLAIMER,
+    }
 
 
 def _envelope(
@@ -111,6 +172,13 @@ def _safe(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> dict[str, Any]:
         _record_operation(source=source, succeeded=True, fallback="fallback" in source.lower())
         return _envelope(records, source, fetched_at)
     except adp.AkShareUnavailable as exc:
+        timeout_response = _timeout_response(
+            exc=exc,
+            source_hint=source_hint,
+            started=started,
+        )
+        if timeout_response is not None:
+            return timeout_response
         _record_operation(source=source_hint, succeeded=False)
         _LOGGER.warning(
             "akshare adapter unavailable source=%s elapsed_ms=%.1f error_type=%s",
@@ -127,7 +195,23 @@ def _safe(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> dict[str, Any]:
             "fetched_at": _utc_now(),
             "disclaimer": DISCLAIMER,
         }
+    except TimeoutError as exc:
+        timeout_response = _timeout_response(
+            exc=exc,
+            source_hint=source_hint,
+            started=started,
+        )
+        if timeout_response is not None:
+            return timeout_response
+        raise AssertionError("TimeoutError must have a timeout classification") from exc
     except Exception as exc:  # noqa: BLE001 - any akshare/network failure
+        timeout_response = _timeout_response(
+            exc=exc,
+            source_hint=source_hint,
+            started=started,
+        )
+        if timeout_response is not None:
+            return timeout_response
         _record_operation(source=source_hint, succeeded=False)
         _LOGGER.warning(
             "akshare adapter failure source=%s elapsed_ms=%.1f error_type=%s",

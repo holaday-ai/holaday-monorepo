@@ -1172,6 +1172,7 @@ export const tasksRouter = router({
         userId: userRow.id,
         input: input.stockContext,
         intent: input.intent,
+        logger: ctx.logger,
       });
     }
     const stockTaskSourceContext = validatedStockContext

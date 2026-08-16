@@ -38,6 +38,7 @@ import { protectedProcedure, router } from '../trpc.js';
 
 type Db = typeof import('../../db/client.js').db;
 interface MinimalLogger {
+  info?(obj: Record<string, unknown>, msg: string): void;
   warn(obj: Record<string, unknown>, msg: string): void;
 }
 
@@ -785,6 +786,33 @@ function dashboardWithTrust(args: {
   return dashboardForTrustMode({ ...observed, trust });
 }
 
+function logDashboardTrust(
+  logger: MinimalLogger,
+  snapshot: DashboardSnapshot,
+  now: Date,
+): void {
+  const trust = snapshot.trust;
+  if (!trust) return;
+  const generatedAtMs = new Date(trust.generatedAt).getTime();
+  logger.info?.(
+    {
+      snapshotId: trust.snapshotId,
+      latestExpectedTradingDate: trust.latestExpectedTradingDate,
+      dataAsOf: trust.dataAsOf,
+      trustMode: trust.mode,
+      snapshotAgeMs: Number.isFinite(generatedAtMs)
+        ? Math.max(0, now.getTime() - generatedAtMs)
+        : null,
+      sourceStatuses: trust.sources.map((source) => ({
+        key: source.key,
+        status: source.status,
+        ...(source.errorCode ? { errorCode: source.errorCode } : {}),
+      })),
+    },
+    'stocks-dashboard: trust snapshot',
+  );
+}
+
 function dashboardForTrustMode(snapshot: DashboardSnapshot): DashboardSnapshot {
   if (snapshot.trust?.mode !== 'unavailable') return snapshot;
   const watchlistStocks = snapshot.watchlistStocks.map((stockRow) =>
@@ -1507,7 +1535,7 @@ async function buildDashboardSnapshot(args: {
   const snapshotKey = args.snapshotKey ?? effectiveWatchlist
     .map((entry) => `${entry.symbol}:${entry.market}:${entry.displayName ?? ''}`)
     .join('|');
-  return dashboardWithTrust({
+  const trustedSnapshot = dashboardWithTrust({
     snapshot: observed,
     snapshotKey,
     now,
@@ -1515,6 +1543,8 @@ async function buildDashboardSnapshot(args: {
     sources,
     dataAsOf: observed.observedTradeDate,
   });
+  logDashboardTrust(logger, trustedSnapshot, now);
+  return trustedSnapshot;
 }
 
 function dashboardWithReconciledTrust(
@@ -1549,7 +1579,7 @@ async function revalidateDashboardTrust(args: {
     logger: args.logger,
   });
   const calendar = await latestExpectedTradingDate(client, args.now);
-  return dashboardWithTrust({
+  const trustedSnapshot = dashboardWithTrust({
     snapshot: args.snapshot,
     snapshotKey: args.snapshotKey,
     now: args.now,
@@ -1557,6 +1587,8 @@ async function revalidateDashboardTrust(args: {
     sources: args.snapshot.trust?.sources,
     dataAsOf: args.snapshot.trust?.dataAsOf,
   });
+  logDashboardTrust(args.logger, trustedSnapshot, args.now);
+  return trustedSnapshot;
 }
 
 function cacheDashboardSnapshot(cacheKey: string, snapshot: DashboardSnapshot, refreshPromise?: Promise<DashboardSnapshot>): void {
