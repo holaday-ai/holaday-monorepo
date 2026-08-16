@@ -25,7 +25,7 @@ loadDotenvAllowingEmpty(resolve(repoRoot, '.env'));
 loadDotenvAllowingEmpty(resolve(repoRoot, '.env.local'));
 loadDotenvAllowingEmpty(resolve(process.cwd(), '.env.local'));
 
-const schema = z.object({
+export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
   HTTP_PORT: z.coerce.number().int().positive().default(3001),
@@ -34,6 +34,36 @@ const schema = z.object({
   DATABASE_URL: z.string().url(),
   REDIS_URL: z.string().url(),
   JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 chars'),
+
+  ENERGY_ANALYTICS_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  ENERGY_ANALYTICS_HMAC_SECRET: z
+    .string()
+    .refine(
+      (value) => value === '' || value.length >= 32,
+      'ENERGY_ANALYTICS_HMAC_SECRET must be empty or at least 32 chars',
+    )
+    .default(''),
+  ENERGY_ANALYTICS_VISITOR_RETENTION_DAYS: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(30)
+    .default(30),
+  ENERGY_ANALYTICS_METRIC_RETENTION_DAYS: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(400)
+    .default(400),
+  ENERGY_ANALYTICS_RECEIPT_RETENTION_HOURS: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(48)
+    .default(48),
 
   ANTHROPIC_API_KEY: z.string().optional().default(''),
 
@@ -404,6 +434,6 @@ const schema = z.object({
     .transform((v) => v === 'true'),
 });
 
-export type Env = z.infer<typeof schema>;
+export type Env = z.infer<typeof envSchema>;
 
-export const env: Env = schema.parse(process.env);
+export const env: Env = envSchema.parse(process.env);
