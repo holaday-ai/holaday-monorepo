@@ -31,6 +31,11 @@ import { env } from './config/env.js';
 import { logger } from './config/logger.js';
 import { injectPendingCookies } from './cookies/sync-service.js';
 import { db } from './db/client.js';
+import {
+  startEnergyAnalyticsCleanup,
+  stopEnergyAnalyticsCleanup,
+} from './energy/analytics-cleanup.js';
+import { createEnergyAnalyticsStore } from './energy/analytics-store.js';
 import { runRetentionReaper } from './evidence/retention-reaper.js';
 import { createHttpApp } from './http.js';
 import { buildScheduledDispatchNotification } from './notifications/scheduled-copy.js';
@@ -367,6 +372,11 @@ async function main() {
 
   const httpServer = app.listen(env.HTTP_PORT, () => {
     logger.info({ port: env.HTTP_PORT }, 'HTTP server listening');
+  });
+
+  startEnergyAnalyticsCleanup({
+    store: createEnergyAnalyticsStore(db),
+    logger,
   });
 
   // Phase 5d follow-up — periodic cleanup of expired webhook
@@ -933,6 +943,7 @@ async function main() {
     if (shuttingDown) return;
     shuttingDown = true;
     logger.info({ signal }, 'shutdown requested');
+    stopEnergyAnalyticsCleanup();
     await ws.close();
     await new Promise<void>((resolve) => httpServer.close(() => resolve()));
     if (playwrightExecutor) {

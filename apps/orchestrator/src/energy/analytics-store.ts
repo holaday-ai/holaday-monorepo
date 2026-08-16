@@ -1,6 +1,7 @@
 import { and, eq, gte, lte, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/mysql-core';
 import type { DB } from '../db/client.js';
+import { readAffectedRows } from '../db/mysql-result.js';
 import {
   energyDailyMetrics,
   energyDailyVisitors,
@@ -39,6 +40,12 @@ export interface EnergyAnalyticsReadStore {
 export interface EnergyAnalyticsDatabaseStore
   extends EnergyAnalyticsStore,
     EnergyAnalyticsReadStore {}
+
+export interface EnergyAnalyticsCleanupStore {
+  deleteExpiredReceipts(now: Date, limit: number): Promise<number>;
+  deleteExpiredVisitors(now: Date, limit: number): Promise<number>;
+  deleteExpiredMetrics(now: Date, limit: number): Promise<number>;
+}
 
 type DBTransaction = Parameters<Parameters<DB['transaction']>[0]>[0];
 
@@ -86,7 +93,9 @@ function createTransaction(tx: DBTransaction): EnergyAnalyticsTransaction {
   };
 }
 
-export function createEnergyAnalyticsStore(database: DB): EnergyAnalyticsDatabaseStore {
+export function createEnergyAnalyticsStore(
+  database: DB,
+): EnergyAnalyticsDatabaseStore & EnergyAnalyticsCleanupStore {
   return {
     transaction: (callback) => database.transaction((tx) => callback(createTransaction(tx))),
 
@@ -136,6 +145,30 @@ export function createEnergyAnalyticsStore(database: DB): EnergyAnalyticsDatabas
         dau: Number(row.dau),
         d1Returning: Number(row.d1Returning),
       }));
+    },
+
+    async deleteExpiredReceipts(now, limit) {
+      const result = await database
+        .delete(energyEventReceipts)
+        .where(lte(energyEventReceipts.expiresAt, now))
+        .limit(limit);
+      return readAffectedRows(result);
+    },
+
+    async deleteExpiredVisitors(now, limit) {
+      const result = await database
+        .delete(energyDailyVisitors)
+        .where(lte(energyDailyVisitors.expiresAt, now))
+        .limit(limit);
+      return readAffectedRows(result);
+    },
+
+    async deleteExpiredMetrics(now, limit) {
+      const result = await database
+        .delete(energyDailyMetrics)
+        .where(lte(energyDailyMetrics.expiresAt, now))
+        .limit(limit);
+      return readAffectedRows(result);
     },
   };
 }
