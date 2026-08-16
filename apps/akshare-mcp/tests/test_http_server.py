@@ -23,6 +23,26 @@ def test_cached_adapter_preserves_actual_fetch_timestamp():
     assert second["fetched_at"] == first["fetched_at"]
 
 
+def test_trading_calendar_latest_route_preserves_source_and_fetch_timestamp(monkeypatch):
+    monkeypatch.setattr(
+        http_server,
+        "_latest_tradecal",
+        lambda requested: (
+            [{"requested_date": requested, "latest_trading_date": "2026-08-14"}],
+            "akshare:tool_trade_date_hist_sina",
+            "2026-08-16T14:00:00+00:00",
+        ),
+    )
+
+    result = http_server.trading_calendar_latest("2026-08-16")
+
+    assert result["data"] == [
+        {"requested_date": "2026-08-16", "latest_trading_date": "2026-08-14"}
+    ]
+    assert result["source"] == "akshare:tool_trade_date_hist_sina"
+    assert result["fetched_at"] == "2026-08-16T14:00:00+00:00"
+
+
 def test_error_envelope_is_attributed_timestamped_and_sanitized(caplog):
     def fetch():
         raise adp.AkShareUnavailable("upstream token=secret-value")

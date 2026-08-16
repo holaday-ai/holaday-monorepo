@@ -57,6 +57,7 @@ describe('HttpAkshareClient', () => {
       '/stock-rankings/gainers?limit=10': { body },
       '/dragon-tiger/20260612': { body },
       '/northbound': { body },
+      '/trading-calendar/latest?on_or_before=2026-08-16': { body },
     });
     const c = new HttpAkshareClient({ baseUrl: 'http://127.0.0.1:8848', fetchImpl });
     await c.getStockAnnouncements('600519');
@@ -67,6 +68,7 @@ describe('HttpAkshareClient', () => {
     await c.getStockRankings('gainers', 10);
     await c.getDragonTiger('20260612');
     await c.getNorthboundFlow();
+    await c.getLatestTradingDay('2026-08-16');
     await c.getStockRankings('gainers', 10);
     expect(calls).toEqual([
       'http://127.0.0.1:8848/announcements/600519',
@@ -77,6 +79,7 @@ describe('HttpAkshareClient', () => {
       'http://127.0.0.1:8848/stock-rankings/gainers?limit=10',
       'http://127.0.0.1:8848/dragon-tiger/20260612',
       'http://127.0.0.1:8848/northbound',
+      'http://127.0.0.1:8848/trading-calendar/latest?on_or_before=2026-08-16',
       'http://127.0.0.1:8848/stock-rankings/gainers?limit=10',
     ]);
   });

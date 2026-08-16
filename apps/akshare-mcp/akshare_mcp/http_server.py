@@ -158,6 +158,7 @@ _north = _cached_adapter(adp.TTL_NORTHBOUND)(adp.get_northbound_flow)
 _index = _cached_adapter(adp.TTL_INDEX)(adp.get_index_quote)
 _unlock = _cached_adapter(adp.TTL_UNLOCK)(adp.get_share_unlock)
 _tradecal = _cached_adapter(adp.TTL_TRADECAL)(adp.is_trading_day)
+_latest_tradecal = _cached_adapter(adp.TTL_TRADECAL)(adp.latest_trading_day)
 # v2 简报：温度计+板块(含即时 ths/指数 spot)→ 短 TTL 覆盖投递窗口；涨停回顾(prevday 历史)→ 长 TTL。
 _pulse = _cached_adapter(adp.TTL_PULSE)(adp.get_market_pulse)
 _ztsum = _cached_adapter(adp.TTL_LHB)(adp.get_zt_pool_summary)
@@ -251,6 +252,12 @@ def northbound() -> dict[str, Any]:
 def trading_day(date: str) -> dict[str, Any]:
     """date: 'YYYY-MM-DD' 或 'YYYYMMDD' 是否 A股交易日（P1 非交易日不投递）。"""
     return _safe(_tradecal, date)
+
+
+@app.get("/trading-calendar/latest")
+def trading_calendar_latest(on_or_before: str) -> dict[str, Any]:
+    """Return the latest A-share trading date on or before the requested date."""
+    return _safe(_latest_tradecal, on_or_before)
 
 
 @app.get("/market-pulse/{date}")

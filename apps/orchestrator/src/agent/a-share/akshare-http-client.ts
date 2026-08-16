@@ -7,7 +7,12 @@
  * 定时任务不崩。fetch 可注入便于单测。
  */
 
-import type { AkshareClient, SymbolRow, TradingDayRow } from './akshare-client.js';
+import type {
+  AkshareClient,
+  SymbolRow,
+  TradingCalendarRow,
+  TradingDayRow,
+} from './akshare-client.js';
 import type {
   AkEnvelope,
   AnnouncementRow,
@@ -153,6 +158,11 @@ export class HttpAkshareClient implements AkshareClient {
   }
   getTradingDay(date: string) {
     return this.get<TradingDayRow>(`/trading-day/${encodeURIComponent(date)}`);
+  }
+  getLatestTradingDay(onOrBefore: string) {
+    const qs = new URLSearchParams();
+    qs.set('on_or_before', onOrBefore);
+    return this.get<TradingCalendarRow>(`/trading-calendar/latest?${qs.toString()}`);
   }
   searchSymbol(query: string) {
     return this.get<SymbolRow>(`/symbol-search/${encodeURIComponent(query)}`);

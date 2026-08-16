@@ -35,6 +35,7 @@
 - Modify: `apps/orchestrator/src/agent/a-share/akshare-client.ts`
 - Modify: `apps/orchestrator/src/agent/a-share/akshare-http-client.ts`
 - Modify: `apps/orchestrator/src/agent/a-share/akshare-http-client.test.ts`
+- Modify: `apps/orchestrator/src/agent/a-share/briefing-service.test.ts`
 
 **Interfaces:**
 - Produces Python adapter `latest_trading_day(on_or_before: str) -> tuple[list[dict[str, Any]], str]`.
@@ -42,7 +43,7 @@
 - Produces TypeScript `TradingCalendarRow` and `AkshareClient.getLatestTradingDay(onOrBefore: string)`.
 - The successful envelope contains exactly one row: `{ requested_date, latest_trading_date }` using `YYYY-MM-DD`.
 
-- [ ] **Step 1: Write failing adapter tests for weekends, holidays, and malformed dates**
+- [x] **Step 1: Write failing adapter tests for weekends, holidays, and malformed dates**
 
 Add literal fixtures to `test_stock_adapters.py`; monkeypatch `tool_trade_date_hist_sina` to return known dates and assert:
 
@@ -57,7 +58,7 @@ assert source == "akshare:tool_trade_date_hist_sina"
 
 Also assert `2026-10-08` resolves across a holiday fixture and `20260816` is normalized. A malformed value must raise `AkShareUnavailable` rather than silently selecting today.
 
-- [ ] **Step 2: Run the adapter tests and verify RED**
+- [x] **Step 2: Run the adapter tests and verify RED**
 
 Run:
 
@@ -67,11 +68,11 @@ Run:
 
 Expected: FAIL because `latest_trading_day` does not exist.
 
-- [ ] **Step 3: Implement one calendar fetch and deterministic latest-date selection**
+- [x] **Step 3: Implement one calendar fetch and deterministic latest-date selection**
 
 Normalize input with `datetime.datetime.strptime`, build a sorted set from `trade_date`, select `max(date <= requested)`, and raise `AkShareUnavailable("交易日历没有可用日期")` when the calendar is empty or has no earlier entry. Do not fall back to weekday logic inside the data service.
 
-- [ ] **Step 4: Add failing HTTP and TypeScript client contract tests**
+- [x] **Step 4: Add failing HTTP and TypeScript client contract tests**
 
 Assert `_safe(_latest_tradecal, "2026-08-16")` preserves source/fetched time and the TypeScript client requests:
 
@@ -79,7 +80,7 @@ Assert `_safe(_latest_tradecal, "2026-08-16")` preserves source/fetched time and
 'http://127.0.0.1:8848/trading-calendar/latest?on_or_before=2026-08-16'
 ```
 
-- [ ] **Step 5: Run the HTTP/client tests and verify RED**
+- [x] **Step 5: Run the HTTP/client tests and verify RED**
 
 Run:
 
@@ -90,7 +91,7 @@ pnpm --filter @holaday/orchestrator exec vitest run src/agent/a-share/akshare-ht
 
 Expected: both fail because the route and client method are missing.
 
-- [ ] **Step 6: Implement the cached route and client method**
+- [x] **Step 6: Implement the cached route and client method**
 
 Cache the latest-day adapter with `TTL_TRADECAL`. Add:
 
@@ -104,12 +105,12 @@ export interface TradingCalendarRow {
 
 and URL-encode the query parameter through `URLSearchParams`.
 
-- [ ] **Step 7: Run Task 1 tests and commit**
+- [x] **Step 7: Run Task 1 tests and commit**
 
 Run the three commands from Steps 2 and 5; all must pass. Then:
 
 ```bash
-git add apps/akshare-mcp/akshare_mcp/adapters.py apps/akshare-mcp/akshare_mcp/http_server.py apps/akshare-mcp/tests/test_stock_adapters.py apps/akshare-mcp/tests/test_http_server.py apps/orchestrator/src/agent/a-share/akshare-client.ts apps/orchestrator/src/agent/a-share/akshare-http-client.ts apps/orchestrator/src/agent/a-share/akshare-http-client.test.ts
+git add apps/akshare-mcp/akshare_mcp/adapters.py apps/akshare-mcp/akshare_mcp/http_server.py apps/akshare-mcp/tests/test_stock_adapters.py apps/akshare-mcp/tests/test_http_server.py apps/orchestrator/src/agent/a-share/akshare-client.ts apps/orchestrator/src/agent/a-share/akshare-http-client.ts apps/orchestrator/src/agent/a-share/akshare-http-client.test.ts apps/orchestrator/src/agent/a-share/briefing-service.test.ts docs/superpowers/plans/2026-08-17-stock-task-trust-p0.md
 git commit -m "feat(stocks): resolve latest valid trading day"
 ```
 
