@@ -21,6 +21,14 @@ class MemoryStore implements EnergyAnalyticsStore {
   readonly metrics = new Map<string, number>();
   readonly visitors = new Set<string>();
 
+  async readMetricRows() {
+    return [];
+  }
+
+  async readDailyAudience() {
+    return [];
+  }
+
   async transaction<T>(callback: (tx: EnergyAnalyticsTransaction) => Promise<T>): Promise<T> {
     const receipts = new Set(this.receipts);
     const metrics = new Map(this.metrics);
@@ -68,6 +76,18 @@ function setup() {
     db: {},
   } as never);
   return { caller, energyRouter, logger, store };
+}
+
+function roleDatabase(role: 'admin' | 'member' | null) {
+  return {
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          limit: async () => (role === null ? [] : [{ role, status: 'active' }]),
+        }),
+      }),
+    }),
+  };
 }
 
 describe('energyRouter', () => {
@@ -219,5 +239,52 @@ describe('energyRouter', () => {
 
     expect(logger.info).not.toHaveBeenCalled();
     expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it('returns aggregate metrics only to an active admin', async () => {
+    const { energyRouter, logger } = setup();
+    const caller = energyRouter.createCaller({
+      userId: 'usr_admin',
+      logger,
+      db: roleDatabase('admin'),
+    } as never);
+
+    const result = await caller.metrics({ window: 7 });
+
+    expect(result).toMatchObject({
+      window: 7,
+      startDate: '2026-08-10',
+      endDate: '2026-08-16',
+      totals: { homeViews: 0, startsPerVisit: null },
+    });
+    expect(JSON.stringify(result)).not.toMatch(/visitorHash|eventId|userId|\bhash\b/i);
+  });
+
+  it('rejects non-admin, unauthenticated and unbounded metric queries', async () => {
+    const { energyRouter, logger } = setup();
+
+    await expect(
+      energyRouter
+        .createCaller({
+          userId: 'usr_member',
+          logger,
+          db: roleDatabase('member'),
+        } as never)
+        .metrics({ window: 7 }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(
+      energyRouter
+        .createCaller({ userId: null, logger, db: roleDatabase(null) } as never)
+        .metrics({ window: 7 }),
+    ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+    await expect(
+      energyRouter
+        .createCaller({
+          userId: 'usr_admin',
+          logger,
+          db: roleDatabase('admin'),
+        } as never)
+        .metrics({ window: 7, userId: 'usr_private' } as never),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
   });
 });

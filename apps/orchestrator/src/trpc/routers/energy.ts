@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { env } from '../../config/env.js';
 import type { DB } from '../../db/client.js';
 import {
@@ -5,16 +6,17 @@ import {
   energyAnalyticsConfigFromEnv,
 } from '../../energy/analytics-bucket.js';
 import { energyEventInput } from '../../energy/analytics-contract.js';
+import { queryEnergyMetrics } from '../../energy/analytics-metrics-service.js';
 import {
-  type EnergyAnalyticsStore,
+  type EnergyAnalyticsDatabaseStore,
   createEnergyAnalyticsStore,
 } from '../../energy/analytics-store.js';
 import { recordEnergyEvent } from '../../energy/analytics-write-service.js';
 import { buildEnergyHome } from '../../energy/catalog.js';
-import { protectedProcedure, router } from '../trpc.js';
+import { adminProcedure, protectedProcedure, router } from '../trpc.js';
 
 interface EnergyRouterDeps {
-  createStore(database: DB): EnergyAnalyticsStore;
+  createStore(database: DB): EnergyAnalyticsDatabaseStore;
   config: EnergyAnalyticsConfig;
   now(): Date;
 }
@@ -38,6 +40,15 @@ export function createEnergyRouter(deps: EnergyRouterDeps = defaultDeps) {
         logger: ctx.logger,
       }),
     ),
+    metrics: adminProcedure
+      .input(z.object({ window: z.union([z.literal(7), z.literal(30)]).default(7) }).strict())
+      .query(({ ctx, input }) =>
+        queryEnergyMetrics({
+          store: deps.createStore(ctx.db),
+          window: input.window,
+          now: deps.now(),
+        }),
+      ),
   });
 }
 

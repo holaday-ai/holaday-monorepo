@@ -1,4 +1,5 @@
-import { sql } from 'drizzle-orm';
+import { and, eq, gte, lte, sql } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/mysql-core';
 import type { DB } from '../db/client.js';
 import {
   energyDailyMetrics,
@@ -16,6 +17,28 @@ export interface EnergyAnalyticsTransaction {
 export interface EnergyAnalyticsStore {
   transaction<T>(callback: (tx: EnergyAnalyticsTransaction) => Promise<T>): Promise<T>;
 }
+
+export interface EnergyMetricReadRow {
+  metricDate: string;
+  eventType: string;
+  experienceId: string;
+  eventCount: number;
+}
+
+export interface EnergyDailyAudienceRow {
+  activityDate: string;
+  dau: number;
+  d1Returning: number;
+}
+
+export interface EnergyAnalyticsReadStore {
+  readMetricRows(startDate: string, endDate: string): Promise<EnergyMetricReadRow[]>;
+  readDailyAudience(startDate: string, endDate: string): Promise<EnergyDailyAudienceRow[]>;
+}
+
+export interface EnergyAnalyticsDatabaseStore
+  extends EnergyAnalyticsStore,
+    EnergyAnalyticsReadStore {}
 
 type DBTransaction = Parameters<Parameters<DB['transaction']>[0]>[0];
 
@@ -63,8 +86,56 @@ function createTransaction(tx: DBTransaction): EnergyAnalyticsTransaction {
   };
 }
 
-export function createEnergyAnalyticsStore(database: DB): EnergyAnalyticsStore {
+export function createEnergyAnalyticsStore(database: DB): EnergyAnalyticsDatabaseStore {
   return {
     transaction: (callback) => database.transaction((tx) => callback(createTransaction(tx))),
+
+    async readMetricRows(startDate, endDate) {
+      const rows = await database
+        .select({
+          metricDate: energyDailyMetrics.metricDate,
+          eventType: energyDailyMetrics.eventType,
+          experienceId: energyDailyMetrics.experienceId,
+          eventCount: energyDailyMetrics.eventCount,
+        })
+        .from(energyDailyMetrics)
+        .where(
+          and(
+            gte(energyDailyMetrics.metricDate, startDate),
+            lte(energyDailyMetrics.metricDate, endDate),
+          ),
+        );
+      return rows.map((row) => ({ ...row, eventCount: Number(row.eventCount) }));
+    },
+
+    async readDailyAudience(startDate, endDate) {
+      const nextVisitor = alias(energyDailyVisitors, 'next_energy_daily_visitors');
+      const rows = await database
+        .select({
+          activityDate: energyDailyVisitors.activityDate,
+          dau: sql<number>`COUNT(${energyDailyVisitors.id})`,
+          d1Returning: sql<number>`COUNT(${nextVisitor.id})`,
+        })
+        .from(energyDailyVisitors)
+        .leftJoin(
+          nextVisitor,
+          and(
+            eq(nextVisitor.visitorHash, energyDailyVisitors.visitorHash),
+            sql`${nextVisitor.activityDate} = DATE_ADD(${energyDailyVisitors.activityDate}, INTERVAL 1 DAY)`,
+          ),
+        )
+        .where(
+          and(
+            gte(energyDailyVisitors.activityDate, startDate),
+            lte(energyDailyVisitors.activityDate, endDate),
+          ),
+        )
+        .groupBy(energyDailyVisitors.activityDate);
+      return rows.map((row) => ({
+        activityDate: row.activityDate,
+        dau: Number(row.dau),
+        d1Returning: Number(row.d1Returning),
+      }));
+    },
   };
 }
