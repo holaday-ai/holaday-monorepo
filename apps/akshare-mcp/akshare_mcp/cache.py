@@ -60,7 +60,10 @@ _FLIGHTS: dict[Hashable, _Flight] = {}
 _FLIGHTS_LOCK = threading.Lock()
 
 
-def cached(ttl_seconds: float) -> Callable[[Callable[..., T]], Callable[..., T]]:
+def cached(
+    ttl_seconds: float,
+    wait_timeout_seconds: float = 15.0,
+) -> Callable[[Callable[..., T]], Callable[..., T]]:
     """Decorator: cache the wrapped fetch for `ttl_seconds`.
 
     Keyed by function identity + positional + keyword args, so each
@@ -86,7 +89,10 @@ def cached(ttl_seconds: float) -> Callable[[Callable[..., T]], Callable[..., T]]
                     _FLIGHTS[key] = flight
 
             if not owns_flight:
-                flight.event.wait()
+                if not flight.event.wait(timeout=wait_timeout_seconds):
+                    raise TimeoutError(
+                        f"single-flight wait exceeded {wait_timeout_seconds:.3f}s"
+                    )
                 if flight.error is not None:
                     raise flight.error
                 return flight.value  # type: ignore[return-value]

@@ -438,11 +438,11 @@ git commit -m "feat(stocks): bind tasks to trusted snapshots"
 - `HttpAkshareClient` returns `error_code: CIRCUIT_OPEN` without starting a fetch while open.
 - Dashboard stock fetches run with maximum concurrency 3 and no 75/90-second request budget.
 
-- [ ] **Step 1: Write a failing Python follower-timeout test**
+- [x] **Step 1: Write a failing Python follower-timeout test**
 
 Own one flight with a blocked function, call the same key from a follower, and assert the follower raises `TimeoutError` within a test-configured 50 ms rather than waiting for the owner forever. Release the owner in `finally` so the test leaves no thread behind.
 
-- [ ] **Step 2: Run the cache test and verify RED**
+- [x] **Step 2: Run the cache test and verify RED**
 
 ```bash
 /Users/yaleiqi/holaday-monorepo/apps/akshare-mcp/.venv/bin/python -m pytest tests/test_cache.py -k follower_timeout -q
@@ -450,15 +450,15 @@ Own one flight with a blocked function, call the same key from a follower, and a
 
 Expected: FAIL because `cached` has no wait timeout.
 
-- [ ] **Step 3: Implement finite follower waiting**
+- [x] **Step 3: Implement finite follower waiting**
 
 Use `flight.event.wait(timeout=wait_timeout_seconds)`. Raise `TimeoutError("single-flight wait exceeded ...")` when false. Do not remove or overwrite the owner's flight from a follower.
 
-- [ ] **Step 4: Write failing circuit-breaker tests**
+- [x] **Step 4: Write failing circuit-breaker tests**
 
 Use an injected clock. Assert exactly three failed calls reach the operation, the fourth is rejected with `CircuitOpenError`, only one call is admitted after 60 seconds, and a successful probe closes the circuit.
 
-- [ ] **Step 5: Run circuit/client tests and verify RED**
+- [x] **Step 5: Run circuit/client tests and verify RED**
 
 ```bash
 pnpm --filter @holaday/orchestrator exec vitest run src/agent/a-share/circuit-breaker.test.ts src/agent/a-share/akshare-http-client.test.ts
@@ -466,19 +466,19 @@ pnpm --filter @holaday/orchestrator exec vitest run src/agent/a-share/circuit-br
 
 Expected: FAIL because the circuit module and `CIRCUIT_OPEN` envelope are missing.
 
-- [ ] **Step 6: Implement per-route-family circuit breaking**
+- [x] **Step 6: Implement per-route-family circuit breaking**
 
 Group keys as `quote`, `intraday`, `kline`, `news`, `calendar`, `risk`, and `market`. HTTP non-2xx, abort, network errors, malformed envelopes, and envelope errors count as failures. A successful valid envelope resets the group. Log group/state/error code without leaking upstream response text.
 
-- [ ] **Step 7: Write failing dashboard concurrency/budget tests**
+- [x] **Step 7: Write failing dashboard concurrency/budget tests**
 
 Track active fake quote requests across eight symbols and assert `maxActive <= 3`. Use fake timers to assert quick/slow dashboard stages settle within their configured 5.5/12-second bounds and do not leave a 75/90-second promise holding the refresh state.
 
-- [ ] **Step 8: Implement bounded concurrency and budgets**
+- [x] **Step 8: Implement bounded concurrency and budgets**
 
 Add a focused `mapWithConcurrency(items, 3, worker)` helper beside dashboard orchestration. Set discovery and slow-signal request budgets to 12 seconds; keep individual client aborts at or below those stage budgets.
 
-- [ ] **Step 9: Run Task 5 tests and commit**
+- [x] **Step 9: Run Task 5 tests and commit**
 
 ```bash
 /Users/yaleiqi/holaday-monorepo/apps/akshare-mcp/.venv/bin/python -m pytest tests/test_cache.py tests/test_http_server.py -q

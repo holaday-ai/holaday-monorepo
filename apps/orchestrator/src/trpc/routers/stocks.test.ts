@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { resetAkshareCircuitBreakersForTests } from '../../agent/a-share/akshare-http-client.js';
 import { __stocksDashboardTest } from './stocks.js';
 
 const disclaimer = '数据来源 AkShare 聚合，仅供信息参考，不构成任何投资建议，不预测股价。';
@@ -17,7 +18,97 @@ describe('stocks dashboard snapshot', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.useRealTimers();
+    resetAkshareCircuitBreakersForTests();
     __stocksDashboardTest.dashboardCache.clear();
+  });
+
+  it('limits dashboard watchlist work to three concurrent items', async () => {
+    let active = 0;
+    let maxActive = 0;
+    const values = await __stocksDashboardTest.mapWithConcurrency(
+      [1, 2, 3, 4, 5, 6, 7, 8],
+      3,
+      async (value) => {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        active -= 1;
+        return value * 2;
+      },
+    );
+
+    expect(maxActive).toBeLessThanOrEqual(3);
+    expect(values).toEqual([2, 4, 6, 8, 10, 12, 14, 16]);
+  });
+
+  it('never runs more than three watchlist quote requests concurrently', async () => {
+    const symbols = Array.from({ length: 8 }, (_, index) => `60000${index + 1}`);
+    let activeQuotes = 0;
+    let maxActiveQuotes = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/trading-calendar/latest') {
+        return new Response(JSON.stringify(envelope([{
+          requested_date: url.searchParams.get('on_or_before'),
+          latest_trading_date: '2026-08-14',
+        }])));
+      }
+      if (url.pathname.startsWith('/quote/')) {
+        const symbol = url.pathname.split('/').at(-1);
+        activeQuotes += 1;
+        maxActiveQuotes = Math.max(maxActiveQuotes, activeQuotes);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        activeQuotes -= 1;
+        return new Response(JSON.stringify(envelope([{
+          代码: symbol,
+          名称: symbol,
+          最新价: 10,
+          涨跌幅: 1,
+        }])));
+      }
+      if (url.pathname.startsWith('/kline/')) {
+        return new Response(JSON.stringify(envelope([
+          { 日期: '2026-08-13', 收盘: 9.9, 涨跌幅: 0 },
+          { 日期: '2026-08-14', 收盘: 10, 涨跌幅: 1 },
+        ])));
+      }
+      return new Response(JSON.stringify(envelope([])));
+    });
+
+    await __stocksDashboardTest.buildDashboardSnapshot({
+      logger: { warn: vi.fn() },
+      watchlistRows: symbols.map((symbol) => ({ symbol, market: 'A' as const, displayName: symbol })),
+      effectiveWatchlist: symbols.map((symbol) => ({ symbol, market: 'A' as const, displayName: symbol })),
+      now: new Date('2026-08-16T14:00:00.000Z'),
+      includeSlowSignals: false,
+    });
+
+    expect(maxActiveQuotes).toBeLessThanOrEqual(3);
+  });
+
+  it('bounds first paint and every slow dashboard stage to 12 seconds or less', async () => {
+    vi.useFakeTimers();
+    expect(__stocksDashboardTest.dashboardBudgets).toEqual({
+      firstPaintMs: 5_500,
+      akshareMs: 8_000,
+      slowSignalMs: 12_000,
+      rankingMs: 12_000,
+      discoveryMs: 12_000,
+    });
+    const quickTimeout = __stocksDashboardTest.withTimeout(
+      new Promise<never>(() => undefined),
+      __stocksDashboardTest.dashboardBudgets.firstPaintMs,
+    );
+    const slowTimeout = __stocksDashboardTest.withTimeout(
+      new Promise<never>(() => undefined),
+      __stocksDashboardTest.dashboardBudgets.slowSignalMs,
+    );
+    const quickAssertion = expect(quickTimeout).rejects.toThrow('timeout after 5500ms');
+    const slowAssertion = expect(slowTimeout).rejects.toThrow('timeout after 12000ms');
+    await vi.advanceTimersByTimeAsync(5_500);
+    await quickAssertion;
+    await vi.advanceTimersByTimeAsync(6_500);
+    await slowAssertion;
   });
 
   it('sorts discovery announcements by publication time and keeps all real items within the larger feed window', () => {

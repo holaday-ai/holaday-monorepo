@@ -173,8 +173,8 @@ const DASHBOARD_PARTIAL_FRESH_TTL_MS = 5_000;
 const DASHBOARD_STALE_TTL_MS = 10 * 60_000;
 const DASHBOARD_FIRST_PAINT_BUDGET_MS = 5_500;
 const DASHBOARD_AKSHARE_TIMEOUT_MS = 8_000;
-const DASHBOARD_SLOW_SIGNAL_TIMEOUT_MS = 90_000;
-const DASHBOARD_RANKING_TIMEOUT_MS = 75_000;
+const DASHBOARD_SLOW_SIGNAL_TIMEOUT_MS = 12_000;
+const DASHBOARD_RANKING_TIMEOUT_MS = 12_000;
 const DASHBOARD_DISCOVERY_TIMEOUT_MS = 12_000;
 const MARKET_DISCOVERY_PAGE_SIZES: Record<MarketDiscoveryFeed, number> = {
   'A股要闻': 30,
@@ -435,6 +435,29 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
       },
     );
   });
+}
+
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  if (!Number.isInteger(concurrency) || concurrency < 1) {
+    throw new RangeError('concurrency must be a positive integer');
+  }
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const runWorker = async (): Promise<void> => {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      const item = items[index] as T;
+      results[index] = await worker(item, index);
+    }
+  };
+  const workerCount = Math.min(concurrency, items.length);
+  await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
+  return results;
 }
 
 function cnDateParts(now = new Date()): { iso: string; compact: string } {
@@ -1381,32 +1404,37 @@ async function buildDashboardSnapshot(args: {
     includeSlowSignals
       ? slowSignalClient.getMarketPulse(compact)
       : deferredPulse,
-    Promise.all(effectiveWatchlist.slice(0, 8).map((entry, index) => stockSnapshot(client, entry, index, now))),
+    mapWithConcurrency(effectiveWatchlist.slice(0, 8), 3, (entry, index) =>
+      stockSnapshot(client, entry, index, now)),
     includeSlowSignals
-      ? Promise.all(
-        announcementWatchlist.map(async (entry) => ({
+      ? mapWithConcurrency(
+        announcementWatchlist,
+        3,
+        async (entry) => ({
           entry,
           env: await client.getStockAnnouncements(entry.symbol, cnCompactDaysAgo(now, 7), compact),
-        })),
+        }),
       )
       : deferredAnnouncements,
     includeSlowSignals
-      ? Promise.all(
-        announcementWatchlist.map(async (entry) => ({
+      ? mapWithConcurrency(
+        announcementWatchlist,
+        3,
+        async (entry) => ({
           entry,
           env: await discoveryClient.getStockNews(entry.symbol),
-        })),
+        }),
       )
       : deferredStockNews,
     includeSlowSignals ? rankingClient.getStockRankings('gainers', 8) : deferredRankings,
     includeSlowSignals ? rankingClient.getStockRankings('losers', 8) : deferredRankings,
     includeSlowSignals ? rankingClient.getStockRankings('amount', 8) : deferredRankings,
     includeSlowSignals
-      ? Promise.all([
+      ? mapWithConcurrency([
         discoveryClient.getMarketNews('cn', 1, MARKET_DISCOVERY_PAGE_SIZES['A股要闻']).then((env) => ({ feed: 'A股要闻' as const, env })),
         discoveryClient.getMarketNews('us', 1, MARKET_DISCOVERY_PAGE_SIZES['美股要闻']).then((env) => ({ feed: '美股要闻' as const, env })),
         discoveryClient.getMarketNews('hk', 1, MARKET_DISCOVERY_PAGE_SIZES['港股要闻']).then((env) => ({ feed: '港股要闻' as const, env })),
-      ])
+      ], 3, async (promise) => promise)
       : deferredMarketNews,
   ]);
   const sectors = mapSectors(pulseEnv);
@@ -1931,4 +1959,13 @@ export const __stocksDashboardTest = {
   withPreservedSlowSignals,
   dashboardForTrustMode,
   revalidateDashboardTrust,
+  mapWithConcurrency,
+  withTimeout,
+  dashboardBudgets: {
+    firstPaintMs: DASHBOARD_FIRST_PAINT_BUDGET_MS,
+    akshareMs: DASHBOARD_AKSHARE_TIMEOUT_MS,
+    slowSignalMs: DASHBOARD_SLOW_SIGNAL_TIMEOUT_MS,
+    rankingMs: DASHBOARD_RANKING_TIMEOUT_MS,
+    discoveryMs: DASHBOARD_DISCOVERY_TIMEOUT_MS,
+  },
 };

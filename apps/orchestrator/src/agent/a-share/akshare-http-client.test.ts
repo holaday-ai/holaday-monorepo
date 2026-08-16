@@ -2,8 +2,11 @@
  * §6c — HttpAkshareClient 单测（注入 mock fetch，不联网）.
  */
 
-import { describe, expect, it, vi } from 'vitest';
-import { HttpAkshareClient } from './akshare-http-client.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  HttpAkshareClient,
+  resetAkshareCircuitBreakersForTests,
+} from './akshare-http-client.js';
 
 interface Route {
   ok?: boolean;
@@ -37,6 +40,10 @@ const okEnv = {
 };
 
 describe('HttpAkshareClient', () => {
+  afterEach(() => {
+    resetAkshareCircuitBreakersForTests();
+  });
+
   it('GET /index/cn → 透传 envelope，URL 正确', async () => {
     const { fetchImpl, calls } = mockFetch({ '/index/cn': { body: okEnv } });
     const c = new HttpAkshareClient({ baseUrl: 'http://127.0.0.1:8848/', fetchImpl });
@@ -99,6 +106,61 @@ describe('HttpAkshareClient', () => {
     const r = await c.getStockKline('600519');
     expect(r.error).toContain('network down');
     expect(r.data).toEqual([]);
+  });
+
+  it('同一路由组连续失败三次后熔断，第四次不再发起 fetch', async () => {
+    const { fetchImpl, calls } = mockFetch({
+      '/quote/600519': { ok: false, status: 503 },
+      '/index/cn': { body: okEnv },
+    });
+    const c = new HttpAkshareClient({ baseUrl: 'http://127.0.0.1:8848', fetchImpl });
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await expect(c.getStockQuote('600519')).resolves.toMatchObject({
+        error: expect.stringContaining('HTTP 503'),
+      });
+    }
+    await expect(c.getStockQuote('600519')).resolves.toMatchObject({
+      data: [],
+      error_code: 'CIRCUIT_OPEN',
+    });
+    expect(calls.filter((url) => url.endsWith('/quote/600519'))).toHaveLength(3);
+
+    await expect(c.getIndexQuote('cn')).resolves.toEqual(okEnv);
+    expect(calls.at(-1)).toBe('http://127.0.0.1:8848/index/cn');
+  });
+
+  it('在同一 AkShare 基址的 client 实例之间共享熔断状态', async () => {
+    const { fetchImpl, calls } = mockFetch({ '/quote/600519': { ok: false, status: 503 } });
+    const first = new HttpAkshareClient({ baseUrl: 'http://shared-circuit-test', fetchImpl });
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await first.getStockQuote('600519');
+    }
+
+    const nextRequest = new HttpAkshareClient({
+      baseUrl: 'http://shared-circuit-test',
+      fetchImpl,
+    });
+    await expect(nextRequest.getStockQuote('600519')).resolves.toMatchObject({
+      error_code: 'CIRCUIT_OPEN',
+    });
+    expect(calls).toHaveLength(3);
+  });
+
+  it('将 malformed envelope 计为失败并在同组熔断', async () => {
+    const { fetchImpl, calls } = mockFetch({ '/stock-news/600519': { body: {} } });
+    const c = new HttpAkshareClient({ baseUrl: 'http://127.0.0.1:8848', fetchImpl });
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await expect(c.getStockNews('600519')).resolves.toMatchObject({
+        data: [],
+        error_code: 'UPSTREAM_INVALID',
+      });
+    }
+    await expect(c.getStockNews('600519')).resolves.toMatchObject({
+      error_code: 'CIRCUIT_OPEN',
+    });
+    expect(calls).toHaveLength(3);
   });
 
   it('④ 风险端点用 riskTimeoutMs(25s)、非风险用 timeoutMs(10s)：差异化超时', async () => {

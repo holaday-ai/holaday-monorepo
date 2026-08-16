@@ -34,6 +34,7 @@ import type {
   ValuationRow,
   ZtReviewRow,
 } from './briefing-types.js';
+import { CircuitBreaker, CircuitOpenError } from './circuit-breaker.js';
 
 interface FetchResponseLike {
   ok: boolean;
@@ -49,7 +50,7 @@ interface MinimalLogger {
 
 const DISCLAIMER = '数据来源 AkShare 聚合，仅供信息参考，不构成任何投资建议，不预测股价。';
 
-function errEnvelope<T>(source: string, error: string): AkEnvelope<T> {
+function errEnvelope<T>(source: string, error: string, errorCode: string): AkEnvelope<T> {
   return {
     data: [],
     count: 0,
@@ -57,7 +58,66 @@ function errEnvelope<T>(source: string, error: string): AkEnvelope<T> {
     fetched_at: new Date().toISOString(),
     disclaimer: DISCLAIMER,
     error,
+    error_code: errorCode,
   };
+}
+
+type CircuitGroup = 'quote' | 'intraday' | 'kline' | 'news' | 'calendar' | 'risk' | 'market';
+const sharedCircuits = new Map<string, CircuitBreaker>();
+
+/** Test isolation helper; production callers must never reset live circuits. */
+export function resetAkshareCircuitBreakersForTests(): void {
+  sharedCircuits.clear();
+}
+
+function circuitFor(baseUrl: string, group: CircuitGroup): CircuitBreaker {
+  const key = `${baseUrl}\u0000${group}`;
+  const existing = sharedCircuits.get(key);
+  if (existing) return existing;
+  const circuit = new CircuitBreaker();
+  sharedCircuits.set(key, circuit);
+  return circuit;
+}
+
+class AkshareUpstreamError extends Error {
+  constructor(
+    readonly errorCode: string,
+    message: string,
+    readonly context: Record<string, unknown> = {},
+  ) {
+    super(message);
+    this.name = 'AkshareUpstreamError';
+  }
+}
+
+function circuitGroupForPath(path: string): CircuitGroup {
+  if (path.startsWith('/quote/')) return 'quote';
+  if (path.startsWith('/intraday/')) return 'intraday';
+  if (path.startsWith('/kline/')) return 'kline';
+  if (
+    path.startsWith('/stock-news/') ||
+    path.startsWith('/market-news/') ||
+    path.startsWith('/announcements/')
+  ) {
+    return 'news';
+  }
+  if (path.startsWith('/trading-day/') || path.startsWith('/trading-calendar/')) {
+    return 'calendar';
+  }
+  if (path.startsWith('/risk-')) return 'risk';
+  return 'market';
+}
+
+function isAkEnvelope<T>(value: unknown): value is AkEnvelope<T> {
+  if (!value || typeof value !== 'object') return false;
+  const envelope = value as Partial<AkEnvelope<T>>;
+  return (
+    Array.isArray(envelope.data) &&
+    typeof envelope.count === 'number' &&
+    typeof envelope.source === 'string' &&
+    typeof envelope.fetched_at === 'string' &&
+    typeof envelope.disclaimer === 'string'
+  );
 }
 
 export interface HttpAkshareClientOptions {
@@ -93,28 +153,49 @@ export class HttpAkshareClient implements AkshareClient {
   }
 
   private async get<T>(path: string, timeoutMs: number = this.timeoutMs): Promise<AkEnvelope<T>> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const group = circuitGroupForPath(path);
+    const breaker = circuitFor(this.baseUrl, group);
     try {
-      const res = await this.fetchImpl(`${this.baseUrl}${path}`, { signal: controller.signal });
-      if (!res.ok) {
-        // 用户文案只见「数据暂不可用」（渲染器据 error 字段降级，不展原文）；
-        // 真实 HTTP 状态进日志。
-        this.logger?.warn({ path, status: res.status }, 'akshare-http: 非 2xx');
-        return errEnvelope<T>(`http:${path}`, `HTTP ${res.status}`);
-      }
-      const env = (await res.json()) as AkEnvelope<T>;
-      // 后端把 akshare 异常包成 envelope.error（如龙虎榜 NoneType）。原始串进
-      // 日志，不带给用户——渲染器据 error 存在与否降级为「数据暂不可用」。
-      if (env.error)
-        this.logger?.warn({ path, error: env.error }, 'akshare-http: 后端 error envelope');
-      return env;
+      return await breaker.execute(async () => {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+          const res = await this.fetchImpl(`${this.baseUrl}${path}`, { signal: controller.signal });
+          if (!res.ok) {
+            throw new AkshareUpstreamError('UPSTREAM_HTTP', `HTTP ${res.status}`, {
+              status: res.status,
+            });
+          }
+          const value = await res.json();
+          if (!isAkEnvelope<T>(value)) {
+            throw new AkshareUpstreamError('UPSTREAM_INVALID', 'invalid AkShare envelope');
+          }
+          if (value.error) {
+            throw new AkshareUpstreamError(
+              value.error_code ?? 'UPSTREAM_ERROR',
+              value.error,
+            );
+          }
+          return value;
+        } finally {
+          clearTimeout(timer);
+        }
+      });
     } catch (e) {
+      if (e instanceof CircuitOpenError) {
+        this.logger?.warn({ path, group, errorCode: e.code }, 'akshare-http: circuit open');
+        return errEnvelope<T>(`http:${path}`, 'AkShare 服务暂时繁忙，请稍后重试。', e.code);
+      }
       const detail = e instanceof Error ? e.message : String(e);
-      this.logger?.warn({ path, error: detail }, 'akshare-http: 取数失败/超时');
-      return errEnvelope<T>(`http:${path}`, detail);
-    } finally {
-      clearTimeout(timer);
+      const errorCode = e instanceof AkshareUpstreamError
+        ? e.errorCode
+        : 'UPSTREAM_UNAVAILABLE';
+      const context = e instanceof AkshareUpstreamError ? e.context : {};
+      this.logger?.warn(
+        { path, group, errorCode, ...context },
+        'akshare-http: 取数失败/超时',
+      );
+      return errEnvelope<T>(`http:${path}`, detail, errorCode);
     }
   }
 
