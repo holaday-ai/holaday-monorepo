@@ -2,8 +2,59 @@ import { describe, expect, it, vi } from 'vitest';
 import { createEnergyEventReporter } from './energy-event-reporter';
 
 const EVENT = { type: 'energy_feed_refreshed' } as const;
+const EVENT_ID = '11111111-1111-4111-8111-111111111111';
 
 describe('energy event reporter', () => {
+  it('adds one event id before delivery and reuses it for retry', async () => {
+    const send = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError('network'))
+      .mockResolvedValue({ ok: true });
+    const createEventId = vi.fn(() => EVENT_ID);
+    const reporter = createEnergyEventReporter({
+      send,
+      createEventId,
+      waitBeforeRetry: () => Promise.resolve(),
+    });
+
+    await reporter.report(EVENT);
+
+    expect(send).toHaveBeenNthCalledWith(1, { ...EVENT, eventId: EVENT_ID });
+    expect(send).toHaveBeenNthCalledWith(2, { ...EVENT, eventId: EVENT_ID });
+    expect(createEventId).toHaveBeenCalledOnce();
+  });
+
+  it('preserves a caller-supplied event id', async () => {
+    const send = vi.fn().mockResolvedValue({ ok: true });
+    const createEventId = vi.fn(() => '22222222-2222-4222-8222-222222222222');
+    const reporter = createEnergyEventReporter({ send, createEventId });
+
+    await reporter.report({ ...EVENT, eventId: EVENT_ID });
+
+    expect(send).toHaveBeenCalledWith({ ...EVENT, eventId: EVENT_ID });
+    expect(createEventId).not.toHaveBeenCalled();
+  });
+
+  it('does not allocate an id for an event dropped at the pending limit', async () => {
+    let release: () => void = () => undefined;
+    const send = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const createEventId = vi.fn(() => EVENT_ID);
+    const reporter = createEnergyEventReporter({ send, createEventId, maxPending: 1 });
+
+    const accepted = reporter.report(EVENT);
+    await reporter.report({ type: 'energy_section_viewed' });
+
+    expect(createEventId).toHaveBeenCalledOnce();
+    expect(send).toHaveBeenCalledOnce();
+    release();
+    await accepted;
+  });
+
   it('retries one network failure and then succeeds without warning', async () => {
     const send = vi
       .fn()
