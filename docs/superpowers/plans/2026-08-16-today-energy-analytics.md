@@ -43,11 +43,11 @@
 - Create `apps/orchestrator/src/energy/analytics-write-service.test.ts`: 状态型内存 store 测试幂等、回滚、缺密钥降级和不留身份。
 - Create `apps/orchestrator/src/energy/analytics-metrics-service.ts`: 7/30 天聚合结果、D1 与比率公式。
 - Create `apps/orchestrator/src/energy/analytics-metrics-service.test.ts`: 空分母、未完整次日和聚合响应隐私测试。
-- Create `apps/orchestrator/src/energy/analytics-cleanup.ts`: 三表分批、有限轮次清理与每日定时器。
-- Create `apps/orchestrator/src/energy/analytics-cleanup.test.ts`: 过期边界、批量上限、失败非致命和 timer 生命周期测试。
+- Create `apps/orchestrator/src/energy/analytics-cleanup.ts`: 三表分批、有限轮次清理、每小时定时器与积压接续。
+- Create `apps/orchestrator/src/energy/analytics-cleanup.test.ts`: 过期边界、批量上限、积压接续、失败非致命和 timer 生命周期测试。
 - Modify `apps/orchestrator/src/trpc/routers/energy.ts`: 使用共享契约和服务，移除逐事件日志，新增 `adminProcedure` 聚合查询。
 - Modify `apps/orchestrator/src/trpc/routers/energy.test.ts`: 路由兼容、严格拒绝、权限和脱敏响应测试。
-- Modify `apps/orchestrator/src/index.ts`: 启动独立的每日清理 timer；统计开关关闭时仍允许清理旧数据。
+- Modify `apps/orchestrator/src/index.ts`: 启动独立的每小时清理 timer；统计开关关闭时仍允许清理旧数据。
 - Modify `apps/web-workbench/src/components/energy/energy-event-reporter.ts`: 入队时生成 UUID，一次重试复用同一个 UUID。
 - Modify `apps/web-workbench/src/components/energy/energy-event-reporter.test.ts`: UUID、重试复用、4xx、dispose 和并发边界测试。
 - Modify `apps/web-workbench/src/components/energy/EnergyHome.tsx`: 首页、补给方向和正确重玩事件。
@@ -669,11 +669,11 @@ Expected: FAIL because cleanup functions do not exist.
 
 Add three methods accepting `(now: Date, limit: number)` and returning `readAffectedRows(...)`. Use `lte(table.expiresAt, now)` and MySQL DELETE `limit(limit)`. Do not provide any unbounded delete method.
 
-- [ ] **Step 4: Implement non-fatal cleanup and the daily timer**
+- [ ] **Step 4: Implement non-fatal cleanup and the hourly backlog-draining timer**
 
-Use constants `CLEANUP_BATCH_SIZE = 500`, `CLEANUP_MAX_ROUNDS = 5`, and `CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000`. For each table, stop when a batch deletes fewer than 500 rows or five rounds have run. Isolate each table sweep so one failure does not prevent the other two tables from being attempted; collect only error class names, emit one warning for the whole run as `{ feature: 'energy_analytics_cleanup', errorNames }`, return successful counts, and never rethrow.
+Use constants `CLEANUP_BATCH_SIZE = 500`, `CLEANUP_MAX_ROUNDS = 5`, `CLEANUP_INTERVAL_MS = 60 * 60 * 1000`, and `CLEANUP_BACKLOG_DELAY_MS = 1000`. For each table, stop when a batch deletes fewer than 500 rows or five rounds have run. If a table deletes the full 2,500-row pass capacity, schedule another bounded pass after one second and continue until a short batch proves the backlog is drained. Prevent overlapping runs and cancel pending continuation on shutdown. Isolate each table sweep so one failure does not prevent the other two tables from being attempted; collect only error class names, emit one warning for the whole run as `{ feature: 'energy_analytics_cleanup', errorNames }`, return successful counts, and never rethrow.
 
-`startEnergyAnalyticsCleanup()` must run one non-awaited boot sweep, schedule the daily sweep, call `unref?.()`, and be idempotent. It must not inspect `ENERGY_ANALYTICS_ENABLED`.
+`startEnergyAnalyticsCleanup()` must run one non-awaited boot sweep, schedule the hourly sweep, call `unref?.()` on both periodic and continuation timers, and be idempotent. It must not inspect `ENERGY_ANALYTICS_ENABLED`.
 
 - [ ] **Step 5: Wire startup without blocking application boot**
 

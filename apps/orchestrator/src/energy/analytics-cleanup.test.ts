@@ -115,7 +115,7 @@ describe('energy analytics cleanup', () => {
     expect(JSON.stringify(logger.warn.mock.calls)).not.toMatch(/private|database detail/);
   });
 
-  it('starts an unrefed idempotent timer and clears it on stop', async () => {
+  it('runs hourly with an unrefed idempotent timer and clears it on stop', async () => {
     const cleanup = await loadCleanup();
     expect(cleanup).not.toBeNull();
     if (!cleanup) return;
@@ -130,12 +130,44 @@ describe('energy analytics cleanup', () => {
     await Promise.resolve();
 
     expect(interval).toHaveBeenCalledOnce();
-    expect(interval).toHaveBeenCalledWith(expect.any(Function), 24 * 60 * 60 * 1_000);
+    expect(interval).toHaveBeenCalledWith(expect.any(Function), 60 * 60 * 1_000);
     expect(timer.unref).toHaveBeenCalledOnce();
     expect(store.calls.length).toBeGreaterThan(0);
 
     cleanup.stopEnergyAnalyticsCleanup();
     expect(clear).toHaveBeenCalledOnce();
     expect(clear).toHaveBeenCalledWith(timer);
+  });
+
+  it('continues bounded cleanup passes while a table may still have expired rows', async () => {
+    const cleanup = await loadCleanup();
+    expect(cleanup).not.toBeNull();
+    if (!cleanup) return;
+    const intervalTimer = { unref: vi.fn() };
+    vi.spyOn(globalThis, 'setInterval').mockReturnValue(intervalTimer as never);
+    const backlogTimer = { unref: vi.fn() };
+    const timeout = vi.spyOn(globalThis, 'setTimeout').mockReturnValue(backlogTimer as never);
+    vi.spyOn(globalThis, 'clearInterval').mockImplementation(() => undefined);
+    vi.spyOn(globalThis, 'clearTimeout').mockImplementation(() => undefined);
+    const store = new CleanupStore();
+    store.receiptCounts = [500, 500, 500, 500, 500, 1];
+    store.visitorCounts = [0, 0];
+    store.metricCounts = [0, 0];
+
+    cleanup.startEnergyAnalyticsCleanup({ store, logger: { warn: vi.fn() }, now: () => NOW });
+    for (let tick = 0; tick < 20; tick += 1) await Promise.resolve();
+
+    expect(timeout).toHaveBeenCalledWith(expect.any(Function), 1_000);
+    expect(backlogTimer.unref).toHaveBeenCalledOnce();
+    const continueCleanup = timeout.mock.calls.find((call) => call[1] === 1_000)?.[0];
+    expect(continueCleanup).toBeTypeOf('function');
+    if (typeof continueCleanup !== 'function') return;
+
+    continueCleanup();
+    for (let tick = 0; tick < 10; tick += 1) await Promise.resolve();
+    expect(store.calls.filter((call) => call.table === 'receipts')).toHaveLength(6);
+    expect(
+      store.calls.filter((call) => call.table === 'receipts').map((call) => call.limit),
+    ).toEqual([500, 500, 500, 500, 500, 500]);
   });
 });
