@@ -46,6 +46,42 @@ export const REQUIRED_INDEXES = [
     unique: true,
     columns: ['provider', 'provider_order_id'],
   },
+  {
+    table: 'energy_daily_metrics',
+    name: 'uk_energy_daily_metrics_bucket',
+    unique: true,
+    columns: ['metric_date', 'bucket_hash'],
+  },
+  {
+    table: 'energy_daily_metrics',
+    name: 'ix_energy_daily_metrics_expires_at',
+    unique: false,
+    columns: ['expires_at'],
+  },
+  {
+    table: 'energy_daily_metrics',
+    name: 'ix_energy_daily_metrics_date_type',
+    unique: false,
+    columns: ['metric_date', 'event_type'],
+  },
+  {
+    table: 'energy_daily_visitors',
+    name: 'uk_energy_daily_visitors_day_hash',
+    unique: true,
+    columns: ['activity_date', 'visitor_hash'],
+  },
+  {
+    table: 'energy_daily_visitors',
+    name: 'ix_energy_daily_visitors_expires_at',
+    unique: false,
+    columns: ['expires_at'],
+  },
+  {
+    table: 'energy_event_receipts',
+    name: 'ix_energy_event_receipts_expires_at',
+    unique: false,
+    columns: ['expires_at'],
+  },
 ];
 
 export function findMissingRequiredIndexes(rows) {
