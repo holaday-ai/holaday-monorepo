@@ -552,6 +552,6 @@ git add apps/akshare-mcp/akshare_mcp/http_server.py apps/akshare-mcp/tests/test_
 git commit -m "docs(stocks): add trust operations runbook"
 ```
 
-- [ ] **Step 6: Finish the branch**
+- [x] **Step 6: Finish the branch**
 
 Use `superpowers:verification-before-completion`, then `superpowers:requesting-code-review`, then `superpowers:finishing-a-development-branch`. Push the verified branch and create a PR by the user's established default. Merge, migration, deployment, and production verification remain separately gated until explicitly authorized for this release.
