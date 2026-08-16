@@ -76,23 +76,135 @@ describe('release database index contract', () => {
       column_name: 'provider_order_id',
       sub_part: null,
     },
+    {
+      table_name: 'energy_daily_metrics',
+      index_name: 'uk_energy_daily_metrics_bucket',
+      non_unique: 0,
+      seq_in_index: 1,
+      column_name: 'metric_date',
+      sub_part: null,
+    },
+    {
+      table_name: 'energy_daily_metrics',
+      index_name: 'uk_energy_daily_metrics_bucket',
+      non_unique: 0,
+      seq_in_index: 2,
+      column_name: 'bucket_hash',
+      sub_part: null,
+    },
+    {
+      table_name: 'energy_daily_metrics',
+      index_name: 'ix_energy_daily_metrics_expires_at',
+      non_unique: 1,
+      seq_in_index: 1,
+      column_name: 'expires_at',
+      sub_part: null,
+    },
+    {
+      table_name: 'energy_daily_metrics',
+      index_name: 'ix_energy_daily_metrics_date_type',
+      non_unique: 1,
+      seq_in_index: 1,
+      column_name: 'metric_date',
+      sub_part: null,
+    },
+    {
+      table_name: 'energy_daily_metrics',
+      index_name: 'ix_energy_daily_metrics_date_type',
+      non_unique: 1,
+      seq_in_index: 2,
+      column_name: 'event_type',
+      sub_part: null,
+    },
+    {
+      table_name: 'energy_daily_visitors',
+      index_name: 'uk_energy_daily_visitors_day_hash',
+      non_unique: 0,
+      seq_in_index: 1,
+      column_name: 'activity_date',
+      sub_part: null,
+    },
+    {
+      table_name: 'energy_daily_visitors',
+      index_name: 'uk_energy_daily_visitors_day_hash',
+      non_unique: 0,
+      seq_in_index: 2,
+      column_name: 'visitor_hash',
+      sub_part: null,
+    },
+    {
+      table_name: 'energy_daily_visitors',
+      index_name: 'ix_energy_daily_visitors_expires_at',
+      non_unique: 1,
+      seq_in_index: 1,
+      column_name: 'expires_at',
+      sub_part: null,
+    },
+    {
+      table_name: 'energy_event_receipts',
+      index_name: 'ix_energy_event_receipts_expires_at',
+      non_unique: 1,
+      seq_in_index: 1,
+      column_name: 'expires_at',
+      sub_part: null,
+    },
   ];
 
   it('accepts the required unique payment provider-order index', () => {
     assert.deepEqual(findMissingRequiredIndexes(validRows), []);
   });
 
+  it('rejects an incomplete energy metric bucket key', () => {
+    assert.deepEqual(
+      findMissingRequiredIndexes(
+        validRows.filter(
+          (row) =>
+            !(
+              row.index_name === 'uk_energy_daily_metrics_bucket' &&
+              row.column_name === 'bucket_hash'
+            ),
+        ),
+      ),
+      ['energy_daily_metrics.uk_energy_daily_metrics_bucket UNIQUE(metric_date, bucket_hash)'],
+    );
+  });
+
+  it('rejects a non-unique daily visitor identity key', () => {
+    assert.deepEqual(
+      findMissingRequiredIndexes(
+        validRows.map((row) =>
+          row.index_name === 'uk_energy_daily_visitors_day_hash'
+            ? { ...row, non_unique: 1 }
+            : row,
+        ),
+      ),
+      [
+        'energy_daily_visitors.uk_energy_daily_visitors_day_hash UNIQUE(activity_date, visitor_hash)',
+      ],
+    );
+  });
+
   it('rejects a non-unique payment provider-order index', () => {
     assert.deepEqual(
-      findMissingRequiredIndexes(validRows.map((row) => ({ ...row, non_unique: 1 }))),
+      findMissingRequiredIndexes(
+        validRows.map((row) =>
+          row.index_name === 'uk_payments_provider_order' ? { ...row, non_unique: 1 } : row,
+        ),
+      ),
       ['payments.uk_payments_provider_order UNIQUE(provider, provider_order_id)'],
     );
   });
 
   it('rejects an incomplete payment provider-order index', () => {
-    assert.deepEqual(findMissingRequiredIndexes(validRows.slice(0, 1)), [
-      'payments.uk_payments_provider_order UNIQUE(provider, provider_order_id)',
-    ]);
+    assert.deepEqual(
+      findMissingRequiredIndexes(
+        validRows.filter(
+          (row) =>
+            !(row.index_name === 'uk_payments_provider_order' && row.column_name === 'provider_order_id'),
+        ),
+      ),
+      ['payments.uk_payments_provider_order UNIQUE(provider, provider_order_id)'],
+    );
   });
 
   it('rejects prefix columns and accepts numeric metadata strings in any row order', () => {

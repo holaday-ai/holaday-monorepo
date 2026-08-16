@@ -24,6 +24,9 @@ const REQUIRED_TABLES = [
   'batch_tasks',
   'execution_memory',
   'execution_stats',
+  'energy_daily_metrics',
+  'energy_daily_visitors',
+  'energy_event_receipts',
   'notifications',
   'notification_channels',
   'payments',
@@ -51,6 +54,27 @@ const REQUIRED_TABLES = [
 ] as const;
 
 const REQUIRED_COLUMNS: Record<string, readonly string[]> = {
+  energy_daily_metrics: [
+    'metric_date',
+    'bucket_hash',
+    'event_type',
+    'experience_id',
+    'mode_id',
+    'energy_need',
+    'duration_bucket',
+    'outcome',
+    'section_id',
+    'target_type',
+    'source_kind',
+    'content_id',
+    'range_key',
+    'task_status',
+    'batch_count',
+    'event_count',
+    'expires_at',
+  ],
+  energy_daily_visitors: ['activity_date', 'visitor_hash', 'expires_at'],
+  energy_event_receipts: ['event_id', 'expires_at'],
   users: [
     'external_id',
     'email',

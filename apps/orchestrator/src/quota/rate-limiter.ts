@@ -1,27 +1,26 @@
 /**
- * Phase 21a — per-user task-creation rate limit.
+ * Shared process-local sliding-window rate limiter.
  *
- * Sliding-window counter (in-memory, process-local). One bucket per
- * external user id. Each `tryAcquire(userId)` records the current
- * timestamp; entries older than the window are pruned; if the
- * remaining count is at the limit, returns false.
+ * One bucket per namespaced subject. Each `tryAcquire(userId)` records
+ * the current timestamp; entries older than the window are pruned; if
+ * the remaining count is at the limit, returns false. Inactive buckets
+ * are opportunistically evicted so one-time callers do not accumulate.
  *
  * Why in-memory not Redis: the orchestrator runs as a single PM2
  * process. A token-bucket here is precise per-process. If we ever
  * scale horizontally, this needs Redis-backed.
- *
- * The limit only fires for users in QUOTA_BYPASS_USERS today — that
- * was the original requirement after BOSS's 155-task flood. To
- * extend to all users, drop the bypass-only check at the call site
- * (tasks.ts) and apply globally.
  */
 
 interface Bucket {
   /** Sorted-ascending submission timestamps in ms. */
   hits: number[];
+  /** Bucket can be discarded after its newest accepted hit leaves the window. */
+  expiresAt: number;
 }
 
 const BUCKETS = new Map<string, Bucket>();
+const BUCKET_EVICTION_INTERVAL_MS = 60_000;
+let nextBucketEvictionAt = 0;
 
 export interface RateLimit {
   /** Window length in ms. e.g. 60_000 for "per minute". */
@@ -46,10 +45,11 @@ export interface AcquireResult {
 export function tryAcquire(userId: string, limit: RateLimit): AcquireResult {
   const now = Date.now();
   const cutoff = now - limit.windowMs;
+  evictInactiveBuckets(now);
 
-  const bucket: Bucket = BUCKETS.get(userId) ?? { hits: [] };
+  const bucket: Bucket = BUCKETS.get(userId) ?? { hits: [], expiresAt: now + limit.windowMs };
   // Prune expired
-  while (bucket.hits.length > 0 && bucket.hits[0]! < cutoff) {
+  while ((bucket.hits[0] ?? Number.POSITIVE_INFINITY) < cutoff) {
     bucket.hits.shift();
   }
 
@@ -64,11 +64,26 @@ export function tryAcquire(userId: string, limit: RateLimit): AcquireResult {
   }
 
   bucket.hits.push(now);
+  bucket.expiresAt = now + limit.windowMs;
   BUCKETS.set(userId, bucket);
   return { ok: true, count: bucket.hits.length, retryAfterMs: 0 };
+}
+
+function evictInactiveBuckets(now: number): void {
+  if (now < nextBucketEvictionAt) return;
+  nextBucketEvictionAt = now + BUCKET_EVICTION_INTERVAL_MS;
+  for (const [key, bucket] of BUCKETS) {
+    if (bucket.expiresAt < now) BUCKETS.delete(key);
+  }
 }
 
 /** Test helper: clear all buckets. */
 export function _resetAllBucketsForTesting(): void {
   BUCKETS.clear();
+  nextBucketEvictionAt = 0;
+}
+
+/** Test helper: inspect whether inactive buckets are bounded. */
+export function _bucketCountForTesting(): number {
+  return BUCKETS.size;
 }

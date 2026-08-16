@@ -1,11 +1,13 @@
 export interface EnergyEventLike {
   type: string;
+  eventId?: string;
 }
 
 interface EnergyEventReporterOptions<TEvent extends EnergyEventLike> {
-  send: (event: TEvent) => Promise<unknown>;
+  send: (event: TEvent & { eventId: string }) => Promise<unknown>;
   warn?: (message: string, metadata: EnergyEventWarning) => void;
   waitBeforeRetry?: () => Promise<void>;
+  createEventId?: () => string;
   maxPending?: number;
 }
 
@@ -24,6 +26,7 @@ export function createEnergyEventReporter<TEvent extends EnergyEventLike>({
   send,
   warn = (message, metadata) => console.warn(message, metadata),
   waitBeforeRetry = () => new Promise((resolve) => window.setTimeout(resolve, 250)),
+  createEventId = () => crypto.randomUUID(),
   maxPending = 8,
 }: EnergyEventReporterOptions<TEvent>): EnergyEventReporter<TEvent> {
   let disposed = false;
@@ -32,7 +35,7 @@ export function createEnergyEventReporter<TEvent extends EnergyEventLike>({
   const configuredLimit = Number.isFinite(maxPending) ? Math.floor(maxPending) : 8;
   const pendingLimit = Math.max(1, Math.min(20, configuredLimit));
 
-  const deliver = async (event: TEvent): Promise<void> => {
+  const deliver = async (event: TEvent & { eventId: string }): Promise<void> => {
     if (disposed) return;
     let attempts: 1 | 2 = 1;
     try {
@@ -65,7 +68,11 @@ export function createEnergyEventReporter<TEvent extends EnergyEventLike>({
 
   const report = (event: TEvent): Promise<void> => {
     if (disposed || pending.size >= pendingLimit) return Promise.resolve();
-    const delivery = deliver(event);
+    const deliveryEvent = {
+      ...event,
+      eventId: event.eventId ?? createEventId(),
+    } as TEvent & { eventId: string };
+    const delivery = deliver(deliveryEvent);
     pending.add(delivery);
     void delivery.then(
       () => pending.delete(delivery),
