@@ -22,6 +22,13 @@ export type UiTaskStatus =
   | 'cancelled'
   | 'unknown';
 
+export interface UiStockTaskContext {
+  snapshotId: string;
+  dataAsOf: string;
+  trustMode: 'current' | 'delayed' | 'historical';
+  evidenceIds: string[];
+}
+
 export interface UiTask {
   taskId: string;
   intent: string;
@@ -70,6 +77,8 @@ export interface UiTask {
   starredAt?: Date | null;
   /** Phase 16 — external project id (prj_…), or null if unfiled. */
   projectId?: string | null;
+  /** Public provenance for a task created from the trusted stock dashboard. */
+  stockContext?: UiStockTaskContext;
   /**
    * R7 — base64 JPEG of the per-task Brave's final visible state,
    * captured pre-pool-release on supercar terminal. Drives the

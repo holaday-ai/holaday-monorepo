@@ -99,7 +99,9 @@ describe('stock tasks layout', () => {
   it('uses dedicated stock routing without rewriting the user prompt', () => {
     const source = readFileSync(new URL('./StockTasksPage.tsx', import.meta.url), 'utf8');
 
-    expect(source).toContain('createStockTask(trimmed)');
+    expect(source).toContain('createStockTask(trimmed, stockTaskContext)');
+    expect(source).toContain('snapshotId: trust.snapshotId');
+    expect(source).toContain('evidenceIds: trust.evidenceIds.slice(0, 50)');
     expect(source).not.toContain('function toStockIntent');
   });
 

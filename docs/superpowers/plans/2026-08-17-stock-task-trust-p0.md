@@ -342,11 +342,11 @@ const stockTaskContextInput = z.object({
 });
 ```
 
-- [ ] **Step 1: Write failing pure validation tests**
+- [x] **Step 1: Write failing pure validation tests**
 
 Test matching snapshot ID/date/evidence subset; reject another user's snapshot, mismatched date, forged evidence ID, unavailable mode, a symbol absent from the bound snapshot, and a historical context with present-tense intent such as `今天哪只最强`. A successful validation returns a minimal `snapshotPayload` containing only the matched watchlist quotes, indices, sectors, and source-backed news selected by the validated evidence IDs.
 
-- [ ] **Step 2: Run context tests and verify RED**
+- [x] **Step 2: Run context tests and verify RED**
 
 ```bash
 pnpm --filter @holaday/orchestrator exec vitest run src/stocks/stock-task-context.test.ts
@@ -354,15 +354,15 @@ pnpm --filter @holaday/orchestrator exec vitest run src/stocks/stock-task-contex
 
 Expected: FAIL because the validator does not exist.
 
-- [ ] **Step 3: Implement validation against the latest persisted dashboard**
+- [x] **Step 3: Implement validation against the latest persisted dashboard**
 
 Select the user's recent `stock_dashboard_snapshots` rows, parse their `snapshotJson.trust`, and require an exact snapshot ID and data date. Evidence IDs must be a subset of the persisted envelope. Historical intents containing current-data terms return `BAD_REQUEST` with a rewrite such as `请改为“截至 08/11，当时有哪些关注点？”`. Copy a bounded payload into the validated context; do not retain unrelated discovery records or another user's data.
 
-- [ ] **Step 4: Write failing snapshot-client tests**
+- [x] **Step 4: Write failing snapshot-client tests**
 
 Build a literal dashboard payload for `603528` and assert the client returns its bound quote, intraday points, index rows, and selected news with `fetched_at === generatedAt`. Assert fundamentals, valuation, risk, announcements, or another symbol return an error envelope with `error_code: SNAPSHOT_EVIDENCE_UNAVAILABLE`; no method may call global `fetch`.
 
-- [ ] **Step 5: Run snapshot-client tests and verify RED**
+- [x] **Step 5: Run snapshot-client tests and verify RED**
 
 ```bash
 pnpm --filter @holaday/orchestrator exec vitest run src/stocks/snapshot-akshare-client.test.ts
@@ -370,12 +370,12 @@ pnpm --filter @holaday/orchestrator exec vitest run src/stocks/snapshot-akshare-
 
 Expected: FAIL because the snapshot-backed client does not exist.
 
-- [ ] **Step 6: Implement the snapshot-backed AkShare interface**
+- [x] **Step 6: Implement the snapshot-backed AkShare interface**
 
 Map only fields present in the immutable payload into complete `AkEnvelope` objects. Use source names beginning `stock-snapshot:`. Methods without bound evidence return a sanitized error envelope instead of reaching the live `HttpAkshareClient`.
 Add optional `error_code?: string` to `AkEnvelope` so callers can distinguish bounded operational states without parsing human text.
 
-- [ ] **Step 7: Write failing API, repository, and store tests**
+- [x] **Step 7: Write failing API, repository, and store tests**
 
 Assert:
 
@@ -390,7 +390,7 @@ await createStockTask('解释多伦科技当日变化', {
 
 sends `taskSource` and `stockContext`, persists the validated public fields plus private minimal `snapshotPayload` in `source_context`, returns only the public fields from task detail, routes stock-dashboard analysis through `SnapshotAkshareClient`, and includes the public fields in A-share terminal metadata.
 
-- [ ] **Step 8: Run API/store tests and verify RED**
+- [x] **Step 8: Run API/store tests and verify RED**
 
 ```bash
 pnpm --filter @holaday/orchestrator exec vitest run src/trpc/routers/tasks-create-idempotency.test.ts src/trpc/routers/tasks-list-detail.integration.test.ts
@@ -399,7 +399,7 @@ pnpm --filter @holaday/web-workbench exec vitest run src/stores/task-store.test.
 
 Expected: new assertions fail because only `taskSource` is currently sent and no task context column exists.
 
-- [ ] **Step 9: Add migration, persistence, API validation, and snapshot-bound execution**
+- [x] **Step 9: Add migration, persistence, API validation, and snapshot-bound execution**
 
 Migration:
 
@@ -410,7 +410,7 @@ ALTER TABLE `tasks`
 
 `InsertTaskContext` accepts `sourceContext?: Record<string, unknown> | null`. Every task created from `stock_dashboard` persists the validated context. Dashboard-created A-share, index, and guidance paths use `SnapshotAkshareClient`; a prompt needing evidence absent from the snapshot gets a clear “当前快照没有该项证据，请刷新或把股票加入自选后重试” boundary instead of silently fetching live data. Result metadata repeats only the four public context fields. The first line states `分析基于 YYYY-MM-DD 数据` and uses the original `snapshotId`.
 
-- [ ] **Step 10: Run Task 4 tests and commit**
+- [x] **Step 10: Run Task 4 tests and commit**
 
 ```bash
 git add apps/orchestrator/drizzle/0046_tasks_source_context.sql apps/orchestrator/src/db/schema/tasks.ts apps/orchestrator/src/stocks/stock-task-context.ts apps/orchestrator/src/stocks/stock-task-context.test.ts apps/orchestrator/src/stocks/snapshot-akshare-client.ts apps/orchestrator/src/stocks/snapshot-akshare-client.test.ts apps/orchestrator/src/agent/a-share/briefing-types.ts apps/orchestrator/src/trpc/routers/tasks.ts apps/orchestrator/src/trpc/routers/tasks-create-idempotency.test.ts apps/orchestrator/src/trpc/routers/tasks-list-detail.integration.test.ts apps/orchestrator/src/agent/task-repository.ts apps/web-workbench/src/stores/task-store.ts apps/web-workbench/src/stores/task-store.test.ts apps/web-workbench/src/pages/StockTasksPage.tsx

@@ -53,7 +53,7 @@ import {
 } from '@/lib/stock-temporal-copy';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
-import { useTaskStore } from '@/stores/task-store';
+import { type StockTaskContextInput, useTaskStore } from '@/stores/task-store';
 
 type WatchlistRow = Awaited<ReturnType<typeof trpc.watchlists.list.query>>[number];
 type BriefingStatus = Awaited<ReturnType<typeof trpc.watchlists.briefingStatus.query>>;
@@ -318,6 +318,18 @@ export function StockTasksPage(): JSX.Element {
   );
   const stockPromptUnavailable =
     dashboardTrust.tone === 'unavailable' || dashboardTrust.tone === 'unverified';
+  const stockTaskContext = React.useMemo<StockTaskContextInput | null>(() => {
+    const trust = dashboard?.trust;
+    if (!trust || !trust.dataAsOf || trust.mode === 'unavailable') {
+      return null;
+    }
+    return {
+      snapshotId: trust.snapshotId,
+      dataAsOf: trust.dataAsOf,
+      trustMode: trust.mode,
+      evidenceIds: trust.evidenceIds.slice(0, 50),
+    };
+  }, [dashboard?.trust]);
   const briefingUnavailable = sampleWatchlist || !dashboardTrust.canGenerateBriefing;
   const briefingUnavailableTitle = sampleWatchlist
     ? '添加真实关注股票后可生成日报'
@@ -526,14 +538,18 @@ export function StockTasksPage(): JSX.Element {
         toast.show('可信行情恢复后再创建股票数据任务', 'error');
         return;
       }
+      if (!stockTaskContext) {
+        toast.show('股票快照尚未就绪，请刷新后再试', 'error');
+        return;
+      }
       setSubmitting(true);
-      const result = await createStockTask(trimmed);
+      const result = await createStockTask(trimmed, stockTaskContext);
       setSubmitting(false);
       if ('taskId' in result) {
         navigate(`/?task=${encodeURIComponent(result.taskId)}`);
       }
     },
-    [createStockTask, navigate, stockPromptUnavailable, submitting, toast],
+    [createStockTask, navigate, stockPromptUnavailable, stockTaskContext, submitting, toast],
   );
 
   const toggleBriefing = React.useCallback(async () => {
