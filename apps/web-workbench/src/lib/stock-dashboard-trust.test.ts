@@ -1,123 +1,73 @@
 import { describe, expect, it } from 'vitest';
-import * as dashboardTrust from './stock-dashboard-trust';
+import { stockDashboardTrustState } from './stock-dashboard-trust';
+
+function trust(mode: 'current' | 'delayed' | 'historical' | 'unavailable') {
+  return {
+    snapshotId: 'stkshot_0123456789abcdef01234567',
+    generatedAt: '2026-08-16T13:55:00.000Z',
+    marketTimezone: 'Asia/Shanghai' as const,
+    marketSession: 'non-trading' as const,
+    latestExpectedTradingDate: '2026-08-14',
+    dataAsOf: mode === 'unavailable' ? null : '2026-08-11',
+    mode,
+    calendarStatus: 'verified' as const,
+    sources: [],
+    evidenceIds: [],
+  };
+}
 
 describe('stock dashboard trust state', () => {
-  it('allows reports only when the latest observed trading date is fresh', () => {
+  it('maps a server-authored current envelope to enabled current-data actions', () => {
     expect(
-      dashboardTrust.stockDashboardTrustState({
-        freshnessStatus: 'fresh',
-        observedTradeDate: '2026-07-24',
-        refreshedAt: '2026-07-24T07:02:00.000Z',
-        now: new Date('2026-07-24T07:05:00.000Z'),
-      }),
-    ).toMatchObject({
-      tone: 'fresh',
+      stockDashboardTrustState({ trust: { ...trust('current'), dataAsOf: '2026-08-14' } }),
+    ).toEqual({
+      tone: 'current',
       statusLabel: 'AkShare',
       canGenerateBriefing: true,
-      dataDateLabel: '数据日期 07/24',
-      refreshLabel: '刷新于 07/24 15:02',
-    });
-  });
-
-  it('keeps a current trading-date snapshot usable while slower sources are still loading', () => {
-    expect(
-      dashboardTrust.stockDashboardTrustState({
-        freshnessStatus: 'partial',
-        observedTradeDate: '2026-08-07',
-        refreshedAt: '2026-08-07T06:35:00.000Z',
-        now: new Date('2026-08-07T06:36:00.000Z'),
-      }),
-    ).toMatchObject({
-      tone: 'fresh',
-      canGenerateBriefing: true,
-      dataDateLabel: '数据日期 08/07',
+      canCreateCurrentTask: true,
+      dataDateLabel: '数据日期 08/14',
+      refreshLabel: '刷新于 08/16 21:55',
       message: null,
     });
   });
 
-  it('labels a latest valid snapshot as refreshing instead of expired while AkShare refreshes it', () => {
+  it('maps a historical envelope directly without applying a client-side weekday heuristic', () => {
+    expect(stockDashboardTrustState({ trust: trust('historical') })).toEqual({
+      tone: 'historical',
+      statusLabel: '历史回看',
+      canGenerateBriefing: false,
+      canCreateCurrentTask: false,
+      dataDateLabel: '数据日期 08/11',
+      refreshLabel: '刷新于 08/16 21:55',
+      message: '此处展示 08/11 的真实历史数据，不代表当前行情。',
+    });
+  });
+
+  it('keeps a delayed snapshot visible but blocks current-data actions', () => {
     expect(
-      dashboardTrust.stockDashboardTrustState({
-        freshnessStatus: 'refreshing',
-        freshnessMessage: '正在后台刷新行情，当前展示最近一次真实数据。',
-        observedTradeDate: '2026-08-07',
-        refreshedAt: '2026-08-08T17:11:00.000Z',
-        now: new Date('2026-08-08T17:12:00.000Z'),
-      }),
+      stockDashboardTrustState({ trust: { ...trust('delayed'), dataAsOf: '2026-08-14' } }),
     ).toMatchObject({
-      tone: 'refreshing',
+      tone: 'delayed',
       statusLabel: '行情刷新中',
       canGenerateBriefing: false,
-      dataDateLabel: '数据日期 08/07',
-      message: '正在后台刷新行情，当前展示最近一次真实数据。',
+      canCreateCurrentTask: false,
+      dataDateLabel: '数据日期 08/14',
     });
   });
 
-  it('labels preserved historical quotes as expired and blocks report generation', () => {
-    expect(
-      dashboardTrust.stockDashboardTrustState({
-        freshnessStatus: 'stale',
-        observedTradeDate: '2026-07-22',
-        refreshedAt: '2026-07-26T13:17:48.000Z',
-        now: new Date('2026-07-26T13:18:00.000Z'),
-      }),
-    ).toEqual({
-      tone: 'stale',
-      statusLabel: '数据过期',
+  it('treats unavailable and missing envelopes as separate blocked states', () => {
+    expect(stockDashboardTrustState({ trust: trust('unavailable') })).toMatchObject({
+      tone: 'unavailable',
+      statusLabel: '行情不可用',
       canGenerateBriefing: false,
-      dataDateLabel: '数据日期 07/22',
-      refreshLabel: '刷新于 07/26 21:17',
-      message: '当前展示 07/22 的真实历史数据，不代表当前行情。真实行情恢复后可生成日报。',
+      canCreateCurrentTask: false,
+      dataDateLabel: '数据日期待核验',
     });
-  });
-
-  it('does not treat a previous-session snapshot as fresh during a weekday session', () => {
-    expect(
-      dashboardTrust.stockDashboardTrustState({
-        freshnessStatus: 'fresh',
-        observedTradeDate: '2026-07-24',
-        refreshedAt: '2026-07-27T02:00:00.000Z',
-        now: new Date('2026-07-27T02:00:00.000Z'),
-      }),
-    ).toMatchObject({
-      tone: 'stale',
-      statusLabel: '数据过期',
-      canGenerateBriefing: false,
-      dataDateLabel: '数据日期 07/24',
-    });
-  });
-
-  it('accepts the latest Friday snapshot on a weekend', () => {
-    expect(
-      dashboardTrust.stockDashboardTrustState({
-        freshnessStatus: 'fresh',
-        observedTradeDate: '2026-07-24',
-        refreshedAt: '2026-07-25T02:00:00.000Z',
-        now: new Date('2026-07-25T02:00:00.000Z'),
-      }),
-    ).toMatchObject({
-      tone: 'fresh',
-      statusLabel: 'AkShare',
-      canGenerateBriefing: true,
-      dataDateLabel: '数据日期 07/24',
-    });
-  });
-
-  it('treats a dashboard without an observed date as unverified', () => {
-    expect(
-      dashboardTrust.stockDashboardTrustState({
-        freshnessStatus: 'partial',
-        observedTradeDate: null,
-        refreshedAt: '2026-07-26T13:17:48.000Z',
-        now: new Date('2026-07-26T13:18:00.000Z'),
-      }),
-    ).toEqual({
+    expect(stockDashboardTrustState({ trust: null })).toMatchObject({
       tone: 'unverified',
       statusLabel: '日期未核验',
       canGenerateBriefing: false,
-      dataDateLabel: '数据日期待核验',
-      refreshLabel: '刷新于 07/26 21:17',
-      message: '真实行情日期尚未核验，不用于生成日报或当前盘面判断。',
+      canCreateCurrentTask: false,
     });
   });
 });

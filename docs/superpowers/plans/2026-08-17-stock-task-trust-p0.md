@@ -243,7 +243,7 @@ git commit -m "feat(stocks): make snapshot trust server authoritative"
 - `stockTemporalCopy(mode, dataAsOf)` returns title/label/action copy for the dashboard.
 - `StockTasksPage` passes trust mode to daily briefing, highlights, tables, quick commands, and prompt submission.
 
-- [ ] **Step 1: Write failing trust-mapping and copy tests**
+- [x] **Step 1: Write failing trust-mapping and copy tests**
 
 Assert a backend historical envelope maps to:
 
@@ -259,7 +259,7 @@ Assert a backend historical envelope maps to:
 
 Assert `stockTemporalCopy('historical', '2026-08-11')` returns `08/11 回看重点`, `当日表现`, `当日价格`, and `历史关注点`, with none of the prohibited present-tense claims.
 
-- [ ] **Step 2: Run library tests and verify RED**
+- [x] **Step 2: Run library tests and verify RED**
 
 ```bash
 pnpm --filter @holaday/web-workbench exec vitest run src/lib/stock-dashboard-trust.test.ts src/lib/stock-temporal-copy.test.ts
@@ -267,11 +267,11 @@ pnpm --filter @holaday/web-workbench exec vitest run src/lib/stock-dashboard-tru
 
 Expected: FAIL because the state still guesses dates locally and temporal-copy does not exist.
 
-- [ ] **Step 3: Implement backend-mode mapping and structured copy**
+- [x] **Step 3: Implement backend-mode mapping and structured copy**
 
 Map `current`, `delayed`, `historical`, and `unavailable` directly. A missing backend envelope is `unverified` and blocks current-data actions; do not restore the old three-calendar-day heuristic.
 
-- [ ] **Step 4: Write failing page behavior tests**
+- [x] **Step 4: Write failing page behavior tests**
 
 Render/inspect page helpers for a historical fixture and assert:
 
@@ -282,7 +282,7 @@ Render/inspect page helpers for a historical fixture and assert:
 - unavailable mode renders no old numeric quote and disables prompt submission;
 - current mode retains current wording.
 
-- [ ] **Step 5: Run page tests and verify RED**
+- [x] **Step 5: Run page tests and verify RED**
 
 ```bash
 pnpm --filter @holaday/web-workbench exec vitest run src/pages/StockTasksPage.test.ts src/pages/stock-tasks-layout.test.ts
@@ -290,11 +290,11 @@ pnpm --filter @holaday/web-workbench exec vitest run src/pages/StockTasksPage.te
 
 Expected: the historical assertions fail against present-tense hard-coded copy.
 
-- [ ] **Step 6: Thread temporal copy through the page**
+- [x] **Step 6: Thread temporal copy through the page**
 
 Do not use global string replacement. Pass structured labels into `DailyBriefing`, `MarketHighlights`, `MarketTable`, and `StarStocks`. Preserve source article titles verbatim even if a publisher title contains words such as “最新” or “强势”; only HOLA DAY-authored claims change.
 
-- [ ] **Step 7: Run Task 3 tests and commit**
+- [x] **Step 7: Run Task 3 tests and commit**
 
 Run the four library/page test files; then:
 

@@ -44,6 +44,13 @@ import {
 } from '@/lib/stock-chart-state';
 import { stockDashboardTrustState } from '@/lib/stock-dashboard-trust';
 import { discoveryStoryAliases, discoveryStoryClusterKey, mergeDiscoveryNews } from '@/lib/stock-news';
+import {
+  stockQuickCommands,
+  stockSignalLabel,
+  stockTemporalCopy,
+  type StockTemporalCopy,
+  type StockTemporalMode,
+} from '@/lib/stock-temporal-copy';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import { useTaskStore } from '@/stores/task-store';
@@ -141,17 +148,6 @@ const EMPTY_LEADERBOARDS: NonNullable<DashboardSnapshot['leaderboards']> = {
 };
 
 const MARKET_DISCOVERY_FEEDS: MarketDiscoveryFeed[] = ['A股要闻', '美股要闻', '港股要闻'];
-
-function quickCommands(stocks: StockSnapshot[]): string[] {
-  const first = stocks[0]?.symbol;
-  const second = stocks[1]?.symbol;
-  return [
-    '生成今日关注日报',
-    '哪些股票风险升高？',
-    '今天 AI 板块怎么看？',
-    first && second ? `比较 ${first} 和 ${second}` : first ? `分析 ${first} 的风险点` : '添加我的第一只关注股票',
-  ];
-}
 
 const MARKET_UP_CLASS = 'text-[#E11D48]';
 const MARKET_DOWN_CLASS = 'text-[#0E9F6E]';
@@ -312,17 +308,16 @@ export function StockTasksPage(): JSX.Element {
   const temperature = dashboard?.temperature ?? null;
   const enabled = briefingStatus?.enabled === true;
   const sampleWatchlist = false;
-  const dashboardFreshness = dashboard?.freshness;
   const dashboardTrust = React.useMemo(
-    () =>
-      stockDashboardTrustState({
-        freshnessStatus: dashboardFreshness?.status,
-        freshnessMessage: dashboardFreshness?.message,
-        observedTradeDate: dashboard?.observedTradeDate,
-        refreshedAt: dashboard?.updatedAt,
-      }),
-    [dashboard?.observedTradeDate, dashboard?.updatedAt, dashboardFreshness?.message, dashboardFreshness?.status],
+    () => stockDashboardTrustState({ trust: dashboard?.trust }),
+    [dashboard?.trust],
   );
+  const temporalCopy = React.useMemo(
+    () => stockTemporalCopy(dashboardTrust.tone, dashboard?.trust?.dataAsOf ?? null),
+    [dashboard?.trust?.dataAsOf, dashboardTrust.tone],
+  );
+  const stockPromptUnavailable =
+    dashboardTrust.tone === 'unavailable' || dashboardTrust.tone === 'unverified';
   const briefingUnavailable = sampleWatchlist || !dashboardTrust.canGenerateBriefing;
   const briefingUnavailableTitle = sampleWatchlist
     ? '添加真实关注股票后可生成日报'
@@ -330,7 +325,7 @@ export function StockTasksPage(): JSX.Element {
       ? '真实行情恢复并核验日期后可生成日报'
       : undefined;
   const realWatchlist = watchlist ?? [];
-  const commands = React.useMemo(() => quickCommands(stocks), [stocks]);
+  const commands = React.useMemo(() => stockQuickCommands(stocks, temporalCopy), [stocks, temporalCopy]);
   const resetDiscoveryExtensions = React.useCallback(() => {
     setDiscoveryExtensions([]);
     setDiscoveryMoreAvailable({
@@ -527,6 +522,10 @@ export function StockTasksPage(): JSX.Element {
     async (value: string) => {
       const trimmed = value.trim();
       if (!trimmed || submitting) return;
+      if (stockPromptUnavailable) {
+        toast.show('可信行情恢复后再创建股票数据任务', 'error');
+        return;
+      }
       setSubmitting(true);
       const result = await createStockTask(trimmed);
       setSubmitting(false);
@@ -534,7 +533,7 @@ export function StockTasksPage(): JSX.Element {
         navigate(`/?task=${encodeURIComponent(result.taskId)}`);
       }
     },
-    [createStockTask, navigate, submitting],
+    [createStockTask, navigate, stockPromptUnavailable, submitting, toast],
   );
 
   const toggleBriefing = React.useCallback(async () => {
@@ -561,6 +560,18 @@ export function StockTasksPage(): JSX.Element {
             <h1 className="text-[22px] font-semibold tracking-tight text-[#121826]">
               股市任务
             </h1>
+            <span
+              className={cn(
+                'inline-flex h-6 items-center rounded-full border px-2 text-[11px] font-medium',
+                dashboardTrust.tone === 'current'
+                  ? 'border-[#BDE7D6] bg-[#F0FBF6] text-[#087A52]'
+                  : dashboardTrust.tone === 'historical'
+                    ? 'border-[#F2D4A7] bg-[#FFF8EC] text-[#9A5B00]'
+                    : 'border-[#E1E3E8] bg-[#F7F8FA] text-[#667085]',
+              )}
+            >
+              {dashboardTrust.statusLabel}
+            </span>
             <span className="text-[12px] text-[#7D8493]">
               {dashboardTrust.dataDateLabel} · {dashboardTrust.refreshLabel}
             </span>
@@ -583,7 +594,7 @@ export function StockTasksPage(): JSX.Element {
               className="inline-flex h-8 items-center gap-2 rounded-[8px] border border-[#DCDDDD] bg-white px-3 transition-colors hover:border-[#EA1F59]/30 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {briefingGenerating ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <FileText className="h-3.5 w-3.5" aria-hidden />}
-              生成日报
+              {temporalCopy.briefingCommand}
             </button>
             <button
               type="button"
@@ -626,12 +637,12 @@ export function StockTasksPage(): JSX.Element {
             <input
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
-              placeholder="问股票、市场、行业，或生成我的关注日报"
+              placeholder={temporalCopy.promptPlaceholder}
               className="min-w-0 flex-1 bg-transparent text-[17px] font-medium text-[#121826] outline-none placeholder:text-[#9AA1AE]"
             />
             <button
               type="submit"
-              disabled={submitting || !prompt.trim()}
+              disabled={submitting || !prompt.trim() || stockPromptUnavailable}
               className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-[8px] bg-[#EA1F59] text-white shadow-[0_10px_24px_rgba(234,31,89,0.22)] transition disabled:cursor-not-allowed disabled:opacity-55"
               aria-label="提交股市任务"
               title="提交股市任务"
@@ -644,11 +655,19 @@ export function StockTasksPage(): JSX.Element {
               <button
                 key={command}
                 type="button"
-                disabled={loadingDashboard || (command === '生成今日关注日报' && briefingUnavailable)}
-                title={command === '生成今日关注日报' ? briefingUnavailableTitle : undefined}
+                disabled={
+                  loadingDashboard ||
+                  stockPromptUnavailable ||
+                  (command === temporalCopy.briefingCommand &&
+                    dashboardTrust.tone === 'current' &&
+                    briefingUnavailable)
+                }
+                title={command === temporalCopy.briefingCommand ? briefingUnavailableTitle : undefined}
                 onClick={() => {
                   setPrompt(command);
-                  if (command === '生成今日关注日报') void generateBriefing();
+                  if (command === temporalCopy.briefingCommand && dashboardTrust.tone === 'current') {
+                    void generateBriefing();
+                  }
                   else void submitPrompt(command);
                 }}
                 className="inline-flex h-9 items-center rounded-[8px] border border-[#E1E3E8] bg-white px-3 text-[13px] font-medium text-[#4F5868] transition hover:border-[#EA1F59]/25 hover:bg-[#EA1F59]/10 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-50"
@@ -686,6 +705,8 @@ export function StockTasksPage(): JSX.Element {
                 onGenerateBriefing={generateBriefing}
                 briefingGenerating={briefingGenerating}
                 canGenerateBriefing={!briefingUnavailable}
+                temporalCopy={temporalCopy}
+                temporalMode={dashboardTrust.tone}
               />
               <DailyBriefing
                 stocks={stocks}
@@ -701,15 +722,20 @@ export function StockTasksPage(): JSX.Element {
                 sampleWatchlist={sampleWatchlist}
                 hasMarketSignals={hasMarketSignals}
                 canGenerateBriefing={!briefingUnavailable}
+                temporalCopy={temporalCopy}
+                temporalMode={dashboardTrust.tone}
               />
               <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
                 <MarketTable
                   rows={marketIndices}
-                  onInspect={() => setInsightSheet(marketInsight(marketIndices))}
+                  onInspect={() => setInsightSheet(marketInsight(marketIndices, dashboardTrust.tone))}
+                  temporalCopy={temporalCopy}
                 />
                 <StarStocks
                   stocks={starStocks}
-                  onInspect={() => setInsightSheet(starStockInsight(starStocks))}
+                  onInspect={() => setInsightSheet(starStockInsight(starStocks, temporalCopy, dashboardTrust.tone))}
+                  temporalCopy={temporalCopy}
+                  temporalMode={dashboardTrust.tone}
                 />
               </div>
             </main>
@@ -721,13 +747,13 @@ export function StockTasksPage(): JSX.Element {
               />
               <SectorTrends
                 sectors={sectors}
-                onInspect={() => setInsightSheet(sectorInsight(sectors))}
+                onInspect={() => setInsightSheet(sectorInsight(sectors, dashboardTrust.tone))}
               />
               <Leaderboard
                 leaders={leaders}
                 active={activeLeaderboard}
                 onActiveChange={setActiveLeaderboard}
-                onInspect={() => setInsightSheet(leaderboardInsight(activeLeaderboard, leaders))}
+                onInspect={() => setInsightSheet(leaderboardInsight(activeLeaderboard, leaders, dashboardTrust.tone))}
               />
             </aside>
           </div>
@@ -996,6 +1022,8 @@ function MarketHighlights({
   onEdit,
   onGenerateBriefing,
   briefingGenerating,
+  temporalCopy,
+  temporalMode,
 }: {
   stocks: StockSnapshot[];
   marketIndices: IndexRow[];
@@ -1006,6 +1034,8 @@ function MarketHighlights({
   onEdit: () => void;
   onGenerateBriefing: () => void;
   briefingGenerating: boolean;
+  temporalCopy: StockTemporalCopy;
+  temporalMode: StockTemporalMode;
 }): JSX.Element {
   const hasRealQuotes = stocks.some((stock) => stock.price !== '—' || stock.spark.length >= 2);
   const highlightStocks = stocks.filter((stock) => stock.price !== '—' || stock.spark.length >= 2).slice(0, 4);
@@ -1056,6 +1086,8 @@ function MarketHighlights({
               canGenerateBriefing={canGenerateBriefing}
               briefingGenerating={briefingGenerating}
               onGenerateBriefing={onGenerateBriefing}
+              temporalCopy={temporalCopy}
+              temporalMode={temporalMode}
             />
           ))}
         </div>
@@ -1071,6 +1103,8 @@ function StockHighlightCard({
   canGenerateBriefing,
   briefingGenerating,
   onGenerateBriefing,
+  temporalCopy,
+  temporalMode,
 }: {
   stock: StockSnapshot;
   marketIndex: IndexRow | null;
@@ -1078,6 +1112,8 @@ function StockHighlightCard({
   canGenerateBriefing: boolean;
   briefingGenerating: boolean;
   onGenerateBriefing: () => void;
+  temporalCopy: StockTemporalCopy;
+  temporalMode: StockTemporalMode;
 }): JSX.Element {
   const [hover, setHover] = React.useState<StockChartHover | null>(null);
   const chartKind = stock.sparkKind ?? 'daily_close';
@@ -1125,7 +1161,7 @@ function StockHighlightCard({
             </div>
           )}
           <p className="mt-3 text-[13px] leading-relaxed text-[#667085]">
-            {stockNarrative(stock, marketIndex)}
+            {stockNarrative(stock, marketIndex, temporalMode)}
           </p>
         </div>
         <div className="grid min-w-0 grid-cols-2 gap-x-4 gap-y-3 self-start border-t border-[#F0F1F4] pt-3 lg:block lg:border-l lg:border-t-0 lg:pl-4 lg:pt-1">
@@ -1144,7 +1180,7 @@ function StockHighlightCard({
                 onClick={onGenerateBriefing}
                 className="mt-2 inline-flex h-8 items-center justify-center rounded-[7px] border border-[#EA1F59]/20 bg-[#EA1F59]/10 px-2.5 text-[12px] font-medium text-[#EA1F59] transition hover:border-[#EA1F59]/40 hover:bg-[#EA1F59]/15 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {briefingGenerating ? '生成中…' : '生成日报'}
+                {briefingGenerating ? '生成中…' : temporalCopy.briefingCommand}
               </button>
             ) : null}
           </div>
@@ -1522,6 +1558,8 @@ function DailyBriefing({
   sampleWatchlist,
   hasMarketSignals,
   canGenerateBriefing,
+  temporalCopy,
+  temporalMode,
 }: {
   stocks: StockSnapshot[];
   marketIndices: IndexRow[];
@@ -1536,19 +1574,21 @@ function DailyBriefing({
   sampleWatchlist: boolean;
   hasMarketSignals: boolean;
   canGenerateBriefing: boolean;
+  temporalCopy: StockTemporalCopy;
+  temporalMode: StockTemporalMode;
 }): JSX.Element {
   const quoteStocks = stocks.filter((stock) => stock.price !== '—');
   const riskStock = quoteStocks.find((s) => s.signal === '偏弱' || s.signal === '风险升高');
   const previewLines = briefing ? briefingPreviewLines(briefing.markdown) : [];
   const opportunityItems = dailyOpportunityItems(stocks, marketIndices, sectors, leaderboards.gainers);
-  const riskItems = dailyRiskItems(stocks, marketIndices, news, leaderboards.losers);
-  const trackingItems = dailyTrackingItems(stocks, news, leaderboards.amount);
+  const riskItems = dailyRiskItems(stocks, marketIndices, news, leaderboards.losers, temporalMode);
+  const trackingItems = dailyTrackingItems(stocks, news, leaderboards.amount, temporalMode);
   return (
     <section className="rounded-[8px] border border-[#E1E3E8] bg-white p-4 shadow-[0_8px_24px_rgba(18,24,38,0.035)]">
       <SectionHeader
-        title="今日关注日报"
+        title={temporalCopy.briefingTitle}
         meta={`更新于 ${formatUpdateTime(briefing?.generatedAt ?? updatedAt)}`}
-        action={briefing ? '重新生成' : '立即生成'}
+        action={briefing ? '重新生成' : temporalCopy.briefingCommand}
         onAction={onGenerate}
         actionBusy={generating}
         actionDisabled={sampleWatchlist || !canGenerateBriefing}
@@ -1565,9 +1605,16 @@ function DailyBriefing({
           {briefing
             ? '已复用当前自选股和 AkShare 数据生成日报，可继续用上方输入框追问。'
             : !canGenerateBriefing && observedTradeDate
-              ? `当前展示 ${formatObservedTradeDate(observedTradeDate)} 的已收盘数据；新交易日行情到达后可生成日报。`
+              ? `此处展示 ${formatObservedTradeDate(observedTradeDate)} 的已收盘数据；新交易日行情到达后可生成日报。`
               : hasMarketSignals
-              ? dailyBriefingSourceLine(quoteStocks, marketIndices, sectors, news, leaderboards)
+              ? dailyBriefingSourceLine(
+                  quoteStocks,
+                  marketIndices,
+                  sectors,
+                  news,
+                  leaderboards,
+                  temporalMode,
+                )
               : '当前真实市场数据不足。添加关注股票或稍后刷新后，可生成更完整的关注日报。'}
         </div>
       </div>
@@ -1590,10 +1637,10 @@ function DailyBriefing({
       <div className="mt-4 grid grid-cols-1 overflow-hidden rounded-[8px] border border-[#ECEEF3] md:grid-cols-3">
         <BriefingLane
           tone="green"
-          title="机会"
+          title={temporalCopy.opportunityTitle}
           items={opportunityItems}
           tags={stockTags(opportunityItems.length > 0 ? stocks : [])}
-          empty="暂无真实机会信号"
+          empty={temporalCopy.opportunityEmpty}
         />
         <BriefingLane
           tone="red"
@@ -1618,10 +1665,12 @@ function MarketTable({
   rows,
   className,
   onInspect,
+  temporalCopy,
 }: {
   rows: IndexRow[];
   className?: string;
   onInspect: () => void;
+  temporalCopy: StockTemporalCopy;
 }): JSX.Element {
   return (
     <Panel className={className}>
@@ -1634,7 +1683,7 @@ function MarketTable({
           <>
             <div className="grid grid-cols-[minmax(0,1fr)_64px_46px] gap-1.5 border-b border-[#ECEEF3] pb-2 text-[12px] text-[#8B92A1]">
               <span>指数</span>
-              <span className="text-right">最新价</span>
+              <span className="text-right">{temporalCopy.priceLabel}</span>
               <span className="text-right">涨跌幅</span>
             </div>
             <div className="divide-y divide-[#F1F2F5]">
@@ -1700,15 +1749,24 @@ function StarStocks({
   stocks,
   className,
   onInspect,
+  temporalCopy,
+  temporalMode,
 }: {
   stocks: StockSnapshot[];
   className?: string;
   onInspect: () => void;
+  temporalCopy: StockTemporalCopy;
+  temporalMode: StockTemporalMode;
 }): JSX.Element {
   const ranked = stocks.filter(Boolean).slice(0, 6);
   return (
     <Panel className={className}>
-      <SectionHeader title="明星股票" meta="今日关注" action="查看详情" onAction={onInspect} />
+      <SectionHeader
+        title={temporalCopy.starTitle}
+        meta={temporalCopy.starMeta}
+        action="查看详情"
+        onAction={onInspect}
+      />
       {ranked.length === 0 ? (
         <EmptyState title="暂无真实明星股票" body="只有拿到真实价格的股票才会进入这里，不使用模拟热度填充。" />
       ) : null}
@@ -1724,7 +1782,7 @@ function StarStocks({
             <thead>
               <tr className="border-b border-[#ECEEF3] text-left text-[#8B92A1]">
                 <th className="py-2 pr-2 font-medium">名称</th>
-                <th className="px-1 py-2 text-right font-medium">最新价</th>
+                <th className="px-1 py-2 text-right font-medium">{temporalCopy.priceLabel}</th>
                 <th className="px-1 py-2 text-right font-medium">涨跌幅</th>
                 <th className="py-2 pl-1 text-right font-medium">状态</th>
               </tr>
@@ -1740,7 +1798,9 @@ function StarStocks({
                   <td className="px-1 py-2 text-right">
                     <ChangeText value={stock.changePct} compact />
                   </td>
-                  <td className="py-2 pl-1 text-right text-[11px] text-[#4F5868]">{stock.signal}</td>
+                  <td className="py-2 pl-1 text-right text-[11px] text-[#4F5868]">
+                    {stockSignalLabel(stock.signal, temporalMode)}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -2561,14 +2621,25 @@ function stockPositionTone(stock: StockSnapshot): 'neutral' | 'red' | 'green' {
   return 'neutral';
 }
 
-function stockNarrative(stock: StockSnapshot, marketIndex: IndexRow | null): string {
+function stockNarrative(
+  stock: StockSnapshot,
+  marketIndex: IndexRow | null,
+  temporalMode: StockTemporalMode = 'current',
+): string {
   if (stock.price === '—') {
-    return `${stock.name} 已在关注列表中，但当前行情源尚未返回真实价格。Holaday 不会用模拟走势填充，建议稍后刷新或先查看公告来源。`;
+    return `${stock.name} 已在关注列表中，但行情源尚未返回可核验价格。Holaday 不会用模拟走势填充，建议稍后刷新或先查看公告来源。`;
   }
   const direction = stock.changePct >= 0 ? '上涨' : '回落';
   const moveScope = stockMoveScope(stock);
   const volume = stockVolumeSummary(stock);
   const market = marketSummary(marketIndex, stock);
+  if (temporalMode === 'historical') {
+    if (stock.spark.length < 2) {
+      return `${stock.name} 在该数据日${direction} ${Math.abs(stock.changePct).toFixed(2)}%，价格与成交数据已核验，但当日分钟线暂缺。${volume}。${market}可结合当时公告继续回看原因。`;
+    }
+    const position = stockPositionText(stock);
+    return `${stock.name} 在该数据日${direction} ${Math.abs(stock.changePct).toFixed(2)}%，收盘位置处于${position}；${volume}。${market}可结合当时公告继续回看原因。`;
+  }
   if (stock.spark.length < 2) {
     return `${stock.name} ${moveScope}${direction} ${Math.abs(stock.changePct).toFixed(2)}%，真实价格与成交数据已返回，但最近交易日分钟线暂缺，Holaday 不会用模拟线或日线替代。${volume}。${market}稍后刷新可重试分时，详细原因和公告影响可生成日报。`;
   }
@@ -2632,6 +2703,7 @@ function formatStockPrice(stock: StockSnapshot): string {
 
 function dashboardHasDisplayableData(snapshot: DashboardSnapshot | null): boolean {
   if (!snapshot) return false;
+  if (snapshot.trust?.mode === 'unavailable') return false;
   return Boolean(
     snapshot.watchlistStocks.some((stockRow) => stockRow.price !== '—' || stockRow.spark.length >= 2) ||
       snapshot.marketIndices.length > 0 ||
@@ -2643,9 +2715,11 @@ function dashboardHasDisplayableData(snapshot: DashboardSnapshot | null): boolea
 }
 
 function preserveDisplayableDashboard(next: DashboardSnapshot, previous: DashboardSnapshot | null): DashboardSnapshot {
+  if (next.trust?.mode === 'unavailable') return next;
   if (!previous || dashboardHasDisplayableData(next) || !dashboardHasDisplayableData(previous)) return next;
   return {
     ...previous,
+    trust: next.trust,
     freshness: {
       ...next.freshness,
       status: 'stale',
@@ -2712,6 +2786,7 @@ function dailyBriefingSourceLine(
   sectors: SectorRow[],
   news: NewsRow[],
   leaderboards: NonNullable<DashboardSnapshot['leaderboards']>,
+  temporalMode: StockTemporalMode,
 ): string {
   const announcementCount = news.filter((item) => item.category === '公告').length;
   const marketNewsCount = news.length - announcementCount;
@@ -2722,9 +2797,12 @@ function dailyBriefingSourceLine(
     news.length > 0 ? `${marketNewsCount} 条新闻 / ${announcementCount} 条公告` : null,
     leaderboards.gainers.length + leaderboards.losers.length + leaderboards.amount.length > 0 ? '榜单数据' : null,
   ].filter((part): part is string => part !== null);
+  const prefix = temporalMode === 'historical' ? '本次回看仅使用已返回的真实数据' : '当前摘要仅使用已返回的真实数据';
   return parts.length > 0
-    ? `当前摘要仅使用已返回的真实数据：${parts.join('、')}。`
-    : '当前没有可用于摘要的真实市场数据。';
+    ? `${prefix}：${parts.join('、')}。`
+    : temporalMode === 'historical'
+      ? '该数据日没有可用于回看的真实市场数据。'
+      : '当前没有可用于摘要的真实市场数据。';
 }
 
 function dailyOpportunityItems(
@@ -2765,6 +2843,7 @@ function dailyRiskItems(
   marketIndices: IndexRow[],
   news: NewsRow[],
   losers: LeaderRow[],
+  temporalMode: StockTemporalMode,
 ): string[] {
   const items: string[] = [];
   const weakestStock = realQuoteStocks(stocks)
@@ -2783,7 +2862,8 @@ function dailyRiskItems(
 
   const announcements = news.filter((item) => item.category === '公告');
   if (announcements.length > 0) {
-    items.push(`近 7 日返回 ${announcements.length} 条公告，最新：${announcements[0]!.title}`);
+    const announcementLabel = temporalMode === 'historical' ? '其中' : '最新';
+    items.push(`近 7 日返回 ${announcements.length} 条公告，${announcementLabel}：${announcements[0]!.title}`);
   }
 
   const topLoser = losers[0];
@@ -2797,23 +2877,27 @@ function dailyTrackingItems(
   stocks: StockSnapshot[],
   news: NewsRow[],
   amountLeaders: LeaderRow[],
+  temporalMode: StockTemporalMode,
 ): string[] {
   const items: string[] = [];
   const latestMarketNews = news.find((item) => item.category !== '公告');
   if (latestMarketNews) {
-    items.push(`最新动态：${latestMarketNews.title}（${latestMarketNews.source ?? '公开来源'}）`);
+    const newsLabel = temporalMode === 'historical' ? '当时动态：' : '最新动态：';
+    items.push(`${newsLabel}${latestMarketNews.title}（${latestMarketNews.source ?? '公开来源'}）`);
   }
 
   const latestAnnouncement = news.find((item) => item.category === '公告');
   if (latestAnnouncement) {
-    items.push(`最新公告：${latestAnnouncement.title}`);
+    const announcementLabel = temporalMode === 'historical' ? '当时公告：' : '最新公告：';
+    items.push(`${announcementLabel}${latestAnnouncement.title}`);
   }
 
   const mostLinkedStock = realQuoteStocks(stocks)
     .filter((stock) => stock.newsCount > 0)
     .sort((a, b) => b.newsCount - a.newsCount)[0];
   if (mostLinkedStock) {
-    items.push(`${mostLinkedStock.name} 当前关联动态 ${mostLinkedStock.newsCount} 条。`);
+    const linkedLabel = temporalMode === 'historical' ? '当时关联动态' : '当前关联动态';
+    items.push(`${mostLinkedStock.name} ${linkedLabel} ${mostLinkedStock.newsCount} 条。`);
   }
 
   const amountLeader = amountLeaders[0];
@@ -2845,10 +2929,12 @@ function dailyBriefingHeadline(stocks: StockSnapshot[], riskStock?: StockSnapsho
   return `关注列表已返回 ${quoteStocks.length} 只真实行情，暂无上涨标的。`;
 }
 
-function marketInsight(rows: IndexRow[]): InsightSheetState {
+function marketInsight(rows: IndexRow[], temporalMode: StockTemporalMode = 'current'): InsightSheetState {
   return {
     title: '市场行情',
-    description: '主要指数的最新点位、涨跌幅和成交额，用于判断当前交易日的整体风险偏好。',
+    description: temporalMode === 'historical'
+      ? '主要指数在该数据日的收盘点位、涨跌幅和成交额，仅用于历史回看。'
+      : '主要指数的最新点位、涨跌幅和成交额，用于判断当前交易日的整体风险偏好。',
     rows: rows.map((row) => ({
       label: row.name,
       value: row.price,
@@ -2858,10 +2944,12 @@ function marketInsight(rows: IndexRow[]): InsightSheetState {
   };
 }
 
-function sectorInsight(sectors: SectorRow[]): InsightSheetState {
+function sectorInsight(sectors: SectorRow[], temporalMode: StockTemporalMode = 'current'): InsightSheetState {
   return {
     title: '行业趋势',
-    description: '按市场脉冲整理的行业强弱和领涨线索，优先用于发现当日主线。',
+    description: temporalMode === 'historical'
+      ? '按该数据日市场脉冲整理的行业表现和领涨线索，仅用于历史回看。'
+      : '按市场脉冲整理的行业强弱和领涨线索，优先用于发现当日主线。',
     rows: sectors.map((sector) => ({
       label: sector.name,
       value: sector.leader,
@@ -2871,14 +2959,20 @@ function sectorInsight(sectors: SectorRow[]): InsightSheetState {
   };
 }
 
-function starStockInsight(stocks: StockSnapshot[]): InsightSheetState {
+function starStockInsight(
+  stocks: StockSnapshot[],
+  temporalCopy: StockTemporalCopy,
+  temporalMode: StockTemporalMode,
+): InsightSheetState {
   return {
-    title: '明星股票',
-    description: '仅展示已拿到真实价格的关注股票，用于快速扫描当日异动。',
+    title: temporalCopy.starTitle,
+    description: temporalMode === 'historical'
+      ? '仅展示该数据日已核验价格的关注股票，用于回看当日表现。'
+      : '仅展示已拿到真实价格的关注股票，用于快速扫描当日异动。',
     rows: stocks.map((stock) => ({
       label: `${stock.name} ${stock.symbol}`,
       value: stock.price,
-      meta: `${marketLabel(stock.market)} · ${stock.signal} · ${stock.note}`,
+      meta: `${marketLabel(stock.market)} · ${stockSignalLabel(stock.signal, temporalMode)} · ${stock.note}`,
       changePct: stock.changePct,
     })),
   };
@@ -2918,10 +3012,16 @@ function temperatureInsight(temperature: DashboardSnapshot['temperature'] | null
   };
 }
 
-function leaderboardInsight(active: string, leaders: LeaderRow[]): InsightSheetState {
+function leaderboardInsight(
+  active: string,
+  leaders: LeaderRow[],
+  temporalMode: StockTemporalMode = 'current',
+): InsightSheetState {
   return {
     title: active,
-    description: '当前榜单来自 AkShare 全市场个股排行，接口无数据时不展示模拟榜单。',
+    description: temporalMode === 'historical'
+      ? '该数据日榜单来自 AkShare 全市场个股排行，仅用于历史回看。'
+      : '当前榜单来自 AkShare 全市场个股排行，接口无数据时不展示模拟榜单。',
     rows: leaders.map((leader) => ({
       label: `${leader.rank}. ${leader.name}`,
       value: leader.price,
