@@ -16,7 +16,7 @@
 - `Asia/Shanghai` is the only stock-market timezone.
 - On a non-trading day, the latest valid trading day is the most recent exchange-calendar trading day.
 - Before 09:45 on a trading day, daily-close semantics may use the previous trading day; at or after 09:45 the expected trading date is the current trading day.
-- A snapshot older than the latest expected trading date is `historical`, never `current`; a snapshot generated more than seven calendar days ago is `unavailable` and its numeric values are not rendered.
+- A snapshot older than the latest expected trading date is `historical`, never `current`; a snapshot generated more than seven calendar days ago or carrying source data more than seven calendar days old is `unavailable` and its numeric values are not rendered.
 - Historical mode must not use `今日`, `最新`, `当前机会`, `强势`, `现价`, or `实时` as claims about the present.
 - Stock tasks require `snapshotId`, `dataAsOf`, `trustMode`, and an evidence-id list; `unavailable` snapshots cannot create a stock-data task.
 - Do not add buy/sell, target-price, timing, return, `推荐指数`, or `最值得买` language.
@@ -156,7 +156,7 @@ export interface StockSnapshotTrust {
 }
 ```
 
-- [ ] **Step 1: Write failing pure domain tests**
+- [x] **Step 1: Write failing pure domain tests**
 
 Cover literal cases:
 
@@ -176,7 +176,7 @@ expect(stockSnapshotTrust({
 
 Also test: Friday data on Sunday is current; current date plus refreshing status is delayed; missing calendar cannot be current; missing data is unavailable; generated more than seven calendar days ago is unavailable; snapshot ID is stable for identical input and changes when data date or generated time changes.
 
-- [ ] **Step 2: Run the trust tests and verify RED**
+- [x] **Step 2: Run the trust tests and verify RED**
 
 ```bash
 pnpm --filter @holaday/orchestrator exec vitest run src/stocks/stock-trust.test.ts
@@ -184,11 +184,11 @@ pnpm --filter @holaday/orchestrator exec vitest run src/stocks/stock-trust.test.
 
 Expected: FAIL because the module does not exist.
 
-- [ ] **Step 3: Implement the pure trust domain**
+- [x] **Step 3: Implement the pure trust domain**
 
-Derive Shanghai date/minute through `Intl.DateTimeFormat`. Before 09:45, call Task 1 with yesterday's Shanghai date; at or after 09:45 call it with today's date. Derive `snapshotId` from SHA-256 over a canonical JSON array of snapshot key, generated time, expected date, data date, mode, source status/date/time, and sorted evidence IDs. Prefix the first 24 hex characters with `stkshot_`.
+Derive Shanghai date/minute through `Intl.DateTimeFormat`. Query today's calendar date first so the service can distinguish a real trading day from a weekend or holiday; before 09:45 on a real trading day, resolve the prior calendar date. Derive `snapshotId` from SHA-256 over a canonical JSON array of snapshot key, generated time, expected date, data date, calendar status, source status/date/time, and sorted evidence IDs. Delivery freshness changes `mode` without changing the immutable snapshot ID. Prefix the first 24 hex characters with `stkshot_`.
 
-- [ ] **Step 4: Write failing router tests for returned and persisted trust**
+- [x] **Step 4: Write failing router tests for returned and persisted trust**
 
 Add tests demonstrating:
 
@@ -197,7 +197,7 @@ Add tests demonstrating:
 - a newly built snapshot stores and reloads the same `snapshotId`;
 - source health reports failed quote/news envelopes rather than calling the whole dashboard fresh.
 
-- [ ] **Step 5: Run router tests and verify RED**
+- [x] **Step 5: Run router tests and verify RED**
 
 ```bash
 pnpm --filter @holaday/orchestrator exec vitest run src/trpc/routers/stocks.test.ts
@@ -205,7 +205,7 @@ pnpm --filter @holaday/orchestrator exec vitest run src/trpc/routers/stocks.test
 
 Expected: new assertions fail because dashboard responses have no `trust` envelope and persisted snapshots are not age-gated.
 
-- [ ] **Step 6: Integrate the envelope without a schema migration**
+- [x] **Step 6: Integrate the envelope without a schema migration**
 
 Keep `stock_dashboard_snapshots.snapshot_json` as the latest display cache. Add trust before `persistDashboardSnapshot`, re-evaluate legacy snapshots on read, and refuse numeric display after the seven-day maximum age. Source-backed evidence IDs use deterministic forms:
 
@@ -216,7 +216,7 @@ Keep `stock_dashboard_snapshots.snapshot_json` as the latest display cache. Add 
 
 Never create a news evidence ID for an item without a source URL.
 
-- [ ] **Step 7: Run Task 2 tests and commit**
+- [x] **Step 7: Run Task 2 tests and commit**
 
 Run the trust and router tests; then:
 
