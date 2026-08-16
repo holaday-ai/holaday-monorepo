@@ -1,7 +1,7 @@
 # HOLA DAY 今日能量隐私最小化观测设计
 
 - 日期：2026-08-16
-- 状态：已确认，待实施计划
+- 状态：已确认；实施计划见 `docs/superpowers/plans/2026-08-16-today-energy-analytics.md`
 - 范围：今日能量 B 阶段 P2 数据闭环，不启动 C 阶段运营系统
 
 ## 1. 背景
