@@ -1,9 +1,10 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NormalizedEnergyBucket } from '../../energy/analytics-bucket.js';
 import type {
   EnergyAnalyticsStore,
   EnergyAnalyticsTransaction,
 } from '../../energy/analytics-store.js';
+import { _resetAllBucketsForTesting } from '../../quota/rate-limiter.js';
 import { createEnergyRouter } from './energy.js';
 
 const NOW = new Date('2026-08-16T12:00:00.000Z');
@@ -90,6 +91,10 @@ function roleDatabase(role: 'admin' | 'member' | null) {
   };
 }
 
+beforeEach(() => {
+  _resetAllBucketsForTesting();
+});
+
 describe('energyRouter', () => {
   it('returns the catalog for an authenticated caller and rejects an anonymous caller', async () => {
     const { caller, energyRouter, logger } = setup();
@@ -123,6 +128,28 @@ describe('energyRouter', () => {
       visitorRecorded: false,
     });
     expect([...store.metrics.values()]).toEqual([1]);
+  });
+
+  it('rate-limits analytics admission per user before persistence', async () => {
+    const { caller, energyRouter, logger, store } = setup();
+    const otherCaller = energyRouter.createCaller({
+      userId: 'usr_other_energy',
+      logger,
+      db: {},
+    } as never);
+
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      await expect(caller.reportEvent({ type: 'energy_feed_refreshed' })).resolves.toMatchObject({
+        ok: true,
+      });
+    }
+    await expect(otherCaller.reportEvent({ type: 'energy_feed_refreshed' })).resolves.toMatchObject(
+      { ok: true },
+    );
+    await expect(caller.reportEvent({ type: 'energy_feed_refreshed' })).rejects.toMatchObject({
+      code: 'TOO_MANY_REQUESTS',
+    });
+    expect([...store.metrics.values()].reduce((sum, value) => sum + value, 0)).toBe(121);
   });
 
   it('keeps a legacy client without eventId writable', async () => {
