@@ -151,7 +151,9 @@ const energyContentHubEventInput = z.discriminatedUnion('type', [
       mode: z.enum(['single', 'yes-no', 'three']),
     })
     .strict(),
-  z.object({ ...eventIdField, type: z.literal('light_test_started'), testId: lightTestId }).strict(),
+  z
+    .object({ ...eventIdField, type: z.literal('light_test_started'), testId: lightTestId })
+    .strict(),
   z
     .object({ ...eventIdField, type: z.literal('light_test_completed'), testId: lightTestId })
     .strict(),

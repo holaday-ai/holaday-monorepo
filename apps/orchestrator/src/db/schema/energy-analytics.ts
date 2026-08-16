@@ -12,9 +12,7 @@ import {
 } from 'drizzle-orm/mysql-core';
 
 const createdAt = () =>
-  datetime('created_at', { mode: 'date', fsp: 3 })
-    .notNull()
-    .default(sql`CURRENT_TIMESTAMP(3)`);
+  datetime('created_at', { mode: 'date', fsp: 3 }).notNull().default(sql`CURRENT_TIMESTAMP(3)`);
 
 export const energyDailyMetrics = mysqlTable(
   'energy_daily_metrics',
@@ -60,10 +58,7 @@ export const energyDailyVisitors = mysqlTable(
     createdAt: createdAt(),
   },
   (table) => [
-    uniqueIndex('uk_energy_daily_visitors_day_hash').on(
-      table.activityDate,
-      table.visitorHash,
-    ),
+    uniqueIndex('uk_energy_daily_visitors_day_hash').on(table.activityDate, table.visitorHash),
     index('ix_energy_daily_visitors_expires_at').on(table.expiresAt),
   ],
 );

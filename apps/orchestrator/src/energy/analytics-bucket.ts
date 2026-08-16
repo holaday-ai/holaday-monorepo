@@ -96,9 +96,7 @@ export function normalizeEnergyBucket(
     taskStatus: stringDimension(event.taskStatus),
     batchCount: numberDimension(event.batchCount),
   };
-  const bucketHash = createHash('sha256')
-    .update(JSON.stringify(dimensions), 'utf8')
-    .digest('hex');
+  const bucketHash = createHash('sha256').update(JSON.stringify(dimensions), 'utf8').digest('hex');
 
   return {
     metricDate,

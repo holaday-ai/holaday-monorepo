@@ -175,9 +175,9 @@ describe('energy analytics contract and bucket normalization', () => {
     expect(bucket.addUtcDaysFromDate('2026-08-16', 30)).toEqual(
       new Date('2026-09-15T00:00:00.000Z'),
     );
-    expect(
-      bucket.hashEnergyVisitor('0123456789abcdef0123456789abcdef', 'usr_energy'),
-    ).toBe('17c22fb1406493f294f9d5e9db5578323eaad7b93497d26e557c92827aa69418');
+    expect(bucket.hashEnergyVisitor('0123456789abcdef0123456789abcdef', 'usr_energy')).toBe(
+      '17c22fb1406493f294f9d5e9db5578323eaad7b93497d26e557c92827aa69418',
+    );
   });
 
   it('copies only the five analytics configuration values', async () => {

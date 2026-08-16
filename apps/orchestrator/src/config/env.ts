@@ -46,24 +46,9 @@ export const envSchema = z.object({
       'ENERGY_ANALYTICS_HMAC_SECRET must be empty or at least 32 chars',
     )
     .default(''),
-  ENERGY_ANALYTICS_VISITOR_RETENTION_DAYS: z.coerce
-    .number()
-    .int()
-    .min(1)
-    .max(30)
-    .default(30),
-  ENERGY_ANALYTICS_METRIC_RETENTION_DAYS: z.coerce
-    .number()
-    .int()
-    .min(1)
-    .max(400)
-    .default(400),
-  ENERGY_ANALYTICS_RECEIPT_RETENTION_HOURS: z.coerce
-    .number()
-    .int()
-    .min(1)
-    .max(48)
-    .default(48),
+  ENERGY_ANALYTICS_VISITOR_RETENTION_DAYS: z.coerce.number().int().min(1).max(30).default(30),
+  ENERGY_ANALYTICS_METRIC_RETENTION_DAYS: z.coerce.number().int().min(1).max(400).default(400),
+  ENERGY_ANALYTICS_RECEIPT_RETENTION_HOURS: z.coerce.number().int().min(1).max(48).default(48),
 
   ANTHROPIC_API_KEY: z.string().optional().default(''),
 
