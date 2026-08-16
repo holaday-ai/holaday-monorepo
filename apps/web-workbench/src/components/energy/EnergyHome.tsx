@@ -39,6 +39,7 @@ interface EnergyHomeProps {
 
 type EnergyEventType =
   | 'energy_experience_started'
+  | 'energy_experience_replayed'
   | 'energy_experience_completed'
   | 'energy_experience_failed';
 type EnergyEventOutcome = 'success' | 'abandoned' | 'error' | null;
@@ -91,6 +92,7 @@ export function EnergyHome({
   const todayContentRef = React.useRef<HTMLDivElement | null>(null);
   const growthRef = React.useRef<HTMLDivElement | null>(null);
   const startedAtRef = React.useRef(Date.now());
+  const reportedHomeScopeRef = React.useRef<string | null>(null);
   const astrology = useEnergyAstrology(profile, liveProvider);
   const LoadedExperience = React.useMemo(
     () => (selectedExperience?.load ? React.lazy(selectedExperience.load) : null),
@@ -106,6 +108,12 @@ export function EnergyHome({
   );
 
   React.useEffect(() => () => eventReporter.dispose(), [eventReporter]);
+
+  React.useEffect(() => {
+    if (!storageScope || reportedHomeScopeRef.current === storageScope) return;
+    reportedHomeScopeRef.current = storageScope;
+    void eventReporter.report({ type: 'energy_home_viewed' });
+  }, [eventReporter, storageScope]);
 
   React.useEffect(() => {
     setProfile(
@@ -164,6 +172,15 @@ export function EnergyHome({
       void eventReporter.report(event);
     },
     [eventReporter],
+  );
+
+  const handleEnergyNeedChange = React.useCallback(
+    (next: EnergyNeed) => {
+      if (next === energyNeed) return;
+      setEnergyNeed(next);
+      void eventReporter.report({ type: 'energy_need_selected', energyNeed: next });
+    },
+    [energyNeed, eventReporter],
   );
 
   const openExperience = (
@@ -287,7 +304,7 @@ export function EnergyHome({
           completedCount={completedToday.length}
           totalCount={5}
           continueLabel={canOpenLastTarget ? '继续上次' : '继续今日内容'}
-          onChange={setEnergyNeed}
+          onChange={handleEnergyNeedChange}
           onContinue={(trigger) => {
             if (
               canOpenLastTarget &&
@@ -402,7 +419,7 @@ export function EnergyHome({
         }}
         onReplay={() => {
           if (selectedExperience) {
-            reportEvent('energy_experience_started', selectedExperience.id, selectedLaunchTarget);
+            reportEvent('energy_experience_replayed', selectedExperience.id, selectedLaunchTarget);
           }
           startedAtRef.current = Date.now();
           handlePhaseChange('active');

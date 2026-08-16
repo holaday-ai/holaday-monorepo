@@ -91,10 +91,46 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.doUnmock('./experiences/TarotExperience');
   vi.clearAllMocks();
 });
 
 describe('EnergyHome', () => {
+  it('reports one home view for a stable authenticated scope', async () => {
+    const { rerender } = render(<EnergyHome profileStorageScope="usr_energy" />);
+
+    rerender(<EnergyHome profileStorageScope="usr_energy" />);
+
+    await waitFor(() =>
+      expect(
+        trpcMocks.reportEvent.mock.calls.filter(
+          ([event]) => event.type === 'energy_home_viewed',
+        ),
+      ).toHaveLength(1),
+    );
+  });
+
+  it('reports only real need changes and never the initial default', async () => {
+    const user = userEvent.setup();
+    render(<EnergyHome profileStorageScope="usr_energy" />);
+    await waitFor(() =>
+      expect(
+        trpcMocks.reportEvent.mock.calls.some(([event]) => event.type === 'energy_home_viewed'),
+      ).toBe(true),
+    );
+    trpcMocks.reportEvent.mockClear();
+
+    await user.click(screen.getByRole('button', { name: '专注' }));
+    await user.click(screen.getByRole('button', { name: '放松' }));
+    await user.click(screen.getByRole('button', { name: '放松' }));
+
+    expect(
+      trpcMocks.reportEvent.mock.calls
+        .filter(([event]) => event.type === 'energy_need_selected')
+        .map(([event]) => event.energyNeed),
+    ).toEqual(['relax']);
+  });
+
   it('keeps public preview interactions local without querying protected energy services', async () => {
     const user = userEvent.setup();
     render(<EnergyHome liveProvider={false} profileStorageScope={null} />);
@@ -126,6 +162,7 @@ describe('EnergyHome', () => {
     ).toBeTruthy();
     expect(screen.queryByText('你现在感觉怎么样？')).toBeNull();
     expect(screen.queryByText('轻松一点的几分钟')).toBeNull();
+    expect(screen.queryByRole('button', { name: /有帮助|没帮助/ })).toBeNull();
     const exploreFeed = screen.getByRole('region', { name: '再逛一会' });
     expect(within(exploreFeed).getAllByRole('article')).toHaveLength(6);
     expect(exploreFeed.querySelectorAll('article[data-layout="hero"]')).toHaveLength(1);
@@ -200,11 +237,43 @@ describe('EnergyHome', () => {
     await user.click(screen.getByRole('button', { name: '关闭体验' }));
     expect(originalTrigger.isConnected).toBe(false);
     expect(document.activeElement).toBe(screen.getByRole('button', { name: '继续今日内容' }));
-    expect(trpcMocks.reportEvent).toHaveBeenCalledWith({
-      type: 'energy_continuation_opened',
-      fromKind: 'recharge',
-      targetType: 'game',
-    });
+    expect(trpcMocks.reportEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'energy_continuation_opened',
+        fromKind: 'recharge',
+        targetType: 'game',
+      }),
+    );
+  });
+
+  it('reports a retry as replayed without a second start', async () => {
+    vi.doMock('./experiences/TarotExperience', () => ({
+      TarotExperience: ({
+        onPhaseChange,
+      }: {
+        onPhaseChange: (phase: 'error') => void;
+      }) => (
+        <button type="button" onClick={() => onPhaseChange('error')}>
+          模拟体验失败
+        </button>
+      ),
+    }));
+    const user = userEvent.setup();
+    render(<EnergyHome profileStorageScope="usr_energy" />);
+
+    await user.click(screen.getByRole('button', { name: '抽一张能量卡' }));
+    await user.click(screen.getByRole('button', { name: '开始体验' }));
+    await user.click(await screen.findByRole('button', { name: '模拟体验失败' }));
+    await user.click(screen.getByRole('button', { name: '重新试试' }));
+
+    const lifecycleTypes = trpcMocks.reportEvent.mock.calls
+      .map(([event]) => event.type)
+      .filter((type) => String(type).startsWith('energy_experience_'));
+    expect(lifecycleTypes).toEqual([
+      'energy_experience_started',
+      'energy_experience_failed',
+      'energy_experience_replayed',
+    ]);
   });
 
   it('skips a remotely unavailable continuation type instead of rendering a dead action', async () => {
