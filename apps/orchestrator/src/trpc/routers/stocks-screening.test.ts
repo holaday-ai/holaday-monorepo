@@ -1,6 +1,9 @@
 import { TRPCError } from '@trpc/server';
 import { describe, expect, it, vi } from 'vitest';
-import { StockScreeningFreshnessError } from '../../stocks/stock-screening-service.js';
+import {
+  StockScreeningDataError,
+  StockScreeningFreshnessError,
+} from '../../stocks/stock-screening-service.js';
 import {
   previewStockScreening,
   runStockScreeningInputSchema,
@@ -182,7 +185,7 @@ describe('stock screening procedures', () => {
       client: {},
       snapshotId: SNAPSHOT_ID,
       dataAsOf: DATA_AS_OF,
-      criteria: [criterion()],
+      criteria: [criterion({ id: 'pe_ttm-1' })],
     });
     const logged = JSON.stringify(logger.info.mock.calls);
     expect(logged).toContain('pe_ttm');
@@ -214,6 +217,34 @@ describe('stock screening procedures', () => {
     }));
   });
 
+  it('reissues unique server-owned criterion ids before evaluation', async () => {
+    const execute = vi.fn(async () => executeResult());
+    await runTrustedStockScreening({
+      db: snapshotDb([snapshot()]) as never,
+      userId: 7,
+      logger: { info: vi.fn(), warn: vi.fn() },
+      client: {} as never,
+      input: {
+        snapshotId: SNAPSHOT_ID,
+        dataAsOf: DATA_AS_OF,
+        criteria: [
+          criterion({ id: 'duplicate' }),
+          criterion({ id: 'duplicate', field: 'pb', value: 3 }),
+        ],
+      },
+      execute,
+    });
+
+    const executeCalls = execute.mock.calls as unknown as Array<[
+      { criteria: ReadyCriterion[] },
+    ]>;
+    const evaluatedCriteria = executeCalls[0]?.[0].criteria ?? [];
+    expect(evaluatedCriteria.map((item: ReadyCriterion) => item.id)).toEqual([
+      'pe_ttm-1',
+      'pb-2',
+    ]);
+  });
+
   it('returns a refreshable client error when the current trading date changes', async () => {
     await expect(runTrustedStockScreening({
       db: snapshotDb([snapshot()]) as never,
@@ -227,6 +258,22 @@ describe('stock screening procedures', () => {
     })).rejects.toMatchObject({
       code: 'BAD_REQUEST',
       message: '股票快照已不是最新交易日，请刷新页面后重试。',
+    });
+  });
+
+  it('returns a safe server error when the full-market source is unavailable', async () => {
+    await expect(runTrustedStockScreening({
+      db: snapshotDb([snapshot()]) as never,
+      userId: 7,
+      logger: { info: vi.fn(), warn: vi.fn() },
+      client: {} as never,
+      input: { snapshotId: SNAPSHOT_ID, dataAsOf: DATA_AS_OF, criteria: [criterion()] },
+      execute: vi.fn(async () => {
+        throw new StockScreeningDataError('全市场筛选数据暂不可用，请稍后重试。');
+      }),
+    })).rejects.toMatchObject({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: '全市场筛选数据暂不可用，请稍后重试。',
     });
   });
 });

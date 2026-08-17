@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { StockScreeningClient } from '../../stocks/stock-screening-service.js';
 import {
   runStockScreening,
+  StockScreeningDataError,
   StockScreeningFreshnessError,
   type StockScreeningResult,
 } from '../../stocks/stock-screening-service.js';
@@ -90,9 +91,10 @@ export async function runTrustedStockScreening(args: {
     });
   }
   const input = parsedInput.data;
-  const criteria = (input.criteria as StockScreenCriterion[]).map(
-    canonicalStockScreenCriterion,
-  );
+  const criteria = (input.criteria as StockScreenCriterion[]).map((criterion, index) => ({
+    ...canonicalStockScreenCriterion(criterion),
+    id: `${criterion.field}-${index + 1}`,
+  }));
   await validateStockTaskContext({
     db: args.db,
     userId: args.userId,
@@ -118,6 +120,9 @@ export async function runTrustedStockScreening(args: {
   } catch (error) {
     if (error instanceof StockScreeningFreshnessError) {
       throw new TRPCError({ code: 'BAD_REQUEST', message: error.message });
+    }
+    if (error instanceof StockScreeningDataError) {
+      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
     }
     throw error;
   }

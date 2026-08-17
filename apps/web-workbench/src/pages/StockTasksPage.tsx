@@ -512,7 +512,6 @@ export function StockTasksPage(): JSX.Element {
       const message = pageErrorMessage(err);
       setLoadError(message);
       toast.show(message, 'error');
-      throw err;
     } finally {
       setWatchlistSaving(false);
     }

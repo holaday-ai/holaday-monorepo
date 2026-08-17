@@ -73,6 +73,16 @@ describe('parseStockScreenPrompt', () => {
       { field: 'roe', value: 12 },
     ]);
   });
+
+  it('converts common Chinese turnover-amount units instead of treating one 亿元 as one 元', () => {
+    const result = parseStockScreenPrompt('成交额高于1.5亿元，成交额不低于8000万元');
+
+    expect(result.unparsedClauses).toEqual([]);
+    expect(result.criteria.map(({ value, label }) => ({ value, label }))).toEqual([
+      { value: 150_000_000, label: '成交额高于 1.5亿元' },
+      { value: 80_000_000, label: '成交额不低于 8000万元' },
+    ]);
+  });
 });
 
 describe('validateStockScreenCriteria', () => {

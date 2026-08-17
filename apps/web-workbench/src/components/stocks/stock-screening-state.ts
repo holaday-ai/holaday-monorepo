@@ -61,7 +61,12 @@ function numericCriterionLabel(
         : '阈值';
     return `${fieldLabel}${suffix}`;
   }
-  return `${fieldLabel}${OPERATOR_LABELS[criterion.operator]} ${value}${criterion.unit ?? ''}`;
+  const displayValue = criterion.field === 'amount' && Math.abs(value) >= 100_000_000
+    ? `${Number((value / 100_000_000).toFixed(4))}亿元`
+    : criterion.field === 'amount' && Math.abs(value) >= 10_000
+      ? `${Number((value / 10_000).toFixed(4))}万元`
+      : `${value}${criterion.unit ?? ''}`;
+  return `${fieldLabel}${OPERATOR_LABELS[criterion.operator]} ${displayValue}`;
 }
 
 function criterionValueReady(value: EditableStockScreenCriterion['value']): boolean {
@@ -83,6 +88,17 @@ export function canRunStockScreening(
     criteria.every((criterion) =>
       criterion.status === 'ready' && criterionValueReady(criterion.value),
     )
+  );
+}
+
+export function isStockScreeningResultCurrent(
+  result: { snapshotId: string; dataAsOf: string },
+  trust: StockScreeningTrustInput,
+): boolean {
+  return (
+    trust.trustMode === 'current' &&
+    result.snapshotId === trust.snapshotId &&
+    result.dataAsOf === trust.dataAsOf
   );
 }
 

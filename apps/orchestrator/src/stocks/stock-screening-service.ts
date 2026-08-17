@@ -55,6 +55,13 @@ export class StockScreeningFreshnessError extends Error {
   }
 }
 
+export class StockScreeningDataError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'StockScreeningDataError';
+  }
+}
+
 export interface StockScreeningWarning {
   key: string;
   severity: '关注' | '警示' | '高风险';
@@ -408,7 +415,10 @@ export async function runStockScreening(args: {
     throw new StockScreeningFreshnessError('股票快照已不是最新交易日，请刷新页面后重试。');
   }
   const universeEnvelope = await client.getScreeningUniverse();
-  const universe = universeEnvelope.error ? [] : universeEnvelope.data;
+  if (universeEnvelope.error || universeEnvelope.data.length === 0) {
+    throw new StockScreeningDataError('全市场筛选数据暂不可用，请稍后重试。');
+  }
+  const universe = universeEnvelope.data;
   const marketCriteria = criteria.filter((criterion) => MARKET_FIELDS.has(criterion.field));
   const marketStatesBySymbol = new Map<string, Map<string, CriterionState>>();
   const prefiltered = universe.filter((row) => {

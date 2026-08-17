@@ -110,6 +110,25 @@ function clientWith(
 }
 
 describe('runStockScreening', () => {
+  it('fails closed when the full-market screening source is unavailable', async () => {
+    const getFundamentals = vi.fn();
+    const client = clientWith([], {
+      getScreeningUniverse: async () => envelope<StockScreeningUniverseRow>([], 'http:/screening-universe', {
+        error: 'safe upstream failure',
+        error_code: 'UPSTREAM_UNAVAILABLE',
+      }),
+      getFundamentals,
+    });
+
+    await expect(runStockScreening({
+      client,
+      snapshotId: 'stkshot_current',
+      dataAsOf: '2026-08-17',
+      criteria: [criterion('pe', 'pe_ttm', 'lte', 30, '市盈率不超过 30')],
+    })).rejects.toThrow('全市场筛选数据暂不可用');
+    expect(getFundamentals).not.toHaveBeenCalled();
+  });
+
   it('rejects a no-longer-current snapshot before loading the screening universe', async () => {
     const getScreeningUniverse = vi.fn(async () => envelope([], 'sina:screening'));
     const client = clientWith([], {

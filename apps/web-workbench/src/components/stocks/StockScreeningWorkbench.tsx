@@ -17,6 +17,7 @@ import {
   canRunStockScreening,
   criterionStateLabel,
   groupScreeningCandidates,
+  isStockScreeningResultCurrent,
   screeningCoverageCopy,
   updateNumericCriterionValue,
   type EditableStockScreenCriterion,
@@ -64,6 +65,9 @@ export function StockScreeningWorkbench({
   const [addingSymbol, setAddingSymbol] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [result, setResult] = React.useState<ScreeningResult | null>(null);
+  const currentTrust = { snapshotId, dataAsOf, trustMode };
+  const currentTrustRef = React.useRef(currentTrust);
+  currentTrustRef.current = currentTrust;
 
   React.useEffect(() => {
     setResult(null);
@@ -100,7 +104,10 @@ export function StockScreeningWorkbench({
         dataAsOf,
         criteria: criteria as RunInput['criteria'],
       };
-      setResult(await api.run(input));
+      const nextResult = await api.run(input);
+      if (isStockScreeningResultCurrent(nextResult, currentTrustRef.current)) {
+        setResult(nextResult);
+      }
     } catch (caught) {
       setError(pageErrorMessage(caught));
     } finally {
@@ -120,6 +127,8 @@ export function StockScreeningWorkbench({
     setAddingSymbol(candidate.symbol);
     try {
       await onAddToWatchlist(candidate.symbol, candidate.name);
+    } catch (caught) {
+      setError(pageErrorMessage(caught));
     } finally {
       setAddingSymbol(null);
     }

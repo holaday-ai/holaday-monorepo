@@ -151,6 +151,7 @@ describe('stock tasks layout', () => {
     expect(source).toContain('dataAsOf={dashboard?.trust?.dataAsOf ?? null}');
     expect(source).toContain('trustMode={dashboard?.trust?.mode ?? \'unverified\'}');
     expect(source).toContain('onAddToWatchlist={addScreeningCandidate}');
+    expect(source).not.toContain('toast.show(message, \'error\');\n      throw err;');
     expect(component).toContain('trpc.stocks.previewScreening.query');
     expect(component).toContain('trpc.stocks.runScreening.mutate');
     expect(component).toContain('条件匹配不等于投资建议');

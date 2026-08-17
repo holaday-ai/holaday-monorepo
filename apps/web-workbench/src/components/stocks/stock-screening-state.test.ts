@@ -3,6 +3,7 @@ import {
   canRunStockScreening,
   criterionStateLabel,
   groupScreeningCandidates,
+  isStockScreeningResultCurrent,
   screeningCoverageCopy,
   updateNumericCriterionValue,
 } from './stock-screening-state';
@@ -58,6 +59,18 @@ describe('stock screening state', () => {
       status: 'needs_input',
       label: '市盈率上限',
     });
+    expect(updateNumericCriterionValue({
+      ...criterion,
+      field: 'amount',
+      value: 100_000_000,
+      unit: '元',
+      label: '成交额高于 1亿元',
+      sourceField: '成交额',
+      operator: 'gt',
+    }, '150000000')).toMatchObject({
+      value: 150_000_000,
+      label: '成交额高于 1.5亿元',
+    });
   });
 
   it('uses explicit missing copy and never converts zero results into relaxed criteria', () => {
@@ -82,5 +95,27 @@ describe('stock screening state', () => {
       deepCheckLimit: 20,
       truncated: true,
     })).toBe('全市场 5,213 只 · 初筛 38 只 · 深查前 20 只（上限 20，只展示深查结果）');
+  });
+
+  it('rejects an async result after the trusted snapshot changes', () => {
+    const result = {
+      snapshotId: 'stkshot_0123456789abcdef01234567',
+      dataAsOf: '2026-08-17',
+    };
+    expect(isStockScreeningResultCurrent(result, {
+      snapshotId: result.snapshotId,
+      dataAsOf: result.dataAsOf,
+      trustMode: 'current',
+    })).toBe(true);
+    expect(isStockScreeningResultCurrent(result, {
+      snapshotId: 'stkshot_fedcba9876543210fedcba98',
+      dataAsOf: result.dataAsOf,
+      trustMode: 'current',
+    })).toBe(false);
+    expect(isStockScreeningResultCurrent(result, {
+      snapshotId: result.snapshotId,
+      dataAsOf: result.dataAsOf,
+      trustMode: 'delayed',
+    })).toBe(false);
   });
 });

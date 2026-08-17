@@ -66,11 +66,31 @@ function numericOperator(clause: string): StockScreenOperator | null {
   return null;
 }
 
-function numericValue(clause: string): number | null {
+function numericValue(clause: string, field: StockScreenField): number | null {
   const match = clause.match(/-?\d+(?:\.\d+)?/);
   if (!match) return null;
-  const value = Number(match[0]);
+  let value = Number(match[0]);
+  if (field === 'amount') {
+    if (/亿(?:元)?/.test(clause)) value *= 100_000_000;
+    else if (/万(?:元)?/.test(clause)) value *= 10_000;
+  }
   return Number.isFinite(value) ? value : null;
+}
+
+function formattedValue(
+  field: StockScreenField,
+  value: number,
+  unit: StockScreenCriterion['unit'],
+): string {
+  if (field === 'amount') {
+    if (Math.abs(value) >= 100_000_000) {
+      return `${Number((value / 100_000_000).toFixed(4))}亿元`;
+    }
+    if (Math.abs(value) >= 10_000) {
+      return `${Number((value / 10_000).toFixed(4))}万元`;
+    }
+  }
+  return `${value}${unit ?? ''}`;
 }
 
 function numericCriterion(
@@ -80,14 +100,14 @@ function numericCriterion(
 ): CriterionDraft | null {
   const meta = FIELD_META[field];
   const operator = numericOperator(clause);
-  const value = numericValue(clause);
+  const value = numericValue(clause, field);
   if (operator && value !== null) {
     return {
       field,
       operator,
       value,
       unit: meta.unit,
-      label: `${meta.label}${operatorLabel(operator)} ${value}${meta.unit ?? ''}`,
+      label: `${meta.label}${operatorLabel(operator)} ${formattedValue(field, value, meta.unit)}`,
       sourceField: meta.sourceField,
       status: 'ready',
     };
@@ -136,9 +156,9 @@ export function canonicalStockScreenCriterion(
   } else if (criterion.field === 'insider_reduction_recent') {
     label = criterion.value === false ? '近期无内部人减持' : '近期有内部人减持';
   } else if (criterion.operator === 'between' && Array.isArray(criterion.value)) {
-    label = `${meta.label}介于 ${criterion.value[0]}–${criterion.value[1]}${meta.unit ?? ''}`;
+    label = `${meta.label}介于 ${formattedValue(criterion.field, criterion.value[0], meta.unit)}–${formattedValue(criterion.field, criterion.value[1], meta.unit)}`;
   } else {
-    label = `${meta.label}${operatorLabel(criterion.operator)} ${String(criterion.value)}${meta.unit ?? ''}`;
+    label = `${meta.label}${operatorLabel(criterion.operator)} ${formattedValue(criterion.field, criterion.value as number, meta.unit)}`;
   }
   return {
     ...criterion,
