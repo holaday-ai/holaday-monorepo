@@ -126,6 +126,12 @@ export const tasks = mysqlTable(
      */
     awaitingKind: varchar('awaiting_kind', { length: 32 }),
     result: json('result'),
+    /**
+     * Server-validated context supplied by a dedicated task surface.
+     * Stock tasks persist the immutable dashboard snapshot payload here;
+     * API responses expose only the bounded public identifiers.
+     */
+    sourceContext: json('source_context'),
     errorCode: varchar('error_code', { length: 64 }),
     errorMessage: text('error_message'),
     /**

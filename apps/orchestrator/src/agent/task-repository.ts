@@ -59,6 +59,8 @@ export interface InsertTaskContext {
    * false when omitted.
    */
   opusUsed?: boolean;
+  /** Immutable, server-validated context from a dedicated product surface. */
+  sourceContext?: Record<string, unknown> | null;
 }
 
 export class TaskRepository {
@@ -75,6 +77,7 @@ export class TaskRepository {
         plan: serializePlan(state.plan),
         roleId: ctx.roleId ?? null,
         opusUsed: ctx.opusUsed ?? false,
+        sourceContext: ctx.sourceContext ?? null,
       });
       const taskRowId = readInsertId(insert);
 

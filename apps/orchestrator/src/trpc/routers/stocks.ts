@@ -2,7 +2,9 @@ import { createHash } from 'node:crypto';
 import { TRPCError } from '@trpc/server';
 import { and, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
+import type { SymbolRow } from '../../agent/a-share/akshare-client.js';
 import { HttpAkshareClient } from '../../agent/a-share/akshare-http-client.js';
+import { fmtNum, fmtYiYuan, pick, toNum } from '../../agent/a-share/ashare-format.js';
 import {
   buildPostmarketBriefing,
   buildPremarketBriefing,
@@ -16,21 +18,27 @@ import type {
   KlineRow,
   MarketPulseRow,
   SectorEntry,
+  StockNewsRow,
   StockQuoteRow,
   StockRankingRow,
-  StockNewsRow,
   WatchlistEntry,
 } from '../../agent/a-share/briefing-types.js';
-import type { SymbolRow } from '../../agent/a-share/akshare-client.js';
-import { fmtNum, fmtYiYuan, pick, toNum } from '../../agent/a-share/ashare-format.js';
 import { stockDashboardSnapshots } from '../../db/schema/stock-dashboard-snapshots.js';
 import { users } from '../../db/schema/users.js';
 import { resolveNewsDetail } from '../../stock-news/article-detail.js';
 import { sourceCoverProxyUrl } from '../../stock-news/source-cover.js';
+import {
+  type LatestExpectedTradingDate,
+  type StockSnapshotTrust,
+  type StockSourceHealth,
+  latestExpectedTradingDate,
+  stockSnapshotTrust,
+} from '../../stocks/stock-trust.js';
 import { protectedProcedure, router } from '../trpc.js';
 
 type Db = typeof import('../../db/client.js').db;
 interface MinimalLogger {
+  info?(obj: Record<string, unknown>, msg: string): void;
   warn(obj: Record<string, unknown>, msg: string): void;
 }
 
@@ -134,6 +142,8 @@ interface DashboardSnapshot {
   leaders: LeaderSnapshot[];
   leaderboards: LeaderboardsSnapshot;
   freshness: DashboardFreshness;
+  /** Optional only for reading snapshots persisted before the trust-envelope migration. */
+  trust?: StockSnapshotTrust;
 }
 
 interface DashboardCacheEntry {
@@ -164,8 +174,8 @@ const DASHBOARD_PARTIAL_FRESH_TTL_MS = 5_000;
 const DASHBOARD_STALE_TTL_MS = 10 * 60_000;
 const DASHBOARD_FIRST_PAINT_BUDGET_MS = 5_500;
 const DASHBOARD_AKSHARE_TIMEOUT_MS = 8_000;
-const DASHBOARD_SLOW_SIGNAL_TIMEOUT_MS = 90_000;
-const DASHBOARD_RANKING_TIMEOUT_MS = 75_000;
+const DASHBOARD_SLOW_SIGNAL_TIMEOUT_MS = 12_000;
+const DASHBOARD_RANKING_TIMEOUT_MS = 12_000;
 const DASHBOARD_DISCOVERY_TIMEOUT_MS = 12_000;
 const MARKET_DISCOVERY_PAGE_SIZES: Record<MarketDiscoveryFeed, number> = {
   'A股要闻': 30,
@@ -241,6 +251,7 @@ function isDashboardSnapshot(value: unknown): value is DashboardSnapshot {
 }
 
 function hasDisplayableRealDashboardData(snapshot: DashboardSnapshot): boolean {
+  if (snapshot.trust?.mode === 'unavailable') return false;
   const hasWatchlistData = snapshot.watchlistStocks.some((stockRow) =>
     stockRow.price !== '—' ||
     stockRow.spark.length >= 2 ||
@@ -340,6 +351,9 @@ function markRefreshing(snapshot: DashboardSnapshot, message: string): Dashboard
       status: 'refreshing',
       message,
     },
+    trust: snapshot.trust?.mode === 'current'
+      ? { ...snapshot.trust, mode: 'delayed' }
+      : snapshot.trust,
   };
 }
 
@@ -362,12 +376,13 @@ function buildPartialDashboardSnapshot(
   effectiveWatchlist: WatchlistEntry[],
   now = new Date(),
   message = '行情刷新仍在进行，先展示真实关注列表。',
+  snapshotKey = 'partial-dashboard',
 ): DashboardSnapshot {
   const watchlistStocks = effectiveWatchlist
     .slice(0, 8)
     .map((entry) => unavailableStock(entry));
   const leaderboards = fallbackLeaderboards();
-  return withFreshness(
+  const snapshot = withFreshness(
     {
       updatedAt: now.toISOString(),
       observedTradeDate: null,
@@ -388,6 +403,21 @@ function buildPartialDashboardSnapshot(
       message,
     },
   );
+  return dashboardForTrustMode({
+    ...snapshot,
+    trust: stockSnapshotTrust({
+      snapshotKey,
+      now,
+      generatedAt: snapshot.updatedAt,
+      latestExpectedTradingDate: null,
+      dataAsOf: null,
+      calendarStatus: 'unavailable',
+      freshnessStatus: snapshot.freshness.status,
+      sources: defaultDashboardSourceHealth(snapshot, now),
+      evidenceIds: [],
+      marketIsTradingDay: false,
+    }),
+  });
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
@@ -406,6 +436,29 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
       },
     );
   });
+}
+
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  if (!Number.isInteger(concurrency) || concurrency < 1) {
+    throw new RangeError('concurrency must be a positive integer');
+  }
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const runWorker = async (): Promise<void> => {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      const item = items[index] as T;
+      results[index] = await worker(item, index);
+    }
+  };
+  const workerCount = Math.min(concurrency, items.length);
+  await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
+  return results;
 }
 
 function cnDateParts(now = new Date()): { iso: string; compact: string } {
@@ -622,6 +675,165 @@ function dashboardWithObservedIntraday(snapshot: DashboardSnapshot, now: Date): 
     watchlistStocks,
     starStocks,
     news: normalizeDiscoveryEditorialArt(snapshot.news),
+  };
+}
+
+function latestSnapshotDate(values: Array<string | null | undefined>): string | null {
+  return values
+    .map((value) => datePart(value ?? undefined))
+    .filter((value): value is string => value !== null)
+    .sort()
+    .at(-1) ?? null;
+}
+
+function sourceHealth(
+  key: StockSourceHealth['key'],
+  status: StockSourceHealth['status'],
+  dataAsOf: string | null,
+  fetchedAt: string | null,
+  errorCode?: string,
+): StockSourceHealth {
+  return {
+    key,
+    status,
+    dataAsOf,
+    fetchedAt,
+    ...(errorCode ? { errorCode } : {}),
+  };
+}
+
+function defaultDashboardSourceHealth(snapshot: DashboardSnapshot, now: Date): StockSourceHealth[] {
+  const fetchedAt = snapshot.updatedAt || now.toISOString();
+  const aShareStocks = snapshot.watchlistStocks.filter((stockRow) => stockRow.market === 'A');
+  const quoteDataAsOf = observedTradeDateFromStocks(aShareStocks);
+  const newsRows = snapshot.news.filter((item) => item.category !== '公告');
+  const announcementRows = snapshot.news.filter((item) => item.category === '公告');
+  const priorSources = new Map(snapshot.trust?.sources.map((source) => [source.key, source]) ?? []);
+  const indicesPrior = priorSources.get('indices');
+  const newsDataAsOf = latestSnapshotDate(newsRows.map((item) => item.publishedAt ?? item.time));
+  const announcementDataAsOf = latestSnapshotDate(
+    announcementRows.map((item) => item.publishedAt ?? item.time),
+  );
+
+  return [
+    aShareStocks.length === 0
+      ? sourceHealth('quotes', 'disabled', null, fetchedAt)
+      : quoteDataAsOf && aShareStocks.some((stockRow) => stockRow.price !== '—')
+        ? sourceHealth('quotes', 'healthy', quoteDataAsOf, fetchedAt)
+        : sourceHealth('quotes', 'failed', null, fetchedAt, 'NO_VERIFIED_QUOTES'),
+    snapshot.marketIndices.length > 0
+      ? sourceHealth(
+          'indices',
+          'healthy',
+          indicesPrior?.dataAsOf ?? snapshot.trust?.dataAsOf ?? quoteDataAsOf,
+          fetchedAt,
+        )
+      : sourceHealth('indices', 'delayed', indicesPrior?.dataAsOf ?? null, fetchedAt, 'NO_INDEX_ROWS'),
+    newsRows.length > 0
+      ? sourceHealth('news', 'healthy', newsDataAsOf, fetchedAt)
+      : sourceHealth('news', 'delayed', null, fetchedAt, 'NO_NEWS_ROWS'),
+    aShareStocks.length === 0
+      ? sourceHealth('announcements', 'disabled', null, fetchedAt)
+      : announcementRows.length > 0
+        ? sourceHealth('announcements', 'healthy', announcementDataAsOf, fetchedAt)
+        : sourceHealth('announcements', 'delayed', null, fetchedAt, 'NO_ANNOUNCEMENT_ROWS'),
+  ];
+}
+
+function dashboardEvidenceIds(snapshot: DashboardSnapshot): string[] {
+  const quoteEvidence = snapshot.watchlistStocks.flatMap((stockRow) => {
+    const tradeDate = latestSnapshotDate([stockRow.sparkTradeDate, stockRow.tradeDate]);
+    return stockRow.price !== '—' && tradeDate
+      ? [`quote:${stockRow.symbol}:${tradeDate}`]
+      : [];
+  });
+  const newsEvidence = snapshot.news.flatMap((item) => {
+    if (!item.url) return [];
+    const payload = item.url;
+    const kind = item.category === '公告' ? 'announcement' : 'news';
+    return [`${kind}:${createHash('sha256').update(payload).digest('hex').slice(0, 24)}`];
+  });
+  return [...quoteEvidence, ...newsEvidence];
+}
+
+function dashboardWithTrust(args: {
+  snapshot: DashboardSnapshot;
+  snapshotKey: string;
+  now: Date;
+  calendar: LatestExpectedTradingDate;
+  sources?: StockSourceHealth[];
+  dataAsOf?: string | null;
+}): DashboardSnapshot {
+  const observed = dashboardWithObservedIntraday(args.snapshot, args.now);
+  const sources = args.sources ?? defaultDashboardSourceHealth(observed, args.now);
+  const dataAsOf = args.dataAsOf === undefined
+    ? observed.observedTradeDate ?? observed.trust?.dataAsOf ?? latestSnapshotDate(
+        sources.map((source) => source.dataAsOf),
+      )
+    : args.dataAsOf;
+  const trust = stockSnapshotTrust({
+    snapshotKey: args.snapshotKey,
+    now: args.now,
+    generatedAt: observed.updatedAt || observed.freshness.cachedAt,
+    latestExpectedTradingDate: args.calendar.date,
+    dataAsOf,
+    calendarStatus: args.calendar.status,
+    freshnessStatus: observed.freshness.status,
+    sources,
+    evidenceIds: dashboardEvidenceIds(observed),
+    marketIsTradingDay: args.calendar.isTradingDay ?? false,
+  });
+  return dashboardForTrustMode({ ...observed, trust });
+}
+
+function logDashboardTrust(
+  logger: MinimalLogger,
+  snapshot: DashboardSnapshot,
+  now: Date,
+): void {
+  const trust = snapshot.trust;
+  if (!trust) return;
+  const generatedAtMs = new Date(trust.generatedAt).getTime();
+  logger.info?.(
+    {
+      snapshotId: trust.snapshotId,
+      latestExpectedTradingDate: trust.latestExpectedTradingDate,
+      dataAsOf: trust.dataAsOf,
+      trustMode: trust.mode,
+      snapshotAgeMs: Number.isFinite(generatedAtMs)
+        ? Math.max(0, now.getTime() - generatedAtMs)
+        : null,
+      sourceStatuses: trust.sources.map((source) => ({
+        key: source.key,
+        status: source.status,
+        ...(source.errorCode ? { errorCode: source.errorCode } : {}),
+      })),
+    },
+    'stocks-dashboard: trust snapshot',
+  );
+}
+
+function dashboardForTrustMode(snapshot: DashboardSnapshot): DashboardSnapshot {
+  if (snapshot.trust?.mode !== 'unavailable') return snapshot;
+  const watchlistStocks = snapshot.watchlistStocks.map((stockRow) =>
+    unavailableStock(
+      {
+        symbol: stockRow.symbol,
+        market: stockRow.market,
+        displayName: stockRow.name,
+      },
+      '该行情快照已超出安全展示窗口，数值已隐藏，正在重新获取。',
+    ));
+  return {
+    ...snapshot,
+    observedTradeDate: null,
+    watchlistStocks,
+    marketIndices: [],
+    sectors: [],
+    starStocks: [],
+    temperature: null,
+    leaders: [],
+    leaderboards: fallbackLeaderboards(),
   };
 }
 
@@ -1121,12 +1333,51 @@ async function loadMarketDiscoveryFeed(args: {
   };
 }
 
+function sourceRowDate(row: unknown): string | null {
+  if (!row || typeof row !== 'object') return null;
+  const record = row as Record<string, unknown>;
+  return latestSnapshotDate([
+    String(
+      record.发布时间 ??
+      record.公告时间 ??
+      record.日期 ??
+      record.date ??
+      record.time ??
+      '',
+    ),
+  ]);
+}
+
+function envelopeSourceHealth<T>(args: {
+  key: Extract<StockSourceHealth['key'], 'indices' | 'news' | 'announcements'>;
+  envelopes: Array<AkEnvelope<T>>;
+  deferred: boolean;
+  disabled?: boolean;
+}): StockSourceHealth {
+  const fetchedAt = args.envelopes
+    .map((env) => env.fetched_at)
+    .filter((value): value is string => typeof value === 'string' && value.length > 0)
+    .sort()
+    .at(-1) ?? null;
+  const dataAsOf = latestSnapshotDate(
+    args.envelopes.flatMap((env) => env.data.map((row) => sourceRowDate(row))),
+  );
+  const hasRows = args.envelopes.some((env) => env.data.length > 0);
+  const hasFailure = args.envelopes.some((env) => Boolean(env.error));
+  if (args.disabled) return sourceHealth(args.key, 'disabled', null, fetchedAt);
+  if (args.deferred) return sourceHealth(args.key, 'delayed', dataAsOf, fetchedAt, 'DEFERRED');
+  if (hasRows) return sourceHealth(args.key, 'healthy', dataAsOf, fetchedAt);
+  if (hasFailure) return sourceHealth(args.key, 'failed', null, fetchedAt, 'UPSTREAM_UNAVAILABLE');
+  return sourceHealth(args.key, 'delayed', null, fetchedAt, 'NO_SOURCE_ROWS');
+}
+
 async function buildDashboardSnapshot(args: {
   logger: MinimalLogger;
   watchlistRows: WatchlistEntry[];
   effectiveWatchlist: WatchlistEntry[];
   now: Date;
   includeSlowSignals?: boolean;
+  snapshotKey?: string;
 }): Promise<DashboardSnapshot> {
   const { logger, effectiveWatchlist, now, includeSlowSignals = true } = args;
   const baseUrl = process.env.AKSHARE_HTTP_URL ?? 'http://127.0.0.1:8848';
@@ -1153,6 +1404,7 @@ async function buildDashboardSnapshot(args: {
     timeoutMs: DASHBOARD_RANKING_TIMEOUT_MS,
     logger,
   });
+  const calendarPromise = latestExpectedTradingDate(client, now);
   const { compact } = cnDateParts(now);
   const announcementWatchlist = effectiveWatchlist
     .filter((entry) => entry.market === 'A');
@@ -1180,32 +1432,37 @@ async function buildDashboardSnapshot(args: {
     includeSlowSignals
       ? slowSignalClient.getMarketPulse(compact)
       : deferredPulse,
-    Promise.all(effectiveWatchlist.slice(0, 8).map((entry, index) => stockSnapshot(client, entry, index, now))),
+    mapWithConcurrency(effectiveWatchlist.slice(0, 8), 3, (entry, index) =>
+      stockSnapshot(client, entry, index, now)),
     includeSlowSignals
-      ? Promise.all(
-        announcementWatchlist.map(async (entry) => ({
+      ? mapWithConcurrency(
+        announcementWatchlist,
+        3,
+        async (entry) => ({
           entry,
           env: await client.getStockAnnouncements(entry.symbol, cnCompactDaysAgo(now, 7), compact),
-        })),
+        }),
       )
       : deferredAnnouncements,
     includeSlowSignals
-      ? Promise.all(
-        announcementWatchlist.map(async (entry) => ({
+      ? mapWithConcurrency(
+        announcementWatchlist,
+        3,
+        async (entry) => ({
           entry,
           env: await discoveryClient.getStockNews(entry.symbol),
-        })),
+        }),
       )
       : deferredStockNews,
     includeSlowSignals ? rankingClient.getStockRankings('gainers', 8) : deferredRankings,
     includeSlowSignals ? rankingClient.getStockRankings('losers', 8) : deferredRankings,
     includeSlowSignals ? rankingClient.getStockRankings('amount', 8) : deferredRankings,
     includeSlowSignals
-      ? Promise.all([
+      ? mapWithConcurrency([
         discoveryClient.getMarketNews('cn', 1, MARKET_DISCOVERY_PAGE_SIZES['A股要闻']).then((env) => ({ feed: 'A股要闻' as const, env })),
         discoveryClient.getMarketNews('us', 1, MARKET_DISCOVERY_PAGE_SIZES['美股要闻']).then((env) => ({ feed: '美股要闻' as const, env })),
         discoveryClient.getMarketNews('hk', 1, MARKET_DISCOVERY_PAGE_SIZES['港股要闻']).then((env) => ({ feed: '港股要闻' as const, env })),
-      ])
+      ], 3, async (promise) => promise)
       : deferredMarketNews,
   ]);
   const sectors = mapSectors(pulseEnv);
@@ -1239,7 +1496,7 @@ async function buildDashboardSnapshot(args: {
         cachedAt: now.toISOString(),
         message: `真实行情已先展示，${missingMarketPanels.join('、')}正在后台补齐。`,
       };
-  return withFreshness(
+  const snapshot = withFreshness(
     {
       updatedAt: now.toISOString(),
       observedTradeDate: observedTradeDateFromStocks(stocks),
@@ -1256,6 +1513,82 @@ async function buildDashboardSnapshot(args: {
     },
     freshness,
   );
+  const observed = dashboardWithObservedIntraday(snapshot, now);
+  const baseSources = defaultDashboardSourceHealth(observed, now);
+  const sources: StockSourceHealth[] = [
+    baseSources.find((source) => source.key === 'quotes') ??
+      sourceHealth('quotes', 'failed', null, now.toISOString(), 'NO_VERIFIED_QUOTES'),
+    envelopeSourceHealth({ key: 'indices', envelopes: [indexCn], deferred: false }),
+    envelopeSourceHealth({
+      key: 'news',
+      envelopes: [...stockNews.map((item) => item.env), ...marketNews.map((item) => item.env)],
+      deferred: !includeSlowSignals,
+    }),
+    envelopeSourceHealth({
+      key: 'announcements',
+      envelopes: announcements.map((item) => item.env),
+      deferred: !includeSlowSignals,
+      disabled: announcementWatchlist.length === 0,
+    }),
+  ];
+  const calendar = await calendarPromise;
+  const snapshotKey = args.snapshotKey ?? effectiveWatchlist
+    .map((entry) => `${entry.symbol}:${entry.market}:${entry.displayName ?? ''}`)
+    .join('|');
+  const trustedSnapshot = dashboardWithTrust({
+    snapshot: observed,
+    snapshotKey,
+    now,
+    calendar,
+    sources,
+    dataAsOf: observed.observedTradeDate,
+  });
+  logDashboardTrust(logger, trustedSnapshot, now);
+  return trustedSnapshot;
+}
+
+function dashboardWithReconciledTrust(
+  snapshot: DashboardSnapshot,
+  snapshotKey: string,
+  now: Date,
+): DashboardSnapshot {
+  const trust = snapshot.trust;
+  if (!trust) return snapshot;
+  return dashboardWithTrust({
+    snapshot,
+    snapshotKey,
+    now,
+    calendar: {
+      date: trust.latestExpectedTradingDate,
+      status: trust.calendarStatus,
+      fetchedAt: null,
+      isTradingDay: trust.marketSession !== 'non-trading',
+    },
+  });
+}
+
+async function revalidateDashboardTrust(args: {
+  snapshot: DashboardSnapshot;
+  snapshotKey: string;
+  now: Date;
+  logger: MinimalLogger;
+}): Promise<DashboardSnapshot> {
+  const client = new HttpAkshareClient({
+    baseUrl: process.env.AKSHARE_HTTP_URL ?? 'http://127.0.0.1:8848',
+    timeoutMs: DASHBOARD_AKSHARE_TIMEOUT_MS,
+    logger: args.logger,
+  });
+  const calendar = await latestExpectedTradingDate(client, args.now);
+  const trustedSnapshot = dashboardWithTrust({
+    snapshot: args.snapshot,
+    snapshotKey: args.snapshotKey,
+    now: args.now,
+    calendar,
+    sources: args.snapshot.trust?.sources,
+    dataAsOf: args.snapshot.trust?.dataAsOf,
+  });
+  logDashboardTrust(args.logger, trustedSnapshot, args.now);
+  return trustedSnapshot;
 }
 
 function cacheDashboardSnapshot(cacheKey: string, snapshot: DashboardSnapshot, refreshPromise?: Promise<DashboardSnapshot>): void {
@@ -1368,8 +1701,14 @@ function startFullDashboardRefresh(args: {
     effectiveWatchlist: args.effectiveWatchlist,
     now: new Date(),
     includeSlowSignals: true,
+    snapshotKey: args.cacheKey,
   }).then(async (snapshot) => {
-    const merged = withPreservedSlowSignals(snapshot, existing?.snapshot);
+    const now = new Date();
+    const merged = dashboardWithReconciledTrust(
+      withPreservedSlowSignals(snapshot, existing?.snapshot),
+      args.cacheKey,
+      now,
+    );
     cacheDashboardSnapshot(args.cacheKey, merged);
     await persistDashboardSnapshot({
       db: args.db,
@@ -1419,9 +1758,14 @@ function startDashboardRefresh(args: {
     effectiveWatchlist: args.effectiveWatchlist,
     now: new Date(),
     includeSlowSignals: !quickFirst,
+    snapshotKey: args.cacheKey,
   }).then(async (snapshot) => {
     if (quickFirst) {
-      const merged = withPreservedSlowSignals(snapshot, existing?.snapshot);
+      const merged = dashboardWithReconciledTrust(
+        withPreservedSlowSignals(snapshot, existing?.snapshot),
+        args.cacheKey,
+        new Date(),
+      );
       const fullRefreshPromise = startFullDashboardRefresh(args);
       cacheDashboardSnapshot(args.cacheKey, merged, fullRefreshPromise);
       persistDashboardSnapshot({
@@ -1433,18 +1777,21 @@ function startDashboardRefresh(args: {
       }).catch(() => undefined);
       fullRefreshPromise.catch(() => undefined);
       return merged;
-    } else {
-      const merged = withPreservedSlowSignals(snapshot, existing?.snapshot);
-      cacheDashboardSnapshot(args.cacheKey, merged);
-      await persistDashboardSnapshot({
-        db: args.db,
-        logger: args.logger,
-        userInternalId: args.userInternalId,
-        cacheKey: args.cacheKey,
-        snapshot: merged,
-      });
-      return merged;
     }
+    const merged = dashboardWithReconciledTrust(
+      withPreservedSlowSignals(snapshot, existing?.snapshot),
+      args.cacheKey,
+      new Date(),
+    );
+    cacheDashboardSnapshot(args.cacheKey, merged);
+    await persistDashboardSnapshot({
+      db: args.db,
+      logger: args.logger,
+      userInternalId: args.userInternalId,
+      cacheKey: args.cacheKey,
+      snapshot: merged,
+    });
+    return merged;
   }).catch((error) => {
     args.logger.warn(
       { error: error instanceof Error ? error.message : String(error) },
@@ -1497,8 +1844,14 @@ async function resolveDashboardSnapshot(args: {
     }
   }
   const nowMs = Date.now();
+  const now = new Date(nowMs);
   const observedCached = cached?.snapshot
-    ? dashboardWithObservedIntraday(cached.snapshot, new Date())
+    ? await revalidateDashboardTrust({
+        snapshot: dashboardWithObservedIntraday(cached.snapshot, now),
+        snapshotKey: cacheKey,
+        now,
+        logger: args.logger,
+      })
     : undefined;
   const cachedHasDisplayableData = observedCached ? hasDisplayableRealDashboardData(observedCached) : false;
   const shouldRefreshMissingIntraday =
@@ -1537,7 +1890,13 @@ async function resolveDashboardSnapshot(args: {
     if (observedCached && cachedHasDisplayableData) {
       return markRefreshing(observedCached, '行情接口暂未返回，当前展示最近一次真实数据。');
     }
-    return buildPartialDashboardSnapshot(args.watchlistRows, args.effectiveWatchlist);
+    return buildPartialDashboardSnapshot(
+      args.watchlistRows,
+      args.effectiveWatchlist,
+      new Date(),
+      '行情刷新仍在进行，先展示真实关注列表。',
+      cacheKey,
+    );
   }
 }
 
@@ -1630,4 +1989,15 @@ export const __stocksDashboardTest = {
   resolveDashboardSnapshot,
   stockSnapshot,
   withPreservedSlowSignals,
+  dashboardForTrustMode,
+  revalidateDashboardTrust,
+  mapWithConcurrency,
+  withTimeout,
+  dashboardBudgets: {
+    firstPaintMs: DASHBOARD_FIRST_PAINT_BUDGET_MS,
+    akshareMs: DASHBOARD_AKSHARE_TIMEOUT_MS,
+    slowSignalMs: DASHBOARD_SLOW_SIGNAL_TIMEOUT_MS,
+    rankingMs: DASHBOARD_RANKING_TIMEOUT_MS,
+    discoveryMs: DASHBOARD_DISCOVERY_TIMEOUT_MS,
+  },
 };

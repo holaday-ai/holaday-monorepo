@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { config as loadDotenv } from 'dotenv';
 import mysql from 'mysql2/promise';
 import {
+  findDuplicateMigrationNumbers,
   isSkippableAlreadyAppliedError,
   splitMigrationStatements,
 } from './release-db-contract.mjs';
@@ -35,6 +36,10 @@ async function main(): Promise<void> {
       .filter((f) => /^\d{4}_.+\.sql$/.test(f))
       .sort();
     if (files.length === 0) throw new Error(`No migrations found in ${migrationsDir}`);
+    const duplicateNumbers = findDuplicateMigrationNumbers(files);
+    if (duplicateNumbers.length > 0) {
+      throw new Error(`Duplicate numbered migration prefixes: ${duplicateNumbers.join(', ')}`);
+    }
 
     for (const file of files) {
       const raw = await readFile(resolve(migrationsDir, file), 'utf8');

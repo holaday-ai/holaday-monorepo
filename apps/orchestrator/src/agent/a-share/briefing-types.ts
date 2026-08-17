@@ -21,6 +21,8 @@ export interface AkEnvelope<T = Record<string, unknown>> {
   disclaimer: string;
   /** 优雅降级时存在（server.py `_safe`）：接口失败但不抛。 */
   error?: string;
+  /** Stable machine-readable failure code; callers must not parse `error`. */
+  error_code?: string;
 }
 
 /** 个股公告行（巨潮 cninfo，实测列：代码/简称/公告标题/公告时间/公告链接）。 */

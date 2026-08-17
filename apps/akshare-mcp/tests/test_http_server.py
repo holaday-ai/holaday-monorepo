@@ -23,6 +23,26 @@ def test_cached_adapter_preserves_actual_fetch_timestamp():
     assert second["fetched_at"] == first["fetched_at"]
 
 
+def test_trading_calendar_latest_route_preserves_source_and_fetch_timestamp(monkeypatch):
+    monkeypatch.setattr(
+        http_server,
+        "_latest_tradecal",
+        lambda requested: (
+            [{"requested_date": requested, "latest_trading_date": "2026-08-14"}],
+            "akshare:tool_trade_date_hist_sina",
+            "2026-08-16T14:00:00+00:00",
+        ),
+    )
+
+    result = http_server.trading_calendar_latest("2026-08-16")
+
+    assert result["data"] == [
+        {"requested_date": "2026-08-16", "latest_trading_date": "2026-08-14"}
+    ]
+    assert result["source"] == "akshare:tool_trade_date_hist_sina"
+    assert result["fetched_at"] == "2026-08-16T14:00:00+00:00"
+
+
 def test_error_envelope_is_attributed_timestamped_and_sanitized(caplog):
     def fetch():
         raise adp.AkShareUnavailable("upstream token=secret-value")
@@ -50,6 +70,53 @@ def test_health_exposes_interface_error_counters():
     assert after["requests_total"] == before["requests_total"] + 1
     assert after["errors_total"] == before["errors_total"] + 1
     assert after["last_error_source"] == "akshare:fetch"
+
+
+def test_health_counts_upstream_timeouts_without_exposing_raw_errors():
+    before = http_server.health()
+
+    def fetch():
+        raise TimeoutError("socket timed out token=secret-value")
+
+    result = http_server._safe(fetch)
+    after = http_server.health()
+
+    assert result["error_code"] == "UPSTREAM_TIMEOUT"
+    assert after["timeouts_total"] == before["timeouts_total"] + 1
+    assert after["single_flight_timeouts_total"] == before["single_flight_timeouts_total"]
+    assert "secret-value" not in str(after)
+
+
+def test_health_counts_a_timeout_wrapped_by_an_adapter():
+    before = http_server.health()
+
+    def fetch():
+        try:
+            raise TimeoutError("socket timed out token=secret-value")
+        except TimeoutError as exc:
+            raise adp.AkShareUnavailable("source unavailable") from exc
+
+    result = http_server._safe(fetch)
+    after = http_server.health()
+
+    assert result["error_code"] == "UPSTREAM_TIMEOUT"
+    assert after["timeouts_total"] == before["timeouts_total"] + 1
+    assert "secret-value" not in str(after)
+
+
+def test_health_counts_single_flight_wait_timeouts_separately():
+    before = http_server.health()
+
+    def fetch():
+        raise TimeoutError("single-flight wait exceeded 15.000s token=secret-value")
+
+    result = http_server._safe(fetch)
+    after = http_server.health()
+
+    assert result["error_code"] == "SINGLE_FLIGHT_TIMEOUT"
+    assert after["timeouts_total"] == before["timeouts_total"]
+    assert after["single_flight_timeouts_total"] == before["single_flight_timeouts_total"] + 1
+    assert "secret-value" not in str(after)
 
 
 def test_health_exposes_successful_source_fallbacks():
