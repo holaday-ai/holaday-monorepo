@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  canonicalStockScreenCriterion,
   parseStockScreenPrompt,
   validateStockScreenCriteria,
   type StockScreenCriterion,
@@ -108,5 +109,23 @@ describe('validateStockScreenCriteria', () => {
       criterion({ id: 'pe', value: 30 }),
       criterion({ id: 'roe-range', field: 'roe', operator: 'between', value: [8, 15] }),
     ])).toEqual({ ok: true, errors: [] });
+  });
+
+  it('rebuilds display metadata from the field, operator, and value', () => {
+    expect(canonicalStockScreenCriterion(criterion({
+      field: 'roe',
+      operator: 'gt',
+      value: 12,
+      unit: null,
+      label: '立即买入',
+      sourceField: '伪造字段',
+    }))).toMatchObject({
+      field: 'roe',
+      operator: 'gt',
+      value: 12,
+      unit: '%',
+      label: 'ROE高于 12%',
+      sourceField: '净资产收益率',
+    });
   });
 });

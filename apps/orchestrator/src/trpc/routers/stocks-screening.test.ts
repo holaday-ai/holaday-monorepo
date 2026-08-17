@@ -189,4 +189,27 @@ describe('stock screening procedures', () => {
     expect(logged).not.toContain('candidates');
     expect(logged).not.toContain('市盈率不超过 30');
   });
+
+  it('canonicalizes client-authored labels before they reach screening output', async () => {
+    const execute = vi.fn(async () => executeResult());
+    await runTrustedStockScreening({
+      db: snapshotDb([snapshot()]) as never,
+      userId: 7,
+      logger: { info: vi.fn(), warn: vi.fn() },
+      client: {} as never,
+      input: {
+        snapshotId: SNAPSHOT_ID,
+        dataAsOf: DATA_AS_OF,
+        criteria: [criterion({ label: '立即买入', sourceField: '伪造字段' })],
+      },
+      execute,
+    });
+
+    expect(execute).toHaveBeenCalledWith(expect.objectContaining({
+      criteria: [expect.objectContaining({
+        label: '市盈率不超过 30',
+        sourceField: '市盈率TTM',
+      })],
+    }));
+  });
 });

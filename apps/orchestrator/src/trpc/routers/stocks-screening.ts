@@ -6,6 +6,7 @@ import {
   type StockScreeningResult,
 } from '../../stocks/stock-screening-service.js';
 import {
+  canonicalStockScreenCriterion,
   parseStockScreenPrompt,
   validateStockScreenCriteria,
   type StockScreenCriterion,
@@ -88,6 +89,9 @@ export async function runTrustedStockScreening(args: {
     });
   }
   const input = parsedInput.data;
+  const criteria = (input.criteria as StockScreenCriterion[]).map(
+    canonicalStockScreenCriterion,
+  );
   await validateStockTaskContext({
     db: args.db,
     userId: args.userId,
@@ -106,7 +110,7 @@ export async function runTrustedStockScreening(args: {
     client: args.client,
     snapshotId: input.snapshotId,
     dataAsOf: input.dataAsOf,
-    criteria: input.criteria as StockScreenCriterion[],
+    criteria,
   });
   args.logger.info?.(
     {

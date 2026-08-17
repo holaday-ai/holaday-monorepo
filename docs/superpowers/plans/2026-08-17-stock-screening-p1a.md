@@ -271,33 +271,33 @@ git commit -m "feat(stocks): bind screening runs to trusted snapshots"
 - Consumes: `previewScreening`, `runScreening`, and the current dashboard trust envelope.
 - Produces: prompt entry, editable criterion rows, explicit unparsed-clause warning, run confirmation, coverage summary, explanatory candidates, zero-result state, and add-to-watchlist action.
 
-- [ ] **Step 1: Write state RED tests**
+- [x] **Step 1: Write state RED tests**
 
 Test that `needs_input` blocks execution, numeric edits preserve the server criterion field/operator, all missing data renders as “缺少数据”, zero matches never change criteria, and current-trust gating requires both snapshot ID and data date.
 
-- [ ] **Step 2: Run state tests and verify RED**
+- [x] **Step 2: Run state tests and verify RED**
 
 Run: `pnpm --filter @holaday/web-workbench exec vitest run src/components/stocks/stock-screening-state.test.ts`
 
 Expected: FAIL because the state module is missing.
 
-- [ ] **Step 3: Implement the pure state helpers**
+- [x] **Step 3: Implement the pure state helpers**
 
 Create focused helpers for editable values, criterion validation summaries, coverage copy, and match grouping. Do not put parsing rules in the browser.
 
-- [ ] **Step 4: Add layout RED assertions**
+- [x] **Step 4: Add layout RED assertions**
 
 Assert the page imports and renders `StockScreeningWorkbench` after `MarketHighlights`, passes the current `snapshotId/dataAsOf/trustMode`, and exposes an add-to-watchlist callback. Assert the component contains native `title` plus `aria-label` on icon-only controls.
 
-- [ ] **Step 5: Implement the component and integrate it**
+- [x] **Step 5: Implement the component and integrate it**
 
 Use the existing white workbench cards and quiet pink accent. The initial card shows one prompt and examples. Preview renders editable compact criteria; run is a separate explicit action. Results show why each candidate matched, failed, or lacks data, risk warnings, evidence metadata, and coverage limits. The footer states “条件匹配不等于投资建议”. Do not introduce charts, recommendation badges, or a composite score.
 
-- [ ] **Step 6: Verify web GREEN**
+- [x] **Step 6: Verify web GREEN**
 
 Run: `pnpm --filter @holaday/web-workbench exec vitest run src/components/stocks/stock-screening-state.test.ts src/pages/stock-tasks-layout.test.ts src/pages/StockTasksPage.test.ts src/lib/stock-dashboard-trust.test.ts`
 
-- [ ] **Step 7: Commit the web slice**
+- [x] **Step 7: Commit the web slice**
 
 ```bash
 git add apps/web-workbench/src/components/stocks/StockScreeningWorkbench.tsx apps/web-workbench/src/components/stocks/stock-screening-state.ts apps/web-workbench/src/components/stocks/stock-screening-state.test.ts apps/web-workbench/src/pages/StockTasksPage.tsx apps/web-workbench/src/pages/stock-tasks-layout.test.ts

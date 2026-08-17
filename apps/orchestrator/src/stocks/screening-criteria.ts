@@ -117,6 +117,37 @@ function operatorLabel(operator: StockScreenOperator): string {
   }[operator];
 }
 
+export function canonicalStockScreenCriterion(
+  criterion: StockScreenCriterion,
+): StockScreenCriterion {
+  const meta = FIELD_META[criterion.field];
+  let label: string;
+  if (criterion.status === 'needs_input' || criterion.value === null) {
+    const suffix = criterion.operator === 'lte' || criterion.operator === 'lt'
+      ? '上限'
+      : criterion.operator === 'gte' || criterion.operator === 'gt'
+        ? '下限'
+        : '阈值';
+    label = `${meta.label}${suffix}`;
+  } else if (criterion.field === 'exclude_st') {
+    label = criterion.value === true ? '排除 ST' : '不排除 ST';
+  } else if (criterion.field === 'net_profit_3y_positive') {
+    label = criterion.value === true ? '近三年持续盈利' : '近三年并非持续盈利';
+  } else if (criterion.field === 'insider_reduction_recent') {
+    label = criterion.value === false ? '近期无内部人减持' : '近期有内部人减持';
+  } else if (criterion.operator === 'between' && Array.isArray(criterion.value)) {
+    label = `${meta.label}介于 ${criterion.value[0]}–${criterion.value[1]}${meta.unit ?? ''}`;
+  } else {
+    label = `${meta.label}${operatorLabel(criterion.operator)} ${String(criterion.value)}${meta.unit ?? ''}`;
+  }
+  return {
+    ...criterion,
+    unit: meta.unit,
+    label,
+    sourceField: meta.sourceField,
+  };
+}
+
 function parseClause(clause: string): CriterionDraft[] {
   if (/^(?:请)?(?:排除|不要)\s*\*?ST(?:股|股票)?$/i.test(clause)) {
     const meta = FIELD_META.exclude_st;
@@ -213,7 +244,7 @@ export function parseStockScreenPrompt(prompt: string): {
   }
 
   return {
-    criteria: drafts.map((criterion, index) => ({
+    criteria: drafts.map((criterion, index) => canonicalStockScreenCriterion({
       ...criterion,
       id: `${criterion.field}-${index + 1}`,
     })),

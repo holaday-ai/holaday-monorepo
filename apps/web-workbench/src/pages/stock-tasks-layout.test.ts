@@ -136,4 +136,25 @@ describe('stock tasks layout', () => {
     expect(source).toContain('disabled={submitting || !prompt.trim() || stockPromptUnavailable}');
     expect(source).toContain('placeholder={temporalCopy.promptPlaceholder}');
   });
+
+  it('places the transparent screening workbench after highlights with current trust and watchlist action', () => {
+    const source = readFileSync(new URL('./StockTasksPage.tsx', import.meta.url), 'utf8');
+    const component = readFileSync(
+      new URL('../components/stocks/StockScreeningWorkbench.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(source).toContain("import { StockScreeningWorkbench } from '@/components/stocks/StockScreeningWorkbench';");
+    expect(source.indexOf('<MarketHighlights')).toBeLessThan(source.indexOf('<StockScreeningWorkbench'));
+    expect(source.indexOf('<StockScreeningWorkbench')).toBeLessThan(source.indexOf('<DailyBriefing'));
+    expect(source).toContain('snapshotId={dashboard?.trust?.snapshotId ?? null}');
+    expect(source).toContain('dataAsOf={dashboard?.trust?.dataAsOf ?? null}');
+    expect(source).toContain('trustMode={dashboard?.trust?.mode ?? \'unverified\'}');
+    expect(source).toContain('onAddToWatchlist={addScreeningCandidate}');
+    expect(component).toContain('trpc.stocks.previewScreening.query');
+    expect(component).toContain('trpc.stocks.runScreening.mutate');
+    expect(component).toContain('条件匹配不等于投资建议');
+    expect(component).toContain('aria-label=');
+    expect(component).toContain('title=');
+  });
 });

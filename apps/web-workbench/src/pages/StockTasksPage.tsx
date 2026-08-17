@@ -17,6 +17,7 @@ import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { DiscoveryNewsCard } from '@/components/DiscoveryNewsCard';
 import { NewsDetailModal as StockNewsDetailModal } from '@/components/NewsDetailModal';
+import { StockScreeningWorkbench } from '@/components/stocks/StockScreeningWorkbench';
 import { Input } from '@/components/ui/input';
 import {
   Sheet,
@@ -488,6 +489,35 @@ export function StockTasksPage(): JSX.Element {
     }
   }, [loadPageData, resetDiscoveryExtensions, stockForm, toast, watchlistSaving]);
 
+  const addScreeningCandidate = React.useCallback(async (symbol: string, name: string) => {
+    if (watchlistSaving) {
+      toast.show('关注列表正在更新，请稍后再试', 'error');
+      return;
+    }
+    setWatchlistSaving(true);
+    setLoadError(null);
+    try {
+      const result = await trpc.watchlists.add.mutate({
+        symbol,
+        market: 'A',
+        displayName: name,
+      });
+      toast.show(result.already ? `${name} 已在关注列表` : `已关注 ${name}`);
+      if (!result.already) {
+        setBriefingResult(null);
+        resetDiscoveryExtensions();
+        await loadPageData('background');
+      }
+    } catch (err) {
+      const message = pageErrorMessage(err);
+      setLoadError(message);
+      toast.show(message, 'error');
+      throw err;
+    } finally {
+      setWatchlistSaving(false);
+    }
+  }, [loadPageData, resetDiscoveryExtensions, toast, watchlistSaving]);
+
   const removeWatchlistStock = React.useCallback(async (symbol: string) => {
     if (watchlistSaving) return;
     setWatchlistSaving(true);
@@ -723,6 +753,12 @@ export function StockTasksPage(): JSX.Element {
                 canGenerateBriefing={!briefingUnavailable}
                 temporalCopy={temporalCopy}
                 temporalMode={dashboardTrust.tone}
+              />
+              <StockScreeningWorkbench
+                snapshotId={dashboard?.trust?.snapshotId ?? null}
+                dataAsOf={dashboard?.trust?.dataAsOf ?? null}
+                trustMode={dashboard?.trust?.mode ?? 'unverified'}
+                onAddToWatchlist={addScreeningCandidate}
               />
               <DailyBriefing
                 stocks={stocks}
