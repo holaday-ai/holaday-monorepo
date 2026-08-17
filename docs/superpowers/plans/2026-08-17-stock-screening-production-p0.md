@@ -158,6 +158,6 @@
 
   Confirm there is no fallback data, no relaxed criteria, no watchlist write, no unrelated file change, and no secret in the diff.
 
-- [ ] **Step 4: Commit, push, and create a pull request**
+- [x] **Step 4: Commit, push, and create a pull request**
 
   Commit only the plan, tests, cache/smoke changes, and workbench result-retention changes. Push `codex/stock-screening-production-p0` and create a PR against `claude/musing-keller-ae1d05`; do not merge or deploy without the separate authorization gate.
