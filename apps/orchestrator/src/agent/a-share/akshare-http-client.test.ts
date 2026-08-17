@@ -49,6 +49,34 @@ describe('HttpAkshareClient', () => {
     expect(calls[0]).toBe('http://127.0.0.1:8848/index/cn'); // 末尾斜杠已规整
   });
 
+  it('GET /screening-universe → 保留全市场初筛字段并使用 market 熔断组', async () => {
+    const screeningEnv = {
+      data: [{
+        代码: '600519',
+        名称: '贵州茅台',
+        最新价: 1488.5,
+        涨跌幅: 1.2,
+        成交额: 987654321,
+        换手率: 0.75,
+        市盈率TTM: 21.5,
+        市净率: 7.8,
+        总市值原值: 1880000000000,
+        行情时间: '10:05:00',
+      }],
+      count: 1,
+      source: 'sina:Market_Center.getHQNodeData(full-market-screening)',
+      fetched_at: '2026-08-17T02:05:00Z',
+      disclaimer: 'x',
+    };
+    const { fetchImpl, calls } = mockFetch({ '/screening-universe': { body: screeningEnv } });
+    const client = new HttpAkshareClient({ baseUrl: 'http://127.0.0.1:8848', fetchImpl });
+
+    const result = await client.getScreeningUniverse();
+
+    expect(result).toEqual(screeningEnv);
+    expect(calls).toEqual(['http://127.0.0.1:8848/screening-universe']);
+  });
+
   it('各方法打到对应路径（含编码）', async () => {
     const body = { data: [], count: 0, source: 's', fetched_at: 'x', disclaimer: 'y' };
     const { fetchImpl, calls } = mockFetch({

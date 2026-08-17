@@ -35,6 +35,12 @@ import {
   stockSnapshotTrust,
 } from '../../stocks/stock-trust.js';
 import { protectedProcedure, router } from '../trpc.js';
+import {
+  previewStockScreening,
+  previewStockScreeningInputSchema,
+  runStockScreeningInputSchema,
+  runTrustedStockScreening,
+} from './stocks-screening.js';
 
 type Db = typeof import('../../db/client.js').db;
 interface MinimalLogger {
@@ -1933,6 +1939,28 @@ export const stocksRouter = router({
       summary: z.string().trim().max(10_000).optional(),
     }))
     .query(async ({ input }) => resolveNewsDetail(input)),
+
+  previewScreening: protectedProcedure
+    .input(previewStockScreeningInputSchema)
+    .query(({ input }) => previewStockScreening(input.prompt)),
+
+  runScreening: protectedProcedure
+    .input(runStockScreeningInputSchema)
+    .mutation(async ({ ctx, input }) => {
+      const userInternalId = await requireUserId(ctx.db, ctx.userId);
+      const client = new HttpAkshareClient({
+        baseUrl: process.env.AKSHARE_HTTP_URL ?? 'http://127.0.0.1:8848',
+        timeoutMs: 12_000,
+        logger: ctx.logger,
+      });
+      return runTrustedStockScreening({
+        db: ctx.db,
+        userId: userInternalId,
+        logger: ctx.logger,
+        client,
+        input,
+      });
+    }),
 
   searchSymbols: protectedProcedure
     .input(z.object({ query: z.string().trim().min(1).max(32) }))

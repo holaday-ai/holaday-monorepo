@@ -19,11 +19,13 @@ Thin **MCP wrapper over [AkShare](https://akshare.akfamily.xyz/)** for A股
 | `get_northbound_flow()` | 北向资金流向 | 60s |
 | `get_index_quote(market)` | 港/美/A股指数（hk/us/cn） | 60s |
 | `get_stock_rankings(metric, limit)` | A股榜单（gainers/losers/amount） | 60s |
+| `get_screening_universe()` | A股条件选股初筛池（全市场行情/PE/PB/换手率源字段） | 300s |
 | `get_share_unlock(symbol)` | 个股限售解禁（G2） | 3600s |
 
 个股 quote 与分时图共享 `stock_zh_a_minute(sina)` 单股票缓存；榜单使用新浪行情中心
 服务端排序后的 HTTPS 单页真实数据，避免每次冷缓存串行抓取 5500+ 只股票。全市场
-`stock_zh_a_spot(sina)` 只保留给代码名称表预热，以及单股票分钟源失败时的真实快照降级。
+筛选池使用同一新浪行情中心的分页原始字段，后台预热后同时填充代码名称表；
+`stock_zh_a_spot(sina)` 只保留给单股票分钟源失败时的真实快照降级。
 TTL 全部 env 可覆盖（`AKSHARE_MCP_TTL_*`，见 `.env.example`）。
 
 ## 结构
@@ -57,6 +59,7 @@ cd apps/akshare-mcp
 python -m akshare_mcp.http_server
 curl -fsS http://127.0.0.1:8848/healthz
 curl -fsS 'http://127.0.0.1:8848/stock-rankings/gainers?limit=3'
+curl -fsS 'http://127.0.0.1:8848/screening-universe'
 ```
 
 测试（仅缓存层，无需联网）：`pip install -e '.[dev]' && pytest`。

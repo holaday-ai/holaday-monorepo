@@ -30,6 +30,7 @@ import type {
   StockNewsRow,
   StockQuoteRow,
   StockRankingRow,
+  StockScreeningUniverseRow,
   UnlockRow,
   ValuationRow,
   ZtReviewRow,
@@ -257,6 +258,9 @@ export class HttpAkshareClient implements AkshareClient {
     return this.get<StockRankingRow>(
       `/stock-rankings/${encodeURIComponent(metric)}?${qs.toString()}`,
     );
+  }
+  getScreeningUniverse() {
+    return this.get<StockScreeningUniverseRow>('/screening-universe');
   }
   getMarketPulse(date: string, prevDate?: string) {
     const qs = prevDate ? `?prev_date=${encodeURIComponent(prevDate)}` : '';

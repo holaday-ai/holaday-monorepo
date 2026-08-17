@@ -66,6 +66,98 @@ def test_latest_trading_day_rejects_malformed_or_unresolvable_dates(monkeypatch)
         adp.latest_trading_day("2020-01-01")
 
 
+def test_screening_universe_preserves_source_fields_and_excludes_invalid_rows(monkeypatch):
+    pages = {
+        1: [
+            {
+                "symbol": "sh600519",
+                "name": "贵州茅台",
+                "trade": "1488.50",
+                "changepercent": "1.20",
+                "amount": "987654321",
+                "turnoverratio": "0.75",
+                "per": "21.50",
+                "pb": "7.80",
+                "mktcap": "1880000000000",
+                "ticktime": "10:05:00",
+            },
+            {
+                "code": "sz000001",
+                "name": "ST平安",
+                "trade": "11.25",
+                "changepercent": "-0.40",
+                "amount": "123456789",
+                "turnoverratio": "1.25",
+                "per": "6.20",
+                "pb": "0.65",
+                "mktcap": "218000000000",
+                "ticktime": "10:05:01",
+            },
+            {
+                "code": "sh600519",
+                "name": "重复行",
+                "trade": "1400",
+                "changepercent": "0",
+                "amount": "1",
+            },
+            {"code": "bad", "name": "无效代码", "trade": "10", "amount": "100"},
+            {"code": "600000", "name": "无价格", "trade": "0", "amount": "100"},
+        ],
+        2: [],
+    }
+    calls = []
+
+    class _Response:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self._payload
+
+    def fetch(url, *, params, timeout):
+        calls.append((url, dict(params), timeout))
+        return _Response(pages[int(params["page"])])
+
+    clear_cache()
+    monkeypatch.setattr(adp.requests, "get", fetch)
+
+    rows, source = adp.get_screening_universe()
+
+    assert source == "sina:Market_Center.getHQNodeData(full-market-screening)"
+    assert calls[0][1]["sort"] == "amount"
+    assert calls[0][1]["num"] == "80"
+    assert [row["代码"] for row in rows] == ["600519", "000001"]
+    assert rows == [
+        {
+            "代码": "600519",
+            "名称": "贵州茅台",
+            "最新价": 1488.5,
+            "涨跌幅": 1.2,
+            "成交额": 987654321.0,
+            "换手率": 0.75,
+            "市盈率TTM": 21.5,
+            "市净率": 7.8,
+            "总市值原值": 1880000000000.0,
+            "行情时间": "10:05:00",
+        },
+        {
+            "代码": "000001",
+            "名称": "ST平安",
+            "最新价": 11.25,
+            "涨跌幅": -0.4,
+            "成交额": 123456789.0,
+            "换手率": 1.25,
+            "市盈率TTM": 6.2,
+            "市净率": 0.65,
+            "总市值原值": 218000000000.0,
+            "行情时间": "10:05:01",
+        },
+    ]
+
+
 class _MinuteAk:
     def __init__(self, pd, rows):
         self._pd = pd

@@ -250,6 +250,7 @@ _ztsum = _cached_adapter(adp.TTL_LHB)(adp.get_zt_pool_summary)
 _fund = _cached_adapter(adp.TTL_FUND)(adp.get_fundamentals)
 _val = _cached_adapter(adp.TTL_VAL)(adp.get_valuation)
 _rank = _cached_adapter(adp.TTL_RANK)(adp.get_stock_rankings)
+_screening_universe = _cached_adapter(adp.TTL_SPOT)(adp.get_screening_universe)
 
 app = FastAPI(title="akshare-cn-http", docs_url=None, redoc_url=None)
 
@@ -319,6 +320,12 @@ def intraday(symbol: str) -> dict[str, Any]:
 def stock_rankings(metric: str, limit: int = 20) -> dict[str, Any]:
     """metric: gainers | losers | amount。换手率源暂不可得，不提供假数据。"""
     return _safe(_rank, metric, limit)
+
+
+@app.get("/screening-universe")
+def screening_universe() -> dict[str, Any]:
+    """全市场筛选初筛快照；只返回新浪源提供的行情/估值字段。"""
+    return _safe(_screening_universe)
 
 
 @app.get("/dragon-tiger/{start_date}")
@@ -425,12 +432,16 @@ def risk_warm() -> dict[str, Any]:
 
 
 def _warm_market_caches_once() -> None:
-    """Warm independent fast-ranking, symbol-table, and risk snapshots."""
+    """Warm independent ranking, screening-universe, and risk snapshots."""
     _safe(_rank, "gainers", 8)
     try:
-        adp.refresh_symbol_table()
+        # The screening universe also hydrates the symbol table, avoiding a
+        # second 5,500-row Sina crawl during the same prewarm cycle.
+        screening = _safe(_screening_universe)
+        if isinstance(screening, dict) and screening.get("error"):
+            adp.refresh_symbol_table()
     except Exception:  # noqa: BLE001 - each cache must warm independently
-        _LOGGER.exception("akshare symbol-table prewarm failed")
+        _LOGGER.exception("akshare screening-universe prewarm failed")
     try:
         adp.warm_risk_tables()
     except Exception:  # noqa: BLE001 - each cache must warm independently
