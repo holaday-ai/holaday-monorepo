@@ -118,25 +118,25 @@ export function validateStockScreenCriteria(criteria: StockScreenCriterion[]): {
 };
 ```
 
-- [ ] **Step 1: Write parser RED tests**
+- [x] **Step 1: Write parser RED tests**
 
 Cover `排除ST`, `市盈率低于30`, `PB不超过3`, `资产负债率低于50%`, `ROE高于10%`, `近三年持续盈利`, and `近期无减持`. Assert `市盈率不过高` becomes `needs_input` with `value: null`; unrelated prose stays in `unparsedClauses`.
 
-- [ ] **Step 2: Run parser tests and verify RED**
+- [x] **Step 2: Run parser tests and verify RED**
 
 Run: `pnpm --filter @holaday/orchestrator exec vitest run src/stocks/screening-criteria.test.ts`
 
 Expected: FAIL because the module is missing.
 
-- [ ] **Step 3: Implement minimal deterministic parsing and validation**
+- [x] **Step 3: Implement minimal deterministic parsing and validation**
 
 Use explicit regular expressions and stable criterion IDs derived from field plus occurrence order. Deduplicate exact duplicate criteria, reject non-finite numbers, reject inverted `between` bounds, and reject any `needs_input` criterion at run time.
 
-- [ ] **Step 4: Verify parser GREEN**
+- [x] **Step 4: Verify parser GREEN**
 
 Run the command from Step 2. Expected: all parser and validation tests pass.
 
-- [ ] **Step 5: Commit the parser slice**
+- [x] **Step 5: Commit the parser slice**
 
 ```bash
 git add apps/orchestrator/src/stocks/screening-criteria.ts apps/orchestrator/src/stocks/screening-criteria.test.ts
