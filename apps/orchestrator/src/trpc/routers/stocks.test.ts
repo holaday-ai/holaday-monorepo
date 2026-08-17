@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { resetAkshareCircuitBreakersForTests } from '../../agent/a-share/akshare-http-client.js';
 import { __stocksDashboardTest } from './stocks.js';
 
 const disclaimer = '数据来源 AkShare 聚合，仅供信息参考，不构成任何投资建议，不预测股价。';
@@ -17,7 +18,97 @@ describe('stocks dashboard snapshot', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.useRealTimers();
+    resetAkshareCircuitBreakersForTests();
     __stocksDashboardTest.dashboardCache.clear();
+  });
+
+  it('limits dashboard watchlist work to three concurrent items', async () => {
+    let active = 0;
+    let maxActive = 0;
+    const values = await __stocksDashboardTest.mapWithConcurrency(
+      [1, 2, 3, 4, 5, 6, 7, 8],
+      3,
+      async (value) => {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        active -= 1;
+        return value * 2;
+      },
+    );
+
+    expect(maxActive).toBeLessThanOrEqual(3);
+    expect(values).toEqual([2, 4, 6, 8, 10, 12, 14, 16]);
+  });
+
+  it('never runs more than three watchlist quote requests concurrently', async () => {
+    const symbols = Array.from({ length: 8 }, (_, index) => `60000${index + 1}`);
+    let activeQuotes = 0;
+    let maxActiveQuotes = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/trading-calendar/latest') {
+        return new Response(JSON.stringify(envelope([{
+          requested_date: url.searchParams.get('on_or_before'),
+          latest_trading_date: '2026-08-14',
+        }])));
+      }
+      if (url.pathname.startsWith('/quote/')) {
+        const symbol = url.pathname.split('/').at(-1);
+        activeQuotes += 1;
+        maxActiveQuotes = Math.max(maxActiveQuotes, activeQuotes);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        activeQuotes -= 1;
+        return new Response(JSON.stringify(envelope([{
+          代码: symbol,
+          名称: symbol,
+          最新价: 10,
+          涨跌幅: 1,
+        }])));
+      }
+      if (url.pathname.startsWith('/kline/')) {
+        return new Response(JSON.stringify(envelope([
+          { 日期: '2026-08-13', 收盘: 9.9, 涨跌幅: 0 },
+          { 日期: '2026-08-14', 收盘: 10, 涨跌幅: 1 },
+        ])));
+      }
+      return new Response(JSON.stringify(envelope([])));
+    });
+
+    await __stocksDashboardTest.buildDashboardSnapshot({
+      logger: { warn: vi.fn() },
+      watchlistRows: symbols.map((symbol) => ({ symbol, market: 'A' as const, displayName: symbol })),
+      effectiveWatchlist: symbols.map((symbol) => ({ symbol, market: 'A' as const, displayName: symbol })),
+      now: new Date('2026-08-16T14:00:00.000Z'),
+      includeSlowSignals: false,
+    });
+
+    expect(maxActiveQuotes).toBeLessThanOrEqual(3);
+  });
+
+  it('bounds first paint and every slow dashboard stage to 12 seconds or less', async () => {
+    vi.useFakeTimers();
+    expect(__stocksDashboardTest.dashboardBudgets).toEqual({
+      firstPaintMs: 5_500,
+      akshareMs: 8_000,
+      slowSignalMs: 12_000,
+      rankingMs: 12_000,
+      discoveryMs: 12_000,
+    });
+    const quickTimeout = __stocksDashboardTest.withTimeout(
+      new Promise<never>(() => undefined),
+      __stocksDashboardTest.dashboardBudgets.firstPaintMs,
+    );
+    const slowTimeout = __stocksDashboardTest.withTimeout(
+      new Promise<never>(() => undefined),
+      __stocksDashboardTest.dashboardBudgets.slowSignalMs,
+    );
+    const quickAssertion = expect(quickTimeout).rejects.toThrow('timeout after 5500ms');
+    const slowAssertion = expect(slowTimeout).rejects.toThrow('timeout after 12000ms');
+    await vi.advanceTimersByTimeAsync(5_500);
+    await quickAssertion;
+    await vi.advanceTimersByTimeAsync(6_500);
+    await slowAssertion;
   });
 
   it('sorts discovery announcements by publication time and keeps all real items within the larger feed window', () => {
@@ -746,6 +837,232 @@ describe('stocks dashboard snapshot', () => {
     expect(requestedPaths.some((path) => path.startsWith('/market-pulse'))).toBe(false);
     expect(requestedPaths.some((path) => path.startsWith('/announcements'))).toBe(false);
     expect(requestedPaths.some((path) => path.startsWith('/stock-rankings'))).toBe(false);
+  });
+
+  it('marks an older quote date historical against the verified exchange calendar', async () => {
+    const info = vi.fn();
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/trading-calendar/latest') {
+        return new Response(JSON.stringify(envelope([
+          {
+            requested_date: url.searchParams.get('on_or_before'),
+            latest_trading_date: '2026-08-14',
+          },
+        ])));
+      }
+      if (url.pathname === '/index/cn') {
+        return new Response(JSON.stringify(envelope([])));
+      }
+      if (url.pathname === '/kline/603528') {
+        return new Response(JSON.stringify(envelope([
+          { 日期: '2026-08-08', 收盘: 6.31, 涨跌幅: -0.31, 成交额: 60_000_000 },
+          { 日期: '2026-08-11', 收盘: 6.38, 涨跌幅: 1.11, 成交额: 70_000_000 },
+        ])));
+      }
+      if (url.pathname === '/intraday/603528') {
+        return new Response(JSON.stringify(envelope([
+          { 时间: '2026-08-11 09:30:00', 最新价: 6.32 },
+          { 时间: '2026-08-11 15:00:00', 最新价: 6.38 },
+        ])));
+      }
+      if (url.pathname === '/quote/603528') {
+        return new Response(JSON.stringify(envelope([
+          { 代码: 'sh603528', 名称: '多伦科技', 最新价: 6.38, 涨跌幅: 1.11, 成交额: 70_000_000 },
+        ])));
+      }
+      throw new Error(`unexpected path ${url.pathname}`);
+    });
+
+    const snapshot = await __stocksDashboardTest.buildDashboardSnapshot({
+      logger: { warn: vi.fn(), info },
+      watchlistRows: [{ symbol: '603528', market: 'A', displayName: '多伦科技' }],
+      effectiveWatchlist: [{ symbol: '603528', market: 'A', displayName: '多伦科技' }],
+      now: new Date('2026-08-16T14:00:00.000Z'),
+      includeSlowSignals: false,
+      snapshotKey: '1:603528:A:多伦科技',
+    });
+
+    expect(snapshot.trust).toMatchObject({
+      mode: 'historical',
+      calendarStatus: 'verified',
+      latestExpectedTradingDate: '2026-08-14',
+      dataAsOf: '2026-08-11',
+      marketTimezone: 'Asia/Shanghai',
+      marketSession: 'non-trading',
+    });
+    expect(snapshot.trust?.sources).toContainEqual(expect.objectContaining({
+      key: 'quotes',
+      status: 'healthy',
+      dataAsOf: '2026-08-11',
+    }));
+    expect(snapshot.trust?.evidenceIds).toContain('quote:603528:2026-08-11');
+    expect(info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        snapshotId: snapshot.trust?.snapshotId,
+        latestExpectedTradingDate: '2026-08-14',
+        dataAsOf: '2026-08-11',
+        trustMode: 'historical',
+        snapshotAgeMs: 0,
+        sourceStatuses: expect.arrayContaining([
+          expect.objectContaining({ key: 'quotes', status: 'healthy' }),
+        ]),
+      }),
+      'stocks-dashboard: trust snapshot',
+    );
+  });
+
+  it('preserves the snapshot id after the persisted JSON is reloaded and revalidated', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/trading-calendar/latest') {
+        return new Response(JSON.stringify(envelope([
+          {
+            requested_date: url.searchParams.get('on_or_before'),
+            latest_trading_date: '2026-08-14',
+          },
+        ])));
+      }
+      if (url.pathname === '/index/cn') return new Response(JSON.stringify(envelope([])));
+      if (url.pathname === '/kline/603528') {
+        return new Response(JSON.stringify(envelope([
+          { 日期: '2026-08-13', 收盘: 6.31, 涨跌幅: -0.31, 成交额: 60_000_000 },
+          { 日期: '2026-08-14', 收盘: 6.38, 涨跌幅: 1.11, 成交额: 70_000_000 },
+        ])));
+      }
+      if (url.pathname === '/intraday/603528') {
+        return new Response(JSON.stringify(envelope([
+          { 时间: '2026-08-14 09:30:00', 最新价: 6.32 },
+          { 时间: '2026-08-14 15:00:00', 最新价: 6.38 },
+        ])));
+      }
+      if (url.pathname === '/quote/603528') {
+        return new Response(JSON.stringify(envelope([
+          { 代码: 'sh603528', 名称: '多伦科技', 最新价: 6.38, 涨跌幅: 1.11, 成交额: 70_000_000 },
+        ])));
+      }
+      throw new Error(`unexpected path ${url.pathname}`);
+    });
+    const now = new Date('2026-08-16T14:00:00.000Z');
+    const snapshotKey = '1:603528:A:多伦科技';
+    const built = await __stocksDashboardTest.buildDashboardSnapshot({
+      logger: { warn: vi.fn() },
+      watchlistRows: [{ symbol: '603528', market: 'A', displayName: '多伦科技' }],
+      effectiveWatchlist: [{ symbol: '603528', market: 'A', displayName: '多伦科技' }],
+      now,
+      includeSlowSignals: false,
+      snapshotKey,
+    });
+    const reloaded = JSON.parse(JSON.stringify(built));
+
+    const revalidated = await __stocksDashboardTest.revalidateDashboardTrust({
+      snapshot: reloaded,
+      snapshotKey,
+      now,
+      logger: { warn: vi.fn() },
+    });
+
+    expect(fetchMock).toHaveBeenCalled();
+    expect(revalidated.trust?.snapshotId).toBe(built.trust?.snapshotId);
+    expect(revalidated.trust?.mode).toBe('current');
+  });
+
+  it('reports failed quote and news sources instead of calling the dashboard fresh', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/trading-calendar/latest') {
+        return new Response(JSON.stringify(envelope([
+          {
+            requested_date: url.searchParams.get('on_or_before'),
+            latest_trading_date: '2026-08-14',
+          },
+        ])));
+      }
+      return new Response(JSON.stringify({ error: 'upstream unavailable' }), { status: 503 });
+    });
+
+    const snapshot = await __stocksDashboardTest.buildDashboardSnapshot({
+      logger: { warn: vi.fn() },
+      watchlistRows: [{ symbol: '603528', market: 'A', displayName: '多伦科技' }],
+      effectiveWatchlist: [{ symbol: '603528', market: 'A', displayName: '多伦科技' }],
+      now: new Date('2026-08-16T14:00:00.000Z'),
+      includeSlowSignals: true,
+      snapshotKey: '1:603528:A:多伦科技',
+    });
+
+    expect(snapshot.freshness.status).toBe('partial');
+    expect(snapshot.trust).toMatchObject({ mode: 'unavailable' });
+    expect(snapshot.trust?.sources).toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: 'quotes', status: 'failed', errorCode: 'NO_VERIFIED_QUOTES' }),
+      expect.objectContaining({ key: 'news', status: 'failed', errorCode: 'UPSTREAM_UNAVAILABLE' }),
+    ]));
+  });
+
+  it('removes quote numbers and charts when a persisted snapshot is outside the safety window', () => {
+    const stock = {
+      symbol: '603528',
+      name: '多伦科技',
+      market: 'A' as const,
+      price: '6.38',
+      changePct: 1.11,
+      signal: '强势' as const,
+      report: '待生成' as const,
+      spark: [6.32, 6.38],
+      sparkLabels: ['2026-08-11 09:30:00', '2026-08-11 15:00:00'],
+      sparkKind: 'intraday' as const,
+      sparkBaseline: 6.31,
+      sparkTradeDate: '2026-08-11',
+      tradeDate: '2026-08-11',
+      turnoverAmount: 70_000_000,
+      averageTurnoverAmount: 60_000_000,
+      volume: 10_000,
+      averageVolume: 9_000,
+      volumeRatio: 1.11,
+      volumeSignal: '接近均量' as const,
+      newsCount: 1,
+      note: '来源 AkShare',
+    };
+    const snapshot = {
+      updatedAt: '2026-08-01T08:00:00.000Z',
+      observedTradeDate: '2026-08-01',
+      source: 'akshare' as const,
+      isFallbackWatchlist: false,
+      watchlistStocks: [stock],
+      marketIndices: [{ name: '上证指数', price: '3634.44', changePct: 0.13, turnover: '5000.00亿元' }],
+      sectors: [{ name: '半导体', changePct: 3.2, leader: '兆易创新', flow: '领涨', spark: [1, 2] }],
+      starStocks: [stock],
+      temperature: null,
+      news: [],
+      leaders: [],
+      leaderboards: { gainers: [], losers: [], amount: [] },
+      freshness: { status: 'stale' as const, cachedAt: '2026-08-01T08:00:00.000Z' },
+      trust: {
+        snapshotId: 'stkshot_old',
+        generatedAt: '2026-08-01T08:00:00.000Z',
+        marketTimezone: 'Asia/Shanghai' as const,
+        marketSession: 'closed' as const,
+        latestExpectedTradingDate: '2026-08-14',
+        dataAsOf: '2026-08-01',
+        mode: 'unavailable' as const,
+        calendarStatus: 'verified' as const,
+        sources: [],
+        evidenceIds: [],
+      },
+    };
+
+    const safe = __stocksDashboardTest.dashboardForTrustMode(snapshot);
+
+    expect(safe.watchlistStocks[0]).toMatchObject({
+      price: '—',
+      changePct: 0,
+      signal: '待观察',
+      spark: [],
+      turnoverAmount: null,
+      volumeRatio: null,
+    });
+    expect(safe.marketIndices).toEqual([]);
+    expect(safe.sectors).toEqual([]);
+    expect(safe.starStocks).toEqual([]);
   });
 
   it('keeps realtime stock cards visible when daily kline is unavailable', async () => {

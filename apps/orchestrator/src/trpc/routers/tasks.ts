@@ -152,6 +152,12 @@ import { users } from '../../db/schema/users.js';
 import { EvidenceArtifactRepository } from '../../evidence/evidence-artifact-repository.js';
 import { routeTaskEvidenceOnDelete } from '../../evidence/evidence-deletion-service.js';
 import { writeLedgerToDb } from '../../evidence/ledger-write-service.js';
+import { SnapshotAkshareClient } from '../../stocks/snapshot-akshare-client.js';
+import {
+  type ValidatedStockTaskContext,
+  publicStockTaskContext,
+  validateStockTaskContext,
+} from '../../stocks/stock-task-context.js';
 import {
   finalizeClaim as finalizeTaskCreateClaim,
   recordClaim as claimTaskCreate,
@@ -467,6 +473,13 @@ const anthropicForResolver: Anthropic | null = appEnv.ANTHROPIC_API_KEY ? new An
 
 const taskIdInput = z.object({ taskId: z.string().min(1) });
 
+export const stockTaskContextInput = z.object({
+  snapshotId: z.string().regex(/^stkshot_[a-f0-9]{24}$/),
+  dataAsOf: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  trustMode: z.enum(['current', 'delayed', 'historical']),
+  evidenceIds: z.array(z.string().min(1).max(160)).max(50),
+});
+
 const createInput = z.object({
   intent: z.string().min(1).max(4_000),
   /**
@@ -475,6 +488,7 @@ const createInput = z.object({
    * receive the user's exact wording.
    */
   taskSource: z.enum(['stock_dashboard']).optional(),
+  stockContext: stockTaskContextInput.optional(),
   clientRequestId: z
     .string()
     .min(8)
@@ -1145,6 +1159,25 @@ export const tasksRouter = router({
         );
       },
       run: async () => {
+    let validatedStockContext: ValidatedStockTaskContext | null = null;
+    if (input.taskSource === 'stock_dashboard') {
+      if (!input.stockContext) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: '股票任务缺少可信快照，请刷新股市任务页面后重试。',
+        });
+      }
+      validatedStockContext = await validateStockTaskContext({
+        db: ctx.db,
+        userId: userRow.id,
+        input: input.stockContext,
+        intent: input.intent,
+        logger: ctx.logger,
+      });
+    }
+    const stockTaskSourceContext = validatedStockContext
+      ? (validatedStockContext as unknown as Record<string, unknown>)
+      : null;
     const taskSkillId = resolveTaskSkillContext(input, userRow.selectedSkills);
     const videoAllowed =
       VIDEO_CREATION_ALLOWLIST.size === 0 || VIDEO_CREATION_ALLOWLIST.has(ctx.userId);
@@ -2375,10 +2408,10 @@ export const tasksRouter = router({
     // the matcher hijacks it (bug: "按这个周报模板填充…" → answered as stock 600415).
     // widen（BOSS 批准，④ 验收关闭）：ASHARE_QA_ALLOWLIST 为空 = 全量用户可用（flag on）；
     // 非空 = 仅名单内（灰度）。
-        const ashareQaAllowed =
+    const ashareQaAllowed =
           ASHARE_QA_ALLOWLIST.size === 0 || ASHARE_QA_ALLOWLIST.has(ctx.userId);
     if (
-      appEnv.ASHARE_QA_ENABLED &&
+      (appEnv.ASHARE_QA_ENABLED || validatedStockContext !== null) &&
       ashareQaHandlesMode(executionMode) &&
       anthropicForResolver &&
       ashareQaAllowed
@@ -2386,14 +2419,29 @@ export const tasksRouter = router({
       const { resolveAshareQa, resolveAshareInContext } = await import(
         '../../agent/a-share/ashare-qa-matcher.js'
       );
-      const { HttpAkshareClient } = await import('../../agent/a-share/akshare-http-client.js');
       const { listWatchlistForUser } = await import('../../agent/a-share/briefing-service.js');
-      const wl = await listWatchlistForUser(ctx.db, userRow.id);
-      const watchlist = wl.map((w) => ({ symbol: w.symbol, displayName: w.displayName }));
-      const aksClient = new HttpAkshareClient({
-        baseUrl: process.env.AKSHARE_HTTP_URL ?? 'http://127.0.0.1:8848',
-        logger: ctx.logger,
-      });
+      const watchlist = validatedStockContext
+        ? validatedStockContext.snapshotPayload.watchlistStocks.map((stock) => ({
+            symbol: stock.symbol,
+            displayName: typeof stock.name === 'string' ? stock.name : null,
+          }))
+        : (await listWatchlistForUser(ctx.db, userRow.id)).map((stock) => ({
+            symbol: stock.symbol,
+            displayName: stock.displayName,
+          }));
+      const aksClient = validatedStockContext
+        ? new SnapshotAkshareClient(validatedStockContext.snapshotPayload)
+        : new (await import('../../agent/a-share/akshare-http-client.js')).HttpAkshareClient({
+            baseUrl: process.env.AKSHARE_HTTP_URL ?? 'http://127.0.0.1:8848',
+            logger: ctx.logger,
+          });
+      const stockAnalysisNow = validatedStockContext
+        ? new Date(`${validatedStockContext.dataAsOf}T07:00:00.000Z`)
+        : new Date();
+      const publicValidatedStockContext = publicStockTaskContext(validatedStockContext);
+      const stockAnswerPrefix = validatedStockContext
+        ? `分析基于 ${validatedStockContext.dataAsOf} 数据。\n\n`
+        : '';
       const searchFn = async (q: string) => {
         const env = await aksClient.searchSymbol(q);
         return (env.data ?? [])
@@ -2410,7 +2458,7 @@ export const tasksRouter = router({
         // 上下文内：命中个股 → 个股 lane；指数/大盘问句 → 指数 lane；命中信号但无个股/非
         // 指数 → 引导兜底；无信号 → 放行通用。
         const r = await resolveAshareInContext(
-          { intent: input.intent, watchlist, now: new Date() },
+          { intent: input.intent, watchlist, now: stockAnalysisNow },
           searchFn,
         );
         ashareQaMatch = r.match;
@@ -2423,7 +2471,7 @@ export const tasksRouter = router({
             intent: input.intent,
             roleId: taskSkillId ?? null,
             watchlist,
-            now: new Date(),
+            now: stockAnalysisNow,
           },
           searchFn,
         );
@@ -2438,6 +2486,7 @@ export const tasksRouter = router({
             intent: input.intent,
             roleId: dispatchRoleId,
             opusUsed: false,
+            ...(stockTaskSourceContext ? { sourceContext: stockTaskSourceContext } : {}),
           },
         );
         ctx.logger.info(
@@ -2518,19 +2567,19 @@ export const tasksRouter = router({
                 // P3 F 走势组 P1：腿A K线波动总结开关（默认 OFF，零新增 LLM）。
                 perfTrend: appEnv.ASHARE_PERF_TREND_ENABLED,
                 logger: ctx.logger,
-                now: new Date(),
+                now: stockAnalysisNow,
                 context: { userId: ctx.userId, taskId },
               },
               ashareQaMatch,
             );
-            answer = r.answer;
+            answer = `${stockAnswerPrefix}${r.answer}`;
             ctx.logger.info(
               { taskId, degraded: r.degraded, reason: r.reason, interpreted: r.interpreted },
               'ashare-qa: lane done',
             );
           } catch (err) {
             ctx.logger.error({ err, taskId }, 'ashare-qa: lane failed');
-            answer = '抱歉，A股问答处理失败，请稍后重试。';
+            answer = `${stockAnswerPrefix}抱歉，A股问答处理失败，请稍后重试。`;
             terminalStatus = 'failed';
           }
           try {
@@ -2542,7 +2591,13 @@ export const tasksRouter = router({
                   status: 'completed',
                   summary: answer,
                   tickCount: 1,
-                  metadata: { executionMode: 'generate', lane: 'ashare_qa' },
+                  metadata: {
+                    executionMode: 'generate',
+                    lane: 'ashare_qa',
+                    ...(publicValidatedStockContext
+                      ? { stockContext: publicValidatedStockContext }
+                      : {}),
+                  },
                 });
                 asharePersisted = persisted.persisted;
               } else {
@@ -2550,7 +2605,13 @@ export const tasksRouter = router({
                   status: 'failed',
                   reason: answer,
                   tickCount: 1,
-                  metadata: { executionMode: 'generate', lane: 'ashare_qa' },
+                  metadata: {
+                    executionMode: 'generate',
+                    lane: 'ashare_qa',
+                    ...(publicValidatedStockContext
+                      ? { stockContext: publicValidatedStockContext }
+                      : {}),
+                  },
                 });
                 asharePersisted = persisted.persisted;
               }
@@ -2595,6 +2656,7 @@ export const tasksRouter = router({
             intent: input.intent,
             roleId: dispatchRoleId,
             opusUsed: false,
+            ...(stockTaskSourceContext ? { sourceContext: stockTaskSourceContext } : {}),
           },
         );
         ctx.logger.info(
@@ -2606,10 +2668,10 @@ export const tasksRouter = router({
           let answer: string;
           let terminalStatus: 'completed' | 'failed' = 'completed';
           try {
-            answer = await buildIndexCard({ client: aksClient, now: new Date() });
+            answer = `${stockAnswerPrefix}${await buildIndexCard({ client: aksClient, now: stockAnalysisNow })}`;
           } catch (err) {
             ctx.logger.error({ err, taskId }, 'ashare-index: lane failed');
-            answer = '抱歉，A股大盘指数查询处理失败，请稍后重试。';
+            answer = `${stockAnswerPrefix}抱歉，A股大盘指数查询处理失败，请稍后重试。`;
             terminalStatus = 'failed';
           }
           try {
@@ -2621,7 +2683,13 @@ export const tasksRouter = router({
                   status: 'completed',
                   summary: answer,
                   tickCount: 1,
-                  metadata: { executionMode: 'generate', lane: 'ashare_index' },
+                  metadata: {
+                    executionMode: 'generate',
+                    lane: 'ashare_index',
+                    ...(publicValidatedStockContext
+                      ? { stockContext: publicValidatedStockContext }
+                      : {}),
+                  },
                 });
                 indexPersisted = persisted.persisted;
               } else {
@@ -2629,7 +2697,13 @@ export const tasksRouter = router({
                   status: 'failed',
                   reason: answer,
                   tickCount: 1,
-                  metadata: { executionMode: 'generate', lane: 'ashare_index' },
+                  metadata: {
+                    executionMode: 'generate',
+                    lane: 'ashare_index',
+                    ...(publicValidatedStockContext
+                      ? { stockContext: publicValidatedStockContext }
+                      : {}),
+                  },
                 });
                 indexPersisted = persisted.persisted;
               }
@@ -2665,6 +2739,7 @@ export const tasksRouter = router({
       // 通用路径（如「帮我写周报」不误拦）。
       if (guidanceNeeded) {
         const { ASHARE_QA_GUIDANCE } = await import('../../agent/a-share/ashare-qa-runner.js');
+        const guidanceAnswer = `${stockAnswerPrefix}${ASHARE_QA_GUIDANCE}`;
         const taskId = newExternalId('task');
         const repo = new TaskRepository(ctx.db);
         await repo.insertTask(
@@ -2674,6 +2749,7 @@ export const tasksRouter = router({
             intent: input.intent,
             roleId: dispatchRoleId,
             opusUsed: false,
+            ...(stockTaskSourceContext ? { sourceContext: stockTaskSourceContext } : {}),
           },
         );
         ctx.logger.info(
@@ -2687,9 +2763,15 @@ export const tasksRouter = router({
             if (taskInternalId != null) {
               const persisted = await repo.persistVisionOutcome(taskId, {
                 status: 'completed',
-                summary: ASHARE_QA_GUIDANCE,
+                summary: guidanceAnswer,
                 tickCount: 1,
-                metadata: { executionMode: 'generate', lane: 'ashare_qa_guidance' },
+                metadata: {
+                  executionMode: 'generate',
+                  lane: 'ashare_qa_guidance',
+                  ...(publicValidatedStockContext
+                    ? { stockContext: publicValidatedStockContext }
+                    : {}),
+                },
               });
               guidancePersisted = persisted.persisted;
             }
@@ -2698,7 +2780,7 @@ export const tasksRouter = router({
                 type: 'server.task.terminal',
                 taskId,
                 status: 'completed',
-                summary: ASHARE_QA_GUIDANCE,
+                summary: guidanceAnswer,
               });
             }
           } catch (err) {
@@ -2712,6 +2794,12 @@ export const tasksRouter = router({
           executionMode: 'generate' as const,
         };
       }
+    }
+    if (validatedStockContext) {
+      throw new TRPCError({
+        code: 'SERVICE_UNAVAILABLE',
+        message: '可信股票任务执行器暂不可用，请稍后重试；任务不会改用实时行情或通用搜索。',
+      });
     }
     // ===== end a-share QA fork =====
 
@@ -7955,6 +8043,7 @@ export const tasksRouter = router({
           // fail indicator without re-fetching detail.
           verificationPassed: tasksTable.verificationPassed,
           failureLevel: tasksTable.failureLevel,
+          sourceContext: tasksTable.sourceContext,
         })
         .from(tasksTable)
         .where(and(...conds))
@@ -8067,6 +8156,7 @@ export const tasksRouter = router({
           completedAt: r.completedAt,
           verificationPassed: r.verificationPassed,
           failureLevel: r.failureLevel,
+          stockContext: publicStockTaskContext(r.sourceContext),
         })),
         nextCursor:
           rows.length === input.limit
@@ -8182,6 +8272,7 @@ export const tasksRouter = router({
         starred: Boolean(taskRow.starred),
         starredAt: taskRow.starredAt,
         projectId: projectExternalId,
+        stockContext: publicStockTaskContext(taskRow.sourceContext),
         result: annotateTaskResultAttachmentAvailability(
           normalizeOutput(taskRow.result),
           availableAttachmentIds,

@@ -4,6 +4,8 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
+import pytest
+
 from akshare_mcp.cache import TTLCache, cached, clear_cache
 
 
@@ -98,3 +100,28 @@ def test_cached_single_flights_concurrent_cold_miss():
         assert [future.result(timeout=2) for future in futures] == ["quote:600519"] * 8
 
     assert calls["n"] == 1
+
+
+def test_cached_follower_timeout_is_bounded_without_canceling_owner():
+    clear_cache()
+    started = threading.Event()
+    release = threading.Event()
+
+    @cached(ttl_seconds=10, wait_timeout_seconds=0.05)
+    def fetch(symbol):
+        started.set()
+        assert release.wait(timeout=2)
+        return f"quote:{symbol}"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        owner = pool.submit(fetch, "600519")
+        assert started.wait(timeout=1)
+        follower = pool.submit(fetch, "600519")
+        began = time.monotonic()
+        try:
+            with pytest.raises(TimeoutError, match="single-flight wait exceeded"):
+                follower.result(timeout=1)
+            assert time.monotonic() - began < 0.5
+        finally:
+            release.set()
+        assert owner.result(timeout=1) == "quote:600519"

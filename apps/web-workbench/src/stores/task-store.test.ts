@@ -1002,11 +1002,22 @@ describe('selectTask detail hydration', () => {
     } as never);
     listQuery.mockResolvedValueOnce({ tasks: [], nextCursor: null } as never);
 
-    await useTaskStore.getState().createStockTask('leopold的基金最近发生了什么事？');
+    await useTaskStore.getState().createStockTask('解释多伦科技当日变化', {
+      snapshotId: 'stkshot_0123456789abcdef01234567',
+      dataAsOf: '2026-08-11',
+      trustMode: 'historical',
+      evidenceIds: ['quote:603528:2026-08-11'],
+    });
 
     expect(createMutate).toHaveBeenCalledWith({
-      intent: 'leopold的基金最近发生了什么事？',
+      intent: '解释多伦科技当日变化',
       taskSource: 'stock_dashboard',
+      stockContext: {
+        snapshotId: 'stkshot_0123456789abcdef01234567',
+        dataAsOf: '2026-08-11',
+        trustMode: 'historical',
+        evidenceIds: ['quote:603528:2026-08-11'],
+      },
       clientRequestId: expect.stringMatching(/^local_pending_/),
       viewportProfile: 'desktop',
     });

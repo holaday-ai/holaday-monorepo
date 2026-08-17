@@ -99,7 +99,9 @@ describe('stock tasks layout', () => {
   it('uses dedicated stock routing without rewriting the user prompt', () => {
     const source = readFileSync(new URL('./StockTasksPage.tsx', import.meta.url), 'utf8');
 
-    expect(source).toContain('createStockTask(trimmed)');
+    expect(source).toContain('createStockTask(trimmed, stockTaskContext)');
+    expect(source).toContain('snapshotId: trust.snapshotId');
+    expect(source).toContain('evidenceIds: trust.evidenceIds.slice(0, 50)');
     expect(source).not.toContain('function toStockIntent');
   });
 
@@ -109,5 +111,29 @@ describe('stock tasks layout', () => {
     expect(source).toContain('dashboardTrust.dataDateLabel');
     expect(source).toContain('dashboardTrust.refreshLabel');
     expect(source).not.toContain('trustMessage: string | null');
+  });
+
+  it('threads server-authored temporal semantics through every numeric market panel', () => {
+    const source = readFileSync(new URL('./StockTasksPage.tsx', import.meta.url), 'utf8');
+
+    expect(source).toContain('stockDashboardTrustState({ trust: dashboard?.trust })');
+    expect(source).toContain('stockTemporalCopy(dashboardTrust.tone, dashboard?.trust?.dataAsOf ?? null)');
+    expect(source).toContain('{dashboardTrust.statusLabel}');
+    expect(source).toContain('temporalCopy={temporalCopy}');
+    expect(source).toContain('title={temporalCopy.briefingTitle}');
+    expect(source).toContain('title={temporalCopy.opportunityTitle}');
+    expect(source).toContain('{temporalCopy.priceLabel}');
+    expect(source).toContain('title={temporalCopy.starTitle}');
+    expect(source).toContain('meta={temporalCopy.starMeta}');
+    expect(source).toContain("temporalMode === 'historical' ? '当时动态：' : '最新动态：'");
+    expect(source).toContain("temporalMode === 'historical' ? '当时公告：' : '最新公告：'");
+  });
+
+  it('blocks prompt submission only when no trustworthy snapshot can support a stock-data task', () => {
+    const source = readFileSync(new URL('./StockTasksPage.tsx', import.meta.url), 'utf8');
+
+    expect(source).toContain("dashboardTrust.tone === 'unavailable' || dashboardTrust.tone === 'unverified'");
+    expect(source).toContain('disabled={submitting || !prompt.trim() || stockPromptUnavailable}');
+    expect(source).toContain('placeholder={temporalCopy.promptPlaceholder}');
   });
 });

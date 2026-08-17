@@ -10,6 +10,62 @@ from akshare_mcp import adapters as adp
 from akshare_mcp.cache import clear_cache
 
 
+class _TradingCalendarAk:
+    def __init__(self, pd, dates):
+        self._pd = pd
+        self._dates = dates
+        self.calls = 0
+
+    def tool_trade_date_hist_sina(self):
+        self.calls += 1
+        return self._pd.DataFrame({"trade_date": self._dates})
+
+
+@pytest.mark.parametrize(
+    ("requested", "expected"),
+    [
+        ("2026-08-16", "2026-08-14"),
+        ("20260816", "2026-08-14"),
+        ("2026-10-08", "2026-09-30"),
+    ],
+)
+def test_latest_trading_day_resolves_weekends_compact_dates_and_holidays(
+    monkeypatch, requested, expected
+):
+    pd = pytest.importorskip("pandas")
+    fake = _TradingCalendarAk(
+        pd,
+        ["2026-08-13", "2026-08-14", "2026-09-29", "2026-09-30", "2026-10-09"],
+    )
+    monkeypatch.setattr(adp, "ak", fake)
+
+    records, source = adp.latest_trading_day(requested)
+
+    assert records == [
+        {
+            "requested_date": (
+                datetime.datetime.strptime(requested, "%Y%m%d").strftime("%Y-%m-%d")
+                if "-" not in requested
+                else requested
+            ),
+            "latest_trading_date": expected,
+        }
+    ]
+    assert source == "akshare:tool_trade_date_hist_sina"
+    assert fake.calls == 1
+
+
+def test_latest_trading_day_rejects_malformed_or_unresolvable_dates(monkeypatch):
+    pd = pytest.importorskip("pandas")
+    monkeypatch.setattr(adp, "ak", _TradingCalendarAk(pd, ["2026-08-14"]))
+
+    with pytest.raises(adp.AkShareUnavailable):
+        adp.latest_trading_day("16/08/2026")
+
+    with pytest.raises(adp.AkShareUnavailable):
+        adp.latest_trading_day("2020-01-01")
+
+
 class _MinuteAk:
     def __init__(self, pd, rows):
         self._pd = pd

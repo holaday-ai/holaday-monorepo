@@ -91,6 +91,7 @@ const REQUIRED_COLUMNS: Record<string, readonly string[]> = {
     'awaiting_question',
     'awaiting_kind',
     'result',
+    'source_context',
     'error_code',
     'error_message',
     'original_summary',

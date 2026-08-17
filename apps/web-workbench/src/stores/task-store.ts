@@ -30,6 +30,13 @@ import type { VideoCreationOptions } from '@/types/video';
  */
 export type TaskCreationSource = 'stock_dashboard';
 
+export interface StockTaskContextInput {
+  snapshotId: string;
+  dataAsOf: string;
+  trustMode: 'current' | 'delayed' | 'historical';
+  evidenceIds: string[];
+}
+
 /**
  * Single source of truth for the task list + selection. Data flows in
  * from two places:
@@ -257,9 +264,13 @@ export interface TaskStore {
     skillSelection?: UiSkillSelection,
     imageOptions?: ImageCreationOptions,
     taskSource?: TaskCreationSource,
+    stockContext?: StockTaskContextInput,
   ): Promise<{ taskId: string } | { error: string }>;
   /** Submit from the stock dashboard without mutating the user's wording. */
-  createStockTask(intent: string): Promise<{ taskId: string } | { error: string }>;
+  createStockTask(
+    intent: string,
+    context: StockTaskContextInput,
+  ): Promise<{ taskId: string } | { error: string }>;
   deleteTask(taskId: string): Promise<{ ok: true } | { error: string }>;
   renameTask(taskId: string, title: string): Promise<{ ok: true } | { error: string }>;
   replyToTask(
@@ -667,6 +678,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         const awaitingKind = normalizeAwaitingKind(detail.awaitingKind);
         const executionMode = extractExecutionMode(detail.result);
         const failedChecks = extractFailedChecks(detail.result);
+        const stockContext = normalizeStockTaskContext(detail.stockContext);
         // Codex Pack A4 — verifier verdict columns from tasks.detail.
         const detailVerification = detail as typeof detail & {
           verificationPassed?: boolean | null;
@@ -719,6 +731,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
                     ...(attachments ? { attachments } : {}),
                     ...(expertWorkflowId ? { expertWorkflowId } : {}),
                     ...(expertMode ? { expertMode } : {}),
+                    ...(stockContext ? { stockContext } : {}),
                     failedChecks,
                     verificationPassed,
                     failureLevel,
@@ -750,6 +763,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
             ...(attachments ? { attachments } : {}),
             ...(expertWorkflowId ? { expertWorkflowId } : {}),
             ...(expertMode ? { expertMode } : {}),
+            ...(stockContext ? { stockContext } : {}),
             failedChecks,
             verificationPassed,
             failureLevel,
@@ -1249,6 +1263,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     skillSelection,
     imageOptions,
     taskSource,
+    stockContext,
   ) {
     // Reject intents that are obviously control commands typed into
     // the wrong box (e.g. user typing "停止" into the composer
@@ -1299,6 +1314,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         ...(videoOptions ? { videoOptions } : {}),
         ...(imageOptions ? { imageOptions } : {}),
         ...(taskSource ? { taskSource } : {}),
+        ...(stockContext ? { stockContext } : {}),
         viewportProfile: pickedViewportProfile,
       });
       // Optimistic insert at the top so the UI feels instant; the next
@@ -1361,7 +1377,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     }
   },
 
-  async createStockTask(intent) {
+  async createStockTask(intent, context) {
     return get().createTask(
       intent,
       undefined,
@@ -1373,6 +1389,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       undefined,
       undefined,
       'stock_dashboard',
+      context,
     );
   },
 
@@ -2576,6 +2593,9 @@ export function toUiTask(row: ListRow): UiTask {
   const finalViewport = normalizeFinalViewport(
     resultObj.finalViewport ?? metadata.finalViewport,
   );
+  const stockContext = normalizeStockTaskContext(
+    (row as { stockContext?: unknown }).stockContext ?? metadata.stockContext,
+  );
   const errorText =
     typeof row.errorMessage === 'string'
       ? humaniseTaskError(row.errorMessage)
@@ -2617,6 +2637,7 @@ export function toUiTask(row: ListRow): UiTask {
     ...(finalUrl ? { finalUrl } : {}),
     ...(finalViewport ? { finalViewport } : {}),
     ...(awaitingKind ? { awaitingKind } : {}),
+    ...(stockContext ? { stockContext } : {}),
     // tRPC serializes Date to string over the wire; coerce back.
     createdAt: new Date(safeTaskListDate((row as { createdAt?: unknown }).createdAt) ?? 0),
     modelLabel: opusUsed ? 'opus' : 'sonnet',
@@ -2633,6 +2654,28 @@ export function toUiTask(row: ListRow): UiTask {
 function safeNullableTaskListText(value: unknown): string | null {
   const text = safeTaskListText(value);
   return text || null;
+}
+
+function normalizeStockTaskContext(value: unknown): StockTaskContextInput | undefined {
+  if (!isTaskListRecord(value)) return undefined;
+  const snapshotId = safeTaskListText(value.snapshotId);
+  const dataAsOf = safeTaskListText(value.dataAsOf);
+  const trustMode = value.trustMode;
+  if (
+    !/^stkshot_[a-f0-9]{24}$/.test(snapshotId) ||
+    !/^\d{4}-\d{2}-\d{2}$/.test(dataAsOf) ||
+    (trustMode !== 'current' && trustMode !== 'delayed' && trustMode !== 'historical') ||
+    !Array.isArray(value.evidenceIds) ||
+    value.evidenceIds.some((id) => typeof id !== 'string')
+  ) {
+    return undefined;
+  }
+  return {
+    snapshotId,
+    dataAsOf,
+    trustMode,
+    evidenceIds: value.evidenceIds,
+  };
 }
 
 function normalizeAwaitingKind(value: unknown): UiAwaitingUser['awaitingKind'] {
