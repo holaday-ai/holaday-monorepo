@@ -136,7 +136,7 @@ Run: `pnpm typecheck && git diff --check && git status --short`
 
 Expected: typecheck and diff check pass; status contains only intentional release files.
 
-- [ ] **Step 5: Push and create a Ready PR**
+- [x] **Step 5: Push and create a Ready PR**
 
 Push `codex/stock-trust-release-reconcile`, create a PR targeting `claude/musing-keller-ae1d05`, and confirm GitHub reports it mergeable.
 
@@ -149,22 +149,22 @@ Push `codex/stock-trust-release-reconcile`, create a PR targeting `claude/musing
 - Consumes: merged active production branch.
 - Produces: production AkShare, orchestrator, schema, and SPA at the reconciled commit.
 
-- [ ] **Step 1: Merge the Ready reconciliation PR**
+- [x] **Step 1: Merge the Ready reconciliation PR**
 
 Confirm no failing checks, then merge without deleting the worktree branch.
 
-- [ ] **Step 2: Deploy AkShare through the guarded script**
+- [x] **Step 2: Deploy AkShare through the guarded script**
 
 Run: `BRANCH=claude/musing-keller-ae1d05 ./scripts/deploy-current.sh akshare`
 
 Expected: ancestor gate, health check, and real rankings smoke pass.
 
-- [ ] **Step 3: Deploy application through the guarded script**
+- [x] **Step 3: Deploy application through the guarded script**
 
 Run: `BRANCH=claude/musing-keller-ae1d05 ./scripts/deploy-current.sh application`
 
 Expected: migration `0047`, schema verification, orchestrator restart, dual-origin SPA upload, and both public health checks pass.
 
-- [ ] **Step 4: Verify production trust behavior**
+- [x] **Step 4: Verify production trust behavior**
 
 Confirm production HEAD, schema column `tasks.source_context`, AkShare health counters, public health endpoints, and authenticated stock dashboard freshness/trust-state behavior. Stop and report if any P0 trust gate fails.

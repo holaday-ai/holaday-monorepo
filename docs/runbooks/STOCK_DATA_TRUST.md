@@ -167,7 +167,7 @@ WHERE external_id = '<task-external-id>';
 
 - 回滚前端布局或新文案时，服务端信任门禁必须继续启用。
 - 不得回滚 `stock-trust.ts` 的日期模式判断、`stock-task-context.ts` 的快照所有权/证据校验，或任务 `source_context` 的持久化。
-- `0046_tasks_source_context.sql` 是 additive 迁移。应用回滚时保留该列，不执行 `DROP COLUMN`。
+- `0047_tasks_source_context.sql` 是 additive 迁移。应用回滚时保留该列，不执行 `DROP COLUMN`。
 - 即使临时关闭新版页面文案，也必须保留：`current` 日期相等、历史当前时态拒绝、七天不可用、任务绑定快照四项门禁。
 
 ### 顺序
