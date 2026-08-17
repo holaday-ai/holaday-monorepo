@@ -73,6 +73,15 @@ fake_payload() {
       minute_one="2026-07-31 10:05:00"
       minute_two="2026-07-31 10:06:00"
       ;;
+    screening_delays_rankings)
+      quote_time="2026-07-31 10:09:00"
+      quote_fetched="2026-07-31T02:08:30+00:00"
+      minute_fetched="2026-07-31T02:08:30+00:00"
+      gainers_fetched="2026-07-31T02:05:30+00:00"
+      amount_fetched="2026-07-31T02:05:30+00:00"
+      minute_one="2026-07-31 10:08:00"
+      minute_two="2026-07-31 10:09:00"
+      ;;
     lunch_break)
       quote_time="2026-07-31 11:30:00"
       quote_fetched="2026-07-31T04:14:30+00:00"
@@ -172,10 +181,16 @@ fake_payload() {
       printf '%s\n' '{"status":"ok","adapter_ready":true}'
       ;;
     */stock-rankings/gainers*)
+      if [[ "$scenario" == screening_delays_rankings && -f "${SMOKE_TEST_SCREENING_STATE:?}" ]]; then
+        gainers_fetched="2026-07-31T02:08:30+00:00"
+      fi
       printf '{"data":[%s],"count":1,"source":"%s","fetched_at":"%s"}\n' \
         "$gainers_row" "$gainers_source" "$gainers_fetched"
       ;;
     */stock-rankings/amount*)
+      if [[ "$scenario" == screening_delays_rankings && -f "${SMOKE_TEST_SCREENING_STATE:?}" ]]; then
+        amount_fetched="2026-07-31T02:08:30+00:00"
+      fi
       printf '{"data":[%s],"count":1,"source":"%s","fetched_at":"%s"}\n' \
         "$amount_row" "$amount_source" "$amount_fetched"
       ;;
@@ -196,6 +211,9 @@ fake_payload() {
         "$minute_one" "$minute_two" "$source" "$minute_fetched"
       ;;
     */screening-universe)
+      if [[ "$scenario" == screening_delays_rankings ]]; then
+        : >"${SMOKE_TEST_SCREENING_STATE:?}"
+      fi
       if [[ "$scenario" == screening_never_ready ]]; then
         printf '%s\n' '{"error":"真实数据源响应超时","error_code":"SINGLE_FLIGHT_TIMEOUT","data":[],"count":0,"source":"akshare:get_screening_universe","fetched_at":"2026-07-31T02:04:30+00:00"}'
         return
@@ -228,7 +246,11 @@ fi
 if [[ "$(basename "$0")" == "date" ]]; then
   state_file="${SMOKE_TEST_DATE_STATE:?}"
   if [[ -f "$state_file" ]]; then
-    printf '%s\n' '2026-07-31T10:06:00+0800'
+    if [[ "${SMOKE_TEST_SCENARIO:-}" == screening_delays_rankings ]]; then
+      printf '%s\n' '2026-07-31T10:09:00+0800'
+    else
+      printf '%s\n' '2026-07-31T10:06:00+0800'
+    fi
   else
     : >"$state_file"
     printf '%s\n' '2026-07-31T10:05:00+0800'
@@ -267,15 +289,17 @@ run_smoke() {
 }
 
 run_smoke_auto_clock() {
+  local scenario="${1:-cross_minute_clock}"
   (
     export PATH="$TMP_DIR:$PATH"
-    export SMOKE_TEST_SCENARIO=cross_minute_clock
-    export SMOKE_TEST_DATE_STATE="$TMP_DIR/date-state"
+    export SMOKE_TEST_SCENARIO="$scenario"
+    export SMOKE_TEST_DATE_STATE="$TMP_DIR/date-$scenario-state"
+    export SMOKE_TEST_SCREENING_STATE="$TMP_DIR/screening-$scenario-state"
     export AKSHARE_SMOKE_REQUIRE_INTRADAY=auto
     export AKSHARE_SMOKE_MAX_FETCH_AGE_SECONDS=120
     export AKSHARE_SMOKE_MAX_MARKET_LAG_SECONDS=300
     export AKSHARE_SMOKE_MIN_UNIVERSE_COUNT=2
-    rm -f "$SMOKE_TEST_DATE_STATE"
+    rm -f "$SMOKE_TEST_DATE_STATE" "$SMOKE_TEST_SCREENING_STATE"
     unset AKSHARE_SMOKE_NOW
     bash "$SMOKE_SCRIPT"
   ) 2>&1
@@ -327,10 +351,21 @@ assert_auto_clock_passes() {
   grep -Fq 'akshare-mcp smoke OK' <<<"$output" || fail "auto clock did not report success"
 }
 
+assert_delayed_screening_does_not_stale_rankings() {
+  local output
+  if ! output="$(run_smoke_auto_clock screening_delays_rankings)"; then
+    echo "$output" >&2
+    fail "slow screening should not stale rankings fetched afterward"
+  fi
+  grep -Fq 'akshare-mcp smoke OK' <<<"$output" \
+    || fail "slow-screening clock did not report success"
+}
+
 assert_passes open_session '2026-07-31T10:05:00+08:00' active
 assert_passes open_session '2026-07-31T10:05:00+0800' active
 assert_passes screening_cold_follower '2026-07-31T10:05:00+08:00' active
 assert_auto_clock_passes
+assert_delayed_screening_does_not_stale_rankings
 assert_fails_with future_minute '2026-07-31T10:05:00+08:00' 'future minute point'
 assert_fails_with future_weekend '2026-08-02T10:05:00+08:00' 'future minute point'
 assert_fails_with stale_quote_fetch '2026-07-31T10:05:00+08:00' 'quote fetched_at is stale'

@@ -104,14 +104,14 @@ wait_for_screening_universe() {
 echo "→ akshare smoke: ${BASE_URL}/healthz"
 curl_json_to_file /healthz 5 "$TMP_DIR/health.json"
 
+echo "→ akshare smoke: full-market screening universe"
+wait_for_screening_universe "$TMP_DIR/screening-universe.json"
+
 echo "→ akshare smoke: gainers ranking"
 curl_json_to_file '/stock-rankings/gainers?limit=1' "$RANK_TIMEOUT" "$TMP_DIR/gainers.json"
 
 echo "→ akshare smoke: amount ranking"
 curl_json_to_file '/stock-rankings/amount?limit=1' "$RANK_TIMEOUT" "$TMP_DIR/amount.json"
-
-echo "→ akshare smoke: full-market screening universe"
-wait_for_screening_universe "$TMP_DIR/screening-universe.json"
 
 TODAY="${NOW_SHANGHAI:0:10}"
 echo "→ akshare smoke: A-share trading calendar for $TODAY"
