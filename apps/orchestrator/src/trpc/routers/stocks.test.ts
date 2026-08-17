@@ -967,7 +967,7 @@ describe('stocks dashboard snapshot', () => {
     expect(revalidated.trust?.mode).toBe('current');
   });
 
-  it('keeps verified quotes actionable while a refresh preserves secondary market data', async () => {
+  it('keeps verified quotes actionable while a refresh preserves secondary data and intraday lines', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-08-17T11:58:00.000Z'));
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
@@ -991,10 +991,7 @@ describe('stocks dashboard snapshot', () => {
         ])));
       }
       if (url.pathname === '/intraday/603528') {
-        return new Response(JSON.stringify(envelope([
-          { 时间: '2026-08-17 09:30:00', 最新价: 6.38, 成交额: 1_000_000 },
-          { 时间: '2026-08-17 15:00:00', 最新价: 6.40, 成交额: 35_186_100 },
-        ])));
+        return new Response(JSON.stringify(envelope([])));
       }
       if (url.pathname === '/quote/603528') {
         return new Response(JSON.stringify(envelope([
@@ -1120,6 +1117,12 @@ describe('stocks dashboard snapshot', () => {
 
     const refreshed = __stocksDashboardTest.dashboardCache.get(cacheKey)?.snapshot;
     expect(refreshed?.marketIndices).toEqual(snapshot.marketIndices);
+    expect(refreshed?.watchlistStocks[0]).toMatchObject({
+      price: '6.40',
+      spark: stock.spark,
+      sparkLabels: stock.sparkLabels,
+      sparkTradeDate: '2026-08-17',
+    });
     expect(refreshed?.freshness).toMatchObject({
       status: 'partial',
     });
@@ -1809,7 +1812,7 @@ describe('stocks dashboard snapshot', () => {
       sparkKind: 'intraday',
       sparkBaseline: 12.8,
     });
-    expect(merged.freshness.status).toBe('stale');
+    expect(merged.freshness.status).toBe('partial');
     expect(merged.freshness.message).toContain('分时线');
   });
 

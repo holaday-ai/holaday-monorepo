@@ -1684,9 +1684,7 @@ function withPreservedSlowSignals(snapshot: DashboardSnapshot, previous?: Dashbo
     leaderboards,
     freshness: {
       ...snapshot.freshness,
-      status: shouldPreserveWatchlistStocks || shouldPreserveWatchlistSparks
-        ? 'stale'
-        : 'partial',
+      status: shouldPreserveWatchlistStocks ? 'stale' : 'partial',
       message: `行情已更新，${preservedLabels.join('、')}保留最近一次真实数据。`,
     },
   };
