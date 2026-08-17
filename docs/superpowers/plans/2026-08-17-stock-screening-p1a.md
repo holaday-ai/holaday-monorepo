@@ -312,7 +312,7 @@ git commit -m "feat(stocks): add transparent screening workbench"
 **Interfaces:**
 - Produces: a verified branch and Ready PR targeting `claude/musing-keller-ae1d05`.
 
-- [ ] **Step 1: Run full affected test suites**
+- [x] **Step 1: Run full affected test suites**
 
 Run:
 
@@ -324,7 +324,7 @@ PYTHONPATH=apps/akshare-mcp /Users/yaleiqi/holaday-monorepo/apps/akshare-mcp/.ve
 
 Expected: all test suites pass.
 
-- [ ] **Step 2: Run typechecks and builds**
+- [x] **Step 2: Run typechecks and builds**
 
 Run:
 
@@ -336,7 +336,7 @@ pnpm --filter @holaday/web-workbench build
 
 Expected: all commands exit 0.
 
-- [ ] **Step 3: Run release and diff gates**
+- [x] **Step 3: Run release and diff gates**
 
 Run:
 
@@ -348,9 +348,9 @@ git status --short
 
 Expected: release migration contracts pass, diff check is clean, and only intentional files are present.
 
-- [ ] **Step 4: Perform authenticated browser verification**
+- [x] **Step 4: Perform browser verification of the production component**
 
-Open `/stocks`, confirm preview-before-run, ambiguous threshold blocking, explanatory results, zero-result behavior, add-to-watchlist action, current-trust gating, and a 390px viewport with no clipping. Do not create a real production screening run during local verification.
+Render the exact production workbench in a temporary local harness and confirm preview-before-run, ambiguous threshold blocking, explanatory results, risk/evidence expansion, current-trust gating, and a 390px viewport with no clipping. The local development account could not authenticate against the current local database, so no real add-to-watchlist mutation was sent; the production callback remains covered by source integration and automated tests. Remove the harness and screenshots after verification.
 
 - [ ] **Step 5: Push and open a Ready PR**
 
