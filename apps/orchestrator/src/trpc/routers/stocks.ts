@@ -35,6 +35,7 @@ import {
   stockSnapshotTrust,
 } from '../../stocks/stock-trust.js';
 import { protectedProcedure, router } from '../trpc.js';
+import { runTrustedStockRiskRadar, stockRiskRadarInputSchema } from './stocks-risk-radar.js';
 import {
   previewStockScreening,
   previewStockScreeningInputSchema,
@@ -1952,6 +1953,25 @@ export const stocksRouter = router({
         logger: ctx.logger,
       });
       return runTrustedStockScreening({
+        db: ctx.db,
+        userId: userInternalId,
+        logger: ctx.logger,
+        client,
+        input,
+      });
+    }),
+
+  riskRadar: protectedProcedure
+    .input(stockRiskRadarInputSchema)
+    .query(async ({ ctx, input }) => {
+      const userInternalId = await requireUserId(ctx.db, ctx.userId);
+      const client = new HttpAkshareClient({
+        baseUrl: process.env.AKSHARE_HTTP_URL ?? 'http://127.0.0.1:8848',
+        timeoutMs: 12_000,
+        riskTimeoutMs: 12_000,
+        logger: ctx.logger,
+      });
+      return runTrustedStockRiskRadar({
         db: ctx.db,
         userId: userInternalId,
         logger: ctx.logger,

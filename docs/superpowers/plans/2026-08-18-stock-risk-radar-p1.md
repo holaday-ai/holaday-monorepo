@@ -225,11 +225,11 @@ export async function runTrustedStockRiskRadar(args: {
 
 - Adds `stocks.riskRadar` as a protected query.
 
-- [ ] **Step 1: Write failing trust-bound procedure tests**
+- [x] **Step 1: Write failing trust-bound procedure tests**
 
 Copy the compact fake snapshot DB pattern from `stocks-screening.test.ts`. Assert that current, delayed, and historical owned snapshots reach `execute`; mismatched ID/date/mode, unavailable snapshots, and another user's snapshot fail before `execute` or any AkShare call. Assert only snapshot watchlist stocks reach the service and logger metadata excludes facts, names, and raw errors.
 
-- [ ] **Step 2: Run the procedure tests and verify RED**
+- [x] **Step 2: Run the procedure tests and verify RED**
 
 Run:
 
@@ -239,7 +239,7 @@ pnpm --filter @holaday/orchestrator exec vitest run src/trpc/routers/stocks-risk
 
 Expected: FAIL because the helper and router procedure do not exist.
 
-- [ ] **Step 3: Implement validation and route wiring**
+- [x] **Step 3: Implement validation and route wiring**
 
 Call:
 
@@ -269,7 +269,7 @@ riskRadar: protectedProcedure
   })),
 ```
 
-- [ ] **Step 4: Run procedure, stock-context, and screening boundary tests**
+- [x] **Step 4: Run procedure, stock-context, and screening boundary tests**
 
 Run:
 
@@ -279,7 +279,7 @@ pnpm --filter @holaday/orchestrator exec vitest run src/trpc/routers/stocks-risk
 
 Expected: PASS with no live HTTP calls.
 
-- [ ] **Step 5: Commit the trusted procedure**
+- [x] **Step 5: Commit the trusted procedure**
 
 ```bash
 git add apps/orchestrator/src/trpc/routers/stocks-risk-radar.ts apps/orchestrator/src/trpc/routers/stocks-risk-radar.test.ts apps/orchestrator/src/trpc/routers/stocks.ts
