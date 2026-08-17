@@ -448,6 +448,6 @@ git add docs/superpowers/plans/2026-08-18-stock-risk-radar-p1.md
 git commit -m "docs(stocks): record risk radar verification"
 ```
 
-- [ ] **Step 5: Finish the branch**
+- [x] **Step 5: Finish the branch**
 
 Use `superpowers:verification-before-completion`, `superpowers:requesting-code-review`, and `superpowers:finishing-a-development-branch`. Push `codex/stock-risk-radar-p1` and create a draft pull request with exact test evidence. Do not merge or deploy in this task.
