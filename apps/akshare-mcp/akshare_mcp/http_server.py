@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import functools
 import logging
+import os
 import threading
 import time
 from datetime import datetime, timezone
@@ -141,13 +142,18 @@ def _envelope(
 
 def _cached_adapter(
     ttl_seconds: float,
+    *,
+    stale_while_revalidate_seconds: float = 0.0,
 ) -> Callable[[Callable[..., tuple[list[dict[str, Any]], str]]], Callable[..., tuple[list[dict[str, Any]], str, str]]]:
     """Cache adapter data together with the time the upstream fetch completed."""
 
     def decorator(
         fn: Callable[..., tuple[list[dict[str, Any]], str]],
     ) -> Callable[..., tuple[list[dict[str, Any]], str, str]]:
-        @cached(ttl_seconds)
+        @cached(
+            ttl_seconds,
+            stale_while_revalidate_seconds=stale_while_revalidate_seconds,
+        )
         @functools.wraps(fn)
         def fetch(*args: Any, **kwargs: Any) -> tuple[list[dict[str, Any]], str, str]:
             records, source = fn(*args, **kwargs)
@@ -250,7 +256,13 @@ _ztsum = _cached_adapter(adp.TTL_LHB)(adp.get_zt_pool_summary)
 _fund = _cached_adapter(adp.TTL_FUND)(adp.get_fundamentals)
 _val = _cached_adapter(adp.TTL_VAL)(adp.get_valuation)
 _rank = _cached_adapter(adp.TTL_RANK)(adp.get_stock_rankings)
-_screening_universe = _cached_adapter(adp.TTL_SPOT)(adp.get_screening_universe)
+_screening_universe = _cached_adapter(
+    adp.TTL_SPOT,
+    stale_while_revalidate_seconds=max(
+        0.0,
+        float(os.environ.get("AKSHARE_MCP_SCREENING_STALE_SECONDS", "900")),
+    ),
+)(adp.get_screening_universe)
 
 app = FastAPI(title="akshare-cn-http", docs_url=None, redoc_url=None)
 
@@ -448,12 +460,22 @@ def _warm_market_caches_once() -> None:
         _LOGGER.exception("akshare risk-table prewarm failed")
 
 
+def _market_cache_refresh_interval_seconds() -> float:
+    """Keep the expensive screening snapshot fresh before its TTL expires."""
+    fresh_ttl = max(float(adp.TTL_SPOT), 1.0)
+    default_interval = min(240.0, fresh_ttl * 0.8)
+    configured = float(
+        os.environ.get(
+            "AKSHARE_MCP_MARKET_PREWARM_INTERVAL_SECONDS",
+            str(default_interval),
+        )
+    )
+    return min(max(configured, 0.1), fresh_ttl * 0.9)
+
+
 @app.on_event("startup")
 def _prewarm_risk_on_startup() -> None:
-    """启动后台预热风险表 + 周期重热(<TTL_RISK 保持热)。daemon 线程，**不阻塞 startup**
-    （服务立即起、慢 fetch 挪后台）；单轮失败仅跳过、服务照常。对齐 BOSS 方案 A。"""
-    import threading
-    import time
+    """启动后台预热市场快照与风险表，daemon 线程不阻塞 startup。"""
 
     def _loop() -> None:
         while True:
@@ -461,15 +483,13 @@ def _prewarm_risk_on_startup() -> None:
                 _warm_market_caches_once()
             except Exception:  # noqa: BLE001 - 预热失败不影响服务
                 _LOGGER.exception("akshare background prewarm failed")
-            time.sleep(5 * 3600)  # < TTL_RISK(6h)，周期重热
+            time.sleep(_market_cache_refresh_interval_seconds())
 
     threading.Thread(target=_loop, daemon=True).start()
 
 
 def main() -> None:
     """Entry point — 仅监听本机回环，由同机 orchestrator 直取。"""
-    import os
-
     import uvicorn
 
     port = int(os.environ.get("AKSHARE_HTTP_PORT", "8848"))

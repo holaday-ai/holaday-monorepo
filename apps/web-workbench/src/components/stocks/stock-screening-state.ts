@@ -91,15 +91,11 @@ export function canRunStockScreening(
   );
 }
 
-export function isStockScreeningResultCurrent(
+export function isStockScreeningResultDisplayable(
   result: { snapshotId: string; dataAsOf: string },
   trust: StockScreeningTrustInput,
 ): boolean {
-  return (
-    trust.trustMode === 'current' &&
-    result.snapshotId === trust.snapshotId &&
-    result.dataAsOf === trust.dataAsOf
-  );
+  return trust.dataAsOf === null || result.dataAsOf === trust.dataAsOf;
 }
 
 export function updateNumericCriterionValue<T extends EditableStockScreenCriterion>(

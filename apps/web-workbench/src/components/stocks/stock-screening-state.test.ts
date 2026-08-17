@@ -3,7 +3,7 @@ import {
   canRunStockScreening,
   criterionStateLabel,
   groupScreeningCandidates,
-  isStockScreeningResultCurrent,
+  isStockScreeningResultDisplayable,
   screeningCoverageCopy,
   updateNumericCriterionValue,
 } from './stock-screening-state';
@@ -97,25 +97,30 @@ describe('stock screening state', () => {
     })).toBe('全市场 5,213 只 · 初筛 38 只 · 深查前 20 只（上限 20，只展示深查结果）');
   });
 
-  it('rejects an async result after the trusted snapshot changes', () => {
+  it('keeps a dated result through same-day trust changes but rejects a new market date', () => {
     const result = {
       snapshotId: 'stkshot_0123456789abcdef01234567',
       dataAsOf: '2026-08-17',
     };
-    expect(isStockScreeningResultCurrent(result, {
+    expect(isStockScreeningResultDisplayable(result, {
       snapshotId: result.snapshotId,
       dataAsOf: result.dataAsOf,
       trustMode: 'current',
     })).toBe(true);
-    expect(isStockScreeningResultCurrent(result, {
+    expect(isStockScreeningResultDisplayable(result, {
       snapshotId: 'stkshot_fedcba9876543210fedcba98',
       dataAsOf: result.dataAsOf,
-      trustMode: 'current',
-    })).toBe(false);
-    expect(isStockScreeningResultCurrent(result, {
-      snapshotId: result.snapshotId,
-      dataAsOf: result.dataAsOf,
       trustMode: 'delayed',
+    })).toBe(true);
+    expect(isStockScreeningResultDisplayable(result, {
+      snapshotId: result.snapshotId,
+      dataAsOf: null,
+      trustMode: 'unavailable',
+    })).toBe(true);
+    expect(isStockScreeningResultDisplayable(result, {
+      snapshotId: 'stkshot_fedcba9876543210fedcba98',
+      dataAsOf: '2026-08-18',
+      trustMode: 'current',
     })).toBe(false);
   });
 });

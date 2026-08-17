@@ -17,7 +17,7 @@ import {
   canRunStockScreening,
   criterionStateLabel,
   groupScreeningCandidates,
-  isStockScreeningResultCurrent,
+  isStockScreeningResultDisplayable,
   screeningCoverageCopy,
   updateNumericCriterionValue,
   type EditableStockScreenCriterion,
@@ -70,9 +70,11 @@ export function StockScreeningWorkbench({
   currentTrustRef.current = currentTrust;
 
   React.useEffect(() => {
-    setResult(null);
+    setResult((current) => (
+      current && dataAsOf && current.dataAsOf !== dataAsOf ? null : current
+    ));
     setError(null);
-  }, [dataAsOf, snapshotId, trustMode]);
+  }, [dataAsOf]);
 
   const readyToRun = canRunStockScreening(criteria, { snapshotId, dataAsOf, trustMode });
   const grouped = result ? groupScreeningCandidates(result) : null;
@@ -105,7 +107,7 @@ export function StockScreeningWorkbench({
         criteria: criteria as RunInput['criteria'],
       };
       const nextResult = await api.run(input);
-      if (isStockScreeningResultCurrent(nextResult, currentTrustRef.current)) {
+      if (isStockScreeningResultDisplayable(nextResult, currentTrustRef.current)) {
         setResult(nextResult);
       }
     } catch (caught) {
