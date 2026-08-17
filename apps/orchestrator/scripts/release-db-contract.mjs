@@ -11,6 +11,19 @@ const REPLAYABLE_MISSING_DROP = {
   statement: 'DROP INDEX `ix_payments_provider_order` ON `payments`',
 };
 
+export function findDuplicateMigrationNumbers(files) {
+  const counts = new Map();
+  for (const file of files) {
+    const match = /^(\d{4})_.+\.sql$/.exec(file);
+    if (!match) continue;
+    counts.set(match[1], (counts.get(match[1]) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .filter(([, count]) => count > 1)
+    .map(([number]) => number)
+    .sort();
+}
+
 export function isSkippableAlreadyAppliedError(error, context = {}) {
   if (!error || typeof error !== 'object') return false;
   if (error.code) {

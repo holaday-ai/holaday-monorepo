@@ -1,10 +1,24 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  findDuplicateMigrationNumbers,
   findMissingRequiredIndexes,
   isSkippableAlreadyAppliedError,
   splitMigrationStatements,
 } from './release-db-contract.mjs';
+
+describe('numbered migration filename contract', () => {
+  it('rejects two migrations with the same numeric prefix', () => {
+    assert.deepEqual(
+      findDuplicateMigrationNumbers([
+        '0045_planned_tasks.sql',
+        '0046_energy_analytics.sql',
+        '0046_tasks_source_context.sql',
+      ]),
+      ['0046'],
+    );
+  });
+});
 
 describe('numbered migration replay safety', () => {
   it('treats an already-dropped index as an applied migration step', () => {
