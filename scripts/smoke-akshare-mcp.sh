@@ -5,6 +5,8 @@ set -euo pipefail
 BASE_URL="${AKSHARE_HTTP_URL:-http://127.0.0.1:8848}"
 RANK_TIMEOUT="${AKSHARE_SMOKE_RANK_TIMEOUT:-60}"
 SCREENING_TIMEOUT="${AKSHARE_SMOKE_SCREENING_TIMEOUT:-240}"
+SCREENING_REQUEST_TIMEOUT="${AKSHARE_SMOKE_SCREENING_REQUEST_TIMEOUT:-20}"
+SCREENING_POLL_SECONDS="${AKSHARE_SMOKE_SCREENING_POLL_SECONDS:-5}"
 MIN_UNIVERSE_COUNT="${AKSHARE_SMOKE_MIN_UNIVERSE_COUNT:-4000}"
 REQUIRE_INTRADAY="${AKSHARE_SMOKE_REQUIRE_INTRADAY:-auto}"
 MAX_FETCH_AGE="${AKSHARE_SMOKE_MAX_FETCH_AGE_SECONDS:-120}"
@@ -20,7 +22,10 @@ case "$REQUIRE_INTRADAY" in
 esac
 
 if ! [[ "$MAX_FETCH_AGE" =~ ^[1-9][0-9]*$ ]] || ! [[ "$MAX_MARKET_LAG" =~ ^[1-9][0-9]*$ ]] \
-  || ! [[ "$SCREENING_TIMEOUT" =~ ^[1-9][0-9]*$ ]] || ! [[ "$MIN_UNIVERSE_COUNT" =~ ^[1-9][0-9]*$ ]]; then
+  || ! [[ "$SCREENING_TIMEOUT" =~ ^[1-9][0-9]*$ ]] \
+  || ! [[ "$SCREENING_REQUEST_TIMEOUT" =~ ^[1-9][0-9]*$ ]] \
+  || ! [[ "$SCREENING_POLL_SECONDS" =~ ^[1-9][0-9]*$ ]] \
+  || ! [[ "$MIN_UNIVERSE_COUNT" =~ ^[1-9][0-9]*$ ]]; then
   echo "❌ AKSHARE smoke numeric limits must be positive whole numbers" >&2
   exit 2
 fi
@@ -35,6 +40,67 @@ curl_json_to_file() {
   curl -fsS --max-time "$timeout" "${BASE_URL}${path}" >"$output"
 }
 
+screening_response_ready() {
+  python3 - "$1" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+try:
+    payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+except (OSError, json.JSONDecodeError):
+    raise SystemExit(1)
+
+if not isinstance(payload, dict):
+    raise SystemExit(1)
+
+rows = payload.get("data")
+count = payload.get("count")
+if payload.get("error") or not isinstance(rows, list) or not rows:
+    raise SystemExit(1)
+if not isinstance(count, int) or count <= 0:
+    raise SystemExit(1)
+PY
+}
+
+wait_for_screening_universe() {
+  local output="$1"
+  local deadline=$((SECONDS + SCREENING_TIMEOUT))
+  local attempt=1
+
+  while true; do
+    local remaining=$((deadline - SECONDS))
+    if (( remaining <= 0 )); then
+      echo "❌ akshare screening universe did not become ready within ${SCREENING_TIMEOUT}s" >&2
+      return 1
+    fi
+
+    local request_timeout="$SCREENING_REQUEST_TIMEOUT"
+    if (( request_timeout > remaining )); then
+      request_timeout="$remaining"
+    fi
+
+    if curl_json_to_file '/screening-universe' "$request_timeout" "$output" \
+      && screening_response_ready "$output"; then
+      return 0
+    fi
+
+    remaining=$((deadline - SECONDS))
+    if (( remaining <= 0 )); then
+      echo "❌ akshare screening universe did not become ready within ${SCREENING_TIMEOUT}s" >&2
+      return 1
+    fi
+
+    local poll_seconds="$SCREENING_POLL_SECONDS"
+    if (( poll_seconds > remaining )); then
+      poll_seconds="$remaining"
+    fi
+    echo "  screening universe not ready (attempt ${attempt}); retrying in ${poll_seconds}s"
+    sleep "$poll_seconds"
+    attempt=$((attempt + 1))
+  done
+}
+
 echo "→ akshare smoke: ${BASE_URL}/healthz"
 curl_json_to_file /healthz 5 "$TMP_DIR/health.json"
 
@@ -45,7 +111,7 @@ echo "→ akshare smoke: amount ranking"
 curl_json_to_file '/stock-rankings/amount?limit=1' "$RANK_TIMEOUT" "$TMP_DIR/amount.json"
 
 echo "→ akshare smoke: full-market screening universe"
-curl_json_to_file '/screening-universe' "$SCREENING_TIMEOUT" "$TMP_DIR/screening-universe.json"
+wait_for_screening_universe "$TMP_DIR/screening-universe.json"
 
 TODAY="${NOW_SHANGHAI:0:10}"
 echo "→ akshare smoke: A-share trading calendar for $TODAY"
