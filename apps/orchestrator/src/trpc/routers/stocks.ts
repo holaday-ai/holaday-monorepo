@@ -1567,6 +1567,7 @@ function dashboardWithReconciledTrust(
       fetchedAt: null,
       isTradingDay: trust.marketSession !== 'non-trading',
     },
+    sources: trust.sources,
   });
 }
 
@@ -1683,7 +1684,9 @@ function withPreservedSlowSignals(snapshot: DashboardSnapshot, previous?: Dashbo
     leaderboards,
     freshness: {
       ...snapshot.freshness,
-      status: 'stale',
+      status: shouldPreserveWatchlistStocks || shouldPreserveWatchlistSparks
+        ? 'stale'
+        : 'partial',
       message: `行情已更新，${preservedLabels.join('、')}保留最近一次真实数据。`,
     },
   };

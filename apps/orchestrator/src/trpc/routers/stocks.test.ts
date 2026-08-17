@@ -967,7 +967,7 @@ describe('stocks dashboard snapshot', () => {
     expect(revalidated.trust?.mode).toBe('current');
   });
 
-  it('keeps a verified current snapshot actionable while its replacement refreshes', async () => {
+  it('keeps verified quotes actionable while a refresh preserves secondary market data', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-08-17T11:58:00.000Z'));
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
@@ -984,14 +984,54 @@ describe('stocks dashboard snapshot', () => {
           ),
         );
       }
+      if (url.pathname === '/kline/603528') {
+        return new Response(JSON.stringify(envelope([
+          { 日期: '2026-08-16', 收盘: 6.38, 涨跌幅: 0.15, 成交额: 60_000_000 },
+          { 日期: '2026-08-17', 收盘: 6.40, 涨跌幅: 0.31, 成交额: 35_186_100 },
+        ])));
+      }
+      if (url.pathname === '/intraday/603528') {
+        return new Response(JSON.stringify(envelope([
+          { 时间: '2026-08-17 09:30:00', 最新价: 6.38, 成交额: 1_000_000 },
+          { 时间: '2026-08-17 15:00:00', 最新价: 6.40, 成交额: 35_186_100 },
+        ])));
+      }
+      if (url.pathname === '/quote/603528') {
+        return new Response(JSON.stringify(envelope([
+          { 代码: 'sh603528', 名称: '多伦科技', 最新价: 6.40, 涨跌幅: 0.31, 成交额: 35_186_100 },
+        ])));
+      }
       return new Response(JSON.stringify(envelope([])));
     });
+    const stock = {
+      symbol: '603528',
+      name: '多伦科技',
+      market: 'A' as const,
+      price: '6.40',
+      changePct: 0.31,
+      signal: '偏强' as const,
+      report: '待生成' as const,
+      spark: [6.38, 6.40],
+      sparkLabels: ['2026-08-17 09:30:00', '2026-08-17 15:00:00'],
+      sparkKind: 'intraday' as const,
+      sparkBaseline: 6.38,
+      sparkTradeDate: '2026-08-17',
+      tradeDate: '2026-08-17',
+      turnoverAmount: 35_186_100,
+      averageTurnoverAmount: 60_000_000,
+      volume: null,
+      averageVolume: null,
+      volumeRatio: 0.59,
+      volumeSignal: '缩量' as const,
+      newsCount: 0,
+      note: '来源 AkShare · 多伦科技 今日真实分钟线',
+    };
     const snapshot = {
       updatedAt: '2026-08-17T11:57:50.000Z',
       observedTradeDate: '2026-08-17',
       source: 'akshare' as const,
       isFallbackWatchlist: false,
-      watchlistStocks: [],
+      watchlistStocks: [stock],
       marketIndices: [
         {
           name: '上证指数',
@@ -1001,7 +1041,7 @@ describe('stocks dashboard snapshot', () => {
         },
       ],
       sectors: [],
-      starStocks: [],
+      starStocks: [stock],
       temperature: null,
       news: [],
       leaders: [],
@@ -1045,10 +1085,11 @@ describe('stocks dashboard snapshot', () => {
             fetchedAt: '2026-08-17T11:57:50.000Z',
           },
         ],
-        evidenceIds: [],
+        evidenceIds: ['quote:603528:2026-08-17'],
       },
     };
-    __stocksDashboardTest.dashboardCache.set('1:', {
+    const cacheKey = '1:603528:A:多伦科技';
+    __stocksDashboardTest.dashboardCache.set(cacheKey, {
       snapshot,
       freshUntil: Date.now() - 1,
       staleUntil: Date.now() + 60_000,
@@ -1065,8 +1106,8 @@ describe('stocks dashboard snapshot', () => {
       db: fakeDb as never,
       logger: { warn: vi.fn() },
       userInternalId: 1,
-      watchlistRows: [],
-      effectiveWatchlist: [],
+      watchlistRows: [{ symbol: '603528', market: 'A', displayName: '多伦科技' }],
+      effectiveWatchlist: [{ symbol: '603528', market: 'A', displayName: '多伦科技' }],
     });
 
     expect(delivered.freshness.status).toBe('refreshing');
@@ -1076,6 +1117,21 @@ describe('stocks dashboard snapshot', () => {
       mode: 'current',
     });
     await vi.runAllTimersAsync();
+
+    const refreshed = __stocksDashboardTest.dashboardCache.get(cacheKey)?.snapshot;
+    expect(refreshed?.marketIndices).toEqual(snapshot.marketIndices);
+    expect(refreshed?.freshness).toMatchObject({
+      status: 'partial',
+    });
+    expect(refreshed?.trust).toMatchObject({
+      latestExpectedTradingDate: '2026-08-17',
+      dataAsOf: '2026-08-17',
+      mode: 'current',
+      sources: expect.arrayContaining([
+        expect.objectContaining({ key: 'quotes', status: 'healthy' }),
+        expect.objectContaining({ key: 'indices', status: 'delayed' }),
+      ]),
+    });
   });
 
   it('reports failed quote and news sources instead of calling the dashboard fresh', async () => {
@@ -1452,7 +1508,7 @@ describe('stocks dashboard snapshot', () => {
     expect(merged.news).toEqual([]);
     expect(merged.marketIndices).toEqual(next.marketIndices);
     expect(merged.leaderboards.gainers).toEqual(next.leaderboards.gainers);
-    expect(merged.freshness.status).toBe('stale');
+    expect(merged.freshness.status).toBe('partial');
     expect(merged.freshness.message).toContain('保留最近一次真实数据');
   });
 
@@ -1602,7 +1658,7 @@ describe('stocks dashboard snapshot', () => {
       '港股要闻',
     ]);
     expect(merged.news.some((item) => item.title === '多伦科技：最新自选股新闻')).toBe(false);
-    expect(merged.freshness.status).toBe('stale');
+    expect(merged.freshness.status).toBe('partial');
     expect(merged.freshness.message).toContain('股市新闻');
   });
 
@@ -2233,7 +2289,7 @@ describe('stocks dashboard snapshot', () => {
     expect(merged.sectors).toEqual(previous.sectors);
     expect(merged.temperature).toEqual(next.temperature);
     expect(merged.leaderboards.gainers).toEqual(next.leaderboards.gainers);
-    expect(merged.freshness.status).toBe('stale');
+    expect(merged.freshness.status).toBe('partial');
     expect(merged.freshness.message).toContain('行业趋势保留最近一次真实数据');
   });
 
@@ -2376,7 +2432,7 @@ describe('stocks dashboard snapshot', () => {
     expect(merged.marketIndices).toEqual(previous.marketIndices);
     expect(merged.leaders).toEqual(previous.leaderboards.gainers);
     expect(merged.leaderboards).toEqual(previous.leaderboards);
-    expect(merged.freshness.status).toBe('stale');
+    expect(merged.freshness.status).toBe('partial');
     expect(merged.freshness.message).toContain('市场行情、榜单保留最近一次真实数据');
   });
 });
