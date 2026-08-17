@@ -327,6 +327,61 @@ describe('tRPC tasks.list + tasks.detail', () => {
     }
   });
 
+  it('returns public stock provenance without exposing the bound snapshot payload', async () => {
+    const user = await seedUser();
+    const { newExternalId } = await import('@holaday/shared-types');
+    const { db } = await import('../../db/client.js');
+    const { tasks } = await import('../../db/schema/tasks.js');
+    const taskId = newExternalId('task');
+    const stockContext = {
+      snapshotId: 'stkshot_0123456789abcdef01234567',
+      dataAsOf: '2026-08-11',
+      trustMode: 'historical',
+      evidenceIds: ['quote:603528:2026-08-11'],
+      snapshotPayload: {
+        watchlistStocks: [{ symbol: '603528', price: '6.38' }],
+      },
+    };
+    await db.insert(tasks).values({
+      externalId: taskId,
+      userId: user.internalId,
+      status: 'completed',
+      intent: '解释多伦科技当日变化',
+      sourceContext: stockContext,
+    });
+
+    const { port, signAccessToken, close } = await bootTrpcServer();
+    try {
+      const token = await signAccessToken({ sub: user.external, plan: 'free' });
+      for (const endpoint of [
+        `tasks.list?input=${encodeURIComponent(JSON.stringify({ limit: 10 }))}`,
+        `tasks.detail?input=${encodeURIComponent(JSON.stringify({ taskId }))}`,
+      ]) {
+        const response = await fetch(`http://127.0.0.1:${port}/trpc/${endpoint}`, {
+          headers: { authorization: `Bearer ${token}` },
+        });
+        expect(response.status).toBe(200);
+        const body = (await response.json()) as { result: { data: unknown } };
+        const data = body.result.data as {
+          tasks?: Array<{ taskId: string; stockContext?: Record<string, unknown> }>;
+          stockContext?: Record<string, unknown>;
+        };
+        const exposed = data.tasks
+          ? data.tasks.find((task) => task.taskId === taskId)?.stockContext
+          : data.stockContext;
+        expect(exposed).toEqual({
+          snapshotId: stockContext.snapshotId,
+          dataAsOf: stockContext.dataAsOf,
+          trustMode: stockContext.trustMode,
+          evidenceIds: stockContext.evidenceIds,
+        });
+        expect(exposed).not.toHaveProperty('snapshotPayload');
+      }
+    } finally {
+      await close();
+    }
+  });
+
   it("tasks.detail returns NOT_FOUND for another user's task (doesn't leak existence)", async () => {
     const userA = await seedUser();
     const userB = await seedUser();

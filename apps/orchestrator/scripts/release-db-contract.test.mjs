@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readdirSync } from 'node:fs';
 import { describe, it } from 'node:test';
 import {
   findDuplicateMigrationNumbers,
@@ -17,6 +18,11 @@ describe('numbered migration filename contract', () => {
       ]),
       ['0046'],
     );
+  });
+
+  it('keeps the shipped migration directory free of duplicate numeric prefixes', () => {
+    const files = readdirSync(new URL('../drizzle/', import.meta.url));
+    assert.deepEqual(findDuplicateMigrationNumbers(files), []);
   });
 });
 

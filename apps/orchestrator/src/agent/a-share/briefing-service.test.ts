@@ -66,6 +66,14 @@ function fakeClient(dtSpy?: (d: string) => void): AkshareClient {
         fetched_at: '2026-06-11T00:00:00Z',
         disclaimer: 'x',
       }),
+    getLatestTradingDay: (onOrBefore: string) =>
+      Promise.resolve({
+        data: [{ requested_date: onOrBefore, latest_trading_date: onOrBefore }],
+        count: 1,
+        source: 'fake:latest_trading_day',
+        fetched_at: '2026-06-11T00:00:00Z',
+        disclaimer: 'x',
+      }),
     searchSymbol: () => Promise.resolve(emptyEnv('symbol')),
     getStockRankings: () => Promise.resolve(emptyEnv('stock_rankings')),
     getMarketPulse: () =>

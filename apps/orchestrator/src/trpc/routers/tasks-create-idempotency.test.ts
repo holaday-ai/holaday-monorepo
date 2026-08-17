@@ -1,5 +1,6 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
-import { runTaskCreateIdempotently } from './tasks.js';
+import { runTaskCreateIdempotently, stockTaskContextInput } from './tasks.js';
 
 const response = { taskId: 'tsk_once', status: 'executing' };
 
@@ -65,5 +66,35 @@ describe('runTaskCreateIdempotently', () => {
       }),
     ).rejects.toThrow('quota failed');
     expect(release).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('stock-dashboard task creation contract', () => {
+  it('accepts only a bounded trusted context input', () => {
+    expect(
+      stockTaskContextInput.parse({
+        snapshotId: 'stkshot_0123456789abcdef01234567',
+        dataAsOf: '2026-08-11',
+        trustMode: 'historical',
+        evidenceIds: ['quote:603528:2026-08-11'],
+      }),
+    ).toMatchObject({ trustMode: 'historical' });
+    expect(() =>
+      stockTaskContextInput.parse({
+        snapshotId: 'stkshot_bad',
+        dataAsOf: '08/11',
+        trustMode: 'unavailable',
+        evidenceIds: [],
+      }),
+    ).toThrow();
+  });
+
+  it('routes a validated dashboard task through snapshot data and stamps provenance', () => {
+    const source = readFileSync(new URL('./tasks.ts', import.meta.url), 'utf8');
+    expect(source).toContain('new SnapshotAkshareClient(validatedStockContext.snapshotPayload)');
+    expect(source).toContain('sourceContext: stockTaskSourceContext');
+    expect(source).toContain('stockContext: publicValidatedStockContext');
+    expect(source).toContain('分析基于 ${validatedStockContext.dataAsOf} 数据');
+    expect(source).toContain('任务不会改用实时行情或通用搜索');
   });
 });

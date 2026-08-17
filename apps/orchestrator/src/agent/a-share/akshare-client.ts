@@ -42,6 +42,13 @@ export interface TradingDayRow {
   [k: string]: unknown;
 }
 
+/** 最近有效交易日单行。 */
+export interface TradingCalendarRow {
+  requested_date?: string;
+  latest_trading_date?: string;
+  [k: string]: unknown;
+}
+
 /** 代码名称搜索单行（④ 短名解析）。 */
 export interface SymbolRow {
   code?: string;
@@ -83,6 +90,8 @@ export interface AkshareClient {
   getNorthboundFlow(): Promise<AkEnvelope<NorthboundRow>>;
   /** is_trading_day(date) — date('YYYY-MM-DD') 是否 A股交易日（P1 非交易日不投递）。 */
   getTradingDay(date: string): Promise<AkEnvelope<TradingDayRow>>;
+  /** latest_trading_day(on_or_before) — 请求日期当日或之前最近的 A 股交易日。 */
+  getLatestTradingDay(onOrBefore: string): Promise<AkEnvelope<TradingCalendarRow>>;
   /** search_symbol(query) — 问句→个股（④ 短名解析；表 day-cache，冷启返空）。 */
   searchSymbol(query: string): Promise<AkEnvelope<SymbolRow>>;
   /** get_stock_rankings(metric, limit) — A股全市场涨幅/跌幅/成交额榜。 */
@@ -166,6 +175,11 @@ export class StubAkshareClient implements AkshareClient {
   }
   getTradingDay(date: string) {
     return Promise.resolve(this.err<TradingDayRow>(`akshare:trading_day(${date})`, this.now()));
+  }
+  getLatestTradingDay(onOrBefore: string) {
+    return Promise.resolve(
+      this.err<TradingCalendarRow>(`akshare:latest_trading_day(${onOrBefore})`, this.now()),
+    );
   }
   searchSymbol(query: string) {
     return Promise.resolve(this.err<SymbolRow>(`akshare:symbol_search(${query})`, this.now()));

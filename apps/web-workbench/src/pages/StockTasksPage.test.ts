@@ -4,6 +4,7 @@ import {
   stockChartHoverTooltipKind,
   stockChartAxisTicks,
 } from '@/lib/stock-chart-state';
+import { stockQuickCommands, stockTemporalCopy } from '@/lib/stock-temporal-copy';
 
 describe('StockTasksPage chart helpers', () => {
   it('does not render future intraday axis labels past the latest real minute', () => {
@@ -25,5 +26,35 @@ describe('StockTasksPage chart helpers', () => {
   it('shows yesterday close only when the pointer is on its dotted baseline', () => {
     expect(stockChartHoverTooltipKind({ pointerY: 18.4, baselineY: 18 })).toBe('baseline');
     expect(stockChartHoverTooltipKind({ pointerY: 21, baselineY: 18 })).toBe('point');
+  });
+});
+
+describe('StockTasksPage temporal commands', () => {
+  const stocks = [
+    {
+      symbol: '603528',
+      name: '多伦科技',
+      market: 'A' as const,
+      price: '6.38',
+      changePct: 1.11,
+      signal: '强势' as const,
+      report: '待生成' as const,
+      spark: [6.32, 6.38],
+      newsCount: 0,
+      note: '来源 AkShare',
+    },
+  ];
+
+  it('offers a dated review instead of a today command for historical data', () => {
+    expect(stockQuickCommands(stocks, stockTemporalCopy('historical', '2026-08-11'))).toEqual([
+      '基于 08/11 生成历史复盘',
+      '截至 08/11，哪些股票风险较高？',
+      '回看 08/11 的 AI 板块表现',
+      '分析 603528 在 08/11 的风险点',
+    ]);
+  });
+
+  it('retains current commands for a current trusted snapshot', () => {
+    expect(stockQuickCommands(stocks, stockTemporalCopy('current', '2026-08-14'))[0]).toBe('生成今日关注日报');
   });
 });

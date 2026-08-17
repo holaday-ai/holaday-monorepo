@@ -218,6 +218,43 @@ function collectSqlText(input: unknown): string {
   return `${ownValue}${childValue}`;
 }
 
+describe('TaskRepository.insertTask source context', () => {
+  it('persists a server-validated stock snapshot context on the task row', async () => {
+    const inserts: Record<string, unknown>[] = [];
+    const transaction = async (cb: (tx: unknown) => Promise<void>) => {
+      await cb({
+        insert: () => ({
+          values: async (payload: Record<string, unknown>) => {
+            inserts.push(payload);
+            return [{ insertId: 41 }];
+          },
+        }),
+      });
+    };
+    const repo = new TaskRepository({ transaction } as unknown as DB);
+    const sourceContext = {
+      snapshotId: 'stkshot_0123456789abcdef01234567',
+      dataAsOf: '2026-08-11',
+      trustMode: 'historical',
+      evidenceIds: ['quote:603528:2026-08-11'],
+      snapshotPayload: { watchlistStocks: [] },
+    };
+
+    await repo.insertTask(
+      {
+        taskId: 'tsk_stock_context',
+        status: 'executing',
+        plan: [],
+        cursor: 0,
+        pendingConfirm: null,
+      },
+      { userId: 7, intent: '解释当日变化', sourceContext },
+    );
+
+    expect(inserts[0]).toMatchObject({ sourceContext });
+  });
+});
+
 describe('TaskRepository.persistVisionOutcome — awaiting_user state guard (Phase 3 R1, atomic)', () => {
   it('UPDATE no-op (affectedRows=0) → row was awaiting_user → no event log, console.warn fires, persisted=false', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);

@@ -1605,6 +1605,37 @@ def is_trading_day(date_str: str) -> tuple[list[dict[str, Any]], str]:
     return [{"date": date_str, "is_trading_day": target in dates}], "akshare:tool_trade_date_hist_sina"
 
 
+def latest_trading_day(on_or_before: str) -> tuple[list[dict[str, Any]], str]:
+    """Return the latest exchange-calendar date on or before the requested date."""
+    raw = on_or_before.strip()
+    try:
+        requested = datetime.datetime.strptime(
+            raw,
+            "%Y%m%d" if re.fullmatch(r"\d{8}", raw) else "%Y-%m-%d",
+        ).date()
+    except ValueError as exc:
+        raise AkShareUnavailable("交易日历请求日期格式无效") from exc
+
+    a = _require_ak()
+    df = a.tool_trade_date_hist_sina()
+    available: list[datetime.date] = []
+    for value in df["trade_date"].astype(str):
+        try:
+            available.append(datetime.date.fromisoformat(str(value)[:10]))
+        except ValueError:
+            continue
+    candidates = [value for value in available if value <= requested]
+    if not candidates:
+        raise AkShareUnavailable("交易日历没有可用日期")
+    latest = max(candidates)
+    return [
+        {
+            "requested_date": requested.isoformat(),
+            "latest_trading_date": latest.isoformat(),
+        }
+    ], "akshare:tool_trade_date_hist_sina"
+
+
 # --- 全量代码名称表 + 短名搜索（④ 即时问答 M2） ---------------------
 # ⚠️ stock_info_a_code_name 从 Vultr **不可达**（ConnectionReset，同 push2）。
 # 改用 sina stock_zh_a_spot（实测可达，5526 只，但一次拉取 ~70s）。故**日级缓存

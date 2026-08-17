@@ -1,17 +1,20 @@
-export type StockDashboardFreshnessStatus = 'fresh' | 'partial' | 'refreshing' | 'stale';
+export type StockDashboardTrustMode = 'current' | 'delayed' | 'historical' | 'unavailable';
+
+export interface StockDashboardTrustEnvelope {
+  generatedAt: string;
+  dataAsOf: string | null;
+  mode: StockDashboardTrustMode;
+}
 
 export interface StockDashboardTrustInput {
-  freshnessStatus?: StockDashboardFreshnessStatus;
-  freshnessMessage?: string | null;
-  observedTradeDate?: string | null;
-  refreshedAt?: string | null;
-  now?: Date;
+  trust?: StockDashboardTrustEnvelope | null;
 }
 
 export interface StockDashboardTrustState {
-  tone: 'fresh' | 'refreshing' | 'stale' | 'unverified';
+  tone: StockDashboardTrustMode | 'unverified';
   statusLabel: string;
   canGenerateBriefing: boolean;
+  canCreateCurrentTask: boolean;
   dataDateLabel: string;
   refreshLabel: string;
   message: string | null;
@@ -38,94 +41,69 @@ function formatRefreshTime(value?: string | null): string {
   }).format(date)}`;
 }
 
-function shanghaiCalendarDate(now: Date): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: SHANGHAI_TIME_ZONE,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(now);
-}
-
-function calendarDayGap(observedTradeDate: string, now: Date): number {
-  const observed = new Date(`${observedTradeDate}T00:00:00+08:00`);
-  if (Number.isNaN(observed.getTime())) return Number.POSITIVE_INFINITY;
-  const current = new Date(`${shanghaiCalendarDate(now)}T00:00:00+08:00`);
-  return Math.floor((current.getTime() - observed.getTime()) / 86_400_000);
-}
-
-function requiresCurrentTradeDate(now: Date): boolean {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: SHANGHAI_TIME_ZONE,
-    weekday: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(now);
-  const value = (type: Intl.DateTimeFormatPartTypes): string =>
-    parts.find((part) => part.type === type)?.value ?? '';
-  const weekday = value('weekday');
-  const minuteOfDay = Number(value('hour')) * 60 + Number(value('minute'));
-  return weekday !== 'Sat' && weekday !== 'Sun' && minuteOfDay >= 9 * 60 + 32;
-}
-
-function isBackgroundRefresh(message?: string | null): boolean {
-  return /(?:正在后台刷新行情|行情接口正在刷新|行情接口暂未返回)/.test(message ?? '');
-}
-
-export function stockDashboardTrustState(input: StockDashboardTrustInput): StockDashboardTrustState {
-  const observedLabel = formatObservedDate(input.observedTradeDate);
-  const refreshLabel = formatRefreshTime(input.refreshedAt);
-  if (!observedLabel || !input.observedTradeDate) {
+export function stockDashboardTrustState(
+  input: StockDashboardTrustInput,
+): StockDashboardTrustState {
+  const trust = input.trust;
+  if (!trust) {
     return {
       tone: 'unverified',
       statusLabel: '日期未核验',
       canGenerateBriefing: false,
+      canCreateCurrentTask: false,
       dataDateLabel: '数据日期待核验',
-      refreshLabel,
-      message: '真实行情日期尚未核验，不用于生成日报或当前盘面判断。',
+      refreshLabel: '刷新时间待核验',
+      message: '可信行情状态尚未返回，不用于生成日报或当前盘面判断。',
     };
   }
 
-  const now = input.now ?? new Date();
-  const dayGap = calendarDayGap(input.observedTradeDate, now);
-  const dateIsCurrentEnough =
-    dayGap >= 0 &&
-    dayGap <= 3 &&
-    (!requiresCurrentTradeDate(now) || input.observedTradeDate === shanghaiCalendarDate(now));
-  if ((input.freshnessStatus === 'fresh' || input.freshnessStatus === 'partial') && dateIsCurrentEnough) {
+  const dataDate = formatObservedDate(trust.dataAsOf);
+  const dataDateLabel = dataDate ? `数据日期 ${dataDate}` : '数据日期待核验';
+  const refreshLabel = formatRefreshTime(trust.generatedAt);
+  if (trust.mode === 'current') {
     return {
-      tone: 'fresh',
+      tone: 'current',
       statusLabel: 'AkShare',
       canGenerateBriefing: true,
-      dataDateLabel: `数据日期 ${observedLabel}`,
+      canCreateCurrentTask: true,
+      dataDateLabel,
       refreshLabel,
       message: null,
     };
   }
-
-  if (
-    dateIsCurrentEnough &&
-    (input.freshnessStatus === 'refreshing' || (
-      input.freshnessStatus === 'stale' && isBackgroundRefresh(input.freshnessMessage)
-    ))
-  ) {
+  if (trust.mode === 'delayed') {
     return {
-      tone: 'refreshing',
+      tone: 'delayed',
       statusLabel: '行情刷新中',
       canGenerateBriefing: false,
-      dataDateLabel: `数据日期 ${observedLabel}`,
+      canCreateCurrentTask: false,
+      dataDateLabel,
       refreshLabel,
-      message: input.freshnessMessage ?? '正在后台刷新行情，当前展示最近一次真实数据。',
+      message: dataDate
+        ? `正在核验 ${dataDate} 的行情快照，完成前不生成当前盘面结论。`
+        : '行情快照正在核验，完成前不生成当前盘面结论。',
     };
   }
-
+  if (trust.mode === 'historical') {
+    return {
+      tone: 'historical',
+      statusLabel: '历史回看',
+      canGenerateBriefing: false,
+      canCreateCurrentTask: false,
+      dataDateLabel,
+      refreshLabel,
+      message: dataDate
+        ? `此处展示 ${dataDate} 的真实历史数据，不代表当前行情。`
+        : '此处仅供历史回看。',
+    };
+  }
   return {
-    tone: 'stale',
-    statusLabel: '数据过期',
+    tone: 'unavailable',
+    statusLabel: '行情不可用',
     canGenerateBriefing: false,
-    dataDateLabel: `数据日期 ${observedLabel}`,
+    canCreateCurrentTask: false,
+    dataDateLabel,
     refreshLabel,
-    message: `当前展示 ${observedLabel} 的真实历史数据，不代表当前行情。真实行情恢复后可生成日报。`,
+    message: '可信行情暂不可用，旧数值已隐藏；请刷新后再创建股票数据任务。',
   };
 }
