@@ -71,9 +71,9 @@ describe('stock snapshot trust', () => {
     });
   });
 
-  it('marks an expected-date snapshot delayed while refresh is incomplete', () => {
+  it('keeps latest verified quotes current while a background refresh is incomplete', () => {
     expect(stockSnapshotTrust(trustInput({ freshnessStatus: 'refreshing' }))).toMatchObject({
-      mode: 'delayed',
+      mode: 'current',
     });
   });
 
@@ -129,7 +129,7 @@ describe('stock snapshot trust', () => {
     const refreshing = stockSnapshotTrust(trustInput({ freshnessStatus: 'refreshing' }));
 
     expect(current.mode).toBe('current');
-    expect(refreshing.mode).toBe('delayed');
+    expect(refreshing.mode).toBe('current');
     expect(refreshing.snapshotId).toBe(current.snapshotId);
   });
 });

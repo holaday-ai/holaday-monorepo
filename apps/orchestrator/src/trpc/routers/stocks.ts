@@ -357,9 +357,6 @@ function markRefreshing(snapshot: DashboardSnapshot, message: string): Dashboard
       status: 'refreshing',
       message,
     },
-    trust: snapshot.trust?.mode === 'current'
-      ? { ...snapshot.trust, mode: 'delayed' }
-      : snapshot.trust,
   };
 }
 
