@@ -265,6 +265,28 @@ function sourceForCriterion(field: StockScreenField, sources: DeepSources): AkEn
   return sources.fundamentals;
 }
 
+function criterionAsOf(
+  field: StockScreenField,
+  sources: DeepSources,
+  recentInsider: InsiderChangeRow[],
+  dataAsOf: string,
+): string | null {
+  if (MARKET_FIELDS.has(field)) return dataAsOf;
+  if (field === 'insider_reduction_recent') {
+    return newestDate(recentInsider, '变动日期');
+  }
+  const fundamentals = firstRow(sources.fundamentals);
+  if (field === 'net_profit_3y_positive') {
+    const trendDates = (fundamentals?.trend3y ?? [])
+      .map((row) => row.report_period)
+      .filter((value): value is string => typeof value === 'string' && value.length > 0)
+      .sort((a, b) => b.localeCompare(a));
+    return trendDates[0] ?? null;
+  }
+  const reportPeriod = fundamentals?.report_period;
+  return typeof reportPeriod === 'string' && reportPeriod.length > 0 ? reportPeriod : null;
+}
+
 async function loadDeepSources(
   client: StockScreeningClient,
   symbol: string,
@@ -323,7 +345,7 @@ async function evaluateCandidate(args: {
       id: `screen:${snapshotId}:${symbol}:criterion:${criterion.id}`,
       label: criterion.label,
       source,
-      asOf: dataAsOf,
+      asOf: criterionAsOf(criterion.field, sources, recentInsider, dataAsOf),
     });
   }
 

@@ -181,6 +181,30 @@ def test_background_prewarm_keeps_rankings_screening_universe_and_risks_warm(mon
     assert calls[2:] == ["risks"]
 
 
+def test_background_prewarm_falls_back_to_symbol_table_on_screening_error_envelope(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(http_server, "_rank", lambda metric, limit: ([], "akshare:test", "now"))
+    monkeypatch.setattr(
+        http_server,
+        "_screening_universe",
+        lambda: ([], "akshare:screen", "now"),
+    )
+
+    def safe(fn, *args):
+        if fn is http_server._screening_universe:
+            return {"error": "真实数据源暂不可用", "data": [], "count": 0}
+        return {"data": [], "count": 0}
+
+    monkeypatch.setattr(http_server, "_safe", safe)
+    monkeypatch.setattr(adp, "refresh_symbol_table", lambda: calls.append("symbols"))
+    monkeypatch.setattr(adp, "warm_risk_tables", lambda: calls.append("risks"))
+
+    http_server._warm_market_caches_once()
+
+    assert calls == ["symbols", "risks"]
+
+
 def test_background_prewarm_isolates_screening_refresh_failure(monkeypatch, caplog):
     calls = []
 

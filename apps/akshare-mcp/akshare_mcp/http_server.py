@@ -437,7 +437,9 @@ def _warm_market_caches_once() -> None:
     try:
         # The screening universe also hydrates the symbol table, avoiding a
         # second 5,500-row Sina crawl during the same prewarm cycle.
-        _safe(_screening_universe)
+        screening = _safe(_screening_universe)
+        if isinstance(screening, dict) and screening.get("error"):
+            adp.refresh_symbol_table()
     except Exception:  # noqa: BLE001 - each cache must warm independently
         _LOGGER.exception("akshare screening-universe prewarm failed")
     try:

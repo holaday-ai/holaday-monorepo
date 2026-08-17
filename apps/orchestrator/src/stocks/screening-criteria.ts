@@ -242,7 +242,7 @@ export function parseStockScreenPrompt(prompt: string): {
   unparsedClauses: string[];
 } {
   const clauses = prompt
-    .split(/[，,；;。\n]+/)
+    .split(/[，,；;。\n]+|并且|以及|且|和/)
     .map((clause) => clause.trim())
     .filter(Boolean);
   const drafts: CriterionDraft[] = [];

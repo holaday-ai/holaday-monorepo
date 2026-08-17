@@ -276,6 +276,27 @@ describe('runStockScreening', () => {
     });
   });
 
+  it('uses each deep source date for criterion evidence instead of the market snapshot date', async () => {
+    const result = await runStockScreening({
+      client: clientWith([marketRow('600015')]),
+      snapshotId: 'stkshot_current',
+      dataAsOf: '2026-08-17',
+      criteria: [
+        criterion('pe', 'pe_ttm', 'lte', 30, '市盈率不超过 30'),
+        criterion('debt', 'debt_ratio', 'lt', 50, '资产负债率低于 50%'),
+        criterion('profit', 'net_profit_3y_positive', 'eq', true, '近三年持续盈利'),
+        criterion('reduction', 'insider_reduction_recent', 'eq', false, '近期无内部人减持'),
+      ],
+    });
+
+    expect(result.candidates[0]?.evidence.map(({ label, asOf }) => ({ label, asOf }))).toEqual([
+      { label: '市盈率不超过 30', asOf: '2026-08-17' },
+      { label: '资产负债率低于 50%', asOf: '2026-06-30' },
+      { label: '近三年持续盈利', asOf: '2025-12-31' },
+      { label: '近期无内部人减持', asOf: null },
+    ]);
+  });
+
   it('surfaces deterministic reduction warnings without recommendation language', async () => {
     const client = clientWith([marketRow('600020')], {
       getRiskInsider: async () => envelope<InsiderChangeRow>([

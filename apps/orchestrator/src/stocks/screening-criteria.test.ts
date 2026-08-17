@@ -83,6 +83,16 @@ describe('parseStockScreenPrompt', () => {
       { value: 80_000_000, label: '成交额不低于 8000万元' },
     ]);
   });
+
+  it('parses numeric requirements joined by conjunctions as separate criteria', () => {
+    const result = parseStockScreenPrompt('ROE高于10%且资产负债率低于50%');
+
+    expect(result.unparsedClauses).toEqual([]);
+    expect(result.criteria.map(({ field, operator, value }) => ({ field, operator, value }))).toEqual([
+      { field: 'roe', operator: 'gt', value: 10 },
+      { field: 'debt_ratio', operator: 'lt', value: 50 },
+    ]);
+  });
 });
 
 describe('validateStockScreenCriteria', () => {
