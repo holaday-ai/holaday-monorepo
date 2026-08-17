@@ -21,6 +21,8 @@ fake_payload() {
   local source="akshare:stock_zh_a_minute(sina,1m)"
   local gainers_source="akshare:sina-stock-rankings(gainers)"
   local amount_source="akshare:sina-stock-rankings(amount)"
+  local screening_source="akshare:sina-full-market-screening"
+  local screening_count=3
   local gainers_row='{"代码":"600000","最新价":10,"涨跌幅":1.2,"成交额":100000}'
   local amount_row='{"代码":"600000","最新价":10,"涨跌幅":1.2,"成交额":100000}'
 
@@ -157,6 +159,12 @@ fake_payload() {
     invalid_ranking_row)
       gainers_row='{"代码":"demo","最新价":0,"涨跌幅":"unknown","成交额":0}'
       ;;
+    mock_screening_source)
+      screening_source="mock:screening-universe"
+      ;;
+    small_screening_universe)
+      screening_count=1
+      ;;
   esac
 
   case "$url" in
@@ -186,6 +194,24 @@ fake_payload() {
       fi
       printf '{"data":[{"时间":"%s","最新价":5.85},{"时间":"%s","最新价":5.86}],"count":2,"source":"%s","fetched_at":"%s"}\n' \
         "$minute_one" "$minute_two" "$source" "$minute_fetched"
+      ;;
+    */screening-universe)
+      if [[ "$scenario" == screening_never_ready ]]; then
+        printf '%s\n' '{"error":"真实数据源响应超时","error_code":"SINGLE_FLIGHT_TIMEOUT","data":[],"count":0,"source":"akshare:get_screening_universe","fetched_at":"2026-07-31T02:04:30+00:00"}'
+        return
+      fi
+      if [[ "$scenario" == screening_cold_follower && ! -f "${SMOKE_TEST_SCREENING_STATE:?}" ]]; then
+        : >"$SMOKE_TEST_SCREENING_STATE"
+        printf '%s\n' '{"error":"真实数据源响应超时","error_code":"SINGLE_FLIGHT_TIMEOUT","data":[],"count":0,"source":"akshare:get_screening_universe","fetched_at":"2026-07-31T02:04:30+00:00"}'
+        return
+      fi
+      if [[ "$screening_count" == 1 ]]; then
+        printf '{"data":[{"代码":"600000"}],"count":1,"source":"%s","fetched_at":"%s"}\n' \
+          "$screening_source" "$gainers_fetched"
+      else
+        printf '{"data":[{"代码":"600000"},{"代码":"000001"},{"代码":"300001"}],"count":3,"source":"%s","fetched_at":"%s"}\n' \
+          "$screening_source" "$gainers_fetched"
+      fi
       ;;
     *)
       echo "unexpected fake URL: $url" >&2
@@ -230,6 +256,12 @@ run_smoke() {
     export AKSHARE_SMOKE_REQUIRE_INTRADAY=auto
     export AKSHARE_SMOKE_MAX_FETCH_AGE_SECONDS=120
     export AKSHARE_SMOKE_MAX_MARKET_LAG_SECONDS=300
+    export AKSHARE_SMOKE_MIN_UNIVERSE_COUNT=2
+    export AKSHARE_SMOKE_SCREENING_TIMEOUT=3
+    export AKSHARE_SMOKE_SCREENING_REQUEST_TIMEOUT=1
+    export AKSHARE_SMOKE_SCREENING_POLL_SECONDS=1
+    export SMOKE_TEST_SCREENING_STATE="$TMP_DIR/screening-$scenario-state"
+    rm -f "$SMOKE_TEST_SCREENING_STATE"
     bash "$SMOKE_SCRIPT"
   ) 2>&1
 }
@@ -242,6 +274,7 @@ run_smoke_auto_clock() {
     export AKSHARE_SMOKE_REQUIRE_INTRADAY=auto
     export AKSHARE_SMOKE_MAX_FETCH_AGE_SECONDS=120
     export AKSHARE_SMOKE_MAX_MARKET_LAG_SECONDS=300
+    export AKSHARE_SMOKE_MIN_UNIVERSE_COUNT=2
     rm -f "$SMOKE_TEST_DATE_STATE"
     unset AKSHARE_SMOKE_NOW
     bash "$SMOKE_SCRIPT"
@@ -296,6 +329,7 @@ assert_auto_clock_passes() {
 
 assert_passes open_session '2026-07-31T10:05:00+08:00' active
 assert_passes open_session '2026-07-31T10:05:00+0800' active
+assert_passes screening_cold_follower '2026-07-31T10:05:00+08:00' active
 assert_auto_clock_passes
 assert_fails_with future_minute '2026-07-31T10:05:00+08:00' 'future minute point'
 assert_fails_with future_weekend '2026-08-02T10:05:00+08:00' 'future minute point'
@@ -310,6 +344,9 @@ assert_fails_with mock_source '2026-07-31T10:05:00+08:00' 'non-production data s
 assert_fails_with mock_source '2026-08-02T10:05:00+08:00' 'non-production data source'
 assert_fails_with mock_ranking_source '2026-07-31T10:05:00+08:00' 'non-production data source'
 assert_fails_with invalid_ranking_row '2026-07-31T10:05:00+08:00' 'gainers row is not a real market ranking'
+assert_fails_with mock_screening_source '2026-07-31T10:05:00+08:00' 'screening universe has a non-production data source'
+assert_fails_with small_screening_universe '2026-07-31T10:05:00+08:00' 'screening universe is unexpectedly small'
+assert_fails_with screening_never_ready '2026-07-31T10:05:00+08:00' 'screening universe did not become ready within 3s'
 assert_passes lunch_break '2026-07-31T12:15:00+08:00'
 assert_fails_with lunch_stale_market_time '2026-07-31T12:15:00+08:00' 'latest market minute is stale for lunch break'
 assert_passes after_close '2026-07-31T16:05:00+08:00'

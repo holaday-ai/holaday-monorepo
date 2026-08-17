@@ -1,6 +1,8 @@
 """HTTP envelope reliability tests without starting FastAPI."""
 
 import logging
+import threading
+import time
 
 from akshare_mcp import adapters as adp
 from akshare_mcp import http_server
@@ -21,6 +23,59 @@ def test_cached_adapter_preserves_actual_fetch_timestamp():
 
     assert calls["n"] == 1
     assert second["fetched_at"] == first["fetched_at"]
+
+
+def test_screening_cached_adapter_serves_stale_timestamp_while_refreshing():
+    clear_cache()
+    calls = {"n": 0}
+    calls_lock = threading.Lock()
+    refresh_started = threading.Event()
+    release_refresh = threading.Event()
+
+    def fetch():
+        with calls_lock:
+            calls["n"] += 1
+            call_number = calls["n"]
+        if call_number == 1:
+            return [{"代码": "600519", "版本": "v1"}], "akshare:test"
+        refresh_started.set()
+        assert release_refresh.wait(timeout=2)
+        return [{"代码": "600519", "版本": "v2"}], "akshare:test"
+
+    wrapped = http_server._cached_adapter(
+        0.03,
+        stale_while_revalidate_seconds=1.0,
+    )(fetch)
+    first = http_server._safe(wrapped)
+    time.sleep(0.06)
+
+    began = time.monotonic()
+    stale = http_server._safe(wrapped)
+    assert time.monotonic() - began < 0.1
+    assert stale["data"][0]["版本"] == "v1"
+    assert stale["fetched_at"] == first["fetched_at"]
+    assert refresh_started.wait(timeout=1)
+
+    second_stale = http_server._safe(wrapped)
+    assert second_stale["fetched_at"] == first["fetched_at"]
+    assert calls["n"] == 2
+
+    release_refresh.set()
+    deadline = time.monotonic() + 1
+    refreshed = http_server._safe(wrapped)
+    while refreshed["data"][0]["版本"] != "v2" and time.monotonic() < deadline:
+        time.sleep(0.01)
+        refreshed = http_server._safe(wrapped)
+
+    assert refreshed["data"][0]["版本"] == "v2"
+    assert refreshed["fetched_at"] != first["fetched_at"]
+    assert calls["n"] == 2
+
+
+def test_market_prewarm_interval_is_shorter_than_screening_fresh_ttl():
+    interval = http_server._market_cache_refresh_interval_seconds()
+
+    assert 0 < interval < adp.TTL_SPOT
 
 
 def test_trading_calendar_latest_route_preserves_source_and_fetch_timestamp(monkeypatch):

@@ -4,6 +4,10 @@ set -euo pipefail
 
 BASE_URL="${AKSHARE_HTTP_URL:-http://127.0.0.1:8848}"
 RANK_TIMEOUT="${AKSHARE_SMOKE_RANK_TIMEOUT:-60}"
+SCREENING_TIMEOUT="${AKSHARE_SMOKE_SCREENING_TIMEOUT:-240}"
+SCREENING_REQUEST_TIMEOUT="${AKSHARE_SMOKE_SCREENING_REQUEST_TIMEOUT:-20}"
+SCREENING_POLL_SECONDS="${AKSHARE_SMOKE_SCREENING_POLL_SECONDS:-5}"
+MIN_UNIVERSE_COUNT="${AKSHARE_SMOKE_MIN_UNIVERSE_COUNT:-4000}"
 REQUIRE_INTRADAY="${AKSHARE_SMOKE_REQUIRE_INTRADAY:-auto}"
 MAX_FETCH_AGE="${AKSHARE_SMOKE_MAX_FETCH_AGE_SECONDS:-120}"
 MAX_MARKET_LAG="${AKSHARE_SMOKE_MAX_MARKET_LAG_SECONDS:-300}"
@@ -17,8 +21,12 @@ case "$REQUIRE_INTRADAY" in
     ;;
 esac
 
-if ! [[ "$MAX_FETCH_AGE" =~ ^[1-9][0-9]*$ ]] || ! [[ "$MAX_MARKET_LAG" =~ ^[1-9][0-9]*$ ]]; then
-  echo "❌ AKSHARE smoke freshness limits must be positive whole seconds" >&2
+if ! [[ "$MAX_FETCH_AGE" =~ ^[1-9][0-9]*$ ]] || ! [[ "$MAX_MARKET_LAG" =~ ^[1-9][0-9]*$ ]] \
+  || ! [[ "$SCREENING_TIMEOUT" =~ ^[1-9][0-9]*$ ]] \
+  || ! [[ "$SCREENING_REQUEST_TIMEOUT" =~ ^[1-9][0-9]*$ ]] \
+  || ! [[ "$SCREENING_POLL_SECONDS" =~ ^[1-9][0-9]*$ ]] \
+  || ! [[ "$MIN_UNIVERSE_COUNT" =~ ^[1-9][0-9]*$ ]]; then
+  echo "❌ AKSHARE smoke numeric limits must be positive whole numbers" >&2
   exit 2
 fi
 
@@ -32,6 +40,67 @@ curl_json_to_file() {
   curl -fsS --max-time "$timeout" "${BASE_URL}${path}" >"$output"
 }
 
+screening_response_ready() {
+  python3 - "$1" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+try:
+    payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+except (OSError, json.JSONDecodeError):
+    raise SystemExit(1)
+
+if not isinstance(payload, dict):
+    raise SystemExit(1)
+
+rows = payload.get("data")
+count = payload.get("count")
+if payload.get("error") or not isinstance(rows, list) or not rows:
+    raise SystemExit(1)
+if not isinstance(count, int) or count <= 0:
+    raise SystemExit(1)
+PY
+}
+
+wait_for_screening_universe() {
+  local output="$1"
+  local deadline=$((SECONDS + SCREENING_TIMEOUT))
+  local attempt=1
+
+  while true; do
+    local remaining=$((deadline - SECONDS))
+    if (( remaining <= 0 )); then
+      echo "❌ akshare screening universe did not become ready within ${SCREENING_TIMEOUT}s" >&2
+      return 1
+    fi
+
+    local request_timeout="$SCREENING_REQUEST_TIMEOUT"
+    if (( request_timeout > remaining )); then
+      request_timeout="$remaining"
+    fi
+
+    if curl_json_to_file '/screening-universe' "$request_timeout" "$output" \
+      && screening_response_ready "$output"; then
+      return 0
+    fi
+
+    remaining=$((deadline - SECONDS))
+    if (( remaining <= 0 )); then
+      echo "❌ akshare screening universe did not become ready within ${SCREENING_TIMEOUT}s" >&2
+      return 1
+    fi
+
+    local poll_seconds="$SCREENING_POLL_SECONDS"
+    if (( poll_seconds > remaining )); then
+      poll_seconds="$remaining"
+    fi
+    echo "  screening universe not ready (attempt ${attempt}); retrying in ${poll_seconds}s"
+    sleep "$poll_seconds"
+    attempt=$((attempt + 1))
+  done
+}
+
 echo "→ akshare smoke: ${BASE_URL}/healthz"
 curl_json_to_file /healthz 5 "$TMP_DIR/health.json"
 
@@ -40,6 +109,9 @@ curl_json_to_file '/stock-rankings/gainers?limit=1' "$RANK_TIMEOUT" "$TMP_DIR/ga
 
 echo "→ akshare smoke: amount ranking"
 curl_json_to_file '/stock-rankings/amount?limit=1' "$RANK_TIMEOUT" "$TMP_DIR/amount.json"
+
+echo "→ akshare smoke: full-market screening universe"
+wait_for_screening_universe "$TMP_DIR/screening-universe.json"
 
 TODAY="${NOW_SHANGHAI:0:10}"
 echo "→ akshare smoke: A-share trading calendar for $TODAY"
@@ -66,10 +138,12 @@ python3 - \
   "$REQUIRE_INTRADAY" \
   "$MAX_FETCH_AGE" \
   "$MAX_MARKET_LAG" \
+  "$MIN_UNIVERSE_COUNT" \
   "$INTRADAY_AVAILABLE" \
   "$TMP_DIR/health.json" \
   "$TMP_DIR/gainers.json" \
   "$TMP_DIR/amount.json" \
+  "$TMP_DIR/screening-universe.json" \
   "$TMP_DIR/trading-day.json" \
   "$TMP_DIR/quote.json" \
   "$TMP_DIR/intraday.json" <<'PY'
@@ -89,10 +163,12 @@ from typing import Any
     intraday_mode,
     max_fetch_age_raw,
     max_market_lag_raw,
+    min_universe_count_raw,
     intraday_available_raw,
     health_path,
     gainers_path,
     amount_path,
+    screening_path,
     calendar_path,
     quote_path,
     intraday_path,
@@ -101,6 +177,7 @@ from typing import Any
 SHANGHAI = timezone(timedelta(hours=8))
 MAX_FETCH_AGE = int(max_fetch_age_raw)
 MAX_MARKET_LAG = int(max_market_lag_raw)
+MIN_UNIVERSE_COUNT = int(min_universe_count_raw)
 intraday_transport_available = intraday_available_raw == "1"
 
 
@@ -181,6 +258,28 @@ if health.get("status") != "ok" or health.get("adapter_ready") is not True:
 
 gainers = data_envelope(gainers_path, "gainers")
 amount = data_envelope(amount_path, "amount")
+screening = load_json(screening_path, "screening universe")
+if screening.get("error"):
+    fail(f"screening universe upstream returned {screening.get('error_code', 'an error')}")
+screening_rows = screening.get("data")
+screening_count = screening.get("count")
+screening_source = screening.get("source")
+if (
+    not isinstance(screening_source, str)
+    or not screening_source.startswith(("akshare:", "sina:"))
+    or re.search(r"(?:mock|fixture|synthetic|demo)", screening_source, flags=re.IGNORECASE)
+):
+    fail("screening universe has a non-production data source")
+if (
+    not isinstance(screening_rows, list)
+    or not isinstance(screening_count, int)
+    or screening_count < MIN_UNIVERSE_COUNT
+    or len(screening_rows) < MIN_UNIVERSE_COUNT
+):
+    fail(
+        "screening universe is unexpectedly small "
+        f"({screening_count!r}; minimum {MIN_UNIVERSE_COUNT})"
+    )
 calendar = data_envelope(calendar_path, "trading calendar")
 calendar_row = calendar["data"][0]
 if not isinstance(calendar_row, dict) or calendar_row.get("date", "").replace("-", "") != today.replace("-", ""):
@@ -341,7 +440,8 @@ minute_summary = max(minute_times).strftime("%Y-%m-%d %H:%M") if minute_times el
 print(
     "✓ real-data gate: "
     f"trading_day={str(is_trading_day).lower()} phase={phase} "
-    f"quote={quote_time.strftime('%Y-%m-%d %H:%M')} intraday={minute_summary}"
+    f"quote={quote_time.strftime('%Y-%m-%d %H:%M')} intraday={minute_summary} "
+    f"screening_universe={screening_count}"
 )
 PY
 

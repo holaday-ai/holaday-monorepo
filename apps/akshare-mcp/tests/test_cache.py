@@ -125,3 +125,56 @@ def test_cached_follower_timeout_is_bounded_without_canceling_owner():
         finally:
             release.set()
         assert owner.result(timeout=1) == "quote:600519"
+
+
+def test_cached_serves_bounded_stale_while_one_background_refreshes():
+    clear_cache()
+    calls = {"n": 0}
+    calls_lock = threading.Lock()
+    refresh_started = threading.Event()
+    release_refresh = threading.Event()
+
+    @cached(ttl_seconds=0.03, stale_while_revalidate_seconds=1.0)
+    def fetch():
+        with calls_lock:
+            calls["n"] += 1
+            call_number = calls["n"]
+        if call_number == 1:
+            return "snapshot-v1"
+        refresh_started.set()
+        assert release_refresh.wait(timeout=2)
+        return "snapshot-v2"
+
+    assert fetch() == "snapshot-v1"
+    time.sleep(0.06)
+
+    began = time.monotonic()
+    assert fetch() == "snapshot-v1"
+    assert time.monotonic() - began < 0.1
+    assert refresh_started.wait(timeout=1)
+
+    assert fetch() == "snapshot-v1"
+    assert calls["n"] == 2
+
+    release_refresh.set()
+    deadline = time.monotonic() + 1
+    value = fetch()
+    while value != "snapshot-v2" and time.monotonic() < deadline:
+        time.sleep(0.01)
+        value = fetch()
+
+    assert value == "snapshot-v2"
+    assert calls["n"] == 2
+
+
+def test_stale_window_expires_instead_of_serving_forever(monkeypatch):
+    clock = {"now": 100.0}
+    monkeypatch.setattr("akshare_mcp.cache.time.monotonic", lambda: clock["now"])
+    cache = TTLCache()
+    cache.set("universe", "snapshot-v1")
+
+    clock["now"] = 106.0
+    assert cache.get_state("universe", ttl=5, stale_ttl=5) == ("snapshot-v1", "stale")
+
+    clock["now"] = 111.0
+    assert cache.get_state("universe", ttl=5, stale_ttl=5) == (None, "miss")
