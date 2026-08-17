@@ -383,7 +383,7 @@ pnpm --filter @holaday/web-workbench exec vitest run src/components/stocks/Stock
 
 Expected: PASS with no React act warnings.
 
-- [ ] **Step 6: Commit the workbench**
+- [x] **Step 6: Commit the workbench**
 
 ```bash
 git add apps/web-workbench/src/components/stocks/StockRiskRadar.tsx apps/web-workbench/src/components/stocks/StockRiskRadar.test.tsx apps/web-workbench/src/pages/StockTasksPage.tsx apps/web-workbench/src/pages/stock-tasks-layout.test.ts
@@ -397,14 +397,14 @@ git commit -m "feat(stocks): add watchlist risk radar"
 **Files:**
 - Modify: `docs/superpowers/plans/2026-08-18-stock-risk-radar-p1.md`
 
-- [ ] **Step 1: Run focused stock-risk verification serially**
+- [x] **Step 1: Run focused stock-risk verification serially**
 
 ```bash
 pnpm --filter @holaday/orchestrator exec vitest run src/agent/a-share/risk-radar-engine.test.ts src/stocks/stock-risk-radar-service.test.ts src/trpc/routers/stocks-risk-radar.test.ts src/stocks/stock-task-context.test.ts src/trpc/routers/stocks-screening.test.ts
 pnpm --filter @holaday/web-workbench exec vitest run src/components/stocks/StockRiskRadar.test.tsx src/components/stocks/StockScreeningWorkbench.test.tsx src/pages/StockTasksPage.test.ts src/pages/stock-tasks-layout.test.ts src/lib/control-tooltip.test.ts
 ```
 
-- [ ] **Step 2: Run package-wide tests, typecheck, and builds serially**
+- [x] **Step 2: Run package-wide tests, typecheck, and builds serially**
 
 ```bash
 pnpm --filter @holaday/orchestrator test
@@ -417,7 +417,17 @@ git diff --check
 
 Record exact counts, failures, warnings, and any pre-existing repository limitation. Do not infer release readiness from targeted tests alone.
 
-- [ ] **Step 3: Review scope and compliance**
+Final verification record (2026-08-18):
+
+- Orchestrator stock-risk focus: 5 files, 43 tests passed.
+- Web stock workbench focus before final hardening: 5 files, 25 tests passed; final component hardening: 4 tests passed.
+- Orchestrator package: 17 Node contract tests plus 4,300 Vitest tests passed. The first sandbox run produced 14 `listen/connect EPERM` failures in three local-socket files; the complete controlled rerun passed with zero failures.
+- Web package: 185 files, 1,403 tests passed. Existing test debug output and Node's `--localstorage-file` warning remained non-fatal.
+- Monorepo typecheck: 8 tasks across 7 packages passed.
+- Orchestrator production build and web lint/typecheck/Vite production build passed.
+- Managed browser QA loaded the fixture, rendered all three severities and explicit unavailable coverage, expanded evidence/source details, and reported no console errors.
+
+- [x] **Step 3: Review scope and compliance**
 
 Run:
 
@@ -429,7 +439,7 @@ rg -n "买入|卖出|持有|目标价|推荐指数|最值得买" apps/orchestrat
 
 The first two commands must show only stock risk radar, stock router/page wiring, tests, and this plan. The text scan may match the explicit non-recommendation footer or test sentinels; inspect each match and reject any recommendation action or score.
 
-- [ ] **Step 4: Mark the plan complete and commit verification evidence**
+- [x] **Step 4: Mark the plan complete and commit verification evidence**
 
 Change every completed checkbox to `[x]`, then:
 
