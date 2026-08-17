@@ -352,6 +352,6 @@ Expected: release migration contracts pass, diff check is clean, and only intent
 
 Render the exact production workbench in a temporary local harness and confirm preview-before-run, ambiguous threshold blocking, explanatory results, risk/evidence expansion, current-trust gating, and a 390px viewport with no clipping. The local development account could not authenticate against the current local database, so no real add-to-watchlist mutation was sent; the production callback remains covered by source integration and automated tests. Remove the harness and screenshots after verification.
 
-- [ ] **Step 5: Push and open a Ready PR**
+- [x] **Step 5: Push and open a Ready PR**
 
 Push `codex/stock-screening-p1a` and create a Ready PR into `claude/musing-keller-ae1d05`. Do not merge or deploy without a separate release decision after review.
