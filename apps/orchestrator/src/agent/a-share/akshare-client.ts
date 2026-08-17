@@ -29,6 +29,7 @@ import type {
   PledgeRow,
   StockQuoteRow,
   StockRankingRow,
+  StockScreeningUniverseRow,
   StockNewsRow,
   UnlockRow,
   ValuationRow,
@@ -99,6 +100,13 @@ export interface AkshareClient {
     metric: 'gainers' | 'losers' | 'amount',
     limit?: number,
   ): Promise<AkEnvelope<StockRankingRow>>;
+  /**
+   * 全市场条件选股初筛快照；只含新浪源字段，不代表推荐。
+   *
+   * 历史快照客户端不提供全市场池，因此保持可选；条件筛选只允许使用
+   * 当前 HTTP 数据客户端，并在入口显式校验该能力存在。
+   */
+  getScreeningUniverse?(): Promise<AkEnvelope<StockScreeningUniverseRow>>;
   /** get_market_pulse(date, prevDate?) — v2 盘后温度计+板块主线+大盘净流入（prevDate→涨停昨对比）。 */
   getMarketPulse(date: string, prevDate?: string): Promise<AkEnvelope<MarketPulseRow>>;
   /** get_zt_pool_summary(date) — v2 盘前回顾某交易日涨停梯队（date 'YYYYMMDD'）。 */
@@ -186,6 +194,11 @@ export class StubAkshareClient implements AkshareClient {
   }
   getStockRankings(metric: 'gainers' | 'losers' | 'amount', _limit?: number) {
     return Promise.resolve(this.err<StockRankingRow>(`akshare:stock_rankings(${metric})`, this.now()));
+  }
+  getScreeningUniverse() {
+    return Promise.resolve(
+      this.err<StockScreeningUniverseRow>('akshare:screening_universe', this.now()),
+    );
   }
   getMarketPulse(date: string, _prevDate?: string) {
     return Promise.resolve(this.err<MarketPulseRow>(`akshare:market_pulse(${date})`, this.now()));

@@ -192,29 +192,29 @@ export interface StockScreeningResult {
 }
 ```
 
-- [ ] **Step 1: Add HTTP-client RED tests**
+- [x] **Step 1: Add HTTP-client RED tests**
 
 Assert `/screening-universe` uses the `market` circuit group, normalizes timeout errors, and maps the standard envelope into `StockScreeningUniverseRow`.
 
-- [ ] **Step 2: Implement the client method and verify GREEN**
+- [x] **Step 2: Implement the client method and verify GREEN**
 
 Add `getScreeningUniverse(): Promise<AkEnvelope<StockScreeningUniverseRow>>` to real and stub clients. Run: `pnpm --filter @holaday/orchestrator exec vitest run src/agent/a-share/akshare-http-client.test.ts`.
 
-- [ ] **Step 3: Write service RED tests**
+- [x] **Step 3: Write service RED tests**
 
 Test cheap market filtering before deep fetch, four-worker concurrency, a hard deep limit of 20, missing fields not passing, zero-result preservation, stable sorting by complete matches then missing count then amount, and reuse of `detectAllRisks`. Include a candidate with a reduction event and assert a warning appears without recommendation language.
 
-- [ ] **Step 4: Implement the service**
+- [x] **Step 4: Implement the service**
 
 Use market fields for the first pass. For the first 20 rows after deterministic amount ordering, fetch fundamentals, valuation, pledge, goodwill, forecast, insider changes, and 90-day announcements with at most four concurrent candidates. Evaluate every criterion into matched/unmet/missing arrays; map `RiskSignal.star` to `警示`, non-star to `关注`, and explicit source failures to `missingCriteria` rather than a clean bill of health.
 
-- [ ] **Step 5: Verify service GREEN**
+- [x] **Step 5: Verify service GREEN**
 
 Run: `pnpm --filter @holaday/orchestrator exec vitest run src/stocks/stock-screening-service.test.ts src/agent/a-share/risk-radar-engine.test.ts src/agent/a-share/akshare-http-client.test.ts`
 
 Expected: all selected tests pass and the compliance sentinel remains green.
 
-- [ ] **Step 6: Commit the service slice**
+- [x] **Step 6: Commit the service slice**
 
 ```bash
 git add apps/orchestrator/src/agent/a-share/briefing-types.ts apps/orchestrator/src/agent/a-share/akshare-client.ts apps/orchestrator/src/agent/a-share/akshare-http-client.ts apps/orchestrator/src/agent/a-share/akshare-http-client.test.ts apps/orchestrator/src/stocks/stock-screening-service.ts apps/orchestrator/src/stocks/stock-screening-service.test.ts

@@ -115,6 +115,22 @@ export interface StockRankingRow {
   [k: string]: unknown;
 }
 
+/** A股全市场条件选股初筛行；字段均来自新浪行情中心原始快照。 */
+export interface StockScreeningUniverseRow {
+  代码?: string;
+  名称?: string;
+  最新价?: number | null;
+  涨跌幅?: number | null;
+  成交额?: number | null;
+  换手率?: number | null;
+  市盈率TTM?: number | null;
+  市净率?: number | null;
+  /** 新浪原始市值数值；单位未在此层推断，首版不用于用户条件。 */
+  总市值原值?: number | null;
+  行情时间?: string;
+  [k: string]: unknown;
+}
+
 /** 个股限售解禁行（stock_restricted_release_queue_em，G2）。列名待 Vultr 核对。 */
 export interface UnlockRow {
   解禁时间?: string;
