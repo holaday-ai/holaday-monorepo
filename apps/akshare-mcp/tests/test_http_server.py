@@ -43,6 +43,35 @@ def test_trading_calendar_latest_route_preserves_source_and_fetch_timestamp(monk
     assert result["fetched_at"] == "2026-08-16T14:00:00+00:00"
 
 
+def test_screening_universe_route_preserves_standard_envelope(monkeypatch):
+    monkeypatch.setattr(
+        http_server,
+        "_screening_universe",
+        lambda: (
+            [
+                {
+                    "代码": "600519",
+                    "名称": "贵州茅台",
+                    "最新价": 1488.5,
+                    "成交额": 987654321.0,
+                    "市盈率TTM": 21.5,
+                }
+            ],
+            "sina:Market_Center.getHQNodeData(full-market-screening)",
+            "2026-08-17T02:05:00+00:00",
+        ),
+        raising=False,
+    )
+
+    result = http_server.screening_universe()
+
+    assert result["count"] == 1
+    assert result["data"][0]["代码"] == "600519"
+    assert result["source"] == "sina:Market_Center.getHQNodeData(full-market-screening)"
+    assert result["fetched_at"] == "2026-08-17T02:05:00+00:00"
+    assert "error" not in result
+
+
 def test_error_envelope_is_attributed_timestamped_and_sanitized(caplog):
     def fetch():
         raise adp.AkShareUnavailable("upstream token=secret-value")
@@ -133,36 +162,46 @@ def test_health_exposes_successful_source_fallbacks():
     assert after["last_fallback_source"] == result["source"]
 
 
-def test_background_prewarm_keeps_fast_rankings_and_slow_symbol_tables_warm(monkeypatch):
+def test_background_prewarm_keeps_rankings_screening_universe_and_risks_warm(monkeypatch):
     calls = []
 
     monkeypatch.setattr(http_server, "_rank", lambda metric, limit: ([], "akshare:test", "now"))
-    monkeypatch.setattr(adp, "refresh_symbol_table", lambda: calls.append("symbols"))
+    monkeypatch.setattr(
+        http_server,
+        "_screening_universe",
+        lambda: ([], "akshare:screen", "now"),
+    )
     monkeypatch.setattr(adp, "warm_risk_tables", lambda: calls.append("risks"))
     monkeypatch.setattr(http_server, "_safe", lambda fn, *args: calls.append((fn, args)))
 
     http_server._warm_market_caches_once()
 
     assert calls[0][1] == ("gainers", 8)
-    assert calls[1:] == ["symbols", "risks"]
+    assert calls[1][1] == ()
+    assert calls[2:] == ["risks"]
 
 
-def test_background_prewarm_isolates_symbol_refresh_failure(monkeypatch, caplog):
+def test_background_prewarm_isolates_screening_refresh_failure(monkeypatch, caplog):
     calls = []
 
     monkeypatch.setattr(http_server, "_rank", lambda metric, limit: ([], "akshare:test", "now"))
 
-    def fail_symbols():
-        calls.append("symbols")
-        raise adp.AkShareUnavailable("symbol source offline")
+    def fail_screening():
+        calls.append("screening")
+        raise adp.AkShareUnavailable("screening source offline")
 
-    monkeypatch.setattr(adp, "refresh_symbol_table", fail_symbols)
+    monkeypatch.setattr(http_server, "_screening_universe", fail_screening)
     monkeypatch.setattr(adp, "warm_risk_tables", lambda: calls.append("risks"))
-    monkeypatch.setattr(http_server, "_safe", lambda fn, *args: calls.append((fn, args)))
+
+    def safe(fn, *args):
+        calls.append((fn, args))
+        return fn(*args)
+
+    monkeypatch.setattr(http_server, "_safe", safe)
 
     with caplog.at_level(logging.WARNING, logger="akshare_mcp.http"):
         http_server._warm_market_caches_once()
 
     assert calls[0][1] == ("gainers", 8)
-    assert calls[1:] == ["symbols", "risks"]
-    assert "symbol-table prewarm failed" in caplog.text
+    assert calls[2:] == ["screening", "risks"]
+    assert "screening-universe prewarm failed" in caplog.text

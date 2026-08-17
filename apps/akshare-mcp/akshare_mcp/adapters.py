@@ -370,6 +370,97 @@ def _sina_ranking_rows(metric: str, limit: int) -> list[dict[str, Any]]:
     return rows[:limit]
 
 
+@_cached(TTL_SPOT)
+def get_screening_universe() -> tuple[list[dict[str, Any]], str]:
+    """Return a cached, source-only A-share universe for transparent screening.
+
+    Sina exposes the market fields required for a cheap first pass in the raw
+    ``Market_Center.getHQNodeData`` payload.  AkShare's public
+    ``stock_zh_a_spot`` adapter drops PE/PB/turnover before returning its
+    DataFrame, so this narrow adapter keeps those source fields without
+    deriving or filling any value.  Deep fundamentals and risk facts remain
+    separate per-symbol calls.
+    """
+    timeout = max(1.0, float(os.environ.get("AKSHARE_MCP_SINA_SCREEN_TIMEOUT", "15")))
+    page_size = 80
+    rows_by_code: dict[str, dict[str, Any]] = {}
+
+    for page in range(1, 91):
+        params = {
+            "page": str(page),
+            "num": str(page_size),
+            "sort": "amount",
+            "asc": "0",
+            "node": "hs_a",
+            "symbol": "",
+            "_s_r_a": "page",
+        }
+        try:
+            response = _retry(
+                lambda params=params: requests.get(
+                    _SINA_A_RANK_URL,
+                    params=params,
+                    timeout=timeout,
+                ),
+                attempts=2,
+                sleep=0.4,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except Exception as exc:  # noqa: BLE001 - normalize transport/parser errors
+            raise AkShareUnavailable("新浪全市场筛选快照暂不可用") from exc
+
+        if not isinstance(payload, list):
+            raise AkShareUnavailable("新浪全市场筛选快照格式异常")
+        if not payload:
+            break
+
+        for raw in payload:
+            if not isinstance(raw, dict):
+                continue
+            code = _strip_market_prefix(str(raw.get("code") or raw.get("symbol") or ""))
+            if code in rows_by_code:
+                continue
+            name = str(raw.get("name") or "").strip()
+            price = _to_float(raw.get("trade"))
+            amount = _to_float(raw.get("amount"))
+            if (
+                not re.fullmatch(r"\d{6}", code)
+                or not name
+                or name in ("nan", "None")
+                or price is None
+                or price <= 0
+                or amount is None
+                or amount <= 0
+            ):
+                continue
+            rows_by_code[code] = {
+                "代码": code,
+                "名称": name,
+                "最新价": price,
+                "涨跌幅": _to_float(raw.get("changepercent")),
+                "成交额": amount,
+                "换手率": _to_float(raw.get("turnoverratio")),
+                "市盈率TTM": _to_float(raw.get("per")),
+                "市净率": _to_float(raw.get("pb")),
+                "总市值原值": _to_float(raw.get("mktcap")),
+                "行情时间": str(raw.get("ticktime") or "").strip(),
+            }
+
+        if len(payload) < page_size:
+            break
+
+    rows = sorted(
+        rows_by_code.values(),
+        key=lambda row: _to_float(row.get("成交额")) or 0,
+        reverse=True,
+    )
+    if not rows:
+        raise AkShareUnavailable("新浪全市场筛选快照没有可验证行情")
+    _hydrate_symbol_table_from_spot(rows)
+    return rows, "sina:Market_Center.getHQNodeData(full-market-screening)"
+
+
 def get_stock_rankings(metric: str = "gainers", limit: int = 20) -> tuple[list[dict[str, Any]], str]:
     """A股全市场榜单。由新浪服务端排序后只取首页真实数据。"""
     m = (metric or "gainers").strip().lower()

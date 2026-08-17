@@ -37,33 +37,33 @@
 - Produces HTTP: `GET /screening-universe` returning the standard AkShare envelope.
 - Each row contains `代码`, `名称`, `最新价`, `涨跌幅`, `成交额`, `换手率`, `市盈率TTM`, `市净率`, `总市值原值`, and `行情时间`; absent source values are `None`.
 
-- [ ] **Step 1: Write failing adapter tests**
+- [x] **Step 1: Write failing adapter tests**
 
 Add fixtures with two raw Sina rows, including an ST name and numeric `per/pb/turnoverratio`, then assert normalization, invalid-row removal, and stable `成交额` descending order. Name the test `test_screening_universe_preserves_source_fields_and_excludes_invalid_rows`.
 
-- [ ] **Step 2: Run the adapter test and verify RED**
+- [x] **Step 2: Run the adapter test and verify RED**
 
 Run: `PYTHONPATH=apps/akshare-mcp /Users/yaleiqi/holaday-monorepo/apps/akshare-mcp/.venv/bin/python -m pytest apps/akshare-mcp/tests/test_stock_adapters.py -k screening_universe -q`
 
 Expected: FAIL because `get_screening_universe` does not exist.
 
-- [ ] **Step 3: Implement the cached Sina snapshot**
+- [x] **Step 3: Implement the cached Sina snapshot**
 
 Implement a bounded page fetch against `_SINA_A_RANK_URL` using `num=80`, `sort=amount`, `asc=0`, a maximum of 90 pages, per-request timeout from `AKSHARE_MCP_SINA_SCREEN_TIMEOUT` defaulting to 15 seconds, and stop on an empty/short page. Normalize only source fields, deduplicate by six-digit code, require positive price and amount, cache with `TTL_SPOT`, hydrate the symbol table, and never synthesize values.
 
-- [ ] **Step 4: Add failing/passing HTTP contract tests**
+- [x] **Step 4: Add failing/passing HTTP contract tests**
 
 Assert `/screening-universe` delegates through `_safe`, returns the standard envelope, and exposes no raw exception text. Run:
 
 `PYTHONPATH=apps/akshare-mcp /Users/yaleiqi/holaday-monorepo/apps/akshare-mcp/.venv/bin/python -m pytest apps/akshare-mcp/tests/test_http_server.py -k screening_universe -q`
 
-- [ ] **Step 5: Verify the AkShare task**
+- [x] **Step 5: Verify the AkShare task**
 
 Run: `PYTHONPATH=apps/akshare-mcp /Users/yaleiqi/holaday-monorepo/apps/akshare-mcp/.venv/bin/python -m pytest apps/akshare-mcp/tests/test_stock_adapters.py apps/akshare-mcp/tests/test_http_server.py -q`
 
 Expected: all selected tests pass.
 
-- [ ] **Step 6: Commit the AkShare slice**
+- [x] **Step 6: Commit the AkShare slice**
 
 ```bash
 git add apps/akshare-mcp/akshare_mcp/adapters.py apps/akshare-mcp/akshare_mcp/http_server.py apps/akshare-mcp/tests/test_stock_adapters.py apps/akshare-mcp/tests/test_http_server.py apps/akshare-mcp/README.md
@@ -355,4 +355,3 @@ Open `/stocks`, confirm preview-before-run, ambiguous threshold blocking, explan
 - [ ] **Step 5: Push and open a Ready PR**
 
 Push `codex/stock-screening-p1a` and create a Ready PR into `claude/musing-keller-ae1d05`. Do not merge or deploy without a separate release decision after review.
-
