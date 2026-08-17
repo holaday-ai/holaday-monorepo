@@ -315,7 +315,7 @@ export function StockRiskRadar(props: {
 }): JSX.Element;
 ```
 
-- [ ] **Step 1: Write failing component and layout tests**
+- [x] **Step 1: Write failing component and layout tests**
 
 Use an injected API and a literal result to assert:
 
@@ -329,7 +329,7 @@ Use an injected API and a literal result to assert:
 - the refresh button has both `aria-label` and native `title`;
 - the page places `<StockRiskRadar>` after `<MarketHighlights>` and before `<StockScreeningWorkbench>`.
 
-- [ ] **Step 2: Run component and layout tests and verify RED**
+- [x] **Step 2: Run component and layout tests and verify RED**
 
 Run:
 
@@ -339,7 +339,7 @@ pnpm --filter @holaday/web-workbench exec vitest run src/components/stocks/Stock
 
 Expected: FAIL because the component is absent.
 
-- [ ] **Step 3: Implement progressive, non-recommendation UI**
+- [x] **Step 3: Implement progressive, non-recommendation UI**
 
 Build one white workbench section with a compact header, trust/date badge, refresh control, summary counts, and signal cards. Use restrained severity accents:
 
@@ -359,7 +359,7 @@ Footer copy is exactly:
 风险雷达只展示已核验事实与规则触发结果；未触发不等于没有风险，也不构成投资建议。
 ```
 
-- [ ] **Step 4: Wire the component into `StockTasksPage`**
+- [x] **Step 4: Wire the component into `StockTasksPage`**
 
 Pass:
 
@@ -373,7 +373,7 @@ Pass:
 
 Place it immediately after `MarketHighlights` and before `StockScreeningWorkbench` so users see watchlist facts, then risk, then broad-market screening.
 
-- [ ] **Step 5: Run component, page, tooltip, and layout tests**
+- [x] **Step 5: Run component, page, tooltip, and layout tests**
 
 Run:
 
