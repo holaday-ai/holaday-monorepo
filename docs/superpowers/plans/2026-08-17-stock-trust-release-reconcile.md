@@ -27,13 +27,13 @@
 - Consumes: `origin/claude/musing-keller-ae1d05` and production HEAD `327ab0bd3a2a94a18bd9c4e36845fb3bda9b4dea`.
 - Produces: a clean isolated branch whose ancestry contains the current production HEAD.
 
-- [ ] **Step 1: Verify branch ancestry and clean status**
+- [x] **Step 1: Verify branch ancestry and clean status**
 
 Run: `git merge-base --is-ancestor 327ab0bd origin/claude/musing-keller-ae1d05 && git status --short`
 
 Expected: exit 0 and no tracked changes other than this plan.
 
-- [ ] **Step 2: Run baseline database release-contract tests**
+- [x] **Step 2: Run baseline database release-contract tests**
 
 Run: `node --test apps/orchestrator/scripts/release-db-contract.test.mjs`
 
@@ -50,21 +50,21 @@ Expected: all tests pass before integration.
 - Consumes: migration filenames matching `NNNN_description.sql`.
 - Produces: `findDuplicateMigrationNumbers(files: string[]): string[]` returning duplicate four-digit prefixes.
 
-- [ ] **Step 1: Write the failing duplicate-prefix test**
+- [x] **Step 1: Write the failing duplicate-prefix test**
 
 Add a test with literal filenames `0046_energy_analytics.sql` and `0046_tasks_source_context.sql`; expect `['0046']`.
 
-- [ ] **Step 2: Run the test and confirm RED**
+- [x] **Step 2: Run the test and confirm RED**
 
 Run: `node --test apps/orchestrator/scripts/release-db-contract.test.mjs`
 
 Expected: failure because `findDuplicateMigrationNumbers` is not exported.
 
-- [ ] **Step 3: Implement the minimal duplicate-prefix detector**
+- [x] **Step 3: Implement the minimal duplicate-prefix detector**
 
 Count four-digit prefixes for matching SQL filenames and return sorted prefixes whose count exceeds one.
 
-- [ ] **Step 4: Run the test and confirm GREEN**
+- [x] **Step 4: Run the test and confirm GREEN**
 
 Run: `node --test apps/orchestrator/scripts/release-db-contract.test.mjs`
 
@@ -81,25 +81,25 @@ Expected: all tests pass.
 - Consumes: PR #61 merge commit `514058a192a4ac746e82b67218e1d38a605a722a`.
 - Produces: one release commit containing both production history and PR #61.
 
-- [ ] **Step 1: Merge the reviewed stock-trust branch without committing**
+- [x] **Step 1: Merge the reviewed stock-trust branch without committing**
 
 Run: `git merge --no-commit --no-ff origin/codex/trust-loop-round1`
 
 Expected: either an automatically merged tree or explicit conflicts to resolve; no stock-trust files may be dropped.
 
-- [ ] **Step 2: Resolve conflicts by preserving both contracts**
+- [x] **Step 2: Resolve conflicts by preserving both contracts**
 
 For `verify-db-schema.ts`, keep energy analytics table checks and the `tasks.source_context` column check. For any other overlap, compare both parents and retain both independently tested behaviors.
 
-- [ ] **Step 3: Renumber the unapplied stock migration**
+- [x] **Step 3: Renumber the unapplied stock migration**
 
 Rename `0046_tasks_source_context.sql` to `0047_tasks_source_context.sql`; keep SQL content unchanged.
 
-- [ ] **Step 4: Add the migration-set integration assertion**
+- [x] **Step 4: Add the migration-set integration assertion**
 
 Read the real `apps/orchestrator/drizzle` directory in the release-contract test and expect `findDuplicateMigrationNumbers(files)` to equal `[]`.
 
-- [ ] **Step 5: Commit the reconciled release**
+- [x] **Step 5: Commit the reconciled release**
 
 Stage only merge resolutions, migration contract files, migration rename, and this plan. Commit with a release-reconciliation message.
 
@@ -112,25 +112,25 @@ Stage only merge resolutions, migration contract files, migration rename, and th
 - Consumes: reconciled release tree.
 - Produces: pushed branch and Ready pull request into `claude/musing-keller-ae1d05`.
 
-- [ ] **Step 1: Run orchestrator tests and build**
+- [x] **Step 1: Run orchestrator tests and build**
 
 Run: `pnpm --filter @holaday/orchestrator test && pnpm --filter @holaday/orchestrator build`
 
 Expected: all tests and build pass.
 
-- [ ] **Step 2: Run AkShare tests**
+- [x] **Step 2: Run AkShare tests**
 
 Run: `cd apps/akshare-mcp && python3 -m pytest`
 
 Expected: all tests pass.
 
-- [ ] **Step 3: Run web tests and production build**
+- [x] **Step 3: Run web tests and production build**
 
 Run: `pnpm --filter @holaday/web-workbench test && pnpm --filter @holaday/web-workbench build`
 
 Expected: all tests, ESLint, typecheck, and Vite build pass.
 
-- [ ] **Step 4: Run repository typecheck and diff checks**
+- [x] **Step 4: Run repository typecheck and diff checks**
 
 Run: `pnpm typecheck && git diff --check && git status --short`
 
