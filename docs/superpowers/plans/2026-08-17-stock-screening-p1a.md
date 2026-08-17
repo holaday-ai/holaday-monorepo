@@ -233,25 +233,25 @@ git commit -m "feat(stocks): evaluate explainable screening candidates"
 - Produces: `stocks.runScreening.mutate({ snapshotId, dataAsOf, criteria })`.
 - `runScreening` rejects non-current, stale, unowned, or mismatched snapshots before any AkShare deep fetch.
 
-- [ ] **Step 1: Write router RED tests**
+- [x] **Step 1: Write router RED tests**
 
 Assert preview returns editable criteria plus unparsed clauses. Assert run rejects `historical`, `delayed`, `unavailable`, foreign snapshot IDs, mismatched dates, incomplete criteria, over 20 criteria, and empty criteria. Assert a valid current snapshot reaches the injected screening service.
 
-- [ ] **Step 2: Run router tests and verify RED**
+- [x] **Step 2: Run router tests and verify RED**
 
 Run: `pnpm --filter @holaday/orchestrator exec vitest run src/trpc/routers/stocks-screening.test.ts`
 
 Expected: FAIL because the procedures do not exist.
 
-- [ ] **Step 3: Implement the procedures**
+- [x] **Step 3: Implement the procedures**
 
 Reuse the existing persisted dashboard snapshot lookup and ownership checks from stock-task context validation. Use Zod discriminated validation for boolean, scalar, and range values. Log only `userId`, `snapshotId`, criterion fields, coverage counts, duration, and stable error codes; never log the natural-language prompt or candidate payload.
 
-- [ ] **Step 4: Verify router GREEN and P0 regression**
+- [x] **Step 4: Verify router GREEN and P0 regression**
 
 Run: `pnpm --filter @holaday/orchestrator exec vitest run src/trpc/routers/stocks-screening.test.ts src/trpc/routers/stocks.test.ts src/stocks/stock-task-context.test.ts src/stocks/stock-trust.test.ts`
 
-- [ ] **Step 5: Commit the router slice**
+- [x] **Step 5: Commit the router slice**
 
 ```bash
 git add apps/orchestrator/src/trpc/routers/stocks.ts apps/orchestrator/src/trpc/routers/stocks.test.ts apps/orchestrator/src/trpc/routers/stocks-screening.test.ts
