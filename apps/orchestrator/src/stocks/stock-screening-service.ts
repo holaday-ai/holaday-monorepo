@@ -9,7 +9,9 @@ import type {
   StockScreeningUniverseRow,
   ValuationRow,
 } from '../agent/a-share/briefing-types.js';
+import type { TradingCalendarRow } from '../agent/a-share/akshare-client.js';
 import { detectAllRisks, type RiskKey } from '../agent/a-share/risk-radar-engine.js';
+import { latestExpectedTradingDate } from './stock-trust.js';
 import type {
   StockScreenCriterion,
   StockScreenField,
@@ -31,6 +33,7 @@ const MARKET_FIELDS = new Set<StockScreenField>([
 ]);
 
 export interface StockScreeningClient {
+  getLatestTradingDay(onOrBefore: string): Promise<AkEnvelope<TradingCalendarRow>>;
   getScreeningUniverse(): Promise<AkEnvelope<StockScreeningUniverseRow>>;
   getFundamentals(symbol: string): Promise<AkEnvelope<FundamentalsRow>>;
   getValuation(symbol: string): Promise<AkEnvelope<ValuationRow>>;
@@ -43,6 +46,13 @@ export interface StockScreeningClient {
     startDate?: string,
     endDate?: string,
   ): Promise<AkEnvelope<AnnouncementRow>>;
+}
+
+export class StockScreeningFreshnessError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'StockScreeningFreshnessError';
+  }
 }
 
 export interface StockScreeningWarning {
@@ -387,8 +397,16 @@ export async function runStockScreening(args: {
   snapshotId: string;
   dataAsOf: string;
   criteria: StockScreenCriterion[];
+  now?: Date;
 }): Promise<StockScreeningResult> {
   const { client, snapshotId, dataAsOf, criteria } = args;
+  const expectedTradingDate = await latestExpectedTradingDate(client, args.now ?? new Date());
+  if (expectedTradingDate.status !== 'verified' || !expectedTradingDate.date) {
+    throw new StockScreeningFreshnessError('暂时无法核验最新交易日，请刷新行情后重试。');
+  }
+  if (expectedTradingDate.date !== dataAsOf) {
+    throw new StockScreeningFreshnessError('股票快照已不是最新交易日，请刷新页面后重试。');
+  }
   const universeEnvelope = await client.getScreeningUniverse();
   const universe = universeEnvelope.error ? [] : universeEnvelope.data;
   const marketCriteria = criteria.filter((criterion) => MARKET_FIELDS.has(criterion.field));

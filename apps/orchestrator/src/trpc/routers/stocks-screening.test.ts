@@ -1,5 +1,6 @@
 import { TRPCError } from '@trpc/server';
 import { describe, expect, it, vi } from 'vitest';
+import { StockScreeningFreshnessError } from '../../stocks/stock-screening-service.js';
 import {
   previewStockScreening,
   runStockScreeningInputSchema,
@@ -211,5 +212,21 @@ describe('stock screening procedures', () => {
         sourceField: '市盈率TTM',
       })],
     }));
+  });
+
+  it('returns a refreshable client error when the current trading date changes', async () => {
+    await expect(runTrustedStockScreening({
+      db: snapshotDb([snapshot()]) as never,
+      userId: 7,
+      logger: { info: vi.fn(), warn: vi.fn() },
+      client: {} as never,
+      input: { snapshotId: SNAPSHOT_ID, dataAsOf: DATA_AS_OF, criteria: [criterion()] },
+      execute: vi.fn(async () => {
+        throw new StockScreeningFreshnessError('股票快照已不是最新交易日，请刷新页面后重试。');
+      }),
+    })).rejects.toMatchObject({
+      code: 'BAD_REQUEST',
+      message: '股票快照已不是最新交易日，请刷新页面后重试。',
+    });
   });
 });

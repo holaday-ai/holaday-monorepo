@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { StockScreeningClient } from '../../stocks/stock-screening-service.js';
 import {
   runStockScreening,
+  StockScreeningFreshnessError,
   type StockScreeningResult,
 } from '../../stocks/stock-screening-service.js';
 import {
@@ -106,12 +107,20 @@ export async function runTrustedStockScreening(args: {
   });
 
   const startedAt = Date.now();
-  const result = await (args.execute ?? runStockScreening)({
-    client: args.client,
-    snapshotId: input.snapshotId,
-    dataAsOf: input.dataAsOf,
-    criteria,
-  });
+  let result: StockScreeningResult;
+  try {
+    result = await (args.execute ?? runStockScreening)({
+      client: args.client,
+      snapshotId: input.snapshotId,
+      dataAsOf: input.dataAsOf,
+      criteria,
+    });
+  } catch (error) {
+    if (error instanceof StockScreeningFreshnessError) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: error.message });
+    }
+    throw error;
+  }
   args.logger.info?.(
     {
       userId: args.userId,

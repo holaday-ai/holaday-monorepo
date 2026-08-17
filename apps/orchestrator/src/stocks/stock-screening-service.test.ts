@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type {
   AkEnvelope,
   AnnouncementRow,
@@ -10,6 +10,7 @@ import type {
   StockScreeningUniverseRow,
   ValuationRow,
 } from '../agent/a-share/briefing-types.js';
+import type { TradingCalendarRow } from '../agent/a-share/akshare-client.js';
 import type { StockScreenCriterion } from './screening-criteria.js';
 import {
   runStockScreening,
@@ -75,6 +76,10 @@ function clientWith(
   overrides: Partial<StockScreeningClient> = {},
 ): StockScreeningClient {
   return {
+    getLatestTradingDay: async (onOrBefore) => envelope<TradingCalendarRow>([{
+      requested_date: onOrBefore,
+      latest_trading_date: '2026-08-17',
+    }], 'akshare:calendar'),
     getScreeningUniverse: async () => envelope(universe, 'sina:screening'),
     getFundamentals: async () => envelope<FundamentalsRow>([{
       report_period: '2026-06-30',
@@ -105,6 +110,46 @@ function clientWith(
 }
 
 describe('runStockScreening', () => {
+  it('rejects a no-longer-current snapshot before loading the screening universe', async () => {
+    const getScreeningUniverse = vi.fn(async () => envelope([], 'sina:screening'));
+    const client = clientWith([], {
+      getLatestTradingDay: async (onOrBefore) => envelope<TradingCalendarRow>([{
+        requested_date: onOrBefore,
+        latest_trading_date: '2026-08-17',
+      }], 'akshare:calendar'),
+      getScreeningUniverse,
+    });
+
+    await expect(runStockScreening({
+      client,
+      snapshotId: 'stkshot_stale',
+      dataAsOf: '2026-08-14',
+      criteria: [criterion('pe', 'pe_ttm', 'lte', 30, '市盈率不超过 30')],
+      now: new Date('2026-08-17T03:00:00.000Z'),
+    })).rejects.toThrow('股票快照已不是最新交易日');
+    expect(getScreeningUniverse).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when the expected trading date cannot be verified', async () => {
+    const getScreeningUniverse = vi.fn(async () => envelope([], 'sina:screening'));
+    const client = clientWith([], {
+      getLatestTradingDay: async () => envelope<TradingCalendarRow>([], 'akshare:calendar', {
+        error: 'calendar unavailable',
+        error_code: 'UPSTREAM_UNAVAILABLE',
+      }),
+      getScreeningUniverse,
+    });
+
+    await expect(runStockScreening({
+      client,
+      snapshotId: 'stkshot_unverified',
+      dataAsOf: '2026-08-17',
+      criteria: [criterion('pe', 'pe_ttm', 'lte', 30, '市盈率不超过 30')],
+      now: new Date('2026-08-17T03:00:00.000Z'),
+    })).rejects.toThrow('暂时无法核验最新交易日');
+    expect(getScreeningUniverse).not.toHaveBeenCalled();
+  });
+
   it('applies market criteria before deep fetch and never deep-checks rejected rows', async () => {
     const deepSymbols: string[] = [];
     const client = clientWith([
