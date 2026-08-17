@@ -209,6 +209,16 @@ function evidenceAnnouncement(key: RiskKey, rows: AnnouncementRow[]): Announceme
   return null;
 }
 
+function safeEvidenceUrl(value: unknown): string | null {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
 function sourceDateForSignal(args: {
   signal: RiskSignal;
   pledgeRows: PledgeRow[];
@@ -305,7 +315,7 @@ function signalRecord(args: {
     announcementRows: args.announcementRows,
   });
   const announcement = evidenceAnnouncement(args.signal.key, args.announcementRows);
-  const evidenceUrl = typeof announcement?.公告链接 === 'string' ? announcement.公告链接 : null;
+  const evidenceUrl = safeEvidenceUrl(announcement?.公告链接);
   const rawEvidence = rawEvidenceForSignal({
     signal: args.signal,
     pledgeRows: args.pledge.data,

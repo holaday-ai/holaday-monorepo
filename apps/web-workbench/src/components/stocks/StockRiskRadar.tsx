@@ -194,132 +194,147 @@ export function StockRiskRadar({
             <div className="mt-1">{error}</div>
           </div>
         ) : result ? (
-          <>
-            <div className="flex flex-wrap items-center gap-2 text-[11px]">
-              <SummaryChip
-                label="高风险"
-                count={signalCount(result.signals, '高风险')}
-                tone="high"
-              />
-              <SummaryChip
-                label="警示"
-                count={signalCount(result.signals, '警示')}
-                tone="warning"
-              />
-              <SummaryChip
-                label="关注"
-                count={signalCount(result.signals, '关注')}
-                tone="attention"
-              />
-              <span className="ml-auto text-[#8B92A1]">
-                已检查 {result.checkedStockCount}/{result.requestedStockCount} 只
-                {result.truncated ? ' · 其余股票将在后续批次检查' : ''}
-              </span>
+          result.requestedStockCount === 0 ? (
+            <div className="rounded-[8px] border border-dashed border-[#DADDE4] bg-[#FCFCFD] px-4 py-8 text-center">
+              <div className="text-[13px] font-semibold text-[#344054]">
+                暂无可检查的 A 股自选股
+              </div>
+              <p className="mt-1 text-[12px] text-[#8B92A1]">
+                风险雷达当前仅覆盖六位代码的 A 股自选项。
+              </p>
             </div>
-
-            {result.signals.length === 0 ? (
-              <div className="mt-4 rounded-[8px] border border-[#DDE5F3] bg-[#F8FAFD] px-4 py-6 text-center">
-                <div className="text-[13px] font-semibold text-[#344054]">本轮规则未触发</div>
-                <p className="mt-1 text-[12px] text-[#667085]">
-                  这只代表当前规则没有命中，仍需结合数据覆盖和后续披露复核。
-                </p>
+          ) : (
+            <>
+              <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                <SummaryChip
+                  label="高风险"
+                  count={signalCount(result.signals, '高风险')}
+                  tone="high"
+                />
+                <SummaryChip
+                  label="警示"
+                  count={signalCount(result.signals, '警示')}
+                  tone="warning"
+                />
+                <SummaryChip
+                  label="关注"
+                  count={signalCount(result.signals, '关注')}
+                  tone="attention"
+                />
+                <span className="ml-auto text-[#8B92A1]">
+                  A股检查 {result.checkedStockCount}/{result.requestedStockCount} 只
+                  {result.truncated
+                    ? ` · 其余 ${result.requestedStockCount - result.checkedStockCount} 只未纳入本轮`
+                    : ''}
+                </span>
               </div>
-            ) : (
-              <div className="mt-4 grid gap-3 lg:grid-cols-2">
-                {result.signals.map((signal) => {
-                  const expanded = expandedSignalId === signal.signalId;
-                  return (
-                    <article
-                      key={signal.signalId}
-                      data-testid="risk-signal"
-                      className="rounded-[8px] border border-[#E4E6EB] bg-[#FCFCFD] p-4"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="truncate text-[14px] font-semibold text-[#121826]">
-                              {signal.name}
-                            </span>
-                            <span className="font-mono text-[11px] text-[#8B92A1]">
-                              {signal.symbol}
-                            </span>
-                            <span
-                              data-testid="risk-severity"
-                              className={cn(
-                                'inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold',
-                                SEVERITY_STYLE[signal.severity],
-                              )}
-                            >
-                              {signal.severity}
-                            </span>
-                          </div>
-                          <div className="mt-1 text-[11px] font-medium text-[#667085]">
-                            {signal.label} · 事实日期 {compactDate(signal.sourceDataAsOf)}
-                          </div>
-                        </div>
-                        <AlertTriangle
-                          className="mt-0.5 h-4 w-4 shrink-0 text-[#C98228]"
-                          aria-hidden
-                        />
-                      </div>
-                      <p className="mt-3 text-[12px] leading-5 text-[#344054]">{signal.fact}</p>
-                      <p className="mt-2 text-[11px] leading-[18px] text-[#667085]">
-                        为什么相关：{signal.whyRelevant}
-                      </p>
-                      <button
-                        type="button"
-                        aria-expanded={expanded}
-                        onClick={() => setExpandedSignalId(expanded ? null : signal.signalId)}
-                        className="mt-3 inline-flex items-center gap-1 text-[11px] font-semibold text-[#6B4AA0] hover:text-[#54377F]"
-                      >
-                        {expanded ? '收起依据' : '查看依据'}
-                        {expanded ? (
-                          <ChevronUp className="h-3.5 w-3.5" aria-hidden />
-                        ) : (
-                          <ChevronDown className="h-3.5 w-3.5" aria-hidden />
-                        )}
-                      </button>
-                      {expanded ? (
-                        <div className="mt-3 space-y-1 rounded-[7px] border border-[#E4E1EC] bg-white px-3 py-3 text-[11px] leading-[18px] text-[#667085]">
-                          <div>规则：{signal.trigger}</div>
-                          <div>来源：{signal.source}</div>
-                          <div>抓取时间：{formatDateTime(signal.fetchedAt)}</div>
-                          <div className="break-all">证据编号：{signal.evidenceId}</div>
-                          {signal.evidenceUrl ? (
-                            <a
-                              href={signal.evidenceUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="inline-flex items-center gap-1 font-semibold text-[#6B4AA0] hover:text-[#54377F]"
-                            >
-                              查看来源
-                              <ExternalLink className="h-3 w-3" aria-hidden />
-                            </a>
-                          ) : null}
-                        </div>
-                      ) : null}
-                    </article>
-                  );
-                })}
-              </div>
-            )}
 
-            {unavailableChecks.length > 0 ? (
-              <div className="mt-4 rounded-[8px] border border-[#E6E3EC] bg-[#FAF9FC] px-4 py-3">
-                <div className="text-[12px] font-semibold text-[#4F465C]">这些项目暂时无法判断</div>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {unavailableChecks.map((check) => (
-                    <span
-                      key={`${check.symbol}-${check.key}`}
-                      className="rounded-full border border-[#DED9E6] bg-white px-2.5 py-1 text-[10px] text-[#6F657C]"
-                    >
-                      {check.name} · {CHECK_LABEL[check.key]}
-                    </span>
-                  ))}
+              {result.signals.length === 0 ? (
+                <div className="mt-4 rounded-[8px] border border-[#DDE5F3] bg-[#F8FAFD] px-4 py-6 text-center">
+                  <div className="text-[13px] font-semibold text-[#344054]">本轮规则未触发</div>
+                  <p className="mt-1 text-[12px] text-[#667085]">
+                    这只代表当前规则没有命中，仍需结合数据覆盖和后续披露复核。
+                  </p>
                 </div>
-              </div>
-            ) : null}
-          </>
+              ) : (
+                <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                  {result.signals.map((signal) => {
+                    const expanded = expandedSignalId === signal.signalId;
+                    return (
+                      <article
+                        key={signal.signalId}
+                        data-testid="risk-signal"
+                        className="rounded-[8px] border border-[#E4E6EB] bg-[#FCFCFD] p-4"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="truncate text-[14px] font-semibold text-[#121826]">
+                                {signal.name}
+                              </span>
+                              <span className="font-mono text-[11px] text-[#8B92A1]">
+                                {signal.symbol}
+                              </span>
+                              <span
+                                data-testid="risk-severity"
+                                className={cn(
+                                  'inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold',
+                                  SEVERITY_STYLE[signal.severity],
+                                )}
+                              >
+                                {signal.severity}
+                              </span>
+                            </div>
+                            <div className="mt-1 text-[11px] font-medium text-[#667085]">
+                              {signal.label} · 事实日期 {compactDate(signal.sourceDataAsOf)}
+                            </div>
+                          </div>
+                          <AlertTriangle
+                            className="mt-0.5 h-4 w-4 shrink-0 text-[#C98228]"
+                            aria-hidden
+                          />
+                        </div>
+                        <p className="mt-3 text-[12px] leading-5 text-[#344054]">{signal.fact}</p>
+                        <p className="mt-2 text-[11px] leading-[18px] text-[#667085]">
+                          为什么相关：{signal.whyRelevant}
+                        </p>
+                        <button
+                          type="button"
+                          aria-expanded={expanded}
+                          onClick={() => setExpandedSignalId(expanded ? null : signal.signalId)}
+                          className="mt-3 inline-flex items-center gap-1 text-[11px] font-semibold text-[#6B4AA0] hover:text-[#54377F]"
+                        >
+                          {expanded ? '收起依据' : '查看依据'}
+                          {expanded ? (
+                            <ChevronUp className="h-3.5 w-3.5" aria-hidden />
+                          ) : (
+                            <ChevronDown className="h-3.5 w-3.5" aria-hidden />
+                          )}
+                        </button>
+                        {expanded ? (
+                          <div className="mt-3 space-y-1 rounded-[7px] border border-[#E4E1EC] bg-white px-3 py-3 text-[11px] leading-[18px] text-[#667085]">
+                            <div>规则：{signal.trigger}</div>
+                            <div>来源：{signal.source}</div>
+                            <div>抓取时间：{formatDateTime(signal.fetchedAt)}</div>
+                            <div className="break-all">证据编号：{signal.evidenceId}</div>
+                            {signal.evidenceUrl ? (
+                              <a
+                                href={signal.evidenceUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-1 font-semibold text-[#6B4AA0] hover:text-[#54377F]"
+                              >
+                                查看来源
+                                <ExternalLink className="h-3 w-3" aria-hidden />
+                              </a>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
+
+              {unavailableChecks.length > 0 ? (
+                <div className="mt-4 rounded-[8px] border border-[#E6E3EC] bg-[#FAF9FC] px-4 py-3">
+                  <div className="text-[12px] font-semibold text-[#4F465C]">
+                    这些项目暂时无法判断
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {unavailableChecks.map((check) => (
+                      <span
+                        key={`${check.symbol}-${check.key}`}
+                        className="rounded-full border border-[#DED9E6] bg-white px-2.5 py-1 text-[10px] text-[#6F657C]"
+                      >
+                        {check.name} · {CHECK_LABEL[check.key]}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </>
+          )
         ) : null}
       </div>
 

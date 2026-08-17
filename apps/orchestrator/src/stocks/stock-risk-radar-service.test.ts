@@ -266,4 +266,33 @@ describe('stock risk radar service', () => {
     expect(changed.signals[0]?.signalId).not.toBe(first.signals[0]?.signalId);
     expect(changed.signals[0]?.evidenceId).not.toBe(first.signals[0]?.evidenceId);
   });
+
+  it('never exposes a non-http announcement link as clickable evidence', async () => {
+    const client = clientWith({
+      getStockAnnouncements: vi.fn(async () =>
+        envelope<AnnouncementRow>(
+          [
+            {
+              公告标题: '关于收到交易所问询函的公告',
+              公告时间: '2026-08-05',
+              公告链接: 'javascript:alert(document.domain)',
+            },
+          ],
+          'akshare:announcements',
+        ),
+      ),
+    });
+
+    const result = await runStockRiskRadar({
+      client,
+      snapshotId: SNAPSHOT_ID,
+      dataAsOf: DATA_AS_OF,
+      stocks: [{ symbol: '600001', name: '测试股份', market: 'A' }],
+    });
+
+    expect(result.signals).toEqual(
+      expect.arrayContaining([expect.objectContaining({ key: 'inquiry', evidenceUrl: null })]),
+    );
+    expect(JSON.stringify(result)).not.toContain('javascript:');
+  });
 });

@@ -229,4 +229,50 @@ describe('StockRiskRadar', () => {
     expect(screen.queryByText('旧快照风险事实')).toBeNull();
     expect(screen.getByText('新快照风险事实')).toBeTruthy();
   });
+
+  it('states partial A-share coverage truthfully and distinguishes an empty universe', async () => {
+    const truncatedApi: StockRiskRadarApi = {
+      load: vi.fn(async () =>
+        result({
+          requestedStockCount: 10,
+          checkedStockCount: 8,
+          truncated: true,
+        }),
+      ),
+    };
+    const view = render(
+      <StockRiskRadar
+        snapshotId={SNAPSHOT_A}
+        dataAsOf={DATA_AS_OF}
+        trustMode="current"
+        api={truncatedApi}
+      />,
+    );
+
+    expect(await screen.findByText('A股检查 8/10 只 · 其余 2 只未纳入本轮')).toBeTruthy();
+    expect(screen.queryByText(/后续批次/)).toBeNull();
+
+    const emptyApi: StockRiskRadarApi = {
+      load: vi.fn(async () =>
+        result({
+          requestedStockCount: 0,
+          checkedStockCount: 0,
+          truncated: false,
+          signals: [],
+          checks: [],
+        }),
+      ),
+    };
+    view.rerender(
+      <StockRiskRadar
+        snapshotId={SNAPSHOT_A}
+        dataAsOf={DATA_AS_OF}
+        trustMode="current"
+        api={emptyApi}
+      />,
+    );
+
+    expect(await screen.findByText('暂无可检查的 A 股自选股')).toBeTruthy();
+    expect(screen.queryByText('本轮规则未触发')).toBeNull();
+  });
 });
