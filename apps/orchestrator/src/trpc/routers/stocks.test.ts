@@ -967,6 +967,117 @@ describe('stocks dashboard snapshot', () => {
     expect(revalidated.trust?.mode).toBe('current');
   });
 
+  it('keeps a verified current snapshot actionable while its replacement refreshes', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-17T11:58:00.000Z'));
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/trading-calendar/latest') {
+        return new Response(
+          JSON.stringify(
+            envelope([
+              {
+                requested_date: url.searchParams.get('on_or_before'),
+                latest_trading_date: '2026-08-17',
+              },
+            ]),
+          ),
+        );
+      }
+      return new Response(JSON.stringify(envelope([])));
+    });
+    const snapshot = {
+      updatedAt: '2026-08-17T11:57:50.000Z',
+      observedTradeDate: '2026-08-17',
+      source: 'akshare' as const,
+      isFallbackWatchlist: false,
+      watchlistStocks: [],
+      marketIndices: [
+        {
+          name: '上证指数',
+          price: '3738.00',
+          changePct: 0.42,
+          turnover: '5000.00亿元',
+        },
+      ],
+      sectors: [],
+      starStocks: [],
+      temperature: null,
+      news: [],
+      leaders: [],
+      leaderboards: { gainers: [], losers: [], amount: [] },
+      freshness: {
+        status: 'fresh' as const,
+        cachedAt: '2026-08-17T11:57:50.000Z',
+      },
+      trust: {
+        snapshotId: 'stkshot_111111111111111111111111',
+        generatedAt: '2026-08-17T11:57:50.000Z',
+        marketTimezone: 'Asia/Shanghai' as const,
+        marketSession: 'closed' as const,
+        latestExpectedTradingDate: '2026-08-17',
+        dataAsOf: '2026-08-17',
+        mode: 'current' as const,
+        calendarStatus: 'verified' as const,
+        sources: [
+          {
+            key: 'quotes' as const,
+            status: 'healthy' as const,
+            dataAsOf: '2026-08-17',
+            fetchedAt: '2026-08-17T11:57:50.000Z',
+          },
+          {
+            key: 'indices' as const,
+            status: 'healthy' as const,
+            dataAsOf: '2026-08-17',
+            fetchedAt: '2026-08-17T11:57:50.000Z',
+          },
+          {
+            key: 'news' as const,
+            status: 'healthy' as const,
+            dataAsOf: '2026-08-17',
+            fetchedAt: '2026-08-17T11:57:50.000Z',
+          },
+          {
+            key: 'announcements' as const,
+            status: 'healthy' as const,
+            dataAsOf: '2026-08-17',
+            fetchedAt: '2026-08-17T11:57:50.000Z',
+          },
+        ],
+        evidenceIds: [],
+      },
+    };
+    __stocksDashboardTest.dashboardCache.set('1:', {
+      snapshot,
+      freshUntil: Date.now() - 1,
+      staleUntil: Date.now() + 60_000,
+    });
+    const fakeDb = {
+      insert: vi.fn(() => ({
+        values: () => ({
+          onDuplicateKeyUpdate: async () => undefined,
+        }),
+      })),
+    };
+
+    const delivered = await __stocksDashboardTest.resolveDashboardSnapshot({
+      db: fakeDb as never,
+      logger: { warn: vi.fn() },
+      userInternalId: 1,
+      watchlistRows: [],
+      effectiveWatchlist: [],
+    });
+
+    expect(delivered.freshness.status).toBe('refreshing');
+    expect(delivered.trust).toMatchObject({
+      latestExpectedTradingDate: '2026-08-17',
+      dataAsOf: '2026-08-17',
+      mode: 'current',
+    });
+    await vi.runAllTimersAsync();
+  });
+
   it('reports failed quote and news sources instead of calling the dashboard fresh', async () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       const url = new URL(String(input));

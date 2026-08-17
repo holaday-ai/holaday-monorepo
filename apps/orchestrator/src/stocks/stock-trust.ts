@@ -162,9 +162,12 @@ function snapshotMode(input: StockSnapshotTrustInput): StockTrustMode {
   if (input.dataAsOf > input.latestExpectedTradingDate) return 'unavailable';
 
   const quoteStatus = input.sources.find((source) => source.key === 'quotes')?.status;
+  // Refreshing is a delivery state; it does not invalidate already verified latest-date quotes.
   if (
     quoteStatus === 'healthy' &&
-    (input.freshnessStatus === 'fresh' || input.freshnessStatus === 'partial')
+    (input.freshnessStatus === 'fresh' ||
+      input.freshnessStatus === 'partial' ||
+      input.freshnessStatus === 'refreshing')
   ) {
     return 'current';
   }
