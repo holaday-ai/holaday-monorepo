@@ -231,7 +231,7 @@ pnpm exec vitest run src/components/stocks/StockPreferenceProfile.test.tsx
 
 Expected: all tests PASS, including pause/resume, editing, two-step clear, stale-request protection, and delayed refresh.
 
-- [ ] **Step 6: Commit Task 2**
+- [x] **Step 6: Commit Task 2**
 
 ```bash
 git add apps/web-workbench/src/components/stocks/StockPreferenceProfile.tsx apps/web-workbench/src/components/stocks/StockPreferenceProfile.test.tsx
@@ -259,7 +259,7 @@ onViewStateChange?: (state: StockScreeningViewState) => void;
 
 - Task 5 consumes this callback to choose the grid span.
 
-- [ ] **Step 1: Write the failing view-state test**
+- [x] **Step 1: Write the failing view-state test**
 
 Render with `onViewStateChange={vi.fn()}` and assert transitions:
 
@@ -273,7 +273,7 @@ await user.click(screen.getByRole('button', { name: '清空筛选条件' }));
 expect(onViewStateChange).toHaveBeenLastCalledWith('idle');
 ```
 
-- [ ] **Step 2: Run the test and verify RED**
+- [x] **Step 2: Run the test and verify RED**
 
 Run:
 
@@ -283,7 +283,7 @@ pnpm exec vitest run src/components/stocks/StockScreeningWorkbench.test.tsx
 
 Expected: FAIL because the callback is not accepted or called.
 
-- [ ] **Step 3: Derive and publish state**
+- [x] **Step 3: Derive and publish state**
 
 Derive state from existing trusted UI state and notify from an effect:
 
@@ -301,19 +301,19 @@ React.useEffect(() => {
 
 Do not put layout state into the screening API.
 
-- [ ] **Step 4: Write the failing result-preservation test**
+- [x] **Step 4: Write the failing result-preservation test**
 
 After one successful run, make the next `preview` reject. Assert the previous `完整符合` result remains visible and the new error is shown. This protects the specification that a transient preview failure must not erase a trustworthy result.
 
-- [ ] **Step 5: Run the preservation test and verify RED**
+- [x] **Step 5: Run the preservation test and verify RED**
 
 Expected: FAIL because `preview()` currently calls `setResult(null)` before the request succeeds.
 
-- [ ] **Step 6: Move result clearing to the successful preview path**
+- [x] **Step 6: Move result clearing to the successful preview path**
 
 Remove the eager `setResult(null)`. After `api.preview(trimmed)` resolves, set criteria/unparsed clauses and then clear the old result. Existing criterion edits continue to clear results immediately because they change the confirmed query.
 
-- [ ] **Step 7: Run the screening suite and verify GREEN**
+- [x] **Step 7: Run the screening suite and verify GREEN**
 
 Run:
 
