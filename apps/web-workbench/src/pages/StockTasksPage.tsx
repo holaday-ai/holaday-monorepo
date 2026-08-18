@@ -17,6 +17,7 @@ import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { DiscoveryNewsCard } from '@/components/DiscoveryNewsCard';
 import { NewsDetailModal as StockNewsDetailModal } from '@/components/NewsDetailModal';
+import { StockRiskRadar } from '@/components/stocks/StockRiskRadar';
 import { StockScreeningWorkbench } from '@/components/stocks/StockScreeningWorkbench';
 import { Input } from '@/components/ui/input';
 import {
@@ -752,6 +753,11 @@ export function StockTasksPage(): JSX.Element {
                 canGenerateBriefing={!briefingUnavailable}
                 temporalCopy={temporalCopy}
                 temporalMode={dashboardTrust.tone}
+              />
+              <StockRiskRadar
+                snapshotId={dashboard?.trust?.snapshotId ?? null}
+                dataAsOf={dashboard?.trust?.dataAsOf ?? null}
+                trustMode={dashboard?.trust?.mode ?? 'unverified'}
               />
               <StockScreeningWorkbench
                 snapshotId={dashboard?.trust?.snapshotId ?? null}

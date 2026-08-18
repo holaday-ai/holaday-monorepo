@@ -158,4 +158,15 @@ describe('stock tasks layout', () => {
     expect(component).toContain('aria-label=');
     expect(component).toContain('title=');
   });
+
+  it('places the trust-bound risk radar between watchlist highlights and broad-market screening', () => {
+    const source = readFileSync(new URL('./StockTasksPage.tsx', import.meta.url), 'utf8');
+
+    expect(source).toContain("import { StockRiskRadar } from '@/components/stocks/StockRiskRadar';");
+    expect(source.indexOf('<MarketHighlights')).toBeLessThan(source.indexOf('<StockRiskRadar'));
+    expect(source.indexOf('<StockRiskRadar')).toBeLessThan(source.indexOf('<StockScreeningWorkbench'));
+    expect(source).toContain('snapshotId={dashboard?.trust?.snapshotId ?? null}');
+    expect(source).toContain('dataAsOf={dashboard?.trust?.dataAsOf ?? null}');
+    expect(source).toContain("trustMode={dashboard?.trust?.mode ?? 'unverified'}");
+  });
 });
