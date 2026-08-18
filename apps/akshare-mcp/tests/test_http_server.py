@@ -1,8 +1,11 @@
 """HTTP envelope reliability tests without starting FastAPI."""
 
+import inspect
 import logging
 import threading
 import time
+
+import requests
 
 from akshare_mcp import adapters as adp
 from akshare_mcp import http_server
@@ -142,14 +145,37 @@ def test_error_envelope_is_attributed_timestamped_and_sanitized(caplog):
     assert result["fetched_at"].endswith("+00:00")
 
 
+def test_health_route_does_not_depend_on_the_sync_worker_pool():
+    assert inspect.iscoroutinefunction(http_server.health)
+
+
+def test_default_requests_timeout_is_injected_without_overriding_explicit_timeout(monkeypatch):
+    observed_timeouts = []
+
+    def fake_request(_session, _method, _url, **kwargs):
+        observed_timeouts.append(kwargs.get("timeout"))
+        return object()
+
+    monkeypatch.setattr(requests.sessions.Session, "request", fake_request)
+
+    assert hasattr(http_server, "_install_default_requests_timeout")
+    http_server._install_default_requests_timeout(7)
+
+    session = requests.Session()
+    session.get("https://example.test/default")
+    session.get("https://example.test/explicit", timeout=3)
+
+    assert observed_timeouts == [7, 3]
+
+
 def test_health_exposes_interface_error_counters():
-    before = http_server.health()
+    before = http_server._health_snapshot()
 
     def fetch():
         raise adp.AkShareUnavailable("offline")
 
     http_server._safe(fetch)
-    after = http_server.health()
+    after = http_server._health_snapshot()
 
     assert after["requests_total"] == before["requests_total"] + 1
     assert after["errors_total"] == before["errors_total"] + 1
@@ -157,13 +183,13 @@ def test_health_exposes_interface_error_counters():
 
 
 def test_health_counts_upstream_timeouts_without_exposing_raw_errors():
-    before = http_server.health()
+    before = http_server._health_snapshot()
 
     def fetch():
         raise TimeoutError("socket timed out token=secret-value")
 
     result = http_server._safe(fetch)
-    after = http_server.health()
+    after = http_server._health_snapshot()
 
     assert result["error_code"] == "UPSTREAM_TIMEOUT"
     assert after["timeouts_total"] == before["timeouts_total"] + 1
@@ -172,7 +198,7 @@ def test_health_counts_upstream_timeouts_without_exposing_raw_errors():
 
 
 def test_health_counts_a_timeout_wrapped_by_an_adapter():
-    before = http_server.health()
+    before = http_server._health_snapshot()
 
     def fetch():
         try:
@@ -181,7 +207,7 @@ def test_health_counts_a_timeout_wrapped_by_an_adapter():
             raise adp.AkShareUnavailable("source unavailable") from exc
 
     result = http_server._safe(fetch)
-    after = http_server.health()
+    after = http_server._health_snapshot()
 
     assert result["error_code"] == "UPSTREAM_TIMEOUT"
     assert after["timeouts_total"] == before["timeouts_total"] + 1
@@ -189,13 +215,13 @@ def test_health_counts_a_timeout_wrapped_by_an_adapter():
 
 
 def test_health_counts_single_flight_wait_timeouts_separately():
-    before = http_server.health()
+    before = http_server._health_snapshot()
 
     def fetch():
         raise TimeoutError("single-flight wait exceeded 15.000s token=secret-value")
 
     result = http_server._safe(fetch)
-    after = http_server.health()
+    after = http_server._health_snapshot()
 
     assert result["error_code"] == "SINGLE_FLIGHT_TIMEOUT"
     assert after["timeouts_total"] == before["timeouts_total"]
@@ -204,13 +230,13 @@ def test_health_counts_single_flight_wait_timeouts_separately():
 
 
 def test_health_exposes_successful_source_fallbacks():
-    before = http_server.health()
+    before = http_server._health_snapshot()
 
     def fetch():
         return [{"最新价": 100}], "akshare:stock_zh_a_spot(sina,filter,fallback)"
 
     result = http_server._safe(fetch)
-    after = http_server.health()
+    after = http_server._health_snapshot()
 
     assert result["count"] == 1
     assert after["fallbacks_total"] == before["fallbacks_total"] + 1

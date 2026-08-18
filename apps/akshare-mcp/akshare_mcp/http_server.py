@@ -20,6 +20,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Callable
 
+import requests
 from fastapi import FastAPI
 
 from . import adapters as adp
@@ -40,6 +41,32 @@ _OPS: dict[str, Any] = {
     "last_fallback_at": None,
     "last_fallback_source": None,
 }
+
+
+def _install_default_requests_timeout(timeout_seconds: float | None = None) -> None:
+    """Bound AkShare's requests calls while preserving explicit timeouts."""
+    timeout = timeout_seconds
+    if timeout is None:
+        timeout = float(os.environ.get("AKSHARE_MCP_HTTP_TIMEOUT", "15"))
+    timeout = max(float(timeout), 1.0)
+
+    current_request = requests.sessions.Session.request
+    if getattr(current_request, "_akshare_default_timeout", False):
+        return
+
+    @functools.wraps(current_request)
+    def request_with_default_timeout(
+        session: requests.Session,
+        method: str,
+        url: str,
+        **kwargs: Any,
+    ) -> requests.Response:
+        if kwargs.get("timeout") is None:
+            kwargs["timeout"] = timeout
+        return current_request(session, method, url, **kwargs)
+
+    setattr(request_with_default_timeout, "_akshare_default_timeout", True)
+    requests.sessions.Session.request = request_with_default_timeout
 
 
 def _utc_now() -> str:
@@ -269,8 +296,13 @@ app = FastAPI(title="akshare-cn-http", docs_url=None, redoc_url=None)
 
 @app.get("/health")
 @app.get("/healthz")
-def health() -> dict[str, Any]:
-    """Liveness plus compact adapter interruption counters for operations."""
+async def health() -> dict[str, Any]:
+    """Serve liveness without consuming the sync adapter worker pool."""
+    return _health_snapshot()
+
+
+def _health_snapshot() -> dict[str, Any]:
+    """Return compact adapter interruption counters for operations."""
     with _OPS_LOCK:
         ops = dict(_OPS)
     return {
@@ -492,6 +524,7 @@ def main() -> None:
     """Entry point — 仅监听本机回环，由同机 orchestrator 直取。"""
     import uvicorn
 
+    _install_default_requests_timeout()
     port = int(os.environ.get("AKSHARE_HTTP_PORT", "8848"))
     uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
 
