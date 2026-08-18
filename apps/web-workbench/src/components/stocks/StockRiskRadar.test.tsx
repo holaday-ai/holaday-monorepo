@@ -260,6 +260,95 @@ describe('StockRiskRadar', () => {
     expect(screen.getByText('新快照风险事实')).toBeTruthy();
   });
 
+  it('preserves an expanded stock across passive snapshot refreshes and resets it for an explicit refresh', async () => {
+    const api: StockRiskRadarApi = {
+      load: vi.fn(async (input) =>
+        result({
+          snapshotId: input.snapshotId,
+          dataAsOf: input.dataAsOf,
+        }),
+      ),
+    };
+    const user = userEvent.setup();
+    const view = render(
+      <StockRiskRadar
+        snapshotId={SNAPSHOT_A}
+        dataAsOf={DATA_AS_OF}
+        trustMode="current"
+        api={api}
+      />,
+    );
+
+    const testedStock = (await screen.findAllByTestId('risk-stock-group'))[0];
+    if (!testedStock) throw new Error('expected grouped events for 测试股份');
+    await user.click(within(testedStock).getByRole('button', { name: '查看全部 3 条' }));
+    expect(screen.getByText('第三条需要展开的风险事实。')).toBeTruthy();
+
+    view.rerender(
+      <StockRiskRadar
+        snapshotId={SNAPSHOT_B}
+        dataAsOf={DATA_AS_OF}
+        trustMode="current"
+        api={api}
+      />,
+    );
+
+    expect(await screen.findByText('第三条需要展开的风险事实。')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '收起其他事项' })).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: '刷新风险雷达' }));
+    await waitFor(() => expect(api.load).toHaveBeenCalledTimes(3));
+    expect(screen.queryByText('第三条需要展开的风险事实。')).toBeNull();
+    expect(screen.getByRole('button', { name: '查看全部 3 条' })).toBeTruthy();
+  });
+
+  it('drops expansion state when a refreshed snapshot no longer contains that stock', async () => {
+    const api: StockRiskRadarApi = {
+      load: vi.fn(async (input) => {
+        const next = result({ snapshotId: input.snapshotId, dataAsOf: input.dataAsOf });
+        return input.snapshotId === SNAPSHOT_B
+          ? { ...next, signals: next.signals.filter((signal) => signal.symbol === '000002') }
+          : next;
+      }),
+    };
+    const user = userEvent.setup();
+    const view = render(
+      <StockRiskRadar
+        snapshotId={SNAPSHOT_A}
+        dataAsOf={DATA_AS_OF}
+        trustMode="current"
+        api={api}
+      />,
+    );
+
+    const testedStock = (await screen.findAllByTestId('risk-stock-group'))[0];
+    if (!testedStock) throw new Error('expected grouped events for 测试股份');
+    await user.click(within(testedStock).getByRole('button', { name: '查看全部 3 条' }));
+    expect(screen.getByText('第三条需要展开的风险事实。')).toBeTruthy();
+
+    view.rerender(
+      <StockRiskRadar
+        snapshotId={SNAPSHOT_B}
+        dataAsOf={DATA_AS_OF}
+        trustMode="current"
+        api={api}
+      />,
+    );
+    expect(await screen.findByText('示例科技')).toBeTruthy();
+
+    view.rerender(
+      <StockRiskRadar
+        snapshotId={SNAPSHOT_A}
+        dataAsOf={DATA_AS_OF}
+        trustMode="current"
+        api={api}
+      />,
+    );
+    expect(await screen.findByText('整体质押比例较高，要留意可能触发的平仓压力。')).toBeTruthy();
+    expect(screen.queryByText('第三条需要展开的风险事实。')).toBeNull();
+    expect(screen.getByRole('button', { name: '查看全部 3 条' })).toBeTruthy();
+  });
+
   it('states partial A-share coverage truthfully and distinguishes an empty universe', async () => {
     const truncatedApi: StockRiskRadarApi = {
       load: vi.fn(async () =>

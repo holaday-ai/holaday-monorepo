@@ -103,15 +103,19 @@ export function StockRiskRadar({
   const trust = { snapshotId, dataAsOf, trustMode };
   const loadable = canLoadRiskRadar(trust);
 
-  const load = React.useCallback(async () => {
+  const load = React.useCallback(async (resetExpansion = false) => {
     const requestTrust = { snapshotId, dataAsOf, trustMode };
     const request = requestSequence.current + 1;
     requestSequence.current = request;
-    setExpandedGroupSymbol(null);
-    setExpandedSignalId(null);
+    if (resetExpansion) {
+      setExpandedGroupSymbol(null);
+      setExpandedSignalId(null);
+    }
     setError(null);
     setResult(null);
     if (!canLoadRiskRadar(requestTrust)) {
+      setExpandedGroupSymbol(null);
+      setExpandedSignalId(null);
       setLoading(false);
       return;
     }
@@ -124,6 +128,12 @@ export function StockRiskRadar({
         next.dataAsOf === dataAsOf
       ) {
         setResult(next);
+        setExpandedGroupSymbol((current) =>
+          current && next.signals.some((signal) => signal.symbol === current) ? current : null,
+        );
+        setExpandedSignalId((current) =>
+          current && next.signals.some((signal) => signal.signalId === current) ? current : null,
+        );
       }
     } catch (caught) {
       if (requestSequence.current === request) setError(pageErrorMessage(caught));
@@ -133,7 +143,7 @@ export function StockRiskRadar({
   }, [api, dataAsOf, snapshotId, trustMode]);
 
   React.useEffect(() => {
-    void load();
+    void load(false);
     return () => {
       requestSequence.current += 1;
     };
@@ -167,7 +177,7 @@ export function StockRiskRadar({
           aria-label="刷新风险雷达"
           title="刷新风险雷达"
           disabled={!loadable || loading}
-          onClick={() => void load()}
+          onClick={() => void load(true)}
           className="inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-[8px] border border-[#DADDE4] bg-white px-3 text-[12px] font-medium text-[#4F5868] transition hover:border-[#EA1F59]/30 hover:bg-[#FFF7F9] hover:text-[#C72654] disabled:cursor-not-allowed disabled:opacity-50"
         >
           {loading ? (
