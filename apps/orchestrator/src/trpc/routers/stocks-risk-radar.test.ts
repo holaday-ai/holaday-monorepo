@@ -1,7 +1,11 @@
 import { TRPCError } from '@trpc/server';
 import { describe, expect, it, vi } from 'vitest';
 import type { StockRiskRadarResult } from '../../stocks/stock-risk-radar-service.js';
-import { runTrustedStockRiskRadar, stockRiskRadarInputSchema } from './stocks-risk-radar.js';
+import {
+  createStockRiskRadarHttpClient,
+  runTrustedStockRiskRadar,
+  stockRiskRadarInputSchema,
+} from './stocks-risk-radar.js';
 import { stocksRouter } from './stocks.js';
 
 const SNAPSHOT_ID = 'stkshot_0123456789abcdef01234567';
@@ -83,6 +87,33 @@ function radarResult(): StockRiskRadarResult {
 }
 
 describe('stock risk radar procedure', () => {
+  it('caps the interactive AkShare request budget at eight seconds', async () => {
+    vi.useFakeTimers();
+    try {
+      const aborted: string[] = [];
+      const client = createStockRiskRadarHttpClient({
+        baseUrl: 'http://akshare.test',
+        logger: { warn: vi.fn() },
+        fetchImpl: (url, init) =>
+          new Promise<never>((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => {
+              aborted.push(url);
+              reject(new Error('aborted'));
+            });
+          }),
+      });
+
+      const pending = client.getRiskInsider('600001');
+      await vi.advanceTimersByTimeAsync(7_999);
+      expect(aborted).toEqual([]);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(pending).resolves.toMatchObject({ error_code: 'UPSTREAM_TIMEOUT' });
+      expect(aborted).toEqual(['http://akshare.test/risk-insider/600001']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('exposes the validated risk radar contract on the stocks router', async () => {
     const caller = stocksRouter.createCaller({
       userId: 'usr_risk_radar',

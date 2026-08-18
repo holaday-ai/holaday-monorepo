@@ -43,6 +43,42 @@ function clientWith(overrides: Partial<StockRiskRadarClient> = {}): StockRiskRad
 }
 
 describe('stock risk radar service', () => {
+  it('starts five watchlist inspections in one interactive batch', async () => {
+    const startedSymbols: string[] = [];
+    let releaseInsiderChecks: (() => void) | undefined;
+    const insiderGate = new Promise<void>((resolve) => {
+      releaseInsiderChecks = resolve;
+    });
+    const client = clientWith({
+      getRiskInsider: vi.fn(async (symbol) => {
+        startedSymbols.push(symbol);
+        await insiderGate;
+        return envelope<InsiderChangeRow>([], 'akshare:insider');
+      }),
+    });
+    const run = runStockRiskRadar({
+      client,
+      snapshotId: SNAPSHOT_ID,
+      dataAsOf: DATA_AS_OF,
+      stocks: Array.from({ length: 5 }, (_, index) => ({
+        symbol: `60000${index}`,
+        name: `测试${index}`,
+        market: 'A',
+      })),
+    });
+
+    let startFailure: unknown;
+    try {
+      expect(startedSymbols).toHaveLength(5);
+    } catch (error) {
+      startFailure = error;
+    } finally {
+      releaseInsiderChecks?.();
+    }
+    await run;
+    if (startFailure) throw startFailure;
+  });
+
   it('turns verified raw facts into auditable deterministic signals', async () => {
     const client = clientWith({
       getRiskPledge: vi.fn(async (_date, symbol) =>

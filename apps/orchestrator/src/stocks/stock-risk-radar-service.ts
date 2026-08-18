@@ -73,7 +73,11 @@ export type StockRiskRadarClient = Pick<
 >;
 
 const MAX_STOCKS = 8;
-const STOCK_CONCURRENCY = 2;
+// Five stocks is the normal watchlist size in the workbench. Inspect them in
+// one batch so a slow-but-bounded upstream cannot multiply the user's wait by
+// three sequential waves. This still caps the local AkShare fan-out at 25
+// requests (five sources per stock) rather than unbounded fan-out.
+const STOCK_CONCURRENCY = 5;
 const LOOKBACK_DAYS = 180;
 const DAY_MS = 24 * 60 * 60 * 1_000;
 

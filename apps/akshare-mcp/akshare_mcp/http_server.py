@@ -282,6 +282,7 @@ _ztsum = _cached_adapter(adp.TTL_LHB)(adp.get_zt_pool_summary)
 # Phase 2 全景速览 step1：④ 基本面（季度级长缓存）+ ⑤ 估值（日级缓存）。
 _fund = _cached_adapter(adp.TTL_FUND)(adp.get_fundamentals)
 _val = _cached_adapter(adp.TTL_VAL)(adp.get_valuation)
+_risk_insider = _cached_adapter(adp.TTL_RISK)(adp.get_risk_insider)
 _rank = _cached_adapter(adp.TTL_RANK)(adp.get_stock_rankings)
 _screening_universe = _cached_adapter(
     adp.TTL_SPOT,
@@ -443,7 +444,7 @@ def risk_forecast(date: str, symbol: str = "") -> dict[str, Any]:
 @app.get("/risk-insider/{symbol}")
 def risk_insider(symbol: str) -> dict[str, Any]:
     """R4 董监高持股变动(减持=变动数<0)。沪 sse / 深 szse 交易所直连。"""
-    return _safe(adp.get_risk_insider, symbol)
+    return _safe(_risk_insider, symbol)
 
 
 @app.get("/symbol-search/{query}")
