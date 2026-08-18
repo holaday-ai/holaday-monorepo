@@ -1,4 +1,5 @@
 import { pageErrorMessage } from '@/lib/page-error-copy';
+import { groupStockRiskSignals } from '@/lib/stock-risk-presentation';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import {
@@ -96,6 +97,7 @@ export function StockRiskRadar({
   const [result, setResult] = React.useState<StockRiskRadarResult | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [expandedGroupSymbol, setExpandedGroupSymbol] = React.useState<string | null>(null);
   const [expandedSignalId, setExpandedSignalId] = React.useState<string | null>(null);
   const requestSequence = React.useRef(0);
   const trust = { snapshotId, dataAsOf, trustMode };
@@ -105,6 +107,7 @@ export function StockRiskRadar({
     const requestTrust = { snapshotId, dataAsOf, trustMode };
     const request = requestSequence.current + 1;
     requestSequence.current = request;
+    setExpandedGroupSymbol(null);
     setExpandedSignalId(null);
     setError(null);
     setResult(null);
@@ -238,35 +241,40 @@ export function StockRiskRadar({
                 </div>
               ) : (
                 <div className="mt-4 grid gap-3 lg:grid-cols-2">
-                  {result.signals.map((signal) => {
-                    const expanded = expandedSignalId === signal.signalId;
+                  {groupStockRiskSignals(result.signals).map((group) => {
+                    const groupExpanded = expandedGroupSymbol === group.symbol;
+                    const visibleSignals = groupExpanded
+                      ? group.signals
+                      : group.signals.slice(0, 2);
                     return (
                       <article
-                        key={signal.signalId}
-                        data-testid="risk-signal"
-                        className="rounded-[8px] border border-[#E4E6EB] bg-[#FCFCFD] p-4"
+                        key={group.symbol}
+                        data-testid="risk-stock-group"
+                        className="overflow-hidden rounded-[8px] border border-[#E4E6EB] bg-[#FCFCFD]"
                       >
-                        <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-start justify-between gap-3 border-b border-[#E8EAF0] px-4 py-3.5">
                           <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-2">
                               <span className="truncate text-[14px] font-semibold text-[#121826]">
-                                {signal.name}
+                                {group.name}
                               </span>
                               <span className="font-mono text-[11px] text-[#8B92A1]">
-                                {signal.symbol}
+                                {group.symbol}
                               </span>
                               <span
                                 data-testid="risk-severity"
                                 className={cn(
                                   'inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold',
-                                  SEVERITY_STYLE[signal.severity],
+                                  SEVERITY_STYLE[group.severity],
                                 )}
                               >
-                                {signal.severity}
+                                {group.severity}
                               </span>
                             </div>
-                            <div className="mt-1 text-[11px] font-medium text-[#667085]">
-                              {signal.label} · 事实日期 {compactDate(signal.sourceDataAsOf)}
+                            <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] font-medium text-[#667085]">
+                              <span>{group.signals.length} 条事项</span>
+                              <span aria-hidden>·</span>
+                              <span>最新事实 {compactDate(group.latestSourceDataAsOf)}</span>
                             </div>
                           </div>
                           <AlertTriangle
@@ -274,40 +282,93 @@ export function StockRiskRadar({
                             aria-hidden
                           />
                         </div>
-                        <p className="mt-3 text-[12px] leading-5 text-[#344054]">{signal.fact}</p>
-                        <p className="mt-2 text-[11px] leading-[18px] text-[#667085]">
-                          为什么相关：{signal.whyRelevant}
-                        </p>
-                        <button
-                          type="button"
-                          aria-expanded={expanded}
-                          onClick={() => setExpandedSignalId(expanded ? null : signal.signalId)}
-                          className="mt-3 inline-flex items-center gap-1 text-[11px] font-semibold text-[#6B4AA0] hover:text-[#54377F]"
-                        >
-                          {expanded ? '收起依据' : '查看依据'}
-                          {expanded ? (
-                            <ChevronUp className="h-3.5 w-3.5" aria-hidden />
-                          ) : (
-                            <ChevronDown className="h-3.5 w-3.5" aria-hidden />
-                          )}
-                        </button>
-                        {expanded ? (
-                          <div className="mt-3 space-y-1 rounded-[7px] border border-[#E4E1EC] bg-white px-3 py-3 text-[11px] leading-[18px] text-[#667085]">
-                            <div>规则：{signal.trigger}</div>
-                            <div>来源：{signal.source}</div>
-                            <div>抓取时间：{formatDateTime(signal.fetchedAt)}</div>
-                            <div className="break-all">证据编号：{signal.evidenceId}</div>
-                            {signal.evidenceUrl ? (
-                              <a
-                                href={signal.evidenceUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="inline-flex items-center gap-1 font-semibold text-[#6B4AA0] hover:text-[#54377F]"
+                        <div className="divide-y divide-[#E8EAF0] px-4">
+                          {visibleSignals.map((signal) => {
+                            const evidenceExpanded = expandedSignalId === signal.signalId;
+                            return (
+                              <div
+                                key={signal.signalId}
+                                data-testid="risk-signal"
+                                className="py-3.5"
                               >
-                                查看来源
-                                <ExternalLink className="h-3 w-3" aria-hidden />
-                              </a>
-                            ) : null}
+                                <div className="flex flex-wrap items-center gap-2 text-[11px] font-medium text-[#667085]">
+                                  <span>{signal.label}</span>
+                                  <span aria-hidden>·</span>
+                                  <span>事实日期 {compactDate(signal.sourceDataAsOf)}</span>
+                                  {signal.severity !== group.severity ? (
+                                    <span
+                                      className={cn(
+                                        'inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold',
+                                        SEVERITY_STYLE[signal.severity],
+                                      )}
+                                    >
+                                      {signal.severity}
+                                    </span>
+                                  ) : null}
+                                </div>
+                                <p className="mt-2 text-[12px] leading-5 text-[#344054]">
+                                  {signal.fact}
+                                </p>
+                                <p className="mt-1.5 text-[11px] leading-[18px] text-[#667085]">
+                                  为什么相关：{signal.whyRelevant}
+                                </p>
+                                <button
+                                  type="button"
+                                  aria-expanded={evidenceExpanded}
+                                  onClick={() =>
+                                    setExpandedSignalId(evidenceExpanded ? null : signal.signalId)
+                                  }
+                                  className="mt-2 inline-flex items-center gap-1 text-[11px] font-semibold text-[#6B4AA0] hover:text-[#54377F]"
+                                >
+                                  {evidenceExpanded ? '收起依据' : '查看依据'}
+                                  {evidenceExpanded ? (
+                                    <ChevronUp className="h-3.5 w-3.5" aria-hidden />
+                                  ) : (
+                                    <ChevronDown className="h-3.5 w-3.5" aria-hidden />
+                                  )}
+                                </button>
+                                {evidenceExpanded ? (
+                                  <div className="mt-3 space-y-1 rounded-[7px] border border-[#E4E1EC] bg-white px-3 py-3 text-[11px] leading-[18px] text-[#667085]">
+                                    <div>规则：{signal.trigger}</div>
+                                    <div>来源：{signal.source}</div>
+                                    <div>抓取时间：{formatDateTime(signal.fetchedAt)}</div>
+                                    <div className="break-all">证据编号：{signal.evidenceId}</div>
+                                    {signal.evidenceUrl ? (
+                                      <a
+                                        href={signal.evidenceUrl}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="inline-flex items-center gap-1 font-semibold text-[#6B4AA0] hover:text-[#54377F]"
+                                      >
+                                        查看来源
+                                        <ExternalLink className="h-3 w-3" aria-hidden />
+                                      </a>
+                                    ) : null}
+                                  </div>
+                                ) : null}
+                              </div>
+                            );
+                          })}
+                        </div>
+                        {group.signals.length > 2 ? (
+                          <div className="border-t border-[#E8EAF0] px-4 py-2.5">
+                            <button
+                              type="button"
+                              aria-expanded={groupExpanded}
+                              onClick={() =>
+                                setExpandedGroupSymbol(groupExpanded ? null : group.symbol)
+                              }
+                              className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#6B4AA0] hover:text-[#54377F]"
+                            >
+                              {groupExpanded
+                                ? '收起其他事项'
+                                : `查看全部 ${group.signals.length} 条`}
+                              {groupExpanded ? (
+                                <ChevronUp className="h-3.5 w-3.5" aria-hidden />
+                              ) : (
+                                <ChevronDown className="h-3.5 w-3.5" aria-hidden />
+                              )}
+                            </button>
                           </div>
                         ) : null}
                       </article>

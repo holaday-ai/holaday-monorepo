@@ -86,7 +86,7 @@ export function groupStockRiskSignals<T extends GroupableStockRiskSignal>(
 
 - Consumes: `StockRiskRadarResult['signals']` without changing the tRPC response.
 
-- [ ] **Step 1: Write the failing helper test**
+- [x] **Step 1: Write the failing helper test**
 
 Add tests proving that two signals for `600001` become one group, the group severity is `高风险`, event order is severity then date, group order is severity then latest date then symbol, and the input array is not mutated.
 
@@ -101,7 +101,7 @@ expect(groupStockRiskSignals(signals).map((group) => ({
 ]);
 ```
 
-- [ ] **Step 2: Run the helper test and verify RED**
+- [x] **Step 2: Run the helper test and verify RED**
 
 Run:
 
@@ -111,15 +111,15 @@ pnpm exec vitest run src/lib/stock-risk-presentation.test.ts
 
 Expected: FAIL because `groupStockRiskSignals` does not exist.
 
-- [ ] **Step 3: Implement the minimal pure helper**
+- [x] **Step 3: Implement the minimal pure helper**
 
 Use a `Map<string, T[]>`, a severity-rank constant, ISO-date lexical comparison with `null` last, and copied arrays. Do not discard duplicate facts or evidence.
 
-- [ ] **Step 4: Write the failing component interaction test**
+- [x] **Step 4: Write the failing component interaction test**
 
 Change `StockRiskRadar.test.tsx` to expect two `data-testid="risk-stock-group"` articles rather than three event cards. Assert that `测试股份` shows `2 条事项`, only the first two event summaries are present by default, and `查看全部 3 条` reveals the remaining event while every event still has an independent `查看依据` button.
 
-- [ ] **Step 5: Run the component test and verify RED**
+- [x] **Step 5: Run the component test and verify RED**
 
 Run:
 
@@ -129,7 +129,7 @@ pnpm exec vitest run src/components/stocks/StockRiskRadar.test.tsx
 
 Expected: FAIL because the component still renders one article per signal.
 
-- [ ] **Step 6: Render grouped cards and event details**
+- [x] **Step 6: Render grouped cards and event details**
 
 Replace `result.signals.map` with `groupStockRiskSignals(result.signals).map`. Keep group expansion and evidence expansion as separate state:
 
@@ -140,7 +140,7 @@ const [expandedSignalId, setExpandedSignalId] = React.useState<string | null>(nu
 
 The group card shows its worst severity, latest fact date, event count, two event rows by default, and all rows after expansion. Event rows retain fact, why-relevant copy, trigger, source, fetched time, evidence ID, and URL.
 
-- [ ] **Step 7: Run focused tests and refactor while green**
+- [x] **Step 7: Run focused tests and refactor while green**
 
 Run:
 

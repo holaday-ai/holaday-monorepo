@@ -75,6 +75,23 @@ function result(overrides: Partial<StockRiskRadarResult> = {}): StockRiskRadarRe
         fetchedAt: '2026-08-17T11:30:00.000Z',
         evidenceUrl: null,
       },
+      {
+        signalId: 'risk_signal_eeeeeeeeeeeeeeeeeeeeeeee',
+        evidenceId: 'risk:eeeeeeeeeeeeeeeeeeeeeeee',
+        symbol: '600001',
+        name: '测试股份',
+        key: 'forecast',
+        label: '业绩预告',
+        severity: '关注',
+        fact: '第三条需要展开的风险事实。',
+        trigger: '业绩预告出现需继续核验的变化',
+        whyRelevant: '需要结合正式财报和后续修正公告复核。',
+        observedAt: '2026-07-30',
+        sourceDataAsOf: '2026-07-30',
+        source: 'akshare:stock_yjyg_em',
+        fetchedAt: '2026-08-17T11:30:00.000Z',
+        evidenceUrl: null,
+      },
     ],
     checks: [
       {
@@ -103,7 +120,7 @@ function result(overrides: Partial<StockRiskRadarResult> = {}): StockRiskRadarRe
 }
 
 describe('StockRiskRadar', () => {
-  it('renders ordered facts, rule evidence, and explicit unknown coverage', async () => {
+  it('groups events by stock while preserving event evidence and explicit unknown coverage', async () => {
     const api: StockRiskRadarApi = { load: vi.fn(async () => result()) };
     const user = userEvent.setup();
     render(
@@ -116,17 +133,30 @@ describe('StockRiskRadar', () => {
     );
 
     expect(await screen.findByText('整体质押比例较高，要留意可能触发的平仓压力。')).toBeTruthy();
-    const cards = screen.getAllByTestId('risk-signal');
-    expect(cards.map((card) => within(card).getByTestId('risk-severity').textContent)).toEqual([
+    const groups = screen.getAllByTestId('risk-stock-group');
+    expect(groups).toHaveLength(2);
+    expect(groups.map((group) => within(group).getByTestId('risk-severity').textContent)).toEqual([
       '高风险',
-      '警示',
       '关注',
     ]);
+    const testedStock = groups[0];
+    if (!testedStock) throw new Error('expected grouped events for 测试股份');
+    expect(within(testedStock).getByText('3 条事项')).toBeTruthy();
+    expect(
+      within(testedStock).getByText('整体质押比例较高，要留意可能触发的平仓压力。'),
+    ).toBeTruthy();
+    expect(
+      within(testedStock).getByText('近期收到交易所问询函（1 件），要留意公司回复。'),
+    ).toBeTruthy();
+    expect(screen.queryByText('第三条需要展开的风险事实。')).toBeNull();
+    await user.click(within(testedStock).getByRole('button', { name: '查看全部 3 条' }));
+    expect(screen.getByText('第三条需要展开的风险事实。')).toBeTruthy();
     expect(screen.getByText('这些项目暂时无法判断')).toBeTruthy();
     expect(screen.getByText('示例科技 · 商誉')).toBeTruthy();
     expect(screen.queryByText(/无风险|安全/)).toBeNull();
 
-    const evidenceButtons = screen.getAllByRole('button', { name: '查看依据' });
+    const evidenceButtons = within(testedStock).getAllByRole('button', { name: '查看依据' });
+    expect(evidenceButtons).toHaveLength(3);
     const inquiryEvidenceButton = evidenceButtons.at(1);
     if (!inquiryEvidenceButton) throw new Error('expected an inquiry evidence control');
     await user.click(inquiryEvidenceButton);
