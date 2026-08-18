@@ -617,7 +617,7 @@ git add docs/superpowers/plans/2026-08-18-stock-task-workbench-p1b.md
 git commit -m "docs(stocks): record workbench verification"
 ```
 
-- [ ] **Step 7: Finish the branch**
+- [x] **Step 7: Finish the branch**
 
 Use `superpowers:verification-before-completion`, `superpowers:requesting-code-review`, and `superpowers:finishing-a-development-branch`. Because the user has already chosen single-agent serial execution, perform a direct self-review rather than spawning review agents. Push the verified branch and open a Ready PR; merge and deployment still require the user's existing task-specific authorization boundary.
 
