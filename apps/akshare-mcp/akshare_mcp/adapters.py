@@ -382,10 +382,14 @@ def get_screening_universe() -> tuple[list[dict[str, Any]], str]:
     separate per-symbol calls.
     """
     timeout = max(1.0, float(os.environ.get("AKSHARE_MCP_SINA_SCREEN_TIMEOUT", "15")))
-    page_size = 80
+    concurrency = min(
+        2,
+        max(1, int(os.environ.get("AKSHARE_MCP_SINA_SCREEN_CONCURRENCY", "2"))),
+    )
+    page_size = 100
     rows_by_code: dict[str, dict[str, Any]] = {}
 
-    for page in range(1, 91):
+    def fetch_page(page: int) -> list[Any]:
         params = {
             "page": str(page),
             "num": str(page_size),
@@ -412,9 +416,22 @@ def get_screening_universe() -> tuple[list[dict[str, Any]], str]:
 
         if not isinstance(payload, list):
             raise AkShareUnavailable("新浪全市场筛选快照格式异常")
-        if not payload:
-            break
+        return payload
 
+    first_payload = fetch_page(1)
+    page_batches: list[list[Any]] = [first_payload]
+    next_page = 2
+
+    with ThreadPoolExecutor(max_workers=concurrency) as executor:
+        while len(page_batches[-1]) == page_size and next_page <= 90:
+            pages = list(range(next_page, min(next_page + concurrency, 91)))
+            payloads = list(executor.map(fetch_page, pages))
+            page_batches.extend(payloads)
+            next_page += len(pages)
+            if any(len(payload) < page_size for payload in payloads):
+                break
+
+    for payload in page_batches:
         for raw in payload:
             if not isinstance(raw, dict):
                 continue
@@ -446,9 +463,6 @@ def get_screening_universe() -> tuple[list[dict[str, Any]], str]:
                 "总市值原值": _to_float(raw.get("mktcap")),
                 "行情时间": str(raw.get("ticktime") or "").strip(),
             }
-
-        if len(payload) < page_size:
-            break
 
     rows = sorted(
         rows_by_code.values(),
