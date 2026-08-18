@@ -622,7 +622,7 @@ export function StockTasksPage(): JSX.Element {
 
   return (
     <div className="min-h-full bg-[#FAFAFB] text-[#121826]">
-      <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-5 px-4 py-4 sm:px-5 lg:px-6">
+      <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-5 px-4 pb-4 pt-14 sm:px-5 min-[769px]:pt-4 lg:px-6">
         <header className="flex flex-col gap-3 border-b border-[#E7E7EB] pb-3 min-[769px]:pr-[12rem] md:flex-row md:items-center md:justify-between">
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-[22px] font-semibold tracking-tight text-[#121826]">

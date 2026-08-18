@@ -9,6 +9,13 @@ describe('stock tasks layout', () => {
     expect(source).toContain('flex flex-wrap items-center justify-end gap-2');
   });
 
+  it('reserves the mobile top bar before rendering the page title', () => {
+    const source = readFileSync(new URL('./StockTasksPage.tsx', import.meta.url), 'utf8');
+
+    expect(source).toContain('pt-14');
+    expect(source).toContain('min-[769px]:pt-4');
+  });
+
   it('uses verified source covers when available and never turns discovery cards into source placeholders', () => {
     const pageSource = readFileSync(new URL('./StockTasksPage.tsx', import.meta.url), 'utf8');
     const cardSource = readFileSync(new URL('../components/DiscoveryNewsCard.tsx', import.meta.url), 'utf8');
