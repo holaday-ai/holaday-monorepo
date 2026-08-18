@@ -254,6 +254,43 @@ def test_quote_prefers_single_symbol_minute_source(monkeypatch):
     assert fake.spot_calls == 0
 
 
+def test_quote_reuses_screening_snapshot_before_full_spot_fallback(monkeypatch):
+    screening_row = {
+        "代码": "601958",
+        "名称": "金钼股份",
+        "最新价": 22.59,
+        "涨跌幅": -1.57,
+        "成交额": 987654321.0,
+        "换手率": 1.25,
+        "市盈率TTM": 12.3,
+        "市净率": 2.1,
+        "总市值原值": 123456789000.0,
+        "行情时间": "15:00:00",
+    }
+
+    def minute_unavailable(symbol):
+        raise adp.AkShareUnavailable("分钟线暂不可用")
+
+    def full_spot_must_not_run():
+        raise AssertionError("warm screening snapshot must avoid the slow full-spot fallback")
+
+    monkeypatch.setattr(adp, "_get_sina_minute_frame", minute_unavailable)
+    monkeypatch.setattr(
+        adp,
+        "get_screening_universe",
+        lambda: (
+            [screening_row],
+            "sina:Market_Center.getHQNodeData(full-market-screening)",
+        ),
+    )
+    monkeypatch.setattr(adp, "_get_a_spot_records", full_spot_must_not_run)
+
+    rows, source = adp.get_quote("601958")
+
+    assert rows == [screening_row]
+    assert source == "sina:Market_Center.getHQNodeData(full-market-screening,filter)"
+
+
 def test_intraday_uses_latest_returned_trading_day(monkeypatch):
     pd = pytest.importorskip("pandas")
     clear_cache()

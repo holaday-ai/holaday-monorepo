@@ -273,6 +273,21 @@ def get_quote(symbol: str) -> tuple[list[dict[str, Any]], str]:
     except Exception:  # noqa: BLE001 - fall through to the other real source
         pass
 
+    try:
+        screening_rows, screening_source = get_screening_universe()
+        screening_hit = [
+            row for row in screening_rows if str(row.get("代码", "")).endswith(code)
+        ]
+        if screening_hit:
+            filtered_source = (
+                f"{screening_source[:-1]},filter)"
+                if screening_source.endswith(")")
+                else f"{screening_source}(filter)"
+            )
+            return screening_hit[:1], filtered_source
+    except Exception:  # noqa: BLE001 - preserve the independent full-spot fallback
+        pass
+
     recs = _get_a_spot_records()
     hit = [r for r in recs if str(r.get("代码", "")).endswith(code)]
     return hit[:1], "akshare:stock_zh_a_spot(sina,filter,fallback)"
