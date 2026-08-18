@@ -548,7 +548,7 @@ pnpm exec vitest run src/components/stocks/StockWorkbenchLayout.test.tsx src/com
 
 Expected: all tests PASS.
 
-- [ ] **Step 9: Commit Task 5**
+- [x] **Step 9: Commit Task 5**
 
 ```bash
 git add apps/web-workbench/src/components/stocks/StockWorkbenchLayout.tsx apps/web-workbench/src/components/stocks/StockWorkbenchLayout.test.tsx apps/web-workbench/src/pages/StockTasksPage.tsx apps/web-workbench/src/pages/stock-tasks-layout.test.ts apps/web-workbench/src/pages/StockTasksPage.test.ts
@@ -566,7 +566,7 @@ git commit -m "feat(stocks): reorder the task-centered workbench"
 
 **Interfaces:** None; this task validates the integrated behavior.
 
-- [ ] **Step 1: Run the full stock-focused suite**
+- [x] **Step 1: Run the full stock-focused suite**
 
 ```bash
 pnpm exec vitest run src/lib/stock-risk-presentation.test.ts src/lib/stock-discovery.test.ts src/components/DiscoveryNewsCard.test.tsx src/components/stocks/StockRiskRadar.test.tsx src/components/stocks/StockPreferenceProfile.test.tsx src/components/stocks/StockScreeningWorkbench.test.tsx src/components/stocks/StockWorkbenchLayout.test.tsx src/pages/stock-tasks-layout.test.ts src/pages/StockTasksPage.test.ts
@@ -580,7 +580,9 @@ pnpm test
 
 Expected baseline: at least 186 files and 1412 tests, all passing; the final count may be higher because this plan adds tests.
 
-- [ ] **Step 3: Run lint, typecheck, and production build**
+Executed on 2026-08-18: 189 files / 1425 tests ran. The stock-focused changes passed, but the full suite retained one unrelated existing failure in `EnergyHome.test.tsx` (`接住第 1 个能量光点`). The isolated test reproduced the same failure, and this branch has no diff in `EnergyHome.tsx` or `EnergyHome.test.tsx`; Today Energy remains outside this implementation scope.
+
+- [x] **Step 3: Run lint, typecheck, and production build**
 
 ```bash
 pnpm build
@@ -588,14 +590,14 @@ pnpm build
 
 Run from `apps/web-workbench`; this command includes ESLint, both TypeScript checks, and Vite production build.
 
-- [ ] **Step 4: Run repository hygiene checks**
+- [x] **Step 4: Run repository hygiene checks**
 
 ```bash
 git diff --check
 pnpm exec biome check apps/web-workbench/src/lib/stock-risk-presentation.ts apps/web-workbench/src/lib/stock-risk-presentation.test.ts apps/web-workbench/src/lib/stock-discovery.ts apps/web-workbench/src/lib/stock-discovery.test.ts apps/web-workbench/src/components/DiscoveryNewsCard.tsx apps/web-workbench/src/components/DiscoveryNewsCard.test.tsx apps/web-workbench/src/components/stocks/StockRiskRadar.tsx apps/web-workbench/src/components/stocks/StockRiskRadar.test.tsx apps/web-workbench/src/components/stocks/StockPreferenceProfile.tsx apps/web-workbench/src/components/stocks/StockPreferenceProfile.test.tsx apps/web-workbench/src/components/stocks/StockScreeningWorkbench.tsx apps/web-workbench/src/components/stocks/StockScreeningWorkbench.test.tsx apps/web-workbench/src/components/stocks/StockWorkbenchLayout.tsx apps/web-workbench/src/components/stocks/StockWorkbenchLayout.test.tsx apps/web-workbench/src/pages/StockTasksPage.tsx apps/web-workbench/src/pages/stock-tasks-layout.test.ts apps/web-workbench/src/pages/StockTasksPage.test.ts
 ```
 
-- [ ] **Step 5: Perform local visual acceptance**
+- [x] **Step 5: Perform local visual acceptance**
 
 Open the authenticated stock page against the local build. Capture and inspect:
 
@@ -608,7 +610,7 @@ Open the authenticated stock page against the local build. Capture and inspect:
 
 Cross at least one 20-second background-refresh cycle and verify scroll position, selected discovery tab, expanded risk group, focus, and screening results remain stable.
 
-- [ ] **Step 6: Commit any verification-only plan status update**
+- [x] **Step 6: Commit any verification-only plan status update**
 
 ```bash
 git add docs/superpowers/plans/2026-08-18-stock-task-workbench-p1b.md
@@ -618,3 +620,13 @@ git commit -m "docs(stocks): record workbench verification"
 - [ ] **Step 7: Finish the branch**
 
 Use `superpowers:verification-before-completion`, `superpowers:requesting-code-review`, and `superpowers:finishing-a-development-branch`. Because the user has already chosen single-agent serial execution, perform a direct self-review rather than spawning review agents. Push the verified branch and open a Ready PR; merge and deployment still require the user's existing task-specific authorization boundary.
+
+## Verification evidence (2026-08-18)
+
+- Stock-focused suite: 9 files / 61 tests passed.
+- Production build: ESLint, both TypeScript checks, and Vite build passed.
+- Hygiene: `git diff --check` passed; all five newly created production/test files passed Biome without fixes. Existing large touched files retain repository-wide Biome baseline noise, while the build ESLint gate is clean.
+- Responsive browser acceptance: 1280px task-first desktop layout and 390px single-column layout passed; mobile title begins below the fixed top bar, and document width equals viewport width.
+- Interaction acceptance: grouped risk expansion, independent evidence expansion, complete-profile Sheet close/focus return, deterministic watchlist relevance, and selected discovery tab/focus stability across a 20-second refresh cycle passed.
+- Screening chain: local UI behavior and state transitions passed. A local frontend proxied to the production API cannot reuse the production user snapshot namespace, while the existing production page returned a complete screening result; no production mutation, merge, or deployment was performed.
+- Direct self-review found no schema, server route, environment, database, entitlement, or transaction changes in this branch.
