@@ -150,7 +150,7 @@ pnpm exec vitest run src/lib/stock-risk-presentation.test.ts src/components/stoc
 
 Expected: all tests PASS.
 
-- [ ] **Step 8: Commit Task 1**
+- [x] **Step 8: Commit Task 1**
 
 ```bash
 git add apps/web-workbench/src/lib/stock-risk-presentation.ts apps/web-workbench/src/lib/stock-risk-presentation.test.ts apps/web-workbench/src/components/stocks/StockRiskRadar.tsx apps/web-workbench/src/components/stocks/StockRiskRadar.test.tsx
@@ -182,7 +182,7 @@ export function StockPreferenceProfile(props: {
 
 - The default remains `full`; `StockTasksPage` will pass `presentation="compact"` in Task 5.
 
-- [ ] **Step 1: Write the failing compact-mode test**
+- [x] **Step 1: Write the failing compact-mode test**
 
 Render a profile with four facts, two strengths, two blind spots, and two supplementary views. Assert compact mode shows at most three facts and one item from each summary group, does not render `依据与控制` inline, and exposes a `查看完整画像` button.
 
@@ -194,7 +194,7 @@ expect(screen.queryByText('依据与控制')).toBeNull();
 expect(screen.getByRole('button', { name: '查看完整画像' })).toBeTruthy();
 ```
 
-- [ ] **Step 2: Run the compact test and verify RED**
+- [x] **Step 2: Run the compact test and verify RED**
 
 Run:
 
@@ -204,7 +204,7 @@ pnpm exec vitest run src/components/stocks/StockPreferenceProfile.test.tsx
 
 Expected: FAIL because the `presentation` prop and complete-profile control do not exist.
 
-- [ ] **Step 3: Implement compact ready content**
+- [x] **Step 3: Implement compact ready content**
 
 Keep the existing full `ReadyProfile`. Add `CompactReadyProfile` that uses server order and `slice` only:
 
@@ -217,11 +217,11 @@ const supplement = profile.supplementaryViews[0] ?? null;
 
 The compact section keeps confidence, 90-day sample counts, refresh, pause, edit, and the non-advice footer.
 
-- [ ] **Step 4: Add a complete-profile Sheet and test it**
+- [x] **Step 4: Add a complete-profile Sheet and test it**
 
 Clicking `查看完整画像` opens a Sheet named `完整选股画像` containing the existing full facts, strengths, blind spots, supplementary views, and basis. Closing restores focus to the trigger. The existing `调整选股偏好` Sheet remains independent.
 
-- [ ] **Step 5: Run the profile suite and verify GREEN**
+- [x] **Step 5: Run the profile suite and verify GREEN**
 
 Run:
 

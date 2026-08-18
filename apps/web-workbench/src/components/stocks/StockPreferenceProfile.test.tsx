@@ -25,31 +25,51 @@ function profile(
     },
     window: { days: 90, from: '2026-05-20', to: '2026-08-18' },
     sample: { screeningRuns: 2, watchlistStocks: 1, manualDimensions: 1 },
-    facts: [{
-      id: 'screening-valuation',
-      dimension: 'valuation',
-      source: 'screening',
-      title: '筛选时持续关注估值',
-      detail: '最近 2 次成功筛选都使用了估值条件。',
-    }],
-    possibleStrengths: [{
-      id: 'strength-evidence',
-      title: '有明确的条件意识',
-      detail: '会先确认可核验条件，再查看符合与不符合项。',
-    }],
-    blindSpots: [{
-      id: 'blind-coverage',
-      title: '研究维度仍较集中',
-      detail: '目前主要证据集中在估值维度。',
-    }],
-    supplementaryViews: [{
-      id: 'supplement-cash-flow',
-      title: '补看现金流',
-      detail: '可以把经营现金流作为补充核对维度。',
-    }],
+    facts: [
+      {
+        id: 'screening-valuation',
+        dimension: 'valuation',
+        source: 'screening',
+        title: '筛选时持续关注估值',
+        detail: '最近 2 次成功筛选都使用了估值条件。',
+      },
+    ],
+    possibleStrengths: [
+      {
+        id: 'strength-evidence',
+        title: '有明确的条件意识',
+        detail: '会先确认可核验条件，再查看符合与不符合项。',
+      },
+    ],
+    blindSpots: [
+      {
+        id: 'blind-coverage',
+        title: '研究维度仍较集中',
+        detail: '目前主要证据集中在估值维度。',
+      },
+    ],
+    supplementaryViews: [
+      {
+        id: 'supplement-cash-flow',
+        title: '补看现金流',
+        detail: '可以把经营现金流作为补充核对维度。',
+      },
+    ],
     basis: [
-      { id: 'basis-screening', source: 'screening', title: '成功条件筛选', detail: '近 90 天', count: 2 },
-      { id: 'basis-watchlist', source: 'watchlist', title: '当前关注列表', detail: '清空后新增', count: 1 },
+      {
+        id: 'basis-screening',
+        source: 'screening',
+        title: '成功条件筛选',
+        detail: '近 90 天',
+        count: 2,
+      },
+      {
+        id: 'basis-watchlist',
+        source: 'watchlist',
+        title: '当前关注列表',
+        detail: '清空后新增',
+        count: 1,
+      },
     ],
     manualPreferences: {
       industries: [],
@@ -70,21 +90,30 @@ function profile(
 function apiFor(initial: StockPreferenceProfileResult = profile()): StockPreferenceProfileApi {
   return {
     load: vi.fn(async () => initial),
-    update: vi.fn(async (input) => profile({
-      enabled: input.enabled,
-      state: input.enabled ? 'ready' : 'disabled',
-      manualPreferences: input.manualPreferences,
-    })),
-    clear: vi.fn(async () => profile({
-      state: 'empty',
-      confidence: { level: 'insufficient', label: '样本不足', score: 0, basis: '尚无清空后的明确设置或行为样本。' },
-      sample: { screeningRuns: 0, watchlistStocks: 0, manualDimensions: 0 },
-      facts: [],
-      possibleStrengths: [],
-      blindSpots: [],
-      supplementaryViews: [],
-      basis: [],
-    })),
+    update: vi.fn(async (input) =>
+      profile({
+        enabled: input.enabled,
+        state: input.enabled ? 'ready' : 'disabled',
+        manualPreferences: input.manualPreferences,
+      }),
+    ),
+    clear: vi.fn(async () =>
+      profile({
+        state: 'empty',
+        confidence: {
+          level: 'insufficient',
+          label: '样本不足',
+          score: 0,
+          basis: '尚无清空后的明确设置或行为样本。',
+        },
+        sample: { screeningRuns: 0, watchlistStocks: 0, manualDimensions: 0 },
+        facts: [],
+        possibleStrengths: [],
+        blindSpots: [],
+        supplementaryViews: [],
+        basis: [],
+      }),
+    ),
   };
 }
 
@@ -113,10 +142,87 @@ describe('StockPreferenceProfile', () => {
     expect(refresh.getAttribute('title')).toBe('刷新选股偏好');
   });
 
+  it('keeps the compact profile bounded while exposing the complete profile', async () => {
+    const richProfile = profile({
+      facts: [
+        {
+          id: 'fact-1',
+          dimension: 'valuation',
+          source: 'screening',
+          title: '事实 1',
+          detail: '事实详情 1',
+        },
+        {
+          id: 'fact-2',
+          dimension: 'industry',
+          source: 'screening',
+          title: '事实 2',
+          detail: '事实详情 2',
+        },
+        {
+          id: 'fact-3',
+          dimension: 'growth',
+          source: 'manual',
+          title: '事实 3',
+          detail: '事实详情 3',
+        },
+        {
+          id: 'fact-4',
+          dimension: 'cashFlow',
+          source: 'manual',
+          title: '事实 4',
+          detail: '事实详情 4',
+        },
+      ],
+      possibleStrengths: [
+        { id: 'strength-1', title: '优势 1', detail: '优势详情 1' },
+        { id: 'strength-2', title: '优势 2', detail: '优势详情 2' },
+      ],
+      blindSpots: [
+        { id: 'blind-1', title: '盲点 1', detail: '盲点详情 1' },
+        { id: 'blind-2', title: '盲点 2', detail: '盲点详情 2' },
+      ],
+      supplementaryViews: [
+        { id: 'supplement-1', title: '补充 1', detail: '补充详情 1' },
+        { id: 'supplement-2', title: '补充 2', detail: '补充详情 2' },
+      ],
+    });
+
+    render(<StockPreferenceProfile api={apiFor(richProfile)} presentation="compact" />);
+
+    expect(await screen.findByText('事实 1')).toBeTruthy();
+    expect(screen.getByText('事实 3')).toBeTruthy();
+    expect(screen.queryByText('事实 4')).toBeNull();
+    expect(screen.getByText('优势 1')).toBeTruthy();
+    expect(screen.queryByText('优势 2')).toBeNull();
+    expect(screen.getByText('盲点 1')).toBeTruthy();
+    expect(screen.queryByText('盲点 2')).toBeNull();
+    expect(screen.getByText('补充 1')).toBeTruthy();
+    expect(screen.queryByText('补充 2')).toBeNull();
+    expect(screen.queryByText('依据与控制')).toBeNull();
+    const completeProfileTrigger = screen.getByRole('button', { name: '查看完整画像' });
+    await userEvent.click(completeProfileTrigger);
+    const completeProfile = await screen.findByRole('dialog', { name: '完整选股画像' });
+    expect(within(completeProfile).getByText('事实 4')).toBeTruthy();
+    expect(within(completeProfile).getByText('优势 2')).toBeTruthy();
+    expect(within(completeProfile).getByText('盲点 2')).toBeTruthy();
+    expect(within(completeProfile).getByText('补充 2')).toBeTruthy();
+    expect(within(completeProfile).getByText('依据与控制')).toBeTruthy();
+
+    await userEvent.click(within(completeProfile).getByRole('button', { name: 'Close' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '完整选股画像' })).toBeNull());
+    expect(document.activeElement).toBe(completeProfileTrigger);
+  });
+
   it('shows truthful empty, disabled, and retryable error states', async () => {
     const empty = profile({
       state: 'empty',
-      confidence: { level: 'insufficient', label: '样本不足', score: 0, basis: '尚无清空后的明确设置或行为样本。' },
+      confidence: {
+        level: 'insufficient',
+        label: '样本不足',
+        score: 0,
+        basis: '尚无清空后的明确设置或行为样本。',
+      },
       sample: { screeningRuns: 0, watchlistStocks: 0, manualDimensions: 0 },
       facts: [],
       possibleStrengths: [],
@@ -156,21 +262,29 @@ describe('StockPreferenceProfile', () => {
     await user.click(within(dialog).getByRole('checkbox', { name: '经营现金流优先' }));
     await user.click(within(dialog).getByRole('button', { name: '保存偏好' }));
 
-    await waitFor(() => expect(api.update).toHaveBeenCalledWith(expect.objectContaining({
-      enabled: true,
-      manualPreferences: expect.objectContaining({
-        industries: ['半导体'],
-        valuation: ['低估值'],
-        cashFlow: ['经营现金流优先'],
-      }),
-    })));
+    await waitFor(() =>
+      expect(api.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          enabled: true,
+          manualPreferences: expect.objectContaining({
+            industries: ['半导体'],
+            valuation: ['低估值'],
+            cashFlow: ['经营现金流优先'],
+          }),
+        }),
+      ),
+    );
 
     await user.click(screen.getByRole('button', { name: '暂停画像' }));
-    await waitFor(() => expect(api.update).toHaveBeenLastCalledWith(expect.objectContaining({ enabled: false })));
+    await waitFor(() =>
+      expect(api.update).toHaveBeenLastCalledWith(expect.objectContaining({ enabled: false })),
+    );
     expect(await screen.findByText('选股偏好已暂停')).toBeTruthy();
 
     await user.click(screen.getByRole('button', { name: '重新开启' }));
-    await waitFor(() => expect(api.update).toHaveBeenLastCalledWith(expect.objectContaining({ enabled: true })));
+    await waitFor(() =>
+      expect(api.update).toHaveBeenLastCalledWith(expect.objectContaining({ enabled: true })),
+    );
   });
 
   it('requires a second action before clearing and states that the watchlist remains', async () => {
@@ -203,9 +317,7 @@ describe('StockPreferenceProfile', () => {
       resolveRefresh = resolve;
     });
     const api = apiFor();
-    vi.mocked(api.load)
-      .mockResolvedValueOnce(profile())
-      .mockReturnValueOnce(refresh);
+    vi.mocked(api.load).mockResolvedValueOnce(profile()).mockReturnValueOnce(refresh);
     const user = userEvent.setup();
     const view = render(<StockPreferenceProfile refreshKey={0} api={api} />);
     await screen.findByText('筛选时持续关注估值');
@@ -222,7 +334,9 @@ describe('StockPreferenceProfile', () => {
       await refresh;
     });
     await user.click(screen.getByRole('button', { name: '调整画像' }));
-    expect((screen.getByRole('checkbox', { name: '半导体' }) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole('checkbox', { name: '半导体' }) as HTMLInputElement).checked).toBe(
+      true,
+    );
   });
 
   it('rechecks once after an explicit behavior so eventual database visibility reaches the card', async () => {
