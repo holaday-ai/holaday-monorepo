@@ -9,11 +9,20 @@ describe('stock tasks layout', () => {
     expect(source).toContain('flex flex-wrap items-center justify-end gap-2');
   });
 
+  it('reserves the mobile top bar before rendering the page title', () => {
+    const source = readFileSync(new URL('./StockTasksPage.tsx', import.meta.url), 'utf8');
+
+    expect(source).toContain('pt-14');
+    expect(source).toContain('min-[769px]:pt-4');
+  });
+
   it('uses verified source covers when available and never turns discovery cards into source placeholders', () => {
     const pageSource = readFileSync(new URL('./StockTasksPage.tsx', import.meta.url), 'utf8');
     const cardSource = readFileSync(new URL('../components/DiscoveryNewsCard.tsx', import.meta.url), 'utf8');
 
     expect(pageSource).toContain('<DiscoveryNewsCard');
+    expect(pageSource).toContain('title="市场动态"');
+    expect(pageSource).toContain('relatedToWatchlist={isExplicitWatchlistNews');
     expect(cardSource).not.toContain('images.unsplash.com');
     expect(cardSource).toContain('{showImage ? (');
     expect(cardSource).toContain('src={item.imageUrl}');
@@ -144,7 +153,7 @@ describe('stock tasks layout', () => {
       'utf8',
     );
 
-    expect(source).toContain("import { StockScreeningWorkbench } from '@/components/stocks/StockScreeningWorkbench';");
+    expect(source).toContain("from '@/components/stocks/StockScreeningWorkbench';");
     expect(source.indexOf('<MarketHighlights')).toBeLessThan(source.indexOf('<StockScreeningWorkbench'));
     expect(source.indexOf('<StockScreeningWorkbench')).toBeLessThan(source.indexOf('<DailyBriefing'));
     expect(source).toContain('snapshotId={dashboard?.trust?.snapshotId ?? null}');
@@ -179,5 +188,16 @@ describe('stock tasks layout', () => {
     expect(source).toContain('refreshKey={preferenceRevision}');
     expect(source).toContain('onScreeningRecorded={refreshPreferenceProfile}');
     expect(source).toContain('setPreferenceRevision((current) => current + 1)');
+  });
+
+  it('composes a task-first workbench before bounded market context', () => {
+    const source = readFileSync(new URL('./StockTasksPage.tsx', import.meta.url), 'utf8');
+
+    expect(source.indexOf('<StockTaskWorkspaceLayout')).toBeLessThan(
+      source.indexOf('<StockMarketContextLayout'),
+    );
+    expect(source).not.toContain('xl:grid-cols-[minmax(0,1fr)_320px]');
+    expect(source).toContain('presentation="compact"');
+    expect(source).toContain('onViewStateChange={setScreeningView}');
   });
 });

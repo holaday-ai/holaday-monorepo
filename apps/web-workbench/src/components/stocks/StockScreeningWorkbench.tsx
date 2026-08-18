@@ -1,3 +1,6 @@
+import { pageErrorMessage } from '@/lib/page-error-copy';
+import { trpc } from '@/lib/trpc';
+import { cn } from '@/lib/utils';
 import {
   Check,
   CircleAlert,
@@ -10,18 +13,15 @@ import {
   ShieldAlert,
 } from 'lucide-react';
 import * as React from 'react';
-import { pageErrorMessage } from '@/lib/page-error-copy';
-import { trpc } from '@/lib/trpc';
-import { cn } from '@/lib/utils';
 import {
+  type EditableStockScreenCriterion,
+  type StockScreeningTrustMode,
   canRunStockScreening,
   criterionStateLabel,
   groupScreeningCandidates,
   isStockScreeningResultDisplayable,
   screeningCoverageCopy,
   updateNumericCriterionValue,
-  type EditableStockScreenCriterion,
-  type StockScreeningTrustMode,
 } from './stock-screening-state';
 
 type PreviewResult = Awaited<ReturnType<typeof trpc.stocks.previewScreening.query>>;
@@ -33,6 +33,8 @@ export interface StockScreeningWorkbenchApi {
   preview(prompt: string): Promise<PreviewResult>;
   run(input: RunInput): Promise<ScreeningResult>;
 }
+
+export type StockScreeningViewState = 'idle' | 'criteria' | 'results';
 
 const LIVE_SCREENING_API: StockScreeningWorkbenchApi = {
   preview: (prompt) => trpc.stocks.previewScreening.query({ prompt }),
@@ -50,6 +52,7 @@ export function StockScreeningWorkbench({
   trustMode,
   onAddToWatchlist,
   onScreeningRecorded,
+  onViewStateChange,
   api = LIVE_SCREENING_API,
 }: {
   snapshotId: string | null;
@@ -57,6 +60,7 @@ export function StockScreeningWorkbench({
   trustMode: StockScreeningTrustMode;
   onAddToWatchlist: (symbol: string, name: string) => Promise<void>;
   onScreeningRecorded?: () => void;
+  onViewStateChange?: (state: StockScreeningViewState) => void;
   api?: StockScreeningWorkbenchApi;
 }): JSX.Element {
   const [prompt, setPrompt] = React.useState('');
@@ -72,25 +76,32 @@ export function StockScreeningWorkbench({
   currentTrustRef.current = currentTrust;
 
   React.useEffect(() => {
-    setResult((current) => (
-      current && dataAsOf && current.dataAsOf !== dataAsOf ? null : current
-    ));
+    setResult((current) => (current && dataAsOf && current.dataAsOf !== dataAsOf ? null : current));
     setError(null);
   }, [dataAsOf]);
 
   const readyToRun = canRunStockScreening(criteria, { snapshotId, dataAsOf, trustMode });
   const grouped = result ? groupScreeningCandidates(result) : null;
+  const viewState: StockScreeningViewState = result
+    ? 'results'
+    : criteria.length > 0
+      ? 'criteria'
+      : 'idle';
+
+  React.useEffect(() => {
+    onViewStateChange?.(viewState);
+  }, [onViewStateChange, viewState]);
 
   const preview = React.useCallback(async () => {
     const trimmed = prompt.trim();
     if (!trimmed || previewing) return;
     setPreviewing(true);
     setError(null);
-    setResult(null);
     try {
       const next: PreviewResult = await api.preview(trimmed);
       setCriteria(next.criteria);
       setUnparsedClauses(next.unparsedClauses);
+      setResult(null);
     } catch (caught) {
       setError(pageErrorMessage(caught));
     } finally {
@@ -127,17 +138,20 @@ export function StockScreeningWorkbench({
     setError(null);
   }, []);
 
-  const addCandidate = React.useCallback(async (candidate: ScreeningCandidate) => {
-    if (addingSymbol) return;
-    setAddingSymbol(candidate.symbol);
-    try {
-      await onAddToWatchlist(candidate.symbol, candidate.name);
-    } catch (caught) {
-      setError(pageErrorMessage(caught));
-    } finally {
-      setAddingSymbol(null);
-    }
-  }, [addingSymbol, onAddToWatchlist]);
+  const addCandidate = React.useCallback(
+    async (candidate: ScreeningCandidate) => {
+      if (addingSymbol) return;
+      setAddingSymbol(candidate.symbol);
+      try {
+        await onAddToWatchlist(candidate.symbol, candidate.name);
+      } catch (caught) {
+        setError(pageErrorMessage(caught));
+      } finally {
+        setAddingSymbol(null);
+      }
+    },
+    [addingSymbol, onAddToWatchlist],
+  );
 
   return (
     <section className="overflow-hidden rounded-[8px] border border-[#E1E3E8] bg-white shadow-[0_8px_24px_rgba(18,24,38,0.035)]">
@@ -201,7 +215,9 @@ export function StockScreeningWorkbench({
           <div className="flex items-center justify-between gap-3">
             <div>
               <h3 className="text-[13px] font-semibold text-[#202939]">确认筛选条件</h3>
-              <p className="mt-0.5 text-[11px] text-[#7A8290]">共 {criteria.length} 项；带输入框的阈值可以修改。</p>
+              <p className="mt-0.5 text-[11px] text-[#7A8290]">
+                共 {criteria.length} 项；带输入框的阈值可以修改。
+              </p>
             </div>
             <button
               type="button"
@@ -220,7 +236,9 @@ export function StockScreeningWorkbench({
                 key={criterion.id}
                 criterion={criterion}
                 onChange={(next) => {
-                  setCriteria((current) => current.map((item) => item.id === next.id ? next : item));
+                  setCriteria((current) =>
+                    current.map((item) => (item.id === next.id ? next : item)),
+                  );
                   setResult(null);
                 }}
               />
@@ -230,7 +248,10 @@ export function StockScreeningWorkbench({
           {unparsedClauses.length > 0 ? (
             <div className="mt-3 flex gap-2 rounded-[7px] border border-[#F4D9A7] bg-[#FFF9EC] px-3 py-2.5 text-[11px] leading-5 text-[#7A5313]">
               <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
-              <span>暂未识别：{unparsedClauses.join('；')}。这些描述不会悄悄参与筛选，请改成明确数值条件。</span>
+              <span>
+                暂未识别：{unparsedClauses.join('；')}
+                。这些描述不会悄悄参与筛选，请改成明确数值条件。
+              </span>
             </div>
           ) : null}
 
@@ -246,7 +267,11 @@ export function StockScreeningWorkbench({
               disabled={!readyToRun || running}
               className="inline-flex h-9 items-center justify-center gap-1.5 rounded-[7px] border border-[#EA1F59] bg-white px-4 text-[12px] font-semibold text-[#D91952] transition hover:bg-[#FFF0F4] disabled:cursor-not-allowed disabled:border-[#DADDE4] disabled:text-[#98A2B3]"
             >
-              {running ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <Database className="h-3.5 w-3.5" aria-hidden />}
+              {running ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+              ) : (
+                <Database className="h-3.5 w-3.5" aria-hidden />
+              )}
               {running ? '正在查找…' : '按这些条件查找'}
             </button>
           </div>
@@ -264,7 +289,9 @@ export function StockScreeningWorkbench({
           <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <h3 className="text-[14px] font-semibold text-[#121826]">
-                {result.zeroResult ? '没有完整符合全部条件的股票' : `完整符合 ${grouped.exact.length} 只`}
+                {result.zeroResult
+                  ? '没有完整符合全部条件的股票'
+                  : `完整符合 ${grouped.exact.length} 只`}
               </h3>
               <p className="mt-1 text-[11px] leading-5 text-[#667085]">
                 {result.zeroResult
@@ -272,7 +299,9 @@ export function StockScreeningWorkbench({
                   : screeningCoverageCopy(result.coverage)}
               </p>
               {result.zeroResult ? (
-                <p className="mt-0.5 text-[11px] text-[#8B92A1]">{screeningCoverageCopy(result.coverage)}</p>
+                <p className="mt-0.5 text-[11px] text-[#8B92A1]">
+                  {screeningCoverageCopy(result.coverage)}
+                </p>
               ) : null}
             </div>
             <div className="flex flex-wrap gap-1.5 text-[10px]">
@@ -296,7 +325,9 @@ export function StockScreeningWorkbench({
           ) : (
             <div className="mt-4 rounded-[8px] border border-dashed border-[#DADDE4] bg-[#FCFCFD] px-4 py-8 text-center">
               <p className="text-[13px] font-medium text-[#4F5868]">市场初筛后没有进入深查的股票</p>
-              <p className="mt-1 text-[11px] text-[#8B92A1]">原条件保持不变，可以返回上方自行调整。</p>
+              <p className="mt-1 text-[11px] text-[#8B92A1]">
+                原条件保持不变，可以返回上方自行调整。
+              </p>
             </div>
           )}
         </div>
@@ -319,12 +350,14 @@ function TrustStatus({
 }): JSX.Element {
   const current = trustMode === 'current';
   return (
-    <div className={cn(
-      'inline-flex w-fit items-center gap-1.5 rounded-[7px] border px-2.5 py-1.5 text-[10px] font-medium',
-      current
-        ? 'border-[#BFE8D8] bg-[#F2FBF7] text-[#087A55]'
-        : 'border-[#E1E3E8] bg-[#F7F7F9] text-[#667085]',
-    )}>
+    <div
+      className={cn(
+        'inline-flex w-fit items-center gap-1.5 rounded-[7px] border px-2.5 py-1.5 text-[10px] font-medium',
+        current
+          ? 'border-[#BFE8D8] bg-[#F2FBF7] text-[#087A55]'
+          : 'border-[#E1E3E8] bg-[#F7F7F9] text-[#667085]',
+      )}
+    >
       <span className={cn('h-1.5 w-1.5 rounded-full', current ? 'bg-[#12A875]' : 'bg-[#98A2B3]')} />
       {current ? `${dataAsOf ?? '当前'} 可筛选` : '等待当前可信行情'}
     </div>
@@ -380,7 +413,9 @@ function CriterionEditor({
           <input
             type="number"
             value={typeof criterion.value === 'number' ? criterion.value : ''}
-            onChange={(event) => onChange(updateNumericCriterionValue(criterion, event.target.value))}
+            onChange={(event) =>
+              onChange(updateNumericCriterionValue(criterion, event.target.value))
+            }
             placeholder="补充数值"
             aria-label={`设置${criterion.label}阈值`}
             className="h-8 w-28 rounded-[6px] border border-[#DADDE4] bg-white px-2 text-[11px] tabular-nums text-[#303846] outline-none placeholder:text-[#A7ADBA] focus:border-[#EA1F59]/45"
@@ -402,12 +437,14 @@ function ResultCount({
   tone: 'matched' | 'missing' | 'unmet';
 }): JSX.Element {
   return (
-    <span className={cn(
-      'rounded-[6px] border px-2 py-1',
-      tone === 'matched' && 'border-[#BFE8D8] bg-[#F2FBF7] text-[#087A55]',
-      tone === 'missing' && 'border-[#F4D9A7] bg-[#FFF9EC] text-[#8A5A12]',
-      tone === 'unmet' && 'border-[#E1E3E8] bg-[#F7F7F9] text-[#667085]',
-    )}>
+    <span
+      className={cn(
+        'rounded-[6px] border px-2 py-1',
+        tone === 'matched' && 'border-[#BFE8D8] bg-[#F2FBF7] text-[#087A55]',
+        tone === 'missing' && 'border-[#F4D9A7] bg-[#FFF9EC] text-[#8A5A12]',
+        tone === 'unmet' && 'border-[#E1E3E8] bg-[#F7F7F9] text-[#667085]',
+      )}
+    >
       {label} {value}
     </span>
   );
@@ -431,12 +468,14 @@ function CandidateRow({
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <h4 className="text-[14px] font-semibold text-[#121826]">{candidate.name}</h4>
             <span className="font-mono text-[11px] text-[#8B92A1]">{candidate.symbol}</span>
-            <span className={cn(
-              'rounded-[5px] px-1.5 py-0.5 text-[9px] font-semibold',
-              state === 'matched' && 'bg-[#EAF8F2] text-[#087A55]',
-              state === 'missing' && 'bg-[#FFF4DB] text-[#8A5A12]',
-              state === 'unmet' && 'bg-[#F0F1F4] text-[#667085]',
-            )}>
+            <span
+              className={cn(
+                'rounded-[5px] px-1.5 py-0.5 text-[9px] font-semibold',
+                state === 'matched' && 'bg-[#EAF8F2] text-[#087A55]',
+                state === 'missing' && 'bg-[#FFF4DB] text-[#8A5A12]',
+                state === 'unmet' && 'bg-[#F0F1F4] text-[#667085]',
+              )}
+            >
               {criterionStateLabel(state)}
             </span>
           </div>
@@ -448,7 +487,11 @@ function CandidateRow({
           disabled={adding}
           className="inline-flex h-8 w-fit shrink-0 items-center justify-center gap-1 rounded-[7px] border border-[#DADDE4] bg-white px-2.5 text-[11px] font-medium text-[#4F5868] transition hover:border-[#EA1F59]/30 hover:text-[#D91952] disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {adding ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden /> : <Plus className="h-3 w-3" aria-hidden />}
+          {adding ? (
+            <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
+          ) : (
+            <Plus className="h-3 w-3" aria-hidden />
+          )}
           加入关注
         </button>
       </div>
@@ -464,7 +507,12 @@ function CandidateRow({
           {candidate.warnings.map((warning) => (
             <div key={warning.key} className="flex gap-2 text-[11px] leading-5 text-[#783044]">
               <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#D91952]" aria-hidden />
-              <span><strong>{warning.severity} · {warning.label}：</strong>{warning.finding}</span>
+              <span>
+                <strong>
+                  {warning.severity} · {warning.label}：
+                </strong>
+                {warning.finding}
+              </span>
             </div>
           ))}
         </div>
@@ -476,7 +524,11 @@ function CandidateRow({
         </summary>
         <ul className="mt-1 grid gap-1 rounded-[7px] bg-[#F7F7F9] px-3 py-2 sm:grid-cols-2">
           {candidate.evidence.map((item) => (
-            <li key={item.id} className="min-w-0 truncate" title={`${item.source} · ${item.asOf ?? '日期未知'}`}>
+            <li
+              key={item.id}
+              className="min-w-0 truncate"
+              title={`${item.source} · ${item.asOf ?? '日期未知'}`}
+            >
               {item.label} · {item.source} · {item.asOf ?? '日期未知'}
             </li>
           ))}
@@ -496,16 +548,22 @@ function CriterionList({
   items: string[];
 }): JSX.Element {
   return (
-    <div className={cn(
-      'min-h-[68px] rounded-[7px] border px-3 py-2',
-      tone === 'matched' && 'border-[#D5ECE3] bg-[#F7FCFA]',
-      tone === 'missing' && 'border-[#F2E0BA] bg-[#FFFCF4]',
-      tone === 'unmet' && 'border-[#E4E6EB] bg-[#FAFAFB]',
-    )}>
-      <div className="text-[10px] font-semibold text-[#667085]">{title} · {items.length}</div>
+    <div
+      className={cn(
+        'min-h-[68px] rounded-[7px] border px-3 py-2',
+        tone === 'matched' && 'border-[#D5ECE3] bg-[#F7FCFA]',
+        tone === 'missing' && 'border-[#F2E0BA] bg-[#FFFCF4]',
+        tone === 'unmet' && 'border-[#E4E6EB] bg-[#FAFAFB]',
+      )}
+    >
+      <div className="text-[10px] font-semibold text-[#667085]">
+        {title} · {items.length}
+      </div>
       {items.length > 0 ? (
         <ul className="mt-1 space-y-0.5 text-[10px] leading-4 text-[#4F5868]">
-          {items.map((item) => <li key={item}>• {item}</li>)}
+          {items.map((item) => (
+            <li key={item}>• {item}</li>
+          ))}
         </ul>
       ) : (
         <div className="mt-1 text-[10px] text-[#A0A6B2]">无</div>

@@ -15,19 +15,151 @@ const DATA_AS_OF = '2026-08-17';
 afterEach(cleanup);
 
 describe('StockScreeningWorkbench', () => {
+  it('publishes idle, criteria, and results view states from trusted UI state', async () => {
+    const api: StockScreeningWorkbenchApi = {
+      preview: vi.fn(async () => ({
+        criteria: [
+          {
+            id: 'pe-1',
+            field: 'pe_ttm',
+            operator: 'lte',
+            value: 30,
+            unit: null,
+            label: '市盈率不超过 30',
+            sourceField: '市盈率TTM',
+            status: 'ready',
+          },
+        ],
+        unparsedClauses: [],
+      })) as StockScreeningWorkbenchApi['preview'],
+      run: vi.fn(async () => ({
+        snapshotId: SNAPSHOT_A,
+        dataAsOf: DATA_AS_OF,
+        coverage: {
+          universeCount: 1,
+          marketPrefilterCount: 1,
+          deepCheckedCount: 1,
+          deepCheckLimit: 20,
+          truncated: false,
+        },
+        candidates: [],
+        zeroResult: true,
+      })) as StockScreeningWorkbenchApi['run'],
+    };
+    const onViewStateChange = vi.fn();
+    const user = userEvent.setup();
+
+    render(
+      <StockScreeningWorkbench
+        snapshotId={SNAPSHOT_A}
+        dataAsOf={DATA_AS_OF}
+        trustMode="current"
+        onAddToWatchlist={vi.fn(async () => undefined)}
+        onViewStateChange={onViewStateChange}
+        api={api}
+      />,
+    );
+
+    await waitFor(() => expect(onViewStateChange).toHaveBeenLastCalledWith('idle'));
+    await user.type(screen.getByRole('textbox'), '市盈率低于30');
+    await user.click(screen.getByRole('button', { name: '识别条件' }));
+    await waitFor(() => expect(onViewStateChange).toHaveBeenLastCalledWith('criteria'));
+    await user.click(screen.getByRole('button', { name: '按这些条件查找' }));
+    await waitFor(() => expect(onViewStateChange).toHaveBeenLastCalledWith('results'));
+    await user.click(screen.getByRole('button', { name: '清空筛选条件' }));
+    await waitFor(() => expect(onViewStateChange).toHaveBeenLastCalledWith('idle'));
+  });
+
+  it('keeps the last trusted result visible when a later preview fails', async () => {
+    const api: StockScreeningWorkbenchApi = {
+      preview: vi
+        .fn()
+        .mockResolvedValueOnce({
+          criteria: [
+            {
+              id: 'pe-1',
+              field: 'pe_ttm',
+              operator: 'lte',
+              value: 30,
+              unit: null,
+              label: '市盈率不超过 30',
+              sourceField: '市盈率TTM',
+              status: 'ready',
+            },
+          ],
+          unparsedClauses: [],
+        })
+        .mockRejectedValueOnce(
+          new Error('预览服务暂时不可用'),
+        ) as StockScreeningWorkbenchApi['preview'],
+      run: vi.fn(async () => ({
+        snapshotId: SNAPSHOT_A,
+        dataAsOf: DATA_AS_OF,
+        coverage: {
+          universeCount: 5_538,
+          marketPrefilterCount: 1_133,
+          deepCheckedCount: 20,
+          deepCheckLimit: 20,
+          truncated: true,
+        },
+        candidates: [
+          {
+            symbol: '600519',
+            name: '贵州茅台',
+            snapshotId: SNAPSHOT_A,
+            dataAsOf: DATA_AS_OF,
+            matchedCriteria: ['市盈率不超过 30'],
+            unmetCriteria: [],
+            missingCriteria: [],
+            warnings: [],
+            evidence: [],
+          },
+        ],
+        zeroResult: false,
+      })) as StockScreeningWorkbenchApi['run'],
+    };
+    const user = userEvent.setup();
+
+    render(
+      <StockScreeningWorkbench
+        snapshotId={SNAPSHOT_A}
+        dataAsOf={DATA_AS_OF}
+        trustMode="current"
+        onAddToWatchlist={vi.fn(async () => undefined)}
+        api={api}
+      />,
+    );
+
+    const prompt = screen.getByRole('textbox');
+    await user.type(prompt, '市盈率低于30');
+    await user.click(screen.getByRole('button', { name: '识别条件' }));
+    await user.click(await screen.findByRole('button', { name: '按这些条件查找' }));
+    expect(await screen.findByRole('heading', { name: '完整符合 1 只' })).toBeTruthy();
+
+    await user.clear(prompt);
+    await user.type(prompt, '资产负债率低于50%');
+    await user.click(screen.getByRole('button', { name: '识别条件' }));
+
+    expect(await screen.findByText('预览服务暂时不可用')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: '完整符合 1 只' })).toBeTruthy();
+    expect(screen.getByText('贵州茅台')).toBeTruthy();
+  });
+
   it('reports a successful screening so the preference profile can refresh', async () => {
     const api: StockScreeningWorkbenchApi = {
       preview: vi.fn(async () => ({
-        criteria: [{
-          id: 'pe-1',
-          field: 'pe_ttm',
-          operator: 'lte',
-          value: 30,
-          unit: null,
-          label: '市盈率不超过 30',
-          sourceField: '市盈率TTM',
-          status: 'ready',
-        }],
+        criteria: [
+          {
+            id: 'pe-1',
+            field: 'pe_ttm',
+            operator: 'lte',
+            value: 30,
+            unit: null,
+            label: '市盈率不超过 30',
+            sourceField: '市盈率TTM',
+            status: 'ready',
+          },
+        ],
         unparsedClauses: [],
       })) as StockScreeningWorkbenchApi['preview'],
       run: vi.fn(async () => ({
@@ -70,16 +202,18 @@ describe('StockScreeningWorkbench', () => {
     });
     const api: StockScreeningWorkbenchApi = {
       preview: vi.fn(async () => ({
-        criteria: [{
-          id: 'pe-1',
-          field: 'pe_ttm',
-          operator: 'lte',
-          value: 30,
-          unit: null,
-          label: '市盈率不超过 30',
-          sourceField: '市盈率TTM',
-          status: 'ready',
-        }],
+        criteria: [
+          {
+            id: 'pe-1',
+            field: 'pe_ttm',
+            operator: 'lte',
+            value: 30,
+            unit: null,
+            label: '市盈率不超过 30',
+            sourceField: '市盈率TTM',
+            status: 'ready',
+          },
+        ],
         unparsedClauses: [],
       })) as StockScreeningWorkbenchApi['preview'],
       run: vi.fn(() => runPromise) as StockScreeningWorkbenchApi['run'],
@@ -122,17 +256,19 @@ describe('StockScreeningWorkbench', () => {
           deepCheckLimit: 20,
           truncated: true,
         },
-        candidates: [{
-          symbol: '600519',
-          name: '贵州茅台',
-          snapshotId: SNAPSHOT_A,
-          dataAsOf: DATA_AS_OF,
-          matchedCriteria: ['市盈率不超过 30'],
-          unmetCriteria: [],
-          missingCriteria: [],
-          warnings: [],
-          evidence: [],
-        }],
+        candidates: [
+          {
+            symbol: '600519',
+            name: '贵州茅台',
+            snapshotId: SNAPSHOT_A,
+            dataAsOf: DATA_AS_OF,
+            matchedCriteria: ['市盈率不超过 30'],
+            unmetCriteria: [],
+            missingCriteria: [],
+            warnings: [],
+            evidence: [],
+          },
+        ],
         zeroResult: false,
       });
       await runPromise;

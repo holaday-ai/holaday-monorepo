@@ -1,4 +1,13 @@
 import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet';
+import { trpc } from '@/lib/trpc';
+import { cn } from '@/lib/utils';
+import {
   BrainCircuit,
   Check,
   ClipboardList,
@@ -14,15 +23,6 @@ import {
   TriangleAlert,
 } from 'lucide-react';
 import * as React from 'react';
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from '@/components/ui/sheet';
-import { trpc } from '@/lib/trpc';
-import { cn } from '@/lib/utils';
 
 export type StockPreferenceProfileResult = Awaited<
   ReturnType<typeof trpc.stocks.preferenceProfile.query>
@@ -37,6 +37,8 @@ export interface StockPreferenceProfileApi {
   clear(): Promise<StockPreferenceProfileResult>;
 }
 
+export type StockPreferencePresentation = 'full' | 'compact';
+
 const LIVE_PROFILE_API: StockPreferenceProfileApi = {
   load: () => trpc.stocks.preferenceProfile.query(),
   update: (input) => trpc.stocks.updatePreferenceProfile.mutate(input),
@@ -48,7 +50,11 @@ const PREFERENCE_OPTIONS: ReadonlyArray<{
   label: string;
   options: readonly string[];
 }> = [
-  { key: 'industries', label: '关注行业', options: ['半导体', '科技', '医药', '消费', '金融', '新能源', '先进制造', '周期资源'] },
+  {
+    key: 'industries',
+    label: '关注行业',
+    options: ['半导体', '科技', '医药', '消费', '金融', '新能源', '先进制造', '周期资源'],
+  },
   { key: 'marketCaps', label: '市值范围', options: ['大盘', '中盘', '小盘'] },
   { key: 'valuation', label: '估值关注', options: ['低估值', '均衡估值', '可接受成长溢价'] },
   { key: 'profitability', label: '盈利质量', options: ['连续盈利', '高ROE', '低负债'] },
@@ -69,18 +75,22 @@ function copyManualPreferences(value: ManualPreferences): ManualPreferences {
 export function StockPreferenceProfile({
   refreshKey = 0,
   api = LIVE_PROFILE_API,
+  presentation = 'full',
 }: {
   refreshKey?: number;
   api?: StockPreferenceProfileApi;
+  presentation?: StockPreferencePresentation;
 }): JSX.Element {
   const [profile, setProfile] = React.useState<StockPreferenceProfileResult | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState(false);
   const [sheetOpen, setSheetOpen] = React.useState(false);
+  const [completeProfileOpen, setCompleteProfileOpen] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [confirmClear, setConfirmClear] = React.useState(false);
   const [draft, setDraft] = React.useState<ManualPreferences | null>(null);
   const requestVersion = React.useRef(0);
+  const completeProfileTriggerRef = React.useRef<HTMLButtonElement>(null);
 
   const load = React.useCallback(async () => {
     const version = ++requestVersion.current;
@@ -98,9 +108,7 @@ export function StockPreferenceProfile({
 
   React.useEffect(() => {
     void load();
-    const settleTimer = refreshKey > 0
-      ? window.setTimeout(() => void load(), 1_200)
-      : null;
+    const settleTimer = refreshKey > 0 ? window.setTimeout(() => void load(), 1_200) : null;
     return () => {
       if (settleTimer !== null) window.clearTimeout(settleTimer);
       requestVersion.current += 1;
@@ -114,26 +122,25 @@ export function StockPreferenceProfile({
     setSheetOpen(true);
   }, [profile]);
 
-  const update = React.useCallback(async (
-    enabled: boolean,
-    manualPreferences: ManualPreferences,
-    closeEditor = false,
-  ) => {
-    if (saving) return;
-    requestVersion.current += 1;
-    setLoading(false);
-    setSaving(true);
-    setError(false);
-    try {
-      const next = await api.update({ enabled, manualPreferences });
-      setProfile(next);
-      if (closeEditor) setSheetOpen(false);
-    } catch {
-      setError(true);
-    } finally {
-      setSaving(false);
-    }
-  }, [api, saving]);
+  const update = React.useCallback(
+    async (enabled: boolean, manualPreferences: ManualPreferences, closeEditor = false) => {
+      if (saving) return;
+      requestVersion.current += 1;
+      setLoading(false);
+      setSaving(true);
+      setError(false);
+      try {
+        const next = await api.update({ enabled, manualPreferences });
+        setProfile(next);
+        if (closeEditor) setSheetOpen(false);
+      } catch {
+        setError(true);
+      } finally {
+        setSaving(false);
+      }
+    },
+    [api, saving],
+  );
 
   const clear = React.useCallback(async () => {
     if (saving) return;
@@ -165,7 +172,9 @@ export function StockPreferenceProfile({
             <span className="inline-flex h-8 w-8 items-center justify-center rounded-[8px] bg-[#FFF0F4] text-[#D91952]">
               <BrainCircuit className="h-4 w-4" aria-hidden />
             </span>
-            <h2 className="text-[16px] font-semibold tracking-[-0.01em] text-[#121826]">你的选股偏好</h2>
+            <h2 className="text-[16px] font-semibold tracking-[-0.01em] text-[#121826]">
+              你的选股偏好
+            </h2>
             {profile ? <ConfidenceBadge profile={profile} /> : null}
           </div>
           <p className="mt-2 max-w-[680px] text-[12px] leading-5 text-[#667085]">
@@ -217,7 +226,17 @@ export function StockPreferenceProfile({
         />
       ) : null}
       {profile?.state === 'empty' ? <EmptyState onEdit={openEditor} /> : null}
-      {profile?.state === 'ready' ? <ReadyProfile profile={profile} /> : null}
+      {profile?.state === 'ready' ? (
+        presentation === 'compact' ? (
+          <CompactReadyProfile
+            profile={profile}
+            onOpenComplete={() => setCompleteProfileOpen(true)}
+            completeProfileTriggerRef={completeProfileTriggerRef}
+          />
+        ) : (
+          <ReadyProfile profile={profile} />
+        )
+      ) : null}
 
       {error && profile ? (
         <div className="border-t border-[#F0D4DC] bg-[#FFF5F7] px-4 py-2.5 text-[11px] text-[#B4234D] sm:px-5">
@@ -245,6 +264,13 @@ export function StockPreferenceProfile({
           if (profile && draft) void update(profile.enabled, draft, true);
         }}
         onClear={() => void clear()}
+      />
+
+      <CompleteProfileSheet
+        open={completeProfileOpen}
+        profile={profile}
+        triggerRef={completeProfileTriggerRef}
+        onOpenChange={setCompleteProfileOpen}
       />
     </section>
   );
@@ -276,19 +302,28 @@ function ErrorState({ onRetry }: { onRetry: () => void }): JSX.Element {
   );
 }
 
-function DisabledState({ saving, onEnable }: { saving: boolean; onEnable: () => void }): JSX.Element {
+function DisabledState({
+  saving,
+  onEnable,
+}: { saving: boolean; onEnable: () => void }): JSX.Element {
   return (
     <div className="px-5 py-8 text-center">
       <Pause className="mx-auto h-5 w-5 text-[#7A8290]" aria-hidden />
       <p className="mt-2 text-[13px] font-semibold text-[#303846]">选股偏好已暂停</p>
-      <p className="mt-1 text-[11px] leading-5 text-[#7A8290]">暂停期间保留你的控制设置，但不展示行为画像。</p>
+      <p className="mt-1 text-[11px] leading-5 text-[#7A8290]">
+        暂停期间保留你的控制设置，但不展示行为画像。
+      </p>
       <button
         type="button"
         onClick={onEnable}
         disabled={saving}
         className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-[7px] border border-[#EA1F59] px-3 text-[11px] font-semibold text-[#D91952] disabled:opacity-50"
       >
-        {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <Play className="h-3.5 w-3.5" aria-hidden />}
+        {saving ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+        ) : (
+          <Play className="h-3.5 w-3.5" aria-hidden />
+        )}
         重新开启
       </button>
     </div>
@@ -316,11 +351,12 @@ function EmptyState({ onEdit }: { onEdit: () => void }): JSX.Element {
 }
 
 function ConfidenceBadge({ profile }: { profile: StockPreferenceProfileResult }): JSX.Element {
-  const tone = profile.confidence.level === 'high'
-    ? 'border-[#BFE8D8] bg-[#F2FBF7] text-[#087A55]'
-    : profile.confidence.level === 'medium'
-      ? 'border-[#CDE1FA] bg-[#F3F8FE] text-[#346A9A]'
-      : 'border-[#F4D9A7] bg-[#FFF9EC] text-[#7A5313]';
+  const tone =
+    profile.confidence.level === 'high'
+      ? 'border-[#BFE8D8] bg-[#F2FBF7] text-[#087A55]'
+      : profile.confidence.level === 'medium'
+        ? 'border-[#CDE1FA] bg-[#F3F8FE] text-[#346A9A]'
+        : 'border-[#F4D9A7] bg-[#FFF9EC] text-[#7A5313]';
   return (
     <span className={cn('rounded-full border px-2 py-0.5 text-[10px] font-semibold', tone)}>
       {profile.confidence.label}
@@ -332,37 +368,146 @@ function ReadyProfile({ profile }: { profile: StockPreferenceProfileResult }): J
   return (
     <div className="px-4 py-4 sm:px-5">
       <div className="flex flex-wrap items-center gap-2 border-b border-[#ECEEF2] pb-3 text-[10px] text-[#667085]">
-        <span className="rounded-[6px] bg-[#F4F5F7] px-2 py-1 font-medium text-[#4F5868]">近 {profile.window.days} 天</span>
+        <span className="rounded-[6px] bg-[#F4F5F7] px-2 py-1 font-medium text-[#4F5868]">
+          近 {profile.window.days} 天
+        </span>
         <span>{profile.sample.screeningRuns} 次筛选</span>
         <span aria-hidden>·</span>
         <span>{profile.sample.watchlistStocks} 只关注</span>
         <span aria-hidden>·</span>
         <span>{profile.sample.manualDimensions} 项主动设置</span>
-        <span className="basis-full text-[#8B92A1] sm:ml-auto sm:basis-auto">{profile.confidence.basis}</span>
+        <span className="basis-full text-[#8B92A1] sm:ml-auto sm:basis-auto">
+          {profile.confidence.basis}
+        </span>
       </div>
 
       <div className="grid gap-4 py-4 lg:grid-cols-2">
         <ProfileGroup icon={ClipboardList} title="偏好事实" items={profile.facts} tone="neutral" />
-        <ProfileGroup icon={Lightbulb} title="可能优势" items={profile.possibleStrengths} tone="positive" />
-        <ProfileGroup icon={TriangleAlert} title="潜在盲点" items={profile.blindSpots} tone="warning" />
-        <ProfileGroup icon={Telescope} title="补充视角" items={profile.supplementaryViews} tone="info" />
+        <ProfileGroup
+          icon={Lightbulb}
+          title="可能优势"
+          items={profile.possibleStrengths}
+          tone="positive"
+        />
+        <ProfileGroup
+          icon={TriangleAlert}
+          title="潜在盲点"
+          items={profile.blindSpots}
+          tone="warning"
+        />
+        <ProfileGroup
+          icon={Telescope}
+          title="补充视角"
+          items={profile.supplementaryViews}
+          tone="info"
+        />
       </div>
 
       <div className="rounded-[8px] border border-[#E1E3E8] bg-[#FCFCFD] px-3 py-3">
         <h3 className="text-[12px] font-semibold text-[#303846]">依据与控制</h3>
         <div className="mt-2 grid gap-2 sm:grid-cols-2">
           {profile.basis.map((item) => (
-            <div key={item.id} className="flex items-start justify-between gap-3 rounded-[7px] bg-white px-3 py-2">
+            <div
+              key={item.id}
+              className="flex items-start justify-between gap-3 rounded-[7px] bg-white px-3 py-2"
+            >
               <span className="min-w-0">
                 <span className="block text-[11px] font-medium text-[#4F5868]">{item.title}</span>
                 <span className="block text-[10px] text-[#8B92A1]">{item.detail}</span>
               </span>
-              <span className="shrink-0 text-[11px] font-semibold tabular-nums text-[#D91952]">{item.count}</span>
+              <span className="shrink-0 text-[11px] font-semibold tabular-nums text-[#D91952]">
+                {item.count}
+              </span>
             </div>
           ))}
         </div>
       </div>
     </div>
+  );
+}
+
+function CompactReadyProfile({
+  profile,
+  onOpenComplete,
+  completeProfileTriggerRef,
+}: {
+  profile: StockPreferenceProfileResult;
+  onOpenComplete: () => void;
+  completeProfileTriggerRef: React.RefObject<HTMLButtonElement>;
+}): JSX.Element {
+  const facts = profile.facts.slice(0, 3);
+  const strengths = profile.possibleStrengths.slice(0, 1);
+  const blindSpots = profile.blindSpots.slice(0, 1);
+  const supplementaryViews = profile.supplementaryViews.slice(0, 1);
+
+  return (
+    <div className="px-4 py-4 sm:px-5">
+      <div className="flex flex-wrap items-center gap-2 border-b border-[#ECEEF2] pb-3 text-[10px] text-[#667085]">
+        <span className="rounded-[6px] bg-[#F4F5F7] px-2 py-1 font-medium text-[#4F5868]">
+          近 {profile.window.days} 天
+        </span>
+        <span>{profile.sample.screeningRuns} 次筛选</span>
+        <span aria-hidden>·</span>
+        <span>{profile.sample.watchlistStocks} 只关注</span>
+        <span aria-hidden>·</span>
+        <span>{profile.sample.manualDimensions} 项主动设置</span>
+      </div>
+
+      <div className="grid gap-4 py-4 sm:grid-cols-2">
+        <ProfileGroup icon={ClipboardList} title="偏好事实" items={facts} tone="neutral" />
+        <div className="grid gap-4">
+          <ProfileGroup icon={Lightbulb} title="可能优势" items={strengths} tone="positive" />
+          <ProfileGroup icon={TriangleAlert} title="潜在盲点" items={blindSpots} tone="warning" />
+          <ProfileGroup icon={Telescope} title="补充视角" items={supplementaryViews} tone="info" />
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-2 border-t border-[#ECEEF2] pt-3 sm:flex-row sm:items-center sm:justify-between">
+        <span className="text-[10px] leading-4 text-[#8B92A1]">{profile.confidence.basis}</span>
+        <button
+          ref={completeProfileTriggerRef}
+          type="button"
+          onClick={onOpenComplete}
+          className="inline-flex h-8 shrink-0 items-center justify-center rounded-[7px] border border-[#DDE0E6] bg-white px-3 text-[11px] font-semibold text-[#4F5868] transition hover:border-[#EA1F59]/30 hover:text-[#D91952]"
+        >
+          查看完整画像
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function CompleteProfileSheet({
+  open,
+  profile,
+  triggerRef,
+  onOpenChange,
+}: {
+  open: boolean;
+  profile: StockPreferenceProfileResult | null;
+  triggerRef: React.RefObject<HTMLButtonElement>;
+  onOpenChange: (open: boolean) => void;
+}): JSX.Element {
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent
+        className="flex w-full max-w-[620px] flex-col bg-white p-0 sm:max-w-[620px]"
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          triggerRef.current?.focus();
+        }}
+      >
+        <SheetHeader className="border-b border-[#ECEEF3] px-5 py-4 pr-12">
+          <SheetTitle className="text-[17px] text-[#121826]">完整选股画像</SheetTitle>
+          <SheetDescription className="text-[12px] leading-5 text-[#667085]">
+            查看全部可核验偏好、补充视角和依据；画像不会自动改写筛选条件。
+          </SheetDescription>
+        </SheetHeader>
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {profile?.state === 'ready' ? <ReadyProfile profile={profile} /> : null}
+        </div>
+      </SheetContent>
+    </Sheet>
   );
 }
 
@@ -386,7 +531,9 @@ function ProfileGroup({
   return (
     <section aria-label={title}>
       <h3 className="flex items-center gap-2 text-[12px] font-semibold text-[#303846]">
-        <span className={cn('inline-flex h-7 w-7 items-center justify-center rounded-[7px]', iconTone)}>
+        <span
+          className={cn('inline-flex h-7 w-7 items-center justify-center rounded-[7px]', iconTone)}
+        >
           <Icon className="h-3.5 w-3.5" aria-hidden />
         </span>
         {title}
@@ -436,42 +583,49 @@ function PreferenceEditor({
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
           <div className="space-y-5">
-            {draft ? PREFERENCE_OPTIONS.map((group) => (
-              <fieldset key={group.key}>
-                <legend className="text-[12px] font-semibold text-[#303846]">{group.label}</legend>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {group.options.map((option) => {
-                    const selected = (draft[group.key] as string[]).includes(option);
-                    return (
-                      <label
-                        key={option}
-                        className={cn(
-                          'inline-flex min-h-9 cursor-pointer items-center gap-1.5 rounded-[7px] border px-2.5 py-1.5 text-[11px] transition',
-                          selected
-                            ? 'border-[#EA1F59]/45 bg-[#FFF0F4] font-semibold text-[#B4234D]'
-                            : 'border-[#DDE0E6] bg-white text-[#667085] hover:border-[#EA1F59]/30',
-                        )}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={selected}
-                          onChange={() => {
-                            const current = draft[group.key] as string[];
-                            const values = selected
-                              ? current.filter((value) => value !== option)
-                              : [...current, option];
-                            onDraftChange({ ...draft, [group.key]: values } as ManualPreferences);
-                          }}
-                          className="sr-only"
-                        />
-                        {selected ? <Check className="h-3 w-3" aria-hidden /> : null}
-                        {option}
-                      </label>
-                    );
-                  })}
-                </div>
-              </fieldset>
-            )) : null}
+            {draft
+              ? PREFERENCE_OPTIONS.map((group) => (
+                  <fieldset key={group.key}>
+                    <legend className="text-[12px] font-semibold text-[#303846]">
+                      {group.label}
+                    </legend>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {group.options.map((option) => {
+                        const selected = (draft[group.key] as string[]).includes(option);
+                        return (
+                          <label
+                            key={option}
+                            className={cn(
+                              'inline-flex min-h-9 cursor-pointer items-center gap-1.5 rounded-[7px] border px-2.5 py-1.5 text-[11px] transition',
+                              selected
+                                ? 'border-[#EA1F59]/45 bg-[#FFF0F4] font-semibold text-[#B4234D]'
+                                : 'border-[#DDE0E6] bg-white text-[#667085] hover:border-[#EA1F59]/30',
+                            )}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selected}
+                              onChange={() => {
+                                const current = draft[group.key] as string[];
+                                const values = selected
+                                  ? current.filter((value) => value !== option)
+                                  : [...current, option];
+                                onDraftChange({
+                                  ...draft,
+                                  [group.key]: values,
+                                } as ManualPreferences);
+                              }}
+                              className="sr-only"
+                            />
+                            {selected ? <Check className="h-3 w-3" aria-hidden /> : null}
+                            {option}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </fieldset>
+                ))
+              : null}
           </div>
 
           <div className="mt-6 rounded-[8px] border border-[#F0D4DC] bg-[#FFF8FA] p-3">
@@ -481,7 +635,9 @@ function PreferenceEditor({
             </p>
             {confirmClear ? (
               <div className="mt-2 rounded-[7px] border border-[#EAB8C8] bg-white p-2.5">
-                <p className="text-[10px] leading-4 text-[#8F2143]">确认后，主动设置和已记录的筛选依据会被清空。</p>
+                <p className="text-[10px] leading-4 text-[#8F2143]">
+                  确认后，主动设置和已记录的筛选依据会被清空。
+                </p>
                 <button
                   type="button"
                   onClick={onClear}

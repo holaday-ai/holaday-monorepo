@@ -3,6 +3,34 @@ export interface IndexedDiscoveryItem<T> {
   index: number;
 }
 
+export type StockDiscoveryFeed =
+  | '全部'
+  | '自选股新闻'
+  | '重要公告'
+  | 'A股要闻'
+  | '美股要闻'
+  | '港股要闻';
+
+export function preferredStockDiscoveryFeed(
+  counts: Readonly<Record<Exclude<StockDiscoveryFeed, '全部'>, number>>,
+): StockDiscoveryFeed {
+  if (counts.自选股新闻 > 0) return '自选股新闻';
+  if (counts.重要公告 > 0) return '重要公告';
+  if (counts.A股要闻 > 0) return 'A股要闻';
+  return '全部';
+}
+
+export function isExplicitWatchlistNews(
+  newsSymbols: readonly string[],
+  watchlistSymbols: readonly string[],
+): boolean {
+  if (newsSymbols.length === 0 || watchlistSymbols.length === 0) return false;
+  const normalizedWatchlist = new Set(
+    watchlistSymbols.map((symbol) => symbol.trim().toUpperCase()).filter(Boolean),
+  );
+  return newsSymbols.some((symbol) => normalizedWatchlist.has(symbol.trim().toUpperCase()));
+}
+
 type DiscoveryMedia = {
   category?: string;
   title?: string;
