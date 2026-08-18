@@ -14,6 +14,8 @@ describe('stock tasks layout', () => {
     const cardSource = readFileSync(new URL('../components/DiscoveryNewsCard.tsx', import.meta.url), 'utf8');
 
     expect(pageSource).toContain('<DiscoveryNewsCard');
+    expect(pageSource).toContain('title="市场动态"');
+    expect(pageSource).toContain('relatedToWatchlist={isExplicitWatchlistNews');
     expect(cardSource).not.toContain('images.unsplash.com');
     expect(cardSource).toContain('{showImage ? (');
     expect(cardSource).toContain('src={item.imageUrl}');

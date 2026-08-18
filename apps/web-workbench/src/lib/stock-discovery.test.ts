@@ -4,11 +4,51 @@ import {
   diversifyDiscoveryItems,
   discoveryPageIndexes,
   discoveryTimeLabel,
+  isExplicitWatchlistNews,
+  preferredStockDiscoveryFeed,
   prioritizeAndDiversifyDiscoveryItems,
   shouldPrefetchDiscoveryPage,
 } from './stock-discovery';
 
 describe('stock discovery presentation', () => {
+  it('chooses a task-relevant default feed without promoting unrelated US or HK news', () => {
+    expect(preferredStockDiscoveryFeed({
+      自选股新闻: 2,
+      重要公告: 8,
+      A股要闻: 12,
+      美股要闻: 20,
+      港股要闻: 20,
+    })).toBe('自选股新闻');
+    expect(preferredStockDiscoveryFeed({
+      自选股新闻: 0,
+      重要公告: 3,
+      A股要闻: 12,
+      美股要闻: 20,
+      港股要闻: 20,
+    })).toBe('重要公告');
+    expect(preferredStockDiscoveryFeed({
+      自选股新闻: 0,
+      重要公告: 0,
+      A股要闻: 12,
+      美股要闻: 20,
+      港股要闻: 20,
+    })).toBe('A股要闻');
+    expect(preferredStockDiscoveryFeed({
+      自选股新闻: 0,
+      重要公告: 0,
+      A股要闻: 0,
+      美股要闻: 20,
+      港股要闻: 20,
+    })).toBe('全部');
+  });
+
+  it('marks relevance only for an explicit normalized symbol intersection', () => {
+    expect(isExplicitWatchlistNews([' sh600519 ', 'aapl'], ['SH600519'])).toBe(true);
+    expect(isExplicitWatchlistNews(['600519'], ['SH600519'])).toBe(false);
+    expect(isExplicitWatchlistNews([], ['SH600519'])).toBe(false);
+    expect(isExplicitWatchlistNews(['SH600519'], [])).toBe(false);
+  });
+
   it('uses different followed stocks before repeating one in a discovery page', () => {
     const items = [
       { item: { symbol: '603738', title: '泰晶科技-最新' }, index: 0 },

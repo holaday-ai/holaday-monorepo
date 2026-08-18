@@ -34,6 +34,8 @@ import {
   diversifyDiscoveryEditorialArt,
   diversifyDiscoveryItems,
   discoveryPageIndexes,
+  isExplicitWatchlistNews,
+  preferredStockDiscoveryFeed,
   shouldPrefetchDiscoveryPage,
 } from '@/lib/stock-discovery';
 import {
@@ -344,6 +346,10 @@ export function StockTasksPage(): JSX.Element {
       ? '真实行情恢复并核验日期后可生成日报'
       : undefined;
   const realWatchlist = watchlist ?? [];
+  const watchlistSymbols = React.useMemo(
+    () => (watchlist ?? []).map((row) => row.symbol),
+    [watchlist],
+  );
   const commands = React.useMemo(() => stockQuickCommands(stocks, temporalCopy), [stocks, temporalCopy]);
   const resetDiscoveryExtensions = React.useCallback(() => {
     setDiscoveryExtensions([]);
@@ -739,6 +745,7 @@ export function StockTasksPage(): JSX.Element {
             <main className="min-w-0 space-y-5">
               <DiscoveryPanel
                 news={news}
+                watchlistSymbols={watchlistSymbols}
                 onOpenNews={(index) => setActiveNewsIndex(index)}
                 onViewAll={(feed) => {
                   const query = feed === '全部' ? '' : `?feed=${encodeURIComponent(feed)}`;
@@ -872,12 +879,14 @@ export function StockTasksPage(): JSX.Element {
 
 function DiscoveryPanel({
   news,
+  watchlistSymbols,
   onOpenNews,
   onViewAll,
   onLoadMore,
   canLoadMore,
 }: {
   news: NewsRow[];
+  watchlistSymbols: readonly string[];
   onOpenNews: (index: number) => void;
   onViewAll: (feed: DiscoveryFeed | '全部') => void;
   onLoadMore: (feed: MarketDiscoveryFeed | '全部') => Promise<boolean>;
@@ -887,6 +896,7 @@ function DiscoveryPanel({
   const [activeFeed, setActiveFeed] = React.useState<DiscoveryFeed | '全部'>('全部');
   const [page, setPage] = React.useState(0);
   const [loadingMore, setLoadingMore] = React.useState(false);
+  const userSelectedFeed = React.useRef(false);
   const indexedNews = React.useMemo(
     () => news.map((item, index) => ({ item, index })),
     [news],
@@ -909,12 +919,18 @@ function DiscoveryPanel({
   const pageIndexes = discoveryPageIndexes(pageCount, safePage);
   const announcementCount = news.filter((item) => newsDisplayType(item) === '公告').length;
   const marketNewsCount = news.length - announcementCount;
-  const feedCounts = React.useMemo(() => new Map(
-    ['自选股新闻', '重要公告', 'A股要闻', '美股要闻', '港股要闻'].map((feed) => [
-      feed,
-      news.filter((item) => newsFeed(item) === feed).length,
-    ]),
-  ), [news]);
+  const feedCounts = React.useMemo<Record<DiscoveryFeed, number>>(() => ({
+    '自选股新闻': news.filter((item) => newsFeed(item) === '自选股新闻').length,
+    '重要公告': news.filter((item) => newsFeed(item) === '重要公告').length,
+    'A股要闻': news.filter((item) => newsFeed(item) === 'A股要闻').length,
+    '美股要闻': news.filter((item) => newsFeed(item) === '美股要闻').length,
+    '港股要闻': news.filter((item) => newsFeed(item) === '港股要闻').length,
+  }), [news]);
+  const preferredFeed = preferredStockDiscoveryFeed(feedCounts);
+
+  React.useEffect(() => {
+    if (!userSelectedFeed.current) setActiveFeed(preferredFeed);
+  }, [preferredFeed]);
 
   React.useEffect(() => {
     if (safePage !== page) setPage(safePage);
@@ -963,17 +979,17 @@ function DiscoveryPanel({
   };
   const tabItems = [
     { label: '全部' as const, count: news.length },
-    { label: '自选股新闻' as const, count: feedCounts.get('自选股新闻') ?? 0 },
-    { label: '重要公告' as const, count: feedCounts.get('重要公告') ?? 0 },
-    { label: 'A股要闻' as const, count: feedCounts.get('A股要闻') ?? 0 },
-    { label: '美股要闻' as const, count: feedCounts.get('美股要闻') ?? 0 },
-    { label: '港股要闻' as const, count: feedCounts.get('港股要闻') ?? 0 },
+    { label: '自选股新闻' as const, count: feedCounts.自选股新闻 },
+    { label: '重要公告' as const, count: feedCounts.重要公告 },
+    { label: 'A股要闻' as const, count: feedCounts.A股要闻 },
+    { label: '美股要闻' as const, count: feedCounts.美股要闻 },
+    { label: '港股要闻' as const, count: feedCounts.港股要闻 },
   ];
 
   return (
     <section className="rounded-[8px] border border-[#E1E3E8] bg-white p-4 shadow-[0_8px_24px_rgba(18,24,38,0.035)]">
       <SectionHeader
-        title="发现"
+        title="市场动态"
         meta={news.length > 0 ? `${marketNewsCount} 条新闻 · ${announcementCount} 条公告` : '等待真实来源'}
         action={news.length > 0 ? '查看更多新闻' : undefined}
         onAction={news.length > 0 ? () => onViewAll(activeFeed) : undefined}
@@ -985,7 +1001,10 @@ function DiscoveryPanel({
               key={tab.label}
               type="button"
               disabled={tab.count === 0}
-              onClick={() => setActiveFeed(tab.label)}
+              onClick={() => {
+                userSelectedFeed.current = true;
+                setActiveFeed(tab.label);
+              }}
               className={cn(
                 'inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-[12px] font-medium transition',
                 activeFeed === tab.label
@@ -1016,6 +1035,7 @@ function DiscoveryPanel({
             <DiscoveryNewsCard
               key={`${index}-${item.time}-${item.title}`}
               item={item}
+              relatedToWatchlist={isExplicitWatchlistNews(item.symbols, watchlistSymbols)}
               onOpen={() => onOpenNews(index)}
             />
           ))}

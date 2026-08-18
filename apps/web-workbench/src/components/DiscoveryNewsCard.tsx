@@ -7,11 +7,13 @@ export function DiscoveryNewsCard({
   item,
   onOpen,
   onImageError,
+  relatedToWatchlist = false,
   variant = 'standard',
 }: {
   item: StockNewsRow;
   onOpen: () => void;
   onImageError?: (imageUrl: string) => void;
+  relatedToWatchlist?: boolean;
   variant?: 'standard' | 'lead' | 'compact';
 }): JSX.Element {
   const type = newsDisplayType(item);
@@ -66,6 +68,7 @@ export function DiscoveryNewsCard({
             <span className="rounded-full bg-white/88 px-2 py-1 text-[11px] tabular-nums text-[#667085] shadow-sm">
               {newsTimeLabel(item)}
             </span>
+            {relatedToWatchlist ? <WatchlistRelevanceBadge /> : null}
           </div>
         </div>
       ) : (
@@ -83,6 +86,7 @@ export function DiscoveryNewsCard({
             <span className="rounded-full bg-white px-2 py-1 text-[11px] tabular-nums text-[#667085] ring-1 ring-[#E7EAF0]">
               {newsTimeLabel(item)}
             </span>
+            {relatedToWatchlist ? <WatchlistRelevanceBadge /> : null}
           </div>
           <p className={cn(
             'mt-3 font-semibold leading-relaxed text-[#344054] transition group-hover:text-[#EA1F59]',
@@ -148,5 +152,13 @@ export function DiscoveryNewsCard({
 function NewsSourceDots(): JSX.Element {
   return (
     <span className="h-3 w-3 shrink-0 rounded-full bg-[#EA1F59]" aria-hidden />
+  );
+}
+
+function WatchlistRelevanceBadge(): JSX.Element {
+  return (
+    <span className="rounded-full bg-[#FFF0F4] px-2 py-1 text-[10px] font-semibold text-[#B4234D] ring-1 ring-[#F2C4D0]">
+      与你的关注相关
+    </span>
   );
 }

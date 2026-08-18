@@ -323,7 +323,7 @@ pnpm exec vitest run src/components/stocks/StockScreeningWorkbench.test.tsx src/
 
 Expected: all tests PASS.
 
-- [ ] **Step 8: Commit Task 3**
+- [x] **Step 8: Commit Task 3**
 
 ```bash
 git add apps/web-workbench/src/components/stocks/StockScreeningWorkbench.tsx apps/web-workbench/src/components/stocks/StockScreeningWorkbench.test.tsx
@@ -368,11 +368,11 @@ export function isExplicitWatchlistNews(
 - `DiscoveryNewsCard` accepts `relatedToWatchlist?: boolean`.
 - `DiscoveryPanel` accepts `watchlistSymbols: readonly string[]`.
 
-- [ ] **Step 1: Write failing pure-helper tests**
+- [x] **Step 1: Write failing pure-helper tests**
 
 Assert the default order `自选股新闻 > 重要公告 > A股要闻 > 全部`; US/HK-only content does not outrank A-share news; symbol comparison trims and uppercases values; empty symbol arrays are never related.
 
-- [ ] **Step 2: Run helper tests and verify RED**
+- [x] **Step 2: Run helper tests and verify RED**
 
 Run:
 
@@ -382,15 +382,15 @@ pnpm exec vitest run src/lib/stock-discovery.test.ts
 
 Expected: FAIL because both helpers are missing.
 
-- [ ] **Step 3: Implement deterministic helpers**
+- [x] **Step 3: Implement deterministic helpers**
 
 Use counts only for default selection and exact normalized symbol intersection only for relevance. Do not consume the preference profile or browser behavior.
 
-- [ ] **Step 4: Write the failing news-card test**
+- [x] **Step 4: Write the failing news-card test**
 
 Render the same real news row with `relatedToWatchlist` false and true. Assert `与你的关注相关` appears only for true and the card remains keyboard-activatable.
 
-- [ ] **Step 5: Run the card test and verify RED**
+- [x] **Step 5: Run the card test and verify RED**
 
 Run:
 
@@ -400,7 +400,7 @@ pnpm exec vitest run src/components/DiscoveryNewsCard.test.tsx
 
 Expected: FAIL because the prop and label do not exist.
 
-- [ ] **Step 6: Wire relevance into the panel**
+- [x] **Step 6: Wire relevance into the panel**
 
 Rename the visible section title to `市场动态`. Use a ref to protect user choice:
 
@@ -414,7 +414,7 @@ React.useEffect(() => {
 
 When a tab is clicked, set `userSelectedFeed.current = true`. Pass `relatedToWatchlist={isExplicitWatchlistNews(item.symbols, watchlistSymbols)}` to each card. `StockTasksPage` passes normalized symbols from the real watchlist.
 
-- [ ] **Step 7: Run discovery and card tests and verify GREEN**
+- [x] **Step 7: Run discovery and card tests and verify GREEN**
 
 Run:
 
