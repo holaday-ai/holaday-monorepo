@@ -49,12 +49,14 @@ export function StockScreeningWorkbench({
   dataAsOf,
   trustMode,
   onAddToWatchlist,
+  onScreeningRecorded,
   api = LIVE_SCREENING_API,
 }: {
   snapshotId: string | null;
   dataAsOf: string | null;
   trustMode: StockScreeningTrustMode;
   onAddToWatchlist: (symbol: string, name: string) => Promise<void>;
+  onScreeningRecorded?: () => void;
   api?: StockScreeningWorkbenchApi;
 }): JSX.Element {
   const [prompt, setPrompt] = React.useState('');
@@ -107,6 +109,7 @@ export function StockScreeningWorkbench({
         criteria: criteria as RunInput['criteria'],
       };
       const nextResult = await api.run(input);
+      onScreeningRecorded?.();
       if (isStockScreeningResultDisplayable(nextResult, currentTrustRef.current)) {
         setResult(nextResult);
       }
@@ -115,7 +118,7 @@ export function StockScreeningWorkbench({
     } finally {
       setRunning(false);
     }
-  }, [api, criteria, dataAsOf, readyToRun, running, snapshotId]);
+  }, [api, criteria, dataAsOf, onScreeningRecorded, readyToRun, running, snapshotId]);
 
   const reset = React.useCallback(() => {
     setCriteria([]);

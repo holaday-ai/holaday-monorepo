@@ -41,6 +41,8 @@ const REQUIRED_TABLES = [
   'sessions',
   'skills',
   'stock_dashboard_snapshots',
+  'stock_preference_profiles',
+  'stock_preference_signals',
   'task_events',
   'task_files',
   'task_quotas',
@@ -225,6 +227,8 @@ const REQUIRED_COLUMNS: Record<string, readonly string[]> = {
   ],
   webhook_idempotency: ['user_id', 'idempotency_key', 'request_hash', 'expires_at'],
   api_keys: ['external_id', 'user_id', 'name', 'key_prefix', 'key_hash', 'last_used_at'],
+  stock_preference_profiles: ['user_id', 'enabled', 'manual_preferences_json', 'cleared_at'],
+  stock_preference_signals: ['user_id', 'kind', 'dedupe_hash', 'payload_json', 'data_as_of', 'occurred_at'],
 };
 
 async function main(): Promise<void> {

@@ -169,4 +169,15 @@ describe('stock tasks layout', () => {
     expect(source).toContain('dataAsOf={dashboard?.trust?.dataAsOf ?? null}');
     expect(source).toContain("trustMode={dashboard?.trust?.mode ?? 'unverified'}");
   });
+
+  it('places the editable preference profile after screening and refreshes it after explicit behavior', () => {
+    const source = readFileSync(new URL('./StockTasksPage.tsx', import.meta.url), 'utf8');
+
+    expect(source).toContain("import { StockPreferenceProfile } from '@/components/stocks/StockPreferenceProfile';");
+    expect(source.indexOf('<StockScreeningWorkbench')).toBeLessThan(source.indexOf('<StockPreferenceProfile'));
+    expect(source.indexOf('<StockPreferenceProfile')).toBeLessThan(source.indexOf('<DailyBriefing'));
+    expect(source).toContain('refreshKey={preferenceRevision}');
+    expect(source).toContain('onScreeningRecorded={refreshPreferenceProfile}');
+    expect(source).toContain('setPreferenceRevision((current) => current + 1)');
+  });
 });

@@ -27,6 +27,7 @@ import { stockDashboardSnapshots } from '../../db/schema/stock-dashboard-snapsho
 import { users } from '../../db/schema/users.js';
 import { resolveNewsDetail } from '../../stock-news/article-detail.js';
 import { sourceCoverProxyUrl } from '../../stock-news/source-cover.js';
+import { recordStockScreeningPreference } from '../../stocks/stock-preference-repository.js';
 import {
   type LatestExpectedTradingDate,
   type StockSnapshotTrust,
@@ -42,6 +43,10 @@ import {
   runStockScreeningInputSchema,
   runTrustedStockScreening,
 } from './stocks-screening.js';
+import {
+  stockPreferenceProcedures,
+  withStockScreeningPreferenceRecording,
+} from './stocks-preferences.js';
 
 type Db = typeof import('../../db/client.js').db;
 interface MinimalLogger {
@@ -1906,6 +1911,7 @@ async function resolveDashboardSnapshot(args: {
 }
 
 export const stocksRouter = router({
+  ...stockPreferenceProcedures,
   dashboardSnapshot: protectedProcedure.query(async ({ ctx }) => {
     const userInternalId = await requireUserId(ctx.db, ctx.userId);
     const watchlistRows = await listWatchlistForUser(ctx.db, userInternalId);
@@ -1952,12 +1958,27 @@ export const stocksRouter = router({
         timeoutMs: 12_000,
         logger: ctx.logger,
       });
-      return runTrustedStockScreening({
-        db: ctx.db,
-        userId: userInternalId,
+      return withStockScreeningPreferenceRecording({
+        run: () => runTrustedStockScreening({
+          db: ctx.db,
+          userId: userInternalId,
+          logger: ctx.logger,
+          client,
+          input,
+        }),
+        record: () => recordStockScreeningPreference({
+          db: ctx.db,
+          userId: userInternalId,
+          snapshotId: input.snapshotId,
+          dataAsOf: input.dataAsOf,
+          criteria: input.criteria,
+        }),
         logger: ctx.logger,
-        client,
-        input,
+        logContext: {
+          userId: userInternalId,
+          snapshotId: input.snapshotId,
+          criterionCount: input.criteria.length,
+        },
       });
     }),
 
