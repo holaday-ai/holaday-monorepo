@@ -2,6 +2,7 @@
 
 import datetime
 import json
+import threading
 from urllib.parse import quote
 
 import pytest
@@ -128,7 +129,7 @@ def test_screening_universe_preserves_source_fields_and_excludes_invalid_rows(mo
 
     assert source == "sina:Market_Center.getHQNodeData(full-market-screening)"
     assert calls[0][1]["sort"] == "amount"
-    assert calls[0][1]["num"] == "80"
+    assert calls[0][1]["num"] == "100"
     assert [row["代码"] for row in rows] == ["600519", "000001"]
     assert rows == [
         {
@@ -156,6 +157,55 @@ def test_screening_universe_preserves_source_fields_and_excludes_invalid_rows(mo
             "行情时间": "10:05:01",
         },
     ]
+
+
+def test_screening_universe_fetches_full_pages_with_bounded_parallelism(monkeypatch):
+    page_barrier = threading.Barrier(2, timeout=1.0)
+
+    def row(code: str, amount: str) -> dict[str, str]:
+        return {
+            "code": code,
+            "name": f"股票{code}",
+            "trade": "10.00",
+            "changepercent": "1.00",
+            "amount": amount,
+            "turnoverratio": "2.00",
+            "per": "15.00",
+            "pb": "1.50",
+            "mktcap": "1000000000",
+            "ticktime": "10:05:00",
+        }
+
+    pages = {
+        1: [row(f"600{index:03d}", str(1000 - index)) for index in range(100)],
+        2: [row("600100", "2000")],
+        3: [row("600101", "1900")],
+    }
+
+    class _Response:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self._payload
+
+    def fetch(url, *, params, timeout):
+        page = int(params["page"])
+        if page in (2, 3):
+            page_barrier.wait()
+        return _Response(pages.get(page, []))
+
+    clear_cache()
+    monkeypatch.setattr(adp.requests, "get", fetch)
+
+    rows, source = adp.get_screening_universe()
+
+    assert source == "sina:Market_Center.getHQNodeData(full-market-screening)"
+    assert len(rows) == 102
+    assert [row["代码"] for row in rows[:2]] == ["600100", "600101"]
 
 
 class _MinuteAk:
