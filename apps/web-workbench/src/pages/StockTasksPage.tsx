@@ -17,6 +17,7 @@ import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { DiscoveryNewsCard } from '@/components/DiscoveryNewsCard';
 import { NewsDetailModal as StockNewsDetailModal } from '@/components/NewsDetailModal';
+import { StockPreferenceProfile } from '@/components/stocks/StockPreferenceProfile';
 import { StockRiskRadar } from '@/components/stocks/StockRiskRadar';
 import { StockScreeningWorkbench } from '@/components/stocks/StockScreeningWorkbench';
 import { Input } from '@/components/ui/input';
@@ -191,6 +192,7 @@ export function StockTasksPage(): JSX.Element {
   });
   const [symbolSuggestions, setSymbolSuggestions] = React.useState<SymbolSuggestion[]>([]);
   const [searchingSymbols, setSearchingSymbols] = React.useState(false);
+  const [preferenceRevision, setPreferenceRevision] = React.useState(0);
   const [activeLeaderboard, setActiveLeaderboard] = React.useState<'涨幅榜' | '跌幅榜' | '成交额榜' | '换手率榜'>('涨幅榜');
   const pageAlive = React.useRef(true);
   const dashboardRefreshInFlight = React.useRef(false);
@@ -202,6 +204,9 @@ export function StockTasksPage(): JSX.Element {
   });
   const discoveryLoadCursor = React.useRef(0);
   const loadingDiscoveryFeeds = React.useRef(new Set<MarketDiscoveryFeed>());
+  const refreshPreferenceProfile = React.useCallback(() => {
+    setPreferenceRevision((current) => current + 1);
+  }, []);
 
   React.useEffect(() => {
     pageAlive.current = true;
@@ -477,6 +482,7 @@ export function StockTasksPage(): JSX.Element {
         note: stockForm.note.trim() || undefined,
       });
       toast.show(result.already ? '这只股票已在关注列表' : `已添加 ${symbol}`);
+      if (!result.already) refreshPreferenceProfile();
       setStockForm({ symbol: '', market: 'A', displayName: '', note: '' });
       setBriefingResult(null);
       resetDiscoveryExtensions();
@@ -488,7 +494,7 @@ export function StockTasksPage(): JSX.Element {
     } finally {
       setWatchlistSaving(false);
     }
-  }, [loadPageData, resetDiscoveryExtensions, stockForm, toast, watchlistSaving]);
+  }, [loadPageData, refreshPreferenceProfile, resetDiscoveryExtensions, stockForm, toast, watchlistSaving]);
 
   const addScreeningCandidate = React.useCallback(async (symbol: string, name: string) => {
     if (watchlistSaving) {
@@ -505,6 +511,7 @@ export function StockTasksPage(): JSX.Element {
       });
       toast.show(result.already ? `${name} 已在关注列表` : `已关注 ${name}`);
       if (!result.already) {
+        refreshPreferenceProfile();
         setBriefingResult(null);
         resetDiscoveryExtensions();
         await loadPageData('background');
@@ -516,7 +523,7 @@ export function StockTasksPage(): JSX.Element {
     } finally {
       setWatchlistSaving(false);
     }
-  }, [loadPageData, resetDiscoveryExtensions, toast, watchlistSaving]);
+  }, [loadPageData, refreshPreferenceProfile, resetDiscoveryExtensions, toast, watchlistSaving]);
 
   const removeWatchlistStock = React.useCallback(async (symbol: string) => {
     if (watchlistSaving) return;
@@ -525,6 +532,7 @@ export function StockTasksPage(): JSX.Element {
     try {
       await trpc.watchlists.remove.mutate({ symbol });
       toast.show(`已移除 ${symbol}`);
+      refreshPreferenceProfile();
       setBriefingResult(null);
       resetDiscoveryExtensions();
       await loadPageData('background');
@@ -535,7 +543,7 @@ export function StockTasksPage(): JSX.Element {
     } finally {
       setWatchlistSaving(false);
     }
-  }, [loadPageData, resetDiscoveryExtensions, toast, watchlistSaving]);
+  }, [loadPageData, refreshPreferenceProfile, resetDiscoveryExtensions, toast, watchlistSaving]);
 
   const updateWatchlistStock = React.useCallback(async (symbol: string, displayName: string, note: string) => {
     if (watchlistSaving) return;
@@ -764,7 +772,9 @@ export function StockTasksPage(): JSX.Element {
                 dataAsOf={dashboard?.trust?.dataAsOf ?? null}
                 trustMode={dashboard?.trust?.mode ?? 'unverified'}
                 onAddToWatchlist={addScreeningCandidate}
+                onScreeningRecorded={refreshPreferenceProfile}
               />
+              <StockPreferenceProfile refreshKey={preferenceRevision} />
               <DailyBriefing
                 stocks={stocks}
                 marketIndices={marketIndices}

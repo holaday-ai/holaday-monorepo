@@ -15,6 +15,54 @@ const DATA_AS_OF = '2026-08-17';
 afterEach(cleanup);
 
 describe('StockScreeningWorkbench', () => {
+  it('reports a successful screening so the preference profile can refresh', async () => {
+    const api: StockScreeningWorkbenchApi = {
+      preview: vi.fn(async () => ({
+        criteria: [{
+          id: 'pe-1',
+          field: 'pe_ttm',
+          operator: 'lte',
+          value: 30,
+          unit: null,
+          label: '市盈率不超过 30',
+          sourceField: '市盈率TTM',
+          status: 'ready',
+        }],
+        unparsedClauses: [],
+      })) as StockScreeningWorkbenchApi['preview'],
+      run: vi.fn(async () => ({
+        snapshotId: SNAPSHOT_A,
+        dataAsOf: DATA_AS_OF,
+        coverage: {
+          universeCount: 1,
+          marketPrefilterCount: 1,
+          deepCheckedCount: 1,
+          deepCheckLimit: 20,
+          truncated: false,
+        },
+        candidates: [],
+        zeroResult: true,
+      })) as StockScreeningWorkbenchApi['run'],
+    };
+    const onScreeningRecorded = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <StockScreeningWorkbench
+        snapshotId={SNAPSHOT_A}
+        dataAsOf={DATA_AS_OF}
+        trustMode="current"
+        onAddToWatchlist={vi.fn(async () => undefined)}
+        onScreeningRecorded={onScreeningRecorded}
+        api={api}
+      />,
+    );
+
+    await user.type(screen.getByRole('textbox'), '市盈率低于30');
+    await user.click(screen.getByRole('button', { name: '识别条件' }));
+    await user.click(await screen.findByRole('button', { name: '按这些条件查找' }));
+    await waitFor(() => expect(onScreeningRecorded).toHaveBeenCalledTimes(1));
+  });
+
   it('keeps an in-flight result when the dashboard rotates to a same-day snapshot', async () => {
     let resolveRun: ((value: unknown) => void) | undefined;
     const runPromise = new Promise((resolve) => {
