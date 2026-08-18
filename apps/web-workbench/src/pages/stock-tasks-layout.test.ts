@@ -146,7 +146,7 @@ describe('stock tasks layout', () => {
       'utf8',
     );
 
-    expect(source).toContain("import { StockScreeningWorkbench } from '@/components/stocks/StockScreeningWorkbench';");
+    expect(source).toContain("from '@/components/stocks/StockScreeningWorkbench';");
     expect(source.indexOf('<MarketHighlights')).toBeLessThan(source.indexOf('<StockScreeningWorkbench'));
     expect(source.indexOf('<StockScreeningWorkbench')).toBeLessThan(source.indexOf('<DailyBriefing'));
     expect(source).toContain('snapshotId={dashboard?.trust?.snapshotId ?? null}');
@@ -181,5 +181,16 @@ describe('stock tasks layout', () => {
     expect(source).toContain('refreshKey={preferenceRevision}');
     expect(source).toContain('onScreeningRecorded={refreshPreferenceProfile}');
     expect(source).toContain('setPreferenceRevision((current) => current + 1)');
+  });
+
+  it('composes a task-first workbench before bounded market context', () => {
+    const source = readFileSync(new URL('./StockTasksPage.tsx', import.meta.url), 'utf8');
+
+    expect(source.indexOf('<StockTaskWorkspaceLayout')).toBeLessThan(
+      source.indexOf('<StockMarketContextLayout'),
+    );
+    expect(source).not.toContain('xl:grid-cols-[minmax(0,1fr)_320px]');
+    expect(source).toContain('presentation="compact"');
+    expect(source).toContain('onViewStateChange={setScreeningView}');
   });
 });

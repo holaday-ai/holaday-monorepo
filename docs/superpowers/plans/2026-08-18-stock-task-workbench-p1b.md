@@ -424,7 +424,7 @@ pnpm exec vitest run src/lib/stock-discovery.test.ts src/components/DiscoveryNew
 
 Expected: all tests PASS after updating the title assertion.
 
-- [ ] **Step 8: Commit Task 4**
+- [x] **Step 8: Commit Task 4**
 
 ```bash
 git add apps/web-workbench/src/lib/stock-discovery.ts apps/web-workbench/src/lib/stock-discovery.test.ts apps/web-workbench/src/components/DiscoveryNewsCard.tsx apps/web-workbench/src/components/DiscoveryNewsCard.test.tsx apps/web-workbench/src/pages/StockTasksPage.tsx apps/web-workbench/src/pages/stock-tasks-layout.test.ts
@@ -468,11 +468,11 @@ export function StockMarketContextLayout(props: {
 }): JSX.Element;
 ```
 
-- [ ] **Step 1: Write the failing layout-component test**
+- [x] **Step 1: Write the failing layout-component test**
 
 Render labeled test nodes and assert DOM order: highlights, risk, screening, profile, briefing. In idle mode assert screening has `lg:col-span-7` and profile has `lg:col-span-5`; in results mode both have `lg:col-span-12`. Assert market context follows its `市场背景` heading and uses an explicit 12-column grid rather than a page-long sidebar.
 
-- [ ] **Step 2: Run the layout test and verify RED**
+- [x] **Step 2: Run the layout test and verify RED**
 
 Run:
 
@@ -482,11 +482,11 @@ pnpm exec vitest run src/components/stocks/StockWorkbenchLayout.test.tsx
 
 Expected: FAIL because the layout components do not exist.
 
-- [ ] **Step 3: Implement layout-only components**
+- [x] **Step 3: Implement layout-only components**
 
 The components accept only React nodes and the screening view state. They do not query data or own product behavior. Use `min-w-0`, `grid-cols-1`, `lg:grid-cols-12`, and explicit span wrappers. The market layout contains a visible `h2` named `市场背景`.
 
-- [ ] **Step 4: Write the failing page-order test**
+- [x] **Step 4: Write the failing page-order test**
 
 Update `stock-tasks-layout.test.ts` to assert:
 
@@ -499,7 +499,7 @@ expect(source).toContain('presentation="compact"');
 expect(source).toContain('onViewStateChange={setScreeningView}');
 ```
 
-- [ ] **Step 5: Run the page test and verify RED**
+- [x] **Step 5: Run the page test and verify RED**
 
 Run:
 
@@ -509,7 +509,7 @@ pnpm exec vitest run src/pages/stock-tasks-layout.test.ts src/pages/StockTasksPa
 
 Expected: FAIL because the old discovery-first `main + aside` layout remains.
 
-- [ ] **Step 6: Recompose `StockTasksPage`**
+- [x] **Step 6: Recompose `StockTasksPage`**
 
 Add `const [screeningView, setScreeningView] = React.useState<StockScreeningViewState>('idle')`. Pass existing components as named props to the two new layouts:
 
@@ -534,11 +534,11 @@ Add `const [screeningView, setScreeningView] = React.useState<StockScreeningView
 
 Delete only the old wrapper grid. Preserve every existing prop, Sheet, modal, error boundary, footer, and handler.
 
-- [ ] **Step 7: Align the initial skeleton and header density**
+- [x] **Step 7: Align the initial skeleton and header density**
 
 Make the initial skeleton use full-width task rows followed by a bounded market-context grid. Keep the title/status/actions source order and `min-[769px]:pr-[12rem]`; reduce only vertical padding that does not alter touch-target height.
 
-- [ ] **Step 8: Run focused page and component tests**
+- [x] **Step 8: Run focused page and component tests**
 
 Run:
 

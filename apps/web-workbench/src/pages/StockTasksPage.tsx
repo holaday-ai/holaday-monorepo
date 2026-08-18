@@ -19,7 +19,14 @@ import { DiscoveryNewsCard } from '@/components/DiscoveryNewsCard';
 import { NewsDetailModal as StockNewsDetailModal } from '@/components/NewsDetailModal';
 import { StockPreferenceProfile } from '@/components/stocks/StockPreferenceProfile';
 import { StockRiskRadar } from '@/components/stocks/StockRiskRadar';
-import { StockScreeningWorkbench } from '@/components/stocks/StockScreeningWorkbench';
+import {
+  StockScreeningWorkbench,
+  type StockScreeningViewState,
+} from '@/components/stocks/StockScreeningWorkbench';
+import {
+  StockMarketContextLayout,
+  StockTaskWorkspaceLayout,
+} from '@/components/stocks/StockWorkbenchLayout';
 import { Input } from '@/components/ui/input';
 import {
   Sheet,
@@ -195,6 +202,7 @@ export function StockTasksPage(): JSX.Element {
   const [symbolSuggestions, setSymbolSuggestions] = React.useState<SymbolSuggestion[]>([]);
   const [searchingSymbols, setSearchingSymbols] = React.useState(false);
   const [preferenceRevision, setPreferenceRevision] = React.useState(0);
+  const [screeningView, setScreeningView] = React.useState<StockScreeningViewState>('idle');
   const [activeLeaderboard, setActiveLeaderboard] = React.useState<'涨幅榜' | '跌幅榜' | '成交额榜' | '换手率榜'>('涨幅榜');
   const pageAlive = React.useRef(true);
   const dashboardRefreshInFlight = React.useRef(false);
@@ -614,8 +622,8 @@ export function StockTasksPage(): JSX.Element {
 
   return (
     <div className="min-h-full bg-[#FAFAFB] text-[#121826]">
-      <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-5 px-4 py-5 sm:px-5 lg:px-6">
-        <header className="flex flex-col gap-3 border-b border-[#E7E7EB] pb-4 min-[769px]:pr-[12rem] md:flex-row md:items-center md:justify-between">
+      <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-5 px-4 py-4 sm:px-5 lg:px-6">
+        <header className="flex flex-col gap-3 border-b border-[#E7E7EB] pb-3 min-[769px]:pr-[12rem] md:flex-row md:items-center md:justify-between">
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-[22px] font-semibold tracking-tight text-[#121826]">
               股市任务
@@ -741,22 +749,9 @@ export function StockTasksPage(): JSX.Element {
         {initialDashboardLoading ? (
           <InitialDashboardSkeleton />
         ) : (
-          <div className="grid min-w-0 grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
-            <main className="min-w-0 space-y-5">
-              <DiscoveryPanel
-                news={news}
-                watchlistSymbols={watchlistSymbols}
-                onOpenNews={(index) => setActiveNewsIndex(index)}
-                onViewAll={(feed) => {
-                  const query = feed === '全部' ? '' : `?feed=${encodeURIComponent(feed)}`;
-                  navigate(`/stocks/discovery${query}`);
-                }}
-                onLoadMore={loadMoreDiscovery}
-                canLoadMore={(feed) => feed === '全部'
-                  ? MARKET_DISCOVERY_FEEDS.some(canLoadMoreDiscovery)
-                  : MARKET_DISCOVERY_FEEDS.includes(feed as MarketDiscoveryFeed) && canLoadMoreDiscovery(feed as MarketDiscoveryFeed)}
-              />
-              <MarketHighlights
+          <div className="min-w-0 space-y-7">
+            <StockTaskWorkspaceLayout
+              highlights={<MarketHighlights
                 stocks={stocks}
                 marketIndices={marketIndices}
                 updatedAt={dashboard?.updatedAt}
@@ -768,21 +763,25 @@ export function StockTasksPage(): JSX.Element {
                 canGenerateBriefing={!briefingUnavailable}
                 temporalCopy={temporalCopy}
                 temporalMode={dashboardTrust.tone}
-              />
-              <StockRiskRadar
+              />}
+              riskRadar={<StockRiskRadar
                 snapshotId={dashboard?.trust?.snapshotId ?? null}
                 dataAsOf={dashboard?.trust?.dataAsOf ?? null}
                 trustMode={dashboard?.trust?.mode ?? 'unverified'}
-              />
-              <StockScreeningWorkbench
+              />}
+              screening={<StockScreeningWorkbench
                 snapshotId={dashboard?.trust?.snapshotId ?? null}
                 dataAsOf={dashboard?.trust?.dataAsOf ?? null}
                 trustMode={dashboard?.trust?.mode ?? 'unverified'}
                 onAddToWatchlist={addScreeningCandidate}
                 onScreeningRecorded={refreshPreferenceProfile}
-              />
-              <StockPreferenceProfile refreshKey={preferenceRevision} />
-              <DailyBriefing
+                onViewStateChange={setScreeningView}
+              />}
+              preferenceProfile={<StockPreferenceProfile
+                presentation="compact"
+                refreshKey={preferenceRevision}
+              />}
+              briefing={<DailyBriefing
                 stocks={stocks}
                 marketIndices={marketIndices}
                 sectors={sectors}
@@ -798,38 +797,49 @@ export function StockTasksPage(): JSX.Element {
                 canGenerateBriefing={!briefingUnavailable}
                 temporalCopy={temporalCopy}
                 temporalMode={dashboardTrust.tone}
-              />
-              <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-                <MarketTable
-                  rows={marketIndices}
-                  onInspect={() => setInsightSheet(marketInsight(marketIndices, dashboardTrust.tone))}
-                  temporalCopy={temporalCopy}
-                />
-                <StarStocks
-                  stocks={starStocks}
-                  onInspect={() => setInsightSheet(starStockInsight(starStocks, temporalCopy, dashboardTrust.tone))}
-                  temporalCopy={temporalCopy}
-                  temporalMode={dashboardTrust.tone}
-                />
-              </div>
-            </main>
-
-            <aside className="space-y-5">
-              <MarketTemperature
+              />}
+              screeningView={screeningView}
+            />
+            <StockMarketContextLayout
+              discovery={<DiscoveryPanel
+                news={news}
+                watchlistSymbols={watchlistSymbols}
+                onOpenNews={(index) => setActiveNewsIndex(index)}
+                onViewAll={(feed) => {
+                  const query = feed === '全部' ? '' : `?feed=${encodeURIComponent(feed)}`;
+                  navigate(`/stocks/discovery${query}`);
+                }}
+                onLoadMore={loadMoreDiscovery}
+                canLoadMore={(feed) => feed === '全部'
+                  ? MARKET_DISCOVERY_FEEDS.some(canLoadMoreDiscovery)
+                  : MARKET_DISCOVERY_FEEDS.includes(feed as MarketDiscoveryFeed) && canLoadMoreDiscovery(feed as MarketDiscoveryFeed)}
+              />}
+              temperature={<MarketTemperature
                 temperature={temperature}
                 onInspect={() => setInsightSheet(temperatureInsight(temperature))}
-              />
-              <SectorTrends
+              />}
+              sectors={<SectorTrends
                 sectors={sectors}
                 onInspect={() => setInsightSheet(sectorInsight(sectors, dashboardTrust.tone))}
-              />
-              <Leaderboard
+              />}
+              leaderboard={<Leaderboard
                 leaders={leaders}
                 active={activeLeaderboard}
                 onActiveChange={setActiveLeaderboard}
                 onInspect={() => setInsightSheet(leaderboardInsight(activeLeaderboard, leaders, dashboardTrust.tone))}
-              />
-            </aside>
+              />}
+              marketTable={<MarketTable
+                rows={marketIndices}
+                onInspect={() => setInsightSheet(marketInsight(marketIndices, dashboardTrust.tone))}
+                temporalCopy={temporalCopy}
+              />}
+              starStocks={<StarStocks
+                stocks={starStocks}
+                onInspect={() => setInsightSheet(starStockInsight(starStocks, temporalCopy, dashboardTrust.tone))}
+                temporalCopy={temporalCopy}
+                temporalMode={dashboardTrust.tone}
+              />}
+            />
           </div>
         )}
 
@@ -1530,8 +1540,8 @@ function WatchlistManagerSheet({
 function InitialDashboardSkeleton(): JSX.Element {
   const bars = ['w-5/6', 'w-4/6', 'w-3/5'];
   return (
-    <div className="grid min-w-0 grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_320px]" aria-busy="true">
-      <main className="min-w-0 space-y-5">
+    <div className="min-w-0 space-y-7" aria-busy="true">
+      <section aria-label="正在加载核心股市任务" className="min-w-0 space-y-5">
         <Panel>
           <div className="mb-4 flex items-center justify-between">
             <div>
@@ -1568,19 +1578,22 @@ function InitialDashboardSkeleton(): JSX.Element {
             ))}
           </div>
         </Panel>
-      </main>
-      <aside className="space-y-5">
-        {[0, 1, 2].map((item) => (
-          <Panel key={item}>
-            <div className="h-5 w-24 rounded-[6px] bg-[#ECEEF3]" />
-            <div className="mt-5 space-y-3">
-              <div className="h-4 w-5/6 rounded-[5px] bg-[#F1F2F5]" />
-              <div className="h-4 w-4/6 rounded-[5px] bg-[#F1F2F5]" />
-              <div className="h-4 w-3/5 rounded-[5px] bg-[#F1F2F5]" />
-            </div>
-          </Panel>
-        ))}
-      </aside>
+      </section>
+      <section aria-label="正在加载市场背景" className="min-w-0 space-y-3">
+        <div className="h-5 w-20 rounded-[6px] bg-[#ECEEF3]" />
+        <div className="grid min-w-0 grid-cols-1 gap-5 lg:grid-cols-12">
+          {[0, 1, 2].map((item) => (
+            <Panel key={item} className={item === 0 ? 'lg:col-span-8 lg:row-span-2' : 'lg:col-span-4'}>
+              <div className="h-5 w-24 rounded-[6px] bg-[#ECEEF3]" />
+              <div className="mt-5 space-y-3">
+                <div className="h-4 w-5/6 rounded-[5px] bg-[#F1F2F5]" />
+                <div className="h-4 w-4/6 rounded-[5px] bg-[#F1F2F5]" />
+                <div className="h-4 w-3/5 rounded-[5px] bg-[#F1F2F5]" />
+              </div>
+            </Panel>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }
