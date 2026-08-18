@@ -130,6 +130,30 @@ def test_screening_universe_route_preserves_standard_envelope(monkeypatch):
     assert "error" not in result
 
 
+def test_risk_insider_route_uses_the_cached_adapter(monkeypatch):
+    monkeypatch.setattr(
+        http_server,
+        "_risk_insider",
+        lambda symbol: (
+            [{"symbol": symbol}],
+            "akshare:cached-insider",
+            "2026-08-19T00:00:00+00:00",
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        http_server.adp,
+        "get_risk_insider",
+        lambda _symbol: (_ for _ in ()).throw(AssertionError("uncached insider adapter used")),
+    )
+
+    result = http_server.risk_insider("600001")
+
+    assert result["count"] == 1
+    assert result["source"] == "akshare:cached-insider"
+    assert result["fetched_at"] == "2026-08-19T00:00:00+00:00"
+
+
 def test_error_envelope_is_attributed_timestamped_and_sanitized(caplog):
     def fetch():
         raise adp.AkShareUnavailable("upstream token=secret-value")

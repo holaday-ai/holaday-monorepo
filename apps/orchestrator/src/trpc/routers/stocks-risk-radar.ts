@@ -1,5 +1,9 @@
 import { z } from 'zod';
 import {
+  HttpAkshareClient,
+  type HttpAkshareClientOptions,
+} from '../../agent/a-share/akshare-http-client.js';
+import {
   type StockRiskRadarClient,
   type StockRiskRadarResult,
   type StockRiskRadarStock,
@@ -12,6 +16,22 @@ type Db = typeof import('../../db/client.js').db;
 export interface RiskRadarLogger {
   info?(obj: Record<string, unknown>, msg: string): void;
   warn(obj: Record<string, unknown>, msg: string): void;
+}
+
+const INTERACTIVE_RISK_REQUEST_BUDGET_MS = 8_000;
+
+export function createStockRiskRadarHttpClient(args: {
+  baseUrl: string;
+  logger: RiskRadarLogger;
+  fetchImpl?: HttpAkshareClientOptions['fetchImpl'];
+}): HttpAkshareClient {
+  return new HttpAkshareClient({
+    baseUrl: args.baseUrl,
+    timeoutMs: INTERACTIVE_RISK_REQUEST_BUDGET_MS,
+    riskTimeoutMs: INTERACTIVE_RISK_REQUEST_BUDGET_MS,
+    logger: args.logger,
+    ...(args.fetchImpl ? { fetchImpl: args.fetchImpl } : {}),
+  });
 }
 
 export const stockRiskRadarInputSchema = z.object({
