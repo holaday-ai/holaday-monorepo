@@ -1,3 +1,113 @@
+# 股市市场背景三栏补白 Design QA（2026-08-18）
+
+## 对照目标
+
+- Source visual truth: `/Users/yaleiqi/.codex/generated_images/019fea2f-b33b-7560-9d5a-5a381b4cfd37/exec-92c106ca-a174-4605-bbf8-5f960f1def2b.png`。
+- Browser-rendered implementation: `http://127.0.0.1:5187/stocks`。
+- Full-view evidence: `/Users/yaleiqi/holaday-monorepo/.worktrees/stock-workbench-p1b/apps/web-workbench/qa-stock-market-context-viewport-final.jpg`。
+- Focused implementation evidence: `/Users/yaleiqi/holaday-monorepo/.worktrees/stock-workbench-p1b/apps/web-workbench/qa-stock-market-context-cards-final.jpg`。
+- Same-input comparison: `/Users/yaleiqi/holaday-monorepo/.worktrees/stock-workbench-p1b/apps/web-workbench/qa-stock-market-context-comparison-final.jpg`。
+- State: authenticated local `/stocks`, market background expanded, current AkShare-backed market context visible.
+
+## Viewport and normalization
+
+- Source: 1487 × 1058 px; implementation: 1280 × 720 CSS px, deviceScaleFactor 1.
+- The reference and the 898 px-wide live card region were placed into one comparison input. The implementation keeps the real application sidebar and therefore has less horizontal card space than the concept image.
+- Measured live cards are exactly equal height: market temperature, sector trends, and leaderboard are all 653.75 px high.
+
+## Findings
+
+- Layout rhythm: the former blank lower half is now filled with real market breadth, capital-flow, and observation content; all three panels share one baseline without enlarging the leaderboard.
+- Information hierarchy: market temperature progresses from the 54 score to `市场广度`、`资金动向`、`今日观察`; sector trends keep the ranking first and add a bottom-anchored `结构观察` summary.
+- Truthfulness: a negative `主力净流入` value is rendered as `主力净流出`; no decorative data, synthetic trend, or unsupported theme classification was added.
+- Copy: the `无走势` placeholder is completely removed. Sector rows leave that slot quiet when the API has fewer than two real trend points.
+- Typography and color: the existing calm warm-white surface, plum headings, restrained berry/green market semantics, border radius, and spacing tokens are retained so this region does not compete with the task content above.
+- Accessibility: market breadth is exposed as a semantic meter with the 30.3% value; the existing expandable panel remains a semantic button.
+- Responsive structure: the three cards retain the existing one-column layout below the `lg` breakpoint and the equal-height rule only applies within the desktop grid. This pass visually verified the current 1280 × 720 desktop state; responsive behavior remains covered structurally rather than by a new mobile browser capture.
+- Browser health: no framework overlay, console warning, or console error was observed.
+
+## Comparison history
+
+### Pass 1
+
+- P2: market temperature and sector trends ended far above the leaderboard, leaving two large empty surfaces.
+- P2: every sector row displayed `无走势`, adding repeated low-value copy and falsely suggesting a missing feature.
+- Fix: introduced truthful summary modules, redistributed vertical rhythm with flex layout, and removed the placeholder branch.
+
+### Final pass
+
+- No actionable P0, P1, or P2 visual, content, interaction, or accessibility issue remains on the changed surface.
+- P3 intentional deviation: the concept's decorative sector-allocation strip is replaced by a text-based `结构观察`, because the current payload supplies ranked sectors and gains but no trustworthy sector-theme allocation.
+
+## Automated gates
+
+- Focused stock layout and market-context tests: 2 files, 7 tests passed.
+- Web typecheck passed.
+- Targeted ESLint and `git diff --check` passed.
+
+final result: passed
+
+---
+
+# 股市任务明亮工作台与紧凑下一步 Design QA（2026-08-18）
+
+## 对照目标
+
+- Source visual truth: `/Users/yaleiqi/.codex/generated_images/019fea2f-b33b-7560-9d5a-5a381b4cfd37/exec-ad4e6d0e-ea85-4f80-baf5-8676efcaf111.png`。
+- Browser-rendered implementation: `http://127.0.0.1:5187/stocks`。
+- Desktop screenshot: `/private/tmp/holaday-stock-1440-final.png`。
+- Focused next-step screenshot: `/private/tmp/holaday-stock-dock-1440.png`。
+- Responsive evidence: `/private/tmp/holaday-stock-900-dock-final2.png` and `/private/tmp/holaday-stock-390-mid-final.png`。
+- State: authenticated local stock watchlist with current AkShare-backed data, selected stock `603528`, verified quote state, five watchlist rows, and the compact follow-up action bar visible.
+
+## Viewport and normalization
+
+- Source: 1487 × 1058 px.
+- Desktop implementation: 1440 × 1024 CSS px and screenshot pixels, deviceScaleFactor 1.
+- Responsive implementation: 900 × 720 and 390 × 844 CSS px and screenshot pixels, deviceScaleFactor 1.
+- The source and desktop render were opened together in one comparison input. The outer shell and content crop are close but not pixel-identical because the implementation intentionally retains the existing prompt composer and live market-status controls above the task navigation.
+- The important bottom action region was checked separately at desktop, narrow desktop, and mobile widths because its controls were too small to judge from the full-view comparison alone.
+
+## Findings
+
+- Fonts and typography: the implementation keeps the existing HOLA DAY sans-serif stack, dark-plum headings, compact 10–12 px metadata, and 11 px action labels. The mobile hero title wraps cleanly without clipping. No actionable P0/P1/P2 finding remains.
+- Spacing and layout rhythm: the selected four-mode navigation, hero, chart, evidence cards, watchlist, and follow-up bar preserve the mock's hierarchy. The next-step region is now a 58 px auxiliary row at tested desktop widths; its two buttons are 36 px high and no longer compete with the chart or evidence cards. No horizontal overflow was visible at 1440, 900, or 390 px.
+- Colors and tokens: warm white, blush, peach, lavender, mint, sky blue, and berry accents now match the brighter Today Energy direction. Red-up/green-down financial semantics remain truthful where live values are shown.
+- Image quality: the hero uses the generated raster asset `/assets/stocks/stock-story-hero-v1.png` with a wide crop that stays sharp and legible at all tested widths. No emoji, CSS illustration, handcrafted SVG, or placeholder art substitutes for the visual target.
+- Copy and content: the live implementation uses current stock name, code, quote, data time, verification state, source, and risk wording. The compact follow-up bar only retains `查看风险证据` and `打开选股与偏好`; duplicate brief and tracking actions were removed from this region.
+- Icons and affordances: Lucide icons share consistent stroke weight, both compact actions retain visible labels and native `title` text, and the active navigation state remains clear.
+- Interaction and accessibility: both follow-up actions were clicked in the browser. Risk evidence and screening/preference content rendered, focusable buttons remained semantic, and the page had no blank state or framework error overlay.
+
+## Comparison history
+
+### Pass 1
+
+- P1: the previous stock page was visually dull and disconnected from the bright HOLA DAY / Today Energy language.
+- P2: the action area shown in the selected mock used a large solid-red primary button and excessive width, making `下一步` feel like another hero rather than an auxiliary continuation.
+- Fix: added the bright macaron hero and lighter surfaces, moved the four modes into a horizontal task bar, compressed the watchlist, and rebuilt the follow-up region as a single lightweight row with two subtle outline actions.
+
+### Final pass
+
+- Desktop evidence shows the action region below the evidence cards without displacing the primary research content.
+- At 900 px the two actions remain on one compact row without cropping. At 390 px they still fit side by side, preserve readable labels, and do not cause horizontal overflow.
+- Browser interaction verified `查看风险证据` and `打开选股与偏好`; console warnings and errors were 0.
+- No actionable P0, P1, or P2 visual, interaction, responsive, or accessibility findings remain.
+- P3 intentional deviation: the production prompt composer is retained above the task navigation, so the first viewport is denser than the concept mock; removing it would change existing product functionality and was outside this approved visual revision.
+
+## Implementation checklist
+
+- [x] Bright HOLA DAY macaron palette and raster hero asset.
+- [x] Four-mode horizontal task navigation.
+- [x] Focused chart plus compact semantic watchlist.
+- [x] Compact two-action next-step region.
+- [x] Desktop, narrow desktop, and mobile browser checks.
+- [x] Risk and screening/preference interaction checks.
+- [x] Console warning/error check.
+
+final result: passed
+
+---
+
 # 今日能量补给站 Design QA
 
 ## 对照目标

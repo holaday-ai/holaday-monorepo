@@ -67,7 +67,6 @@ describe('StockTaskWorkspaceLayout', () => {
 
   it('routes next-step actions to the matching research task', async () => {
     const user = userEvent.setup();
-    const onCreateTrackingTask = vi.fn();
     render(
       <StockTaskWorkspaceLayout
         highlights={node('highlights')}
@@ -76,25 +75,27 @@ describe('StockTaskWorkspaceLayout', () => {
         preferenceProfile={node('profile')}
         briefing={node('briefing')}
         screeningView="results"
-        onCreateTrackingTask={onCreateTrackingTask}
       />,
     );
+
+    const nextStep = screen.getByRole('complementary', { name: '下一步' });
+    expect(nextStep.querySelectorAll('button')).toHaveLength(2);
+    expect(screen.queryByRole('button', { name: '生成关注简报' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '设置跟踪任务' })).toBeNull();
+    expect(screen.queryByText('核对触发条件与来源')).toBeNull();
+    expect(screen.queryByText('按条件筛选并看偏好盲点')).toBeNull();
 
     await user.click(screen.getByRole('button', { name: '查看风险证据' }));
     expect(screen.getByTestId('risk')).toBeTruthy();
 
     await user.click(screen.getByRole('button', { name: '关注股票' }));
-    await user.click(screen.getByRole('button', { name: '生成关注简报' }));
+    await user.click(screen.getByRole('button', { name: '今日简报' }));
     expect(screen.getByTestId('briefing')).toBeTruthy();
 
     await user.click(screen.getByRole('button', { name: '关注股票' }));
     await user.click(screen.getByRole('button', { name: '打开选股与偏好' }));
     expect(screen.getByTestId('screening')).toBeTruthy();
     expect(screen.getByTestId('profile')).toBeTruthy();
-
-    await user.click(screen.getByRole('button', { name: '关注股票' }));
-    await user.click(screen.getByRole('button', { name: '设置跟踪任务' }));
-    expect(onCreateTrackingTask).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -9,6 +9,7 @@ import {
   Plus,
   RefreshCw,
   Send,
+  ShieldAlert,
   Trash2,
   TrendingDown,
   TrendingUp,
@@ -18,6 +19,10 @@ import { useNavigate } from 'react-router-dom';
 import { DiscoveryNewsCard } from '@/components/DiscoveryNewsCard';
 import { NewsDetailModal as StockNewsDetailModal } from '@/components/NewsDetailModal';
 import { StockPreferenceProfile } from '@/components/stocks/StockPreferenceProfile';
+import {
+  MarketTemperatureDetails,
+  sectorTrendValues,
+} from '@/components/stocks/StockMarketContextDetails';
 import { StockRiskRadar } from '@/components/stocks/StockRiskRadar';
 import {
   StockScreeningWorkbench,
@@ -219,13 +224,6 @@ export function StockTasksPage(): JSX.Element {
   const refreshPreferenceProfile = React.useCallback(() => {
     setPreferenceRevision((current) => current + 1);
   }, []);
-  const prepareTrackingTask = React.useCallback(() => {
-    setPrompt((current) => current.trim()
-      ? current
-      : '跟踪我的关注股票，出现风险信号升高或异常放量时提醒我');
-    promptInputRef.current?.focus();
-  }, []);
-
   React.useEffect(() => {
     pageAlive.current = true;
     return () => {
@@ -629,11 +627,11 @@ export function StockTasksPage(): JSX.Element {
   }, [briefingBusy, briefingUnavailable, enabled, loadingDashboard]);
 
   return (
-    <div className="min-h-full bg-[#FBFAFD] text-[#121826]">
-      <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-4 px-4 pb-4 pt-14 sm:px-5 min-[769px]:pt-4 lg:px-6">
-        <header className="flex flex-col gap-3 border-b border-[#E7E7EB] pb-3 min-[769px]:pr-[12rem] md:flex-row md:items-center md:justify-between">
+    <div className="min-h-full bg-[#FFFCFA] text-[#25233A]">
+      <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-4 px-4 pb-5 pt-14 sm:px-5 min-[769px]:pt-4 lg:px-6">
+        <header className="flex flex-col gap-3 border-b border-[#EFE7F1] pb-3 min-[769px]:pr-[12rem] md:flex-row md:items-center md:justify-between">
           <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-[22px] font-semibold tracking-tight text-[#3E3154]">
+            <h1 className="text-[22px] font-semibold tracking-[-0.025em] text-[#3E3154]">
               股市任务
             </h1>
             <span
@@ -692,32 +690,32 @@ export function StockTasksPage(): JSX.Element {
           </div>
         ) : null}
 
-        <section className="rounded-[8px] border border-[#E1E3E8] bg-white p-2 shadow-[0_10px_30px_rgba(18,24,38,0.04)]">
+        <section className="rounded-[18px] border border-[#E9E0EC] bg-[#FFFDFB] p-2 shadow-[0_14px_36px_rgba(102,74,119,0.055)]">
           <form
             onSubmit={(event) => {
               event.preventDefault();
               void submitPrompt(prompt);
             }}
-            className="flex min-h-[68px] items-center gap-3 rounded-[6px] border border-transparent bg-[#FCFCFD] px-3 transition-colors focus-within:border-[#EA1F59]/30"
+            className="flex min-h-[62px] items-center gap-3 rounded-[14px] border border-transparent bg-[#FFF7FA] px-3 transition-colors focus-within:border-[#EA1F59]/30"
           >
             <input
               ref={promptInputRef}
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
               placeholder={temporalCopy.promptPlaceholder}
-              className="min-w-0 flex-1 bg-transparent text-[17px] font-medium text-[#121826] outline-none placeholder:text-[#9AA1AE]"
+              className="min-w-0 flex-1 bg-transparent text-[16px] font-medium text-[#332842] outline-none placeholder:text-[#968C9D]"
             />
             <button
               type="submit"
               disabled={submitting || !prompt.trim() || stockPromptUnavailable}
-              className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-[8px] bg-[#EA1F59] text-white shadow-[0_10px_24px_rgba(234,31,89,0.22)] transition disabled:cursor-not-allowed disabled:opacity-55"
+              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] bg-[#EA1F59] text-white shadow-[0_8px_20px_rgba(234,31,89,0.18)] transition hover:bg-[#D91952] disabled:cursor-not-allowed disabled:opacity-55"
               aria-label="提交股市任务"
               title="提交股市任务"
             >
               {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
             </button>
           </form>
-          <div className="flex flex-wrap gap-2 border-t border-[#EFEFF2] px-2 py-2">
+          <div className="flex flex-wrap gap-2 border-t border-[#F0E8F1] px-2 py-2">
             {commands.map((command) => (
               <button
                 key={command}
@@ -737,7 +735,7 @@ export function StockTasksPage(): JSX.Element {
                   }
                   else void submitPrompt(command);
                 }}
-                className="inline-flex h-9 items-center rounded-[8px] border border-[#E1E3E8] bg-white px-3 text-[13px] font-medium text-[#4F5868] transition hover:border-[#EA1F59]/25 hover:bg-[#EA1F59]/10 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex h-8 items-center rounded-[10px] border border-[#E5DEEB] bg-[#FBF8FF] px-3 text-[12px] font-medium text-[#5D5368] transition hover:border-[#E7BEC9] hover:bg-[#FFF0F4] hover:text-[#C9184A] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {command}
               </button>
@@ -748,7 +746,7 @@ export function StockTasksPage(): JSX.Element {
         {initialDashboardLoading ? (
           <InitialDashboardSkeleton />
         ) : (
-          <div className="min-w-0 space-y-7">
+          <div className="min-w-0 space-y-5">
             <StockTaskWorkspaceLayout
               highlights={<MarketHighlights
                 stocks={stocks}
@@ -798,7 +796,6 @@ export function StockTasksPage(): JSX.Element {
                 temporalMode={dashboardTrust.tone}
               />}
               screeningView={screeningView}
-              onCreateTrackingTask={prepareTrackingTask}
             />
             <StockMarketContextLayout
               discovery={<DiscoveryPanel
@@ -1144,19 +1141,20 @@ function MarketHighlights({
     ?? firstResearchStock;
   const primaryIndex = marketIndices.find((row) => row.name.includes('上证')) ?? marketIndices[0] ?? null;
   return (
-    <section className="rounded-[8px] border border-[#E7E1EC] bg-[#FFFDFB] p-3.5 shadow-[0_10px_28px_rgba(91,70,118,0.055)]">
-      <SectionHeader
-        title="关注股票"
-        meta={loading ? '同步自选股中…' : sample ? `示例关注 · ${stocks.length} 只` : `${stocks.length} 只关注股票`}
-        action="管理列表"
-        onAction={onEdit}
-      />
+    <section className="min-w-0">
+      {selectedStock ? (
+        <StockStoryHero
+          stock={selectedStock}
+          updatedAt={updatedAt}
+          temporalMode={temporalMode}
+        />
+      ) : null}
       {!hasRealQuotes ? (
-        <div className="mt-4 rounded-[8px] border border-dashed border-[#D7DAE2] bg-[#FCFCFD] p-4">
+        <div className="mt-3 rounded-[16px] border border-dashed border-[#DCD4E2] bg-[#FFFDFB] p-4">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
-              <div className="text-[14px] font-semibold text-[#121826]">真实行情同步中</div>
-              <p className="mt-1 max-w-[560px] text-[12px] leading-relaxed text-[#667085]">
+              <div className="text-[14px] font-semibold text-[#332842]">真实行情同步中</div>
+              <p className="mt-1 max-w-[560px] text-[12px] leading-relaxed text-[#716A7C]">
                 Holaday 正在等待 AkShare 返回价格和走势；未拿到真实行情前，不放大空图表，也不使用模拟数据。
               </p>
             </div>
@@ -1179,20 +1177,7 @@ function MarketHighlights({
         </div>
       ) : null}
       {hasRealQuotes && selectedStock ? (
-        <div className="mt-3 space-y-3">
-          <StockResearchTable
-            rows={researchStocks.map((stock) => ({
-              symbol: stock.symbol,
-              name: stock.name,
-              price: formatStockPrice(stock),
-              changePct: stock.price === '—' ? null : stock.changePct,
-              turnover: stockTurnoverText(stock),
-              note: stock.note,
-              updatedAt: formatUpdateTime(updatedAt),
-            }))}
-            selectedSymbol={selectedStock.symbol}
-            onSelect={setSelectedSymbol}
-          />
+        <div className="mt-3 grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1fr)_292px]">
           <StockHighlightCard
             key={selectedStock.symbol}
             stock={selectedStock}
@@ -1204,9 +1189,94 @@ function MarketHighlights({
             temporalCopy={temporalCopy}
             temporalMode={temporalMode}
           />
+          <aside className="min-w-0" aria-label="我的关注股票">
+            <div className="mb-2 flex items-center justify-between px-1">
+              <div className="flex items-center gap-2">
+                <h2 className="text-[13px] font-semibold text-[#3E3154]">我的关注</h2>
+                <span className="text-[10px] text-[#8A8192]">
+                  {loading ? '同步中…' : sample ? `示例 ${stocks.length}` : `${stocks.length} 只`}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={onEdit}
+                className="text-[10px] font-semibold text-[#7A5A8E] transition hover:text-[#C9184A]"
+              >
+                管理列表
+              </button>
+            </div>
+            <StockResearchTable
+              rows={researchStocks.map((stock) => ({
+                symbol: stock.symbol,
+                name: stock.name,
+                price: formatStockPrice(stock),
+                changePct: stock.price === '—' ? null : stock.changePct,
+                turnover: stockTurnoverText(stock),
+                note: stock.note,
+                updatedAt: formatUpdateTime(updatedAt),
+              }))}
+              selectedSymbol={selectedStock.symbol}
+              onSelect={setSelectedSymbol}
+            />
+          </aside>
         </div>
       ) : null}
     </section>
+  );
+}
+
+function StockStoryHero({
+  stock,
+  updatedAt,
+  temporalMode,
+}: {
+  stock: StockSnapshot;
+  updatedAt?: string;
+  temporalMode: StockTemporalMode;
+}): JSX.Element {
+  const statusLabel = temporalMode === 'current'
+    ? '行情已核验'
+    : temporalMode === 'historical'
+      ? '最近交易日数据'
+      : '行情校验中';
+  const changeUnavailable = stock.price === '—';
+  return (
+    <div className="relative min-h-[172px] overflow-hidden rounded-[20px] border border-[#E9DEEC] bg-[#FFF7F3] shadow-[0_16px_40px_rgba(116,82,133,0.08)]">
+      <img
+        src="/assets/stocks/stock-story-hero-v1.png"
+        alt=""
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 h-full w-full object-cover object-[64%_center]"
+      />
+      <div className="relative z-10 max-w-[70%] px-5 py-5 sm:max-w-[58%] sm:px-6">
+        <p className="text-[10px] font-semibold tracking-[0.08em] text-[#7F648D]">
+          关注中的股票 · {stock.symbol}
+        </p>
+        <h2 className="mt-2 text-[24px] font-semibold tracking-[-0.035em] text-[#542043] sm:text-[28px]">
+          {stock.name}今日发生了什么
+        </h2>
+        <div className="mt-3 flex flex-wrap items-baseline gap-x-4 gap-y-1">
+          <span className="text-[22px] font-semibold tabular-nums text-[#25233A]">{formatStockPrice(stock)}</span>
+          <span
+            className={cn(
+              'text-[18px] font-semibold tabular-nums',
+              changeUnavailable || stock.changePct === 0
+                ? 'text-[#667085]'
+                : stock.changePct > 0
+                  ? MARKET_UP_CLASS
+                  : MARKET_DOWN_CLASS,
+            )}
+          >
+            {changeUnavailable ? '—' : `${stock.changePct > 0 ? '+' : ''}${stock.changePct.toFixed(2)}%`}
+          </span>
+        </div>
+        <div className="mt-3 flex items-center gap-2 text-[10px] text-[#776D7D]">
+          <span>数据更新 {stockDataUpdatedAt(updatedAt)}</span>
+          <span className="h-1 w-1 rounded-full bg-[#A874C4]" aria-hidden />
+          <span>{statusLabel}</span>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1232,12 +1302,12 @@ function StockHighlightCard({
   const [hover, setHover] = React.useState<StockChartHover | null>(null);
   const chartKind = stock.sparkKind ?? 'daily_close';
   return (
-    <article className="group overflow-hidden rounded-[9px] border border-[#E7E1EC] bg-white px-4 pb-4 pt-4 transition-[border-color,box-shadow,transform] duration-200 hover:-translate-y-px hover:border-[#D9CCDF] hover:shadow-[0_14px_30px_rgba(91,70,118,0.09)]">
+    <article className="group overflow-hidden rounded-[18px] border border-[#E8E1EC] bg-white px-4 pb-4 pt-4 shadow-[0_12px_34px_rgba(95,73,112,0.055)] transition-[border-color,box-shadow,transform] duration-200 hover:-translate-y-px hover:border-[#D9CCDF] hover:shadow-[0_16px_34px_rgba(91,70,118,0.09)]">
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_180px]">
         <div className="min-w-0">
           <div className="flex items-start justify-between gap-3">
             <div className="flex min-w-0 items-start gap-3">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[7px] bg-[#0B4AA2] text-[11px] font-semibold text-white shadow-[inset_0_-1px_0_rgba(255,255,255,0.18)]">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[11px] bg-[#EEF5FF] text-[11px] font-semibold text-[#4269A5]">
                 {stock.symbol.slice(0, 2)}
               </div>
               <div className="min-w-0">
@@ -1250,7 +1320,7 @@ function StockHighlightCard({
               </div>
             </div>
             <div className="text-right">
-              <div className="whitespace-nowrap text-[22px] font-medium leading-none tracking-normal tabular-nums text-[#121826]">{formatStockPrice(stock)}</div>
+              <div className="whitespace-nowrap text-[22px] font-semibold leading-none tracking-normal tabular-nums text-[#25233A]">{formatStockPrice(stock)}</div>
               <StockChangeBadge value={stock.price === '—' ? null : stock.changePct} className="mt-1.5 justify-end" />
             </div>
           </div>
@@ -1267,7 +1337,7 @@ function StockHighlightCard({
               showTimeline
             />
           ) : (
-            <div className="mt-4 flex h-[220px] flex-col items-center justify-center rounded-[7px] border border-dashed border-[#D7DAE2] bg-[#F7F8FA] px-4 text-center">
+            <div className="mt-4 flex h-[220px] flex-col items-center justify-center rounded-[13px] border border-dashed border-[#DCD4E2] bg-[#FBF9FD] px-4 text-center">
               <div className="text-[13px] font-medium text-[#667085]">最近交易日分时暂不可用</div>
               <div className="mt-1 max-w-[320px] text-[12px] leading-relaxed text-[#98A2B3]">
                 已保留真实价格与成交数据；不使用模拟线，也不自动切换成日线。
@@ -1278,7 +1348,7 @@ function StockHighlightCard({
             {stockNarrative(stock, marketIndex, temporalMode)}
           </p>
         </div>
-        <div className="grid min-w-0 grid-cols-2 gap-x-4 gap-y-3 self-start border-t border-[#F0F1F4] pt-3 lg:block lg:border-l lg:border-t-0 lg:pl-4 lg:pt-1">
+        <div className="grid min-w-0 grid-cols-2 gap-x-4 gap-y-3 self-start border-t border-[#F0ECF2] pt-3 lg:block lg:border-l lg:border-t-0 lg:pl-4 lg:pt-1">
           <StockRailMetric label="支撑 / 压力" value={stockRangeText(stock)} />
           <StockRailMetric label="价格位置" value={stockPositionText(stock)} meta={stockPositionMeta(stock)} tone={stockPositionTone(stock)} />
           <StockRailMetric label="成交额" value={stockTurnoverText(stock)} />
@@ -1300,7 +1370,64 @@ function StockHighlightCard({
           </div>
         </div>
       </div>
+      <div className="mt-4 grid gap-2 border-t border-[#F0ECF2] pt-3 sm:grid-cols-3">
+        <StockEvidenceCard
+          label="信号"
+          title={stockVolumeSignalText(stock)}
+          detail={stockVolumeMeta(stock) || '等待更多成交数据'}
+          icon={TrendingUp}
+          tone="mint"
+        />
+        <StockEvidenceCard
+          label="背景"
+          title={marketContextText(marketIndex)}
+          detail={marketContextMeta(marketIndex) || '市场数据持续更新'}
+          icon={FileText}
+          tone="sky"
+        />
+        <StockEvidenceCard
+          label="风险观察"
+          title={stockPositionText(stock)}
+          detail={stockPositionMeta(stock) || '继续观察价格与成交变化'}
+          icon={ShieldAlert}
+          tone="peach"
+        />
+      </div>
     </article>
+  );
+}
+
+function StockEvidenceCard({
+  label,
+  title,
+  detail,
+  icon: Icon,
+  tone,
+}: {
+  label: string;
+  title: string;
+  detail: string;
+  icon: typeof TrendingUp;
+  tone: 'mint' | 'sky' | 'peach';
+}): JSX.Element {
+  const toneClass = tone === 'mint'
+    ? 'border-[#D7EEE3] bg-[#F0FBF6] text-[#12835D]'
+    : tone === 'sky'
+      ? 'border-[#D9E8F6] bg-[#F0F8FF] text-[#3378B8]'
+      : 'border-[#F2DFC9] bg-[#FFF6EB] text-[#C46D24]';
+  return (
+    <div className={cn('min-w-0 rounded-[13px] border px-3 py-2.5', toneClass)}>
+      <div className="flex items-center gap-2">
+        <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[9px] bg-white/80">
+          <Icon className="h-3.5 w-3.5" aria-hidden />
+        </span>
+        <div className="min-w-0">
+          <div className="text-[10px] font-semibold">{label}</div>
+          <div className="mt-0.5 truncate text-[11px] font-semibold text-[#3E354A]">{title}</div>
+        </div>
+      </div>
+      <p className="mt-2 line-clamp-2 text-[10px] leading-4 text-[#766E7F]">{detail}</p>
+    </div>
   );
 }
 
@@ -1836,28 +1963,44 @@ function SectorTrends({
   className?: string;
   onInspect: () => void;
 }): JSX.Element {
+  const topSector = sectors[0] ?? null;
   return (
-    <Panel className={className}>
+    <Panel className={cn('flex h-full flex-col', className)}>
       <SectionHeader title="行业趋势" meta="涨幅榜" action="查看详情" onAction={onInspect} />
       {sectors.length === 0 ? (
         <EmptyState title="暂无真实行业数据" body="市场脉冲接口暂未返回行业排行，刷新后会自动补齐。" />
       ) : null}
       <div className="mt-3 space-y-1">
-        {sectors.map((sector) => (
-          <div key={sector.name} className="grid grid-cols-[1fr_auto_auto] items-center gap-3 border-b border-[#F1F2F5] py-2 last:border-b-0">
-            <div className="min-w-0">
-              <div className="truncate text-[13px] font-medium text-[#121826]">{sector.name}</div>
-              <div className="truncate text-[11px] text-[#8B92A1]">{sector.leader} · {sector.flow}</div>
+        {sectors.map((sector) => {
+          const trendValues = sectorTrendValues(sector.spark);
+          return (
+            <div key={sector.name} className="grid grid-cols-[minmax(0,1fr)_auto_56px] items-center gap-3 border-b border-[#F1F2F5] py-2.5 last:border-b-0">
+              <div className="min-w-0">
+                <div className="truncate text-[13px] font-medium text-[#121826]">{sector.name}</div>
+                <div className="truncate text-[11px] text-[#8B92A1]">{sector.leader} · {sector.flow}</div>
+              </div>
+              <ChangeText value={sector.changePct} compact />
+              {trendValues ? (
+                <Sparkline values={trendValues} positive={sector.changePct >= 0} className="h-6 w-14" />
+              ) : null}
             </div>
-            <ChangeText value={sector.changePct} compact />
-            {sector.spark.length >= 2 ? (
-              <Sparkline values={sector.spark} positive={sector.changePct >= 0} className="h-6 w-14" />
-            ) : (
-              <span className="w-14 text-right text-[10px] text-[#A0A7B3]">无走势</span>
-            )}
-          </div>
-        ))}
+          );
+        })}
       </div>
+      {topSector ? (
+        <div className="mt-auto border-t border-[#ECEEF3] pt-4">
+          <div className="text-[12px] font-semibold text-[#344054]">结构观察</div>
+          <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-[#667085]">
+            <span>领涨方向 {sectors.length} 个</span>
+            <span>
+              最高涨幅 <span className={MARKET_UP_CLASS}>{formatSignedPct(topSector.changePct)}</span>
+            </span>
+          </div>
+          <p className="mt-2 text-[12px] leading-relaxed text-[#667085]">
+            当前热点集中在{topSector.name}，继续结合领涨股与成交变化核验持续性。
+          </p>
+        </div>
+      ) : null}
     </Panel>
   );
 }
@@ -1945,9 +2088,8 @@ function MarketTemperature({
   }
   const score = temperature.score;
   const mood = temperature.mood;
-  const notes = temperature.notes;
   return (
-    <Panel>
+    <Panel className="flex h-full flex-col">
       <SectionHeader title="市场温度" action="详情" onAction={onInspect} />
       <div className="mt-4 flex items-center gap-4">
         <div className="relative h-[118px] w-[118px] shrink-0">
@@ -1964,11 +2106,7 @@ function MarketTemperature({
           <MetricLine label="历史位置" value={temperature.historicalPosition} />
         </div>
       </div>
-      <div className="mt-4 space-y-2 border-t border-[#F1F2F5] pt-3 text-[12px] leading-relaxed text-[#4F5868]">
-        {notes.slice(0, 2).map((note) => (
-          <p key={note}>{note}</p>
-        ))}
-      </div>
+      <MarketTemperatureDetails score={score} notes={temperature.notes} />
     </Panel>
   );
 }
