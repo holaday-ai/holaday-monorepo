@@ -25,6 +25,7 @@ import {
 } from '@/components/stocks/StockScreeningWorkbench';
 import {
   StockMarketContextLayout,
+  StockResearchTable,
   StockTaskWorkspaceLayout,
 } from '@/components/stocks/StockWorkbenchLayout';
 import { Input } from '@/components/ui/input';
@@ -205,6 +206,7 @@ export function StockTasksPage(): JSX.Element {
   const [screeningView, setScreeningView] = React.useState<StockScreeningViewState>('idle');
   const [activeLeaderboard, setActiveLeaderboard] = React.useState<'涨幅榜' | '跌幅榜' | '成交额榜' | '换手率榜'>('涨幅榜');
   const pageAlive = React.useRef(true);
+  const promptInputRef = React.useRef<HTMLInputElement | null>(null);
   const dashboardRefreshInFlight = React.useRef(false);
   const dashboardCompletionRetries = React.useRef(0);
   const discoveryNextPage = React.useRef<Record<MarketDiscoveryFeed, number>>({
@@ -216,6 +218,12 @@ export function StockTasksPage(): JSX.Element {
   const loadingDiscoveryFeeds = React.useRef(new Set<MarketDiscoveryFeed>());
   const refreshPreferenceProfile = React.useCallback(() => {
     setPreferenceRevision((current) => current + 1);
+  }, []);
+  const prepareTrackingTask = React.useCallback(() => {
+    setPrompt((current) => current.trim()
+      ? current
+      : '跟踪我的关注股票，出现风险信号升高或异常放量时提醒我');
+    promptInputRef.current?.focus();
   }, []);
 
   React.useEffect(() => {
@@ -621,11 +629,11 @@ export function StockTasksPage(): JSX.Element {
   }, [briefingBusy, briefingUnavailable, enabled, loadingDashboard]);
 
   return (
-    <div className="min-h-full bg-[#FAFAFB] text-[#121826]">
-      <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-5 px-4 pb-4 pt-14 sm:px-5 min-[769px]:pt-4 lg:px-6">
+    <div className="min-h-full bg-[#FBFAFD] text-[#121826]">
+      <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-4 px-4 pb-4 pt-14 sm:px-5 min-[769px]:pt-4 lg:px-6">
         <header className="flex flex-col gap-3 border-b border-[#E7E7EB] pb-3 min-[769px]:pr-[12rem] md:flex-row md:items-center md:justify-between">
           <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-[22px] font-semibold tracking-tight text-[#121826]">
+            <h1 className="text-[22px] font-semibold tracking-tight text-[#3E3154]">
               股市任务
             </h1>
             <span
@@ -653,16 +661,6 @@ export function StockTasksPage(): JSX.Element {
             >
               <RefreshCw className={cn('h-3.5 w-3.5', refreshingDashboard || loadingDashboard ? 'animate-spin' : '')} aria-hidden />
               刷新
-            </button>
-            <button
-              type="button"
-              onClick={() => void generateBriefing()}
-              disabled={briefingGenerating || loadingDashboard || briefingUnavailable}
-              title={briefingUnavailableTitle}
-              className="inline-flex h-8 items-center gap-2 rounded-[8px] border border-[#DCDDDD] bg-white px-3 transition-colors hover:border-[#EA1F59]/30 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {briefingGenerating ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <FileText className="h-3.5 w-3.5" aria-hidden />}
-              {temporalCopy.briefingCommand}
             </button>
             <button
               type="button"
@@ -703,6 +701,7 @@ export function StockTasksPage(): JSX.Element {
             className="flex min-h-[68px] items-center gap-3 rounded-[6px] border border-transparent bg-[#FCFCFD] px-3 transition-colors focus-within:border-[#EA1F59]/30"
           >
             <input
+              ref={promptInputRef}
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
               placeholder={temporalCopy.promptPlaceholder}
@@ -799,6 +798,7 @@ export function StockTasksPage(): JSX.Element {
                 temporalMode={dashboardTrust.tone}
               />}
               screeningView={screeningView}
+              onCreateTrackingTask={prepareTrackingTask}
             />
             <StockMarketContextLayout
               discovery={<DiscoveryPanel
@@ -1135,14 +1135,20 @@ function MarketHighlights({
   temporalMode: StockTemporalMode;
 }): JSX.Element {
   const hasRealQuotes = stocks.some((stock) => stock.price !== '—' || stock.spark.length >= 2);
-  const highlightStocks = stocks.filter((stock) => stock.price !== '—' || stock.spark.length >= 2).slice(0, 4);
+  const researchStocks = stocks.slice(0, 12);
+  const firstResearchStock = researchStocks.find((stock) => stock.price !== '—' || stock.spark.length >= 2)
+    ?? researchStocks[0]
+    ?? null;
+  const [selectedSymbol, setSelectedSymbol] = React.useState<string | null>(null);
+  const selectedStock = researchStocks.find((stock) => stock.symbol === selectedSymbol)
+    ?? firstResearchStock;
   const primaryIndex = marketIndices.find((row) => row.name.includes('上证')) ?? marketIndices[0] ?? null;
   return (
-    <section className="rounded-[8px] border border-[#E1E3E8] bg-white p-4 shadow-[0_8px_24px_rgba(18,24,38,0.035)]">
+    <section className="rounded-[8px] border border-[#E7E1EC] bg-[#FFFDFB] p-3.5 shadow-[0_10px_28px_rgba(91,70,118,0.055)]">
       <SectionHeader
-        title="亮点"
+        title="关注股票"
         meta={loading ? '同步自选股中…' : sample ? `示例关注 · ${stocks.length} 只` : `${stocks.length} 只关注股票`}
-        action="编辑"
+        action="管理列表"
         onAction={onEdit}
       />
       {!hasRealQuotes ? (
@@ -1172,21 +1178,32 @@ function MarketHighlights({
           </div>
         </div>
       ) : null}
-      {hasRealQuotes ? (
-        <div className="mt-4 space-y-3">
-          {highlightStocks.map((stock) => (
-            <StockHighlightCard
-              key={stock.symbol}
-              stock={stock}
-              marketIndex={primaryIndex}
-              updatedAt={updatedAt}
-              canGenerateBriefing={canGenerateBriefing}
-              briefingGenerating={briefingGenerating}
-              onGenerateBriefing={onGenerateBriefing}
-              temporalCopy={temporalCopy}
-              temporalMode={temporalMode}
-            />
-          ))}
+      {hasRealQuotes && selectedStock ? (
+        <div className="mt-3 space-y-3">
+          <StockResearchTable
+            rows={researchStocks.map((stock) => ({
+              symbol: stock.symbol,
+              name: stock.name,
+              price: formatStockPrice(stock),
+              changePct: stock.price === '—' ? null : stock.changePct,
+              turnover: stockTurnoverText(stock),
+              note: stock.note,
+              updatedAt: formatUpdateTime(updatedAt),
+            }))}
+            selectedSymbol={selectedStock.symbol}
+            onSelect={setSelectedSymbol}
+          />
+          <StockHighlightCard
+            key={selectedStock.symbol}
+            stock={selectedStock}
+            marketIndex={primaryIndex}
+            updatedAt={updatedAt}
+            canGenerateBriefing={canGenerateBriefing}
+            briefingGenerating={briefingGenerating}
+            onGenerateBriefing={onGenerateBriefing}
+            temporalCopy={temporalCopy}
+            temporalMode={temporalMode}
+          />
         </div>
       ) : null}
     </section>
@@ -1215,7 +1232,7 @@ function StockHighlightCard({
   const [hover, setHover] = React.useState<StockChartHover | null>(null);
   const chartKind = stock.sparkKind ?? 'daily_close';
   return (
-    <article className="group overflow-hidden rounded-[10px] border border-[#E7E7EB] bg-[#FEFEFF] px-4 pb-4 pt-4 transition-[border-color,box-shadow] hover:border-[#DADDE5] hover:shadow-[0_14px_28px_rgba(18,24,38,0.06)]">
+    <article className="group overflow-hidden rounded-[9px] border border-[#E7E1EC] bg-white px-4 pb-4 pt-4 transition-[border-color,box-shadow,transform] duration-200 hover:-translate-y-px hover:border-[#D9CCDF] hover:shadow-[0_14px_30px_rgba(91,70,118,0.09)]">
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_180px]">
         <div className="min-w-0">
           <div className="flex items-start justify-between gap-3">
