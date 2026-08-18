@@ -224,4 +224,30 @@ describe('StockPreferenceProfile', () => {
     await user.click(screen.getByRole('button', { name: '调整画像' }));
     expect((screen.getByRole('checkbox', { name: '半导体' }) as HTMLInputElement).checked).toBe(true);
   });
+
+  it('rechecks once after an explicit behavior so eventual database visibility reaches the card', async () => {
+    const stale = profile({
+      sample: { screeningRuns: 0, watchlistStocks: 1, manualDimensions: 0 },
+    });
+    const fresh = profile({
+      sample: { screeningRuns: 1, watchlistStocks: 1, manualDimensions: 0 },
+    });
+    const api = apiFor();
+    vi.mocked(api.load)
+      .mockResolvedValueOnce(stale)
+      .mockResolvedValueOnce(stale)
+      .mockResolvedValueOnce(fresh);
+    const view = render(<StockPreferenceProfile refreshKey={0} api={api} />);
+    await screen.findByText('0 次筛选');
+
+    view.rerender(<StockPreferenceProfile refreshKey={1} api={api} />);
+    await waitFor(() => expect(api.load).toHaveBeenCalledTimes(2));
+    expect(screen.getByText('0 次筛选')).toBeTruthy();
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 1_300));
+    });
+
+    await waitFor(() => expect(api.load).toHaveBeenCalledTimes(3));
+    expect(screen.getByText('1 次筛选')).toBeTruthy();
+  });
 });

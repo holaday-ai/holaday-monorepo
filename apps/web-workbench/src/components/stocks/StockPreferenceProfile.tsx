@@ -98,7 +98,11 @@ export function StockPreferenceProfile({
 
   React.useEffect(() => {
     void load();
+    const settleTimer = refreshKey > 0
+      ? window.setTimeout(() => void load(), 1_200)
+      : null;
     return () => {
+      if (settleTimer !== null) window.clearTimeout(settleTimer);
       requestVersion.current += 1;
     };
   }, [load, refreshKey]);
