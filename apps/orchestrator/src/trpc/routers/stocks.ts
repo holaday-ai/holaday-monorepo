@@ -41,6 +41,7 @@ import {
   runTrustedStockRiskRadar,
   stockRiskRadarInputSchema,
 } from './stocks-risk-radar.js';
+import { stockRiskMonitorProcedures } from './stocks-risk-monitor.js';
 import {
   previewStockScreening,
   previewStockScreeningInputSchema,
@@ -1917,6 +1918,7 @@ async function resolveDashboardSnapshot(args: {
 
 export const stocksRouter = router({
   ...stockPreferenceProcedures,
+  ...stockRiskMonitorProcedures,
   dashboardSnapshot: protectedProcedure.query(async ({ ctx }) => {
     const userInternalId = await requireUserId(ctx.db, ctx.userId);
     const watchlistRows = await listWatchlistForUser(ctx.db, userInternalId);

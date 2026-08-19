@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   formatRelative,
   notificationColor,
+  plannedNotificationHref,
   scheduledNotificationHref,
 } from './NotificationBell.js';
 
@@ -81,5 +82,17 @@ describe('scheduledNotificationHref', () => {
     expect(scheduledNotificationHref(0)).toBeNull();
     expect(scheduledNotificationHref(-1)).toBeNull();
     expect(scheduledNotificationHref(Number.NaN)).toBeNull();
+  });
+});
+
+describe('plannedNotificationHref', () => {
+  it('deep-links a risk alert to its owned planned-task record', () => {
+    expect(plannedNotificationHref('pln risk/1')).toBe('/planned?plan=pln%20risk%2F1');
+  });
+
+  it('rejects blank or missing planned-task ids', () => {
+    expect(plannedNotificationHref(null)).toBeNull();
+    expect(plannedNotificationHref('')).toBeNull();
+    expect(plannedNotificationHref('   ')).toBeNull();
   });
 });

@@ -5,6 +5,7 @@ import {
   datetime,
   index,
   int,
+  json,
   mysqlTable,
   text,
   uniqueIndex,
@@ -132,6 +133,7 @@ export const plannedTaskRuns = mysqlTable(
     itemsReview: int('items_review', { unsigned: true }).notNull().default(0),
     itemsFailed: int('items_failed', { unsigned: true }).notNull().default(0),
     errorMessage: text('error_message'),
+    resultJson: json('result_json'),
     startedAt: datetime('started_at', { mode: 'date', fsp: 3 }),
     completedAt: datetime('completed_at', { mode: 'date', fsp: 3 }),
     createdAt: datetime('created_at', { mode: 'date', fsp: 3 })

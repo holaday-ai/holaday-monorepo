@@ -40,6 +40,35 @@ interface QueuePlannedRunInput {
   claimed?: boolean;
 }
 
+export type PlannedRunSpecialDispatchResult =
+  | { handled: false }
+  | { handled: true; ok: boolean; errorMessage?: string };
+
+export type PlannedRunSpecialDispatcher = (input: {
+  ctx: AuthenticatedContext;
+  runExternalId: string;
+  plannedTaskInternalId: number;
+  trigger: 'scheduled' | 'manual';
+}) => Promise<PlannedRunSpecialDispatchResult>;
+
+let configuredSpecialDispatcher: PlannedRunSpecialDispatcher | null = null;
+
+export function configurePlannedRunSpecialDispatcher(
+  dispatcher: PlannedRunSpecialDispatcher | null,
+): void {
+  configuredSpecialDispatcher = dispatcher;
+}
+
+export async function dispatchSpecialOrGeneric(input: {
+  special?: (() => Promise<PlannedRunSpecialDispatchResult>) | null;
+  generic(): Promise<void>;
+}): Promise<PlannedRunSpecialDispatchResult> {
+  const specialized = input.special ? await input.special() : { handled: false as const };
+  if (specialized.handled) return specialized;
+  await input.generic();
+  return { handled: false };
+}
+
 export async function queuePlannedRun(
   ctx: AuthenticatedContext,
   input: QueuePlannedRunInput,
@@ -165,7 +194,7 @@ function startRunDispatch(ctx: AuthenticatedContext, runExternalId: string): voi
   });
 }
 
-async function dispatchPlannedRun(
+export async function dispatchPlannedRun(
   ctx: AuthenticatedContext,
   runExternalId: string,
 ): Promise<void> {
@@ -204,49 +233,69 @@ async function dispatchPlannedRun(
     .where(and(eq(plannedTaskRuns.id, run.id), eq(plannedTaskRuns.status, 'pending')));
 
   try {
-    if (runItems.length === 1) {
-      const item = runItems[0]!;
-      const result = await tasksRouter.createCaller(ctx).create({
-        intent: item.instruction,
-        clientRequestId: `planned:${runExternalId}:${item.seq}`,
-      });
-      const [task] = await ctx.db
-        .select({ id: tasks.id })
-        .from(tasks)
-        .where(eq(tasks.externalId, result.taskId))
-        .limit(1);
-      if (!task) throw new Error(`创建任务 ${result.taskId} 后未找到记录`);
-      await ctx.db.transaction(async (tx) => {
-        await tx
-          .update(plannedTaskRuns)
-          .set({ status: 'running', taskId: task.id })
-          .where(eq(plannedTaskRuns.id, run.id));
-        await tx
-          .update(plannedTaskRunItems)
-          .set({ status: 'running', taskId: task.id })
-          .where(eq(plannedTaskRunItems.id, item.id));
-      });
-    } else {
-      const result = await batchTasksRouter.createCaller(ctx).create({
-        name: run.planTitle,
-        prompts: runItems.map((item) => item.instruction),
-      });
-      const [batch] = await ctx.db
-        .select({ id: batchTasks.id })
-        .from(batchTasks)
-        .where(eq(batchTasks.externalId, result.batchId))
-        .limit(1);
-      if (!batch) throw new Error(`创建批量任务 ${result.batchId} 后未找到记录`);
-      await ctx.db
-        .update(plannedTaskRuns)
-        .set({ status: 'running', batchTaskId: batch.id })
-        .where(eq(plannedTaskRuns.id, run.id));
-      await ctx.db
-        .update(plannedTaskRunItems)
-        .set({ status: 'running' })
-        .where(eq(plannedTaskRunItems.plannedTaskRunId, run.id));
-    }
-    await updatePlanAfterDispatch(ctx.db, run, true, null);
+    const specialDispatcher = configuredSpecialDispatcher;
+    const dispatchResult = await dispatchSpecialOrGeneric({
+      special: specialDispatcher
+        ? () => specialDispatcher({
+            ctx,
+            runExternalId,
+            plannedTaskInternalId: run.planId,
+            trigger: run.trigger as 'scheduled' | 'manual',
+          })
+        : null,
+      generic: async () => {
+        if (runItems.length === 1) {
+          const item = runItems[0];
+          if (!item) throw new Error(`规划运行 ${runExternalId} 缺少任务项`);
+          const result = await tasksRouter.createCaller(ctx).create({
+            intent: item.instruction,
+            clientRequestId: `planned:${runExternalId}:${item.seq}`,
+          });
+          const [task] = await ctx.db
+            .select({ id: tasks.id })
+            .from(tasks)
+            .where(eq(tasks.externalId, result.taskId))
+            .limit(1);
+          if (!task) throw new Error(`创建任务 ${result.taskId} 后未找到记录`);
+          await ctx.db.transaction(async (tx) => {
+            await tx
+              .update(plannedTaskRuns)
+              .set({ status: 'running', taskId: task.id })
+              .where(eq(plannedTaskRuns.id, run.id));
+            await tx
+              .update(plannedTaskRunItems)
+              .set({ status: 'running', taskId: task.id })
+              .where(eq(plannedTaskRunItems.id, item.id));
+          });
+        } else {
+          const result = await batchTasksRouter.createCaller(ctx).create({
+            name: run.planTitle,
+            prompts: runItems.map((item) => item.instruction),
+          });
+          const [batch] = await ctx.db
+            .select({ id: batchTasks.id })
+            .from(batchTasks)
+            .where(eq(batchTasks.externalId, result.batchId))
+            .limit(1);
+          if (!batch) throw new Error(`创建批量任务 ${result.batchId} 后未找到记录`);
+          await ctx.db
+            .update(plannedTaskRuns)
+            .set({ status: 'running', batchTaskId: batch.id })
+            .where(eq(plannedTaskRuns.id, run.id));
+          await ctx.db
+            .update(plannedTaskRunItems)
+            .set({ status: 'running' })
+            .where(eq(plannedTaskRunItems.plannedTaskRunId, run.id));
+        }
+      },
+    });
+    await updatePlanAfterDispatch(
+      ctx.db,
+      run,
+      dispatchResult.handled ? dispatchResult.ok : true,
+      dispatchResult.handled ? dispatchResult.errorMessage ?? null : null,
+      dispatchResult.handled && dispatchResult.ok ? 'completed' : undefined,
+    );
   } catch (error) {
     const message = (error instanceof Error ? error.message : String(error)).slice(0, 2000);
     await ctx.db.transaction(async (tx) => {
@@ -281,10 +330,11 @@ async function updatePlanAfterDispatch(
   },
   ok: boolean,
   error: string | null,
+  successfulStatus: 'running' | 'completed' = 'running',
 ): Promise<void> {
   const base = {
     lastRunAt: new Date(),
-    lastRunStatus: ok ? 'running' : 'failed',
+    lastRunStatus: ok ? successfulStatus : 'failed',
     lastError: error,
   };
   if (run.trigger !== 'scheduled') {

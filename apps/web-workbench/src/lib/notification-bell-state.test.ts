@@ -86,6 +86,7 @@ describe('notification bell state helpers', () => {
       isRead: false,
       createdAt: '2026-08-05T00:00:00.000Z',
       scheduledTaskInternalId: null,
+      plannedTaskId: null,
     };
     expect(
       normalizeNotificationPage({
@@ -107,6 +108,7 @@ describe('notification bell state helpers', () => {
       isRead: false,
       createdAt: '2026-08-05T00:00:00.000Z',
       scheduledTaskInternalId: null,
+      plannedTaskId: null,
     };
     expect(
       mergeNotificationRows(
@@ -120,5 +122,26 @@ describe('notification bell state helpers', () => {
       ['not_1', true],
       ['not_2', false],
     ]);
+  });
+
+  it('normalizes a planned-task notification link without trusting blank ids', () => {
+    const base = {
+      notificationId: 'not_risk',
+      type: 'task_reminder',
+      title: '风险变化',
+      message: '查看记录',
+      isRead: false,
+      createdAt: '2026-08-19T08:00:00.000Z',
+      scheduledTaskInternalId: null,
+    };
+
+    expect(
+      normalizeNotificationPage([{ ...base, plannedTaskId: 'pln_risk_1' }]).items[0]
+        ?.plannedTaskId,
+    ).toBe('pln_risk_1');
+    expect(
+      normalizeNotificationPage([{ ...base, plannedTaskId: '   ' }]).items[0]
+        ?.plannedTaskId,
+    ).toBeNull();
   });
 });

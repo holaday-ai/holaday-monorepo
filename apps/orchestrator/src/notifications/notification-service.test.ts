@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { notify } from './notification-service.js';
+import { notify, type NotifyDeps } from './notification-service.js';
 import type { sendWebhook } from './webhook-sender.js';
 
 /**
@@ -25,7 +25,13 @@ function makeDbStub(opts: {
   insertThrows?: Error;
   selectThrows?: Error;
 }) {
-  const inserted: Array<{ externalId: string; userId: number; type: string }> = [];
+  const inserted: Array<{
+    externalId: string;
+    userId: number;
+    type: string;
+    plannedTaskId?: number | null;
+  }> = [];
+  let selectCount = 0;
   const db = {
     insert: () => ({
       values: (row: { externalId: string; userId: number; type: string }) => {
@@ -37,14 +43,14 @@ function makeDbStub(opts: {
     select: () => ({
       from: () => ({
         where: () => {
+          selectCount += 1;
           if (opts.selectThrows) return Promise.reject(opts.selectThrows);
           return Promise.resolve(opts.channels ?? []);
         },
       }),
     }),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  } as any;
-  return { db, inserted };
+  } as unknown as NotifyDeps['db'];
+  return { db, inserted, selectCount: () => selectCount };
 }
 
 const NOOP_LOGGER = {
@@ -54,6 +60,33 @@ const NOOP_LOGGER = {
 };
 
 describe('notify', () => {
+  it('writes stock alerts in-app without enumerating or sending webhook channels', async () => {
+    const { db, inserted, selectCount } = makeDbStub({
+      channels: [
+        { externalId: 'nch_1', platform: 'wecom', webhookUrl: 'u1', customTemplate: null },
+      ],
+    });
+    const sendMock = vi.fn();
+    const result = await notify(
+      { db, logger: NOOP_LOGGER, send: sendMock },
+      {
+        userInternalId: 42,
+        type: 'task_complete',
+        title: '多伦科技风险发生变化',
+        message: '数据日期 2026-08-19：升级 1 条',
+        plannedTaskInternalId: 77,
+        delivery: 'in_app_only',
+      },
+    );
+    expect(inserted).toEqual([
+      expect.objectContaining({ userId: 42, plannedTaskId: 77 }),
+    ]);
+    expect(result.channelResults).toEqual([]);
+    expect(result.inAppStored).toBe(true);
+    expect(selectCount()).toBe(0);
+    expect(sendMock).not.toHaveBeenCalled();
+  });
+
   it('writes inbox row + skips webhooks when user has no channels', async () => {
     const { db, inserted } = makeDbStub({ channels: [] });
     const sendMock = vi.fn();
@@ -70,6 +103,7 @@ describe('notify', () => {
     expect(inserted[0]?.userId).toBe(42);
     expect(inserted[0]?.type).toBe('task_complete');
     expect(res.channelResults).toEqual([]);
+    expect(res.inAppStored).toBe(true);
     expect(sendMock).not.toHaveBeenCalled();
   });
 
@@ -160,6 +194,7 @@ describe('notify', () => {
       },
     );
     expect(res.channelResults).toEqual([]);
+    expect(res.inAppStored).toBe(false);
     expect(NOOP_LOGGER.error).toHaveBeenCalled();
     expect(sendMock).not.toHaveBeenCalled();
   });
@@ -202,7 +237,8 @@ describe('notify', () => {
         taskName: '每日新闻',
       },
     );
-    const ctxArg = sendMock.mock.calls[0]![1];
+    const ctxArg = sendMock.mock.calls[0]?.[1];
+    if (!ctxArg) throw new Error('expected webhook context');
     expect(ctxArg.taskName).toBe('每日新闻');
     expect(ctxArg.status).toBe('failed');
   });
@@ -226,7 +262,8 @@ describe('notify', () => {
         taskName: '每日新闻',
       },
     );
-    const ctxArg = sendMock.mock.calls[0]![1];
+    const ctxArg = sendMock.mock.calls[0]?.[1];
+    if (!ctxArg) throw new Error('expected webhook context');
     expect(ctxArg.status).toBe('started');
   });
 
@@ -249,7 +286,8 @@ describe('notify', () => {
         taskName: '每日新闻',
       },
     );
-    const ctxArg = sendMock.mock.calls[0]![1];
+    const ctxArg = sendMock.mock.calls[0]?.[1];
+    if (!ctxArg) throw new Error('expected webhook context');
     expect(ctxArg.status).toBe('reminder');
   });
 
@@ -272,7 +310,8 @@ describe('notify', () => {
         taskName: '每日简报',
       },
     );
-    const ctxArg = sendMock.mock.calls[0]![1];
+    const ctxArg = sendMock.mock.calls[0]?.[1];
+    if (!ctxArg) throw new Error('expected webhook context');
     expect(ctxArg.status).toBe('skipped');
   });
 });

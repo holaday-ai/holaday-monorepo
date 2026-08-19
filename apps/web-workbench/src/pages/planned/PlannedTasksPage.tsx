@@ -41,7 +41,7 @@ import {
   X,
 } from 'lucide-react';
 import * as React from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   firstPlannedEditorError,
   plannedEditorFingerprint,
@@ -62,12 +62,14 @@ import {
   defaultPlannedCalendarView,
   legacyScheduledEvent,
   nextPlannedEndState,
+  ownedPlannedTaskQueryTarget,
   plannedCalendarEmptyState,
   plannedEndsOnPayload,
   plannedRepeatLabel,
   plannedRefreshTargets,
   plannedStatusGroup,
   stablePlannedCalendarRange,
+  stockRiskRunSummary,
   workloadHint,
 } from './planned-task-state';
 import './planned-tasks.css';
@@ -122,6 +124,7 @@ interface PlannedRunRow {
   errorMessage: string | null;
   startedAt: string | Date | null;
   completedAt: string | Date | null;
+  resultJson: unknown;
 }
 
 interface LegacyScheduledTaskRow {
@@ -182,6 +185,7 @@ function emptyEditor(date = nextWholeHour()): EditorState {
 export function PlannedTasksPage(): JSX.Element {
   const toast = useToast();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const calendarRef = React.useRef<FullCalendar | null>(null);
   const mountedRef = React.useRef(true);
   const instructionRef = React.useRef<HTMLTextAreaElement | null>(null);
@@ -195,6 +199,7 @@ export function PlannedTasksPage(): JSX.Element {
   const telemetryReportedRef = React.useRef(false);
   const mountRefreshStartedRef = React.useRef(false);
   const lastRangeRefreshKeyRef = React.useRef<string | null>(null);
+  const lastHandledPlanQueryRef = React.useRef<string | null>(null);
   const initialLoadStartedRef = React.useRef(performance.now());
   const [view, setView] = React.useState<PlannedCalendarView>(() =>
     defaultPlannedCalendarView(matchMobile(), readSavedView()),
@@ -330,6 +335,19 @@ export function PlannedTasksPage(): JSX.Element {
     lastRangeRefreshKeyRef.current = key;
     void runRefresh('range', range);
   }, [range, runRefresh]);
+
+  React.useEffect(() => {
+    const planQuery = searchParams.get('plan');
+    if (plansLoading || planQuery === null || lastHandledPlanQueryRef.current === planQuery) {
+      return;
+    }
+    lastHandledPlanQueryRef.current = planQuery;
+    const target = ownedPlannedTaskQueryTarget(planQuery, plans);
+    if (target) openPlan(target, null);
+    // `openPlan` is intentionally handled once per query value. Plan refreshes must not
+    // reopen the inspector or issue duplicate detail requests.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plans, plansLoading, searchParams]);
 
   React.useEffect(() => {
     if (!editor?.plannedTaskId) {
@@ -1211,20 +1229,40 @@ export function PlannedTasksPage(): JSX.Element {
                   {runs.length === 0 ? (
                     <p>还没有执行记录。</p>
                   ) : (
-                    runs.map((run) => (
-                      <div className="planned-run" key={run.runId}>
-                        <span className={`planned-run__status planned-run__status--${run.status}`}>
-                          {runStatusLabel(run.status)}
-                        </span>
-                        <div>
-                          <strong>{run.title}</strong>
-                          <small>
-                            {formatDateTime(run.scheduledFor)} · {run.itemsDone}/{run.itemsTotal}{' '}
-                            完成{run.itemsFailed > 0 ? ` · ${run.itemsFailed} 失败` : ''}
-                          </small>
+                    runs.map((run) => {
+                      const riskSummary = stockRiskRunSummary(run.resultJson);
+                      return (
+                        <div className="planned-run" key={run.runId}>
+                          <span
+                            className={`planned-run__status planned-run__status--${run.status}`}
+                          >
+                            {runStatusLabel(run.status)}
+                          </span>
+                          <div>
+                            <strong>{run.title}</strong>
+                            <small>
+                              {formatDateTime(run.scheduledFor)} · {run.itemsDone}/{run.itemsTotal}{' '}
+                              完成{run.itemsFailed > 0 ? ` · ${run.itemsFailed} 失败` : ''}
+                            </small>
+                            {riskSummary && (
+                              <div className="planned-run__risk-summary">
+                                <div className="planned-run__risk-meta">
+                                  <span>{riskSummary.outcomeLabel}</span>
+                                  {riskSummary.dataAsOf && <span>数据 {riskSummary.dataAsOf}</span>}
+                                  {riskSummary.changeCount > 0 && (
+                                    <span>{riskSummary.changeCount} 项变化</span>
+                                  )}
+                                  {riskSummary.unavailableCount > 0 && (
+                                    <span>{riskSummary.unavailableCount} 项暂不可判断</span>
+                                  )}
+                                </div>
+                                <p>{riskSummary.summary}</p>
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
               )}

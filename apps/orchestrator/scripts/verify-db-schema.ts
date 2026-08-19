@@ -43,6 +43,7 @@ const REQUIRED_TABLES = [
   'stock_dashboard_snapshots',
   'stock_preference_profiles',
   'stock_preference_signals',
+  'stock_risk_monitors',
   'task_events',
   'task_files',
   'task_quotas',
@@ -197,6 +198,7 @@ const REQUIRED_COLUMNS: Record<string, readonly string[]> = {
     'trigger',
     'status',
     'items_total',
+    'result_json',
   ],
   planned_task_run_items: [
     'external_id',
@@ -229,6 +231,20 @@ const REQUIRED_COLUMNS: Record<string, readonly string[]> = {
   api_keys: ['external_id', 'user_id', 'name', 'key_prefix', 'key_hash', 'last_used_at'],
   stock_preference_profiles: ['user_id', 'enabled', 'manual_preferences_json', 'cleared_at'],
   stock_preference_signals: ['user_id', 'kind', 'dedupe_hash', 'payload_json', 'data_as_of', 'occurred_at'],
+  stock_risk_monitors: [
+    'external_id',
+    'user_id',
+    'planned_task_id',
+    'symbol',
+    'name',
+    'market',
+    'risk_keys_json',
+    'last_evaluated_data_as_of',
+    'last_signals_json',
+    'last_unavailable_checks_json',
+    'last_notification_fingerprint',
+  ],
+  notifications: ['planned_task_id'],
 };
 
 async function main(): Promise<void> {

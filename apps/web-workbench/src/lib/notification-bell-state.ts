@@ -13,6 +13,7 @@ export interface NormalizedNotificationRow {
   readonly isRead: boolean;
   readonly createdAt: string | Date;
   readonly scheduledTaskInternalId: number | null;
+  readonly plannedTaskId: string | null;
 }
 
 export interface NormalizedNotificationPage {
@@ -56,6 +57,7 @@ function normalizeNotificationRows(value: unknown): NormalizedNotificationRow[] 
       row.scheduledTaskInternalId > 0
         ? row.scheduledTaskInternalId
         : null;
+    const plannedTaskId = safeText(row.plannedTaskId) || null;
     const createdAt = safeDate(row.createdAt) ?? '';
     return [
       {
@@ -66,6 +68,7 @@ function normalizeNotificationRows(value: unknown): NormalizedNotificationRow[] 
         isRead: row.isRead === true,
         createdAt,
         scheduledTaskInternalId,
+        plannedTaskId,
       },
     ];
   });
