@@ -166,7 +166,7 @@ export function StockPreferenceProfile({
 
   return (
     <section className="overflow-hidden rounded-[8px] border border-[#E1E3E8] bg-white shadow-[0_8px_24px_rgba(18,24,38,0.035)]">
-      <header className="flex flex-col gap-3 border-b border-[#ECEEF2] px-4 py-4 sm:flex-row sm:items-start sm:justify-between sm:px-5">
+      <header className="flex flex-col gap-3 border-b border-[#ECEEF2] px-4 py-4 sm:px-5">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <span className="inline-flex h-8 w-8 items-center justify-center rounded-[8px] bg-[#FFF0F4] text-[#D91952]">
@@ -181,14 +181,14 @@ export function StockPreferenceProfile({
             汇总你主动设置、成功筛选和清空后新增关注的可核验迹象，只描述研究习惯，不推断投资者类型或风险承受能力。
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2 self-end">
           <button
             type="button"
             onClick={() => void load()}
             disabled={loading}
             aria-label="刷新选股偏好"
             title="刷新选股偏好"
-            className="inline-flex h-9 w-9 items-center justify-center rounded-[7px] border border-[#DDE0E6] bg-white text-[#667085] transition hover:border-[#EA1F59]/30 hover:text-[#D91952] disabled:opacity-50"
+            className="inline-flex h-11 w-11 items-center justify-center rounded-[7px] border border-[#DDE0E6] bg-white text-[#667085] transition hover:border-[#EA1F59]/30 hover:text-[#D91952] disabled:opacity-50 sm:h-9 sm:w-9"
           >
             <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} aria-hidden />
           </button>
@@ -199,7 +199,7 @@ export function StockPreferenceProfile({
               disabled={saving}
               aria-label="暂停画像"
               title="暂停画像"
-              className="inline-flex h-9 w-9 items-center justify-center rounded-[7px] border border-[#DDE0E6] bg-white text-[#667085] transition hover:border-[#EA1F59]/30 hover:text-[#D91952] disabled:opacity-50"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-[7px] border border-[#DDE0E6] bg-white text-[#667085] transition hover:border-[#EA1F59]/30 hover:text-[#D91952] disabled:opacity-50 sm:h-9 sm:w-9"
             >
               <Pause className="h-3.5 w-3.5" aria-hidden />
             </button>
@@ -208,7 +208,7 @@ export function StockPreferenceProfile({
             <button
               type="button"
               onClick={openEditor}
-              className="inline-flex h-9 items-center justify-center gap-1.5 rounded-[7px] border border-[#DDE0E6] bg-white px-3 text-[12px] font-semibold text-[#4F5868] transition hover:border-[#EA1F59]/30 hover:text-[#D91952]"
+              className="inline-flex h-11 items-center justify-center gap-1.5 whitespace-nowrap rounded-[7px] border border-[#DDE0E6] bg-white px-3 text-[12px] font-semibold text-[#4F5868] transition hover:border-[#EA1F59]/30 hover:text-[#D91952] sm:h-9"
             >
               <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden />
               调整画像

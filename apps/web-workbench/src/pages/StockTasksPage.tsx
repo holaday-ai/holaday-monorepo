@@ -654,7 +654,7 @@ export function StockTasksPage(): JSX.Element {
               type="button"
               onClick={() => void loadPageData('manual')}
               disabled={refreshingDashboard || loadingDashboard}
-              className="inline-flex h-8 items-center gap-2 rounded-[8px] border border-[#DCDDDD] bg-white px-3 transition-colors hover:border-[#EA1F59]/30 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex h-11 min-[769px]:h-8 items-center gap-2 rounded-[8px] border border-[#DCDDDD] bg-white px-3 transition-colors hover:border-[#EA1F59]/30 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-60"
             >
               <RefreshCw className={cn('h-3.5 w-3.5', refreshingDashboard || loadingDashboard ? 'animate-spin' : '')} aria-hidden />
               刷新
@@ -664,7 +664,7 @@ export function StockTasksPage(): JSX.Element {
               onClick={toggleBriefing}
               disabled={briefingBusy || loadingDashboard || briefingUnavailable}
               title={briefingUnavailableTitle}
-              className="inline-flex h-8 items-center gap-2 rounded-[8px] border border-[#DCDDDD] bg-white px-3 transition-colors hover:border-[#EA1F59]/30 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex h-11 min-[769px]:h-8 items-center gap-2 rounded-[8px] border border-[#DCDDDD] bg-white px-3 transition-colors hover:border-[#EA1F59]/30 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {briefingBusy ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
