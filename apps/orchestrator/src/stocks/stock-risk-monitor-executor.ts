@@ -1,5 +1,6 @@
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, isNull, ne, or } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
+import { readAffectedRows } from '../db/mysql-result.js';
 import {
   plannedTaskRunItems,
   plannedTaskRuns,
@@ -7,6 +8,7 @@ import {
 } from '../db/schema/planned-tasks.js';
 import { stockDashboardSnapshots } from '../db/schema/stock-dashboard-snapshots.js';
 import { stockRiskMonitors } from '../db/schema/stock-risk-monitors.js';
+import { notify, type NotifyDeps } from '../notifications/notification-service.js';
 import { validateStockTaskContextSnapshot } from './stock-task-context.js';
 import {
   runStockRiskRadar,
@@ -371,10 +373,7 @@ function latestSnapshot(value: unknown, symbol: string): LatestStockRiskSnapshot
 export function createStockRiskMonitorSpecialDispatcher(args: {
   db: DB;
   client: StockRiskRadarClient;
-  logger: {
-    info?(obj: Record<string, unknown>, msg: string): void;
-    error(obj: Record<string, unknown>, msg: string): void;
-  };
+  logger: NonNullable<NotifyDeps['logger']>;
 }) {
   const deps: StockRiskMonitorExecutionDeps = {
     async loadMonitor(plannedTaskId) {
@@ -421,6 +420,7 @@ export function createStockRiskMonitorSpecialDispatcher(args: {
     }),
     async complete(input) {
       const completedAt = new Date();
+      let notificationAcquired = false;
       await args.db.transaction(async (tx) => {
         const [run] = await tx
           .select({ id: plannedTaskRuns.id })
@@ -447,15 +447,23 @@ export function createStockRiskMonitorSpecialDispatcher(args: {
             lastEvaluatedDataAsOf: input.result.dataAsOf,
             lastSignalsJson: input.nextSignals,
             lastUnavailableChecksJson: input.nextUnavailableChecks,
-            ...(input.notificationFingerprint
-              ? { lastNotificationFingerprint: input.notificationFingerprint }
-              : {}),
           }).where(eq(stockRiskMonitors.plannedTaskId, input.monitor.plannedTaskId));
-        } else if (input.notificationFingerprint) {
+        } else {
           await tx.update(stockRiskMonitors).set({
             lastUnavailableChecksJson: input.nextUnavailableChecks,
-            lastNotificationFingerprint: input.notificationFingerprint,
           }).where(eq(stockRiskMonitors.plannedTaskId, input.monitor.plannedTaskId));
+        }
+        if (input.notificationFingerprint) {
+          const claim = await tx.update(stockRiskMonitors).set({
+            lastNotificationFingerprint: input.notificationFingerprint,
+          }).where(and(
+            eq(stockRiskMonitors.plannedTaskId, input.monitor.plannedTaskId),
+            or(
+              isNull(stockRiskMonitors.lastNotificationFingerprint),
+              ne(stockRiskMonitors.lastNotificationFingerprint, input.notificationFingerprint),
+            ),
+          ));
+          notificationAcquired = readAffectedRows(claim) > 0;
         }
         await tx.update(plannedTasks).set({
           lastRunAt: completedAt,
@@ -472,6 +480,25 @@ export function createStockRiskMonitorSpecialDispatcher(args: {
         changeCount: input.result.added.length + input.result.upgraded.length + input.result.resolved.length,
         unavailableCheckCount: input.result.unavailableChecks.length,
       }, 'stock-risk-monitor: completed');
+      if (
+        notificationAcquired
+        && (input.result.outcome === 'changed' || input.result.outcome === 'unavailable')
+      ) {
+        await notify(
+          { db: args.db, logger: args.logger },
+          {
+            userInternalId: input.monitor.userId,
+            plannedTaskInternalId: input.monitor.plannedTaskId,
+            type: input.result.outcome === 'changed' ? 'task_complete' : 'task_failed',
+            title: input.result.outcome === 'changed'
+              ? `${input.monitor.name}风险发生变化`
+              : `${input.monitor.name}风险暂时无法判断`,
+            message: input.result.summary,
+            taskName: `监控 ${input.monitor.name} 风险变化`,
+            delivery: 'in_app_only',
+          },
+        );
+      }
     },
     async fail(input) {
       const completedAt = new Date();

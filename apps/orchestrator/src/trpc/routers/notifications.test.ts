@@ -258,6 +258,43 @@ describe('notificationChannelsRouter — webhook target safety', () => {
 });
 
 describe('notificationsRouter — keyset pagination', () => {
+  it('returns the public planned task id for a stock-risk notification', async () => {
+    const notificationRows = [{
+      id: 103,
+      externalId: 'nfn_103',
+      type: 'task_complete',
+      title: '风险发生变化',
+      message: '数据日期 2026-08-19：升级 1 条',
+      isRead: false,
+      createdAt: new Date('2026-08-19T09:00:00Z'),
+      scheduledTaskId: null,
+      plannedTaskId: 77,
+    }];
+    const db = {
+      select() {
+        return {
+          from(table: unknown) {
+            const name = tableName(table);
+            return {
+              where() {
+                if (name === 'users') return { limit: async () => [{ id: 42 }] };
+                if (name === 'planned_tasks') return Promise.resolve([{ id: 77, externalId: 'pln_public' }]);
+                return { orderBy: () => ({ limit: async () => notificationRows }) };
+              },
+            };
+          },
+        };
+      },
+    };
+
+    const page = await notificationsRouter
+      .createCaller({ db, userId: 'usr_test', logger: fakeLogger } as never)
+      .list({ limit: 10 });
+
+    expect(page.items[0]).toMatchObject({ plannedTaskId: 'pln_public' });
+    expect(page.items[0]).not.toHaveProperty('plannedTaskInternalId');
+  });
+
   it('returns limit items plus a cursor when an older page exists', async () => {
     const rows = [
       {

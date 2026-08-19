@@ -25,7 +25,13 @@ function makeDbStub(opts: {
   insertThrows?: Error;
   selectThrows?: Error;
 }) {
-  const inserted: Array<{ externalId: string; userId: number; type: string }> = [];
+  const inserted: Array<{
+    externalId: string;
+    userId: number;
+    type: string;
+    plannedTaskId?: number | null;
+  }> = [];
+  let selectCount = 0;
   const db = {
     insert: () => ({
       values: (row: { externalId: string; userId: number; type: string }) => {
@@ -37,6 +43,7 @@ function makeDbStub(opts: {
     select: () => ({
       from: () => ({
         where: () => {
+          selectCount += 1;
           if (opts.selectThrows) return Promise.reject(opts.selectThrows);
           return Promise.resolve(opts.channels ?? []);
         },
@@ -44,7 +51,7 @@ function makeDbStub(opts: {
     }),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any;
-  return { db, inserted };
+  return { db, inserted, selectCount: () => selectCount };
 }
 
 const NOOP_LOGGER = {
@@ -54,6 +61,32 @@ const NOOP_LOGGER = {
 };
 
 describe('notify', () => {
+  it('writes stock alerts in-app without enumerating or sending webhook channels', async () => {
+    const { db, inserted, selectCount } = makeDbStub({
+      channels: [
+        { externalId: 'nch_1', platform: 'wecom', webhookUrl: 'u1', customTemplate: null },
+      ],
+    });
+    const sendMock = vi.fn();
+    const result = await notify(
+      { db, logger: NOOP_LOGGER, send: sendMock },
+      {
+        userInternalId: 42,
+        type: 'task_complete',
+        title: '多伦科技风险发生变化',
+        message: '数据日期 2026-08-19：升级 1 条',
+        plannedTaskInternalId: 77,
+        delivery: 'in_app_only',
+      },
+    );
+    expect(inserted).toEqual([
+      expect.objectContaining({ userId: 42, plannedTaskId: 77 }),
+    ]);
+    expect(result.channelResults).toEqual([]);
+    expect(selectCount()).toBe(0);
+    expect(sendMock).not.toHaveBeenCalled();
+  });
+
   it('writes inbox row + skips webhooks when user has no channels', async () => {
     const { db, inserted } = makeDbStub({ channels: [] });
     const sendMock = vi.fn();

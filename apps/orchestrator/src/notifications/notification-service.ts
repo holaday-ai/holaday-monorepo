@@ -42,6 +42,11 @@ export interface NotifyInput {
   /** Internal scheduled_tasks.id (bigint), or null for non-task
    *  notifications. */
   scheduledTaskInternalId?: number | null;
+  /** Internal planned_tasks.id for a planned-task detail deep link. */
+  plannedTaskInternalId?: number | null;
+  /** Stock-risk alerts are deliberately inbox-only until users have
+   *  explicit per-topic external-channel controls. */
+  delivery?: 'all' | 'in_app_only';
   /** Optional task label that flows into the webhook context's
    *  `taskName` placeholder. */
   taskName?: string;
@@ -103,6 +108,7 @@ export async function notify(
       title: input.title,
       message: input.message,
       scheduledTaskId: input.scheduledTaskInternalId ?? null,
+      plannedTaskId: input.plannedTaskInternalId ?? null,
       isRead: false,
     });
   } catch (err) {
@@ -116,6 +122,10 @@ export async function notify(
     // Without an inbox row, channel fan-out would still be useful,
     // but a DB failure here usually means everything is broken —
     // bail. The runner's dispatch path is unaffected.
+    return { notificationId: externalId, channelResults: [] };
+  }
+
+  if (input.delivery === 'in_app_only') {
     return { notificationId: externalId, channelResults: [] };
   }
 

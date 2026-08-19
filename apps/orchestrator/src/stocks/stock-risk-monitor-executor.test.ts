@@ -176,4 +176,26 @@ describe('stock risk monitor executor', () => {
       errorCode: 'STOCK_RISK_MONITOR_EXECUTION_FAILED',
     }));
   });
+
+  it('suppresses a retried notification with the same canonical fingerprint', async () => {
+    const firstDeps = deps();
+    const first = await executeStockRiskMonitorRun({
+      plannedTaskId: 42,
+      runExternalId: 'plr_5',
+      trigger: 'manual',
+      deps: firstDeps,
+    });
+    expect(first.handled && first.notification?.fingerprint).toBeTruthy();
+    const fingerprint = first.handled ? first.notification?.fingerprint ?? null : null;
+    const retryDeps = deps({
+      loadMonitor: vi.fn(async () => ({ ...monitor, lastNotificationFingerprint: fingerprint })),
+    });
+    const retry = await executeStockRiskMonitorRun({
+      plannedTaskId: 42,
+      runExternalId: 'plr_6',
+      trigger: 'scheduled',
+      deps: retryDeps,
+    });
+    expect(retry).toMatchObject({ handled: true, notification: null });
+  });
 });

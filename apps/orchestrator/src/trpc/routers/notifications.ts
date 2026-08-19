@@ -21,7 +21,7 @@
 
 import { newExternalId } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
-import { and, desc, eq, lt, or, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, lt, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import {
   notificationChannels,
@@ -29,6 +29,7 @@ import {
 } from '../../db/schema/notifications.js';
 import { readAffectedRows } from '../../db/mysql-result.js';
 import { users } from '../../db/schema/users.js';
+import { plannedTasks } from '../../db/schema/planned-tasks.js';
 import {
   buildPayload,
   sendWebhook,
@@ -176,6 +177,7 @@ export const notificationsRouter = router({
           isRead: notifications.isRead,
           createdAt: notifications.createdAt,
           scheduledTaskId: notifications.scheduledTaskId,
+          plannedTaskId: notifications.plannedTaskId,
         })
         .from(notifications)
         .where(and(...whereParts))
@@ -183,6 +185,20 @@ export const notificationsRouter = router({
         .limit(limit + 1);
       const hasMore = rows.length > limit;
       const page = rows.slice(0, limit);
+      const plannedTaskInternalIds = [...new Set(page.flatMap((row) =>
+        typeof row.plannedTaskId === 'number' ? [row.plannedTaskId] : []))];
+      const plannedTaskRows = plannedTaskInternalIds.length > 0
+        ? await ctx.db
+            .select({ id: plannedTasks.id, externalId: plannedTasks.externalId })
+            .from(plannedTasks)
+            .where(and(
+              eq(plannedTasks.userId, userId),
+              inArray(plannedTasks.id, plannedTaskInternalIds),
+            ))
+        : [];
+      const publicPlannedTaskIds = new Map(
+        plannedTaskRows.map((row) => [row.id, row.externalId]),
+      );
       const items = page.map((r) => ({
         notificationId: r.externalId,
         type: r.type,
@@ -191,6 +207,9 @@ export const notificationsRouter = router({
         isRead: r.isRead,
         createdAt: r.createdAt,
         scheduledTaskInternalId: r.scheduledTaskId,
+        plannedTaskId: r.plannedTaskId === null
+          ? null
+          : publicPlannedTaskIds.get(r.plannedTaskId) ?? null,
       }));
       const last = page[page.length - 1];
       return {
