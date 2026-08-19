@@ -320,7 +320,10 @@ describe('EnergyHome', () => {
     await user.click(screen.getByRole('button', { name: '玩接住能量' }));
     await user.click(screen.getByRole('button', { name: '开始体验' }));
     for (let round = 1; round <= 12; round += 1) {
-      await user.click(screen.getByRole('button', { name: `接住第 ${round} 个能量光点` }));
+      const catchButton = round === 1
+        ? await screen.findByRole('button', { name: '接住第 1 个能量光点' })
+        : screen.getByRole('button', { name: `接住第 ${round} 个能量光点` });
+      await user.click(catchButton);
     }
     expect(screen.getByRole('heading', { name: '能量收集完成' })).toBeTruthy();
     await user.click(screen.getByRole('button', { name: '返回今日内容' }));
