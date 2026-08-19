@@ -306,6 +306,21 @@ describe('StockPreferenceProfile', () => {
     );
   });
 
+  it('returns focus to the adjust-profile trigger after cancelling the editor', async () => {
+    const user = userEvent.setup();
+    render(<StockPreferenceProfile api={apiFor()} />);
+    await screen.findByText('筛选时持续关注估值');
+
+    const trigger = screen.getByRole('button', { name: '调整画像' });
+    await user.click(trigger);
+    const dialog = screen.getByRole('dialog', { name: '调整选股偏好' });
+    expect(document.activeElement).toBe(within(dialog).getByRole('checkbox', { name: '半导体' }));
+
+    await user.click(within(dialog).getByRole('button', { name: '取消' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '调整选股偏好' })).toBeNull());
+    expect(document.activeElement).toBe(trigger);
+  });
+
   it('requires a second action before clearing and states that the watchlist remains', async () => {
     const api = apiFor();
     const user = userEvent.setup();

@@ -138,7 +138,7 @@ function NextStepRail({
                 if (action.task) onNavigate(action.task);
               }}
               className={cn(
-                'group inline-flex h-9 min-w-0 items-center justify-center gap-2 rounded-[10px] border px-3 text-left transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/25 sm:min-w-[154px]',
+                'group inline-flex h-11 min-[769px]:h-9 min-w-0 items-center justify-center gap-2 rounded-[10px] border px-3 text-left transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/25 motion-reduce:transition-none sm:min-w-[154px]',
                 isPrimary
                   ? 'border-[#F2CCD7] bg-[#FFF0F4] text-[#B4234D] hover:border-[#EBAFC0] hover:bg-[#FFE8EF]'
                   : 'border-[#DDE5F1] bg-[#F7FAFF] text-[#475467] hover:border-[#C7D6EA] hover:bg-[#EEF6FF]',
@@ -146,7 +146,7 @@ function NextStepRail({
             >
               <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
               <span className="min-w-0 truncate text-[11px] font-semibold">{action.label}</span>
-              <ArrowRight className="h-3.5 w-3.5 shrink-0 opacity-55 transition group-hover:translate-x-0.5" aria-hidden />
+              <ArrowRight className="h-3.5 w-3.5 shrink-0 opacity-55 transition group-hover:translate-x-0.5 motion-reduce:transition-none" aria-hidden />
             </button>
           );
         })}
@@ -276,10 +276,16 @@ export function StockMarketContextLayout({
           title={expanded ? '收起市场背景' : '展开市场背景'}
           aria-expanded={expanded}
           onClick={() => setExpanded((current) => !current)}
-          className="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-[10px] border border-[#DED5E6] bg-[#F8F5FC] px-3 text-[11px] font-medium text-[#6B587D] transition hover:border-[#CDBCD8] hover:bg-[#F2EBF8]"
+          className="inline-flex h-11 min-[769px]:h-8 shrink-0 items-center justify-center gap-1.5 rounded-[10px] border border-[#DED5E6] bg-[#F8F5FC] px-3 text-[11px] font-medium text-[#6B587D] transition hover:border-[#CDBCD8] hover:bg-[#F2EBF8] motion-reduce:transition-none"
         >
           {expanded ? '收起资料' : '查看市场资料'}
-          <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', expanded ? 'rotate-180' : '')} aria-hidden />
+          <ChevronDown
+            className={cn(
+              'h-3.5 w-3.5 transition-transform motion-reduce:transition-none',
+              expanded ? 'rotate-180' : '',
+            )}
+            aria-hidden
+          />
         </button>
       </div>
       {expanded ? (

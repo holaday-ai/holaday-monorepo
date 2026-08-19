@@ -120,6 +120,28 @@ function result(overrides: Partial<StockRiskRadarResult> = {}): StockRiskRadarRe
 }
 
 describe('StockRiskRadar', () => {
+  it('announces the initial risk check without forcing motion', () => {
+    const api: StockRiskRadarApi = {
+      load: vi.fn(() => new Promise<StockRiskRadarResult>(() => undefined)),
+    };
+    render(
+      <StockRiskRadar
+        snapshotId={SNAPSHOT_A}
+        dataAsOf={DATA_AS_OF}
+        trustMode="current"
+        api={api}
+      />,
+    );
+
+    const loading = screen.getByLabelText('正在检查风险来源');
+    expect(loading.getAttribute('role')).toBe('status');
+    expect(loading.getAttribute('aria-live')).toBe('polite');
+    expect(loading.getAttribute('aria-busy')).toBe('true');
+    for (const skeleton of loading.children) {
+      expect(skeleton.className).toContain('motion-reduce:animate-none');
+    }
+  });
+
   it('groups events by stock while preserving event evidence and explicit unknown coverage', async () => {
     const api: StockRiskRadarApi = { load: vi.fn(async () => result()) };
     const user = userEvent.setup();

@@ -102,6 +102,11 @@ describe('StockTaskWorkspaceLayout', () => {
 
     const nextStep = screen.getByRole('complementary', { name: '下一步' });
     expect(nextStep.querySelectorAll('button')).toHaveLength(2);
+    for (const action of nextStep.querySelectorAll('button')) {
+      expect(action.className).toContain('h-11');
+      expect(action.className).toContain('min-[769px]:h-9');
+      expect(action.className).toContain('motion-reduce:transition-none');
+    }
     expect(screen.queryByRole('button', { name: '生成关注简报' })).toBeNull();
     expect(screen.queryByRole('button', { name: '设置跟踪任务' })).toBeNull();
     expect(screen.queryByText('核对触发条件与来源')).toBeNull();
@@ -176,7 +181,10 @@ describe('StockMarketContextLayout', () => {
 
     expect(screen.getByRole('heading', { name: '市场背景' })).toBeTruthy();
     expect(screen.queryByTestId('discovery')).toBeNull();
-    expect(screen.getByRole('button', { name: '展开市场背景' })).toBeTruthy();
+    const expand = screen.getByRole('button', { name: '展开市场背景' });
+    expect(expand.className).toContain('h-11');
+    expect(expand.className).toContain('min-[769px]:h-8');
+    expect(expand.className).toContain('motion-reduce:transition-none');
 
     await user.click(screen.getByRole('button', { name: '展开市场背景' }));
     expect(

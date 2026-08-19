@@ -90,6 +90,7 @@ export function StockPreferenceProfile({
   const [confirmClear, setConfirmClear] = React.useState(false);
   const [draft, setDraft] = React.useState<ManualPreferences | null>(null);
   const requestVersion = React.useRef(0);
+  const editorTriggerRef = React.useRef<HTMLButtonElement>(null);
   const completeProfileTriggerRef = React.useRef<HTMLButtonElement>(null);
 
   const load = React.useCallback(async () => {
@@ -206,9 +207,10 @@ export function StockPreferenceProfile({
           ) : null}
           {profile?.enabled ? (
             <button
+              ref={editorTriggerRef}
               type="button"
               onClick={openEditor}
-              className="inline-flex h-11 items-center justify-center gap-1.5 whitespace-nowrap rounded-[7px] border border-[#DDE0E6] bg-white px-3 text-[12px] font-semibold text-[#4F5868] transition hover:border-[#EA1F59]/30 hover:text-[#D91952] sm:h-9"
+              className="inline-flex h-11 items-center justify-center gap-1.5 whitespace-nowrap rounded-[7px] border border-[#DDE0E6] bg-white px-3 text-[12px] font-semibold text-[#4F5868] transition hover:border-[#EA1F59]/30 hover:text-[#D91952] motion-reduce:transition-none sm:h-9"
             >
               <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden />
               调整画像
@@ -225,7 +227,9 @@ export function StockPreferenceProfile({
           onEnable={() => void update(true, profile.manualPreferences)}
         />
       ) : null}
-      {profile?.state === 'empty' ? <EmptyState onEdit={openEditor} /> : null}
+      {profile?.state === 'empty' ? (
+        <EmptyState onEdit={openEditor} triggerRef={editorTriggerRef} />
+      ) : null}
       {profile?.state === 'ready' ? (
         presentation === 'compact' ? (
           <CompactReadyProfile
@@ -255,6 +259,7 @@ export function StockPreferenceProfile({
         draft={draft}
         saving={saving}
         confirmClear={confirmClear}
+        triggerRef={editorTriggerRef}
         onOpenChange={(open) => {
           setSheetOpen(open);
           if (!open) setConfirmClear(false);
@@ -278,8 +283,13 @@ export function StockPreferenceProfile({
 
 function LoadingState(): JSX.Element {
   return (
-    <div className="flex min-h-[150px] items-center justify-center gap-2 px-5 py-8 text-[12px] text-[#667085]">
-      <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+    <div
+      className="flex min-h-[150px] items-center justify-center gap-2 px-5 py-8 text-[12px] text-[#667085]"
+      aria-busy="true"
+      aria-live="polite"
+      role="status"
+    >
+      <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />
       正在整理你的明确偏好…
     </div>
   );
@@ -330,7 +340,13 @@ function DisabledState({
   );
 }
 
-function EmptyState({ onEdit }: { onEdit: () => void }): JSX.Element {
+function EmptyState({
+  onEdit,
+  triggerRef,
+}: {
+  onEdit: () => void;
+  triggerRef: React.RefObject<HTMLButtonElement>;
+}): JSX.Element {
   return (
     <div className="px-5 py-8 text-center">
       <Gauge className="mx-auto h-5 w-5 text-[#D28A17]" aria-hidden />
@@ -339,6 +355,7 @@ function EmptyState({ onEdit }: { onEdit: () => void }): JSX.Element {
         完成明确条件筛选、添加新的关注股票，或主动设置研究偏好后，画像会逐步形成；小样本不会被包装成确定结论。
       </p>
       <button
+        ref={triggerRef}
         type="button"
         onClick={onEdit}
         className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-[7px] border border-[#EA1F59] px-3 text-[11px] font-semibold text-[#D91952]"
@@ -556,6 +573,7 @@ function PreferenceEditor({
   draft,
   saving,
   confirmClear,
+  triggerRef,
   onOpenChange,
   onDraftChange,
   onSave,
@@ -566,6 +584,7 @@ function PreferenceEditor({
   draft: ManualPreferences | null;
   saving: boolean;
   confirmClear: boolean;
+  triggerRef: React.RefObject<HTMLButtonElement>;
   onOpenChange: (open: boolean) => void;
   onDraftChange: (draft: ManualPreferences) => void;
   onSave: () => void;
@@ -573,7 +592,13 @@ function PreferenceEditor({
 }): JSX.Element {
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="flex w-full max-w-[460px] flex-col bg-white p-0 sm:max-w-[460px]">
+      <SheetContent
+        className="flex w-full max-w-[460px] flex-col bg-white p-0 sm:max-w-[460px]"
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          triggerRef.current?.focus();
+        }}
+      >
         <SheetHeader className="border-b border-[#ECEEF3] px-5 py-4 pr-12">
           <SheetTitle className="text-[17px] text-[#121826]">调整选股偏好</SheetTitle>
           <SheetDescription className="text-[12px] leading-5 text-[#667085]">
