@@ -33,7 +33,66 @@ export interface PlannedCalendarRange {
   end: Date;
 }
 
+export interface StockRiskRunSummary {
+  outcome: 'changed' | 'unavailable' | 'unchanged' | 'skipped' | 'failed';
+  outcomeLabel: string;
+  dataAsOf: string | null;
+  summary: string;
+  changeCount: number;
+  unavailableCount: number;
+}
+
 const VALID_VIEWS = new Set<PlannedCalendarView>(['dayGridMonth', 'listMonth']);
+const STOCK_RISK_OUTCOME_LABELS: Record<StockRiskRunSummary['outcome'], string> = {
+  changed: '风险发生变化',
+  unavailable: '部分数据暂不可用',
+  unchanged: '风险状态无变化',
+  skipped: '本次已跳过',
+  failed: '检查失败',
+};
+
+export function ownedPlannedTaskQueryTarget(
+  value: string | null,
+  plans: readonly { plannedTaskId: string }[],
+): string | null {
+  if (!value || value.trim() !== value) return null;
+  return plans.some((plan) => plan.plannedTaskId === value) ? value : null;
+}
+
+export function stockRiskRunSummary(value: unknown): StockRiskRunSummary | null {
+  if (!isUnknownRecord(value)) return null;
+  if (value.kind !== 'stock-risk-monitor' || value.version !== 1) return null;
+  if (
+    typeof value.outcome !== 'string' ||
+    !Object.prototype.hasOwnProperty.call(STOCK_RISK_OUTCOME_LABELS, value.outcome)
+  ) {
+    return null;
+  }
+  if (typeof value.summary !== 'string') return null;
+  const summary = value.summary.trim();
+  if (!summary) return null;
+  const outcome = value.outcome as StockRiskRunSummary['outcome'];
+  return {
+    outcome,
+    outcomeLabel: STOCK_RISK_OUTCOME_LABELS[outcome],
+    dataAsOf:
+      typeof value.dataAsOf === 'string' ? value.dataAsOf.trim().slice(0, 32) || null : null,
+    summary: summary.slice(0, 500),
+    changeCount:
+      boundedArrayLength(value.added) +
+      boundedArrayLength(value.upgraded) +
+      boundedArrayLength(value.resolved),
+    unavailableCount: boundedArrayLength(value.unavailableChecks),
+  };
+}
+
+function boundedArrayLength(value: unknown): number {
+  return Array.isArray(value) ? Math.min(999, value.length) : 0;
+}
+
+function isUnknownRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
 
 export function defaultPlannedCalendarView(
   isMobile: boolean,

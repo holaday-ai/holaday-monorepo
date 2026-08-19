@@ -565,6 +565,32 @@
   color: #77757a;
   font-size: 10px;
 }
+.planned-run__risk-summary {
+  margin-top: 7px;
+  padding: 8px 9px;
+  border: 1px solid #eadff0;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #fff8fb 0%, #f7fbff 100%);
+}
+.planned-run__risk-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  color: #755a78;
+  font-size: 9px;
+  font-weight: 600;
+}
+.planned-run__risk-meta span + span::before {
+  margin-right: 8px;
+  color: #c7b9c8;
+  content: "·";
+}
+.planned-run__risk-summary p {
+  margin: 5px 0 0;
+  color: #595757;
+  font-size: 10px;
+  line-height: 1.55;
+}
 
 .planned-scope-dialog {
   position: fixed;

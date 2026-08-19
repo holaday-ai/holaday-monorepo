@@ -558,6 +558,7 @@ function NotificationDetailModal({
   const icon = TYPE_ICON[row.type] ?? <Bell className="h-3.5 w-3.5" />;
   const color = notificationColor(row.type);
   const scheduleHref = scheduledNotificationHref(row.scheduledTaskInternalId);
+  const plannedHref = plannedNotificationHref(row.plannedTaskId);
 
   return createPortal(
     <div
@@ -603,17 +604,29 @@ function NotificationDetailModal({
             <p className="py-6 text-center text-xs text-muted-foreground">此通知没有正文内容。</p>
           )}
         </div>
-        {scheduleHref && (
+        {(scheduleHref || plannedHref) && (
           <div className="flex justify-end border-t border-[#DCDDDD]/80 px-5 py-3 dark:border-white/10">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => onNavigate(scheduleHref)}
-              className="h-8 rounded-[6px] border-[#DCDDDD]/75 px-3 text-xs text-[#595757] hover:border-[#EA1F59]/25 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59]"
-            >
-              在定时任务中查看
-            </Button>
+            {plannedHref ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => onNavigate(plannedHref)}
+                className="h-8 rounded-[6px] border-[#DCDDDD]/75 px-3 text-xs text-[#595757] hover:border-[#EA1F59]/25 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59]"
+              >
+                查看规划记录
+              </Button>
+            ) : scheduleHref ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => onNavigate(scheduleHref)}
+                className="h-8 rounded-[6px] border-[#DCDDDD]/75 px-3 text-xs text-[#595757] hover:border-[#EA1F59]/25 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59]"
+              >
+                在定时任务中查看
+              </Button>
+            ) : null}
           </div>
         )}
       </div>
@@ -640,6 +653,12 @@ export function scheduledNotificationHref(
   return `/scheduled?focusScheduledTaskInternalId=${encodeURIComponent(
     String(scheduledTaskInternalId),
   )}`;
+}
+
+export function plannedNotificationHref(plannedTaskId: string | null): string | null {
+  const id = plannedTaskId?.trim();
+  if (!id) return null;
+  return `/planned?plan=${encodeURIComponent(id)}`;
 }
 
 /**

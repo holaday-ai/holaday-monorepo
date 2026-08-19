@@ -9,10 +9,12 @@ import {
   nextPlannedEndState,
   plannedCalendarEmptyState,
   plannedEndsOnPayload,
+  ownedPlannedTaskQueryTarget,
   plannedRepeatLabel,
   plannedRefreshTargets,
   plannedStatusGroup,
   stablePlannedCalendarRange,
+  stockRiskRunSummary,
   workloadHint,
 } from './planned-task-state';
 
@@ -187,6 +189,52 @@ describe('planned task presentation state', () => {
 
     const changed = { ...repeated, end: new Date('2026-10-01T00:00:00.000Z') };
     expect(stablePlannedCalendarRange(current, changed)).toBe(changed);
+  });
+
+  it('only accepts deep links for an exactly matched owned plan', () => {
+    const plans = [{ plannedTaskId: 'pln_owned' }, { plannedTaskId: 'pln_other' }];
+
+    expect(ownedPlannedTaskQueryTarget('pln_owned', plans)).toBe('pln_owned');
+    expect(ownedPlannedTaskQueryTarget('pln_foreign', plans)).toBeNull();
+    expect(ownedPlannedTaskQueryTarget(' pln_owned ', plans)).toBeNull();
+    expect(ownedPlannedTaskQueryTarget('', plans)).toBeNull();
+    expect(ownedPlannedTaskQueryTarget(null, plans)).toBeNull();
+  });
+
+  it('turns a versioned stock risk result into a bounded run summary', () => {
+    expect(
+      stockRiskRunSummary({
+        kind: 'stock-risk-monitor',
+        version: 1,
+        outcome: 'changed',
+        dataAsOf: '2026-08-19',
+        summary: '新增成交量异常，估值风险已缓解。',
+        added: [{ key: 'volume' }],
+        upgraded: [{ key: 'price' }],
+        resolved: [{ key: 'valuation' }],
+        unavailableChecks: ['news'],
+      }),
+    ).toEqual({
+      outcome: 'changed',
+      outcomeLabel: '风险发生变化',
+      dataAsOf: '2026-08-19',
+      summary: '新增成交量异常，估值风险已缓解。',
+      changeCount: 3,
+      unavailableCount: 1,
+    });
+  });
+
+  it('falls back for malformed or unknown risk result payloads', () => {
+    expect(stockRiskRunSummary(null)).toBeNull();
+    expect(stockRiskRunSummary({ kind: 'stock-risk-monitor', version: 2 })).toBeNull();
+    expect(
+      stockRiskRunSummary({
+        kind: 'stock-risk-monitor',
+        version: 1,
+        outcome: 'changed',
+        summary: 42,
+      }),
+    ).toBeNull();
   });
 });
 
