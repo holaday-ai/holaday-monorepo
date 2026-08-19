@@ -29,7 +29,9 @@ describe('StockTaskWorkspaceLayout', () => {
     );
 
     expect(screen.getByRole('navigation', { name: '股市任务视图' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: '关注股票' }).getAttribute('aria-current')).toBe('page');
+    expect(screen.getByRole('button', { name: '关注股票' }).getAttribute('aria-current')).toBe(
+      'page',
+    );
     expect(screen.getByTestId('highlights')).toBeTruthy();
     expect(screen.queryByTestId('risk')).toBeNull();
     expect(screen.queryByTestId('screening')).toBeNull();
@@ -63,6 +65,41 @@ describe('StockTaskWorkspaceLayout', () => {
     await user.click(screen.getByRole('button', { name: '今日简报' }));
     expect(screen.getByTestId('briefing')).toBeTruthy();
     expect(screen.queryByTestId('screening')).toBeNull();
+  });
+
+  it('keeps screening ahead of the preference profile in one reading column', async () => {
+    const user = userEvent.setup();
+    const view = render(
+      <StockTaskWorkspaceLayout
+        highlights={node('highlights')}
+        riskRadar={node('risk')}
+        screening={node('screening')}
+        preferenceProfile={node('profile')}
+        briefing={node('briefing')}
+        screeningView="idle"
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: '条件选股' }));
+    const screeningStack = screen.getByTestId('screening').parentElement?.parentElement;
+    expect(screeningStack?.className).toContain('space-y-4');
+    expect(screeningStack?.className).not.toContain('xl:grid-cols');
+    expect(screeningStack?.children[0]?.textContent).toContain('screening');
+    expect(screeningStack?.children[1]?.textContent).toContain('profile');
+
+    view.rerender(
+      <StockTaskWorkspaceLayout
+        highlights={node('highlights')}
+        riskRadar={node('risk')}
+        screening={node('screening')}
+        preferenceProfile={node('profile')}
+        briefing={node('briefing')}
+        screeningView="criteria"
+      />,
+    );
+    expect(screen.getByTestId('screening').parentElement?.parentElement?.className).toContain(
+      'space-y-4',
+    );
   });
 
   it('keeps all four task destinations visible without a horizontally clipped mobile rail', () => {
@@ -158,7 +195,9 @@ describe('StockResearchTable', () => {
     );
 
     expect(screen.getByRole('table', { name: '关注股票列表' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: '查看多伦科技研究详情' }).getAttribute('aria-current')).toBe('true');
+    expect(
+      screen.getByRole('button', { name: '查看多伦科技研究详情' }).getAttribute('aria-current'),
+    ).toBe('true');
 
     await user.click(screen.getByRole('button', { name: '查看驰宏锌锗研究详情' }));
     expect(onSelect).toHaveBeenCalledWith('600497');

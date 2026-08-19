@@ -292,4 +292,113 @@ describe('StockScreeningWorkbench', () => {
       expect(screen.queryByRole('heading', { name: '完整符合 1 只' })).toBeNull();
     });
   });
+
+  it('keeps exact matches primary and reveals secondary outcomes on demand', async () => {
+    const api: StockScreeningWorkbenchApi = {
+      preview: vi.fn(async () => ({
+        criteria: [
+          {
+            id: 'profit-1',
+            field: 'net_profit_3y_positive',
+            operator: 'eq',
+            value: true,
+            unit: null,
+            label: '近三年持续盈利',
+            sourceField: '近3年净利润',
+            status: 'ready',
+          },
+        ],
+        unparsedClauses: [],
+      })) as StockScreeningWorkbenchApi['preview'],
+      run: vi.fn(async () => ({
+        snapshotId: SNAPSHOT_A,
+        dataAsOf: DATA_AS_OF,
+        coverage: {
+          universeCount: 5_540,
+          marketPrefilterCount: 5_540,
+          deepCheckedCount: 3,
+          deepCheckLimit: 20,
+          truncated: true,
+        },
+        candidates: [
+          {
+            symbol: '300502',
+            name: '精确匹配',
+            snapshotId: SNAPSHOT_A,
+            dataAsOf: DATA_AS_OF,
+            matchedCriteria: ['近三年持续盈利'],
+            unmetCriteria: [],
+            missingCriteria: [],
+            warnings: [],
+            evidence: [
+              {
+                id: 'evidence-exact',
+                label: '近三年持续盈利',
+                source: 'akshare:stock_financial_abstract_ths(report+annual+quarter)',
+                asOf: DATA_AS_OF,
+              },
+            ],
+          },
+          {
+            symbol: '300308',
+            name: '资料待补',
+            snapshotId: SNAPSHOT_A,
+            dataAsOf: DATA_AS_OF,
+            matchedCriteria: [],
+            unmetCriteria: [],
+            missingCriteria: ['近三年持续盈利'],
+            warnings: [],
+            evidence: [],
+          },
+          {
+            symbol: '688256',
+            name: '条件未满足',
+            snapshotId: SNAPSHOT_A,
+            dataAsOf: DATA_AS_OF,
+            matchedCriteria: [],
+            unmetCriteria: ['近三年持续盈利'],
+            missingCriteria: [],
+            warnings: [],
+            evidence: [],
+          },
+        ],
+        zeroResult: false,
+      })) as StockScreeningWorkbenchApi['run'],
+    };
+    const user = userEvent.setup();
+    render(
+      <StockScreeningWorkbench
+        snapshotId={SNAPSHOT_A}
+        dataAsOf={DATA_AS_OF}
+        trustMode="current"
+        onAddToWatchlist={vi.fn(async () => undefined)}
+        api={api}
+      />,
+    );
+
+    await user.type(screen.getByRole('textbox'), '近三年持续盈利');
+    await user.click(screen.getByRole('button', { name: '识别条件' }));
+    await user.click(await screen.findByRole('button', { name: '按这些条件查找' }));
+
+    expect(await screen.findByText('精确匹配')).toBeTruthy();
+    const missingGroup = screen.getByText('查看缺少数据 1 只').closest('details');
+    const unmetGroup = screen.getByText('查看未满足 1 只').closest('details');
+    expect(missingGroup?.open).toBe(false);
+    expect(unmetGroup?.open).toBe(false);
+
+    await user.click(screen.getByText('查看缺少数据 1 只'));
+    expect(missingGroup?.open).toBe(true);
+    expect(screen.getByText('资料待补')).toBeTruthy();
+    expect(unmetGroup?.open).toBe(false);
+
+    await user.click(screen.getByText('查看未满足 1 只'));
+    expect(unmetGroup?.open).toBe(true);
+    expect(screen.getByText('条件未满足')).toBeTruthy();
+
+    await user.click(screen.getByText('查看 1 条数据来源'));
+    expect(await screen.findByText(`数据日期 ${DATA_AS_OF}`)).toBeTruthy();
+    expect(
+      screen.getByText('akshare:stock_financial_abstract_ths(report+annual+quarter)'),
+    ).toBeTruthy();
+  });
 });
