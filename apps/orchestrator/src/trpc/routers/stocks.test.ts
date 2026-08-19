@@ -111,6 +111,100 @@ describe('stocks dashboard snapshot', () => {
     await slowAssertion;
   });
 
+  it('persists a newly issued quick snapshot before returning it to trust-bound consumers', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-06-30T08:00:00.000Z'));
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/trading-calendar/latest') {
+        return new Response(JSON.stringify(envelope([{
+          requested_date: url.searchParams.get('on_or_before'),
+          latest_trading_date: '2026-06-30',
+        }])));
+      }
+      if (url.pathname === '/kline/603528') {
+        return new Response(JSON.stringify(envelope([
+          { 日期: '2026-06-29', 收盘: 6.03, 涨跌幅: -0.33, 成交额: 60_000_000 },
+          { 日期: '2026-06-30', 收盘: 6.10, 涨跌幅: 1.16, 成交额: 72_000_000 },
+        ])));
+      }
+      if (url.pathname === '/intraday/603528') {
+        return new Response(JSON.stringify(envelope([
+          { 时间: '2026-06-30 09:30:00', 最新价: 6.04 },
+          { 时间: '2026-06-30 15:00:00', 最新价: 6.10 },
+        ])));
+      }
+      if (url.pathname === '/quote/603528') {
+        return new Response(JSON.stringify(envelope([{
+          代码: 'sh603528',
+          名称: '多伦科技',
+          最新价: 6.10,
+          涨跌幅: 1.16,
+          成交额: 72_000_000,
+        }])));
+      }
+      if (url.pathname === '/stock-rankings/gainers') {
+        return new Promise<Response>(() => undefined);
+      }
+      return new Response(JSON.stringify(envelope([])));
+    });
+
+    let markPersistStarted: (() => void) | undefined;
+    const persistStarted = new Promise<void>((resolve) => {
+      markPersistStarted = resolve;
+    });
+    let releasePersist: (() => void) | undefined;
+    const persistGate = new Promise<void>((resolve) => {
+      releasePersist = resolve;
+    });
+    const persistedSnapshotIds: string[] = [];
+    const fakeDb = {
+      select: vi.fn(() => ({
+        from: () => ({
+          where: () => ({
+            limit: async () => [],
+          }),
+        }),
+      })),
+      insert: vi.fn(() => ({
+        values: (values: { snapshotJson: { trust?: { snapshotId?: string } } }) => ({
+          onDuplicateKeyUpdate: async () => {
+            const snapshotId = values.snapshotJson.trust?.snapshotId;
+            if (snapshotId) persistedSnapshotIds.push(snapshotId);
+            markPersistStarted?.();
+            await persistGate;
+          },
+        }),
+      })),
+    };
+
+    let resolved = false;
+    const pendingSnapshot = __stocksDashboardTest.resolveDashboardSnapshot({
+      db: fakeDb as never,
+      logger: { warn: vi.fn() },
+      userInternalId: 1,
+      watchlistRows: [{ symbol: '603528', market: 'A', displayName: '多伦科技' }],
+      effectiveWatchlist: [{ symbol: '603528', market: 'A', displayName: '多伦科技' }],
+    }).then((snapshot) => {
+      resolved = true;
+      return snapshot;
+    });
+
+    await persistStarted;
+    const earlyOutcome = Promise.race([
+      pendingSnapshot.then(() => 'resolved' as const),
+      new Promise<'blocked'>((resolve) => setTimeout(() => resolve('blocked'), 1)),
+    ]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await earlyOutcome).toBe('blocked');
+    expect(resolved).toBe(false);
+
+    releasePersist?.();
+    const snapshot = await pendingSnapshot;
+    expect(snapshot.trust?.snapshotId).toBeTruthy();
+    expect(persistedSnapshotIds).toContain(snapshot.trust?.snapshotId);
+  });
+
   it('sorts discovery announcements by publication time and keeps all real items within the larger feed window', () => {
     const announcement = (title: string, time: string) => ({
       公告标题: title,

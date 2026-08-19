@@ -1780,15 +1780,16 @@ function startDashboardRefresh(args: {
         args.cacheKey,
         new Date(),
       );
-      const fullRefreshPromise = startFullDashboardRefresh(args);
-      cacheDashboardSnapshot(args.cacheKey, merged, fullRefreshPromise);
-      persistDashboardSnapshot({
+      await persistDashboardSnapshot({
         db: args.db,
         logger: args.logger,
         userInternalId: args.userInternalId,
         cacheKey: args.cacheKey,
         snapshot: merged,
-      }).catch(() => undefined);
+      });
+      cacheDashboardSnapshot(args.cacheKey, merged);
+      const fullRefreshPromise = startFullDashboardRefresh(args);
+      cacheDashboardSnapshot(args.cacheKey, merged, fullRefreshPromise);
       fullRefreshPromise.catch(() => undefined);
       return merged;
     }
