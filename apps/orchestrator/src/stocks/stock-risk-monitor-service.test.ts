@@ -1,4 +1,4 @@
-import { TRPCError } from '@trpc/server';
+import type { TRPCError } from '@trpc/server';
 import { describe, expect, it, vi } from 'vitest';
 import type { ValidatedStockTaskContext } from './stock-task-context.js';
 import type { StockRiskRadarResult } from './stock-risk-radar-service.js';

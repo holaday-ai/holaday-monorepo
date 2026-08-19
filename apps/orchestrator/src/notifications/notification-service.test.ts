@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { notify } from './notification-service.js';
+import { notify, type NotifyDeps } from './notification-service.js';
 import type { sendWebhook } from './webhook-sender.js';
 
 /**
@@ -49,8 +49,7 @@ function makeDbStub(opts: {
         },
       }),
     }),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  } as any;
+  } as unknown as NotifyDeps['db'];
   return { db, inserted, selectCount: () => selectCount };
 }
 
@@ -83,6 +82,7 @@ describe('notify', () => {
       expect.objectContaining({ userId: 42, plannedTaskId: 77 }),
     ]);
     expect(result.channelResults).toEqual([]);
+    expect(result.inAppStored).toBe(true);
     expect(selectCount()).toBe(0);
     expect(sendMock).not.toHaveBeenCalled();
   });
@@ -103,6 +103,7 @@ describe('notify', () => {
     expect(inserted[0]?.userId).toBe(42);
     expect(inserted[0]?.type).toBe('task_complete');
     expect(res.channelResults).toEqual([]);
+    expect(res.inAppStored).toBe(true);
     expect(sendMock).not.toHaveBeenCalled();
   });
 
@@ -193,6 +194,7 @@ describe('notify', () => {
       },
     );
     expect(res.channelResults).toEqual([]);
+    expect(res.inAppStored).toBe(false);
     expect(NOOP_LOGGER.error).toHaveBeenCalled();
     expect(sendMock).not.toHaveBeenCalled();
   });
@@ -235,7 +237,8 @@ describe('notify', () => {
         taskName: '每日新闻',
       },
     );
-    const ctxArg = sendMock.mock.calls[0]![1];
+    const ctxArg = sendMock.mock.calls[0]?.[1];
+    if (!ctxArg) throw new Error('expected webhook context');
     expect(ctxArg.taskName).toBe('每日新闻');
     expect(ctxArg.status).toBe('failed');
   });
@@ -259,7 +262,8 @@ describe('notify', () => {
         taskName: '每日新闻',
       },
     );
-    const ctxArg = sendMock.mock.calls[0]![1];
+    const ctxArg = sendMock.mock.calls[0]?.[1];
+    if (!ctxArg) throw new Error('expected webhook context');
     expect(ctxArg.status).toBe('started');
   });
 
@@ -282,7 +286,8 @@ describe('notify', () => {
         taskName: '每日新闻',
       },
     );
-    const ctxArg = sendMock.mock.calls[0]![1];
+    const ctxArg = sendMock.mock.calls[0]?.[1];
+    if (!ctxArg) throw new Error('expected webhook context');
     expect(ctxArg.status).toBe('reminder');
   });
 
@@ -305,7 +310,8 @@ describe('notify', () => {
         taskName: '每日简报',
       },
     );
-    const ctxArg = sendMock.mock.calls[0]![1];
+    const ctxArg = sendMock.mock.calls[0]?.[1];
+    if (!ctxArg) throw new Error('expected webhook context');
     expect(ctxArg.status).toBe('skipped');
   });
 });

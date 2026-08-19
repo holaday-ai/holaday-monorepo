@@ -127,8 +127,7 @@ export function StockRiskRadar({
   const [monitorPendingSymbol, setMonitorPendingSymbol] = React.useState<string | null>(null);
   const [monitorError, setMonitorError] = React.useState<string | null>(null);
   const requestSequence = React.useRef(0);
-  const trust = { snapshotId, dataAsOf, trustMode };
-  const loadable = canLoadRiskRadar(trust);
+  const loadable = canLoadRiskRadar({ snapshotId, dataAsOf, trustMode });
 
   const load = React.useCallback(async (resetExpansion = false) => {
     const requestTrust = { snapshotId, dataAsOf, trustMode };
@@ -209,15 +208,16 @@ export function StockRiskRadar({
     if (
       !selectedMonitorStock
       || !api.createMonitor
-      || !canLoadRiskRadar(trust)
-      || trust.trustMode !== 'current'
+      || !snapshotId
+      || !dataAsOf
+      || trustMode !== 'current'
     ) return;
     setMonitorPendingSymbol(selectedMonitorStock.symbol);
     setMonitorError(null);
     try {
       const response = await api.createMonitor({
-        snapshotId: trust.snapshotId,
-        dataAsOf: trust.dataAsOf,
+        snapshotId,
+        dataAsOf,
         trustMode: 'current',
         symbol: selectedMonitorStock.symbol,
       });
@@ -228,7 +228,7 @@ export function StockRiskRadar({
     } finally {
       setMonitorPendingSymbol(null);
     }
-  }, [api, replaceMonitor, selectedMonitorStock, trust]);
+  }, [api, dataAsOf, replaceMonitor, selectedMonitorStock, snapshotId, trustMode]);
 
   const toggleMonitor = React.useCallback(async (monitor: StockRiskMonitorView) => {
     if (!api.toggleMonitor) return;

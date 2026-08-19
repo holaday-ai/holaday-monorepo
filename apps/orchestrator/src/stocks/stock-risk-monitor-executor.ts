@@ -335,7 +335,7 @@ function storedChecks(value: unknown): StockRiskCheckKey[] {
   return STOCK_RISK_CHECK_KEYS.filter((key) => value.includes(key));
 }
 
-function latestSnapshot(value: unknown, symbol: string): LatestStockRiskSnapshot | null {
+function latestSnapshot(value: unknown): LatestStockRiskSnapshot | null {
   const row = jsonRecord(value);
   const trust = jsonRecord(row?.trust);
   if (
@@ -399,7 +399,7 @@ export function createStockRiskMonitorSpecialDispatcher(args: {
         lastUnavailableChecks: storedChecks(row.lastUnavailableChecks),
       } : null;
     },
-    async loadLatestSnapshot(userId, symbol) {
+    async loadLatestSnapshot(userId, _symbol) {
       const rows = await args.db
         .select({ snapshotJson: stockDashboardSnapshots.snapshotJson })
         .from(stockDashboardSnapshots)
@@ -407,7 +407,7 @@ export function createStockRiskMonitorSpecialDispatcher(args: {
         .orderBy(desc(stockDashboardSnapshots.updatedAt))
         .limit(20);
       for (const row of rows) {
-        const snapshot = latestSnapshot(row.snapshotJson, symbol);
+        const snapshot = latestSnapshot(row.snapshotJson);
         if (snapshot) return snapshot;
       }
       return null;
@@ -420,7 +420,6 @@ export function createStockRiskMonitorSpecialDispatcher(args: {
     }),
     async complete(input) {
       const completedAt = new Date();
-      let notificationAcquired = false;
       await args.db.transaction(async (tx) => {
         const [run] = await tx
           .select({ id: plannedTaskRuns.id })
@@ -463,7 +462,28 @@ export function createStockRiskMonitorSpecialDispatcher(args: {
               ne(stockRiskMonitors.lastNotificationFingerprint, input.notificationFingerprint),
             ),
           ));
-          notificationAcquired = readAffectedRows(claim) > 0;
+          if (
+            readAffectedRows(claim) > 0
+            && (input.result.outcome === 'changed' || input.result.outcome === 'unavailable')
+          ) {
+            const notification = await notify(
+              { db: tx, logger: args.logger },
+              {
+                userInternalId: input.monitor.userId,
+                plannedTaskInternalId: input.monitor.plannedTaskId,
+                type: input.result.outcome === 'changed' ? 'task_complete' : 'task_failed',
+                title: input.result.outcome === 'changed'
+                  ? `${input.monitor.name}风险发生变化`
+                  : `${input.monitor.name}风险暂时无法判断`,
+                message: input.result.summary,
+                taskName: `监控 ${input.monitor.name} 风险变化`,
+                delivery: 'in_app_only',
+              },
+            );
+            if (!notification.inAppStored) {
+              throw new Error('股票风险提醒写入失败');
+            }
+          }
         }
         await tx.update(plannedTasks).set({
           lastRunAt: completedAt,
@@ -480,25 +500,6 @@ export function createStockRiskMonitorSpecialDispatcher(args: {
         changeCount: input.result.added.length + input.result.upgraded.length + input.result.resolved.length,
         unavailableCheckCount: input.result.unavailableChecks.length,
       }, 'stock-risk-monitor: completed');
-      if (
-        notificationAcquired
-        && (input.result.outcome === 'changed' || input.result.outcome === 'unavailable')
-      ) {
-        await notify(
-          { db: args.db, logger: args.logger },
-          {
-            userInternalId: input.monitor.userId,
-            plannedTaskInternalId: input.monitor.plannedTaskId,
-            type: input.result.outcome === 'changed' ? 'task_complete' : 'task_failed',
-            title: input.result.outcome === 'changed'
-              ? `${input.monitor.name}风险发生变化`
-              : `${input.monitor.name}风险暂时无法判断`,
-            message: input.result.summary,
-            taskName: `监控 ${input.monitor.name} 风险变化`,
-            delivery: 'in_app_only',
-          },
-        );
-      }
     },
     async fail(input) {
       const completedAt = new Date();

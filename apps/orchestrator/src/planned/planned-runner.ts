@@ -233,9 +233,10 @@ export async function dispatchPlannedRun(
     .where(and(eq(plannedTaskRuns.id, run.id), eq(plannedTaskRuns.status, 'pending')));
 
   try {
+    const specialDispatcher = configuredSpecialDispatcher;
     const dispatchResult = await dispatchSpecialOrGeneric({
-      special: configuredSpecialDispatcher
-        ? () => configuredSpecialDispatcher!({
+      special: specialDispatcher
+        ? () => specialDispatcher({
             ctx,
             runExternalId,
             plannedTaskInternalId: run.planId,
@@ -244,7 +245,8 @@ export async function dispatchPlannedRun(
         : null,
       generic: async () => {
         if (runItems.length === 1) {
-          const item = runItems[0]!;
+          const item = runItems[0];
+          if (!item) throw new Error(`规划运行 ${runExternalId} 缺少任务项`);
           const result = await tasksRouter.createCaller(ctx).create({
             intent: item.instruction,
             clientRequestId: `planned:${runExternalId}:${item.seq}`,

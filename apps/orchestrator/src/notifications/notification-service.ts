@@ -55,13 +55,15 @@ export interface NotifyInput {
 export interface NotifyResult {
   /** The external_id of the newly-written notifications row. */
   notificationId: string;
+  /** Whether the in-app inbox row was durably written. */
+  inAppStored: boolean;
   /** Outcome of every channel fan-out attempt. Always present, may
    *  be empty when the user has no enabled channels. */
   channelResults: Array<{ channelExternalId: string; result: SendResult }>;
 }
 
 export interface NotifyDeps {
-  db: typeof import('../db/client.js').db;
+  db: Pick<typeof import('../db/client.js').db, 'insert' | 'select'>;
   logger?: Pick<Logger, 'info' | 'warn' | 'error'>;
   /** Override for tests — defaults to the real sendWebhook. */
   send?: typeof sendWebhook;
@@ -122,11 +124,11 @@ export async function notify(
     // Without an inbox row, channel fan-out would still be useful,
     // but a DB failure here usually means everything is broken —
     // bail. The runner's dispatch path is unaffected.
-    return { notificationId: externalId, channelResults: [] };
+    return { notificationId: externalId, inAppStored: false, channelResults: [] };
   }
 
   if (input.delivery === 'in_app_only') {
-    return { notificationId: externalId, channelResults: [] };
+    return { notificationId: externalId, inAppStored: true, channelResults: [] };
   }
 
   // 2. Enumerate enabled channels.
@@ -159,11 +161,11 @@ export async function notify(
       },
       'notify: channel select failed; inbox row stands',
     );
-    return { notificationId: externalId, channelResults: [] };
+    return { notificationId: externalId, inAppStored: true, channelResults: [] };
   }
 
   if (channels.length === 0) {
-    return { notificationId: externalId, channelResults: [] };
+    return { notificationId: externalId, inAppStored: true, channelResults: [] };
   }
 
   // 3. Fan-out.
@@ -187,7 +189,8 @@ export async function notify(
     ),
   );
   const channelResults = settled.map((s, i) => {
-    const ch = channels[i]!;
+    const ch = channels[i];
+    if (!ch) throw new Error(`notify: missing channel result at index ${i}`);
     if (s.status === 'fulfilled') {
       return { channelExternalId: ch.externalId, result: s.value };
     }
@@ -212,5 +215,5 @@ export async function notify(
     },
     'notify: fan-out complete',
   );
-  return { notificationId: externalId, channelResults };
+  return { notificationId: externalId, inAppStored: true, channelResults };
 }
