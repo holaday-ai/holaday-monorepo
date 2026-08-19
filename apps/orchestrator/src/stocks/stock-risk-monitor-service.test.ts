@@ -1,9 +1,12 @@
 import type { TRPCError } from '@trpc/server';
 import { describe, expect, it, vi } from 'vitest';
+import { plannedTaskItems, plannedTasks } from '../db/schema/planned-tasks.js';
+import { stockRiskMonitors } from '../db/schema/stock-risk-monitors.js';
 import type { ValidatedStockTaskContext } from './stock-task-context.js';
 import type { StockRiskRadarResult } from './stock-risk-radar-service.js';
 import {
   createStockRiskMonitor,
+  databaseStockRiskMonitorRepository,
   listStockRiskMonitors,
   type StockRiskMonitorRepository,
   type StockRiskMonitorView,
@@ -203,5 +206,194 @@ describe('stock risk monitor service', () => {
       validateContext: vi.fn(async () => context),
     });
     expect(repo.listByUserSymbols).toHaveBeenCalledWith(7, ['603528', '600497']);
+  });
+
+  it('reactivates an archived monitor instead of colliding with its unique symbol key', async () => {
+    const archivedRow = {
+      monitorInternalId: 55,
+      monitorId: 'stockRiskMonitor_archived',
+      plannedTaskInternalId: 77,
+      plannedTaskId: 'plannedTask_archived',
+      symbol: '603528',
+      planStatus: 'archived',
+      nextRunAt: null,
+      lastRunAt: new Date('2026-08-18T09:00:00.000Z'),
+      lastRunStatus: 'failed',
+    };
+    const selections: unknown[][] = [
+      [],
+      [archivedRow],
+      [{ id: 77, status: 'archived' }],
+      [{ id: 55, plannedTaskId: 77 }],
+      [],
+      [{
+        ...archivedRow,
+        plannedTaskInternalId: 101,
+        plannedTaskId: 'plannedTask_replacement',
+        planStatus: 'active',
+        nextRunAt: new Date('2026-08-20T08:30:00.000Z'),
+        lastRunAt: null,
+        lastRunStatus: null,
+      }],
+      [],
+    ];
+    const planUpdates: Array<Record<string, unknown>> = [];
+    const monitorUpdates: Array<Record<string, unknown>> = [];
+    const insertedPlans: Array<Record<string, unknown>> = [];
+    const insertedItems: Array<Record<string, unknown>> = [];
+    let rowLocks = 0;
+    const fakeDb = {
+      select() {
+        const call = 7 - selections.length;
+        const rows = selections.shift() ?? [];
+        return {
+          from() {
+            return {
+              innerJoin() {
+                return { where: async () => rows };
+              },
+              where() {
+                return {
+                  limit() {
+                    if (call === 2 || call === 3) {
+                      return {
+                        async for(mode: string) {
+                          if (mode === 'update') rowLocks += 1;
+                          return rows;
+                        },
+                      };
+                    }
+                    return Promise.resolve(rows);
+                  },
+                  orderBy: async () => rows,
+                };
+              },
+            };
+          },
+        };
+      },
+      async transaction<T>(callback: (tx: unknown) => Promise<T>) {
+        return callback(fakeDb);
+      },
+      update(table: unknown) {
+        return {
+          set(values: Record<string, unknown>) {
+            if (table === plannedTasks) planUpdates.push(values);
+            if (table === stockRiskMonitors) monitorUpdates.push(values);
+            return { where: async () => [{ affectedRows: 1 }] };
+          },
+        };
+      },
+      delete(table: unknown) {
+        throw new Error(`replacement revival must preserve archived rows: ${String(table)}`);
+      },
+      insert(table: unknown) {
+        return {
+          async values(values: Record<string, unknown>) {
+            if (table === plannedTasks) {
+              insertedPlans.push(values);
+              return [{ insertId: 101 }];
+            }
+            if (table === plannedTaskItems) {
+              insertedItems.push(values);
+              return [{ insertId: 901 }];
+            }
+            throw new Error('archived monitor revival must reuse the existing monitor row');
+          },
+        };
+      },
+    };
+    const repository = databaseStockRiskMonitorRepository(fakeDb as never);
+
+    const result = await repository.createOrGet({
+      userId: 7,
+      symbol: '603528',
+      name: '多伦科技',
+      market: 'A',
+      dataAsOf: '2026-08-19',
+      nextRunAt: new Date('2026-08-20T08:30:00.000Z'),
+      baselineSignals: [],
+      baselineUnavailableChecks: ['pledge'],
+    });
+
+    expect(result).toMatchObject({ created: true, monitor: { status: 'active' } });
+    expect(planUpdates).toEqual([]);
+    expect(insertedPlans).toEqual([expect.objectContaining({
+      status: 'active',
+      nextRunAt: new Date('2026-08-20T08:30:00.000Z'),
+      itemCount: 1,
+    })]);
+    expect(monitorUpdates).toContainEqual(expect.objectContaining({
+      plannedTaskId: 101,
+      lastEvaluatedDataAsOf: '2026-08-19',
+      lastUnavailableChecksJson: ['pledge'],
+      lastNotificationFingerprint: null,
+    }));
+    expect(insertedItems).toEqual([expect.objectContaining({
+      plannedTaskId: 101,
+      seq: 0,
+      instruction: '检查 多伦科技（603528）风险变化',
+      enabled: true,
+    })]);
+    expect(rowLocks).toBe(2);
+  });
+
+  it('does not revive an archived monitor while an old run is nonterminal', async () => {
+    const archivedRow = {
+      monitorInternalId: 55,
+      plannedTaskInternalId: 77,
+    };
+    const selections: unknown[][] = [
+      [],
+      [archivedRow],
+      [{ id: 77, status: 'archived' }],
+      [{ id: 55, plannedTaskId: 77 }],
+      [{ id: 88 }],
+    ];
+    let selectCall = 0;
+    const fakeDb = {
+      select() {
+        const call = selectCall++;
+        const rows = selections.shift() ?? [];
+        return {
+          from() {
+            return {
+              innerJoin() {
+                return { where: async () => rows };
+              },
+              where() {
+                return {
+                  limit() {
+                    if (call === 2 || call === 3) {
+                      return { for: async () => rows };
+                    }
+                    return Promise.resolve(rows);
+                  },
+                  orderBy: async () => rows,
+                };
+              },
+            };
+          },
+        };
+      },
+      async transaction<T>(callback: (tx: unknown) => Promise<T>) {
+        return callback(fakeDb);
+      },
+    };
+    const repository = databaseStockRiskMonitorRepository(fakeDb as never);
+
+    await expect(repository.createOrGet({
+      userId: 7,
+      symbol: '603528',
+      name: '多伦科技',
+      market: 'A',
+      dataAsOf: '2026-08-19',
+      nextRunAt: new Date('2026-08-20T08:30:00.000Z'),
+      baselineSignals: [],
+      baselineUnavailableChecks: [],
+    })).rejects.toMatchObject({
+      code: 'CONFLICT',
+      message: '旧监控仍有尚未完成的运行，请稍后重试',
+    });
   });
 });

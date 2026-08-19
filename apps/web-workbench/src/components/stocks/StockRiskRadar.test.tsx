@@ -192,7 +192,7 @@ describe('StockRiskRadar', () => {
     expect(refresh.getAttribute('title')).toBe('刷新风险雷达');
   });
 
-  it('uses a non-safety empty state and never queries an unavailable snapshot', async () => {
+  it('uses an unknown-coverage empty state and never queries an unavailable snapshot', async () => {
     const api: StockRiskRadarApi = {
       load: vi.fn(async () => result({ signals: [], checks: [] })),
     };
@@ -204,7 +204,8 @@ describe('StockRiskRadar', () => {
         api={api}
       />,
     );
-    expect(await screen.findByText('本轮规则未触发')).toBeTruthy();
+    expect(await screen.findByText('本轮暂无可用核验结果')).toBeTruthy();
+    expect(screen.queryByText('本轮规则未触发')).toBeNull();
     expect(screen.queryByText('没有风险')).toBeNull();
     expect(screen.queryByText('无风险')).toBeNull();
     expect(api.load).toHaveBeenCalledTimes(1);
@@ -506,6 +507,99 @@ describe('StockRiskRadar', () => {
     expect(await within(group).findByText('监控中')).toBeTruthy();
     const recordLink = within(group).getByRole('link', { name: '查看测试股份监控记录' });
     expect(recordLink.getAttribute('href')).toBe('/planned?plan=pln_1');
+  });
+
+  it('offers monitoring for a checked watchlist stock with no currently triggered signal', async () => {
+    const quietCheck = {
+      symbol: '300001',
+      name: '沉默股份',
+      key: 'pledge' as const,
+      status: 'checked' as const,
+      source: 'akshare:stock_gpzy_pledge_ratio_em',
+      fetchedAt: '2026-08-17T11:30:00.000Z',
+      sourceDataAsOf: '2026-08-17',
+      errorCode: null,
+    };
+    const api: StockRiskRadarApi = {
+      load: vi.fn(async () => result({
+        requestedStockCount: 3,
+        checkedStockCount: 3,
+        checks: [...result().checks, quietCheck],
+      })),
+      loadMonitors: vi.fn(async () => []),
+      createMonitor: vi.fn(async () => ({
+        created: true,
+        monitor: {
+          monitorId: 'srm_quiet',
+          plannedTaskId: 'pln_quiet',
+          symbol: '300001',
+          status: 'active' as const,
+          nextRunAt: '2026-08-18T08:30:00.000Z',
+          lastRunAt: null,
+          lastOutcome: null,
+          lastSummary: null,
+        },
+      })),
+    };
+    const user = userEvent.setup();
+    render(
+      <StockRiskRadar
+        snapshotId={SNAPSHOT_A}
+        dataAsOf={DATA_AS_OF}
+        trustMode="current"
+        api={api}
+      />,
+    );
+
+    const quietGroup = (await screen.findAllByTestId('risk-stock-group')).find(
+      (group) => group.getAttribute('data-stock-symbol') === '300001',
+    );
+    if (!quietGroup) throw new Error('expected risk coverage group for 沉默股份');
+    expect(within(quietGroup).getByText('本轮未触发已配置阈值')).toBeTruthy();
+    await user.click(within(quietGroup).getByRole('button', { name: '持续监控沉默股份' }));
+    await user.click(screen.getByRole('button', { name: '确认开始监控' }));
+
+    expect(api.createMonitor).toHaveBeenCalledWith(expect.objectContaining({ symbol: '300001' }));
+  });
+
+  it('does not describe an all-unavailable stock as checked or untriggered', async () => {
+    const unavailableCheck = {
+      symbol: '300002',
+      name: '待核验股份',
+      key: 'pledge' as const,
+      status: 'unavailable' as const,
+      source: 'akshare:stock_gpzy_pledge_ratio_em',
+      fetchedAt: '2026-08-17T11:30:00.000Z',
+      sourceDataAsOf: null,
+      errorCode: 'UPSTREAM_UNAVAILABLE',
+    };
+    const api: StockRiskRadarApi = {
+      load: vi.fn(async () => result({
+        requestedStockCount: 1,
+        checkedStockCount: 1,
+        signals: [],
+        checks: [unavailableCheck],
+      })),
+      loadMonitors: vi.fn(async () => []),
+    };
+    render(
+      <StockRiskRadar
+        snapshotId={SNAPSHOT_A}
+        dataAsOf={DATA_AS_OF}
+        trustMode="current"
+        api={api}
+      />,
+    );
+
+    const unavailableGroup = (await screen.findAllByTestId('risk-stock-group')).find(
+      (group) => group.getAttribute('data-stock-symbol') === '300002',
+    );
+    if (!unavailableGroup) throw new Error('expected unavailable coverage group for 待核验股份');
+    expect(screen.getByText('本轮暂无可用核验结果')).toBeTruthy();
+    expect(screen.queryByText('本轮规则未触发')).toBeNull();
+    expect(within(unavailableGroup).getByText('本轮来源暂不可判断')).toBeTruthy();
+    expect(within(unavailableGroup).getByText('本轮无可用核验结果')).toBeTruthy();
+    expect(within(unavailableGroup).queryByText('本轮未触发已配置阈值')).toBeNull();
   });
 
   it('keeps verified risk facts visible when monitor status loading fails', async () => {

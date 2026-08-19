@@ -9,6 +9,7 @@ import {
   plannedTaskRuns,
   plannedTasks,
 } from '../../db/schema/planned-tasks.js';
+import { stockRiskMonitors } from '../../db/schema/stock-risk-monitors.js';
 import { users } from '../../db/schema/users.js';
 import {
   plannedCalendarInputSchema,
@@ -73,6 +74,43 @@ async function loadOwnedPlan(db: DB, userId: number, externalId: string) {
     .limit(1);
   if (!plan) throw new TRPCError({ code: 'NOT_FOUND', message: '规划任务不存在' });
   return plan;
+}
+
+async function assertFutureSplitAllowed(
+  tx: DBTransaction,
+  input: {
+    planId: number;
+    userId: number;
+    expectedStatus: typeof plannedTasks.$inferSelect.status;
+  },
+): Promise<void> {
+  const [lockedPlan] = await tx
+    .select({ id: plannedTasks.id, status: plannedTasks.status })
+    .from(plannedTasks)
+    .where(and(eq(plannedTasks.id, input.planId), eq(plannedTasks.userId, input.userId)))
+    .limit(1)
+    .for('update');
+  if (
+    !lockedPlan
+    || lockedPlan.status === 'archived'
+    || lockedPlan.status !== input.expectedStatus
+  ) {
+    throw new TRPCError({
+      code: 'CONFLICT',
+      message: '任务状态刚刚发生变化，请刷新后重试',
+    });
+  }
+  const [monitor] = await tx
+    .select({ id: stockRiskMonitors.id })
+    .from(stockRiskMonitors)
+    .where(eq(stockRiskMonitors.plannedTaskId, lockedPlan.id))
+    .limit(1);
+  if (monitor) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: '系统风险监控不支持拆分未来轮次，请改为调整整个系列',
+    });
+  }
 }
 
 async function replacePlanItems(
@@ -460,6 +498,11 @@ export const plannedTasksRouter = router({
         }
         const newPlanExternalId = newExternalId('plannedTask');
         await ctx.db.transaction(async (tx) => {
+          await assertFutureSplitAllowed(tx, {
+            planId: plan.id,
+            userId,
+            expectedStatus: plan.status,
+          });
           const oldHasPendingOccurrence =
             plan.nextRunAt !== null && plan.nextRunAt.getTime() < original.getTime();
           await tx
@@ -623,6 +666,8 @@ export const plannedTasksRouter = router({
         return { ok: true as const, plannedTaskId: plan.externalId };
       }
       if (input.scope === 'future' && plan.repeatType !== 'once') {
+        const oldHasPendingOccurrence =
+          plan.nextRunAt !== null && plan.nextRunAt.getTime() < original.getTime();
         const items = await ctx.db
           .select({ instruction: plannedTaskItems.instruction })
           .from(plannedTaskItems)
@@ -646,8 +691,11 @@ export const plannedTasksRouter = router({
         }
         const newPlanExternalId = newExternalId('plannedTask');
         await ctx.db.transaction(async (tx) => {
-          const oldHasPendingOccurrence =
-            plan.nextRunAt !== null && plan.nextRunAt.getTime() < original.getTime();
+          await assertFutureSplitAllowed(tx, {
+            planId: plan.id,
+            userId,
+            expectedStatus: plan.status,
+          });
           await tx
             .update(plannedTasks)
             .set({
@@ -673,9 +721,10 @@ export const plannedTasksRouter = router({
             status: 'active',
             itemCount: plan.itemCount,
           });
+          const replacementPlanId = readInsertId(insert);
           await replacePlanItems(
             tx,
-            readInsertId(insert),
+            replacementPlanId,
             items.map((item) => item.instruction),
           );
         });
@@ -762,10 +811,21 @@ export const plannedTasksRouter = router({
           .where(eq(plannedTasks.id, plan.id));
         return { ok: true as const };
       }
-      await ctx.db
-        .update(plannedTasks)
-        .set({ status: 'archived', nextRunAt: null })
-        .where(eq(plannedTasks.id, plan.id));
+      await ctx.db.transaction(async (tx) => {
+        const [lockedPlan] = await tx
+          .select({ id: plannedTasks.id })
+          .from(plannedTasks)
+          .where(and(eq(plannedTasks.id, plan.id), eq(plannedTasks.userId, userId)))
+          .limit(1)
+          .for('update');
+        if (!lockedPlan) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: '规划任务不存在' });
+        }
+        await tx
+          .update(plannedTasks)
+          .set({ status: 'archived', nextRunAt: null })
+          .where(eq(plannedTasks.id, lockedPlan.id));
+      });
       return { ok: true as const };
     }),
 
@@ -806,14 +866,25 @@ export const plannedTasksRouter = router({
 
   archive: protectedProcedure.input(planIdInput).mutation(async ({ ctx, input }) => {
     const userId = await requireUserId(ctx);
-    const result = await ctx.db
-      .update(plannedTasks)
-      .set({ status: 'archived', nextRunAt: null })
-      .where(and(eq(plannedTasks.externalId, input.plannedTaskId), eq(plannedTasks.userId, userId)));
-    if (readAffectedRows(result) === 0) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: '规划任务不存在' });
-    }
-    return { ok: true as const };
+    return ctx.db.transaction(async (tx) => {
+      const [lockedPlan] = await tx
+        .select({ id: plannedTasks.id })
+        .from(plannedTasks)
+        .where(and(
+          eq(plannedTasks.externalId, input.plannedTaskId),
+          eq(plannedTasks.userId, userId),
+        ))
+        .limit(1)
+        .for('update');
+      if (!lockedPlan) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: '规划任务不存在' });
+      }
+      await tx
+        .update(plannedTasks)
+        .set({ status: 'archived', nextRunAt: null })
+        .where(eq(plannedTasks.id, lockedPlan.id));
+      return { ok: true as const };
+    });
   }),
 
   runs: protectedProcedure

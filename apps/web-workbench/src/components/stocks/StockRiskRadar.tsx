@@ -21,6 +21,7 @@ import { StockRiskMonitorSheet } from './StockRiskMonitorSheet';
 type RiskRadarQueryInput = Parameters<typeof trpc.stocks.riskRadar.query>[0];
 export type StockRiskRadarResult = Awaited<ReturnType<typeof trpc.stocks.riskRadar.query>>;
 type StockRiskSignal = StockRiskRadarResult['signals'][number];
+type StockRiskCheck = StockRiskRadarResult['checks'][number];
 type StockRiskMonitorView = Awaited<ReturnType<typeof trpc.stocks.riskMonitors.query>>[number];
 type StockRiskMonitorListInput = Parameters<typeof trpc.stocks.riskMonitors.query>[0];
 type StockRiskMonitorCreateInput = Parameters<typeof trpc.stocks.createRiskMonitor.mutate>[0];
@@ -99,6 +100,51 @@ function formatDateTime(value: string | Date): string {
 
 function signalCount(signals: StockRiskSignal[], severity: StockRiskSignal['severity']): number {
   return signals.filter((signal) => signal.severity === severity).length;
+}
+
+interface StockRiskDisplayGroup {
+  symbol: string;
+  name: string;
+  severity: StockRiskSignal['severity'] | null;
+  latestSourceDataAsOf: string | null;
+  signals: StockRiskSignal[];
+  checks: StockRiskCheck[];
+}
+
+function groupStockRiskCoverage(result: StockRiskRadarResult): StockRiskDisplayGroup[] {
+  const groups = new Map<string, StockRiskDisplayGroup>(
+    groupStockRiskSignals(result.signals).map((group) => [
+      group.symbol,
+      { ...group, checks: [] },
+    ]),
+  );
+
+  for (const check of result.checks) {
+    const current = groups.get(check.symbol);
+    if (current) {
+      current.checks.push(check);
+      continue;
+    }
+    groups.set(check.symbol, {
+      symbol: check.symbol,
+      name: check.name,
+      severity: null,
+      latestSourceDataAsOf: null,
+      signals: [],
+      checks: [check],
+    });
+  }
+
+  return Array.from(groups.values()).map((group) => {
+    if (group.severity !== null) return group;
+    return {
+      ...group,
+      latestSourceDataAsOf: group.checks.reduce<string | null>((latest, check) => {
+        if (!check.sourceDataAsOf) return latest;
+        return !latest || check.sourceDataAsOf > latest ? check.sourceDataAsOf : latest;
+      }, null),
+    };
+  });
 }
 
 export function StockRiskRadar({
@@ -361,15 +407,25 @@ export function StockRiskRadar({
 
               {result.signals.length === 0 ? (
                 <div className="mt-4 rounded-[8px] border border-[#DDE5F3] bg-[#F8FAFD] px-4 py-6 text-center">
-                  <div className="text-[13px] font-semibold text-[#344054]">本轮规则未触发</div>
+                  <div className="text-[13px] font-semibold text-[#344054]">
+                    {result.checks.some((check) => check.status === 'checked')
+                      ? '本轮规则未触发'
+                      : '本轮暂无可用核验结果'}
+                  </div>
                   <p className="mt-1 text-[12px] text-[#667085]">
-                    这只代表当前规则没有命中，仍需结合数据覆盖和后续披露复核。
+                    {result.checks.some((check) => check.status === 'checked')
+                      ? '这只代表当前规则没有命中，仍需结合数据覆盖和后续披露复核。'
+                      : '本轮没有可用的来源核验结果，无法判断规则是否触发；请稍后刷新或持续监控。'}
                   </p>
                 </div>
-              ) : (
+              ) : null}
+
+              {result.checks.length > 0 ? (
                 <div className="mt-4 grid gap-3 lg:grid-cols-2">
-                  {groupStockRiskSignals(result.signals).map((group) => {
+                  {groupStockRiskCoverage(result).map((group) => {
                     const groupExpanded = expandedGroupSymbol === group.symbol;
+                    const hasCheckedSource = group.signals.length > 0
+                      || group.checks.some((check) => check.status === 'checked');
                     const visibleSignals = groupExpanded
                       ? group.signals
                       : group.signals.slice(0, 2);
@@ -378,6 +434,7 @@ export function StockRiskRadar({
                       <article
                         key={group.symbol}
                         data-testid="risk-stock-group"
+                        data-stock-symbol={group.symbol}
                         className="overflow-hidden rounded-[8px] border border-[#E4E6EB] bg-[#FCFCFD]"
                       >
                         <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[#E8EAF0] px-4 py-3.5">
@@ -389,24 +446,46 @@ export function StockRiskRadar({
                               <span className="font-mono text-[11px] text-[#8B92A1]">
                                 {group.symbol}
                               </span>
-                              <span
-                                data-testid="risk-severity"
-                                className={cn(
-                                  'inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold',
-                                  SEVERITY_STYLE[group.severity],
-                                )}
-                              >
-                                {group.severity}
-                              </span>
+                              {group.severity ? (
+                                <span
+                                  data-testid="risk-severity"
+                                  className={cn(
+                                    'inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold',
+                                    SEVERITY_STYLE[group.severity],
+                                  )}
+                                >
+                                  {group.severity}
+                                </span>
+                              ) : null}
                             </div>
                             <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] font-medium text-[#667085]">
-                              <span>{group.signals.length} 条事项</span>
-                              <span aria-hidden>·</span>
-                              <span>最新事实 {compactDate(group.latestSourceDataAsOf)}</span>
+                              {group.severity ? (
+                                <>
+                                  <span>{group.signals.length} 条事项</span>
+                                  <span aria-hidden>·</span>
+                                  <span>最新事实 {compactDate(group.latestSourceDataAsOf)}</span>
+                                </>
+                              ) : (
+                                <>
+                                  <span>
+                                    {hasCheckedSource
+                                      ? '本轮未触发已配置阈值'
+                                      : '本轮来源暂不可判断'}
+                                  </span>
+                                  <span aria-hidden>·</span>
+                                  <span>
+                                    {hasCheckedSource
+                                      ? `最近核验 ${compactDate(group.latestSourceDataAsOf)}`
+                                      : '本轮无可用核验结果'}
+                                  </span>
+                                </>
+                              )}
                             </div>
                           </div>
                           <div className="flex min-w-0 shrink-0 flex-col items-end gap-1.5 max-[390px]:w-full max-[390px]:items-start">
-                            <AlertTriangle className="h-4 w-4 text-[#C98228]" aria-hidden />
+                            {group.severity ? (
+                              <AlertTriangle className="h-4 w-4 text-[#C98228]" aria-hidden />
+                            ) : null}
                             {monitorCapability ? (
                               <MonitorControl
                                 name={group.name}
@@ -427,6 +506,13 @@ export function StockRiskRadar({
                             ) : null}
                           </div>
                         </div>
+                        {group.signals.length === 0 ? (
+                          <div className="px-4 py-3.5 text-[11px] leading-[18px] text-[#667085]">
+                            {hasCheckedSource
+                              ? '未触发不等于没有风险；持续监控会在后续事实新增、升级、解除或暂不可判断时提醒。'
+                              : '本轮数据源均暂不可用，无法判断是否触发阈值；持续监控会在来源恢复后继续核验。'}
+                          </div>
+                        ) : null}
                         <div className="divide-y divide-[#E8EAF0] px-4">
                           {visibleSignals.map((signal) => {
                             const evidenceExpanded = expandedSignalId === signal.signalId;
@@ -520,7 +606,7 @@ export function StockRiskRadar({
                     );
                   })}
                 </div>
-              )}
+              ) : null}
 
               {unavailableChecks.length > 0 ? (
                 <div className="mt-4 rounded-[8px] border border-[#E6E3EC] bg-[#FAF9FC] px-4 py-3">

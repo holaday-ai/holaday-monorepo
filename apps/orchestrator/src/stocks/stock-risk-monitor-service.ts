@@ -2,7 +2,7 @@ import { newExternalId } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
 import { and, desc, eq, inArray, ne } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
-import { readInsertId } from '../db/mysql-result.js';
+import { readAffectedRows, readInsertId } from '../db/mysql-result.js';
 import {
   plannedTaskItems,
   plannedTaskRuns,
@@ -192,7 +192,9 @@ export function databaseStockRiskMonitorRepository(db: DB): StockRiskMonitorRepo
       if (!latestResult.has(run.plannedTaskId)) latestResult.set(run.plannedTaskId, run.resultJson);
     }
     return rows.map((row) => {
-      const latest = resultView(latestResult.get(row.plannedTaskInternalId));
+      const latest = row.lastRunAt
+        ? resultView(latestResult.get(row.plannedTaskInternalId))
+        : { lastOutcome: null, lastSummary: null };
       const status: StockRiskMonitorView['status'] = row.planStatus === 'paused'
         ? 'paused'
         : row.lastRunStatus === 'failed' || latest.lastOutcome === 'failed'
@@ -214,12 +216,124 @@ export function databaseStockRiskMonitorRepository(db: DB): StockRiskMonitorRepo
     return (await listByUserSymbols(userId, [symbol]))[0] ?? null;
   }
 
+  async function findArchived(userId: number, symbol: string): Promise<{
+    monitorInternalId: number;
+    plannedTaskInternalId: number;
+  } | null> {
+    const [row] = await db
+      .select({
+        monitorInternalId: stockRiskMonitors.id,
+        plannedTaskInternalId: plannedTasks.id,
+      })
+      .from(stockRiskMonitors)
+      .innerJoin(plannedTasks, eq(plannedTasks.id, stockRiskMonitors.plannedTaskId))
+      .where(and(
+        eq(stockRiskMonitors.userId, userId),
+        eq(stockRiskMonitors.symbol, symbol),
+        eq(plannedTasks.status, 'archived'),
+      ));
+    return row ?? null;
+  }
+
   return {
     listByUserSymbols,
     async createOrGet(input) {
       const existing = await find(input.userId, input.symbol);
       if (existing) return { created: false, monitor: existing };
+      const archived = await findArchived(input.userId, input.symbol);
       const plannedTaskExternalId = newExternalId('plannedTask');
+      if (archived) {
+        const revived = await db.transaction(async (tx) => {
+          const [lockedPlan] = await tx
+            .select({ id: plannedTasks.id, status: plannedTasks.status })
+            .from(plannedTasks)
+            .where(and(
+              eq(plannedTasks.id, archived.plannedTaskInternalId),
+              eq(plannedTasks.status, 'archived'),
+            ))
+            .limit(1)
+            .for('update');
+          if (!lockedPlan) return false;
+
+          const [lockedMonitor] = await tx
+            .select({ id: stockRiskMonitors.id, plannedTaskId: stockRiskMonitors.plannedTaskId })
+            .from(stockRiskMonitors)
+            .where(and(
+              eq(stockRiskMonitors.id, archived.monitorInternalId),
+              eq(stockRiskMonitors.userId, input.userId),
+              eq(stockRiskMonitors.symbol, input.symbol),
+              eq(stockRiskMonitors.plannedTaskId, archived.plannedTaskInternalId),
+            ))
+            .limit(1)
+            .for('update');
+          if (!lockedMonitor) return false;
+
+          const [nonterminalRun] = await tx
+            .select({ id: plannedTaskRuns.id })
+            .from(plannedTaskRuns)
+            .where(and(
+              eq(plannedTaskRuns.plannedTaskId, lockedPlan.id),
+              inArray(plannedTaskRuns.status, ['pending', 'dispatching', 'running']),
+            ))
+            .limit(1);
+          if (nonterminalRun) {
+            throw new TRPCError({
+              code: 'CONFLICT',
+              message: '旧监控仍有尚未完成的运行，请稍后重试',
+            });
+          }
+
+          const instruction = `检查 ${input.name}（${input.symbol}）风险变化`;
+          const planInsert = await tx.insert(plannedTasks).values({
+            externalId: plannedTaskExternalId,
+            userId: input.userId,
+            title: `监控 ${input.name} 风险变化`,
+            instruction: `系统专用：${instruction}`,
+            notes: '仅在风险新增、升级、解除或无法判断时发送站内提醒；不构成投资建议。',
+            scope: 'single',
+            repeatType: 'daily',
+            rrule: null,
+            firstRunAt: input.nextRunAt,
+            endsAt: null,
+            nextRunAt: input.nextRunAt,
+            timezone: 'Asia/Shanghai',
+            reminderMinutes: null,
+            status: 'active',
+            itemCount: 1,
+          });
+          const plannedTaskId = readInsertId(planInsert);
+          await tx.insert(plannedTaskItems).values({
+            externalId: newExternalId('plannedTaskItem'),
+            plannedTaskId,
+            seq: 0,
+            instruction,
+            enabled: true,
+          });
+          const monitorUpdate = await tx
+            .update(stockRiskMonitors)
+            .set({
+              plannedTaskId,
+              name: input.name,
+              market: input.market,
+              riskKeysJson: [...STOCK_RISK_CHECK_KEYS],
+              lastEvaluatedDataAsOf: input.dataAsOf,
+              lastSignalsJson: input.baselineSignals,
+              lastUnavailableChecksJson: input.baselineUnavailableChecks,
+              lastNotificationFingerprint: null,
+            })
+            .where(and(
+              eq(stockRiskMonitors.id, lockedMonitor.id),
+              eq(stockRiskMonitors.plannedTaskId, archived.plannedTaskInternalId),
+            ));
+          if (readAffectedRows(monitorUpdate) === 0) {
+            throw new Error('归档风险监控替换时记录已发生变化');
+          }
+          return true;
+        });
+        const monitor = await find(input.userId, input.symbol);
+        if (!monitor) throw new Error('归档风险监控恢复后未找到记录');
+        return { created: revived, monitor };
+      }
       const monitorExternalId = newExternalId('stockRiskMonitor');
       try {
         await db.transaction(async (tx) => {

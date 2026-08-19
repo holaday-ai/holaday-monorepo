@@ -155,6 +155,21 @@ export async function queuePlannedRun(
 
   const runExternalId = newExternalId('plannedTaskRun');
   await ctx.db.transaction(async (tx) => {
+    const [lockedPlan] = await tx
+      .select({ status: plannedTasks.status })
+      .from(plannedTasks)
+      .where(eq(plannedTasks.id, plan.id))
+      .limit(1)
+      .for('update');
+    if (!lockedPlan) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: '规划任务不存在' });
+    }
+    const stillAllowed = input.claimed
+      ? lockedPlan.status === 'running'
+      : plannedTaskCanRunNow(lockedPlan.status as PlannedTaskStatus);
+    if (!stillAllowed) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: '当前状态不能执行' });
+    }
     const result = await tx.insert(plannedTaskRuns).values({
       externalId: runExternalId,
       plannedTaskId: plan.id,
@@ -355,7 +370,7 @@ async function updatePlanAfterDispatch(
   await db
     .update(plannedTasks)
     .set({ ...base, status, nextRunAt, lastReminderRun: null })
-    .where(eq(plannedTasks.id, run.planId));
+    .where(and(eq(plannedTasks.id, run.planId), eq(plannedTasks.status, 'running')));
 }
 
 export async function syncPlannedRuns(db: DB): Promise<number> {
@@ -651,7 +666,7 @@ async function plannedReminderScan(deps: PlannedRunnerDeps, now: Date): Promise<
   }
 }
 
-async function plannedTick(deps: PlannedRunnerDeps): Promise<void> {
+export async function plannedTick(deps: PlannedRunnerDeps): Promise<void> {
   const now = new Date();
   const candidates = await deps.db
     .select({
@@ -766,7 +781,7 @@ async function plannedTick(deps: PlannedRunnerDeps): Promise<void> {
           lastRunStatus: 'failed',
           lastError: (error instanceof Error ? error.message : String(error)).slice(0, 2000),
         })
-        .where(eq(plannedTasks.id, plan.id));
+        .where(and(eq(plannedTasks.id, plan.id), eq(plannedTasks.status, 'running')));
     }
   }
 }
