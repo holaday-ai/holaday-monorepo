@@ -50,6 +50,8 @@ export const ID_PREFIXES = {
   taskActionCapture: 'tac',
   // Phase 1 #2 — A股自选股 (watchlist row).
   watchlist: 'wl',
+  // Deterministic stock-risk monitor linked one-to-one with a planned task.
+  stockRiskMonitor: 'srm',
 } as const;
 
 export type IdKind = keyof typeof ID_PREFIXES;
