@@ -17,17 +17,12 @@ import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { DiscoveryNewsCard } from '@/components/DiscoveryNewsCard';
 import { NewsDetailModal as StockNewsDetailModal } from '@/components/NewsDetailModal';
-import { StockPreferenceProfile } from '@/components/stocks/StockPreferenceProfile';
 import { StockAiCommandComposer } from '@/components/stocks/StockAiCommandComposer';
 import {
   MarketTemperatureDetails,
   sectorTrendValues,
 } from '@/components/stocks/StockMarketContextDetails';
-import { StockRiskRadar } from '@/components/stocks/StockRiskRadar';
-import {
-  StockScreeningWorkbench,
-  type StockScreeningViewState,
-} from '@/components/stocks/StockScreeningWorkbench';
+import type { StockScreeningViewState } from '@/components/stocks/StockScreeningWorkbench';
 import {
   StockMarketContextLayout,
   StockResearchTable,
@@ -72,6 +67,35 @@ import {
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import { type StockTaskContextInput, useTaskStore } from '@/stores/task-store';
+
+const StockRiskRadar = React.lazy(async () => {
+  const component = await import('@/components/stocks/StockRiskRadar');
+  return { default: component.StockRiskRadar };
+});
+
+const StockScreeningWorkbench = React.lazy(async () => {
+  const component = await import('@/components/stocks/StockScreeningWorkbench');
+  return { default: component.StockScreeningWorkbench };
+});
+
+const StockPreferenceProfile = React.lazy(async () => {
+  const component = await import('@/components/stocks/StockPreferenceProfile');
+  return { default: component.StockPreferenceProfile };
+});
+
+function DeferredStockPanel({ label }: { label: string }): JSX.Element {
+  return (
+    <div
+      className="flex min-h-[180px] items-center justify-center gap-2 rounded-[12px] border border-[#E8E1EC] bg-[#FFFCFA] px-5 py-8 text-[12px] text-[#716A7C]"
+      aria-busy="true"
+      aria-live="polite"
+      role="status"
+    >
+      <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />
+      {label}
+    </div>
+  );
+}
 
 type WatchlistRow = Awaited<ReturnType<typeof trpc.watchlists.list.query>>[number];
 type BriefingStatus = Awaited<ReturnType<typeof trpc.watchlists.briefingStatus.query>>;
@@ -733,23 +757,35 @@ export function StockTasksPage(): JSX.Element {
                 temporalCopy={temporalCopy}
                 temporalMode={dashboardTrust.tone}
               />}
-              riskRadar={<StockRiskRadar
-                snapshotId={dashboard?.trust?.snapshotId ?? null}
-                dataAsOf={dashboard?.trust?.dataAsOf ?? null}
-                trustMode={dashboard?.trust?.mode ?? 'unverified'}
-              />}
-              screening={<StockScreeningWorkbench
-                snapshotId={dashboard?.trust?.snapshotId ?? null}
-                dataAsOf={dashboard?.trust?.dataAsOf ?? null}
-                trustMode={dashboard?.trust?.mode ?? 'unverified'}
-                onAddToWatchlist={addScreeningCandidate}
-                onScreeningRecorded={refreshPreferenceProfile}
-                onViewStateChange={setScreeningView}
-              />}
-              preferenceProfile={<StockPreferenceProfile
-                presentation="compact"
-                refreshKey={preferenceRevision}
-              />}
+              riskRadar={(
+                <React.Suspense fallback={<DeferredStockPanel label="正在加载风险证据…" />}>
+                  <StockRiskRadar
+                    snapshotId={dashboard?.trust?.snapshotId ?? null}
+                    dataAsOf={dashboard?.trust?.dataAsOf ?? null}
+                    trustMode={dashboard?.trust?.mode ?? 'unverified'}
+                  />
+                </React.Suspense>
+              )}
+              screening={(
+                <React.Suspense fallback={<DeferredStockPanel label="正在加载条件选股…" />}>
+                  <StockScreeningWorkbench
+                    snapshotId={dashboard?.trust?.snapshotId ?? null}
+                    dataAsOf={dashboard?.trust?.dataAsOf ?? null}
+                    trustMode={dashboard?.trust?.mode ?? 'unverified'}
+                    onAddToWatchlist={addScreeningCandidate}
+                    onScreeningRecorded={refreshPreferenceProfile}
+                    onViewStateChange={setScreeningView}
+                  />
+                </React.Suspense>
+              )}
+              preferenceProfile={(
+                <React.Suspense fallback={<DeferredStockPanel label="正在加载选股偏好…" />}>
+                  <StockPreferenceProfile
+                    presentation="compact"
+                    refreshKey={preferenceRevision}
+                  />
+                </React.Suspense>
+              )}
               briefing={<DailyBriefing
                 stocks={stocks}
                 marketIndices={marketIndices}
@@ -1172,7 +1208,7 @@ function MarketHighlights({
               <button
                 type="button"
                 onClick={onEdit}
-                className="text-[10px] font-semibold text-[#7A5A8E] transition hover:text-[#C9184A]"
+                className="inline-flex h-11 min-[769px]:h-8 items-center rounded-[7px] px-2 text-[10px] font-semibold text-[#7A5A8E] transition hover:bg-[#F8F3FA] hover:text-[#C9184A] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/25 motion-reduce:transition-none"
               >
                 管理列表
               </button>
@@ -1214,12 +1250,26 @@ function StockStoryHero({
   const changeUnavailable = stock.price === '—';
   return (
     <div className="relative min-h-[172px] overflow-hidden rounded-[20px] border border-[#E9DEEC] bg-[#FFF7F3] shadow-[0_16px_40px_rgba(116,82,133,0.08)]">
-      <img
-        src="/assets/stocks/stock-story-hero-v1.png"
-        alt=""
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0 h-full w-full object-cover object-[64%_center]"
-      />
+      <picture className="contents">
+        <source
+          media="(max-width: 640px)"
+          srcSet="/assets/stocks/stock-story-hero-v1-mobile.webp"
+          type="image/webp"
+        />
+        <source
+          srcSet="/assets/stocks/stock-story-hero-v1-desktop.webp"
+          type="image/webp"
+        />
+        <img
+          src="/assets/stocks/stock-story-hero-v1.png"
+          alt=""
+          aria-hidden="true"
+          width="1774"
+          height="887"
+          decoding="async"
+          className="pointer-events-none absolute inset-0 h-full w-full object-cover object-[64%_center]"
+        />
+      </picture>
       <div className="relative z-10 max-w-[70%] px-5 py-5 sm:max-w-[58%] sm:px-6">
         <p className="text-[10px] font-semibold tracking-[0.08em] text-[#7F648D]">
           关注中的股票 · {stock.symbol}
@@ -1334,7 +1384,7 @@ function StockHighlightCard({
                 type="button"
                 disabled={!canGenerateBriefing || briefingGenerating}
                 onClick={onGenerateBriefing}
-                className="mt-2 inline-flex h-8 items-center justify-center rounded-[7px] border border-[#EA1F59]/20 bg-[#EA1F59]/10 px-2.5 text-[12px] font-medium text-[#EA1F59] transition hover:border-[#EA1F59]/40 hover:bg-[#EA1F59]/15 disabled:cursor-not-allowed disabled:opacity-50"
+                className="mt-2 inline-flex h-11 min-[769px]:h-8 items-center justify-center rounded-[7px] border border-[#EA1F59]/20 bg-[#EA1F59]/10 px-2.5 text-[12px] font-medium text-[#EA1F59] transition hover:border-[#EA1F59]/40 hover:bg-[#EA1F59]/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/25 disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:transition-none"
               >
                 {briefingGenerating ? '生成中…' : temporalCopy.briefingCommand}
               </button>

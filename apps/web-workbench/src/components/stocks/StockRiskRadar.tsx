@@ -187,7 +187,7 @@ export function StockRiskRadar({
           className="inline-flex h-11 shrink-0 items-center justify-center gap-1.5 rounded-[8px] border border-[#DADDE4] bg-white px-3 text-[12px] font-medium text-[#4F5868] transition hover:border-[#EA1F59]/30 hover:bg-[#FFF7F9] hover:text-[#C72654] disabled:cursor-not-allowed disabled:opacity-50 sm:h-9"
         >
           {loading ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+            <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden />
           ) : (
             <RefreshCw className="h-3.5 w-3.5" aria-hidden />
           )}
@@ -210,9 +210,18 @@ export function StockRiskRadar({
             <p className="mt-1 text-[12px] text-[#8B92A1]">旧数值不会作为当前风险依据继续展示。</p>
           </div>
         ) : loading && !result ? (
-          <div className="grid gap-3 md:grid-cols-3" aria-label="正在检查风险来源">
+          <div
+            className="grid gap-3 md:grid-cols-3"
+            aria-label="正在检查风险来源"
+            aria-busy="true"
+            aria-live="polite"
+            role="status"
+          >
             {[0, 1, 2].map((item) => (
-              <div key={item} className="h-28 animate-pulse rounded-[8px] bg-[#F5F6F8]" />
+              <div
+                key={item}
+                className="h-28 animate-pulse rounded-[8px] bg-[#F5F6F8] motion-reduce:animate-none"
+              />
             ))}
           </div>
         ) : error && !result ? (

@@ -16,11 +16,37 @@ describe('stock tasks layout', () => {
     expect(source).toContain('min-[769px]:pt-4');
   });
 
-  it('keeps the compact page actions at least 44px tall on mobile', () => {
+  it('keeps all compact page actions at least 44px tall on mobile', () => {
     const source = readFileSync(new URL('./StockTasksPage.tsx', import.meta.url), 'utf8');
-    const responsiveTargets = source.match(/h-11 min-\[769px\]:h-8/g) ?? [];
+    const layoutSource = readFileSync(
+      new URL('../components/stocks/StockWorkbenchLayout.tsx', import.meta.url),
+      'utf8',
+    );
+    const responsiveTargets = `${source}\n${layoutSource}`.match(/h-11 min-\[769px\]:h-(?:8|9)/g) ?? [];
 
-    expect(responsiveTargets).toHaveLength(2);
+    expect(responsiveTargets).toHaveLength(6);
+  });
+
+  it('serves responsive WebP hero art before the PNG fallback', () => {
+    const source = readFileSync(new URL('./StockTasksPage.tsx', import.meta.url), 'utf8');
+
+    expect(source).toContain('<picture');
+    expect(source).toContain('stock-story-hero-v1-mobile.webp');
+    expect(source).toContain('stock-story-hero-v1-desktop.webp');
+    expect(source).toContain('stock-story-hero-v1.png');
+    expect(source).toContain('width="1774"');
+    expect(source).toContain('height="887"');
+  });
+
+  it('defers secondary task modules until their task view renders', () => {
+    const source = readFileSync(new URL('./StockTasksPage.tsx', import.meta.url), 'utf8');
+
+    expect(source).toContain("import('@/components/stocks/StockRiskRadar')");
+    expect(source).toContain("import('@/components/stocks/StockScreeningWorkbench')");
+    expect(source).toContain("import('@/components/stocks/StockPreferenceProfile')");
+    expect(source).toContain('<React.Suspense');
+    expect(source).not.toContain("import { StockRiskRadar } from '@/components/stocks/StockRiskRadar';");
+    expect(source).not.toContain("import { StockPreferenceProfile } from '@/components/stocks/StockPreferenceProfile';");
   });
 
   it('uses verified source covers when available and never turns discovery cards into source placeholders', () => {
@@ -160,7 +186,7 @@ describe('stock tasks layout', () => {
       'utf8',
     );
 
-    expect(source).toContain("from '@/components/stocks/StockScreeningWorkbench';");
+    expect(source).toContain("import('@/components/stocks/StockScreeningWorkbench')");
     expect(source.indexOf('<MarketHighlights')).toBeLessThan(source.indexOf('<StockScreeningWorkbench'));
     expect(source.indexOf('<StockScreeningWorkbench')).toBeLessThan(source.indexOf('<DailyBriefing'));
     expect(source).toContain('snapshotId={dashboard?.trust?.snapshotId ?? null}');
@@ -178,7 +204,7 @@ describe('stock tasks layout', () => {
   it('places the trust-bound risk radar between watchlist highlights and broad-market screening', () => {
     const source = readFileSync(new URL('./StockTasksPage.tsx', import.meta.url), 'utf8');
 
-    expect(source).toContain("import { StockRiskRadar } from '@/components/stocks/StockRiskRadar';");
+    expect(source).toContain("import('@/components/stocks/StockRiskRadar')");
     expect(source.indexOf('<MarketHighlights')).toBeLessThan(source.indexOf('<StockRiskRadar'));
     expect(source.indexOf('<StockRiskRadar')).toBeLessThan(source.indexOf('<StockScreeningWorkbench'));
     expect(source).toContain('snapshotId={dashboard?.trust?.snapshotId ?? null}');
@@ -189,7 +215,7 @@ describe('stock tasks layout', () => {
   it('places the editable preference profile after screening and refreshes it after explicit behavior', () => {
     const source = readFileSync(new URL('./StockTasksPage.tsx', import.meta.url), 'utf8');
 
-    expect(source).toContain("import { StockPreferenceProfile } from '@/components/stocks/StockPreferenceProfile';");
+    expect(source).toContain("import('@/components/stocks/StockPreferenceProfile')");
     expect(source.indexOf('<StockScreeningWorkbench')).toBeLessThan(source.indexOf('<StockPreferenceProfile'));
     expect(source.indexOf('<StockPreferenceProfile')).toBeLessThan(source.indexOf('<DailyBriefing'));
     expect(source).toContain('refreshKey={preferenceRevision}');
