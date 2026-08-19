@@ -91,6 +91,7 @@ export function StockPreferenceProfile({
   const [draft, setDraft] = React.useState<ManualPreferences | null>(null);
   const requestVersion = React.useRef(0);
   const editorTriggerRef = React.useRef<HTMLButtonElement>(null);
+  const editorOpenedByRef = React.useRef<HTMLButtonElement | null>(null);
   const completeProfileTriggerRef = React.useRef<HTMLButtonElement>(null);
 
   const load = React.useCallback(async () => {
@@ -116,8 +117,9 @@ export function StockPreferenceProfile({
     };
   }, [load, refreshKey]);
 
-  const openEditor = React.useCallback(() => {
+  const openEditor = React.useCallback((trigger: HTMLButtonElement) => {
     if (!profile) return;
+    editorOpenedByRef.current = trigger;
     setDraft(copyManualPreferences(profile.manualPreferences));
     setConfirmClear(false);
     setSheetOpen(true);
@@ -209,7 +211,7 @@ export function StockPreferenceProfile({
             <button
               ref={editorTriggerRef}
               type="button"
-              onClick={openEditor}
+              onClick={(event) => openEditor(event.currentTarget)}
               className="inline-flex h-11 items-center justify-center gap-1.5 whitespace-nowrap rounded-[7px] border border-[#DDE0E6] bg-white px-3 text-[12px] font-semibold text-[#4F5868] transition hover:border-[#EA1F59]/30 hover:text-[#D91952] motion-reduce:transition-none sm:h-9"
             >
               <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden />
@@ -228,7 +230,7 @@ export function StockPreferenceProfile({
         />
       ) : null}
       {profile?.state === 'empty' ? (
-        <EmptyState onEdit={openEditor} triggerRef={editorTriggerRef} />
+        <EmptyState onEdit={openEditor} />
       ) : null}
       {profile?.state === 'ready' ? (
         presentation === 'compact' ? (
@@ -259,7 +261,8 @@ export function StockPreferenceProfile({
         draft={draft}
         saving={saving}
         confirmClear={confirmClear}
-        triggerRef={editorTriggerRef}
+        triggerRef={editorOpenedByRef}
+        fallbackTriggerRef={editorTriggerRef}
         onOpenChange={(open) => {
           setSheetOpen(open);
           if (!open) setConfirmClear(false);
@@ -342,10 +345,8 @@ function DisabledState({
 
 function EmptyState({
   onEdit,
-  triggerRef,
 }: {
-  onEdit: () => void;
-  triggerRef: React.RefObject<HTMLButtonElement>;
+  onEdit: (trigger: HTMLButtonElement) => void;
 }): JSX.Element {
   return (
     <div className="px-5 py-8 text-center">
@@ -355,9 +356,8 @@ function EmptyState({
         完成明确条件筛选、添加新的关注股票，或主动设置研究偏好后，画像会逐步形成；小样本不会被包装成确定结论。
       </p>
       <button
-        ref={triggerRef}
         type="button"
-        onClick={onEdit}
+        onClick={(event) => onEdit(event.currentTarget)}
         className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-[7px] border border-[#EA1F59] px-3 text-[11px] font-semibold text-[#D91952]"
       >
         <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden />
@@ -574,6 +574,7 @@ function PreferenceEditor({
   saving,
   confirmClear,
   triggerRef,
+  fallbackTriggerRef,
   onOpenChange,
   onDraftChange,
   onSave,
@@ -585,6 +586,7 @@ function PreferenceEditor({
   saving: boolean;
   confirmClear: boolean;
   triggerRef: React.RefObject<HTMLButtonElement>;
+  fallbackTriggerRef: React.RefObject<HTMLButtonElement>;
   onOpenChange: (open: boolean) => void;
   onDraftChange: (draft: ManualPreferences) => void;
   onSave: () => void;
@@ -596,7 +598,10 @@ function PreferenceEditor({
         className="flex w-full max-w-[460px] flex-col bg-white p-0 sm:max-w-[460px]"
         onCloseAutoFocus={(event) => {
           event.preventDefault();
-          triggerRef.current?.focus();
+          const target = triggerRef.current?.isConnected
+            ? triggerRef.current
+            : fallbackTriggerRef.current;
+          target?.focus();
         }}
       >
         <SheetHeader className="border-b border-[#ECEEF3] px-5 py-4 pr-12">

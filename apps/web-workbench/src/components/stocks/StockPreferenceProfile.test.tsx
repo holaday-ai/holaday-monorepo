@@ -321,6 +321,35 @@ describe('StockPreferenceProfile', () => {
     expect(document.activeElement).toBe(trigger);
   });
 
+  it('returns focus to the persistent trigger when saving replaces the empty-state trigger', async () => {
+    const empty = profile({
+      state: 'empty',
+      confidence: {
+        level: 'insufficient',
+        label: '样本不足',
+        score: 0,
+        basis: '尚无清空后的明确设置或行为样本。',
+      },
+      sample: { screeningRuns: 0, watchlistStocks: 0, manualDimensions: 0 },
+      facts: [],
+      possibleStrengths: [],
+      blindSpots: [],
+      supplementaryViews: [],
+      basis: [],
+    });
+    const user = userEvent.setup();
+    render(<StockPreferenceProfile api={apiFor(empty)} />);
+    await screen.findByText('样本还不够形成画像');
+
+    const persistentTrigger = screen.getByRole('button', { name: '调整画像' });
+    await user.click(screen.getByRole('button', { name: '主动设置偏好' }));
+    const dialog = screen.getByRole('dialog', { name: '调整选股偏好' });
+    await user.click(within(dialog).getByRole('button', { name: '保存偏好' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '调整选股偏好' })).toBeNull());
+    expect(document.activeElement).toBe(persistentTrigger);
+  });
+
   it('requires a second action before clearing and states that the watchlist remains', async () => {
     const api = apiFor();
     const user = userEvent.setup();
