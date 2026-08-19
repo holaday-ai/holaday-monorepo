@@ -205,6 +205,111 @@ describe('stocks dashboard snapshot', () => {
     expect(persistedSnapshotIds).toContain(snapshot.trust?.snapshotId);
   });
 
+  it('keeps serving the persisted quick snapshot until the full refresh is persisted', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-06-30T08:00:00.000Z'));
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/trading-calendar/latest') {
+        return new Response(JSON.stringify(envelope([{
+          requested_date: url.searchParams.get('on_or_before'),
+          latest_trading_date: '2026-06-30',
+        }])));
+      }
+      if (url.pathname === '/kline/603528') {
+        return new Response(JSON.stringify(envelope([
+          { 日期: '2026-06-29', 收盘: 6.03, 涨跌幅: -0.33, 成交额: 60_000_000 },
+          { 日期: '2026-06-30', 收盘: 6.10, 涨跌幅: 1.16, 成交额: 72_000_000 },
+        ])));
+      }
+      if (url.pathname === '/intraday/603528') {
+        return new Response(JSON.stringify(envelope([
+          { 时间: '2026-06-30 09:30:00', 最新价: 6.04 },
+          { 时间: '2026-06-30 15:00:00', 最新价: 6.10 },
+        ])));
+      }
+      if (url.pathname === '/quote/603528') {
+        return new Response(JSON.stringify(envelope([{
+          代码: 'sh603528',
+          名称: '多伦科技',
+          最新价: 6.10,
+          涨跌幅: 1.16,
+          成交额: 72_000_000,
+        }])));
+      }
+      if (url.pathname === '/announcements/603528') {
+        return new Response(JSON.stringify(envelope([{
+          公告标题: '多伦科技重要公告',
+          公告时间: '2026-06-30 15:30:00',
+          公告链接: 'https://www.cninfo.com.cn/603528/notice.html',
+        }])));
+      }
+      return new Response(JSON.stringify(envelope([])));
+    });
+
+    let markFullPersistStarted: (() => void) | undefined;
+    const fullPersistStarted = new Promise<void>((resolve) => {
+      markFullPersistStarted = resolve;
+    });
+    let releaseFullPersist: (() => void) | undefined;
+    const fullPersistGate = new Promise<void>((resolve) => {
+      releaseFullPersist = resolve;
+    });
+    let persistCallCount = 0;
+    const fakeDb = {
+      select: vi.fn(() => ({
+        from: () => ({
+          where: () => ({
+            limit: async () => [],
+          }),
+        }),
+      })),
+      insert: vi.fn(() => ({
+        values: () => ({
+          onDuplicateKeyUpdate: async () => {
+            persistCallCount += 1;
+            if (persistCallCount === 2) {
+              markFullPersistStarted?.();
+              await fullPersistGate;
+            }
+          },
+        }),
+      })),
+    };
+
+    const quickSnapshot = await __stocksDashboardTest.resolveDashboardSnapshot({
+      db: fakeDb as never,
+      logger: { warn: vi.fn() },
+      userInternalId: 1,
+      watchlistRows: [{ symbol: '603528', market: 'A', displayName: '多伦科技' }],
+      effectiveWatchlist: [{ symbol: '603528', market: 'A', displayName: '多伦科技' }],
+    });
+
+    expect(quickSnapshot.trust?.snapshotId).toBeTruthy();
+    const inFlightFullRefresh = Array.from(
+      __stocksDashboardTest.dashboardCache.values(),
+    )[0]?.refreshPromise;
+    expect(inFlightFullRefresh).toBeTruthy();
+    await fullPersistStarted;
+
+    try {
+      const snapshotWhileFullPersistIsPending = await __stocksDashboardTest.resolveDashboardSnapshot({
+        db: fakeDb as never,
+        logger: { warn: vi.fn() },
+        userInternalId: 1,
+        watchlistRows: [{ symbol: '603528', market: 'A', displayName: '多伦科技' }],
+        effectiveWatchlist: [{ symbol: '603528', market: 'A', displayName: '多伦科技' }],
+      });
+
+      expect(snapshotWhileFullPersistIsPending.trust?.snapshotId).toBe(
+        quickSnapshot.trust?.snapshotId,
+      );
+    } finally {
+      releaseFullPersist?.();
+      await inFlightFullRefresh;
+    }
+  });
+
   it('sorts discovery announcements by publication time and keeps all real items within the larger feed window', () => {
     const announcement = (title: string, time: string) => ({
       公告标题: title,
