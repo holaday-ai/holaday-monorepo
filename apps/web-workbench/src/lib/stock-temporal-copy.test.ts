@@ -21,6 +21,7 @@ describe('stock temporal copy', () => {
 
   it('retains current wording only for a current snapshot', () => {
     expect(stockTemporalCopy('current', '2026-08-14')).toMatchObject({
+      assistantStatus: '正在理解你的关注股票',
       briefingTitle: '今日关注日报',
       briefingCommand: '生成今日关注日报',
       performanceLabel: '当前表现',
@@ -28,12 +29,14 @@ describe('stock temporal copy', () => {
       opportunityTitle: '机会',
       starTitle: '明星股票',
       starMeta: '今日关注',
+      promptPlaceholder: '今天想让 AI 帮你看什么？',
     });
     expect(stockSignalLabel('强势', 'current')).toBe('强势');
   });
 
   it('uses blocked neutral wording when no trustworthy numeric snapshot is available', () => {
     expect(stockTemporalCopy('unavailable', null)).toMatchObject({
+      assistantStatus: '等待可信行情恢复',
       briefingTitle: '行情待恢复',
       briefingCommand: '等待可信行情',
       priceLabel: '价格待核验',

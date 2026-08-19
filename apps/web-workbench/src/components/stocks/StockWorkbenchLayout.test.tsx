@@ -65,6 +65,28 @@ describe('StockTaskWorkspaceLayout', () => {
     expect(screen.queryByTestId('screening')).toBeNull();
   });
 
+  it('keeps all four task destinations visible without a horizontally clipped mobile rail', () => {
+    render(
+      <StockTaskWorkspaceLayout
+        highlights={node('highlights')}
+        riskRadar={node('risk')}
+        screening={node('screening')}
+        preferenceProfile={node('profile')}
+        briefing={node('briefing')}
+        screeningView="idle"
+      />,
+    );
+
+    const navigation = screen.getByRole('navigation', { name: '股市任务视图' });
+    expect(navigation.className).toContain('grid-cols-2');
+    expect(navigation.className).toContain('sm:grid-cols-4');
+    expect(navigation.className).not.toContain('overflow-x-auto');
+    for (const button of navigation.querySelectorAll('button')) {
+      expect(button.className).toContain('min-w-0');
+      expect(button.className).not.toContain('min-w-[132px]');
+    }
+  });
+
   it('routes next-step actions to the matching research task', async () => {
     const user = userEvent.setup();
     render(

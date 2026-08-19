@@ -8,7 +8,6 @@ import {
   Loader2,
   Plus,
   RefreshCw,
-  Send,
   ShieldAlert,
   Trash2,
   TrendingDown,
@@ -19,6 +18,7 @@ import { useNavigate } from 'react-router-dom';
 import { DiscoveryNewsCard } from '@/components/DiscoveryNewsCard';
 import { NewsDetailModal as StockNewsDetailModal } from '@/components/NewsDetailModal';
 import { StockPreferenceProfile } from '@/components/stocks/StockPreferenceProfile';
+import { StockAiCommandComposer } from '@/components/stocks/StockAiCommandComposer';
 import {
   MarketTemperatureDetails,
   sectorTrendValues,
@@ -211,7 +211,6 @@ export function StockTasksPage(): JSX.Element {
   const [screeningView, setScreeningView] = React.useState<StockScreeningViewState>('idle');
   const [activeLeaderboard, setActiveLeaderboard] = React.useState<'涨幅榜' | '跌幅榜' | '成交额榜' | '换手率榜'>('涨幅榜');
   const pageAlive = React.useRef(true);
-  const promptInputRef = React.useRef<HTMLInputElement | null>(null);
   const dashboardRefreshInFlight = React.useRef(false);
   const dashboardCompletionRetries = React.useRef(0);
   const discoveryNextPage = React.useRef<Record<MarketDiscoveryFeed, number>>({
@@ -690,58 +689,31 @@ export function StockTasksPage(): JSX.Element {
           </div>
         ) : null}
 
-        <section className="rounded-[18px] border border-[#E9E0EC] bg-[#FFFDFB] p-2 shadow-[0_14px_36px_rgba(102,74,119,0.055)]">
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              void submitPrompt(prompt);
-            }}
-            className="flex min-h-[62px] items-center gap-3 rounded-[14px] border border-transparent bg-[#FFF7FA] px-3 transition-colors focus-within:border-[#EA1F59]/30"
-          >
-            <input
-              ref={promptInputRef}
-              value={prompt}
-              onChange={(event) => setPrompt(event.target.value)}
-              placeholder={temporalCopy.promptPlaceholder}
-              className="min-w-0 flex-1 bg-transparent text-[16px] font-medium text-[#332842] outline-none placeholder:text-[#968C9D]"
-            />
-            <button
-              type="submit"
-              disabled={submitting || !prompt.trim() || stockPromptUnavailable}
-              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] bg-[#EA1F59] text-white shadow-[0_8px_20px_rgba(234,31,89,0.18)] transition hover:bg-[#D91952] disabled:cursor-not-allowed disabled:opacity-55"
-              aria-label="提交股市任务"
-              title="提交股市任务"
-            >
-              {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-            </button>
-          </form>
-          <div className="flex flex-wrap gap-2 border-t border-[#F0E8F1] px-2 py-2">
-            {commands.map((command) => (
-              <button
-                key={command}
-                type="button"
-                disabled={
-                  loadingDashboard ||
-                  stockPromptUnavailable ||
-                  (command === temporalCopy.briefingCommand &&
-                    dashboardTrust.tone === 'current' &&
-                    briefingUnavailable)
-                }
-                title={command === temporalCopy.briefingCommand ? briefingUnavailableTitle : undefined}
-                onClick={() => {
-                  setPrompt(command);
-                  if (command === temporalCopy.briefingCommand && dashboardTrust.tone === 'current') {
-                    void generateBriefing();
-                  }
-                  else void submitPrompt(command);
-                }}
-                className="inline-flex h-8 items-center rounded-[10px] border border-[#E5DEEB] bg-[#FBF8FF] px-3 text-[12px] font-medium text-[#5D5368] transition hover:border-[#E7BEC9] hover:bg-[#FFF0F4] hover:text-[#C9184A] disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {command}
-              </button>
-            ))}
-          </div>
-        </section>
+        <StockAiCommandComposer
+          value={prompt}
+          placeholder={temporalCopy.promptPlaceholder}
+          assistantStatus={temporalCopy.assistantStatus}
+          commands={commands}
+          submitting={submitting}
+          submitDisabled={submitting || !prompt.trim() || stockPromptUnavailable}
+          onValueChange={setPrompt}
+          onSubmit={() => void submitPrompt(prompt)}
+          onCommand={(command) => {
+            setPrompt(command);
+            if (command === temporalCopy.briefingCommand && dashboardTrust.tone === 'current') {
+              void generateBriefing();
+            }
+            else void submitPrompt(command);
+          }}
+          isCommandDisabled={(command) =>
+            loadingDashboard ||
+            stockPromptUnavailable ||
+            (command === temporalCopy.briefingCommand &&
+              dashboardTrust.tone === 'current' &&
+              briefingUnavailable)}
+          commandTitle={(command) =>
+            command === temporalCopy.briefingCommand ? briefingUnavailableTitle : undefined}
+        />
 
         {initialDashboardLoading ? (
           <InitialDashboardSkeleton />
