@@ -11,6 +11,7 @@ import {
   varchar,
 } from 'drizzle-orm/mysql-core';
 import { scheduledTasks } from './scheduled-tasks.js';
+import { plannedTasks } from './planned-tasks.js';
 import { users } from './users.js';
 
 /**
@@ -43,6 +44,10 @@ export const notifications = mysqlTable(
       () => scheduledTasks.id,
       { onDelete: 'set null' },
     ),
+    plannedTaskId: bigint('planned_task_id', { mode: 'number', unsigned: true }).references(
+      () => plannedTasks.id,
+      { onDelete: 'set null' },
+    ),
     type: varchar('type', { length: 32 }).notNull(),
     title: varchar('title', { length: 255 }).notNull(),
     message: text('message').notNull(),
@@ -57,6 +62,7 @@ export const notifications = mysqlTable(
     index('ix_notifications_user_unread').on(t.userId, t.isRead),
     // Per-user list ordered by created_at desc.
     index('ix_notifications_user_created').on(t.userId, t.createdAt),
+    index('ix_notifications_planned_task').on(t.plannedTaskId),
   ],
 );
 
