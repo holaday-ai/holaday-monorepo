@@ -1723,7 +1723,6 @@ function startFullDashboardRefresh(args: {
       args.cacheKey,
       now,
     );
-    cacheDashboardSnapshot(args.cacheKey, merged);
     await persistDashboardSnapshot({
       db: args.db,
       logger: args.logger,
@@ -1731,6 +1730,7 @@ function startFullDashboardRefresh(args: {
       cacheKey: args.cacheKey,
       snapshot: merged,
     });
+    cacheDashboardSnapshot(args.cacheKey, merged);
     return merged;
   }).catch((error) => {
     args.logger.warn(
@@ -1798,7 +1798,6 @@ function startDashboardRefresh(args: {
       args.cacheKey,
       new Date(),
     );
-    cacheDashboardSnapshot(args.cacheKey, merged);
     await persistDashboardSnapshot({
       db: args.db,
       logger: args.logger,
@@ -1806,6 +1805,7 @@ function startDashboardRefresh(args: {
       cacheKey: args.cacheKey,
       snapshot: merged,
     });
+    cacheDashboardSnapshot(args.cacheKey, merged);
     return merged;
   }).catch((error) => {
     args.logger.warn(
