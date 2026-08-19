@@ -1,3 +1,4 @@
+import { cn } from '@/lib/utils';
 import {
   ArrowRight,
   ChevronDown,
@@ -9,7 +10,6 @@ import {
   Search,
   ShieldAlert,
 } from 'lucide-react';
-import { cn } from '@/lib/utils';
 import * as React from 'react';
 import type { StockScreeningViewState } from './StockScreeningWorkbench';
 
@@ -33,7 +33,6 @@ export function StockTaskWorkspaceLayout({
   screening,
   preferenceProfile,
   briefing,
-  screeningView,
 }: {
   highlights: React.ReactNode;
   riskRadar: React.ReactNode;
@@ -43,7 +42,6 @@ export function StockTaskWorkspaceLayout({
   screeningView: StockScreeningViewState;
 }): JSX.Element {
   const [activeTask, setActiveTask] = React.useState<StockWorkspaceTask>('watchlist');
-  const showsResults = screeningView === 'results';
 
   return (
     <section
@@ -72,9 +70,14 @@ export function StockTaskWorkspaceLayout({
                   : 'text-[#566074] hover:bg-[#F7F4FC] hover:text-[#332842]',
               )}
             >
-              <Icon className={cn('h-4 w-4 shrink-0', selected ? 'text-[#EA1F59]' : 'text-[#7A8192]')} aria-hidden />
+              <Icon
+                className={cn('h-4 w-4 shrink-0', selected ? 'text-[#EA1F59]' : 'text-[#7A8192]')}
+                aria-hidden
+              />
               <span className="min-w-0">
-                <span className="block whitespace-nowrap text-[13px] font-semibold">{task.label}</span>
+                <span className="block whitespace-nowrap text-[13px] font-semibold">
+                  {task.label}
+                </span>
               </span>
             </button>
           );
@@ -90,7 +93,7 @@ export function StockTaskWorkspaceLayout({
         ) : null}
         {activeTask === 'risk' ? <div className="min-w-0">{riskRadar}</div> : null}
         {activeTask === 'screening' ? (
-          <div className={cn('grid min-w-0 grid-cols-1 gap-4', showsResults ? '' : 'xl:grid-cols-[minmax(0,1fr)_340px]')}>
+          <div className="min-w-0 space-y-4">
             <div className="min-w-0">{screening}</div>
             <div className="min-w-0">{preferenceProfile}</div>
           </div>
@@ -113,7 +116,12 @@ function NextStepRail({
     icon: typeof ClipboardList;
   }> = [
     { label: '查看风险证据', description: '核对触发条件与来源', task: 'risk', icon: ShieldAlert },
-    { label: '打开选股与偏好', description: '按条件筛选并看偏好盲点', task: 'screening', icon: ClipboardList },
+    {
+      label: '打开选股与偏好',
+      description: '按条件筛选并看偏好盲点',
+      task: 'screening',
+      icon: ClipboardList,
+    },
   ];
   return (
     <aside
@@ -122,7 +130,9 @@ function NextStepRail({
     >
       <div className="min-w-0">
         <div className="text-[12px] font-semibold text-[#3E3154]">下一步</div>
-        <p className="mt-0.5 truncate text-[10px] text-[#8A8192]">继续核验，或按偏好寻找下一批候选</p>
+        <p className="mt-0.5 truncate text-[10px] text-[#8A8192]">
+          继续核验，或按偏好寻找下一批候选
+        </p>
       </div>
       <div className="flex min-w-0 flex-wrap gap-2 sm:justify-end">
         {actions.map((action) => {
@@ -146,7 +156,10 @@ function NextStepRail({
             >
               <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
               <span className="min-w-0 truncate text-[11px] font-semibold">{action.label}</span>
-              <ArrowRight className="h-3.5 w-3.5 shrink-0 opacity-55 transition group-hover:translate-x-0.5 motion-reduce:transition-none" aria-hidden />
+              <ArrowRight
+                className="h-3.5 w-3.5 shrink-0 opacity-55 transition group-hover:translate-x-0.5 motion-reduce:transition-none"
+                aria-hidden
+              />
             </button>
           );
         })}
@@ -210,12 +223,18 @@ export function StockResearchTable({
                       <Circle className="h-4 w-4 shrink-0 text-[#C9C5D1]" aria-hidden />
                     )}
                     <span className="min-w-0">
-                      <span className="block truncate text-[12px] font-semibold text-[#2E2639]">{row.name}</span>
-                      <span className="mt-0.5 block text-[10px] tabular-nums text-[#8A8192]">{row.symbol} · {row.updatedAt}</span>
+                      <span className="block truncate text-[12px] font-semibold text-[#2E2639]">
+                        {row.name}
+                      </span>
+                      <span className="mt-0.5 block text-[10px] tabular-nums text-[#8A8192]">
+                        {row.symbol} · {row.updatedAt}
+                      </span>
                     </span>
                   </button>
                 </td>
-                <td className="whitespace-nowrap px-2 py-2.5 text-right font-semibold tabular-nums text-[#2E2639]">{row.price}</td>
+                <td className="whitespace-nowrap px-2 py-2.5 text-right font-semibold tabular-nums text-[#2E2639]">
+                  {row.price}
+                </td>
                 <td
                   className={cn(
                     'whitespace-nowrap px-3 py-2.5 text-right text-[11px] font-semibold tabular-nums',
@@ -268,7 +287,9 @@ export function StockMarketContextLayout({
           >
             市场背景
           </h2>
-          <p className="mt-1 text-[11px] text-[#7D718A]">需要横向参照时再展开，不打断当前研究任务</p>
+          <p className="mt-1 text-[11px] text-[#7D718A]">
+            需要横向参照时再展开，不打断当前研究任务
+          </p>
         </div>
         <button
           type="button"

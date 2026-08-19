@@ -1,3 +1,4 @@
+import type { TradingCalendarRow } from '../agent/a-share/akshare-client.js';
 import type {
   AkEnvelope,
   AnnouncementRow,
@@ -9,17 +10,17 @@ import type {
   StockScreeningUniverseRow,
   ValuationRow,
 } from '../agent/a-share/briefing-types.js';
-import type { TradingCalendarRow } from '../agent/a-share/akshare-client.js';
-import { detectAllRisks, type RiskKey } from '../agent/a-share/risk-radar-engine.js';
-import { latestExpectedTradingDate } from './stock-trust.js';
+import { type RiskKey, detectAllRisks } from '../agent/a-share/risk-radar-engine.js';
 import type {
   StockScreenCriterion,
   StockScreenField,
   StockScreenOperator,
 } from './screening-criteria.js';
+import { latestExpectedTradingDate } from './stock-trust.js';
 
 const DEEP_CHECK_LIMIT = 20 as const;
-const DEEP_CHECK_CONCURRENCY = 4;
+const DEEP_CHECK_CONCURRENCY = 8;
+const SCREENING_SOURCE_TIMEOUT_MS = 4_000;
 const RECENT_INSIDER_DAYS = 180;
 const ANNOUNCEMENT_LOOKBACK_DAYS = 90;
 
@@ -112,12 +113,53 @@ interface CandidateEvaluation extends StockCandidateMatch {
 
 interface DeepSources {
   fundamentals: AkEnvelope<FundamentalsRow>;
-  valuation: AkEnvelope<ValuationRow>;
+  insider: AkEnvelope<InsiderChangeRow>;
+}
+
+interface RiskSources {
   pledge: AkEnvelope<PledgeRow>;
   goodwill: AkEnvelope<GoodwillRow>;
   forecast: AkEnvelope<ForecastRow>;
   insider: AkEnvelope<InsiderChangeRow>;
   announcements: AkEnvelope<AnnouncementRow>;
+}
+
+const SCREENING_DISCLAIMER =
+  '数据来源 AkShare 聚合，仅供信息参考，不构成任何投资建议，不预测股价。';
+
+function unavailableEnvelope<T>(source: string, errorCode: string): AkEnvelope<T> {
+  return {
+    data: [],
+    count: 0,
+    source,
+    fetched_at: new Date().toISOString(),
+    disclaimer: SCREENING_DISCLAIMER,
+    error: '筛选数据源暂不可用',
+    error_code: errorCode,
+  };
+}
+
+async function withinSourceBudget<T>(
+  load: () => Promise<AkEnvelope<T>>,
+  timeoutMs: number,
+): Promise<AkEnvelope<T>> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      load(),
+      new Promise<AkEnvelope<T>>((resolve) => {
+        timer = setTimeout(
+          () =>
+            resolve(unavailableEnvelope<T>('screening:source-timeout', 'SCREENING_SOURCE_TIMEOUT')),
+          Math.max(1, timeoutMs),
+        );
+      }),
+    ]);
+  } catch {
+    return unavailableEnvelope<T>('screening:source-unavailable', 'SCREENING_SOURCE_UNAVAILABLE');
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 function numberOrNull(value: unknown): number | null {
@@ -223,7 +265,7 @@ function deepValue(
     case 'net_profit_yoy':
       return numberOrNull(fundamentals?.net_profit_yoy);
     case 'insider_reduction_recent':
-      if (sources.insider.error) return null;
+      if (sources.insider.error || sources.insider.source.includes('(无数据)')) return null;
       return recentInsider.some((row) => (numberOrNull(row.变动数) ?? 0) < 0);
     default:
       return null;
@@ -238,7 +280,7 @@ function newestDate(rows: Array<Record<string, unknown>>, key: string): string |
   return dates[0] ?? null;
 }
 
-function warningSource(key: RiskKey, sources: DeepSources): AkEnvelope<unknown> {
+function warningSource(key: RiskKey, sources: RiskSources): AkEnvelope<unknown> {
   if (key === 'pledge') return sources.pledge;
   if (key === 'goodwill') return sources.goodwill;
   if (key === 'forecast') return sources.forecast;
@@ -248,7 +290,7 @@ function warningSource(key: RiskKey, sources: DeepSources): AkEnvelope<unknown> 
 
 function warningAsOf(
   key: RiskKey,
-  sources: DeepSources,
+  sources: RiskSources,
   recentInsider: InsiderChangeRow[],
   fallback: string,
 ): string | null {
@@ -261,7 +303,6 @@ function warningAsOf(
 
 function sourceForCriterion(field: StockScreenField, sources: DeepSources): AkEnvelope<unknown> {
   if (field === 'insider_reduction_recent') return sources.insider;
-  if (field === 'pe_ttm' || field === 'pb') return sources.valuation;
   return sources.fundamentals;
 }
 
@@ -273,7 +314,8 @@ function criterionAsOf(
 ): string | null {
   if (MARKET_FIELDS.has(field)) return dataAsOf;
   if (field === 'insider_reduction_recent') {
-    return newestDate(recentInsider, '变动日期');
+    if (sources.insider.error || sources.insider.source.includes('(无数据)')) return null;
+    return newestDate(recentInsider, '变动日期') ?? dataAsOf;
   }
   const fundamentals = firstRow(sources.fundamentals);
   if (field === 'net_profit_3y_positive') {
@@ -287,24 +329,52 @@ function criterionAsOf(
   return typeof reportPeriod === 'string' && reportPeriod.length > 0 ? reportPeriod : null;
 }
 
-async function loadDeepSources(
+async function loadCriterionSources(
+  client: StockScreeningClient,
+  symbol: string,
+  criteria: StockScreenCriterion[],
+  timeoutMs: number,
+): Promise<DeepSources> {
+  const needsFundamentals = criteria.some(
+    (criterion) =>
+      !MARKET_FIELDS.has(criterion.field) && criterion.field !== 'insider_reduction_recent',
+  );
+  const needsInsider = criteria.some((criterion) => criterion.field === 'insider_reduction_recent');
+  const [fundamentals, insider] = await Promise.all([
+    needsFundamentals
+      ? withinSourceBudget(() => client.getFundamentals(symbol), timeoutMs)
+      : Promise.resolve(
+          unavailableEnvelope<FundamentalsRow>('screening:not-requested', 'NOT_REQUESTED'),
+        ),
+    needsInsider
+      ? withinSourceBudget(() => client.getRiskInsider(symbol), timeoutMs)
+      : Promise.resolve(
+          unavailableEnvelope<InsiderChangeRow>('screening:not-requested', 'NOT_REQUESTED'),
+        ),
+  ]);
+  return { fundamentals, insider };
+}
+
+async function loadRiskSources(
   client: StockScreeningClient,
   symbol: string,
   dataAsOf: string,
-): Promise<DeepSources> {
+  criterionSources: DeepSources,
+  criterionIncludesInsider: boolean,
+  timeoutMs: number,
+): Promise<RiskSources> {
   const date = compactDate(dataAsOf);
   const startDate = subtractDays(dataAsOf, ANNOUNCEMENT_LOOKBACK_DAYS);
-  const [fundamentals, valuation, pledge, goodwill, forecast, insider, announcements] =
-    await Promise.all([
-      client.getFundamentals(symbol),
-      client.getValuation(symbol),
-      client.getRiskPledge(date, symbol),
-      client.getRiskGoodwill(date, symbol),
-      client.getRiskForecast(date, symbol),
-      client.getRiskInsider(symbol),
-      client.getStockAnnouncements(symbol, startDate, date),
-    ]);
-  return { fundamentals, valuation, pledge, goodwill, forecast, insider, announcements };
+  const [pledge, goodwill, forecast, insider, announcements] = await Promise.all([
+    withinSourceBudget(() => client.getRiskPledge(date, symbol), timeoutMs),
+    withinSourceBudget(() => client.getRiskGoodwill(date, symbol), timeoutMs),
+    withinSourceBudget(() => client.getRiskForecast(date, symbol), timeoutMs),
+    criterionIncludesInsider
+      ? Promise.resolve(criterionSources.insider)
+      : withinSourceBudget(() => client.getRiskInsider(symbol), timeoutMs),
+    withinSourceBudget(() => client.getStockAnnouncements(symbol, startDate, date), timeoutMs),
+  ]);
+  return { pledge, goodwill, forecast, insider, announcements };
 }
 
 async function evaluateCandidate(args: {
@@ -314,10 +384,11 @@ async function evaluateCandidate(args: {
   dataAsOf: string;
   criteria: StockScreenCriterion[];
   marketStates: Map<string, CriterionState>;
+  sourceTimeoutMs: number;
 }): Promise<CandidateEvaluation> {
-  const { client, row, snapshotId, dataAsOf, criteria, marketStates } = args;
+  const { client, row, snapshotId, dataAsOf, criteria, marketStates, sourceTimeoutMs } = args;
   const symbol = String(row.代码 ?? '');
-  const sources = await loadDeepSources(client, symbol, dataAsOf);
+  const sources = await loadCriterionSources(client, symbol, criteria, sourceTimeoutMs);
   const recentInsider = (sources.insider.error ? [] : sources.insider.data).filter((item) =>
     withinDaysOnOrBefore(item.变动日期, dataAsOf, RECENT_INSIDER_DAYS),
   );
@@ -329,11 +400,7 @@ async function evaluateCandidate(args: {
   for (const criterion of criteria) {
     const state = MARKET_FIELDS.has(criterion.field)
       ? (marketStates.get(criterion.id) ?? 'missing')
-      : compare(
-          deepValue(criterion, sources, recentInsider),
-          criterion.operator,
-          criterion.value,
-        );
+      : compare(deepValue(criterion, sources, recentInsider), criterion.operator, criterion.value);
     if (state === 'matched') matchedCriteria.push(criterion.label);
     else if (state === 'unmet') unmetCriteria.push(criterion.label);
     else missingCriteria.push(criterion.label);
@@ -349,29 +416,54 @@ async function evaluateCandidate(args: {
     });
   }
 
+  const isExactMatch = unmetCriteria.length === 0 && missingCriteria.length === 0;
   const fundamentals = firstRow(sources.fundamentals);
   const eps = numberOrNull(fundamentals?.eps_basic);
   const netProfit = numberOrNull(fundamentals?.net_profit);
   const totalShares = eps !== null && eps > 0 && netProfit !== null ? netProfit / eps : null;
-  const risks = detectAllRisks({
-    pledge: firstRow(sources.pledge),
-    goodwill: firstRow(sources.goodwill),
-    forecast: firstRow(sources.forecast),
-    insider: recentInsider,
-    announcements: sources.announcements.error ? [] : sources.announcements.data,
-    totalShares,
-  });
-  const warnings = risks.map((risk): StockScreeningWarning => {
-    const source = warningSource(risk.key, sources);
-    return {
-      key: risk.key,
-      severity: risk.star ? '警示' : '关注',
-      label: risk.label,
-      finding: risk.finding,
-      source: source.source,
-      asOf: warningAsOf(risk.key, sources, recentInsider, dataAsOf),
-    };
-  });
+  let warnings = detectAllRisks({ insider: recentInsider, totalShares })
+    .filter((risk) => risk.key === 'insider')
+    .map(
+      (risk): StockScreeningWarning => ({
+        key: risk.key,
+        severity: risk.star ? '警示' : '关注',
+        label: risk.label,
+        finding: risk.finding,
+        source: sources.insider.source,
+        asOf: newestDate(recentInsider, '变动日期') ?? dataAsOf,
+      }),
+    );
+  if (isExactMatch) {
+    const riskSources = await loadRiskSources(
+      client,
+      symbol,
+      dataAsOf,
+      sources,
+      criteria.some((criterion) => criterion.field === 'insider_reduction_recent'),
+      sourceTimeoutMs,
+    );
+    const riskInsider = (riskSources.insider.error ? [] : riskSources.insider.data).filter((item) =>
+      withinDaysOnOrBefore(item.变动日期, dataAsOf, RECENT_INSIDER_DAYS),
+    );
+    warnings = detectAllRisks({
+      pledge: firstRow(riskSources.pledge),
+      goodwill: firstRow(riskSources.goodwill),
+      forecast: firstRow(riskSources.forecast),
+      insider: riskInsider,
+      announcements: riskSources.announcements.error ? [] : riskSources.announcements.data,
+      totalShares,
+    }).map((risk): StockScreeningWarning => {
+      const source = warningSource(risk.key, riskSources);
+      return {
+        key: risk.key,
+        severity: risk.star ? '警示' : '关注',
+        label: risk.label,
+        finding: risk.finding,
+        source: source.source,
+        asOf: warningAsOf(risk.key, riskSources, riskInsider, dataAsOf),
+      };
+    });
+  }
   for (const warning of warnings) {
     evidence.push({
       id: `screen:${snapshotId}:${symbol}:risk:${warning.key}`,
@@ -409,9 +501,7 @@ async function mapWithConcurrency<T, R>(
       results[index] = await mapper(items[index] as T);
     }
   }
-  await Promise.all(
-    Array.from({ length: Math.min(concurrency, items.length) }, () => worker()),
-  );
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => worker()));
   return results;
 }
 
@@ -427,6 +517,7 @@ export async function runStockScreening(args: {
   dataAsOf: string;
   criteria: StockScreenCriterion[];
   now?: Date;
+  sourceTimeoutMs?: number;
 }): Promise<StockScreeningResult> {
   const { client, snapshotId, dataAsOf, criteria } = args;
   const expectedTradingDate = await latestExpectedTradingDate(client, args.now ?? new Date());
@@ -446,10 +537,7 @@ export async function runStockScreening(args: {
   const prefiltered = universe.filter((row) => {
     const symbol = String(row.代码 ?? '');
     const states = new Map(
-      marketCriteria.map((criterion) => [
-        criterion.id,
-        evaluateMarketCriterion(row, criterion),
-      ]),
+      marketCriteria.map((criterion) => [criterion.id, evaluateMarketCriterion(row, criterion)]),
     );
     marketStatesBySymbol.set(symbol, states);
     return [...states.values()].every((state) => state === 'matched');
@@ -458,16 +546,15 @@ export async function runStockScreening(args: {
     (left, right) => (numberOrNull(right.成交额) ?? 0) - (numberOrNull(left.成交额) ?? 0),
   );
   const selected = ordered.slice(0, DEEP_CHECK_LIMIT);
-  const evaluated = await mapWithConcurrency(
-    selected,
-    DEEP_CHECK_CONCURRENCY,
-    async (row) => evaluateCandidate({
+  const evaluated = await mapWithConcurrency(selected, DEEP_CHECK_CONCURRENCY, async (row) =>
+    evaluateCandidate({
       client,
       row,
       snapshotId,
       dataAsOf,
       criteria,
       marketStates: marketStatesBySymbol.get(String(row.代码 ?? '')) ?? new Map(),
+      sourceTimeoutMs: args.sourceTimeoutMs ?? SCREENING_SOURCE_TIMEOUT_MS,
     }),
   );
   evaluated.sort((left, right) => {
@@ -488,8 +575,7 @@ export async function runStockScreening(args: {
     },
     candidates,
     zeroResult: !candidates.some(
-      (candidate) =>
-        candidate.unmetCriteria.length === 0 && candidate.missingCriteria.length === 0,
+      (candidate) => candidate.unmetCriteria.length === 0 && candidate.missingCriteria.length === 0,
     ),
   };
 }

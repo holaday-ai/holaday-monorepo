@@ -312,15 +312,27 @@ export function StockScreeningWorkbench({
           </div>
 
           {result.candidates.length > 0 ? (
-            <div className="mt-4 divide-y divide-[#E8EAF0] border-y border-[#E1E3E8]">
-              {result.candidates.map((candidate) => (
-                <CandidateRow
-                  key={candidate.symbol}
-                  candidate={candidate}
-                  adding={addingSymbol === candidate.symbol}
-                  onAdd={() => void addCandidate(candidate)}
+            <div className="mt-4 space-y-3">
+              {grouped.exact.length > 0 ? (
+                <CandidateList
+                  candidates={grouped.exact}
+                  addingSymbol={addingSymbol}
+                  onAdd={addCandidate}
                 />
-              ))}
+              ) : null}
+              <SecondaryCandidateGroup
+                label="缺少数据"
+                candidates={grouped.missing}
+                defaultOpen={grouped.exact.length === 0}
+                addingSymbol={addingSymbol}
+                onAdd={addCandidate}
+              />
+              <SecondaryCandidateGroup
+                label="未满足"
+                candidates={grouped.unmet}
+                addingSymbol={addingSymbol}
+                onAdd={addCandidate}
+              />
             </div>
           ) : (
             <div className="mt-4 rounded-[8px] border border-dashed border-[#DADDE4] bg-[#FCFCFD] px-4 py-8 text-center">
@@ -335,7 +347,7 @@ export function StockScreeningWorkbench({
 
       <footer className="flex items-center gap-2 border-t border-[#ECEEF2] bg-[#FCFCFD] px-4 py-3 text-[10px] leading-4 text-[#7A8290] sm:px-5">
         <ShieldAlert className="h-3.5 w-3.5 shrink-0" aria-hidden />
-        条件匹配不等于投资建议；结果仅说明数据是否满足你确认的条件，风险提示也不预测价格。
+        条件匹配不等于投资建议；这里只核验你确认的条件，完整风险请到“风险证据”继续核对。
       </footer>
     </section>
   );
@@ -450,6 +462,64 @@ function ResultCount({
   );
 }
 
+function CandidateList({
+  candidates,
+  addingSymbol,
+  onAdd,
+}: {
+  candidates: ScreeningCandidate[];
+  addingSymbol: string | null;
+  onAdd: (candidate: ScreeningCandidate) => Promise<void>;
+}): JSX.Element {
+  return (
+    <div className="divide-y divide-[#E8EAF0] border-y border-[#E1E3E8]">
+      {candidates.map((candidate) => (
+        <CandidateRow
+          key={candidate.symbol}
+          candidate={candidate}
+          adding={addingSymbol === candidate.symbol}
+          onAdd={() => void onAdd(candidate)}
+        />
+      ))}
+    </div>
+  );
+}
+
+function SecondaryCandidateGroup({
+  label,
+  candidates,
+  defaultOpen = false,
+  addingSymbol,
+  onAdd,
+}: {
+  label: '缺少数据' | '未满足';
+  candidates: ScreeningCandidate[];
+  defaultOpen?: boolean;
+  addingSymbol: string | null;
+  onAdd: (candidate: ScreeningCandidate) => Promise<void>;
+}): JSX.Element | null {
+  if (candidates.length === 0) return null;
+  return (
+    <details
+      open={defaultOpen || undefined}
+      className="group overflow-hidden rounded-[8px] border border-[#E1E3E8] bg-[#FCFCFD]"
+    >
+      <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 px-3.5 py-2.5 text-[12px] font-semibold text-[#4F5868] marker:hidden hover:bg-[#F7F7F9]">
+        <span>
+          查看{label} {candidates.length} 只
+        </span>
+        <span className="text-[10px] font-normal text-[#8B92A1] group-open:hidden">展开</span>
+        <span className="hidden text-[10px] font-normal text-[#8B92A1] group-open:inline">
+          收起
+        </span>
+      </summary>
+      <div className="border-t border-[#E8EAF0] bg-white px-3">
+        <CandidateList candidates={candidates} addingSymbol={addingSymbol} onAdd={onAdd} />
+      </div>
+    </details>
+  );
+}
+
 function CandidateRow({
   candidate,
   adding,
@@ -522,14 +592,16 @@ function CandidateRow({
         <summary className="w-fit cursor-pointer select-none py-1 transition hover:text-[#D91952]">
           查看 {candidate.evidence.length} 条数据来源
         </summary>
-        <ul className="mt-1 grid gap-1 rounded-[7px] bg-[#F7F7F9] px-3 py-2 sm:grid-cols-2">
+        <ul className="mt-1 grid gap-2 rounded-[7px] border border-[#E8EAF0] bg-[#F9FAFB] px-3 py-2.5 sm:grid-cols-2">
           {candidate.evidence.map((item) => (
-            <li
-              key={item.id}
-              className="min-w-0 truncate"
-              title={`${item.source} · ${item.asOf ?? '日期未知'}`}
-            >
-              {item.label} · {item.source} · {item.asOf ?? '日期未知'}
+            <li key={item.id} className="min-w-0 rounded-[6px] bg-white px-2.5 py-2">
+              <div className="flex flex-wrap items-center justify-between gap-1 text-[#4F5868]">
+                <span className="font-medium">{item.label}</span>
+                <span>{item.asOf ? `数据日期 ${item.asOf}` : '数据日期待补'}</span>
+              </div>
+              <div className="mt-1 break-all font-mono text-[9px] leading-4 text-[#8B92A1]">
+                {item.source}
+              </div>
             </li>
           ))}
         </ul>
