@@ -202,6 +202,50 @@ describe('StockRiskRadar', () => {
     expect(api.load).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps the last verified result visible when a same-snapshot refresh fails', async () => {
+    let requestCount = 0;
+    const api: StockRiskRadarApi = {
+      load: vi.fn(async () => {
+        requestCount += 1;
+        if (requestCount === 1) return result();
+        throw new Error('temporary upstream failure');
+      }),
+    };
+    const user = userEvent.setup();
+    render(
+      <StockRiskRadar
+        snapshotId={SNAPSHOT_A}
+        dataAsOf={DATA_AS_OF}
+        trustMode="current"
+        api={api}
+      />,
+    );
+
+    expect(await screen.findByText('整体质押比例较高，要留意可能触发的平仓压力。')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '刷新风险雷达' }));
+
+    expect(await screen.findByText('本次刷新未完成，继续展示数据日期 08/17 的已核验结果。')).toBeTruthy();
+    expect(screen.getByText('整体质押比例较高，要留意可能触发的平仓压力。')).toBeTruthy();
+    expect(screen.queryByText('本次风险检查未完成')).toBeNull();
+  });
+
+  it('uses a mobile-safe refresh target without enlarging the desktop control', async () => {
+    const api: StockRiskRadarApi = { load: vi.fn(async () => result()) };
+    render(
+      <StockRiskRadar
+        snapshotId={SNAPSHOT_A}
+        dataAsOf={DATA_AS_OF}
+        trustMode="current"
+        api={api}
+      />,
+    );
+
+    await screen.findByText('整体质押比例较高，要留意可能触发的平仓压力。');
+    const refresh = screen.getByRole('button', { name: '刷新风险雷达' });
+    expect(refresh.className).toContain('h-11');
+    expect(refresh.className).toContain('sm:h-9');
+  });
+
   it('drops an obsolete in-flight result when the dashboard snapshot changes', async () => {
     const baseSignal = result().signals[0];
     if (!baseSignal) throw new Error('expected a base risk signal');

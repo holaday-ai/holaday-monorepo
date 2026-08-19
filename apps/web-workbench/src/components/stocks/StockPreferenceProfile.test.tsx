@@ -142,6 +142,25 @@ describe('StockPreferenceProfile', () => {
     expect(refresh.getAttribute('title')).toBe('刷新选股偏好');
   });
 
+  it('keeps profile controls on their own non-wrapping row with mobile-safe targets', async () => {
+    const api = apiFor();
+    render(<StockPreferenceProfile api={api} />);
+
+    const heading = await screen.findByRole('heading', { name: '你的选股偏好' });
+    const header = heading.closest('header');
+    if (!header) throw new Error('expected the profile heading inside a header');
+    expect(header.className).not.toContain('sm:flex-row');
+
+    const refresh = screen.getByRole('button', { name: '刷新选股偏好' });
+    const pause = screen.getByRole('button', { name: '暂停画像' });
+    const edit = screen.getByRole('button', { name: '调整画像' });
+    for (const control of [refresh, pause, edit]) {
+      expect(control.className).toContain('h-11');
+      expect(control.className).toContain('sm:h-9');
+    }
+    expect(edit.className).toContain('whitespace-nowrap');
+  });
+
   it('keeps the compact profile bounded while exposing the complete profile', async () => {
     const richProfile = profile({
       facts: [

@@ -112,7 +112,13 @@ export function StockRiskRadar({
       setExpandedSignalId(null);
     }
     setError(null);
-    setResult(null);
+    setResult((current) =>
+      canLoadRiskRadar(requestTrust) &&
+      current?.snapshotId === requestTrust.snapshotId &&
+      current.dataAsOf === requestTrust.dataAsOf
+        ? current
+        : null,
+    );
     if (!canLoadRiskRadar(requestTrust)) {
       setExpandedGroupSymbol(null);
       setExpandedSignalId(null);
@@ -178,7 +184,7 @@ export function StockRiskRadar({
           title="刷新风险雷达"
           disabled={!loadable || loading}
           onClick={() => void load(true)}
-          className="inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-[8px] border border-[#DADDE4] bg-white px-3 text-[12px] font-medium text-[#4F5868] transition hover:border-[#EA1F59]/30 hover:bg-[#FFF7F9] hover:text-[#C72654] disabled:cursor-not-allowed disabled:opacity-50"
+          className="inline-flex h-11 shrink-0 items-center justify-center gap-1.5 rounded-[8px] border border-[#DADDE4] bg-white px-3 text-[12px] font-medium text-[#4F5868] transition hover:border-[#EA1F59]/30 hover:bg-[#FFF7F9] hover:text-[#C72654] disabled:cursor-not-allowed disabled:opacity-50 sm:h-9"
         >
           {loading ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
@@ -190,6 +196,14 @@ export function StockRiskRadar({
       </header>
 
       <div className="px-4 py-4 sm:px-5">
+        {error && result ? (
+          <div
+            className="mb-3 rounded-[8px] border border-[#F1D4A9] bg-[#FFF9EF] px-3 py-2.5 text-[11px] leading-5 text-[#8A5314]"
+            role="status"
+          >
+            {`本次刷新未完成，继续展示数据日期 ${compactDate(result.dataAsOf)} 的已核验结果。`}
+          </div>
+        ) : null}
         {!loadable ? (
           <div className="rounded-[8px] border border-dashed border-[#DADDE4] bg-[#FCFCFD] px-4 py-8 text-center">
             <div className="text-[13px] font-semibold text-[#344054]">可信快照恢复后再检查风险</div>
@@ -201,7 +215,7 @@ export function StockRiskRadar({
               <div key={item} className="h-28 animate-pulse rounded-[8px] bg-[#F5F6F8]" />
             ))}
           </div>
-        ) : error ? (
+        ) : error && !result ? (
           <div className="rounded-[8px] border border-[#F1D4A9] bg-[#FFF9EF] px-4 py-4 text-[12px] text-[#8A5314]">
             <div className="font-semibold">本次风险检查未完成</div>
             <div className="mt-1">{error}</div>

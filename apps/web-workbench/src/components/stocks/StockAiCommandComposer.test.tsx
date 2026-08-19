@@ -40,6 +40,9 @@ describe('StockAiCommandComposer', () => {
     expect(screen.getByText('核对风险变化')).toBeTruthy();
     expect(screen.getByText('分析行业主线')).toBeTruthy();
     expect(screen.getByText('比较两只股票')).toBeTruthy();
+    for (const command of commands) {
+      expect(screen.getByRole('button', { name: command }).className).toContain('min-h-11');
+    }
   });
 
   it('keeps typed delegation and suggested AI actions interactive', async () => {

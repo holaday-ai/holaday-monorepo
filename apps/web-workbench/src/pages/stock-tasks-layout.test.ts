@@ -16,6 +16,13 @@ describe('stock tasks layout', () => {
     expect(source).toContain('min-[769px]:pt-4');
   });
 
+  it('keeps the compact page actions at least 44px tall on mobile', () => {
+    const source = readFileSync(new URL('./StockTasksPage.tsx', import.meta.url), 'utf8');
+    const responsiveTargets = source.match(/h-11 min-\[769px\]:h-8/g) ?? [];
+
+    expect(responsiveTargets).toHaveLength(2);
+  });
+
   it('uses verified source covers when available and never turns discovery cards into source placeholders', () => {
     const pageSource = readFileSync(new URL('./StockTasksPage.tsx', import.meta.url), 'utf8');
     const cardSource = readFileSync(new URL('../components/DiscoveryNewsCard.tsx', import.meta.url), 'utf8');
