@@ -1,0 +1,521 @@
+import { and, desc, eq } from 'drizzle-orm';
+import type { DB } from '../db/client.js';
+import {
+  plannedTaskRunItems,
+  plannedTaskRuns,
+  plannedTasks,
+} from '../db/schema/planned-tasks.js';
+import { stockDashboardSnapshots } from '../db/schema/stock-dashboard-snapshots.js';
+import { stockRiskMonitors } from '../db/schema/stock-risk-monitors.js';
+import { validateStockTaskContextSnapshot } from './stock-task-context.js';
+import {
+  runStockRiskRadar,
+  type StockRiskCheckKey,
+  type StockRiskRadarClient,
+  type StockRiskRadarResult,
+  type StockRiskRadarStock,
+  type StockRiskSeverity,
+  type StockRiskSignalRecord,
+} from './stock-risk-radar-service.js';
+import {
+  STOCK_RISK_CHECK_KEYS,
+  boundedStockRiskSummary,
+  canonicalStockRiskMonitorSignals,
+  compareStockRiskMonitorState,
+  stockRiskNotificationFingerprint,
+  type CanonicalStockRiskMonitorSignal,
+  type StockRiskMonitorRunResultV1,
+} from './stock-risk-monitor-state.js';
+
+export interface StoredStockRiskMonitor {
+  monitorId: string;
+  userId: number;
+  plannedTaskId: number;
+  symbol: string;
+  name: string;
+  market: string;
+  lastEvaluatedDataAsOf: string | null;
+  lastSignals: CanonicalStockRiskMonitorSignal[];
+  lastUnavailableChecks: StockRiskCheckKey[];
+  lastNotificationFingerprint: string | null;
+}
+
+export interface LatestStockRiskSnapshot {
+  snapshotId: string;
+  dataAsOf: string;
+  stocks: StockRiskRadarStock[];
+}
+
+export interface StockRiskMonitorNotificationCandidate {
+  kind: 'changed' | 'unavailable';
+  fingerprint: string;
+}
+
+interface CompleteStockRiskMonitorInput {
+  monitor: StoredStockRiskMonitor;
+  runExternalId: string;
+  result: StockRiskMonitorRunResultV1;
+  updateBaseline: boolean;
+  nextSignals: CanonicalStockRiskMonitorSignal[];
+  nextUnavailableChecks: StockRiskCheckKey[];
+  notificationFingerprint: string | null;
+}
+
+interface FailStockRiskMonitorInput {
+  monitor: StoredStockRiskMonitor;
+  runExternalId: string;
+  result: StockRiskMonitorRunResultV1;
+  errorCode: 'STOCK_RISK_MONITOR_EXECUTION_FAILED';
+}
+
+export interface StockRiskMonitorExecutionDeps {
+  loadMonitor(plannedTaskId: number): Promise<StoredStockRiskMonitor | null>;
+  loadLatestSnapshot(userId: number, symbol: string): Promise<LatestStockRiskSnapshot | null>;
+  runRadar(snapshot: LatestStockRiskSnapshot, monitor: StoredStockRiskMonitor): Promise<StockRiskRadarResult>;
+  complete(input: CompleteStockRiskMonitorInput): Promise<void>;
+  fail(input: FailStockRiskMonitorInput): Promise<void>;
+}
+
+export type StockRiskSpecialDispatchResult =
+  | { handled: false }
+  | {
+      handled: true;
+      ok: boolean;
+      result: StockRiskMonitorRunResultV1;
+      notification: StockRiskMonitorNotificationCandidate | null;
+      errorMessage?: string;
+    };
+
+function emptyResult(
+  monitor: StoredStockRiskMonitor,
+  input: Pick<StockRiskMonitorRunResultV1, 'dataAsOf' | 'outcome' | 'summary'>,
+): StockRiskMonitorRunResultV1 {
+  return {
+    kind: 'stock-risk-monitor',
+    version: 1,
+    monitorId: monitor.monitorId,
+    symbol: monitor.symbol,
+    name: monitor.name,
+    dataAsOf: input.dataAsOf,
+    outcome: input.outcome,
+    added: [],
+    upgraded: [],
+    resolved: [],
+    unavailableChecks: [],
+    summary: boundedStockRiskSummary(input.summary),
+  };
+}
+
+const SIGNAL_SOURCE: Record<StockRiskSignalRecord['key'], StockRiskCheckKey> = {
+  pledge: 'pledge',
+  goodwill: 'goodwill',
+  forecast: 'forecast',
+  insider: 'insider',
+  reduction_plan: 'announcements',
+  inquiry: 'announcements',
+};
+
+function baselineWithUnavailableSources(
+  previous: readonly CanonicalStockRiskMonitorSignal[],
+  current: readonly CanonicalStockRiskMonitorSignal[],
+  unavailableChecks: readonly StockRiskCheckKey[],
+): CanonicalStockRiskMonitorSignal[] {
+  const unavailable = new Set(unavailableChecks);
+  const merged = new Map(current.map((signal) => [`${signal.symbol}:${signal.key}`, signal]));
+  for (const signal of previous) {
+    if (!unavailable.has(SIGNAL_SOURCE[signal.key])) continue;
+    const identity = `${signal.symbol}:${signal.key}`;
+    if (!merged.has(identity)) merged.set(identity, signal);
+  }
+  return [...merged.values()];
+}
+
+function changedSummary(
+  dataAsOf: string,
+  comparison: ReturnType<typeof compareStockRiskMonitorState>,
+): string {
+  const parts = [
+    comparison.added.length > 0 ? `新增 ${comparison.added.length} 条` : '',
+    comparison.upgraded.length > 0 ? `升级 ${comparison.upgraded.length} 条` : '',
+    comparison.resolved.length > 0 ? `解除 ${comparison.resolved.length} 条` : '',
+  ].filter(Boolean);
+  return `数据日期 ${dataAsOf}：${parts.join('、')}`;
+}
+
+export async function executeStockRiskMonitorRun(input: {
+  plannedTaskId: number;
+  runExternalId: string;
+  trigger: 'scheduled' | 'manual';
+  deps: StockRiskMonitorExecutionDeps;
+}): Promise<StockRiskSpecialDispatchResult> {
+  const monitor = await input.deps.loadMonitor(input.plannedTaskId);
+  if (!monitor) return { handled: false };
+
+  try {
+    const snapshot = await input.deps.loadLatestSnapshot(monitor.userId, monitor.symbol);
+    if (!snapshot) {
+      const result = {
+        ...emptyResult(monitor, {
+          dataAsOf: null,
+          outcome: 'unavailable',
+          summary: '当前可信股票快照暂时不可用，无法判断风险变化。',
+        }),
+        unavailableChecks: [...STOCK_RISK_CHECK_KEYS],
+      };
+      const fingerprint = stockRiskNotificationFingerprint({ ...result, monitorId: monitor.monitorId });
+      const notification = fingerprint === monitor.lastNotificationFingerprint
+        ? null
+        : { kind: 'unavailable' as const, fingerprint };
+      await input.deps.complete({
+        monitor,
+        runExternalId: input.runExternalId,
+        result,
+        updateBaseline: false,
+        nextSignals: monitor.lastSignals,
+        nextUnavailableChecks: [...STOCK_RISK_CHECK_KEYS],
+        notificationFingerprint: notification?.fingerprint ?? null,
+      });
+      return { handled: true, ok: true, result, notification };
+    }
+    const watched = snapshot.stocks.some((stock) => stock.symbol === monitor.symbol);
+    if (!watched) {
+      const result = emptyResult(monitor, {
+        dataAsOf: snapshot.dataAsOf,
+        outcome: 'skipped',
+        summary: `数据日期 ${snapshot.dataAsOf}：股票已不在关注列表，本轮跳过。`,
+      });
+      await input.deps.complete({
+        monitor,
+        runExternalId: input.runExternalId,
+        result,
+        updateBaseline: false,
+        nextSignals: monitor.lastSignals,
+        nextUnavailableChecks: monitor.lastUnavailableChecks,
+        notificationFingerprint: null,
+      });
+      return { handled: true, ok: true, result, notification: null };
+    }
+    if (
+      monitor.lastEvaluatedDataAsOf !== null
+      && snapshot.dataAsOf <= monitor.lastEvaluatedDataAsOf
+    ) {
+      const result = emptyResult(monitor, {
+        dataAsOf: snapshot.dataAsOf,
+        outcome: 'skipped',
+        summary: `数据日期 ${snapshot.dataAsOf} 未前进，本轮跳过。`,
+      });
+      await input.deps.complete({
+        monitor,
+        runExternalId: input.runExternalId,
+        result,
+        updateBaseline: false,
+        nextSignals: monitor.lastSignals,
+        nextUnavailableChecks: monitor.lastUnavailableChecks,
+        notificationFingerprint: null,
+      });
+      return { handled: true, ok: true, result, notification: null };
+    }
+
+    const radar = await input.deps.runRadar(snapshot, monitor);
+    const rawCurrent = canonicalStockRiskMonitorSignals(
+      radar.signals.filter((signal) => signal.symbol === monitor.symbol),
+    );
+    const checks = radar.checks.filter((check) => check.symbol === monitor.symbol);
+    const comparison = compareStockRiskMonitorState(monitor.lastSignals, rawCurrent, checks);
+    const nextSignals = baselineWithUnavailableSources(
+      monitor.lastSignals,
+      rawCurrent,
+      comparison.unavailableChecks,
+    );
+    const changed = comparison.added.length + comparison.upgraded.length + comparison.resolved.length > 0;
+    const outcome: StockRiskMonitorRunResultV1['outcome'] = changed
+      ? 'changed'
+      : comparison.unavailableChecks.length > 0
+        ? 'unavailable'
+        : 'unchanged';
+    const summary = outcome === 'changed'
+      ? changedSummary(snapshot.dataAsOf, comparison)
+      : outcome === 'unavailable'
+        ? `数据日期 ${snapshot.dataAsOf}：${comparison.unavailableChecks.length} 项来源暂时无法判断。`
+        : `数据日期 ${snapshot.dataAsOf}：风险状态无变化。`;
+    const result: StockRiskMonitorRunResultV1 = {
+      kind: 'stock-risk-monitor',
+      version: 1,
+      monitorId: monitor.monitorId,
+      symbol: monitor.symbol,
+      name: monitor.name,
+      dataAsOf: snapshot.dataAsOf,
+      outcome,
+      ...comparison,
+      summary: boundedStockRiskSummary(summary),
+    };
+    const shouldNotify = outcome === 'changed' || outcome === 'unavailable';
+    const fingerprint = shouldNotify
+      ? stockRiskNotificationFingerprint({ ...comparison, monitorId: monitor.monitorId, dataAsOf: snapshot.dataAsOf })
+      : null;
+    const notification = fingerprint && fingerprint !== monitor.lastNotificationFingerprint
+      ? { kind: outcome as 'changed' | 'unavailable', fingerprint }
+      : null;
+    await input.deps.complete({
+      monitor,
+      runExternalId: input.runExternalId,
+      result,
+      updateBaseline: true,
+      nextSignals,
+      nextUnavailableChecks: comparison.unavailableChecks,
+      notificationFingerprint: notification?.fingerprint ?? null,
+    });
+    return { handled: true, ok: true, result, notification };
+  } catch {
+    const result = emptyResult(monitor, {
+      dataAsOf: null,
+      outcome: 'failed',
+      summary: '本次风险检查未完成，请稍后重试。',
+    });
+    await input.deps.fail({
+      monitor,
+      runExternalId: input.runExternalId,
+      result,
+      errorCode: 'STOCK_RISK_MONITOR_EXECUTION_FAILED',
+    });
+    return {
+      handled: true,
+      ok: false,
+      result,
+      notification: null,
+      errorMessage: '股票风险监控执行失败',
+    };
+  }
+}
+
+function jsonRecord(value: unknown): Record<string, unknown> | null {
+  if (typeof value === 'string') {
+    try {
+      return jsonRecord(JSON.parse(value));
+    } catch {
+      return null;
+    }
+  }
+  return value && typeof value === 'object' ? value as Record<string, unknown> : null;
+}
+
+function storedSignals(value: unknown): CanonicalStockRiskMonitorSignal[] {
+  if (!Array.isArray(value)) return [];
+  const severities = new Set<StockRiskSeverity>(['关注', '警示', '高风险']);
+  const keys = new Set<StockRiskSignalRecord['key']>([
+    'pledge', 'goodwill', 'forecast', 'insider', 'reduction_plan', 'inquiry',
+  ]);
+  return value.flatMap((raw): CanonicalStockRiskMonitorSignal[] => {
+    const row = jsonRecord(raw);
+    if (
+      !row
+      || typeof row.symbol !== 'string'
+      || typeof row.key !== 'string'
+      || !keys.has(row.key as StockRiskSignalRecord['key'])
+      || typeof row.severity !== 'string'
+      || !severities.has(row.severity as StockRiskSeverity)
+      || typeof row.signalId !== 'string'
+      || typeof row.evidenceId !== 'string'
+    ) return [];
+    return [{
+      symbol: row.symbol,
+      key: row.key as StockRiskSignalRecord['key'],
+      severity: row.severity as StockRiskSeverity,
+      signalId: row.signalId,
+      evidenceId: row.evidenceId,
+      sourceDataAsOf: typeof row.sourceDataAsOf === 'string' ? row.sourceDataAsOf : null,
+    }];
+  });
+}
+
+function storedChecks(value: unknown): StockRiskCheckKey[] {
+  if (!Array.isArray(value)) return [];
+  return STOCK_RISK_CHECK_KEYS.filter((key) => value.includes(key));
+}
+
+function latestSnapshot(value: unknown, symbol: string): LatestStockRiskSnapshot | null {
+  const row = jsonRecord(value);
+  const trust = jsonRecord(row?.trust);
+  if (
+    !row
+    || !trust
+    || trust.mode !== 'current'
+    || typeof trust.snapshotId !== 'string'
+    || typeof trust.dataAsOf !== 'string'
+  ) return null;
+  try {
+    const validated = validateStockTaskContextSnapshot({
+      snapshot: row,
+      input: {
+        snapshotId: trust.snapshotId,
+        dataAsOf: trust.dataAsOf,
+        trustMode: 'current',
+        evidenceIds: [],
+      },
+      intent: '查看自选股风险监控状态',
+    });
+    return {
+      snapshotId: validated.snapshotId,
+      dataAsOf: validated.dataAsOf,
+      stocks: validated.snapshotPayload.watchlistStocks.map((stock) => ({
+        symbol: stock.symbol,
+        name: typeof stock.name === 'string' && stock.name.trim() ? stock.name.trim() : stock.symbol,
+        market: typeof stock.market === 'string' ? stock.market : 'A',
+      })),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function createStockRiskMonitorSpecialDispatcher(args: {
+  db: DB;
+  client: StockRiskRadarClient;
+  logger: {
+    info?(obj: Record<string, unknown>, msg: string): void;
+    error(obj: Record<string, unknown>, msg: string): void;
+  };
+}) {
+  const deps: StockRiskMonitorExecutionDeps = {
+    async loadMonitor(plannedTaskId) {
+      const [row] = await args.db
+        .select({
+          monitorId: stockRiskMonitors.externalId,
+          userId: stockRiskMonitors.userId,
+          plannedTaskId: stockRiskMonitors.plannedTaskId,
+          symbol: stockRiskMonitors.symbol,
+          name: stockRiskMonitors.name,
+          market: stockRiskMonitors.market,
+          lastEvaluatedDataAsOf: stockRiskMonitors.lastEvaluatedDataAsOf,
+          lastSignals: stockRiskMonitors.lastSignalsJson,
+          lastUnavailableChecks: stockRiskMonitors.lastUnavailableChecksJson,
+          lastNotificationFingerprint: stockRiskMonitors.lastNotificationFingerprint,
+        })
+        .from(stockRiskMonitors)
+        .where(eq(stockRiskMonitors.plannedTaskId, plannedTaskId))
+        .limit(1);
+      return row ? {
+        ...row,
+        lastSignals: storedSignals(row.lastSignals),
+        lastUnavailableChecks: storedChecks(row.lastUnavailableChecks),
+      } : null;
+    },
+    async loadLatestSnapshot(userId, symbol) {
+      const rows = await args.db
+        .select({ snapshotJson: stockDashboardSnapshots.snapshotJson })
+        .from(stockDashboardSnapshots)
+        .where(eq(stockDashboardSnapshots.userId, userId))
+        .orderBy(desc(stockDashboardSnapshots.updatedAt))
+        .limit(20);
+      for (const row of rows) {
+        const snapshot = latestSnapshot(row.snapshotJson, symbol);
+        if (snapshot) return snapshot;
+      }
+      return null;
+    },
+    runRadar: (snapshot, monitor) => runStockRiskRadar({
+      client: args.client,
+      snapshotId: snapshot.snapshotId,
+      dataAsOf: snapshot.dataAsOf,
+      stocks: [{ symbol: monitor.symbol, name: monitor.name, market: monitor.market }],
+    }),
+    async complete(input) {
+      const completedAt = new Date();
+      await args.db.transaction(async (tx) => {
+        const [run] = await tx
+          .select({ id: plannedTaskRuns.id })
+          .from(plannedTaskRuns)
+          .where(eq(plannedTaskRuns.externalId, input.runExternalId))
+          .limit(1);
+        if (!run) throw new Error('股票风险监控运行记录不存在');
+        await tx.update(plannedTaskRuns).set({
+          status: 'completed',
+          itemsDone: 1,
+          itemsReview: 0,
+          itemsFailed: 0,
+          errorMessage: null,
+          resultJson: input.result,
+          completedAt,
+        }).where(eq(plannedTaskRuns.id, run.id));
+        await tx.update(plannedTaskRunItems).set({
+          status: 'completed',
+          errorMessage: null,
+          completedAt,
+        }).where(eq(plannedTaskRunItems.plannedTaskRunId, run.id));
+        if (input.updateBaseline) {
+          await tx.update(stockRiskMonitors).set({
+            lastEvaluatedDataAsOf: input.result.dataAsOf,
+            lastSignalsJson: input.nextSignals,
+            lastUnavailableChecksJson: input.nextUnavailableChecks,
+            ...(input.notificationFingerprint
+              ? { lastNotificationFingerprint: input.notificationFingerprint }
+              : {}),
+          }).where(eq(stockRiskMonitors.plannedTaskId, input.monitor.plannedTaskId));
+        } else if (input.notificationFingerprint) {
+          await tx.update(stockRiskMonitors).set({
+            lastUnavailableChecksJson: input.nextUnavailableChecks,
+            lastNotificationFingerprint: input.notificationFingerprint,
+          }).where(eq(stockRiskMonitors.plannedTaskId, input.monitor.plannedTaskId));
+        }
+        await tx.update(plannedTasks).set({
+          lastRunAt: completedAt,
+          lastRunStatus: 'completed',
+          lastError: null,
+        }).where(eq(plannedTasks.id, input.monitor.plannedTaskId));
+      });
+      args.logger.info?.({
+        userId: input.monitor.userId,
+        monitorId: input.monitor.monitorId,
+        symbol: input.monitor.symbol,
+        dataAsOf: input.result.dataAsOf,
+        outcome: input.result.outcome,
+        changeCount: input.result.added.length + input.result.upgraded.length + input.result.resolved.length,
+        unavailableCheckCount: input.result.unavailableChecks.length,
+      }, 'stock-risk-monitor: completed');
+    },
+    async fail(input) {
+      const completedAt = new Date();
+      await args.db.transaction(async (tx) => {
+        const [run] = await tx
+          .select({ id: plannedTaskRuns.id })
+          .from(plannedTaskRuns)
+          .where(eq(plannedTaskRuns.externalId, input.runExternalId))
+          .limit(1);
+        if (!run) return;
+        await tx.update(plannedTaskRuns).set({
+          status: 'failed',
+          itemsFailed: 1,
+          errorMessage: input.errorCode,
+          resultJson: input.result,
+          completedAt,
+        }).where(eq(plannedTaskRuns.id, run.id));
+        await tx.update(plannedTaskRunItems).set({
+          status: 'failed',
+          errorMessage: input.errorCode,
+          completedAt,
+        }).where(eq(plannedTaskRunItems.plannedTaskRunId, run.id));
+        await tx.update(plannedTasks).set({
+          lastRunAt: completedAt,
+          lastRunStatus: 'failed',
+          lastError: input.errorCode,
+        }).where(eq(plannedTasks.id, input.monitor.plannedTaskId));
+      });
+      args.logger.error({
+        userId: input.monitor.userId,
+        monitorId: input.monitor.monitorId,
+        symbol: input.monitor.symbol,
+        errorCode: input.errorCode,
+      }, 'stock-risk-monitor: failed');
+    },
+  };
+  return (input: {
+    runExternalId: string;
+    plannedTaskInternalId: number;
+    trigger: 'scheduled' | 'manual';
+  }) => executeStockRiskMonitorRun({
+    plannedTaskId: input.plannedTaskInternalId,
+    runExternalId: input.runExternalId,
+    trigger: input.trigger,
+    deps,
+  });
+}

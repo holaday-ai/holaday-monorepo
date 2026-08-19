@@ -833,6 +833,7 @@ export const plannedTasksRouter = router({
           itemsReview: plannedTaskRuns.itemsReview,
           itemsFailed: plannedTaskRuns.itemsFailed,
           errorMessage: plannedTaskRuns.errorMessage,
+          resultJson: plannedTaskRuns.resultJson,
           startedAt: plannedTaskRuns.startedAt,
           completedAt: plannedTaskRuns.completedAt,
         })

@@ -41,6 +41,7 @@ import { createHttpApp } from './http.js';
 import { buildScheduledDispatchNotification } from './notifications/scheduled-copy.js';
 import { createPayPalAdapter } from './payment/index.js';
 import {
+  configurePlannedRunSpecialDispatcher,
   queuePlannedRun,
   recoverStuckRunningPlannedTasks,
   startPlannedRunner,
@@ -618,6 +619,20 @@ async function main() {
 
   await recoverStuckRunningPlannedTasks(db);
   {
+    const { createStockRiskMonitorSpecialDispatcher } = await import(
+      './stocks/stock-risk-monitor-executor.js'
+    );
+    const { createStockRiskRadarHttpClient } = await import(
+      './trpc/routers/stocks-risk-radar.js'
+    );
+    configurePlannedRunSpecialDispatcher(createStockRiskMonitorSpecialDispatcher({
+      db,
+      logger,
+      client: createStockRiskRadarHttpClient({
+        baseUrl: process.env.AKSHARE_HTTP_URL ?? 'http://127.0.0.1:8848',
+        logger,
+      }),
+    }));
     const { plannedTasks: plannedTasksTable } = await import(
       './db/schema/planned-tasks.js'
     );
