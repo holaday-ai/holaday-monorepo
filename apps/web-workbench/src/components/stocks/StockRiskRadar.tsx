@@ -4,25 +4,43 @@ import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import {
   AlertTriangle,
+  BellRing,
   ChevronDown,
   ChevronUp,
+  CircleAlert,
   ExternalLink,
   Loader2,
+  PauseCircle,
+  Play,
   RefreshCw,
   ShieldAlert,
 } from 'lucide-react';
 import * as React from 'react';
+import { StockRiskMonitorSheet } from './StockRiskMonitorSheet';
 
 type RiskRadarQueryInput = Parameters<typeof trpc.stocks.riskRadar.query>[0];
 export type StockRiskRadarResult = Awaited<ReturnType<typeof trpc.stocks.riskRadar.query>>;
 type StockRiskSignal = StockRiskRadarResult['signals'][number];
+type StockRiskMonitorView = Awaited<ReturnType<typeof trpc.stocks.riskMonitors.query>>[number];
+type StockRiskMonitorListInput = Parameters<typeof trpc.stocks.riskMonitors.query>[0];
+type StockRiskMonitorCreateInput = Parameters<typeof trpc.stocks.createRiskMonitor.mutate>[0];
 
 export interface StockRiskRadarApi {
   load(input: RiskRadarQueryInput): Promise<StockRiskRadarResult>;
+  loadMonitors?(input: StockRiskMonitorListInput): Promise<StockRiskMonitorView[]>;
+  createMonitor?(input: StockRiskMonitorCreateInput): ReturnType<typeof trpc.stocks.createRiskMonitor.mutate>;
+  toggleMonitor?(input: { plannedTaskId: string }): ReturnType<typeof trpc.plannedTasks.toggle.mutate>;
+  runMonitorNow?(input: { plannedTaskId: string }): ReturnType<typeof trpc.plannedTasks.runNow.mutate>;
+  archiveMonitor?(input: { plannedTaskId: string }): ReturnType<typeof trpc.plannedTasks.archive.mutate>;
 }
 
 const LIVE_API: StockRiskRadarApi = {
   load: (input) => trpc.stocks.riskRadar.query(input),
+  loadMonitors: (input) => trpc.stocks.riskMonitors.query(input),
+  createMonitor: (input) => trpc.stocks.createRiskMonitor.mutate(input),
+  toggleMonitor: (input) => trpc.plannedTasks.toggle.mutate(input),
+  runMonitorNow: (input) => trpc.plannedTasks.runNow.mutate(input),
+  archiveMonitor: (input) => trpc.plannedTasks.archive.mutate(input),
 };
 
 const SEVERITY_STYLE = {
@@ -73,9 +91,9 @@ function compactDate(value: string | null): string {
   return match ? `${match[2]}/${match[3]}` : value;
 }
 
-function formatDateTime(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
+function formatDateTime(value: string | Date): string {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
   return DATE_TIME_FORMATTER.format(date);
 }
 
@@ -99,6 +117,15 @@ export function StockRiskRadar({
   const [error, setError] = React.useState<string | null>(null);
   const [expandedGroupSymbol, setExpandedGroupSymbol] = React.useState<string | null>(null);
   const [expandedSignalId, setExpandedSignalId] = React.useState<string | null>(null);
+  const [monitors, setMonitors] = React.useState<Map<string, StockRiskMonitorView>>(new Map());
+  const [monitorCapability, setMonitorCapability] = React.useState(false);
+  const [selectedMonitorStock, setSelectedMonitorStock] = React.useState<{
+    symbol: string;
+    name: string;
+    trigger: HTMLButtonElement;
+  } | null>(null);
+  const [monitorPendingSymbol, setMonitorPendingSymbol] = React.useState<string | null>(null);
+  const [monitorError, setMonitorError] = React.useState<string | null>(null);
   const requestSequence = React.useRef(0);
   const trust = { snapshotId, dataAsOf, trustMode };
   const loadable = canLoadRiskRadar(trust);
@@ -111,6 +138,8 @@ export function StockRiskRadar({
       setExpandedGroupSymbol(null);
       setExpandedSignalId(null);
     }
+    setMonitorCapability(false);
+    setMonitors(new Map());
     setError(null);
     setResult((current) =>
       canLoadRiskRadar(requestTrust) &&
@@ -140,6 +169,17 @@ export function StockRiskRadar({
         setExpandedSignalId((current) =>
           current && next.signals.some((signal) => signal.signalId === current) ? current : null,
         );
+        if (api.loadMonitors) {
+          void api.loadMonitors(requestTrust).then((rows) => {
+            if (requestSequence.current !== request) return;
+            setMonitors(new Map(rows.map((row) => [row.symbol, row])));
+            setMonitorCapability(true);
+          }).catch(() => {
+            if (requestSequence.current !== request) return;
+            setMonitors(new Map());
+            setMonitorCapability(false);
+          });
+        }
       }
     } catch (caught) {
       if (requestSequence.current === request) setError(pageErrorMessage(caught));
@@ -156,6 +196,60 @@ export function StockRiskRadar({
   }, [load]);
 
   const unavailableChecks = result?.checks.filter((check) => check.status === 'unavailable') ?? [];
+
+  const replaceMonitor = React.useCallback((monitor: StockRiskMonitorView) => {
+    setMonitors((current) => {
+      const next = new Map(current);
+      next.set(monitor.symbol, monitor);
+      return next;
+    });
+  }, []);
+
+  const createMonitor = React.useCallback(async () => {
+    if (
+      !selectedMonitorStock
+      || !api.createMonitor
+      || !canLoadRiskRadar(trust)
+      || trust.trustMode !== 'current'
+    ) return;
+    setMonitorPendingSymbol(selectedMonitorStock.symbol);
+    setMonitorError(null);
+    try {
+      const response = await api.createMonitor({
+        snapshotId: trust.snapshotId,
+        dataAsOf: trust.dataAsOf,
+        trustMode: 'current',
+        symbol: selectedMonitorStock.symbol,
+      });
+      replaceMonitor(response.monitor);
+      setSelectedMonitorStock(null);
+    } catch (caught) {
+      setMonitorError(pageErrorMessage(caught));
+    } finally {
+      setMonitorPendingSymbol(null);
+    }
+  }, [api, replaceMonitor, selectedMonitorStock, trust]);
+
+  const toggleMonitor = React.useCallback(async (monitor: StockRiskMonitorView) => {
+    if (!api.toggleMonitor) return;
+    setMonitorPendingSymbol(monitor.symbol);
+    try {
+      const response = await api.toggleMonitor({ plannedTaskId: monitor.plannedTaskId });
+      replaceMonitor({ ...monitor, status: response.status === 'paused' ? 'paused' : 'active' });
+    } finally {
+      setMonitorPendingSymbol(null);
+    }
+  }, [api, replaceMonitor]);
+
+  const runMonitorNow = React.useCallback(async (monitor: StockRiskMonitorView) => {
+    if (!api.runMonitorNow) return;
+    setMonitorPendingSymbol(monitor.symbol);
+    try {
+      await api.runMonitorNow({ plannedTaskId: monitor.plannedTaskId });
+    } finally {
+      setMonitorPendingSymbol(null);
+    }
+  }, [api]);
 
   return (
     <section className="overflow-hidden rounded-[8px] border border-[#E1E3E8] bg-white shadow-[0_8px_24px_rgba(18,24,38,0.035)]">
@@ -279,13 +373,14 @@ export function StockRiskRadar({
                     const visibleSignals = groupExpanded
                       ? group.signals
                       : group.signals.slice(0, 2);
+                    const monitor = monitors.get(group.symbol) ?? null;
                     return (
                       <article
                         key={group.symbol}
                         data-testid="risk-stock-group"
                         className="overflow-hidden rounded-[8px] border border-[#E4E6EB] bg-[#FCFCFD]"
                       >
-                        <div className="flex items-start justify-between gap-3 border-b border-[#E8EAF0] px-4 py-3.5">
+                        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[#E8EAF0] px-4 py-3.5">
                           <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-2">
                               <span className="truncate text-[14px] font-semibold text-[#121826]">
@@ -310,10 +405,27 @@ export function StockRiskRadar({
                               <span>最新事实 {compactDate(group.latestSourceDataAsOf)}</span>
                             </div>
                           </div>
-                          <AlertTriangle
-                            className="mt-0.5 h-4 w-4 shrink-0 text-[#C98228]"
-                            aria-hidden
-                          />
+                          <div className="flex min-w-0 shrink-0 flex-col items-end gap-1.5 max-[390px]:w-full max-[390px]:items-start">
+                            <AlertTriangle className="h-4 w-4 text-[#C98228]" aria-hidden />
+                            {monitorCapability ? (
+                              <MonitorControl
+                                name={group.name}
+                                monitor={monitor}
+                                canCreate={trustMode === 'current' && Boolean(api.createMonitor)}
+                                pending={monitorPendingSymbol === group.symbol}
+                                onCreate={(trigger) => {
+                                  setMonitorError(null);
+                                  setSelectedMonitorStock({
+                                    symbol: group.symbol,
+                                    name: group.name,
+                                    trigger,
+                                  });
+                                }}
+                                onToggle={() => monitor && void toggleMonitor(monitor)}
+                                onRunNow={() => monitor && void runMonitorNow(monitor)}
+                              />
+                            ) : null}
+                          </div>
                         </div>
                         <div className="divide-y divide-[#E8EAF0] px-4">
                           {visibleSignals.map((signal) => {
@@ -435,7 +547,106 @@ export function StockRiskRadar({
       <footer className="border-t border-[#ECEEF2] bg-[#FCFCFD] px-4 py-3 text-[10px] leading-4 text-[#8B92A1] sm:px-5">
         风险雷达只展示已核验事实与规则触发结果；未触发不等于没有风险，也不构成投资建议。
       </footer>
+      <StockRiskMonitorSheet
+        open={selectedMonitorStock !== null}
+        stock={selectedMonitorStock}
+        dataAsOf={dataAsOf}
+        pending={selectedMonitorStock?.symbol === monitorPendingSymbol}
+        error={monitorError}
+        restoreFocus={selectedMonitorStock?.trigger}
+        onOpenChange={(open) => {
+          if (!open && monitorPendingSymbol === null) {
+            setSelectedMonitorStock(null);
+            setMonitorError(null);
+          }
+        }}
+        onConfirm={createMonitor}
+      />
     </section>
+  );
+}
+
+function MonitorControl({
+  name,
+  monitor,
+  canCreate,
+  pending,
+  onCreate,
+  onToggle,
+  onRunNow,
+}: {
+  name: string;
+  monitor: StockRiskMonitorView | null;
+  canCreate: boolean;
+  pending: boolean;
+  onCreate(trigger: HTMLButtonElement): void;
+  onToggle(): void;
+  onRunNow(): void;
+}): JSX.Element {
+  if (!monitor) {
+    if (!canCreate) return <></>;
+    return (
+      <button
+        type="button"
+        aria-label={`持续监控${name}`}
+        title={`持续监控${name}`}
+        onClick={(event) => onCreate(event.currentTarget)}
+        className="inline-flex h-9 items-center gap-1.5 rounded-[8px] border border-[#D8D0E6] bg-white px-3 text-[11px] font-semibold text-[#6B4AA0] hover:border-[#BFAFD5] hover:bg-[#FBF9FD] max-[390px]:h-11"
+      >
+        <BellRing className="h-3.5 w-3.5" aria-hidden />
+        持续监控
+      </button>
+    );
+  }
+  const recordHref = `/planned?plan=${encodeURIComponent(monitor.plannedTaskId)}`;
+  const label = monitor.status === 'paused' ? '已暂停' : monitor.status === 'failed' ? '需要处理' : '监控中';
+  const Icon = monitor.status === 'paused' ? PauseCircle : monitor.status === 'failed' ? CircleAlert : BellRing;
+  return (
+    <div className="flex max-w-[240px] flex-col items-end gap-1 text-right max-[390px]:max-w-none max-[390px]:items-start max-[390px]:text-left">
+      <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-[#4F5868]">
+        <Icon className={cn('h-3.5 w-3.5', monitor.status === 'failed' ? 'text-[#C72654]' : 'text-[#6B4AA0]')} aria-hidden />
+        {label}
+      </span>
+      {monitor.nextRunAt && monitor.status === 'active' ? (
+        <span className="text-[10px] text-[#8B92A1]">下次 {formatDateTime(monitor.nextRunAt)}</span>
+      ) : null}
+      {monitor.lastSummary ? (
+        <span className="line-clamp-1 max-w-full text-[10px] text-[#8B92A1]">{monitor.lastSummary}</span>
+      ) : null}
+      <div className="flex flex-wrap justify-end gap-x-2 gap-y-1 max-[390px]:justify-start">
+        {monitor.status === 'paused' ? (
+          <button
+            type="button"
+            disabled={pending}
+            aria-label={`恢复${name}监控`}
+            title={`恢复${name}监控`}
+            onClick={onToggle}
+            className="inline-flex min-h-8 items-center gap-1 text-[10px] font-semibold text-[#6B4AA0] disabled:opacity-50 max-[390px]:min-h-11"
+          >
+            <Play className="h-3 w-3" aria-hidden />恢复
+          </button>
+        ) : null}
+        {monitor.status === 'failed' ? (
+          <button
+            type="button"
+            disabled={pending}
+            aria-label={`立即重试${name}监控`}
+            title={`立即重试${name}监控`}
+            onClick={onRunNow}
+            className="inline-flex min-h-8 items-center gap-1 text-[10px] font-semibold text-[#C72654] disabled:opacity-50 max-[390px]:min-h-11"
+          >
+            <RefreshCw className={cn('h-3 w-3', pending && 'animate-spin motion-reduce:animate-none')} aria-hidden />重试
+          </button>
+        ) : null}
+        <a
+          href={recordHref}
+          aria-label={`查看${name}监控记录`}
+          className="inline-flex min-h-8 items-center text-[10px] font-semibold text-[#6B4AA0] max-[390px]:min-h-11 max-[390px]:items-center"
+        >
+          查看记录
+        </a>
+      </div>
+    </div>
   );
 }
 

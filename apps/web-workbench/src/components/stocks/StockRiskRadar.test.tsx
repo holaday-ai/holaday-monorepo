@@ -460,4 +460,115 @@ describe('StockRiskRadar', () => {
     expect(await screen.findByText('暂无可检查的 A 股自选股')).toBeTruthy();
     expect(screen.queryByText('本轮规则未触发')).toBeNull();
   });
+
+  it('creates monitoring only after confirming the bounded deterministic rules', async () => {
+    const monitor = {
+      monitorId: 'srm_1',
+      plannedTaskId: 'pln_1',
+      symbol: '600001',
+      status: 'active' as const,
+      nextRunAt: '2026-08-18T08:30:00.000Z',
+      lastRunAt: null,
+      lastOutcome: null,
+      lastSummary: null,
+    };
+    const api: StockRiskRadarApi = {
+      load: vi.fn(async () => result()),
+      loadMonitors: vi.fn(async () => []),
+      createMonitor: vi.fn(async () => ({ created: true, monitor })),
+      toggleMonitor: vi.fn(async () => ({ status: 'paused' as const })),
+      runMonitorNow: vi.fn(async () => ({ runId: 'plr_1', status: 'starting' as const })),
+      archiveMonitor: vi.fn(async () => ({ ok: true as const })),
+    };
+    const user = userEvent.setup();
+    render(
+      <StockRiskRadar
+        snapshotId={SNAPSHOT_A}
+        dataAsOf={DATA_AS_OF}
+        trustMode="current"
+        api={api}
+      />,
+    );
+
+    const group = (await screen.findAllByTestId('risk-stock-group'))[0];
+    if (!group) throw new Error('expected grouped stock');
+    await user.click(within(group).getByRole('button', { name: '持续监控测试股份' }));
+    expect(screen.getByRole('dialog', { name: '持续监控测试股份风险' })).toBeTruthy();
+    expect(screen.getByText('每天 16:30 · Asia/Shanghai')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '确认开始监控' }));
+
+    expect(api.createMonitor).toHaveBeenCalledWith({
+      snapshotId: SNAPSHOT_A,
+      dataAsOf: DATA_AS_OF,
+      trustMode: 'current',
+      symbol: '600001',
+    });
+    expect(await within(group).findByText('监控中')).toBeTruthy();
+    const recordLink = within(group).getByRole('link', { name: '查看测试股份监控记录' });
+    expect(recordLink.getAttribute('href')).toBe('/planned?plan=pln_1');
+  });
+
+  it('keeps verified risk facts visible when monitor status loading fails', async () => {
+    const api: StockRiskRadarApi = {
+      load: vi.fn(async () => result()),
+      loadMonitors: vi.fn(async () => { throw new Error('monitor offline'); }),
+    };
+    render(
+      <StockRiskRadar
+        snapshotId={SNAPSHOT_A}
+        dataAsOf={DATA_AS_OF}
+        trustMode="current"
+        api={api}
+      />,
+    );
+
+    expect(await screen.findByText('整体质押比例较高，要留意可能触发的平仓压力。')).toBeTruthy();
+    expect(screen.queryByText('本次风险检查未完成')).toBeNull();
+    expect(screen.queryByRole('button', { name: /持续监控/ })).toBeNull();
+  });
+
+  it('renders paused and failed monitor states with explicit actions and native titles', async () => {
+    const api: StockRiskRadarApi = {
+      load: vi.fn(async () => result()),
+      loadMonitors: vi.fn(async () => [
+        {
+          monitorId: 'srm_1',
+          plannedTaskId: 'pln_1',
+          symbol: '600001',
+          status: 'paused' as const,
+          nextRunAt: null,
+          lastRunAt: '2026-08-18T09:00:00.000Z',
+          lastOutcome: 'unchanged' as const,
+          lastSummary: '风险状态无变化',
+        },
+        {
+          monitorId: 'srm_2',
+          plannedTaskId: 'pln_2',
+          symbol: '000002',
+          status: 'failed' as const,
+          nextRunAt: '2026-08-19T08:30:00.000Z',
+          lastRunAt: '2026-08-18T09:00:00.000Z',
+          lastOutcome: 'failed' as const,
+          lastSummary: '本次风险检查未完成',
+        },
+      ]),
+      toggleMonitor: vi.fn(async () => ({ status: 'active' as const })),
+      runMonitorNow: vi.fn(async () => ({ runId: 'plr_1', status: 'starting' as const })),
+    };
+    render(
+      <StockRiskRadar
+        snapshotId={SNAPSHOT_A}
+        dataAsOf={DATA_AS_OF}
+        trustMode="current"
+        api={api}
+      />,
+    );
+
+    expect(await screen.findByText('已暂停')).toBeTruthy();
+    expect(screen.getByText('需要处理')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '恢复测试股份监控' }).getAttribute('title'))
+      .toBe('恢复测试股份监控');
+    expect(screen.getByRole('button', { name: '立即重试示例科技监控' }).getAttribute('title'))
+      .toBe('立即重试示例科技监控');
+  });
 });
