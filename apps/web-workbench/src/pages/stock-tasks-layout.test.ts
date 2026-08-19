@@ -142,7 +142,7 @@ describe('stock tasks layout', () => {
     const source = readFileSync(new URL('./StockTasksPage.tsx', import.meta.url), 'utf8');
 
     expect(source).toContain("dashboardTrust.tone === 'unavailable' || dashboardTrust.tone === 'unverified'");
-    expect(source).toContain('disabled={submitting || !prompt.trim() || stockPromptUnavailable}');
+    expect(source).toContain('submitDisabled={submitting || !prompt.trim() || stockPromptUnavailable}');
     expect(source).toContain('placeholder={temporalCopy.promptPlaceholder}');
   });
 

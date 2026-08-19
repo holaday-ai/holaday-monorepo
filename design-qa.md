@@ -49,6 +49,71 @@ final result: passed
 
 ---
 
+# 股市 AI 研究命令台与移动任务导航 Design QA（2026-08-19）
+
+## 对照目标与状态
+
+- Source visual truth: `/Users/yaleiqi/.codex/generated_images/019fea2f-b33b-7560-9d5a-5a381b4cfd37/exec-c3206587-315e-4875-81ba-7b0afe309e91.png`。
+- Browser-rendered implementation: `http://127.0.0.1:5188/stocks`。
+- Desktop implementation evidence: `/private/tmp/holaday-stock-p2-audit/13-ai-command-desktop-final-1280.png`。
+- Mobile implementation evidence: `/private/tmp/holaday-stock-p2-audit/11-ai-command-mobile-final-390.png`。
+- Final focused comparison: `/private/tmp/holaday-stock-p2-audit/12-ai-command-comparison-final.png`。
+- Source state: current trusted data concept, with four concise AI actions.
+- Implementation state: local API unavailable and therefore intentionally using the product's unverified-data boundary. The same component's current-state invitation and command semantics are covered by component and temporal-copy tests; no fake market data was injected for the screenshot.
+
+## Viewport and normalization
+
+- Source: 1681 × 935 px.
+- Desktop implementation: 1280 × 900 CSS px and screenshot pixels, deviceScaleFactor 1; AI command surface measured 928 × 200 CSS px.
+- Mobile implementation: 390 × 844 CSS px and screenshot pixels, deviceScaleFactor 1; AI command surface measured 358 × 240 CSS px.
+- Narrow responsive boundary: 320 × 800 CSS px; document width remained 320 px, the AI command surface measured 288 × 240 px, and the task navigation client/scroll widths both measured 286 px.
+- Focused comparison crops the visible 358 × 240 mobile command surface, scales it to 410 px height, and places it beside the full source visual in one comparison input. The differing aspect ratios are intentional: the reference is a wide concept board, while the implementation must remain readable inside a 390 px app viewport.
+
+## Required fidelity surfaces
+
+- Fonts and typography: retained the existing Holaday system/PingFang fallback stack, medium 16 px delegation prompt, 13 px assistant identity, and 11 px status/action hierarchy. No clipping or truncation remained at 390 or 320 px.
+- Spacing and layout rhythm: the AI identity, delegation field, circular send action, and four suggested tasks form a compact three-band hierarchy. Desktop height is 200 px; mobile height is 240 px. The following task navigation now uses a complete 2 × 2 grid on mobile and four columns from `sm` upward.
+- Colors and visual tokens: warm white, blush, berry, lilac underline, muted purple text, soft borders, and low-elevation shadows match the selected light Holaday direction without competing with the primary stock workspace.
+- Image quality and asset fidelity: the source does not require raster imagery. Visible marks use the project's existing Lucide icon family; no emoji, CSS drawing, handcrafted SVG, or placeholder image was introduced.
+- Copy and content: `Holaday AI` plus a live trust-aware status establishes assistant presence. The current trusted state uses `今天想让 AI 帮你看什么？`; historical, delayed, and unavailable states retain explicit date/trust boundaries. Suggested actions display concise labels while preserving the full original task command in their accessible name, title, and callback payload.
+
+## Interaction, accessibility, and browser QA
+
+- Page identity: `/stocks`, title `HOLA DAY`; meaningful content rendered with no framework overlay.
+- Free-form delegation: filled `比较 603528 和 600497` through the labelled textbox and verified the exact input value without submitting a real task.
+- Suggested tasks: component tests verified submission and suggested-command callbacks; the browser snapshot verified four accessible action buttons and trust-aware disabled states.
+- Task navigation: all four task entries are present in the 390 px and 320 px snapshots; at 390 px the navigation client and scroll widths both measured 356 px, so no task is clipped offscreen.
+- Document overflow: document width equalled viewport width at 1280, 390, and 320 px.
+- Accessibility: labelled region, textbox, submit button, and action group; 44 px submit target; visible keyboard focus rings; reduced-motion fallbacks on transitions and loading animation.
+- Console: zero warning/error entries after the final desktop reload. Local stock API unavailability was shown as an explicit in-product data state rather than hidden or replaced with sample values.
+
+## Comparison history
+
+### Pass 1
+
+- P2: the first implementation preserved the long backend command strings as visible mobile labels, causing two- and three-line wrapping that made the 2 × 2 suggestion grid denser than the selected design.
+- Fix: added concise display labels (`整理今日关注`, `核对风险变化`, `分析行业主线`, `比较两只股票`) while retaining the exact original command for `aria-label`, native title, disabled logic, and execution callback. Empty-watchlist and unavailable states keep accurate alternatives such as `添加关注股票` and `等待可信行情`.
+
+### Final pass
+
+- Post-fix evidence: `/private/tmp/holaday-stock-p2-audit/12-ai-command-comparison-final.png`.
+- The assistant identity, status dot, large invitation field, circular send affordance, pastel underline, four line-icon actions, radii, and warm low-noise surface now preserve the selected option's visual hierarchy.
+- The implementation is intentionally denser than the wide concept image so the next stock task remains visible on a 390 px viewport. This is an acceptable responsive adaptation, not unresolved design drift.
+- No actionable P0, P1, or P2 visual, interaction, responsive, accessibility, or copy findings remain on the changed surface.
+
+## Automated gates
+
+- Focused component/layout/temporal-copy suite: 3 files, 11 tests passed.
+- Full Web suite: 191 files, 1434 tests passed.
+- Web typecheck passed.
+- Changed-file ESLint passed.
+- Web production build passed.
+- `git diff --check` passed before this report update and is rerun in the final verification set.
+
+final result: passed
+
+---
+
 # 股市任务明亮工作台与紧凑下一步 Design QA（2026-08-18）
 
 ## 对照目标

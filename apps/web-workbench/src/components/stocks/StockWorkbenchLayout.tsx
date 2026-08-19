@@ -52,7 +52,7 @@ export function StockTaskWorkspaceLayout({
     >
       <nav
         aria-label="股市任务视图"
-        className="grid min-w-0 auto-cols-[minmax(132px,1fr)] grid-flow-col gap-1 overflow-x-auto border-b border-[#EFE7F1] bg-white p-2"
+        className="grid min-w-0 grid-cols-2 gap-1 border-b border-[#EFE7F1] bg-white p-2 sm:grid-cols-4"
       >
         {STOCK_WORKSPACE_TASKS.map((task) => {
           const Icon = task.icon;
@@ -66,7 +66,7 @@ export function StockTaskWorkspaceLayout({
               aria-current={selected ? 'page' : undefined}
               onClick={() => setActiveTask(task.id)}
               className={cn(
-                'group relative flex h-11 min-w-[132px] shrink-0 items-center justify-center gap-2 rounded-[13px] px-3 text-center transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/25',
+                'group relative flex h-11 min-w-0 items-center justify-center gap-2 rounded-[13px] px-2 text-center transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/25 motion-reduce:transition-none sm:px-3',
                 selected
                   ? 'bg-[#FFF0F4] text-[#C9184A] shadow-[0_6px_18px_rgba(220,48,93,0.08)]'
                   : 'text-[#566074] hover:bg-[#F7F4FC] hover:text-[#332842]',

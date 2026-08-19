@@ -4,6 +4,7 @@ export type StockTemporalMode = StockDashboardTrustState['tone'];
 export type StockSignal = '强势' | '偏强' | '中性' | '偏弱' | '风险升高' | '待观察';
 
 export interface StockTemporalCopy {
+  assistantStatus: string;
   briefingTitle: string;
   briefingCommand: string;
   performanceLabel: string;
@@ -27,6 +28,7 @@ export function stockTemporalCopy(
   const date = compactDate(dataAsOf);
   if (mode === 'current') {
     return {
+      assistantStatus: '正在理解你的关注股票',
       briefingTitle: '今日关注日报',
       briefingCommand: '生成今日关注日报',
       performanceLabel: '当前表现',
@@ -35,11 +37,12 @@ export function stockTemporalCopy(
       opportunityEmpty: '暂无真实机会信号',
       starTitle: '明星股票',
       starMeta: '今日关注',
-      promptPlaceholder: '问股票、市场、行业，或生成我的关注日报',
+      promptPlaceholder: '今天想让 AI 帮你看什么？',
     };
   }
   if (mode === 'historical' && date) {
     return {
+      assistantStatus: `基于 ${date} 可信快照继续研究`,
       briefingTitle: `${date} 回看重点`,
       briefingCommand: `基于 ${date} 生成历史复盘`,
       performanceLabel: '当日表现',
@@ -53,6 +56,7 @@ export function stockTemporalCopy(
   }
   if (mode === 'delayed') {
     return {
+      assistantStatus: '正在核验行情快照',
       briefingTitle: date ? `${date} 快照核验中` : '行情快照核验中',
       briefingCommand: '等待行情核验',
       performanceLabel: '快照表现',
@@ -65,6 +69,7 @@ export function stockTemporalCopy(
     };
   }
   return {
+    assistantStatus: '等待可信行情恢复',
     briefingTitle: '行情待恢复',
     briefingCommand: '等待可信行情',
     performanceLabel: '表现待核验',
