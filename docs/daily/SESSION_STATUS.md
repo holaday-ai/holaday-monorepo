@@ -28,7 +28,9 @@
 <!-- 2026-07-09 Codex 补充：状态机 pre-execution guard：start(existing) 不再把 pending/queued 直接派发成 executing；pause 只允许 executing source；repository control transition 同步拒绝非 executing→paused 与非 paused→executing，防 queued/pending 绕过队列恢复。 -->
 <!-- 2026-07-09 Codex 补充：状态机 planning bootstrap 收口：新任务 seed 显式走 state:null + taskId + plan；start(existing planning) 改为 noop，避免历史/重连 planning 被误派发；tasks.create/smoke 与集成 fixture 已统一。 -->
 <!-- 2026-07-09 Codex 补充：技能 planner 闭环：planner catalogue 现在合并 DB SKILL.md rows + shared 13 用户可见技能；手动 @ 技能会注入 planner hint，避免前端选择了技能但通用 planner 不知道。 -->
-## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05@35023d6e`（2026-08-20 JST）
+## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05@fa0c8126`（2026-08-20 JST）
+
+任务结果可信度与时效性 P0 已通过 PR #88–#92 连续收口并上线。PR #90 将 Anthropic 动态检索返回的原始搜索结果提取为可核验来源，写入 EvidenceLedger 后再执行终态验证；PR #91 补齐新自动烟测解析器在部署回滚测试夹具中的安装；PR #92 对已经带有“核验来源 / 检索来源（请核对）”的回答跳过第二次 OpenAI 润色，逐字保留来源边界并消除约 25 秒无效等待。生产 Orchestrator HEAD 为 `fa0c8126cc3d416c1aa9ddf86d2de4600548ca3a`，运行状态 online、uid 998、restart count 0；编号 migration（`statements=13`、`alreadyApplied=183`）、`db:verify`、必需密钥存在性、前端 lint/typecheck/build、31 项运维测试与 Aliyun/Vultr 原子发布门禁均通过，双公网 healthz 均为 200。由于生产保持 `SKIP_AUTO_SMOKE=1`，发布后人工运行完整 P0 smoke：11/11 通过；原先越过 120 秒的 P0_007 最新检索任务在 78,491ms 内 completed，verification passed、failed checks 0，结果含 12 个来源链接（7 个唯一链接），response layer 以 `source_preservation` 在 0ms 返回。双入口 SPA bundle 均为 `index-CdorFHuL.js`；本轮未部署 AkShare 或 CN Payment，PayPal 保持 disabled。
 
 股市任务移动端收口已通过 PR #86 上线。发布回滚点为 `e27fdc8a`，本机与生产祖先门禁均确认可安全快进；生产 Orchestrator HEAD 为 `35023d6e79153021268e3e22480a869647ccae5c`，构建、编号 migration（`statements=13`、`alreadyApplied=183`）、`db:verify`、非 root PM2 重启、必需密钥存在性与本机 healthz 检查均通过，运行用户 uid/gid 998、restart count 0。Aliyun 与 Vultr SPA 均命中 `index-DjCaLQBA.js`，双公网 healthz 均为 200 / `status=ok`；Vultr 大文件 SCP 连续超时后，改用同一已核验 HEAD 在远端临时目录构建，校验目标 hash 后原子切换并保留旧包备份，外部复验确认双入口资源一致。登录态生产 `/stocks` 显示 AkShare 数据日期 08/20；390px 与 1440px 均无横向溢出，移动端风险组默认一条、桌面端首组两条，控制台无 warning/error。该次只部署 application；未部署 AkShare 或 CN Payment，PayPal 保持 disabled，支付仅执行发布前预检，`SKIP_AUTO_SMOKE=1` 保持原配置。
 
