@@ -28,7 +28,9 @@
 <!-- 2026-07-09 Codex 补充：状态机 pre-execution guard：start(existing) 不再把 pending/queued 直接派发成 executing；pause 只允许 executing source；repository control transition 同步拒绝非 executing→paused 与非 paused→executing，防 queued/pending 绕过队列恢复。 -->
 <!-- 2026-07-09 Codex 补充：状态机 planning bootstrap 收口：新任务 seed 显式走 state:null + taskId + plan；start(existing planning) 改为 noop，避免历史/重连 planning 被误派发；tasks.create/smoke 与集成 fixture 已统一。 -->
 <!-- 2026-07-09 Codex 补充：技能 planner 闭环：planner catalogue 现在合并 DB SKILL.md rows + shared 13 用户可见技能；手动 @ 技能会注入 planner hint，避免前端选择了技能但通用 planner 不知道。 -->
-## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05@fa0c8126`（2026-08-20 JST）
+## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05@85821d6c`（2026-08-20 JST）
+
+基础发布可靠性已通过 PR #94 上线：每次 application 发布现在默认运行不含浏览器和实时搜索的 4 项快速 P0 阻断门禁，覆盖文本生成、澄清停靠、任务详情回填与伪造 URL 防护；失败或无法解析会自动恢复发布前版本，完整 11 项 P0 则仅在 `RUN_FULL_AUTO_SMOKE=1` 时作为信息性检查运行。首次生产门禁 4/4 通过，总耗时 12.4 秒（P0_001 7,752ms、P0_002 1,563ms、P0_010 17ms、P0_011 3,046ms），完整 P0 按设计未重复执行。生产 Orchestrator HEAD 为 `85821d6c08617f6363c648681cfe836638dee87a`，运行状态 online、uid 998、restart count 0；编号 migration（`statements=13`、`alreadyApplied=183`）、`db:verify`、必需密钥存在性、前端 lint/typecheck/build、31 项运维测试及 Aliyun/Vultr 原子发布均通过，双公网 healthz 均为 200，双入口 bundle 均为 `index-CdorFHuL.js`。本轮未部署 AkShare 或 CN Payment，PayPal 保持 disabled。
 
 任务结果可信度与时效性 P0 已通过 PR #88–#92 连续收口并上线。PR #90 将 Anthropic 动态检索返回的原始搜索结果提取为可核验来源，写入 EvidenceLedger 后再执行终态验证；PR #91 补齐新自动烟测解析器在部署回滚测试夹具中的安装；PR #92 对已经带有“核验来源 / 检索来源（请核对）”的回答跳过第二次 OpenAI 润色，逐字保留来源边界并消除约 25 秒无效等待。生产 Orchestrator HEAD 为 `fa0c8126cc3d416c1aa9ddf86d2de4600548ca3a`，运行状态 online、uid 998、restart count 0；编号 migration（`statements=13`、`alreadyApplied=183`）、`db:verify`、必需密钥存在性、前端 lint/typecheck/build、31 项运维测试与 Aliyun/Vultr 原子发布门禁均通过，双公网 healthz 均为 200。由于生产保持 `SKIP_AUTO_SMOKE=1`，发布后人工运行完整 P0 smoke：11/11 通过；原先越过 120 秒的 P0_007 最新检索任务在 78,491ms 内 completed，verification passed、failed checks 0，结果含 12 个来源链接（7 个唯一链接），response layer 以 `source_preservation` 在 0ms 返回。双入口 SPA bundle 均为 `index-CdorFHuL.js`；本轮未部署 AkShare 或 CN Payment，PayPal 保持 disabled。
 
