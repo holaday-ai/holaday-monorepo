@@ -6,6 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CURRENT_SCRIPT="$SCRIPT_DIR/deploy-current.sh"
 AKSHARE_SCRIPT="$SCRIPT_DIR/deploy-akshare-mcp.sh"
 ORCHESTRATOR_SCRIPT="$SCRIPT_DIR/deploy-orchestrator.sh"
+AUTO_SMOKE_SUMMARY_SCRIPT="$SCRIPT_DIR/auto-smoke-summary.sh"
 CN_PAYMENT_SCRIPT="$SCRIPT_DIR/deploy-cn-payment.sh"
 export DEPLOY_REMOTE_RETRY_SLEEP="${DEPLOY_REMOTE_RETRY_SLEEP:-0}"
 
@@ -406,6 +407,7 @@ test_orchestrator_retries_transient_payment_preflights() {
   : > "$event_log"
   write_common_deploy_stubs "$harness_dir"
   cp "$ORCHESTRATOR_SCRIPT" "$harness_dir/repo/scripts/deploy-orchestrator.sh"
+  cp "$AUTO_SMOKE_SUMMARY_SCRIPT" "$harness_dir/repo/scripts/auto-smoke-summary.sh"
   : > "$harness_dir/repo/scripts/orchestrator-runtime.sh"
   : > "$harness_dir/repo/scripts/start-orchestrator-production.sh"
   chmod +x "$harness_dir/repo/scripts/deploy-orchestrator.sh" \
@@ -452,6 +454,7 @@ write_orchestrator_gate_retry_harness() {
 
   write_common_deploy_stubs "$harness_dir"
   cp "$ORCHESTRATOR_SCRIPT" "$harness_dir/repo/scripts/deploy-orchestrator.sh"
+  cp "$AUTO_SMOKE_SUMMARY_SCRIPT" "$harness_dir/repo/scripts/auto-smoke-summary.sh"
   : > "$harness_dir/repo/scripts/orchestrator-runtime.sh"
   : > "$harness_dir/repo/scripts/start-orchestrator-production.sh"
   chmod +x "$harness_dir/repo/scripts/deploy-orchestrator.sh" \
