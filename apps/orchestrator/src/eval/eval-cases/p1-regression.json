@@ -6,6 +6,7 @@
     "prompt": "翻译这段话到日语：今天天气不错，适合出去走走",
     "expectations": {
       "mustComplete": true,
+      "verificationMustPass": true,
       "executionMode": "generate",
       "maxDurationMs": 60000
     },
@@ -18,6 +19,7 @@
     "prompt": "以下是关于人工智能的一段描述，请用 100 字以内总结：人工智能是一门让机器能够胜任通常需要人类智能才能完成的复杂工作的技术科学。它由不同领域组成，包括机器学习、计算机视觉、自然语言处理等。它的目标是使机器能够模拟人的认知过程，并不断扩展其能力边界。",
     "expectations": {
       "mustComplete": true,
+      "verificationMustPass": true,
       "executionMode": "generate",
       "maxDurationMs": 90000
     },
@@ -30,6 +32,7 @@
     "prompt": "请帮我写一份关于 2026 年中国 AI 行业现状与展望的详细分析报告，覆盖政策、市场、技术、应用四个维度，每个维度至少 200 字，总字数不少于 1000 字。",
     "expectations": {
       "mustComplete": true,
+      "verificationMustPass": true,
       "executionMode": "generate",
       "maxDurationMs": 240000
     },
@@ -42,6 +45,7 @@
     "prompt": "凭记忆给我 5 个机器学习官方文档的网址。每行一个，https 开头的完整地址。不要联网，直接写。",
     "expectations": {
       "mustComplete": true,
+      "verificationMustPass": true,
       "executionMode": "generate",
       "mustNotContain": ["http://", "https://"],
       "maxDurationMs": 60000
@@ -68,6 +72,7 @@
     "prompt": "搜索 2026 年 5 月最新的人工智能行业动态新闻",
     "expectations": {
       "mustComplete": true,
+      "verificationMustPass": true,
       "executionMode": "scrape",
       "maxDurationMs": 90000
     },
@@ -80,6 +85,7 @@
     "prompt": "查询 iPhone 16 Pro 官方介绍和价格",
     "expectations": {
       "mustComplete": true,
+      "verificationMustPass": true,
       "executionMode": "scrape",
       "maxDurationMs": 90000
     },
@@ -92,6 +98,7 @@
     "prompt": "搜索小红书上关于护肤的热门笔记总结",
     "expectations": {
       "mustComplete": true,
+      "verificationMustPass": true,
       "executionMode": "scrape",
       "maxDurationMs": 120000
     },
@@ -104,6 +111,7 @@
     "prompt": "查询苹果公司最新一季度财报的关键数据",
     "expectations": {
       "mustComplete": true,
+      "verificationMustPass": true,
       "executionMode": "scrape",
       "maxDurationMs": 120000
     },
@@ -128,6 +136,7 @@
     "prompt": "打开 https://www.baidu.com 告诉我搜索框的占位提示文字",
     "expectations": {
       "mustComplete": true,
+      "verificationMustPass": true,
       "executionMode": "browser",
       "urlMustMatch": "baidu.com",
       "maxDurationMs": 180000
@@ -141,6 +150,7 @@
     "prompt": "打开 https://example.com 点击 More information 链接，告诉我跳转后的页面标题",
     "expectations": {
       "mustComplete": true,
+      "verificationMustPass": true,
       "executionMode": "browser",
       "urlMustMatch": "iana.org",
       "maxDurationMs": 240000
@@ -154,6 +164,7 @@
     "prompt": "打开 https://www.bing.com，把 'AI' 这两个字符输入到搜索框，但不要点击搜索按钮，把输入完成后的状态告诉我",
     "expectations": {
       "mustComplete": true,
+      "verificationMustPass": true,
       "executionMode": "browser",
       "urlMustMatch": "bing.com",
       "maxDurationMs": 180000
@@ -181,6 +192,7 @@
     "prompt": "打开 https://example.com 然后告诉我当前页面的完整 URL 是什么",
     "expectations": {
       "mustComplete": true,
+      "verificationMustPass": true,
       "executionMode": "browser",
       "urlMustMatch": "example.com",
       "maxDurationMs": 120000

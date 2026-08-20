@@ -26,4 +26,15 @@ describe('P0 release gate suite', () => {
     expect(suite.some((testCase) => testCase.category.startsWith('browser'))).toBe(false);
     expect(suite.some((testCase) => testCase.category === 'generate_search')).toBe(false);
   });
+
+  it('requires verifier approval for every completed release case', () => {
+    const completedCases = readReleaseGateSuite().filter(
+      (testCase) => testCase.expectations.mustComplete,
+    );
+
+    expect(completedCases.map((testCase) => testCase.id)).toEqual(['P0_001', 'P0_011']);
+    expect(
+      completedCases.every((testCase) => testCase.expectations.verificationMustPass === true),
+    ).toBe(true);
+  });
 });
