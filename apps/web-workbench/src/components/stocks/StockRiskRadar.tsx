@@ -1,3 +1,4 @@
+import { useIsMobile } from '@/hooks/use-mobile';
 import { pageErrorMessage } from '@/lib/page-error-copy';
 import { groupStockRiskSignals } from '@/lib/stock-risk-presentation';
 import { trpc } from '@/lib/trpc';
@@ -173,6 +174,7 @@ export function StockRiskRadar({
   const [monitorPendingSymbol, setMonitorPendingSymbol] = React.useState<string | null>(null);
   const [monitorError, setMonitorError] = React.useState<string | null>(null);
   const requestSequence = React.useRef(0);
+  const isMobile = useIsMobile();
   const loadable = canLoadRiskRadar({ snapshotId, dataAsOf, trustMode });
 
   const load = React.useCallback(async (resetExpansion = false) => {
@@ -426,9 +428,10 @@ export function StockRiskRadar({
                     const groupExpanded = expandedGroupSymbol === group.symbol;
                     const hasCheckedSource = group.signals.length > 0
                       || group.checks.some((check) => check.status === 'checked');
+                    const collapsedSignalLimit = isMobile ? 1 : 2;
                     const visibleSignals = groupExpanded
                       ? group.signals
-                      : group.signals.slice(0, 2);
+                      : group.signals.slice(0, collapsedSignalLimit);
                     const monitor = monitors.get(group.symbol) ?? null;
                     return (
                       <article
@@ -437,7 +440,7 @@ export function StockRiskRadar({
                         data-stock-symbol={group.symbol}
                         className="overflow-hidden rounded-[8px] border border-[#E4E6EB] bg-[#FCFCFD]"
                       >
-                        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[#E8EAF0] px-4 py-3.5">
+                        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[#E8EAF0] px-3 py-3 sm:px-4 sm:py-3.5">
                           <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-2">
                               <span className="truncate text-[14px] font-semibold text-[#121826]">
@@ -513,14 +516,14 @@ export function StockRiskRadar({
                               : '本轮数据源均暂不可用，无法判断是否触发阈值；持续监控会在来源恢复后继续核验。'}
                           </div>
                         ) : null}
-                        <div className="divide-y divide-[#E8EAF0] px-4">
+                        <div className="divide-y divide-[#E8EAF0] px-3 sm:px-4">
                           {visibleSignals.map((signal) => {
                             const evidenceExpanded = expandedSignalId === signal.signalId;
                             return (
                               <div
                                 key={signal.signalId}
                                 data-testid="risk-signal"
-                                className="py-3.5"
+                                className="py-3 sm:py-3.5"
                               >
                                 <div className="flex flex-wrap items-center gap-2 text-[11px] font-medium text-[#667085]">
                                   <span>{signal.label}</span>
@@ -581,8 +584,8 @@ export function StockRiskRadar({
                             );
                           })}
                         </div>
-                        {group.signals.length > 2 ? (
-                          <div className="border-t border-[#E8EAF0] px-4 py-2.5">
+                        {group.signals.length > collapsedSignalLimit ? (
+                          <div className="border-t border-[#E8EAF0] px-3 py-2.5 sm:px-4">
                             <button
                               type="button"
                               aria-expanded={groupExpanded}

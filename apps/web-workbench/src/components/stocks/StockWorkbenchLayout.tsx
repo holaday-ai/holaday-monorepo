@@ -42,6 +42,41 @@ export function StockTaskWorkspaceLayout({
   screeningView: StockScreeningViewState;
 }): JSX.Element {
   const [activeTask, setActiveTask] = React.useState<StockWorkspaceTask>('watchlist');
+  const tabRefs = React.useRef<Record<StockWorkspaceTask, HTMLButtonElement | null>>({
+    watchlist: null,
+    screening: null,
+    risk: null,
+    briefing: null,
+  });
+  const activeTaskIndex = STOCK_WORKSPACE_TASKS.findIndex((task) => task.id === activeTask);
+
+  const activateTask = React.useCallback((task: StockWorkspaceTask, focusTab = false) => {
+    setActiveTask(task);
+    if (focusTab) {
+      queueMicrotask(() => tabRefs.current[task]?.focus());
+    }
+  }, []);
+
+  const handleTabKeyDown = React.useCallback(
+    (event: React.KeyboardEvent<HTMLButtonElement>) => {
+      let nextIndex: number | null = null;
+      if (event.key === 'ArrowRight') {
+        nextIndex = (activeTaskIndex + 1) % STOCK_WORKSPACE_TASKS.length;
+      } else if (event.key === 'ArrowLeft') {
+        nextIndex =
+          (activeTaskIndex - 1 + STOCK_WORKSPACE_TASKS.length) % STOCK_WORKSPACE_TASKS.length;
+      } else if (event.key === 'Home') {
+        nextIndex = 0;
+      } else if (event.key === 'End') {
+        nextIndex = STOCK_WORKSPACE_TASKS.length - 1;
+      }
+      if (nextIndex === null) return;
+      event.preventDefault();
+      const nextTask = STOCK_WORKSPACE_TASKS[nextIndex]?.id;
+      if (nextTask) activateTask(nextTask, true);
+    },
+    [activateTask, activeTaskIndex],
+  );
 
   return (
     <section
@@ -50,6 +85,7 @@ export function StockTaskWorkspaceLayout({
     >
       <nav
         aria-label="股市任务视图"
+        role="tablist"
         className="grid min-w-0 grid-cols-2 gap-1 border-b border-[#EFE7F1] bg-white p-2 sm:grid-cols-4"
       >
         {STOCK_WORKSPACE_TASKS.map((task) => {
@@ -58,11 +94,19 @@ export function StockTaskWorkspaceLayout({
           return (
             <button
               key={task.id}
+              ref={(node) => {
+                tabRefs.current[task.id] = node;
+              }}
               type="button"
+              role="tab"
+              id={`stock-task-tab-${task.id}`}
               aria-label={task.label}
               title={task.description}
-              aria-current={selected ? 'page' : undefined}
-              onClick={() => setActiveTask(task.id)}
+              aria-selected={selected}
+              aria-controls="stock-task-panel"
+              tabIndex={selected ? 0 : -1}
+              onClick={() => activateTask(task.id)}
+              onKeyDown={handleTabKeyDown}
               className={cn(
                 'group relative flex h-11 min-w-0 items-center justify-center gap-2 rounded-[13px] px-2 text-center transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/25 motion-reduce:transition-none sm:px-3',
                 selected
@@ -84,11 +128,17 @@ export function StockTaskWorkspaceLayout({
         })}
       </nav>
 
-      <div className="min-w-0 p-2.5 sm:p-3">
+      <div
+        id="stock-task-panel"
+        role="tabpanel"
+        aria-labelledby={`stock-task-tab-${activeTask}`}
+        tabIndex={0}
+        className="min-w-0 p-2.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#EA1F59]/20 sm:p-3"
+      >
         {activeTask === 'watchlist' ? (
           <div className="min-w-0 space-y-3">
             <div className="min-w-0">{highlights}</div>
-            <NextStepRail onNavigate={setActiveTask} />
+            <NextStepRail onNavigate={(task) => activateTask(task, true)} />
           </div>
         ) : null}
         {activeTask === 'risk' ? <div className="min-w-0">{riskRadar}</div> : null}
