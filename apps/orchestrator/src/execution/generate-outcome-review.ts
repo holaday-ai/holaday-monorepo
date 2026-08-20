@@ -18,6 +18,8 @@ export interface ReviewableGenerateOutcome {
   status: 'completed' | 'failed' | 'awaiting_user';
   summary: string;
   reason?: string;
+  /** Provider-observed web-search URLs, never model-authored prose URLs. */
+  sourceUrls?: ReadonlyArray<string>;
   inputTokens: number;
   outputTokens: number;
   durationMs: number;
@@ -58,6 +60,26 @@ export async function reviewGenerateOutcome(
 
   let verification: VerificationResult | null = null;
   if (outcome.status === 'completed') {
+    const observedUrls = new Set<string>();
+    for (const rawUrl of outcome.sourceUrls ?? []) {
+      let url: URL;
+      try {
+        url = new URL(rawUrl);
+      } catch {
+        continue;
+      }
+      if (url.protocol !== 'https:' && url.protocol !== 'http:') continue;
+      observedUrls.add(url.href);
+      if (observedUrls.size >= 10) break;
+    }
+    for (const url of observedUrls) {
+      recordEvidence(input.taskId, {
+        fact: `web_search_url=${url}`,
+        sourceType: 'tool_result',
+        sourceDetail: 'generate web_search provider result',
+        confidence: 'observed',
+      });
+    }
     recordEvidence(input.taskId, {
       fact: `response_length=${outcome.summary.length}`,
       sourceType: 'tool_result',

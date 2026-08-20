@@ -1,13 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { _resetLedgerRegistryForTest } from './evidence-ledger.js';
+import { _resetLedgerRegistryForTest, getLedger } from './evidence-ledger.js';
 import { _resetExecutionPipelineForTest, initExecution } from './execution-pipeline.js';
 import { reloadFeatureFlagsForTest, setFeatureFlagsForTest } from './feature-flags.js';
 import { reviewGenerateOutcome } from './generate-outcome-review.js';
 
-const completedOutcome = (summary: string) => ({
+const completedOutcome = (summary: string, sourceUrls?: ReadonlyArray<string>) => ({
   status: 'completed' as const,
   summary,
+  ...(sourceUrls ? { sourceUrls } : {}),
   inputTokens: 10,
   outputTokens: 20,
   durationMs: 30,
@@ -73,5 +74,32 @@ describe('reviewGenerateOutcome', () => {
     expect(reviewed.failedChecks).toEqual(
       expect.arrayContaining([expect.objectContaining({ type: 'expert_claim_provenance' })]),
     );
+  });
+
+  it('grounds provider-returned search URLs before verifying a fresh research answer', async () => {
+    setFeatureFlagsForTest({
+      EVIDENCE_LEDGER: true,
+      EXECUTION_CONTRACT: true,
+      EXECUTION_VERIFIER: true,
+    });
+    initExecution({
+      taskId: 'tsk_generate_search_source',
+      intent: '2026年5月最新的AI行业新闻是什么',
+      executionMode: 'generate',
+    });
+
+    const sourceUrl = 'https://example.com/latest-ai-news';
+    const reviewed = await reviewGenerateOutcome({
+      taskId: 'tsk_generate_search_source',
+      intent: '2026年5月最新的AI行业新闻是什么',
+      outcome: completedOutcome(
+        `AI 行业新闻摘要。\n\n### 检索来源（请核对）\n- [行业报道](<${sourceUrl}>)`,
+        [sourceUrl],
+      ),
+    });
+
+    expect(getLedger('tsk_generate_search_source')?.getGroundedUrls()).toContain(sourceUrl);
+    expect(reviewed.terminalStatus).toBe('completed');
+    expect(reviewed.failedChecks).toEqual([]);
   });
 });

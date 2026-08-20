@@ -43,6 +43,8 @@ BRANCH="${1:-claude/musing-keller-ae1d05}"
 HEALTH_URL="http://localhost:4001/healthz"
 HEALTH_MARKER='"status":"ok"'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/auto-smoke-summary.sh
+source "$SCRIPT_DIR/auto-smoke-summary.sh"
 RUNTIME_HELPER="$SCRIPT_DIR/orchestrator-runtime.sh"
 START_HELPER="$SCRIPT_DIR/start-orchestrator-production.sh"
 REMOTE_RUNTIME_DIR="/var/lib/holaday-deploy"
@@ -366,16 +368,19 @@ else
      pnpm --filter @holaday/orchestrator eval:smoke 2>&1 | tail -25" \
     || true)
   echo "$SMOKE_OUT"
-  if echo "$SMOKE_OUT" | grep -qE '\[eval\] [0-9]+/[0-9]+ passed'; then
-    if echo "$SMOKE_OUT" | grep -qE '\[eval\] 10/10 passed'; then
-      echo "✅ Auto-smoke 10/10 — pipeline healthy"
-    else
-      echo "⚠️  Auto-smoke had failures (see output above) — deploy NOT rolled back"
+  parse_auto_smoke_summary "$SMOKE_OUT"
+  case "$AUTO_SMOKE_STATE" in
+    healthy)
+      echo "✅ Auto-smoke $AUTO_SMOKE_PASSED/$AUTO_SMOKE_TOTAL — pipeline healthy"
+      ;;
+    failures)
+      echo "⚠️  Auto-smoke $AUTO_SMOKE_PASSED/$AUTO_SMOKE_TOTAL had failures (see output above) — deploy NOT rolled back"
       echo "   Likely flaky LLM (Anthropic overloaded) or a real regression — investigate."
-    fi
-  else
-    echo "⚠️  Auto-smoke did not produce a parseable summary line — eval runner may have errored"
-  fi
+      ;;
+    *)
+      echo "⚠️  Auto-smoke did not produce a parseable summary line — eval runner may have errored"
+      ;;
+  esac
 fi
 
 # Authoritative post-deploy reference (hard rule 7). Copy this into the
