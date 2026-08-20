@@ -13,7 +13,10 @@ const SNAPSHOT_A = 'stkshot_0123456789abcdef01234567';
 const SNAPSHOT_B = 'stkshot_fedcba9876543210fedcba98';
 const DATA_AS_OF = '2026-08-17';
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 });
+});
 
 function result(overrides: Partial<StockRiskRadarResult> = {}): StockRiskRadarResult {
   return {
@@ -120,6 +123,31 @@ function result(overrides: Partial<StockRiskRadarResult> = {}): StockRiskRadarRe
 }
 
 describe('StockRiskRadar', () => {
+  it('shows only the highest-priority signal by default on a narrow viewport', async () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
+    const api: StockRiskRadarApi = { load: vi.fn(async () => result()) };
+
+    render(
+      <StockRiskRadar
+        snapshotId={SNAPSHOT_A}
+        dataAsOf={DATA_AS_OF}
+        trustMode="current"
+        api={api}
+      />,
+    );
+
+    const testedStock = (await screen.findAllByTestId('risk-stock-group'))[0];
+    if (!testedStock) throw new Error('expected grouped events for 测试股份');
+    await waitFor(() => expect(within(testedStock).getAllByTestId('risk-signal')).toHaveLength(1));
+    expect(
+      within(testedStock).getByText('整体质押比例较高，要留意可能触发的平仓压力。'),
+    ).toBeTruthy();
+    expect(
+      within(testedStock).queryByText('近期收到交易所问询函（1 件），要留意公司回复。'),
+    ).toBeNull();
+    expect(within(testedStock).getByRole('button', { name: '查看全部 3 条' })).toBeTruthy();
+  });
+
   it('announces the initial risk check without forcing motion', () => {
     const api: StockRiskRadarApi = {
       load: vi.fn(() => new Promise<StockRiskRadarResult>(() => undefined)),

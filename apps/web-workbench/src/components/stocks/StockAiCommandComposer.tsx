@@ -54,11 +54,11 @@ export function StockAiCommandComposer({
   return (
     <section
       aria-label="Holaday AI 股市研究助手"
-      className="overflow-hidden rounded-[18px] border border-[#E9E0EC] bg-[#FFFCFB] p-3 shadow-[0_14px_36px_rgba(102,74,119,0.055)] sm:p-4"
+      className="overflow-hidden rounded-[18px] border border-[#E9E0EC] bg-[#FFFCFB] p-2.5 shadow-[0_14px_36px_rgba(102,74,119,0.055)] sm:p-4"
     >
       <div className="flex items-center justify-between gap-3 px-1">
         <div className="flex min-w-0 items-center gap-2.5">
-          <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#FFF0F4] text-[#C9184A]">
+          <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#FFF0F4] text-[#C9184A] sm:h-9 sm:w-9">
             <Sparkles className="h-[18px] w-[18px]" aria-hidden />
           </span>
           <div className="min-w-0">
@@ -77,14 +77,14 @@ export function StockAiCommandComposer({
           event.preventDefault();
           onSubmit();
         }}
-        className="mt-3 flex min-h-[60px] items-end gap-2 rounded-[14px] bg-[#FFF7FA] px-3 py-2.5 shadow-[inset_0_-2px_0_#E8C8F5] transition-colors focus-within:bg-white motion-reduce:transition-none"
+        className="mt-2.5 flex min-h-[52px] items-end gap-2 rounded-[14px] bg-[#FFF7FA] px-3 py-2 shadow-[inset_0_-2px_0_#E8C8F5] transition-colors focus-within:bg-white motion-reduce:transition-none sm:mt-3 sm:min-h-[60px] sm:py-2.5"
       >
         <input
           value={value}
           onChange={(event) => onValueChange(event.target.value)}
           aria-label="交代股市研究任务"
           placeholder={placeholder}
-          className="min-w-0 flex-1 self-stretch bg-transparent text-[16px] font-medium leading-6 text-[#332842] outline-none placeholder:text-[#968C9D]"
+          className="min-w-0 flex-1 self-stretch bg-transparent text-[14px] font-medium leading-6 text-[#332842] outline-none placeholder:text-[#968C9D] sm:text-[16px]"
         />
         <button
           type="submit"
@@ -101,7 +101,11 @@ export function StockAiCommandComposer({
         </button>
       </form>
 
-      <div role="group" aria-label="AI 研究建议" className="mt-3 grid grid-cols-2 gap-2 lg:grid-cols-4">
+      <div
+        role="group"
+        aria-label="AI 研究建议"
+        className="mt-2.5 flex gap-2 overflow-x-auto pb-0.5 sm:mt-3 sm:grid sm:grid-cols-2 sm:overflow-visible sm:pb-0 lg:grid-cols-4"
+      >
         {commands.map((command, index) => {
           const Icon = COMMAND_ICONS[index] ?? Sparkles;
           return (
@@ -113,7 +117,7 @@ export function StockAiCommandComposer({
               title={commandTitle(command) ?? command}
               onClick={() => onCommand(command)}
               className={cn(
-                'flex min-h-11 min-w-0 items-center gap-2 rounded-[11px] border border-[#E5DEEB] bg-[#FCFAFF] px-2.5 text-left text-[11px] font-medium leading-4 text-[#5D5368] transition hover:border-[#E7BEC9] hover:bg-[#FFF0F4] hover:text-[#C9184A] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/25 disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:transition-none',
+                'flex min-h-11 min-w-[132px] items-center gap-2 rounded-[11px] border border-[#E5DEEB] bg-[#FCFAFF] px-2.5 text-left text-[11px] font-medium leading-4 text-[#5D5368] transition hover:border-[#E7BEC9] hover:bg-[#FFF0F4] hover:text-[#C9184A] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/25 disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:transition-none sm:min-w-0',
                 index === 0 && 'border-[#F0D1DA] bg-[#FFF7F9] text-[#9F3153]',
               )}
             >

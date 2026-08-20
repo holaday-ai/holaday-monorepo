@@ -36,6 +36,12 @@ describe('StockAiCommandComposer', () => {
       .toBe('今天想让 AI 帮你看什么？');
     expect(screen.getByRole('button', { name: '提交股市任务' })).toBeTruthy();
     expect(screen.getByRole('group', { name: 'AI 研究建议' }).querySelectorAll('button')).toHaveLength(4);
+    expect(screen.getByRole('group', { name: 'AI 研究建议' }).className).toContain(
+      'overflow-x-auto',
+    );
+    expect(screen.getByRole('group', { name: 'AI 研究建议' }).className).toContain(
+      'sm:grid',
+    );
     expect(screen.getByText('整理今日关注')).toBeTruthy();
     expect(screen.getByText('核对风险变化')).toBeTruthy();
     expect(screen.getByText('分析行业主线')).toBeTruthy();

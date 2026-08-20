@@ -651,7 +651,12 @@ export function StockTasksPage(): JSX.Element {
 
   return (
     <div className="min-h-full bg-[#FFFCFA] text-[#25233A]">
-      <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-4 px-4 pb-5 pt-14 sm:px-5 min-[769px]:pt-4 lg:px-6">
+      <div
+        data-stock-mobile-chrome=""
+        aria-hidden
+        className="pointer-events-none fixed inset-x-0 top-0 z-[35] h-12 border-b border-[#EFE7F1] bg-[#FFFCFA]/95 shadow-[0_2px_12px_rgba(103,75,121,0.06)] backdrop-blur-xl min-[769px]:hidden"
+      />
+      <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-3 px-4 pb-5 pt-14 sm:gap-4 sm:px-5 min-[769px]:pt-4 lg:px-6">
         <header className="flex flex-col gap-3 border-b border-[#EFE7F1] pb-3 min-[769px]:pr-[12rem] md:flex-row md:items-center md:justify-between">
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-[22px] font-semibold tracking-[-0.025em] text-[#3E3154]">

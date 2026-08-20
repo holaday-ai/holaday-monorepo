@@ -12,6 +12,8 @@ describe('stock tasks layout', () => {
   it('reserves the mobile top bar before rendering the page title', () => {
     const source = readFileSync(new URL('./StockTasksPage.tsx', import.meta.url), 'utf8');
 
+    expect(source).toContain('data-stock-mobile-chrome');
+    expect(source).toContain('fixed inset-x-0 top-0 z-[35] h-12');
     expect(source).toContain('pt-14');
     expect(source).toContain('min-[769px]:pt-4');
   });

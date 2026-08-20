@@ -28,9 +28,14 @@ describe('StockTaskWorkspaceLayout', () => {
       />,
     );
 
-    expect(screen.getByRole('navigation', { name: '股市任务视图' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: '关注股票' }).getAttribute('aria-current')).toBe(
-      'page',
+    expect(screen.getByRole('tablist', { name: '股市任务视图' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: '关注股票' }).getAttribute('aria-selected')).toBe(
+      'true',
+    );
+    const activePanel = screen.getByRole('tabpanel', { name: '关注股票' });
+    expect(activePanel.id).toBe('stock-task-panel');
+    expect(screen.getByRole('tab', { name: '关注股票' }).getAttribute('aria-controls')).toBe(
+      activePanel.id,
     );
     expect(screen.getByTestId('highlights')).toBeTruthy();
     expect(screen.queryByTestId('risk')).toBeNull();
@@ -53,16 +58,16 @@ describe('StockTaskWorkspaceLayout', () => {
       />,
     );
 
-    await user.click(screen.getByRole('button', { name: '风险证据' }));
+    await user.click(screen.getByRole('tab', { name: '风险证据' }));
     expect(screen.getByTestId('risk')).toBeTruthy();
     expect(screen.queryByTestId('highlights')).toBeNull();
 
-    await user.click(screen.getByRole('button', { name: '条件选股' }));
+    await user.click(screen.getByRole('tab', { name: '条件选股' }));
     expect(screen.getByTestId('screening')).toBeTruthy();
     expect(screen.getByTestId('profile')).toBeTruthy();
     expect(screen.queryByTestId('risk')).toBeNull();
 
-    await user.click(screen.getByRole('button', { name: '今日简报' }));
+    await user.click(screen.getByRole('tab', { name: '今日简报' }));
     expect(screen.getByTestId('briefing')).toBeTruthy();
     expect(screen.queryByTestId('screening')).toBeNull();
   });
@@ -80,7 +85,7 @@ describe('StockTaskWorkspaceLayout', () => {
       />,
     );
 
-    await user.click(screen.getByRole('button', { name: '条件选股' }));
+    await user.click(screen.getByRole('tab', { name: '条件选股' }));
     const screeningStack = screen.getByTestId('screening').parentElement?.parentElement;
     expect(screeningStack?.className).toContain('space-y-4');
     expect(screeningStack?.className).not.toContain('xl:grid-cols');
@@ -114,14 +119,42 @@ describe('StockTaskWorkspaceLayout', () => {
       />,
     );
 
-    const navigation = screen.getByRole('navigation', { name: '股市任务视图' });
+    const navigation = screen.getByRole('tablist', { name: '股市任务视图' });
     expect(navigation.className).toContain('grid-cols-2');
     expect(navigation.className).toContain('sm:grid-cols-4');
     expect(navigation.className).not.toContain('overflow-x-auto');
-    for (const button of navigation.querySelectorAll('button')) {
+    for (const button of navigation.querySelectorAll('[role="tab"]')) {
       expect(button.className).toContain('min-w-0');
       expect(button.className).not.toContain('min-w-[132px]');
     }
+  });
+
+  it('supports arrow, Home, and End navigation while keeping the active panel labelled', async () => {
+    const user = userEvent.setup();
+    render(
+      <StockTaskWorkspaceLayout
+        highlights={node('highlights')}
+        riskRadar={node('risk')}
+        screening={node('screening')}
+        preferenceProfile={node('profile')}
+        briefing={node('briefing')}
+        screeningView="idle"
+      />,
+    );
+
+    const watchlistTab = screen.getByRole('tab', { name: '关注股票' });
+    watchlistTab.focus();
+    await user.keyboard('{ArrowRight}');
+    expect(document.activeElement).toBe(screen.getByRole('tab', { name: '条件选股' }));
+    expect(screen.getByTestId('screening')).toBeTruthy();
+
+    await user.keyboard('{End}');
+    expect(document.activeElement).toBe(screen.getByRole('tab', { name: '今日简报' }));
+    expect(screen.getByRole('tabpanel', { name: '今日简报' })).toBeTruthy();
+
+    await user.keyboard('{Home}');
+    expect(document.activeElement).toBe(watchlistTab);
+    expect(screen.getByRole('tabpanel', { name: '关注股票' })).toBeTruthy();
   });
 
   it('routes next-step actions to the matching research task', async () => {
@@ -151,12 +184,13 @@ describe('StockTaskWorkspaceLayout', () => {
 
     await user.click(screen.getByRole('button', { name: '查看风险证据' }));
     expect(screen.getByTestId('risk')).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByRole('tab', { name: '风险证据' }));
 
-    await user.click(screen.getByRole('button', { name: '关注股票' }));
-    await user.click(screen.getByRole('button', { name: '今日简报' }));
+    await user.click(screen.getByRole('tab', { name: '关注股票' }));
+    await user.click(screen.getByRole('tab', { name: '今日简报' }));
     expect(screen.getByTestId('briefing')).toBeTruthy();
 
-    await user.click(screen.getByRole('button', { name: '关注股票' }));
+    await user.click(screen.getByRole('tab', { name: '关注股票' }));
     await user.click(screen.getByRole('button', { name: '打开选股与偏好' }));
     expect(screen.getByTestId('screening')).toBeTruthy();
     expect(screen.getByTestId('profile')).toBeTruthy();
