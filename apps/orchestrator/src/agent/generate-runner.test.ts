@@ -35,6 +35,7 @@ function makeLogger() {
  */
 function makeClient(opts: {
   textOut?: string;
+  contentBlocks?: ReadonlyArray<unknown>;
   citations?: Array<{
     type: 'web_search_result_location';
     title: string | null;
@@ -89,9 +90,11 @@ function makeClient(opts: {
             model: 'claude-sonnet-4-6',
             stop_reason: opts.stopReason ?? 'end_turn',
             stop_sequence: null,
-            content: opts.textOut
-              ? [{ type: 'text', text: opts.textOut, citations: opts.citations ?? null }]
-              : [],
+            content:
+              opts.contentBlocks ??
+              (opts.textOut
+                ? [{ type: 'text', text: opts.textOut, citations: opts.citations ?? null }]
+                : []),
             usage: {
               input_tokens: opts.inputTokens ?? 100,
               output_tokens: opts.outputTokens ?? 50,
@@ -591,5 +594,77 @@ describe('runGenerateTask — lightweight direct-answer path', () => {
     expect(outcome.summary).toContain(
       '[Reuters: fund update](<https://www.reuters.com/example/fund-update>)',
     );
+    expect(outcome.sourceUrls).toEqual(['https://www.reuters.com/example/fund-update']);
+  });
+
+  it('keeps verified search-result links when dynamic filtering emits no text citations', async () => {
+    const sourceUrl = 'https://developers.googleblog.com/en/google-io-2026-ai-update/';
+    const client = makeClient({
+      textOut: 'Google I/O 2026 发布了最新 AI 产品更新。',
+      contentBlocks: [
+        {
+          type: 'server_tool_use',
+          id: 'srvtoolu_code',
+          name: 'code_execution',
+          input: { code: 'search_web("Google I/O 2026 AI")' },
+        },
+        {
+          type: 'server_tool_use',
+          id: 'srvtoolu_search',
+          name: 'web_search',
+          input: { query: 'Google I/O 2026 AI' },
+          caller: { type: 'code_execution_20260120', tool_id: 'srvtoolu_code' },
+        },
+        {
+          type: 'web_search_tool_result',
+          tool_use_id: 'srvtoolu_search',
+          caller: { type: 'code_execution_20260120', tool_id: 'srvtoolu_code' },
+          content: [
+            {
+              type: 'web_search_result',
+              url: sourceUrl,
+              title: 'Google I/O 2026 AI update',
+              encrypted_content: 'encrypted-search-result',
+              page_age: 'May 20, 2026',
+            },
+            {
+              type: 'web_search_result',
+              url: sourceUrl,
+              title: 'Duplicate result',
+            },
+            {
+              type: 'web_search_result',
+              url: 'javascript:alert(1)',
+              title: 'Unsafe result',
+            },
+          ],
+        },
+        {
+          type: 'code_execution_tool_result',
+          tool_use_id: 'srvtoolu_code',
+          content: { type: 'code_execution_result', stdout: '', stderr: '', return_code: 0 },
+        },
+        {
+          type: 'text',
+          text: 'Google I/O 2026 发布了最新 AI 产品更新。',
+          citations: null,
+        },
+      ],
+    });
+
+    const outcome = await runGenerateTask({
+      taskId: 'tsk_dynamic_search_result',
+      userId: 'usr_test',
+      intent: '2026年5月最新的AI行业新闻是什么',
+      client,
+      logger: makeLogger(),
+    });
+
+    expect(outcome.status).toBe('completed');
+    expect(outcome.summary).toContain('### 检索来源（请核对）');
+    expect(outcome.summary).not.toContain('### 核验来源');
+    expect(outcome.summary).toContain(`[Google I/O 2026 AI update](<${sourceUrl}>)`);
+    expect(outcome.summary).not.toContain('javascript:');
+    expect(outcome.sourceUrls).toEqual([sourceUrl]);
   });
 });

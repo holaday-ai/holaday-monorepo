@@ -29,6 +29,7 @@ write_orchestrator_harness() {
 
   mkdir -p "$harness_dir/repo/scripts" "$harness_dir/bin"
   cp "$DEPLOY_SCRIPT" "$harness_dir/repo/scripts/deploy-orchestrator.sh"
+  cp "$SCRIPT_DIR/auto-smoke-summary.sh" "$harness_dir/repo/scripts/auto-smoke-summary.sh"
   chmod +x "$harness_dir/repo/scripts/deploy-orchestrator.sh"
 
   cat > "$harness_dir/repo/scripts/load-deploy-env.sh" <<'STUB'

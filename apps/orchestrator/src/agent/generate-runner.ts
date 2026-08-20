@@ -63,6 +63,12 @@ export interface GenerateOutcome {
   summary: string;
   /** Failure reason — only set when status='failed'. */
   reason?: string;
+  /**
+   * HTTP(S) sources observed in provider web-search results. The caller records
+   * these in the evidence ledger before verifying URLs in `summary`; prose URLs
+   * invented by the model are deliberately excluded.
+   */
+  sourceUrls?: ReadonlyArray<string>;
   inputTokens: number;
   outputTokens: number;
   /** Wall-clock time including web_search round-trips. */
@@ -201,67 +207,95 @@ const DEFAULT_TIMEOUT_MS = 300_000;
 const HEARTBEAT_TIMEOUT_MS = 45_000;
 const HEARTBEAT_TICK_MS = 5_000;
 
-type VerifiedCitationSource = {
+type ObservedSearchSource = {
   title: string;
   url: string;
+  provenance: 'citation' | 'search_result';
 };
 
 /**
- * Extract only citations emitted by the provider's web-search tool. A model
- * mentioning a publisher name in prose is not sufficient evidence: without a
- * provider-returned http(s) URL, we deliberately add no source link.
+ * Extract only URLs emitted by the provider's web-search tool. Text citations
+ * are stronger than raw result candidates, but both are provider-observed. A
+ * publisher name or URL authored only in model prose is never accepted here.
  */
-function extractVerifiedCitationSources(
+function extractObservedSearchSources(
   content: ReadonlyArray<unknown>,
-): VerifiedCitationSource[] {
-  const seen = new Set<string>();
-  const sources: VerifiedCitationSource[] = [];
+): ObservedSearchSource[] {
+  const sources: ObservedSearchSource[] = [];
+  const sourceByUrl = new Map<string, ObservedSearchSource>();
 
-  for (const block of content) {
-    if (!block || typeof block !== 'object') continue;
-    const citations = (block as { citations?: unknown }).citations;
-    if (!Array.isArray(citations)) continue;
+  const appendSource = (
+    rawTitle: unknown,
+    rawUrl: unknown,
+    provenance: ObservedSearchSource['provenance'],
+  ): void => {
+    if (typeof rawUrl !== 'string') return;
 
-    for (const citation of citations) {
-      if (!citation || typeof citation !== 'object') continue;
-      const source = citation as { type?: unknown; title?: unknown; url?: unknown };
-      if (source.type !== 'web_search_result_location' || typeof source.url !== 'string') {
-        continue;
-      }
+    const url = rawUrl.trim();
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      return;
+    }
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return;
 
-      const url = source.url.trim();
-      let parsed: URL;
-      try {
-        parsed = new URL(url);
-      } catch {
-        continue;
-      }
-      if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') continue;
-
-      const key = parsed.href;
-      if (seen.has(key)) continue;
-      seen.add(key);
-
-      const rawTitle = typeof source.title === 'string' ? source.title : '';
-      const title = rawTitle
+    const key = parsed.href;
+    const existing = sourceByUrl.get(key);
+    if (existing) {
+      if (provenance === 'citation') existing.provenance = 'citation';
+      return;
+    }
+    const title =
+      (typeof rawTitle === 'string' ? rawTitle : '')
         .replace(/[\r\n]+/g, ' ')
         .replace(/[\[\]]/g, '')
         .trim()
         .slice(0, 160) || parsed.hostname;
-      sources.push({ title, url });
+    const source = { title, url, provenance };
+    sources.push(source);
+    sourceByUrl.set(key, source);
+  };
+
+  for (const block of content) {
+    if (!block || typeof block !== 'object') continue;
+    const citations = (block as { citations?: unknown }).citations;
+    if (Array.isArray(citations)) {
+      for (const citation of citations) {
+        if (!citation || typeof citation !== 'object') continue;
+        const source = citation as { type?: unknown; title?: unknown; url?: unknown };
+        if (source.type !== 'web_search_result_location') continue;
+        appendSource(source.title, source.url, 'citation');
+      }
+    }
+
+    const searchResultBlock = block as { type?: unknown; content?: unknown };
+    if (
+      searchResultBlock.type !== 'web_search_tool_result' ||
+      !Array.isArray(searchResultBlock.content)
+    ) {
+      continue;
+    }
+    for (const item of searchResultBlock.content) {
+      if (!item || typeof item !== 'object') continue;
+      const source = item as { type?: unknown; title?: unknown; url?: unknown };
+      if (source.type !== 'web_search_result') continue;
+      appendSource(source.title, source.url, 'search_result');
     }
   }
 
   return sources;
 }
 
-function appendVerifiedCitationSources(
+function appendObservedSearchSources(
   summary: string,
-  sources: ReadonlyArray<VerifiedCitationSource>,
+  sources: ReadonlyArray<ObservedSearchSource>,
 ): string {
   if (!summary || sources.length === 0) return summary;
+  const citedSources = sources.filter((source) => source.provenance === 'citation');
+  const displaySources = citedSources.length > 0 ? citedSources : sources;
   const seen = new Set<string>();
-  const links = sources
+  const links = displaySources
     .filter((source) => {
       if (seen.has(source.url)) return false;
       seen.add(source.url);
@@ -270,7 +304,8 @@ function appendVerifiedCitationSources(
     .slice(0, 5)
     .map((source) => `- [${source.title}](<${source.url}>)`)
     .join('\n');
-  return `${summary}\n\n### 核验来源\n${links}`;
+  const heading = citedSources.length > 0 ? '核验来源' : '检索来源（请核对）';
+  return `${summary}\n\n### ${heading}\n${links}`;
 }
 
 /**
@@ -495,7 +530,7 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
   const baseMessages = requestArgs.messages;
   let accumulatedSummary = '';
   let truncatedAtCap = false;
-  const verifiedCitationSources: VerifiedCitationSource[] = [];
+  const observedSearchSources: ObservedSearchSource[] = [];
 
   try {
     continuationLoop: for (
@@ -603,8 +638,8 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
             .map((b) => (b.type === 'text' ? b.text : ''))
             .join('')
             .trim();
-          verifiedCitationSources.push(
-            ...extractVerifiedCitationSources(finalMessage.content),
+          observedSearchSources.push(
+            ...extractObservedSearchSources(finalMessage.content),
           );
           stopReason = finalMessage.stop_reason;
           lastInputTokens = finalMessage.usage?.input_tokens ?? 0;
@@ -768,9 +803,9 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
     const visibleSummary = truncatedAtCap
       ? accumulatedSummary + TRUNCATION_NOTICE
       : accumulatedSummary;
-    const baseSummary = appendVerifiedCitationSources(
+    const baseSummary = appendObservedSearchSources(
       visibleSummary,
-      verifiedCitationSources,
+      observedSearchSources,
     );
     // Phase 2 — append the workflow's follow-up actions footer.
     // Empty string when no workflow matched (legacy generate path)
@@ -784,6 +819,9 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
     return {
       status: 'completed',
       summary: finalSummary,
+      ...(observedSearchSources.length > 0
+        ? { sourceUrls: observedSearchSources.map((source) => source.url) }
+        : {}),
       inputTokens: totalInputTokens,
       outputTokens: totalOutputTokens,
       durationMs: Date.now() - start,
@@ -816,13 +854,16 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
     if (accumulatedSummary.length > 0) {
       // Phase 2 — same footer-append discipline as the happy path
       // so a partially-streamed report still ships with chips.
-      const partialSummary = appendVerifiedCitationSources(
+      const partialSummary = appendObservedSearchSources(
         `${accumulatedSummary}\n\n---\n【提示】内容因网络/超时被截断，如需完整版请追问。`,
-        verifiedCitationSources,
+        observedSearchSources,
       );
       return {
         status: 'completed',
         summary: workflow ? partialSummary + buildFollowUpFooter(workflow) : partialSummary,
+        ...(observedSearchSources.length > 0
+          ? { sourceUrls: observedSearchSources.map((source) => source.url) }
+          : {}),
         inputTokens: totalInputTokens,
         outputTokens: totalOutputTokens,
         durationMs,
