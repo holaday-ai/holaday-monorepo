@@ -79,7 +79,7 @@ function makeStubClient(textOut: string): AnthropicLikeClient {
 // ---------------------------------------------------------------------------
 
 describe('flags off (default)', () => {
-  it('fails an explicit research result with no source instead of displaying an unverified conclusion', () => {
+  it('marks an explicit research result with no source as partial instead of completed', () => {
     const review = assessResearchSourceTrust({
       intent: '研究 2026 年 AI 行业趋势',
       resultText: 'AI 行业仍在快速增长。',
@@ -87,6 +87,7 @@ describe('flags off (default)', () => {
 
     expect(review).toEqual({
       requiresReview: true,
+      blocking: false,
       failedChecks: [
         {
           type: 'source_count',
@@ -94,7 +95,26 @@ describe('flags off (default)', () => {
         },
       ],
     });
-    expect(deriveFinalStatus('completed', null, review)).toBe('failed');
+    expect(deriveFinalStatus('completed', null, review)).toBe('partial_success');
+  });
+
+  it('recognises a natural freshness question as research that needs sources', () => {
+    const review = assessResultTrust({
+      intent: '2026年5月最新的AI行业新闻是什么',
+      resultText: '多家公司发布了新的模型与融资计划。',
+    });
+
+    expect(review).toEqual({
+      requiresReview: true,
+      blocking: false,
+      failedChecks: [
+        {
+          type: 'source_count',
+          detail: '研究或检索结果缺少可点击来源，关键事实未验证',
+        },
+      ],
+    });
+    expect(deriveFinalStatus('completed', null, review)).toBe('partial_success');
   });
 
   it('fails a stock quote with no source even when the execution verifier flag is off', () => {

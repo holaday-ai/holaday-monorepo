@@ -33,7 +33,7 @@ describe('reviewGenerateOutcome', () => {
       outcome: completedOutcome('A 产品最值得采用。'),
     });
 
-    expect(reviewed.terminalStatus).toBe('failed');
+    expect(reviewed.terminalStatus).toBe('partial_success');
     expect(reviewed.failedChecks).toEqual(
       expect.arrayContaining([expect.objectContaining({ type: 'source_count' })]),
     );

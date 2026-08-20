@@ -18,6 +18,7 @@
  * contract afterwards.
  */
 import { randomUUID } from 'node:crypto';
+import { isResearchOrRetrievalIntent as isSharedResearchOrRetrievalIntent } from '@holaday/shared-types';
 import { classifyLightweightTask } from './lightweight-task.js';
 
 export type ContractTier = 'full' | 'light' | 'checklist';
@@ -311,19 +312,7 @@ export function classifyIntentForOutputRequirement(intent: string): {
 }
 
 export function isResearchOrRetrievalIntent(intent: string): boolean {
-  const text = intent.trim();
-  if (!text) return false;
-  if (/股价|股票|股市|A股|港股|美股|stock\s+(?:price|quote)/i.test(text)) {
-    return false;
-  }
-  return (
-    /^(?:(?:请|麻烦|劳烦)?\s*(?:帮我|帮忙|给我|替我)?\s*)?(?:研究|调研|检索|搜索|搜集|搜寻|查询|查找|调查|查(?!看|验|错|重))/i.test(
-      text,
-    ) ||
-    /^(?:(?:please|could you|can you)\s+)?(?:research|search(?:\s+for)?|look\s+up|investigate)\b/i.test(
-      text,
-    )
-  );
+  return isSharedResearchOrRetrievalIntent(intent);
 }
 
 function inferRequestedItemCount(text: string): number {
