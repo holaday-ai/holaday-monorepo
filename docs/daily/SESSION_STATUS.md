@@ -28,7 +28,9 @@
 <!-- 2026-07-09 Codex 补充：状态机 pre-execution guard：start(existing) 不再把 pending/queued 直接派发成 executing；pause 只允许 executing source；repository control transition 同步拒绝非 executing→paused 与非 paused→executing，防 queued/pending 绕过队列恢复。 -->
 <!-- 2026-07-09 Codex 补充：状态机 planning bootstrap 收口：新任务 seed 显式走 state:null + taskId + plan；start(existing planning) 改为 noop，避免历史/重连 planning 被误派发；tasks.create/smoke 与集成 fixture 已统一。 -->
 <!-- 2026-07-09 Codex 补充：技能 planner 闭环：planner catalogue 现在合并 DB SKILL.md rows + shared 13 用户可见技能；手动 @ 技能会注入 planner hint，避免前端选择了技能但通用 planner 不知道。 -->
-## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05@85821d6c`（2026-08-20 JST）
+## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05@2cb183a4`（2026-08-21 JST）
+
+基础任务完成验收已通过 PR #96 上线：评估器不再仅凭 `completed`、执行 lane、文本或 URL 断言放行；当用例声明 `verificationMustPass=true` 时，持久化 verifier 只有明确返回 `true` 才通过，`false` 与历史/缺失的 `null` 均阻断。快速发布门禁的两项完成型用例、完整 P0 的 5 项完成型用例及 P1 的 12 项完成型用例均已接入该准入；等待登录、澄清、拒绝和预期失败用例保持原语义。生产 Orchestrator HEAD 为 `2cb183a43a3883c9852154e9056535c6f0aa3704`，运行 uid 998、restart count 0；最新快速门禁 4/4 通过，总耗时 18,474ms，P0_001 与 P0_011 的 `verificationPassed=true`，等待态 P0_002 为预期 `null`，P0_010 详情回填复用已验证完成任务。双公网 healthz 均为 200 / `status=ok`，两套 `/app` 均引用 `index-CdorFHuL.js`。本地完整 Orchestrator 套件、定向 7 项、TypeScript build、31 项运维 Node 门禁及 shell 发布门禁均通过。CN 支付预检首次遇到瞬时中断，单独复验后 WeChat/Alipay 均 ready；PayPal 按 live 配置 disabled。发布工具返回脱离后检测到第二条同版本重复发布，已在第二次重启前终止冗余进程组，保留的首条发布完整收口。无 schema、migration、前端行为、生产配置、AkShare、CN Payment、DivineAPI、Translator 或 OpenAI Key 变更。
 
 基础发布可靠性已通过 PR #94 上线：每次 application 发布现在默认运行不含浏览器和实时搜索的 4 项快速 P0 阻断门禁，覆盖文本生成、澄清停靠、任务详情回填与伪造 URL 防护；失败或无法解析会自动恢复发布前版本，完整 11 项 P0 则仅在 `RUN_FULL_AUTO_SMOKE=1` 时作为信息性检查运行。首次生产门禁 4/4 通过，总耗时 12.4 秒（P0_001 7,752ms、P0_002 1,563ms、P0_010 17ms、P0_011 3,046ms），完整 P0 按设计未重复执行。生产 Orchestrator HEAD 为 `85821d6c08617f6363c648681cfe836638dee87a`，运行状态 online、uid 998、restart count 0；编号 migration（`statements=13`、`alreadyApplied=183`）、`db:verify`、必需密钥存在性、前端 lint/typecheck/build、31 项运维测试及 Aliyun/Vultr 原子发布均通过，双公网 healthz 均为 200，双入口 bundle 均为 `index-CdorFHuL.js`。本轮未部署 AkShare 或 CN Payment，PayPal 保持 disabled。
 
