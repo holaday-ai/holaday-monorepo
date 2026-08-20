@@ -28,7 +28,9 @@
 <!-- 2026-07-09 Codex 补充：状态机 pre-execution guard：start(existing) 不再把 pending/queued 直接派发成 executing；pause 只允许 executing source；repository control transition 同步拒绝非 executing→paused 与非 paused→executing，防 queued/pending 绕过队列恢复。 -->
 <!-- 2026-07-09 Codex 补充：状态机 planning bootstrap 收口：新任务 seed 显式走 state:null + taskId + plan；start(existing planning) 改为 noop，避免历史/重连 planning 被误派发；tasks.create/smoke 与集成 fixture 已统一。 -->
 <!-- 2026-07-09 Codex 补充：技能 planner 闭环：planner catalogue 现在合并 DB SKILL.md rows + shared 13 用户可见技能；手动 @ 技能会注入 planner hint，避免前端选择了技能但通用 planner 不知道。 -->
-## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05@ac5ec564`（2026-08-17 JST）
+## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05@35023d6e`（2026-08-20 JST）
+
+股市任务移动端收口已通过 PR #86 上线。发布回滚点为 `e27fdc8a`，本机与生产祖先门禁均确认可安全快进；生产 Orchestrator HEAD 为 `35023d6e79153021268e3e22480a869647ccae5c`，构建、编号 migration（`statements=13`、`alreadyApplied=183`）、`db:verify`、非 root PM2 重启、必需密钥存在性与本机 healthz 检查均通过，运行用户 uid/gid 998、restart count 0。Aliyun 与 Vultr SPA 均命中 `index-DjCaLQBA.js`，双公网 healthz 均为 200 / `status=ok`；Vultr 大文件 SCP 连续超时后，改用同一已核验 HEAD 在远端临时目录构建，校验目标 hash 后原子切换并保留旧包备份，外部复验确认双入口资源一致。登录态生产 `/stocks` 显示 AkShare 数据日期 08/20；390px 与 1440px 均无横向溢出，移动端风险组默认一条、桌面端首组两条，控制台无 warning/error。该次只部署 application；未部署 AkShare 或 CN Payment，PayPal 保持 disabled，支付仅执行发布前预检，`SKIP_AUTO_SMOKE=1` 保持原配置。
 
 股票可信数据 P0 已通过 PR #61 与生产对齐 PR #62 上线。发布保留原生产 Today Energy analytics 历史，并将股票任务上下文 migration 编号调整为 `0047_tasks_source_context.sql`；生产编号 migration 共应用 14 statements、177 项已存在，随后 `db:verify` 通过。AkShare 真实烟测确认 2026-08-17 为交易日，实时行情与分时数据均返回 2026-08-17；Orchestrator、AkShare、Aliyun 与 Vultr 公网 health 均通过，双站 SPA bundle 为 `index-DKyEeTcA.js`。登录态生产股票页显示“数据日期 08/17”，08/17 新闻及 10:05 行情；结构化日志确认 `latestExpectedTradingDate=2026-08-17`、`dataAsOf=2026-08-17`、`trustMode=current`，公告、指数、新闻、行情四类来源均为 healthy。生产 Orchestrator HEAD 为 `ac5ec564`，进程 online、restart count 0；本轮未创建真实股票任务，避免污染用户数据。
 
