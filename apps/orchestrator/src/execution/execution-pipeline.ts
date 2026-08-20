@@ -228,6 +228,8 @@ export type FinalTerminalStatus =
 
 export interface ResearchSourceTrustReview {
   requiresReview: boolean;
+  /** True when the output is unusable, rather than useful-but-unverified. */
+  blocking: boolean;
   failedChecks: Array<{ type: string; detail: string }>;
 }
 
@@ -244,10 +246,11 @@ export function assessResearchSourceTrust(input: {
     !isResearchOrRetrievalIntent(input.intent ?? '') ||
     hasClickableSource
   ) {
-    return { requiresReview: false, failedChecks: [] };
+    return { requiresReview: false, blocking: false, failedChecks: [] };
   }
   return {
     requiresReview: true,
+    blocking: false,
     failedChecks: [
       {
         type: 'source_count',
@@ -271,7 +274,9 @@ export function assessResultTrust(input: {
 }): ResearchSourceTrustReview {
   const intent = input.intent?.trim() ?? '';
   const resultText = input.resultText?.trim() ?? '';
-  if (!intent || !resultText) return { requiresReview: false, failedChecks: [] };
+  if (!intent || !resultText) {
+    return { requiresReview: false, blocking: false, failedChecks: [] };
+  }
 
   const { kind, requirement } = classifyIntentForOutputRequirement(intent);
   const failedChecks: Array<{ type: string; detail: string }> = [];
@@ -339,7 +344,7 @@ export function assessResultTrust(input: {
   }
 
   if (failedChecks.length > 0) {
-    return { requiresReview: true, failedChecks };
+    return { requiresReview: true, blocking: true, failedChecks };
   }
   return assessResearchSourceTrust(input);
 }
@@ -378,6 +383,14 @@ export function deriveFinalStatus(
   const original = runnerStatus as FinalTerminalStatus;
   if (runnerStatus !== 'completed') return original;
   if (verification && !verification.passed) {
+    const failedVerificationChecks = verification.checks.filter((check) => !check.passed);
+    const hasOnlyNonBlockingSourceFailures =
+      sourceTrust?.requiresReview === true &&
+      sourceTrust.blocking === false &&
+      failedVerificationChecks.length > 0 &&
+      failedVerificationChecks.every((check) => check.criterionType === 'url_count');
+    if (hasOnlyNonBlockingSourceFailures) return 'partial_success';
+
     const hasCriticalStructuralFailure = verification.checks.some(
       (check) =>
         !check.passed &&
@@ -394,7 +407,9 @@ export function deriveFinalStatus(
     }
     return 'partial_success';
   }
-  if (sourceTrust?.requiresReview) return 'failed';
+  if (sourceTrust?.requiresReview) {
+    return sourceTrust.blocking ? 'failed' : 'partial_success';
+  }
   return original;
 }
 

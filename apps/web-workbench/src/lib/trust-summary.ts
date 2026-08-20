@@ -1,6 +1,7 @@
 import type { AwaitingKind } from '@/lib/awaiting-user-copy';
 import { verificationCheckLabel, type VerificationCheck } from '@/lib/verification-banner-copy';
 import type { UiTask } from '@/types/task';
+import { isResearchOrRetrievalIntent } from '@holaday/shared-types';
 
 export type TrustTone = 'neutral' | 'warning' | 'danger';
 export type TrustEvidenceStage = 'observed' | 'extracted' | 'inferred' | 'boundary';
@@ -455,22 +456,6 @@ function hasMissingResearchSources(input: {
   if (input.status !== 'completed' && input.status !== 'partial_success') return false;
   if (!input.resultText?.trim() || !isResearchOrRetrievalIntent(input.intent)) return false;
   return countVisibleSourceUrls(input.resultText, input.currentUrl) === 0;
-}
-
-function isResearchOrRetrievalIntent(intent?: string): boolean {
-  const text = intent?.trim() ?? '';
-  if (!text) return false;
-  if (/股价|股票|股市|A股|港股|美股|stock\s+(?:price|quote)/i.test(text)) {
-    return false;
-  }
-  return (
-    /^(?:(?:请|麻烦|劳烦)?\s*(?:帮我|帮忙|给我|替我)?\s*)?(?:研究|调研|检索|搜索|搜集|搜寻|查询|查找|调查|查(?!看|验|错|重))/i.test(
-      text,
-    ) ||
-    /^(?:(?:please|could you|can you)\s+)?(?:research|search(?:\s+for)?|look\s+up|investigate)\b/i.test(
-      text,
-    )
-  );
 }
 
 function isSourceEvidenceCheck(type: string): boolean {
