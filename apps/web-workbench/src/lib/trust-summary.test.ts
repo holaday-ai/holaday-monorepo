@@ -38,6 +38,19 @@ describe('trust summary', () => {
     expect(summary.verdict).toBe('缺少可核验来源');
   });
 
+  it('warns when a freshness retrieval request starts with a transformation word', () => {
+    const summary = buildTrustSummary({
+      status: 'completed',
+      intent: '总结本周 AI 行业新闻',
+      resultText: '多家公司发布了新的模型与融资计划。',
+      currentUrl: null,
+    });
+
+    expect(summary.presentation).toBe('compact');
+    expect(summary.title).toBe('结果需复核');
+    expect(summary.verdict).toBe('缺少可核验来源');
+  });
+
   it('states evidence boundaries without implying fact-level certainty', () => {
     const summary = buildTrustSummary({
       status: 'completed',

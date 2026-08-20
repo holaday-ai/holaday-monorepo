@@ -383,6 +383,14 @@ export function deriveFinalStatus(
   const original = runnerStatus as FinalTerminalStatus;
   if (runnerStatus !== 'completed') return original;
   if (verification && !verification.passed) {
+    const failedVerificationChecks = verification.checks.filter((check) => !check.passed);
+    const hasOnlyNonBlockingSourceFailures =
+      sourceTrust?.requiresReview === true &&
+      sourceTrust.blocking === false &&
+      failedVerificationChecks.length > 0 &&
+      failedVerificationChecks.every((check) => check.criterionType === 'url_count');
+    if (hasOnlyNonBlockingSourceFailures) return 'partial_success';
+
     const hasCriticalStructuralFailure = verification.checks.some(
       (check) =>
         !check.passed &&

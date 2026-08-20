@@ -117,6 +117,28 @@ describe('flags off (default)', () => {
     expect(deriveFinalStatus('completed', null, review)).toBe('partial_success');
   });
 
+  it.each(['总结本周 AI 行业新闻', '生成式 AI 最新新闻是什么'])(
+    'recognises freshness retrieval phrased as %s',
+    (intent) => {
+      const review = assessResultTrust({
+        intent,
+        resultText: '多家公司发布了新的模型与融资计划。',
+      });
+
+      expect(review.requiresReview).toBe(true);
+      expect(review.blocking).toBe(false);
+    },
+  );
+
+  it('does not treat supplied text containing freshness words as retrieval', () => {
+    const review = assessResultTrust({
+      intent: '把下面这句话改写得更自然：今天的新闻很多。',
+      resultText: '今天的新闻内容很丰富。',
+    });
+
+    expect(review.requiresReview).toBe(false);
+  });
+
   it('fails a stock quote with no source even when the execution verifier flag is off', () => {
     const review = assessResultTrust({
       intent: '查今天特斯拉股价并给出来源',
@@ -302,7 +324,7 @@ describe('all flags on — generate happy path', () => {
     expect(out.finalText).toContain('Today the weather');
   });
 
-  it('fails research without a clickable source', async () => {
+  it('marks research with only a missing-source verifier failure as partial', async () => {
     initExecution({
       taskId: 'tsk_g2',
       intent: '研究 2026 年 AI 行业趋势',
@@ -331,7 +353,13 @@ describe('all flags on — generate happy path', () => {
         }),
       ]),
     );
-    expect(deriveFinalStatus('completed', out.verification)).toBe('failed');
+    const sourceTrust = assessResultTrust({
+      intent: '研究 2026 年 AI 行业趋势',
+      resultText: out.finalText,
+    });
+    expect(deriveFinalStatus('completed', out.verification, sourceTrust)).toBe(
+      'partial_success',
+    );
   });
 });
 
