@@ -25,6 +25,7 @@ import {
   disposeExecution,
   deriveFinalStatus,
   extractFailedChecks,
+  finalizeAnswerForPersistence,
   getContract,
   initExecution,
   persistExecution,
@@ -360,6 +361,145 @@ describe('all flags on — generate happy path', () => {
     expect(deriveFinalStatus('completed', out.verification, sourceTrust)).toBe(
       'partial_success',
     );
+  });
+});
+
+describe('final persistence boundary', () => {
+  beforeEach(() => flagsAllOn());
+
+  it('repairs duplicate source links introduced after the first verification pass', async () => {
+    const taskId = 'tsk_final_boundary_duplicate_links';
+    const repeatedUrl =
+      'https://openai.com/index/offering-zero-data-retention-for-frontier-models/';
+    initExecution({
+      taskId,
+      intent: '搜索 OpenAI 官方最新发布页面，返回页面标题和至少一个可点击的官方来源链接',
+      executionMode: 'browser',
+    });
+    recordEvidence(taskId, {
+      fact: `web_search_url=${repeatedUrl}`,
+      sourceType: 'tool_result',
+      sourceDetail: 'supercar web_search provider result',
+      confidence: 'observed',
+    });
+    const formatterMutatedAnswer = [
+      '| 发布 | 日期 | 官方来源 |',
+      '|---|---|---|',
+      `| 企业数据保护更新 | 2026-08-19 | [OpenAI](${repeatedUrl}) |`,
+      `| 模型能力更新 | 2026-08-18 | [OpenAI](${repeatedUrl}) |`,
+      `| API 平台更新 | 2026-08-17 | [OpenAI](${repeatedUrl}) |`,
+      `| 安全研究更新 | 2026-08-16 | [OpenAI](${repeatedUrl}) |`,
+      `| 产品公告更新 | 2026-08-15 | [OpenAI](${repeatedUrl}) |`,
+      `| 开发者工具更新 | 2026-08-14 | [OpenAI](${repeatedUrl}) |`,
+      `| 公司动态更新 | 2026-08-13 | [OpenAI](${repeatedUrl}) |`,
+    ].join('\n');
+
+    const out = await finalizeAnswerForPersistence({
+      taskId,
+      answerText: formatterMutatedAnswer,
+    });
+
+    expect(out.verification?.passed).toBe(true);
+    expect(out.verification?.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          criterionId: 'autoFix.duplicate_candidate_link_drop',
+          passed: true,
+        }),
+      ]),
+    );
+    expect(out.finalText.split(repeatedUrl)).toHaveLength(2);
+    expect(out.finalText).toContain('同一来源页');
+  });
+
+  it('does not erase a stricter earlier verifier failure when final structure passes', async () => {
+    const taskId = 'tsk_final_boundary_preserves_llm_failure';
+    const sourceUrl = 'https://openai.com/news/';
+    initExecution({
+      taskId,
+      intent: '搜索 OpenAI 官方最新发布页面并提供来源链接',
+      executionMode: 'browser',
+    });
+    recordEvidence(taskId, {
+      fact: `web_search_url=${sourceUrl}`,
+      sourceType: 'tool_result',
+      sourceDetail: 'supercar web_search provider result',
+      confidence: 'observed',
+    });
+
+    const out = await finalizeAnswerForPersistence({
+      taskId,
+      answerText: [
+        `OpenAI 官方发布页汇总了产品、研究与公司动态，可从[官方来源](${sourceUrl})继续核验。`,
+        '本段只确认页面用途和来源入口，不把尚未逐条核对的发布内容写成已验证结论。',
+      ].join(''),
+      priorVerification: {
+        taskId,
+        passed: false,
+        tier: 'llm',
+        failureLevel: 'hard_fail',
+        checks: [
+          {
+            criterionId: 'llm.goal_satisfaction',
+            passed: false,
+            checker: 'llm',
+            severity: 'hard_fail',
+            detail: '答案没有满足核心语义要求',
+          },
+        ],
+      },
+    });
+
+    expect(out.verification?.passed).toBe(false);
+    expect(out.verification?.failureLevel).toBe('hard_fail');
+    expect(out.verification?.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ criterionId: 'llm.goal_satisfaction', passed: false }),
+      ]),
+    );
+  });
+
+  it('clears an earlier deterministic source failure when the final text now passes', async () => {
+    const taskId = 'tsk_final_boundary_clears_resolved_deterministic_failure';
+    const sourceUrl = 'https://openai.com/news/';
+    initExecution({
+      taskId,
+      intent: '搜索 OpenAI 官方最新发布页面并提供来源链接',
+      executionMode: 'browser',
+    });
+    recordEvidence(taskId, {
+      fact: `web_search_url=${sourceUrl}`,
+      sourceType: 'tool_result',
+      sourceDetail: 'supercar web_search provider result',
+      confidence: 'observed',
+    });
+
+    const out = await finalizeAnswerForPersistence({
+      taskId,
+      answerText: [
+        `OpenAI 官方发布页汇总了产品、研究与公司动态，可从[官方来源](${sourceUrl})继续核验。`,
+        '最终来源补齐后，这段结果已具备可点击的官方核验入口。',
+      ].join(''),
+      priorVerification: {
+        taskId,
+        passed: false,
+        tier: 'deterministic',
+        failureLevel: 'fixable',
+        checks: [
+          {
+            criterionId: 'intent.general_with_links.url_count',
+            criterionType: 'url_count',
+            passed: false,
+            checker: 'deterministic',
+            severity: 'fixable',
+            detail: '结果缺少来源链接',
+          },
+        ],
+      },
+    });
+
+    expect(out.verification?.passed).toBe(true);
+    expect(out.verification?.tier).toBe('deterministic');
   });
 });
 

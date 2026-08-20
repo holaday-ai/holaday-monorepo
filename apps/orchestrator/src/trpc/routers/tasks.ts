@@ -175,6 +175,7 @@ import {
   deriveFinalStatus,
   disposeExecution,
   extractFailedChecks,
+  finalizeAnswerForPersistence,
   initExecution,
   persistExecution,
   recheckPostFormat,
@@ -5918,40 +5919,19 @@ export const tasksRouter = router({
               }
               executionVerification = verified.verification;
             }
-            const supercarResearchSourceTrust = assessResultTrust({
+            const preFormatResearchSourceTrust = assessResultTrust({
               intent: input.intent,
               resultText: outcome.status === 'completed' ? outcome.summary : '',
               currentUrl: finalState.finalUrl,
             });
 
-            // Codex Pack A3 — verifier verdict drives the supercar lane
-            // terminal status. The override flows through both
-            // persistSupercarOutcome (DB write) and buildTaskTerminalMessage
-            // (WS broadcast) via the new verdict params.
-            const supercarTerminalStatus: FinalTerminalStatus = deriveFinalStatus(
+            // The formatter needs a provisional terminal shape. The definitive
+            // verdict is recalculated from the exact persisted text below.
+            const preFormatTerminalStatus: FinalTerminalStatus = deriveFinalStatus(
               outcome.status,
               executionVerification,
-              supercarResearchSourceTrust,
+              preFormatResearchSourceTrust,
             );
-            const supercarFailureSummary =
-              supercarTerminalStatus === 'failed'
-                ? executionVerification
-                  ? summariseVerificationFailure(executionVerification)
-                  : (supercarResearchSourceTrust.failedChecks[0]?.detail ?? null)
-                : null;
-            const supercarFailedChecks = [
-              ...(executionVerification && !executionVerification.passed
-                ? extractFailedChecks(executionVerification)
-                : []),
-              ...(executionVerification && !executionVerification.passed
-                ? []
-                : supercarResearchSourceTrust.failedChecks),
-            ];
-            const supercarStateTransition = classifySupercarTaskStateTransition({
-              status: outcome.status,
-              question: outcome.question,
-              summary: outcome.summary,
-            });
             // Optimization #2 — OpenAI response formatter / style
             // layer. Runs AFTER the verifier (so we polish facts that
             // have already been grounded) and BEFORE persistence. The
@@ -5981,8 +5961,8 @@ export const tasksRouter = router({
               (responseLayerFlag === 'true' || responseLayerFlag === '1') &&
               !!process.env.OPENAI_API_KEY;
             const responseLayerTerminalStatus =
-              supercarResponseLayerTerminalStatus(supercarTerminalStatus);
-              if (responseLayerTerminalStatus && outcome.summary && responseLayerActive) {
+              supercarResponseLayerTerminalStatus(preFormatTerminalStatus);
+            if (responseLayerTerminalStatus && outcome.summary && responseLayerActive) {
               try {
                 const { format: formatResponse } = await import(
                   '../../response-layer/openai-response-layer.js'
@@ -6015,14 +5995,66 @@ export const tasksRouter = router({
             // The optional response layer may rewrite prose, so enforce the
             // observed-source boundary once more immediately before persistence.
             if (outcome.status === 'completed' && outcome.summary) {
+              const persistenceSummary = appendSearchSourceReferences(
+                outcome.summary,
+                observedWebSearchSources,
+              );
               outcome = {
                 ...outcome,
-                summary: appendSearchSourceReferences(
-                  outcome.summary,
-                  observedWebSearchSources,
-                ),
+                summary: persistenceSummary,
               };
+
+              // Production trust P0 — this is the last mutation boundary.
+              // Re-run the deterministic verifier + auto-fix on the exact
+              // string we will persist. This prevents a formatter (or the
+              // source footer) from re-introducing duplicate candidate links
+              // after the primary verifier already ran.
+              const finalVerified = await finalizeAnswerForPersistence({
+                taskId,
+                answerText: persistenceSummary,
+                priorVerification: executionVerification,
+                ...(finalState.finalUrl ? { finalUrl: finalState.finalUrl } : {}),
+                logger: ctx.logger,
+                outputFiles: outputDocDescriptors,
+              });
+              if (finalVerified.finalText !== outcome.summary) {
+                outcome = { ...outcome, summary: finalVerified.finalText };
+              }
+              executionVerification = finalVerified.verification;
             }
+
+            const supercarResearchSourceTrust = assessResultTrust({
+              intent: input.intent,
+              resultText: outcome.status === 'completed' ? outcome.summary : '',
+              currentUrl: finalState.finalUrl,
+            });
+
+            // Codex Pack A3 — the verdict now describes the exact text that
+            // flows through persistence and the terminal WebSocket message.
+            const supercarTerminalStatus: FinalTerminalStatus = deriveFinalStatus(
+              outcome.status,
+              executionVerification,
+              supercarResearchSourceTrust,
+            );
+            const supercarFailureSummary =
+              supercarTerminalStatus === 'failed'
+                ? executionVerification
+                  ? summariseVerificationFailure(executionVerification)
+                  : (supercarResearchSourceTrust.failedChecks[0]?.detail ?? null)
+                : null;
+            const supercarFailedChecks = [
+              ...(executionVerification && !executionVerification.passed
+                ? extractFailedChecks(executionVerification)
+                : []),
+              ...(executionVerification && !executionVerification.passed
+                ? []
+                : supercarResearchSourceTrust.failedChecks),
+            ];
+            const supercarStateTransition = classifySupercarTaskStateTransition({
+              status: outcome.status,
+              question: outcome.question,
+              summary: outcome.summary,
+            });
             let terminalPersisted = false;
             if (supercarStateTransition.kind === 'waiting_user') {
               try {
