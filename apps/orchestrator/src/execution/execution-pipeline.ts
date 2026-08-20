@@ -590,6 +590,77 @@ export async function verifyAndFinalize(
 }
 
 /**
+ * Last deterministic quality gate for the exact text that is about to be
+ * persisted. Some lanes intentionally run a response formatter and append
+ * observed source references after their primary verifier pass. Those are
+ * still text mutations, so the persistence boundary must re-run the verifier
+ * and auto-fix loop against the final string instead of trusting an earlier
+ * verdict. Omitting `client` keeps this second pass deterministic and cheap.
+ */
+export type FinalizeAnswerForPersistenceInputs = Omit<VerifyInputs, 'client'> & {
+  /** Preserve unrelated semantic/LLM failures from the primary verifier. */
+  priorVerification?: VerificationResult | null;
+};
+
+export async function finalizeAnswerForPersistence(
+  inputs: FinalizeAnswerForPersistenceInputs,
+): Promise<VerifyOutput> {
+  const { priorVerification, ...verifyInputs } = inputs;
+  const flags = getFeatureFlags();
+  if (!flags.EXECUTION_VERIFIER) return NULL_OUTPUT(verifyInputs.answerText);
+
+  const contract = getContract(verifyInputs.taskId);
+  const ledger = getLedger(verifyInputs.taskId);
+  if (!contract || !ledger) return NULL_OUTPUT(verifyInputs.answerText);
+
+  const workflowContract = contract.expertWorkflowId
+    ? getExpertWorkflowById(contract.expertWorkflowId)
+    : null;
+  const deterministic = verifyDeterministic({
+    contract,
+    ledger,
+    answerText: verifyInputs.answerText,
+    ...(verifyInputs.finalUrl ? { finalUrl: verifyInputs.finalUrl } : {}),
+    ...(workflowContract ? { workflowContract } : {}),
+    ...(verifyInputs.outputFiles ? { outputFiles: verifyInputs.outputFiles } : {}),
+  });
+  const unresolvedLlmFailures = priorVerification?.checks.filter(
+    (check) => !check.passed && check.checker === 'llm',
+  ) ?? [];
+
+  if (deterministic.passed) {
+    return priorVerification && unresolvedLlmFailures.length > 0
+      ? { verification: priorVerification, finalText: verifyInputs.answerText }
+      : { verification: deterministic, finalText: verifyInputs.answerText };
+  }
+
+  const finalOutput = runFixLoop(
+    contract,
+    ledger,
+    deterministic,
+    verifyInputs,
+    workflowContract,
+  );
+  if (!priorVerification || priorVerification.passed) return finalOutput;
+  if (unresolvedLlmFailures.length === 0) return finalOutput;
+
+  const finalChecks = finalOutput.verification?.checks ?? [];
+  return {
+    finalText: finalOutput.finalText,
+    verification: {
+      ...priorVerification,
+      passed: false,
+      checks: [
+        ...priorVerification.checks,
+        ...finalChecks.filter(
+          (check) => !priorVerification.checks.some((prior) => prior.criterionId === check.criterionId),
+        ),
+      ],
+    },
+  };
+}
+
+/**
  * Optimization #2b — second-opinion via VerifierFallback. Inline
  * flag gate avoids loading the module + its `openai` dep on every
  * verification when the feature is off (production default).
