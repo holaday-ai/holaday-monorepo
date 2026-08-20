@@ -351,36 +351,60 @@ if [[ -n "$KEY_MISS" ]]; then
 fi
 echo "✅ Keys present in process"
 
-# Phase 1 follow-up — auto-run P0 smoke after every deploy. Failure
-# does NOT block the deploy (smoke runs against a live orchestrator
-# and depends on Anthropic API health which fluctuates). The result
-# is logged + the JSON / markdown report is left on disk for
-# follow-up triage. Skip with SKIP_AUTO_SMOKE=1 (e.g. urgent hotfix
-# where you don't want to wait the ~3min for a full P0 cycle).
-if [[ "${SKIP_AUTO_SMOKE:-0}" == "1" ]]; then
-  echo "→ Auto-smoke skipped (SKIP_AUTO_SMOKE=1)"
+# Run a bounded, non-browser release gate after every deploy. It covers text
+# generation, clarification parking, detail rehydration, and ungrounded-URL
+# removal without paying the 3+ minute cost of the full browser/search suite.
+# A missing or failed summary is release-blocking and restores the previous
+# checkout. SKIP_RELEASE_GATE=1 is reserved for an explicit emergency cutover.
+if [[ "${SKIP_RELEASE_GATE:-0}" == "1" ]]; then
+  echo "⚠️  Fast release gate skipped (SKIP_RELEASE_GATE=1)"
 else
-  echo "→ Running P0 smoke (informational; failure does NOT block deploy)"
-  SMOKE_OUT=$(run_with_retry "Vultr auto-smoke" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
+  echo "→ Running fast P0 release gate (blocking)"
+  if ! RELEASE_GATE_OUT=$(run_with_retry "Vultr fast release gate" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
     "cd /opt/holaday-monorepo && \
      set -a && . apps/orchestrator/.env && set +a && \
      EVAL_BASE_URL=http://127.0.0.1:4001 \
-     pnpm --filter @holaday/orchestrator eval:smoke 2>&1 | tail -25" \
+     pnpm --filter @holaday/orchestrator eval:release 2>&1; \
+     : __HOLADAY_RELEASE_GATE_CAPTURE__; exit 0"); then
+    echo "$RELEASE_GATE_OUT" | tail -25
+    abort_with_rollback "fast release gate failed"
+  fi
+  echo "$RELEASE_GATE_OUT" | tail -25
+  parse_auto_smoke_summary "$RELEASE_GATE_OUT"
+  if [[ "$AUTO_SMOKE_STATE" != "healthy" ]]; then
+    abort_with_rollback "fast release gate failed"
+  fi
+  echo "✅ Fast release gate $AUTO_SMOKE_PASSED/$AUTO_SMOKE_TOTAL — release healthy"
+fi
+
+# The full browser/search P0 suite remains available for major releases and
+# manual production checks, but is opt-in so routine deploys stay bounded.
+# Its failures remain informational because upstream/browser availability can
+# fluctuate independently of the candidate release.
+if [[ "${RUN_FULL_AUTO_SMOKE:-0}" == "1" && "${SKIP_AUTO_SMOKE:-0}" != "1" ]]; then
+  echo "→ Running full P0 smoke (informational; failure does NOT block deploy)"
+  SMOKE_OUT=$(run_with_retry "Vultr full auto-smoke" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
+    "cd /opt/holaday-monorepo && \
+     set -a && . apps/orchestrator/.env && set +a && \
+     EVAL_BASE_URL=http://127.0.0.1:4001 \
+     pnpm --filter @holaday/orchestrator eval:smoke 2>&1" \
     || true)
   echo "$SMOKE_OUT"
   parse_auto_smoke_summary "$SMOKE_OUT"
   case "$AUTO_SMOKE_STATE" in
     healthy)
-      echo "✅ Auto-smoke $AUTO_SMOKE_PASSED/$AUTO_SMOKE_TOTAL — pipeline healthy"
+      echo "✅ Full P0 smoke $AUTO_SMOKE_PASSED/$AUTO_SMOKE_TOTAL — pipeline healthy"
       ;;
     failures)
-      echo "⚠️  Auto-smoke $AUTO_SMOKE_PASSED/$AUTO_SMOKE_TOTAL had failures (see output above) — deploy NOT rolled back"
+      echo "⚠️  Full P0 smoke $AUTO_SMOKE_PASSED/$AUTO_SMOKE_TOTAL had failures (see output above) — deploy NOT rolled back"
       echo "   Likely flaky LLM (Anthropic overloaded) or a real regression — investigate."
       ;;
     *)
-      echo "⚠️  Auto-smoke did not produce a parseable summary line — eval runner may have errored"
+      echo "⚠️  Full P0 smoke did not produce a parseable summary line — eval runner may have errored"
       ;;
   esac
+else
+  echo "→ Full P0 smoke skipped (set RUN_FULL_AUTO_SMOKE=1 to enable)"
 fi
 
 # Authoritative post-deploy reference (hard rule 7). Copy this into the

@@ -576,6 +576,183 @@ test_orchestrator_classifies_exhausted_gate_fetch() {
   rm -rf "$harness_dir"
 }
 
+write_orchestrator_release_smoke_harness() {
+  local harness_dir="$1"
+
+  write_common_deploy_stubs "$harness_dir"
+  cp "$ORCHESTRATOR_SCRIPT" "$harness_dir/repo/scripts/deploy-orchestrator.sh"
+  cp "$AUTO_SMOKE_SUMMARY_SCRIPT" "$harness_dir/repo/scripts/auto-smoke-summary.sh"
+  : > "$harness_dir/repo/scripts/orchestrator-runtime.sh"
+  : > "$harness_dir/repo/scripts/start-orchestrator-production.sh"
+  chmod +x "$harness_dir/repo/scripts/deploy-orchestrator.sh" \
+    "$harness_dir/repo/scripts/orchestrator-runtime.sh" \
+    "$harness_dir/repo/scripts/start-orchestrator-production.sh"
+
+  cat > "$harness_dir/bin/scp" <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  cat > "$harness_dir/bin/ssh" <<'STUB'
+#!/usr/bin/env bash
+command_text="${!#}"
+
+if [[ "$command_text" == *"eval:release"* ]]; then
+  echo "release-gate" >> "$TEST_EVENT_LOG"
+  case "${TEST_RELEASE_GATE_STATE:-healthy}" in
+    healthy) echo "[eval] 4/4 passed (12.0s)" ;;
+    failures)
+      echo "[eval] 3/4 passed (12.0s)"
+      [[ "$command_text" == *"__HOLADAY_RELEASE_GATE_CAPTURE__"* ]] || exit 1
+      ;;
+    unparseable) echo "release gate crashed" ;;
+  esac
+elif [[ "$command_text" == *"eval:smoke"* ]]; then
+  echo "full-smoke" >> "$TEST_EVENT_LOG"
+  case "${TEST_FULL_SMOKE_STATE:-healthy}" in
+    healthy) echo "[eval] 11/11 passed (180.0s)" ;;
+    failures) echo "[eval] 10/11 passed (180.0s)"; exit 1 ;;
+    unparseable) echo "full smoke crashed" ;;
+  esac
+elif [[ "$command_text" == *"git reset --hard '1111111111111111111111111111111111111111'"* ]]; then
+  echo "rollback-build" >> "$TEST_EVENT_LOG"
+elif [[ "$command_text" == *"install -d"* ]]; then
+  echo "runtime-directory" >> "$TEST_EVENT_LOG"
+elif [[ "$command_text" == *"chown root:root"* ]]; then
+  echo "runtime-permissions" >> "$TEST_EVENT_LOG"
+elif [[ "$command_text" == *"git cat-file -e '1111111111111111111111111111111111111111"* ]]; then
+  exit 0
+elif [[ "$command_text" == *"deploy-preflight.sh"* ]]; then
+  exit 0
+elif [[ "$command_text" == *"git fetch origin"* && "$command_text" != *"git reset --hard"* ]]; then
+  exit 0
+elif [[ "$command_text" == *"git reset --hard origin/codex/release-candidate"* ]]; then
+  echo "2222222222222222222222222222222222222222"
+elif [[ "$command_text" == *"git rev-parse --short HEAD"* ]]; then
+  echo "2222222"
+elif [[ "$command_text" == *"git rev-parse HEAD"* ]]; then
+  echo "1111111111111111111111111111111111111111"
+elif [[ "$command_text" == *"pnpm install"* ]]; then
+  exit 0
+elif [[ "$command_text" == *"db:migrate:numbered"* ]]; then
+  exit 0
+elif [[ "$command_text" == *"orchestrator-runtime.sh' restart"* ]]; then
+  if grep -Fxq "rollback-build" "$TEST_EVENT_LOG"; then
+    echo "rollback-restart" >> "$TEST_EVENT_LOG"
+  else
+    echo "runtime-restart" >> "$TEST_EVENT_LOG"
+  fi
+elif [[ "$command_text" == *"curl -sf"* ]]; then
+  echo '{"status":"ok"}'
+elif [[ "$command_text" == *"restart_time"* ]]; then
+  echo "0"
+elif [[ "$command_text" == *"/proc/"* && "$command_text" == *"environ"* ]]; then
+  printf '%s\n' GEMINI_API_KEY ANTHROPIC_API_KEY DASHSCOPE_API_KEY
+else
+  echo "unexpected:$command_text" >> "$TEST_EVENT_LOG"
+  exit 90
+fi
+STUB
+  chmod +x "$harness_dir/bin/ssh" "$harness_dir/bin/scp"
+}
+
+test_orchestrator_fast_release_gate_rolls_back_on_failure() {
+  local harness_dir event_log output rc
+  harness_dir="$(mktemp -d)"
+  event_log="$harness_dir/events"
+  output="$harness_dir/output"
+  : > "$event_log"
+  write_orchestrator_release_smoke_harness "$harness_dir"
+
+  set +e
+  PATH="$harness_dir/bin:$PATH" \
+    TEST_EVENT_LOG="$event_log" \
+    TEST_RELEASE_GATE_STATE=failures \
+    DEPLOY_REMOTE_RETRIES=3 \
+    DEPLOY_REMOTE_RETRY_SLEEP=0 \
+    CN_PAYMENT_PREFLIGHT_VERIFIED=1 \
+    PAYPAL_PREFLIGHT_VERIFIED=1 \
+    ORCHESTRATOR_ROLLBACK_HEAD="1111111111111111111111111111111111111111" \
+    SKIP_AUTO_SMOKE=1 \
+    VULTR_PASSWORD="unit-secret" \
+    "$harness_dir/repo/scripts/deploy-orchestrator.sh" \
+      "codex/release-candidate" > "$output" 2>&1
+  rc=$?
+  set -e
+
+  (( rc == 1 )) || fail "failed fast release gate must fail the deploy and restore the previous release"
+  assert_event_count "$event_log" release-gate 1
+  assert_event_order "$event_log" release-gate rollback-build rollback-restart
+  ! grep -Fxq "full-smoke" "$event_log" \
+    || fail "legacy SKIP_AUTO_SMOKE must keep the optional full suite disabled"
+  grep -Fq "fast release gate failed" "$output" \
+    || fail "release-gate rollback must explain the failure"
+  rm -rf "$harness_dir"
+}
+
+test_orchestrator_fast_release_gate_runs_without_full_smoke() {
+  local harness_dir event_log output
+  harness_dir="$(mktemp -d)"
+  event_log="$harness_dir/events"
+  output="$harness_dir/output"
+  : > "$event_log"
+  write_orchestrator_release_smoke_harness "$harness_dir"
+
+  if ! PATH="$harness_dir/bin:$PATH" \
+    TEST_EVENT_LOG="$event_log" \
+    DEPLOY_REMOTE_RETRIES=1 \
+    DEPLOY_REMOTE_RETRY_SLEEP=0 \
+    CN_PAYMENT_PREFLIGHT_VERIFIED=1 \
+    PAYPAL_PREFLIGHT_VERIFIED=1 \
+    ORCHESTRATOR_ROLLBACK_HEAD="1111111111111111111111111111111111111111" \
+    SKIP_AUTO_SMOKE=1 \
+    VULTR_PASSWORD="unit-secret" \
+    "$harness_dir/repo/scripts/deploy-orchestrator.sh" \
+      "codex/release-candidate" > "$output" 2>&1; then
+    cat "$output" >&2
+    fail "healthy fast release gate must allow the deploy"
+  fi
+
+  assert_event_count "$event_log" release-gate 1
+  ! grep -Fxq "full-smoke" "$event_log" \
+    || fail "the full smoke suite must remain opt-in"
+  grep -Fq "Fast release gate 4/4" "$output" \
+    || fail "successful release gate must report its dynamic pass count"
+  rm -rf "$harness_dir"
+}
+
+test_orchestrator_full_smoke_is_opt_in_and_informational() {
+  local harness_dir event_log output
+  harness_dir="$(mktemp -d)"
+  event_log="$harness_dir/events"
+  output="$harness_dir/output"
+  : > "$event_log"
+  write_orchestrator_release_smoke_harness "$harness_dir"
+
+  if ! PATH="$harness_dir/bin:$PATH" \
+    TEST_EVENT_LOG="$event_log" \
+    TEST_FULL_SMOKE_STATE=failures \
+    DEPLOY_REMOTE_RETRIES=1 \
+    DEPLOY_REMOTE_RETRY_SLEEP=0 \
+    CN_PAYMENT_PREFLIGHT_VERIFIED=1 \
+    PAYPAL_PREFLIGHT_VERIFIED=1 \
+    ORCHESTRATOR_ROLLBACK_HEAD="1111111111111111111111111111111111111111" \
+    RUN_FULL_AUTO_SMOKE=1 \
+    SKIP_AUTO_SMOKE=0 \
+    VULTR_PASSWORD="unit-secret" \
+    "$harness_dir/repo/scripts/deploy-orchestrator.sh" \
+      "codex/release-candidate" > "$output" 2>&1; then
+    cat "$output" >&2
+    fail "optional full smoke failures must remain informational"
+  fi
+
+  assert_event_order "$event_log" release-gate full-smoke
+  ! grep -Fxq "rollback-build" "$event_log" \
+    || fail "optional full smoke failure must not roll back a healthy fast gate"
+  grep -Fq "Full P0 smoke 10/11 had failures" "$output" \
+    || fail "optional full smoke must report failures without hiding them"
+  rm -rf "$harness_dir"
+}
+
 test_akshare_divergence_override() {
   local allow_divergence="$1"
   local harness_dir event_log output rc
@@ -727,6 +904,9 @@ test_application_deploy_skips_unrelated_service_restarts
 test_orchestrator_retries_transient_payment_preflights
 test_orchestrator_retries_transient_ancestor_gate
 test_orchestrator_classifies_exhausted_gate_fetch
+test_orchestrator_fast_release_gate_rolls_back_on_failure
+test_orchestrator_fast_release_gate_runs_without_full_smoke
+test_orchestrator_full_smoke_is_opt_in_and_informational
 test_akshare_rollback_only_restores_without_deploying
 test_akshare_failure_restores_live_head install
 test_akshare_failure_restores_live_head smoke

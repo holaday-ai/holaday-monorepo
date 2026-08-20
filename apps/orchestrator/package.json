@@ -24,6 +24,7 @@
     "smoke-anthropic": "tsx scripts/smoke-anthropic.ts",
     "smoke:browser-egress": "tsx scripts/smoke-browser-egress.ts",
     "eval": "tsx src/eval/eval-runner.ts",
+    "eval:release": "tsx src/eval/eval-runner.ts p0-release-gate",
     "eval:smoke": "tsx src/eval/eval-runner.ts p0-smoke",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
