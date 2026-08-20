@@ -46,6 +46,7 @@ function makeFakeOpenAI(content: string | (() => Promise<string>)) {
 
 const longOriginal =
   '抖音直播昨晚 GMV 50000 元，UV 3500，转化率 4.1%。'.repeat(8);
+const sourceBackedOriginal = `${longOriginal}\n\n### 检索来源（请核对）\n- [行业报道](<https://example.com/news>)`;
 
 describe('shouldFormat — trigger rules', () => {
   it('flag off → false even for long expert workflow', () => {
@@ -70,6 +71,13 @@ describe('shouldFormat — trigger rules', () => {
     expect(
       shouldFormat({ original: longOriginal, terminalStatus: 'completed' }, env),
     ).toBe(true);
+  });
+
+  it('flag on + source-backed response → false to preserve source structure', () => {
+    const env = { OPENAI_RESPONSE_LAYER_ENABLED: 'true', OPENAI_API_KEY: 'sk-x' };
+    expect(
+      shouldFormat({ original: sourceBackedOriginal, terminalStatus: 'completed' }, env),
+    ).toBe(false);
   });
 
   it('flag on + short response + no workflow → false', () => {
@@ -135,6 +143,19 @@ describe('format — runtime', () => {
     );
     expect(r.formatted).toBe('short');
     expect(r.metadata.fallbackReason).toBe('short_response');
+    expect(client.chat.completions.create).not.toHaveBeenCalled();
+  });
+
+  it('source-backed response → skipped without a second model call', async () => {
+    const client = makeFakeOpenAI('SHOULD NEVER FIRE');
+    const r = await format(
+      { original: sourceBackedOriginal, terminalStatus: 'completed' },
+      { logger: fakeLogger, openaiClient: client },
+      { OPENAI_RESPONSE_LAYER_ENABLED: 'true', OPENAI_API_KEY: 'sk-x' },
+    );
+    expect(r.formatted).toBe(sourceBackedOriginal);
+    expect(r.metadata.fallbackReason).toBe('source_preservation');
+    expect(r.metadata.latencyMs).toBe(0);
     expect(client.chat.completions.create).not.toHaveBeenCalled();
   });
 

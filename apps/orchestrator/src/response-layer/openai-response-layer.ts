@@ -91,6 +91,7 @@ export interface FormatMetadata {
   fallbackReason?:
     | 'flag_off'
     | 'short_response'
+    | 'source_preservation'
     | 'missing_api_key'
     | 'timeout'
     | 'api_error'
@@ -130,15 +131,24 @@ export function isResponseLayerEnabled(env: NodeJS.ProcessEnv = process.env): bo
   return true;
 }
 
+function hasProtectedSourceSection(original: string): boolean {
+  return /^#{2,4}\s*(?:核验来源|检索来源(?:（请核对）|\(请核对\))?)\s*$/m.test(original);
+}
+
 /**
  * Should we even attempt to format this response? Returns false when:
  *   - flag is off
  *   - status is something other than a task terminal status
+ *   - response already carries a provider-backed source section
  *   - response is short AND not an expert workflow report
  */
 export function shouldFormat(req: FormatRequest, env: NodeJS.ProcessEnv = process.env): boolean {
   if (!isResponseLayerEnabled(env)) return false;
   if (!isTaskTerminalStatus(req.terminalStatus)) return false;
+  // Provider-backed source footers are already structured and verification-
+  // sensitive. A second model call adds latency and can only weaken the exact
+  // source boundary, so preserve these answers byte-for-byte.
+  if (hasProtectedSourceSection(req.original)) return false;
   // Expert workflow reports always format, regardless of length.
   if (req.expertWorkflowId) return true;
   // Short replies (translations, single-fact answers) skip the
@@ -174,7 +184,9 @@ export async function format(
           : (env.OPENAI_RESPONSE_LAYER_ENABLED ?? '').toLowerCase() !== 'true' &&
               (env.OPENAI_RESPONSE_LAYER_ENABLED ?? '').toLowerCase() !== '1'
             ? 'flag_off'
-            : 'short_response',
+            : hasProtectedSourceSection(req.original)
+              ? 'source_preservation'
+              : 'short_response',
       },
     };
   }
