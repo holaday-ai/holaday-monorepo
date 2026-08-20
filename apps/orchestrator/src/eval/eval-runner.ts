@@ -34,10 +34,14 @@ import { env } from '../config/env.js';
 import { db } from '../db/client.js';
 import { users } from '../db/schema/users.js';
 import { isTaskTerminalStatus } from '../task-status.js';
+import {
+  type EvalTaskDetail,
+  readResultField,
+  validateEvalExpectations,
+} from './eval-expectations.js';
 import type {
   EvalCase,
   EvalCaseResult,
-  EvalExpectations,
   EvalReport,
 } from './eval-suite.js';
 import { writeEvalSummary } from './eval-summary.js';
@@ -50,19 +54,6 @@ const EVAL_USER_EXTERNAL_ID =
   process.env.EVAL_USER_EXTERNAL_ID ?? 'usr_EeYpvsvLtyDzN4VLQi7BT';
 const POLL_INTERVAL_MS = 1_500;
 const DEFAULT_MAX_DURATION_MS = 180_000;
-
-interface TaskDetail {
-  taskId: string;
-  intent: string;
-  status: string;
-  awaitingKind: string | null;
-  awaitingQuestion: string | null;
-  errorCode: string | null;
-  errorMessage: string | null;
-  result: unknown;
-  planText: string | null;
-  steps: Array<{ kind: string; seq: number; output: unknown }>;
-}
 
 interface CreateTaskOut {
   taskId: string;
@@ -140,11 +131,11 @@ async function pollUntilTerminal(
   taskId: string,
   token: string,
   maxMs: number,
-): Promise<TaskDetail> {
+): Promise<EvalTaskDetail> {
   const deadline = Date.now() + maxMs;
-  let last: TaskDetail | undefined;
+  let last: EvalTaskDetail | undefined;
   while (Date.now() < deadline) {
-    last = await callQuery<TaskDetail>('tasks.detail', { taskId }, token);
+    last = await callQuery<EvalTaskDetail>('tasks.detail', { taskId }, token);
     if (isTaskTerminalStatus(last.status) || last.status === 'awaiting_user') {
       return last;
     }
@@ -155,43 +146,8 @@ async function pollUntilTerminal(
     `pollUntilTerminal: timed out after ${maxMs}ms (last status=${lastStatus})`,
   );
   // Attach last detail so the caller can still surface it in the report.
-  (err as Error & { detail?: TaskDetail }).detail = last;
+  (err as Error & { detail?: EvalTaskDetail }).detail = last;
   throw err;
-}
-
-function readResultField<T = unknown>(result: unknown, key: string): T | null {
-  if (result == null || typeof result !== 'object') return null;
-  const v = (result as Record<string, unknown>)[key];
-  return (v ?? null) as T | null;
-}
-
-function buildHaystack(detail: TaskDetail): string {
-  const summary = readResultField<string>(detail.result, 'summary');
-  const reason = readResultField<string>(detail.result, 'reason');
-  // Phase 3 R3 — also surface result.metadata.attachments[] (L1
-  // auto-saved screenshot + L2 save_page_as_pdf outputs) so eval
-  // cases can assert via mustContainAny on filename / downloadUrl
-  // substrings (e.g. "screenshot-" / "page-tsk_" / ".pdf").
-  const metadata = readResultField<{ attachments?: unknown }>(detail.result, 'metadata');
-  const attachments = metadata?.attachments;
-  const attachmentsJson =
-    Array.isArray(attachments) && attachments.length > 0
-      ? JSON.stringify(attachments)
-      : null;
-  // For awaiting_user states the relevant text lives in
-  // awaitingQuestion (the agent's clarification prompt) — result
-  // is empty until the task actually terminates. Including it lets
-  // mustContain / mustContainAny validate parked tasks too.
-  return [
-    summary,
-    reason,
-    detail.awaitingQuestion,
-    detail.intent,
-    detail.errorMessage,
-    attachmentsJson,
-  ]
-    .filter((v): v is string => typeof v === 'string' && v.length > 0)
-    .join('\n');
 }
 
 async function runDetailRehydrate(
@@ -220,7 +176,7 @@ async function runDetailRehydrate(
       durationMs: Date.now() - startedAt,
     };
   }
-  const detail = await callQuery<TaskDetail>(
+  const detail = await callQuery<EvalTaskDetail>(
     'tasks.detail',
     { taskId: completed.taskId },
     token,
@@ -254,73 +210,6 @@ async function runDetailRehydrate(
   };
 }
 
-function validateExpectations(
-  detail: TaskDetail | undefined,
-  exp: EvalExpectations,
-  prefix: string,
-  capturedExecutionMode: string | null,
-): string[] {
-  const failures: string[] = [];
-  if (!detail) {
-    failures.push(`${prefix}no detail captured`);
-    return failures;
-  }
-  if (exp.terminalStatus && detail.status !== exp.terminalStatus) {
-    failures.push(
-      `${prefix}terminalStatus: expected ${exp.terminalStatus}, got ${detail.status}`,
-    );
-  }
-  if (
-    exp.mustComplete &&
-    !exp.terminalStatus &&
-    detail.status !== 'completed'
-  ) {
-    failures.push(
-      `${prefix}mustComplete: status=${detail.status}${
-        detail.errorMessage ? ` (errorMessage="${detail.errorMessage}")` : ''
-      }`,
-    );
-  }
-  if (exp.executionMode && capturedExecutionMode !== exp.executionMode) {
-    failures.push(
-      `${prefix}executionMode: expected ${exp.executionMode}, got ${capturedExecutionMode ?? 'null'}`,
-    );
-  }
-  if (exp.awaitingKind && detail.awaitingKind !== exp.awaitingKind) {
-    failures.push(
-      `${prefix}awaitingKind: expected ${exp.awaitingKind}, got ${detail.awaitingKind ?? 'null'}`,
-    );
-  }
-  const haystack = buildHaystack(detail);
-  for (const needle of exp.mustContain ?? []) {
-    if (!haystack.includes(needle)) {
-      failures.push(`${prefix}mustContain: missing "${needle}"`);
-    }
-  }
-  if (exp.mustContainAny && exp.mustContainAny.length > 0) {
-    const hit = exp.mustContainAny.some((n) => haystack.includes(n));
-    if (!hit) {
-      failures.push(
-        `${prefix}mustContainAny: none of [${exp.mustContainAny.join(', ')}] appeared`,
-      );
-    }
-  }
-  for (const needle of exp.mustNotContain ?? []) {
-    if (haystack.includes(needle)) {
-      failures.push(`${prefix}mustNotContain: contains "${needle}"`);
-    }
-  }
-  if (exp.urlMustMatch) {
-    const finalUrl = readResultField<string>(detail.result, 'finalUrl');
-    if (!finalUrl || !finalUrl.includes(exp.urlMustMatch)) {
-      failures.push(
-        `${prefix}urlMustMatch: finalUrl=${finalUrl ?? 'null'} doesn't include "${exp.urlMustMatch}"`,
-      );
-    }
-  }
-  return failures;
-}
-
 async function runStandardCase(
   caseDef: EvalCase,
   token: string,
@@ -331,7 +220,7 @@ async function runStandardCase(
 
   let taskId: string | undefined;
   let executionMode: string | null = null;
-  let detail: TaskDetail | undefined;
+  let detail: EvalTaskDetail | undefined;
   let timedOut = false;
 
   try {
@@ -348,7 +237,7 @@ async function runStandardCase(
       detail = await pollUntilTerminal(taskId, token, maxMs);
     } catch (err) {
       timedOut = true;
-      detail = (err as Error & { detail?: TaskDetail }).detail;
+      detail = (err as Error & { detail?: EvalTaskDetail }).detail;
       failures.push(
         `timeout: did not reach terminal in ${maxMs}ms (last status=${
           detail?.status ?? 'unknown'
@@ -390,7 +279,9 @@ async function runStandardCase(
   const initialResultMode = readResultField<string>(detail?.result, 'executionMode');
   if (initialResultMode) executionMode = initialResultMode;
   if (detail) {
-    failures.push(...validateExpectations(detail, exp, '', executionMode));
+    failures.push(
+      ...validateEvalExpectations(detail, exp, '', executionMode),
+    );
   } else if (!timedOut) {
     failures.push('runner: no detail captured — task never created');
   }
@@ -452,14 +343,18 @@ async function runStandardCase(
         try {
           detail = await pollUntilTerminal(taskId, token, turnMaxMs);
         } catch (err) {
-          detail = (err as Error & { detail?: TaskDetail }).detail;
+          detail = (err as Error & { detail?: EvalTaskDetail }).detail;
           failures.push(
             `${turnLabel}timeout: did not reach terminal in ${turnMaxMs}ms after reply "${turn.message.slice(0, 40)}"`,
           );
         }
       } else {
         try {
-          detail = await callQuery<TaskDetail>('tasks.detail', { taskId }, token);
+          detail = await callQuery<EvalTaskDetail>(
+            'tasks.detail',
+            { taskId },
+            token,
+          );
         } catch (err) {
           failures.push(
             `${turnLabel}refetch failed: ${
@@ -472,7 +367,12 @@ async function runStandardCase(
       if (turnResultMode) executionMode = turnResultMode;
       if (turn.expectations) {
         failures.push(
-          ...validateExpectations(detail, turn.expectations, turnLabel, executionMode),
+          ...validateEvalExpectations(
+            detail,
+            turn.expectations,
+            turnLabel,
+            executionMode,
+          ),
         );
       }
     }

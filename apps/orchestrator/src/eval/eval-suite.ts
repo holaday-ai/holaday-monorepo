@@ -49,6 +49,11 @@ export interface EvalExpectations {
    */
   mustComplete: boolean;
   /**
+   * Require the persisted deterministic verifier verdict to be true.
+   * A completed status alone is not sufficient: false and null both fail.
+   */
+  verificationMustPass?: boolean;
+  /**
    * Pin the terminal status. When set, this overrides `mustComplete`
    * — a case that expects 'awaiting_user' shouldn't also need
    * mustComplete=true. Use one or the other.

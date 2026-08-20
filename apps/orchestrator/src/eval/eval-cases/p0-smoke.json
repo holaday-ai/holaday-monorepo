@@ -6,6 +6,7 @@
     "prompt": "把这句话翻译成英文：今天天气真好",
     "expectations": {
       "mustComplete": true,
+      "verificationMustPass": true,
       "terminalStatus": "completed",
       "executionMode": "generate",
       "maxDurationMs": 60000
@@ -47,6 +48,7 @@
     "prompt": "打开 https://example.com 告诉我页面标题",
     "expectations": {
       "mustComplete": true,
+      "verificationMustPass": true,
       "terminalStatus": "completed",
       "executionMode": "browser",
       "urlMustMatch": "example.com",
@@ -61,6 +63,7 @@
     "prompt": "打开 https://example.com 点击 More information 链接，告诉我跳转后 URL",
     "expectations": {
       "mustComplete": true,
+      "verificationMustPass": true,
       "terminalStatus": "completed",
       "executionMode": "browser",
       "urlMustMatch": "iana.org",
@@ -88,6 +91,7 @@
     "prompt": "2026年5月最新的AI行业新闻是什么",
     "expectations": {
       "mustComplete": true,
+      "verificationMustPass": true,
       "terminalStatus": "completed",
       "executionMode": "generate",
       "maxDurationMs": 120000
@@ -139,6 +143,7 @@
     "prompt": "凭你的训练数据，写出 5 个最权威的 React 学习网站的网址。每行一个，用 https 开头的完整地址。不要联网。",
     "expectations": {
       "mustComplete": true,
+      "verificationMustPass": true,
       "executionMode": "generate",
       "mustNotContain": ["http://", "https://"],
       "maxDurationMs": 60000

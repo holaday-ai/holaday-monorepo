@@ -7,6 +7,7 @@
     "expectations": {
       "mustComplete": true,
       "terminalStatus": "completed",
+      "verificationMustPass": true,
       "executionMode": "generate",
       "maxDurationMs": 60000
     },
@@ -44,6 +45,7 @@
     "prompt": "凭你的训练数据，写出 5 个最权威的 React 学习网站的网址。每行一个，用 https 开头的完整地址。不要联网。",
     "expectations": {
       "mustComplete": true,
+      "verificationMustPass": true,
       "executionMode": "generate",
       "mustNotContain": ["http://", "https://"],
       "maxDurationMs": 60000
