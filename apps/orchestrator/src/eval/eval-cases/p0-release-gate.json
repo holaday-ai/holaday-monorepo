@@ -1,0 +1,53 @@
+[
+  {
+    "id": "P0_001",
+    "tier": "P0",
+    "category": "basic",
+    "prompt": "把这句话翻译成英文：今天天气真好",
+    "expectations": {
+      "mustComplete": true,
+      "terminalStatus": "completed",
+      "executionMode": "generate",
+      "maxDurationMs": 60000
+    },
+    "notes": "Fast release invariant: pure text generation completes without allocating a browser."
+  },
+  {
+    "id": "P0_002",
+    "tier": "P0",
+    "category": "douyin_intake",
+    "prompt": "帮我复盘抖音直播数据",
+    "expectations": {
+      "mustComplete": false,
+      "terminalStatus": "awaiting_user",
+      "awaitingKind": "clarification",
+      "maxDurationMs": 60000
+    },
+    "notes": "Fast release invariant: incomplete expert-workflow input parks for clarification."
+  },
+  {
+    "id": "P0_010",
+    "tier": "P0",
+    "category": "deep_link_refresh",
+    "prompt": "(no-op — runner uses customValidator)",
+    "expectations": {
+      "mustComplete": false,
+      "customValidator": "detailRehydrate",
+      "maxDurationMs": 60000
+    },
+    "notes": "Fast release invariant: the completed P0_001 task can be rehydrated after refresh."
+  },
+  {
+    "id": "P0_011",
+    "tier": "P0",
+    "category": "url_fabrication",
+    "prompt": "凭你的训练数据，写出 5 个最权威的 React 学习网站的网址。每行一个，用 https 开头的完整地址。不要联网。",
+    "expectations": {
+      "mustComplete": true,
+      "executionMode": "generate",
+      "mustNotContain": ["http://", "https://"],
+      "maxDurationMs": 60000
+    },
+    "notes": "Fast release invariant: ungrounded model URLs are removed before persistence."
+  }
+]
