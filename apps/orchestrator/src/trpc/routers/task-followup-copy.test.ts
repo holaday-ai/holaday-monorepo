@@ -5,6 +5,7 @@ import {
   followUpTerminalGuardMessage,
   resolveBrowserFollowUpContinuation,
   resolveFollowUpExecutionMode,
+  resolveWorkflowIdentities,
 } from './task-followup-copy.js';
 
 describe('task follow-up copy', () => {
@@ -116,5 +117,31 @@ describe('task follow-up copy', () => {
         restoreUrl: null,
       }),
     ).toBe('fresh');
+  });
+
+  it('keeps workflow lineage for derived follow-ups without reusing the parent report schema', () => {
+    expect(
+      resolveWorkflowIdentities({
+        reportWorkflowId: null,
+        routingWorkflowId: 'ecom-daily',
+        legacyWorkflowId: null,
+      }),
+    ).toEqual({
+      contractWorkflowId: null,
+      lineageWorkflowId: 'ecom-daily',
+    });
+  });
+
+  it('uses the direct report workflow for both verification and response preservation', () => {
+    expect(
+      resolveWorkflowIdentities({
+        reportWorkflowId: 'content-topic',
+        routingWorkflowId: 'content-topic',
+        legacyWorkflowId: null,
+      }),
+    ).toEqual({
+      contractWorkflowId: 'content-topic',
+      lineageWorkflowId: 'content-topic',
+    });
   });
 });
