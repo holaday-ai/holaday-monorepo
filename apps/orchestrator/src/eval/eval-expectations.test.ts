@@ -109,4 +109,30 @@ describe('validateEvalExpectations', () => {
       validateEvalExpectations(completedDetail(true), expectations, '', 'browser', snapshot),
     ).toEqual([]);
   });
+
+  it('accepts only an explicitly allowed terminal-status set', () => {
+    const expectations = {
+      mustComplete: false,
+      allowedTerminalStatuses: ['completed', 'partial_success'],
+    } satisfies EvalExpectations;
+
+    expect(
+      validateEvalExpectations(
+        { ...completedDetail(true), status: 'partial_success' },
+        expectations,
+        '',
+        'scrape',
+      ),
+    ).toEqual([]);
+    expect(
+      validateEvalExpectations(
+        { ...completedDetail(false), status: 'failed' },
+        expectations,
+        '',
+        'scrape',
+      ),
+    ).toEqual([
+      'allowedTerminalStatuses: expected one of [completed, partial_success], got failed',
+    ]);
+  });
 });

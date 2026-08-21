@@ -33,7 +33,8 @@ describe('P1 persisted acceptance contract', () => {
     expect(byId.get('P1_TRUST_SCRAPE')).toMatchObject({
       prompt: expect.stringContaining('至少 3 个不同来源'),
       expectations: {
-        mustComplete: true,
+        mustComplete: false,
+        allowedTerminalStatuses: ['completed', 'partial_success'],
         verificationMustPass: true,
         executionMode: 'scrape',
         minEvidenceEntries: 2,

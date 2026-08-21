@@ -75,6 +75,13 @@ export interface EvalExpectations {
    */
   terminalStatus?: ExpectedTerminalStatus;
   /**
+   * Accept any one of these terminal statuses. Use with
+   * `mustComplete:false` when a focused probe treats more than one
+   * deliverable terminal state as valid. A failed or non-terminal task
+   * still fails unless it is explicitly listed.
+   */
+  allowedTerminalStatuses?: ExpectedTerminalStatus[];
+  /**
    * Cap on `tasks.create → terminal-status` wall-clock. Defaults to
    * 180_000 (3 min) when unset. P0_007 (search) caps at 60_000 to
    * surface latency regressions.

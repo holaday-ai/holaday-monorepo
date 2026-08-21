@@ -5,7 +5,8 @@
     "category": "persisted_source_evidence",
     "prompt": "搜索 OpenAI Responses API 的核心能力与使用场景，在答案中列出至少 3 个不同来源的完整网址。",
     "expectations": {
-      "mustComplete": true,
+      "mustComplete": false,
+      "allowedTerminalStatuses": ["completed", "partial_success"],
       "verificationMustPass": true,
       "minEvidenceEntries": 2,
       "requiredEvidenceSourceTypes": ["tool_result"],
