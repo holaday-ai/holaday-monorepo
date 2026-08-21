@@ -28,7 +28,9 @@
 <!-- 2026-07-09 Codex 补充：状态机 pre-execution guard：start(existing) 不再把 pending/queued 直接派发成 executing；pause 只允许 executing source；repository control transition 同步拒绝非 executing→paused 与非 paused→executing，防 queued/pending 绕过队列恢复。 -->
 <!-- 2026-07-09 Codex 补充：状态机 planning bootstrap 收口：新任务 seed 显式走 state:null + taskId + plan；start(existing planning) 改为 noop，避免历史/重连 planning 被误派发；tasks.create/smoke 与集成 fixture 已统一。 -->
 <!-- 2026-07-09 Codex 补充：技能 planner 闭环：planner catalogue 现在合并 DB SKILL.md rows + shared 13 用户可见技能；手动 @ 技能会注入 planner hint，避免前端选择了技能但通用 planner 不知道。 -->
-## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05@2cb183a4`（2026-08-21 JST）
+## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05@82fdaa32`（2026-08-21 JST）
+
+基础任务验收的持久化证据门禁已通过 PR #98–#101 上线：评估器会从数据库读取聚合后的 evidence 类型、有效输出文件 MIME 与动作类型，来源、文件和真实副作用均可作为阻断断言，不再接受结果文本自述。生产快速 P0 门禁 4/4 通过（10.9 秒）；独立 `p1-persisted-gate` 2/2 通过（来源证据 46.9 秒、浏览器动作与 JPEG 产物 22.1 秒）。P0 澄清用例已改为缺少模板附件的确定性 `template_fill` 入口，避免依赖模型或专家工作流漂移。生产 Orchestrator HEAD 为 `82fdaa323d6a811980666bff99efc8403e204611`，运行 uid 998、restart count 0，`ACTION_CAPTURE_ENABLED=true`；双公网 healthz 均为 200，部署与评测残留进程为 0。Orchestrator 完整套件 284 个文件 / 4396 项通过，最终定向回归 115/115，TypeScript typecheck/build、Biome 与差异检查通过。未修改 schema、生产密钥、AkShare、CN Payment、DivineAPI、Translator 或 OpenAI Key。
 
 基础任务完成验收已通过 PR #96 上线：评估器不再仅凭 `completed`、执行 lane、文本或 URL 断言放行；当用例声明 `verificationMustPass=true` 时，持久化 verifier 只有明确返回 `true` 才通过，`false` 与历史/缺失的 `null` 均阻断。快速发布门禁的两项完成型用例、完整 P0 的 5 项完成型用例及 P1 的 12 项完成型用例均已接入该准入；等待登录、澄清、拒绝和预期失败用例保持原语义。生产 Orchestrator HEAD 为 `2cb183a43a3883c9852154e9056535c6f0aa3704`，运行 uid 998、restart count 0；最新快速门禁 4/4 通过，总耗时 18,474ms，P0_001 与 P0_011 的 `verificationPassed=true`，等待态 P0_002 为预期 `null`，P0_010 详情回填复用已验证完成任务。双公网 healthz 均为 200 / `status=ok`，两套 `/app` 均引用 `index-CdorFHuL.js`。本地完整 Orchestrator 套件、定向 7 项、TypeScript build、31 项运维 Node 门禁及 shell 发布门禁均通过。CN 支付预检首次遇到瞬时中断，单独复验后 WeChat/Alipay 均 ready；PayPal 按 live 配置 disabled。发布工具返回脱离后检测到第二条同版本重复发布，已在第二次重启前终止冗余进程组，保留的首条发布完整收口。无 schema、migration、前端行为、生产配置、AkShare、CN Payment、DivineAPI、Translator 或 OpenAI Key 变更。
 
