@@ -17,6 +17,9 @@ function commandDisplayLabel(command: string, index: number): string {
   if (index === 0) {
     if (command.includes('等待')) return command;
     if (command.includes('历史') || command.includes('回看')) return '整理历史重点';
+    if (command.includes('最新交易日') || command.includes('交易日复盘')) {
+      return '整理交易日重点';
+    }
     return '整理今日关注';
   }
   if (index === 1) return '核对风险变化';

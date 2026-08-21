@@ -79,4 +79,28 @@ describe('StockAiCommandComposer', () => {
     await user.click(screen.getByRole('button', { name: '哪些股票风险升高？' }));
     expect(onCommand).toHaveBeenCalledWith('哪些股票风险升高？');
   });
+
+  it('labels the primary suggestion as a trading-day recap outside market hours', () => {
+    render(
+      <StockAiCommandComposer
+        value=""
+        placeholder="基于 08/21 最新交易日数据研究股票、市场或行业"
+        assistantStatus="休市中 · 基于 08/21 最新交易日快照"
+        commands={[
+          '基于 08/21 生成交易日复盘',
+          '哪些股票存在已核验的风险信号？',
+          '查看 AI 板块已核验信息',
+          '比较 603528 和 600497',
+        ]}
+        submitting={false}
+        submitDisabled
+        onValueChange={vi.fn()}
+        onSubmit={vi.fn()}
+        onCommand={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('整理交易日重点')).toBeTruthy();
+    expect(screen.queryByText('整理今日关注')).toBeNull();
+  });
 });

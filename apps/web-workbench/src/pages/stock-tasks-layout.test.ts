@@ -135,7 +135,7 @@ describe('stock tasks layout', () => {
 
     expect(source).toContain('onPointerEnter={handlePointerEnter}');
     expect(source).toContain('onMouseEnter={handleMouseEnter}');
-    expect(source).toContain('StockRailMetric label="数据更新"');
+    expect(source).toContain('StockRailMetric label={temporalCopy.updateLabel}');
     expect(source).toContain('分时截至');
     expect(source).not.toContain('interpolatedChartPoint');
   });
@@ -161,9 +161,13 @@ describe('stock tasks layout', () => {
     const source = readFileSync(new URL('./StockTasksPage.tsx', import.meta.url), 'utf8');
 
     expect(source).toContain('stockDashboardTrustState({ trust: dashboard?.trust })');
-    expect(source).toContain('stockTemporalCopy(dashboardTrust.tone, dashboard?.trust?.dataAsOf ?? null)');
+    expect(source).toContain('dashboard?.trust?.marketSession ?? null');
     expect(source).toContain('{dashboardTrust.statusLabel}');
     expect(source).toContain('temporalCopy={temporalCopy}');
+    expect(source).toContain('briefingLabel={temporalCopy.briefingTabLabel}');
+    expect(source).toContain('{stock.name}{temporalCopy.storyTitleSuffix}');
+    expect(source).toContain('{temporalCopy.storyStatusLabel}');
+    expect(source).toContain('temporalCopy.researchTimestampLabel ?? formatUpdateTime(updatedAt)');
     expect(source).toContain('title={temporalCopy.briefingTitle}');
     expect(source).toContain('title={temporalCopy.opportunityTitle}');
     expect(source).toContain('{temporalCopy.priceLabel}');

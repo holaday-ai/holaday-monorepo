@@ -72,6 +72,26 @@ describe('StockTaskWorkspaceLayout', () => {
     expect(screen.queryByTestId('screening')).toBeNull();
   });
 
+  it('uses a session-aware briefing label on non-trading days', async () => {
+    const user = userEvent.setup();
+    render(
+      <StockTaskWorkspaceLayout
+        highlights={node('highlights')}
+        riskRadar={node('risk')}
+        screening={node('screening')}
+        preferenceProfile={node('profile')}
+        briefing={node('briefing')}
+        briefingLabel="交易日简报"
+        screeningView="idle"
+      />,
+    );
+
+    expect(screen.queryByRole('tab', { name: '今日简报' })).toBeNull();
+    await user.click(screen.getByRole('tab', { name: '交易日简报' }));
+    expect(screen.getByRole('tabpanel', { name: '交易日简报' })).toBeTruthy();
+    expect(screen.getByTestId('briefing')).toBeTruthy();
+  });
+
   it('keeps screening ahead of the preference profile in one reading column', async () => {
     const user = userEvent.setup();
     const view = render(

@@ -34,6 +34,35 @@ describe('stock temporal copy', () => {
     expect(stockSignalLabel('强势', 'current')).toBe('强势');
   });
 
+  it('uses latest-trading-day language when the market is closed for a non-trading day', () => {
+    const copy = stockTemporalCopy('current', '2026-08-21', 'non-trading');
+
+    expect(copy).toMatchObject({
+      assistantStatus: '休市中 · 基于 08/21 最新交易日快照',
+      briefingTitle: '08/21 最新交易日简报',
+      briefingCommand: '基于 08/21 生成交易日复盘',
+      briefingTabLabel: '交易日简报',
+      performanceLabel: '08/21 表现',
+      priceLabel: '08/21 收盘价',
+      opportunityTitle: '最新交易日关注点',
+      starMeta: '08/21 收盘',
+      storyTitleSuffix: ' 08/21 交易日发生了什么',
+      storyStatusLabel: '休市 · 最新交易日已核验',
+      updateLabel: '快照刷新',
+      researchTimestampLabel: '08/21 行情',
+      promptPlaceholder: '基于 08/21 最新交易日数据研究股票、市场或行业',
+    });
+    expect(Object.values(copy).join(' ')).not.toMatch(/今日|最新价|数据更新/);
+  });
+
+  it('uses previous-trading-day language before the market opens', () => {
+    expect(stockTemporalCopy('current', '2026-08-21', 'preopen')).toMatchObject({
+      assistantStatus: '开盘前 · 基于 08/21 最新交易日快照',
+      storyStatusLabel: '开盘前 · 最新交易日已核验',
+      updateLabel: '快照刷新',
+    });
+  });
+
   it('uses blocked neutral wording when no trustworthy numeric snapshot is available', () => {
     expect(stockTemporalCopy('unavailable', null)).toMatchObject({
       assistantStatus: '等待可信行情恢复',

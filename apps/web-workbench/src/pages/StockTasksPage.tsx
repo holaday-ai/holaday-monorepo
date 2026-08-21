@@ -359,8 +359,12 @@ export function StockTasksPage(): JSX.Element {
     [dashboard?.trust],
   );
   const temporalCopy = React.useMemo(
-    () => stockTemporalCopy(dashboardTrust.tone, dashboard?.trust?.dataAsOf ?? null),
-    [dashboard?.trust?.dataAsOf, dashboardTrust.tone],
+    () => stockTemporalCopy(
+      dashboardTrust.tone,
+      dashboard?.trust?.dataAsOf ?? null,
+      dashboard?.trust?.marketSession ?? null,
+    ),
+    [dashboard?.trust?.dataAsOf, dashboard?.trust?.marketSession, dashboardTrust.tone],
   );
   const stockPromptUnavailable =
     dashboardTrust.tone === 'unavailable' || dashboardTrust.tone === 'unverified';
@@ -749,6 +753,7 @@ export function StockTasksPage(): JSX.Element {
         ) : (
           <div className="min-w-0 space-y-5">
             <StockTaskWorkspaceLayout
+              briefingLabel={temporalCopy.briefingTabLabel}
               highlights={<MarketHighlights
                 stocks={stocks}
                 marketIndices={marketIndices}
@@ -1159,7 +1164,7 @@ function MarketHighlights({
         <StockStoryHero
           stock={selectedStock}
           updatedAt={updatedAt}
-          temporalMode={temporalMode}
+          temporalCopy={temporalCopy}
         />
       ) : null}
       {!hasRealQuotes ? (
@@ -1226,7 +1231,7 @@ function MarketHighlights({
                 changePct: stock.price === '—' ? null : stock.changePct,
                 turnover: stockTurnoverText(stock),
                 note: stock.note,
-                updatedAt: formatUpdateTime(updatedAt),
+                updatedAt: temporalCopy.researchTimestampLabel ?? formatUpdateTime(updatedAt),
               }))}
               selectedSymbol={selectedStock.symbol}
               onSelect={setSelectedSymbol}
@@ -1241,17 +1246,12 @@ function MarketHighlights({
 function StockStoryHero({
   stock,
   updatedAt,
-  temporalMode,
+  temporalCopy,
 }: {
   stock: StockSnapshot;
   updatedAt?: string;
-  temporalMode: StockTemporalMode;
+  temporalCopy: StockTemporalCopy;
 }): JSX.Element {
-  const statusLabel = temporalMode === 'current'
-    ? '行情已核验'
-    : temporalMode === 'historical'
-      ? '最近交易日数据'
-      : '行情校验中';
   const changeUnavailable = stock.price === '—';
   return (
     <div className="relative min-h-[172px] overflow-hidden rounded-[20px] border border-[#E9DEEC] bg-[#FFF7F3] shadow-[0_16px_40px_rgba(116,82,133,0.08)]">
@@ -1280,7 +1280,7 @@ function StockStoryHero({
           关注中的股票 · {stock.symbol}
         </p>
         <h2 className="mt-2 text-[24px] font-semibold tracking-[-0.035em] text-[#542043] sm:text-[28px]">
-          {stock.name}今日发生了什么
+          {stock.name}{temporalCopy.storyTitleSuffix}
         </h2>
         <div className="mt-3 flex flex-wrap items-baseline gap-x-4 gap-y-1">
           <span className="text-[22px] font-semibold tabular-nums text-[#25233A]">{formatStockPrice(stock)}</span>
@@ -1298,9 +1298,9 @@ function StockStoryHero({
           </span>
         </div>
         <div className="mt-3 flex items-center gap-2 text-[10px] text-[#776D7D]">
-          <span>数据更新 {stockDataUpdatedAt(updatedAt)}</span>
+          <span>{temporalCopy.updateLabel} {stockDataUpdatedAt(updatedAt)}</span>
           <span className="h-1 w-1 rounded-full bg-[#A874C4]" aria-hidden />
-          <span>{statusLabel}</span>
+          <span>{temporalCopy.storyStatusLabel}</span>
         </div>
       </div>
     </div>
@@ -1381,7 +1381,7 @@ function StockHighlightCard({
           <StockRailMetric label="成交额" value={stockTurnoverText(stock)} />
           <StockRailMetric label="成交活跃度" value={stockVolumeSignalText(stock)} meta={stockVolumeMeta(stock)} tone={stockVolumeTone(stock)} />
           <StockRailMetric label="市场" value={marketContextText(marketIndex)} meta={marketContextMeta(marketIndex)} tone={marketContextTone(marketIndex)} />
-          <StockRailMetric label="数据更新" value={stockDataUpdatedAt(updatedAt)} meta={stockIntradayUpdatedMeta(stock)} />
+          <StockRailMetric label={temporalCopy.updateLabel} value={stockDataUpdatedAt(updatedAt)} meta={stockIntradayUpdatedMeta(stock)} />
           <div className="min-w-0 lg:mb-3.5">
             <StockRailMetric label="日报状态" value={stock.report} />
             {stock.report !== '已生成' ? (
