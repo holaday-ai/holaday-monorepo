@@ -33,12 +33,14 @@ export function StockTaskWorkspaceLayout({
   screening,
   preferenceProfile,
   briefing,
+  briefingLabel = '今日简报',
 }: {
   highlights: React.ReactNode;
   riskRadar: React.ReactNode;
   screening: React.ReactNode;
   preferenceProfile: React.ReactNode;
   briefing: React.ReactNode;
+  briefingLabel?: string;
   screeningView: StockScreeningViewState;
 }): JSX.Element {
   const [activeTask, setActiveTask] = React.useState<StockWorkspaceTask>('watchlist');
@@ -91,6 +93,7 @@ export function StockTaskWorkspaceLayout({
         {STOCK_WORKSPACE_TASKS.map((task) => {
           const Icon = task.icon;
           const selected = activeTask === task.id;
+          const taskLabel = task.id === 'briefing' ? briefingLabel : task.label;
           return (
             <button
               key={task.id}
@@ -100,7 +103,7 @@ export function StockTaskWorkspaceLayout({
               type="button"
               role="tab"
               id={`stock-task-tab-${task.id}`}
-              aria-label={task.label}
+              aria-label={taskLabel}
               title={task.description}
               aria-selected={selected}
               aria-controls="stock-task-panel"
@@ -120,7 +123,7 @@ export function StockTaskWorkspaceLayout({
               />
               <span className="min-w-0">
                 <span className="block whitespace-nowrap text-[13px] font-semibold">
-                  {task.label}
+                  {taskLabel}
                 </span>
               </span>
             </button>
