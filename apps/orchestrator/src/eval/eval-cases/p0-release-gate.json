@@ -16,15 +16,16 @@
   {
     "id": "P0_002",
     "tier": "P0",
-    "category": "douyin_intake",
-    "prompt": "帮我复盘抖音直播数据",
+    "category": "template_intake",
+    "prompt": "帮我填充这个模板",
     "expectations": {
       "mustComplete": false,
       "terminalStatus": "awaiting_user",
       "awaitingKind": "clarification",
+      "executionMode": "template_fill",
       "maxDurationMs": 60000
     },
-    "notes": "Fast release invariant: incomplete expert-workflow input parks for clarification."
+    "notes": "Fast release invariant: template-fill without an uploaded template deterministically parks for clarification."
   },
   {
     "id": "P0_010",
