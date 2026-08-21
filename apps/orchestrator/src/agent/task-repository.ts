@@ -1254,7 +1254,9 @@ export class TaskRepository {
       })
       .from(tasks)
       .innerJoin(users, eq(users.id, tasks.userId))
-      .where(inArray(tasks.status, [...TASK_ACTIVE_STATUSES]));
+      .where(
+        and(inArray(tasks.status, [...TASK_ACTIVE_STATUSES]), eq(tasks.origin, this.taskOrigin)),
+      );
 
     const out: RehydratedTask[] = [];
     for (const row of rows) {
