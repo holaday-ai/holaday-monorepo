@@ -3,16 +3,16 @@
     "id": "P1_TRUST_SCRAPE",
     "tier": "P1",
     "category": "persisted_source_evidence",
-    "prompt": "查询 OpenAI Responses API 官方文档的核心能力",
+    "prompt": "搜索 OpenAI Responses API 的核心能力与使用场景，在答案中列出至少 3 个不同来源的完整网址。",
     "expectations": {
       "mustComplete": true,
       "verificationMustPass": true,
       "minEvidenceEntries": 2,
       "requiredEvidenceSourceTypes": ["tool_result"],
       "executionMode": "scrape",
-      "maxDurationMs": 120000
+      "maxDurationMs": 240000
     },
-    "notes": "Bounded production probe: the answer must be verifier-approved and backed by persisted tool-result evidence; generated source-looking text cannot satisfy the gate."
+    "notes": "Bounded production probe: the answer must be verifier-approved, include at least three grounded source URLs, and be backed by persisted tool-result evidence. The 240s window includes the verifier auto-fix pass observed in production."
   },
   {
     "id": "P1_TRUST_BROWSER_ARTIFACT",

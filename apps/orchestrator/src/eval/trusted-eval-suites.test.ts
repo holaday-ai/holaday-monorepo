@@ -30,12 +30,16 @@ describe('P1 persisted acceptance contract', () => {
       'P1_TRUST_SCRAPE',
       'P1_TRUST_BROWSER_ARTIFACT',
     ]);
-    expect(byId.get('P1_TRUST_SCRAPE')?.expectations).toMatchObject({
-      mustComplete: true,
-      verificationMustPass: true,
-      executionMode: 'scrape',
-      minEvidenceEntries: 2,
-      requiredEvidenceSourceTypes: ['tool_result'],
+    expect(byId.get('P1_TRUST_SCRAPE')).toMatchObject({
+      prompt: expect.stringContaining('至少 3 个不同来源'),
+      expectations: {
+        mustComplete: true,
+        verificationMustPass: true,
+        executionMode: 'scrape',
+        minEvidenceEntries: 2,
+        requiredEvidenceSourceTypes: ['tool_result'],
+        maxDurationMs: 240000,
+      },
     });
     expect(byId.get('P1_TRUST_BROWSER_ARTIFACT')?.expectations).toMatchObject({
       mustComplete: true,
