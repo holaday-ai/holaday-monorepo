@@ -1,7 +1,12 @@
-import { newExternalId, type PlanId } from '@holaday/shared-types';
+import {
+  DEFAULT_TASK_ORIGIN,
+  type PlanId,
+  type TaskOrigin,
+  newExternalId,
+} from '@holaday/shared-types';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
-import { QuotaService, type ConsumeReason } from '../quota/quota-service.js';
+import { type ConsumeReason, QuotaService } from '../quota/quota-service.js';
 
 /**
  * mysql2 returns `[ResultSetHeader, ...]` from drizzle's `update().set()`
@@ -22,9 +27,9 @@ import { taskSteps } from '../db/schema/task-steps.js';
 import { tasks } from '../db/schema/tasks.js';
 import { users } from '../db/schema/users.js';
 import {
-  isTaskTerminalStatus,
   TASK_ACTIVE_STATUSES,
   TASK_RUNNER_OUTCOME_SOURCE_STATUSES,
+  isTaskTerminalStatus,
   taskRunnerOutcomeSourceStatuses,
 } from '../task-status.js';
 import type { PendingConfirm, PlannedStep, TaskState } from './task-controller.js';
@@ -64,7 +69,10 @@ export interface InsertTaskContext {
 }
 
 export class TaskRepository {
-  constructor(private readonly db: DB) {}
+  constructor(
+    private readonly db: DB,
+    private readonly taskOrigin: TaskOrigin = DEFAULT_TASK_ORIGIN,
+  ) {}
 
   async insertTask(state: TaskState, ctx: InsertTaskContext): Promise<void> {
     await this.db.transaction(async (tx) => {
@@ -72,6 +80,7 @@ export class TaskRepository {
         externalId: state.taskId,
         userId: ctx.userId,
         sessionId: ctx.sessionId ?? null,
+        origin: this.taskOrigin,
         status: state.status,
         intent: ctx.intent,
         plan: serializePlan(state.plan),

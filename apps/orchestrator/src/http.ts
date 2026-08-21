@@ -51,6 +51,7 @@ import {
 import { partnerConfig } from './partner/partner-config.js';
 import {
   ADDON_PACK_CATALOGUE,
+  DEFAULT_TASK_ORIGIN,
   getAddonPackPriceCents,
   getPlanPriceCents,
   isAddonPackId,
@@ -1557,6 +1558,7 @@ export function createHttpApp(deps: HttpAppDeps) {
     paypalAdapter: deps.paypalAdapter ?? null,
     downloadManager: deps.downloadManager ?? null,
     userId: userExternalId,
+    taskOrigin: DEFAULT_TASK_ORIGIN,
   });
   const webhookHandler = createWebhookTasksHandler({
     db,

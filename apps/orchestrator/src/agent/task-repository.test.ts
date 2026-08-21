@@ -253,6 +253,34 @@ describe('TaskRepository.insertTask source context', () => {
 
     expect(inserts[0]).toMatchObject({ sourceContext });
   });
+
+  it('persists the repository task origin on every inserted task', async () => {
+    const inserts: Record<string, unknown>[] = [];
+    const transaction = async (cb: (tx: unknown) => Promise<void>) => {
+      await cb({
+        insert: () => ({
+          values: async (payload: Record<string, unknown>) => {
+            inserts.push(payload);
+            return [{ insertId: 42 }];
+          },
+        }),
+      });
+    };
+    const repo = new TaskRepository({ transaction } as unknown as DB, 'eval');
+
+    await repo.insertTask(
+      {
+        taskId: 'tsk_eval_origin',
+        status: 'executing',
+        plan: [],
+        cursor: 0,
+        pendingConfirm: null,
+      },
+      { userId: 7, intent: 'run internal evaluation' },
+    );
+
+    expect(inserts[0]).toMatchObject({ origin: 'eval' });
+  });
 });
 
 describe('TaskRepository.persistVisionOutcome — awaiting_user state guard (Phase 3 R1, atomic)', () => {

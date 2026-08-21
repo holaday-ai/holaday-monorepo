@@ -55,6 +55,7 @@ describe('tRPC tasks.list + tasks.detail', () => {
     intent: string,
     stepKinds: string[] = ['goto', 'extract'],
     status = 'completed',
+    origin: 'user' | 'eval' = 'user',
   ): Promise<string> {
     const { newExternalId } = await import('@holaday/shared-types');
     const { db } = await import('../../db/client.js');
@@ -66,6 +67,7 @@ describe('tRPC tasks.list + tasks.detail', () => {
       externalId,
       userId: userInternalId,
       status,
+      origin,
       intent,
       plan: null,
     });
@@ -147,6 +149,86 @@ describe('tRPC tasks.list + tasks.detail', () => {
       const body2 = (await res2.json()) as typeof body1;
       expect(body2.result.data.tasks).toHaveLength(1);
       expect(body2.result.data.tasks[0]?.taskId).toBe(t1);
+    } finally {
+      await close();
+    }
+  });
+
+  it('isolates product history from eval history while keeping eval polling readable', async () => {
+    const user = await seedUser();
+    const productTask = await seedTask(user.internalId, 'product task');
+    const evalTask = await seedTask(user.internalId, 'eval task', ['extract'], 'completed', 'eval');
+
+    const { port, signAccessToken, close } = await bootTrpcServer();
+    const listUrl = `http://127.0.0.1:${port}/trpc/tasks.list?input=${encodeURIComponent(
+      JSON.stringify({ limit: 10 }),
+    )}`;
+    const detailUrl = (taskId: string) =>
+      `http://127.0.0.1:${port}/trpc/tasks.detail?input=${encodeURIComponent(
+        JSON.stringify({ taskId }),
+      )}`;
+    try {
+      const productToken = await signAccessToken({ sub: user.external, plan: 'free' });
+      const evalToken = await signAccessToken({
+        sub: user.external,
+        plan: 'free',
+        taskOrigin: 'eval',
+      });
+
+      const productList = (await (
+        await fetch(listUrl, { headers: { authorization: `Bearer ${productToken}` } })
+      ).json()) as { result: { data: { tasks: Array<{ taskId: string }> } } };
+      expect(productList.result.data.tasks.map((task) => task.taskId)).toContain(productTask);
+      expect(productList.result.data.tasks.map((task) => task.taskId)).not.toContain(evalTask);
+
+      const evalList = (await (
+        await fetch(listUrl, { headers: { authorization: `Bearer ${evalToken}` } })
+      ).json()) as { result: { data: { tasks: Array<{ taskId: string }> } } };
+      expect(evalList.result.data.tasks.map((task) => task.taskId)).toContain(evalTask);
+      expect(evalList.result.data.tasks.map((task) => task.taskId)).not.toContain(productTask);
+
+      const evalDetail = await fetch(detailUrl(evalTask), {
+        headers: { authorization: `Bearer ${evalToken}` },
+      });
+      const productDetailViaEval = await fetch(detailUrl(productTask), {
+        headers: { authorization: `Bearer ${evalToken}` },
+      });
+      expect(evalDetail.status).toBe(200);
+      expect(productDetailViaEval.status).toBe(404);
+    } finally {
+      await close();
+    }
+  });
+
+  it('tasks.create persists the server-signed eval origin', async () => {
+    const user = await seedUser();
+    const { port, signAccessToken, close } = await bootTrpcServer();
+    try {
+      const evalToken = await signAccessToken({
+        sub: user.external,
+        plan: 'free',
+        taskOrigin: 'eval',
+      });
+      const response = await fetch(`http://127.0.0.1:${port}/trpc/tasks.create`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${evalToken}`,
+        },
+        body: JSON.stringify({ intent: '总结一句今天的工作进展' }),
+      });
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as { result: { data: { taskId: string } } };
+
+      const { db } = await import('../../db/client.js');
+      const { eq } = await import('drizzle-orm');
+      const { tasks } = await import('../../db/schema/tasks.js');
+      const [created] = await db
+        .select({ origin: tasks.origin })
+        .from(tasks)
+        .where(eq(tasks.externalId, body.result.data.taskId))
+        .limit(1);
+      expect(created?.origin).toBe('eval');
     } finally {
       await close();
     }

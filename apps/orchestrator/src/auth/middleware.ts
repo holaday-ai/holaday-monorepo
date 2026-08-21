@@ -1,5 +1,6 @@
-import type { NextFunction, Request, Response } from 'express';
+import { DEFAULT_TASK_ORIGIN, type TaskOrigin } from '@holaday/shared-types';
 import { eq } from 'drizzle-orm';
+import type { NextFunction, Request, Response } from 'express';
 import type { DB } from '../db/client.js';
 import { db } from '../db/client.js';
 import { users } from '../db/schema/users.js';
@@ -10,12 +11,14 @@ const BEARER_PREFIX = 'Bearer ';
 export interface AuthenticatedSession {
   userId: string;
   authVersion: number;
+  taskOrigin?: TaskOrigin;
 }
 
 async function activeUserSession(
   database: DB,
   userId: string,
   authVersion: number,
+  taskOrigin?: TaskOrigin,
 ): Promise<AuthenticatedSession | null> {
   const [user] = await database
     .select({
@@ -29,7 +32,11 @@ async function activeUserSession(
   if (!user || user.status !== 'active' || user.authVersion !== authVersion) {
     return null;
   }
-  return { userId: user.externalId, authVersion: user.authVersion };
+  return {
+    userId: user.externalId,
+    authVersion: user.authVersion,
+    ...(taskOrigin ? { taskOrigin } : {}),
+  };
 }
 
 export async function authenticateAccessTokenSession(
@@ -38,7 +45,7 @@ export async function authenticateAccessTokenSession(
 ): Promise<AuthenticatedSession | null> {
   const claims = await verifyAccessToken(token);
   if (!claims) return null;
-  return activeUserSession(database, claims.sub, claims.authVersion);
+  return activeUserSession(database, claims.sub, claims.authVersion, claims.taskOrigin);
 }
 
 export async function authenticateBearerSession(
@@ -106,9 +113,11 @@ export async function bearerAuth(req: Request, _res: Response, next: NextFunctio
       const authenticatedRequest = req as Request & {
         userId?: string;
         userAuthVersion?: number;
+        taskOrigin?: TaskOrigin;
       };
       authenticatedRequest.userId = session.userId;
       authenticatedRequest.userAuthVersion = session.authVersion;
+      authenticatedRequest.taskOrigin = session.taskOrigin ?? DEFAULT_TASK_ORIGIN;
     }
   } catch {
     // Authentication must fail closed if the account lookup is

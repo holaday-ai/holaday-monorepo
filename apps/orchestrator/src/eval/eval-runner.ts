@@ -484,6 +484,7 @@ async function main(): Promise<void> {
   const token = await signAccessToken({
     sub: EVAL_USER_EXTERNAL_ID,
     plan: 'free',
+    taskOrigin: 'eval',
   });
 
   console.log(`[eval] suite=${suiteName} cases=${cases.length}`);

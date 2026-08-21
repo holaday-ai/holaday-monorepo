@@ -86,6 +86,27 @@ describe('authenticateBearerHeader', () => {
       ),
     ).resolves.toBeNull();
   });
+
+  it('retains a signed eval task origin on the authenticated session', async () => {
+    const { signAccessToken } = await import('./jwt.js');
+    const { authenticateBearerSession } = await import('./middleware.js');
+    const token = await signAccessToken({
+      sub: 'usr_eval_runner',
+      plan: 'free',
+      taskOrigin: 'eval',
+    });
+
+    await expect(
+      authenticateBearerSession(
+        fakeDbFor({ externalId: 'usr_eval_runner', status: 'active', authVersion: 0 }) as never,
+        `Bearer ${token}`,
+      ),
+    ).resolves.toEqual({
+      userId: 'usr_eval_runner',
+      authVersion: 0,
+      taskOrigin: 'eval',
+    });
+  });
 });
 
 describe('realtime token authentication', () => {
