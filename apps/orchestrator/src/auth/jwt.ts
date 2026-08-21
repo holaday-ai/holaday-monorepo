@@ -1,3 +1,4 @@
+import { TASK_ORIGINS, type TaskOrigin } from '@holaday/shared-types';
 import { SignJWT, jwtVerify } from 'jose';
 import { env } from '../config/env.js';
 
@@ -22,6 +23,8 @@ export interface AccessTokenClaims {
   sub: string; // user external_id (usr_...)
   plan: string;
   authVersion: number;
+  /** Server-signed internal task classification. Omitted for product users. */
+  taskOrigin?: TaskOrigin;
 }
 
 export interface StreamTokenClaims {
@@ -32,7 +35,11 @@ export interface StreamTokenClaims {
 export async function signAccessToken(
   claims: Omit<AccessTokenClaims, 'authVersion'> & { authVersion?: number },
 ): Promise<string> {
-  return new SignJWT({ plan: claims.plan, authVersion: claims.authVersion ?? 0 })
+  return new SignJWT({
+    plan: claims.plan,
+    authVersion: claims.authVersion ?? 0,
+    ...(claims.taskOrigin ? { taskOrigin: claims.taskOrigin } : {}),
+  })
     .setProtectedHeader({ alg: ALGORITHM })
     .setSubject(claims.sub)
     .setIssuer(ISSUER)
@@ -59,7 +66,20 @@ export async function verifyAccessToken(token: string): Promise<AccessTokenClaim
           ? payload.authVersion
           : null;
     if (authVersion === null) return null;
-    return { sub: payload.sub, plan: payload.plan, authVersion };
+    const taskOrigin =
+      payload.taskOrigin === undefined
+        ? undefined
+        : typeof payload.taskOrigin === 'string' &&
+            TASK_ORIGINS.includes(payload.taskOrigin as TaskOrigin)
+          ? (payload.taskOrigin as TaskOrigin)
+          : null;
+    if (taskOrigin === null) return null;
+    return {
+      sub: payload.sub,
+      plan: payload.plan,
+      authVersion,
+      ...(taskOrigin ? { taskOrigin } : {}),
+    };
   } catch {
     return null;
   }

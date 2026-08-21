@@ -1163,6 +1163,10 @@ export const tasksRouter = router({
         );
       },
       run: async () => {
+    // The authenticated request carries a server-signed origin. One repository
+    // instance is shared by every execution lane so no early-return branch can
+    // accidentally fall back to the database's `user` default.
+    const repo = new TaskRepository(ctx.db, ctx.taskOrigin);
     let validatedStockContext: ValidatedStockTaskContext | null = null;
     if (input.taskSource === 'stock_dashboard') {
       if (!input.stockContext) {
@@ -1288,7 +1292,7 @@ export const tasksRouter = router({
           and(
             eq(tasksTable.externalId, input.replyToTaskId),
             eq(tasksTable.userId, userRow.id),
-            eq(tasksTable.origin, 'user'),
+            eq(tasksTable.origin, ctx.taskOrigin),
           ),
         )
         .limit(1);
@@ -1839,7 +1843,6 @@ export const tasksRouter = router({
         // image work never falls through to a text-only lane.
         if (executionMode === 'image') {
       const taskId = newExternalId('task');
-      const repo = new TaskRepository(ctx.db);
 
       await repo.insertTask(
         {
@@ -2165,7 +2168,6 @@ export const tasksRouter = router({
             lipSyncModel: appEnv.FAL_CLONE_LIPSYNC_MODEL,
           });
           const taskId = newExternalId('task');
-          const repo = new TaskRepository(ctx.db);
           await repo.insertTask(
             { taskId, status: 'awaiting_user', plan: [], cursor: 0, pendingConfirm: null },
                 {
@@ -2239,7 +2241,6 @@ export const tasksRouter = router({
           }
               const ipQuote = quoteIpVideo(input.intent, appEnv.FAL_LIPSYNC_MODEL);
           const taskId = newExternalId('task');
-          const repo = new TaskRepository(ctx.db);
           await repo.insertTask(
             { taskId, status: 'awaiting_user', plan: [], cursor: 0, pendingConfirm: null },
                 {
@@ -2342,7 +2343,6 @@ export const tasksRouter = router({
             ...(vOpts.aspectRatio ? { aspectRatio: vOpts.aspectRatio } : {}),
           });
           const taskId = newExternalId('task');
-          const repo = new TaskRepository(ctx.db);
           await repo.insertTask(
             { taskId, status: 'awaiting_user', plan: [], cursor: 0, pendingConfirm: null },
                 {
@@ -2497,7 +2497,6 @@ export const tasksRouter = router({
       }
       if (ashareQaMatch) {
         const taskId = newExternalId('task');
-        const repo = new TaskRepository(ctx.db);
         await repo.insertTask(
           { taskId, status: 'executing', plan: [], cursor: 0, pendingConfirm: null },
           {
@@ -2667,7 +2666,6 @@ export const tasksRouter = router({
       if (indexIntent) {
         const { buildIndexCard } = await import('../../agent/a-share/ashare-fact-card.js');
         const taskId = newExternalId('task');
-        const repo = new TaskRepository(ctx.db);
         await repo.insertTask(
           { taskId, status: 'executing', plan: [], cursor: 0, pendingConfirm: null },
           {
@@ -2760,7 +2758,6 @@ export const tasksRouter = router({
         const { ASHARE_QA_GUIDANCE } = await import('../../agent/a-share/ashare-qa-runner.js');
         const guidanceAnswer = `${stockAnswerPrefix}${ASHARE_QA_GUIDANCE}`;
         const taskId = newExternalId('task');
-        const repo = new TaskRepository(ctx.db);
         await repo.insertTask(
           { taskId, status: 'executing', plan: [], cursor: 0, pendingConfirm: null },
           {
@@ -2840,7 +2837,6 @@ export const tasksRouter = router({
           anthropicForResolver
         ) {
       const taskId = newExternalId('task');
-      const repo = new TaskRepository(ctx.db);
 
       await repo.insertTask(
         {
@@ -3091,7 +3087,6 @@ export const tasksRouter = router({
       anthropicForResolver
     ) {
       const taskId = newExternalId('task');
-      const repo = new TaskRepository(ctx.db);
 
       await repo.insertTask(
         {
@@ -3488,7 +3483,6 @@ export const tasksRouter = router({
     // classifier explicitly avoided routing to).
     if (executionMode === 'scrape' && appEnv.ANTHROPIC_API_KEY && anthropicForResolver) {
       const taskId = newExternalId('task');
-      const repo = new TaskRepository(ctx.db);
 
       await repo.insertTask(
         {
@@ -4003,7 +3997,6 @@ export const tasksRouter = router({
     // QA honest — it never creates StubPlanner's about:blank smoke plan.
     if (directOpenUrl) {
       const taskId = newExternalId('task');
-      const repo = new TaskRepository(ctx.db);
       const willQueueDirectOpen = Boolean(ctx.taskQueue && directOpenUsesBrowserPool);
       await repo.insertTask(
         {
@@ -4223,7 +4216,6 @@ export const tasksRouter = router({
       (ctx.playwrightExecutor || browserPoolEligible)
     ) {
       const taskId = newExternalId('task');
-      const repo = new TaskRepository(ctx.db);
 
       // Phase 13 Dim 1 — first-frame plan. Skipped for simple-search
       // (the model's web_search tool handles those in one shot),
@@ -6523,7 +6515,6 @@ export const tasksRouter = router({
     // legacy plan-once path otherwise.
     if (ctx.visionCommander) {
       const taskId = newExternalId('task');
-      const repo = new TaskRepository(ctx.db);
       // Seed task row with status='executing' and empty plan — the
       // vision loop has no pre-planned steps; task_steps rows get
       // written as the loop progresses (Phase B: per-tick row; Phase
@@ -6942,7 +6933,6 @@ export const tasksRouter = router({
       ...(allowedOrigins.length > 0 ? { allowedOrigins } : {}),
     });
 
-    const repo = new TaskRepository(ctx.db);
     await repo.insertTask(state, {
       userId: userRow.id,
       intent: input.intent,
@@ -8009,9 +7999,12 @@ export const tasksRouter = router({
       if (!userRow) {
         throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
       }
-      // Phase 1 #3 — isolation boundary: user history excludes canary/exploration/eval
-      // tasks (no-op today; every row defaults to origin='user').
-      const conds = [eq(tasksTable.userId, userRow.id), eq(tasksTable.origin, 'user')];
+      // Phase 1 #3 — isolation boundary. Product sessions are pinned to `user`;
+      // the server-signed eval session can poll only its own `eval` rows.
+      const conds = [
+        eq(tasksTable.userId, userRow.id),
+        eq(tasksTable.origin, ctx.taskOrigin),
+      ];
       // Cursor is an opaque numeric token whose interpretation matches
       // the active ORDER BY. In starred mode we order by `starredAt
       // DESC` and treat the cursor as a unix-ms timestamp; otherwise
@@ -8121,7 +8114,7 @@ export const tasksRouter = router({
             .where(
               and(
                 eq(tasksTable.userId, userRow.id),
-                eq(tasksTable.origin, 'user'),
+                eq(tasksTable.origin, ctx.taskOrigin),
                 inArray(
                   tasksTable.id,
                   rows.map((row) => row.id),
@@ -8242,7 +8235,7 @@ export const tasksRouter = router({
           and(
             eq(tasksTable.externalId, input.taskId),
             eq(tasksTable.userId, userRow.id),
-            eq(tasksTable.origin, 'user'),
+            eq(tasksTable.origin, ctx.taskOrigin),
           ),
         )
         .limit(1);
@@ -8409,7 +8402,7 @@ export const tasksRouter = router({
             and(
               eq(tasksTable.externalId, input.taskId),
               eq(tasksTable.userId, userRow.id),
-              eq(tasksTable.origin, 'user'),
+              eq(tasksTable.origin, ctx.taskOrigin),
             ),
           )
         .limit(1);
@@ -8477,7 +8470,7 @@ export const tasksRouter = router({
               and(
                 eq(tasksTable.externalId, input.taskId),
                 eq(tasksTable.userId, userRow.id),
-                eq(tasksTable.origin, 'user'),
+                eq(tasksTable.origin, ctx.taskOrigin),
               ),
             )
             .limit(1);

@@ -4,6 +4,7 @@ if (_proxy) setGlobalDispatcher(new ProxyAgent(_proxy));
 import { bootstrap } from 'global-agent';
 bootstrap();
 import Anthropic from '@anthropic-ai/sdk';
+import { DEFAULT_TASK_ORIGIN } from '@holaday/shared-types';
 import { isBriefingIntent } from './agent/a-share/briefing-dispatch.js';
 import { DrizzleLlmCallRecorder } from './agent/llm-call-recorder.js';
 import { AnthropicPlanner } from './agent/planners/anthropic.js';
@@ -500,6 +501,7 @@ async function main() {
             paypalAdapter: paypalAdapter ?? null,
             downloadManager,
             userId: user.externalId,
+            taskOrigin: DEFAULT_TASK_ORIGIN,
           };
           const result = await tasksRouter.createCaller(ctx).create({ intent });
           // Resolve the new external taskId back to the internal
@@ -663,6 +665,7 @@ async function main() {
           paypalAdapter: paypalAdapter ?? null,
           downloadManager,
           userId: owner.externalId,
+          taskOrigin: DEFAULT_TASK_ORIGIN,
         };
         await queuePlannedRun(ctx, {
           plannedTaskId,

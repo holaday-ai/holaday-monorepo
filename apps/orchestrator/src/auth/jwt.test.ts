@@ -28,6 +28,22 @@ describe('JWT access tokens', () => {
     });
   });
 
+  it('round-trips a trusted internal task origin for the eval runner', async () => {
+    const { signAccessToken, verifyAccessToken } = await import('./jwt.js');
+    const token = await signAccessToken({
+      sub: 'usr_eval_runner',
+      plan: 'free',
+      taskOrigin: 'eval',
+    });
+
+    await expect(verifyAccessToken(token)).resolves.toEqual({
+      sub: 'usr_eval_runner',
+      plan: 'free',
+      authVersion: 0,
+      taskOrigin: 'eval',
+    });
+  });
+
   it('returns null for a tampered token', async () => {
     const { signAccessToken, verifyAccessToken } = await import('./jwt.js');
     const token = await signAccessToken({ sub: 'usr_xyz', plan: 'pro' });

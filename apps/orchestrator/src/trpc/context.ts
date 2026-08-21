@@ -1,3 +1,4 @@
+import { DEFAULT_TASK_ORIGIN, type TaskOrigin } from '@holaday/shared-types';
 import type { Request, Response } from 'express';
 import type { Planner } from '../agent/planner.js';
 import type { ExecutionRouter } from '../agent/supercar/index.js';
@@ -7,9 +8,9 @@ import type { BrowserPool } from '../browser-pool/index.js';
 import { logger } from '../config/logger.js';
 import { db } from '../db/client.js';
 import type { DownloadManager } from '../files/download-manager.js';
+import type { FirecrawlLane } from '../firecrawl/firecrawl-lane.js';
 import type { PayPalAdapter } from '../payment/index.js';
 import type { TaskQueue } from '../queue/task-queue.js';
-import type { FirecrawlLane } from '../firecrawl/firecrawl-lane.js';
 
 /**
  * Context factory. `planner` and `visionCommander` are both injected by the
@@ -89,6 +90,7 @@ export function makeCreateContext(deps: AppContextDeps) {
       paypalAdapter: deps.paypalAdapter ?? null,
       downloadManager: deps.downloadManager ?? null,
       userId: (req as Request & { userId?: string }).userId,
+      taskOrigin: (req as Request & { taskOrigin?: TaskOrigin }).taskOrigin ?? DEFAULT_TASK_ORIGIN,
     };
   };
 }
