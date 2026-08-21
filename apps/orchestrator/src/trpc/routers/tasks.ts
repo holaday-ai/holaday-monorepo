@@ -190,6 +190,7 @@ import {
   getExpertWorkflowById,
   matchExpertWorkflow as matchTypedExpertWorkflow,
   resolveExpertWorkflowDispatch,
+  shouldAllowSpecializedLaneOverride,
 } from '../../execution/expert-workflow-registry.js';
 import { getFeatureFlags as getExecutionFeatureFlags } from '../../execution/feature-flags.js';
 import { fencedFileIds, isDocumentOutput } from '../../execution/file-artifact-consistency.js';
@@ -2422,6 +2423,7 @@ export const tasksRouter = router({
     const ashareQaAllowed =
           ASHARE_QA_ALLOWLIST.size === 0 || ASHARE_QA_ALLOWLIST.has(ctx.userId);
     if (
+      shouldAllowSpecializedLaneOverride(typedRoutingWorkflow) &&
       (appEnv.ASHARE_QA_ENABLED || validatedStockContext !== null) &&
       ashareQaHandlesMode(executionMode) &&
       anthropicForResolver &&

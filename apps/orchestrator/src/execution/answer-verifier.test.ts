@@ -893,6 +893,38 @@ describe('verifyDeterministic — workflow section_presence + source_annotation 
     expect(annotationCheck!.passed).toBe(true);
   });
 
+  it('accepts generated markdown headings with explicit anchor ids', () => {
+    let anchorIndex = 0;
+    const anchoredReport = COMPLETE_REPORT.replace(
+      /^## ([^\n]+)$/gm,
+      (_line, title: string) => `## ${title} {#section_${++anchorIndex}}`,
+    );
+    const contract = fullTierContract('tsk_wf_anchor_headings');
+    const ledger = new EvidenceLedger('tsk_wf_anchor_headings');
+    ledger.add({
+      fact: 'GMV=100000, 订单数=1250, 客单价=80',
+      sourceType: 'user_input',
+      sourceDetail: 'msg',
+      confidence: 'observed',
+    });
+
+    const result = verifyDeterministic({
+      contract,
+      ledger,
+      answerText: anchoredReport,
+      workflowContract: DOUYIN_REVIEW_WORKFLOW,
+    });
+
+    expect(
+      result.checks.find((check) => check.criterionId === 'workflow.section_presence')
+        ?.passed,
+    ).toBe(true);
+    expect(
+      result.checks.find((check) => check.criterionId === 'workflow.source_annotation')
+        ?.passed,
+    ).toBe(true);
+  });
+
   it('missing required section: section_presence fails as fixable', () => {
     // Drop the "优化动作" section entirely.
     const truncated = COMPLETE_REPORT.replace(

@@ -4,6 +4,7 @@ import {
   getExpertWorkflowById,
   matchExpertWorkflow,
   resolveExpertWorkflowDispatch,
+  shouldAllowSpecializedLaneOverride,
 } from './expert-workflow-registry.js';
 
 describe('matchExpertWorkflow — douyin-review', () => {
@@ -205,6 +206,17 @@ describe('resolveExpertWorkflowDispatch — new follow-up tasks', () => {
 
     expect(resolved.reportWorkflow?.workflowId).toBe('content-topic');
     expect(resolved.routingWorkflow?.workflowId).toBe('content-topic');
+  });
+
+  it('keeps a matched typed workflow ahead of keyword-based specialized lanes', () => {
+    const resolved = resolveExpertWorkflowDispatch({
+      matchedWorkflow: ecomDaily,
+      parentWorkflow: null,
+      isFollowUp: false,
+    });
+
+    expect(shouldAllowSpecializedLaneOverride(resolved.routingWorkflow)).toBe(false);
+    expect(shouldAllowSpecializedLaneOverride(null)).toBe(true);
   });
 
   it('inherits only generate routing from the parent for a follow-up action', () => {

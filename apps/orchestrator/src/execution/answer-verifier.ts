@@ -1597,7 +1597,7 @@ function findSectionHeading(
 }
 
 function normaliseSectionHeadingLine(value: string): string {
-  return normaliseSectionTitle(value)
+  return normaliseSectionTitle(value.replace(/\s*\{#[A-Za-z0-9_-]+\}\s*$/u, ''))
     .replace(/^#{1,6}/, '')
     .replace(/^(?:\d+[.、):：]|[一二三四五六七八九十]+[.、])/, '')
     .replace(/[*_`>]/g, '')
