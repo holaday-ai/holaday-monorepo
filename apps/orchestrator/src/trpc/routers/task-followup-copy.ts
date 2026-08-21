@@ -32,6 +32,28 @@ export function resolveFollowUpExecutionMode(input: {
 }
 
 /**
+ * Keep the verification contract and the workflow lineage deliberately
+ * separate for derived follow-ups. A calendar/SOP generated from a typed
+ * parent must not be checked against the parent's report schema, but it is
+ * still part of that workflow and must keep the response-preservation policy.
+ */
+export function resolveWorkflowIdentities(input: {
+  reportWorkflowId: string | null | undefined;
+  routingWorkflowId: string | null | undefined;
+  legacyWorkflowId: string | null | undefined;
+}): {
+  contractWorkflowId: string | null;
+  lineageWorkflowId: string | null;
+} {
+  const contractWorkflowId = input.reportWorkflowId ?? input.legacyWorkflowId ?? null;
+  return {
+    contractWorkflowId,
+    lineageWorkflowId:
+      input.reportWorkflowId ?? input.routingWorkflowId ?? input.legacyWorkflowId ?? null,
+  };
+}
+
+/**
  * Keep legacy browser tasks on the same continuation path as current rows.
  * An explicit non-browser mode wins; evidence heuristics are only for older
  * tasks written before executionMode was persisted.

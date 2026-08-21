@@ -237,6 +237,7 @@ import {
   followUpTerminalGuardMessage,
   resolveBrowserFollowUpContinuation,
   resolveFollowUpExecutionMode,
+  resolveWorkflowIdentities,
 } from './task-followup-copy.js';
 import { markQueuedTaskExecutingOrThrow } from './task-queue-start.js';
 import { annotateTaskResultAttachmentAvailability } from './task-result-attachment-availability.js';
@@ -1528,6 +1529,11 @@ export const tasksRouter = router({
       typedRoutingWorkflow != null && expertWorkflow?.routeOverride !== 'browser'
         ? ('generate' as const)
         : null;
+    const workflowIdentities = resolveWorkflowIdentities({
+      reportWorkflowId: typedWorkflow?.workflowId,
+      routingWorkflowId: typedRoutingWorkflow?.workflowId,
+      legacyWorkflowId: expertWorkflow?.id,
+    });
     const executionMode = resolveFollowUpExecutionMode({
       parentHasBrowserContext,
       typedWorkflowOverride,
@@ -3116,7 +3122,7 @@ export const tasksRouter = router({
         taskId,
         intent: input.intent,
         executionMode: 'generate',
-        expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
+        expertWorkflowId: workflowIdentities.contractWorkflowId,
         expertMode: expertModeOverride,
         hasAttachments: attachmentBlocks.length > 0,
       });
@@ -3222,7 +3228,7 @@ export const tasksRouter = router({
         const metadata = {
           executionMode: 'generate' as const,
           finalExecutionMode: 'generate' as const,
-          expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
+          expertWorkflowId: workflowIdentities.lineageWorkflowId,
           // Codex Pack C1 — user's composer pick. SPA reads this from
           // tasks.detail.result.metadata.expertMode to decide whether
           // to render the "本次使用了技能" footer chip.
@@ -3257,7 +3263,7 @@ export const tasksRouter = router({
           taskId,
           status: outcome.status,
           summary: outcome.status === 'completed' ? outcome.summary : '',
-          expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
+          expertWorkflowId: workflowIdentities.lineageWorkflowId,
           logger: ctx.logger,
         });
         // Codex Round 2 P1-5 — post-formatter recheck. If the response
