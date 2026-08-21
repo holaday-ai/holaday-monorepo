@@ -173,4 +173,52 @@ describe('TaskRepository against real MySQL', () => {
     expect(types).toContain('step.retry');
     expect(types).toContain('task.paused');
   });
+
+  it('rehydrates only active tasks from the repository origin', async () => {
+    const { newExternalId } = await import('@holaday/shared-types');
+    const { db } = await import('../db/client.js');
+    const { eq } = await import('drizzle-orm');
+    const { users } = await import('../db/schema/users.js');
+    const { tasks } = await import('../db/schema/tasks.js');
+    const { TaskRepository } = await import('./task-repository.js');
+
+    const userExternalId = newExternalId('user');
+    const email = `rehydrate-origin+${Date.now()}+${Math.random()}@example.com`;
+    await db.insert(users).values({
+      externalId: userExternalId,
+      email,
+      passwordHash: 'placeholder',
+    });
+    const user = must((await db.select().from(users).where(eq(users.email, email)))[0], 'user');
+    const userTaskId = newExternalId('task');
+    const evalTaskId = newExternalId('task');
+    await db.insert(tasks).values([
+      {
+        externalId: userTaskId,
+        userId: user.id,
+        origin: 'user',
+        status: 'executing',
+        intent: 'product task',
+        plan: null,
+      },
+      {
+        externalId: evalTaskId,
+        userId: user.id,
+        origin: 'eval',
+        status: 'executing',
+        intent: 'eval task',
+        plan: null,
+      },
+    ]);
+
+    const userRows = (await new TaskRepository(db).rehydrateInFlight()).filter(
+      (row) => row.userExternalId === userExternalId,
+    );
+    const evalRows = (await new TaskRepository(db, 'eval').rehydrateInFlight()).filter(
+      (row) => row.userExternalId === userExternalId,
+    );
+
+    expect(userRows.map((row) => row.state.taskId)).toEqual([userTaskId]);
+    expect(evalRows.map((row) => row.state.taskId)).toEqual([evalTaskId]);
+  });
 });

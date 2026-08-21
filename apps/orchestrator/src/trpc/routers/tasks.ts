@@ -6994,7 +6994,7 @@ export const tasksRouter = router({
       allowedOrigins: smokeAllowedOrigins,
     });
 
-    const repo = new TaskRepository(ctx.db);
+    const repo = new TaskRepository(ctx.db, ctx.taskOrigin);
     await repo.insertTask(state, {
       userId: userRow.id,
       intent: '[smoke] Baidu search for "半导体" — diagnostic, not Opus-planned',
@@ -7018,7 +7018,7 @@ export const tasksRouter = router({
   }),
 
   pause: protectedProcedure.input(taskIdInput).mutation(async ({ ctx, input }) => {
-    const repo = new TaskRepository(ctx.db);
+    const repo = new TaskRepository(ctx.db, ctx.taskOrigin);
     const prev = await loadTaskState(repo, input.taskId, ctx.userId);
 
     const { state: next, effects } = taskController.pause(prev, 'user');
@@ -7044,7 +7044,7 @@ export const tasksRouter = router({
   }),
 
   resume: protectedProcedure.input(taskIdInput).mutation(async ({ ctx, input }) => {
-    const repo = new TaskRepository(ctx.db);
+    const repo = new TaskRepository(ctx.db, ctx.taskOrigin);
     const prev = await loadTaskState(repo, input.taskId, ctx.userId);
 
     const { state: next, effects } = taskController.resume(prev);
@@ -7086,7 +7086,7 @@ export const tasksRouter = router({
         }),
     )
     .mutation(async ({ ctx, input }) => {
-      const repo = new TaskRepository(ctx.db);
+      const repo = new TaskRepository(ctx.db, ctx.taskOrigin);
       const prev = await loadTaskState(repo, input.taskId, ctx.userId);
       if (prev.status !== 'awaiting_user') {
         throw new TRPCError({
@@ -8511,7 +8511,7 @@ export const tasksRouter = router({
       const supercarHasHandle = hasParkedSupercarHandle(input.taskId);
       if (supercarHasHandle) {
         try {
-          const repo = new TaskRepository(ctx.db);
+          const repo = new TaskRepository(ctx.db, ctx.taskOrigin);
           const persisted = await repo.markAwaitingReplyResumed(input.taskId);
           if (!persisted.persisted) {
             ctx.logger.warn(
@@ -8677,7 +8677,7 @@ export const tasksRouter = router({
         // stays completed (with combinedIntent in result) — slightly
         // worse UX than ideal but never blocks the user, and matches
         // the prior behaviour for partial failure.
-        const repo = new TaskRepository(ctx.db);
+        const repo = new TaskRepository(ctx.db, ctx.taskOrigin);
         try {
           const parentResult = {
             ...(prevResult ?? {}),
@@ -8792,7 +8792,7 @@ export const tasksRouter = router({
         );
         return { ok: false };
       }
-      const repo = new TaskRepository(ctx.db);
+      const repo = new TaskRepository(ctx.db, ctx.taskOrigin);
       const newWorkflowPreamble = newWorkflow?.promptPreamble ?? '';
       const effectiveCombined =
         (newWorkflowPreamble ? `${newWorkflowPreamble}\n` : '') + combinedIntent;
@@ -9007,14 +9007,14 @@ export const tasksRouter = router({
           and(
             eq(tasksTable.externalId, input.taskId),
             eq(tasksTable.userId, userRow.id),
-            eq(tasksTable.origin, 'user'),
+            eq(tasksTable.origin, ctx.taskOrigin),
           ),
         )
         .limit(1);
       if (!taskRow) {
         throw new TRPCError({ code: 'NOT_FOUND', message: `task ${input.taskId} not found` });
       }
-      const repo = new TaskRepository(ctx.db);
+      const repo = new TaskRepository(ctx.db, ctx.taskOrigin);
       const aborted = supercarAbort(input.taskId);
       if (aborted) {
         try {

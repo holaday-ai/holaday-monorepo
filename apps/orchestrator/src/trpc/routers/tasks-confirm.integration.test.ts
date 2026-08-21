@@ -27,7 +27,7 @@ describe('tasks.confirm tRPC mutation (awaiting_user → executing | cancelled)'
     await cleanup();
   });
 
-  async function makeUserWithAwaitingTask() {
+  async function makeUserWithAwaitingTask(origin: 'user' | 'eval' = 'user') {
     const { newExternalId } = await import('@holaday/shared-types');
     const { db } = await import('../../db/client.js');
     const { eq } = await import('drizzle-orm');
@@ -44,7 +44,7 @@ describe('tasks.confirm tRPC mutation (awaiting_user → executing | cancelled)'
     });
     const user = must((await db.select().from(users).where(eq(users.email, email)))[0], 'user');
 
-    const repo = new TaskRepository(db);
+    const repo = new TaskRepository(db, origin);
     const controller = new TaskController();
     const stepHigh = newExternalId('taskStep');
     const stepNext = newExternalId('taskStep');
@@ -68,7 +68,7 @@ describe('tasks.confirm tRPC mutation (awaiting_user → executing | cancelled)'
     return { userExternalId, taskId: s0.taskId };
   }
 
-  async function makeUserWithTaskStatus(status: string) {
+  async function makeUserWithTaskStatus(status: string, origin: 'user' | 'eval' = 'user') {
     const { newExternalId } = await import('@holaday/shared-types');
     const { db } = await import('../../db/client.js');
     const { eq } = await import('drizzle-orm');
@@ -90,7 +90,7 @@ describe('tasks.confirm tRPC mutation (awaiting_user → executing | cancelled)'
       intent: `seeded ${status}`,
       status,
       plan: null,
-      origin: 'user',
+      origin,
     });
     return { userExternalId, taskId };
   }
@@ -132,6 +132,7 @@ describe('tasks.confirm tRPC mutation (awaiting_user → executing | cancelled)'
     route: 'abort' | 'confirm' | 'confirmVideo' | 'pause' | 'resume',
     body: unknown,
     userExternalId: string,
+    taskOrigin?: 'user' | 'eval',
   ) {
     const { signAccessToken } = await import('../../auth/jwt.js');
     const { createHttpApp } = await import('../../http.js');
@@ -147,7 +148,11 @@ describe('tasks.confirm tRPC mutation (awaiting_user → executing | cancelled)'
     const port = address.port;
 
     try {
-      const token = await signAccessToken({ sub: userExternalId, plan: 'free' });
+      const token = await signAccessToken({
+        sub: userExternalId,
+        plan: 'free',
+        ...(taskOrigin ? { taskOrigin } : {}),
+      });
       const res = await fetch(`http://127.0.0.1:${port}/trpc/tasks.${route}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
@@ -241,6 +246,94 @@ describe('tasks.confirm tRPC mutation (awaiting_user → executing | cancelled)'
     );
     expect(taskRow.status).toBe('cancelled');
     expect(taskRow.completedAt).not.toBeNull();
+  });
+
+  it('eval pause cannot control a user-origin task', async () => {
+    const { userExternalId, taskId } = await makeUserWithTaskStatus('executing');
+
+    const { status } = await callTrpc('pause', { taskId }, userExternalId, 'eval');
+
+    expect(status).toBe(404);
+    const { db } = await import('../../db/client.js');
+    const { eq } = await import('drizzle-orm');
+    const { tasks } = await import('../../db/schema/tasks.js');
+    const [taskRow] = await db.select().from(tasks).where(eq(tasks.externalId, taskId)).limit(1);
+    expect(taskRow?.status).toBe('executing');
+  });
+
+  it('eval pause controls its own eval-origin task', async () => {
+    const { userExternalId, taskId } = await makeUserWithTaskStatus('executing', 'eval');
+
+    const { status, json } = await callTrpc('pause', { taskId }, userExternalId, 'eval');
+
+    expect(status).toBe(200);
+    expect((json as { result: { data: { status: string } } }).result.data.status).toBe('paused');
+  });
+
+  it('eval resume cannot control a user-origin task', async () => {
+    const { userExternalId, taskId } = await makeUserWithTaskStatus('paused');
+
+    const { status } = await callTrpc('resume', { taskId }, userExternalId, 'eval');
+
+    expect(status).toBe(404);
+  });
+
+  it('eval resume controls its own eval-origin task', async () => {
+    const { userExternalId, taskId } = await makeUserWithTaskStatus('paused', 'eval');
+
+    const { status, json } = await callTrpc('resume', { taskId }, userExternalId, 'eval');
+
+    expect(status).toBe(200);
+    expect((json as { result: { data: { status: string } } }).result.data.status).toBe('completed');
+  });
+
+  it('eval confirm cannot control a user-origin task', async () => {
+    const { userExternalId, taskId } = await makeUserWithAwaitingTask();
+
+    const { status } = await callTrpc(
+      'confirm',
+      { taskId, decision: 'reject' },
+      userExternalId,
+      'eval',
+    );
+
+    expect(status).toBe(404);
+  });
+
+  it('eval confirm controls its own eval-origin task', async () => {
+    const { userExternalId, taskId } = await makeUserWithAwaitingTask('eval');
+
+    const { status, json } = await callTrpc(
+      'confirm',
+      { taskId, decision: 'reject' },
+      userExternalId,
+      'eval',
+    );
+
+    expect(status).toBe(200);
+    expect((json as { result: { data: { status: string } } }).result.data.status).toBe('cancelled');
+  });
+
+  it('eval abort cannot control a user-origin task', async () => {
+    const { userExternalId, taskId } = await makeUserWithTaskStatus('queued');
+
+    const { status } = await callTrpc('abort', { taskId }, userExternalId, 'eval');
+
+    expect(status).toBe(404);
+    const { db } = await import('../../db/client.js');
+    const { eq } = await import('drizzle-orm');
+    const { tasks } = await import('../../db/schema/tasks.js');
+    const [taskRow] = await db.select().from(tasks).where(eq(tasks.externalId, taskId)).limit(1);
+    expect(taskRow?.status).toBe('queued');
+  });
+
+  it('eval abort controls its own eval-origin task', async () => {
+    const { userExternalId, taskId } = await makeUserWithTaskStatus('queued', 'eval');
+
+    const { status, json } = await callTrpc('abort', { taskId }, userExternalId, 'eval');
+
+    expect(status).toBe(200);
+    expect((json as { result: { data: { state: string } } }).result.data.state).toBe('cancelled');
   });
 
   it('confirmVideo unclear keeps video quotes parked and persists the next prompt', async () => {
