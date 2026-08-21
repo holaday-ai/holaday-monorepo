@@ -21,6 +21,58 @@ describe.each(['p0-smoke', 'p1-regression'])('%s trust contract', (suiteName) =>
   });
 });
 
+const p2CompletedCaseIds = {
+  'p2-content-topic': [
+    'P2_CT_001',
+    'P2_CT_004',
+    'P2_CT_005',
+    'P2_CT_006',
+    'P2_CT_007',
+    'P2_CT_008',
+  ],
+  'p2-ecom-daily': ['P2_ED_001', 'P2_ED_003', 'P2_ED_006', 'P2_ED_007', 'P2_ED_008'],
+  'p2-douyin-review': ['P2_DR_001', 'P2_DR_005', 'P2_DR_006', 'P2_DR_008'],
+} as const;
+
+describe.each(Object.entries(p2CompletedCaseIds))(
+  '%s professional-workflow trust contract',
+  (suiteName, expectedCompletedIds) => {
+    it('requires verified completion backed by persisted user input', () => {
+      const completedCases = readSuite(suiteName).filter(
+        (testCase) => testCase.expectations.mustComplete,
+      );
+
+      expect(completedCases.map((testCase) => testCase.id)).toEqual(expectedCompletedIds);
+      for (const testCase of completedCases) {
+        expect(testCase.expectations).toMatchObject({
+          terminalStatus: 'completed',
+          verificationMustPass: true,
+          minEvidenceEntries: 1,
+          requiredEvidenceSourceTypes: ['user_input'],
+          executionMode: 'generate',
+        });
+      }
+    });
+
+    it('applies the same gate to completed follow-up deliverables', () => {
+      const completedFollowUps = readSuite(suiteName).flatMap((testCase) =>
+        (testCase.replySequence ?? [])
+          .filter((turn) => turn.expectations?.mustComplete)
+          .map((turn) => ({ caseId: testCase.id, expectations: turn.expectations })),
+      );
+
+      expect(completedFollowUps.map((turn) => turn.caseId)).toEqual([expectedCompletedIds.at(-1)]);
+      expect(completedFollowUps[0]?.expectations).toMatchObject({
+        terminalStatus: 'completed',
+        verificationMustPass: true,
+        minEvidenceEntries: 1,
+        requiredEvidenceSourceTypes: ['user_input'],
+        executionMode: 'generate',
+      });
+    });
+  },
+);
+
 describe('P1 persisted acceptance contract', () => {
   it('keeps the production persisted gate bounded and representative', () => {
     const cases = readSuite('p1-persisted-gate');
