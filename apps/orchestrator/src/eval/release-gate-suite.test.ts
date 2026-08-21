@@ -37,4 +37,18 @@ describe('P0 release gate suite', () => {
       completedCases.every((testCase) => testCase.expectations.verificationMustPass === true),
     ).toBe(true);
   });
+
+  it('uses the deterministic missing-template intake for the clarification invariant', () => {
+    const clarificationCase = readReleaseGateSuite().find((testCase) => testCase.id === 'P0_002');
+
+    expect(clarificationCase).toMatchObject({
+      category: 'template_intake',
+      prompt: '帮我填充这个模板',
+      expectations: {
+        terminalStatus: 'awaiting_user',
+        awaitingKind: 'clarification',
+        executionMode: 'template_fill',
+      },
+    });
+  });
 });
