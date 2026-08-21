@@ -6,6 +6,9 @@
     "prompt": "小红书爆款选题策划：品类是 美妆护肤，关键词 早C晚A、油痘肌、平价好物，目标人群 22-30岁敏感肌女生，生成 6 个选题",
     "expectations": {
       "mustComplete": true,
+      "verificationMustPass": true,
+      "minEvidenceEntries": 1,
+      "requiredEvidenceSourceTypes": ["user_input"],
       "terminalStatus": "completed",
       "executionMode": "generate",
       "mustContainAny": ["选题方向", "标题候选", "内容大纲", "发布策略"],
@@ -50,6 +53,9 @@
     "prompt": "小红书爆款选题：品类美妆护肤，平台小红书，竞品账号 完美日记 / 花西子 / 橘朵，目标人群 25-35岁宝妈",
     "expectations": {
       "mustComplete": true,
+      "verificationMustPass": true,
+      "minEvidenceEntries": 1,
+      "requiredEvidenceSourceTypes": ["user_input"],
       "terminalStatus": "completed",
       "executionMode": "generate",
       "mustContainAny": ["竞品参考", "完美日记", "差异化"],
@@ -64,6 +70,9 @@
     "prompt": "抖音 爆款选题策划：品类 数码3C，平台抖音，内容形式 短视频，关键词 性价比 学生党 笔记本评测",
     "expectations": {
       "mustComplete": true,
+      "verificationMustPass": true,
+      "minEvidenceEntries": 1,
+      "requiredEvidenceSourceTypes": ["user_input"],
       "terminalStatus": "completed",
       "executionMode": "generate",
       "mustContainAny": ["短视频", "钩子", "前 3 秒"],
@@ -78,6 +87,9 @@
     "prompt": "B站 爆款选题：品类 数码3C 平台 bilibili 内容形式 长图文 关键词 装机 显卡 性价比",
     "expectations": {
       "mustComplete": true,
+      "verificationMustPass": true,
+      "minEvidenceEntries": 1,
+      "requiredEvidenceSourceTypes": ["user_input"],
       "terminalStatus": "completed",
       "executionMode": "generate",
       "mustContainAny": ["B站", "标题"],
@@ -92,6 +104,9 @@
     "prompt": "小红书 爆款选题：品类 母婴 平台小红书 节点 双11 关键词 囤货 折扣攻略",
     "expectations": {
       "mustComplete": true,
+      "verificationMustPass": true,
+      "minEvidenceEntries": 1,
+      "requiredEvidenceSourceTypes": ["user_input"],
       "terminalStatus": "completed",
       "executionMode": "generate",
       "mustContainAny": ["双11", "选题方向", "标题"],
@@ -106,6 +121,9 @@
     "prompt": "小红书 爆款选题：品类 美妆护肤 平台小红书 关键词 早C晚A 平价 油痘肌 生成 5 个选题",
     "expectations": {
       "mustComplete": true,
+      "verificationMustPass": true,
+      "minEvidenceEntries": 1,
+      "requiredEvidenceSourceTypes": ["user_input"],
       "terminalStatus": "completed",
       "executionMode": "generate",
       "maxDurationMs": 240000
@@ -116,6 +134,9 @@
         "message": "基于这次小红书选题策划的方向，帮我排一份 30 天的发布日历：每条内容的选题、发布时段、所属系列、复用素材标记。",
         "expectations": {
           "mustComplete": true,
+          "verificationMustPass": true,
+          "minEvidenceEntries": 1,
+          "requiredEvidenceSourceTypes": ["user_input"],
           "terminalStatus": "completed",
           "executionMode": "generate",
           "mustContainAny": ["发布日历", "30 天", "周一", "时段"],

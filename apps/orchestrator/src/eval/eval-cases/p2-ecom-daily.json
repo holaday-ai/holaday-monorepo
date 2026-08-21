@@ -6,6 +6,9 @@
     "prompt": "电商日报 日期 2026-05-09 营收 30万 订单 1500 客单价 200 UV 15000 转化率 10% 投放消耗 6万 ROI 1:5 退款率 3% 新客数 200",
     "expectations": {
       "mustComplete": true,
+      "verificationMustPass": true,
+      "minEvidenceEntries": 1,
+      "requiredEvidenceSourceTypes": ["user_input"],
       "terminalStatus": "completed",
       "executionMode": "generate",
       "mustContainAny": ["核心数据", "异动诊断", "明日重点", "执行 Checklist"],
@@ -35,6 +38,9 @@
     "prompt": "昨日营收 50万 怎么样",
     "expectations": {
       "mustComplete": true,
+      "verificationMustPass": true,
+      "minEvidenceEntries": 1,
+      "requiredEvidenceSourceTypes": ["user_input"],
       "terminalStatus": "completed",
       "executionMode": "generate",
       "mustContainAny": ["核心数据", "明日重点"],
@@ -79,6 +85,9 @@
     "prompt": "帮我做昨日的电商日报，营收 50万 订单 2500 客单价 200 投放 10万 ROI 1:5",
     "expectations": {
       "mustComplete": true,
+      "verificationMustPass": true,
+      "minEvidenceEntries": 1,
+      "requiredEvidenceSourceTypes": ["user_input"],
       "terminalStatus": "completed",
       "executionMode": "generate",
       "mustContainAny": ["核心数据", "投放", "渠道"],
@@ -93,6 +102,9 @@
     "prompt": "日报 2026-05-09 营收 80万 订单 4000 客单价 200 转化率 8% UV 50000 TOP SKU: 商品A 占比40% / 商品B 占比25% / 商品C 占比15%",
     "expectations": {
       "mustComplete": true,
+      "verificationMustPass": true,
+      "minEvidenceEntries": 1,
+      "requiredEvidenceSourceTypes": ["user_input"],
       "terminalStatus": "completed",
       "executionMode": "generate",
       "mustContainAny": ["商品A", "TOP", "SKU"],
@@ -107,6 +119,9 @@
     "prompt": "电商日报 日期 2026-05-09 营收 30万 订单 1500 客单价 200 UV 15000 转化率 10%",
     "expectations": {
       "mustComplete": true,
+      "verificationMustPass": true,
+      "minEvidenceEntries": 1,
+      "requiredEvidenceSourceTypes": ["user_input"],
       "terminalStatus": "completed",
       "executionMode": "generate",
       "maxDurationMs": 240000
@@ -117,6 +132,9 @@
         "message": "基于这次电商日报的诊断和明日重点，帮我生成一份完整的明日运营 SOP：开店前准备、上架顺序、活动页改动、投放配置、客服话术。",
         "expectations": {
           "mustComplete": true,
+          "verificationMustPass": true,
+          "minEvidenceEntries": 1,
+          "requiredEvidenceSourceTypes": ["user_input"],
           "terminalStatus": "completed",
           "executionMode": "generate",
           "mustContainAny": ["开店前", "SOP", "活动页", "投放"],
