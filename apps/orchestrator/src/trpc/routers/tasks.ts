@@ -189,6 +189,7 @@ import { assessGeneralTaskIntake } from '../../execution/general-task-intake.js'
 import {
   getExpertWorkflowById,
   matchExpertWorkflow as matchTypedExpertWorkflow,
+  resolveExpertWorkflowDispatch,
 } from '../../execution/expert-workflow-registry.js';
 import { getFeatureFlags as getExecutionFeatureFlags } from '../../execution/feature-flags.js';
 import { fencedFileIds, isDocumentOutput } from '../../execution/file-artifact-consistency.js';
@@ -1505,17 +1506,24 @@ export const tasksRouter = router({
               roleId: taskSkillId ?? null,
             })
           : null;
-    // Phase 3 R1 (Codex follow-up #2) — on follow-up tasks the chip
-    // prompt usually doesn't carry workflow keywords ("生成发布日历"
-    // / "深挖 ROI 不达预期" / "生成下场直播 SOP"). Fall back to the
-    // parent task's workflow id so the contract stays full-tier and
-    // the verifier's section_presence + source_annotation checks
-    // continue to fire on the follow-up's report.
+    // A follow-up chip usually does not carry the original workflow
+    // keywords. The parent workflow still forces the safe generate lane,
+    // but the new deliverable must not inherit the parent's report schema:
+    // a 30-day calendar is not another content-topic report, and a live SOP
+    // is not another douyin-review report. Only a workflow matched by the
+    // follow-up text itself becomes the new report/verifier contract.
     const typedWorkflowFromParent =
       isFollowUp && parentWorkflowId ? getExpertWorkflowById(parentWorkflowId) : null;
-    const typedWorkflow = typedWorkflowFromMatcher ?? typedWorkflowFromParent;
+    const {
+      reportWorkflow: typedWorkflow,
+      routingWorkflow: typedRoutingWorkflow,
+    } = resolveExpertWorkflowDispatch({
+      matchedWorkflow: typedWorkflowFromMatcher,
+      parentWorkflow: typedWorkflowFromParent,
+      isFollowUp,
+    });
     const typedWorkflowOverride =
-      typedWorkflow != null && expertWorkflow?.routeOverride !== 'browser'
+      typedRoutingWorkflow != null && expertWorkflow?.routeOverride !== 'browser'
         ? ('generate' as const)
         : null;
     const executionMode = resolveFollowUpExecutionMode({
@@ -1649,10 +1657,11 @@ export const tasksRouter = router({
       },
       'task:expert_dispatch',
     );
-    if (typedWorkflow != null && executionMode === 'generate') {
+    if (typedRoutingWorkflow != null && executionMode === 'generate') {
       ctx.logger.info(
         {
-          typedWorkflowId: typedWorkflow.workflowId,
+          typedWorkflowId: typedRoutingWorkflow.workflowId,
+          reportWorkflowId: typedWorkflow?.workflowId ?? null,
           classifiedExecutionMode,
           legacyRouteOverride: expertWorkflow?.routeOverride ?? null,
         },

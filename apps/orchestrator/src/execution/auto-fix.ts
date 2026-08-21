@@ -13,6 +13,8 @@
  *      candidate exists (rather than fabricating further),
  *   3. appends a short "补充字段" note when the answer omits
  *      provided required inputs.
+ *   4. adds a truthful section-wide `[模型假设]` provenance note
+ *      when an expert-workflow draft omitted the required marker.
  *
  * If no fix can be applied the answer comes back unchanged and the
  * applied list is empty — caller can decide to escalate.
@@ -20,6 +22,7 @@
 import type { ExecutionContract } from './execution-contract.js';
 import type { EvidenceLedger } from './evidence-ledger.js';
 import type { VerificationResult } from './answer-verifier.js';
+import type { ExpertWorkflowContract } from './expert-workflow-contract.js';
 
 const URL_RE = /https?:\/\/[^\s,;'")\]>]+/g;
 
@@ -35,6 +38,14 @@ const URL_RE = /https?:\/\/[^\s,;'")\]>]+/g;
 const MARKDOWN_LINK_RE = /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g;
 const URL_DROP_EMPTY_FALLBACK =
   '这些网址缺少可验证来源，已从结果中移除。请允许联网检索后再获取可靠链接。';
+const WORKFLOW_SOURCE_NOTE =
+  '> 来源说明：[模型假设] 本节内容基于用户输入与模型经验生成，未引用外部实时数据。';
+const WORKFLOW_SOURCE_MARKERS = [
+  '[用户提供]',
+  '[系统计算]',
+  '[模型假设]',
+  '[外部来源]',
+] as const;
 
 export type AutoFixKind =
   | 'url_substitute'
@@ -42,7 +53,8 @@ export type AutoFixKind =
   | 'missing_fields_note'
   | 'empty_url_fill'
   | 'ecommerce_row_prune'
-  | 'duplicate_candidate_link_drop';
+  | 'duplicate_candidate_link_drop'
+  | 'source_annotation_note';
 
 export interface AutoFixOp {
   kind: AutoFixKind;
@@ -54,6 +66,7 @@ export interface AutoFixInputs {
   ledger: EvidenceLedger;
   verification: VerificationResult;
   answerText: string;
+  workflowContract?: ExpertWorkflowContract;
 }
 
 export interface AutoFixOutput {
@@ -122,7 +135,75 @@ export function autoFix(inputs: AutoFixInputs): AutoFixOutput {
     if (out.op) ops.push(out.op);
   }
 
+  // 3. Expert-workflow provenance. The deterministic verifier only
+  // requires a marker inside each annotated section, but model output
+  // occasionally omits it despite the pinned prompt. Adding an explicit
+  // section-wide model-assumption note is truthful (the draft is model
+  // generated), does not alter any recommendation, and avoids asking the
+  // user to clarify data they already supplied.
+  const missingWorkflowSources = inputs.verification.checks.find(
+    (c) => c.criterionId === 'workflow.source_annotation' && !c.passed,
+  );
+  if (missingWorkflowSources && inputs.workflowContract) {
+    const out = addWorkflowSourceNotes(text, inputs.workflowContract);
+    text = out.text;
+    ops.push(...out.ops);
+  }
+
   return { fixed: text, applied: ops };
+}
+
+function addWorkflowSourceNotes(
+  text: string,
+  workflow: ExpertWorkflowContract,
+): { text: string; ops: AutoFixOp[] } {
+  const lines = text.split('\n');
+  const ops: AutoFixOp[] = [];
+
+  for (const section of workflow.reportSections.filter((item) => item.sourceAnnotation)) {
+    const headingIndex = findSectionHeadingLine(lines, section.title);
+    if (headingIndex === -1) continue;
+
+    const nextHeadingIndex = workflow.reportSections
+      .filter((item) => item.title !== section.title)
+      .map((item) => findSectionHeadingLine(lines, item.title, headingIndex + 1))
+      .filter((index) => index > headingIndex)
+      .reduce((nearest, index) => Math.min(nearest, index), lines.length);
+    const body = lines.slice(headingIndex + 1, nextHeadingIndex).join('\n');
+    if (WORKFLOW_SOURCE_MARKERS.some((marker) => body.includes(marker))) continue;
+
+    lines.splice(headingIndex + 1, 0, '', WORKFLOW_SOURCE_NOTE);
+    ops.push({
+      kind: 'source_annotation_note',
+      detail: `${workflow.workflowId}:${section.id} marked as model assumption`,
+    });
+  }
+
+  return { text: lines.join('\n'), ops };
+}
+
+function findSectionHeadingLine(
+  lines: readonly string[],
+  title: string,
+  fromIndex = 0,
+): number {
+  const titleCore = normaliseSectionText(title);
+  for (let index = fromIndex; index < lines.length; index += 1) {
+    const lineCore = normaliseSectionText(lines[index] ?? '');
+    const isHeadingMatch =
+      lineCore === titleCore ||
+      (lineCore.endsWith(titleCore) && lineCore.length <= titleCore.length + 6);
+    if (isHeadingMatch) return index;
+  }
+  return -1;
+}
+
+function normaliseSectionText(value: string): string {
+  return value
+    .replace(/\p{Extended_Pictographic}/gu, '')
+    .replace(/\uFE0F/g, '')
+    .replace(/[#*_`>\s:：-]+/g, '')
+    .trim();
 }
 
 // ---------------------------------------------------------------------------

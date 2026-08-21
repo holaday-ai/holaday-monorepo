@@ -261,7 +261,7 @@ export function classifyIntentForOutputRequirement(intent: string): {
 
   // E-commerce listing — at least one product-list cue AND either a
   // count signal or a price/sort signal.
-  const ecomCue = /商品|榜单|排行|淘宝|天猫|京东|拼多多|电商|平台|amazon|亚马逊|sku|商城|网购/i.test(
+  const ecomCue = /商品|榜单|排行|淘宝|天猫|京东|拼多多|电商|amazon|亚马逊|sku|商城|网购/i.test(
     text,
   );
   const minItems = inferRequestedItemCount(text);

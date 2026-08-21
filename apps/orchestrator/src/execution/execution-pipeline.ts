@@ -745,6 +745,7 @@ function runFixLoop(
     ledger,
     verification: initialVerification,
     answerText: inputs.answerText,
+    ...(workflowContract ? { workflowContract } : {}),
   });
   if (fix.applied.length === 0) {
     // Nothing to fix — keep the original verdict but demote so
