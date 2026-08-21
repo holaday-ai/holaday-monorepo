@@ -73,6 +73,8 @@
     "expectations": {
       "mustComplete": true,
       "verificationMustPass": true,
+      "minEvidenceEntries": 2,
+      "requiredEvidenceSourceTypes": ["tool_result"],
       "executionMode": "scrape",
       "maxDurationMs": 90000
     },
@@ -86,6 +88,8 @@
     "expectations": {
       "mustComplete": true,
       "verificationMustPass": true,
+      "minEvidenceEntries": 2,
+      "requiredEvidenceSourceTypes": ["tool_result"],
       "executionMode": "scrape",
       "maxDurationMs": 90000
     },
@@ -99,6 +103,8 @@
     "expectations": {
       "mustComplete": true,
       "verificationMustPass": true,
+      "minEvidenceEntries": 2,
+      "requiredEvidenceSourceTypes": ["tool_result"],
       "executionMode": "scrape",
       "maxDurationMs": 120000
     },
@@ -112,6 +118,8 @@
     "expectations": {
       "mustComplete": true,
       "verificationMustPass": true,
+      "minEvidenceEntries": 2,
+      "requiredEvidenceSourceTypes": ["tool_result"],
       "executionMode": "scrape",
       "maxDurationMs": 120000
     },
@@ -137,6 +145,9 @@
     "expectations": {
       "mustComplete": true,
       "verificationMustPass": true,
+      "minEvidenceEntries": 2,
+      "requiredEvidenceSourceTypes": ["browser_state"],
+      "requiredActionCaptureTypes": ["navigate"],
       "executionMode": "browser",
       "urlMustMatch": "baidu.com",
       "maxDurationMs": 180000
@@ -151,6 +162,9 @@
     "expectations": {
       "mustComplete": true,
       "verificationMustPass": true,
+      "minEvidenceEntries": 2,
+      "requiredEvidenceSourceTypes": ["browser_state"],
+      "requiredActionCaptureTypes": ["navigate", "click"],
       "executionMode": "browser",
       "urlMustMatch": "iana.org",
       "maxDurationMs": 240000
@@ -165,6 +179,9 @@
     "expectations": {
       "mustComplete": true,
       "verificationMustPass": true,
+      "minEvidenceEntries": 2,
+      "requiredEvidenceSourceTypes": ["browser_state"],
+      "requiredActionCaptureTypes": ["navigate", "type"],
       "executionMode": "browser",
       "urlMustMatch": "bing.com",
       "maxDurationMs": 180000
@@ -180,6 +197,7 @@
       "mustComplete": false,
       "terminalStatus": "awaiting_user",
       "awaitingKind": "login",
+      "requiredActionCaptureTypes": ["navigate"],
       "executionMode": "browser",
       "maxDurationMs": 180000
     },
@@ -193,6 +211,9 @@
     "expectations": {
       "mustComplete": true,
       "verificationMustPass": true,
+      "minEvidenceEntries": 2,
+      "requiredEvidenceSourceTypes": ["browser_state"],
+      "requiredActionCaptureTypes": ["navigate"],
       "executionMode": "browser",
       "urlMustMatch": "example.com",
       "maxDurationMs": 120000

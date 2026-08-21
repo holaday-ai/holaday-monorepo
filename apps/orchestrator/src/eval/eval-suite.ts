@@ -22,11 +22,16 @@ export type EvalCategory = string;
 
 export type ExpectedExecutionMode = 'browser' | 'generate' | 'scrape';
 
-export type ExpectedAwaitingKind =
-  | 'clarification'
-  | 'login'
-  | 'captcha'
-  | 'browser_action';
+export type ExpectedEvidenceSourceType =
+  | 'user_input'
+  | 'file_parse'
+  | 'browser_state'
+  | 'tool_result'
+  | 'inference';
+
+export type ExpectedActionCaptureType = 'navigate' | 'click' | 'type';
+
+export type ExpectedAwaitingKind = 'clarification' | 'login' | 'captcha' | 'browser_action';
 
 export type ExpectedTerminalStatus =
   | 'completed'
@@ -53,6 +58,16 @@ export interface EvalExpectations {
    * A completed status alone is not sufficient: false and null both fail.
    */
   verificationMustPass?: boolean;
+  /** Minimum number of valid persisted EvidenceLedger entries. */
+  minEvidenceEntries?: number;
+  /** Every listed EvidenceLedger source type must be present. */
+  requiredEvidenceSourceTypes?: ExpectedEvidenceSourceType[];
+  /** Minimum number of active, unexpired task_files output rows. */
+  minOutputFiles?: number;
+  /** Every listed MIME type must exist in an active output-file row. */
+  requiredOutputMimeTypes?: string[];
+  /** Every listed browser action must exist in task_action_captures. */
+  requiredActionCaptureTypes?: ExpectedActionCaptureType[];
   /**
    * Pin the terminal status. When set, this overrides `mustComplete`
    * — a case that expects 'awaiting_user' shouldn't also need
