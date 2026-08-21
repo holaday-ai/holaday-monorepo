@@ -1,4 +1,7 @@
+import type { EvalAcceptanceSnapshot } from './eval-acceptance-snapshot.js';
 import type { EvalExpectations } from './eval-suite.js';
+
+export type { EvalAcceptanceSnapshot } from './eval-acceptance-snapshot.js';
 
 export interface EvalTaskDetail {
   taskId: string;
@@ -52,6 +55,7 @@ export function validateEvalExpectations(
   expectations: EvalExpectations,
   prefix: string,
   capturedExecutionMode: string | null,
+  acceptanceSnapshot?: EvalAcceptanceSnapshot,
 ): string[] {
   const failures: string[] = [];
   if (!detail) {
@@ -74,6 +78,37 @@ export function validateEvalExpectations(
     failures.push(
       `${prefix}verificationMustPass: expected true, got ${String(detail.verificationPassed)}`,
     );
+  }
+  if (
+    expectations.minEvidenceEntries !== undefined &&
+    (acceptanceSnapshot?.evidenceEntryCount ?? 0) < expectations.minEvidenceEntries
+  ) {
+    failures.push(
+      `${prefix}minEvidenceEntries: expected >= ${expectations.minEvidenceEntries}, got ${acceptanceSnapshot?.evidenceEntryCount ?? 0}`,
+    );
+  }
+  for (const sourceType of expectations.requiredEvidenceSourceTypes ?? []) {
+    if ((acceptanceSnapshot?.evidenceSourceTypeCounts[sourceType] ?? 0) === 0) {
+      failures.push(`${prefix}requiredEvidenceSourceTypes: missing ${sourceType}`);
+    }
+  }
+  if (
+    expectations.minOutputFiles !== undefined &&
+    (acceptanceSnapshot?.outputFileCount ?? 0) < expectations.minOutputFiles
+  ) {
+    failures.push(
+      `${prefix}minOutputFiles: expected >= ${expectations.minOutputFiles}, got ${acceptanceSnapshot?.outputFileCount ?? 0}`,
+    );
+  }
+  for (const mimetype of expectations.requiredOutputMimeTypes ?? []) {
+    if ((acceptanceSnapshot?.outputMimeTypeCounts[mimetype] ?? 0) === 0) {
+      failures.push(`${prefix}requiredOutputMimeTypes: missing ${mimetype}`);
+    }
+  }
+  for (const actionType of expectations.requiredActionCaptureTypes ?? []) {
+    if ((acceptanceSnapshot?.actionCaptureTypeCounts[actionType] ?? 0) === 0) {
+      failures.push(`${prefix}requiredActionCaptureTypes: missing ${actionType}`);
+    }
   }
   if (expectations.executionMode && capturedExecutionMode !== expectations.executionMode) {
     failures.push(

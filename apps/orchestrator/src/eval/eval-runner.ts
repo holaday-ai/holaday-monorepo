@@ -34,26 +34,29 @@ import { env } from '../config/env.js';
 import { db } from '../db/client.js';
 import { users } from '../db/schema/users.js';
 import { isTaskTerminalStatus } from '../task-status.js';
+import { loadEvalAcceptanceSnapshot } from './eval-acceptance-loader.js';
+import {
+  type EvalAcceptanceSnapshot,
+  requiresEvalAcceptanceSnapshot,
+  satisfiesEvalAcceptanceSnapshot,
+} from './eval-acceptance-snapshot.js';
 import {
   type EvalTaskDetail,
   readResultField,
   validateEvalExpectations,
 } from './eval-expectations.js';
-import type {
-  EvalCase,
-  EvalCaseResult,
-  EvalReport,
-} from './eval-suite.js';
+import type { EvalCase, EvalCaseResult, EvalExpectations, EvalReport } from './eval-suite.js';
 import { writeEvalSummary } from './eval-summary.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const DEFAULT_BASE = `http://127.0.0.1:${env.HTTP_PORT}`;
 const BASE_URL = (process.env.EVAL_BASE_URL ?? DEFAULT_BASE).replace(/\/$/, '');
-const EVAL_USER_EXTERNAL_ID =
-  process.env.EVAL_USER_EXTERNAL_ID ?? 'usr_EeYpvsvLtyDzN4VLQi7BT';
+const EVAL_USER_EXTERNAL_ID = process.env.EVAL_USER_EXTERNAL_ID ?? 'usr_EeYpvsvLtyDzN4VLQi7BT';
 const POLL_INTERVAL_MS = 1_500;
 const DEFAULT_MAX_DURATION_MS = 180_000;
+const ACCEPTANCE_SNAPSHOT_RETRY_MS = 200;
+const ACCEPTANCE_SNAPSHOT_MAX_ATTEMPTS = 5;
 
 interface CreateTaskOut {
   taskId: string;
@@ -65,6 +68,26 @@ interface CreateTaskOut {
 interface ListOut {
   tasks: Array<{ taskId: string; status: string; intent: string }>;
   nextCursor: number | null;
+}
+
+async function loadAcceptanceForExpectations(
+  taskId: string,
+  expectations: EvalExpectations,
+): Promise<EvalAcceptanceSnapshot | undefined> {
+  if (!requiresEvalAcceptanceSnapshot(expectations)) return undefined;
+
+  let snapshot: EvalAcceptanceSnapshot | undefined;
+  for (let attempt = 1; attempt <= ACCEPTANCE_SNAPSHOT_MAX_ATTEMPTS; attempt += 1) {
+    snapshot = await loadEvalAcceptanceSnapshot(taskId);
+    if (
+      satisfiesEvalAcceptanceSnapshot(snapshot, expectations) ||
+      attempt === ACCEPTANCE_SNAPSHOT_MAX_ATTEMPTS
+    ) {
+      return snapshot;
+    }
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, ACCEPTANCE_SNAPSHOT_RETRY_MS));
+  }
+  return snapshot;
 }
 
 async function ensureUser(externalId: string): Promise<void> {
@@ -221,6 +244,7 @@ async function runStandardCase(
   let taskId: string | undefined;
   let executionMode: string | null = null;
   let detail: EvalTaskDetail | undefined;
+  let acceptanceSnapshot: EvalAcceptanceSnapshot | undefined;
   let timedOut = false;
 
   try {
@@ -279,8 +303,17 @@ async function runStandardCase(
   const initialResultMode = readResultField<string>(detail?.result, 'executionMode');
   if (initialResultMode) executionMode = initialResultMode;
   if (detail) {
+    if (taskId) {
+      try {
+        acceptanceSnapshot = await loadAcceptanceForExpectations(taskId, exp);
+      } catch (err) {
+        failures.push(
+          `acceptanceSnapshot: load failed (${err instanceof Error ? err.message : String(err)})`,
+        );
+      }
+    }
     failures.push(
-      ...validateEvalExpectations(detail, exp, '', executionMode),
+      ...validateEvalExpectations(detail, exp, '', executionMode, acceptanceSnapshot),
     );
   } else if (!timedOut) {
     failures.push('runner: no detail captured — task never created');
@@ -366,12 +399,21 @@ async function runStandardCase(
       const turnResultMode = readResultField<string>(detail?.result, 'executionMode');
       if (turnResultMode) executionMode = turnResultMode;
       if (turn.expectations) {
+        try {
+          acceptanceSnapshot = await loadAcceptanceForExpectations(taskId, turn.expectations);
+        } catch (err) {
+          failures.push(
+            `${turnLabel}acceptanceSnapshot: load failed (${err instanceof Error ? err.message : String(err)})`,
+          );
+          acceptanceSnapshot = undefined;
+        }
         failures.push(
           ...validateEvalExpectations(
             detail,
             turn.expectations,
             turnLabel,
             executionMode,
+            acceptanceSnapshot,
           ),
         );
       }

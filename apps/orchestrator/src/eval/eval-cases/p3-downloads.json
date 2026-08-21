@@ -7,16 +7,14 @@
     "expectations": {
       "mustComplete": true,
       "terminalStatus": "completed",
+      "verificationMustPass": true,
+      "minOutputFiles": 1,
+      "requiredOutputMimeTypes": ["image/jpeg"],
       "executionMode": "browser",
       "urlMustMatch": "example.com",
-      "mustContainAny": [
-        "screenshot-tsk_",
-        "image/jpeg",
-        "/files/file_"
-      ],
       "maxDurationMs": 180000
     },
-    "notes": "L1 — every browser task auto-saves the final screenshot as a downloadable file. mustContainAny scans the haystack (now includes metadata.attachments JSON) for the auto-generated filename pattern (screenshot-tsk_X.jpg) OR the MIME (image/jpeg — captureFinalState produces JPEG q80) OR the download URL fragment. The model's summary still includes 'Example Domain' (P0_004 baseline), this case just adds the attachment assertion."
+    "notes": "L1 — every browser task auto-saves the final screenshot as a downloadable file. The blocking assertion reads active task_files output rows and requires image/jpeg; result wording and attachment-link text cannot satisfy it."
   },
   {
     "id": "P3_DL_002",
@@ -26,16 +24,13 @@
     "expectations": {
       "mustComplete": true,
       "terminalStatus": "completed",
+      "verificationMustPass": true,
+      "minOutputFiles": 1,
+      "requiredOutputMimeTypes": ["application/pdf"],
       "executionMode": "browser",
       "urlMustMatch": "example.com",
-      "mustContainAny": [
-        "save_page_as_pdf",
-        "application/pdf",
-        ".pdf",
-        "/files/file_"
-      ],
       "maxDurationMs": 300000
     },
-    "notes": "L2 — explicit prompt tells the agent to invoke save_page_as_pdf. The tool result text includes '下载链接：...' which the agent echoes in its summary. mustContainAny also accepts the attachment JSON (application/pdf MIME / .pdf filename / /files/file_ URL prefix) so the test passes regardless of how the model phrases the final answer."
+    "notes": "L2 — explicit prompt tells the agent to invoke save_page_as_pdf. The blocking assertion reads active task_files output rows and requires application/pdf; a claimed download link without the real file now fails."
   }
 ]
