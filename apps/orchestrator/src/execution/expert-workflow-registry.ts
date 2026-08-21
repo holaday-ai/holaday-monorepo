@@ -270,6 +270,18 @@ export function resolveExpertWorkflowDispatch(input: {
   return { reportWorkflow, routingWorkflow };
 }
 
+/**
+ * Keyword-based specialist lanes (for example A-share Q&A) are fallbacks for
+ * otherwise unclaimed intents. Once a typed workflow owns routing, letting a
+ * later keyword matcher override it can silently replace its intake and
+ * verification contract — "电商日报" previously became the stock 南极电商.
+ */
+export function shouldAllowSpecializedLaneOverride(
+  routingWorkflow: ExpertWorkflowContract | null,
+): boolean {
+  return routingWorkflow == null;
+}
+
 function matchesWorkflowFollowUpAction(
   workflowId: ExpertWorkflowContract['workflowId'],
   intent: string,
