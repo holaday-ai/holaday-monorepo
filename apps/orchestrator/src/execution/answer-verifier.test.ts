@@ -327,6 +327,29 @@ describe('verifyDeterministic — number cross-validation (acceptance #4)', () =
     expect(numCheck!.passed).toBe(true);
   });
 
+  it('normalizes Chinese 万 units before cross-validating user-input facts', () => {
+    const contract = happyChecklistContract('tsk_num_cn_units');
+    const ledger = ledgerWith('tsk_num_cn_units', {
+      fact: '复盘抖音直播：GMV 15万 UV 2万人 订单 800 客单价 188 转化率 4%',
+      sourceType: 'user_input',
+      sourceDetail: 'msg',
+      confidence: 'observed',
+    });
+
+    const result = verifyDeterministic({
+      contract,
+      ledger,
+      answerText: '直播复盘 ' + 'x'.repeat(80),
+    });
+    const numCheck = result.checks.find(
+      (check) => check.criterionId === 'generic.number_cross_check',
+    );
+
+    expect(numCheck).toBeDefined();
+    expect(numCheck?.passed).toBe(true);
+    expect(numCheck?.detail).toContain('GMV=150000');
+  });
+
   it('skips cross-check when triple is incomplete', () => {
     const contract = happyChecklistContract('tsk_num_partial');
     const ledger = ledgerWith('tsk_num_partial', {

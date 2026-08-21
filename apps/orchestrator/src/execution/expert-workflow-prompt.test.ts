@@ -54,6 +54,14 @@ describe('buildReportSystemPrompt — clean data', () => {
     expect(prompt).toContain('严格按 section 顺序输出');
     expect(prompt).toContain('不要以解释 / 引言开场');
   });
+
+  it('includes a literal non-renamable Markdown skeleton for every required section', () => {
+    expect(prompt).toContain('不得重命名、增加编号或用其他章节替代');
+    for (const section of W.reportSections.filter((item) => item.required)) {
+      expect(prompt).toMatch(new RegExp(`^## ${section.title}$`, 'm'));
+    }
+    expect(prompt).toContain('## 下场直播 Checklist\n- [ ]');
+  });
 });
 
 describe('buildReportSystemPrompt — failed validator surfaces in prompt', () => {
