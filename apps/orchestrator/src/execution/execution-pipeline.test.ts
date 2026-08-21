@@ -641,6 +641,48 @@ describe('fixable demotion when autoFix produces no ops', () => {
 describe('full tier triggers LLM verifier', () => {
   beforeEach(() => flagsAllOn());
 
+  it('registered typed workflow keeps deterministic verdict without an LLM call', async () => {
+    initExecution({
+      taskId: 'tsk_typed_full',
+      intent: '复盘抖音直播',
+      executionMode: 'generate',
+      expertWorkflowId: 'douyin-review',
+      requiredInputs: [
+        { name: 'GMV', description: '总成交额', provided: true },
+        { name: '客单价', description: '人均下单金额', provided: true },
+      ],
+    });
+    recordEvidence('tsk_typed_full', {
+      fact: 'parsed: GMV=100000 客单价=80',
+      sourceType: 'user_input',
+      sourceDetail: 'msg',
+      confidence: 'observed',
+    });
+    const client = makeStubClient('{"passed":true,"issues":[]}');
+    const answerText = [
+      '## 数据校验',
+      '已通过。',
+      '## 核心数据',
+      'GMV ¥100000 [用户提供]，客单价 ¥80 [用户提供]。',
+      '## 问题诊断',
+      '当前数据口径一致 [用户提供]。' + '分析内容'.repeat(80),
+      '## 优化动作',
+      '1. 固定主推品节奏并记录转化。',
+      '## 下场直播 Checklist',
+      '- [ ] 开播前核对商品和投放配置。',
+    ].join('\n');
+
+    const out = await verifyAndFinalize({
+      taskId: 'tsk_typed_full',
+      answerText,
+      client,
+    });
+
+    expect(out.verification!.tier).toBe('deterministic');
+    expect(out.verification!.passed).toBe(true);
+    expect(client.messages.create).not.toHaveBeenCalled();
+  });
+
   it('deterministic passes → LLM tier called → final passed=true', async () => {
     initExecution({
       taskId: 'tsk_full1',

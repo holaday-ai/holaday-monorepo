@@ -45,6 +45,21 @@ export function buildReportSystemPrompt(opts: {
   lines.push(workflow.systemPromptPreamble);
   lines.push('');
 
+  lines.push('## 输出规模预算');
+  lines.push(
+    `- 正文目标 ${workflow.generationBudget.targetChars.min}-${workflow.generationBudget.targetChars.max} 个中文字符；完整覆盖必需 section，但同一事实、数字和结论只写一次。`,
+  );
+  if (workflow.workflowId === 'content-topic') {
+    const requestedTopicCount = Number(extracted.topic_count ?? 5);
+    const topicCount = Number.isFinite(requestedTopicCount)
+      ? Math.max(1, Math.floor(requestedTopicCount))
+      : 5;
+    lines.push(`- 严格输出 ${topicCount} 个选题方向；不要擅自增加或减少。`);
+    lines.push('- 每个方向只生成 2 个标题，且两种钩子不同。');
+    lines.push('- 只展开 1 个 Top 选题为详细内容大纲。');
+  }
+  lines.push('');
+
   lines.push('## 必须输出的报告 sections（按顺序）');
   for (const s of workflow.reportSections) {
     if (!s.required) continue;

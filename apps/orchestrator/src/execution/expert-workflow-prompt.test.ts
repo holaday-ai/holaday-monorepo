@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { DOUYIN_REVIEW_WORKFLOW } from './expert-workflow-douyin.js';
+import { CONTENT_TOPIC_WORKFLOW } from './expert-workflow-content-topic.js';
 import {
   buildFollowUpFooter,
   buildReportSystemPrompt,
@@ -97,6 +98,25 @@ describe('buildReportSystemPrompt — failed validator surfaces in prompt', () =
 
   it('passed validators still get pass marker', () => {
     expect(prompt).toContain('通过 `conversion_sanity`');
+  });
+});
+
+describe('buildReportSystemPrompt — workflow generation budget', () => {
+  it('pins the workflow character target and dynamic topic count', () => {
+    const prompt = buildReportSystemPrompt({
+      workflow: CONTENT_TOPIC_WORKFLOW,
+      extracted: {
+        category: '母婴',
+        platform: '小红书',
+        topic_count: 8,
+      },
+      validatorResults: [],
+    });
+
+    expect(prompt).toContain('正文目标 2600-3800 个中文字符');
+    expect(prompt).toContain('严格输出 8 个选题方向');
+    expect(prompt).toContain('每个方向只生成 2 个标题');
+    expect(prompt).toContain('只展开 1 个 Top 选题');
   });
 });
 

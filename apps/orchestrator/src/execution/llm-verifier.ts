@@ -115,8 +115,13 @@ export interface LlmVerifierInputs {
 export function shouldRunLlmVerifier(
   deterministicResult: VerificationResult,
   contract: ExecutionContract,
+  hasTypedWorkflowContract = false,
 ): boolean {
-  return contract.tier === 'full' && deterministicResult.passed;
+  return (
+    contract.tier === 'full' &&
+    deterministicResult.passed &&
+    !hasTypedWorkflowContract
+  );
 }
 
 /**

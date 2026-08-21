@@ -480,7 +480,8 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
   const MAX_ATTEMPTS = 2;
   const requestArgs = {
     model: opts.model ?? DEFAULT_MODEL,
-    max_tokens: opts.maxTokens ?? DEFAULT_MAX_TOKENS,
+    max_tokens:
+      opts.maxTokens ?? workflow?.generationBudget.maxTokens ?? DEFAULT_MAX_TOKENS,
     // Cache the system addon — when 100 tasks fire under the same
     // role-id in a window, the role addon is a cache hit on every
     // request after the first.

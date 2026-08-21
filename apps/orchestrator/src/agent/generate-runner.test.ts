@@ -14,9 +14,10 @@
  *                    classifyRole.
  */
 
-import { describe, expect, it, vi } from 'vitest';
-import { pino } from 'pino';
 import type Anthropic from '@anthropic-ai/sdk';
+import { pino } from 'pino';
+import { describe, expect, it, vi } from 'vitest';
+import { CONTENT_TOPIC_WORKFLOW } from '../execution/expert-workflow-content-topic.js';
 import { runGenerateTask } from './generate-runner.js';
 
 function makeLogger() {
@@ -141,6 +142,23 @@ describe('runGenerateTask (phase 22a)', () => {
       expect(outcome.outputTokens).toBe(567);
       expect(outcome.reason).toBeUndefined();
       expect(outcome.durationMs).toBeGreaterThanOrEqual(0);
+    });
+
+    it('ordinary generate task keeps the global 8192-token budget', async () => {
+      const client = makeClient({ textOut: '普通生成结果' });
+
+      const outcome = await runGenerateTask({
+        taskId: 'tsk_default_budget',
+        userId: 'usr_test',
+        intent: '写一份详细的产品方案，包含背景、目标和执行步骤',
+        client,
+        logger: makeLogger(),
+      });
+
+      const streamMock = client.messages.stream as unknown as ReturnType<typeof vi.fn>;
+      const params = streamMock.mock.calls[0]?.[0] as { max_tokens: number };
+      expect(outcome.status).toBe('completed');
+      expect(params.max_tokens).toBe(8192);
     });
 
     it('threads forced expert mode into the generated system prompt', async () => {
@@ -320,9 +338,11 @@ describe('runGenerateTask (phase 22a)', () => {
       // we can assert it carries the workflow's directive markers
       // (source-annotation markers, section list).
       let systemPromptSeen = '';
+      let maxTokensSeen = 0;
       const stream = vi.fn(
-        (params: { system: { text: string }[] }, _reqOpts?: unknown): unknown => {
+        (params: { system: { text: string }[]; max_tokens: number }, _reqOpts?: unknown): unknown => {
           systemPromptSeen = params.system[0]?.text ?? '';
+          maxTokensSeen = params.max_tokens;
           const listeners: Record<string, Array<(...args: unknown[]) => void>> = {};
           const emit = (event: string, ...args: unknown[]) => {
             for (const fn of listeners[event] ?? []) fn(...args);
@@ -369,9 +389,49 @@ describe('runGenerateTask (phase 22a)', () => {
       expect(systemPromptSeen).toContain('[用户提供]');
       expect(systemPromptSeen).toContain('核心数据');
       expect(systemPromptSeen).toContain('"gmv": 100000');
+      expect(maxTokensSeen).toBe(4096);
       // Follow-up footer appended:
       expect(outcome.summary).toContain('HOLA_FOLLOW_UP_ACTIONS_START');
       expect(outcome.summary).toContain('生成下场直播 SOP');
+    });
+
+    it('content-topic workflow uses its larger bounded token budget', async () => {
+      let maxTokensSeen = 0;
+      const stream = vi.fn(
+        (params: { max_tokens: number }): unknown => {
+          maxTokensSeen = params.max_tokens;
+          const finalMessagePromise = Promise.resolve({
+            id: 'msg_content_budget',
+            model: 'claude-sonnet-4-6',
+            stop_reason: 'end_turn',
+            content: [{ type: 'text', text: '## 数据校验\n已通过', citations: null }],
+            usage: { input_tokens: 100, output_tokens: 50 },
+          });
+          return {
+            on() {
+              return this;
+            },
+            finalMessage() {
+              return finalMessagePromise;
+            },
+          };
+        },
+      );
+      const client = { messages: { stream } } as unknown as Anthropic;
+
+      const outcome = await withFlag(true, () =>
+        runGenerateTask({
+          taskId: 'tsk_content_budget',
+          userId: 'usr_test',
+          intent: '品类 母婴 平台小红书 生成 8 个选题',
+          workflowOverride: CONTENT_TOPIC_WORKFLOW,
+          client,
+          logger: makeLogger(),
+        }),
+      );
+
+      expect(outcome.status).toBe('completed');
+      expect(maxTokensSeen).toBe(5120);
     });
 
     it('flag ON + non-matching intent → workflow skipped, default flow', async () => {
