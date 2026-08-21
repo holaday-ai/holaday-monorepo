@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { matchExpertWorkflow } from './expert-workflow-registry.js';
+import {
+  getExpertWorkflowById,
+  matchExpertWorkflow,
+  resolveExpertWorkflowDispatch,
+} from './expert-workflow-registry.js';
 
 describe('matchExpertWorkflow — douyin-review', () => {
   it('matches on full intent (抖音 + 直播 + 复盘)', () => {
@@ -185,5 +189,43 @@ describe('matchExpertWorkflow — ecom-daily', () => {
     expect(
       matchExpertWorkflow({ intent: 'yesterday 销售额 100万' })?.workflowId,
     ).toBe('ecom-daily');
+  });
+});
+
+describe('resolveExpertWorkflowDispatch — new follow-up tasks', () => {
+  const contentTopic = getExpertWorkflowById('content-topic');
+  const ecomDaily = getExpertWorkflowById('ecom-daily');
+
+  it('uses an initial matched workflow for both report generation and routing', () => {
+    const resolved = resolveExpertWorkflowDispatch({
+      matchedWorkflow: contentTopic,
+      parentWorkflow: null,
+      isFollowUp: false,
+    });
+
+    expect(resolved.reportWorkflow?.workflowId).toBe('content-topic');
+    expect(resolved.routingWorkflow?.workflowId).toBe('content-topic');
+  });
+
+  it('inherits only generate routing from the parent for a follow-up action', () => {
+    const resolved = resolveExpertWorkflowDispatch({
+      matchedWorkflow: null,
+      parentWorkflow: contentTopic,
+      isFollowUp: true,
+    });
+
+    expect(resolved.reportWorkflow).toBeNull();
+    expect(resolved.routingWorkflow?.workflowId).toBe('content-topic');
+  });
+
+  it('treats an explicitly matched follow-up as a new workflow report', () => {
+    const resolved = resolveExpertWorkflowDispatch({
+      matchedWorkflow: ecomDaily,
+      parentWorkflow: contentTopic,
+      isFollowUp: true,
+    });
+
+    expect(resolved.reportWorkflow?.workflowId).toBe('ecom-daily');
+    expect(resolved.routingWorkflow?.workflowId).toBe('ecom-daily');
   });
 });

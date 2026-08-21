@@ -374,6 +374,17 @@ describe('classifyIntentForOutputRequirement — real QA prompts', () => {
     });
   });
 
+  it('does not mistake a platform content plan and topic count for a product listing', () => {
+    expect(
+      classifyIntentForOutputRequirement(
+        '小红书 爆款选题：品类 美妆护肤 平台小红书 关键词 早C晚A 平价 油痘肌 生成 5 个选题',
+      ),
+    ).toEqual({
+      kind: 'general',
+      requirement: null,
+    });
+  });
+
   it('tightens comparison URL requirements when the user asks for links', () => {
     const out = classifyIntentForOutputRequirement(
       '对比 Notion 和 Coda 的优缺点，并给出来源链接',

@@ -4,6 +4,7 @@ import { autoFix, pickSimilarUrl } from './auto-fix.js';
 import { verifyDeterministic } from './answer-verifier.js';
 import { buildContract } from './execution-contract.js';
 import { EvidenceLedger } from './evidence-ledger.js';
+import { CONTENT_TOPIC_WORKFLOW } from './expert-workflow-content-topic.js';
 
 describe('pickSimilarUrl', () => {
   it('prefers exact-host match with path overlap', () => {
@@ -461,6 +462,80 @@ describe('autoFix — missing fields note', () => {
     expect(out.fixed).toContain('客单价');
     const op = out.applied.find((o) => o.kind === 'missing_fields_note');
     expect(op).toBeDefined();
+  });
+});
+
+describe('autoFix — workflow source annotations', () => {
+  it('adds a truthful section-wide model-assumption note without changing the draft content', () => {
+    const taskId = 'tsk_workflow_sources';
+    const contract = buildContract({
+      taskId,
+      intent: '小红书美妆选题策划',
+      executionMode: 'generate',
+      expertWorkflowId: CONTENT_TOPIC_WORKFLOW.workflowId,
+    });
+    const ledger = new EvidenceLedger(taskId);
+    ledger.add({
+      fact: '用户要求小红书美妆选题策划',
+      sourceType: 'user_input',
+      sourceDetail: 'task intent',
+      confidence: 'observed',
+    });
+    const answer = [
+      '## 数据校验',
+      '已通过，输入参数完整。',
+      '## 选题方向',
+      '1. 油痘肌通勤场景。2. 平价早 C 晚 A。3. 敏感肌避坑。4. 成分搭配。5. 新手入门。',
+      '## 标题候选',
+      '方向 1：油痘肌早八怎么护肤；方向 2：百元搭出早 C 晚 A；方向 3：敏感肌避坑清单。',
+      '## 内容大纲',
+      '开头展示痛点，主体拆解三个步骤与具体镜头，结尾引导收藏并留言肤质。',
+      '## 发布策略',
+      '每周发布三条，工作日 19:30-21:00 发布，首小时集中回复评论。',
+      '## 执行 Checklist',
+      '- [ ] 准备成分图\n- [ ] 检查关键词\n- [ ] 发布后复盘数据',
+      '## 竞品参考',
+      '围绕常见成分教育内容做更细的人群切分，并避免复用同质化标题。',
+    ].join('\n\n');
+
+    const verification = verifyDeterministic({
+      contract,
+      ledger,
+      answerText: answer,
+      workflowContract: CONTENT_TOPIC_WORKFLOW,
+    });
+    expect(verification.failureLevel).toBe('fixable');
+    expect(verification.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          criterionId: 'workflow.source_annotation',
+          passed: false,
+        }),
+      ]),
+    );
+
+    const out = autoFix({
+      contract,
+      ledger,
+      verification,
+      answerText: answer,
+      workflowContract: CONTENT_TOPIC_WORKFLOW,
+    });
+
+    expect(out.applied.map((op) => op.kind)).toContain('source_annotation_note');
+    expect(out.fixed).toContain(
+      '> 来源说明：[模型假设] 本节内容基于用户输入与模型经验生成，未引用外部实时数据。',
+    );
+    expect(out.fixed).toContain('油痘肌通勤场景');
+    expect(out.fixed).toContain('工作日 19:30-21:00');
+
+    const rechecked = verifyDeterministic({
+      contract,
+      ledger,
+      answerText: out.fixed,
+      workflowContract: CONTENT_TOPIC_WORKFLOW,
+    });
+    expect(rechecked.passed).toBe(true);
   });
 });
 

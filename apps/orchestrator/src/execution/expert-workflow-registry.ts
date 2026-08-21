@@ -219,6 +219,29 @@ export function getExpertWorkflowById(
 }
 
 /**
+ * Resolve the two distinct workflow responsibilities for a newly-created
+ * follow-up task.
+ *
+ * A parent workflow is useful for routing a chip action such as "生成发布日历"
+ * back to the generate lane, but its original report schema must not be
+ * applied to the new deliverable. Only a workflow matched by the follow-up's
+ * own text is allowed to become the new task's report/verifier contract.
+ */
+export function resolveExpertWorkflowDispatch(input: {
+  matchedWorkflow: ExpertWorkflowContract | null;
+  parentWorkflow: ExpertWorkflowContract | null;
+  isFollowUp: boolean;
+}): {
+  reportWorkflow: ExpertWorkflowContract | null;
+  routingWorkflow: ExpertWorkflowContract | null;
+} {
+  const reportWorkflow = input.matchedWorkflow;
+  const routingWorkflow =
+    reportWorkflow ?? (input.isFollowUp ? input.parentWorkflow : null);
+  return { reportWorkflow, routingWorkflow };
+}
+
+/**
  * Test-only — get all registered workflows for shape introspection.
  */
 export function _getRegisteredWorkflowsForTest(): readonly ExpertWorkflowContract[] {
