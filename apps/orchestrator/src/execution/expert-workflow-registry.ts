@@ -43,6 +43,26 @@ const WORKFLOWS: readonly ExpertWorkflowContract[] = [
   ECOM_DAILY_WORKFLOW,
 ];
 
+const FOLLOW_UP_ACTION_PATTERNS: Partial<
+  Record<ExpertWorkflowContract['workflowId'], readonly RegExp[]>
+> = {
+  'content-topic': [
+    /发布日历/i,
+    /(?:top\s*\d*\s*)?选题.*脚本/i,
+    /竞品.*差异化.*清单|差异化.*竞品/i,
+  ],
+  'ecom-daily': [
+    /明日.*(?:运营\s*)?sop/i,
+    /上周同期/i,
+    /roi.*(?:不达预期|原因|排查)/i,
+  ],
+  'douyin-review': [
+    /下场直播.*sop/i,
+    /单品.*表现/i,
+    /对比.*(?:上场|上一场)/i,
+  ],
+};
+
 /**
  * Per-workflow matcher logic. Decoupled from the contract data so
  * the contract stays declarative + serialisable. New workflows
@@ -231,14 +251,32 @@ export function resolveExpertWorkflowDispatch(input: {
   matchedWorkflow: ExpertWorkflowContract | null;
   parentWorkflow: ExpertWorkflowContract | null;
   isFollowUp: boolean;
+  followUpIntent?: string;
 }): {
   reportWorkflow: ExpertWorkflowContract | null;
   routingWorkflow: ExpertWorkflowContract | null;
 } {
-  const reportWorkflow = input.matchedWorkflow;
+  const sameWorkflowDerivedAction =
+    input.isFollowUp &&
+    input.matchedWorkflow != null &&
+    input.parentWorkflow?.workflowId === input.matchedWorkflow.workflowId &&
+    matchesWorkflowFollowUpAction(
+      input.matchedWorkflow.workflowId,
+      input.followUpIntent ?? '',
+    );
+  const reportWorkflow = sameWorkflowDerivedAction ? null : input.matchedWorkflow;
   const routingWorkflow =
-    reportWorkflow ?? (input.isFollowUp ? input.parentWorkflow : null);
+    input.matchedWorkflow ?? (input.isFollowUp ? input.parentWorkflow : null);
   return { reportWorkflow, routingWorkflow };
+}
+
+function matchesWorkflowFollowUpAction(
+  workflowId: ExpertWorkflowContract['workflowId'],
+  intent: string,
+): boolean {
+  return (FOLLOW_UP_ACTION_PATTERNS[workflowId] ?? []).some((pattern) =>
+    pattern.test(intent),
+  );
 }
 
 /**

@@ -265,6 +265,7 @@ function parseResponse(text: string): LlmVerifierRawResponse | null {
       fixable: issue.fixable,
     });
   }
+  if (!obj.passed && issues.length === 0) return null;
   return { passed: obj.passed, issues };
 }
 

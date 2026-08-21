@@ -148,9 +148,10 @@ export interface RunGenerateOpts {
    * reply. Passing the resolved workflow keeps the decisions
    * consistent across the two layers.
    *
-   * `null` / undefined = re-run the matcher inside (legacy / forward-
-   * path behaviour, also fine for non-follow-up calls because
-   * input.intent and effectiveIntent agree there).
+   * `undefined` = re-run the matcher inside (legacy / forward path).
+   * `null` = explicitly disable a typed report contract. Follow-up
+   * actions use this when they generate a derived deliverable such as
+   * a calendar or SOP rather than another copy of the parent report.
    */
   workflowOverride?: ExpertWorkflowContract | null;
 }

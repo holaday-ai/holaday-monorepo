@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { extractStructuredItems, verifyDeterministic } from './answer-verifier.js';
+import { CONTENT_TOPIC_WORKFLOW } from './expert-workflow-content-topic.js';
 import { DOUYIN_REVIEW_WORKFLOW } from './expert-workflow-douyin.js';
 import type { ExecutionContract } from './execution-contract.js';
 import { buildContract } from './execution-contract.js';
@@ -961,6 +962,52 @@ describe('verifyDeterministic — workflow section_presence + source_annotation 
     expect(annotationCheck!.detail).toContain('核心数据');
     expect(annotationCheck!.severity).toBe('fixable');
     expect(result.failureLevel).toBe('fixable');
+  });
+
+  it('does not treat an optional section name in prose as a section heading', () => {
+    const taskId = 'tsk_wf_optional_section_mention';
+    const contract = buildContract({
+      taskId,
+      intent: '小红书母婴选题策划',
+      executionMode: 'generate',
+      expertWorkflowId: CONTENT_TOPIC_WORKFLOW.workflowId,
+    });
+    const ledger = new EvidenceLedger(taskId);
+    ledger.add({
+      fact: '用户要求小红书母婴选题策划',
+      sourceType: 'user_input',
+      sourceDetail: 'msg',
+      confidence: 'observed',
+    });
+    const answer = [
+      '## 数据校验',
+      '| 字段 | 状态 |',
+      '| --- | --- |',
+      '| 竞品 | 未提供（竞品参考 section 跳过） |',
+      '## 选题方向',
+      '[用户提供] 围绕母婴囤货、预算与真实使用周期规划五个方向。',
+      '## 标题候选',
+      '[模型假设] 给出五组可测试标题，发布后按收藏率迭代。',
+      '## 内容大纲',
+      '每条包含开头钩子、三个核心论点与结尾互动引导。',
+      '## 发布策略',
+      '[模型假设] 每周发布三次，先按晚间时段测试再根据真实数据调整。',
+      '## 执行 Checklist',
+      '- [ ] 准备素材\n- [ ] 检查关键词\n- [ ] 发布后复盘',
+    ].join('\n\n');
+
+    const result = verifyDeterministic({
+      contract,
+      ledger,
+      answerText: answer,
+      workflowContract: CONTENT_TOPIC_WORKFLOW,
+    });
+    const annotationCheck = result.checks.find(
+      (check) => check.criterionId === 'workflow.source_annotation',
+    );
+
+    expect(annotationCheck?.passed).toBe(true);
+    expect(result.passed).toBe(true);
   });
 });
 
