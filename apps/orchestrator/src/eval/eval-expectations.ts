@@ -67,6 +67,16 @@ export function validateEvalExpectations(
       `${prefix}terminalStatus: expected ${expectations.terminalStatus}, got ${detail.status}`,
     );
   }
+  if (
+    expectations.allowedTerminalStatuses &&
+    !expectations.allowedTerminalStatuses.includes(
+      detail.status as (typeof expectations.allowedTerminalStatuses)[number],
+    )
+  ) {
+    failures.push(
+      `${prefix}allowedTerminalStatuses: expected one of [${expectations.allowedTerminalStatuses.join(', ')}], got ${detail.status}`,
+    );
+  }
   if (expectations.mustComplete && !expectations.terminalStatus && detail.status !== 'completed') {
     failures.push(
       `${prefix}mustComplete: status=${detail.status}${
