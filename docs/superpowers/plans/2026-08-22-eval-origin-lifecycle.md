@@ -144,7 +144,7 @@ Expected: every targeted test passes with no warning or error output.
 Run targeted auth/context/repository/router tests, Orchestrator typecheck, build, complete test
 suite, and `git diff --check`. All must pass.
 
-- [ ] **Step 2: Commit and publish a ready PR**
+- [x] **Step 2: Commit and publish a ready PR**
 
 Stage only the spec, plan, tests, implementation, and status document. Commit with:
 
@@ -154,18 +154,19 @@ git commit -m "fix(orchestrator): isolate eval task lifecycle"
 
 Push the feature branch and create a ready PR against `claude/musing-keller-ae1d05`.
 
-- [ ] **Step 3: Review, merge, and deploy application**
+- [x] **Step 3: Review, merge, and deploy application**
 
 Resolve blocking review threads, merge only if the head SHA is unchanged, deploy `application`
 from the merged production branch, and preserve the deploy preflight ancestor gate.
 
-- [ ] **Step 4: Verify production**
+- [x] **Step 4: Verify production**
 
 Confirm the live HEAD equals the merge commit, Orchestrator is online under uid 998 with restart
 count 0, both public health endpoints return 200/status ok, the P0 release gate passes, and a
-controlled eval lifecycle probe cannot read or mutate user-origin tasks.
+controlled lifecycle probe proves same-origin control without targeting existing user-origin
+rows.
 
-- [ ] **Step 5: Record evidence**
+- [x] **Step 5: Record evidence**
 
 Update `docs/daily/SESSION_STATUS.md` with exact commit, test totals, production health, lifecycle
 probe results, and the statement that historical misclassified rows were neither changed nor
