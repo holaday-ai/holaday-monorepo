@@ -139,6 +139,20 @@ export interface FollowUpAction {
 }
 
 /**
+ * Bounded generation envelope for one typed report. `targetChars` is a
+ * prompt-level brevity target; `maxTokens` is the hard Anthropic request cap.
+ * Keeping both on the workflow makes report depth explicit without changing
+ * the global budget for ordinary generate tasks.
+ */
+export interface ExpertWorkflowGenerationBudget {
+  maxTokens: number;
+  targetChars: {
+    min: number;
+    max: number;
+  };
+}
+
+/**
  * Full workflow definition. Hangs off a stable `workflowId` and
  * is matched by either an explicit `role_id` choice or a keyword
  * scan against the user's intent (Phase 2 Day 2 will wire the
@@ -148,6 +162,8 @@ export interface ExpertWorkflowContract {
   workflowId: string;
   /** User-facing name shown in clarification copy. */
   name: string;
+  /** Workflow-specific output envelope used by the prompt and runner. */
+  generationBudget: ExpertWorkflowGenerationBudget;
   /**
    * Role ids that this workflow can serve as the backing role —
    * lets the existing skill/role picker route into the workflow.

@@ -12,6 +12,13 @@ describe('CONTENT_TOPIC_WORKFLOW — shape', () => {
     expect(W.roleIds.length).toBeGreaterThanOrEqual(3);
   });
 
+  it('declares a bounded generation budget for a complete report', () => {
+    expect(W.generationBudget).toEqual({
+      maxTokens: 5120,
+      targetChars: { min: 2600, max: 3800 },
+    });
+  });
+
   it('2 required + 6 optional inputs', () => {
     expect(W.requiredInputs).toHaveLength(2);
     expect(W.optionalInputs).toHaveLength(6);
@@ -90,7 +97,9 @@ describe('CONTENT_TOPIC_WORKFLOW — shape', () => {
     expect(W.systemPromptPreamble).toContain('[系统计算]');
     expect(W.systemPromptPreamble).toContain('[模型假设]');
     expect(W.systemPromptPreamble).toContain('[外部来源]');
-    expect(W.systemPromptPreamble).toContain('5 个');
+    expect(W.systemPromptPreamble).toContain('topic_count');
+    expect(W.systemPromptPreamble).toContain('每个方向只生成 2 个标题');
+    expect(W.systemPromptPreamble).toContain('只展开 1 个');
     expect(W.systemPromptPreamble).toContain('Markdown checkbox');
   });
 });

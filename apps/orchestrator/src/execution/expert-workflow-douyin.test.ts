@@ -5,6 +5,13 @@ import { DOUYIN_REVIEW_WORKFLOW } from './expert-workflow-douyin.js';
 const W = DOUYIN_REVIEW_WORKFLOW;
 
 describe('DOUYIN_REVIEW_WORKFLOW — shape', () => {
+  it('declares a bounded generation budget for a complete report', () => {
+    expect(W.generationBudget).toEqual({
+      maxTokens: 4096,
+      targetChars: { min: 1800, max: 2800 },
+    });
+  });
+
   it('has the right workflowId + name + 4 roles', () => {
     expect(W.workflowId).toBe('douyin-review');
     expect(W.name).toBe('抖音直播复盘');

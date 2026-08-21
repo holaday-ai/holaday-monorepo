@@ -355,11 +355,16 @@ const SYSTEM_PROMPT_PREAMBLE = [
   '- 渠道拆解 section：用户没提供 ad_spend / top_skus 就完全跳过（不放空 section 占位）。',
   '- 没把握的行业基准数字写"—"+"缺少类目基准数据"，绝不编造。',
   '- 每个 section 的 title 必须严格按下方列出的写（用于 verifier 识别）。',
+  '- 同一指标、异常或机会只解释一次；动作 section 直接引用结论，不要重复整段数据。',
 ].join('\n');
 
 export const ECOM_DAILY_WORKFLOW: ExpertWorkflowContract = {
   workflowId: 'ecom-daily',
   name: '电商日报',
+  generationBudget: {
+    maxTokens: 4096,
+    targetChars: { min: 1800, max: 2800 },
+  },
   roleIds: [
     'ecom-operator',
     'shop-manager',

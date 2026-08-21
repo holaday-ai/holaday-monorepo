@@ -3,8 +3,8 @@
  *
  * Coverage matches the spec:
  *   - Flag off → no LLM call, fallback original (metadata.fallbackReason=flag_off)
- *   - Short response → skipped (unless expert workflow)
- *   - Expert workflow short response → still triggers
+ *   - Short response → skipped
+ *   - Expert workflow report → preserved without a second model call
  *   - Timeout → fallback original
  *   - Happy path → formatted text returned, no fallback
  *   - Post-check: new URL → fallback / new number → fallback /
@@ -87,14 +87,20 @@ describe('shouldFormat — trigger rules', () => {
     ).toBe(false);
   });
 
-  it('flag on + short response + expert workflow → true (always trigger)', () => {
+  it('flag on + expert workflow → false to preserve its verified structure', () => {
     const env = { OPENAI_RESPONSE_LAYER_ENABLED: 'true', OPENAI_API_KEY: 'sk-x' };
     expect(
       shouldFormat(
         { original: 'short', terminalStatus: 'completed', expertWorkflowId: 'ecom-daily' },
         env,
       ),
-    ).toBe(true);
+    ).toBe(false);
+    expect(
+      shouldFormat(
+        { original: longOriginal, terminalStatus: 'completed', expertWorkflowId: 'ecom-daily' },
+        env,
+      ),
+    ).toBe(false);
   });
 
   it('partial_success / failed / cancelled status still triggers', () => {
@@ -159,20 +165,21 @@ describe('format — runtime', () => {
     expect(client.chat.completions.create).not.toHaveBeenCalled();
   });
 
-  it('expert workflow short response → triggers (no skip)', async () => {
-    const client = makeFakeOpenAI('polished short report');
+  it('expert workflow report → preserved with zero latency and no API call', async () => {
+    const client = makeFakeOpenAI('SHOULD NEVER FIRE');
     const r = await format(
       {
-        original: 'short report',
+        original: longOriginal,
         terminalStatus: 'completed',
         expertWorkflowId: 'ecom-daily',
       },
       { logger: fakeLogger, openaiClient: client },
       { OPENAI_RESPONSE_LAYER_ENABLED: 'true', OPENAI_API_KEY: 'sk-x' },
     );
-    expect(r.formatted).toBe('polished short report');
-    expect(r.metadata.fallbackReason).toBeUndefined();
-    expect(client.chat.completions.create).toHaveBeenCalledTimes(1);
+    expect(r.formatted).toBe(longOriginal);
+    expect(r.metadata.fallbackReason).toBe('expert_workflow_preservation');
+    expect(r.metadata.latencyMs).toBe(0);
+    expect(client.chat.completions.create).not.toHaveBeenCalled();
   });
 
   it('timeout / API error → fallback original with fallbackReason=timeout', async () => {
@@ -226,12 +233,13 @@ describe('format — runtime', () => {
   it('happy path: clean polish → returns formatted, no fallback', async () => {
     // Formatter rewrites with same URLs + numbers, no new content.
     const original =
-      '昨日 GMV 是 50000 元，UV 3500。详情见 https://compass.example/report。';
+      '昨日 GMV 是 50000 元，UV 3500。详情见 https://compass.example/report。' +
+      '这是一份需要进一步整理的长报告内容。'.repeat(12);
     const polished =
       '昨日 GMV 50000 元，UV 3500。\n详情：https://compass.example/report';
     const client = makeFakeOpenAI(polished);
     const r = await format(
-      { original, terminalStatus: 'completed', expertWorkflowId: 'ecom-daily' },
+      { original, terminalStatus: 'completed' },
       { logger: fakeLogger, openaiClient: client },
       { OPENAI_RESPONSE_LAYER_ENABLED: 'true', OPENAI_API_KEY: 'sk-x' },
     );

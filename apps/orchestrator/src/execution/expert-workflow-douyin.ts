@@ -334,11 +334,16 @@ const SYSTEM_PROMPT_PREAMBLE = [
   '- "下场直播 Checklist" 必须用 Markdown checkbox 格式（`- [ ] 项`）。',
   '- 没把握的行业基准数字写"—"+"缺少类目基准数据"，绝不编造。',
   '- 每个 section 的 title 必须严格按下方列出的写（用于 verifier 识别）。',
+  '- 同一指标或诊断只解释一次；后续 section 直接给对应动作，不要换句话重复结论。',
 ].join('\n');
 
 export const DOUYIN_REVIEW_WORKFLOW: ExpertWorkflowContract = {
   workflowId: 'douyin-review',
   name: '抖音直播复盘',
+  generationBudget: {
+    maxTokens: 4096,
+    targetChars: { min: 1800, max: 2800 },
+  },
   roleIds: ['douyin-strategist', 'livestream-coach', 'china-ecommerce', 'data-analyst'],
   requiredInputs: REQUIRED_INPUTS,
   optionalInputs: OPTIONAL_INPUTS,

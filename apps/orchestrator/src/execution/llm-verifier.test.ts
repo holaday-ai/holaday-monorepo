@@ -110,7 +110,13 @@ describe('shouldRunLlmVerifier', () => {
   it('triggers when tier=full AND deterministic passed', () => {
     const { contract, detResult } = makeFullPassingResult('tsk_t1');
     expect(detResult.passed).toBe(true);
-    expect(shouldRunLlmVerifier(detResult, contract)).toBe(true);
+    expect(shouldRunLlmVerifier(detResult, contract, false)).toBe(true);
+  });
+
+  it('does NOT trigger for a registered typed workflow after deterministic pass', () => {
+    const { contract, detResult } = makeFullPassingResult('tsk_typed');
+    expect(detResult.passed).toBe(true);
+    expect(shouldRunLlmVerifier(detResult, contract, true)).toBe(false);
   });
 
   it('does NOT trigger when tier=full but deterministic failed', () => {

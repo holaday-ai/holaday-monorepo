@@ -7,6 +7,13 @@ import { runIntake } from './expert-workflow-intake.js';
 const W = ECOM_DAILY_WORKFLOW;
 
 describe('ECOM_DAILY_WORKFLOW — shape', () => {
+  it('declares a bounded generation budget for a complete report', () => {
+    expect(W.generationBudget).toEqual({
+      maxTokens: 4096,
+      targetChars: { min: 1800, max: 2800 },
+    });
+  });
+
   it('has stable workflowId + name + roles', () => {
     expect(W.workflowId).toBe('ecom-daily');
     expect(W.name).toBe('电商日报');

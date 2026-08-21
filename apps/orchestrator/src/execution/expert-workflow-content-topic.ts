@@ -147,7 +147,7 @@ const REPORT_SECTIONS: readonly ReportSection[] = [
     required: true,
     sourceAnnotation: true,
     guidance:
-      '从 5-7 个不同维度产出选题方向。每个方向 1-2 句话说明角度 + 适用场景。每个方向后必须标注 [用户提供]/ [系统计算]/ [模型假设]/ [外部来源]：[用户提供] 用户关键词命中 / [系统计算] 平台机制推导 / [模型假设] 模型经验 / [外部来源] 外部基准引用。禁止只列 3 个或更少（输出深度不够）。',
+      '严格按结构化输入中的 topic_count 产出不同维度的选题方向。每个方向用 1 句话说明角度 + 适用场景，并标注 [用户提供]/ [系统计算]/ [模型假设]/ [外部来源]。',
   },
   {
     id: 'title_candidates',
@@ -155,7 +155,7 @@ const REPORT_SECTIONS: readonly ReportSection[] = [
     required: true,
     sourceAnnotation: true,
     guidance:
-      '为上面每个选题方向生成 3-5 个标题候选。标题之间风格要差异化（数字党 / 反问 / 痛点 / 情绪 / 场景），不要堆同一个套路。每组标题前注明方向 id；每个标题后用括号标注主打钩子（数字 / 反问 / 痛点 / 情绪 / 场景）+ 来源 [用户提供]/ [系统计算]/ [模型假设]/ [外部来源]。',
+      '为上面每个选题方向只生成 2 个标题候选，且两者钩子类型不同。每组标题前注明方向 id；每个标题后标注钩子类型 + 来源 [用户提供]/ [系统计算]/ [模型假设]/ [外部来源]。',
   },
   {
     id: 'content_outline',
@@ -163,7 +163,7 @@ const REPORT_SECTIONS: readonly ReportSection[] = [
     required: true,
     sourceAnnotation: false,
     guidance:
-      '从上面挑出 1-2 个最有潜力的选题，写详细大纲：开头钩子（前 3 秒 / 前 1 行）→ 核心论点 3-5 条 → CTA。要落到具体话术 / 镜头描述 / 配图建议 — 不能只写"开头要吸引人"这种废话。',
+      '只展开 1 个最有潜力的 Top 选题，写可执行大纲：开头钩子（前 3 秒 / 前 1 行）→ 核心论点 3 条 → CTA。落到具体话术 / 镜头描述 / 配图建议。',
   },
   {
     id: 'publishing_strategy',
@@ -220,19 +220,24 @@ const SYSTEM_PROMPT_PREAMBLE = [
   '- [外部来源]：引用公开数据 / 行业报告，必须标注来源名称（不可编造来源）。',
   '',
   '## 硬性约束',
-  '- "选题方向" section 至少 5 个，最多 7 个。少于 5 个直接判失败 — 内容策划深度不够。',
-  '- "标题候选" 每个方向 3-5 个，且套路必须差异化（不要 5 个全是数字党）。每个标题用括号标注钩子类型。',
-  '- "内容大纲" 不接受抽象描述，必须落到具体话术 / 镜头 / 配图建议。',
+  '- "选题方向" section 严格采用结构化输入中的 topic_count（未提供时 parser 默认 5），不得擅自扩写数量。',
+  '- "标题候选" 每个方向只生成 2 个标题，且两种钩子必须不同。每个标题用括号标注钩子类型。',
+  '- "内容大纲" 只展开 1 个 Top 选题，必须落到具体话术 / 镜头 / 配图建议。',
   '- "发布策略" 时段必须给具体时间窗（如 19:30-21:00），不接受"晚上"这种粒度。',
   '- "执行 Checklist" 用 Markdown checkbox 格式（`- [ ] 项`）。',
   '- 竞品参考 section：用户没提供竞品就完全跳过（不写空 section、不放 placeholder）。',
   '- 没把握的行业基准数字写"—"+"缺少类目基准数据"，绝不编造。',
   '- 每个 section 的 title 必须严格按下方列出的写（用于 verifier 识别）。',
+  '- 同一选题角度不要在方向、标题和大纲中重复解释；各 section 只承担自己的信息。',
 ].join('\n');
 
 export const CONTENT_TOPIC_WORKFLOW: ExpertWorkflowContract = {
   workflowId: 'content-topic',
   name: '内容选题策划',
+  generationBudget: {
+    maxTokens: 5120,
+    targetChars: { min: 2600, max: 3800 },
+  },
   roleIds: [
     'content-strategist',
     'xiaohongshu-strategist',

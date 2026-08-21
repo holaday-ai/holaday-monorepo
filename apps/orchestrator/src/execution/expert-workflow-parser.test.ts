@@ -166,6 +166,7 @@ describe('parseInputs — malformed coercion', () => {
     const stub: ExpertWorkflowContract = {
       workflowId: 'test',
       name: 'test',
+      generationBudget: { maxTokens: 1024, targetChars: { min: 100, max: 500 } },
       roleIds: [],
       requiredInputs: [minimalInput],
       optionalInputs: [],

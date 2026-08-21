@@ -545,10 +545,14 @@ export async function verifyAndFinalize(
     return runFixLoop(contract, ledger, augmented, inputs, workflowContract);
   }
 
-  // Layer 2 — LLM (only when tier=full and deterministic passed).
+  // Layer 2 — LLM (only when tier=full and deterministic passed). Registered
+  // typed workflows already have a section-aware deterministic contract; the
+  // current semantic verifier is non-blocking and therefore adds latency
+  // without changing their effective verdict. Unregistered legacy full-tier
+  // tasks keep the second opinion.
   if (
     inputs.client &&
-    shouldRunLlmVerifier(det, contract)
+    shouldRunLlmVerifier(det, contract, workflowContract !== null)
   ) {
     try {
       const llm = await verifyWithLlm({

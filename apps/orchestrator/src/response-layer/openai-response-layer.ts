@@ -73,9 +73,9 @@ export interface FormatRequest {
   /** The agent's raw summary. Source of truth for facts. */
   original: string;
   /**
-   * Workflow id when the agent ran a typed expert workflow. Drives
-   * "always trigger formatter regardless of length" (expert reports
-   * are short-but-structured; we want consistent voice).
+   * Workflow id when the agent ran a typed expert workflow. These reports
+   * already have a strict Markdown skeleton and deterministic verification,
+   * so the response layer preserves them byte-for-byte.
    */
   expertWorkflowId?: string | undefined;
   /** Task status — formatter runs on terminal task statuses. */
@@ -92,6 +92,7 @@ export interface FormatMetadata {
     | 'flag_off'
     | 'short_response'
     | 'source_preservation'
+    | 'expert_workflow_preservation'
     | 'missing_api_key'
     | 'timeout'
     | 'api_error'
@@ -149,8 +150,10 @@ export function shouldFormat(req: FormatRequest, env: NodeJS.ProcessEnv = proces
   // sensitive. A second model call adds latency and can only weaken the exact
   // source boundary, so preserve these answers byte-for-byte.
   if (hasProtectedSourceSection(req.original)) return false;
-  // Expert workflow reports always format, regardless of length.
-  if (req.expertWorkflowId) return true;
+  // Typed expert reports already passed a section-aware deterministic gate.
+  // A second model call can only add latency or disturb the exact structure,
+  // source badges and follow-up markers that the verifier just approved.
+  if (req.expertWorkflowId) return false;
   // Short replies (translations, single-fact answers) skip the
   // formatter — the round-trip latency + risk-of-fallback isn't
   // worth it for ≤200 chars.
@@ -186,7 +189,9 @@ export async function format(
             ? 'flag_off'
             : hasProtectedSourceSection(req.original)
               ? 'source_preservation'
-              : 'short_response',
+              : req.expertWorkflowId
+                ? 'expert_workflow_preservation'
+                : 'short_response',
       },
     };
   }
