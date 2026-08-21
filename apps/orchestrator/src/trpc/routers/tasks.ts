@@ -1521,6 +1521,7 @@ export const tasksRouter = router({
       matchedWorkflow: typedWorkflowFromMatcher,
       parentWorkflow: typedWorkflowFromParent,
       isFollowUp,
+      followUpIntent: input.intent,
     });
     const typedWorkflowOverride =
       typedRoutingWorkflow != null && expertWorkflow?.routeOverride !== 'browser'

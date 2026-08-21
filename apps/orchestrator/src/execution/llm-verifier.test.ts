@@ -342,14 +342,20 @@ describe('verifyWithLlm — issues', () => {
     expect(result.checks).toHaveLength(2);
   });
 
-  it('passed=false with empty issues classifies as needs_clarification', async () => {
+  it('passed=false with empty issues is an invalid advisory verdict and does not block', async () => {
     const { contract, ledger, answerText } = makeFullPassingResult('tsk_i4');
     const { client } = makeClient({
       textOut: '{"passed":false,"issues":[]}',
     });
     const result = await verifyWithLlm({ contract, ledger, answerText, client });
-    expect(result.passed).toBe(false);
-    expect(result.failureLevel).toBe('needs_clarification');
+    expect(result.passed).toBe(true);
+    expect(result.failureLevel).toBeUndefined();
+    expect(result.checks).toContainEqual(
+      expect.objectContaining({
+        criterionId: 'llm.fallback',
+        passed: true,
+      }),
+    );
   });
 });
 

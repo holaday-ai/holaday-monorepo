@@ -144,6 +144,6 @@
         }
       }
     ],
-    "notes": "Two-task flow mirroring the SPA chip-click on '生成 30 天发布日历'. Parent runs content-topic workflow + completes; follow-up uses tasks.create with replyToTaskId. The follow-up message contains 小红书选题 keywords so the matcher fires on combined parent context + follow-up intent and the workflow re-runs (or, with parent context inherited, the model produces calendar content)."
+    "notes": "Two-task flow mirroring the SPA chip-click on '生成 30 天发布日历'. Parent runs content-topic workflow + completes; follow-up uses tasks.create with replyToTaskId. The follow-up inherits parent context and generate routing, but the calendar is a derived deliverable and must not inherit the parent's content-topic report schema."
   }
 ]

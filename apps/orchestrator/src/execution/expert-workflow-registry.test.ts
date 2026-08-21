@@ -228,4 +228,39 @@ describe('resolveExpertWorkflowDispatch — new follow-up tasks', () => {
     expect(resolved.reportWorkflow?.workflowId).toBe('ecom-daily');
     expect(resolved.routingWorkflow?.workflowId).toBe('ecom-daily');
   });
+
+  it.each([
+    {
+      workflowId: 'content-topic',
+      intent:
+        '基于这次小红书选题策划的方向，帮我排一份 30 天的发布日历：每条内容的选题、发布时段、所属系列、复用素材标记。',
+    },
+    {
+      workflowId: 'ecom-daily',
+      intent:
+        '基于这次电商日报的诊断和明日重点，帮我生成一份完整的明日运营 SOP：开店前准备、上架顺序、活动页改动、投放配置、客服话术。',
+    },
+    {
+      workflowId: 'douyin-review',
+      intent:
+        '基于这次抖音直播复盘的诊断和优化建议，帮我生成一份详细的下场直播 SOP，包含开播前准备、节奏节点、话术框架。',
+    },
+  ])('does not reuse the $workflowId report schema for its derived action', ({
+    workflowId,
+    intent,
+  }) => {
+    const parentWorkflow = getExpertWorkflowById(workflowId);
+    const matchedWorkflow = matchExpertWorkflow({ intent });
+    expect(matchedWorkflow?.workflowId).toBe(workflowId);
+
+    const resolved = resolveExpertWorkflowDispatch({
+      matchedWorkflow,
+      parentWorkflow,
+      isFollowUp: true,
+      followUpIntent: intent,
+    });
+
+    expect(resolved.reportWorkflow).toBeNull();
+    expect(resolved.routingWorkflow?.workflowId).toBe(workflowId);
+  });
 });

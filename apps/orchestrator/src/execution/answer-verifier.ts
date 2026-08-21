@@ -1553,56 +1553,55 @@ function extractSectionBody(
   title: string,
   allTitles: readonly string[],
 ): string | null {
-  const titleCore = normaliseSectionTitle(title);
-  if (titleCore.length === 0) return null;
-
-  const startIdx = findNormalisedIndex(text, titleCore, 0);
-  if (startIdx === -1) return null;
-
-  // Skip past the original characters that contributed to the
-  // matched title. Original text may have extra decorative markers or spaces
-  // between the core characters, so probe forward until we've
-  // consumed enough normalised chars.
-  let bodyStart = startIdx;
-  let collected = 0;
-  while (bodyStart < text.length && collected < titleCore.length) {
-    if (normaliseSectionTitle(text[bodyStart]!).length > 0) collected++;
-    bodyStart++;
-  }
+  const heading = findSectionHeading(text, title, 0);
+  if (!heading) return null;
+  const bodyStart = heading.bodyStart;
 
   let endIdx = text.length;
   for (const other of allTitles) {
     if (other === title) continue;
-    const otherCore = normaliseSectionTitle(other);
-    if (otherCore.length === 0) continue;
-    const idx = findNormalisedIndex(text, otherCore, bodyStart);
-    if (idx !== -1 && idx < endIdx) endIdx = idx;
+    const otherHeading = findSectionHeading(text, other, bodyStart);
+    if (otherHeading && otherHeading.start < endIdx) endIdx = otherHeading.start;
   }
   return text.slice(bodyStart, endIdx);
 }
 
-/**
- * Find the first index in `text` (original — marker + whitespace
- * intact) where the normalised suffix starts with `needleCore`
- * (already normalised). Returns -1 if no match. Quadratic worst
- * case but inputs are short.
- */
-function findNormalisedIndex(
+function findSectionHeading(
   text: string,
-  needleCore: string,
+  title: string,
   fromIdx: number,
-): number {
-  if (needleCore.length === 0) return -1;
-  for (let i = fromIdx; i < text.length; i++) {
-    let collected = '';
-    let j = i;
-    while (j < text.length && collected.length < needleCore.length) {
-      collected += normaliseSectionTitle(text[j]!);
-      j++;
+): { start: number; bodyStart: number } | null {
+  const titleCore = normaliseSectionHeadingLine(title);
+  if (titleCore.length === 0) return null;
+  let lineStart = 0;
+  for (const line of text.split('\n')) {
+    const bodyStart = lineStart + line.length + 1;
+    if (lineStart >= fromIdx) {
+      const lineCore = normaliseSectionHeadingLine(line);
+      const isHeadingSyntax =
+        /^\s*#{1,6}\s+/.test(line) ||
+        /^\s*(?:\d+[.、):：]|[一二三四五六七八九十]+[.、])\s*/u.test(line) ||
+        /^\s*\*\*[^*]+\*\*\s*$/.test(line);
+      const exactPlainHeading = lineCore === titleCore;
+      const decoratedHeading =
+        isHeadingSyntax &&
+        (lineCore === titleCore ||
+          (lineCore.endsWith(titleCore) && lineCore.length <= titleCore.length + 6));
+      if (exactPlainHeading || decoratedHeading) {
+        return { start: lineStart, bodyStart: Math.min(bodyStart, text.length) };
+      }
     }
-    if (collected.startsWith(needleCore)) return i;
+    lineStart = bodyStart;
   }
-  return -1;
+  return null;
+}
+
+function normaliseSectionHeadingLine(value: string): string {
+  return normaliseSectionTitle(value)
+    .replace(/^#{1,6}/, '')
+    .replace(/^(?:\d+[.、):：]|[一二三四五六七八九十]+[.、])/, '')
+    .replace(/[*_`>]/g, '')
+    .trim();
 }
 
 /**
@@ -1622,9 +1621,8 @@ function checkWorkflowSectionPresence(
 ): CheckResult | null {
   const required = workflow.reportSections.filter((s) => s.required);
   if (required.length === 0) return null;
-  const normalisedAnswer = normaliseSectionTitle(answerText);
   const missing = required.filter(
-    (s) => !normalisedAnswer.includes(normaliseSectionTitle(s.title)),
+    (section) => findSectionHeading(answerText, section.title, 0) == null,
   );
   const passed = missing.length === 0;
   return {
