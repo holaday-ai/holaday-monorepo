@@ -1468,12 +1468,22 @@ function collectNumericFacts(ledger: EvidenceLedger): Map<string, number> {
       // `=`, `:`, whitespace, or `¥`. Number may use comma
       // separators or have a `%` suffix.
       const re = new RegExp(
-        `${escapeRegex(key)}\\s*[=:：]?\\s*[¥¥$]?\\s*([0-9]+(?:[.,][0-9]+)?)\\s*[%％]?`,
+        `${escapeRegex(key)}\\s*[=:：]?\\s*[¥¥$]?\\s*([0-9]+(?:[.,][0-9]+)?)\\s*(万|亿|千|百)?\\s*[%％]?`,
       );
       const m = e.fact.match(re);
       if (!m) continue;
       const raw = m[1]!.replace(/,/g, '');
-      const n = Number(raw);
+      const unitMultiplier =
+        m[2] === '亿'
+          ? 100_000_000
+          : m[2] === '万'
+            ? 10_000
+            : m[2] === '千'
+              ? 1_000
+              : m[2] === '百'
+                ? 100
+                : 1;
+      const n = Number(raw) * unitMultiplier;
       if (!Number.isFinite(n)) continue;
       // Don't clobber if we already saw a more interesting value.
       if (!out.has(key) || (n >= MIN_CROSSCHECK_VALUE && (out.get(key) ?? 0) < MIN_CROSSCHECK_VALUE)) {

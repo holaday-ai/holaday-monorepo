@@ -60,6 +60,24 @@ export function buildReportSystemPrompt(opts: {
   }
   lines.push('');
 
+  lines.push('## 不可变 Markdown 输出骨架');
+  lines.push(
+    '输出时必须逐字保留下列标题行；不得重命名、增加编号或用其他章节替代。标题下直接填写真实内容，不要输出额外的“关键结论/归因分析/实验清单”来代替必需 section。',
+  );
+  for (const section of workflow.reportSections.filter((item) => item.required)) {
+    lines.push('');
+    lines.push(`## ${section.title}`);
+    if (section.id === 'next_stream_checklist') {
+      lines.push('- [ ] 开播前准备：填写具体负责人、动作和完成时间');
+      lines.push('- [ ] 主推品话术节奏：填写具体节点和话术动作');
+      lines.push('- [ ] 投放配置：填写具体预算、定向和止损条件');
+      lines.push('- [ ] 下播前复盘记录：填写需要保存的数据与责任人');
+    } else {
+      lines.push('<!-- 在此标题下按上方 guidance 填写真实内容 -->');
+    }
+  }
+  lines.push('');
+
   lines.push('## 用户提供的数据（已结构化提取）');
   lines.push('```json');
   lines.push(JSON.stringify(extracted, null, 2));
