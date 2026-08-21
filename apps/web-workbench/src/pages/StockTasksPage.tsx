@@ -2247,7 +2247,7 @@ function SectionHeader({
           type="button"
           onClick={onAction}
           disabled={actionDisabled || actionBusy || !onAction}
-          className="inline-flex shrink-0 items-center gap-1 text-[12px] font-medium text-[#4F5868] transition-colors hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-60"
+          className="inline-flex h-11 min-[769px]:h-8 shrink-0 items-center gap-1 rounded-[8px] px-2 text-[12px] font-medium text-[#4F5868] transition-colors hover:bg-[#FFF5F7] hover:text-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/25 disabled:cursor-not-allowed disabled:opacity-60 motion-reduce:transition-none"
         >
           {actionBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
           {action}

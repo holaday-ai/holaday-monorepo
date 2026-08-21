@@ -26,7 +26,8 @@ describe('stock tasks layout', () => {
     );
     const responsiveTargets = `${source}\n${layoutSource}`.match(/h-11 min-\[769px\]:h-(?:8|9)/g) ?? [];
 
-    expect(responsiveTargets).toHaveLength(6);
+    expect(responsiveTargets).toHaveLength(7);
+    expect(source).toContain('h-11 min-[769px]:h-8');
   });
 
   it('serves responsive WebP hero art before the PNG fallback', () => {
