@@ -12,6 +12,7 @@ import {
 } from './usage-page-state';
 
 const snapshot = {
+  quotaMode: 'metered' as const,
   monthTasksTotal: 12,
   monthCompleted: 7,
   monthPartialSuccess: 1,
@@ -49,6 +50,13 @@ describe('usage page state helpers', () => {
     expect(usagePageSummary({ loading: false, error: null, snapshot })).toBe(
       '本月 12 次执行 · 32% 已使用',
     );
+    expect(
+      usagePageSummary({
+        loading: false,
+        error: null,
+        snapshot: { ...snapshot, quotaMode: 'unmetered_test', monthTasksTotal: 278 },
+      }),
+    ).toBe('本月 278 次执行 · 测试账号不扣额度');
   });
 
   it('builds status copy for loading, hard errors, and stale errors', () => {
@@ -92,6 +100,7 @@ describe('usage page state helpers', () => {
   it('normalizes usage summary payloads before rendering', () => {
     expect(
       normalizeUsageSnapshot({
+        quotaMode: 'unmetered_test',
         monthTasksTotal: '12.9',
         monthCompleted: '7',
         monthPartialSuccess: 1.8,
@@ -108,6 +117,7 @@ describe('usage page state helpers', () => {
         ],
       }),
     ).toEqual({
+      quotaMode: 'unmetered_test',
       monthTasksTotal: 12,
       monthCompleted: 7,
       monthPartialSuccess: 1,
@@ -127,6 +137,7 @@ describe('usage page state helpers', () => {
 
   it('uses an empty safe snapshot for malformed usage payloads', () => {
     expect(normalizeUsageSnapshot(null)).toEqual({
+      quotaMode: 'metered',
       monthTasksTotal: 0,
       monthCompleted: 0,
       monthPartialSuccess: 0,

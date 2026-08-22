@@ -9,11 +9,12 @@
  * server-side query so the dashboard can never disagree with itself.
  */
 
+import type { PlanId } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
 import { and, eq, gte, sql } from 'drizzle-orm';
-import type { PlanId } from '@holaday/shared-types';
 import { tasks } from '../../db/schema/tasks.js';
 import { users } from '../../db/schema/users.js';
+import { quotaModeForExternalUser } from '../../quota/quota-mode.js';
 import { QuotaService, getConcurrencyLimit } from '../../quota/quota-service.js';
 import { TASK_ACTIVE_STATUSES } from '../../task-status.js';
 import { protectedProcedure, router } from '../trpc.js';
@@ -31,9 +32,7 @@ function currentMonthStartUtc(now: Date = new Date()): Date {
 function buildSevenDayWindow(now: Date = new Date()): string[] {
   const out: string[] = [];
   for (let i = 6; i >= 0; i--) {
-    const d = new Date(
-      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - i),
-    );
+    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - i));
     out.push(d.toISOString().slice(0, 10));
   }
   return out;
@@ -86,8 +85,7 @@ export const usageRouter = router({
     if (!user) {
       throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
     }
-    const planId: PlanId =
-      user.plan === 'basic' || user.plan === 'pro' ? user.plan : 'free';
+    const planId: PlanId = user.plan === 'basic' || user.plan === 'pro' ? user.plan : 'free';
     const quotaService = new QuotaService(ctx.db);
     const snap = await quotaService.snapshot(user.id, planId);
 
@@ -101,7 +99,9 @@ export const usageRouter = router({
         count: sql<number>`COUNT(*)`,
       })
       .from(tasks)
-      .where(and(eq(tasks.userId, user.id), gte(tasks.createdAt, monthStart), eq(tasks.origin, 'user')))
+      .where(
+        and(eq(tasks.userId, user.id), gte(tasks.createdAt, monthStart), eq(tasks.origin, 'user')),
+      )
       .groupBy(tasks.status);
     const {
       monthTasksTotal,
@@ -116,11 +116,7 @@ export const usageRouter = router({
     // pattern; the days the user didn't run anything fill in as 0
     // client-side via the window helper.
     const sevenDaysAgoStart = new Date(
-      Date.UTC(
-        new Date().getUTCFullYear(),
-        new Date().getUTCMonth(),
-        new Date().getUTCDate() - 6,
-      ),
+      Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate() - 6),
     );
     const dailyRows = await ctx.db
       .select({
@@ -128,7 +124,13 @@ export const usageRouter = router({
         count: sql<number>`COUNT(*)`,
       })
       .from(tasks)
-      .where(and(eq(tasks.userId, user.id), gte(tasks.createdAt, sevenDaysAgoStart), eq(tasks.origin, 'user')))
+      .where(
+        and(
+          eq(tasks.userId, user.id),
+          gte(tasks.createdAt, sevenDaysAgoStart),
+          eq(tasks.origin, 'user'),
+        ),
+      )
       .groupBy(sql`DATE(${tasks.createdAt})`);
     const byDate = new Map<string, number>();
     for (const row of dailyRows) {
@@ -143,6 +145,7 @@ export const usageRouter = router({
 
     return {
       plan: planId,
+      quotaMode: quotaModeForExternalUser(ctx.userId),
       monthTasksTotal,
       monthCompleted,
       monthPartialSuccess,
