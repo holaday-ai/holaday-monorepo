@@ -48,6 +48,14 @@ export const users = mysqlTable(
      * HTTP authentication accepts only the current value.
      */
     authVersion: int('auth_version').notNull().default(0),
+    /** Authenticator-app MFA. Secret is an AES-GCM envelope, never plaintext. */
+    mfaEnabled: boolean('mfa_enabled').notNull().default(false),
+    mfaSecretEncrypted: varchar('mfa_secret_encrypted', { length: 512 }),
+    mfaSetupCreatedAt: datetime('mfa_setup_created_at', { mode: 'date', fsp: 3 }),
+    /** Last accepted RFC 6238 time step, preventing same-code replay. */
+    mfaLastUsedStep: bigint('mfa_last_used_step', { mode: 'number' }),
+    mfaFailedAttempts: int('mfa_failed_attempts').notNull().default(0),
+    mfaLockedUntil: datetime('mfa_locked_until', { mode: 'date', fsp: 3 }),
     displayName: varchar('display_name', { length: 128 }),
     googleId: varchar('google_id', { length: 64 }),
     avatarUrl: varchar('avatar_url', { length: 512 }),

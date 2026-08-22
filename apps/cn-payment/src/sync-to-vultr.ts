@@ -44,7 +44,7 @@ export interface VultrPartnerConfirmPayload {
  * Mirrors the AuthService.AuthResult shape (sans server-internal
  * fields) so the gateway can hand it straight back to its caller.
  */
-export interface VultrSmsLoginResult {
+interface VultrSmsLoginUser {
   user: {
     externalId: string;
     email: string | null;
@@ -53,8 +53,10 @@ export interface VultrSmsLoginResult {
     avatarUrl: string | null;
     createdAt: string | Date;
   };
-  accessToken: string;
 }
+
+export type VultrSmsLoginResult = VultrSmsLoginUser &
+  ({ accessToken: string; mfaRequired?: false } | { mfaRequired: true; mfaToken: string });
 
 export class VultrSync {
   constructor(

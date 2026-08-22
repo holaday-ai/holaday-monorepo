@@ -16,6 +16,8 @@ const ACCESS_TOKEN_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 days
  */
 const STREAM_TOKEN_TTL_SECONDS = 60;
 const STREAM_AUDIENCE = 'holaday-stream';
+const MFA_CHALLENGE_AUDIENCE = 'holaday-mfa-challenge';
+const MFA_CHALLENGE_TTL_SECONDS = 5 * 60;
 
 const key = new TextEncoder().encode(env.JWT_SECRET);
 
@@ -28,6 +30,11 @@ export interface AccessTokenClaims {
 }
 
 export interface StreamTokenClaims {
+  sub: string;
+  authVersion: number;
+}
+
+export interface MfaChallengeClaims {
   sub: string;
   authVersion: number;
 }
@@ -80,6 +87,39 @@ export async function verifyAccessToken(token: string): Promise<AccessTokenClaim
       authVersion,
       ...(taskOrigin ? { taskOrigin } : {}),
     };
+  } catch {
+    return null;
+  }
+}
+
+export async function signMfaChallengeToken(claims: MfaChallengeClaims): Promise<string> {
+  return new SignJWT({ purpose: 'mfa', authVersion: claims.authVersion })
+    .setProtectedHeader({ alg: ALGORITHM })
+    .setSubject(claims.sub)
+    .setIssuer(ISSUER)
+    .setAudience(MFA_CHALLENGE_AUDIENCE)
+    .setIssuedAt()
+    .setExpirationTime(`${MFA_CHALLENGE_TTL_SECONDS}s`)
+    .sign(key);
+}
+
+export async function verifyMfaChallengeToken(token: string): Promise<MfaChallengeClaims | null> {
+  try {
+    const { payload } = await jwtVerify(token, key, {
+      algorithms: [ALGORITHM],
+      issuer: ISSUER,
+      audience: MFA_CHALLENGE_AUDIENCE,
+    });
+    if (
+      payload.purpose !== 'mfa' ||
+      typeof payload.sub !== 'string' ||
+      typeof payload.authVersion !== 'number' ||
+      !Number.isInteger(payload.authVersion) ||
+      payload.authVersion < 0
+    ) {
+      return null;
+    }
+    return { sub: payload.sub, authVersion: payload.authVersion };
   } catch {
     return null;
   }

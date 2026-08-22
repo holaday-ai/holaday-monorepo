@@ -1,26 +1,26 @@
 import { inspect } from 'node:util';
-import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
-import { appRouter } from '../router.js';
-import { partnerRouter } from './partner.js';
-import { users, type User } from '../../db/schema/users.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  holaCreditLedgerEntries,
-  partnerActivityEvents,
-  partnerKycProfiles,
-  partnerLots,
-  partnerMemberships,
-  partnerReferrals,
-  partnerRechargeOrders,
-  partnerWithdrawalRequests,
   type HolaCreditLedgerEntry,
   type PartnerActivityEvent,
   type PartnerKycProfile,
   type PartnerLot,
   type PartnerMembership,
-  type PartnerReferral,
   type PartnerRechargeOrder,
+  type PartnerReferral,
   type PartnerWithdrawalRequest,
+  holaCreditLedgerEntries,
+  partnerActivityEvents,
+  partnerKycProfiles,
+  partnerLots,
+  partnerMemberships,
+  partnerRechargeOrders,
+  partnerReferrals,
+  partnerWithdrawalRequests,
 } from '../../db/schema/partner.js';
+import { type User, users } from '../../db/schema/users.js';
+import { appRouter } from '../router.js';
+import { partnerRouter } from './partner.js';
 
 class FakePartnerDb {
   readonly users: User[];
@@ -34,17 +34,19 @@ class FakePartnerDb {
   readonly referrals: PartnerReferral[];
   readonly selectTables: string[] = [];
 
-  constructor(input: {
-    users?: User[];
-    memberships?: PartnerMembership[];
-    kycProfiles?: PartnerKycProfile[];
-    ledgerEntries?: HolaCreditLedgerEntry[];
-    activityEvents?: PartnerActivityEvent[];
-    lots?: PartnerLot[];
-    orders?: PartnerRechargeOrder[];
-    withdrawals?: PartnerWithdrawalRequest[];
-    referrals?: PartnerReferral[];
-  } = {}) {
+  constructor(
+    input: {
+      users?: User[];
+      memberships?: PartnerMembership[];
+      kycProfiles?: PartnerKycProfile[];
+      ledgerEntries?: HolaCreditLedgerEntry[];
+      activityEvents?: PartnerActivityEvent[];
+      lots?: PartnerLot[];
+      orders?: PartnerRechargeOrder[];
+      withdrawals?: PartnerWithdrawalRequest[];
+      referrals?: PartnerReferral[];
+    } = {},
+  ) {
     this.users = [...(input.users ?? [fakeUser()])];
     this.memberships = [...(input.memberships ?? [])];
     this.kycProfiles = [...(input.kycProfiles ?? [])];
@@ -102,7 +104,9 @@ class FakePartnerDb {
       return this.users.filter((user) => predicateText.includes(user.externalId));
     }
     if (table === partnerMemberships) {
-      return this.memberships.filter((membership) => predicateText.includes(String(membership.userId)));
+      return this.memberships.filter((membership) =>
+        predicateText.includes(String(membership.userId)),
+      );
     }
     if (table === partnerKycProfiles) {
       return this.kycProfiles.filter((profile) => predicateText.includes(String(profile.userId)));
@@ -117,7 +121,8 @@ class FakePartnerDb {
       const endDay = days[days.length - 1] ?? startDay;
       return this.activityEvents.filter((event) => {
         if (!predicateText.includes(String(event.userId))) return false;
-        if (predicateText.includes('daily_checkin') && event.eventType !== 'daily_checkin') return false;
+        if (predicateText.includes('daily_checkin') && event.eventType !== 'daily_checkin')
+          return false;
         if (startDay && event.activityDate < startDay) return false;
         if (endDay && event.activityDate > endDay) return false;
         return true;
@@ -129,15 +134,21 @@ class FakePartnerDb {
     if (table === partnerRechargeOrders) {
       const rows = this.orders.filter((order) => predicateText.includes(String(order.userId)));
       if (predicateText.includes('completed')) {
-        return rows.filter((order) => order.status === 'completed' && order.orderKind === 'recharge');
+        return rows.filter(
+          (order) => order.status === 'completed' && order.orderKind === 'recharge',
+        );
       }
       return rows;
     }
     if (table === partnerWithdrawalRequests) {
-      return this.withdrawals.filter((withdrawal) => predicateText.includes(String(withdrawal.userId)));
+      return this.withdrawals.filter((withdrawal) =>
+        predicateText.includes(String(withdrawal.userId)),
+      );
     }
     if (table === partnerReferrals) {
-      return this.referrals.filter((referral) => predicateText.includes(String(referral.inviterUserId)));
+      return this.referrals.filter((referral) =>
+        predicateText.includes(String(referral.inviterUserId)),
+      );
     }
     return [];
   }
@@ -162,6 +173,12 @@ function fakeUser(overrides: Partial<User> = {}): User {
     planExpiresAt: null,
     status: 'active',
     authVersion: 0,
+    mfaEnabled: false,
+    mfaSecretEncrypted: null,
+    mfaSetupCreatedAt: null,
+    mfaLastUsedStep: null,
+    mfaFailedAttempts: 0,
+    mfaLockedUntil: null,
     displayName: 'Partner User',
     googleId: null,
     avatarUrl: null,
@@ -298,7 +315,9 @@ function fakeOrder(overrides: Partial<PartnerRechargeOrder> = {}): PartnerRechar
   };
 }
 
-function fakeWithdrawal(overrides: Partial<PartnerWithdrawalRequest> = {}): PartnerWithdrawalRequest {
+function fakeWithdrawal(
+  overrides: Partial<PartnerWithdrawalRequest> = {},
+): PartnerWithdrawalRequest {
   return {
     id: 60,
     externalId: 'pay_withdrawal',

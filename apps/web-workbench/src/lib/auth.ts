@@ -7,6 +7,9 @@
  * request / closing the WS with 4401.
  */
 const TOKEN_KEY = 'holaday.access_token';
+const MFA_CHALLENGE_KEY = 'holaday.mfa_challenge';
+let memoryToken: string | null = null;
+let memoryMfaChallenge: string | null = null;
 
 /**
  * OAuth callback handoff: the `/api/auth/google/callback` handler
@@ -17,12 +20,13 @@ const TOKEN_KEY = 'holaday.access_token';
  */
 (function consumeOAuthFragment(): void {
   if (typeof window === 'undefined' || !window.location.hash) return;
-  const m = /(?:^|[#&])token=([^&]+)/.exec(window.location.hash);
-  if (!m || !m[1]) return;
-  try {
-    localStorage.setItem(TOKEN_KEY, decodeURIComponent(m[1]));
-  } catch {
-    /* see setAccessToken */
+  const tokenMatch = /(?:^|[#&])token=([^&]+)/.exec(window.location.hash);
+  const mfaMatch = /(?:^|[#&])mfa=([^&]+)/.exec(window.location.hash);
+  if (!tokenMatch?.[1] && !mfaMatch?.[1]) return;
+  if (tokenMatch?.[1]) {
+    setAccessToken(decodeURIComponent(tokenMatch[1]));
+  } else if (mfaMatch?.[1]) {
+    setMfaChallenge(decodeURIComponent(mfaMatch[1]));
   }
   // Strip the token from the URL without a page reload so it can't
   // leak into referrers / shared links. History replaceState keeps
@@ -32,13 +36,14 @@ const TOKEN_KEY = 'holaday.access_token';
 
 export function getAccessToken(): string | null {
   try {
-    return localStorage.getItem(TOKEN_KEY);
+    return localStorage.getItem(TOKEN_KEY) ?? memoryToken;
   } catch {
-    return null;
+    return memoryToken;
   }
 }
 
 export function setAccessToken(token: string): void {
+  memoryToken = token;
   try {
     localStorage.setItem(TOKEN_KEY, token);
   } catch {
@@ -48,9 +53,37 @@ export function setAccessToken(token: string): void {
 }
 
 export function clearAccessToken(): void {
+  memoryToken = null;
   try {
     localStorage.removeItem(TOKEN_KEY);
   } catch {
     // see setAccessToken
+  }
+}
+
+export function getMfaChallenge(): string | null {
+  try {
+    return sessionStorage.getItem(MFA_CHALLENGE_KEY) ?? memoryMfaChallenge;
+  } catch {
+    return memoryMfaChallenge;
+  }
+}
+
+export function setMfaChallenge(token: string): void {
+  memoryMfaChallenge = token;
+  try {
+    sessionStorage.setItem(MFA_CHALLENGE_KEY, token);
+  } catch {
+    // The in-memory fallback lasts for the current page only, which
+    // matches the five-minute challenge lifetime.
+  }
+}
+
+export function clearMfaChallenge(): void {
+  memoryMfaChallenge = null;
+  try {
+    sessionStorage.removeItem(MFA_CHALLENGE_KEY);
+  } catch {
+    // see setMfaChallenge
   }
 }

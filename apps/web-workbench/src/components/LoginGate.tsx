@@ -1,9 +1,6 @@
-import { Eye, EyeOff } from 'lucide-react';
-import * as React from 'react';
 import { FullBrandLogo } from '@/components/BrandLogo';
 import { Button } from '@/components/ui/button';
-import { setAccessToken } from '@/lib/auth';
-import { cn } from '@/lib/utils';
+import { clearMfaChallenge, getMfaChallenge, setAccessToken, setMfaChallenge } from '@/lib/auth';
 import {
   authErrorMessage,
   isValidChinaPhone,
@@ -14,6 +11,9 @@ import {
   normalisePhoneInput,
 } from '@/lib/login-gate-validation';
 import { trpc } from '@/lib/trpc';
+import { cn } from '@/lib/utils';
+import { Eye, EyeOff } from 'lucide-react';
+import * as React from 'react';
 
 interface Props {
   onAuthenticated: () => void;
@@ -66,6 +66,8 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<string | null>(null);
+  const [mfaToken, setMfaToken] = React.useState<string | null>(() => getMfaChallenge());
+  const [mfaCode, setMfaCode] = React.useState('');
   const [loginOptions, setLoginOptions] = React.useState<{
     google: boolean;
     emailCode: boolean;
@@ -100,6 +102,23 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
     setNotice(null);
   };
 
+  const finishLogin = React.useCallback(
+    (result: { accessToken: string } | { mfaRequired: true; mfaToken: string }): void => {
+      if ('mfaRequired' in result && result.mfaRequired) {
+        setMfaChallenge(result.mfaToken);
+        setMfaToken(result.mfaToken);
+        setMfaCode('');
+        setError(null);
+        return;
+      }
+      if (!('accessToken' in result)) return;
+      setAccessToken(result.accessToken);
+      clearMfaChallenge();
+      onAuthenticated();
+    },
+    [onAuthenticated],
+  );
+
   function switchMode(m: Mode): void {
     if (pending) return;
     setMode(m);
@@ -129,8 +148,7 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
     setPending(true);
     try {
       const res = await trpc.auth.login.mutate({ email: cleanEmail, password });
-      setAccessToken(res.accessToken);
-      onAuthenticated();
+      finishLogin(res);
     } catch (err) {
       setError(authErrorMessage(err, '登录失败，请稍后重试。'));
     } finally {
@@ -204,8 +222,7 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
     setPending(true);
     try {
       const res = await trpc.auth.verifyCode.mutate({ email: cleanEmail, code });
-      setAccessToken(res.accessToken);
-      onAuthenticated();
+      finishLogin(res);
     } catch (err) {
       setError(authErrorMessage(err, '验证码校验失败，请稍后重试。'));
     } finally {
@@ -237,8 +254,7 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
     setPending(true);
     try {
       const res = await trpc.auth.resetPassword.mutate({ email: cleanEmail, code, password });
-      setAccessToken(res.accessToken);
-      onAuthenticated();
+      finishLogin(res);
     } catch (err) {
       setError(authErrorMessage(err, '重置密码失败，请稍后重试。'));
     } finally {
@@ -291,8 +307,7 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
     setPending(true);
     try {
       const res = await trpc.auth.smsVerify.mutate({ phone: cleanPhone, code });
-      setAccessToken(res.accessToken);
-      onAuthenticated();
+      finishLogin(res);
     } catch (err) {
       setError(authErrorMessage(err, '验证码校验失败，请稍后重试。'));
     } finally {
@@ -304,6 +319,77 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
     if (pending) return;
     window.location.href = '/api/auth/google';
   };
+
+  async function handleVerifyMfa(e: React.FormEvent): Promise<void> {
+    e.preventDefault();
+    if (pending || !mfaToken) return;
+    resetTransient();
+    const cleanCode = mfaCode.trim().toUpperCase();
+    if (!/^(?:\d{6}|[A-Z0-9]{5}-?[A-Z0-9]{5})$/.test(cleanCode)) {
+      setError('请输入 6 位动态码或恢复码');
+      return;
+    }
+    setPending(true);
+    try {
+      const result = await trpc.auth.verifyMfaChallenge.mutate({
+        mfaToken,
+        code: cleanCode,
+      });
+      setAccessToken(result.accessToken);
+      clearMfaChallenge();
+      setMfaToken(null);
+      onAuthenticated();
+    } catch (err) {
+      setError(authErrorMessage(err, '双重验证失败，请重新尝试。'));
+    } finally {
+      setPending(false);
+    }
+  }
+
+  if (mfaToken) {
+    return (
+      <div className="flex h-full items-center justify-center bg-[#EFEFEF]/45 px-4 py-8 dark:bg-background">
+        <div className={cn('w-full max-w-[400px] space-y-5 rounded-lg p-8', LOGIN_SURFACE)}>
+          <div className="space-y-2 text-center">
+            <FullBrandLogo className="mx-auto" />
+            <h1 className="text-base font-semibold text-foreground">双重验证</h1>
+            <p className="text-xs leading-5 text-muted-foreground">
+              输入身份验证器中的 6 位动态码，或一条未使用的恢复码。
+            </p>
+          </div>
+          <form onSubmit={handleVerifyMfa} className="space-y-3" noValidate>
+            <label className="block text-xs font-medium text-foreground" htmlFor="mfa-login-code">
+              身份验证器或恢复码
+            </label>
+            <input
+              id="mfa-login-code"
+              name="mfa-login-code"
+              value={mfaCode}
+              onChange={(event) => setMfaCode(event.target.value.slice(0, 11))}
+              autoComplete="one-time-code"
+              className={cn('flex h-10 w-full rounded-md border px-3 py-2 text-sm', LOGIN_INPUT)}
+            />
+            <InlineMessage tone="error">{error}</InlineMessage>
+            <Button type="submit" className={cn('w-full', LOGIN_PRIMARY)} disabled={pending}>
+              {pending ? '验证中…' : '验证并登录'}
+            </Button>
+            <button
+              type="button"
+              className={cn(LOGIN_LINK, 'w-full text-xs text-muted-foreground')}
+              onClick={() => {
+                clearMfaChallenge();
+                setMfaToken(null);
+                setMfaCode('');
+                resetTransient();
+              }}
+            >
+              返回登录
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full items-center justify-center bg-[#EFEFEF]/45 px-4 py-8 dark:bg-background">
@@ -339,7 +425,7 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
 
         {mode === 'login' && (
           <form onSubmit={handleLogin} className="space-y-3" noValidate>
-            <EmailInput value={email} onChange={setEmail} autoFocus />
+            <EmailInput value={email} onChange={setEmail} />
             <PasswordInput
               value={password}
               onChange={setPassword}
@@ -349,7 +435,10 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
               <button
                 type="button"
                 onClick={() => switchMode('forgot')}
-                className={cn(LOGIN_LINK, 'text-[11px] text-muted-foreground hover:text-foreground')}
+                className={cn(
+                  LOGIN_LINK,
+                  'text-[11px] text-muted-foreground hover:text-foreground',
+                )}
               >
                 忘记密码？
               </button>
@@ -363,7 +452,7 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
 
         {mode === 'register' && (
           <form onSubmit={handleRegister} className="space-y-3" noValidate>
-            <EmailInput value={email} onChange={setEmail} autoFocus />
+            <EmailInput value={email} onChange={setEmail} />
             <PasswordInput
               value={password}
               onChange={setPassword}
@@ -385,7 +474,7 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
 
         {mode === 'emailCode' && (
           <form onSubmit={handleVerifyCode} className="space-y-3" noValidate>
-            <EmailInput value={email} onChange={setEmail} autoFocus />
+            <EmailInput value={email} onChange={setEmail} />
             <CodeRow
               code={code}
               onChange={setCode}
@@ -408,7 +497,7 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
 
         {mode === 'phone' && (
           <form onSubmit={handleVerifySms} className="space-y-3" noValidate>
-            <PhoneInput value={phone} onChange={setPhone} autoFocus />
+            <PhoneInput value={phone} onChange={setPhone} />
             <CodeRow
               code={code}
               onChange={setCode}
@@ -431,7 +520,7 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
 
         {mode === 'forgot' && (
           <form onSubmit={handleResetPassword} className="space-y-3" noValidate>
-            <EmailInput value={email} onChange={setEmail} autoFocus />
+            <EmailInput value={email} onChange={setEmail} />
             <CodeRow
               code={code}
               onChange={setCode}
@@ -462,11 +551,7 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
               {pending ? '重置中…' : '重置密码并登录'}
             </Button>
             <div className="text-center text-xs text-muted-foreground">
-              <button
-                type="button"
-                onClick={() => switchMode('login')}
-                className={LOGIN_LINK}
-              >
+              <button type="button" onClick={() => switchMode('login')} className={LOGIN_LINK}>
                 返回登录
               </button>
             </div>
@@ -625,11 +710,9 @@ function CodeRow({
 function EmailInput({
   value,
   onChange,
-  autoFocus = false,
 }: {
   value: string;
   onChange: (v: string) => void;
-  autoFocus?: boolean;
 }): JSX.Element {
   return (
     <label className="block space-y-1">
@@ -640,7 +723,6 @@ function EmailInput({
         autoComplete="email"
         name="email"
         placeholder="you@example.com"
-        autoFocus={autoFocus}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className={cn('w-full rounded-md px-3 py-2 text-sm', LOGIN_INPUT)}
@@ -657,11 +739,9 @@ function EmailInput({
 function PhoneInput({
   value,
   onChange,
-  autoFocus = false,
 }: {
   value: string;
   onChange: (v: string) => void;
-  autoFocus?: boolean;
 }): JSX.Element {
   return (
     <label className="block space-y-1">
@@ -678,7 +758,6 @@ function PhoneInput({
           autoComplete="tel-national"
           name="phone"
           placeholder="138 0000 0000"
-          autoFocus={autoFocus}
           value={value}
           onChange={(e) => onChange(normalisePhoneInput(e.target.value))}
           className={cn('w-full rounded-r-md px-3 py-2 text-sm', LOGIN_INPUT)}
@@ -700,11 +779,15 @@ function PasswordInput({
   label?: string;
 }): JSX.Element {
   const [show, setShow] = React.useState(false);
+  const inputId = React.useId();
   return (
-    <label className="block space-y-1">
-      <span className="text-xs font-medium text-muted-foreground">{label}</span>
+    <div className="block space-y-1">
+      <label htmlFor={inputId} className="text-xs font-medium text-muted-foreground">
+        {label}
+      </label>
       <div className="relative">
         <input
+          id={inputId}
           type={show ? 'text' : 'password'}
           required
           autoComplete={autoComplete}
@@ -723,6 +806,6 @@ function PasswordInput({
           {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
         </button>
       </div>
-    </label>
+    </div>
   );
 }

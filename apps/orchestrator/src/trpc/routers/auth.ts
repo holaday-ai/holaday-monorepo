@@ -1,9 +1,10 @@
 import { TRPCError } from '@trpc/server';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
-import { EmailCodeError, createEmailCodeService } from '../../auth/email-code.js';
-import { AuthError, AuthService } from '../../auth/service.js';
 import { isVideoEnabledFor } from '../../agent/video/video-access.js';
+import { EmailCodeError, createEmailCodeService } from '../../auth/email-code.js';
+import { MfaError, MfaService } from '../../auth/mfa-service.js';
+import { AuthError, AuthService } from '../../auth/service.js';
 import { users } from '../../db/schema/users.js';
 import { protectedProcedure, publicProcedure, router } from '../trpc.js';
 
@@ -31,6 +32,23 @@ const resetPasswordInput = z.object({
   email: z.string().email().max(255),
   code: z.string().regex(/^\d{6}$/),
   password: z.string().min(8).max(128),
+});
+
+const changePasswordWithCodeInput = z.object({
+  code: z.string().regex(/^\d{6}$/),
+  password: z.string().min(8).max(128),
+});
+
+const mfaCode = z
+  .string()
+  .trim()
+  .min(6)
+  .max(11)
+  .regex(/^(?:\d{6}|[A-Za-z0-9]{5}-?[A-Za-z0-9]{5})$/);
+
+const verifyMfaChallengeInput = z.object({
+  mfaToken: z.string().min(1).max(4096),
+  code: mfaCode,
 });
 
 // Module-scope service so the in-memory code store survives across
@@ -188,6 +206,8 @@ export const authRouter = router({
       const body = (await res.json().catch(() => ({}))) as {
         accessToken?: string;
         user?: import('../../auth/service.js').PublicUser;
+        mfaRequired?: true;
+        mfaToken?: string;
         error?: string;
       };
       if (!res.ok) {
@@ -202,13 +222,16 @@ export const authRouter = router({
           message: body.error ?? '验证失败',
         });
       }
+      if (body.mfaRequired && body.mfaToken && body.user) {
+        return { user: body.user, mfaRequired: true as const, mfaToken: body.mfaToken };
+      }
       if (!body.accessToken || !body.user) {
         throw new TRPCError({
           code: 'INTERNAL_SERVER_ERROR',
           message: '网关响应缺少 token',
         });
       }
-      return { user: body.user, accessToken: body.accessToken };
+      return { user: body.user, accessToken: body.accessToken, mfaRequired: false as const };
     }),
 
   /**
@@ -241,6 +264,123 @@ export const authRouter = router({
       throw maskUnexpectedAuthError(ctx, 'auth.resetPassword', err);
     }
   }),
+
+  sendPasswordChangeCode: protectedProcedure.mutation(async ({ ctx }) => {
+    const [row] = await ctx.db
+      .select({ email: users.email })
+      .from(users)
+      .where(eq(users.externalId, ctx.userId))
+      .limit(1);
+    if (!row) {
+      throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
+    }
+    if (!row.email) {
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message: '当前账号尚未绑定邮箱，请先联系支持。',
+      });
+    }
+    try {
+      const { cooldownMs } = await emailCodeService.sendCode(row.email, 'password-change');
+      return { ok: true as const, cooldownMs };
+    } catch (err) {
+      if (err instanceof EmailCodeError && err.code === 'COOLDOWN') {
+        throw new TRPCError({ code: 'TOO_MANY_REQUESTS', message: err.message });
+      }
+      throw maskUnexpectedAuthError(ctx, 'auth.sendPasswordChangeCode', err);
+    }
+  }),
+
+  changePasswordWithCode: protectedProcedure
+    .input(changePasswordWithCodeInput)
+    .mutation(async ({ ctx, input }) => {
+      const [row] = await ctx.db
+        .select({ email: users.email })
+        .from(users)
+        .where(eq(users.externalId, ctx.userId))
+        .limit(1);
+      if (!row) {
+        throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
+      }
+      if (!row.email) {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: '当前账号尚未绑定邮箱，请先联系支持。',
+        });
+      }
+      try {
+        await emailCodeService.verifyCode(row.email, input.code, 'password-change');
+      } catch (err) {
+        if (err instanceof EmailCodeError) {
+          throw new TRPCError({ code: 'UNAUTHORIZED', message: err.message });
+        }
+        throw err;
+      }
+      try {
+        return await new AuthService(ctx.db).changePasswordForUser(ctx.userId, input.password);
+      } catch (err) {
+        if (err instanceof AuthError && err.code === 'INVALID_CREDENTIALS') {
+          throw new TRPCError({ code: 'UNAUTHORIZED', message: err.message });
+        }
+        throw maskUnexpectedAuthError(ctx, 'auth.changePasswordWithCode', err);
+      }
+    }),
+
+  verifyMfaChallenge: publicProcedure
+    .input(verifyMfaChallengeInput)
+    .mutation(async ({ ctx, input }) => {
+      try {
+        return await new MfaService(ctx.db).verifyChallenge(input.mfaToken, input.code);
+      } catch (err) {
+        throw mapMfaError(ctx, 'auth.verifyMfaChallenge', err);
+      }
+    }),
+
+  mfaStatus: protectedProcedure.query(async ({ ctx }) => {
+    try {
+      return await new MfaService(ctx.db).status(ctx.userId);
+    } catch (err) {
+      throw mapMfaError(ctx, 'auth.mfaStatus', err);
+    }
+  }),
+
+  beginMfaSetup: protectedProcedure.mutation(async ({ ctx }) => {
+    try {
+      return await new MfaService(ctx.db).beginSetup(ctx.userId);
+    } catch (err) {
+      throw mapMfaError(ctx, 'auth.beginMfaSetup', err);
+    }
+  }),
+
+  confirmMfaSetup: protectedProcedure
+    .input(z.object({ code: z.string().regex(/^\d{6}$/) }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        return await new MfaService(ctx.db).confirmSetup(ctx.userId, input.code);
+      } catch (err) {
+        throw mapMfaError(ctx, 'auth.confirmMfaSetup', err);
+      }
+    }),
+
+  regenerateMfaRecoveryCodes: protectedProcedure
+    .input(z.object({ code: mfaCode }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        return await new MfaService(ctx.db).regenerateRecoveryCodes(ctx.userId, input.code);
+      } catch (err) {
+        throw mapMfaError(ctx, 'auth.regenerateMfaRecoveryCodes', err);
+      }
+    }),
+
+  disableMfa: protectedProcedure
+    .input(z.object({ code: mfaCode }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        return await new MfaService(ctx.db).disable(ctx.userId, input.code);
+      } catch (err) {
+        throw mapMfaError(ctx, 'auth.disableMfa', err);
+      }
+    }),
 
   me: protectedProcedure.query(async ({ ctx }) => {
     const [row] = await ctx.db
@@ -305,4 +445,24 @@ function maskUnexpectedAuthError(
     code: 'INTERNAL_SERVER_ERROR',
     message: '登录服务暂时不可用，请稍后重试。',
   });
+}
+
+function mapMfaError(
+  ctx: { logger?: { error: (obj: unknown, msg?: string) => void } },
+  procedure: string,
+  err: unknown,
+): TRPCError {
+  if (err instanceof MfaError) {
+    if (err.code === 'LOCKED') {
+      return new TRPCError({ code: 'TOO_MANY_REQUESTS', message: err.message });
+    }
+    if (err.code === 'ALREADY_ENABLED') {
+      return new TRPCError({ code: 'CONFLICT', message: err.message });
+    }
+    if (err.code === 'NOT_ENABLED' || err.code === 'SETUP_EXPIRED') {
+      return new TRPCError({ code: 'PRECONDITION_FAILED', message: err.message });
+    }
+    return new TRPCError({ code: 'UNAUTHORIZED', message: err.message });
+  }
+  return maskUnexpectedAuthError(ctx, procedure, err);
 }

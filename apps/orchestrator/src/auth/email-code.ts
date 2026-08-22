@@ -26,6 +26,25 @@ interface Entry {
 
 const store = new Map<string, Entry>();
 
+export type EmailCodePurpose = 'login' | 'password-change';
+
+function storeKey(email: string, purpose: EmailCodePurpose): string {
+  return `${purpose}:${email.trim().toLowerCase()}`;
+}
+
+function emailCopy(purpose: EmailCodePurpose, code: string): { subject: string; text: string } {
+  if (purpose === 'password-change') {
+    return {
+      subject: 'HOLA DAY 修改密码验证码',
+      text: `你的修改密码验证码是：${code}\n\n5 分钟内有效。如果这不是你本人操作，请立即忽略此邮件。`,
+    };
+  }
+  return {
+    subject: 'HOLA DAY 登录验证码',
+    text: `你的验证码是：${code}\n\n5 分钟内有效。如果这不是你本人操作，请忽略此邮件。`,
+  };
+}
+
 function genCode(): string {
   // crypto.randomInt is the only stdlib RNG with cryptographic
   // guarantees on Node. Math.random() is a deterministic PRNG seeded
@@ -83,27 +102,29 @@ export class EmailCodeError extends Error {
 }
 
 export interface EmailCodeService {
-  sendCode(email: string): Promise<{ cooldownMs: number }>;
-  verifyCode(email: string, code: string): Promise<void>;
+  sendCode(email: string, purpose?: EmailCodePurpose): Promise<{ cooldownMs: number }>;
+  verifyCode(email: string, code: string, purpose?: EmailCodePurpose): Promise<void>;
   /** Test helper — never ship to prod routes. */
-  _peek(email: string): Entry | undefined;
+  _peek(email: string, purpose?: EmailCodePurpose): Entry | undefined;
 }
 
 export function createEmailCodeService(sender: EmailSender = resendSender): EmailCodeService {
   return {
-    async sendCode(email) {
+    async sendCode(email, purpose = 'login') {
       const normalized = email.trim().toLowerCase();
-      const existing = store.get(normalized);
+      const key = storeKey(normalized, purpose);
+      const existing = store.get(key);
       if (existing && Date.now() - existing.createdAt < RESEND_COOLDOWN_MS) {
         throw new EmailCodeError('请稍候再重新发送验证码', 'COOLDOWN');
       }
       const code = genCode();
-      store.set(normalized, { code, createdAt: Date.now(), attempts: 0 });
+      store.set(key, { code, createdAt: Date.now(), attempts: 0 });
+      const copy = emailCopy(purpose, code);
       try {
         await sender.send({
           to: normalized,
-          subject: 'HOLA DAY 登录验证码',
-          text: `你的验证码是：${code}\n\n5 分钟内有效。如果这不是你本人操作，请忽略此邮件。`,
+          subject: copy.subject,
+          text: copy.text,
         });
       } catch (err) {
         // Leave the code in the store so a retry doesn't regenerate
@@ -118,28 +139,29 @@ export function createEmailCodeService(sender: EmailSender = resendSender): Emai
       return { cooldownMs: RESEND_COOLDOWN_MS };
     },
 
-    async verifyCode(email, code) {
+    async verifyCode(email, code, purpose = 'login') {
       const normalized = email.trim().toLowerCase();
-      const entry = store.get(normalized);
+      const key = storeKey(normalized, purpose);
+      const entry = store.get(key);
       if (!entry) throw new EmailCodeError('请先获取验证码', 'MISSING');
       if (Date.now() - entry.createdAt > CODE_TTL_MS) {
-        store.delete(normalized);
+        store.delete(key);
         throw new EmailCodeError('验证码已过期', 'EXPIRED');
       }
       entry.attempts += 1;
       if (entry.attempts > 5) {
-        store.delete(normalized);
+        store.delete(key);
         throw new EmailCodeError('尝试次数过多，请重新发送验证码', 'EXPIRED');
       }
       if (entry.code !== code.trim()) {
         throw new EmailCodeError('验证码不正确', 'MISMATCH');
       }
       // Single-use: consume on success.
-      store.delete(normalized);
+      store.delete(key);
     },
 
-    _peek(email) {
-      return store.get(email.trim().toLowerCase());
+    _peek(email, purpose = 'login') {
+      return store.get(storeKey(email, purpose));
     },
   };
 }

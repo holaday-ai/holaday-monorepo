@@ -1,4 +1,13 @@
 import { randomBytes } from 'node:crypto';
+import {
+  ADDON_PACK_CATALOGUE,
+  type AddonPackId,
+  type BillingCycle,
+  DEFAULT_TASK_ORIGIN,
+  getAddonPackPriceCents,
+  getPlanPriceCents,
+  isAddonPackId,
+} from '@holaday/shared-types';
 import { createExpressMiddleware } from '@trpc/server/adapters/express';
 import { and, eq } from 'drizzle-orm';
 import express from 'express';
@@ -8,39 +17,37 @@ import type { Planner } from './agent/planner.js';
 import type { ExecutionRouter } from './agent/supercar/index.js';
 import type { VisionLoopCommander } from './agent/vision-loop/commander.js';
 import type { PlaywrightExecutor } from './agent/vision-loop/playwright-executor.js';
-import type { BrowserPool } from './browser-pool/index.js';
-import { bearerAuth } from './auth/middleware.js';
+import { createWebhookTasksHandler } from './api-keys/webhook-handler.js';
 import { signStreamToken } from './auth/jwt.js';
+import { bearerAuth } from './auth/middleware.js';
 import { AuthService } from './auth/service.js';
+import type { BrowserPool } from './browser-pool/index.js';
+import { browsingHistorySchema, replaceUserSiteStats } from './browsing-history/service.js';
 import { env } from './config/env.js';
 import { logger } from './config/logger.js';
+import {
+  MAX_COOKIES_PER_SYNC,
+  type SyncableCookie,
+  injectPendingCookies,
+  isAllowedCookieDomain,
+  syncableCookieSchema,
+  upsertPendingCookies,
+} from './cookies/sync-service.js';
 import { db } from './db/client.js';
 import { payments } from './db/schema/payments.js';
 import { users } from './db/schema/users.js';
-import {
-  injectPendingCookies,
-  isAllowedCookieDomain,
-  MAX_COOKIES_PER_SYNC,
-  syncableCookieSchema,
-  type SyncableCookie,
-  upsertPendingCookies,
-} from './cookies/sync-service.js';
-import {
-  browsingHistorySchema,
-  replaceUserSiteStats,
-} from './browsing-history/service.js';
 import {
   ACCEPTED_EXTENSIONS,
   ACCEPTED_MIMES,
   FileService,
   UPLOAD_BYTE_LIMIT,
   classifyUpload,
-  isMacroOfficeUpload,
-  decodeUploadFilename,
   contentDispositionAttachment,
+  decodeUploadFilename,
+  isMacroOfficeUpload,
   uploadByteLimit,
 } from './files/file-service.js';
-import type { PayPalAdapter, PlanId } from './payment/index.js';
+import { partnerConfig } from './partner/partner-config.js';
 import {
   PartnerPaymentConfirmConflictError,
   PartnerPaymentConfirmReviewRequiredError,
@@ -48,24 +55,11 @@ import {
   PartnerPaymentProviderCaptureConflictError,
   validatePartnerPaymentConfirmHttpRequest,
 } from './partner/payment-confirm-service.js';
-import { partnerConfig } from './partner/partner-config.js';
-import {
-  ADDON_PACK_CATALOGUE,
-  DEFAULT_TASK_ORIGIN,
-  getAddonPackPriceCents,
-  getPlanPriceCents,
-  isAddonPackId,
-  type AddonPackId,
-  type BillingCycle,
-} from '@holaday/shared-types';
-import { createWebhookTasksHandler } from './api-keys/webhook-handler.js';
+import type { PayPalAdapter, PlanId } from './payment/index.js';
 import { fetchSourceCover } from './stock-news/source-cover.js';
 import { makeCreateContext } from './trpc/context.js';
 import { appRouter } from './trpc/router.js';
-import {
-  completePaymentInTransaction,
-  lockSettlementContext,
-} from './trpc/routers/payment.js';
+import { completePaymentInTransaction, lockSettlementContext } from './trpc/routers/payment.js';
 import { tasksRouter } from './trpc/routers/tasks.js';
 
 export interface HttpAppDeps {
@@ -285,7 +279,10 @@ export function createHttpApp(deps: HttpAppDeps) {
       });
       if (!tokenRes.ok) {
         const body = await tokenRes.text();
-        logger.error({ status: tokenRes.status, body: body.slice(0, 400) }, 'google token swap failed');
+        logger.error(
+          { status: tokenRes.status, body: body.slice(0, 400) },
+          'google token swap failed',
+        );
         res.redirect(302, '/?auth_error=token_swap_failed');
         return;
       }
@@ -343,7 +340,9 @@ export function createHttpApp(deps: HttpAppDeps) {
       });
       logger.info(
         { email: info.email, sub: info.sub.slice(0, 6) },
-        'google oauth: issued access token',
+        result.mfaRequired
+          ? 'google oauth: issued MFA challenge'
+          : 'google oauth: issued access token',
       );
       // 4. Hand the token back via URL fragment — the SPA's lib/auth
       //    picks it out at load, persists to localStorage, then scrubs
@@ -351,7 +350,9 @@ export function createHttpApp(deps: HttpAppDeps) {
       //    referrers. Land on `/login` (not `/`) so the SPA's auth
       //    bootstrap is the surface that consumes the hash, instead
       //    of the landing page swallowing it before the SPA mounts.
-      const fragment = `#token=${encodeURIComponent(result.accessToken)}`;
+      const fragment = result.mfaRequired
+        ? `#mfa=${encodeURIComponent(result.mfaToken)}`
+        : `#token=${encodeURIComponent(result.accessToken)}`;
       res.redirect(302, `/login${fragment}`);
     } catch (err) {
       logger.error(
@@ -487,10 +488,7 @@ export function createHttpApp(deps: HttpAppDeps) {
             .where(and(eq(payments.id, row.id), eq(payments.status, 'pending')));
           return { kind: 'review' as const, row, reason: 'capture_settlement_mismatch' };
         }
-        if (
-          settlement.firstMonthRequested &&
-          !settlement.firstMonthEligible
-        ) {
+        if (settlement.firstMonthRequested && !settlement.firstMonthEligible) {
           await tx
             .update(payments)
             .set({
@@ -639,8 +637,7 @@ export function createHttpApp(deps: HttpAppDeps) {
         res.status(401).json({ error: 'unknown user' });
         return;
       }
-      const planId: PlanId =
-        user.plan === 'basic' || user.plan === 'pro' ? user.plan : 'free';
+      const planId: PlanId = user.plan === 'basic' || user.plan === 'pro' ? user.plan : 'free';
       const cap = UPLOAD_BYTE_LIMIT[planId];
       if (cap === 0) {
         res.status(403).json({
@@ -924,111 +921,112 @@ export function createHttpApp(deps: HttpAppDeps) {
   // legitimately ship a few hundred KB of cookies across the
   // curated domain list, comfortably above the global 1MB cap.
   // ---------------------------------------------------------------------
-  app.post(
-    '/cookies/sync',
-    express.json({ limit: '5mb' }),
-    async (req, res) => {
-      const userExternalId = (req as express.Request & { userId?: string }).userId;
-      if (!userExternalId) {
-        res.status(401).json({ error: 'unauthorized' });
-        return;
+  app.post('/cookies/sync', express.json({ limit: '5mb' }), async (req, res) => {
+    const userExternalId = (req as express.Request & { userId?: string }).userId;
+    if (!userExternalId) {
+      res.status(401).json({ error: 'unauthorized' });
+      return;
+    }
+    const body = (req.body ?? {}) as { cookies?: unknown };
+    if (!Array.isArray(body.cookies)) {
+      res.status(400).json({ error: 'body.cookies must be an array' });
+      return;
+    }
+    if (body.cookies.length === 0) {
+      res.json({ synced: 0, domains: [], deferred: false });
+      return;
+    }
+    if (body.cookies.length > MAX_COOKIES_PER_SYNC) {
+      res.status(400).json({
+        error: 'too_many_cookies',
+        message: `最多同步 ${MAX_COOKIES_PER_SYNC} 条`,
+      });
+      return;
+    }
+    // zod-validate + domain-whitelist server-side. The extension's
+    // own TRACKED_DOMAINS gate is enforced HERE too so a tampered
+    // or repurposed extension can't widen the scope to arbitrary
+    // sites. Off-list cookies and malformed entries get dropped
+    // silently (logged) — never cause a 4xx, since users blame
+    // "the cookie sync broke" not "site X isn't tracked".
+    const validated: SyncableCookie[] = [];
+    let skippedSchema = 0;
+    let skippedDomain = 0;
+    for (const raw of body.cookies) {
+      const parsed = syncableCookieSchema.safeParse(raw);
+      if (!parsed.success) {
+        skippedSchema += 1;
+        continue;
       }
-      const body = (req.body ?? {}) as { cookies?: unknown };
-      if (!Array.isArray(body.cookies)) {
-        res.status(400).json({ error: 'body.cookies must be an array' });
-        return;
+      if (!isAllowedCookieDomain(parsed.data.domain)) {
+        skippedDomain += 1;
+        continue;
       }
-      if (body.cookies.length === 0) {
-        res.json({ synced: 0, domains: [], deferred: false });
-        return;
-      }
-      if (body.cookies.length > MAX_COOKIES_PER_SYNC) {
-        res.status(400).json({
-          error: 'too_many_cookies',
-          message: `最多同步 ${MAX_COOKIES_PER_SYNC} 条`,
-        });
-        return;
-      }
-      // zod-validate + domain-whitelist server-side. The extension's
-      // own TRACKED_DOMAINS gate is enforced HERE too so a tampered
-      // or repurposed extension can't widen the scope to arbitrary
-      // sites. Off-list cookies and malformed entries get dropped
-      // silently (logged) — never cause a 4xx, since users blame
-      // "the cookie sync broke" not "site X isn't tracked".
-      const validated: SyncableCookie[] = [];
-      let skippedSchema = 0;
-      let skippedDomain = 0;
-      for (const raw of body.cookies) {
-        const parsed = syncableCookieSchema.safeParse(raw);
-        if (!parsed.success) {
-          skippedSchema += 1;
-          continue;
-        }
-        if (!isAllowedCookieDomain(parsed.data.domain)) {
-          skippedDomain += 1;
-          continue;
-        }
-        validated.push(parsed.data);
-      }
-      if (skippedSchema > 0 || skippedDomain > 0) {
+      validated.push(parsed.data);
+    }
+    if (skippedSchema > 0 || skippedDomain > 0) {
+      logger.warn(
+        { userExternalId, skippedSchema, skippedDomain, kept: validated.length },
+        'cookie-sync: dropped entries failing schema or domain whitelist',
+      );
+    }
+    const cookies = validated;
+    if (cookies.length === 0) {
+      res.json({
+        synced: 0,
+        domains: [],
+        deferred: false,
+        dropped: { schema: skippedSchema, domain: skippedDomain },
+      });
+      return;
+    }
+    const [user] = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.externalId, userExternalId))
+      .limit(1);
+    if (!user) {
+      res.status(401).json({ error: 'unknown user' });
+      return;
+    }
+    const domains = Array.from(
+      new Set(cookies.map((c) => c.domain).filter((d): d is string => typeof d === 'string')),
+    );
+    // Upsert into pending_cookies first — that way even if the
+    // immediate-inject path throws (transient executor death),
+    // the next allocate still drains them.
+    await upsertPendingCookies(db, user.id, cookies);
+
+    // Try the immediate inject when the user has a live executor.
+    // Phase 24 — peekActiveForUser finds whichever active task
+    // instance the user currently has (if any). Cookies get
+    // injected into that task's context immediately; if no task
+    // is active, deferred=true means the next task spawn will
+    // pick them up via onInstanceReady.
+    let deferred = true;
+    const live = deps.browserPool?.peekActiveForUser(userExternalId);
+    if (live && live.status === 'ready') {
+      try {
+        const page = await live.executor.getPage();
+        const ctx = page.context();
+        await injectPendingCookies({ db, context: ctx, userExternalId });
+        deferred = false;
+      } catch (err) {
         logger.warn(
-          { userExternalId, skippedSchema, skippedDomain, kept: validated.length },
-          'cookie-sync: dropped entries failing schema or domain whitelist',
+          {
+            err: err instanceof Error ? err.message : String(err),
+            userExternalId,
+          },
+          'cookie-sync: immediate inject failed; will retry on next allocate',
         );
       }
-      const cookies = validated;
-      if (cookies.length === 0) {
-        res.json({ synced: 0, domains: [], deferred: false, dropped: { schema: skippedSchema, domain: skippedDomain } });
-        return;
-      }
-      const [user] = await db
-        .select({ id: users.id })
-        .from(users)
-        .where(eq(users.externalId, userExternalId))
-        .limit(1);
-      if (!user) {
-        res.status(401).json({ error: 'unknown user' });
-        return;
-      }
-      const domains = Array.from(
-        new Set(cookies.map((c) => c.domain).filter((d): d is string => typeof d === 'string')),
-      );
-      // Upsert into pending_cookies first — that way even if the
-      // immediate-inject path throws (transient executor death),
-      // the next allocate still drains them.
-      await upsertPendingCookies(db, user.id, cookies);
-
-      // Try the immediate inject when the user has a live executor.
-      // Phase 24 — peekActiveForUser finds whichever active task
-      // instance the user currently has (if any). Cookies get
-      // injected into that task's context immediately; if no task
-      // is active, deferred=true means the next task spawn will
-      // pick them up via onInstanceReady.
-      let deferred = true;
-      const live = deps.browserPool?.peekActiveForUser(userExternalId);
-      if (live && live.status === 'ready') {
-        try {
-          const page = await live.executor.getPage();
-          const ctx = page.context();
-          await injectPendingCookies({ db, context: ctx, userExternalId });
-          deferred = false;
-        } catch (err) {
-          logger.warn(
-            {
-              err: err instanceof Error ? err.message : String(err),
-              userExternalId,
-            },
-            'cookie-sync: immediate inject failed; will retry on next allocate',
-          );
-        }
-      }
-      res.json({
-        synced: cookies.length,
-        domains,
-        deferred,
-      });
-    },
-  );
+    }
+    res.json({
+      synced: cookies.length,
+      domains,
+      deferred,
+    });
+  });
 
   // ---------------------------------------------------------------------
   // Phase 25 — extension browsing-history sync.
@@ -1053,57 +1051,53 @@ export function createHttpApp(deps: HttpAppDeps) {
   // of KB but we let the headroom accommodate users with very wide
   // browsing footprints.
   // ---------------------------------------------------------------------
-  app.post(
-    '/extension/browsing-history',
-    express.json({ limit: '1mb' }),
-    async (req, res) => {
-      const userExternalId = (req as express.Request & { userId?: string }).userId;
-      if (!userExternalId) {
-        res.status(401).json({ error: 'unauthorized' });
-        return;
-      }
-      const parsed = browsingHistorySchema.safeParse(req.body ?? {});
-      if (!parsed.success) {
-        res.status(400).json({
-          error: 'invalid_payload',
-          // Zod's flatten() is plenty informative for an internal
-          // client we control; no need to ship its full issue tree.
-          message: parsed.error.issues[0]?.message ?? 'invalid body',
-        });
-        return;
-      }
-      const [user] = await db
-        .select({ id: users.id })
-        .from(users)
-        .where(eq(users.externalId, userExternalId))
-        .limit(1);
-      if (!user) {
-        res.status(401).json({ error: 'unknown_user' });
-        return;
-      }
-      try {
-        const result = await replaceUserSiteStats(db, user.id, parsed.data);
-        logger.info(
-          {
-            userExternalId,
-            ingested: result.ingested,
-            rejected: result.rejected,
-          },
-          'extension: browsing-history sync',
-        );
-        res.json(result);
-      } catch (err) {
-        logger.error(
-          {
-            err: err instanceof Error ? err.message : String(err),
-            userExternalId,
-          },
-          'extension: browsing-history sync failed',
-        );
-        res.status(500).json({ error: 'sync_failed' });
-      }
-    },
-  );
+  app.post('/extension/browsing-history', express.json({ limit: '1mb' }), async (req, res) => {
+    const userExternalId = (req as express.Request & { userId?: string }).userId;
+    if (!userExternalId) {
+      res.status(401).json({ error: 'unauthorized' });
+      return;
+    }
+    const parsed = browsingHistorySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({
+        error: 'invalid_payload',
+        // Zod's flatten() is plenty informative for an internal
+        // client we control; no need to ship its full issue tree.
+        message: parsed.error.issues[0]?.message ?? 'invalid body',
+      });
+      return;
+    }
+    const [user] = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.externalId, userExternalId))
+      .limit(1);
+    if (!user) {
+      res.status(401).json({ error: 'unknown_user' });
+      return;
+    }
+    try {
+      const result = await replaceUserSiteStats(db, user.id, parsed.data);
+      logger.info(
+        {
+          userExternalId,
+          ingested: result.ingested,
+          rejected: result.rejected,
+        },
+        'extension: browsing-history sync',
+      );
+      res.json(result);
+    } catch (err) {
+      logger.error(
+        {
+          err: err instanceof Error ? err.message : String(err),
+          userExternalId,
+        },
+        'extension: browsing-history sync failed',
+      );
+      res.status(500).json({ error: 'sync_failed' });
+    }
+  });
 
   // ---------------------------------------------------------------------
   // Phase 11 — internal bridge from the Aliyun cn-payment gateway.
@@ -1176,10 +1170,7 @@ export function createHttpApp(deps: HttpAppDeps) {
         err instanceof PartnerPaymentConfirmConflictError ||
         err instanceof PartnerPaymentProviderCaptureConflictError
       ) {
-        logger.warn(
-          { err: err.message },
-          'partner-internal-confirm: confirmation rejected',
-        );
+        logger.warn({ err: err.message }, 'partner-internal-confirm: confirmation rejected');
         res.status(409).json({ error: 'partner_payment_confirm_conflict' });
         return;
       }
@@ -1272,10 +1263,7 @@ export function createHttpApp(deps: HttpAppDeps) {
       res.status(400).json({ error: 'bad_amount' });
       return;
     }
-    if (
-      body.isFirstMonth !== undefined &&
-      typeof body.isFirstMonth !== 'boolean'
-    ) {
+    if (body.isFirstMonth !== undefined && typeof body.isFirstMonth !== 'boolean') {
       res.status(400).json({ error: 'bad_first_month' });
       return;
     }
@@ -1311,8 +1299,7 @@ export function createHttpApp(deps: HttpAppDeps) {
         res.status(400).json({ error: 'bad_addon_pack' });
         return;
       }
-      const paymentPlan =
-        kind === 'subscription' ? planId : (packId as AddonPackId);
+      const paymentPlan = kind === 'subscription' ? planId : (packId as AddonPackId);
 
       const outcome = await db.transaction(async (tx) => {
         const [lockedUser] = await tx
@@ -1328,10 +1315,7 @@ export function createHttpApp(deps: HttpAppDeps) {
           .select()
           .from(payments)
           .where(
-            and(
-              eq(payments.provider, provider),
-              eq(payments.providerCaptureId, transactionId),
-            ),
+            and(eq(payments.provider, provider), eq(payments.providerCaptureId, transactionId)),
           )
           .limit(1)
           .for('update');
@@ -1347,12 +1331,7 @@ export function createHttpApp(deps: HttpAppDeps) {
           const [pendingOrder] = await tx
             .select()
             .from(payments)
-            .where(
-              and(
-                eq(payments.provider, provider),
-                eq(payments.providerOrderId, outTradeNo),
-              ),
-            )
+            .where(and(eq(payments.provider, provider), eq(payments.providerOrderId, outTradeNo)))
             .limit(1)
             .for('update');
           row = pendingOrder;
@@ -1365,8 +1344,7 @@ export function createHttpApp(deps: HttpAppDeps) {
           kind === 'subscription'
             ? {
                 cycle,
-                firstMonth:
-                  cycle === 'monthly' && body.isFirstMonth === true,
+                firstMonth: cycle === 'monthly' && body.isFirstMonth === true,
                 source: 'cn-payment-gateway',
               }
             : {
@@ -1416,13 +1394,11 @@ export function createHttpApp(deps: HttpAppDeps) {
                 planId,
                 cycle,
                 'cny',
-                settlement.firstMonthRequested &&
-                  settlement.firstMonthEligible,
+                settlement.firstMonthRequested && settlement.firstMonthEligible,
               )
             : getAddonPackPriceCents(packId as AddonPackId, 'cny');
         if (
-          (settlement.firstMonthRequested &&
-            !settlement.firstMonthEligible) ||
+          (settlement.firstMonthRequested && !settlement.firstMonthEligible) ||
           amountCents !== expectedAmount
         ) {
           await tx
@@ -1528,7 +1504,10 @@ export function createHttpApp(deps: HttpAppDeps) {
       res.status(200).json(result);
     } catch (err) {
       logger.error(
-        { err: err instanceof Error ? err.message : String(err), phone: phone.slice(0, 3) + '****' },
+        {
+          err: err instanceof Error ? err.message : String(err),
+          phone: `${phone.slice(0, 3)}****`,
+        },
         'sms-login: handler crashed',
       );
       res.status(500).json({ error: 'internal_error' });
@@ -1539,9 +1518,7 @@ export function createHttpApp(deps: HttpAppDeps) {
   // `/webhooks/tasks`. The handler does its own bearer auth (API
   // key, not JWT) — the upstream bearerAuth silently no-ops on
   // `hd_live_…` tokens because they don't verify as JWTs.
-  const buildContextForUser = (
-    userExternalId: string,
-  ): import('./trpc/context.js').Context => ({
+  const buildContextForUser = (userExternalId: string): import('./trpc/context.js').Context => ({
     db,
     logger,
     // Express req/res stubs — tasks.create doesn't read them; the
@@ -1565,9 +1542,7 @@ export function createHttpApp(deps: HttpAppDeps) {
     logger,
     buildContextForUser,
     dispatch: async (ctx, input) => {
-      const result = await tasksRouter
-        .createCaller(ctx)
-        .create({ intent: input.intent });
+      const result = await tasksRouter.createCaller(ctx).create({ intent: input.intent });
       return { taskId: result.taskId, status: result.status };
     },
   });
