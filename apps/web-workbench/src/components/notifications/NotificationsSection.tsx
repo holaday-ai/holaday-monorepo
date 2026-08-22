@@ -35,6 +35,67 @@ import { trpc } from '@/lib/trpc';
 import { Row, Section } from '@/pages/PageShell';
 import { AddChannelModal, type ChannelDraft } from './AddChannelModal';
 
+export function NotificationToggle({
+  accessibleName,
+  enabled,
+  pending,
+  onToggle,
+}: {
+  accessibleName: string;
+  enabled: boolean;
+  pending: boolean;
+  onToggle: () => void;
+}): JSX.Element {
+  const action = enabled ? '关闭' : '开启';
+
+  return (
+    <label
+      className={cn(
+        'flex h-8 w-12 cursor-pointer items-center rounded-full p-1 transition-colors',
+        pending && 'cursor-wait opacity-70',
+        enabled ? 'bg-[#EA1F59]' : 'bg-muted-foreground/40',
+      )}
+      title={pending ? `正在更新${accessibleName}` : `${action}${accessibleName}`}
+    >
+      <input
+        type="checkbox"
+        role="switch"
+        className="sr-only"
+        checked={enabled}
+        disabled={pending}
+        aria-label={accessibleName}
+        aria-busy={pending}
+        onChange={onToggle}
+      />
+      <span
+        className={cn(
+          'h-6 w-6 rounded-full bg-white transition-transform',
+          enabled && 'translate-x-4',
+        )}
+      />
+    </label>
+  );
+}
+
+export function DailyBriefingToggle({
+  enabled,
+  pending,
+  onToggle,
+}: {
+  enabled: boolean;
+  pending: boolean;
+  onToggle: () => void;
+}): JSX.Element {
+  return (
+    <NotificationToggle
+      accessibleName="每日 A股简报"
+      enabled={enabled}
+      pending={pending}
+      onToggle={onToggle}
+    />
+  );
+}
+
 export function NotificationsSection(): JSX.Element {
   const toast = useToast();
   const mountedRef = React.useRef(false);
@@ -208,29 +269,11 @@ export function NotificationsSection(): JSX.Element {
           {briefingEnabled === null ? (
             <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" aria-label="加载中" />
           ) : (
-            <label
-              className={cn(
-                'flex h-8 w-12 cursor-pointer items-center rounded-full p-1 transition-colors',
-                briefingPending && 'cursor-wait opacity-70',
-                briefingEnabled ? 'bg-[#EA1F59]' : 'bg-muted-foreground/40',
-              )}
-              title={briefingPending ? '正在更新' : briefingEnabled ? '关闭' : '开启'}
-            >
-              <input
-                type="checkbox"
-                className="sr-only"
-                checked={briefingEnabled}
-                disabled={briefingPending}
-                aria-label={`${briefingEnabled ? '关闭' : '开启'}每日 A股简报`}
-                onChange={() => void handleBriefingToggle()}
-              />
-              <span
-                className={cn(
-                  'h-6 w-6 rounded-full bg-white transition-transform',
-                  briefingEnabled && 'translate-x-4',
-                )}
-              />
-            </label>
+            <DailyBriefingToggle
+              enabled={briefingEnabled}
+              pending={briefingPending}
+              onToggle={() => void handleBriefingToggle()}
+            />
           )}
         </Row>
         <div className="-mx-4 mt-3 border-t border-border/50">
@@ -310,29 +353,12 @@ export function NotificationsSection(): JSX.Element {
                       {maskWebhookUrl(row.webhookUrl)}
                     </div>
                   </div>
-                  <label
-                    className={cn(
-                      'flex h-8 w-12 cursor-pointer items-center rounded-full p-1 transition-colors',
-                      rowPending && 'cursor-wait opacity-70',
-                      row.enabled ? 'bg-[#EA1F59]' : 'bg-muted-foreground/40',
-                    )}
-                    title={rowPending ? '正在更新' : row.enabled ? '禁用' : '启用'}
-                  >
-                    <input
-                      type="checkbox"
-                      className="sr-only"
-                      checked={row.enabled}
-                      disabled={rowPending}
-                      aria-label={`${row.enabled ? '禁用' : '启用'}${NOTIFICATION_PLATFORM_LABEL[row.platform]}通知渠道`}
-                      onChange={() => void handleToggle(row)}
-                    />
-                    <span
-                      className={cn(
-                        'h-6 w-6 rounded-full bg-white transition-transform',
-                        row.enabled && 'translate-x-4',
-                      )}
-                    />
-                  </label>
+                  <NotificationToggle
+                    accessibleName={`${NOTIFICATION_PLATFORM_LABEL[row.platform]}通知渠道`}
+                    enabled={row.enabled}
+                    pending={rowPending}
+                    onToggle={() => void handleToggle(row)}
+                  />
                   <button
                     type="button"
                     onClick={() => {
