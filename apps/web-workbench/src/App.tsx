@@ -8,6 +8,7 @@ import {
 } from '@/components/LazyLoadBoundary';
 import { ToastProvider } from '@/components/ui/toast';
 import { partnerWorkbenchRedirectTarget, type PartnerWorkbenchSection } from '@/lib/partner-page-state';
+import { loadStockTasksPageRoute } from '@/lib/stock-page-preload';
 import { LoginPage } from '@/pages/LoginPage';
 import { RedirectIfAuthed } from '@/pages/RedirectIfAuthed';
 import { RegisterPage } from '@/pages/RegisterPage';
@@ -49,7 +50,7 @@ const SettingsPage = lazyRoute(() => import('@/pages/SettingsPage'), 'SettingsPa
 const SkillsPage = lazyRoute(() => import('@/pages/SkillsPage'), 'SkillsPage');
 const StarredPage = lazyRoute(() => import('@/pages/StarredPage'), 'StarredPage');
 const StockDiscoveryPage = lazyRoute(() => import('@/pages/StockDiscoveryPage'), 'StockDiscoveryPage');
-const StockTasksPage = lazyRoute(() => import('@/pages/StockTasksPage'), 'StockTasksPage');
+const StockTasksPage = lazyRoute(loadStockTasksPageRoute, 'StockTasksPage');
 const TermsPage = lazyRoute(() => import('@/pages/TermsPage'), 'TermsPage');
 const UsagePage = lazyRoute(() => import('@/pages/UsagePage'), 'UsagePage');
 const VideoPage = lazy(() =>
