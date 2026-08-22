@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -16,6 +16,25 @@ function node(label: string): JSX.Element {
 }
 
 describe('StockTaskWorkspaceLayout', () => {
+  it('prewarms risk after the watchlist paint while keeping it hidden from the active task', async () => {
+    render(
+      <StockTaskWorkspaceLayout
+        highlights={node('highlights')}
+        riskRadar={node('risk')}
+        screening={node('screening')}
+        preferenceProfile={node('profile')}
+        briefing={node('briefing')}
+        screeningView="idle"
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('risk')).toBeTruthy());
+    const hiddenRiskPanel = screen.getByTestId('risk').closest('[hidden]');
+    expect(hiddenRiskPanel?.getAttribute('aria-hidden')).toBe('true');
+    expect(screen.getByRole('tabpanel', { name: '关注股票' })).toBeTruthy();
+    expect(screen.getByTestId('highlights')).toBeTruthy();
+  });
+
   it('opens on the watchlist research desk and keeps secondary tasks out of the reading flow', () => {
     render(
       <StockTaskWorkspaceLayout
@@ -38,14 +57,16 @@ describe('StockTaskWorkspaceLayout', () => {
       activePanel.id,
     );
     expect(screen.getByTestId('highlights')).toBeTruthy();
-    expect(screen.queryByTestId('risk')).toBeNull();
+    expect(screen.getByTestId('risk').closest('[hidden]')?.getAttribute('aria-hidden')).toBe(
+      'true',
+    );
     expect(screen.queryByTestId('screening')).toBeNull();
     expect(screen.queryByTestId('profile')).toBeNull();
     expect(screen.queryByTestId('briefing')).toBeNull();
     expect(screen.getByRole('complementary', { name: '下一步' })).toBeTruthy();
   });
 
-  it('switches task destinations without stacking every stock module on the page', async () => {
+  it('switches task destinations while exposing only the active stock module', async () => {
     const user = userEvent.setup();
     render(
       <StockTaskWorkspaceLayout
@@ -59,13 +80,15 @@ describe('StockTaskWorkspaceLayout', () => {
     );
 
     await user.click(screen.getByRole('tab', { name: '风险证据' }));
-    expect(screen.getByTestId('risk')).toBeTruthy();
+    const warmedRisk = screen.getByTestId('risk');
+    expect(warmedRisk.closest('[hidden]')).toBeNull();
     expect(screen.queryByTestId('highlights')).toBeNull();
 
     await user.click(screen.getByRole('tab', { name: '条件选股' }));
     expect(screen.getByTestId('screening')).toBeTruthy();
     expect(screen.getByTestId('profile')).toBeTruthy();
-    expect(screen.queryByTestId('risk')).toBeNull();
+    expect(screen.getByTestId('risk')).toBe(warmedRisk);
+    expect(warmedRisk.closest('[hidden]')?.getAttribute('aria-hidden')).toBe('true');
 
     await user.click(screen.getByRole('tab', { name: '今日简报' }));
     expect(screen.getByTestId('briefing')).toBeTruthy();
