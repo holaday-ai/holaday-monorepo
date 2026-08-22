@@ -1,19 +1,41 @@
 import { describe, expect, it, vi } from 'vitest';
 import { __filesRouterInternals } from './files.js';
 
-const { fileIsAvailableInLibrary, fileMatchesLibraryFilter } =
-  __filesRouterInternals;
+const {
+  fileIsAvailableInLibrary,
+  fileMatchesLibraryFilter,
+  libraryFilenameSearchTerms,
+  normalizeLibraryFilename,
+} = __filesRouterInternals;
+
+describe('files router legacy filename compatibility', () => {
+  it('recovers UTF-8 filenames that legacy uploads stored as Latin-1', () => {
+    expect(normalizeLibraryFilename('å¨æ¥æ¨¡æ¿.xlsx')).toBe('周报模板.xlsx');
+  });
+
+  it('preserves correct Unicode and genuine Latin-1 filenames', () => {
+    expect(normalizeLibraryFilename('正常文件.pdf')).toBe('正常文件.pdf');
+    expect(normalizeLibraryFilename('café.docx')).toBe('café.docx');
+  });
+
+  it('searches both the user-facing name and its legacy stored form', () => {
+    expect(libraryFilenameSearchTerms(' 周报模板 ')).toEqual([
+      '周报模板',
+      Buffer.from('周报模板', 'utf8').toString('latin1'),
+    ]);
+  });
+
+  it('does not duplicate ASCII search terms', () => {
+    expect(libraryFilenameSearchTerms(' report ')).toEqual(['report']);
+    expect(libraryFilenameSearchTerms('   ')).toEqual([]);
+  });
+});
 
 describe('files router library availability', () => {
   const now = new Date('2026-07-23T10:00:00.000Z');
 
   it('keeps active files with no expiry or a future expiry', () => {
-    expect(
-      fileIsAvailableInLibrary(
-        { status: 'active', expiresAt: null },
-        now,
-      ),
-    ).toBe(true);
+    expect(fileIsAvailableInLibrary({ status: 'active', expiresAt: null }, now)).toBe(true);
     expect(
       fileIsAvailableInLibrary(
         { status: 'active', expiresAt: new Date('2026-07-23T10:00:01.000Z') },
@@ -23,18 +45,8 @@ describe('files router library availability', () => {
   });
 
   it('drops pending, expired, and time-expired rows', () => {
-    expect(
-      fileIsAvailableInLibrary(
-        { status: 'pending', expiresAt: null },
-        now,
-      ),
-    ).toBe(false);
-    expect(
-      fileIsAvailableInLibrary(
-        { status: 'expired', expiresAt: null },
-        now,
-      ),
-    ).toBe(false);
+    expect(fileIsAvailableInLibrary({ status: 'pending', expiresAt: null }, now)).toBe(false);
+    expect(fileIsAvailableInLibrary({ status: 'expired', expiresAt: null }, now)).toBe(false);
     expect(
       fileIsAvailableInLibrary(
         { status: 'active', expiresAt: new Date('2026-07-23T09:59:59.000Z') },
@@ -72,11 +84,7 @@ describe('files router library deletion', () => {
     const deleteForUser = vi.fn(async () => true);
 
     await expect(
-      __filesRouterInternals.deleteLibraryFile(
-        { deleteForUser },
-        'file_owned',
-        7,
-      ),
+      __filesRouterInternals.deleteLibraryFile({ deleteForUser }, 'file_owned', 7),
     ).resolves.toEqual({ ok: true });
 
     expect(deleteForUser).toHaveBeenCalledWith('file_owned', 7);
@@ -86,11 +94,7 @@ describe('files router library deletion', () => {
     const deleteForUser = vi.fn(async () => false);
 
     await expect(
-      __filesRouterInternals.deleteLibraryFile(
-        { deleteForUser },
-        'file_foreign',
-        7,
-      ),
+      __filesRouterInternals.deleteLibraryFile({ deleteForUser }, 'file_foreign', 7),
     ).rejects.toMatchObject({
       code: 'NOT_FOUND',
       message: 'file not found',
