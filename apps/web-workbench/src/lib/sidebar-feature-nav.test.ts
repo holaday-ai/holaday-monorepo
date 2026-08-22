@@ -1,5 +1,9 @@
-import { describe, expect, it } from 'vitest';
-import { filterSidebarFeatureNavItems } from './sidebar-feature-nav';
+import { readFileSync } from 'node:fs';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  filterSidebarFeatureNavItems,
+  preloadSidebarFeatureNavItem,
+} from './sidebar-feature-nav';
 
 const FEATURES = [
   { label: '专家技能', href: '/skills' },
@@ -33,5 +37,23 @@ describe('filterSidebarFeatureNavItems', () => {
         partnerEnabled: true,
       }).map((item) => item.href),
     ).toEqual(['/skills', '/partner', '/files']);
+  });
+
+  it('runs an optional feature preload for pointer or focus intent', () => {
+    const preload = vi.fn();
+
+    preloadSidebarFeatureNavItem({ label: '股市任务', href: '/stocks', preload });
+    preloadSidebarFeatureNavItem({ label: '文件库', href: '/files' });
+
+    expect(preload).toHaveBeenCalledTimes(1);
+  });
+
+  it('wires stock module preload to pointer and keyboard intent without replacing navigation', () => {
+    const sidebarSource = readFileSync(new URL('../components/Sidebar.tsx', import.meta.url), 'utf8');
+
+    expect(sidebarSource).toContain('void preloadStockTasksPageRoute()');
+    expect(sidebarSource).toContain('onPointerEnter={() => preloadSidebarFeatureNavItem(item)}');
+    expect(sidebarSource).toContain('onFocus={() => preloadSidebarFeatureNavItem(item)}');
+    expect(sidebarSource).toContain('onClick={() => navigate(href)}');
   });
 });
