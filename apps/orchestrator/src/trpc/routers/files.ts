@@ -13,12 +13,13 @@ import { and, desc, eq, gt, isNull, like, lt, notLike, or } from 'drizzle-orm';
 import { z } from 'zod';
 import { taskFiles } from '../../db/schema/task-files.js';
 import { users } from '../../db/schema/users.js';
-import { FileService } from '../../files/file-service.js';
+import { FileService, decodeUploadFilename } from '../../files/file-service.js';
 import { protectedProcedure, router } from '../trpc.js';
 
-async function requireUserId(
-  ctx: { db: typeof import('../../db/client.js').db; userId: string },
-): Promise<number> {
+async function requireUserId(ctx: {
+  db: typeof import('../../db/client.js').db;
+  userId: string;
+}): Promise<number> {
   const [row] = await ctx.db
     .select({ id: users.id })
     .from(users)
@@ -49,8 +50,8 @@ export const filesRouter = router({
    *   - 'images'    : mime starts with 'image/'
    *   - 'videos'    : mime starts with 'video/'
    *   - 'documents' : every other non-media mime (excludes images/videos)
-   * Optional `q` does a simple LIKE on filename for the search box
-   * on the SPA's library page.
+   * Optional `q` matches both current filenames and the Latin-1 form
+   * used by legacy uploads, so users can search with the correct name.
    */
   list: protectedProcedure
     .input(
@@ -71,25 +72,24 @@ export const filesRouter = router({
         eq(taskFiles.kind, 'input'),
         eq(taskFiles.status, 'active'),
       ];
-      const notExpired = or(
-        isNull(taskFiles.expiresAt),
-        gt(taskFiles.expiresAt, now),
-      );
+      const notExpired = or(isNull(taskFiles.expiresAt), gt(taskFiles.expiresAt, now));
       if (notExpired) conds.push(notExpired);
-      if (input.q && input.q.trim()) {
-        conds.push(like(taskFiles.filename, `%${input.q.trim()}%`));
+      const searchTerms = libraryFilenameSearchTerms(input.q ?? '');
+      if (searchTerms.length > 0) {
+        const filenameMatches = searchTerms.map((term) => like(taskFiles.filename, `%${term}%`));
+        const filenameSearch = or(...filenameMatches);
+        if (filenameSearch) conds.push(filenameSearch);
       }
       if (input.type === 'images') {
         conds.push(like(taskFiles.mimetype, 'image/%'));
       } else if (input.type === 'videos') {
         conds.push(like(taskFiles.mimetype, 'video/%'));
       } else if (input.type === 'documents') {
-        conds.push(
-          and(
-            notLike(taskFiles.mimetype, 'image/%'),
-            notLike(taskFiles.mimetype, 'video/%'),
-          )!,
+        const documentMatches = and(
+          notLike(taskFiles.mimetype, 'image/%'),
+          notLike(taskFiles.mimetype, 'video/%'),
         );
+        if (documentMatches) conds.push(documentMatches);
       }
       if (input.cursor) {
         conds.push(lt(taskFiles.id, input.cursor));
@@ -114,7 +114,7 @@ export const filesRouter = router({
       return {
         items: page.map((r) => ({
           fileId: r.externalId,
-          filename: r.filename,
+          filename: normalizeLibraryFilename(r.filename),
           mimetype: r.mimetype,
           sizeBytes: Number(r.sizeBytes),
           createdAt: r.createdAt,
@@ -140,8 +140,7 @@ function fileIsAvailableInLibrary(
   now = new Date(),
 ): boolean {
   return (
-    row.status === 'active' &&
-    (row.expiresAt === null || row.expiresAt.getTime() > now.getTime())
+    row.status === 'active' && (row.expiresAt === null || row.expiresAt.getTime() > now.getTime())
   );
 }
 
@@ -155,8 +154,21 @@ function fileMatchesLibraryFilter(mimetype: string, filter: LibraryFileFilter): 
   return true;
 }
 
+function normalizeLibraryFilename(filename: string): string {
+  return decodeUploadFilename(filename);
+}
+
+function libraryFilenameSearchTerms(query: string): string[] {
+  const trimmed = query.trim();
+  if (!trimmed) return [];
+  const legacyEncoded = Buffer.from(trimmed, 'utf8').toString('latin1');
+  return legacyEncoded === trimmed ? [trimmed] : [trimmed, legacyEncoded];
+}
+
 export const __filesRouterInternals = {
   deleteLibraryFile,
   fileIsAvailableInLibrary,
   fileMatchesLibraryFilter,
+  libraryFilenameSearchTerms,
+  normalizeLibraryFilename,
 };
