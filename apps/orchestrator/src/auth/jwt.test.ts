@@ -56,4 +56,22 @@ describe('JWT access tokens', () => {
     expect(await verifyAccessToken('not.a.jwt')).toBeNull();
     expect(await verifyAccessToken('')).toBeNull();
   });
+
+  it('keeps short-lived MFA challenges separate from access tokens', async () => {
+    const { signMfaChallengeToken, verifyAccessToken, verifyMfaChallengeToken } = await import(
+      './jwt.js'
+    );
+    const token = await signMfaChallengeToken({ sub: 'usr_mfa', authVersion: 7 });
+    await expect(verifyMfaChallengeToken(token)).resolves.toEqual({
+      sub: 'usr_mfa',
+      authVersion: 7,
+    });
+    await expect(verifyAccessToken(token)).resolves.toBeNull();
+  });
+
+  it('rejects an access token as an MFA challenge', async () => {
+    const { signAccessToken, verifyMfaChallengeToken } = await import('./jwt.js');
+    const token = await signAccessToken({ sub: 'usr_regular', plan: 'free', authVersion: 0 });
+    await expect(verifyMfaChallengeToken(token)).resolves.toBeNull();
+  });
 });

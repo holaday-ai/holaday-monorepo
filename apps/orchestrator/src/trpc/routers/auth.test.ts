@@ -31,4 +31,23 @@ describe('auth router — unexpected error masking', () => {
       'auth: unexpected error',
     );
   });
+
+  it('requires an authenticated account before starting a password change', async () => {
+    const caller = authRouter.createCaller({ db: {}, logger: { error: vi.fn() } } as never);
+
+    await expect(caller.sendPasswordChangeCode()).rejects.toMatchObject({
+      code: 'UNAUTHORIZED',
+    });
+    await expect(
+      caller.changePasswordWithCode({ code: '123456', password: 'new-password-42' }),
+    ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+  });
+
+  it('rejects a missing or invalid MFA challenge', async () => {
+    const caller = authRouter.createCaller({ db: {}, logger: { error: vi.fn() } } as never);
+
+    await expect(
+      caller.verifyMfaChallenge({ mfaToken: 'not-a-token', code: '123456' }),
+    ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+  });
 });

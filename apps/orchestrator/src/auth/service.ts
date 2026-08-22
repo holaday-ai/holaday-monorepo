@@ -2,7 +2,7 @@ import { newExternalId } from '@holaday/shared-types';
 import { eq, or, sql } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
 import { users } from '../db/schema/users.js';
-import { signAccessToken } from './jwt.js';
+import { signAccessToken, signMfaChallengeToken } from './jwt.js';
 import { hashPassword, verifyPassword } from './password.js';
 
 export interface PublicUser {
@@ -22,10 +22,20 @@ export interface GoogleProfile {
   avatarUrl?: string | null;
 }
 
-export interface AuthResult {
+export interface AuthenticatedResult {
   user: PublicUser;
   accessToken: string;
+  mfaRequired?: false;
 }
+
+export interface MfaRequiredResult {
+  user: PublicUser;
+  mfaRequired: true;
+  mfaToken: string;
+}
+
+export type LoginResult = AuthenticatedResult | MfaRequiredResult;
+export type AuthResult = AuthenticatedResult;
 
 export class AuthError extends Error {
   constructor(
@@ -91,12 +101,15 @@ export class AuthService {
    * creating one if the email is new (email-code flow doubles as
    * signup — no password set, user can add one via settings later).
    */
-  async loginOrRegisterByEmail(email: string): Promise<AuthResult> {
+  async loginOrRegisterByEmail(email: string): Promise<LoginResult> {
     const normalized = email.trim().toLowerCase();
-    const [existing] = await this.db.select().from(users).where(eq(users.email, normalized)).limit(1);
+    const [existing] = await this.db
+      .select()
+      .from(users)
+      .where(eq(users.email, normalized))
+      .limit(1);
     if (existing) {
-      const accessToken = await issueAccessToken(existing);
-      return { user: toPublic(existing), accessToken };
+      return issueLoginResult(existing);
     }
     const externalId = newExternalId('user');
     // Stash a random, un-learnable password hash so the password login
@@ -127,7 +140,7 @@ export class AuthService {
    * gates this method behind its own email_verified check at the OAuth
    * layer, so by the time we get here, ownership is proven.
    */
-  async loginOrRegisterByGoogle(profile: GoogleProfile): Promise<AuthResult> {
+  async loginOrRegisterByGoogle(profile: GoogleProfile): Promise<LoginResult> {
     const email = profile.email.trim().toLowerCase();
     const [existing] = await this.db
       .select()
@@ -146,14 +159,9 @@ export class AuthService {
       if (Object.keys(patch).length > 0) {
         await this.db.update(users).set(patch).where(eq(users.id, existing.id));
       }
-      const [row] = await this.db
-        .select()
-        .from(users)
-        .where(eq(users.id, existing.id))
-        .limit(1);
+      const [row] = await this.db.select().from(users).where(eq(users.id, existing.id)).limit(1);
       if (!row) throw new Error('user disappeared after google upsert');
-      const accessToken = await issueAccessToken(row);
-      return { user: toPublic(row), accessToken };
+      return issueLoginResult(row);
     }
 
     // Fresh user. Sentinel password hash so the password-login path
@@ -187,9 +195,13 @@ export class AuthService {
    * the forgot-password flow). Returns the updated user + a fresh
    * access token so the frontend can log them in immediately.
    */
-  async resetPasswordByEmail(email: string, newPassword: string): Promise<AuthResult> {
+  async resetPasswordByEmail(email: string, newPassword: string): Promise<LoginResult> {
     const normalized = email.trim().toLowerCase();
-    const [existing] = await this.db.select().from(users).where(eq(users.email, normalized)).limit(1);
+    const [existing] = await this.db
+      .select()
+      .from(users)
+      .where(eq(users.email, normalized))
+      .limit(1);
     if (!existing) {
       throw new AuthError('INVALID_CREDENTIALS', 'email not registered');
     }
@@ -203,6 +215,34 @@ export class AuthService {
       .where(eq(users.id, existing.id));
     const [updated] = await this.db.select().from(users).where(eq(users.id, existing.id)).limit(1);
     if (!updated) throw new Error('user disappeared after password reset');
+    return issueLoginResult(updated);
+  }
+
+  /**
+   * Change the password for the already-authenticated account. The router
+   * verifies an account-bound password-change code before calling this method.
+   * Incrementing authVersion invalidates every previously issued access token;
+   * the returned token keeps the current device signed in at the new version.
+   */
+  async changePasswordForUser(externalId: string, newPassword: string): Promise<AuthResult> {
+    const [existing] = await this.db
+      .select()
+      .from(users)
+      .where(eq(users.externalId, externalId))
+      .limit(1);
+    if (!existing) {
+      throw new AuthError('INVALID_CREDENTIALS', 'account not found');
+    }
+    const passwordHash = await hashPassword(newPassword);
+    await this.db
+      .update(users)
+      .set({
+        passwordHash,
+        authVersion: sql`${users.authVersion} + 1`,
+      })
+      .where(eq(users.id, existing.id));
+    const [updated] = await this.db.select().from(users).where(eq(users.id, existing.id)).limit(1);
+    if (!updated) throw new Error('user disappeared after password change');
     const accessToken = await issueAccessToken(updated);
     return { user: toPublic(updated), accessToken };
   }
@@ -223,7 +263,7 @@ export class AuthService {
    *      masked display_name like 138****1234 so the UI has
    *      something to show before they pick a real one.
    */
-  async loginOrRegisterByPhone(phone: string): Promise<AuthResult> {
+  async loginOrRegisterByPhone(phone: string): Promise<LoginResult> {
     const normalized = phone.trim();
     const [existing] = await this.db
       .select()
@@ -232,13 +272,9 @@ export class AuthService {
       .limit(1);
     if (existing) {
       if (!existing.phoneVerified) {
-        await this.db
-          .update(users)
-          .set({ phoneVerified: true })
-          .where(eq(users.id, existing.id));
+        await this.db.update(users).set({ phoneVerified: true }).where(eq(users.id, existing.id));
       }
-      const accessToken = await issueAccessToken(existing);
-      return { user: toPublic(existing), accessToken };
+      return issueLoginResult(existing);
     }
     const externalId = newExternalId('user');
     const passwordHash = await hashPassword(
@@ -269,7 +305,7 @@ export class AuthService {
     return { user: toPublic(row), accessToken };
   }
 
-  async login(input: LoginInput): Promise<AuthResult> {
+  async login(input: LoginInput): Promise<LoginResult> {
     const email = input.email.trim().toLowerCase();
 
     const [row] = await this.db.select().from(users).where(eq(users.email, email)).limit(1);
@@ -281,8 +317,7 @@ export class AuthService {
       throw new AuthError('INVALID_CREDENTIALS', 'email or password incorrect');
     }
 
-    const accessToken = await issueAccessToken(row);
-    return { user: toPublic(row), accessToken };
+    return issueLoginResult(row);
   }
 }
 
@@ -305,4 +340,33 @@ function issueAccessToken(
     plan: row.plan,
     authVersion: row.authVersion,
   });
+}
+
+async function issueLoginResult(
+  row: Pick<
+    typeof users.$inferSelect,
+    | 'externalId'
+    | 'plan'
+    | 'authVersion'
+    | 'mfaEnabled'
+    | 'email'
+    | 'displayName'
+    | 'avatarUrl'
+    | 'createdAt'
+  >,
+): Promise<LoginResult> {
+  if (row.mfaEnabled) {
+    return {
+      user: toPublic(row as typeof users.$inferSelect),
+      mfaRequired: true,
+      mfaToken: await signMfaChallengeToken({
+        sub: row.externalId,
+        authVersion: row.authVersion,
+      }),
+    };
+  }
+  return {
+    user: toPublic(row as typeof users.$inferSelect),
+    accessToken: await issueAccessToken(row),
+  };
 }

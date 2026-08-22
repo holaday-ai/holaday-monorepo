@@ -2,6 +2,7 @@ export * from './api-keys.js';
 export * from './batch-tasks.js';
 export * from './webhook-idempotency.js';
 export * from './users.js';
+export * from './user-mfa-recovery-codes.js';
 export * from './user-profiles.js';
 export * from './skills.js';
 export * from './sessions.js';

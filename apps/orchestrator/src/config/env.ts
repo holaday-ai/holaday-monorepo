@@ -34,6 +34,13 @@ export const envSchema = z.object({
   DATABASE_URL: z.string().url(),
   REDIS_URL: z.string().url(),
   JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 chars'),
+  MFA_MASTER_KEY: z
+    .string()
+    .refine(
+      (value) => value === '' || Buffer.from(value, 'base64').length === 32,
+      'MFA_MASTER_KEY must be empty or decode to 32 bytes',
+    )
+    .default(''),
 
   ENERGY_ANALYTICS_ENABLED: z
     .enum(['true', 'false'])
