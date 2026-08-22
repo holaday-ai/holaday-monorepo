@@ -13,6 +13,10 @@ describe('files router legacy filename compatibility', () => {
     expect(normalizeLibraryFilename('å¨æ¥æ¨¡æ¿.xlsx')).toBe('周报模板.xlsx');
   });
 
+  it('recovers legacy mojibake after an NBSP byte was normalized to a space', () => {
+    expect(normalizeLibraryFilename('åä¹±ç´ æ.txt')).toBe('凌乱素材.txt');
+  });
+
   it('preserves correct Unicode and genuine Latin-1 filenames', () => {
     expect(normalizeLibraryFilename('正常文件.pdf')).toBe('正常文件.pdf');
     expect(normalizeLibraryFilename('café.docx')).toBe('café.docx');
@@ -22,6 +26,14 @@ describe('files router legacy filename compatibility', () => {
     expect(libraryFilenameSearchTerms(' 周报模板 ')).toEqual([
       '周报模板',
       Buffer.from('周报模板', 'utf8').toString('latin1'),
+    ]);
+  });
+
+  it('searches the lossy space-normalized legacy form', () => {
+    expect(libraryFilenameSearchTerms('凌乱素材')).toEqual([
+      '凌乱素材',
+      Buffer.from('凌乱素材', 'utf8').toString('latin1'),
+      'åä¹±ç´ æ',
     ]);
   });
 

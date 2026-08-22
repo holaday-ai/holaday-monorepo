@@ -81,6 +81,17 @@ describe('decodeUploadFilename (P2 — multipart latin1→utf8)', () => {
   it('does NOT corrupt a genuine latin1 name (no valid-UTF-8 recovery)', () => {
     expect(decodeUploadFilename('café.docx')).toBe('café.docx');
   });
+  it('recovers a legacy filename whose mojibake NBSP byte was normalized to a space', () => {
+    const mojibake = Buffer.from('凌乱素材.txt', 'utf8')
+      .toString('latin1')
+      .replaceAll('\u00a0', ' ');
+
+    expect(mojibake).toBe('åä¹±ç´ æ.txt');
+    expect(decodeUploadFilename(mojibake)).toBe('凌乱素材.txt');
+  });
+  it('preserves genuine latin1 text containing ordinary spaces', () => {
+    expect(decodeUploadFilename('café résumé.docx')).toBe('café résumé.docx');
+  });
   it('handles empty input', () => {
     expect(decodeUploadFilename('')).toBe('');
   });
