@@ -9,7 +9,7 @@ import {
   normaliseSettingsHash,
   settingsSectionHref,
 } from '@/lib/settings-sections';
-import { supportMailtoHref } from '@/lib/support-links';
+import { SUPPORT_EMAIL, supportMailtoHref } from '@/lib/support-links';
 import { cn } from '@/lib/utils';
 import { PageContainer, PageHeader, Row, Section } from '@/pages/PageShell';
 import { type ThemeMode, useTheme } from '@/stores/theme-store';
@@ -97,30 +97,57 @@ export function SettingsPage(): JSX.Element {
           <NotificationsSection />
         </div>
 
-        <Section id="account" title="账号">
-          <Row
-            label="删除账号"
-            description="删除会清除任务记录、浏览器数据和订阅信息；需要先通过支持渠道确认身份"
-          >
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setDeleteDialogOpen(true)}
-              className="text-red-600 hover:text-red-700"
+        <Section id="account" title="账号" description="查看身份、套餐和额度，再处理账号操作">
+          <div className="grid gap-2 md:grid-cols-3">
+            <AccountDestinationLink
+              to="/profile"
+              label="个人资料"
+              description="登录邮箱与基本信息"
+            />
+            <AccountDestinationLink
+              to="/billing"
+              label="订阅与账单"
+              description="套餐、有效期与付款记录"
+            />
+            <AccountDestinationLink
+              to="/usage"
+              label="用量与额度"
+              description="本月额度与使用明细"
+            />
+          </div>
+
+          <div className="mt-5 border-t border-border pt-5">
+            <div className="text-xs font-semibold text-red-600">危险操作</div>
+            <Row
+              label="删除账号"
+              description="删除会清除任务记录、浏览器数据和订阅信息；需要先通过支持渠道确认身份"
             >
-              申请删除
-            </Button>
-          </Row>
+              <div className="flex flex-wrap items-center gap-3 md:justify-end">
+                <a
+                  href={`mailto:${SUPPORT_EMAIL}`}
+                  className="inline-flex h-8 items-center text-xs font-medium text-muted-foreground underline-offset-2 hover:text-red-600 hover:underline"
+                >
+                  {SUPPORT_EMAIL}
+                </a>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setDeleteDialogOpen(true)}
+                  className="text-red-600 hover:text-red-700"
+                >
+                  邮件申请删除
+                </Button>
+              </div>
+            </Row>
+          </div>
         </Section>
       </div>
 
       <ConfirmDialog
         open={deleteDialogOpen}
         title="申请删除账号？"
-        description={
-          '账号删除不可撤销。我们会通过邮件确认身份、处理订阅和数据删除，再完成账号关闭。'
-        }
-        confirmLabel="发送删除申请"
+        description={`账号删除不可撤销。我们会通过邮件确认身份、处理订阅和数据删除，再完成账号关闭。\n\n将打开系统邮件应用；若未自动打开，请手动发送到 ${SUPPORT_EMAIL}。`}
+        confirmLabel="打开邮件应用"
         destructive
         onClose={() => setDeleteDialogOpen(false)}
         onConfirm={() => {
@@ -132,6 +159,29 @@ export function SettingsPage(): JSX.Element {
         }}
       />
     </PageContainer>
+  );
+}
+
+function AccountDestinationLink({
+  to,
+  label,
+  description,
+}: {
+  to: string;
+  label: string;
+  description: string;
+}): JSX.Element {
+  return (
+    <Link
+      to={to}
+      className="group flex min-h-16 items-center justify-between gap-3 rounded-md border border-border px-4 py-3 transition-colors hover:border-primary/25 hover:bg-foreground/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+    >
+      <span className="min-w-0">
+        <span className="block text-sm font-medium">{label}</span>
+        <span className="mt-0.5 block text-xs text-muted-foreground">{description}</span>
+      </span>
+      <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+    </Link>
   );
 }
 
