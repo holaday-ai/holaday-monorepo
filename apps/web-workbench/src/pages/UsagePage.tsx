@@ -1,7 +1,5 @@
-import { Activity, AlertCircle, CheckCircle2, Clock, Loader2, RefreshCw } from 'lucide-react';
-import * as React from 'react';
-import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
+import { supportMailtoHref } from '@/lib/support-links';
 import { trpc } from '@/lib/trpc';
 import {
   usageOutcomeLoadingSubcopy,
@@ -9,6 +7,8 @@ import {
   usageQuotaPolicyCopy,
 } from '@/lib/usage-copy';
 import {
+  type NormalizedUsageSnapshot,
+  type UsageDayBar,
   hasRecentUsage,
   normalizeUsageSnapshot,
   usageDayBars,
@@ -17,12 +17,12 @@ import {
   usagePercent,
   usageQuotaTotal,
   usageStatusCopy,
-  type NormalizedUsageSnapshot,
-  type UsageDayBar,
 } from '@/lib/usage-page-state';
-import { supportMailtoHref } from '@/lib/support-links';
 import { cn } from '@/lib/utils';
 import { PageContainer, PageHeader, Section } from '@/pages/PageShell';
+import { Activity, AlertCircle, CheckCircle2, Clock, Loader2, RefreshCw } from 'lucide-react';
+import * as React from 'react';
+import { Link } from 'react-router-dom';
 
 /**
  * Usage dashboard. P1.3 — single data source: `usage.summary`. The
@@ -118,7 +118,9 @@ export function UsagePage(): JSX.Element {
                 )}
                 <div className="min-w-0">
                   <div className="text-sm font-medium text-foreground/85">{statusCopy.title}</div>
-                  <div className="mt-0.5 text-xs leading-5 text-muted-foreground">{statusCopy.body}</div>
+                  <div className="mt-0.5 text-xs leading-5 text-muted-foreground">
+                    {statusCopy.body}
+                  </div>
                 </div>
               </div>
               {error && (
@@ -155,8 +157,11 @@ export function UsagePage(): JSX.Element {
         )}
         {loading && snap == null ? (
           <div className="grid gap-4 md:grid-cols-3">
-            {['本月执行记录', '成功', '剩余额度'].map((label) => (
-              <div key={label} className="rounded-[8px] border border-[#DCDDDD] bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
+            {['本月执行记录', '成功', '额度状态'].map((label) => (
+              <div
+                key={label}
+                className="rounded-[8px] border border-[#DCDDDD] bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.03)]"
+              >
                 <div className="mb-3 h-3 w-24 rounded bg-[#EFEFEF]" />
                 <div className="h-8 w-16 rounded bg-[#EFEFEF]" />
                 <div className="mt-3 h-3 w-32 rounded bg-[#EFEFEF]" />
@@ -203,9 +208,11 @@ export function UsagePage(): JSX.Element {
                 sub={
                   snap == null
                     ? '配额 — 个'
-                    : snap.quotaBonus > 0
-                      ? `配额 ${snap.quotaLimit} + 加量 ${snap.quotaBonus}`
-                      : `配额 ${snap.quotaLimit} 个`
+                    : snap.quotaMode === 'unmetered_test'
+                      ? '执行记录正常统计'
+                      : snap.quotaBonus > 0
+                        ? `配额 ${snap.quotaLimit} + 加量 ${snap.quotaBonus}`
+                        : `配额 ${snap.quotaLimit} 个`
                 }
               />
               <StatCard
@@ -224,32 +231,62 @@ export function UsagePage(): JSX.Element {
                 }
               />
               <StatCard
-                icon={<Clock className="h-4 w-4 text-[#EA1F59]" />}
-                label="剩余额度"
-                value={snap == null ? '—' : String(snap.quotaRemaining)}
-                sub={totalQuota == null ? '加载中…' : `${pct}% 已使用`}
+                icon={
+                  snap?.quotaMode === 'unmetered_test' ? (
+                    <CheckCircle2 className="h-4 w-4 text-[#42C0EF]" />
+                  ) : (
+                    <Clock className="h-4 w-4 text-[#EA1F59]" />
+                  )
+                }
+                label={snap?.quotaMode === 'unmetered_test' ? '额度状态' : '剩余额度'}
+                value={
+                  snap?.quotaMode === 'unmetered_test'
+                    ? '不扣减'
+                    : snap == null
+                      ? '—'
+                      : String(snap.quotaRemaining)
+                }
+                sub={
+                  snap?.quotaMode === 'unmetered_test'
+                    ? '生产测试账号'
+                    : totalQuota == null
+                      ? '加载中…'
+                      : `${pct}% 已使用`
+                }
               />
             </div>
 
-            <Section title="额度使用进度" className="rounded-[8px] border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
+            <Section
+              title={snap?.quotaMode === 'unmetered_test' ? '额度规则' : '额度使用进度'}
+              className="rounded-[8px] border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]"
+            >
               <p className="mb-3 text-[11px] text-muted-foreground">
-                {usageQuotaPolicyCopy()}
+                {usageQuotaPolicyCopy(snap?.quotaMode)}
               </p>
-              <div className="flex items-center gap-3">
-                <div className="h-2 flex-1 overflow-hidden rounded-full bg-[#EFEFEF]">
-                  <div
-                    className={cn(
-                      'h-full transition-all',
-                      pct >= 90 ? 'bg-[#EA1F59]' : pct >= 75 ? 'bg-[#FFC910]' : 'bg-[#EA1F59]',
-                    )}
-                    style={{ width: `${pct}%` }}
-                  />
+              {snap?.quotaMode === 'unmetered_test' ? (
+                <div className="flex items-center gap-3 rounded-[8px] border border-[#42C0EF]/25 bg-[#42C0EF]/[0.06] px-4 py-3">
+                  <CheckCircle2 className="h-4 w-4 shrink-0 text-[#42C0EF]" aria-hidden />
+                  <span className="text-xs font-medium text-[#595757]">
+                    执行记录正常统计 · 套餐额度保持不变
+                  </span>
                 </div>
-                <span className="text-xs tabular-nums text-muted-foreground">
-                  {snap?.quotaUsed ?? 0} / {totalQuota ?? '—'}
-                </span>
-              </div>
-              {pct >= 75 && (
+              ) : (
+                <div className="flex items-center gap-3">
+                  <div className="h-2 flex-1 overflow-hidden rounded-full bg-[#EFEFEF]">
+                    <div
+                      className={cn(
+                        'h-full transition-all',
+                        pct >= 90 ? 'bg-[#EA1F59]' : pct >= 75 ? 'bg-[#FFC910]' : 'bg-[#EA1F59]',
+                      )}
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                  <span className="text-xs tabular-nums text-muted-foreground">
+                    {snap?.quotaUsed ?? 0} / {totalQuota ?? '—'}
+                  </span>
+                </div>
+              )}
+              {snap?.quotaMode !== 'unmetered_test' && pct >= 75 && (
                 <div className="mt-3 flex items-center justify-between rounded-[8px] border border-[#DCDDDD] border-l-[#FFC910] bg-white p-3 [border-left-width:3px]">
                   <div>
                     <div className="text-xs font-medium">额度即将用完</div>
@@ -258,7 +295,11 @@ export function UsagePage(): JSX.Element {
                     </div>
                   </div>
                   <Link to="/plan">
-                    <Button size="sm" variant="outline" className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+                    >
                       查看套餐
                     </Button>
                   </Link>
@@ -266,13 +307,19 @@ export function UsagePage(): JSX.Element {
               )}
             </Section>
 
-            <Section title="最近 7 天" className="rounded-[8px] border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
+            <Section
+              title="最近 7 天"
+              className="rounded-[8px] border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]"
+            >
               {hasRecentUsage(bars) ? (
                 <div className="flex items-end justify-between gap-2 px-1 pb-4 pt-2">
                   {bars.map((b) => {
                     const h = b.count === 0 ? 4 : Math.max(6, Math.round((b.count / maxBar) * 120));
                     return (
-                      <div key={b.date} className="flex min-w-0 flex-1 flex-col items-center gap-1.5">
+                      <div
+                        key={b.date}
+                        className="flex min-w-0 flex-1 flex-col items-center gap-1.5"
+                      >
                         <div className="text-[10px] tabular-nums text-muted-foreground">
                           {b.count || ''}
                         </div>
@@ -290,7 +337,9 @@ export function UsagePage(): JSX.Element {
                 </div>
               ) : (
                 <div className="rounded-[8px] border border-dashed border-[#DCDDDD] bg-white px-6 py-10 text-center">
-                  <div className="text-sm font-medium text-foreground/80">最近 7 天暂无执行记录</div>
+                  <div className="text-sm font-medium text-foreground/80">
+                    最近 7 天暂无执行记录
+                  </div>
                   <div className="mt-1 text-xs text-muted-foreground">
                     创建任务后，这里会显示每天的执行次数。
                   </div>

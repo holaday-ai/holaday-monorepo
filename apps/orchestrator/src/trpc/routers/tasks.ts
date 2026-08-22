@@ -204,6 +204,7 @@ import { parseFileForPrompt } from '../../files/parsers.js';
 import { getSharedStorageProvider } from '../../files/storage-provider.js';
 import { allowedFormatsForPlan, isCreateFileFormat, renderFile } from '../../files/writers.js';
 import { TaskActionCaptureRepository } from '../../playbook/task-action-capture-repository.js';
+import { isQuotaBypassUser } from '../../quota/quota-mode.js';
 import {
   type ConsumeReason,
   QuotaService,
@@ -341,7 +342,6 @@ const clearUnsuccessfulProcedure = protectedProcedure.mutation(async ({ ctx }) =
  * Plan limits (daily/monthly task counter) are still skipped for
  * bypass users so smoke testing isn't blocked by the 3/day cap.
  */
-const QUOTA_BYPASS_USERS: ReadonlySet<string> = new Set(['usr_EeYpvsvLtyDzN4VLQi7BT']);
 const BYPASS_CONCURRENCY = 100;
 const BYPASS_RATE = { max: 30, windowMs: 60_000 };
 const GLOBAL_QUEUE_DEPTH_LIMIT = 100;
@@ -1475,7 +1475,7 @@ export const tasksRouter = router({
     const willConsumeOpus = isOpus && planId === 'pro';
 
     const quotaService = new QuotaService(ctx.db);
-    const isBypass = QUOTA_BYPASS_USERS.has(ctx.userId);
+    const isBypass = isQuotaBypassUser(ctx.userId);
 
     // Phase 21b — classify execution mode FIRST so the concurrency
     // gate can apply per-mode caps (bypass users have separate
@@ -1733,7 +1733,8 @@ export const tasksRouter = router({
 
     // Phase 21a P0 — per-bypass-user submission rate limit. In-memory
     // sliding window (see quota/rate-limiter.ts). Only fires for users
-    // in QUOTA_BYPASS_USERS today; non-bypass users are governed by
+    // in the centrally configured unmetered test-account set today;
+    // non-bypass users are governed by
     // their plan's monthly/daily counter (see tryConsume below) which
     // is already a different shape of throttle.
     if (isBypass) {
@@ -7175,7 +7176,7 @@ export const tasksRouter = router({
       if (!userRow) throw new TRPCError({ code: 'UNAUTHORIZED', message: 'user not found' });
       const planId: PlanId =
         userRow.plan === 'basic' || userRow.plan === 'pro' ? userRow.plan : 'free';
-      const isBypass = QUOTA_BYPASS_USERS.has(ctx.userId);
+      const isBypass = isQuotaBypassUser(ctx.userId);
       const repo = new TaskRepository(ctx.db);
       const [row] = await ctx.db
         .select({

@@ -2,6 +2,7 @@ import { pageErrorMessage } from './page-error-copy';
 import { PLAN_ADDONS_HASH } from './plan-page-hash';
 
 export interface QuotaIndicatorSnapshotLike {
+  readonly quotaMode?: 'metered' | 'unmetered_test';
   readonly plan: string;
   readonly period: 'day' | 'month';
   readonly tasksLimit: number;
@@ -53,6 +54,7 @@ export function quotaTaskState(snap: QuotaIndicatorSnapshotLike): QuotaTaskState
 }
 
 export function quotaIndicatorHref(snap: QuotaIndicatorSnapshotLike): string {
+  if (snap.quotaMode === 'unmetered_test') return '/usage';
   const state = quotaTaskState(snap);
   return state.outOfTasks && snap.plan !== 'free' ? `/plan${PLAN_ADDONS_HASH}` : '/plan';
 }
@@ -86,6 +88,7 @@ export function normalizeQuotaSnapshot(value: unknown): QuotaSnapshot | null {
 
   return {
     plan: typeof raw.plan === 'string' && raw.plan.trim() ? raw.plan : 'free',
+    quotaMode: raw.quotaMode === 'unmetered_test' ? 'unmetered_test' : 'metered',
     period,
     tasksUsed,
     tasksLimit,

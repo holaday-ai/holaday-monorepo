@@ -1,6 +1,9 @@
 import { pageErrorMessage } from './page-error-copy';
 
+export type QuotaMode = 'metered' | 'unmetered_test';
+
 export interface UsageSnapshotLike {
+  readonly quotaMode: QuotaMode;
   readonly monthTasksTotal: number;
   readonly monthCompleted: number;
   readonly monthPartialSuccess: number;
@@ -22,7 +25,9 @@ export interface UsageDayBar {
   readonly count: number;
 }
 
-export function usageQuotaTotal(snapshot: Pick<UsageSnapshotLike, 'quotaLimit' | 'quotaBonus'>): number {
+export function usageQuotaTotal(
+  snapshot: Pick<UsageSnapshotLike, 'quotaLimit' | 'quotaBonus'>,
+): number {
   return Math.max(0, snapshot.quotaLimit) + Math.max(0, snapshot.quotaBonus);
 }
 
@@ -40,6 +45,9 @@ export function usagePageSummary(options: {
   if (options.error && options.snapshot) return '刷新失败 · 显示上次用量';
   if (options.error) return '用量暂时无法加载';
   if (!options.snapshot) return '暂无用量数据';
+  if (options.snapshot.quotaMode === 'unmetered_test') {
+    return `本月 ${options.snapshot.monthTasksTotal} 次执行 · 测试账号不扣额度`;
+  }
   const total = usageQuotaTotal(options.snapshot);
   const pct = usagePercent(options.snapshot.quotaUsed, total);
   return `本月 ${options.snapshot.monthTasksTotal} 次执行 · ${pct}% 已使用`;
@@ -88,6 +96,7 @@ export function normalizeUsageSnapshot(value: unknown): NormalizedUsageSnapshot 
   const quotaUsed = safeUsageCount(root.quotaUsed);
   const fallbackRemaining = Math.max(0, quotaLimit + quotaBonus - quotaUsed);
   return {
+    quotaMode: root.quotaMode === 'unmetered_test' ? 'unmetered_test' : 'metered',
     monthTasksTotal: safeUsageCount(root.monthTasksTotal),
     monthCompleted: safeUsageCount(root.monthCompleted),
     monthPartialSuccess: safeUsageCount(root.monthPartialSuccess),
@@ -97,9 +106,7 @@ export function normalizeUsageSnapshot(value: unknown): NormalizedUsageSnapshot 
     quotaLimit,
     quotaUsed,
     quotaRemaining:
-      root.quotaRemaining == null
-        ? fallbackRemaining
-        : safeUsageCount(root.quotaRemaining),
+      root.quotaRemaining == null ? fallbackRemaining : safeUsageCount(root.quotaRemaining),
     quotaBonus,
     dailyCounts: normalizeUsageDailyCounts(root.dailyCounts),
   };

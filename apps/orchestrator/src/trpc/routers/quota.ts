@@ -17,10 +17,8 @@ import type { PlanId } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
 import { eq } from 'drizzle-orm';
 import { users } from '../../db/schema/users.js';
-import {
-  QuotaService,
-  getConcurrencyLimit,
-} from '../../quota/quota-service.js';
+import { quotaModeForExternalUser } from '../../quota/quota-mode.js';
+import { QuotaService, getConcurrencyLimit } from '../../quota/quota-service.js';
 import { protectedProcedure, router } from '../trpc.js';
 
 export const quotaRouter = router({
@@ -33,13 +31,13 @@ export const quotaRouter = router({
     if (!user) {
       throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
     }
-    const planId: PlanId =
-      user.plan === 'basic' || user.plan === 'pro' ? user.plan : 'free';
+    const planId: PlanId = user.plan === 'basic' || user.plan === 'pro' ? user.plan : 'free';
     const service = new QuotaService(ctx.db);
     const snap = await service.snapshot(user.id, planId);
     const concurrentCount = await service.getActiveTaskCount(user.id);
     return {
       plan: planId,
+      quotaMode: quotaModeForExternalUser(ctx.userId),
       period: snap.period,
       periodStart: snap.periodStart.toISOString(),
       periodEnd: snap.periodEnd.toISOString(),

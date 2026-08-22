@@ -19,7 +19,10 @@ export function usageOutcomeSubcopy({
   return parts.join(' · ');
 }
 
-export function usageQuotaPolicyCopy(): string {
+export function usageQuotaPolicyCopy(quotaMode: 'metered' | 'unmetered_test' = 'metered'): string {
+  if (quotaMode === 'unmetered_test') {
+    return '当前为生产测试账号，任务执行记录会正常统计，但不会扣减套餐额度。';
+  }
   return '额度按任务提交计入；系统任务不计入。任务后续进入需复核、失败或取消，也会保留本次提交占用。';
 }
 

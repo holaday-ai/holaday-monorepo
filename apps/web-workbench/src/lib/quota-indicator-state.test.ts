@@ -13,6 +13,7 @@ describe('quota indicator state helpers', () => {
       quotaTaskState({
         plan: 'pro',
         period: 'month',
+        quotaMode: 'metered',
         tasksLimit: 20,
         tasksRemaining: 18,
         bonusTasks: 5,
@@ -30,6 +31,7 @@ describe('quota indicator state helpers', () => {
       quotaTaskState({
         plan: 'free',
         period: 'day',
+        quotaMode: 'metered',
         tasksLimit: 10,
         tasksRemaining: -4,
         bonusTasks: 0,
@@ -46,6 +48,7 @@ describe('quota indicator state helpers', () => {
       quotaTaskState({
         plan: 'pro',
         period: 'month',
+        quotaMode: 'metered',
         tasksLimit: Number.NaN,
         tasksRemaining: Number.POSITIVE_INFINITY,
         bonusTasks: 0,
@@ -64,6 +67,7 @@ describe('quota indicator state helpers', () => {
       quotaIndicatorHref({
         plan: 'basic',
         period: 'month',
+        quotaMode: 'metered',
         tasksLimit: 100,
         tasksRemaining: 0,
         bonusTasks: 0,
@@ -73,6 +77,7 @@ describe('quota indicator state helpers', () => {
       quotaIndicatorHref({
         plan: 'pro',
         period: 'month',
+        quotaMode: 'metered',
         tasksLimit: 100,
         tasksRemaining: 3,
         bonusTasks: 0,
@@ -82,11 +87,23 @@ describe('quota indicator state helpers', () => {
       quotaIndicatorHref({
         plan: 'free',
         period: 'day',
+        quotaMode: 'metered',
         tasksLimit: 3,
         tasksRemaining: 0,
         bonusTasks: 0,
       }),
     ).toBe('/plan');
+
+    expect(
+      quotaIndicatorHref({
+        plan: 'basic',
+        period: 'month',
+        quotaMode: 'unmetered_test',
+        tasksLimit: 100,
+        tasksRemaining: 100,
+        bonusTasks: 0,
+      }),
+    ).toBe('/usage');
   });
 
   it('normalizes valid quota snapshots and rejects malformed payloads', () => {
@@ -94,6 +111,7 @@ describe('quota indicator state helpers', () => {
       normalizeQuotaSnapshot({
         plan: 'pro',
         period: 'month',
+        quotaMode: 'unmetered_test',
         tasksUsed: 3,
         tasksLimit: 20,
         tasksRemaining: 17,
@@ -108,6 +126,7 @@ describe('quota indicator state helpers', () => {
     ).toMatchObject({
       plan: 'pro',
       period: 'month',
+      quotaMode: 'unmetered_test',
       tasksLimit: 20,
       tasksRemaining: 17,
       opusLimit: null,
@@ -123,6 +142,7 @@ describe('quota indicator state helpers', () => {
       normalizeQuotaSnapshot({
         plan: 'pro',
         period: 'month',
+        quotaMode: 'metered',
         tasksUsed: 1,
         tasksLimit: Number.NaN,
         tasksRemaining: 3,
@@ -136,12 +156,12 @@ describe('quota indicator state helpers', () => {
   });
 
   it('keeps refresh failure copy distinct for stale and unavailable states', () => {
-    expect(
-      quotaRefreshStatusCopy({ error: 'offline', hasSnapshot: true })?.title,
-    ).toBe('额度刷新失败，正在显示上次数据');
-    expect(
-      quotaRefreshStatusCopy({ error: 'offline', hasSnapshot: false })?.title,
-    ).toBe('额度暂时不可用');
+    expect(quotaRefreshStatusCopy({ error: 'offline', hasSnapshot: true })?.title).toBe(
+      '额度刷新失败，正在显示上次数据',
+    );
+    expect(quotaRefreshStatusCopy({ error: 'offline', hasSnapshot: false })?.title).toBe(
+      '额度暂时不可用',
+    );
     expect(quotaRefreshStatusCopy({ error: null, hasSnapshot: true })).toBeNull();
   });
 

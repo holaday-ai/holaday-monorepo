@@ -1,16 +1,16 @@
-import { AlertCircle, ArrowUpRight, Loader2, RotateCw } from 'lucide-react';
-import * as React from 'react';
-import { useNavigate } from 'react-router-dom';
 import {
+  type QuotaSnapshot,
   normalizeQuotaSnapshot,
   quotaIndicatorHref,
-  type QuotaSnapshot,
   quotaRefreshErrorMessage,
   quotaRefreshStatusCopy,
   quotaTaskState,
 } from '@/lib/quota-indicator-state';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
+import { AlertCircle, ArrowUpRight, CheckCircle2, Loader2, RotateCw } from 'lucide-react';
+import * as React from 'react';
+import { useNavigate } from 'react-router-dom';
 
 interface Props {
   /** Compact rail variant — vertical icon strip can't fit the bar. */
@@ -84,9 +84,7 @@ export function QuotaIndicator({ compact = false, refreshKey }: Props): JSX.Elem
           <div className="flex items-start gap-2">
             <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#EA1F59]" aria-hidden />
             <div className="min-w-0 flex-1">
-              <div className="font-medium text-foreground">
-                {copy?.title ?? '额度暂时不可用'}
-              </div>
+              <div className="font-medium text-foreground">{copy?.title ?? '额度暂时不可用'}</div>
               <div className="mt-0.5 leading-5 text-muted-foreground">
                 {copy?.body ?? '请稍后重试。'}
               </div>
@@ -112,23 +110,55 @@ export function QuotaIndicator({ compact = false, refreshKey }: Props): JSX.Elem
 
   if (compact) {
     const href = quotaIndicatorHref(snap);
+    const isUnmetered = snap.quotaMode === 'unmetered_test';
+    const accessibleLabel = isUnmetered
+      ? '测试账号，额度不扣减'
+      : `${periodLabel}剩余 ${remaining} / ${totalLimit}`;
     return (
       <button
         type="button"
         onClick={() => navigate(href)}
-        title={`${periodLabel}剩余 ${remaining} / ${totalLimit}`}
-        aria-label={`${periodLabel}剩余 ${remaining} / ${totalLimit}`}
+        title={accessibleLabel}
+        aria-label={accessibleLabel}
         className={cn(
           'mt-1 inline-flex h-6 w-10 items-center justify-center rounded text-[10px] font-medium',
-          outOfTasks
-            ? 'bg-[#EA1F59]/10 text-[#EA1F59]'
-            : lowOnTasks
-              ? 'bg-[#FFC910]/15 text-[#595757]'
-              : 'text-muted-foreground hover:bg-[#EFEFEF]/60 dark:hover:bg-white/10',
+          isUnmetered
+            ? 'bg-[#42C0EF]/10 text-[#258CAE]'
+            : outOfTasks
+              ? 'bg-[#EA1F59]/10 text-[#EA1F59]'
+              : lowOnTasks
+                ? 'bg-[#FFC910]/15 text-[#595757]'
+                : 'text-muted-foreground hover:bg-[#EFEFEF]/60 dark:hover:bg-white/10',
         )}
       >
-        {remaining}
+        {isUnmetered ? '免' : remaining}
       </button>
+    );
+  }
+
+  if (snap.quotaMode === 'unmetered_test') {
+    return (
+      <div className="px-2 pb-2">
+        <button
+          type="button"
+          onClick={() => navigate('/usage')}
+          title="查看测试账号用量"
+          aria-label="查看测试账号用量"
+          className="group w-full rounded-[10px] border border-[#DCDDDD]/70 bg-white/72 px-3 py-2 text-left shadow-[0_4px_12px_rgba(17,24,39,0.035)] transition-colors hover:border-[#42C0EF]/35 hover:bg-[#42C0EF]/[0.04] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#42C0EF]/45 dark:border-white/10 dark:bg-white/[0.04]"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[10px] font-medium text-[#8B93A6]">测试账号</span>
+            <span className="text-[11px] font-semibold text-[#258CAE]">额度不扣减</span>
+            <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-[6px] border border-[#DCDDDD]/70 bg-white/65 text-[#ADADAD] transition-colors group-hover:border-[#42C0EF]/35 group-hover:text-[#258CAE] dark:border-white/10 dark:bg-transparent">
+              <ArrowUpRight className="h-3 w-3" />
+            </span>
+          </div>
+          <div className="mt-1.5 flex items-center gap-2 text-[10px] text-[#8B93A6] dark:text-foreground/60">
+            <CheckCircle2 className="h-3 w-3 shrink-0 text-[#42C0EF]" aria-hidden />
+            <span>执行记录正常统计</span>
+          </div>
+        </button>
+      </div>
     );
   }
 
@@ -162,11 +192,7 @@ export function QuotaIndicator({ compact = false, refreshKey }: Props): JSX.Elem
             <div
               className={cn(
                 'h-full rounded-full transition-[width] duration-300',
-                outOfTasks
-                  ? 'bg-[#EA1F59]/75'
-                  : lowOnTasks
-                    ? 'bg-[#FFC910]'
-                    : 'bg-[#42C0EF]',
+                outOfTasks ? 'bg-[#EA1F59]/75' : lowOnTasks ? 'bg-[#FFC910]' : 'bg-[#42C0EF]',
               )}
               style={{ width: `${usedPct}%` }}
             />
@@ -175,7 +201,8 @@ export function QuotaIndicator({ compact = false, refreshKey }: Props): JSX.Elem
             <span className="truncate">
               {snap.bonusTasks > 0 ? (
                 <>
-                  额度 {snap.tasksLimit} <span className="text-[#ADADAD]">+ {snap.bonusTasks} 加量</span>
+                  额度 {snap.tasksLimit}{' '}
+                  <span className="text-[#ADADAD]">+ {snap.bonusTasks} 加量</span>
                 </>
               ) : (
                 <>套餐：{planLabel(snap.plan)}</>
