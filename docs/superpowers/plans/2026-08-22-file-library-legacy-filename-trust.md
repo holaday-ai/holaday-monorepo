@@ -17,6 +17,7 @@
 - 查询仍限制为 100 字符，并使用 Drizzle 参数化 SQL 条件。
 - 已正确的 Unicode、ASCII 和真实 Latin-1 文件名必须保持不变。
 - 不改通知设置、AI 记忆页面、支付、密钥或生产配置。
+- 仅在含 C1 乱码控制字节且 UTF-8 序列正等待续字节时恢复被归一化的 `0xA0`，不得改写普通空格。
 
 ---
 
@@ -145,3 +146,34 @@ PR 必须说明不迁移数据、不重命名对象，并列出定向测试、�
 - [ ] **Step 4: 合并、部署 application 并验证生产**
 
 在生产 `/files` 验证：旧记录显示正确中文；搜索 `周报模板` 命中同一文件；正常文件名不变；健康检查保持 200/status ok。
+
+### Task 4: 生产验收发现的空格归一化旧数据
+
+**Files:**
+- Modify: `apps/orchestrator/src/files/upload-allowlist.test.ts`
+- Modify: `apps/orchestrator/src/files/file-service.ts`
+- Modify: `apps/orchestrator/src/trpc/routers/files.test.ts`
+- Modify: `apps/orchestrator/src/trpc/routers/files.ts`
+
+**Interfaces:**
+- Consumes: `decodeUploadFilename(name: string): string`
+- Produces: 对 UTF-8 续字节 `0xA0` 被归一化为空格的窄恢复逻辑
+- Produces: `libraryFilenameSearchTerms` 的空格归一化旧存储候选
+
+- [x] **Step 1: 写失败测试并复现生产值**
+
+使用生产页面实际字符序列 `åä¹±ç´ æ.txt`，验证显示恢复、搜索候选与真实 Latin-1 普通空格保护；确认修复前 3 项测试失败。
+
+- [x] **Step 2: 实现最小续字节修复**
+
+逐字节验证 UTF-8 序列，只把续字节槽位中的 `0x20` 恢复为 `0xA0`；必须同时存在 C1 乱码信号，最终解码不得含 U+FFFD。
+
+- [x] **Step 3: 扩展旧存储搜索候选**
+
+当 Latin-1 候选含 U+00A0 时，追加其 ASCII 空格变体并去重。
+
+- [x] **Step 4: 运行定向测试**
+
+Run: `pnpm --filter @holaday/orchestrator exec vitest run src/files/upload-allowlist.test.ts src/trpc/routers/files.test.ts`
+
+Expected: 47/47 PASS.

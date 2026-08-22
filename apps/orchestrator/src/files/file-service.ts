@@ -224,8 +224,61 @@ export function decodeUploadFilename(name: string): string {
   if (!hasHighByte) return name; // pure ASCII
   // latin1 high bytes → UTF-8 bytes mis-read as latin1; recover unless that
   // yields a replacement char (a genuine latin1 name like café.docx).
-  const recovered = Buffer.from(name, 'latin1').toString('utf8');
-  return recovered.includes('\uFFFD') ? name : recovered;
+  const latin1Bytes = Buffer.from(name, 'latin1');
+  const recovered = latin1Bytes.toString('utf8');
+  if (!recovered.includes('\uFFFD')) return recovered;
+
+  // Some legacy database/client paths normalized the mojibake character
+  // U+00A0 to an ASCII space. Restore 0xA0 only when that space occupies a
+  // continuation-byte slot in an otherwise valid UTF-8 byte sequence. The
+  // C1-control guard keeps genuine Latin-1 names with ordinary spaces intact.
+  if (!looksLikeMojibake(name)) return name;
+  const repairedBytes = restoreNormalizedNbspContinuation(latin1Bytes);
+  if (!repairedBytes) return name;
+  const repaired = repairedBytes.toString('utf8');
+  return repaired.includes('\uFFFD') ? name : repaired;
+}
+
+function restoreNormalizedNbspContinuation(bytes: Buffer): Buffer | null {
+  const repaired = Buffer.from(bytes);
+  let changed = false;
+
+  for (let i = 0; i < repaired.length; ) {
+    const lead = repaired[i];
+    if (lead === undefined) return null;
+    if (lead <= 0x7f) {
+      i += 1;
+      continue;
+    }
+
+    let sequenceLength = 0;
+    if (lead >= 0xc2 && lead <= 0xdf) sequenceLength = 2;
+    else if (lead >= 0xe0 && lead <= 0xef) sequenceLength = 3;
+    else if (lead >= 0xf0 && lead <= 0xf4) sequenceLength = 4;
+    else return null;
+
+    if (i + sequenceLength > repaired.length) return null;
+    for (let offset = 1; offset < sequenceLength; offset += 1) {
+      const index = i + offset;
+      if (repaired[index] === 0x20) {
+        repaired[index] = 0xa0;
+        changed = true;
+      }
+      const continuation = repaired[index];
+      if (continuation === undefined) return null;
+      if (continuation < 0x80 || continuation > 0xbf) return null;
+    }
+
+    const second = repaired[i + 1];
+    if (second === undefined) return null;
+    if (lead === 0xe0 && second < 0xa0) return null;
+    if (lead === 0xed && second > 0x9f) return null;
+    if (lead === 0xf0 && second < 0x90) return null;
+    if (lead === 0xf4 && second > 0x8f) return null;
+    i += sequenceLength;
+  }
+
+  return changed ? repaired : null;
 }
 
 /**

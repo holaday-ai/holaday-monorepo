@@ -162,7 +162,11 @@ function libraryFilenameSearchTerms(query: string): string[] {
   const trimmed = query.trim();
   if (!trimmed) return [];
   const legacyEncoded = Buffer.from(trimmed, 'utf8').toString('latin1');
-  return legacyEncoded === trimmed ? [trimmed] : [trimmed, legacyEncoded];
+  if (legacyEncoded === trimmed) return [trimmed];
+  const lossySpaceEncoded = legacyEncoded.replaceAll('\u00a0', ' ');
+  return lossySpaceEncoded === legacyEncoded
+    ? [trimmed, legacyEncoded]
+    : [trimmed, legacyEncoded, lossySpaceEncoded];
 }
 
 export const __filesRouterInternals = {
