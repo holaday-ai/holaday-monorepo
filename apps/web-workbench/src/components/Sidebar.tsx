@@ -63,7 +63,9 @@ import {
 import {
   filterSidebarFeatureNavItems,
   isPartnerNavEnabled,
+  preloadSidebarFeatureNavItem,
 } from '@/lib/sidebar-feature-nav';
+import { preloadStockTasksPageRoute } from '@/lib/stock-page-preload';
 import type { ProjectFilterChipState } from '@/lib/project-task-filter-state';
 import { cn } from '@/lib/utils';
 import { useTaskStore } from '@/stores/task-store';
@@ -975,11 +977,20 @@ interface FeatureItem {
   label: string;
   /** When set the row is clickable and routes here. */
   href?: string;
+  /** Optional module-only warmup for clear pointer or keyboard intent. */
+  preload?: () => void;
 }
 
 const FEATURES: readonly FeatureItem[] = [
   { icon: Sparkles, label: '技能', href: '/skills' },
-  { icon: TrendingUp, label: '股市任务', href: '/stocks' },
+  {
+    icon: TrendingUp,
+    label: '股市任务',
+    href: '/stocks',
+    preload: () => {
+      void preloadStockTasksPageRoute();
+    },
+  },
   { icon: Wallet, label: '合伙人计划', href: '/partner' },
   { icon: MoonStar, label: '今日能量', href: '/cosmic' },
   { icon: Clapperboard, label: '视频任务', href: '/video' },
@@ -1013,7 +1024,8 @@ function FeatureNav({ userRole }: { userRole: 'user' | 'admin' }): JSX.Element {
           {filterSidebarFeatureNavItems(FEATURES, {
             cosmicEnabled: isCosmicEnabled(),
             partnerEnabled: isPartnerNavEnabled(),
-          }).map(({ icon: Icon, label, href }) => {
+          }).map((item) => {
+            const { icon: Icon, label, href } = item;
             if (href) {
               const isActive = pathname === href;
               return (
@@ -1021,6 +1033,8 @@ function FeatureNav({ userRole }: { userRole: 'user' | 'admin' }): JSX.Element {
                 <SidebarMenuButton
                   tooltip={label}
                   isActive={isActive}
+                  onPointerEnter={() => preloadSidebarFeatureNavItem(item)}
+                  onFocus={() => preloadSidebarFeatureNavItem(item)}
                   onClick={() => navigate(href)}
                   className={cn(
                     'rounded-[8px] border border-transparent text-[#595757] hover:border-[#EA1F59]/20 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] dark:text-foreground/75 dark:hover:border-[#EA1F59]/35 dark:hover:bg-[#EA1F59]/10',

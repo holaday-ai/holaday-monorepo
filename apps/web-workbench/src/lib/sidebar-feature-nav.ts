@@ -1,6 +1,7 @@
 export interface SidebarFeatureNavItem {
   label: string;
   href?: string;
+  preload?: () => void;
 }
 
 export interface SidebarFeatureNavFlags {
@@ -17,6 +18,10 @@ export function filterSidebarFeatureNavItems<T extends SidebarFeatureNavItem>(
     if (item.href === '/partner') return flags.partnerEnabled === true;
     return true;
   });
+}
+
+export function preloadSidebarFeatureNavItem(item: SidebarFeatureNavItem): void {
+  item.preload?.();
 }
 
 export function isPartnerNavEnabled(): boolean {

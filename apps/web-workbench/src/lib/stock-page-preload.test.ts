@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   consumeStockPageInitialRequests,
+  loadStockTasksPageRoute,
   prepareStockPageInitialRequests,
+  preloadStockTasksPageRoute,
 } from './stock-page-preload';
 
 const api = vi.hoisted(() => ({
@@ -78,5 +80,25 @@ describe('stock page initial request preload', () => {
       briefing: api.briefingStatus.mock.calls.length,
       dashboard: api.dashboardSnapshot.mock.calls.length,
     }).toEqual({ watchlist: 2, briefing: 2, dashboard: 2 });
+  });
+
+  it('warms only the stock route module, then reuses it when navigation starts data', async () => {
+    const preloaded = preloadStockTasksPageRoute();
+
+    expect(preloadStockTasksPageRoute()).toBe(preloaded);
+    expect({
+      watchlist: api.watchlist.mock.calls.length,
+      briefing: api.briefingStatus.mock.calls.length,
+      dashboard: api.dashboardSnapshot.mock.calls.length,
+    }).toEqual({ watchlist: 0, briefing: 0, dashboard: 0 });
+    await expect(preloaded).resolves.toHaveProperty('StockTasksPage');
+
+    expect(loadStockTasksPageRoute()).toBe(preloaded);
+    expect({
+      watchlist: api.watchlist.mock.calls.length,
+      briefing: api.briefingStatus.mock.calls.length,
+      dashboard: api.dashboardSnapshot.mock.calls.length,
+    }).toEqual({ watchlist: 1, briefing: 1, dashboard: 1 });
+    consumeStockPageInitialRequests();
   });
 });
