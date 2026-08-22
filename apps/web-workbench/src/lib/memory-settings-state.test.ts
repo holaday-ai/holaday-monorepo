@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  formatMemoryDate,
   memoryCategoryLabel,
   memoryLoadErrorCopy,
   memoryLoadErrorMessage,
@@ -95,5 +96,10 @@ describe('memory settings state helpers', () => {
       title: 'AI 记忆暂时无法加载',
       body: '请稍后重试，或刷新页面后再打开设置。',
     });
+  });
+
+  it('formats memory dates in the product timezone and rejects invalid values', () => {
+    expect(formatMemoryDate('2026-08-22T15:30:00.000Z')).toBe('8月22日');
+    expect(formatMemoryDate('not-a-date')).toBeNull();
   });
 });

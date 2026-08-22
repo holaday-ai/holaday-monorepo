@@ -21,6 +21,8 @@ export const MEMORY_CATEGORY_LABELS: Record<string, string> = {
   execution_tip: '执行经验',
 };
 
+const MEMORY_TIME_ZONE = 'Asia/Shanghai';
+
 export function normalizeMemoryRows(value: unknown): MemoryRowView[] {
   if (typeof value !== 'object' || value === null) {
     throw new Error('AI 记忆暂时无法读取，请刷新后重试。');
@@ -68,6 +70,19 @@ export function memoryLoadErrorCopy(message: string | null | undefined): MemoryL
     title: 'AI 记忆暂时无法加载',
     body,
   };
+}
+
+export function formatMemoryDate(value: string, timeZone = MEMORY_TIME_ZONE): string | null {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const parts = new Intl.DateTimeFormat('zh-CN', {
+    month: 'numeric',
+    day: 'numeric',
+    timeZone,
+  }).formatToParts(date);
+  const month = parts.find((part) => part.type === 'month')?.value;
+  const day = parts.find((part) => part.type === 'day')?.value;
+  return month && day ? `${month}月${day}日` : null;
 }
 
 function safeMemoryText(value: unknown): string {
