@@ -56,6 +56,10 @@ import {
   stockChartAxisTicks,
 } from '@/lib/stock-chart-state';
 import { stockDashboardTrustState } from '@/lib/stock-dashboard-trust';
+import {
+  consumeStockPageInitialRequests,
+  createStockPageInitialRequests,
+} from '@/lib/stock-page-preload';
 import { discoveryStoryAliases, discoveryStoryClusterKey, mergeDiscoveryNews } from '@/lib/stock-news';
 import {
   stockQuickCommands,
@@ -264,15 +268,18 @@ export function StockTasksPage(): JSX.Element {
     else if (mode === 'manual') setRefreshingDashboard(true);
     setLoadError(null);
     try {
-      const watchlistPromise = trpc.watchlists.list.query().then((rows) => {
+      const requests = mode === 'initial'
+        ? consumeStockPageInitialRequests()
+        : createStockPageInitialRequests();
+      const watchlistPromise = requests.watchlist.then((rows) => {
         if (pageAlive.current) setWatchlist(rows);
         return rows;
       });
-      const statusPromise = trpc.watchlists.briefingStatus.query().then((status) => {
+      const statusPromise = requests.briefingStatus.then((status) => {
         if (pageAlive.current) setBriefingStatus(status);
         return status;
       });
-      const snapshotPromise = trpc.stocks.dashboardSnapshot.query().then((snapshot) => {
+      const snapshotPromise = requests.dashboardSnapshot.then((snapshot) => {
         if (pageAlive.current) {
           setDashboard((previous) => preserveDisplayableDashboard(snapshot, previous));
         }
