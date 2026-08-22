@@ -44,6 +44,7 @@ export function StockTaskWorkspaceLayout({
   screeningView: StockScreeningViewState;
 }): JSX.Element {
   const [activeTask, setActiveTask] = React.useState<StockWorkspaceTask>('watchlist');
+  const [riskWarmed, setRiskWarmed] = React.useState(false);
   const tabRefs = React.useRef<Record<StockWorkspaceTask, HTMLButtonElement | null>>({
     watchlist: null,
     screening: null,
@@ -51,6 +52,10 @@ export function StockTaskWorkspaceLayout({
     briefing: null,
   });
   const activeTaskIndex = STOCK_WORKSPACE_TASKS.findIndex((task) => task.id === activeTask);
+
+  React.useEffect(() => {
+    setRiskWarmed(true);
+  }, []);
 
   const activateTask = React.useCallback((task: StockWorkspaceTask, focusTab = false) => {
     setActiveTask(task);
@@ -144,7 +149,15 @@ export function StockTaskWorkspaceLayout({
             <NextStepRail onNavigate={(task) => activateTask(task, true)} />
           </div>
         ) : null}
-        {activeTask === 'risk' ? <div className="min-w-0">{riskRadar}</div> : null}
+        {riskWarmed || activeTask === 'risk' ? (
+          <div
+            className="min-w-0"
+            hidden={activeTask !== 'risk'}
+            aria-hidden={activeTask !== 'risk' ? true : undefined}
+          >
+            {riskRadar}
+          </div>
+        ) : null}
         {activeTask === 'screening' ? (
           <div className="min-w-0 space-y-4">
             <div className="min-w-0">{screening}</div>
