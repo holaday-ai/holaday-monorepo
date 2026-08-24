@@ -821,6 +821,201 @@ describe('history — safe customer payment records', () => {
   });
 });
 
+describe('ledger — paginated customer payment records', () => {
+  const ledgerRows = [
+    {
+      externalId: 'pay_completed',
+      userExternalId: 'usr_test',
+      provider: 'wechat',
+      kind: 'subscription',
+      plan: 'basic',
+      amountCents: 2900,
+      currency: 'CNY',
+      status: 'completed',
+      createdAt: new Date('2026-08-04T15:00:00.000Z'),
+      completedAt: new Date('2026-08-04T15:00:10.000Z'),
+    },
+    {
+      externalId: 'pay_refunded',
+      userExternalId: 'usr_test',
+      provider: 'alipay',
+      kind: 'addon',
+      plan: 'pack-20',
+      amountCents: 990,
+      currency: 'CNY',
+      status: 'refunded',
+      createdAt: new Date('2026-08-04T14:00:00.000Z'),
+      completedAt: new Date('2026-08-04T14:00:10.000Z'),
+    },
+    {
+      externalId: 'pay_completed_older',
+      userExternalId: 'usr_test',
+      provider: 'paypal',
+      kind: 'subscription',
+      plan: 'pro',
+      amountCents: 690,
+      currency: 'USD',
+      status: 'completed',
+      createdAt: new Date('2026-08-04T13:00:00.000Z'),
+      completedAt: new Date('2026-08-04T13:00:10.000Z'),
+    },
+    {
+      externalId: 'pay_pending',
+      userExternalId: 'usr_test',
+      provider: 'wechat',
+      kind: 'subscription',
+      plan: 'pro',
+      amountCents: 6900,
+      currency: 'CNY',
+      status: 'pending',
+      createdAt: new Date('2026-08-04T12:00:00.000Z'),
+      completedAt: null,
+    },
+    {
+      externalId: 'pay_failed',
+      userExternalId: 'usr_test',
+      provider: 'alipay',
+      kind: 'subscription',
+      plan: 'basic',
+      amountCents: 2900,
+      currency: 'CNY',
+      status: 'failed',
+      createdAt: new Date('2026-08-04T11:00:00.000Z'),
+      completedAt: null,
+    },
+    {
+      externalId: 'pay_other',
+      userExternalId: 'usr_other',
+      provider: 'paypal',
+      kind: 'subscription',
+      plan: 'pro',
+      amountCents: 690,
+      currency: 'USD',
+      status: 'completed',
+      createdAt: new Date('2026-08-04T10:00:00.000Z'),
+      completedAt: new Date('2026-08-04T10:00:10.000Z'),
+    },
+  ];
+
+  function makeLedgerCtx(rows = ledgerRows) {
+    let selectedFields: Record<string, unknown> | undefined;
+    let requestedLimit: number | undefined;
+    let selectCalls = 0;
+    const db = {
+      select(fields: Record<string, unknown>) {
+        selectCalls += 1;
+        selectedFields = fields;
+        return {
+          from() {
+            const query = {
+              where() {
+                return query;
+              },
+              orderBy() {
+                return query;
+              },
+              limit(value: number) {
+                requestedLimit = value;
+                return Promise.resolve(rows);
+              },
+            };
+            return query;
+          },
+        };
+      },
+    };
+    const ctx = {
+      db,
+      userId: 'usr_test',
+      logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn(),
+        child: vi.fn(),
+      },
+    } as unknown as Parameters<typeof paymentRouter.createCaller>[0];
+    return {
+      ctx,
+      selectedFields: () => selectedFields,
+      requestedLimit: () => requestedLimit,
+      selectCalls: () => selectCalls,
+    };
+  }
+
+  it('separates settled records, paginates them, and returns only safe fields', async () => {
+    const mock = makeLedgerCtx();
+    const settled = await paymentRouter
+      .createCaller(mock.ctx)
+      .ledger({ section: 'settled', limit: 2 });
+
+    expect(settled.items.map((row) => row.orderId)).toEqual(['pay_completed', 'pay_refunded']);
+    expect(settled.nextCursor).toEqual({
+      createdAt: '2026-08-04T14:00:00.000Z',
+      orderId: 'pay_refunded',
+    });
+    expect(mock.requestedLimit()).toBe(3);
+    expect(Object.keys(mock.selectedFields() ?? {}).sort()).toEqual(
+      [
+        'amountCents',
+        'completedAt',
+        'createdAt',
+        'currency',
+        'externalId',
+        'kind',
+        'plan',
+        'provider',
+        'status',
+        'userExternalId',
+      ].sort(),
+    );
+    expect(settled.items[0]).not.toHaveProperty('metadata');
+    expect(settled.items[0]).not.toHaveProperty('userExternalId');
+    expect(settled.items[0]).not.toHaveProperty('providerOrderId');
+    expect(settled.items[0]).not.toHaveProperty('providerCaptureId');
+  });
+
+  it('keeps unfinished attempts separate and excludes another account', async () => {
+    const mock = makeLedgerCtx();
+    const unfinished = await paymentRouter.createCaller(mock.ctx).ledger({ section: 'unfinished' });
+
+    expect(unfinished.items.map((row) => [row.orderId, row.status])).toEqual([
+      ['pay_pending', 'pending'],
+      ['pay_failed', 'failed'],
+    ]);
+    expect(unfinished.items.some((row) => row.orderId === 'pay_other')).toBe(false);
+    expect(unfinished.nextCursor).toBeNull();
+    expect(mock.requestedLimit()).toBe(11);
+  });
+
+  it('accepts a bounded keyset cursor and rejects malformed inputs before querying', async () => {
+    const mock = makeLedgerCtx([]);
+    const caller = paymentRouter.createCaller(mock.ctx);
+
+    await expect(
+      caller.ledger({
+        section: 'settled',
+        cursor: {
+          createdAt: '2026-08-04T14:00:00.000Z',
+          orderId: 'pay_refunded',
+        },
+      }),
+    ).resolves.toEqual({ items: [], nextCursor: null });
+    expect(mock.selectCalls()).toBe(1);
+
+    await expect(caller.ledger({ section: 'settled', limit: 21 })).rejects.toMatchObject({
+      code: 'BAD_REQUEST',
+    });
+    await expect(
+      caller.ledger({
+        section: 'settled',
+        cursor: { createdAt: 'not-a-date', orderId: '../other' },
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(mock.selectCalls()).toBe(1);
+  });
+});
+
 describe('cnOptions — production provider readiness', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
