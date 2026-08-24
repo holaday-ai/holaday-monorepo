@@ -31,6 +31,18 @@ export interface BillingPaymentRecord {
   readonly completedAt: string | null;
 }
 
+export type BillingPaymentLedgerSection = 'settled' | 'unfinished';
+
+export interface BillingPaymentCursor {
+  readonly createdAt: string;
+  readonly orderId: string;
+}
+
+export interface BillingPaymentPage {
+  readonly items: BillingPaymentRecord[];
+  readonly nextCursor: BillingPaymentCursor | null;
+}
+
 export interface BillingPaymentStatusCopy {
   readonly label: string;
   readonly detail: string;
@@ -188,6 +200,39 @@ export function normalizeBillingPaymentRecords(value: unknown): BillingPaymentRe
   });
 }
 
+export function normalizeBillingPaymentPage(
+  value: unknown,
+  section: BillingPaymentLedgerSection,
+): BillingPaymentPage {
+  const raw = isRecord(value) ? value : {};
+  const allowedStatuses =
+    section === 'settled' ? new Set(['completed', 'refunded']) : new Set(['pending', 'failed']);
+  const items = normalizeBillingPaymentRecords(raw.items).filter((item) =>
+    allowedStatuses.has(item.status),
+  );
+  const rawCursor = isRecord(raw.nextCursor) ? raw.nextCursor : null;
+  const createdAt = safeBillingText(rawCursor?.createdAt);
+  const orderId = safeBillingText(rawCursor?.orderId);
+  const nextCursor =
+    Number.isFinite(Date.parse(createdAt)) && /^[A-Za-z0-9_-]{1,64}$/.test(orderId)
+      ? { createdAt, orderId }
+      : null;
+
+  return { items, nextCursor };
+}
+
+export function appendBillingPaymentPage(
+  current: readonly BillingPaymentRecord[],
+  incoming: readonly BillingPaymentRecord[],
+): BillingPaymentRecord[] {
+  const seen = new Set<string>();
+  return [...current, ...incoming].filter((record) => {
+    if (seen.has(record.orderId)) return false;
+    seen.add(record.orderId);
+    return true;
+  });
+}
+
 export function billingPaymentStatusCopy(
   status: string,
   createdAt: string,
@@ -252,6 +297,31 @@ export function billingPaymentDate(value: string): string {
   const part = (type: Intl.DateTimeFormatPartTypes): string =>
     parts.find((candidate) => candidate.type === type)?.value ?? '';
   return `${part('year')}-${part('month')}-${part('day')} ${part('hour')}:${part('minute')}`;
+}
+
+export function billingPaymentReceiptMailOptions(record: BillingPaymentRecord): {
+  subject: string;
+  body: string;
+} {
+  const product = billingPaymentProduct(record.kind, record.plan);
+  const amount = billingPaymentAmount(record.amountCents, record.currency);
+  const paidAt = billingPaymentDate(record.completedAt ?? record.createdAt);
+  return {
+    subject: `HOLA DAY 付款凭证与发票申请 · ${record.orderId}`,
+    body: [
+      '请协助处理以下付款的凭证或发票申请。',
+      '',
+      `订单号：${record.orderId}`,
+      `产品：${product}`,
+      `金额：${amount}`,
+      `付款时间：${paidAt}`,
+      '',
+      '需要：付款凭证 / 发票（请保留所需项）',
+      '发票抬头：',
+      '税号：',
+      '接收邮箱：',
+    ].join('\n'),
+  };
 }
 
 function safeBillingNullableText(value: unknown): string | null {

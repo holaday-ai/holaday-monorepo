@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  appendBillingPaymentPage,
   billingLoadErrorCopy,
   billingLoadErrorMessage,
   billingPageSummary,
@@ -7,6 +8,7 @@ import {
   billingPaymentDate,
   billingPaymentProduct,
   billingPaymentProvider,
+  billingPaymentReceiptMailOptions,
   billingPaymentReturnCopy,
   billingPaymentStatusCopy,
   billingPlanActionLabel,
@@ -14,6 +16,7 @@ import {
   cancellationMailBody,
   isPaidBillingPlan,
   normalizeBillingPaymentRecords,
+  normalizeBillingPaymentPage,
   normalizeBillingSnapshot,
   normalizePaymentReturnOrder,
   planValidUntilText,
@@ -185,5 +188,144 @@ describe('billing page state helpers', () => {
     expect(billingPaymentAmount(2900, 'CNY')).toBe('RMB¥29.00');
     expect(billingPaymentAmount(690, 'USD')).toBe('US$6.90');
     expect(billingPaymentDate('2026-08-04T15:14:56.168Z')).toBe('2026-08-04 23:14');
+  });
+
+  it('normalizes a payment page and keeps only statuses for its requested section', () => {
+    expect(
+      normalizeBillingPaymentPage(
+        {
+          items: [
+            {
+              orderId: ' pay_completed ',
+              provider: ' wechat ',
+              kind: ' subscription ',
+              plan: ' basic ',
+              amountCents: 2900,
+              currency: ' CNY ',
+              status: ' completed ',
+              createdAt: ' 2026-08-04T15:14:34.852Z ',
+              completedAt: ' 2026-08-04T15:14:56.168Z ',
+              metadata: { shouldNotLeak: true },
+            },
+            {
+              orderId: 'pay_pending',
+              provider: 'alipay',
+              kind: 'subscription',
+              plan: 'pro',
+              amountCents: 6900,
+              currency: 'CNY',
+              status: 'pending',
+              createdAt: '2026-08-04T15:15:00.000Z',
+              completedAt: null,
+            },
+          ],
+          nextCursor: {
+            createdAt: '2026-08-04T15:14:34.852Z',
+            orderId: 'pay_completed',
+          },
+        },
+        'settled',
+      ),
+    ).toEqual({
+      items: [
+        {
+          orderId: 'pay_completed',
+          provider: 'wechat',
+          kind: 'subscription',
+          plan: 'basic',
+          amountCents: 2900,
+          currency: 'CNY',
+          status: 'completed',
+          createdAt: '2026-08-04T15:14:34.852Z',
+          completedAt: '2026-08-04T15:14:56.168Z',
+        },
+      ],
+      nextCursor: {
+        createdAt: '2026-08-04T15:14:34.852Z',
+        orderId: 'pay_completed',
+      },
+    });
+  });
+
+  it('rejects malformed ledger cursors without dropping otherwise safe items', () => {
+    expect(
+      normalizeBillingPaymentPage(
+        {
+          items: [
+            {
+              orderId: 'pay_failed',
+              provider: 'alipay',
+              kind: 'subscription',
+              plan: 'basic',
+              amountCents: 2900,
+              currency: 'CNY',
+              status: 'failed',
+              createdAt: '2026-08-04T15:15:00.000Z',
+              completedAt: null,
+            },
+          ],
+          nextCursor: { createdAt: 'not-a-date', orderId: '../bad' },
+        },
+        'unfinished',
+      ),
+    ).toEqual({
+      items: [
+        {
+          orderId: 'pay_failed',
+          provider: 'alipay',
+          kind: 'subscription',
+          plan: 'basic',
+          amountCents: 2900,
+          currency: 'CNY',
+          status: 'failed',
+          createdAt: '2026-08-04T15:15:00.000Z',
+          completedAt: null,
+        },
+      ],
+      nextCursor: null,
+    });
+  });
+
+  it('appends payment pages without duplicating an overlapping order', () => {
+    const completed = {
+      orderId: 'pay_completed',
+      provider: 'wechat',
+      kind: 'subscription',
+      plan: 'basic',
+      amountCents: 2900,
+      currency: 'CNY',
+      status: 'completed',
+      createdAt: '2026-08-04T15:14:34.852Z',
+      completedAt: '2026-08-04T15:14:56.168Z',
+    };
+    const refunded = { ...completed, orderId: 'pay_refunded', status: 'refunded' };
+
+    expect(appendBillingPaymentPage([completed], [completed, refunded])).toEqual([
+      completed,
+      refunded,
+    ]);
+  });
+
+  it('builds a receipt request from safe visible payment fields', () => {
+    const options = billingPaymentReceiptMailOptions({
+      orderId: 'pay_completed',
+      provider: 'wechat',
+      kind: 'subscription',
+      plan: 'basic',
+      amountCents: 2900,
+      currency: 'CNY',
+      status: 'completed',
+      createdAt: '2026-08-04T15:14:34.852Z',
+      completedAt: '2026-08-04T15:14:56.168Z',
+    });
+
+    expect(options.subject).toBe('HOLA DAY 付款凭证与发票申请 · pay_completed');
+    expect(options.body).toContain('订单号：pay_completed');
+    expect(options.body).toContain('产品：Basic 套餐');
+    expect(options.body).toContain('金额：RMB¥29.00');
+    expect(options.body).toContain('付款时间：2026-08-04 23:14');
+    expect(options.body).toContain('发票抬头：');
+    expect(options.body).not.toContain('userId');
+    expect(options.body).not.toContain('metadata');
   });
 });
