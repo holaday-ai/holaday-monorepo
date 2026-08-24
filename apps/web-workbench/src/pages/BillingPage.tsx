@@ -1,22 +1,16 @@
 import { Button } from '@/components/ui/button';
+import { PaymentLedgerSection } from '@/components/billing/PaymentLedgerSection';
 import {
-  type BillingPaymentRecord,
   type BillingPaymentReturnStatus,
   type BillingSnapshot,
   billingLoadErrorCopy,
   billingLoadErrorMessage,
   billingPageSummary,
-  billingPaymentAmount,
-  billingPaymentDate,
-  billingPaymentProduct,
-  billingPaymentProvider,
   billingPaymentReturnCopy,
-  billingPaymentStatusCopy,
   billingPlanActionLabel,
   billingPlanLabel,
   cancellationMailBody,
   isPaidBillingPlan,
-  normalizeBillingPaymentRecords,
   normalizeBillingSnapshot,
   normalizePaymentReturnOrder,
   planValidUntilText,
@@ -33,13 +27,10 @@ export function BillingPage(): JSX.Element {
   const [searchParams] = useSearchParams();
   const mountedRef = React.useRef(false);
   const requestIdRef = React.useRef(0);
-  const paymentHistoryRequestIdRef = React.useRef(0);
   const [snapshot, setSnapshot] = React.useState<BillingSnapshot | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [loadError, setLoadError] = React.useState<string | null>(null);
-  const [paymentHistory, setPaymentHistory] = React.useState<BillingPaymentRecord[]>([]);
-  const [paymentHistoryLoading, setPaymentHistoryLoading] = React.useState(true);
-  const [paymentHistoryError, setPaymentHistoryError] = React.useState<string | null>(null);
+  const [paymentLedgerRefreshKey, setPaymentLedgerRefreshKey] = React.useState(0);
   const paymentReturnOrder = normalizePaymentReturnOrder(searchParams.get('payment'));
   const [paymentReturnStatus, setPaymentReturnStatus] =
     React.useState<BillingPaymentReturnStatus | null>(paymentReturnOrder ? 'checking' : null);
@@ -60,34 +51,14 @@ export function BillingPage(): JSX.Element {
     }
   }, []);
 
-  const refreshPaymentHistory = React.useCallback(async () => {
-    const requestId = ++paymentHistoryRequestIdRef.current;
-    setPaymentHistoryLoading(true);
-    setPaymentHistoryError(null);
-    try {
-      const records = normalizeBillingPaymentRecords(await trpc.payment.history.query());
-      if (!mountedRef.current || requestId !== paymentHistoryRequestIdRef.current) return;
-      setPaymentHistory(records);
-    } catch (err) {
-      if (!mountedRef.current || requestId !== paymentHistoryRequestIdRef.current) return;
-      setPaymentHistoryError(billingLoadErrorMessage(err, '交易记录暂时无法加载，请稍后重试。'));
-    } finally {
-      if (mountedRef.current && requestId === paymentHistoryRequestIdRef.current) {
-        setPaymentHistoryLoading(false);
-      }
-    }
-  }, []);
-
   React.useEffect(() => {
     mountedRef.current = true;
     void refresh();
-    void refreshPaymentHistory();
     return () => {
       mountedRef.current = false;
       requestIdRef.current += 1;
-      paymentHistoryRequestIdRef.current += 1;
     };
-  }, [refresh, refreshPaymentHistory]);
+  }, [refresh]);
 
   React.useEffect(() => {
     if (!paymentReturnOrder) {
@@ -107,7 +78,8 @@ export function BillingPage(): JSX.Element {
         if (cancelled) return;
         if (result.status === 'completed') {
           setPaymentReturnStatus('completed');
-          await Promise.all([refresh(), refreshPaymentHistory()]);
+          await refresh();
+          if (!cancelled) setPaymentLedgerRefreshKey((value) => value + 1);
           return;
         }
         if (result.status === 'failed') {
@@ -129,7 +101,7 @@ export function BillingPage(): JSX.Element {
       cancelled = true;
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [paymentReturnOrder, refresh, refreshPaymentHistory]);
+  }, [paymentReturnOrder, refresh]);
 
   const plan = snapshot?.plan ?? null;
   const planLabel = billingPlanLabel(plan);
@@ -311,99 +283,7 @@ export function BillingPage(): JSX.Element {
           </>
         )}
 
-        <Section
-          title="交易记录"
-          description="最近 20 笔支付尝试，以支付平台确认结果为准"
-          className="rounded-[8px] border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]"
-        >
-          {paymentHistoryLoading ? (
-            <div className="space-y-3" aria-label="交易记录加载中" aria-live="polite">
-              {[0, 1, 2].map((item) => (
-                <div key={item} className="hola-skel h-[68px] rounded-[6px] bg-[#EFEFEF]/80" />
-              ))}
-            </div>
-          ) : paymentHistoryError ? (
-            <div className="flex flex-col items-center gap-2 border-y border-[#EFEFEF] px-4 py-8 text-center">
-              <AlertCircle className="h-5 w-5 text-[#EA1F59]" aria-hidden />
-              <p className="text-sm font-medium">交易记录暂时无法加载</p>
-              <p className="max-w-md text-xs leading-5 text-muted-foreground">
-                {paymentHistoryError}
-              </p>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="mt-1 border-[#DCDDDD] bg-white"
-                onClick={() => void refreshPaymentHistory()}
-              >
-                重试
-              </Button>
-            </div>
-          ) : paymentHistory.length === 0 ? (
-            <div className="border-y border-dashed border-[#DCDDDD] px-6 py-10 text-center">
-              <p className="text-sm text-muted-foreground">暂无交易记录</p>
-              <p className="mt-1 text-[11px] text-muted-foreground">
-                完成订阅或购买加量包后，记录会显示在这里。
-              </p>
-            </div>
-          ) : (
-            <div className="divide-y divide-[#EFEFEF] border-y border-[#EFEFEF]">
-              {paymentHistory.map((record) => {
-                const status = billingPaymentStatusCopy(record.status, record.createdAt);
-                const statusClass =
-                  status.tone === 'success'
-                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                    : status.tone === 'warning'
-                      ? 'border-amber-200 bg-amber-50 text-amber-700'
-                      : 'border-[#DCDDDD] bg-[#F7F7F7] text-[#777777]';
-                return (
-                  <div
-                    key={record.orderId}
-                    className="flex flex-col gap-3 py-4 sm:flex-row sm:items-start sm:justify-between sm:gap-6"
-                  >
-                    <div className="min-w-0">
-                      <div className="text-sm font-medium text-[#1F1F1F]">
-                        {billingPaymentProduct(record.kind, record.plan)}
-                      </div>
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        {billingPaymentProvider(record.provider)} ·{' '}
-                        {billingPaymentDate(record.completedAt ?? record.createdAt)}
-                      </div>
-                      <div className="mt-1 break-all font-mono text-[10px] leading-4 text-[#999999]">
-                        订单 {record.orderId}
-                      </div>
-                    </div>
-                    <div className="flex shrink-0 items-start justify-between gap-4 sm:flex-col sm:items-end sm:text-right">
-                      <div className="text-sm font-semibold tabular-nums text-[#1F1F1F]">
-                        {billingPaymentAmount(record.amountCents, record.currency)}
-                      </div>
-                      <div className="flex min-w-0 flex-col items-end gap-1">
-                        <span
-                          className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${statusClass}`}
-                        >
-                          {status.label}
-                        </span>
-                        <span className="max-w-[220px] text-[10px] leading-4 text-muted-foreground">
-                          {status.detail}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-          <p className="mt-4 text-[11px] leading-5 text-muted-foreground">
-            如需付款凭证或发票，请联系{' '}
-            <a
-              href={supportMailtoHref({ subject: 'HOLA DAY 付款凭证与发票' })}
-              className="text-[#EA1F59] underline-offset-2 hover:underline"
-            >
-              {SUPPORT_EMAIL}
-            </a>
-            。
-          </p>
-        </Section>
+        <PaymentLedgerSection refreshKey={paymentLedgerRefreshKey} />
       </div>
     </PageContainer>
   );
