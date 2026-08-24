@@ -29,7 +29,7 @@ import {
   newExternalId,
 } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray, lt, or } from 'drizzle-orm';
 import { z } from 'zod';
 import type { DB } from '../../db/client.js';
 import { readAffectedRows } from '../../db/mysql-result.js';
@@ -61,6 +61,22 @@ const captureOrderInput = z.object({
 const createAddonOrderInput = z.object({
   packId: z.enum(ADDON_PACK_IDS),
 });
+
+const paymentLedgerInput = z.object({
+  section: z.enum(['settled', 'unfinished']),
+  cursor: z
+    .object({
+      createdAt: z.string().datetime({ offset: true }),
+      orderId: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
+    })
+    .optional(),
+  limit: z.number().int().min(1).max(20).default(10),
+});
+
+const PAYMENT_LEDGER_STATUSES = {
+  settled: ['completed', 'refunded'],
+  unfinished: ['pending', 'failed'],
+} as const;
 
 type PaymentTransaction = Parameters<Parameters<DB['transaction']>[0]>[0];
 
@@ -211,6 +227,65 @@ export async function completePaymentInTransaction(
 }
 
 export const paymentRouter = router({
+  ledger: protectedProcedure.input(paymentLedgerInput).query(async ({ ctx, input }) => {
+    const statuses = PAYMENT_LEDGER_STATUSES[input.section];
+    const cursorWhere = input.cursor
+      ? or(
+          lt(payments.createdAt, new Date(input.cursor.createdAt)),
+          and(
+            eq(payments.createdAt, new Date(input.cursor.createdAt)),
+            lt(payments.externalId, input.cursor.orderId),
+          ),
+        )
+      : undefined;
+    const rows = await ctx.db
+      .select({
+        externalId: payments.externalId,
+        userExternalId: payments.userExternalId,
+        provider: payments.provider,
+        kind: payments.kind,
+        plan: payments.plan,
+        amountCents: payments.amountCents,
+        currency: payments.currency,
+        status: payments.status,
+        createdAt: payments.createdAt,
+        completedAt: payments.completedAt,
+      })
+      .from(payments)
+      .where(
+        and(
+          eq(payments.userExternalId, ctx.userId),
+          inArray(payments.status, [...statuses]),
+          cursorWhere,
+        ),
+      )
+      .orderBy(desc(payments.createdAt), desc(payments.externalId))
+      .limit(input.limit + 1);
+
+    const safeRows = rows.filter(
+      (row) => row.userExternalId === ctx.userId && statuses.some((status) => status === row.status),
+    );
+    const hasMore = safeRows.length > input.limit;
+    const page = safeRows.slice(0, input.limit);
+    const items = page.map((row) => ({
+      orderId: row.externalId,
+      provider: row.provider,
+      kind: row.kind,
+      plan: row.plan,
+      amountCents: row.amountCents,
+      currency: row.currency,
+      status: row.status as (typeof statuses)[number],
+      createdAt: row.createdAt.toISOString(),
+      completedAt: row.completedAt?.toISOString() ?? null,
+    }));
+    const last = items[items.length - 1];
+
+    return {
+      items,
+      nextCursor:
+        hasMore && last ? { createdAt: last.createdAt, orderId: last.orderId } : null,
+    };
+  }),
   history: protectedProcedure.query(async ({ ctx }) => {
     const rows = await ctx.db
       .select({
