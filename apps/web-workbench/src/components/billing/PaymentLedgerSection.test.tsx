@@ -2,6 +2,7 @@
 
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PaymentLedgerSection } from './PaymentLedgerSection';
 
@@ -57,6 +58,18 @@ afterEach(() => {
 });
 
 describe('PaymentLedgerSection', () => {
+  it('loads settled records when React development mode replays effects', async () => {
+    ledgerQuery.mockResolvedValue({ items: [settledRecord], nextCursor: null });
+
+    render(
+      <React.StrictMode>
+        <PaymentLedgerSection refreshKey={0} />
+      </React.StrictMode>,
+    );
+
+    expect(await screen.findByText('Basic 套餐')).toBeTruthy();
+  });
+
   it('loads settled records first and fetches unfinished attempts only after expansion', async () => {
     ledgerQuery.mockImplementation(async (input: { section: string }) =>
       input.section === 'settled'

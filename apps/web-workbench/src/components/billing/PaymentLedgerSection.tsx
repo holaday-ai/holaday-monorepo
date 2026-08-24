@@ -60,9 +60,13 @@ export function PaymentLedgerSection({ refreshKey }: { refreshKey: number }): JS
       section: BillingPaymentLedgerSection,
       cursor: BillingPaymentCursor | null,
       replace: boolean,
+      requestRefreshKey?: number,
     ): Promise<void> => {
       const setState = section === 'settled' ? setSettled : setUnfinished;
       const requestRef = section === 'settled' ? settledRequestRef : unfinishedRequestRef;
+      if (section === 'settled' && requestRefreshKey !== undefined) {
+        settledRefreshKeyRef.current = requestRefreshKey;
+      }
       const requestId = ++requestRef.current;
       setState((current) => ({
         ...current,
@@ -78,7 +82,14 @@ export function PaymentLedgerSection({ refreshKey }: { refreshKey: number }): JS
           ...(cursor ? { cursor } : {}),
         });
         const page = normalizeBillingPaymentPage(rawPage, section);
-        if (!mountedRef.current || requestId !== requestRef.current) return;
+        if (
+          !mountedRef.current ||
+          requestId !== requestRef.current ||
+          (section === 'settled' &&
+            requestRefreshKey !== undefined &&
+            requestRefreshKey !== settledRefreshKeyRef.current)
+        )
+          return;
         setState((current) => ({
           items: replace ? page.items : appendBillingPaymentPage(current.items, page.items),
           nextCursor: page.nextCursor,
@@ -88,7 +99,14 @@ export function PaymentLedgerSection({ refreshKey }: { refreshKey: number }): JS
           loaded: true,
         }));
       } catch (error) {
-        if (!mountedRef.current || requestId !== requestRef.current) return;
+        if (
+          !mountedRef.current ||
+          requestId !== requestRef.current ||
+          (section === 'settled' &&
+            requestRefreshKey !== undefined &&
+            requestRefreshKey !== settledRefreshKeyRef.current)
+        )
+          return;
         setState((current) => ({
           ...current,
           loading: false,
@@ -112,9 +130,7 @@ export function PaymentLedgerSection({ refreshKey }: { refreshKey: number }): JS
   }, []);
 
   React.useEffect(() => {
-    if (settledRefreshKeyRef.current === refreshKey) return;
-    settledRefreshKeyRef.current = refreshKey;
-    void loadSection('settled', null, true);
+    void loadSection('settled', null, true, refreshKey);
   }, [loadSection, refreshKey]);
 
   React.useEffect(() => {
