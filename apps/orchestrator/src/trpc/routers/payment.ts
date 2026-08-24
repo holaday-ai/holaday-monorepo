@@ -263,7 +263,8 @@ export const paymentRouter = router({
       .limit(input.limit + 1);
 
     const safeRows = rows.filter(
-      (row) => row.userExternalId === ctx.userId && statuses.some((status) => status === row.status),
+      (row) =>
+        row.userExternalId === ctx.userId && statuses.some((status) => status === row.status),
     );
     const hasMore = safeRows.length > input.limit;
     const page = safeRows.slice(0, input.limit);
@@ -282,8 +283,7 @@ export const paymentRouter = router({
 
     return {
       items,
-      nextCursor:
-        hasMore && last ? { createdAt: last.createdAt, orderId: last.orderId } : null,
+      nextCursor: hasMore && last ? { createdAt: last.createdAt, orderId: last.orderId } : null,
     };
   }),
   history: protectedProcedure.query(async ({ ctx }) => {

@@ -92,4 +92,3 @@ describe('BillingPage payment ledger integration', () => {
     expect(historyQuery).not.toHaveBeenCalled();
   });
 });
-

@@ -949,10 +949,7 @@ describe('ledger — paginated customer payment records', () => {
       .createCaller(mock.ctx)
       .ledger({ section: 'settled', limit: 2 });
 
-    expect(settled.items.map((row) => row.orderId)).toEqual([
-      'pay_completed',
-      'pay_refunded',
-    ]);
+    expect(settled.items.map((row) => row.orderId)).toEqual(['pay_completed', 'pay_refunded']);
     expect(settled.nextCursor).toEqual({
       createdAt: '2026-08-04T14:00:00.000Z',
       orderId: 'pay_refunded',
@@ -980,9 +977,7 @@ describe('ledger — paginated customer payment records', () => {
 
   it('keeps unfinished attempts separate and excludes another account', async () => {
     const mock = makeLedgerCtx();
-    const unfinished = await paymentRouter
-      .createCaller(mock.ctx)
-      .ledger({ section: 'unfinished' });
+    const unfinished = await paymentRouter.createCaller(mock.ctx).ledger({ section: 'unfinished' });
 
     expect(unfinished.items.map((row) => [row.orderId, row.status])).toEqual([
       ['pay_pending', 'pending'],

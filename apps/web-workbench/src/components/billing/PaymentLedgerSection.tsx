@@ -42,6 +42,7 @@ export function PaymentLedgerSection({ refreshKey }: { refreshKey: number }): JS
   const mountedRef = React.useRef(false);
   const settledRequestRef = React.useRef(0);
   const unfinishedRequestRef = React.useRef(0);
+  const settledRefreshKeyRef = React.useRef<number | null>(null);
   const copyTimerRef = React.useRef<number | null>(null);
   const [settled, setSettled] = React.useState<LedgerState>({
     ...EMPTY_LEDGER_STATE,
@@ -79,9 +80,7 @@ export function PaymentLedgerSection({ refreshKey }: { refreshKey: number }): JS
         const page = normalizeBillingPaymentPage(rawPage, section);
         if (!mountedRef.current || requestId !== requestRef.current) return;
         setState((current) => ({
-          items: replace
-            ? page.items
-            : appendBillingPaymentPage(current.items, page.items),
+          items: replace ? page.items : appendBillingPaymentPage(current.items, page.items),
           nextCursor: page.nextCursor,
           loading: false,
           loadingMore: false,
@@ -113,6 +112,8 @@ export function PaymentLedgerSection({ refreshKey }: { refreshKey: number }): JS
   }, []);
 
   React.useEffect(() => {
+    if (settledRefreshKeyRef.current === refreshKey) return;
+    settledRefreshKeyRef.current = refreshKey;
     void loadSection('settled', null, true);
   }, [loadSection, refreshKey]);
 
@@ -237,7 +238,10 @@ function PaymentList({
     return (
       <div className="space-y-3" aria-label={`${listLabel}加载中`} aria-live="polite">
         {[0, 1, 2].map((item) => (
-          <div key={item} className="hola-skel h-[92px] rounded-[6px] bg-[#EFEFEF]/80 sm:h-[76px]" />
+          <div
+            key={item}
+            className="hola-skel h-[92px] rounded-[6px] bg-[#EFEFEF]/80 sm:h-[76px]"
+          />
         ))}
       </div>
     );
@@ -290,7 +294,10 @@ function PaymentList({
       </div>
 
       {(state.nextCursor || state.loadingMore || state.error) && (
-        <div className="flex min-h-11 flex-col items-center justify-center gap-1 pt-3" aria-live="polite">
+        <div
+          className="flex min-h-11 flex-col items-center justify-center gap-1 pt-3"
+          aria-live="polite"
+        >
           {state.error ? (
             <>
               <span className="text-[11px] text-amber-700">{loadMoreErrorTitle}</span>
@@ -398,7 +405,9 @@ function PaymentRow({
           {billingPaymentAmount(record.amountCents, record.currency)}
         </span>
         <div className="hidden min-w-0 flex-col items-end gap-1 sm:flex">
-          <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${statusClass}`}>
+          <span
+            className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${statusClass}`}
+          >
             {status.label}
           </span>
           <span className="max-w-[220px] text-[10px] leading-4 text-muted-foreground">

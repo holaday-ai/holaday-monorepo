@@ -77,9 +77,7 @@ describe('PaymentLedgerSection', () => {
     expect(disclosure.getAttribute('aria-expanded')).toBe('false');
     await user.click(disclosure);
 
-    expect(
-      (await screen.findAllByText('没有确认扣款，可重新发起支付')).length,
-    ).toBeGreaterThan(0);
+    expect((await screen.findAllByText('没有确认扣款，可重新发起支付')).length).toBeGreaterThan(0);
     expect(disclosure.getAttribute('aria-expanded')).toBe('true');
     expect(ledgerQuery).toHaveBeenCalledWith({ section: 'unfinished', limit: 10 });
   });
@@ -89,13 +87,11 @@ describe('PaymentLedgerSection', () => {
       createdAt: settledRecord.createdAt,
       orderId: settledRecord.orderId,
     };
-    ledgerQuery.mockImplementation(
-      async (input: { section: string; cursor?: typeof cursor }) => {
-        if (input.section === 'unfinished') return { items: [], nextCursor: null };
-        if (input.cursor) return { items: [refundedRecord], nextCursor: null };
-        return { items: [settledRecord], nextCursor: cursor };
-      },
-    );
+    ledgerQuery.mockImplementation(async (input: { section: string; cursor?: typeof cursor }) => {
+      if (input.section === 'unfinished') return { items: [], nextCursor: null };
+      if (input.cursor) return { items: [refundedRecord], nextCursor: null };
+      return { items: [settledRecord], nextCursor: cursor };
+    });
     const user = userEvent.setup();
     const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined);
 
@@ -181,8 +177,6 @@ describe('PaymentLedgerSection', () => {
     view.rerender(<PaymentLedgerSection refreshKey={1} />);
     resolveUnfinished?.({ items: [unfinishedRecord], nextCursor: null });
 
-    expect(
-      (await screen.findAllByText('没有确认扣款，可重新发起支付')).length,
-    ).toBeGreaterThan(0);
+    expect((await screen.findAllByText('没有确认扣款，可重新发起支付')).length).toBeGreaterThan(0);
   });
 });
