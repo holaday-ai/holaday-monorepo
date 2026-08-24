@@ -104,13 +104,16 @@ export function PaymentLedgerSection({ refreshKey }: { refreshKey: number }): JS
 
   React.useEffect(() => {
     mountedRef.current = true;
-    void loadSection('settled', null, true);
     return () => {
       mountedRef.current = false;
       settledRequestRef.current += 1;
       unfinishedRequestRef.current += 1;
       if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
     };
+  }, []);
+
+  React.useEffect(() => {
+    void loadSection('settled', null, true);
   }, [loadSection, refreshKey]);
 
   React.useEffect(() => {
@@ -409,4 +412,3 @@ function PaymentRow({
     </article>
   );
 }
-

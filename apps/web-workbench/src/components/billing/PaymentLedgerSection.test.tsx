@@ -162,4 +162,27 @@ describe('PaymentLedgerSection', () => {
       expect.objectContaining({ section: 'unfinished' }),
     );
   });
+
+  it('does not strand an unfinished request when settled records refresh', async () => {
+    let resolveUnfinished: ((value: unknown) => void) | undefined;
+    ledgerQuery.mockImplementation(async (input: { section: string }) => {
+      if (input.section === 'settled') return { items: [settledRecord], nextCursor: null };
+      return new Promise((resolve) => {
+        resolveUnfinished = resolve;
+      });
+    });
+    const user = userEvent.setup();
+
+    const view = render(<PaymentLedgerSection refreshKey={0} />);
+    expect(await screen.findByText('Basic 套餐')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: /查看未完成支付/ }));
+    await waitFor(() => expect(resolveUnfinished).toBeTypeOf('function'));
+
+    view.rerender(<PaymentLedgerSection refreshKey={1} />);
+    resolveUnfinished?.({ items: [unfinishedRecord], nextCursor: null });
+
+    expect(
+      (await screen.findAllByText('没有确认扣款，可重新发起支付')).length,
+    ).toBeGreaterThan(0);
+  });
 });
