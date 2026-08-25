@@ -99,7 +99,10 @@ test('runs the ops release gate before uploading', () => {
 
 test('publishes the Aliyun SPA through the atomic edge release path', () => {
   assert.match(spaDeployScript, /ALIYUN_EDGE_DEPLOY=.*ops\/aliyun-edge\/deploy\.sh/);
-  assert.match(spaDeployScript, /"\$PORTABLE_TAR_SCRIPT" "\$TARBALL" -C apps\/web-workbench dist/);
+  assert.match(
+    spaDeployScript,
+    /"\$PORTABLE_TAR_SCRIPT" "\$TARBALL" apps\/web-workbench\/dist apps\/holaday-landing "\$VULTR_WEB_SWITCH_SCRIPT"/,
+  );
   assert.match(deployScript, /DEFAULT_RELEASE_ID="\$\(date -u \+%Y%m%d%H%M%S\)-\$\$"/);
   assert.match(deployScript, /RELEASE_ID="\$\{HOLADAY_EDGE_RELEASE_ID:-\$DEFAULT_RELEASE_ID\}"/);
   assert.match(spaDeployScript, /ALIYUN_RELEASE_ID="\$\(date -u \+%Y%m%d%H%M%S\)-\$\$"/);
@@ -124,18 +127,39 @@ test('publishes the Aliyun SPA through the atomic edge release path', () => {
   assert.doesNotMatch(spaDeployScript, /\/opt\/holaday-spa\/dist/);
 });
 
-test('keeps the Vultr backup, switch, smoke, and rollback sequence intact', () => {
+test('keeps the Vultr web switch, smoke, and rollback sequence intact', () => {
   const upload = spaDeployScript.indexOf('echo "→ Uploading tarball to Vultr"');
-  const stage = spaDeployScript.indexOf('echo "→ Staging Vultr dist"', upload);
-  const swap = spaDeployScript.indexOf('echo "→ Switching Vultr dist"', stage);
+  const stage = spaDeployScript.indexOf('echo "→ Staging Vultr web release"', upload);
+  const swap = spaDeployScript.indexOf('echo "→ Switching Vultr web release"', stage);
   const smoke = spaDeployScript.indexOf('echo "→ Vultr smoke check', swap);
-  const rollback = spaDeployScript.indexOf('"Vultr rollback"', smoke);
+  const legalSmoke = spaDeployScript.indexOf('echo "→ Vultr legal-page smoke check', smoke);
+  const rollback = spaDeployScript.indexOf('rollback_vultr_web', legalSmoke);
 
   assert.ok(upload >= 0, 'missing Vultr upload');
   assert.ok(stage > upload, 'Vultr stage must follow upload');
   assert.ok(swap > stage, 'Vultr switch must follow stage');
   assert.ok(smoke > swap, 'Vultr smoke must follow switch');
-  assert.ok(rollback > smoke, 'Vultr rollback must remain after smoke failure');
+  assert.ok(legalSmoke > smoke, 'Vultr legal smoke must follow SPA smoke');
+  assert.ok(rollback > legalSmoke, 'Vultr rollback must remain after smoke failure');
+});
+
+test('publishes the Vultr SPA and landing site as one rollback unit', () => {
+  assert.match(spaDeployScript, /VULTR_LANDING_PATH="\/opt\/holaday-landing"/);
+  assert.match(spaDeployScript, /VULTR_WEB_SWITCH_SCRIPT=.*switch-vultr-web-release\.sh/);
+  assert.match(
+    spaDeployScript,
+    /apps\/web-workbench\/dist apps\/holaday-landing "\$VULTR_WEB_SWITCH_SCRIPT"/,
+  );
+
+  const switchStep = spaDeployScript.indexOf('echo "→ Switching Vultr web release"');
+  const spaSmoke = spaDeployScript.indexOf('echo "→ Vultr smoke check', switchStep);
+  const legalSmoke = spaDeployScript.indexOf('echo "→ Vultr legal-page smoke check', spaSmoke);
+  const rollback = spaDeployScript.indexOf('rollback_vultr_web', legalSmoke);
+
+  assert.ok(switchStep >= 0, 'missing combined Vultr web switch');
+  assert.ok(spaSmoke > switchStep, 'SPA smoke must follow the combined switch');
+  assert.ok(legalSmoke > spaSmoke, 'legal-page smoke must follow the SPA smoke');
+  assert.ok(rollback > legalSmoke, 'combined rollback must remain after legal smoke failure');
 });
 
 test('supports password deployment on macOS without exposing the password', () => {
