@@ -53,6 +53,14 @@ const DATA_CATEGORIES: DataCategory[] = [
     retention: '套餐天数只控制可见历史；实际按数据类别和申请处理',
   },
   {
+    label: '跨任务 AI 记忆',
+    data: '从已完成任务的任务指令与结果摘要中提取的偏好、网站状态、任务历史与执行建议',
+    purpose: '在后续相关任务中提供个性化上下文',
+    processors: 'HOLA DAY；启用 Anthropic 时由 Anthropic 完成提取',
+    retention:
+      '偏好可能长期保留；其他条目按提取时设置的期限或长期状态保存；可在“设置 > AI 记忆”逐条删除或清空全部',
+  },
+  {
     label: '扩展常用网站',
     data: '最近 30 天访问记录在设备端汇总后的域名、访问次数与最近访问时间',
     purpose: '优先准备常用站点配置',
@@ -316,7 +324,7 @@ export function PrivacyPage(): JSX.Element {
             也可能在中国大陆以外处理。我们不会把下列服务写成每次任务都会使用；启用需要单独同意的处理时，
             我们会按适用法律取得相应同意。
           </p>
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2">
             <ProviderGroup title="基础设施与存储" providers="Vultr · Cloudflare R2 · Aliyun">
               用于计算、数据库、静态内容分发、文件存储和必要的网络服务。
             </ProviderGroup>
@@ -331,6 +339,10 @@ export function PrivacyPage(): JSX.Element {
               providers="Google · Resend · 短信网关 · PayPal · 中国支付服务"
             >
               用于第三方登录、验证码、服务邮件、收款、权益发放、退款与争议处理。
+            </ProviderGroup>
+            <ProviderGroup title="自动化连接" providers="Zapier">
+              仅在相关配置已启用且任务被识别为跨平台自动化时，将任务指令和任务标识发送至配置的
+              webhook，以触发工作流。
             </ProviderGroup>
           </div>
           <div className="mt-4 rounded-[8px] bg-[#F7F7F7] px-4 py-3 text-xs leading-relaxed text-muted-foreground dark:bg-muted">

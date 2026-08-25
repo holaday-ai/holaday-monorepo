@@ -37,6 +37,9 @@ describe('PrivacyPage truth contract', () => {
     expectText(/可能在中国大陆以外处理/);
     expectText(/Apify/);
     expectText(/网页地址与检索条件/);
+    expectText(/Zapier/);
+    expectText(/任务指令和任务标识/);
+    expectText(/跨平台自动化/);
     const privacyLinks = screen.getAllByRole('link', { name: 'privacy@holaday.ai' });
     expect(privacyLinks.length).toBeGreaterThan(0);
     for (const link of privacyLinks) {
@@ -44,6 +47,16 @@ describe('PrivacyPage truth contract', () => {
     }
     expectText(/邮件是申请入口，不代表即时或自动完成/);
     expectText(/交易、安全、争议或审计记录/);
+  });
+
+  it('discloses automatic cross-task memory, retention, reuse, and deletion controls', () => {
+    renderPrivacy();
+
+    expectText(/跨任务 AI 记忆/);
+    expectText(/任务指令与结果摘要/);
+    expectText(/后续相关任务/);
+    expectText(/偏好可能长期保留/);
+    expectText(/逐条删除或清空全部/);
   });
 
   it('states the implemented account and payment boundaries', () => {

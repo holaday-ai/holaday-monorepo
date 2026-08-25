@@ -217,15 +217,16 @@ const POLICY_NAV: ReadonlyArray<{ id: PrivacySectionId; label: string }> = [
 ];
 ```
 
-Define seven `DataCategory` rows for:
+Define eight `DataCategory` rows for:
 
 1. `账号与安全` — email/phone/display name/avatar/password hash/MFA/session;
 2. `任务与执行` — intent/plan/steps/result/screenshots/page context/files/errors;
-3. `扩展常用网站` — domain/visit count/last-visit time only;
-4. `扩展登录态` — allowlisted real Cookie values;
-5. `支付与套餐` — order/provider identifiers/amount/currency/purchase/status/payer email;
-6. `媒体素材` — user images/video/audio/voice-clone identifier/consent time;
-7. `分析与日志` — bounded event aggregates/anonymous digests/IP/UA/operation/error context.
+3. `跨任务 AI 记忆` — extracted preference/site state/task history/execution tips, later-task reuse, retention state and settings deletion controls;
+4. `扩展常用网站` — domain/visit count/last-visit time only;
+5. `扩展登录态` — allowlisted real Cookie values;
+6. `支付与套餐` — order/provider identifiers/amount/currency/purchase/status/payer email;
+7. `媒体素材` — user images/video/audio/voice-clone identifier/consent time;
+8. `分析与日志` — bounded event aggregates/anonymous digests/IP/UA/operation/error context.
 
 Do not put host IPs, env keys, schema names, retention defaults, or internal IDs in the arrays.
 
@@ -291,7 +292,7 @@ Keep the table available in the accessibility tree on desktop. The mobile cards 
 Use these exact factual boundaries:
 
 - `extension`: clearly separate domain aggregates from real Cookie values and mention server allowlisting; stopping/uninstalling prevents future access but does not automatically delete received data.
-- `providers`: say use depends on the feature and current service configuration. Group the verified provider names by function: infrastructure/storage (`Vultr`, `Cloudflare R2`, `Aliyun`); AI/scraping/media (`Anthropic`, `Google`, `OpenAI`, `Alibaba Cloud DashScope`, `fal.ai`, `Firecrawl`, `Apify`, `DivineAPI`); identity/communications/payments (`Google`, `Resend`, SMS gateway, `PayPal` or China payment provider). State only the minimum data needed for the requested feature is sent and that processing may occur outside mainland China.
+- `providers`: say use depends on the feature and current service configuration. Group the verified provider names by function: infrastructure/storage (`Vultr`, `Cloudflare R2`, `Aliyun`); AI/scraping/media (`Anthropic`, `Google`, `OpenAI`, `Alibaba Cloud DashScope`, `fal.ai`, `Firecrawl`, `Apify`, `DivineAPI`); automation (`Zapier`); identity/communications/payments (`Google`, `Resend`, SMS gateway, `PayPal` or China payment provider). Disclose that the configured Zapier path receives task intent and task ID for cross-platform automation. State only the minimum data needed for the requested feature is sent and that processing may occur outside mainland China.
 - `retention`: say 7/30/90 days is default task-history visibility, not server deletion; files follow visible expiry; common-site aggregates are replaced by the next successful sync; pending Cookies are injected immediately or held for the next browser injection; transaction/security/dispute/audit records follow necessary legal and operational criteria; do not give a universal log deadline.
 - `rights`: list access/copy/correction/deletion/withdrawal/restriction/objection/complaint subject to applicable law; identify email as the current intake; explain identity verification and lawful retention exceptions.
 - `security`: describe Argon2id-equivalent wording as “不可逆单向哈希”, MFA secret encryption, transport/access control and sensitive-header redaction; state no security method is absolute and do not claim all stored data is encrypted.
@@ -439,7 +440,7 @@ git commit -m "fix(settings): clarify account deletion request scope"
 
 - [ ] **Step 1: Add a failing static-content contract**
 
-Require the implemented password, retention, extension, Apify, rights and manual-renewal boundaries; reject the old fixed deletion/log deadlines, automatic-renewal cancellation and Singapore-jurisdiction claims.
+Require the implemented password, retention, extension, cross-task memory, Apify, Zapier, rights and manual-renewal boundaries; reject the old fixed deletion/log deadlines, automatic-renewal cancellation and Singapore-jurisdiction claims.
 
 - [ ] **Step 2: Rebuild the landing privacy content**
 
