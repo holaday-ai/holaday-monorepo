@@ -84,8 +84,8 @@ const DATA_CATEGORIES: DataCategory[] = [
   },
   {
     label: '扩展登录态',
-    data: '您授权的白名单网站的真实 Cookie 值',
-    purpose: '让 HOLA DAY 任务浏览器继承已授权登录状态',
+    data: '扩展在登录状态下对固定同步域名清单读取的 Cookie 名称、值、域名、路径、安全与同站标记及到期时间',
+    purpose: '让 HOLA DAY 任务浏览器继承 Chrome 中已有的登录状态',
     processors: 'HOLA DAY 浏览器执行环境',
     retention: '有可用浏览器时即时注入，否则暂存至下一次注入',
   },
@@ -121,7 +121,7 @@ const SUMMARY_ITEMS = [
   {
     number: '02',
     title: '扩展数据分两类',
-    body: '常用网站是域名级聚合；登录态同步则会处理您授权站点的真实 Cookie 值。',
+    body: '常用网站是域名级聚合；登录扩展后，固定同步域名清单内的真实 Cookie 值会自动同步。',
   },
   {
     number: '03',
@@ -316,15 +316,16 @@ export function PrivacyPage(): JSX.Element {
               <p className="text-[11px] font-medium text-[#7655A6] dark:text-[#CDB9F1]">
                 登录态同步
               </p>
-              <h3 className="mt-1 text-sm font-semibold">会处理真实 Cookie 值</h3>
+              <h3 className="mt-1 text-sm font-semibold">登录扩展后自动同步固定白名单内的真实 Cookie 值</h3>
               <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                仅接收服务端白名单内、由您授权的网站 Cookie，用于让您发起的 HOLA DAY
-                浏览器任务继承登录状态。 我们不将其出售、用于广告画像或共享给其他用户。
+                当扩展保存有有效 HOLA DAY 登录令牌时，会在服务器连接成功时触发同步，并在后台闹钟路径约每
+                30 分钟再次尝试。扩展读取固定同步域名清单中 Chrome 可访问的 Cookie 名称、值、域名、路径、
+                安全与同站标记及到期时间（最多 500 条）；服务端白名单仍会拒绝不支持的域名。当前没有逐站点开关。
               </p>
             </article>
           </div>
           <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
-            停用或卸载扩展可以阻止未来读取，但不会自动删除服务器已经收到的数据；您可以通过下方渠道申请处理。
+            退出 HOLA DAY 登录、停用或卸载扩展可以阻止未来同步，但不会自动删除服务器已经收到的数据；您可以通过下方渠道申请处理。
           </p>
         </Section>
 

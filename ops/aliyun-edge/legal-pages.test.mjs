@@ -17,6 +17,13 @@ test('public landing privacy page states implemented data boundaries', () => {
     '不可逆单向哈希',
     '不是服务器删除期限',
     '真实 Cookie 值',
+    '登录扩展后自动同步',
+    '服务器连接成功',
+    '约每 30 分钟',
+    '固定同步域名清单',
+    'Cookie 名称、值、域名、路径',
+    '当前没有逐站点开关',
+    '退出 HOLA DAY 登录、停用或卸载扩展',
     'Apify',
     '网页地址与检索条件',
     'Zapier',
@@ -82,6 +89,8 @@ test('public landing privacy page excludes unsupported promises', () => {
     '系统日志：90 天',
     '使用本服务即视为同意相关第三方处理',
     '继续使用本服务即视为接受更新后的政策',
+    '您授权的白名单网站',
+    '由您授权的网站 Cookie',
   ]) {
     assert.doesNotMatch(privacy, new RegExp(forbidden), `unsupported privacy copy: ${forbidden}`);
   }

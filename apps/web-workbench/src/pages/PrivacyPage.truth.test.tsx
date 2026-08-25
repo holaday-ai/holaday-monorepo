@@ -28,6 +28,13 @@ describe('PrivacyPage truth contract', () => {
     expectText(/不上传完整 URL、查询参数、网页标题或历史页面正文/);
     expectText(/真实 Cookie 值/);
     expectText(/服务端白名单/);
+    expectText(/登录扩展后自动同步/);
+    expectText(/服务器连接成功/);
+    expectText(/约每 30 分钟/);
+    expectText(/固定同步域名清单/);
+    expectText(/Cookie 名称、值、域名、路径/);
+    expectText(/当前没有逐站点开关/);
+    expectText(/退出 HOLA DAY 登录、停用或卸载扩展/);
   });
 
   it('describes feature-dependent external processing and a mail-based rights request', () => {
@@ -103,6 +110,8 @@ describe('PrivacyPage truth contract', () => {
       '持续使用本服务即视为接受',
       '完全合规',
       '按月自动续费',
+      '您授权的白名单网站',
+      '由您授权的网站 Cookie',
     ]) {
       expect(body).not.toContain(forbidden);
     }
