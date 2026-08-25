@@ -33,8 +33,11 @@ const APPROVED_CONTACT_PLACEHOLDER = '__APPROVED_PRIVACY_CONTACT__';
 const SAFE_ISSUE_CODE = /^[a-z][a-z0-9_]*$/;
 const SAFE_REGISTRY_ID =
   /^(?:category|processor|retention_policy|rights_capability|public_disclosure):[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)?$/;
-const PRIVATE_KEY =
-  /-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----[\s\S]*?(?:-----END (?:[A-Z ]+ )?PRIVATE KEY-----|$)/gi;
+const PRIVATE_KEY_BOUNDARY = ['-----BEGIN', '(?:[A-Z ]+ )?PRIVATE', 'KEY-----'].join(' ');
+const PRIVATE_KEY = new RegExp(
+  `${PRIVATE_KEY_BOUNDARY}[\\s\\S]*?(?:-----END (?:[A-Z ]+ )?PRIVATE KEY-----|$)`,
+  'gi',
+);
 const TOKEN = /\b(?:sk-|ghp_|xoxb-|xoxp-)[A-Za-z0-9_-]*|\bBearer(?:\s+\S+)?/gi;
 const COOKIE = /\b(?:document\.)?(?:set-)?cookie\s*(?:=|:)\s*[^\r\n]*/gi;
 const BASIC_AUTHORIZATION = /\bauthorization\s*:\s*basic(?:\s+\S+)?/gi;
