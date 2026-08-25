@@ -192,7 +192,7 @@ function ProviderGroup({
   return (
     <article className="rounded-[8px] border border-[#E8E8E8] bg-[#FAFAFA] p-4 dark:border-white/10 dark:bg-white/[0.04]">
       <h3 className="text-sm font-semibold text-foreground">{title}</h3>
-      <p className="mt-1 text-xs font-medium text-[#6D55A5]">{providers}</p>
+      <p className="mt-1 text-xs font-medium text-[#6D55A5] dark:text-[#CDB9F1]">{providers}</p>
       <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{children}</p>
     </article>
   );
@@ -212,7 +212,9 @@ export function PrivacyPage(): JSX.Element {
           className="rounded-[8px] border border-[#DED8EA] bg-gradient-to-br from-[#FBF9FF] via-white to-[#F7FBFF] p-5 shadow-[0_1px_2px_rgba(15,23,42,0.03)] dark:border-border dark:from-[#1A1720] dark:via-card dark:to-[#12191B] sm:p-6"
         >
           <div className="max-w-2xl">
-            <p className="text-xs font-medium tracking-wide text-[#7655A6]">阅读约 6 分钟</p>
+            <p className="text-xs font-medium tracking-wide text-[#7655A6] dark:text-[#CDB9F1]">
+              阅读约 6 分钟
+            </p>
             <h2 id="summary-heading" className="mt-1 text-lg font-semibold tracking-tight">
               先看重点
             </h2>
@@ -248,7 +250,7 @@ export function PrivacyPage(): JSX.Element {
               <a
                 key={item.id}
                 href={`#${item.id}`}
-                className="text-xs font-medium text-foreground underline decoration-[#CFC4E3] decoration-1 underline-offset-4 transition-colors hover:text-[#6F52A3]"
+                className="text-xs font-medium text-foreground underline decoration-[#CFC4E3] decoration-1 underline-offset-4 transition-colors hover:text-[#6F52A3] dark:hover:text-[#CDB9F1]"
               >
                 {item.label}
               </a>
@@ -278,7 +280,9 @@ export function PrivacyPage(): JSX.Element {
         >
           <div className="grid gap-3 sm:grid-cols-2">
             <article className="rounded-[8px] border border-[#DCE8E5] bg-[#F6FBFA] p-4 dark:border-[#377F70]/30 dark:bg-[#377F70]/10">
-              <p className="text-[11px] font-medium text-[#377F70]">常用网站统计</p>
+              <p className="text-[11px] font-medium text-[#377F70] dark:text-[#8BD3C4]">
+                常用网站统计
+              </p>
               <h3 className="mt-1 text-sm font-semibold">只上传域名级聚合</h3>
               <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
                 扩展在您的设备上汇总最近 30 天记录，只发送域名、访问次数和最近访问时间； 不上传完整
@@ -286,7 +290,9 @@ export function PrivacyPage(): JSX.Element {
               </p>
             </article>
             <article className="rounded-[8px] border border-[#E6DDF3] bg-[#FBF8FF] p-4 dark:border-[#7655A6]/35 dark:bg-[#7655A6]/10">
-              <p className="text-[11px] font-medium text-[#7655A6]">登录态同步</p>
+              <p className="text-[11px] font-medium text-[#7655A6] dark:text-[#CDB9F1]">
+                登录态同步
+              </p>
               <h3 className="mt-1 text-sm font-semibold">会处理真实 Cookie 值</h3>
               <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
                 仅接收服务端白名单内、由您授权的网站 Cookie，用于让您发起的 HOLA DAY
@@ -368,7 +374,7 @@ export function PrivacyPage(): JSX.Element {
           <p className="text-xs leading-relaxed text-muted-foreground">
             当前请发送邮件至{' '}
             <a
-              className="font-medium text-[#6F52A3] underline underline-offset-4"
+              className="font-medium text-[#6F52A3] underline underline-offset-4 dark:text-[#CDB9F1]"
               href="mailto:privacy@holaday.ai"
             >
               privacy@holaday.ai
@@ -410,7 +416,7 @@ export function PrivacyPage(): JSX.Element {
             <p>
               隐私与个人信息申请：{' '}
               <a
-                className="font-medium text-[#6F52A3] underline underline-offset-4"
+                className="font-medium text-[#6F52A3] underline underline-offset-4 dark:text-[#CDB9F1]"
                 href="mailto:privacy@holaday.ai"
               >
                 privacy@holaday.ai
@@ -419,7 +425,7 @@ export function PrivacyPage(): JSX.Element {
             <p>
               一般支持：{' '}
               <a
-                className="font-medium text-[#6F52A3] underline underline-offset-4"
+                className="font-medium text-[#6F52A3] underline underline-offset-4 dark:text-[#CDB9F1]"
                 href="mailto:support@holaday.ai"
               >
                 support@holaday.ai
@@ -427,7 +433,10 @@ export function PrivacyPage(): JSX.Element {
             </p>
             <p>
               同时请查阅{' '}
-              <Link className="font-medium text-[#6F52A3] underline underline-offset-4" to="/terms">
+              <Link
+                className="font-medium text-[#6F52A3] underline underline-offset-4 dark:text-[#CDB9F1]"
+                to="/terms"
+              >
                 服务条款
               </Link>
               。
