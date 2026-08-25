@@ -178,7 +178,9 @@ export function StockPreferenceProfile({
             <h2 className="text-[16px] font-semibold tracking-[-0.01em] text-[#121826]">
               你的选股偏好
             </h2>
-            {profile ? <ConfidenceBadge profile={profile} /> : null}
+            {profile && profile.state !== 'disabled' ? (
+              <ConfidenceBadge profile={profile} />
+            ) : null}
           </div>
           <p className="mt-2 max-w-[680px] text-[12px] leading-5 text-[#667085]">
             汇总你主动设置、成功筛选和清空后新增关注的可核验迹象，只描述研究习惯，不推断投资者类型或风险承受能力。

@@ -256,6 +256,7 @@ describe('StockPreferenceProfile', () => {
 
     render(<StockPreferenceProfile api={apiFor(profile({ state: 'disabled', enabled: false }))} />);
     expect(await screen.findByText('选股偏好已暂停')).toBeTruthy();
+    expect(screen.queryByText('中置信度')).toBeNull();
     expect(screen.getByRole('button', { name: '重新开启' })).toBeTruthy();
     cleanup();
 
