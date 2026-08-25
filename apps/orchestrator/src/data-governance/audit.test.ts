@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { auditGovernanceRegistry } from './audit.js';
@@ -102,6 +105,12 @@ function validBundle(): GovernanceRegistryBundle {
   };
 }
 
+function first<T>(items: T[]): T {
+  const item = items[0];
+  if (!item) throw new Error('Test fixture unexpectedly has no entry.');
+  return item;
+}
+
 describe('auditGovernanceRegistry', () => {
   it('accepts a structurally complete registry without reading runtime data', () => {
     const report = auditGovernanceRegistry(validBundle(), { verifyEvidenceFiles: false });
@@ -113,12 +122,23 @@ describe('auditGovernanceRegistry', () => {
     );
   });
 
+  it('requires evidence even when source-file verification is disabled', () => {
+    const bundle = validBundle();
+    first(bundle.categories).evidence = [];
+
+    expect(auditGovernanceRegistry(bundle, { verifyEvidenceFiles: false }).issues).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: 'missing_evidence' })]),
+    );
+  });
+
   it('rejects duplicate ids, dangling references, and implemented rights without handlers', () => {
     const bundle = validBundle();
-    bundle.categories = [...bundle.categories, bundle.categories[0]!];
-    bundle.categories[0] = { ...bundle.categories[0]!, processorIds: ['missing_processor'] };
+    const category = first(bundle.categories);
+    bundle.categories = [...bundle.categories, category];
+    Reflect.set(category, 'processorIds', ['missing_processor']);
+    const rightsCapability = first(bundle.rightsCapabilities);
     bundle.rightsCapabilities[0] = {
-      ...bundle.rightsCapabilities[0]!,
+      ...rightsCapability,
       export: { status: 'implemented', scope: '导出', limitations: [], evidence },
     };
     const report = auditGovernanceRegistry(bundle, { verifyEvidenceFiles: false });
@@ -130,15 +150,17 @@ describe('auditGovernanceRegistry', () => {
 
   it('rejects suspicious secret values but permits configuration key names', () => {
     const safe = validBundle();
+    const processor = first(safe.processors);
     safe.processors[0] = {
-      ...safe.processors[0]!,
-      activation: { ...safe.processors[0]!.activation, configKeys: ['RESEND_API_KEY'] },
+      ...processor,
+      activation: { ...processor.activation, configKeys: ['RESEND_API_KEY'] },
     };
     expect(auditGovernanceRegistry(safe, { verifyEvidenceFiles: false }).ok).toBe(true);
 
     const unsafe = validBundle();
+    const category = first(unsafe.categories);
     unsafe.categories[0] = {
-      ...unsafe.categories[0]!,
+      ...category,
       description: 'sk-live-secret-example-123456789',
     };
     expect(auditGovernanceRegistry(unsafe, { verifyEvidenceFiles: false }).issues).toEqual(
@@ -148,10 +170,10 @@ describe('auditGovernanceRegistry', () => {
 
   it('enforces ids, bidirectional processors, retention rules, and disclosure cardinality', () => {
     const bundle = validBundle();
-    Reflect.set(bundle.categories[0]!, 'id', 'Account Security');
-    bundle.processors[0]!.categoryIds = [];
-    bundle.retentionPolicies[0]!.rule = { kind: 'fixed_days', days: 0 };
-    bundle.publicDisclosures.push(bundle.publicDisclosures[0]!);
+    Reflect.set(first(bundle.categories), 'id', 'Account Security');
+    first(bundle.processors).categoryIds = [];
+    first(bundle.retentionPolicies).rule = { kind: 'fixed_days', days: 0 };
+    bundle.publicDisclosures.push(first(bundle.publicDisclosures));
     const report = auditGovernanceRegistry(bundle, {
       verifyEvidenceFiles: false,
       requirePublicDisclosures: true,
@@ -168,7 +190,7 @@ describe('auditGovernanceRegistry', () => {
 
   it('verifies exported symbols without reading runtime data', () => {
     const bundle = validBundle();
-    bundle.categories[0]!.evidence = [
+    first(bundle.categories).evidence = [
       {
         kind: 'exported_symbol',
         path: 'apps/orchestrator/src/db/schema/users.ts',
@@ -181,4 +203,77 @@ describe('auditGovernanceRegistry', () => {
       expect.arrayContaining([expect.objectContaining({ code: 'evidence_symbol_missing' })]),
     );
   });
+
+  it.each(['/tmp/file#symbol', '../file#symbol'])(
+    'rejects non-repository-relative implemented handler %s',
+    (handlerRef) => {
+      const bundle = validBundle();
+      const rightsCapability = first(bundle.rightsCapabilities);
+      rightsCapability.export = {
+        status: 'implemented',
+        handlerRef,
+        scope: '导出',
+        limitations: [],
+        evidence,
+      };
+
+      expect(
+        auditGovernanceRegistry(bundle, { repoRoot, verifyEvidenceFiles: false }).issues,
+      ).toEqual(
+        expect.arrayContaining([expect.objectContaining({ code: 'implemented_handler_missing' })]),
+      );
+    },
+  );
+
+  it('rejects evidence symlinks whose canonical target escapes repoRoot', () => {
+    const temporaryRoot = mkdtempSync(join(tmpdir(), 'governance-root-'));
+    const externalRoot = mkdtempSync(join(tmpdir(), 'governance-external-'));
+    try {
+      const sourcePath = join(temporaryRoot, 'apps/orchestrator/src/db/schema/users.ts');
+      mkdirSync(join(temporaryRoot, 'apps/orchestrator/src/db/schema'), { recursive: true });
+      writeFileSync(sourcePath, 'export const userSchema = true;');
+      const externalSource = join(externalRoot, 'external.ts');
+      writeFileSync(externalSource, 'export const externalEvidence = true;');
+      symlinkSync(externalSource, join(temporaryRoot, 'linked.ts'));
+
+      const bundle = validBundle();
+      first(bundle.categories).evidence = [
+        {
+          kind: 'exported_symbol',
+          path: 'linked.ts',
+          symbol: 'externalEvidence',
+          fact: '外部符号',
+        },
+      ];
+
+      const report = auditGovernanceRegistry(bundle, {
+        repoRoot: temporaryRoot,
+        verifyEvidenceFiles: true,
+      });
+      expect(report.issues).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: 'source_evidence_missing',
+            registryId: 'category:account_security',
+          }),
+        ]),
+      );
+    } finally {
+      rmSync(temporaryRoot, { force: true, recursive: true });
+      rmSync(externalRoot, { force: true, recursive: true });
+    }
+  });
+
+  it.each(['Bearer private-token', 'Cookie: session=private-value'])(
+    'rejects secret-like manual entrypoint %s',
+    (manualEntrypoint) => {
+      const bundle = validBundle();
+      const rightsCapability = first(bundle.rightsCapabilities);
+      rightsCapability.delete = { ...rightsCapability.delete, manualEntrypoint };
+
+      expect(auditGovernanceRegistry(bundle, { verifyEvidenceFiles: false }).issues).toEqual(
+        expect.arrayContaining([expect.objectContaining({ code: 'suspicious_secret' })]),
+      );
+    },
+  );
 });

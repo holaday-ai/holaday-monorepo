@@ -1,5 +1,5 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { isAbsolute, relative, resolve } from 'node:path';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
 import type {
   AuditIssue,
   AuditReport,
@@ -20,7 +20,7 @@ const HANDLER_REF = /^[^#\s]+#[A-Za-z_$][A-Za-z0-9_$]*$/;
 const CAPABILITY_NAMES = ['export', 'delete', 'correct', 'pause', 'withdraw'] as const;
 
 const SECRET_VALUE =
-  /-----BEGIN (?:[A-Z ]+)?PRIVATE KEY-----|(?:^|\s)(?:sk-|ghp_|xoxb-|xoxp-)[A-Za-z0-9_-]+|Bearer\s+\S+|(?:document\.)?cookie\s*=|set-cookie\s*:/i;
+  /-----BEGIN (?:[A-Z ]+)?PRIVATE KEY-----|(?:^|\s)(?:sk-|ghp_|xoxb-|xoxp-)[A-Za-z0-9_-]+|Bearer\s+\S+|(?:document\.)?cookie\s*(?:=|:)|set-cookie\s*:/i;
 const PERSONAL_VALUE = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}|\+?\d(?:[\s-]?\d){7,}/i;
 
 function nonEmpty(value: unknown): value is string {
@@ -37,12 +37,26 @@ function hasExportedSymbol(source: string, symbol: string): boolean {
   return declaration.test(source) || namedExport.test(source);
 }
 
+function isWithinRoot(root: string, target: string): boolean {
+  const targetRelative = relative(root, target);
+  return (
+    targetRelative !== '..' && !targetRelative.startsWith(`..${sep}`) && !isAbsolute(targetRelative)
+  );
+}
+
+function isRepositoryRelativeHandlerRef(handlerRef: string, repoRoot: string): boolean {
+  if (!HANDLER_REF.test(handlerRef)) return false;
+  const [path] = handlerRef.split('#', 1);
+  return nonEmpty(path) && !isAbsolute(path) && isWithinRoot(repoRoot, resolve(repoRoot, path));
+}
+
 /** Audits registry metadata only; it never reads runtime, database, or user data. */
 export function auditGovernanceRegistry(
   bundle: GovernanceRegistryBundle,
   options: AuditOptions = {},
 ): AuditReport {
   const issues: AuditIssue[] = [];
+  const repoRoot = resolve(options.repoRoot ?? process.cwd());
   const gapKeys = new Set<string>();
   const addIssue = (
     severity: AuditIssue['severity'],
@@ -155,7 +169,10 @@ export function auditGovernanceRegistry(
   const auditCapability = (registryId: string, capability: CapabilityDefinition) => {
     const { status } = capability;
     if (status === 'implemented') {
-      if (!nonEmpty(capability.handlerRef) || !HANDLER_REF.test(capability.handlerRef)) {
+      if (
+        !nonEmpty(capability.handlerRef) ||
+        !isRepositoryRelativeHandlerRef(capability.handlerRef, repoRoot)
+      ) {
         addIssue(
           'error',
           'implemented_handler_missing',
@@ -334,6 +351,14 @@ function auditEvidence(
   ) => void,
 ): void {
   const repoRoot = resolve(options.repoRoot ?? process.cwd());
+  let canonicalRepoRoot: string | undefined;
+  if (options.verifyEvidenceFiles && existsSync(repoRoot)) {
+    try {
+      canonicalRepoRoot = realpathSync(repoRoot);
+    } catch {
+      canonicalRepoRoot = undefined;
+    }
+  }
   for (const group of groups) {
     if (!Array.isArray(group.evidence) || group.evidence.length === 0) {
       addIssue(
@@ -345,14 +370,18 @@ function auditEvidence(
       continue;
     }
     if (!options.verifyEvidenceFiles) continue;
+    if (!canonicalRepoRoot) {
+      addIssue(
+        'error',
+        'source_evidence_missing',
+        group.registryId,
+        'Evidence repoRoot does not exist or cannot be resolved.',
+      );
+      continue;
+    }
     for (const evidence of group.evidence) {
       const resolvedPath = resolve(repoRoot, evidence.path);
-      const outsideRoot = relative(repoRoot, resolvedPath);
-      if (
-        outsideRoot === '..' ||
-        outsideRoot.startsWith(`..${String.fromCharCode(47)}`) ||
-        isAbsolute(outsideRoot)
-      ) {
+      if (!isWithinRoot(repoRoot, resolvedPath)) {
         addIssue(
           'error',
           'source_evidence_missing',
@@ -370,6 +399,27 @@ function auditEvidence(
         );
         continue;
       }
+      let canonicalPath: string;
+      try {
+        canonicalPath = realpathSync(resolvedPath);
+      } catch {
+        addIssue(
+          'error',
+          'source_evidence_missing',
+          group.registryId,
+          `Evidence source cannot be resolved: ${evidence.path}.`,
+        );
+        continue;
+      }
+      if (!isWithinRoot(canonicalRepoRoot, canonicalPath)) {
+        addIssue(
+          'error',
+          'source_evidence_missing',
+          group.registryId,
+          'Evidence source resolves outside repoRoot.',
+        );
+        continue;
+      }
       if (evidence.kind === 'exported_symbol') {
         if (!nonEmpty(evidence.symbol)) {
           addIssue(
@@ -380,7 +430,7 @@ function auditEvidence(
           );
           continue;
         }
-        const source = readFileSync(resolvedPath, 'utf8');
+        const source = readFileSync(canonicalPath, 'utf8');
         if (!hasExportedSymbol(source, evidence.symbol)) {
           addIssue(
             'error',
@@ -411,7 +461,7 @@ function auditSuspiciousValues(
     approvedPublicContact = false,
   ): void => {
     if (typeof value === 'string') {
-      if (CONFIG_KEY_NAME.test(value) || approvedPublicContact) return;
+      if (CONFIG_KEY_NAME.test(value)) return;
       if (SECRET_VALUE.test(value)) {
         addIssue(
           'error',
@@ -419,7 +469,7 @@ function auditSuspiciousValues(
           registryId,
           `Suspicious secret-like value at ${path}.`,
         );
-      } else if (PERSONAL_VALUE.test(value)) {
+      } else if (!approvedPublicContact && PERSONAL_VALUE.test(value)) {
         addIssue(
           'error',
           'suspicious_personal_data',
