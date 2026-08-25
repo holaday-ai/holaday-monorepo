@@ -98,6 +98,102 @@ function collectBindingNames(name: ts.BindingName, names: Set<string>): void {
   }
 }
 
+function collectVariableRuntimeBindings(
+  statement: ts.VariableStatement,
+  names: Set<string>,
+): boolean {
+  const flags = statement.declarationList.flags;
+  if ((flags & ts.NodeFlags.Using) !== 0) return false;
+
+  const isConst = (flags & ts.NodeFlags.Const) !== 0;
+  for (const declaration of statement.declarationList.declarations) {
+    if ((isConst || !ts.isIdentifier(declaration.name)) && !declaration.initializer) return false;
+    collectBindingNames(declaration.name, names);
+  }
+  return true;
+}
+
+interface RuntimeBodyAnalysis {
+  readonly structurallyValid: boolean;
+  readonly emitsCode: boolean;
+}
+
+function analyzeModuleDeclaration(statement: ts.ModuleDeclaration): RuntimeBodyAnalysis {
+  if (
+    hasModifier(statement, ts.SyntaxKind.DeclareKeyword) ||
+    !ts.isIdentifier(statement.name) ||
+    !statement.body ||
+    (statement.flags & ts.NodeFlags.GlobalAugmentation) !== 0
+  ) {
+    return { structurallyValid: true, emitsCode: false };
+  }
+  return analyzeModuleBody(statement.body);
+}
+
+function analyzeModuleBody(body: ts.ModuleBody): RuntimeBodyAnalysis {
+  if (ts.isModuleDeclaration(body)) return analyzeModuleDeclaration(body);
+  if (!ts.isModuleBlock(body)) return { structurallyValid: true, emitsCode: false };
+
+  let emitsCode = false;
+  for (const statement of body.statements) {
+    if (hasModifier(statement, ts.SyntaxKind.DeclareKeyword)) continue;
+    if (ts.isVariableStatement(statement)) {
+      if (!collectVariableRuntimeBindings(statement, new Set<string>())) {
+        return { structurallyValid: false, emitsCode: false };
+      }
+      emitsCode = true;
+      continue;
+    }
+    if (ts.isFunctionDeclaration(statement)) {
+      emitsCode ||= Boolean(statement.body);
+      continue;
+    }
+    if (ts.isClassDeclaration(statement)) {
+      emitsCode = true;
+      continue;
+    }
+    if (ts.isEnumDeclaration(statement)) {
+      emitsCode ||= !hasModifier(statement, ts.SyntaxKind.ConstKeyword);
+      continue;
+    }
+    if (ts.isModuleDeclaration(statement)) {
+      const nested = analyzeModuleDeclaration(statement);
+      if (!nested.structurallyValid) return nested;
+      emitsCode ||= nested.emitsCode;
+      continue;
+    }
+    if (
+      ts.isInterfaceDeclaration(statement) ||
+      ts.isTypeAliasDeclaration(statement) ||
+      ts.isImportDeclaration(statement) ||
+      ts.isImportEqualsDeclaration(statement) ||
+      ts.isExportDeclaration(statement) ||
+      ts.isExportAssignment(statement) ||
+      ts.isNamespaceExportDeclaration(statement) ||
+      ts.isEmptyStatement(statement) ||
+      ts.isNotEmittedStatement(statement)
+    ) {
+      continue;
+    }
+    emitsCode = true;
+  }
+  return { structurallyValid: true, emitsCode };
+}
+
+function runtimeDeclarationName(statement: ts.Statement): string | undefined {
+  if (ts.isFunctionDeclaration(statement)) {
+    return statement.body ? statement.name?.text : undefined;
+  }
+  if (ts.isClassDeclaration(statement)) return statement.name?.text;
+  if (ts.isEnumDeclaration(statement)) {
+    return hasModifier(statement, ts.SyntaxKind.ConstKeyword) ? undefined : statement.name.text;
+  }
+  if (ts.isModuleDeclaration(statement) && analyzeModuleDeclaration(statement).emitsCode) {
+    return statement.name.text;
+  }
+  return undefined;
+}
+
 function scriptKindForPath(filePath: string): ts.ScriptKind {
   if (filePath.endsWith('.tsx')) return ts.ScriptKind.TSX;
   if (filePath.endsWith('.jsx')) return ts.ScriptKind.JSX;
@@ -119,22 +215,26 @@ function hasExportedSymbol(source: string, symbol: string, filePath: string): bo
   const parseDiagnostics = (
     sourceFile as ts.SourceFile & { readonly parseDiagnostics?: readonly ts.Diagnostic[] }
   ).parseDiagnostics;
-  if (parseDiagnostics && parseDiagnostics.length > 0) return false;
+  if ((parseDiagnostics && parseDiagnostics.length > 0) || sourceFile.isDeclarationFile)
+    return false;
 
   const runtimeBindings = new Set<string>();
   for (const statement of sourceFile.statements) {
     if (hasModifier(statement, ts.SyntaxKind.DeclareKeyword)) continue;
     if (ts.isVariableStatement(statement)) {
-      for (const declaration of statement.declarationList.declarations) {
-        collectBindingNames(declaration.name, runtimeBindings);
-      }
-    } else if (
-      ((ts.isFunctionDeclaration(statement) && Boolean(statement.body)) ||
-        ts.isClassDeclaration(statement)) &&
-      statement.name
-    ) {
-      runtimeBindings.add(statement.name.text);
+      if (!collectVariableRuntimeBindings(statement, runtimeBindings)) return false;
+      continue;
     }
+    if (ts.isModuleDeclaration(statement)) {
+      const moduleAnalysis = analyzeModuleDeclaration(statement);
+      if (!moduleAnalysis.structurallyValid) return false;
+      if (moduleAnalysis.emitsCode && ts.isIdentifier(statement.name)) {
+        runtimeBindings.add(statement.name.text);
+      }
+      continue;
+    }
+    const runtimeName = runtimeDeclarationName(statement);
+    if (runtimeName) runtimeBindings.add(runtimeName);
   }
 
   for (const statement of sourceFile.statements) {
@@ -163,20 +263,11 @@ function hasExportedSymbol(source: string, symbol: string, filePath: string): bo
     }
     if (ts.isVariableStatement(statement)) {
       const exportedBindings = new Set<string>();
-      for (const declaration of statement.declarationList.declarations) {
-        collectBindingNames(declaration.name, exportedBindings);
-      }
+      if (!collectVariableRuntimeBindings(statement, exportedBindings)) return false;
       if (exportedBindings.has(symbol)) return true;
       continue;
     }
-    if (
-      ((ts.isFunctionDeclaration(statement) && Boolean(statement.body)) ||
-        ts.isClassDeclaration(statement)) &&
-      statement.name &&
-      statement.name.text === symbol
-    ) {
-      return true;
-    }
+    if (runtimeDeclarationName(statement) === symbol) return true;
   }
   return false;
 }
