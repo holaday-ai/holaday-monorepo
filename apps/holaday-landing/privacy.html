@@ -7,9 +7,6 @@
   <meta name="description" content="HOLA DAY 隐私政策 — 我们如何收集、使用和保护你的数据。">
   <link rel="canonical" href="https://holaday.ai/privacy">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
@@ -19,7 +16,7 @@
       --border: #E4E4E7; --border-strong: #D4D4D8;
       --container-narrow: 760px; --container: 1180px;
       --font-sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif;
-      --font-display: 'Outfit', var(--font-sans);
+      --font-display: var(--font-sans);
     }
     html { -webkit-text-size-adjust: 100%; }
     body { font-family: var(--font-sans); color: var(--text); background: var(--bg); line-height: 1.7; -webkit-font-smoothing: antialiased; }
@@ -50,6 +47,17 @@
     .data-table { margin: 16px 0; width: 100%; border-collapse: collapse; font-size: 14px; }
     .data-table th, .data-table td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }
     .data-table th { background: var(--bg-soft); color: var(--ink); font-weight: 600; }
+    .mobile-cell-label { display: none; }
+    @media (max-width: 700px) {
+      .data-table, .data-table tbody, .data-table tr, .data-table td { display: block; width: 100%; }
+      .data-table { border-collapse: separate; }
+      .data-table thead { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+      .data-table tr { margin-bottom: 12px; padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-soft); }
+      .data-table td { padding: 0; border: 0; }
+      .data-table td + td { margin-top: 10px; }
+      .data-table td:first-child { color: var(--ink); font-weight: 600; }
+      .mobile-cell-label { display: block; margin-bottom: 2px; color: var(--text-muted); font-size: 12px; font-weight: 600; }
+    }
     footer { padding: 32px 0 48px; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 13px; text-align: center; }
     footer a { color: var(--text-muted); margin: 0 12px; }
     footer a:hover { color: var(--ink); }
@@ -70,7 +78,7 @@
   <div class="container-narrow">
     <div class="doc-eyebrow">Privacy Policy</div>
     <h1 class="doc-title">隐私政策</h1>
-    <div class="doc-meta">最近更新：2026 年 6 月 3 日</div>
+    <div class="doc-meta">最后更新：2026 年 8 月 25 日 · 本页说明 HOLA DAY 实际如何处理个人信息</div>
   </div>
 </section>
 
@@ -78,130 +86,84 @@
   <div class="container-narrow">
 
     <div class="toc">
-      <div class="toc-title">目录</div>
+      <div class="toc-title">快速查看</div>
       <ol>
-        <li><a href="#collect">我们收集的信息</a></li>
-        <li><a href="#use">信息用途</a></li>
-        <li><a href="#storage">存储位置与保留期限</a></li>
-        <li><a href="#third">第三方服务</a></li>
-        <li><a href="#cookie">Cookie 与本地存储</a></li>
-        <li><a href="#share">数据共享</a></li>
+        <li><a href="#data">我们处理什么</a></li>
+        <li><a href="#extension">浏览器扩展</a></li>
+        <li><a href="#providers">第三方与跨境</a></li>
+        <li><a href="#retention">保存与删除</a></li>
         <li><a href="#rights">您的权利</a></li>
         <li><a href="#security">安全措施</a></li>
-        <li><a href="#minor">未成年人保护</a></li>
+        <li><a href="#minor">未成年人</a></li>
         <li><a href="#changes">政策更新</a></li>
-        <li><a href="#contact">联系方式</a></li>
+        <li><a href="#contact">联系我们</a></li>
       </ol>
     </div>
 
-    <p>HOLA DAY（以下简称"我们"）尊重并保护用户隐私。本《隐私政策》说明我们在您使用本服务时
-       会收集哪些信息、如何使用、如何保护，以及您拥有哪些权利。请仔细阅读。</p>
+    <p>HOLA DAY 为完成账号、任务和安全等明确目的处理必要信息。不同功能处理的数据和外部服务并不相同。部分任务会交给境内外的 AI、媒体、存储、通信或支付服务商处理。</p>
 
-    <h2 id="collect">1. 我们收集的信息</h2>
+    <h2 id="data">1. 我们处理什么</h2>
+    <p>具体范围取决于您实际使用的功能。下表中的“可能”不代表每次任务都会使用该处理方。</p>
     <table class="data-table">
-      <thead><tr><th>类别</th><th>具体内容</th><th>来源</th></tr></thead>
+      <thead><tr><th>数据类别</th><th>具体内容与用途</th><th>保存标准或控制</th></tr></thead>
       <tbody>
-        <tr><td>账号信息</td><td>邮箱、手机号、密码（加密存储）、昵称</td><td>注册时由您提供</td></tr>
-        <tr><td>任务内容</td><td>您提交的任务描述、AI 生成的执行步骤、截图、产出文件</td><td>使用过程中产生</td></tr>
-        <tr><td>浏览器 Cookie</td><td>通过 HOLA DAY 浏览器扩展同步到云端浏览器的登录态 Cookie，仅用于让云端浏览器继承您已授权的网站登录状态</td><td>需您主动安装扩展并授权同步</td></tr>
-        <tr><td>浏览器扩展数据</td><td>扩展连接状态、任务执行时的页面上下文/截图/操作结果，以及最近 30 天常用网站的域名聚合（域名、访问次数、最近访问时间）；不会上传完整 URL、查询参数、网页标题或浏览历史页面内容</td><td>安装并启用 HOLA DAY 浏览器扩展后产生</td></tr>
-        <tr><td>使用数据</td><td>登录时间、任务次数、API 调用统计、错误日志</td><td>系统自动采集</td></tr>
-        <tr><td>设备与网络</td><td>IP 地址、浏览器 User-Agent、操作系统</td><td>HTTP 请求自动携带</td></tr>
-        <tr><td>支付信息</td><td>订单金额、支付时间、支付平台流水号（不存储完整卡号或密码）</td><td>第三方支付平台回传</td></tr>
+        <tr><td>账号与安全</td><td><span class="mobile-cell-label">具体内容与用途</span>邮箱、手机号、昵称、头像、密码哈希、MFA 与登录会话，用于注册、登录、身份确认与账号安全</td><td><span class="mobile-cell-label">保存标准或控制</span>账号存续及安全所需；可通过邮件申请处理</td></tr>
+        <tr><td>任务与执行</td><td><span class="mobile-cell-label">具体内容与用途</span>指令、计划、步骤、结果、错误、截图、网页上下文与文件，用于执行、恢复和验证您提交的任务</td><td><span class="mobile-cell-label">保存标准或控制</span>套餐天数只控制可见历史；实际按数据类别和申请处理</td></tr>
+        <tr><td>跨任务 AI 记忆</td><td><span class="mobile-cell-label">具体内容与用途</span>从已完成任务的任务指令与结果摘要中提取偏好、网站状态、任务历史与执行建议，用于在后续相关任务中提供个性化上下文；启用 Anthropic 时由 Anthropic 完成提取</td><td><span class="mobile-cell-label">保存标准或控制</span>偏好可能长期保留；其他条目按提取时设置的期限或长期状态保存；可在“设置 &gt; AI 记忆”逐条删除或清空全部</td></tr>
+        <tr><td>今日能量星座资料</td><td><span class="mobile-cell-label">具体内容与用途</span>姓名、精确生日、可选出生时间与地点、星座及浏览器时区，用于计算星座并生成个性化的日、周、月、年提示；资料保存在当前浏览器的 localStorage，实时星座能力启用时会提交给 HOLA DAY 星座接口，DivineAPI 仅接收星座、日期或周期、语言及时区等必要参数</td><td><span class="mobile-cell-label">保存标准或控制</span>资料保留至您在“我的能量”中选择“清除资料”或清理浏览器数据；实时请求按日志标准处理</td></tr>
+        <tr><td>股票偏好画像</td><td><span class="mobile-cell-label">具体内容与用途</span>成功选股后自动记录的筛选条件、主动设置的研究偏好与新增自选股（股票代码、市场和添加时间），以及据此归纳的偏好事实、可能优势与潜在盲点，用于帮助您看见研究重点和可能遗漏的维度；画像不会自动改变筛选条件或触发交易</td><td><span class="mobile-cell-label">保存标准或控制</span>自动筛选依据仅在最近 90 天内参与画像；最近 90 天是推断窗口，不是服务器删除期限。“暂停画像”只停止展示画像，不会停止新筛选依据的记录；“清空画像”会清除主动偏好与已记录的筛选依据，并排除清空前的自选股依据，但不会删除自选股本身</td></tr>
+        <tr><td>反馈与支持</td><td><span class="mobile-cell-label">具体内容与用途</span>您主动提交的自由文本、账号邮箱、账号标识、User-Agent 与可选的关联任务标识，用于接收反馈、定位问题并提供支持；启用 Resend 时转发给 Resend，否则可能进入服务日志</td><td><span class="mobile-cell-label">保存标准或控制</span>按处理反馈、故障、安全和争议所需保存；可通过隐私邮箱申请处理</td></tr>
+        <tr><td>外部通知渠道</td><td><span class="mobile-cell-label">具体内容与用途</span>您保存的企业微信、飞书、钉钉或自定义 webhook 地址和模板；向已启用渠道发送通知标题、正文、状态，以及最多 60 字的定时任务意图，用于发送任务通知</td><td><span class="mobile-cell-label">保存标准或控制</span>渠道配置在账号中保存至您修改或删除渠道配置；通知接收方按其自身规则处理</td></tr>
+        <tr><td>扩展常用网站</td><td><span class="mobile-cell-label">具体内容与用途</span>最近 30 天记录在设备端汇总后的域名、访问次数与最近访问时间，用于优先准备常用站点配置</td><td><span class="mobile-cell-label">保存标准或控制</span>下一次成功同步会替换旧快照；停止同步不等于自动删除</td></tr>
+        <tr><td>扩展登录态</td><td><span class="mobile-cell-label">具体内容与用途</span>扩展在登录状态下对固定同步域名清单读取 Cookie 名称、值、域名、路径、安全与同站标记及到期时间，用于让任务浏览器继承 Chrome 中已有的登录状态</td><td><span class="mobile-cell-label">保存标准或控制</span>有可用浏览器时即时注入，否则暂存至下一次注入；退出登录、停用或卸载扩展可阻止未来同步</td></tr>
+        <tr><td>支付与套餐</td><td><span class="mobile-cell-label">具体内容与用途</span>订单、金额、币种、购买内容、状态、渠道标识与可能的付款邮箱，用于结算、发放权益、退款和处理争议</td><td><span class="mobile-cell-label">保存标准或控制</span>按交易、税务、争议和适用法律所需保存</td></tr>
+        <tr><td>合伙人 KYC 与账本</td><td><span class="mobile-cell-label">具体内容与用途</span>银行账户或银行卡指纹、KYC 状态、认证服务商与参考号、提现金额、状态与风险评分、邀请关系与奖励、HOLA Credit 与 API Units 账本及活动记录，用于验证合伙人资格与同名账户，并处理充值、分润、提现、风险审核、对账与争议</td><td><span class="mobile-cell-label">保存标准或控制</span>按实名审核、账务、反欺诈、税务和争议处理及适用法律所需保存</td></tr>
+        <tr><td>媒体素材</td><td><span class="mobile-cell-label">具体内容与用途</span>您上传的图片、视频、语音，以及声音克隆标识和授权时间，用于完成您明确请求的媒体任务</td><td><span class="mobile-cell-label">保存标准或控制</span>按文件可用期、账号处理及必要的安全或授权证据标准保存</td></tr>
+        <tr><td>分析与日志</td><td><span class="mobile-cell-label">具体内容与用途</span>固定事件聚合、匿名摘要、IP、User-Agent、操作与错误日志，用于安全、稳定和故障排查</td><td><span class="mobile-cell-label">保存标准或控制</span>按具体配置、故障、安全和法律所需的最短期限</td></tr>
       </tbody>
     </table>
+    <p>我们也会使用 Cookie 和 localStorage 维持 HOLA DAY 登录状态和保存界面偏好。禁用后，部分功能可能无法正常使用。</p>
 
-    <h2 id="use">2. 信息用途</h2>
-    <p>我们仅在以下范围内使用您的信息：</p>
+    <h2 id="extension">2. 浏览器扩展：两类数据，两种边界</h2>
+    <h3>常用网站统计只上传域名级聚合</h3>
+    <p>扩展在您的设备上汇总最近 30 天记录，只发送域名、访问次数和最近访问时间；不上传完整 URL、查询参数、网页标题或历史页面正文。下一次成功同步会替换服务器上的旧快照。</p>
+    <h3>登录扩展后自动同步固定白名单内的真实 Cookie 值</h3>
+    <p>当扩展保存有有效 HOLA DAY 登录令牌时，会在服务器连接成功时触发同步，并在后台闹钟路径约每 30 分钟再次尝试。扩展读取固定同步域名清单中 Chrome 可访问的 Cookie 名称、值、域名、路径、安全与同站标记及到期时间（最多 500 条）；服务端白名单仍会拒绝不支持的域名。当前没有逐站点开关。</p>
+    <p>退出 HOLA DAY 登录、停用或卸载扩展可以阻止未来同步，但不会自动删除服务器已经收到的数据；您可以通过下方渠道申请处理。我们不将这些 Cookie 出售、用于广告画像或共享给其他用户。</p>
+
+    <h2 id="providers">3. 第三方服务与跨境处理</h2>
+    <p>以下服务是否参与，取决于您使用的功能和当时启用的服务。为完成您选择的任务，必要的指令、文件、媒体素材、账号或交易信息可能由相关服务商处理，也可能在中国大陆以外处理。适用法律要求单独同意时，我们会在取得相应同意后启用。</p>
     <ul>
-      <li>提供、维护、改进本服务（执行任务、生成结果、保存历史）</li>
-      <li>在您授权的浏览器页面中执行任务、同步执行状态、恢复异常中断的浏览器操作</li>
-      <li>账号管理与安全保护（登录验证、异常检测、防止滥用）</li>
-      <li>处理订阅、续费、退款</li>
-      <li>客户支持与故障排查</li>
-      <li>统计分析（脱敏后用于产品优化，不针对个人）</li>
-      <li>必要的法律合规要求</li>
+      <li><strong>基础设施与存储：</strong>Vultr、Cloudflare R2、Aliyun，用于计算、数据库、静态内容分发、文件存储和必要的网络服务。</li>
+      <li><strong>AI、抓取与媒体：</strong>Anthropic、Google、OpenAI、Alibaba Cloud DashScope、fal.ai、Firecrawl、Apify、DivineAPI，按功能处理任务指令、网页地址与检索条件、网页内容、图片、视频、语音、星座或塔罗请求及生成结果。</li>
+      <li><strong>身份、通信、反馈与支付：</strong>Google、Resend、短信网关、PayPal、中国支付服务，用于第三方登录、验证码、服务邮件、反馈转发、收款、权益发放、退款与争议处理。</li>
+      <li><strong>自动化与外部通知：</strong>Zapier 仅在相关配置已启用且任务被识别为跨平台自动化时接收任务指令和任务标识。您启用外部通知渠道时，通知标题、正文、状态和最多 60 字的定时任务意图会发送至您配置的企业微信、飞书、钉钉或自定义 webhook。</li>
+      <li><strong>合伙人身份与账务：</strong>合伙人功能启用时，HOLA DAY 会保存认证服务商与参考号或人工审核记录。实际另行启用外部实名认证、银行、支付或出款服务商时，完成验证与出款所需的最小信息可能由其处理。</li>
     </ul>
-    <p>我们<strong>不会</strong>将您的任务内容用于训练公开发布的 AI 模型，
-       也<strong>不会</strong>将您的个人信息出售或出租给第三方。</p>
+    <p>支付记录可能包含支付渠道标识和付款邮箱。HOLA DAY 不直接保存银行卡号、CVV 或第三方支付账户密码。每次付款只购买所选周期，到期前由您手动续费，不会自动扣款。</p>
 
-    <h2 id="storage">3. 存储位置与保留期限</h2>
-    <p><strong>主要数据存储在以下两个地理位置：</strong></p>
-    <ul>
-      <li>账号、任务、文件等核心数据：新加坡 / 香港数据中心（Vultr）</li>
-      <li>中国大陆用户访问加速节点 + 中国境内支付通知：阿里云（杭州区域）</li>
-    </ul>
-    <p><strong>保留期限：</strong></p>
-    <ul>
-      <li>账号信息：账号有效期内长期保存；账号注销后 30 日内删除（备份按公司数据生命周期 90 日内清除）</li>
-      <li>任务内容与产出文件：默认 24 小时后自动清理；登录态用户的历史任务记录保存 90 天</li>
-      <li>支付与开票数据：依据税务法规保存 7 年</li>
-      <li>系统日志：90 天</li>
-    </ul>
+    <h2 id="retention">4. 保存与删除</h2>
+    <p><strong>任务历史：</strong>套餐中的 7/30/90 天表示默认可见范围，不是服务器删除期限。任务、截图、文件和验证材料会按其类别、文件界面显示的到期时间、服务需要和删除申请分别处理。</p>
+    <p><strong>扩展数据：</strong>常用网站快照由下次成功同步替换；登录 Cookie 在有可用浏览器时即时注入，或暂存至下一次注入。当前不承诺尚未实现的统一自动清理期限。</p>
+    <p><strong>支付与运维记录：</strong>交易、安全、争议或审计记录会按履行交易、法定义务、保障安全和解决争议所需保存，条件结束后删除或去标识化。其他日志按故障排查、安全和运营所必需的最短期限处理，并非统一固定天数。</p>
+    <p><strong>合伙人记录：</strong>KYC、账本、邀请、奖励、提现和风险记录按实名审核、账务、反欺诈、税务和争议处理及适用法律所需保存。</p>
 
-    <h2 id="third">4. 第三方服务</h2>
-    <p>本服务依赖以下第三方提供基础能力。这些服务有各自的隐私政策，您使用本服务即视为同意相关第三方处理必要的数据：</p>
-    <ul>
-      <li><strong>Anthropic API</strong>：AI 大模型推理（任务描述与上下文会发送给 Anthropic，由其按其隐私政策处理）</li>
-      <li><strong>Resend</strong>：发送验证码、通知邮件（仅传递邮箱地址与邮件正文）</li>
-      <li><strong>阿里云短信服务</strong>：发送中国大陆手机短信验证码（仅传递手机号与签名/模板参数）</li>
-      <li><strong>微信支付 / 支付宝</strong>：处理中国大陆用户的人民币订阅支付（订单金额、订单号；不接触卡号）</li>
-      <li><strong>Stripe / PayPal</strong>：处理国际用户的美元订阅支付</li>
-      <li><strong>Cloudflare</strong>：CDN 加速、DDoS 防护（短暂记录访问 IP 与 UA）</li>
-    </ul>
+    <h2 id="rights">5. 您的权利</h2>
+    <p>适用法律可能赋予您查阅、复制、更正、删除、撤回同意、限制或反对处理以及投诉的权利。当前请发送邮件至 <a href="mailto:privacy@holaday.ai">privacy@holaday.ai</a> 提交申请。邮件是申请入口，不代表即时或自动完成。为保护账号，我们会先确认账号归属，再处理账号关闭和可处理的关联数据。依法需要保留，或处理交易、安全、争议所必需的记录，可能在相应条件结束前继续受限保存。</p>
+    <p>请勿在初次邮件中发送密码、验证码、身份证件照片或完整支付信息。若请求受到适用法律限制，我们会说明可以处理的范围。</p>
 
-    <h2 id="cookie">5. Cookie 与本地存储</h2>
-    <p>本服务使用以下 Cookie / localStorage：</p>
-    <ul>
-      <li><strong>必要型</strong>：登录态 token、CSRF token、用户偏好（主题、语言）— 不可关闭</li>
-      <li><strong>功能型</strong>：上次选择的传输方式（VNC / CDP）、面板布局 — 由您主动设置</li>
-      <li><strong>浏览器扩展</strong>：在您安装并启用扩展后，可能读取特定网站 Cookie 以迁移登录状态；常用网站分析只上传域名聚合，不上传完整浏览历史 URL、页面标题或页面内容</li>
-    </ul>
-    <p>本服务<strong>不使用</strong>第三方追踪 Cookie 或广告 Cookie。</p>
+    <h2 id="security">6. 安全措施</h2>
+    <p>HOLA DAY 使用访问控制、传输保护、敏感请求头遮蔽和运行监控等措施降低风险。账号密码使用 Argon2id 不可逆单向哈希保存；MFA 密钥使用加密封装。没有任何互联网传输或存储方式能够保证绝对安全，我们会根据风险持续改进措施并处理安全事件。</p>
 
-    <h2 id="share">6. 数据共享</h2>
-    <p>我们仅在以下情形向第三方提供您的数据：</p>
-    <ul>
-      <li>经您明确授权（如您主动通过 MCP 连接外部服务）</li>
-      <li>提供基础服务所必需（见上文"第三方服务"）</li>
-      <li>响应法律要求（如司法机关合法调取）</li>
-      <li>保护本服务、用户或公众的合法权益（如阻止欺诈）</li>
-    </ul>
+    <h2 id="minor">7. 未成年人</h2>
+    <p>本服务不面向 14 周岁以下未成年人。若您认为未成年人未经监护人同意向我们提供了个人信息，请通过隐私邮箱联系；我们会核实并按适用法律处理。</p>
 
-    <h2 id="rights">7. 您的权利</h2>
-    <p>您对自己的个人数据享有以下权利：</p>
-    <ul>
-      <li><strong>查看权</strong>：通过账号设置查看您的资料、任务历史、支付记录</li>
-      <li><strong>更正权</strong>：随时修改您的资料</li>
-      <li><strong>删除权</strong>：注销账号或删除特定任务记录</li>
-      <li><strong>导出权</strong>：通过邮件请求导出您的全部数据（处理时限：30 个自然日内）</li>
-      <li><strong>撤回授权</strong>：随时关闭浏览器扩展、停用 MCP 连接</li>
-    </ul>
-    <p>如需行使上述权利，请联系：<a href="mailto:support@holaday.ai">support@holaday.ai</a></p>
+    <h2 id="changes">8. 政策更新</h2>
+    <p>政策更新会在本页标明新日期。重大变化会通过合理渠道提示；适用法律要求重新同意或单独同意的处理，会在取得相应同意后启用，不以继续使用代替所需同意。</p>
 
-    <h2 id="security">8. 安全措施</h2>
-    <p>我们采取以下措施保护您的数据：</p>
-    <ul>
-      <li>传输：全站强制 HTTPS（TLS 1.2+）</li>
-      <li>存储：密码使用 bcrypt 不可逆加密；敏感字段加密存储</li>
-      <li>访问控制：最小权限原则、操作审计日志</li>
-      <li>云端浏览器实例按用户隔离（per-user pool），任务结束 5 分钟后自动回收</li>
-      <li>定期安全审计与依赖更新</li>
-    </ul>
-    <p>尽管我们采取业界标准的安全措施，但任何系统都无法保证 100% 安全。
-       如发生数据泄露，我们将依法及时通知受影响的用户。</p>
-
-    <h2 id="minor">9. 未成年人保护</h2>
-    <p>本服务面向 16 周岁及以上用户。我们不会有意收集未满 16 周岁用户的个人信息；
-       如发现，将立即删除相关数据并注销账号。</p>
-
-    <h2 id="changes">10. 政策更新</h2>
-    <p>本政策可能不时更新。重大变更将通过站内通知或邮件告知。
-       建议您定期查看本页面以了解最新版本。继续使用本服务即视为接受更新后的政策。</p>
-
-    <h2 id="contact">11. 联系方式</h2>
-    <p>如对本政策、您的数据或任何隐私相关问题有疑问，请联系：
-       <a href="mailto:support@holaday.ai">support@holaday.ai</a></p>
+    <h2 id="contact">9. 联系我们</h2>
+    <p>隐私与个人信息申请：<a href="mailto:privacy@holaday.ai">privacy@holaday.ai</a></p>
+    <p>一般支持：<a href="mailto:support@holaday.ai">support@holaday.ai</a></p>
 
   </div>
 </main>

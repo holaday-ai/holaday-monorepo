@@ -127,8 +127,7 @@ export function AdminLearningDomainPage(): JSX.Element {
             backgroundImage: `linear-gradient(135deg, ${ADMIN_MAGENTA}18 0%, ${ADMIN_DIVIDER} 100%)`,
           }}
         >
-          {/* Try the favicon service; fall back to a globe icon. */}
-          <FaviconOrIcon domain={view.domain} />
+          <DomainIcon />
         </div>
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-xl font-semibold">
@@ -450,21 +449,8 @@ function BackLink(): JSX.Element {
   );
 }
 
-function FaviconOrIcon({ domain }: { domain: string }): JSX.Element {
-  const [errored, setErrored] = React.useState(false);
-  if (errored) {
-    return <Globe className="h-6 w-6" aria-hidden />;
-  }
-  // Google's public favicon service — best-effort. If it 404s or
-  // the user's network blocks it, we fall back to the lucide icon.
-  return (
-    <img
-      src={`https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=32`}
-      alt=""
-      className="h-6 w-6"
-      onError={() => setErrored(true)}
-    />
-  );
+function DomainIcon(): JSX.Element {
+  return <Globe className="h-6 w-6" aria-hidden />;
 }
 
 function Section({

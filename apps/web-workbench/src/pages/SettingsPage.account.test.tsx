@@ -53,11 +53,52 @@ describe('SettingsPage account hub', () => {
     const supportLink = within(account).getByRole('link', { name: 'support@holaday.ai' });
     expect(supportLink.getAttribute('href')).toBe('mailto:support@holaday.ai');
 
-    await user.click(within(account).getByRole('button', { name: '邮件申请删除' }));
+    const deleteButton = within(account).getByRole('button', { name: '邮件申请删除' });
+    await user.click(deleteButton);
 
     const dialog = screen.getByRole('dialog', { name: '申请删除账号？' });
     expect(within(dialog).getByText(/若未自动打开/)).toBeTruthy();
     expect(within(dialog).getByText(/support@holaday\.ai/)).toBeTruthy();
     expect(within(dialog).getByRole('button', { name: '打开邮件应用' })).toBeTruthy();
+  });
+
+  it('describes deletion as a reviewed request with lawful retention exceptions', async () => {
+    const user = userEvent.setup();
+    renderSettings();
+
+    const account = screen.getByRole('region', { name: '账号' });
+    expect(within(account).getByText(/通过邮件提交申请/)).toBeTruthy();
+    expect(within(account).getByText(/交易、安全或审计记录可能继续受限保存/)).toBeTruthy();
+
+    const deleteButton = within(account).getByRole('button', { name: '邮件申请删除' });
+    await user.click(deleteButton);
+    const dialog = screen.getByRole('dialog', { name: '申请删除账号？' });
+    expect(within(dialog).getByText(/邮件是申请入口，不代表账号会即时自动删除/)).toBeTruthy();
+    expect(within(dialog).getByText(/依法需要保留/)).toBeTruthy();
+
+    const text = dialog.textContent ?? '';
+    expect(text).not.toContain('删除会清除任务记录、浏览器数据和订阅信息');
+    expect(text).not.toContain('再完成账号关闭');
+
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog', { name: '申请删除账号？' })).toBeNull();
+    expect(document.activeElement).toBe(deleteButton);
+  });
+
+  it('restores focus after launching the deletion email', async () => {
+    const user = userEvent.setup();
+    renderSettings();
+
+    const account = screen.getByRole('region', { name: '账号' });
+    const deleteButton = within(account).getByRole('button', { name: '邮件申请删除' });
+    await user.click(deleteButton);
+    await user.click(
+      within(screen.getByRole('dialog', { name: '申请删除账号？' })).getByRole('button', {
+        name: '打开邮件应用',
+      }),
+    );
+
+    expect(screen.queryByRole('dialog', { name: '申请删除账号？' })).toBeNull();
+    expect(document.activeElement).toBe(deleteButton);
   });
 });
