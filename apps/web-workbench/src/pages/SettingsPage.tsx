@@ -120,7 +120,7 @@ export function SettingsPage(): JSX.Element {
             <div className="text-xs font-semibold text-red-600">危险操作</div>
             <Row
               label="删除账号"
-              description="删除会清除任务记录、浏览器数据和订阅信息；需要先通过支持渠道确认身份"
+              description="通过邮件提交申请。确认身份后处理账号关闭和关联数据；依法需要保留的交易、安全或审计记录可能继续受限保存"
             >
               <div className="flex flex-wrap items-center gap-3 md:justify-end">
                 <a
@@ -146,7 +146,7 @@ export function SettingsPage(): JSX.Element {
       <ConfirmDialog
         open={deleteDialogOpen}
         title="申请删除账号？"
-        description={`账号删除不可撤销。我们会通过邮件确认身份、处理订阅和数据删除，再完成账号关闭。\n\n将打开系统邮件应用；若未自动打开，请手动发送到 ${SUPPORT_EMAIL}。`}
+        description={`账号删除不可撤销。邮件是申请入口，不代表账号会即时自动删除。我们会先确认账号归属，并处理账号关闭和可删除的关联数据；依法需要保留的交易、安全、争议或审计记录可能继续受限保存。\n\n将打开系统邮件应用；若未自动打开，请手动发送到 ${SUPPORT_EMAIL}。请勿在邮件中发送密码、验证码、身份证件照片或完整支付信息。`}
         confirmLabel="打开邮件应用"
         destructive
         onClose={() => setDeleteDialogOpen(false)}
