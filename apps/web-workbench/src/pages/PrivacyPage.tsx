@@ -118,7 +118,7 @@ function DataCards(): JSX.Element {
       {DATA_CATEGORIES.map((category) => (
         <article
           key={category.label}
-          className="rounded-[8px] border border-[#E8E8E8] bg-[#FAFAFA] p-4"
+          className="rounded-[8px] border border-[#E8E8E8] bg-[#FAFAFA] p-4 dark:border-white/10 dark:bg-white/[0.04]"
         >
           <h3 className="text-sm font-semibold text-foreground">{category.label}</h3>
           <dl className="mt-3 space-y-2.5 text-xs leading-relaxed">
@@ -147,12 +147,12 @@ function DataCards(): JSX.Element {
 
 function DataTable(): JSX.Element {
   return (
-    <div className="hidden overflow-hidden rounded-[8px] border border-[#E3E3E3] md:block">
+    <div className="hidden overflow-hidden rounded-[8px] border border-[#E3E3E3] dark:border-border md:block">
       <table
         aria-label="HOLA DAY 个人信息处理说明"
         className="w-full table-fixed border-collapse text-left text-[11px] leading-relaxed"
       >
-        <thead className="bg-[#F7F7F7] text-foreground">
+        <thead className="bg-[#F7F7F7] text-foreground dark:bg-muted">
           <tr>
             <th className="w-[14%] px-3 py-3 font-semibold">数据类别</th>
             <th className="w-[22%] px-3 py-3 font-semibold">具体内容</th>
@@ -163,7 +163,10 @@ function DataTable(): JSX.Element {
         </thead>
         <tbody>
           {DATA_CATEGORIES.map((category) => (
-            <tr key={category.label} className="border-t border-[#E8E8E8] align-top">
+            <tr
+              key={category.label}
+              className="border-t border-[#E8E8E8] align-top dark:border-border"
+            >
               <th className="px-3 py-3 font-semibold text-foreground">{category.label}</th>
               <td className="px-3 py-3 text-muted-foreground">{category.data}</td>
               <td className="px-3 py-3 text-muted-foreground">{category.purpose}</td>
@@ -187,7 +190,7 @@ function ProviderGroup({
   children: React.ReactNode;
 }): JSX.Element {
   return (
-    <article className="rounded-[8px] border border-[#E8E8E8] bg-[#FAFAFA] p-4">
+    <article className="rounded-[8px] border border-[#E8E8E8] bg-[#FAFAFA] p-4 dark:border-white/10 dark:bg-white/[0.04]">
       <h3 className="text-sm font-semibold text-foreground">{title}</h3>
       <p className="mt-1 text-xs font-medium text-[#6D55A5]">{providers}</p>
       <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{children}</p>
@@ -206,7 +209,7 @@ export function PrivacyPage(): JSX.Element {
       <main className="space-y-4 text-sm leading-relaxed text-foreground">
         <section
           aria-labelledby="summary-heading"
-          className="rounded-[8px] border border-[#DED8EA] bg-gradient-to-br from-[#FBF9FF] via-white to-[#F7FBFF] p-5 shadow-[0_1px_2px_rgba(15,23,42,0.03)] sm:p-6"
+          className="rounded-[8px] border border-[#DED8EA] bg-gradient-to-br from-[#FBF9FF] via-white to-[#F7FBFF] p-5 shadow-[0_1px_2px_rgba(15,23,42,0.03)] dark:border-border dark:from-[#1A1720] dark:via-card dark:to-[#12191B] sm:p-6"
         >
           <div className="max-w-2xl">
             <p className="text-xs font-medium tracking-wide text-[#7655A6]">阅读约 6 分钟</p>
@@ -221,7 +224,7 @@ export function PrivacyPage(): JSX.Element {
             {SUMMARY_ITEMS.map((item) => (
               <article
                 key={item.number}
-                className="flex gap-3 rounded-[8px] border border-white/80 bg-white/80 p-4 shadow-[0_1px_2px_rgba(15,23,42,0.025)]"
+                className="flex gap-3 rounded-[8px] border border-white/80 bg-white/80 p-4 shadow-[0_1px_2px_rgba(15,23,42,0.025)] dark:border-white/10 dark:bg-white/[0.04]"
               >
                 <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#F1EAFE] text-[10px] font-semibold text-[#6F52A3]">
                   {item.number}
@@ -237,7 +240,7 @@ export function PrivacyPage(): JSX.Element {
 
         <nav
           aria-label="隐私政策目录"
-          className="rounded-[8px] border border-[#E3E3E3] bg-white px-4 py-3 shadow-[0_1px_2px_rgba(15,23,42,0.03)]"
+          className="rounded-[8px] border border-[#E3E3E3] bg-white px-4 py-3 shadow-[0_1px_2px_rgba(15,23,42,0.03)] dark:border-border dark:bg-card"
         >
           <p className="mb-2 text-[11px] font-medium text-muted-foreground">快速查看</p>
           <div className="flex flex-wrap gap-x-4 gap-y-2">
@@ -257,6 +260,7 @@ export function PrivacyPage(): JSX.Element {
           id="data"
           title="我们处理什么"
           description="具体范围取决于您实际使用的功能。下表中的“可能”不代表每次任务都会使用该处理方。"
+          className="dark:border-border dark:bg-card"
         >
           <DataCards />
           <DataTable />
@@ -270,9 +274,10 @@ export function PrivacyPage(): JSX.Element {
           id="extension"
           title="浏览器扩展：两类数据，两种边界"
           description="常用网站统计和登录态同步不是同一种处理。"
+          className="dark:border-border dark:bg-card"
         >
           <div className="grid gap-3 sm:grid-cols-2">
-            <article className="rounded-[8px] border border-[#DCE8E5] bg-[#F6FBFA] p-4">
+            <article className="rounded-[8px] border border-[#DCE8E5] bg-[#F6FBFA] p-4 dark:border-[#377F70]/30 dark:bg-[#377F70]/10">
               <p className="text-[11px] font-medium text-[#377F70]">常用网站统计</p>
               <h3 className="mt-1 text-sm font-semibold">只上传域名级聚合</h3>
               <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
@@ -280,7 +285,7 @@ export function PrivacyPage(): JSX.Element {
                 URL、查询参数、网页标题或历史页面正文。下一次成功同步会替换服务器上的旧快照。
               </p>
             </article>
-            <article className="rounded-[8px] border border-[#E6DDF3] bg-[#FBF8FF] p-4">
+            <article className="rounded-[8px] border border-[#E6DDF3] bg-[#FBF8FF] p-4 dark:border-[#7655A6]/35 dark:bg-[#7655A6]/10">
               <p className="text-[11px] font-medium text-[#7655A6]">登录态同步</p>
               <h3 className="mt-1 text-sm font-semibold">会处理真实 Cookie 值</h3>
               <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
@@ -298,6 +303,7 @@ export function PrivacyPage(): JSX.Element {
           id="providers"
           title="第三方服务与跨境处理"
           description="以下服务是否参与，取决于您使用的功能和当时启用的服务。"
+          className="dark:border-border dark:bg-card"
         >
           <p className="mb-4 text-xs leading-relaxed text-muted-foreground">
             为完成您选择的任务，必要的指令、文件、媒体素材、账号或交易信息可能由相关服务商处理，
@@ -321,7 +327,7 @@ export function PrivacyPage(): JSX.Element {
               用于第三方登录、验证码、服务邮件、收款、权益发放、退款与争议处理。
             </ProviderGroup>
           </div>
-          <div className="mt-4 rounded-[8px] bg-[#F7F7F7] px-4 py-3 text-xs leading-relaxed text-muted-foreground">
+          <div className="mt-4 rounded-[8px] bg-[#F7F7F7] px-4 py-3 text-xs leading-relaxed text-muted-foreground dark:bg-muted">
             支付记录可能包含支付渠道标识和付款邮箱。HOLA DAY 不直接保存银行卡号、CVV
             或第三方支付账户密码。 每次付款只购买所选周期，到期前由您手动续费，不会自动扣款。
           </div>
@@ -331,6 +337,7 @@ export function PrivacyPage(): JSX.Element {
           id="retention"
           title="保存与删除"
           description="能给出期限时说明期限；无法统一时说明决定标准。"
+          className="dark:border-border dark:bg-card"
         >
           <div className="space-y-3 text-xs text-muted-foreground">
             <p>
@@ -356,6 +363,7 @@ export function PrivacyPage(): JSX.Element {
           id="rights"
           title="您的权利"
           description="适用法律可能赋予您查阅、复制、更正、删除、撤回同意、限制或反对处理以及投诉的权利。"
+          className="dark:border-border dark:bg-card"
         >
           <p className="text-xs leading-relaxed text-muted-foreground">
             当前请发送邮件至{' '}
@@ -373,7 +381,7 @@ export function PrivacyPage(): JSX.Element {
           </p>
         </Section>
 
-        <Section id="security" title="安全措施">
+        <Section id="security" title="安全措施" className="dark:border-border dark:bg-card">
           <p className="text-xs leading-relaxed text-muted-foreground">
             HOLA DAY 使用访问控制、传输保护、敏感请求头遮蔽和运行监控等措施降低风险。账号密码使用
             Argon2id 不可逆单向哈希保存；MFA
@@ -382,7 +390,7 @@ export function PrivacyPage(): JSX.Element {
           </p>
         </Section>
 
-        <Section id="minors" title="未成年人">
+        <Section id="minors" title="未成年人" className="dark:border-border dark:bg-card">
           <p className="text-xs leading-relaxed text-muted-foreground">
             本服务不面向 14
             周岁以下未成年人。若您认为未成年人未经监护人同意向我们提供了个人信息，请通过隐私邮箱联系；
@@ -390,14 +398,14 @@ export function PrivacyPage(): JSX.Element {
           </p>
         </Section>
 
-        <Section id="updates" title="政策更新">
+        <Section id="updates" title="政策更新" className="dark:border-border dark:bg-card">
           <p className="text-xs leading-relaxed text-muted-foreground">
             政策更新会在本页标明新日期。重大变化会通过合理渠道提示；适用法律要求重新同意或单独同意的处理，
             会在取得相应同意后启用，不以继续使用代替所需同意。
           </p>
         </Section>
 
-        <Section id="contact" title="联系我们">
+        <Section id="contact" title="联系我们" className="dark:border-border dark:bg-card">
           <div className="space-y-2 text-xs leading-relaxed text-muted-foreground">
             <p>
               隐私与个人信息申请：{' '}

@@ -32,7 +32,13 @@ export function SettingsPage(): JSX.Element {
   const { mode, setMode } = useTheme();
   const location = useLocation();
   const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
+  const deleteButtonRef = React.useRef<HTMLButtonElement>(null);
   const activeSection = normaliseSettingsHash(location.hash) ?? 'appearance';
+
+  const closeDeleteDialog = React.useCallback(() => {
+    setDeleteDialogOpen(false);
+    deleteButtonRef.current?.focus();
+  }, []);
 
   React.useEffect(() => {
     const sectionId = normaliseSettingsHash(location.hash);
@@ -130,6 +136,7 @@ export function SettingsPage(): JSX.Element {
                   {SUPPORT_EMAIL}
                 </a>
                 <Button
+                  ref={deleteButtonRef}
                   variant="outline"
                   size="sm"
                   onClick={() => setDeleteDialogOpen(true)}
@@ -149,7 +156,7 @@ export function SettingsPage(): JSX.Element {
         description={`账号删除不可撤销。邮件是申请入口，不代表账号会即时自动删除。我们会先确认账号归属，并处理账号关闭和可删除的关联数据；依法需要保留的交易、安全、争议或审计记录可能继续受限保存。\n\n将打开系统邮件应用；若未自动打开，请手动发送到 ${SUPPORT_EMAIL}。请勿在邮件中发送密码、验证码、身份证件照片或完整支付信息。`}
         confirmLabel="打开邮件应用"
         destructive
-        onClose={() => setDeleteDialogOpen(false)}
+        onClose={closeDeleteDialog}
         onConfirm={() => {
           window.location.href = supportMailtoHref({
             subject: '删除 HOLA DAY 账号',
