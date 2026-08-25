@@ -16,7 +16,7 @@ const CATEGORY_IDS: DataCategoryId[] = [
   'analytics_logs',
 ];
 
-export const processors: ProcessorDefinition[] = [
+export const processors: readonly ProcessorDefinition[] = [
   {
     id: 'holaday_internal',
     displayName: 'HOLA DAY',

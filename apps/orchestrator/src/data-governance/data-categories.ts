@@ -4,7 +4,7 @@ function source(path: string, fact: string): SourceEvidence {
   return { kind: 'source_file', path, fact };
 }
 
-export const dataCategories: DataCategoryDefinition[] = [
+export const dataCategories: readonly DataCategoryDefinition[] = [
   {
     id: 'account_security',
     displayName: '账号与安全',

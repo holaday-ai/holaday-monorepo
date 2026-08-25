@@ -174,6 +174,54 @@ describe('governance audit CLI', () => {
     expect(textLines.join('\n')).not.toContain('word secret');
   });
 
+  it('redacts credential assignments while preserving uppercase configuration key names', () => {
+    const secretFragments = [
+      'client secret with spaces',
+      'access-token-value',
+      'sk-credential-token-value',
+      'unterminated credential tail',
+    ];
+    const report: AuditReport = {
+      ...unsafeReport(),
+      issues: [
+        {
+          severity: 'error',
+          code: 'suspicious_secret',
+          registryId: 'category:account_security',
+          message:
+            'CLIENT_SECRET="client secret with spaces"; ACCESS_TOKEN=access-token-value; credential=sk-credential-token-value; CREDENTIAL="unterminated credential tail',
+        },
+      ],
+    };
+    const outputs = [
+      JSON.stringify(sanitizeGovernanceAuditReport(report)),
+      formatGovernanceAuditText(report).join('\n'),
+    ];
+
+    for (const output of outputs) {
+      expect(output).toContain('CLIENT_SECRET=[redacted-assignment]');
+      expect(output).toContain('ACCESS_TOKEN=[redacted-assignment]');
+      expect(output).toContain('CREDENTIAL=[redacted-assignment]');
+      for (const fragment of secretFragments) expect(output).not.toContain(fragment);
+    }
+  });
+
+  it('sanitizes report-construction exception messages before writing stderr', () => {
+    const output = io();
+    const code = runGovernanceAuditCli([], output, {
+      buildReport: () => {
+        throw new Error(
+          'failed with CLIENT_SECRET="stderr client secret" and credential=sk-stderr-token',
+        );
+      },
+    });
+
+    expect(code).toBe(2);
+    const stderr = output.stderr.mock.calls.flat().join('\n');
+    expect(stderr).toContain('CLIENT_SECRET=[redacted-assignment]');
+    expect(stderr).not.toMatch(/stderr client secret|sk-stderr-token/);
+  });
+
   it('redacts PEM private keys from JSON and text while retaining safe registry ids', () => {
     const pemHeader = '-----BEGIN RSA PRIVATE KEY-----';
     const pemBody = 'synthetic-private-key-body-fragment';

@@ -8,13 +8,13 @@ function source(path: string, fact: string): SourceEvidence {
 
 function capability(
   scope: string,
-  limitations: string[],
-  evidence: SourceEvidence[],
+  limitations: readonly string[],
+  evidence: readonly SourceEvidence[],
 ): Pick<CapabilityDefinition, 'scope' | 'limitations' | 'evidence'> {
   return { scope, limitations, evidence };
 }
 
-export const rightsCapabilities: RightsCapability[] = [
+export const rightsCapabilities: readonly RightsCapability[] = [
   {
     id: 'account_manual_request',
     export: {

@@ -51,6 +51,8 @@ export type RetentionPolicyId =
   | 'media_mixed'
   | 'analytics_configured_mixed';
 
+export type LocalRetentionRegimeId = 'task_30d' | 'audit_180d' | 'manual_hold';
+
 export type RightsCapabilityId =
   | 'account_manual_request'
   | 'task_manual_request'
@@ -79,87 +81,100 @@ export type VerificationStatus =
   | 'pending_legal_review';
 
 export interface SourceEvidence {
-  kind: 'source_file' | 'exported_symbol' | 'operational_entrypoint';
-  path: string;
-  symbol?: string;
-  fact: string;
+  readonly kind: 'source_file' | 'exported_symbol' | 'operational_entrypoint';
+  readonly path: string;
+  readonly symbol?: string;
+  readonly fact: string;
 }
 
 export interface DataCategoryDefinition {
-  id: DataCategoryId;
-  displayName: string;
-  description: string;
-  dataElements: string[];
-  sources: string[];
-  purposes: string[];
-  sensitivity: 'standard' | 'sensitive' | 'highly_sensitive';
-  storageLocations: string[];
-  processorIds: ProcessorId[];
-  retentionPolicyId: RetentionPolicyId;
-  rightsCapabilityId: RightsCapabilityId;
-  evidence: SourceEvidence[];
+  readonly id: DataCategoryId;
+  readonly displayName: string;
+  readonly description: string;
+  readonly dataElements: readonly string[];
+  readonly sources: readonly string[];
+  readonly purposes: readonly string[];
+  readonly sensitivity: 'standard' | 'sensitive' | 'highly_sensitive';
+  readonly storageLocations: readonly string[];
+  readonly processorIds: readonly ProcessorId[];
+  readonly retentionPolicyId: RetentionPolicyId;
+  readonly rightsCapabilityId: RightsCapabilityId;
+  readonly evidence: readonly SourceEvidence[];
 }
 
 export interface ProcessorDefinition {
-  id: ProcessorId;
-  displayName: string;
-  purposes: string[];
-  categoryIds: DataCategoryId[];
-  activation: {
-    mode: 'always_internal' | 'feature_conditional' | 'user_configured';
-    configKeys?: string[];
-    evidence: SourceEvidence[];
+  readonly id: ProcessorId;
+  readonly displayName: string;
+  readonly purposes: readonly string[];
+  readonly categoryIds: readonly DataCategoryId[];
+  readonly activation: {
+    readonly mode: 'always_internal' | 'feature_conditional' | 'user_configured';
+    readonly configKeys?: readonly string[];
+    readonly evidence: readonly SourceEvidence[];
   };
-  regionStatus: VerificationStatus;
-  legalReviewStatus: VerificationStatus;
+  readonly regionStatus: VerificationStatus;
+  readonly legalReviewStatus: VerificationStatus;
+}
+
+export interface LocalRetentionRegimeDefinition {
+  readonly id: LocalRetentionRegimeId;
+  readonly boundary: string;
+  readonly automationStatus: GovernanceCapabilityStatus;
+  readonly activation: {
+    readonly mode: 'feature_conditional';
+    readonly enabledByDefault: false;
+    readonly configKeys: readonly string[];
+  };
+  readonly evidence: readonly SourceEvidence[];
 }
 
 export interface RetentionPolicyDefinition {
-  id: RetentionPolicyId;
-  trigger: string;
-  rule:
-    | { kind: 'fixed_days'; days: number }
-    | { kind: 'until_user_action'; action: string }
-    | { kind: 'purpose_bound'; description: string }
-    | { kind: 'mixed'; description: string }
-    | { kind: 'unknown'; reason: string };
-  automationStatus: GovernanceCapabilityStatus;
-  retryStatus: GovernanceCapabilityStatus;
-  evidence: SourceEvidence[];
+  readonly id: RetentionPolicyId;
+  readonly trigger: string;
+  readonly rule:
+    | { readonly kind: 'fixed_days'; readonly days: number }
+    | { readonly kind: 'until_user_action'; readonly action: string }
+    | { readonly kind: 'purpose_bound'; readonly description: string }
+    | { readonly kind: 'mixed'; readonly description: string }
+    | { readonly kind: 'unknown'; readonly reason: string };
+  readonly automationStatus: GovernanceCapabilityStatus;
+  readonly retryStatus: GovernanceCapabilityStatus;
+  readonly evidence: readonly SourceEvidence[];
+  readonly localRegimes?: readonly LocalRetentionRegimeDefinition[];
 }
 
 export interface CapabilityDefinition {
-  status: GovernanceCapabilityStatus;
-  handlerRef?: string;
-  manualEntrypoint?: string;
-  scope: string;
-  limitations: string[];
-  evidence: SourceEvidence[];
+  readonly status: GovernanceCapabilityStatus;
+  readonly handlerRef?: string;
+  readonly manualEntrypoint?: string;
+  readonly scope: string;
+  readonly limitations: readonly string[];
+  readonly evidence: readonly SourceEvidence[];
 }
 
 export interface RightsCapability {
-  id: RightsCapabilityId;
-  export: CapabilityDefinition;
-  delete: CapabilityDefinition;
-  correct: CapabilityDefinition;
-  pause: CapabilityDefinition;
-  withdraw: CapabilityDefinition;
+  readonly id: RightsCapabilityId;
+  readonly export: CapabilityDefinition;
+  readonly delete: CapabilityDefinition;
+  readonly correct: CapabilityDefinition;
+  readonly pause: CapabilityDefinition;
+  readonly withdraw: CapabilityDefinition;
 }
 
 export interface PublicDisclosureDefinition {
-  categoryId: DataCategoryId;
-  spaLabel: string;
-  landingLabel: string;
-  requiredBoundaries: string[];
-  publiclyDisclosed: boolean;
+  readonly categoryId: DataCategoryId;
+  readonly spaLabel: string;
+  readonly landingLabel: string;
+  readonly requiredBoundaries: readonly string[];
+  readonly publiclyDisclosed: boolean;
 }
 
 export interface GovernanceRegistryBundle {
-  categories: DataCategoryDefinition[];
-  processors: ProcessorDefinition[];
-  retentionPolicies: RetentionPolicyDefinition[];
-  rightsCapabilities: RightsCapability[];
-  publicDisclosures: PublicDisclosureDefinition[];
+  readonly categories: readonly DataCategoryDefinition[];
+  readonly processors: readonly ProcessorDefinition[];
+  readonly retentionPolicies: readonly RetentionPolicyDefinition[];
+  readonly rightsCapabilities: readonly RightsCapability[];
+  readonly publicDisclosures: readonly PublicDisclosureDefinition[];
 }
 
 export interface AuditIssue {
@@ -181,6 +196,13 @@ export interface AuditIssue {
     | 'public_disclosure_missing'
     | 'public_disclosure_duplicate'
     | 'public_disclosure_unknown_category'
+    | 'required_string_missing'
+    | 'required_array_empty'
+    | 'invalid_enum_value'
+    | 'invalid_evidence'
+    | 'invalid_public_disclosure'
+    | 'handler_source_missing'
+    | 'handler_symbol_missing'
     | 'suspicious_secret'
     | 'suspicious_personal_data'
     | 'governance_gap';

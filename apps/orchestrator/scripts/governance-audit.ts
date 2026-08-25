@@ -31,8 +31,9 @@ export interface SanitizedGovernanceAuditReport {
 const APPROVED_PRIVACY_CONTACT = 'privacy@holaday.ai';
 const APPROVED_CONTACT_PLACEHOLDER = '__APPROVED_PRIVACY_CONTACT__';
 const SAFE_ISSUE_CODE = /^[a-z][a-z0-9_]*$/;
+const CONFIG_KEY_NAME = /^[A-Z][A-Z0-9_]+$/;
 const SAFE_REGISTRY_ID =
-  /^(?:category|processor|retention_policy|rights_capability|public_disclosure):[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)?$/;
+  /^(?:(?:category|processor|public_disclosure):[a-z][a-z0-9_]*|rights_capability:[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)?|retention_policy:[a-z][a-z0-9_]*(?:\.local_regime:[a-z][a-z0-9_]*)?)$/;
 const PRIVATE_KEY_BOUNDARY = ['-----BEGIN', '(?:[A-Z ]+ )?PRIVATE', 'KEY-----'].join(' ');
 const PRIVATE_KEY = new RegExp(
   `${PRIVATE_KEY_BOUNDARY}[\\s\\S]*?(?:-----END (?:[A-Z ]+ )?PRIVATE KEY-----|$)`,
@@ -94,15 +95,23 @@ interface CredentialAssignmentRedaction {
 }
 
 function redactCredentialAssignments(value: string): CredentialAssignmentRedaction {
-  const assignmentStart = /\b(?:password|passwd|api[_-]?key)\s*(?:=|:)\s*/gi;
+  const assignmentStart =
+    /\b(password|passwd|api[_-]?key|client[_-]?secret|access[_-]?token|credential)([ \t]*(?:=|:)[ \t]*)/gi;
   const parts: string[] = [];
   let found = false;
   let copiedThrough = 0;
   let match = assignmentStart.exec(value);
 
   while (match !== null) {
-    found = true;
     const valueStart = assignmentStart.lastIndex;
+    const key = match[1] ?? '';
+    const separator = match[2] ?? '=';
+    const redactedMarker = '[redacted-assignment]';
+    if (value.startsWith(redactedMarker, valueStart)) {
+      assignmentStart.lastIndex = valueStart + redactedMarker.length;
+      match = assignmentStart.exec(value);
+      continue;
+    }
     const quote = value[valueStart];
     let valueEnd = valueStart;
 
@@ -125,8 +134,16 @@ function redactCredentialAssignments(value: string): CredentialAssignmentRedacti
         valueEnd += 1;
       }
     }
+    if (valueEnd === valueStart) {
+      match = assignmentStart.exec(value);
+      continue;
+    }
 
-    parts.push(value.slice(copiedThrough, match.index), '[redacted-assignment]');
+    found = true;
+    parts.push(
+      value.slice(copiedThrough, match.index),
+      CONFIG_KEY_NAME.test(key) ? `${key}${separator}${redactedMarker}` : redactedMarker,
+    );
     copiedThrough = valueEnd;
     assignmentStart.lastIndex = valueEnd;
     match = assignmentStart.exec(value);
@@ -211,7 +228,15 @@ function printTextReport(report: AuditReport, io: GovernanceAuditIo): void {
   }
 }
 
-export function runGovernanceAuditCli(args: readonly string[], io: GovernanceAuditIo): 0 | 1 | 2 {
+export interface GovernanceAuditDependencies {
+  readonly buildReport?: () => AuditReport;
+}
+
+export function runGovernanceAuditCli(
+  args: readonly string[],
+  io: GovernanceAuditIo,
+  dependencies: GovernanceAuditDependencies = {},
+): 0 | 1 | 2 {
   const parsed = parseArguments(args);
   if (!parsed) {
     io.stderr(
@@ -222,14 +247,16 @@ export function runGovernanceAuditCli(args: readonly string[], io: GovernanceAud
 
   let report: AuditReport;
   try {
-    report = auditGovernanceRegistry(governanceRegistry, {
-      repoRoot: repositoryRoot(),
-      verifyEvidenceFiles: true,
-      requirePublicDisclosures: true,
-    });
+    report =
+      dependencies.buildReport?.() ??
+      auditGovernanceRegistry(governanceRegistry, {
+        repoRoot: repositoryRoot(),
+        verifyEvidenceFiles: true,
+        requirePublicDisclosures: true,
+      });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown report construction error.';
-    io.stderr(`Governance audit could not construct a report: ${message}`);
+    io.stderr(`Governance audit could not construct a report: ${sanitizeMessage(message)}`);
     return 2;
   }
 

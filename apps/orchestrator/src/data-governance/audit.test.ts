@@ -105,7 +105,7 @@ function validBundle(): GovernanceRegistryBundle {
   };
 }
 
-function first<T>(items: T[]): T {
+function first<T>(items: readonly T[]): T {
   const item = items[0];
   if (!item) throw new Error('Test fixture unexpectedly has no entry.');
   return item;
@@ -124,9 +124,10 @@ describe('auditGovernanceRegistry', () => {
 
   it('requires evidence even when source-file verification is disabled', () => {
     const bundle = validBundle();
-    first(bundle.categories).evidence = [];
+    const category = first(bundle.categories);
+    const malformed = { ...bundle, categories: [{ ...category, evidence: [] }] };
 
-    expect(auditGovernanceRegistry(bundle, { verifyEvidenceFiles: false }).issues).toEqual(
+    expect(auditGovernanceRegistry(malformed, { verifyEvidenceFiles: false }).issues).toEqual(
       expect.arrayContaining([expect.objectContaining({ code: 'missing_evidence' })]),
     );
   });
@@ -134,14 +135,20 @@ describe('auditGovernanceRegistry', () => {
   it('rejects duplicate ids, dangling references, and implemented rights without handlers', () => {
     const bundle = validBundle();
     const category = first(bundle.categories);
-    bundle.categories = [...bundle.categories, category];
-    Reflect.set(category, 'processorIds', ['missing_processor']);
+    const missingProcessorCategory = { ...category };
+    Reflect.set(missingProcessorCategory, 'processorIds', ['missing_processor']);
     const rightsCapability = first(bundle.rightsCapabilities);
-    bundle.rightsCapabilities[0] = {
-      ...rightsCapability,
-      export: { status: 'implemented', scope: '导出', limitations: [], evidence },
+    const malformed: GovernanceRegistryBundle = {
+      ...bundle,
+      categories: [missingProcessorCategory, { ...missingProcessorCategory }],
+      rightsCapabilities: [
+        {
+          ...rightsCapability,
+          export: { status: 'implemented', scope: '导出', limitations: [], evidence },
+        },
+      ],
     };
-    const report = auditGovernanceRegistry(bundle, { verifyEvidenceFiles: false });
+    const report = auditGovernanceRegistry(malformed, { verifyEvidenceFiles: false });
     expect(report.ok).toBe(false);
     expect(report.issues.map((issue) => issue.code)).toEqual(
       expect.arrayContaining(['duplicate_id', 'dangling_reference', 'implemented_handler_missing']),
@@ -151,30 +158,107 @@ describe('auditGovernanceRegistry', () => {
   it('rejects suspicious secret values but permits configuration key names', () => {
     const safe = validBundle();
     const processor = first(safe.processors);
-    safe.processors[0] = {
-      ...processor,
-      activation: { ...processor.activation, configKeys: ['RESEND_API_KEY'] },
+    const safeWithConfigKey: GovernanceRegistryBundle = {
+      ...safe,
+      processors: [
+        {
+          ...processor,
+          activation: {
+            ...processor.activation,
+            configKeys: ['RESEND_API_KEY', 'CLIENT_SECRET', 'ACCESS_TOKEN'],
+          },
+        },
+      ],
     };
-    expect(auditGovernanceRegistry(safe, { verifyEvidenceFiles: false }).ok).toBe(true);
-
-    const unsafe = validBundle();
-    const category = first(unsafe.categories);
-    unsafe.categories[0] = {
-      ...category,
-      description: 'sk-live-secret-example-123456789',
-    };
-    expect(auditGovernanceRegistry(unsafe, { verifyEvidenceFiles: false }).issues).toEqual(
-      expect.arrayContaining([expect.objectContaining({ code: 'suspicious_secret' })]),
+    expect(auditGovernanceRegistry(safeWithConfigKey, { verifyEvidenceFiles: false }).ok).toBe(
+      true,
     );
+
+    for (const description of [
+      'embedded=prefix/sk-live-secret-example-123456789',
+      'credential=sk-live-secret-example-123456789',
+      'client_secret=plain-client-secret',
+      'access_token="plain access token"',
+    ]) {
+      const unsafe = validBundle();
+      const category = first(unsafe.categories);
+      const malformed = { ...unsafe, categories: [{ ...category, description }] };
+      expect(auditGovernanceRegistry(malformed, { verifyEvidenceFiles: false }).issues).toEqual(
+        expect.arrayContaining([expect.objectContaining({ code: 'suspicious_secret' })]),
+      );
+    }
+  });
+
+  it('aggregates empty fields, arrays, enum values, evidence, and disclosure failures', () => {
+    const bundle = validBundle();
+    const category = {
+      ...first(bundle.categories),
+      displayName: '',
+      dataElements: [],
+      evidence: [{ kind: 'source_file' as const, path: '', fact: '' }],
+    };
+    Reflect.set(category, 'sensitivity', 'extreme');
+    const processor = {
+      ...first(bundle.processors),
+      purposes: [],
+      activation: { ...first(bundle.processors).activation },
+    };
+    Reflect.set(processor.activation, 'mode', 'sometimes');
+    Reflect.set(processor, 'regionStatus', 'probably_verified');
+    const policy = { ...first(bundle.retentionPolicies), trigger: '' };
+    Reflect.set(policy, 'automationStatus', 'automatic');
+    const rights = {
+      ...first(bundle.rightsCapabilities),
+      export: { ...first(bundle.rightsCapabilities).export, scope: '' },
+    };
+    Reflect.set(rights.export, 'status', 'planned');
+    const disclosure = {
+      ...first(bundle.publicDisclosures),
+      spaLabel: '',
+      requiredBoundaries: [],
+      publiclyDisclosed: false,
+    };
+    const malformed = {
+      ...bundle,
+      categories: [category],
+      processors: [processor],
+      retentionPolicies: [policy],
+      rightsCapabilities: [rights],
+      publicDisclosures: [disclosure],
+    } as GovernanceRegistryBundle;
+
+    const report = auditGovernanceRegistry(malformed, {
+      verifyEvidenceFiles: false,
+      requirePublicDisclosures: true,
+    });
+
+    expect(report.ok).toBe(false);
+    expect(report.issues.map((issue) => issue.code)).toEqual(
+      expect.arrayContaining([
+        'required_string_missing',
+        'required_array_empty',
+        'invalid_enum_value',
+        'invalid_evidence',
+        'invalid_public_disclosure',
+      ]),
+    );
+    expect(report.summary.errors).toBeGreaterThanOrEqual(10);
   });
 
   it('enforces ids, bidirectional processors, retention rules, and disclosure cardinality', () => {
     const bundle = validBundle();
-    Reflect.set(first(bundle.categories), 'id', 'Account Security');
-    first(bundle.processors).categoryIds = [];
-    first(bundle.retentionPolicies).rule = { kind: 'fixed_days', days: 0 };
-    bundle.publicDisclosures.push(first(bundle.publicDisclosures));
-    const report = auditGovernanceRegistry(bundle, {
+    const category = { ...first(bundle.categories) };
+    Reflect.set(category, 'id', 'Account Security');
+    const malformed = {
+      ...bundle,
+      categories: [category],
+      processors: [{ ...first(bundle.processors), categoryIds: [] }],
+      retentionPolicies: [
+        { ...first(bundle.retentionPolicies), rule: { kind: 'fixed_days', days: 0 } },
+      ],
+      publicDisclosures: [first(bundle.publicDisclosures), { ...first(bundle.publicDisclosures) }],
+    } as GovernanceRegistryBundle;
+    const report = auditGovernanceRegistry(malformed, {
       verifyEvidenceFiles: false,
       requirePublicDisclosures: true,
     });
@@ -190,15 +274,24 @@ describe('auditGovernanceRegistry', () => {
 
   it('verifies exported symbols without reading runtime data', () => {
     const bundle = validBundle();
-    first(bundle.categories).evidence = [
-      {
-        kind: 'exported_symbol',
-        path: 'apps/orchestrator/src/db/schema/users.ts',
-        symbol: 'DefinitelyMissingGovernanceSymbol',
-        fact: '负向证据符号',
-      },
-    ];
-    const report = auditGovernanceRegistry(bundle, { repoRoot, verifyEvidenceFiles: true });
+    const category = first(bundle.categories);
+    const malformed: GovernanceRegistryBundle = {
+      ...bundle,
+      categories: [
+        {
+          ...category,
+          evidence: [
+            {
+              kind: 'exported_symbol',
+              path: 'apps/orchestrator/src/db/schema/users.ts',
+              symbol: 'DefinitelyMissingGovernanceSymbol',
+              fact: '负向证据符号',
+            },
+          ],
+        },
+      ],
+    };
+    const report = auditGovernanceRegistry(malformed, { repoRoot, verifyEvidenceFiles: true });
     expect(report.issues).toEqual(
       expect.arrayContaining([expect.objectContaining({ code: 'evidence_symbol_missing' })]),
     );
@@ -209,21 +302,114 @@ describe('auditGovernanceRegistry', () => {
     (handlerRef) => {
       const bundle = validBundle();
       const rightsCapability = first(bundle.rightsCapabilities);
-      rightsCapability.export = {
-        status: 'implemented',
-        handlerRef,
-        scope: '导出',
-        limitations: [],
-        evidence,
+      const malformed: GovernanceRegistryBundle = {
+        ...bundle,
+        rightsCapabilities: [
+          {
+            ...rightsCapability,
+            export: {
+              status: 'implemented',
+              handlerRef,
+              scope: '导出',
+              limitations: [],
+              evidence,
+            },
+          },
+        ],
       };
 
       expect(
-        auditGovernanceRegistry(bundle, { repoRoot, verifyEvidenceFiles: false }).issues,
+        auditGovernanceRegistry(malformed, { repoRoot, verifyEvidenceFiles: false }).issues,
       ).toEqual(
         expect.arrayContaining([expect.objectContaining({ code: 'implemented_handler_missing' })]),
       );
     },
   );
+
+  it.each([
+    ['missing-handler.ts#missingHandler', 'handler_source_missing'],
+    ['apps/orchestrator/src/db/schema/users.ts#DefinitelyMissingHandler', 'handler_symbol_missing'],
+  ] as const)(
+    'verifies implemented handler path and exact export for %s',
+    (handlerRef, expectedCode) => {
+      const bundle = validBundle();
+      const rightsCapability = first(bundle.rightsCapabilities);
+      const malformed: GovernanceRegistryBundle = {
+        ...bundle,
+        rightsCapabilities: [
+          {
+            ...rightsCapability,
+            export: {
+              status: 'implemented',
+              handlerRef,
+              scope: '导出',
+              limitations: [],
+              evidence,
+            },
+          },
+        ],
+      };
+
+      const report = auditGovernanceRegistry(malformed, {
+        repoRoot,
+        verifyEvidenceFiles: true,
+      });
+      expect(report.issues).toEqual(
+        expect.arrayContaining([expect.objectContaining({ code: expectedCode })]),
+      );
+    },
+  );
+
+  it('aggregates directory evidence and handler paths instead of throwing', () => {
+    const temporaryRoot = mkdtempSync(join(tmpdir(), 'governance-directory-'));
+    try {
+      const sourcePath = join(temporaryRoot, 'apps/orchestrator/src/db/schema/users.ts');
+      mkdirSync(join(temporaryRoot, 'apps/orchestrator/src/db/schema'), { recursive: true });
+      writeFileSync(sourcePath, 'export const userSchema = true;');
+      mkdirSync(join(temporaryRoot, 'directory-evidence'));
+      const bundle = validBundle();
+      const rightsCapability = first(bundle.rightsCapabilities);
+      const malformed: GovernanceRegistryBundle = {
+        ...bundle,
+        categories: [
+          {
+            ...first(bundle.categories),
+            evidence: [
+              {
+                kind: 'exported_symbol',
+                path: 'directory-evidence',
+                symbol: 'directorySymbol',
+                fact: '目录不能作为源码证据',
+              },
+            ],
+          },
+        ],
+        rightsCapabilities: [
+          {
+            ...rightsCapability,
+            export: {
+              status: 'implemented',
+              handlerRef: 'directory-evidence#directorySymbol',
+              scope: '导出',
+              limitations: [],
+              evidence,
+            },
+          },
+        ],
+      };
+
+      const report = auditGovernanceRegistry(malformed, {
+        repoRoot: temporaryRoot,
+        verifyEvidenceFiles: true,
+      });
+      expect(report.ok).toBe(false);
+      expect(report.issues.map((issue) => issue.code)).toEqual(
+        expect.arrayContaining(['source_evidence_missing', 'handler_source_missing']),
+      );
+    } finally {
+      rmSync(temporaryRoot, { force: true, recursive: true });
+    }
+  });
 
   it('rejects evidence symlinks whose canonical target escapes repoRoot', () => {
     const temporaryRoot = mkdtempSync(join(tmpdir(), 'governance-root-'));
@@ -237,16 +423,25 @@ describe('auditGovernanceRegistry', () => {
       symlinkSync(externalSource, join(temporaryRoot, 'linked.ts'));
 
       const bundle = validBundle();
-      first(bundle.categories).evidence = [
-        {
-          kind: 'exported_symbol',
-          path: 'linked.ts',
-          symbol: 'externalEvidence',
-          fact: '外部符号',
-        },
-      ];
+      const category = first(bundle.categories);
+      const malformed: GovernanceRegistryBundle = {
+        ...bundle,
+        categories: [
+          {
+            ...category,
+            evidence: [
+              {
+                kind: 'exported_symbol',
+                path: 'linked.ts',
+                symbol: 'externalEvidence',
+                fact: '外部符号',
+              },
+            ],
+          },
+        ],
+      };
 
-      const report = auditGovernanceRegistry(bundle, {
+      const report = auditGovernanceRegistry(malformed, {
         repoRoot: temporaryRoot,
         verifyEvidenceFiles: true,
       });
@@ -269,9 +464,17 @@ describe('auditGovernanceRegistry', () => {
     (manualEntrypoint) => {
       const bundle = validBundle();
       const rightsCapability = first(bundle.rightsCapabilities);
-      rightsCapability.delete = { ...rightsCapability.delete, manualEntrypoint };
+      const malformed: GovernanceRegistryBundle = {
+        ...bundle,
+        rightsCapabilities: [
+          {
+            ...rightsCapability,
+            delete: { ...rightsCapability.delete, manualEntrypoint },
+          },
+        ],
+      };
 
-      expect(auditGovernanceRegistry(bundle, { verifyEvidenceFiles: false }).issues).toEqual(
+      expect(auditGovernanceRegistry(malformed, { verifyEvidenceFiles: false }).issues).toEqual(
         expect.arrayContaining([expect.objectContaining({ code: 'suspicious_secret' })]),
       );
     },

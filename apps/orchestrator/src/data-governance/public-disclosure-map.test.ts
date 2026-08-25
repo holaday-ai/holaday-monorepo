@@ -22,7 +22,7 @@ const APPROVED_PUBLIC_DISCLOSURES = [
     categoryId: 'task_execution',
     spaLabel: '任务与执行',
     landingLabel: '任务与执行',
-    requiredBoundaries: ['不是服务器删除期限'],
+    requiredBoundaries: ['套餐天数只控制可见历史'],
     publiclyDisclosed: true,
   },
   {
@@ -71,14 +71,14 @@ const APPROVED_PUBLIC_DISCLOSURES = [
     categoryId: 'extension_login_cookies',
     spaLabel: '扩展登录态',
     landingLabel: '扩展登录态',
-    requiredBoundaries: ['真实 Cookie'],
+    requiredBoundaries: ['Cookie 名称、值'],
     publiclyDisclosed: true,
   },
   {
     categoryId: 'payments_entitlements',
     spaLabel: '支付与套餐',
     landingLabel: '支付与套餐',
-    requiredBoundaries: ['不会自动扣款'],
+    requiredBoundaries: ['按交易、税务、争议和适用法律所需保存'],
     publiclyDisclosed: true,
   },
   {
@@ -109,15 +109,27 @@ describe('public disclosure map', () => {
     expect(publicDisclosures).toEqual(APPROVED_PUBLIC_DISCLOSURES);
   });
 
-  it('maps every registered public category to both policy surfaces', () => {
+  it('maps every registered public category to its own row on both policy surfaces', () => {
     expect(publicDisclosures).toHaveLength(13);
     expect(new Set(publicDisclosures.map((item) => item.categoryId)).size).toBe(13);
     for (const item of publicDisclosures) {
-      expect(spa).toContain(item.spaLabel);
-      expect(landing).toContain(item.landingLabel);
+      const spaLabel = `label: '${item.spaLabel}'`;
+      const spaStart = spa.indexOf(spaLabel);
+      const spaEnd = spa.indexOf('\n  },', spaStart);
+      const spaEntry = spa.slice(spaStart, spaEnd);
+      const landingStart = landing.indexOf(`<tr><td>${item.landingLabel}</td>`);
+      const landingEnd = landing.indexOf('</tr>', landingStart);
+      const landingRow = landing.slice(landingStart, landingEnd);
+
+      expect(spaStart, `SPA entry missing for ${item.categoryId}`).toBeGreaterThanOrEqual(0);
+      expect(spaEnd, `SPA entry end missing for ${item.categoryId}`).toBeGreaterThan(spaStart);
+      expect(landingStart, `landing row missing for ${item.categoryId}`).toBeGreaterThanOrEqual(0);
+      expect(landingEnd, `landing row end missing for ${item.categoryId}`).toBeGreaterThan(
+        landingStart,
+      );
       for (const boundary of item.requiredBoundaries) {
-        expect(spa).toContain(boundary);
-        expect(landing).toContain(boundary);
+        expect(spaEntry, `SPA ${item.categoryId} boundary`).toContain(boundary);
+        expect(landingRow, `landing ${item.categoryId} boundary`).toContain(boundary);
       }
     }
   });

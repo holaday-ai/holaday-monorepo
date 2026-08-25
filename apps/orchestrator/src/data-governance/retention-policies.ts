@@ -4,7 +4,7 @@ function source(path: string, fact: string): SourceEvidence {
   return { kind: 'source_file', path, fact };
 }
 
-export const retentionPolicies: RetentionPolicyDefinition[] = [
+export const retentionPolicies: readonly RetentionPolicyDefinition[] = [
   {
     id: 'account_purpose_bound',
     trigger: '账号创建与持续使用',
@@ -32,18 +32,111 @@ export const retentionPolicies: RetentionPolicyDefinition[] = [
         '任务时间分组和可见性工具不定义服务器删除期限。',
       ),
     ],
+    localRegimes: [
+      {
+        id: 'task_30d',
+        boundary:
+          'task_30d 是写入标签；仅 LEDGER_DB_WRITE_ENABLED 开启时写入，expires_at 由 LEDGER_RETENTION_DAYS 决定且默认 60 天；仅默认关闭的 RETENTION_REAPER_ENABLED 开启后，reaper 才处理已到期且非 manual_hold 的行。',
+        automationStatus: 'implemented',
+        activation: {
+          mode: 'feature_conditional',
+          enabledByDefault: false,
+          configKeys: [
+            'LEDGER_DB_WRITE_ENABLED',
+            'LEDGER_RETENTION_DAYS',
+            'RETENTION_REAPER_ENABLED',
+          ],
+        },
+        evidence: [
+          source(
+            'apps/orchestrator/src/execution/feature-flags.ts',
+            'Evidence Ledger 数据库写入仅在 LEDGER_DB_WRITE_ENABLED 严格等于 true 时开启，默认关闭。',
+          ),
+          source(
+            'apps/orchestrator/src/evidence/ledger-write-service.ts',
+            '写入器保存 task_30d 标签，并按 LEDGER_RETENTION_DAYS 为新行写入 expires_at，缺省为 60 天。',
+          ),
+          source(
+            'apps/orchestrator/src/index.ts',
+            '定时 reaper 仅在 RETENTION_REAPER_ENABLED 严格等于 true 时注册，默认关闭。',
+          ),
+          source(
+            'apps/orchestrator/src/evidence/retention-reaper.ts',
+            'reaper 只处理仓储返回的已到期非 manual_hold 行。',
+          ),
+        ],
+      },
+      {
+        id: 'audit_180d',
+        boundary:
+          '删除路由识别 audit_180d 并在任务删除时去标识后保留；当前没有已核实的 180 天写入器或统一 expires_at 赋值路径，因此不能声明 180 天自动删除。',
+        automationStatus: 'not_implemented',
+        activation: {
+          mode: 'feature_conditional',
+          enabledByDefault: false,
+          configKeys: ['RETENTION_REAPER_ENABLED'],
+        },
+        evidence: [
+          source(
+            'apps/orchestrator/src/evidence/evidence-deletion-service.ts',
+            '任务删除路由将 audit_180d 视为需去标识并保留的本地证据标签。',
+          ),
+          source(
+            'apps/orchestrator/src/evidence/evidence-artifact-repository.ts',
+            '仓储只按每行 expires_at 选择到期制品，没有 audit_180d 的固定天数推断。',
+          ),
+          source(
+            'apps/orchestrator/src/index.ts',
+            '通用 retention reaper 的定时注册由默认关闭的 RETENTION_REAPER_ENABLED 控制。',
+          ),
+        ],
+      },
+      {
+        id: 'manual_hold',
+        boundary:
+          'manual_hold 仅在 ACTION_CAPTURE_ENABLED 与 B4_SCREENSHOT_ANCHOR_ENABLED 同时开启时用于截图锚点，两个开关默认关闭；仓储查询和 reaper 明确排除 manual_hold，不存在自动删除期限。',
+        automationStatus: 'not_applicable',
+        activation: {
+          mode: 'feature_conditional',
+          enabledByDefault: false,
+          configKeys: [
+            'ACTION_CAPTURE_ENABLED',
+            'B4_SCREENSHOT_ANCHOR_ENABLED',
+            'RETENTION_REAPER_ENABLED',
+          ],
+        },
+        evidence: [
+          source(
+            'apps/orchestrator/src/execution/feature-flags.ts',
+            'ACTION_CAPTURE_ENABLED 与 B4_SCREENSHOT_ANCHOR_ENABLED 均需显式 true，默认关闭。',
+          ),
+          source(
+            'apps/orchestrator/src/trpc/routers/tasks.ts',
+            '截图锚点只在两个捕获开关同时开启时写入 manual_hold 标签。',
+          ),
+          source(
+            'apps/orchestrator/src/evidence/evidence-artifact-repository.ts',
+            '到期查询明确排除 retention_policy 为 manual_hold 的行。',
+          ),
+        ],
+      },
+    ],
   },
   {
     id: 'memory_entry_lifecycle',
     trigger: '记忆条目创建、更新或到期',
-    rule: { kind: 'mixed', description: '偏好可长期，其他条目按自身期限/长期状态。' },
-    automationStatus: 'implemented',
+    rule: {
+      kind: 'mixed',
+      description:
+        '偏好可长期，其他条目按自身期限/长期状态；读取时过滤不等于存储删除，尚无到期行删除自动化。',
+    },
+    automationStatus: 'not_implemented',
     retryStatus: 'not_implemented',
     evidence: [
       source('apps/orchestrator/src/db/schema/execution-memory.ts', '记忆条目包含可选到期时间。'),
       source(
         'apps/orchestrator/src/trpc/routers/memory.ts',
-        '记忆路由过滤过期条目并提供用户删除操作。',
+        '记忆路由在读取时过滤过期条目并提供用户删除操作，但读取过滤不删除存储行。',
       ),
     ],
   },

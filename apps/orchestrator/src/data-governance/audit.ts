@@ -1,4 +1,10 @@
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import {
+  accessSync,
+  constants as fsConstants,
+  readFileSync,
+  realpathSync,
+  statSync,
+} from 'node:fs';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import type {
   AuditIssue,
@@ -18,10 +24,56 @@ const SNAKE_CASE_ID = /^[a-z][a-z0-9_]*$/;
 const CONFIG_KEY_NAME = /^[A-Z][A-Z0-9_]+$/;
 const HANDLER_REF = /^[^#\s]+#[A-Za-z_$][A-Za-z0-9_$]*$/;
 const CAPABILITY_NAMES = ['export', 'delete', 'correct', 'pause', 'withdraw'] as const;
+const CAPABILITY_STATUSES = ['implemented', 'manual', 'not_implemented', 'not_applicable'] as const;
+const VERIFICATION_STATUSES = [
+  'verified_in_code',
+  'verified_operationally',
+  'unknown',
+  'pending_legal_review',
+] as const;
+const EVIDENCE_KINDS = ['source_file', 'exported_symbol', 'operational_entrypoint'] as const;
+const SENSITIVITIES = ['standard', 'sensitive', 'highly_sensitive'] as const;
+const ACTIVATION_MODES = ['always_internal', 'feature_conditional', 'user_configured'] as const;
+const RETENTION_RULE_KINDS = [
+  'fixed_days',
+  'until_user_action',
+  'purpose_bound',
+  'mixed',
+  'unknown',
+] as const;
 
 const SECRET_VALUE =
-  /-----BEGIN (?:[A-Z ]+)?PRIVATE KEY-----|(?:^|\s)(?:sk-|ghp_|xoxb-|xoxp-)[A-Za-z0-9_-]+|Bearer\s+\S+|(?:document\.)?cookie\s*(?:=|:)|set-cookie\s*:/i;
+  /-----BEGIN (?:[A-Z ]+)?PRIVATE KEY-----|(?:^|[^A-Za-z0-9])(?:sk-|ghp_|xoxb-|xoxp-)[A-Za-z0-9_-]+|Bearer\s+\S+|(?:document\.)?cookie\s*(?:=|:)|set-cookie\s*:|\b(?:password|passwd|api[_-]?key|client[_-]?secret|access[_-]?token|credential)\s*(?:=|:)\s*(?:["'][^"']*|[^\s;,]+)/i;
 const PERSONAL_VALUE = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}|\+?\d(?:[\s-]?\d){7,}/i;
+
+type AddIssue = (
+  severity: AuditIssue['severity'],
+  code: AuditIssue['code'],
+  registryId: string,
+  message: string,
+) => void;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function recordArray<T>(value: unknown): readonly T[] {
+  return Array.isArray(value) ? (value.filter(isRecord) as T[]) : [];
+}
+
+function stringArray(value: unknown): readonly string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string')
+    : [];
+}
+
+function evidenceArray(value: unknown): readonly SourceEvidence[] {
+  return recordArray<SourceEvidence>(value);
+}
+
+function oneOf(value: unknown, allowed: readonly string[]): value is string {
+  return typeof value === 'string' && allowed.includes(value);
+}
 
 function nonEmpty(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
@@ -58,12 +110,8 @@ export function auditGovernanceRegistry(
   const issues: AuditIssue[] = [];
   const repoRoot = resolve(options.repoRoot ?? process.cwd());
   const gapKeys = new Set<string>();
-  const addIssue = (
-    severity: AuditIssue['severity'],
-    code: AuditIssue['code'],
-    registryId: string,
-    message: string,
-  ) => issues.push({ severity, code, registryId, message });
+  const addIssue: AddIssue = (severity, code, registryId, message) =>
+    issues.push({ severity, code, registryId, message });
   const addGap = (registryId: string, status: string) => {
     const key = `${registryId}:${status}`;
     if (!gapKeys.has(key)) {
@@ -77,7 +125,26 @@ export function auditGovernanceRegistry(
     }
   };
 
-  const auditIds = (kind: string, entries: Array<{ id: string }>) => {
+  const rawBundle: Record<string, unknown> = isRecord(bundle) ? bundle : {};
+  const categories = recordArray<GovernanceRegistryBundle['categories'][number]>(
+    rawBundle.categories,
+  );
+  const processorEntries = recordArray<GovernanceRegistryBundle['processors'][number]>(
+    rawBundle.processors,
+  );
+  const policyEntries = recordArray<GovernanceRegistryBundle['retentionPolicies'][number]>(
+    rawBundle.retentionPolicies,
+  );
+  const rightsEntries = recordArray<GovernanceRegistryBundle['rightsCapabilities'][number]>(
+    rawBundle.rightsCapabilities,
+  );
+  const disclosureEntries = recordArray<GovernanceRegistryBundle['publicDisclosures'][number]>(
+    rawBundle.publicDisclosures,
+  );
+
+  validateGovernanceRegistryStructure(rawBundle, addIssue);
+
+  const auditIds = (kind: string, entries: readonly { readonly id: string }[]) => {
     const seen = new Set<string>();
     for (const entry of entries) {
       const registryId = `${kind}:${entry.id}`;
@@ -91,17 +158,21 @@ export function auditGovernanceRegistry(
     }
   };
 
-  auditIds('category', bundle.categories);
-  auditIds('processor', bundle.processors);
-  auditIds('retention_policy', bundle.retentionPolicies);
-  auditIds('rights_capability', bundle.rightsCapabilities);
+  auditIds('category', categories);
+  auditIds('processor', processorEntries);
+  auditIds('retention_policy', policyEntries);
+  auditIds('rights_capability', rightsEntries);
 
-  const categories = new Map(bundle.categories.map((category) => [category.id, category]));
-  const processors = new Map(bundle.processors.map((processor) => [processor.id, processor]));
-  const retentionPolicies = new Set(bundle.retentionPolicies.map((policy) => policy.id));
-  const rightsCapabilities = new Set(bundle.rightsCapabilities.map((capability) => capability.id));
+  const categoryMap = new Map<string, (typeof categories)[number]>(
+    categories.map((category) => [category.id, category]),
+  );
+  const processors = new Map<string, (typeof processorEntries)[number]>(
+    processorEntries.map((processor) => [processor.id, processor]),
+  );
+  const retentionPolicies = new Set<string>(policyEntries.map((policy) => policy.id));
+  const rightsCapabilities = new Set<string>(rightsEntries.map((capability) => capability.id));
 
-  for (const category of bundle.categories) {
+  for (const category of categories) {
     const registryId = `category:${category.id}`;
     if (!retentionPolicies.has(category.retentionPolicyId)) {
       addIssue(
@@ -119,7 +190,7 @@ export function auditGovernanceRegistry(
         'Rights capability reference does not exist.',
       );
     }
-    for (const processorId of category.processorIds) {
+    for (const processorId of stringArray(category.processorIds)) {
       const processor = processors.get(processorId);
       if (!processor) {
         addIssue(
@@ -128,7 +199,7 @@ export function auditGovernanceRegistry(
           registryId,
           `Processor reference ${processorId} does not exist.`,
         );
-      } else if (!processor.categoryIds.includes(category.id)) {
+      } else if (!stringArray(processor.categoryIds).includes(category.id)) {
         addIssue(
           'error',
           'processor_category_mismatch',
@@ -139,10 +210,10 @@ export function auditGovernanceRegistry(
     }
   }
 
-  for (const processor of bundle.processors) {
+  for (const processor of processorEntries) {
     const registryId = `processor:${processor.id}`;
-    for (const categoryId of processor.categoryIds) {
-      const category = categories.get(categoryId);
+    for (const categoryId of stringArray(processor.categoryIds)) {
+      const category = categoryMap.get(categoryId);
       if (!category) {
         addIssue(
           'error',
@@ -150,7 +221,7 @@ export function auditGovernanceRegistry(
           registryId,
           `Category reference ${categoryId} does not exist.`,
         );
-      } else if (!category.processorIds.includes(processor.id)) {
+      } else if (!stringArray(category.processorIds).includes(processor.id)) {
         addIssue(
           'error',
           'processor_category_mismatch',
@@ -179,6 +250,8 @@ export function auditGovernanceRegistry(
           registryId,
           'Implemented capability requires a repository-relative path#exportedSymbol handlerRef.',
         );
+      } else if (options.verifyEvidenceFiles) {
+        auditHandlerRef(capability.handlerRef, registryId, repoRoot, addIssue);
       }
     } else if (nonEmpty(capability.handlerRef)) {
       addIssue(
@@ -209,17 +282,24 @@ export function auditGovernanceRegistry(
     }
   };
 
-  for (const rightsCapability of bundle.rightsCapabilities) {
+  for (const rightsCapability of rightsEntries) {
     for (const name of CAPABILITY_NAMES) {
-      auditCapability(`rights_capability:${rightsCapability.id}.${name}`, rightsCapability[name]);
+      const capability = rightsCapability[name];
+      if (isRecord(capability)) {
+        auditCapability(
+          `rights_capability:${rightsCapability.id}.${name}`,
+          capability as unknown as CapabilityDefinition,
+        );
+      }
     }
   }
 
   let unknownRetentionPolicies = 0;
-  for (const policy of bundle.retentionPolicies) {
+  for (const policy of policyEntries) {
     const registryId = `retention_policy:${policy.id}`;
-    if (policy.rule.kind === 'fixed_days') {
-      if (!Number.isInteger(policy.rule.days) || policy.rule.days <= 0) {
+    const rule: Record<string, unknown> = isRecord(policy.rule) ? policy.rule : {};
+    if (rule.kind === 'fixed_days') {
+      if (!Number.isInteger(rule.days) || (rule.days as number) <= 0) {
         addIssue(
           'error',
           'invalid_fixed_days',
@@ -236,10 +316,10 @@ export function auditGovernanceRegistry(
         );
       }
     }
-    if (policy.rule.kind === 'unknown') {
+    if (rule.kind === 'unknown') {
       unknownRetentionPolicies += 1;
       addGap(registryId, 'unknown');
-      if (!nonEmpty(policy.rule.reason)) {
+      if (!nonEmpty(rule.reason)) {
         addIssue(
           'error',
           'unknown_reason_missing',
@@ -251,23 +331,46 @@ export function auditGovernanceRegistry(
     for (const status of [policy.automationStatus, policy.retryStatus]) {
       if (status === 'manual' || status === 'not_implemented') addGap(registryId, status);
     }
+    for (const regime of recordArray<NonNullable<typeof policy.localRegimes>[number]>(
+      policy.localRegimes,
+    )) {
+      if (regime.automationStatus === 'manual' || regime.automationStatus === 'not_implemented') {
+        addGap(`${registryId}.local_regime:${regime.id}`, regime.automationStatus);
+      }
+    }
   }
 
-  const evidenceGroups: Array<{ registryId: string; evidence: SourceEvidence[] }> = [];
-  for (const category of bundle.categories)
-    evidenceGroups.push({ registryId: `category:${category.id}`, evidence: category.evidence });
-  for (const processor of bundle.processors)
+  const evidenceGroups: Array<{ registryId: string; evidence: readonly SourceEvidence[] }> = [];
+  for (const category of categories)
+    evidenceGroups.push({
+      registryId: `category:${category.id}`,
+      evidence: evidenceArray(category.evidence),
+    });
+  for (const processor of processorEntries)
     evidenceGroups.push({
       registryId: `processor:${processor.id}`,
-      evidence: processor.activation.evidence,
+      evidence: evidenceArray(isRecord(processor.activation) ? processor.activation.evidence : []),
     });
-  for (const policy of bundle.retentionPolicies)
-    evidenceGroups.push({ registryId: `retention_policy:${policy.id}`, evidence: policy.evidence });
-  for (const rightsCapability of bundle.rightsCapabilities) {
+  for (const policy of policyEntries) {
+    evidenceGroups.push({
+      registryId: `retention_policy:${policy.id}`,
+      evidence: evidenceArray(policy.evidence),
+    });
+    for (const regime of recordArray<NonNullable<typeof policy.localRegimes>[number]>(
+      policy.localRegimes,
+    )) {
+      evidenceGroups.push({
+        registryId: `retention_policy:${policy.id}.local_regime:${regime.id}`,
+        evidence: evidenceArray(regime.evidence),
+      });
+    }
+  }
+  for (const rightsCapability of rightsEntries) {
     for (const name of CAPABILITY_NAMES) {
+      const capability = rightsCapability[name];
       evidenceGroups.push({
         registryId: `rights_capability:${rightsCapability.id}.${name}`,
-        evidence: rightsCapability[name].evidence,
+        evidence: evidenceArray(isRecord(capability) ? capability.evidence : []),
       });
     }
   }
@@ -275,9 +378,9 @@ export function auditGovernanceRegistry(
 
   if (options.requirePublicDisclosures) {
     const disclosureCounts = new Map<string, number>();
-    for (const disclosure of bundle.publicDisclosures) {
+    for (const disclosure of disclosureEntries) {
       const registryId = `public_disclosure:${disclosure.categoryId}`;
-      if (!categories.has(disclosure.categoryId)) {
+      if (!categoryMap.has(disclosure.categoryId)) {
         addIssue(
           'error',
           'public_disclosure_unknown_category',
@@ -300,7 +403,7 @@ export function auditGovernanceRegistry(
         );
       }
     }
-    for (const category of bundle.categories) {
+    for (const category of categories) {
       const count = disclosureCounts.get(category.id) ?? 0;
       if (count === 0)
         addIssue(
@@ -312,18 +415,27 @@ export function auditGovernanceRegistry(
     }
   }
 
-  auditSuspiciousValues(bundle, addIssue);
+  auditSuspiciousValues(
+    {
+      categories,
+      processors: processorEntries,
+      retentionPolicies: policyEntries,
+      rightsCapabilities: rightsEntries,
+      publicDisclosures: disclosureEntries,
+    },
+    addIssue,
+  );
 
   const errors = issues.filter((issue) => issue.severity === 'error').length;
   const gaps = issues.length - errors;
   return {
     ok: errors === 0,
     summary: {
-      categories: bundle.categories.length,
-      processors: bundle.processors.length,
-      retentionPolicies: bundle.retentionPolicies.length,
-      rightsCapabilities: bundle.rightsCapabilities.length,
-      unknownOrPendingProcessors: bundle.processors.filter(
+      categories: categories.length,
+      processors: processorEntries.length,
+      retentionPolicies: policyEntries.length,
+      rightsCapabilities: rightsEntries.length,
+      unknownOrPendingProcessors: processorEntries.filter(
         (processor) =>
           processor.regionStatus === 'unknown' ||
           processor.regionStatus === 'pending_legal_review' ||
@@ -340,21 +452,324 @@ export function auditGovernanceRegistry(
   };
 }
 
-function auditEvidence(
-  groups: Array<{ registryId: string; evidence: SourceEvidence[] }>,
-  options: AuditOptions,
-  addIssue: (
-    severity: AuditIssue['severity'],
-    code: AuditIssue['code'],
+function validateGovernanceRegistryStructure(
+  bundle: Record<string, unknown>,
+  addIssue: AddIssue,
+): void {
+  const requireTopLevelEntries = (key: string): readonly Record<string, unknown>[] => {
+    const value = bundle[key];
+    if (!Array.isArray(value) || value.length === 0) {
+      addIssue(
+        'error',
+        'required_array_empty',
+        `registry:${key}`,
+        `${key} must be a non-empty array.`,
+      );
+      return [];
+    }
+    const entries = value.filter(isRecord);
+    if (entries.length !== value.length) {
+      addIssue(
+        'error',
+        'required_array_empty',
+        `registry:${key}`,
+        `${key} must contain registry objects only.`,
+      );
+    }
+    return entries;
+  };
+  const requireString = (entry: Record<string, unknown>, key: string, registryId: string): void => {
+    if (!nonEmpty(entry[key])) {
+      addIssue(
+        'error',
+        'required_string_missing',
+        registryId,
+        `${key} must be a non-empty string.`,
+      );
+    }
+  };
+  const requireStringList = (
+    entry: Record<string, unknown>,
+    key: string,
     registryId: string,
-    message: string,
-  ) => void,
+    allowEmpty = false,
+  ): void => {
+    const value = entry[key];
+    if (
+      !Array.isArray(value) ||
+      (!allowEmpty && value.length === 0) ||
+      value.some((item) => !nonEmpty(item))
+    ) {
+      addIssue(
+        'error',
+        'required_array_empty',
+        registryId,
+        `${key} must be ${allowEmpty ? 'an explicit' : 'a non-empty'} array of non-empty strings.`,
+      );
+    }
+  };
+  const requireEnum = (
+    entry: Record<string, unknown>,
+    key: string,
+    allowed: readonly string[],
+    registryId: string,
+  ): void => {
+    if (!oneOf(entry[key], allowed)) {
+      addIssue(
+        'error',
+        'invalid_enum_value',
+        registryId,
+        `${key} must use an approved enum value.`,
+      );
+    }
+  };
+  const validateEvidence = (value: unknown, registryId: string): void => {
+    if (!Array.isArray(value) || value.length === 0) return;
+    for (const item of value) {
+      if (!isRecord(item)) {
+        addIssue('error', 'invalid_evidence', registryId, 'Evidence must be an object.');
+        continue;
+      }
+      if (!oneOf(item.kind, EVIDENCE_KINDS)) {
+        addIssue(
+          'error',
+          'invalid_evidence',
+          registryId,
+          'Evidence kind must use an approved enum value.',
+        );
+      }
+      if (!nonEmpty(item.path) || !nonEmpty(item.fact)) {
+        addIssue(
+          'error',
+          'invalid_evidence',
+          registryId,
+          'Evidence path and fact must be non-empty strings.',
+        );
+      }
+      if (item.kind === 'exported_symbol' && !nonEmpty(item.symbol)) {
+        addIssue(
+          'error',
+          'invalid_evidence',
+          registryId,
+          'Exported-symbol evidence requires a non-empty symbol.',
+        );
+      }
+    }
+  };
+  const validateCapability = (value: unknown, registryId: string): void => {
+    if (!isRecord(value)) {
+      addIssue(
+        'error',
+        'invalid_enum_value',
+        registryId,
+        'Capability definition must be an object with an approved status.',
+      );
+      return;
+    }
+    requireEnum(value, 'status', CAPABILITY_STATUSES, registryId);
+    requireString(value, 'scope', registryId);
+    requireStringList(value, 'limitations', registryId, true);
+    validateEvidence(value.evidence, registryId);
+  };
+
+  for (const category of requireTopLevelEntries('categories')) {
+    const registryId = `category:${nonEmpty(category.id) ? category.id : 'unknown'}`;
+    for (const key of [
+      'id',
+      'displayName',
+      'description',
+      'retentionPolicyId',
+      'rightsCapabilityId',
+    ]) {
+      requireString(category, key, registryId);
+    }
+    for (const key of ['dataElements', 'sources', 'purposes', 'storageLocations', 'processorIds']) {
+      requireStringList(category, key, registryId);
+    }
+    requireEnum(category, 'sensitivity', SENSITIVITIES, registryId);
+    validateEvidence(category.evidence, registryId);
+  }
+
+  for (const processor of requireTopLevelEntries('processors')) {
+    const registryId = `processor:${nonEmpty(processor.id) ? processor.id : 'unknown'}`;
+    requireString(processor, 'id', registryId);
+    requireString(processor, 'displayName', registryId);
+    requireStringList(processor, 'purposes', registryId);
+    requireStringList(processor, 'categoryIds', registryId);
+    requireEnum(processor, 'regionStatus', VERIFICATION_STATUSES, registryId);
+    requireEnum(processor, 'legalReviewStatus', VERIFICATION_STATUSES, registryId);
+    if (!isRecord(processor.activation)) {
+      addIssue(
+        'error',
+        'invalid_enum_value',
+        registryId,
+        'activation must be an object with an approved mode.',
+      );
+      continue;
+    }
+    requireEnum(processor.activation, 'mode', ACTIVATION_MODES, registryId);
+    if (processor.activation.configKeys !== undefined) {
+      requireStringList(processor.activation, 'configKeys', registryId);
+      for (const key of stringArray(processor.activation.configKeys)) {
+        if (!CONFIG_KEY_NAME.test(key)) {
+          addIssue(
+            'error',
+            'invalid_enum_value',
+            registryId,
+            'Processor configKeys must contain uppercase configuration key names only.',
+          );
+        }
+      }
+    }
+    validateEvidence(processor.activation.evidence, registryId);
+  }
+
+  for (const policy of requireTopLevelEntries('retentionPolicies')) {
+    const registryId = `retention_policy:${nonEmpty(policy.id) ? policy.id : 'unknown'}`;
+    requireString(policy, 'id', registryId);
+    requireString(policy, 'trigger', registryId);
+    requireEnum(policy, 'automationStatus', CAPABILITY_STATUSES, registryId);
+    requireEnum(policy, 'retryStatus', CAPABILITY_STATUSES, registryId);
+    if (!isRecord(policy.rule)) {
+      addIssue('error', 'invalid_enum_value', registryId, 'Retention rule must be an object.');
+    } else {
+      requireEnum(policy.rule, 'kind', RETENTION_RULE_KINDS, registryId);
+      if (policy.rule.kind === 'until_user_action') {
+        requireString(policy.rule, 'action', registryId);
+      } else if (policy.rule.kind === 'purpose_bound' || policy.rule.kind === 'mixed') {
+        requireString(policy.rule, 'description', registryId);
+      } else if (policy.rule.kind === 'unknown') {
+        requireString(policy.rule, 'reason', registryId);
+      }
+    }
+    validateEvidence(policy.evidence, registryId);
+    if (policy.localRegimes !== undefined) {
+      if (!Array.isArray(policy.localRegimes) || policy.localRegimes.length === 0) {
+        addIssue(
+          'error',
+          'required_array_empty',
+          registryId,
+          'localRegimes must be a non-empty array when present.',
+        );
+      }
+      for (const regime of recordArray<Record<string, unknown>>(policy.localRegimes)) {
+        const regimeId = `${registryId}.local_regime:${nonEmpty(regime.id) ? regime.id : 'unknown'}`;
+        requireString(regime, 'id', regimeId);
+        requireString(regime, 'boundary', regimeId);
+        requireEnum(regime, 'automationStatus', CAPABILITY_STATUSES, regimeId);
+        if (!isRecord(regime.activation)) {
+          addIssue('error', 'invalid_enum_value', regimeId, 'Local activation must be an object.');
+        } else {
+          if (regime.activation.mode !== 'feature_conditional') {
+            addIssue(
+              'error',
+              'invalid_enum_value',
+              regimeId,
+              'Local retention activation must be feature_conditional.',
+            );
+          }
+          if (regime.activation.enabledByDefault !== false) {
+            addIssue(
+              'error',
+              'invalid_enum_value',
+              regimeId,
+              'Local retention activation must record the default-off boundary.',
+            );
+          }
+          requireStringList(regime.activation, 'configKeys', regimeId);
+        }
+        validateEvidence(regime.evidence, regimeId);
+      }
+    }
+  }
+
+  for (const rights of requireTopLevelEntries('rightsCapabilities')) {
+    const registryId = `rights_capability:${nonEmpty(rights.id) ? rights.id : 'unknown'}`;
+    requireString(rights, 'id', registryId);
+    for (const name of CAPABILITY_NAMES) {
+      validateCapability(rights[name], `${registryId}.${name}`);
+    }
+  }
+
+  for (const disclosure of requireTopLevelEntries('publicDisclosures')) {
+    const registryId = `public_disclosure:${nonEmpty(disclosure.categoryId) ? disclosure.categoryId : 'unknown'}`;
+    const invalidStrings = ['categoryId', 'spaLabel', 'landingLabel'].some(
+      (key) => !nonEmpty(disclosure[key]),
+    );
+    const invalidBoundaries =
+      !Array.isArray(disclosure.requiredBoundaries) ||
+      disclosure.requiredBoundaries.length === 0 ||
+      disclosure.requiredBoundaries.some((item) => !nonEmpty(item));
+    if (invalidStrings || invalidBoundaries || disclosure.publiclyDisclosed !== true) {
+      addIssue(
+        'error',
+        'invalid_public_disclosure',
+        registryId,
+        'Current public categories require labels, boundaries, and publiclyDisclosed true.',
+      );
+    }
+  }
+}
+
+function auditHandlerRef(
+  handlerRef: string,
+  registryId: string,
+  repoRoot: string,
+  addIssue: AddIssue,
+): void {
+  const separator = handlerRef.lastIndexOf('#');
+  const relativePath = handlerRef.slice(0, separator);
+  const symbol = handlerRef.slice(separator + 1);
+  let canonicalRoot: string;
+  let canonicalPath: string;
+  try {
+    canonicalRoot = realpathSync(repoRoot);
+    canonicalPath = realpathSync(resolve(repoRoot, relativePath));
+    if (!isWithinRoot(canonicalRoot, canonicalPath)) throw new Error('outside root');
+    const stat = statSync(canonicalPath);
+    if (!stat.isFile()) throw new Error('not a regular file');
+    accessSync(canonicalPath, fsConstants.R_OK);
+  } catch {
+    addIssue(
+      'error',
+      'handler_source_missing',
+      registryId,
+      'Implemented capability handler must resolve to a readable repository file.',
+    );
+    return;
+  }
+
+  try {
+    const source = readFileSync(canonicalPath, 'utf8');
+    if (!hasExportedSymbol(source, symbol)) {
+      addIssue(
+        'error',
+        'handler_symbol_missing',
+        registryId,
+        `Implemented capability handler export ${symbol} was not found.`,
+      );
+    }
+  } catch {
+    addIssue(
+      'error',
+      'handler_source_missing',
+      registryId,
+      'Implemented capability handler source could not be read.',
+    );
+  }
+}
+
+function auditEvidence(
+  groups: readonly { readonly registryId: string; readonly evidence: readonly SourceEvidence[] }[],
+  options: AuditOptions,
+  addIssue: AddIssue,
 ): void {
   const repoRoot = resolve(options.repoRoot ?? process.cwd());
   let canonicalRepoRoot: string | undefined;
-  if (options.verifyEvidenceFiles && existsSync(repoRoot)) {
+  if (options.verifyEvidenceFiles) {
     try {
       canonicalRepoRoot = realpathSync(repoRoot);
+      if (!statSync(canonicalRepoRoot).isDirectory()) canonicalRepoRoot = undefined;
     } catch {
       canonicalRepoRoot = undefined;
     }
@@ -380,6 +795,7 @@ function auditEvidence(
       continue;
     }
     for (const evidence of group.evidence) {
+      if (!isRecord(evidence) || !nonEmpty(evidence.path)) continue;
       const resolvedPath = resolve(repoRoot, evidence.path);
       if (!isWithinRoot(repoRoot, resolvedPath)) {
         addIssue(
@@ -390,33 +806,19 @@ function auditEvidence(
         );
         continue;
       }
-      if (!existsSync(resolvedPath)) {
-        addIssue(
-          'error',
-          'source_evidence_missing',
-          group.registryId,
-          `Evidence source does not exist: ${evidence.path}.`,
-        );
-        continue;
-      }
       let canonicalPath: string;
       try {
         canonicalPath = realpathSync(resolvedPath);
+        if (!isWithinRoot(canonicalRepoRoot, canonicalPath)) throw new Error('outside root');
+        const stat = statSync(canonicalPath);
+        if (!stat.isFile()) throw new Error('not a regular file');
+        accessSync(canonicalPath, fsConstants.R_OK);
       } catch {
         addIssue(
           'error',
           'source_evidence_missing',
           group.registryId,
-          `Evidence source cannot be resolved: ${evidence.path}.`,
-        );
-        continue;
-      }
-      if (!isWithinRoot(canonicalRepoRoot, canonicalPath)) {
-        addIssue(
-          'error',
-          'source_evidence_missing',
-          group.registryId,
-          'Evidence source resolves outside repoRoot.',
+          'Evidence source must resolve to a readable regular repository file.',
         );
         continue;
       }
@@ -430,13 +832,21 @@ function auditEvidence(
           );
           continue;
         }
-        const source = readFileSync(canonicalPath, 'utf8');
-        if (!hasExportedSymbol(source, evidence.symbol)) {
+        try {
+          const source = readFileSync(canonicalPath, 'utf8');
+          if (hasExportedSymbol(source, evidence.symbol)) continue;
           addIssue(
             'error',
             'evidence_symbol_missing',
             group.registryId,
-            `Exported symbol ${evidence.symbol} was not found.`,
+            'The exact exported evidence symbol was not found.',
+          );
+        } catch {
+          addIssue(
+            'error',
+            'source_evidence_missing',
+            group.registryId,
+            'Evidence source could not be read.',
           );
         }
       }

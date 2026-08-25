@@ -18,21 +18,21 @@ const LABELS = [
 
 const REQUIRED_BOUNDARIES: Record<DataCategoryId, string> = {
   account_security: '密码哈希',
-  task_execution: '不是服务器删除期限',
+  task_execution: '套餐天数只控制可见历史',
   cross_task_memory: '偏好可能长期保留',
   energy_astrology_profile: 'DivineAPI',
   stock_preference_profile: '90 天是推断窗口',
   feedback_support: 'Resend',
   external_notifications: 'webhook',
   extension_site_stats: '域名',
-  extension_login_cookies: '真实 Cookie',
-  payments_entitlements: '不会自动扣款',
+  extension_login_cookies: 'Cookie 名称、值',
+  payments_entitlements: '按交易、税务、争议和适用法律所需保存',
   partner_kyc_ledger: '风险评分',
   media_assets: '声音克隆',
   analytics_logs: '匿名摘要',
 };
 
-export const publicDisclosures: PublicDisclosureDefinition[] = LABELS.map(
+export const publicDisclosures: readonly PublicDisclosureDefinition[] = LABELS.map(
   ([categoryId, spaLabel]) => ({
     categoryId,
     spaLabel,

@@ -151,13 +151,17 @@ describe('auditGovernanceRegistry', () => {
 
   it('rejects duplicate ids, dangling references, and implemented rights without handlers', () => {
     const bundle = validBundle();
-    bundle.categories = [...bundle.categories, bundle.categories[0]!];
-    bundle.categories[0] = { ...bundle.categories[0]!, processorIds: ['missing_processor'] };
-    bundle.rightsCapabilities[0] = {
+    const category = { ...bundle.categories[0]! };
+    Reflect.set(category, 'processorIds', ['missing_processor']);
+    const malformed = {
+      ...bundle,
+      categories: [category, { ...category }],
+      rightsCapabilities: [{
       ...bundle.rightsCapabilities[0]!,
       export: { status: 'implemented', scope: '导出', limitations: [], evidence },
-    };
-    const report = auditGovernanceRegistry(bundle, { verifyEvidenceFiles: false });
+      }],
+    } satisfies GovernanceRegistryBundle;
+    const report = auditGovernanceRegistry(malformed, { verifyEvidenceFiles: false });
     expect(report.ok).toBe(false);
     expect(report.issues.map((issue) => issue.code)).toEqual(expect.arrayContaining([
       'duplicate_id', 'dangling_reference', 'implemented_handler_missing',
@@ -166,25 +170,36 @@ describe('auditGovernanceRegistry', () => {
 
   it('rejects suspicious secret values but permits configuration key names', () => {
     const safe = validBundle();
-    safe.processors[0] = {
-      ...safe.processors[0]!,
-      activation: { ...safe.processors[0]!.activation, configKeys: ['RESEND_API_KEY'] },
+    const safeWithConfigKey = {
+      ...safe,
+      processors: [{
+        ...safe.processors[0]!,
+        activation: { ...safe.processors[0]!.activation, configKeys: ['RESEND_API_KEY'] },
+      }],
     };
-    expect(auditGovernanceRegistry(safe, { verifyEvidenceFiles: false }).ok).toBe(true);
+    expect(auditGovernanceRegistry(safeWithConfigKey, { verifyEvidenceFiles: false }).ok).toBe(true);
 
     const unsafe = validBundle();
-    unsafe.categories[0] = { ...unsafe.categories[0]!, description: 'sk-live-secret-example-123456789' };
-    expect(auditGovernanceRegistry(unsafe, { verifyEvidenceFiles: false }).issues)
+    const unsafeWithSecret = {
+      ...unsafe,
+      categories: [{ ...unsafe.categories[0]!, description: 'credential=sk-live-secret-example-123456789' }],
+    };
+    expect(auditGovernanceRegistry(unsafeWithSecret, { verifyEvidenceFiles: false }).issues)
       .toEqual(expect.arrayContaining([expect.objectContaining({ code: 'suspicious_secret' })]));
   });
 
   it('enforces ids, bidirectional processors, retention rules, and disclosure cardinality', () => {
     const bundle = validBundle();
-    Reflect.set(bundle.categories[0]!, 'id', 'Account Security');
-    bundle.processors[0]!.categoryIds = [];
-    bundle.retentionPolicies[0]!.rule = { kind: 'fixed_days', days: 0 };
-    bundle.publicDisclosures.push(bundle.publicDisclosures[0]!);
-    const report = auditGovernanceRegistry(bundle, {
+    const category = { ...bundle.categories[0]! };
+    Reflect.set(category, 'id', 'Account Security');
+    const malformed = {
+      ...bundle,
+      categories: [category],
+      processors: [{ ...bundle.processors[0]!, categoryIds: [] }],
+      retentionPolicies: [{ ...bundle.retentionPolicies[0]!, rule: { kind: 'fixed_days', days: 0 } }],
+      publicDisclosures: [bundle.publicDisclosures[0]!, { ...bundle.publicDisclosures[0]! }],
+    } as GovernanceRegistryBundle;
+    const report = auditGovernanceRegistry(malformed, {
       verifyEvidenceFiles: false,
       requirePublicDisclosures: true,
     });
@@ -196,13 +211,19 @@ describe('auditGovernanceRegistry', () => {
 
   it('verifies exported symbols without reading runtime data', () => {
     const bundle = validBundle();
-    bundle.categories[0]!.evidence = [{
-      kind: 'exported_symbol',
-      path: 'apps/orchestrator/src/db/schema/users.ts',
-      symbol: 'DefinitelyMissingGovernanceSymbol',
-      fact: '负向证据符号',
-    }];
-    const report = auditGovernanceRegistry(bundle, { repoRoot, verifyEvidenceFiles: true });
+    const malformed = {
+      ...bundle,
+      categories: [{
+        ...bundle.categories[0]!,
+        evidence: [{
+          kind: 'exported_symbol',
+          path: 'apps/orchestrator/src/db/schema/users.ts',
+          symbol: 'DefinitelyMissingGovernanceSymbol',
+          fact: '负向证据符号',
+        }],
+      }],
+    } satisfies GovernanceRegistryBundle;
+    const report = auditGovernanceRegistry(malformed, { repoRoot, verifyEvidenceFiles: true });
     expect(report.issues).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'evidence_symbol_missing' }),
     ]));
@@ -286,7 +307,7 @@ export interface AuditReport {
 }
 ```
 
-Implement the spec interfaces `SourceEvidence`, `DataCategoryDefinition`, `ProcessorDefinition`, `RetentionPolicyDefinition`, `CapabilityDefinition`, `RightsCapability`, `PublicDisclosureDefinition`, and mutable-array `GovernanceRegistryBundle`. Keep `CapabilityDefinition.handlerRef?: string` exactly aligned with the approved spec; implemented capabilities use a repository-relative `path#exportedSymbol` reference and also carry `SourceEvidence`. `manualEntrypoint` is a public string entry point.
+Implement the spec interfaces `SourceEvidence`, `DataCategoryDefinition`, `ProcessorDefinition`, `RetentionPolicyDefinition`, `CapabilityDefinition`, `RightsCapability`, `PublicDisclosureDefinition`, and a readonly-array `GovernanceRegistryBundle`. Every exported fact property and nested array is readonly. Malformed runtime tests construct new fixtures and use `Reflect.set` only where they must bypass the static type boundary. Keep `CapabilityDefinition.handlerRef?: string` exactly aligned with the approved spec; implemented capabilities use a repository-relative `path#exportedSymbol` reference and also carry `SourceEvidence`. `manualEntrypoint` is a public string entry point.
 
 - [ ] **Step 4: Implement the minimal pure auditor**
 
@@ -305,7 +326,7 @@ export function auditGovernanceRegistry(
 ): AuditReport;
 ```
 
-The function must aggregate rather than throw. Implement helpers for lowercase snake-case IDs, unique IDs, reference existence, processor/category bidirectional equality, capability invariants, retention-rule invariants, evidence non-emptiness, optional `existsSync(resolve(repoRoot, evidence.path))`, optional exported-symbol verification, strict public-disclosure completeness, and recursive suspicious-value detection.
+The function must aggregate rather than throw. Implement helpers for lowercase snake-case IDs, unique IDs, reference existence, processor/category bidirectional equality, capability invariants, retention-rule invariants, runtime structural validation, evidence non-emptiness, canonical repository-relative readable-regular-file checks, exact exported-symbol verification for evidence and `handlerRef`, strict public-disclosure completeness, and recursive suspicious-value detection. Filesystem resolution/stat/read failures are structural issues, never thrown report-construction failures.
 
 Required invariants are explicit:
 
@@ -429,8 +450,8 @@ Create `retention-policies.ts` with the exact order in `RETENTION_IDS`. Use this
 | ID | Rule | Automation | Retry | Required evidence |
 |---|---|---|---|---|
 | `account_purpose_bound` | purpose-bound: 账号存续及安全所需 | manual | not_implemented | `apps/orchestrator/src/db/schema/users.ts`, `apps/web-workbench/src/pages/SettingsPage.tsx` |
-| `task_visibility_unified_unknown` | unknown: 套餐可见范围不是服务器删除期限，尚无统一期限 | not_implemented | not_implemented | `apps/orchestrator/src/db/schema/tasks.ts`, `apps/web-workbench/src/utils/time-buckets.ts` |
-| `memory_entry_lifecycle` | mixed: 偏好可长期，其他条目按自身期限/长期状态 | implemented | not_implemented | `apps/orchestrator/src/db/schema/execution-memory.ts`, `apps/orchestrator/src/trpc/routers/memory.ts` |
+| `task_visibility_unified_unknown` | unknown: 套餐可见范围不是服务器删除期限，尚无统一期限；另以 readonly `localRegimes` 明示 `task_30d`、`audit_180d`、`manual_hold` 的条件性边界 | not_implemented | not_implemented | `apps/orchestrator/src/db/schema/tasks.ts`, `apps/web-workbench/src/utils/time-buckets.ts`, `apps/orchestrator/src/evidence/ledger-write-service.ts`, `apps/orchestrator/src/evidence/evidence-deletion-service.ts`, `apps/orchestrator/src/evidence/evidence-artifact-repository.ts`, `apps/orchestrator/src/index.ts` |
+| `memory_entry_lifecycle` | mixed: 偏好可长期，其他条目按自身期限/长期状态；读取过滤不等于存储删除 | not_implemented | not_implemented | `apps/orchestrator/src/db/schema/execution-memory.ts`, `apps/orchestrator/src/trpc/routers/memory.ts` |
 | `browser_local_until_clear` | until-user-action: 本地清除资料或浏览器数据 | implemented | not_applicable | `apps/web-workbench/src/lib/astrology.ts` |
 | `stock_profile_mixed` | mixed: 自动筛选依据 90 天仅是推断窗口，清空控制服务器依据 | implemented | not_implemented | `apps/orchestrator/src/stocks/stock-preference-profile.ts`, `apps/orchestrator/src/stocks/stock-preference-repository.ts` |
 | `feedback_purpose_bound` | purpose-bound: 反馈、故障、安全、争议所需 | manual | not_implemented | `apps/orchestrator/src/trpc/routers/feedback.ts` |
@@ -443,6 +464,8 @@ Create `retention-policies.ts` with the exact order in `RETENTION_IDS`. Use this
 | `analytics_configured_mixed` | mixed: 已有能量分析分级期限，其他日志无统一期限 | implemented | implemented | `apps/orchestrator/src/config/env.energy-analytics.test.ts`, `apps/orchestrator/src/energy/analytics-cleanup.ts` |
 
 Each evidence path is repository-relative and carries a one-sentence `fact`. Do not assign `fixed_days` to any mixed or unknown policy.
+
+`task_visibility_unified_unknown.localRegimes` does not replace the unknown unified policy. It records only verified local evidence behavior: `task_30d` writes are behind default-off `LEDGER_DB_WRITE_ENABLED`, use configurable `LEDGER_RETENTION_DAYS` (default 60 despite the label), and are reaped only when default-off `RETENTION_REAPER_ENABLED` is enabled and `expires_at` has passed; `audit_180d` is recognized for scrub/retention but has no verified 180-day writer; `manual_hold` is created only behind default-off action/screenshot capture flags and is excluded from the reaper.
 
 - [ ] **Step 4: Implement the 13 rights capabilities**
 
@@ -762,15 +785,17 @@ const spa = readFileSync(`${repoRoot}/apps/web-workbench/src/pages/PrivacyPage.t
 const landing = readFileSync(`${repoRoot}/apps/holaday-landing/privacy.html`, 'utf8');
 
 describe('public disclosure map', () => {
-  it('maps every registered public category to both policy surfaces', () => {
+  it('maps every registered public category to its own row on both policy surfaces', () => {
     expect(publicDisclosures).toHaveLength(13);
     expect(new Set(publicDisclosures.map((item) => item.categoryId)).size).toBe(13);
     for (const item of publicDisclosures) {
-      expect(spa).toContain(item.spaLabel);
-      expect(landing).toContain(item.landingLabel);
+      const spaStart = spa.indexOf(`label: '${item.spaLabel}'`);
+      const spaEntry = spa.slice(spaStart, spa.indexOf('\n  },', spaStart));
+      const landingStart = landing.indexOf(`<tr><td>${item.landingLabel}</td>`);
+      const landingRow = landing.slice(landingStart, landing.indexOf('</tr>', landingStart));
       for (const boundary of item.requiredBoundaries) {
-        expect(spa).toContain(boundary);
-        expect(landing).toContain(boundary);
+        expect(spaEntry).toContain(boundary);
+        expect(landingRow).toContain(boundary);
       }
     }
   });
@@ -819,15 +844,15 @@ const LABELS = [
 
 Set `publiclyDisclosed: true` on all 13. Required boundaries must remain short and stable:
 
-- task: `不是服务器删除期限`;
+- task: `套餐天数只控制可见历史`;
 - memory: `偏好可能长期保留`;
 - astrology: `DivineAPI`;
 - stock: `90 天是推断窗口`;
 - feedback: `Resend`;
 - notifications: `webhook`;
 - extension stats: `域名`;
-- extension cookies: `真实 Cookie`;
-- payment: `不会自动扣款`;
+- extension cookies: `Cookie 名称、值`;
+- payment: `按交易、税务、争议和适用法律所需保存`;
 - partner: `风险评分`;
 - media: `声音克隆`;
 - analytics: `匿名摘要`;

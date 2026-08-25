@@ -42,11 +42,47 @@ describe('governance lifecycle registry', () => {
 
   it('does not turn visibility, observation, or inference windows into deletion deadlines', () => {
     const task = retentionPolicies.find((item) => item.id === 'task_visibility_unified_unknown');
+    const memory = retentionPolicies.find((item) => item.id === 'memory_entry_lifecycle');
     const stock = retentionPolicies.find((item) => item.id === 'stock_profile_mixed');
     expect(task?.rule.kind).toBe('unknown');
     expect(JSON.stringify(task)).toContain('可见范围不是服务器删除期限');
+    expect(memory?.automationStatus).toBe('not_implemented');
+    expect(JSON.stringify(memory)).toContain('读取时过滤不等于存储删除');
     expect(stock?.rule.kind).toBe('mixed');
     expect(JSON.stringify(stock)).toContain('90 天仅是推断窗口');
+  });
+
+  it('records local evidence regimes without inventing a unified deletion rule', () => {
+    const task = retentionPolicies.find((item) => item.id === 'task_visibility_unified_unknown');
+    expect(task?.rule.kind).toBe('unknown');
+    expect(task?.localRegimes?.map((regime) => regime.id)).toEqual([
+      'task_30d',
+      'audit_180d',
+      'manual_hold',
+    ]);
+
+    const task30d = task?.localRegimes?.find((regime) => regime.id === 'task_30d');
+    expect(task30d?.activation.enabledByDefault).toBe(false);
+    expect(task30d?.activation.configKeys).toEqual([
+      'LEDGER_DB_WRITE_ENABLED',
+      'LEDGER_RETENTION_DAYS',
+      'RETENTION_REAPER_ENABLED',
+    ]);
+    expect(task30d?.boundary).toContain('默认 60 天');
+    expect(task30d?.boundary).toContain('expires_at');
+
+    const audit = task?.localRegimes?.find((regime) => regime.id === 'audit_180d');
+    expect(audit?.automationStatus).toBe('not_implemented');
+    expect(audit?.boundary).toContain('没有已核实的 180 天写入器');
+
+    const hold = task?.localRegimes?.find((regime) => regime.id === 'manual_hold');
+    expect(hold?.automationStatus).toBe('not_applicable');
+    expect(hold?.activation.configKeys).toEqual([
+      'ACTION_CAPTURE_ENABLED',
+      'B4_SCREENSHOT_ANCHOR_ENABLED',
+      'RETENTION_REAPER_ENABLED',
+    ]);
+    expect(hold?.boundary).toContain('reaper 明确排除');
   });
 
   it('keeps account close and comprehensive export truthful', () => {
