@@ -61,6 +61,13 @@ const DATA_CATEGORIES: DataCategory[] = [
       '偏好可能长期保留；其他条目按提取时设置的期限或长期状态保存；可在“设置 > AI 记忆”逐条删除或清空全部',
   },
   {
+    label: '反馈与支持',
+    data: '您主动提交的自由文本、账号邮箱、账号标识、User-Agent 与可选的关联任务标识',
+    purpose: '接收反馈、定位问题并提供支持',
+    processors: 'HOLA DAY；启用 Resend 时转发给 Resend，否则可能进入服务日志',
+    retention: '按处理反馈、故障、安全和争议所需保存；可通过隐私邮箱申请处理',
+  },
+  {
     label: '扩展常用网站',
     data: '最近 30 天访问记录在设备端汇总后的域名、访问次数与最近访问时间',
     purpose: '优先准备常用站点配置',
@@ -335,10 +342,10 @@ export function PrivacyPage(): JSX.Element {
               按功能处理任务指令、网页地址与检索条件、网页内容、图片、视频、语音、星座或塔罗请求及生成结果。
             </ProviderGroup>
             <ProviderGroup
-              title="身份、通信与支付"
+              title="身份、通信、反馈与支付"
               providers="Google · Resend · 短信网关 · PayPal · 中国支付服务"
             >
-              用于第三方登录、验证码、服务邮件、收款、权益发放、退款与争议处理。
+              用于第三方登录、验证码、服务邮件、反馈转发、收款、权益发放、退款与争议处理。
             </ProviderGroup>
             <ProviderGroup title="自动化连接" providers="Zapier">
               仅在相关配置已启用且任务被识别为跨平台自动化时，将任务指令和任务标识发送至配置的

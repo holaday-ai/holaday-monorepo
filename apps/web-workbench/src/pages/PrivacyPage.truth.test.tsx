@@ -59,6 +59,17 @@ describe('PrivacyPage truth contract', () => {
     expectText(/逐条删除或清空全部/);
   });
 
+  it('discloses feedback content and context forwarded through Resend or service logs', () => {
+    renderPrivacy();
+
+    expectText(/反馈与支持/);
+    expectText(/您主动提交的自由文本/);
+    expectText(/账号邮箱、账号标识、User-Agent 与可选的关联任务标识/);
+    expectText(/启用 Resend 时转发给 Resend/);
+    expectText(/否则可能进入服务日志/);
+    expectText(/处理反馈、故障、安全和争议所需/);
+  });
+
   it('states the implemented account and payment boundaries', () => {
     renderPrivacy();
 

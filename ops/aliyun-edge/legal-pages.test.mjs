@@ -27,6 +27,12 @@ test('public landing privacy page states implemented data boundaries', () => {
     '后续相关任务',
     '偏好可能长期保留',
     '逐条删除或清空全部',
+    '反馈与支持',
+    '您主动提交的自由文本',
+    '账号邮箱、账号标识、User-Agent 与可选的关联任务标识',
+    '启用 Resend 时转发给 Resend',
+    '否则可能进入服务日志',
+    '处理反馈、故障、安全和争议所需',
     'privacy@holaday.ai',
     '不会自动扣款',
   ]) {
