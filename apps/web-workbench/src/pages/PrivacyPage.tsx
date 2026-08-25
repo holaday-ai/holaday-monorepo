@@ -219,7 +219,7 @@ export function PrivacyPage(): JSX.Element {
               先看重点
             </h2>
             <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-              HOLA DAY 只应为明确目的处理必要信息。不同功能处理的数据和外部服务并不相同。
+              HOLA DAY 为完成账号、任务和安全等明确目的处理必要信息。不同功能处理的数据和外部服务并不相同。
             </p>
           </div>
           <div className="mt-5 grid gap-3 sm:grid-cols-2">
