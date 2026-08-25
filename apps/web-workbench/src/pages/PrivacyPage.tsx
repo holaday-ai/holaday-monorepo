@@ -322,9 +322,9 @@ export function PrivacyPage(): JSX.Element {
             </ProviderGroup>
             <ProviderGroup
               title="AI、抓取与媒体"
-              providers="Anthropic · Google · OpenAI · Alibaba Cloud DashScope · fal.ai · Firecrawl · DivineAPI"
+              providers="Anthropic · Google · OpenAI · Alibaba Cloud DashScope · fal.ai · Firecrawl · Apify · DivineAPI"
             >
-              按功能处理任务指令、网页内容、图片、视频、语音、星座或塔罗请求及生成结果。
+              按功能处理任务指令、网页地址与检索条件、网页内容、图片、视频、语音、星座或塔罗请求及生成结果。
             </ProviderGroup>
             <ProviderGroup
               title="身份、通信与支付"

@@ -35,6 +35,8 @@ describe('PrivacyPage truth contract', () => {
 
     expectText(/取决于您使用的功能和当时启用的服务/);
     expectText(/可能在中国大陆以外处理/);
+    expectText(/Apify/);
+    expectText(/网页地址与检索条件/);
     const privacyLinks = screen.getAllByRole('link', { name: 'privacy@holaday.ai' });
     expect(privacyLinks.length).toBeGreaterThan(0);
     for (const link of privacyLinks) {
