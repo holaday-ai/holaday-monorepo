@@ -90,6 +90,18 @@ describe('PrivacyPage truth contract', () => {
     expectText(/“我的能量”.*“清除资料”/);
   });
 
+  it('discloses automatic stock-preference profiling, its inference window, and exact controls', () => {
+    renderPrivacy();
+
+    expectText(/股票偏好画像/);
+    expectText(/成功选股后自动记录/);
+    expectText(/筛选条件、主动设置的研究偏好与新增自选股/);
+    expectText(/可能优势与潜在盲点/);
+    expectText(/最近 90 天.*推断窗口.*不是服务器删除期限/);
+    expectText(/“暂停画像”.*不会停止新筛选依据的记录/);
+    expectText(/“清空画像”.*不会删除自选股本身/);
+  });
+
   it('discloses feedback content and context forwarded through Resend or service logs', () => {
     renderPrivacy();
 

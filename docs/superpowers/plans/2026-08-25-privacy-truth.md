@@ -217,20 +217,21 @@ const POLICY_NAV: ReadonlyArray<{ id: PrivacySectionId; label: string }> = [
 ];
 ```
 
-Define twelve `DataCategory` rows for:
+Define thirteen `DataCategory` rows for:
 
 1. `账号与安全` — email/phone/display name/avatar/password hash/MFA/session;
 2. `任务与执行` — intent/plan/steps/result/screenshots/page context/files/errors;
 3. `跨任务 AI 记忆` — extracted preference/site state/task history/execution tips, later-task reuse, retention state and settings deletion controls;
 4. `今日能量星座资料` — locally stored name/exact birthday/optional birth time and place/zodiac, live HOLA DAY request timezone, DivineAPI minimum field scope, and clear control;
-5. `反馈与支持` — submitted free text/account email and identifier/User-Agent/optional task ID, Resend-or-log path and purpose-bound retention;
-6. `外部通知渠道` — stored webhook URL/template plus notification title/message/status and up to 60 characters of scheduled-task intent;
-7. `扩展常用网站` — domain/visit count/last-visit time only;
-8. `扩展登录态` — allowlisted real Cookie values;
-9. `支付与套餐` — order/provider identifiers/amount/currency/purchase/status/payer email;
-10. `合伙人 KYC 与账本` — bank-account/card fingerprint, KYC status/provider/reference, credit/API-unit ledger, activity, referrals/rewards, withdrawals, risk and payout records;
-11. `媒体素材` — user images/video/audio/voice-clone identifier/consent time;
-12. `分析与日志` — bounded event aggregates/anonymous digests/IP/UA/operation/error context.
+5. `股票偏好画像` — automatically recorded successful-screening criteria, manual research preferences, post-clear watchlist activity, derived facts/strengths/blind spots, the 90-day inference boundary, and exact pause/clear behavior;
+6. `反馈与支持` — submitted free text/account email and identifier/User-Agent/optional task ID, Resend-or-log path and purpose-bound retention;
+7. `外部通知渠道` — stored webhook URL/template plus notification title/message/status and up to 60 characters of scheduled-task intent;
+8. `扩展常用网站` — domain/visit count/last-visit time only;
+9. `扩展登录态` — allowlisted real Cookie values;
+10. `支付与套餐` — order/provider identifiers/amount/currency/purchase/status/payer email;
+11. `合伙人 KYC 与账本` — bank-account/card fingerprint, KYC status/provider/reference, credit/API-unit ledger, activity, referrals/rewards, withdrawals, risk and payout records;
+12. `媒体素材` — user images/video/audio/voice-clone identifier/consent time;
+13. `分析与日志` — bounded event aggregates/anonymous digests/IP/UA/operation/error context.
 
 Do not put host IPs, env keys, schema names, retention defaults, or internal IDs in the arrays.
 
