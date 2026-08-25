@@ -70,6 +70,17 @@ describe('PrivacyPage truth contract', () => {
     expectText(/处理反馈、故障、安全和争议所需/);
   });
 
+  it('discloses external notification webhook configuration and task context transfers', () => {
+    renderPrivacy();
+
+    expectText(/外部通知渠道/);
+    expectText(/webhook 地址和模板/);
+    expectText(/通知标题、正文、状态/);
+    expectText(/最多 60 字的定时任务意图/);
+    expectText(/企业微信、飞书、钉钉或自定义 webhook/);
+    expectText(/修改或删除渠道配置/);
+  });
+
   it('states the implemented account and payment boundaries', () => {
     renderPrivacy();
 

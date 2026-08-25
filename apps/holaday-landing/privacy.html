@@ -50,18 +50,16 @@
     .data-table { margin: 16px 0; width: 100%; border-collapse: collapse; font-size: 14px; }
     .data-table th, .data-table td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }
     .data-table th { background: var(--bg-soft); color: var(--ink); font-weight: 600; }
+    .mobile-cell-label { display: none; }
     @media (max-width: 700px) {
       .data-table, .data-table tbody, .data-table tr, .data-table td { display: block; width: 100%; }
       .data-table { border-collapse: separate; }
-      .data-table thead { display: none; }
+      .data-table thead { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
       .data-table tr { margin-bottom: 12px; padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-soft); }
       .data-table td { padding: 0; border: 0; }
       .data-table td + td { margin-top: 10px; }
       .data-table td:first-child { color: var(--ink); font-weight: 600; }
-      .data-table td:nth-child(2)::before,
-      .data-table td:nth-child(3)::before { display: block; margin-bottom: 2px; color: var(--text-muted); font-size: 12px; font-weight: 600; }
-      .data-table td:nth-child(2)::before { content: "具体内容与用途"; }
-      .data-table td:nth-child(3)::before { content: "保存标准或控制"; }
+      .mobile-cell-label { display: block; margin-bottom: 2px; color: var(--text-muted); font-size: 12px; font-weight: 600; }
     }
     footer { padding: 32px 0 48px; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 13px; text-align: center; }
     footer a { color: var(--text-muted); margin: 0 12px; }
@@ -112,15 +110,16 @@
     <table class="data-table">
       <thead><tr><th>数据类别</th><th>具体内容与用途</th><th>保存标准或控制</th></tr></thead>
       <tbody>
-        <tr><td>账号与安全</td><td>邮箱、手机号、昵称、头像、密码哈希、MFA 与登录会话，用于注册、登录、身份确认与账号安全</td><td>账号存续及安全所需；可通过邮件申请处理</td></tr>
-        <tr><td>任务与执行</td><td>指令、计划、步骤、结果、错误、截图、网页上下文与文件，用于执行、恢复和验证您提交的任务</td><td>套餐天数只控制可见历史；实际按数据类别和申请处理</td></tr>
-        <tr><td>跨任务 AI 记忆</td><td>从已完成任务的任务指令与结果摘要中提取偏好、网站状态、任务历史与执行建议，用于在后续相关任务中提供个性化上下文；启用 Anthropic 时由 Anthropic 完成提取</td><td>偏好可能长期保留；其他条目按提取时设置的期限或长期状态保存；可在“设置 &gt; AI 记忆”逐条删除或清空全部</td></tr>
-        <tr><td>反馈与支持</td><td>您主动提交的自由文本、账号邮箱、账号标识、User-Agent 与可选的关联任务标识，用于接收反馈、定位问题并提供支持；启用 Resend 时转发给 Resend，否则可能进入服务日志</td><td>按处理反馈、故障、安全和争议所需保存；可通过隐私邮箱申请处理</td></tr>
-        <tr><td>扩展常用网站</td><td>最近 30 天记录在设备端汇总后的域名、访问次数与最近访问时间，用于优先准备常用站点配置</td><td>下一次成功同步会替换旧快照；停止同步不等于自动删除</td></tr>
-        <tr><td>扩展登录态</td><td>您授权的白名单网站的真实 Cookie 值，用于让任务浏览器继承已授权登录状态</td><td>有可用浏览器时即时注入，否则暂存至下一次注入</td></tr>
-        <tr><td>支付与套餐</td><td>订单、金额、币种、购买内容、状态、渠道标识与可能的付款邮箱，用于结算、发放权益、退款和处理争议</td><td>按交易、税务、争议和适用法律所需保存</td></tr>
-        <tr><td>媒体素材</td><td>您上传的图片、视频、语音，以及声音克隆标识和授权时间，用于完成您明确请求的媒体任务</td><td>按文件可用期、账号处理及必要的安全或授权证据标准保存</td></tr>
-        <tr><td>分析与日志</td><td>固定事件聚合、匿名摘要、IP、User-Agent、操作与错误日志，用于安全、稳定和故障排查</td><td>按具体配置、故障、安全和法律所需的最短期限</td></tr>
+        <tr><td>账号与安全</td><td><span class="mobile-cell-label">具体内容与用途</span>邮箱、手机号、昵称、头像、密码哈希、MFA 与登录会话，用于注册、登录、身份确认与账号安全</td><td><span class="mobile-cell-label">保存标准或控制</span>账号存续及安全所需；可通过邮件申请处理</td></tr>
+        <tr><td>任务与执行</td><td><span class="mobile-cell-label">具体内容与用途</span>指令、计划、步骤、结果、错误、截图、网页上下文与文件，用于执行、恢复和验证您提交的任务</td><td><span class="mobile-cell-label">保存标准或控制</span>套餐天数只控制可见历史；实际按数据类别和申请处理</td></tr>
+        <tr><td>跨任务 AI 记忆</td><td><span class="mobile-cell-label">具体内容与用途</span>从已完成任务的任务指令与结果摘要中提取偏好、网站状态、任务历史与执行建议，用于在后续相关任务中提供个性化上下文；启用 Anthropic 时由 Anthropic 完成提取</td><td><span class="mobile-cell-label">保存标准或控制</span>偏好可能长期保留；其他条目按提取时设置的期限或长期状态保存；可在“设置 &gt; AI 记忆”逐条删除或清空全部</td></tr>
+        <tr><td>反馈与支持</td><td><span class="mobile-cell-label">具体内容与用途</span>您主动提交的自由文本、账号邮箱、账号标识、User-Agent 与可选的关联任务标识，用于接收反馈、定位问题并提供支持；启用 Resend 时转发给 Resend，否则可能进入服务日志</td><td><span class="mobile-cell-label">保存标准或控制</span>按处理反馈、故障、安全和争议所需保存；可通过隐私邮箱申请处理</td></tr>
+        <tr><td>外部通知渠道</td><td><span class="mobile-cell-label">具体内容与用途</span>您保存的企业微信、飞书、钉钉或自定义 webhook 地址和模板；向已启用渠道发送通知标题、正文、状态，以及最多 60 字的定时任务意图，用于发送任务通知</td><td><span class="mobile-cell-label">保存标准或控制</span>渠道配置在账号中保存至您修改或删除渠道配置；通知接收方按其自身规则处理</td></tr>
+        <tr><td>扩展常用网站</td><td><span class="mobile-cell-label">具体内容与用途</span>最近 30 天记录在设备端汇总后的域名、访问次数与最近访问时间，用于优先准备常用站点配置</td><td><span class="mobile-cell-label">保存标准或控制</span>下一次成功同步会替换旧快照；停止同步不等于自动删除</td></tr>
+        <tr><td>扩展登录态</td><td><span class="mobile-cell-label">具体内容与用途</span>您授权的白名单网站的真实 Cookie 值，用于让任务浏览器继承已授权登录状态</td><td><span class="mobile-cell-label">保存标准或控制</span>有可用浏览器时即时注入，否则暂存至下一次注入</td></tr>
+        <tr><td>支付与套餐</td><td><span class="mobile-cell-label">具体内容与用途</span>订单、金额、币种、购买内容、状态、渠道标识与可能的付款邮箱，用于结算、发放权益、退款和处理争议</td><td><span class="mobile-cell-label">保存标准或控制</span>按交易、税务、争议和适用法律所需保存</td></tr>
+        <tr><td>媒体素材</td><td><span class="mobile-cell-label">具体内容与用途</span>您上传的图片、视频、语音，以及声音克隆标识和授权时间，用于完成您明确请求的媒体任务</td><td><span class="mobile-cell-label">保存标准或控制</span>按文件可用期、账号处理及必要的安全或授权证据标准保存</td></tr>
+        <tr><td>分析与日志</td><td><span class="mobile-cell-label">具体内容与用途</span>固定事件聚合、匿名摘要、IP、User-Agent、操作与错误日志，用于安全、稳定和故障排查</td><td><span class="mobile-cell-label">保存标准或控制</span>按具体配置、故障、安全和法律所需的最短期限</td></tr>
       </tbody>
     </table>
     <p>我们也会使用 Cookie 和 localStorage 维持 HOLA DAY 登录状态和保存界面偏好。禁用后，部分功能可能无法正常使用。</p>
@@ -138,7 +137,7 @@
       <li><strong>基础设施与存储：</strong>Vultr、Cloudflare R2、Aliyun，用于计算、数据库、静态内容分发、文件存储和必要的网络服务。</li>
       <li><strong>AI、抓取与媒体：</strong>Anthropic、Google、OpenAI、Alibaba Cloud DashScope、fal.ai、Firecrawl、Apify、DivineAPI，按功能处理任务指令、网页地址与检索条件、网页内容、图片、视频、语音、星座或塔罗请求及生成结果。</li>
       <li><strong>身份、通信、反馈与支付：</strong>Google、Resend、短信网关、PayPal、中国支付服务，用于第三方登录、验证码、服务邮件、反馈转发、收款、权益发放、退款与争议处理。</li>
-      <li><strong>自动化连接：</strong>Zapier，仅在相关配置已启用且任务被识别为跨平台自动化时，将任务指令和任务标识发送至配置的 webhook，以触发工作流。</li>
+      <li><strong>自动化与外部通知：</strong>Zapier 仅在相关配置已启用且任务被识别为跨平台自动化时接收任务指令和任务标识。您启用外部通知渠道时，通知标题、正文、状态和最多 60 字的定时任务意图会发送至您配置的企业微信、飞书、钉钉或自定义 webhook。</li>
     </ul>
     <p>支付记录可能包含支付渠道标识和付款邮箱。HOLA DAY 不直接保存银行卡号、CVV 或第三方支付账户密码。每次付款只购买所选周期，到期前由您手动续费，不会自动扣款。</p>
 

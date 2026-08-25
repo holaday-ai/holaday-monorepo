@@ -68,6 +68,14 @@ const DATA_CATEGORIES: DataCategory[] = [
     retention: '按处理反馈、故障、安全和争议所需保存；可通过隐私邮箱申请处理',
   },
   {
+    label: '外部通知渠道',
+    data: '您保存的企业微信、飞书、钉钉或自定义 webhook 地址和模板；向已启用渠道发送的通知标题、正文、状态，以及最多 60 字的定时任务意图',
+    purpose: '向您配置的外部渠道发送任务通知',
+    processors: '您选择并配置的企业微信、飞书、钉钉或自定义 webhook 服务',
+    retention:
+      '渠道配置在账号中保存至您修改或删除渠道配置；通知接收方按其自身规则处理',
+  },
+  {
     label: '扩展常用网站',
     data: '最近 30 天访问记录在设备端汇总后的域名、访问次数与最近访问时间',
     purpose: '优先准备常用站点配置',
@@ -347,9 +355,13 @@ export function PrivacyPage(): JSX.Element {
             >
               用于第三方登录、验证码、服务邮件、反馈转发、收款、权益发放、退款与争议处理。
             </ProviderGroup>
-            <ProviderGroup title="自动化连接" providers="Zapier">
-              仅在相关配置已启用且任务被识别为跨平台自动化时，将任务指令和任务标识发送至配置的
-              webhook，以触发工作流。
+            <ProviderGroup
+              title="自动化与外部通知"
+              providers="Zapier · 企业微信 · 飞书 · 钉钉 · 自定义 webhook"
+            >
+              Zapier 仅在相关配置已启用且任务被识别为跨平台自动化时接收任务指令和任务标识。
+              您启用外部通知渠道时，通知标题、正文、状态和最多 60 字的定时任务意图会发送至您配置的
+              webhook。
             </ProviderGroup>
           </div>
           <div className="mt-4 rounded-[8px] bg-[#F7F7F7] px-4 py-3 text-xs leading-relaxed text-muted-foreground dark:bg-muted">

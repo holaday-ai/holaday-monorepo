@@ -33,11 +33,36 @@ test('public landing privacy page states implemented data boundaries', () => {
     '启用 Resend 时转发给 Resend',
     '否则可能进入服务日志',
     '处理反馈、故障、安全和争议所需',
+    '外部通知渠道',
+    'webhook 地址和模板',
+    '通知标题、正文、状态',
+    '最多 60 字的定时任务意图',
+    '企业微信、飞书、钉钉或自定义 webhook',
+    '修改或删除渠道配置',
     'privacy@holaday.ai',
     '不会自动扣款',
   ]) {
     assert.match(privacy, new RegExp(required), `missing truthful privacy copy: ${required}`);
   }
+});
+
+test('public landing privacy table keeps mobile labels in accessible HTML', () => {
+  assert.doesNotMatch(privacy, /\.data-table thead \{ display: none; \}/);
+  assert.match(privacy, /class="mobile-cell-label">具体内容与用途<\/span>/);
+  assert.match(privacy, /class="mobile-cell-label">保存标准或控制<\/span>/);
+  const tbody = privacy.match(/<tbody>([\s\S]*?)<\/tbody>/)?.[1] ?? '';
+  const rowCount = tbody.match(/<tr>/g)?.length ?? 0;
+  assert.ok(rowCount > 0, 'privacy table must contain data rows');
+  assert.equal(
+    tbody.match(/class="mobile-cell-label">具体内容与用途<\/span>/g)?.length ?? 0,
+    rowCount,
+    'each mobile data row must expose its content label in HTML',
+  );
+  assert.equal(
+    tbody.match(/class="mobile-cell-label">保存标准或控制<\/span>/g)?.length ?? 0,
+    rowCount,
+    'each mobile data row must expose its retention label in HTML',
+  );
 });
 
 test('public landing privacy page excludes unsupported promises', () => {
