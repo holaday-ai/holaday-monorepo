@@ -37,10 +37,6 @@ const PRIVATE_KEY =
   /-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----[\s\S]*?(?:-----END (?:[A-Z ]+ )?PRIVATE KEY-----|$)/gi;
 const TOKEN = /\b(?:sk-|ghp_|xoxb-|xoxp-)[A-Za-z0-9_-]*|\bBearer(?:\s+\S+)?/gi;
 const COOKIE = /\b(?:document\.)?(?:set-)?cookie\s*(?:=|:)\s*[^\r\n]*/gi;
-const SECRET_ASSIGNMENT =
-  /\b(?:password|passwd|api[_-]?key)\s*(?:=|:)\s*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s;,]+)/gi;
-const UNCLOSED_SECRET_ASSIGNMENT =
-  /\b(?:password|passwd|api[_-]?key)\s*(?:=|:)\s*(?:"(?:\\.|[^"\\])*|'(?:\\.|[^'\\])*)$/gi;
 const BASIC_AUTHORIZATION = /\bauthorization\s*:\s*basic(?:\s+\S+)?/gi;
 const EMAIL = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
 const PHONE = /\+?\d[\d\s().-]{7,}\d/g;
@@ -52,8 +48,6 @@ const SENSITIVE_PATTERNS = [
   PRIVATE_KEY,
   TOKEN,
   COOKIE,
-  SECRET_ASSIGNMENT,
-  UNCLOSED_SECRET_ASSIGNMENT,
   BASIC_AUTHORIZATION,
   EMAIL,
   PHONE,
@@ -91,7 +85,57 @@ function repositoryRoot(): string {
   return fileURLToPath(new URL('../../../', import.meta.url));
 }
 
+interface CredentialAssignmentRedaction {
+  found: boolean;
+  value: string;
+}
+
+function redactCredentialAssignments(value: string): CredentialAssignmentRedaction {
+  const assignmentStart = /\b(?:password|passwd|api[_-]?key)\s*(?:=|:)\s*/gi;
+  const parts: string[] = [];
+  let found = false;
+  let copiedThrough = 0;
+  let match = assignmentStart.exec(value);
+
+  while (match !== null) {
+    found = true;
+    const valueStart = assignmentStart.lastIndex;
+    const quote = value[valueStart];
+    let valueEnd = valueStart;
+
+    if (quote === '"' || quote === "'") {
+      valueEnd += 1;
+      let escaped = false;
+      while (valueEnd < value.length) {
+        const character = value[valueEnd];
+        valueEnd += 1;
+        if (escaped) {
+          escaped = false;
+        } else if (character === '\\') {
+          escaped = true;
+        } else if (character === quote) {
+          break;
+        }
+      }
+    } else {
+      while (valueEnd < value.length && !/[\s;,]/.test(value[valueEnd] ?? '')) {
+        valueEnd += 1;
+      }
+    }
+
+    parts.push(value.slice(copiedThrough, match.index), '[redacted-assignment]');
+    copiedThrough = valueEnd;
+    assignmentStart.lastIndex = valueEnd;
+    match = assignmentStart.exec(value);
+  }
+
+  if (!found) return { found: false, value };
+  parts.push(value.slice(copiedThrough));
+  return { found: true, value: parts.join('') };
+}
+
 function hasSensitiveContent(value: string): boolean {
+  if (redactCredentialAssignments(value).found) return true;
   return SENSITIVE_PATTERNS.some((pattern) => {
     pattern.lastIndex = 0;
     return pattern.test(value);
@@ -99,13 +143,14 @@ function hasSensitiveContent(value: string): boolean {
 }
 
 function sanitizeMessage(message: string): string {
-  const sanitized = message
-    .replace(new RegExp(APPROVED_PRIVACY_CONTACT, 'gi'), APPROVED_CONTACT_PLACEHOLDER)
-    .replace(PRIVATE_KEY, '[redacted-private-key]')
+  const contactProtected = message.replace(
+    new RegExp(APPROVED_PRIVACY_CONTACT, 'gi'),
+    APPROVED_CONTACT_PLACEHOLDER,
+  );
+  const sanitized = redactCredentialAssignments(contactProtected)
+    .value.replace(PRIVATE_KEY, '[redacted-private-key]')
     .replace(COOKIE, '[redacted-cookie]')
     .replace(TOKEN, '[redacted-token]')
-    .replace(UNCLOSED_SECRET_ASSIGNMENT, '[redacted-assignment]')
-    .replace(SECRET_ASSIGNMENT, '[redacted-assignment]')
     .replace(BASIC_AUTHORIZATION, '[redacted-authorization]')
     .replace(EMAIL, '[redacted-email]')
     .replace(PHONE, '[redacted-phone]')

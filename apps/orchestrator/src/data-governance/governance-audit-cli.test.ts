@@ -65,6 +65,38 @@ function unsafeReport(): AuditReport {
   };
 }
 
+function danglingEscapeReport(): AuditReport {
+  return {
+    ok: false,
+    summary: {
+      categories: 1,
+      processors: 0,
+      retentionPolicies: 0,
+      rightsCapabilities: 0,
+      unknownOrPendingProcessors: 0,
+      manualCapabilities: 0,
+      notImplementedCapabilities: 0,
+      unknownRetentionPolicies: 0,
+      errors: 2,
+      gaps: 0,
+    },
+    issues: [
+      {
+        severity: 'error',
+        code: 'source_evidence_missing',
+        registryId: 'category:account_security',
+        message: 'Double dangling: password="double word secret\\',
+      },
+      {
+        severity: 'error',
+        code: 'source_evidence_missing',
+        registryId: 'category:account_security',
+        message: "Single dangling: api_key='single word secret\\",
+      },
+    ],
+  };
+}
+
 describe('governance audit CLI', () => {
   it('prints aggregate text and explicit gap ids without raw data', () => {
     const output = io();
@@ -121,6 +153,25 @@ describe('governance audit CLI', () => {
         /sk-live-registry-secret-123456|ghp_private-token-123456|Bearer private-token|Cookie: session=private-value|user@example\.test|\+1 415 555 0123|config\/secrets|ghp_abcdefghijklmnopqrstuvwxyz|password=plain-password-value|api_key=api-value-123|api-key:api-value-456|Authorization: Basic basic-token-789|double word secret|single word secret|escaped \\" quote secret|unclosed tail secret remains until end/i,
       );
     }
+  });
+
+  it('redacts dangling escapes at the end of unclosed quoted assignments in JSON and text', () => {
+    const report = danglingEscapeReport();
+    const json = JSON.stringify(sanitizeGovernanceAuditReport(report));
+    const parsed = JSON.parse(json) as ReturnType<typeof sanitizeGovernanceAuditReport>;
+    const textLines = formatGovernanceAuditText(report);
+    const expectedMessages = [
+      'Double dangling: [redacted-assignment]',
+      'Single dangling: [redacted-assignment]',
+    ];
+
+    expect(parsed.issues.map((issue) => issue.message)).toEqual(expectedMessages);
+    expect(textLines.slice(-2)).toEqual([
+      '[governance:source_evidence_missing] category:account_security: Double dangling: [redacted-assignment]',
+      '[governance:source_evidence_missing] category:account_security: Single dangling: [redacted-assignment]',
+    ]);
+    expect(json).not.toContain('word secret');
+    expect(textLines.join('\n')).not.toContain('word secret');
   });
 
   it('runs directly with console-compatible output handlers', () => {
