@@ -277,12 +277,12 @@ export const processors: readonly ProcessorDefinition[] = [
     categoryIds: ['payments_entitlements'],
     activation: {
       mode: 'feature_conditional',
-      configKeys: ['PAYPAL_ENABLED', 'PAYPAL_CLIENT_ID'],
+      configKeys: ['PAYPAL_ENABLED', 'PAYPAL_CLIENT_ID', 'PAYPAL_CLIENT_SECRET'],
       evidence: [
         {
           kind: 'source_file',
           path: 'apps/orchestrator/src/payment/paypal.ts',
-          fact: 'PayPal 支付处理由启用标记和客户端标识配置。',
+          fact: 'PayPal 支付处理由启用标记、客户端标识和客户端密钥共同配置。',
         },
       ],
     },

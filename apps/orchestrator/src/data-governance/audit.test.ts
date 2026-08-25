@@ -885,4 +885,25 @@ describe('auditGovernanceRegistry', () => {
       );
     },
   );
+
+  it.each(['someone@example.com', '+1 202-555-0198'])(
+    'rejects unapproved personal-data manual entrypoint %s',
+    (manualEntrypoint) => {
+      const bundle = validBundle();
+      const rightsCapability = first(bundle.rightsCapabilities);
+      const malformed: GovernanceRegistryBundle = {
+        ...bundle,
+        rightsCapabilities: [
+          {
+            ...rightsCapability,
+            delete: { ...rightsCapability.delete, manualEntrypoint },
+          },
+        ],
+      };
+
+      expect(auditGovernanceRegistry(malformed, { verifyEvidenceFiles: false }).issues).toEqual(
+        expect.arrayContaining([expect.objectContaining({ code: 'suspicious_personal_data' })]),
+      );
+    },
+  );
 });

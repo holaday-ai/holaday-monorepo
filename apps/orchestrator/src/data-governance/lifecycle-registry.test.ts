@@ -95,7 +95,9 @@ describe('governance lifecycle registry', () => {
   it('records exact self-service limits for memory, astrology, stock, and cookies', () => {
     const stock = rightsCapabilities.find((item) => item.id === 'stock_profile_self_service');
     const cookie = rightsCapabilities.find((item) => item.id === 'extension_cookie_mixed');
-    expect(stock?.pause.status).toBe('implemented');
+    expect(stock?.pause.status).toBe('not_implemented');
+    expect(stock?.pause.handlerRef).toBeUndefined();
+    expect(stock?.pause.limitations).toContain('现有开关只停止画像展示，不停止新筛选依据记录。');
     expect(stock?.delete.limitations).toContain('不会删除自选股本身');
     expect(cookie?.withdraw.status).toBe('implemented');
     expect(cookie?.delete.status).toBe('manual');

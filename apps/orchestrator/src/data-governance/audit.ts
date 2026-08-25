@@ -41,6 +41,7 @@ const LOCAL_RETENTION_REGIME_IDS = ['task_30d', 'audit_180d', 'manual_hold'] as 
 const SECRET_VALUE =
   /-----BEGIN (?:[A-Z ]+)?PRIVATE KEY-----|(?:^|[^A-Za-z0-9])(?:sk-|ghp_|xoxb-|xoxp-)[A-Za-z0-9_-]+|Bearer\s+\S+|(?:document\.)?cookie\s*(?:=|:)|set-cookie\s*:|\b(?:password|passwd|api[_-]?key|client[_-]?secret|access[_-]?token|credential)\s*(?:=|:)\s*(?:["'][^"']*|[^\s;,]+)/i;
 const PERSONAL_VALUE = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}|\+?\d(?:[\s-]?\d){7,}/i;
+const APPROVED_PUBLIC_MANUAL_ENTRYPOINT = 'privacy@holaday.ai';
 
 type AddIssue = (
   severity: AuditIssue['severity'],
@@ -1112,7 +1113,12 @@ function auditSuspiciousValues(
       return;
     }
     for (const [key, child] of Object.entries(value)) {
-      inspect(child, registryId, path ? `${path}.${key}` : key, key === 'manualEntrypoint');
+      inspect(
+        child,
+        registryId,
+        path ? `${path}.${key}` : key,
+        key === 'manualEntrypoint' && child === APPROVED_PUBLIC_MANUAL_ENTRYPOINT,
+      );
     }
   };
   for (const category of bundle.categories) inspect(category, `category:${category.id}`, '');

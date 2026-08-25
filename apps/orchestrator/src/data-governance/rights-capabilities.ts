@@ -273,16 +273,21 @@ export const rightsCapabilities: readonly RightsCapability[] = [
       ),
     },
     pause: {
-      status: 'implemented',
-      handlerRef:
-        'apps/orchestrator/src/stocks/stock-preference-repository.ts#updateStockPreferenceControls',
+      status: 'not_implemented',
       ...capability(
-        '关闭股票偏好推断',
-        ['不会删除已有自选股或独立行情记录。'],
+        '尚未提供停止股票偏好依据记录的处理暂停能力',
+        [
+          '现有开关只停止画像展示，不停止新筛选依据记录。',
+          '清空画像可删除已记录的筛选依据，但不会删除自选股本身。',
+        ],
         [
           source(
             'apps/orchestrator/src/stocks/stock-preference-repository.ts',
-            '偏好控制保存 enabled 开关。',
+            '筛选信号写入不读取画像 enabled 开关；该开关只影响画像构建结果。',
+          ),
+          source(
+            'apps/web-workbench/src/pages/PrivacyPage.tsx',
+            '公开隐私说明明确暂停画像不会停止新筛选依据的记录。',
           ),
         ],
       ),
