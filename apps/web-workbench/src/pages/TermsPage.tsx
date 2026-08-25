@@ -12,11 +12,10 @@ export function TermsPage(): JSX.Element {
     <PageContainer width="prose">
       <PageHeader title="服务条款" description="最后更新：2026-08-26" />
       <article className="prose prose-sm max-w-none dark:prose-invert prose-headings:tracking-tight">
+        <p>上海慕雾品牌管理有限公司（以下简称“我们”）以 HOLA DAY 品牌向您提供本服务。</p>
         <p>
-          欢迎使用 HOLA DAY（下称"我们"、"本服务"）。本服务条款（下称"本条款"）构成您
-          与我们之间具有法律约束力的协议。请您在使用本服务前仔细阅读并同意本条款。
+          本服务条款（以下简称“本条款”）构成您与我们之间具有法律约束力的协议。请您在使用本服务前仔细阅读并同意本条款。
         </p>
-        <p>合同相对方及运营主体：上海慕雾品牌管理有限公司。</p>
         <p>联系地址：上海市虹口区汶水东路351号B幢306室。</p>
 
         <h2>1. 服务内容</h2>

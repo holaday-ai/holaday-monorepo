@@ -16,8 +16,13 @@ describe('TermsPage billing policy', () => {
     );
 
     expect(screen.getByText(/最后更新：2026-08-26/)).toBeTruthy();
-    expect(screen.getByText(/合同相对方及运营主体：上海慕雾品牌管理有限公司/)).toBeTruthy();
+    expect(
+      screen.getByText(
+        '上海慕雾品牌管理有限公司（以下简称“我们”）以 HOLA DAY 品牌向您提供本服务。',
+      ),
+    ).toBeTruthy();
     expect(screen.getByText(/联系地址：上海市虹口区汶水东路351号B幢306室/)).toBeTruthy();
+    expect(screen.queryByText(/HOLA DAY 团队.*运营/)).toBeNull();
   });
 
   it('describes the implemented prepaid manual-renewal model without promising recurring charges', () => {

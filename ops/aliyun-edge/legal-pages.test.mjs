@@ -144,4 +144,7 @@ test('public legal pages identify the same operator and contact address', () => 
     );
     assert.match(page, /最后更新：2026 年 8 月 26 日/, `${name} has a stale update date`);
   }
+
+  assert.match(terms, /上海慕雾品牌管理有限公司（以下简称“我们”）以 HOLA DAY 品牌向您提供本服务。/);
+  assert.doesNotMatch(terms, /HOLA DAY 团队（以下简称"我们"）运营/);
 });
