@@ -272,7 +272,7 @@ describe('auditGovernanceRegistry', () => {
     );
   });
 
-  it('verifies exported symbols without reading runtime data', () => {
+  it('verifies exported symbols without evaluating application modules', () => {
     const bundle = validBundle();
     const category = first(bundle.categories);
     const malformed: GovernanceRegistryBundle = {
@@ -311,6 +311,28 @@ describe('auditGovernanceRegistry', () => {
     ],
     ['exact named export', 'const targetHandler = () => true;\nexport { targetHandler };', false],
     ['direct function export', 'export function targetHandler() { return true; }', false],
+    [
+      'duplicate local binding',
+      'const targetHandler = () => true;\nconst targetHandler = () => false;\nexport { targetHandler };',
+      true,
+    ],
+    [
+      'duplicate exported name',
+      'const first = () => true;\nconst second = () => false;\nexport { first as targetHandler, second as targetHandler };',
+      true,
+    ],
+    ['missing initializer binding', 'export const targetHandler = missingBinding;', true],
+    ['missing superclass', 'export class targetHandler extends MissingBase {}', true],
+    [
+      'namespace initializer missing binding',
+      'export namespace targetHandler { export const ready = missingBinding; }',
+      true,
+    ],
+    [
+      'unrelated top-level semantic error',
+      'const unrelated = missingBinding;\nexport function targetHandler() { return true; }',
+      true,
+    ],
     ['direct enum export', 'export enum targetHandler { Ready }', false],
     [
       'direct namespace export',
@@ -381,7 +403,7 @@ describe('auditGovernanceRegistry', () => {
     ['interface export', 'export interface targetHandler { value: string }', true],
     ['malformed declaration', 'export const targetHandler =', true],
   ] as const)(
-    'distinguishes the runtime exported name for %s',
+    'distinguishes the TypeScript semantic exported value for %s',
     (_caseName, source, expectsMissingSymbol) => {
       const temporaryRoot = mkdtempSync(join(tmpdir(), 'governance-export-'));
       try {
@@ -420,6 +442,73 @@ describe('auditGovernanceRegistry', () => {
       }
     },
   );
+
+  it.each([
+    ['JavaScript source', 'handler.js', 'export const targetHandler = true;'],
+    ['declaration file', 'handler.d.ts', 'export declare const targetHandler: boolean;'],
+    [
+      'default declaration',
+      'handler.ts',
+      'export default function targetHandler() { return true; }',
+    ],
+    [
+      'default assignment',
+      'handler.ts',
+      'const targetHandler = () => true;\nexport default targetHandler;',
+    ],
+    [
+      'export assignment',
+      'handler.ts',
+      'const targetHandler = () => true;\nexport = targetHandler;',
+    ],
+    [
+      'resolved imported alias',
+      'handler.ts',
+      "import { externalHandler } from './other.js';\nexport { externalHandler as targetHandler };",
+    ],
+    [
+      'resolved external re-export',
+      'handler.ts',
+      "export { externalHandler as targetHandler } from './other.js';",
+    ],
+  ] as const)('fails closed for unsupported %s', (_caseName, fileName, source) => {
+    const temporaryRoot = mkdtempSync(join(tmpdir(), 'governance-export-boundary-'));
+    try {
+      const evidencePath = join(temporaryRoot, 'apps/orchestrator/src/db/schema/users.ts');
+      mkdirSync(join(temporaryRoot, 'apps/orchestrator/src/db/schema'), { recursive: true });
+      writeFileSync(evidencePath, 'export const userSchema = true;');
+      writeFileSync(join(temporaryRoot, 'other.ts'), 'export const externalHandler = true;');
+      writeFileSync(join(temporaryRoot, fileName), source);
+      const bundle = validBundle();
+      const rightsCapability = first(bundle.rightsCapabilities);
+      const registry: GovernanceRegistryBundle = {
+        ...bundle,
+        rightsCapabilities: [
+          {
+            ...rightsCapability,
+            export: {
+              status: 'implemented',
+              handlerRef: `${fileName}#targetHandler`,
+              scope: '导出',
+              limitations: [],
+              evidence,
+            },
+          },
+        ],
+      };
+
+      const report = auditGovernanceRegistry(registry, {
+        repoRoot: temporaryRoot,
+        verifyEvidenceFiles: true,
+      });
+
+      expect(report.issues).toEqual(
+        expect.arrayContaining([expect.objectContaining({ code: 'handler_symbol_missing' })]),
+      );
+    } finally {
+      rmSync(temporaryRoot, { force: true, recursive: true });
+    }
+  });
 
   it.each([
     ['non-object entry', [null], 'invalid_enum_value'],

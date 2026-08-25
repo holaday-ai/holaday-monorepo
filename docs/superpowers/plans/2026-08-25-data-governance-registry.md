@@ -4,7 +4,7 @@
 
 **Goal:** 建立只读、强类型、可审计的数据治理工程事实层，完整登记当前 13 个公开数据类别及其处理方、保留和用户权利能力，并用测试阻止公开披露再次漂移。
 
-**Architecture:** 在 Orchestrator 内新增无运行时副作用的 `data-governance` 模块，以 TypeScript 常量保存事实，并由纯函数审计器验证结构、交叉引用、源码证据和敏感值边界。一个只读 CLI 输出聚合与注册项 ID；业务路由、数据库和生产启动不导入该模块，隐私页面只通过契约测试做一致性检查，不由注册表自动生成。
+**Architecture:** 在 Orchestrator 内新增无运行时副作用的 `data-governance` 模块，以 TypeScript 常量保存事实，并由审计器验证结构、交叉引用、TypeScript 源码语义证据和敏感值边界。源码符号核验只构建 TypeScript `Program`/`TypeChecker`，不 import 或执行被审计模块。一个只读 CLI 输出聚合与注册项 ID；业务路由、数据库和生产启动不导入该模块，隐私页面只通过契约测试做一致性检查，不由注册表自动生成。
 
 **Tech Stack:** TypeScript 5.7、Vitest、Node.js `fs/path`、pnpm workspace、Biome、现有 Orchestrator 构建与测试工具链。
 
@@ -14,6 +14,7 @@
 
 - 首阶段不得新增数据库表、migration、运行时 API、前端页面、生产配置或部署步骤。
 - 审计器不得访问数据库、对象存储、支付、AI、浏览器、网络或生产主机。
+- 审计器不得动态 import、执行或求值被审计应用模块；源码证据只允许静态读取和 TypeScript 编译语义分析。
 - 注册表与报告不得包含密钥值、Cookie 值、用户标识、任务正文、支付标识或真实个人数据。
 - 能力状态只能是 `implemented`、`manual`、`not_implemented` 或 `not_applicable`。
 - 地区与法务状态只能使用已核实值或显式的 `unknown` / `pending_legal_review`，不得猜测。
@@ -326,7 +327,7 @@ export function auditGovernanceRegistry(
 ): AuditReport;
 ```
 
-The function must aggregate rather than throw. Implement helpers for lowercase snake-case IDs, unique IDs, reference existence, processor/category bidirectional equality, capability invariants, retention-rule invariants, runtime structural validation, evidence non-emptiness, canonical repository-relative readable-regular-file checks, exact exported-symbol verification for evidence and `handlerRef`, strict public-disclosure completeness, and recursive suspicious-value detection. Filesystem resolution/stat/read failures are structural issues, never thrown report-construction failures.
+The function must aggregate rather than throw. Implement helpers for lowercase snake-case IDs, unique IDs, reference existence, processor/category bidirectional equality, capability invariants, retention-rule invariants, runtime structural validation, evidence non-emptiness, canonical repository-relative readable-regular-file checks, TypeScript-semantic exported-value verification for evidence and `handlerRef`, strict public-disclosure completeness, and recursive suspicious-value detection. Filesystem, tsconfig, compiler-program, syntax, semantic, module-symbol, or alias-resolution failures are structural issues, never thrown report-construction failures.
 
 Required invariants are explicit:
 
@@ -334,9 +335,11 @@ Required invariants are explicit:
 - `manual` requires a public/manual entry point, non-empty scope, and an explicit limitations array;
 - `fixed_days` requires a positive integer and implemented automation evidence;
 - `unknown` retention requires a non-empty reason;
-- `exported_symbol` evidence reads only the referenced repository source file and must find the exact exported symbol name;
+- `exported_symbol` evidence loads the nearest repository TypeScript compiler options and required declaration roots, rejects error-level syntax/semantic diagnostics, and must find the exact exported name through the module symbol as a local value declaration that TypeScript can emit;
 - evidence resolution rejects paths that escape `repoRoot`;
 - `requirePublicDisclosures: true` requires one and only one mapping per category and rejects unknown category IDs.
+
+The exported-value contract is deliberately narrower than module executability. The auditor never imports or evaluates the target. It does not prove that arbitrary top-level business code cannot throw at runtime. Default exports, `export =`, external re-exports, imported aliases, ambient declarations, declaration files, erased/unprovable `const enum` forms, and unsupported source formats fail closed unless a future reviewed contract proves them safely.
 
 The suspicious-value detector must ignore strings matching `/^[A-Z][A-Z0-9_]+$/` because those are configuration key names. It flags private-key headers; token-like values beginning `sk-`, `ghp_`, `xoxb-`, `xoxp-`, or `Bearer `; Cookie assignment strings; and obvious embedded user/email/phone identifiers in fields that are not approved public contact entry points. Do not add broad entropy heuristics that would misclassify Chinese policy text.
 

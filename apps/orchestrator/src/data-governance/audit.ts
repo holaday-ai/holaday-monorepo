@@ -1,11 +1,5 @@
-import {
-  accessSync,
-  constants as fsConstants,
-  readFileSync,
-  realpathSync,
-  statSync,
-} from 'node:fs';
-import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { accessSync, constants as fsConstants, realpathSync, statSync } from 'node:fs';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import ts from 'typescript';
 import type {
   AuditIssue,
@@ -88,188 +82,204 @@ function hasModifier(node: ts.Node, kind: ts.ModifierSyntaxKind): boolean {
   );
 }
 
-function collectBindingNames(name: ts.BindingName, names: Set<string>): void {
-  if (ts.isIdentifier(name)) {
-    names.add(name.text);
-    return;
-  }
-  for (const element of name.elements) {
-    if (!ts.isOmittedExpression(element)) collectBindingNames(element.name, names);
-  }
+interface CompilerOptionsResolution {
+  readonly options?: ts.CompilerOptions;
+  readonly rootNames?: readonly string[];
+  readonly valid: boolean;
 }
 
-function collectVariableRuntimeBindings(
-  statement: ts.VariableStatement,
-  names: Set<string>,
-): boolean {
-  const flags = statement.declarationList.flags;
-  if ((flags & ts.NodeFlags.Using) !== 0) return false;
+type VerifyExportedSymbol = (filePath: string, symbol: string) => boolean;
 
-  const isConst = (flags & ts.NodeFlags.Const) !== 0;
-  for (const declaration of statement.declarationList.declarations) {
-    if ((isConst || !ts.isIdentifier(declaration.name)) && !declaration.initializer) return false;
-    collectBindingNames(declaration.name, names);
-  }
-  return true;
-}
+const FALLBACK_COMPILER_OPTIONS: ts.CompilerOptions = {
+  target: ts.ScriptTarget.ES2022,
+  module: ts.ModuleKind.ESNext,
+  moduleResolution: ts.ModuleResolutionKind.Bundler,
+  jsx: ts.JsxEmit.Preserve,
+  strict: true,
+  skipLibCheck: true,
+  noEmit: true,
+  allowJs: false,
+  checkJs: false,
+  types: [],
+};
 
-interface RuntimeBodyAnalysis {
-  readonly structurallyValid: boolean;
-  readonly emitsCode: boolean;
-}
-
-function analyzeModuleDeclaration(statement: ts.ModuleDeclaration): RuntimeBodyAnalysis {
-  if (
-    hasModifier(statement, ts.SyntaxKind.DeclareKeyword) ||
-    !ts.isIdentifier(statement.name) ||
-    !statement.body ||
-    (statement.flags & ts.NodeFlags.GlobalAugmentation) !== 0
-  ) {
-    return { structurallyValid: true, emitsCode: false };
-  }
-  return analyzeModuleBody(statement.body);
-}
-
-function analyzeModuleBody(body: ts.ModuleBody): RuntimeBodyAnalysis {
-  if (ts.isModuleDeclaration(body)) return analyzeModuleDeclaration(body);
-  if (!ts.isModuleBlock(body)) return { structurallyValid: true, emitsCode: false };
-
-  let emitsCode = false;
-  for (const statement of body.statements) {
-    if (hasModifier(statement, ts.SyntaxKind.DeclareKeyword)) continue;
-    if (ts.isVariableStatement(statement)) {
-      if (!collectVariableRuntimeBindings(statement, new Set<string>())) {
-        return { structurallyValid: false, emitsCode: false };
+function resolveCompilerOptions(filePath: string, repoRoot: string): CompilerOptionsResolution {
+  let directory = dirname(filePath);
+  while (isWithinRoot(repoRoot, directory)) {
+    const configPath = join(directory, 'tsconfig.json');
+    if (ts.sys.fileExists(configPath)) {
+      const config = ts.readConfigFile(configPath, ts.sys.readFile);
+      if (config.error) return { valid: false };
+      const parsed = ts.parseJsonConfigFileContent(
+        config.config,
+        ts.sys,
+        directory,
+        undefined,
+        configPath,
+      );
+      if (parsed.errors.some((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error)) {
+        return { valid: false };
       }
-      emitsCode = true;
-      continue;
+      return {
+        valid: true,
+        rootNames: [
+          filePath,
+          ...parsed.fileNames.filter((candidate) => /\.d\.(?:ts|mts|cts)$/.test(candidate)),
+        ],
+        options: {
+          ...parsed.options,
+          noEmit: true,
+          incremental: false,
+          composite: false,
+          tsBuildInfoFile: undefined,
+        },
+      };
     }
-    if (ts.isFunctionDeclaration(statement)) {
-      emitsCode ||= Boolean(statement.body);
-      continue;
-    }
-    if (ts.isClassDeclaration(statement)) {
-      emitsCode = true;
-      continue;
-    }
-    if (ts.isEnumDeclaration(statement)) {
-      emitsCode ||= !hasModifier(statement, ts.SyntaxKind.ConstKeyword);
-      continue;
-    }
-    if (ts.isModuleDeclaration(statement)) {
-      const nested = analyzeModuleDeclaration(statement);
-      if (!nested.structurallyValid) return nested;
-      emitsCode ||= nested.emitsCode;
-      continue;
-    }
-    if (
-      ts.isInterfaceDeclaration(statement) ||
-      ts.isTypeAliasDeclaration(statement) ||
-      ts.isImportDeclaration(statement) ||
-      ts.isImportEqualsDeclaration(statement) ||
-      ts.isExportDeclaration(statement) ||
-      ts.isExportAssignment(statement) ||
-      ts.isNamespaceExportDeclaration(statement) ||
-      ts.isEmptyStatement(statement) ||
-      ts.isNotEmittedStatement(statement)
-    ) {
-      continue;
-    }
-    emitsCode = true;
+    if (directory === repoRoot) break;
+    const parent = dirname(directory);
+    if (parent === directory) break;
+    directory = parent;
   }
-  return { structurallyValid: true, emitsCode };
+  return { valid: true, options: FALLBACK_COMPILER_OPTIONS, rootNames: [filePath] };
 }
 
-function runtimeDeclarationName(statement: ts.Statement): string | undefined {
-  if (ts.isFunctionDeclaration(statement)) {
-    return statement.body ? statement.name?.text : undefined;
+function isSupportedTypeScriptSource(filePath: string): boolean {
+  const lowerPath = filePath.toLowerCase();
+  if (/\.d\.(?:ts|mts|cts)$/.test(lowerPath)) return false;
+  return /\.(?:ts|tsx|mts|cts)$/.test(lowerPath);
+}
+
+function isAmbientDeclaration(node: ts.Node, sourceFile: ts.SourceFile): boolean {
+  if (sourceFile.isDeclarationFile) return true;
+  let current: ts.Node | undefined = node;
+  while (current && current !== sourceFile) {
+    if (hasModifier(current, ts.SyntaxKind.DeclareKeyword)) return true;
+    current = current.parent;
   }
-  if (ts.isClassDeclaration(statement)) return statement.name?.text;
-  if (ts.isEnumDeclaration(statement)) {
-    return hasModifier(statement, ts.SyntaxKind.ConstKeyword) ? undefined : statement.name.text;
-  }
-  if (ts.isModuleDeclaration(statement) && analyzeModuleDeclaration(statement).emitsCode) {
-    return statement.name.text;
+  return false;
+}
+
+function enclosingVariableStatement(node: ts.Node): ts.VariableStatement | undefined {
+  let current: ts.Node | undefined = node;
+  while (current && !ts.isSourceFile(current)) {
+    if (ts.isVariableStatement(current)) return current;
+    current = current.parent;
   }
   return undefined;
 }
 
-function scriptKindForPath(filePath: string): ts.ScriptKind {
-  if (filePath.endsWith('.tsx')) return ts.ScriptKind.TSX;
-  if (filePath.endsWith('.jsx')) return ts.ScriptKind.JSX;
-  if (filePath.endsWith('.js') || filePath.endsWith('.mjs') || filePath.endsWith('.cjs')) {
-    return ts.ScriptKind.JS;
-  }
-  return ts.ScriptKind.TS;
-}
-
-function hasExportedSymbol(source: string, symbol: string, filePath: string): boolean {
-  if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(symbol)) return false;
-  const sourceFile = ts.createSourceFile(
-    filePath,
-    source,
-    ts.ScriptTarget.Latest,
-    true,
-    scriptKindForPath(filePath),
-  );
-  const parseDiagnostics = (
-    sourceFile as ts.SourceFile & { readonly parseDiagnostics?: readonly ts.Diagnostic[] }
-  ).parseDiagnostics;
-  if ((parseDiagnostics && parseDiagnostics.length > 0) || sourceFile.isDeclarationFile)
+function declarationCanEmitValue(
+  declaration: ts.Declaration,
+  sourceFile: ts.SourceFile,
+  symbol: ts.Symbol,
+): boolean {
+  if (declaration.getSourceFile() !== sourceFile || isAmbientDeclaration(declaration, sourceFile)) {
     return false;
-
-  const runtimeBindings = new Set<string>();
-  for (const statement of sourceFile.statements) {
-    if (hasModifier(statement, ts.SyntaxKind.DeclareKeyword)) continue;
-    if (ts.isVariableStatement(statement)) {
-      if (!collectVariableRuntimeBindings(statement, runtimeBindings)) return false;
-      continue;
-    }
-    if (ts.isModuleDeclaration(statement)) {
-      const moduleAnalysis = analyzeModuleDeclaration(statement);
-      if (!moduleAnalysis.structurallyValid) return false;
-      if (moduleAnalysis.emitsCode && ts.isIdentifier(statement.name)) {
-        runtimeBindings.add(statement.name.text);
-      }
-      continue;
-    }
-    const runtimeName = runtimeDeclarationName(statement);
-    if (runtimeName) runtimeBindings.add(runtimeName);
   }
-
-  for (const statement of sourceFile.statements) {
-    if (ts.isExportDeclaration(statement)) {
-      if (statement.isTypeOnly || statement.moduleSpecifier || !statement.exportClause) continue;
-      if (
-        ts.isNamedExports(statement.exportClause) &&
-        statement.exportClause.elements.some(
-          (element) =>
-            !element.isTypeOnly &&
-            element.name.text === symbol &&
-            runtimeBindings.has((element.propertyName ?? element.name).text),
-        )
-      ) {
-        return true;
-      }
-      continue;
-    }
-
-    if (
-      !hasModifier(statement, ts.SyntaxKind.ExportKeyword) ||
-      hasModifier(statement, ts.SyntaxKind.DefaultKeyword) ||
-      hasModifier(statement, ts.SyntaxKind.DeclareKeyword)
-    ) {
-      continue;
-    }
-    if (ts.isVariableStatement(statement)) {
-      const exportedBindings = new Set<string>();
-      if (!collectVariableRuntimeBindings(statement, exportedBindings)) return false;
-      if (exportedBindings.has(symbol)) return true;
-      continue;
-    }
-    if (runtimeDeclarationName(statement) === symbol) return true;
+  if (ts.isVariableDeclaration(declaration) || ts.isBindingElement(declaration)) {
+    return Boolean(enclosingVariableStatement(declaration));
+  }
+  if (ts.isFunctionDeclaration(declaration)) return Boolean(declaration.body);
+  if (ts.isClassDeclaration(declaration)) return true;
+  if (ts.isEnumDeclaration(declaration)) {
+    return !hasModifier(declaration, ts.SyntaxKind.ConstKeyword);
+  }
+  if (ts.isModuleDeclaration(declaration)) {
+    return (
+      ts.isIdentifier(declaration.name) &&
+      Boolean(declaration.body) &&
+      (declaration.flags & ts.NodeFlags.GlobalAugmentation) === 0 &&
+      (symbol.flags & ts.SymbolFlags.ValueModule) !== 0
+    );
   }
   return false;
+}
+
+function resolveLocalExportTarget(
+  exportedSymbol: ts.Symbol,
+  checker: ts.TypeChecker,
+): ts.Symbol | undefined {
+  if ((exportedSymbol.flags & ts.SymbolFlags.Alias) === 0) return exportedSymbol;
+  const declarations = exportedSymbol.getDeclarations();
+  if (!declarations || declarations.length === 0) return undefined;
+  for (const declaration of declarations) {
+    if (!ts.isExportSpecifier(declaration) || declaration.isTypeOnly) return undefined;
+    const exportDeclaration = declaration.parent.parent;
+    if (
+      !ts.isExportDeclaration(exportDeclaration) ||
+      exportDeclaration.isTypeOnly ||
+      exportDeclaration.moduleSpecifier
+    ) {
+      return undefined;
+    }
+  }
+  try {
+    const target = checker.getAliasedSymbol(exportedSymbol);
+    return target === exportedSymbol ? undefined : target;
+  } catch {
+    return undefined;
+  }
+}
+
+function collectSemanticExportedValues(
+  filePath: string,
+  repoRoot: string,
+): ReadonlySet<string> | undefined {
+  if (!isSupportedTypeScriptSource(filePath)) return undefined;
+  const compiler = resolveCompilerOptions(filePath, repoRoot);
+  if (!compiler.valid || !compiler.options || !compiler.rootNames) return undefined;
+
+  try {
+    const host = ts.createCompilerHost(compiler.options, true);
+    const program = ts.createProgram({
+      rootNames: [...new Set(compiler.rootNames)],
+      options: compiler.options,
+      host,
+    });
+    const sourceFile = program.getSourceFile(filePath);
+    if (!sourceFile || sourceFile.isDeclarationFile) return undefined;
+    if (
+      ts
+        .getPreEmitDiagnostics(program)
+        .some((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error)
+    ) {
+      return undefined;
+    }
+
+    const checker = program.getTypeChecker();
+    const moduleSymbol = checker.getSymbolAtLocation(sourceFile);
+    if (!moduleSymbol) return undefined;
+    const exportedValues = new Set<string>();
+    for (const exportedSymbol of checker.getExportsOfModule(moduleSymbol)) {
+      const exportName = exportedSymbol.getName();
+      if (exportName === 'default' || exportName === 'export=') continue;
+      const target = resolveLocalExportTarget(exportedSymbol, checker);
+      if (!target || (target.flags & ts.SymbolFlags.Value) === 0) continue;
+      if ((target.flags & ts.SymbolFlags.ConstEnum) !== 0) continue;
+      const declarations = target.getDeclarations();
+      if (
+        declarations?.some((declaration) =>
+          declarationCanEmitValue(declaration, sourceFile, target),
+        )
+      ) {
+        exportedValues.add(exportName);
+      }
+    }
+    return exportedValues;
+  } catch {
+    return undefined;
+  }
+}
+
+function createSemanticExportVerifier(repoRoot: string): VerifyExportedSymbol {
+  const analyses = new Map<string, ReadonlySet<string> | undefined>();
+  return (filePath, symbol) => {
+    if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(symbol) || symbol === 'default') return false;
+    if (!analyses.has(filePath)) {
+      analyses.set(filePath, collectSemanticExportedValues(filePath, repoRoot));
+    }
+    return analyses.get(filePath)?.has(symbol) ?? false;
+  };
 }
 
 function isWithinRoot(root: string, target: string): boolean {
@@ -285,13 +295,14 @@ function isRepositoryRelativeHandlerRef(handlerRef: string, repoRoot: string): b
   return nonEmpty(path) && !isAbsolute(path) && isWithinRoot(repoRoot, resolve(repoRoot, path));
 }
 
-/** Audits registry metadata only; it never reads runtime, database, or user data. */
+/** Audits registry metadata and source semantics without importing or evaluating application code. */
 export function auditGovernanceRegistry(
   bundle: GovernanceRegistryBundle,
   options: AuditOptions = {},
 ): AuditReport {
   const issues: AuditIssue[] = [];
   const repoRoot = resolve(options.repoRoot ?? process.cwd());
+  const verifyExportedSymbol = createSemanticExportVerifier(repoRoot);
   const gapKeys = new Set<string>();
   const addIssue: AddIssue = (severity, code, registryId, message) =>
     issues.push({ severity, code, registryId, message });
@@ -434,7 +445,13 @@ export function auditGovernanceRegistry(
           'Implemented capability requires a repository-relative path#exportedSymbol handlerRef.',
         );
       } else if (options.verifyEvidenceFiles) {
-        auditHandlerRef(capability.handlerRef, registryId, repoRoot, addIssue);
+        auditHandlerRef(
+          capability.handlerRef,
+          registryId,
+          repoRoot,
+          verifyExportedSymbol,
+          addIssue,
+        );
       }
     } else if (nonEmpty(capability.handlerRef)) {
       addIssue(
@@ -557,7 +574,7 @@ export function auditGovernanceRegistry(
       });
     }
   }
-  auditEvidence(evidenceGroups, options, addIssue);
+  auditEvidence(evidenceGroups, options, verifyExportedSymbol, addIssue);
 
   if (options.requirePublicDisclosures) {
     const disclosureCounts = new Map<string, number>();
@@ -926,6 +943,7 @@ function auditHandlerRef(
   handlerRef: string,
   registryId: string,
   repoRoot: string,
+  verifyExportedSymbol: VerifyExportedSymbol,
   addIssue: AddIssue,
 ): void {
   const separator = handlerRef.lastIndexOf('#');
@@ -950,22 +968,12 @@ function auditHandlerRef(
     return;
   }
 
-  try {
-    const source = readFileSync(canonicalPath, 'utf8');
-    if (!hasExportedSymbol(source, symbol, canonicalPath)) {
-      addIssue(
-        'error',
-        'handler_symbol_missing',
-        registryId,
-        `Implemented capability handler export ${symbol} was not found.`,
-      );
-    }
-  } catch {
+  if (!verifyExportedSymbol(canonicalPath, symbol)) {
     addIssue(
       'error',
-      'handler_source_missing',
+      'handler_symbol_missing',
       registryId,
-      'Implemented capability handler source could not be read.',
+      `Implemented capability TypeScript semantic export ${symbol} was not verified.`,
     );
   }
 }
@@ -973,6 +981,7 @@ function auditHandlerRef(
 function auditEvidence(
   groups: readonly { readonly registryId: string; readonly evidence: readonly SourceEvidence[] }[],
   options: AuditOptions,
+  verifyExportedSymbol: VerifyExportedSymbol,
   addIssue: AddIssue,
 ): void {
   const repoRoot = resolve(options.repoRoot ?? process.cwd());
@@ -1043,23 +1052,13 @@ function auditEvidence(
           );
           continue;
         }
-        try {
-          const source = readFileSync(canonicalPath, 'utf8');
-          if (hasExportedSymbol(source, evidence.symbol, canonicalPath)) continue;
-          addIssue(
-            'error',
-            'evidence_symbol_missing',
-            group.registryId,
-            'The exact exported evidence symbol was not found.',
-          );
-        } catch {
-          addIssue(
-            'error',
-            'source_evidence_missing',
-            group.registryId,
-            'Evidence source could not be read.',
-          );
-        }
+        if (verifyExportedSymbol(canonicalPath, evidence.symbol)) continue;
+        addIssue(
+          'error',
+          'evidence_symbol_missing',
+          group.registryId,
+          'The exact TypeScript semantic evidence export was not verified.',
+        );
       }
     }
   }
