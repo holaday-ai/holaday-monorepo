@@ -297,6 +297,160 @@ describe('auditGovernanceRegistry', () => {
     );
   });
 
+  it.each([
+    ['commented export', '// export { targetHandler };\nconst targetHandler = () => true;', true],
+    [
+      'renamed-away local export',
+      'const targetHandler = () => true;\nexport { targetHandler as otherName };',
+      true,
+    ],
+    [
+      'renamed-to exact export',
+      'const localHandler = () => true;\nexport { localHandler as targetHandler };',
+      false,
+    ],
+    ['exact named export', 'const targetHandler = () => true;\nexport { targetHandler };', false],
+    ['direct function export', 'export function targetHandler() { return true; }', false],
+    ['direct const export', 'export const targetHandler = () => true;', false],
+    [
+      'unexported local beside another export',
+      'const targetHandler = () => true;\nexport const otherHandler = targetHandler;',
+      true,
+    ],
+    ['direct class export', 'export class targetHandler {}', false],
+    [
+      'type-only named export',
+      'type targetHandler = string;\nexport type { targetHandler };',
+      true,
+    ],
+    [
+      'type alias in a value-looking export list',
+      'type targetHandler = string;\nexport { targetHandler };',
+      true,
+    ],
+    ['unresolved re-export', "export { targetHandler } from './other.js';", true],
+    ['interface export', 'export interface targetHandler { value: string }', true],
+    ['malformed declaration', 'export const targetHandler =', true],
+  ] as const)(
+    'distinguishes the runtime exported name for %s',
+    (_caseName, source, expectsMissingSymbol) => {
+      const temporaryRoot = mkdtempSync(join(tmpdir(), 'governance-export-'));
+      try {
+        const evidencePath = join(temporaryRoot, 'apps/orchestrator/src/db/schema/users.ts');
+        mkdirSync(join(temporaryRoot, 'apps/orchestrator/src/db/schema'), { recursive: true });
+        writeFileSync(evidencePath, 'export const userSchema = true;');
+        writeFileSync(join(temporaryRoot, 'handler.ts'), source);
+        const bundle = validBundle();
+        const rightsCapability = first(bundle.rightsCapabilities);
+        const registry: GovernanceRegistryBundle = {
+          ...bundle,
+          rightsCapabilities: [
+            {
+              ...rightsCapability,
+              export: {
+                status: 'implemented',
+                handlerRef: 'handler.ts#targetHandler',
+                scope: '导出',
+                limitations: [],
+                evidence,
+              },
+            },
+          ],
+        };
+
+        const report = auditGovernanceRegistry(registry, {
+          repoRoot: temporaryRoot,
+          verifyEvidenceFiles: true,
+        });
+        const hasMissingSymbol = report.issues.some(
+          (issue) => issue.code === 'handler_symbol_missing',
+        );
+        expect(hasMissingSymbol).toBe(expectsMissingSymbol);
+      } finally {
+        rmSync(temporaryRoot, { force: true, recursive: true });
+      }
+    },
+  );
+
+  it.each([
+    ['non-object entry', [null], 'invalid_enum_value'],
+    [
+      'duplicate id',
+      [
+        {
+          id: 'task_30d',
+          boundary: '第一个边界',
+          automationStatus: 'implemented',
+          activation: {
+            mode: 'feature_conditional',
+            enabledByDefault: false,
+            configKeys: ['LEDGER_DB_WRITE_ENABLED'],
+          },
+          evidence,
+        },
+        {
+          id: 'task_30d',
+          boundary: '重复边界',
+          automationStatus: 'implemented',
+          activation: {
+            mode: 'feature_conditional',
+            enabledByDefault: false,
+            configKeys: ['RETENTION_REAPER_ENABLED'],
+          },
+          evidence,
+        },
+      ],
+      'duplicate_id',
+    ],
+    [
+      'unknown id',
+      [
+        {
+          id: 'unregistered_regime',
+          boundary: '未知边界',
+          automationStatus: 'implemented',
+          activation: {
+            mode: 'feature_conditional',
+            enabledByDefault: false,
+            configKeys: ['RETENTION_REAPER_ENABLED'],
+          },
+          evidence,
+        },
+      ],
+      'invalid_enum_value',
+    ],
+    [
+      'invalid nested config key',
+      [
+        {
+          id: 'task_30d',
+          boundary: '已登记边界',
+          automationStatus: 'implemented',
+          activation: {
+            mode: 'feature_conditional',
+            enabledByDefault: false,
+            configKeys: ['not_a_config_key'],
+          },
+          evidence,
+        },
+      ],
+      'invalid_enum_value',
+    ],
+  ] as const)('fails closed for malformed localRegimes: %s', (_caseName, localRegimes, code) => {
+    const bundle = validBundle();
+    const policy = { ...first(bundle.retentionPolicies) };
+    Reflect.set(policy, 'localRegimes', localRegimes);
+    const malformed: GovernanceRegistryBundle = {
+      ...bundle,
+      retentionPolicies: [policy],
+    };
+
+    const report = auditGovernanceRegistry(malformed, { verifyEvidenceFiles: false });
+
+    expect(report.ok).toBe(false);
+    expect(report.issues).toEqual(expect.arrayContaining([expect.objectContaining({ code })]));
+  });
+
   it.each(['/tmp/file#symbol', '../file#symbol'])(
     'rejects non-repository-relative implemented handler %s',
     (handlerRef) => {

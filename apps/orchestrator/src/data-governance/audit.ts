@@ -6,6 +6,7 @@ import {
   statSync,
 } from 'node:fs';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
+import ts from 'typescript';
 import type {
   AuditIssue,
   AuditReport,
@@ -41,6 +42,7 @@ const RETENTION_RULE_KINDS = [
   'mixed',
   'unknown',
 ] as const;
+const LOCAL_RETENTION_REGIME_IDS = ['task_30d', 'audit_180d', 'manual_hold'] as const;
 
 const SECRET_VALUE =
   /-----BEGIN (?:[A-Z ]+)?PRIVATE KEY-----|(?:^|[^A-Za-z0-9])(?:sk-|ghp_|xoxb-|xoxp-)[A-Za-z0-9_-]+|Bearer\s+\S+|(?:document\.)?cookie\s*(?:=|:)|set-cookie\s*:|\b(?:password|passwd|api[_-]?key|client[_-]?secret|access[_-]?token|credential)\s*(?:=|:)\s*(?:["'][^"']*|[^\s;,]+)/i;
@@ -79,14 +81,104 @@ function nonEmpty(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
-function hasExportedSymbol(source: string, symbol: string): boolean {
-  if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(symbol)) return false;
-  const name = symbol;
-  const declaration = new RegExp(
-    `\\bexport\\s+(?:(?:declare\\s+)?(?:async\\s+)?(?:const|let|var|function|class|interface|type|enum)\\s+${name}\\b)`,
+function hasModifier(node: ts.Node, kind: ts.ModifierSyntaxKind): boolean {
+  return (
+    ts.canHaveModifiers(node) &&
+    (ts.getModifiers(node)?.some((modifier) => modifier.kind === kind) ?? false)
   );
-  const namedExport = new RegExp(`\\bexport\\s*\\{[^}]*\\b${name}\\b[^}]*\\}`, 's');
-  return declaration.test(source) || namedExport.test(source);
+}
+
+function collectBindingNames(name: ts.BindingName, names: Set<string>): void {
+  if (ts.isIdentifier(name)) {
+    names.add(name.text);
+    return;
+  }
+  for (const element of name.elements) {
+    if (!ts.isOmittedExpression(element)) collectBindingNames(element.name, names);
+  }
+}
+
+function scriptKindForPath(filePath: string): ts.ScriptKind {
+  if (filePath.endsWith('.tsx')) return ts.ScriptKind.TSX;
+  if (filePath.endsWith('.jsx')) return ts.ScriptKind.JSX;
+  if (filePath.endsWith('.js') || filePath.endsWith('.mjs') || filePath.endsWith('.cjs')) {
+    return ts.ScriptKind.JS;
+  }
+  return ts.ScriptKind.TS;
+}
+
+function hasExportedSymbol(source: string, symbol: string, filePath: string): boolean {
+  if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(symbol)) return false;
+  const sourceFile = ts.createSourceFile(
+    filePath,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    scriptKindForPath(filePath),
+  );
+  const parseDiagnostics = (
+    sourceFile as ts.SourceFile & { readonly parseDiagnostics?: readonly ts.Diagnostic[] }
+  ).parseDiagnostics;
+  if (parseDiagnostics && parseDiagnostics.length > 0) return false;
+
+  const runtimeBindings = new Set<string>();
+  for (const statement of sourceFile.statements) {
+    if (hasModifier(statement, ts.SyntaxKind.DeclareKeyword)) continue;
+    if (ts.isVariableStatement(statement)) {
+      for (const declaration of statement.declarationList.declarations) {
+        collectBindingNames(declaration.name, runtimeBindings);
+      }
+    } else if (
+      ((ts.isFunctionDeclaration(statement) && Boolean(statement.body)) ||
+        ts.isClassDeclaration(statement)) &&
+      statement.name
+    ) {
+      runtimeBindings.add(statement.name.text);
+    }
+  }
+
+  for (const statement of sourceFile.statements) {
+    if (ts.isExportDeclaration(statement)) {
+      if (statement.isTypeOnly || statement.moduleSpecifier || !statement.exportClause) continue;
+      if (
+        ts.isNamedExports(statement.exportClause) &&
+        statement.exportClause.elements.some(
+          (element) =>
+            !element.isTypeOnly &&
+            element.name.text === symbol &&
+            runtimeBindings.has((element.propertyName ?? element.name).text),
+        )
+      ) {
+        return true;
+      }
+      continue;
+    }
+
+    if (
+      !hasModifier(statement, ts.SyntaxKind.ExportKeyword) ||
+      hasModifier(statement, ts.SyntaxKind.DefaultKeyword) ||
+      hasModifier(statement, ts.SyntaxKind.DeclareKeyword)
+    ) {
+      continue;
+    }
+    if (ts.isVariableStatement(statement)) {
+      const exportedBindings = new Set<string>();
+      for (const declaration of statement.declarationList.declarations) {
+        collectBindingNames(declaration.name, exportedBindings);
+      }
+      if (exportedBindings.has(symbol)) return true;
+      continue;
+    }
+    if (
+      ((ts.isFunctionDeclaration(statement) && Boolean(statement.body)) ||
+        ts.isClassDeclaration(statement)) &&
+      statement.name &&
+      statement.name.text === symbol
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function isWithinRoot(root: string, target: string): boolean {
@@ -456,6 +548,7 @@ function validateGovernanceRegistryStructure(
   bundle: Record<string, unknown>,
   addIssue: AddIssue,
 ): void {
+  const seenLocalRegimeIds = new Set<string>();
   const requireTopLevelEntries = (key: string): readonly Record<string, unknown>[] => {
     const value = bundle[key];
     if (!Array.isArray(value) || value.length === 0) {
@@ -651,10 +744,27 @@ function validateGovernanceRegistryStructure(
           registryId,
           'localRegimes must be a non-empty array when present.',
         );
+        continue;
       }
-      for (const regime of recordArray<Record<string, unknown>>(policy.localRegimes)) {
+      for (const [index, value] of policy.localRegimes.entries()) {
+        if (!isRecord(value)) {
+          addIssue(
+            'error',
+            'invalid_enum_value',
+            `${registryId}.local_regime:index_${index}`,
+            'Local retention regime must be an object.',
+          );
+          continue;
+        }
+        const regime = value;
         const regimeId = `${registryId}.local_regime:${nonEmpty(regime.id) ? regime.id : 'unknown'}`;
-        requireString(regime, 'id', regimeId);
+        requireEnum(regime, 'id', LOCAL_RETENTION_REGIME_IDS, regimeId);
+        if (nonEmpty(regime.id)) {
+          if (seenLocalRegimeIds.has(regime.id)) {
+            addIssue('error', 'duplicate_id', regimeId, 'Local retention regime id is duplicated.');
+          }
+          seenLocalRegimeIds.add(regime.id);
+        }
         requireString(regime, 'boundary', regimeId);
         requireEnum(regime, 'automationStatus', CAPABILITY_STATUSES, regimeId);
         if (!isRecord(regime.activation)) {
@@ -677,6 +787,16 @@ function validateGovernanceRegistryStructure(
             );
           }
           requireStringList(regime.activation, 'configKeys', regimeId);
+          for (const key of stringArray(regime.activation.configKeys)) {
+            if (!CONFIG_KEY_NAME.test(key)) {
+              addIssue(
+                'error',
+                'invalid_enum_value',
+                regimeId,
+                'Local retention configKeys must contain uppercase configuration key names only.',
+              );
+            }
+          }
         }
         validateEvidence(regime.evidence, regimeId);
       }
@@ -741,7 +861,7 @@ function auditHandlerRef(
 
   try {
     const source = readFileSync(canonicalPath, 'utf8');
-    if (!hasExportedSymbol(source, symbol)) {
+    if (!hasExportedSymbol(source, symbol, canonicalPath)) {
       addIssue(
         'error',
         'handler_symbol_missing',
@@ -834,7 +954,7 @@ function auditEvidence(
         }
         try {
           const source = readFileSync(canonicalPath, 'utf8');
-          if (hasExportedSymbol(source, evidence.symbol)) continue;
+          if (hasExportedSymbol(source, evidence.symbol, canonicalPath)) continue;
           addIssue(
             'error',
             'evidence_symbol_missing',
