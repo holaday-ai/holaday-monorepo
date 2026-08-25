@@ -1,21 +1,22 @@
-import { Link } from 'react-router-dom';
 import { MANUAL_RENEWAL_DISCLOSURE_ZH } from '@/lib/billing-page-state';
 import { PageContainer, PageHeader } from '@/pages/PageShell';
+import { Link } from 'react-router-dom';
 
 /**
- * Terms of service. Template text; must be reviewed by counsel before
- * paid-tier launch. Covers acceptable use, payment, termination,
- * liability caps, and dispute resolution.
+ * Terms of service covering acceptable use, payment, termination,
+ * liability caps, and dispute resolution. Business confirmed counsel
+ * review on 2026-08-26.
  */
 export function TermsPage(): JSX.Element {
   return (
     <PageContainer width="prose">
-      <PageHeader title="服务条款" description="最后更新：2026-08-25" />
+      <PageHeader title="服务条款" description="最后更新：2026-08-26" />
       <article className="prose prose-sm max-w-none dark:prose-invert prose-headings:tracking-tight">
+        <p>上海慕雾品牌管理有限公司（以下简称“我们”）以 HOLA DAY 品牌向您提供本服务。</p>
         <p>
-          欢迎使用 HOLA DAY（下称"我们"、"本服务"）。本服务条款（下称"本条款"）构成您
-          与我们之间具有法律约束力的协议。请您在使用本服务前仔细阅读并同意本条款。
+          本服务条款（以下简称“本条款”）构成您与我们之间具有法律约束力的协议。请您在使用本服务前仔细阅读并同意本条款。
         </p>
+        <p>联系地址：上海市虹口区汶水东路351号B幢306室。</p>
 
         <h2>1. 服务内容</h2>
         <p>
@@ -39,13 +40,13 @@ export function TermsPage(): JSX.Element {
           <li>发布涉及侵权、欺诈、色情、暴力、恐怖等违法内容；</li>
           <li>逆向工程、破解、未经授权访问本服务的源代码或数据。</li>
         </ul>
-        <p>
-          一旦发现违规行为，我们有权限制或终止您对本服务的使用，并保留追究法律责任的权利。
-        </p>
+        <p>一旦发现违规行为，我们有权限制或终止您对本服务的使用，并保留追究法律责任的权利。</p>
 
         <h2>4. 付费与套餐</h2>
         <ul>
-          <li>付费套餐的内容、价格及续费规则详见{' '}<Link to="/plan">套餐页面</Link>；</li>
+          <li>
+            付费套餐的内容、价格及续费规则详见 <Link to="/plan">套餐页面</Link>；
+          </li>
           <li>{MANUAL_RENEWAL_DISCLOSURE_ZH}</li>
           <li>
             您可在 <Link to="/billing">账单页面</Link>{' '}
@@ -71,8 +72,8 @@ export function TermsPage(): JSX.Element {
 
         <h2>7. 赔偿责任上限</h2>
         <p>
-          除非适用法律另有规定，我们在任何情况下对您的累计赔偿责任不超过您在主张产生的
-          前 12 个月内实际支付给本服务的费用。
+          除非适用法律另有规定，我们在任何情况下对您的累计赔偿责任不超过您在主张产生的 前 12
+          个月内实际支付给本服务的费用。
         </p>
 
         <h2>8. 服务终止</h2>
@@ -91,7 +92,9 @@ export function TermsPage(): JSX.Element {
         <ul>
           <li>本条款的任何条款被认定无效或不可执行的，不影响其他条款的效力；</li>
           <li>我们可能适时修订本条款，修订后的条款自发布之日起生效；</li>
-          <li>请同时参阅我们的<Link to="/privacy">隐私政策</Link>。</li>
+          <li>
+            请同时参阅我们的<Link to="/privacy">隐私政策</Link>。
+          </li>
         </ul>
 
         <p>

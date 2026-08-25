@@ -20,6 +20,14 @@ function expectText(pattern: RegExp): void {
 afterEach(cleanup);
 
 describe('PrivacyPage truth contract', () => {
+  it('identifies the legal operator and contact address', () => {
+    renderPrivacy();
+
+    expectText(/最后更新：2026-08-26/);
+    expectText(/个人信息处理者及运营主体：上海慕雾品牌管理有限公司/);
+    expectText(/联系地址：上海市虹口区汶水东路351号B幢306室/);
+  });
+
   it('separates plan visibility from server deletion and describes sensitive extension data', () => {
     renderPrivacy();
 

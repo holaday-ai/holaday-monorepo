@@ -13,7 +13,7 @@ const terms = await readFile(
 
 test('public landing privacy page states implemented data boundaries', () => {
   for (const required of [
-    '最后更新：2026 年 8 月 25 日',
+    '最后更新：2026 年 8 月 26 日',
     '不可逆单向哈希',
     '不是服务器删除期限',
     '真实 Cookie 值',
@@ -99,7 +99,11 @@ test('public legal pages do not contact Google Fonts on every visit', () => {
     ['privacy', privacy],
     ['terms', terms],
   ]) {
-    assert.doesNotMatch(page, /fonts\.googleapis\.com|fonts\.gstatic\.com/, `${name} loads Google Fonts`);
+    assert.doesNotMatch(
+      page,
+      /fonts\.googleapis\.com|fonts\.gstatic\.com/,
+      `${name} loads Google Fonts`,
+    );
   }
 });
 
@@ -125,4 +129,22 @@ test('public landing terms match the implemented manual-renewal boundary', () =>
   assert.doesNotMatch(terms, /月度续费如需取消/);
   assert.doesNotMatch(terms, /适用法律：新加坡/);
   assert.doesNotMatch(terms, /新加坡国际仲裁中心/);
+});
+
+test('public legal pages identify the same operator and contact address', () => {
+  for (const [name, page] of [
+    ['privacy', privacy],
+    ['terms', terms],
+  ]) {
+    assert.match(page, /上海慕雾品牌管理有限公司/, `${name} omits the legal operator`);
+    assert.match(
+      page,
+      /上海市虹口区汶水东路351号B幢306室/,
+      `${name} omits the operator contact address`,
+    );
+    assert.match(page, /最后更新：2026 年 8 月 26 日/, `${name} has a stale update date`);
+  }
+
+  assert.match(terms, /上海慕雾品牌管理有限公司（以下简称“我们”）以 HOLA DAY 品牌向您提供本服务。/);
+  assert.doesNotMatch(terms, /HOLA DAY 团队（以下简称"我们"）运营/);
 });
