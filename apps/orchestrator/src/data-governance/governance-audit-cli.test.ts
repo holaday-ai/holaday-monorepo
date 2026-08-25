@@ -174,6 +174,33 @@ describe('governance audit CLI', () => {
     expect(textLines.join('\n')).not.toContain('word secret');
   });
 
+  it('redacts PEM private keys from JSON and text while retaining safe registry ids', () => {
+    const pemHeader = '-----BEGIN RSA PRIVATE KEY-----';
+    const pemBody = 'synthetic-private-key-body-fragment';
+    const pemFooter = '-----END RSA PRIVATE KEY-----';
+    const report: AuditReport = {
+      ...unsafeReport(),
+      issues: [
+        {
+          severity: 'error',
+          code: 'source_evidence_missing',
+          registryId: 'category:account_security',
+          message: `Captured credential:\n${pemHeader}\n${pemBody}\n${pemFooter}`,
+        },
+      ],
+    };
+    const json = JSON.stringify(sanitizeGovernanceAuditReport(report));
+    const text = formatGovernanceAuditText(report).join('\n');
+
+    for (const output of [json, text]) {
+      expect(output).toContain('category:account_security');
+      expect(output).toContain('[redacted-private-key]');
+      expect(output).not.toContain(pemHeader);
+      expect(output).not.toContain(pemBody);
+      expect(output).not.toContain(pemFooter);
+    }
+  });
+
   it('runs directly with console-compatible output handlers', () => {
     const scriptPath = fileURLToPath(new URL('../../scripts/governance-audit.ts', import.meta.url));
     const orchestratorRoot = fileURLToPath(new URL('../../', import.meta.url));
