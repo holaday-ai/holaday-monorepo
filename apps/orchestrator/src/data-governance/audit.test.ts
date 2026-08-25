@@ -511,6 +511,120 @@ describe('auditGovernanceRegistry', () => {
   });
 
   it.each([
+    ['clean source', 'export const targetHandler = true;', false],
+    [
+      'source rejected by nearest tsconfig',
+      'const unusedLocal = true;\nexport const targetHandler = true;',
+      true,
+    ],
+  ] as const)(
+    'discovers the nearest tsconfig through a noncanonical root alias for %s',
+    (_caseName, source, expectsMissingSymbol) => {
+      const temporaryContainer = mkdtempSync(join(tmpdir(), 'governance-export-root-alias-'));
+      const canonicalRoot = join(temporaryContainer, 'canonical-root');
+      const rootAlias = join(temporaryContainer, 'root-alias');
+      try {
+        mkdirSync(canonicalRoot, { recursive: true });
+        symlinkSync(canonicalRoot, rootAlias, 'dir');
+        const evidencePath = join(canonicalRoot, 'apps/orchestrator/src/db/schema/users.ts');
+        mkdirSync(join(canonicalRoot, 'apps/orchestrator/src/db/schema'), { recursive: true });
+        writeFileSync(evidencePath, 'export const userSchema = true;');
+        writeFileSync(
+          join(canonicalRoot, 'tsconfig.json'),
+          JSON.stringify({
+            compilerOptions: {
+              module: 'ESNext',
+              moduleResolution: 'Bundler',
+              noEmit: true,
+              noUnusedLocals: true,
+            },
+            files: ['handler.ts'],
+          }),
+        );
+        writeFileSync(join(canonicalRoot, 'handler.ts'), source);
+        const bundle = validBundle();
+        const rightsCapability = first(bundle.rightsCapabilities);
+        const registry: GovernanceRegistryBundle = {
+          ...bundle,
+          rightsCapabilities: [
+            {
+              ...rightsCapability,
+              export: {
+                status: 'implemented',
+                handlerRef: 'handler.ts#targetHandler',
+                scope: '导出',
+                limitations: [],
+                evidence,
+              },
+            },
+          ],
+        };
+
+        const report = auditGovernanceRegistry(registry, {
+          repoRoot: rootAlias,
+          verifyEvidenceFiles: true,
+        });
+        expect(report.issues.some((issue) => issue.code === 'handler_symbol_missing')).toBe(
+          expectsMissingSymbol,
+        );
+      } finally {
+        rmSync(temporaryContainer, { force: true, recursive: true });
+      }
+    },
+  );
+
+  it('overrides a nearest-tsconfig noCheck option and fails closed on semantic errors', () => {
+    const temporaryRoot = mkdtempSync(join(tmpdir(), 'governance-export-nocheck-'));
+    try {
+      const evidencePath = join(temporaryRoot, 'apps/orchestrator/src/db/schema/users.ts');
+      mkdirSync(join(temporaryRoot, 'apps/orchestrator/src/db/schema'), { recursive: true });
+      writeFileSync(evidencePath, 'export const userSchema = true;');
+      writeFileSync(
+        join(temporaryRoot, 'tsconfig.json'),
+        JSON.stringify({
+          compilerOptions: {
+            module: 'ESNext',
+            moduleResolution: 'Bundler',
+            noCheck: true,
+          },
+          files: ['handler.ts'],
+        }),
+      );
+      writeFileSync(
+        join(temporaryRoot, 'handler.ts'),
+        'export const targetHandler = missingBinding;',
+      );
+      const bundle = validBundle();
+      const rightsCapability = first(bundle.rightsCapabilities);
+      const registry: GovernanceRegistryBundle = {
+        ...bundle,
+        rightsCapabilities: [
+          {
+            ...rightsCapability,
+            export: {
+              status: 'implemented',
+              handlerRef: 'handler.ts#targetHandler',
+              scope: '导出',
+              limitations: [],
+              evidence,
+            },
+          },
+        ],
+      };
+
+      const report = auditGovernanceRegistry(registry, {
+        repoRoot: temporaryRoot,
+        verifyEvidenceFiles: true,
+      });
+      expect(report.issues).toEqual(
+        expect.arrayContaining([expect.objectContaining({ code: 'handler_symbol_missing' })]),
+      );
+    } finally {
+      rmSync(temporaryRoot, { force: true, recursive: true });
+    }
+  });
+
+  it.each([
     ['non-object entry', [null], 'invalid_enum_value'],
     [
       'duplicate id',

@@ -98,6 +98,7 @@ const FALLBACK_COMPILER_OPTIONS: ts.CompilerOptions = {
   strict: true,
   skipLibCheck: true,
   noEmit: true,
+  noCheck: false,
   allowJs: false,
   checkJs: false,
   types: [],
@@ -129,6 +130,7 @@ function resolveCompilerOptions(filePath: string, repoRoot: string): CompilerOpt
         options: {
           ...parsed.options,
           noEmit: true,
+          noCheck: false,
           incremental: false,
           composite: false,
           tsBuildInfoFile: undefined,
@@ -301,8 +303,19 @@ export function auditGovernanceRegistry(
   options: AuditOptions = {},
 ): AuditReport {
   const issues: AuditIssue[] = [];
-  const repoRoot = resolve(options.repoRoot ?? process.cwd());
-  const verifyExportedSymbol = createSemanticExportVerifier(repoRoot);
+  const configuredRepoRoot = resolve(options.repoRoot ?? process.cwd());
+  let canonicalRepoRoot: string | undefined;
+  if (options.verifyEvidenceFiles) {
+    try {
+      const candidate = realpathSync(configuredRepoRoot);
+      if (statSync(candidate).isDirectory()) canonicalRepoRoot = candidate;
+    } catch {
+      canonicalRepoRoot = undefined;
+    }
+  }
+  const verifyExportedSymbol = canonicalRepoRoot
+    ? createSemanticExportVerifier(canonicalRepoRoot)
+    : () => false;
   const gapKeys = new Set<string>();
   const addIssue: AddIssue = (severity, code, registryId, message) =>
     issues.push({ severity, code, registryId, message });
@@ -436,7 +449,10 @@ export function auditGovernanceRegistry(
     if (status === 'implemented') {
       if (
         !nonEmpty(capability.handlerRef) ||
-        !isRepositoryRelativeHandlerRef(capability.handlerRef, repoRoot)
+        !isRepositoryRelativeHandlerRef(
+          capability.handlerRef,
+          canonicalRepoRoot ?? configuredRepoRoot,
+        )
       ) {
         addIssue(
           'error',
@@ -448,7 +464,7 @@ export function auditGovernanceRegistry(
         auditHandlerRef(
           capability.handlerRef,
           registryId,
-          repoRoot,
+          canonicalRepoRoot,
           verifyExportedSymbol,
           addIssue,
         );
@@ -574,7 +590,7 @@ export function auditGovernanceRegistry(
       });
     }
   }
-  auditEvidence(evidenceGroups, options, verifyExportedSymbol, addIssue);
+  auditEvidence(evidenceGroups, options, canonicalRepoRoot, verifyExportedSymbol, addIssue);
 
   if (options.requirePublicDisclosures) {
     const disclosureCounts = new Map<string, number>();
@@ -942,19 +958,18 @@ function validateGovernanceRegistryStructure(
 function auditHandlerRef(
   handlerRef: string,
   registryId: string,
-  repoRoot: string,
+  canonicalRepoRoot: string | undefined,
   verifyExportedSymbol: VerifyExportedSymbol,
   addIssue: AddIssue,
 ): void {
   const separator = handlerRef.lastIndexOf('#');
   const relativePath = handlerRef.slice(0, separator);
   const symbol = handlerRef.slice(separator + 1);
-  let canonicalRoot: string;
   let canonicalPath: string;
   try {
-    canonicalRoot = realpathSync(repoRoot);
-    canonicalPath = realpathSync(resolve(repoRoot, relativePath));
-    if (!isWithinRoot(canonicalRoot, canonicalPath)) throw new Error('outside root');
+    if (!canonicalRepoRoot) throw new Error('repo root unavailable');
+    canonicalPath = realpathSync(resolve(canonicalRepoRoot, relativePath));
+    if (!isWithinRoot(canonicalRepoRoot, canonicalPath)) throw new Error('outside root');
     const stat = statSync(canonicalPath);
     if (!stat.isFile()) throw new Error('not a regular file');
     accessSync(canonicalPath, fsConstants.R_OK);
@@ -981,19 +996,10 @@ function auditHandlerRef(
 function auditEvidence(
   groups: readonly { readonly registryId: string; readonly evidence: readonly SourceEvidence[] }[],
   options: AuditOptions,
+  canonicalRepoRoot: string | undefined,
   verifyExportedSymbol: VerifyExportedSymbol,
   addIssue: AddIssue,
 ): void {
-  const repoRoot = resolve(options.repoRoot ?? process.cwd());
-  let canonicalRepoRoot: string | undefined;
-  if (options.verifyEvidenceFiles) {
-    try {
-      canonicalRepoRoot = realpathSync(repoRoot);
-      if (!statSync(canonicalRepoRoot).isDirectory()) canonicalRepoRoot = undefined;
-    } catch {
-      canonicalRepoRoot = undefined;
-    }
-  }
   for (const group of groups) {
     if (!Array.isArray(group.evidence) || group.evidence.length === 0) {
       addIssue(
@@ -1016,8 +1022,8 @@ function auditEvidence(
     }
     for (const evidence of group.evidence) {
       if (!isRecord(evidence) || !nonEmpty(evidence.path)) continue;
-      const resolvedPath = resolve(repoRoot, evidence.path);
-      if (!isWithinRoot(repoRoot, resolvedPath)) {
+      const resolvedPath = resolve(canonicalRepoRoot, evidence.path);
+      if (!isWithinRoot(canonicalRepoRoot, resolvedPath)) {
         addIssue(
           'error',
           'source_evidence_missing',
