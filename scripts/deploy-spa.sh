@@ -4,13 +4,14 @@
 # White-screen postmortem (1de57cc) made the smoke check
 # non-negotiable: build, ship, then verify the live HTML responds
 # with our marker string. Aliyun rolls back its atomic edge release;
-# Vultr restores dist.bak.
+# Vultr restores the SPA and landing-site backup pair.
 #
 # BOSS-feedback follow-up (2026-05-18) — script now pushes to BOTH
 # Aliyun AND Vultr. The Aliyun-only flow let Vultr's SPA dist sit
 # 15 days stale; holaday.ai (which hits Vultr nginx directly, no
 # CF in front yet) silently served the old bundle until BOSS noticed
-# a hash mismatch. Vultr push uses the same tarball + smoke pattern.
+# a hash mismatch. Vultr now publishes the SPA and landing site together so
+# exact legal routes cannot remain on an older release.
 #
 # Usage:   ./scripts/deploy-spa.sh
 # Env:     ALIYUN_PASSWORD + VULTR_PASSWORD (both required)
@@ -41,21 +42,29 @@ ALIYUN_DOMAIN="hd-app.orangebench.tech"
 ALIYUN_EDGE_DEPLOY="$ROOT_DIR/ops/aliyun-edge/deploy.sh"
 ALIYUN_EDGE_ROOT="/opt/holaday-edge"
 DIST_DIR="apps/web-workbench/dist"
+LANDING_DIR="apps/holaday-landing"
 # Probe the SPA entry, not the marketing root, so the response contains
 # both the smoke marker and the deployed bundle hash.
 SMOKE_URL="https://hd-app.orangebench.tech/app"
 SMOKE_MARKER="HOLA DAY"
-TARBALL="/tmp/holaday-spa-dist.tar.gz"
+TARBALL="/tmp/holaday-web-release.tar.gz"
 PORTABLE_TAR_SCRIPT="$ROOT_DIR/scripts/create-portable-tar.sh"
+VULTR_WEB_SWITCH_SCRIPT="scripts/switch-vultr-web-release.sh"
 
 # Vultr SPA mirror — holaday.ai serves this directly until Phase 28
 # Cloudflare migration is done.
 VULTR_HOST="root@207.148.70.106"
 VULTR_SPA_PATH="/opt/holaday-monorepo/apps/web-workbench/dist"
-VULTR_BACKUP_PATH="/opt/holaday-monorepo/apps/web-workbench/dist.bak"
+VULTR_SPA_BACKUP_PATH="/opt/holaday-monorepo/apps/web-workbench/dist.bak"
+VULTR_LANDING_PATH="/opt/holaday-landing"
+VULTR_LANDING_BACKUP_PATH="/opt/holaday-landing.bak"
+VULTR_WEB_STATE_PATH="/var/lib/holaday-deploy/vultr-web-release.state"
+VULTR_STAGE_ROOT="/tmp/holaday-web-new"
 VULTR_SMOKE_URL="https://holaday.ai/app"
 VULTR_SMOKE_RESOLVE="holaday.ai:443:207.148.70.106"
 VULTR_REMOTE_SMOKE_RESOLVE="holaday.ai:443:127.0.0.1"
+VULTR_PRIVACY_URL="https://holaday.ai/privacy"
+VULTR_TERMS_URL="https://holaday.ai/terms"
 
 # Non-interactive password auth — pulled from env / local deploy env so
 # passwords don't end up in shell history. Uses sshpass when installed,
@@ -144,6 +153,16 @@ count_matches() {
   printf '%s\n' "${count:-0}" | head -1
 }
 
+sha256_file() {
+  local path="$1"
+
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$path" | awk '{print $1}'
+  else
+    shasum -a 256 "$path" | awk '{print $1}'
+  fi
+}
+
 smoke_check() {
   local label="$1"
   local url="$2"
@@ -191,6 +210,47 @@ vultr_remote_smoke_check() {
   return 1
 }
 
+vultr_legal_smoke_check() {
+  local page url expected_sha response_path http_code actual_sha attempt
+
+  for page in privacy terms; do
+    if [[ "$page" == "privacy" ]]; then
+      url="$VULTR_PRIVACY_URL"
+      expected_sha="$VULTR_PRIVACY_SHA"
+    else
+      url="$VULTR_TERMS_URL"
+      expected_sha="$VULTR_TERMS_SHA"
+    fi
+    response_path="/tmp/vultr-${page}-smoke.html"
+
+    for attempt in 1 2; do
+      http_code=$(curl -s --max-time 15 --resolve "$VULTR_SMOKE_RESOLVE" \
+        -o "$response_path" -w '%{http_code}' "$url" 2>&1 || true)
+      actual_sha=$(sha256_file "$response_path" 2>/dev/null || true)
+      if [[ "$http_code" == "200" && "$actual_sha" == "$expected_sha" ]]; then
+        echo "✅ Vultr $page origin smoke check passed"
+        break
+      fi
+      echo "   $page attempt $attempt: http=$http_code, content_match=$([[ "$actual_sha" == "$expected_sha" ]] && echo 1 || echo 0)"
+      if (( attempt == 2 )); then
+        echo "❌ Vultr $page origin smoke FAILED" >&2
+        return 1
+      fi
+      sleep 3
+    done
+  done
+}
+
+rollback_vultr_web() {
+  run_with_retry "Vultr web rollback" "${VULTR_SSH[@]}" "$VULTR_HOST" \
+    "VULTR_WEB_SPA_PATH='$VULTR_SPA_PATH' \
+     VULTR_WEB_SPA_BACKUP_PATH='$VULTR_SPA_BACKUP_PATH' \
+     VULTR_WEB_LANDING_PATH='$VULTR_LANDING_PATH' \
+     VULTR_WEB_LANDING_BACKUP_PATH='$VULTR_LANDING_BACKUP_PATH' \
+     VULTR_WEB_STATE_PATH='$VULTR_WEB_STATE_PATH' \
+     bash '$VULTR_STAGE_ROOT/$VULTR_WEB_SWITCH_SCRIPT' rollback"
+}
+
 rollback_aliyun_edge() {
   local release_id="$1"
 
@@ -219,17 +279,24 @@ if [[ ! -x "$PORTABLE_TAR_SCRIPT" ]]; then
   echo "❌ $PORTABLE_TAR_SCRIPT is not executable" >&2
   exit 1
 fi
+if [[ ! -x "$VULTR_WEB_SWITCH_SCRIPT" ]]; then
+  echo "❌ $VULTR_WEB_SWITCH_SCRIPT is not executable" >&2
+  exit 1
+fi
 
 NEW_HASH=$(grep -o 'index-[^"]*\.js' "$DIST_DIR/index.html" | head -1 || echo unknown)
+VULTR_PRIVACY_SHA=$(sha256_file "$LANDING_DIR/privacy.html")
+VULTR_TERMS_SHA=$(sha256_file "$LANDING_DIR/terms.html")
+VULTR_WEB_MANIFEST=$(bash "$VULTR_WEB_SWITCH_SCRIPT" manifest "$DIST_DIR" "$LANDING_DIR")
 echo "📦 Local bundle: $NEW_HASH"
 
 ALIYUN_SSH=("${ALIYUN_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}")
 ALIYUN_RELEASE_ID="$(date -u +%Y%m%d%H%M%S)-$$"
 ALIYUN_EDGE_RELEASE_SPA_PATH="$ALIYUN_EDGE_ROOT/releases/$ALIYUN_RELEASE_ID/apps/web-workbench/dist"
 
-echo "→ Packing $DIST_DIR for the Vultr mirror"
+echo "→ Packing the SPA and landing site for the Vultr mirror"
 rm -f "$TARBALL"
-"$PORTABLE_TAR_SCRIPT" "$TARBALL" -C apps/web-workbench dist
+"$PORTABLE_TAR_SCRIPT" "$TARBALL" apps/web-workbench/dist apps/holaday-landing "$VULTR_WEB_SWITCH_SCRIPT"
 
 echo "→ Publishing Aliyun through the atomic edge release"
 HOLADAY_EDGE_RELEASE_ID="$ALIYUN_RELEASE_ID" SSHPASS="$ALIYUN_PASSWORD" "$ALIYUN_EDGE_DEPLOY"
@@ -258,9 +325,8 @@ assert_aliyun_release_active "$ALIYUN_RELEASE_ID"
 
 # ───────────────────────── Vultr mirror ─────────────────────────
 #
-# Same tarball, different extract path. Smoke probes a deep route
-# (/app — under the SPA fallback) since `/` lands on the marketing
-# landing page.
+# The Vultr archive contains both web surfaces. Activation and rollback keep
+# the SPA and exact-route landing pages on one release boundary.
 echo
 echo "→ Mirroring to Vultr (holaday.ai)"
 if [[ -z "${VULTR_PASSWORD:-}" ]]; then
@@ -277,38 +343,40 @@ VULTR_SCP=("${VULTR_AUTH_PREFIX[@]}" scp "${SSH_OPTS[@]}")
 echo "→ Uploading tarball to Vultr"
 run_with_retry "Vultr upload" "${VULTR_SCP[@]}" "$TARBALL" "$VULTR_HOST:/tmp/" >/dev/null
 
-echo "→ Staging Vultr dist"
+echo "→ Staging Vultr web release"
 run_with_retry_filtered "Vultr stage" "${VULTR_SSH[@]}" "$VULTR_HOST" \
-  "rm -rf /tmp/holaday-spa-new && \
-   mkdir -p /tmp/holaday-spa-new && \
-   tar xzf /tmp/holaday-spa-dist.tar.gz -C /tmp/holaday-spa-new"
+  "rm -rf '$VULTR_STAGE_ROOT' && \
+   mkdir -p '$VULTR_STAGE_ROOT' && \
+   tar xzf '$TARBALL' -C '$VULTR_STAGE_ROOT'"
 
-echo "→ Switching Vultr dist"
-run_with_retry "Vultr switch" "${VULTR_SSH[@]}" "$VULTR_HOST" \
-  "set -e; \
-   cd /opt/holaday-monorepo/apps/web-workbench; \
-   if [ ! -d /tmp/holaday-spa-new/dist ]; then \
-     grep -q '$NEW_HASH' dist/index.html 2>/dev/null && exit 0; \
-     echo 'staged dist missing' >&2; \
-     exit 1; \
-   fi; \
-   rm -rf dist.prev; \
-   if [ -d dist ]; then mv dist dist.prev; fi; \
-   mv /tmp/holaday-spa-new/dist dist; \
-   rm -rf $VULTR_BACKUP_PATH; \
-   if [ -d dist.prev ]; then mv dist.prev $VULTR_BACKUP_PATH; fi"
+echo "→ Switching Vultr web release"
+run_with_retry "Vultr web switch" "${VULTR_SSH[@]}" "$VULTR_HOST" \
+  "VULTR_WEB_SPA_PATH='$VULTR_SPA_PATH' \
+   VULTR_WEB_SPA_BACKUP_PATH='$VULTR_SPA_BACKUP_PATH' \
+   VULTR_WEB_LANDING_PATH='$VULTR_LANDING_PATH' \
+   VULTR_WEB_LANDING_BACKUP_PATH='$VULTR_LANDING_BACKUP_PATH' \
+   VULTR_WEB_STATE_PATH='$VULTR_WEB_STATE_PATH' \
+   bash '$VULTR_STAGE_ROOT/$VULTR_WEB_SWITCH_SCRIPT' activate \
+     '$VULTR_STAGE_ROOT' '$NEW_HASH' '$VULTR_WEB_MANIFEST'"
 
 echo "→ Vultr smoke check ($VULTR_SMOKE_URL via $VULTR_SMOKE_RESOLVE must return '$SMOKE_MARKER' + $NEW_HASH)"
 sleep 2
 if ! smoke_check "Vultr" "$VULTR_SMOKE_URL" /tmp/vultr-smoke.html --resolve "$VULTR_SMOKE_RESOLVE"; then
   echo "⚠️  Vultr local-origin smoke failed from deploy host; verifying from inside Vultr before rollback"
   if ! vultr_remote_smoke_check; then
-    echo "❌ Vultr smoke FAILED — rolling Vultr back"
-    run_with_retry "Vultr rollback" "${VULTR_SSH[@]}" "$VULTR_HOST" \
-      "rm -rf $VULTR_SPA_PATH && mv $VULTR_BACKUP_PATH $VULTR_SPA_PATH"
-    echo "🔄 Vultr rolled back. Aliyun deploy remains."
+    echo "❌ Vultr smoke FAILED — rolling both Vultr web surfaces back"
+    rollback_vultr_web
+    echo "🔄 Vultr SPA and landing site rolled back. Aliyun deploy remains."
     exit 1
   fi
+fi
+
+echo "→ Vultr legal-page smoke check (privacy and terms must match this release)"
+if ! vultr_legal_smoke_check; then
+  echo "❌ Vultr legal-page smoke FAILED — rolling both Vultr web surfaces back"
+  rollback_vultr_web
+  echo "🔄 Vultr SPA and landing site rolled back. Aliyun deploy remains."
+  exit 1
 fi
 
 VULTR_DEPLOYED_HASH=$(run_with_retry "Vultr bundle hash" "${VULTR_SSH[@]}" "$VULTR_HOST" \
@@ -316,5 +384,6 @@ VULTR_DEPLOYED_HASH=$(run_with_retry "Vultr bundle hash" "${VULTR_SSH[@]}" "$VUL
 echo "✅ Vultr bundle:  $VULTR_DEPLOYED_HASH"
 if [[ "$VULTR_DEPLOYED_HASH" != "$NEW_HASH" ]]; then
   echo "❌ Vultr hash mismatch — local $NEW_HASH vs Vultr $VULTR_DEPLOYED_HASH" >&2
+  rollback_vultr_web
   exit 1
 fi
