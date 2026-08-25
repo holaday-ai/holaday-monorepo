@@ -66,6 +66,19 @@ describe('PrivacyPage truth contract', () => {
     expectText(/逐条删除或清空全部/);
   });
 
+  it('discloses partner KYC, financial profile, risk, referral, and ledger processing', () => {
+    renderPrivacy();
+
+    expectText(/合伙人 KYC 与账本/);
+    expectText(/银行账户或银行卡指纹/);
+    expectText(/认证服务商与参考号/);
+    expectText(/提现金额、状态与风险评分/);
+    expectText(/邀请关系与奖励/);
+    expectText(/HOLA Credit 与 API Units 账本/);
+    expectText(/实名审核、账务、反欺诈、税务和争议/);
+    expectText(/外部实名认证、银行、支付或出款服务商/);
+  });
+
   it('discloses feedback content and context forwarded through Resend or service logs', () => {
     renderPrivacy();
 

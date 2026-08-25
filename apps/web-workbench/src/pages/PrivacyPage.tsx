@@ -97,6 +97,13 @@ const DATA_CATEGORIES: DataCategory[] = [
     retention: '按交易、税务、争议和适用法律所需保存',
   },
   {
+    label: '合伙人 KYC 与账本',
+    data: '银行账户或银行卡指纹、KYC 状态、认证服务商与参考号、提现金额、状态与风险评分、邀请关系与奖励、HOLA Credit 与 API Units 账本及活动记录',
+    purpose: '验证合伙人资格与同名账户，处理充值、分润、提现、风险审核、对账与争议',
+    processors: 'HOLA DAY；实际启用时可能涉及外部实名认证、银行、支付或出款服务商',
+    retention: '按实名审核、账务、反欺诈、税务和争议处理及适用法律所需保存',
+  },
+  {
     label: '媒体素材',
     data: '您上传的图片、视频、语音，以及声音克隆标识和授权时间',
     purpose: '完成您明确请求的图片、视频或语音任务',
@@ -364,6 +371,13 @@ export function PrivacyPage(): JSX.Element {
               您启用外部通知渠道时，通知标题、正文、状态和最多 60 字的定时任务意图会发送至您配置的
               webhook。
             </ProviderGroup>
+            <ProviderGroup
+              title="合伙人身份与账务"
+              providers="HOLA DAY · 按实际启用的实名、银行、支付或出款服务"
+            >
+              合伙人功能启用时，我们会保存认证服务商与参考号或人工审核记录。实际另行启用外部实名认证、银行、
+              支付或出款服务商时，完成验证与出款所需的最小信息可能由其处理。
+            </ProviderGroup>
           </div>
           <div className="mt-4 rounded-[8px] bg-[#F7F7F7] px-4 py-3 text-xs leading-relaxed text-muted-foreground dark:bg-muted">
             支付记录可能包含支付渠道标识和付款邮箱。HOLA DAY 不直接保存银行卡号、CVV
@@ -393,6 +407,10 @@ export function PrivacyPage(): JSX.Element {
               <strong className="font-semibold text-foreground">支付与运维记录：</strong>
               交易、安全、争议或审计记录会按履行交易、法定义务、保障安全和解决争议所需保存，条件结束后删除或去标识化。
               其他日志按故障排查、安全和运营所必需的最短期限处理，并非统一固定天数。
+            </p>
+            <p>
+              <strong className="font-semibold text-foreground">合伙人记录：</strong>
+              KYC、账本、邀请、奖励、提现和风险记录按实名审核、账务、反欺诈、税务和争议处理及适用法律所需保存。
             </p>
           </div>
         </Section>

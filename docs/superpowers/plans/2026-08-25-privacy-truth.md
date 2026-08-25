@@ -217,7 +217,7 @@ const POLICY_NAV: ReadonlyArray<{ id: PrivacySectionId; label: string }> = [
 ];
 ```
 
-Define ten `DataCategory` rows for:
+Define eleven `DataCategory` rows for:
 
 1. `账号与安全` — email/phone/display name/avatar/password hash/MFA/session;
 2. `任务与执行` — intent/plan/steps/result/screenshots/page context/files/errors;
@@ -227,8 +227,9 @@ Define ten `DataCategory` rows for:
 6. `扩展常用网站` — domain/visit count/last-visit time only;
 7. `扩展登录态` — allowlisted real Cookie values;
 8. `支付与套餐` — order/provider identifiers/amount/currency/purchase/status/payer email;
-9. `媒体素材` — user images/video/audio/voice-clone identifier/consent time;
-10. `分析与日志` — bounded event aggregates/anonymous digests/IP/UA/operation/error context.
+9. `合伙人 KYC 与账本` — bank-account/card fingerprint, KYC status/provider/reference, credit/API-unit ledger, activity, referrals/rewards, withdrawals, risk and payout records;
+10. `媒体素材` — user images/video/audio/voice-clone identifier/consent time;
+11. `分析与日志` — bounded event aggregates/anonymous digests/IP/UA/operation/error context.
 
 Do not put host IPs, env keys, schema names, retention defaults, or internal IDs in the arrays.
 
@@ -295,6 +296,7 @@ Use these exact factual boundaries:
 
 - `extension`: clearly separate domain aggregates from real Cookie values and mention server allowlisting. State that an authenticated extension automatically reads the fixed sync-domain list on server welcome and about every 30 minutes through the alarm path, that there is no per-site toggle, and that logout/disabling/uninstalling prevents future sync but does not automatically delete received data.
 - `providers`: say use depends on the feature and current service configuration. Group the verified provider names by function: infrastructure/storage (`Vultr`, `Cloudflare R2`, `Aliyun`); AI/scraping/media (`Anthropic`, `Google`, `OpenAI`, `Alibaba Cloud DashScope`, `fal.ai`, `Firecrawl`, `Apify`, `DivineAPI`); automation and external notifications (`Zapier`, WeCom, Feishu, DingTalk, custom webhook); identity/communications/feedback/payments (`Google`, `Resend`, SMS gateway, `PayPal` or China payment provider). Disclose that the configured Zapier path receives task intent and task ID for cross-platform automation; external notification channels receive title, message, status and up to 60 characters of scheduled-task intent; and feedback can carry user-entered text, account details, User-Agent and an optional task ID to Resend or service logs. State only the minimum data needed for the requested feature is sent and that processing may occur outside mainland China.
+- `partner`: disclose the enabled partner flow's KYC status/provider/reference and bank-account/card fingerprint, recharge and credit/API-unit ledger, activity, referral/reward, withdrawal, risk and payout records; state qualification, same-name verification, settlement, fraud/risk review, reconciliation, tax and dispute purposes; distinguish HOLA DAY's current record/manual-review path from any external identity, bank, payment or payout provider that is actually enabled.
 - `retention`: say 7/30/90 days is default task-history visibility, not server deletion; files follow visible expiry; common-site aggregates are replaced by the next successful sync; pending Cookies are injected immediately or held for the next browser injection; transaction/security/dispute/audit records follow necessary legal and operational criteria; do not give a universal log deadline.
 - `rights`: list access/copy/correction/deletion/withdrawal/restriction/objection/complaint subject to applicable law; identify email as the current intake; explain identity verification and lawful retention exceptions.
 - `security`: describe Argon2id-equivalent wording as “不可逆单向哈希”, MFA secret encryption, transport/access control and sensitive-header redaction; state no security method is absolute and do not claim all stored data is encrypted.

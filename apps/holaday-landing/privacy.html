@@ -115,6 +115,7 @@
         <tr><td>扩展常用网站</td><td><span class="mobile-cell-label">具体内容与用途</span>最近 30 天记录在设备端汇总后的域名、访问次数与最近访问时间，用于优先准备常用站点配置</td><td><span class="mobile-cell-label">保存标准或控制</span>下一次成功同步会替换旧快照；停止同步不等于自动删除</td></tr>
         <tr><td>扩展登录态</td><td><span class="mobile-cell-label">具体内容与用途</span>扩展在登录状态下对固定同步域名清单读取 Cookie 名称、值、域名、路径、安全与同站标记及到期时间，用于让任务浏览器继承 Chrome 中已有的登录状态</td><td><span class="mobile-cell-label">保存标准或控制</span>有可用浏览器时即时注入，否则暂存至下一次注入；退出登录、停用或卸载扩展可阻止未来同步</td></tr>
         <tr><td>支付与套餐</td><td><span class="mobile-cell-label">具体内容与用途</span>订单、金额、币种、购买内容、状态、渠道标识与可能的付款邮箱，用于结算、发放权益、退款和处理争议</td><td><span class="mobile-cell-label">保存标准或控制</span>按交易、税务、争议和适用法律所需保存</td></tr>
+        <tr><td>合伙人 KYC 与账本</td><td><span class="mobile-cell-label">具体内容与用途</span>银行账户或银行卡指纹、KYC 状态、认证服务商与参考号、提现金额、状态与风险评分、邀请关系与奖励、HOLA Credit 与 API Units 账本及活动记录，用于验证合伙人资格与同名账户，并处理充值、分润、提现、风险审核、对账与争议</td><td><span class="mobile-cell-label">保存标准或控制</span>按实名审核、账务、反欺诈、税务和争议处理及适用法律所需保存</td></tr>
         <tr><td>媒体素材</td><td><span class="mobile-cell-label">具体内容与用途</span>您上传的图片、视频、语音，以及声音克隆标识和授权时间，用于完成您明确请求的媒体任务</td><td><span class="mobile-cell-label">保存标准或控制</span>按文件可用期、账号处理及必要的安全或授权证据标准保存</td></tr>
         <tr><td>分析与日志</td><td><span class="mobile-cell-label">具体内容与用途</span>固定事件聚合、匿名摘要、IP、User-Agent、操作与错误日志，用于安全、稳定和故障排查</td><td><span class="mobile-cell-label">保存标准或控制</span>按具体配置、故障、安全和法律所需的最短期限</td></tr>
       </tbody>
@@ -135,6 +136,7 @@
       <li><strong>AI、抓取与媒体：</strong>Anthropic、Google、OpenAI、Alibaba Cloud DashScope、fal.ai、Firecrawl、Apify、DivineAPI，按功能处理任务指令、网页地址与检索条件、网页内容、图片、视频、语音、星座或塔罗请求及生成结果。</li>
       <li><strong>身份、通信、反馈与支付：</strong>Google、Resend、短信网关、PayPal、中国支付服务，用于第三方登录、验证码、服务邮件、反馈转发、收款、权益发放、退款与争议处理。</li>
       <li><strong>自动化与外部通知：</strong>Zapier 仅在相关配置已启用且任务被识别为跨平台自动化时接收任务指令和任务标识。您启用外部通知渠道时，通知标题、正文、状态和最多 60 字的定时任务意图会发送至您配置的企业微信、飞书、钉钉或自定义 webhook。</li>
+      <li><strong>合伙人身份与账务：</strong>合伙人功能启用时，HOLA DAY 会保存认证服务商与参考号或人工审核记录。实际另行启用外部实名认证、银行、支付或出款服务商时，完成验证与出款所需的最小信息可能由其处理。</li>
     </ul>
     <p>支付记录可能包含支付渠道标识和付款邮箱。HOLA DAY 不直接保存银行卡号、CVV 或第三方支付账户密码。每次付款只购买所选周期，到期前由您手动续费，不会自动扣款。</p>
 
@@ -142,6 +144,7 @@
     <p><strong>任务历史：</strong>套餐中的 7/30/90 天表示默认可见范围，不是服务器删除期限。任务、截图、文件和验证材料会按其类别、文件界面显示的到期时间、服务需要和删除申请分别处理。</p>
     <p><strong>扩展数据：</strong>常用网站快照由下次成功同步替换；登录 Cookie 在有可用浏览器时即时注入，或暂存至下一次注入。当前不承诺尚未实现的统一自动清理期限。</p>
     <p><strong>支付与运维记录：</strong>交易、安全、争议或审计记录会按履行交易、法定义务、保障安全和解决争议所需保存，条件结束后删除或去标识化。其他日志按故障排查、安全和运营所必需的最短期限处理，并非统一固定天数。</p>
+    <p><strong>合伙人记录：</strong>KYC、账本、邀请、奖励、提现和风险记录按实名审核、账务、反欺诈、税务和争议处理及适用法律所需保存。</p>
 
     <h2 id="rights">5. 您的权利</h2>
     <p>适用法律可能赋予您查阅、复制、更正、删除、撤回同意、限制或反对处理以及投诉的权利。当前请发送邮件至 <a href="mailto:privacy@holaday.ai">privacy@holaday.ai</a> 提交申请。邮件是申请入口，不代表即时或自动完成。为保护账号，我们会先确认账号归属，再处理账号关闭和可处理的关联数据。依法需要保留，或处理交易、安全、争议所必需的记录，可能在相应条件结束前继续受限保存。</p>
