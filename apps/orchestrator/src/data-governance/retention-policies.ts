@@ -1,0 +1,193 @@
+import type { RetentionPolicyDefinition, SourceEvidence } from './types.js';
+
+function source(path: string, fact: string): SourceEvidence {
+  return { kind: 'source_file', path, fact };
+}
+
+export const retentionPolicies: RetentionPolicyDefinition[] = [
+  {
+    id: 'account_purpose_bound',
+    trigger: '账号创建与持续使用',
+    rule: { kind: 'purpose_bound', description: '账号存续及安全所需' },
+    automationStatus: 'manual',
+    retryStatus: 'not_implemented',
+    evidence: [
+      source('apps/orchestrator/src/db/schema/users.ts', '用户账号资料存储在 users 表中。'),
+      source('apps/web-workbench/src/pages/SettingsPage.tsx', '设置页提供账号相关设置入口。'),
+    ],
+  },
+  {
+    id: 'task_visibility_unified_unknown',
+    trigger: '任务创建、执行与展示',
+    rule: {
+      kind: 'unknown',
+      reason: '套餐可见范围不是服务器删除期限，尚无统一期限。',
+    },
+    automationStatus: 'not_implemented',
+    retryStatus: 'not_implemented',
+    evidence: [
+      source('apps/orchestrator/src/db/schema/tasks.ts', '任务记录存储在 tasks 表中。'),
+      source(
+        'apps/web-workbench/src/utils/time-buckets.ts',
+        '任务时间分组和可见性工具不定义服务器删除期限。',
+      ),
+    ],
+  },
+  {
+    id: 'memory_entry_lifecycle',
+    trigger: '记忆条目创建、更新或到期',
+    rule: { kind: 'mixed', description: '偏好可长期，其他条目按自身期限/长期状态。' },
+    automationStatus: 'implemented',
+    retryStatus: 'not_implemented',
+    evidence: [
+      source('apps/orchestrator/src/db/schema/execution-memory.ts', '记忆条目包含可选到期时间。'),
+      source(
+        'apps/orchestrator/src/trpc/routers/memory.ts',
+        '记忆路由过滤过期条目并提供用户删除操作。',
+      ),
+    ],
+  },
+  {
+    id: 'browser_local_until_clear',
+    trigger: '本地星座资料写入',
+    rule: { kind: 'until_user_action', action: '本地清除资料或浏览器数据' },
+    automationStatus: 'implemented',
+    retryStatus: 'not_applicable',
+    evidence: [
+      source(
+        'apps/web-workbench/src/lib/astrology.ts',
+        '星座资料保存在浏览器 localStorage 并可由清除函数移除。',
+      ),
+    ],
+  },
+  {
+    id: 'stock_profile_mixed',
+    trigger: '股票筛选、偏好更新或清空',
+    rule: {
+      kind: 'mixed',
+      description: '自动筛选依据 90 天仅是推断窗口，清空控制服务器依据。',
+    },
+    automationStatus: 'implemented',
+    retryStatus: 'not_implemented',
+    evidence: [
+      source(
+        'apps/orchestrator/src/stocks/stock-preference-profile.ts',
+        '股票偏好推断使用 90 天观察窗口。',
+      ),
+      source(
+        'apps/orchestrator/src/stocks/stock-preference-repository.ts',
+        '清空偏好会删除服务器信号并记录清空时间。',
+      ),
+    ],
+  },
+  {
+    id: 'feedback_purpose_bound',
+    trigger: '用户提交反馈或支持请求',
+    rule: { kind: 'purpose_bound', description: '反馈、故障、安全、争议所需。' },
+    automationStatus: 'manual',
+    retryStatus: 'not_implemented',
+    evidence: [
+      source('apps/orchestrator/src/trpc/routers/feedback.ts', '反馈路由接收并处理用户反馈记录。'),
+    ],
+  },
+  {
+    id: 'notification_config_until_change',
+    trigger: '通知渠道创建或更新',
+    rule: { kind: 'until_user_action', action: '修改或删除渠道配置' },
+    automationStatus: 'implemented',
+    retryStatus: 'not_implemented',
+    evidence: [
+      source(
+        'apps/orchestrator/src/trpc/routers/notifications.ts',
+        '通知渠道路由支持更新和删除用户自己的渠道配置。',
+      ),
+    ],
+  },
+  {
+    id: 'domain_snapshot_replace',
+    trigger: '浏览历史同步成功',
+    rule: { kind: 'until_user_action', action: '下次成功同步替换旧快照' },
+    automationStatus: 'implemented',
+    retryStatus: 'not_implemented',
+    evidence: [
+      source(
+        'apps/orchestrator/src/browsing-history/service.ts',
+        '浏览历史服务在事务中用新快照替换旧站点统计。',
+      ),
+    ],
+  },
+  {
+    id: 'cookie_injection_mixed',
+    trigger: '登录 cookie 同步或待注入记录创建',
+    rule: { kind: 'mixed', description: '即时注入或暂存；旧明文字段迁移未完成。' },
+    automationStatus: 'not_implemented',
+    retryStatus: 'not_implemented',
+    evidence: [
+      source(
+        'apps/orchestrator/src/cookies/sync-service.ts',
+        '同步服务将待注入 cookie 注入浏览器上下文后清理记录。',
+      ),
+      source(
+        'apps/orchestrator/src/db/schema/pending-cookies.ts',
+        '待注入 cookie 表仍包含迁移中的旧字段。',
+      ),
+    ],
+  },
+  {
+    id: 'transaction_restricted',
+    trigger: '支付交易、退款或争议处理',
+    rule: { kind: 'purpose_bound', description: '交易、税务、争议及法律所需。' },
+    automationStatus: 'manual',
+    retryStatus: 'not_implemented',
+    evidence: [
+      source('apps/orchestrator/src/db/schema/payments.ts', '支付表保存交易和支付状态记录。'),
+    ],
+  },
+  {
+    id: 'partner_financial_restricted',
+    trigger: '合作伙伴实名、账务或风控处理',
+    rule: { kind: 'purpose_bound', description: '实名、账务、反欺诈、税务和争议。' },
+    automationStatus: 'manual',
+    retryStatus: 'not_implemented',
+    evidence: [
+      source(
+        'apps/orchestrator/src/db/schema/partner.ts',
+        '合作伙伴表包含实名、账务、风控和结算记录。',
+      ),
+    ],
+  },
+  {
+    id: 'media_mixed',
+    trigger: '文件上传、媒体处理或账号素材设置',
+    rule: { kind: 'mixed', description: '文件可用期、账号处理与安全/授权证据。' },
+    automationStatus: 'manual',
+    retryStatus: 'not_implemented',
+    evidence: [
+      source(
+        'apps/orchestrator/src/db/schema/task-files.ts',
+        '任务文件表记录用户文件及其生命周期元数据。',
+      ),
+      source(
+        'apps/orchestrator/src/trpc/routers/video-onboarding.ts',
+        '视频引导路由在特定媒体流程中清理可替换的素材。',
+      ),
+    ],
+  },
+  {
+    id: 'analytics_configured_mixed',
+    trigger: '能量分析日志写入或清理任务运行',
+    rule: { kind: 'mixed', description: '已有能量分析分级期限，其他日志无统一期限。' },
+    automationStatus: 'implemented',
+    retryStatus: 'implemented',
+    evidence: [
+      source(
+        'apps/orchestrator/src/config/env.energy-analytics.test.ts',
+        '能量分析配置测试覆盖分级保留期限。',
+      ),
+      source(
+        'apps/orchestrator/src/energy/analytics-cleanup.ts',
+        '清理任务批量删除已过期的能量分析记录并支持后续补跑。',
+      ),
+    ],
+  },
+];
