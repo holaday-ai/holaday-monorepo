@@ -288,7 +288,7 @@ function PaymentList({
         </p>
         <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
           {section === 'settled'
-            ? '完成订阅或购买加量包后，记录会显示在这里。'
+            ? '购买套餐或加量包后，记录会显示在这里。'
             : '目前没有取消、失败或仍待确认的结账记录。'}
         </p>
       </div>
@@ -321,6 +321,7 @@ function PaymentList({
                 type="button"
                 className="inline-flex min-h-11 items-center rounded-[7px] px-3 text-xs font-medium text-[#595757] hover:bg-[#F7F7F7] hover:text-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/25"
                 aria-label={`重试加载${listLabel}`}
+                title={`重试加载${listLabel}`}
                 onClick={onRetry}
               >
                 重试
@@ -331,6 +332,7 @@ function PaymentList({
               type="button"
               className="inline-flex min-h-11 items-center gap-2 rounded-[7px] px-3 text-xs font-medium text-[#595757] hover:bg-[#F7F7F7] hover:text-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/25 disabled:cursor-not-allowed disabled:opacity-60"
               aria-label={`加载更多${listLabel}`}
+              title={`加载更多${listLabel}`}
               disabled={state.loadingMore}
               onClick={onLoadMore}
             >
@@ -393,6 +395,7 @@ function PaymentRow({
             type="button"
             className="inline-flex min-h-11 items-center gap-1 rounded-[7px] px-2 text-[11px] font-medium text-[#595757] hover:bg-[#F7F7F7] hover:text-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/25 min-[769px]:min-h-8"
             aria-label={`复制订单 ${record.orderId}`}
+            title={`复制订单 ${record.orderId}`}
             onClick={() => void onCopy(record.orderId)}
           >
             <Copy className="h-3.5 w-3.5" aria-hidden />

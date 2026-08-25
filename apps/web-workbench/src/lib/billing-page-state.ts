@@ -51,6 +51,11 @@ export interface BillingPaymentStatusCopy {
 
 const PENDING_PAYMENT_WINDOW_MS = 30 * 60 * 1_000;
 
+export const MANUAL_RENEWAL_DISCLOSURE_ZH =
+  '每次付款仅购买所选周期，到期前手动续费，不会自动扣款。';
+export const MANUAL_RENEWAL_DISCLOSURE_EN =
+  'Each payment buys one selected term. Renewal is manual and there are no automatic charges.';
+
 export function normalizeBillingSnapshot(value: unknown): BillingSnapshot {
   const raw = isRecord(value) ? value : {};
   return {
@@ -85,7 +90,7 @@ export function planValidUntilText(
 }
 
 export function renewalMethodText(plan: string | null | undefined): string {
-  return isPaidBillingPlan(plan) ? '到期前手动续费' : '无需续费';
+  return isPaidBillingPlan(plan) ? '到期前手动续费 · 不会自动扣款' : '无需续费';
 }
 
 export function billingPageSummary(options: {
@@ -93,18 +98,18 @@ export function billingPageSummary(options: {
   readonly error: string | null;
   readonly plan: string | null | undefined;
 }): string {
-  if (options.loading) return '订阅加载中…';
-  if (options.error) return '订阅信息暂时无法加载';
-  return `${billingPlanLabel(options.plan)} · 当前订阅`;
+  if (options.loading) return '套餐加载中…';
+  if (options.error) return '套餐信息暂时无法加载';
+  return `${billingPlanLabel(options.plan)} · 当前套餐`;
 }
 
-export function cancellationMailBody(planLabel: string): string {
-  return `请协助取消我的 HOLA DAY 订阅。\n\n注册邮箱：\n当前套餐：${planLabel}`;
+export function billingPlanSupportMailBody(planLabel: string): string {
+  return `请协助处理我的 HOLA DAY 套餐退款或提前结束事宜。\n\n注册邮箱：\n当前套餐：${planLabel}`;
 }
 
 export function billingLoadErrorMessage(
   err: unknown,
-  fallback = '订阅信息暂时无法加载，请稍后重试。',
+  fallback = '套餐信息暂时无法加载，请稍后重试。',
 ): string {
   return pageErrorMessage(err, fallback);
 }
@@ -115,7 +120,7 @@ export function billingLoadErrorCopy(message: string | null | undefined): Billin
       ? message.trim()
       : '请稍后重试，或刷新页面后再打开账单。';
   return {
-    title: '订阅信息暂时无法加载',
+    title: '套餐信息暂时无法加载',
     body,
   };
 }
@@ -265,7 +270,7 @@ export function billingPaymentProduct(kind: string, plan: string): string {
   }
   if (plan === 'pro') return 'Pro 套餐';
   if (plan === 'basic') return 'Basic 套餐';
-  return '套餐订阅';
+  return '套餐购买';
 }
 
 export function billingPaymentProvider(provider: string): string {

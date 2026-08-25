@@ -4,6 +4,10 @@ import { PayPalButton } from '@/components/PayPalButton';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { normalizeAuthMeProfile } from '@/lib/auth-me-state';
+import {
+  MANUAL_RENEWAL_DISCLOSURE_EN,
+  MANUAL_RENEWAL_DISCLOSURE_ZH,
+} from '@/lib/billing-page-state';
 import { shouldScrollPlanAddons } from '@/lib/plan-page-hash';
 import {
   type CnPaymentOptions,
@@ -161,7 +165,7 @@ export function PlanPage(): JSX.Element {
       </div>
 
       {/* Cycle toggle */}
-      <div className="mx-auto mb-7 flex items-center justify-center">
+      <div className="mx-auto mb-7 flex flex-col items-center gap-2">
         <div className="inline-flex rounded-[8px] border border-[#DCDDDD] bg-[#EFEFEF]/55 p-0.5 text-sm shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
           <button
             type="button"
@@ -198,6 +202,9 @@ export function PlanPage(): JSX.Element {
             </span>
           </button>
         </div>
+        <p className="text-center text-[12px] leading-5 text-muted-foreground">
+          {zh ? MANUAL_RENEWAL_DISCLOSURE_ZH : MANUAL_RENEWAL_DISCLOSURE_EN}
+        </p>
       </div>
 
       <div className="grid gap-5 md:grid-cols-3">
