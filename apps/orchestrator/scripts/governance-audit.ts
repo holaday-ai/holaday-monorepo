@@ -37,7 +37,10 @@ const PRIVATE_KEY =
   /-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----[\s\S]*?(?:-----END (?:[A-Z ]+ )?PRIVATE KEY-----|$)/gi;
 const TOKEN = /\b(?:sk-|ghp_|xoxb-|xoxp-)[A-Za-z0-9_-]*|\bBearer(?:\s+\S+)?/gi;
 const COOKIE = /\b(?:document\.)?(?:set-)?cookie\s*(?:=|:)\s*[^\r\n]*/gi;
-const SECRET_ASSIGNMENT = /\b(?:password|passwd|api[_-]?key)\s*(?:=|:)\s*[^\s;,]+/gi;
+const SECRET_ASSIGNMENT =
+  /\b(?:password|passwd|api[_-]?key)\s*(?:=|:)\s*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s;,]+)/gi;
+const UNCLOSED_SECRET_ASSIGNMENT =
+  /\b(?:password|passwd|api[_-]?key)\s*(?:=|:)\s*(?:"(?:\\.|[^"\\])*|'(?:\\.|[^'\\])*)$/gi;
 const BASIC_AUTHORIZATION = /\bauthorization\s*:\s*basic(?:\s+\S+)?/gi;
 const EMAIL = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
 const PHONE = /\+?\d[\d\s().-]{7,}\d/g;
@@ -50,6 +53,7 @@ const SENSITIVE_PATTERNS = [
   TOKEN,
   COOKIE,
   SECRET_ASSIGNMENT,
+  UNCLOSED_SECRET_ASSIGNMENT,
   BASIC_AUTHORIZATION,
   EMAIL,
   PHONE,
@@ -100,6 +104,7 @@ function sanitizeMessage(message: string): string {
     .replace(PRIVATE_KEY, '[redacted-private-key]')
     .replace(COOKIE, '[redacted-cookie]')
     .replace(TOKEN, '[redacted-token]')
+    .replace(UNCLOSED_SECRET_ASSIGNMENT, '[redacted-assignment]')
     .replace(SECRET_ASSIGNMENT, '[redacted-assignment]')
     .replace(BASIC_AUTHORIZATION, '[redacted-authorization]')
     .replace(EMAIL, '[redacted-email]')

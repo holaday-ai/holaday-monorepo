@@ -54,6 +54,13 @@ function unsafeReport(): AuditReport {
         message:
           'Evidence for processor:ghp_abcdefghijklmnopqrstuvwxyz has password=plain-password-value; api_key=api-value-123; api-key:api-value-456; Authorization: Basic basic-token-789; config key OPENAI_API_KEY.',
       },
+      {
+        severity: 'error',
+        code: 'source_evidence_missing',
+        registryId: 'category:account_security',
+        message:
+          'Quoted values: password="double word secret"; api_key=\'single word secret\'; api-key:"escaped \\" quote secret"; password="unclosed tail secret remains until end',
+      },
     ],
   };
 }
@@ -107,8 +114,11 @@ describe('governance audit CLI', () => {
       expect(output).toContain('retention_policy:cookie_injection_mixed');
       expect(output).toContain('privacy@holaday.ai');
       expect(output).toContain('OPENAI_API_KEY');
+      expect(output).toContain(
+        'Quoted values: [redacted-assignment]; [redacted-assignment]; [redacted-assignment]; [redacted-assignment]',
+      );
       expect(output).not.toMatch(
-        /sk-live-registry-secret-123456|ghp_private-token-123456|Bearer private-token|Cookie: session=private-value|user@example\.test|\+1 415 555 0123|config\/secrets|ghp_abcdefghijklmnopqrstuvwxyz|password=plain-password-value|api_key=api-value-123|api-key:api-value-456|Authorization: Basic basic-token-789/i,
+        /sk-live-registry-secret-123456|ghp_private-token-123456|Bearer private-token|Cookie: session=private-value|user@example\.test|\+1 415 555 0123|config\/secrets|ghp_abcdefghijklmnopqrstuvwxyz|password=plain-password-value|api_key=api-value-123|api-key:api-value-456|Authorization: Basic basic-token-789|double word secret|single word secret|escaped \\" quote secret|unclosed tail secret remains until end/i,
       );
     }
   });
