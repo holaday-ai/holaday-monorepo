@@ -84,4 +84,21 @@ describe('SettingsPage account hub', () => {
     expect(screen.queryByRole('dialog', { name: '申请删除账号？' })).toBeNull();
     expect(document.activeElement).toBe(deleteButton);
   });
+
+  it('restores focus after launching the deletion email', async () => {
+    const user = userEvent.setup();
+    renderSettings();
+
+    const account = screen.getByRole('region', { name: '账号' });
+    const deleteButton = within(account).getByRole('button', { name: '邮件申请删除' });
+    await user.click(deleteButton);
+    await user.click(
+      within(screen.getByRole('dialog', { name: '申请删除账号？' })).getByRole('button', {
+        name: '打开邮件应用',
+      }),
+    );
+
+    expect(screen.queryByRole('dialog', { name: '申请删除账号？' })).toBeNull();
+    expect(document.activeElement).toBe(deleteButton);
+  });
 });

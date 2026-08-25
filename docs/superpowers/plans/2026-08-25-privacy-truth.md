@@ -442,7 +442,7 @@ git commit -m "fix(settings): clarify account deletion request scope"
 
 - [ ] **Step 1: Add a failing static-content contract**
 
-Require the implemented password, retention, extension, cross-task memory, feedback, external notification webhooks, Apify, Zapier, rights and manual-renewal boundaries; reject the old fixed deletion/log deadlines, automatic-renewal cancellation and Singapore-jurisdiction claims. Keep the mobile table headings in accessible HTML rather than CSS-generated content.
+Require the implemented password, retention, extension, cross-task memory, feedback, external notification webhooks, Apify, Zapier, rights and manual-renewal boundaries; reject the old fixed deletion/log deadlines, automatic-renewal cancellation and Singapore-jurisdiction claims. Keep the mobile table headings in accessible HTML rather than CSS-generated content, and prevent both legal pages from making unconditional Google Fonts requests.
 
 - [ ] **Step 2: Rebuild the landing privacy content**
 

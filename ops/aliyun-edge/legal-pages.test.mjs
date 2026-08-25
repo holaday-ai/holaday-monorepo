@@ -65,6 +65,15 @@ test('public landing privacy table keeps mobile labels in accessible HTML', () =
   );
 });
 
+test('public legal pages do not contact Google Fonts on every visit', () => {
+  for (const [name, page] of [
+    ['privacy', privacy],
+    ['terms', terms],
+  ]) {
+    assert.doesNotMatch(page, /fonts\.googleapis\.com|fonts\.gstatic\.com/, `${name} loads Google Fonts`);
+  }
+});
+
 test('public landing privacy page excludes unsupported promises', () => {
   for (const forbidden of [
     '密码（加密存储）',

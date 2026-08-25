@@ -162,7 +162,7 @@ export function SettingsPage(): JSX.Element {
             subject: '删除 HOLA DAY 账号',
             body: '请协助删除我的 HOLA DAY 账号。\n\n注册邮箱：\n删除原因（选填）：',
           });
-          setDeleteDialogOpen(false);
+          closeDeleteDialog();
         }}
       />
     </PageContainer>
