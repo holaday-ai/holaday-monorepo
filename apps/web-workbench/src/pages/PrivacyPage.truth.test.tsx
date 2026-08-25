@@ -35,9 +35,11 @@ describe('PrivacyPage truth contract', () => {
 
     expectText(/取决于您使用的功能和当时启用的服务/);
     expectText(/可能在中国大陆以外处理/);
-    expect(screen.getByRole('link', { name: 'privacy@holaday.ai' }).getAttribute('href')).toBe(
-      'mailto:privacy@holaday.ai',
-    );
+    const privacyLinks = screen.getAllByRole('link', { name: 'privacy@holaday.ai' });
+    expect(privacyLinks.length).toBeGreaterThan(0);
+    for (const link of privacyLinks) {
+      expect(link.getAttribute('href')).toBe('mailto:privacy@holaday.ai');
+    }
     expectText(/邮件是申请入口，不代表即时或自动完成/);
     expectText(/交易、安全、争议或审计记录/);
   });
