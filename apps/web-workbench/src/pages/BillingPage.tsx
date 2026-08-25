@@ -7,9 +7,9 @@ import {
   billingLoadErrorMessage,
   billingPageSummary,
   billingPaymentReturnCopy,
+  billingPlanSupportMailBody,
   billingPlanActionLabel,
   billingPlanLabel,
-  cancellationMailBody,
   isPaidBillingPlan,
   normalizeBillingSnapshot,
   normalizePaymentReturnOrder,
@@ -118,7 +118,7 @@ export function BillingPage(): JSX.Element {
   return (
     <PageContainer width="list">
       <PageHeader
-        title="账单与订阅"
+        title="账单与套餐"
         description="套餐有效期、续费方式和付款支持"
         action={
           <div className="inline-flex items-center rounded-full border border-[#DCDDDD] bg-white px-3 py-1 text-[12px] font-medium text-[#595757] shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
@@ -156,7 +156,7 @@ export function BillingPage(): JSX.Element {
         )}
         {loading ? (
           <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
-            订阅加载中…
+            套餐加载中…
           </div>
         ) : loadError ? (
           <div className="flex flex-col items-center gap-3 rounded-[8px] border border-[#DCDDDD] bg-white px-6 py-12 text-center shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
@@ -177,8 +177,8 @@ export function BillingPage(): JSX.Element {
               >
                 <a
                   href={supportMailtoHref({
-                    subject: '账单订阅信息加载失败',
-                    body: '账单订阅信息加载失败，请协助排查。\n\n注册邮箱：\n出现时间：',
+                    subject: '账单套餐信息加载失败',
+                    body: '账单套餐信息加载失败，请协助排查。\n\n注册邮箱：\n出现时间：',
                   })}
                 >
                   联系支持
@@ -189,7 +189,7 @@ export function BillingPage(): JSX.Element {
         ) : (
           <>
             <Section
-              title="当前订阅"
+              title="当前套餐"
               className="rounded-[8px] border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]"
             >
               <Row label="套餐" description="查看完整对比">
@@ -229,15 +229,15 @@ export function BillingPage(): JSX.Element {
                   >
                     <a
                       href={supportMailtoHref({
-                        subject: '取消 HOLA DAY 订阅',
-                        body: cancellationMailBody(planLabel),
+                        subject: 'HOLA DAY 套餐退款或提前结束',
+                        body: billingPlanSupportMailBody(planLabel),
                       })}
                     >
-                      联系客服取消
+                      退款/提前结束套餐
                     </a>
                   </Button>
                   <p className="text-[11px] text-muted-foreground">
-                    取消订阅请联系客服：
+                    套餐不会自动续费；退款或提前结束请联系：
                     <a
                       href={`mailto:${SUPPORT_EMAIL}`}
                       className="inline-flex h-8 items-center text-[#EA1F59] underline-offset-2 hover:underline"
@@ -262,7 +262,7 @@ export function BillingPage(): JSX.Element {
                     <div>
                       <div className="text-sm font-medium">当前未保存支付方式</div>
                       <div className="text-[11px] text-muted-foreground">
-                        在线订阅通过结账页完成；企业付款、发票和本地支付可联系支持处理
+                        在线套餐通过结账页购买；企业付款、发票和本地支付可联系支持处理
                       </div>
                     </div>
                   </div>

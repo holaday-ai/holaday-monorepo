@@ -77,6 +77,10 @@ describe('BillingPage payment ledger integration', () => {
     renderBilling();
 
     expect(await screen.findByText('已确认到账或已退款的记录')).toBeTruthy();
+    expect(screen.getByText('到期前手动续费 · 不会自动扣款')).toBeTruthy();
+    expect(screen.getByRole('link', { name: '退款/提前结束套餐' })).toBeTruthy();
+    expect(screen.queryByText('联系客服取消')).toBeNull();
+    expect(screen.queryByText(/当前订阅|订阅加载中/)).toBeNull();
     expect(ledgerQuery).toHaveBeenCalledWith({ section: 'settled', limit: 10 });
     expect(historyQuery).not.toHaveBeenCalled();
   });

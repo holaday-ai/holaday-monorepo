@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { MANUAL_RENEWAL_DISCLOSURE_ZH } from '@/lib/billing-page-state';
 import { PageContainer, PageHeader } from '@/pages/PageShell';
 
 /**
@@ -9,7 +10,7 @@ import { PageContainer, PageHeader } from '@/pages/PageShell';
 export function TermsPage(): JSX.Element {
   return (
     <PageContainer width="prose">
-      <PageHeader title="服务条款" description="最后更新：2026-04-24" />
+      <PageHeader title="服务条款" description="最后更新：2026-08-25" />
       <article className="prose prose-sm max-w-none dark:prose-invert prose-headings:tracking-tight">
         <p>
           欢迎使用 HOLA DAY（下称"我们"、"本服务"）。本服务条款（下称"本条款"）构成您
@@ -42,15 +43,15 @@ export function TermsPage(): JSX.Element {
           一旦发现违规行为，我们有权限制或终止您对本服务的使用，并保留追究法律责任的权利。
         </p>
 
-        <h2>4. 付费与订阅</h2>
+        <h2>4. 付费与套餐</h2>
         <ul>
           <li>付费套餐的内容、价格及续费规则详见{' '}<Link to="/plan">套餐页面</Link>；</li>
+          <li>{MANUAL_RENEWAL_DISCLOSURE_ZH}</li>
           <li>
-            订阅按月自动续费，您可在{' '}
-            <Link to="/billing">账单页面</Link>
-            查看订阅并通过支持渠道申请取消；
+            您可在 <Link to="/billing">账单页面</Link>{' '}
+            查看套餐有效期与付款记录；如需退款或提前结束套餐，可通过页面内支持渠道申请；
           </li>
-          <li>除法律强制要求外，已支付的订阅费用不予退还；</li>
+          <li>除法律强制要求外，已支付的套餐费用不予退还；</li>
           <li>我们有权基于业务调整定价，变更前会至少提前 7 天通过站内或邮件通知。</li>
         </ul>
 
