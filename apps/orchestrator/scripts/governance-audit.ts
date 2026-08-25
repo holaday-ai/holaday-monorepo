@@ -37,10 +37,25 @@ const PRIVATE_KEY =
   /-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----[\s\S]*?(?:-----END (?:[A-Z ]+ )?PRIVATE KEY-----|$)/gi;
 const TOKEN = /\b(?:sk-|ghp_|xoxb-|xoxp-)[A-Za-z0-9_-]*|\bBearer(?:\s+\S+)?/gi;
 const COOKIE = /\b(?:document\.)?(?:set-)?cookie\s*(?:=|:)\s*[^\r\n]*/gi;
+const SECRET_ASSIGNMENT = /\b(?:password|passwd|api[_-]?key)\s*(?:=|:)\s*[^\s;,]+/gi;
+const BASIC_AUTHORIZATION = /\bauthorization\s*:\s*basic(?:\s+\S+)?/gi;
 const EMAIL = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
 const PHONE = /\+?\d[\d\s().-]{7,}\d/g;
+const SUSPICIOUS_PATH_START =
+  /^[^\\/\s]*(?:secret|token|password|passwd|credential|api[_-]?key|private[_-]?key|cookie)[^\\/\s]*[\\/]/gi;
 const SUSPICIOUS_PATH_SEGMENT =
-  /(^|[\\/])[^\\/\s]*(?:secret|token|password|passwd|credential|api[_-]?key|private[_-]?key|cookie)[^\\/\s]*(?=$|[\\/\s])/gi;
+  /([\\/])[^\\/\s]*(?:secret|token|password|passwd|credential|api[_-]?key|private[_-]?key|cookie)[^\\/\s]*(?=$|[\\/\s])/gi;
+const SENSITIVE_PATTERNS = [
+  PRIVATE_KEY,
+  TOKEN,
+  COOKIE,
+  SECRET_ASSIGNMENT,
+  BASIC_AUTHORIZATION,
+  EMAIL,
+  PHONE,
+  SUSPICIOUS_PATH_START,
+  SUSPICIOUS_PATH_SEGMENT,
+];
 
 function parseArguments(args: readonly string[]): ParsedArguments | undefined {
   let format: OutputFormat = 'text';
@@ -72,20 +87,33 @@ function repositoryRoot(): string {
   return fileURLToPath(new URL('../../../', import.meta.url));
 }
 
+function hasSensitiveContent(value: string): boolean {
+  return SENSITIVE_PATTERNS.some((pattern) => {
+    pattern.lastIndex = 0;
+    return pattern.test(value);
+  });
+}
+
 function sanitizeMessage(message: string): string {
-  return message
+  const sanitized = message
     .replace(new RegExp(APPROVED_PRIVACY_CONTACT, 'gi'), APPROVED_CONTACT_PLACEHOLDER)
     .replace(PRIVATE_KEY, '[redacted-private-key]')
     .replace(COOKIE, '[redacted-cookie]')
     .replace(TOKEN, '[redacted-token]')
+    .replace(SECRET_ASSIGNMENT, '[redacted-assignment]')
+    .replace(BASIC_AUTHORIZATION, '[redacted-authorization]')
     .replace(EMAIL, '[redacted-email]')
     .replace(PHONE, '[redacted-phone]')
-    .replace(SUSPICIOUS_PATH_SEGMENT, '$1[redacted-path]')
-    .replaceAll(APPROVED_CONTACT_PLACEHOLDER, APPROVED_PRIVACY_CONTACT);
+    .replace(SUSPICIOUS_PATH_START, '[redacted-path]/')
+    .replace(SUSPICIOUS_PATH_SEGMENT, '$1[redacted-path]');
+  return hasSensitiveContent(sanitized)
+    ? '[redacted-sensitive-message]'
+    : sanitized.replaceAll(APPROVED_CONTACT_PLACEHOLDER, APPROVED_PRIVACY_CONTACT);
 }
 
 function sanitizeIssue(issue: AuditIssue): SanitizedGovernanceAuditReport['issues'][number] {
-  const registryIdIsSafe = SAFE_REGISTRY_ID.test(issue.registryId);
+  const registryIdIsSafe =
+    SAFE_REGISTRY_ID.test(issue.registryId) && !hasSensitiveContent(issue.registryId);
   const message = registryIdIsSafe
     ? issue.message
     : issue.message.replaceAll(issue.registryId, '[redacted-registry-id]');

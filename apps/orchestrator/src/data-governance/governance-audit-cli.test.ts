@@ -41,6 +41,19 @@ function unsafeReport(): AuditReport {
         registryId: 'category:account_security',
         message: 'Public entry point is privacy@holaday.ai.',
       },
+      {
+        severity: 'gap',
+        code: 'governance_gap',
+        registryId: 'retention_policy:cookie_injection_mixed',
+        message: 'Governance state requires follow-up: not_implemented.',
+      },
+      {
+        severity: 'error',
+        code: 'source_evidence_missing',
+        registryId: 'processor:ghp_abcdefghijklmnopqrstuvwxyz',
+        message:
+          'Evidence for processor:ghp_abcdefghijklmnopqrstuvwxyz has password=plain-password-value; api_key=api-value-123; api-key:api-value-456; Authorization: Basic basic-token-789; config key OPENAI_API_KEY.',
+      },
     ],
   };
 }
@@ -91,9 +104,11 @@ describe('governance audit CLI', () => {
     for (const output of [json, text]) {
       expect(output).toContain('[redacted-registry-id]');
       expect(output).toContain('category:account_security');
+      expect(output).toContain('retention_policy:cookie_injection_mixed');
       expect(output).toContain('privacy@holaday.ai');
+      expect(output).toContain('OPENAI_API_KEY');
       expect(output).not.toMatch(
-        /sk-live-registry-secret-123456|ghp_private-token-123456|Bearer private-token|Cookie: session=private-value|user@example\.test|\+1 415 555 0123|config\/secrets/i,
+        /sk-live-registry-secret-123456|ghp_private-token-123456|Bearer private-token|Cookie: session=private-value|user@example\.test|\+1 415 555 0123|config\/secrets|ghp_abcdefghijklmnopqrstuvwxyz|password=plain-password-value|api_key=api-value-123|api-key:api-value-456|Authorization: Basic basic-token-789/i,
       );
     }
   });
