@@ -52,4 +52,16 @@ describe('data category registry', () => {
       JSON.stringify(dataCategories.find((item) => item.id === 'extension_login_cookies')),
     ).toContain('真实 Cookie');
   });
+
+  it('preserves the approved feedback account-identifier data type', () => {
+    expect(dataCategories.find((item) => item.id === 'feedback_support')?.dataElements).toContain(
+      '账号标识',
+    );
+  });
+
+  it('preserves the approved analytics IP data type', () => {
+    expect(dataCategories.find((item) => item.id === 'analytics_logs')?.dataElements).toContain(
+      'IP',
+    );
+  });
 });
