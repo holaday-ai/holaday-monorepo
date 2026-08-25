@@ -4,7 +4,7 @@
 
 **Goal:** Replace HOLA DAY's unsupported privacy promises with a readable, evidence-backed disclosure and align the account-deletion request copy without pretending that self-service privacy operations already exist.
 
-**Architecture:** Keep this release SPA-only. Render the policy as typed, static React content inside the existing `PageShell`, use responsive cards plus a desktop data-category table, and protect the factual boundary with rendered-content tests. Account deletion remains a support-email intake; P1 export/deletion/retention orchestration and the legacy pending-cookie migration remain explicitly out of scope.
+**Architecture:** Keep this release presentation-only. Render the policy as typed, static React content inside the existing `PageShell`, and mirror the same factual boundary in the static landing pages that production nginx serves for exact `/privacy` and `/terms` routes. Protect both surfaces with content tests. Account deletion remains a support-email intake; P1 export/deletion/retention orchestration and the legacy pending-cookie migration remain explicitly out of scope.
 
 **Tech Stack:** TypeScript 5.7, React 18, React Router 7, Tailwind CSS, Testing Library, Vitest 2, existing HOLA DAY `PageShell` and `ConfirmDialog`.
 
@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Modify only SPA copy, layout, and tests; do not add migrations, backend APIs, environment changes, providers, dependencies, or deployment configuration.
+- Modify only SPA/landing copy, layout, and tests; do not add migrations, backend APIs, environment changes, providers, dependencies, or deployment configuration.
 - Do not claim PIPL/GDPR certification, complete compliance, absolute security, universal encryption at rest, signed DPAs, mainland-primary hosting, a universal 90-day log purge, automatic account deletion, or tier-based task deletion.
 - Say explicitly that 7/30/90-day plan history is a default visibility window, not a server deletion deadline.
 - Separate domain-level browsing-history aggregates from real login Cookie values; the latter must be described as sensitive login-state data subject to a server allowlist.
@@ -36,8 +36,12 @@
   - Keeps the existing mail-based deletion intake while correcting the scope and legal-retention exception.
 - `apps/web-workbench/src/pages/SettingsPage.account.test.tsx`
   - Verifies deletion remains a mail request and cannot be read as automatic, immediate, or exception-free.
+- `apps/holaday-landing/privacy.html` and `apps/holaday-landing/terms.html`
+  - Own the production exact-route legal surfaces and mirror the verified privacy, deletion, payment, provider, and jurisdiction boundaries.
+- `ops/aliyun-edge/legal-pages.test.mjs`
+  - Prevents the production landing pages from drifting back to unsupported promises.
 
-No shared content module is introduced: the policy is one public page, and moving legal copy into a general-purpose library would create an unnecessary second abstraction and make the rendered contract harder to audit.
+No shared runtime content module is introduced. The production route split is explicit and both static/React surfaces are protected by content contracts; a general-purpose legal-copy library would complicate the dependency boundary between the standalone landing bundle and the SPA.
 
 ---
 
@@ -287,7 +291,7 @@ Keep the table available in the accessibility tree on desktop. The mobile cards 
 Use these exact factual boundaries:
 
 - `extension`: clearly separate domain aggregates from real Cookie values and mention server allowlisting; stopping/uninstalling prevents future access but does not automatically delete received data.
-- `providers`: say use depends on the feature and current service configuration. Group the verified provider names by function: infrastructure/storage (`Vultr`, `Cloudflare R2`, `Aliyun`); AI/scraping/media (`Anthropic`, `Google`, `OpenAI`, `Alibaba Cloud DashScope`, `fal.ai`, `Firecrawl`, `DivineAPI`); identity/communications/payments (`Google`, `Resend`, SMS gateway, `PayPal` or China payment provider). State only the minimum data needed for the requested feature is sent and that processing may occur outside mainland China.
+- `providers`: say use depends on the feature and current service configuration. Group the verified provider names by function: infrastructure/storage (`Vultr`, `Cloudflare R2`, `Aliyun`); AI/scraping/media (`Anthropic`, `Google`, `OpenAI`, `Alibaba Cloud DashScope`, `fal.ai`, `Firecrawl`, `Apify`, `DivineAPI`); identity/communications/payments (`Google`, `Resend`, SMS gateway, `PayPal` or China payment provider). State only the minimum data needed for the requested feature is sent and that processing may occur outside mainland China.
 - `retention`: say 7/30/90 days is default task-history visibility, not server deletion; files follow visible expiry; common-site aggregates are replaced by the next successful sync; pending Cookies are injected immediately or held for the next browser injection; transaction/security/dispute/audit records follow necessary legal and operational criteria; do not give a universal log deadline.
 - `rights`: list access/copy/correction/deletion/withdrawal/restriction/objection/complaint subject to applicable law; identify email as the current intake; explain identity verification and lawful retention exceptions.
 - `security`: describe Argon2id-equivalent wording as “不可逆单向哈希”, MFA secret encryption, transport/access control and sensitive-header redaction; state no security method is absolute and do not claim all stored data is encrypted.
@@ -422,7 +426,36 @@ git commit -m "fix(settings): clarify account deletion request scope"
 
 ---
 
-### Task 4: Verify the complete P0 story and prepare review evidence
+### Task 4: Align the production exact-route legal pages
+
+**Files:**
+- Modify: `apps/holaday-landing/privacy.html`
+- Modify: `apps/holaday-landing/terms.html`
+- Create: `ops/aliyun-edge/legal-pages.test.mjs`
+
+**Interfaces:**
+- Consumes: the verified factual boundaries from Tasks 1–3 and the exact `/privacy`/`/terms` nginx routing.
+- Produces: truth-aligned standalone pages shipped by both Vultr and Aliyun edge bundles.
+
+- [ ] **Step 1: Add a failing static-content contract**
+
+Require the implemented password, retention, extension, Apify, rights and manual-renewal boundaries; reject the old fixed deletion/log deadlines, automatic-renewal cancellation and Singapore-jurisdiction claims.
+
+- [ ] **Step 2: Rebuild the landing privacy content**
+
+Mirror the SPA facts without exposing internal hostnames, IPs, schema details or secrets. On mobile, render the processing table as readable cards rather than compressed columns.
+
+- [ ] **Step 3: Align landing terms**
+
+State one-time purchased periods and manual renewal, make account deletion an identity-checked request with lawful-retention exceptions, and remove the unverified specific jurisdiction.
+
+- [ ] **Step 4: Verify the routed artifact**
+
+Run `node --test ops/aliyun-edge/legal-pages.test.mjs` and `pnpm test:ops`, then inspect both pages at desktop and 390px widths with no overflow and valid anchors.
+
+---
+
+### Task 5: Verify the complete P0 story and prepare review evidence
 
 **Files:**
 - Read: `docs/superpowers/specs/2026-08-25-privacy-truth-design.md`
@@ -430,7 +463,7 @@ git commit -m "fix(settings): clarify account deletion request scope"
 - Do not modify unrelated files.
 
 **Interfaces:**
-- Consumes: Tasks 1–3 commits.
+- Consumes: Tasks 1–4 commits.
 - Produces: verified branch evidence suitable for review; it does not authorize production deployment.
 
 - [ ] **Step 1: Run the full web test suite**
