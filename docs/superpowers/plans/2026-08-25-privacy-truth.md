@@ -21,7 +21,7 @@
 - Do not publish internal host IPs, database names, secret names or values, internal IDs, schema names, or the pending-cookie compatibility-column implementation.
 - Preserve the current one-time purchase/manual-renewal model; do not reintroduce automatic-renewal wording.
 - Preserve all unrelated untracked `.claude/`, `qa-artifacts/`, `skills/*`, and `docs/PHASE1_PLAYBOOK_EVIDENCE_LEDGER_DESIGN.md` content in the root checkout.
-- Final production deployment is blocked until the business supplies and counsel confirms the legal operator identity and address; local implementation and preview may proceed.
+- Release blocker resolved on 2026-08-26: the business supplied the legal operator identity and contact address and confirmed counsel review.
 
 ---
 
@@ -529,14 +529,14 @@ Verify:
 
 Save screenshots only under a new task-specific `qa-artifacts/privacy-truth-*` directory inside the isolated worktree if evidence is needed; never touch the root checkout's existing `qa-artifacts/`.
 
-- [ ] **Step 5: Review scope and unresolved production blocker**
+- [x] **Step 5: Review scope and production blocker resolution**
 
 Confirm the branch contains no backend, migration, env, payment, provider, extension, or deployment changes. Record in the handoff:
 
 ```text
 P0 complete: public disclosure and mail-based deletion boundary are factually aligned.
 P1 not complete: automated export/deletion, unified retention, policy-consent receipts, provider legal register, and pending-cookie legacy-column removal remain separate.
-Production blocker: legal operator identity/address and counsel review are not supplied.
+Production blocker resolved on 2026-08-26: 上海慕雾品牌管理有限公司, 上海市虹口区汶水东路351号B幢306室; business confirmed counsel review.
 ```
 
 - [ ] **Step 6: Apply the finishing and verification skills**
@@ -549,4 +549,4 @@ Before claiming completion, read and follow:
 
 Because team subagents are not authorized for this task, perform inline self-review and use the repository's available PR review workflow; do not spawn a review subagent.
 
-When the branch is complete and verified, push it and create a PR by default. Do not merge or deploy merely because the branch and PR exist. Production deployment remains blocked until the legal operator information and counsel review are supplied.
+When the branch is complete and verified, push it and create a PR by default. Do not merge or deploy merely because the branch and PR exist. The legal-operator blocker was resolved on 2026-08-26; deployment still requires explicit authorization and fresh release verification.

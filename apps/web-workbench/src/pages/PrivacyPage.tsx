@@ -89,8 +89,7 @@ const DATA_CATEGORIES: DataCategory[] = [
     data: '您保存的企业微信、飞书、钉钉或自定义 webhook 地址和模板；向已启用渠道发送的通知标题、正文、状态，以及最多 60 字的定时任务意图',
     purpose: '向您配置的外部渠道发送任务通知',
     processors: '您选择并配置的企业微信、飞书、钉钉或自定义 webhook 服务',
-    retention:
-      '渠道配置在账号中保存至您修改或删除渠道配置；通知接收方按其自身规则处理',
+    retention: '渠道配置在账号中保存至您修改或删除渠道配置；通知接收方按其自身规则处理',
   },
   {
     label: '扩展常用网站',
@@ -250,7 +249,7 @@ export function PrivacyPage(): JSX.Element {
     <PageContainer width="form">
       <PageHeader
         title="隐私政策"
-        description="最后更新：2026-08-25 · 本页说明 HOLA DAY 实际如何处理个人信息"
+        description="最后更新：2026-08-26 · 本页说明 HOLA DAY 实际如何处理个人信息"
       />
 
       <main className="space-y-4 text-sm leading-relaxed text-foreground">
@@ -266,7 +265,8 @@ export function PrivacyPage(): JSX.Element {
               先看重点
             </h2>
             <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-              HOLA DAY 为完成账号、任务和安全等明确目的处理必要信息。不同功能处理的数据和外部服务并不相同。
+              HOLA DAY
+              为完成账号、任务和安全等明确目的处理必要信息。不同功能处理的数据和外部服务并不相同。
             </p>
           </div>
           <div className="mt-5 grid gap-3 sm:grid-cols-2">
@@ -340,16 +340,21 @@ export function PrivacyPage(): JSX.Element {
               <p className="text-[11px] font-medium text-[#7655A6] dark:text-[#CDB9F1]">
                 登录态同步
               </p>
-              <h3 className="mt-1 text-sm font-semibold">登录扩展后自动同步固定白名单内的真实 Cookie 值</h3>
+              <h3 className="mt-1 text-sm font-semibold">
+                登录扩展后自动同步固定白名单内的真实 Cookie 值
+              </h3>
               <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                当扩展保存有有效 HOLA DAY 登录令牌时，会在服务器连接成功时触发同步，并在后台闹钟路径约每
-                30 分钟再次尝试。扩展读取固定同步域名清单中 Chrome 可访问的 Cookie 名称、值、域名、路径、
-                安全与同站标记及到期时间（最多 500 条）；服务端白名单仍会拒绝不支持的域名。当前没有逐站点开关。
+                当扩展保存有有效 HOLA DAY
+                登录令牌时，会在服务器连接成功时触发同步，并在后台闹钟路径约每 30
+                分钟再次尝试。扩展读取固定同步域名清单中 Chrome 可访问的 Cookie
+                名称、值、域名、路径、 安全与同站标记及到期时间（最多 500
+                条）；服务端白名单仍会拒绝不支持的域名。当前没有逐站点开关。
               </p>
             </article>
           </div>
           <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
-            退出 HOLA DAY 登录、停用或卸载扩展可以阻止未来同步，但不会自动删除服务器已经收到的数据；您可以通过下方渠道申请处理。
+            退出 HOLA DAY
+            登录、停用或卸载扩展可以阻止未来同步，但不会自动删除服务器已经收到的数据；您可以通过下方渠道申请处理。
           </p>
         </Section>
 
@@ -480,6 +485,8 @@ export function PrivacyPage(): JSX.Element {
 
         <Section id="contact" title="联系我们" className="dark:border-border dark:bg-card">
           <div className="space-y-2 text-xs leading-relaxed text-muted-foreground">
+            <p>个人信息处理者及运营主体：上海慕雾品牌管理有限公司</p>
+            <p>联系地址：上海市虹口区汶水东路351号B幢306室</p>
             <p>
               隐私与个人信息申请：{' '}
               <a
