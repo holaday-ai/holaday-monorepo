@@ -150,7 +150,7 @@ describe('PrivacyPage truth contract', () => {
 Run:
 
 ```bash
-pnpm --filter @holaday/web-workbench test -- src/pages/PrivacyPage.truth.test.tsx
+pnpm --filter @holaday/web-workbench exec vitest run src/pages/PrivacyPage.truth.test.tsx
 ```
 
 Expected: FAIL because the current page has no “先看重点” region or data table and still contains the prohibited mainland/retention statements.
@@ -306,7 +306,7 @@ In the payment paragraph include this exact sentence to keep the billing boundar
 Run:
 
 ```bash
-pnpm --filter @holaday/web-workbench test -- src/pages/PrivacyPage.truth.test.tsx
+pnpm --filter @holaday/web-workbench exec vitest run src/pages/PrivacyPage.truth.test.tsx
 ```
 
 Expected: PASS, 5 tests.
@@ -370,7 +370,7 @@ it('describes deletion as a reviewed request with lawful retention exceptions', 
 Run:
 
 ```bash
-pnpm --filter @holaday/web-workbench test -- src/pages/SettingsPage.account.test.tsx
+pnpm --filter @holaday/web-workbench exec vitest run src/pages/SettingsPage.account.test.tsx
 ```
 
 Expected: FAIL because the old copy promises broad clearing and does not disclose retention exceptions.
@@ -398,7 +398,7 @@ Keep the button label `邮件申请删除`, the confirm label `打开邮件应�
 Run:
 
 ```bash
-pnpm --filter @holaday/web-workbench test -- src/pages/SettingsPage.account.test.tsx src/pages/PrivacyPage.truth.test.tsx
+pnpm --filter @holaday/web-workbench exec vitest run src/pages/SettingsPage.account.test.tsx src/pages/PrivacyPage.truth.test.tsx
 ```
 
 Expected: PASS, both files.
