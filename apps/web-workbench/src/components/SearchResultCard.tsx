@@ -10,7 +10,7 @@ import {
 export interface SearchSource {
   /** Page title from the search engine. Trimmed; never empty. */
   title: string;
-  /** Absolute URL. Used as the link target and to derive the favicon. */
+  /** Absolute URL. Used as the link target and to derive the displayed domain. */
   url: string;
   /** Optional snippet / description from the search result. */
   snippet?: string;
@@ -24,7 +24,7 @@ interface Props {
 
 /**
  * Renders a list of web-search source cards Claude-style: row of
- * favicon + domain + title, with the snippet on the second line.
+ * local source icon + domain + title, with the snippet on the second line.
  * Click asks for confirmation before opening the URL in a new tab.
  * Used inside the per-iteration `WebSearchLine` so users can see
  * WHERE the agent's information came from, not just that a search
@@ -118,7 +118,6 @@ function SourceRow({
   link: SearchSourceLink;
   onOpen: (href: string) => void;
 }): JSX.Element {
-  const faviconUrl = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(link.domain)}&sz=32`;
   return (
     <a
       href={link.href}
@@ -135,18 +134,7 @@ function SourceRow({
         {index}
       </span>
       <span className="relative mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center overflow-hidden rounded-[6px] border border-[#DCDDDD]/80 bg-[#EFEFEF]/55 text-[#42C0EF] dark:border-white/10 dark:bg-white/5">
-        <Globe2 className="h-3 w-3" />
-        <img
-          src={faviconUrl}
-          alt=""
-          width={20}
-          height={20}
-          loading="lazy"
-          className="absolute inset-0 h-full w-full object-cover"
-          onError={(e) => {
-            (e.currentTarget as HTMLImageElement).remove();
-          }}
-        />
+        <Globe2 className="h-3 w-3" aria-hidden />
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">

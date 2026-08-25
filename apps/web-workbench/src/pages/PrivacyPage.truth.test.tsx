@@ -79,6 +79,17 @@ describe('PrivacyPage truth contract', () => {
     expectText(/外部实名认证、银行、支付或出款服务商/);
   });
 
+  it('discloses the locally stored astrology profile, live request, and clear control', () => {
+    renderPrivacy();
+
+    expectText(/今日能量星座资料/);
+    expectText(/姓名、精确生日、可选出生时间与地点、星座及浏览器时区/);
+    expectText(/当前浏览器的 localStorage/);
+    expectText(/实时星座能力启用时.*提交给 HOLA DAY 星座接口/);
+    expectText(/DivineAPI.*星座、日期或周期、语言及时区/);
+    expectText(/“我的能量”.*“清除资料”/);
+  });
+
   it('discloses feedback content and context forwarded through Resend or service logs', () => {
     renderPrivacy();
 
