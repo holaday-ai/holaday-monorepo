@@ -39,6 +39,20 @@ afterEach(() => {
 });
 
 describe('PlanPage renewal disclosure', () => {
+  it('does not present a guessed current plan or first-month eligibility while account data loads', () => {
+    authMeQuery.mockReturnValue(new Promise(() => {}));
+
+    render(
+      <MemoryRouter initialEntries={['/plan']}>
+        <PlanPage />
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByText('当前使用中')).toBeNull();
+    expect(screen.queryByText(/符合新付费用户优惠条件/)).toBeNull();
+    expect(screen.getAllByRole('button', { name: '正在确认当前套餐…' })).toHaveLength(3);
+  });
+
   it('states before checkout that paid periods do not renew or charge automatically', async () => {
     render(
       <MemoryRouter initialEntries={['/plan']}>
@@ -49,5 +63,20 @@ describe('PlanPage renewal disclosure', () => {
     expect(
       await screen.findByText('每次付款仅购买所选周期，到期前手动续费，不会自动扣款。'),
     ).toBeTruthy();
+  });
+
+  it('connects purchase decisions to billing, account security, and legal explanations', async () => {
+    render(
+      <MemoryRouter initialEntries={['/plan']}>
+        <PlanPage />
+      </MemoryRouter>,
+    );
+
+    await screen.findByText('每次付款仅购买所选周期，到期前手动续费，不会自动扣款。');
+    const trustNavigation = screen.getByRole('navigation', { name: '购买与账号保障' });
+    expect(trustNavigation.querySelector('a[href="/billing"]')).toBeTruthy();
+    expect(trustNavigation.querySelector('a[href="/profile"]')).toBeTruthy();
+    expect(trustNavigation.querySelector('a[href="/terms"]')).toBeTruthy();
+    expect(trustNavigation.querySelector('a[href="/privacy"]')).toBeTruthy();
   });
 });

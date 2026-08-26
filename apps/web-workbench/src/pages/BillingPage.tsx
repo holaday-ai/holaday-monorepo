@@ -1,3 +1,4 @@
+import { TrustNavigation } from '@/components/TrustNavigation';
 import { PaymentLedgerSection } from '@/components/billing/PaymentLedgerSection';
 import { Button } from '@/components/ui/button';
 import {
@@ -7,9 +8,9 @@ import {
   billingLoadErrorMessage,
   billingPageSummary,
   billingPaymentReturnCopy,
-  billingPlanSupportMailBody,
   billingPlanActionLabel,
   billingPlanLabel,
+  billingPlanSupportMailBody,
   isPaidBillingPlan,
   normalizeBillingSnapshot,
   normalizePaymentReturnOrder,
@@ -262,7 +263,8 @@ export function BillingPage(): JSX.Element {
                     <div>
                       <div className="text-sm font-medium">当前未保存支付方式</div>
                       <div className="text-[11px] text-muted-foreground">
-                        在线套餐通过结账页购买；企业付款、发票和本地支付可联系支持处理
+                        付款由结账页处理；HOLA DAY
+                        不保存银行卡号或支付账户密码。企业付款和发票可联系支持
                       </div>
                     </div>
                   </div>
@@ -284,6 +286,7 @@ export function BillingPage(): JSX.Element {
         )}
 
         <PaymentLedgerSection refreshKey={paymentLedgerRefreshKey} />
+        <TrustNavigation destinations={['plan', 'profile', 'terms', 'privacy']} />
       </div>
     </PageContainer>
   );

@@ -85,6 +85,19 @@ describe('BillingPage payment ledger integration', () => {
     expect(historyQuery).not.toHaveBeenCalled();
   });
 
+  it('explains checkout honestly and links billing to security and legal details', async () => {
+    renderBilling();
+
+    expect(await screen.findByText(/付款由结账页处理/)).toBeTruthy();
+    expect(screen.queryByText(/本地支付可联系支持处理/)).toBeNull();
+
+    const trustNavigation = screen.getByRole('navigation', { name: '购买与账号保障' });
+    expect(trustNavigation.querySelector('a[href="/plan"]')).toBeTruthy();
+    expect(trustNavigation.querySelector('a[href="/profile"]')).toBeTruthy();
+    expect(trustNavigation.querySelector('a[href="/terms"]')).toBeTruthy();
+    expect(trustNavigation.querySelector('a[href="/privacy"]')).toBeTruthy();
+  });
+
   it('refreshes settled payments after a confirmed payment return', async () => {
     renderBilling('/billing?payment=pay_return');
 

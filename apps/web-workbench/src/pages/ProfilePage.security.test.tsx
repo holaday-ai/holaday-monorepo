@@ -3,6 +3,7 @@
 import { clearAccessToken, getAccessToken } from '@/lib/auth';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ProfilePage } from './ProfilePage';
 
@@ -71,9 +72,17 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+function renderProfile(): void {
+  render(
+    <MemoryRouter initialEntries={['/profile']}>
+      <ProfilePage />
+    </MemoryRouter>,
+  );
+}
+
 describe('ProfilePage password self-service', () => {
   it('offers a real authenticator setup instead of email or SMS pseudo-2FA', async () => {
-    render(<ProfilePage />);
+    renderProfile();
 
     await screen.findByRole('heading', { name: '账号安全' });
     expect(await screen.findByRole('button', { name: '开启双重验证' })).toBeTruthy();
@@ -83,7 +92,7 @@ describe('ProfilePage password self-service', () => {
 
   it('enables an authenticator and reveals recovery codes only after verification', async () => {
     const user = userEvent.setup();
-    render(<ProfilePage />);
+    renderProfile();
 
     await user.click(await screen.findByRole('button', { name: '开启双重验证' }));
     expect(await screen.findByRole('img', { name: '双重验证二维码' })).toBeTruthy();
@@ -98,7 +107,7 @@ describe('ProfilePage password self-service', () => {
 
   it('keeps only one security workflow open at a time', async () => {
     const user = userEvent.setup();
-    render(<ProfilePage />);
+    renderProfile();
 
     await screen.findByRole('heading', { name: '账号安全' });
     await user.click(screen.getByRole('button', { name: '修改密码' }));
@@ -111,7 +120,7 @@ describe('ProfilePage password self-service', () => {
 
   it('changes the password with a code sent to the authenticated account', async () => {
     const user = userEvent.setup();
-    render(<ProfilePage />);
+    renderProfile();
 
     await screen.findByRole('heading', { name: '账号安全' });
     await user.click(screen.getByRole('button', { name: '修改密码' }));
@@ -138,7 +147,7 @@ describe('ProfilePage password self-service', () => {
 
   it('rejects mismatched passwords before submitting', async () => {
     const user = userEvent.setup();
-    render(<ProfilePage />);
+    renderProfile();
 
     await screen.findByRole('heading', { name: '账号安全' });
     await user.click(screen.getByRole('button', { name: '修改密码' }));
@@ -149,5 +158,18 @@ describe('ProfilePage password self-service', () => {
 
     expect(screen.getByRole('alert').textContent).toContain('两次输入的新密码不一致');
     expect(trpcMocks.changePasswordWithCode).not.toHaveBeenCalled();
+  });
+
+  it('uses truthful security copy and links to billing and legal details', async () => {
+    renderProfile();
+
+    await screen.findByRole('heading', { name: '账号安全' });
+    expect(screen.queryByText('最近修改：未知')).toBeNull();
+    expect(screen.getByText('使用邮箱验证码验证当前账号')).toBeTruthy();
+
+    const trustNavigation = screen.getByRole('navigation', { name: '购买与账号保障' });
+    expect(trustNavigation.querySelector('a[href="/billing"]')).toBeTruthy();
+    expect(trustNavigation.querySelector('a[href="/terms"]')).toBeTruthy();
+    expect(trustNavigation.querySelector('a[href="/privacy"]')).toBeTruthy();
   });
 });
