@@ -1,3 +1,4 @@
+import { TrustNavigation } from '@/components/TrustNavigation';
 import { Button } from '@/components/ui/button';
 import { setAccessToken } from '@/lib/auth';
 import {
@@ -282,7 +283,7 @@ export function ProfilePage(): JSX.Element {
     <PageContainer width="form">
       <PageHeader
         title="个人资料"
-        description="管理你的基本信息"
+        description="管理基本信息、密码和双重验证"
         action={
           <div className="inline-flex items-center rounded-full border border-[#DCDDDD] bg-white px-3 py-1 text-[12px] font-medium text-[#595757] shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
             {summary}
@@ -349,7 +350,7 @@ export function ProfilePage(): JSX.Element {
           title="账号安全"
           className="rounded-[8px] border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]"
         >
-          <Row label="密码" description="最近修改：未知">
+          <Row label="密码" description="使用邮箱验证码验证当前账号">
             <Button
               type="button"
               variant="outline"
@@ -655,6 +656,7 @@ export function ProfilePage(): JSX.Element {
             <output className="mt-3 block text-xs text-[#16775A]">{mfaMessage}</output>
           ) : null}
         </Section>
+        <TrustNavigation destinations={['billing', 'terms', 'privacy']} />
       </div>
     </PageContainer>
   );

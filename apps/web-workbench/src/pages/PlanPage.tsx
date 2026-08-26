@@ -1,6 +1,7 @@
 import { AddonPackButton } from '@/components/AddonPackButton';
 import { CnPaymentDialog, type CnProvider, type CnPurchase } from '@/components/CnPaymentDialog';
 import { PayPalButton } from '@/components/PayPalButton';
+import { TrustNavigation } from '@/components/TrustNavigation';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { normalizeAuthMeProfile } from '@/lib/auth-me-state';
@@ -72,7 +73,10 @@ const CARD_TAGLINE_EN: Record<PlanId, string> = {
 export function PlanPage(): JSX.Element {
   const toast = useToast();
   const location = useLocation();
-  const [currentPlan, setCurrentPlan] = React.useState<string>('free');
+  const [currentPlan, setCurrentPlan] = React.useState<PlanId | null>(null);
+  const [accountStatus, setAccountStatus] = React.useState<'loading' | 'ready' | 'error'>(
+    'loading',
+  );
   const [paymentOpts, setPaymentOpts] = React.useState<PaymentOptions | null>(null);
   const [cnOpts, setCnOpts] = React.useState<CnPaymentOptions | null>(null);
   const [openPayFor, setOpenPayFor] = React.useState<PlanId | null>(null);
@@ -88,10 +92,16 @@ export function PlanPage(): JSX.Element {
   } | null>(null);
 
   const refreshUser = React.useCallback(() => {
+    setAccountStatus('loading');
     trpc.auth.me.query().then(
-      (res) => setCurrentPlan(normalizeAuthMeProfile(res).plan),
+      (res) => {
+        const plan = normalizeAuthMeProfile(res).plan;
+        setCurrentPlan(plan === 'basic' || plan === 'pro' ? plan : 'free');
+        setAccountStatus('ready');
+      },
       () => {
-        /* not logged in — keep showing free as current */
+        setCurrentPlan(null);
+        setAccountStatus('error');
       },
     );
   }, []);
@@ -117,7 +127,8 @@ export function PlanPage(): JSX.Element {
     return () => cancelAnimationFrame(id);
   }, [location.hash]);
 
-  const mayQualifyForFirstMonthOffer = currentPlan === 'free';
+  const accountReady = accountStatus === 'ready' && currentPlan !== null;
+  const mayQualifyForFirstMonthOffer = accountReady && currentPlan === 'free';
   const isPaidPlan = currentPlan === 'basic' || currentPlan === 'pro';
   const canBuyAddons = Boolean(
     isPaidPlan &&
@@ -213,7 +224,7 @@ export function PlanPage(): JSX.Element {
           const name = zh ? def.nameZh : def.nameEn;
           const tagline = zh ? CARD_TAGLINE_ZH[planId] : CARD_TAGLINE_EN[planId];
           const features = zh ? def.featuresZh : def.featuresEn;
-          const isCurrent = planId === currentPlan;
+          const isCurrent = accountReady && planId === currentPlan;
           const featured = planId === 'basic';
           const isPaid = planId !== 'free';
           const isOpen = openPayFor === planId;
@@ -358,7 +369,17 @@ export function PlanPage(): JSX.Element {
                 ))}
               </ul>
 
-              {isCurrent ? (
+              {!accountReady ? (
+                <Button variant="outline" disabled className="w-full">
+                  {accountStatus === 'error'
+                    ? zh
+                      ? '当前套餐暂不可用'
+                      : 'Plan status unavailable'
+                    : zh
+                      ? '正在确认当前套餐…'
+                      : 'Checking current plan…'}
+                </Button>
+              ) : isCurrent ? (
                 <Button variant="outline" disabled className="w-full">
                   {zh ? '当前使用中' : 'Current'}
                 </Button>
@@ -644,6 +665,10 @@ export function PlanPage(): JSX.Element {
             : 'Notice: PayPal is in sandbox mode, no real charges'}
         </div>
       )}
+
+      <div className="mt-6">
+        <TrustNavigation destinations={['billing', 'profile', 'terms', 'privacy']} />
+      </div>
 
       {/* Phase 11 — CN payment dialog. Mounted page-level so the QR /
           Alipay-redirect view sits above whatever card the user
