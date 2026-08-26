@@ -98,6 +98,10 @@ describe('numbered migration filename contract', () => {
 });
 
 describe('numbered migration replay safety', () => {
+  it('treats an existing check constraint as an applied migration step', () => {
+    assert.equal(isSkippableAlreadyAppliedError({ code: 'ER_CHECK_CONSTRAINT_DUP_NAME' }), true);
+  });
+
   it('treats an already-dropped index as an applied migration step', () => {
     assert.equal(
       isSkippableAlreadyAppliedError(
