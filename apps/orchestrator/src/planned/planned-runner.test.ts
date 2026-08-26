@@ -114,11 +114,13 @@ describe('planned runner lifecycle serialization', () => {
       },
     };
 
-    await expect(queuePlannedRun(ctx as never, {
-      plannedTaskId: 'pln_monitor',
-      scheduledFor: new Date('2026-08-19T09:00:00.000Z'),
-      trigger: 'manual',
-    })).rejects.toMatchObject({
+    await expect(
+      queuePlannedRun(ctx as never, {
+        plannedTaskId: 'pln_monitor',
+        scheduledFor: new Date('2026-08-19T09:00:00.000Z'),
+        trigger: 'manual',
+      }),
+    ).rejects.toMatchObject({
       code: 'BAD_REQUEST',
       message: '当前状态不能执行',
     });
@@ -137,16 +139,20 @@ describe('planned runner lifecycle serialization', () => {
             return {
               where() {
                 if (call === 0) {
-                  return Promise.resolve([{
-                    id: 7,
-                    externalId: 'pln_monitor',
-                    nextRunAt: new Date('2026-08-19T09:00:00.000Z'),
-                    repeatType: 'daily',
-                    rrule: null,
-                    endsAt: null,
-                  }]);
+                  return Promise.resolve([
+                    {
+                      id: 7,
+                      externalId: 'pln_monitor',
+                      nextRunAt: new Date('2026-08-19T09:00:00.000Z'),
+                      repeatType: 'daily',
+                      rrule: null,
+                      endsAt: null,
+                      userId: 42,
+                    },
+                  ]);
                 }
-                return { limit: async () => [] };
+                if (call === 1) return { limit: async () => [] };
+                return { limit: async () => [{ status: 'active' }] };
               },
             };
           },
@@ -177,6 +183,59 @@ describe('planned runner lifecycle serialization', () => {
 
     expect(updateCalls).toHaveLength(2);
     expect(updateCalls[1]?.values).toMatchObject({ status: 'failed' });
-    expect(drizzleParamValues(updateCalls[1]?.where)).toEqual(expect.arrayContaining([7, 'running']));
+    expect(drizzleParamValues(updateCalls[1]?.where)).toEqual(
+      expect.arrayContaining([7, 'running']),
+    );
+  });
+
+  it('does not queue a claimed plan after the owner enters account closure', async () => {
+    let selectCall = 0;
+    const updates: Array<Record<string, unknown>> = [];
+    const db = {
+      select() {
+        const call = selectCall++;
+        return {
+          from() {
+            return {
+              where() {
+                if (call === 0) {
+                  return Promise.resolve([
+                    {
+                      id: 17,
+                      externalId: 'pln_closure_race',
+                      nextRunAt: new Date('2026-08-19T09:00:00.000Z'),
+                      repeatType: 'daily',
+                      rrule: null,
+                      endsAt: null,
+                      userId: 42,
+                    },
+                  ]);
+                }
+                if (call === 1) return { limit: async () => [] };
+                return { limit: async () => [{ status: 'closure_pending' }] };
+              },
+            };
+          },
+        };
+      },
+      update() {
+        return {
+          set(values: Record<string, unknown>) {
+            return {
+              async where() {
+                updates.push(values);
+                return [{ affectedRows: 1 }];
+              },
+            };
+          },
+        };
+      },
+    };
+    const queue = vi.fn(async () => undefined);
+
+    await plannedTick({ db: db as never, queue });
+
+    expect(queue).not.toHaveBeenCalled();
+    expect(updates).toEqual([{ status: 'running' }]);
   });
 });

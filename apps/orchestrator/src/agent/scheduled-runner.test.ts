@@ -26,6 +26,16 @@ import {
   stopScheduledRunner,
 } from './scheduled-runner.js';
 
+function fakeSelectRows(rows: unknown[]) {
+  return Object.assign(Promise.resolve(rows), { limit: vi.fn(async () => rows) });
+}
+
+function mustArrayItem<T>(items: T[], index: number): T {
+  const item = items[index];
+  if (!item) throw new Error(`missing item at index ${index}`);
+  return item;
+}
+
 afterEach(() => {
   stopScheduledRunner();
 });
@@ -154,16 +164,19 @@ describe('startScheduledRunner — tick integration', () => {
    * `claimSucceeds` controls whether the claim UPDATE reports
    * affectedRows=1 (we own this row) or 0 (lost the race).
    */
-  function makeFakeDb(
-    rows: Array<Record<string, unknown>>,
-    opts?: { claimSucceeds?: boolean },
-  ) {
+  function makeFakeDb(rows: Array<Record<string, unknown>>, opts?: { claimSucceeds?: boolean }) {
     const updates: Array<Record<string, unknown>> = [];
     const claimSucceeds = opts?.claimSucceeds ?? true;
     let updateCallNum = 0;
-    const select = vi.fn(() => ({
+    const select = vi.fn((selection?: Record<string, unknown>) => ({
       from: vi.fn(() => ({
-        where: vi.fn(async () => rows),
+        where: vi.fn(() => {
+          const selected =
+            selection && Object.hasOwn(selection, 'status') ? [{ status: 'active' }] : rows;
+          return Object.assign(Promise.resolve(selected), {
+            limit: vi.fn(async () => selected),
+          });
+        }),
       })),
     }));
     const update = vi.fn(() => ({
@@ -204,7 +217,7 @@ describe('startScheduledRunner — tick integration', () => {
     // (2) advance + restore status='active'.
     expect(updates.length).toBe(2);
     expect(updates[0]).toMatchObject({ status: 'running' });
-    const advance = updates[1]!;
+    const advance = mustArrayItem(updates, 1);
     expect(advance).toMatchObject({
       status: 'active',
       lastTaskId: 999,
@@ -225,7 +238,7 @@ describe('startScheduledRunner — tick integration', () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(updates.length).toBe(2);
     expect(updates[0]).toMatchObject({ status: 'running' });
-    const advance = updates[1]!;
+    const advance = mustArrayItem(updates, 1);
     expect(advance).toMatchObject({
       status: 'completed',
       lastTaskId: 1000,
@@ -245,7 +258,7 @@ describe('startScheduledRunner — tick integration', () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(dispatch).toHaveBeenCalledTimes(1);
     expect(updates.length).toBe(2);
-    const advance = updates[1]!;
+    const advance = mustArrayItem(updates, 1);
     // lastTaskId NOT set when dispatch returned null (the conditional
     // spread in the runner skips the column).
     expect('lastTaskId' in advance).toBe(false);
@@ -273,7 +286,7 @@ describe('startScheduledRunner — tick integration', () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(dispatch).toHaveBeenCalledTimes(1);
     expect(updates.length).toBe(2);
-    const advance = updates[1]!;
+    const advance = mustArrayItem(updates, 1);
     // Recurring row still advances + restores to active so the next
     // interval gets another shot.
     expect(advance).toMatchObject({
@@ -301,7 +314,7 @@ describe('startScheduledRunner — tick integration', () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(dispatch).toHaveBeenCalledTimes(1);
     expect(updates.length).toBe(2);
-    const advance = updates[1]!;
+    const advance = mustArrayItem(updates, 1);
     expect(advance).toMatchObject({
       status: 'failed',
       lastRunStatus: 'failed',
@@ -323,7 +336,7 @@ describe('startScheduledRunner — tick integration', () => {
     startScheduledRunner({ db, dispatch, pollIntervalMs: 60_000 });
     await new Promise((r) => setTimeout(r, 50));
     expect(updates.length).toBe(2);
-    const advance = updates[1]!;
+    const advance = mustArrayItem(updates, 1);
     expect((advance as { lastError: string }).lastError).toHaveLength(2_000);
     stopScheduledRunner();
   });
@@ -372,6 +385,67 @@ describe('startScheduledRunner — tick integration', () => {
     stopScheduledRunner();
   });
 
+  it('does not dispatch a claimed row after the owner enters account closure', async () => {
+    const selectResults = [
+      [{ id: 15, userId: 42, intent: 'closure race', repeatType: 'daily', rrule: null }],
+      [{ status: 'closure_pending' }],
+    ];
+    const updates: Array<Record<string, unknown>> = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const db: any = {
+      select: vi.fn(() => ({
+        from: vi.fn(() => ({
+          where: vi.fn(() => fakeSelectRows(selectResults.shift() ?? [])),
+        })),
+      })),
+      update: vi.fn(() => ({
+        set: vi.fn((values: Record<string, unknown>) => ({
+          where: vi.fn(async () => {
+            updates.push(values);
+            return { affectedRows: 1 };
+          }),
+        })),
+      })),
+    };
+    const dispatch = vi.fn(async () => 1234);
+    startScheduledRunner({ db, dispatch, pollIntervalMs: 60_000 });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(updates).toEqual([{ status: 'running' }]);
+    stopScheduledRunner();
+  });
+
+  it('does not reactivate recurring work when closure starts during dispatch', async () => {
+    const selectResults = [
+      [{ id: 16, userId: 42, intent: 'mid-dispatch freeze', repeatType: 'daily', rrule: null }],
+      [{ status: 'active' }],
+      [{ status: 'closure_pending' }],
+    ];
+    const updates: Array<Record<string, unknown>> = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const db: any = {
+      select: vi.fn(() => ({
+        from: vi.fn(() => ({
+          where: vi.fn(() => fakeSelectRows(selectResults.shift() ?? [])),
+        })),
+      })),
+      update: vi.fn(() => ({
+        set: vi.fn((values: Record<string, unknown>) => ({
+          where: vi.fn(async () => {
+            updates.push(values);
+            return { affectedRows: 1 };
+          }),
+        })),
+      })),
+    };
+    const dispatch = vi.fn(async () => 1234);
+    startScheduledRunner({ db, dispatch, pollIntervalMs: 60_000 });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(updates).toEqual([{ status: 'running' }]);
+    stopScheduledRunner();
+  });
+
   it('fires a due reminder and records the claimed cycle', async () => {
     const nextRunAt = new Date(Date.now() + 10 * 60_000);
     const selectResults = [
@@ -385,6 +459,7 @@ describe('startScheduledRunner — tick integration', () => {
           lastReminderRun: null,
         },
       ],
+      [{ status: 'active' }],
       [],
     ];
     const updates: Array<Record<string, unknown>> = [];
@@ -392,7 +467,7 @@ describe('startScheduledRunner — tick integration', () => {
     const db: any = {
       select: vi.fn(() => ({
         from: vi.fn(() => ({
-          where: vi.fn(async () => selectResults.shift() ?? []),
+          where: vi.fn(() => fakeSelectRows(selectResults.shift() ?? [])),
         })),
       })),
       update: vi.fn(() => ({
@@ -436,13 +511,14 @@ describe('startScheduledRunner — tick integration', () => {
           lastReminderRun: null,
         },
       ],
+      [{ status: 'active' }],
       [],
     ];
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const db: any = {
       select: vi.fn(() => ({
         from: vi.fn(() => ({
-          where: vi.fn(async () => selectResults.shift() ?? []),
+          where: vi.fn(() => fakeSelectRows(selectResults.shift() ?? [])),
         })),
       })),
       update: vi.fn(() => ({

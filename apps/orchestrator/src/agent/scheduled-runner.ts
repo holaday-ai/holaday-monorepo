@@ -20,7 +20,7 @@
  * importing the full tasks router graph.
  */
 
-import { and, eq, isNull, lt, lte, or } from 'drizzle-orm';
+import { and, eq, isNull, lt, lte, or, sql } from 'drizzle-orm';
 // rrule ships CJS-first (package.json main: dist/es5/rrule.js). Node 22's
 // ESM interop doesn't expose `rrulestr` as a named import on CJS modules
 // reliably — `import { rrulestr } from 'rrule'` crashes with
@@ -31,8 +31,10 @@ import rrule from 'rrule';
 const { rrulestr } = rrule as {
   rrulestr: (s: string) => { after: (d: Date, inc?: boolean) => Date | null };
 };
+import { accountClosureAllowsExecution } from '../account-closure/repository.js';
 import { logger } from '../config/logger.js';
 import { scheduledTasks } from '../db/schema/scheduled-tasks.js';
+import { users } from '../db/schema/users.js';
 
 const DEFAULT_POLL_MS = 60_000;
 
@@ -222,7 +224,12 @@ export async function recoverStuckRunningScheduledTasks(
     const result = await db
       .update(scheduledTasks)
       .set({ status: 'active' })
-      .where(eq(scheduledTasks.status, 'running'));
+      .where(
+        and(
+          eq(scheduledTasks.status, 'running'),
+          sql`EXISTS (SELECT 1 FROM ${users} WHERE ${users.id} = ${scheduledTasks.userId} AND ${users.status} = 'active')`,
+        ),
+      );
     const affected = extractMysqlAffectedRows(result);
     if (affected > 0) {
       logger.info(
@@ -333,6 +340,7 @@ async function reminderScan(deps: ScheduledRunnerDeps, now: Date): Promise<void>
       continue;
     }
     if (claimed === 0) continue;
+    if (!(await accountClosureAllowsExecution(deps.db, c.userId))) continue;
     try {
       await deps.notifyReminder({
         userInternalId: c.userId,
@@ -427,6 +435,12 @@ async function tick(deps: ScheduledRunnerDeps): Promise<void> {
       // OR a user paused/deleted it between the scan and the claim.
       continue;
     }
+    if (!(await accountClosureAllowsExecution(deps.db, row.userId))) {
+      // The durable immediate-effects pass owns the running→paused change and
+      // restoration ledger. Leaving the transient claim untouched here avoids
+      // dispatch and prevents an unrecorded restoration.
+      continue;
+    }
 
     // We own this row now (status='running'). Dispatch, then advance
     // + restore — both branches MUST run so the row doesn't wedge.
@@ -470,6 +484,11 @@ async function tick(deps: ScheduledRunnerDeps): Promise<void> {
     // longer payloads usually mean a system error worth shortening
     // before persisting.
     const truncatedError = dispatchError !== null ? dispatchError.slice(0, 2000) : null;
+    if (!(await accountClosureAllowsExecution(deps.db, row.userId))) {
+      // Closure may win while external dispatch is in flight. Never write
+      // `active` back over the closure-owned pause.
+      continue;
+    }
     try {
       if (nextRun === null) {
         // One-shot — terminal. 'completed' on success; 'failed' when
@@ -483,7 +502,7 @@ async function tick(deps: ScheduledRunnerDeps): Promise<void> {
             lastError: skipped ? skipNote : truncatedError,
             ...(dispatchedTaskId !== null ? { lastTaskId: dispatchedTaskId } : {}),
           })
-          .where(eq(scheduledTasks.id, row.id));
+          .where(and(eq(scheduledTasks.id, row.id), eq(scheduledTasks.status, 'running')));
       } else {
         // Recurring — restore to 'active' for the next tick. Failure
         // is recorded but doesn't block the next interval; the
@@ -499,7 +518,7 @@ async function tick(deps: ScheduledRunnerDeps): Promise<void> {
             lastError: skipped ? skipNote : truncatedError,
             ...(dispatchedTaskId !== null ? { lastTaskId: dispatchedTaskId } : {}),
           })
-          .where(eq(scheduledTasks.id, row.id));
+          .where(and(eq(scheduledTasks.id, row.id), eq(scheduledTasks.status, 'running')));
       }
     } catch (err) {
       // Worst-case path — the row stays in 'running' until the boot
