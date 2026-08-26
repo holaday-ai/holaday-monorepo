@@ -225,6 +225,7 @@ export const taskExecutionClosureHandler: AccountClosureHandler = {
   categoryId: 'task_execution',
   version: 1,
   async run(context) {
+    context.signal.throwIfAborted();
     const pageSize = Math.min(context.pageSize, 100);
     if (!Number.isSafeInteger(pageSize) || pageSize <= 0) {
       throw new ClosureHandlerError('INVARIANT_VIOLATION');
@@ -240,6 +241,7 @@ export const taskExecutionClosureHandler: AccountClosureHandler = {
       {
         store: createDbUserFileClosureStore(context.db),
         storage: context.storage,
+        signal: context.signal,
       },
     );
     if (filePage.deleted > 0) {
@@ -254,6 +256,7 @@ export const taskExecutionClosureHandler: AccountClosureHandler = {
       };
     }
 
+    context.signal.throwIfAborted();
     const evidencePage = await deleteUserEvidencePage(context, 'task_execution', pageSize);
     if (evidencePage.restricted !== 0) throw new ClosureHandlerError('INVARIANT_VIOLATION');
     if (evidencePage.deleted > 0) {
@@ -261,6 +264,7 @@ export const taskExecutionClosureHandler: AccountClosureHandler = {
       return { kind: 'continue', checkpoint: { processedCount: processed }, processed };
     }
 
+    context.signal.throwIfAborted();
     return taskExecutionRelationalClosureHandler.run(context);
   },
 };

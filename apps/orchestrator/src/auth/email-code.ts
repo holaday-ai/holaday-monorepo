@@ -63,6 +63,8 @@ export interface EmailMessage {
   text: string;
   /** Optional provider idempotency token; never derived from recipient data. */
   idempotencyKey?: string;
+  /** Caller cancellation boundary for lease-scoped private delivery. */
+  signal?: AbortSignal;
 }
 
 export interface EmailSender {
@@ -79,7 +81,7 @@ export interface PrivateEmailSender extends EmailSender {
  * Uses the Resend HTTP API directly — no SDK dep.
  */
 export const resendSender: EmailSender = {
-  async send({ to, subject, text }) {
+  async send({ to, subject, text, signal }) {
     const key = process.env.RESEND_API_KEY;
     if (!key) {
       logger.info({ to, subject, text }, 'email-code: RESEND_API_KEY unset, logging only');
@@ -97,6 +99,7 @@ export const resendSender: EmailSender = {
         subject,
         text,
       }),
+      ...(signal ? { signal } : {}),
     });
     if (!resp.ok) {
       const body = await resp.text();
@@ -117,7 +120,7 @@ export const privateResendSender: PrivateEmailSender = {
     return Boolean(process.env.RESEND_API_KEY);
   },
 
-  async send({ to, subject, text, idempotencyKey }) {
+  async send({ to, subject, text, idempotencyKey, signal }) {
     const key = process.env.RESEND_API_KEY;
     if (!key) throw new Error('Private email delivery unavailable');
     let response: Response;
@@ -135,7 +138,9 @@ export const privateResendSender: PrivateEmailSender = {
           subject,
           text,
         }),
-        signal: AbortSignal.timeout(10_000),
+        signal: signal
+          ? AbortSignal.any([signal, AbortSignal.timeout(10_000)])
+          : AbortSignal.timeout(10_000),
       });
     } catch {
       throw new Error('Private email delivery failed');

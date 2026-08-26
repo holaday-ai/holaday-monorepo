@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
+import type { StorageProvider } from '../files/storage-provider.js';
 import type { AccountClosureHandler } from './handler-contract.js';
 import {
   type AccountClosureWorkerRepository,
@@ -74,6 +75,8 @@ function deps(input: {
   handler?: AccountClosureHandler;
   enabled?: boolean;
   rssBytes?: number;
+  storage?: StorageProvider;
+  leaseHeartbeatMs?: number;
 }) {
   const selected = input.handler ?? handler();
   return {
@@ -85,7 +88,8 @@ function deps(input: {
     enabled: input.enabled ?? true,
     repository: input.repository ?? repository(),
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } as never,
-    storage: {} as never,
+    storage: input.storage ?? ({} as never),
+    leaseHeartbeatMs: input.leaseHeartbeatMs,
   };
 }
 
@@ -198,6 +202,98 @@ describe('account closure durable worker', () => {
       await runAccountClosureWorkerTick(deps({ repository: repo, handler: pageHandler })),
     ).toBe('idle');
     expect(pageHandler.run).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['returns false', () => Promise.resolve(false)],
+    ['rejects', () => Promise.reject(new Error('renewal unavailable'))],
+  ] as const)(
+    'aborts a pending provider and leaves takeover work unpersisted when heartbeat %s',
+    async (_label, heartbeatResult) => {
+      const repo = repository();
+      vi.mocked(repo.renewLease)
+        .mockResolvedValueOnce(true)
+        .mockImplementationOnce(heartbeatResult);
+      let releaseProvider!: () => void;
+      let observedSignal: AbortSignal | undefined;
+      const storage = {
+        delete: vi.fn(
+          async (_path: string, options?: { signal?: AbortSignal }): Promise<void> =>
+            new Promise<void>((resolve, reject) => {
+              releaseProvider = resolve;
+              observedSignal = options?.signal;
+              observedSignal?.addEventListener(
+                'abort',
+                () => reject(new DOMException('lease lost', 'AbortError')),
+                { once: true },
+              );
+            }),
+        ),
+      } as unknown as StorageProvider;
+      const providerHandler: AccountClosureHandler = {
+        categoryId: 'account_security',
+        version: 1,
+        async run(context) {
+          await context.storage.delete('/pending-provider', { signal: context.signal });
+          return { kind: 'complete', processed: 1, retention: 'deleted' };
+        },
+      };
+
+      const oldWorker = runAccountClosureWorkerTick(
+        deps({
+          repository: repo,
+          handler: providerHandler,
+          storage,
+          leaseHeartbeatMs: 1,
+        }),
+      );
+      await vi.waitFor(() =>
+        expect(vi.mocked(repo.renewLease).mock.calls.length).toBeGreaterThanOrEqual(2),
+      );
+      // Makes the RED implementation terminate even though it never forwards
+      // or aborts an operation-scoped signal. GREEN has already aborted it.
+      releaseProvider();
+
+      expect(await oldWorker).toBe('idle');
+      expect(observedSignal).toBeInstanceOf(AbortSignal);
+      expect(observedSignal?.aborted).toBe(true);
+      expect(repo.markStepContinuation).not.toHaveBeenCalled();
+      expect(repo.markStepSucceeded).not.toHaveBeenCalled();
+      expect(repo.markStepRetryable).not.toHaveBeenCalled();
+      expect(repo.markStepBlocked).not.toHaveBeenCalled();
+
+      const takeoverRepo = repository(claim({ leaseOwner: 'worker-b' }));
+      expect(
+        await runAccountClosureWorkerTick(
+          deps({ repository: takeoverRepo, handler: handler(), storage }),
+        ),
+      ).toBe('progress');
+      expect(takeoverRepo.markStepSucceeded).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('aborts pending completion delivery and does not mark retry after lease loss', async () => {
+    const repo = repository(completionClaim());
+    vi.mocked(repo.renewLease).mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    let observedSignal: AbortSignal | undefined;
+    vi.mocked(repo.completeRequest).mockImplementationOnce(
+      async (input) =>
+        new Promise<'completed'>((_resolve, reject) => {
+          observedSignal = input.signal;
+          input.signal.addEventListener(
+            'abort',
+            () => reject(new DOMException('lease lost', 'AbortError')),
+            { once: true },
+          );
+        }),
+    );
+
+    expect(await runAccountClosureWorkerTick(deps({ repository: repo, leaseHeartbeatMs: 1 }))).toBe(
+      'idle',
+    );
+    expect(observedSignal).toBeInstanceOf(AbortSignal);
+    expect(observedSignal?.aborted).toBe(true);
+    expect(repo.markCompletionRetry).not.toHaveBeenCalled();
   });
 
   it('finishes the in-flight page after SIGTERM state and refuses a new claim', async () => {

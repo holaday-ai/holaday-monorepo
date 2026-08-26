@@ -1117,6 +1117,7 @@ describe.sequential('account closure tombstone finalization', () => {
       db,
       logger,
       storage,
+      signal: new AbortController().signal,
       request: {
         id: 10_000 + user.id,
         externalId: uniqueId('acl_context'),

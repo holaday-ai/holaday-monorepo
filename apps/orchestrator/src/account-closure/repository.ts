@@ -108,7 +108,9 @@ export interface AccountClosureWorkerRepository {
       blocked: boolean;
     },
   ): Promise<boolean>;
-  completeRequest(input: CompletionLeaseInput & { now: Date }): Promise<'completed' | 'retryable'>;
+  completeRequest(
+    input: CompletionLeaseInput & { now: Date; signal: AbortSignal },
+  ): Promise<'completed' | 'retryable'>;
 }
 
 export type AccountClosureRepositoryErrorCode =
@@ -616,7 +618,7 @@ export class DatabaseAccountClosureWorkerRepository implements AccountClosureWor
   constructor(
     private readonly db: DB,
     private readonly complete: (
-      input: CompletionLeaseInput & { now: Date },
+      input: CompletionLeaseInput & { now: Date; signal: AbortSignal },
     ) => Promise<'completed' | 'retryable'>,
   ) {}
 
@@ -663,7 +665,7 @@ export class DatabaseAccountClosureWorkerRepository implements AccountClosureWor
   ) {
     return markCompletionRetry(this.db, input);
   }
-  completeRequest(input: CompletionLeaseInput & { now: Date }) {
+  completeRequest(input: CompletionLeaseInput & { now: Date; signal: AbortSignal }) {
     return this.complete(input);
   }
 }

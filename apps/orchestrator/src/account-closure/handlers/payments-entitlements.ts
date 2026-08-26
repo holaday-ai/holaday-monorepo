@@ -16,6 +16,7 @@ export const paymentsEntitlementsClosureHandler: AccountClosureHandler = {
   categoryId: 'payments_entitlements',
   version: 1,
   async run(context) {
+    context.signal.throwIfAborted();
     const pageSize = boundedPageSize(context.pageSize);
     const previousProcessed = context.checkpoint?.processedCount ?? 0;
     const afterId = context.checkpoint?.cursor ?? 0;
@@ -38,6 +39,7 @@ export const paymentsEntitlementsClosureHandler: AccountClosureHandler = {
 
     if (rows.length > 0) {
       for (const row of rows) {
+        context.signal.throwIfAborted();
         const result = await context.db
           .update(payments)
           .set({ metadata: sanitizePaymentMetadataForClosure(row.metadata) })
@@ -79,10 +81,12 @@ export const paymentsEntitlementsClosureHandler: AccountClosureHandler = {
       (user.plan !== 'free' || user.planExpiresAt !== null ? 1 : 0) +
       Number(quotaSummary?.activeCount ?? 0);
 
+    context.signal.throwIfAborted();
     await context.db
       .update(users)
       .set({ plan: 'free', planExpiresAt: null })
       .where(eq(users.id, context.request.userId));
+    context.signal.throwIfAborted();
     await context.db
       .update(taskQuotas)
       .set({
@@ -93,6 +97,7 @@ export const paymentsEntitlementsClosureHandler: AccountClosureHandler = {
       .where(eq(taskQuotas.userId, context.request.userId));
 
     const processed = previousProcessed + entitlementChanges;
+    context.signal.throwIfAborted();
     const [retainedPayments] = await context.db
       .select({ count: sql<number>`COUNT(*)` })
       .from(payments)

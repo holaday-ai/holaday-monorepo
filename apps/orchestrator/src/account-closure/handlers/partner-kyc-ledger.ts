@@ -120,6 +120,7 @@ export const partnerKycLedgerClosureHandler: AccountClosureHandler = {
   categoryId: 'partner_kyc_ledger',
   version: 1,
   async run(context) {
+    context.signal.throwIfAborted();
     const pageSize = Math.min(context.pageSize, 100);
     if (!Number.isSafeInteger(pageSize) || pageSize <= 0) {
       throw new ClosureHandlerError('INVARIANT_VIOLATION');
@@ -139,6 +140,7 @@ export const partnerKycLedgerClosureHandler: AccountClosureHandler = {
 
     let pageProcessed = 0;
     while (targetIndex < PARTNER_TARGETS.length) {
+      context.signal.throwIfAborted();
       const remaining = pageSize - pageProcessed;
       if (remaining === 0) break;
       const target = PARTNER_TARGETS[targetIndex];
@@ -150,6 +152,7 @@ export const partnerKycLedgerClosureHandler: AccountClosureHandler = {
         afterId = 0;
         continue;
       }
+      context.signal.throwIfAborted();
       const mutated = await target.mutateRows(context, rows);
       if (mutated !== rows.length) throw new ClosureHandlerError('INVARIANT_VIOLATION');
       pageProcessed += mutated;
@@ -173,6 +176,7 @@ export const partnerKycLedgerClosureHandler: AccountClosureHandler = {
         processed,
       };
     }
+    context.signal.throwIfAborted();
     const hasRestrictedRows = await hasAnyRestrictedRows(context);
     if (processed === 0) {
       return {

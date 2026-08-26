@@ -6,7 +6,7 @@ import { energyAstrologyProfileClosureHandler } from './handlers/energy-astrolog
 import { feedbackSupportClosureHandler } from './handlers/feedback-support.js';
 
 describe('external-retention closure handler', () => {
-  const context = {} as ClosureHandlerContext;
+  const context = { signal: new AbortController().signal } as ClosureHandlerContext;
 
   it('blocks completion when external personal data requires a separate retention workflow', async () => {
     const handler = createExternalRetentionHandler('feedback_support', async () => 0);
@@ -30,6 +30,7 @@ describe('external-retention closure handler', () => {
     const probeError = new Error('test-only probe outage');
     const failingContext = {
       db: { execute: vi.fn().mockRejectedValue(probeError) },
+      signal: new AbortController().signal,
     } as unknown as ClosureHandlerContext;
 
     await expect(handler.run(failingContext)).rejects.toBe(probeError);

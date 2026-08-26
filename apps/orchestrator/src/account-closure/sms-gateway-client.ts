@@ -29,14 +29,26 @@ export class SmsGatewayClient {
     });
   }
 
-  async sendAccountClosureComplete(rawPhone: string, receiptNumber: string): Promise<void> {
-    await this.send('/api/internal/account-closure/complete', {
-      phone: rawPhone,
-      receiptNumber,
-    });
+  async sendAccountClosureComplete(
+    rawPhone: string,
+    receiptNumber: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<void> {
+    await this.send(
+      '/api/internal/account-closure/complete',
+      {
+        phone: rawPhone,
+        receiptNumber,
+      },
+      options,
+    );
   }
 
-  private async send(path: string, body: Record<string, string>): Promise<void> {
+  private async send(
+    path: string,
+    body: Record<string, string>,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<void> {
     let response: Response;
     try {
       response = await this.fetchImpl(`${this.baseUrl}${path}`, {
@@ -46,7 +58,9 @@ export class SmsGatewayClient {
           'x-internal-secret': this.internalSecret,
         },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(10_000),
+        signal: options.signal
+          ? AbortSignal.any([options.signal, AbortSignal.timeout(10_000)])
+          : AbortSignal.timeout(10_000),
       });
     } catch {
       throw new Error('Account closure SMS delivery failed');

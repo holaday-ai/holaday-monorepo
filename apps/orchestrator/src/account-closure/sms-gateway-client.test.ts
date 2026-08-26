@@ -41,6 +41,40 @@ describe('SmsGatewayClient', () => {
     expect(init?.body).toBe(JSON.stringify({ phone: '13900139000', receiptNumber: 'ACL-RCPT-7' }));
   });
 
+  it('combines completion lease cancellation with the native request timeout', async () => {
+    let observedSignal: AbortSignal | undefined;
+    let started!: () => void;
+    const requestStarted = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const fetchImpl = vi.fn<typeof fetch>(async (_url, init) => {
+      observedSignal = init?.signal ?? undefined;
+      started();
+      return new Promise<Response>((_resolve, reject) => {
+        observedSignal?.addEventListener(
+          'abort',
+          () => reject(new DOMException('lease lost', 'AbortError')),
+          { once: true },
+        );
+      });
+    });
+    const client = new SmsGatewayClient({
+      baseUrl: 'https://sms-gateway.test',
+      internalSecret: 'internal-secret-value',
+      fetchImpl,
+    });
+    const controller = new AbortController();
+    const delivery = client.sendAccountClosureComplete('13900139000', 'ACL-RCPT-7', {
+      signal: controller.signal,
+    });
+    await requestStarted;
+    controller.abort();
+
+    await expect(delivery).rejects.toThrow('Account closure SMS delivery failed');
+    expect(observedSignal).toBeInstanceOf(AbortSignal);
+    expect(observedSignal?.aborted).toBe(true);
+  });
+
   it('returns a generic delivery error without exposing a rejected response payload', async () => {
     const fetchImpl = vi.fn<typeof fetch>(
       async () => new Response('provider rejected phone=13800138000 code=482901', { status: 502 }),

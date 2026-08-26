@@ -16,6 +16,8 @@ export interface ClosureHandlerContext {
   db: DB;
   logger: Logger;
   storage: StorageProvider;
+  /** Aborted when this worker can no longer prove ownership of the lease. */
+  signal: AbortSignal;
   request: {
     id: number;
     externalId: string;
@@ -77,6 +79,7 @@ export function createRelationalDeleteHandler(
     categoryId: options.categoryId,
     version: 1,
     async run(context) {
+      context.signal.throwIfAborted();
       const pageSize = Math.min(context.pageSize, 100);
       if (!Number.isSafeInteger(pageSize) || pageSize <= 0) {
         throw new ClosureHandlerError('INVARIANT_VIOLATION');
@@ -86,6 +89,7 @@ export function createRelationalDeleteHandler(
       const previousProcessed = context.checkpoint?.processedCount ?? 0;
       let pageProcessed = 0;
       for (const target of options.targets) {
+        context.signal.throwIfAborted();
         const remaining = pageSize - pageProcessed;
         if (remaining === 0) break;
         const ids = await target.selectOwnedIds(context, remaining);
@@ -93,12 +97,14 @@ export function createRelationalDeleteHandler(
           throw new ClosureHandlerError('INVARIANT_VIOLATION');
         }
         if (ids.length === 0) continue;
+        context.signal.throwIfAborted();
         const deleted = await target.deleteOwnedIds(context, ids);
         if (deleted !== ids.length) throw new ClosureHandlerError('INVARIANT_VIOLATION');
         pageProcessed += deleted;
       }
 
       const processed = previousProcessed + pageProcessed;
+      context.signal.throwIfAborted();
       const remaining = await hasAnyOwnedRows(context, options.targets);
       if (remaining) {
         return { kind: 'continue', checkpoint: { processedCount: processed }, processed };
@@ -120,6 +126,7 @@ export function createNoAccountAssociationHandler(
     categoryId,
     version: 1,
     async run(context) {
+      context.signal.throwIfAborted();
       const associations = await countAssociations(context);
       if (!Number.isSafeInteger(associations) || associations < 0) {
         throw new ClosureHandlerError('INVARIANT_VIOLATION');
@@ -142,6 +149,7 @@ export function createExternalRetentionHandler(
     categoryId,
     version: 1,
     async run(context) {
+      context.signal.throwIfAborted();
       const associations = await countAssociations(context);
       if (!Number.isSafeInteger(associations) || associations < 0) {
         throw new ClosureHandlerError('INVARIANT_VIOLATION');

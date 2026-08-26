@@ -334,6 +334,7 @@ describe.sequential('account closure relational handlers', () => {
       db,
       logger,
       storage,
+      signal: new AbortController().signal,
       request: {
         id: 501,
         externalId: 'acl_relational_test',

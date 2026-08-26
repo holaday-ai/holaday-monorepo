@@ -116,6 +116,41 @@ describe('account closure file deletion', () => {
     expect(events).not.toContain('row:1');
   });
 
+  it('combines lease cancellation with the object timeout and keeps its database row', async () => {
+    const events: string[] = [];
+    const store = new MemoryClosureStore([fileRow(1, 'image/png')], events);
+    const storage = fakeStorage(events);
+    let observedSignal: AbortSignal | undefined;
+    let started!: () => void;
+    const deleteStarted = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    vi.mocked(storage.delete).mockImplementation(async (_path, options) => {
+      observedSignal = options?.signal;
+      started();
+      await new Promise<never>((_resolve, reject) => {
+        observedSignal?.addEventListener(
+          'abort',
+          () => reject(new DOMException('lease lost', 'AbortError')),
+          { once: true },
+        );
+      });
+    });
+    const controller = new AbortController();
+    const deletion = deleteUserFilesPage(
+      { userIdInternal: 7, limit: 100, categoryId: 'media_assets' },
+      { store, storage, deleteTimeoutMs: 60_000, signal: controller.signal },
+    );
+    await deleteStarted;
+    controller.abort();
+
+    await expect(deletion).rejects.toMatchObject({ name: 'AbortError' });
+    expect(observedSignal).toBeInstanceOf(AbortSignal);
+    expect(observedSignal?.aborted).toBe(true);
+    expect(store.rows).toHaveLength(1);
+    expect(events).not.toContain('row:1');
+  });
+
   it('partitions media and task files exclusively, assigning null and non-standard MIME conservatively', async () => {
     expect(closureFileCategoryForMimetype(null)).toBe('task_execution');
     expect(closureFileCategoryForMimetype('application/x-private')).toBe('task_execution');

@@ -357,6 +357,7 @@ export interface DeleteUserFilesPageDependencies {
   store: UserFileClosureStore;
   storage: Pick<StorageProvider, 'delete'>;
   deleteTimeoutMs?: number;
+  signal?: AbortSignal;
 }
 
 /**
@@ -418,11 +419,12 @@ export async function deleteUserFilesPage(
 
   const page = selected.slice(0, input.limit);
   for (const row of page) {
-    await deleteStorageObjectForClosure(
-      dependencies.storage,
-      row.storagePath,
-      dependencies.deleteTimeoutMs,
-    );
+    await deleteStorageObjectForClosure(dependencies.storage, row.storagePath, {
+      ...(dependencies.deleteTimeoutMs !== undefined
+        ? { timeoutMs: dependencies.deleteTimeoutMs }
+        : {}),
+      ...(dependencies.signal ? { signal: dependencies.signal } : {}),
+    });
     const deleted = await dependencies.store.deleteOwnedRow({
       id: row.id,
       userIdInternal: input.userIdInternal,

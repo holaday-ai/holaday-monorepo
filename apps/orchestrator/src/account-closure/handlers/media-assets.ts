@@ -22,7 +22,7 @@ import {
 
 export interface MediaAssetsClosureDependencies {
   /** Null means the runtime cannot prove remote voice deletion capability. */
-  deleteVoiceClone: ((voiceId: string) => Promise<void>) | null;
+  deleteVoiceClone: ((voiceId: string, signal: AbortSignal) => Promise<void>) | null;
 }
 
 interface EvidenceClosurePageResult {
@@ -44,6 +44,7 @@ export function createMediaAssetsClosureHandler(
     categoryId: 'media_assets',
     version: 1,
     async run(context) {
+      context.signal.throwIfAborted();
       const pageSize = boundedPageSize(context);
       const previousProcessed = context.checkpoint?.processedCount ?? 0;
       // Cursor 0 is the durable, non-personal marker that this category has
@@ -61,6 +62,7 @@ export function createMediaAssetsClosureHandler(
         {
           store: createDbUserFileClosureStore(context.db),
           storage: context.storage,
+          signal: context.signal,
         },
       );
       if (filePage.deleted > 0) {
@@ -68,12 +70,14 @@ export function createMediaAssetsClosureHandler(
         return continueResult(processed, previouslyRestricted, filePage.nextAfterId);
       }
 
+      context.signal.throwIfAborted();
       const evidencePage = await deleteUserEvidencePage(context, 'media_assets', pageSize);
       if (evidencePage.deleted + evidencePage.restricted > 0) {
         const processed = previousProcessed + evidencePage.deleted + evidencePage.restricted;
         return continueResult(processed, previouslyRestricted || evidencePage.restricted > 0);
       }
 
+      context.signal.throwIfAborted();
       const [profile] = await context.db
         .select({
           avatarUrl: users.avatarUrl,
@@ -101,9 +105,10 @@ export function createMediaAssetsClosureHandler(
 
       if (profile.qwenVoiceId) {
         if (!dependencies.deleteVoiceClone) throw new ClosureHandlerError('HANDLER_DEFERRED');
-        await dependencies.deleteVoiceClone(profile.qwenVoiceId);
+        await dependencies.deleteVoiceClone(profile.qwenVoiceId, context.signal);
       }
 
+      context.signal.throwIfAborted();
       const profileFields = [
         profile.avatarUrl,
         profile.qwenVoiceId,
@@ -195,6 +200,7 @@ export async function deleteUserEvidencePage(
   let deleted = 0;
   let restricted = 0;
   for (const row of selected.slice(0, limit)) {
+    context.signal.throwIfAborted();
     if (row.retained) {
       const result = await context.db.execute(sql`
         UPDATE evidence_artifacts AS artifact
@@ -229,7 +235,10 @@ export async function deleteUserEvidencePage(
       continue;
     }
 
-    await deleteStorageObjectForClosure(context.storage, row.r2Key);
+    await deleteStorageObjectForClosure(context.storage, row.r2Key, {
+      signal: context.signal,
+    });
+    context.signal.throwIfAborted();
     const result = await context.db.execute(sql`
       DELETE artifact
       FROM evidence_artifacts AS artifact
@@ -250,11 +259,11 @@ export async function deleteUserEvidencePage(
 }
 
 export function createQwenVoiceDeletionAdapter(
-  options: Omit<DeleteVoiceParams, 'voiceId'>,
-): (voiceId: string) => Promise<void> {
-  return async (voiceId) => {
+  options: Omit<DeleteVoiceParams, 'voiceId' | 'signal'>,
+): (voiceId: string, signal: AbortSignal) => Promise<void> {
+  return async (voiceId, signal) => {
     try {
-      await deleteVoice({ ...options, voiceId });
+      await deleteVoice({ ...options, voiceId, signal });
     } catch (error) {
       if (
         error instanceof QwenVoiceCloneError &&

@@ -131,7 +131,7 @@ describe.sequential('media assets closure handler', () => {
 
     expect(final.retention).toBe('restricted');
     expect(deleteVoiceClone).toHaveBeenCalledOnce();
-    expect(deleteVoiceClone).toHaveBeenCalledWith('voice_target');
+    expect(deleteVoiceClone).toHaveBeenCalledWith('voice_target', expect.any(AbortSignal));
     expect(deletedPaths).toEqual(
       expect.arrayContaining([
         'objects/file_target_base',
@@ -395,6 +395,44 @@ describe.sequential('media assets closure handler', () => {
     expect(unchanged?.qwenVoiceId).toBe(`voice_error_${label}`);
   });
 
+  it('forwards lease cancellation through the Qwen delete timeout and retains the voice id', async () => {
+    const target = await createUser('qla', {
+      qwenVoiceId: 'voice_qwen_lease_abort',
+    });
+    let observedSignal: AbortSignal | undefined;
+    let started!: () => void;
+    const requestStarted = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const adapter = createQwenVoiceDeletionAdapter({
+      apiKey: 'test-only-key',
+      baseUrl: 'https://qwen.test.invalid',
+      maxRetries: 0,
+      fetchImpl: vi.fn<typeof fetch>(async (_url, init) => {
+        observedSignal = init?.signal ?? undefined;
+        started();
+        return new Promise<Response>((_resolve, reject) => {
+          observedSignal?.addEventListener(
+            'abort',
+            () => reject(new DOMException('lease lost', 'AbortError')),
+            { once: true },
+          );
+        });
+      }),
+    });
+    const handler = createMediaAssetsClosureHandler({ deleteVoiceClone: adapter });
+    const controller = new AbortController();
+    const cleanup = handler.run(context(target, fakeStorage([]), null, controller.signal));
+    await requestStarted;
+    controller.abort();
+
+    await expect(cleanup).rejects.toBeInstanceOf(Error);
+    expect(observedSignal).toBeInstanceOf(AbortSignal);
+    expect(observedSignal?.aborted).toBe(true);
+    const [unchanged] = await db.select().from(users).where(eq(users.id, target.id)).limit(1);
+    expect(unchanged?.qwenVoiceId).toBe('voice_qwen_lease_abort');
+  });
+
   it('fails closed when a voice identifier exists without a verified provider deletion capability', async () => {
     const target = await createUser('deferred', { qwenVoiceId: 'voice_deferred' });
     const handler = createMediaAssetsClosureHandler({ deleteVoiceClone: null });
@@ -410,11 +448,13 @@ describe.sequential('media assets closure handler', () => {
     user: { id: number; externalId: string },
     storage: StorageProvider,
     checkpoint: ClosureCheckpoint,
+    signal: AbortSignal = new AbortController().signal,
   ): ClosureHandlerContext {
     return {
       db,
       logger,
       storage,
+      signal,
       request: {
         id: 701,
         externalId: 'acl_media_test',

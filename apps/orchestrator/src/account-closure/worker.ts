@@ -149,7 +149,7 @@ export async function runAccountClosureWorkerTick(
   if (!renewed) return 'idle';
 
   if (claim.kind === 'completion') {
-    const stopHeartbeat = startLeaseHeartbeat(
+    const heartbeat = startLeaseHeartbeat(
       repository,
       claim,
       deps.now,
@@ -160,12 +160,15 @@ export async function runAccountClosureWorkerTick(
         requestId: claim.requestId,
         leaseOwner: claim.leaseOwner,
         now: deps.now(),
+        signal: heartbeat.signal,
       });
+      await heartbeat.stop();
+      if (result !== 'completed' && heartbeat.signal.aborted) return 'idle';
       return result === 'completed' ? 'progress' : 'attention';
     } catch (error) {
+      await heartbeat.stop();
+      if (heartbeat.signal.aborted) return 'idle';
       return persistCompletionFailure(repository, claim, deps.now(), error);
-    } finally {
-      stopHeartbeat();
     }
   }
 
@@ -183,7 +186,7 @@ export async function runAccountClosureWorkerTick(
     throw new Error('Account closure worker dependencies are incomplete');
   }
 
-  const stopHeartbeat = startLeaseHeartbeat(
+  const heartbeat = startLeaseHeartbeat(
     repository,
     claim,
     deps.now,
@@ -194,6 +197,7 @@ export async function runAccountClosureWorkerTick(
       db: deps.db,
       logger: deps.logger,
       storage: deps.storage,
+      signal: heartbeat.signal,
       request: {
         id: claim.requestId,
         externalId: claim.requestExternalId,
@@ -210,6 +214,8 @@ export async function runAccountClosureWorkerTick(
           : null,
       pageSize: 100,
     });
+    await heartbeat.stop();
+    if (heartbeat.signal.aborted) return 'idle';
     if (result.kind === 'continue') {
       const saved = await repository.markStepContinuation({
         ...stepLeaseInput(claim),
@@ -231,15 +237,15 @@ export async function runAccountClosureWorkerTick(
     safeLog(deps.logger, 'info', claim, 'step_succeeded', result.processed);
     return 'progress';
   } catch (error) {
+    await heartbeat.stop();
+    if (heartbeat.signal.aborted) return 'idle';
     return persistHandlerFailure(repository, claim, deps.now(), error, deps.logger);
-  } finally {
-    stopHeartbeat();
   }
 }
 
 async function completeClaim(
   deps: AccountClosureWorkerDeps,
-  input: CompletionLeaseInput & { now: Date },
+  input: CompletionLeaseInput & { now: Date; signal: AbortSignal },
 ): Promise<'completed' | 'retryable'> {
   if (!deps.hmacSecret || deps.hmacSecret.trim().length < 32 || !deps.notification) {
     throw new WorkerOperationError('configuration');
@@ -251,6 +257,7 @@ async function completeClaim(
     input.now,
     deps.hmacSecret,
   );
+  input.signal.throwIfAborted();
   const receipts = createDatabaseReceiptService(deps.db);
   await receipts.createCompletionReceipt({
     requestId: input.requestId,
@@ -261,6 +268,7 @@ async function completeClaim(
   });
   let receipt = await receipts.getCompletionReceiptRecord(input.requestId, context.userId);
   if (!receipt) throw new WorkerOperationError('database_unavailable');
+  input.signal.throwIfAborted();
   if (receipt.notificationStatus !== 'accepted') {
     try {
       if (context.email && context.emailVerified && deps.notification.emailSender.isAvailable()) {
@@ -269,27 +277,32 @@ async function completeClaim(
           subject: 'HOLA DAY 账户关闭完成',
           text: `你的账户关闭已完成。回执编号：${receipt.receiptNumber}`,
           idempotencyKey: receipt.receiptNumber,
+          signal: input.signal,
         });
       } else if (context.phone && context.phoneVerified) {
         await deps.notification.smsGateway.sendAccountClosureComplete(
           context.phone,
           receipt.receiptNumber,
+          { signal: input.signal },
         );
       } else {
         throw new WorkerOperationError('configuration');
       }
+      input.signal.throwIfAborted();
       receipt = await receipts.setCompletionNotificationStatus(
         input.requestId,
         context.userId,
         'accepted',
       );
     } catch (error) {
+      if (input.signal.aborted) throw error;
       await receipts.setCompletionNotificationStatus(input.requestId, context.userId, 'failed');
       if (error instanceof WorkerOperationError && error.code === 'configuration') throw error;
       throw new WorkerOperationError('provider_unavailable');
     }
   }
   if (receipt.notificationStatus !== 'accepted') return 'retryable';
+  input.signal.throwIfAborted();
   const completedAt = deps.now();
   await finalizeUserTombstone({
     db: deps.db,
@@ -422,21 +435,61 @@ async function persistCompletionFailure(
   return blocked ? 'attention' : 'progress';
 }
 
+interface LeaseHeartbeat {
+  signal: AbortSignal;
+  stop(): Promise<void>;
+}
+
 function startLeaseHeartbeat(
   repository: AccountClosureWorkerRepository,
   claim: ClaimedClosureWork,
   now: () => Date,
   heartbeatMs: number,
-): () => void {
-  const timer = setInterval(() => {
-    const current = now();
-    void repository.renewLease({
-      ...workerLeaseInput(claim),
-      leaseUntil: new Date(current.getTime() + ACCOUNT_CLOSURE_LEASE_MS),
-    });
-  }, heartbeatMs);
-  timer.unref();
-  return () => clearInterval(timer);
+): LeaseHeartbeat {
+  if (!Number.isSafeInteger(heartbeatMs) || heartbeatMs <= 0) {
+    throw new Error('Invalid account closure heartbeat interval');
+  }
+  const controller = new AbortController();
+  let stopped = false;
+  let timer: NodeJS.Timeout | null = null;
+  let renewal: Promise<void> | null = null;
+
+  const schedule = () => {
+    if (stopped || controller.signal.aborted) return;
+    timer = setTimeout(() => {
+      timer = null;
+      renewal = (async () => {
+        try {
+          const current = now();
+          const renewed = await repository.renewLease({
+            ...workerLeaseInput(claim),
+            leaseUntil: new Date(current.getTime() + ACCOUNT_CLOSURE_LEASE_MS),
+          });
+          if (!renewed) controller.abort(new Error('account closure lease lost'));
+        } catch {
+          controller.abort(new Error('account closure lease renewal failed'));
+        }
+      })().finally(() => {
+        renewal = null;
+        schedule();
+      });
+    }, heartbeatMs);
+    timer.unref();
+  };
+  schedule();
+
+  return {
+    signal: controller.signal,
+    async stop() {
+      stopped = true;
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      const pending = renewal;
+      if (pending) await pending;
+    },
+  };
 }
 
 function workerLeaseInput(claim: ClaimedClosureWork): WorkerLeaseInput {

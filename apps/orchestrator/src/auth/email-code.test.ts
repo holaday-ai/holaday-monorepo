@@ -177,4 +177,40 @@ describe('private email delivery', () => {
       }),
     );
   });
+
+  it('combines caller cancellation with the private provider timeout', async () => {
+    vi.stubEnv('RESEND_API_KEY', 'private-resend-key');
+    let observedSignal: AbortSignal | undefined;
+    let started!: () => void;
+    const requestStarted = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn<typeof fetch>(async (_url, init) => {
+        observedSignal = init?.signal ?? undefined;
+        started();
+        return new Promise<Response>((_resolve, reject) => {
+          observedSignal?.addEventListener(
+            'abort',
+            () => reject(new DOMException('lease lost', 'AbortError')),
+            { once: true },
+          );
+        });
+      }),
+    );
+    const controller = new AbortController();
+    const delivery = privateResendSender.send({
+      to: 'closure-owner@example.test',
+      subject: 'Closure complete',
+      text: 'Receipt ACR-random',
+      signal: controller.signal,
+    });
+    await requestStarted;
+    controller.abort();
+
+    await expect(delivery).rejects.toThrow('Private email delivery failed');
+    expect(observedSignal).toBeInstanceOf(AbortSignal);
+    expect(observedSignal?.aborted).toBe(true);
+  });
 });
