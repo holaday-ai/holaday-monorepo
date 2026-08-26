@@ -51,6 +51,10 @@ STUB
 #!/usr/bin/env bash
 exit 0
 STUB
+  cat > "$harness_dir/repo/scripts/start-account-closure-worker-production.sh" <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
   chmod +x "$harness_dir/repo/scripts/"*.sh
 
   cat > "$harness_dir/bin/scp" <<'STUB'
@@ -76,6 +80,10 @@ elif [[ "$command_text" == *"db:migrate:numbered"* ]]; then
     echo "migration-contract-error" >> "$TEST_EVENT_LOG"
     exit 44
   fi
+  if [[ "$command_text" != *"test -f apps/orchestrator/drizzle/0051_account_closures.sql"* ]]; then
+    echo "migration-0051-gate-missing" >> "$TEST_EVENT_LOG"
+    exit 46
+  fi
   echo "migration" >> "$TEST_EVENT_LOG"
   [[ "$TEST_FAIL_PHASE" != "migration" ]] || exit 43
 elif [[ "$command_text" == *"git reset --hard '$TEST_LIVE_HEAD'"* ]]; then
@@ -83,6 +91,7 @@ elif [[ "$command_text" == *"git reset --hard '$TEST_LIVE_HEAD'"* ]]; then
   [[ "${TEST_ROLLBACK_BUILD_RC:-0}" == "0" ]] || exit "$TEST_ROLLBACK_BUILD_RC"
 elif [[ "$command_text" == *"orchestrator-runtime.sh' restart"* ]]; then
   if grep -Fxq "rollback-checkout" "$TEST_EVENT_LOG"; then
+    [[ "$command_text" == *"ACCOUNT_CLOSURE_WORKER_ENABLED=false"* ]] || exit 47
     echo "rollback-restart" >> "$TEST_EVENT_LOG"
     exit "${TEST_ROLLBACK_RESTART_RC:-0}"
   fi

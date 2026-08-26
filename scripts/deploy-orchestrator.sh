@@ -47,9 +47,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/auto-smoke-summary.sh"
 RUNTIME_HELPER="$SCRIPT_DIR/orchestrator-runtime.sh"
 START_HELPER="$SCRIPT_DIR/start-orchestrator-production.sh"
+WORKER_START_HELPER="$SCRIPT_DIR/start-account-closure-worker-production.sh"
 REMOTE_RUNTIME_DIR="/var/lib/holaday-deploy"
 REMOTE_RUNTIME_HELPER="$REMOTE_RUNTIME_DIR/orchestrator-runtime.sh"
 REMOTE_START_HELPER="$REMOTE_RUNTIME_DIR/start-orchestrator-production.sh"
+REMOTE_WORKER_START_HELPER="$REMOTE_RUNTIME_DIR/start-account-closure-worker-production.sh"
 ORCHESTRATOR_RUN_USER="${ORCHESTRATOR_RUN_USER:-holaday}"
 ORCHESTRATOR_RUN_GROUP="${ORCHESTRATOR_RUN_GROUP:-$ORCHESTRATOR_RUN_USER}"
 
@@ -63,6 +65,10 @@ if [[ ! -f "$RUNTIME_HELPER" ]]; then
 fi
 if [[ ! -f "$START_HELPER" ]]; then
   echo "❌ Production start helper missing: $START_HELPER" >&2
+  exit 1
+fi
+if [[ ! -f "$WORKER_START_HELPER" ]]; then
+  echo "❌ Closure worker production start helper missing: $WORKER_START_HELPER" >&2
   exit 1
 fi
 if ! [[ "$ORCHESTRATOR_RUN_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
@@ -130,22 +136,26 @@ stage_runtime_helper() {
     "install -d -o root -g root -m 755 '$REMOTE_RUNTIME_DIR'"
   run_with_retry "Vultr runtime-helper upload" \
     "${VULTR_AUTH_PREFIX[@]}" scp "${SSH_OPTS[@]}" \
-    "$RUNTIME_HELPER" "$START_HELPER" "$VULTR_HOST:$REMOTE_RUNTIME_DIR/"
+    "$RUNTIME_HELPER" "$START_HELPER" "$WORKER_START_HELPER" "$VULTR_HOST:$REMOTE_RUNTIME_DIR/"
   run_with_retry "Vultr runtime-helper permissions" \
     "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
-    "chown root:root '$REMOTE_RUNTIME_HELPER' '$REMOTE_START_HELPER' && \
-     chmod 700 '$REMOTE_RUNTIME_HELPER' && chmod 755 '$REMOTE_START_HELPER'"
+    "chown root:root '$REMOTE_RUNTIME_HELPER' '$REMOTE_START_HELPER' '$REMOTE_WORKER_START_HELPER' && \
+     chmod 700 '$REMOTE_RUNTIME_HELPER' && \
+     chmod 755 '$REMOTE_START_HELPER' '$REMOTE_WORKER_START_HELPER'"
 }
 
 restart_orchestrator_as_runtime_user() {
   local label="$1"
+  local force_worker_disabled="${2:-0}"
   run_with_retry "$label" \
     "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
       cd /opt/holaday-monorepo && \
       set -a && . apps/orchestrator/.env && set +a && \
+      if [[ '$force_worker_disabled' == '1' ]]; then export ACCOUNT_CLOSURE_WORKER_ENABLED=false; fi && \
       ORCHESTRATOR_RUN_USER='$ORCHESTRATOR_RUN_USER' \
       ORCHESTRATOR_RUN_GROUP='$ORCHESTRATOR_RUN_GROUP' \
       ORCHESTRATOR_START_SCRIPT='$REMOTE_START_HELPER' \
+      ACCOUNT_CLOSURE_WORKER_START_SCRIPT='$REMOTE_WORKER_START_HELPER' \
       '$REMOTE_RUNTIME_HELPER' restart /opt/holaday-monorepo"
 }
 
@@ -178,7 +188,7 @@ rollback() {
   fi
 
   set +e
-  rollback_output=$(restart_orchestrator_as_runtime_user "Vultr rollback restart" 2>&1)
+  rollback_output=$(restart_orchestrator_as_runtime_user "Vultr rollback restart" 1 2>&1)
   rollback_rc=$?
   set -e
   echo "$rollback_output" | tail -5 >&2
@@ -298,6 +308,7 @@ if ! run_with_retry "Vultr database migration gate" \
   "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
     cd /opt/holaday-monorepo && \
     set -a && . apps/orchestrator/.env && set +a && \
+    test -f apps/orchestrator/drizzle/0051_account_closures.sql && \
     pnpm --filter @holaday/orchestrator db:migrate:numbered && \
     pnpm --filter @holaday/orchestrator db:verify"; then
   abort_with_rollback "database migration/schema verification failed"

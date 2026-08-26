@@ -20,7 +20,9 @@ export function findMissingRequiredPreAppRolloutMigrations(files) {
 export function assertDatabaseReadyForAppRollout(appliedMigrations) {
   const missing = findMissingRequiredPreAppRolloutMigrations(appliedMigrations);
   if (missing.length > 0) {
-    throw new Error(`Account closure migrations must run before application rollout: ${missing.join(', ')}`);
+    throw new Error(
+      `Account closure migrations must run before application rollout: ${missing.join(', ')}`,
+    );
   }
 }
 
@@ -55,9 +57,7 @@ export function isSkippableAlreadyAppliedError(error, context = {}) {
     );
   }
   const message = error.message ?? '';
-  return /already exists|duplicate column|duplicate key name|duplicate foreign key/i.test(
-    message,
-  );
+  return /already exists|duplicate column|duplicate key name|duplicate foreign key/i.test(message);
 }
 
 export function splitMigrationStatements(sql) {
@@ -90,6 +90,12 @@ export const REQUIRED_INDEXES = [
     name: 'ix_account_closure_requests_status_grace',
     unique: false,
     columns: ['status', 'grace_ends_at'],
+  },
+  {
+    table: 'account_closure_requests',
+    name: 'ix_account_closure_requests_completion_due',
+    unique: false,
+    columns: ['status', 'completion_next_attempt_at', 'completion_lease_until'],
   },
   {
     table: 'account_closure_steps',

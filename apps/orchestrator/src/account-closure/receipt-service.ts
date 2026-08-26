@@ -41,6 +41,11 @@ export interface CompletionClosureReceipt {
 export interface ClosureReceiptStore {
   insertOrGet(row: ClosureReceiptRecord): Promise<ClosureReceiptRecord>;
   find(requestId: number, kind: AccountClosureReceiptKind): Promise<ClosureReceiptRecord | null>;
+  setNotificationStatus(
+    requestId: number,
+    kind: 'completion',
+    status: 'accepted' | 'failed',
+  ): Promise<ClosureReceiptRecord>;
 }
 
 export interface ReceiptServiceOptions {
@@ -128,7 +133,33 @@ export class AccountClosureReceiptService {
       completedAt: input.completedAt,
     });
     assertReceiptIdentity(row, input.requestId, input.userId, 'completion');
+    if (
+      row.subjectDigest?.toLowerCase() !== input.subjectDigest.toLowerCase() ||
+      !sameCategorySet(row.completedCategoryIds, completedCategoryIds) ||
+      !sameCategorySet(row.restrictedCategoryIds, restrictedCategoryIds)
+    ) {
+      throw new Error('Account closure completion receipt invariant failed');
+    }
     return serializeCompletionReceipt(row);
+  }
+
+  async getCompletionReceiptRecord(
+    requestId: number,
+    userId: number,
+  ): Promise<ClosureReceiptRecord | null> {
+    const row = await this.store.find(requestId, 'completion');
+    if (row) assertReceiptIdentity(row, requestId, userId, 'completion');
+    return row;
+  }
+
+  async setCompletionNotificationStatus(
+    requestId: number,
+    userId: number,
+    status: 'accepted' | 'failed',
+  ): Promise<ClosureReceiptRecord> {
+    const row = await this.store.setNotificationStatus(requestId, 'completion', status);
+    assertReceiptIdentity(row, requestId, userId, 'completion');
+    return row;
   }
 }
 
@@ -190,6 +221,28 @@ export class DatabaseClosureReceiptStore implements ClosureReceiptStore {
       restrictedCategoryIds: parseAccountClosureReceiptCategoryIds(row.restrictedCategoryIds),
     };
   }
+
+  async setNotificationStatus(
+    requestId: number,
+    kind: 'completion',
+    status: 'accepted' | 'failed',
+  ): Promise<ClosureReceiptRecord> {
+    await this.db
+      .update(accountClosureReceipts)
+      .set({ notificationStatus: status })
+      .where(
+        and(
+          eq(accountClosureReceipts.requestId, requestId),
+          eq(accountClosureReceipts.kind, kind),
+          status === 'accepted'
+            ? sql`${accountClosureReceipts.notificationStatus} IN ('pending', 'failed')`
+            : sql`${accountClosureReceipts.notificationStatus} <> 'accepted'`,
+        ),
+      );
+    const persisted = await this.find(requestId, kind);
+    if (!persisted) throw new Error('Account closure receipt persistence failed');
+    return persisted;
+  }
 }
 
 export function createDatabaseReceiptService(db: DB): AccountClosureReceiptService {
@@ -232,4 +285,11 @@ function assertReceiptIdentity(
   if (row.requestId !== requestId || row.userId !== userId || row.kind !== kind) {
     throw new Error('Account closure receipt invariant failed');
   }
+}
+
+function sameCategorySet(
+  left: readonly AccountClosureCategoryId[],
+  right: readonly AccountClosureCategoryId[],
+): boolean {
+  return left.length === right.length && left.every((categoryId) => right.includes(categoryId));
 }

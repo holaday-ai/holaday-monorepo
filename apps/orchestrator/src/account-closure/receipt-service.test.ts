@@ -22,6 +22,18 @@ class MemoryReceiptStore implements ClosureReceiptStore {
     return structuredClone(this.rows.get(`${requestId}:${kind}`) ?? null);
   }
 
+  async setNotificationStatus(
+    requestId: number,
+    kind: 'completion',
+    status: 'accepted' | 'failed',
+  ) {
+    const key = `${requestId}:${kind}`;
+    const current = this.rows.get(key);
+    if (!current) throw new Error('missing receipt');
+    if (current.notificationStatus !== 'accepted') current.notificationStatus = status;
+    return structuredClone(current);
+  }
+
   count() {
     return this.rows.size;
   }
@@ -118,6 +130,15 @@ describe('account closure receipt service', () => {
     ]);
     expect(first.receiptNumber).toBe(second.receiptNumber);
     expect(store.count()).toBe(1);
+    expect(
+      (await service.setCompletionNotificationStatus(99, 77, 'accepted')).notificationStatus,
+    ).toBe('accepted');
+    expect(
+      (await service.setCompletionNotificationStatus(99, 77, 'failed')).notificationStatus,
+    ).toBe('accepted');
+    await expect(
+      service.createCompletionReceipt({ ...input, subjectDigest: 'b'.repeat(64) }),
+    ).rejects.toThrow('Account closure completion receipt invariant failed');
     await expect(
       service.createCompletionReceipt({
         ...input,

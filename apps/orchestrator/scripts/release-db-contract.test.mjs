@@ -130,6 +130,30 @@ describe('release database index contract', () => {
     },
     {
       table_name: 'account_closure_requests',
+      index_name: 'ix_account_closure_requests_completion_due',
+      non_unique: 1,
+      seq_in_index: 1,
+      column_name: 'status',
+      sub_part: null,
+    },
+    {
+      table_name: 'account_closure_requests',
+      index_name: 'ix_account_closure_requests_completion_due',
+      non_unique: 1,
+      seq_in_index: 2,
+      column_name: 'completion_next_attempt_at',
+      sub_part: null,
+    },
+    {
+      table_name: 'account_closure_requests',
+      index_name: 'ix_account_closure_requests_completion_due',
+      non_unique: 1,
+      seq_in_index: 3,
+      column_name: 'completion_lease_until',
+      sub_part: null,
+    },
+    {
+      table_name: 'account_closure_requests',
       index_name: 'ix_account_closure_requests_status_grace',
       non_unique: 1,
       seq_in_index: 2,
@@ -369,9 +393,7 @@ describe('release database index contract', () => {
     assert.deepEqual(
       findMissingRequiredIndexes(
         validRows.map((row) =>
-          row.index_name === 'uk_energy_daily_visitors_day_hash'
-            ? { ...row, non_unique: 1 }
-            : row,
+          row.index_name === 'uk_energy_daily_visitors_day_hash' ? { ...row, non_unique: 1 } : row,
         ),
       ),
       [
@@ -396,7 +418,10 @@ describe('release database index contract', () => {
       findMissingRequiredIndexes(
         validRows.filter(
           (row) =>
-            !(row.index_name === 'uk_payments_provider_order' && row.column_name === 'provider_order_id'),
+            !(
+              row.index_name === 'uk_payments_provider_order' &&
+              row.column_name === 'provider_order_id'
+            ),
         ),
       ),
       ['payments.uk_payments_provider_order UNIQUE(provider, provider_order_id)'],

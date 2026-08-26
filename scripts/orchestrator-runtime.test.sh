@@ -5,6 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUNTIME_SCRIPT="$SCRIPT_DIR/orchestrator-runtime.sh"
 START_SCRIPT="$SCRIPT_DIR/start-orchestrator-production.sh"
+WORKER_START_SCRIPT="$SCRIPT_DIR/start-account-closure-worker-production.sh"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -47,4 +48,31 @@ grep -Fq 'ORCHESTRATOR_START_SCRIPT:-' "$RUNTIME_SCRIPT" \
 grep -Fq 'ORCHESTRATOR_REPO_ROOT:-' "$START_SCRIPT" \
   || fail "staged entrypoint must accept the live repository root"
 
-echo "PASS: orchestrator runtime keeps one root-owned PM2 daemon and a non-root application child"
+# Closure deletion is a separate, portless, single-concurrency process. It
+# shares uid 998 with the application but has its own memory ceiling and is
+# removed from PM2 whenever the dark-launch flag is false.
+grep -Fq 'ORCHESTRATOR_EXPECTED_UID:-998' "$RUNTIME_SCRIPT" \
+  || fail "runtime must enforce the reviewed production uid 998"
+grep -Fq 'holaday-account-closure-worker' "$RUNTIME_SCRIPT" \
+  || fail "runtime must use a separate closure worker process"
+grep -Fq 'pm2 delete "$WORKER_APP_NAME"' "$RUNTIME_SCRIPT" \
+  || fail "disabled deployments must delete a stale worker entry"
+grep -Fq '[[ "$WORKER_ENABLED" == "true" ]]' "$RUNTIME_SCRIPT" \
+  || fail "worker startup must remain behind its independent flag"
+grep -Fq -- '--instances 1' "$RUNTIME_SCRIPT" \
+  || fail "PM2 must run exactly one worker instance"
+grep -Fq -- '--max-memory-restart 512M' "$RUNTIME_SCRIPT" \
+  || fail "worker must retain the 512M PM2 ceiling"
+grep -Fq -- '--uid "$RUN_UID"' "$RUNTIME_SCRIPT" \
+  || fail "worker and application must share the dedicated uid"
+grep -Fq 'BUILT_ENTRY="$ORCHESTRATOR_DIR/dist/account-closure/worker-entry.js"' "$WORKER_START_SCRIPT" \
+  || fail "worker start helper must target the built portless worker entry"
+grep -Fq 'exec "$NODE_BIN" "$BUILT_ENTRY"' "$WORKER_START_SCRIPT" \
+  || fail "worker must remain the PM2-owned built Node process"
+grep -Eq '^unset PM2_HOME$' "$WORKER_START_SCRIPT" \
+  || fail "worker child must not inherit root PM2 state"
+if grep -Eq 'HTTP_PORT|WS_PORT|listen\(' "$WORKER_START_SCRIPT"; then
+  fail "worker start helper must not open or configure a public port"
+fi
+
+echo "PASS: orchestrator runtime keeps one application and one bounded portless closure worker"

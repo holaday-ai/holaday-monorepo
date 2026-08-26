@@ -219,6 +219,10 @@ export async function finalizeUserTombstone(input: {
         activeUserId: null,
         status: 'completed',
         completedAt: receipt.completedAt,
+        completionLeaseOwner: null,
+        completionLeaseUntil: null,
+        completionNextAttemptAt: null,
+        completionLastErrorCode: null,
       })
       .where(
         and(

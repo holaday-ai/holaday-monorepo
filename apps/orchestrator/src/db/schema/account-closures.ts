@@ -42,6 +42,14 @@ export const accountClosureRequests = mysqlTable(
     requestedAt: datetime('requested_at', { mode: 'date', fsp: 3 }).notNull(),
     graceEndsAt: datetime('grace_ends_at', { mode: 'date', fsp: 3 }).notNull(),
     processingStartedAt: datetime('processing_started_at', { mode: 'date', fsp: 3 }),
+    completionAttemptCount: int('completion_attempt_count').notNull().default(0),
+    completionNextAttemptAt: datetime('completion_next_attempt_at', { mode: 'date', fsp: 3 }),
+    completionLeaseOwner: varchar('completion_lease_owner', { length: 64 }),
+    completionLeaseUntil: datetime('completion_lease_until', { mode: 'date', fsp: 3 }),
+    completionLastErrorCode: mysqlEnum(
+      'completion_last_error_code',
+      ACCOUNT_CLOSURE_STEP_ERROR_CODES,
+    ),
     completedAt: datetime('completed_at', { mode: 'date', fsp: 3 }),
     cancelledAt: datetime('cancelled_at', { mode: 'date', fsp: 3 }),
     createdAt: datetime('created_at', { mode: 'date', fsp: 3 })
@@ -56,6 +64,11 @@ export const accountClosureRequests = mysqlTable(
     uniqueIndex('uk_account_closure_requests_external_id').on(table.externalId),
     uniqueIndex('uk_account_closure_requests_active_user').on(table.activeUserId),
     index('ix_account_closure_requests_status_grace').on(table.status, table.graceEndsAt),
+    index('ix_account_closure_requests_completion_due').on(
+      table.status,
+      table.completionNextAttemptAt,
+      table.completionLeaseUntil,
+    ),
     check(
       'ck_account_closure_requests_active_user',
       sql`(${table.status} IN ('pending_grace', 'processing', 'needs_attention') AND ${table.activeUserId} IS NOT NULL AND ${table.activeUserId} = ${table.userId}) OR (${table.status} IN ('cancelled', 'completed') AND ${table.activeUserId} IS NULL)`,

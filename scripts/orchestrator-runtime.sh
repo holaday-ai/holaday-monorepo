@@ -8,12 +8,16 @@ set -euo pipefail
 ACTION="${1:-restart}"
 REPO_ROOT="${2:-/opt/holaday-monorepo}"
 APP_NAME="${ORCHESTRATOR_PM2_NAME:-holaday-orchestrator}"
+WORKER_APP_NAME="${ACCOUNT_CLOSURE_WORKER_PM2_NAME:-holaday-account-closure-worker}"
 RUN_USER="${ORCHESTRATOR_RUN_USER:-holaday}"
 RUN_GROUP="${ORCHESTRATOR_RUN_GROUP:-$RUN_USER}"
 NODE_BIN="${ORCHESTRATOR_NODE_BIN:-/opt/node22/bin/node}"
 BROWSER_DIR="${BROWSER_POOL_DIR:-/var/lib/holaday-browsers}"
 PM2_HOME="${ORCHESTRATOR_PM2_HOME:-/root/.pm2}"
 START_SCRIPT="${ORCHESTRATOR_START_SCRIPT:-$REPO_ROOT/scripts/start-orchestrator-production.sh}"
+WORKER_START_SCRIPT="${ACCOUNT_CLOSURE_WORKER_START_SCRIPT:-$REPO_ROOT/scripts/start-account-closure-worker-production.sh}"
+WORKER_ENABLED="${ACCOUNT_CLOSURE_WORKER_ENABLED:-false}"
+EXPECTED_RUN_UID="${ORCHESTRATOR_EXPECTED_UID:-998}"
 ORCHESTRATOR_DIR="$REPO_ROOT/apps/orchestrator"
 HTTP_PORT="${ORCHESTRATOR_HTTP_PORT:-4001}"
 WS_PORT="${ORCHESTRATOR_WS_PORT:-4002}"
@@ -32,9 +36,17 @@ die() {
 [[ "$HTTP_PORT" =~ ^[1-9][0-9]{0,4}$ ]] || die "invalid HTTP port"
 [[ "$WS_PORT" =~ ^[1-9][0-9]{0,4}$ ]] || die "invalid WebSocket port"
 [[ "$HTTP_PORT" != "$WS_PORT" ]] || die "HTTP and WebSocket ports must differ"
+[[ "$EXPECTED_RUN_UID" =~ ^[1-9][0-9]*$ ]] || die "invalid expected runtime uid"
+[[ "$WORKER_ENABLED" == "true" || "$WORKER_ENABLED" == "false" ]] \
+  || die "ACCOUNT_CLOSURE_WORKER_ENABLED must be true or false"
 [[ -x "$NODE_BIN" ]] || die "node interpreter not executable: $NODE_BIN"
 [[ -f "$REPO_ROOT/apps/orchestrator/dist/index.js" ]] || die "orchestrator build missing"
 [[ -x "$START_SCRIPT" ]] || die "production start script missing or not executable"
+if [[ "$WORKER_ENABLED" == "true" ]]; then
+  [[ -x "$WORKER_START_SCRIPT" ]] || die "closure worker start script missing or not executable"
+  [[ -f "$REPO_ROOT/apps/orchestrator/dist/account-closure/worker-entry.js" ]] \
+    || die "built closure worker entrypoint missing"
+fi
 command -v ss >/dev/null 2>&1 || die "ss is required for listener ownership checks"
 
 listener_pids() {
@@ -142,6 +154,7 @@ fi
 if ! id "$RUN_USER" >/dev/null 2>&1; then
   useradd \
     --system \
+    --uid "$EXPECTED_RUN_UID" \
     --gid "$RUN_GROUP" \
     --home-dir "/var/lib/$RUN_USER" \
     --create-home \
@@ -154,6 +167,8 @@ RUN_GID="$(id -g "$RUN_USER")"
 EXPECTED_GID="$(getent group "$RUN_GROUP" | cut -d: -f3)"
 RUN_HOME="$(getent passwd "$RUN_USER" | cut -d: -f6)"
 [[ "$RUN_GID" == "$EXPECTED_GID" ]] || die "runtime user primary group does not match $RUN_GROUP"
+[[ "$RUN_UID" == "$EXPECTED_RUN_UID" ]] \
+  || die "runtime uid mismatch: expected $EXPECTED_RUN_UID, got $RUN_UID"
 [[ -n "$RUN_HOME" ]] || die "runtime user has no home directory"
 
 install -d -o "$RUN_USER" -g "$RUN_GROUP" -m 0750 "$RUN_HOME"
@@ -175,6 +190,7 @@ export ORCHESTRATOR_REPO_ROOT="$REPO_ROOT"
 # root identity, while `--uid/--gid` on start records the intended runtime
 # identity in PM2's process definition and survives `pm2 save`.
 pm2 delete "$APP_NAME" >/dev/null 2>&1 || true
+pm2 delete "$WORKER_APP_NAME" >/dev/null 2>&1 || true
 stop_verified_stale_orchestrators
 pm2 start "$START_SCRIPT" \
   --name "$APP_NAME" \
@@ -183,11 +199,27 @@ pm2 start "$START_SCRIPT" \
   --uid "$RUN_UID" \
   --gid "$RUN_GID" \
   --update-env >/dev/null
+if [[ "$WORKER_ENABLED" == "true" ]]; then
+  pm2 start "$WORKER_START_SCRIPT" \
+    --name "$WORKER_APP_NAME" \
+    --interpreter /usr/bin/bash \
+    --cwd "$REPO_ROOT/apps/orchestrator" \
+    --instances 1 \
+    --max-memory-restart 512M \
+    --uid "$RUN_UID" \
+    --gid "$RUN_GID" \
+    --update-env >/dev/null
+fi
 pm2 save --force >/dev/null
 
 # PM2 creates service logs with the daemon's default umask. Keep request and
 # error logs readable only by root even after a fresh entry is created.
 chmod 0600 "$PM2_HOME/logs/$APP_NAME-out.log" "$PM2_HOME/logs/$APP_NAME-error.log"
+if [[ "$WORKER_ENABLED" == "true" ]]; then
+  chmod 0600 \
+    "$PM2_HOME/logs/$WORKER_APP_NAME-out.log" \
+    "$PM2_HOME/logs/$WORKER_APP_NAME-error.log"
+fi
 
 PID=""
 for _ in $(seq 1 20); do
@@ -203,5 +235,17 @@ ACTUAL_UID="$(ps -o uid= -p "$PID" | tr -d '[:space:]')"
 [[ "$ACTUAL_UID" == "$RUN_UID" ]] || die "runtime uid mismatch: expected $RUN_UID, got ${ACTUAL_UID:-missing}"
 verify_single_listener_owner "$PID" || die "orchestrator ports are not owned by the PM2 process"
 
+WORKER_PID="disabled"
+if [[ "$WORKER_ENABLED" == "true" ]]; then
+  mapfile -t WORKER_PIDS < <(pm2 pid "$WORKER_APP_NAME" | tr -d '[:space:]' | grep -E '^[1-9][0-9]*$' || true)
+  ((${#WORKER_PIDS[@]} == 1)) || die "PM2 must publish exactly one closure worker pid"
+  WORKER_PID="${WORKER_PIDS[0]}"
+  kill -0 "$WORKER_PID" 2>/dev/null || die "closure worker process is not alive"
+  WORKER_UID="$(ps -o uid= -p "$WORKER_PID" | tr -d '[:space:]')"
+  [[ "$WORKER_UID" == "$RUN_UID" ]] || die "closure worker uid mismatch"
+fi
+
 printf 'ORCHESTRATOR_RUNTIME user=%s uid=%s gid=%s pid=%s vnc=%s browser_dir=%s\n' \
   "$RUN_USER" "$RUN_UID" "$RUN_GID" "$PID" "$BROWSER_VNC_WS_ENABLED" "$BROWSER_DIR"
+printf 'ACCOUNT_CLOSURE_WORKER enabled=%s pid=%s max_memory=512M instances=1\n' \
+  "$WORKER_ENABLED" "$WORKER_PID"

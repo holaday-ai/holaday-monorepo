@@ -159,6 +159,7 @@ describe('private email delivery', () => {
         to: 'closure-owner@example.test',
         subject: 'Closure verification',
         text: 'Private code 482901',
+        idempotencyKey: 'ACR-random-notification-id',
       }),
     ).resolves.toBeUndefined();
 
@@ -170,6 +171,7 @@ describe('private email delivery', () => {
         headers: {
           'content-type': 'application/json',
           authorization: 'Bearer private-resend-key',
+          'idempotency-key': 'ACR-random-notification-id',
         },
       }),
     );

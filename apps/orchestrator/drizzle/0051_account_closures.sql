@@ -16,6 +16,11 @@ CREATE TABLE `account_closure_requests` (
   `requested_at` DATETIME(3) NOT NULL,
   `grace_ends_at` DATETIME(3) NOT NULL,
   `processing_started_at` DATETIME(3) NULL,
+  `completion_attempt_count` INT NOT NULL DEFAULT 0,
+  `completion_next_attempt_at` DATETIME(3) NULL,
+  `completion_lease_owner` VARCHAR(64) NULL,
+  `completion_lease_until` DATETIME(3) NULL,
+  `completion_last_error_code` ENUM('provider_unavailable', 'provider_rejected', 'storage_unavailable', 'database_unavailable', 'handler_missing', 'configuration', 'invariant_violation') NULL,
   `completed_at` DATETIME(3) NULL,
   `cancelled_at` DATETIME(3) NULL,
   `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
@@ -24,6 +29,7 @@ CREATE TABLE `account_closure_requests` (
   UNIQUE KEY `uk_account_closure_requests_external_id` (`external_id`),
   UNIQUE KEY `uk_account_closure_requests_active_user` (`active_user_id`),
   KEY `ix_account_closure_requests_status_grace` (`status`, `grace_ends_at`),
+  KEY `ix_account_closure_requests_completion_due` (`status`, `completion_next_attempt_at`, `completion_lease_until`),
   CONSTRAINT `ck_account_closure_requests_active_user`
     CHECK (
       (`status` IN ('pending_grace', 'processing', 'needs_attention') AND `active_user_id` IS NOT NULL AND `active_user_id` = `user_id`)

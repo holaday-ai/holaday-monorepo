@@ -61,6 +61,8 @@ export interface EmailMessage {
   to: string;
   subject: string;
   text: string;
+  /** Optional provider idempotency token; never derived from recipient data. */
+  idempotencyKey?: string;
 }
 
 export interface EmailSender {
@@ -115,7 +117,7 @@ export const privateResendSender: PrivateEmailSender = {
     return Boolean(process.env.RESEND_API_KEY);
   },
 
-  async send({ to, subject, text }) {
+  async send({ to, subject, text, idempotencyKey }) {
     const key = process.env.RESEND_API_KEY;
     if (!key) throw new Error('Private email delivery unavailable');
     let response: Response;
@@ -125,6 +127,7 @@ export const privateResendSender: PrivateEmailSender = {
         headers: {
           'content-type': 'application/json',
           authorization: `Bearer ${key}`,
+          ...(idempotencyKey ? { 'idempotency-key': idempotencyKey } : {}),
         },
         body: JSON.stringify({
           from: process.env.RESEND_FROM_EMAIL ?? 'HOLA DAY <noreply@holaday.ai>',
