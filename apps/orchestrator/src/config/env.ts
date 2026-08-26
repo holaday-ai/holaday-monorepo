@@ -25,7 +25,7 @@ loadDotenvAllowingEmpty(resolve(repoRoot, '.env'));
 loadDotenvAllowingEmpty(resolve(repoRoot, '.env.local'));
 loadDotenvAllowingEmpty(resolve(process.cwd(), '.env.local'));
 
-export const envSchema = z.object({
+const baseEnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
   HTTP_PORT: z.coerce.number().int().positive().default(3001),
@@ -56,6 +56,28 @@ export const envSchema = z.object({
   ENERGY_ANALYTICS_VISITOR_RETENTION_DAYS: z.coerce.number().int().min(1).max(30).default(30),
   ENERGY_ANALYTICS_METRIC_RETENTION_DAYS: z.coerce.number().int().min(1).max(400).default(400),
   ENERGY_ANALYTICS_RECEIPT_RETENTION_HOURS: z.coerce.number().int().min(1).max(48).default(48),
+
+  /**
+   * Self-service account closure ships dark. New applications require both
+   * the master flag and an exact external-user-id allowlist entry. The worker
+   * has a separate flag so schema/API rollout never starts destructive work.
+   */
+  ACCOUNT_CLOSURE_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  ACCOUNT_CLOSURE_WORKER_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  ACCOUNT_CLOSURE_ALLOWLIST: z.string().default(''),
+  ACCOUNT_CLOSURE_HMAC_SECRET: z
+    .string()
+    .refine(
+      (value) => value === '' || value.length >= 32,
+      'ACCOUNT_CLOSURE_HMAC_SECRET must be empty or at least 32 chars',
+    )
+    .default(''),
 
   ANTHROPIC_API_KEY: z.string().optional().default(''),
 
@@ -424,6 +446,19 @@ export const envSchema = z.object({
     .enum(['true', 'false'])
     .default('false')
     .transform((v) => v === 'true'),
+});
+
+export const envSchema = baseEnvSchema.superRefine((value, ctx) => {
+  if (
+    (value.ACCOUNT_CLOSURE_ENABLED || value.ACCOUNT_CLOSURE_WORKER_ENABLED) &&
+    value.ACCOUNT_CLOSURE_HMAC_SECRET.trim().length < 32
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['ACCOUNT_CLOSURE_HMAC_SECRET'],
+      message: 'ACCOUNT_CLOSURE_HMAC_SECRET must be at least 32 chars when closure is enabled',
+    });
+  }
 });
 
 export type Env = z.infer<typeof envSchema>;
