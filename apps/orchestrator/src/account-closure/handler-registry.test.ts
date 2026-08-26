@@ -30,14 +30,13 @@ describe('account closure handler registry', () => {
     );
   });
 
-  it('registers the Task 7 media handler while Task 8 categories remain fail-closed', async () => {
+  it('registers the real Task 7 and Task 8 handlers', () => {
     expect(getAccountClosureHandler('media_assets')).toMatchObject({
       categoryId: 'media_assets',
       version: 1,
     });
-    for (const categoryId of ['payments_entitlements', 'partner_kyc_ledger']) {
-      const handler = getAccountClosureHandler(categoryId);
-      await expect(handler.run({} as never)).rejects.toMatchObject({ code: 'HANDLER_DEFERRED' });
+    for (const categoryId of ['payments_entitlements', 'partner_kyc_ledger'] as const) {
+      expect(getAccountClosureHandler(categoryId)).toMatchObject({ categoryId, version: 1 });
     }
   });
 });

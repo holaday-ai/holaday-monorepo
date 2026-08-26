@@ -1,5 +1,5 @@
 import { DATA_CATEGORY_IDS, type DataCategoryId } from '../data-governance/types.js';
-import { type AccountClosureHandler, createDeferredClosureHandler } from './handler-contract.js';
+import type { AccountClosureHandler } from './handler-contract.js';
 import { accountSecurityClosureHandler } from './handlers/account-security.js';
 import { analyticsLogsClosureHandler } from './handlers/analytics-logs.js';
 import { crossTaskMemoryClosureHandler } from './handlers/cross-task-memory.js';
@@ -9,6 +9,8 @@ import { extensionSiteStatsClosureHandler } from './handlers/extension-site-stat
 import { externalNotificationsClosureHandler } from './handlers/external-notifications.js';
 import { feedbackSupportClosureHandler } from './handlers/feedback-support.js';
 import { mediaAssetsClosureHandler } from './handlers/media-assets.js';
+import { partnerKycLedgerClosureHandler } from './handlers/partner-kyc-ledger.js';
+import { paymentsEntitlementsClosureHandler } from './handlers/payments-entitlements.js';
 import { stockPreferenceProfileClosureHandler } from './handlers/stock-preference-profile.js';
 import { taskExecutionClosureHandler } from './handlers/task-execution.js';
 
@@ -22,8 +24,8 @@ export const ACCOUNT_CLOSURE_HANDLERS: readonly AccountClosureHandler[] = [
   externalNotificationsClosureHandler,
   extensionSiteStatsClosureHandler,
   extensionLoginCookiesClosureHandler,
-  createDeferredClosureHandler('payments_entitlements'),
-  createDeferredClosureHandler('partner_kyc_ledger'),
+  paymentsEntitlementsClosureHandler,
+  partnerKycLedgerClosureHandler,
   mediaAssetsClosureHandler,
   analyticsLogsClosureHandler,
 ];
