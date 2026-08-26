@@ -22,10 +22,10 @@ import {
  * - `plan` kept as VARCHAR(32) (not ENUM) so plans can evolve without DDL churn.
  * - `password_hash` is empty string for OAuth-only users — bcrypt(``) never
  *   matches anything, so they can't password-login by accident.
- * - `status` is one of `active`, `suspended`, `closure_pending`,
- *   `closure_processing`, or `closed`. Closure preserves a non-login tombstone
- *   user instead of deleting the primary key, so restricted financial and audit
- *   references remain valid.
+ * - `status` is one of `active`, the reserved non-login `system` state,
+ *   `suspended`, `closure_pending`, `closure_processing`, or `closed`. Closure
+ *   preserves a non-login tombstone user instead of deleting the primary key,
+ *   so restricted financial and audit references remain valid.
  */
 export const users = mysqlTable(
   'users',
@@ -138,7 +138,10 @@ export const users = mysqlTable(
     index('ix_users_role').on(t.role),
     check(
       'ck_users_status_allowed',
-      sql`${t.status} IN (${sql.join(ACCOUNT_CLOSURE_USER_STATUSES.map((status) => sql`${status}`), sql`, `)})`,
+      sql`${t.status} IN (${sql.join(
+        ACCOUNT_CLOSURE_USER_STATUSES.map((status) => sql`${status}`),
+        sql`, `,
+      )})`,
     ),
   ],
 );

@@ -4,7 +4,7 @@
 ALTER TABLE `users`
   MODIFY COLUMN `status` VARCHAR(20) NOT NULL DEFAULT 'active',
   ADD CONSTRAINT `ck_users_status_allowed`
-    CHECK (`status` IN ('active', 'suspended', 'closure_pending', 'closure_processing', 'closed'));
+    CHECK (`status` IN ('active', 'system', 'suspended', 'closure_pending', 'closure_processing', 'closed'));
 --> statement-breakpoint
 CREATE TABLE `account_closure_requests` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,

@@ -2,6 +2,7 @@ import { DATA_CATEGORY_IDS, type DataCategoryId } from '../data-governance/types
 
 export const ACCOUNT_CLOSURE_USER_STATUSES = [
   'active',
+  'system',
   'suspended',
   'closure_pending',
   'closure_processing',

@@ -41,6 +41,18 @@ describe('numbered migration filename contract', () => {
     assert.deepEqual(findNonAdditiveMigrationStatements(statements), []);
   });
 
+  it('preserves the existing non-login system principal during closure migration', () => {
+    const migration = readFileSync(
+      new URL('../drizzle/0051_account_closures.sql', import.meta.url),
+      'utf8',
+    );
+
+    assert.match(
+      migration,
+      /CHECK \(`status` IN \('active', 'system', 'suspended', 'closure_pending', 'closure_processing', 'closed'\)\)/,
+    );
+  });
+
   it('requires migrations 0051 and 0052 before application rollout', () => {
     assert.throws(
       () => assertDatabaseReadyForAppRollout(['0050_user_mfa.sql']),
