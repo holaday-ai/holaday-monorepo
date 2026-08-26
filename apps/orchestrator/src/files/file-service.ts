@@ -27,7 +27,7 @@ import { readAffectedRows } from '../db/mysql-result.js';
 import { type TaskFile, taskFiles } from '../db/schema/task-files.js';
 import { tasks } from '../db/schema/tasks.js';
 import type { StorageProvider } from './storage-provider.js';
-import { getSharedStorageProvider } from './storage-provider.js';
+import { deleteStorageObjectForClosure, getSharedStorageProvider } from './storage-provider.js';
 
 export type FileKind = 'input' | 'output';
 
@@ -356,6 +356,7 @@ export interface UserFileClosureStore {
 export interface DeleteUserFilesPageDependencies {
   store: UserFileClosureStore;
   storage: Pick<StorageProvider, 'delete'>;
+  deleteTimeoutMs?: number;
 }
 
 /**
@@ -417,7 +418,11 @@ export async function deleteUserFilesPage(
 
   const page = selected.slice(0, input.limit);
   for (const row of page) {
-    await dependencies.storage.delete(row.storagePath);
+    await deleteStorageObjectForClosure(
+      dependencies.storage,
+      row.storagePath,
+      dependencies.deleteTimeoutMs,
+    );
     const deleted = await dependencies.store.deleteOwnedRow({
       id: row.id,
       userIdInternal: input.userIdInternal,

@@ -13,6 +13,7 @@ import {
   createDbUserFileClosureStore,
   deleteUserFilesPage,
 } from '../../files/file-service.js';
+import { deleteStorageObjectForClosure } from '../../files/storage-provider.js';
 import {
   type AccountClosureHandler,
   type ClosureHandlerContext,
@@ -228,7 +229,7 @@ export async function deleteUserEvidencePage(
       continue;
     }
 
-    await context.storage.delete(row.r2Key);
+    await deleteStorageObjectForClosure(context.storage, row.r2Key);
     const result = await context.db.execute(sql`
       DELETE artifact
       FROM evidence_artifacts AS artifact

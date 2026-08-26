@@ -109,7 +109,6 @@ export class AccountClosureReceiptService {
     subjectDigest: string;
     completedCategoryIds: readonly string[];
     restrictedCategoryIds: readonly string[];
-    completedAt: Date;
   }): Promise<CompletionClosureReceipt> {
     if (!/^[a-f0-9]{64}$/i.test(input.subjectDigest)) {
       throw new Error('Invalid account closure subject digest');
@@ -130,7 +129,7 @@ export class AccountClosureReceiptService {
       restrictedCategoryIds,
       notificationStatus: 'pending',
       issuedAt: this.now(),
-      completedAt: input.completedAt,
+      completedAt: null,
     });
     assertReceiptIdentity(row, input.requestId, input.userId, 'completion');
     if (

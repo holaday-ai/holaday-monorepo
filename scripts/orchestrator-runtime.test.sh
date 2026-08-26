@@ -63,6 +63,8 @@ grep -Fq -- '--instances 1' "$RUNTIME_SCRIPT" \
   || fail "PM2 must run exactly one worker instance"
 grep -Fq -- '--max-memory-restart 512M' "$RUNTIME_SCRIPT" \
   || fail "worker must retain the 512M PM2 ceiling"
+grep -Fq -- '--kill-timeout 660000' "$RUNTIME_SCRIPT" \
+  || fail "PM2 must allow the reviewed 600s page bound plus 60s checkpoint drain margin"
 grep -Fq -- '--uid "$RUN_UID"' "$RUNTIME_SCRIPT" \
   || fail "worker and application must share the dedicated uid"
 grep -Fq 'BUILT_ENTRY="$ORCHESTRATOR_DIR/dist/account-closure/worker-entry.js"' "$WORKER_START_SCRIPT" \

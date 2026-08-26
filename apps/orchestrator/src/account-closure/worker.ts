@@ -5,7 +5,10 @@ import { DATA_CATEGORY_IDS, type DataCategoryId } from '../data-governance/types
 import type { DB } from '../db/client.js';
 import { accountClosureRequests, accountClosureSteps } from '../db/schema/account-closures.js';
 import { users } from '../db/schema/users.js';
-import type { StorageProvider } from '../files/storage-provider.js';
+import {
+  ACCOUNT_CLOSURE_STORAGE_DELETE_TIMEOUT_MS,
+  type StorageProvider,
+} from '../files/storage-provider.js';
 import { type AccountClosureHandler, ClosureHandlerError } from './handler-contract.js';
 import { createDatabaseReceiptService } from './receipt-service.js';
 import {
@@ -30,6 +33,14 @@ export type WorkerTickResult = 'disabled' | 'idle' | 'progress' | 'attention' | 
 export const CLOSURE_RETRY_DELAYS_MS = [60_000, 300_000, 1_800_000, 7_200_000, 21_600_000] as const;
 export const ACCOUNT_CLOSURE_ATTENTION_RETRY_MS = 24 * 60 * 60 * 1_000;
 export const ACCOUNT_CLOSURE_MEMORY_GUARD_BYTES = 480 * 1024 * 1024;
+/**
+ * A storage page returns immediately after at most 100 sequential deletes.
+ * 100 × 5s = 500s; the remaining 100s is reserved for bounded queries and
+ * the durable checkpoint. Voice deletion and completion notification run on
+ * mutually exclusive ticks and have lower provider bounds.
+ */
+export const ACCOUNT_CLOSURE_MAX_PAGE_DURATION_MS =
+  100 * ACCOUNT_CLOSURE_STORAGE_DELETE_TIMEOUT_MS + 100_000;
 const LEASE_HEARTBEAT_MS = 30_000;
 
 export interface AccountClosureCompletionNotification {
@@ -61,6 +72,56 @@ export async function runAccountClosureWorkerLoop(input: {
   while (!input.shouldStop()) {
     await input.tick();
     if (!input.shouldStop()) await input.wait();
+  }
+}
+
+export interface AccountClosureWorkerSignalSource {
+  once(event: 'SIGTERM' | 'SIGINT', listener: () => void): unknown;
+  removeListener(event: 'SIGTERM' | 'SIGINT', listener: () => void): unknown;
+}
+
+/** Installs the production signal boundary and drains the current durable page. */
+export async function runAccountClosureWorkerRuntime(input: {
+  tick: () => Promise<WorkerTickResult>;
+  signals: AccountClosureWorkerSignalSource;
+  pollMs: number;
+  onSignal?: (signal: 'SIGTERM' | 'SIGINT') => void;
+}): Promise<void> {
+  if (!Number.isSafeInteger(input.pollMs) || input.pollMs <= 0) {
+    throw new Error('Invalid account closure worker poll interval');
+  }
+  let stopping = false;
+  const sleeper: { wake: (() => void) | null } = { wake: null };
+  const listeners = new Map<'SIGTERM' | 'SIGINT', () => void>();
+  for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+    const listener = () => {
+      stopping = true;
+      sleeper.wake?.();
+      input.onSignal?.(signal);
+    };
+    listeners.set(signal, listener);
+    input.signals.once(signal, listener);
+  }
+  try {
+    await runAccountClosureWorkerLoop({
+      tick: input.tick,
+      shouldStop: () => stopping,
+      wait: () =>
+        new Promise<void>((resolve) => {
+          const finish = () => {
+            clearTimeout(timer);
+            if (sleeper.wake === finish) sleeper.wake = null;
+            resolve();
+          };
+          const timer = setTimeout(finish, input.pollMs);
+          sleeper.wake = finish;
+        }),
+    });
+  } finally {
+    sleeper.wake?.();
+    for (const [signal, listener] of listeners) {
+      input.signals.removeListener(signal, listener);
+    }
   }
 }
 
@@ -197,7 +258,6 @@ async function completeClaim(
     subjectDigest: context.subjectDigest,
     completedCategoryIds: DATA_CATEGORY_IDS,
     restrictedCategoryIds: context.restrictedCategoryIds,
-    completedAt: input.now,
   });
   let receipt = await receipts.getCompletionReceiptRecord(input.requestId, context.userId);
   if (!receipt) throw new WorkerOperationError('database_unavailable');
@@ -230,12 +290,14 @@ async function completeClaim(
     }
   }
   if (receipt.notificationStatus !== 'accepted') return 'retryable';
-  await assertCompletionLease(deps.db, input.requestId, input.leaseOwner, deps.now());
+  const completedAt = deps.now();
   await finalizeUserTombstone({
     db: deps.db,
     requestId: input.requestId,
     userId: context.userId,
     hmacSecret: deps.hmacSecret,
+    expectedLeaseOwner: input.leaseOwner,
+    now: completedAt,
   });
   return 'completed';
 }
@@ -395,18 +457,6 @@ function stepLeaseInput(claim: Extract<ClaimedClosureWork, { kind: 'handler' }>)
     requestId: claim.requestId,
     leaseOwner: claim.leaseOwner,
   };
-}
-
-async function assertCompletionLease(
-  db: DB,
-  requestId: number,
-  leaseOwner: string,
-  now: Date,
-): Promise<void> {
-  const current = await db.transaction((tx) =>
-    hasCurrentCompletionLease(tx, requestId, leaseOwner, now),
-  );
-  if (!current) throw new WorkerOperationError('database_unavailable');
 }
 
 async function hasCurrentCompletionLease(

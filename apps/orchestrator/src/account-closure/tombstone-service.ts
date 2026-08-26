@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, gt, isNull, sql } from 'drizzle-orm';
 import { DATA_CATEGORY_IDS } from '../data-governance/types.js';
 import type { DB } from '../db/client.js';
 import { readAffectedRows } from '../db/mysql-result.js';
@@ -29,6 +29,8 @@ export async function finalizeUserTombstone(input: {
   requestId: number;
   userId: number;
   hmacSecret: string;
+  expectedLeaseOwner: string;
+  now: Date;
 }): Promise<void> {
   if (!Number.isSafeInteger(input.requestId) || input.requestId <= 0) {
     throw new TombstoneFinalizationError('FINALIZATION_PRECONDITION_FAILED');
@@ -39,6 +41,14 @@ export async function finalizeUserTombstone(input: {
   if (input.hmacSecret.trim().length < 32) {
     throw new TombstoneFinalizationError('INVALID_HMAC_SECRET');
   }
+  if (
+    !input.expectedLeaseOwner ||
+    input.expectedLeaseOwner.length > 64 ||
+    !(input.now instanceof Date) ||
+    !Number.isFinite(input.now.getTime())
+  ) {
+    throw new TombstoneFinalizationError('FINALIZATION_PRECONDITION_FAILED');
+  }
 
   await input.db.transaction(async (tx) => {
     const [request] = await tx
@@ -47,6 +57,8 @@ export async function finalizeUserTombstone(input: {
         userId: accountClosureRequests.userId,
         activeUserId: accountClosureRequests.activeUserId,
         status: accountClosureRequests.status,
+        completionLeaseOwner: accountClosureRequests.completionLeaseOwner,
+        completionLeaseUntil: accountClosureRequests.completionLeaseUntil,
       })
       .from(accountClosureRequests)
       .where(
@@ -57,7 +69,14 @@ export async function finalizeUserTombstone(input: {
       )
       .limit(1)
       .for('update');
-    if (!request || request.status !== 'processing' || request.activeUserId !== input.userId) {
+    if (
+      !request ||
+      request.status !== 'processing' ||
+      request.activeUserId !== input.userId ||
+      request.completionLeaseOwner !== input.expectedLeaseOwner ||
+      !request.completionLeaseUntil ||
+      request.completionLeaseUntil.getTime() <= input.now.getTime()
+    ) {
       throw new TombstoneFinalizationError('FINALIZATION_PRECONDITION_FAILED');
     }
 
@@ -113,7 +132,7 @@ export async function finalizeUserTombstone(input: {
       !receipt ||
       receipt.userId !== input.userId ||
       receipt.notificationStatus !== 'accepted' ||
-      receipt.completedAt === null ||
+      receipt.completedAt !== null ||
       !hasExactCategoryCoverage(receipt.completedCategoryIds) ||
       !hasExactRestrictedCategories(receipt.restrictedCategoryIds, restrictedStepCategories)
     ) {
@@ -178,6 +197,22 @@ export async function finalizeUserTombstone(input: {
       throw new TombstoneFinalizationError('IDENTITY_DIGEST_MISMATCH');
     }
 
+    const completeReceipt = await tx
+      .update(accountClosureReceipts)
+      .set({ completedAt: input.now })
+      .where(
+        and(
+          eq(accountClosureReceipts.requestId, input.requestId),
+          eq(accountClosureReceipts.userId, input.userId),
+          eq(accountClosureReceipts.kind, 'completion'),
+          eq(accountClosureReceipts.notificationStatus, 'accepted'),
+          isNull(accountClosureReceipts.completedAt),
+        ),
+      );
+    if (readAffectedRows(completeReceipt) !== 1) {
+      throw new TombstoneFinalizationError('FINALIZATION_PRECONDITION_FAILED');
+    }
+
     const closeUser = await tx
       .update(users)
       .set({
@@ -218,7 +253,7 @@ export async function finalizeUserTombstone(input: {
       .set({
         activeUserId: null,
         status: 'completed',
-        completedAt: receipt.completedAt,
+        completedAt: input.now,
         completionLeaseOwner: null,
         completionLeaseUntil: null,
         completionNextAttemptAt: null,
@@ -230,6 +265,8 @@ export async function finalizeUserTombstone(input: {
           eq(accountClosureRequests.userId, input.userId),
           eq(accountClosureRequests.activeUserId, input.userId),
           eq(accountClosureRequests.status, 'processing'),
+          eq(accountClosureRequests.completionLeaseOwner, input.expectedLeaseOwner),
+          gt(accountClosureRequests.completionLeaseUntil, input.now),
         ),
       );
     if (readAffectedRows(completeRequest) !== 1) {

@@ -47,6 +47,7 @@ import { finalizeUserTombstone } from './tombstone-service.js';
 
 const HMAC_SECRET = 'task8-review-hmac-secret-32-bytes-minimum';
 const OTHER_HMAC_SECRET = 'task8-review-other-secret-32-bytes-minimum';
+const FINALIZATION_LEASE_OWNER = 'task8-finalizer-worker';
 const logger = pino({ enabled: false });
 
 describe.sequential('account closure tombstone finalization', () => {
@@ -256,12 +257,7 @@ describe.sequential('account closure tombstone finalization', () => {
     });
     const oldExternalId = target.externalId;
     const oldAuthVersion = targetBeforeFinalization?.authVersion ?? 0;
-    await finalizeUserTombstone({
-      db,
-      requestId,
-      userId: target.id,
-      hmacSecret: HMAC_SECRET,
-    });
+    await finalizeRequest(requestId, target.id);
 
     const [closed] = await db.select().from(users).where(eq(users.id, target.id)).limit(1);
     expect(closed).toMatchObject({
@@ -341,39 +337,24 @@ describe.sequential('account closure tombstone finalization', () => {
       notificationStatus: 'accepted',
       incompleteCategory: 'analytics_logs',
     });
-    await expect(
-      finalizeUserTombstone({
-        db,
-        requestId: incompleteRequest,
-        userId: incomplete.id,
-        hmacSecret: HMAC_SECRET,
-      }),
-    ).rejects.toMatchObject({ code: 'FINALIZATION_PRECONDITION_FAILED' });
+    await expect(finalizeRequest(incompleteRequest, incomplete.id)).rejects.toMatchObject({
+      code: 'FINALIZATION_PRECONDITION_FAILED',
+    });
 
     const unaccepted = await createUser('unaccepted', { status: 'closure_processing' });
     const unacceptedRequest = await createFinalizationRequest(unaccepted.id, {
       notificationStatus: 'pending',
     });
-    await expect(
-      finalizeUserTombstone({
-        db,
-        requestId: unacceptedRequest,
-        userId: unaccepted.id,
-        hmacSecret: HMAC_SECRET,
-      }),
-    ).rejects.toMatchObject({ code: 'FINALIZATION_PRECONDITION_FAILED' });
+    await expect(finalizeRequest(unacceptedRequest, unaccepted.id)).rejects.toMatchObject({
+      code: 'FINALIZATION_PRECONDITION_FAILED',
+    });
 
     const mismatch = await createUser('mismatch', { status: 'closure_processing' });
     const mismatchRequest = await createFinalizationRequest(mismatch.id, {
       notificationStatus: 'accepted',
     });
     await expect(
-      finalizeUserTombstone({
-        db,
-        requestId: mismatchRequest,
-        userId: mismatch.id,
-        hmacSecret: OTHER_HMAC_SECRET,
-      }),
+      finalizeRequest(mismatchRequest, mismatch.id, OTHER_HMAC_SECRET),
     ).rejects.toMatchObject({ code: 'IDENTITY_DIGEST_MISMATCH' });
 
     const arbitraryReceipt = await createUser('arbitrary-receipt', {
@@ -384,12 +365,7 @@ describe.sequential('account closure tombstone finalization', () => {
       digestOverride: 'ab'.repeat(32),
     });
     await expect(
-      finalizeUserTombstone({
-        db,
-        requestId: arbitraryReceiptRequest,
-        userId: arbitraryReceipt.id,
-        hmacSecret: HMAC_SECRET,
-      }),
+      finalizeRequest(arbitraryReceiptRequest, arbitraryReceipt.id),
     ).rejects.toMatchObject({ code: 'IDENTITY_DIGEST_MISMATCH' });
 
     for (const subject of [incomplete, unaccepted, mismatch, arbitraryReceipt]) {
@@ -398,20 +374,43 @@ describe.sequential('account closure tombstone finalization', () => {
     }
   });
 
+  it('rejects a stale finalizer after the completion lease is taken over', async () => {
+    const subject = await createUser('lease-takeover', { status: 'closure_processing' });
+    const requestId = await createFinalizationRequest(subject.id, {
+      notificationStatus: 'accepted',
+    });
+    const authoritativeNow = new Date();
+    await db
+      .update(accountClosureRequests)
+      .set({
+        completionLeaseOwner: 'new-worker',
+        completionLeaseUntil: new Date(authoritativeNow.getTime() + 60_000),
+      })
+      .where(eq(accountClosureRequests.id, requestId));
+
+    await expect(
+      finalizeUserTombstone({
+        db,
+        requestId,
+        userId: subject.id,
+        hmacSecret: HMAC_SECRET,
+        expectedLeaseOwner: 'stale-worker',
+        now: authoritativeNow,
+      }),
+    ).rejects.toMatchObject({ code: 'FINALIZATION_PRECONDITION_FAILED' });
+    const [unchanged] = await db.select().from(users).where(eq(users.id, subject.id)).limit(1);
+    expect(unchanged).toMatchObject({ status: 'closure_processing', email: subject.email });
+  });
+
   it('requires trusted step outcomes and an exact restricted-category receipt set', async () => {
     const missingOutcome = await createUser('missing-outcome', { status: 'closure_processing' });
     const missingOutcomeRequest = await createFinalizationRequest(missingOutcome.id, {
       notificationStatus: 'accepted',
       missingOutcomeCategory: 'payments_entitlements',
     });
-    await expect(
-      finalizeUserTombstone({
-        db,
-        requestId: missingOutcomeRequest,
-        userId: missingOutcome.id,
-        hmacSecret: HMAC_SECRET,
-      }),
-    ).rejects.toMatchObject({ code: 'FINALIZATION_PRECONDITION_FAILED' });
+    await expect(finalizeRequest(missingOutcomeRequest, missingOutcome.id)).rejects.toMatchObject({
+      code: 'FINALIZATION_PRECONDITION_FAILED',
+    });
 
     const omitted = await createUser('omitted-restricted', { status: 'closure_processing' });
     await createPayment(omitted.externalId, 'omitted-restricted', 'completed');
@@ -422,28 +421,18 @@ describe.sequential('account closure tombstone finalization', () => {
       notificationStatus: 'accepted',
       restrictedCategoryIds: ['partner_kyc_ledger'],
     });
-    await expect(
-      finalizeUserTombstone({
-        db,
-        requestId: omittedRequest,
-        userId: omitted.id,
-        hmacSecret: HMAC_SECRET,
-      }),
-    ).rejects.toMatchObject({ code: 'FINALIZATION_PRECONDITION_FAILED' });
+    await expect(finalizeRequest(omittedRequest, omitted.id)).rejects.toMatchObject({
+      code: 'FINALIZATION_PRECONDITION_FAILED',
+    });
 
     const extra = await createUser('extra-restricted', { status: 'closure_processing' });
     const extraRequest = await createFinalizationRequest(extra.id, {
       notificationStatus: 'accepted',
       restrictedCategoryIds: ['payments_entitlements', 'partner_kyc_ledger', 'media_assets'],
     });
-    await expect(
-      finalizeUserTombstone({
-        db,
-        requestId: extraRequest,
-        userId: extra.id,
-        hmacSecret: HMAC_SECRET,
-      }),
-    ).rejects.toMatchObject({ code: 'FINALIZATION_PRECONDITION_FAILED' });
+    await expect(finalizeRequest(extraRequest, extra.id)).rejects.toMatchObject({
+      code: 'FINALIZATION_PRECONDITION_FAILED',
+    });
 
     const retainedMedia = await createUser('retained-media', { status: 'closure_processing' });
     const retainedMediaTaskId = await createTaskWithFile(retainedMedia.id, 'retained-media');
@@ -460,14 +449,9 @@ describe.sequential('account closure tombstone finalization', () => {
       restrictedOutcomeCategoryIds: ['media_assets'],
       restrictedCategoryIds: [],
     });
-    await expect(
-      finalizeUserTombstone({
-        db,
-        requestId: retainedMediaRequest,
-        userId: retainedMedia.id,
-        hmacSecret: HMAC_SECRET,
-      }),
-    ).rejects.toMatchObject({ code: 'FINALIZATION_PRECONDITION_FAILED' });
+    await expect(finalizeRequest(retainedMediaRequest, retainedMedia.id)).rejects.toMatchObject({
+      code: 'FINALIZATION_PRECONDITION_FAILED',
+    });
 
     for (const subject of [missingOutcome, omitted, extra, retainedMedia]) {
       const [unchanged] = await db.select().from(users).where(eq(users.id, subject.id)).limit(1);
@@ -507,9 +491,9 @@ describe.sequential('account closure tombstone finalization', () => {
       notificationStatus: 'accepted',
     });
 
-    await expect(
-      finalizeUserTombstone({ db, requestId, userId: subject.id, hmacSecret: HMAC_SECRET }),
-    ).rejects.toMatchObject({ code: 'FINALIZATION_PRECONDITION_FAILED' });
+    await expect(finalizeRequest(requestId, subject.id)).rejects.toMatchObject({
+      code: 'FINALIZATION_PRECONDITION_FAILED',
+    });
 
     const [unchanged] = await db.select().from(users).where(eq(users.id, subject.id)).limit(1);
     expect(unchanged).toMatchObject({ status: 'closure_processing', plan: 'pro' });
@@ -605,12 +589,7 @@ describe.sequential('account closure tombstone finalization', () => {
       });
     });
     await userLocked;
-    const finalization = finalizeUserTombstone({
-      db,
-      requestId,
-      userId: subject.id,
-      hmacSecret: HMAC_SECRET,
-    });
+    const finalization = finalizeRequest(requestId, subject.id);
     await expect(
       Promise.race([
         finalization.then(() => 'completed'),
@@ -1044,6 +1023,8 @@ describe.sequential('account closure tombstone finalization', () => {
       requestedAt: new Date(now.getTime() - 8 * 24 * 60 * 60 * 1000),
       graceEndsAt: new Date(now.getTime() - 24 * 60 * 60 * 1000),
       processingStartedAt: new Date(now.getTime() - 60_000),
+      completionLeaseOwner: FINALIZATION_LEASE_OWNER,
+      completionLeaseUntil: new Date(now.getTime() + 60 * 60 * 1_000),
     });
     const requestId = Number(requestResult.insertId);
     await db.insert(accountClosureSteps).values(
@@ -1093,9 +1074,24 @@ describe.sequential('account closure tombstone finalization', () => {
       ],
       notificationStatus: options.notificationStatus,
       issuedAt: now,
-      completedAt: now,
+      completedAt: null,
     });
     return requestId;
+  }
+
+  function finalizeRequest(
+    requestId: number,
+    userId: number,
+    hmacSecret = HMAC_SECRET,
+  ): Promise<void> {
+    return finalizeUserTombstone({
+      db,
+      requestId,
+      userId,
+      hmacSecret,
+      expectedLeaseOwner: FINALIZATION_LEASE_OWNER,
+      now: new Date(),
+    });
   }
 
   async function runToCompletion(

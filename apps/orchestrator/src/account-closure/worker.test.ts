@@ -1,10 +1,11 @@
+import { EventEmitter } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
 import type { AccountClosureHandler } from './handler-contract.js';
 import {
   type AccountClosureWorkerRepository,
   CLOSURE_RETRY_DELAYS_MS,
   type ClaimedClosureWork,
-  runAccountClosureWorkerLoop,
+  runAccountClosureWorkerRuntime,
   runAccountClosureWorkerTick,
 } from './worker.js';
 
@@ -200,22 +201,39 @@ describe('account closure durable worker', () => {
   });
 
   it('finishes the in-flight page after SIGTERM state and refuses a new claim', async () => {
-    let stopping = false;
     let finishPage!: () => void;
     const inFlight = new Promise<void>((resolve) => {
       finishPage = resolve;
     });
-    const tick = vi.fn(async () => {
+    const repo = repository();
+    const pageHandler = handler();
+    vi.mocked(pageHandler.run).mockImplementationOnce(async () => {
       await inFlight;
-      return 'progress' as const;
+      return {
+        kind: 'continue',
+        checkpoint: { cursor: 100, processedCount: 100 },
+        processed: 100,
+      };
     });
-    const wait = vi.fn(async () => undefined);
-    const loop = runAccountClosureWorkerLoop({ tick, wait, shouldStop: () => stopping });
-    await vi.waitFor(() => expect(tick).toHaveBeenCalledTimes(1));
-    stopping = true;
+    const tick = vi.fn(() =>
+      runAccountClosureWorkerTick(deps({ repository: repo, handler: pageHandler })),
+    );
+    const signals = new EventEmitter();
+    const loop = runAccountClosureWorkerRuntime({
+      tick,
+      signals,
+      pollMs: 1,
+    });
+    await vi.waitFor(() => expect(pageHandler.run).toHaveBeenCalledTimes(1));
+    signals.emit('SIGTERM');
     finishPage();
     await loop;
     expect(tick).toHaveBeenCalledTimes(1);
-    expect(wait).not.toHaveBeenCalled();
+    expect(repo.markStepContinuation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        checkpoint: { cursor: 100, processedCount: 100 },
+        processedCount: 100,
+      }),
+    );
   });
 });

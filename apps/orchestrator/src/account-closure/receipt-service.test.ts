@@ -40,7 +40,6 @@ class MemoryReceiptStore implements ClosureReceiptStore {
 }
 
 const requestedAt = new Date('2026-08-26T09:00:00.000Z');
-const graceEndsAt = new Date('2026-09-02T09:00:00.000Z');
 
 describe('account closure receipt service', () => {
   it('projects application receipts without internal ids, subject digests, or raw content', () => {
@@ -122,13 +121,14 @@ describe('account closure receipt service', () => {
       subjectDigest: 'a'.repeat(64),
       completedCategoryIds: DATA_CATEGORY_IDS,
       restrictedCategoryIds: ['payments_entitlements', 'partner_kyc_ledger'] as const,
-      completedAt: graceEndsAt,
     };
     const [first, second] = await Promise.all([
       service.createCompletionReceipt(input),
       service.createCompletionReceipt(input),
     ]);
     expect(first.receiptNumber).toBe(second.receiptNumber);
+    expect(first.completedAt).toBeNull();
+    expect((await service.getCompletionReceiptRecord(99, 77))?.completedAt).toBeNull();
     expect(store.count()).toBe(1);
     expect(
       (await service.setCompletionNotificationStatus(99, 77, 'accepted')).notificationStatus,

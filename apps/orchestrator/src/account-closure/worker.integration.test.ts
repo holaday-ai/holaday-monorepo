@@ -276,6 +276,16 @@ describe.sequential('account closure worker durability', () => {
     });
     expect(first).toBe('progress');
     expect(await completionReceiptCount(subject.requestId)).toBe(1);
+    const [pendingReceipt] = await db
+      .select({ completedAt: accountClosureReceipts.completedAt })
+      .from(accountClosureReceipts)
+      .where(
+        and(
+          eq(accountClosureReceipts.requestId, subject.requestId),
+          eq(accountClosureReceipts.kind, 'completion'),
+        ),
+      );
+    expect(pendingReceipt?.completedAt).toBeNull();
     const [stillIdentified] = await db
       .select({ email: users.email, status: users.status })
       .from(users)
@@ -324,10 +334,24 @@ describe.sequential('account closure worker durability', () => {
       .where(eq(users.id, subject.userId));
     expect(closed).toEqual({ email: null, status: 'closed' });
     const [request] = await db
-      .select({ status: accountClosureRequests.status })
+      .select({
+        status: accountClosureRequests.status,
+        completedAt: accountClosureRequests.completedAt,
+      })
       .from(accountClosureRequests)
       .where(eq(accountClosureRequests.id, subject.requestId));
     expect(request?.status).toBe('completed');
+    const [completedReceipt] = await db
+      .select({ completedAt: accountClosureReceipts.completedAt })
+      .from(accountClosureReceipts)
+      .where(
+        and(
+          eq(accountClosureReceipts.requestId, subject.requestId),
+          eq(accountClosureReceipts.kind, 'completion'),
+        ),
+      );
+    expect(completedReceipt?.completedAt).toEqual(liveNow);
+    expect(request?.completedAt).toEqual(liveNow);
   });
 
   it('does not resend an accepted notification after a crash before final user update', async () => {

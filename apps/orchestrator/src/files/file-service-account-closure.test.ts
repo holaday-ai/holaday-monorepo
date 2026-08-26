@@ -89,6 +89,33 @@ describe('account closure file deletion', () => {
     expect(storage.get).not.toHaveBeenCalled();
   });
 
+  it('aborts a hanging closure object delete and keeps its database row', async () => {
+    const events: string[] = [];
+    const store = new MemoryClosureStore([fileRow(1, 'image/png')], events);
+    const storage = fakeStorage(events);
+    vi.mocked(storage.delete).mockImplementation(
+      async (_path: string, options?: { signal?: AbortSignal }) => {
+        if (!options?.signal) throw new Error('missing closure abort signal');
+        await new Promise<never>((_resolve, reject) => {
+          options.signal?.addEventListener(
+            'abort',
+            () => reject(new DOMException('aborted', 'AbortError')),
+            { once: true },
+          );
+        });
+      },
+    );
+
+    await expect(
+      deleteUserFilesPage(
+        { userIdInternal: 7, limit: 100, categoryId: 'media_assets' },
+        { store, storage, deleteTimeoutMs: 5 },
+      ),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(store.rows).toHaveLength(1);
+    expect(events).not.toContain('row:1');
+  });
+
   it('partitions media and task files exclusively, assigning null and non-standard MIME conservatively', async () => {
     expect(closureFileCategoryForMimetype(null)).toBe('task_execution');
     expect(closureFileCategoryForMimetype('application/x-private')).toBe('task_execution');

@@ -168,6 +168,7 @@ describe('private email delivery', () => {
       'https://api.resend.com/emails',
       expect.objectContaining({
         method: 'POST',
+        signal: expect.any(AbortSignal),
         headers: {
           'content-type': 'application/json',
           authorization: 'Bearer private-resend-key',

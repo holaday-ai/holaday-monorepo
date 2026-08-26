@@ -206,6 +206,7 @@ if [[ "$WORKER_ENABLED" == "true" ]]; then
     --cwd "$REPO_ROOT/apps/orchestrator" \
     --instances 1 \
     --max-memory-restart 512M \
+    --kill-timeout 660000 \
     --uid "$RUN_UID" \
     --gid "$RUN_GID" \
     --update-env >/dev/null

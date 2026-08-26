@@ -135,6 +135,7 @@ export const privateResendSender: PrivateEmailSender = {
           subject,
           text,
         }),
+        signal: AbortSignal.timeout(10_000),
       });
     } catch {
       throw new Error('Private email delivery failed');
