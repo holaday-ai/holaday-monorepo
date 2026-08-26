@@ -44,15 +44,16 @@ const EnvBase = z.object({
   ALIYUN_ACCESS_KEY_SECRET: z.string().optional(),
   ALIYUN_SMS_SIGN_NAME: z.string().optional(),
   ALIYUN_SMS_TEMPLATE_CODE: z.string().optional(),
+  ALIYUN_SMS_ACCOUNT_CLOSURE_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
   ALIYUN_SMS_ACCOUNT_CLOSURE_VERIFY_TEMPLATE_CODE: z.string().optional(),
   ALIYUN_SMS_ACCOUNT_CLOSURE_COMPLETE_TEMPLATE_CODE: z.string().optional(),
 });
 
 const Env = EnvBase.superRefine((value, context) => {
-  const aliyunSmsConfigured = Boolean(
-    value.ALIYUN_ACCESS_KEY_ID && value.ALIYUN_ACCESS_KEY_SECRET && value.ALIYUN_SMS_SIGN_NAME,
-  );
-  if (value.NODE_ENV !== 'production' || !aliyunSmsConfigured) return;
+  if (value.NODE_ENV !== 'production' || !value.ALIYUN_SMS_ACCOUNT_CLOSURE_ENABLED) return;
   for (const key of [
     'ALIYUN_SMS_ACCOUNT_CLOSURE_VERIFY_TEMPLATE_CODE',
     'ALIYUN_SMS_ACCOUNT_CLOSURE_COMPLETE_TEMPLATE_CODE',
@@ -67,15 +68,18 @@ const Env = EnvBase.superRefine((value, context) => {
   }
 });
 
-export type Env = z.infer<typeof Env>;
+type ParsedEnv = z.infer<typeof Env>;
+export type Env = Omit<ParsedEnv, 'ALIYUN_SMS_ACCOUNT_CLOSURE_ENABLED'> & {
+  ALIYUN_SMS_ACCOUNT_CLOSURE_ENABLED?: boolean;
+};
 
-let cached: Env | null = null;
+let cached: ParsedEnv | null = null;
 
 /**
  * Lazy parse so a misformatted env file doesn't block the test
  * harness from importing modules. Called by index.ts at boot.
  */
-export function loadEnv(): Env {
+export function loadEnv(): ParsedEnv {
   if (cached) return cached;
   cached = Env.parse(process.env);
   return cached;

@@ -110,6 +110,7 @@ export class SmsAdapter {
 
   isAccountClosureReady(): boolean {
     return (
+      this.env.ALIYUN_SMS_ACCOUNT_CLOSURE_ENABLED === true &&
       this.client !== null &&
       Boolean(this.env.ALIYUN_SMS_ACCOUNT_CLOSURE_VERIFY_TEMPLATE_CODE) &&
       Boolean(this.env.ALIYUN_SMS_ACCOUNT_CLOSURE_COMPLETE_TEMPLATE_CODE)
@@ -195,6 +196,9 @@ export class SmsAdapter {
     action: 'begin' | 'cancel',
   ): Promise<SmsDeliveryResult> {
     const phone = rawPhone.trim();
+    if (!this.env.ALIYUN_SMS_ACCOUNT_CLOSURE_ENABLED) {
+      return { ok: false, error: 'sms_not_configured' };
+    }
     if (!/^1[3-9]\d{9}$/.test(phone)) return { ok: false, error: 'invalid_phone' };
     if (!/^\d{6}$/.test(code)) return { ok: false, error: 'invalid_payload' };
     const templateCode = this.env.ALIYUN_SMS_ACCOUNT_CLOSURE_VERIFY_TEMPLATE_CODE;
@@ -210,6 +214,9 @@ export class SmsAdapter {
     receiptNumber: string,
   ): Promise<SmsDeliveryResult> {
     const phone = rawPhone.trim();
+    if (!this.env.ALIYUN_SMS_ACCOUNT_CLOSURE_ENABLED) {
+      return { ok: false, error: 'sms_not_configured' };
+    }
     if (!/^1[3-9]\d{9}$/.test(phone)) return { ok: false, error: 'invalid_phone' };
     if (receiptNumber.length < 1 || receiptNumber.length > 32) {
       return { ok: false, error: 'invalid_payload' };

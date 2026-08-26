@@ -1,7 +1,7 @@
 import { createHmac, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 import { and, eq, isNull } from 'drizzle-orm';
 import type { Logger } from 'pino';
-import type { EmailSender } from '../auth/email-code.js';
+import type { PrivateEmailSender } from '../auth/email-code.js';
 import { env } from '../config/env.js';
 import type { DB } from '../db/client.js';
 import { accountClosureChallenges } from '../db/schema/account-closures.js';
@@ -27,7 +27,7 @@ export interface VerifyClosureChallengeInput extends CreateClosureChallengeInput
 }
 
 interface ChallengeServiceDependencies {
-  emailSender: EmailSender;
+  emailSender: PrivateEmailSender;
   smsGateway: {
     sendAccountClosureCode(
       rawPhone: string,
@@ -100,6 +100,9 @@ export class AccountClosureChallengeService {
 
     try {
       if (destination.channel === 'email') {
+        if (!isPrivateEmailSender(this.dependencies.emailSender)) {
+          throw new Error('Private email delivery unavailable');
+        }
         await this.dependencies.emailSender.send({
           to: destination.value,
           subject:
@@ -187,6 +190,14 @@ export class AccountClosureChallengeService {
     });
     if (failure) throw new AccountClosureChallengeError(failure);
   }
+}
+
+function isPrivateEmailSender(sender: PrivateEmailSender): boolean {
+  return (
+    sender.privateDelivery === true &&
+    typeof sender.isAvailable === 'function' &&
+    sender.isAvailable()
+  );
 }
 
 type Destination = { channel: 'email'; value: string } | { channel: 'sms'; value: string };

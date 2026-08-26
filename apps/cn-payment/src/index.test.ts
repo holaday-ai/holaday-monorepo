@@ -275,6 +275,17 @@ describe('account-closure SMS routes', () => {
     },
   );
 
+  it('authenticates before parsing a rejected closure payload', async () => {
+    const handler = routes.get('POST /api/internal/account-closure/code');
+    if (!handler) throw new Error('closure code route was not registered');
+    const { response, state } = makeResponse();
+
+    await handler({ headers: {}, body: { rejected: 'private payload' } }, response);
+
+    expect(state).toEqual({ status: 401, body: { error: 'unauthorized' } });
+    expect(smsClosureCodeSpy).not.toHaveBeenCalled();
+  });
+
   it('accepts an authenticated, strictly-shaped closure-code delivery request', async () => {
     const handler = routes.get('POST /api/internal/account-closure/code');
     if (!handler) throw new Error('closure code route was not registered');

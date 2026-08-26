@@ -1,7 +1,8 @@
 import { randomBytes } from 'node:crypto';
 import { and, eq, inArray } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import type { EmailSender } from '../auth/email-code.js';
+import { type PrivateEmailSender, resendSender } from '../auth/email-code.js';
+import { logger as productionLogger } from '../config/logger.js';
 import { accountClosureChallenges } from '../db/schema/account-closures.js';
 import { users } from '../db/schema/users.js';
 import {
@@ -22,6 +23,8 @@ describe.sequential('AccountClosureChallengeService', () => {
 
   afterEach(async () => {
     vi.useRealTimers();
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
     if (userIds.length === 0) return;
     const { db } = await import('../db/client.js');
     await db
@@ -60,7 +63,9 @@ describe.sequential('AccountClosureChallengeService', () => {
     const emails: Array<{ to: string; subject: string; text: string }> = [];
     const sms: Array<{ phone: string; code: string; action: 'begin' | 'cancel' }> = [];
     const logs: unknown[] = [];
-    const emailSender: EmailSender = {
+    const emailSender: PrivateEmailSender = {
+      privateDelivery: true,
+      isAvailable: () => true,
       async send(message) {
         emails.push(message);
       },
@@ -126,7 +131,9 @@ describe.sequential('AccountClosureChallengeService', () => {
     let persistedBeforeDelivery = false;
     let rawCode = '';
     const logs: unknown[] = [];
-    const emailSender: EmailSender = {
+    const emailSender: PrivateEmailSender = {
+      privateDelivery: true,
+      isAvailable: () => true,
       async send(message) {
         rawCode = message.text.match(/\b\d{6}\b/)?.[0] ?? '';
         const rows = await db
@@ -265,6 +272,8 @@ describe.sequential('AccountClosureChallengeService', () => {
     const logs: unknown[] = [];
     const service = new AccountClosureChallengeService(db, {
       emailSender: {
+        privateDelivery: true,
+        isAvailable: () => true,
         async send() {
           throw new Error('provider rejected code=123456');
         },
@@ -289,5 +298,33 @@ describe.sequential('AccountClosureChallengeService', () => {
     expect(JSON.stringify(logs)).not.toContain(rawEmail);
     expect(JSON.stringify(logs)).not.toContain('123456');
     expect(JSON.stringify(logs)).not.toContain('provider rejected');
+  });
+
+  it('refuses the ordinary raw-logging email fallback before closure delivery', async () => {
+    vi.stubEnv('RESEND_API_KEY', '');
+    const rawEmail = 'closure-private@example.test';
+    const userId = await createUser({ email: rawEmail, emailVerified: true });
+    const capturedLogs: unknown[] = [];
+    vi.spyOn(productionLogger, 'info').mockImplementation((...args: unknown[]) => {
+      capturedLogs.push(args);
+    });
+    const { db } = await import('../db/client.js');
+    const service = new AccountClosureChallengeService(db, {
+      emailSender: resendSender as unknown as PrivateEmailSender,
+      smsGateway: { async sendAccountClosureCode() {} },
+      logger: { error() {} },
+    });
+
+    let failure: unknown;
+    try {
+      await service.createChallenge({ userId, action: 'begin' });
+    } catch (error) {
+      failure = error;
+    }
+
+    expect.soft(failure).toMatchObject({ code: 'DELIVERY_FAILED' });
+    const serializedLogs = JSON.stringify(capturedLogs);
+    expect(serializedLogs).not.toContain(rawEmail);
+    expect(serializedLogs).not.toMatch(/\b\d{6}\b/);
   });
 });
