@@ -3864,7 +3864,9 @@ async function runSupercarTaskInternal(
             'supercar: delegating to Apify actor',
           );
           const input = match.buildInput(opts.intent);
+          if (await cancellationRequested()) return cancelledOutcome();
           const r = await opts.apifyAdapter.run(match.actorId, input);
+          if (await cancellationRequested()) return cancelledOutcome();
           if ('items' in r && r.items.length > 0) {
             const itemsPreview = r.items
               .slice(0, 10)

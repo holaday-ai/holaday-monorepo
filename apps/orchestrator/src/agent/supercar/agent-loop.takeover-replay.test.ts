@@ -390,6 +390,81 @@ describe('runSupercarTask credential takeover', () => {
     expect(actorRun).not.toHaveBeenCalled();
   });
 
+  it('does not complete from the Lane 5 stuck fallback when abort wins during its actor run', async () => {
+    for (let iteration = 1; iteration <= 3; iteration += 1) {
+      createMessage.mockResolvedValueOnce(
+        response(
+          [
+            {
+              type: 'tool_use',
+              id: `tool_stuck_${iteration}`,
+              name: 'computer',
+              input: { action: 'left_click', coordinate: [10, 20] },
+            },
+          ],
+          'tool_use',
+        ),
+      );
+    }
+    const page = {
+      url: () => 'https://example.com/stuck',
+      title: vi.fn(async () => 'Stuck'),
+      evaluate: vi.fn(async () => ''),
+      mouse: { move: vi.fn(), click: vi.fn(), down: vi.fn(), up: vi.fn() },
+      keyboard: { down: vi.fn(), up: vi.fn() },
+      waitForTimeout: vi.fn(),
+    };
+    const executor = {
+      resetPageForTask: vi.fn(async () => undefined),
+      getPage: vi.fn(async () => page),
+      screenshot: vi.fn(async () => ({
+        base64: 'dGVzdA==',
+        viewportWidth: 1280,
+        viewportHeight: 720,
+      })),
+      captureTargetDescriptor: vi.fn(async () => ({
+        tagName: 'BUTTON',
+        visibleText: 'Retry',
+        url: 'https://example.com/stuck',
+      })),
+      click: vi.fn(async () => ({ ok: true, message: 'clicked' })),
+    } as unknown as PlaywrightExecutor;
+    let signalActor!: () => void;
+    let releaseActor!: () => void;
+    const actorStarted = new Promise<void>((resolve) => {
+      signalActor = resolve;
+    });
+    const actorRun = vi.fn(
+      () =>
+        new Promise<{ items: readonly unknown[] }>((resolve) => {
+          signalActor();
+          releaseActor = () => resolve({ items: [{ stale: 'result' }] });
+        }),
+    );
+    const taskId = 'tsk_abort_lane5_stuck_actor';
+    const run = runSupercarTask({
+      taskId,
+      intent: 'collect example data',
+      executor,
+      apiKey: 'test-key',
+      maxIterations: 4,
+      apifyAdapter: {
+        findActorForIntent: vi.fn(() => ({
+          actorId: 'example/stuck-scraper',
+          hostLabel: 'Example',
+          buildInput: () => ({ startUrl: 'https://example.com/stuck' }),
+        })),
+        run: actorRun,
+      },
+    });
+
+    await actorStarted;
+    expect(actorRun).toHaveBeenCalledTimes(1);
+    expect(supercarAbort(taskId)).toBe(true);
+    releaseActor();
+    await expect(run).resolves.toMatchObject({ status: 'cancelled' });
+  });
+
   it('does not replay the stale credential input after the user takes over', async () => {
     createMessage
       .mockResolvedValueOnce(
