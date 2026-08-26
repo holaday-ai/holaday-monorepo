@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import {
   bigint,
+  check,
   datetime,
   index,
   int,
@@ -54,6 +55,10 @@ export const accountClosureRequests = mysqlTable(
     uniqueIndex('uk_account_closure_requests_external_id').on(table.externalId),
     uniqueIndex('uk_account_closure_requests_active_user').on(table.activeUserId),
     index('ix_account_closure_requests_status_grace').on(table.status, table.graceEndsAt),
+    check(
+      'ck_account_closure_requests_active_user',
+      sql`(${table.status} IN ('pending_grace', 'processing', 'needs_attention') AND ${table.activeUserId} IS NOT NULL AND ${table.activeUserId} = ${table.userId}) OR (${table.status} IN ('cancelled', 'completed') AND ${table.activeUserId} IS NULL)`,
+    ),
   ],
 );
 
@@ -88,6 +93,10 @@ export const accountClosureSteps = mysqlTable(
     uniqueIndex('uk_account_closure_steps_request_category').on(table.requestId, table.categoryId),
     index('ix_account_closure_steps_status_next_attempt').on(table.status, table.nextAttemptAt),
     index('ix_account_closure_steps_lease_until').on(table.leaseUntil),
+    check(
+      'ck_account_closure_steps_checkpoint_keys',
+      sql`${table.checkpoint} IS NULL OR (JSON_TYPE(${table.checkpoint}) = 'OBJECT' AND JSON_REMOVE(${table.checkpoint}, '$.cursor', '$.processedCount') = JSON_OBJECT())`,
+    ),
   ],
 );
 
@@ -179,6 +188,18 @@ export const accountClosureReceipts = mysqlTable(
   (table) => [
     uniqueIndex('uk_account_closure_receipts_number').on(table.receiptNumber),
     uniqueIndex('uk_account_closure_receipts_request_kind').on(table.requestId, table.kind),
+    check(
+      'ck_account_closure_receipts_completed_categories_array',
+      sql`JSON_TYPE(${table.completedCategoryIds}) = 'ARRAY'`,
+    ),
+    check(
+      'ck_account_closure_receipts_restricted_categories_array',
+      sql`JSON_TYPE(${table.restrictedCategoryIds}) = 'ARRAY'`,
+    ),
+    check(
+      'ck_account_closure_receipts_subject_digest_kind',
+      sql`${table.kind} = 'completion' OR ${table.subjectDigest} IS NULL`,
+    ),
   ],
 );
 

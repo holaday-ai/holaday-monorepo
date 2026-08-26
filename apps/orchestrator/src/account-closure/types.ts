@@ -1,5 +1,11 @@
+import {
+  DATA_CATEGORY_IDS,
+  type DataCategoryId,
+} from '../data-governance/types.js';
+
 export const ACCOUNT_CLOSURE_USER_STATUSES = [
   'active',
+  'suspended',
   'closure_pending',
   'closure_processing',
   'closed',
@@ -71,4 +77,63 @@ export type AccountClosureNotificationStatus =
 export interface AccountClosureCheckpoint {
   cursor?: number;
   processedCount?: number;
+}
+
+export type AccountClosureCategoryId = DataCategoryId;
+
+const ACCOUNT_CLOSURE_CHECKPOINT_KEYS = new Set(['cursor', 'processedCount']);
+const ACCOUNT_CLOSURE_CATEGORY_ID_SET = new Set<string>(DATA_CATEGORY_IDS);
+
+/**
+ * Validates the only checkpoint shape closure repositories may persist. This
+ * function deliberately returns no input-derived diagnostics so callers never
+ * log a rejected payload containing personal content.
+ */
+export function parseAccountClosureCheckpoint(value: unknown): AccountClosureCheckpoint | null {
+  if (value === null) return null;
+  if (!isRecord(value)) throw new Error('Invalid account closure checkpoint');
+  if (Object.keys(value).some((key) => !ACCOUNT_CLOSURE_CHECKPOINT_KEYS.has(key))) {
+    throw new Error('Invalid account closure checkpoint');
+  }
+
+  const checkpoint: AccountClosureCheckpoint = {};
+  if (Object.hasOwn(value, 'cursor')) checkpoint.cursor = parseProgressValue(value.cursor);
+  if (Object.hasOwn(value, 'processedCount')) {
+    checkpoint.processedCount = parseProgressValue(value.processedCount);
+  }
+  return checkpoint;
+}
+
+/**
+ * Validates receipt category arrays before they cross the database write
+ * boundary. Every value must be one of the canonical 13 governance IDs.
+ */
+export function parseAccountClosureReceiptCategoryIds(value: unknown): AccountClosureCategoryId[] {
+  if (!Array.isArray(value)) throw new Error('Invalid account closure receipt categories');
+
+  const categoryIds: AccountClosureCategoryId[] = [];
+  const seen = new Set<string>();
+  for (const categoryId of value) {
+    if (
+      typeof categoryId !== 'string' ||
+      !ACCOUNT_CLOSURE_CATEGORY_ID_SET.has(categoryId) ||
+      seen.has(categoryId)
+    ) {
+      throw new Error('Invalid account closure receipt categories');
+    }
+    seen.add(categoryId);
+    categoryIds.push(categoryId as AccountClosureCategoryId);
+  }
+  return categoryIds;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function parseProgressValue(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+    throw new Error('Invalid account closure checkpoint');
+  }
+  return value;
 }

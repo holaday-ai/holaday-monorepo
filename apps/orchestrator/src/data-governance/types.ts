@@ -1,17 +1,20 @@
-export type DataCategoryId =
-  | 'account_security'
-  | 'task_execution'
-  | 'cross_task_memory'
-  | 'energy_astrology_profile'
-  | 'stock_preference_profile'
-  | 'feedback_support'
-  | 'external_notifications'
-  | 'extension_site_stats'
-  | 'extension_login_cookies'
-  | 'payments_entitlements'
-  | 'partner_kyc_ledger'
-  | 'media_assets'
-  | 'analytics_logs';
+export const DATA_CATEGORY_IDS = [
+  'account_security',
+  'task_execution',
+  'cross_task_memory',
+  'energy_astrology_profile',
+  'stock_preference_profile',
+  'feedback_support',
+  'external_notifications',
+  'extension_site_stats',
+  'extension_login_cookies',
+  'payments_entitlements',
+  'partner_kyc_ledger',
+  'media_assets',
+  'analytics_logs',
+] as const;
+
+export type DataCategoryId = (typeof DATA_CATEGORY_IDS)[number];
 
 export type ProcessorId =
   | 'holaday_internal'

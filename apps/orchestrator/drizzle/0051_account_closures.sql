@@ -2,7 +2,9 @@
 -- user tombstone and deliberately reject cascading deletion of closure history.
 
 ALTER TABLE `users`
-  MODIFY COLUMN `status` VARCHAR(20) NOT NULL DEFAULT 'active';
+  MODIFY COLUMN `status` VARCHAR(20) NOT NULL DEFAULT 'active',
+  ADD CONSTRAINT `ck_users_status_allowed`
+    CHECK (`status` IN ('active', 'suspended', 'closure_pending', 'closure_processing', 'closed'));
 --> statement-breakpoint
 CREATE TABLE `account_closure_requests` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -22,6 +24,11 @@ CREATE TABLE `account_closure_requests` (
   UNIQUE KEY `uk_account_closure_requests_external_id` (`external_id`),
   UNIQUE KEY `uk_account_closure_requests_active_user` (`active_user_id`),
   KEY `ix_account_closure_requests_status_grace` (`status`, `grace_ends_at`),
+  CONSTRAINT `ck_account_closure_requests_active_user`
+    CHECK (
+      (`status` IN ('pending_grace', 'processing', 'needs_attention') AND `active_user_id` IS NOT NULL AND `active_user_id` = `user_id`)
+      OR (`status` IN ('cancelled', 'completed') AND `active_user_id` IS NULL)
+    ),
   CONSTRAINT `fk_account_closure_requests_user`
     FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT,
   CONSTRAINT `fk_account_closure_requests_active_user`
@@ -49,6 +56,11 @@ CREATE TABLE `account_closure_steps` (
   UNIQUE KEY `uk_account_closure_steps_request_category` (`request_id`, `category_id`),
   KEY `ix_account_closure_steps_status_next_attempt` (`status`, `next_attempt_at`),
   KEY `ix_account_closure_steps_lease_until` (`lease_until`),
+  CONSTRAINT `ck_account_closure_steps_checkpoint_keys`
+    CHECK (
+      `checkpoint` IS NULL
+      OR (JSON_TYPE(`checkpoint`) = 'OBJECT' AND JSON_REMOVE(`checkpoint`, '$.cursor', '$.processedCount') = JSON_OBJECT())
+    ),
   CONSTRAINT `fk_account_closure_steps_request`
     FOREIGN KEY (`request_id`) REFERENCES `account_closure_requests` (`id`) ON DELETE RESTRICT
 );
@@ -106,6 +118,10 @@ CREATE TABLE `account_closure_receipts` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_account_closure_receipts_number` (`receipt_number`),
   UNIQUE KEY `uk_account_closure_receipts_request_kind` (`request_id`, `kind`),
+  CONSTRAINT `ck_account_closure_receipts_completed_categories_array`
+    CHECK (JSON_TYPE(`completed_category_ids`) = 'ARRAY'),
+  CONSTRAINT `ck_account_closure_receipts_restricted_categories_array`
+    CHECK (JSON_TYPE(`restricted_category_ids`) = 'ARRAY'),
   CONSTRAINT `ck_account_closure_receipts_subject_digest_kind`
     CHECK (`kind` = 'completion' OR `subject_digest` IS NULL),
   CONSTRAINT `fk_account_closure_receipts_request`
