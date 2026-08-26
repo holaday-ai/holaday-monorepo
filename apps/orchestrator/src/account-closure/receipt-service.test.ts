@@ -10,6 +10,8 @@ import {
 class MemoryReceiptStore implements ClosureReceiptStore {
   private readonly rows = new Map<string, ClosureReceiptRecord>();
 
+  constructor(private readonly leaseCurrent = true) {}
+
   async insertOrGet(row: ClosureReceiptRecord): Promise<ClosureReceiptRecord> {
     const key = `${row.requestId}:${row.kind}`;
     const current = this.rows.get(key);
@@ -32,6 +34,19 @@ class MemoryReceiptStore implements ClosureReceiptStore {
     if (!current) throw new Error('missing receipt');
     if (current.notificationStatus !== 'accepted') current.notificationStatus = status;
     return structuredClone(current);
+  }
+
+  async insertCompletionOrGetWithLease(row: ClosureReceiptRecord) {
+    if (!this.leaseCurrent) return null;
+    return this.insertOrGet(row);
+  }
+
+  async setNotificationStatusWithLease(input: {
+    requestId: number;
+    status: 'accepted' | 'failed';
+  }) {
+    if (!this.leaseCurrent) return null;
+    return this.setNotificationStatus(input.requestId, 'completion', input.status);
   }
 
   count() {
@@ -121,6 +136,8 @@ describe('account closure receipt service', () => {
       subjectDigest: 'a'.repeat(64),
       completedCategoryIds: DATA_CATEGORY_IDS,
       restrictedCategoryIds: ['payments_entitlements', 'partner_kyc_ledger'] as const,
+      expectedLeaseOwner: 'worker-current',
+      now: requestedAt,
     };
     const [first, second] = await Promise.all([
       service.createCompletionReceipt(input),
@@ -131,10 +148,26 @@ describe('account closure receipt service', () => {
     expect((await service.getCompletionReceiptRecord(99, 77))?.completedAt).toBeNull();
     expect(store.count()).toBe(1);
     expect(
-      (await service.setCompletionNotificationStatus(99, 77, 'accepted')).notificationStatus,
+      (
+        await service.setCompletionNotificationStatus({
+          requestId: 99,
+          userId: 77,
+          expectedLeaseOwner: 'worker-current',
+          now: requestedAt,
+          status: 'accepted',
+        })
+      ).notificationStatus,
     ).toBe('accepted');
     expect(
-      (await service.setCompletionNotificationStatus(99, 77, 'failed')).notificationStatus,
+      (
+        await service.setCompletionNotificationStatus({
+          requestId: 99,
+          userId: 77,
+          expectedLeaseOwner: 'worker-current',
+          now: requestedAt,
+          status: 'failed',
+        })
+      ).notificationStatus,
     ).toBe('accepted');
     await expect(
       service.createCompletionReceipt({ ...input, subjectDigest: 'b'.repeat(64) }),
@@ -164,5 +197,25 @@ describe('account closure receipt service', () => {
     await expect(service.getApplicationReceipt(99, 78)).rejects.toThrow(
       'Account closure receipt invariant failed',
     );
+  });
+
+  it('does not create or update a completion receipt after its lease is lost', async () => {
+    const store = new MemoryReceiptStore(false);
+    const service = new AccountClosureReceiptService(store, {
+      randomReceiptNumber: () => 'ACR-random-lease-bound',
+      now: () => requestedAt,
+    });
+    const completion = {
+      requestId: 99,
+      userId: 77,
+      subjectDigest: 'a'.repeat(64),
+      completedCategoryIds: DATA_CATEGORY_IDS,
+      restrictedCategoryIds: [] as const,
+      expectedLeaseOwner: 'worker-stale',
+      now: requestedAt,
+    };
+
+    await expect(service.createCompletionReceipt(completion)).rejects.toThrow(/lease/i);
+    expect(store.count()).toBe(0);
   });
 });

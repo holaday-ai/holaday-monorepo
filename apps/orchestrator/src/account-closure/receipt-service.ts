@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { and, eq, sql } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
-import { accountClosureReceipts } from '../db/schema/account-closures.js';
+import { accountClosureReceipts, accountClosureRequests } from '../db/schema/account-closures.js';
 import {
   type AccountClosureCategoryId,
   type AccountClosureReceiptKind,
@@ -40,12 +40,32 @@ export interface CompletionClosureReceipt {
 
 export interface ClosureReceiptStore {
   insertOrGet(row: ClosureReceiptRecord): Promise<ClosureReceiptRecord>;
+  insertCompletionOrGetWithLease(
+    row: ClosureReceiptRecord,
+    lease: CompletionReceiptLeaseInput,
+  ): Promise<ClosureReceiptRecord | null>;
   find(requestId: number, kind: AccountClosureReceiptKind): Promise<ClosureReceiptRecord | null>;
-  setNotificationStatus(
-    requestId: number,
-    kind: 'completion',
-    status: 'accepted' | 'failed',
-  ): Promise<ClosureReceiptRecord>;
+  setNotificationStatusWithLease(
+    input: CompletionNotificationLeaseInput,
+  ): Promise<ClosureReceiptRecord | null>;
+}
+
+export interface CompletionReceiptLeaseInput {
+  requestId: number;
+  userId: number;
+  expectedLeaseOwner: string;
+  now: Date;
+}
+
+export interface CompletionNotificationLeaseInput extends CompletionReceiptLeaseInput {
+  status: 'accepted' | 'failed';
+}
+
+export class AccountClosureReceiptLeaseLostError extends Error {
+  constructor() {
+    super('Account closure completion lease lost');
+    this.name = 'AccountClosureReceiptLeaseLostError';
+  }
 }
 
 export interface ReceiptServiceOptions {
@@ -109,6 +129,8 @@ export class AccountClosureReceiptService {
     subjectDigest: string;
     completedCategoryIds: readonly string[];
     restrictedCategoryIds: readonly string[];
+    expectedLeaseOwner: string;
+    now: Date;
   }): Promise<CompletionClosureReceipt> {
     if (!/^[a-f0-9]{64}$/i.test(input.subjectDigest)) {
       throw new Error('Invalid account closure subject digest');
@@ -119,18 +141,23 @@ export class AccountClosureReceiptService {
     const restrictedCategoryIds = parseAccountClosureReceiptCategoryIds([
       ...input.restrictedCategoryIds,
     ]);
-    const row = await this.store.insertOrGet({
-      requestId: input.requestId,
-      userId: input.userId,
-      receiptNumber: this.randomReceiptNumber(),
-      kind: 'completion',
-      subjectDigest: input.subjectDigest,
-      completedCategoryIds,
-      restrictedCategoryIds,
-      notificationStatus: 'pending',
-      issuedAt: this.now(),
-      completedAt: null,
-    });
+    assertCompletionLeaseInput(input);
+    const row = await this.store.insertCompletionOrGetWithLease(
+      {
+        requestId: input.requestId,
+        userId: input.userId,
+        receiptNumber: this.randomReceiptNumber(),
+        kind: 'completion',
+        subjectDigest: input.subjectDigest,
+        completedCategoryIds,
+        restrictedCategoryIds,
+        notificationStatus: 'pending',
+        issuedAt: this.now(),
+        completedAt: null,
+      },
+      input,
+    );
+    if (!row) throw new AccountClosureReceiptLeaseLostError();
     assertReceiptIdentity(row, input.requestId, input.userId, 'completion');
     if (
       row.subjectDigest?.toLowerCase() !== input.subjectDigest.toLowerCase() ||
@@ -152,12 +179,12 @@ export class AccountClosureReceiptService {
   }
 
   async setCompletionNotificationStatus(
-    requestId: number,
-    userId: number,
-    status: 'accepted' | 'failed',
+    input: CompletionNotificationLeaseInput,
   ): Promise<ClosureReceiptRecord> {
-    const row = await this.store.setNotificationStatus(requestId, 'completion', status);
-    assertReceiptIdentity(row, requestId, userId, 'completion');
+    assertCompletionLeaseInput(input);
+    const row = await this.store.setNotificationStatusWithLease(input);
+    if (!row) throw new AccountClosureReceiptLeaseLostError();
+    assertReceiptIdentity(row, input.requestId, input.userId, 'completion');
     return row;
   }
 }
@@ -191,6 +218,34 @@ export class DatabaseClosureReceiptStore implements ClosureReceiptStore {
     return persisted;
   }
 
+  async insertCompletionOrGetWithLease(
+    row: ClosureReceiptRecord,
+    lease: CompletionReceiptLeaseInput,
+  ): Promise<ClosureReceiptRecord | null> {
+    return this.db.transaction(async (tx) => {
+      const [request] = await tx
+        .select({
+          userId: accountClosureRequests.userId,
+          activeUserId: accountClosureRequests.activeUserId,
+          status: accountClosureRequests.status,
+          leaseOwner: accountClosureRequests.completionLeaseOwner,
+          leaseUntil: accountClosureRequests.completionLeaseUntil,
+        })
+        .from(accountClosureRequests)
+        .where(eq(accountClosureRequests.id, lease.requestId))
+        .limit(1)
+        .for('update');
+      if (!hasCurrentCompletionLease(request, lease)) return null;
+      await tx
+        .insert(accountClosureReceipts)
+        .values(receiptInsertValues(row))
+        .onDuplicateKeyUpdate({
+          set: { requestId: sql`${accountClosureReceipts.requestId}` },
+        });
+      return findReceiptInTransaction(tx, row.requestId, 'completion');
+    });
+  }
+
   async find(
     requestId: number,
     kind: AccountClosureReceiptKind,
@@ -221,26 +276,126 @@ export class DatabaseClosureReceiptStore implements ClosureReceiptStore {
     };
   }
 
-  async setNotificationStatus(
-    requestId: number,
-    kind: 'completion',
-    status: 'accepted' | 'failed',
-  ): Promise<ClosureReceiptRecord> {
-    await this.db
-      .update(accountClosureReceipts)
-      .set({ notificationStatus: status })
-      .where(
-        and(
-          eq(accountClosureReceipts.requestId, requestId),
-          eq(accountClosureReceipts.kind, kind),
-          status === 'accepted'
-            ? sql`${accountClosureReceipts.notificationStatus} IN ('pending', 'failed')`
-            : sql`${accountClosureReceipts.notificationStatus} <> 'accepted'`,
-        ),
-      );
-    const persisted = await this.find(requestId, kind);
-    if (!persisted) throw new Error('Account closure receipt persistence failed');
-    return persisted;
+  async setNotificationStatusWithLease(
+    input: CompletionNotificationLeaseInput,
+  ): Promise<ClosureReceiptRecord | null> {
+    return this.db.transaction(async (tx) => {
+      const [request] = await tx
+        .select({
+          userId: accountClosureRequests.userId,
+          activeUserId: accountClosureRequests.activeUserId,
+          status: accountClosureRequests.status,
+          leaseOwner: accountClosureRequests.completionLeaseOwner,
+          leaseUntil: accountClosureRequests.completionLeaseUntil,
+        })
+        .from(accountClosureRequests)
+        .where(eq(accountClosureRequests.id, input.requestId))
+        .limit(1)
+        .for('update');
+      if (!hasCurrentCompletionLease(request, input)) return null;
+      await tx
+        .update(accountClosureReceipts)
+        .set({ notificationStatus: input.status })
+        .where(
+          and(
+            eq(accountClosureReceipts.requestId, input.requestId),
+            eq(accountClosureReceipts.userId, input.userId),
+            eq(accountClosureReceipts.kind, 'completion'),
+            input.status === 'accepted'
+              ? sql`${accountClosureReceipts.notificationStatus} IN ('pending', 'failed')`
+              : sql`${accountClosureReceipts.notificationStatus} <> 'accepted'`,
+          ),
+        );
+      const persisted = await findReceiptInTransaction(tx, input.requestId, 'completion');
+      if (!persisted) throw new Error('Account closure receipt persistence failed');
+      return persisted;
+    });
+  }
+}
+
+type ReceiptTransaction = Parameters<Parameters<DB['transaction']>[0]>[0];
+
+function receiptInsertValues(row: ClosureReceiptRecord) {
+  return {
+    requestId: row.requestId,
+    userId: row.userId,
+    receiptNumber: row.receiptNumber,
+    kind: row.kind,
+    subjectDigest: row.subjectDigest,
+    completedCategoryIds: row.completedCategoryIds,
+    restrictedCategoryIds: row.restrictedCategoryIds,
+    notificationStatus: row.notificationStatus,
+    issuedAt: row.issuedAt,
+    completedAt: row.completedAt,
+  };
+}
+
+async function findReceiptInTransaction(
+  tx: ReceiptTransaction,
+  requestId: number,
+  kind: AccountClosureReceiptKind,
+): Promise<ClosureReceiptRecord | null> {
+  const [row] = await tx
+    .select({
+      requestId: accountClosureReceipts.requestId,
+      userId: accountClosureReceipts.userId,
+      receiptNumber: accountClosureReceipts.receiptNumber,
+      kind: accountClosureReceipts.kind,
+      subjectDigest: accountClosureReceipts.subjectDigest,
+      completedCategoryIds: accountClosureReceipts.completedCategoryIds,
+      restrictedCategoryIds: accountClosureReceipts.restrictedCategoryIds,
+      notificationStatus: accountClosureReceipts.notificationStatus,
+      issuedAt: accountClosureReceipts.issuedAt,
+      completedAt: accountClosureReceipts.completedAt,
+    })
+    .from(accountClosureReceipts)
+    .where(
+      and(eq(accountClosureReceipts.requestId, requestId), eq(accountClosureReceipts.kind, kind)),
+    )
+    .limit(1);
+  if (!row) return null;
+  return {
+    ...row,
+    completedCategoryIds: parseAccountClosureReceiptCategoryIds(row.completedCategoryIds),
+    restrictedCategoryIds: parseAccountClosureReceiptCategoryIds(row.restrictedCategoryIds),
+  };
+}
+
+function hasCurrentCompletionLease(
+  request:
+    | {
+        userId: number;
+        activeUserId: number | null;
+        status: string;
+        leaseOwner: string | null;
+        leaseUntil: Date | null;
+      }
+    | undefined,
+  input: CompletionReceiptLeaseInput,
+): boolean {
+  return Boolean(
+    request &&
+      request.userId === input.userId &&
+      request.activeUserId === input.userId &&
+      request.status === 'processing' &&
+      request.leaseOwner === input.expectedLeaseOwner &&
+      request.leaseUntil &&
+      request.leaseUntil.getTime() > input.now.getTime(),
+  );
+}
+
+function assertCompletionLeaseInput(input: CompletionReceiptLeaseInput): void {
+  if (
+    !Number.isSafeInteger(input.requestId) ||
+    input.requestId <= 0 ||
+    !Number.isSafeInteger(input.userId) ||
+    input.userId <= 0 ||
+    !input.expectedLeaseOwner ||
+    input.expectedLeaseOwner.length > 64 ||
+    !(input.now instanceof Date) ||
+    !Number.isFinite(input.now.getTime())
+  ) {
+    throw new Error('Invalid account closure completion lease');
   }
 }
 

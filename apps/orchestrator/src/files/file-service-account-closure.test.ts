@@ -151,6 +151,41 @@ describe('account closure file deletion', () => {
     expect(events).not.toContain('row:1');
   });
 
+  it('stops after one non-cooperative provider call and never deletes its row after lease loss', async () => {
+    const events: string[] = [];
+    const store = new MemoryClosureStore(
+      [fileRow(1, 'image/png'), fileRow(2, 'image/png')],
+      events,
+    );
+    let releaseProvider!: () => void;
+    let started!: () => void;
+    const providerStarted = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const storage = fakeStorage(events);
+    vi.mocked(storage.delete).mockImplementationOnce(
+      async () =>
+        new Promise<void>((resolve) => {
+          releaseProvider = resolve;
+          started();
+        }),
+    );
+    const controller = new AbortController();
+    const deletion = deleteUserFilesPage(
+      { userIdInternal: 7, limit: 100, categoryId: 'media_assets' },
+      { store, storage, signal: controller.signal },
+    );
+    await providerStarted;
+    controller.abort();
+    releaseProvider();
+
+    await expect(deletion).rejects.toMatchObject({ name: 'AbortError' });
+    expect(storage.delete).toHaveBeenCalledTimes(1);
+    expect(store.rows.map((row) => row.id)).toEqual([1, 2]);
+    expect(events).not.toContain('row:1');
+    expect(events).not.toContain('row:2');
+  });
+
   it('partitions media and task files exclusively, assigning null and non-standard MIME conservatively', async () => {
     expect(closureFileCategoryForMimetype(null)).toBe('task_execution');
     expect(closureFileCategoryForMimetype('application/x-private')).toBe('task_execution');

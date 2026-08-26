@@ -10,7 +10,10 @@ import {
   type StorageProvider,
 } from '../files/storage-provider.js';
 import { type AccountClosureHandler, ClosureHandlerError } from './handler-contract.js';
-import { createDatabaseReceiptService } from './receipt-service.js';
+import {
+  AccountClosureReceiptLeaseLostError,
+  createDatabaseReceiptService,
+} from './receipt-service.js';
 import {
   ACCOUNT_CLOSURE_LEASE_MS,
   type AccountClosureWorkerRepository,
@@ -167,7 +170,9 @@ export async function runAccountClosureWorkerTick(
       return result === 'completed' ? 'progress' : 'attention';
     } catch (error) {
       await heartbeat.stop();
-      if (heartbeat.signal.aborted) return 'idle';
+      if (heartbeat.signal.aborted || error instanceof AccountClosureReceiptLeaseLostError) {
+        return 'idle';
+      }
       return persistCompletionFailure(repository, claim, deps.now(), error);
     }
   }
@@ -265,6 +270,8 @@ async function completeClaim(
     subjectDigest: context.subjectDigest,
     completedCategoryIds: DATA_CATEGORY_IDS,
     restrictedCategoryIds: context.restrictedCategoryIds,
+    expectedLeaseOwner: input.leaseOwner,
+    now: deps.now(),
   });
   let receipt = await receipts.getCompletionReceiptRecord(input.requestId, context.userId);
   if (!receipt) throw new WorkerOperationError('database_unavailable');
@@ -289,14 +296,23 @@ async function completeClaim(
         throw new WorkerOperationError('configuration');
       }
       input.signal.throwIfAborted();
-      receipt = await receipts.setCompletionNotificationStatus(
-        input.requestId,
-        context.userId,
-        'accepted',
-      );
+      receipt = await receipts.setCompletionNotificationStatus({
+        requestId: input.requestId,
+        userId: context.userId,
+        expectedLeaseOwner: input.leaseOwner,
+        now: deps.now(),
+        status: 'accepted',
+      });
     } catch (error) {
       if (input.signal.aborted) throw error;
-      await receipts.setCompletionNotificationStatus(input.requestId, context.userId, 'failed');
+      if (error instanceof AccountClosureReceiptLeaseLostError) throw error;
+      await receipts.setCompletionNotificationStatus({
+        requestId: input.requestId,
+        userId: context.userId,
+        expectedLeaseOwner: input.leaseOwner,
+        now: deps.now(),
+        status: 'failed',
+      });
       if (error instanceof WorkerOperationError && error.code === 'configuration') throw error;
       throw new WorkerOperationError('provider_unavailable');
     }

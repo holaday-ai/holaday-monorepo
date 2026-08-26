@@ -419,12 +419,14 @@ export async function deleteUserFilesPage(
 
   const page = selected.slice(0, input.limit);
   for (const row of page) {
+    dependencies.signal?.throwIfAborted();
     await deleteStorageObjectForClosure(dependencies.storage, row.storagePath, {
       ...(dependencies.deleteTimeoutMs !== undefined
         ? { timeoutMs: dependencies.deleteTimeoutMs }
         : {}),
       ...(dependencies.signal ? { signal: dependencies.signal } : {}),
     });
+    dependencies.signal?.throwIfAborted();
     const deleted = await dependencies.store.deleteOwnedRow({
       id: row.id,
       userIdInternal: input.userIdInternal,

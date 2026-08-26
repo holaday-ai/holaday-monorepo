@@ -2,6 +2,7 @@ import { and, eq, like, sql } from 'drizzle-orm';
 import { pino } from 'pino';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { PrivateEmailSender } from '../auth/email-code.js';
+import { DATA_CATEGORY_IDS } from '../data-governance/types.js';
 import {
   accountClosureReceipts,
   accountClosureRequests,
@@ -10,6 +11,10 @@ import {
 import { users } from '../db/schema/users.js';
 import type { StorageProvider } from '../files/storage-provider.js';
 import type { AccountClosureHandler } from './handler-contract.js';
+import {
+  AccountClosureReceiptLeaseLostError,
+  createDatabaseReceiptService,
+} from './receipt-service.js';
 import {
   ACCOUNT_CLOSURE_LEASE_MS,
   claimNextClosureStep,
@@ -426,6 +431,135 @@ describe.sequential('account closure worker durability', () => {
       }),
     ).toBe('progress');
     expect(send).toHaveBeenCalledTimes(1);
+    const [closed] = await db
+      .select({ status: users.status, email: users.email })
+      .from(users)
+      .where(eq(users.id, subject.userId));
+    expect(closed).toEqual({ status: 'closed', email: null });
+  });
+
+  it('does not create a completion receipt for a stale lease owner', async () => {
+    const subject = await createDueClosure('receipt-create-lease');
+    await db
+      .update(accountClosureRequests)
+      .set({
+        status: 'processing',
+        processingStartedAt: baseNow,
+        completionLeaseOwner: 'receipt-current-owner',
+        completionLeaseUntil: new Date(baseNow.getTime() + ACCOUNT_CLOSURE_LEASE_MS),
+      })
+      .where(eq(accountClosureRequests.id, subject.requestId));
+    const receipts = createDatabaseReceiptService(db);
+
+    await expect(
+      receipts.createCompletionReceipt({
+        requestId: subject.requestId,
+        userId: subject.userId,
+        subjectDigest: 'a'.repeat(64),
+        completedCategoryIds: DATA_CATEGORY_IDS,
+        restrictedCategoryIds: [],
+        expectedLeaseOwner: 'receipt-stale-owner',
+        now: baseNow,
+      }),
+    ).rejects.toBeInstanceOf(AccountClosureReceiptLeaseLostError);
+    expect(await completionReceiptCount(subject.requestId)).toBe(0);
+  });
+
+  it('keeps notification status pending when ownership changes after provider acceptance', async () => {
+    const subject = await createDueClosure('receipt-status-lease');
+    await db
+      .update(accountClosureRequests)
+      .set({ status: 'processing', processingStartedAt: baseNow })
+      .where(eq(accountClosureRequests.id, subject.requestId));
+    await db
+      .update(users)
+      .set({ status: 'closure_processing' })
+      .where(eq(users.id, subject.userId));
+    await db
+      .update(accountClosureSteps)
+      .set({ status: 'succeeded', retentionOutcome: 'not_present', finishedAt: baseNow })
+      .where(eq(accountClosureSteps.requestId, subject.requestId));
+
+    const idempotencyKeys: string[] = [];
+    const send = vi
+      .fn<PrivateEmailSender['send']>()
+      .mockImplementationOnce(async (message) => {
+        idempotencyKeys.push(message.idempotencyKey ?? '');
+        await db
+          .update(accountClosureRequests)
+          .set({
+            completionLeaseOwner: 'receipt-intervening-owner',
+            completionLeaseUntil: new Date(baseNow.getTime() + 1_000),
+          })
+          .where(
+            and(
+              eq(accountClosureRequests.id, subject.requestId),
+              eq(accountClosureRequests.completionLeaseOwner, 'receipt-status-a'),
+            ),
+          );
+      })
+      .mockImplementationOnce(async (message) => {
+        idempotencyKeys.push(message.idempotencyKey ?? '');
+      });
+    const notification = {
+      emailSender: {
+        privateDelivery: true as const,
+        isAvailable: () => true,
+        send,
+      },
+      smsGateway: { sendAccountClosureComplete: vi.fn() },
+    };
+
+    expect(
+      await runAccountClosureWorkerTick({
+        db,
+        handlers: new Map(),
+        workerId: 'receipt-status-a',
+        now: () => baseNow,
+        rssBytes: () => 1,
+        enabled: true,
+        logger,
+        storage,
+        hmacSecret: HMAC_SECRET,
+        notification,
+      }),
+    ).toBe('idle');
+    const [pending] = await db
+      .select({
+        notificationStatus: accountClosureReceipts.notificationStatus,
+        attemptCount: accountClosureRequests.completionAttemptCount,
+        userStatus: users.status,
+      })
+      .from(accountClosureReceipts)
+      .innerJoin(
+        accountClosureRequests,
+        eq(accountClosureRequests.id, accountClosureReceipts.requestId),
+      )
+      .innerJoin(users, eq(users.id, accountClosureRequests.userId))
+      .where(eq(accountClosureReceipts.requestId, subject.requestId));
+    expect(pending).toEqual({
+      notificationStatus: 'pending',
+      attemptCount: 0,
+      userStatus: 'closure_processing',
+    });
+
+    const takeoverAt = new Date(baseNow.getTime() + 1_001);
+    expect(
+      await runAccountClosureWorkerTick({
+        db,
+        handlers: new Map(),
+        workerId: 'receipt-status-b',
+        now: () => takeoverAt,
+        rssBytes: () => 1,
+        enabled: true,
+        logger,
+        storage,
+        hmacSecret: HMAC_SECRET,
+        notification,
+      }),
+    ).toBe('progress');
+    expect(idempotencyKeys).toHaveLength(2);
+    expect(idempotencyKeys[0]).toBe(idempotencyKeys[1]);
     const [closed] = await db
       .select({ status: users.status, email: users.email })
       .from(users)

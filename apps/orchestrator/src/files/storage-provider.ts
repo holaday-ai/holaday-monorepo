@@ -178,9 +178,11 @@ export async function deleteStorageObjectForClosure(
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 60_000) {
     throw new Error('Invalid account closure storage timeout');
   }
+  options.signal?.throwIfAborted();
   const timeoutSignal = AbortSignal.timeout(timeoutMs);
   const signal = options.signal ? AbortSignal.any([options.signal, timeoutSignal]) : timeoutSignal;
   await storage.delete(storagePath, { signal });
+  options.signal?.throwIfAborted();
 }
 
 // ---------------------------------------------------------------------------
