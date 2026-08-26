@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { accountClosureSteps } from '../../db/schema/account-closures.js';
 import { getAccountClosureHandler } from '../handler-registry.js';
 import { sanitizePartnerMetadataForClosure } from './partner-kyc-ledger.js';
 import {
@@ -7,6 +8,10 @@ import {
 } from './payments-entitlements.js';
 
 describe('financial account-closure retention', () => {
+  it('exposes a trusted step retention outcome instead of deriving it from receipts', () => {
+    expect(accountClosureSteps.retentionOutcome).toBeDefined();
+  });
+
   it('keeps exactly the nine reviewed payment keys with safe scalar values', () => {
     const sanitized = sanitizePaymentMetadataForClosure({
       provider: 'paypal',

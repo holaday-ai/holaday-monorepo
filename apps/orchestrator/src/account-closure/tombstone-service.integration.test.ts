@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { createHmac, randomBytes } from 'node:crypto';
 import { type SQL, eq, sql } from 'drizzle-orm';
 import type { MySqlTable } from 'drizzle-orm/mysql-core';
 import { pino } from 'pino';
@@ -10,6 +10,7 @@ import {
   accountClosureRequests,
   accountClosureSteps,
 } from '../db/schema/account-closures.js';
+import { evidenceArtifacts } from '../db/schema/evidence-artifacts.js';
 import {
   holaCreditLedgerEntries,
   partnerActivityEvents,
@@ -30,6 +31,7 @@ import { tasks } from '../db/schema/tasks.js';
 import { users } from '../db/schema/users.js';
 import { watchlists } from '../db/schema/watchlists.js';
 import type { StorageProvider } from '../files/storage-provider.js';
+import { completePaymentInTransaction, lockSettlementContext } from '../trpc/routers/payment.js';
 import type {
   AccountClosureHandler,
   ClosureCheckpoint,
@@ -43,8 +45,8 @@ import { stockPreferenceProfileClosureHandler } from './handlers/stock-preferenc
 import { taskExecutionClosureHandler } from './handlers/task-execution.js';
 import { finalizeUserTombstone } from './tombstone-service.js';
 
-const DIGEST = 'ab'.repeat(32);
-const OTHER_DIGEST = 'cd'.repeat(32);
+const HMAC_SECRET = 'task8-review-hmac-secret-32-bytes-minimum';
+const OTHER_HMAC_SECRET = 'task8-review-other-secret-32-bytes-minimum';
 const logger = pino({ enabled: false });
 
 describe.sequential('account closure tombstone finalization', () => {
@@ -112,7 +114,7 @@ describe.sequential('account closure tombstone finalization', () => {
 
     const targetPaymentId = await createPayment(target.externalId, 'target', 'refunded');
     await createPayment(other.externalId, 'other', 'completed');
-    const targetPartner = await createPartnerGraph(target.id, 'target');
+    const targetPartner = await createPartnerGraph(target.id, 'target', true);
     const otherPartner = await createPartnerGraph(other.id, 'other');
     await db.insert(partnerReferrals).values({
       externalId: uniqueId('pref_target'),
@@ -125,6 +127,7 @@ describe.sequential('account closure tombstone finalization', () => {
       assisted: 1,
       metadata: {
         ...sensitiveMetadata('target referral'),
+        closureRestricted: true,
         rewardedAt: '2026-08-15T00:00:00.000Z',
       },
     });
@@ -165,8 +168,10 @@ describe.sequential('account closure tombstone finalization', () => {
       storage,
     );
     expect(freshPaymentRetry).toMatchObject({ kind: 'complete', retention: 'restricted' });
-    const freshPartnerRetry = await partnerKycLedgerClosureHandler.run(
-      closureContext(target, storage, null),
+    const freshPartnerRetry = await runToCompletion(
+      partnerKycLedgerClosureHandler,
+      target,
+      storage,
     );
     expect(freshPartnerRetry).toMatchObject({ kind: 'complete', retention: 'restricted' });
 
@@ -247,7 +252,6 @@ describe.sequential('account closure tombstone finalization', () => {
     expect(await countRows(watchlists, eq(watchlists.userId, target.id))).toBe(0);
 
     const requestId = await createFinalizationRequest(target.id, {
-      digest: DIGEST,
       notificationStatus: 'accepted',
     });
     const oldExternalId = target.externalId;
@@ -256,7 +260,7 @@ describe.sequential('account closure tombstone finalization', () => {
       db,
       requestId,
       userId: target.id,
-      identityDigest: DIGEST,
+      hmacSecret: HMAC_SECRET,
     });
 
     const [closed] = await db.select().from(users).where(eq(users.id, target.id)).limit(1);
@@ -334,7 +338,6 @@ describe.sequential('account closure tombstone finalization', () => {
   it('fails closed for incomplete steps, an unaccepted receipt, or a mismatched digest', async () => {
     const incomplete = await createUser('incomplete', { status: 'closure_processing' });
     const incompleteRequest = await createFinalizationRequest(incomplete.id, {
-      digest: DIGEST,
       notificationStatus: 'accepted',
       incompleteCategory: 'analytics_logs',
     });
@@ -343,13 +346,12 @@ describe.sequential('account closure tombstone finalization', () => {
         db,
         requestId: incompleteRequest,
         userId: incomplete.id,
-        identityDigest: DIGEST,
+        hmacSecret: HMAC_SECRET,
       }),
     ).rejects.toMatchObject({ code: 'FINALIZATION_PRECONDITION_FAILED' });
 
     const unaccepted = await createUser('unaccepted', { status: 'closure_processing' });
     const unacceptedRequest = await createFinalizationRequest(unaccepted.id, {
-      digest: DIGEST,
       notificationStatus: 'pending',
     });
     await expect(
@@ -357,13 +359,12 @@ describe.sequential('account closure tombstone finalization', () => {
         db,
         requestId: unacceptedRequest,
         userId: unaccepted.id,
-        identityDigest: DIGEST,
+        hmacSecret: HMAC_SECRET,
       }),
     ).rejects.toMatchObject({ code: 'FINALIZATION_PRECONDITION_FAILED' });
 
     const mismatch = await createUser('mismatch', { status: 'closure_processing' });
     const mismatchRequest = await createFinalizationRequest(mismatch.id, {
-      digest: DIGEST,
       notificationStatus: 'accepted',
     });
     await expect(
@@ -371,11 +372,104 @@ describe.sequential('account closure tombstone finalization', () => {
         db,
         requestId: mismatchRequest,
         userId: mismatch.id,
-        identityDigest: OTHER_DIGEST,
+        hmacSecret: OTHER_HMAC_SECRET,
       }),
     ).rejects.toMatchObject({ code: 'IDENTITY_DIGEST_MISMATCH' });
 
-    for (const subject of [incomplete, unaccepted, mismatch]) {
+    const arbitraryReceipt = await createUser('arbitrary-receipt', {
+      status: 'closure_processing',
+    });
+    const arbitraryReceiptRequest = await createFinalizationRequest(arbitraryReceipt.id, {
+      notificationStatus: 'accepted',
+      digestOverride: 'ab'.repeat(32),
+    });
+    await expect(
+      finalizeUserTombstone({
+        db,
+        requestId: arbitraryReceiptRequest,
+        userId: arbitraryReceipt.id,
+        hmacSecret: HMAC_SECRET,
+      }),
+    ).rejects.toMatchObject({ code: 'IDENTITY_DIGEST_MISMATCH' });
+
+    for (const subject of [incomplete, unaccepted, mismatch, arbitraryReceipt]) {
+      const [unchanged] = await db.select().from(users).where(eq(users.id, subject.id)).limit(1);
+      expect(unchanged).toMatchObject({ status: 'closure_processing', email: subject.email });
+    }
+  });
+
+  it('requires trusted step outcomes and an exact restricted-category receipt set', async () => {
+    const missingOutcome = await createUser('missing-outcome', { status: 'closure_processing' });
+    const missingOutcomeRequest = await createFinalizationRequest(missingOutcome.id, {
+      notificationStatus: 'accepted',
+      missingOutcomeCategory: 'payments_entitlements',
+    });
+    await expect(
+      finalizeUserTombstone({
+        db,
+        requestId: missingOutcomeRequest,
+        userId: missingOutcome.id,
+        hmacSecret: HMAC_SECRET,
+      }),
+    ).rejects.toMatchObject({ code: 'FINALIZATION_PRECONDITION_FAILED' });
+
+    const omitted = await createUser('omitted-restricted', { status: 'closure_processing' });
+    await createPayment(omitted.externalId, 'omitted-restricted', 'completed');
+    await createPartnerGraph(omitted.id, 'omitted-restricted', true);
+    await runToCompletion(paymentsEntitlementsClosureHandler, omitted, fakeStorage([]));
+    await runToCompletion(partnerKycLedgerClosureHandler, omitted, fakeStorage([]));
+    const omittedRequest = await createFinalizationRequest(omitted.id, {
+      notificationStatus: 'accepted',
+      restrictedCategoryIds: ['partner_kyc_ledger'],
+    });
+    await expect(
+      finalizeUserTombstone({
+        db,
+        requestId: omittedRequest,
+        userId: omitted.id,
+        hmacSecret: HMAC_SECRET,
+      }),
+    ).rejects.toMatchObject({ code: 'FINALIZATION_PRECONDITION_FAILED' });
+
+    const extra = await createUser('extra-restricted', { status: 'closure_processing' });
+    const extraRequest = await createFinalizationRequest(extra.id, {
+      notificationStatus: 'accepted',
+      restrictedCategoryIds: ['payments_entitlements', 'partner_kyc_ledger', 'media_assets'],
+    });
+    await expect(
+      finalizeUserTombstone({
+        db,
+        requestId: extraRequest,
+        userId: extra.id,
+        hmacSecret: HMAC_SECRET,
+      }),
+    ).rejects.toMatchObject({ code: 'FINALIZATION_PRECONDITION_FAILED' });
+
+    const retainedMedia = await createUser('retained-media', { status: 'closure_processing' });
+    const retainedMediaTaskId = await createTaskWithFile(retainedMedia.id, 'retained-media');
+    await createAuthorizationEvidence(retainedMedia.id, retainedMediaTaskId, 'retained-media');
+    const retainedMediaResult = await runToCompletion(
+      createMediaAssetsClosureHandler({ deleteVoiceClone: vi.fn(async () => undefined) }),
+      retainedMedia,
+      fakeStorage([]),
+    );
+    expect(retainedMediaResult.retention).toBe('restricted');
+    await runToCompletion(taskExecutionClosureHandler, retainedMedia, fakeStorage([]));
+    const retainedMediaRequest = await createFinalizationRequest(retainedMedia.id, {
+      notificationStatus: 'accepted',
+      restrictedOutcomeCategoryIds: ['media_assets'],
+      restrictedCategoryIds: [],
+    });
+    await expect(
+      finalizeUserTombstone({
+        db,
+        requestId: retainedMediaRequest,
+        userId: retainedMedia.id,
+        hmacSecret: HMAC_SECRET,
+      }),
+    ).rejects.toMatchObject({ code: 'FINALIZATION_PRECONDITION_FAILED' });
+
+    for (const subject of [missingOutcome, omitted, extra, retainedMedia]) {
       const [unchanged] = await db.select().from(users).where(eq(users.id, subject.id)).limit(1);
       expect(unchanged).toMatchObject({ status: 'closure_processing', email: subject.email });
     }
@@ -410,12 +504,11 @@ describe.sequential('account closure tombstone finalization', () => {
       storagePath: 'objects/still-owned.png',
     });
     const requestId = await createFinalizationRequest(subject.id, {
-      digest: DIGEST,
       notificationStatus: 'accepted',
     });
 
     await expect(
-      finalizeUserTombstone({ db, requestId, userId: subject.id, identityDigest: DIGEST }),
+      finalizeUserTombstone({ db, requestId, userId: subject.id, hmacSecret: HMAC_SECRET }),
     ).rejects.toMatchObject({ code: 'FINALIZATION_PRECONDITION_FAILED' });
 
     const [unchanged] = await db.select().from(users).where(eq(users.id, subject.id)).limit(1);
@@ -448,6 +541,91 @@ describe.sequential('account closure tombstone finalization', () => {
     expect(untouched?.metadata).toMatchObject({ payerEmail: 'tuple-external@example.test' });
   });
 
+  it('retains late settlements without entitlement after cleanup and after tombstoning', async () => {
+    const processing = await createUser('late-processing', { status: 'closure_processing' });
+    const processingPaymentId = await createPendingPayment(
+      processing.externalId,
+      'late-processing',
+    );
+    await expect(settlePendingPayment(processingPaymentId)).resolves.toBe('retained_only');
+
+    const [processingAfter] = await db
+      .select()
+      .from(users)
+      .where(eq(users.id, processing.id))
+      .limit(1);
+    expect(processingAfter).toMatchObject({ status: 'closure_processing', plan: 'free' });
+    await expectMinimizedSettlement(processingPaymentId);
+
+    const closed = await createUser('late-closed', { status: 'closed' });
+    await db
+      .update(users)
+      .set({ email: null, phone: null, googleId: null, displayName: null })
+      .where(eq(users.id, closed.id));
+    const closedPaymentId = await createPendingPayment(closed.externalId, 'late-closed');
+    await expect(settlePendingPayment(closedPaymentId)).resolves.toBe('retained_only');
+    const [closedAfter] = await db.select().from(users).where(eq(users.id, closed.id)).limit(1);
+    expect(closedAfter).toMatchObject({ status: 'closed', plan: 'free', email: null });
+    await expectMinimizedSettlement(closedPaymentId);
+  });
+
+  it('serializes a late settlement against finalization on the locked user row', async () => {
+    const subject = await createUser('settlement-race', { status: 'closure_processing' });
+    const paymentId = await createPendingPayment(subject.externalId, 'settlement-race');
+    const requestId = await createFinalizationRequest(subject.id, {
+      notificationStatus: 'accepted',
+      restrictedOutcomeCategoryIds: ['payments_entitlements'],
+      restrictedCategoryIds: ['payments_entitlements'],
+    });
+
+    let releaseSettlement = () => {};
+    const settlementGate = new Promise<void>((resolve) => {
+      releaseSettlement = resolve;
+    });
+    let reportUserLocked = () => {};
+    const userLocked = new Promise<void>((resolve) => {
+      reportUserLocked = resolve;
+    });
+    const settlement = db.transaction(async (tx) => {
+      const [row] = await tx.select().from(payments).where(eq(payments.id, paymentId)).limit(1);
+      if (!row) throw new Error('race payment missing');
+      const context = await lockSettlementContext(tx, row);
+      const [lockedRow] = await tx
+        .select()
+        .from(payments)
+        .where(eq(payments.id, paymentId))
+        .limit(1)
+        .for('update');
+      if (!lockedRow) throw new Error('race payment vanished');
+      reportUserLocked();
+      await settlementGate;
+      return completePaymentInTransaction(tx, lockedRow, context, {
+        captureId: uniqueId('cap_race'),
+        captureStatus: 'COMPLETED',
+      });
+    });
+    await userLocked;
+    const finalization = finalizeUserTombstone({
+      db,
+      requestId,
+      userId: subject.id,
+      hmacSecret: HMAC_SECRET,
+    });
+    await expect(
+      Promise.race([
+        finalization.then(() => 'completed'),
+        new Promise<'waiting'>((resolve) => setTimeout(() => resolve('waiting'), 50)),
+      ]),
+    ).resolves.toBe('waiting');
+
+    releaseSettlement();
+    await expect(settlement).resolves.toBe('retained_only');
+    await expect(finalization).resolves.toBeUndefined();
+    const [closed] = await db.select().from(users).where(eq(users.id, subject.id)).limit(1);
+    expect(closed).toMatchObject({ status: 'closed', plan: 'free', email: null });
+    await expectMinimizedSettlement(paymentId);
+  });
+
   async function createUser(
     label: string,
     options: {
@@ -456,7 +634,7 @@ describe.sequential('account closure tombstone finalization', () => {
       googleId?: string;
       plan?: string;
       role?: string;
-      status?: 'active' | 'closure_processing';
+      status?: 'active' | 'closure_processing' | 'closed';
       displayName?: string;
       media?: boolean;
       mfa?: boolean;
@@ -516,6 +694,29 @@ describe.sequential('account closure tombstone finalization', () => {
     return taskId;
   }
 
+  async function createAuthorizationEvidence(
+    userId: number,
+    taskId: number,
+    label: string,
+  ): Promise<void> {
+    await db.insert(evidenceArtifacts).values({
+      externalId: uniqueId(`evidence_${label}`),
+      ownerUserId: userId,
+      taskId,
+      artifactKind: 'document',
+      purpose: 'authorization',
+      r2Bucket: 'synthetic-test',
+      r2Key: `evidence/${label}/authorization`,
+      contentType: 'application/pdf',
+      sizeBytes: 10,
+      sha256: 'ab'.repeat(32),
+      capturedAt: new Date('2026-08-01T00:00:00.000Z'),
+      collectorLane: 'task8-review-test',
+      retentionPolicy: 'manual_hold',
+      metadataJson: { privateNote: 'must be removed' },
+    });
+  }
+
   async function createPayment(userExternalId: string, label: string, status: string) {
     const [result] = await db.insert(payments).values({
       externalId: uniqueId(`pay_${label}`),
@@ -549,7 +750,66 @@ describe.sequential('account closure tombstone finalization', () => {
     return Number(result.insertId);
   }
 
-  async function createPartnerGraph(userId: number, label: string) {
+  async function createPendingPayment(userExternalId: string, label: string): Promise<number> {
+    const [result] = await db.insert(payments).values({
+      externalId: uniqueId(`pay_${label}`),
+      userExternalId,
+      provider: 'paypal',
+      providerOrderId: uniqueId(`ord_${label}`),
+      plan: 'pro',
+      kind: 'subscription',
+      amountCents: 1999,
+      currency: 'USD',
+      status: 'pending',
+      metadata: {
+        environment: 'live',
+        cycle: 'monthly',
+        payerEmail: `${label}@example.test`,
+        approveUrl: 'https://provider.example/private-token',
+        rawPayload: { secret: true },
+      },
+    });
+    return Number(result.insertId);
+  }
+
+  async function settlePendingPayment(paymentId: number) {
+    return db.transaction(async (tx) => {
+      const [row] = await tx.select().from(payments).where(eq(payments.id, paymentId)).limit(1);
+      if (!row) throw new Error('payment fixture missing');
+      const context = await lockSettlementContext(tx, row);
+      const [lockedRow] = await tx
+        .select()
+        .from(payments)
+        .where(eq(payments.id, paymentId))
+        .limit(1)
+        .for('update');
+      if (!lockedRow) throw new Error('payment fixture vanished');
+      return completePaymentInTransaction(tx, lockedRow, context, {
+        captureId: uniqueId('cap_late'),
+        captureStatus: 'COMPLETED',
+      });
+    });
+  }
+
+  async function expectMinimizedSettlement(paymentId: number): Promise<void> {
+    const [row] = await db.select().from(payments).where(eq(payments.id, paymentId)).limit(1);
+    expect(row).toMatchObject({
+      status: 'completed',
+      metadata: {
+        provider: 'paypal',
+        environment: 'live',
+        cycle: 'monthly',
+        providerStatus: 'COMPLETED',
+        currency: 'USD',
+        settledAt: expect.any(String),
+      },
+    });
+    expect(row?.metadata).not.toHaveProperty('payerEmail');
+    expect(row?.metadata).not.toHaveProperty('approveUrl');
+    expect(row?.metadata).not.toHaveProperty('rawPayload');
+  }
+
+  async function createPartnerGraph(userId: number, label: string, preMarked = false) {
     const now = new Date('2026-08-01T00:00:00.000Z');
     await db.insert(partnerMemberships).values({
       externalId: uniqueId(`pmem_${label}`),
@@ -557,7 +817,7 @@ describe.sequential('account closure tombstone finalization', () => {
       status: 'active',
       startsAt: now,
       expiresAt: new Date('2027-08-01T00:00:00.000Z'),
-      metadata: sensitiveMetadata(`${label} membership`),
+      metadata: sensitiveMetadata(`${label} membership`, preMarked),
     });
     await db.insert(partnerKycProfiles).values({
       externalId: uniqueId(`pkyc_${label}`),
@@ -572,7 +832,7 @@ describe.sequential('account closure tombstone finalization', () => {
       providerRef: uniqueId(`kycref_${label}`),
       reviewedAt: now,
       metadata: {
-        ...sensitiveMetadata(`${label} kyc`),
+        ...sensitiveMetadata(`${label} kyc`, preMarked),
         providerRef: uniqueId(`kycrefmeta_${label}`),
         bankCardHashUpdatedAt: '2026-08-01T00:00:00.000Z',
         reviewerUserId: 9,
@@ -588,7 +848,7 @@ describe.sequential('account closure tombstone finalization', () => {
       status: 'completed',
       orderKind: 'recharge',
       idempotencyKey: uniqueId(`pordkey_${label}`),
-      metadata: sensitiveMetadata(`${label} order`),
+      metadata: sensitiveMetadata(`${label} order`, preMarked),
     });
     const orderId = Number(orderResult.insertId);
     const [lotResult] = await db.insert(partnerLots).values({
@@ -606,7 +866,7 @@ describe.sequential('account closure tombstone finalization', () => {
       accumulationEndsAt: new Date('2026-09-01T00:00:00.000Z'),
       releaseStartsAt: new Date('2026-09-01T00:00:00.000Z'),
       releaseEndsAt: new Date('2027-09-01T00:00:00.000Z'),
-      metadata: sensitiveMetadata(`${label} lot`),
+      metadata: sensitiveMetadata(`${label} lot`, preMarked),
     });
     const lotId = Number(lotResult.insertId);
     await db.insert(holaCreditLedgerEntries).values({
@@ -620,7 +880,7 @@ describe.sequential('account closure tombstone finalization', () => {
       status: 'posted',
       idempotencyKey: uniqueId(`pledkey_${label}`),
       metadata: {
-        ...sensitiveMetadata(`${label} ledger`),
+        ...sensitiveMetadata(`${label} ledger`, preMarked),
         releaseId: 44,
         releaseMonth: '2026-08',
       },
@@ -636,7 +896,7 @@ describe.sequential('account closure tombstone finalization', () => {
       idempotencyKey: uniqueId(`pwdkey_${label}`),
       rejectionReason: `${label} private reviewer free text`,
       metadata: {
-        ...sensitiveMetadata(`${label} withdrawal`),
+        ...sensitiveMetadata(`${label} withdrawal`, preMarked),
         paidByUserId: 11,
         providerPayoutId: uniqueId(`payout_${label}`),
         paidAt: '2026-08-20T00:00:00.000Z',
@@ -649,7 +909,7 @@ describe.sequential('account closure tombstone finalization', () => {
       eventType: 'risk_hold',
       severity: 'high',
       status: 'open',
-      metadata: sensitiveMetadata(`${label} risk`),
+      metadata: sensitiveMetadata(`${label} risk`, preMarked),
     });
     await db.insert(partnerActivityEvents).values({
       externalId: uniqueId(`pact_${label}`),
@@ -658,7 +918,7 @@ describe.sequential('account closure tombstone finalization', () => {
       eventType: 'marketing_display',
       points: 5,
       idempotencyKey: uniqueId(`pactkey_${label}`),
-      metadata: sensitiveMetadata(`${label} activity`),
+      metadata: sensitiveMetadata(`${label} activity`, preMarked),
     });
     await db.insert(partnerDailyAllocations).values({
       externalId: uniqueId(`pday_${label}`),
@@ -667,7 +927,7 @@ describe.sequential('account closure tombstone finalization', () => {
       lockedBonusCreditCents: 50,
       apiUnitsWeight: 100,
       idempotencyKey: uniqueId(`pdaykey_${label}`),
-      metadata: sensitiveMetadata(`${label} allocation`),
+      metadata: sensitiveMetadata(`${label} allocation`, preMarked),
     });
     await db.insert(partnerMonthlyReleases).values({
       externalId: uniqueId(`pmonth_${label}`),
@@ -677,7 +937,7 @@ describe.sequential('account closure tombstone finalization', () => {
       bonusCreditCents: 10,
       status: 'posted',
       idempotencyKey: uniqueId(`pmonkey_${label}`),
-      metadata: sensitiveMetadata(`${label} release`),
+      metadata: sensitiveMetadata(`${label} release`, preMarked),
     });
     return { orderId, lotId };
   }
@@ -767,9 +1027,12 @@ describe.sequential('account closure tombstone finalization', () => {
   async function createFinalizationRequest(
     userId: number,
     options: {
-      digest: string;
       notificationStatus: 'pending' | 'accepted';
       incompleteCategory?: (typeof DATA_CATEGORY_IDS)[number];
+      missingOutcomeCategory?: (typeof DATA_CATEGORY_IDS)[number];
+      restrictedOutcomeCategoryIds?: (typeof DATA_CATEGORY_IDS)[number][];
+      restrictedCategoryIds?: (typeof DATA_CATEGORY_IDS)[number][];
+      digestOverride?: string;
     },
   ): Promise<number> {
     const now = new Date();
@@ -792,17 +1055,42 @@ describe.sequential('account closure tombstone finalization', () => {
           categoryId === options.incompleteCategory
             ? ('retryable' as const)
             : ('succeeded' as const),
+        retentionOutcome:
+          categoryId === options.incompleteCategory || categoryId === options.missingOutcomeCategory
+            ? null
+            : (
+                  options.restrictedOutcomeCategoryIds ?? [
+                    'payments_entitlements',
+                    'partner_kyc_ledger',
+                  ]
+                ).includes(categoryId)
+              ? ('restricted' as const)
+              : ('deleted' as const),
         finishedAt: categoryId === options.incompleteCategory ? null : now,
       })),
     );
+    const [identity] = await db
+      .select({
+        externalId: users.externalId,
+        email: users.email,
+        phone: users.phone,
+        googleId: users.googleId,
+      })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+    if (!identity) throw new Error('identity fixture missing');
     await db.insert(accountClosureReceipts).values({
       requestId,
       userId,
       receiptNumber: uniqueId('acl_rcpt'),
       kind: 'completion',
-      subjectDigest: options.digest,
+      subjectDigest: options.digestOverride ?? testSubjectDigest(HMAC_SECRET, identity),
       completedCategoryIds: [...DATA_CATEGORY_IDS],
-      restrictedCategoryIds: ['payments_entitlements', 'partner_kyc_ledger'],
+      restrictedCategoryIds: options.restrictedCategoryIds ?? [
+        'payments_entitlements',
+        'partner_kyc_ledger',
+      ],
       notificationStatus: options.notificationStatus,
       issuedAt: now,
       completedAt: now,
@@ -850,8 +1138,31 @@ describe.sequential('account closure tombstone finalization', () => {
   }
 });
 
-function sensitiveMetadata(freeText: string) {
+function testSubjectDigest(
+  secret: string,
+  identity: {
+    externalId: string;
+    email: string | null;
+    phone: string | null;
+    googleId: string | null;
+  },
+): string {
+  return createHmac('sha256', secret)
+    .update(
+      JSON.stringify([
+        'account-closure-subject-v1',
+        identity.externalId,
+        identity.email,
+        identity.phone,
+        identity.googleId,
+      ]),
+    )
+    .digest('hex');
+}
+
+function sensitiveMetadata(freeText: string, preMarked = false) {
   return {
+    ...(preMarked ? { closureRestricted: true } : {}),
     freeText,
     payerEmail: 'person@example.test',
     marketingDisplay: 'private campaign',

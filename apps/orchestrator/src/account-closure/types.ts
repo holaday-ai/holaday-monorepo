@@ -1,7 +1,4 @@
-import {
-  DATA_CATEGORY_IDS,
-  type DataCategoryId,
-} from '../data-governance/types.js';
+import { DATA_CATEGORY_IDS, type DataCategoryId } from '../data-governance/types.js';
 
 export const ACCOUNT_CLOSURE_USER_STATUSES = [
   'active',
@@ -65,23 +62,28 @@ export type AccountClosureChannel = (typeof ACCOUNT_CLOSURE_CHANNELS)[number];
 export const ACCOUNT_CLOSURE_RECEIPT_KINDS = ['application', 'completion'] as const;
 export type AccountClosureReceiptKind = (typeof ACCOUNT_CLOSURE_RECEIPT_KINDS)[number];
 
-export const ACCOUNT_CLOSURE_NOTIFICATION_STATUSES = [
-  'pending',
-  'accepted',
-  'failed',
-] as const;
+export const ACCOUNT_CLOSURE_NOTIFICATION_STATUSES = ['pending', 'accepted', 'failed'] as const;
 export type AccountClosureNotificationStatus =
   (typeof ACCOUNT_CLOSURE_NOTIFICATION_STATUSES)[number];
 
+export const ACCOUNT_CLOSURE_RETENTION_OUTCOMES = [
+  'deleted',
+  'anonymized',
+  'restricted',
+  'not_present',
+] as const;
+export type AccountClosureRetentionOutcome = (typeof ACCOUNT_CLOSURE_RETENTION_OUTCOMES)[number];
+
 /** Checkpoints deliberately permit only opaque numeric pagination progress. */
 export interface AccountClosureCheckpoint {
+  targetIndex?: number;
   cursor?: number;
   processedCount?: number;
 }
 
 export type AccountClosureCategoryId = DataCategoryId;
 
-const ACCOUNT_CLOSURE_CHECKPOINT_KEYS = new Set(['cursor', 'processedCount']);
+const ACCOUNT_CLOSURE_CHECKPOINT_KEYS = new Set(['targetIndex', 'cursor', 'processedCount']);
 const ACCOUNT_CLOSURE_CATEGORY_ID_SET = new Set<string>(DATA_CATEGORY_IDS);
 
 /**
@@ -97,6 +99,9 @@ export function parseAccountClosureCheckpoint(value: unknown): AccountClosureChe
   }
 
   const checkpoint: AccountClosureCheckpoint = {};
+  if (Object.hasOwn(value, 'targetIndex')) {
+    checkpoint.targetIndex = parseProgressValue(value.targetIndex);
+  }
   if (Object.hasOwn(value, 'cursor')) checkpoint.cursor = parseProgressValue(value.cursor);
   if (Object.hasOwn(value, 'processedCount')) {
     checkpoint.processedCount = parseProgressValue(value.processedCount);

@@ -108,7 +108,11 @@ interface PartnerTargetRow {
 
 interface PartnerTarget {
   kind: 'delete' | 'restrict';
-  selectRows(context: ClosureHandlerContext, limit: number): Promise<PartnerTargetRow[]>;
+  selectRows(
+    context: ClosureHandlerContext,
+    limit: number,
+    afterId: number,
+  ): Promise<PartnerTargetRow[]>;
   mutateRows(context: ClosureHandlerContext, rows: readonly PartnerTargetRow[]): Promise<number>;
 }
 
@@ -121,35 +125,56 @@ export const partnerKycLedgerClosureHandler: AccountClosureHandler = {
       throw new ClosureHandlerError('INVARIANT_VIOLATION');
     }
 
+    let targetIndex = context.checkpoint?.targetIndex ?? 0;
+    let afterId = context.checkpoint?.cursor ?? 0;
+    if (
+      !Number.isSafeInteger(targetIndex) ||
+      targetIndex < 0 ||
+      targetIndex > PARTNER_TARGETS.length ||
+      !Number.isSafeInteger(afterId) ||
+      afterId < 0
+    ) {
+      throw new ClosureHandlerError('INVARIANT_VIOLATION');
+    }
+
     let pageProcessed = 0;
-    let restrictedThisPage = false;
-    for (const target of PARTNER_TARGETS) {
+    while (targetIndex < PARTNER_TARGETS.length) {
       const remaining = pageSize - pageProcessed;
       if (remaining === 0) break;
-      const rows = await target.selectRows(context, remaining);
+      const target = PARTNER_TARGETS[targetIndex];
+      if (!target) throw new ClosureHandlerError('INVARIANT_VIOLATION');
+      const rows = await target.selectRows(context, remaining, afterId);
       if (rows.length > remaining) throw new ClosureHandlerError('INVARIANT_VIOLATION');
-      if (rows.length === 0) continue;
+      if (rows.length === 0) {
+        targetIndex += 1;
+        afterId = 0;
+        continue;
+      }
       const mutated = await target.mutateRows(context, rows);
       if (mutated !== rows.length) throw new ClosureHandlerError('INVARIANT_VIOLATION');
       pageProcessed += mutated;
-      if (target.kind === 'restrict') restrictedThisPage = true;
+      afterId = rows[rows.length - 1]?.id ?? afterId;
+      if (rows.length < remaining) {
+        targetIndex += 1;
+        afterId = 0;
+      }
     }
 
     const previousProcessed = context.checkpoint?.processedCount ?? 0;
-    const previouslyRestricted = context.checkpoint?.cursor === 1;
-    if (pageProcessed > 0) {
-      const processed = previousProcessed + pageProcessed;
+    const processed = previousProcessed + pageProcessed;
+    if (targetIndex < PARTNER_TARGETS.length) {
       return {
         kind: 'continue',
         checkpoint: {
-          cursor: previouslyRestricted || restrictedThisPage ? 1 : 0,
+          targetIndex,
+          cursor: afterId,
           processedCount: processed,
         },
         processed,
       };
     }
     const hasRestrictedRows = await hasAnyRestrictedRows(context);
-    if (previousProcessed === 0) {
+    if (processed === 0) {
       return {
         kind: 'complete',
         processed: 0,
@@ -158,8 +183,8 @@ export const partnerKycLedgerClosureHandler: AccountClosureHandler = {
     }
     return {
       kind: 'complete',
-      processed: previousProcessed,
-      retention: previouslyRestricted || hasRestrictedRows ? 'restricted' : 'deleted',
+      processed,
+      retention: hasRestrictedRows ? 'restricted' : 'deleted',
     };
   },
 };
@@ -199,7 +224,6 @@ const PARTNER_TARGETS: readonly PartnerTarget[] = [
     'partner_withdrawal_requests',
     'withdrawal',
     sql`, rejection_reason = NULL`,
-    sql` OR rejection_reason IS NOT NULL`,
   ),
   directRestrictedTarget('partner_risk_events', 'risk'),
   referralRestrictedTarget(),
@@ -211,10 +235,10 @@ function directDeleteTarget(tableName: string): PartnerTarget {
   const table = identifier(tableName);
   return {
     kind: 'delete',
-    async selectRows(context, limit) {
+    async selectRows(context, limit, afterId) {
       return readRows(
         await context.db.execute(
-          sql`SELECT id, NULL AS metadata FROM ${table} WHERE user_id = ${context.request.userId} ORDER BY id ASC LIMIT ${limit}`,
+          sql`SELECT id, NULL AS metadata FROM ${table} WHERE user_id = ${context.request.userId} AND id > ${afterId} ORDER BY id ASC LIMIT ${limit}`,
         ),
       );
     },
@@ -233,15 +257,14 @@ function directRestrictedTarget(
   tableName: string,
   metadataKind: PartnerMetadataKind,
   extraSet: SQL = sql``,
-  extraPending: SQL = sql``,
 ): PartnerTarget {
   const table = identifier(tableName);
   return {
     kind: 'restrict',
-    async selectRows(context, limit) {
+    async selectRows(context, limit, afterId) {
       return readRows(
         await context.db.execute(
-          sql`SELECT id, metadata FROM ${table} WHERE user_id = ${context.request.userId} AND (NOT (JSON_EXTRACT(metadata, '$.closureRestricted') <=> TRUE)${extraPending}) ORDER BY id ASC LIMIT ${limit}`,
+          sql`SELECT id, metadata FROM ${table} WHERE user_id = ${context.request.userId} AND id > ${afterId} ORDER BY id ASC LIMIT ${limit}`,
         ),
       );
     },
@@ -262,12 +285,12 @@ function directRestrictedTarget(
 function referralRestrictedTarget(): PartnerTarget {
   return {
     kind: 'restrict',
-    async selectRows(context, limit) {
+    async selectRows(context, limit, afterId) {
       return readRows(
         await context.db.execute(sql`
           SELECT id, metadata FROM partner_referrals
           WHERE (inviter_user_id = ${context.request.userId} OR invitee_user_id = ${context.request.userId})
-            AND NOT (JSON_EXTRACT(metadata, '$.closureRestricted') <=> TRUE)
+            AND id > ${afterId}
           ORDER BY id ASC LIMIT ${limit}
         `),
       );
@@ -296,13 +319,13 @@ function lotChildRestrictedTarget(
   const table = identifier(tableName);
   return {
     kind: 'restrict',
-    async selectRows(context, limit) {
+    async selectRows(context, limit, afterId) {
       return readRows(
         await context.db.execute(sql`
           SELECT child.id, child.metadata FROM ${table} AS child
           INNER JOIN partner_lots AS lot ON lot.id = child.lot_id
           WHERE lot.user_id = ${context.request.userId}
-            AND NOT (JSON_EXTRACT(child.metadata, '$.closureRestricted') <=> TRUE)
+            AND child.id > ${afterId}
           ORDER BY child.id ASC LIMIT ${limit}
         `),
       );

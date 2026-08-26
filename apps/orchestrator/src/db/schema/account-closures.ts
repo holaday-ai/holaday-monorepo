@@ -12,12 +12,13 @@ import {
   varchar,
 } from 'drizzle-orm/mysql-core';
 import {
-  ACCOUNT_CLOSURE_CHANNELS,
   ACCOUNT_CLOSURE_CHALLENGE_ACTIONS,
+  ACCOUNT_CLOSURE_CHANNELS,
   ACCOUNT_CLOSURE_NOTIFICATION_STATUSES,
   ACCOUNT_CLOSURE_REASON_CODES,
   ACCOUNT_CLOSURE_RECEIPT_KINDS,
   ACCOUNT_CLOSURE_REQUEST_STATUSES,
+  ACCOUNT_CLOSURE_RETENTION_OUTCOMES,
   ACCOUNT_CLOSURE_STEP_ERROR_CODES,
   ACCOUNT_CLOSURE_STEP_STATUSES,
   type AccountClosureCheckpoint,
@@ -78,6 +79,7 @@ export const accountClosureSteps = mysqlTable(
     leaseUntil: datetime('lease_until', { mode: 'date', fsp: 3 }),
     checkpoint: json('checkpoint').$type<AccountClosureCheckpoint | null>(),
     processedCount: int('processed_count', { unsigned: true }).notNull().default(0),
+    retentionOutcome: mysqlEnum('retention_outcome', ACCOUNT_CLOSURE_RETENTION_OUTCOMES),
     lastErrorCode: mysqlEnum('last_error_code', ACCOUNT_CLOSURE_STEP_ERROR_CODES),
     startedAt: datetime('started_at', { mode: 'date', fsp: 3 }),
     finishedAt: datetime('finished_at', { mode: 'date', fsp: 3 }),
@@ -95,7 +97,7 @@ export const accountClosureSteps = mysqlTable(
     index('ix_account_closure_steps_lease_until').on(table.leaseUntil),
     check(
       'ck_account_closure_steps_checkpoint_keys',
-      sql`${table.checkpoint} IS NULL OR (JSON_TYPE(${table.checkpoint}) = 'OBJECT' AND JSON_REMOVE(${table.checkpoint}, '$.cursor', '$.processedCount') = JSON_OBJECT())`,
+      sql`${table.checkpoint} IS NULL OR (JSON_TYPE(${table.checkpoint}) = 'OBJECT' AND JSON_REMOVE(${table.checkpoint}, '$.targetIndex', '$.cursor', '$.processedCount') = JSON_OBJECT())`,
     ),
   ],
 );

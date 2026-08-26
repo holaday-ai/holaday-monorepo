@@ -125,6 +125,7 @@ const addonOrder = {
   id: 1,
   externalId: 'pay_addon',
   userExternalId: 'usr_test',
+  provider: 'paypal',
   providerOrderId: 'ord_addon',
   status: 'pending',
   kind: 'addon',
@@ -133,12 +134,13 @@ const addonOrder = {
   currency: 'USD',
   metadata: {},
 };
-const proUser = { id: 42, plan: 'pro', planExpiresAt: null };
+const proUser = { id: 42, plan: 'pro', planExpiresAt: null, status: 'active' };
 
 const subOrder = {
   id: 2,
   externalId: 'pay_sub',
   userExternalId: 'usr_test',
+  provider: 'paypal',
   providerOrderId: 'ord_sub',
   status: 'pending',
   kind: 'subscription',
@@ -147,7 +149,7 @@ const subOrder = {
   currency: 'USD',
   metadata: { firstMonth: true, cycle: 'monthly' },
 };
-const freeUser = { id: 42, plan: 'free', planExpiresAt: null };
+const freeUser = { id: 42, plan: 'free', planExpiresAt: null, status: 'active' };
 
 describe('captureOrder — affectedRows-gated entitlement (regression)', () => {
   beforeEach(() => {
@@ -210,10 +212,44 @@ describe('captureOrder — affectedRows-gated entitlement (regression)', () => {
     expect(updates.some((u) => u.table === 'users' && u.set.plan === 'pro')).toBe(false);
     expect(grantFirstMonthBonusSpy).not.toHaveBeenCalled();
   });
+
+  it('records a captured settlement but never restores entitlement for a closing account', async () => {
+    const { ctx, updates } = makeCtx({
+      orderRow: {
+        ...subOrder,
+        metadata: {
+          cycle: 'monthly',
+          payerEmail: 'private@example.test',
+          approveUrl: 'https://provider.example/private',
+          rawPayload: { secret: true },
+        },
+      },
+      userRow: { ...freeUser, status: 'closure_processing' },
+      gateAffected: 1,
+    });
+
+    await expect(
+      paymentRouter.createCaller(ctx).captureOrder({ paymentId: 'pay_sub', orderId: 'ord_sub' }),
+    ).resolves.toEqual({ ok: true, plan: 'pro' });
+
+    const paymentWrite = updates.find(
+      (update) => update.table === 'payments' && update.set.status === 'completed',
+    );
+    expect(paymentWrite?.set.metadata).toEqual({
+      provider: 'paypal',
+      cycle: 'monthly',
+      providerStatus: 'COMPLETED',
+      currency: 'USD',
+      settledAt: expect.any(String),
+    });
+    expect(updates.some((update) => update.table === 'users' && update.set.plan === 'pro')).toBe(
+      false,
+    );
+    expect(grantFirstMonthBonusSpy).not.toHaveBeenCalled();
+  });
 });
 
 type MutablePayment = typeof subOrder & {
-  provider?: string;
   amountCents?: number;
   currency?: string;
 };

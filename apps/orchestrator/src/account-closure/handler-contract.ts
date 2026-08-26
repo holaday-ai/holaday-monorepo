@@ -4,8 +4,13 @@ import type { DataCategoryId } from '../data-governance/types.js';
 import type { DB } from '../db/client.js';
 import { readAffectedRows } from '../db/mysql-result.js';
 import type { StorageProvider } from '../files/storage-provider.js';
+import type { AccountClosureRetentionOutcome } from './types.js';
 
-export type ClosureCheckpoint = { cursor?: number; processedCount: number } | null;
+export type ClosureCheckpoint = {
+  targetIndex?: number;
+  cursor?: number;
+  processedCount: number;
+} | null;
 
 export interface ClosureHandlerContext {
   db: DB;
@@ -26,7 +31,7 @@ export type ClosureHandlerResult =
   | {
       kind: 'complete';
       processed: number;
-      retention: 'deleted' | 'anonymized' | 'restricted' | 'not_present';
+      retention: AccountClosureRetentionOutcome;
     };
 
 export interface AccountClosureHandler {

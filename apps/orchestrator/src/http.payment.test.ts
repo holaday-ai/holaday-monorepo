@@ -11,6 +11,7 @@ const { applyAddonPackSpy, fakeDb, grantFirstMonthBonusSpy, paymentRows, userSta
       externalId: 'usr_cn_test',
       plan: 'free',
       planExpiresAt: null as Date | null,
+      status: 'active',
     };
 
     const drizzleName = (table: unknown): string =>
@@ -244,6 +245,7 @@ describe('internal payment confirmation', () => {
       externalId: 'usr_cn_test',
       plan: 'free',
       planExpiresAt: null,
+      status: 'active',
     });
     applyAddonPackSpy.mockReset().mockResolvedValue(undefined);
     grantFirstMonthBonusSpy.mockReset().mockResolvedValue(undefined);
@@ -288,6 +290,69 @@ describe('internal payment confirmation', () => {
     expect(userState.plan).toBe('free');
     expect(grantFirstMonthBonusSpy).not.toHaveBeenCalled();
   });
+
+  it('retains only settlement facts when a CN callback reaches a closing account', async () => {
+    seedPendingCnPayment();
+    Object.assign(userState, { status: 'closure_processing', plan: 'free' });
+    Object.assign(paymentRows[0] ?? {}, {
+      metadata: {
+        cycle: 'monthly',
+        firstMonth: true,
+        payerEmail: 'private@example.test',
+        rawPayload: { secret: true },
+      },
+    });
+
+    const response = await postInternalConfirm(firstMonthConfirm);
+
+    expect(response.status).toBe(200);
+    expect(userState.plan).toBe('free');
+    expect(grantFirstMonthBonusSpy).not.toHaveBeenCalled();
+    expect(paymentRows[0]).toMatchObject({
+      status: 'completed',
+      metadata: {
+        provider: 'wechat',
+        cycle: 'monthly',
+        providerStatus: 'COMPLETED',
+        currency: 'CNY',
+        settledAt: expect.any(String),
+      },
+    });
+    expect(paymentRows[0]?.metadata).not.toHaveProperty('payerEmail');
+    expect(paymentRows[0]?.metadata).not.toHaveProperty('rawPayload');
+  });
+
+  it('does not reintroduce callback metadata when a closing-account settlement needs review', async () => {
+    seedPendingCnPayment();
+    Object.assign(userState, { status: 'closure_processing', plan: 'free' });
+    Object.assign(paymentRows[0] ?? {}, {
+      amountCents: 1,
+      metadata: {
+        cycle: 'monthly',
+        firstMonth: true,
+        payerEmail: 'private@example.test',
+        rawPayload: { secret: true },
+      },
+    });
+
+    const response = await postInternalConfirm({ ...firstMonthConfirm, amountCents: 1 });
+
+    expect(response.status).toBe(200);
+    expect(userState.plan).toBe('free');
+    expect(grantFirstMonthBonusSpy).not.toHaveBeenCalled();
+    expect(paymentRows[0]).toMatchObject({
+      status: 'failed',
+      metadata: {
+        provider: 'wechat',
+        cycle: 'monthly',
+        providerStatus: 'FAILED',
+        currency: 'CNY',
+      },
+    });
+    expect(paymentRows[0]?.metadata).not.toHaveProperty('reason');
+    expect(paymentRows[0]?.metadata).not.toHaveProperty('payerEmail');
+    expect(paymentRows[0]?.metadata).not.toHaveProperty('rawPayload');
+  });
 });
 
 describe('internal payment bridge health', () => {
@@ -328,6 +393,7 @@ describe('PayPal webhook verification', () => {
       externalId: 'usr_cn_test',
       plan: 'free',
       planExpiresAt: null,
+      status: 'active',
     });
     grantFirstMonthBonusSpy.mockReset().mockResolvedValue(undefined);
   });

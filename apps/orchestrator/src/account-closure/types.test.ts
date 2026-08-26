@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import {
-  parseAccountClosureCheckpoint,
-  parseAccountClosureReceiptCategoryIds,
-} from './types.js';
+import { parseAccountClosureCheckpoint, parseAccountClosureReceiptCategoryIds } from './types.js';
 
 describe('account closure durable payload validation', () => {
-  it('accepts numeric cursor and processed-count checkpoints', () => {
-    expect(parseAccountClosureCheckpoint({ cursor: 7, processedCount: 100 })).toEqual({
+  it('accepts server-owned numeric target, cursor, and processed-count checkpoints', () => {
+    expect(
+      parseAccountClosureCheckpoint({ targetIndex: 3, cursor: 7, processedCount: 100 }),
+    ).toEqual({
+      targetIndex: 3,
       cursor: 7,
       processedCount: 100,
     });
@@ -16,6 +16,8 @@ describe('account closure durable payload validation', () => {
     { cursor: 1, email: 'not-permitted' },
     { cursor: -1 },
     { cursor: 1.5 },
+    { targetIndex: -1 },
+    { targetIndex: 1.5 },
     { processedCount: -1 },
     { processedCount: 2.5 },
   ])('rejects a checkpoint that can carry invalid progress or private fields', (value) => {

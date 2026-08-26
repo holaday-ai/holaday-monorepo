@@ -1,4 +1,4 @@
-import { timingSafeEqual } from 'node:crypto';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import { and, eq, sql } from 'drizzle-orm';
 import { DATA_CATEGORY_IDS } from '../data-governance/types.js';
 import type { DB } from '../db/client.js';
@@ -14,7 +14,7 @@ import { users } from '../db/schema/users.js';
 
 export type TombstoneFinalizationErrorCode =
   | 'FINALIZATION_PRECONDITION_FAILED'
-  | 'INVALID_IDENTITY_DIGEST'
+  | 'INVALID_HMAC_SECRET'
   | 'IDENTITY_DIGEST_MISMATCH';
 
 export class TombstoneFinalizationError extends Error {
@@ -28,7 +28,7 @@ export async function finalizeUserTombstone(input: {
   db: DB;
   requestId: number;
   userId: number;
-  identityDigest: string;
+  hmacSecret: string;
 }): Promise<void> {
   if (!Number.isSafeInteger(input.requestId) || input.requestId <= 0) {
     throw new TombstoneFinalizationError('FINALIZATION_PRECONDITION_FAILED');
@@ -36,8 +36,8 @@ export async function finalizeUserTombstone(input: {
   if (!Number.isSafeInteger(input.userId) || input.userId <= 0) {
     throw new TombstoneFinalizationError('FINALIZATION_PRECONDITION_FAILED');
   }
-  if (!/^[a-f0-9]{64}$/i.test(input.identityDigest)) {
-    throw new TombstoneFinalizationError('INVALID_IDENTITY_DIGEST');
+  if (input.hmacSecret.trim().length < 32) {
+    throw new TombstoneFinalizationError('INVALID_HMAC_SECRET');
   }
 
   await input.db.transaction(async (tx) => {
@@ -66,6 +66,7 @@ export async function finalizeUserTombstone(input: {
         categoryId: accountClosureSteps.categoryId,
         status: accountClosureSteps.status,
         handlerVersion: accountClosureSteps.handlerVersion,
+        retentionOutcome: accountClosureSteps.retentionOutcome,
       })
       .from(accountClosureSteps)
       .where(eq(accountClosureSteps.requestId, input.requestId))
@@ -74,11 +75,21 @@ export async function finalizeUserTombstone(input: {
     if (
       steps.length !== DATA_CATEGORY_IDS.length ||
       stepCategories.size !== DATA_CATEGORY_IDS.length ||
-      steps.some((step) => step.status !== 'succeeded' || step.handlerVersion !== 1) ||
+      steps.some(
+        (step) =>
+          step.status !== 'succeeded' ||
+          step.handlerVersion !== 1 ||
+          step.retentionOutcome === null,
+      ) ||
       DATA_CATEGORY_IDS.some((categoryId) => !stepCategories.has(categoryId))
     ) {
       throw new TombstoneFinalizationError('FINALIZATION_PRECONDITION_FAILED');
     }
+    const restrictedStepCategories = DATA_CATEGORY_IDS.filter((categoryId) =>
+      steps.some(
+        (step) => step.categoryId === categoryId && step.retentionOutcome === 'restricted',
+      ),
+    );
 
     const [receipt] = await tx
       .select({
@@ -104,16 +115,17 @@ export async function finalizeUserTombstone(input: {
       receipt.notificationStatus !== 'accepted' ||
       receipt.completedAt === null ||
       !hasExactCategoryCoverage(receipt.completedCategoryIds) ||
-      !hasValidRestrictedCategories(receipt.restrictedCategoryIds)
+      !hasExactRestrictedCategories(receipt.restrictedCategoryIds, restrictedStepCategories)
     ) {
       throw new TombstoneFinalizationError('FINALIZATION_PRECONDITION_FAILED');
-    }
-    if (!digestMatches(receipt.subjectDigest, input.identityDigest)) {
-      throw new TombstoneFinalizationError('IDENTITY_DIGEST_MISMATCH');
     }
 
     const [user] = await tx
       .select({
+        externalId: users.externalId,
+        email: users.email,
+        phone: users.phone,
+        googleId: users.googleId,
         plan: users.plan,
         planExpiresAt: users.planExpiresAt,
         avatarUrl: users.avatarUrl,
@@ -154,6 +166,16 @@ export async function finalizeUserTombstone(input: {
       objectAssociationCount !== 0
     ) {
       throw new TombstoneFinalizationError('FINALIZATION_PRECONDITION_FAILED');
+    }
+
+    const identityDigest = computeAccountClosureSubjectDigest(input.hmacSecret, {
+      externalId: user.externalId,
+      email: user.email,
+      phone: user.phone,
+      googleId: user.googleId,
+    });
+    if (!digestMatches(receipt.subjectDigest, identityDigest)) {
+      throw new TombstoneFinalizationError('IDENTITY_DIGEST_MISMATCH');
     }
 
     const closeUser = await tx
@@ -254,13 +276,39 @@ function hasExactCategoryCoverage(value: unknown): boolean {
   );
 }
 
-function hasValidRestrictedCategories(value: unknown): boolean {
+function hasExactRestrictedCategories(value: unknown, expected: readonly string[]): boolean {
   if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) return false;
   const categories = new Set(value);
   return (
     categories.size === value.length &&
-    [...categories].every((item) => DATA_CATEGORY_IDS.includes(item as never))
+    categories.size === expected.length &&
+    expected.every((categoryId) => categories.has(categoryId))
   );
+}
+
+export function computeAccountClosureSubjectDigest(
+  hmacSecret: string,
+  identity: {
+    externalId: string;
+    email: string | null;
+    phone: string | null;
+    googleId: string | null;
+  },
+): string {
+  if (hmacSecret.trim().length < 32) {
+    throw new TombstoneFinalizationError('INVALID_HMAC_SECRET');
+  }
+  return createHmac('sha256', hmacSecret)
+    .update(
+      JSON.stringify([
+        'account-closure-subject-v1',
+        identity.externalId,
+        identity.email,
+        identity.phone,
+        identity.googleId,
+      ]),
+    )
+    .digest('hex');
 }
 
 function digestMatches(stored: string | null, supplied: string): boolean {

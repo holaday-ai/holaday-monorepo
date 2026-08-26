@@ -36,6 +36,7 @@ import { readAffectedRows } from '../../db/mysql-result.js';
 import { type Payment, payments } from '../../db/schema/payments.js';
 import { users } from '../../db/schema/users.js';
 import { describePlanOrder, isPaidPlan, nextExpiryFor } from '../../payment/plans.js';
+import { sanitizePaymentMetadataForClosure } from '../../payment/retention.js';
 import { QuotaService } from '../../quota/quota-service.js';
 import { protectedProcedure, publicProcedure, router } from '../trpc.js';
 
@@ -85,6 +86,7 @@ interface SettlementContext {
     readonly id: number;
     readonly plan: string;
     readonly planExpiresAt: Date | null;
+    readonly status: string;
   };
   readonly cycle: BillingCycle;
   readonly firstMonthRequested: boolean;
@@ -125,6 +127,7 @@ export async function lockSettlementContext(
       id: users.id,
       plan: users.plan,
       planExpiresAt: users.planExpiresAt,
+      status: users.status,
     })
     .from(users)
     .where(eq(users.externalId, row.userExternalId))
@@ -139,7 +142,7 @@ export async function lockSettlementContext(
   const firstMonthRequested =
     row.kind === 'subscription' && cycle === 'monthly' && metadata.firstMonth === true;
   let firstMonthEligible = false;
-  if (firstMonthRequested) {
+  if (firstMonthRequested && user.status === 'active') {
     const subscriptionPayments = await lockSubscriptionPayments(tx, row.userExternalId);
     firstMonthEligible =
       user.plan === 'free' &&
@@ -165,29 +168,35 @@ export async function completePaymentInTransaction(
   settlement: SettlementContext,
   capture: {
     readonly captureId: string;
-    readonly payerEmail?: string | null;
     readonly captureStatus: string;
     readonly metadata?: Record<string, unknown>;
   },
-): Promise<boolean> {
+): Promise<'applied' | 'retained_only' | false> {
   const metadata = paymentMetadata(row);
   const firstMonthConsumed = settlement.firstMonthRequested && settlement.firstMonthEligible;
+  const settledAt = new Date();
+  const retainedMetadata = sanitizePaymentMetadataForClosure({
+    ...metadata,
+    ...capture.metadata,
+    provider: row.provider,
+    environment: metadata.environment ?? metadata.env,
+    cycle: settlement.cycle,
+    packId: row.kind === 'addon' ? row.plan : metadata.packId,
+    providerStatus: capture.captureStatus,
+    currency: row.currency,
+    settledAt: settledAt.toISOString(),
+  });
   const updateResult = await tx
     .update(payments)
     .set({
       status: 'completed',
-      completedAt: new Date(),
+      completedAt: settledAt,
       providerCaptureId: capture.captureId,
-      metadata: {
-        ...metadata,
-        ...capture.metadata,
-        payerEmail: capture.payerEmail,
-        captureStatus: capture.captureStatus,
-        firstMonthConsumed,
-      },
+      metadata: retainedMetadata,
     })
     .where(and(eq(payments.id, row.id), eq(payments.status, 'pending')));
   if (readAffectedRows(updateResult) !== 1) return false;
+  if (settlement.user.status !== 'active') return 'retained_only';
 
   const quotaService = new QuotaService(tx as unknown as DB);
   if (row.kind === 'addon') {
@@ -208,7 +217,7 @@ export async function completePaymentInTransaction(
       });
     }
     await quotaService.applyAddonPack(settlement.user.id, planId, row.plan as AddonPackId);
-    return true;
+    return 'applied';
   }
 
   const nextExpiry = nextExpiryFor(
@@ -223,7 +232,7 @@ export async function completePaymentInTransaction(
   if (firstMonthConsumed) {
     await quotaService.grantFirstMonthBonus(settlement.user.id, row.plan as PlanId);
   }
-  return true;
+  return 'applied';
 }
 
 export const paymentRouter = router({
@@ -475,13 +484,18 @@ export const paymentRouter = router({
           message: `支付订单当前状态不可结算：${lockedRow.status}`,
         });
       }
-      if (settlement.firstMonthRequested && !settlement.firstMonthEligible) {
+      if (
+        settlement.user.status === 'active' &&
+        settlement.firstMonthRequested &&
+        !settlement.firstMonthEligible
+      ) {
         throw new TRPCError({
           code: 'CONFLICT',
           message: '首月优惠资格已被其他订单使用，请重新下单',
         });
       }
       if (
+        settlement.user.status === 'active' &&
         lockedRow.kind === 'addon' &&
         settlement.user.plan !== 'basic' &&
         settlement.user.plan !== 'pro'
@@ -500,11 +514,18 @@ export const paymentRouter = router({
           .set({
             status: nextStatus,
             providerCaptureId: capture.captureId || null,
-            metadata: {
-              ...paymentMetadata(lockedRow),
-              lastCaptureStatus: capture.status,
-              payerEmail: capture.payerEmail,
-            },
+            metadata:
+              settlement.user.status === 'active'
+                ? {
+                    ...paymentMetadata(lockedRow),
+                    lastCaptureStatus: capture.status,
+                  }
+                : sanitizePaymentMetadataForClosure({
+                    ...paymentMetadata(lockedRow),
+                    provider: lockedRow.provider,
+                    providerStatus: capture.status,
+                    currency: lockedRow.currency,
+                  }),
           })
           .where(eq(payments.id, lockedRow.id));
         return { kind: 'incomplete' as const, status: capture.status };
@@ -531,10 +552,16 @@ export const paymentRouter = router({
 
       const completed = await completePaymentInTransaction(tx, lockedRow, settlement, {
         captureId: capture.captureId,
-        payerEmail: capture.payerEmail,
         captureStatus: capture.status,
       });
-      return { kind: completed ? ('completed' as const) : ('deduped' as const) };
+      return {
+        kind:
+          completed === 'applied'
+            ? ('completed' as const)
+            : completed === 'retained_only'
+              ? ('retained' as const)
+              : ('deduped' as const),
+      };
     });
 
     if (result.kind === 'incomplete') {

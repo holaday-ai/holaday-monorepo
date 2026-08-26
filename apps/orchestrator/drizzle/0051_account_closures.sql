@@ -47,6 +47,7 @@ CREATE TABLE `account_closure_steps` (
   `lease_until` DATETIME(3) NULL,
   `checkpoint` JSON NULL,
   `processed_count` INT UNSIGNED NOT NULL DEFAULT 0,
+  `retention_outcome` ENUM('deleted', 'anonymized', 'restricted', 'not_present') NULL,
   `last_error_code` ENUM('provider_unavailable', 'provider_rejected', 'storage_unavailable', 'database_unavailable', 'handler_missing', 'configuration', 'invariant_violation') NULL,
   `started_at` DATETIME(3) NULL,
   `finished_at` DATETIME(3) NULL,
@@ -59,7 +60,7 @@ CREATE TABLE `account_closure_steps` (
   CONSTRAINT `ck_account_closure_steps_checkpoint_keys`
     CHECK (
       `checkpoint` IS NULL
-      OR (JSON_TYPE(`checkpoint`) = 'OBJECT' AND JSON_REMOVE(`checkpoint`, '$.cursor', '$.processedCount') = JSON_OBJECT())
+      OR (JSON_TYPE(`checkpoint`) = 'OBJECT' AND JSON_REMOVE(`checkpoint`, '$.targetIndex', '$.cursor', '$.processedCount') = JSON_OBJECT())
     ),
   CONSTRAINT `fk_account_closure_steps_request`
     FOREIGN KEY (`request_id`) REFERENCES `account_closure_requests` (`id`) ON DELETE RESTRICT
