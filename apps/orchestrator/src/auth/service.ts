@@ -45,6 +45,7 @@ export interface ClosureRecoveryRequiredResult {
 
 export type LoginResult = AuthenticatedResult | MfaRequiredResult | ClosureRecoveryRequiredResult;
 export type AuthResult = AuthenticatedResult;
+type AuthenticatedOperationResult = AuthenticatedResult | ClosureRecoveryRequiredResult;
 
 export function isClosureRecoveryResult(
   result: LoginResult,
@@ -251,7 +252,10 @@ export class AuthService {
    * Incrementing authVersion invalidates every previously issued access token;
    * the returned token keeps the current device signed in at the new version.
    */
-  async changePasswordForUser(externalId: string, newPassword: string): Promise<LoginResult> {
+  async changePasswordForUser(
+    externalId: string,
+    newPassword: string,
+  ): Promise<AuthenticatedOperationResult> {
     const [existing] = await this.db
       .select()
       .from(users)
@@ -273,6 +277,7 @@ export class AuthService {
       },
       existing.authVersion + 1,
       'password change',
+      'authenticated',
     );
   }
 
@@ -361,20 +366,39 @@ export class AuthService {
   }
 }
 
+type ActiveUserPatch = {
+  passwordHash?: string;
+  authVersion?: number | SQL;
+  googleId?: string | null;
+  avatarUrl?: string | null;
+  displayName?: string | null;
+  emailVerified?: boolean;
+  phoneVerified?: boolean;
+};
+
+function updateActiveUserAndIssue(
+  database: DB,
+  row: typeof users.$inferSelect,
+  patch: ActiveUserPatch,
+  expectedIssuanceVersion: number,
+  operation: string,
+  issuanceMode: 'authenticated',
+): Promise<AuthenticatedOperationResult>;
+function updateActiveUserAndIssue(
+  database: DB,
+  row: typeof users.$inferSelect,
+  patch: ActiveUserPatch,
+  expectedIssuanceVersion: number,
+  operation: string,
+  issuanceMode?: 'login',
+): Promise<LoginResult>;
 async function updateActiveUserAndIssue(
   database: DB,
   row: typeof users.$inferSelect,
-  patch: {
-    passwordHash?: string;
-    authVersion?: number | SQL;
-    googleId?: string | null;
-    avatarUrl?: string | null;
-    displayName?: string | null;
-    emailVerified?: boolean;
-    phoneVerified?: boolean;
-  },
+  patch: ActiveUserPatch,
   expectedIssuanceVersion: number,
   operation: string,
+  issuanceMode: 'login' | 'authenticated' = 'login',
 ): Promise<LoginResult> {
   const result = await database
     .update(users)
@@ -390,6 +414,9 @@ async function updateActiveUserAndIssue(
     }
     throw new AuthError('INVALID_CREDENTIALS', 'email or password incorrect');
   }
+  if (issuanceMode === 'authenticated') {
+    return issueLoginResultAtVersion(database, current, expectedIssuanceVersion, 'authenticated');
+  }
   return issueLoginResultAtVersion(database, current, expectedIssuanceVersion);
 }
 
@@ -397,6 +424,19 @@ function issueLoginResultAtVersion(
   database: DB,
   row: typeof users.$inferSelect,
   expectedIssuanceVersion: number,
+  issuanceMode: 'authenticated',
+): Promise<AuthenticatedOperationResult>;
+function issueLoginResultAtVersion(
+  database: DB,
+  row: typeof users.$inferSelect,
+  expectedIssuanceVersion: number,
+  issuanceMode?: 'login',
+): Promise<LoginResult>;
+function issueLoginResultAtVersion(
+  database: DB,
+  row: typeof users.$inferSelect,
+  expectedIssuanceVersion: number,
+  issuanceMode: 'login' | 'authenticated' = 'login',
 ): Promise<LoginResult> {
   if (row.status === 'closure_pending' || row.status === 'closure_processing') {
     return issueLoginResult(database, row);
@@ -404,7 +444,7 @@ function issueLoginResultAtVersion(
   if (row.status !== 'active' || row.authVersion !== expectedIssuanceVersion) {
     throw new AuthError('INVALID_CREDENTIALS', 'email or password incorrect');
   }
-  return issueLoginResult(database, row);
+  return issueLoginResult(database, row, { mfaVerified: issuanceMode === 'authenticated' });
 }
 
 function toPublic(

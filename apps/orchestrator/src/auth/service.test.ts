@@ -98,7 +98,7 @@ describe('AuthService password reset invalidation', () => {
     });
   });
 
-  it('changes the password for the authenticated external user and rotates authVersion', async () => {
+  it('changes the password for an MFA-enabled authenticated user without requiring MFA again', async () => {
     const row = {
       id: 9,
       externalId: 'usr_change_password',
@@ -109,6 +109,8 @@ describe('AuthService password reset invalidation', () => {
       planExpiresAt: null,
       status: 'active',
       authVersion: 2,
+      mfaEnabled: true,
+      mfaSecretEncrypted: 'encrypted-mfa-secret',
       displayName: null,
       googleId: null,
       avatarUrl: null,
@@ -162,6 +164,8 @@ describe('AuthService password reset invalidation', () => {
     );
 
     expect(row.passwordHash).toBe('hash:new-password-42');
+    expect(result).not.toHaveProperty('mfaRequired');
+    expect(result).toHaveProperty('accessToken');
     if (!('accessToken' in result)) throw new Error('expected authenticated result');
     await expect(verifyAccessToken(result.accessToken)).resolves.toMatchObject({
       sub: row.externalId,

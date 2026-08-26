@@ -1,6 +1,6 @@
 import { TrustNavigation } from '@/components/TrustNavigation';
 import { Button } from '@/components/ui/button';
-import { setAccessToken, setClosureRecovery } from '@/lib/auth';
+import { clearAccessToken, setAccessToken, setClosureRecovery } from '@/lib/auth';
 import {
   normalizeProfileSnapshot,
   profileDisplayName,
@@ -135,6 +135,11 @@ export function ProfilePage(): JSX.Element {
       ) {
         setClosureRecovery(result.recoveryToken);
         navigate('/account/closure-recovery', { replace: true });
+        return;
+      }
+      if (!('accessToken' in result) || typeof result.accessToken !== 'string') {
+        clearAccessToken();
+        setPasswordError('密码已修改，但登录状态刷新失败，请重新登录。');
         return;
       }
       setAccessToken(result.accessToken);
