@@ -1,5 +1,9 @@
 import { eq, sql } from 'drizzle-orm';
-import { QwenVoiceCloneError, deleteVoice } from '../../agent/video/qwen-voice-clone-client.js';
+import {
+  type DeleteVoiceParams,
+  QwenVoiceCloneError,
+  deleteVoice,
+} from '../../agent/video/qwen-voice-clone-client.js';
 import { env as appEnv } from '../../config/env.js';
 import { readAffectedRows } from '../../db/mysql-result.js';
 import { taskFiles } from '../../db/schema/task-files.js';
@@ -151,6 +155,23 @@ export async function deleteUserEvidencePage(
   if (!Number.isSafeInteger(limit) || limit <= 0 || limit > 100) {
     throw new ClosureHandlerError('INVARIANT_VIOLATION');
   }
+  const ownershipConflicts = parseEvidenceConflictRows(
+    await context.db.execute(sql`
+      SELECT artifact.id
+      FROM evidence_artifacts AS artifact
+      LEFT JOIN tasks AS owner_task ON owner_task.id = artifact.task_id
+      LEFT JOIN sites AS owner_site ON owner_site.id = artifact.site_id
+      LEFT JOIN exploration_runs AS owner_run ON owner_run.id = artifact.exploration_run_id
+      LEFT JOIN sites AS owner_run_site ON owner_run_site.id = owner_run.site_id
+      WHERE ${evidenceAnyTargetOwnershipPredicate(context.request.userId)}
+        AND NOT ${evidenceOwnershipAxesCompatiblePredicate(context.request.userId)}
+        AND ${evidencePartitionPredicate(categoryId)}
+      ORDER BY artifact.id ASC
+      LIMIT 1
+    `),
+  );
+  if (ownershipConflicts > 0) throw new ClosureHandlerError('INVARIANT_VIOLATION');
+
   const selected = parseEvidenceRows(
     await context.db.execute(sql`
       SELECT
@@ -162,7 +183,7 @@ export async function deleteUserEvidencePage(
       LEFT JOIN sites AS owner_site ON owner_site.id = artifact.site_id
       LEFT JOIN exploration_runs AS owner_run ON owner_run.id = artifact.exploration_run_id
       LEFT JOIN sites AS owner_run_site ON owner_run_site.id = owner_run.site_id
-      WHERE ${evidenceOwnershipPredicate(context.request.userId)}
+      WHERE ${evidenceConsistentOwnershipPredicate(context.request.userId)}
         AND ${evidencePartitionPredicate(categoryId)}
       ORDER BY retained ASC, artifact.id ASC
       LIMIT ${limit + 1}
@@ -191,14 +212,13 @@ export async function deleteUserEvidencePage(
           artifact.viewport_json = NULL,
           artifact.dom_hash = NULL,
           artifact.screenshot_hash = NULL,
-          artifact.retention_policy = 'manual_hold',
           artifact.metadata_json = JSON_OBJECT(
             'scrubbed', TRUE,
             'scrubbedReason', 'account_closure',
             'retentionClass', 'restricted'
           )
         WHERE artifact.id = ${row.id}
-          AND ${evidenceOwnershipPredicate(context.request.userId)}
+          AND ${evidenceConsistentOwnershipPredicate(context.request.userId)}
           AND ${evidencePartitionPredicate(categoryId)}
       `);
       if (readAffectedRows(result) !== 1) {
@@ -217,7 +237,7 @@ export async function deleteUserEvidencePage(
       LEFT JOIN exploration_runs AS owner_run ON owner_run.id = artifact.exploration_run_id
       LEFT JOIN sites AS owner_run_site ON owner_run_site.id = owner_run.site_id
       WHERE artifact.id = ${row.id}
-        AND ${evidenceOwnershipPredicate(context.request.userId)}
+        AND ${evidenceConsistentOwnershipPredicate(context.request.userId)}
         AND ${evidencePartitionPredicate(categoryId)}
     `);
     if (readAffectedRows(result) !== 1) {
@@ -228,28 +248,35 @@ export async function deleteUserEvidencePage(
   return { deleted, restricted, done: selected.length <= limit };
 }
 
-async function deleteConfiguredQwenVoice(voiceId: string): Promise<void> {
-  try {
-    await deleteVoice({
+export function createQwenVoiceDeletionAdapter(
+  options: Omit<DeleteVoiceParams, 'voiceId'>,
+): (voiceId: string) => Promise<void> {
+  return async (voiceId) => {
+    try {
+      await deleteVoice({ ...options, voiceId });
+    } catch (error) {
+      if (
+        error instanceof QwenVoiceCloneError &&
+        error.kind === 'http' &&
+        (error.status === 404 || error.status === 410)
+      ) {
+        return;
+      }
+      throw error;
+    }
+  };
+}
+
+const configuredQwenVoiceDeletionAdapter = appEnv.DASHSCOPE_API_KEY
+  ? createQwenVoiceDeletionAdapter({
       apiKey: appEnv.DASHSCOPE_API_KEY,
       baseUrl: appEnv.DASHSCOPE_BASE_URL,
       ...(appEnv.DASHSCOPE_WORKSPACE_ID ? { workspaceId: appEnv.DASHSCOPE_WORKSPACE_ID } : {}),
-      voiceId,
-    });
-  } catch (error) {
-    if (
-      error instanceof QwenVoiceCloneError &&
-      error.kind === 'http' &&
-      (error.status === 404 || error.status === 410)
-    ) {
-      return;
-    }
-    throw error;
-  }
-}
+    })
+  : null;
 
 export const mediaAssetsClosureHandler = createMediaAssetsClosureHandler({
-  deleteVoiceClone: appEnv.DASHSCOPE_API_KEY ? deleteConfiguredQwenVoice : null,
+  deleteVoiceClone: configuredQwenVoiceDeletionAdapter,
 });
 
 function continueResult(processed: number, restricted: boolean, fileCursor: number | null = null) {
@@ -273,8 +300,14 @@ function boundedPageSize(context: ClosureHandlerContext): number {
 
 function retainedEvidencePredicate() {
   return sql`(
-    artifact.purpose IN ('authorization', 'media_authorization', 'dispute', 'audit')
-    OR artifact.retention_policy IN ('audit_180d', 'manual_hold')
+    artifact.purpose IN (
+      'authorization',
+      'media_authorization',
+      'dispute',
+      'legal_hold',
+      'audit'
+    )
+    OR artifact.retention_policy = 'audit_180d'
   )`;
 }
 
@@ -288,13 +321,42 @@ function evidencePartitionPredicate(categoryId: FileClosureCategory) {
   return categoryId === 'media_assets' ? media : sql`NOT ${media}`;
 }
 
-function evidenceOwnershipPredicate(userId: number) {
+function evidenceAnyTargetOwnershipPredicate(userId: number) {
   return sql`(
     artifact.owner_user_id = ${userId}
     OR owner_task.user_id = ${userId}
     OR owner_site.owner_user_id = ${userId}
     OR owner_run_site.owner_user_id = ${userId}
   )`;
+}
+
+function evidenceOwnershipAxesCompatiblePredicate(userId: number) {
+  return sql`(
+    (artifact.owner_user_id IS NULL OR artifact.owner_user_id = ${userId})
+    AND (owner_task.user_id IS NULL OR owner_task.user_id = ${userId})
+    AND (owner_site.owner_user_id IS NULL OR owner_site.owner_user_id = ${userId})
+    AND (owner_run_site.owner_user_id IS NULL OR owner_run_site.owner_user_id = ${userId})
+  )`;
+}
+
+function evidenceConsistentOwnershipPredicate(userId: number) {
+  return sql`(
+    ${evidenceAnyTargetOwnershipPredicate(userId)}
+    AND ${evidenceOwnershipAxesCompatiblePredicate(userId)}
+  )`;
+}
+
+function parseEvidenceConflictRows(result: unknown): number {
+  const rows = Array.isArray(result) ? result[0] : null;
+  if (!Array.isArray(rows) || rows.length > 1) {
+    throw new ClosureHandlerError('INVARIANT_VIOLATION');
+  }
+  if (rows.length === 0) return 0;
+  const id = Number((rows[0] as { id?: unknown }).id);
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    throw new ClosureHandlerError('INVARIANT_VIOLATION');
+  }
+  return 1;
 }
 
 function parseEvidenceRows(result: unknown): EvidenceClosureRow[] {

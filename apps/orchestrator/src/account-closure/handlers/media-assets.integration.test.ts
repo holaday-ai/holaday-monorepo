@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import { pino } from 'pino';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { evidenceArtifacts } from '../../db/schema/evidence-artifacts.js';
+import { sites } from '../../db/schema/sites.js';
 import { taskFiles } from '../../db/schema/task-files.js';
 import { tasks } from '../../db/schema/tasks.js';
 import { users } from '../../db/schema/users.js';
@@ -13,7 +14,7 @@ import type {
   ClosureHandlerContext,
   ClosureHandlerResult,
 } from '../handler-contract.js';
-import { createMediaAssetsClosureHandler } from './media-assets.js';
+import { createMediaAssetsClosureHandler, createQwenVoiceDeletionAdapter } from './media-assets.js';
 import { taskExecutionClosureHandler } from './task-execution.js';
 
 describe.sequential('media assets closure handler', () => {
@@ -50,6 +51,7 @@ describe.sequential('media assets closure handler', () => {
     });
     const targetTaskId = await createTask(target.id, 'target');
     const otherTaskId = await createTask(other.id, 'other');
+    const auditExpiresAt = new Date('2027-02-16T00:00:00.000Z');
     await insertFile(target.id, targetTaskId, 'file_target_base', 'input', 'video/mp4');
     await insertFile(target.id, targetTaskId, 'file_target_image', 'output', 'image/png');
     await insertFile(target.id, targetTaskId, 'file_target_video', 'output', 'video/mp4');
@@ -73,6 +75,43 @@ describe.sequential('media assets closure handler', () => {
       purpose: 'authorization',
       retentionPolicy: 'manual_hold',
       r2Key: 'evidence/target/authorization',
+    });
+    await insertEvidence({
+      externalId: 'ev_target_manual_hold',
+      ownerUserId: target.id,
+      taskId: targetTaskId,
+      contentType: 'image/png',
+      purpose: 'task_evidence',
+      retentionPolicy: 'manual_hold',
+      r2Key: 'evidence/target/incidental-manual-hold',
+    });
+    await insertEvidence({
+      externalId: 'ev_target_text_manual_hold',
+      ownerUserId: target.id,
+      taskId: targetTaskId,
+      contentType: 'application/pdf',
+      purpose: 'task_evidence',
+      retentionPolicy: 'manual_hold',
+      r2Key: 'evidence/target/text-manual-hold',
+    });
+    await insertEvidence({
+      externalId: 'ev_target_audit',
+      ownerUserId: target.id,
+      taskId: targetTaskId,
+      contentType: 'application/json',
+      purpose: 'audit',
+      retentionPolicy: 'audit_180d',
+      expiresAt: auditExpiresAt,
+      r2Key: 'evidence/target/audit',
+    });
+    await insertEvidence({
+      externalId: 'ev_target_dispute',
+      ownerUserId: target.id,
+      taskId: targetTaskId,
+      contentType: 'application/pdf',
+      purpose: 'dispute',
+      retentionPolicy: 'manual_hold',
+      r2Key: 'evidence/target/dispute',
     });
     await insertEvidence({
       externalId: 'evidence_other_authorization',
@@ -100,10 +139,14 @@ describe.sequential('media assets closure handler', () => {
         'objects/file_target_video',
         'objects/file_target_audio',
         'evidence/target/media',
+        'evidence/target/incidental-manual-hold',
       ]),
     );
     expect(deletedPaths).not.toContain('objects/file_target_document');
     expect(deletedPaths).not.toContain('evidence/target/authorization');
+    expect(deletedPaths).not.toContain('evidence/target/audit');
+    expect(deletedPaths).not.toContain('evidence/target/dispute');
+    expect(deletedPaths).not.toContain('evidence/target/text-manual-hold');
     expect(deletedPaths).not.toContain('objects/file_other_base');
     expect(storage.get).not.toHaveBeenCalled();
 
@@ -128,6 +171,8 @@ describe.sequential('media assets closure handler', () => {
     expect(await fileExists('file_target_document')).toBe(true);
     expect(await fileExists('file_other_base')).toBe(true);
     expect(await evidenceExists('evidence_target_media')).toBe(false);
+    expect(await evidenceExists('ev_target_manual_hold')).toBe(false);
+    expect(await evidenceExists('ev_target_text_manual_hold')).toBe(true);
 
     const [retained] = await db
       .select()
@@ -154,6 +199,30 @@ describe.sequential('media assets closure handler', () => {
       },
     });
 
+    const [retainedAudit] = await db
+      .select()
+      .from(evidenceArtifacts)
+      .where(eq(evidenceArtifacts.externalId, 'ev_target_audit'))
+      .limit(1);
+    expect(retainedAudit).toMatchObject({
+      ownerUserId: null,
+      taskId: null,
+      retentionPolicy: 'audit_180d',
+      expiresAt: auditExpiresAt,
+      r2Key: 'evidence/target/audit',
+    });
+    const [retainedDispute] = await db
+      .select()
+      .from(evidenceArtifacts)
+      .where(eq(evidenceArtifacts.externalId, 'ev_target_dispute'))
+      .limit(1);
+    expect(retainedDispute).toMatchObject({
+      ownerUserId: null,
+      taskId: null,
+      retentionPolicy: 'manual_hold',
+      r2Key: 'evidence/target/dispute',
+    });
+
     const taskResult = await runToCompletion(
       taskExecutionClosureHandler,
       context(target, storage, null),
@@ -163,6 +232,10 @@ describe.sequential('media assets closure handler', () => {
     expect(await taskExists(targetTaskId)).toBe(false);
     expect(await taskExists(otherTaskId)).toBe(true);
     expect(deletedPaths.filter((path) => path === 'objects/file_target_document')).toHaveLength(1);
+    expect(deletedPaths.filter((path) => path === 'evidence/target/text-manual-hold')).toHaveLength(
+      1,
+    );
+    expect(await evidenceExists('ev_target_text_manual_hold')).toBe(false);
 
     await expect(handler.run(context(target, storage, null))).resolves.toEqual({
       kind: 'complete',
@@ -235,6 +308,91 @@ describe.sequential('media assets closure handler', () => {
     expect(await evidenceExists('evidence_target_retry_media')).toBe(false);
     const [cleared] = await db.select().from(users).where(eq(users.id, target.id)).limit(1);
     expect(cleared?.avatarUrl).toBeNull();
+  });
+
+  it('fails closed before object I/O when non-null evidence ownership axes disagree', async () => {
+    const target = await createUser('own-target');
+    const other = await createUser('own-other');
+    const targetTaskId = await createTask(target.id, 'own-target');
+    const targetSiteId = await createSite(target.id, 'own-target');
+    await insertEvidence({
+      externalId: 'ev_cross_owned_media',
+      ownerUserId: other.id,
+      taskId: targetTaskId,
+      siteId: targetSiteId,
+      contentType: 'image/png',
+      purpose: 'task_evidence',
+      retentionPolicy: 'task_30d',
+      r2Key: 'evidence/cross-owned/media',
+    });
+    const deletedPaths: string[] = [];
+    const storage = fakeStorage(deletedPaths);
+    const handler = createMediaAssetsClosureHandler({ deleteVoiceClone: null });
+
+    await expect(handler.run(context(target, storage, null))).rejects.toMatchObject({
+      code: 'INVARIANT_VIOLATION',
+    });
+    expect(storage.delete).not.toHaveBeenCalled();
+    expect(deletedPaths).toEqual([]);
+    const [unchanged] = await db
+      .select({
+        ownerUserId: evidenceArtifacts.ownerUserId,
+        taskId: evidenceArtifacts.taskId,
+        siteId: evidenceArtifacts.siteId,
+      })
+      .from(evidenceArtifacts)
+      .where(eq(evidenceArtifacts.externalId, 'ev_cross_owned_media'))
+      .limit(1);
+    expect(unchanged).toEqual({
+      ownerUserId: other.id,
+      taskId: targetTaskId,
+      siteId: targetSiteId,
+    });
+  });
+
+  it.each([404, 410])(
+    'treats Qwen HTTP %s as already deleted and clears the stored voice id',
+    async (status) => {
+      const target = await createUser(`qm-${status}`, {
+        qwenVoiceId: `voice_missing_${status}`,
+      });
+      const adapter = createQwenVoiceDeletionAdapter({
+        apiKey: 'test-only-key',
+        baseUrl: 'https://qwen.test.invalid',
+        fetchImpl: httpResponse(status),
+        maxRetries: 0,
+      });
+      const handler = createMediaAssetsClosureHandler({ deleteVoiceClone: adapter });
+
+      await expect(handler.run(context(target, fakeStorage([]), null))).resolves.toMatchObject({
+        kind: 'complete',
+        retention: 'deleted',
+      });
+      const [closed] = await db.select().from(users).where(eq(users.id, target.id)).limit(1);
+      expect(closed?.qwenVoiceId).toBeNull();
+    },
+  );
+
+  it.each([
+    ['401', () => httpResponse(401)],
+    ['500', () => httpResponse(500)],
+    ['timeout', () => timeoutFetch()],
+  ])('propagates Qwen %s and retains the stored voice id', async (label, makeFetch) => {
+    const target = await createUser(`qe-${label}`, {
+      qwenVoiceId: `voice_error_${label}`,
+    });
+    const adapter = createQwenVoiceDeletionAdapter({
+      apiKey: 'test-only-key',
+      baseUrl: 'https://qwen.test.invalid',
+      fetchImpl: makeFetch(),
+      timeoutMs: 1,
+      maxRetries: 0,
+    });
+    const handler = createMediaAssetsClosureHandler({ deleteVoiceClone: adapter });
+
+    await expect(handler.run(context(target, fakeStorage([]), null))).rejects.toBeInstanceOf(Error);
+    const [unchanged] = await db.select().from(users).where(eq(users.id, target.id)).limit(1);
+    expect(unchanged?.qwenVoiceId).toBe(`voice_error_${label}`);
   });
 
   it('fails closed when a voice identifier exists without a verified provider deletion capability', async () => {
@@ -316,6 +474,18 @@ describe.sequential('media assets closure handler', () => {
     return Number(result.insertId);
   }
 
+  async function createSite(userId: number, label: string): Promise<number> {
+    const suffix = randomBytes(3).toString('hex');
+    const [result] = await db.insert(sites).values({
+      externalId: `site_t7_${label}_${suffix}`,
+      ownerUserId: userId,
+      canonicalDomain: `${label}-${suffix}.example.test`,
+      displayName: `Task 7 ${label}`,
+      homepageUrl: `https://${label}-${suffix}.example.test`,
+    });
+    return Number(result.insertId);
+  }
+
   async function insertFile(
     userId: number,
     taskId: number,
@@ -339,9 +509,11 @@ describe.sequential('media assets closure handler', () => {
     externalId: string;
     ownerUserId: number;
     taskId: number;
+    siteId?: number;
     contentType: string;
     purpose: string;
     retentionPolicy: string;
+    expiresAt?: Date;
     r2Key: string;
   }) {
     await db.insert(evidenceArtifacts).values({
@@ -397,4 +569,26 @@ function fakeStorage(deletedPaths: string[]): StorageProvider {
     getSignedPutUrl: vi.fn(),
     stat: vi.fn(),
   };
+}
+
+function httpResponse(status: number): typeof fetch {
+  return vi.fn(
+    async () =>
+      new Response(JSON.stringify({ code: `test-${status}` }), {
+        status,
+        headers: { 'content-type': 'application/json' },
+      }),
+  ) as unknown as typeof fetch;
+}
+
+function timeoutFetch(): typeof fetch {
+  return vi.fn(
+    async (_input: string | URL | Request, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        const signal = init?.signal;
+        const abort = () => reject(new Error('test fetch aborted'));
+        if (signal?.aborted) abort();
+        else signal?.addEventListener('abort', abort, { once: true });
+      }),
+  ) as unknown as typeof fetch;
 }
