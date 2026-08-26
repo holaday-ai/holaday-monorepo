@@ -1,5 +1,5 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import mysql, { type Pool, type ResultSetHeader, type RowDataPacket } from 'mysql2/promise';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 describe('account closure database invariants', () => {
   let pool: Pool;
@@ -22,12 +22,21 @@ describe('account closure database invariants', () => {
     const [result] = await pool.execute<ResultSetHeader>(
       `INSERT INTO users (external_id, email, password_hash, status)
        VALUES (?, ?, ?, ?)`,
-      [`usr_closure_${sequence}`, `closure-${sequence}@example.test`, 'not-a-real-password', status],
+      [
+        `usr_closure_${sequence}`,
+        `closure-${sequence}@example.test`,
+        'not-a-real-password',
+        status,
+      ],
     );
     return result.insertId;
   }
 
-  async function createRequest(userId: number, activeUserId: number | null, status = 'pending_grace') {
+  async function createRequest(
+    userId: number,
+    activeUserId: number | null,
+    status = 'pending_grace',
+  ) {
     sequence += 1;
     return pool.execute(
       `INSERT INTO account_closure_requests
@@ -62,7 +71,7 @@ describe('account closure database invariants', () => {
     });
   });
 
-  it.each(['active', 'suspended', 'closure_pending', 'closure_processing', 'closed'])(
+  it.each(['active', 'system', 'suspended', 'closure_pending', 'closure_processing', 'closed'])(
     'accepts the persisted user status %s',
     async (status) => {
       await expect(createUser(status)).resolves.toEqual(expect.any(Number));
