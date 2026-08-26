@@ -207,6 +207,7 @@ export interface AuditIssue {
     | 'handler_source_missing'
     | 'handler_symbol_missing'
     | 'closure_handler_category_mismatch'
+    | 'closure_table_owner_missing'
     | 'closure_retention_missing'
     | 'closure_test_missing'
     | 'closure_receipt_raw_content'

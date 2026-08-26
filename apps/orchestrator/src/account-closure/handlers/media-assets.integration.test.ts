@@ -449,7 +449,7 @@ describe.sequential('media assets closure handler', () => {
   });
 
   it('executes the exact production media handler for an account with no media', async () => {
-    const target = await createUser('production-empty');
+    const target = await createUser('prod-empty');
     await expect(
       mediaAssetsClosureHandler.run(context(target, fakeStorage([]), null)),
     ).resolves.toEqual({ kind: 'complete', processed: 0, retention: 'not_present' });

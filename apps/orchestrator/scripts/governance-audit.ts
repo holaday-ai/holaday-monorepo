@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import ts from 'typescript';
 import type { AccountClosureHandler } from '../src/account-closure/handler-contract.js';
 import {
   ACCOUNT_CLOSURE_HANDLERS,
@@ -8,10 +9,9 @@ import {
   type AccountClosureHandlerBinding,
 } from '../src/account-closure/handler-registry.js';
 import {
-  ACCOUNT_CLOSURE_HANDLER_EXECUTION_EVIDENCE,
-  ACCOUNT_CLOSURE_HANDLER_EXECUTION_TEST,
-  type AccountClosureHandlerExecutionEvidence,
-} from '../src/account-closure/handler-release-evidence.js';
+  ACCOUNT_CLOSURE_TABLE_OWNERSHIP,
+  type AccountClosureTableOwnership,
+} from '../src/account-closure/table-ownership.js';
 import {
   ACCOUNT_CLOSURE_RETENTION_OUTCOMES,
   ACCOUNT_CLOSURE_PUBLIC_RECEIPT_FIELDS as PUBLIC_RECEIPT_FIELDS,
@@ -25,6 +25,7 @@ import {
   auditGovernanceRegistry,
   governanceRegistry,
 } from '../src/data-governance/index.js';
+import * as dbSchema from '../src/db/schema/index.js';
 
 export const ACCOUNT_CLOSURE_PUBLIC_RECEIPT_FIELDS = PUBLIC_RECEIPT_FIELDS;
 
@@ -35,17 +36,80 @@ export interface AccountClosureGovernanceDeclaration {
 }
 
 export const ACCOUNT_CLOSURE_GOVERNANCE_DECLARATIONS: readonly AccountClosureGovernanceDeclaration[] =
-  ACCOUNT_CLOSURE_HANDLER_EXECUTION_EVIDENCE.map((evidence) => ({
-    categoryId: evidence.categoryId,
-    handlerRef: evidence.handlerRef,
-    testRef: evidence.behaviorTestRef,
-  }));
+  [
+    relationalDeclaration('account_security', 'account-security', 'accountSecurityClosureHandler'),
+    relationalDeclaration('task_execution', 'task-execution', 'taskExecutionClosureHandler'),
+    relationalDeclaration(
+      'cross_task_memory',
+      'cross-task-memory',
+      'crossTaskMemoryClosureHandler',
+    ),
+    relationalDeclaration(
+      'energy_astrology_profile',
+      'energy-astrology-profile',
+      'energyAstrologyProfileClosureHandler',
+    ),
+    relationalDeclaration(
+      'stock_preference_profile',
+      'stock-preference-profile',
+      'stockPreferenceProfileClosureHandler',
+    ),
+    relationalDeclaration('feedback_support', 'feedback-support', 'feedbackSupportClosureHandler'),
+    relationalDeclaration(
+      'external_notifications',
+      'external-notifications',
+      'externalNotificationsClosureHandler',
+    ),
+    relationalDeclaration(
+      'extension_site_stats',
+      'extension-site-stats',
+      'extensionSiteStatsClosureHandler',
+    ),
+    relationalDeclaration(
+      'extension_login_cookies',
+      'extension-login-cookies',
+      'extensionLoginCookiesClosureHandler',
+    ),
+    {
+      categoryId: 'payments_entitlements',
+      handlerRef:
+        'apps/orchestrator/src/account-closure/handlers/payments-entitlements.ts#paymentsEntitlementsClosureHandler',
+      testRef: 'apps/orchestrator/src/account-closure/tombstone-service.integration.test.ts',
+    },
+    {
+      categoryId: 'partner_kyc_ledger',
+      handlerRef:
+        'apps/orchestrator/src/account-closure/handlers/partner-kyc-ledger.ts#partnerKycLedgerClosureHandler',
+      testRef: 'apps/orchestrator/src/account-closure/tombstone-service.integration.test.ts',
+    },
+    {
+      categoryId: 'media_assets',
+      handlerRef:
+        'apps/orchestrator/src/account-closure/handlers/media-assets.ts#mediaAssetsClosureHandler',
+      testRef: 'apps/orchestrator/src/account-closure/handlers/media-assets.integration.test.ts',
+    },
+    relationalDeclaration('analytics_logs', 'analytics-logs', 'analyticsLogsClosureHandler'),
+  ];
+
+function relationalDeclaration(
+  categoryId: DataCategoryId,
+  moduleName: string,
+  exportName: string,
+): AccountClosureGovernanceDeclaration {
+  return {
+    categoryId,
+    handlerRef: `apps/orchestrator/src/account-closure/handlers/${moduleName}.ts#${exportName}`,
+    testRef:
+      'apps/orchestrator/src/account-closure/handlers/relational-handlers.integration.test.ts',
+  };
+}
 
 export interface AccountClosureGovernanceAuditInput {
   readonly declarations: readonly AccountClosureGovernanceDeclaration[];
   readonly handlerBindings: readonly AccountClosureHandlerBinding[];
   readonly runtimeHandlers: readonly AccountClosureHandler[];
-  readonly executionEvidence: readonly AccountClosureHandlerExecutionEvidence[];
+  readonly schemaTableNames: readonly string[];
+  readonly tableOwnership: readonly AccountClosureTableOwnership[];
   readonly receiptFields: readonly string[];
   readonly rightsCapabilities: readonly RightsCapability[];
   readonly repoRoot?: string;
@@ -62,9 +126,6 @@ export function auditAccountClosureGovernance(
   const bindings = new Map(input.handlerBindings.map((binding) => [binding.handlerRef, binding]));
   const runtimeHandlers = new Map(
     input.runtimeHandlers.map((handler) => [handler.categoryId, handler] as const),
-  );
-  const executionEvidence = new Map(
-    input.executionEvidence.map((evidence) => [evidence.categoryId, evidence] as const),
   );
   const root = resolve(input.repoRoot ?? repositoryRoot());
 
@@ -103,15 +164,7 @@ export function auditAccountClosureGovernance(
         'Account closure category requires an explicit supported retention outcome.',
       );
     }
-    const evidence = executionEvidence.get(declaration.categoryId);
-    if (
-      !evidence ||
-      evidence.handler !== binding?.handler ||
-      evidence.handlerRef !== declaration.handlerRef ||
-      evidence.behaviorTestRef !== declaration.testRef ||
-      !isSafeExistingTestRef(root, declaration.testRef) ||
-      !isExecutionTestEvidence(root)
-    ) {
+    if (!hasDirectHandlerBehaviorEvidence(declaration.handlerRef, declaration.testRef, root)) {
       add(
         'closure_test_missing',
         registryId,
@@ -129,6 +182,8 @@ export function auditAccountClosureGovernance(
       );
     }
   }
+
+  auditTableOwnership(input, add);
 
   const allowedReceiptFields = new Set(PUBLIC_RECEIPT_FIELDS);
   if (
@@ -173,16 +228,119 @@ function isSafeExistingTestRef(root: string, testRef: string): boolean {
   );
 }
 
-function isExecutionTestEvidence(root: string): boolean {
-  if (!isSafeExistingTestRef(root, ACCOUNT_CLOSURE_HANDLER_EXECUTION_TEST)) return false;
-  const source = readFileSync(resolve(root, ACCOUNT_CLOSURE_HANDLER_EXECUTION_TEST), 'utf8');
-  return (
-    source.includes('ACCOUNT_CLOSURE_HANDLER_EXECUTION_EVIDENCE') &&
-    source.includes("from './handler-release-evidence.js'") &&
-    /for\s*\(\s*const\s+evidence\s+of\s+ACCOUNT_CLOSURE_HANDLER_EXECUTION_EVIDENCE\s*\)\s*\{[\s\S]*?evidence\.execute\s*\(/.test(
-      source,
-    )
-  );
+export function hasDirectHandlerBehaviorEvidence(
+  handlerRef: string,
+  testRef: string,
+  repoRoot = repositoryRoot(),
+): boolean {
+  const separator = handlerRef.lastIndexOf('#');
+  if (separator <= 0 || !isSafeExistingTestRef(repoRoot, testRef)) return false;
+  const moduleRef = handlerRef.slice(0, separator);
+  const exportName = handlerRef.slice(separator + 1);
+  if (!/^[$A-Z_a-z][$\w]*$/.test(exportName)) return false;
+  const expectedModule = resolve(repoRoot, moduleRef);
+  const testPath = resolve(repoRoot, testRef);
+  const source = readFileSync(testPath, 'utf8');
+  const sourceFile = ts.createSourceFile(testPath, source, ts.ScriptTarget.Latest, true);
+  let localName: string | null = null;
+  for (const statement of sourceFile.statements) {
+    if (
+      !ts.isImportDeclaration(statement) ||
+      !ts.isStringLiteral(statement.moduleSpecifier) ||
+      !statement.moduleSpecifier.text.startsWith('.')
+    ) {
+      continue;
+    }
+    const moduleSpecifier = statement.moduleSpecifier.text;
+    const importedModule = resolve(
+      dirname(testPath),
+      moduleSpecifier.endsWith('.js') ? `${moduleSpecifier.slice(0, -3)}.ts` : moduleSpecifier,
+    );
+    if (importedModule !== expectedModule) continue;
+    const bindings = statement.importClause?.namedBindings;
+    if (!bindings || !ts.isNamedImports(bindings)) continue;
+    for (const element of bindings.elements) {
+      if ((element.propertyName?.text ?? element.name.text) === exportName) {
+        localName = element.name.text;
+        break;
+      }
+    }
+  }
+  if (!localName) return false;
+
+  let found = false;
+  const visit = (node: ts.Node): void => {
+    if (found) return;
+    if (ts.isCallExpression(node)) {
+      const firstArgument = node.arguments[0];
+      if (
+        ts.isPropertyAccessExpression(node.expression) &&
+        ts.isIdentifier(node.expression.expression) &&
+        node.expression.expression.text === localName &&
+        node.expression.name.text === 'run'
+      ) {
+        found = true;
+        return;
+      }
+      if (
+        ts.isIdentifier(node.expression) &&
+        node.expression.text === 'runToCompletion' &&
+        firstArgument !== undefined &&
+        ts.isIdentifier(firstArgument) &&
+        firstArgument.text === localName
+      ) {
+        found = true;
+        return;
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return found;
+}
+
+function auditTableOwnership(
+  input: AccountClosureGovernanceAuditInput,
+  add: (code: AuditIssue['code'], registryId: string, message: string) => void,
+): void {
+  const owners = new Map<string, DataCategoryId>();
+  for (const entry of input.tableOwnership) {
+    if (owners.has(entry.tableName) || !DATA_CATEGORY_IDS.includes(entry.categoryId)) {
+      add(
+        'closure_table_owner_missing',
+        `account_closure:${entry.tableName}`,
+        'Persistent table must have exactly one canonical account closure owner.',
+      );
+      continue;
+    }
+    owners.set(entry.tableName, entry.categoryId);
+  }
+  const schemaNames = new Set(input.schemaTableNames);
+  for (const tableName of schemaNames) {
+    if (!owners.has(tableName)) {
+      add(
+        'closure_table_owner_missing',
+        `account_closure:${tableName}`,
+        'Exported persistent table has no account closure owner.',
+      );
+    }
+  }
+  for (const tableName of owners.keys()) {
+    if (!schemaNames.has(tableName)) {
+      add(
+        'closure_table_owner_missing',
+        `account_closure:${tableName}`,
+        'Account closure table owner points to no exported persistent table.',
+      );
+    }
+  }
+}
+
+function exportedDrizzleTableNames(): string[] {
+  const nameSymbol = Symbol.for('drizzle:Name');
+  return Object.values(dbSchema)
+    .map((value) => (value as unknown as Record<symbol, unknown> | null)?.[nameSymbol])
+    .filter((value): value is string => typeof value === 'string');
 }
 
 export interface GovernanceAuditIo {
@@ -421,7 +579,8 @@ export function buildGovernanceAuditReport(): AuditReport {
     declarations: ACCOUNT_CLOSURE_GOVERNANCE_DECLARATIONS,
     handlerBindings: ACCOUNT_CLOSURE_HANDLER_BINDINGS,
     runtimeHandlers: ACCOUNT_CLOSURE_HANDLERS,
-    executionEvidence: ACCOUNT_CLOSURE_HANDLER_EXECUTION_EVIDENCE,
+    schemaTableNames: exportedDrizzleTableNames(),
+    tableOwnership: ACCOUNT_CLOSURE_TABLE_OWNERSHIP,
     receiptFields: PUBLIC_RECEIPT_FIELDS,
     rightsCapabilities: governanceRegistry.rightsCapabilities,
     repoRoot: repositoryRoot(),

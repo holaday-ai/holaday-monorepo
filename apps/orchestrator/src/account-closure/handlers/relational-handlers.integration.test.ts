@@ -457,7 +457,7 @@ describe.sequential('account closure relational handlers', () => {
     let analyticsTableAdded = false;
     try {
       await db.execute(sql`
-        CREATE TABLE energy_account_analytics (
+        CREATE TABLE telemetry_events (
           id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
           user_id BIGINT UNSIGNED NULL,
           PRIMARY KEY (id)
@@ -469,7 +469,7 @@ describe.sequential('account closure relational handlers', () => {
       });
     } finally {
       if (analyticsTableAdded) {
-        await db.execute(sql`DROP TABLE energy_account_analytics`);
+        await db.execute(sql`DROP TABLE telemetry_events`);
       }
     }
 
@@ -488,6 +488,50 @@ describe.sequential('account closure relational handlers', () => {
     await expect(productionHandler('analytics_logs').run(context(null))).resolves.toEqual({
       kind: 'complete',
       processed: 0,
+      retention: 'restricted',
+    });
+
+    // Release governance parses these exact production-export calls. They run
+    // with an ordinary live context (not an abort shortcut) after the full
+    // fixtures above have proven pagination, isolation, and retention.
+    await expect(accountSecurityClosureHandler.run(context(null))).resolves.toMatchObject({
+      kind: 'complete',
+      retention: 'not_present',
+    });
+    await expect(taskExecutionClosureHandler.run(context(null))).resolves.toMatchObject({
+      kind: 'complete',
+      retention: 'not_present',
+    });
+    await expect(crossTaskMemoryClosureHandler.run(context(null))).resolves.toMatchObject({
+      kind: 'complete',
+      retention: 'not_present',
+    });
+    await expect(energyAstrologyProfileClosureHandler.run(context(null))).resolves.toMatchObject({
+      kind: 'complete',
+      retention: 'not_present',
+    });
+    await expect(stockPreferenceProfileClosureHandler.run(context(null))).resolves.toMatchObject({
+      kind: 'complete',
+      retention: 'not_present',
+    });
+    await expect(feedbackSupportClosureHandler.run(context(null))).resolves.toMatchObject({
+      kind: 'complete',
+      retention: 'restricted',
+    });
+    await expect(externalNotificationsClosureHandler.run(context(null))).resolves.toMatchObject({
+      kind: 'complete',
+      retention: 'not_present',
+    });
+    await expect(extensionSiteStatsClosureHandler.run(context(null))).resolves.toMatchObject({
+      kind: 'complete',
+      retention: 'not_present',
+    });
+    await expect(extensionLoginCookiesClosureHandler.run(context(null))).resolves.toMatchObject({
+      kind: 'complete',
+      retention: 'not_present',
+    });
+    await expect(analyticsLogsClosureHandler.run(context(null))).resolves.toMatchObject({
+      kind: 'complete',
       retention: 'restricted',
     });
     Reflect.deleteProperty(process.env, 'ACCOUNT_CLOSURE_LEGACY_FEEDBACK_SANITIZED');
@@ -1186,7 +1230,7 @@ describe.sequential('account closure relational handlers', () => {
           SELECT COUNT(*)
           FROM information_schema.tables
           WHERE table_schema = DATABASE()
-            AND table_name = 'energy_account_analytics'
+            AND table_name = 'telemetry_events'
         ) AS value
     `);
     return resultCount(result);

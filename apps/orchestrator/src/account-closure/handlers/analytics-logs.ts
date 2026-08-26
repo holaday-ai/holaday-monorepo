@@ -4,6 +4,7 @@ import {
   ClosureHandlerError,
   createVerifiedRestrictedRetentionHandler,
 } from '../handler-contract.js';
+import { ACCOUNT_CLOSURE_TABLE_OWNER_BY_NAME } from '../table-ownership.js';
 
 interface AnalyticsColumnDefinition {
   readonly columnType: string;
@@ -31,9 +32,8 @@ const required = (
 
 /**
  * The analytics category owns only the three anonymous tables introduced by
- * migration 0046. `energy_astrology_*` and other product tables deliberately
- * do not belong here. New daily/event/analytics persistence must be reviewed
- * and added explicitly before account closure can resume.
+ * migration 0046. The global table ownership registry, rather than a naming
+ * heuristic, closes the boundary around every other persistence table.
  */
 export const ACCOUNT_CLOSURE_ANALYTICS_SCHEMA_MANIFEST: AnalyticsSchemaManifest = {
   energy_daily_metrics: {
@@ -108,27 +108,28 @@ export const analyticsLogsClosureHandler = createVerifiedRestrictedRetentionHand
 async function countAnalyticsSchemaMismatches(context: ClosureHandlerContext): Promise<number> {
   const result = await context.db.execute(sql`
     SELECT
-      table_name AS tableName,
-      column_name AS columnName,
-      column_type AS columnType,
-      is_nullable AS nullable,
-      column_default AS defaultValue,
-      column_key AS columnKey,
-      extra AS extra
-    FROM information_schema.columns
-    WHERE table_schema = DATABASE()
-      AND (
-        table_name IN ('energy_daily_metrics', 'energy_daily_visitors', 'energy_event_receipts')
-        OR table_name REGEXP '^energy_(daily|event)_'
-        OR table_name LIKE '%analytics%'
-      )
-    ORDER BY table_name, ordinal_position
+      governed_column.table_name AS tableName,
+      governed_column.column_name AS columnName,
+      governed_column.column_type AS columnType,
+      governed_column.is_nullable AS nullable,
+      governed_column.column_default AS defaultValue,
+      governed_column.column_key AS columnKey,
+      governed_column.extra AS extra
+    FROM information_schema.columns AS governed_column
+    INNER JOIN information_schema.tables AS governed_table
+      ON governed_table.table_schema = governed_column.table_schema
+      AND governed_table.table_name = governed_column.table_name
+      AND governed_table.table_type = 'BASE TABLE'
+    WHERE governed_column.table_schema = DATABASE()
+      AND governed_column.table_name <> '__drizzle_migrations'
+    ORDER BY governed_column.table_name, governed_column.ordinal_position
   `);
   context.signal.throwIfAborted();
   const rows = readColumnRows(result);
   const actual = new Map<string, InformationSchemaColumnRow>(
     rows.map((row) => [`${row.tableName}.${row.columnName}`, row] as const),
   );
+  const actualTables = new Set(rows.map((row) => row.tableName));
   const expected = new Map<string, AnalyticsColumnDefinition>();
   for (const [tableName, columns] of Object.entries(ACCOUNT_CLOSURE_ANALYTICS_SCHEMA_MANIFEST)) {
     for (const [columnName, definition] of Object.entries(columns)) {
@@ -137,12 +138,20 @@ async function countAnalyticsSchemaMismatches(context: ClosureHandlerContext): P
   }
 
   let mismatches = 0;
+  for (const tableName of actualTables) {
+    if (!ACCOUNT_CLOSURE_TABLE_OWNER_BY_NAME.has(tableName)) mismatches += 1;
+  }
   for (const [key, definition] of expected) {
     const row = actual.get(key);
     if (!row || !matchesDefinition(row, definition)) mismatches += 1;
   }
-  for (const key of actual.keys()) {
-    if (!expected.has(key)) mismatches += 1;
+  for (const [key, row] of actual) {
+    if (
+      ACCOUNT_CLOSURE_TABLE_OWNER_BY_NAME.get(row.tableName) === 'analytics_logs' &&
+      !expected.has(key)
+    ) {
+      mismatches += 1;
+    }
   }
   return mismatches;
 }

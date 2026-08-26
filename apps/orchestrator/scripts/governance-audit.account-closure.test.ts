@@ -4,20 +4,31 @@ import {
   ACCOUNT_CLOSURE_HANDLERS,
   ACCOUNT_CLOSURE_HANDLER_BINDINGS,
 } from '../src/account-closure/handler-registry.js';
-import { ACCOUNT_CLOSURE_HANDLER_EXECUTION_EVIDENCE } from '../src/account-closure/handler-release-evidence.js';
+import { ACCOUNT_CLOSURE_TABLE_OWNERSHIP } from '../src/account-closure/table-ownership.js';
 import { rightsCapabilities } from '../src/data-governance/rights-capabilities.js';
+import * as schema from '../src/db/schema/index.js';
 import {
   ACCOUNT_CLOSURE_GOVERNANCE_DECLARATIONS,
   ACCOUNT_CLOSURE_PUBLIC_RECEIPT_FIELDS,
   auditAccountClosureGovernance,
+  hasDirectHandlerBehaviorEvidence,
 } from './governance-audit.js';
+
+const DRIZZLE_TABLE_NAME = Symbol.for('drizzle:Name');
+
+function schemaTableNames(): string[] {
+  return Object.values(schema)
+    .map((value) => (value as unknown as Record<symbol, unknown> | null)?.[DRIZZLE_TABLE_NAME])
+    .filter((value): value is string => typeof value === 'string');
+}
 
 function liveInput() {
   return {
     declarations: ACCOUNT_CLOSURE_GOVERNANCE_DECLARATIONS,
     handlerBindings: ACCOUNT_CLOSURE_HANDLER_BINDINGS,
     runtimeHandlers: ACCOUNT_CLOSURE_HANDLERS,
-    executionEvidence: ACCOUNT_CLOSURE_HANDLER_EXECUTION_EVIDENCE,
+    schemaTableNames: schemaTableNames(),
+    tableOwnership: ACCOUNT_CLOSURE_TABLE_OWNERSHIP,
     receiptFields: ACCOUNT_CLOSURE_PUBLIC_RECEIPT_FIELDS,
     rightsCapabilities,
   };
@@ -88,6 +99,24 @@ describe('account closure governance release audit', () => {
         ),
       }),
     ).toContain('closure_test_missing');
+  });
+
+  it('binds every behavior reference to a direct call of its exact production export', () => {
+    for (const declaration of ACCOUNT_CLOSURE_GOVERNANCE_DECLARATIONS) {
+      expect(
+        hasDirectHandlerBehaviorEvidence(declaration.handlerRef, declaration.testRef),
+        declaration.categoryId,
+      ).toBe(true);
+    }
+  });
+
+  it('rejects a Drizzle table without one registered closure owner', () => {
+    expect(
+      errorCodes({
+        ...liveInput(),
+        schemaTableNames: [...schemaTableNames(), 'future_unreviewed_table'],
+      }),
+    ).toContain('closure_table_owner_missing');
   });
 
   it('rejects deferred capability and a binding that is not the exact runtime handler', () => {
