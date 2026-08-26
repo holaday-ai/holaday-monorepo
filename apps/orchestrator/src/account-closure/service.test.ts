@@ -46,6 +46,8 @@ function fixture(overrides: Partial<ClosureServiceRepository> = {}) {
       userExternalId: 'usr_allowed',
       authVersion: 5,
       mfaEnabled: true,
+      plan: 'pro',
+      planExpiresAt: new Date('2026-12-31T00:00:00.000Z'),
       userStatus: 'closure_pending' as const,
       requestId: 19,
       requestExternalId: 'acl_random_request',
@@ -218,6 +220,8 @@ describe('account closure service', () => {
     await expect(service.status('token-only')).resolves.toMatchObject({
       requestStatus: 'pending_grace',
       graceEndsAt: graceEndsAt.toISOString(),
+      plan: { name: 'pro', expiresAt: '2026-12-31T00:00:00.000Z' },
+      mfaRequired: true,
     });
     expect(deps.verifyRecoveryToken).toHaveBeenCalledWith('token-only');
 

@@ -95,6 +95,8 @@ const statusResultSchema = z
     completedAt: z.string().datetime().nullable(),
     cancelledAt: z.string().datetime().nullable(),
     canCancel: z.boolean(),
+    plan: z.object({ name: z.string(), expiresAt: z.string().datetime().nullable() }).strict(),
+    mfaRequired: z.boolean(),
   })
   .strict();
 

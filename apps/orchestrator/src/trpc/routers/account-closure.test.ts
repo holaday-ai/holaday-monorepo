@@ -47,6 +47,8 @@ function serviceFixture(): AccountClosureApi {
       completedAt: null,
       cancelledAt: null,
       canCancel: true,
+      plan: { name: 'pro', expiresAt: '2026-12-31T00:00:00.000Z' },
+      mfaRequired: true,
     })),
     requestCancellationVerification: vi.fn(async () => ({
       challengeId: 'ach_cancel',
@@ -95,6 +97,8 @@ describe('account closure router contract', () => {
     await expect(api.begin(beginInput)).resolves.toMatchObject({ requestStatus: 'pending_grace' });
     await expect(api.status({ recoveryToken: 'token-only' })).resolves.toMatchObject({
       requestStatus: 'pending_grace',
+      plan: { name: 'pro', expiresAt: '2026-12-31T00:00:00.000Z' },
+      mfaRequired: true,
     });
     await expect(
       api.requestCancellationVerification({ recoveryToken: 'token-only' }),

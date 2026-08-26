@@ -426,6 +426,25 @@ export function readEnergyProgress(scope: string | null, now = new Date()): Ener
   }
 }
 
+export function clearAllEnergyProgressForCurrentDevice(): void {
+  if (typeof window === 'undefined') return;
+  previewProgressByWindow.delete(window);
+  scopedProgressByWindow.delete(window);
+  const keys: string[] = [];
+  for (let index = 0; index < window.localStorage.length; index += 1) {
+    const key = window.localStorage.key(index);
+    if (
+      key &&
+      [STORAGE_PREFIX, V3_STORAGE_PREFIX, V2_STORAGE_PREFIX, LEGACY_STORAGE_PREFIX].some((prefix) =>
+        key.startsWith(`${prefix}:`),
+      )
+    ) {
+      keys.push(key);
+    }
+  }
+  for (const key of keys) window.localStorage.removeItem(key);
+}
+
 export function recordEnergyCompletion(
   scope: string | null,
   kind: EnergyCompletionKind,

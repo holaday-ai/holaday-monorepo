@@ -60,6 +60,8 @@ export interface ClosureRecoverySubject {
   userExternalId: string;
   authVersion: number;
   mfaEnabled: boolean;
+  plan: string;
+  planExpiresAt: Date | null;
   userStatus: AccountClosureUserStatus;
   requestId: number;
   requestExternalId: string;
@@ -269,6 +271,11 @@ export class AccountClosureService {
       canCancel:
         subject.requestStatus === 'pending_grace' &&
         this.deps.now().getTime() < subject.graceEndsAt.getTime(),
+      plan: {
+        name: subject.plan,
+        expiresAt: subject.planExpiresAt?.toISOString() ?? null,
+      },
+      mfaRequired: subject.mfaEnabled,
     };
   }
 
@@ -470,6 +477,8 @@ export class DatabaseClosureServiceRepository implements ClosureServiceRepositor
         userExternalId: users.externalId,
         authVersion: users.authVersion,
         mfaEnabled: users.mfaEnabled,
+        plan: users.plan,
+        planExpiresAt: users.planExpiresAt,
         userStatus: users.status,
         requestId: accountClosureRequests.id,
         requestExternalId: accountClosureRequests.externalId,
