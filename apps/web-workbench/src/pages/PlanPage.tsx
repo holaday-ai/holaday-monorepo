@@ -1,4 +1,5 @@
 import { AddonPackButton } from '@/components/AddonPackButton';
+import { useAppShellContext } from '@/components/AppShell';
 import { CnPaymentDialog, type CnProvider, type CnPurchase } from '@/components/CnPaymentDialog';
 import { PayPalButton } from '@/components/PayPalButton';
 import { TrustNavigation } from '@/components/TrustNavigation';
@@ -57,6 +58,10 @@ function isZhLocale(): boolean {
   return navigator.language.toLowerCase().startsWith('zh');
 }
 
+function normalizePlanId(value: unknown): PlanId {
+  return value === 'basic' || value === 'pro' ? value : 'free';
+}
+
 const CARDS_ORDER: PlanId[] = ['free', 'basic', 'pro'];
 
 const CARD_TAGLINE_ZH: Record<PlanId, string> = {
@@ -73,10 +78,12 @@ const CARD_TAGLINE_EN: Record<PlanId, string> = {
 export function PlanPage(): JSX.Element {
   const toast = useToast();
   const location = useLocation();
-  const [currentPlan, setCurrentPlan] = React.useState<PlanId | null>(null);
-  const [accountStatus, setAccountStatus] = React.useState<'loading' | 'ready' | 'error'>(
-    'loading',
-  );
+  const shellContext = useAppShellContext();
+  const shellPlan = shellContext?.me ? normalizePlanId(shellContext.me.plan) : null;
+  const [refreshedPlan, setRefreshedPlan] = React.useState<PlanId | null>(null);
+  const [accountRequestStatus, setAccountRequestStatus] = React.useState<
+    'idle' | 'loading' | 'ready' | 'error'
+  >('idle');
   const [paymentOpts, setPaymentOpts] = React.useState<PaymentOptions | null>(null);
   const [cnOpts, setCnOpts] = React.useState<CnPaymentOptions | null>(null);
   const [openPayFor, setOpenPayFor] = React.useState<PlanId | null>(null);
@@ -92,22 +99,21 @@ export function PlanPage(): JSX.Element {
   } | null>(null);
 
   const refreshUser = React.useCallback(() => {
-    setAccountStatus('loading');
+    setAccountRequestStatus('loading');
     trpc.auth.me.query().then(
       (res) => {
-        const plan = normalizeAuthMeProfile(res).plan;
-        setCurrentPlan(plan === 'basic' || plan === 'pro' ? plan : 'free');
-        setAccountStatus('ready');
+        setRefreshedPlan(normalizePlanId(normalizeAuthMeProfile(res).plan));
+        setAccountRequestStatus('ready');
       },
       () => {
-        setCurrentPlan(null);
-        setAccountStatus('error');
+        setRefreshedPlan(null);
+        setAccountRequestStatus('error');
       },
     );
   }, []);
 
   React.useEffect(() => {
-    refreshUser();
+    if (!shellPlan) refreshUser();
     trpc.payment.options.query().then(
       (res) => setPaymentOpts(normalizePaymentOptions(res)),
       () => setPaymentOpts({ paypal: false, paypalClientId: null, paypalEnv: null }),
@@ -116,7 +122,7 @@ export function PlanPage(): JSX.Element {
       (res) => setCnOpts(normalizeCnPaymentOptions(res)),
       () => setCnOpts({ enabled: false, wechat: false, alipay: false }),
     );
-  }, [refreshUser]);
+  }, [refreshUser, shellPlan]);
 
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -127,6 +133,9 @@ export function PlanPage(): JSX.Element {
     return () => cancelAnimationFrame(id);
   }, [location.hash]);
 
+  const currentPlan = refreshedPlan ?? shellPlan;
+  const accountStatus =
+    accountRequestStatus === 'idle' ? (shellPlan ? 'ready' : 'loading') : accountRequestStatus;
   const accountReady = accountStatus === 'ready' && currentPlan !== null;
   const mayQualifyForFirstMonthOffer = accountReady && currentPlan === 'free';
   const isPaidPlan = currentPlan === 'basic' || currentPlan === 'pro';
