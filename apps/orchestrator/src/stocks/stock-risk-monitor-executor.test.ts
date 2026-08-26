@@ -81,8 +81,8 @@ function deps(
       stocks: [{ symbol: '603528', name: '多伦科技', market: 'A' }],
     })),
     runRadar: vi.fn(async () => radar()),
-    complete: vi.fn(async () => undefined),
-    fail: vi.fn(async () => undefined),
+    complete: vi.fn(async () => 'committed' as const),
+    fail: vi.fn(async () => 'committed' as const),
     ...overrides,
   };
 }
@@ -235,11 +235,42 @@ describe('stock risk monitor executor', () => {
       trigger: 'scheduled',
       deps: executionDeps,
     });
-    expect(result).toMatchObject({ handled: true, ok: false });
+    expect(result).toMatchObject({
+      handled: true,
+      ok: false,
+      persisted: false,
+      stoppedForInactiveOwner: true,
+      ownerUserId: 7,
+    });
     expect(executionDeps.loadLatestSnapshot).not.toHaveBeenCalled();
     expect(executionDeps.runRadar).not.toHaveBeenCalled();
     expect(executionDeps.complete).not.toHaveBeenCalled();
     expect(executionDeps.fail).not.toHaveBeenCalled();
+  });
+
+  it('fails a database error at the owner gate closed without calling an external source', async () => {
+    const executionDeps = deps({
+      isUserActive: vi.fn(async () => {
+        throw new Error('owner lookup unavailable');
+      }),
+    });
+
+    const result = await executeStockRiskMonitorRun({
+      plannedTaskId: 42,
+      runExternalId: 'plr_gate_error',
+      trigger: 'scheduled',
+      deps: executionDeps,
+    });
+
+    expect(result).toMatchObject({
+      handled: true,
+      ok: false,
+      persisted: false,
+      stoppedForInactiveOwner: true,
+      ownerUserId: 7,
+    });
+    expect(executionDeps.loadLatestSnapshot).not.toHaveBeenCalled();
+    expect(executionDeps.runRadar).not.toHaveBeenCalled();
   });
 
   it('does not call the upstream radar when closure starts after snapshot loading', async () => {
@@ -305,5 +336,25 @@ describe('stock risk monitor executor', () => {
     expect(result).toMatchObject({ handled: true, ok: false });
     expect(executionDeps.fail).not.toHaveBeenCalled();
     expect(executionDeps.complete).not.toHaveBeenCalled();
+  });
+
+  it('reports a lost terminal CAS without claiming the run was persisted', async () => {
+    const executionDeps = deps({
+      complete: vi.fn(async () => 'lost-claim' as const),
+    });
+    const result = await executeStockRiskMonitorRun({
+      plannedTaskId: 42,
+      runExternalId: 'plr_lost_finalize',
+      trigger: 'scheduled',
+      deps: executionDeps,
+    });
+
+    expect(result).toMatchObject({
+      handled: true,
+      ok: false,
+      persisted: false,
+      stoppedForInactiveOwner: false,
+      ownerUserId: 7,
+    });
   });
 });

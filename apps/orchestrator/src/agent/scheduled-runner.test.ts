@@ -444,6 +444,63 @@ describe('startScheduledRunner — tick integration', () => {
     stopScheduledRunner();
   });
 
+  it('fails a rejected owner gate closed and recovers the claim on the next cycle', async () => {
+    let status = 'active';
+    let finalized = false;
+    let ownerChecks = 0;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const db: any = {
+      select: vi.fn((selection: Record<string, unknown>) => ({
+        from: vi.fn(() => ({
+          where: vi.fn(() => {
+            if (Object.hasOwn(selection, 'status')) {
+              ownerChecks += 1;
+              if (ownerChecks === 1)
+                return fakeSelectRows(Promise.reject(new Error('gate db down')) as never);
+              return fakeSelectRows([{ status: 'active' }]);
+            }
+            return fakeSelectRows(
+              !finalized && status === 'active'
+                ? [{ id: 151, userId: 42, intent: 'recover me', repeatType: 'once', rrule: null }]
+                : [],
+            );
+          }),
+        })),
+      })),
+      update: vi.fn(() => ({
+        set: vi.fn((values: Record<string, unknown>) => ({
+          where: vi.fn(async () => {
+            if (values.status === 'running') {
+              if (status !== 'active') return { affectedRows: 0 };
+              status = 'running';
+              return { affectedRows: 1 };
+            }
+            if (values.status === 'active' && Object.keys(values).length === 1) {
+              if (status !== 'running') return { affectedRows: 0 };
+              status = 'active';
+              return { affectedRows: 1 };
+            }
+            if (values.status === 'completed') {
+              finalized = true;
+              status = 'completed';
+              return { affectedRows: 1 };
+            }
+            return { affectedRows: 0 };
+          }),
+        })),
+      })),
+    };
+    db.transaction = (callback: (tx: unknown) => unknown) => callback(db);
+    const dispatch = vi.fn(async () => 991);
+
+    startScheduledRunner({ db, dispatch, pollIntervalMs: 15 });
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    stopScheduledRunner();
+
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(status).toBe('completed');
+  });
+
   it('does not reactivate recurring work when closure starts during dispatch', async () => {
     const selectResults = [
       [{ id: 16, userId: 42, intent: 'mid-dispatch freeze', repeatType: 'daily', rrule: null }],

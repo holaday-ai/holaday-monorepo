@@ -2,6 +2,7 @@ import { newExternalId } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
 import { and, eq, isNull, lt, lte, or, sql } from 'drizzle-orm';
 import { accountClosureAllowsExecution } from '../account-closure/repository.js';
+import { logger } from '../config/logger.js';
 import type { DB } from '../db/client.js';
 import { readAffectedRows, readInsertId } from '../db/mysql-result.js';
 import { batchTaskItems, batchTasks } from '../db/schema/batch-tasks.js';
@@ -43,7 +44,14 @@ interface QueuePlannedRunInput {
 
 export type PlannedRunSpecialDispatchResult =
   | { handled: false }
-  | { handled: true; ok: boolean; errorMessage?: string };
+  | {
+      handled: true;
+      ok: boolean;
+      errorMessage?: string;
+      persisted?: boolean;
+      stoppedForInactiveOwner?: boolean;
+      ownerUserId?: number;
+    };
 
 export type PlannedRunSpecialDispatcher = (input: {
   ctx: AuthenticatedContext;
@@ -119,6 +127,23 @@ export async function queuePlannedRun(
       .limit(1);
     if (existing) {
       if (existing.status === 'pending') startRunDispatch(ctx, existing.externalId);
+      if (existing.status === 'cancelled') {
+        await updatePlanAfterDispatch(
+          ctx.db,
+          {
+            planId: plan.id,
+            scheduledFor: input.scheduledFor,
+            seriesScheduledFor,
+            trigger: 'scheduled',
+            repeatType: plan.repeatType,
+            rrule: plan.rrule,
+            endsAt: plan.endsAt,
+            userId: plan.userId,
+          },
+          false,
+          '本次运行已在账号关闭期间取消',
+        );
+      }
       return { runId: existing.externalId, status: 'starting' };
     }
   }
@@ -255,18 +280,19 @@ export async function dispatchPlannedRun(
     .where(eq(plannedTaskRunItems.plannedTaskRunId, run.id))
     .orderBy(plannedTaskRunItems.seq);
   const startedAt = new Date();
-  await ctx.db
+  const claim = await ctx.db
     .update(plannedTaskRuns)
     .set({ status: 'dispatching', startedAt })
     .where(and(eq(plannedTaskRuns.id, run.id), eq(plannedTaskRuns.status, 'pending')));
-
-  if (!(await accountClosureAllowsExecution(ctx.db, run.userId))) {
-    await cancelUndispatchedPlannedRun(ctx.db, run.id);
-    return;
-  }
+  if (readAffectedRows(claim) === 0) return;
 
   try {
+    if (!(await plannedOwnerAllowsExecution(ctx.db, run.userId, 'dispatch'))) {
+      await cancelUndispatchedPlannedRun(ctx.db, run.id);
+      return;
+    }
     const specialDispatcher = configuredSpecialDispatcher;
+    let genericPersisted = false;
     const dispatchResult = await dispatchSpecialOrGeneric({
       special: specialDispatcher
         ? () =>
@@ -291,15 +317,25 @@ export async function dispatchPlannedRun(
             .where(eq(tasks.externalId, result.taskId))
             .limit(1);
           if (!task) throw new Error(`创建任务 ${result.taskId} 后未找到记录`);
+          if (!(await plannedOwnerAllowsExecution(ctx.db, run.userId, 'task-persist'))) {
+            await cancelUndispatchedPlannedRun(ctx.db, run.id);
+            return;
+          }
           await ctx.db.transaction(async (tx) => {
-            await tx
+            const transition = await tx
               .update(plannedTaskRuns)
               .set({ status: 'running', taskId: task.id })
-              .where(eq(plannedTaskRuns.id, run.id));
+              .where(
+                and(eq(plannedTaskRuns.id, run.id), eq(plannedTaskRuns.status, 'dispatching')),
+              );
+            if (readAffectedRows(transition) === 0) return;
             await tx
               .update(plannedTaskRunItems)
               .set({ status: 'running', taskId: task.id })
-              .where(eq(plannedTaskRunItems.id, item.id));
+              .where(
+                and(eq(plannedTaskRunItems.id, item.id), eq(plannedTaskRunItems.status, 'pending')),
+              );
+            genericPersisted = true;
           });
         } else {
           const result = await batchTasksRouter.createCaller(ctx).create({
@@ -312,17 +348,40 @@ export async function dispatchPlannedRun(
             .where(eq(batchTasks.externalId, result.batchId))
             .limit(1);
           if (!batch) throw new Error(`创建批量任务 ${result.batchId} 后未找到记录`);
-          await ctx.db
-            .update(plannedTaskRuns)
-            .set({ status: 'running', batchTaskId: batch.id })
-            .where(eq(plannedTaskRuns.id, run.id));
-          await ctx.db
-            .update(plannedTaskRunItems)
-            .set({ status: 'running' })
-            .where(eq(plannedTaskRunItems.plannedTaskRunId, run.id));
+          if (!(await plannedOwnerAllowsExecution(ctx.db, run.userId, 'batch-persist'))) {
+            await cancelUndispatchedPlannedRun(ctx.db, run.id);
+            return;
+          }
+          await ctx.db.transaction(async (tx) => {
+            const transition = await tx
+              .update(plannedTaskRuns)
+              .set({ status: 'running', batchTaskId: batch.id })
+              .where(
+                and(eq(plannedTaskRuns.id, run.id), eq(plannedTaskRuns.status, 'dispatching')),
+              );
+            if (readAffectedRows(transition) === 0) return;
+            await tx
+              .update(plannedTaskRunItems)
+              .set({ status: 'running' })
+              .where(
+                and(
+                  eq(plannedTaskRunItems.plannedTaskRunId, run.id),
+                  eq(plannedTaskRunItems.status, 'pending'),
+                ),
+              );
+            genericPersisted = true;
+          });
         }
       },
     });
+    if (dispatchResult.handled && dispatchResult.stoppedForInactiveOwner) {
+      if (dispatchResult.ownerUserId !== run.userId) {
+        throw new Error('专用规划执行器返回了不匹配的账号所有者');
+      }
+      await cancelUndispatchedPlannedRun(ctx.db, run.id);
+      return;
+    }
+    if (dispatchResult.handled ? dispatchResult.persisted === false : !genericPersisted) return;
     await updatePlanAfterDispatch(
       ctx.db,
       { ...run, userId: run.userId },
@@ -332,8 +391,8 @@ export async function dispatchPlannedRun(
     );
   } catch (error) {
     const message = (error instanceof Error ? error.message : String(error)).slice(0, 2000);
-    await ctx.db.transaction(async (tx) => {
-      await tx
+    const failed = await ctx.db.transaction(async (tx) => {
+      const transition = await tx
         .update(plannedTaskRuns)
         .set({
           status: 'failed',
@@ -341,13 +400,22 @@ export async function dispatchPlannedRun(
           errorMessage: message,
           completedAt: new Date(),
         })
-        .where(eq(plannedTaskRuns.id, run.id));
+        .where(and(eq(plannedTaskRuns.id, run.id), eq(plannedTaskRuns.status, 'dispatching')));
+      if (readAffectedRows(transition) === 0) return false;
       await tx
         .update(plannedTaskRunItems)
         .set({ status: 'failed', errorMessage: message, completedAt: new Date() })
-        .where(eq(plannedTaskRunItems.plannedTaskRunId, run.id));
+        .where(
+          and(
+            eq(plannedTaskRunItems.plannedTaskRunId, run.id),
+            eq(plannedTaskRunItems.status, 'pending'),
+          ),
+        );
+      return true;
     });
-    await updatePlanAfterDispatch(ctx.db, { ...run, userId: run.userId }, false, message);
+    if (failed) {
+      await updatePlanAfterDispatch(ctx.db, { ...run, userId: run.userId }, false, message);
+    }
   }
 }
 
@@ -376,7 +444,7 @@ async function updatePlanAfterDispatch(
     await db.update(plannedTasks).set(base).where(eq(plannedTasks.id, run.planId));
     return;
   }
-  if (!(await accountClosureAllowsExecution(db, run.userId))) return;
+  if (!(await plannedOwnerAllowsExecution(db, run.userId, 'schedule-advance'))) return;
   const schedule = advancePlannedSchedule({
     firedAt: run.seriesScheduledFor,
     repeatType: run.repeatType as PlannedRepeatType,
@@ -549,16 +617,28 @@ export function startPlannedRunner(deps: PlannedRunnerDeps): NodeJS.Timeout {
     if (tickRunning) return;
     tickRunning = true;
     try {
+      await recoverStuckRunningPlannedTasks(deps.db);
       await normalizePendingOccurrenceOverrides(deps.db);
       await plannedReminderScan(deps, new Date());
       await plannedTick(deps);
       await syncPlannedRuns(deps.db);
+    } catch (error) {
+      logger.warn(
+        { error: error instanceof Error ? error.message : String(error) },
+        'planned-runner: tick failed closed',
+      );
     } finally {
       tickRunning = false;
     }
   };
-  void run();
-  interval = setInterval(() => void run(), pollMs);
+  void run().catch((error) => {
+    logger.error({ error }, 'planned-runner: unexpected tick rejection');
+  });
+  interval = setInterval(() => {
+    void run().catch((error) => {
+      logger.error({ error }, 'planned-runner: unexpected tick rejection');
+    });
+  }, pollMs);
   return interval;
 }
 
@@ -677,7 +757,7 @@ async function plannedReminderScan(deps: PlannedRunnerDeps, now: Date): Promise<
         ),
       );
     if (readAffectedRows(claim) === 0) continue;
-    if (!(await accountClosureAllowsExecution(deps.db, plan.userId))) continue;
+    if (!(await plannedOwnerAllowsExecution(deps.db, plan.userId, 'reminder'))) continue;
     try {
       await deps.notifyReminder({
         userInternalId: plan.userId,
@@ -794,7 +874,7 @@ export async function plannedTick(deps: PlannedRunnerDeps): Promise<void> {
         ),
       );
     if (readAffectedRows(claim) === 0) continue;
-    if (!(await accountClosureAllowsExecution(deps.db, plan.userId))) continue;
+    if (!(await plannedOwnerAllowsExecution(deps.db, plan.userId, 'queue'))) continue;
     try {
       await deps.queue({
         plannedTaskId: plan.externalId,
@@ -814,16 +894,45 @@ export async function plannedTick(deps: PlannedRunnerDeps): Promise<void> {
   }
 }
 
-async function cancelUndispatchedPlannedRun(db: DB, runId: number): Promise<void> {
+async function cancelUndispatchedPlannedRun(db: DB, runId: number): Promise<boolean> {
   const completedAt = new Date();
-  await db.transaction(async (tx) => {
-    await tx
+  return db.transaction(async (tx) => {
+    const transition = await tx
       .update(plannedTaskRuns)
       .set({ status: 'cancelled', completedAt })
       .where(and(eq(plannedTaskRuns.id, runId), eq(plannedTaskRuns.status, 'dispatching')));
+    if (readAffectedRows(transition) === 0) return false;
     await tx
       .update(plannedTaskRunItems)
       .set({ status: 'cancelled', completedAt })
-      .where(eq(plannedTaskRunItems.plannedTaskRunId, runId));
+      .where(
+        and(
+          eq(plannedTaskRunItems.plannedTaskRunId, runId),
+          eq(plannedTaskRunItems.status, 'pending'),
+        ),
+      );
+    return true;
   });
+}
+
+async function plannedOwnerAllowsExecution(
+  db: DB,
+  userId: number,
+  boundary:
+    | 'dispatch'
+    | 'task-persist'
+    | 'batch-persist'
+    | 'schedule-advance'
+    | 'reminder'
+    | 'queue',
+): Promise<boolean> {
+  try {
+    return await accountClosureAllowsExecution(db, userId);
+  } catch (error) {
+    logger.warn(
+      { error: error instanceof Error ? error.message : String(error), userId, boundary },
+      'planned-runner: owner gate failed closed',
+    );
+    return false;
+  }
 }

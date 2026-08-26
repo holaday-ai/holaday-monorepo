@@ -167,14 +167,15 @@ export async function applyImmediateClosureEffects(
   });
 
   // In-memory aborts happen only after the durable cancellation transaction.
-  // A missing/failed local handle leaves the durable cancellation intact but
-  // must surface a retry signal. A later apply pass re-reads the same effect
-  // rows, so it can retry the abort without duplicating effects.
+  // A missing local handle is already stopped/not applicable: durable state is
+  // authoritative and synchronous handle registration closes the old miss
+  // race. Only an abort implementation that throws represents a retryable
+  // transport/runtime failure.
   const abortTask = deps.abortTask ?? supercarAbort;
   const abortFailures: string[] = [];
   for (const taskId of summary.runningTaskIds) {
     try {
-      if (!abortTask(taskId)) abortFailures.push(taskId);
+      abortTask(taskId);
     } catch {
       abortFailures.push(taskId);
     }

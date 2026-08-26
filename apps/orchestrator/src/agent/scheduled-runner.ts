@@ -163,6 +163,7 @@ export function computeNextRunFromInputs(opts: {
 }
 
 let runnerInterval: NodeJS.Timeout | null = null;
+let runnerTickRunning = false;
 
 /**
  * Start the polling loop. Idempotent: calling twice without an
@@ -176,9 +177,25 @@ export function startScheduledRunner(deps: ScheduledRunnerDeps): NodeJS.Timeout 
   logger.info({ pollMs }, 'scheduled-runner: starting');
   // Fire once immediately on boot so a row that was due during a
   // restart doesn't sit waiting for the first interval tick.
-  void tick(deps);
+  const run = async (recover: boolean) => {
+    if (runnerTickRunning) return;
+    runnerTickRunning = true;
+    try {
+      if (recover) await recoverStuckRunningScheduledTasks(deps.db);
+      await tick(deps);
+    } catch (err) {
+      logger.warn({ err: errMsg(err) }, 'scheduled-runner: tick failed closed');
+    } finally {
+      runnerTickRunning = false;
+    }
+  };
+  void run(false).catch((err) => {
+    logger.error({ err: errMsg(err) }, 'scheduled-runner: unexpected tick rejection');
+  });
   runnerInterval = setInterval(() => {
-    void tick(deps);
+    void run(true).catch((err) => {
+      logger.error({ err: errMsg(err) }, 'scheduled-runner: unexpected tick rejection');
+    });
   }, pollMs);
   return runnerInterval;
 }
@@ -187,6 +204,7 @@ export function stopScheduledRunner(): void {
   if (runnerInterval) {
     clearInterval(runnerInterval);
     runnerInterval = null;
+    runnerTickRunning = false;
     logger.info('scheduled-runner: stopped');
   }
 }
@@ -321,6 +339,7 @@ async function reminderScan(deps: ScheduledRunnerDeps, now: Date): Promise<void>
         .where(
           and(
             eq(scheduledTasks.id, c.id),
+            eq(scheduledTasks.status, 'active'),
             eq(scheduledTasks.nextRunAt, c.nextRunAt),
             // Re-check the not-fired predicate in the UPDATE itself.
             // Without this, two overlapping ticks can both select the
@@ -340,7 +359,7 @@ async function reminderScan(deps: ScheduledRunnerDeps, now: Date): Promise<void>
       continue;
     }
     if (claimed === 0) continue;
-    if (!(await accountClosureAllowsExecution(deps.db, c.userId))) continue;
+    if (!(await scheduledOwnerAllowsExecution(deps, c.userId, c.id, 'reminder'))) continue;
     try {
       await deps.notifyReminder({
         userInternalId: c.userId,
@@ -435,7 +454,7 @@ async function tick(deps: ScheduledRunnerDeps): Promise<void> {
       // OR a user paused/deleted it between the scan and the claim.
       continue;
     }
-    if (!(await accountClosureAllowsExecution(deps.db, row.userId))) {
+    if (!(await scheduledOwnerAllowsExecution(deps, row.userId, row.id, 'dispatch'))) {
       // The durable immediate-effects pass owns the running→paused change and
       // restoration ledger. Leaving the transient claim untouched here avoids
       // dispatch and prevents an unrecorded restoration.
@@ -536,7 +555,10 @@ async function tick(deps: ScheduledRunnerDeps): Promise<void> {
     // never wedges the runner's tick. The notify implementation
     // itself never throws (allSettled fan-out), this is defence-
     // in-depth in case a future stub does.
-    if (deps.notify && (await accountClosureAllowsExecution(deps.db, row.userId))) {
+    if (
+      deps.notify &&
+      (await scheduledOwnerAllowsExecution(deps, row.userId, row.id, 'notification'))
+    ) {
       try {
         await deps.notify({
           userInternalId: row.userId,
@@ -553,6 +575,23 @@ async function tick(deps: ScheduledRunnerDeps): Promise<void> {
         );
       }
     }
+  }
+}
+
+async function scheduledOwnerAllowsExecution(
+  deps: ScheduledRunnerDeps,
+  userId: number,
+  scheduledTaskId: number,
+  boundary: 'reminder' | 'dispatch' | 'notification',
+): Promise<boolean> {
+  try {
+    return await accountClosureAllowsExecution(deps.db, userId);
+  } catch (err) {
+    logger.warn(
+      { err: errMsg(err), scheduledTaskId, boundary },
+      'scheduled-runner: owner gate failed closed',
+    );
+    return false;
   }
 }
 

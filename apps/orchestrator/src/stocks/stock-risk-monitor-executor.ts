@@ -67,6 +67,8 @@ interface FailStockRiskMonitorInput {
   errorCode: 'STOCK_RISK_MONITOR_EXECUTION_FAILED';
 }
 
+type StockRiskPersistenceOutcome = 'committed' | 'inactive-owner' | 'lost-claim';
+
 export interface StockRiskMonitorExecutionDeps {
   loadMonitor(plannedTaskId: number): Promise<StoredStockRiskMonitor | null>;
   isUserActive(userId: number): Promise<boolean>;
@@ -75,8 +77,8 @@ export interface StockRiskMonitorExecutionDeps {
     snapshot: LatestStockRiskSnapshot,
     monitor: StoredStockRiskMonitor,
   ): Promise<StockRiskRadarResult>;
-  complete(input: CompleteStockRiskMonitorInput): Promise<void>;
-  fail(input: FailStockRiskMonitorInput): Promise<void>;
+  complete(input: CompleteStockRiskMonitorInput): Promise<StockRiskPersistenceOutcome>;
+  fail(input: FailStockRiskMonitorInput): Promise<StockRiskPersistenceOutcome>;
 }
 
 export type StockRiskSpecialDispatchResult =
@@ -87,6 +89,9 @@ export type StockRiskSpecialDispatchResult =
       result: StockRiskMonitorRunResultV1;
       notification: StockRiskMonitorNotificationCandidate | null;
       errorMessage?: string;
+      persisted?: boolean;
+      stoppedForInactiveOwner?: boolean;
+      ownerUserId?: number;
     };
 
 function emptyResult(
@@ -153,11 +158,18 @@ export async function executeStockRiskMonitorRun(input: {
 }): Promise<StockRiskSpecialDispatchResult> {
   const monitor = await input.deps.loadMonitor(input.plannedTaskId);
   if (!monitor) return { handled: false };
-  if (!(await input.deps.isUserActive(monitor.userId))) return inactiveResult(monitor);
+  const ownerIsActive = async () => {
+    try {
+      return await input.deps.isUserActive(monitor.userId);
+    } catch {
+      return false;
+    }
+  };
+  if (!(await ownerIsActive())) return inactiveResult(monitor);
 
   try {
     const snapshot = await input.deps.loadLatestSnapshot(monitor.userId, monitor.symbol);
-    if (!(await input.deps.isUserActive(monitor.userId))) return inactiveResult(monitor);
+    if (!(await ownerIsActive())) return inactiveResult(monitor);
     if (!snapshot) {
       const result = {
         ...emptyResult(monitor, {
@@ -175,7 +187,7 @@ export async function executeStockRiskMonitorRun(input: {
         fingerprint === monitor.lastNotificationFingerprint
           ? null
           : { kind: 'unavailable' as const, fingerprint };
-      await input.deps.complete({
+      const persisted = await input.deps.complete({
         monitor,
         runExternalId: input.runExternalId,
         result,
@@ -184,6 +196,7 @@ export async function executeStockRiskMonitorRun(input: {
         nextUnavailableChecks: [...STOCK_RISK_CHECK_KEYS],
         notificationFingerprint: notification?.fingerprint ?? null,
       });
+      if (persisted !== 'committed') return inactiveResult(monitor, persisted);
       return { handled: true, ok: true, result, notification };
     }
     const watched = snapshot.stocks.some((stock) => stock.symbol === monitor.symbol);
@@ -193,7 +206,7 @@ export async function executeStockRiskMonitorRun(input: {
         outcome: 'skipped',
         summary: `数据日期 ${snapshot.dataAsOf}：股票已不在关注列表，本轮跳过。`,
       });
-      await input.deps.complete({
+      const persisted = await input.deps.complete({
         monitor,
         runExternalId: input.runExternalId,
         result,
@@ -202,6 +215,7 @@ export async function executeStockRiskMonitorRun(input: {
         nextUnavailableChecks: monitor.lastUnavailableChecks,
         notificationFingerprint: null,
       });
+      if (persisted !== 'committed') return inactiveResult(monitor, persisted);
       return { handled: true, ok: true, result, notification: null };
     }
     if (
@@ -213,7 +227,7 @@ export async function executeStockRiskMonitorRun(input: {
         outcome: 'skipped',
         summary: `数据日期 ${snapshot.dataAsOf} 未前进，本轮跳过。`,
       });
-      await input.deps.complete({
+      const persisted = await input.deps.complete({
         monitor,
         runExternalId: input.runExternalId,
         result,
@@ -222,11 +236,12 @@ export async function executeStockRiskMonitorRun(input: {
         nextUnavailableChecks: monitor.lastUnavailableChecks,
         notificationFingerprint: null,
       });
+      if (persisted !== 'committed') return inactiveResult(monitor, persisted);
       return { handled: true, ok: true, result, notification: null };
     }
 
     const radar = await input.deps.runRadar(snapshot, monitor);
-    if (!(await input.deps.isUserActive(monitor.userId))) return inactiveResult(monitor);
+    if (!(await ownerIsActive())) return inactiveResult(monitor);
     const rawCurrent = canonicalStockRiskMonitorSignals(
       radar.signals.filter((signal) => signal.symbol === monitor.symbol),
     );
@@ -273,7 +288,7 @@ export async function executeStockRiskMonitorRun(input: {
       fingerprint && fingerprint !== monitor.lastNotificationFingerprint
         ? { kind: outcome as 'changed' | 'unavailable', fingerprint }
         : null;
-    await input.deps.complete({
+    const persisted = await input.deps.complete({
       monitor,
       runExternalId: input.runExternalId,
       result,
@@ -282,20 +297,22 @@ export async function executeStockRiskMonitorRun(input: {
       nextUnavailableChecks: comparison.unavailableChecks,
       notificationFingerprint: notification?.fingerprint ?? null,
     });
+    if (persisted !== 'committed') return inactiveResult(monitor, persisted);
     return { handled: true, ok: true, result, notification };
   } catch {
-    if (!(await input.deps.isUserActive(monitor.userId))) return inactiveResult(monitor);
+    if (!(await ownerIsActive())) return inactiveResult(monitor);
     const result = emptyResult(monitor, {
       dataAsOf: null,
       outcome: 'failed',
       summary: '本次风险检查未完成，请稍后重试。',
     });
-    await input.deps.fail({
+    const persisted = await input.deps.fail({
       monitor,
       runExternalId: input.runExternalId,
       result,
       errorCode: 'STOCK_RISK_MONITOR_EXECUTION_FAILED',
     });
+    if (persisted !== 'committed') return inactiveResult(monitor, persisted);
     return {
       handled: true,
       ok: false,
@@ -464,14 +481,14 @@ export function createStockRiskMonitorSpecialDispatcher(args: {
           .where(eq(users.id, input.monitor.userId))
           .limit(1)
           .for('update');
-        if (owner?.status !== 'active') return false;
+        if (owner?.status !== 'active') return 'inactive-owner' as const;
         const [run] = await tx
-          .select({ id: plannedTaskRuns.id })
+          .select({ id: plannedTaskRuns.id, status: plannedTaskRuns.status })
           .from(plannedTaskRuns)
           .where(eq(plannedTaskRuns.externalId, input.runExternalId))
           .limit(1);
-        if (!run) throw new Error('股票风险监控运行记录不存在');
-        await tx
+        if (!run || run.status !== 'dispatching') return 'lost-claim' as const;
+        const transition = await tx
           .update(plannedTaskRuns)
           .set({
             status: 'completed',
@@ -482,7 +499,8 @@ export function createStockRiskMonitorSpecialDispatcher(args: {
             resultJson: input.result,
             completedAt,
           })
-          .where(eq(plannedTaskRuns.id, run.id));
+          .where(and(eq(plannedTaskRuns.id, run.id), eq(plannedTaskRuns.status, 'dispatching')));
+        if (readAffectedRows(transition) === 0) return 'lost-claim' as const;
         await tx
           .update(plannedTaskRunItems)
           .set({
@@ -490,7 +508,12 @@ export function createStockRiskMonitorSpecialDispatcher(args: {
             errorMessage: null,
             completedAt,
           })
-          .where(eq(plannedTaskRunItems.plannedTaskRunId, run.id));
+          .where(
+            and(
+              eq(plannedTaskRunItems.plannedTaskRunId, run.id),
+              eq(plannedTaskRunItems.status, 'pending'),
+            ),
+          );
         if (input.updateBaseline) {
           await tx
             .update(stockRiskMonitors)
@@ -555,9 +578,9 @@ export function createStockRiskMonitorSpecialDispatcher(args: {
             lastError: null,
           })
           .where(eq(plannedTasks.id, input.monitor.plannedTaskId));
-        return true;
+        return 'committed' as const;
       });
-      if (!completed) return;
+      if (completed !== 'committed') return completed;
       args.logger.info?.(
         {
           userId: input.monitor.userId,
@@ -571,6 +594,7 @@ export function createStockRiskMonitorSpecialDispatcher(args: {
         },
         'stock-risk-monitor: completed',
       );
+      return 'committed';
     },
     async fail(input) {
       const completedAt = new Date();
@@ -581,14 +605,14 @@ export function createStockRiskMonitorSpecialDispatcher(args: {
           .where(eq(users.id, input.monitor.userId))
           .limit(1)
           .for('update');
-        if (owner?.status !== 'active') return false;
+        if (owner?.status !== 'active') return 'inactive-owner' as const;
         const [run] = await tx
-          .select({ id: plannedTaskRuns.id })
+          .select({ id: plannedTaskRuns.id, status: plannedTaskRuns.status })
           .from(plannedTaskRuns)
           .where(eq(plannedTaskRuns.externalId, input.runExternalId))
           .limit(1);
-        if (!run) return false;
-        await tx
+        if (!run || run.status !== 'dispatching') return 'lost-claim' as const;
+        const transition = await tx
           .update(plannedTaskRuns)
           .set({
             status: 'failed',
@@ -597,7 +621,8 @@ export function createStockRiskMonitorSpecialDispatcher(args: {
             resultJson: input.result,
             completedAt,
           })
-          .where(eq(plannedTaskRuns.id, run.id));
+          .where(and(eq(plannedTaskRuns.id, run.id), eq(plannedTaskRuns.status, 'dispatching')));
+        if (readAffectedRows(transition) === 0) return 'lost-claim' as const;
         await tx
           .update(plannedTaskRunItems)
           .set({
@@ -605,7 +630,12 @@ export function createStockRiskMonitorSpecialDispatcher(args: {
             errorMessage: input.errorCode,
             completedAt,
           })
-          .where(eq(plannedTaskRunItems.plannedTaskRunId, run.id));
+          .where(
+            and(
+              eq(plannedTaskRunItems.plannedTaskRunId, run.id),
+              eq(plannedTaskRunItems.status, 'pending'),
+            ),
+          );
         await tx
           .update(plannedTasks)
           .set({
@@ -614,9 +644,9 @@ export function createStockRiskMonitorSpecialDispatcher(args: {
             lastError: input.errorCode,
           })
           .where(eq(plannedTasks.id, input.monitor.plannedTaskId));
-        return true;
+        return 'committed' as const;
       });
-      if (!completed) return;
+      if (completed !== 'committed') return completed;
       args.logger.error(
         {
           userId: input.monitor.userId,
@@ -626,6 +656,7 @@ export function createStockRiskMonitorSpecialDispatcher(args: {
         },
         'stock-risk-monitor: failed',
       );
+      return 'committed';
     },
   };
   return (input: {
@@ -641,7 +672,10 @@ export function createStockRiskMonitorSpecialDispatcher(args: {
     });
 }
 
-function inactiveResult(monitor: StoredStockRiskMonitor): StockRiskSpecialDispatchResult {
+function inactiveResult(
+  monitor: StoredStockRiskMonitor,
+  reason: Exclude<StockRiskPersistenceOutcome, 'committed'> = 'inactive-owner',
+): StockRiskSpecialDispatchResult {
   return {
     handled: true,
     ok: false,
@@ -651,6 +685,9 @@ function inactiveResult(monitor: StoredStockRiskMonitor): StockRiskSpecialDispat
       summary: '账号当前不可执行，本轮风险检查已停止。',
     }),
     notification: null,
-    errorMessage: '账号当前不可执行',
+    errorMessage: reason === 'inactive-owner' ? '账号当前不可执行' : '运行已由其他流程终止',
+    persisted: false,
+    stoppedForInactiveOwner: reason === 'inactive-owner',
+    ownerUserId: monitor.userId,
   };
 }

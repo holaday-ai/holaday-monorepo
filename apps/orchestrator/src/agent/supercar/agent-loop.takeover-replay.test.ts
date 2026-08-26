@@ -206,6 +206,190 @@ describe('runSupercarTask credential takeover', () => {
     expect(click).not.toHaveBeenCalled();
   });
 
+  it('does not persist a PDF when abort wins while Chromium is rendering it', async () => {
+    createMessage.mockResolvedValueOnce(
+      response(
+        [{ type: 'tool_use', id: 'tool_pdf', name: 'save_page_as_pdf', input: {} }],
+        'tool_use',
+      ),
+    );
+    let releasePdf!: () => void;
+    let signalPdf!: () => void;
+    const pdfStarted = new Promise<void>((resolve) => {
+      signalPdf = resolve;
+    });
+    const pdf = vi.fn(
+      () =>
+        new Promise<Buffer>((resolve) => {
+          signalPdf();
+          releasePdf = () => resolve(Buffer.from('pdf'));
+        }),
+    );
+    const page = {
+      pdf,
+      url: () => 'https://example.com',
+      title: vi.fn(async () => 'Example'),
+      evaluate: vi.fn(async () => ''),
+      mouse: { move: vi.fn(), click: vi.fn(), down: vi.fn(), up: vi.fn() },
+      keyboard: { down: vi.fn(), up: vi.fn() },
+      waitForTimeout: vi.fn(),
+    };
+    const executor = {
+      resetPageForTask: vi.fn(async () => undefined),
+      getPage: vi.fn(async () => page),
+      screenshot: vi.fn(async () => ({
+        base64: 'dGVzdA==',
+        viewportWidth: 1280,
+        viewportHeight: 720,
+      })),
+    } as unknown as PlaywrightExecutor;
+    const onSavePageAsPdf = vi.fn(async () => ({
+      fileId: 'fil_never',
+      filename: 'page.pdf',
+      sizeBytes: 3,
+      downloadUrl: '/never',
+    }));
+    const taskId = 'tsk_abort_during_pdf';
+    const run = runSupercarTask({
+      taskId,
+      intent: 'save this page',
+      executor,
+      apiKey: 'test-key',
+      maxIterations: 1,
+      onSavePageAsPdf,
+    });
+
+    await pdfStarted;
+    expect(supercarAbort(taskId)).toBe(true);
+    releasePdf();
+    await expect(run).resolves.toMatchObject({ status: 'cancelled' });
+    expect(onSavePageAsPdf).not.toHaveBeenCalled();
+  });
+
+  it('does not report an Apify fallback as completed when abort wins during the actor run', async () => {
+    createMessage.mockResolvedValueOnce(
+      response(
+        [
+          {
+            type: 'tool_use',
+            id: 'tool_scrape',
+            name: 'scrape_website',
+            input: { url: 'https://example.com' },
+          },
+        ],
+        'tool_use',
+      ),
+    );
+    let releaseActor!: () => void;
+    let signalActor!: () => void;
+    const actorStarted = new Promise<void>((resolve) => {
+      signalActor = resolve;
+    });
+    const actorRun = vi.fn(
+      () =>
+        new Promise<{ items: Array<Record<string, unknown>> }>((resolve) => {
+          signalActor();
+          releaseActor = () => resolve({ items: [{ url: 'https://example.com', text: 'stale' }] });
+        }),
+    );
+    const taskId = 'tsk_abort_during_apify';
+    const page = {
+      url: () => 'https://example.com',
+      title: vi.fn(async () => 'Example'),
+      evaluate: vi.fn(async () => ''),
+      mouse: { move: vi.fn(), click: vi.fn(), down: vi.fn(), up: vi.fn() },
+      keyboard: { down: vi.fn(), up: vi.fn() },
+      waitForTimeout: vi.fn(),
+    };
+    const executor = {
+      resetPageForTask: vi.fn(async () => undefined),
+      getPage: vi.fn(async () => page),
+      screenshot: vi.fn(async () => ({
+        base64: 'dGVzdA==',
+        viewportWidth: 1280,
+        viewportHeight: 720,
+      })),
+    } as unknown as PlaywrightExecutor;
+    const run = runSupercarTask({
+      taskId,
+      intent: 'scrape a site',
+      executor,
+      apiKey: 'test-key',
+      maxIterations: 1,
+      apifyAdapter: { run: actorRun } as never,
+    });
+
+    await actorStarted;
+    expect(supercarAbort(taskId)).toBe(true);
+    releaseActor();
+    await expect(run).resolves.toMatchObject({ status: 'cancelled' });
+    expect(createMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not start an Apify actor when abort wins during its final durable check', async () => {
+    createMessage.mockResolvedValueOnce(
+      response(
+        [
+          {
+            type: 'tool_use',
+            id: 'tool_scrape_veto',
+            name: 'scrape_website',
+            input: { url: 'https://example.com' },
+          },
+        ],
+        'tool_use',
+      ),
+    );
+    const page = {
+      url: () => 'https://example.com',
+      title: vi.fn(async () => 'Example'),
+      evaluate: vi.fn(async () => ''),
+      mouse: { move: vi.fn(), click: vi.fn(), down: vi.fn(), up: vi.fn() },
+      keyboard: { down: vi.fn(), up: vi.fn() },
+      waitForTimeout: vi.fn(),
+    };
+    const executor = {
+      resetPageForTask: vi.fn(async () => undefined),
+      getPage: vi.fn(async () => page),
+      screenshot: vi.fn(async () => ({
+        base64: 'dGVzdA==',
+        viewportWidth: 1280,
+        viewportHeight: 720,
+      })),
+    } as unknown as PlaywrightExecutor;
+    let checkCount = 0;
+    let signalFinalCheck!: () => void;
+    let releaseFinalCheck!: () => void;
+    const finalCheckStarted = new Promise<void>((resolve) => {
+      signalFinalCheck = resolve;
+    });
+    const finalCheck = new Promise<boolean>((resolve) => {
+      releaseFinalCheck = () => resolve(false);
+    });
+    const actorRun = vi.fn(async () => ({ items: [] }));
+    const taskId = 'tsk_abort_before_apify';
+    const run = runSupercarTask({
+      taskId,
+      intent: 'scrape a site',
+      executor,
+      apiKey: 'test-key',
+      maxIterations: 1,
+      apifyAdapter: { run: actorRun } as never,
+      isTaskCancelled: async () => {
+        checkCount += 1;
+        if (checkCount !== 5) return false;
+        signalFinalCheck();
+        return finalCheck;
+      },
+    });
+
+    await finalCheckStarted;
+    expect(supercarAbort(taskId)).toBe(true);
+    releaseFinalCheck();
+    await expect(run).resolves.toMatchObject({ status: 'cancelled' });
+    expect(actorRun).not.toHaveBeenCalled();
+  });
+
   it('does not replay the stale credential input after the user takes over', async () => {
     createMessage
       .mockResolvedValueOnce(

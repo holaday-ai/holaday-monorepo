@@ -3135,6 +3135,7 @@ async function runSupercarTaskInternal(
               printBackground: true,
               format: 'A4',
             });
+            if (await cancellationRequested()) return cancelledOutcome();
             const result = await opts.onSavePageAsPdf({ filename, pdfBuffer });
             if ('error' in result) {
               toolResults.push({
@@ -3331,7 +3332,9 @@ async function runSupercarTaskInternal(
             // stays as a fallback for older deployments where the
             // Firecrawl key isn't yet provisioned.
             if (opts.firecrawl) {
+              if (await cancellationRequested()) return cancelledOutcome();
               const r = await opts.firecrawl.scrape(url);
+              if (await cancellationRequested()) return cancelledOutcome();
               if (!r.ok) {
                 toolResults.push({
                   type: 'tool_result',
@@ -3354,12 +3357,14 @@ async function runSupercarTaskInternal(
                 content: [{ type: 'text', text: head + body + tail }],
               });
             } else if (opts.apifyAdapter) {
+              if (await cancellationRequested()) return cancelledOutcome();
               const result = await opts.apifyAdapter.run(APIFY_SCRAPE_WEBSITE_ACTOR, {
                 startUrls: [{ url }],
                 maxRequestsPerCrawl: 1,
                 maxResults: 1,
                 ...(inp.extractionPrompt ? { extractionPrompt: inp.extractionPrompt } : {}),
               });
+              if (await cancellationRequested()) return cancelledOutcome();
               if ('error' in result) {
                 toolResults.push({
                   type: 'tool_result',
@@ -3464,10 +3469,12 @@ async function runSupercarTaskInternal(
                 platform === 'jd' ? '京东 jd.com' :
                 platform === 'taobao' ? '淘宝 taobao.com' :
                 'amazon.com';
+              if (await cancellationRequested()) return cancelledOutcome();
               const r = await opts.firecrawl.search(
                 `${platformName} ${query}`,
                 { limit: maxResults },
               );
+              if (await cancellationRequested()) return cancelledOutcome();
               if (!r.ok) {
                 toolResults.push({
                   type: 'tool_result',
@@ -3528,12 +3535,14 @@ async function runSupercarTaskInternal(
               });
             } else if (opts.apifyAdapter) {
               const actorId = APIFY_ECOMMERCE_ACTORS[platform];
+              if (await cancellationRequested()) return cancelledOutcome();
               const result = await opts.apifyAdapter.run(actorId, {
                 search: query,
                 query,
                 maxItems: maxResults,
                 maxResults,
               });
+              if (await cancellationRequested()) return cancelledOutcome();
               if ('error' in result) {
                 toolResults.push({
                   type: 'tool_result',

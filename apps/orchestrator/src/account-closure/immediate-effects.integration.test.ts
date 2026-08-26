@@ -408,26 +408,35 @@ describe.sequential('account closure atomic freeze and exact immediate effects',
     expect(batchItemStates.filter((item) => item.status === 'pending')).toHaveLength(1);
   });
 
-  it('keeps a failed running-task abort retryable without duplicating effects', async () => {
+  it('treats missing handles as stopped while retrying only thrown aborts across tasks', async () => {
     const user = await createUser();
+    const stoppedTaskId = `tsk_abort_stopped_${randomBytes(5).toString('hex')}`;
+    const retryTaskId = `tsk_abort_retry_${randomBytes(5).toString('hex')}`;
     await db.insert(tasks).values({
-      externalId: `tsk_abort_retry_${randomBytes(5).toString('hex')}`,
+      externalId: stoppedTaskId,
       userId: user.id,
       status: 'executing',
-      intent: 'abort retry',
+      intent: 'already stopped locally',
+    });
+    await db.insert(tasks).values({
+      externalId: retryTaskId,
+      userId: user.id,
+      status: 'executing',
+      intent: 'abort transport retry',
     });
     const frozen = await freezeAccountForClosure(db, {
       userId: user.id,
       requestExternalId: `acl_${randomBytes(10).toString('hex')}`,
       requestedAt: new Date('2026-08-26T05:00:00.000Z'),
     });
-    const abortTask = vi
-      .fn()
-      .mockReturnValueOnce(false)
-      .mockImplementationOnce(() => {
+    let retryAttempts = 0;
+    const abortTask = vi.fn((taskId: string) => {
+      if (taskId === stoppedTaskId) return false;
+      if (taskId === retryTaskId && retryAttempts++ === 0) {
         throw new Error('local abort transport failed');
-      })
-      .mockReturnValueOnce(true);
+      }
+      return false;
+    });
 
     await expect(
       applyImmediateClosureEffects(
@@ -440,15 +449,8 @@ describe.sequential('account closure atomic freeze and exact immediate effects',
       .select({ id: accountClosureEffects.id })
       .from(accountClosureEffects)
       .where(eq(accountClosureEffects.requestId, frozen.requestId));
-    expect(effectsAfterMiss).toHaveLength(1);
+    expect(effectsAfterMiss).toHaveLength(2);
 
-    await expect(
-      applyImmediateClosureEffects(
-        db,
-        { requestId: frozen.requestId, userId: user.id, userExternalId: user.externalId },
-        { abortTask },
-      ),
-    ).rejects.toThrow(/retry/i);
     await expect(
       applyImmediateClosureEffects(
         db,
@@ -460,8 +462,8 @@ describe.sequential('account closure atomic freeze and exact immediate effects',
       .select({ id: accountClosureEffects.id })
       .from(accountClosureEffects)
       .where(eq(accountClosureEffects.requestId, frozen.requestId));
-    expect(effectsAfterRetry).toHaveLength(1);
-    expect(abortTask).toHaveBeenCalledTimes(3);
+    expect(effectsAfterRetry).toHaveLength(2);
+    expect(abortTask).toHaveBeenCalledTimes(4);
   });
 
   it('lets exactly one of withdrawal or processing win across independent connections', async () => {
