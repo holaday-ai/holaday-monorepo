@@ -160,14 +160,30 @@ describe.sequential('account closure relational handlers', () => {
   it('fails closed before task cleanup while Task 7 objects or cross-category children remain', async () => {
     const handler = getAccountClosureHandler('task_execution');
 
-    await expect(handler.run(context(null))).rejects.toMatchObject({ code: 'HANDLER_DEFERRED' });
+    const taskFilePage = await handler.run(context(null));
+    expect(taskFilePage).toEqual({
+      kind: 'continue',
+      checkpoint: { processedCount: 1 },
+      processed: 1,
+    });
+    if (taskFilePage.kind !== 'continue') throw new Error('expected task file page');
+
+    // The task handler owns the non-media file but cannot cross its relational
+    // preflight while the media-owned screenshot evidence remains.
+    await expect(handler.run(context(taskFilePage.checkpoint))).rejects.toMatchObject({
+      code: 'HANDLER_DEFERRED',
+    });
+    const mediaResult = await runToCompletion(getAccountClosureHandler('media_assets'));
+    expect(mediaResult.retention).toBe('deleted');
     for (const row of targetTaskGraph.blockerRows) {
-      await db.execute(sql`DELETE FROM ${sql.identifier(row.tableName)} WHERE id = ${row.id}`);
+      expect(await rowExists(row)).toBe(false);
     }
 
     // Stock monitors and notifications still own FK-bearing children. They
     // must finish under their own governed categories before task parents.
-    await expect(handler.run(context(null))).rejects.toMatchObject({ code: 'HANDLER_DEFERRED' });
+    await expect(handler.run(context(taskFilePage.checkpoint))).rejects.toMatchObject({
+      code: 'HANDLER_DEFERRED',
+    });
   });
 
   it('deletes every existing relational category child-first without touching the other account or users', async () => {

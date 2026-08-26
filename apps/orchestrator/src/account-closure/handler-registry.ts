@@ -8,6 +8,7 @@ import { extensionLoginCookiesClosureHandler } from './handlers/extension-login-
 import { extensionSiteStatsClosureHandler } from './handlers/extension-site-stats.js';
 import { externalNotificationsClosureHandler } from './handlers/external-notifications.js';
 import { feedbackSupportClosureHandler } from './handlers/feedback-support.js';
+import { mediaAssetsClosureHandler } from './handlers/media-assets.js';
 import { stockPreferenceProfileClosureHandler } from './handlers/stock-preference-profile.js';
 import { taskExecutionClosureHandler } from './handlers/task-execution.js';
 
@@ -23,7 +24,7 @@ export const ACCOUNT_CLOSURE_HANDLERS: readonly AccountClosureHandler[] = [
   extensionLoginCookiesClosureHandler,
   createDeferredClosureHandler('payments_entitlements'),
   createDeferredClosureHandler('partner_kyc_ledger'),
-  createDeferredClosureHandler('media_assets'),
+  mediaAssetsClosureHandler,
   analyticsLogsClosureHandler,
 ];
 

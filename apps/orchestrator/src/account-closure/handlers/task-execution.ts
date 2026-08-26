@@ -1,4 +1,7 @@
+import { createDbUserFileClosureStore, deleteUserFilesPage } from '../../files/file-service.js';
 import {
+  type AccountClosureHandler,
+  ClosureHandlerError,
   assertNoOwnedRows,
   createRelationalDeleteHandler,
   directUserRows,
@@ -6,6 +9,7 @@ import {
   rowsOwnedThroughParent,
   rowsOwnedThroughThreeParents,
 } from '../handler-contract.js';
+import { deleteUserEvidencePage } from './media-assets.js';
 
 const deferredObjectRows = [
   directUserRows('task_files'),
@@ -35,7 +39,7 @@ const crossCategoryDependencies = [
   directUserRows('stock_risk_monitors'),
 ];
 
-export const taskExecutionClosureHandler = createRelationalDeleteHandler({
+const taskExecutionRelationalClosureHandler = createRelationalDeleteHandler({
   categoryId: 'task_execution',
   preflight: async (context) => {
     // Object-backed file/evidence rows belong to Task 7. Notification and
@@ -209,3 +213,54 @@ export const taskExecutionClosureHandler = createRelationalDeleteHandler({
     directUserRows('projects'),
   ],
 });
+
+/**
+ * Task-owned files/evidence are removed object-first before the relational
+ * graph. Media MIME families and retained evidence remain exclusively owned by
+ * `media_assets`; the relational preflight deliberately blocks until that
+ * category has also finished, preventing task FK cleanup from orphaning an
+ * object while avoiding double counting.
+ */
+export const taskExecutionClosureHandler: AccountClosureHandler = {
+  categoryId: 'task_execution',
+  version: 1,
+  async run(context) {
+    const pageSize = Math.min(context.pageSize, 100);
+    if (!Number.isSafeInteger(pageSize) || pageSize <= 0) {
+      throw new ClosureHandlerError('INVARIANT_VIOLATION');
+    }
+    const previousProcessed = context.checkpoint?.processedCount ?? 0;
+    const filePage = await deleteUserFilesPage(
+      {
+        userIdInternal: context.request.userId,
+        ...(context.checkpoint?.cursor !== undefined ? { afterId: context.checkpoint.cursor } : {}),
+        limit: pageSize,
+        categoryId: 'task_execution',
+      },
+      {
+        store: createDbUserFileClosureStore(context.db),
+        storage: context.storage,
+      },
+    );
+    if (filePage.deleted > 0) {
+      const processed = previousProcessed + filePage.deleted;
+      return {
+        kind: 'continue',
+        checkpoint: {
+          ...(filePage.nextAfterId !== null ? { cursor: filePage.nextAfterId } : {}),
+          processedCount: processed,
+        },
+        processed,
+      };
+    }
+
+    const evidencePage = await deleteUserEvidencePage(context, 'task_execution', pageSize);
+    if (evidencePage.restricted !== 0) throw new ClosureHandlerError('INVARIANT_VIOLATION');
+    if (evidencePage.deleted > 0) {
+      const processed = previousProcessed + evidencePage.deleted;
+      return { kind: 'continue', checkpoint: { processedCount: processed }, processed };
+    }
+
+    return taskExecutionRelationalClosureHandler.run(context);
+  },
+};
