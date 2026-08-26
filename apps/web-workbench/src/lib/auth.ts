@@ -22,21 +22,38 @@ let memoryClosureRecovery: string | null = null;
  */
 (function consumeOAuthFragment(): void {
   if (typeof window === 'undefined' || !window.location.hash) return;
+  const scrubFragment = (): void => {
+    window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+  };
+  const hasUnassociatedFactorFragment = /(?:^|[#&])(?:mfa|closure)=/.test(
+    window.location.hash,
+  );
+  if (hasUnassociatedFactorFragment && getAccessToken()) {
+    scrubFragment();
+    return;
+  }
   const tokenMatch = /(?:^|[#&])token=([^&]+)/.exec(window.location.hash);
   const mfaMatch = /(?:^|[#&])mfa=([^&]+)/.exec(window.location.hash);
   const closureMatch = /(?:^|[#&])closure=([^&]+)/.exec(window.location.hash);
-  if (!tokenMatch?.[1] && !mfaMatch?.[1] && !closureMatch?.[1]) return;
-  if (closureMatch?.[1]) {
-    setClosureRecovery(decodeURIComponent(closureMatch[1]));
-  } else if (mfaMatch?.[1]) {
-    setMfaChallenge(decodeURIComponent(mfaMatch[1]));
-  } else if (tokenMatch?.[1]) {
-    setAccessToken(decodeURIComponent(tokenMatch[1]));
+  if (!tokenMatch?.[1] && !mfaMatch?.[1] && !closureMatch?.[1]) {
+    if (hasUnassociatedFactorFragment) scrubFragment();
+    return;
+  }
+  try {
+    if (closureMatch?.[1]) {
+      setClosureRecovery(decodeURIComponent(closureMatch[1]));
+    } else if (mfaMatch?.[1]) {
+      setMfaChallenge(decodeURIComponent(mfaMatch[1]));
+    } else if (tokenMatch?.[1]) {
+      setAccessToken(decodeURIComponent(tokenMatch[1]));
+    }
+  } catch {
+    // Malformed percent escapes are untrusted input; discard the handoff.
   }
   // Strip the token from the URL without a page reload so it can't
   // leak into referrers / shared links. History replaceState keeps
   // the current pathname + search but nukes the hash.
-  window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+  scrubFragment();
 })();
 
 export function getAccessToken(): string | null {

@@ -162,6 +162,7 @@ describe('AuthService password reset invalidation', () => {
     );
 
     expect(row.passwordHash).toBe('hash:new-password-42');
+    if (!('accessToken' in result)) throw new Error('expected authenticated result');
     await expect(verifyAccessToken(result.accessToken)).resolves.toMatchObject({
       sub: row.externalId,
       authVersion: 3,
@@ -576,7 +577,7 @@ describe('AuthService account status admission', () => {
         mfaFailedAttempts: 0,
         mfaLockedUntil: null,
         displayName: null,
-        googleId: null,
+        googleId: null as string | null,
         avatarUrl: null,
         emailVerified: false,
         phone: '13800138000',
@@ -682,6 +683,165 @@ describe('AuthService account status admission', () => {
         passwordHash: 'hash:old-password',
         authVersion: 13,
       });
+    },
+  );
+
+  it.each(['google', 'phone', 'reset', 'change'] as const)(
+    'rejects %s issuance when authVersion advances again after a successful CAS',
+    async (lane) => {
+      const row = {
+        id: 88,
+        externalId: 'usr_post_cas_drift',
+        email: 'post-cas@example.com',
+        passwordHash: 'hash:old-password',
+        plan: 'pro',
+        role: 'user',
+        planExpiresAt: null,
+        status: 'active',
+        authVersion: 10,
+        mfaEnabled: false,
+        mfaSecretEncrypted: null,
+        mfaSetupCreatedAt: null,
+        mfaLastUsedStep: null,
+        mfaFailedAttempts: 0,
+        mfaLockedUntil: null,
+        displayName: null,
+        googleId: null as string | null,
+        avatarUrl: null,
+        emailVerified: false,
+        phone: '13600136000',
+        phoneVerified: false,
+        qwenVoiceId: null,
+        baseVideoFileId: null,
+        videoSelfUseAuthorizedAt: null,
+        selectedRoles: null,
+        selectedSkills: null,
+        roleChangesThisMonth: 0,
+        roleChangesPeriodStart: null,
+        createdAt: new Date('2026-08-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-08-26T00:00:00.000Z'),
+      };
+      let updateCompleted = false;
+      let laterVersionApplied = false;
+      const query = () => {
+        const value = {
+          where() {
+            return value;
+          },
+          limit() {
+            return value;
+          },
+          // biome-ignore lint/suspicious/noThenProperty: Drizzle query builders are awaitable.
+          then<TResult1 = unknown, TResult2 = never>(
+            onfulfilled?: ((result: Array<typeof row>) => TResult1 | PromiseLike<TResult1>) | null,
+            onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+          ) {
+            if (updateCompleted && !laterVersionApplied) {
+              laterVersionApplied = true;
+              row.authVersion += 1;
+            }
+            return Promise.resolve([{ ...row }]).then(onfulfilled, onrejected);
+          },
+        };
+        return value;
+      };
+      const db = {
+        select() {
+          return { from: query };
+        },
+        update() {
+          return {
+            set(values: Record<string, unknown>) {
+              return {
+                where() {
+                  if ('passwordHash' in values) row.passwordHash = String(values.passwordHash);
+                  if ('authVersion' in values) row.authVersion += 1;
+                  if ('googleId' in values) row.googleId = String(values.googleId);
+                  if ('emailVerified' in values) row.emailVerified = Boolean(values.emailVerified);
+                  if ('phoneVerified' in values) row.phoneVerified = Boolean(values.phoneVerified);
+                  updateCompleted = true;
+                  return Promise.resolve([{ affectedRows: 1 }, null]);
+                },
+              };
+            },
+          };
+        },
+      };
+      const { AuthService } = await import('./service.js');
+      const service = new AuthService(db as never);
+      const attempt =
+        lane === 'google'
+          ? service.loginOrRegisterByGoogle({
+              email: row.email,
+              googleId: 'google-post-cas',
+            })
+          : lane === 'phone'
+            ? service.loginOrRegisterByPhone(row.phone)
+            : lane === 'reset'
+              ? service.resetPasswordByEmail(row.email, 'new-password-42')
+              : service.changePasswordForUser(row.externalId, 'new-password-42');
+
+      await expect(attempt).rejects.toMatchObject({ code: 'INVALID_CREDENTIALS' });
+      expect(laterVersionApplied).toBe(true);
+    },
+  );
+
+  it.each(['google', 'phone'] as const)(
+    'rejects %s no-write issuance when reread authVersion differs from the first read',
+    async (lane) => {
+      const row = {
+        id: 89,
+        externalId: 'usr_no_write_drift',
+        email: 'no-write@example.com',
+        passwordHash: 'hash:password',
+        plan: 'free',
+        status: 'active',
+        authVersion: 14,
+        mfaEnabled: false,
+        displayName: 'Existing Name',
+        googleId: 'google-existing',
+        avatarUrl: null,
+        emailVerified: true,
+        phone: '13500135000',
+        phoneVerified: true,
+        createdAt: new Date('2026-08-01T00:00:00.000Z'),
+      };
+      let reads = 0;
+      const query = {
+        where() {
+          return query;
+        },
+        limit() {
+          return query;
+        },
+        // biome-ignore lint/suspicious/noThenProperty: Drizzle query builders are awaitable.
+        then<TResult1 = unknown, TResult2 = never>(
+          onfulfilled?: ((result: Array<typeof row>) => TResult1 | PromiseLike<TResult1>) | null,
+          onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+        ) {
+          reads += 1;
+          if (reads === 2) row.authVersion += 1;
+          return Promise.resolve([{ ...row }]).then(onfulfilled, onrejected);
+        },
+      };
+      const db = {
+        select() {
+          return { from: () => query };
+        },
+      };
+      const { AuthService } = await import('./service.js');
+      const service = new AuthService(db as never);
+      const attempt =
+        lane === 'google'
+          ? service.loginOrRegisterByGoogle({
+              email: row.email,
+              googleId: row.googleId,
+              name: row.displayName,
+            })
+          : service.loginOrRegisterByPhone(row.phone);
+
+      await expect(attempt).rejects.toMatchObject({ code: 'INVALID_CREDENTIALS' });
+      expect(reads).toBe(2);
     },
   );
 });

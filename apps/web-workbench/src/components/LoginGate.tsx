@@ -150,6 +150,8 @@ export function LoginGate({
       }
       if (!('accessToken' in result)) return;
       setAccessToken(result.accessToken);
+      setMfaToken(null);
+      setMfaCode('');
       onAuthenticated();
     },
     [onAuthenticated, onClosureRecovery],

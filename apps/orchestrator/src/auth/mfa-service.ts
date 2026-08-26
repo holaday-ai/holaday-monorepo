@@ -123,6 +123,7 @@ export class MfaService {
     if (!claims) throw new MfaError('INVALID', '验证已过期，请重新登录');
     const row = await this.user(claims.sub);
     if (row.status === 'closure_pending' || row.status === 'closure_processing') {
+      assertDirectPreFreezeVersion(row.authVersion, claims.authVersion);
       return issueLoginResult(this.db, row, { mfaVerified: true });
     }
     if (!row.mfaEnabled || !row.mfaSecretEncrypted || row.authVersion !== claims.authVersion) {
@@ -131,6 +132,7 @@ export class MfaService {
     await this.verifyFactor(row, code);
     const refreshed = await this.user(claims.sub);
     if (refreshed.status === 'closure_pending' || refreshed.status === 'closure_processing') {
+      assertDirectPreFreezeVersion(refreshed.authVersion, claims.authVersion);
       return issueLoginResult(this.db, refreshed, { mfaVerified: true });
     }
     if (refreshed.status !== 'active' || refreshed.authVersion !== claims.authVersion) {
@@ -292,6 +294,12 @@ export class MfaService {
       if (affectedRows(result) === 1) return;
     }
     throw new MfaError('LOCKED', '尝试次数过多，请稍后再试');
+  }
+}
+
+function assertDirectPreFreezeVersion(currentVersion: number, challengeVersion: number): void {
+  if (currentVersion !== challengeVersion + 1) {
+    throw new MfaError('INVALID', '验证已过期，请重新登录');
   }
 }
 

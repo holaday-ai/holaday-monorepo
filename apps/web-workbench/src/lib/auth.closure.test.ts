@@ -72,4 +72,22 @@ describe('closure recovery credential storage', () => {
     expect(window.location.hash).toBe('');
     expect(localStorage.getItem('holaday.closure_recovery')).toBeNull();
   });
+
+  it.each([
+    ['forged closure', '#closure=forged-recovery-token'],
+    ['forged MFA', '#mfa=forged-mfa-token'],
+    ['malformed escape', '#closure=%E0%A4%A'],
+    ['empty MFA', '#mfa='],
+    ['multiple modes', '#token=attacker-access&mfa=forged-mfa&closure=forged-recovery'],
+  ])('preserves existing access and scrubs an unassociated %s fragment', async (_caseName, hash) => {
+    localStorage.setItem('holaday.access_token', 'existing-valid-access');
+    window.history.replaceState(null, '', `/login${hash}`);
+
+    const auth = await import('./auth.js');
+
+    expect(auth.getAccessToken()).toBe('existing-valid-access');
+    expect(auth.getMfaChallenge()).toBeNull();
+    expect(auth.getClosureRecovery()).toBeNull();
+    expect(window.location.hash).toBe('');
+  });
 });

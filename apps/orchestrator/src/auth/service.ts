@@ -175,11 +175,17 @@ export class AuthService {
       }
       if (profile.name && !existing.displayName) patch.displayName = profile.name;
       if (Object.keys(patch).length > 0) {
-        return updateActiveUserAndIssue(this.db, existing, patch, 'google upsert');
+        return updateActiveUserAndIssue(
+          this.db,
+          existing,
+          patch,
+          existing.authVersion,
+          'google upsert',
+        );
       }
       const [row] = await this.db.select().from(users).where(eq(users.id, existing.id)).limit(1);
       if (!row) throw new Error('user disappeared after google upsert');
-      return issueLoginResult(this.db, row);
+      return issueLoginResultAtVersion(this.db, row, existing.authVersion);
     }
 
     // Fresh user. Sentinel password hash so the password-login path
@@ -234,6 +240,7 @@ export class AuthService {
         passwordHash,
         authVersion: sql`${users.authVersion} + 1`,
       },
+      existing.authVersion + 1,
       'password reset',
     );
   }
@@ -244,7 +251,7 @@ export class AuthService {
    * Incrementing authVersion invalidates every previously issued access token;
    * the returned token keeps the current device signed in at the new version.
    */
-  async changePasswordForUser(externalId: string, newPassword: string): Promise<AuthResult> {
+  async changePasswordForUser(externalId: string, newPassword: string): Promise<LoginResult> {
     const [existing] = await this.db
       .select()
       .from(users)
@@ -257,26 +264,16 @@ export class AuthService {
       throw new AuthError('INVALID_CREDENTIALS', 'account not found');
     }
     const passwordHash = await hashPassword(newPassword);
-    const updateResult = await this.db
-      .update(users)
-      .set({
+    return updateActiveUserAndIssue(
+      this.db,
+      existing,
+      {
         passwordHash,
         authVersion: sql`${users.authVersion} + 1`,
-      })
-      .where(
-        and(
-          eq(users.id, existing.id),
-          eq(users.status, 'active'),
-          eq(users.authVersion, existing.authVersion),
-        ),
-      );
-    const [updated] = await this.db.select().from(users).where(eq(users.id, existing.id)).limit(1);
-    if (!updated) throw new Error('user disappeared after password change');
-    if (readAffectedRows(updateResult) !== 1 || updated.status !== 'active') {
-      throw new AuthError('INVALID_CREDENTIALS', 'account not found');
-    }
-    const accessToken = await issueAccessToken(updated);
-    return { user: toPublic(updated), accessToken };
+      },
+      existing.authVersion + 1,
+      'password change',
+    );
   }
 
   /**
@@ -311,12 +308,13 @@ export class AuthService {
           this.db,
           existing,
           { phoneVerified: true },
+          existing.authVersion,
           'sms verification',
         );
       }
       const [row] = await this.db.select().from(users).where(eq(users.id, existing.id)).limit(1);
       if (!row) throw new Error('user disappeared after sms verification');
-      return issueLoginResult(this.db, row);
+      return issueLoginResultAtVersion(this.db, row, existing.authVersion);
     }
     const externalId = newExternalId('user');
     const passwordHash = await hashPassword(
@@ -375,6 +373,7 @@ async function updateActiveUserAndIssue(
     emailVerified?: boolean;
     phoneVerified?: boolean;
   },
+  expectedIssuanceVersion: number,
   operation: string,
 ): Promise<LoginResult> {
   const result = await database
@@ -385,10 +384,27 @@ async function updateActiveUserAndIssue(
     );
   const [current] = await database.select().from(users).where(eq(users.id, row.id)).limit(1);
   if (!current) throw new Error(`user disappeared after ${operation}`);
-  if (readAffectedRows(result) !== 1 && current.status === 'active') {
+  if (readAffectedRows(result) !== 1) {
+    if (current.status === 'closure_pending' || current.status === 'closure_processing') {
+      return issueLoginResult(database, current);
+    }
     throw new AuthError('INVALID_CREDENTIALS', 'email or password incorrect');
   }
-  return issueLoginResult(database, current);
+  return issueLoginResultAtVersion(database, current, expectedIssuanceVersion);
+}
+
+function issueLoginResultAtVersion(
+  database: DB,
+  row: typeof users.$inferSelect,
+  expectedIssuanceVersion: number,
+): Promise<LoginResult> {
+  if (row.status === 'closure_pending' || row.status === 'closure_processing') {
+    return issueLoginResult(database, row);
+  }
+  if (row.status !== 'active' || row.authVersion !== expectedIssuanceVersion) {
+    throw new AuthError('INVALID_CREDENTIALS', 'email or password incorrect');
+  }
+  return issueLoginResult(database, row);
 }
 
 function toPublic(

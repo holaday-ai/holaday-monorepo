@@ -1,6 +1,6 @@
 import { TrustNavigation } from '@/components/TrustNavigation';
 import { Button } from '@/components/ui/button';
-import { setAccessToken } from '@/lib/auth';
+import { setAccessToken, setClosureRecovery } from '@/lib/auth';
 import {
   normalizeProfileSnapshot,
   profileDisplayName,
@@ -16,9 +16,11 @@ import { PageContainer, PageHeader, Row, Section } from '@/pages/PageShell';
 import { AlertCircle, Copy, KeyRound, Loader2, Mail, ShieldCheck } from 'lucide-react';
 import * as QRCode from 'qrcode';
 import * as React from 'react';
+import { useNavigate } from 'react-router-dom';
 
 /** Account profile with real password and authenticator security controls. */
 export function ProfilePage(): JSX.Element {
+  const navigate = useNavigate();
   const mountedRef = React.useRef(false);
   const requestIdRef = React.useRef(0);
   const [loading, setLoading] = React.useState(true);
@@ -125,6 +127,16 @@ export function ProfilePage(): JSX.Element {
         code: passwordCode,
         password: newPassword,
       });
+      if (
+        'closureRecoveryRequired' in result &&
+        result.closureRecoveryRequired === true &&
+        'recoveryToken' in result &&
+        typeof result.recoveryToken === 'string'
+      ) {
+        setClosureRecovery(result.recoveryToken);
+        navigate('/account/closure-recovery', { replace: true });
+        return;
+      }
       setAccessToken(result.accessToken);
       setPasswordCode('');
       setNewPassword('');
