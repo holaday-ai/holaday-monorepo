@@ -1,6 +1,7 @@
 import { newExternalId } from '@holaday/shared-types';
-import { eq, or, sql } from 'drizzle-orm';
+import { type SQL, and, eq, or, sql } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
+import { readAffectedRows } from '../db/mysql-result.js';
 import { accountClosureRequests } from '../db/schema/account-closures.js';
 import { users } from '../db/schema/users.js';
 import { signAccessToken, signAccountClosureRecoveryToken, signMfaChallengeToken } from './jwt.js';
@@ -163,6 +164,9 @@ export class AuthService {
       .limit(1);
 
     if (existing) {
+      if (existing.status !== 'active') {
+        return issueLoginResult(this.db, existing);
+      }
       const patch: Partial<typeof users.$inferInsert> = {};
       if (!existing.googleId) patch.googleId = profile.googleId;
       if (!existing.emailVerified) patch.emailVerified = true;
@@ -171,7 +175,7 @@ export class AuthService {
       }
       if (profile.name && !existing.displayName) patch.displayName = profile.name;
       if (Object.keys(patch).length > 0) {
-        await this.db.update(users).set(patch).where(eq(users.id, existing.id));
+        return updateActiveUserAndIssue(this.db, existing, patch, 'google upsert');
       }
       const [row] = await this.db.select().from(users).where(eq(users.id, existing.id)).limit(1);
       if (!row) throw new Error('user disappeared after google upsert');
@@ -219,17 +223,19 @@ export class AuthService {
     if (!existing) {
       throw new AuthError('INVALID_CREDENTIALS', 'email not registered');
     }
+    if (existing.status !== 'active') {
+      return issueLoginResult(this.db, existing);
+    }
     const passwordHash = await hashPassword(newPassword);
-    await this.db
-      .update(users)
-      .set({
+    return updateActiveUserAndIssue(
+      this.db,
+      existing,
+      {
         passwordHash,
         authVersion: sql`${users.authVersion} + 1`,
-      })
-      .where(eq(users.id, existing.id));
-    const [updated] = await this.db.select().from(users).where(eq(users.id, existing.id)).limit(1);
-    if (!updated) throw new Error('user disappeared after password reset');
-    return issueLoginResult(this.db, updated);
+      },
+      'password reset',
+    );
   }
 
   /**
@@ -247,17 +253,26 @@ export class AuthService {
     if (!existing) {
       throw new AuthError('INVALID_CREDENTIALS', 'account not found');
     }
+    if (existing.status !== 'active') {
+      throw new AuthError('INVALID_CREDENTIALS', 'account not found');
+    }
     const passwordHash = await hashPassword(newPassword);
-    await this.db
+    const updateResult = await this.db
       .update(users)
       .set({
         passwordHash,
         authVersion: sql`${users.authVersion} + 1`,
       })
-      .where(eq(users.id, existing.id));
+      .where(
+        and(
+          eq(users.id, existing.id),
+          eq(users.status, 'active'),
+          eq(users.authVersion, existing.authVersion),
+        ),
+      );
     const [updated] = await this.db.select().from(users).where(eq(users.id, existing.id)).limit(1);
     if (!updated) throw new Error('user disappeared after password change');
-    if (updated.status !== 'active') {
+    if (readAffectedRows(updateResult) !== 1 || updated.status !== 'active') {
       throw new AuthError('INVALID_CREDENTIALS', 'account not found');
     }
     const accessToken = await issueAccessToken(updated);
@@ -288,10 +303,20 @@ export class AuthService {
       .where(eq(users.phone, normalized))
       .limit(1);
     if (existing) {
-      if (!existing.phoneVerified) {
-        await this.db.update(users).set({ phoneVerified: true }).where(eq(users.id, existing.id));
+      if (existing.status !== 'active') {
+        return issueLoginResult(this.db, existing);
       }
-      return issueLoginResult(this.db, existing);
+      if (!existing.phoneVerified) {
+        return updateActiveUserAndIssue(
+          this.db,
+          existing,
+          { phoneVerified: true },
+          'sms verification',
+        );
+      }
+      const [row] = await this.db.select().from(users).where(eq(users.id, existing.id)).limit(1);
+      if (!row) throw new Error('user disappeared after sms verification');
+      return issueLoginResult(this.db, row);
     }
     const externalId = newExternalId('user');
     const passwordHash = await hashPassword(
@@ -336,6 +361,34 @@ export class AuthService {
 
     return issueLoginResult(this.db, row);
   }
+}
+
+async function updateActiveUserAndIssue(
+  database: DB,
+  row: typeof users.$inferSelect,
+  patch: {
+    passwordHash?: string;
+    authVersion?: number | SQL;
+    googleId?: string | null;
+    avatarUrl?: string | null;
+    displayName?: string | null;
+    emailVerified?: boolean;
+    phoneVerified?: boolean;
+  },
+  operation: string,
+): Promise<LoginResult> {
+  const result = await database
+    .update(users)
+    .set(patch)
+    .where(
+      and(eq(users.id, row.id), eq(users.status, 'active'), eq(users.authVersion, row.authVersion)),
+    );
+  const [current] = await database.select().from(users).where(eq(users.id, row.id)).limit(1);
+  if (!current) throw new Error(`user disappeared after ${operation}`);
+  if (readAffectedRows(result) !== 1 && current.status === 'active') {
+    throw new AuthError('INVALID_CREDENTIALS', 'email or password incorrect');
+  }
+  return issueLoginResult(database, current);
 }
 
 function toPublic(

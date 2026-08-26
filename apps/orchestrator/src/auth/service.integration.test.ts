@@ -114,6 +114,67 @@ describe('AuthService against real MySQL', () => {
     expect(matchingRows[0]?.id).toBe(user.id);
   });
 
+  it('leaves pending identity and credential fields unchanged across Google, phone, and reset', async () => {
+    const { randomBytes } = await import('node:crypto');
+    const { eq } = await import('drizzle-orm');
+    const { db } = await import('../db/client.js');
+    const { accountClosureRequests } = await import('../db/schema/account-closures.js');
+    const { users } = await import('../db/schema/users.js');
+    const { AuthService, isClosureRecoveryResult } = await import('./service.js');
+
+    const suffix = randomBytes(5).toString('hex');
+    const externalId = `usr_pending_zero_${suffix}`;
+    const email = `pending-zero-${suffix}@example.com`;
+    const phone = `137${String(Date.now()).slice(-8)}`;
+    await db.insert(users).values({
+      externalId,
+      email,
+      passwordHash: 'unchanged-password-hash',
+      phone,
+      status: 'closure_pending',
+      authVersion: 7,
+      googleId: null,
+      emailVerified: false,
+      phoneVerified: false,
+      avatarUrl: null,
+      displayName: null,
+    });
+    const [user] = await db.select().from(users).where(eq(users.externalId, externalId)).limit(1);
+    if (!user) throw new Error('expected pending mutation user');
+    await db.insert(accountClosureRequests).values({
+      externalId: `acl_zero_${suffix}`,
+      userId: user.id,
+      activeUserId: user.id,
+      status: 'pending_grace',
+      requestedAt: new Date(),
+      graceEndsAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    });
+
+    const service = new AuthService(db);
+    const results = await Promise.all([
+      service.loginOrRegisterByGoogle({
+        email,
+        googleId: `google-zero-${suffix}`,
+        name: 'Must Not Persist',
+        avatarUrl: 'https://images.example/must-not-persist.png',
+      }),
+      service.loginOrRegisterByPhone(phone),
+      service.resetPasswordByEmail(email, 'must-not-persist-password'),
+    ]);
+
+    expect(results.every(isClosureRecoveryResult)).toBe(true);
+    const [after] = await db.select().from(users).where(eq(users.id, user.id)).limit(1);
+    expect(after).toMatchObject({
+      googleId: null,
+      emailVerified: false,
+      phoneVerified: false,
+      avatarUrl: null,
+      displayName: null,
+      passwordHash: 'unchanged-password-hash',
+      authVersion: 7,
+    });
+  });
+
   it('inserts user_profile linked to user via FK', async () => {
     const { newExternalId, matchOccupation } = await import('@holaday/shared-types');
     const { db } = await import('../db/client.js');
