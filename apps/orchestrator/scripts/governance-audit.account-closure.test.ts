@@ -101,6 +101,24 @@ describe('account closure governance release audit', () => {
     ).toContain('closure_test_missing');
   });
 
+  it('rejects a same-named local parameter that shadows the imported handler', () => {
+    expect(
+      hasDirectHandlerBehaviorEvidence(
+        ACCOUNT_CLOSURE_GOVERNANCE_DECLARATIONS[0]?.handlerRef ?? '',
+        'apps/orchestrator/scripts/fixtures/account-closure-shadowed-import.test.ts',
+      ),
+    ).toBe(false);
+  });
+
+  it('rejects a fake completion helper that never invokes the imported handler', () => {
+    expect(
+      hasDirectHandlerBehaviorEvidence(
+        ACCOUNT_CLOSURE_GOVERNANCE_DECLARATIONS[0]?.handlerRef ?? '',
+        'apps/orchestrator/scripts/fixtures/account-closure-fake-run-to-completion.test.ts',
+      ),
+    ).toBe(false);
+  });
+
   it('binds every behavior reference to a direct call of its exact production export', () => {
     for (const declaration of ACCOUNT_CLOSURE_GOVERNANCE_DECLARATIONS) {
       expect(

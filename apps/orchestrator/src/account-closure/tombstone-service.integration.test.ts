@@ -417,6 +417,9 @@ describe.sequential('account closure tombstone finalization', () => {
     await createPartnerGraph(omitted.id, 'omitted-restricted', true);
     await runToCompletion(paymentsEntitlementsClosureHandler, omitted, fakeStorage([]));
     await runToCompletion(partnerKycLedgerClosureHandler, omitted, fakeStorage([]));
+    await expect(
+      partnerKycLedgerClosureHandler.run(closureContext(omitted, fakeStorage([]), null)),
+    ).resolves.toMatchObject({ kind: 'complete', retention: 'restricted' });
     const omittedRequest = await createFinalizationRequest(omitted.id, {
       notificationStatus: 'accepted',
       restrictedCategoryIds: ['partner_kyc_ledger'],

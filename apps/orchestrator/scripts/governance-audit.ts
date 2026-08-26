@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import ts from 'typescript';
@@ -240,9 +240,10 @@ export function hasDirectHandlerBehaviorEvidence(
   if (!/^[$A-Z_a-z][$\w]*$/.test(exportName)) return false;
   const expectedModule = resolve(repoRoot, moduleRef);
   const testPath = resolve(repoRoot, testRef);
-  const source = readFileSync(testPath, 'utf8');
-  const sourceFile = ts.createSourceFile(testPath, source, ts.ScriptTarget.Latest, true);
-  let localName: string | null = null;
+  const typeContext = behaviorTypeContext(testPath);
+  if (!typeContext) return false;
+  const { checker, sourceFile } = typeContext;
+  let importedSymbol: ts.Symbol | null = null;
   for (const statement of sourceFile.statements) {
     if (
       !ts.isImportDeclaration(statement) ||
@@ -261,33 +262,22 @@ export function hasDirectHandlerBehaviorEvidence(
     if (!bindings || !ts.isNamedImports(bindings)) continue;
     for (const element of bindings.elements) {
       if ((element.propertyName?.text ?? element.name.text) === exportName) {
-        localName = element.name.text;
+        importedSymbol = checker.getSymbolAtLocation(element.name) ?? null;
         break;
       }
     }
   }
-  if (!localName) return false;
+  if (!importedSymbol) return false;
 
   let found = false;
   const visit = (node: ts.Node): void => {
     if (found) return;
     if (ts.isCallExpression(node)) {
-      const firstArgument = node.arguments[0];
       if (
         ts.isPropertyAccessExpression(node.expression) &&
         ts.isIdentifier(node.expression.expression) &&
-        node.expression.expression.text === localName &&
-        node.expression.name.text === 'run'
-      ) {
-        found = true;
-        return;
-      }
-      if (
-        ts.isIdentifier(node.expression) &&
-        node.expression.text === 'runToCompletion' &&
-        firstArgument !== undefined &&
-        ts.isIdentifier(firstArgument) &&
-        firstArgument.text === localName
+        node.expression.name.text === 'run' &&
+        checker.getSymbolAtLocation(node.expression.expression) === importedSymbol
       ) {
         found = true;
         return;
@@ -297,6 +287,32 @@ export function hasDirectHandlerBehaviorEvidence(
   };
   visit(sourceFile);
   return found;
+}
+
+interface BehaviorTypeContext {
+  readonly checker: ts.TypeChecker;
+  readonly sourceFile: ts.SourceFile;
+}
+
+const BEHAVIOR_TYPE_CONTEXTS = new Map<string, BehaviorTypeContext>();
+
+function behaviorTypeContext(testPath: string): BehaviorTypeContext | null {
+  const cached = BEHAVIOR_TYPE_CONTEXTS.get(testPath);
+  if (cached) return cached;
+  const program = ts.createProgram({
+    rootNames: [testPath],
+    options: {
+      module: ts.ModuleKind.NodeNext,
+      moduleResolution: ts.ModuleResolutionKind.NodeNext,
+      skipLibCheck: true,
+      target: ts.ScriptTarget.ES2022,
+    },
+  });
+  const sourceFile = program.getSourceFile(testPath);
+  if (!sourceFile) return null;
+  const context = { checker: program.getTypeChecker(), sourceFile };
+  BEHAVIOR_TYPE_CONTEXTS.set(testPath, context);
+  return context;
 }
 
 function auditTableOwnership(
