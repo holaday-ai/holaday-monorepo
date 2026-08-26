@@ -1,6 +1,6 @@
-import { useLocation, useNavigate } from 'react-router-dom';
 import { LoginGate } from '@/components/LoginGate';
 import { authRedirectTarget } from '@/lib/auth-redirect';
+import { useLocation, useNavigate } from 'react-router-dom';
 
 /**
  * Standalone register route. Pre-selects the register mode on
@@ -15,6 +15,7 @@ export function RegisterPage(): JSX.Element {
     <LoginGate
       initialMode="register"
       onAuthenticated={() => navigate(target, { replace: true })}
+      onClosureRecovery={() => navigate('/account/closure-recovery', { replace: true })}
     />
   );
 }

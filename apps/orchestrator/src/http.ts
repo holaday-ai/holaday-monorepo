@@ -20,7 +20,7 @@ import type { PlaywrightExecutor } from './agent/vision-loop/playwright-executor
 import { createWebhookTasksHandler } from './api-keys/webhook-handler.js';
 import { signStreamToken } from './auth/jwt.js';
 import { bearerAuth } from './auth/middleware.js';
-import { AuthService } from './auth/service.js';
+import { AuthService, isClosureRecoveryResult } from './auth/service.js';
 import type { BrowserPool } from './browser-pool/index.js';
 import { browsingHistorySchema, replaceUserSiteStats } from './browsing-history/service.js';
 import { env } from './config/env.js';
@@ -338,21 +338,30 @@ export function createHttpApp(deps: HttpAppDeps) {
         name: info.name ?? null,
         avatarUrl: info.picture ?? null,
       });
-      logger.info(
-        { email: info.email, sub: info.sub.slice(0, 6) },
-        result.mfaRequired
-          ? 'google oauth: issued MFA challenge'
-          : 'google oauth: issued access token',
-      );
+      if (isClosureRecoveryResult(result)) {
+        logger.info(
+          { closureStatus: result.closureStatus },
+          'google oauth: issued closure recovery credential',
+        );
+      } else {
+        logger.info(
+          { email: info.email, sub: info.sub.slice(0, 6) },
+          result.mfaRequired
+            ? 'google oauth: issued MFA challenge'
+            : 'google oauth: issued access token',
+        );
+      }
       // 4. Hand the token back via URL fragment — the SPA's lib/auth
       //    picks it out at load, persists to localStorage, then scrubs
       //    the hash via history.replaceState so it doesn't leak into
       //    referrers. Land on `/login` (not `/`) so the SPA's auth
       //    bootstrap is the surface that consumes the hash, instead
       //    of the landing page swallowing it before the SPA mounts.
-      const fragment = result.mfaRequired
-        ? `#mfa=${encodeURIComponent(result.mfaToken)}`
-        : `#token=${encodeURIComponent(result.accessToken)}`;
+      const fragment = isClosureRecoveryResult(result)
+        ? `#closure=${encodeURIComponent(result.recoveryToken)}`
+        : result.mfaRequired
+          ? `#mfa=${encodeURIComponent(result.mfaToken)}`
+          : `#token=${encodeURIComponent(result.accessToken)}`;
       res.redirect(302, `/login${fragment}`);
     } catch (err) {
       logger.error(
@@ -1497,10 +1506,17 @@ export function createHttpApp(deps: HttpAppDeps) {
     try {
       const svc = new AuthService(db);
       const result = await svc.loginOrRegisterByPhone(phone);
-      logger.info(
-        { userId: result.user.externalId, plan: result.user.plan },
-        'sms-login: user authenticated via gateway',
-      );
+      if (isClosureRecoveryResult(result)) {
+        logger.info(
+          { closureStatus: result.closureStatus },
+          'sms-login: issued closure recovery credential',
+        );
+      } else {
+        logger.info(
+          { userId: result.user.externalId, plan: result.user.plan },
+          'sms-login: user authenticated via gateway',
+        );
+      }
       res.status(200).json(result);
     } catch (err) {
       logger.error(

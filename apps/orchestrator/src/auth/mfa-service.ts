@@ -12,6 +12,7 @@ import {
   normalizeRecoveryCode,
   verifyTotp,
 } from './mfa.js';
+import { type LoginResult, issueLoginResult } from './service.js';
 
 const SETUP_TTL_MS = 10 * 60 * 1000;
 const LOCK_MINUTES = 5;
@@ -117,15 +118,25 @@ export class MfaService {
     return { accessToken: await issueAccess(updated), recoveryCodes };
   }
 
-  async verifyChallenge(mfaToken: string, code: string): Promise<{ accessToken: string }> {
+  async verifyChallenge(mfaToken: string, code: string): Promise<LoginResult> {
     const claims = await verifyMfaChallengeToken(mfaToken);
     if (!claims) throw new MfaError('INVALID', '验证已过期，请重新登录');
     const row = await this.user(claims.sub);
+    if (row.status === 'closure_pending' || row.status === 'closure_processing') {
+      return issueLoginResult(this.db, row, { mfaVerified: true });
+    }
     if (!row.mfaEnabled || !row.mfaSecretEncrypted || row.authVersion !== claims.authVersion) {
       throw new MfaError('INVALID', '验证已过期，请重新登录');
     }
     await this.verifyFactor(row, code);
-    return { accessToken: await issueAccess(row) };
+    const refreshed = await this.user(claims.sub);
+    if (refreshed.status === 'closure_pending' || refreshed.status === 'closure_processing') {
+      return issueLoginResult(this.db, refreshed, { mfaVerified: true });
+    }
+    if (refreshed.status !== 'active' || refreshed.authVersion !== claims.authVersion) {
+      throw new MfaError('INVALID', '验证已过期，请重新登录');
+    }
+    return issueLoginResult(this.db, refreshed, { mfaVerified: true });
   }
 
   async verifyUserFactor(userExternalId: string, code: string): Promise<void> {

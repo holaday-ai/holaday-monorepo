@@ -1,6 +1,13 @@
 import { FullBrandLogo } from '@/components/BrandLogo';
 import { Button } from '@/components/ui/button';
-import { clearMfaChallenge, getMfaChallenge, setAccessToken, setMfaChallenge } from '@/lib/auth';
+import {
+  clearMfaChallenge,
+  getClosureRecovery,
+  getMfaChallenge,
+  setAccessToken,
+  setClosureRecovery,
+  setMfaChallenge,
+} from '@/lib/auth';
 import {
   authErrorMessage,
   isValidChinaPhone,
@@ -17,11 +24,21 @@ import * as React from 'react';
 
 interface Props {
   onAuthenticated: () => void;
+  onClosureRecovery?: () => void;
   /** Initial form mode. Defaults to `login`. Used by /register route. */
   initialMode?: Mode;
 }
 
 type Mode = 'login' | 'register' | 'emailCode' | 'forgot' | 'phone';
+
+type LoginOutcome =
+  | { accessToken: string }
+  | { mfaRequired: true; mfaToken: string }
+  | {
+      closureRecoveryRequired: true;
+      recoveryToken: string;
+      closureStatus: 'pending_grace' | 'processing' | 'needs_attention';
+    };
 
 const LOGIN_SURFACE =
   'border-[#DCDDDD] bg-white shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-white/10 dark:bg-card/90';
@@ -43,7 +60,11 @@ const LOGIN_LINK =
  * Google OAuth button only appears when the server advertises the
  * feature via `auth.loginOptions` (env-gated on GOOGLE_CLIENT_ID).
  */
-export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JSX.Element {
+export function LoginGate({
+  onAuthenticated,
+  onClosureRecovery,
+  initialMode = 'login',
+}: Props): JSX.Element {
   // Chinese-locale visitors default to the SMS tab — phone+code is the
   // dominant onboarding path in mainland China; email/password feels
   // foreign. Other locales keep the existing email/password default.
@@ -68,11 +89,18 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
   const [notice, setNotice] = React.useState<string | null>(null);
   const [mfaToken, setMfaToken] = React.useState<string | null>(() => getMfaChallenge());
   const [mfaCode, setMfaCode] = React.useState('');
+  const closureResumeHandledRef = React.useRef(false);
   const [loginOptions, setLoginOptions] = React.useState<{
     google: boolean;
     emailCode: boolean;
     sms: boolean;
   }>({ google: false, emailCode: false, sms: false });
+
+  React.useEffect(() => {
+    if (closureResumeHandledRef.current || !getClosureRecovery()) return;
+    closureResumeHandledRef.current = true;
+    onClosureRecovery?.();
+  }, [onClosureRecovery]);
 
   // Fetch server-side login options once on mount.
   React.useEffect(() => {
@@ -103,7 +131,16 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
   };
 
   const finishLogin = React.useCallback(
-    (result: { accessToken: string } | { mfaRequired: true; mfaToken: string }): void => {
+    (result: LoginOutcome): void => {
+      if ('closureRecoveryRequired' in result && result.closureRecoveryRequired) {
+        closureResumeHandledRef.current = true;
+        setClosureRecovery(result.recoveryToken);
+        setMfaToken(null);
+        setMfaCode('');
+        setError(null);
+        onClosureRecovery?.();
+        return;
+      }
       if ('mfaRequired' in result && result.mfaRequired) {
         setMfaChallenge(result.mfaToken);
         setMfaToken(result.mfaToken);
@@ -113,10 +150,9 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
       }
       if (!('accessToken' in result)) return;
       setAccessToken(result.accessToken);
-      clearMfaChallenge();
       onAuthenticated();
     },
-    [onAuthenticated],
+    [onAuthenticated, onClosureRecovery],
   );
 
   function switchMode(m: Mode): void {
@@ -335,10 +371,7 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
         mfaToken,
         code: cleanCode,
       });
-      setAccessToken(result.accessToken);
-      clearMfaChallenge();
-      setMfaToken(null);
-      onAuthenticated();
+      finishLogin(result);
     } catch (err) {
       setError(authErrorMessage(err, '双重验证失败，请重新尝试。'));
     } finally {

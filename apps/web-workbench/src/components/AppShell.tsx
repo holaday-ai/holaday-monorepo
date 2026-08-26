@@ -259,6 +259,9 @@ export function AppShell(): JSX.Element {
     authInvalidatedRef.current = false;
     setAuthed(true);
   }, []);
+  const handleClosureRecovery = React.useCallback(() => {
+    navigate('/account/closure-recovery', { replace: true });
+  }, [navigate]);
 
   const failedTaskSignature = React.useMemo(() => {
     const failedIds = tasks
@@ -691,7 +694,12 @@ export function AppShell(): JSX.Element {
   }, [loadMoreProjectTasks, projectFilter, projectTaskFilter]);
 
   if (!authed) {
-    return <LoginGate onAuthenticated={handleAuthenticated} />;
+    return (
+      <LoginGate
+        onAuthenticated={handleAuthenticated}
+        onClosureRecovery={handleClosureRecovery}
+      />
+    );
   }
   if (!bootstrapped) return <AppSkeleton />;
 

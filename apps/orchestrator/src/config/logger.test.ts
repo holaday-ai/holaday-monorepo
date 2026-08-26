@@ -2,8 +2,8 @@ import { createServer, request } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { Writable } from 'node:stream';
 import { pino } from 'pino';
-import { describe, expect, it } from 'vitest';
 import { pinoHttp } from 'pino-http';
+import { describe, expect, it } from 'vitest';
 import { loggerOptions } from './logger.js';
 
 describe('HTTP request logging', () => {
@@ -14,6 +14,7 @@ describe('HTTP request logging', () => {
     const alternateApiKey = 'private-alternate-api-key-value';
     const proxyAuthorization = 'Basic private-proxy-credentials';
     const setCookie = 'session=private-response-cookie';
+    const closureLocation = '/login#closure=private-recovery-token';
     const chunks: string[] = [];
     const sink = new Writable({
       write(chunk, _encoding, callback) {
@@ -26,6 +27,7 @@ describe('HTTP request logging', () => {
     const server = createServer((req, res) => {
       httpLogger(req, res, () => {
         res.setHeader('set-cookie', setCookie);
+        res.setHeader('location', closureLocation);
         res.end('ok');
       });
     });
@@ -68,6 +70,8 @@ describe('HTTP request logging', () => {
     expect(output).not.toContain(alternateApiKey);
     expect(output).not.toContain(proxyAuthorization);
     expect(output).not.toContain(setCookie);
+    expect(output).not.toContain(closureLocation);
+    expect(output).not.toContain('private-recovery-token');
 
     const entry = JSON.parse(output) as {
       req: { headers: Record<string, string> };
@@ -79,5 +83,6 @@ describe('HTTP request logging', () => {
     expect(entry.req.headers['proxy-authorization']).toBe('[Redacted]');
     expect(entry.req.headers['x-api-key']).toBe('[Redacted]');
     expect(entry.res.headers['set-cookie']).toBe('[Redacted]');
+    expect(entry.res.headers.location).toBe('[Redacted]');
   });
 });

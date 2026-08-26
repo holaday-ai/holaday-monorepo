@@ -56,7 +56,15 @@ interface VultrSmsLoginUser {
 }
 
 export type VultrSmsLoginResult = VultrSmsLoginUser &
-  ({ accessToken: string; mfaRequired?: false } | { mfaRequired: true; mfaToken: string });
+  (
+    | { accessToken: string; mfaRequired?: false }
+    | { mfaRequired: true; mfaToken: string }
+    | {
+        closureRecoveryRequired: true;
+        recoveryToken: string;
+        closureStatus: 'pending_grace' | 'processing' | 'needs_attention';
+      }
+  );
 
 export class VultrSync {
   constructor(

@@ -60,6 +60,60 @@ describe('AuthService against real MySQL', () => {
     });
   });
 
+  it('keeps email, Google, and phone identities attached to one pending account', async () => {
+    const { randomBytes } = await import('node:crypto');
+    const { eq, or } = await import('drizzle-orm');
+    const { db } = await import('../db/client.js');
+    const { accountClosureRequests } = await import('../db/schema/account-closures.js');
+    const { users } = await import('../db/schema/users.js');
+    const { hashPassword } = await import('./password.js');
+    const { AuthService, isClosureRecoveryResult } = await import('./service.js');
+
+    const suffix = randomBytes(6).toString('hex');
+    const externalId = `usr_pending_id_${suffix}`;
+    const email = `pending-identity-${suffix}@example.com`;
+    const googleId = `google-pending-${suffix}`;
+    const phone = `139${String(Date.now()).slice(-8)}`;
+    await db.insert(users).values({
+      externalId,
+      email,
+      passwordHash: await hashPassword('password-42'),
+      googleId,
+      phone,
+      phoneVerified: true,
+      status: 'closure_pending',
+      authVersion: 3,
+    });
+    const [user] = await db.select().from(users).where(eq(users.externalId, externalId)).limit(1);
+    if (!user) throw new Error('expected pending user');
+    await db.insert(accountClosureRequests).values({
+      externalId: `acl_req_${suffix}`,
+      userId: user.id,
+      activeUserId: user.id,
+      status: 'pending_grace',
+      requestedAt: new Date(),
+      graceEndsAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    });
+
+    const service = new AuthService(db);
+    await expect(service.register({ email, password: 'password-42' })).rejects.toMatchObject({
+      code: 'EMAIL_TAKEN',
+    });
+    const results = await Promise.all([
+      service.loginOrRegisterByEmail(email),
+      service.loginOrRegisterByGoogle({ email, googleId }),
+      service.loginOrRegisterByPhone(phone),
+    ]);
+
+    expect(results.every(isClosureRecoveryResult)).toBe(true);
+    const matchingRows = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(or(eq(users.email, email), eq(users.googleId, googleId), eq(users.phone, phone)));
+    expect(matchingRows).toHaveLength(1);
+    expect(matchingRows[0]?.id).toBe(user.id);
+  });
+
   it('inserts user_profile linked to user via FK', async () => {
     const { newExternalId, matchOccupation } = await import('@holaday/shared-types');
     const { db } = await import('../db/client.js');
