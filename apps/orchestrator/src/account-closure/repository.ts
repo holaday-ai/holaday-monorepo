@@ -33,12 +33,14 @@ export interface FrozenAccountClosure {
   requestExternalId: string;
   requestedAt: Date;
   graceEndsAt: Date;
+  authVersion: number;
 }
 
 export async function freezeAccountForClosure(
   db: DB,
   input: {
     userId: number;
+    expectedAuthVersion: number;
     requestExternalId?: string;
     requestedAt?: Date;
     reasonCode?: AccountClosureReasonCode;
@@ -55,7 +57,13 @@ export async function freezeAccountForClosure(
         status: 'closure_pending',
         authVersion: sql`${users.authVersion} + 1`,
       })
-      .where(and(eq(users.id, input.userId), eq(users.status, 'active')));
+      .where(
+        and(
+          eq(users.id, input.userId),
+          eq(users.status, 'active'),
+          eq(users.authVersion, input.expectedAuthVersion),
+        ),
+      );
     if (readAffectedRows(freeze) !== 1) {
       throw new AccountClosureRepositoryError('ACCOUNT_NOT_ACTIVE');
     }
@@ -87,7 +95,22 @@ export async function freezeAccountForClosure(
       .set({ revokedAt: requestedAt })
       .where(and(eq(apiKeys.userId, input.userId), isNull(apiKeys.revokedAt)));
 
-    return { requestId, requestExternalId, requestedAt, graceEndsAt };
+    const [committedUser] = await tx
+      .select({ authVersion: users.authVersion })
+      .from(users)
+      .where(and(eq(users.id, input.userId), eq(users.status, 'closure_pending')))
+      .limit(1);
+    if (!committedUser) {
+      throw new AccountClosureRepositoryError('USER_STATE_CONFLICT');
+    }
+
+    return {
+      requestId,
+      requestExternalId,
+      requestedAt,
+      graceEndsAt,
+      authVersion: committedUser.authVersion,
+    };
   });
 }
 

@@ -85,12 +85,14 @@ describe.sequential('account closure atomic freeze and exact immediate effects',
     const attempts = await Promise.allSettled([
       freezeAccountForClosure(db, {
         userId: user.id,
+        expectedAuthVersion: 8,
         requestExternalId: `acl_${randomBytes(10).toString('hex')}`,
         requestedAt: now,
         reasonCode: 'privacy',
       }),
       freezeAccountForClosure(db, {
         userId: user.id,
+        expectedAuthVersion: 8,
         requestExternalId: `acl_${randomBytes(10).toString('hex')}`,
         requestedAt: now,
         reasonCode: 'privacy',
@@ -99,6 +101,8 @@ describe.sequential('account closure atomic freeze and exact immediate effects',
 
     expect(attempts.filter((attempt) => attempt.status === 'fulfilled')).toHaveLength(1);
     expect(attempts.filter((attempt) => attempt.status === 'rejected')).toHaveLength(1);
+    const winner = attempts.find((attempt) => attempt.status === 'fulfilled');
+    expect(winner?.status === 'fulfilled' ? winner.value.authVersion : null).toBe(9);
     const [frozenUser] = await db
       .select({ status: users.status, authVersion: users.authVersion })
       .from(users)
@@ -129,6 +133,36 @@ describe.sequential('account closure atomic freeze and exact immediate effects',
       .from(apiKeys)
       .where(eq(apiKeys.userId, user.id));
     expect(key?.revokedAt).toBeInstanceOf(Date);
+  });
+
+  it('loses the freeze CAS after a concurrent authentication version change', async () => {
+    const user = await createUser({ authVersion: 8 });
+    await db.update(users).set({ authVersion: 9, mfaEnabled: true }).where(eq(users.id, user.id));
+
+    await expect(
+      freezeAccountForClosure(db, {
+        userId: user.id,
+        expectedAuthVersion: 8,
+        requestExternalId: `acl_${randomBytes(10).toString('hex')}`,
+        requestedAt: new Date('2026-08-26T03:30:00.000Z'),
+        reasonCode: 'privacy',
+      }),
+    ).rejects.toMatchObject({ code: 'ACCOUNT_NOT_ACTIVE' });
+
+    const [unchanged] = await db
+      .select({
+        status: users.status,
+        authVersion: users.authVersion,
+        mfaEnabled: users.mfaEnabled,
+      })
+      .from(users)
+      .where(eq(users.id, user.id));
+    expect(unchanged).toEqual({ status: 'active', authVersion: 9, mfaEnabled: true });
+    const requests = await db
+      .select({ id: accountClosureRequests.id })
+      .from(accountClosureRequests)
+      .where(eq(accountClosureRequests.userId, user.id));
+    expect(requests).toHaveLength(0);
   });
 
   it('changes only live resources, records only actual changes, and restores exact reversible effects', async () => {
@@ -246,6 +280,7 @@ describe.sequential('account closure atomic freeze and exact immediate effects',
 
     const frozen = await freezeAccountForClosure(db, {
       userId: user.id,
+      expectedAuthVersion: 3,
       requestExternalId: `acl_${randomBytes(10).toString('hex')}`,
       requestedAt: new Date('2026-08-26T04:00:00.000Z'),
     });
@@ -426,6 +461,7 @@ describe.sequential('account closure atomic freeze and exact immediate effects',
     });
     const frozen = await freezeAccountForClosure(db, {
       userId: user.id,
+      expectedAuthVersion: 3,
       requestExternalId: `acl_${randomBytes(10).toString('hex')}`,
       requestedAt: new Date('2026-08-26T05:00:00.000Z'),
     });
@@ -470,6 +506,7 @@ describe.sequential('account closure atomic freeze and exact immediate effects',
     const user = await createUser();
     const frozen = await freezeAccountForClosure(db, {
       userId: user.id,
+      expectedAuthVersion: 3,
       requestExternalId: `acl_${randomBytes(10).toString('hex')}`,
       requestedAt: new Date('2026-08-01T00:00:00.000Z'),
     });

@@ -63,6 +63,7 @@ export class AccountClosureReceiptService {
   async createApplicationReceipt(input: {
     requestId: number;
     userId: number;
+    issuedAt: Date;
     completedCategoryIds: readonly string[];
     restrictedCategoryIds: readonly string[];
   }): Promise<ApplicationClosureReceipt> {
@@ -81,7 +82,7 @@ export class AccountClosureReceiptService {
       completedCategoryIds,
       restrictedCategoryIds,
       notificationStatus: 'pending',
-      issuedAt: this.now(),
+      issuedAt: input.issuedAt,
       completedAt: null,
     });
     assertReceiptIdentity(row, input.requestId, input.userId, 'application');

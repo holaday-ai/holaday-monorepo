@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { DATA_CATEGORY_IDS } from '../data-governance/types.js';
+import type { ApplicationClosureReceipt } from './receipt-service.js';
 import {
   type AccountClosureServiceDependencies,
   AccountClosureServiceError,
@@ -37,6 +38,7 @@ function fixture(overrides: Partial<ClosureServiceRepository> = {}) {
       requestExternalId: 'acl_random_request',
       requestedAt: now,
       graceEndsAt,
+      authVersion: 23,
     })),
     applyImmediateEffects: vi.fn(async () => undefined),
     findRecoverySubject: vi.fn(async () => ({
@@ -73,13 +75,15 @@ function fixture(overrides: Partial<ClosureServiceRepository> = {}) {
       completedCategoryIds: [],
       restrictedCategoryIds,
     })),
-    getApplicationReceipt: vi.fn(async () => ({
-      receiptNumber: 'ACR-random-application',
-      kind: 'application' as const,
-      issuedAt: now.toISOString(),
-      completedCategoryIds: [],
-      restrictedCategoryIds,
-    })),
+    getApplicationReceipt: vi.fn(
+      async (): Promise<ApplicationClosureReceipt | null> => ({
+        receiptNumber: 'ACR-random-application',
+        kind: 'application' as const,
+        issuedAt: now.toISOString(),
+        completedCategoryIds: [],
+        restrictedCategoryIds,
+      }),
+    ),
   };
   const deps: AccountClosureServiceDependencies = {
     repository,
@@ -154,12 +158,14 @@ describe('account closure service', () => {
     expect(repository.freeze).toHaveBeenCalledWith({
       userId: 7,
       userExternalId: 'usr_allowed',
+      expectedAuthVersion: 4,
       reasonCode: 'privacy',
       requestedAt: now,
     });
     expect(receipts.createApplicationReceipt).toHaveBeenCalledWith({
       requestId: 19,
       userId: 7,
+      issuedAt: now,
       completedCategoryIds: [],
       restrictedCategoryIds: ['payments_entitlements', 'partner_kyc_ledger'],
     });
@@ -172,6 +178,11 @@ describe('account closure service', () => {
       recoveryToken: 'signed-recovery-token',
       requestStatus: 'pending_grace',
       receipt: { receiptNumber: 'ACR-random-application' },
+    });
+    expect(deps.signRecoveryToken).toHaveBeenCalledWith({
+      sub: 'usr_allowed',
+      requestId: 'acl_random_request',
+      authVersion: 23,
     });
   });
 
@@ -303,6 +314,20 @@ describe('account closure service', () => {
       requestId: 19,
       userId: 7,
       userExternalId: 'usr_allowed',
+    });
+  });
+
+  it('repairs a missing application receipt with the original request timestamp', async () => {
+    const { service, receipts, deps } = fixture();
+    deps.now = () => new Date('2026-08-29T09:00:00.000Z');
+    vi.mocked(receipts.getApplicationReceipt).mockResolvedValueOnce(null);
+    await service.applicationReceipt('token-only');
+    expect(receipts.createApplicationReceipt).toHaveBeenCalledWith({
+      requestId: 19,
+      userId: 7,
+      issuedAt: now,
+      completedCategoryIds: [],
+      restrictedCategoryIds,
     });
   });
 

@@ -78,11 +78,12 @@ describe('account closure receipt service', () => {
     let sequence = 0;
     const service = new AccountClosureReceiptService(store, {
       randomReceiptNumber: () => `ACR-random-${++sequence}`,
-      now: () => requestedAt,
+      now: () => new Date('2026-08-29T09:00:00.000Z'),
     });
     const input = {
       requestId: 99,
       userId: 77,
+      issuedAt: requestedAt,
       completedCategoryIds: [] as const,
       restrictedCategoryIds: ['payments_entitlements', 'partner_kyc_ledger'] as const,
     };
@@ -92,6 +93,7 @@ describe('account closure receipt service', () => {
     ]);
     expect(first.receiptNumber).toBe(second.receiptNumber);
     expect(first.receiptNumber).not.toMatch(/^\d+$/);
+    expect(first.issuedAt).toBe(requestedAt.toISOString());
     expect(store.count()).toBe(1);
   });
 
@@ -134,6 +136,7 @@ describe('account closure receipt service', () => {
     await service.createApplicationReceipt({
       requestId: 99,
       userId: 77,
+      issuedAt: requestedAt,
       completedCategoryIds: [],
       restrictedCategoryIds: ['payments_entitlements', 'partner_kyc_ledger'],
     });

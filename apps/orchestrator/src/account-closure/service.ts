@@ -80,6 +80,7 @@ export interface ClosureServiceRepository {
   freeze(input: {
     userId: number;
     userExternalId: string;
+    expectedAuthVersion: number;
     requestedAt: Date;
     reasonCode?: AccountClosureReasonCode;
   }): Promise<FrozenAccountClosure>;
@@ -196,6 +197,7 @@ export class AccountClosureService {
       frozen = await this.deps.repository.freeze({
         userId: user.id,
         userExternalId: user.externalId,
+        expectedAuthVersion: user.authVersion,
         requestedAt,
         reasonCode: input.reasonCode,
       });
@@ -208,6 +210,7 @@ export class AccountClosureService {
       receipt = await this.deps.receipts.createApplicationReceipt({
         requestId: frozen.requestId,
         userId: user.id,
+        issuedAt: frozen.requestedAt,
         completedCategoryIds: [],
         restrictedCategoryIds: RETAINED_CATEGORY_IDS,
       });
@@ -247,7 +250,7 @@ export class AccountClosureService {
       recoveryToken: await this.deps.signRecoveryToken({
         sub: user.externalId,
         requestId: frozen.requestExternalId,
-        authVersion: user.authVersion + 1,
+        authVersion: frozen.authVersion,
       }),
       requestStatus: 'pending_grace' as const,
       graceEndsAt: frozen.graceEndsAt.toISOString(),
@@ -326,6 +329,7 @@ export class AccountClosureService {
       return await this.deps.receipts.createApplicationReceipt({
         requestId: subject.requestId,
         userId: subject.userId,
+        issuedAt: subject.requestedAt,
         completedCategoryIds: [],
         restrictedCategoryIds: RETAINED_CATEGORY_IDS,
       });
@@ -436,11 +440,13 @@ export class DatabaseClosureServiceRepository implements ClosureServiceRepositor
   async freeze(input: {
     userId: number;
     userExternalId: string;
+    expectedAuthVersion: number;
     requestedAt: Date;
     reasonCode?: AccountClosureReasonCode;
   }): Promise<FrozenAccountClosure> {
     return freezeAccountForClosure(this.db, {
       userId: input.userId,
+      expectedAuthVersion: input.expectedAuthVersion,
       requestedAt: input.requestedAt,
       reasonCode: input.reasonCode,
     });
