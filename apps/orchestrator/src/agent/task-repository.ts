@@ -131,6 +131,15 @@ export class TaskRepository {
     private readonly taskOrigin: TaskOrigin = DEFAULT_TASK_ORIGIN,
   ) {}
 
+  async isTaskCancelled(taskExternalId: string): Promise<boolean> {
+    const [task] = await this.db
+      .select({ status: tasks.status })
+      .from(tasks)
+      .where(eq(tasks.externalId, taskExternalId))
+      .limit(1);
+    return task?.status === 'cancelled';
+  }
+
   async insertTask(state: TaskState, ctx: InsertTaskContext): Promise<void> {
     await this.db.transaction(async (tx) => {
       const insert = await tx.insert(tasks).values({

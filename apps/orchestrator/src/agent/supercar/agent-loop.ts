@@ -767,6 +767,8 @@ export interface RunSupercarOptions {
   preserveExistingPage?: boolean;
   /** API key; defaults to `ANTHROPIC_API_KEY`. */
   apiKey?: string;
+  /** Durable task-state gate, re-read before external action boundaries. */
+  isTaskCancelled?: () => boolean | Promise<boolean>;
   /** Override the default model (`claude-sonnet-4-6`). */
   model?: string;
   /** Cap on messages.create calls per run. Default 50. */
@@ -1158,7 +1160,52 @@ export function supercarAbort(taskId: string): boolean {
 
 const COMPUTER_USE_BETA = 'computer-use-2025-11-24';
 
-export async function runSupercarTask(opts: RunSupercarOptions): Promise<SupercarOutcome> {
+interface SupercarRunLifecycle {
+  cancelled: boolean;
+  handle: RunHandle;
+}
+
+export function runSupercarTask(opts: RunSupercarOptions): Promise<SupercarOutcome> {
+  const lifecycle = { cancelled: false } as SupercarRunLifecycle;
+  const handle: RunHandle = {
+    resolveReply: null,
+    handoffMessage: null,
+    originalIntent: opts.intent,
+    pendingAttachmentBlocks: null,
+    abort: () => {
+      lifecycle.cancelled = true;
+      if (handle.resolveReply) {
+        const resolve = handle.resolveReply;
+        handle.resolveReply = null;
+        resolve('__SUPERCAR_ABORT__');
+      }
+    },
+  };
+  lifecycle.handle = handle;
+  handles.set(opts.taskId, handle);
+  return runSupercarTaskInternal(opts, lifecycle).finally(() => {
+    if (handles.get(opts.taskId) === handle) handles.delete(opts.taskId);
+  });
+}
+
+async function runSupercarTaskInternal(
+  opts: RunSupercarOptions,
+  lifecycle: SupercarRunLifecycle,
+): Promise<SupercarOutcome> {
+  const handle = lifecycle.handle;
+  const cancellationRequested = async (): Promise<boolean> => {
+    if (lifecycle.cancelled) return true;
+    if (await opts.isTaskCancelled?.()) {
+      lifecycle.cancelled = true;
+      return true;
+    }
+    return false;
+  };
+  const cancelledOutcome = (): SupercarOutcome => ({
+    status: 'cancelled',
+    iterations: 0,
+    toolsUsed: [],
+  });
   const apiKey = opts.apiKey ?? process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     return {
@@ -1222,10 +1269,12 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
     opts.zapierWebhookPath &&
     !hasAttachments
   ) {
+    if (await cancellationRequested()) return cancelledOutcome();
     const r = await opts.zapierAdapter.trigger(opts.zapierWebhookPath, {
       intent: opts.intent,
       task_id: opts.taskId,
     });
+    if (await cancellationRequested()) return cancelledOutcome();
     if ('ok' in r) {
       logger.info(
         { taskId: opts.taskId, lane: 'zapier', runId: r.runId ?? null },
@@ -1371,6 +1420,7 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
   // Fresh tasks start from a clean tab. Follow-ups that adopted the user's
   // terminal browser deliberately keep its current page, cookies, focus and
   // navigation state so AI can continue after manual takeover.
+  if (await cancellationRequested()) return cancelledOutcome();
   if (!opts.preserveExistingPage) {
     try {
       await executor.resetPageForTask();
@@ -1540,8 +1590,6 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
   // Phase 1 Playbook B2 — monotonic per-action counter (task-internal
   // action sequence). Bumped once per tool_use in the dispatch loop below.
   let actionIndex = 0;
-  let cancelled = false;
-  let handle: RunHandle;
 
   // Phase 1 Playbook ④ — LIVE-VETO. When opts.onBeforeAction is wired,
   // every live WRITE action calls this BEFORE executing. The hook may reject,
@@ -1603,7 +1651,7 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
       const reply = await Promise.race([replyPromise, timeoutPromise]);
       if (waitTimer) clearTimeout(waitTimer);
       handle.resolveReply = null;
-      if (reply === '__SUPERCAR_ABORT__' || cancelled) {
+      if (reply === '__SUPERCAR_ABORT__' || lifecycle.cancelled) {
         return {
           status: 'cancelled',
           iterations: iteration,
@@ -1712,26 +1760,6 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
   // See the block in the loop where we set it from response.container.
   let containerId: string | null = null;
 
-  // Install the per-task handle so `supercarReply` / `supercarAbort`
-  // can find us later.
-  handle = {
-    resolveReply: null,
-    handoffMessage: null,
-    originalIntent: opts.intent,
-    pendingAttachmentBlocks: null,
-    abort: () => {
-      cancelled = true;
-      if (handle.resolveReply) {
-        // If we're parked on awaiting_user, wake the promise with a
-        // sentinel the loop will recognise as abort.
-        const r = handle.resolveReply;
-        handle.resolveReply = null;
-        r('__SUPERCAR_ABORT__');
-      }
-    },
-  };
-  handles.set(opts.taskId, handle);
-
   async function parkForAuthWall(
     kind: 'login' | 'captcha' | 'permission',
     url: string | null,
@@ -1747,7 +1775,7 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
       currentUrl: url,
       awaitingKind: kind,
     });
-    if (cancelled) {
+    if (lifecycle.cancelled) {
       return {
         status: 'cancelled',
         iterations: iteration,
@@ -1774,7 +1802,7 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
         toolsUsed: Array.from(toolsUsed),
       };
     }
-    if (replyOrAbort === '__SUPERCAR_ABORT__' || cancelled) {
+    if (replyOrAbort === '__SUPERCAR_ABORT__' || lifecycle.cancelled) {
       return {
         status: 'cancelled',
         iterations: iteration,
@@ -1812,7 +1840,14 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
   }
 
   try {
-    while (iteration < maxIterations && Date.now() < deadline && !cancelled) {
+    while (iteration < maxIterations && Date.now() < deadline && !lifecycle.cancelled) {
+      if (await cancellationRequested()) {
+        return {
+          status: 'cancelled',
+          iterations: iteration,
+          toolsUsed: Array.from(toolsUsed),
+        };
+      }
       iteration++;
 
       // Phase 13 Dim 6 — per-iteration timer for stats. Wall time
@@ -2092,6 +2127,13 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
         return {
           status: 'failed',
           reason: friendly,
+          iterations: iteration,
+          toolsUsed: Array.from(toolsUsed),
+        };
+      }
+      if (await cancellationRequested()) {
+        return {
+          status: 'cancelled',
           iterations: iteration,
           toolsUsed: Array.from(toolsUsed),
         };
@@ -2542,7 +2584,7 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
               toolsUsed: Array.from(toolsUsed),
             };
           }
-          if (replyOrAbort === '__SUPERCAR_ABORT__' || cancelled) {
+          if (replyOrAbort === '__SUPERCAR_ABORT__' || lifecycle.cancelled) {
             return {
               status: 'cancelled',
               iterations: iteration,
@@ -2712,6 +2754,13 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
         });
       };
       for (const toolUse of toolUseBlocks) {
+        if (await cancellationRequested()) {
+          return {
+            status: 'cancelled',
+            iterations: iteration,
+            toolsUsed: Array.from(toolsUsed),
+          };
+        }
         actionIndex += 1;
         if (skipRemainingToolUses) {
           toolResults.push({
@@ -4028,7 +4077,7 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
       });
     }
 
-    if (cancelled) {
+    if (lifecycle.cancelled) {
       return {
         status: 'cancelled',
         iterations: iteration,
@@ -4103,7 +4152,7 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
       toolsUsed: Array.from(toolsUsed),
     };
   } finally {
-    handles.delete(opts.taskId);
+    if (handles.get(opts.taskId) === handle) handles.delete(opts.taskId);
   }
 }
 

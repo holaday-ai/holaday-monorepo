@@ -484,42 +484,43 @@ async function tick(deps: ScheduledRunnerDeps): Promise<void> {
     // longer payloads usually mean a system error worth shortening
     // before persisting.
     const truncatedError = dispatchError !== null ? dispatchError.slice(0, 2000) : null;
-    if (!(await accountClosureAllowsExecution(deps.db, row.userId))) {
-      // Closure may win while external dispatch is in flight. Never write
-      // `active` back over the closure-owned pause.
-      continue;
-    }
+    let finalizeWon = false;
     try {
-      if (nextRun === null) {
-        // One-shot — terminal. 'completed' on success; 'failed' when
-        // dispatch threw so the user can see the difference.
-        await deps.db
-          .update(scheduledTasks)
-          .set({
-            status: dispatchOk ? 'completed' : 'failed',
-            lastRunAt: now,
-            lastRunStatus: skipped ? 'skipped' : dispatchOk ? 'success' : 'failed',
-            lastError: skipped ? skipNote : truncatedError,
-            ...(dispatchedTaskId !== null ? { lastTaskId: dispatchedTaskId } : {}),
-          })
-          .where(and(eq(scheduledTasks.id, row.id), eq(scheduledTasks.status, 'running')));
-      } else {
-        // Recurring — restore to 'active' for the next tick. Failure
-        // is recorded but doesn't block the next interval; the
-        // common transient cause (quota, network blip) typically
-        // resolves before the next fire.
-        await deps.db
-          .update(scheduledTasks)
-          .set({
-            status: 'active',
-            nextRunAt: nextRun,
-            lastRunAt: now,
-            lastRunStatus: skipped ? 'skipped' : dispatchOk ? 'success' : 'failed',
-            lastError: skipped ? skipNote : truncatedError,
-            ...(dispatchedTaskId !== null ? { lastTaskId: dispatchedTaskId } : {}),
-          })
-          .where(and(eq(scheduledTasks.id, row.id), eq(scheduledTasks.status, 'running')));
-      }
+      finalizeWon = await deps.db.transaction(async (tx) => {
+        // Linearize freeze vs terminal finalization on the owner row. The
+        // lock is released before any notification/webhook side effect.
+        const [owner] = await tx
+          .select({ status: users.status })
+          .from(users)
+          .where(eq(users.id, row.userId))
+          .limit(1)
+          .for('update');
+        if (owner?.status !== 'active') return false;
+        const finalize =
+          nextRun === null
+            ? await tx
+                .update(scheduledTasks)
+                .set({
+                  status: dispatchOk ? 'completed' : 'failed',
+                  lastRunAt: now,
+                  lastRunStatus: skipped ? 'skipped' : dispatchOk ? 'success' : 'failed',
+                  lastError: skipped ? skipNote : truncatedError,
+                  ...(dispatchedTaskId !== null ? { lastTaskId: dispatchedTaskId } : {}),
+                })
+                .where(and(eq(scheduledTasks.id, row.id), eq(scheduledTasks.status, 'running')))
+            : await tx
+                .update(scheduledTasks)
+                .set({
+                  status: 'active',
+                  nextRunAt: nextRun,
+                  lastRunAt: now,
+                  lastRunStatus: skipped ? 'skipped' : dispatchOk ? 'success' : 'failed',
+                  lastError: skipped ? skipNote : truncatedError,
+                  ...(dispatchedTaskId !== null ? { lastTaskId: dispatchedTaskId } : {}),
+                })
+                .where(and(eq(scheduledTasks.id, row.id), eq(scheduledTasks.status, 'running')));
+        return extractMysqlAffectedRows(finalize) === 1;
+      });
     } catch (err) {
       // Worst-case path — the row stays in 'running' until the boot
       // sweep recovers it. Log so we know it happened.
@@ -528,13 +529,14 @@ async function tick(deps: ScheduledRunnerDeps): Promise<void> {
         'scheduled-runner: advance failed — row may be stuck in running until next restart',
       );
     }
+    if (!finalizeWon) continue;
 
     // Phase 26B — fire the user's inbox + webhook notifications.
     // Wrapped in its own try/catch so a notification path failure
     // never wedges the runner's tick. The notify implementation
     // itself never throws (allSettled fan-out), this is defence-
     // in-depth in case a future stub does.
-    if (deps.notify) {
+    if (deps.notify && (await accountClosureAllowsExecution(deps.db, row.userId))) {
       try {
         await deps.notify({
           userInternalId: row.userId,

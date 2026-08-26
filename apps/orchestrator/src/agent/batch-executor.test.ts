@@ -17,12 +17,32 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   batchItemClientRequestId,
+  batchOwnerAllowsExecution,
   executeBatch,
   isResumableBatchStatus,
   prepareBatchItemsForRecovery,
   runWithConcurrency,
   summarizeBatchItemStatuses,
 } from './batch-executor.js';
+
+describe('batch account-closure dispatch gate', () => {
+  it('must be re-read at claim and dispatch boundaries', async () => {
+    const statuses = ['active', 'closure_pending'];
+    const db = {
+      select: vi.fn(() => ({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({
+            limit: vi.fn(async () => [{ status: statuses.shift() }]),
+          })),
+        })),
+      })),
+    };
+
+    expect(await batchOwnerAllowsExecution(db as never, 42)).toBe(true);
+    expect(await batchOwnerAllowsExecution(db as never, 42)).toBe(false);
+    expect(db.select).toHaveBeenCalledTimes(2);
+  });
+});
 
 describe('batch restart recovery', () => {
   it('only re-awakens non-terminal batch states', () => {
@@ -263,7 +283,7 @@ describe('executeBatch — Codex P5 atomic claim', () => {
         { id: 12, externalId: 'bti_won', batchId: 1, seq: 1, prompt: 'won-race', status: 'pending' as string, taskId: null as number | null },
       ],
       tasks: new Map<number, string>([[201, 'tsk_won']]),
-      users: [{ id: 42, externalId: 'usr_test' }],
+      users: [{ id: 42, externalId: 'usr_test', status: 'active' }],
     };
 
     function tableName(t: unknown): string {

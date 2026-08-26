@@ -27,7 +27,11 @@ import {
 } from './scheduled-runner.js';
 
 function fakeSelectRows(rows: unknown[]) {
-  return Object.assign(Promise.resolve(rows), { limit: vi.fn(async () => rows) });
+  const terminal = () => Object.assign(Promise.resolve(rows), { for: vi.fn(async () => rows) });
+  return Object.assign(Promise.resolve(rows), {
+    limit: vi.fn(() => terminal()),
+    for: vi.fn(async () => rows),
+  });
 }
 
 function mustArrayItem<T>(items: T[], index: number): T {
@@ -164,18 +168,20 @@ describe('startScheduledRunner — tick integration', () => {
    * `claimSucceeds` controls whether the claim UPDATE reports
    * affectedRows=1 (we own this row) or 0 (lost the race).
    */
-  function makeFakeDb(rows: Array<Record<string, unknown>>, opts?: { claimSucceeds?: boolean }) {
+  function makeFakeDb(
+    rows: Array<Record<string, unknown>>,
+    opts?: { claimSucceeds?: boolean; finalizeSucceeds?: boolean },
+  ) {
     const updates: Array<Record<string, unknown>> = [];
     const claimSucceeds = opts?.claimSucceeds ?? true;
+    const finalizeSucceeds = opts?.finalizeSucceeds ?? true;
     let updateCallNum = 0;
     const select = vi.fn((selection?: Record<string, unknown>) => ({
       from: vi.fn(() => ({
         where: vi.fn(() => {
           const selected =
             selection && Object.hasOwn(selection, 'status') ? [{ status: 'active' }] : rows;
-          return Object.assign(Promise.resolve(selected), {
-            limit: vi.fn(async () => selected),
-          });
+          return fakeSelectRows(selected);
         }),
       })),
     }));
@@ -187,13 +193,19 @@ describe('startScheduledRunner — tick integration', () => {
           // First update per row is the claim (status='running').
           // Subsequent updates (advance) always succeed.
           const isClaim = (values as { status?: string }).status === 'running';
-          const affectedRows = isClaim && !claimSucceeds ? 0 : 1;
+          const affectedRows = isClaim ? (claimSucceeds ? 1 : 0) : finalizeSucceeds ? 1 : 0;
           return { affectedRows };
         }),
       })),
     }));
+    const db = { select, update } as {
+      select: typeof select;
+      update: typeof update;
+      transaction?: (callback: (tx: unknown) => unknown) => unknown;
+    };
+    db.transaction = (callback) => callback(db);
     return {
-      db: { select, update } as unknown as Parameters<typeof startScheduledRunner>[0]['db'],
+      db: db as unknown as Parameters<typeof startScheduledRunner>[0]['db'],
       updates,
       getUpdateCount: () => updateCallNum,
     };
@@ -385,6 +397,22 @@ describe('startScheduledRunner — tick integration', () => {
     stopScheduledRunner();
   });
 
+  it('notifies only when this runner wins the terminal finalize CAS', async () => {
+    const { db } = makeFakeDb(
+      [{ id: 17, userId: 42, intent: 'lost finalize', repeatType: 'once' }],
+      { finalizeSucceeds: false },
+    );
+    const notify = vi.fn(async () => undefined);
+    startScheduledRunner({
+      db,
+      dispatch: vi.fn(async () => 1234),
+      notify,
+      pollIntervalMs: 60_000,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(notify).not.toHaveBeenCalled();
+  });
+
   it('does not dispatch a claimed row after the owner enters account closure', async () => {
     const selectResults = [
       [{ id: 15, userId: 42, intent: 'closure race', repeatType: 'daily', rrule: null }],
@@ -407,6 +435,7 @@ describe('startScheduledRunner — tick integration', () => {
         })),
       })),
     };
+    db.transaction = (callback: (tx: unknown) => unknown) => callback(db);
     const dispatch = vi.fn(async () => 1234);
     startScheduledRunner({ db, dispatch, pollIntervalMs: 60_000 });
     await new Promise((resolve) => setTimeout(resolve, 50));
@@ -438,12 +467,50 @@ describe('startScheduledRunner — tick integration', () => {
         })),
       })),
     };
+    db.transaction = (callback: (tx: unknown) => unknown) => callback(db);
     const dispatch = vi.fn(async () => 1234);
     startScheduledRunner({ db, dispatch, pollIntervalMs: 60_000 });
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(dispatch).toHaveBeenCalledTimes(1);
     expect(updates).toEqual([{ status: 'running' }]);
     stopScheduledRunner();
+  });
+
+  it('does not notify when closure wins after finalize and before notification', async () => {
+    const selectResults = [
+      [{ id: 18, userId: 42, intent: 'finalize notify freeze', repeatType: 'once', rrule: null }],
+      [{ status: 'active' }],
+      [{ status: 'active' }],
+      [{ status: 'closure_pending' }],
+    ];
+    const updates: Array<Record<string, unknown>> = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const db: any = {
+      select: vi.fn(() => ({
+        from: vi.fn(() => ({
+          where: vi.fn(() => fakeSelectRows(selectResults.shift() ?? [])),
+        })),
+      })),
+      update: vi.fn(() => ({
+        set: vi.fn((values: Record<string, unknown>) => ({
+          where: vi.fn(async () => {
+            updates.push(values);
+            return { affectedRows: 1 };
+          }),
+        })),
+      })),
+    };
+    db.transaction = (callback: (tx: unknown) => unknown) => callback(db);
+    const notify = vi.fn(async () => undefined);
+    startScheduledRunner({
+      db,
+      dispatch: vi.fn(async () => 1234),
+      notify,
+      pollIntervalMs: 60_000,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(updates).toHaveLength(2);
+    expect(notify).not.toHaveBeenCalled();
   });
 
   it('fires a due reminder and records the claimed cycle', async () => {

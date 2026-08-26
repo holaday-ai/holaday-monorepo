@@ -30,18 +30,18 @@
  * user, not silently re-dispatch.
  */
 
+import type { ServerMessage } from '@holaday/shared-types';
 import { and, eq, isNull } from 'drizzle-orm';
 import type { Logger } from 'pino';
-import type { ServerMessage } from '@holaday/shared-types';
+import type { DB } from '../db/client.js';
 import {
-  batchTaskItems,
-  batchTasks,
   type BatchTask,
   type BatchTaskItem,
+  batchTaskItems,
+  batchTasks,
 } from '../db/schema/batch-tasks.js';
 import { tasks } from '../db/schema/tasks.js';
 import { users } from '../db/schema/users.js';
-import type { DB } from '../db/client.js';
 import { isTaskTerminalStatus } from '../task-status.js';
 
 /** How often we re-check a dispatched task for terminal status. */
@@ -119,7 +119,7 @@ async function executeBatchInternal(
     return;
   }
   const [owner] = await db
-    .select({ externalId: users.externalId, id: users.id })
+    .select({ externalId: users.externalId, id: users.id, status: users.status })
     .from(users)
     .where(eq(users.id, batch.userId))
     .limit(1);
@@ -127,6 +127,7 @@ async function executeBatchInternal(
     logger.warn({ batchExternalId, userId: batch.userId }, 'batch-executor: owner not found');
     return;
   }
+  if (owner.status !== 'active') return;
 
   // Codex P5 follow-up — atomic flip pending → running. The earlier
   // read-then-write (`if (batch.status === 'pending')`) had a race
@@ -135,10 +136,12 @@ async function executeBatchInternal(
   // includes `status='pending'` so the UPDATE is a no-op if anyone
   // else moved the row first; we don't care about the affectedRows
   // result here (idempotent — already-running is fine).
-  await db
+  const parentClaim = await db
     .update(batchTasks)
     .set({ status: 'running' })
     .where(and(eq(batchTasks.id, batch.id), eq(batchTasks.status, 'pending')));
+  if (batch.status === 'pending' && extractMysqlAffectedRows(parentClaim) !== 1) return;
+  if (!(await batchOwnerAllowsExecution(db, owner.id))) return;
 
   // Concurrency-bounded fanout. We re-read item rows on each pass so
   // a user-cancel between iterations is observed.
@@ -203,6 +206,7 @@ async function executeBatchInternal(
     await Promise.race(inFlight.values());
   }
 
+  if (!(await batchOwnerAllowsExecution(db, owner.id))) return;
   await finalizeBatch(batch.id, deps);
 }
 
@@ -217,6 +221,7 @@ async function runItem(
   deps: BatchExecutorDeps,
 ): Promise<void> {
   const { db, logger } = deps;
+  if (!(await batchOwnerAllowsExecution(db, owner.id))) return;
   // Codex P5 follow-up — atomic claim on the item row. The earlier
   // unconditional `UPDATE ... SET status='running' WHERE id=?` would
   // double-dispatch if two executeBatch invocations both grabbed the
@@ -244,6 +249,24 @@ async function runItem(
     return;
   }
   await broadcastItemUpdate(batch, item.id, 'running', deps, owner.externalId);
+
+  // The user may enter closure after this worker won the item CAS. Re-read
+  // immediately before the external dispatch. If closure won, leave a
+  // cancellable undispatched row for the durable effects pass (or cancel it
+  // ourselves if it has not reached that pass yet).
+  if (!(await batchOwnerAllowsExecution(db, owner.id))) {
+    await db
+      .update(batchTaskItems)
+      .set({ status: 'cancelled', completedAt: new Date() })
+      .where(
+        and(
+          eq(batchTaskItems.id, item.id),
+          eq(batchTaskItems.status, 'running'),
+          isNull(batchTaskItems.taskId),
+        ),
+      );
+    return;
+  }
 
   let taskInternalId: number | null = null;
   let taskExternalId: string | null = null;
@@ -338,8 +361,8 @@ async function pollTaskForItem(
         })
         .where(eq(batchTaskItems.id, item.id));
       await broadcastItemUpdate(batch, item.id, itemStatus, deps, owner.externalId, {
-          ...(taskExternalId ? { taskExternalId } : {}),
-          ...(errorMessage ? { errorMessage } : {}),
+        ...(taskExternalId ? { taskExternalId } : {}),
+        ...(errorMessage ? { errorMessage } : {}),
       });
       return;
     }
@@ -349,6 +372,15 @@ async function pollTaskForItem(
 
 export function batchItemClientRequestId(batchItemExternalId: string): string {
   return `batch_item:${batchItemExternalId}`;
+}
+
+export async function batchOwnerAllowsExecution(db: DB, userId: number): Promise<boolean> {
+  const [owner] = await db
+    .select({ status: users.status })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  return owner?.status === 'active';
 }
 
 export function isResumableBatchStatus(status: string): boolean {

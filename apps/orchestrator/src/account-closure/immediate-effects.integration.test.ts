@@ -1,6 +1,8 @@
 import { randomBytes } from 'node:crypto';
-import { and, eq } from 'drizzle-orm';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/mysql2';
+import mysql from 'mysql2/promise';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { DATA_CATEGORY_IDS } from '../data-governance/types.js';
 import {
   accountClosureEffects,
@@ -8,6 +10,8 @@ import {
   accountClosureSteps,
 } from '../db/schema/account-closures.js';
 import { apiKeys } from '../db/schema/api-keys.js';
+import { batchTaskItems, batchTasks } from '../db/schema/batch-tasks.js';
+import * as schema from '../db/schema/index.js';
 import { notificationChannels } from '../db/schema/notifications.js';
 import { plannedTasks } from '../db/schema/planned-tasks.js';
 import { scheduledTasks } from '../db/schema/scheduled-tasks.js';
@@ -29,9 +33,10 @@ import {
 describe.sequential('account closure atomic freeze and exact immediate effects', () => {
   let cleanup: () => Promise<void> = async () => {};
   let db: typeof import('../db/client.js').db;
+  let databaseUrl = '';
 
   beforeAll(async () => {
-    const databaseUrl = process.env.DATABASE_URL;
+    databaseUrl = process.env.DATABASE_URL ?? '';
     if (!databaseUrl) throw new Error('DATABASE_URL is required for integration tests');
     const { applyMigrations } = await import('../test/db-helper.js');
     await applyMigrations(databaseUrl);
@@ -145,13 +150,15 @@ describe.sequential('account closure atomic freeze and exact immediate effects',
       ['completed', 'completed'],
       ['cancelled', 'cancelled'],
     ] as const;
+    const taskIds = new Map<string, number>();
     for (const [label, status] of taskRows) {
-      await db.insert(tasks).values({
+      const [insert] = await db.insert(tasks).values({
         externalId: `tsk_${label}_${randomBytes(5).toString('hex')}`,
         userId: user.id,
         status,
         intent: label,
       });
+      taskIds.set(label, Number(insert.insertId));
     }
     const firstRunAt = new Date('2026-08-27T00:00:00.000Z');
     for (const [label, status] of [
@@ -184,22 +191,81 @@ describe.sequential('account closure atomic freeze and exact immediate effects',
         enabled,
       });
     }
+    const [pendingBatchInsert] = await db.insert(batchTasks).values({
+      externalId: `btc_pending_${randomBytes(5).toString('hex')}`,
+      userId: user.id,
+      name: 'pending closure batch',
+      status: 'pending',
+      itemsTotal: 1,
+    });
+    const [runningBatchInsert] = await db.insert(batchTasks).values({
+      externalId: `btc_running_${randomBytes(5).toString('hex')}`,
+      userId: user.id,
+      name: 'running closure batch',
+      status: 'running',
+      itemsTotal: 2,
+    });
+    const [completedBatchInsert] = await db.insert(batchTasks).values({
+      externalId: `btc_completed_${randomBytes(5).toString('hex')}`,
+      userId: user.id,
+      name: 'terminal batch',
+      status: 'completed',
+      itemsTotal: 1,
+    });
+    await db.insert(batchTaskItems).values([
+      {
+        externalId: `bti_pending_${randomBytes(5).toString('hex')}`,
+        batchId: Number(pendingBatchInsert.insertId),
+        seq: 0,
+        prompt: 'not claimed',
+        status: 'pending',
+      },
+      {
+        externalId: `bti_claimed_${randomBytes(5).toString('hex')}`,
+        batchId: Number(runningBatchInsert.insertId),
+        seq: 0,
+        prompt: 'claimed but not dispatched',
+        status: 'running',
+      },
+      {
+        externalId: `bti_dispatched_${randomBytes(5).toString('hex')}`,
+        batchId: Number(runningBatchInsert.insertId),
+        seq: 1,
+        prompt: 'already dispatched',
+        status: 'running',
+        taskId: taskIds.get('executing'),
+      },
+      {
+        externalId: `bti_terminal_parent_${randomBytes(5).toString('hex')}`,
+        batchId: Number(completedBatchInsert.insertId),
+        seq: 0,
+        prompt: 'terminal parent is out of scope',
+        status: 'pending',
+      },
+    ]);
 
     const frozen = await freezeAccountForClosure(db, {
       userId: user.id,
       requestExternalId: `acl_${randomBytes(10).toString('hex')}`,
       requestedAt: new Date('2026-08-26T04:00:00.000Z'),
     });
-    const summary = await applyImmediateClosureEffects(db, {
-      requestId: frozen.requestId,
-      userId: user.id,
-      userExternalId: user.externalId,
-    });
+    const abortTask = vi.fn(() => true);
+    const summary = await applyImmediateClosureEffects(
+      db,
+      {
+        requestId: frozen.requestId,
+        userId: user.id,
+        userExternalId: user.externalId,
+      },
+      { abortTask },
+    );
 
     expect(summary.cancelledTaskIds).toHaveLength(2);
     expect(summary.pausedPlannedTaskIds).toHaveLength(1);
     expect(summary.pausedScheduledTaskIds).toHaveLength(1);
     expect(summary.disabledNotificationChannelIds).toHaveLength(1);
+    expect(summary.cancelledBatchTaskIds).toHaveLength(2);
+    expect(summary.cancelledBatchTaskItemIds).toHaveLength(2);
     const effects = await db
       .select({
         resourceType: accountClosureEffects.resourceType,
@@ -207,28 +273,38 @@ describe.sequential('account closure atomic freeze and exact immediate effects',
       })
       .from(accountClosureEffects)
       .where(eq(accountClosureEffects.requestId, frozen.requestId));
-    expect(effects).toHaveLength(5);
+    expect(effects).toHaveLength(9);
     expect(effects.map((effect) => effect.resourceType).sort()).toEqual([
+      'batch_task',
+      'batch_task',
+      'batch_task_item',
+      'batch_task_item',
       'notification_channel',
       'planned_task',
       'scheduled_task',
       'task',
       'task',
     ]);
-    const retrySummary = await applyImmediateClosureEffects(db, {
-      requestId: frozen.requestId,
-      userId: user.id,
-      userExternalId: user.externalId,
-    });
+    const retrySummary = await applyImmediateClosureEffects(
+      db,
+      {
+        requestId: frozen.requestId,
+        userId: user.id,
+        userExternalId: user.externalId,
+      },
+      { abortTask },
+    );
     expect(retrySummary.cancelledTaskIds).toHaveLength(2);
     expect(retrySummary.pausedPlannedTaskIds).toEqual([]);
     expect(retrySummary.pausedScheduledTaskIds).toEqual([]);
     expect(retrySummary.disabledNotificationChannelIds).toEqual([]);
+    expect(retrySummary.cancelledBatchTaskIds).toEqual([]);
+    expect(retrySummary.cancelledBatchTaskItemIds).toEqual([]);
     const effectsAfterRetry = await db
       .select({ id: accountClosureEffects.id })
       .from(accountClosureEffects)
       .where(eq(accountClosureEffects.requestId, frozen.requestId));
-    expect(effectsAfterRetry).toHaveLength(5);
+    expect(effectsAfterRetry).toHaveLength(9);
     const cancellationEvents = await db
       .select({ type: taskEvents.type })
       .from(taskEvents)
@@ -246,6 +322,22 @@ describe.sequential('account closure atomic freeze and exact immediate effects',
       .update(plannedTasks)
       .set({ status: 'archived' })
       .where(eq(plannedTasks.id, changedPlan.id));
+    const changedScheduleEffect = effects.find(
+      (effect) => effect.resourceType === 'scheduled_task',
+    );
+    if (!changedScheduleEffect) throw new Error('expected a scheduled-task effect');
+    const otherOwner = await createUser();
+    await db
+      .update(scheduledTasks)
+      .set({ userId: otherOwner.id })
+      .where(eq(scheduledTasks.externalId, changedScheduleEffect.resourceId));
+    const missingChannelEffect = effects.find(
+      (effect) => effect.resourceType === 'notification_channel',
+    );
+    if (!missingChannelEffect) throw new Error('expected a notification-channel effect');
+    await db
+      .delete(notificationChannels)
+      .where(eq(notificationChannels.externalId, missingChannelEffect.resourceId));
 
     await withdrawAccountClosureRequest(db, {
       requestId: frozen.requestId,
@@ -269,12 +361,17 @@ describe.sequential('account closure atomic freeze and exact immediate effects',
       .select({ status: scheduledTasks.status })
       .from(scheduledTasks)
       .where(eq(scheduledTasks.userId, user.id));
-    expect(scheduledStates.map((row) => row.status).sort()).toEqual(['active', 'paused']);
+    expect(scheduledStates.map((row) => row.status).sort()).toEqual(['paused']);
+    const [movedSchedule] = await db
+      .select({ status: scheduledTasks.status })
+      .from(scheduledTasks)
+      .where(eq(scheduledTasks.userId, otherOwner.id));
+    expect(movedSchedule?.status).toBe('paused');
     const channels = await db
       .select({ enabled: notificationChannels.enabled })
       .from(notificationChannels)
       .where(eq(notificationChannels.userId, user.id));
-    expect(channels.map((row) => row.enabled).sort()).toEqual([false, true]);
+    expect(channels.map((row) => row.enabled)).toEqual([false]);
     const [restoredUser] = await db
       .select({ status: users.status, planExpiresAt: users.planExpiresAt })
       .from(users)
@@ -285,19 +382,90 @@ describe.sequential('account closure atomic freeze and exact immediate effects',
       .from(taskQuotas)
       .where(eq(taskQuotas.userId, user.id));
     expect(quota).toEqual({ tasksUsed: 7, bonusTasks: 11 });
-    const unrestored = await db
+    const handledEffects = await db
       .select({ restoredAt: accountClosureEffects.restoredAt })
       .from(accountClosureEffects)
-      .where(
-        and(
-          eq(accountClosureEffects.requestId, frozen.requestId),
-          eq(accountClosureEffects.resourceType, 'planned_task'),
-        ),
-      );
-    expect(unrestored[0]?.restoredAt).toBeNull();
+      .where(eq(accountClosureEffects.requestId, frozen.requestId));
+    expect(handledEffects).toHaveLength(9);
+    expect(handledEffects.every((effect) => effect.restoredAt instanceof Date)).toBe(true);
+    const batchStates = await db
+      .select({ status: batchTasks.status })
+      .from(batchTasks)
+      .where(eq(batchTasks.userId, user.id));
+    expect(batchStates.map((row) => row.status).sort()).toEqual([
+      'cancelled',
+      'cancelled',
+      'completed',
+    ]);
+    const batchItemStates = await db
+      .select({ status: batchTaskItems.status, taskId: batchTaskItems.taskId })
+      .from(batchTaskItems)
+      .innerJoin(batchTasks, eq(batchTasks.id, batchTaskItems.batchId))
+      .where(eq(batchTasks.userId, user.id));
+    expect(batchItemStates.filter((item) => item.status === 'cancelled')).toHaveLength(2);
+    expect(
+      batchItemStates.filter((item) => item.status === 'running' && item.taskId !== null),
+    ).toHaveLength(1);
+    expect(batchItemStates.filter((item) => item.status === 'pending')).toHaveLength(1);
   });
 
-  it('lets only withdrawal or processing win and never restores after processing wins', async () => {
+  it('keeps a failed running-task abort retryable without duplicating effects', async () => {
+    const user = await createUser();
+    await db.insert(tasks).values({
+      externalId: `tsk_abort_retry_${randomBytes(5).toString('hex')}`,
+      userId: user.id,
+      status: 'executing',
+      intent: 'abort retry',
+    });
+    const frozen = await freezeAccountForClosure(db, {
+      userId: user.id,
+      requestExternalId: `acl_${randomBytes(10).toString('hex')}`,
+      requestedAt: new Date('2026-08-26T05:00:00.000Z'),
+    });
+    const abortTask = vi
+      .fn()
+      .mockReturnValueOnce(false)
+      .mockImplementationOnce(() => {
+        throw new Error('local abort transport failed');
+      })
+      .mockReturnValueOnce(true);
+
+    await expect(
+      applyImmediateClosureEffects(
+        db,
+        { requestId: frozen.requestId, userId: user.id, userExternalId: user.externalId },
+        { abortTask },
+      ),
+    ).rejects.toThrow(/retry/i);
+    const effectsAfterMiss = await db
+      .select({ id: accountClosureEffects.id })
+      .from(accountClosureEffects)
+      .where(eq(accountClosureEffects.requestId, frozen.requestId));
+    expect(effectsAfterMiss).toHaveLength(1);
+
+    await expect(
+      applyImmediateClosureEffects(
+        db,
+        { requestId: frozen.requestId, userId: user.id, userExternalId: user.externalId },
+        { abortTask },
+      ),
+    ).rejects.toThrow(/retry/i);
+    await expect(
+      applyImmediateClosureEffects(
+        db,
+        { requestId: frozen.requestId, userId: user.id, userExternalId: user.externalId },
+        { abortTask },
+      ),
+    ).resolves.toEqual(expect.objectContaining({ cancelledTaskIds: expect.any(Array) }));
+    const effectsAfterRetry = await db
+      .select({ id: accountClosureEffects.id })
+      .from(accountClosureEffects)
+      .where(eq(accountClosureEffects.requestId, frozen.requestId));
+    expect(effectsAfterRetry).toHaveLength(1);
+    expect(abortTask).toHaveBeenCalledTimes(3);
+  });
+
+  it('lets exactly one of withdrawal or processing win across independent connections', async () => {
     const user = await createUser();
     const frozen = await freezeAccountForClosure(db, {
       userId: user.id,
@@ -319,33 +487,84 @@ describe.sequential('account closure atomic freeze and exact immediate effects',
       userExternalId: user.externalId,
     });
 
-    const claimed = await claimClosureRequestForProcessing(db, {
-      requestId: frozen.requestId,
-      userId: user.id,
-      now: frozen.graceEndsAt,
+    const processingPool = mysql.createPool({
+      uri: databaseUrl,
+      connectionLimit: 1,
+      timezone: 'Z',
+      dateStrings: false,
+      supportBigNumbers: true,
+      bigNumberStrings: false,
     });
-    expect(claimed).toBe(true);
-    await expect(
-      withdrawAccountClosureRequest(db, {
+    const withdrawalPool = mysql.createPool({
+      uri: databaseUrl,
+      connectionLimit: 1,
+      timezone: 'Z',
+      dateStrings: false,
+      supportBigNumbers: true,
+      bigNumberStrings: false,
+    });
+    const processingDb = drizzle(processingPool, {
+      schema,
+      mode: 'default',
+      casing: 'snake_case',
+    });
+    const withdrawalDb = drizzle(withdrawalPool, {
+      schema,
+      mode: 'default',
+      casing: 'snake_case',
+    });
+    const [processingAttempt, withdrawalAttempt] = await Promise.allSettled([
+      claimClosureRequestForProcessing(processingDb, {
+        requestId: frozen.requestId,
+        userId: user.id,
+        now: frozen.graceEndsAt,
+      }),
+      withdrawAccountClosureRequest(withdrawalDb, {
         requestId: frozen.requestId,
         userId: user.id,
         now: new Date(frozen.graceEndsAt.getTime() - 1),
       }),
-    ).rejects.toEqual(
-      expect.objectContaining({
-        code: 'DEADLINE_PASSED_OR_PROCESSING',
-      }),
-    );
+    ]);
+    await Promise.all([processingPool.end(), withdrawalPool.end()]);
+
+    const processingWon =
+      processingAttempt.status === 'fulfilled' && processingAttempt.value === true;
+    const withdrawalWon = withdrawalAttempt.status === 'fulfilled';
+    expect(Number(processingWon) + Number(withdrawalWon)).toBe(1);
     await restoreImmediateClosureEffects(db, { requestId: frozen.requestId, userId: user.id });
+    const [finalUser] = await db
+      .select({ status: users.status })
+      .from(users)
+      .where(eq(users.id, user.id));
+    const [finalRequest] = await db
+      .select({ status: accountClosureRequests.status })
+      .from(accountClosureRequests)
+      .where(eq(accountClosureRequests.id, frozen.requestId));
     const [plan] = await db
       .select({ status: plannedTasks.status })
       .from(plannedTasks)
       .where(eq(plannedTasks.userId, user.id));
-    expect(plan?.status).toBe('paused');
     const [effect] = await db
       .select({ restoredAt: accountClosureEffects.restoredAt })
       .from(accountClosureEffects)
       .where(eq(accountClosureEffects.requestId, frozen.requestId));
-    expect(effect?.restoredAt).toBeNull();
+    if (processingWon) {
+      expect(withdrawalAttempt).toEqual(
+        expect.objectContaining({
+          status: 'rejected',
+          reason: expect.objectContaining({ code: 'DEADLINE_PASSED_OR_PROCESSING' }),
+        }),
+      );
+      expect(finalUser?.status).toBe('closure_processing');
+      expect(finalRequest?.status).toBe('processing');
+      expect(plan?.status).toBe('paused');
+      expect(effect?.restoredAt).toBeNull();
+    } else {
+      expect(processingAttempt).toEqual({ status: 'fulfilled', value: false });
+      expect(finalUser?.status).toBe('active');
+      expect(finalRequest?.status).toBe('cancelled');
+      expect(plan?.status).toBe('active');
+      expect(effect?.restoredAt).toBeInstanceOf(Date);
+    }
   });
 });

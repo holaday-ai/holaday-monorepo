@@ -45,6 +45,32 @@ describe('runSupercarTask credential takeover', () => {
     createMessage.mockReset();
   });
 
+  it('registers an abort handle before awaiting a non-browser lane', async () => {
+    let releaseTrigger!: () => void;
+    const triggerStarted = new Promise<void>((resolve) => {
+      releaseTrigger = resolve;
+    });
+    const taskId = 'tsk_abort_before_zapier_await';
+    const run = runSupercarTask({
+      taskId,
+      intent: 'trigger a workflow',
+      executor: null,
+      apiKey: 'test-key',
+      isCrossPlatformAutomation: true,
+      zapierWebhookPath: '/hooks/test',
+      zapierAdapter: {
+        trigger: vi.fn(async () => {
+          await triggerStarted;
+          return { ok: true as const, runId: 'run_should_not_complete' };
+        }),
+      } as never,
+    });
+
+    expect(supercarAbort(taskId)).toBe(true);
+    releaseTrigger();
+    await expect(run).resolves.toMatchObject({ status: 'cancelled' });
+  });
+
   it('does not replay the stale credential input after the user takes over', async () => {
     createMessage
       .mockResolvedValueOnce(

@@ -4,6 +4,7 @@ import { cancelUserTasksForAccountClosure } from '../agent/task-repository.js';
 import type { DB } from '../db/client.js';
 import { readAffectedRows } from '../db/mysql-result.js';
 import { accountClosureEffects, accountClosureRequests } from '../db/schema/account-closures.js';
+import { batchTaskItems, batchTasks } from '../db/schema/batch-tasks.js';
 import { notificationChannels } from '../db/schema/notifications.js';
 import { plannedTasks } from '../db/schema/planned-tasks.js';
 import { scheduledTasks } from '../db/schema/scheduled-tasks.js';
@@ -14,6 +15,8 @@ type DBTransaction = Parameters<Parameters<DB['transaction']>[0]>[0];
 
 export interface ClosureEffectSummary {
   cancelledTaskIds: string[];
+  cancelledBatchTaskIds: string[];
+  cancelledBatchTaskItemIds: string[];
   pausedPlannedTaskIds: string[];
   pausedScheduledTaskIds: string[];
   disabledNotificationChannelIds: string[];
@@ -47,6 +50,7 @@ export function closureRestorationTarget(input: RestorationPolicyInput): string 
 export async function applyImmediateClosureEffects(
   db: DB,
   input: { requestId: number; userId: number; userExternalId: string },
+  deps: { abortTask?: (taskId: string) => boolean } = {},
 ): Promise<ClosureEffectSummary> {
   const summary = await db.transaction(async (tx) => {
     const [request] = await tx
@@ -80,6 +84,12 @@ export async function applyImmediateClosureEffects(
         closureAppliedState: 'cancelled',
       });
     }
+
+    const { cancelledBatchTaskIds, cancelledBatchTaskItemIds } = await cancelUndispatchedBatchWork(
+      tx,
+      input.requestId,
+      input.userId,
+    );
 
     const pausedPlannedTaskIds = await pauseFutureWork(
       tx,
@@ -130,7 +140,10 @@ export async function applyImmediateClosureEffects(
     // winners. A retry can therefore re-issue post-commit in-memory/external
     // cancellation without duplicating state changes or effect rows.
     const taskEffects = await tx
-      .select({ resourceId: accountClosureEffects.resourceId })
+      .select({
+        resourceId: accountClosureEffects.resourceId,
+        previousState: accountClosureEffects.previousState,
+      })
       .from(accountClosureEffects)
       .where(
         and(
@@ -142,6 +155,11 @@ export async function applyImmediateClosureEffects(
 
     return {
       cancelledTaskIds: taskEffects.map((effect) => effect.resourceId),
+      runningTaskIds: taskEffects
+        .filter((effect) => effect.previousState === 'executing')
+        .map((effect) => effect.resourceId),
+      cancelledBatchTaskIds,
+      cancelledBatchTaskItemIds,
       pausedPlannedTaskIds,
       pausedScheduledTaskIds,
       disabledNotificationChannelIds,
@@ -149,16 +167,30 @@ export async function applyImmediateClosureEffects(
   });
 
   // In-memory aborts happen only after the durable cancellation transaction.
-  // A missing/failed local handle never rolls the account back; the persisted
-  // cancelled state remains the retry-safe source of truth.
-  for (const taskId of summary.cancelledTaskIds) {
+  // A missing/failed local handle leaves the durable cancellation intact but
+  // must surface a retry signal. A later apply pass re-reads the same effect
+  // rows, so it can retry the abort without duplicating effects.
+  const abortTask = deps.abortTask ?? supercarAbort;
+  const abortFailures: string[] = [];
+  for (const taskId of summary.runningTaskIds) {
     try {
-      supercarAbort(taskId);
+      if (!abortTask(taskId)) abortFailures.push(taskId);
     } catch {
-      // The durable task/effect rows deliberately remain available to retry.
+      abortFailures.push(taskId);
     }
   }
-  return summary;
+  if (abortFailures.length > 0) {
+    throw new ImmediateClosureEffectsRetryableError(abortFailures.length);
+  }
+  const { runningTaskIds: _, ...publicSummary } = summary;
+  return publicSummary;
+}
+
+export class ImmediateClosureEffectsRetryableError extends Error {
+  constructor(public readonly failedAbortCount: number) {
+    super(`Immediate closure effects require retry (${failedAbortCount} task aborts pending)`);
+    this.name = 'ImmediateClosureEffectsRetryableError';
+  }
 }
 
 export async function restoreImmediateClosureEffects(
@@ -207,9 +239,9 @@ export async function restoreImmediateClosureEffectsInTransaction(
 
   for (const effect of effects) {
     const target = closureRestorationTarget(effect);
-    let ownedAndRestored = false;
+    let handled = false;
     if (effect.resourceType === 'task') {
-      const [task] = await tx
+      await tx
         .select({ id: tasks.id })
         .from(tasks)
         .where(
@@ -220,11 +252,14 @@ export async function restoreImmediateClosureEffectsInTransaction(
           ),
         )
         .limit(1);
-      // Cancelled work is intentionally not restarted. Marking this effect
-      // restored records that the withdrawal policy was applied.
-      ownedAndRestored = Boolean(task);
+      // Cancelled work is intentionally not restarted. A missing, moved, or
+      // independently changed row is also a safe terminal no-op.
+      handled = true;
+    } else if (effect.resourceType === 'batch_task' || effect.resourceType === 'batch_task_item') {
+      // Closure-cancelled batch work is never restarted on withdrawal.
+      handled = true;
     } else if (effect.resourceType === 'planned_task' && target === 'active') {
-      const result = await tx
+      await tx
         .update(plannedTasks)
         .set({ status: 'active' })
         .where(
@@ -234,9 +269,9 @@ export async function restoreImmediateClosureEffectsInTransaction(
             eq(plannedTasks.status, effect.closureAppliedState),
           ),
         );
-      ownedAndRestored = readAffectedRows(result) === 1;
+      handled = true;
     } else if (effect.resourceType === 'scheduled_task' && target === 'active') {
-      const result = await tx
+      await tx
         .update(scheduledTasks)
         .set({ status: 'active' })
         .where(
@@ -246,9 +281,9 @@ export async function restoreImmediateClosureEffectsInTransaction(
             eq(scheduledTasks.status, effect.closureAppliedState),
           ),
         );
-      ownedAndRestored = readAffectedRows(result) === 1;
+      handled = true;
     } else if (effect.resourceType === 'notification_channel' && target === 'enabled') {
-      const result = await tx
+      await tx
         .update(notificationChannels)
         .set({ enabled: true })
         .where(
@@ -258,9 +293,9 @@ export async function restoreImmediateClosureEffectsInTransaction(
             eq(notificationChannels.enabled, false),
           ),
         );
-      ownedAndRestored = readAffectedRows(result) === 1;
+      handled = true;
     }
-    if (!ownedAndRestored) continue;
+    if (!handled) continue;
     await tx
       .update(accountClosureEffects)
       .set({ restoredAt: new Date() })
@@ -268,6 +303,79 @@ export async function restoreImmediateClosureEffectsInTransaction(
         and(eq(accountClosureEffects.id, effect.id), isNull(accountClosureEffects.restoredAt)),
       );
   }
+}
+
+async function cancelUndispatchedBatchWork(
+  tx: DBTransaction,
+  requestId: number,
+  userId: number,
+): Promise<{ cancelledBatchTaskIds: string[]; cancelledBatchTaskItemIds: string[] }> {
+  const candidates = await tx
+    .select({ id: batchTasks.id, externalId: batchTasks.externalId, status: batchTasks.status })
+    .from(batchTasks)
+    .where(and(eq(batchTasks.userId, userId), inArray(batchTasks.status, ['pending', 'running'])))
+    .for('update');
+  const cancelledBatchTaskIds: string[] = [];
+  const cancelledBatchTaskItemIds: string[] = [];
+  for (const batch of candidates) {
+    const items = await tx
+      .select({
+        id: batchTaskItems.id,
+        externalId: batchTaskItems.externalId,
+        status: batchTaskItems.status,
+      })
+      .from(batchTaskItems)
+      .where(
+        and(
+          eq(batchTaskItems.batchId, batch.id),
+          inArray(batchTaskItems.status, ['pending', 'running']),
+          isNull(batchTaskItems.taskId),
+        ),
+      )
+      .for('update');
+    const parentResult = await tx
+      .update(batchTasks)
+      .set({ status: 'cancelled', completedAt: new Date() })
+      .where(
+        and(
+          eq(batchTasks.id, batch.id),
+          eq(batchTasks.userId, userId),
+          eq(batchTasks.status, batch.status),
+        ),
+      );
+    if (readAffectedRows(parentResult) !== 1) continue;
+    await insertEffect(tx, {
+      requestId,
+      resourceType: 'batch_task',
+      resourceId: batch.externalId,
+      previousState: batch.status,
+      closureAppliedState: 'cancelled',
+    });
+    cancelledBatchTaskIds.push(batch.externalId);
+    for (const item of items) {
+      const itemResult = await tx
+        .update(batchTaskItems)
+        .set({ status: 'cancelled', completedAt: new Date() })
+        .where(
+          and(
+            eq(batchTaskItems.id, item.id),
+            eq(batchTaskItems.batchId, batch.id),
+            eq(batchTaskItems.status, item.status),
+            isNull(batchTaskItems.taskId),
+          ),
+        );
+      if (readAffectedRows(itemResult) !== 1) continue;
+      await insertEffect(tx, {
+        requestId,
+        resourceType: 'batch_task_item',
+        resourceId: item.externalId,
+        previousState: item.status,
+        closureAppliedState: 'cancelled',
+      });
+      cancelledBatchTaskItemIds.push(item.externalId);
+    }
+  }
+  return { cancelledBatchTaskIds, cancelledBatchTaskItemIds };
 }
 
 async function insertEffect(
