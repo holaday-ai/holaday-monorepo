@@ -28,7 +28,9 @@
 <!-- 2026-07-09 Codex 补充：状态机 pre-execution guard：start(existing) 不再把 pending/queued 直接派发成 executing；pause 只允许 executing source；repository control transition 同步拒绝非 executing→paused 与非 paused→executing，防 queued/pending 绕过队列恢复。 -->
 <!-- 2026-07-09 Codex 补充：状态机 planning bootstrap 收口：新任务 seed 显式走 state:null + taskId + plan；start(existing planning) 改为 noop，避免历史/重连 planning 被误派发；tasks.create/smoke 与集成 fixture 已统一。 -->
 <!-- 2026-07-09 Codex 补充：技能 planner 闭环：planner catalogue 现在合并 DB SKILL.md rows + shared 13 用户可见技能；手动 @ 技能会注入 planner hint，避免前端选择了技能但通用 planner 不知道。 -->
-## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05@b4a55b56`（2026-08-26 JST）
+## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05@e998edf0`（2026-08-27 JST）
+
+账户关闭编排的禁用态基础设施已通过 PR #149–#151 部署：0051/0052 与 `db:verify` 在生产通过，`system` 内部主体保持非登录合法状态，编号迁移可安全重复执行；Orchestrator 运行 uid 998，快速 P0 门禁 4/4、双公网 healthz、Aliyun/Vultr SPA 与法律页 smoke 均通过。四个账户关闭/遗留清理开关均缺省为 `false`，专用 HMAC 未配置（仅核对不存在、长度 0），closure worker 未运行，5 张编排表已创建且请求、步骤、效果、挑战、收据聚合计数均为 0，近期错误日志相关计数为 0。因此本轮只完成 dormant deployment，不对用户开放账户关闭；后续必须先通过遗留反馈与分析日志的双人清理确认，再配置专用 HMAC/通知模板、受控 allowlist 与 canary，不能直接开启通用流量。
 
 购买与账号信任链路已通过 PR #145、#146 收口上线：套餐、账单、个人资料、服务条款和隐私政策现在通过统一的“购买与账号保障”入口互相连接；账单页明确付款由结账页处理、HOLA DAY 不保存银行卡号或支付账户密码，个人资料页不再展示无法证实的“最近修改：未知”。套餐页不会在账号资料未完成时猜测用户是体验版，也不会在正常 AppShell 路由内重复请求 `auth.me`：已认证壳层的真实套餐会直接展示，支付成功后的显式刷新和缺少壳层上下文的独立场景仍保留查询。两轮均按测试先行完成红绿验证；最终 web-workbench 完整套件为 208 个文件 / 1535 项，完整 lint、typecheck、生产构建、目标 Biome/ESLint 与差异检查通过。PR #145 发布 bundle `index-CyIlZYTR.js` 后，PR #146 最终发布 bundle `index-Ck7AjDpQ.js`；两次部署均通过 50 项发布门禁、Aliyun/Vultr 原子切换、SPA/法律页 smoke 和双公网 healthz，最终两域均为 200 / `status=ok`，套餐页生产资源哈希与本地构建完全一致。Vultr 部署前实读服务器仓库 HEAD 为 `850afb5c`，确认是目标集成提交祖先后才发布；本轮为 SPA-only 发布，没有重启 Orchestrator、修改数据库、迁移、生产配置、环境变量、支付供应商、订单、额度或用户数据，也未触碰 AkShare、DivineAPI、Translator 或 OpenAI Key。登录态生产视觉复验已于 2026-08-26 JST 补齐：测试账号真实 Basic 套餐在 `/plan` 直接显示“当前使用中”，初始加载、月付/年付切换及从 `/billing` 返回后均未出现“正在确认当前套餐”；1440×900 与 390×844 两个视口均无横向溢出，购买与账号保障导航可达，页面无框架错误覆盖，控制台 warning/error 为 0。复验只读浏览套餐和账单页面，没有购买、复制订单、打开邮件、修改账号或输出原始付款标识；临时视口已恢复默认。
 
