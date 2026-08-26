@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { DATA_CATEGORY_IDS } from '../data-governance/types.js';
 import {
+  ACCOUNT_CLOSURE_PUBLIC_RECEIPT_FIELDS,
   AccountClosureReceiptService,
   type ClosureReceiptRecord,
   type ClosureReceiptStore,
   serializeApplicationReceipt,
+  serializeCompletionReceipt,
 } from './receipt-service.js';
 
 class MemoryReceiptStore implements ClosureReceiptStore {
@@ -97,6 +99,34 @@ describe('account closure receipt service', () => {
     ]) {
       expect(json).not.toContain(forbidden);
     }
+  });
+
+  it('binds the reviewed public field allowlist to both poisoned receipt serializers', () => {
+    const internal = {
+      requestId: 99,
+      userId: 77,
+      receiptNumber: 'ACR-random-123',
+      subjectDigest: 'forbidden-digest',
+      completedCategoryIds: ['account_security'] as ClosureReceiptRecord['completedCategoryIds'],
+      restrictedCategoryIds: [
+        'payments_entitlements',
+      ] as ClosureReceiptRecord['restrictedCategoryIds'],
+      notificationStatus: 'accepted' as const,
+      issuedAt: requestedAt,
+      completedAt: new Date('2026-08-29T09:00:00.000Z'),
+      email: 'sentinel-private@example.test',
+      taskText: 'sentinel private task content',
+      filename: 'sentinel-private.txt',
+    };
+    const application = serializeApplicationReceipt({ ...internal, kind: 'application' });
+    const completion = serializeCompletionReceipt({ ...internal, kind: 'completion' });
+    const actualFields = [...new Set([...Object.keys(application), ...Object.keys(completion)])];
+
+    expect(actualFields.sort()).toEqual([...ACCOUNT_CLOSURE_PUBLIC_RECEIPT_FIELDS].sort());
+    const json = JSON.stringify({ application, completion });
+    expect(json).not.toMatch(
+      /requestId|userId|subjectDigest|email|taskText|filename|sentinel-private|sentinel private/i,
+    );
   });
 
   it('creates one immutable random application receipt across retries', async () => {

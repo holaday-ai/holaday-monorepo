@@ -38,6 +38,8 @@ export interface CompletionClosureReceipt {
   restrictedCategoryIds: AccountClosureCategoryId[];
 }
 
+export { ACCOUNT_CLOSURE_PUBLIC_RECEIPT_FIELDS } from './types.js';
+
 export interface ClosureReceiptStore {
   insertOrGet(row: ClosureReceiptRecord): Promise<ClosureReceiptRecord>;
   insertCompletionOrGetWithLease(
@@ -414,7 +416,7 @@ export function serializeApplicationReceipt(row: ClosureReceiptRecord): Applicat
   };
 }
 
-function serializeCompletionReceipt(row: ClosureReceiptRecord): CompletionClosureReceipt {
+export function serializeCompletionReceipt(row: ClosureReceiptRecord): CompletionClosureReceipt {
   if (row.kind !== 'completion') throw new Error('Completion receipt required');
   return {
     receiptNumber: row.receiptNumber,

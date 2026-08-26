@@ -74,6 +74,16 @@ export const ACCOUNT_CLOSURE_RETENTION_OUTCOMES = [
 ] as const;
 export type AccountClosureRetentionOutcome = (typeof ACCOUNT_CLOSURE_RETENTION_OUTCOMES)[number];
 
+/** The complete public receipt surface; internal identities and digests are excluded. */
+export const ACCOUNT_CLOSURE_PUBLIC_RECEIPT_FIELDS = [
+  'receiptNumber',
+  'kind',
+  'issuedAt',
+  'completedAt',
+  'completedCategoryIds',
+  'restrictedCategoryIds',
+] as const;
+
 /** Checkpoints deliberately permit only opaque numeric pagination progress. */
 export interface AccountClosureCheckpoint {
   targetIndex?: number;

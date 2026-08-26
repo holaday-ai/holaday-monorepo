@@ -1,10 +1,231 @@
+import { existsSync } from 'node:fs';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import {
+  ACCOUNT_CLOSURE_HANDLER_METADATA,
+  type AccountClosureHandlerMetadata,
+} from '../src/account-closure/handler-governance.js';
+import {
+  ACCOUNT_CLOSURE_RETENTION_OUTCOMES,
+  type AccountClosureRetentionOutcome,
+  ACCOUNT_CLOSURE_PUBLIC_RECEIPT_FIELDS as PUBLIC_RECEIPT_FIELDS,
+} from '../src/account-closure/types.js';
 import {
   type AuditIssue,
   type AuditReport,
+  DATA_CATEGORY_IDS,
+  type DataCategoryId,
+  type RightsCapability,
   auditGovernanceRegistry,
   governanceRegistry,
 } from '../src/data-governance/index.js';
+
+export const ACCOUNT_CLOSURE_PUBLIC_RECEIPT_FIELDS = PUBLIC_RECEIPT_FIELDS;
+
+export interface AccountClosureGovernanceDeclaration {
+  readonly categoryId: DataCategoryId;
+  readonly handlerRef: string;
+  readonly retentionModes: readonly AccountClosureRetentionOutcome[];
+  readonly testRef: string;
+}
+
+const RELATIONAL_TEST =
+  'apps/orchestrator/src/account-closure/handlers/relational-handlers.integration.test.ts';
+const FINANCIAL_TEST = 'apps/orchestrator/src/account-closure/handlers/financial-retention.test.ts';
+
+export const ACCOUNT_CLOSURE_GOVERNANCE_DECLARATIONS: readonly AccountClosureGovernanceDeclaration[] =
+  [
+    closureDeclaration('account_security', 'account-security', 'accountSecurityClosureHandler', [
+      'deleted',
+      'not_present',
+    ]),
+    closureDeclaration('task_execution', 'task-execution', 'taskExecutionClosureHandler', [
+      'deleted',
+      'not_present',
+    ]),
+    closureDeclaration('cross_task_memory', 'cross-task-memory', 'crossTaskMemoryClosureHandler', [
+      'deleted',
+      'not_present',
+    ]),
+    closureDeclaration(
+      'energy_astrology_profile',
+      'energy-astrology-profile',
+      'energyAstrologyProfileClosureHandler',
+      ['not_present'],
+    ),
+    closureDeclaration(
+      'stock_preference_profile',
+      'stock-preference-profile',
+      'stockPreferenceProfileClosureHandler',
+      ['deleted', 'not_present'],
+    ),
+    closureDeclaration('feedback_support', 'feedback-support', 'feedbackSupportClosureHandler', [
+      'restricted',
+    ]),
+    closureDeclaration(
+      'external_notifications',
+      'external-notifications',
+      'externalNotificationsClosureHandler',
+      ['deleted', 'not_present'],
+    ),
+    closureDeclaration(
+      'extension_site_stats',
+      'extension-site-stats',
+      'extensionSiteStatsClosureHandler',
+      ['deleted', 'not_present'],
+    ),
+    closureDeclaration(
+      'extension_login_cookies',
+      'extension-login-cookies',
+      'extensionLoginCookiesClosureHandler',
+      ['deleted', 'not_present'],
+    ),
+    {
+      categoryId: 'payments_entitlements',
+      handlerRef:
+        'apps/orchestrator/src/account-closure/handlers/payments-entitlements.ts#paymentsEntitlementsClosureHandler',
+      retentionModes: ['restricted', 'not_present'],
+      testRef: FINANCIAL_TEST,
+    },
+    {
+      categoryId: 'partner_kyc_ledger',
+      handlerRef:
+        'apps/orchestrator/src/account-closure/handlers/partner-kyc-ledger.ts#partnerKycLedgerClosureHandler',
+      retentionModes: ['restricted', 'not_present'],
+      testRef: FINANCIAL_TEST,
+    },
+    {
+      categoryId: 'media_assets',
+      handlerRef:
+        'apps/orchestrator/src/account-closure/handlers/media-assets.ts#mediaAssetsClosureHandler',
+      retentionModes: ['deleted', 'restricted', 'not_present'],
+      testRef: 'apps/orchestrator/src/account-closure/handlers/media-assets.integration.test.ts',
+    },
+    closureDeclaration('analytics_logs', 'analytics-logs', 'analyticsLogsClosureHandler', [
+      'anonymized',
+      'restricted',
+    ]),
+  ];
+
+function closureDeclaration(
+  categoryId: DataCategoryId,
+  moduleName: string,
+  exportName: string,
+  retentionModes: readonly AccountClosureRetentionOutcome[],
+): AccountClosureGovernanceDeclaration {
+  return {
+    categoryId,
+    handlerRef: `apps/orchestrator/src/account-closure/handlers/${moduleName}.ts#${exportName}`,
+    retentionModes,
+    testRef: RELATIONAL_TEST,
+  };
+}
+
+export interface AccountClosureGovernanceAuditInput {
+  readonly declarations: readonly AccountClosureGovernanceDeclaration[];
+  readonly handlerBindings: readonly AccountClosureHandlerMetadata[];
+  readonly receiptFields: readonly string[];
+  readonly rightsCapabilities: readonly RightsCapability[];
+  readonly repoRoot?: string;
+}
+
+/** Validates the destructive-flow release contract without reading runtime or user data. */
+export function auditAccountClosureGovernance(
+  input: AccountClosureGovernanceAuditInput,
+): AuditIssue[] {
+  const issues: AuditIssue[] = [];
+  const add = (code: AuditIssue['code'], registryId: string, message: string) =>
+    issues.push({ severity: 'error', code, registryId, message });
+  const seen = new Set<string>();
+  const bindings = new Map(input.handlerBindings.map((binding) => [binding.handlerRef, binding]));
+  const root = resolve(input.repoRoot ?? repositoryRoot());
+
+  for (const declaration of input.declarations) {
+    const registryId = `account_closure:${declaration.categoryId}`;
+    if (seen.has(declaration.categoryId)) {
+      add('duplicate_id', registryId, 'Account closure category declaration is duplicated.');
+    }
+    seen.add(declaration.categoryId);
+
+    const binding = bindings.get(declaration.handlerRef);
+    if (!binding || binding.categoryId !== declaration.categoryId) {
+      add(
+        'closure_handler_category_mismatch',
+        registryId,
+        'Account closure handler does not match its governed category.',
+      );
+    }
+    if (
+      declaration.retentionModes.length === 0 ||
+      declaration.retentionModes.some((mode) => !ACCOUNT_CLOSURE_RETENTION_OUTCOMES.includes(mode))
+    ) {
+      add(
+        'closure_retention_missing',
+        registryId,
+        'Account closure category requires an explicit supported retention outcome.',
+      );
+    }
+    if (!isSafeExistingTestRef(root, declaration.testRef)) {
+      add(
+        'closure_test_missing',
+        registryId,
+        'Account closure category requires repository-owned test evidence.',
+      );
+    }
+  }
+
+  for (const categoryId of DATA_CATEGORY_IDS) {
+    if (!seen.has(categoryId)) {
+      add(
+        'closure_handler_category_mismatch',
+        `account_closure:${categoryId}`,
+        'Canonical category has no account closure governance declaration.',
+      );
+    }
+  }
+
+  const allowedReceiptFields = new Set(PUBLIC_RECEIPT_FIELDS);
+  if (
+    input.receiptFields.some((field) => !allowedReceiptFields.has(field as never)) ||
+    new Set(input.receiptFields).size !== input.receiptFields.length
+  ) {
+    add(
+      'closure_receipt_raw_content',
+      'account_closure:receipt',
+      'Public closure receipts may contain only the reviewed aggregate field allowlist.',
+    );
+  }
+
+  const accountRights = input.rightsCapabilities.find(
+    (capability) => capability.id === 'account_manual_request',
+  );
+  if (
+    accountRights?.delete.status !== 'implemented' ||
+    accountRights.delete.handlerRef !==
+      'apps/orchestrator/src/trpc/routers/account-closure.ts#accountClosureRouter' ||
+    accountRights.export.status !== 'not_implemented'
+  ) {
+    add(
+      'closure_public_claim_exceeds_capability',
+      'account_closure:public_claim',
+      'Public self-service closure claims must match the implemented route while export stays unavailable.',
+    );
+  }
+
+  return issues;
+}
+
+function isSafeExistingTestRef(root: string, testRef: string): boolean {
+  if (!testRef.endsWith('.test.ts') || isAbsolute(testRef)) return false;
+  const target = resolve(root, testRef);
+  const targetRelative = relative(root, target);
+  return (
+    targetRelative !== '..' &&
+    !targetRelative.startsWith(`..${sep}`) &&
+    !isAbsolute(targetRelative) &&
+    existsSync(target)
+  );
+}
 
 export interface GovernanceAuditIo {
   stdout(message: string): void;
@@ -33,7 +254,7 @@ const APPROVED_CONTACT_PLACEHOLDER = '__APPROVED_PRIVACY_CONTACT__';
 const SAFE_ISSUE_CODE = /^[a-z][a-z0-9_]*$/;
 const CONFIG_KEY_NAME = /^[A-Z][A-Z0-9_]+$/;
 const SAFE_REGISTRY_ID =
-  /^(?:(?:category|processor|public_disclosure):[a-z][a-z0-9_]*|rights_capability:[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)?|retention_policy:[a-z][a-z0-9_]*(?:\.local_regime:[a-z][a-z0-9_]*)?)$/;
+  /^(?:(?:category|processor|public_disclosure|account_closure):[a-z][a-z0-9_]*|rights_capability:[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)?|retention_policy:[a-z][a-z0-9_]*(?:\.local_regime:[a-z][a-z0-9_]*)?)$/;
 const PRIVATE_KEY_BOUNDARY = ['-----BEGIN', '(?:[A-Z ]+ )?PRIVATE', 'KEY-----'].join(' ');
 const PRIVATE_KEY = new RegExp(
   `${PRIVATE_KEY_BOUNDARY}[\\s\\S]*?(?:-----END (?:[A-Z ]+ )?PRIVATE KEY-----|$)`,
@@ -232,6 +453,28 @@ export interface GovernanceAuditDependencies {
   readonly buildReport?: () => AuditReport;
 }
 
+export function buildGovernanceAuditReport(): AuditReport {
+  const base = auditGovernanceRegistry(governanceRegistry, {
+    repoRoot: repositoryRoot(),
+    verifyEvidenceFiles: true,
+    requirePublicDisclosures: true,
+  });
+  const closureIssues = auditAccountClosureGovernance({
+    declarations: ACCOUNT_CLOSURE_GOVERNANCE_DECLARATIONS,
+    handlerBindings: ACCOUNT_CLOSURE_HANDLER_METADATA,
+    receiptFields: PUBLIC_RECEIPT_FIELDS,
+    rightsCapabilities: governanceRegistry.rightsCapabilities,
+    repoRoot: repositoryRoot(),
+  });
+  const errors = base.summary.errors + closureIssues.length;
+  return {
+    ...base,
+    ok: errors === 0,
+    summary: { ...base.summary, errors },
+    issues: [...base.issues, ...closureIssues],
+  };
+}
+
 export function runGovernanceAuditCli(
   args: readonly string[],
   io: GovernanceAuditIo,
@@ -247,13 +490,7 @@ export function runGovernanceAuditCli(
 
   let report: AuditReport;
   try {
-    report =
-      dependencies.buildReport?.() ??
-      auditGovernanceRegistry(governanceRegistry, {
-        repoRoot: repositoryRoot(),
-        verifyEvidenceFiles: true,
-        requirePublicDisclosures: true,
-      });
+    report = dependencies.buildReport?.() ?? buildGovernanceAuditReport();
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown report construction error.';
     io.stderr(`Governance audit could not construct a report: ${sanitizeMessage(message)}`);

@@ -206,6 +206,11 @@ export interface AuditIssue {
     | 'invalid_public_disclosure'
     | 'handler_source_missing'
     | 'handler_symbol_missing'
+    | 'closure_handler_category_mismatch'
+    | 'closure_retention_missing'
+    | 'closure_test_missing'
+    | 'closure_receipt_raw_content'
+    | 'closure_public_claim_exceeds_capability'
     | 'suspicious_secret'
     | 'suspicious_personal_data'
     | 'governance_gap';

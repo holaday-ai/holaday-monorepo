@@ -87,9 +87,21 @@ describe('governance lifecycle registry', () => {
 
   it('keeps account close and comprehensive export truthful', () => {
     const account = rightsCapabilities.find((item) => item.id === 'account_manual_request');
-    expect(account?.delete.status).toBe('manual');
-    expect(account?.delete.manualEntrypoint).toBe('privacy@holaday.ai');
+    expect(account?.delete.status).toBe('implemented');
+    expect(account?.delete.handlerRef).toBe(
+      'apps/orchestrator/src/trpc/routers/account-closure.ts#accountClosureRouter',
+    );
+    expect(account?.delete.manualEntrypoint).toBeUndefined();
+    expect(account?.delete.scope).toContain('7 天');
+    expect(account?.delete.limitations).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('完整个人数据导出'),
+        expect.stringContaining('支付'),
+        expect.stringContaining('其他设备'),
+      ]),
+    );
     expect(account?.export.status).toBe('not_implemented');
+    expect(account?.export.handlerRef).toBeUndefined();
   });
 
   it('records exact self-service limits for memory, astrology, stock, and cookies', () => {

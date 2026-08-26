@@ -1,5 +1,6 @@
 import { DATA_CATEGORY_IDS, type DataCategoryId } from '../data-governance/types.js';
 import type { AccountClosureHandler } from './handler-contract.js';
+import { ACCOUNT_CLOSURE_HANDLER_METADATA } from './handler-governance.js';
 import { accountSecurityClosureHandler } from './handlers/account-security.js';
 import { analyticsLogsClosureHandler } from './handlers/analytics-logs.js';
 import { crossTaskMemoryClosureHandler } from './handlers/cross-task-memory.js';
@@ -14,21 +15,37 @@ import { paymentsEntitlementsClosureHandler } from './handlers/payments-entitlem
 import { stockPreferenceProfileClosureHandler } from './handlers/stock-preference-profile.js';
 import { taskExecutionClosureHandler } from './handlers/task-execution.js';
 
-export const ACCOUNT_CLOSURE_HANDLERS: readonly AccountClosureHandler[] = [
-  accountSecurityClosureHandler,
-  taskExecutionClosureHandler,
-  crossTaskMemoryClosureHandler,
-  energyAstrologyProfileClosureHandler,
-  stockPreferenceProfileClosureHandler,
-  feedbackSupportClosureHandler,
-  externalNotificationsClosureHandler,
-  extensionSiteStatsClosureHandler,
-  extensionLoginCookiesClosureHandler,
-  paymentsEntitlementsClosureHandler,
-  partnerKycLedgerClosureHandler,
-  mediaAssetsClosureHandler,
-  analyticsLogsClosureHandler,
-];
+export interface AccountClosureHandlerBinding {
+  readonly categoryId: DataCategoryId;
+  readonly handlerRef: string;
+  readonly handler: AccountClosureHandler;
+}
+
+/** Source-owned bindings let release governance prove a route to the exact runtime handler. */
+const HANDLER_IMPLEMENTATIONS: Readonly<Record<DataCategoryId, AccountClosureHandler>> = {
+  account_security: accountSecurityClosureHandler,
+  task_execution: taskExecutionClosureHandler,
+  cross_task_memory: crossTaskMemoryClosureHandler,
+  energy_astrology_profile: energyAstrologyProfileClosureHandler,
+  stock_preference_profile: stockPreferenceProfileClosureHandler,
+  feedback_support: feedbackSupportClosureHandler,
+  external_notifications: externalNotificationsClosureHandler,
+  extension_site_stats: extensionSiteStatsClosureHandler,
+  extension_login_cookies: extensionLoginCookiesClosureHandler,
+  payments_entitlements: paymentsEntitlementsClosureHandler,
+  partner_kyc_ledger: partnerKycLedgerClosureHandler,
+  media_assets: mediaAssetsClosureHandler,
+  analytics_logs: analyticsLogsClosureHandler,
+};
+
+export const ACCOUNT_CLOSURE_HANDLER_BINDINGS: readonly AccountClosureHandlerBinding[] =
+  ACCOUNT_CLOSURE_HANDLER_METADATA.map((metadata) => ({
+    ...metadata,
+    handler: HANDLER_IMPLEMENTATIONS[metadata.categoryId],
+  }));
+
+export const ACCOUNT_CLOSURE_HANDLERS: readonly AccountClosureHandler[] =
+  ACCOUNT_CLOSURE_HANDLER_BINDINGS.map((binding) => binding.handler);
 
 export function assertAccountClosureHandlerContract(
   categoryIds: readonly string[],

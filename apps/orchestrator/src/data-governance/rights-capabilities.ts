@@ -26,12 +26,21 @@ export const rightsCapabilities: readonly RightsCapability[] = [
       ),
     },
     delete: {
-      status: 'manual',
-      manualEntrypoint: PRIVACY_EMAIL,
+      status: 'implemented',
+      handlerRef: 'apps/orchestrator/src/trpc/routers/account-closure.ts#accountClosureRouter',
       ...capability(
-        '身份核验后的账号关闭和可处理数据',
-        ['交易、审计或法律保留记录除外。'],
-        [source('apps/orchestrator/src/db/schema/users.ts', '账号数据由 users 表承载。')],
+        '强身份核验后进入 7 天冷静期的自助账号关闭',
+        [
+          '不提供完整个人数据导出。',
+          '必要的支付、争议、安全、KYC 和账本记录可能经最小化后受限保留。',
+          '无法远程清除其他设备、浏览器扩展或用户已下载的文件副本。',
+        ],
+        [
+          source(
+            'apps/orchestrator/src/trpc/routers/account-closure.ts',
+            '账号关闭路由提供预览、强验证、申请、状态、撤销和回执接口。',
+          ),
+        ],
       ),
     },
     correct: {
