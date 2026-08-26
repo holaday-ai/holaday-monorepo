@@ -13,6 +13,30 @@ const ACCOUNT_CLOSURE_RESET_TABLES = [
   'account_closure_requests',
 ];
 
+export function assertDestructiveTestDatabaseAllowed(
+  databaseUrl: string,
+  env: NodeJS.ProcessEnv = process.env,
+): void {
+  if (env.ALLOW_DESTRUCTIVE_TEST_DB_RESET !== '1') {
+    throw new Error(
+      'Destructive test database reset refused: set ALLOW_DESTRUCTIVE_TEST_DB_RESET=1 explicitly',
+    );
+  }
+
+  let databaseName = '';
+  try {
+    databaseName = decodeURIComponent(new URL(databaseUrl).pathname.slice(1));
+  } catch {
+    // Keep the error below credential-free. Never include the supplied URL.
+  }
+
+  if (!/_(?:test|integration)$/.test(databaseName)) {
+    throw new Error(
+      'Destructive test database reset refused: use a dedicated database ending in _test or _integration',
+    );
+  }
+}
+
 /**
  * Apply every numbered drizzle migration (drizzle/NNNN_*.sql) in order to
  * the configured DATABASE_URL. Resets tables named in 0000 first so reruns
@@ -23,6 +47,7 @@ const ACCOUNT_CLOSURE_RESET_TABLES = [
  * MariaDB where some of them are not accepted.
  */
 export async function applyMigrations(databaseUrl: string): Promise<void> {
+  assertDestructiveTestDatabaseAllowed(databaseUrl);
   const conn = await mysql.createConnection({ uri: databaseUrl, multipleStatements: true });
   try {
     const migrationsDir = resolve(__dirname, '../../drizzle');
