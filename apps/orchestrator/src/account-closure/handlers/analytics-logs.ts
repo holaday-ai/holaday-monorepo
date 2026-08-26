@@ -1,13 +1,15 @@
 import { sql } from 'drizzle-orm';
-import { createNoAccountAssociationHandler, readQueryCount } from '../handler-contract.js';
+import { createExternalRetentionHandler, readQueryCount } from '../handler-contract.js';
 
 /**
  * Existing energy analytics tables contain irreversible aggregates, anonymous
  * daily visitor hashes, and idempotency receipts. None maps a user to a
- * visitor. This probe fails closed if such a reversible account column lands;
- * it deliberately does not derive a new hash from the closure subject.
+ * visitor. This probe fails closed if such a reversible account column lands
+ * and deliberately does not derive a new hash from the closure subject.
+ * Process/operations logs remain an external retention surface, so a zero
+ * relational probe still blocks until that separate workflow is evidenced.
  */
-export const analyticsLogsClosureHandler = createNoAccountAssociationHandler(
+export const analyticsLogsClosureHandler = createExternalRetentionHandler(
   'analytics_logs',
   async (context) =>
     readQueryCount(

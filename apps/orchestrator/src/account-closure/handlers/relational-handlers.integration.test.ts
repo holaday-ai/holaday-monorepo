@@ -3,24 +3,44 @@ import { eq, sql } from 'drizzle-orm';
 import { pino } from 'pino';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { apiKeys } from '../../db/schema/api-keys.js';
+import { batchTaskItems, batchTasks } from '../../db/schema/batch-tasks.js';
+import { canaryResults } from '../../db/schema/canary-results.js';
+import { claimEvidenceLinks } from '../../db/schema/claim-evidence-links.js';
+import { claims } from '../../db/schema/claims.js';
 import {
   energyDailyMetrics,
   energyDailyVisitors,
   energyEventReceipts,
 } from '../../db/schema/energy-analytics.js';
+import { evidenceArtifacts } from '../../db/schema/evidence-artifacts.js';
 import { executionMemory } from '../../db/schema/execution-memory.js';
 import { executionStats } from '../../db/schema/execution-stats.js';
+import { explorationRuns } from '../../db/schema/exploration-runs.js';
 import { notificationChannels, notifications } from '../../db/schema/notifications.js';
+import { operationPathSteps } from '../../db/schema/operation-path-steps.js';
+import { operationPaths } from '../../db/schema/operation-paths.js';
 import { pendingCookies } from '../../db/schema/pending-cookies.js';
-import { plannedTasks } from '../../db/schema/planned-tasks.js';
+import {
+  plannedTaskItems,
+  plannedTaskOccurrenceOverrides,
+  plannedTaskRunItems,
+  plannedTaskRuns,
+  plannedTasks,
+} from '../../db/schema/planned-tasks.js';
+import { projects } from '../../db/schema/projects.js';
+import { scheduledTasks } from '../../db/schema/scheduled-tasks.js';
 import { sessions } from '../../db/schema/sessions.js';
+import { siteCapabilities } from '../../db/schema/site-capabilities.js';
+import { sites } from '../../db/schema/sites.js';
 import { stockDashboardSnapshots } from '../../db/schema/stock-dashboard-snapshots.js';
 import {
   stockPreferenceProfiles,
   stockPreferenceSignals,
 } from '../../db/schema/stock-preferences.js';
 import { stockRiskMonitors } from '../../db/schema/stock-risk-monitors.js';
+import { taskActionCaptures } from '../../db/schema/task-action-captures.js';
 import { taskEvents } from '../../db/schema/task-events.js';
+import { taskFiles } from '../../db/schema/task-files.js';
 import { taskSteps } from '../../db/schema/task-steps.js';
 import { tasks } from '../../db/schema/tasks.js';
 import { userMfaRecoveryCodes } from '../../db/schema/user-mfa-recovery-codes.js';
@@ -29,6 +49,7 @@ import { userSiteStats } from '../../db/schema/user-site-stats.js';
 import { users } from '../../db/schema/users.js';
 import { verificationCodes } from '../../db/schema/verification-codes.js';
 import { watchlists } from '../../db/schema/watchlists.js';
+import { webhookIdempotency } from '../../db/schema/webhook-idempotency.js';
 import type { StorageProvider } from '../../files/storage-provider.js';
 import type {
   AccountClosureHandler,
@@ -38,11 +59,25 @@ import type {
 } from '../handler-contract.js';
 import { getAccountClosureHandler } from '../handler-registry.js';
 
+interface RowRef {
+  id: number;
+  tableName: string;
+}
+
+interface TaskGraphFixture {
+  blockerRows: RowRef[];
+  deletedRows: RowRef[];
+  preservedRows: RowRef[];
+  sourceTaskExternalId: string;
+}
+
 describe.sequential('account closure relational handlers', () => {
   let cleanup: () => Promise<void> = async () => {};
   let db: typeof import('../../db/client.js').db;
   let target: { id: number; externalId: string; email: string };
   let other: { id: number; externalId: string; email: string };
+  let targetTaskGraph: TaskGraphFixture;
+  let otherTaskGraph: TaskGraphFixture;
 
   const storage = {
     pathFor: () => '',
@@ -69,8 +104,8 @@ describe.sequential('account closure relational handlers', () => {
     other = await createUser('other');
     await seedAccountSecurity(target, 101);
     await seedAccountSecurity(other, 1);
-    await seedTaskExecution(target, 101);
-    await seedTaskExecution(other, 1);
+    targetTaskGraph = await seedTaskExecution(target, 101);
+    otherTaskGraph = await seedTaskExecution(other, 1);
     await seedCrossTaskMemory(target, 101);
     await seedCrossTaskMemory(other, 1);
     await seedStockProfile(target, 101);
@@ -122,6 +157,19 @@ describe.sequential('account closure relational handlers', () => {
     });
   });
 
+  it('fails closed before task cleanup while Task 7 objects or cross-category children remain', async () => {
+    const handler = getAccountClosureHandler('task_execution');
+
+    await expect(handler.run(context(null))).rejects.toMatchObject({ code: 'HANDLER_DEFERRED' });
+    for (const row of targetTaskGraph.blockerRows) {
+      await db.execute(sql`DELETE FROM ${sql.identifier(row.tableName)} WHERE id = ${row.id}`);
+    }
+
+    // Stock monitors and notifications still own FK-bearing children. They
+    // must finish under their own governed categories before task parents.
+    await expect(handler.run(context(null))).rejects.toMatchObject({ code: 'HANDLER_DEFERRED' });
+  });
+
   it('deletes every existing relational category child-first without touching the other account or users', async () => {
     const categories = [
       'account_security',
@@ -137,18 +185,47 @@ describe.sequential('account closure relational handlers', () => {
       expect(result.processed).toBeGreaterThan(0);
     }
 
-    expect(await ownedCount('sessions', target.id)).toBe(0);
-    expect(await ownedCount('sessions', other.id)).toBe(1);
-    expect(await ownedCount('execution_memory', target.id)).toBe(0);
-    expect(await ownedCount('execution_memory', other.id)).toBe(1);
-    expect(await ownedCount('watchlists', target.id)).toBe(0);
-    expect(await ownedCount('watchlists', other.id)).toBe(1);
-    expect(await ownedCount('notifications', target.id)).toBe(0);
-    expect(await ownedCount('notifications', other.id)).toBe(1);
-    expect(await ownedCount('pending_cookies', target.id)).toBe(0);
-    expect(await ownedCount('pending_cookies', other.id)).toBe(1);
-    expect(await ownedCount('tasks', target.id)).toBe(0);
-    expect(await ownedCount('tasks', other.id)).toBe(1);
+    for (const tableName of [
+      'sessions',
+      'api_keys',
+      'user_mfa_recovery_codes',
+      'webhook_idempotency',
+      'user_profiles',
+      'execution_memory',
+      'execution_stats',
+      'stock_risk_monitors',
+      'stock_preference_signals',
+      'stock_preference_profiles',
+      'stock_dashboard_snapshots',
+      'watchlists',
+      'notifications',
+      'notification_channels',
+      'pending_cookies',
+      'batch_tasks',
+      'planned_tasks',
+      'scheduled_tasks',
+      'tasks',
+      'projects',
+    ]) {
+      expect(await ownedCount(tableName, target.id)).toBe(0);
+      expect(await ownedCount(tableName, other.id)).toBeGreaterThan(0);
+    }
+    expect(await emailOwnedCount('verification_codes', target.email)).toBe(0);
+    expect(await emailOwnedCount('verification_codes', other.email)).toBe(1);
+    for (const row of targetTaskGraph.deletedRows) {
+      expect(await rowExists(row), `target row survived: ${row.tableName}#${row.id}`).toBe(false);
+    }
+    for (const row of [
+      ...targetTaskGraph.preservedRows,
+      ...otherTaskGraph.blockerRows,
+      ...otherTaskGraph.deletedRows,
+      ...otherTaskGraph.preservedRows,
+    ]) {
+      expect(await rowExists(row), `other/shared row was deleted: ${row.tableName}#${row.id}`).toBe(
+        true,
+      );
+    }
+    expect(await pathMetadataSourceCount(targetTaskGraph.sourceTaskExternalId)).toBe(0);
     expect(await userExists(target.id)).toBe(true);
     expect(await userExists(other.id)).toBe(true);
 
@@ -161,16 +238,13 @@ describe.sequential('account closure relational handlers', () => {
     }
   });
 
-  it('uses explicit capability probes for non-persisted categories and preserves anonymous aggregates', async () => {
-    for (const categoryId of [
-      'energy_astrology_profile',
-      'feedback_support',
-      'analytics_logs',
-    ] as const) {
-      await expect(getAccountClosureHandler(categoryId).run(context(null))).resolves.toEqual({
-        kind: 'complete',
-        processed: 0,
-        retention: 'not_present',
+  it('keeps browser-only astrology separate but blocks external feedback and logs retention', async () => {
+    await expect(
+      getAccountClosureHandler('energy_astrology_profile').run(context(null)),
+    ).resolves.toEqual({ kind: 'complete', processed: 0, retention: 'not_present' });
+    for (const categoryId of ['feedback_support', 'analytics_logs'] as const) {
+      await expect(getAccountClosureHandler(categoryId).run(context(null))).rejects.toMatchObject({
+        code: 'EXTERNAL_RETENTION_REQUIRED',
       });
     }
 
@@ -258,15 +332,41 @@ describe.sequential('account closure relational handlers', () => {
       userId: user.id,
       occupationRaw: 'test-only',
     });
+    await db.insert(webhookIdempotency).values({
+      userId: user.id,
+      idempotencyKey: `task6-${user.id}`,
+      requestHash: `${user.id}`.padStart(64, '9'),
+      taskId: `tsk_webhook_${user.id}`,
+      responseJson: { private: `response-${user.id}` },
+      expiresAt: new Date('2026-08-27T00:00:00.000Z'),
+    });
   }
 
-  async function seedTaskExecution(user: typeof target, rows: number) {
+  async function seedTaskExecution(user: typeof target, rows: number): Promise<TaskGraphFixture> {
+    const deletedRows: RowRef[] = [];
+    const preservedRows: RowRef[] = [];
+    const blockerRows: RowRef[] = [];
+    const suffix = `t6_${user.id}`;
+
+    const [projectInsert] = await db.insert(projects).values({
+      externalId: `prj_${suffix}`,
+      userId: user.id,
+      name: 'Task 6 private project',
+    });
+    const projectId = Number(projectInsert.insertId);
+    deletedRows.push({ tableName: 'projects', id: projectId });
+
+    const sourceTaskExternalId = `tsk_${suffix}_0`;
     await db.insert(tasks).values(
       Array.from({ length: rows }, (_, index) => ({
-        externalId: `tsk_t6_${user.id}_${index}`,
+        externalId: `tsk_${suffix}_${index}`,
         userId: user.id,
+        projectId: index === 0 ? projectId : null,
         status: 'cancelled',
-        intent: `synthetic task ${index}`,
+        intent:
+          index === 0
+            ? `full private source intent for account ${user.id}`
+            : `synthetic task ${index}`,
       })),
     );
     const ownedTasks = await db
@@ -275,17 +375,360 @@ describe.sequential('account closure relational handlers', () => {
       .where(eq(tasks.userId, user.id));
     const firstTaskId = ownedTasks[0]?.id;
     if (!firstTaskId) throw new Error('expected seeded task');
-    await db.insert(taskSteps).values({
-      externalId: `step_t6_${user.id}`,
+    deletedRows.push({ tableName: 'tasks', id: firstTaskId });
+
+    const [stepInsert] = await db.insert(taskSteps).values({
+      externalId: `step_${suffix}`,
       taskId: firstTaskId,
       seq: 0,
       kind: 'test',
     });
-    await db.insert(taskEvents).values({
-      externalId: `evt_t6_${user.id}`,
+    deletedRows.push({ tableName: 'task_steps', id: Number(stepInsert.insertId) });
+    const [eventInsert] = await db.insert(taskEvents).values({
+      externalId: `evt_${suffix}`,
       taskId: firstTaskId,
       type: 'test',
     });
+    deletedRows.push({ tableName: 'task_events', id: Number(eventInsert.insertId) });
+    const [captureInsert] = await db.insert(taskActionCaptures).values({
+      externalId: `cap_${suffix}`,
+      taskId: firstTaskId,
+      actionIndex: 0,
+      stepType: 'click',
+      visibleText: 'private visible task content',
+    });
+    deletedRows.push({
+      tableName: 'task_action_captures',
+      id: Number(captureInsert.insertId),
+    });
+
+    const [claimArtifactInsert] = await db.insert(evidenceArtifacts).values({
+      externalId: `art_claim_${suffix}`,
+      ownerUserId: null,
+      artifactKind: 'html_snapshot',
+      purpose: 'test_fixture',
+      r2Bucket: 'task6-test',
+      r2Key: `claim/${suffix}`,
+      contentType: 'text/html',
+      sizeBytes: 1,
+      sha256: `${user.id}`.padStart(64, 'e'),
+      capturedAt: new Date('2026-08-26T00:00:00.000Z'),
+      collectorLane: 'test',
+    });
+    const claimArtifactId = Number(claimArtifactInsert.insertId);
+    preservedRows.push({ tableName: 'evidence_artifacts', id: claimArtifactId });
+    const [taskClaimInsert] = await db.insert(claims).values({
+      externalId: `clm_task_${suffix}`,
+      taskId: firstTaskId,
+      claimType: 'test',
+      subject: 'private subject',
+      predicate: 'contains',
+      objectText: 'private object',
+    });
+    const taskClaimId = Number(taskClaimInsert.insertId);
+    deletedRows.push({ tableName: 'claims', id: taskClaimId });
+    const [taskClaimLinkInsert] = await db.insert(claimEvidenceLinks).values({
+      claimId: taskClaimId,
+      artifactId: claimArtifactId,
+      quotedExcerpt: 'private quoted evidence',
+    });
+    deletedRows.push({
+      tableName: 'claim_evidence_links',
+      id: Number(taskClaimLinkInsert.insertId),
+    });
+
+    const [globalSiteInsert] = await db.insert(sites).values({
+      externalId: `site_global_${suffix}`,
+      ownerUserId: null,
+      canonicalDomain: `global-${user.id}.example.test`,
+      displayName: 'Shared site',
+      homepageUrl: `https://global-${user.id}.example.test/`,
+    });
+    const globalSiteId = Number(globalSiteInsert.insertId);
+    preservedRows.push({ tableName: 'sites', id: globalSiteId });
+    await db
+      .update(evidenceArtifacts)
+      .set({ siteId: globalSiteId, retentionPolicy: 'manual_hold' })
+      .where(eq(evidenceArtifacts.id, claimArtifactId));
+    const [globalCapabilityInsert] = await db.insert(siteCapabilities).values({
+      externalId: `scap_global_${suffix}`,
+      siteId: globalSiteId,
+      capabilityKey: 'test',
+      displayName: 'Shared capability',
+    });
+    const globalCapabilityId = Number(globalCapabilityInsert.insertId);
+    preservedRows.push({ tableName: 'site_capabilities', id: globalCapabilityId });
+    const [taskPathInsert] = await db.insert(operationPaths).values({
+      externalId: `path_task_${suffix}`,
+      siteId: globalSiteId,
+      capabilityId: globalCapabilityId,
+      version: 1,
+      sourceTaskId: firstTaskId,
+      metadataJson: {
+        sourceTaskId: firstTaskId,
+        sourceTaskExternalId,
+        sourceTaskIntent: `full private source intent for account ${user.id}`,
+      },
+    });
+    const taskPathId = Number(taskPathInsert.insertId);
+    deletedRows.push({ tableName: 'operation_paths', id: taskPathId });
+    const [taskPathStepInsert] = await db.insert(operationPathSteps).values({
+      pathId: taskPathId,
+      stepIndex: 0,
+      stepType: 'click',
+      intent: 'private derived step',
+    });
+    deletedRows.push({
+      tableName: 'operation_path_steps',
+      id: Number(taskPathStepInsert.insertId),
+    });
+    const [taskPathCanaryInsert] = await db.insert(canaryResults).values({
+      externalId: `canary_task_path_${suffix}`,
+      pathId: taskPathId,
+      status: 'passed',
+      evidenceSummaryJson: { private: 'task-derived canary evidence' },
+    });
+    deletedRows.push({ tableName: 'canary_results', id: Number(taskPathCanaryInsert.insertId) });
+
+    const [sharedPathInsert] = await db.insert(operationPaths).values({
+      externalId: `path_shared_${suffix}`,
+      siteId: globalSiteId,
+      capabilityId: globalCapabilityId,
+      version: 2,
+      metadataJson: { shared: true },
+    });
+    const sharedPathId = Number(sharedPathInsert.insertId);
+    preservedRows.push({ tableName: 'operation_paths', id: sharedPathId });
+    const [taskCanaryInsert] = await db.insert(canaryResults).values({
+      externalId: `canary_task_${suffix}`,
+      pathId: sharedPathId,
+      taskId: firstTaskId,
+      status: 'passed',
+    });
+    deletedRows.push({ tableName: 'canary_results', id: Number(taskCanaryInsert.insertId) });
+
+    const [privateSiteInsert] = await db.insert(sites).values({
+      externalId: `site_private_${suffix}`,
+      ownerUserId: user.id,
+      canonicalDomain: `private-${user.id}.example.test`,
+      displayName: 'Private site',
+      homepageUrl: `https://private-${user.id}.example.test/`,
+      metadataJson: { private: `site metadata ${user.id}` },
+    });
+    const privateSiteId = Number(privateSiteInsert.insertId);
+    deletedRows.push({ tableName: 'sites', id: privateSiteId });
+    const [privateCapabilityInsert] = await db.insert(siteCapabilities).values({
+      externalId: `scap_private_${suffix}`,
+      siteId: privateSiteId,
+      capabilityKey: 'private-test',
+      displayName: 'Private capability',
+      description: 'private capability description',
+    });
+    const privateCapabilityId = Number(privateCapabilityInsert.insertId);
+    deletedRows.push({ tableName: 'site_capabilities', id: privateCapabilityId });
+    const [privatePathInsert] = await db.insert(operationPaths).values({
+      externalId: `path_private_${suffix}`,
+      siteId: privateSiteId,
+      capabilityId: privateCapabilityId,
+      version: 1,
+      metadataJson: { private: `path metadata ${user.id}` },
+    });
+    const privatePathId = Number(privatePathInsert.insertId);
+    deletedRows.push({ tableName: 'operation_paths', id: privatePathId });
+    const [privatePathStepInsert] = await db.insert(operationPathSteps).values({
+      pathId: privatePathId,
+      stepIndex: 0,
+      stepType: 'type',
+      intent: 'private site step content',
+    });
+    const privatePathStepId = Number(privatePathStepInsert.insertId);
+    deletedRows.push({ tableName: 'operation_path_steps', id: privatePathStepId });
+    const [privateExplorationInsert] = await db.insert(explorationRuns).values({
+      externalId: `explore_private_${suffix}`,
+      siteId: privateSiteId,
+      triggerType: 'manual',
+      runnerType: 'test',
+      summary: 'private exploration summary',
+    });
+    const privateExplorationId = Number(privateExplorationInsert.insertId);
+    deletedRows.push({ tableName: 'exploration_runs', id: privateExplorationId });
+    const [privatePathCanaryInsert] = await db.insert(canaryResults).values({
+      externalId: `canary_private_path_${suffix}`,
+      pathId: privatePathId,
+      status: 'failed',
+      failureType: 'private-test',
+    });
+    deletedRows.push({
+      tableName: 'canary_results',
+      id: Number(privatePathCanaryInsert.insertId),
+    });
+    const [privateExplorationCanaryInsert] = await db.insert(canaryResults).values({
+      externalId: `canary_private_explore_${suffix}`,
+      pathId: sharedPathId,
+      explorationRunId: privateExplorationId,
+      status: 'passed',
+    });
+    deletedRows.push({
+      tableName: 'canary_results',
+      id: Number(privateExplorationCanaryInsert.insertId),
+    });
+
+    const [siteClaimInsert] = await db.insert(claims).values({
+      externalId: `clm_site_${suffix}`,
+      siteId: privateSiteId,
+      claimType: 'test',
+      subject: 'private site subject',
+      predicate: 'contains',
+      objectText: 'private site object',
+    });
+    const siteClaimId = Number(siteClaimInsert.insertId);
+    deletedRows.push({ tableName: 'claims', id: siteClaimId });
+    const [siteClaimLinkInsert] = await db.insert(claimEvidenceLinks).values({
+      claimId: siteClaimId,
+      artifactId: claimArtifactId,
+      supportType: 'site-supports',
+    });
+    deletedRows.push({
+      tableName: 'claim_evidence_links',
+      id: Number(siteClaimLinkInsert.insertId),
+    });
+    const [capabilityClaimInsert] = await db.insert(claims).values({
+      externalId: `clm_cap_${suffix}`,
+      capabilityId: privateCapabilityId,
+      claimType: 'test',
+      subject: 'private capability subject',
+      predicate: 'contains',
+      objectText: 'private capability object',
+    });
+    const capabilityClaimId = Number(capabilityClaimInsert.insertId);
+    deletedRows.push({ tableName: 'claims', id: capabilityClaimId });
+    const [capabilityClaimLinkInsert] = await db.insert(claimEvidenceLinks).values({
+      claimId: capabilityClaimId,
+      artifactId: claimArtifactId,
+      supportType: 'cap-supports',
+    });
+    deletedRows.push({
+      tableName: 'claim_evidence_links',
+      id: Number(capabilityClaimLinkInsert.insertId),
+    });
+
+    const [blockerArtifactInsert] = await db.insert(evidenceArtifacts).values({
+      externalId: `art_block_${suffix}`,
+      ownerUserId: user.id,
+      siteId: privateSiteId,
+      taskId: firstTaskId,
+      explorationRunId: privateExplorationId,
+      artifactKind: 'screenshot',
+      purpose: 'task_30d',
+      r2Bucket: 'task6-test',
+      r2Key: `blocker/${suffix}`,
+      contentType: 'image/png',
+      sizeBytes: 1,
+      sha256: `${user.id}`.padStart(64, 'f'),
+      capturedAt: new Date('2026-08-26T00:00:00.000Z'),
+      collectorLane: 'test',
+    });
+    const blockerArtifactId = Number(blockerArtifactInsert.insertId);
+    blockerRows.push({ tableName: 'evidence_artifacts', id: blockerArtifactId });
+    await db
+      .update(operationPathSteps)
+      .set({ screenshotAnchorId: blockerArtifactId })
+      .where(eq(operationPathSteps.id, privatePathStepId));
+    const [blockerFileInsert] = await db.insert(taskFiles).values({
+      externalId: `file_block_${suffix}`,
+      userId: user.id,
+      taskId: firstTaskId,
+      kind: 'input',
+      filename: 'private.txt',
+      mimetype: 'text/plain',
+      sizeBytes: 1,
+      storagePath: `task6/${suffix}/private.txt`,
+    });
+    blockerRows.push({ tableName: 'task_files', id: Number(blockerFileInsert.insertId) });
+
+    const [batchInsert] = await db.insert(batchTasks).values({
+      externalId: `batch_${suffix}`,
+      userId: user.id,
+      name: 'private batch',
+      status: 'cancelled',
+    });
+    const batchId = Number(batchInsert.insertId);
+    deletedRows.push({ tableName: 'batch_tasks', id: batchId });
+    const [batchItemInsert] = await db.insert(batchTaskItems).values({
+      externalId: `batch_item_${suffix}`,
+      batchId,
+      seq: 0,
+      prompt: 'private batch prompt',
+      status: 'cancelled',
+      taskId: firstTaskId,
+    });
+    deletedRows.push({ tableName: 'batch_task_items', id: Number(batchItemInsert.insertId) });
+
+    const [planInsert] = await db.insert(plannedTasks).values({
+      externalId: `plan_exec_${suffix}`,
+      userId: user.id,
+      title: 'private plan',
+      instruction: 'private planned instruction',
+      firstRunAt: new Date('2026-08-26T00:00:00.000Z'),
+      status: 'paused',
+    });
+    const planId = Number(planInsert.insertId);
+    deletedRows.push({ tableName: 'planned_tasks', id: planId });
+    const [planItemInsert] = await db.insert(plannedTaskItems).values({
+      externalId: `plan_item_${suffix}`,
+      plannedTaskId: planId,
+      seq: 0,
+      instruction: 'private planned item',
+    });
+    const planItemId = Number(planItemInsert.insertId);
+    deletedRows.push({ tableName: 'planned_task_items', id: planItemId });
+    const [overrideInsert] = await db.insert(plannedTaskOccurrenceOverrides).values({
+      externalId: `plan_override_${suffix}`,
+      plannedTaskId: planId,
+      originalScheduledFor: new Date('2026-08-26T01:00:00.000Z'),
+      action: 'skip',
+    });
+    deletedRows.push({
+      tableName: 'planned_task_occurrence_overrides',
+      id: Number(overrideInsert.insertId),
+    });
+    const [planRunInsert] = await db.insert(plannedTaskRuns).values({
+      externalId: `plan_run_${suffix}`,
+      plannedTaskId: planId,
+      title: 'private run',
+      scheduledFor: new Date('2026-08-26T01:00:00.000Z'),
+      seriesScheduledFor: new Date('2026-08-26T01:00:00.000Z'),
+      status: 'cancelled',
+      taskId: firstTaskId,
+      batchTaskId: batchId,
+    });
+    const planRunId = Number(planRunInsert.insertId);
+    deletedRows.push({ tableName: 'planned_task_runs', id: planRunId });
+    const [planRunItemInsert] = await db.insert(plannedTaskRunItems).values({
+      externalId: `plan_run_item_${suffix}`,
+      plannedTaskRunId: planRunId,
+      plannedTaskItemId: planItemId,
+      seq: 0,
+      instruction: 'private run item',
+      status: 'cancelled',
+      taskId: firstTaskId,
+    });
+    deletedRows.push({
+      tableName: 'planned_task_run_items',
+      id: Number(planRunItemInsert.insertId),
+    });
+
+    const [scheduledInsert] = await db.insert(scheduledTasks).values({
+      externalId: `scheduled_${suffix}`,
+      userId: user.id,
+      intent: 'private scheduled intent',
+      nextRunAt: new Date('2026-08-27T00:00:00.000Z'),
+      lastTaskId: firstTaskId,
+      status: 'paused',
+    });
+    deletedRows.push({ tableName: 'scheduled_tasks', id: Number(scheduledInsert.insertId) });
+
+    return { blockerRows, deletedRows, preservedRows, sourceTaskExternalId };
   }
 
   async function seedCrossTaskMemory(user: typeof target, rows: number) {
@@ -411,6 +854,13 @@ describe.sequential('account closure relational handlers', () => {
     return resultCount(result);
   }
 
+  async function emailOwnedCount(tableName: string, email: string): Promise<number> {
+    const result = await db.execute(
+      sql`SELECT COUNT(*) AS value FROM ${sql.identifier(tableName)} WHERE email = ${email}`,
+    );
+    return resultCount(result);
+  }
+
   async function userExists(userId: number): Promise<boolean> {
     const result = await db.execute(sql`SELECT COUNT(*) AS value FROM users WHERE id = ${userId}`);
     return resultCount(result) === 1;
@@ -421,6 +871,22 @@ describe.sequential('account closure relational handlers', () => {
       sql`SELECT COUNT(*) AS value FROM ${sql.identifier(tableName)}`,
     );
     return resultCount(result);
+  }
+
+  async function pathMetadataSourceCount(sourceTaskExternalId: string): Promise<number> {
+    const result = await db.execute(sql`
+      SELECT COUNT(*) AS value
+      FROM operation_paths
+      WHERE JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.sourceTaskExternalId')) = ${sourceTaskExternalId}
+    `);
+    return resultCount(result);
+  }
+
+  async function rowExists(row: RowRef): Promise<boolean> {
+    const result = await db.execute(
+      sql`SELECT COUNT(*) AS value FROM ${sql.identifier(row.tableName)} WHERE id = ${row.id}`,
+    );
+    return resultCount(result) === 1;
   }
 });
 

@@ -38,6 +38,7 @@ export interface AccountClosureHandler {
 export type ClosureHandlerErrorCode =
   | 'HANDLER_DEFERRED'
   | 'CAPABILITY_CHANGED'
+  | 'EXTERNAL_RETENTION_REQUIRED'
   | 'INVARIANT_VIOLATION';
 
 export class ClosureHandlerError extends Error {
@@ -120,6 +121,28 @@ export function createNoAccountAssociationHandler(
       }
       if (associations !== 0) throw new ClosureHandlerError('CAPABILITY_CHANGED');
       return { kind: 'complete', processed: 0, retention: 'not_present' };
+    },
+  };
+}
+
+/**
+ * Proves no relational association was added, then blocks until the
+ * separately governed external-retention workflow is complete.
+ */
+export function createExternalRetentionHandler(
+  categoryId: DataCategoryId,
+  countAssociations: (context: ClosureHandlerContext) => Promise<number>,
+): AccountClosureHandler {
+  return {
+    categoryId,
+    version: 1,
+    async run(context) {
+      const associations = await countAssociations(context);
+      if (!Number.isSafeInteger(associations) || associations < 0) {
+        throw new ClosureHandlerError('INVARIANT_VIOLATION');
+      }
+      if (associations !== 0) throw new ClosureHandlerError('CAPABILITY_CHANGED');
+      throw new ClosureHandlerError('EXTERNAL_RETENTION_REQUIRED');
     },
   };
 }
@@ -227,6 +250,53 @@ export function rowsOwnedThroughGrandparent(input: {
       return affectedRows(
         await context.db.execute(
           sql`DELETE child FROM ${child} AS child INNER JOIN ${parent} AS parent ON parent.${parentJoin} = child.${childParent} INNER JOIN ${ownerTable} AS owner_table ON owner_table.${ownerJoin} = parent.${parentOwner} WHERE owner_table.${ownerUser} = ${context.request.userId} AND child.id IN (${sql.join(
+            ids.map((id) => sql`${id}`),
+            sql`, `,
+          )})`,
+        ),
+      );
+    },
+  };
+}
+
+/** Child ownership proven through three relation hops to a user-owned root. */
+export function rowsOwnedThroughThreeParents(input: {
+  tableName: string;
+  parentTableName: string;
+  ancestorTableName: string;
+  ownerTableName: string;
+  childParentColumn: string;
+  parentAncestorColumn: string;
+  ancestorOwnerColumn: string;
+  parentJoinColumn?: string;
+  ancestorJoinColumn?: string;
+  ownerJoinColumn?: string;
+  ownerUserColumn?: string;
+}): RelationalDeleteTarget {
+  const child = identifier(input.tableName);
+  const parent = identifier(input.parentTableName);
+  const ancestor = identifier(input.ancestorTableName);
+  const ownerTable = identifier(input.ownerTableName);
+  const childParent = identifier(input.childParentColumn);
+  const parentAncestor = identifier(input.parentAncestorColumn);
+  const ancestorOwner = identifier(input.ancestorOwnerColumn);
+  const parentJoin = identifier(input.parentJoinColumn ?? 'id');
+  const ancestorJoin = identifier(input.ancestorJoinColumn ?? 'id');
+  const ownerJoin = identifier(input.ownerJoinColumn ?? 'id');
+  const ownerUser = identifier(input.ownerUserColumn ?? 'user_id');
+  return {
+    async selectOwnedIds(context, limit) {
+      return selectIds(
+        await context.db.execute(
+          sql`SELECT child.id FROM ${child} AS child INNER JOIN ${parent} AS parent ON parent.${parentJoin} = child.${childParent} INNER JOIN ${ancestor} AS ancestor ON ancestor.${ancestorJoin} = parent.${parentAncestor} INNER JOIN ${ownerTable} AS owner_table ON owner_table.${ownerJoin} = ancestor.${ancestorOwner} WHERE owner_table.${ownerUser} = ${context.request.userId} ORDER BY child.id ASC LIMIT ${limit}`,
+        ),
+      );
+    },
+    async deleteOwnedIds(context, ids) {
+      if (ids.length === 0) return 0;
+      return affectedRows(
+        await context.db.execute(
+          sql`DELETE child FROM ${child} AS child INNER JOIN ${parent} AS parent ON parent.${parentJoin} = child.${childParent} INNER JOIN ${ancestor} AS ancestor ON ancestor.${ancestorJoin} = parent.${parentAncestor} INNER JOIN ${ownerTable} AS owner_table ON owner_table.${ownerJoin} = ancestor.${ancestorOwner} WHERE owner_table.${ownerUser} = ${context.request.userId} AND child.id IN (${sql.join(
             ids.map((id) => sql`${id}`),
             sql`, `,
           )})`,
