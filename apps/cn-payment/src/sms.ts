@@ -12,6 +12,7 @@
  * (phone) operations, no shared mutable state besides the map.
  */
 
+import { randomInt } from 'node:crypto';
 import { createRequire } from 'node:module';
 import type { Logger } from 'pino';
 // SDK ships as CJS with `module.exports = { default: Client, ... }`.
@@ -26,14 +27,16 @@ import { SendSmsRequest } from '@alicloud/dysmsapi20170525/dist/models/SendSmsRe
 import * as OpenApi from '@alicloud/openapi-client';
 import type { Env } from './config/env.js';
 
-type DysmsapiCtor = new (config: InstanceType<typeof OpenApi.Config>) => {
+type DysmsapiCtor = new (
+  config: InstanceType<typeof OpenApi.Config>,
+) => {
   sendSms(req: InstanceType<typeof SendSmsRequest>): Promise<unknown>;
 };
 const dysmsapiModule: unknown = require('@alicloud/dysmsapi20170525');
 const Dysmsapi: DysmsapiCtor =
   typeof dysmsapiModule === 'function'
     ? (dysmsapiModule as DysmsapiCtor)
-    : ((dysmsapiModule as { default: DysmsapiCtor }).default);
+    : (dysmsapiModule as { default: DysmsapiCtor }).default;
 
 interface CodeEntry {
   code: string;
@@ -47,7 +50,18 @@ const COOLDOWN_MS = 60 * 1000;
 
 export type SmsSendResult =
   | { ok: true; cooldownMs: number }
-  | { ok: false; error: 'sms_not_configured' | 'invalid_phone' | 'too_frequent' | 'aliyun_error'; message?: string };
+  | {
+      ok: false;
+      error: 'sms_not_configured' | 'invalid_phone' | 'too_frequent' | 'aliyun_error';
+      message?: string;
+    };
+
+export type SmsDeliveryResult =
+  | { ok: true }
+  | {
+      ok: false;
+      error: 'sms_not_configured' | 'invalid_phone' | 'invalid_payload' | 'aliyun_error';
+    };
 
 export type SmsVerifyResult =
   | { ok: true; phone: string }
@@ -62,10 +76,7 @@ export class SmsAdapter {
     private readonly logger: Logger,
   ) {
     const ready =
-      env.ALIYUN_ACCESS_KEY_ID &&
-      env.ALIYUN_ACCESS_KEY_SECRET &&
-      env.ALIYUN_SMS_SIGN_NAME &&
-      env.ALIYUN_SMS_TEMPLATE_CODE;
+      env.ALIYUN_ACCESS_KEY_ID && env.ALIYUN_ACCESS_KEY_SECRET && env.ALIYUN_SMS_SIGN_NAME;
     if (!ready) {
       this.client = null;
       this.logger.warn(
@@ -84,13 +95,25 @@ export class SmsAdapter {
     });
     this.client = new Dysmsapi(config);
     this.logger.info(
-      { kind: 'sms', signName: env.ALIYUN_SMS_SIGN_NAME, templateCode: env.ALIYUN_SMS_TEMPLATE_CODE },
+      {
+        kind: 'sms',
+        signName: env.ALIYUN_SMS_SIGN_NAME,
+        templateCode: env.ALIYUN_SMS_TEMPLATE_CODE,
+      },
       'sms: adapter initialised',
     );
   }
 
   isReady(): boolean {
-    return this.client !== null;
+    return this.client !== null && Boolean(this.env.ALIYUN_SMS_TEMPLATE_CODE);
+  }
+
+  isAccountClosureReady(): boolean {
+    return (
+      this.client !== null &&
+      Boolean(this.env.ALIYUN_SMS_ACCOUNT_CLOSURE_VERIFY_TEMPLATE_CODE) &&
+      Boolean(this.env.ALIYUN_SMS_ACCOUNT_CLOSURE_COMPLETE_TEMPLATE_CODE)
+    );
   }
 
   /**
@@ -103,7 +126,7 @@ export class SmsAdapter {
     if (!/^1[3-9]\d{9}$/.test(phone)) {
       return { ok: false, error: 'invalid_phone' };
     }
-    if (!this.client) {
+    if (!this.client || !this.env.ALIYUN_SMS_TEMPLATE_CODE) {
       return { ok: false, error: 'sms_not_configured' };
     }
     this.gc();
@@ -111,7 +134,7 @@ export class SmsAdapter {
     if (existing && Date.now() - existing.sentAt < COOLDOWN_MS) {
       return { ok: false, error: 'too_frequent' };
     }
-    const code = String(Math.floor(100000 + Math.random() * 900000));
+    const code = randomInt(100_000, 1_000_000).toString();
     try {
       // sendSms returns { body: SendSmsResponseBody } where the SDK
       // normalises Aliyun's raw `Code`/`Message`/`BizId`/`RequestId`
@@ -138,7 +161,6 @@ export class SmsAdapter {
             kind: 'sms',
             phone: maskPhone(phone),
             apiCode: body.code,
-            apiMessage: body.message,
             requestId: body.requestId,
             signName: this.env.ALIYUN_SMS_SIGN_NAME,
             templateCode: this.env.ALIYUN_SMS_TEMPLATE_CODE,
@@ -148,31 +170,53 @@ export class SmsAdapter {
         return {
           ok: false,
           error: 'aliyun_error',
-          message: `${body.code ?? 'UNKNOWN'}: ${body.message ?? 'unknown error'}`,
         };
       }
       this.logger.info(
         { kind: 'sms', phone: maskPhone(phone), bizId: body.bizId, requestId: body.requestId },
         'sms: aliyun accepted (code=OK)',
       );
-    } catch (err) {
-      this.logger.error(
-        { kind: 'sms', err: err instanceof Error ? err.message : String(err), phone: maskPhone(phone) },
-        'sms: aliyun sendSms threw',
-      );
+    } catch {
+      this.logger.error({ kind: 'sms', phone: maskPhone(phone) }, 'sms: aliyun sendSms threw');
       return {
         ok: false,
         error: 'aliyun_error',
-        message: err instanceof Error ? err.message : String(err),
       };
     }
     const now = Date.now();
     this.codes.set(phone, { code, sentAt: now, expiresAt: now + TTL_MS });
-    this.logger.info(
-      { kind: 'sms', phone: maskPhone(phone) },
-      'sms: code dispatched',
-    );
+    this.logger.info({ kind: 'sms', phone: maskPhone(phone) }, 'sms: code dispatched');
     return { ok: true, cooldownMs: COOLDOWN_MS };
+  }
+
+  async sendAccountClosureCode(
+    rawPhone: string,
+    code: string,
+    action: 'begin' | 'cancel',
+  ): Promise<SmsDeliveryResult> {
+    const phone = rawPhone.trim();
+    if (!/^1[3-9]\d{9}$/.test(phone)) return { ok: false, error: 'invalid_phone' };
+    if (!/^\d{6}$/.test(code)) return { ok: false, error: 'invalid_payload' };
+    const templateCode = this.env.ALIYUN_SMS_ACCOUNT_CLOSURE_VERIFY_TEMPLATE_CODE;
+    if (!this.client || !templateCode) return { ok: false, error: 'sms_not_configured' };
+    return this.sendDelivery(phone, templateCode, {
+      code,
+      action: action === 'begin' ? '关闭账号' : '撤回账号关闭',
+    });
+  }
+
+  async sendAccountClosureComplete(
+    rawPhone: string,
+    receiptNumber: string,
+  ): Promise<SmsDeliveryResult> {
+    const phone = rawPhone.trim();
+    if (!/^1[3-9]\d{9}$/.test(phone)) return { ok: false, error: 'invalid_phone' };
+    if (receiptNumber.length < 1 || receiptNumber.length > 32) {
+      return { ok: false, error: 'invalid_payload' };
+    }
+    const templateCode = this.env.ALIYUN_SMS_ACCOUNT_CLOSURE_COMPLETE_TEMPLATE_CODE;
+    if (!this.client || !templateCode) return { ok: false, error: 'sms_not_configured' };
+    return this.sendDelivery(phone, templateCode, { receiptNumber });
   }
 
   /**
@@ -194,6 +238,48 @@ export class SmsAdapter {
     }
     this.codes.delete(phone);
     return { ok: true, phone };
+  }
+
+  private async sendDelivery(
+    phone: string,
+    templateCode: string,
+    templateParams: Record<string, string>,
+  ): Promise<SmsDeliveryResult> {
+    if (!this.client) return { ok: false, error: 'sms_not_configured' };
+    try {
+      const response = (await this.client.sendSms(
+        new SendSmsRequest({
+          phoneNumbers: phone,
+          signName: this.env.ALIYUN_SMS_SIGN_NAME,
+          templateCode,
+          templateParam: JSON.stringify(templateParams),
+        }),
+      )) as { body?: { code?: string; requestId?: string } };
+      if (response.body?.code !== 'OK') {
+        this.logger.error(
+          {
+            kind: 'account_closure_sms',
+            phone: maskPhone(phone),
+            apiCode: response.body?.code,
+            requestId: response.body?.requestId,
+            templateCode,
+          },
+          'sms: account closure delivery rejected',
+        );
+        return { ok: false, error: 'aliyun_error' };
+      }
+      this.logger.info(
+        { kind: 'account_closure_sms', phone: maskPhone(phone), templateCode },
+        'sms: account closure delivery accepted',
+      );
+      return { ok: true };
+    } catch {
+      this.logger.error(
+        { kind: 'account_closure_sms', phone: maskPhone(phone), templateCode },
+        'sms: account closure delivery failed',
+      );
+      return { ok: false, error: 'aliyun_error' };
+    }
   }
 
   /** Drop expired entries to keep the map bounded. */

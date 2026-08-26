@@ -18,6 +18,8 @@ const STREAM_TOKEN_TTL_SECONDS = 60;
 const STREAM_AUDIENCE = 'holaday-stream';
 const MFA_CHALLENGE_AUDIENCE = 'holaday-mfa-challenge';
 const MFA_CHALLENGE_TTL_SECONDS = 5 * 60;
+const ACCOUNT_CLOSURE_RECOVERY_AUDIENCE = 'account-closure-recovery';
+const ACCOUNT_CLOSURE_RECOVERY_TTL_SECONDS = 10 * 60;
 
 const key = new TextEncoder().encode(env.JWT_SECRET);
 
@@ -37,6 +39,61 @@ export interface StreamTokenClaims {
 export interface MfaChallengeClaims {
   sub: string;
   authVersion: number;
+}
+
+export interface AccountClosureRecoveryClaims {
+  sub: string;
+  requestId: string;
+  authVersion: number;
+  aud: 'account-closure-recovery';
+}
+
+export async function signAccountClosureRecoveryToken(
+  claims: Omit<AccountClosureRecoveryClaims, 'aud'>,
+): Promise<string> {
+  return new SignJWT({
+    purpose: 'account-closure-recovery',
+    requestId: claims.requestId,
+    authVersion: claims.authVersion,
+  })
+    .setProtectedHeader({ alg: ALGORITHM })
+    .setSubject(claims.sub)
+    .setIssuer(ISSUER)
+    .setAudience(ACCOUNT_CLOSURE_RECOVERY_AUDIENCE)
+    .setIssuedAt()
+    .setExpirationTime(`${ACCOUNT_CLOSURE_RECOVERY_TTL_SECONDS}s`)
+    .sign(key);
+}
+
+export async function verifyAccountClosureRecoveryToken(
+  token: string,
+): Promise<AccountClosureRecoveryClaims | null> {
+  try {
+    const { payload } = await jwtVerify(token, key, {
+      algorithms: [ALGORITHM],
+      issuer: ISSUER,
+      audience: ACCOUNT_CLOSURE_RECOVERY_AUDIENCE,
+    });
+    if (
+      payload.purpose !== 'account-closure-recovery' ||
+      typeof payload.sub !== 'string' ||
+      typeof payload.requestId !== 'string' ||
+      payload.requestId.length === 0 ||
+      typeof payload.authVersion !== 'number' ||
+      !Number.isInteger(payload.authVersion) ||
+      payload.authVersion < 0
+    ) {
+      return null;
+    }
+    return {
+      sub: payload.sub,
+      requestId: payload.requestId,
+      authVersion: payload.authVersion,
+      aud: ACCOUNT_CLOSURE_RECOVERY_AUDIENCE,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export async function signAccessToken(

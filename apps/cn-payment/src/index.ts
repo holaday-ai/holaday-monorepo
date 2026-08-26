@@ -89,7 +89,12 @@ async function main(): Promise<void> {
   //     raw JSON; parsing through express.json() would round-trip
   //     it through a JSON serializer with different whitespace,
   //     breaking the signature.
-  app.use(pinoHttp({ logger }));
+  app.use(
+    pinoHttp({
+      logger,
+      redact: ['req.headers.x-internal-secret'],
+    }),
+  );
   app.use('/payment/wechat/notify', express.text({ type: '*/*', limit: '64kb' }));
   app.use('/payment/alipay/notify', express.urlencoded({ extended: true, limit: '64kb' }));
   app.use(express.json({ limit: '64kb' }));
@@ -351,12 +356,73 @@ async function main(): Promise<void> {
   // VultrSync.smsLogin so the JWT signing stays on the orchestrator
   // (single source of truth for users + plan + token signing key).
   // ------------------------------------------------------------------
-  const SmsSendInput = z.object({
-    phone: z.string().regex(/^1[3-9]\d{9}$/),
+  const SmsSendInput = z
+    .object({
+      phone: z.string().regex(/^1[3-9]\d{9}$/),
+    })
+    .strict();
+  const SmsVerifyInput = z
+    .object({
+      phone: z.string().regex(/^1[3-9]\d{9}$/),
+      code: z.string().regex(/^\d{6}$/),
+    })
+    .strict();
+  const AccountClosureCodeInput = z
+    .object({
+      phone: z.string().regex(/^1[3-9]\d{9}$/),
+      code: z.string().regex(/^\d{6}$/),
+      action: z.enum(['begin', 'cancel']),
+    })
+    .strict();
+  const AccountClosureCompleteInput = z
+    .object({
+      phone: z.string().regex(/^1[3-9]\d{9}$/),
+      receiptNumber: z.string().trim().min(1).max(32),
+    })
+    .strict();
+
+  app.post('/api/internal/account-closure/code', async (req, res) => {
+    if (req.headers['x-internal-secret'] !== env.INTERNAL_SHARED_SECRET) {
+      res.status(401).json({ error: 'unauthorized' });
+      return;
+    }
+    const parse = AccountClosureCodeInput.safeParse(req.body);
+    if (!parse.success) {
+      res.status(400).json({ error: 'bad_request' });
+      return;
+    }
+    const result = await sms.sendAccountClosureCode(
+      parse.data.phone,
+      parse.data.code,
+      parse.data.action,
+    );
+    if (!result.ok) {
+      const status =
+        result.error === 'sms_not_configured' ? 503 : result.error === 'aliyun_error' ? 502 : 400;
+      res.status(status).json({ error: result.error });
+      return;
+    }
+    res.status(202).json({ ok: true });
   });
-  const SmsVerifyInput = z.object({
-    phone: z.string().regex(/^1[3-9]\d{9}$/),
-    code: z.string().regex(/^\d{6}$/),
+
+  app.post('/api/internal/account-closure/complete', async (req, res) => {
+    if (req.headers['x-internal-secret'] !== env.INTERNAL_SHARED_SECRET) {
+      res.status(401).json({ error: 'unauthorized' });
+      return;
+    }
+    const parse = AccountClosureCompleteInput.safeParse(req.body);
+    if (!parse.success) {
+      res.status(400).json({ error: 'bad_request' });
+      return;
+    }
+    const result = await sms.sendAccountClosureComplete(parse.data.phone, parse.data.receiptNumber);
+    if (!result.ok) {
+      const status =
+        result.error === 'sms_not_configured' ? 503 : result.error === 'aliyun_error' ? 502 : 400;
+      res.status(status).json({ error: result.error });
+      return;
+    }
+    res.status(202).json({ ok: true });
   });
 
   app.post('/api/sms/send', async (req, res) => {

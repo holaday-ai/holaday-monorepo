@@ -128,6 +128,11 @@ export class MfaService {
     return { accessToken: await issueAccess(row) };
   }
 
+  async verifyUserFactor(userExternalId: string, code: string): Promise<void> {
+    const row = await this.user(userExternalId);
+    await this.verifyFactor(row, code);
+  }
+
   async regenerateRecoveryCodes(
     externalId: string,
     code: string,

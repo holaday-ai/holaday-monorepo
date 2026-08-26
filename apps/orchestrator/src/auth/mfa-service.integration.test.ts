@@ -53,11 +53,18 @@ describe('MfaService', () => {
       recoveryCodesRemaining: 10,
     });
 
+    vi.setSystemTime(new Date(baseTime.getTime() + 30_000));
+    const directFactorCode = totpAt(setup.secret, Date.now());
+    await expect(mfa.verifyUserFactor(externalId, directFactorCode)).resolves.toBeUndefined();
+    await expect(mfa.verifyUserFactor(externalId, directFactorCode)).rejects.toMatchObject({
+      code: 'INVALID',
+    });
+
     const login = await new AuthService(db).login({ email, password: 'password-42' });
     expect(login).toMatchObject({ mfaRequired: true });
     if (!('mfaToken' in login)) throw new Error('expected MFA challenge');
 
-    vi.setSystemTime(new Date(baseTime.getTime() + 30_000));
+    vi.setSystemTime(new Date(baseTime.getTime() + 60_000));
     const loginCode = totpAt(setup.secret, Date.now());
     await expect(mfa.verifyChallenge(login.mfaToken, loginCode)).resolves.toHaveProperty(
       'accessToken',

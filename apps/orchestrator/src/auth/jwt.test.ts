@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 beforeAll(() => {
   process.env.JWT_SECRET ??= 'test-secret-must-be-at-least-32-characters-long-yes';
@@ -7,6 +7,10 @@ beforeAll(() => {
 });
 
 describe('JWT access tokens', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('round-trips a token (sign -> verify)', async () => {
     const { signAccessToken, verifyAccessToken } = await import('./jwt.js');
     const token = await signAccessToken({ sub: 'usr_abc123', plan: 'free' });
@@ -73,5 +77,52 @@ describe('JWT access tokens', () => {
     const { signAccessToken, verifyMfaChallengeToken } = await import('./jwt.js');
     const token = await signAccessToken({ sub: 'usr_regular', plan: 'free', authVersion: 0 });
     await expect(verifyMfaChallengeToken(token)).resolves.toBeNull();
+  });
+
+  it('keeps account-closure recovery credentials separate from access tokens', async () => {
+    const {
+      signAccountClosureRecoveryToken,
+      verifyAccessToken,
+      verifyAccountClosureRecoveryToken,
+    } = await import('./jwt.js');
+    const token = await signAccountClosureRecoveryToken({
+      sub: 'usr_closure_pending',
+      requestId: 'acl_req_123',
+      authVersion: 9,
+    });
+
+    await expect(verifyAccountClosureRecoveryToken(token)).resolves.toEqual({
+      sub: 'usr_closure_pending',
+      requestId: 'acl_req_123',
+      authVersion: 9,
+      aud: 'account-closure-recovery',
+    });
+    await expect(verifyAccessToken(token)).resolves.toBeNull();
+  });
+
+  it('rejects access and MFA tokens as account-closure recovery credentials', async () => {
+    const { signAccessToken, signMfaChallengeToken, verifyAccountClosureRecoveryToken } =
+      await import('./jwt.js');
+    const access = await signAccessToken({ sub: 'usr_active', plan: 'free', authVersion: 1 });
+    const mfa = await signMfaChallengeToken({ sub: 'usr_active', authVersion: 1 });
+
+    await expect(verifyAccountClosureRecoveryToken(access)).resolves.toBeNull();
+    await expect(verifyAccountClosureRecoveryToken(mfa)).resolves.toBeNull();
+  });
+
+  it('expires account-closure recovery credentials after ten minutes', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-26T00:00:00.000Z'));
+    const { signAccountClosureRecoveryToken, verifyAccountClosureRecoveryToken } = await import(
+      './jwt.js'
+    );
+    const token = await signAccountClosureRecoveryToken({
+      sub: 'usr_closure_pending',
+      requestId: 'acl_req_expiring',
+      authVersion: 2,
+    });
+
+    vi.setSystemTime(new Date('2026-08-26T00:10:01.000Z'));
+    await expect(verifyAccountClosureRecoveryToken(token)).resolves.toBeNull();
   });
 });

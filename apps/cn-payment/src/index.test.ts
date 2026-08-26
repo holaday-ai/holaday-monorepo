@@ -1,6 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { app, routes, syncConfirmSpy, wechatCreateSpy, wechatNotifySpy } = vi.hoisted(() => {
+const {
+  app,
+  routes,
+  smsClosureCodeSpy,
+  smsClosureCompleteSpy,
+  smsSendCodeSpy,
+  syncConfirmSpy,
+  wechatCreateSpy,
+  wechatNotifySpy,
+} = vi.hoisted(() => {
   const routes = new Map<string, (req: unknown, res: unknown) => unknown>();
   const app = {
     use: vi.fn(),
@@ -18,6 +27,9 @@ const { app, routes, syncConfirmSpy, wechatCreateSpy, wechatNotifySpy } = vi.hoi
   return {
     app,
     routes,
+    smsClosureCodeSpy: vi.fn(async () => ({ ok: true })),
+    smsClosureCompleteSpy: vi.fn(async () => ({ ok: true })),
+    smsSendCodeSpy: vi.fn(async () => ({ ok: true, cooldownMs: 60_000 })),
     syncConfirmSpy: vi.fn<() => Promise<{ ok: true } | { ok: false; reason: string }>>(
       async () => ({ ok: true }),
     ),
@@ -90,8 +102,10 @@ vi.mock('./alipay.js', () => ({
 vi.mock('./sms.js', () => ({
   SmsAdapter: vi.fn(() => ({
     isReady: vi.fn(() => true),
-    sendCode: vi.fn(),
+    sendCode: smsSendCodeSpy,
     verifyCode: vi.fn(),
+    sendAccountClosureCode: smsClosureCodeSpy,
+    sendAccountClosureComplete: smsClosureCompleteSpy,
   })),
 }));
 
@@ -231,5 +245,90 @@ describe('CN first-month qualification propagation', () => {
       code: 'FAIL',
       message: 'verification failed',
     });
+  });
+});
+
+describe('account-closure SMS routes', () => {
+  beforeEach(() => {
+    smsClosureCodeSpy.mockClear();
+    smsClosureCompleteSpy.mockClear();
+    smsSendCodeSpy.mockClear();
+  });
+
+  it.each([undefined, 'wrong-secret'])(
+    'rejects closure-code delivery with secret %s',
+    async (secret) => {
+      const handler = routes.get('POST /api/internal/account-closure/code');
+      if (!handler) throw new Error('closure code route was not registered');
+      const { response, state } = makeResponse();
+
+      await handler(
+        {
+          headers: secret === undefined ? {} : { 'x-internal-secret': secret },
+          body: { phone: '13800138000', code: '482901', action: 'begin' },
+        },
+        response,
+      );
+
+      expect(state).toEqual({ status: 401, body: { error: 'unauthorized' } });
+      expect(smsClosureCodeSpy).not.toHaveBeenCalled();
+    },
+  );
+
+  it('accepts an authenticated, strictly-shaped closure-code delivery request', async () => {
+    const handler = routes.get('POST /api/internal/account-closure/code');
+    if (!handler) throw new Error('closure code route was not registered');
+    const { response, state } = makeResponse();
+
+    await handler(
+      {
+        headers: { 'x-internal-secret': 'cn-test-secret' },
+        body: { phone: '13800138000', code: '482901', action: 'cancel' },
+      },
+      response,
+    );
+
+    expect(state).toEqual({ status: 202, body: { ok: true } });
+    expect(smsClosureCodeSpy).toHaveBeenCalledWith('13800138000', '482901', 'cancel');
+  });
+
+  it('protects completion-receipt delivery with the same internal secret', async () => {
+    const handler = routes.get('POST /api/internal/account-closure/complete');
+    if (!handler) throw new Error('closure completion route was not registered');
+    const unauthorized = makeResponse();
+    await handler(
+      { headers: {}, body: { phone: '13800138000', receiptNumber: 'ACL-RCPT-1' } },
+      unauthorized.response,
+    );
+    expect(unauthorized.state.status).toBe(401);
+
+    const accepted = makeResponse();
+    await handler(
+      {
+        headers: { 'x-internal-secret': 'cn-test-secret' },
+        body: { phone: '13800138000', receiptNumber: 'ACL-RCPT-1' },
+      },
+      accepted.response,
+    );
+    expect(accepted.state).toEqual({ status: 202, body: { ok: true } });
+    expect(smsClosureCompleteSpy).toHaveBeenCalledWith('13800138000', 'ACL-RCPT-1');
+  });
+
+  it('rejects attempts to choose a closure action or code through the public send route', async () => {
+    const handler = routes.get('POST /api/sms/send');
+    if (!handler) throw new Error('public SMS send route was not registered');
+    const { response, state } = makeResponse();
+
+    await handler(
+      {
+        headers: {},
+        body: { phone: '13800138000', code: '482901', action: 'begin' },
+      },
+      response,
+    );
+
+    expect(state).toEqual({ status: 400, body: { error: 'invalid_phone' } });
+    expect(smsSendCodeSpy).not.toHaveBeenCalled();
+    expect([...routes.keys()]).not.toContain('POST /api/sms/account-closure/verify');
   });
 });
