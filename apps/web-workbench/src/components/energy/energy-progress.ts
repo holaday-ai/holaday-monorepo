@@ -431,8 +431,19 @@ export function clearAllEnergyProgressForCurrentDevice(): void {
   previewProgressByWindow.delete(window);
   scopedProgressByWindow.delete(window);
   const keys: string[] = [];
-  for (let index = 0; index < window.localStorage.length; index += 1) {
-    const key = window.localStorage.key(index);
+  let length = 0;
+  try {
+    length = window.localStorage.length;
+  } catch {
+    return;
+  }
+  for (let index = 0; index < length; index += 1) {
+    let key: string | null = null;
+    try {
+      key = window.localStorage.key(index);
+    } catch {
+      continue;
+    }
     if (
       key &&
       [STORAGE_PREFIX, V3_STORAGE_PREFIX, V2_STORAGE_PREFIX, LEGACY_STORAGE_PREFIX].some((prefix) =>
@@ -442,7 +453,13 @@ export function clearAllEnergyProgressForCurrentDevice(): void {
       keys.push(key);
     }
   }
-  for (const key of keys) window.localStorage.removeItem(key);
+  for (const key of keys) {
+    try {
+      window.localStorage.removeItem(key);
+    } catch {
+      // Storage cleanup is best effort on privacy-restricted browsers.
+    }
+  }
 }
 
 export function recordEnergyCompletion(

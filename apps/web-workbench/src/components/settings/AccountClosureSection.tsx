@@ -104,8 +104,8 @@ export function AccountClosureSection(): JSX.Element {
           noAutomaticRefund: true,
         },
       });
-      clearCurrentDeviceClosureData();
       setClosureRecovery(result.recoveryToken);
+      clearCurrentDeviceClosureData();
       navigate('/account/closure-recovery', { replace: true });
     } catch {
       submittedRef.current = false;

@@ -98,6 +98,28 @@ function memoryStorage(): Storage {
   };
 }
 
+function faultingStorage(fault: 'length' | 'key' | 'removeItem'): Storage {
+  const storage = memoryStorage();
+  storage.setItem('holaday.cosmic.profile.v1.usr_1', 'private-profile');
+  return {
+    get length() {
+      if (fault === 'length') throw new Error('storage length unavailable');
+      return storage.length;
+    },
+    clear: () => storage.clear(),
+    getItem: (key) => storage.getItem(key),
+    key: (index) => {
+      if (fault === 'key') throw new Error('storage key unavailable');
+      return storage.key(index);
+    },
+    removeItem: (key) => {
+      if (fault === 'removeItem') throw new Error('storage removal unavailable');
+      storage.removeItem(key);
+    },
+    setItem: (key, value) => storage.setItem(key, value),
+  };
+}
+
 describe('AccountClosureRecoveryPage', () => {
   it('shows the exact deadline, countdown, receipt, plan expiry, and precise restoration promise', async () => {
     renderRecovery();
@@ -177,6 +199,18 @@ describe('AccountClosureRecoveryPage', () => {
     expect(
       screen.getByText(/无法远程清除其他设备、浏览器扩展、已下载文件或其他本地副本/),
     ).toBeTruthy();
+  });
+
+  it('keeps manual cleanup usable when browser storage enumeration fails', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    renderRecovery();
+    await screen.findByRole('heading', { name: '账号关闭冷静期' });
+    vi.stubGlobal('localStorage', faultingStorage('key'));
+
+    await user.click(screen.getByRole('button', { name: '立即清除本机资料' }));
+
+    expect(screen.getByRole('status').textContent).toMatch(/已清除当前浏览器/);
+    expect(screen.getByRole('heading', { name: '账号关闭冷静期' })).toBeTruthy();
   });
 
   it('shows only a generic error and moves focus to it', async () => {

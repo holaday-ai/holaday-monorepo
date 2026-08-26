@@ -904,8 +904,9 @@ describe('selectTask detail hydration', () => {
     });
     expect(pending?.taskId).toMatch(/^local_pending_/);
     expect(useTaskStore.getState().selectedTaskId).toBeNull();
+    if (!pending) throw new Error('Expected a local pending task');
 
-    useTaskStore.getState().selectTask(pending!.taskId, 'ui');
+    useTaskStore.getState().selectTask(pending.taskId, 'ui');
     expect(useTaskStore.getState().selectedTaskId).toBeNull();
 
     resolveCreate({
@@ -1463,6 +1464,86 @@ describe('loadMoreTasks', () => {
       intent: '未命名任务',
       status: 'unknown',
     });
+  });
+});
+
+describe('reset session generation', () => {
+  it('does not let a deferred detail response repopulate tasks after reset', async () => {
+    const pending = deferred<unknown>();
+    detailQuery.mockReturnValueOnce(pending.promise as never);
+    useTaskStore.setState({ tasks: [task({ taskId: 'tsk_old_session' })] });
+
+    useTaskStore.getState().selectTask('tsk_old_session', 'ui');
+    useTaskStore.getState().reset();
+    pending.resolve({
+      intent: 'private old task',
+      title: null,
+      status: 'completed',
+      createdAt: '2026-08-26T00:00:00.000Z',
+      steps: [],
+      result: { summary: 'private old result' },
+    });
+    await flushPromises();
+
+    expect(useTaskStore.getState().tasks).toEqual([]);
+    expect(useTaskStore.getState().stepsByTask).toEqual({});
+    expect(useTaskStore.getState().error).toBeNull();
+  });
+
+  it('does not let a deferred first page repopulate tasks after reset', async () => {
+    const pending = deferred<unknown>();
+    listQuery.mockReturnValueOnce(pending.promise as never);
+
+    const refresh = useTaskStore.getState().refreshTaskList();
+    useTaskStore.getState().reset();
+    pending.resolve({
+      tasks: [taskRow({ taskId: 'tsk_old_first_page', status: 'completed' })],
+      nextCursor: null,
+    });
+    await refresh;
+
+    expect(useTaskStore.getState().tasks).toEqual([]);
+    expect(useTaskStore.getState().loading).toBe(false);
+    expect(useTaskStore.getState().error).toBeNull();
+  });
+
+  it('does not let deferred pagination append tasks after reset', async () => {
+    const pending = deferred<unknown>();
+    listQuery.mockReturnValueOnce(pending.promise as never);
+    useTaskStore.setState({
+      tasks: [task({ taskId: 'tsk_old_first_page' })],
+      tasksCursor: 51,
+      tasksHasMore: true,
+    });
+
+    const loadMore = useTaskStore.getState().loadMoreTasks();
+    useTaskStore.getState().reset();
+    pending.resolve({
+      tasks: [taskRow({ taskId: 'tsk_old_second_page', status: 'completed' })],
+      nextCursor: null,
+    });
+    await loadMore;
+
+    expect(useTaskStore.getState().tasks).toEqual([]);
+    expect(useTaskStore.getState().loadingMore).toBe(false);
+    expect(useTaskStore.getState().error).toBeNull();
+  });
+
+  it('does not let deferred task creation navigate or repopulate after reset', async () => {
+    const pending = deferred<unknown>();
+    const navigate = vi.fn();
+    createMutate.mockReturnValueOnce(pending.promise as never);
+    listQuery.mockReturnValueOnce(new Promise(() => {}) as never);
+    setStoreNavigate(navigate);
+
+    const create = useTaskStore.getState().createTask('private old intent', []);
+    useTaskStore.getState().reset();
+    pending.resolve({ taskId: 'tsk_old_created', status: 'executing' });
+    await create;
+
+    expect(useTaskStore.getState().tasks).toEqual([]);
+    expect(useTaskStore.getState().selectedTaskId).toBeNull();
+    expect(navigate).not.toHaveBeenCalled();
   });
 });
 
@@ -2935,4 +3016,12 @@ function taskRow(overrides: Record<string, unknown> & { taskId: string }): never
     failureLevel: null,
     ...overrides,
   } as never;
+}
+
+function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
 }

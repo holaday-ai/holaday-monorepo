@@ -93,6 +93,17 @@ describe('account closure recovery state', () => {
     expect(useTaskStore.getState().tasks).toEqual([]);
     expect(readEnergyProgress('usr_1').completedDates).toEqual([]);
   });
+
+  it.each(['length', 'key', 'removeItem'] as const)(
+    'never throws when browser Storage.%s fails during best-effort cleanup',
+    (fault) => {
+      vi.stubGlobal('localStorage', faultingStorage(fault));
+      vi.stubGlobal('sessionStorage', faultingStorage(fault));
+
+      expect(() => clearCurrentDeviceClosureData()).not.toThrow();
+      expect(useTaskStore.getState().tasks).toEqual([]);
+    },
+  );
 });
 
 function memoryStorage(): Storage {
@@ -106,5 +117,29 @@ function memoryStorage(): Storage {
     key: (index) => [...values.keys()][index] ?? null,
     removeItem: (key) => values.delete(key),
     setItem: (key, value) => values.set(key, value),
+  };
+}
+
+function faultingStorage(fault: 'length' | 'key' | 'removeItem'): Storage {
+  const storage = memoryStorage();
+  storage.setItem('holaday.cosmic.profile.v1.usr_1', 'private-profile');
+  storage.setItem('holaday.energy.progress.v4:usr_1', 'private-progress');
+  storage.setItem('holaday.mfa_challenge', 'mfa-token');
+  return {
+    get length() {
+      if (fault === 'length') throw new Error('storage length unavailable');
+      return storage.length;
+    },
+    clear: () => storage.clear(),
+    getItem: (key) => storage.getItem(key),
+    key: (index) => {
+      if (fault === 'key') throw new Error('storage key unavailable');
+      return storage.key(index);
+    },
+    removeItem: (key) => {
+      if (fault === 'removeItem') throw new Error('storage removal unavailable');
+      storage.removeItem(key);
+    },
+    setItem: (key, value) => storage.setItem(key, value),
   };
 }

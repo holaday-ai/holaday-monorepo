@@ -164,6 +164,26 @@ describe('AccountClosureSection', () => {
     expect(screen.getByLabelText('当前位置').textContent).toBe('/account/closure-recovery');
   });
 
+  it('hands off the recovery credential even when best-effort local cleanup fails', async () => {
+    const user = userEvent.setup();
+    renderSection();
+
+    await user.click(screen.getByRole('button', { name: '查看关闭影响' }));
+    await user.click(await screen.findByRole('button', { name: '继续' }));
+    for (const checkbox of screen.getAllByRole('checkbox')) await user.click(checkbox);
+    await user.click(screen.getByRole('button', { name: '继续验证' }));
+    await user.click(screen.getByRole('button', { name: '发送验证码' }));
+    await user.type(screen.getByLabelText('6 位验证码'), '482901');
+    await user.type(screen.getByLabelText('MFA 动态码或恢复码'), '123456');
+    vi.stubGlobal('localStorage', faultingStorage('length'));
+
+    await user.click(screen.getByRole('button', { name: '确认关闭账号' }));
+
+    await waitFor(() => expect(trpcMocks.begin).toHaveBeenCalledOnce());
+    expect(window.sessionStorage.getItem('holaday.closure_recovery')).toBe('recovery-only-token');
+    expect(screen.getByLabelText('当前位置').textContent).toBe('/account/closure-recovery');
+  });
+
   it('traps keyboard focus, labels its icon-only close control, and focuses a generic error', async () => {
     const user = userEvent.setup();
     renderSection();
@@ -208,5 +228,26 @@ function memoryStorage(): Storage {
     key: (index) => [...values.keys()][index] ?? null,
     removeItem: (key) => values.delete(key),
     setItem: (key, value) => values.set(key, value),
+  };
+}
+
+function faultingStorage(fault: 'length' | 'key' | 'removeItem'): Storage {
+  const storage = memoryStorage();
+  return {
+    get length() {
+      if (fault === 'length') throw new Error('storage length unavailable');
+      return storage.length;
+    },
+    clear: () => storage.clear(),
+    getItem: (key) => storage.getItem(key),
+    key: (index) => {
+      if (fault === 'key') throw new Error('storage key unavailable');
+      return storage.key(index);
+    },
+    removeItem: (key) => {
+      if (fault === 'removeItem') throw new Error('storage removal unavailable');
+      storage.removeItem(key);
+    },
+    setItem: (key, value) => storage.setItem(key, value),
   };
 }

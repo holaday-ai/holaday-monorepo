@@ -370,11 +370,28 @@ function profileStorageKey(storageScope?: string | null): string {
 
 function removeStorageKeysWithPrefix(storage: Storage, prefix: string): void {
   const keys: string[] = [];
-  for (let index = 0; index < storage.length; index += 1) {
-    const key = storage.key(index);
+  let length = 0;
+  try {
+    length = storage.length;
+  } catch {
+    return;
+  }
+  for (let index = 0; index < length; index += 1) {
+    let key: string | null = null;
+    try {
+      key = storage.key(index);
+    } catch {
+      continue;
+    }
     if (key === prefix || key?.startsWith(`${prefix}.`)) keys.push(key);
   }
-  for (const key of keys) storage.removeItem(key);
+  for (const key of keys) {
+    try {
+      storage.removeItem(key);
+    } catch {
+      // Storage cleanup is best effort on privacy-restricted browsers.
+    }
+  }
 }
 
 function buildWeek(seed: number): AstroDay[] {

@@ -76,22 +76,47 @@ export function closureCountdownLabel(graceEndsAt: string, now = new Date()): st
 }
 
 export function clearCurrentDeviceClosureData(): void {
-  clearAccessToken();
-  clearMfaChallenge();
-  disconnect();
-  useTaskStore.getState().reset();
-  clearAllAstroProfilesForCurrentDevice();
-  clearAllEnergyProgressForCurrentDevice();
-  removeSessionDataExceptRecovery();
+  runBestEffort(clearAccessToken);
+  runBestEffort(clearMfaChallenge);
+  runBestEffort(disconnect);
+  runBestEffort(() => useTaskStore.getState().reset());
+  runBestEffort(clearAllAstroProfilesForCurrentDevice);
+  runBestEffort(clearAllEnergyProgressForCurrentDevice);
+  runBestEffort(removeSessionDataExceptRecovery);
 }
 
 function removeSessionDataExceptRecovery(): void {
   if (typeof window === 'undefined') return;
   const recoveryKey = 'holaday.closure_recovery';
   const keys: string[] = [];
-  for (let index = 0; index < window.sessionStorage.length; index += 1) {
-    const key = window.sessionStorage.key(index);
+  let length = 0;
+  try {
+    length = window.sessionStorage.length;
+  } catch {
+    return;
+  }
+  for (let index = 0; index < length; index += 1) {
+    let key: string | null = null;
+    try {
+      key = window.sessionStorage.key(index);
+    } catch {
+      continue;
+    }
     if (key && key !== recoveryKey) keys.push(key);
   }
-  for (const key of keys) window.sessionStorage.removeItem(key);
+  for (const key of keys) {
+    try {
+      window.sessionStorage.removeItem(key);
+    } catch {
+      // Best effort: an unavailable Storage entry must not block recovery handoff.
+    }
+  }
+}
+
+function runBestEffort(action: () => void): void {
+  try {
+    action();
+  } catch {
+    // Local cleanup cannot be a prerequisite for the server-owned recovery flow.
+  }
 }
