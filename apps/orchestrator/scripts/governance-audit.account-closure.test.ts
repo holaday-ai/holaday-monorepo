@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { ACCOUNT_CLOSURE_HANDLER_BINDINGS } from '../src/account-closure/handler-registry.js';
+import { createDeferredClosureHandler } from '../src/account-closure/handler-contract.js';
+import {
+  ACCOUNT_CLOSURE_HANDLERS,
+  ACCOUNT_CLOSURE_HANDLER_BINDINGS,
+} from '../src/account-closure/handler-registry.js';
 import { rightsCapabilities } from '../src/data-governance/rights-capabilities.js';
 import {
   ACCOUNT_CLOSURE_GOVERNANCE_DECLARATIONS,
@@ -11,6 +15,7 @@ function liveInput() {
   return {
     declarations: ACCOUNT_CLOSURE_GOVERNANCE_DECLARATIONS,
     handlerBindings: ACCOUNT_CLOSURE_HANDLER_BINDINGS,
+    runtimeHandlers: ACCOUNT_CLOSURE_HANDLERS,
     receiptFields: ACCOUNT_CLOSURE_PUBLIC_RECEIPT_FIELDS,
     rightsCapabilities,
   };
@@ -30,16 +35,23 @@ describe('account closure governance release audit', () => {
       new Set(ACCOUNT_CLOSURE_GOVERNANCE_DECLARATIONS.map((item) => item.categoryId)).size,
     ).toBe(13);
     for (const declaration of ACCOUNT_CLOSURE_GOVERNANCE_DECLARATIONS) {
-      expect(declaration.retentionModes.length).toBeGreaterThan(0);
+      expect(declaration).not.toHaveProperty('retentionModes');
       expect(declaration.testRef).toMatch(/\.test\.ts$/);
+    }
+    for (const categoryId of ['payments_entitlements', 'partner_kyc_ledger']) {
+      expect(
+        ACCOUNT_CLOSURE_GOVERNANCE_DECLARATIONS.find(
+          (declaration) => declaration.categoryId === categoryId,
+        )?.testRef,
+      ).toBe('apps/orchestrator/src/account-closure/tombstone-service.integration.test.ts');
     }
   });
 
-  it('fails category/handler mismatches, duplicate ids, and missing retention or test evidence', () => {
+  it('fails category/handler mismatches, duplicate ids, and missing test evidence', () => {
     const [first, second, ...rest] = ACCOUNT_CLOSURE_GOVERNANCE_DECLARATIONS;
     if (!first || !second) throw new Error('Expected closure governance fixtures');
     const malformed = [
-      { ...first, handlerRef: second.handlerRef, retentionModes: [], testRef: '' },
+      { ...first, handlerRef: second.handlerRef, testRef: '' },
       { ...first },
       ...rest,
     ];
@@ -53,9 +65,26 @@ describe('account closure governance release audit', () => {
       expect.arrayContaining([
         'closure_handler_category_mismatch',
         'duplicate_id',
-        'closure_retention_missing',
         'closure_test_missing',
       ]),
+    );
+  });
+
+  it('rejects deferred capability and a binding that is not the exact runtime handler', () => {
+    const firstBinding = ACCOUNT_CLOSURE_HANDLER_BINDINGS[0];
+    if (!firstBinding) throw new Error('Expected closure handler binding');
+    const deferred = createDeferredClosureHandler(firstBinding.categoryId);
+    const poisonedBindings = ACCOUNT_CLOSURE_HANDLER_BINDINGS.map((binding) =>
+      binding.categoryId === firstBinding.categoryId ? { ...binding, handler: deferred } : binding,
+    );
+
+    expect(
+      errorCodes({
+        ...liveInput(),
+        handlerBindings: poisonedBindings,
+      }),
+    ).toEqual(
+      expect.arrayContaining(['closure_handler_category_mismatch', 'closure_retention_missing']),
     );
   });
 

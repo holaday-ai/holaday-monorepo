@@ -126,16 +126,23 @@ export const dataCategories: readonly DataCategoryDefinition[] = [
     id: 'feedback_support',
     displayName: '反馈与支持',
     description: '用户主动提交以接收反馈、定位问题并提供支持的数据。',
-    dataElements: ['自由文本', '账号邮箱', '账号标识', 'User-Agent', '可选的关联任务标识'],
+    dataElements: ['自由文本', '可选上下文', 'User-Agent', '随机反馈编号', '账号关联'],
     sources: ['用户主动提交反馈'],
     purposes: ['接收反馈、定位问题并提供支持'],
     sensitivity: 'sensitive',
-    storageLocations: ['HOLA DAY 反馈与服务日志存储'],
+    storageLocations: ['HOLA DAY 受治理反馈表与最小化投递状态日志'],
     processorIds: ['holaday_internal', 'resend'],
     retentionPolicyId: 'feedback_purpose_bound',
     rightsCapabilityId: 'feedback_manual_request',
     evidence: [
-      source('apps/orchestrator/src/trpc/routers/feedback.ts', '反馈路由接收用户反馈内容。'),
+      source(
+        'apps/orchestrator/src/trpc/routers/feedback.ts',
+        '反馈路由先持久化受治理记录；外部邮件与日志只使用随机反馈编号和固定状态。',
+      ),
+      source(
+        'apps/orchestrator/src/db/schema/feedback-cases.ts',
+        '反馈表区分账号关联的活动记录与去标识的受限保留记录。',
+      ),
     ],
   },
   {

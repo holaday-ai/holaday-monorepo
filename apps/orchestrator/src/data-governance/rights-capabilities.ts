@@ -33,12 +33,17 @@ export const rightsCapabilities: readonly RightsCapability[] = [
         [
           '不提供完整个人数据导出。',
           '必要的支付、争议、安全、KYC 和账本记录可能经最小化后受限保留。',
+          '已审核的反馈法律保留、进行中争议及无法按账号定位的必要运维安全日志可能受限保留。',
           '无法远程清除其他设备、浏览器扩展或用户已下载的文件副本。',
         ],
         [
           source(
             'apps/orchestrator/src/trpc/routers/account-closure.ts',
             '账号关闭路由提供预览、强验证、申请、状态、撤销和回执接口。',
+          ),
+          source(
+            'apps/orchestrator/src/account-closure/handlers/feedback-support.ts',
+            '反馈关闭处理删除普通行并最小化已审核的法律或争议保留行。',
           ),
         ],
       ),

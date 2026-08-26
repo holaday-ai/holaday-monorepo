@@ -39,6 +39,8 @@ export type ClosureHandlerResult =
 export interface AccountClosureHandler {
   categoryId: DataCategoryId;
   version: 1;
+  /** Release governance derives supported outcomes from this runtime object. */
+  readonly retentionOutcomes: readonly AccountClosureRetentionOutcome[];
   run(context: ClosureHandlerContext): Promise<ClosureHandlerResult>;
 }
 
@@ -78,6 +80,7 @@ export function createRelationalDeleteHandler(
   return {
     categoryId: options.categoryId,
     version: 1,
+    retentionOutcomes: uniqueOutcomes(['not_present', options.retention ?? 'deleted']),
     async run(context) {
       context.signal.throwIfAborted();
       const pageSize = Math.min(context.pageSize, 100);
@@ -125,6 +128,7 @@ export function createNoAccountAssociationHandler(
   return {
     categoryId,
     version: 1,
+    retentionOutcomes: ['not_present'],
     async run(context) {
       context.signal.throwIfAborted();
       const associations = await countAssociations(context);
@@ -148,6 +152,7 @@ export function createExternalRetentionHandler(
   return {
     categoryId,
     version: 1,
+    retentionOutcomes: [],
     async run(context) {
       context.signal.throwIfAborted();
       const associations = await countAssociations(context);
@@ -164,10 +169,46 @@ export function createDeferredClosureHandler(categoryId: DataCategoryId): Accoun
   return {
     categoryId,
     version: 1,
+    retentionOutcomes: [],
     async run() {
       throw new ClosureHandlerError('HANDLER_DEFERRED');
     },
   };
+}
+
+/**
+ * Completes only after an operator-confirmed legacy sanitation prerequisite
+ * and a zero-association capability probe. The remaining external/operations
+ * evidence is explicitly restricted rather than misreported as absent.
+ */
+export function createVerifiedRestrictedRetentionHandler(
+  categoryId: DataCategoryId,
+  prerequisiteSatisfied: () => boolean,
+  countAssociations: (context: ClosureHandlerContext) => Promise<number>,
+): AccountClosureHandler {
+  return {
+    categoryId,
+    version: 1,
+    retentionOutcomes: ['restricted'],
+    async run(context) {
+      context.signal.throwIfAborted();
+      if (!prerequisiteSatisfied()) {
+        throw new ClosureHandlerError('EXTERNAL_RETENTION_REQUIRED');
+      }
+      const associations = await countAssociations(context);
+      if (!Number.isSafeInteger(associations) || associations < 0) {
+        throw new ClosureHandlerError('INVARIANT_VIOLATION');
+      }
+      if (associations !== 0) throw new ClosureHandlerError('CAPABILITY_CHANGED');
+      return { kind: 'complete', processed: 0, retention: 'restricted' };
+    },
+  };
+}
+
+function uniqueOutcomes(
+  outcomes: readonly AccountClosureRetentionOutcome[],
+): readonly AccountClosureRetentionOutcome[] {
+  return [...new Set(outcomes)];
 }
 
 /** Direct `table.user_id = request.userId` ownership. */

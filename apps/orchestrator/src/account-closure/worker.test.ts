@@ -66,6 +66,7 @@ function handler(
   return {
     categoryId: 'account_security',
     version: 1,
+    retentionOutcomes: ['deleted'],
     run: vi.fn().mockResolvedValue(result),
   };
 }
@@ -233,6 +234,7 @@ describe('account closure durable worker', () => {
       const providerHandler: AccountClosureHandler = {
         categoryId: 'account_security',
         version: 1,
+        retentionOutcomes: ['deleted'],
         async run(context) {
           await context.storage.delete('/pending-provider', { signal: context.signal });
           return { kind: 'complete', processed: 1, retention: 'deleted' };

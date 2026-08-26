@@ -707,7 +707,7 @@ account_manual_request: {
 - [ ] Push the branch and create a PR that links the approved spec and this plan. Include migration order, flags-default-off statement, retention boundary, test evidence, and rollback limitations.
 - [ ] Resolve review findings with `superpowers:receiving-code-review`; rerun the smallest reproducing test and all affected release gates before marking threads resolved.
 - [ ] Merge only after required checks pass and review is complete.
-- [ ] Deploy migration 0051 first with both closure flags false. Run `db:verify` and verify existing login/task/payment/partner health before deploying application code.
+- [ ] Deploy migration 0051, then additive migration 0052, with both closure flags and both legacy-sanitation prerequisites false. Run `db:verify` and verify existing login/task/feedback/payment/partner health before deploying application code.
 - [ ] Deploy application and dormant worker code. Confirm no closure worker process exists while `ACCOUNT_CLOSURE_WORKER_ENABLED=false`.
 - [ ] Configure the dedicated HMAC secret and completion email/SMS templates through the approved production secret path; report only presence and length, never values.
 - [ ] Enable API and worker only for the dedicated synthetic allowlisted account. Confirm worker uid=998, process count=1, no public worker listener, RSS under 512MB, and host steady-state memory near/below the 10GB target.

@@ -53,10 +53,13 @@ describe('data category registry', () => {
     ).toContain('真实 Cookie');
   });
 
-  it('preserves the approved feedback account-identifier data type', () => {
-    expect(dataCategories.find((item) => item.id === 'feedback_support')?.dataElements).toContain(
-      '账号标识',
+  it('keeps feedback relationally governed while Resend receives only a random case reference', () => {
+    const feedback = dataCategories.find((item) => item.id === 'feedback_support');
+    expect(feedback?.dataElements).toEqual(
+      expect.arrayContaining(['自由文本', '可选上下文', 'User-Agent', '随机反馈编号', '账号关联']),
     );
+    expect(feedback?.dataElements).not.toContain('账号邮箱');
+    expect(feedback?.dataElements).not.toContain('账号标识');
   });
 
   it('preserves the approved analytics IP data type', () => {

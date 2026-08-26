@@ -28,24 +28,59 @@ describe('numbered migration filename contract', () => {
     assert.deepEqual(findDuplicateMigrationNumbers(files), []);
   });
 
-  it('ships the closure migration as a discoverable additive migration', () => {
-    const migration = '0051_account_closures.sql';
+  it('ships closure migrations as discoverable additive migrations', () => {
     const files = readdirSync(new URL('../drizzle/', import.meta.url));
-    const statements = splitMigrationStatements(
-      readFileSync(new URL(`../drizzle/${migration}`, import.meta.url), 'utf8'),
+    const statements = ['0051_account_closures.sql', '0052_feedback_cases.sql'].flatMap(
+      (migration) =>
+        splitMigrationStatements(
+          readFileSync(new URL(`../drizzle/${migration}`, import.meta.url), 'utf8'),
+        ),
     );
 
     assert.deepEqual(findMissingRequiredPreAppRolloutMigrations(files), []);
     assert.deepEqual(findNonAdditiveMigrationStatements(statements), []);
   });
 
-  it('requires migration 0051 before application rollout', () => {
+  it('requires migrations 0051 and 0052 before application rollout', () => {
     assert.throws(
       () => assertDatabaseReadyForAppRollout(['0050_user_mfa.sql']),
-      /Account closure migrations must run before application rollout: 0051_account_closures.sql/,
+      /0051_account_closures\.sql, 0052_feedback_cases\.sql/,
+    );
+    assert.throws(
+      () => assertDatabaseReadyForAppRollout(['0050_user_mfa.sql', '0051_account_closures.sql']),
+      /0052_feedback_cases\.sql/,
     );
     assert.doesNotThrow(() =>
-      assertDatabaseReadyForAppRollout(['0050_user_mfa.sql', '0051_account_closures.sql']),
+      assertDatabaseReadyForAppRollout([
+        '0050_user_mfa.sql',
+        '0051_account_closures.sql',
+        '0052_feedback_cases.sql',
+      ]),
+    );
+  });
+
+  it('keeps active and restricted feedback case states mutually exclusive', () => {
+    const migration = readFileSync(
+      new URL('../drizzle/0052_feedback_cases.sql', import.meta.url),
+      'utf8',
+    );
+    assert.match(migration, /ck_feedback_cases_active_or_restricted/);
+    assert.match(
+      migration,
+      /closure_request_id` IS NULL[\s\S]*user_id` IS NOT NULL[\s\S]*message` IS NOT NULL/,
+    );
+    assert.match(
+      migration,
+      /closure_request_id` IS NOT NULL[\s\S]*user_id` IS NULL[\s\S]*hold_reason` IS NOT NULL[\s\S]*message` IS NULL[\s\S]*context` IS NULL[\s\S]*user_agent` IS NULL/,
+    );
+  });
+
+  it('includes the governed feedback table in the production schema verifier', () => {
+    const verifier = readFileSync(new URL('./verify-db-schema.ts', import.meta.url), 'utf8');
+    assert.match(verifier, /REQUIRED_TABLES[\s\S]*'feedback_cases'/);
+    assert.match(
+      verifier,
+      /feedback_cases:\s*\[[\s\S]*'external_id'[\s\S]*'user_id'[\s\S]*'closure_request_id'[\s\S]*'message'[\s\S]*'context'[\s\S]*'user_agent'[\s\S]*'hold_reason'[\s\S]*'restricted_at'[\s\S]*'created_at'/,
     );
   });
 });
@@ -104,6 +139,38 @@ describe('numbered migration replay safety', () => {
 
 describe('release database index contract', () => {
   const validRows = [
+    {
+      table_name: 'feedback_cases',
+      index_name: 'uk_feedback_cases_external_id',
+      non_unique: 0,
+      seq_in_index: 1,
+      column_name: 'external_id',
+      sub_part: null,
+    },
+    {
+      table_name: 'feedback_cases',
+      index_name: 'ix_feedback_cases_user_id_id',
+      non_unique: 1,
+      seq_in_index: 1,
+      column_name: 'user_id',
+      sub_part: null,
+    },
+    {
+      table_name: 'feedback_cases',
+      index_name: 'ix_feedback_cases_user_id_id',
+      non_unique: 1,
+      seq_in_index: 2,
+      column_name: 'id',
+      sub_part: null,
+    },
+    {
+      table_name: 'feedback_cases',
+      index_name: 'ix_feedback_cases_closure_request_id',
+      non_unique: 1,
+      seq_in_index: 1,
+      column_name: 'closure_request_id',
+      sub_part: null,
+    },
     {
       table_name: 'account_closure_requests',
       index_name: 'uk_account_closure_requests_external_id',

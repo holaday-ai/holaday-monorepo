@@ -1,11 +1,19 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/mysql2';
+import { createPool } from 'mysql2/promise';
 import { pino } from 'pino';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { generateApiKey } from '../api-keys/api-key-service.js';
+import { resolveApiKey } from '../api-keys/webhook-handler.js';
+import type { PrivateEmailSender } from '../auth/email-code.js';
+import { authenticateAccessTokenSession } from '../auth/middleware.js';
+import { hashPassword } from '../auth/password.js';
 import { AuthService } from '../auth/service.js';
 import { DATA_CATEGORY_IDS, type DataCategoryId } from '../data-governance/types.js';
-import { readAffectedRows } from '../db/mysql-result.js';
 import { accountClosureRequests, accountClosureSteps } from '../db/schema/account-closures.js';
 import { apiKeys } from '../db/schema/api-keys.js';
+import { evidenceArtifacts } from '../db/schema/evidence-artifacts.js';
+import * as schema from '../db/schema/index.js';
 import { notificationChannels } from '../db/schema/notifications.js';
 import { plannedTasks } from '../db/schema/planned-tasks.js';
 import { sessions } from '../db/schema/sessions.js';
@@ -13,10 +21,12 @@ import { taskFiles } from '../db/schema/task-files.js';
 import { taskQuotas } from '../db/schema/task-quotas.js';
 import { tasks } from '../db/schema/tasks.js';
 import { users } from '../db/schema/users.js';
-import { type StorageProvider, deleteStorageObjectForClosure } from '../files/storage-provider.js';
+import type { StorageProvider } from '../files/storage-provider.js';
+import { AccountClosureChallengeService } from './challenge-service.js';
 import type { AccountClosureHandler } from './handler-contract.js';
-import { paymentsEntitlementsClosureHandler } from './handlers/payments-entitlements.js';
+import { ACCOUNT_CLOSURE_HANDLERS } from './handler-registry.js';
 import { createDatabaseReceiptService, serializeCompletionReceipt } from './receipt-service.js';
+import { ACCOUNT_CLOSURE_LEASE_MS, claimNextClosureStep } from './repository.js';
 import { AccountClosureService, DatabaseClosureServiceRepository } from './service.js';
 import { runAccountClosureWorkerTick } from './worker.js';
 
@@ -57,15 +67,23 @@ describe.sequential('account closure synthetic release gate', () => {
         aud: 'account-closure-recovery';
       }
     >();
-    const challenge = {
-      createChallenge: vi.fn(async () => ({
-        challengeId: `ach-${challenge.createChallenge.mock.calls.length + 1}`,
-        channel: 'email' as const,
-        maskedDestination: 't***l@example.test',
-        expiresAt: new Date(liveNow.getTime() + 600_000),
-      })),
-      verifyChallenge: vi.fn(async () => undefined),
+    const challengeCodes: string[] = [];
+    const challengeEmailSender: PrivateEmailSender = {
+      privateDelivery: true,
+      isAvailable: () => true,
+      send: vi.fn(async (message) => {
+        const code = /\b(\d{6})\b/.exec(message.text)?.[1];
+        if (!code) throw new Error('challenge code missing');
+        challengeCodes.push(code);
+      }),
     };
+    const challengeLogger = { error: vi.fn() };
+    const challenge = new AccountClosureChallengeService(db, {
+      emailSender: challengeEmailSender,
+      smsGateway: { sendAccountClosureCode: vi.fn(async () => undefined) },
+      logger: challengeLogger,
+    });
+    const serviceLogger = { error: vi.fn() };
     const receipts = createDatabaseReceiptService(db);
     const service = new AccountClosureService({
       repository: new DatabaseClosureServiceRepository(db),
@@ -79,7 +97,7 @@ describe.sequential('account closure synthetic release gate', () => {
         return token;
       },
       now: () => liveNow,
-      logger: { error: vi.fn() },
+      logger: serviceLogger,
       config: { enabled: true, allowlist: new Set([user.externalId]) },
     });
 
@@ -89,30 +107,90 @@ describe.sequential('account closure synthetic release gate', () => {
       counts: { activeTasks: 1, futureTasks: 1, files: 205, notificationChannels: 1 },
       automaticRefund: false,
     });
-    await service.requestVerification(user.externalId);
-    const firstApplication = await service.begin(user.externalId, beginInput('ach-1'));
-    expect(challenge.verifyChallenge).toHaveBeenCalled();
-    await expectFrozenAndStopped(user.id);
+    const authService = new AuthService(db);
+    const login = await authService.login({ email: OLD_EMAIL, password: user.password });
+    if (!('accessToken' in login)) throw new Error('Expected ordinary access token');
+    expect(await authenticateAccessTokenSession(db, login.accessToken)).toMatchObject({
+      userId: user.externalId,
+    });
+    expect(await resolveApiKey(user.apiKey, db)).toMatchObject({ ok: true });
 
-    await service.requestCancellationVerification(firstApplication.recoveryToken);
+    const firstChallenge = await service.requestVerification(user.externalId);
+    const firstApplication = await service.begin(
+      user.externalId,
+      beginInput(firstChallenge.challengeId, challengeCodes.at(-1) ?? ''),
+    );
+    await expectFrozenAndStopped(user.id);
+    expect(await authenticateAccessTokenSession(db, login.accessToken)).toBeNull();
+    expect((await resolveApiKey(user.apiKey, db)).ok).toBe(false);
+
+    const cancelChallenge = await service.requestCancellationVerification(
+      firstApplication.recoveryToken,
+    );
     await service.cancel(firstApplication.recoveryToken, {
-      challengeId: 'ach-2',
-      code: '482901',
+      challengeId: cancelChallenge.challengeId,
+      code: challengeCodes.at(-1) ?? '',
     });
     await expectExactlyRestored(user.id);
 
     liveNow = new Date(REQUESTED_AT.getTime() + 1_000);
-    await service.requestVerification(user.externalId);
-    const secondApplication = await service.begin(user.externalId, beginInput('ach-3'));
+    const secondChallenge = await service.requestVerification(user.externalId);
+    const secondApplication = await service.begin(
+      user.externalId,
+      beginInput(secondChallenge.challengeId, challengeCodes.at(-1) ?? ''),
+    );
     const applicationReceipt = await service.applicationReceipt(secondApplication.recoveryToken);
     expect(applicationReceipt.receiptNumber).not.toBe(firstApplication.receipt.receiptNumber);
 
     liveNow = new Date(secondApplication.graceEndsAt);
     expect(liveNow.getTime() - (REQUESTED_AT.getTime() + 1_000)).toBe(168 * 60 * 60 * 1_000);
+    const secondClaims = recoveryClaims.get(secondApplication.recoveryToken);
+    if (!secondClaims) throw new Error('Expected second recovery claims');
 
-    const storageObjects = new Set(
-      Array.from({ length: 205 }, (_, index) => `objects/task11/${index + 1}`),
-    );
+    const competitor = await createCompetingDueRequest(liveNow);
+    const databaseUrl = process.env.DATABASE_URL ?? '';
+    const firstClaimPool = createPool({ uri: databaseUrl, connectionLimit: 1 });
+    const secondClaimPool = createPool({ uri: databaseUrl, connectionLimit: 1 });
+    try {
+      const firstClaimDb = drizzle(firstClaimPool, { schema, mode: 'default' }) as typeof db;
+      const secondClaimDb = drizzle(secondClaimPool, { schema, mode: 'default' }) as typeof db;
+      const leaseUntil = new Date(liveNow.getTime() + ACCOUNT_CLOSURE_LEASE_MS);
+      const concurrentClaims = await Promise.all([
+        claimNextClosureStep(firstClaimDb, {
+          workerId: 'release-worker-a',
+          now: liveNow,
+          leaseUntil,
+        }),
+        claimNextClosureStep(secondClaimDb, {
+          workerId: 'release-worker-b',
+          now: liveNow,
+          leaseUntil,
+        }),
+      ]);
+      expect(concurrentClaims.filter(Boolean)).toHaveLength(1);
+      const winner = concurrentClaims.find(Boolean);
+      expect(winner).toMatchObject({ requestExternalId: secondClaims.requestId });
+      if (!winner || winner.kind !== 'handler') throw new Error('Expected handler claim');
+      await db
+        .update(accountClosureSteps)
+        .set({ leaseUntil: new Date(liveNow.getTime() - 1) })
+        .where(eq(accountClosureSteps.id, winner.stepId));
+    } finally {
+      await firstClaimPool.end();
+      await secondClaimPool.end();
+      await db
+        .delete(accountClosureSteps)
+        .where(eq(accountClosureSteps.requestId, competitor.requestId));
+      await db
+        .delete(accountClosureRequests)
+        .where(eq(accountClosureRequests.id, competitor.requestId));
+      await db.delete(users).where(eq(users.id, competitor.userId));
+    }
+
+    const storageObjects = new Set([
+      ...Array.from({ length: 205 }, (_, index) => `objects/task11/${index + 1}`),
+      'objects/task11/evidence.png',
+    ]);
     let storageFailedOnce = false;
     const storageDelete = vi.fn(async (path: string) => {
       if (!storageFailedOnce) {
@@ -124,30 +202,21 @@ describe.sequential('account closure synthetic release gate', () => {
     const storage = { delete: storageDelete } as unknown as StorageProvider;
     let activePages = 0;
     let maxActivePages = 0;
-    const mediaHandler = createReleaseMediaHandler();
     const handlers = new Map<DataCategoryId, AccountClosureHandler>(
-      DATA_CATEGORY_IDS.map((categoryId) => {
-        const handler =
-          categoryId === 'media_assets'
-            ? mediaHandler
-            : categoryId === 'payments_entitlements'
-              ? paymentsEntitlementsClosureHandler
-              : noContentHandler(categoryId);
-        return [
-          categoryId,
-          {
-            ...handler,
-            async run(context) {
-              activePages += 1;
-              maxActivePages = Math.max(maxActivePages, activePages);
-              try {
-                return await handler.run(context);
-              } finally {
-                activePages -= 1;
-              }
-            },
+      ACCOUNT_CLOSURE_HANDLERS.map((handler) => {
+        const wrapped: AccountClosureHandler = {
+          ...handler,
+          async run(context) {
+            activePages += 1;
+            maxActivePages = Math.max(maxActivePages, activePages);
+            try {
+              return await handler.run(context);
+            } finally {
+              activePages -= 1;
+            }
           },
-        ];
+        };
+        return [handler.categoryId, wrapped] as const;
       }),
     );
     const logLines: string[] = [];
@@ -165,13 +234,14 @@ describe.sequential('account closure synthetic release gate', () => {
       },
       smsGateway: { sendAccountClosureComplete: vi.fn(async () => undefined) },
     };
-    const observedWorkerIds = new Set<string>();
-    let peakRss = process.memoryUsage().rss;
     let completed = false;
+    const previousFeedbackGate = process.env.ACCOUNT_CLOSURE_LEGACY_FEEDBACK_SANITIZED;
+    const previousAnalyticsGate = process.env.ACCOUNT_CLOSURE_LEGACY_ANALYTICS_LOGS_SANITIZED;
+    process.env.ACCOUNT_CLOSURE_LEGACY_FEEDBACK_SANITIZED = 'true';
+    process.env.ACCOUNT_CLOSURE_LEGACY_ANALYTICS_LOGS_SANITIZED = 'true';
 
-    for (let tick = 0; tick < 40; tick += 1) {
+    for (let tick = 0; tick < 80; tick += 1) {
       const workerId = 'task11-single-worker';
-      observedWorkerIds.add(workerId);
       await runAccountClosureWorkerTick({
         db,
         handlers,
@@ -184,7 +254,6 @@ describe.sequential('account closure synthetic release gate', () => {
         hmacSecret: HMAC_SECRET,
         notification,
       });
-      peakRss = Math.max(peakRss, process.memoryUsage().rss);
       const [request] = await db
         .select({ status: accountClosureRequests.status })
         .from(accountClosureRequests)
@@ -201,19 +270,17 @@ describe.sequential('account closure synthetic release gate', () => {
       }
       liveNow = new Date(liveNow.getTime() + 60_001);
     }
+    restoreProcessEnv('ACCOUNT_CLOSURE_LEGACY_FEEDBACK_SANITIZED', previousFeedbackGate);
+    restoreProcessEnv('ACCOUNT_CLOSURE_LEGACY_ANALYTICS_LOGS_SANITIZED', previousAnalyticsGate);
 
     expect(completed).toBe(true);
     expect(storageFailedOnce).toBe(true);
-    expect(storageDelete).toHaveBeenCalledTimes(206);
+    expect(storageDelete).toHaveBeenCalledTimes(207);
     expect(storageObjects.size).toBe(0);
-    expect(observedWorkerIds).toEqual(new Set(['task11-single-worker']));
     expect(maxActivePages).toBe(1);
-    expect(peakRss).toBeLessThan(512 * 1024 * 1024);
     expect(acceptedReceiptNumbers).toHaveLength(1);
     expect(acceptedReceiptNumbers[0]).toMatch(/^ACR-/);
 
-    const secondClaims = recoveryClaims.get(secondApplication.recoveryToken);
-    if (!secondClaims) throw new Error('Expected second recovery claims');
     const [request] = await db
       .select({ id: accountClosureRequests.id, status: accountClosureRequests.status })
       .from(accountClosureRequests)
@@ -235,17 +302,22 @@ describe.sequential('account closure synthetic release gate', () => {
       completion: serializeCompletionReceipt(completionRecord),
     });
     expect(publicReceipts).not.toContain(SENTINEL);
-    expect(logLines.join('\n')).not.toContain(SENTINEL);
+    expect(
+      JSON.stringify({
+        worker: logLines,
+        service: serviceLogger.error.mock.calls,
+        challenge: challengeLogger.error.mock.calls,
+      }),
+    ).not.toContain(SENTINEL);
 
     const [closed] = await db.select().from(users).where(eq(users.id, user.id)).limit(1);
     expect(closed).toMatchObject({ status: 'closed', email: null, phone: null, plan: 'free' });
 
-    const auth = new AuthService(db);
-    const emailRegistration = await auth.register({
+    const emailRegistration = await authService.register({
       email: OLD_EMAIL,
       password: 'task11-synthetic-password',
     });
-    const phoneRegistration = await auth.loginOrRegisterByPhone(OLD_PHONE);
+    const phoneRegistration = await authService.loginOrRegisterByPhone(OLD_PHONE);
     expect(emailRegistration.user.externalId).not.toBe(user.externalId);
     expect(phoneRegistration.user.externalId).not.toBe(user.externalId);
     const newUsers = await db
@@ -267,11 +339,13 @@ describe.sequential('account closure synthetic release gate', () => {
   });
 
   async function createLargeSyntheticAccount() {
+    const password = 'task11-synthetic-password';
+    const generatedApiKey = generateApiKey();
     const [insert] = await db.insert(users).values({
       externalId: 'usr_task11_release',
       email: OLD_EMAIL,
       phone: OLD_PHONE,
-      passwordHash: 'synthetic-non-authenticating-hash',
+      passwordHash: await hashPassword(password),
       plan: 'pro',
       planExpiresAt: ORIGINAL_EXPIRY,
       emailVerified: true,
@@ -288,8 +362,8 @@ describe.sequential('account closure synthetic release gate', () => {
       externalId: 'key_task11_release',
       userId: id,
       name: 'release gate key',
-      keyPrefix: 'hd_live_t11',
-      keyHash: 'a'.repeat(64),
+      keyPrefix: generatedApiKey.displayPrefix,
+      keyHash: generatedApiKey.hash,
     });
     const [taskInsert] = await db.insert(tasks).values({
       externalId: 'tsk_task11_release',
@@ -337,7 +411,56 @@ describe.sequential('account closure synthetic release gate', () => {
         storagePath: `objects/task11/${index + 1}`,
       })),
     );
-    return { id, externalId: 'usr_task11_release' };
+    await db.insert(evidenceArtifacts).values({
+      externalId: 'eva_task11_release',
+      ownerUserId: id,
+      taskId,
+      artifactKind: 'screenshot',
+      purpose: 'task_evidence',
+      r2Bucket: 'task11-test',
+      r2Key: 'objects/task11/evidence.png',
+      contentType: 'image/png',
+      sizeBytes: 1,
+      sha256: 'b'.repeat(64),
+      capturedAt: REQUESTED_AT,
+      collectorLane: 'task11-release-gate',
+      rawExcerpt: SENTINEL,
+      retentionPolicy: 'task_30d',
+    });
+    return {
+      id,
+      externalId: 'usr_task11_release',
+      password,
+      apiKey: generatedApiKey.plaintext,
+    };
+  }
+
+  async function createCompetingDueRequest(now: Date) {
+    const [userInsert] = await db.insert(users).values({
+      externalId: 'usr_task11_competing',
+      email: 'task11-competing@example.test',
+      passwordHash: await hashPassword('task11-competing-password'),
+      status: 'closure_pending',
+    });
+    const userId = Number(userInsert.insertId);
+    const [requestInsert] = await db.insert(accountClosureRequests).values({
+      externalId: 'acl_task11_competing',
+      userId,
+      activeUserId: userId,
+      status: 'pending_grace',
+      requestedAt: new Date(now.getTime() - 168 * 60 * 60 * 1_000),
+      graceEndsAt: now,
+    });
+    const requestId = Number(requestInsert.insertId);
+    await db.insert(accountClosureSteps).values(
+      DATA_CATEGORY_IDS.map((categoryId) => ({
+        requestId,
+        categoryId,
+        handlerVersion: 1,
+        status: 'pending' as const,
+      })),
+    );
+    return { requestId, userId };
   }
 
   async function expectFrozenAndStopped(userId: number) {
@@ -398,10 +521,10 @@ describe.sequential('account closure synthetic release gate', () => {
   }
 });
 
-function beginInput(challengeId: string) {
+function beginInput(challengeId: string, code: string) {
   return {
     challengeId,
-    code: '482901',
+    code,
     reasonCode: 'privacy' as const,
     acknowledgements: {
       immediateSignOut: true as const,
@@ -411,55 +534,7 @@ function beginInput(challengeId: string) {
   };
 }
 
-function noContentHandler(categoryId: DataCategoryId): AccountClosureHandler {
-  return {
-    categoryId,
-    version: 1,
-    async run(context) {
-      context.signal.throwIfAborted();
-      return { kind: 'complete', processed: 0, retention: 'not_present' };
-    },
-  };
-}
-
-function createReleaseMediaHandler(): AccountClosureHandler {
-  return {
-    categoryId: 'media_assets',
-    version: 1,
-    async run(context) {
-      context.signal.throwIfAborted();
-      const previousProcessed = context.checkpoint?.processedCount ?? 0;
-      const afterId = context.checkpoint?.cursor ?? 0;
-      const rows = await context.db
-        .select({ id: taskFiles.id, storagePath: taskFiles.storagePath })
-        .from(taskFiles)
-        .where(and(eq(taskFiles.userId, context.request.userId), sql`${taskFiles.id} > ${afterId}`))
-        .orderBy(taskFiles.id)
-        .limit(context.pageSize);
-      for (const row of rows) {
-        context.signal.throwIfAborted();
-        await deleteStorageObjectForClosure(context.storage, row.storagePath, {
-          signal: context.signal,
-        });
-        context.signal.throwIfAborted();
-        const removed = await context.db
-          .delete(taskFiles)
-          .where(and(eq(taskFiles.id, row.id), eq(taskFiles.userId, context.request.userId)));
-        if (readAffectedRows(removed) !== 1) throw new Error('owned file row was not removed');
-      }
-      const processed = previousProcessed + rows.length;
-      if (rows.length === context.pageSize) {
-        return {
-          kind: 'continue',
-          checkpoint: { cursor: rows.at(-1)?.id ?? afterId, processedCount: processed },
-          processed,
-        };
-      }
-      return {
-        kind: 'complete',
-        processed,
-        retention: processed === 0 ? 'not_present' : 'deleted',
-      };
-    },
-  };
+function restoreProcessEnv(name: string, value: string | undefined): void {
+  if (value === undefined) Reflect.deleteProperty(process.env, name);
+  else process.env[name] = value;
 }

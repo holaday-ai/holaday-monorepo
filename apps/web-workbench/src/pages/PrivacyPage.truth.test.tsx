@@ -128,15 +128,17 @@ describe('PrivacyPage truth contract', () => {
     expectText(/“清空画像”.*不会删除自选股本身/);
   });
 
-  it('discloses feedback content and context forwarded through Resend or service logs', () => {
+  it('discloses governed feedback storage and identifier-only Resend notifications', () => {
     renderPrivacy();
 
     expectText(/反馈与支持/);
     expectText(/您主动提交的自由文本/);
-    expectText(/账号邮箱、账号标识、User-Agent 与可选的关联任务标识/);
-    expectText(/启用 Resend 时转发给 Resend/);
-    expectText(/否则可能进入服务日志/);
-    expectText(/处理反馈、故障、安全和争议所需/);
+    expectText(/随机反馈编号/);
+    expectText(/可选上下文、User-Agent、随机反馈编号及账号关联/);
+    expectText(/Resend 仅接收不含正文、邮箱或账号标识的随机反馈编号通知/);
+    expectText(/普通反馈会删除/);
+    expectText(/法律保留或进行中争议/);
+    expectText(/接收反馈、定位问题并提供支持/);
   });
 
   it('discloses external notification webhook configuration and task context transfers', () => {

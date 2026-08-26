@@ -71,6 +71,20 @@ const baseEnvSchema = z.object({
     .default('false')
     .transform((value) => value === 'true'),
   ACCOUNT_CLOSURE_ALLOWLIST: z.string().default(''),
+  /**
+   * One-time operational prerequisites. These are flipped only after the
+   * legacy Resend inbox/PM2 surfaces have been sanitized or placed under a
+   * reviewed restricted-retention control. They never authorize reading or
+   * printing legacy content.
+   */
+  ACCOUNT_CLOSURE_LEGACY_FEEDBACK_SANITIZED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  ACCOUNT_CLOSURE_LEGACY_ANALYTICS_LOGS_SANITIZED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
   ACCOUNT_CLOSURE_HMAC_SECRET: z
     .string()
     .refine(
@@ -449,15 +463,25 @@ const baseEnvSchema = z.object({
 });
 
 export const envSchema = baseEnvSchema.superRefine((value, ctx) => {
-  if (
-    (value.ACCOUNT_CLOSURE_ENABLED || value.ACCOUNT_CLOSURE_WORKER_ENABLED) &&
-    value.ACCOUNT_CLOSURE_HMAC_SECRET.trim().length < 32
-  ) {
+  const closureEnabled = value.ACCOUNT_CLOSURE_ENABLED || value.ACCOUNT_CLOSURE_WORKER_ENABLED;
+  if (closureEnabled && value.ACCOUNT_CLOSURE_HMAC_SECRET.trim().length < 32) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['ACCOUNT_CLOSURE_HMAC_SECRET'],
       message: 'ACCOUNT_CLOSURE_HMAC_SECRET must be at least 32 chars when closure is enabled',
     });
+  }
+  for (const prerequisite of [
+    'ACCOUNT_CLOSURE_LEGACY_FEEDBACK_SANITIZED',
+    'ACCOUNT_CLOSURE_LEGACY_ANALYTICS_LOGS_SANITIZED',
+  ] as const) {
+    if (closureEnabled && !value[prerequisite]) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [prerequisite],
+        message: `${prerequisite} must be true when account closure is enabled`,
+      });
+    }
   }
 });
 

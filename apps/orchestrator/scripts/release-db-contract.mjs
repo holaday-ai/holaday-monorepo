@@ -11,7 +11,10 @@ const REPLAYABLE_MISSING_DROP = {
   statement: 'DROP INDEX `ix_payments_provider_order` ON `payments`',
 };
 
-export const REQUIRED_PRE_APP_ROLLOUT_MIGRATIONS = ['0051_account_closures.sql'];
+export const REQUIRED_PRE_APP_ROLLOUT_MIGRATIONS = [
+  '0051_account_closures.sql',
+  '0052_feedback_cases.sql',
+];
 
 export function findMissingRequiredPreAppRolloutMigrations(files) {
   return REQUIRED_PRE_APP_ROLLOUT_MIGRATIONS.filter((migration) => !files.includes(migration));
@@ -73,6 +76,24 @@ export function splitMigrationStatements(sql) {
 }
 
 export const REQUIRED_INDEXES = [
+  {
+    table: 'feedback_cases',
+    name: 'uk_feedback_cases_external_id',
+    unique: true,
+    columns: ['external_id'],
+  },
+  {
+    table: 'feedback_cases',
+    name: 'ix_feedback_cases_user_id_id',
+    unique: false,
+    columns: ['user_id', 'id'],
+  },
+  {
+    table: 'feedback_cases',
+    name: 'ix_feedback_cases_closure_request_id',
+    unique: false,
+    columns: ['closure_request_id'],
+  },
   {
     table: 'account_closure_requests',
     name: 'uk_account_closure_requests_external_id',

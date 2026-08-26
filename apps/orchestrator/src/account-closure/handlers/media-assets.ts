@@ -43,6 +43,7 @@ export function createMediaAssetsClosureHandler(
   return {
     categoryId: 'media_assets',
     version: 1,
+    retentionOutcomes: ['deleted', 'restricted', 'not_present'],
     async run(context) {
       context.signal.throwIfAborted();
       const pageSize = boundedPageSize(context);

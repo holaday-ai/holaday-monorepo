@@ -112,6 +112,7 @@ describe.sequential('account closure worker durability', () => {
     const handler: AccountClosureHandler = {
       categoryId: 'account_security',
       version: 1,
+      retentionOutcomes: ['deleted'],
       run: page,
     };
     const restartAt = new Date(baseNow.getTime() + 1_001);
@@ -201,6 +202,7 @@ describe.sequential('account closure worker durability', () => {
     const retryHandler: AccountClosureHandler = {
       categoryId: claimed.categoryId,
       version: 1,
+      retentionOutcomes: ['deleted'],
       async run() {
         deleteObject(); // explicit provider not-found is idempotent success
         return { kind: 'complete', processed: 1, retention: 'deleted' };

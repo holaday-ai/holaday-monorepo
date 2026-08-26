@@ -1,13 +1,14 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import type { AccountClosureHandler } from '../src/account-closure/handler-contract.js';
 import {
-  ACCOUNT_CLOSURE_HANDLER_METADATA,
-  type AccountClosureHandlerMetadata,
-} from '../src/account-closure/handler-governance.js';
+  ACCOUNT_CLOSURE_HANDLERS,
+  ACCOUNT_CLOSURE_HANDLER_BINDINGS,
+  type AccountClosureHandlerBinding,
+} from '../src/account-closure/handler-registry.js';
 import {
   ACCOUNT_CLOSURE_RETENTION_OUTCOMES,
-  type AccountClosureRetentionOutcome,
   ACCOUNT_CLOSURE_PUBLIC_RECEIPT_FIELDS as PUBLIC_RECEIPT_FIELDS,
 } from '../src/account-closure/types.js';
 import {
@@ -25,105 +26,85 @@ export const ACCOUNT_CLOSURE_PUBLIC_RECEIPT_FIELDS = PUBLIC_RECEIPT_FIELDS;
 export interface AccountClosureGovernanceDeclaration {
   readonly categoryId: DataCategoryId;
   readonly handlerRef: string;
-  readonly retentionModes: readonly AccountClosureRetentionOutcome[];
   readonly testRef: string;
 }
 
+const IDENTITY_TEST = 'apps/orchestrator/src/account-closure/handler-release-contract.test.ts';
 const RELATIONAL_TEST =
   'apps/orchestrator/src/account-closure/handlers/relational-handlers.integration.test.ts';
-const FINANCIAL_TEST = 'apps/orchestrator/src/account-closure/handlers/financial-retention.test.ts';
+const FINANCIAL_TEST =
+  'apps/orchestrator/src/account-closure/tombstone-service.integration.test.ts';
+const MEDIA_TEST =
+  'apps/orchestrator/src/account-closure/handlers/media-assets.integration.test.ts';
 
 export const ACCOUNT_CLOSURE_GOVERNANCE_DECLARATIONS: readonly AccountClosureGovernanceDeclaration[] =
   [
-    closureDeclaration('account_security', 'account-security', 'accountSecurityClosureHandler', [
-      'deleted',
-      'not_present',
-    ]),
-    closureDeclaration('task_execution', 'task-execution', 'taskExecutionClosureHandler', [
-      'deleted',
-      'not_present',
-    ]),
-    closureDeclaration('cross_task_memory', 'cross-task-memory', 'crossTaskMemoryClosureHandler', [
-      'deleted',
-      'not_present',
-    ]),
+    closureDeclaration('account_security', 'account-security', 'accountSecurityClosureHandler'),
+    closureDeclaration('task_execution', 'task-execution', 'taskExecutionClosureHandler'),
+    closureDeclaration('cross_task_memory', 'cross-task-memory', 'crossTaskMemoryClosureHandler'),
     closureDeclaration(
       'energy_astrology_profile',
       'energy-astrology-profile',
       'energyAstrologyProfileClosureHandler',
-      ['not_present'],
     ),
     closureDeclaration(
       'stock_preference_profile',
       'stock-preference-profile',
       'stockPreferenceProfileClosureHandler',
-      ['deleted', 'not_present'],
     ),
-    closureDeclaration('feedback_support', 'feedback-support', 'feedbackSupportClosureHandler', [
-      'restricted',
-    ]),
+    closureDeclaration('feedback_support', 'feedback-support', 'feedbackSupportClosureHandler'),
     closureDeclaration(
       'external_notifications',
       'external-notifications',
       'externalNotificationsClosureHandler',
-      ['deleted', 'not_present'],
     ),
     closureDeclaration(
       'extension_site_stats',
       'extension-site-stats',
       'extensionSiteStatsClosureHandler',
-      ['deleted', 'not_present'],
     ),
     closureDeclaration(
       'extension_login_cookies',
       'extension-login-cookies',
       'extensionLoginCookiesClosureHandler',
-      ['deleted', 'not_present'],
     ),
     {
       categoryId: 'payments_entitlements',
       handlerRef:
         'apps/orchestrator/src/account-closure/handlers/payments-entitlements.ts#paymentsEntitlementsClosureHandler',
-      retentionModes: ['restricted', 'not_present'],
       testRef: FINANCIAL_TEST,
     },
     {
       categoryId: 'partner_kyc_ledger',
       handlerRef:
         'apps/orchestrator/src/account-closure/handlers/partner-kyc-ledger.ts#partnerKycLedgerClosureHandler',
-      retentionModes: ['restricted', 'not_present'],
       testRef: FINANCIAL_TEST,
     },
     {
       categoryId: 'media_assets',
       handlerRef:
         'apps/orchestrator/src/account-closure/handlers/media-assets.ts#mediaAssetsClosureHandler',
-      retentionModes: ['deleted', 'restricted', 'not_present'],
-      testRef: 'apps/orchestrator/src/account-closure/handlers/media-assets.integration.test.ts',
+      testRef: MEDIA_TEST,
     },
-    closureDeclaration('analytics_logs', 'analytics-logs', 'analyticsLogsClosureHandler', [
-      'anonymized',
-      'restricted',
-    ]),
+    closureDeclaration('analytics_logs', 'analytics-logs', 'analyticsLogsClosureHandler'),
   ];
 
 function closureDeclaration(
   categoryId: DataCategoryId,
   moduleName: string,
   exportName: string,
-  retentionModes: readonly AccountClosureRetentionOutcome[],
 ): AccountClosureGovernanceDeclaration {
   return {
     categoryId,
     handlerRef: `apps/orchestrator/src/account-closure/handlers/${moduleName}.ts#${exportName}`,
-    retentionModes,
     testRef: RELATIONAL_TEST,
   };
 }
 
 export interface AccountClosureGovernanceAuditInput {
   readonly declarations: readonly AccountClosureGovernanceDeclaration[];
-  readonly handlerBindings: readonly AccountClosureHandlerMetadata[];
+  readonly handlerBindings: readonly AccountClosureHandlerBinding[];
+  readonly runtimeHandlers: readonly AccountClosureHandler[];
   readonly receiptFields: readonly string[];
   readonly rightsCapabilities: readonly RightsCapability[];
   readonly repoRoot?: string;
@@ -138,6 +119,9 @@ export function auditAccountClosureGovernance(
     issues.push({ severity: 'error', code, registryId, message });
   const seen = new Set<string>();
   const bindings = new Map(input.handlerBindings.map((binding) => [binding.handlerRef, binding]));
+  const runtimeHandlers = new Map(
+    input.runtimeHandlers.map((handler) => [handler.categoryId, handler] as const),
+  );
   const root = resolve(input.repoRoot ?? repositoryRoot());
 
   for (const declaration of input.declarations) {
@@ -148,7 +132,14 @@ export function auditAccountClosureGovernance(
     seen.add(declaration.categoryId);
 
     const binding = bindings.get(declaration.handlerRef);
-    if (!binding || binding.categoryId !== declaration.categoryId) {
+    const runtimeHandler = runtimeHandlers.get(declaration.categoryId);
+    if (
+      !binding ||
+      binding.categoryId !== declaration.categoryId ||
+      binding.handler.categoryId !== declaration.categoryId ||
+      binding.handler.version !== 1 ||
+      binding.handler !== runtimeHandler
+    ) {
       add(
         'closure_handler_category_mismatch',
         registryId,
@@ -156,8 +147,11 @@ export function auditAccountClosureGovernance(
       );
     }
     if (
-      declaration.retentionModes.length === 0 ||
-      declaration.retentionModes.some((mode) => !ACCOUNT_CLOSURE_RETENTION_OUTCOMES.includes(mode))
+      !binding ||
+      binding.handler.retentionOutcomes.length === 0 ||
+      binding.handler.retentionOutcomes.some(
+        (mode) => !ACCOUNT_CLOSURE_RETENTION_OUTCOMES.includes(mode),
+      )
     ) {
       add(
         'closure_retention_missing',
@@ -165,7 +159,7 @@ export function auditAccountClosureGovernance(
         'Account closure category requires an explicit supported retention outcome.',
       );
     }
-    if (!isSafeExistingTestRef(root, declaration.testRef)) {
+    if (!isSafeExistingTestRef(root, IDENTITY_TEST) || !isBehaviorTestEvidence(root, declaration)) {
       add(
         'closure_test_missing',
         registryId,
@@ -225,6 +219,17 @@ function isSafeExistingTestRef(root: string, testRef: string): boolean {
     !isAbsolute(targetRelative) &&
     existsSync(target)
   );
+}
+
+function isBehaviorTestEvidence(
+  root: string,
+  declaration: AccountClosureGovernanceDeclaration,
+): boolean {
+  if (!isSafeExistingTestRef(root, declaration.testRef)) return false;
+  const exportName = declaration.handlerRef.split('#')[1];
+  if (!exportName) return false;
+  const source = readFileSync(resolve(root, declaration.testRef), 'utf8');
+  return source.includes(exportName) && /\.run\s*\(/.test(source);
 }
 
 export interface GovernanceAuditIo {
@@ -461,7 +466,8 @@ export function buildGovernanceAuditReport(): AuditReport {
   });
   const closureIssues = auditAccountClosureGovernance({
     declarations: ACCOUNT_CLOSURE_GOVERNANCE_DECLARATIONS,
-    handlerBindings: ACCOUNT_CLOSURE_HANDLER_METADATA,
+    handlerBindings: ACCOUNT_CLOSURE_HANDLER_BINDINGS,
+    runtimeHandlers: ACCOUNT_CLOSURE_HANDLERS,
     receiptFields: PUBLIC_RECEIPT_FIELDS,
     rightsCapabilities: governanceRegistry.rightsCapabilities,
     repoRoot: repositoryRoot(),

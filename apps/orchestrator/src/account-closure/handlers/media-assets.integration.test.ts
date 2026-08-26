@@ -14,7 +14,11 @@ import type {
   ClosureHandlerContext,
   ClosureHandlerResult,
 } from '../handler-contract.js';
-import { createMediaAssetsClosureHandler, createQwenVoiceDeletionAdapter } from './media-assets.js';
+import {
+  createMediaAssetsClosureHandler,
+  createQwenVoiceDeletionAdapter,
+  mediaAssetsClosureHandler,
+} from './media-assets.js';
 import { taskExecutionClosureHandler } from './task-execution.js';
 
 describe.sequential('media assets closure handler', () => {
@@ -442,6 +446,13 @@ describe.sequential('media assets closure handler', () => {
     });
     const [unchanged] = await db.select().from(users).where(eq(users.id, target.id)).limit(1);
     expect(unchanged?.qwenVoiceId).toBe('voice_deferred');
+  });
+
+  it('executes the exact production media handler for an account with no media', async () => {
+    const target = await createUser('production-empty');
+    await expect(
+      mediaAssetsClosureHandler.run(context(target, fakeStorage([]), null)),
+    ).resolves.toEqual({ kind: 'complete', processed: 0, retention: 'not_present' });
   });
 
   function context(

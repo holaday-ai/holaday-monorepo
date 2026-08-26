@@ -39,4 +39,14 @@ describe('account closure handler registry', () => {
       expect(getAccountClosureHandler(categoryId)).toMatchObject({ categoryId, version: 1 });
     }
   });
+
+  it('derives release retention capabilities from every production runtime handler', () => {
+    for (const handler of ACCOUNT_CLOSURE_HANDLERS) {
+      expect(handler.retentionOutcomes, handler.categoryId).toBeDefined();
+      expect(handler.retentionOutcomes.length, handler.categoryId).toBeGreaterThan(0);
+    }
+    for (const categoryId of ['feedback_support', 'analytics_logs'] as const) {
+      expect(getAccountClosureHandler(categoryId).retentionOutcomes).toContain('restricted');
+    }
+  });
 });

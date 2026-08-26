@@ -15,6 +15,7 @@ export { RETAINED_PAYMENT_METADATA_KEYS, sanitizePaymentMetadataForClosure };
 export const paymentsEntitlementsClosureHandler: AccountClosureHandler = {
   categoryId: 'payments_entitlements',
   version: 1,
+  retentionOutcomes: ['restricted', 'not_present'],
   async run(context) {
     context.signal.throwIfAborted();
     const pageSize = boundedPageSize(context.pageSize);

@@ -6,6 +6,10 @@ const base = {
   REDIS_URL: 'redis://127.0.0.1:6379',
   JWT_SECRET: 'j'.repeat(32),
 };
+const sanitizedPrerequisites = {
+  ACCOUNT_CLOSURE_LEGACY_FEEDBACK_SANITIZED: 'true',
+  ACCOUNT_CLOSURE_LEGACY_ANALYTICS_LOGS_SANITIZED: 'true',
+};
 
 describe('account closure environment contract', () => {
   it('defaults both flags off and secrets/allowlist empty', () => {
@@ -15,6 +19,8 @@ describe('account closure environment contract', () => {
       ACCOUNT_CLOSURE_WORKER_ENABLED: false,
       ACCOUNT_CLOSURE_ALLOWLIST: '',
       ACCOUNT_CLOSURE_HMAC_SECRET: '',
+      ACCOUNT_CLOSURE_LEGACY_FEEDBACK_SANITIZED: false,
+      ACCOUNT_CLOSURE_LEGACY_ANALYTICS_LOGS_SANITIZED: false,
     });
   });
 
@@ -22,11 +28,17 @@ describe('account closure environment contract', () => {
     'requires a 32-character HMAC secret when %s is enabled',
     (flag) => {
       expect(
-        envSchema.safeParse({ ...base, [flag]: 'true', ACCOUNT_CLOSURE_HMAC_SECRET: '' }).success,
+        envSchema.safeParse({
+          ...base,
+          ...sanitizedPrerequisites,
+          [flag]: 'true',
+          ACCOUNT_CLOSURE_HMAC_SECRET: '',
+        }).success,
       ).toBe(false);
       expect(
         envSchema.safeParse({
           ...base,
+          ...sanitizedPrerequisites,
           [flag]: 'true',
           ACCOUNT_CLOSURE_HMAC_SECRET: 'h'.repeat(31),
         }).success,
@@ -34,6 +46,7 @@ describe('account closure environment contract', () => {
       expect(
         envSchema.safeParse({
           ...base,
+          ...sanitizedPrerequisites,
           [flag]: 'true',
           ACCOUNT_CLOSURE_HMAC_SECRET: ' '.repeat(32),
         }).success,
@@ -41,6 +54,7 @@ describe('account closure environment contract', () => {
       expect(
         envSchema.safeParse({
           ...base,
+          ...sanitizedPrerequisites,
           [flag]: 'true',
           ACCOUNT_CLOSURE_HMAC_SECRET: 'h'.repeat(32),
         }).success,
@@ -58,4 +72,29 @@ describe('account closure environment contract', () => {
       }).success,
     ).toBe(true);
   });
+
+  it.each(['ACCOUNT_CLOSURE_ENABLED', 'ACCOUNT_CLOSURE_WORKER_ENABLED'] as const)(
+    'requires both legacy sanitation prerequisites when %s is enabled',
+    (flag) => {
+      const enabled = {
+        ...base,
+        [flag]: 'true',
+        ACCOUNT_CLOSURE_HMAC_SECRET: 'h'.repeat(32),
+      };
+      expect(envSchema.safeParse(enabled).success).toBe(false);
+      expect(
+        envSchema.safeParse({
+          ...enabled,
+          ACCOUNT_CLOSURE_LEGACY_FEEDBACK_SANITIZED: 'true',
+        }).success,
+      ).toBe(false);
+      expect(
+        envSchema.safeParse({
+          ...enabled,
+          ACCOUNT_CLOSURE_LEGACY_FEEDBACK_SANITIZED: 'true',
+          ACCOUNT_CLOSURE_LEGACY_ANALYTICS_LOGS_SANITIZED: 'true',
+        }).success,
+      ).toBe(true);
+    },
+  );
 });

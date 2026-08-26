@@ -57,7 +57,35 @@ import type {
   ClosureHandlerContext,
   ClosureHandlerResult,
 } from '../handler-contract.js';
-import { getAccountClosureHandler } from '../handler-registry.js';
+import { accountSecurityClosureHandler } from './account-security.js';
+import { analyticsLogsClosureHandler } from './analytics-logs.js';
+import { crossTaskMemoryClosureHandler } from './cross-task-memory.js';
+import { energyAstrologyProfileClosureHandler } from './energy-astrology-profile.js';
+import { extensionLoginCookiesClosureHandler } from './extension-login-cookies.js';
+import { extensionSiteStatsClosureHandler } from './extension-site-stats.js';
+import { externalNotificationsClosureHandler } from './external-notifications.js';
+import { feedbackSupportClosureHandler } from './feedback-support.js';
+import { mediaAssetsClosureHandler } from './media-assets.js';
+import { stockPreferenceProfileClosureHandler } from './stock-preference-profile.js';
+import { taskExecutionClosureHandler } from './task-execution.js';
+
+const PRODUCTION_HANDLERS = {
+  account_security: accountSecurityClosureHandler,
+  task_execution: taskExecutionClosureHandler,
+  cross_task_memory: crossTaskMemoryClosureHandler,
+  energy_astrology_profile: energyAstrologyProfileClosureHandler,
+  stock_preference_profile: stockPreferenceProfileClosureHandler,
+  feedback_support: feedbackSupportClosureHandler,
+  external_notifications: externalNotificationsClosureHandler,
+  extension_site_stats: extensionSiteStatsClosureHandler,
+  extension_login_cookies: extensionLoginCookiesClosureHandler,
+  media_assets: mediaAssetsClosureHandler,
+  analytics_logs: analyticsLogsClosureHandler,
+} as const;
+
+function productionHandler(categoryId: keyof typeof PRODUCTION_HANDLERS): AccountClosureHandler {
+  return PRODUCTION_HANDLERS[categoryId];
+}
 
 interface RowRef {
   id: number;
@@ -124,7 +152,7 @@ describe.sequential('account closure relational handlers', () => {
   });
 
   it('pages deterministically at 100 rows, resumes from a saved numeric checkpoint, and is idempotent', async () => {
-    const handler = getAccountClosureHandler('extension_site_stats');
+    const handler = productionHandler('extension_site_stats');
     const first = await handler.run(context(null));
     expect(first).toEqual({
       kind: 'continue',
@@ -136,9 +164,7 @@ describe.sequential('account closure relational handlers', () => {
     expect(await ownedCount('user_site_stats', target.id)).toBe(105);
 
     // A new handler lookup simulates a process restart after the worker saved the page checkpoint.
-    const second = await getAccountClosureHandler('extension_site_stats').run(
-      context(first.checkpoint),
-    );
+    const second = await productionHandler('extension_site_stats').run(context(first.checkpoint));
     expect(second).toEqual({
       kind: 'continue',
       checkpoint: { processedCount: 200 },
@@ -158,7 +184,7 @@ describe.sequential('account closure relational handlers', () => {
   });
 
   it('fails closed before task cleanup while Task 7 objects or cross-category children remain', async () => {
-    const handler = getAccountClosureHandler('task_execution');
+    const handler = productionHandler('task_execution');
 
     const taskFilePage = await handler.run(context(null));
     expect(taskFilePage).toEqual({
@@ -173,7 +199,7 @@ describe.sequential('account closure relational handlers', () => {
     await expect(handler.run(context(taskFilePage.checkpoint))).rejects.toMatchObject({
       code: 'HANDLER_DEFERRED',
     });
-    const mediaResult = await runToCompletion(getAccountClosureHandler('media_assets'));
+    const mediaResult = await runToCompletion(productionHandler('media_assets'));
     expect(mediaResult.retention).toBe('deleted');
     for (const row of targetTaskGraph.blockerRows) {
       expect(await rowExists(row)).toBe(false);
@@ -196,7 +222,7 @@ describe.sequential('account closure relational handlers', () => {
       'task_execution',
     ] as const;
     for (const categoryId of categories) {
-      const result = await runToCompletion(getAccountClosureHandler(categoryId));
+      const result = await runToCompletion(productionHandler(categoryId));
       expect(result.retention).toBe('deleted');
       expect(result.processed).toBeGreaterThan(0);
     }
@@ -246,7 +272,7 @@ describe.sequential('account closure relational handlers', () => {
     expect(await userExists(other.id)).toBe(true);
 
     for (const categoryId of categories) {
-      await expect(getAccountClosureHandler(categoryId).run(context(null))).resolves.toEqual({
+      await expect(productionHandler(categoryId).run(context(null))).resolves.toEqual({
         kind: 'complete',
         processed: 0,
         retention: 'not_present',
@@ -254,14 +280,88 @@ describe.sequential('account closure relational handlers', () => {
     }
   });
 
-  it('keeps browser-only astrology separate but blocks external feedback and logs retention', async () => {
-    await expect(
-      getAccountClosureHandler('energy_astrology_profile').run(context(null)),
-    ).resolves.toEqual({ kind: 'complete', processed: 0, retention: 'not_present' });
-    for (const categoryId of ['feedback_support', 'analytics_logs'] as const) {
-      await expect(getAccountClosureHandler(categoryId).run(context(null))).rejects.toMatchObject({
+  it('pages feedback cases, deletes ordinary rows, minimizes reviewed holds, and isolates another user', async () => {
+    const previousGate = process.env.ACCOUNT_CLOSURE_LEGACY_FEEDBACK_SANITIZED;
+    Reflect.deleteProperty(process.env, 'ACCOUNT_CLOSURE_LEGACY_FEEDBACK_SANITIZED');
+    await seedFeedbackCases();
+    const handler = productionHandler('feedback_support');
+
+    try {
+      await expect(handler.run(context(null))).rejects.toMatchObject({
         code: 'EXTERNAL_RETENTION_REQUIRED',
       });
+      expect(await feedbackOwnedCount(target.id)).toBe(205);
+
+      process.env.ACCOUNT_CLOSURE_LEGACY_FEEDBACK_SANITIZED = 'true';
+      const first = await handler.run(context(null));
+      expect(first).toEqual({
+        kind: 'continue',
+        checkpoint: { processedCount: 100 },
+        processed: 100,
+      });
+      if (first.kind !== 'continue') throw new Error('expected first feedback page');
+      const second = await handler.run(context(first.checkpoint));
+      expect(second).toEqual({
+        kind: 'continue',
+        checkpoint: { processedCount: 200 },
+        processed: 200,
+      });
+      if (second.kind !== 'continue') throw new Error('expected second feedback page');
+      await expect(handler.run(context(second.checkpoint))).resolves.toEqual({
+        kind: 'complete',
+        processed: 205,
+        retention: 'restricted',
+      });
+
+      expect(await feedbackOwnedCount(target.id)).toBe(0);
+      expect(await feedbackOwnedCount(other.id)).toBe(1);
+      expect(await minimizedFeedbackHoldCount(501)).toBe(2);
+      await expect(handler.run(context(null))).resolves.toEqual({
+        kind: 'complete',
+        processed: 0,
+        retention: 'restricted',
+      });
+    } finally {
+      restoreProcessEnv('ACCOUNT_CLOSURE_LEGACY_FEEDBACK_SANITIZED', previousGate);
+    }
+  });
+
+  it('enforces mutually exclusive active and restricted feedback case states', async () => {
+    await expect(
+      db.execute(sql`
+        INSERT INTO feedback_cases
+          (external_id, user_id, closure_request_id, message, hold_reason, restricted_at)
+        VALUES
+          ('fbc_invalid_restricted', NULL, 501, 'raw content survived', 'legal_hold', NOW(3))
+      `),
+    ).rejects.toThrow();
+    await expect(
+      db.execute(sql`
+        INSERT INTO feedback_cases (external_id, user_id, message)
+        VALUES ('fbc_invalid_active', NULL, 'orphaned active content')
+      `),
+    ).rejects.toThrow();
+  });
+
+  it('keeps browser-only astrology separate and closes analytics only after legacy sanitation', async () => {
+    await expect(productionHandler('energy_astrology_profile').run(context(null))).resolves.toEqual(
+      { kind: 'complete', processed: 0, retention: 'not_present' },
+    );
+
+    const previousGate = process.env.ACCOUNT_CLOSURE_LEGACY_ANALYTICS_LOGS_SANITIZED;
+    Reflect.deleteProperty(process.env, 'ACCOUNT_CLOSURE_LEGACY_ANALYTICS_LOGS_SANITIZED');
+    try {
+      await expect(productionHandler('analytics_logs').run(context(null))).rejects.toMatchObject({
+        code: 'EXTERNAL_RETENTION_REQUIRED',
+      });
+      process.env.ACCOUNT_CLOSURE_LEGACY_ANALYTICS_LOGS_SANITIZED = 'true';
+      await expect(productionHandler('analytics_logs').run(context(null))).resolves.toEqual({
+        kind: 'complete',
+        processed: 0,
+        retention: 'restricted',
+      });
+    } finally {
+      restoreProcessEnv('ACCOUNT_CLOSURE_LEGACY_ANALYTICS_LOGS_SANITIZED', previousGate);
     }
 
     expect(await tableCount('energy_daily_metrics')).toBe(1);
@@ -271,6 +371,8 @@ describe.sequential('account closure relational handlers', () => {
 
   it('fails closed when governed relational capabilities appear and restores the test schema', async () => {
     const analyticsBefore = await anonymousAnalyticsState();
+    process.env.ACCOUNT_CLOSURE_LEGACY_FEEDBACK_SANITIZED = 'true';
+    process.env.ACCOUNT_CLOSURE_LEGACY_ANALYTICS_LOGS_SANITIZED = 'true';
 
     try {
       await db.execute(sql`
@@ -280,11 +382,26 @@ describe.sequential('account closure relational handlers', () => {
           PRIMARY KEY (id)
         ) ENGINE=InnoDB
       `);
-      await expect(
-        getAccountClosureHandler('feedback_support').run(context(null)),
-      ).rejects.toMatchObject({ code: 'CAPABILITY_CHANGED' });
+      await expect(productionHandler('feedback_support').run(context(null))).rejects.toMatchObject({
+        code: 'CAPABILITY_CHANGED',
+      });
     } finally {
       await db.execute(sql`DROP TABLE IF EXISTS feedback_support_cases_task6`);
+    }
+
+    let feedbackColumnAdded = false;
+    try {
+      await db.execute(
+        sql`ALTER TABLE feedback_cases ADD COLUMN future_user_id BIGINT UNSIGNED NULL`,
+      );
+      feedbackColumnAdded = true;
+      await expect(productionHandler('feedback_support').run(context(null))).rejects.toMatchObject({
+        code: 'CAPABILITY_CHANGED',
+      });
+    } finally {
+      if (feedbackColumnAdded) {
+        await db.execute(sql`ALTER TABLE feedback_cases DROP COLUMN future_user_id`);
+      }
     }
 
     try {
@@ -296,7 +413,7 @@ describe.sequential('account closure relational handlers', () => {
         ) ENGINE=InnoDB
       `);
       await expect(
-        getAccountClosureHandler('energy_astrology_profile').run(context(null)),
+        productionHandler('energy_astrology_profile').run(context(null)),
       ).rejects.toMatchObject({ code: 'CAPABILITY_CHANGED' });
     } finally {
       await db.execute(sql`DROP TABLE IF EXISTS energy_astrology_profiles`);
@@ -305,28 +422,37 @@ describe.sequential('account closure relational handlers', () => {
     let analyticsColumnAdded = false;
     try {
       await db.execute(
-        sql`ALTER TABLE energy_daily_metrics ADD COLUMN user_id BIGINT UNSIGNED NULL`,
+        sql`ALTER TABLE energy_daily_metrics ADD COLUMN future_user_id BIGINT UNSIGNED NULL`,
       );
       analyticsColumnAdded = true;
-      await expect(
-        getAccountClosureHandler('analytics_logs').run(context(null)),
-      ).rejects.toMatchObject({ code: 'CAPABILITY_CHANGED' });
+      await expect(productionHandler('analytics_logs').run(context(null))).rejects.toMatchObject({
+        code: 'CAPABILITY_CHANGED',
+      });
     } finally {
       if (analyticsColumnAdded) {
-        await db.execute(sql`ALTER TABLE energy_daily_metrics DROP COLUMN user_id`);
+        await db.execute(sql`ALTER TABLE energy_daily_metrics DROP COLUMN future_user_id`);
       }
     }
 
     expect(await temporaryCapabilityResidueCount()).toBe(0);
     expect(await anonymousAnalyticsState()).toEqual(analyticsBefore);
-    await expect(
-      getAccountClosureHandler('energy_astrology_profile').run(context(null)),
-    ).resolves.toEqual({ kind: 'complete', processed: 0, retention: 'not_present' });
-    for (const categoryId of ['feedback_support', 'analytics_logs'] as const) {
-      await expect(getAccountClosureHandler(categoryId).run(context(null))).rejects.toMatchObject({
-        code: 'EXTERNAL_RETENTION_REQUIRED',
-      });
-    }
+    await expect(productionHandler('energy_astrology_profile').run(context(null))).resolves.toEqual(
+      { kind: 'complete', processed: 0, retention: 'not_present' },
+    );
+    process.env.ACCOUNT_CLOSURE_LEGACY_FEEDBACK_SANITIZED = 'true';
+    process.env.ACCOUNT_CLOSURE_LEGACY_ANALYTICS_LOGS_SANITIZED = 'true';
+    await expect(productionHandler('feedback_support').run(context(null))).resolves.toEqual({
+      kind: 'complete',
+      processed: 0,
+      retention: 'restricted',
+    });
+    await expect(productionHandler('analytics_logs').run(context(null))).resolves.toEqual({
+      kind: 'complete',
+      processed: 0,
+      retention: 'restricted',
+    });
+    Reflect.deleteProperty(process.env, 'ACCOUNT_CLOSURE_LEGACY_FEEDBACK_SANITIZED');
+    Reflect.deleteProperty(process.env, 'ACCOUNT_CLOSURE_LEGACY_ANALYTICS_LOGS_SANITIZED');
   });
 
   function context(checkpoint: ClosureCheckpoint): ClosureHandlerContext {
@@ -905,6 +1031,51 @@ describe.sequential('account closure relational handlers', () => {
     });
   }
 
+  async function seedFeedbackCases() {
+    await db.execute(sql`
+      INSERT INTO account_closure_requests
+        (id, external_id, user_id, active_user_id, status, requested_at, grace_ends_at)
+      VALUES
+        (501, 'acl_relational_test', ${target.id}, ${target.id}, 'processing',
+         '2026-08-26 00:00:00.000', '2026-09-02 00:00:00.000')
+    `);
+    const rows = Array.from({ length: 205 }, (_, index) => {
+      const holdReason = index === 50 ? 'legal_hold' : index === 150 ? 'active_dispute' : null;
+      return sql`(${`fbc_target_${index}`}, ${target.id}, ${`private message ${index}`}, ${`context ${index}`}, ${`ua ${index}`}, ${holdReason})`;
+    });
+    await db.execute(sql`
+      INSERT INTO feedback_cases
+        (external_id, user_id, message, context, user_agent, hold_reason)
+      VALUES ${sql.join(rows, sql`, `)}
+    `);
+    await db.execute(sql`
+      INSERT INTO feedback_cases
+        (external_id, user_id, message, context, user_agent, hold_reason)
+      VALUES ('fbc_other', ${other.id}, 'other private message', 'other context', 'other ua', NULL)
+    `);
+  }
+
+  async function feedbackOwnedCount(userId: number): Promise<number> {
+    const result = await db.execute(
+      sql`SELECT COUNT(*) AS value FROM feedback_cases WHERE user_id = ${userId}`,
+    );
+    return resultCount(result);
+  }
+
+  async function minimizedFeedbackHoldCount(requestId: number): Promise<number> {
+    const result = await db.execute(sql`
+      SELECT COUNT(*) AS value
+      FROM feedback_cases
+      WHERE closure_request_id = ${requestId}
+        AND user_id IS NULL
+        AND message IS NULL
+        AND context IS NULL
+        AND user_agent IS NULL
+        AND hold_reason IN ('legal_hold', 'active_dispute')
+    `);
+    return resultCount(result);
+  }
+
   async function seedAnonymousAnalytics() {
     const expiresAt = new Date('2026-09-26T00:00:00.000Z');
     await db.insert(energyDailyMetrics).values({
@@ -971,7 +1142,7 @@ describe.sequential('account closure relational handlers', () => {
           FROM information_schema.columns
           WHERE table_schema = DATABASE()
             AND table_name = 'energy_daily_metrics'
-            AND column_name = 'user_id'
+            AND column_name = 'future_user_id'
         ) AS value
     `);
     return resultCount(result);
@@ -1007,4 +1178,9 @@ function resultCount(result: unknown): number {
     ? (rows[0] as { value?: number | string } | undefined)
     : undefined;
   return Number(row?.value ?? 0);
+}
+
+function restoreProcessEnv(name: string, value: string | undefined): void {
+  if (value === undefined) Reflect.deleteProperty(process.env, name);
+  else process.env[name] = value;
 }

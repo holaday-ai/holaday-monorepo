@@ -7,7 +7,8 @@ requests over rolling application or database state backward.
 
 ## Safety invariants
 
-- Apply and verify migration `0051_account_closures.sql` before deploying code.
+- Apply and verify migrations `0051_account_closures.sql` and
+  `0052_feedback_cases.sql` before deploying code.
 - Ship with `ACCOUNT_CLOSURE_ENABLED=false` and
   `ACCOUNT_CLOSURE_WORKER_ENABLED=false`.
 - If either flag is true, `ACCOUNT_CLOSURE_HMAC_SECRET` must be a dedicated
@@ -15,6 +16,14 @@ requests over rolling application or database state backward.
   length; never print its value or a derived subject digest.
 - `ACCOUNT_CLOSURE_ALLOWLIST` is a comma-separated list of exact user external
   IDs. It is not a general entitlement switch.
+- Both `ACCOUNT_CLOSURE_LEGACY_FEEDBACK_SANITIZED` and
+  `ACCOUNT_CLOSURE_LEGACY_ANALYTICS_LOGS_SANITIZED` default to `false`. The API
+  and worker refuse to start enabled until both are true. Set them true only
+  after a two-person review confirms the pre-0052 Resend inbox and PM2/ops-log
+  surfaces were deleted where appropriate or placed under a documented,
+  access-restricted retention control. Record only confirmation status,
+  reviewer, timestamp, and evidence reference; never copy or print legacy
+  message/log content into the change record.
 - The worker must run as uid `998`, with exactly one PM2 instance, no listening
   port, a `512M` PM2 memory ceiling, and a `660000ms` kill timeout. The runtime
   memory guard stops new claims at 480 MiB; the kill timeout leaves 60 seconds
@@ -25,19 +34,23 @@ requests over rolling application or database state backward.
 
 ## Staged enablement
 
-1. Deploy migration 0051 with both flags false. Run the database verification
-   gate and ordinary login, task, payment, and partner health checks.
+1. Deploy migrations 0051 and 0052 with both closure flags and both legacy
+   sanitation prerequisites false. Run the database verification gate and
+   ordinary login, task, feedback, payment, and partner health checks.
 2. Deploy application and dormant worker code. With the worker flag false,
    verify that no stale `holaday-account-closure-worker` process exists.
-3. Configure the dedicated HMAC secret and completion email/SMS templates via
+3. Complete the one-time legacy Resend/PM2 sanitation and restricted-retention
+   review, then set both sanitation prerequisites true. This is a confirmation
+   gate, not permission to query or export old content.
+4. Configure the dedicated HMAC secret and completion email/SMS templates via
    the approved secret path. Do not paste secrets into a shell history, log,
    ticket, or pull request.
-4. Put only the dedicated synthetic external ID in the allowlist, set the API
+5. Put only the dedicated synthetic external ID in the allowlist, set the API
    flag true, then set the worker flag true. Restart through
    `scripts/orchestrator-runtime.sh`; do not start an extra worker manually.
-5. Verify one worker process, uid 998, no worker listener, RSS below 512 MiB,
+6. Verify one worker process, uid 998, no worker listener, RSS below 512 MiB,
    and a healthy application before exercising submit and cancellation.
-6. Expand to employee external IDs only after the synthetic flow succeeds.
+7. Expand to employee external IDs only after the synthetic flow succeeds.
    Observe at least one complete seven-day window before considering general
    availability. Small samples are insufficient evidence for policy changes.
 
@@ -154,5 +167,6 @@ effects did not happen or to reopen a completed account.
 For a bad release, stop new applications, drain or pause the worker as above,
 fix forward, and retry from the persisted checkpoint. Schema rollback is
 prohibited after any request enters `processing`. Preserve restricted
-financial, dispute, security, KYC, ledger, closure-step, and receipt records
-according to their approved policies; do not assign a made-up common expiry.
+financial, reviewed feedback legal/dispute, operations/security log, KYC,
+ledger, closure-step, and receipt records according to their approved
+policies; do not assign a made-up common expiry.

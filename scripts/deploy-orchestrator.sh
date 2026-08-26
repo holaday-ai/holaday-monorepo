@@ -309,6 +309,7 @@ if ! run_with_retry "Vultr database migration gate" \
     cd /opt/holaday-monorepo && \
     set -a && . apps/orchestrator/.env && set +a && \
     test -f apps/orchestrator/drizzle/0051_account_closures.sql && \
+    test -f apps/orchestrator/drizzle/0052_feedback_cases.sql && \
     pnpm --filter @holaday/orchestrator db:migrate:numbered && \
     pnpm --filter @holaday/orchestrator db:verify"; then
   abort_with_rollback "database migration/schema verification failed"

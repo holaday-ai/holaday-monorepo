@@ -224,6 +224,7 @@ const taskExecutionRelationalClosureHandler = createRelationalDeleteHandler({
 export const taskExecutionClosureHandler: AccountClosureHandler = {
   categoryId: 'task_execution',
   version: 1,
+  retentionOutcomes: ['deleted', 'not_present'],
   async run(context) {
     context.signal.throwIfAborted();
     const pageSize = Math.min(context.pageSize, 100);

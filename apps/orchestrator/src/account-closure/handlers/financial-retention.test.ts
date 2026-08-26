@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { accountClosureSteps } from '../../db/schema/account-closures.js';
-import { getAccountClosureHandler } from '../handler-registry.js';
-import { sanitizePartnerMetadataForClosure } from './partner-kyc-ledger.js';
+import {
+  partnerKycLedgerClosureHandler,
+  sanitizePartnerMetadataForClosure,
+} from './partner-kyc-ledger.js';
 import {
   RETAINED_PAYMENT_METADATA_KEYS,
+  paymentsEntitlementsClosureHandler,
   sanitizePaymentMetadataForClosure,
 } from './payments-entitlements.js';
 
@@ -107,8 +110,8 @@ describe('financial account-closure retention', () => {
   });
 
   it('registers real Task 8 handlers instead of deferred placeholders', async () => {
-    for (const categoryId of ['payments_entitlements', 'partner_kyc_ledger'] as const) {
-      const handler = getAccountClosureHandler(categoryId);
+    for (const handler of [paymentsEntitlementsClosureHandler, partnerKycLedgerClosureHandler]) {
+      const categoryId = handler.categoryId;
       expect(handler).toMatchObject({ categoryId, version: 1 });
       await expect(handler.run({} as never)).rejects.not.toMatchObject({
         code: 'HANDLER_DEFERRED',

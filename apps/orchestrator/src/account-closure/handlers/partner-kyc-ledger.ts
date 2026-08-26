@@ -119,6 +119,7 @@ interface PartnerTarget {
 export const partnerKycLedgerClosureHandler: AccountClosureHandler = {
   categoryId: 'partner_kyc_ledger',
   version: 1,
+  retentionOutcomes: ['restricted', 'not_present'],
   async run(context) {
     context.signal.throwIfAborted();
     const pageSize = Math.min(context.pageSize, 100);

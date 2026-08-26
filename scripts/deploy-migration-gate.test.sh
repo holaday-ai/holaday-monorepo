@@ -84,6 +84,10 @@ elif [[ "$command_text" == *"db:migrate:numbered"* ]]; then
     echo "migration-0051-gate-missing" >> "$TEST_EVENT_LOG"
     exit 46
   fi
+  if [[ "$command_text" != *"test -f apps/orchestrator/drizzle/0052_feedback_cases.sql"* ]]; then
+    echo "migration-0052-gate-missing" >> "$TEST_EVENT_LOG"
+    exit 48
+  fi
   echo "migration" >> "$TEST_EVENT_LOG"
   [[ "$TEST_FAIL_PHASE" != "migration" ]] || exit 43
 elif [[ "$command_text" == *"git reset --hard '$TEST_LIVE_HEAD'"* ]]; then
