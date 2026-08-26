@@ -219,6 +219,9 @@ export async function runAccountClosureWorkerTick(
           : null,
       pageSize: 100,
     });
+    if (result.kind === 'complete' && !handler.retentionOutcomes.includes(result.retention)) {
+      throw new ClosureHandlerError('INVARIANT_VIOLATION');
+    }
     await heartbeat.stop();
     if (heartbeat.signal.aborted) return 'idle';
     if (result.kind === 'continue') {

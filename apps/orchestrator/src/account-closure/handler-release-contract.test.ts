@@ -1,44 +1,50 @@
 import { describe, expect, it } from 'vitest';
-import type { DataCategoryId } from '../data-governance/types.js';
-import type { AccountClosureHandler } from './handler-contract.js';
 import { ACCOUNT_CLOSURE_HANDLER_BINDINGS } from './handler-registry.js';
-import { accountSecurityClosureHandler } from './handlers/account-security.js';
-import { analyticsLogsClosureHandler } from './handlers/analytics-logs.js';
-import { crossTaskMemoryClosureHandler } from './handlers/cross-task-memory.js';
-import { energyAstrologyProfileClosureHandler } from './handlers/energy-astrology-profile.js';
-import { extensionLoginCookiesClosureHandler } from './handlers/extension-login-cookies.js';
-import { extensionSiteStatsClosureHandler } from './handlers/extension-site-stats.js';
-import { externalNotificationsClosureHandler } from './handlers/external-notifications.js';
-import { feedbackSupportClosureHandler } from './handlers/feedback-support.js';
-import { mediaAssetsClosureHandler } from './handlers/media-assets.js';
-import { partnerKycLedgerClosureHandler } from './handlers/partner-kyc-ledger.js';
-import { paymentsEntitlementsClosureHandler } from './handlers/payments-entitlements.js';
-import { stockPreferenceProfileClosureHandler } from './handlers/stock-preference-profile.js';
-import { taskExecutionClosureHandler } from './handlers/task-execution.js';
-
-const PRODUCTION_HANDLERS: Readonly<Record<DataCategoryId, AccountClosureHandler>> = {
-  account_security: accountSecurityClosureHandler,
-  task_execution: taskExecutionClosureHandler,
-  cross_task_memory: crossTaskMemoryClosureHandler,
-  energy_astrology_profile: energyAstrologyProfileClosureHandler,
-  stock_preference_profile: stockPreferenceProfileClosureHandler,
-  feedback_support: feedbackSupportClosureHandler,
-  external_notifications: externalNotificationsClosureHandler,
-  extension_site_stats: extensionSiteStatsClosureHandler,
-  extension_login_cookies: extensionLoginCookiesClosureHandler,
-  payments_entitlements: paymentsEntitlementsClosureHandler,
-  partner_kyc_ledger: partnerKycLedgerClosureHandler,
-  media_assets: mediaAssetsClosureHandler,
-  analytics_logs: analyticsLogsClosureHandler,
-};
+import {
+  ACCOUNT_CLOSURE_HANDLER_EXECUTION_EVIDENCE,
+  ACCOUNT_CLOSURE_HANDLER_EXECUTION_TEST,
+} from './handler-release-evidence.js';
 
 describe('production account closure handler release contract', () => {
-  it('binds each category to the exact imported v1 handler with a declared retention capability', () => {
+  it('binds each category to exact runtime identity, behavior evidence, and retention capability', () => {
     expect(ACCOUNT_CLOSURE_HANDLER_BINDINGS).toHaveLength(13);
-    for (const binding of ACCOUNT_CLOSURE_HANDLER_BINDINGS) {
-      expect(binding.handler).toBe(PRODUCTION_HANDLERS[binding.categoryId]);
-      expect(binding.handler).toMatchObject({ categoryId: binding.categoryId, version: 1 });
-      expect(binding.handler.retentionOutcomes.length).toBeGreaterThan(0);
+    expect(ACCOUNT_CLOSURE_HANDLER_EXECUTION_EVIDENCE).toHaveLength(13);
+    expect(ACCOUNT_CLOSURE_HANDLER_EXECUTION_TEST).toBe(
+      'apps/orchestrator/src/account-closure/handler-release-contract.test.ts',
+    );
+    for (const evidence of ACCOUNT_CLOSURE_HANDLER_EXECUTION_EVIDENCE) {
+      const binding = ACCOUNT_CLOSURE_HANDLER_BINDINGS.find(
+        (candidate) => candidate.categoryId === evidence.categoryId,
+      );
+      expect(evidence.handler).toBe(binding?.handler);
+      expect(evidence.handlerRef).toBe(binding?.handlerRef);
+      expect(evidence.behaviorTestRef).toMatch(/\.integration\.test\.ts$/);
+      expect(evidence.handler).toMatchObject({ categoryId: evidence.categoryId, version: 1 });
+      expect(evidence.handler.retentionOutcomes.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('executes every exact production handler through the shared evidence manifest', async () => {
+    const controller = new AbortController();
+    const abortReason = new Error('governance execution evidence abort');
+    controller.abort(abortReason);
+    const context = {
+      db: {},
+      logger: {},
+      storage: {},
+      signal: controller.signal,
+      request: {
+        id: 1,
+        externalId: 'acl_governance_evidence',
+        userId: 1,
+        userExternalId: 'usr_governance_evidence',
+      },
+      checkpoint: null,
+      pageSize: 100,
+    } as const;
+
+    for (const evidence of ACCOUNT_CLOSURE_HANDLER_EXECUTION_EVIDENCE) {
+      await expect(evidence.execute(context as never)).rejects.toBe(abortReason);
     }
   });
 });

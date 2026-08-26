@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ClosureHandlerContext } from './handler-contract.js';
 import { createExternalRetentionHandler } from './handler-contract.js';
-import { analyticsLogsClosureHandler } from './handlers/analytics-logs.js';
+import {
+  ACCOUNT_CLOSURE_ANALYTICS_SCHEMA_MANIFEST,
+  analyticsLogsClosureHandler,
+} from './handlers/analytics-logs.js';
 import { energyAstrologyProfileClosureHandler } from './handlers/energy-astrology-profile.js';
 import { feedbackSupportClosureHandler } from './handlers/feedback-support.js';
 
@@ -63,9 +66,20 @@ describe('external-retention closure handler', () => {
           : 'ACCOUNT_CLOSURE_LEGACY_ANALYTICS_LOGS_SANITIZED';
       const previous = process.env[flag];
       process.env[flag] = 'true';
+      const probeRows =
+        handler.categoryId === 'analytics_logs'
+          ? Object.entries(ACCOUNT_CLOSURE_ANALYTICS_SCHEMA_MANIFEST).flatMap(
+              ([tableName, columns]) =>
+                Object.entries(columns).map(([columnName, definition]) => ({
+                  tableName,
+                  columnName,
+                  ...definition,
+                })),
+            )
+          : [{ association_count: 0 }];
       const restrictedContext = {
         db: {
-          execute: vi.fn().mockResolvedValue([[{ association_count: 0 }]]),
+          execute: vi.fn().mockResolvedValue([probeRows]),
           select: () => ({
             from: () => ({
               where: () => ({

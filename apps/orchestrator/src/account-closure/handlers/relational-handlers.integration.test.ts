@@ -369,6 +369,26 @@ describe.sequential('account closure relational handlers', () => {
     expect(await tableCount('energy_event_receipts')).toBe(1);
   });
 
+  it('fails closed when a governed analytics column definition drifts', async () => {
+    const previousGate = process.env.ACCOUNT_CLOSURE_LEGACY_ANALYTICS_LOGS_SANITIZED;
+    process.env.ACCOUNT_CLOSURE_LEGACY_ANALYTICS_LOGS_SANITIZED = 'true';
+    let analyticsDefinitionChanged = false;
+    try {
+      await db.execute(sql`ALTER TABLE energy_daily_visitors MODIFY visitor_hash VARCHAR(64) NULL`);
+      analyticsDefinitionChanged = true;
+      await expect(productionHandler('analytics_logs').run(context(null))).rejects.toMatchObject({
+        code: 'CAPABILITY_CHANGED',
+      });
+    } finally {
+      if (analyticsDefinitionChanged) {
+        await db.execute(
+          sql`ALTER TABLE energy_daily_visitors MODIFY visitor_hash CHAR(64) NOT NULL`,
+        );
+      }
+      restoreProcessEnv('ACCOUNT_CLOSURE_LEGACY_ANALYTICS_LOGS_SANITIZED', previousGate);
+    }
+  });
+
   it('fails closed when governed relational capabilities appear and restores the test schema', async () => {
     const analyticsBefore = await anonymousAnalyticsState();
     process.env.ACCOUNT_CLOSURE_LEGACY_FEEDBACK_SANITIZED = 'true';
@@ -431,6 +451,25 @@ describe.sequential('account closure relational handlers', () => {
     } finally {
       if (analyticsColumnAdded) {
         await db.execute(sql`ALTER TABLE energy_daily_metrics DROP COLUMN future_user_id`);
+      }
+    }
+
+    let analyticsTableAdded = false;
+    try {
+      await db.execute(sql`
+        CREATE TABLE energy_account_analytics (
+          id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+          user_id BIGINT UNSIGNED NULL,
+          PRIMARY KEY (id)
+        ) ENGINE=InnoDB
+      `);
+      analyticsTableAdded = true;
+      await expect(productionHandler('analytics_logs').run(context(null))).rejects.toMatchObject({
+        code: 'CAPABILITY_CHANGED',
+      });
+    } finally {
+      if (analyticsTableAdded) {
+        await db.execute(sql`DROP TABLE energy_account_analytics`);
       }
     }
 
@@ -1143,6 +1182,11 @@ describe.sequential('account closure relational handlers', () => {
           WHERE table_schema = DATABASE()
             AND table_name = 'energy_daily_metrics'
             AND column_name = 'future_user_id'
+        ) + (
+          SELECT COUNT(*)
+          FROM information_schema.tables
+          WHERE table_schema = DATABASE()
+            AND table_name = 'energy_account_analytics'
         ) AS value
     `);
     return resultCount(result);

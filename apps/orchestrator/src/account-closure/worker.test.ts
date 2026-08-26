@@ -147,6 +147,23 @@ describe('account closure durable worker', () => {
     );
   });
 
+  it('rejects a completed retention outcome the production handler did not declare', async () => {
+    const repo = repository();
+    const undeclared = handler({
+      kind: 'complete',
+      processed: 1,
+      retention: 'restricted',
+    });
+
+    expect(await runAccountClosureWorkerTick(deps({ repository: repo, handler: undeclared }))).toBe(
+      'progress',
+    );
+    expect(repo.markStepSucceeded).not.toHaveBeenCalled();
+    expect(repo.markStepRetryable).toHaveBeenCalledWith(
+      expect.objectContaining({ errorCode: 'invariant_violation' }),
+    );
+  });
+
   it.each(CLOSURE_RETRY_DELAYS_MS.map((delay, index) => [index, delay] as const))(
     'schedules failure %i using the exact delay',
     async (attemptCount, delay) => {
