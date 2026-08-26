@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 
 import { cleanup, render, screen } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Outlet, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PlanPage } from './PlanPage';
 
@@ -39,6 +39,41 @@ afterEach(() => {
 });
 
 describe('PlanPage renewal disclosure', () => {
+  it('uses the authenticated shell plan immediately instead of waiting on a duplicate profile request', () => {
+    authMeQuery.mockReturnValue(new Promise(() => {}));
+
+    render(
+      <MemoryRouter initialEntries={['/plan']}>
+        <Routes>
+          <Route
+            element={
+              <Outlet
+                context={{
+                  me: {
+                    userId: 'usr_plan_shell',
+                    email: 'member@example.com',
+                    phone: null,
+                    displayName: 'Member',
+                    plan: 'pro',
+                    multiUser: false,
+                    selectedRoles: [],
+                    role: 'user',
+                    videoEnabled: false,
+                  },
+                }}
+              />
+            }
+          >
+            <Route path="/plan" element={<PlanPage />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole('button', { name: '当前使用中' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '正在确认当前套餐…' })).toBeNull();
+  });
+
   it('does not present a guessed current plan or first-month eligibility while account data loads', () => {
     authMeQuery.mockReturnValue(new Promise(() => {}));
 
