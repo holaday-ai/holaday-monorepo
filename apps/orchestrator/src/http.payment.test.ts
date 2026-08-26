@@ -268,6 +268,14 @@ describe('internal payment confirmation', () => {
     expect(userState.plan).toBe('pro');
     expect(paymentRows).toHaveLength(1);
     expect(paymentRows[0]?.status).toBe('completed');
+    expect(paymentRows[0]?.metadata).toEqual({
+      cycle: 'monthly',
+      firstMonth: true,
+      source: 'cn-payment-gateway',
+      payerEmail: undefined,
+      captureStatus: 'COMPLETED',
+      firstMonthConsumed: true,
+    });
     expect(grantFirstMonthBonusSpy).toHaveBeenCalledWith(42, 'pro');
   });
 

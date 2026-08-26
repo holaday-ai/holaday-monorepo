@@ -168,6 +168,7 @@ export async function completePaymentInTransaction(
   settlement: SettlementContext,
   capture: {
     readonly captureId: string;
+    readonly payerEmail?: string | null;
     readonly captureStatus: string;
     readonly metadata?: Record<string, unknown>;
   },
@@ -175,24 +176,34 @@ export async function completePaymentInTransaction(
   const metadata = paymentMetadata(row);
   const firstMonthConsumed = settlement.firstMonthRequested && settlement.firstMonthEligible;
   const settledAt = new Date();
-  const retainedMetadata = sanitizePaymentMetadataForClosure({
-    ...metadata,
-    ...capture.metadata,
-    provider: row.provider,
-    environment: metadata.environment ?? metadata.env,
-    cycle: settlement.cycle,
-    packId: row.kind === 'addon' ? row.plan : metadata.packId,
-    providerStatus: capture.captureStatus,
-    currency: row.currency,
-    settledAt: settledAt.toISOString(),
-  });
+  const completedMetadata =
+    settlement.user.status === 'active'
+      ? {
+          ...metadata,
+          ...capture.metadata,
+          payerEmail: capture.payerEmail,
+          captureStatus: capture.captureStatus,
+          firstMonthConsumed,
+        }
+      : sanitizePaymentMetadataForClosure({
+          ...metadata,
+          ...capture.metadata,
+          payerEmail: capture.payerEmail,
+          provider: row.provider,
+          environment: metadata.environment ?? metadata.env,
+          cycle: settlement.cycle,
+          packId: row.kind === 'addon' ? row.plan : metadata.packId,
+          providerStatus: capture.captureStatus,
+          currency: row.currency,
+          settledAt: settledAt.toISOString(),
+        });
   const updateResult = await tx
     .update(payments)
     .set({
       status: 'completed',
       completedAt: settledAt,
       providerCaptureId: capture.captureId,
-      metadata: retainedMetadata,
+      metadata: completedMetadata,
     })
     .where(and(eq(payments.id, row.id), eq(payments.status, 'pending')));
   if (readAffectedRows(updateResult) !== 1) return false;
@@ -552,6 +563,7 @@ export const paymentRouter = router({
 
       const completed = await completePaymentInTransaction(tx, lockedRow, settlement, {
         captureId: capture.captureId,
+        payerEmail: capture.payerEmail,
         captureStatus: capture.status,
       });
       return {

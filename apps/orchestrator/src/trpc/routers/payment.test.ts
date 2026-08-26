@@ -195,6 +195,16 @@ describe('captureOrder — affectedRows-gated entitlement (regression)', () => {
       .captureOrder({ paymentId: 'pay_sub', orderId: 'ord_sub' });
     expect(res).toEqual({ ok: true, plan: 'pro' });
     expect(updates.some((u) => u.table === 'users' && u.set.plan === 'pro')).toBe(true);
+    const paymentWrite = updates.find(
+      (update) => update.table === 'payments' && update.set.status === 'completed',
+    );
+    expect(paymentWrite?.set.metadata).toEqual({
+      firstMonth: true,
+      cycle: 'monthly',
+      payerEmail: 'payer@example.com',
+      captureStatus: 'COMPLETED',
+      firstMonthConsumed: true,
+    });
     expect(grantFirstMonthBonusSpy).toHaveBeenCalledTimes(1);
     expect(grantFirstMonthBonusSpy).toHaveBeenCalledWith(42, 'pro');
   });
