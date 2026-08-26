@@ -11,6 +11,26 @@ const REPLAYABLE_MISSING_DROP = {
   statement: 'DROP INDEX `ix_payments_provider_order` ON `payments`',
 };
 
+export const REQUIRED_PRE_APP_ROLLOUT_MIGRATIONS = ['0051_account_closures.sql'];
+
+export function findMissingRequiredPreAppRolloutMigrations(files) {
+  return REQUIRED_PRE_APP_ROLLOUT_MIGRATIONS.filter((migration) => !files.includes(migration));
+}
+
+export function assertDatabaseReadyForAppRollout(appliedMigrations) {
+  const missing = findMissingRequiredPreAppRolloutMigrations(appliedMigrations);
+  if (missing.length > 0) {
+    throw new Error(`Account closure migrations must run before application rollout: ${missing.join(', ')}`);
+  }
+}
+
+export function findNonAdditiveMigrationStatements(statements) {
+  return statements.filter((statement) => {
+    const normalized = statement.trim().replace(/\s+/g, ' ');
+    return /^(?:DROP|TRUNCATE)\b|^DELETE\s+FROM\b/i.test(normalized);
+  });
+}
+
 export function findDuplicateMigrationNumbers(files) {
   const counts = new Map();
   for (const file of files) {
@@ -53,6 +73,72 @@ export function splitMigrationStatements(sql) {
 }
 
 export const REQUIRED_INDEXES = [
+  {
+    table: 'account_closure_requests',
+    name: 'uk_account_closure_requests_external_id',
+    unique: true,
+    columns: ['external_id'],
+  },
+  {
+    table: 'account_closure_requests',
+    name: 'uk_account_closure_requests_active_user',
+    unique: true,
+    columns: ['active_user_id'],
+  },
+  {
+    table: 'account_closure_requests',
+    name: 'ix_account_closure_requests_status_grace',
+    unique: false,
+    columns: ['status', 'grace_ends_at'],
+  },
+  {
+    table: 'account_closure_steps',
+    name: 'uk_account_closure_steps_request_category',
+    unique: true,
+    columns: ['request_id', 'category_id'],
+  },
+  {
+    table: 'account_closure_steps',
+    name: 'ix_account_closure_steps_status_next_attempt',
+    unique: false,
+    columns: ['status', 'next_attempt_at'],
+  },
+  {
+    table: 'account_closure_steps',
+    name: 'ix_account_closure_steps_lease_until',
+    unique: false,
+    columns: ['lease_until'],
+  },
+  {
+    table: 'account_closure_effects',
+    name: 'uk_account_closure_effects_request_resource',
+    unique: true,
+    columns: ['request_id', 'resource_type', 'resource_id'],
+  },
+  {
+    table: 'account_closure_challenges',
+    name: 'uk_account_closure_challenges_external_id',
+    unique: true,
+    columns: ['external_id'],
+  },
+  {
+    table: 'account_closure_challenges',
+    name: 'ix_account_closure_challenges_user_action_expiry',
+    unique: false,
+    columns: ['user_id', 'action', 'expires_at'],
+  },
+  {
+    table: 'account_closure_receipts',
+    name: 'uk_account_closure_receipts_number',
+    unique: true,
+    columns: ['receipt_number'],
+  },
+  {
+    table: 'account_closure_receipts',
+    name: 'uk_account_closure_receipts_request_kind',
+    unique: true,
+    columns: ['request_id', 'kind'],
+  },
   {
     table: 'payments',
     name: 'uk_payments_provider_order',

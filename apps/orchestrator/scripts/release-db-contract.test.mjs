@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
-import { readdirSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { describe, it } from 'node:test';
 import {
+  assertDatabaseReadyForAppRollout,
   findDuplicateMigrationNumbers,
   findMissingRequiredIndexes,
+  findMissingRequiredPreAppRolloutMigrations,
+  findNonAdditiveMigrationStatements,
   isSkippableAlreadyAppliedError,
   splitMigrationStatements,
 } from './release-db-contract.mjs';
@@ -23,6 +26,27 @@ describe('numbered migration filename contract', () => {
   it('keeps the shipped migration directory free of duplicate numeric prefixes', () => {
     const files = readdirSync(new URL('../drizzle/', import.meta.url));
     assert.deepEqual(findDuplicateMigrationNumbers(files), []);
+  });
+
+  it('ships the closure migration as a discoverable additive migration', () => {
+    const migration = '0051_account_closures.sql';
+    const files = readdirSync(new URL('../drizzle/', import.meta.url));
+    const statements = splitMigrationStatements(
+      readFileSync(new URL(`../drizzle/${migration}`, import.meta.url), 'utf8'),
+    );
+
+    assert.deepEqual(findMissingRequiredPreAppRolloutMigrations(files), []);
+    assert.deepEqual(findNonAdditiveMigrationStatements(statements), []);
+  });
+
+  it('requires migration 0051 before application rollout', () => {
+    assert.throws(
+      () => assertDatabaseReadyForAppRollout(['0050_user_mfa.sql']),
+      /Account closure migrations must run before application rollout: 0051_account_closures.sql/,
+    );
+    assert.doesNotThrow(() =>
+      assertDatabaseReadyForAppRollout(['0050_user_mfa.sql', '0051_account_closures.sql']),
+    );
   });
 });
 
@@ -80,6 +104,158 @@ describe('numbered migration replay safety', () => {
 
 describe('release database index contract', () => {
   const validRows = [
+    {
+      table_name: 'account_closure_requests',
+      index_name: 'uk_account_closure_requests_external_id',
+      non_unique: 0,
+      seq_in_index: 1,
+      column_name: 'external_id',
+      sub_part: null,
+    },
+    {
+      table_name: 'account_closure_requests',
+      index_name: 'uk_account_closure_requests_active_user',
+      non_unique: 0,
+      seq_in_index: 1,
+      column_name: 'active_user_id',
+      sub_part: null,
+    },
+    {
+      table_name: 'account_closure_requests',
+      index_name: 'ix_account_closure_requests_status_grace',
+      non_unique: 1,
+      seq_in_index: 1,
+      column_name: 'status',
+      sub_part: null,
+    },
+    {
+      table_name: 'account_closure_requests',
+      index_name: 'ix_account_closure_requests_status_grace',
+      non_unique: 1,
+      seq_in_index: 2,
+      column_name: 'grace_ends_at',
+      sub_part: null,
+    },
+    {
+      table_name: 'account_closure_steps',
+      index_name: 'uk_account_closure_steps_request_category',
+      non_unique: 0,
+      seq_in_index: 1,
+      column_name: 'request_id',
+      sub_part: null,
+    },
+    {
+      table_name: 'account_closure_steps',
+      index_name: 'uk_account_closure_steps_request_category',
+      non_unique: 0,
+      seq_in_index: 2,
+      column_name: 'category_id',
+      sub_part: null,
+    },
+    {
+      table_name: 'account_closure_steps',
+      index_name: 'ix_account_closure_steps_status_next_attempt',
+      non_unique: 1,
+      seq_in_index: 1,
+      column_name: 'status',
+      sub_part: null,
+    },
+    {
+      table_name: 'account_closure_steps',
+      index_name: 'ix_account_closure_steps_status_next_attempt',
+      non_unique: 1,
+      seq_in_index: 2,
+      column_name: 'next_attempt_at',
+      sub_part: null,
+    },
+    {
+      table_name: 'account_closure_steps',
+      index_name: 'ix_account_closure_steps_lease_until',
+      non_unique: 1,
+      seq_in_index: 1,
+      column_name: 'lease_until',
+      sub_part: null,
+    },
+    {
+      table_name: 'account_closure_effects',
+      index_name: 'uk_account_closure_effects_request_resource',
+      non_unique: 0,
+      seq_in_index: 1,
+      column_name: 'request_id',
+      sub_part: null,
+    },
+    {
+      table_name: 'account_closure_effects',
+      index_name: 'uk_account_closure_effects_request_resource',
+      non_unique: 0,
+      seq_in_index: 2,
+      column_name: 'resource_type',
+      sub_part: null,
+    },
+    {
+      table_name: 'account_closure_effects',
+      index_name: 'uk_account_closure_effects_request_resource',
+      non_unique: 0,
+      seq_in_index: 3,
+      column_name: 'resource_id',
+      sub_part: null,
+    },
+    {
+      table_name: 'account_closure_challenges',
+      index_name: 'uk_account_closure_challenges_external_id',
+      non_unique: 0,
+      seq_in_index: 1,
+      column_name: 'external_id',
+      sub_part: null,
+    },
+    {
+      table_name: 'account_closure_challenges',
+      index_name: 'ix_account_closure_challenges_user_action_expiry',
+      non_unique: 1,
+      seq_in_index: 1,
+      column_name: 'user_id',
+      sub_part: null,
+    },
+    {
+      table_name: 'account_closure_challenges',
+      index_name: 'ix_account_closure_challenges_user_action_expiry',
+      non_unique: 1,
+      seq_in_index: 2,
+      column_name: 'action',
+      sub_part: null,
+    },
+    {
+      table_name: 'account_closure_challenges',
+      index_name: 'ix_account_closure_challenges_user_action_expiry',
+      non_unique: 1,
+      seq_in_index: 3,
+      column_name: 'expires_at',
+      sub_part: null,
+    },
+    {
+      table_name: 'account_closure_receipts',
+      index_name: 'uk_account_closure_receipts_number',
+      non_unique: 0,
+      seq_in_index: 1,
+      column_name: 'receipt_number',
+      sub_part: null,
+    },
+    {
+      table_name: 'account_closure_receipts',
+      index_name: 'uk_account_closure_receipts_request_kind',
+      non_unique: 0,
+      seq_in_index: 1,
+      column_name: 'request_id',
+      sub_part: null,
+    },
+    {
+      table_name: 'account_closure_receipts',
+      index_name: 'uk_account_closure_receipts_request_kind',
+      non_unique: 0,
+      seq_in_index: 2,
+      column_name: 'kind',
+      sub_part: null,
+    },
     {
       table_name: 'payments',
       index_name: 'uk_payments_provider_order',

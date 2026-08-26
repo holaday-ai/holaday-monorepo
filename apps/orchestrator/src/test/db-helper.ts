@@ -5,6 +5,14 @@ import mysql from 'mysql2/promise';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+const ACCOUNT_CLOSURE_RESET_TABLES = [
+  'account_closure_receipts',
+  'account_closure_challenges',
+  'account_closure_effects',
+  'account_closure_steps',
+  'account_closure_requests',
+];
+
 /**
  * Apply every numbered drizzle migration (drizzle/NNNN_*.sql) in order to
  * the configured DATABASE_URL. Resets tables named in 0000 first so reruns
@@ -24,7 +32,13 @@ export async function applyMigrations(databaseUrl: string): Promise<void> {
     // Reset every CREATE TABLE target from the whole chain so reruns are clean.
     const all = await Promise.all(files.map((f) => readFile(resolve(migrationsDir, f), 'utf8')));
     const combined = all.join('\n');
-    const tableNames = [...combined.matchAll(/CREATE TABLE `([^`]+)`/g)].map((m) => m[1]);
+    const migrationTableNames = [...combined.matchAll(/CREATE TABLE `([^`]+)`/g)]
+      .map((m) => m[1])
+      .filter((name): name is string => name != null);
+    const tableNames = [
+      ...ACCOUNT_CLOSURE_RESET_TABLES,
+      ...migrationTableNames.filter((name) => !ACCOUNT_CLOSURE_RESET_TABLES.includes(name)),
+    ];
     await conn.query('SET FOREIGN_KEY_CHECKS = 0');
     for (const name of tableNames) {
       await conn.query(`DROP TABLE IF EXISTS \`${name}\``);

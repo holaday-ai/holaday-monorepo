@@ -40,3 +40,4 @@ export * from './stock-dashboard-snapshots.js';
 export * from './stock-preferences.js';
 export * from './stock-risk-monitors.js';
 export * from './energy-analytics.js';
+export * from './account-closures.js';
