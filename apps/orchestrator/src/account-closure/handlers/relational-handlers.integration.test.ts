@@ -253,6 +253,66 @@ describe.sequential('account closure relational handlers', () => {
     expect(await tableCount('energy_event_receipts')).toBe(1);
   });
 
+  it('fails closed when governed relational capabilities appear and restores the test schema', async () => {
+    const analyticsBefore = await anonymousAnalyticsState();
+
+    try {
+      await db.execute(sql`
+        CREATE TABLE feedback_support_cases_task6 (
+          id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+          user_id BIGINT UNSIGNED NULL,
+          PRIMARY KEY (id)
+        ) ENGINE=InnoDB
+      `);
+      await expect(
+        getAccountClosureHandler('feedback_support').run(context(null)),
+      ).rejects.toMatchObject({ code: 'CAPABILITY_CHANGED' });
+    } finally {
+      await db.execute(sql`DROP TABLE IF EXISTS feedback_support_cases_task6`);
+    }
+
+    try {
+      await db.execute(sql`
+        CREATE TABLE energy_astrology_profiles (
+          id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+          user_id BIGINT UNSIGNED NULL,
+          PRIMARY KEY (id)
+        ) ENGINE=InnoDB
+      `);
+      await expect(
+        getAccountClosureHandler('energy_astrology_profile').run(context(null)),
+      ).rejects.toMatchObject({ code: 'CAPABILITY_CHANGED' });
+    } finally {
+      await db.execute(sql`DROP TABLE IF EXISTS energy_astrology_profiles`);
+    }
+
+    let analyticsColumnAdded = false;
+    try {
+      await db.execute(
+        sql`ALTER TABLE energy_daily_metrics ADD COLUMN user_id BIGINT UNSIGNED NULL`,
+      );
+      analyticsColumnAdded = true;
+      await expect(
+        getAccountClosureHandler('analytics_logs').run(context(null)),
+      ).rejects.toMatchObject({ code: 'CAPABILITY_CHANGED' });
+    } finally {
+      if (analyticsColumnAdded) {
+        await db.execute(sql`ALTER TABLE energy_daily_metrics DROP COLUMN user_id`);
+      }
+    }
+
+    expect(await temporaryCapabilityResidueCount()).toBe(0);
+    expect(await anonymousAnalyticsState()).toEqual(analyticsBefore);
+    await expect(
+      getAccountClosureHandler('energy_astrology_profile').run(context(null)),
+    ).resolves.toEqual({ kind: 'complete', processed: 0, retention: 'not_present' });
+    for (const categoryId of ['feedback_support', 'analytics_logs'] as const) {
+      await expect(getAccountClosureHandler(categoryId).run(context(null))).rejects.toMatchObject({
+        code: 'EXTERNAL_RETENTION_REQUIRED',
+      });
+    }
+  });
+
   function context(checkpoint: ClosureCheckpoint): ClosureHandlerContext {
     return {
       db,
@@ -870,6 +930,33 @@ describe.sequential('account closure relational handlers', () => {
     const result = await db.execute(
       sql`SELECT COUNT(*) AS value FROM ${sql.identifier(tableName)}`,
     );
+    return resultCount(result);
+  }
+
+  async function anonymousAnalyticsState() {
+    return {
+      metrics: await db.select().from(energyDailyMetrics),
+      visitors: await db.select().from(energyDailyVisitors),
+      receipts: await db.select().from(energyEventReceipts),
+    };
+  }
+
+  async function temporaryCapabilityResidueCount(): Promise<number> {
+    const result = await db.execute(sql`
+      SELECT
+        (
+          SELECT COUNT(*)
+          FROM information_schema.tables
+          WHERE table_schema = DATABASE()
+            AND table_name IN ('feedback_support_cases_task6', 'energy_astrology_profiles')
+        ) + (
+          SELECT COUNT(*)
+          FROM information_schema.columns
+          WHERE table_schema = DATABASE()
+            AND table_name = 'energy_daily_metrics'
+            AND column_name = 'user_id'
+        ) AS value
+    `);
     return resultCount(result);
   }
 

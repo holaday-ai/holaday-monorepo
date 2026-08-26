@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ClosureHandlerContext } from './handler-contract.js';
 import { createExternalRetentionHandler } from './handler-contract.js';
+import { analyticsLogsClosureHandler } from './handlers/analytics-logs.js';
+import { energyAstrologyProfileClosureHandler } from './handlers/energy-astrology-profile.js';
+import { feedbackSupportClosureHandler } from './handlers/feedback-support.js';
 
 describe('external-retention closure handler', () => {
   const context = {} as ClosureHandlerContext;
@@ -19,13 +22,16 @@ describe('external-retention closure handler', () => {
     await expect(handler.run(context)).rejects.toMatchObject({ code: 'CAPABILITY_CHANGED' });
   });
 
-  it('fails closed when the capability probe itself errors', async () => {
+  it.each([
+    ['feedback', feedbackSupportClosureHandler],
+    ['analytics', analyticsLogsClosureHandler],
+    ['energy astrology', energyAstrologyProfileClosureHandler],
+  ])('propagates a database probe error from the actual %s handler', async (_label, handler) => {
     const probeError = new Error('test-only probe outage');
-    const handler = createExternalRetentionHandler(
-      'analytics_logs',
-      vi.fn().mockRejectedValue(probeError),
-    );
+    const failingContext = {
+      db: { execute: vi.fn().mockRejectedValue(probeError) },
+    } as unknown as ClosureHandlerContext;
 
-    await expect(handler.run(context)).rejects.toBe(probeError);
+    await expect(handler.run(failingContext)).rejects.toBe(probeError);
   });
 });
