@@ -16,6 +16,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import {
+  MAX_WAIT_MS,
   batchItemClientRequestId,
   batchOwnerAllowsExecution,
   executeBatch,
@@ -24,6 +25,221 @@ import {
   runWithConcurrency,
   summarizeBatchItemStatuses,
 } from './batch-executor.js';
+
+type BatchFreezePoint = 'dispatch_failure' | 'poll_terminal' | 'poll_timeout' | 'finalize';
+
+function makeBatchClosureRace(freezePoint: BatchFreezePoint) {
+  const state = {
+    closed: false,
+    batch: {
+      id: 91,
+      externalId: `btc_${freezePoint}`,
+      userId: 42,
+      status: 'running',
+      concurrency: 1,
+      itemsTotal: 1,
+      itemsDone: 0,
+      itemsReview: 0,
+      itemsFailed: 0,
+      completedAt: null as Date | null,
+    },
+    item: {
+      id: 92,
+      externalId: `bti_${freezePoint}`,
+      batchId: 91,
+      seq: 0,
+      prompt: freezePoint,
+      status: 'pending',
+      taskId: null as number | null,
+      completedAt: null as Date | null,
+    },
+    owner: { id: 42, externalId: 'usr_batch_race', status: 'active' },
+  };
+  const afterFreezeBroadcasts: unknown[] = [];
+  let fullBatchReads = 0;
+  const tableName = (table: unknown): string =>
+    (table as Record<symbol, string>)[Symbol.for('drizzle:Name')] ??
+    (table as { _?: { name?: string } })._?.name ??
+    '';
+  const inspect = (predicate: unknown): string =>
+    require('node:util').inspect(predicate, { depth: 8, getters: true });
+  const freeze = () => {
+    state.closed = true;
+    state.owner.status = 'closure_pending';
+    state.batch.status = 'cancelled';
+    state.item.status = 'cancelled';
+    state.item.completedAt = new Date();
+  };
+
+  // biome-ignore lint/suspicious/noExplicitAny: stateful Drizzle test double exercises CAS races.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const db: any = {
+    transaction: async (callback: (tx: unknown) => Promise<unknown>) => callback(db),
+    select(fields?: unknown) {
+      return {
+        from(table: unknown) {
+          const name = tableName(table);
+          return {
+            where(predicate: unknown) {
+              const predicateText = inspect(predicate);
+              const rows = () => {
+                if (name === 'batch_tasks') {
+                  if (fields === undefined) {
+                    fullBatchReads += 1;
+                    const snapshot = { ...state.batch };
+                    if (freezePoint === 'finalize' && fullBatchReads === 2) freeze();
+                    return [snapshot];
+                  }
+                  return [{ status: state.batch.status }];
+                }
+                if (name === 'users') return [{ ...state.owner }];
+                if (name === 'batch_task_items') {
+                  if (predicateText.includes("value: 'pending'")) {
+                    return state.item.status === 'pending' ? [{ ...state.item }] : [];
+                  }
+                  if (predicateText.includes("value: 'running'")) {
+                    return state.item.status === 'running' ? [{ ...state.item }] : [];
+                  }
+                  return [{ ...state.item }];
+                }
+                if (name === 'tasks') {
+                  if (freezePoint === 'poll_terminal') freeze();
+                  return [{ id: 301, externalId: 'tsk_batch_race', status: 'completed' }];
+                }
+                return [];
+              };
+              const chain = {
+                limit: (_limit: number) => {
+                  const result = Promise.resolve(rows());
+                  return Object.assign(result, { for: (_lock: string) => result });
+                },
+                orderBy: (_column: unknown) => ({ limit: async (_limit: number) => rows() }),
+                for: (_lock: string) => Promise.resolve(rows()),
+                // biome-ignore lint/suspicious/noThenProperty: Drizzle builders are intentionally thenable.
+                then: (onfulfilled?: (value: unknown[]) => unknown) =>
+                  Promise.resolve(rows()).then(onfulfilled),
+              };
+              return chain;
+            },
+          };
+        },
+      };
+    },
+    update(table: unknown) {
+      const name = tableName(table);
+      return {
+        set(values: Record<string, unknown>) {
+          return {
+            async where(predicate: unknown) {
+              const predicateText = inspect(predicate);
+              if (name === 'batch_task_items') {
+                if (values.taskId !== undefined) {
+                  state.item.taskId = Number(values.taskId);
+                  if (freezePoint === 'poll_timeout') freeze();
+                  return { affectedRows: 1 };
+                }
+                const requiresRunning = predicateText.includes("value: 'running'");
+                if (requiresRunning && state.item.status !== 'running') return { affectedRows: 0 };
+                if (values.status === 'running' && state.item.status !== 'pending') {
+                  return { affectedRows: 0 };
+                }
+                Object.assign(state.item, values);
+                return { affectedRows: 1 };
+              }
+              if (name === 'batch_tasks') {
+                const requiresRunning = predicateText.includes("value: 'running'");
+                if (requiresRunning && state.batch.status !== 'running') return { affectedRows: 0 };
+                Object.assign(state.batch, values);
+                return { affectedRows: 1 };
+              }
+              return { affectedRows: 0 };
+            },
+          };
+        },
+      };
+    },
+  };
+  const dispatch = vi.fn(async () => {
+    if (freezePoint === 'dispatch_failure') {
+      freeze();
+      throw new Error('dispatch failed after closure won');
+    }
+    return { taskInternalId: 301, taskExternalId: 'tsk_batch_race' };
+  });
+  const broadcastToUser = vi.fn((_userId: string, message: unknown) => {
+    if (state.closed) afterFreezeBroadcasts.push(message);
+  });
+  return {
+    state,
+    db,
+    dispatch,
+    afterFreezeBroadcasts,
+    deps: {
+      db,
+      dispatch,
+      broadcastToUser,
+      logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn(),
+        child: vi.fn(),
+        // biome-ignore lint/suspicious/noExplicitAny: minimal logger double for executor behavior.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any,
+    },
+  };
+}
+
+describe('executeBatch account-closure convergence', () => {
+  it('does not overwrite durable cancellation when dispatch fails after the final owner gate', async () => {
+    const race = makeBatchClosureRace('dispatch_failure');
+
+    await executeBatch(race.state.batch.externalId, race.deps);
+
+    expect(race.state.item.status).toBe('cancelled');
+    expect(race.state.batch.status).toBe('cancelled');
+    expect(race.afterFreezeBroadcasts).toEqual([]);
+  });
+
+  it('does not overwrite durable cancellation when the task becomes terminal after freeze', async () => {
+    const race = makeBatchClosureRace('poll_terminal');
+
+    await executeBatch(race.state.batch.externalId, race.deps);
+
+    expect(race.state.item.status).toBe('cancelled');
+    expect(race.state.batch.status).toBe('cancelled');
+    expect(race.afterFreezeBroadcasts).toEqual([]);
+  });
+
+  it('does not overwrite durable cancellation when poll timeout observes a frozen item', async () => {
+    const now = vi
+      .spyOn(Date, 'now')
+      .mockReturnValueOnce(0)
+      .mockReturnValue(MAX_WAIT_MS + 1);
+    const race = makeBatchClosureRace('poll_timeout');
+
+    try {
+      await executeBatch(race.state.batch.externalId, race.deps);
+    } finally {
+      now.mockRestore();
+    }
+
+    expect(race.state.item.status).toBe('cancelled');
+    expect(race.state.batch.status).toBe('cancelled');
+    expect(race.afterFreezeBroadcasts).toEqual([]);
+  });
+
+  it('does not finalize or broadcast when freeze wins between parent read and CAS', async () => {
+    const race = makeBatchClosureRace('finalize');
+
+    await executeBatch(race.state.batch.externalId, race.deps);
+
+    expect(race.state.item.status).toBe('cancelled');
+    expect(race.state.batch.status).toBe('cancelled');
+    expect(race.afterFreezeBroadcasts).toEqual([]);
+  });
+});
 
 describe('batch account-closure dispatch gate', () => {
   it('must be re-read at claim and dispatch boundaries', async () => {
@@ -300,6 +516,9 @@ describe('executeBatch — Codex P5 atomic claim', () => {
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const db: any = {
+      transaction(callback: (tx: unknown) => Promise<unknown>) {
+        return callback(db);
+      },
       select(_fields?: unknown) {
         return {
           from(table: unknown) {
@@ -327,8 +546,9 @@ describe('executeBatch — Codex P5 atomic claim', () => {
                   return [];
                 }
                 const chain = {
-                  async limit(_n: number) {
-                    return rowsFor();
+                  limit(_n: number) {
+                    const result = rowsFor();
+                    return Object.assign(result, { for: (_lock: string) => result });
                   },
                   orderBy(_col: unknown) {
                     return {

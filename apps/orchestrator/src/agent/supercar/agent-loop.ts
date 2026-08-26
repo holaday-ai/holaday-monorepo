@@ -1195,7 +1195,8 @@ async function runSupercarTaskInternal(
   const handle = lifecycle.handle;
   const cancellationRequested = async (): Promise<boolean> => {
     if (lifecycle.cancelled) return true;
-    if (await opts.isTaskCancelled?.()) {
+    const durablyCancelled = await opts.isTaskCancelled?.();
+    if (lifecycle.cancelled || durablyCancelled) {
       lifecycle.cancelled = true;
       return true;
     }
@@ -2840,6 +2841,13 @@ async function runSupercarTaskInternal(
               opts?: { waitUntil?: string; timeout?: number },
             ) => Promise<unknown>;
           };
+          if (await cancellationRequested()) {
+            return {
+              status: 'cancelled',
+              iterations: iteration,
+              toolsUsed: Array.from(toolsUsed),
+            };
+          }
           // Phase 3 R4 — capture friendly error message for the
           // failure paths. We still continue to screenshot in case
           // the page has partial content (e.g. SSL warning page,
@@ -3692,7 +3700,18 @@ async function runSupercarTaskInternal(
             if (actVeto) return actVeto;
           }
         }
-        const execResult = await executeComputerAction(executor, computerInput);
+        const execResult = await executeComputerAction(
+          executor,
+          computerInput,
+          cancellationRequested,
+        );
+        if (execResult.cancelled) {
+          return {
+            status: 'cancelled',
+            iterations: iteration,
+            toolsUsed: Array.from(toolsUsed),
+          };
+        }
         const freshPage = (await executor.getPage()) as unknown as PageLike;
         // Phase 1 Playbook ④ — POST-ACTION URL re-check. A click on a link can
         // navigate to a sensitive URL the click veto never saw (it only had the
@@ -4226,6 +4245,7 @@ interface ComputerActionInput {
 interface ActionResult {
   ok: boolean;
   summary: string;
+  cancelled?: true;
 }
 
 /**
@@ -4275,8 +4295,12 @@ function validateCoordinate(c: unknown): { ok: true; x: number; y: number } | { 
 async function executeComputerAction(
   executor: PlaywrightExecutor,
   input: ComputerActionInput,
+  cancellationRequested: () => Promise<boolean>,
 ): Promise<ActionResult> {
   const page = (await executor.getPage()) as unknown as PageLike;
+  if (await cancellationRequested()) {
+    return { ok: false, summary: 'cancelled before computer action', cancelled: true };
+  }
   const action = input.action;
 
   try {

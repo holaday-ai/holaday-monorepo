@@ -85,7 +85,7 @@ export async function applyImmediateClosureEffects(
       });
     }
 
-    const { cancelledBatchTaskIds, cancelledBatchTaskItemIds } = await cancelUndispatchedBatchWork(
+    const { cancelledBatchTaskIds, cancelledBatchTaskItemIds } = await cancelBatchWork(
       tx,
       input.requestId,
       input.userId,
@@ -305,7 +305,7 @@ export async function restoreImmediateClosureEffectsInTransaction(
   }
 }
 
-async function cancelUndispatchedBatchWork(
+async function cancelBatchWork(
   tx: DBTransaction,
   requestId: number,
   userId: number,
@@ -329,7 +329,6 @@ async function cancelUndispatchedBatchWork(
         and(
           eq(batchTaskItems.batchId, batch.id),
           inArray(batchTaskItems.status, ['pending', 'running']),
-          isNull(batchTaskItems.taskId),
         ),
       )
       .for('update');
@@ -361,7 +360,6 @@ async function cancelUndispatchedBatchWork(
             eq(batchTaskItems.id, item.id),
             eq(batchTaskItems.batchId, batch.id),
             eq(batchTaskItems.status, item.status),
-            isNull(batchTaskItems.taskId),
           ),
         );
       if (readAffectedRows(itemResult) !== 1) continue;

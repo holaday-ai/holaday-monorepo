@@ -265,7 +265,7 @@ describe.sequential('account closure atomic freeze and exact immediate effects',
     expect(summary.pausedScheduledTaskIds).toHaveLength(1);
     expect(summary.disabledNotificationChannelIds).toHaveLength(1);
     expect(summary.cancelledBatchTaskIds).toHaveLength(2);
-    expect(summary.cancelledBatchTaskItemIds).toHaveLength(2);
+    expect(summary.cancelledBatchTaskItemIds).toHaveLength(3);
     const effects = await db
       .select({
         resourceType: accountClosureEffects.resourceType,
@@ -273,10 +273,11 @@ describe.sequential('account closure atomic freeze and exact immediate effects',
       })
       .from(accountClosureEffects)
       .where(eq(accountClosureEffects.requestId, frozen.requestId));
-    expect(effects).toHaveLength(9);
+    expect(effects).toHaveLength(10);
     expect(effects.map((effect) => effect.resourceType).sort()).toEqual([
       'batch_task',
       'batch_task',
+      'batch_task_item',
       'batch_task_item',
       'batch_task_item',
       'notification_channel',
@@ -304,7 +305,7 @@ describe.sequential('account closure atomic freeze and exact immediate effects',
       .select({ id: accountClosureEffects.id })
       .from(accountClosureEffects)
       .where(eq(accountClosureEffects.requestId, frozen.requestId));
-    expect(effectsAfterRetry).toHaveLength(9);
+    expect(effectsAfterRetry).toHaveLength(10);
     const cancellationEvents = await db
       .select({ type: taskEvents.type })
       .from(taskEvents)
@@ -386,7 +387,7 @@ describe.sequential('account closure atomic freeze and exact immediate effects',
       .select({ restoredAt: accountClosureEffects.restoredAt })
       .from(accountClosureEffects)
       .where(eq(accountClosureEffects.requestId, frozen.requestId));
-    expect(handledEffects).toHaveLength(9);
+    expect(handledEffects).toHaveLength(10);
     expect(handledEffects.every((effect) => effect.restoredAt instanceof Date)).toBe(true);
     const batchStates = await db
       .select({ status: batchTasks.status })
@@ -402,10 +403,8 @@ describe.sequential('account closure atomic freeze and exact immediate effects',
       .from(batchTaskItems)
       .innerJoin(batchTasks, eq(batchTasks.id, batchTaskItems.batchId))
       .where(eq(batchTasks.userId, user.id));
-    expect(batchItemStates.filter((item) => item.status === 'cancelled')).toHaveLength(2);
-    expect(
-      batchItemStates.filter((item) => item.status === 'running' && item.taskId !== null),
-    ).toHaveLength(1);
+    expect(batchItemStates.filter((item) => item.status === 'cancelled')).toHaveLength(3);
+    expect(batchItemStates.filter((item) => item.status === 'running')).toHaveLength(0);
     expect(batchItemStates.filter((item) => item.status === 'pending')).toHaveLength(1);
   });
 

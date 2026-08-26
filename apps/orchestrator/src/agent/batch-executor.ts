@@ -279,24 +279,26 @@ async function runItem(
     });
     taskInternalId = res.taskInternalId;
     taskExternalId = res.taskExternalId;
-    await db
+    const stamp = await db
       .update(batchTaskItems)
       .set({ taskId: taskInternalId })
-      .where(eq(batchTaskItems.id, item.id));
+      .where(and(eq(batchTaskItems.id, item.id), eq(batchTaskItems.status, 'running')));
+    if (extractMysqlAffectedRows(stamp) !== 1) return;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     logger.warn(
       { batchId: batch.externalId, itemSeq: item.seq, err: msg },
       'batch-executor: dispatch failed',
     );
-    await db
+    const failure = await db
       .update(batchTaskItems)
       .set({
         status: 'failed',
         errorMessage: msg.slice(0, 1000),
         completedAt: new Date(),
       })
-      .where(eq(batchTaskItems.id, item.id));
+      .where(and(eq(batchTaskItems.id, item.id), eq(batchTaskItems.status, 'running')));
+    if (extractMysqlAffectedRows(failure) !== 1) return;
     await broadcastItemUpdate(batch, item.id, 'failed', deps, owner.externalId, {
       errorMessage: msg.slice(0, 200),
     });
@@ -328,14 +330,15 @@ async function pollTaskForItem(
         },
         'batch-executor: item poll timed out — marking failed (task may still finish)',
       );
-      await db
+      const timeout = await db
         .update(batchTaskItems)
         .set({
           status: 'failed',
           errorMessage: 'batch poll timeout — task still running on backend',
           completedAt: new Date(),
         })
-        .where(eq(batchTaskItems.id, item.id));
+        .where(and(eq(batchTaskItems.id, item.id), eq(batchTaskItems.status, 'running')));
+      if (extractMysqlAffectedRows(timeout) !== 1) return;
       await broadcastItemUpdate(batch, item.id, 'failed', deps, owner.externalId, {
         errorMessage: 'batch poll timeout',
         ...(taskExternalId ? { taskExternalId } : {}),
@@ -352,14 +355,15 @@ async function pollTaskForItem(
       const itemStatus = taskTerminalStatusToBatchItemStatus(tRow.status);
       const ok = itemStatus === 'completed';
       const errorMessage = ok ? null : `task ended with status=${tRow.status}`;
-      await db
+      const terminal = await db
         .update(batchTaskItems)
         .set({
           status: itemStatus,
           completedAt: new Date(),
           ...(errorMessage ? { errorMessage } : {}),
         })
-        .where(eq(batchTaskItems.id, item.id));
+        .where(and(eq(batchTaskItems.id, item.id), eq(batchTaskItems.status, 'running')));
+      if (extractMysqlAffectedRows(terminal) !== 1) return;
       await broadcastItemUpdate(batch, item.id, itemStatus, deps, owner.externalId, {
         ...(taskExternalId ? { taskExternalId } : {}),
         ...(errorMessage ? { errorMessage } : {}),
@@ -422,56 +426,54 @@ export async function prepareBatchItemsForRecovery(
  */
 async function finalizeBatch(batchInternalId: number, deps: BatchExecutorDeps): Promise<void> {
   const { db } = deps;
-  // Re-read items to compute fresh counters.
-  const items = await db
-    .select({ id: batchTaskItems.id, status: batchTaskItems.status })
-    .from(batchTaskItems)
-    .where(eq(batchTaskItems.batchId, batchInternalId));
-  const counts = summarizeBatchItemStatuses(items);
-  const [batch] = await db
-    .select()
-    .from(batchTasks)
-    .where(eq(batchTasks.id, batchInternalId))
-    .limit(1);
-  if (!batch) return;
-  // Preserve a user-pressed cancellation; only flip to completed /
-  // partial when status is still 'running'.
-  let nextStatus = batch.status;
-  if (batch.status === 'running') {
-    nextStatus =
+  const finalized = await db.transaction(async (tx) => {
+    const [batch] = await tx
+      .select()
+      .from(batchTasks)
+      .where(eq(batchTasks.id, batchInternalId))
+      .limit(1);
+    if (!batch) return null;
+    const [owner] = await tx
+      .select({ externalId: users.externalId, status: users.status })
+      .from(users)
+      .where(eq(users.id, batch.userId))
+      .limit(1)
+      .for('update');
+    if (owner?.status !== 'active') return null;
+    const items = await tx
+      .select({ id: batchTaskItems.id, status: batchTaskItems.status })
+      .from(batchTaskItems)
+      .where(eq(batchTaskItems.batchId, batchInternalId));
+    const counts = summarizeBatchItemStatuses(items);
+    const nextStatus: 'completed' | 'partial' =
       counts.review === 0 && counts.failed === 0 && counts.cancelled === 0
         ? 'completed'
         : 'partial';
-  }
-  await db
-    .update(batchTasks)
-    .set({
-      itemsTotal: counts.total,
-      itemsDone: counts.done,
-      itemsReview: counts.review,
-      itemsFailed: counts.failed,
-      status: nextStatus,
-      ...(nextStatus !== 'running' ? { completedAt: new Date() } : {}),
-    })
-    .where(eq(batchTasks.id, batchInternalId));
-  // Final broadcast — same shape as per-item updates but no `item`.
-  const [owner] = await db
-    .select({ externalId: users.externalId })
-    .from(users)
-    .where(eq(users.id, batch.userId))
-    .limit(1);
-  if (owner) {
-    deps.broadcastToUser(owner.externalId, {
-      type: 'server.batch.progress',
-      batchId: batch.externalId,
-      status: nextStatus as 'pending' | 'running' | 'completed' | 'partial' | 'cancelled',
-      itemsTotal: counts.total,
-      itemsDone: counts.done,
-      itemsReview: counts.review,
-      itemsFailed: counts.failed,
-      itemsCancelled: counts.cancelled,
-    });
-  }
+    const update = await tx
+      .update(batchTasks)
+      .set({
+        itemsTotal: counts.total,
+        itemsDone: counts.done,
+        itemsReview: counts.review,
+        itemsFailed: counts.failed,
+        status: nextStatus,
+        completedAt: new Date(),
+      })
+      .where(and(eq(batchTasks.id, batchInternalId), eq(batchTasks.status, 'running')));
+    if (extractMysqlAffectedRows(update) !== 1) return null;
+    return { batch, owner, counts, nextStatus };
+  });
+  if (!finalized) return;
+  deps.broadcastToUser(finalized.owner.externalId, {
+    type: 'server.batch.progress',
+    batchId: finalized.batch.externalId,
+    status: finalized.nextStatus,
+    itemsTotal: finalized.counts.total,
+    itemsDone: finalized.counts.done,
+    itemsReview: finalized.counts.review,
+    itemsFailed: finalized.counts.failed,
+    itemsCancelled: finalized.counts.cancelled,
+  });
 }
 
 /**
