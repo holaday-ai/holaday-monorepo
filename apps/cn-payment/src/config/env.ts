@@ -8,7 +8,7 @@ import { z } from 'zod';
  * its own creds at request time and returns a typed
  * `provider_not_configured` error when missing.
  */
-const Env = z.object({
+const EnvBase = z.object({
   NODE_ENV: z.string().default('production'),
   PORT: z.coerce.number().default(4010),
   LOG_LEVEL: z.string().default('info'),
@@ -44,17 +44,42 @@ const Env = z.object({
   ALIYUN_ACCESS_KEY_SECRET: z.string().optional(),
   ALIYUN_SMS_SIGN_NAME: z.string().optional(),
   ALIYUN_SMS_TEMPLATE_CODE: z.string().optional(),
+  ALIYUN_SMS_ACCOUNT_CLOSURE_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  ALIYUN_SMS_ACCOUNT_CLOSURE_VERIFY_TEMPLATE_CODE: z.string().optional(),
+  ALIYUN_SMS_ACCOUNT_CLOSURE_COMPLETE_TEMPLATE_CODE: z.string().optional(),
 });
 
-export type Env = z.infer<typeof Env>;
+const Env = EnvBase.superRefine((value, context) => {
+  if (value.NODE_ENV !== 'production' || !value.ALIYUN_SMS_ACCOUNT_CLOSURE_ENABLED) return;
+  for (const key of [
+    'ALIYUN_SMS_ACCOUNT_CLOSURE_VERIFY_TEMPLATE_CODE',
+    'ALIYUN_SMS_ACCOUNT_CLOSURE_COMPLETE_TEMPLATE_CODE',
+  ] as const) {
+    if (!value[key]) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [key],
+        message: `${key} is required when production Aliyun SMS is enabled`,
+      });
+    }
+  }
+});
 
-let cached: Env | null = null;
+type ParsedEnv = z.infer<typeof Env>;
+export type Env = Omit<ParsedEnv, 'ALIYUN_SMS_ACCOUNT_CLOSURE_ENABLED'> & {
+  ALIYUN_SMS_ACCOUNT_CLOSURE_ENABLED?: boolean;
+};
+
+let cached: ParsedEnv | null = null;
 
 /**
  * Lazy parse so a misformatted env file doesn't block the test
  * harness from importing modules. Called by index.ts at boot.
  */
-export function loadEnv(): Env {
+export function loadEnv(): ParsedEnv {
   if (cached) return cached;
   cached = Env.parse(process.env);
   return cached;

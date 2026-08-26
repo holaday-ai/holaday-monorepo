@@ -1,6 +1,6 @@
-import { useLocation, useNavigate } from 'react-router-dom';
 import { LoginGate } from '@/components/LoginGate';
 import { authRedirectTarget } from '@/lib/auth-redirect';
+import { useLocation, useNavigate } from 'react-router-dom';
 
 /**
  * Standalone /login route — mirrors RegisterPage but pre-selects
@@ -15,6 +15,10 @@ export function LoginPage(): JSX.Element {
   const location = useLocation();
   const target = authRedirectTarget(location.search);
   return (
-    <LoginGate initialMode="login" onAuthenticated={() => navigate(target, { replace: true })} />
+    <LoginGate
+      initialMode="login"
+      onAuthenticated={() => navigate(target, { replace: true })}
+      onClosureRecovery={() => navigate('/account/closure-recovery', { replace: true })}
+    />
   );
 }

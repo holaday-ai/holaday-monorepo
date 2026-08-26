@@ -233,6 +233,22 @@ describe('resolveApiKey', () => {
     expect(await resolveApiKey(plaintext, db)).toEqual({ ok: false, code: 'inactive_owner' });
   });
 
+  it.each(['closure_pending', 'closure_processing', 'closed'])(
+    'rejects an otherwise active key while its owner is %s',
+    async (status) => {
+      const { plaintext, hash } = generateApiKey();
+      const { db } = makeFakeDb({
+        keys: [{ id: 5, userId: 42, keyHash: hash, revokedAt: null, expiresAt: null }],
+        users: [{ id: 42, externalId: 'usr_closure_key', status }],
+      });
+
+      expect(await resolveApiKey(plaintext, db)).toEqual({
+        ok: false,
+        code: 'inactive_owner',
+      });
+    },
+  );
+
   it('revoked key → revoked', async () => {
     const { plaintext, hash } = generateApiKey();
     const { db } = makeFakeDb({
@@ -319,6 +335,22 @@ describe('createWebhookTasksHandler', () => {
     expect(captured).toMatchObject({ status: 401, json: { error: 'invalid_api_key' } });
     expect(dispatch).not.toHaveBeenCalled();
   });
+
+  it.each(['closure_pending', 'closure_processing', 'closed'])(
+    'returns the same generic 401 for a key owned by a %s user',
+    async (userStatus) => {
+      const { handler, plaintext, dispatch } = setup({ userStatus });
+      const { res, captured } = makeRes();
+
+      await handler(
+        makeReq({ auth: `Bearer ${plaintext}`, body: { prompt: 'run report' } }),
+        res,
+      );
+
+      expect(captured).toMatchObject({ status: 401, json: { error: 'invalid_api_key' } });
+      expect(dispatch).not.toHaveBeenCalled();
+    },
+  );
 
   it('200: valid key + valid prompt → dispatch called, returns taskId + status', async () => {
     const { handler, plaintext, dispatch } = setup();

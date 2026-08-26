@@ -228,7 +228,7 @@ export const processors: readonly ProcessorDefinition[] = [
         {
           kind: 'source_file',
           path: 'apps/orchestrator/src/trpc/routers/feedback.ts',
-          fact: '反馈路由使用邮件服务处理支持请求。',
+          fact: '反馈路由只向邮件服务发送随机反馈编号，不发送正文、邮箱或账号标识。',
         },
       ],
     },

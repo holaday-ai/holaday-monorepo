@@ -1,9 +1,14 @@
 // @vitest-environment happy-dom
 
-import { clearAccessToken, getAccessToken } from '@/lib/auth';
+import {
+  clearAccessToken,
+  clearClosureRecovery,
+  getAccessToken,
+  getClosureRecovery,
+} from '@/lib/auth';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ProfilePage } from './ProfilePage';
 
@@ -39,6 +44,7 @@ vi.mock('@/lib/trpc', () => ({
 
 beforeEach(() => {
   clearAccessToken();
+  clearClosureRecovery();
   trpcMocks.me.mockResolvedValue({
     email: 'member@example.com',
     displayName: 'Member',
@@ -69,13 +75,17 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   clearAccessToken();
+  clearClosureRecovery();
   vi.clearAllMocks();
 });
 
 function renderProfile(): void {
   render(
     <MemoryRouter initialEntries={['/profile']}>
-      <ProfilePage />
+      <Routes>
+        <Route path="/profile" element={<ProfilePage />} />
+        <Route path="/account/closure-recovery" element={<div>Closure recovery route</div>} />
+      </Routes>
     </MemoryRouter>,
   );
 }
@@ -143,6 +153,56 @@ describe('ProfilePage password self-service', () => {
       code: '123456',
       password: 'new-password-42',
     });
+  });
+
+  it('hands a freeze-raced password change to closure recovery without storing access', async () => {
+    const user = userEvent.setup();
+    trpcMocks.changePasswordWithCode.mockResolvedValue({
+      closureRecoveryRequired: true,
+      recoveryToken: 'password-change-recovery',
+      closureStatus: 'pending_grace',
+      user: { externalId: 'usr_member' },
+    });
+    renderProfile();
+
+    await screen.findByRole('heading', { name: '账号安全' });
+    await user.click(screen.getByRole('button', { name: '修改密码' }));
+    await user.type(screen.getByLabelText('邮箱验证码'), '123456');
+    await user.type(screen.getByLabelText('新密码'), 'new-password-42');
+    await user.type(screen.getByLabelText('确认新密码'), 'new-password-42');
+    await user.click(screen.getByRole('button', { name: '确认修改' }));
+
+    expect(await screen.findByText('Closure recovery route')).toBeTruthy();
+    expect(getClosureRecovery()).toBe('password-change-recovery');
+    expect(getAccessToken()).toBeNull();
+  });
+
+  it('rejects an unexpected MFA password-change result without storing an undefined access token', async () => {
+    const user = userEvent.setup();
+    trpcMocks.changePasswordWithCode.mockResolvedValue({
+      mfaRequired: true,
+      mfaToken: 'unexpected-password-change-mfa',
+      user: {
+        externalId: 'usr_member',
+        email: 'member@example.com',
+        plan: 'free',
+        displayName: 'Member',
+        avatarUrl: null,
+        createdAt: new Date(),
+      },
+    });
+    renderProfile();
+
+    await screen.findByRole('heading', { name: '账号安全' });
+    await user.click(screen.getByRole('button', { name: '修改密码' }));
+    await user.type(screen.getByLabelText('邮箱验证码'), '123456');
+    await user.type(screen.getByLabelText('新密码'), 'new-password-42');
+    await user.type(screen.getByLabelText('确认新密码'), 'new-password-42');
+    await user.click(screen.getByRole('button', { name: '确认修改' }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain('请重新登录');
+    expect(screen.queryByText('密码已修改，其他设备需要重新登录。')).toBeNull();
+    expect(getAccessToken()).toBeNull();
   });
 
   it('rejects mismatched passwords before submitting', async () => {

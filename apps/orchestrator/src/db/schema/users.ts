@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import {
   bigint,
   boolean,
+  check,
   datetime,
   index,
   int,
@@ -10,6 +11,10 @@ import {
   uniqueIndex,
   varchar,
 } from 'drizzle-orm/mysql-core';
+import {
+  ACCOUNT_CLOSURE_USER_STATUSES,
+  type AccountClosureUserStatus,
+} from '../../account-closure/types.js';
 
 /**
  * `users` — account.
@@ -17,7 +22,10 @@ import {
  * - `plan` kept as VARCHAR(32) (not ENUM) so plans can evolve without DDL churn.
  * - `password_hash` is empty string for OAuth-only users — bcrypt(``) never
  *   matches anything, so they can't password-login by accident.
- * - Phase 0: no soft delete.
+ * - `status` is one of `active`, `suspended`, `closure_pending`,
+ *   `closure_processing`, or `closed`. Closure preserves a non-login tombstone
+ *   user instead of deleting the primary key, so restricted financial and audit
+ *   references remain valid.
  */
 export const users = mysqlTable(
   'users',
@@ -41,7 +49,11 @@ export const users = mysqlTable(
      */
     role: varchar('role', { length: 16 }).notNull().default('user'),
     planExpiresAt: datetime('plan_expires_at', { mode: 'date', fsp: 3 }),
-    status: varchar('status', { length: 16 }).notNull().default('active'),
+    /** Account admission state; only `active` may receive normal credentials. */
+    status: varchar('status', { length: 20 })
+      .$type<AccountClosureUserStatus>()
+      .notNull()
+      .default('active'),
     /**
      * Incremented whenever all existing access tokens must be revoked
      * (currently password reset). Tokens carry the issuing version and
@@ -124,6 +136,10 @@ export const users = mysqlTable(
     index('ix_users_plan').on(t.plan),
     index('ix_users_plan_expires_at').on(t.planExpiresAt),
     index('ix_users_role').on(t.role),
+    check(
+      'ck_users_status_allowed',
+      sql`${t.status} IN (${sql.join(ACCOUNT_CLOSURE_USER_STATUSES.map((status) => sql`${status}`), sql`, `)})`,
+    ),
   ],
 );
 

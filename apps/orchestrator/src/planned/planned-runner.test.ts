@@ -1,6 +1,14 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { plannedTaskRunItems, plannedTaskRuns } from '../db/schema/planned-tasks.js';
-import { dispatchSpecialOrGeneric, plannedTick, queuePlannedRun } from './planned-runner.js';
+import {
+  configurePlannedRunSpecialDispatcher,
+  dispatchPlannedRun,
+  dispatchSpecialOrGeneric,
+  plannedTick,
+  queuePlannedRun,
+} from './planned-runner.js';
+
+afterEach(() => configurePlannedRunSpecialDispatcher(null));
 
 function drizzleParamValues(input: unknown, out: unknown[] = []): unknown[] {
   if (Array.isArray(input)) {
@@ -41,6 +49,202 @@ describe('planned runner specialized dispatch boundary', () => {
 });
 
 describe('planned runner lifecycle serialization', () => {
+  it('advances a cancelled scheduled occurrence after withdrawal instead of wedging it', async () => {
+    let selectCall = 0;
+    const updates: Array<Record<string, unknown>> = [];
+    const scheduledFor = new Date('2026-08-26T09:00:00.000Z');
+    const db = {
+      select() {
+        const call = selectCall++;
+        return {
+          from() {
+            return {
+              innerJoin() {
+                return {
+                  where: () => ({
+                    limit: async () => [
+                      {
+                        id: 9,
+                        externalId: 'pln_restored',
+                        title: 'restored plan',
+                        instruction: 'work',
+                        scope: 'single',
+                        repeatType: 'daily',
+                        rrule: null,
+                        endsAt: null,
+                        status: 'running',
+                        userId: 7,
+                        userStatus: 'active',
+                      },
+                    ],
+                  }),
+                };
+              },
+              where() {
+                if (call === 1) {
+                  return {
+                    limit: async () => [{ externalId: 'plr_cancelled', status: 'cancelled' }],
+                  };
+                }
+                return { limit: async () => [{ status: 'active' }] };
+              },
+            };
+          },
+        };
+      },
+      update() {
+        return {
+          set: (values: Record<string, unknown>) => ({
+            where: async () => {
+              updates.push(values);
+              return [{ affectedRows: 1 }];
+            },
+          }),
+        };
+      },
+    };
+
+    await expect(
+      queuePlannedRun({ db, userId: 'usr_7', logger: { error: vi.fn() } } as never, {
+        plannedTaskId: 'pln_restored',
+        scheduledFor,
+        seriesScheduledFor: scheduledFor,
+        trigger: 'scheduled',
+        claimed: true,
+      }),
+    ).resolves.toEqual({ runId: 'plr_cancelled', status: 'starting' });
+    expect(updates).toHaveLength(1);
+    expect(updates[0]).toMatchObject({
+      status: 'active',
+      lastRunStatus: 'failed',
+      lastError: '本次运行已在账号关闭期间取消',
+    });
+    expect((updates[0]?.nextRunAt as Date).getTime()).toBeGreaterThan(scheduledFor.getTime());
+  });
+
+  it('does not dispatch when another worker wins pending to dispatching', async () => {
+    let selectCall = 0;
+    const db = {
+      select() {
+        const call = selectCall++;
+        return {
+          from() {
+            return {
+              innerJoin() {
+                return {
+                  where: () => ({
+                    limit: async () => [
+                      {
+                        id: 31,
+                        status: 'pending',
+                        scheduledFor: new Date(),
+                        seriesScheduledFor: new Date(),
+                        trigger: 'scheduled',
+                        planId: 3,
+                        planExternalId: 'pln_3',
+                        planTitle: 'plan',
+                        repeatType: 'daily',
+                        rrule: null,
+                        endsAt: null,
+                        userId: 7,
+                      },
+                    ],
+                  }),
+                };
+              },
+              where() {
+                return call === 1
+                  ? { orderBy: async () => [{ id: 41, seq: 0, instruction: 'work' }] }
+                  : { limit: async () => [{ status: 'active' }] };
+              },
+            };
+          },
+        };
+      },
+      update() {
+        return { set: () => ({ where: async () => [{ affectedRows: 0 }] }) };
+      },
+    };
+    const special = vi.fn(async () => ({ handled: true as const, ok: true as const }));
+    configurePlannedRunSpecialDispatcher(special);
+
+    await dispatchPlannedRun(
+      { db, userId: 'usr_7', logger: { error: vi.fn() } } as never,
+      'plr_31',
+    );
+
+    expect(special).not.toHaveBeenCalled();
+    expect(selectCall).toBe(2);
+  });
+
+  it('does not cancel children when the parent dispatch cancellation CAS loses', async () => {
+    let selectCall = 0;
+    let updateCall = 0;
+    const updates: Array<Record<string, unknown>> = [];
+    const db = {
+      select() {
+        const call = selectCall++;
+        return {
+          from() {
+            return {
+              innerJoin() {
+                return {
+                  where: () => ({
+                    limit: async () => [
+                      {
+                        id: 32,
+                        status: 'pending',
+                        scheduledFor: new Date(),
+                        seriesScheduledFor: new Date(),
+                        trigger: 'scheduled',
+                        planId: 3,
+                        planExternalId: 'pln_3',
+                        planTitle: 'plan',
+                        repeatType: 'daily',
+                        rrule: null,
+                        endsAt: null,
+                        userId: 7,
+                      },
+                    ],
+                  }),
+                };
+              },
+              where() {
+                return call === 1
+                  ? { orderBy: async () => [{ id: 42, seq: 0, instruction: 'work' }] }
+                  : { limit: async () => [{ status: 'closure_pending' }] };
+              },
+            };
+          },
+        };
+      },
+      update() {
+        return {
+          set: (values: Record<string, unknown>) => ({
+            where: async () => {
+              updates.push(values);
+              updateCall += 1;
+              return [{ affectedRows: updateCall === 1 ? 1 : 0 }];
+            },
+          }),
+        };
+      },
+      async transaction<T>(callback: (tx: unknown) => Promise<T>) {
+        return callback(db);
+      },
+    };
+
+    await dispatchPlannedRun(
+      { db, userId: 'usr_7', logger: { error: vi.fn() } } as never,
+      'plr_32',
+    );
+
+    expect(updates).toEqual([
+      expect.objectContaining({ status: 'dispatching' }),
+      expect.objectContaining({ status: 'cancelled' }),
+    ]);
+  });
+
   it('rechecks the plan under a row lock before inserting a manual run', async () => {
     let selectCall = 0;
     let insertedRuns = 0;
@@ -114,11 +318,13 @@ describe('planned runner lifecycle serialization', () => {
       },
     };
 
-    await expect(queuePlannedRun(ctx as never, {
-      plannedTaskId: 'pln_monitor',
-      scheduledFor: new Date('2026-08-19T09:00:00.000Z'),
-      trigger: 'manual',
-    })).rejects.toMatchObject({
+    await expect(
+      queuePlannedRun(ctx as never, {
+        plannedTaskId: 'pln_monitor',
+        scheduledFor: new Date('2026-08-19T09:00:00.000Z'),
+        trigger: 'manual',
+      }),
+    ).rejects.toMatchObject({
       code: 'BAD_REQUEST',
       message: '当前状态不能执行',
     });
@@ -137,16 +343,20 @@ describe('planned runner lifecycle serialization', () => {
             return {
               where() {
                 if (call === 0) {
-                  return Promise.resolve([{
-                    id: 7,
-                    externalId: 'pln_monitor',
-                    nextRunAt: new Date('2026-08-19T09:00:00.000Z'),
-                    repeatType: 'daily',
-                    rrule: null,
-                    endsAt: null,
-                  }]);
+                  return Promise.resolve([
+                    {
+                      id: 7,
+                      externalId: 'pln_monitor',
+                      nextRunAt: new Date('2026-08-19T09:00:00.000Z'),
+                      repeatType: 'daily',
+                      rrule: null,
+                      endsAt: null,
+                      userId: 42,
+                    },
+                  ]);
                 }
-                return { limit: async () => [] };
+                if (call === 1) return { limit: async () => [] };
+                return { limit: async () => [{ status: 'active' }] };
               },
             };
           },
@@ -177,6 +387,59 @@ describe('planned runner lifecycle serialization', () => {
 
     expect(updateCalls).toHaveLength(2);
     expect(updateCalls[1]?.values).toMatchObject({ status: 'failed' });
-    expect(drizzleParamValues(updateCalls[1]?.where)).toEqual(expect.arrayContaining([7, 'running']));
+    expect(drizzleParamValues(updateCalls[1]?.where)).toEqual(
+      expect.arrayContaining([7, 'running']),
+    );
+  });
+
+  it('does not queue a claimed plan after the owner enters account closure', async () => {
+    let selectCall = 0;
+    const updates: Array<Record<string, unknown>> = [];
+    const db = {
+      select() {
+        const call = selectCall++;
+        return {
+          from() {
+            return {
+              where() {
+                if (call === 0) {
+                  return Promise.resolve([
+                    {
+                      id: 17,
+                      externalId: 'pln_closure_race',
+                      nextRunAt: new Date('2026-08-19T09:00:00.000Z'),
+                      repeatType: 'daily',
+                      rrule: null,
+                      endsAt: null,
+                      userId: 42,
+                    },
+                  ]);
+                }
+                if (call === 1) return { limit: async () => [] };
+                return { limit: async () => [{ status: 'closure_pending' }] };
+              },
+            };
+          },
+        };
+      },
+      update() {
+        return {
+          set(values: Record<string, unknown>) {
+            return {
+              async where() {
+                updates.push(values);
+                return [{ affectedRows: 1 }];
+              },
+            };
+          },
+        };
+      },
+    };
+    const queue = vi.fn(async () => undefined);
+
+    await plannedTick({ db: db as never, queue });
+
+    expect(queue).not.toHaveBeenCalled();
+    expect(updates).toEqual([{ status: 'running' }]);
   });
 });

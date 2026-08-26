@@ -20,7 +20,7 @@
  * importing the full tasks router graph.
  */
 
-import { and, eq, isNull, lt, lte, or } from 'drizzle-orm';
+import { and, eq, isNull, lt, lte, or, sql } from 'drizzle-orm';
 // rrule ships CJS-first (package.json main: dist/es5/rrule.js). Node 22's
 // ESM interop doesn't expose `rrulestr` as a named import on CJS modules
 // reliably — `import { rrulestr } from 'rrule'` crashes with
@@ -31,8 +31,10 @@ import rrule from 'rrule';
 const { rrulestr } = rrule as {
   rrulestr: (s: string) => { after: (d: Date, inc?: boolean) => Date | null };
 };
+import { accountClosureAllowsExecution } from '../account-closure/repository.js';
 import { logger } from '../config/logger.js';
 import { scheduledTasks } from '../db/schema/scheduled-tasks.js';
+import { users } from '../db/schema/users.js';
 
 const DEFAULT_POLL_MS = 60_000;
 
@@ -161,6 +163,7 @@ export function computeNextRunFromInputs(opts: {
 }
 
 let runnerInterval: NodeJS.Timeout | null = null;
+let runnerTickRunning = false;
 
 /**
  * Start the polling loop. Idempotent: calling twice without an
@@ -174,9 +177,25 @@ export function startScheduledRunner(deps: ScheduledRunnerDeps): NodeJS.Timeout 
   logger.info({ pollMs }, 'scheduled-runner: starting');
   // Fire once immediately on boot so a row that was due during a
   // restart doesn't sit waiting for the first interval tick.
-  void tick(deps);
+  const run = async (recover: boolean) => {
+    if (runnerTickRunning) return;
+    runnerTickRunning = true;
+    try {
+      if (recover) await recoverStuckRunningScheduledTasks(deps.db);
+      await tick(deps);
+    } catch (err) {
+      logger.warn({ err: errMsg(err) }, 'scheduled-runner: tick failed closed');
+    } finally {
+      runnerTickRunning = false;
+    }
+  };
+  void run(false).catch((err) => {
+    logger.error({ err: errMsg(err) }, 'scheduled-runner: unexpected tick rejection');
+  });
   runnerInterval = setInterval(() => {
-    void tick(deps);
+    void run(true).catch((err) => {
+      logger.error({ err: errMsg(err) }, 'scheduled-runner: unexpected tick rejection');
+    });
   }, pollMs);
   return runnerInterval;
 }
@@ -185,6 +204,7 @@ export function stopScheduledRunner(): void {
   if (runnerInterval) {
     clearInterval(runnerInterval);
     runnerInterval = null;
+    runnerTickRunning = false;
     logger.info('scheduled-runner: stopped');
   }
 }
@@ -222,7 +242,12 @@ export async function recoverStuckRunningScheduledTasks(
     const result = await db
       .update(scheduledTasks)
       .set({ status: 'active' })
-      .where(eq(scheduledTasks.status, 'running'));
+      .where(
+        and(
+          eq(scheduledTasks.status, 'running'),
+          sql`EXISTS (SELECT 1 FROM ${users} WHERE ${users.id} = ${scheduledTasks.userId} AND ${users.status} = 'active')`,
+        ),
+      );
     const affected = extractMysqlAffectedRows(result);
     if (affected > 0) {
       logger.info(
@@ -314,6 +339,7 @@ async function reminderScan(deps: ScheduledRunnerDeps, now: Date): Promise<void>
         .where(
           and(
             eq(scheduledTasks.id, c.id),
+            eq(scheduledTasks.status, 'active'),
             eq(scheduledTasks.nextRunAt, c.nextRunAt),
             // Re-check the not-fired predicate in the UPDATE itself.
             // Without this, two overlapping ticks can both select the
@@ -333,6 +359,7 @@ async function reminderScan(deps: ScheduledRunnerDeps, now: Date): Promise<void>
       continue;
     }
     if (claimed === 0) continue;
+    if (!(await scheduledOwnerAllowsExecution(deps, c.userId, c.id, 'reminder'))) continue;
     try {
       await deps.notifyReminder({
         userInternalId: c.userId,
@@ -427,6 +454,12 @@ async function tick(deps: ScheduledRunnerDeps): Promise<void> {
       // OR a user paused/deleted it between the scan and the claim.
       continue;
     }
+    if (!(await scheduledOwnerAllowsExecution(deps, row.userId, row.id, 'dispatch'))) {
+      // The durable immediate-effects pass owns the running→paused change and
+      // restoration ledger. Leaving the transient claim untouched here avoids
+      // dispatch and prevents an unrecorded restoration.
+      continue;
+    }
 
     // We own this row now (status='running'). Dispatch, then advance
     // + restore — both branches MUST run so the row doesn't wedge.
@@ -470,37 +503,43 @@ async function tick(deps: ScheduledRunnerDeps): Promise<void> {
     // longer payloads usually mean a system error worth shortening
     // before persisting.
     const truncatedError = dispatchError !== null ? dispatchError.slice(0, 2000) : null;
+    let finalizeWon = false;
     try {
-      if (nextRun === null) {
-        // One-shot — terminal. 'completed' on success; 'failed' when
-        // dispatch threw so the user can see the difference.
-        await deps.db
-          .update(scheduledTasks)
-          .set({
-            status: dispatchOk ? 'completed' : 'failed',
-            lastRunAt: now,
-            lastRunStatus: skipped ? 'skipped' : dispatchOk ? 'success' : 'failed',
-            lastError: skipped ? skipNote : truncatedError,
-            ...(dispatchedTaskId !== null ? { lastTaskId: dispatchedTaskId } : {}),
-          })
-          .where(eq(scheduledTasks.id, row.id));
-      } else {
-        // Recurring — restore to 'active' for the next tick. Failure
-        // is recorded but doesn't block the next interval; the
-        // common transient cause (quota, network blip) typically
-        // resolves before the next fire.
-        await deps.db
-          .update(scheduledTasks)
-          .set({
-            status: 'active',
-            nextRunAt: nextRun,
-            lastRunAt: now,
-            lastRunStatus: skipped ? 'skipped' : dispatchOk ? 'success' : 'failed',
-            lastError: skipped ? skipNote : truncatedError,
-            ...(dispatchedTaskId !== null ? { lastTaskId: dispatchedTaskId } : {}),
-          })
-          .where(eq(scheduledTasks.id, row.id));
-      }
+      finalizeWon = await deps.db.transaction(async (tx) => {
+        // Linearize freeze vs terminal finalization on the owner row. The
+        // lock is released before any notification/webhook side effect.
+        const [owner] = await tx
+          .select({ status: users.status })
+          .from(users)
+          .where(eq(users.id, row.userId))
+          .limit(1)
+          .for('update');
+        if (owner?.status !== 'active') return false;
+        const finalize =
+          nextRun === null
+            ? await tx
+                .update(scheduledTasks)
+                .set({
+                  status: dispatchOk ? 'completed' : 'failed',
+                  lastRunAt: now,
+                  lastRunStatus: skipped ? 'skipped' : dispatchOk ? 'success' : 'failed',
+                  lastError: skipped ? skipNote : truncatedError,
+                  ...(dispatchedTaskId !== null ? { lastTaskId: dispatchedTaskId } : {}),
+                })
+                .where(and(eq(scheduledTasks.id, row.id), eq(scheduledTasks.status, 'running')))
+            : await tx
+                .update(scheduledTasks)
+                .set({
+                  status: 'active',
+                  nextRunAt: nextRun,
+                  lastRunAt: now,
+                  lastRunStatus: skipped ? 'skipped' : dispatchOk ? 'success' : 'failed',
+                  lastError: skipped ? skipNote : truncatedError,
+                  ...(dispatchedTaskId !== null ? { lastTaskId: dispatchedTaskId } : {}),
+                })
+                .where(and(eq(scheduledTasks.id, row.id), eq(scheduledTasks.status, 'running')));
+        return extractMysqlAffectedRows(finalize) === 1;
+      });
     } catch (err) {
       // Worst-case path — the row stays in 'running' until the boot
       // sweep recovers it. Log so we know it happened.
@@ -509,13 +548,17 @@ async function tick(deps: ScheduledRunnerDeps): Promise<void> {
         'scheduled-runner: advance failed — row may be stuck in running until next restart',
       );
     }
+    if (!finalizeWon) continue;
 
     // Phase 26B — fire the user's inbox + webhook notifications.
     // Wrapped in its own try/catch so a notification path failure
     // never wedges the runner's tick. The notify implementation
     // itself never throws (allSettled fan-out), this is defence-
     // in-depth in case a future stub does.
-    if (deps.notify) {
+    if (
+      deps.notify &&
+      (await scheduledOwnerAllowsExecution(deps, row.userId, row.id, 'notification'))
+    ) {
       try {
         await deps.notify({
           userInternalId: row.userId,
@@ -532,6 +575,23 @@ async function tick(deps: ScheduledRunnerDeps): Promise<void> {
         );
       }
     }
+  }
+}
+
+async function scheduledOwnerAllowsExecution(
+  deps: ScheduledRunnerDeps,
+  userId: number,
+  scheduledTaskId: number,
+  boundary: 'reminder' | 'dispatch' | 'notification',
+): Promise<boolean> {
+  try {
+    return await accountClosureAllowsExecution(deps.db, userId);
+  } catch (err) {
+    logger.warn(
+      { err: errMsg(err), scheduledTaskId, boundary },
+      'scheduled-runner: owner gate failed closed',
+    );
+    return false;
   }
 }
 

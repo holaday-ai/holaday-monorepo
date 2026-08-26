@@ -17,7 +17,8 @@
     "isolatedModules": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@holaday/orchestrator/trpc/router": ["../orchestrator/src/trpc/router.ts"]
     }
   },
   "include": ["src"]

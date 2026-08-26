@@ -34,6 +34,7 @@ export type ConnStatus = 'idle' | 'connecting' | 'open' | 'closed' | 'unauthoriz
 
 interface State {
   socket: WebSocket | null;
+  connectionGeneration: number;
   reconnectAttempt: number;
   pingTimer: ReturnType<typeof setInterval> | null;
   closedByUser: boolean;
@@ -44,6 +45,7 @@ interface State {
 
 const state: State = {
   socket: null,
+  connectionGeneration: 0,
   reconnectAttempt: 0,
   pingTimer: null,
   closedByUser: false,
@@ -82,7 +84,7 @@ export function onStatus(fn: StatusListener): () => void {
 }
 
 export function send(msg: ClientMessage): boolean {
-  if (state.socket?.readyState !== WebSocket.OPEN) return false;
+  if (state.closedByUser || state.socket?.readyState !== WebSocket.OPEN) return false;
   state.socket.send(JSON.stringify(msg));
   return true;
 }
@@ -113,35 +115,51 @@ export function connect(): void {
 }
 
 export function disconnect(): void {
+  const socket = state.socket;
   state.closedByUser = true;
-  state.socket?.close(1000, 'client requested disconnect');
+  state.connectionGeneration += 1;
+  state.socket = null;
   if (state.pingTimer) {
     clearInterval(state.pingTimer);
     state.pingTimer = null;
   }
-  state.socket = null;
+  socket?.close(1000, 'client requested disconnect');
   setStatus('closed');
 }
 
 function openSocket(token: string): void {
+  const generation = state.connectionGeneration + 1;
+  state.connectionGeneration = generation;
   setStatus('connecting');
   const protocols = [WS_SUBPROTOCOL, `jwt.${token}`];
   const ws = new WebSocket(WS_URL, protocols);
   state.socket = ws;
 
   ws.addEventListener('open', () => {
+    if (!isCurrentSocket(ws, generation)) return;
     state.reconnectAttempt = 0;
     setStatus('open');
     // Fallback hello: if a proxy stripped the subprotocol we still
     // auth this way. The server accepts both paths and swallows the
     // duplicate cleanly when the header already succeeded.
-    send({ type: 'client.hello', token, extensionVersion: WEB_SOURCE });
-    state.pingTimer = setInterval(() => {
-      send({ type: 'client.pong', at: Date.now() });
+    sendOnSocket(ws, generation, {
+      type: 'client.hello',
+      token,
+      extensionVersion: WEB_SOURCE,
+    });
+    const pingTimer = setInterval(() => {
+      if (!isCurrentSocket(ws, generation)) {
+        clearInterval(pingTimer);
+        if (state.pingTimer === pingTimer) state.pingTimer = null;
+        return;
+      }
+      sendOnSocket(ws, generation, { type: 'client.pong', at: Date.now() });
     }, HEARTBEAT_INTERVAL_MS);
+    state.pingTimer = pingTimer;
   });
 
   ws.addEventListener('message', (event) => {
+    if (!isCurrentSocket(ws, generation)) return;
     const result = parseServerMessage(typeof event.data === 'string' ? event.data : '');
     if (!result.success) {
       hdDebug('ws bad frame', { error: result.error });
@@ -158,6 +176,7 @@ function openSocket(token: string): void {
   });
 
   ws.addEventListener('close', (event) => {
+    if (!isCurrentSocket(ws, generation)) return;
     if (state.pingTimer) {
       clearInterval(state.pingTimer);
       state.pingTimer = null;
@@ -172,20 +191,45 @@ function openSocket(token: string): void {
       return;
     }
     setStatus('closed');
-    scheduleReconnect();
+    scheduleReconnect(generation);
   });
 
   ws.addEventListener('error', () => {
+    if (!isCurrentSocket(ws, generation)) return;
     // 'close' fires immediately after; reconnect handled there.
   });
 }
 
-function scheduleReconnect(): void {
+function isCurrentSocket(socket: WebSocket, generation: number): boolean {
+  return (
+    !state.closedByUser &&
+    state.socket === socket &&
+    state.connectionGeneration === generation
+  );
+}
+
+function sendOnSocket(
+  socket: WebSocket,
+  generation: number,
+  message: ClientMessage,
+): boolean {
+  if (!isCurrentSocket(socket, generation) || socket.readyState !== WebSocket.OPEN) return false;
+  socket.send(JSON.stringify(message));
+  return true;
+}
+
+function scheduleReconnect(generation: number): void {
   state.reconnectAttempt += 1;
   const backoff = Math.min(30_000, 500 * 2 ** state.reconnectAttempt);
   const jitter = Math.floor(Math.random() * 250);
   setTimeout(() => {
-    if (state.closedByUser) return;
+    if (
+      state.closedByUser ||
+      state.connectionGeneration !== generation ||
+      state.socket !== null
+    ) {
+      return;
+    }
     const token = getAccessToken();
     if (!token) {
       setStatus('unauthorized');

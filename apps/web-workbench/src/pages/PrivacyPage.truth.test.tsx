@@ -60,8 +60,26 @@ describe('PrivacyPage truth contract', () => {
     for (const link of privacyLinks) {
       expect(link.getAttribute('href')).toBe('mailto:privacy@holaday.ai');
     }
-    expectText(/邮件是申请入口，不代表即时或自动完成/);
+    expectText(/其他个人信息请求.*邮件.*人工处理/);
     expectText(/交易、安全、争议或审计记录/);
+  });
+
+  it('truthfully describes self-service account closure without overstating erasure or export', () => {
+    renderPrivacy();
+    const rightsSection = screen.getByRole('heading', { name: '您的权利' }).closest('section');
+    const rightsText = rightsSection?.textContent ?? '';
+
+    expect(rightsText).toMatch(/设置.*账号与安全.*自助申请关闭账号/);
+    expect(rightsText).toMatch(/整整 7 天|7×24 小时/);
+    expect(rightsText).toMatch(/申请提交后立即冻结/);
+    expect(rightsText).toMatch(/邮箱或短信验证码.*MFA/);
+    expect(rightsText).toMatch(/不会自动退款/);
+    expect(rightsText).toMatch(/支付、争议、安全、KYC 和账本.*最小化.*受限保留/);
+    expect(rightsText).toMatch(/不会承诺统一的固定保留期限/);
+    expect(rightsText).toMatch(/同一邮箱或手机号.*全新账号/);
+    expect(rightsText).toMatch(/新账号不会关联/);
+    expect(rightsText).toMatch(/其他设备.*浏览器扩展.*已下载.*本地副本/);
+    expect(rightsText).toMatch(/完整个人数据导出.*尚未提供/);
   });
 
   it('discloses automatic cross-task memory, retention, reuse, and deletion controls', () => {
@@ -110,15 +128,17 @@ describe('PrivacyPage truth contract', () => {
     expectText(/“清空画像”.*不会删除自选股本身/);
   });
 
-  it('discloses feedback content and context forwarded through Resend or service logs', () => {
+  it('discloses governed feedback storage and identifier-only Resend notifications', () => {
     renderPrivacy();
 
     expectText(/反馈与支持/);
     expectText(/您主动提交的自由文本/);
-    expectText(/账号邮箱、账号标识、User-Agent 与可选的关联任务标识/);
-    expectText(/启用 Resend 时转发给 Resend/);
-    expectText(/否则可能进入服务日志/);
-    expectText(/处理反馈、故障、安全和争议所需/);
+    expectText(/随机反馈编号/);
+    expectText(/可选上下文、User-Agent、随机反馈编号及账号关联/);
+    expectText(/Resend 仅接收不含正文、邮箱或账号标识的随机反馈编号通知/);
+    expectText(/普通反馈会删除/);
+    expectText(/法律保留或进行中争议/);
+    expectText(/接收反馈、定位问题并提供支持/);
   });
 
   it('discloses external notification webhook configuration and task context transfers', () => {

@@ -20,13 +20,14 @@
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import { type PlanId, newExternalId } from '@holaday/shared-types';
-import { and, eq } from 'drizzle-orm';
+import { and, asc, eq, gt, isNull, like, notLike, or } from 'drizzle-orm';
 import type { Logger } from 'pino';
 import type { DB } from '../db/client.js';
+import { readAffectedRows } from '../db/mysql-result.js';
 import { type TaskFile, taskFiles } from '../db/schema/task-files.js';
 import { tasks } from '../db/schema/tasks.js';
 import type { StorageProvider } from './storage-provider.js';
-import { getSharedStorageProvider } from './storage-provider.js';
+import { deleteStorageObjectForClosure, getSharedStorageProvider } from './storage-provider.js';
 
 export type FileKind = 'input' | 'output';
 
@@ -314,6 +315,188 @@ export function looksLikeMojibake(s: string): boolean {
     if ((c >= 0x80 && c <= 0x9f) || c === 0xfffd) return true;
   }
   return false;
+}
+
+export type FileClosureCategory = 'task_execution' | 'media_assets';
+
+export interface DeleteUserFilesPageInput {
+  userIdInternal: number;
+  afterId?: number;
+  limit: number;
+  categoryId: FileClosureCategory;
+}
+
+export interface DeleteUserFilesPageResult {
+  nextAfterId: number | null;
+  deleted: number;
+  done: boolean;
+}
+
+export interface UserFileClosureRow {
+  id: number;
+  userId: number;
+  storagePath: string;
+  mimetype: string | null;
+}
+
+export interface UserFileClosureStore {
+  listOwnedPage(input: {
+    userIdInternal: number;
+    afterId: number;
+    limit: number;
+    categoryId: FileClosureCategory;
+  }): Promise<UserFileClosureRow[]>;
+  deleteOwnedRow(input: {
+    id: number;
+    userIdInternal: number;
+    categoryId: FileClosureCategory;
+  }): Promise<boolean>;
+}
+
+export interface DeleteUserFilesPageDependencies {
+  store: UserFileClosureStore;
+  storage: Pick<StorageProvider, 'delete'>;
+  deleteTimeoutMs?: number;
+  signal?: AbortSignal;
+}
+
+/**
+ * Stable, exhaustive closure ownership rule for `task_files`. Media MIME
+ * families belong to `media_assets`; null, empty, and every non-standard MIME
+ * conservatively belong to `task_execution`, so no row can fall between the
+ * two category handlers.
+ */
+export function closureFileCategoryForMimetype(
+  mimetype: string | null | undefined,
+): FileClosureCategory {
+  const normalized = mimetype?.toLowerCase() ?? '';
+  return normalized.startsWith('image/') ||
+    normalized.startsWith('video/') ||
+    normalized.startsWith('audio/')
+    ? 'media_assets'
+    : 'task_execution';
+}
+
+/**
+ * Deletes at most 100 owned files in deterministic primary-key order. The
+ * backing object is always deleted (or confirmed missing by the provider)
+ * before the ownership-scoped row mutation. A thrown object delete leaves the
+ * current row durable and prevents the caller from saving a later cursor.
+ */
+export async function deleteUserFilesPage(
+  input: DeleteUserFilesPageInput,
+  dependencies: DeleteUserFilesPageDependencies,
+): Promise<DeleteUserFilesPageResult> {
+  if (
+    !Number.isSafeInteger(input.userIdInternal) ||
+    input.userIdInternal <= 0 ||
+    !Number.isSafeInteger(input.limit) ||
+    input.limit <= 0 ||
+    input.limit > 100 ||
+    (input.afterId !== undefined && (!Number.isSafeInteger(input.afterId) || input.afterId < 0))
+  ) {
+    throw new Error('deleteUserFilesPage: invariant violation');
+  }
+  const afterId = input.afterId ?? 0;
+  const selected = await dependencies.store.listOwnedPage({
+    userIdInternal: input.userIdInternal,
+    afterId,
+    limit: input.limit + 1,
+    categoryId: input.categoryId,
+  });
+  if (
+    selected.length > input.limit + 1 ||
+    selected.some(
+      (row) =>
+        !Number.isSafeInteger(row.id) ||
+        row.id <= afterId ||
+        row.userId !== input.userIdInternal ||
+        closureFileCategoryForMimetype(row.mimetype) !== input.categoryId,
+    )
+  ) {
+    throw new Error('deleteUserFilesPage: invariant violation');
+  }
+
+  const page = selected.slice(0, input.limit);
+  for (const row of page) {
+    dependencies.signal?.throwIfAborted();
+    await deleteStorageObjectForClosure(dependencies.storage, row.storagePath, {
+      ...(dependencies.deleteTimeoutMs !== undefined
+        ? { timeoutMs: dependencies.deleteTimeoutMs }
+        : {}),
+      ...(dependencies.signal ? { signal: dependencies.signal } : {}),
+    });
+    dependencies.signal?.throwIfAborted();
+    const deleted = await dependencies.store.deleteOwnedRow({
+      id: row.id,
+      userIdInternal: input.userIdInternal,
+      categoryId: input.categoryId,
+    });
+    if (!deleted) throw new Error('deleteUserFilesPage: owned row changed during deletion');
+  }
+
+  const done = selected.length <= input.limit;
+  return {
+    nextAfterId: done ? null : (page.at(-1)?.id ?? null),
+    deleted: page.length,
+    done,
+  };
+}
+
+export function createDbUserFileClosureStore(db: DB): UserFileClosureStore {
+  return {
+    async listOwnedPage(input) {
+      const partition = fileClosurePartitionPredicate(input.categoryId);
+      return db
+        .select({
+          id: taskFiles.id,
+          userId: taskFiles.userId,
+          storagePath: taskFiles.storagePath,
+          mimetype: taskFiles.mimetype,
+        })
+        .from(taskFiles)
+        .where(
+          and(
+            eq(taskFiles.userId, input.userIdInternal),
+            gt(taskFiles.id, input.afterId),
+            partition,
+          ),
+        )
+        .orderBy(asc(taskFiles.id))
+        .limit(input.limit);
+    },
+    async deleteOwnedRow(input) {
+      const result = await db
+        .delete(taskFiles)
+        .where(
+          and(
+            eq(taskFiles.id, input.id),
+            eq(taskFiles.userId, input.userIdInternal),
+            fileClosurePartitionPredicate(input.categoryId),
+          ),
+        );
+      const affected = readAffectedRows(result);
+      if (affected > 1) throw new Error('deleteUserFilesPage: invariant violation');
+      return affected === 1;
+    },
+  };
+}
+
+function fileClosurePartitionPredicate(categoryId: FileClosureCategory) {
+  const media = or(
+    like(taskFiles.mimetype, 'image/%'),
+    like(taskFiles.mimetype, 'video/%'),
+    like(taskFiles.mimetype, 'audio/%'),
+  );
+  if (categoryId === 'media_assets') return media;
+  return or(
+    isNull(taskFiles.mimetype),
+    and(
+      notLike(taskFiles.mimetype, 'image/%'),
+      notLike(taskFiles.mimetype, 'video/%'),
+      notLike(taskFiles.mimetype, 'audio/%'),
+    ),
+  );
 }
 
 export class FileService {

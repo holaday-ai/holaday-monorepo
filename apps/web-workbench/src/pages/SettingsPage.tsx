@@ -1,15 +1,13 @@
 import { ApiKeysSection } from '@/components/ApiKeysSection';
-import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { NotificationsSection } from '@/components/notifications/NotificationsSection';
+import { AccountClosureSection } from '@/components/settings/AccountClosureSection';
 import { MemorySection } from '@/components/settings/MemorySection';
-import { Button } from '@/components/ui/button';
 import {
   SETTINGS_SECTIONS,
   type SettingsSectionId,
   normaliseSettingsHash,
   settingsSectionHref,
 } from '@/lib/settings-sections';
-import { SUPPORT_EMAIL, supportMailtoHref } from '@/lib/support-links';
 import { cn } from '@/lib/utils';
 import { PageContainer, PageHeader, Row, Section } from '@/pages/PageShell';
 import { type ThemeMode, useTheme } from '@/stores/theme-store';
@@ -31,14 +29,7 @@ import { Link, useLocation } from 'react-router-dom';
 export function SettingsPage(): JSX.Element {
   const { mode, setMode } = useTheme();
   const location = useLocation();
-  const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
-  const deleteButtonRef = React.useRef<HTMLButtonElement>(null);
   const activeSection = normaliseSettingsHash(location.hash) ?? 'appearance';
-
-  const closeDeleteDialog = React.useCallback(() => {
-    setDeleteDialogOpen(false);
-    deleteButtonRef.current?.focus();
-  }, []);
 
   React.useEffect(() => {
     const sectionId = normaliseSettingsHash(location.hash);
@@ -54,7 +45,7 @@ export function SettingsPage(): JSX.Element {
     );
     return () => {
       window.cancelAnimationFrame(frame);
-      timers.forEach((timer) => window.clearTimeout(timer));
+      for (const timer of timers) window.clearTimeout(timer);
     };
   }, [location.hash]);
 
@@ -70,10 +61,7 @@ export function SettingsPage(): JSX.Element {
       <SettingsSectionNav active={activeSection} />
       <div className="space-y-6">
         <Section id="appearance" title="外观">
-          <Row
-            label="主题"
-            description="跟随系统、浅色或深色。立即生效，记到本地。"
-          >
+          <Row label="主题" description="跟随系统、浅色或深色。立即生效，记到本地。">
             <ThemeSwitcher mode={mode} onChange={setMode} />
           </Row>
         </Section>
@@ -122,49 +110,9 @@ export function SettingsPage(): JSX.Element {
             />
           </div>
 
-          <div className="mt-5 border-t border-border pt-5">
-            <div className="text-xs font-semibold text-red-600">危险操作</div>
-            <Row
-              label="删除账号"
-              description="通过邮件提交申请。确认身份后处理账号关闭和关联数据；依法需要保留的交易、安全或审计记录可能继续受限保存"
-            >
-              <div className="flex flex-wrap items-center gap-3 md:justify-end">
-                <a
-                  href={`mailto:${SUPPORT_EMAIL}`}
-                  className="inline-flex h-8 items-center text-xs font-medium text-muted-foreground underline-offset-2 hover:text-red-600 hover:underline"
-                >
-                  {SUPPORT_EMAIL}
-                </a>
-                <Button
-                  ref={deleteButtonRef}
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setDeleteDialogOpen(true)}
-                  className="text-red-600 hover:text-red-700"
-                >
-                  邮件申请删除
-                </Button>
-              </div>
-            </Row>
-          </div>
+          <AccountClosureSection />
         </Section>
       </div>
-
-      <ConfirmDialog
-        open={deleteDialogOpen}
-        title="申请删除账号？"
-        description={`账号删除不可撤销。邮件是申请入口，不代表账号会即时自动删除。我们会先确认账号归属，并处理账号关闭和可删除的关联数据；依法需要保留的交易、安全、争议或审计记录可能继续受限保存。\n\n将打开系统邮件应用；若未自动打开，请手动发送到 ${SUPPORT_EMAIL}。请勿在邮件中发送密码、验证码、身份证件照片或完整支付信息。`}
-        confirmLabel="打开邮件应用"
-        destructive
-        onClose={closeDeleteDialog}
-        onConfirm={() => {
-          window.location.href = supportMailtoHref({
-            subject: '删除 HOLA DAY 账号',
-            body: '请协助删除我的 HOLA DAY 账号。\n\n注册邮箱：\n删除原因（选填）：',
-          });
-          closeDeleteDialog();
-        }}
-      />
     </PageContainer>
   );
 }
@@ -228,25 +176,13 @@ function ThemeSwitcher({
 }): JSX.Element {
   return (
     <div className="inline-grid grid-cols-3 gap-1 rounded-md bg-muted p-0.5">
-      <ThemeOption
-        active={mode === 'light'}
-        onClick={() => onChange('light')}
-        label="浅色"
-      >
+      <ThemeOption active={mode === 'light'} onClick={() => onChange('light')} label="浅色">
         <Sun className="h-3.5 w-3.5" />
       </ThemeOption>
-      <ThemeOption
-        active={mode === 'dark'}
-        onClick={() => onChange('dark')}
-        label="深色"
-      >
+      <ThemeOption active={mode === 'dark'} onClick={() => onChange('dark')} label="深色">
         <Moon className="h-3.5 w-3.5" />
       </ThemeOption>
-      <ThemeOption
-        active={mode === 'system'}
-        onClick={() => onChange('system')}
-        label="跟随系统"
-      >
+      <ThemeOption active={mode === 'system'} onClick={() => onChange('system')} label="跟随系统">
         <Monitor className="h-3.5 w-3.5" />
       </ThemeOption>
     </div>

@@ -79,10 +79,11 @@ const DATA_CATEGORIES: DataCategory[] = [
   },
   {
     label: '反馈与支持',
-    data: '您主动提交的自由文本、账号邮箱、账号标识、User-Agent 与可选的关联任务标识',
+    data: '您主动提交的自由文本、可选上下文、User-Agent、随机反馈编号及账号关联',
     purpose: '接收反馈、定位问题并提供支持',
-    processors: 'HOLA DAY；启用 Resend 时转发给 Resend，否则可能进入服务日志',
-    retention: '按处理反馈、故障、安全和争议所需保存；可通过隐私邮箱申请处理',
+    processors: 'HOLA DAY；Resend 仅接收不含正文、邮箱或账号标识的随机反馈编号通知',
+    retention:
+      '关闭账号时普通反馈会删除；已审核的法律保留或进行中争议会清除身份、正文、上下文和 User-Agent 后受限保留，不承诺统一固定期限',
   },
   {
     label: '外部通知渠道',
@@ -153,8 +154,8 @@ const SUMMARY_ITEMS = [
   },
   {
     number: '04',
-    title: '邮件是申请入口',
-    body: '您可申请查阅、更正或删除。邮件是申请入口，不代表即时或自动完成。',
+    title: '账号关闭可自助',
+    body: '账号关闭可在设置中自助申请；其他个人信息请求仍通过隐私邮件人工处理。',
   },
 ];
 
@@ -443,20 +444,48 @@ export function PrivacyPage(): JSX.Element {
           description="适用法律可能赋予您查阅、复制、更正、删除、撤回同意、限制或反对处理以及投诉的权利。"
           className="dark:border-border dark:bg-card"
         >
-          <p className="text-xs leading-relaxed text-muted-foreground">
-            当前请发送邮件至{' '}
-            <a
-              className="font-medium text-[#6F52A3] underline underline-offset-4 dark:text-[#CDB9F1]"
-              href="mailto:privacy@holaday.ai"
-            >
-              privacy@holaday.ai
-            </a>{' '}
-            提交申请。邮件是申请入口，不代表即时或自动完成。为保护账号，我们会先确认账号归属，再处理账号关闭和可处理的关联数据。
-            依法需要保留，或处理交易、安全、争议所必需的记录，可能在相应条件结束前继续受限保存。
-          </p>
-          <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
-            请勿在初次邮件中发送密码、验证码、身份证件照片或完整支付信息。若请求受到适用法律限制，我们会说明可以处理的范围。
-          </p>
+          <div className="space-y-3 text-xs leading-relaxed text-muted-foreground">
+            <p>
+              您可以在
+              <Link
+                className="font-medium text-[#6F52A3] underline underline-offset-4 dark:text-[#CDB9F1]"
+                to="/settings/account"
+              >
+                设置 &gt; 账号与安全
+              </Link>
+              自助申请关闭账号。申请提交后立即冻结账号、撤销当前访问并停止继续执行任务；冷静期是整整
+              7 天（7×24 小时），在截止前可以通过恢复页面撤销。
+            </p>
+            <p>
+              申请和撤销都需要邮箱或短信验证码；已启用 MFA 时还需要 MFA
+              验证。关闭账号不会自动退款；在冷静期内撤销时，
+              原套餐、额度和原到期时间按申请前状态恢复，不会额外增加 7 天。
+            </p>
+            <p>
+              冷静期结束后，可删除的数据会被清除；支付、争议、安全、KYC
+              和账本等必要记录可能经最小化后受限保留。已审核的反馈法律保留或进行中争议会去除身份和正文后受限保留；
+              无法按账号定位的必要运维或安全日志也可能受限保留。
+              不同记录按实际目的和适用要求处理，我们不会承诺统一的固定保留期限。
+            </p>
+            <p>
+              关闭完成并释放原身份后，同一邮箱或手机号可以注册为全新账号；新账号不会关联或继承旧账号的任务、文件、套餐、
+              额度或偏好。
+            </p>
+            <p>
+              当前设备会尽力清除登录态和本地资料，但 HOLA DAY
+              无法远程清除其他设备、浏览器扩展、您已下载的文件或其他本地副本。
+            </p>
+            <p>
+              完整个人数据导出尚未提供自助功能。其他个人信息请求请发送邮件至{' '}
+              <a
+                className="font-medium text-[#6F52A3] underline underline-offset-4 dark:text-[#CDB9F1]"
+                href="mailto:privacy@holaday.ai"
+              >
+                privacy@holaday.ai
+              </a>
+              ，由人工处理，不代表即时完成。请勿在初次邮件中发送密码、验证码、身份证件照片或完整支付信息。
+            </p>
+          </div>
         </Section>
 
         <Section id="security" title="安全措施" className="dark:border-border dark:bg-card">

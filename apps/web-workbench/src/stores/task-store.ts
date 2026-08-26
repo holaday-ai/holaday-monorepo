@@ -585,16 +585,26 @@ export const useTaskStore = create<TaskStore>((set, get) => {
   // the current one and bails if superseded. Cheaper + more
   // portable than threading AbortControllers through tRPC.
   let hydrateToken = 0;
+  let sessionGeneration = 0;
 
   function abortInFlightHydrate(): void {
     hydrateToken += 1;
   }
 
+  function captureSessionGeneration(): number {
+    return sessionGeneration;
+  }
+
+  function isCurrentSession(generation: number): boolean {
+    return generation === sessionGeneration;
+  }
+
   async function hydrateDetail(taskId: string): Promise<void> {
     const myToken = ++hydrateToken;
+    const generation = captureSessionGeneration();
     try {
       const rawDetail = await trpc.tasks.detail.query({ taskId });
-      if (myToken !== hydrateToken) return;
+      if (myToken !== hydrateToken || !isCurrentSession(generation)) return;
       const detail: Record<string, unknown> = isTaskListRecord(rawDetail)
         ? rawDetail
         : {};
@@ -795,7 +805,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         };
       });
     } catch (err) {
-      if (myToken !== hydrateToken) return;
+      if (myToken !== hydrateToken || !isCurrentSession(generation)) return;
       set({ error: taskStoreError(err) });
     }
   }
@@ -910,9 +920,11 @@ export const useTaskStore = create<TaskStore>((set, get) => {
   },
 
   async refreshTaskList() {
+    const generation = captureSessionGeneration();
     set({ loading: true, error: null });
     try {
       const res = await trpc.tasks.list.query({ limit: 50 });
+      if (!isCurrentSession(generation)) return;
       const freshList = preserveFinalTaskRows(
         get().tasks,
         normalizeTaskListRows(res?.tasks),
@@ -955,6 +967,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         void hydrateDetail(prevSelected);
       }
     } catch (err) {
+      if (!isCurrentSession(generation)) return;
       set({ loading: false, error: taskStoreError(err) });
     }
   },
@@ -965,12 +978,14 @@ export const useTaskStore = create<TaskStore>((set, get) => {
   },
 
   async loadMoreTasks() {
+    const generation = captureSessionGeneration();
     const { tasksCursor, tasksHasMore, loadingMore } = get();
     if (loadingMore) return;
     if (!tasksHasMore || tasksCursor == null) return;
     set({ loadingMore: true });
     try {
       const res = await trpc.tasks.list.query({ limit: 50, cursor: tasksCursor });
+      if (!isCurrentSession(generation)) return;
       const moreTasks = normalizeTaskListRows(res?.tasks);
       set((prev) => {
         // De-dupe defensively in case a row landed on both pages
@@ -988,11 +1003,13 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         };
       });
     } catch (err) {
+      if (!isCurrentSession(generation)) return;
       set({ loadingMore: false, error: taskStoreError(err) });
     }
   },
 
   async togglePin(taskId, desiredPinned) {
+    const generation = captureSessionGeneration();
     // Pin is server-persisted. The optimistic local flip only applies
     // when the task is in the store's `tasks` array — /starred can
     // call this for older pins that aren't in the recent-50 slice, in
@@ -1014,6 +1031,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     try {
       await trpc.tasks.star.mutate({ taskId, starred: next });
     } catch (err) {
+      if (!isCurrentSession(generation)) return;
       if (before) {
         // Local row existed and the RPC failed — revert the optimistic
         // flip so the UI matches the server.
@@ -1036,6 +1054,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
   },
 
   async moveTaskToProject(taskId, projectId) {
+    const generation = captureSessionGeneration();
     const before = get().tasks.find((t) => t.taskId === taskId);
     if (!before) return { ok: true };
     set((prev) => ({
@@ -1046,6 +1065,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       return { ok: true };
     } catch (err) {
       const msg = taskStoreError(err);
+      if (!isCurrentSession(generation)) return { error: msg };
       set((prev) => ({
         tasks: prev.tasks.map((t) =>
           t.taskId === taskId ? { ...t, projectId: before.projectId ?? null } : t,
@@ -1057,8 +1077,10 @@ export const useTaskStore = create<TaskStore>((set, get) => {
   },
 
   async deleteTask(taskId) {
+    const generation = captureSessionGeneration();
     try {
       await trpc.tasks.delete.mutate({ taskId });
+      if (!isCurrentSession(generation)) return { ok: true as const };
       const deletedActiveTask = get().selectedTaskId === taskId;
       if (deletedActiveTask) {
         abortInFlightHydrate();
@@ -1102,12 +1124,14 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       return { ok: true as const };
     } catch (err) {
       const msg = taskStoreError(err);
+      if (!isCurrentSession(generation)) return { error: msg };
       set({ error: msg });
       return { error: msg };
     }
   },
 
   async renameTask(taskId, title) {
+    const generation = captureSessionGeneration();
     const trimmed = title.trim();
     const nextTitle = trimmed.length === 0 ? null : trimmed;
     // Optimistic update — snap the new title immediately so the inline
@@ -1122,6 +1146,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       return { ok: true as const };
     } catch (err) {
       const msg = taskStoreError(err);
+      if (!isCurrentSession(generation)) return { error: msg };
       set({ error: msg });
       // Roll back optimistic change by pulling the server's truth.
       void get().refreshTasks();
@@ -1130,6 +1155,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
   },
 
   async replyToTask(taskId, message, fileIds) {
+    const generation = captureSessionGeneration();
     // Pin the user's text into the conversation stream before the
     // round-trip returns — the old behaviour wiped the composer and
     // left no trace of what the user said, which read like the reply
@@ -1149,6 +1175,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         message,
         ...(fileIds && fileIds.length > 0 ? { fileIds } : {}),
       });
+      if (!isCurrentSession(generation)) return { ok: res.ok };
       // Fix 2 — backend tags reply outcome as `state: 'resumed' | 'stillAwaiting'`.
       // Only `resumed` means the supercar accepted the message and
       // started executing again; `stillAwaiting` is the user saying
@@ -1203,14 +1230,17 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       return { ok: res.ok };
     } catch (err) {
       const msg = taskStoreError(err);
+      if (!isCurrentSession(generation)) return { error: msg };
       set({ error: msg });
       return { error: msg };
     }
   },
 
   async abortTask(taskId) {
+    const generation = captureSessionGeneration();
     try {
       const res = await trpc.tasks.abort.mutate({ taskId });
+      if (!isCurrentSession(generation)) return { ok: res.ok };
       // Optimistic status flip so the UI doesn't keep showing the
       // task as executing until the terminal frame arrives. The
       // server's own terminal broadcast (status='cancelled') will
@@ -1247,6 +1277,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       return { ok: res.ok };
     } catch (err) {
       const msg = taskStoreError(err);
+      if (!isCurrentSession(generation)) return { error: msg };
       set({ error: msg });
       return { error: msg };
     }
@@ -1274,6 +1305,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       const msg = `"${trimmed}" 是控制词，不是任务指令。要停止任务请用 Panel 右上角的"停止"按钮。`;
       return { error: msg };
     }
+    const generation = captureSessionGeneration();
     const pickedViewportProfile =
       viewportProfile ??
       get().defaultViewportProfile ??
@@ -1317,6 +1349,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         ...(stockContext ? { stockContext } : {}),
         viewportProfile: pickedViewportProfile,
       });
+      if (!isCurrentSession(generation)) return { error: SESSION_ENDED_ERROR };
       // Optimistic insert at the top so the UI feels instant; the next
       // refreshTasks() will pick up the canonical server row.
       //
@@ -1370,6 +1403,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       return { taskId: res.taskId };
     } catch (err) {
       const msg = taskStoreError(err);
+      if (!isCurrentSession(generation)) return { error: SESSION_ENDED_ERROR };
       set((prev) => ({
         tasks: prev.tasks.filter((t) => t.taskId !== localTaskId),
       }));
@@ -1827,6 +1861,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         // that no longer matches `TaskStore['subStatusByTask']` —
         // causing the zustand `set` callback to reject the return
         // shape (C2 TS regression repro on Pack B1 land).
+        const previousSubStatus = prev.subStatusByTask[msg.taskId];
         const nextSubStatus: TaskStore['subStatusByTask'] = typedSubStatus
           ? {
               ...prev.subStatusByTask,
@@ -1834,8 +1869,8 @@ export const useTaskStore = create<TaskStore>((set, get) => {
                 // Reuse `since` if the chip was already up — gives a
                 // continuous timer across phase transitions instead of
                 // resetting to 0 every time the runner advances.
-                prev.subStatusByTask[msg.taskId]
-                  ? { subStatus: typedSubStatus, since: prev.subStatusByTask[msg.taskId]!.since }
+                previousSubStatus
+                  ? { subStatus: typedSubStatus, since: previousSubStatus.since }
                   : { subStatus: typedSubStatus, since: Date.now() },
             }
           : prev.subStatusByTask;
@@ -2172,6 +2207,8 @@ export const useTaskStore = create<TaskStore>((set, get) => {
   },
 
   reset() {
+    sessionGeneration += 1;
+    abortInFlightHydrate();
     set({
       tasks: [],
       selectedTaskId: null,
@@ -2205,6 +2242,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
 // task intent. Matched case-insensitive + whole-string; a task legitimately
 // asking the agent to "停止" some external action would be phrased as a
 // full sentence and wouldn't match.
+const SESSION_ENDED_ERROR = '账号会话已结束，请重新登录。';
 const CONTROL_WORDS: ReadonlySet<string> = new Set([
   '停止',
   '取消',

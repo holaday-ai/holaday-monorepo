@@ -16,6 +16,8 @@
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import type { S3Client } from '@aws-sdk/client-s3';
+import type { Logger } from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   LocalStorageProvider,
@@ -31,8 +33,7 @@ const fakeLogger = {
   debug: vi.fn(),
   child: vi.fn(),
   level: 'silent',
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-} as any;
+} as unknown as Logger;
 
 describe('LocalStorageProvider', () => {
   let root: string;
@@ -162,8 +163,7 @@ describe('R2StorageProvider — stubbed S3Client', () => {
           return {};
         },
       ),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } as any;
+    } as unknown as S3Client;
     return { client, sent };
   }
 
@@ -257,8 +257,7 @@ describe('R2StorageProvider — stubbed S3Client', () => {
         err.name = 'NoSuchKey';
         throw err;
       }),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } as any;
+    } as unknown as S3Client;
     const provider = new R2StorageProvider(
       {
         endpoint: 'https://r2.example',
@@ -277,8 +276,7 @@ describe('R2StorageProvider — stubbed S3Client', () => {
       send: vi.fn(async () => {
         throw new Error('R2 unavailable');
       }),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } as any;
+    } as unknown as S3Client;
     const provider = new R2StorageProvider(
       {
         endpoint: 'https://r2.example',
@@ -291,6 +289,46 @@ describe('R2StorageProvider — stubbed S3Client', () => {
     );
 
     await expect(provider.delete('usr/output/file/video.mp4')).rejects.toThrow('R2 unavailable');
+  });
+
+  it('passes the closure abort signal into the native R2 delete operation', async () => {
+    let observedSignal: AbortSignal | undefined;
+    const client = {
+      send: vi.fn(
+        async (
+          _command: unknown,
+          options?: { abortSignal?: AbortSignal },
+        ): Promise<Record<string, never>> => {
+          observedSignal = options?.abortSignal;
+          if (!observedSignal) throw new Error('missing native abort signal');
+          await new Promise<never>((_resolve, reject) => {
+            observedSignal?.addEventListener(
+              'abort',
+              () => reject(new DOMException('aborted', 'AbortError')),
+              { once: true },
+            );
+          });
+          return {};
+        },
+      ),
+    } as unknown as S3Client;
+    const provider = new R2StorageProvider(
+      {
+        endpoint: 'https://r2.example',
+        accessKeyId: 'x',
+        secretAccessKey: 'y',
+        bucket: 'b',
+      },
+      fakeLogger,
+      { client },
+    );
+    const controller = new AbortController();
+    const deletion = provider.delete('usr/output/file/video.mp4', {
+      signal: controller.signal,
+    });
+    controller.abort();
+    await expect(deletion).rejects.toMatchObject({ name: 'AbortError' });
+    expect(observedSignal).toBe(controller.signal);
   });
 });
 

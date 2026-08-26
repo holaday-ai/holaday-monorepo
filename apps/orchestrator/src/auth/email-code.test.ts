@@ -1,11 +1,19 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { logger as productionLogger } from '../config/logger.js';
 import {
   CODE_LENGTH,
   CODE_TTL_MS,
   EmailCodeError,
   type EmailSender,
   createEmailCodeService,
+  privateResendSender,
 } from './email-code.js';
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 function fakeSender(): {
   sender: EmailSender;
@@ -112,5 +120,97 @@ describe('createEmailCodeService', () => {
 
     await svc.verifyCode(email, passwordChangeCode as string, 'password-change');
     expect(svc._peek(email, 'password-change')).toBeUndefined();
+  });
+});
+
+describe('private email delivery', () => {
+  it('fails closed without logging message content when the provider is unavailable', async () => {
+    vi.stubEnv('RESEND_API_KEY', '');
+    const capturedLogs: unknown[] = [];
+    vi.spyOn(productionLogger, 'info').mockImplementation((...args: unknown[]) => {
+      capturedLogs.push(args);
+    });
+    const message = {
+      to: 'closure-owner@example.test',
+      subject: 'Closure verification',
+      text: 'Private code 482901',
+    };
+
+    let failure: unknown;
+    try {
+      await privateResendSender.send(message);
+    } catch (error) {
+      failure = error;
+    }
+
+    expect.soft(failure).toBeInstanceOf(Error);
+    const serializedLogs = JSON.stringify(capturedLogs);
+    expect(serializedLogs).not.toContain(message.to);
+    expect(serializedLogs).not.toContain('482901');
+  });
+
+  it('uses the real private provider when it is available', async () => {
+    vi.stubEnv('RESEND_API_KEY', 'private-resend-key');
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response(null, { status: 202 }));
+    vi.stubGlobal('fetch', fetchImpl);
+
+    await expect(
+      privateResendSender.send({
+        to: 'closure-owner@example.test',
+        subject: 'Closure verification',
+        text: 'Private code 482901',
+        idempotencyKey: 'ACR-random-notification-id',
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(privateResendSender.isAvailable()).toBe(true);
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://api.resend.com/emails',
+      expect.objectContaining({
+        method: 'POST',
+        signal: expect.any(AbortSignal),
+        headers: {
+          'content-type': 'application/json',
+          authorization: 'Bearer private-resend-key',
+          'idempotency-key': 'ACR-random-notification-id',
+        },
+      }),
+    );
+  });
+
+  it('combines caller cancellation with the private provider timeout', async () => {
+    vi.stubEnv('RESEND_API_KEY', 'private-resend-key');
+    let observedSignal: AbortSignal | undefined;
+    let started!: () => void;
+    const requestStarted = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn<typeof fetch>(async (_url, init) => {
+        observedSignal = init?.signal ?? undefined;
+        started();
+        return new Promise<Response>((_resolve, reject) => {
+          observedSignal?.addEventListener(
+            'abort',
+            () => reject(new DOMException('lease lost', 'AbortError')),
+            { once: true },
+          );
+        });
+      }),
+    );
+    const controller = new AbortController();
+    const delivery = privateResendSender.send({
+      to: 'closure-owner@example.test',
+      subject: 'Closure complete',
+      text: 'Receipt ACR-random',
+      signal: controller.signal,
+    });
+    await requestStarted;
+    controller.abort();
+
+    await expect(delivery).rejects.toThrow('Private email delivery failed');
+    expect(observedSignal).toBeInstanceOf(AbortSignal);
+    expect(observedSignal?.aborted).toBe(true);
   });
 });

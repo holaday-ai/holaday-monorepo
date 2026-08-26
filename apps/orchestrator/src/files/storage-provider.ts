@@ -117,6 +117,13 @@ export interface StatResult {
   contentType?: string;
 }
 
+export interface DeleteStorageOptions {
+  /** Remote providers must forward this to their native request. */
+  signal?: AbortSignal;
+}
+
+export const ACCOUNT_CLOSURE_STORAGE_DELETE_TIMEOUT_MS = 5_000;
+
 export interface StorageProvider {
   /**
    * Resolve the exact path/key that a subsequent put will use. Temporary
@@ -131,7 +138,7 @@ export interface StorageProvider {
   /** Read bytes. Returns null when the path doesn't exist (caller decides 404 vs 500). */
   get(storagePath: StoragePath): Promise<Buffer | null>;
   /** Remove. No-op when the path doesn't exist (idempotent — handles double-cleanup). */
-  delete(storagePath: StoragePath): Promise<void>;
+  delete(storagePath: StoragePath, options?: DeleteStorageOptions): Promise<void>;
   /**
    * Return a short-lived URL the SPA can use for a direct-download
    * GET. For providers without native signing (local disk), returns
@@ -155,6 +162,27 @@ export interface StorageProvider {
    * missing.
    */
   stat(storagePath: StoragePath): Promise<StatResult | null>;
+}
+
+/**
+ * Closure-only object deletion. The provider receives a native cancellation
+ * signal and this function awaits its settlement, so no mutation continues in
+ * the background after the worker handles the result.
+ */
+export async function deleteStorageObjectForClosure(
+  storage: Pick<StorageProvider, 'delete'>,
+  storagePath: StoragePath,
+  options: { timeoutMs?: number; signal?: AbortSignal } = {},
+): Promise<void> {
+  const timeoutMs = options.timeoutMs ?? ACCOUNT_CLOSURE_STORAGE_DELETE_TIMEOUT_MS;
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 60_000) {
+    throw new Error('Invalid account closure storage timeout');
+  }
+  options.signal?.throwIfAborted();
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  const signal = options.signal ? AbortSignal.any([options.signal, timeoutSignal]) : timeoutSignal;
+  await storage.delete(storagePath, { signal });
+  options.signal?.throwIfAborted();
 }
 
 // ---------------------------------------------------------------------------
@@ -213,7 +241,7 @@ export class LocalStorageProvider implements StorageProvider {
     }
   }
 
-  async delete(storagePath: StoragePath): Promise<void> {
+  async delete(storagePath: StoragePath, _options?: DeleteStorageOptions): Promise<void> {
     try {
       await fs.unlink(storagePath);
     } catch (err) {
@@ -360,13 +388,14 @@ export class R2StorageProvider implements StorageProvider {
     }
   }
 
-  async delete(storagePath: StoragePath): Promise<void> {
+  async delete(storagePath: StoragePath, options?: DeleteStorageOptions): Promise<void> {
     try {
       await this.client.send(
         new DeleteObjectCommand({
           Bucket: this.config.bucket,
           Key: storagePath,
         }),
+        options?.signal ? { abortSignal: options.signal } : undefined,
       );
     } catch (err) {
       const code = (err as { name?: string }).name;

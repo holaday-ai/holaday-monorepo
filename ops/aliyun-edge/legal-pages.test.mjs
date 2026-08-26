@@ -58,10 +58,10 @@ test('public landing privacy page states implemented data boundaries', () => {
     '不会删除自选股本身',
     '反馈与支持',
     '您主动提交的自由文本',
-    '账号邮箱、账号标识、User-Agent 与可选的关联任务标识',
-    '启用 Resend 时转发给 Resend',
-    '否则可能进入服务日志',
-    '处理反馈、故障、安全和争议所需',
+    '可选上下文、User-Agent、随机反馈编号及账号关联',
+    'Resend 仅接收不含正文、邮箱或账号标识的随机反馈编号通知',
+    '关闭账号时普通反馈会删除',
+    '已审核的法律保留或进行中争议',
     '外部通知渠道',
     'webhook 地址和模板',
     '通知标题、正文、状态',
@@ -70,6 +70,12 @@ test('public landing privacy page states implemented data boundaries', () => {
     '修改或删除渠道配置',
     'privacy@holaday.ai',
     '不会自动扣款',
+    '设置 &gt; 账号与安全',
+    '整整 7 天',
+    '申请提交后立即冻结',
+    '不会自动退款',
+    '同一邮箱或手机号可以注册全新账号',
+    '完整个人数据导出尚未提供',
   ]) {
     assert.match(privacy, new RegExp(required), `missing truthful privacy copy: ${required}`);
   }
@@ -117,6 +123,7 @@ test('public landing privacy page excludes unsupported promises', () => {
     '继续使用本服务即视为接受更新后的政策',
     '您授权的白名单网站',
     '由您授权的网站 Cookie',
+    '再通过邮件申请关闭账号',
   ]) {
     assert.doesNotMatch(privacy, new RegExp(forbidden), `unsupported privacy copy: ${forbidden}`);
   }

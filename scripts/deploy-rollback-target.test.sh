@@ -410,9 +410,11 @@ test_orchestrator_retries_transient_payment_preflights() {
   cp "$AUTO_SMOKE_SUMMARY_SCRIPT" "$harness_dir/repo/scripts/auto-smoke-summary.sh"
   : > "$harness_dir/repo/scripts/orchestrator-runtime.sh"
   : > "$harness_dir/repo/scripts/start-orchestrator-production.sh"
+  : > "$harness_dir/repo/scripts/start-account-closure-worker-production.sh"
   chmod +x "$harness_dir/repo/scripts/deploy-orchestrator.sh" \
     "$harness_dir/repo/scripts/orchestrator-runtime.sh" \
-    "$harness_dir/repo/scripts/start-orchestrator-production.sh"
+    "$harness_dir/repo/scripts/start-orchestrator-production.sh" \
+    "$harness_dir/repo/scripts/start-account-closure-worker-production.sh"
 
   cat > "$harness_dir/bin/ssh" <<'STUB'
 #!/usr/bin/env bash
@@ -457,9 +459,11 @@ write_orchestrator_gate_retry_harness() {
   cp "$AUTO_SMOKE_SUMMARY_SCRIPT" "$harness_dir/repo/scripts/auto-smoke-summary.sh"
   : > "$harness_dir/repo/scripts/orchestrator-runtime.sh"
   : > "$harness_dir/repo/scripts/start-orchestrator-production.sh"
+  : > "$harness_dir/repo/scripts/start-account-closure-worker-production.sh"
   chmod +x "$harness_dir/repo/scripts/deploy-orchestrator.sh" \
     "$harness_dir/repo/scripts/orchestrator-runtime.sh" \
-    "$harness_dir/repo/scripts/start-orchestrator-production.sh"
+    "$harness_dir/repo/scripts/start-orchestrator-production.sh" \
+    "$harness_dir/repo/scripts/start-account-closure-worker-production.sh"
 
   cat > "$harness_dir/bin/scp" <<'STUB'
 #!/usr/bin/env bash
@@ -584,9 +588,11 @@ write_orchestrator_release_smoke_harness() {
   cp "$AUTO_SMOKE_SUMMARY_SCRIPT" "$harness_dir/repo/scripts/auto-smoke-summary.sh"
   : > "$harness_dir/repo/scripts/orchestrator-runtime.sh"
   : > "$harness_dir/repo/scripts/start-orchestrator-production.sh"
+  : > "$harness_dir/repo/scripts/start-account-closure-worker-production.sh"
   chmod +x "$harness_dir/repo/scripts/deploy-orchestrator.sh" \
     "$harness_dir/repo/scripts/orchestrator-runtime.sh" \
-    "$harness_dir/repo/scripts/start-orchestrator-production.sh"
+    "$harness_dir/repo/scripts/start-orchestrator-production.sh" \
+    "$harness_dir/repo/scripts/start-account-closure-worker-production.sh"
 
   cat > "$harness_dir/bin/scp" <<'STUB'
 #!/usr/bin/env bash

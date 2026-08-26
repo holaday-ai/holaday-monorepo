@@ -1,0 +1,78 @@
+import { DATA_CATEGORY_IDS, type DataCategoryId } from '../data-governance/types.js';
+import type { AccountClosureHandler } from './handler-contract.js';
+import { ACCOUNT_CLOSURE_HANDLER_METADATA } from './handler-governance.js';
+import { accountSecurityClosureHandler } from './handlers/account-security.js';
+import { analyticsLogsClosureHandler } from './handlers/analytics-logs.js';
+import { crossTaskMemoryClosureHandler } from './handlers/cross-task-memory.js';
+import { energyAstrologyProfileClosureHandler } from './handlers/energy-astrology-profile.js';
+import { extensionLoginCookiesClosureHandler } from './handlers/extension-login-cookies.js';
+import { extensionSiteStatsClosureHandler } from './handlers/extension-site-stats.js';
+import { externalNotificationsClosureHandler } from './handlers/external-notifications.js';
+import { feedbackSupportClosureHandler } from './handlers/feedback-support.js';
+import { mediaAssetsClosureHandler } from './handlers/media-assets.js';
+import { partnerKycLedgerClosureHandler } from './handlers/partner-kyc-ledger.js';
+import { paymentsEntitlementsClosureHandler } from './handlers/payments-entitlements.js';
+import { stockPreferenceProfileClosureHandler } from './handlers/stock-preference-profile.js';
+import { taskExecutionClosureHandler } from './handlers/task-execution.js';
+
+export interface AccountClosureHandlerBinding {
+  readonly categoryId: DataCategoryId;
+  readonly handlerRef: string;
+  readonly handler: AccountClosureHandler;
+}
+
+/** Source-owned bindings let release governance prove a route to the exact runtime handler. */
+const HANDLER_IMPLEMENTATIONS: Readonly<Record<DataCategoryId, AccountClosureHandler>> = {
+  account_security: accountSecurityClosureHandler,
+  task_execution: taskExecutionClosureHandler,
+  cross_task_memory: crossTaskMemoryClosureHandler,
+  energy_astrology_profile: energyAstrologyProfileClosureHandler,
+  stock_preference_profile: stockPreferenceProfileClosureHandler,
+  feedback_support: feedbackSupportClosureHandler,
+  external_notifications: externalNotificationsClosureHandler,
+  extension_site_stats: extensionSiteStatsClosureHandler,
+  extension_login_cookies: extensionLoginCookiesClosureHandler,
+  payments_entitlements: paymentsEntitlementsClosureHandler,
+  partner_kyc_ledger: partnerKycLedgerClosureHandler,
+  media_assets: mediaAssetsClosureHandler,
+  analytics_logs: analyticsLogsClosureHandler,
+};
+
+export const ACCOUNT_CLOSURE_HANDLER_BINDINGS: readonly AccountClosureHandlerBinding[] =
+  ACCOUNT_CLOSURE_HANDLER_METADATA.map((metadata) => ({
+    ...metadata,
+    handler: HANDLER_IMPLEMENTATIONS[metadata.categoryId],
+  }));
+
+export const ACCOUNT_CLOSURE_HANDLERS: readonly AccountClosureHandler[] =
+  ACCOUNT_CLOSURE_HANDLER_BINDINGS.map((binding) => binding.handler);
+
+export function assertAccountClosureHandlerContract(
+  categoryIds: readonly string[],
+  handlers: readonly AccountClosureHandler[],
+): void {
+  const categories = new Set(categoryIds);
+  const registered = new Set<string>();
+  const valid =
+    categories.size === categoryIds.length &&
+    handlers.length === categoryIds.length &&
+    handlers.every((handler) => {
+      if (handler.version !== 1 || registered.has(handler.categoryId)) return false;
+      registered.add(handler.categoryId);
+      return categories.has(handler.categoryId);
+    }) &&
+    categoryIds.every((categoryId) => registered.has(categoryId));
+  if (!valid) throw new Error('Account closure handler contract mismatch');
+}
+
+assertAccountClosureHandlerContract(DATA_CATEGORY_IDS, ACCOUNT_CLOSURE_HANDLERS);
+
+const HANDLER_BY_CATEGORY = new Map(
+  ACCOUNT_CLOSURE_HANDLERS.map((handler) => [handler.categoryId, handler] as const),
+);
+
+export function getAccountClosureHandler(categoryId: string): AccountClosureHandler {
+  const handler = HANDLER_BY_CATEGORY.get(categoryId as DataCategoryId);
+  if (!handler) throw new Error('Account closure handler missing');
+  return handler;
+}

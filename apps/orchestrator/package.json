@@ -33,6 +33,7 @@
     "db:verify": "tsx scripts/verify-db-schema.ts",
     "partner:daily": "tsx scripts/partner-run-daily.ts",
     "partner:monthly": "tsx scripts/partner-run-monthly.ts",
+    "account-closure:worker": "node dist/account-closure/worker-entry.js",
     "db:studio": "drizzle-kit studio",
     "clean": "rimraf dist .turbo"
   },

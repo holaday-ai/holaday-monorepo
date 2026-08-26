@@ -1,68 +1,73 @@
+import { randomBytes } from 'node:crypto';
+import { TRPCError } from '@trpc/server';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
-import { resendSender } from '../../auth/email-code.js';
+import { type PrivateEmailSender, privateResendSender } from '../../auth/email-code.js';
+import { feedbackCases } from '../../db/schema/feedback-cases.js';
 import { users } from '../../db/schema/users.js';
 import { protectedProcedure, router } from '../trpc.js';
 
 /**
- * Collect in-app user feedback and forward it to ops via Resend. Very
- * thin: the message + optional context string (e.g. "task_id=xxx") +
- * the caller's email land in a single mail to FEEDBACK_TO_EMAIL. We
- * deliberately avoid persisting to the DB — the inbox is authoritative
- * and the whole feature is for the first couple hundred users.
- *
- * If Resend isn't configured, the mutation still returns ok=true — the
- * email helper logs the payload so the operator can read it out of
- * pm2 logs. Failing the mutation would frustrate users on a cold
- * dev env.
+ * Feedback is stored in the governed relational source of truth. Resend is a
+ * content-free case notification only: no identity, message, context, UA, or
+ * provider error body may enter the inbox or operational logs.
  */
 const submitInput = z.object({
   message: z.string().min(1).max(4_000),
   context: z.string().max(512).optional(),
 });
 
-const FEEDBACK_TO_EMAIL =
-  process.env.FEEDBACK_TO_EMAIL ?? 'feedback@holaday.ai';
+const FEEDBACK_TO_EMAIL = process.env.FEEDBACK_TO_EMAIL ?? 'feedback@holaday.ai';
 
-export const feedbackRouter = router({
-  submit: protectedProcedure.input(submitInput).mutation(async ({ ctx, input }) => {
-    const [userRow] = await ctx.db
-      .select({ email: users.email, externalId: users.externalId })
-      .from(users)
-      .where(eq(users.externalId, ctx.userId))
-      .limit(1);
-    const from = userRow?.email ?? '(unknown)';
-    const ua =
-      typeof (ctx as unknown as { req?: { headers?: Record<string, unknown> } }).req?.headers?.[
-        'user-agent'
-      ] === 'string'
-        ? ((ctx as unknown as { req: { headers: { 'user-agent': string } } }).req.headers[
-            'user-agent'
-          ] as string)
-        : '(unknown)';
-    const text = [
-      `From: ${from} (${userRow?.externalId ?? ctx.userId})`,
-      `User-Agent: ${ua}`,
-      input.context ? `Context: ${input.context}` : null,
-      '',
-      input.message,
-    ]
-      .filter(Boolean)
-      .join('\n');
-    try {
-      await resendSender.send({
-        to: FEEDBACK_TO_EMAIL,
-        subject: `[HOLA DAY feedback] ${from}`,
-        text,
+export interface FeedbackRouterDependencies {
+  emailSender: PrivateEmailSender;
+  createCaseRef: () => string;
+}
+
+export function createFeedbackRouter(dependencies: FeedbackRouterDependencies) {
+  return router({
+    submit: protectedProcedure.input(submitInput).mutation(async ({ ctx, input }) => {
+      const [userRow] = await ctx.db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.externalId, ctx.userId))
+        .limit(1);
+      if (!userRow) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR' });
+      const ua = (
+        typeof (ctx as unknown as { req?: { headers?: Record<string, unknown> } }).req?.headers?.[
+          'user-agent'
+        ] === 'string'
+          ? ((ctx as unknown as { req: { headers: { 'user-agent': string } } }).req.headers[
+              'user-agent'
+            ] as string)
+          : '(unknown)'
+      ).slice(0, 512);
+      const caseRef = dependencies.createCaseRef();
+      await ctx.db.insert(feedbackCases).values({
+        externalId: caseRef,
+        userId: userRow.id,
+        message: input.message,
+        context: input.context ?? null,
+        userAgent: ua,
       });
-    } catch (err) {
-      ctx.logger.error(
-        { err, from, message: input.message.slice(0, 200) },
-        'feedback: delivery failed — message logged above',
-      );
-      // Don't fail the mutation — we already have the payload in logs.
-    }
-    ctx.logger.info({ from, context: input.context ?? null }, 'feedback submitted');
-    return { ok: true as const };
-  }),
+      try {
+        if (!dependencies.emailSender.isAvailable())
+          throw new Error('private delivery unavailable');
+        await dependencies.emailSender.send({
+          to: FEEDBACK_TO_EMAIL,
+          subject: `[HOLA DAY feedback] ${caseRef}`,
+          text: `New governed feedback case: ${caseRef}`,
+        });
+        ctx.logger.info({ caseRef, status: 'accepted' }, 'feedback delivery status');
+      } catch {
+        ctx.logger.error({ caseRef, status: 'failed' }, 'feedback delivery status');
+      }
+      return { ok: true as const };
+    }),
+  });
+}
+
+export const feedbackRouter = createFeedbackRouter({
+  emailSender: privateResendSender,
+  createCaseRef: () => `fbc_${randomBytes(12).toString('hex')}`,
 });

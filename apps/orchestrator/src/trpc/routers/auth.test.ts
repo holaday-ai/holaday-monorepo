@@ -1,5 +1,10 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { authRouter } from './auth.js';
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+});
 
 describe('auth router — unexpected error masking', () => {
   it('does not leak raw database errors from password login', async () => {
@@ -49,5 +54,40 @@ describe('auth router — unexpected error masking', () => {
     await expect(
       caller.verifyMfaChallenge({ mfaToken: 'not-a-token', code: '123456' }),
     ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+  });
+
+  it('passes the SMS gateway closure-recovery union to the client unchanged', async () => {
+    vi.stubEnv('ALIYUN_SMS_URL', 'https://sms-gateway.test');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              user: {
+                externalId: 'usr_sms_closure',
+                email: null,
+                plan: 'free',
+                displayName: null,
+                avatarUrl: null,
+                createdAt: '2026-08-01T00:00:00.000Z',
+              },
+              closureRecoveryRequired: true,
+              recoveryToken: 'sms-recovery-token',
+              closureStatus: 'pending_grace',
+            }),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          ),
+      ),
+    );
+    const caller = authRouter.createCaller({ db: {}, logger: { error: vi.fn() } } as never);
+
+    await expect(caller.smsVerify({ phone: '13800138000', code: '123456' })).resolves.toMatchObject(
+      {
+        closureRecoveryRequired: true,
+        recoveryToken: 'sms-recovery-token',
+        closureStatus: 'pending_grace',
+      },
+    );
   });
 });

@@ -20,7 +20,7 @@ import type { PlaywrightExecutor } from './agent/vision-loop/playwright-executor
 import { createWebhookTasksHandler } from './api-keys/webhook-handler.js';
 import { signStreamToken } from './auth/jwt.js';
 import { bearerAuth } from './auth/middleware.js';
-import { AuthService } from './auth/service.js';
+import { AuthService, isClosureRecoveryResult } from './auth/service.js';
 import type { BrowserPool } from './browser-pool/index.js';
 import { browsingHistorySchema, replaceUserSiteStats } from './browsing-history/service.js';
 import { env } from './config/env.js';
@@ -56,6 +56,7 @@ import {
   validatePartnerPaymentConfirmHttpRequest,
 } from './partner/payment-confirm-service.js';
 import type { PayPalAdapter, PlanId } from './payment/index.js';
+import { sanitizePaymentMetadataForClosure } from './payment/retention.js';
 import { fetchSourceCover } from './stock-news/source-cover.js';
 import { makeCreateContext } from './trpc/context.js';
 import { appRouter } from './trpc/router.js';
@@ -338,21 +339,30 @@ export function createHttpApp(deps: HttpAppDeps) {
         name: info.name ?? null,
         avatarUrl: info.picture ?? null,
       });
-      logger.info(
-        { email: info.email, sub: info.sub.slice(0, 6) },
-        result.mfaRequired
-          ? 'google oauth: issued MFA challenge'
-          : 'google oauth: issued access token',
-      );
+      if (isClosureRecoveryResult(result)) {
+        logger.info(
+          { closureStatus: result.closureStatus },
+          'google oauth: issued closure recovery credential',
+        );
+      } else {
+        logger.info(
+          { email: info.email, sub: info.sub.slice(0, 6) },
+          result.mfaRequired
+            ? 'google oauth: issued MFA challenge'
+            : 'google oauth: issued access token',
+        );
+      }
       // 4. Hand the token back via URL fragment — the SPA's lib/auth
       //    picks it out at load, persists to localStorage, then scrubs
       //    the hash via history.replaceState so it doesn't leak into
       //    referrers. Land on `/login` (not `/`) so the SPA's auth
       //    bootstrap is the surface that consumes the hash, instead
       //    of the landing page swallowing it before the SPA mounts.
-      const fragment = result.mfaRequired
-        ? `#mfa=${encodeURIComponent(result.mfaToken)}`
-        : `#token=${encodeURIComponent(result.accessToken)}`;
+      const fragment = isClosureRecoveryResult(result)
+        ? `#closure=${encodeURIComponent(result.recoveryToken)}`
+        : result.mfaRequired
+          ? `#mfa=${encodeURIComponent(result.mfaToken)}`
+          : `#token=${encodeURIComponent(result.accessToken)}`;
       res.redirect(302, `/login${fragment}`);
     } catch (err) {
       logger.error(
@@ -476,19 +486,31 @@ export function createHttpApp(deps: HttpAppDeps) {
             .set({
               status: 'failed',
               providerCaptureId: captureId,
-              metadata: {
-                ...((row.metadata as Record<string, unknown> | null) ?? {}),
-                webhookEventType: event.event_type,
-                reason: 'capture_settlement_mismatch',
-                captureStatus,
-                captureAmountCents,
-                captureCurrency,
-              },
+              metadata:
+                settlement.user.status === 'active'
+                  ? {
+                      ...((row.metadata as Record<string, unknown> | null) ?? {}),
+                      webhookEventType: event.event_type,
+                      reason: 'capture_settlement_mismatch',
+                      captureStatus,
+                      captureAmountCents,
+                      captureCurrency,
+                    }
+                  : sanitizePaymentMetadataForClosure({
+                      ...((row.metadata as Record<string, unknown> | null) ?? {}),
+                      provider: row.provider,
+                      providerStatus: captureStatus,
+                      currency: row.currency,
+                    }),
             })
             .where(and(eq(payments.id, row.id), eq(payments.status, 'pending')));
           return { kind: 'review' as const, row, reason: 'capture_settlement_mismatch' };
         }
-        if (settlement.firstMonthRequested && !settlement.firstMonthEligible) {
+        if (
+          settlement.user.status === 'active' &&
+          settlement.firstMonthRequested &&
+          !settlement.firstMonthEligible
+        ) {
           await tx
             .update(payments)
             .set({
@@ -510,7 +532,12 @@ export function createHttpApp(deps: HttpAppDeps) {
           metadata: { webhookEventType: event.event_type },
         });
         return {
-          kind: completed ? ('completed' as const) : ('deduped' as const),
+          kind:
+            completed === 'applied'
+              ? ('completed' as const)
+              : completed === 'retained_only'
+                ? ('retained' as const)
+                : ('deduped' as const),
           row,
         };
       });
@@ -529,6 +556,14 @@ export function createHttpApp(deps: HttpAppDeps) {
           'paypal webhook capture requires refund review',
         );
         res.status(200).send('review required');
+        return;
+      }
+      if (outcome.kind === 'retained') {
+        logger.info(
+          { paymentId: outcome.row.externalId, captureId },
+          'paypal webhook: capture retained without entitlement for inactive account',
+        );
+        res.status(200).send('settlement retained');
         return;
       }
       logger.info(
@@ -1303,7 +1338,7 @@ export function createHttpApp(deps: HttpAppDeps) {
 
       const outcome = await db.transaction(async (tx) => {
         const [lockedUser] = await tx
-          .select({ id: users.id })
+          .select({ id: users.id, status: users.status })
           .from(users)
           .where(eq(users.externalId, user.externalId))
           .limit(1)
@@ -1356,27 +1391,6 @@ export function createHttpApp(deps: HttpAppDeps) {
         if (!row) {
           throw new Error('cn payment callback has no pending Holaday order');
         }
-        if (!row.providerCaptureId) {
-          await tx
-            .update(payments)
-            .set({
-              providerCaptureId: transactionId,
-              metadata: {
-                ...((row.metadata as Record<string, unknown> | null) ?? {}),
-                ...callbackMetadata,
-              },
-            })
-            .where(and(eq(payments.id, row.id), eq(payments.status, 'pending')));
-          row = {
-            ...row,
-            providerCaptureId: transactionId,
-            metadata: {
-              ...((row.metadata as Record<string, unknown> | null) ?? {}),
-              ...callbackMetadata,
-            },
-          };
-        }
-
         if (
           row.userExternalId !== user.externalId ||
           row.providerOrderId !== outTradeNo ||
@@ -1386,32 +1400,69 @@ export function createHttpApp(deps: HttpAppDeps) {
         ) {
           throw new Error('cn payment callback does not match pending order');
         }
-
         const settlement = await lockSettlementContext(tx, row);
+        if (!row.providerCaptureId) {
+          const nextMetadata =
+            lockedUser.status === 'active'
+              ? {
+                  ...((row.metadata as Record<string, unknown> | null) ?? {}),
+                  ...callbackMetadata,
+                }
+              : sanitizePaymentMetadataForClosure({
+                  ...((row.metadata as Record<string, unknown> | null) ?? {}),
+                  ...callbackMetadata,
+                  provider,
+                  providerStatus: 'COMPLETED',
+                  currency: row.currency,
+                });
+          await tx
+            .update(payments)
+            .set({
+              providerCaptureId: transactionId,
+              metadata: nextMetadata,
+            })
+            .where(and(eq(payments.id, row.id), eq(payments.status, 'pending')));
+          row = {
+            ...row,
+            providerCaptureId: transactionId,
+            metadata: nextMetadata,
+          };
+        }
+
         const expectedAmount =
           kind === 'subscription'
             ? getPlanPriceCents(
                 planId,
                 cycle,
                 'cny',
-                settlement.firstMonthRequested && settlement.firstMonthEligible,
+                settlement.firstMonthRequested &&
+                  (settlement.user.status !== 'active' || settlement.firstMonthEligible),
               )
             : getAddonPackPriceCents(packId as AddonPackId, 'cny');
         if (
-          (settlement.firstMonthRequested && !settlement.firstMonthEligible) ||
+          (settlement.user.status === 'active' &&
+            settlement.firstMonthRequested &&
+            !settlement.firstMonthEligible) ||
           amountCents !== expectedAmount
         ) {
+          const mismatchReason =
+            amountCents !== expectedAmount ? 'amount_mismatch' : 'first_month_no_longer_eligible';
           await tx
             .update(payments)
             .set({
               status: 'failed',
-              metadata: {
-                ...((row.metadata as Record<string, unknown> | null) ?? {}),
-                reason:
-                  amountCents !== expectedAmount
-                    ? 'amount_mismatch'
-                    : 'first_month_no_longer_eligible',
-              },
+              metadata:
+                settlement.user.status === 'active'
+                  ? {
+                      ...((row.metadata as Record<string, unknown> | null) ?? {}),
+                      reason: mismatchReason,
+                    }
+                  : sanitizePaymentMetadataForClosure({
+                      ...((row.metadata as Record<string, unknown> | null) ?? {}),
+                      provider: row.provider,
+                      providerStatus: 'FAILED',
+                      currency: row.currency,
+                    }),
             })
             .where(and(eq(payments.id, row.id), eq(payments.status, 'pending')));
           return { kind: 'review' as const, row };
@@ -1423,7 +1474,12 @@ export function createHttpApp(deps: HttpAppDeps) {
           metadata: { source: 'cn-payment-gateway' },
         });
         return {
-          kind: completed ? ('completed' as const) : ('deduped' as const),
+          kind:
+            completed === 'applied'
+              ? ('completed' as const)
+              : completed === 'retained_only'
+                ? ('retained' as const)
+                : ('deduped' as const),
           row,
         };
       });
@@ -1431,7 +1487,10 @@ export function createHttpApp(deps: HttpAppDeps) {
       const deduped = outcome.kind === 'deduped';
       logger.info(
         {
-          userId: user.externalId,
+          userId:
+            outcome.kind === 'completed' || outcome.kind === 'deduped'
+              ? user.externalId
+              : undefined,
           planId: kind === 'subscription' ? planId : undefined,
           packId: kind === 'addon' ? packId : undefined,
           cycle: kind === 'subscription' ? cycle : undefined,
@@ -1442,13 +1501,16 @@ export function createHttpApp(deps: HttpAppDeps) {
         },
         outcome.kind === 'review'
           ? 'internal-confirm: captured payment requires refund review'
-          : deduped
-            ? 'internal-confirm: payment deduped'
-            : 'internal-confirm: payment completed',
+          : outcome.kind === 'retained'
+            ? 'internal-confirm: settlement retained without entitlement for inactive account'
+            : deduped
+              ? 'internal-confirm: payment deduped'
+              : 'internal-confirm: payment completed',
       );
       res.status(200).json({
         ok: true,
         deduped,
+        ...(outcome.kind === 'retained' ? { retained: true } : {}),
         ...(outcome.kind === 'review' ? { reviewRequired: true } : {}),
       });
     } catch (err) {
@@ -1497,10 +1559,17 @@ export function createHttpApp(deps: HttpAppDeps) {
     try {
       const svc = new AuthService(db);
       const result = await svc.loginOrRegisterByPhone(phone);
-      logger.info(
-        { userId: result.user.externalId, plan: result.user.plan },
-        'sms-login: user authenticated via gateway',
-      );
+      if (isClosureRecoveryResult(result)) {
+        logger.info(
+          { closureStatus: result.closureStatus },
+          'sms-login: issued closure recovery credential',
+        );
+      } else {
+        logger.info(
+          { userId: result.user.externalId, plan: result.user.plan },
+          'sms-login: user authenticated via gateway',
+        );
+      }
       res.status(200).json(result);
     } catch (err) {
       logger.error(

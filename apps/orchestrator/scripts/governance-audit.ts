@@ -1,10 +1,363 @@
+import { existsSync } from 'node:fs';
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import ts from 'typescript';
+import type { AccountClosureHandler } from '../src/account-closure/handler-contract.js';
+import {
+  ACCOUNT_CLOSURE_HANDLERS,
+  ACCOUNT_CLOSURE_HANDLER_BINDINGS,
+  type AccountClosureHandlerBinding,
+} from '../src/account-closure/handler-registry.js';
+import {
+  ACCOUNT_CLOSURE_TABLE_OWNERSHIP,
+  type AccountClosureTableOwnership,
+} from '../src/account-closure/table-ownership.js';
+import {
+  ACCOUNT_CLOSURE_RETENTION_OUTCOMES,
+  ACCOUNT_CLOSURE_PUBLIC_RECEIPT_FIELDS as PUBLIC_RECEIPT_FIELDS,
+} from '../src/account-closure/types.js';
 import {
   type AuditIssue,
   type AuditReport,
+  DATA_CATEGORY_IDS,
+  type DataCategoryId,
+  type RightsCapability,
   auditGovernanceRegistry,
   governanceRegistry,
 } from '../src/data-governance/index.js';
+import * as dbSchema from '../src/db/schema/index.js';
+
+export const ACCOUNT_CLOSURE_PUBLIC_RECEIPT_FIELDS = PUBLIC_RECEIPT_FIELDS;
+
+export interface AccountClosureGovernanceDeclaration {
+  readonly categoryId: DataCategoryId;
+  readonly handlerRef: string;
+  readonly testRef: string;
+}
+
+export const ACCOUNT_CLOSURE_GOVERNANCE_DECLARATIONS: readonly AccountClosureGovernanceDeclaration[] =
+  [
+    relationalDeclaration('account_security', 'account-security', 'accountSecurityClosureHandler'),
+    relationalDeclaration('task_execution', 'task-execution', 'taskExecutionClosureHandler'),
+    relationalDeclaration(
+      'cross_task_memory',
+      'cross-task-memory',
+      'crossTaskMemoryClosureHandler',
+    ),
+    relationalDeclaration(
+      'energy_astrology_profile',
+      'energy-astrology-profile',
+      'energyAstrologyProfileClosureHandler',
+    ),
+    relationalDeclaration(
+      'stock_preference_profile',
+      'stock-preference-profile',
+      'stockPreferenceProfileClosureHandler',
+    ),
+    relationalDeclaration('feedback_support', 'feedback-support', 'feedbackSupportClosureHandler'),
+    relationalDeclaration(
+      'external_notifications',
+      'external-notifications',
+      'externalNotificationsClosureHandler',
+    ),
+    relationalDeclaration(
+      'extension_site_stats',
+      'extension-site-stats',
+      'extensionSiteStatsClosureHandler',
+    ),
+    relationalDeclaration(
+      'extension_login_cookies',
+      'extension-login-cookies',
+      'extensionLoginCookiesClosureHandler',
+    ),
+    {
+      categoryId: 'payments_entitlements',
+      handlerRef:
+        'apps/orchestrator/src/account-closure/handlers/payments-entitlements.ts#paymentsEntitlementsClosureHandler',
+      testRef: 'apps/orchestrator/src/account-closure/tombstone-service.integration.test.ts',
+    },
+    {
+      categoryId: 'partner_kyc_ledger',
+      handlerRef:
+        'apps/orchestrator/src/account-closure/handlers/partner-kyc-ledger.ts#partnerKycLedgerClosureHandler',
+      testRef: 'apps/orchestrator/src/account-closure/tombstone-service.integration.test.ts',
+    },
+    {
+      categoryId: 'media_assets',
+      handlerRef:
+        'apps/orchestrator/src/account-closure/handlers/media-assets.ts#mediaAssetsClosureHandler',
+      testRef: 'apps/orchestrator/src/account-closure/handlers/media-assets.integration.test.ts',
+    },
+    relationalDeclaration('analytics_logs', 'analytics-logs', 'analyticsLogsClosureHandler'),
+  ];
+
+function relationalDeclaration(
+  categoryId: DataCategoryId,
+  moduleName: string,
+  exportName: string,
+): AccountClosureGovernanceDeclaration {
+  return {
+    categoryId,
+    handlerRef: `apps/orchestrator/src/account-closure/handlers/${moduleName}.ts#${exportName}`,
+    testRef:
+      'apps/orchestrator/src/account-closure/handlers/relational-handlers.integration.test.ts',
+  };
+}
+
+export interface AccountClosureGovernanceAuditInput {
+  readonly declarations: readonly AccountClosureGovernanceDeclaration[];
+  readonly handlerBindings: readonly AccountClosureHandlerBinding[];
+  readonly runtimeHandlers: readonly AccountClosureHandler[];
+  readonly schemaTableNames: readonly string[];
+  readonly tableOwnership: readonly AccountClosureTableOwnership[];
+  readonly receiptFields: readonly string[];
+  readonly rightsCapabilities: readonly RightsCapability[];
+  readonly repoRoot?: string;
+}
+
+/** Validates the destructive-flow release contract without reading runtime or user data. */
+export function auditAccountClosureGovernance(
+  input: AccountClosureGovernanceAuditInput,
+): AuditIssue[] {
+  const issues: AuditIssue[] = [];
+  const add = (code: AuditIssue['code'], registryId: string, message: string) =>
+    issues.push({ severity: 'error', code, registryId, message });
+  const seen = new Set<string>();
+  const bindings = new Map(input.handlerBindings.map((binding) => [binding.handlerRef, binding]));
+  const runtimeHandlers = new Map(
+    input.runtimeHandlers.map((handler) => [handler.categoryId, handler] as const),
+  );
+  const root = resolve(input.repoRoot ?? repositoryRoot());
+
+  for (const declaration of input.declarations) {
+    const registryId = `account_closure:${declaration.categoryId}`;
+    if (seen.has(declaration.categoryId)) {
+      add('duplicate_id', registryId, 'Account closure category declaration is duplicated.');
+    }
+    seen.add(declaration.categoryId);
+
+    const binding = bindings.get(declaration.handlerRef);
+    const runtimeHandler = runtimeHandlers.get(declaration.categoryId);
+    if (
+      !binding ||
+      binding.categoryId !== declaration.categoryId ||
+      binding.handler.categoryId !== declaration.categoryId ||
+      binding.handler.version !== 1 ||
+      binding.handler !== runtimeHandler
+    ) {
+      add(
+        'closure_handler_category_mismatch',
+        registryId,
+        'Account closure handler does not match its governed category.',
+      );
+    }
+    if (
+      !binding ||
+      binding.handler.retentionOutcomes.length === 0 ||
+      binding.handler.retentionOutcomes.some(
+        (mode) => !ACCOUNT_CLOSURE_RETENTION_OUTCOMES.includes(mode),
+      )
+    ) {
+      add(
+        'closure_retention_missing',
+        registryId,
+        'Account closure category requires an explicit supported retention outcome.',
+      );
+    }
+    if (!hasDirectHandlerBehaviorEvidence(declaration.handlerRef, declaration.testRef, root)) {
+      add(
+        'closure_test_missing',
+        registryId,
+        'Account closure category requires repository-owned test evidence.',
+      );
+    }
+  }
+
+  for (const categoryId of DATA_CATEGORY_IDS) {
+    if (!seen.has(categoryId)) {
+      add(
+        'closure_handler_category_mismatch',
+        `account_closure:${categoryId}`,
+        'Canonical category has no account closure governance declaration.',
+      );
+    }
+  }
+
+  auditTableOwnership(input, add);
+
+  const allowedReceiptFields = new Set(PUBLIC_RECEIPT_FIELDS);
+  if (
+    input.receiptFields.some((field) => !allowedReceiptFields.has(field as never)) ||
+    new Set(input.receiptFields).size !== input.receiptFields.length
+  ) {
+    add(
+      'closure_receipt_raw_content',
+      'account_closure:receipt',
+      'Public closure receipts may contain only the reviewed aggregate field allowlist.',
+    );
+  }
+
+  const accountRights = input.rightsCapabilities.find(
+    (capability) => capability.id === 'account_manual_request',
+  );
+  if (
+    accountRights?.delete.status !== 'implemented' ||
+    accountRights.delete.handlerRef !==
+      'apps/orchestrator/src/trpc/routers/account-closure.ts#accountClosureRouter' ||
+    accountRights.export.status !== 'not_implemented'
+  ) {
+    add(
+      'closure_public_claim_exceeds_capability',
+      'account_closure:public_claim',
+      'Public self-service closure claims must match the implemented route while export stays unavailable.',
+    );
+  }
+
+  return issues;
+}
+
+function isSafeExistingTestRef(root: string, testRef: string): boolean {
+  if (!testRef.endsWith('.test.ts') || isAbsolute(testRef)) return false;
+  const target = resolve(root, testRef);
+  const targetRelative = relative(root, target);
+  return (
+    targetRelative !== '..' &&
+    !targetRelative.startsWith(`..${sep}`) &&
+    !isAbsolute(targetRelative) &&
+    existsSync(target)
+  );
+}
+
+export function hasDirectHandlerBehaviorEvidence(
+  handlerRef: string,
+  testRef: string,
+  repoRoot = repositoryRoot(),
+): boolean {
+  const separator = handlerRef.lastIndexOf('#');
+  if (separator <= 0 || !isSafeExistingTestRef(repoRoot, testRef)) return false;
+  const moduleRef = handlerRef.slice(0, separator);
+  const exportName = handlerRef.slice(separator + 1);
+  if (!/^[$A-Z_a-z][$\w]*$/.test(exportName)) return false;
+  const expectedModule = resolve(repoRoot, moduleRef);
+  const testPath = resolve(repoRoot, testRef);
+  const typeContext = behaviorTypeContext(testPath);
+  if (!typeContext) return false;
+  const { checker, sourceFile } = typeContext;
+  let importedSymbol: ts.Symbol | null = null;
+  for (const statement of sourceFile.statements) {
+    if (
+      !ts.isImportDeclaration(statement) ||
+      !ts.isStringLiteral(statement.moduleSpecifier) ||
+      !statement.moduleSpecifier.text.startsWith('.')
+    ) {
+      continue;
+    }
+    const moduleSpecifier = statement.moduleSpecifier.text;
+    const importedModule = resolve(
+      dirname(testPath),
+      moduleSpecifier.endsWith('.js') ? `${moduleSpecifier.slice(0, -3)}.ts` : moduleSpecifier,
+    );
+    if (importedModule !== expectedModule) continue;
+    const bindings = statement.importClause?.namedBindings;
+    if (!bindings || !ts.isNamedImports(bindings)) continue;
+    for (const element of bindings.elements) {
+      if ((element.propertyName?.text ?? element.name.text) === exportName) {
+        importedSymbol = checker.getSymbolAtLocation(element.name) ?? null;
+        break;
+      }
+    }
+  }
+  if (!importedSymbol) return false;
+
+  let found = false;
+  const visit = (node: ts.Node): void => {
+    if (found) return;
+    if (ts.isCallExpression(node)) {
+      if (
+        ts.isPropertyAccessExpression(node.expression) &&
+        ts.isIdentifier(node.expression.expression) &&
+        node.expression.name.text === 'run' &&
+        checker.getSymbolAtLocation(node.expression.expression) === importedSymbol
+      ) {
+        found = true;
+        return;
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return found;
+}
+
+interface BehaviorTypeContext {
+  readonly checker: ts.TypeChecker;
+  readonly sourceFile: ts.SourceFile;
+}
+
+const BEHAVIOR_TYPE_CONTEXTS = new Map<string, BehaviorTypeContext>();
+
+function behaviorTypeContext(testPath: string): BehaviorTypeContext | null {
+  const cached = BEHAVIOR_TYPE_CONTEXTS.get(testPath);
+  if (cached) return cached;
+  const program = ts.createProgram({
+    rootNames: [testPath],
+    options: {
+      module: ts.ModuleKind.NodeNext,
+      moduleResolution: ts.ModuleResolutionKind.NodeNext,
+      skipLibCheck: true,
+      target: ts.ScriptTarget.ES2022,
+    },
+  });
+  const sourceFile = program.getSourceFile(testPath);
+  if (!sourceFile) return null;
+  const context = { checker: program.getTypeChecker(), sourceFile };
+  BEHAVIOR_TYPE_CONTEXTS.set(testPath, context);
+  return context;
+}
+
+function auditTableOwnership(
+  input: AccountClosureGovernanceAuditInput,
+  add: (code: AuditIssue['code'], registryId: string, message: string) => void,
+): void {
+  const owners = new Map<string, DataCategoryId>();
+  for (const entry of input.tableOwnership) {
+    if (owners.has(entry.tableName) || !DATA_CATEGORY_IDS.includes(entry.categoryId)) {
+      add(
+        'closure_table_owner_missing',
+        `account_closure:${entry.tableName}`,
+        'Persistent table must have exactly one canonical account closure owner.',
+      );
+      continue;
+    }
+    owners.set(entry.tableName, entry.categoryId);
+  }
+  const schemaNames = new Set(input.schemaTableNames);
+  for (const tableName of schemaNames) {
+    if (!owners.has(tableName)) {
+      add(
+        'closure_table_owner_missing',
+        `account_closure:${tableName}`,
+        'Exported persistent table has no account closure owner.',
+      );
+    }
+  }
+  for (const tableName of owners.keys()) {
+    if (!schemaNames.has(tableName)) {
+      add(
+        'closure_table_owner_missing',
+        `account_closure:${tableName}`,
+        'Account closure table owner points to no exported persistent table.',
+      );
+    }
+  }
+}
+
+function exportedDrizzleTableNames(): string[] {
+  const nameSymbol = Symbol.for('drizzle:Name');
+  return Object.values(dbSchema)
+    .map((value) => (value as unknown as Record<symbol, unknown> | null)?.[nameSymbol])
+    .filter((value): value is string => typeof value === 'string');
+}
 
 export interface GovernanceAuditIo {
   stdout(message: string): void;
@@ -33,7 +386,7 @@ const APPROVED_CONTACT_PLACEHOLDER = '__APPROVED_PRIVACY_CONTACT__';
 const SAFE_ISSUE_CODE = /^[a-z][a-z0-9_]*$/;
 const CONFIG_KEY_NAME = /^[A-Z][A-Z0-9_]+$/;
 const SAFE_REGISTRY_ID =
-  /^(?:(?:category|processor|public_disclosure):[a-z][a-z0-9_]*|rights_capability:[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)?|retention_policy:[a-z][a-z0-9_]*(?:\.local_regime:[a-z][a-z0-9_]*)?)$/;
+  /^(?:(?:category|processor|public_disclosure|account_closure):[a-z][a-z0-9_]*|rights_capability:[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)?|retention_policy:[a-z][a-z0-9_]*(?:\.local_regime:[a-z][a-z0-9_]*)?)$/;
 const PRIVATE_KEY_BOUNDARY = ['-----BEGIN', '(?:[A-Z ]+ )?PRIVATE', 'KEY-----'].join(' ');
 const PRIVATE_KEY = new RegExp(
   `${PRIVATE_KEY_BOUNDARY}[\\s\\S]*?(?:-----END (?:[A-Z ]+ )?PRIVATE KEY-----|$)`,
@@ -232,6 +585,31 @@ export interface GovernanceAuditDependencies {
   readonly buildReport?: () => AuditReport;
 }
 
+export function buildGovernanceAuditReport(): AuditReport {
+  const base = auditGovernanceRegistry(governanceRegistry, {
+    repoRoot: repositoryRoot(),
+    verifyEvidenceFiles: true,
+    requirePublicDisclosures: true,
+  });
+  const closureIssues = auditAccountClosureGovernance({
+    declarations: ACCOUNT_CLOSURE_GOVERNANCE_DECLARATIONS,
+    handlerBindings: ACCOUNT_CLOSURE_HANDLER_BINDINGS,
+    runtimeHandlers: ACCOUNT_CLOSURE_HANDLERS,
+    schemaTableNames: exportedDrizzleTableNames(),
+    tableOwnership: ACCOUNT_CLOSURE_TABLE_OWNERSHIP,
+    receiptFields: PUBLIC_RECEIPT_FIELDS,
+    rightsCapabilities: governanceRegistry.rightsCapabilities,
+    repoRoot: repositoryRoot(),
+  });
+  const errors = base.summary.errors + closureIssues.length;
+  return {
+    ...base,
+    ok: errors === 0,
+    summary: { ...base.summary, errors },
+    issues: [...base.issues, ...closureIssues],
+  };
+}
+
 export function runGovernanceAuditCli(
   args: readonly string[],
   io: GovernanceAuditIo,
@@ -247,13 +625,7 @@ export function runGovernanceAuditCli(
 
   let report: AuditReport;
   try {
-    report =
-      dependencies.buildReport?.() ??
-      auditGovernanceRegistry(governanceRegistry, {
-        repoRoot: repositoryRoot(),
-        verifyEvidenceFiles: true,
-        requirePublicDisclosures: true,
-      });
+    report = dependencies.buildReport?.() ?? buildGovernanceAuditReport();
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown report construction error.';
     io.stderr(`Governance audit could not construct a report: ${sanitizeMessage(message)}`);

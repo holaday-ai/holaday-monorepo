@@ -24,9 +24,7 @@ function fakeDbFor(row: {
             },
             // biome-ignore lint/suspicious/noThenProperty: Drizzle query builders are awaitable.
             then<TResult1 = unknown, TResult2 = never>(
-              onfulfilled?:
-                | ((value: Array<typeof row>) => TResult1 | PromiseLike<TResult1>)
-                | null,
+              onfulfilled?: ((value: Array<typeof row>) => TResult1 | PromiseLike<TResult1>) | null,
               onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
             ) {
               return Promise.resolve([row]).then(onfulfilled, onrejected);
@@ -65,6 +63,47 @@ describe('authenticateBearerHeader', () => {
     await expect(
       authenticateBearerHeader(
         fakeDbFor({ externalId: 'usr_suspended', status: 'suspended', authVersion: 0 }) as never,
+        `Bearer ${token}`,
+      ),
+    ).resolves.toBeNull();
+  });
+
+  it.each(['closure_pending', 'closure_processing', 'closed'])(
+    'rejects bearer access while the account is %s',
+    async (status) => {
+      const { signAccessToken } = await import('./jwt.js');
+      const { authenticateBearerHeader } = await import('./middleware.js');
+      const token = await signAccessToken({
+        sub: 'usr_closure_bearer',
+        plan: 'pro',
+        authVersion: 4,
+      });
+
+      await expect(
+        authenticateBearerHeader(
+          fakeDbFor({ externalId: 'usr_closure_bearer', status, authVersion: 4 }) as never,
+          `Bearer ${token}`,
+        ),
+      ).resolves.toBeNull();
+    },
+  );
+
+  it('keeps a pre-withdrawal bearer revoked after the account becomes active again', async () => {
+    const { signAccessToken } = await import('./jwt.js');
+    const { authenticateBearerHeader } = await import('./middleware.js');
+    const token = await signAccessToken({
+      sub: 'usr_withdrawn_closure',
+      plan: 'pro',
+      authVersion: 9,
+    });
+
+    await expect(
+      authenticateBearerHeader(
+        fakeDbFor({
+          externalId: 'usr_withdrawn_closure',
+          status: 'active',
+          authVersion: 10,
+        }) as never,
         `Bearer ${token}`,
       ),
     ).resolves.toBeNull();
@@ -126,9 +165,9 @@ describe('realtime token authentication', () => {
       },
     };
 
-    await expect(
-      authenticateStreamOrAccessToken(database as never, token),
-    ).resolves.toBe('usr_stream_active');
+    await expect(authenticateStreamOrAccessToken(database as never, token)).resolves.toBe(
+      'usr_stream_active',
+    );
     expect(selectCalls).toBe(1);
   });
 
@@ -168,6 +207,45 @@ describe('realtime token authentication', () => {
         token,
       ),
     ).resolves.toBeNull();
+  });
+
+  it.each(['closure_pending', 'closure_processing', 'closed'])(
+    'rejects stream and WebSocket revalidation while the account is %s',
+    async (status) => {
+      const { signStreamToken } = await import('./jwt.js');
+      const { authenticateStreamOrAccessSession, revalidateAuthenticatedSession } = await import(
+        './middleware.js'
+      );
+      const { token } = await signStreamToken('usr_closure_stream', 12);
+      const database = fakeDbFor({
+        externalId: 'usr_closure_stream',
+        status,
+        authVersion: 12,
+      }) as never;
+
+      await expect(authenticateStreamOrAccessSession(database, token)).resolves.toBeNull();
+      await expect(
+        revalidateAuthenticatedSession(database, {
+          userId: 'usr_closure_stream',
+          authVersion: 12,
+        }),
+      ).resolves.toBe(false);
+    },
+  );
+
+  it('keeps a pre-withdrawal WebSocket session revoked after status returns to active', async () => {
+    const { revalidateAuthenticatedSession } = await import('./middleware.js');
+
+    await expect(
+      revalidateAuthenticatedSession(
+        fakeDbFor({
+          externalId: 'usr_closure_stream',
+          status: 'active',
+          authVersion: 13,
+        }) as never,
+        { userId: 'usr_closure_stream', authVersion: 12 },
+      ),
+    ).resolves.toBe(false);
   });
 
   it('rejects a legacy stream fallback token after authVersion changes', async () => {

@@ -195,10 +195,7 @@ export function readAstroProfile(storageScope?: string | null): AstroProfile | n
   }
 }
 
-export function saveAstroProfile(
-  profile: AstroProfile,
-  storageScope?: string | null,
-): void {
+export function saveAstroProfile(profile: AstroProfile, storageScope?: string | null): void {
   if (typeof window === 'undefined') return;
   try {
     window.localStorage.setItem(profileStorageKey(storageScope), JSON.stringify(profile));
@@ -214,6 +211,11 @@ export function clearAstroProfile(storageScope?: string | null): void {
   } catch {
     /* localStorage can be disabled. */
   }
+}
+
+export function clearAllAstroProfilesForCurrentDevice(): void {
+  if (typeof window === 'undefined') return;
+  removeStorageKeysWithPrefix(window.localStorage, STORAGE_KEY);
 }
 
 export function defaultAstroProfile(): AstroProfile {
@@ -366,6 +368,32 @@ function profileStorageKey(storageScope?: string | null): string {
   return `${STORAGE_KEY}.${encodeURIComponent(scope)}`;
 }
 
+function removeStorageKeysWithPrefix(storage: Storage, prefix: string): void {
+  const keys: string[] = [];
+  let length = 0;
+  try {
+    length = storage.length;
+  } catch {
+    return;
+  }
+  for (let index = 0; index < length; index += 1) {
+    let key: string | null = null;
+    try {
+      key = storage.key(index);
+    } catch {
+      continue;
+    }
+    if (key === prefix || key?.startsWith(`${prefix}.`)) keys.push(key);
+  }
+  for (const key of keys) {
+    try {
+      storage.removeItem(key);
+    } catch {
+      // Storage cleanup is best effort on privacy-restricted browsers.
+    }
+  }
+}
+
 function buildWeek(seed: number): AstroDay[] {
   const labels = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
   const tones: AstroDay['tone'][] = ['focus', 'social', 'creative', 'recovery'];
@@ -424,7 +452,7 @@ function buildFortune(sign: ZodiacSign, seed: number): AstroFortuneArea[] {
       label: '感情 / 人际',
       score: score(27),
       title: '表达放轻一点',
-      body: `今天不用急着证明自己。把话说具体一点、柔和一点，更容易获得回应和协作。`,
+      body: '今天不用急着证明自己。把话说具体一点、柔和一点，更容易获得回应和协作。',
     },
     {
       key: 'health',

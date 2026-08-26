@@ -4685,6 +4685,7 @@ export const tasksRouter = router({
       });
       const supercarArgs: Parameters<typeof runSupercarTask>[0] = {
           taskId,
+          isTaskCancelled: () => repo.isTaskCancelled(taskId),
           // Phase 1 Playbook ④ prerequisite — cost accounting for the browse
           // loop (recorder + the external user id llm_calls.user_id needs).
           recorder: llmCallRecorder,

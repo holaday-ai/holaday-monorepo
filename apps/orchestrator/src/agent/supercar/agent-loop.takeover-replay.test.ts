@@ -45,6 +45,426 @@ describe('runSupercarTask credential takeover', () => {
     createMessage.mockReset();
   });
 
+  it('registers an abort handle before awaiting a non-browser lane', async () => {
+    let signalCheckStarted!: () => void;
+    const checkStarted = new Promise<void>((resolve) => {
+      signalCheckStarted = resolve;
+    });
+    let releaseCheck!: (cancelled: boolean) => void;
+    const durableCheck = new Promise<boolean>((resolve) => {
+      releaseCheck = resolve;
+    });
+    const taskId = 'tsk_abort_before_zapier_await';
+    const trigger = vi.fn(async () => ({ ok: true as const, runId: 'run_must_not_start' }));
+    const run = runSupercarTask({
+      taskId,
+      intent: 'trigger a workflow',
+      executor: null,
+      apiKey: 'test-key',
+      isTaskCancelled: async () => {
+        signalCheckStarted();
+        return durableCheck;
+      },
+      isCrossPlatformAutomation: true,
+      zapierWebhookPath: '/hooks/test',
+      zapierAdapter: { trigger } as never,
+    });
+
+    await checkStarted;
+    expect(supercarAbort(taskId)).toBe(true);
+    releaseCheck(false);
+    await expect(run).resolves.toMatchObject({ status: 'cancelled' });
+    expect(trigger).not.toHaveBeenCalled();
+  });
+
+  it('does not navigate when abort wins during the final action veto await', async () => {
+    createMessage.mockResolvedValueOnce(
+      response(
+        [
+          {
+            type: 'tool_use',
+            id: 'tool_nav',
+            name: 'navigate',
+            input: { url: 'https://93.184.216.34/next' },
+          },
+        ],
+        'tool_use',
+      ),
+    );
+    const goto = vi.fn(async () => undefined);
+    const page = {
+      url: () => 'https://93.184.216.34/',
+      title: vi.fn(async () => 'Example'),
+      evaluate: vi.fn(async () => ({ bodyTextLen: 100, images: 0, inputs: 0, buttons: 0 })),
+      goto,
+      mouse: { move: vi.fn(), click: vi.fn(), down: vi.fn(), up: vi.fn() },
+      keyboard: { down: vi.fn(), up: vi.fn() },
+      waitForTimeout: vi.fn(),
+    };
+    const executor = {
+      resetPageForTask: vi.fn(async () => undefined),
+      getPage: vi.fn(async () => page),
+      screenshot: vi.fn(async () => ({
+        base64: 'dGVzdA==',
+        viewportWidth: 1280,
+        viewportHeight: 720,
+      })),
+    } as unknown as PlaywrightExecutor;
+    let releaseVeto!: () => void;
+    const vetoPending = new Promise<void>((resolve) => {
+      releaseVeto = resolve;
+    });
+    let signalVeto!: () => void;
+    const vetoStarted = new Promise<void>((resolve) => {
+      signalVeto = resolve;
+    });
+    const taskId = 'tsk_abort_before_goto';
+    const run = runSupercarTask({
+      taskId,
+      intent: 'navigate after checking',
+      executor,
+      apiKey: 'test-key',
+      maxIterations: 1,
+      onBeforeAction: async () => {
+        signalVeto();
+        await vetoPending;
+        return { allowed: true };
+      },
+    });
+
+    await vetoStarted;
+    expect(supercarAbort(taskId)).toBe(true);
+    releaseVeto();
+    await expect(run).resolves.toMatchObject({ status: 'cancelled' });
+    expect(goto).not.toHaveBeenCalled();
+  });
+
+  it('does not execute a computer action when abort wins during its veto await', async () => {
+    createMessage.mockResolvedValueOnce(
+      response(
+        [
+          {
+            type: 'tool_use',
+            id: 'tool_click',
+            name: 'computer',
+            input: { action: 'left_click', coordinate: [10, 20] },
+          },
+        ],
+        'tool_use',
+      ),
+    );
+    const page = {
+      url: () => 'https://93.184.216.34/',
+      title: vi.fn(async () => 'Example'),
+      evaluate: vi.fn(async () => ''),
+      mouse: { move: vi.fn(), click: vi.fn(), down: vi.fn(), up: vi.fn() },
+      keyboard: { down: vi.fn(), up: vi.fn() },
+      waitForTimeout: vi.fn(),
+    };
+    const click = vi.fn(async () => ({ ok: true, message: 'clicked' }));
+    const executor = {
+      resetPageForTask: vi.fn(async () => undefined),
+      getPage: vi.fn(async () => page),
+      screenshot: vi.fn(async () => ({
+        base64: 'dGVzdA==',
+        viewportWidth: 1280,
+        viewportHeight: 720,
+      })),
+      captureTargetDescriptor: vi.fn(async () => ({
+        tagName: 'BUTTON',
+        visibleText: 'Continue',
+        url: 'https://93.184.216.34/',
+      })),
+      click,
+    } as unknown as PlaywrightExecutor;
+    let releaseVeto!: () => void;
+    const vetoPending = new Promise<void>((resolve) => {
+      releaseVeto = resolve;
+    });
+    let signalVeto!: () => void;
+    const vetoStarted = new Promise<void>((resolve) => {
+      signalVeto = resolve;
+    });
+    const taskId = 'tsk_abort_before_computer_action';
+    const run = runSupercarTask({
+      taskId,
+      intent: 'click after checking',
+      executor,
+      apiKey: 'test-key',
+      maxIterations: 1,
+      onBeforeAction: async () => {
+        signalVeto();
+        await vetoPending;
+        return { allowed: true };
+      },
+    });
+
+    await vetoStarted;
+    expect(supercarAbort(taskId)).toBe(true);
+    releaseVeto();
+    await expect(run).resolves.toMatchObject({ status: 'cancelled' });
+    expect(click).not.toHaveBeenCalled();
+  });
+
+  it('does not persist a PDF when abort wins while Chromium is rendering it', async () => {
+    createMessage.mockResolvedValueOnce(
+      response(
+        [{ type: 'tool_use', id: 'tool_pdf', name: 'save_page_as_pdf', input: {} }],
+        'tool_use',
+      ),
+    );
+    let releasePdf!: () => void;
+    let signalPdf!: () => void;
+    const pdfStarted = new Promise<void>((resolve) => {
+      signalPdf = resolve;
+    });
+    const pdf = vi.fn(
+      () =>
+        new Promise<Buffer>((resolve) => {
+          signalPdf();
+          releasePdf = () => resolve(Buffer.from('pdf'));
+        }),
+    );
+    const page = {
+      pdf,
+      url: () => 'https://example.com',
+      title: vi.fn(async () => 'Example'),
+      evaluate: vi.fn(async () => ''),
+      mouse: { move: vi.fn(), click: vi.fn(), down: vi.fn(), up: vi.fn() },
+      keyboard: { down: vi.fn(), up: vi.fn() },
+      waitForTimeout: vi.fn(),
+    };
+    const executor = {
+      resetPageForTask: vi.fn(async () => undefined),
+      getPage: vi.fn(async () => page),
+      screenshot: vi.fn(async () => ({
+        base64: 'dGVzdA==',
+        viewportWidth: 1280,
+        viewportHeight: 720,
+      })),
+    } as unknown as PlaywrightExecutor;
+    const onSavePageAsPdf = vi.fn(async () => ({
+      fileId: 'fil_never',
+      filename: 'page.pdf',
+      sizeBytes: 3,
+      downloadUrl: '/never',
+    }));
+    const taskId = 'tsk_abort_during_pdf';
+    const run = runSupercarTask({
+      taskId,
+      intent: 'save this page',
+      executor,
+      apiKey: 'test-key',
+      maxIterations: 1,
+      onSavePageAsPdf,
+    });
+
+    await pdfStarted;
+    expect(supercarAbort(taskId)).toBe(true);
+    releasePdf();
+    await expect(run).resolves.toMatchObject({ status: 'cancelled' });
+    expect(onSavePageAsPdf).not.toHaveBeenCalled();
+  });
+
+  it('does not report an Apify fallback as completed when abort wins during the actor run', async () => {
+    createMessage.mockResolvedValueOnce(
+      response(
+        [
+          {
+            type: 'tool_use',
+            id: 'tool_scrape',
+            name: 'scrape_website',
+            input: { url: 'https://example.com' },
+          },
+        ],
+        'tool_use',
+      ),
+    );
+    let releaseActor!: () => void;
+    let signalActor!: () => void;
+    const actorStarted = new Promise<void>((resolve) => {
+      signalActor = resolve;
+    });
+    const actorRun = vi.fn(
+      () =>
+        new Promise<{ items: Array<Record<string, unknown>> }>((resolve) => {
+          signalActor();
+          releaseActor = () => resolve({ items: [{ url: 'https://example.com', text: 'stale' }] });
+        }),
+    );
+    const taskId = 'tsk_abort_during_apify';
+    const page = {
+      url: () => 'https://example.com',
+      title: vi.fn(async () => 'Example'),
+      evaluate: vi.fn(async () => ''),
+      mouse: { move: vi.fn(), click: vi.fn(), down: vi.fn(), up: vi.fn() },
+      keyboard: { down: vi.fn(), up: vi.fn() },
+      waitForTimeout: vi.fn(),
+    };
+    const executor = {
+      resetPageForTask: vi.fn(async () => undefined),
+      getPage: vi.fn(async () => page),
+      screenshot: vi.fn(async () => ({
+        base64: 'dGVzdA==',
+        viewportWidth: 1280,
+        viewportHeight: 720,
+      })),
+    } as unknown as PlaywrightExecutor;
+    const run = runSupercarTask({
+      taskId,
+      intent: 'scrape a site',
+      executor,
+      apiKey: 'test-key',
+      maxIterations: 1,
+      apifyAdapter: { run: actorRun } as never,
+    });
+
+    await actorStarted;
+    expect(supercarAbort(taskId)).toBe(true);
+    releaseActor();
+    await expect(run).resolves.toMatchObject({ status: 'cancelled' });
+    expect(createMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not start an Apify actor when abort wins during its final durable check', async () => {
+    createMessage.mockResolvedValueOnce(
+      response(
+        [
+          {
+            type: 'tool_use',
+            id: 'tool_scrape_veto',
+            name: 'scrape_website',
+            input: { url: 'https://example.com' },
+          },
+        ],
+        'tool_use',
+      ),
+    );
+    const page = {
+      url: () => 'https://example.com',
+      title: vi.fn(async () => 'Example'),
+      evaluate: vi.fn(async () => ''),
+      mouse: { move: vi.fn(), click: vi.fn(), down: vi.fn(), up: vi.fn() },
+      keyboard: { down: vi.fn(), up: vi.fn() },
+      waitForTimeout: vi.fn(),
+    };
+    const executor = {
+      resetPageForTask: vi.fn(async () => undefined),
+      getPage: vi.fn(async () => page),
+      screenshot: vi.fn(async () => ({
+        base64: 'dGVzdA==',
+        viewportWidth: 1280,
+        viewportHeight: 720,
+      })),
+    } as unknown as PlaywrightExecutor;
+    let checkCount = 0;
+    let signalFinalCheck!: () => void;
+    let releaseFinalCheck!: () => void;
+    const finalCheckStarted = new Promise<void>((resolve) => {
+      signalFinalCheck = resolve;
+    });
+    const finalCheck = new Promise<boolean>((resolve) => {
+      releaseFinalCheck = () => resolve(false);
+    });
+    const actorRun = vi.fn(async () => ({ items: [] }));
+    const taskId = 'tsk_abort_before_apify';
+    const run = runSupercarTask({
+      taskId,
+      intent: 'scrape a site',
+      executor,
+      apiKey: 'test-key',
+      maxIterations: 1,
+      apifyAdapter: { run: actorRun } as never,
+      isTaskCancelled: async () => {
+        checkCount += 1;
+        if (checkCount !== 5) return false;
+        signalFinalCheck();
+        return finalCheck;
+      },
+    });
+
+    await finalCheckStarted;
+    expect(supercarAbort(taskId)).toBe(true);
+    releaseFinalCheck();
+    await expect(run).resolves.toMatchObject({ status: 'cancelled' });
+    expect(actorRun).not.toHaveBeenCalled();
+  });
+
+  it('does not complete from the Lane 5 stuck fallback when abort wins during its actor run', async () => {
+    for (let iteration = 1; iteration <= 3; iteration += 1) {
+      createMessage.mockResolvedValueOnce(
+        response(
+          [
+            {
+              type: 'tool_use',
+              id: `tool_stuck_${iteration}`,
+              name: 'computer',
+              input: { action: 'left_click', coordinate: [10, 20] },
+            },
+          ],
+          'tool_use',
+        ),
+      );
+    }
+    const page = {
+      url: () => 'https://example.com/stuck',
+      title: vi.fn(async () => 'Stuck'),
+      evaluate: vi.fn(async () => ''),
+      mouse: { move: vi.fn(), click: vi.fn(), down: vi.fn(), up: vi.fn() },
+      keyboard: { down: vi.fn(), up: vi.fn() },
+      waitForTimeout: vi.fn(),
+    };
+    const executor = {
+      resetPageForTask: vi.fn(async () => undefined),
+      getPage: vi.fn(async () => page),
+      screenshot: vi.fn(async () => ({
+        base64: 'dGVzdA==',
+        viewportWidth: 1280,
+        viewportHeight: 720,
+      })),
+      captureTargetDescriptor: vi.fn(async () => ({
+        tagName: 'BUTTON',
+        visibleText: 'Retry',
+        url: 'https://example.com/stuck',
+      })),
+      click: vi.fn(async () => ({ ok: true, message: 'clicked' })),
+    } as unknown as PlaywrightExecutor;
+    let signalActor!: () => void;
+    let releaseActor!: () => void;
+    const actorStarted = new Promise<void>((resolve) => {
+      signalActor = resolve;
+    });
+    const actorRun = vi.fn(
+      () =>
+        new Promise<{ items: readonly unknown[] }>((resolve) => {
+          signalActor();
+          releaseActor = () => resolve({ items: [{ stale: 'result' }] });
+        }),
+    );
+    const taskId = 'tsk_abort_lane5_stuck_actor';
+    const run = runSupercarTask({
+      taskId,
+      intent: 'collect example data',
+      executor,
+      apiKey: 'test-key',
+      maxIterations: 4,
+      apifyAdapter: {
+        findActorForIntent: vi.fn(() => ({
+          actorId: 'example/stuck-scraper',
+          hostLabel: 'Example',
+          buildInput: () => ({ startUrl: 'https://example.com/stuck' }),
+        })),
+        run: actorRun,
+      },
+    });
+
+    await actorStarted;
+    expect(actorRun).toHaveBeenCalledTimes(1);
+    expect(supercarAbort(taskId)).toBe(true);
+    releaseActor();
+    await expect(run).resolves.toMatchObject({ status: 'cancelled' });
+  });
+
   it('does not replay the stale credential input after the user takes over', async () => {
     createMessage
       .mockResolvedValueOnce(

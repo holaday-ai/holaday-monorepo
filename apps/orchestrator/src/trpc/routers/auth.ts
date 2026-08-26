@@ -208,6 +208,9 @@ export const authRouter = router({
         user?: import('../../auth/service.js').PublicUser;
         mfaRequired?: true;
         mfaToken?: string;
+        closureRecoveryRequired?: true;
+        recoveryToken?: string;
+        closureStatus?: 'pending_grace' | 'processing' | 'needs_attention';
         error?: string;
       };
       if (!res.ok) {
@@ -224,6 +227,14 @@ export const authRouter = router({
       }
       if (body.mfaRequired && body.mfaToken && body.user) {
         return { user: body.user, mfaRequired: true as const, mfaToken: body.mfaToken };
+      }
+      if (body.closureRecoveryRequired && body.recoveryToken && body.closureStatus && body.user) {
+        return {
+          user: body.user,
+          closureRecoveryRequired: true as const,
+          recoveryToken: body.recoveryToken,
+          closureStatus: body.closureStatus,
+        };
       }
       if (!body.accessToken || !body.user) {
         throw new TRPCError({

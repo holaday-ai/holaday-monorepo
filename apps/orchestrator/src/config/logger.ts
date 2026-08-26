@@ -1,4 +1,4 @@
-import { pino, type LoggerOptions } from 'pino';
+import { type LoggerOptions, pino } from 'pino';
 import { env } from './env.js';
 
 export const loggerOptions = {
@@ -13,6 +13,7 @@ export const loggerOptions = {
       'req.headers["x-api-key"]',
       'req.headers["api-key"]',
       'res.headers["set-cookie"]',
+      'res.headers.location',
     ],
     censor: '[Redacted]',
   },

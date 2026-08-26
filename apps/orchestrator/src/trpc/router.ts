@@ -1,3 +1,4 @@
+import { accountClosureRouter } from './routers/account-closure.js';
 import { adminRouter } from './routers/admin.js';
 import { apiKeysRouter } from './routers/api-keys.js';
 import { astrologyRouter } from './routers/astrology.js';
@@ -30,6 +31,7 @@ export const appRouter = router({
     status: 'ok' as const,
     time: new Date().toISOString(),
   })),
+  accountClosure: accountClosureRouter,
   astrology: astrologyRouter,
   energy: energyRouter,
   auth: authRouter,

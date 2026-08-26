@@ -426,6 +426,42 @@ export function readEnergyProgress(scope: string | null, now = new Date()): Ener
   }
 }
 
+export function clearAllEnergyProgressForCurrentDevice(): void {
+  if (typeof window === 'undefined') return;
+  previewProgressByWindow.delete(window);
+  scopedProgressByWindow.delete(window);
+  const keys: string[] = [];
+  let length = 0;
+  try {
+    length = window.localStorage.length;
+  } catch {
+    return;
+  }
+  for (let index = 0; index < length; index += 1) {
+    let key: string | null = null;
+    try {
+      key = window.localStorage.key(index);
+    } catch {
+      continue;
+    }
+    if (
+      key &&
+      [STORAGE_PREFIX, V3_STORAGE_PREFIX, V2_STORAGE_PREFIX, LEGACY_STORAGE_PREFIX].some((prefix) =>
+        key.startsWith(`${prefix}:`),
+      )
+    ) {
+      keys.push(key);
+    }
+  }
+  for (const key of keys) {
+    try {
+      window.localStorage.removeItem(key);
+    } catch {
+      // Storage cleanup is best effort on privacy-restricted browsers.
+    }
+  }
+}
+
 export function recordEnergyCompletion(
   scope: string | null,
   kind: EnergyCompletionKind,

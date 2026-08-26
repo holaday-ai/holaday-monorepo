@@ -30,18 +30,18 @@
  * user, not silently re-dispatch.
  */
 
+import type { ServerMessage } from '@holaday/shared-types';
 import { and, eq, isNull } from 'drizzle-orm';
 import type { Logger } from 'pino';
-import type { ServerMessage } from '@holaday/shared-types';
+import type { DB } from '../db/client.js';
 import {
-  batchTaskItems,
-  batchTasks,
   type BatchTask,
   type BatchTaskItem,
+  batchTaskItems,
+  batchTasks,
 } from '../db/schema/batch-tasks.js';
 import { tasks } from '../db/schema/tasks.js';
 import { users } from '../db/schema/users.js';
-import type { DB } from '../db/client.js';
 import { isTaskTerminalStatus } from '../task-status.js';
 
 /** How often we re-check a dispatched task for terminal status. */
@@ -119,7 +119,7 @@ async function executeBatchInternal(
     return;
   }
   const [owner] = await db
-    .select({ externalId: users.externalId, id: users.id })
+    .select({ externalId: users.externalId, id: users.id, status: users.status })
     .from(users)
     .where(eq(users.id, batch.userId))
     .limit(1);
@@ -127,6 +127,7 @@ async function executeBatchInternal(
     logger.warn({ batchExternalId, userId: batch.userId }, 'batch-executor: owner not found');
     return;
   }
+  if (owner.status !== 'active') return;
 
   // Codex P5 follow-up — atomic flip pending → running. The earlier
   // read-then-write (`if (batch.status === 'pending')`) had a race
@@ -135,10 +136,12 @@ async function executeBatchInternal(
   // includes `status='pending'` so the UPDATE is a no-op if anyone
   // else moved the row first; we don't care about the affectedRows
   // result here (idempotent — already-running is fine).
-  await db
+  const parentClaim = await db
     .update(batchTasks)
     .set({ status: 'running' })
     .where(and(eq(batchTasks.id, batch.id), eq(batchTasks.status, 'pending')));
+  if (batch.status === 'pending' && extractMysqlAffectedRows(parentClaim) !== 1) return;
+  if (!(await batchOwnerAllowsExecution(db, owner.id))) return;
 
   // Concurrency-bounded fanout. We re-read item rows on each pass so
   // a user-cancel between iterations is observed.
@@ -203,6 +206,7 @@ async function executeBatchInternal(
     await Promise.race(inFlight.values());
   }
 
+  if (!(await batchOwnerAllowsExecution(db, owner.id))) return;
   await finalizeBatch(batch.id, deps);
 }
 
@@ -217,6 +221,7 @@ async function runItem(
   deps: BatchExecutorDeps,
 ): Promise<void> {
   const { db, logger } = deps;
+  if (!(await batchOwnerAllowsExecution(db, owner.id))) return;
   // Codex P5 follow-up — atomic claim on the item row. The earlier
   // unconditional `UPDATE ... SET status='running' WHERE id=?` would
   // double-dispatch if two executeBatch invocations both grabbed the
@@ -245,6 +250,24 @@ async function runItem(
   }
   await broadcastItemUpdate(batch, item.id, 'running', deps, owner.externalId);
 
+  // The user may enter closure after this worker won the item CAS. Re-read
+  // immediately before the external dispatch. If closure won, leave a
+  // cancellable undispatched row for the durable effects pass (or cancel it
+  // ourselves if it has not reached that pass yet).
+  if (!(await batchOwnerAllowsExecution(db, owner.id))) {
+    await db
+      .update(batchTaskItems)
+      .set({ status: 'cancelled', completedAt: new Date() })
+      .where(
+        and(
+          eq(batchTaskItems.id, item.id),
+          eq(batchTaskItems.status, 'running'),
+          isNull(batchTaskItems.taskId),
+        ),
+      );
+    return;
+  }
+
   let taskInternalId: number | null = null;
   let taskExternalId: string | null = null;
   try {
@@ -256,24 +279,26 @@ async function runItem(
     });
     taskInternalId = res.taskInternalId;
     taskExternalId = res.taskExternalId;
-    await db
+    const stamp = await db
       .update(batchTaskItems)
       .set({ taskId: taskInternalId })
-      .where(eq(batchTaskItems.id, item.id));
+      .where(and(eq(batchTaskItems.id, item.id), eq(batchTaskItems.status, 'running')));
+    if (extractMysqlAffectedRows(stamp) !== 1) return;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     logger.warn(
       { batchId: batch.externalId, itemSeq: item.seq, err: msg },
       'batch-executor: dispatch failed',
     );
-    await db
+    const failure = await db
       .update(batchTaskItems)
       .set({
         status: 'failed',
         errorMessage: msg.slice(0, 1000),
         completedAt: new Date(),
       })
-      .where(eq(batchTaskItems.id, item.id));
+      .where(and(eq(batchTaskItems.id, item.id), eq(batchTaskItems.status, 'running')));
+    if (extractMysqlAffectedRows(failure) !== 1) return;
     await broadcastItemUpdate(batch, item.id, 'failed', deps, owner.externalId, {
       errorMessage: msg.slice(0, 200),
     });
@@ -305,14 +330,15 @@ async function pollTaskForItem(
         },
         'batch-executor: item poll timed out — marking failed (task may still finish)',
       );
-      await db
+      const timeout = await db
         .update(batchTaskItems)
         .set({
           status: 'failed',
           errorMessage: 'batch poll timeout — task still running on backend',
           completedAt: new Date(),
         })
-        .where(eq(batchTaskItems.id, item.id));
+        .where(and(eq(batchTaskItems.id, item.id), eq(batchTaskItems.status, 'running')));
+      if (extractMysqlAffectedRows(timeout) !== 1) return;
       await broadcastItemUpdate(batch, item.id, 'failed', deps, owner.externalId, {
         errorMessage: 'batch poll timeout',
         ...(taskExternalId ? { taskExternalId } : {}),
@@ -329,17 +355,18 @@ async function pollTaskForItem(
       const itemStatus = taskTerminalStatusToBatchItemStatus(tRow.status);
       const ok = itemStatus === 'completed';
       const errorMessage = ok ? null : `task ended with status=${tRow.status}`;
-      await db
+      const terminal = await db
         .update(batchTaskItems)
         .set({
           status: itemStatus,
           completedAt: new Date(),
           ...(errorMessage ? { errorMessage } : {}),
         })
-        .where(eq(batchTaskItems.id, item.id));
+        .where(and(eq(batchTaskItems.id, item.id), eq(batchTaskItems.status, 'running')));
+      if (extractMysqlAffectedRows(terminal) !== 1) return;
       await broadcastItemUpdate(batch, item.id, itemStatus, deps, owner.externalId, {
-          ...(taskExternalId ? { taskExternalId } : {}),
-          ...(errorMessage ? { errorMessage } : {}),
+        ...(taskExternalId ? { taskExternalId } : {}),
+        ...(errorMessage ? { errorMessage } : {}),
       });
       return;
     }
@@ -349,6 +376,15 @@ async function pollTaskForItem(
 
 export function batchItemClientRequestId(batchItemExternalId: string): string {
   return `batch_item:${batchItemExternalId}`;
+}
+
+export async function batchOwnerAllowsExecution(db: DB, userId: number): Promise<boolean> {
+  const [owner] = await db
+    .select({ status: users.status })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  return owner?.status === 'active';
 }
 
 export function isResumableBatchStatus(status: string): boolean {
@@ -390,56 +426,54 @@ export async function prepareBatchItemsForRecovery(
  */
 async function finalizeBatch(batchInternalId: number, deps: BatchExecutorDeps): Promise<void> {
   const { db } = deps;
-  // Re-read items to compute fresh counters.
-  const items = await db
-    .select({ id: batchTaskItems.id, status: batchTaskItems.status })
-    .from(batchTaskItems)
-    .where(eq(batchTaskItems.batchId, batchInternalId));
-  const counts = summarizeBatchItemStatuses(items);
-  const [batch] = await db
-    .select()
-    .from(batchTasks)
-    .where(eq(batchTasks.id, batchInternalId))
-    .limit(1);
-  if (!batch) return;
-  // Preserve a user-pressed cancellation; only flip to completed /
-  // partial when status is still 'running'.
-  let nextStatus = batch.status;
-  if (batch.status === 'running') {
-    nextStatus =
+  const finalized = await db.transaction(async (tx) => {
+    const [batch] = await tx
+      .select()
+      .from(batchTasks)
+      .where(eq(batchTasks.id, batchInternalId))
+      .limit(1);
+    if (!batch) return null;
+    const [owner] = await tx
+      .select({ externalId: users.externalId, status: users.status })
+      .from(users)
+      .where(eq(users.id, batch.userId))
+      .limit(1)
+      .for('update');
+    if (owner?.status !== 'active') return null;
+    const items = await tx
+      .select({ id: batchTaskItems.id, status: batchTaskItems.status })
+      .from(batchTaskItems)
+      .where(eq(batchTaskItems.batchId, batchInternalId));
+    const counts = summarizeBatchItemStatuses(items);
+    const nextStatus: 'completed' | 'partial' =
       counts.review === 0 && counts.failed === 0 && counts.cancelled === 0
         ? 'completed'
         : 'partial';
-  }
-  await db
-    .update(batchTasks)
-    .set({
-      itemsTotal: counts.total,
-      itemsDone: counts.done,
-      itemsReview: counts.review,
-      itemsFailed: counts.failed,
-      status: nextStatus,
-      ...(nextStatus !== 'running' ? { completedAt: new Date() } : {}),
-    })
-    .where(eq(batchTasks.id, batchInternalId));
-  // Final broadcast — same shape as per-item updates but no `item`.
-  const [owner] = await db
-    .select({ externalId: users.externalId })
-    .from(users)
-    .where(eq(users.id, batch.userId))
-    .limit(1);
-  if (owner) {
-    deps.broadcastToUser(owner.externalId, {
-      type: 'server.batch.progress',
-      batchId: batch.externalId,
-      status: nextStatus as 'pending' | 'running' | 'completed' | 'partial' | 'cancelled',
-      itemsTotal: counts.total,
-      itemsDone: counts.done,
-      itemsReview: counts.review,
-      itemsFailed: counts.failed,
-      itemsCancelled: counts.cancelled,
-    });
-  }
+    const update = await tx
+      .update(batchTasks)
+      .set({
+        itemsTotal: counts.total,
+        itemsDone: counts.done,
+        itemsReview: counts.review,
+        itemsFailed: counts.failed,
+        status: nextStatus,
+        completedAt: new Date(),
+      })
+      .where(and(eq(batchTasks.id, batchInternalId), eq(batchTasks.status, 'running')));
+    if (extractMysqlAffectedRows(update) !== 1) return null;
+    return { batch, owner, counts, nextStatus };
+  });
+  if (!finalized) return;
+  deps.broadcastToUser(finalized.owner.externalId, {
+    type: 'server.batch.progress',
+    batchId: finalized.batch.externalId,
+    status: finalized.nextStatus,
+    itemsTotal: finalized.counts.total,
+    itemsDone: finalized.counts.done,
+    itemsReview: finalized.counts.review,
+    itemsFailed: finalized.counts.failed,
+    itemsCancelled: finalized.counts.cancelled,
+  });
 }
 
 /**

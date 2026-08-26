@@ -1,8 +1,10 @@
 import { newExternalId } from '@holaday/shared-types';
-import { eq, or, sql } from 'drizzle-orm';
+import { type SQL, and, eq, or, sql } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
+import { readAffectedRows } from '../db/mysql-result.js';
+import { accountClosureRequests } from '../db/schema/account-closures.js';
 import { users } from '../db/schema/users.js';
-import { signAccessToken, signMfaChallengeToken } from './jwt.js';
+import { signAccessToken, signAccountClosureRecoveryToken, signMfaChallengeToken } from './jwt.js';
 import { hashPassword, verifyPassword } from './password.js';
 
 export interface PublicUser {
@@ -34,8 +36,22 @@ export interface MfaRequiredResult {
   mfaToken: string;
 }
 
-export type LoginResult = AuthenticatedResult | MfaRequiredResult;
+export interface ClosureRecoveryRequiredResult {
+  user: PublicUser;
+  closureRecoveryRequired: true;
+  recoveryToken: string;
+  closureStatus: 'pending_grace' | 'processing' | 'needs_attention';
+}
+
+export type LoginResult = AuthenticatedResult | MfaRequiredResult | ClosureRecoveryRequiredResult;
 export type AuthResult = AuthenticatedResult;
+type AuthenticatedOperationResult = AuthenticatedResult | ClosureRecoveryRequiredResult;
+
+export function isClosureRecoveryResult(
+  result: LoginResult,
+): result is ClosureRecoveryRequiredResult {
+  return 'closureRecoveryRequired' in result && result.closureRecoveryRequired === true;
+}
 
 export class AuthError extends Error {
   constructor(
@@ -109,7 +125,7 @@ export class AuthService {
       .where(eq(users.email, normalized))
       .limit(1);
     if (existing) {
-      return issueLoginResult(existing);
+      return issueLoginResult(this.db, existing);
     }
     const externalId = newExternalId('user');
     // Stash a random, un-learnable password hash so the password login
@@ -149,6 +165,9 @@ export class AuthService {
       .limit(1);
 
     if (existing) {
+      if (existing.status !== 'active') {
+        return issueLoginResult(this.db, existing);
+      }
       const patch: Partial<typeof users.$inferInsert> = {};
       if (!existing.googleId) patch.googleId = profile.googleId;
       if (!existing.emailVerified) patch.emailVerified = true;
@@ -157,11 +176,17 @@ export class AuthService {
       }
       if (profile.name && !existing.displayName) patch.displayName = profile.name;
       if (Object.keys(patch).length > 0) {
-        await this.db.update(users).set(patch).where(eq(users.id, existing.id));
+        return updateActiveUserAndIssue(
+          this.db,
+          existing,
+          patch,
+          existing.authVersion,
+          'google upsert',
+        );
       }
       const [row] = await this.db.select().from(users).where(eq(users.id, existing.id)).limit(1);
       if (!row) throw new Error('user disappeared after google upsert');
-      return issueLoginResult(row);
+      return issueLoginResultAtVersion(this.db, row, existing.authVersion);
     }
 
     // Fresh user. Sentinel password hash so the password-login path
@@ -205,17 +230,20 @@ export class AuthService {
     if (!existing) {
       throw new AuthError('INVALID_CREDENTIALS', 'email not registered');
     }
+    if (existing.status !== 'active') {
+      return issueLoginResult(this.db, existing);
+    }
     const passwordHash = await hashPassword(newPassword);
-    await this.db
-      .update(users)
-      .set({
+    return updateActiveUserAndIssue(
+      this.db,
+      existing,
+      {
         passwordHash,
         authVersion: sql`${users.authVersion} + 1`,
-      })
-      .where(eq(users.id, existing.id));
-    const [updated] = await this.db.select().from(users).where(eq(users.id, existing.id)).limit(1);
-    if (!updated) throw new Error('user disappeared after password reset');
-    return issueLoginResult(updated);
+      },
+      existing.authVersion + 1,
+      'password reset',
+    );
   }
 
   /**
@@ -224,7 +252,10 @@ export class AuthService {
    * Incrementing authVersion invalidates every previously issued access token;
    * the returned token keeps the current device signed in at the new version.
    */
-  async changePasswordForUser(externalId: string, newPassword: string): Promise<AuthResult> {
+  async changePasswordForUser(
+    externalId: string,
+    newPassword: string,
+  ): Promise<AuthenticatedOperationResult> {
     const [existing] = await this.db
       .select()
       .from(users)
@@ -233,18 +264,21 @@ export class AuthService {
     if (!existing) {
       throw new AuthError('INVALID_CREDENTIALS', 'account not found');
     }
+    if (existing.status !== 'active') {
+      throw new AuthError('INVALID_CREDENTIALS', 'account not found');
+    }
     const passwordHash = await hashPassword(newPassword);
-    await this.db
-      .update(users)
-      .set({
+    return updateActiveUserAndIssue(
+      this.db,
+      existing,
+      {
         passwordHash,
         authVersion: sql`${users.authVersion} + 1`,
-      })
-      .where(eq(users.id, existing.id));
-    const [updated] = await this.db.select().from(users).where(eq(users.id, existing.id)).limit(1);
-    if (!updated) throw new Error('user disappeared after password change');
-    const accessToken = await issueAccessToken(updated);
-    return { user: toPublic(updated), accessToken };
+      },
+      existing.authVersion + 1,
+      'password change',
+      'authenticated',
+    );
   }
 
   /**
@@ -271,10 +305,21 @@ export class AuthService {
       .where(eq(users.phone, normalized))
       .limit(1);
     if (existing) {
-      if (!existing.phoneVerified) {
-        await this.db.update(users).set({ phoneVerified: true }).where(eq(users.id, existing.id));
+      if (existing.status !== 'active') {
+        return issueLoginResult(this.db, existing);
       }
-      return issueLoginResult(existing);
+      if (!existing.phoneVerified) {
+        return updateActiveUserAndIssue(
+          this.db,
+          existing,
+          { phoneVerified: true },
+          existing.authVersion,
+          'sms verification',
+        );
+      }
+      const [row] = await this.db.select().from(users).where(eq(users.id, existing.id)).limit(1);
+      if (!row) throw new Error('user disappeared after sms verification');
+      return issueLoginResultAtVersion(this.db, row, existing.authVersion);
     }
     const externalId = newExternalId('user');
     const passwordHash = await hashPassword(
@@ -317,11 +362,97 @@ export class AuthService {
       throw new AuthError('INVALID_CREDENTIALS', 'email or password incorrect');
     }
 
-    return issueLoginResult(row);
+    return issueLoginResult(this.db, row);
   }
 }
 
-function toPublic(row: typeof users.$inferSelect): PublicUser {
+type ActiveUserPatch = {
+  passwordHash?: string;
+  authVersion?: number | SQL;
+  googleId?: string | null;
+  avatarUrl?: string | null;
+  displayName?: string | null;
+  emailVerified?: boolean;
+  phoneVerified?: boolean;
+};
+
+function updateActiveUserAndIssue(
+  database: DB,
+  row: typeof users.$inferSelect,
+  patch: ActiveUserPatch,
+  expectedIssuanceVersion: number,
+  operation: string,
+  issuanceMode: 'authenticated',
+): Promise<AuthenticatedOperationResult>;
+function updateActiveUserAndIssue(
+  database: DB,
+  row: typeof users.$inferSelect,
+  patch: ActiveUserPatch,
+  expectedIssuanceVersion: number,
+  operation: string,
+  issuanceMode?: 'login',
+): Promise<LoginResult>;
+async function updateActiveUserAndIssue(
+  database: DB,
+  row: typeof users.$inferSelect,
+  patch: ActiveUserPatch,
+  expectedIssuanceVersion: number,
+  operation: string,
+  issuanceMode: 'login' | 'authenticated' = 'login',
+): Promise<LoginResult> {
+  const result = await database
+    .update(users)
+    .set(patch)
+    .where(
+      and(eq(users.id, row.id), eq(users.status, 'active'), eq(users.authVersion, row.authVersion)),
+    );
+  const [current] = await database.select().from(users).where(eq(users.id, row.id)).limit(1);
+  if (!current) throw new Error(`user disappeared after ${operation}`);
+  if (readAffectedRows(result) !== 1) {
+    if (current.status === 'closure_pending' || current.status === 'closure_processing') {
+      return issueLoginResult(database, current);
+    }
+    throw new AuthError('INVALID_CREDENTIALS', 'email or password incorrect');
+  }
+  if (issuanceMode === 'authenticated') {
+    return issueLoginResultAtVersion(database, current, expectedIssuanceVersion, 'authenticated');
+  }
+  return issueLoginResultAtVersion(database, current, expectedIssuanceVersion);
+}
+
+function issueLoginResultAtVersion(
+  database: DB,
+  row: typeof users.$inferSelect,
+  expectedIssuanceVersion: number,
+  issuanceMode: 'authenticated',
+): Promise<AuthenticatedOperationResult>;
+function issueLoginResultAtVersion(
+  database: DB,
+  row: typeof users.$inferSelect,
+  expectedIssuanceVersion: number,
+  issuanceMode?: 'login',
+): Promise<LoginResult>;
+function issueLoginResultAtVersion(
+  database: DB,
+  row: typeof users.$inferSelect,
+  expectedIssuanceVersion: number,
+  issuanceMode: 'login' | 'authenticated' = 'login',
+): Promise<LoginResult> {
+  if (row.status === 'closure_pending' || row.status === 'closure_processing') {
+    return issueLoginResult(database, row);
+  }
+  if (row.status !== 'active' || row.authVersion !== expectedIssuanceVersion) {
+    throw new AuthError('INVALID_CREDENTIALS', 'email or password incorrect');
+  }
+  return issueLoginResult(database, row, { mfaVerified: issuanceMode === 'authenticated' });
+}
+
+function toPublic(
+  row: Pick<
+    typeof users.$inferSelect,
+    'externalId' | 'email' | 'plan' | 'displayName' | 'avatarUrl' | 'createdAt'
+  >,
+): PublicUser {
   return {
     externalId: row.externalId,
     email: row.email,
@@ -342,22 +473,63 @@ function issueAccessToken(
   });
 }
 
-async function issueLoginResult(
+export async function issueLoginResult(
+  database: DB,
   row: Pick<
     typeof users.$inferSelect,
+    | 'id'
     | 'externalId'
     | 'plan'
     | 'authVersion'
+    | 'status'
     | 'mfaEnabled'
     | 'email'
     | 'displayName'
     | 'avatarUrl'
     | 'createdAt'
   >,
+  options: { mfaVerified?: boolean } = {},
 ): Promise<LoginResult> {
-  if (row.mfaEnabled) {
+  if (row.status === 'suspended' || row.status === 'closed') {
+    throw new AuthError('INVALID_CREDENTIALS', 'email or password incorrect');
+  }
+  if (row.status === 'closure_pending' || row.status === 'closure_processing') {
+    const [request] = await database
+      .select({
+        externalId: accountClosureRequests.externalId,
+        status: accountClosureRequests.status,
+      })
+      .from(accountClosureRequests)
+      .where(eq(accountClosureRequests.activeUserId, row.id))
+      .limit(1);
+    if (!request) {
+      throw new AuthError('INVALID_CREDENTIALS', 'email or password incorrect');
+    }
+    let closureStatus: ClosureRecoveryRequiredResult['closureStatus'];
+    if (row.status === 'closure_pending' && request.status === 'pending_grace') {
+      closureStatus = 'pending_grace';
+    } else if (
+      row.status === 'closure_processing' &&
+      (request.status === 'processing' || request.status === 'needs_attention')
+    ) {
+      closureStatus = request.status;
+    } else {
+      throw new AuthError('INVALID_CREDENTIALS', 'email or password incorrect');
+    }
     return {
-      user: toPublic(row as typeof users.$inferSelect),
+      user: toPublic(row),
+      closureRecoveryRequired: true,
+      recoveryToken: await signAccountClosureRecoveryToken({
+        sub: row.externalId,
+        requestId: request.externalId,
+        authVersion: row.authVersion,
+      }),
+      closureStatus,
+    };
+  }
+  if (row.mfaEnabled && !options.mfaVerified) {
+    return {
+      user: toPublic(row),
       mfaRequired: true,
       mfaToken: await signMfaChallengeToken({
         sub: row.externalId,
@@ -366,7 +538,7 @@ async function issueLoginResult(
     };
   }
   return {
-    user: toPublic(row as typeof users.$inferSelect),
+    user: toPublic(row),
     accessToken: await issueAccessToken(row),
   };
 }

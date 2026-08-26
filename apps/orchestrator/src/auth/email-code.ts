@@ -57,8 +57,23 @@ function genCode(): string {
   return out;
 }
 
+export interface EmailMessage {
+  to: string;
+  subject: string;
+  text: string;
+  /** Optional provider idempotency token; never derived from recipient data. */
+  idempotencyKey?: string;
+  /** Caller cancellation boundary for lease-scoped private delivery. */
+  signal?: AbortSignal;
+}
+
 export interface EmailSender {
-  send(opts: { to: string; subject: string; text: string }): Promise<void>;
+  send(opts: EmailMessage): Promise<void>;
+}
+
+export interface PrivateEmailSender extends EmailSender {
+  readonly privateDelivery: true;
+  isAvailable(): boolean;
 }
 
 /**
@@ -66,7 +81,7 @@ export interface EmailSender {
  * Uses the Resend HTTP API directly — no SDK dep.
  */
 export const resendSender: EmailSender = {
-  async send({ to, subject, text }) {
+  async send({ to, subject, text, signal }) {
     const key = process.env.RESEND_API_KEY;
     if (!key) {
       logger.info({ to, subject, text }, 'email-code: RESEND_API_KEY unset, logging only');
@@ -84,11 +99,53 @@ export const resendSender: EmailSender = {
         subject,
         text,
       }),
+      ...(signal ? { signal } : {}),
     });
     if (!resp.ok) {
       const body = await resp.text();
       throw new Error(`Resend failed: ${resp.status} ${body.slice(0, 200)}`);
     }
+  },
+};
+
+/**
+ * Private-delivery Resend adapter for messages that must never enter the
+ * ordinary development fallback. Absence or rejection of the real provider
+ * fails closed with a content-free error and produces no local message log.
+ */
+export const privateResendSender: PrivateEmailSender = {
+  privateDelivery: true,
+
+  isAvailable() {
+    return Boolean(process.env.RESEND_API_KEY);
+  },
+
+  async send({ to, subject, text, idempotencyKey, signal }) {
+    const key = process.env.RESEND_API_KEY;
+    if (!key) throw new Error('Private email delivery unavailable');
+    let response: Response;
+    try {
+      response = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${key}`,
+          ...(idempotencyKey ? { 'idempotency-key': idempotencyKey } : {}),
+        },
+        body: JSON.stringify({
+          from: process.env.RESEND_FROM_EMAIL ?? 'HOLA DAY <noreply@holaday.ai>',
+          to: [to],
+          subject,
+          text,
+        }),
+        signal: signal
+          ? AbortSignal.any([signal, AbortSignal.timeout(10_000)])
+          : AbortSignal.timeout(10_000),
+      });
+    } catch {
+      throw new Error('Private email delivery failed');
+    }
+    if (!response.ok) throw new Error('Private email delivery failed');
   },
 };
 

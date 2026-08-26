@@ -68,11 +68,77 @@ export interface InsertTaskContext {
   sourceContext?: Record<string, unknown> | null;
 }
 
+type TaskRepositoryTransaction = Parameters<Parameters<DB['transaction']>[0]>[0];
+
+export interface ClosureCancelledTask {
+  id: number;
+  externalId: string;
+  previousStatus: string;
+}
+
+/**
+ * Atomically cancel every non-terminal task owned by the closing account and
+ * emit the same durable cancellation event consumed by the ordinary task UI.
+ * The caller owns the surrounding transaction so closure effects and their
+ * restoration ledger cannot diverge.
+ */
+export async function cancelUserTasksForAccountClosure(
+  tx: TaskRepositoryTransaction,
+  userId: number,
+): Promise<ClosureCancelledTask[]> {
+  const candidates = await tx
+    .select({ id: tasks.id, externalId: tasks.externalId, status: tasks.status })
+    .from(tasks)
+    .where(and(eq(tasks.userId, userId), inArray(tasks.status, [...TASK_ACTIVE_STATUSES])))
+    .for('update');
+  const cancelled: ClosureCancelledTask[] = [];
+  for (const task of candidates) {
+    const result = await tx
+      .update(tasks)
+      .set({
+        status: 'cancelled',
+        completedAt: new Date(),
+        pauseReason: null,
+        awaitingQuestion: null,
+        awaitingKind: null,
+      })
+      .where(and(eq(tasks.id, task.id), eq(tasks.userId, userId), eq(tasks.status, task.status)));
+    if (extractMysqlAffectedRows(result) !== 1) continue;
+    await tx
+      .update(taskSteps)
+      .set({ status: 'cancelled', completedAt: new Date() })
+      .where(
+        and(
+          eq(taskSteps.taskId, task.id),
+          inArray(taskSteps.status, ['pending', 'executing', 'awaiting_user', 'paused']),
+        ),
+      );
+    await tx.insert(taskEvents).values({
+      externalId: newExternalId('taskEvent'),
+      taskId: task.id,
+      type: 'task.cancelled',
+      actor: 'system',
+      payload: { from: task.status, reason: 'account_closure' },
+    });
+    cancelled.push({ id: task.id, externalId: task.externalId, previousStatus: task.status });
+  }
+  return cancelled;
+}
+
 export class TaskRepository {
   constructor(
     private readonly db: DB,
     private readonly taskOrigin: TaskOrigin = DEFAULT_TASK_ORIGIN,
   ) {}
+
+  async isTaskCancelled(taskExternalId: string): Promise<boolean> {
+    const [task] = await this.db
+      .select({ status: tasks.status })
+      .from(tasks)
+      .where(eq(tasks.externalId, taskExternalId))
+      .limit(1);
+    return task?.status === 'cancelled';
+  }
 
   async insertTask(state: TaskState, ctx: InsertTaskContext): Promise<void> {
     await this.db.transaction(async (tx) => {
@@ -248,10 +314,7 @@ export class TaskRepository {
    * User pause / resume and quota-exceeded pause are transitions that do NOT
    * correspond to a step result frame. This applies them with one SQL batch.
    */
-  async applyControlTransition(
-    prev: TaskState,
-    next: TaskState,
-  ): Promise<{ persisted: boolean }> {
+  async applyControlTransition(prev: TaskState, next: TaskState): Promise<{ persisted: boolean }> {
     if (prev.taskId !== next.taskId) {
       throw new Error('applyControlTransition requires matching taskIds');
     }
@@ -503,12 +566,7 @@ export class TaskRepository {
           errorMessage: null,
           result: params.result,
         })
-        .where(
-          and(
-            eq(tasks.externalId, params.taskExternalId),
-            eq(tasks.status, 'awaiting_user'),
-          ),
-        );
+        .where(and(eq(tasks.externalId, params.taskExternalId), eq(tasks.status, 'awaiting_user')));
       if (extractMysqlAffectedRows(updateResult) === 0) {
         persisted = false;
         return;
@@ -1044,7 +1102,9 @@ export class TaskRepository {
           AND awaiting_kind = 'video_quote'
           AND JSON_UNQUOTE(JSON_EXTRACT(result, '$.metadata.lane')) = 'video_creation_confirm'
       `);
-      const header = (Array.isArray(result) ? result[0] : result) as { affectedRows?: number } | undefined;
+      const header = (Array.isArray(result) ? result[0] : result) as
+        | { affectedRows?: number }
+        | undefined;
       if ((header?.affectedRows ?? 0) !== 1) {
         persisted = false;
         return;
@@ -1195,7 +1255,9 @@ export class TaskRepository {
           AND awaiting_kind = 'video_quote'
           AND JSON_UNQUOTE(JSON_EXTRACT(result, '$.metadata.lane')) = 'video_creation_confirm'
       `);
-      const header = (Array.isArray(result) ? result[0] : result) as { affectedRows?: number } | undefined;
+      const header = (Array.isArray(result) ? result[0] : result) as
+        | { affectedRows?: number }
+        | undefined;
       if ((header?.affectedRows ?? 0) !== 1) {
         persisted = false;
         return;
@@ -1235,7 +1297,9 @@ export class TaskRepository {
         AND awaiting_kind = 'video_quote'
         AND JSON_UNQUOTE(JSON_EXTRACT(result, '$.metadata.lane')) = 'video_creation_confirm'
     `);
-    const header = (Array.isArray(result) ? result[0] : result) as { affectedRows?: number } | undefined;
+    const header = (Array.isArray(result) ? result[0] : result) as
+      | { affectedRows?: number }
+      | undefined;
     return { persisted: (header?.affectedRows ?? 0) === 1 };
   }
 
