@@ -5,6 +5,7 @@ set -Eeuo pipefail
 ROOT="/opt/holaday-cn-payment"
 CURRENT="$ROOT/src"
 RELEASES="$ROOT/releases"
+START_SCRIPT="$ROOT/start.sh"
 ACTION="${1:-deploy}"
 RELEASE_ID="${2:-}"
 ARCHIVE_PATH="${3:-}"
@@ -58,6 +59,18 @@ switch_current() {
   mv -Tf "$next_link" "$CURRENT"
 }
 
+install_start_script() {
+  local candidate="$1"
+  local next_start
+  [[ -f "$candidate" && ! -L "$candidate" ]] || {
+    echo "CN payment deploy failed: managed start script is missing" >&2
+    return 2
+  }
+  next_start="$(mktemp "$ROOT/.start.sh.XXXXXX")"
+  install -m 755 "$candidate" "$next_start"
+  mv -Tf "$next_start" "$START_SCRIPT"
+}
+
 rollback_release() {
   local release="$RELEASES/$RELEASE_ID"
   local previous_file="$release/.previous-target"
@@ -71,7 +84,13 @@ rollback_release() {
     echo "CN payment rollback failed: previous release is missing" >&2
     return 2
   }
+  local previous_start="$release/.previous-start.sh"
+  [[ -f "$previous_start" ]] || {
+    echo "CN payment rollback failed: previous start script is missing" >&2
+    return 2
+  }
   switch_current "$previous_target"
+  install_start_script "$previous_start"
   pm2 restart holaday-cn-payment --update-env >/dev/null
   wait_for_gateway_health
   echo "CN payment rollback complete"
@@ -95,6 +114,16 @@ fi
 install -d -m 755 "$STAGE"
 tar xzf "$ARCHIVE_PATH" -C "$STAGE"
 
+CANDIDATE_START_SCRIPT="$STAGE/scripts/cn-payment-start.sh"
+[[ -f "$CANDIDATE_START_SCRIPT" ]] || {
+  echo "CN payment deploy failed: candidate start script is missing" >&2
+  exit 2
+}
+[[ -f "$STAGE/scripts/cn-payment-env-export.mjs" ]] || {
+  echo "CN payment deploy failed: candidate env exporter is missing" >&2
+  exit 2
+}
+
 if [[ ! -e "$CURRENT" ]]; then
   echo "CN payment deploy failed: current release is missing" >&2
   exit 2
@@ -117,6 +146,11 @@ if [[ ! -L "$CURRENT" ]]; then
   mv "$CURRENT" "$previous_target"
 fi
 printf '%s\n' "$previous_target" > "$STAGE/.previous-target"
+[[ -f "$START_SCRIPT" ]] || {
+  echo "CN payment deploy failed: current start script is missing" >&2
+  exit 2
+}
+cp --preserve=mode,ownership "$START_SCRIPT" "$STAGE/.previous-start.sh"
 
 activated=0
 rollback_on_error() {
@@ -129,8 +163,9 @@ rollback_on_error() {
 }
 trap rollback_on_error ERR
 
-switch_current "$STAGE"
 activated=1
+install_start_script "$CANDIDATE_START_SCRIPT"
+switch_current "$STAGE"
 pm2 restart holaday-cn-payment --update-env >/dev/null
 wait_for_gateway_health '"bridge":"ready"'
 
