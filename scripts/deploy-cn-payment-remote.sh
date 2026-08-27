@@ -8,6 +8,7 @@ RELEASES="$ROOT/releases"
 ACTION="${1:-deploy}"
 RELEASE_ID="${2:-}"
 ARCHIVE_PATH="${3:-}"
+NPM_REGISTRY="${4:-https://registry.npmjs.org}"
 GATEWAY_HEALTH_ATTEMPTS="${GATEWAY_HEALTH_ATTEMPTS:-12}"
 GATEWAY_HEALTH_RETRY_SECONDS="${GATEWAY_HEALTH_RETRY_SECONDS:-1}"
 
@@ -23,6 +24,13 @@ if [[ ! "$GATEWAY_HEALTH_RETRY_SECONDS" =~ ^[0-9]+$ ]]; then
   echo "CN payment deploy failed: GATEWAY_HEALTH_RETRY_SECONDS must be non-negative" >&2
   exit 2
 fi
+case "$NPM_REGISTRY" in
+  https://registry.npmjs.org | https://registry.npmmirror.com) ;;
+  *)
+    echo "CN payment deploy failed: registry is not allowlisted" >&2
+    exit 2
+    ;;
+esac
 
 wait_for_gateway_health() {
   local required_marker="${1:-}"
@@ -99,7 +107,7 @@ fi
 cp "$current_real/apps/cn-payment/.env" "$STAGE/apps/cn-payment/.env"
 
 cd "$STAGE"
-pnpm install --frozen-lockfile
+NPM_CONFIG_REGISTRY="$NPM_REGISTRY" pnpm install --frozen-lockfile
 pnpm --filter @holaday/cn-payment typecheck
 pnpm --filter @holaday/cn-payment test
 
