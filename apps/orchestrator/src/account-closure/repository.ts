@@ -258,6 +258,25 @@ export async function withdrawAccountClosureRequest(
       throw new AccountClosureRepositoryError('REQUEST_NOT_PENDING');
     }
 
+    const skippedSteps = await tx
+      .update(accountClosureSteps)
+      .set({
+        status: 'skipped',
+        finishedAt: now,
+        nextAttemptAt: null,
+        leaseOwner: null,
+        leaseUntil: null,
+      })
+      .where(
+        and(
+          eq(accountClosureSteps.requestId, input.requestId),
+          eq(accountClosureSteps.status, 'pending'),
+        ),
+      );
+    if (readAffectedRows(skippedSteps) !== DATA_CATEGORY_IDS.length) {
+      throw new AccountClosureRepositoryError('USER_STATE_CONFLICT');
+    }
+
     const reactivate = await tx
       .update(users)
       .set({ status: 'active', authVersion: sql`${users.authVersion} + 1` })
