@@ -24,11 +24,11 @@ import {
   newExternalId,
 } from '@holaday/shared-types';
 import express from 'express';
-import { pinoHttp } from 'pino-http';
 import { z } from 'zod';
 import { AlipayAdapter } from './alipay.js';
 import { loadEnv } from './config/env.js';
 import { logger } from './config/logger.js';
+import { createPaymentHttpLogger } from './http-logging.js';
 import { SmsAdapter } from './sms.js';
 import { VultrSync } from './sync-to-vultr.js';
 import { WechatPayAdapter } from './wechat-pay.js';
@@ -89,12 +89,7 @@ async function main(): Promise<void> {
   //     raw JSON; parsing through express.json() would round-trip
   //     it through a JSON serializer with different whitespace,
   //     breaking the signature.
-  app.use(
-    pinoHttp({
-      logger,
-      redact: ['req.headers.x-internal-secret'],
-    }),
-  );
+  app.use(createPaymentHttpLogger(logger));
   app.use('/payment/wechat/notify', express.text({ type: '*/*', limit: '64kb' }));
   app.use('/payment/alipay/notify', express.urlencoded({ extended: true, limit: '64kb' }));
   app.use(express.json({ limit: '64kb' }));
