@@ -6,6 +6,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOCAL_SCRIPT="$SCRIPT_DIR/deploy-cn-payment.sh"
 REMOTE_SCRIPT="$SCRIPT_DIR/deploy-cn-payment-remote.sh"
 VERIFY_SCRIPT="$SCRIPT_DIR/verify-cn-payment-production.sh"
+HARNESS_DIR="$(mktemp -d)"
+trap 'rm -rf "$HARNESS_DIR"' EXIT
 
 fail() {
   echo "FAIL: $*" >&2
@@ -43,9 +45,30 @@ grep -Fq 'StrictHostKeyChecking=yes' "$LOCAL_SCRIPT" \
   || fail "CN payment deploy must enforce the pinned known_hosts entry"
 grep -Fq 'StrictHostKeyChecking=yes' "$VERIFY_SCRIPT" \
   || fail "CN payment verifier must enforce the pinned known_hosts entry"
+grep -Fq 'CN_PAYMENT_NPM_REGISTRY' "$LOCAL_SCRIPT" \
+  || fail "CN payment deploy must support an explicit scoped registry"
+grep -Fq 'https://registry.npmjs.org | https://registry.npmmirror.com' "$LOCAL_SCRIPT" \
+  || fail "CN payment deploy registry must use the fixed HTTPS allowlist"
+grep -Fq "bash '\$remote_installer' deploy '\$release_id' '\$remote_archive' '\$CN_PAYMENT_NPM_REGISTRY'" "$LOCAL_SCRIPT" \
+  || fail "CN payment deploy must pass the allowlisted registry as an installer argument"
+grep -Fq 'NPM_CONFIG_REGISTRY="$NPM_REGISTRY" pnpm install --frozen-lockfile' "$REMOTE_SCRIPT" \
+  || fail "CN payment registry must be scoped to the pnpm install subprocess"
+! grep -Fq 'NPM_CONFIG_REGISTRY=' "$LOCAL_SCRIPT" \
+  || fail "CN payment registry must not enter the full installer environment"
 ! grep -Fq 'StrictHostKeyChecking=no' "$LOCAL_SCRIPT" \
   || fail "CN payment deploy must not disable SSH host verification"
 ! grep -Fq 'StrictHostKeyChecking=no' "$VERIFY_SCRIPT" \
   || fail "CN payment verifier must not disable SSH host verification"
+
+cat >"$HARNESS_DIR/deploy.env" <<'ENV'
+ALIYUN_PASSWORD=unit-test-password
+ENV
+if HOLADAY_DEPLOY_ENV="$HARNESS_DIR/deploy.env" \
+  CN_PAYMENT_NPM_REGISTRY='https://registry.example.invalid' \
+  "$LOCAL_SCRIPT" >"$HARNESS_DIR/invalid.out" 2>&1; then
+  fail "CN payment deploy accepted a non-allowlisted registry"
+fi
+grep -Fq 'registry is not allowlisted' "$HARNESS_DIR/invalid.out" \
+  || fail "CN payment deploy did not fail before transport for an invalid registry"
 
 echo "PASS: CN payment deploy validates, atomically activates, smokes and rolls back releases"

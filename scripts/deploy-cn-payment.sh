@@ -5,6 +5,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT_DIR="$ROOT_DIR/scripts"
 ALIYUN_HOST="${ALIYUN_HOST:-root@47.99.169.186}"
+CN_PAYMENT_NPM_REGISTRY="${CN_PAYMENT_NPM_REGISTRY:-https://registry.npmjs.org}"
 REMOTE_ROOT="/opt/holaday-cn-payment"
 REMOTE_INSTALLER="$SCRIPT_DIR/deploy-cn-payment-remote.sh"
 
@@ -21,6 +22,13 @@ if [[ ! -f "$REMOTE_INSTALLER" ]]; then
   echo "CN payment deploy failed: remote installer is missing" >&2
   exit 1
 fi
+case "$CN_PAYMENT_NPM_REGISTRY" in
+  https://registry.npmjs.org | https://registry.npmmirror.com) ;;
+  *)
+    echo "CN payment deploy failed: registry is not allowlisted" >&2
+    exit 2
+    ;;
+esac
 if [[ -n "$(git -C "$ROOT_DIR" status --porcelain --untracked-files=no)" && "${ALLOW_DIRTY_DEPLOY:-0}" != "1" ]]; then
   echo "CN payment deploy failed: tracked worktree changes are not committed" >&2
   exit 1
@@ -49,7 +57,7 @@ echo "→ Uploading CN payment release $release_id"
 "${AUTH[@]}" scp "${SSH_OPTS[@]}" "$archive" "$ALIYUN_HOST:$remote_archive"
 "${AUTH[@]}" scp "${SSH_OPTS[@]}" "$REMOTE_INSTALLER" "$ALIYUN_HOST:/tmp/"
 "${AUTH[@]}" ssh "${SSH_OPTS[@]}" "$ALIYUN_HOST" \
-  "mv '/tmp/$(basename "$REMOTE_INSTALLER")' '$remote_installer' && chmod 700 '$remote_installer' && bash '$remote_installer' deploy '$release_id' '$remote_archive'"
+  "mv '/tmp/$(basename "$REMOTE_INSTALLER")' '$remote_installer' && chmod 700 '$remote_installer' && bash '$remote_installer' deploy '$release_id' '$remote_archive' '$CN_PAYMENT_NPM_REGISTRY'"
 
 echo "→ Running live WeChat Pay and Alipay readiness checks"
 if ! "$SCRIPT_DIR/verify-cn-payment-production.sh"; then
