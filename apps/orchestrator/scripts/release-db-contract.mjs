@@ -17,6 +17,23 @@ export const REQUIRED_PRE_APP_ROLLOUT_MIGRATIONS = [
   '0052_feedback_cases.sql',
 ];
 
+export const STOCK_PREFERENCE_REQUIRED_TABLES = [
+  'stock_preference_profiles',
+  'stock_preference_signals',
+];
+
+export const STOCK_PREFERENCE_REQUIRED_COLUMNS = {
+  stock_preference_profiles: ['user_id', 'enabled', 'manual_preferences_json', 'cleared_at'],
+  stock_preference_signals: [
+    'user_id',
+    'kind',
+    'dedupe_hash',
+    'payload_json',
+    'data_as_of',
+    'occurred_at',
+  ],
+};
+
 export function findMissingRequiredPreAppRolloutMigrations(files) {
   return REQUIRED_PRE_APP_ROLLOUT_MIGRATIONS.filter((migration) => !files.includes(migration));
 }

@@ -2,7 +2,11 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config as loadDotenv } from 'dotenv';
 import mysql from 'mysql2/promise';
-import { findMissingRequiredIndexes } from './release-db-contract.mjs';
+import {
+  STOCK_PREFERENCE_REQUIRED_COLUMNS,
+  STOCK_PREFERENCE_REQUIRED_TABLES,
+  findMissingRequiredIndexes,
+} from './release-db-contract.mjs';
 
 function loadDotenvAllowingEmpty(path: string): void {
   const result = loadDotenv({ path, override: false });
@@ -47,8 +51,7 @@ const REQUIRED_TABLES = [
   'sessions',
   'skills',
   'stock_dashboard_snapshots',
-  'stock_preference_profiles',
-  'stock_preference_signals',
+  ...STOCK_PREFERENCE_REQUIRED_TABLES,
   'stock_risk_monitors',
   'task_events',
   'task_files',
@@ -312,15 +315,7 @@ const REQUIRED_COLUMNS: Record<string, readonly string[]> = {
   ],
   webhook_idempotency: ['user_id', 'idempotency_key', 'request_hash', 'expires_at'],
   api_keys: ['external_id', 'user_id', 'name', 'key_prefix', 'key_hash', 'last_used_at'],
-  stock_preference_profiles: ['user_id', 'enabled', 'manual_preferences_json', 'cleared_at'],
-  stock_preference_signals: [
-    'user_id',
-    'kind',
-    'dedupe_hash',
-    'payload_json',
-    'data_as_of',
-    'occurred_at',
-  ],
+  ...STOCK_PREFERENCE_REQUIRED_COLUMNS,
   stock_risk_monitors: [
     'external_id',
     'user_id',
