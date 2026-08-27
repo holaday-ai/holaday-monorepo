@@ -16,6 +16,7 @@ BROWSER_DIR="${BROWSER_POOL_DIR:-/var/lib/holaday-browsers}"
 PM2_HOME="${ORCHESTRATOR_PM2_HOME:-/root/.pm2}"
 START_SCRIPT="${ORCHESTRATOR_START_SCRIPT:-$REPO_ROOT/scripts/start-orchestrator-production.sh}"
 WORKER_START_SCRIPT="${ACCOUNT_CLOSURE_WORKER_START_SCRIPT:-$REPO_ROOT/scripts/start-account-closure-worker-production.sh}"
+LOG_SECURITY_HELPER="${PM2_LOG_SECURITY_HELPER:-$REPO_ROOT/scripts/secure-pm2-logs.mjs}"
 WORKER_ENABLED="${ACCOUNT_CLOSURE_WORKER_ENABLED:-false}"
 EXPECTED_RUN_UID="${ORCHESTRATOR_EXPECTED_UID:-998}"
 ORCHESTRATOR_DIR="$REPO_ROOT/apps/orchestrator"
@@ -42,6 +43,7 @@ die() {
 [[ -x "$NODE_BIN" ]] || die "node interpreter not executable: $NODE_BIN"
 [[ -f "$REPO_ROOT/apps/orchestrator/dist/index.js" ]] || die "orchestrator build missing"
 [[ -x "$START_SCRIPT" ]] || die "production start script missing or not executable"
+[[ -f "$LOG_SECURITY_HELPER" ]] || die "PM2 log security helper missing"
 if [[ "$WORKER_ENABLED" == "true" ]]; then
   [[ -x "$WORKER_START_SCRIPT" ]] || die "closure worker start script missing or not executable"
   [[ -f "$REPO_ROOT/apps/orchestrator/dist/account-closure/worker-entry.js" ]] \
@@ -213,14 +215,15 @@ if [[ "$WORKER_ENABLED" == "true" ]]; then
 fi
 pm2 save --force >/dev/null
 
-# PM2 creates service logs with the daemon's default umask. Keep request and
-# error logs readable only by root even after a fresh entry is created.
-chmod 0600 "$PM2_HOME/logs/$APP_NAME-out.log" "$PM2_HOME/logs/$APP_NAME-error.log"
+# PM2 adds an instance suffix when `--instances 1` is present, so the exact
+# worker log paths must come from PM2 metadata rather than a guessed filename.
+# The helper validates every path remains inside the configured PM2 log root
+# before changing permissions.
+LOG_APPS=("$APP_NAME")
 if [[ "$WORKER_ENABLED" == "true" ]]; then
-  chmod 0600 \
-    "$PM2_HOME/logs/$WORKER_APP_NAME-out.log" \
-    "$PM2_HOME/logs/$WORKER_APP_NAME-error.log"
+  LOG_APPS+=("$WORKER_APP_NAME")
 fi
+pm2 jlist 2>/dev/null | "$NODE_BIN" "$LOG_SECURITY_HELPER" "${LOG_APPS[@]}" >/dev/null
 
 PID=""
 for _ in $(seq 1 20); do

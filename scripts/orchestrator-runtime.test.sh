@@ -6,6 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUNTIME_SCRIPT="$SCRIPT_DIR/orchestrator-runtime.sh"
 START_SCRIPT="$SCRIPT_DIR/start-orchestrator-production.sh"
 WORKER_START_SCRIPT="$SCRIPT_DIR/start-account-closure-worker-production.sh"
+LOG_SECURITY_HELPER="$SCRIPT_DIR/secure-pm2-logs.mjs"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -14,15 +15,18 @@ fail() {
 
 runtime_pm2_home_line="$(grep -n 'ORCHESTRATOR_PM2_HOME:-/root/.pm2' "$RUNTIME_SCRIPT" | head -1 | cut -d: -f1 || true)"
 runtime_pm2_start_line="$(grep -n 'pm2 start ' "$RUNTIME_SCRIPT" | head -1 | cut -d: -f1 || true)"
-runtime_log_permissions_line="$(grep -n 'chmod 0600 "$PM2_HOME/logs/$APP_NAME-out.log" "$PM2_HOME/logs/$APP_NAME-error.log"' "$RUNTIME_SCRIPT" | head -1 | cut -d: -f1 || true)"
+runtime_log_permissions_line="$(grep -n '"$NODE_BIN" "$LOG_SECURITY_HELPER" "${LOG_APPS\[@\]}"' "$RUNTIME_SCRIPT" | head -1 | cut -d: -f1 || true)"
 
 [[ "$runtime_pm2_home_line" =~ ^[1-9][0-9]*$ ]] || fail "runtime must pin PM2 to the root-owned process home"
 [[ "$runtime_pm2_start_line" =~ ^[1-9][0-9]*$ ]] || fail "runtime must start the PM2 application"
-[[ "$runtime_log_permissions_line" =~ ^[1-9][0-9]*$ ]] || fail "runtime must make orchestrator logs root-only"
+[[ "$runtime_log_permissions_line" =~ ^[1-9][0-9]*$ ]] || fail "runtime must secure actual PM2 log paths"
 (( runtime_pm2_home_line < runtime_pm2_start_line )) || fail "PM2 home must be selected before PM2 is invoked"
 (( runtime_pm2_start_line < runtime_log_permissions_line )) || fail "log permissions must be secured after PM2 creates the files"
 
 grep -Eq '^export PM2_HOME$' "$RUNTIME_SCRIPT" || fail "runtime must export the pinned PM2 home"
+grep -Fq 'PM2_LOG_SECURITY_HELPER:-' "$RUNTIME_SCRIPT" \
+  || fail "runtime must support the validated PM2 log security helper"
+[[ -f "$LOG_SECURITY_HELPER" ]] || fail "PM2 log security helper must ship with the runtime"
 grep -Eq '^unset PM2_HOME$' "$START_SCRIPT" || fail "application child must not inherit root PM2 state"
 
 # PM2 must own the actual long-lived Node server. The tsx CLI spawns a loader
